@@ -135,6 +135,15 @@ type Project struct {
 	GitRepositoryExternalID *string            `json:"git_repository_external_id"`
 	CreatedBy               pgtype.UUID        `json:"created_by"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	// GitProvider provisioning state: pending (created, repo not provisioned yet), provisioned (T0301), failed
+	ProvisionStatus string `json:"provision_status"`
+}
+
+type ProjectMembership struct {
+	ProjectID pgtype.UUID        `json:"project_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Role      string             `json:"role"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type ProjectState struct {
