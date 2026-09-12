@@ -373,6 +373,15 @@ func RenderPrompt(pkg *TaskPackage, worktree, resultDir string, worktreesDir, wo
 	for _, rt := range pkg.RequiredTests {
 		fmt.Fprintf(&b, "- %s\n", rt)
 	}
+	if len(pkg.RequiredTests) > 0 {
+		// Stated because it is checked mechanically and cannot be inferred:
+		// the label above is what the acceptance check matches against, and
+		// the command that was run does not contain it by any rule.
+		b.WriteString("\nFor every test entry in RESULT.json that satisfies one of these, set\n" +
+			"`label` to the required test's name exactly as written above (e.g. \"auth unit\").\n" +
+			"An entry with neither a label nor the name in its command does not count as\n" +
+			"covering the requirement, however good the command is.\n")
+	}
 	if len(pkg.RelevantSpecs) > 0 {
 		b.WriteString("\n## Relevant specs\n\n")
 		for _, s := range pkg.RelevantSpecs {

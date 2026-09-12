@@ -1427,3 +1427,49 @@ TestGateStepsRunInTheTaskWorktree
 **T0101 现有的 G2 记录（`run-dbb818143867122b`）是无效证据**，因为它是关于 `main` 的。
 修复落地后必须**重跑 G2**（rework → collect → review → accept 的流程里本来就会重跑），
 而且这次它才会真正编译 auth 代码。**预计重跑会因真实缺陷而变红——那正是它应有的行为。**
+
+## L1-20260912-44 — required tests 的覆盖检查需要一个**能表达**它的字段，而不是靠字符串巧合
+
+T0101 第三次 collect 又被 `result-tests-coverage` 拒了：
+
+```
+status completed but 2 required test(s) have no passed entry: auth unit; auth e2e
+```
+
+**但这次它跑了两个套件**：`go test ./internal/application/authn/ ./cmd/api/... -count=1`
+与 `go test ./tests/e2e -count=1 -v`，13 条全部 passed。它只是**没有把标签写进命令里**——
+上一次写了（我要求过），这一次没写。
+
+### 这仍然是 Gate 的缺陷，不是 Worker 的
+
+DAG 把 required tests 写成人读的**标签**（`"auth unit"`），契约里每条 entry 只有 `command`。
+**因此 RESULT 里根本没有任何字段可以让 Worker 声明"这一条满足哪个 required test"。**
+覆盖检查只能退化成"命令字符串里凑巧包含标签"——**一条没人写下来的约定**。
+
+我在 L1-20260912-35 已经因为这件事错过一次（object 是 `覆盖检查不可满足`），当时的修法
+是**把字符串匹配放宽**。那是治症：它把"永远不满足"换成了"标签恰好被提到时才满足"，
+**但字段依然不存在，所以第二次仍然失败**。
+
+### 正确修法：让契约能表达这件事
+
+- `specs/orchestrator/worker-result.schema.json` 的 `tests[].items` 增加**可选** `label` 字段
+  （可选 → 既有文档仍然合法）；
+- 覆盖判定改为 `testCovers(label, command, required)`：`label == required` **或**
+  命令中提到 required（保留旧风格作为回落）；
+- **Worker prompt 显式要求**：满足某个 required test 的 entry 必须把 `label` 写成该 test 的名字。
+
+**最后一环是必要的**：schema 里有一个字段，不等于 Worker 知道要用它。
+本会话反复出现的教训是"散文不是强制"——但反过来同样成立：**强制也需要被说明，
+否则它只是让人猜。** 字段 + 提示词 + 检查三者齐备，这条要求才是可满足且可执行的。
+
+**回归测试双向**：
+
+```
+TestRequiredTestCoveredByExplicitLabel                -> 声明 label 的 entry 必须被认定覆盖
+TestRequiredTestCoverageNotSatisfiedByAnUnrelatedLabel -> 随便写一个 label **不能**蒙混过关
+```
+
+**关于 T0101 的处置（重要）**：这次拒绝**不计入"Worker 反复失败"**。
+它两次都跑对了测试，两次都被同一处 Gate 的表达能力所限。因此**仍然是 rework，不是 respawn**；
+而且这次的返工要求是**最小**的（只补 `label` 字段），worktree 的 diff 一个字都不需要动。
+**若把 Gate 自己无法表达的要求记在 Worker 头上，就会让"修 Gate"永远排在"罚 Worker"之后。**

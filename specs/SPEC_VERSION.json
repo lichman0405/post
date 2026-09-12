@@ -1,6 +1,6 @@
 {
   "algorithm": "sha256",
-  "combined_digest": "f8343d9b45b32d2c9e58a027c83f5aac9852464208c6e1a1a127ed59fb7e78b6",
+  "combined_digest": "e26a831b6ce9e0bf8be91416e80d739aa4eb62cf348dee9ed366bb9d689233d1",
   "files": {
     "specs/README.md": "2a0398dfb3ead0586034364d7411d845b84fd33b7c43d1ce9199d6a14ef4cf1a",
     "specs/api/openapi.yaml": "8f2e4cb78ae6c66991d8ad1a4ca15a67248b2cbeee4ebe259323af4a8f08aad1",
@@ -18,7 +18,7 @@
     "specs/orchestrator/task-state-machine.yaml": "43b6e557bff0d32337ab4e3b083daaf356685d0cddca254252489cdc0578e029",
     "specs/orchestrator/worker-permissions.yaml": "cd26e1fff62107feccf8c1948642b0aea417f94f983d1a36fbea82821ae69cda",
     "specs/orchestrator/worker-registry.schema.json": "907fe9143712217ba6983cacb1f5a61a6203d7cf61306f5cd0914ebba1cf9358",
-    "specs/orchestrator/worker-result.schema.json": "3dffbf315af5b48a489a0974c823305c70de2c982b0c5ec2e9c4572ed4fb4981",
+    "specs/orchestrator/worker-result.schema.json": "c40f7994837f698d0b78079a989a708ea0e56050c93bada6602d9e7604467098",
     "specs/policies/permissions-matrix.csv": "0143dade0b6dcddf04611ed5321f13b8e70f1ebfba9ad280cc2611b6aadd8e40",
     "specs/policies/rights-template.yaml": "849e73bc283b2319559592a341380ebf35fa7177f4585505da70382adbb6d10e",
     "specs/schemas/calculation.schema.json": "aae944e00e6a03cb47bbcb69c16e614ccc0ce41cd76d928aaafe16b01f36e439",
@@ -43,5 +43,5 @@
   },
   "input_count": 38,
   "marker_format": 1,
-  "spec_version": "sha256:f8343d9b45b32d2c"
+  "spec_version": "sha256:e26a831b6ce9e0bf"
 }
