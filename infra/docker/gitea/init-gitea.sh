@@ -52,8 +52,40 @@ echo "== service account '$SVC_USER' (token-only bot user)"
 if curl -fsS -u "$ADMIN_USER:$ADMIN_PASSWORD" "$API/users/$SVC_USER" >/dev/null 2>&1; then
   echo "   already exists (no-op)"
 else
+  # Deliberately NO --access-token here. `gitea admin user create --access-token`
+  # prints the token in plaintext to stdout, which lands in terminal scrollback,
+  # CI logs and any `| tee` capture. docs/23 §10 requires secrets to stay out of
+  # logs, so tokens are minted on demand by the step below instead — where the
+  # operator can redirect them straight into a secret store.
   gitea admin user create --username "$SVC_USER" --email "$SVC_EMAIL" \
-    --user-type bot --access-token --access-token-name svc-token
+    --user-type bot
+  echo "   created (no token issued — see below)"
+fi
+
+# -- bot token (on demand) ---------------------------------------------------
+# Issued only when explicitly asked for, so a normal `make infra-init` never
+# puts a credential into a log. Redirect it into a secret store, never a file
+# that gets committed:
+#
+#   GITEA_SVC_MINT_TOKEN=1 make infra-init 2>/dev/null > /dev/null
+#
+# or directly:
+#
+#   docker compose exec -T --user git gitea \
+#     gitea admin user generate-access-token \
+#     --username post-git-svc --token-name local-dev \
+#     --scopes write:repository,write:user --raw
+#
+# --scopes defaults to "all"; prefer the narrowest set the caller needs
+# (docs/23 §8, service token least privilege).
+if [ "${GITEA_SVC_MINT_TOKEN:-0}" = "1" ]; then
+  echo "== minting a fresh token for '$SVC_USER' (store it now — it is shown once)"
+  echo "   note: this prints a credential; redirect away from logs/CI"
+  gitea admin user generate-access-token \
+    --username "$SVC_USER" --token-name "local-dev-$(date +%s)" \
+    --scopes "${GITEA_SVC_TOKEN_SCOPES:-write:repository,write:user}" --raw
+else
+  echo "== bot token: not minted (set GITEA_SVC_MINT_TOKEN=1 to issue one)"
 fi
 
 # -- svc team (the bot's org membership) -------------------------------------

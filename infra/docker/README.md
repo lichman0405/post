@@ -52,10 +52,27 @@ prebuilt in the image, it is not installed by any runtime script).
   native service accounts; bot users are its machine-identity mechanism, and
   org membership now goes through teams.
 
-The service account's access token is printed **on first creation only**
-(the admin can mint more with
-`docker compose exec --user git gitea gitea admin user generate-access-token --username post-git-svc --token-name <name> --raw`).
-The admin password above is likewise the *initial* password.
+**No access token is created by `make infra-init`.** Minting one on demand:
+
+```bash
+GITEA_SVC_MINT_TOKEN=1 make infra-init          # prints the token once
+# or, equivalently, directly:
+docker compose exec --user git gitea \
+  gitea admin user generate-access-token \
+  --username post-git-svc --token-name local-dev \
+  --scopes write:repository,write:user --raw
+```
+
+`--scopes` defaults to `all`; prefer the narrowest set the caller actually needs
+(`docs/23` §8, service-token least privilege). Redirect the token straight into a
+secret store — it is shown once and must never be pasted into a log, an issue or a
+committed file.
+
+> Earlier revisions minted the token as part of init and printed it to stdout,
+> which put a credential into terminal scrollback and any CI log. That is why
+> minting is now an explicit, opt-in step.
+
+The admin password above is the *initial* password, set at first creation only.
 
 ## Overrides
 
@@ -72,9 +89,14 @@ Every host port and credential in `docker-compose.yml` defaults inline via
 | `POSTGRES_DB` | `post` | `MINIO_ROOT_USER` | `minio_dev` |
 | `MINIO_ROOT_PASSWORD` | `minio_dev_pw` | `GITEA_DB_*` | `gitea` / `gitea_dev_pw` / `gitea` |
 
-Init-time values (admin, org, service account) are env-overridable inside the
-init scripts (`GITEA_ADMIN_USER`, `GITEA_TEST_ORG`, `GITEA_SERVICE_ACCOUNT`,
-`MINIO_INIT_BUCKET`, … — see the scripts).
+Init-time values (admin, org, service account) are overridable too:
+`GITEA_ADMIN_USER`, `GITEA_TEST_ORG`, `GITEA_SERVICE_ACCOUNT`,
+`GITEA_SVC_MINT_TOKEN`, `MINIO_INIT_BUCKET`, … — see the scripts.
+
+`infra/docker/init.sh` forwards these explicitly with `docker compose exec -e`,
+because compose does **not** pass host environment into `exec` on its own. If you
+add a new overridable variable, add it to the allowlist in `init.sh` as well, or it
+will be silently ignored and the default will be used instead.
 
 ## Parallel Workers / isolated stacks
 
