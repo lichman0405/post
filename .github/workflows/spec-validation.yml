@@ -16,5 +16,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install PyYAML (YAML spec parsing)
+        run: pip install pyyaml
       - name: Validate machine-readable specs and task DAG
         run: python3 scripts/validate_specs.py
+      - name: Verify derived spec version marker
+        run: python3 scripts/spec_version.py --check
+      - name: Spec validation unit tests (fixture-driven, no network)
+        run: bash scripts/tests/spec-validation-unit-test.sh
+      - name: Source repository remote smoke test (real git remote capture)
+        run: bash scripts/tests/spec-validation-smoke-test.sh

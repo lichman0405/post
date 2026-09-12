@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-rd.example/specs/orchestrator/source-repo-preflight.schema.json",
+  "title": "POST Source Repository Preflight Result",
+  "description": "Output contract of scripts/source_repo_preflight.py --json (docs/69 §2.1). Deterministic: same inputs -> same bytes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["preflight_version", "exit_code", "spec_source", "checks", "verdict"],
+  "properties": {
+    "preflight_version": {"type": "integer", "const": 1},
+    "exit_code": {
+      "type": "integer",
+      "description": "0 blessed; 1 refused (SPEC_BLOCKED or process reasons); 2 usage error; 3 cannot proceed",
+      "enum": [0, 1, 2, 3]
+    },
+    "spec_source": {"type": "string"},
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "status", "source", "measured", "expected", "detail"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": ["SPEC-PARSE", "SPEC-CANONICAL", "SPEC-EXPECTATION", "REPO-CANONICAL", "BRANCH-DEFAULT", "VISIBILITY", "SPEC-VERSION"]
+          },
+          "name": {"type": "string"},
+          "status": {"type": "string", "enum": ["passed", "failed", "unknown", "error"]},
+          "source": {"type": "string", "description": "where the measured input came from: spec | file | git | gh | fixture | flag | none"},
+          "measured": {"type": "string"},
+          "expected": {"type": "string"},
+          "detail": {"type": "string"},
+          "gating": {"type": "boolean", "description": "true when a failed/unknown status refuses the push blessing"},
+          "block_reason": {
+            "type": ["string", "null"],
+            "description": "machine-readable reason code used in the verdict",
+            "enum": [
+              "spec_not_canonical", "expectation_unrecorded", "expectation_invalid",
+              "remote_not_canonical", "remote_unparseable", "remote_unverifiable", "remote_missing",
+              "branch_mismatch", "visibility_mismatch", "visibility_unverifiable",
+              "version_stale", "version_missing", null
+            ]
+          }
+        }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["push_blessing", "reasons"],
+      "properties": {
+        "push_blessing": {
+          "type": "string",
+          "enum": ["bless", "refused"],
+          "description": "refused carries the SPEC_BLOCKED signal for governance reasons (docs/69 §5)"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["check", "reason", "level", "detail"],
+            "properties": {
+              "check": {"type": "string"},
+              "reason": {"type": "string"},
+              "level": {"type": "string", "enum": ["SPEC_BLOCKED", "process"]},
+              "detail": {"type": "string"}
+            }
+          }
+        }
+      }
+    }
+  }
+}

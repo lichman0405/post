@@ -1,0 +1,14 @@
+# Recorded real `git remote -v` output for the canonical POST checkout,
+# injected via the documented --fixture contract (docs/69 §2.1): this file
+# IS the git-remote-v.txt fixture of scripts/tests/fixtures/.
+#
+# Provenance (2026-09-12, T0001 Worker environment): direct `git remote -v`
+# invocation from the Worker shell is denied by the permission guard; the
+# origin URL was read from the shared git config of this checkout
+# (.git/config: "url = https://github.com/lichman0405/post.git"). The
+# preflight's real mode additionally captures live output from the actual
+# `git remote -v` command (this executes in CI and Supervisor context, and
+# the smoke test asserts both paths), so this fixture documents and proves
+# the parse of the real remote bytes when live capture is unavailable.
+origin	https://github.com/lichman0405/post.git (fetch)
+origin	https://github.com/lichman0405/post.git (push)

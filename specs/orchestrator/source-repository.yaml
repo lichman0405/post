@@ -10,8 +10,27 @@ source_repository:
   https_clone_url: https://github.com/lichman0405/post.git
   ssh_clone_url: git@github.com:lichman0405/post.git
   default_branch: main
+  # Historical observation of the upstream spec package at generation time
+  # (2026-09-12): public. This is a historical record and never rewritten —
+  # it does NOT describe the repository's current or expected visibility.
   visibility_at_package_generation: public
   observed_at: '2026-09-12'
+  # Owner-confirmed EXPECTATION for the live repository visibility. This is
+  # a governance fact (tasks/decisions.md L3-20260912-1): on 2026-09-12 the
+  # Supervisor re-read the remote, observed PRIVATE, the mismatch was
+  # treated as an L3 governance block per docs/69 §5, and the repository
+  # owner confirmed in writing that PRIVATE is intentional.
+  #
+  # The preflight (scripts/source_repo_preflight.py) compares this recorded
+  # expectation against the LIVE observation before blessing any push.
+  # "private is correct forever" is NOT encoded here: if the owner changes
+  # the expectation, update this block (and record the decision), and the
+  # preflight follows it.
+  visibility_expectation:
+    value: private
+    confirmed_by: repository owner
+    confirmed_at: '2026-09-12'
+    decision_ref: tasks/decisions.md L3-20260912-1
   runtime_visibility_must_be_rechecked_before_first_push: true
 supervisor:
   owns_git_control_plane: true
