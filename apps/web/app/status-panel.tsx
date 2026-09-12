@@ -19,9 +19,12 @@ export interface ServiceStatus {
 export function StatusPanel({
   webVersion,
   services,
+  correlationId,
 }: {
   webVersion: string;
   services: ServiceStatus[];
+  /** The render's correlation id (T0007): grep every service log with it. */
+  correlationId?: string;
 }) {
   return (
     <div>
@@ -54,6 +57,12 @@ export function StatusPanel({
           The web app has no backend of its own: it only renders status fetched
           over HTTP from the Go API and the scientific adapter.
         </Text>
+        {correlationId !== undefined && (
+          <Text as="p" className="status-note">
+            Request trace: <code>{correlationId}</code> — grep the API, worker
+            and adapter logs with this id to follow this render.
+          </Text>
+        )}
       </main>
     </div>
   );

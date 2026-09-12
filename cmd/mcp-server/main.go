@@ -7,6 +7,10 @@
 // wiring (tool catalog per specs/mcp and docs/47) arrives with the agent
 // tasks, which will add real readiness probes. The /mcp route still answers
 // 501: this process deliberately does not fake an MCP handshake.
+//
+// T0007: like the API, every request passes the observability middleware
+// (correlation id at the edge, structured request logs); logs are JSON on
+// stderr.
 package main
 
 import (
@@ -23,6 +27,7 @@ import (
 
 	"github.com/lichman0405/post/internal/config"
 	"github.com/lichman0405/post/internal/health"
+	"github.com/lichman0405/post/internal/observability"
 	"github.com/lichman0405/post/internal/version"
 )
 
@@ -60,6 +65,11 @@ func run(args []string) int {
 		cfg.Server.MCPAddr = *addr
 	}
 
+	// Structured JSON logs on stderr, request-scoped correlation ids at the
+	// edge (T0007).
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	slog.SetDefault(logger)
+
 	mux := http.NewServeMux()
 	healthHandler := health.NewHandler("mcp-server")
 	mux.Handle("/healthz", healthHandler)
@@ -72,7 +82,7 @@ func run(args []string) int {
 
 	srv := &http.Server{
 		Addr:              cfg.Server.MCPAddr,
-		Handler:           mux,
+		Handler:           observability.Middleware(logger)(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

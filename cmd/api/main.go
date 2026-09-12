@@ -13,6 +13,12 @@
 // The database pool is opened lazily on purpose: the API must start (and
 // report "not ready") while PostgreSQL is down, not refuse to start.
 //
+// T0007: every request passes the observability middleware — a correlation
+// id is created (or honoured from X-Correlation-ID) at the edge, echoed in
+// the response and carried by every log line of the request, including the
+// background job the request enqueues. Logs are structured JSON on stderr
+// and go-redis's internal chatter is routed through the same logger.
+//
 // Product endpoints arrive with the OpenAPI-first API tasks; the contract
 // seed lives in specs/api/openapi.yaml (docs/52: transport/http ->
 // application -> domain).
@@ -38,8 +44,10 @@ import (
 
 	"github.com/lichman0405/post/internal/config"
 	"github.com/lichman0405/post/internal/health"
+	"github.com/lichman0405/post/internal/observability"
 	"github.com/lichman0405/post/internal/persistence"
 	"github.com/lichman0405/post/internal/version"
+	"github.com/lichman0405/post/internal/worker"
 )
 
 // Exit codes: 0 ok, 1 runtime failure, 2 configuration failure (the same
@@ -78,6 +86,12 @@ func run(args []string) int {
 		cfg.Server.Addr = *addr
 	}
 
+	// Structured JSON logs on stderr; every request-scoped line carries the
+	// correlation id (T0007).
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	slog.SetDefault(logger)
+	observability.RouteRedisLogging(logger)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -97,10 +111,12 @@ func run(args []string) int {
 	healthz := newHealthHandler(pool, redisClient)
 	mux.Handle("/healthz", healthz)
 	mux.Handle("/readyz", healthz)
+	queue := worker.NewRedisQueue(redisClient, "post")
+	mux.Handle("POST /internal/jobs", newJobHandler(queue, logger))
 
 	srv := &http.Server{
 		Addr:              cfg.Server.Addr,
-		Handler:           mux,
+		Handler:           observability.Middleware(logger)(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
