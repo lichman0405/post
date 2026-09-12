@@ -1534,3 +1534,81 @@ P3 的 Gitea branch protection/webhook、P7 的 MinIO hash……**每一条都�
                              a Reviewer trusting this document reviews a fraction of the change"
 恢复               -> PASS
 ```
+
+## L1-20260912-47 — ★★ 缺失的控制面操作：如何**推进一个任务的基线而不丢失它的工作**
+
+### 起因：G2 修好之后，T0101 卡在两个都不能怪它的地方
+
+L1-20260912-43 让 G2 改在任务 worktree 里跑之后，T0101 的 G2 第一次**真正编译了它的代码**，
+并抓到 `internal/domain/user.go:70` 的 staticcheck 违规（S1003）——**这是真缺陷，Worker 该修**。
+但同时暴露了两个纯基础设施的失败：
+
+```
+web step 4:  bash scripts/web-unit-tests.sh: No such file or directory
+migration step 0: bash scripts/tests/pg-ready-unit-test.sh: No such file or directory
+```
+
+这两个脚本是**我在 T0101 运行期间**才加到 main 的（PR #50、#54）。
+也就是说：`gates.json` 的步骤列表来自**现在**的 main，而 worktree 停在**它被创建时**的 `ee50f7f`。
+
+**两个方向都是死路**，而且都不是关于 T0101 的代码的：
+
+| 用哪份 gates.json | 结果 |
+|---|---|
+| 现在的（main） | 步骤 4/0 引用的脚本在旧树里不存在 → 红 |
+| 任务基线里的（`ee50f7f`） | 步骤 0 是老版的 `corepack enable` → 在这台机器上 EACCES 红（#55 已修的那个 bug） |
+
+**根因不是任何一个选择，而是缺失一个操作**：**没有任何机制可以推进一个任务的基线而保留它的工作。**
+`collect` 要求 `HEAD == baseline`、scope 校验以 baseline 为界、review 指纹基于 `git diff baseline`——
+三者都把 baseline 当作不可变的。于是"main 在任务运行期间前进了"这件事，
+在大规模并行/长时间运行下迟早会**让任务无法通过任何 Gate**。
+
+### 关键发现：基线不是 `main`，而是**任务分支的 head**
+
+`worker_spawn.go`：
+
+```
+// The baseline is the TASK BRANCH's head — the repo-root HEAD is the
+// Supervisor's working branch, not the code the Worker starts from.
+baseline, err := gitOutput(repoRoot, "rev-parse", "--verify", "refs/heads/"+branch)
+```
+
+**任务分支是 Supervisor 独占的 Git control-plane 对象。** 所以"推进基线"就是
+"把任务分支移到新的 main tip，并让 worktree 跟着走"——**用既有原语即可完成，不需要新命令。**
+
+### 执行的步骤（可复用，已逐文件验证）
+
+```bash
+WT=.rddev/worktrees/T0101; MAIN=$(git rev-parse main)
+git -C "$WT" add -A && git -C "$WT" diff --cached > /tmp/T0101.patch && git -C "$WT" reset -q
+git -C <scratch> apply --check /tmp/T0101.patch      # 先在临时树里 dry-run
+git -C "$WT" reset --hard "$MAIN"                    # 分支与 worktree 一起前进
+git -C "$WT" clean -fdq
+git -C "$WT" apply /tmp/T0101.patch                  # 完整改动原样重放
+git -C "$WT" status --porcelain | awk '{print $NF}' | sort > after.txt   # 与 before.txt 比对
+rddev worker rework T0101                            # 重新记录权威 gate-inputs，baseline = 分支 tip
+```
+
+**四个要点，缺一不可：**
+
+1. **`git add -A` + `git diff --cached` 取的是"完整改动"**——包括新文件（`git diff` 不含 untracked，
+   这正是 L1-20260912-46 修的那个 bug）。本次导出 **39 个文件**，与 collect report 的 39 完全一致。
+2. **先在临时 worktree 里 `apply --check`**。`git apply` 默认是原子的：不干净就整体不落盘，
+   所以补丁文件本身就是保险。
+3. **`reset --hard` 会移动"当前检出的分支"**，因此任务分支与 worktree 一起前进；
+   这也避开了"分支在 worktree 里被检出时不能 `git branch -f`"的限制。
+4. **逐个文件比对前后改动集合**，而不是"看起来没问题"。本次结果：**IDENTICAL CHANGE SET**。
+
+随后 `rework`（而不是 `respawn`）的新 spawn 会用**分支 tip** 重新写入权威 gate-inputs——
+`baseline_sha` 实测已变为新的 main tip。**这是唯一被允许写那份记录的路径**，
+所以推进基线走的是设计好的写入者，而不是手工改 `gate-inputs.json`（那正是 T0012 要防的篡改）。
+
+### 诚实的边界
+
+- 这一步**只能由 Supervisor 做**（Worker 的 guard 禁止 merge/checkout）。
+- 它**丢弃了此前的 collect 与 review 记录的有效性**（它们描述的是旧树），
+  因此必须重新 collect + 重新 review。本次因为还要修 staticcheck，本来就要重跑。
+- `respawn` **不是**这个操作：它 `reset --hard HEAD` 到*旧*树并清空 untracked，会丢工作；
+  而且它重置到 HEAD 而基线取分支 tip，两者不一致时 collect 的 `head-baseline` 仍会红。
+- **这条应固化为 `rddev` 的一个显式子命令**（如 `rddev worker rebaseline TASK`），
+  而不是继续靠手工 git 序列。列为后续项——手工序列正确但不可审计、不可复现。
