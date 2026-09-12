@@ -1,9 +1,21 @@
-"""Command-line entry point for the POST scientific adapter."""
+"""Command-line entry point for the POST scientific adapter.
+
+The adapter validates its own environment (config.load_config_from_cwd):
+POST_ENV selects the layer and a missing or ambiguous layer refuses to
+start. --host/--port override the environment when given.
+"""
+
+from __future__ import annotations
 
 import argparse
+import sys
 
 from post_scientific_adapter import __version__
 from post_scientific_adapter.app import make_server
+from post_scientific_adapter.config import (
+    ConfigError,
+    load_config_from_cwd,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -13,14 +25,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--host",
-        default="127.0.0.1",
-        help="listen host (default: 127.0.0.1)",
+        default=None,
+        help=("listen host (default: POST_SCIENTIFIC_ADAPTER_HOST "
+              "or 127.0.0.1)"),
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=9000,
-        help="listen port (default: 9000)",
+        default=None,
+        help=("listen port (default: POST_SCIENTIFIC_ADAPTER_PORT "
+              "or 9000)"),
     )
     parser.add_argument(
         "--version",
@@ -29,10 +43,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    server = make_server(args.host, args.port)
+    # The configuration is validated before anything starts: a missing or
+    # ambiguous layer (or a malformed value) fails fast with an error naming
+    # the offending variable. Never a silent fallback.
+    try:
+        cfg = load_config_from_cwd()
+    except ConfigError as exc:
+        print(f"scientific-adapter: config error: {exc}", file=sys.stderr)
+        return 2
+
+    host = args.host if args.host is not None else cfg.host
+    port = args.port if args.port is not None else cfg.port
+
+    server = make_server(host, port)
     print(
-        f"scientific-adapter {__version__} listening on {args.host}:{args.port}"
-        " (healthz: /healthz)"
+        f"scientific-adapter {__version__} listening on {host}:{port} "
+        f"({cfg.describe()}; healthz: /healthz)"
     )
     try:
         server.serve_forever()
@@ -41,3 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         server.server_close()
     return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())
