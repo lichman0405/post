@@ -60,7 +60,7 @@
       "status": "running",
       "started_at": "2026-09-12T15:48:00Z",
       "completed_at": null,
-      "notes": "Dispatched in parallel with T0009. Scope excludes cmd/rddev/** and internal/devorchestrator/** (T0009 owns them). Carries three REQUIRED carry-over fixes from T0004 (decisions.md L1-20260912-14): wire internal/config into cmd/api, wire loadWebConfig into apps/web/app/page.tsx removing silent localhost fallbacks, and resolve the port 9000 collision.",
+      "notes": "Dispatched in parallel with T0009. Scope excludes cmd/rddev/** and internal/devorchestrator/** (T0009 owns them). Carries three REQUIRED carry-over fixes from T0004 (decisions.md L1-20260912-14): wire internal/config into cmd/api, wire loadWebConfig into apps/web/app/page.tsx removing silent localhost fallbacks, and resolve the port 9000 collision. NOTE: T0008 must split make check (infrastructure-free) from make test-integration - see decisions.md L1-20260912-19.",
       "worker_run_id": "worker-T0006-44a21bb",
       "accepted_by_supervisor_at": null,
       "merged_at": null
@@ -84,13 +84,13 @@
       "merged_at": null
     },
     "T0009": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-12T15:12:00Z",
-      "completed_at": null,
-      "notes": "Dispatched in parallel with T0005. Scope narrowed to cmd/rddev + internal/devorchestrator + specs/orchestrator + tasks/tasks.json; go.mod/go.sum forbidden (T0005 owns them) so the worker must use the standard library only. Supervisor-owned task state files explicitly excluded.",
+      "completed_at": "2026-09-12T16:35:00Z",
+      "notes": "G2 accepted after independent verification (rddev doctor matches ops/doctor.sh exactly, 35/35 checks; scheduling proven on a synthetic DAG; 10-way concurrency race -> 1 success / 9 loud rejections; honest stubs exit 4). Merged as PR #23 at b810338 BUT that merge was a process failure: CI was RED (stale spec version marker from an unreviewed specs/ edit) and G2 had run only a subset of the CI steps. Fixed on main by PR #24 (794b2c6). See decisions.md L1-20260912-18.",
       "worker_run_id": "worker-T0009-9430396",
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "accepted_by_supervisor_at": "2026-09-12T16:35:00Z",
+      "merged_at": "2026-09-12T16:36:00Z"
     },
     "T0010": {
       "status": "todo",

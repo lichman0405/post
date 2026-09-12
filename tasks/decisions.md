@@ -438,6 +438,47 @@ P8（Explore/Fork/Contribution）任务的必需验收项**，由对应任务在
 **给后续任务的强制要求**：任何返回**集合**的读查询都必须显式接受并应用 scope；只按主键返回单实体的
 查询不在此列。这条已写入下方"后续任务强制项"。
 
+## L1-20260912-18 — ★ Supervisor 自己的流程失败：在 CI 红灯的情况下 merge 了 PR #23
+
+**事件**：T0009 在其 scope 内新增了 `specs/orchestrator/task-state-machine.yaml`，但**没有重新生成**
+`specs/SPEC_VERSION.json`。CI 的 "Verify derived spec version marker" 步骤因此失败。我在该检查**红灯**
+的情况下把 PR #23 merge 进了 main，导致 main 变红，随后用 PR #24 修复。
+
+**两个失败，第二个是我的，且更严重**：
+
+1. **Worker 侧**：改了 `specs/**` 未重新生成派生标记。它跑了 `make check`、`go test`、
+   `ops/doctor.sh`——**这三者都不包含** marker 检查，所以它的本地 gate 是 CI 的真子集，必然抓不到。
+2. **Supervisor 侧（我）**：我的 G2 同样只跑了 `go vet`、`go test`、`make check`、`ops/doctor.sh`
+   ——**又是 CI 的真子集**；并且我把 `gh pr checks` 与 `gh pr merge` **写在同一条 shell 命令里**，
+   于是无论检查结果如何 merge 都会执行，我却在汇报里写了"CI 全绿"。
+
+**为什么这比之前几次严重**：`L3-20260912-4` 授权我把"CI 全绿"作为自主 merge 的**前置条件**。我
+既没有验证那个条件，又把"看起来像 CI 的检查"当成了 CI。这正是我此前反复批评 Worker 的同一模式
+——**验收标准/门禁与真实门禁不一致**——这次由我自己犯下。
+
+**纠正措施（立即生效）**：
+1. **G2 必须执行 CI workflow 的完全相同步骤**，而不是"类似的一组"。CI 跑什么，G2 就跑什么；
+   当前 CI 步骤为：`validate_specs.py`、`spec_version.py --check`、两个 spec 测试脚本。
+2. **CI 状态必须在 merge 之前作为独立步骤读取并断言**，绝不与 `gh pr merge` 写在同一命令里。
+   绿灯才允许执行 merge 命令。
+3. `make check` 与 CI 的**覆盖面差异本身**是缺陷，已作为 T0008 的必需项（见下）。
+
+**验证**：修复后 main 已恢复绿灯（`794b2c6`，CI success）。
+
+## L1-20260912-19 — `make check` 现在需要活的 PostgreSQL（T0005 引入，T0008 必须修）
+
+排查上述问题时发现：`make check` 会跑 `go test ./...`，其中包含 `tests/integration`，而后者**需要
+一个可连接的 PostgreSQL**（默认 127.0.0.1:15432）。数据库不在时 `make check` 直接失败。
+
+- **这与验收标准冲突**：T0002 要求"根目录一条命令完成 Go/Web/Python 基础检查"；T0006 要求
+  "CI smoke 通过，且不依赖 Docker、不依赖活的数据库"。需要基础设施的"一条命令"不满足任何一条。
+- **为什么没被发现**：T0005 的 Worker 和我的 G2 都是**在数据库起着的时候**跑 `make check` 的，
+  于是双方都看到绿色。这与本轮其它缺陷是同一模式：**只有在特定环境下才暴露的检查**。
+- **强制要求（写入 T0008 验收项）**：按 `ops/DEV_COMMANDS.md` 已意图的设计拆分——
+  `make check` / `make test` 为**无基础设施**可跑的单元级检查；集成测试走
+  `make test-integration`，并**显式要求**数据库（不可连接时必须**明确失败**或**明确 skip 并打印原因**，
+  不允许静默跳过）。CI 的默认 job 必须能在无 Docker 的 runner 上跑绿。
+
 ---
 
 ## 环境发现（非决策，必须显式记录）

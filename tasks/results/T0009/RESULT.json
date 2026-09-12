@@ -1,0 +1,105 @@
+{
+  "task_id": "T0009",
+  "status": "completed",
+  "summary": "Implemented the rddev Go CLI and the task state machine. Command skeleton per specs/orchestrator/rddev-cli.yaml: doctor (full ops/doctor-checks.md port, exit 0/1/2/3), env up|down (real docker compose wrappers), env reset|gc (honest stubs, exit 4), task next|ready|inspect|verify|accept|reject|merged, worker */git commit/pr open|merge (honest stubs naming T0010/T0011/T0012, exit 4 — never silent no-ops). Task state machine in internal/devorchestrator: 9 states, legal-transition enforcement (illegal transitions rejected, state file unchanged), dependency satisfaction = all deps merged, atomic writes (temp+fsync+rename) serialized by flock, run_id + UTC timestamp on every change, append-only history, unknown-field preservation (non-clobbering). rddev doctor is byte-identical to ops/doctor.sh for identical inputs (verified both via the 16-case fixture port and in real mode on this host). Human output by default, --json for machines, both tested. Stdlib only; go.mod/go.sum untouched.",
+  "files_changed": [
+    "cmd/rddev/main.go",
+    "cmd/rddev/flags.go",
+    "cmd/rddev/task.go",
+    "cmd/rddev/env.go",
+    "cmd/rddev/stubs.go",
+    "cmd/rddev/main_test.go",
+    "cmd/rddev/task_test.go",
+    "cmd/rddev/env_test.go",
+    "internal/devorchestrator/doc.go",
+    "internal/devorchestrator/state.go",
+    "internal/devorchestrator/dag.go",
+    "internal/devorchestrator/store.go",
+    "internal/devorchestrator/store_test.go",
+    "internal/devorchestrator/doctor/catalog.go",
+    "internal/devorchestrator/doctor/measure.go",
+    "internal/devorchestrator/doctor/eval.go",
+    "internal/devorchestrator/doctor/output.go",
+    "internal/devorchestrator/doctor/doctor.go",
+    "internal/devorchestrator/doctor/doctor_test.go",
+    "specs/orchestrator/task-state-machine.yaml"
+  ],
+  "tests": [
+    {
+      "command": "go vet ./...",
+      "status": "passed",
+      "evidence": "exit 0, no output (clean)"
+    },
+    {
+      "command": "go test ./...",
+      "status": "passed",
+      "evidence": "ok github.com/lichman0405/post/cmd/api 0.003s; ok github.com/lichman0405/post/cmd/rddev 0.212s; ok github.com/lichman0405/post/internal/config 0.004s; ok github.com/lichman0405/post/internal/devorchestrator 0.154s; ok github.com/lichman0405/post/internal/devorchestrator/doctor 0.538s (all packages with tests pass; cmd/mcp-server, cmd/worker and other packages have no test files)"
+    },
+    {
+      "command": "go test -v ./internal/devorchestrator/",
+      "status": "passed",
+      "evidence": "14 tests pass, incl. TestNextOnlyDependencySatisfied (T1002 excluded until T1001 merged), TestEveryIllegalTransitionRejectedAndFileUnchanged (byte-compared file before/after every illegal transition), TestReadyRequiresDependenciesMerged, TestUnknownFieldsPreservedOnMutation, TestConcurrentWritersDoNotSilentlyOverwrite (8 goroutines race accept: exactly 1 success + 7 loud IllegalTransitionError, history == 4), TestConcurrentIndependentUpdatesAllCommit, TestEmptyPoolSerializesAsEmptyArray, TestRealDAGLoadsAndIsConsistent, TestInspectReturnsSpecAndState"
+    },
+    {
+      "command": "go test -v ./internal/devorchestrator/doctor/",
+      "status": "passed",
+      "evidence": "21 tests pass: the 16 ops/tests/doctor-unit-test.sh cases ported to the fixture injection point (all-green with --check-docker-daemon exit 0; go.absent exit 1 + measured 'missing'; go 1.28 drift names 1.27.x + Supervisor; python 3.11 below baseline; MINGW exit 2 + WSL2 remediation; Darwin exit 2; debian ENV-OS-DISTRO failed exit 2; wsl1 warn exit 0; wsl2 + /mnt RES-REPO-FS failed exit 1; pnpm 12.0.0 vs pin 12.4.1 failed; npm pin skipped; docker_reachable=false warn + skip exit 0; compose missing names docker-compose-plugin; compose v5.5.1 passed version 5.5; compose v1.99.9 failed; default run never probes the daemon and names --check-docker-daemon; usage errors exit 3 with no JSON; determinism byte-identical; rg.absent names 'rg'), plus TestJSONShapeContract (35 checks, fixed contract order, summary counts consistent with checks array, remediation/reason invariants) and TestParityWithBashReference"
+    },
+    {
+      "command": "go test -v -run 'Subprocess|TestCLI' ./cmd/rddev/",
+      "status": "passed",
+      "evidence": "TestSubprocessConcurrencyRunsTwoRealProcesses PASS (0.16s): builds the real binary via go build, two `rddev task accept T1000` processes race on one state file — exactly one exits 0 and one exits 1 with 'illegal state transition' on stderr, final history has exactly 1 entry, no leftover temp files. TestSubprocessJSONShape PASS: real-process JSON output has deterministic fields (task_id/from/to/run_id/at), empty stderr. 7 TestCLI* pass: next excludes unmet-dep tasks, ready refuses until deps merged, inspect JSON shape, illegal transition leaves file byte-unchanged, reject requires --reason/--reason-file (flag after positional), merged unblocks dependents, usage errors exit 2"
+    },
+    {
+      "command": "make check",
+      "status": "passed",
+      "evidence": "exit 0 — check-schema-drift, go vet ./..., go build ./..., go test ./... (all ok), pnpm typecheck x2, eslint, node --test (11 pass), uv run pytest -q (30 passed)"
+    },
+    {
+      "command": "./ops/doctor.sh",
+      "status": "passed",
+      "evidence": "exit 0, 'Verdict: ok (exit 0)' — required 27 checks: 25 passed, 0 failed, 2 skipped | advisory 8 checks: 5 passed, 2 warn, 1 skipped"
+    },
+    {
+      "command": "rddev doctor --json vs ./ops/doctor.sh --json (real mode, this host, no fixture)",
+      "status": "passed",
+      "evidence": "both exit 0; `cmp /tmp/doctor-go.json /tmp/doctor-bash.json` → BYTE-IDENTICAL. Human mode: `diff` shows exactly one difference, line 1 (script name 'rddev doctor' vs 'ops/doctor.sh'). The parity is also enforced in-repo by TestParityWithBashReference against the canonical fixture in both modes."
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "rddev task next 只返回 dependencies 满足的任务",
+      "status": "passed",
+      "evidence": "Store.Next() filters status ∈ {todo, ready} AND all dependencies merged (docs/30 §3). TestNextOnlyDependencySatisfied: with T1000 merged, next returns exactly [T1001, T1003] and excludes T1002 (depends on unmerged T1001). Real-repo smoke test: `rddev task next --json` returns [] because T0009's dependency T0004 is still running — the exclusion is correct, and the empty pool emits [] not null."
+    },
+    {
+      "criterion": "非法状态转换拒绝",
+      "status": "passed",
+      "evidence": "Transition table enforced in internal/devorchestrator/state.go (recorded in specs/orchestrator/task-state-machine.yaml). TestEveryIllegalTransitionRejectedAndFileUnchanged drives every illegal from→to pair and byte-compares the state file before/after: rejected, never coerced. CLI-level: TestCLIIllegalTransitionLeavesFileUnchanged (accept from accepted → exit 1, file byte-unchanged) and the subprocess race loser exits 1 with 'illegal state transition'."
+    },
+    {
+      "criterion": "并发写状态不会静默覆盖",
+      "status": "passed",
+      "evidence": "All mutations serialize on an exclusive flock (per-open-file-description, so it conflicts across goroutines and processes) and commit via temp file + fsync + rename. TestConcurrentWritersDoNotSilentlyOverwrite: 8 goroutines race `accept` — exactly 1 succeeds, 7 fail loudly with IllegalTransitionError, history has exactly the committed entries. TestSubprocessConcurrencyRunsTwoRealProcesses exercises the same guarantee across two real OS processes: exactly one exit 0, one exit 1, history length 1, no leftover temp files."
+    },
+    {
+      "criterion": "CLI help/JSON output 可测试",
+      "status": "passed",
+      "evidence": "Every command has help (exit 0, usage on stdout) and deterministic JSON output (compact, SetEscapeHTML(false), trailing newline, fixed field order). Tested: main_test.go (help content, version, unknown subcommand exit 2, doctor delegation exit 0/3), task_test.go (next/ready/inspect/transition JSON shapes, empty pools as [], subprocess JSON field-by-field), env_test.go (stub JSON error object {error, exit_code}), doctor_test.go (TestJSONShapeContract: 35 checks in contract order, summary counts consistent)."
+    }
+  ],
+  "risks": [
+    "L1: the transition table was not previously written down; recorded in specs/orchestrator/task-state-machine.yaml (todo→[ready,blocked], ready→[running,blocked], running→[verification,worker_failed,rejected], verification→[accepted,rejected], worker_failed/rejected/blocked→[ready], accepted→[merged], merged→terminal). Supervisor confirmation requested in G2.",
+    "L1: `task merged` (accepted→merged, stamps merged_at) is implemented as Supervisor merge bookkeeping so the state machine is complete before T0012; T0012 may fold it into pr merge.",
+    "L1: bare `rddev task ready` lists the ready pool; `task ready TASK` performs the transition (docs/61 shows the bare form without an argument).",
+    "L1: rddev uses the current directory as the repo root (documented 'run from the repo root'); --tasks-json/--state-json override. The default state lock is .rddev/locks/task_status.lock (untracked runtime dir per rddev-cli.yaml); overridden state paths get a sibling .lock.",
+    "L1: general CLI usage errors exit 2 while doctor usage errors exit 3 (contract ops/doctor-checks.md §2). Consistent with the T0002 scaffold's exit 2 for unknown subcommands.",
+    "env up/down are real `docker compose up -d --wait --wait-timeout 300` / `docker compose down` wrappers (docs/66) but were NOT exercised against a real daemon in this task — the Worker environment has no Docker socket grant (worker-guard). The compose command construction is unit-tested via an injected runner seam; live verification is deferred to G3.",
+    "env reset/gc are honest stubs (exit 4) pending the infra clients of T0010/T0011; the reset/gc flag surface (--test-only/--all-dev-data/--confirm) is parsed and validated but the destructive operations belong to the namespace-management subsystem (docs/66 §4 forbids Workers from running uncontrolled prunes).",
+    "worker spawn|list|logs|stop, git commit, pr open|merge are honest stubs exiting 4 with the owning task named (T0010/T0011/T0012) — never silent no-ops. Stub messages are emitted on stderr in human mode and as a JSON error object {error, exit_code} on stdout in --json mode (choice: machine consumers read stdout JSON, humans read stderr).",
+    "run_id defaults to a freshly generated crypto/rand id and is reported in the output; --run-id accepts a Supervisor-supplied id.",
+    "The reject command requires --reason or --reason-file (docs/61 shows --reason-file); the reason is recorded in rejection_reason and in the history entry."
+  ],
+  "follow_up_issues": [],
+  "notes_for_supervisor": "1) The worker-guard hook blocks Bash command text containing git-control-plane or Docker keywords on this Worker box, so the live smoke test of `rddev git commit`/`rddev pr ...` (which are exit-4 stubs performing zero git operations) could not be run from the shell — their behavior is covered by unit tests instead. 2) T0009's DAG dependency T0004 is still running, so `rddev task next` legitimately returns [] for the real repo right now; once T0004 merges, T0009 becomes dispatchable by the machine (deps T0002 merged + T0004 running). 3) rddev doctor is byte-identical to ops/doctor.sh in real mode on this host (both JSON and human output, human differing only in the line-1 script name) — the ops/doctor.sh parity test in the doctor package enforces this in CI too. 4) No follow_up_issues were implemented (per the Worker contract); all forward-looking hooks are described in risks. 5) go.mod/go.sum were not touched (stdlib only), as required while the DB-dependency Worker owns them."
+}
