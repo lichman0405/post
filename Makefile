@@ -74,7 +74,10 @@ check-openapi: ## validate the OpenAPI contract: parse + internal $ref integrity
 	python3 scripts/validate_openapi.py
 
 fmt-check: ## fail when any Go file is not gofmt-formatted (legacy baseline: ops/ci/gofmt-baseline.txt)
-	@out="$$(gofmt -l . | grep -vxF -f <(grep -v '^#' ops/ci/gofmt-baseline.txt) || true)"; \
+# .rddev/ is runtime state (Worker worktrees under .rddev/worktrees/<TASK>), not source.
+# gofmt has no module awareness, so without this exclusion an in-flight Worker's copy of a
+# grandfathered file is reported as a NEW violation and the Supervisor's own gate fails.
+	@out="$$(gofmt -l . | grep -vE '^\.rddev/' | grep -vxF -f <(grep -v '^#' ops/ci/gofmt-baseline.txt) || true)"; \
 	if [ -n "$$out" ]; then \
 		echo "gofmt: these files are not formatted:" >&2; \
 		echo "$$out" >&2; \

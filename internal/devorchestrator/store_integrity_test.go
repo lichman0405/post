@@ -145,3 +145,33 @@ func TestNormalStateStillWorks(t *testing.T) {
 		t.Fatalf("expected exactly T0002 to be dispatchable, got %+v", next)
 	}
 }
+
+// A state note containing "->" must be stored legibly. Plain json.Marshal
+// HTML-escapes it to >, which made task_status.json - the Supervisor's
+// human-read truth source - unreadable and ratcheted that way on every write.
+func TestStateNotesAreNotHTMLEscaped(t *testing.T) {
+	dir := t.TempDir()
+	dagPath := writeDAG(t, dir)
+	statePath := filepath.Join(dir, "task_status.json")
+	if err := os.WriteFile(statePath, []byte(
+		`{"version":2,"tasks":{"T0001":{"status":"todo"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenStore(dagPath, statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition("T0001", StateReady, NewRunID(), "moved todo -> ready"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "\\u003e") {
+		t.Errorf("state write HTML-escaped the note; it must stay legible:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "todo -> ready") {
+		t.Errorf("the note did not survive the write legibly:\n%s", raw)
+	}
+}

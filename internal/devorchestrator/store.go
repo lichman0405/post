@@ -350,12 +350,12 @@ func (s *Store) mutate(id string, fn func(ts *TaskState, from State, states map[
 	if err := fn(&ts, from, states); err != nil {
 		return err
 	}
-	entry, err := json.Marshal(&ts)
+	entry, err := marshalNoEscape(&ts)
 	if err != nil {
 		return fmt.Errorf("encoding task %s state: %w", id, err)
 	}
 	tasks[id] = entry
-	tasksRaw, err := json.Marshal(tasks)
+	tasksRaw, err := marshalNoEscape(tasks)
 	if err != nil {
 		return fmt.Errorf("encoding task status file: %w", err)
 	}
@@ -430,6 +430,21 @@ func decodeTaskEntries(raw json.RawMessage) (map[string]json.RawMessage, error) 
 		return nil, fmt.Errorf("invalid tasks object: %w", err)
 	}
 	return tasks, nil
+}
+
+// marshalNoEscape marshals without HTML escaping. Plain json.Marshal rewrites
+// every ">" and "<" in a state note as \u003e / \u003c, so a note written as
+// "ready -> running" is stored unreadable and every later write keeps it that
+// way. task_status.json is the Supervisor's human-read truth source; its notes
+// must stay legible.
+func marshalNoEscape(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
 // marshalIndent pretty-prints JSON preserving field order and raw Unicode

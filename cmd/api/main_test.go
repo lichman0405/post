@@ -82,8 +82,18 @@ func TestHealthSurfaceReportsTruthfulReadinessWithPostgresDown(t *testing.T) {
 	if pg["status"] != "down" {
 		t.Errorf("postgresql check = %v, want down", pg)
 	}
-	if detail, _ := pg["detail"].(string); !strings.Contains(detail, "connect") {
-		t.Errorf("postgresql detail should carry the connection error: %q", pg["detail"])
+	// The public body carries no probe detail: it would disclose the database
+	// host, port, name and user to an unauthenticated caller. The detail is
+	// logged for the operator instead.
+	if _, present := pg["detail"]; present {
+		t.Errorf("readyz exposed probe detail to an unauthenticated caller: %v", pg)
+	}
+	rawReady, err := json.Marshal(ready)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rawReady), "connection refused") || strings.Contains(string(rawReady), "user=") {
+		t.Errorf("readyz body carries internal topology: %s", rawReady)
 	}
 	rd, _ := checks["redis"].(map[string]any)
 	if rd["status"] != "down" {

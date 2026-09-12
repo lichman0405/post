@@ -79,9 +79,18 @@ func TestReadyzReportsDownDependencyAs503NotReady(t *testing.T) {
 	if body["status"] != "not_ready" {
 		t.Errorf("readyz status field = %v, want not_ready", body["status"])
 	}
+	// /readyz is unauthenticated: the body must be truthful about up/down and
+	// must NOT disclose internal topology (host, port, database, user). The
+	// probe error goes to the operator log instead.
 	raw := string(mustJSON(t, body))
-	if !strings.Contains(raw, "connection refused") {
-		t.Errorf("readyz must carry the dependency error detail: %s", raw)
+	if strings.Contains(raw, "connection refused") {
+		t.Errorf("readyz leaked the probe error into the public body: %s", raw)
+	}
+	if strings.Contains(raw, "postgres://") || strings.Contains(raw, "password") {
+		t.Errorf("readyz body looks like it carries a DSN or secret: %s", raw)
+	}
+	if !strings.Contains(raw, `"status":"down"`) {
+		t.Errorf("readyz must still report the dependency as down: %s", raw)
 	}
 }
 
