@@ -86,9 +86,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-12T19:00:07Z
+生成时间：2026-09-12T20:07:52Z
 
-状态分布：todo 115 · ready 0 · running 2 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 15（合计 132/132 个任务）
+状态分布：todo 115 · ready 0 · running 1 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 16（合计 132/132 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -107,8 +107,8 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0012 | Supervisor 四层验收 Gate 与自动开发闭环 | P0 | merged | 2026-09-12T20:25:00Z | 2026-09-12T21:55:00Z | 2026-09-12T21:55:00Z | 2026-09-12T21:55:00Z |
 | T0013 | Enforce append-only / version immutability at the storage layer | P0 | merged | 2026-09-12T15:15:00Z | 2026-09-12T15:55:00Z | 2026-09-12T15:55:00Z | 2026-09-12T15:55:00Z |
 | T0101 | 用户认证与 session | P1 | merged | 2026-09-12T18:07:10Z |  | 2026-09-12T18:35:07Z | 2026-09-12T18:42:00Z |
-| T0102 | Research Profile 基础 | P1 | running | 2026-09-12T18:42:28Z |  |  |  |
-| T0103 | Organization 创建与成员关系 | P1 | running | 2026-09-12T18:42:34Z |  |  |  |
+| T0102 | Research Profile 基础 | P1 | merged | 2026-09-12T19:32:25Z |  | 2026-09-12T20:04:20Z | 2026-09-12T20:07:44Z |
+| T0103 | Organization 创建与成员关系 | P1 | running | 2026-09-12T19:49:12Z |  |  |  |
 | T0104 | Project 创建与 Purpose/Program | P1 | todo |  |  |  |  |
 | T0105 | Project 成员权限框架 | P1 | todo |  |  |  |  |
 | T0106 | Public/Private 读取隔离 | P1 | todo |  |  |  |  |
