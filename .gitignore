@@ -5,10 +5,9 @@
 *.pem
 *.key
 
-# orchestrator transient state
+# orchestrator transient state (Supervisor-owned runtime; never committed)
 .worktrees/
-.rddev/runtime/
-.rddev/logs/
+.rddev/
 
 # Go
 /bin/
