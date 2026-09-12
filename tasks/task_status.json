@@ -57,10 +57,10 @@
       "merged_at": "2026-09-12T15:45:00Z"
     },
     "T0006": {
-      "status": "running",
+      "status": "worker_failed",
       "started_at": "2026-09-12T15:48:00Z",
       "completed_at": null,
-      "notes": "Dispatched in parallel with T0009. Scope excludes cmd/rddev/** and internal/devorchestrator/** (T0009 owns them). Carries three REQUIRED carry-over fixes from T0004 (decisions.md L1-20260912-14): wire internal/config into cmd/api, wire loadWebConfig into apps/web/app/page.tsx removing silent localhost fallbacks, and resolve the port 9000 collision. NOTE: T0008 must split make check (infrastructure-free) from make test-integration - see decisions.md L1-20260912-19.",
+      "notes": "FIRST ATTEMPT: budget exhausted. Worker produced substantial work (26 changed paths) but ran out of its $15 cap (total_cost_usd 15.23) at the moment it was about to write RESULT.json, so no RESULT was delivered and collect rejected on that plus 6 out-of-scope paths. Per docs/62 §4 this is worker_failed, not a discipline failure. TWO of the scope violations are SUPERVISOR error: the task package used the glob \"internal/config/wiring*\" which matches no real file, so the worker could not legitimately touch internal/config/config.go. Re-dispatched in the SAME worktree to preserve the work, with corrected scope, a larger budget, and an explicit instruction to write RESULT.json FIRST.",
       "worker_run_id": "worker-T0006-44a21bb",
       "accepted_by_supervisor_at": null,
       "merged_at": null

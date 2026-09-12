@@ -543,6 +543,34 @@ ALTER TABLE ... DISABLE TRIGGER ...;      → UPDATE 1
 **流程印证**：这次"主动尝试让 X 发生"的规则立刻产出了价值——TRUNCATE 与
 `session_replication_role` 两个绕过都不是读代码能看出来的。
 
+## L1-20260912-22 — T0006 第一次派发 worker_failed：预算耗尽 + **我写了一个不存在的 scope glob**
+
+**结果**：T0006 第一次派发以 `worker_failed` 结束（`docs/62` §4：预算耗尽不算 completed）。Worker 在
+**即将写 RESULT.json 的那一刻**用尽了 $15 上限（`total_cost_usd = 15.23`），因此**没有交付 RESULT**，
+collect 因"缺 RESULT + 6 条越界路径"而 REJECTED。
+
+**归类**：这是**预算耗尽**，不是纪律失败。它产出的 29 个改动路径是真实且有价值的——`go build`、
+`go vet` 通过，`internal/health` 与 `internal/worker` 的测试通过。因此处理方式是**在同一 worktree
+续做**（保留成果），而不是销毁重来。
+
+**★ 我自己的错误（两个之一）**：T0006 的 task package 里我写了
+`"internal/config/wiring*"`——**这个 glob 不匹配任何真实文件**。Worker 需要改
+`internal/config/config.go`（为 `cmd/api` 提供 cwd/仓库根相关的 env 文件解析），却因 scope 而无权改，
+于是它越界了。**6 条"越界"里有 3 条（config.go / cwd.go / cwd_test.go）是我造成的。**
+
+**纠正措施（已生效）**：派发前**必须用真实文件树校验 `allowed_scope` 的每个 glob 至少匹配到东西**；
+纯占位式 glob 会制造出"Worker 必然违规"的局面，然后被我自己的 collect 判为违规——这是**门禁设计
+缺陷**，不是 Worker 问题。scope 已修正为 `internal/config/**` 等真实路径。
+
+**第二条教训（已写入 Worker 提示词）**：**RESULT.json 必须在早期写出并增量更新，绝不能留到最后一步。**
+上一次尝试把结果写在最后一个操作，预算一断**全部证据归零**——包括那些本已完成的验证。现在的规则是：
+有任何真实结果就先写一版（哪怕 `not_run` 占位），随后覆盖。这条对任何"交付物在最后生成"的流程都成立。
+
+**`cmd/devredis` 的裁定（L1）**：Worker 新增了一个 dev-only 的进程内 Redis（miniredis），使
+"worker 消费真实 job"这一验收项能在**无 Docker** 的前提下用真实 Redis 协议证明。这是对"无 Docker +
+必须证明真实消费"这一张力**合理的工程解法**，故 **接受**并纳入 scope，条件是：明确标注为 dev/CI 工具、
+不被任何部署服务依赖、并在 RESULT 中说明理由。验收标准不因此放宽。
+
 ---
 
 ## 环境发现（非决策，必须显式记录）
