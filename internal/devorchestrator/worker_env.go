@@ -1,6 +1,7 @@
 package devorchestrator
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,4 +106,25 @@ func stripped(key string) bool {
 		}
 	}
 	return false
+}
+
+// assertCleanWorkerEnv verifies an actual process environment (the raw
+// NUL-separated /proc/<pid>/environ bytes) carries none of the stripped
+// credential variables. It is the post-spawn assertion of T0011 Defect 1:
+// --setting-sources project stops user settings re-injecting env into a
+// Worker, and this check makes the spawn fail loudly if a stripped variable
+// appears in the real Worker environment anyway — a single CLI flag is a
+// fragile guarantee, the observed environment is the real one. Returns the
+// leaking variable name on violation (never its value), "" when clean.
+func assertCleanWorkerEnv(environ []byte) string {
+	for _, kv := range bytes.Split(environ, []byte{0}) {
+		if len(kv) == 0 {
+			continue
+		}
+		key, _, _ := strings.Cut(string(kv), "=")
+		if stripped(key) {
+			return key
+		}
+	}
+	return ""
 }

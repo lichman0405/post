@@ -22,7 +22,14 @@ import (
 
 const fakeClaude = `#!/bin/sh
 # fake claude: --version prints the version line; the worker run is driven by
-# FAKE_CLAUDE_MODE (write|sleep|crash) inherited from the spawn environment.
+# FAKE_CLAUDE_MODE (write|sleep|crash|write-scope|outside|residue|listener)
+# inherited from the spawn environment.
+write_result() {
+	# $1 = files_changed JSON array; writes a schema-conforming RESULT.json
+	cat > "$POST_WORKER_RESULT_DIR/RESULT.json" <<EOF
+{"task_id":"$POST_WORKER_TASK_ID","status":"completed","summary":"fake worker","files_changed":$1,"tests":[{"command":"true","status":"passed","evidence":"fake"}],"acceptance":[{"criterion":"a1","status":"passed","evidence":"fake"}],"risks":[],"follow_up_issues":[],"notes_for_supervisor":""}
+EOF
+}
 case "$1" in
 	--version) echo "2.1.269 (Claude Code)"; exit 0 ;;
 esac
@@ -34,6 +41,35 @@ case "$mode" in
 		# prove which worktree this process ran in: marker named by task id
 		echo "worker $POST_WORKER_TASK_ID at $(pwd)" > "worker-$POST_WORKER_TASK_ID.txt"
 		exec sleep "${FAKE_CLAUDE_SECONDS:-3}" ;;
+	write-scope)
+		# the T0011 happy path: an in-scope change plus a conforming RESULT
+		dir=${FAKE_CLAUDE_SCOPE_DIR:-t0001}
+		mkdir -p "$dir"
+		echo "worker marker" > "$dir/marker.txt"
+		write_result "[\"$dir/marker.txt\"]"
+		exec sleep "${FAKE_CLAUDE_SECONDS:-3}" ;;
+	outside)
+		# the T0011 scope violation: a change outside allowed_scope
+		mkdir -p docs
+		echo "out of scope" > docs/evil.txt
+		write_result '["docs/evil.txt"]'
+		exec sleep "${FAKE_CLAUDE_SECONDS:-3}" ;;
+	residue)
+		# leaves a background process running (the T0007 lesson). Real
+		# claude's Bash tool starts each command in its own session, so the
+		# survivor escapes the reaper session exactly like this setsid does
+		# (T0011 Defect 2); the run marker in its environment is what collect
+		# must find. The child writes its own pid because setsid forks.
+		write_result '[]'
+		setsid sh -c 'echo $$ > "$1"; exec sleep "${2:-300}"' sh "$POST_WORKER_RESULT_DIR/residue.pid" "${FAKE_CLAUDE_RESIDUE_SECONDS:-300}" >/dev/null 2>&1 &
+		exec sleep "${FAKE_CLAUDE_SECONDS:-2}" ;;
+	listener)
+		# leaves an environment-scrubbing daemon listening: it escapes both
+		# the session (setsid) and the run marker (env -i) — the warn-only
+		# class collect surfaces but does not reject.
+		write_result '[]'
+		env -i PATH=/usr/bin:/bin setsid sh -c 'echo $$ > "$1"; exec python3 -m http.server "${2:-18981}" --bind 127.0.0.1' sh "$POST_WORKER_RESULT_DIR/listener.pid" "${FAKE_CLAUDE_PORT:-18981}" >/dev/null 2>&1 &
+		exec sleep "${FAKE_CLAUDE_SECONDS:-2}" ;;
 esac
 `
 
@@ -68,6 +104,16 @@ func fakeRepo(t *testing.T) string {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, "specs", "orchestrator", "task-package.schema.json"), schema, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// spawn derives --json-schema from the repo's own result schema (T0011)
+	// and collect validates RESULT.json against it — the fixture must carry
+	// the real schema.
+	resultSchema, err := os.ReadFile(filepath.Join("..", "..", "specs", "orchestrator", "worker-result.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "specs", "orchestrator", "worker-result.schema.json"), resultSchema, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	tasks := make([]map[string]any, 0, 3)

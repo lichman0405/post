@@ -151,10 +151,17 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 		return nil, err
 	}
 
-	// 6) Record the claude version the Worker will run with (L1-20260912-5).
+	// 6) Record the claude version the Worker will run with (L1-20260912-5),
+	// and derive the --json-schema argument from the repo's own
+	// worker-result.schema.json (T0011: the RESULT contract is enforced at
+	// spawn, not merely requested in prose).
 	claudeVersion, err := gitOutput2(claudeBin, "--version")
 	if err != nil {
 		return nil, fmt.Errorf("reading claude version: %w", err)
+	}
+	resultSchema, err := resultSchemaForCLI(repoRoot)
+	if err != nil {
+		return nil, err
 	}
 
 	// 7) Start the reaper detached; it writes claude.pid, prints the pid,
@@ -163,6 +170,14 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 	if runID == "" {
 		runID = NewRunID()
 	}
+	// The run marker is the residue-attribution signal collect reads back
+	// from /proc/<pid>/environ (T0011 Defect 2): real claude's Bash tool
+	// runs each command in its own session, so a nohup'd survivor escapes
+	// the reaper's session — the session scan alone missed it (live probe:
+	// sleep 300 alive with PPID 1, not in the reaper's session). The marker
+	// travels into every descendant's environment unless the descendant
+	// deliberately scrubs it, which is exactly the attribution boundary.
+	env.Vars = append(env.Vars, "POST_WORKER_RUN_ID="+runID)
 	sessionID, err := newUUID()
 	if err != nil {
 		return nil, err
@@ -172,7 +187,7 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 	statusFile := filepath.Join(taskDir, "exit.status")
 	settingsPath := filepath.Join(taskDir, "worker-settings.json")
 	systemPath := filepath.Join(taskDir, "system.md")
-	args, err := claudeArgs(opts, sessionID, settingsPath, systemPath, prompt)
+	args, err := claudeArgs(opts, sessionID, settingsPath, systemPath, prompt, resultSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -193,6 +208,12 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 	cmd.Env = env.Vars
 	cmd.Stdin = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	// The listening-socket baseline is taken before the reaper starts: every
+	// listener that appears later is a candidate for Worker-started residue.
+	listenersBefore, err := ListenerSnapshot()
+	if err != nil {
+		return nil, fmt.Errorf("snapshotting listening sockets for residue detection: %w", err)
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -224,7 +245,29 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 		cmd.Process.Kill()
 		return nil, fmt.Errorf("the reaper wrapper reported an invalid pid — spawn aborted, nothing was recorded")
 	}
+	// The reaper is the session leader (setsid): every process the Worker
+	// spawns inherits this session id, so it is the residue anchor collect
+	// scans for. Captured BEFORE Release (Release resets Pid to -1).
+	sessionLeaderPID := cmd.Process.Pid
 	_ = cmd.Process.Release()
+
+	// Post-spawn environment assertion (T0011 Defect 1): the actual
+	// environments of the just-started Worker and its reaper wrapper must
+	// carry none of the stripped credential variables. --setting-sources
+	// project stops user settings re-injecting them; this check makes spawn
+	// fail loudly if one is present in the real processes anyway. A spawn
+	// must never silently hand a credential to a Worker.
+	for _, pid := range []int{workerPID, sessionLeaderPID} {
+		environ, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
+		if err != nil {
+			killWorker(workerPID)
+			return nil, fmt.Errorf("post-spawn environment assertion: reading /proc/%d/environ: %w — the Worker environment could not be verified, spawn aborted and the Worker killed", pid, err)
+		}
+		if leak := assertCleanWorkerEnv(environ); leak != "" {
+			killWorker(workerPID)
+			return nil, fmt.Errorf("post-spawn environment assertion: %s is present in the environment of pid %d — the Worker must not hold remote credentials, spawn aborted and the Worker killed", leak, pid)
+		}
+	}
 
 	// 8) Record the registry fact (status running; exit info merged later).
 	startedAt := time.Now().UTC().Format(time.RFC3339)
@@ -253,6 +296,10 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 		LogPath:       logPath,
 		ResultDir:     taskDir,
 		StartedAt:     startedAt,
+		// residue anchors: the Worker's session and the spawn-time listener
+		// baseline (T0011, specs/orchestrator/worker-permissions.yaml)
+		SessionLeaderPID: sessionLeaderPID,
+		ListenersBefore:  listenersBefore,
 	}
 	if err := SaveRegistry(repoRoot, rec); err != nil {
 		killWorker(workerPID)

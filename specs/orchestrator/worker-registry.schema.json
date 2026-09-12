@@ -22,6 +22,8 @@
     "branch": {"type": "string"},
     "baseline_sha": {"type": "string", "minLength": 7},
     "refs_before": {"type": "array", "items": {"type": "string"}},
+    "session_leader_pid": {"type": ["integer", "null"], "minimum": 1},
+    "listeners_before": {"type": ["array", "null"], "items": {"type": "string"}},
     "log_path": {"type": "string"},
     "result_dir": {"type": "string"},
     "started_at": {"type": "string"},

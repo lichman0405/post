@@ -97,6 +97,35 @@ json_field() {
 	}'
 }
 
+# json_bool_true KEYPATH prints "yes" when the boolean at that dotted path is
+# true, and prints "no" when it is absent or false. Exit 0 when the payload
+# parsed; non-zero when it did not.
+#
+# This parses the tool input with a real JSON decoder instead of scanning the
+# raw text. Scanning is wrong in principle: the same document also carries the
+# model-controlled `command` string, and duplicate/escaped keys resolve
+# differently in a text scan than in the JSON the consumer actually reads.
+# (A security review raised this as a fail-open. Testing showed the obvious
+# injection - putting the key inside the command text - does NOT work, because
+# a quote inside a JSON string is escaped, so the raw key never appears
+# contiguously. It is still the wrong shape for a security check, and a
+# future serialisation change could make it exploitable, so it is parsed.)
+json_bool_true() {
+	python3 -c '
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    sys.exit(3)
+cur = doc
+for part in sys.argv[1].split("."):
+    if not isinstance(cur, dict) or part not in cur:
+        print("no"); sys.exit(0)
+    cur = cur[part]
+print("yes" if cur is True else "no")
+' "$1"
+}
+
 # command_records emits the parsed Bash command as one record per line:
 #   BIN:<word>  the first non-assignment word of a command segment — the
 #               binary in *command position* (after ; | && || &, or the start)
@@ -433,6 +462,21 @@ case "$tool_name" in
 	Bash)
 		command=$(printf '%s\n' "$input" | json_field command)
 		[ -n "$command" ] || exit 0
+
+		# 0) background execution is refused. A Worker that backgrounds its
+		# long-running work (a full test suite) and then ends its turn leaves
+		# the session with that work still pending: the session exits, the work
+		# is never done, and whatever result is on disk describes a state that
+		# never completed. This happened twice on T0011 - the first time
+		# producing a RESULT that falsely claimed success - so it is refused
+		# mechanically rather than requested in prose.
+		bg=$(printf '%s\n' "$input" | json_bool_true tool_input.run_in_background); bgrc=$?
+		if [ "$bgrc" -ne 0 ]; then
+			block "cannot parse the tool-input JSON to check the background-execution rule; refusing the call rather than allowing an unverified background execution."
+		fi
+		if [ "$bg" = yes ]; then
+			block "background execution is not permitted in a Worker: run the command in the foreground and wait for it. A Worker must finish its work inside its own session, never hand it to a background task and exit."
+		fi
 
 		# 1) redirection targets, anywhere in the command text
 		redirect_policy "$command"

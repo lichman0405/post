@@ -25,4 +25,26 @@ collection_invariants:
   - no unauthorized refs created
   - every changed path matches allowed_scope
   - RESULT.json validates worker-result.schema.json
+  - RESULT.json task_id must equal the collected task
   - no secret material introduced
+  - no processes/services left running that are attributable to the Worker's
+    run (spawn records the session leader pid, the per-run environment marker
+    POST_WORKER_RUN_ID, and the listening-socket baseline; collect hard-rejects
+    survivors attributable via the session or the run marker, and surfaces
+    listeners that appeared during the run but escaped both signals, e.g.
+    environment-scrubbing daemons)
+credential_isolation:
+  - spawn passes --setting-sources project so the Worker's claude loads only
+    project settings (the task's worker-settings.json guard); user settings
+    like ~/.claude/settings.json cannot re-inject env variables that
+    BuildWorkerEnv stripped
+  - spawn reads /proc/<worker-pid>/environ and /proc/<reaper-pid>/environ
+    after starting the Worker and fails loudly (killing the Worker) if any
+    stripped credential variable is present — the guarantee is observed, not
+    just constructed
+result_enforcement:
+  - spawn passes --json-schema (worker-result.schema.json, header metadata
+    stripped for claude compatibility) so the Worker's final message is
+    schema-validated by claude itself
+  - collect re-validates the written RESULT.json against the same schema
+    with field-level errors; the contract is enforced, not requested
