@@ -262,8 +262,9 @@
     },
     "T0102": {
       "status": "running",
-      "started_at": "2026-09-12T18:42:28Z",
-      "worker_run_id": "run-7f5fed2811f431fd",
+      "started_at": "2026-09-12T19:32:25Z",
+      "worker_run_id": "run-940bc9345d2ccfac",
+      "rejection_reason": "【这不是缺陷 —— 你的实现没有被否定】\n\n在你的 attempt 完成之后、Supervisor 做最终 Gate 之前，main 前进了多个提交\n（Gate 工具自身的修复：`pr merge` 现在会校验 GitHub 上的必需检查、\n`tests/acceptance/*` 被接进 CI 并且其中一个把旧 bug 写成了断言，等等）。\n\n**问题**：G2 的步骤列表来自**当前** main，而步骤要跑在你 worktree 的**脚本**上；\n你的基线早于这些修复，于是 `acceptance` 这一步会用**旧的、把 bug 写成断言的** e2e 脚本去跑，\n必然为红——**这是一个基线时序问题，与你的代码无关**。\n\n**Supervisor 已完成**：把你的 worktree 与任务分支**整体推进到当前 main**，\n并把你的完整改动**原样重新应用**在上面。改动集合逐个文件比对过，**与推进前完全一致**\n（文件数与路径都相同）。**你的实现一个字都没有被改。**\n\n【你要做的（很少）】\n1. 在**新的基线上**重跑你的验证（尤其是 required tests 与 `make test-integration`），\n   确认没有任何东西因为 main 的变动而失效；\n2. 确认 RESULT.json 仍然自洽（completed 要求 tests[] 全部 passed；\n   覆盖任务要求的条目必须带 `label`，例如 `\"label\": \"org permission integration\"`）；\n3. 如果一切照旧，把 RESULT.json 原样重新提交即可（更新 evidence 里的命令输出更佳）；\n   如果**确实**发现了因基线变动而失效的地方，修好它并如实记录。\n\n【不要做的事】\n- 不要为了\"让 Gate 变绿\"而改动或放宽任何测试；\n- 不要趁这次机会重构别的代码；\n- 不要删除任何既有测试。\n",
       "history": [
         {
           "from": "todo",
@@ -277,13 +278,28 @@
           "at": "2026-09-12T18:42:28Z",
           "run_id": "run-7f5fed2811f431fd",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-12T19:32:24Z",
+          "run_id": "run-a5a4ee43e9d9be79",
+          "reason": "【这不是缺陷 —— 你的实现没有被否定】\n\n在你的 attempt 完成之后、Supervisor 做最终 Gate 之前，main 前进了多个提交\n（Gate 工具自身的修复：`pr merge` 现在会校验 GitHub 上的必需检查、\n`tests/acceptance/*` 被接进 CI 并且其中一个把旧 bug 写成了断言，等等）。\n\n**问题**：G2 的步骤列表来自**当前** main，而步骤要跑在你 worktree 的**脚本**上；\n你的基线早于这些修复，于是 `acceptance` 这一步会用**旧的、把 bug 写成断言的** e2e 脚本去跑，\n必然为红——**这是一个基线时序问题，与你的代码无关**。\n\n**Supervisor 已完成**：把你的 worktree 与任务分支**整体推进到当前 main**，\n并把你的完整改动**原样重新应用**在上面。改动集合逐个文件比对过，**与推进前完全一致**\n（文件数与路径都相同）。**你的实现一个字都没有被改。**\n\n【你要做的（很少）】\n1. 在**新的基线上**重跑你的验证（尤其是 required tests 与 `make test-integration`），\n   确认没有任何东西因为 main 的变动而失效；\n2. 确认 RESULT.json 仍然自洽（completed 要求 tests[] 全部 passed；\n   覆盖任务要求的条目必须带 `label`，例如 `\"label\": \"org permission integration\"`）；\n3. 如果一切照旧，把 RESULT.json 原样重新提交即可（更新 evidence 里的命令输出更佳）；\n   如果**确实**发现了因基线变动而失效的地方，修好它并如实记录。\n\n【不要做的事】\n- 不要为了\"让 Gate 变绿\"而改动或放宽任何测试；\n- 不要趁这次机会重构别的代码；\n- 不要删除任何既有测试。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-12T19:32:25Z",
+          "run_id": "run-940bc9345d2ccfac",
+          "reason": "worker spawn"
         }
       ]
     },
     "T0103": {
       "status": "running",
-      "started_at": "2026-09-12T18:42:34Z",
-      "worker_run_id": "run-adba7bff863f2739",
+      "started_at": "2026-09-12T19:32:24Z",
+      "worker_run_id": "run-dbfa73491c424051",
+      "rejection_reason": "【这不是缺陷 —— 你的实现没有被否定】\n\n在你的 attempt 完成之后、Supervisor 做最终 Gate 之前，main 前进了多个提交\n（Gate 工具自身的修复：`pr merge` 现在会校验 GitHub 上的必需检查、\n`tests/acceptance/*` 被接进 CI 并且其中一个把旧 bug 写成了断言，等等）。\n\n**问题**：G2 的步骤列表来自**当前** main，而步骤要跑在你 worktree 的**脚本**上；\n你的基线早于这些修复，于是 `acceptance` 这一步会用**旧的、把 bug 写成断言的** e2e 脚本去跑，\n必然为红——**这是一个基线时序问题，与你的代码无关**。\n\n**Supervisor 已完成**：把你的 worktree 与任务分支**整体推进到当前 main**，\n并把你的完整改动**原样重新应用**在上面。改动集合逐个文件比对过，**与推进前完全一致**\n（文件数与路径都相同）。**你的实现一个字都没有被改。**\n\n【你要做的（很少）】\n1. 在**新的基线上**重跑你的验证（尤其是 required tests 与 `make test-integration`），\n   确认没有任何东西因为 main 的变动而失效；\n2. 确认 RESULT.json 仍然自洽（completed 要求 tests[] 全部 passed；\n   覆盖任务要求的条目必须带 `label`，例如 `\"label\": \"org permission integration\"`）；\n3. 如果一切照旧，把 RESULT.json 原样重新提交即可（更新 evidence 里的命令输出更佳）；\n   如果**确实**发现了因基线变动而失效的地方，修好它并如实记录。\n\n【不要做的事】\n- 不要为了\"让 Gate 变绿\"而改动或放宽任何测试；\n- 不要趁这次机会重构别的代码；\n- 不要删除任何既有测试。\n",
       "history": [
         {
           "from": "todo",
@@ -296,6 +312,20 @@
           "to": "running",
           "at": "2026-09-12T18:42:34Z",
           "run_id": "run-adba7bff863f2739",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-12T19:32:24Z",
+          "run_id": "run-ab72408ef40d5b29",
+          "reason": "【这不是缺陷 —— 你的实现没有被否定】\n\n在你的 attempt 完成之后、Supervisor 做最终 Gate 之前，main 前进了多个提交\n（Gate 工具自身的修复：`pr merge` 现在会校验 GitHub 上的必需检查、\n`tests/acceptance/*` 被接进 CI 并且其中一个把旧 bug 写成了断言，等等）。\n\n**问题**：G2 的步骤列表来自**当前** main，而步骤要跑在你 worktree 的**脚本**上；\n你的基线早于这些修复，于是 `acceptance` 这一步会用**旧的、把 bug 写成断言的** e2e 脚本去跑，\n必然为红——**这是一个基线时序问题，与你的代码无关**。\n\n**Supervisor 已完成**：把你的 worktree 与任务分支**整体推进到当前 main**，\n并把你的完整改动**原样重新应用**在上面。改动集合逐个文件比对过，**与推进前完全一致**\n（文件数与路径都相同）。**你的实现一个字都没有被改。**\n\n【你要做的（很少）】\n1. 在**新的基线上**重跑你的验证（尤其是 required tests 与 `make test-integration`），\n   确认没有任何东西因为 main 的变动而失效；\n2. 确认 RESULT.json 仍然自洽（completed 要求 tests[] 全部 passed；\n   覆盖任务要求的条目必须带 `label`，例如 `\"label\": \"org permission integration\"`）；\n3. 如果一切照旧，把 RESULT.json 原样重新提交即可（更新 evidence 里的命令输出更佳）；\n   如果**确实**发现了因基线变动而失效的地方，修好它并如实记录。\n\n【不要做的事】\n- 不要为了\"让 Gate 变绿\"而改动或放宽任何测试；\n- 不要趁这次机会重构别的代码；\n- 不要删除任何既有测试。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-12T19:32:24Z",
+          "run_id": "run-dbfa73491c424051",
           "reason": "worker spawn"
         }
       ]
