@@ -147,9 +147,9 @@
       "name": "application smoke",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T16:35:00Z",
+      "evidence": "application smoke: Supervisor ran make smoke with no Docker and no database - all three binaries build and start, worker completed job smoke-1 (queue drained over the real Redis protocol via the dev-only devredis), web served live status from the real API, adapter readiness=ready, and fail-closed proven for both api (exit 2 naming POST_ENV) and web. /healthz 200 ok; /readyz 503 not_ready naming postgresql and redis as down."
     },
     {
       "id": "T0007-TEST-01",
