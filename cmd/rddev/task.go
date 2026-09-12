@@ -362,7 +362,31 @@ func (tr *taskRunner) accept(id string) int {
 		}
 		return exitOperational
 	}
-	status["G4"] = "not_required"
+	// G4: run the SAME assertion `rddev pr open` and `rddev pr merge` run, and
+	// require it BEFORE acceptance rather than after.
+	//
+	// Accepting without it deadlocked T0101. accept hard-coded G4 as
+	// "not_required" and moved the task to accepted; only then did `pr open`
+	// report that a review verdict is required for merge. A Review Worker may
+	// review a task in verification only, so the requirement became
+	// unsatisfiable in an accepted state — accepted and unmergeable at once,
+	// with no legal transition out. Acceptance must not be reachable in an
+	// order that makes a later gate impossible to satisfy.
+	mergeRes, err := devorchestrator.CheckMergeGate(repoRoot, gatesPath, id)
+	if err != nil {
+		return operationalError(tr.stderr, "rddev task accept", err)
+	}
+	if mergeRes.Status != "passed" {
+		status["G4"] = "failed"
+		reasons = append(reasons, mergeRes.Reasons...)
+		recordRefusal(status, reasons)
+		fmt.Fprintf(tr.stderr, "rddev task accept: REFUSED — the merge gate (G4) is not satisfied (state unchanged):\n")
+		for _, r := range reasons {
+			fmt.Fprintf(tr.stderr, "  - %s\n", r)
+		}
+		return exitOperational
+	}
+	status["G4"] = "passed"
 
 	res, err := tr.store.Transition(id, devorchestrator.StateAccepted, runID, "")
 	if err != nil {
@@ -379,8 +403,8 @@ func (tr *taskRunner) accept(id string) int {
 		}{TransitionResult: res, Gates: status})
 		return exitOK
 	}
-	fmt.Fprintf(tr.stdout, "%s: %s -> %s (run_id=%s, gates: G1=%s G2=%s G3=%s)\n",
-		res.TaskID, res.From, res.To, res.RunID, status["G1"], status["G2"], status["G3"])
+	fmt.Fprintf(tr.stdout, "%s: %s -> %s (run_id=%s, gates: G1=%s G2=%s G3=%s G4=%s)\n",
+		res.TaskID, res.From, res.To, res.RunID, status["G1"], status["G2"], status["G3"], status["G4"])
 	return exitOK
 }
 
