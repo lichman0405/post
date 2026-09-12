@@ -99,6 +99,20 @@ type Querier interface {
 	// validation_results, releases, research_assets, research_asset_versions,
 	// knowledge_publications). Release/asset versions are immutable (invariant 5).
 	RecordValidationResult(ctx context.Context, arg RecordValidationResultParams) (ValidationResult, error)
+	//
+	// Access control is enforced HERE, not delegated to a caller.
+	//
+	// The query returns a row only if it is public, or if its project is
+	// explicitly listed in allowed_project_ids. Passing an empty array therefore
+	// yields public rows only — never the whole table. That property is the point:
+	// a query that cannot even accept an actor's scope cannot enforce one, and the
+	// previous unfiltered form returned every matching row regardless of
+	// visibility.
+	//
+	// docs/54 ranks "private project/branch content appearing in Search" as its
+	// top-severity scenario, and docs/23 §5 requires tenant/project/object policy
+	// filtering on every query, search, export and download. Master Gate E ("Search
+	// 无 private leakage") holds this invariant too.
 	SearchDocuments(ctx context.Context, arg SearchDocumentsParams) ([]SearchDocumentsRow, error)
 	UpdateProjectActivityStatus(ctx context.Context, arg UpdateProjectActivityStatusParams) (Project, error)
 	// Search projection (canonical table: search_documents). Rebuildable by

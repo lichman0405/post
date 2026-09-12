@@ -16,14 +16,16 @@ SELECT entity_ref, entity_type, visibility, project_id, title, content, structur
        ts_rank(to_tsvector('simple', title || ' ' || content), plainto_tsquery('simple', $1)) AS rank
 FROM search_documents
 WHERE to_tsvector('simple', title || ' ' || content) @@ plainto_tsquery('simple', $1)
+  AND (visibility = 'public' OR project_id = ANY($2::uuid[]))
 ORDER BY rank DESC, entity_ref
-LIMIT $3 OFFSET $2
+LIMIT $4 OFFSET $3
 `
 
 type SearchDocumentsParams struct {
-	Query      string `json:"query"`
-	PageOffset int32  `json:"page_offset"`
-	PageSize   int32  `json:"page_size"`
+	Query             string        `json:"query"`
+	AllowedProjectIds []pgtype.UUID `json:"allowed_project_ids"`
+	PageOffset        int32         `json:"page_offset"`
+	PageSize          int32         `json:"page_size"`
 }
 
 type SearchDocumentsRow struct {
@@ -38,8 +40,26 @@ type SearchDocumentsRow struct {
 	Rank       float32            `json:"rank"`
 }
 
+// Access control is enforced HERE, not delegated to a caller.
+//
+// The query returns a row only if it is public, or if its project is
+// explicitly listed in allowed_project_ids. Passing an empty array therefore
+// yields public rows only — never the whole table. That property is the point:
+// a query that cannot even accept an actor's scope cannot enforce one, and the
+// previous unfiltered form returned every matching row regardless of
+// visibility.
+//
+// docs/54 ranks "private project/branch content appearing in Search" as its
+// top-severity scenario, and docs/23 §5 requires tenant/project/object policy
+// filtering on every query, search, export and download. Master Gate E ("Search
+// 无 private leakage") holds this invariant too.
 func (q *Queries) SearchDocuments(ctx context.Context, arg SearchDocumentsParams) ([]SearchDocumentsRow, error) {
-	rows, err := q.db.Query(ctx, searchDocuments, arg.Query, arg.PageOffset, arg.PageSize)
+	rows, err := q.db.Query(ctx, searchDocuments,
+		arg.Query,
+		arg.AllowedProjectIds,
+		arg.PageOffset,
+		arg.PageSize,
+	)
 	if err != nil {
 		return nil, err
 	}
