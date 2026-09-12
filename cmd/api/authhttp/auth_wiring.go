@@ -47,11 +47,11 @@ type API struct {
 	guard    guard
 }
 
-// Routes registers the auth surface and returns the guarded subtree
-// handler. New product routes (T0103+) register on this mux and inherit
-// the write guard automatically.
-func (a *API) Routes() http.Handler {
-	mux := http.NewServeMux()
+// Routes registers the auth routes on mux and returns the guarded auth
+// subtree handler. Product routes (T0102+ profilehttp) register on the
+// same mux via their own Register methods and inherit the write guard
+// automatically.
+func (a *API) Register(mux *http.ServeMux) {
 	h := a.handlers
 	mux.HandleFunc("POST /api/v1/auth/signup", h.handleSignup)
 	mux.HandleFunc("POST /api/v1/auth/login", h.handleLogin)
@@ -59,7 +59,23 @@ func (a *API) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/auth/session", h.handleSession)
 	mux.HandleFunc("GET /api/v1/auth/oidc/authorize-url", h.handleOIDCAuthorize)
 	mux.HandleFunc("GET /api/v1/auth/oidc/callback", h.handleOIDCCallback)
-	return a.guard.guard(mux)
+}
+
+// Guard wraps a /api/v1 route set with the session/CSRF guard (see guard):
+// anonymous writes are 401 before routing, session-bearing writes need the
+// CSRF token, reads flow (product reads decide their own visibility).
+func (a *API) Guard(next http.Handler) http.Handler {
+	return a.guard.guard(next)
+}
+
+// Routes returns the guarded auth-only subtree — the pre-product wiring.
+// cmd/api composes Register + Guard explicitly instead, so the product
+// APIs mount on the same guarded mux (one guard for the whole subtree,
+// not one per surface).
+func (a *API) Routes() http.Handler {
+	mux := http.NewServeMux()
+	a.Register(mux)
+	return a.Guard(mux)
 }
 
 // hostOf extracts the host part of an origin URL ("http://x:3000" -> "x:3000").

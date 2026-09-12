@@ -109,6 +109,11 @@ var canonicalTables = map[string]tableExp{
 		pk:      []string{"id"},
 		uniques: [][]string{{"handle"}, {"email"}},
 	},
+	"profiles": {
+		cols: []colExp{c("user_id", u, false, false), c("bio", txt, false, true), c("updated_at", ts, false, true)},
+		pk:   []string{"user_id"},
+		fks:  []fkExp{fk("user_id", "users", "RESTRICT")},
+	},
 	"organizations": {
 		cols:    []colExp{c("id", u, false, true), c("slug", txt, false, false), c("name", txt, false, false), c("description", txt, true, false), c("created_at", ts, false, true)},
 		pk:      []string{"id"},
@@ -441,6 +446,7 @@ func TestUpgradePath(t *testing.T) {
 		"external_reference_snapshots", "contribution_events",
 		"credit_disputes", "research_events", "outbox_events",
 		"subscriptions", "webhook_deliveries", "audit_log", "search_documents",
+		"profiles",
 	}
 	for _, name := range present {
 		if _, ok := intermediate.Tables[name]; !ok {
@@ -464,6 +470,20 @@ func TestUpgradePath(t *testing.T) {
 		}
 	}
 
+	// T0102 data-level upgrade check: identities that exist before the
+	// profiles migration (00017) must get a profile row when it lands —
+	// the 1:1 identity/profile shape holds for pre-existing data, not just
+	// for accounts created after head.
+	var preProfileUsers []string
+	for _, handle := range []string{"pre-profile-1", "pre-profile-2"} {
+		var id string
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO users (handle, display_name) VALUES ($1, $1) RETURNING id`, handle).Scan(&id); err != nil {
+			t.Fatalf("upgrade path: seed pre-profile user: %v", err)
+		}
+		preProfileUsers = append(preProfileUsers, id)
+	}
+
 	// Continue to head.
 	applied, err = persistence.Migrate(ctx, url)
 	if err != nil {
@@ -476,6 +496,18 @@ func TestUpgradePath(t *testing.T) {
 		t.Fatalf("upgrade path: version after head = %d, want %d", v, headVersion)
 	}
 	upgraded := takeSnapshot(t, ctx, pool)
+
+	// The pre-00017 identities were backfilled with profile rows.
+	for _, id := range preProfileUsers {
+		var n int
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM profiles WHERE user_id = $1`, id).Scan(&n); err != nil {
+			t.Fatalf("upgrade path: probe profile backfill: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("upgrade path: profile row not backfilled for pre-migration user %s", id)
+		}
+	}
 
 	// Fresh reference install.
 	freshPool, _ := testdb.Setup(t, ctx, adminURL(t), taskID)

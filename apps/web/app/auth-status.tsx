@@ -76,6 +76,9 @@ export function AuthStatus({ apiBaseUrl }: { apiBaseUrl: string }) {
         Signed in as <strong>{user.display_name || user.handle}</strong>{" "}
         <span className="auth-email">({user.email})</span>
       </Text>
+      {/* The profile URL is id-keyed and stable (T0102): it never changes
+          when the owner renames their handle. */}
+      <Link href={`/users/${user.id}`}>View profile</Link>
       <Button variant="invisible" size="small" disabled={busy} onClick={() => void signOut()}>
         {busy ? "Signing out…" : "Sign out"}
       </Button>

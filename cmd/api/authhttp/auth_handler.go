@@ -55,7 +55,7 @@ type sessionPayload struct {
 func (h *handlers) sessionResponse(w http.ResponseWriter, result authn.SignupResult, status int) {
 	http.SetCookie(w, sessionCookie(result.Session.Token,
 		int(time.Until(result.Session.ExpiresAt).Seconds()), h.secure))
-	writeJSON(w, status, sessionPayload{
+	WriteJSON(w, status, sessionPayload{
 		User:      userPayloadFromDomain(result.User),
 		CSRFToken: result.Session.CSRFToken,
 	})
@@ -72,7 +72,7 @@ func decodeCredentials(w http.ResponseWriter, r *http.Request) (credentialsReque
 	var req credentialsRequest
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
 	if err := dec.Decode(&req); err != nil {
-		writeError(w, r, http.StatusBadRequest, authn.CodeValidationFailed,
+		WriteError(w, r, http.StatusBadRequest, authn.CodeValidationFailed,
 			"request body must be valid JSON")
 		return credentialsRequest{}, false
 	}
@@ -114,7 +114,7 @@ func (h *handlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 	p, ok := principalFrom(r.Context())
 	if ok {
 		if err := h.svc.Logout(r.Context(), p.Session.Token); err != nil {
-			writeError(w, r, http.StatusServiceUnavailable, authn.CodeServiceUnavailable,
+			WriteError(w, r, http.StatusServiceUnavailable, authn.CodeServiceUnavailable,
 				"could not revoke the session")
 			return
 		}
@@ -128,11 +128,11 @@ func (h *handlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) handleSession(w http.ResponseWriter, r *http.Request) {
 	p, ok := principalFrom(r.Context())
 	if !ok {
-		writeError(w, r, http.StatusUnauthorized, authn.CodeUnauthenticated,
+		WriteError(w, r, http.StatusUnauthorized, authn.CodeUnauthenticated,
 			"no active session")
 		return
 	}
-	writeJSON(w, http.StatusOK, sessionPayload{
+	WriteJSON(w, http.StatusOK, sessionPayload{
 		User:      userPayloadFromDomain(p.User),
 		CSRFToken: p.Session.CSRFToken,
 	})
@@ -145,7 +145,7 @@ func (h *handlers) handleOIDCAuthorize(w http.ResponseWriter, r *http.Request) {
 	redirectURI := schemeHost(r) + h.cfg.OIDC.RedirectPath
 	url, state, err := h.svc.OIDCAuthorizeURL(r.Context(), redirectURI)
 	if errors.Is(err, authn.ErrOIDCNotConfigured) {
-		writeError(w, r, http.StatusNotImplemented, authn.CodeOIDCNotConfigured,
+		WriteError(w, r, http.StatusNotImplemented, authn.CodeOIDCNotConfigured,
 			"OIDC login is not configured for this deployment")
 		return
 	}
@@ -154,7 +154,7 @@ func (h *handlers) handleOIDCAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, oidcStateCookie(state, h.secure))
-	writeJSON(w, http.StatusOK, map[string]string{"authorize_url": url})
+	WriteJSON(w, http.StatusOK, map[string]string{"authorize_url": url})
 }
 
 // handleOIDCCallback: GET /api/v1/auth/oidc/callback?code&state — the
@@ -211,22 +211,22 @@ func (h *handlers) authError(w http.ResponseWriter, r *http.Request, err error) 
 	switch {
 	case errors.Is(err, authn.ErrInvalidCredentials):
 		logAuthFailure(r, authn.CodeInvalidCredentials)
-		writeError(w, r, http.StatusUnauthorized, authn.CodeInvalidCredentials,
+		WriteError(w, r, http.StatusUnauthorized, authn.CodeInvalidCredentials,
 			"invalid email or password")
 	case errors.Is(err, authn.ErrEmailTaken):
-		writeError(w, r, http.StatusConflict, authn.CodeEmailTaken,
+		WriteError(w, r, http.StatusConflict, authn.CodeEmailTaken,
 			"an account with this email already exists")
 	case errors.Is(err, authn.ErrValidation):
-		writeError(w, r, http.StatusBadRequest, authn.CodeValidationFailed, err.Error())
+		WriteError(w, r, http.StatusBadRequest, authn.CodeValidationFailed, err.Error())
 	case errors.Is(err, authn.ErrUnavailable), errors.Is(err, authn.ErrStore):
-		writeError(w, r, http.StatusServiceUnavailable, authn.CodeServiceUnavailable,
+		WriteError(w, r, http.StatusServiceUnavailable, authn.CodeServiceUnavailable,
 			"authentication is temporarily unavailable")
 	case errors.Is(err, authn.ErrOIDCProviderFailed):
 		logAuthFailure(r, authn.CodeOIDCProviderFailed)
-		writeError(w, r, http.StatusBadGateway, authn.CodeOIDCProviderFailed,
+		WriteError(w, r, http.StatusBadGateway, authn.CodeOIDCProviderFailed,
 			"the identity provider failed; try again")
 	case errors.Is(err, authn.ErrOIDCEmailNotVerified):
-		writeError(w, r, http.StatusForbidden, authn.CodeOIDCEmailNotVerified,
+		WriteError(w, r, http.StatusForbidden, authn.CodeOIDCEmailNotVerified,
 			"the provider did not verify your email address")
 	default:
 		var rateErr *authn.RateLimitError
@@ -237,12 +237,12 @@ func (h *handlers) authError(w http.ResponseWriter, r *http.Request, err error) 
 			}
 			w.Header().Set("Retry-After", fmt.Sprintf("%d", retry))
 			logAuthFailure(r, authn.CodeRateLimited)
-			writeError(w, r, http.StatusTooManyRequests, authn.CodeRateLimited,
+			WriteError(w, r, http.StatusTooManyRequests, authn.CodeRateLimited,
 				"too many attempts; try again later")
 			return
 		}
 		observability.LoggerFromContext(r.Context()).Error("auth handler: unexpected error", "error", err)
-		writeError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR",
+		WriteError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR",
 			"an internal error occurred")
 	}
 }
