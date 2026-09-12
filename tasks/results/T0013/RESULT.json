@@ -1,0 +1,90 @@
+{
+  "task_id": "T0013",
+  "status": "completed",
+  "summary": "Append-only / version immutability is now enforced at the storage layer by one new forward-only migration (infra/migrations/00014_append_only_enforcement.sql) that creates a single shared PL/pgSQL guard function and a BEFORE UPDATE OR DELETE row trigger per covered table. The guard RAISEs P0001 naming the table and the forbidden operation (TG_TABLE_NAME/TG_OP). Covered set (13 tables, append-only BY DESIGN per docs/21 §4, docs/46, ADR-007/008/021, Master Acceptance Gate A): scientific_object_versions, relation_versions, project_states, state_commits, releases, research_asset_versions, asset_lineage, policy_versions, validation_results, contribution_events, audit_log, research_events, external_reference_snapshots. The Supervisor's original tamper (UPDATE scientific_object_versions SET title/... ) is now rejected by the database itself with SQLSTATE P0001, proven against a real PostgreSQL via psql and by Go regression tests; DELETE is rejected identically; a legitimate INSERT of a new version row succeeds. Deliberately exempt (mutable by design, each justified in notes_for_supervisor): all current-state/workflow tables (users, organizations, memberships, programs, projects, scientific_objects, relations, branches, research_assets, issues, pull_requests, reviews, evidence_assertions, credit_disputes, subscriptions, blobs, blob_attachments, external_references, knowledge_publications, asset_dependencies), the worker bookkeeping tables (outbox_events, webhook_deliveries) and the rebuildable search projection (search_documents). No existing constraint was changed or dropped; no column semantics added; sqlc drift check clean; doctor.sh and make check pass; diff is exactly within allowed_scope.",
+  "files_changed": [
+    "infra/migrations/00014_append_only_enforcement.sql",
+    "tests/integration/append_only_test.go",
+    "tests/integration/migration_test.go"
+  ],
+  "tests": [
+    {
+      "command": "POSTGRES_TEST_ADMIN_URL='postgres://postgres:postgres_dev_pw@127.0.0.1:15433/post' go test ./tests/integration/ -count=1 -run 'TestAppendOnlyEnforcement' -v",
+      "status": "passed",
+      "evidence": "--- PASS: TestAppendOnlyEnforcement (0.20s). Logs show: UPDATE scientific_object_versions → rejected: SQLSTATE P0001: table scientific_object_versions is append-only: UPDATE is forbidden ...; DELETE FROM scientific_object_versions → rejected: SQLSTATE P0001: ... DELETE is forbidden ...; and one UPDATE+DELETE rejection pair per remaining covered table (relation_versions, project_states, state_commits, releases, research_asset_versions, asset_lineage, policy_versions, validation_results, contribution_events, audit_log, research_events, external_reference_snapshots); INSERT of version_no=2 succeeded (count=2); a branches.base_state_id pointer UPDATE (mutable current state) still succeeds."
+    },
+    {
+      "command": "POSTGRES_TEST_ADMIN_URL='postgres://postgres:postgres_dev_pw@127.0.0.1:15433/post' go test ./tests/integration/ -count=1 -run 'TestAppendOnlyUpgradePath' -v",
+      "status": "passed",
+      "evidence": "--- PASS: TestAppendOnlyUpgradePath (0.58s). Migrated an empty DB to the previous head (version 13): 0 user triggers and no append_only_guard function (proves 00014 is the sole source); then Migrate to head applied exactly 1 migration reaching version 14; pg_trigger shows exactly the 13 guard triggers, all tgenabled='O', tgtype=27 (BEFORE, per-row, UPDATE+DELETE); an in-place UPDATE of an audit_log row on the UPGRADED database is rejected with SQLSTATE P0001; the upgraded trigger set and full pg_catalog snapshot are identical to a fresh install."
+    },
+    {
+      "command": "POSTGRES_TEST_ADMIN_URL='postgres://postgres:postgres_dev_pw@127.0.0.1:15433/post' go test ./... ",
+      "status": "passed",
+      "evidence": "Full repo suite ok, including tests/integration (fresh install, repeat migrate, upgrade path 6→14, constraint enforcement with the updated project_states P0001 expectation): 'ok github.com/lichman0405/post/tests/integration 2.874s'; all other packages ok / no test files."
+    },
+    {
+      "command": "./ops/doctor.sh",
+      "status": "passed",
+      "evidence": "Verdict: ok (exit 0). Summary: required 27 checks: 25 passed, 0 failed, 2 skipped | advisory 8 checks: 5 passed, 2 warn, 1 skipped."
+    },
+    {
+      "command": "POSTGRES_TEST_ADMIN_URL='postgres://postgres:postgres_dev_pw@127.0.0.1:15433/post' make check",
+      "status": "passed",
+      "evidence": "Exit 0: check-schema-drift, go vet ./..., go build ./..., go test ./..., pnpm typecheck+lint for @post/ui and @post/web, node config tests (11 pass), scientific-adapter pytest (30 passed)."
+    },
+    {
+      "command": "tests/integration/check-sqlc-drift.sh",
+      "status": "passed",
+      "evidence": "'DRIFT CHECK [verify]: clean — checked-in generated code matches generator output' with sqlc v1.31.1; adding migration 00014 (function + triggers) changes no generated code."
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "an UPDATE of an existing scientific_object_versions row is rejected by the database",
+      "status": "passed",
+      "evidence": "Real PostgreSQL 16.15 (container posttask-t0013-postgres-1, port 15433). psql demo: 'UPDATE scientific_object_versions SET title='REWRITTEN HISTORY', integrity_hash='tampered';' → ERROR: P0001: table scientific_object_versions is append-only: UPDATE is forbidden (history is immutable; insert a new row instead) [CONTEXT: PL/pgSQL function append_only_guard() line 3 at RAISE]. Regression test TestAppendOnlyEnforcement asserts pgconn.PgError Code == \"P0001\" and the message naming the table and UPDATE."
+    },
+    {
+      "criterion": "a DELETE of an existing version row is rejected by the database",
+      "status": "passed",
+      "evidence": "psql: 'DELETE FROM scientific_object_versions;' → ERROR: table scientific_object_versions is append-only: DELETE is forbidden (history is immutable; insert a new row instead). TestAppendOnlyEnforcement asserts SQLSTATE P0001 + message naming table and DELETE."
+    },
+    {
+      "criterion": "legitimate INSERT of a new version row still succeeds",
+      "status": "passed",
+      "evidence": "psql: INSERT of version_no=2 completed with no error; TestAppendOnlyEnforcement inserts version 2 after the rejections and verifies count(*) = 2 and a distinct new id. Additionally a legitimate INSERT into every other covered table (relation_versions, state_commits, releases, research_asset_versions, asset_lineage, policy_versions, validation_results, contribution_events, audit_log, research_events, external_reference_snapshots, project_states) succeeds inside the same test."
+    },
+    {
+      "criterion": "the rejection is proven by SQLSTATE/exception evidence against a real PostgreSQL, and by a regression test",
+      "status": "passed",
+      "evidence": "SQLSTATE P0001 (raise_exception) captured verbatim via psql -v VERBOSITY=verbose ('ERROR: P0001: table scientific_object_versions is append-only: UPDATE is forbidden ...') and asserted exactly in the Go tests via *pgconn.PgError for both UPDATE and DELETE on all 13 covered tables — not merely 'the trigger exists in the catalog'."
+    },
+    {
+      "criterion": "fresh install and upgrade path both apply the migration cleanly",
+      "status": "passed",
+      "evidence": "Fresh install: testdb.Setup migrates an empty DB to head (14) cleanly (TestFreshInstallCatalog still passes against the canonical fixture). Upgrade path: TestAppendOnlyUpgradePath migrates 0→13→14 (exactly 1 migration applied on the last step), asserts no guard at v13, then pg_trigger on the upgraded DB shows exactly 13 triggers all ENABLED (tgenabled='O'), and trigger set + full pg_catalog snapshot are identical to a fresh install. All 14 migration files also apply end-to-end in order via psql -f on a scratch DB (t0013_demo, dropped afterwards)."
+    },
+    {
+      "criterion": "no existing constraint is weakened; migration is forward-only and repeat-migrate safe",
+      "status": "passed",
+      "evidence": "Migration 00014 only CREATEs a function and triggers — every existing FK/unique/check/index is untouched (no ALTER, no DROP anywhere in the file). Forward-only: numbered 00014, no down migration, shipped files never edited. Repeat-migrate: TestRepeatMigrateIsNoop passes — re-running Migrate on a migrated DB applies 0 migrations and the catalog snapshot is byte-identical. goose StatementBegin/StatementEnd wrapper makes the plpgsql body statement-split-safe."
+    },
+    {
+      "criterion": "ops/doctor.sh and make check still pass; no file outside allowed_scope is modified",
+      "status": "passed",
+      "evidence": "./ops/doctor.sh → Verdict: ok (exit 0). make check → exit 0 (go vet/build/test, schema drift, pnpm typecheck/lint, node tests, pytest 30 passed). git status --porcelain shows exactly: M tests/integration/migration_test.go, ?? infra/migrations/00014_append_only_enforcement.sql, ?? tests/integration/append_only_test.go — all inside allowed_scope (infra/migrations/**, tests/integration/**). The only change to migration_test.go: headVersion 13→14 and the project_states DELETE expectation 23503→P0001 (the new guard fires before FK RESTRICT; the FK-RESTRICT evidence remains covered by the users DELETE case, 23503). No test was deleted, skipped or weakened."
+    }
+  ],
+  "risks": [
+    "TRUNCATE is not blocked: row-level triggers do not fire on TRUNCATE. Most guarded tables are FK-referenced (scientific_object_versions, relation_versions, project_states, state_commits, releases, research_asset_versions, asset_lineage, policy_versions) so plain TRUNCATE fails with 0A000 there, but audit_log, contribution_events, research_events, validation_results and external_reference_snapshots have no referencing tables and a table owner could TRUNCATE them. Documented as a follow-up, not implemented (the owner-decided mechanism for this task is BEFORE UPDATE OR DELETE triggers).",
+    "The guard is a database mechanism, not a security boundary against superusers: a table owner can still DISABLE TRIGGER / ALTER the function. This matches the intended model (defense against application-level and accidental rewrites, with an admin break-glass runbook per docs/9), but it is not tamper-proof against the DBA role.",
+    "The covered set is an L1 decision derived from the specs. If the Supervisor wants a different boundary (e.g. also guarding knowledge_publications, or exempting validation_results), it is a one-line change plus a new forward-only migration — no shipped file would be edited.",
+    "Over-guarding a table that a future product flow legitimately updates would surface as a P0001 at runtime; each such case would need a new migration. The current persistence query layer performs no UPDATE/DELETE on any covered table (verified: only outbox_events, blobs, projects, search_documents are mutated by existing queries)."
+  ],
+  "follow_up_issues": [
+    "Consider statement-level BEFORE TRUNCATE triggers (or explicit TRUNCATE tests) for the append-only tables that no FK pins: audit_log, contribution_events, research_events, validation_results, external_reference_snapshots.",
+    "Confirm the exemption boundary: knowledge_publications (publication/visibility record per ADR-006) and validation_results (gate-run record) sit on the edge of the append-only set; extending the guard to them later is a trivial forward-only migration."
+  ],
+  "notes_for_supervisor": "COVERED (13 tables) — scientific_object_versions & relation_versions: version logs, docs/21 §4 '不 update semantic content；修正通过新记录', Master Acceptance Gate A; project_states & state_commits: the RSG state history (task requirement 'state commits'), docs/53 'UPDATE 不能覆写历史 scientific content' — current state moves via pointers (branches.base_state_id, docs/21 §5), never by mutating a state row; releases & research_asset_versions & asset_lineage: ADR-008 'Release 与 Published Asset Version 不可变', docs/11 §1/§2/§5/§7; policy_versions: 'Policy 版本化；Release 绑定当时 policy version' (docs/12), Master Acceptance 'policy/schema/version/hash pinned'; validation_results: each row is a recorded gate run (re-runs append — no unique constraint); contribution_events & audit_log: the append-only ledgers (docs/21 §4, docs/46, docs/13, invariant 14); research_events: ADR-021 'Append-only Domain Event Log'; external_reference_snapshots: docs/19 §2 'pinned snapshot' (re-access appends a new snapshot). EXEMPT — mutable by design: users/organizations/organization_memberships/programs/projects/project_memberships/scientific_objects/relations/research_assets (current state); branches (lifecycle_state active→merged→aborted and base_state_id current pointer); issues/pull_requests (state machines); reviews (workflow decisions); evidence_assertions (review_state unreviewed→reviewed→rejected workflow); credit_disputes (open→resolved→rejected state machine — corrections leave traces via the dispute record + immutable contribution_events); blobs (integrity_state pending→verified→failed); blob_attachments (access_level is a current access declaration); external_references (live identity, docs/19 §5 'refresh live metadata'); asset_dependencies (visibility_of_usage declaration defaults 'private'); knowledge_publications (publication/visibility record, ADR-006 'Publish controls visibility'; not listed in the append-only sets — exempted rather than over-guarded); subscriptions (user-managed); outbox_events & webhook_deliveries (worker bookkeeping: published_at/attempts/status); search_documents (rebuildable projection, upsert on rebuild). Implementation: one shared guard function + one trigger per table, tgtype=27 (BEFORE, per-row, UPDATE+DELETE), tgenabled='O' on both fresh install and the 13→14 upgrade. Error message names table and operation. goose StatementBegin/StatementEnd wraps the plpgsql body (goose v3 splits statements on semicolons). Existing T0005 tests updated only where the new guard legitimately changed the observable behavior (project_states DELETE now P0001 instead of FK 23503 — the guard fires first; the FK RESTRICT evidence is still present via the users DELETE case). PostgreSQL evidence was gathered on a task-namespaced compose project (posttask-t0013, host port 15433) and all scratch databases were dropped; the container was removed after the run."
+}

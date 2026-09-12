@@ -1490,6 +1490,26 @@
       "status": "not_run",
       "last_run": null,
       "evidence": null
+    },
+    {
+      "id": "T0013-TEST-01",
+      "task_id": "T0013",
+      "name": "append-only enforcement integration",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "passed",
+      "last_run": "2026-09-12T15:55:00Z",
+      "evidence": "append-only enforcement integration: Supervisor re-ran its ORIGINAL probe against real PostgreSQL - UPDATE of a committed version row now rejected with P0001 naming table+operation, DELETE rejected, legitimate INSERT of a new version row still succeeds, same on the other 12 covered tables. TRUNCATE (which bypasses row triggers) now rejected via 00015; an unguarded table still truncates. 13 row + 13 statement triggers, all enabled."
+    },
+    {
+      "id": "T0013-TEST-02",
+      "task_id": "T0013",
+      "name": "migration upgrade path",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "passed",
+      "last_run": "2026-09-12T15:55:00Z",
+      "evidence": "migration upgrade path: 0 triggers at 00013, 26 after head, upgraded DB enforces the guard, trigger set matches a fresh install. Full integration suite 11/11 against real PostgreSQL."
     }
   ]
 }
