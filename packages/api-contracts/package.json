@@ -1,0 +1,6 @@
+{
+  "name": "@post/api-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenAPI contract + generated TypeScript client for the POST API. Canonical source: specs/api/openapi.yaml; generated code lands here and is never hand-edited (docs/65, docs/50: no second hand-written DTO set)."
+}

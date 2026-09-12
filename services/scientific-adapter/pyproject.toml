@@ -1,0 +1,17 @@
+[project]
+name = "post-scientific-adapter"
+version = "0.1.0"
+description = "POST scientific adapter — isolated Python service for the scientific Python ecosystem (pymatgen/ASE arrive with the adapter tasks). Talks to the Go core only via stable API/RPC/queue (docs/65)."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+scientific-adapter = "post_scientific_adapter.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["pytest>=8.3"]

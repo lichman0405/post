@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-rd.example/schemas/external_reference.schema.json",
+  "title": "ExternalReference",
+  "type": "object",
+  "required": [
+    "id",
+    "type",
+    "version",
+    "project_id",
+    "title",
+    "lifecycle_state",
+    "schema_ref",
+    "created_by",
+    "created_at",
+    "source_type",
+    "external_identifier"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 8
+    },
+    "type": {
+      "const": "external_reference"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "branch_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "lifecycle_state": {
+      "enum": [
+        "active",
+        "aborted",
+        "reopened",
+        "superseded"
+      ]
+    },
+    "schema_ref": {
+      "type": "object",
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "created_by": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "visibility_policy_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "source_type": {
+      "enum": [
+        "publication",
+        "patent",
+        "database",
+        "standard",
+        "vendor",
+        "web",
+        "other"
+      ]
+    },
+    "external_identifier": {
+      "type": "string"
+    },
+    "canonical_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uri"
+    },
+    "accessed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "upstream_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "snapshot_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "snapshot_blob_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

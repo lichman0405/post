@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-rd.example/schemas/protocol.schema.json",
+  "title": "Protocol",
+  "type": "object",
+  "required": [
+    "id",
+    "type",
+    "version",
+    "project_id",
+    "title",
+    "lifecycle_state",
+    "schema_ref",
+    "created_by",
+    "created_at",
+    "purpose"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 8
+    },
+    "type": {
+      "const": "protocol"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "branch_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "lifecycle_state": {
+      "enum": [
+        "active",
+        "aborted",
+        "reopened",
+        "superseded"
+      ]
+    },
+    "schema_ref": {
+      "type": "object",
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "created_by": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "visibility_policy_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "purpose": {
+      "type": "string"
+    },
+    "domain": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

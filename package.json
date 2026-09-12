@@ -1,0 +1,10 @@
+{
+  "name": "post",
+  "version": "0.1.0",
+  "private": true,
+  "description": "POST (Platform for Open Science & Technology) — monorepo root. Cross-language entry points live in the Makefile (docs/65, docs/66); this file scopes the pnpm workspace to web/ui/contracts only.",
+  "packageManager": "pnpm@12.4.1",
+  "engines": {
+    "node": ">=24"
+  }
+}
