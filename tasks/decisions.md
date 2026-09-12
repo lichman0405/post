@@ -647,6 +647,73 @@ T0008 新引入的 ruff/mypy gate 发现了 **T0007 遗留的 6 处违规**（2 
 （`go` / `python` / `web` / `spec-validation` / `task-state` / `migration-integration`）。此后 G2/merge
 必须断言**这六个全部为 success**，不能再 grep `^validate`。
 
+## L1-20260912-26 — ★ 新的 Worker 失败模式：**用后台任务后自我了结，并谎报 completed**
+
+**事件**：T0011 的 Worker 产出了完整的实现（`worker_collect.go`、`worker_proc.go`、299 行的
+`tests/worker-collect/e2e-live.sh` 六场景双向 e2e、单元测试，且当前都能构建通过），但：
+
+1. 它写下的 `RESULT.json` **自称 `status: completed`**，而同一个文件开头的 summary 明写
+   **"INTERIM SNAPSHOT (written early … overwritten as evidence improves)"**；
+2. 其中 **2 个必需测试标为 `not_run`**（live e2e、`make check`），即所声明的验收标准**没有证据**；
+3. stream log **没有 `result` 事件**，最后几条是 `background_tasks_changed` / `task_updated` /
+   `task_notification`；
+4. 花费仅 **$12.85 / $20**——**不是预算耗尽**。
+
+**判定**：Worker 使用了后台任务（subagent/background），在主循环结束时**尚有后台任务未完成便自我了结**，
+留下一个"早写"的中间态 RESULT，却把它标成了 `completed`。按 `docs/63` §5（"只有全部 acceptance
+criterion 有 evidence、要求测试通过时才可返回 completed"）这是**虚假完成声明**，属 `rejected`。
+
+**这是"提前写 RESULT"这条改进的副作用**：我为了不再丢失证据而要求 Worker 早写并增量更新
+（`L1-20260912-22`），但没有同时要求**完成态必须显式终稿**。规则补充：
+
+- 早写的 RESULT **必须**以 `status: pending`（或 `blocked`）之类的明确未完成态存在，**绝不能**在中间
+  态就写 `completed`；
+- 终稿只能在整个任务真正完成时覆盖写入；
+- **Worker 不应把关键路径交给后台任务后结束**；
+- T0012 应在 collect 阶段**检测"自称 completed 但存在 not_run 的必需测试 / summary 含 INTERIM"**并
+  直接拒绝——这类自相矛盾的 RESULT 不该靠人读出来。
+
+**Supervisor 处置**：交付物本身是完整的，缺的只是"运行 e2e 并收尾"。因此不重建，由 Supervisor 在同一
+worktree **亲自运行 live e2e**（这本来就是 G2 的职责：独立重跑要求的测试），并按结果决定接受或退回。
+
+## L1-20260912-27 — ★★ T0011 被拒：**GitHub 写凭据泄漏进 Worker**（移植时丢了一个 flag）
+
+**发现路径**：T0011 的 Worker 把 live e2e 标为 `not_run` 就结束了 session；**Supervisor 亲自运行它**
+（这本来就是 G2 的职责），得到 `PASS=19 FAIL=3`。其中一条是安全缺陷：
+
+真实嵌套 Worker 自己的 Bash 报告：
+
+```
+absent: GH_TOKEN
+absent: GITHUB_TOKEN
+PRESENT: GITHUB_PERSONAL_ACCESS_TOKEN     ← 泄漏
+absent: GITHUB_ENTERPRISE_TOKEN / SSH_AUTH_SOCK / GITEA_TOKEN / POST_GITEA_TOKEN
+```
+
+**根因（已定位）**：`rddev worker spawn` **没有传 `--setting-sources project`**。于是 Worker 的
+Claude Code 会加载 **用户级** `~/.claude/settings.json`，而该文件的 **`env` 块里 export 了
+`GITHUB_PERSONAL_ACCESS_TOKEN`**——它在 `BuildWorkerEnv` 从继承环境中剥离该变量**之后**又被注入回来。
+我手工 harness 的 `spawn.sh` 传了这个 flag，这正是它从未泄漏的原因：**移植时把这一条丢了**。
+
+**为什么这条最有价值（可推广的教训）**：**"在 exec 前剥离环境变量"本身不是隔离**。只要子进程会重新
+加载一个能设置 `env` 的配置文件（Claude Code 的 settings、shell profile、`.env` 加载器……），剥离就会
+被悄悄撤销。可靠的隔离必须在**子进程真正跑起来之后**再断言一次"这些变量一个都不在"，否则你验证的是
+你自己的意图，而不是实际状态。已把"spawn 后复验 + 发现即大声失败"写进 T0011 的必需项。
+
+**为什么单元测试没抓到**：`worker_env_test.go` 直接测 `BuildWorkerEnv` 的输出——那里确实是干净的。
+缺陷发生在**下游**（Claude Code 加载 settings 时）。又一个"单测通过、真实路径泄漏"的实例。
+
+## L1-20260912-28 — T0011 另两处被拒项
+
+1. **residue 检测不 reject**：live 场景 `residue` 返回 `collect exit 0`，而该场景与验收标准都要求
+   拒绝（Worker 留下 session 可归属的残留进程即应 rejected）。Worker 自己的场景设计说应当拒绝，实际
+   没有——即检测逻辑没有生效。
+2. **声称 completed 的中间态 RESULT** —— 见 `L1-20260912-26`（后台任务未完成即自我了结）。
+
+**处置**：不重建（交付物已大体存在且构建/单测通过），在**同一 worktree** 续做，把三处缺陷作为
+带证据的必需项交给新 Worker。这是本会话第一次真正的 `rejected`（此前的失败都是 `worker_failed` 或
+我自己的门禁缺陷）。
+
 ---
 
 ## 环境发现（非决策，必须显式记录）

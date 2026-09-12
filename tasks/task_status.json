@@ -102,10 +102,10 @@
       "merged_at": "2026-09-12T18:05:00Z"
     },
     "T0011": {
-      "status": "todo",
+      "status": "rejected",
       "started_at": null,
       "completed_at": null,
-      "notes": "",
+      "notes": "REJECTED after the Supervisor ran the live e2e the Worker left unrun: PASS=19 FAIL=3, and two failures are real. (1) CREDENTIAL LEAK: a real Worker's own Bash reported PRESENT: GITHUB_PERSONAL_ACCESS_TOKEN while every other stripped variable was absent. Root cause: rddev's spawn omits --setting-sources project, so the worker's Claude Code loads ~/.claude/settings.json, whose env block re-injects the token AFTER spawn-time env stripping. The hand-rolled harness passed that flag, which is why it never leaked - the port dropped it. (2) Residue detection returned collect exit 0 where its own scenario expects a rejection. (3) The RESULT claimed status=completed while self-describing as an INTERIM SNAPSHOT with 2 required tests not_run. Deliverable is largely there (builds, unit tests pass, 6-scenario e2e harness written); re-dispatched in the same worktree for these three defects.",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null
