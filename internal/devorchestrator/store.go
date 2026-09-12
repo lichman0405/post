@@ -1,0 +1,433 @@
+package devorchestrator
+
+import (
+	"bytes"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"syscall"
+	"time"
+)
+
+// DefaultDAGPath and DefaultStatePath are the in-repo locations of the DAG
+// and the state truth source, relative to the repo root (rddev's cwd).
+const (
+	DefaultDAGPath   = "tasks/tasks.json"
+	DefaultStatePath = "tasks/task_status.json"
+)
+
+// DefaultLockPath is the lock guarding the default state file. It lives under
+// the untracked runtime state dir (.rddev, see specs/orchestrator/rddev-cli.yaml)
+// so the repo tree is not polluted; an overridden state path is guarded by a
+// sibling "<state-file>.lock" instead.
+const DefaultLockPath = ".rddev/locks/task_status.lock"
+
+// NewRunID returns a random run_id for a state change (crypto/rand, 8 bytes
+// hex). Callers may instead pass a Supervisor-supplied run id via --run-id.
+func NewRunID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand is not expected to fail; fall back to a timestamp so a
+		// run_id is always carried (the write must never silently lack one).
+		return fmt.Sprintf("run-%d", time.Now().UnixNano())
+	}
+	return "run-" + hex.EncodeToString(b[:])
+}
+
+// Store reads the task DAG and applies guarded transitions to the state file.
+// All mutations serialize on an exclusive lock and commit with an atomic
+// rename; readers see either the complete old or the complete new file.
+type Store struct {
+	dag       *DAG
+	statePath string
+	lockPath  string
+}
+
+// OpenStore loads the DAG and resolves the state/lock paths.
+func OpenStore(dagPath, statePath string) (*Store, error) {
+	d, err := LoadDAG(dagPath)
+	if err != nil {
+		return nil, err
+	}
+	lock := statePath + ".lock"
+	if statePath == DefaultStatePath {
+		lock = DefaultLockPath
+	}
+	return &Store{dag: d, statePath: statePath, lockPath: lock}, nil
+}
+
+// DAG returns the loaded task DAG.
+func (s *Store) DAG() *DAG { return s.dag }
+
+// StatePath returns the targeted state file path.
+func (s *Store) StatePath() string { return s.statePath }
+
+// NextTask is one entry of `rddev task next` / `task ready` output.
+type NextTask struct {
+	ID           string   `json:"id"`
+	Status       State    `json:"status"`
+	Phase        string   `json:"phase"`
+	Title        string   `json:"title"`
+	Dependencies []string `json:"dependencies"`
+	DepsMet      bool     `json:"deps_met"`
+	UnmetDeps    []string `json:"unmet_deps"`
+}
+
+// depsMet returns the dependency statuses of id per the given state map:
+// every dependency must be merged (docs/30 §3: dependencies are verified
+// merged before a task starts).
+func (s *Store) depsMet(states map[string]State, id string) (met bool, unmet []string) {
+	t := s.dag.Get(id)
+	unmet = make([]string, 0, len(t.Dependencies))
+	for _, dep := range t.Dependencies {
+		if states[dep] != StateMerged {
+			unmet = append(unmet, dep)
+		}
+	}
+	return len(unmet) == 0, unmet
+}
+
+// readStates loads the state file (absent entries default to todo).
+func (s *Store) readStates() (map[string]State, error) {
+	data, err := os.ReadFile(s.statePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]State{}, nil
+		}
+		return nil, fmt.Errorf("reading task status file %s: %w", s.statePath, err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parsing task status file %s: %w", s.statePath, err)
+	}
+	entries, err := decodeTaskEntries(raw["tasks"])
+	if err != nil {
+		return nil, fmt.Errorf("parsing task status file %s: %w", s.statePath, err)
+	}
+	states := make(map[string]State, len(entries)+len(s.dag.Tasks))
+	for id, entry := range entries {
+		var ts TaskState
+		if err := json.Unmarshal(entry, &ts); err != nil {
+			return nil, fmt.Errorf("task status file %s: task %s entry is not valid JSON: %w", s.statePath, id, err)
+		}
+		if !ValidState(string(ts.Status)) {
+			return nil, fmt.Errorf("task status file %s: task %s has unknown status %q", s.statePath, id, ts.Status)
+		}
+		states[id] = ts.Status
+	}
+	for _, t := range s.dag.Tasks { // absent == todo
+		if _, ok := states[t.ID]; !ok {
+			states[t.ID] = StateTodo
+		}
+	}
+	return states, nil
+}
+
+// Next returns tasks whose dependencies are all satisfied (every dependency
+// merged) and whose status is todo or ready — the dispatch pool, sorted by
+// id. This is the scheduling answer `rddev task next` provides the
+// Supervisor; tasks with an unsatisfied dependency are excluded entirely.
+func (s *Store) Next() ([]NextTask, error) {
+	states, err := s.readStates()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]NextTask, 0) // empty pool serializes as [], never null
+	for _, id := range s.dag.IDs() {
+		st := states[id]
+		if st != StateTodo && st != StateReady {
+			continue
+		}
+		met, unmet := s.depsMet(states, id)
+		if !met {
+			continue
+		}
+		t := s.dag.Get(id)
+		out = append(out, NextTask{
+			ID: id, Status: st, Phase: t.Phase, Title: t.Title,
+			Dependencies: t.Dependencies, DepsMet: met, UnmetDeps: unmet,
+		})
+	}
+	return out, nil
+}
+
+// ReadyList returns tasks currently in state ready, sorted by id.
+func (s *Store) ReadyList() ([]NextTask, error) {
+	states, err := s.readStates()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]NextTask, 0) // empty pool serializes as [], never null
+	for _, id := range s.dag.IDs() {
+		if states[id] != StateReady {
+			continue
+		}
+		met, unmet := s.depsMet(states, id)
+		t := s.dag.Get(id)
+		out = append(out, NextTask{
+			ID: id, Status: states[id], Phase: t.Phase, Title: t.Title,
+			Dependencies: t.Dependencies, DepsMet: met, UnmetDeps: unmet,
+		})
+	}
+	return out, nil
+}
+
+// InspectResult is the payload of `rddev task inspect`: the DAG entry plus
+// the full recorded state (history included).
+type InspectResult struct {
+	Task  TaskSpec  `json:"task"`
+	State TaskState `json:"state"`
+}
+
+// Inspect returns the DAG entry and the full recorded state for id. A task
+// with no state entry yet reports the implicit StateTodo. Reads are lock-free
+// but always see a complete file (all writers commit with an atomic rename).
+func (s *Store) Inspect(id string) (*InspectResult, error) {
+	t := s.dag.Get(id)
+	if t == nil {
+		return nil, fmt.Errorf("unknown task %s in task DAG", id)
+	}
+	ts := TaskState{Status: StateTodo}
+	data, err := os.ReadFile(s.statePath)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("reading task status file %s: %w", s.statePath, err)
+	}
+	if len(data) > 0 {
+		var top map[string]json.RawMessage
+		if err := json.Unmarshal(data, &top); err != nil {
+			return nil, fmt.Errorf("parsing task status file %s: %w", s.statePath, err)
+		}
+		tasks, err := decodeTaskEntries(top["tasks"])
+		if err != nil {
+			return nil, fmt.Errorf("parsing task status file %s: %w", s.statePath, err)
+		}
+		if raw, ok := tasks[id]; ok {
+			if err := json.Unmarshal(raw, &ts); err != nil {
+				return nil, fmt.Errorf("task status file %s: task %s entry is not valid JSON: %w", s.statePath, id, err)
+			}
+			if !ValidState(string(ts.Status)) {
+				return nil, fmt.Errorf("task status file %s: task %s has unknown status %q", s.statePath, id, ts.Status)
+			}
+		}
+	}
+	return &InspectResult{Task: *t, State: ts}, nil
+}
+
+// TransitionResult reports a committed state change.
+type TransitionResult struct {
+	TaskID string `json:"task_id"`
+	From   State  `json:"from"`
+	To     State  `json:"to"`
+	RunID  string `json:"run_id"`
+	At     string `json:"at"`
+}
+
+// Transition applies id -> to under the exclusive lock: it validates the
+// transition against the current state (re-read after acquiring the lock),
+// appends a history entry carrying runID, and commits with an atomic rename.
+// On an illegal transition the state file is left unchanged and an
+// *IllegalTransitionError is returned. Entering `ready` additionally requires
+// every dependency to be merged (docs/30 §3) — a *DependencyError otherwise.
+func (s *Store) Transition(id string, to State, runID, reason string) (*TransitionResult, error) {
+	if s.dag.Get(id) == nil {
+		return nil, fmt.Errorf("unknown task %s in task DAG", id)
+	}
+	if runID == "" {
+		return nil, fmt.Errorf("internal error: transition without run_id")
+	}
+	var result *TransitionResult
+	err := s.mutate(id, func(ts *TaskState, from State, states map[string]State) error {
+		if err := checkTransition(id, from, to); err != nil {
+			return err
+		}
+		if to == StateReady {
+			unmet := map[string]State{}
+			for _, dep := range s.dag.Get(id).Dependencies {
+				if states[dep] != StateMerged {
+					unmet[dep] = states[dep]
+				}
+			}
+			if len(unmet) > 0 {
+				return &DependencyError{ID: id, Unmet: unmet}
+			}
+		}
+		at := time.Now().UTC().Format(time.RFC3339)
+		ts.Status = to
+		ts.History = append(ts.History, StateChange{From: from, To: to, At: at, RunID: runID, Reason: reason})
+		if to == StateAccepted {
+			ts.AcceptedBySupervisorAt = strptr(at)
+		}
+		if to == StateMerged {
+			ts.MergedAt = strptr(at)
+		}
+		if to == StateRejected && reason != "" {
+			ts.RejectionReason = reason
+		}
+		result = &TransitionResult{TaskID: id, From: from, To: to, RunID: runID, At: at}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// mutate locks the state file, applies fn to the task entry, and commits
+// atomically. fn receives the task's current state (todo if absent) and the
+// full locked status map (absent tasks default to todo).
+func (s *Store) mutate(id string, fn func(ts *TaskState, from State, states map[string]State) error) error {
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	top, tasks, err := s.readRawLocked()
+	if err != nil {
+		return err
+	}
+	ts, from := TaskState{Status: StateTodo}, StateTodo
+	if raw, ok := tasks[id]; ok {
+		if err := json.Unmarshal(raw, &ts); err != nil {
+			return fmt.Errorf("task status file %s: task %s entry is not valid JSON: %w", s.statePath, id, err)
+		}
+		from = ts.Status
+	}
+	states := make(map[string]State, len(s.dag.Tasks))
+	for tid, raw := range tasks {
+		var entry TaskState
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			return fmt.Errorf("task status file %s: task %s entry is not valid JSON: %w", s.statePath, tid, err)
+		}
+		states[tid] = entry.Status
+	}
+	for _, t := range s.dag.Tasks {
+		if _, ok := states[t.ID]; !ok {
+			states[t.ID] = StateTodo
+		}
+	}
+	if err := fn(&ts, from, states); err != nil {
+		return err
+	}
+	entry, err := json.Marshal(&ts)
+	if err != nil {
+		return fmt.Errorf("encoding task %s state: %w", id, err)
+	}
+	tasks[id] = entry
+	tasksRaw, err := json.Marshal(tasks)
+	if err != nil {
+		return fmt.Errorf("encoding task status file: %w", err)
+	}
+	top["tasks"] = tasksRaw
+	if _, ok := top["version"]; !ok {
+		top["version"] = json.RawMessage("2")
+	}
+	out, err := marshalIndent(top)
+	if err != nil {
+		return fmt.Errorf("encoding task status file: %w", err)
+	}
+	return writeFileAtomic(s.statePath, out)
+}
+
+// lock acquires the exclusive state-file lock (blocking; the OS releases it
+// when the process dies, so a crashed writer cannot wedge the file forever).
+func (s *Store) lock() (func(), error) {
+	if dir := filepath.Dir(s.lockPath); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("creating lock directory %s: %w", dir, err)
+		}
+	}
+	f, err := os.OpenFile(s.lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("opening state lock %s: %w", s.lockPath, err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("locking state file via %s: %w", s.lockPath, err)
+	}
+	return func() {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN) // best effort
+		f.Close()
+	}, nil
+}
+
+// readRawLocked reads the raw status file (caller must hold the lock).
+func (s *Store) readRawLocked() (map[string]json.RawMessage, map[string]json.RawMessage, error) {
+	top := map[string]json.RawMessage{}
+	data, err := os.ReadFile(s.statePath)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, nil, fmt.Errorf("reading task status file %s: %w", s.statePath, err)
+	}
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &top); err != nil {
+			return nil, nil, fmt.Errorf("parsing task status file %s: %w", s.statePath, err)
+		}
+	}
+	tasks, err := decodeTaskEntries(top["tasks"])
+	if err != nil {
+		return nil, nil, fmt.Errorf("parsing task status file %s: %w", s.statePath, err)
+	}
+	return top, tasks, nil
+}
+
+// decodeTaskEntries decodes a raw `tasks` object into per-task raw entries.
+func decodeTaskEntries(raw json.RawMessage) (map[string]json.RawMessage, error) {
+	tasks := map[string]json.RawMessage{}
+	if len(raw) == 0 {
+		return tasks, nil
+	}
+	if err := json.Unmarshal(raw, &tasks); err != nil {
+		return nil, fmt.Errorf("invalid tasks object: %w", err)
+	}
+	return tasks, nil
+}
+
+// marshalIndent pretty-prints JSON preserving field order and raw Unicode
+// (no HTML escaping, matching the existing hand-maintained state file).
+func marshalIndent(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// writeFileAtomic writes data to path via a temp file + fsync + rename so a
+// concurrent reader never observes a partial write.
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("creating state directory %s: %w", dir, err)
+		}
+	}
+	tmp, err := os.CreateTemp(dir, ".task-status-*.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp state file in %s: %w", dir, err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful rename
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("writing temp state file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("syncing temp state file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing temp state file: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("renaming temp state file into place: %w", err)
+	}
+	return nil
+}
+
+func strptr(s string) *string { return &s }
