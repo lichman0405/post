@@ -15,9 +15,16 @@
 (
   set -euo pipefail
 
-  psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
-	CREATE USER ${GITEA_DB_USER} WITH PASSWORD '${GITEA_DB_PASSWORD}';
-	CREATE DATABASE ${GITEA_DB_NAME} OWNER ${GITEA_DB_USER};
+  # Values are passed as psql variables and referenced with :"ident" (quoted
+  # identifier) / :'literal' (quoted literal) so psql performs the escaping.
+  # Interpolating them into the SQL text from the shell would make the script
+  # injectable through an overridden environment variable.
+  psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+    -v gitea_user="$GITEA_DB_USER" \
+    -v gitea_password="$GITEA_DB_PASSWORD" \
+    -v gitea_db="$GITEA_DB_NAME" <<-'EOSQL'
+	CREATE USER :"gitea_user" WITH PASSWORD :'gitea_password';
+	CREATE DATABASE :"gitea_db" OWNER :"gitea_user";
 	CREATE EXTENSION IF NOT EXISTS vector;
 EOSQL
 )
