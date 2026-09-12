@@ -147,7 +147,10 @@ func (ts *TaskState) UnmarshalJSON(data []byte) error {
 // MarshalJSON emits the known fields plus any preserved unknown ones.
 func (ts TaskState) MarshalJSON() ([]byte, error) {
 	type plain TaskState
-	b, err := json.Marshal(plain(ts))
+	// marshalNoEscape, not json.Marshal: HTML escaping would rewrite every
+	// ">" and "<" in a note (e.g. "todo -> ready") as \u003e, making
+	// task_status.json unreadable in its most human-read field.
+	b, err := marshalNoEscape(plain(ts))
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +164,7 @@ func (ts TaskState) MarshalJSON() ([]byte, error) {
 	for k, v := range ts.extra {
 		m[k] = v
 	}
-	return json.Marshal(m)
+	return marshalNoEscape(m)
 }
 
 // DependencyError reports a refused `ready` transition: at least one
