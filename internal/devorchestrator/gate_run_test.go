@@ -382,3 +382,59 @@ func containsAny(s string, parts ...string) bool {
 	}
 	return false
 }
+
+// An approving verdict must not outlive the code it judged. The G2 checks in
+// CheckMergeGate already compare evidence against the latest collect; the
+// review clause did not, so a verdict written before a rework (or before a
+// Supervisor edit to the worktree) still satisfied the merge gate — evidence
+// for a tree nobody reviewed.
+func TestCheckMergeGateReviewVerdictMustBeFresh(t *testing.T) {
+	repoRoot, specPath := mergeGateFixture(t)
+	spec, err := LoadGateSpec(specPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.Review.RequiredForMerge = true
+	data, err := json.MarshalIndent(spec, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(specPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeReview := func(at string) {
+		t.Helper()
+		if _, err := WriteRecord(repoRoot, "T0001", RecordReview, "rev-"+at, &ReviewRecord{
+			recordMeta: recordMeta{RecordType: RecordReview, TaskID: "T0001", RunID: "rev-" + at, At: at},
+			Verdict:    "approve", Summary: "fixture",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The fixture's collect is at 10:00. A verdict from before it approved a
+	// tree that no longer exists.
+	writeReview("2026-09-12T09:00:00.000Z")
+	res, err := CheckMergeGate(repoRoot, specPath, "T0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "failed" {
+		t.Fatalf("merge gate passed on an approve verdict older than the latest collect: %v", res.Checks)
+	}
+	if !containsAny(strings.Join(res.Reasons, " "), "older than the latest collect") {
+		t.Errorf("refusal does not name the staleness: %v", res.Reasons)
+	}
+
+	// A verdict written after the collect is fresh and must pass — without
+	// this the rule could be "no verdict ever satisfies the gate".
+	writeReview("2026-09-12T12:00:00.000Z")
+	res, err = CheckMergeGate(repoRoot, specPath, "T0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "passed" {
+		t.Fatalf("merge gate = %s on a fresh approving verdict, reasons %v", res.Status, res.Reasons)
+	}
+}
