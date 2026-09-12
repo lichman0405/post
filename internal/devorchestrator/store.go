@@ -19,11 +19,26 @@ const (
 	DefaultStatePath = "tasks/task_status.json"
 )
 
-// DefaultLockPath is the lock guarding the default state file. It lives under
-// the untracked runtime state dir (.rddev, see specs/orchestrator/rddev-cli.yaml)
-// so the repo tree is not polluted; an overridden state path is guarded by a
-// sibling "<state-file>.lock" instead.
-const DefaultLockPath = ".rddev/locks/task_status.lock"
+// LockFileName is the lock guarding a state file. It is derived from the
+// state file's *canonical directory*, so every spelling of the same state file
+// (`tasks/task_status.json`, `./tasks/task_status.json`, an absolute path)
+// maps to exactly one lock file.
+const LockFileName = ".task_status.lock"
+
+// lockPathFor returns the single lock file guarding statePath.
+//
+// Deriving the lock from the path string is what broke mutual exclusion
+// before: the default spelling used one lock file and an explicitly re-spelled
+// path used another, so two processes writing the SAME file took DIFFERENT
+// locks and silently lost an update. Canonicalising first makes the lock a
+// property of the file, not of how a caller happened to type it.
+func lockPathFor(statePath string) (string, error) {
+	abs, err := filepath.Abs(statePath)
+	if err != nil {
+		return "", fmt.Errorf("resolving state path %s: %w", statePath, err)
+	}
+	return filepath.Join(filepath.Dir(filepath.Clean(abs)), LockFileName), nil
+}
 
 // NewRunID returns a random run_id for a state change (crypto/rand, 8 bytes
 // hex). Callers may instead pass a Supervisor-supplied run id via --run-id.
@@ -52,9 +67,9 @@ func OpenStore(dagPath, statePath string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	lock := statePath + ".lock"
-	if statePath == DefaultStatePath {
-		lock = DefaultLockPath
+	lock, err := lockPathFor(statePath)
+	if err != nil {
+		return nil, err
 	}
 	return &Store{dag: d, statePath: statePath, lockPath: lock}, nil
 }
@@ -90,6 +105,23 @@ func (s *Store) depsMet(states map[string]State, id string) (met bool, unmet []s
 	return len(unmet) == 0, unmet
 }
 
+// checkForStateDrift rejects a state file that EXISTS but declares no tasks
+// while the DAG has tasks.
+//
+// Such a file is truncated, renamed or hand-edited — it is not "every task is
+// todo". Treating it that way silently resets every completed task to todo and
+// lets finished work be re-dispatched, with no warning: a fail-open on state
+// drift. A *missing* file is different and still means a fresh repository.
+func (s *Store) checkForStateDrift(entryCount int) error {
+	if entryCount == 0 && len(s.dag.Tasks) > 0 {
+		return fmt.Errorf("task status file %s exists but declares no tasks while "+
+			"the DAG has %d: refusing to read this as 'all tasks are todo' — the "+
+			"file is truncated, renamed or drifted. Restore it, or delete it "+
+			"deliberately to start from a fresh state", s.statePath, len(s.dag.Tasks))
+	}
+	return nil
+}
+
 // readStates loads the state file (absent entries default to todo).
 func (s *Store) readStates() (map[string]State, error) {
 	data, err := os.ReadFile(s.statePath)
@@ -106,6 +138,9 @@ func (s *Store) readStates() (map[string]State, error) {
 	entries, err := decodeTaskEntries(raw["tasks"])
 	if err != nil {
 		return nil, fmt.Errorf("parsing task status file %s: %w", s.statePath, err)
+	}
+	if err := s.checkForStateDrift(len(entries)); err != nil {
+		return nil, err
 	}
 	states := make(map[string]State, len(entries)+len(s.dag.Tasks))
 	for id, entry := range entries {
@@ -203,6 +238,9 @@ func (s *Store) Inspect(id string) (*InspectResult, error) {
 		tasks, err := decodeTaskEntries(top["tasks"])
 		if err != nil {
 			return nil, fmt.Errorf("parsing task status file %s: %w", s.statePath, err)
+		}
+		if err := s.checkForStateDrift(len(tasks)); err != nil {
+			return nil, err
 		}
 		if raw, ok := tasks[id]; ok {
 			if err := json.Unmarshal(raw, &ts); err != nil {
@@ -358,7 +396,13 @@ func (s *Store) lock() (func(), error) {
 func (s *Store) readRawLocked() (map[string]json.RawMessage, map[string]json.RawMessage, error) {
 	top := map[string]json.RawMessage{}
 	data, err := os.ReadFile(s.statePath)
-	if err != nil && !os.IsNotExist(err) {
+	// A missing file is a legitimate fresh start and yields an empty state.
+	// A file that exists but carries no tasks is drift, and checkForStateDrift
+	// below refuses it — those two cases must not be conflated.
+	if os.IsNotExist(err) {
+		return top, map[string]json.RawMessage{}, nil
+	}
+	if err != nil {
 		return nil, nil, fmt.Errorf("reading task status file %s: %w", s.statePath, err)
 	}
 	if len(data) > 0 {
@@ -369,6 +413,9 @@ func (s *Store) readRawLocked() (map[string]json.RawMessage, map[string]json.Raw
 	tasks, err := decodeTaskEntries(top["tasks"])
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing task status file %s: %w", s.statePath, err)
+	}
+	if err := s.checkForStateDrift(len(tasks)); err != nil {
+		return nil, nil, err
 	}
 	return top, tasks, nil
 }
