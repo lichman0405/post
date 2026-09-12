@@ -66,13 +66,13 @@
       "merged_at": "2026-09-12T16:35:00Z"
     },
     "T0007": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-12T17:00:00Z",
-      "completed_at": null,
-      "notes": "Running in parallel with T0008/T0010. Scope narrowed to cmd/api|worker|mcp-server + internal/observability + apps/web + services/scientific-adapter + logging tests; go.mod/go.sum FORBIDDEN (owned by T0010) so it must use the standard library only.",
+      "completed_at": "2026-09-12T17:20:00Z",
+      "notes": "G2 accepted; merged as PR #34 (01c375e). Supervisor ran the scripts itself: one correlation id traced web->API->adapter AND a request id carried into the job enqueue, with real log lines. The canary sweep includes a NEGATIVE CONTROL proving it can fail plus positive evidence that values were masked rather than dropped. Redaction reuses internal/config (no second redactor). Collect initially REJECTED on my own scope error - I had narrowed the declared tests/** to invented globs; see decisions.md L1-20260912-23. The Worker also started its own PostgreSQL on the host and left it running; stopped by the Supervisor (L1-20260912-24).",
       "worker_run_id": "worker-T0007-cbeff16",
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "accepted_by_supervisor_at": "2026-09-12T17:20:00Z",
+      "merged_at": "2026-09-12T17:20:00Z"
     },
     "T0008": {
       "status": "running",

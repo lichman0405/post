@@ -1,0 +1,107 @@
+{
+  "task_id": "T0007",
+  "status": "completed",
+  "summary": "T0007: structured logging with correlation ids that survive the whole path. Go services (api, worker, mcp-server) log structured JSON via log/slog on stderr; a correlation id is created at the API edge (or honoured from a valid incoming X-Correlation-ID) by internal/observability.Middleware, echoed in the response header, attached to every request log line, embedded into the Redis queue job, and re-attached per job by the worker loop. go-redis's internal retry chatter is routed through the structured logger via a SetLogger bridge (T0006 defect). The web app (Next.js server components) and the Python scientific adapter propagate the same X-Correlation-ID across their boundaries with the shared shape ^[A-Za-z0-9][A-Za-z0-9._-]{7,63}$ and log it server-side. All redaction reuses internal/config's RedactForOutput/RedactURL (no second redactor); a canary sweep over real log output proves no secret-shaped value can reach any log, and the sweep is proven capable of failing by planting the raw canary. Standard library only; go.mod untouched (owned by T0010). Evidence is infrastructure-free (cmd/devredis as the Redis server, host-native processes) because the worker-guard blocks docker/sudo. The one new endpoint POST /internal/jobs is a clearly documented scaffold (not part of specs/api/openapi.yaml) that exists so a real API request can cause a real background job today; it is replaced by the domain-event outbox when the event tasks land.",
+  "files_changed": [
+    "internal/observability/doc.go",
+    "internal/observability/correlation.go",
+    "internal/observability/logger.go",
+    "internal/observability/middleware.go",
+    "internal/observability/redislog.go",
+    "internal/observability/observability_test.go",
+    "cmd/api/main.go",
+    "cmd/api/jobs.go",
+    "cmd/api/jobs_test.go",
+    "cmd/worker/main.go",
+    "cmd/mcp-server/main.go",
+    "apps/web/lib/correlation.ts",
+    "apps/web/lib/correlation.test.mjs",
+    "apps/web/app/page.tsx",
+    "apps/web/app/status-panel.tsx",
+    "services/scientific-adapter/src/post_scientific_adapter/correlation.py",
+    "services/scientific-adapter/src/post_scientific_adapter/observability.py",
+    "services/scientific-adapter/src/post_scientific_adapter/app.py",
+    "services/scientific-adapter/src/post_scientific_adapter/cli.py",
+    "services/scientific-adapter/tests/test_correlation.py",
+    "tests/observability/trace-e2e.sh",
+    "tests/observability/canary-sweep.sh"
+  ],
+  "tests": [
+    {
+      "command": "POSTGRES_TEST_ADMIN_URL='postgres://postgres:postgres_dev_pw@127.0.0.1:15433/postgres' make check",
+      "status": "passed",
+      "evidence": "exit 0. Go unit tests pass incl. internal/observability (9 tests) and cmd/api (miniredis job-handler tests); tests/integration (real PostgreSQL via local conda PG 16.15 on 127.0.0.1:15433) pass in 2.76s; web checks pass; adapter pytest: 40 passed in 3.06s."
+    },
+    {
+      "command": "go test ./cmd/... ./internal/observability/",
+      "status": "passed",
+      "evidence": "ok github.com/lichman0405/post/cmd/api; ok .../cmd/rddev 0.171s; ok .../internal/observability (8 unit tests: middleware id create/echo/completion log with query string asserted ABSENT, valid incoming id honoured, invalid incoming id rejected and replaced, flusher preserved via ResponseController, go-redis bridge redacts postgres://user:sekret123@... -> user:***@ and masks bare ghp_ tokens, logger context fallback, JSON round-trip)."
+    },
+    {
+      "command": "bash tests/observability/trace-e2e.sh",
+      "status": "passed",
+      "evidence": "Real processes (api, worker, devredis, adapter via uv, next start) with real log files. Phase 1: POST /internal/jobs -> X-Correlation-Id da3f459f705c2a7af0428d7967fa311b; api.log: {\"level\":\"INFO\",\"msg\":\"api: job enqueued\",\"correlation_id\":\"da3f459f705c2a7af0428d7967fa311b\",...} and {\"msg\":\"http request completed\",...\"status\":202}; worker.log for the SAME id: {\"msg\":\"worker: job completed\",\"job_type\":\"smoke\",\"correlation_id\":\"da3f459f705c2a7af0428d7967fa311b\",\"attempt\":1} plus {\"msg\":\"post-worker smoke job\",...\"payload\":\"{\\\"ref\\\":\\\"rsg/trace-e2e\\\"}\"}. Phase 2: incoming X-Correlation-ID: trace-e2e-from-caller honoured end to end. Phase 3: Redis down -> api.log {\"level\":\"ERROR\",\"msg\":\"api: job enqueue failed\",\"correlation_id\":\"trace-e2e-redis-down\"} and structured go-redis lines {\"level\":\"WARN\",\"msg\":\"go-redis: redis: connection pool: failed to dial after 5 attempts...\",\"component\":\"go-redis\"}. Phase 4: web page fetched with X-Correlation-ID: web-trace-0001 -> the id appears in the rendered HTML, in web.log {\"msg\":\"web: status render\",\"correlation_id\":\"web-trace-0001\"}, in api.log request-completed lines for /healthz and /readyz, and in adapter.log {\"msg\": \"request completed\", \"correlation_id\": \"web-trace-0001\"}."
+    },
+    {
+      "command": "bash tests/observability/canary-sweep.sh",
+      "status": "passed",
+      "evidence": "Canaries CANARY_PLAIN=t0007-canary-9f7a3c21b5e8 and CANARY_SECRET=ghp_t0007canarya1b2c3d4e5f6 configured as real secrets (DB password, blob keys, gitea token, gitea base URL) across real processes; all paths exercised (startup config log, healthz/readyz, enqueue ok/bad json/bad type/unknown type, redis-down enqueue, config-error paths with the canary pasted into non-secret fields). Negative control first: planted raw canary -> 'sweep FAILED as expected: planted raw canary detected (the check is capable of failing)'. Real sweep: 'sweep clean: neither canary appears in any log file'. Positive masking evidence: '\"token\":\"***\"' in api.log and worker.log, '\"password\":\"***\"', '\"base_url\":\"http://gitea-user:***@127.0.0.1:3000\"', and 'has an invalid value \"***\"' in both config-error logs."
+    },
+    {
+      "command": "./ops/doctor.sh",
+      "status": "passed",
+      "evidence": "exit 0 (repository/scope health checks unchanged by this task)."
+    },
+    {
+      "command": "make smoke",
+      "status": "passed",
+      "evidence": "exit 0, 'smoke OK': api+worker smoke job completed end to end (worker completed job smoke-1, queue drained), web status page rendered live data, fail-closed config checks behaved as specified. Runs against the new JSON logging and middleware without modification."
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "Request traced end-to-end by correlation id (real API + worker log lines for the SAME id)",
+      "status": "passed",
+      "evidence": "trace-e2e.sh Phase 1 with the REAL processes and REAL log output: X-Correlation-Id da3f459f705c2a7af0428d7967fa311b echoed on the 202 response; api.log contains both {\"msg\":\"api: job enqueued\",\"correlation_id\":\"da3f459f705c2a7af0428d7967fa311b\"} and {\"msg\":\"http request completed\",\"correlation_id\":\"da3f459f705c2a7af0428d7967fa311b\",\"status\":202}; worker.log contains {\"msg\":\"worker: job completed\",\"correlation_id\":\"da3f459f705c2a7af0428d7967fa311b\"} for the job that request caused. Unit-level: cmd/api/jobs_test.go TestEnqueueJobPropagatesRequestCorrelationID asserts the queued job carries the request's id."
+    },
+    {
+      "criterion": "Canary sweep: secret/token never appears in real log output; sweep demonstrably capable of failing",
+      "status": "passed",
+      "evidence": "canary-sweep.sh configures real canaries as real secrets, exercises every real path, then greps the actual log files. Negative control (raw canary planted) makes the sweep FAIL as expected, proving capability. Real sweep finds zero hits: 'sweep clean: neither canary appears in any log file'. Masking is proven to have happened, not dropped: '\"token\":\"***\"', '\"password\":\"***\"', '\"base_url\":\"http://gitea-user:***@127.0.0.1:3000\"', 'has an invalid value \"***\"' present in the logs."
+    },
+    {
+      "criterion": "Web app and Python adapter propagate the same correlation id across their boundaries",
+      "status": "passed",
+      "evidence": "trace-e2e.sh Phase 4: page fetched with X-Correlation-ID: web-trace-0001; the SAME id appears in the rendered HTML (status panel 'Request trace: web-trace-0001'), in web.log {\"msg\":\"web: status render\",\"correlation_id\":\"web-trace-0001\"}, in api.log {\"msg\":\"http request completed\",\"correlation_id\":\"web-trace-0001\",\"method\":\"GET\",\"path\":\"/healthz\"} (server-side fetches), and in adapter.log {\"msg\": \"request completed\", \"correlation_id\": \"web-trace-0001\"}. Shared validation regex identical in all three languages (Go correlation.go, web correlation.ts, adapter correlation.py), unit-tested in each."
+    },
+    {
+      "criterion": "go-redis retry logs routed through the structured logger (T0006 defect)",
+      "status": "passed",
+      "evidence": "internal/observability.RouteRedisLogging installs a redis.SetLogger bridge; e2e Redis-down phase produced {\"time\":...,\"level\":\"WARN\",\"msg\":\"go-redis: redis: connection pool: failed to dial after 5 attempts: dial tcp 127.0.0.1:16390: connect: connection refused\",\"component\":\"go-redis\"} in worker.log. Unit tests TestRedisLogBridgeFormatsAndRedacts / TestRedisLogBridgeMasksBareTokens cover format + redaction of bridge messages."
+    },
+    {
+      "criterion": "Config redaction reused (RedactForOutput / RedactURL) — no second redactor",
+      "status": "passed",
+      "evidence": "All Go redaction sites call into internal/config: internal/observability/redislog.go uses config.RedactForOutput on bridged messages; cmd/worker/main.go smoke handler logs \"payload\", config.RedactForOutput(string(job.Payload)) (caller-controlled input); cmd/api/jobs.go redacts err.Error() in both the log line and the 503 body. internal/observability/doc.go states 'there is deliberately no second redactor in this package'. Secret-typed config fields mask structurally via their LogValue (Secret/SecretURL)."
+    },
+    {
+      "criterion": "./ops/doctor.sh and infrastructure-free checks pass",
+      "status": "passed",
+      "evidence": "./ops/doctor.sh exit 0; make smoke exit 0 ('smoke OK'); make check exit 0 with the POSTGRES_TEST_ADMIN_URL override pointing at the local conda PostgreSQL (127.0.0.1:15433); both e2e scripts run with zero external infrastructure (devredis as Redis, host-native processes)."
+    }
+  ],
+  "risks": [
+    "Worker environment blocks docker, sudo and system/package mutation (worker-guard), so G3-style evidence uses devredis + host-native processes instead of docker compose. The Supervisor should re-run make check / smoke / the two e2e scripts against real Docker infra when accepting.",
+    "make check needs PostgreSQL; the worker has no docker PG, so it ran with POSTGRES_TEST_ADMIN_URL='postgres://postgres:postgres_dev_pw@127.0.0.1:15433/postgres' against a pre-existing conda PostgreSQL 16.15 on the nonstandard port 15433. The Supervisor's canonical PG (15432) will behave identically.",
+    "POST /internal/jobs is a documented scaffold endpoint, NOT part of specs/api/openapi.yaml; it carries no product semantics and is meant to be replaced by the domain-event outbox (see follow_up_issues).",
+    "go-redis bridge lines log at WARN level so dependency chatter never reads as app errors; this is a deliberate level policy, not an error condition.",
+    "The web render line goes through Next.js server console.log (JSON-shaped); Next's stdout buffering means e2e asserts it after the page response, which is what trace-e2e does."
+  ],
+  "follow_up_issues": [
+    "Replace the POST /internal/jobs scaffold (cmd/api/jobs.go) with the domain-event outbox endpoint when the event tasks land; delete the scaffold and its comment referencing T0007 then.",
+    "Consider a request-log sampling/level policy (docs/26 note) when real traffic arrives; the middleware currently logs every completion at INFO.",
+    "Consider moving the worker's per-job correlation id attachment into internal/worker.Loop itself (it already accepts WithLogger) once event jobs define their payload schema, instead of each handler passing job.CorrelationID manually.",
+    "The scientific adapter currently matches paths exactly (scaffold behaviour); when it grows real endpoints, keep the query-string-stripping log discipline tested in test_logged_path_never_carries_the_query_string."
+  ],
+  "notes_for_supervisor": "1) The worker-guard blocked docker socket access, privilege escalation (sudo) and system package mutation, so all evidence is infrastructure-free: cmd/devredis stands in for a Redis server, everything runs host-native, and the required PostgreSQL integration tests run via the pre-existing conda PostgreSQL at 127.0.0.1:15433 through the POSTGRES_TEST_ADMIN_URL override. 2) go.mod was NOT touched (T0010 owns it); every dependency used (go-redis v9.22.0, miniredis, Next 16, stdlib Python) was already present. 3) The e2e harness was hardened after a real cross-run contamination: a leaked next-server from a previous trace-e2e run kept port 13190 and served the next run's traffic into the OLD log dir (page rendered, web.log grep failed). Both scripts now fail fast if any port is occupied (verified: exit 1 'FAIL: port 18191 already in use...') and kill whole process groups via setsid + kill -- -PID (verified: no leaked listeners after runs). 4) The middleware deliberately logs r.URL.Path and never r.URL.RawQuery, and both the adapter and the middleware reject invalid incoming correlation ids by replacing them with a fresh one — injection-shaped header values can never reach a log field."
+}
