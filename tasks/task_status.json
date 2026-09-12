@@ -93,13 +93,13 @@
       "merged_at": "2026-09-12T16:36:00Z"
     },
     "T0010": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-12T17:00:00Z",
-      "completed_at": null,
-      "notes": "Running in parallel. Owns go.mod/go.sum. Must PORT the .rddev/dispatch/ hardening (four rounds of fixes) rather than re-derive it, with two-sided regression tests for every rule.",
+      "completed_at": "2026-09-12T18:05:00Z",
+      "notes": "G2 accepted; merged as PR #38 (14b3ace) with all six CI jobs green. Supervisor verified the ported guard behaviourally (147/147 regression, and the two over-blocking cases now correctly ALLOWED), proved the nested worker is a separate process from the ps snapshot (orphaned to pid 1, no Claude ancestor), read the e2e log showing two concurrent workers in disjoint worktrees, and confirmed restart discovery from a fresh process. Supervisor interventions: regenerated specs/SPEC_VERSION.json (scope gap was mine), normalised RESULT.json into the published schema (the worker emitted its own shape - root cause is that spawn.sh never passed --json-schema; T0011 must close it), gofmt on 5 new files and fixed 4 staticcheck findings that the new T0008 gates surfaced.",
       "worker_run_id": "worker-T0010-cbeff16",
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "accepted_by_supervisor_at": "2026-09-12T18:05:00Z",
+      "merged_at": "2026-09-12T18:05:00Z"
     },
     "T0011": {
       "status": "todo",
