@@ -609,6 +609,44 @@ T0007 的 Worker 为了跑 `make check`（该命令当时仍需要一个真实�
 collect 阶段把"宿主残留"纳入检查（至少记录 Worker 启动的进程，并在 collect 时提示）。当前 guard 不
 禁止启动进程（只禁 Docker/sudo/apt），这是有意的，但"启动后不清理"必须被约束。
 
+## L1-20260912-25 — ★ T0008 的 CI workflow 是无效 YAML：合并它会让仓库**完全没有 CI**
+
+**事件**：T0008 用一个新的 `.github/workflows/ci.yml` **替换**了原有的 `spec-validation.yml`。而
+该文件**无法被 YAML 解析**——`- name: go: fmt check` 这类未加引号的"冒号+空格"被 YAML 读成分层
+mapping，于是整个 workflow 非法。GitHub 对非法 workflow 的处理**不是"检查失败"，而是根本不运行**：
+run 在 0 秒内失败。
+
+**后果（为什么这条最严重）**：该 commit 同时**删除了**原来可用的 spec-validation workflow。若照原样
+合并，仓库将**一个可运行的 CI 都没有**——而我这轮一直在执行的合并条件是"CI 全绿"。**绿灯的前提
+（CI 存在）本身消失了，而且没有任何本地检查能发现**：`scripts/ci.sh` 验证的是 workflow **所运行的
+命令**，从不验证 workflow **文档本身**。
+
+**修复**（Supervisor）：
+1. 给 27 处含 `": "` 的 step name 加引号；
+2. 新增 `scripts/validate_workflows.py`，作为 `scripts/ci.sh` 的**第一个 stage**：解析每个 workflow，
+   并校验每个 job 的 `runs-on`/`steps`/step 结构/`needs` 可解析。这是套件里**唯一**能发现该缺陷类型的
+   检查。它同时处理了 PyYAML 的 YAML 1.1 怪癖（裸 `on:` 会被解析成布尔 True，否则会对合法文件误报）。
+3. **验证**：反向种植原缺陷 → `does not parse at line 69 column 17`，exit 1；修复后 → exit 0。
+
+**随后暴露的连带问题（都是真问题，非误报）**：workflow 一旦真的运行，python stage 立刻失败——
+T0008 新引入的 ruff/mypy gate 发现了 **T0007 遗留的 6 处违规**（2 处 import 排序、3 处 RUF059 未使用
+解包变量、1 处 mypy 类型错误：`configure_request_logging(stream: object)` 与 `StreamHandler` 不兼容）。
+**选择修复而不是加 baseline**：在 gate 引入当天就把 6 处小问题 baseline 掉，等于永久削弱它。
+修复后 `go/web/python/spec-validation/task-state/migration-integration` **六个 job 全绿**。
+
+**第三条"用真实命令验证"的教训（本会话第三次）**：我用**近似**命令跑
+`ruff --fix`（在仓库根用 `ruff check services/scientific-adapter --config ops/ci/ruff.toml`），
+其配置解析与 CI 的真实命令（在 adapter 目录用 `ruff check . --config ../../ops/ci/ruff.toml`）**不同**，
+导致它**删掉了作者写的 `# noqa: N802`**（未启用该规则时 RUF100 会移除对应 noqa），并因此与 main 产生
+冲突。**必须用与 CI 完全相同的命令验证**——与 L1-20260912-18（带着红灯合并）同源。
+
+**我的第四个操作失误**：我在 T0008 分支上修 T0007 的文件，而 T0007 之后才合并进 main，导致 PR 变为
+`CONFLICTING`。冲突由我按 Supervisor 职责解决（取 main 版本 + 重跑真实命令）。
+
+**合并流程必须更新**：required check 的名字已从单一 `validate` 变为六个 job
+（`go` / `python` / `web` / `spec-validation` / `task-state` / `migration-integration`）。此后 G2/merge
+必须断言**这六个全部为 success**，不能再 grep `^validate`。
+
 ---
 
 ## 环境发现（非决策，必须显式记录）

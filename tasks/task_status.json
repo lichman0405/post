@@ -75,13 +75,13 @@
       "merged_at": "2026-09-12T17:20:00Z"
     },
     "T0008": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-12T17:00:00Z",
-      "completed_at": null,
-      "notes": "Running in parallel. Owns Makefile/.github/scripts/ops/tasks.json. Carries two REQUIRED fixes identified by the Supervisor: (1) make check must not require a live PostgreSQL - split from make test-integration which must fail loudly or skip with a printed reason (decisions.md L1-20260912-19); (2) add a DAG/state coverage check, the gap found after T0013 where a task existed in tasks.json but not in task_status.json.",
+      "completed_at": "2026-09-12T17:35:00Z",
+      "notes": "G2 accepted; merged as PR #36 (8e3a73f) with all six CI jobs green. Supervisor verified both required fixes independently: make check/make test exit 0 with NO database or Docker; make test-integration exits 2 loudly naming the address and the remedy (no silent skip); and the DAG/state coverage check fails on a mismatch the Supervisor planted itself. BUT the delivered ci.yml was INVALID YAML and had replaced spec-validation.yml, so merging as-is would have left the repo with no working CI - fixed by the Supervisor (quoting + a new scripts/validate_workflows.py gate). The workflow then ran and exposed 6 pre-existing ruff/mypy violations in T0007 code, also fixed. See decisions.md L1-20260912-25.",
       "worker_run_id": "worker-T0008-cbeff16",
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "accepted_by_supervisor_at": "2026-09-12T17:35:00Z",
+      "merged_at": "2026-09-12T17:35:00Z"
     },
     "T0009": {
       "status": "merged",

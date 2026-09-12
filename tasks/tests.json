@@ -167,9 +167,9 @@
       "name": "ci self test",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T17:35:00Z",
+      "evidence": "ci self test: Supervisor verified (a) make check and make test exit 0 with no database and no containers; (b) make test-integration with no DB exits 2 with a loud, actionable message and is NOT a silent skip; (c) validate_task_state.py fails (exit 1, \"FAIL TASKSTATE-SET\") on a mismatch the Supervisor planted and passes after restore; (d) all six CI jobs (go/web/python/spec-validation/task-state/migration-integration, the last against a real pgvector service container) green on the merged commit; (e) validate_workflows.py fails on a planted invalid workflow and passes on the fixed one."
     },
     {
       "id": "T0009-TEST-01",
