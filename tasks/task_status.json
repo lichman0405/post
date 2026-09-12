@@ -1180,6 +1180,15 @@
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null
+    },
+    "T0013": {
+      "status": "merged",
+      "started_at": "2026-09-12T15:15:00Z",
+      "completed_at": "2026-09-12T15:55:00Z",
+      "notes": "G2 accepted after independent verification: Supervisor re-ran its own original probe - the UPDATE that previously succeeded is now rejected with P0001, DELETE rejected, legitimate INSERT still succeeds, 13 row + 13 statement triggers enabled. Merged as PR #28 (eb1fc6d); its disclosed TRUNCATE gap closed by the Supervisor in PR #29 (a530fef). Residual bypass (session_replication_role / DISABLE TRIGGER) demonstrated but NOT closed; needs a restricted write role the owner did not select - decisions.md L1-20260912-21.",
+      "worker_run_id": "worker-T0013-6308664",
+      "accepted_by_supervisor_at": "2026-09-12T15:55:00Z",
+      "merged_at": "2026-09-12T15:55:00Z"
     }
   }
 }

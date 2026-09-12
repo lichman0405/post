@@ -508,6 +508,41 @@ P8（Explore/Fork/Contribution）任务的必需验收项**，由对应任务在
 与 `ready` 均 exit 1 并给出可操作错误。新增 `store_integrity_test.go`（4 种拼写的锁同一性、
 4 种 drift 形态被 Next/Inspect/Transition 拒绝、正常路径仍工作）。PR #26（`9b6ef86`）。
 
+## L1-20260912-21 — T0013 落地：触发器强制不可变，以及**实测出但未关闭**的残余绕过
+
+**背景**：owner 裁定用 DB 触发器强制版本不可变（`L2-SPEC-20260912-15`）。T0013 已实现并合并
+（PR #28，`eb1fc6d`）：13 张 append-only 表，`BEFORE UPDATE OR DELETE` 行级触发器 + 共享 guard
+函数。我用自己的原始探针复核：原先成功的
+`UPDATE scientific_object_versions SET title='REWRITTEN HISTORY'` 现在被 `P0001` 拒绝，合法
+`INSERT` 新版本行仍成功，13 个触发器在全新安装与升级路径下均 enabled。**Master Gate A 的该项
+在应用层意义上已闭合。**
+
+**T0013 Worker 主动披露的缺口**：行级触发器**不响应 `TRUNCATE`**。我已用 `00015` 补上
+statement-level `BEFORE TRUNCATE` 触发器（PR #29，`a530fef`），并验证 `TRUNCATE ... CASCADE`
+现被拒绝、未受保护的表仍可正常 truncate（即定向而非一刀切）。
+
+**我方主动攻击后实测出、且**未**关闭的残余绕过**（这一步是新规则"主动制造失败"的直接应用）：
+
+```
+SET session_replication_role = replica;   → UPDATE 1   （触发器不触发）
+ALTER TABLE ... DISABLE TRIGGER ...;      → UPDATE 1
+```
+
+**含义**：触发器强制可被**表 owner** 或任何能设置 `session_replication_role` 的角色绕过。而本栈的
+应用当前**以表 owner 身份连接**（`POST_DB_USER` 默认 `postgres`）。因此这套机制挡住的是
+**应用层的意外改写**（它的主要用途），**挡不住特权角色**。
+
+**为什么不由我关闭**：真正关闭它需要引入受限写入角色（`REVOKE UPDATE/DELETE` + 应用以非 owner
+运行），这属于**权限模型与部署形态**的变更；owner 在我给出的选项中**明确没有选择**该方案
+（选项 2/3），因此我不擅自更改权限模型，仅如实记录并上报。**待 owner 决定是否升级为纵深防御。**
+
+**同时修复的测试脆弱性**：迁移头号被硬编码（`headVersion = 14`），导致新增一个迁移就打断 3 个
+无关测试；现改为从 embedded 迁移集**推导**，不可能再过期。`assertTriggers` 也改为断言每张表的
+**两半**保护（行级 + 语句级）而非"恰好一个触发器"。
+
+**流程印证**：这次"主动尝试让 X 发生"的规则立刻产出了价值——TRUNCATE 与
+`session_replication_role` 两个绕过都不是读代码能看出来的。
+
 ---
 
 ## 环境发现（非决策，必须显式记录）
