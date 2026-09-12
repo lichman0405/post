@@ -1,0 +1,315 @@
+openapi: 3.1.0
+info:
+  title: POST API
+  version: 1.0.0-draft
+  description: >-
+    V1 semantic API. Governance-sensitive actions are explicitly separated from scientific
+    state write operations. This file is a contract seed; implementation must keep it in sync.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+paths:
+  /projects:
+    get:
+      summary: List accessible projects
+      responses:
+        '200': {description: OK}
+    post:
+      summary: Create project
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug, visibility, purpose]
+              properties:
+                name: {type: string}
+                slug: {type: string}
+                visibility: {enum: [public, private]}
+                purpose: {type: string}
+                organization_id: {type: [string, 'null']}
+      responses:
+        '201': {description: Created}
+  /projects/{projectId}:
+    get:
+      summary: Get project summary and governance state
+      parameters: [{$ref: '#/components/parameters/ProjectId'}]
+      responses:
+        '200': {description: OK}
+  /projects/{projectId}/main:freeze:
+    post:
+      summary: Freeze main; governance action
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': {description: Frozen}
+  /projects/{projectId}/branches:
+    get:
+      summary: List branches
+      parameters: [{$ref: '#/components/parameters/ProjectId'}]
+      responses:
+        '200': {description: OK}
+    post:
+      summary: Create research branch
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, base_ref, visibility]
+              properties:
+                name: {type: string}
+                base_ref: {type: string}
+                visibility: {enum: [public, private]}
+                purpose: {type: [string, 'null']}
+      responses:
+        '201': {description: Created}
+  /projects/{projectId}/branches/{branchId}/objects:
+    post:
+      summary: Create a scientific object version in a research branch
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/BranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [object_type, payload]
+              properties:
+                object_type: {type: string}
+                payload: {type: object}
+                schema_ref: {type: [string, 'null']}
+      responses:
+        '201': {description: Object version created}
+  /projects/{projectId}/branches/{branchId}/objects/{objectId}:version:
+    post:
+      summary: Create next version of an object in branch
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/BranchId'
+        - name: objectId
+          in: path
+          required: true
+          schema: {type: string}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_version, patch]
+              properties:
+                expected_version: {type: integer}
+                patch: {type: object}
+      responses:
+        '201': {description: New immutable version created}
+  /projects/{projectId}/branches/{branchId}/relations:
+    post:
+      summary: Create typed, version-pinned RSG relation
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/BranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201': {description: Relation created}
+  /projects/{projectId}/branches/{branchId}/evidence-assertions:
+    post:
+      summary: Create evidence assertion
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/BranchId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201': {description: Evidence assertion created}
+  /projects/{projectId}/branches/{branchId}/blobs:request-upload:
+    post:
+      summary: Request signed upload for a scientific-context blob
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/BranchId'
+      responses:
+        '200': {description: Upload URL and provisional blob id}
+  /projects/{projectId}/branches/{branchId}/blobs/{blobId}:finalize:
+    post:
+      summary: Finalize and attach uploaded blob to a scientific object
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/BranchId'
+        - name: blobId
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Attached}
+  /projects/{projectId}/branches/{branchId}:validate:
+    post:
+      summary: Validate branch at PR/main/release/asset gate
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/BranchId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                gate: {enum: [pr, main, release, asset]}
+      responses:
+        '200': {description: Validation report}
+  /projects/{projectId}/pull-requests:
+    get:
+      summary: List pull requests
+      parameters: [{$ref: '#/components/parameters/ProjectId'}]
+      responses:
+        '200': {description: OK}
+    post:
+      summary: Open pull request with RSG diff
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201': {description: PR opened}
+  /projects/{projectId}/pull-requests/{prId}/diff:
+    get:
+      summary: Get Research State Diff and raw file diff references
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/PrId'
+      responses:
+        '200': {description: OK}
+  /projects/{projectId}/pull-requests/{prId}/reviews:
+    post:
+      summary: Submit scientific/integrity review
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/PrId'
+      responses:
+        '201': {description: Review submitted}
+  /projects/{projectId}/pull-requests/{prId}:merge:
+    post:
+      summary: Merge approved PR into frozen main; governance action
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/PrId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': {description: Merged}
+  /projects/{projectId}/objects/{objectId}:abort-proposal:
+    post:
+      summary: Propose abort for object; main objects require PR flow
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: objectId
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '201': {description: Proposal or branch change created}
+  /projects/{projectId}/releases:
+    post:
+      summary: Create immutable release from accepted main state
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201': {description: Release created}
+  /projects/{projectId}/assets:publish-preview:
+    post:
+      summary: Build publication impact/rights preview
+      parameters: [{$ref: '#/components/parameters/ProjectId'}]
+      responses:
+        '200': {description: Preview}
+  /projects/{projectId}/assets:publish:
+    post:
+      summary: Publish approved research asset; human governance action
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201': {description: Asset version published}
+  /search:
+    post:
+      summary: Search Open R&D Network and generate evidence-backed answer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: {type: string}
+                filters: {type: object}
+      responses:
+        '200': {description: Search answer with cited entity versions}
+  /search/{searchId}:start-project:
+    post:
+      summary: Create Draft Research Context from search answer
+      parameters:
+        - name: searchId
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '201': {description: Draft project context created}
+  /assets/{assetId}:
+    get:
+      security: []
+      summary: Public/authorized asset page data
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: OK}
+  /knowledge/{knowledgeId}:
+    get:
+      security: []
+      summary: Published knowledge object plus origin/network evidence state
+      parameters:
+        - name: knowledgeId
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: OK}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 8}
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema: {type: string}
+    BranchId:
+      name: branchId
+      in: path
+      required: true
+      schema: {type: string}
+    PrId:
+      name: prId
+      in: path
+      required: true
+      schema: {type: string}

@@ -1,0 +1,34 @@
+name: SPEC_BLOCKED
+about: L2/L3 specification, architecture, security, permission, or scientific-semantic decision that cannot be guessed
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: "Use this only when autonomous development cannot safely continue without a specification/governance decision."
+  - type: input
+    id: task
+    attributes:
+      label: Task ID
+      placeholder: T0000
+    validations:
+      required: true
+  - type: textarea
+    id: conflict
+    attributes:
+      label: Blocking conflict
+      description: State the exact conflicting or missing requirements.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence / relevant specs
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options considered
+      description: List options without silently choosing a new product rule.
+    validations:
+      required: true

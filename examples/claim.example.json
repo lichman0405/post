@@ -1,0 +1,22 @@
+{
+  "id": "CLM-DEMO-001",
+  "type": "claim",
+  "version": 2,
+  "project_id": "PRJ-DEMO-MOF",
+  "branch_id": "BR-HUMIDITY-70",
+  "title": "MOF-X retains adsorption performance at 70% RH",
+  "lifecycle_state": "active",
+  "schema_ref": {"id": "claim", "version": "1.0.0"},
+  "created_by": "USR-DEMO-A",
+  "created_at": "2026-09-11T12:00:00Z",
+  "visibility_policy_id": "POL-PUBLIC-RSG",
+  "tags": ["demo", "mof", "humidity"],
+  "metadata": {},
+  "statement": "MOF-X retains at least 90% of its baseline C2H4 adsorption capacity after 24 h exposure at 70% relative humidity under the tested conditions.",
+  "claim_type": "quantitative",
+  "subject_ref": "MAT-DEMO-X@1",
+  "property": "adsorption_capacity_retention",
+  "value": {"value": 0.91, "unit": "fraction"},
+  "scope": {"temperature": {"value": 298, "unit": "K"}, "relative_humidity": {"value": 70, "unit": "%"}, "exposure": {"value": 24, "unit": "h"}},
+  "assessment": "supported"
+}

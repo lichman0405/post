@@ -1,0 +1,30 @@
+name: Bug
+about: Reproducible implementation defect discovered during autonomous development
+labels: []
+body:
+  - type: input
+    id: task
+    attributes:
+      label: Related Task ID(s)
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / acceptance criterion
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs / test evidence

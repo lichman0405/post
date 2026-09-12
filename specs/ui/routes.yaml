@@ -1,0 +1,23 @@
+version: 1
+project_tabs:
+  - overview
+  - research
+  - issues
+  - pull_requests
+  - releases
+  - assets
+  - files
+  - activity
+  - settings
+research_views:
+  default: by_question
+  supported_v1:
+    - by_question
+    - by_finding
+files:
+  mutation_allowed: false
+visual_guardrails:
+  gradients: forbidden
+  glassmorphism: forbidden
+  default_density: high
+  design_language: github_primer_like

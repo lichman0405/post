@@ -1,0 +1,22 @@
+{
+  "base_state": "STATE-DEMO-BASE",
+  "proposed_state": "STATE-DEMO-PROPOSED",
+  "summary": {
+    "objects_added": 3,
+    "objects_updated": 2,
+    "objects_aborted": 0,
+    "relations_added": 4,
+    "evidence_assertions_added": 2
+  },
+  "scientific_changes": [
+    {"kind": "add", "object": "EXP-DEMO-007@1", "type": "experiment"},
+    {"kind": "add", "object": "CLM-DEMO-001@2", "type": "claim"}
+  ],
+  "knowledge_changes": [
+    {"object": "CLM-DEMO-001", "field": "assessment", "from": "preliminary", "to": "supported"}
+  ],
+  "evidence_changes": [
+    {"relation": "supports", "from": "EXP-DEMO-007@1", "to": "CLM-DEMO-001@2"}
+  ],
+  "raw_file_diff_available": true
+}

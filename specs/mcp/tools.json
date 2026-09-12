@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "tools": [
+    {"name":"project.get","mode":"read","args":["project_id"]},
+    {"name":"project.list","mode":"read","args":["scope","cursor"]},
+    {"name":"branch.create","mode":"write","args":["project_id","base_ref","name","visibility","purpose","idempotency_key"]},
+    {"name":"branch.get","mode":"read","args":["project_id","branch_id"]},
+    {"name":"rsg.query","mode":"read","args":["project_id","state_or_branch","query"]},
+    {"name":"object.get","mode":"read","args":["object_id","version"]},
+    {"name":"object.create","mode":"write","args":["project_id","branch_id","object_type","payload","schema_ref","idempotency_key"]},
+    {"name":"object.create_version","mode":"write","args":["project_id","branch_id","object_id","expected_version","patch","idempotency_key"]},
+    {"name":"relation.create","mode":"write","args":["project_id","branch_id","type","source_version_ref","target_version_ref","metadata","idempotency_key"]},
+    {"name":"evidence.create_assertion","mode":"write","args":["project_id","branch_id","target_version_ref","evidence_version_ref","relation","scope","reasoning_note","idempotency_key"]},
+    {"name":"blob.request_upload","mode":"write","args":["project_id","branch_id","filename","size","media_type","purpose"]},
+    {"name":"blob.finalize_attach","mode":"write","args":["project_id","branch_id","blob_id","object_version_ref","attachment_role","idempotency_key"]},
+    {"name":"issue.create","mode":"write","args":["project_id","title","issue_type","body","related_refs","idempotency_key"]},
+    {"name":"pr.create","mode":"write","args":["project_id","source_branch","target_branch","title","body","idempotency_key"]},
+    {"name":"pr.diff","mode":"read","args":["project_id","pr_id"]},
+    {"name":"validation.run","mode":"read_action","args":["project_id","branch_id","gate"]},
+    {"name":"release.prepare","mode":"proposal","args":["project_id","title","notes"]},
+    {"name":"asset.publish_preview","mode":"proposal","args":["project_id","source_refs","asset_type","rights"]},
+    {"name":"knowledge.publish_preview","mode":"proposal","args":["knowledge_version_ref","rights"]},
+    {"name":"object.abort_proposal","mode":"proposal","args":["project_id","object_version_ref","reason_code","explanation"]},
+    {"name":"search.query","mode":"read","args":["query","filters"]}
+  ],
+  "forbidden_default_agent_actions": [
+    "merge_main",
+    "publish_private_to_public",
+    "change_rights_holder",
+    "delete_history",
+    "force_push_main"
+  ]
+}

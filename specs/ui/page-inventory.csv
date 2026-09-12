@@ -1,0 +1,18 @@
+route,page,auth,primary purpose,write behavior
+/,Home,optional,discovery or personal dashboard,none except navigation
+/explore,Explore,optional,discover projects/assets/knowledge/people/orgs,follow when logged in
+/search,Search Answer,optional,evidence-backed network search,start project when logged in
+/{org}/{project},Project Overview,depends visibility,summary/governance,governance only
+/{org}/{project}/research,Research Map,depends visibility,questions/findings/RSG drill-down,agent handoff only
+/{org}/{project}/issues,Issues,depends visibility,workflow,issue create/update allowed
+/{org}/{project}/pulls,Pull Requests,depends visibility,review state changes,review/merge governance
+/{org}/{project}/releases,Releases,depends visibility,immutable snapshots,create governance
+/{org}/{project}/assets,Project Assets,depends visibility,published/dependencies,publish governance
+/{org}/{project}/files,Files,depends visibility,read-only git/blob view,NO MUTATION
+/{org}/{project}/activity,Activity,depends visibility,audit/research events,none
+/{org}/{project}/settings,Settings,member/policy admins,governance,policy/member changes
+/assets/{id},Research Asset,optional if public,network asset page,reference/fork actions after login
+/knowledge/{id},Knowledge Object,optional if public,network evidence page,external contribution after login
+/{user},Research Profile,optional if public,contribution identity,profile settings for owner
+/orgs/{org},Organization Profile,optional if public,institutional research identity,admin settings separate
+/notifications,Notifications,required,research inbox,subscription actions

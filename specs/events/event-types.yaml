@@ -1,0 +1,36 @@
+version: 1
+namespace: openrd
+required_envelope_fields:
+  - event_id
+  - event_type
+  - occurred_at
+  - actor_id
+  - correlation_id
+  - visibility
+  - payload_version
+events:
+  - project.created
+  - project.visibility_changed
+  - project.main_frozen
+  - branch.created
+  - branch.aborted
+  - state.committed
+  - pull_request.opened
+  - pull_request.reviewed
+  - pull_request.merged
+  - scientific_object.version_created
+  - scientific_object.aborted
+  - scientific_object.reopened
+  - evidence_assertion.created
+  - release.published
+  - research_asset.version_published
+  - knowledge.version_published
+  - knowledge.external_evidence_added
+  - dependency.status_changed
+  - dependency.impact_detected
+  - contribution.accepted
+  - credit.dispute_opened
+  - credit.dispute_resolved
+  - rights.visibility_changed
+  - policy.version_published
+  - webhook.delivery_failed

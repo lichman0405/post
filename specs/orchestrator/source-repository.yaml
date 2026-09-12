@@ -1,0 +1,36 @@
+version: 1
+product:
+  name: POST
+  full_name: Platform for Open Science & Technology
+source_repository:
+  provider: github
+  owner: lichman0405
+  name: post
+  full_name: lichman0405/post
+  https_clone_url: https://github.com/lichman0405/post.git
+  ssh_clone_url: git@github.com:lichman0405/post.git
+  default_branch: main
+  visibility_at_package_generation: public
+  observed_at: '2026-09-12'
+  runtime_visibility_must_be_rechecked_before_first_push: true
+supervisor:
+  owns_git_control_plane: true
+  may_create_issue: true
+  may_create_branch: true
+  may_commit: true
+  may_push: true
+  may_open_pr: true
+  may_merge: true
+worker:
+  may_read_repository: true
+  may_modify_allowed_scope: true
+  may_commit: false
+  may_push: false
+  may_create_branch: false
+  may_open_pr: false
+  may_create_issue: false
+  may_merge: false
+  github_write_credentials: forbidden
+branch_convention: task/{task_id}-{slug}
+commit_convention: '{task_id}: {imperative_summary}'
+pr_title_convention: '[{task_id}] {task_title}'

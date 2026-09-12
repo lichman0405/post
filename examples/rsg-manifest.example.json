@@ -1,0 +1,13 @@
+{
+  "format_version": "1.0",
+  "project_id": "PRJ-DEMO-MOF",
+  "state_id": "STATE-DEMO-R1",
+  "generated_at": "2026-09-11T14:00:00Z",
+  "schema_refs": ["material@1.0.0", "experiment@1.0.0", "claim@1.0.0"],
+  "policy_refs": ["DEMO-ORG-POLICY@1.0"],
+  "object_versions": ["RQ-DEMO-001@1", "HYP-DEMO-001@1", "MAT-DEMO-X@1", "EXP-DEMO-007@1", "CLM-DEMO-001@2", "FND-DEMO-001@1"],
+  "relation_versions": ["REL-DEMO-001@1", "REL-DEMO-002@1"],
+  "blob_refs": [{"id": "BLB-DEMO-RAW-007", "hash": "sha256:demo"}],
+  "git_ref": {"repository_id": "GIT-DEMO-001", "commit_sha": "0123456789abcdef0123456789abcdef01234567"},
+  "state_hash": "sha256:state-demo-placeholder"
+}

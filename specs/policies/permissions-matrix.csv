@@ -1,0 +1,16 @@
+action,public_anonymous,authenticated_nonmember,viewer,contributor,maintainer,owner,agent_default
+read_public_project,allow,allow,allow,allow,allow,allow,allow
+read_private_project,deny,deny,allow,allow,allow,allow,scoped
+create_project,deny,allow,allow,allow,allow,allow,scoped
+create_branch,deny,external_fork_only,deny,allow,allow,allow,allow
+write_scientific_state,deny,own_fork_only,deny,allow,allow,allow,allow
+open_pr,deny,allow_from_fork,deny,allow,allow,allow,allow
+submit_scientific_review,deny,conditional,conditional,conditional,allow,allow,proposal_or_scoped
+merge_main,deny,deny,deny,deny,allow,allow,deny
+freeze_main,deny,deny,deny,deny,allow,allow,deny
+create_release,deny,deny,deny,deny,allow,allow,proposal_only
+publish_private_to_public,deny,deny,deny,deny,conditional,allow,deny
+change_rights_holder,deny,deny,deny,deny,deny,allow,deny
+abort_main_object,deny,deny,deny,deny,via_pr,via_pr,proposal_only
+read_files,public_policy,authorized,authorized,authorized,authorized,authorized,allow_if_authorized
+mutate_files_web,deny,deny,deny,deny,deny,deny,deny

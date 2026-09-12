@@ -1,0 +1,28 @@
+version: 1
+mode: dontAsk
+principles:
+  - worker_has_no_git_control_plane
+  - worker_has_no_remote_git_credentials
+  - worker_may_read_entire_worktree
+  - worker_writes_are_validated_against_allowed_scope
+  - supervisor_revalidates_every_result
+explicitly_denied_shell_intents:
+  - git commit
+  - git push
+  - git merge
+  - git rebase
+  - git tag
+  - git cherry-pick
+  - git branch_create_or_delete
+  - git worktree_mutation
+  - git remote_mutation
+  - gh issue/pr/release mutation
+  - gitea control-plane mutation
+  - docker system prune
+  - production deployment
+collection_invariants:
+  - HEAD must equal baseline_sha
+  - no unauthorized refs created
+  - every changed path matches allowed_scope
+  - RESULT.json validates worker-result.schema.json
+  - no secret material introduced

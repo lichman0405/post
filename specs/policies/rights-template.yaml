@@ -1,0 +1,14 @@
+version: 1
+standard_license_id: null
+custom_agreement_ref: null
+usage:
+  commercial_use: unspecified   # allowed|restricted|unspecified
+  derivatives: unspecified
+  redistribution: unspecified
+  model_training: unspecified
+  attribution: required         # required|not_required|unspecified
+  patent_grant: none            # none|see_agreement|explicit
+visibility:
+  metadata: project_policy
+  data_access: restricted       # open|restricted
+notes: null

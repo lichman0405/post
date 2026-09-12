@@ -1,0 +1,14 @@
+{
+  "id": "EA-DEMO-001",
+  "target_version_ref": "CLM-DEMO-001@2",
+  "evidence_version_ref": "EXP-DEMO-007@1",
+  "relation": "supports",
+  "evidence_type": "experimental",
+  "scope": {"temperature_K": 298, "relative_humidity_pct": 70},
+  "directness": "direct",
+  "inference_nature": "descriptive",
+  "reasoning_note": "The experiment directly measures adsorption retention after controlled humidity exposure.",
+  "review_state": "reviewed",
+  "created_by": "USR-DEMO-REVIEWER",
+  "created_at": "2026-09-11T13:00:00Z"
+}

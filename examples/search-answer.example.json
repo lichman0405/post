@@ -1,0 +1,17 @@
+{
+  "query": "哪些 MOF 在高湿环境下仍保持气体吸附性能？",
+  "answer_view": "demo only",
+  "summary": "在当前 demo network 中，MOF-X 有受审核实验支持其在 70% RH 条件下保持较高吸附性能，但机制解释仍存在竞争假设。",
+  "results": [
+    {
+      "material_ref": "MAT-DEMO-X@1",
+      "claim_ref": "CLM-DEMO-001@2",
+      "origin_assessment": "supported",
+      "network_evidence_state": "limited_external_evidence",
+      "scope": {"temperature_K": 298, "relative_humidity_pct": 70},
+      "source_refs": ["EXP-DEMO-007@1", "FND-DEMO-001@1"]
+    }
+  ],
+  "limitations": ["Demo data is synthetic and does not represent a real scientific conclusion."],
+  "can_start_research_project": true
+}

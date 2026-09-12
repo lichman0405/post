@@ -1,0 +1,35 @@
+# secrets / local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# orchestrator transient state
+.worktrees/
+.rddev/runtime/
+.rddev/logs/
+
+# Go
+/bin/
+*.test
+coverage.out
+
+# Node / Next
+node_modules/
+.next/
+out/
+coverage/
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,27 @@
+version: 1
+binary: rddev
+commands:
+  - doctor
+  - env up
+  - env down
+  - env reset
+  - env gc
+  - task next
+  - task ready
+  - task inspect
+  - task verify
+  - task accept
+  - task reject
+  - worker spawn
+  - worker list
+  - worker logs
+  - worker collect
+  - worker stop
+  - git commit
+  - pr open
+  - pr merge
+machine_output: json
+runtime_state_dir: .rddev
+parallel_workers:
+  default: 3
+  maximum: 4

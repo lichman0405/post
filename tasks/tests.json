@@ -1,0 +1,1495 @@
+{
+  "version": 2,
+  "tests": [
+    {
+      "id": "T0000-TEST-01",
+      "task_id": "T0000",
+      "name": "environment preflight unit",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0000-TEST-02",
+      "task_id": "T0000",
+      "name": "ubuntu smoke",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0001-TEST-01",
+      "task_id": "T0001",
+      "name": "spec validation unit",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0001-TEST-02",
+      "task_id": "T0001",
+      "name": "source repository remote validation",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0002-TEST-01",
+      "task_id": "T0002",
+      "name": "go build smoke",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0002-TEST-02",
+      "task_id": "T0002",
+      "name": "go test smoke",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0002-TEST-03",
+      "task_id": "T0002",
+      "name": "web typecheck",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0002-TEST-04",
+      "task_id": "T0002",
+      "name": "web lint",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0002-TEST-05",
+      "task_id": "T0002",
+      "name": "python adapter pytest smoke",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0003-TEST-01",
+      "task_id": "T0003",
+      "name": "service health integration",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0004-TEST-01",
+      "task_id": "T0004",
+      "name": "config unit",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0004-TEST-02",
+      "task_id": "T0004",
+      "name": "secret scan",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0005-TEST-01",
+      "task_id": "T0005",
+      "name": "db migration integration",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0005-TEST-02",
+      "task_id": "T0005",
+      "name": "sql generation drift",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0006-TEST-01",
+      "task_id": "T0006",
+      "name": "application smoke",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0007-TEST-01",
+      "task_id": "T0007",
+      "name": "logging integration",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0008-TEST-01",
+      "task_id": "T0008",
+      "name": "ci self test",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0009-TEST-01",
+      "task_id": "T0009",
+      "name": "rddev unit",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0009-TEST-02",
+      "task_id": "T0009",
+      "name": "task state integration",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0010-TEST-01",
+      "task_id": "T0010",
+      "name": "worktree integration",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0010-TEST-02",
+      "task_id": "T0010",
+      "name": "two-worker concurrency smoke",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0010-TEST-03",
+      "task_id": "T0010",
+      "name": "worker crash recovery",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0011-TEST-01",
+      "task_id": "T0011",
+      "name": "git control denial e2e",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0011-TEST-02",
+      "task_id": "T0011",
+      "name": "scope violation e2e",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0011-TEST-03",
+      "task_id": "T0011",
+      "name": "result schema unit",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0012-TEST-01",
+      "task_id": "T0012",
+      "name": "four-gate acceptance e2e",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0012-TEST-02",
+      "task_id": "T0012",
+      "name": "rejection/retry e2e",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0012-TEST-03",
+      "task_id": "T0012",
+      "name": "supervisor git control e2e",
+      "gate": "G1/G2",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0101-TEST-01",
+      "task_id": "T0101",
+      "name": "auth unit",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0101-TEST-02",
+      "task_id": "T0101",
+      "name": "auth e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0102-TEST-01",
+      "task_id": "T0102",
+      "name": "profile api",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0102-TEST-02",
+      "task_id": "T0102",
+      "name": "profile e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0103-TEST-01",
+      "task_id": "T0103",
+      "name": "org permission integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0104-TEST-01",
+      "task_id": "T0104",
+      "name": "project api",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0105-TEST-01",
+      "task_id": "T0105",
+      "name": "permission matrix tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0106-TEST-01",
+      "task_id": "T0106",
+      "name": "privacy negative e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0107-TEST-01",
+      "task_id": "T0107",
+      "name": "visual smoke",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0107-TEST-02",
+      "task_id": "T0107",
+      "name": "a11y smoke",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0108-TEST-01",
+      "task_id": "T0108",
+      "name": "project shell e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0109-TEST-01",
+      "task_id": "T0109",
+      "name": "settings e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0110-TEST-01",
+      "task_id": "T0110",
+      "name": "audit integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0201-TEST-01",
+      "task_id": "T0201",
+      "name": "schema unit",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0202-TEST-01",
+      "task_id": "T0202",
+      "name": "object repository integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0203-TEST-01",
+      "task_id": "T0203",
+      "name": "relation integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0204-TEST-01",
+      "task_id": "T0204",
+      "name": "state integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0205-TEST-01",
+      "task_id": "T0205",
+      "name": "branch unit/integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0206-TEST-01",
+      "task_id": "T0206",
+      "name": "golden manifest tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0207-TEST-01",
+      "task_id": "T0207",
+      "name": "validation unit/integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0208-TEST-01",
+      "task_id": "T0208",
+      "name": "object type tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0209-TEST-01",
+      "task_id": "T0209",
+      "name": "rsg query integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0210-TEST-01",
+      "task_id": "T0210",
+      "name": "object detail e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0211-TEST-01",
+      "task_id": "T0211",
+      "name": "research page e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0212-TEST-01",
+      "task_id": "T0212",
+      "name": "overview e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0213-TEST-01",
+      "task_id": "T0213",
+      "name": "schema extension integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0214-TEST-01",
+      "task_id": "T0214",
+      "name": "template creation e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0301-TEST-01",
+      "task_id": "T0301",
+      "name": "gitea integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0302-TEST-01",
+      "task_id": "T0302",
+      "name": "git protection e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0303-TEST-01",
+      "task_id": "T0303",
+      "name": "git branch integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0304-TEST-01",
+      "task_id": "T0304",
+      "name": "git auth integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0305-TEST-01",
+      "task_id": "T0305",
+      "name": "git ingestion integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0306-TEST-01",
+      "task_id": "T0306",
+      "name": "unstructured negative",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0307-TEST-01",
+      "task_id": "T0307",
+      "name": "files api",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0308-TEST-01",
+      "task_id": "T0308",
+      "name": "files read-only e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0309-TEST-01",
+      "task_id": "T0309",
+      "name": "reconciliation integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0401-TEST-01",
+      "task_id": "T0401",
+      "name": "golden diff",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0402-TEST-01",
+      "task_id": "T0402",
+      "name": "pr integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0403-TEST-01",
+      "task_id": "T0403",
+      "name": "integrity tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0404-TEST-01",
+      "task_id": "T0404",
+      "name": "review tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0405-TEST-01",
+      "task_id": "T0405",
+      "name": "conflict unit",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0406-TEST-01",
+      "task_id": "T0406",
+      "name": "merge integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0407-TEST-01",
+      "task_id": "T0407",
+      "name": "conflict e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0408-TEST-01",
+      "task_id": "T0408",
+      "name": "pr ui e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0409-TEST-01",
+      "task_id": "T0409",
+      "name": "merge governance e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0410-TEST-01",
+      "task_id": "T0410",
+      "name": "playwright pr flows",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0501-TEST-01",
+      "task_id": "T0501",
+      "name": "knowledge relation tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0502-TEST-01",
+      "task_id": "T0502",
+      "name": "claim unit",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0503-TEST-01",
+      "task_id": "T0503",
+      "name": "finding tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0504-TEST-01",
+      "task_id": "T0504",
+      "name": "evidence tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0505-TEST-01",
+      "task_id": "T0505",
+      "name": "provenance integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0506-TEST-01",
+      "task_id": "T0506",
+      "name": "evidence graph integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0507-TEST-01",
+      "task_id": "T0507",
+      "name": "graph e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0508-TEST-01",
+      "task_id": "T0508",
+      "name": "external ref tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0509-TEST-01",
+      "task_id": "T0509",
+      "name": "literature evidence negative",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0510-TEST-01",
+      "task_id": "T0510",
+      "name": "knowledge e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0601-TEST-01",
+      "task_id": "T0601",
+      "name": "freeze e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0602-TEST-01",
+      "task_id": "T0602",
+      "name": "abort tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0603-TEST-01",
+      "task_id": "T0603",
+      "name": "policy tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0604-TEST-01",
+      "task_id": "T0604",
+      "name": "review routing",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0605-TEST-01",
+      "task_id": "T0605",
+      "name": "release golden",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0606-TEST-01",
+      "task_id": "T0606",
+      "name": "release e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0607-TEST-01",
+      "task_id": "T0607",
+      "name": "activity e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0608-TEST-01",
+      "task_id": "T0608",
+      "name": "playwright release flow",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0609-TEST-01",
+      "task_id": "T0609",
+      "name": "milestone tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0701-TEST-01",
+      "task_id": "T0701",
+      "name": "asset core",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0702-TEST-01",
+      "task_id": "T0702",
+      "name": "asset validators",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0703-TEST-01",
+      "task_id": "T0703",
+      "name": "rights tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0704-TEST-01",
+      "task_id": "T0704",
+      "name": "publish preview tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0705-TEST-01",
+      "task_id": "T0705",
+      "name": "publish security e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0706-TEST-01",
+      "task_id": "T0706",
+      "name": "asset metadata tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0707-TEST-01",
+      "task_id": "T0707",
+      "name": "asset dependency tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0708-TEST-01",
+      "task_id": "T0708",
+      "name": "asset lineage",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0709-TEST-01",
+      "task_id": "T0709",
+      "name": "asset ui e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0710-TEST-01",
+      "task_id": "T0710",
+      "name": "asset canonical e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0711-TEST-01",
+      "task_id": "T0711",
+      "name": "asset governance tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0801-TEST-01",
+      "task_id": "T0801",
+      "name": "anonymous e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0802-TEST-01",
+      "task_id": "T0802",
+      "name": "explore e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0803-TEST-01",
+      "task_id": "T0803",
+      "name": "contribution opportunity tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0804-TEST-01",
+      "task_id": "T0804",
+      "name": "external fork e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0805-TEST-01",
+      "task_id": "T0805",
+      "name": "knowledge publish tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0806-TEST-01",
+      "task_id": "T0806",
+      "name": "external evidence tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0807-TEST-01",
+      "task_id": "T0807",
+      "name": "contribution projection",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0808-TEST-01",
+      "task_id": "T0808",
+      "name": "profile e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0809-TEST-01",
+      "task_id": "T0809",
+      "name": "credit dispute",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0810-TEST-01",
+      "task_id": "T0810",
+      "name": "network e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0811-TEST-01",
+      "task_id": "T0811",
+      "name": "discussion promotion e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0812-TEST-01",
+      "task_id": "T0812",
+      "name": "attestation privacy e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0901-TEST-01",
+      "task_id": "T0901",
+      "name": "search projection",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0902-TEST-01",
+      "task_id": "T0902",
+      "name": "embedding tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0903-TEST-01",
+      "task_id": "T0903",
+      "name": "planner contract",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0904-TEST-01",
+      "task_id": "T0904",
+      "name": "retrieval integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0905-TEST-01",
+      "task_id": "T0905",
+      "name": "ranking golden",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0906-TEST-01",
+      "task_id": "T0906",
+      "name": "answer grounding tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0907-TEST-01",
+      "task_id": "T0907",
+      "name": "search ui e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0908-TEST-01",
+      "task_id": "T0908",
+      "name": "start project e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1001-TEST-01",
+      "task_id": "T1001",
+      "name": "outbox integration",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1002-TEST-01",
+      "task_id": "T1002",
+      "name": "subscription tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1003-TEST-01",
+      "task_id": "T1003",
+      "name": "inbox e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1004-TEST-01",
+      "task_id": "T1004",
+      "name": "feed tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1005-TEST-01",
+      "task_id": "T1005",
+      "name": "email tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1006-TEST-01",
+      "task_id": "T1006",
+      "name": "webhook security",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1007-TEST-01",
+      "task_id": "T1007",
+      "name": "impact golden/e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1101-TEST-01",
+      "task_id": "T1101",
+      "name": "visual regression",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1102-TEST-01",
+      "task_id": "T1102",
+      "name": "research map e2e/perf",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1103-TEST-01",
+      "task_id": "T1103",
+      "name": "publish ux e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1104-TEST-01",
+      "task_id": "T1104",
+      "name": "a11y suite",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1105-TEST-01",
+      "task_id": "T1105",
+      "name": "i18n e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1106-TEST-01",
+      "task_id": "T1106",
+      "name": "security tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1107-TEST-01",
+      "task_id": "T1107",
+      "name": "privacy suite",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1108-TEST-01",
+      "task_id": "T1108",
+      "name": "perf benchmark",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1109-TEST-01",
+      "task_id": "T1109",
+      "name": "observability smoke",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1110-TEST-01",
+      "task_id": "T1110",
+      "name": "restore drill",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1201-TEST-01",
+      "task_id": "T1201",
+      "name": "seed builder",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1202-TEST-01",
+      "task_id": "T1202",
+      "name": "canonical playwright",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1203-TEST-01",
+      "task_id": "T1203",
+      "name": "deployment smoke",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1204-TEST-01",
+      "task_id": "T1204",
+      "name": "runbook drill",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1205-TEST-01",
+      "task_id": "T1205",
+      "name": "contract suite",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1206-TEST-01",
+      "task_id": "T1206",
+      "name": "master suite",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1207-TEST-01",
+      "task_id": "T1207",
+      "name": "final audit",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1208-TEST-01",
+      "task_id": "T1208",
+      "name": "project export portability e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+version: 1
+levels:
+  L0:
+    name: mechanical
+    supervisor_may_decide: true
+    adr_required: false
+  L1:
+    name: implementation
+    supervisor_may_decide: true
+    record_decision: true
+  L2:
+    name: architecture
+    supervisor_may_decide: true
+    adr_required: true
+    must_not_silently_conflict_with_accepted_adr: true
+  L3:
+    name: product_security_scientific_semantics
+    supervisor_may_decide: false
+    action: SPEC_BLOCKED

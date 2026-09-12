@@ -1,0 +1,5344 @@
+{
+  "version": 1,
+  "task_count": 131,
+  "phases": {
+    "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
+    "P1": "身份、组织与 Project Shell",
+    "P2": "RSG 核心与 Scientific Objects",
+    "P3": "Git 兼容层与只读 Files",
+    "P4": "PR、Review 与 Semantic Merge",
+    "P5": "Evidence、Knowledge 与 External References",
+    "P6": "Frozen Main、Abort、Policy 与 Release",
+    "P7": "Research Asset Hub、Rights 与 Publish",
+    "P8": "开放网络、Fork、贡献与 Research Profile",
+    "P9": "Search 与 Evidence-backed Research Answer",
+    "P10": "Research Events、订阅与 Impact Analysis",
+    "P11": "UI、安全、可访问性、性能与运维加固",
+    "P12": "Canonical Workflow 与最终交付"
+  },
+  "tasks": [
+    {
+      "id": "T0000",
+      "phase": "P0",
+      "phase_name": "Canonical 开发环境与工程脚手架",
+      "title": "Ubuntu 24.04 Canonical Environment Preflight",
+      "v1_required": true,
+      "dependencies": [],
+      "requirements": [
+        "实现/提供 Ubuntu 24.04 LTS 环境检查",
+        "检查 amd64、CPU/RAM/disk、fd limit、Git/Claude/Go/Node/pnpm/Python/uv/Docker Compose",
+        "非 canonical 环境给出明确失败或 WSL2 指引",
+        "记录 toolchain 版本，不允许 Worker 静默 major upgrade"
+      ],
+      "deliverables": [
+        "rddev doctor/preflight specification",
+        "ops bootstrap documentation"
+      ],
+      "acceptance_criteria": [
+        "Ubuntu 24.04 clean host/WSL2 可得到确定性检查结果",
+        "缺少任一关键工具时错误明确并给出修复动作",
+        "Windows Native 被标记为 unsupported canonical environment"
+      ],
+      "tests": [
+        "environment preflight unit",
+        "ubuntu smoke"
+      ],
+      "allowed_scope": [
+        "ops/**",
+        "docs/64_UBUNTU_DEV_ENV.md",
+        "cmd/rddev/**",
+        "internal/devorchestrator/**"
+      ],
+      "forbidden_scope": [
+        "product domain semantics",
+        "accepted ADR rewrites"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": []
+    },
+    {
+      "id": "T0001",
+      "phase": "P0",
+      "phase_name": "Canonical 开发环境与工程脚手架",
+      "title": "验证规格仓库与任务依赖图",
+      "v1_required": true,
+      "dependencies": [
+        "T0000"
+      ],
+      "requirements": [
+        "校验 canonical source repository：origin normalized owner/name 为 lichman0405/post、integration branch 为 main，并在首次 push 前重新读取 visibility",
+        "校验 Markdown/spec JSON/YAML 可读取",
+        "校验 tasks.json 依赖无缺失/无环",
+        "生成规格版本标记"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "remote/branch/visibility preflight 结果可审计；visibility 与 owner 预期不明确时必须 SPEC_BLOCKED，禁止首次 push",
+        "CI 中 spec-validation 通过",
+        "无 orphan dependency",
+        "将验证命令写入 scripts"
+      ],
+      "tests": [
+        "spec validation unit",
+        "source repository remote validation"
+      ],
+      "allowed_scope": [
+        "scripts/**",
+        "specs/**",
+        "tasks/**",
+        "PROJECT_REPOSITORY.md",
+        "docs/69_GITHUB_SOURCE_REPOSITORY.md",
+        "specs/orchestrator/source-repository.yaml"
+      ],
+      "forbidden_scope": [
+        "product behavior changes"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": []
+    },
+    {
+      "id": "T0002",
+      "phase": "P0",
+      "phase_name": "Canonical 开发环境与工程脚手架",
+      "title": "初始化 Go + Next.js + Python Adapter Monorepo",
+      "v1_required": true,
+      "dependencies": [
+        "T0001"
+      ],
+      "requirements": [
+        "初始化 root Go module：cmd/api,worker,mcp-server,rddev 与 internal domain/application/ports/adapters",
+        "初始化 apps/web：Next.js Active LTS + React + strict TypeScript + Primer/Octicons",
+        "初始化 services/scientific-adapter：Python 3.12+ + uv",
+        "初始化 packages/schemas,api-contracts,ui,domain-fixtures",
+        "统一 Makefile/format/lint/test/build，不使用 Turborepo 控制 Go/Python"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "根目录一条命令完成 Go/Web/Python 基础检查",
+        "Go API/Web/Python adapter 均有最小 build/smoke",
+        "不存在 TypeScript API backend placeholder",
+        "workspace/跨语言契约边界与 docs/65 一致"
+      ],
+      "tests": [
+        "go build smoke",
+        "go test smoke",
+        "web typecheck",
+        "web lint",
+        "python adapter pytest smoke"
+      ],
+      "allowed_scope": [
+        "go.mod",
+        "go.sum",
+        "cmd/**",
+        "internal/**",
+        "apps/web/**",
+        "services/scientific-adapter/**",
+        "packages/**",
+        "Makefile",
+        "package.json",
+        "pnpm-lock.yaml"
+      ],
+      "forbidden_scope": [
+        "product domain behavior beyond scaffold"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": []
+    },
+    {
+      "id": "T0003",
+      "phase": "P0",
+      "phase_name": "Canonical 开发环境与工程脚手架",
+      "title": "本地基础服务 Docker Compose",
+      "v1_required": true,
+      "dependencies": [
+        "T0002"
+      ],
+      "requirements": [
+        "Docker Compose: PostgreSQL+pgvector、Redis、MinIO、Gitea、Mailpit",
+        "healthcheck 与 named volume",
+        "一键 init bucket/Gitea service account/test organization",
+        "不要求应用本身在 dev 时运行于容器"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "docker compose up 后所有依赖 healthy",
+        "重复启动幂等",
+        "README/脚本说明完整"
+      ],
+      "tests": [
+        "service health integration"
+      ],
+      "allowed_scope": [
+        "docker-compose.yml",
+        "infra/docker/**",
+        "infra/gitea/**",
+        "ops/**",
+        "Makefile"
+      ],
+      "forbidden_scope": [
+        "production credentials"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": []
+    },
+    {
+      "id": "T0004",
+      "phase": "P0",
+      "phase_name": "Canonical 开发环境与工程脚手架",
+      "title": "配置与 Secret 管理基线",
+      "v1_required": true,
+      "dependencies": [
+        "T0002",
+        "T0003"
+      ],
+      "requirements": [
+        "Go typed config loader",
+        "Web/Python 独立 env validation",
+        "env schema/config validation",
+        "dev/test/prod config 分层",
+        ".env.example 不含 secrets"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "缺关键配置时 fail fast 且错误清晰",
+        "secret 不出现在 log/test snapshot"
+      ],
+      "tests": [
+        "config unit",
+        "secret scan"
+      ],
+      "allowed_scope": [
+        "internal/config/**",
+        "apps/web/**/config*",
+        "services/scientific-adapter/**",
+        "*.env.example",
+        "Makefile"
+      ],
+      "forbidden_scope": [
+        "real secrets"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": []
+    },
+    {
+      "id": "T0005",
+      "phase": "P0",
+      "phase_name": "Canonical 开发环境与工程脚手架",
+      "title": "数据库 migration 与 pgx/sqlc 数据访问层",
+      "v1_required": true,
+      "dependencies": [
+        "T0003"
+      ],
+      "requirements": [
+        "将 specs/database/postgres.sql 转为 forward-only migrations",
+        "Go 使用 pgx + sqlc 或等价显式强类型 SQL 方案",
+        "保留 append-only/FK/check/unique 约束",
+        "提供 transaction helper 与 test DB namespace"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "fresh DB migration 成功",
+        "upgrade/repeat migrate 安全",
+        "sqlc/generator 无 drift",
+        "关键约束 integration test 通过"
+      ],
+      "tests": [
+        "db migration integration",
+        "sql generation drift"
+      ],
+      "allowed_scope": [
+        "infra/migrations/**",
+        "internal/persistence/**",
+        "sqlc.yaml",
+        "specs/database/**",
+        "tests/integration/**"
+      ],
+      "forbidden_scope": [
+        "applied migration rewrite after release"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": []
+    },
+    {
+      "id": "T0006",
+      "phase": "P0",
+      "phase_name": "Canonical 开发环境与工程脚手架",
+      "title": "基础 Go API/Worker/MCP + Web + Python Adapter 健康检查",
+      "v1_required": true,
+      "dependencies": [
+        "T0002",
+        "T0004"
+      ],
+      "requirements": [
+        "Go api/worker/mcp 三个 binary 可启动",
+        "Next.js web 可启动并显示 dev status",
+        "Python scientific-adapter 可启动",
+        "/healthz,/readyz",
+        "worker 可消费 test job 或执行最小 job loop"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "host-native 一键启动所有 app",
+        "CI smoke 通过",
+        "不依赖 TypeScript backend"
+      ],
+      "tests": [
+        "application smoke"
+      ],
+      "allowed_scope": [
+        "cmd/**",
+        "internal/**",
+        "apps/web/**",
+        "services/scientific-adapter/**",
+        "Makefile"
+      ],
+      "forbidden_scope": [
+        "business features beyond health"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": []
+    },
+    {
+      "id": "T0007",
+      "phase": "P0",
+      "phase_name": "Canonical 开发环境与工程脚手架",
+      "title": "日志、request id 与基础 telemetry",
+      "v1_required": true,
+      "dependencies": [
+        "T0006"
+      ],
+      "requirements": [
+        "Go structured logs",
+        "request/correlation id",
+        "敏感字段 redact",
+        "background worker/job correlation",
+        "Web/Python adapter correlation propagation"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "请求跨 API→job 可追踪",
+        "token/password 不记录"
+      ],
+      "tests": [
+        "logging integration"
+      ],
+      "allowed_scope": [
+        "internal/observability/**",
+        "cmd/**",
+        "apps/web/**",
+        "services/scientific-adapter/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        "raw private data logging"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": []
+    },
+    {
+      "id": "T0008",
+      "phase": "P0",
+      "phase_name": "Canonical 开发环境与工程脚手架",
+      "title": "CI 基线与多语言 Gate",
+      "v1_required": true,
+      "dependencies": [
+        "T0002",
+        "T0005",
+        "T0006"
+      ],
+      "requirements": [
+        "CI: spec validation + Go fmt/vet/static/unit + Web lint/typecheck/unit/build + Python lint/type/pytest + migration/integration",
+        "校验 task_status/tests JSON",
+        "OpenAPI/schema generation drift check",
+        "提供 progress update helper"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "PR CI 全绿",
+        "失败 stage 明确",
+        "Ubuntu runner 与 canonical env 对齐",
+        "Supervisor 可从 task_status 恢复"
+      ],
+      "tests": [
+        "ci self test"
+      ],
+      "allowed_scope": [
+        ".github/**",
+        ".gitlab-ci.yml",
+        "Makefile",
+        "scripts/**",
+        "ops/**",
+        "tasks/**"
+      ],
+      "forbidden_scope": [
+        "production deploy"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": []
+    },
+    {
+      "id": "T0009",
+      "phase": "P0",
+      "phase_name": "Canonical 开发环境与工程脚手架",
+      "title": "实现 rddev Go CLI 与任务状态机",
+      "v1_required": true,
+      "dependencies": [
+        "T0002",
+        "T0004"
+      ],
+      "requirements": [
+        "实现 rddev doctor/env/task/worker/git/pr 命令骨架",
+        "读取 tasks.json/task_status.json 并验证合法状态转换",
+        "状态写入原子化并带 run_id",
+        "CLI 输出支持人类文本与 JSON"
+      ],
+      "deliverables": [
+        "cmd/rddev",
+        "internal/devorchestrator"
+      ],
+      "acceptance_criteria": [
+        "rddev task next 只返回 dependencies 满足的任务",
+        "非法状态转换拒绝",
+        "并发写状态不会静默覆盖",
+        "CLI help/JSON output 可测试"
+      ],
+      "tests": [
+        "rddev unit",
+        "task state integration"
+      ],
+      "allowed_scope": [
+        "cmd/rddev/**",
+        "internal/devorchestrator/**",
+        "specs/orchestrator/**",
+        "tasks/**"
+      ],
+      "forbidden_scope": [
+        "business domain implementation"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": []
+    },
+    {
+      "id": "T0010",
+      "phase": "P0",
+      "phase_name": "Canonical 开发环境与工程脚手架",
+      "title": "Worktree 与独立 Claude Code Worker 调度",
+      "v1_required": true,
+      "dependencies": [
+        "T0009"
+      ],
+      "requirements": [
+        "Supervisor-owned branch/worktree lifecycle",
+        "通过 claude -p 启动独立完整 Claude Code Worker",
+        "记录 PID/session/version/model/budget/logs/baseline SHA",
+        "默认并行 3、硬上限 4",
+        "worker crash/timeout/exit status 可恢复"
+      ],
+      "deliverables": [
+        "worker registry",
+        "prompt renderer",
+        "process manager"
+      ],
+      "acceptance_criteria": [
+        "可同时启动两个不同 task Worker 且 worktree 互不污染",
+        "Supervisor 重启后能发现 running/stale worker",
+        "Worker 不是 Claude subagent",
+        "任务完成可收集结构化 RESULT"
+      ],
+      "tests": [
+        "worktree integration",
+        "two-worker concurrency smoke",
+        "worker crash recovery"
+      ],
+      "allowed_scope": [
+        "cmd/rddev/**",
+        "internal/devorchestrator/**",
+        "specs/orchestrator/**",
+        ".rddev.example/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        "product business code"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": []
+    },
+    {
+      "id": "T0011",
+      "phase": "P0",
+      "phase_name": "Canonical 开发环境与工程脚手架",
+      "title": "Worker 权限隔离与结果收集",
+      "v1_required": true,
+      "dependencies": [
+        "T0010"
+      ],
+      "requirements": [
+        "Worker 环境剥离 GitHub/Gitea/prod credentials",
+        "Claude dontAsk + allow/deny/hooks 阻断 Git control-plane 操作",
+        "collect 校验 HEAD 等于 baseline 且无非法 ref mutation",
+        "按 allowed_scope 校验 diff",
+        "验证 RESULT.json schema"
+      ],
+      "deliverables": [
+        "worker permission policy",
+        "collect validator"
+      ],
+      "acceptance_criteria": [
+        "尝试 git commit/push/branch mutation 的测试 Worker 被阻断或最终强制 rejected",
+        "越界文件修改被 rejected",
+        "合法代码修改可正常测试和收集",
+        "Worker 不需要 Git remote credentials"
+      ],
+      "tests": [
+        "git control denial e2e",
+        "scope violation e2e",
+        "result schema unit"
+      ],
+      "allowed_scope": [
+        "cmd/rddev/**",
+        "internal/devorchestrator/**",
+        "specs/orchestrator/**",
+        ".claude/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        "production credentials"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": []
+    },
+    {
+      "id": "T0012",
+      "phase": "P0",
+      "phase_name": "Canonical 开发环境与工程脚手架",
+      "title": "Supervisor 四层验收 Gate 与自动开发闭环",
+      "v1_required": true,
+      "dependencies": [
+        "T0008",
+        "T0011"
+      ],
+      "requirements": [
+        "实现 G1/G2/G3/G4 task metadata 与执行器",
+        "Supervisor 可 accept/reject/rework/respawn worker",
+        "accepted 后仅 Supervisor 执行 commit/push/PR/merge workflow",
+        "支持 independent Review Worker",
+        "所有动作写 audit/progress/result evidence"
+      ],
+      "deliverables": [
+        "gate runner",
+        "supervisor workflow docs/tests"
+      ],
+      "acceptance_criteria": [
+        "一个示例任务可完整 Worker→G2→commit→PR 流程演练",
+        "失败 Worker 不会进入 accepted",
+        "blocking test 红灯无法 merge",
+        "Supervisor 可恢复中断 workflow"
+      ],
+      "tests": [
+        "four-gate acceptance e2e",
+        "rejection/retry e2e",
+        "supervisor git control e2e"
+      ],
+      "allowed_scope": [
+        "cmd/rddev/**",
+        "internal/devorchestrator/**",
+        "specs/orchestrator/**",
+        "tasks/**",
+        "tests/acceptance/**",
+        "docs/61_DEVELOPMENT_ORCHESTRATION.md"
+      ],
+      "forbidden_scope": [
+        "product feature implementation"
+      ],
+      "decision_level_max": "L2",
+      "relevant_specs": []
+    },
+    {
+      "id": "T0101",
+      "phase": "P1",
+      "phase_name": "身份、组织与 Project Shell",
+      "title": "用户认证与 session",
+      "v1_required": true,
+      "dependencies": [
+        "T0012"
+      ],
+      "requirements": [
+        "实现安全登录与 session",
+        "支持 email + 至少一个 OAuth/OIDC adapter",
+        "CSRF/secure cookie/rate limit 基础"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "未认证写 API 401",
+        "登录/退出 E2E",
+        "账号枚举防护"
+      ],
+      "tests": [
+        "auth unit",
+        "auth e2e"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/authz/**",
+        "internal/persistence/**",
+        "apps/web/**",
+        "packages/api-contracts/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0102",
+      "phase": "P1",
+      "phase_name": "身份、组织与 Project Shell",
+      "title": "Research Profile 基础",
+      "v1_required": true,
+      "dependencies": [
+        "T0101"
+      ],
+      "requirements": [
+        "handle/display name/bio/公开 profile",
+        "公开/私有字段区分",
+        "profile URL 稳定"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "未登录可读公开 profile",
+        "用户只能改自己可编辑字段"
+      ],
+      "tests": [
+        "profile api",
+        "profile e2e"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/authz/**",
+        "internal/persistence/**",
+        "apps/web/**",
+        "packages/api-contracts/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0103",
+      "phase": "P1",
+      "phase_name": "身份、组织与 Project Shell",
+      "title": "Organization 创建与成员关系",
+      "v1_required": true,
+      "dependencies": [
+        "T0101"
+      ],
+      "requirements": [
+        "org CRUD governance",
+        "membership role",
+        "affiliation 时间与 verified 字段"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Owner 可邀请/调整 role",
+        "普通成员不能提升自己",
+        "离职不删除历史"
+      ],
+      "tests": [
+        "org permission integration"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/authz/**",
+        "internal/persistence/**",
+        "apps/web/**",
+        "packages/api-contracts/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0104",
+      "phase": "P1",
+      "phase_name": "身份、组织与 Project Shell",
+      "title": "Project 创建与 Purpose/Program",
+      "v1_required": true,
+      "dependencies": [
+        "T0103"
+      ],
+      "requirements": [
+        "Public/Private preset",
+        "purpose 与可选 program",
+        "创建者成为 owner",
+        "provision pending 状态"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Project 创建成功且 visibility 正确",
+        "slug conflict 清晰"
+      ],
+      "tests": [
+        "project api"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/authz/**",
+        "internal/persistence/**",
+        "apps/web/**",
+        "packages/api-contracts/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0105",
+      "phase": "P1",
+      "phase_name": "身份、组织与 Project Shell",
+      "title": "Project 成员权限框架",
+      "v1_required": true,
+      "dependencies": [
+        "T0104"
+      ],
+      "requirements": [
+        "Owner/Maintainer/Contributor/Viewer server-side auth",
+        "default deny policy engine interface"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "权限矩阵核心动作与 CSV 一致",
+        "前端隐藏不代替后端拒绝"
+      ],
+      "tests": [
+        "permission matrix tests"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/authz/**",
+        "internal/persistence/**",
+        "apps/web/**",
+        "packages/api-contracts/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0106",
+      "phase": "P1",
+      "phase_name": "身份、组织与 Project Shell",
+      "title": "Public/Private 读取隔离",
+      "v1_required": true,
+      "dependencies": [
+        "T0104",
+        "T0105"
+      ],
+      "requirements": [
+        "匿名可读 public project shell",
+        "private project 对未授权返回不泄漏式 404/403 policy",
+        "列表过滤"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "匿名搜索/list 不出现 private",
+        "直接猜 ID 不泄漏 metadata"
+      ],
+      "tests": [
+        "privacy negative e2e"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/authz/**",
+        "internal/persistence/**",
+        "apps/web/**",
+        "packages/api-contracts/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0107",
+      "phase": "P1",
+      "phase_name": "身份、组织与 Project Shell",
+      "title": "全局 GitHub-style 导航与 Layout",
+      "v1_required": true,
+      "dependencies": [
+        "T0102",
+        "T0104"
+      ],
+      "requirements": [
+        "Primer 风格 header/nav",
+        "Home/Explore/Search/Projects/Assets/People/Organizations/Notifications",
+        "responsive 基线"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "无渐变紫/玻璃拟态",
+        "键盘可达",
+        "桌面信息密度符合 06_UI_UX_SPEC"
+      ],
+      "tests": [
+        "visual smoke",
+        "a11y smoke"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/authz/**",
+        "internal/persistence/**",
+        "apps/web/**",
+        "packages/api-contracts/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0108",
+      "phase": "P1",
+      "phase_name": "身份、组织与 Project Shell",
+      "title": "Project Shell 与 tabs",
+      "v1_required": true,
+      "dependencies": [
+        "T0104",
+        "T0107"
+      ],
+      "requirements": [
+        "Overview/Research/Issues/PR/Releases/Assets/Files/Activity/Settings tabs",
+        "visibility/frozen badge",
+        "permission-aware settings"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "所有 route 可导航",
+        "private unauthorized 不渲染 shell"
+      ],
+      "tests": [
+        "project shell e2e"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/authz/**",
+        "internal/persistence/**",
+        "apps/web/**",
+        "packages/api-contracts/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0109",
+      "phase": "P1",
+      "phase_name": "身份、组织与 Project Shell",
+      "title": "Project Settings 与成员管理 UI",
+      "v1_required": true,
+      "dependencies": [
+        "T0105",
+        "T0108"
+      ],
+      "requirements": [
+        "member list/role changes",
+        "visibility setting 仅预览，publishing guard 后续增强",
+        "project purpose/activity status"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "viewer 无 settings",
+        "owner/maintainer 动作有 audit placeholder"
+      ],
+      "tests": [
+        "settings e2e"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/authz/**",
+        "internal/persistence/**",
+        "apps/web/**",
+        "packages/api-contracts/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0110",
+      "phase": "P1",
+      "phase_name": "身份、组织与 Project Shell",
+      "title": "基础 Audit Log",
+      "v1_required": true,
+      "dependencies": [
+        "T0105"
+      ],
+      "requirements": [
+        "记录 auth/governance/member/project visibility/action",
+        "append-only repository",
+        "Activity page 基础查询"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "高风险动作有 actor/via/request id",
+        "无 update/delete audit endpoint"
+      ],
+      "tests": [
+        "audit integration"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/authz/**",
+        "internal/persistence/**",
+        "apps/web/**",
+        "packages/api-contracts/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0201",
+      "phase": "P2",
+      "phase_name": "RSG 核心与 Scientific Objects",
+      "title": "Core Scientific Object Schema registry",
+      "v1_required": true,
+      "dependencies": [
+        "T0005",
+        "T0105"
+      ],
+      "requirements": [
+        "加载 JSON schemas",
+        "schema id/version registry",
+        "validation service",
+        "旧版本不被覆盖"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "所有 V1 schema 可 validate",
+        "未知 schema 明确失败或 namespaced extension path"
+      ],
+      "tests": [
+        "schema unit"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "packages/schemas/**",
+        "specs/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0202",
+      "phase": "P2",
+      "phase_name": "RSG 核心与 Scientific Objects",
+      "title": "Scientific Object immutable version repository",
+      "v1_required": true,
+      "dependencies": [
+        "T0201"
+      ],
+      "requirements": [
+        "create object + v1",
+        "create next version with expected_version",
+        "版本不可更新 payload"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "并发 expected version 冲突返回稳定 code",
+        "旧版本内容保持不变"
+      ],
+      "tests": [
+        "object repository integration"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "packages/schemas/**",
+        "specs/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0203",
+      "phase": "P2",
+      "phase_name": "RSG 核心与 Scientific Objects",
+      "title": "Typed Relation repository",
+      "v1_required": true,
+      "dependencies": [
+        "T0202"
+      ],
+      "requirements": [
+        "version-pinned source/target",
+        "relation type catalog validation",
+        "relation immutable version"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "禁止引用不存在版本",
+        "dependency/provenance type 可查询"
+      ],
+      "tests": [
+        "relation integration"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "packages/schemas/**",
+        "specs/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0204",
+      "phase": "P2",
+      "phase_name": "RSG 核心与 Scientific Objects",
+      "title": "Project State 与 State Commit",
+      "v1_required": true,
+      "dependencies": [
+        "T0202",
+        "T0203"
+      ],
+      "requirements": [
+        "state snapshots/projections",
+        "state commit actor/via/message/operations",
+        "parent state",
+        "transaction boundary"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "每次 semantic write 形成可追溯 state transition",
+        "失败 transaction 不产生半状态"
+      ],
+      "tests": [
+        "state integration"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "packages/schemas/**",
+        "specs/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0205",
+      "phase": "P2",
+      "phase_name": "RSG 核心与 Scientific Objects",
+      "title": "Research Branch Domain",
+      "v1_required": true,
+      "dependencies": [
+        "T0204"
+      ],
+      "requirements": [
+        "branch from base state",
+        "public/private visibility",
+        "branch lifecycle",
+        "current head state"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "branch head 可独立演化",
+        "main 与 branch state 不混淆"
+      ],
+      "tests": [
+        "branch unit/integration"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "packages/schemas/**",
+        "specs/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0206",
+      "phase": "P2",
+      "phase_name": "RSG 核心与 Scientific Objects",
+      "title": "RSG Manifest 导出与 hash",
+      "v1_required": true,
+      "dependencies": [
+        "T0204"
+      ],
+      "requirements": [
+        "canonical serialization",
+        "stable ordering",
+        "object/relation/blob/git refs",
+        "state hash"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "同一 state 多次导出 hash 相同",
+        "任何 semantic change 改变 hash"
+      ],
+      "tests": [
+        "golden manifest tests"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "packages/schemas/**",
+        "specs/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0207",
+      "phase": "P2",
+      "phase_name": "RSG 核心与 Scientific Objects",
+      "title": "Progressive Validation Gates",
+      "v1_required": true,
+      "dependencies": [
+        "T0201",
+        "T0204"
+      ],
+      "requirements": [
+        "draft/pr/main/release/asset gate",
+        "required field/provenance/schema checks",
+        "warning vs blocking"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "不同 gate 严格度不同且可解释",
+        "command 再次 server validate"
+      ],
+      "tests": [
+        "validation unit/integration"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "packages/schemas/**",
+        "specs/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0208",
+      "phase": "P2",
+      "phase_name": "RSG 核心与 Scientific Objects",
+      "title": "V1 Scientific Object Domain Services",
+      "v1_required": true,
+      "dependencies": [
+        "T0202",
+        "T0205"
+      ],
+      "requirements": [
+        "ResearchQuestion/Hypothesis/Material/Sample/Experiment/Calculation/Dataset/Protocol/Claim/Finding/ExternalReference create/version commands",
+        "domain-specific semantic checks"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "每类对象 API+service 可创建版本",
+        "Claim atomicity只做提示不硬 NLP 判断"
+      ],
+      "tests": [
+        "object type tests"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "packages/schemas/**",
+        "specs/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0209",
+      "phase": "P2",
+      "phase_name": "RSG 核心与 Scientific Objects",
+      "title": "RSG Query API",
+      "v1_required": true,
+      "dependencies": [
+        "T0203",
+        "T0205"
+      ],
+      "requirements": [
+        "按 type/relation/question/finding/material 查询",
+        "recursive relation traversal 限深",
+        "permission-aware"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "查询可返回 state-specific graph slice",
+        "private relation 不泄漏"
+      ],
+      "tests": [
+        "rsg query integration"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "packages/schemas/**",
+        "specs/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0210",
+      "phase": "P2",
+      "phase_name": "RSG 核心与 Scientific Objects",
+      "title": "Scientific Object Detail UI",
+      "v1_required": true,
+      "dependencies": [
+        "T0208",
+        "T0108"
+      ],
+      "requirements": [
+        "object header/id/version/state",
+        "metadata/relations/history placeholder/files/evidence tabs",
+        "Work with Agent CTA"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "对象版本可切换",
+        "无 web scientific edit form"
+      ],
+      "tests": [
+        "object detail e2e"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "packages/schemas/**",
+        "specs/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0211",
+      "phase": "P2",
+      "phase_name": "RSG 核心与 Scientific Objects",
+      "title": "Research Outline 与基础 Research 页面",
+      "v1_required": true,
+      "dependencies": [
+        "T0209",
+        "T0210"
+      ],
+      "requirements": [
+        "按 Research Question/Findings 聚合 outline",
+        "对象 counts 只作辅助",
+        "list fallback"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "默认不是 files/type dump",
+        "可从 question drill-down"
+      ],
+      "tests": [
+        "research page e2e"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "packages/schemas/**",
+        "specs/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0212",
+      "phase": "P2",
+      "phase_name": "RSG 核心与 Scientific Objects",
+      "title": "Project Overview Research Summary",
+      "v1_required": true,
+      "dependencies": [
+        "T0211"
+      ],
+      "requirements": [
+        "key questions/findings/active branches/needs attention/current main",
+        "empty state 引导 agent/project start"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "首屏可理解项目在做什么",
+        "不展示文件树为主内容"
+      ],
+      "tests": [
+        "overview e2e"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "packages/schemas/**",
+        "specs/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0213",
+      "phase": "P2",
+      "phase_name": "RSG 核心与 Scientific Objects",
+      "title": "Project Schema Extension 与 Custom Metadata",
+      "v1_required": true,
+      "dependencies": [
+        "T0201",
+        "T0208"
+      ],
+      "requirements": [
+        "允许 Project 注册 namespaced schema profile 扩展官方 base schema",
+        "Custom metadata 永远有逃生口",
+        "schema 版本化且旧 object version 固定 schema ref"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "用户可为 Experiment 添加项目专用字段而不改平台 core",
+        "schema v2 不使 v1 历史失效"
+      ],
+      "tests": [
+        "schema extension integration"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "packages/schemas/**",
+        "specs/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0214",
+      "phase": "P2",
+      "phase_name": "RSG 核心与 Scientific Objects",
+      "title": "官方材料研发 Project Templates",
+      "v1_required": true,
+      "dependencies": [
+        "T0213",
+        "T0211"
+      ],
+      "requirements": [
+        "实现 Materials Discovery/Computational Screening/Experimental Validation/Paper Reproduction/Dataset Construction/Benchmarking 模板",
+        "模板只初始化 project/schema/review/map 默认，不永久控制项目",
+        "记录 template id/version"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "用户可从模板创建 Project",
+        "创建后可独立演化",
+        "模板升级不会自动改已有项目"
+      ],
+      "tests": [
+        "template creation e2e"
+      ],
+      "allowed_scope": [
+        "cmd/api/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "packages/schemas/**",
+        "specs/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0301",
+      "phase": "P3",
+      "phase_name": "Git 兼容层与只读 Files",
+      "title": "Gitea adapter 与 repo provisioning",
+      "v1_required": true,
+      "dependencies": [
+        "T0104",
+        "T0003"
+      ],
+      "requirements": [
+        "GitPort interface",
+        "project→repo 1:1",
+        "service account",
+        "webhook secret"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "新 Project 可 provision repo",
+        "domain 不引用 Gitea DB"
+      ],
+      "tests": [
+        "gitea integration"
+      ],
+      "allowed_scope": [
+        "internal/gitprovider/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "infra/gitea/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0302",
+      "phase": "P3",
+      "phase_name": "Git 兼容层与只读 Files",
+      "title": "Git main 双层保护",
+      "v1_required": true,
+      "dependencies": [
+        "T0301",
+        "T0205"
+      ],
+      "requirements": [
+        "Gitea protected branch",
+        "platform ref guard",
+        "禁止 force/direct push"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "owner 使用 Git 也无法 direct push main",
+        "平台 merge service 可受控写"
+      ],
+      "tests": [
+        "git protection e2e"
+      ],
+      "allowed_scope": [
+        "internal/gitprovider/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "infra/gitea/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0303",
+      "phase": "P3",
+      "phase_name": "Git 兼容层与只读 Files",
+      "title": "Branch Git ref 同步",
+      "v1_required": true,
+      "dependencies": [
+        "T0301",
+        "T0205"
+      ],
+      "requirements": [
+        "Research Branch 创建对应 Git ref",
+        "branch abort/merge ref strategy",
+        "mapping table"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "semantic branch 与 Git ref 一致"
+      ],
+      "tests": [
+        "git branch integration"
+      ],
+      "allowed_scope": [
+        "internal/gitprovider/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "infra/gitea/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0304",
+      "phase": "P3",
+      "phase_name": "Git 兼容层与只读 Files",
+      "title": "Git 用户认证/PAT/SSH key 基础",
+      "v1_required": true,
+      "dependencies": [
+        "T0101",
+        "T0301"
+      ],
+      "requirements": [
+        "scoped git token 或 SSH key",
+        "revocation",
+        "repo access mapping"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "无权限用户 clone private 失败",
+        "token revoke 生效"
+      ],
+      "tests": [
+        "git auth integration"
+      ],
+      "allowed_scope": [
+        "internal/gitprovider/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "infra/gitea/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0305",
+      "phase": "P3",
+      "phase_name": "Git 兼容层与只读 Files",
+      "title": "Push Webhook 与 Semantic Ingestion",
+      "v1_required": true,
+      "dependencies": [
+        "T0303"
+      ],
+      "requirements": [
+        "push event 验签",
+        "inspect changed manifests/files",
+        "候选 semantic diff",
+        "idempotent duplicate webhook"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "branch push 被 ingest",
+        "重复 webhook 不重复 state"
+      ],
+      "tests": [
+        "git ingestion integration"
+      ],
+      "allowed_scope": [
+        "internal/gitprovider/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "infra/gitea/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0306",
+      "phase": "P3",
+      "phase_name": "Git 兼容层与只读 Files",
+      "title": "Unstructured Change 状态",
+      "v1_required": true,
+      "dependencies": [
+        "T0305"
+      ],
+      "requirements": [
+        "无法解析文件可保留",
+        "branch semantic completeness flag",
+        "PR gate 阻止不完整 state"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "任意文件 push 不丢失",
+        "但不可绕过 semantic validation merge"
+      ],
+      "tests": [
+        "unstructured negative"
+      ],
+      "allowed_scope": [
+        "internal/gitprovider/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "infra/gitea/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0307",
+      "phase": "P3",
+      "phase_name": "Git 兼容层与只读 Files",
+      "title": "Files Tree/Preview API",
+      "v1_required": true,
+      "dependencies": [
+        "T0301",
+        "T0304"
+      ],
+      "requirements": [
+        "read git tree/file/history",
+        "blob pointer display",
+        "permission filter",
+        "safe preview"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Files API 无 mutation method",
+        "private blob metadata 不泄漏"
+      ],
+      "tests": [
+        "files api"
+      ],
+      "allowed_scope": [
+        "internal/gitprovider/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "infra/gitea/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0308",
+      "phase": "P3",
+      "phase_name": "Git 兼容层与只读 Files",
+      "title": "只读 Files Web UI",
+      "v1_required": true,
+      "dependencies": [
+        "T0307",
+        "T0108"
+      ],
+      "requirements": [
+        "tree/preview/history/download/context sidebar",
+        "无 edit/upload/delete UI",
+        "raw diff link"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "DOM/E2E 断言无 mutation controls",
+        "可跳到 Scientific Context"
+      ],
+      "tests": [
+        "files read-only e2e"
+      ],
+      "allowed_scope": [
+        "internal/gitprovider/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "infra/gitea/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0309",
+      "phase": "P3",
+      "phase_name": "Git 兼容层与只读 Files",
+      "title": "Git ↔ RSG reconciliation",
+      "v1_required": true,
+      "dependencies": [
+        "T0305",
+        "T0206"
+      ],
+      "requirements": [
+        "定时校验 branch ref/state hash/mapping",
+        "drift alert",
+        "repair proposal 不静默修"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "测试构造 drift 可检测",
+        "产生高严重 alert/audit"
+      ],
+      "tests": [
+        "reconciliation integration"
+      ],
+      "allowed_scope": [
+        "internal/gitprovider/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "infra/gitea/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0401",
+      "phase": "P4",
+      "phase_name": "PR、Review 与 Semantic Merge",
+      "title": "Research State Diff 引擎",
+      "v1_required": true,
+      "dependencies": [
+        "T0206"
+      ],
+      "requirements": [
+        "base/source/target object+relation diff",
+        "scientific summary categories",
+        "file diff refs"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "能稳定列出 create/update/abort/relation changes",
+        "golden diff 可重复"
+      ],
+      "tests": [
+        "golden diff"
+      ],
+      "allowed_scope": [
+        "internal/rsg/**",
+        "internal/application/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0402",
+      "phase": "P4",
+      "phase_name": "PR、Review 与 Semantic Merge",
+      "title": "Pull Request Domain",
+      "v1_required": true,
+      "dependencies": [
+        "T0401",
+        "T0207"
+      ],
+      "requirements": [
+        "open/close/review state",
+        "base/proposed state fixed",
+        "number per project"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "PR base 不随 main 漂移",
+        "head update 可显式 refresh"
+      ],
+      "tests": [
+        "pr integration"
+      ],
+      "allowed_scope": [
+        "internal/rsg/**",
+        "internal/application/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0403",
+      "phase": "P4",
+      "phase_name": "PR、Review 与 Semantic Merge",
+      "title": "Integrity Review Checks",
+      "v1_required": true,
+      "dependencies": [
+        "T0402"
+      ],
+      "requirements": [
+        "schema/provenance/dependency/rights/visibility/blob integrity checks",
+        "machine results"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "blocking/warning 区分",
+        "PR 页面可读"
+      ],
+      "tests": [
+        "integrity tests"
+      ],
+      "allowed_scope": [
+        "internal/rsg/**",
+        "internal/application/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0404",
+      "phase": "P4",
+      "phase_name": "PR、Review 与 Semantic Merge",
+      "title": "Scientific Review 模型",
+      "v1_required": true,
+      "dependencies": [
+        "T0402",
+        "T0105"
+      ],
+      "requirements": [
+        "scientific/integrity review 分维度",
+        "reviewer responsibility hook",
+        "changes_requested/approved/comment"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "一人不同 review kind 可记录",
+        "权限正确"
+      ],
+      "tests": [
+        "review tests"
+      ],
+      "allowed_scope": [
+        "internal/rsg/**",
+        "internal/application/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0405",
+      "phase": "P4",
+      "phase_name": "PR、Review 与 Semantic Merge",
+      "title": "Semantic Conflict Detector",
+      "v1_required": true,
+      "dependencies": [
+        "T0401"
+      ],
+      "requirements": [
+        "attribute/identity/relation/schema/knowledge/rights/dependency conflict 分类",
+        "safe changes 标 auto_mergeable"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Protocol 同字段不同值识别 scientific conflict",
+        "append evidence 不误判文本 conflict"
+      ],
+      "tests": [
+        "conflict unit"
+      ],
+      "allowed_scope": [
+        "internal/rsg/**",
+        "internal/application/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0406",
+      "phase": "P4",
+      "phase_name": "PR、Review 与 Semantic Merge",
+      "title": "Semantic Merge Engine",
+      "v1_required": true,
+      "dependencies": [
+        "T0405",
+        "T0404"
+      ],
+      "requirements": [
+        "three-way merge non-conflicting object/relations",
+        "human resolution plan input",
+        "transaction + Git update saga"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "safe merge 结果 deterministic",
+        "科学冲突不自动 winner"
+      ],
+      "tests": [
+        "merge integration"
+      ],
+      "allowed_scope": [
+        "internal/rsg/**",
+        "internal/application/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0407",
+      "phase": "P4",
+      "phase_name": "PR、Review 与 Semantic Merge",
+      "title": "Scientific Conflict Resolution UI",
+      "v1_required": true,
+      "dependencies": [
+        "T0405",
+        "T0108"
+      ],
+      "requirements": [
+        "base/A/B/evidence context",
+        "Accept A/B/Keep Both/Create Validation Branch/Unresolved options",
+        "agent explanation 仅建议"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "用户可明确处理冲突",
+        "不存在自动平均参数"
+      ],
+      "tests": [
+        "conflict e2e"
+      ],
+      "allowed_scope": [
+        "internal/rsg/**",
+        "internal/application/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0408",
+      "phase": "P4",
+      "phase_name": "PR、Review 与 Semantic Merge",
+      "title": "PR Research Diff UI",
+      "v1_required": true,
+      "dependencies": [
+        "T0401",
+        "T0403",
+        "T0404"
+      ],
+      "requirements": [
+        "Summary/Scientific changes/Knowledge changes/Evidence/Checks/Raw Files tabs",
+        "review controls"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "默认首屏非 raw diff",
+        "重要风险明显"
+      ],
+      "tests": [
+        "pr ui e2e"
+      ],
+      "allowed_scope": [
+        "internal/rsg/**",
+        "internal/application/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0409",
+      "phase": "P4",
+      "phase_name": "PR、Review 与 Semantic Merge",
+      "title": "Merge Governance 与 frozen main 更新",
+      "v1_required": true,
+      "dependencies": [
+        "T0406",
+        "T0302"
+      ],
+      "requirements": [
+        "仅 maintainer/owner + reviews/policy pass",
+        "platform service Git merge/ref",
+        "new accepted RSG state"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "main direct write 仍禁止",
+        "merge event/audit/contribution 产生"
+      ],
+      "tests": [
+        "merge governance e2e"
+      ],
+      "allowed_scope": [
+        "internal/rsg/**",
+        "internal/application/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0410",
+      "phase": "P4",
+      "phase_name": "PR、Review 与 Semantic Merge",
+      "title": "PR/Branch 完整 E2E",
+      "v1_required": true,
+      "dependencies": [
+        "T0409"
+      ],
+      "requirements": [
+        "seed branch create→objects→PR→review→merge",
+        "另一条 scientific conflict flow"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "两条 E2E 在 CI 稳定通过"
+      ],
+      "tests": [
+        "playwright pr flows"
+      ],
+      "allowed_scope": [
+        "internal/rsg/**",
+        "internal/application/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0501",
+      "phase": "P5",
+      "phase_name": "Evidence、Knowledge 与 External References",
+      "title": "Research Question 与 Hypothesis 关系模型",
+      "v1_required": true,
+      "dependencies": [
+        "T0208"
+      ],
+      "requirements": [
+        "subquestions",
+        "addresses/tests relations",
+        "hypothesis assessment 非 Issue state"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Issue close 不改变 question state"
+      ],
+      "tests": [
+        "knowledge relation tests"
+      ],
+      "allowed_scope": [
+        "internal/evidence/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0502",
+      "phase": "P5",
+      "phase_name": "Evidence、Knowledge 与 External References",
+      "title": "Claim 结构与 scope",
+      "v1_required": true,
+      "dependencies": [
+        "T0208"
+      ],
+      "requirements": [
+        "claim type",
+        "subject/property/value/scope",
+        "causal claim basis field",
+        "assessment"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "quantitative scope 可结构化",
+        "causal 无 basis 产生 validation warning"
+      ],
+      "tests": [
+        "claim unit"
+      ],
+      "allowed_scope": [
+        "internal/evidence/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0503",
+      "phase": "P5",
+      "phase_name": "Evidence、Knowledge 与 External References",
+      "title": "Finding 聚合模型",
+      "v1_required": true,
+      "dependencies": [
+        "T0502"
+      ],
+      "requirements": [
+        "Finding 引用固定 Claim versions",
+        "assessment/status",
+        "negative finding"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Claim 后续新版本不静默改变旧 Finding"
+      ],
+      "tests": [
+        "finding tests"
+      ],
+      "allowed_scope": [
+        "internal/evidence/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0504",
+      "phase": "P5",
+      "phase_name": "Evidence、Knowledge 与 External References",
+      "title": "Evidence Assertion Domain",
+      "v1_required": true,
+      "dependencies": [
+        "T0203",
+        "T0502"
+      ],
+      "requirements": [
+        "9种 relation",
+        "scope/directness/inference/review",
+        "version pin"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "支持与反驳可同时存在",
+        "不生成 Truth Score"
+      ],
+      "tests": [
+        "evidence tests"
+      ],
+      "allowed_scope": [
+        "internal/evidence/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0505",
+      "phase": "P5",
+      "phase_name": "Evidence、Knowledge 与 External References",
+      "title": "Provenance Graph Projection",
+      "v1_required": true,
+      "dependencies": [
+        "T0203"
+      ],
+      "requirements": [
+        "uses/produces/derived/follows etc traversal",
+        "lineage view",
+        "impact hooks"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "可回答 Dataset 从哪来",
+        "graph list/JSON 输出"
+      ],
+      "tests": [
+        "provenance integration"
+      ],
+      "allowed_scope": [
+        "internal/evidence/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0506",
+      "phase": "P5",
+      "phase_name": "Evidence、Knowledge 与 External References",
+      "title": "Evidence Graph Projection",
+      "v1_required": true,
+      "dependencies": [
+        "T0504"
+      ],
+      "requirements": [
+        "Claim/Hypothesis→evidence grouping",
+        "origin/external placeholder",
+        "conflicting evidence"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "可回答为什么相信/质疑",
+        "与 provenance API 分开"
+      ],
+      "tests": [
+        "evidence graph integration"
+      ],
+      "allowed_scope": [
+        "internal/evidence/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0507",
+      "phase": "P5",
+      "phase_name": "Evidence、Knowledge 与 External References",
+      "title": "Evidence/Provenance UI",
+      "v1_required": true,
+      "dependencies": [
+        "T0505",
+        "T0506",
+        "T0210"
+      ],
+      "requirements": [
+        "Object detail 两类 graph/tab",
+        "list fallback",
+        "relation semantics label"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "用户不把两图混淆",
+        "a11y list 可访问"
+      ],
+      "tests": [
+        "graph e2e"
+      ],
+      "allowed_scope": [
+        "internal/evidence/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0508",
+      "phase": "P5",
+      "phase_name": "Evidence、Knowledge 与 External References",
+      "title": "External Reference live identity + snapshot",
+      "v1_required": true,
+      "dependencies": [
+        "T0208"
+      ],
+      "requirements": [
+        "external id uniqueness",
+        "snapshot metadata/hash/accessed_at",
+        "manual refresh adapter",
+        "citation/dependency relations"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "旧 snapshot 固定",
+        "upstream refresh 不改历史"
+      ],
+      "tests": [
+        "external ref tests"
+      ],
+      "allowed_scope": [
+        "internal/evidence/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0509",
+      "phase": "P5",
+      "phase_name": "Evidence、Knowledge 与 External References",
+      "title": "Literature evidence extraction data model",
+      "v1_required": true,
+      "dependencies": [
+        "T0508",
+        "T0504"
+      ],
+      "requirements": [
+        "specific figure/table/section/location metadata",
+        "human confirmed flag",
+        "snapshot source"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "禁止只有 DOI 就标 supports",
+        "API validation"
+      ],
+      "tests": [
+        "literature evidence negative"
+      ],
+      "allowed_scope": [
+        "internal/evidence/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0510",
+      "phase": "P5",
+      "phase_name": "Evidence、Knowledge 与 External References",
+      "title": "Knowledge workflow E2E",
+      "v1_required": true,
+      "dependencies": [
+        "T0501",
+        "T0503",
+        "T0507",
+        "T0509"
+      ],
+      "requirements": [
+        "Q→H→Exp/Calc/Dataset→Evidence→Claim→Finding",
+        "含 conflicting evidence"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "完整知识链可浏览、版本化、PR merge"
+      ],
+      "tests": [
+        "knowledge e2e"
+      ],
+      "allowed_scope": [
+        "internal/evidence/**",
+        "internal/rsg/**",
+        "internal/domain/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0601",
+      "phase": "P6",
+      "phase_name": "Frozen Main、Abort、Policy 与 Release",
+      "title": "Freeze Main Governance",
+      "v1_required": true,
+      "dependencies": [
+        "T0409"
+      ],
+      "requirements": [
+        "project main freeze action",
+        "audit/event",
+        "新项目可 setup 后 freeze"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "freeze 后 semantic/Git direct write 全拒绝"
+      ],
+      "tests": [
+        "freeze e2e"
+      ],
+      "allowed_scope": [
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0602",
+      "phase": "P6",
+      "phase_name": "Frozen Main、Abort、Policy 与 Release",
+      "title": "Abort/Reopen State Transition",
+      "v1_required": true,
+      "dependencies": [
+        "T0208",
+        "T0409"
+      ],
+      "requirements": [
+        "branch 中 abort/reopen",
+        "main 对象需 PR",
+        "reason/replacement"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "历史版本/Release 不变",
+        "对象当前状态正确"
+      ],
+      "tests": [
+        "abort tests"
+      ],
+      "allowed_scope": [
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0603",
+      "phase": "P6",
+      "phase_name": "Frozen Main、Abort、Policy 与 Release",
+      "title": "Organization/Project Policy Engine",
+      "v1_required": true,
+      "dependencies": [
+        "T0105"
+      ],
+      "requirements": [
+        "versioned policy",
+        "org lower-bound + project stricter",
+        "policy evaluate interface"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Project 不可放宽 org rule",
+        "旧 policy version 可查询"
+      ],
+      "tests": [
+        "policy tests"
+      ],
+      "allowed_scope": [
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0604",
+      "phase": "P6",
+      "phase_name": "Frozen Main、Abort、Policy 与 Release",
+      "title": "Scientific Responsibility / Reviewer Routing",
+      "v1_required": true,
+      "dependencies": [
+        "T0404",
+        "T0603"
+      ],
+      "requirements": [
+        "Research Owners rule by object/schema/type",
+        "required review calculation"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Protocol change 自动要求对应 reviewer",
+        "无权限不自动赋权"
+      ],
+      "tests": [
+        "review routing"
+      ],
+      "allowed_scope": [
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0605",
+      "phase": "P6",
+      "phase_name": "Frozen Main、Abort、Policy 与 Release",
+      "title": "Release Manifest Builder",
+      "v1_required": true,
+      "dependencies": [
+        "T0206",
+        "T0603"
+      ],
+      "requirements": [
+        "accepted main snapshot",
+        "objects/relations/blobs/git/policy/schema/reviews/hash"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "manifest deterministic",
+        "包含 pinned policy/schema"
+      ],
+      "tests": [
+        "release golden"
+      ],
+      "allowed_scope": [
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0606",
+      "phase": "P6",
+      "phase_name": "Frozen Main、Abort、Policy 与 Release",
+      "title": "Immutable Release API/UI",
+      "v1_required": true,
+      "dependencies": [
+        "T0605"
+      ],
+      "requirements": [
+        "create release governance",
+        "release page",
+        "export manifest",
+        "no edit/delete"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "同 version 重复 idempotent/conflict",
+        "旧 release 不受 current state 改变"
+      ],
+      "tests": [
+        "release e2e"
+      ],
+      "allowed_scope": [
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0607",
+      "phase": "P6",
+      "phase_name": "Frozen Main、Abort、Policy 与 Release",
+      "title": "Activity/Audit Timeline 增强",
+      "v1_required": true,
+      "dependencies": [
+        "T0601",
+        "T0602",
+        "T0606"
+      ],
+      "requirements": [
+        "filter governance/research events",
+        "actor/via links",
+        "abort/reopen/release display"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "关键历史可追踪"
+      ],
+      "tests": [
+        "activity e2e"
+      ],
+      "allowed_scope": [
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0608",
+      "phase": "P6",
+      "phase_name": "Frozen Main、Abort、Policy 与 Release",
+      "title": "Release/Abort/Policy E2E",
+      "v1_required": true,
+      "dependencies": [
+        "T0606",
+        "T0604"
+      ],
+      "requirements": [
+        "policy requires reviewers→merge→release→later abort object→old release warning but immutable"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "链路全通过"
+      ],
+      "tests": [
+        "playwright release flow"
+      ],
+      "allowed_scope": [
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0609",
+      "phase": "P6",
+      "phase_name": "Frozen Main、Abort、Policy 与 Release",
+      "title": "Project Milestone 基础",
+      "v1_required": true,
+      "dependencies": [
+        "T0606"
+      ],
+      "requirements": [
+        "Milestone 与 Release 分离",
+        "支持 Candidate selected/Paper submitted/Patent filed/External validation 等类型和 custom label",
+        "Milestone 可关联 Release 但不要求"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Project 没有强制 Completed 终态",
+        "Milestone timeline 正确"
+      ],
+      "tests": [
+        "milestone tests"
+      ],
+      "allowed_scope": [
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0701",
+      "phase": "P7",
+      "phase_name": "Research Asset Hub、Rights 与 Publish",
+      "title": "Research Asset Core/PID",
+      "v1_required": true,
+      "dependencies": [
+        "T0606"
+      ],
+      "requirements": [
+        "asset identity + immutable versions",
+        "4 types enum",
+        "origin refs",
+        "persistent URLs"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "asset ID 不随 slug/org 变化"
+      ],
+      "tests": [
+        "asset core"
+      ],
+      "allowed_scope": [
+        "internal/assets/**",
+        "internal/rights/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0702",
+      "phase": "P7",
+      "phase_name": "Research Asset Hub、Rights 与 Publish",
+      "title": "四类 Asset Manifest validator",
+      "v1_required": true,
+      "dependencies": [
+        "T0701",
+        "T0207"
+      ],
+      "requirements": [
+        "Dataset/Protocol/Material Collection/Benchmark required metadata",
+        "asset gate"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "缺 provenance/rights/version pin 阻止发布"
+      ],
+      "tests": [
+        "asset validators"
+      ],
+      "allowed_scope": [
+        "internal/assets/**",
+        "internal/rights/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0703",
+      "phase": "P7",
+      "phase_name": "Research Asset Hub、Rights 与 Publish",
+      "title": "Rights Model",
+      "v1_required": true,
+      "dependencies": [
+        "T0701"
+      ],
+      "requirements": [
+        "standard license id",
+        "usage declarations",
+        "custom agreement ref",
+        "metadata vs blob access"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "可表达 commercial/derivative/redistribution/model training/attribution",
+        "UI 不声称法律保证"
+      ],
+      "tests": [
+        "rights tests"
+      ],
+      "allowed_scope": [
+        "internal/assets/**",
+        "internal/rights/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0704",
+      "phase": "P7",
+      "phase_name": "Research Asset Hub、Rights 与 Publish",
+      "title": "Publication Impact Preview",
+      "v1_required": true,
+      "dependencies": [
+        "T0702",
+        "T0703"
+      ],
+      "requirements": [
+        "列将公开对象/metadata/blobs/refs/private dependencies/rights blockers",
+        "不修改 state"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "private→public preview 完整且可重复"
+      ],
+      "tests": [
+        "publish preview tests"
+      ],
+      "allowed_scope": [
+        "internal/assets/**",
+        "internal/rights/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0705",
+      "phase": "P7",
+      "phase_name": "Research Asset Hub、Rights 与 Publish",
+      "title": "Asset Publish Governance",
+      "v1_required": true,
+      "dependencies": [
+        "T0704"
+      ],
+      "requirements": [
+        "human maintainer/owner explicit approval",
+        "policy checks",
+        "immutable version + audit/event"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Agent token 直接 publish 被拒",
+        "重复请求幂等"
+      ],
+      "tests": [
+        "publish security e2e"
+      ],
+      "allowed_scope": [
+        "internal/assets/**",
+        "internal/rights/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0706",
+      "phase": "P7",
+      "phase_name": "Research Asset Hub、Rights 与 Publish",
+      "title": "Asset Metadata Revision",
+      "v1_required": true,
+      "dependencies": [
+        "T0705"
+      ],
+      "requirements": [
+        "description/keywords/contact docs revision independent",
+        "audit"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "不改变 scientific asset version/hash"
+      ],
+      "tests": [
+        "asset metadata tests"
+      ],
+      "allowed_scope": [
+        "internal/assets/**",
+        "internal/rights/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0707",
+      "phase": "P7",
+      "phase_name": "Research Asset Hub、Rights 与 Publish",
+      "title": "Asset Reference/Dependency",
+      "v1_required": true,
+      "dependencies": [
+        "T0705"
+      ],
+      "requirements": [
+        "project uses fixed asset version",
+        "citation/reference vs dependency",
+        "visibility_of_usage"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "upstream current 升级不改变 pinned dependency"
+      ],
+      "tests": [
+        "asset dependency tests"
+      ],
+      "allowed_scope": [
+        "internal/assets/**",
+        "internal/rights/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0708",
+      "phase": "P7",
+      "phase_name": "Research Asset Hub、Rights 与 Publish",
+      "title": "Asset Fork/Derive + Lineage",
+      "v1_required": true,
+      "dependencies": [
+        "T0707"
+      ],
+      "requirements": [
+        "new identity from source version",
+        "lineage graph",
+        "rights check"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "derived asset 保留 parent version",
+        "禁止 rights 不允许的 derive"
+      ],
+      "tests": [
+        "asset lineage"
+      ],
+      "allowed_scope": [
+        "internal/assets/**",
+        "internal/rights/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0709",
+      "phase": "P7",
+      "phase_name": "Research Asset Hub、Rights 与 Publish",
+      "title": "Asset Hub Pages/Explore",
+      "v1_required": true,
+      "dependencies": [
+        "T0705",
+        "T0107"
+      ],
+      "requirements": [
+        "asset page versions/origin/rights/lineage/dependencies/public usage",
+        "4 types filters"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "未登录可浏览 public asset",
+        "restricted blobs 不可下载"
+      ],
+      "tests": [
+        "asset ui e2e"
+      ],
+      "allowed_scope": [
+        "internal/assets/**",
+        "internal/rights/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0710",
+      "phase": "P7",
+      "phase_name": "Research Asset Hub、Rights 与 Publish",
+      "title": "Asset 完整 E2E",
+      "v1_required": true,
+      "dependencies": [
+        "T0708",
+        "T0709"
+      ],
+      "requirements": [
+        "Release→Dataset Asset publish→另一 Project reference/depend→fork derived"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "PID/version/rights/lineage 全正确"
+      ],
+      "tests": [
+        "asset canonical e2e"
+      ],
+      "allowed_scope": [
+        "internal/assets/**",
+        "internal/rights/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0711",
+      "phase": "P7",
+      "phase_name": "Research Asset Hub、Rights 与 Publish",
+      "title": "Asset Governance 与 Rights Holder Transfer",
+      "v1_required": true,
+      "dependencies": [
+        "T0705"
+      ],
+      "requirements": [
+        "实现 Rights Holder/Custodian/Maintainer/Creator/Contributor 分离",
+        "ownership transfer append-only event",
+        "transfer 不改变 asset id/version/origin/creator"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "转移后旧历史可见",
+        "Creator 不被新 owner 替换"
+      ],
+      "tests": [
+        "asset governance tests"
+      ],
+      "allowed_scope": [
+        "internal/assets/**",
+        "internal/rights/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "packages/schemas/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0801",
+      "phase": "P8",
+      "phase_name": "开放网络、Fork、贡献与 Research Profile",
+      "title": "Public Entity Anonymous Pages",
+      "v1_required": true,
+      "dependencies": [
+        "T0606",
+        "T0709"
+      ],
+      "requirements": [
+        "public project/release/asset/profile/org/knowledge route 无登录可读",
+        "SEO/meta basics"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "登录墙不挡 public research",
+        "private 不索引"
+      ],
+      "tests": [
+        "anonymous e2e"
+      ],
+      "allowed_scope": [
+        "internal/contribution/**",
+        "internal/application/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0802",
+      "phase": "P8",
+      "phase_name": "开放网络、Fork、贡献与 Research Profile",
+      "title": "Explore 聚合",
+      "v1_required": true,
+      "dependencies": [
+        "T0801"
+      ],
+      "requirements": [
+        "Projects/Assets/Knowledge/People/Organizations/Open Contributions tabs",
+        "基于真实 public index"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "无 like-based core ranking",
+        "private 不出现"
+      ],
+      "tests": [
+        "explore e2e"
+      ],
+      "allowed_scope": [
+        "internal/contribution/**",
+        "internal/application/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0803",
+      "phase": "P8",
+      "phase_name": "开放网络、Fork、贡献与 Research Profile",
+      "title": "Open Contribution Opportunity",
+      "v1_required": true,
+      "dependencies": [
+        "T0402",
+        "T0501"
+      ],
+      "requirements": [
+        "maintainer 将 issue/research need 标 open for contribution",
+        "difficulty/capability metadata",
+        "agent suggestions require approval"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Agent 不能自动 publicize opportunity"
+      ],
+      "tests": [
+        "contribution opportunity tests"
+      ],
+      "allowed_scope": [
+        "internal/contribution/**",
+        "internal/application/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0804",
+      "phase": "P8",
+      "phase_name": "开放网络、Fork、贡献与 Research Profile",
+      "title": "External Fork/Contribution flow",
+      "v1_required": true,
+      "dependencies": [
+        "T0803",
+        "T0303"
+      ],
+      "requirements": [
+        "nonmember fork public project/state allowed according rights",
+        "external PR to upstream",
+        "权限隔离"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "外部用户无需 member 即可贡献",
+        "fork 不包含 restricted blobs"
+      ],
+      "tests": [
+        "external fork e2e"
+      ],
+      "allowed_scope": [
+        "internal/contribution/**",
+        "internal/application/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0805",
+      "phase": "P8",
+      "phase_name": "开放网络、Fork、贡献与 Research Profile",
+      "title": "Published Knowledge Object",
+      "v1_required": true,
+      "dependencies": [
+        "T0503",
+        "T0704"
+      ],
+      "requirements": [
+        "Q/H/Claim/Finding explicit Publish to Network",
+        "fixed version/rights/PID-like id",
+        "not auto on main"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "进入 main 不等于公开网络",
+        "publish explicit"
+      ],
+      "tests": [
+        "knowledge publish tests"
+      ],
+      "allowed_scope": [
+        "internal/contribution/**",
+        "internal/application/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0806",
+      "phase": "P8",
+      "phase_name": "开放网络、Fork、贡献与 Research Profile",
+      "title": "External Evidence Network Aggregation",
+      "v1_required": true,
+      "dependencies": [
+        "T0805",
+        "T0504"
+      ],
+      "requirements": [
+        "其他 Project evidence 指向 published version",
+        "origin/reviewed/unreviewed 分类",
+        "origin maintainer 无删除权"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "反对证据可见",
+        "private evidence 不泄漏"
+      ],
+      "tests": [
+        "external evidence tests"
+      ],
+      "allowed_scope": [
+        "internal/contribution/**",
+        "internal/application/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0807",
+      "phase": "P8",
+      "phase_name": "开放网络、Fork、贡献与 Research Profile",
+      "title": "Contribution Ledger projection",
+      "v1_required": true,
+      "dependencies": [
+        "T0409",
+        "T0705"
+      ],
+      "requirements": [
+        "从 domain events 生成 contribution events",
+        "roles",
+        "accepted/released context",
+        "affiliation at time"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "事件 append-only",
+        "同一 event 不重复 credit"
+      ],
+      "tests": [
+        "contribution projection"
+      ],
+      "allowed_scope": [
+        "internal/contribution/**",
+        "internal/application/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0808",
+      "phase": "P8",
+      "phase_name": "开放网络、Fork、贡献与 Research Profile",
+      "title": "Research Profile / Organization Profile",
+      "v1_required": true,
+      "dependencies": [
+        "T0807",
+        "T0102",
+        "T0103"
+      ],
+      "requirements": [
+        "多维贡献/资产/reuse/reproduction/affiliations",
+        "org public research activity",
+        "无单一 score"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "离职后个人历史保留",
+        "private info 不泄漏"
+      ],
+      "tests": [
+        "profile e2e"
+      ],
+      "allowed_scope": [
+        "internal/contribution/**",
+        "internal/application/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0809",
+      "phase": "P8",
+      "phase_name": "开放网络、Fork、贡献与 Research Profile",
+      "title": "Credit Attribution/Dispute 基础",
+      "v1_required": true,
+      "dependencies": [
+        "T0807"
+      ],
+      "requirements": [
+        "creator/major contributor metadata",
+        "dispute open/resolution append-only"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "修正不改 ledger 原事件",
+        "dispute history 可查"
+      ],
+      "tests": [
+        "credit dispute"
+      ],
+      "allowed_scope": [
+        "internal/contribution/**",
+        "internal/application/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0810",
+      "phase": "P8",
+      "phase_name": "开放网络、Fork、贡献与 Research Profile",
+      "title": "最小 Open Network 闭环 E2E",
+      "v1_required": true,
+      "dependencies": [
+        "T0802",
+        "T0804",
+        "T0806",
+        "T0808"
+      ],
+      "requirements": [
+        "public project→discover→fork/contribute→PR merge→profile credit→external evidence"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "完整链路 CI 可跑"
+      ],
+      "tests": [
+        "network e2e"
+      ],
+      "allowed_scope": [
+        "internal/contribution/**",
+        "internal/application/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0811",
+      "phase": "P8",
+      "phase_name": "开放网络、Fork、贡献与 Research Profile",
+      "title": "Discussion 与 Promote to Research Object",
+      "v1_required": true,
+      "dependencies": [
+        "T0805",
+        "T0803"
+      ],
+      "requirements": [
+        "Project/Knowledge/PR 支持 discussion thread",
+        "Discussion 不进入 Evidence/Reputation",
+        "有权限用户可将讨论提案转 Issue/Hypothesis/External Evidence proposal，并保留原作者 provenance"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "普通评论不会改变 scientific state",
+        "Promote 后 origin discussion/author 可追溯"
+      ],
+      "tests": [
+        "discussion promotion e2e"
+      ],
+      "allowed_scope": [
+        "internal/contribution/**",
+        "internal/application/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0812",
+      "phase": "P8",
+      "phase_name": "开放网络、Fork、贡献与 Research Profile",
+      "title": "Private Evidence / Public Attestation 基础",
+      "v1_required": true,
+      "dependencies": [
+        "T0806",
+        "T0703"
+      ],
+      "requirements": [
+        "私有 Project 可对 public Protocol/Claim/Asset 发布 attestation，不暴露底层 private evidence",
+        "记录 validation type/result/org visibility/internal review",
+        "明确 attestation != public evidence"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "公共页面可显示 attestation 语义但无法反推出 private project/data",
+        "organization 可匿名或公开按设置"
+      ],
+      "tests": [
+        "attestation privacy e2e"
+      ],
+      "allowed_scope": [
+        "internal/contribution/**",
+        "internal/application/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0901",
+      "phase": "P9",
+      "phase_name": "Search 与 Evidence-backed Research Answer",
+      "title": "Search Document Projection",
+      "v1_required": true,
+      "dependencies": [
+        "T0805",
+        "T0705"
+      ],
+      "requirements": [
+        "public/authorized searchable entity projection",
+        "structured fields + text",
+        "incremental outbox updates"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "private 默认不进 public projection",
+        "rebuild command"
+      ],
+      "tests": [
+        "search projection"
+      ],
+      "allowed_scope": [
+        "internal/search/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0902",
+      "phase": "P9",
+      "phase_name": "Search 与 Evidence-backed Research Answer",
+      "title": "Embedding Provider 与 pgvector",
+      "v1_required": true,
+      "dependencies": [
+        "T0901"
+      ],
+      "requirements": [
+        "provider interface",
+        "batch embedding worker",
+        "deterministic fake in tests",
+        "version metadata"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "embedding 失败不阻塞 structured search",
+        "可重建"
+      ],
+      "tests": [
+        "embedding tests"
+      ],
+      "allowed_scope": [
+        "internal/search/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0903",
+      "phase": "P9",
+      "phase_name": "Search 与 Evidence-backed Research Answer",
+      "title": "Scientific Query Planner",
+      "v1_required": true,
+      "dependencies": [
+        "T0901"
+      ],
+      "requirements": [
+        "自然语言→structured intent/target/property/scope/evidence preference",
+        "provider-agnostic LLM",
+        "schema-constrained output"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "invalid plan fallback",
+        "planner 不访问 private unauthorized entities"
+      ],
+      "tests": [
+        "planner contract"
+      ],
+      "allowed_scope": [
+        "internal/search/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0904",
+      "phase": "P9",
+      "phase_name": "Search 与 Evidence-backed Research Answer",
+      "title": "Hybrid Retrieval + Graph Expansion",
+      "v1_required": true,
+      "dependencies": [
+        "T0902",
+        "T0903"
+      ],
+      "requirements": [
+        "FTS+vector+structured filter+relation traversal",
+        "version-pinned candidates"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Seed queries recall relevant Claims/Materials/Findings",
+        "无 private leak"
+      ],
+      "tests": [
+        "retrieval integration"
+      ],
+      "allowed_scope": [
+        "internal/search/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0905",
+      "phase": "P9",
+      "phase_name": "Search 与 Evidence-backed Research Answer",
+      "title": "Scientific Ranking",
+      "v1_required": true,
+      "dependencies": [
+        "T0904"
+      ],
+      "requirements": [
+        "scope match/evidence/review/reproduction/conflict/version factors",
+        "透明 explanation fields"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "不按 star/prestige 主排序",
+        "ranking deterministic fixture"
+      ],
+      "tests": [
+        "ranking golden"
+      ],
+      "allowed_scope": [
+        "internal/search/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0906",
+      "phase": "P9",
+      "phase_name": "Search 与 Evidence-backed Research Answer",
+      "title": "Evidence-backed Answer Generator/API",
+      "v1_required": true,
+      "dependencies": [
+        "T0905"
+      ],
+      "requirements": [
+        "只能引用 retrieval 返回 entity version refs",
+        "回答含 limitations/conflicts/sources",
+        "structured fallback"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "构造 hallucination test：模型不可引用不存在 id",
+        "source click 可定位"
+      ],
+      "tests": [
+        "answer grounding tests"
+      ],
+      "allowed_scope": [
+        "internal/search/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0907",
+      "phase": "P9",
+      "phase_name": "Search 与 Evidence-backed Research Answer",
+      "title": "Search Answer Web UI",
+      "v1_required": true,
+      "dependencies": [
+        "T0906"
+      ],
+      "requirements": [
+        "answer/comparison/evidence map/limitations/sources/underlying results/start project",
+        "loading/fallback/error"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "不是 Google list 首屏",
+        "可直接探索 source"
+      ],
+      "tests": [
+        "search ui e2e"
+      ],
+      "allowed_scope": [
+        "internal/search/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0908",
+      "phase": "P9",
+      "phase_name": "Search 与 Evidence-backed Research Answer",
+      "title": "Search → Draft Research Context",
+      "v1_required": true,
+      "dependencies": [
+        "T0907",
+        "T0104"
+      ],
+      "requirements": [
+        "用户选择 references/dependencies/candidates/hypotheses",
+        "先 draft 确认",
+        "生成 initial project state"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Agent answer 不自动写 main",
+        "确认后 state 可追踪"
+      ],
+      "tests": [
+        "start project e2e"
+      ],
+      "allowed_scope": [
+        "internal/search/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1001",
+      "phase": "P10",
+      "phase_name": "Research Events、订阅与 Impact Analysis",
+      "title": "Transactional Outbox",
+      "v1_required": true,
+      "dependencies": [
+        "T0204"
+      ],
+      "requirements": [
+        "domain transaction 写 outbox",
+        "worker publish research_events",
+        "idempotent"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "crash/retry 不丢事件不重复副作用"
+      ],
+      "tests": [
+        "outbox integration"
+      ],
+      "allowed_scope": [
+        "internal/events/**",
+        "internal/application/**",
+        "cmd/worker/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1002",
+      "phase": "P10",
+      "phase_name": "Research Events、订阅与 Impact Analysis",
+      "title": "Subscription Model / Follow/Watch",
+      "v1_required": true,
+      "dependencies": [
+        "T1001",
+        "T0801"
+      ],
+      "requirements": [
+        "target types + event filters + channels",
+        "public/private auth"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "取消订阅生效",
+        "private target 权限变化后不继续泄漏"
+      ],
+      "tests": [
+        "subscription tests"
+      ],
+      "allowed_scope": [
+        "internal/events/**",
+        "internal/application/**",
+        "cmd/worker/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1003",
+      "phase": "P10",
+      "phase_name": "Research Events、订阅与 Impact Analysis",
+      "title": "Web Research Inbox",
+      "v1_required": true,
+      "dependencies": [
+        "T1002"
+      ],
+      "requirements": [
+        "聚合 meaningful events",
+        "read/unread",
+        "deep links"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "低级每 commit 不默认轰炸用户"
+      ],
+      "tests": [
+        "inbox e2e"
+      ],
+      "allowed_scope": [
+        "internal/events/**",
+        "internal/application/**",
+        "cmd/worker/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1004",
+      "phase": "P10",
+      "phase_name": "Research Events、订阅与 Impact Analysis",
+      "title": "RSS/Atom Feeds",
+      "v1_required": true,
+      "dependencies": [
+        "T1002"
+      ],
+      "requirements": [
+        "public Project/Asset/Knowledge feeds",
+        "stable ids/version links"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "未登录可订阅 public feed",
+        "private 无 feed"
+      ],
+      "tests": [
+        "feed tests"
+      ],
+      "allowed_scope": [
+        "internal/events/**",
+        "internal/application/**",
+        "cmd/worker/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1005",
+      "phase": "P10",
+      "phase_name": "Research Events、订阅与 Impact Analysis",
+      "title": "Email Digest abstraction",
+      "v1_required": true,
+      "dependencies": [
+        "T1002"
+      ],
+      "requirements": [
+        "immediate/daily/weekly preference",
+        "dev mail sink",
+        "templates concise"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "测试邮件不含 unauthorized private content"
+      ],
+      "tests": [
+        "email tests"
+      ],
+      "allowed_scope": [
+        "internal/events/**",
+        "internal/application/**",
+        "cmd/worker/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1006",
+      "phase": "P10",
+      "phase_name": "Research Events、订阅与 Impact Analysis",
+      "title": "Signed Webhooks",
+      "v1_required": true,
+      "dependencies": [
+        "T1001"
+      ],
+      "requirements": [
+        "endpoint/secret",
+        "HMAC timestamp",
+        "retry/delivery log",
+        "disable failing endpoint policy"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "重放/坏签名测试",
+        "duplicate event consumer safe"
+      ],
+      "tests": [
+        "webhook security"
+      ],
+      "allowed_scope": [
+        "internal/events/**",
+        "internal/application/**",
+        "cmd/worker/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1007",
+      "phase": "P10",
+      "phase_name": "Research Events、订阅与 Impact Analysis",
+      "title": "Dependency Impact Analysis",
+      "v1_required": true,
+      "dependencies": [
+        "T0707",
+        "T1001"
+      ],
+      "requirements": [
+        "沿 depends_on/provenance 下游分析",
+        "direct/indirect affected",
+        "review required alerts",
+        "不自动 invalidate"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Protocol abort seed 可列受影响 Experiments/Datasets/Claims/Assets"
+      ],
+      "tests": [
+        "impact golden/e2e"
+      ],
+      "allowed_scope": [
+        "internal/events/**",
+        "internal/application/**",
+        "cmd/worker/**",
+        "cmd/api/**",
+        "apps/web/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1101",
+      "phase": "P11",
+      "phase_name": "UI、安全、可访问性、性能与运维加固",
+      "title": "统一 Primer-style Design System",
+      "v1_required": true,
+      "dependencies": [
+        "T0107",
+        "T0809",
+        "T0907"
+      ],
+      "requirements": [
+        "packages/ui 封装 tokens/components",
+        "StateLabel/Table/Timeline/Diff/Sidebar",
+        "去除不一致自定义样式"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "全站无 gradient/glass",
+        "visual regression 核心页"
+      ],
+      "tests": [
+        "visual regression"
+      ],
+      "allowed_scope": [
+        "apps/web/**",
+        "internal/**",
+        "cmd/**",
+        "infra/**",
+        "tests/**",
+        "ops/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1102",
+      "phase": "P11",
+      "phase_name": "UI、安全、可访问性、性能与运维加固",
+      "title": "Research Map 高质量交互",
+      "v1_required": true,
+      "dependencies": [
+        "T0211",
+        "T0507"
+      ],
+      "requirements": [
+        "聚合图 By Question/By Finding",
+        "drill-down",
+        "keyboard/list fallback",
+        "大节点数聚合"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Seed 项目不成蜘蛛网",
+        "1000 node underlying state 仍默认粗粒度"
+      ],
+      "tests": [
+        "research map e2e/perf"
+      ],
+      "allowed_scope": [
+        "apps/web/**",
+        "internal/**",
+        "cmd/**",
+        "infra/**",
+        "tests/**",
+        "ops/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1103",
+      "phase": "P11",
+      "phase_name": "UI、安全、可访问性、性能与运维加固",
+      "title": "Publication/Visibility Security UX",
+      "v1_required": true,
+      "dependencies": [
+        "T0704",
+        "T1101"
+      ],
+      "requirements": [
+        "impact preview UI",
+        "double confirmation for visibility expansion",
+        "rights blockers",
+        "private dependency attestation display"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "不能一键 generic modal 发布敏感 state"
+      ],
+      "tests": [
+        "publish ux e2e"
+      ],
+      "allowed_scope": [
+        "apps/web/**",
+        "internal/**",
+        "cmd/**",
+        "infra/**",
+        "tests/**",
+        "ops/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1104",
+      "phase": "P11",
+      "phase_name": "UI、安全、可访问性、性能与运维加固",
+      "title": "全站 Accessibility AA",
+      "v1_required": true,
+      "dependencies": [
+        "T1101",
+        "T1102"
+      ],
+      "requirements": [
+        "axe checks",
+        "keyboard",
+        "labels/aria",
+        "contrast",
+        "reduced motion"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "核心页面 automated a11y 无 serious/critical",
+        "手动键盘 smoke 文档"
+      ],
+      "tests": [
+        "a11y suite"
+      ],
+      "allowed_scope": [
+        "apps/web/**",
+        "internal/**",
+        "cmd/**",
+        "infra/**",
+        "tests/**",
+        "ops/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1105",
+      "phase": "P11",
+      "phase_name": "UI、安全、可访问性、性能与运维加固",
+      "title": "I18N 基线",
+      "v1_required": true,
+      "dependencies": [
+        "T1101"
+      ],
+      "requirements": [
+        "UI strings resource files",
+        "zh-CN/en",
+        "locale routes/preference",
+        "domain enums stable codes"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "核心页面可切语言",
+        "科学值/单位不被错误本地化"
+      ],
+      "tests": [
+        "i18n e2e"
+      ],
+      "allowed_scope": [
+        "apps/web/**",
+        "internal/**",
+        "cmd/**",
+        "infra/**",
+        "tests/**",
+        "ops/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1106",
+      "phase": "P11",
+      "phase_name": "UI、安全、可访问性、性能与运维加固",
+      "title": "API/Upload 安全加固",
+      "v1_required": true,
+      "dependencies": [
+        "T0307",
+        "T0705"
+      ],
+      "requirements": [
+        "rate limit",
+        "CSP/CSRF",
+        "signed upload TTL",
+        "preview sanitization",
+        "SSRF guard external refs"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "OWASP smoke",
+        "恶意 svg/html 不执行",
+        "URL SSRF negative"
+      ],
+      "tests": [
+        "security tests"
+      ],
+      "allowed_scope": [
+        "apps/web/**",
+        "internal/**",
+        "cmd/**",
+        "infra/**",
+        "tests/**",
+        "ops/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1107",
+      "phase": "P11",
+      "phase_name": "UI、安全、可访问性、性能与运维加固",
+      "title": "权限与 Search Side-channel 安全回归",
+      "v1_required": true,
+      "dependencies": [
+        "T0906",
+        "T0806"
+      ],
+      "requirements": [
+        "anonymous/auth role matrix E2E",
+        "计数/error/timing 不明显泄漏 private id",
+        "search post-filter guaranteed"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "permission negative suite 全过"
+      ],
+      "tests": [
+        "privacy suite"
+      ],
+      "allowed_scope": [
+        "apps/web/**",
+        "internal/**",
+        "cmd/**",
+        "infra/**",
+        "tests/**",
+        "ops/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1108",
+      "phase": "P11",
+      "phase_name": "UI、安全、可访问性、性能与运维加固",
+      "title": "性能基线与索引调优",
+      "v1_required": true,
+      "dependencies": [
+        "T0907",
+        "T1102"
+      ],
+      "requirements": [
+        "生成 100 projects/100k entities benchmark seed",
+        "查询/graph/search profiling",
+        "必要 indexes"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "满足 27_PERFORMANCE_SLO 开发目标或记录可接受偏差"
+      ],
+      "tests": [
+        "perf benchmark"
+      ],
+      "allowed_scope": [
+        "apps/web/**",
+        "internal/**",
+        "cmd/**",
+        "infra/**",
+        "tests/**",
+        "ops/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1109",
+      "phase": "P11",
+      "phase_name": "UI、安全、可访问性、性能与运维加固",
+      "title": "生产级 Observability/Dashboards",
+      "v1_required": true,
+      "dependencies": [
+        "T1007",
+        "T0007"
+      ],
+      "requirements": [
+        "metrics/traces/log dashboards",
+        "outbox/queue/git drift/visibility audit alerts"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "故障注入可触发预期 alert"
+      ],
+      "tests": [
+        "observability smoke"
+      ],
+      "allowed_scope": [
+        "apps/web/**",
+        "internal/**",
+        "cmd/**",
+        "infra/**",
+        "tests/**",
+        "ops/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1110",
+      "phase": "P11",
+      "phase_name": "UI、安全、可访问性、性能与运维加固",
+      "title": "Backup/Restore 自动化演练",
+      "v1_required": true,
+      "dependencies": [
+        "T0606",
+        "T0705"
+      ],
+      "requirements": [
+        "Postgres/S3/Gitea backup scripts",
+        "空环境 restore",
+        "reconciliation"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Seed Project/Release/Asset restore 后 hash/refs 正确"
+      ],
+      "tests": [
+        "restore drill"
+      ],
+      "allowed_scope": [
+        "apps/web/**",
+        "internal/**",
+        "cmd/**",
+        "infra/**",
+        "tests/**",
+        "ops/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1201",
+      "phase": "P12",
+      "phase_name": "Canonical Workflow 与最终交付",
+      "title": "完整 Seed Demo Data Builder",
+      "v1_required": true,
+      "dependencies": [
+        "T0810",
+        "T1007"
+      ],
+      "requirements": [
+        "按 34_SEED_DEMO_PROJECT 自动构建 demo",
+        "synthetic 标记",
+        "idempotent reset"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "一条命令生成完整 demo 网络"
+      ],
+      "tests": [
+        "seed builder"
+      ],
+      "allowed_scope": [
+        "tests/acceptance/**",
+        "tests/e2e/**",
+        "ops/**",
+        "docs/**",
+        "examples/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1202",
+      "phase": "P12",
+      "phase_name": "Canonical Workflow 与最终交付",
+      "title": "Canonical MOF Workflow E2E",
+      "v1_required": true,
+      "dependencies": [
+        "T1201",
+        "T0908",
+        "T1007"
+      ],
+      "requirements": [
+        "从 Q 到 H/branch/exp/calc/evidence/claim/finding/PR/main/release/assets/external project evidence/profile credit",
+        "真实 DB/Git/S3/浏览器"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Master Gate I 全通过",
+        "测试失败可定位 step"
+      ],
+      "tests": [
+        "canonical playwright"
+      ],
+      "allowed_scope": [
+        "tests/acceptance/**",
+        "tests/e2e/**",
+        "ops/**",
+        "docs/**",
+        "examples/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1203",
+      "phase": "P12",
+      "phase_name": "Canonical Workflow 与最终交付",
+      "title": "Staging 部署模板",
+      "v1_required": true,
+      "dependencies": [
+        "T1110"
+      ],
+      "requirements": [
+        "Docker production compose 或 k8s manifests",
+        "secrets placeholders",
+        "TLS/reverse proxy notes",
+        "healthchecks"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "干净 staging 可按 runbook 部署"
+      ],
+      "tests": [
+        "deployment smoke"
+      ],
+      "allowed_scope": [
+        "tests/acceptance/**",
+        "tests/e2e/**",
+        "ops/**",
+        "docs/**",
+        "examples/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1204",
+      "phase": "P12",
+      "phase_name": "Canonical Workflow 与最终交付",
+      "title": "生产 Runbook/Release/Recovery 验证",
+      "v1_required": true,
+      "dependencies": [
+        "T1203"
+      ],
+      "requirements": [
+        "执行 deployment/release/backup runbook dry-run",
+        "rollback/forward fix scenario"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "文档与实际命令一致"
+      ],
+      "tests": [
+        "runbook drill"
+      ],
+      "allowed_scope": [
+        "tests/acceptance/**",
+        "tests/e2e/**",
+        "ops/**",
+        "docs/**",
+        "examples/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1205",
+      "phase": "P12",
+      "phase_name": "Canonical Workflow 与最终交付",
+      "title": "OpenAPI/MCP/Schema 文档最终同步",
+      "v1_required": true,
+      "dependencies": [
+        "T1202"
+      ],
+      "requirements": [
+        "生成 API docs/SDK",
+        "MCP tools 与实现一致",
+        "schema examples"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "contract tests 通过",
+        "无 undocumented public endpoint"
+      ],
+      "tests": [
+        "contract suite"
+      ],
+      "allowed_scope": [
+        "tests/acceptance/**",
+        "tests/e2e/**",
+        "ops/**",
+        "docs/**",
+        "examples/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1206",
+      "phase": "P12",
+      "phase_name": "Canonical Workflow 与最终交付",
+      "title": "Master Security/Quality Gate",
+      "v1_required": true,
+      "dependencies": [
+        "T1202",
+        "T1204",
+        "T1205"
+      ],
+      "requirements": [
+        "全部 blocking tests",
+        "dependency/secret/container scan",
+        "a11y/perf/privacy"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "Critical/High=0",
+        "tests.json blocking 全 passed"
+      ],
+      "tests": [
+        "master suite"
+      ],
+      "allowed_scope": [
+        "tests/acceptance/**",
+        "tests/e2e/**",
+        "ops/**",
+        "docs/**",
+        "examples/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1207",
+      "phase": "P12",
+      "phase_name": "Canonical Workflow 与最终交付",
+      "title": "V1 最终验收与交付报告",
+      "v1_required": true,
+      "dependencies": [
+        "T1206"
+      ],
+      "requirements": [
+        "逐条核对 31_MASTER_ACCEPTANCE",
+        "输出 build/version/commit/test evidence",
+        "remaining nonblocking risks"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "所有 V1 gate checked",
+        "task_status 所有 required done",
+        "progress 标记 completed"
+      ],
+      "tests": [
+        "final audit"
+      ],
+      "allowed_scope": [
+        "tests/acceptance/**",
+        "tests/e2e/**",
+        "ops/**",
+        "docs/**",
+        "examples/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1208",
+      "phase": "P12",
+      "phase_name": "Canonical Workflow 与最终交付",
+      "title": "完整 Project 可移植导出",
+      "v1_required": true,
+      "dependencies": [
+        "T1202",
+        "T1007",
+        "T0812"
+      ],
+      "requirements": [
+        "导出 Git bundle/repository refs、RSG manifests、Scientific Object/relations、Issues/PR/Reviews、Releases/Assets metadata、Contribution/Audit export、可访问 blobs 清单/打包选项",
+        "格式文档化且不依赖内部 DB 主键才能理解",
+        "Restricted/private 导出仅授权 owner"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "导出包可在离线 validator 中校验 hash/refs",
+        "Seed Project 导出后关键对象/历史计数一致"
+      ],
+      "tests": [
+        "project export portability e2e"
+      ],
+      "allowed_scope": [
+        "tests/acceptance/**",
+        "tests/e2e/**",
+        "ops/**",
+        "docs/**",
+        "examples/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    }
+  ]
+}

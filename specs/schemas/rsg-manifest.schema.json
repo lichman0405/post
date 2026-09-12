@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RSGManifest",
+  "type": "object",
+  "required": [
+    "format_version",
+    "project_id",
+    "state_id",
+    "generated_at",
+    "object_versions",
+    "relation_versions",
+    "blob_refs",
+    "git_ref",
+    "state_hash"
+  ],
+  "properties": {
+    "format_version": {
+      "type": "string"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "state_id": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "schema_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "policy_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "object_versions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "relation_versions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blob_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "hash"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "git_ref": {
+      "type": "object",
+      "required": [
+        "repository_id",
+        "commit_sha"
+      ],
+      "properties": {
+        "repository_id": {
+          "type": "string"
+        },
+        "commit_sha": {
+          "type": "string"
+        }
+      }
+    },
+    "state_hash": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

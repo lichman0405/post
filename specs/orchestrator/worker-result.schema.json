@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-rd.example/specs/orchestrator/worker-result.schema.json",
+  "title": "Claude Code Worker Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "status", "summary", "files_changed", "tests", "acceptance", "risks", "follow_up_issues", "notes_for_supervisor"],
+  "properties": {
+    "task_id": {"type": "string", "pattern": "^T[0-9]{4}$"},
+    "status": {"enum": ["completed", "failed", "blocked"]},
+    "summary": {"type": "string", "minLength": 1},
+    "files_changed": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "status"],
+        "properties": {
+          "command": {"type": "string"},
+          "status": {"enum": ["passed", "failed", "not_run"]},
+          "evidence": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "acceptance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["criterion", "status", "evidence"],
+        "properties": {
+          "criterion": {"type": "string"},
+          "status": {"enum": ["passed", "failed", "not_applicable"]},
+          "evidence": {"type": "string"}
+        }
+      }
+    },
+    "risks": {"type": "array", "items": {"type": "string"}},
+    "follow_up_issues": {"type": "array", "items": {"type": "string"}},
+    "notes_for_supervisor": {"type": "string"}
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "source": "BR-HUMIDITY-70",
+  "target": "public-main",
+  "will_become_public": ["EXP-DEMO-007@1", "CLM-DEMO-001@2", "FND-DEMO-001@1"],
+  "restricted_blobs_remaining_restricted": ["BLB-DEMO-RAW-007"],
+  "private_dependencies": [],
+  "rights_blockers": [],
+  "warnings": ["Underlying raw instrument data remains restricted; public evidence page must label this clearly."],
+  "requires_human_confirmation": true
+}
