@@ -546,7 +546,16 @@ func renderReviewPrompt(taskID, reviewDir string, gate *GateInputs) string {
 	fmt.Fprintf(&b, "  %s\n", filepath.Join(reviewDir, "diff.txt"))
 	fmt.Fprintf(&b, "  %s\n", filepath.Join(reviewDir, "task-package.json"))
 	fmt.Fprintf(&b, "  %s\n\n", filepath.Join(reviewDir, "collect-report.json"))
-	fmt.Fprintf(&b, "The diff in diff.txt is the Worker's complete change for task %s, measured\nagainst baseline %s. The collect report lists the mechanical checks that\npassed. Your job is the independent human-level review the machines cannot do:\n\n", taskID, gate.BaselineSHA)
+	// Say what the diff actually IS. Calling it "the complete change" was true
+	// while the baseline was the spawn-point commit and stops being true the
+	// moment a baseline is advanced: after a rework onto a newer main the
+	// baseline is the merge commit, so the diff is only what has changed
+	// SINCE it, and the task's earlier work is already inside both the
+	// baseline and the previous collect. A review input that describes itself
+	// inaccurately is the defect this whole system exists to prevent, and the
+	// Reviewer that caught the previous instance had to reconcile the file
+	// count against the collect report to notice.
+	fmt.Fprintf(&b, "The diff in diff.txt is the change for task %s measured against baseline\n%s. Read it as exactly that: if the baseline is a merge or a rebase point\nrather than the commit the task started from, this is the change since that\nbaseline, NOT the task's whole contribution — the earlier part is already in\nthe baseline and was verified by the collect the baseline came from. The\nworktree itself holds the complete state; read it when the diff alone cannot\nanswer a question. The collect report lists the mechanical checks that\npassed, and its file list is the authoritative account of what this round\nchanged. Your job is the independent human-level review the machines cannot\ndo:\n\n", taskID, gate.BaselineSHA)
 	b.WriteString("- Does the diff actually satisfy every acceptance criterion in the task package?\n")
 	b.WriteString("- Do the required tests exist, and does the evidence support them?\n")
 	b.WriteString("- Are there correctness defects, security problems, scope violations,\n  weakened tests, or product-semantics changes the task did not authorize?\n")

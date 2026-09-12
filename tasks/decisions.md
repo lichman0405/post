@@ -1936,3 +1936,29 @@ T0103 的 PR 开出来之后，七项检查一项都没跑。`gh run list` 空�
 而 `tasks/**` 是任务的 **forbidden_scope**。
 我把它恢复了（那是 Supervisor 注入的、不是 Worker 的产物），但它**本会让 collect 以越界拒绝整个交付**。
 **教训：`rddev` 的状态文件路径是相对 cwd 的；对任务执行 Supervisor 命令必须在仓库根目录。**
+
+## L1-20260912-54 — Review 输入**自称"完整改动"，但在基线推进之后它不是**
+
+推进基线（F-20260912-5）之后，T0103 的 review 输入只有 **5 个文件**——
+因为 review 的 diff 是"相对**当前基线**的改动"，而当前基线已经是那次 merge commit，
+于是 T0103 的**绝大部分交付物已经落在基线之内**，diff 只剩合并之后的增量。
+
+**diff 本身是对的**（每次 collect/review 校验的是"自上一次被认可的基线以来的增量"，
+更早的部分已在之前那次 collect + review 中被校验过 ✓）。**错的是提示词对它的描述**：
+
+> "The diff in diff.txt is the Worker's **complete change** for task …, measured against baseline …"
+
+**这是假话**，而且正是我这一整个会话在消灭的缺陷类型：
+**证据自称是 A，实际是 B**。上一次同类问题（#62，diff 少了 30 个文件）就是靠 Reviewer
+自己拿文件数去对 collect report 才发现的——**把正确性押在"Reviewer 恰好足够谨慎"上是错的**。
+
+**处置**：提示词改为如实描述——
+
+- 明说这是"相对基线的改动"；**若基线是 merge/rebase 点而非任务起点，这就是基线的增量，
+  不是任务的完整贡献**；更早的部分在基线里，且由产生该基线的那次 collect 校验过；
+- 指出 **worktree 里是完整状态**，diff 不足以回答时应当去读它；
+- 指明 **collect report 的文件清单才是"本轮改了什么"的权威说明**。
+
+**边界（诚实）**：本条只修正**描述**，没有改变 diff 的计算方式，也没有让 Reviewer 自动看到
+任务的完整贡献。后者是一个更大的设计选择（例如用 `main...HEAD` 的 PR diff），
+记录为后续项，不在本次临时决定。
