@@ -76,6 +76,40 @@ func TestProjectRole(t *testing.T) {
 	}
 }
 
+// TestProjectRoleHierarchy: the four roles are ordered by authority
+// (docs/04 §2) — every role carries at least its own authority, a higher
+// role carries every lower one, and a lower role carries nothing above
+// itself. An unknown role grants nothing.
+func TestProjectRoleHierarchy(t *testing.T) {
+	chain := []ProjectRole{ProjectRoleViewer, ProjectRoleContributor, ProjectRoleMaintainer, ProjectRoleOwner}
+	for i, lower := range chain {
+		if !lower.AtLeast(lower) {
+			t.Errorf("%s.AtLeast(%s) = false, want true (self)", lower, lower)
+		}
+		for j, higher := range chain {
+			if j <= i {
+				continue
+			}
+			if !higher.AtLeast(lower) {
+				t.Errorf("%s.AtLeast(%s) = false, want true", higher, lower)
+			}
+			if lower.AtLeast(higher) {
+				t.Errorf("%s.AtLeast(%s) = true, want false", lower, higher)
+			}
+		}
+	}
+	bogus := ProjectRole("admin")
+	if bogus.Rank() != -1 {
+		t.Errorf("bogus.Rank() = %d, want -1", bogus.Rank())
+	}
+	if bogus.AtLeast(ProjectRoleViewer) || ProjectRoleOwner.AtLeast(bogus) {
+		t.Error("unknown roles must grant and satisfy nothing")
+	}
+	if ProjectRoleOwner.Rank() <= ProjectRoleViewer.Rank() {
+		t.Error("owner must outrank viewer")
+	}
+}
+
 func TestProjectPersonal(t *testing.T) {
 	if !(Project{}).Personal() {
 		t.Error("a project without an organization is personal")

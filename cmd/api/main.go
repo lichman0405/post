@@ -47,6 +47,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
 	"github.com/lichman0405/post/internal/application/authn"
+	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/config"
 	"github.com/lichman0405/post/internal/health"
 	"github.com/lichman0405/post/internal/observability"
@@ -157,6 +158,7 @@ func run(args []string) int {
 	projectAPI := projectshttp.New(projectshttp.Deps{
 		Store: persistence.NewProjectStore(pool),
 		Orgs:  orgStore,
+		Authz: authz.NewMatrixEngine(),
 	})
 	v1.Handle("/api/v1/projects", projectAPI.Routes())
 	v1.Handle("/api/v1/projects/", projectAPI.Routes())

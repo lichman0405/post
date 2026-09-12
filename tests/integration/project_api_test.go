@@ -41,6 +41,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
 	"github.com/lichman0405/post/internal/application/authn"
+	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/persistence"
 	"github.com/lichman0405/post/internal/persistence/memstore"
 	"github.com/lichman0405/post/internal/persistence/testdb"
@@ -110,6 +111,7 @@ func TestProjectAPI(t *testing.T) {
 	projectAPI := projectshttp.New(projectshttp.Deps{
 		Store: persistence.NewProjectStore(pool),
 		Orgs:  orgStore,
+		Authz: authz.NewMatrixEngine(),
 	})
 	apiMux := http.NewServeMux()
 	apiMux.Handle("/api/v1/auth/", authAPI.Routes())

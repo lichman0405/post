@@ -103,6 +103,31 @@ func ValidProjectRole(r ProjectRole) bool {
 	return false
 }
 
+// Rank orders the four project roles by authority (docs/04 §2): viewer <
+// contributor < maintainer < owner. The permission matrix's role columns
+// are consistent with this order — internal/authz's
+// TestRoleColumnsMonotonic enforces it. An unknown role ranks -1.
+func (r ProjectRole) Rank() int {
+	switch r {
+	case ProjectRoleViewer:
+		return 0
+	case ProjectRoleContributor:
+		return 1
+	case ProjectRoleMaintainer:
+		return 2
+	case ProjectRoleOwner:
+		return 3
+	}
+	return -1
+}
+
+// AtLeast reports whether r carries at least the authority of min.
+// Unknown roles answer false: an unparseable role grants nothing.
+func (r ProjectRole) AtLeast(min ProjectRole) bool {
+	rank, minRank := r.Rank(), min.Rank()
+	return rank >= 0 && minRank >= 0 && rank >= minRank
+}
+
 // ProjectMembership is the relationship between a person and a project
 // (canonical table project_memberships). One row per (project, user) pair.
 type ProjectMembership struct {
