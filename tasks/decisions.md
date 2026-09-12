@@ -173,6 +173,55 @@ T0000 Worker 没有静默选择，而是把三处基线校准作为待确认项�
 - **代价提示**：该模式对长链路任务吞吐不利。若 P0 后半段吞吐成为瓶颈，可考虑对规格明确的
   实现类任务下调 Worker `--effort`，但需先用数据证明不影响 G2 通过率。
 
+## L1-20260912-8 — T0002 Monorepo 脚手架的前置决策
+
+派发 T0002 前由 Supervisor 先行确定，避免 Worker 在无规格处自行发明：
+
+1. **Go module path = `github.com/lichman0405/post`**。与 canonical source repository 同名，
+   但**不得**与产品 runtime 的 Gitea provider 混淆（`docs/69` §7 的身份域分离仍然有效：
+   这是源码工程的模块路径，不是产品领域对象）。
+2. **pnpm workspace 边界**：只覆盖 `apps/web`、`packages/ui`、`packages/api-contracts` 与生成的
+   TS client；不控制 Go/Python（`docs/65` 规则）。
+3. **不使用 Turborepo**；跨语言命令统一由根 `Makefile` 承担。
+4. **`packageManager` 精确 pin 到宿主 pnpm 版本**，使 T0000 的 `T-PNPM-PIN` 从 `skipped` 转为
+   `passed`；这也顺带验证 T0000 的"deferred check"设计确实会在 T0002 后生效。
+5. **`packages/schemas` 与 `specs/schemas` 的关系必须可校验**：若复制，必须带 drift check，
+   禁止制造第二份会静默分叉的真相源。
+
+以上均为 L1（实现级、可逆），记录于此；若 Worker 认为必须偏离，须在 RESULT 中显式提出。
+
+## L1-20260912-9 — Bootstrap Worker harness 缺陷修复（由 T0001 Worker 发现）
+
+T0001 Worker 在 RESULT 中**报告而非绕过**了两个 harness 缺陷。两者都是我（Supervisor）在
+T0000 之后加固隔离时引入的，属实测发现，必须记录：
+
+1. **Worker 无法按契约写 `RESULT.json`**。`docs/63` §6 要求 Worker 把结果写到 worktree 之外的
+   `.rddev/workers/<TASK_ID>/RESULT.json`，但我在 `permissions.deny` 里加了
+   `Read(//…/.rddev/workers/**)` —— Claude Code 把 Read-deny 同时当作**写入阻断**，于是契约路径
+   被自己的加固封死。T0001 Worker 只能写到 worktree 根目录并在 notes 中说明，由 Supervisor 在
+   collect 阶段搬回契约位置。
+   **修复**：移除该 deny 规则；改为按 Worker 授权自己的 result 目录（
+   `POST_WORKER_WORKERS_DIR`），并在 hook 中阻断访问**其它** Worker 的 result 目录。
+2. **`Bash(git remote:*)` deny 与 Worker 契约矛盾**。契约（`docs/63` §3 与 task prompt）承诺
+   Worker 可用只读 git（含 `git remote -v` / `git remote get-url`），但 settings deny 把
+   `git remote` 整体封死，导致 T0001 无法直接自证 remote 归一化。
+   **修复**：从 deny 列表移除 `git remote`/`git branch`；改由 hook 精确区分只读与变更子命令
+   （`remote -v|get-url` 放行，`remote add|set-url|prune|...` 阻断；`branch -a|-v|--list|...`
+   放行，裸分支名与 `-D/-m/--contains <val>` 阻断）。
+
+**第三次修复（我在 collect 阶段自查发现）**：
+
+3. **spawn.sh 的 registry 写入在多行值上崩溃**。`REFS_BEFORE` 含换行，被插值进 Python 字面量后
+   产生 `SyntaxError`，`> registry.json` 重定向留下一个**空文件**，任务看似"无 registry"。
+   **修复**：改为把值作为 argv 传给 Python（绝不再插值进脚本文本），并对 `refs/remotes/**`
+   统一排除。T0001 的 registry 由 Supervisor 依 stream log、git 状态与文件时间戳**重建**，
+   并在文件中标记 `reconstructed: true` 与原因。
+
+**经验**：加固隔离的每一次改动都必须回归测试，且**测试必须覆盖契约本身**（"Worker 到底能不能
+完成契约要求的动作"），而不只是覆盖"危险动作是否被阻断"。2 和 3 都是"阻断过头"型缺陷。
+
+**待办**：T0011 必须把上述 20 条 guard 用例与两个契约路径用例固化为自动化 e2e。
+
 ---
 
 ## 环境发现（非决策，必须显式记录）

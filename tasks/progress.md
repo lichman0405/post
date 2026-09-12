@@ -39,12 +39,24 @@ owner 于 2026-09-12 授予**默认自主推进**授权（`L3-20260912-4`，持�
 
 ## 进行中
 
-- **T0001 派发中** — 规格仓库与任务依赖图校验脚本化 + source-repository preflight。
-  任务包/系统提示词已预置；baseline 取 T0000 merge 后的 main。
+- **T0002 运行中** — Monorepo 初始化（Go module + Next.js + Python adapter + Makefile）。
+  branch `task/T0002-monorepo-init`，baseline `7c8a9d2`。
+- **T0001 已 merged**（PR #6，`7c8a9d2`）。交付：`scripts/validate_specs.py` 扩到 12 项检查、
+  `scripts/source_repo_preflight.py`（三方 visibility 模型 + SPEC_BLOCKED 拒绝语义）、
+  `scripts/spec_version.py` + `specs/SPEC_VERSION.json` 派生版本标记、两个测试脚本
+  （57 + 17 assertions）、CI 实际执行新检查。
+  G2 独立复现：visibility verdict matrix（match=bless / mismatch=SPEC_BLOCKED / unknown=拒绝 /
+  无输入=拒绝）、真实 gh probe = bless、12/12 检查通过。
 
 ## 阻塞
 
-- 无。`main` = T0000 merge 后状态；T0001 已解锁。
+- 无。
+
+## Harness 修复（本轮）
+
+T0001 Worker 报告了两个由我引入的隔离缺陷（见 `decisions.md` L1-20260912-9）：
+`RESULT.json` 契约路径被自己的 Read-deny 封死；`git remote` deny 与 Worker 契约矛盾。
+另有一处 spawn.sh registry 写入在多行值上崩溃。三者已修复，guard 回归 20/20。
 
 ## 已知风险 / 需 owner 关注
 
