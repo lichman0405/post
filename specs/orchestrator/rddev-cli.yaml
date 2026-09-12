@@ -17,11 +17,28 @@ commands:
   - worker logs
   - worker collect
   - worker stop
+  # T0012 additions (docs/67): the four-gate loop surface.
+  - worker rework      # rejected -> running with the SAME Worker session resumed
+  - worker respawn     # rejected -> running with a NEW Worker and a reset worktree
+  - review spawn       # dispatch an independent Review Worker (no Git control-plane)
+  - review collect     # collect and record the Review Worker's verdict
+  - gate list          # show G1..G4 and their job sets for a task
+  - gate run           # execute G2/G3 locally and record the evidence (G1/G4 refused: not runnable)
+  - gate status        # merge-gate (G4) verdict with its reasons
+  - gate records       # list gate evidence records for a task
+  - workflow           # print the task's gate trail, evidence, review and next action
   - git commit
+  - git push
   - pr open
   - pr merge
+  - pr status
 machine_output: json
 runtime_state_dir: .rddev
 parallel_workers:
   default: 3
   maximum: 4
+# T0012: rddev git/pr are Supervisor-only surface and refuse (before invoking
+# git/gh) unless the task's G4 merge gate is green at execution time.
+# rddev worker spawn requires the task's allowed_scope to validate against the
+# real tree, and a scope covering a marker file must cover its derived
+# artifacts (specs/orchestrator/derived-artifacts.json).

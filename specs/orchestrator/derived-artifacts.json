@@ -1,0 +1,16 @@
+{
+  "$comment": "Derived artifacts of spec inputs (T0012). A task whose allowed_scope covers a marker input MUST also cover the derived artifact: pre-dispatch scope validation fails the spawn otherwise, and collect treats the derived artifact of a covered marker as in scope (so a Worker can regenerate it without an out-of-scope rejection). The pairs mirror scripts/speclib.py derive_spec_version: inputs are tasks/tasks.json plus every file under specs/ except the marker itself.",
+  "version": 1,
+  "rules": [
+    {
+      "marker": "specs/**",
+      "derived": "specs/SPEC_VERSION.json",
+      "note": "every spec file is an input of the derived spec version marker"
+    },
+    {
+      "marker": "tasks/tasks.json",
+      "derived": "specs/SPEC_VERSION.json",
+      "note": "the task DAG is an input of the derived spec version marker"
+    }
+  ]
+}

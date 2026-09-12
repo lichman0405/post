@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-rd.example/specs/orchestrator/review-verdict.schema.json",
+  "title": "Review Worker Verdict",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "verdict", "summary", "findings", "risks"],
+  "properties": {
+    "task_id": {"type": "string", "pattern": "^T[0-9]{4}$"},
+    "verdict": {"enum": ["approve", "request_changes"]},
+    "summary": {"type": "string", "minLength": 1},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "finding"],
+        "properties": {
+          "severity": {"enum": ["blocking", "major", "minor", "nit"]},
+          "file": {"type": "string"},
+          "line": {"type": ["integer", "null"], "minimum": 0},
+          "finding": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "risks": {"type": "array", "items": {"type": "string"}}
+  }
+}

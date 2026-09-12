@@ -18,6 +18,14 @@ Commands:
   spawn TASK   create the Supervisor-owned worktree, render the task package,
                generate the guard layer and start an independent claude -p
                Worker; performs ready -> running
+  rework TASK  rejected task -> running with the SAME Worker: resumes the
+               Worker's claude session (--resume) with its context intact, the
+               rejection reasons appended to the prompt, and the worktree diff
+               kept; requires state rejected and the Worker exited
+  respawn TASK rejected task -> running with a NEW Worker: fresh session,
+               worktree reset --hard + clean -fd (the rejected diff's evidence
+               is already recorded), then a normal guarded dispatch; requires
+               state rejected and the Worker exited
   list         discover every Worker from disk: running / stale / exited, with
                stream-log growth for hang detection
   logs TASK    print the tail of the Worker's stream log
@@ -45,6 +53,8 @@ Flags:
   --docker              per-task opt-in Docker grant (guard + COMPOSE_PROJECT_NAME
                         namespacing)
   --bare                run claude with --bare (skip CLAUDE.md discovery)
+  --claude-bin PATH     claude binary to dispatch (default: claude on PATH;
+                        e2e tests substitute a fake)
   --parallel N          concurrency limit for the gate (default 3, hard max 4)
   --lines N             logs: number of tail lines (default 50)
 
@@ -70,6 +80,7 @@ func runWorker(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		flagSpec{"--timeout", true},
 		flagSpec{"--docker", false},
 		flagSpec{"--bare", false},
+		flagSpec{"--claude-bin", true},
 		flagSpec{"--parallel", true},
 		flagSpec{"--lines", true},
 	)
@@ -101,6 +112,16 @@ func runWorker(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 			return usageError(stderr, "rddev worker spawn: missing TASK", workerUsage)
 		}
 		return runWorkerSpawn(vals, taskArg, repoRoot, stdout, stderr, jsonOut)
+	case "rework":
+		if taskArg == "" {
+			return usageError(stderr, "rddev worker rework: missing TASK", workerUsage)
+		}
+		return runWorkerRework(vals, taskArg, repoRoot, stdout, stderr, jsonOut)
+	case "respawn":
+		if taskArg == "" {
+			return usageError(stderr, "rddev worker respawn: missing TASK", workerUsage)
+		}
+		return runWorkerRespawn(vals, taskArg, repoRoot, stdout, stderr, jsonOut)
 	case "list":
 		if taskArg != "" {
 			return usageError(stderr, "rddev worker list: takes no TASK argument", workerUsage)
@@ -126,8 +147,9 @@ func runWorker(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 	}
 }
 
-// runWorkerSpawn parses spawn-specific flags and calls the spawn pipeline.
-func runWorkerSpawn(vals map[string]string, taskID, repoRoot string, stdout, stderr io.Writer, jsonOut bool) int {
+// buildSpawnOpts parses the shared spawn/rework/respawn flags into
+// SpawnOpts; a nonzero return code means a usage error was already reported.
+func buildSpawnOpts(vals map[string]string, taskID, repoRoot string, stderr io.Writer) (*devorchestrator.SpawnOpts, int) {
 	opts := &devorchestrator.SpawnOpts{
 		RepoRoot:  repoRoot,
 		DagPath:   stringOr(vals["--tasks-json"], devorchestrator.DefaultDAGPath),
@@ -138,37 +160,74 @@ func runWorkerSpawn(vals map[string]string, taskID, repoRoot string, stdout, std
 		RunID:     vals["--run-id"],
 		Docker:    vals["--docker"] != "",
 		Bare:      vals["--bare"] != "",
+		ClaudeBin: vals["--claude-bin"],
 	}
 	if v := vals["--max-budget-usd"]; v != "" {
 		f, err := strconv.ParseFloat(v, 64)
 		if err != nil || f < 0 {
-			return usageError(stderr, fmt.Sprintf("rddev worker spawn: invalid --max-budget-usd %q", v), workerUsage)
+			return nil, usageError(stderr, fmt.Sprintf("rddev worker spawn: invalid --max-budget-usd %q", v), workerUsage)
 		}
 		opts.MaxBudgetUSD = &f
 	}
 	if v := vals["--max-turns"]; v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 {
-			return usageError(stderr, fmt.Sprintf("rddev worker spawn: invalid --max-turns %q", v), workerUsage)
+			return nil, usageError(stderr, fmt.Sprintf("rddev worker spawn: invalid --max-turns %q", v), workerUsage)
 		}
 		opts.MaxTurns = &n
 	}
 	if v := vals["--timeout"]; v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil || d <= 0 {
-			return usageError(stderr, fmt.Sprintf("rddev worker spawn: invalid --timeout %q", v), workerUsage)
+			return nil, usageError(stderr, fmt.Sprintf("rddev worker spawn: invalid --timeout %q", v), workerUsage)
 		}
 		opts.Timeout = d
 	}
 	if v := vals["--parallel"]; v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			return usageError(stderr, fmt.Sprintf("rddev worker spawn: invalid --parallel %q", v), workerUsage)
+			return nil, usageError(stderr, fmt.Sprintf("rddev worker spawn: invalid --parallel %q", v), workerUsage)
 		}
 		opts.Parallel = n
 	}
+	return opts, -1
+}
 
-	res, err := devorchestrator.Spawn(opts)
+// runWorkerSpawn parses spawn-specific flags and calls the spawn pipeline.
+func runWorkerSpawn(vals map[string]string, taskID, repoRoot string, stdout, stderr io.Writer, jsonOut bool) int {
+	opts, code := buildSpawnOpts(vals, taskID, repoRoot, stderr)
+	if code >= 0 {
+		return code
+	}
+	return spawnAndReport(opts, devorchestrator.Spawn, stdout, stderr, jsonOut)
+}
+
+// runWorkerRework dispatches the rejected task's SAME Worker (resumed
+// session, context intact, rejection reasons in the prompt). The engine
+// enforces state rejected + Worker exited.
+func runWorkerRework(vals map[string]string, taskID, repoRoot string, stdout, stderr io.Writer, jsonOut bool) int {
+	opts, code := buildSpawnOpts(vals, taskID, repoRoot, stderr)
+	if code >= 0 {
+		return code
+	}
+	return spawnAndReport(opts, devorchestrator.ReworkWorker, stdout, stderr, jsonOut)
+}
+
+// runWorkerRespawn dispatches a NEW Worker for the rejected task (fresh
+// session, worktree reset to the baseline). The engine enforces state
+// rejected + Worker exited; the rejected diff's evidence is already recorded.
+func runWorkerRespawn(vals map[string]string, taskID, repoRoot string, stdout, stderr io.Writer, jsonOut bool) int {
+	opts, code := buildSpawnOpts(vals, taskID, repoRoot, stderr)
+	if code >= 0 {
+		return code
+	}
+	return spawnAndReport(opts, devorchestrator.RespawnWorker, stdout, stderr, jsonOut)
+}
+
+// spawnAndReport runs one spawn pipeline (spawn, rework or respawn) and
+// reports its result.
+func spawnAndReport(opts *devorchestrator.SpawnOpts, spawn func(*devorchestrator.SpawnOpts) (*devorchestrator.SpawnResult, error), stdout, stderr io.Writer, jsonOut bool) int {
+	res, err := spawn(opts)
 	if err != nil {
 		return operationalError(stderr, "rddev worker spawn", err)
 	}

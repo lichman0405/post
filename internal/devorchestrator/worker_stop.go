@@ -64,7 +64,9 @@ func StopWorker(repoRoot string, rec *WorkerRecord) error {
 }
 
 // recordStop merges the reaper's exit.status (or a synthetic -1 when none was
-// recorded) into the registry under the registry lock.
+// recorded) into the registry under the registry lock, and writes the same
+// code into the Supervisor-owned authoritative dir (T0012) so collect's
+// authoritative copy agrees for stopped Workers too.
 func recordStop(repoRoot string, rec *WorkerRecord) error {
 	code := -1
 	data, err := os.ReadFile(filepath.Join(rec.ResultDir, "exit.status"))
@@ -73,6 +75,9 @@ func recordStop(repoRoot string, rec *WorkerRecord) error {
 		if _, err := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &c); err == nil {
 			code = c
 		}
+	}
+	if err := writeAuthoritativeExitStatus(repoRoot, rec.TaskID, code); err != nil {
+		return err
 	}
 	lock, err := lockPathFor(registryPath(repoRoot, rec.TaskID))
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -251,14 +252,20 @@ func TestSessionResidueFindsLiveChildren(t *testing.T) {
 // Worker left running — both must not count as residue.
 func TestSessionResidueExcludesReaperAndZombie(t *testing.T) {
 	// The reaper: a script named run-worker.sh started in its own session,
-	// exactly what spawn does with the wrapper.
+	// exactly what spawn does with the wrapper. Its child (the sleep) is the
+	// Worker, so it is passed as workerPID — the same call shape collect uses
+	// (the recorded Worker pid, not an ancestry guess). The test waits for
+	// the child to exist instead of racing the wrapper's fork (the race
+	// flaked under full-suite load: a scan that beat the fork passed, one
+	// that lost it failed).
 	dir := t.TempDir()
 	reaper := filepath.Join(dir, "run-worker.sh")
 	if err := os.WriteFile(reaper, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	r := startSetsidChild(t, reaper)
-	found, err := sessionResidue(r.Process.Pid, -1)
+	childPID := waitForChild(t, r.Process.Pid)
+	found, err := sessionResidue(r.Process.Pid, childPID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,6 +301,30 @@ func waitZombie(t *testing.T, pid int) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("pid %d did not become a zombie", pid)
+}
+
+// waitForChild polls /proc/<pid>/task/<pid>/children until pid has at least
+// one live child and returns its pid. Spawn's reaper wrapper backgrounds the
+// Worker as its child, so a deterministic test must observe that child —
+// never race the fork.
+func waitForChild(t *testing.T, pid int) int {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/task/%d/children", pid, pid))
+		if err == nil {
+			fields := strings.Fields(string(data))
+			if len(fields) > 0 {
+				child, err := strconv.Atoi(fields[0])
+				if err == nil && child > 0 {
+					return child
+				}
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("pid %d never showed a child", pid)
+	return 0
 }
 
 // startMarkerChild starts cmdline in its own session with the given extra

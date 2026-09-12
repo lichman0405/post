@@ -105,7 +105,8 @@ func Collect(opts *CollectOpts) (*CollectReport, error) {
 		return nil, fmt.Errorf("no recorded Worker for %s — nothing to collect", taskID)
 	}
 	// Reconcile the reaper's exit.status into the registry first (the same
-	// disk-derived path `worker list` uses), then re-read.
+	// disk-derived path `worker list` uses; the authoritative copy in the
+	// Supervisor-owned runtime dir wins, T0012), then re-read.
 	if _, err := DiscoverWorkers(repoRoot); err != nil {
 		return nil, err
 	}
@@ -115,6 +116,16 @@ func Collect(opts *CollectOpts) (*CollectReport, error) {
 	}
 	if rec.ExitStatus == nil {
 		return nil, fmt.Errorf("worker %s has no recorded exit status (still running or stale) — collect refuses to judge an unfinished run; see `rddev worker list`", taskID)
+	}
+
+	// The authoritative spawn-time record (T0012 security fix). Collect
+	// judges by THESE values — baseline, allowed_scope, package and guard
+	// bytes — never by the Worker-writable copies in the task dir. A missing
+	// record means a pre-T0012 spawn: the judgement degrades to the registry
+	// values with a loud warning, never a silent pass.
+	gate, gateErr := LoadGateInputs(repoRoot, taskID)
+	if gateErr != nil {
+		return nil, fmt.Errorf("loading authoritative gate inputs for %s: %w", taskID, gateErr)
 	}
 
 	report := &CollectReport{
@@ -129,6 +140,24 @@ func Collect(opts *CollectOpts) (*CollectReport, error) {
 	}
 	pass := func(name, detail string) {
 		report.Checks = append(report.Checks, CollectCheck{Name: name, Status: "passed", Detail: detail})
+	}
+
+	// 0) gate-input integrity: the Worker-writable copies of the gate inputs
+	// (registry gate fields, task-package.json, guard layer, exit.status)
+	// must byte-match the spawn-time authoritative record. A mismatch is a
+	// hard reject — the Worker edited its own gate inputs.
+	if gate != nil {
+		if tampers := VerifyGateInputs(repoRoot, rec, gate); len(tampers) > 0 {
+			parts := make([]string, 0, len(tampers))
+			for _, t := range tampers {
+				parts = append(parts, t.What+": "+t.Detail)
+			}
+			fail("gate-inputs", fmt.Sprintf("%d tamper(s) detected against the authoritative spawn record: %s", len(tampers), strings.Join(parts, "; ")))
+		} else {
+			pass("gate-inputs", "Worker-writable gate inputs byte-match the authoritative spawn record (registry fields, task-package.json, guard layer, exit.status)")
+		}
+	} else {
+		pass("gate-inputs", "no authoritative spawn record (pre-T0012 spawn) — judgement degrades to the registry values with this warning")
 	}
 
 	// 1) worker-exit. A nonzero exit never passes the other checks — a
@@ -167,15 +196,21 @@ func Collect(opts *CollectOpts) (*CollectReport, error) {
 	}
 
 	// 3) HEAD must equal the recorded baseline (a Worker whose guard was
-	// bypassed moved it with a commit/checkout).
+	// bypassed moved it with a commit/checkout). The baseline is the
+	// AUTHORITATIVE spawn record's value (T0012); the registry copy is only
+	// the fallback for pre-T0012 spawns.
+	baseline := rec.BaselineSHA
+	if gate != nil {
+		baseline = gate.BaselineSHA
+	}
 	head, err := gitOutput(rec.Worktree, "rev-parse", "HEAD")
 	if err != nil {
 		return report, fmt.Errorf("reading worktree HEAD: %w", err)
 	}
-	if head != rec.BaselineSHA {
-		fail("head-baseline", fmt.Sprintf("worktree HEAD is %s, baseline was %s — the Worker moved HEAD (Git control-plane)", head, rec.BaselineSHA))
+	if head != baseline {
+		fail("head-baseline", fmt.Sprintf("worktree HEAD is %s, baseline was %s — the Worker moved HEAD (Git control-plane)", head, baseline))
 	} else {
-		pass("head-baseline", fmt.Sprintf("worktree HEAD == baseline %s", rec.BaselineSHA))
+		pass("head-baseline", fmt.Sprintf("worktree HEAD == baseline %s", baseline))
 	}
 
 	// 4) the task branch ref must still point at the baseline: a commit on
@@ -184,10 +219,10 @@ func Collect(opts *CollectOpts) (*CollectReport, error) {
 	branchSHA, branchErr := gitOutput(repoRoot, "rev-parse", "--verify", "refs/heads/"+rec.Branch)
 	if branchErr != nil {
 		fail("branch-ref", fmt.Sprintf("reading refs/heads/%s: %v", rec.Branch, branchErr))
-	} else if branchSHA != rec.BaselineSHA {
-		fail("branch-ref", fmt.Sprintf("refs/heads/%s is %s, baseline was %s — the task branch moved", rec.Branch, branchSHA, rec.BaselineSHA))
+	} else if branchSHA != baseline {
+		fail("branch-ref", fmt.Sprintf("refs/heads/%s is %s, baseline was %s — the task branch moved", rec.Branch, branchSHA, baseline))
 	} else {
-		pass("branch-ref", fmt.Sprintf("refs/heads/%s == baseline %s", rec.Branch, rec.BaselineSHA))
+		pass("branch-ref", fmt.Sprintf("refs/heads/%s == baseline %s", rec.Branch, baseline))
 	}
 
 	// 5) no unauthorized refs created (moving an existing ref is normal
@@ -214,26 +249,37 @@ func Collect(opts *CollectOpts) (*CollectReport, error) {
 		pass("refs", fmt.Sprintf("no new refs created (snapshot of %d refs unchanged)", len(currentRefs)))
 	}
 
-	// 6) every changed path matches allowed_scope.
-	scopes, err := allowedScopeFromPackage(rec.ResultDir)
-	if err != nil {
-		return report, err
+	// 6) every changed path matches allowed_scope. The scope comes from the
+	// AUTHORITATIVE spawn record (T0012 — the Worker-writable task-package
+	// copy is compared against it above, never used as the judgement input),
+	// plus the derived-artifact allowance: a task whose scope covers a
+	// derived marker may regenerate the artifact derived from it (e.g.
+	// specs/** -> specs/SPEC_VERSION.json).
+	var scopes []string
+	if gate != nil {
+		scopes = gate.AllowedScope
+	} else {
+		scopes, err = allowedScopeFromPackage(rec.ResultDir)
+		if err != nil {
+			return report, err
+		}
 	}
-	changed, err := changedPaths(rec.Worktree, rec.BaselineSHA)
+	changed, err := changedPaths(rec.Worktree, baseline)
 	if err != nil {
 		return report, err
 	}
 	report.FilesChanged = changed
+	derived := derivedAt(repoRoot)
 	var outOfScope []string
 	for _, p := range changed {
-		if !pathMatchesScope(p, scopes) {
+		if !ScopeMatchesPathWithDerived(p, scopes, derived) {
 			outOfScope = append(outOfScope, p)
 		}
 	}
 	if len(outOfScope) > 0 {
 		fail("scope", fmt.Sprintf("%d changed path(s) outside allowed_scope %v: %s", len(outOfScope), scopes, strings.Join(outOfScope, ", ")))
 	} else {
-		pass("scope", fmt.Sprintf("%d changed path(s), all inside allowed_scope", len(changed)))
+		pass("scope", fmt.Sprintf("%d changed path(s), all inside allowed_scope (derived-artifact allowance applied)", len(changed)))
 	}
 
 	// 7) RESULT.json validates against worker-result.schema.json — the
@@ -255,6 +301,43 @@ func Collect(opts *CollectOpts) (*CollectReport, error) {
 		}
 	} else if len(report.Reasons) == 0 {
 		fail("result-task-id", fmt.Sprintf("reading RESULT.json for the task_id check: %v", err))
+	}
+
+	// 7b) RESULT consistency (T0012 requirement 1): a completion claim is
+	// verified against the document itself. An INTERIM-marked file is refused
+	// outright; `status: completed` with any not_run/failed test or a
+	// non-passed acceptance entry is a contradiction and is refused
+	// mechanically — the defect where an INTERIM snapshot with two not_run
+	// tests was collected as a completion can never pass again. A
+	// failed/blocked RESULT is an honest non-completion: it is rejected below,
+	// never accepted.
+	criteria := []string(nil)
+	requiredTests := []string(nil)
+	if gate != nil {
+		criteria = gate.AcceptanceCriteria
+		requiredTests = gate.RequiredTests
+	}
+	consistencyChecks, _, consErr := CheckResultConsistency(resultPath, criteria, requiredTests)
+	if consErr != nil {
+		return report, consErr
+	}
+	for _, c := range consistencyChecks {
+		if c.Status == "failed" {
+			fail("result-consistency", c.Name+": "+c.Detail)
+		} else {
+			pass("result-consistency-"+c.Name, c.Detail)
+		}
+	}
+	// An honest non-completion (status failed/blocked) is a rejected run,
+	// never verification — checked UNCONDITIONALLY: CheckResultConsistency
+	// reports consistent=false for it without a failed check, so nesting this
+	// under `consistent` made the refusal dead code (the rework e2e caught a
+	// failed RESULT reaching verification).
+	if raw, err := os.ReadFile(resultPath); err == nil {
+		var doc WorkerResultDoc
+		if json.Unmarshal(raw, &doc) == nil && doc.Status != "completed" {
+			fail("result-status", fmt.Sprintf("RESULT.json reports status %q — an honest non-completion is a rejected run, never verification", doc.Status))
+		}
 	}
 
 	// 8) no secret material introduced by the diff (or quoted in RESULT.json
@@ -280,10 +363,13 @@ func Collect(opts *CollectOpts) (*CollectReport, error) {
 // collectFinalize writes collect-report.json into the task's result dir and
 // advances the state machine. The report write happens first so the evidence
 // survives even when the transition is refused (e.g. a second collect on an
-// already-verified task).
+// already-verified task). The gate evidence record (T0012) is written into
+// the Supervisor-owned gates dir either way — the collect outcome is part of
+// the four-gate trail, whatever the verdict.
 func collectFinalize(opts *CollectOpts, report *CollectReport, rec *WorkerRecord, target State, reason string) error {
 	report.StateTransition = string(target)
-	if err := writeFileAtomic(filepath.Join(rec.ResultDir, "collect-report.json"), marshalIndentBytes(report)); err != nil {
+	reportPath := filepath.Join(rec.ResultDir, "collect-report.json")
+	if err := writeFileAtomic(reportPath, marshalIndentBytes(report)); err != nil {
 		return fmt.Errorf("writing collect report: %w", err)
 	}
 	store, err := OpenStore(opts.DagPath, opts.StatePath)
@@ -296,6 +382,15 @@ func collectFinalize(opts *CollectOpts, report *CollectReport, rec *WorkerRecord
 	}
 	if _, err := store.Transition(opts.TaskID, target, runID, reason); err != nil {
 		return fmt.Errorf("collection checks done (%s) but the %s -> %s transition failed: %w", report.Status, StateRunning, target, err)
+	}
+	if _, err := WriteRecord(opts.RepoRoot, opts.TaskID, RecordCollect, runID, &CollectRecord{
+		recordMeta:  recordMeta{RecordType: RecordCollect, TaskID: opts.TaskID, RunID: runID, At: nowRFC3339()},
+		Status:      report.Status,
+		ReportPath:  reportPath,
+		ResultState: string(target),
+		Summary:     reason,
+	}); err != nil {
+		return fmt.Errorf("collect transition done but the gate evidence record failed to write: %w", err)
 	}
 	return nil
 }

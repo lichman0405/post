@@ -27,7 +27,7 @@ const fakeClaude = `#!/bin/sh
 write_result() {
 	# $1 = files_changed JSON array; writes a schema-conforming RESULT.json
 	cat > "$POST_WORKER_RESULT_DIR/RESULT.json" <<EOF
-{"task_id":"$POST_WORKER_TASK_ID","status":"completed","summary":"fake worker","files_changed":$1,"tests":[{"command":"true","status":"passed","evidence":"fake"}],"acceptance":[{"criterion":"a1","status":"passed","evidence":"fake"}],"risks":[],"follow_up_issues":[],"notes_for_supervisor":""}
+{"task_id":"$POST_WORKER_TASK_ID","status":"completed","summary":"fake worker","files_changed":$1,"tests":[{"command":"t1","status":"passed","evidence":"fake"}],"acceptance":[{"criterion":"a1","status":"passed","evidence":"fake"}],"risks":[],"follow_up_issues":[],"notes_for_supervisor":""}
 EOF
 }
 case "$1" in
@@ -91,7 +91,19 @@ func fakeRepo(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# fake repo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	git("add", "README.md")
+	// T0012: spawn validates allowed_scope against the real tree and refuses a
+	// glob matching nothing — the fixture scopes (t0001/** ...) must match
+	// real files, like the tasks they model.
+	for _, id := range []string{"T0001", "T0002", "T0003"} {
+		dir := filepath.Join(repo, strings.ToLower(id))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".keep"), []byte(id+" scope\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("add", "-A")
 	git("-c", "user.name=test", "-c", "user.email=test@test", "commit", "-q", "-m", "initial")
 	if err := os.MkdirAll(filepath.Join(repo, "tasks"), 0o755); err != nil {
 		t.Fatal(err)
