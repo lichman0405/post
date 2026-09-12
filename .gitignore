@@ -16,6 +16,15 @@
 /bin/
 *.test
 coverage.out
+# Binaries from `go build ./cmd/<name>` without -o, which drop <name> in
+# the repo root. A Worker building a binary would otherwise leave a ~16MB
+# untracked artifact that the collect scope check reports as an
+# out-of-scope change - a build artefact is not a source change.
+/api
+/worker
+/mcp-server
+/rddev
+/devredis
 
 # Node / Next
 node_modules/
