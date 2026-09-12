@@ -110,7 +110,9 @@ var canonicalTables = map[string]tableExp{
 		uniques: [][]string{{"handle"}, {"email"}},
 	},
 	"organizations": {
-		cols:    []colExp{c("id", u, false, true), c("slug", txt, false, false), c("name", txt, false, false), c("description", txt, true, false), c("created_at", ts, false, true)},
+		// deactivated_at is the T0103 addition (00017) — the only "delete"
+		// the domain offers; the canonical seed will be back-ported.
+		cols:    []colExp{c("id", u, false, true), c("slug", txt, false, false), c("name", txt, false, false), c("description", txt, true, false), c("created_at", ts, false, true), c("deactivated_at", ts, true, false)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"slug"}},
 	},
@@ -335,6 +337,7 @@ var explicitIndexes = map[string][]string{
 	"relation_versions_target_idx":           {"target_object_version_id", "relation_type"},
 	"search_documents_fts_idx":               {"USING gin", "to_tsvector"},
 	"search_documents_structured_gin":        {"USING gin", "structured"},
+	"organization_memberships_user_idx":      {"user_id"},
 }
 
 // headVersion is the number of migrations in infra/migrations, DERIVED from the

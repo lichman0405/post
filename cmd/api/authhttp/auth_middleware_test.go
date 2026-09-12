@@ -103,7 +103,7 @@ const (
 // unimplemented product endpoint (POST /api/v1/projects) is 401, not 404.
 func TestUnauthenticatedWriteReturns401(t *testing.T) {
 	api, _ := newTestAPI(t, authn.Config{}, nil)
-	h := api.Routes()
+	h := api.Guard(api.Routes()) // guard wraps the routes exactly as cmd/api/main.go composes them
 
 	cases := []struct{ method, path string }{
 		{http.MethodPost, "/api/v1/projects"},
@@ -130,7 +130,7 @@ func TestUnauthenticatedWriteReturns401(t *testing.T) {
 // 401, an unknown route answers the mux 404).
 func TestUnauthenticatedReadPassesToRouting(t *testing.T) {
 	api, _ := newTestAPI(t, authn.Config{}, nil)
-	h := api.Routes()
+	h := api.Guard(api.Routes()) // guard wraps the routes exactly as cmd/api/main.go composes them
 
 	rec := doAuth(t, h, http.MethodGet, apiTarget+"/api/v1/auth/session", "", nil)
 	if rec.Code != http.StatusUnauthorized {
@@ -147,7 +147,7 @@ func TestUnauthenticatedReadPassesToRouting(t *testing.T) {
 // resolves it, CSRF-bound logout revokes it, whoami then answers 401.
 func TestSignupLoginLogoutFlowHTTP(t *testing.T) {
 	api, _ := newTestAPI(t, authn.Config{}, nil)
-	h := api.Routes()
+	h := api.Guard(api.Routes()) // guard wraps the routes exactly as cmd/api/main.go composes them
 
 	rec := doAuth(t, h, http.MethodPost, apiTarget+"/api/v1/auth/signup", signupJSON, nil)
 	if rec.Code != http.StatusCreated {
@@ -209,7 +209,7 @@ func TestSignupLoginLogoutFlowHTTP(t *testing.T) {
 // let it through).
 func TestCSRFEnforcedOnAllWrites(t *testing.T) {
 	api, _ := newTestAPI(t, authn.Config{}, nil)
-	h := api.Routes()
+	h := api.Guard(api.Routes()) // guard wraps the routes exactly as cmd/api/main.go composes them
 
 	rec := doAuth(t, h, http.MethodPost, apiTarget+"/api/v1/auth/signup", signupJSON, nil)
 	token := cookieValue(rec, "post_session")
@@ -242,7 +242,7 @@ func TestCSRFEnforcedOnAllWrites(t *testing.T) {
 func TestLoginCrossSiteAndContentTypeDefenses(t *testing.T) {
 	api, users := newTestAPI(t, authn.Config{}, nil)
 	seedUserHTTP(t, users, "known@example.com", "right-password-123")
-	h := api.Routes()
+	h := api.Guard(api.Routes()) // guard wraps the routes exactly as cmd/api/main.go composes them
 	loginJSON := `{"email":"known@example.com","password":"right-password-123"}`
 
 	// Cross-site origin.
@@ -290,7 +290,7 @@ func TestLoginCrossSiteAndContentTypeDefenses(t *testing.T) {
 func TestLoginWebOriginAllowedCrossHost(t *testing.T) {
 	api, users := newTestAPI(t, authn.Config{WebOrigin: "http://web.test"}, nil)
 	seedUserHTTP(t, users, "known@example.com", "right-password-123")
-	h := api.Routes()
+	h := api.Guard(api.Routes()) // guard wraps the routes exactly as cmd/api/main.go composes them
 	loginJSON := `{"email":"known@example.com","password":"right-password-123"}`
 
 	// The configured web origin from the API's own host (cross-origin
@@ -339,7 +339,7 @@ func TestLoginOriginStrictWithoutWebOrigin(t *testing.T) {
 		},
 		Secure: false,
 	})
-	h := api.Routes()
+	h := api.Guard(api.Routes()) // guard wraps the routes exactly as cmd/api/main.go composes them
 	rec := doAuth(t, h, http.MethodPost, apiTarget+"/api/v1/auth/login",
 		`{"email":"known@example.com","password":"right-password-123"}`,
 		map[string]string{headerOrigin: "http://web.test"})
@@ -355,7 +355,7 @@ func TestLoginOriginStrictWithoutWebOrigin(t *testing.T) {
 func TestLoginEnumerationIdenticalEnvelopes(t *testing.T) {
 	api, users := newTestAPI(t, authn.Config{}, nil)
 	seedUserHTTP(t, users, "known@example.com", "right-password-123")
-	h := api.Routes()
+	h := api.Guard(api.Routes()) // guard wraps the routes exactly as cmd/api/main.go composes them
 
 	wrongPass := doAuth(t, h, http.MethodPost, apiTarget+"/api/v1/auth/login",
 		`{"email":"known@example.com","password":"wrong-password-456"}`, nil)
@@ -388,7 +388,7 @@ func TestLoginEnumerationIdenticalEnvelopes(t *testing.T) {
 func TestLoginRateLimit429(t *testing.T) {
 	api, users := newTestAPI(t, authn.Config{LoginLimitPerEmail: 3}, nil)
 	seedUserHTTP(t, users, "limited@example.com", "right-password-123")
-	h := api.Routes()
+	h := api.Guard(api.Routes()) // guard wraps the routes exactly as cmd/api/main.go composes them
 
 	attempt := `{"email":"limited@example.com","password":"wrong-password-%d"}`
 	for i := 0; i < 3; i++ {
@@ -417,7 +417,7 @@ func TestLoginRateLimit429(t *testing.T) {
 // routing.
 func TestCORSPreflight(t *testing.T) {
 	api, _ := newTestAPI(t, authn.Config{WebOrigin: "http://web.test"}, nil)
-	h := api.Routes()
+	h := api.Guard(api.Routes()) // guard wraps the routes exactly as cmd/api/main.go composes them
 
 	rec := doAuth(t, h, http.MethodOptions, apiTarget+"/api/v1/auth/login", "",
 		map[string]string{headerOrigin: "http://web.test"})
@@ -480,7 +480,7 @@ func TestOIDCTransportFlow(t *testing.T) {
 		},
 	}
 	api, _ := newTestAPI(t, cfg, provider.NewClient(""))
-	h := api.Routes()
+	h := api.Guard(api.Routes()) // guard wraps the routes exactly as cmd/api/main.go composes them
 
 	rec := doAuth(t, h, http.MethodGet, apiTarget+"/api/v1/auth/oidc/authorize-url", "", nil)
 	if rec.Code != http.StatusOK {
@@ -540,7 +540,7 @@ func TestOIDCCallbackStateBinding(t *testing.T) {
 		},
 	}
 	api, _ := newTestAPI(t, cfg, provider.NewClient(""))
-	h := api.Routes()
+	h := api.Guard(api.Routes()) // guard wraps the routes exactly as cmd/api/main.go composes them
 
 	// No state cookie at all.
 	rec := doAuth(t, h, http.MethodGet, apiTarget+"/api/v1/auth/oidc/callback?code=x&state=y", "", nil)
@@ -603,7 +603,7 @@ func TestOIDCCallbackFailureKeepsExistingSession(t *testing.T) {
 		},
 	}
 	api, _ := newTestAPI(t, cfg, provider.NewClient(""))
-	h := api.Routes()
+	h := api.Guard(api.Routes()) // guard wraps the routes exactly as cmd/api/main.go composes them
 
 	// A signed-in user (session cookie from a normal signup).
 	rec := doAuth(t, h, http.MethodPost, apiTarget+"/api/v1/auth/signup", signupJSON, nil)
@@ -660,7 +660,7 @@ func TestOIDCUnverifiedEmailRefused(t *testing.T) {
 		},
 	}
 	api, users := newTestAPI(t, cfg, provider.NewClient(""))
-	h := api.Routes()
+	h := api.Guard(api.Routes()) // guard wraps the routes exactly as cmd/api/main.go composes them
 
 	rec := doAuth(t, h, http.MethodGet, apiTarget+"/api/v1/auth/oidc/authorize-url", "", nil)
 	state := cookieValue(rec, "post_oidc_state")

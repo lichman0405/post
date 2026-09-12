@@ -18,10 +18,11 @@ type errorEnvelope struct {
 	Retryable bool   `json:"retryable"`
 }
 
-// writeError renders the envelope with the given status. The message is
+// WriteError renders the envelope with the given status. The message is
 // client-safe by construction: callers pass fixed strings, never error
-// text from a dependency.
-func writeError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
+// text from a dependency. Exported so product packages (orgshttp) render
+// the identical error shape.
+func WriteError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(errorEnvelope{
@@ -40,8 +41,8 @@ func requestID(r *http.Request) string {
 	return id.String()
 }
 
-// writeJSON renders a success payload.
-func writeJSON(w http.ResponseWriter, status int, payload any) {
+// WriteJSON renders a success payload.
+func WriteJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)

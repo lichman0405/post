@@ -47,9 +47,10 @@ type API struct {
 	guard    guard
 }
 
-// Routes registers the auth surface and returns the guarded subtree
-// handler. New product routes (T0103+) register on this mux and inherit
-// the write guard automatically.
+// Routes registers the auth surface only (no guard). The composition in
+// cmd/api/main.go mounts this and the product routes together and wraps
+// the whole /api/v1 subtree in Guard — product routes (orgs, T0103+) sit
+// inside the same write guard as auth itself.
 func (a *API) Routes() http.Handler {
 	mux := http.NewServeMux()
 	h := a.handlers
@@ -59,7 +60,15 @@ func (a *API) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/auth/session", h.handleSession)
 	mux.HandleFunc("GET /api/v1/auth/oidc/authorize-url", h.handleOIDCAuthorize)
 	mux.HandleFunc("GET /api/v1/auth/oidc/callback", h.handleOIDCCallback)
-	return a.guard.guard(mux)
+	return mux
+}
+
+// Guard wraps a handler in the /api/v1 guard: CORS, session resolution
+// (Principal on the context), 401 on unauthenticated writes, CSRF on
+// session-bearing writes. Every state-changing product route inherits this
+// by being mounted inside it.
+func (a *API) Guard(next http.Handler) http.Handler {
+	return a.guard.guard(next)
 }
 
 // hostOf extracts the host part of an origin URL ("http://x:3000" -> "x:3000").

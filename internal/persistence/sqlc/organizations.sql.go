@@ -13,9 +13,9 @@ import (
 
 const addOrganizationMembership = `-- name: AddOrganizationMembership :exec
 INSERT INTO organization_memberships
-    (organization_id, user_id, role, affiliation_start, affiliation_end)
+    (organization_id, user_id, role, affiliation_start, affiliation_end, verified)
 VALUES
-    ($1, $2, $3, $4, $5)
+    ($1, $2, $3, $4, $5, $6)
 `
 
 type AddOrganizationMembershipParams struct {
@@ -24,6 +24,7 @@ type AddOrganizationMembershipParams struct {
 	Role             string      `json:"role"`
 	AffiliationStart pgtype.Date `json:"affiliation_start"`
 	AffiliationEnd   pgtype.Date `json:"affiliation_end"`
+	Verified         bool        `json:"verified"`
 }
 
 func (q *Queries) AddOrganizationMembership(ctx context.Context, arg AddOrganizationMembershipParams) error {
@@ -33,15 +34,28 @@ func (q *Queries) AddOrganizationMembership(ctx context.Context, arg AddOrganiza
 		arg.Role,
 		arg.AffiliationStart,
 		arg.AffiliationEnd,
+		arg.Verified,
 	)
 	return err
+}
+
+const countActiveOrganizationOwners = `-- name: CountActiveOrganizationOwners :one
+SELECT count(*) FROM organization_memberships
+WHERE organization_id = $1 AND role = 'owner' AND affiliation_end IS NULL
+`
+
+func (q *Queries) CountActiveOrganizationOwners(ctx context.Context, organizationID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveOrganizationOwners, organizationID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const createOrganization = `-- name: CreateOrganization :one
 
 INSERT INTO organizations (slug, name, description)
 VALUES ($1, $2, $3)
-RETURNING id, slug, name, description, created_at
+RETURNING id, slug, name, description, created_at, deactivated_at
 `
 
 type CreateOrganizationParams struct {
@@ -51,7 +65,7 @@ type CreateOrganizationParams struct {
 }
 
 // Organizations and memberships (canonical tables: organizations,
-// organization_memberships).
+// organization_memberships; 00017 adds organizations.deactivated_at).
 func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error) {
 	row := q.db.QueryRow(ctx, createOrganization, arg.Slug, arg.Name, arg.Description)
 	var i Organization
@@ -61,12 +75,66 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		&i.Name,
 		&i.Description,
 		&i.CreatedAt,
+		&i.DeactivatedAt,
+	)
+	return i, err
+}
+
+const deactivateOrganization = `-- name: DeactivateOrganization :one
+UPDATE organizations
+SET deactivated_at = now()
+WHERE id = $1
+RETURNING id, slug, name, description, created_at, deactivated_at
+`
+
+func (q *Queries) DeactivateOrganization(ctx context.Context, id pgtype.UUID) (Organization, error) {
+	row := q.db.QueryRow(ctx, deactivateOrganization, id)
+	var i Organization
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.DeactivatedAt,
+	)
+	return i, err
+}
+
+const endOrganizationAffiliation = `-- name: EndOrganizationAffiliation :one
+UPDATE organization_memberships
+SET affiliation_end = $1
+WHERE organization_id = $2 AND user_id = $3
+RETURNING organization_id, user_id, role, affiliation_start, affiliation_end, verified
+`
+
+type EndOrganizationAffiliationParams struct {
+	AffiliationEnd pgtype.Date `json:"affiliation_end"`
+	OrganizationID pgtype.UUID `json:"organization_id"`
+	UserID         pgtype.UUID `json:"user_id"`
+}
+
+// Stamps affiliation_end and keeps the row (离职不删除历史 — history is
+// never deleted, docs/04 §6). The store only executes this for
+// still-open affiliations (it reads the row first under the organization
+// lock): ending an already-ended membership is a no-op, so the historical
+// end date is never re-stamped.
+func (q *Queries) EndOrganizationAffiliation(ctx context.Context, arg EndOrganizationAffiliationParams) (OrganizationMembership, error) {
+	row := q.db.QueryRow(ctx, endOrganizationAffiliation, arg.AffiliationEnd, arg.OrganizationID, arg.UserID)
+	var i OrganizationMembership
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.UserID,
+		&i.Role,
+		&i.AffiliationStart,
+		&i.AffiliationEnd,
+		&i.Verified,
 	)
 	return i, err
 }
 
 const getOrganizationByID = `-- name: GetOrganizationByID :one
-SELECT id, slug, name, description, created_at FROM organizations WHERE id = $1
+SELECT id, slug, name, description, created_at, deactivated_at FROM organizations WHERE id = $1
 `
 
 func (q *Queries) GetOrganizationByID(ctx context.Context, id pgtype.UUID) (Organization, error) {
@@ -78,12 +146,33 @@ func (q *Queries) GetOrganizationByID(ctx context.Context, id pgtype.UUID) (Orga
 		&i.Name,
 		&i.Description,
 		&i.CreatedAt,
+		&i.DeactivatedAt,
+	)
+	return i, err
+}
+
+const getOrganizationByIDForUpdate = `-- name: GetOrganizationByIDForUpdate :one
+SELECT id, slug, name, description, created_at, deactivated_at FROM organizations WHERE id = $1 FOR UPDATE
+`
+
+// Row-locks the organization: governance writes serialize on this lock, so
+// the last-owner check and the change that depends on it are atomic.
+func (q *Queries) GetOrganizationByIDForUpdate(ctx context.Context, id pgtype.UUID) (Organization, error) {
+	row := q.db.QueryRow(ctx, getOrganizationByIDForUpdate, id)
+	var i Organization
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.DeactivatedAt,
 	)
 	return i, err
 }
 
 const getOrganizationBySlug = `-- name: GetOrganizationBySlug :one
-SELECT id, slug, name, description, created_at FROM organizations WHERE slug = $1
+SELECT id, slug, name, description, created_at, deactivated_at FROM organizations WHERE slug = $1
 `
 
 func (q *Queries) GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error) {
@@ -95,12 +184,70 @@ func (q *Queries) GetOrganizationBySlug(ctx context.Context, slug string) (Organ
 		&i.Name,
 		&i.Description,
 		&i.CreatedAt,
+		&i.DeactivatedAt,
 	)
 	return i, err
 }
 
+const getOrganizationMembership = `-- name: GetOrganizationMembership :one
+SELECT organization_id, user_id, role, affiliation_start, affiliation_end, verified FROM organization_memberships
+WHERE organization_id = $1 AND user_id = $2
+`
+
+type GetOrganizationMembershipParams struct {
+	OrganizationID pgtype.UUID `json:"organization_id"`
+	UserID         pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) GetOrganizationMembership(ctx context.Context, arg GetOrganizationMembershipParams) (OrganizationMembership, error) {
+	row := q.db.QueryRow(ctx, getOrganizationMembership, arg.OrganizationID, arg.UserID)
+	var i OrganizationMembership
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.UserID,
+		&i.Role,
+		&i.AffiliationStart,
+		&i.AffiliationEnd,
+		&i.Verified,
+	)
+	return i, err
+}
+
+const listOrganizationMemberships = `-- name: ListOrganizationMemberships :many
+SELECT organization_id, user_id, role, affiliation_start, affiliation_end, verified FROM organization_memberships
+WHERE organization_id = $1
+ORDER BY affiliation_end NULLS FIRST, affiliation_start DESC, user_id
+`
+
+func (q *Queries) ListOrganizationMemberships(ctx context.Context, organizationID pgtype.UUID) ([]OrganizationMembership, error) {
+	rows, err := q.db.Query(ctx, listOrganizationMemberships, organizationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrganizationMembership
+	for rows.Next() {
+		var i OrganizationMembership
+		if err := rows.Scan(
+			&i.OrganizationID,
+			&i.UserID,
+			&i.Role,
+			&i.AffiliationStart,
+			&i.AffiliationEnd,
+			&i.Verified,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrganizations = `-- name: ListOrganizations :many
-SELECT id, slug, name, description, created_at FROM organizations
+SELECT id, slug, name, description, created_at, deactivated_at FROM organizations
 ORDER BY created_at, id
 LIMIT $2 OFFSET $1
 `
@@ -125,6 +272,7 @@ func (q *Queries) ListOrganizations(ctx context.Context, arg ListOrganizationsPa
 			&i.Name,
 			&i.Description,
 			&i.CreatedAt,
+			&i.DeactivatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -134,4 +282,110 @@ func (q *Queries) ListOrganizations(ctx context.Context, arg ListOrganizationsPa
 		return nil, err
 	}
 	return items, nil
+}
+
+const listOrganizationsForUser = `-- name: ListOrganizationsForUser :many
+SELECT o.id, o.slug, o.name, o.description, o.created_at, o.deactivated_at
+FROM organizations o
+JOIN organization_memberships m ON m.organization_id = o.id
+WHERE m.user_id = $1 AND m.affiliation_end IS NULL
+ORDER BY o.created_at DESC, o.id
+`
+
+// Organizations the user currently belongs to (open affiliation), most
+// recently created first.
+func (q *Queries) ListOrganizationsForUser(ctx context.Context, userID pgtype.UUID) ([]Organization, error) {
+	rows, err := q.db.Query(ctx, listOrganizationsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Organization
+	for rows.Next() {
+		var i Organization
+		if err := rows.Scan(
+			&i.ID,
+			&i.Slug,
+			&i.Name,
+			&i.Description,
+			&i.CreatedAt,
+			&i.DeactivatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateOrganization = `-- name: UpdateOrganization :one
+UPDATE organizations
+SET name = $1, description = $2
+WHERE id = $3
+RETURNING id, slug, name, description, created_at, deactivated_at
+`
+
+type UpdateOrganizationParams struct {
+	Name        string      `json:"name"`
+	Description *string     `json:"description"`
+	ID          pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateOrganization(ctx context.Context, arg UpdateOrganizationParams) (Organization, error) {
+	row := q.db.QueryRow(ctx, updateOrganization, arg.Name, arg.Description, arg.ID)
+	var i Organization
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.DeactivatedAt,
+	)
+	return i, err
+}
+
+const updateOrganizationMembership = `-- name: UpdateOrganizationMembership :one
+UPDATE organization_memberships
+SET role = $1,
+    affiliation_start = $2,
+    verified = $3
+WHERE organization_id = $4 AND user_id = $5
+RETURNING organization_id, user_id, role, affiliation_start, affiliation_end, verified
+`
+
+type UpdateOrganizationMembershipParams struct {
+	Role             string      `json:"role"`
+	AffiliationStart pgtype.Date `json:"affiliation_start"`
+	Verified         bool        `json:"verified"`
+	OrganizationID   pgtype.UUID `json:"organization_id"`
+	UserID           pgtype.UUID `json:"user_id"`
+}
+
+// Adjusts role/affiliation_start/verified. affiliation_end is deliberately
+// NOT a column of this statement: it is written exclusively by
+// EndOrganizationAffiliation, so no adjustment path can clear or re-stamp
+// a departure date (离职不删除历史 — the historical end date survives by
+// construction, whatever the caller passes).
+func (q *Queries) UpdateOrganizationMembership(ctx context.Context, arg UpdateOrganizationMembershipParams) (OrganizationMembership, error) {
+	row := q.db.QueryRow(ctx, updateOrganizationMembership,
+		arg.Role,
+		arg.AffiliationStart,
+		arg.Verified,
+		arg.OrganizationID,
+		arg.UserID,
+	)
+	var i OrganizationMembership
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.UserID,
+		&i.Role,
+		&i.AffiliationStart,
+		&i.AffiliationEnd,
+		&i.Verified,
+	)
+	return i, err
 }
