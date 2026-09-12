@@ -48,20 +48,20 @@
       "merged_at": "2026-09-12T15:10:00Z"
     },
     "T0005": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-12T14:45:00Z",
-      "completed_at": null,
-      "notes": "Dispatched in parallel with T0004 with an explicit per-task Docker grant (real PostgreSQL required by its integration test per docs/67 G3), COMPOSE_PROJECT_NAME=posttask-t0005. go.mod/go.sum added to scope; Makefile explicitly out of scope.",
+      "completed_at": "2026-09-12T15:40:00Z",
+      "notes": "G2/G3 accepted independently; merged as PR #19 (squash) at 44a21bb. 56/56 paths in scope. Supervisor ran the integration suite against real PostgreSQL: 7 tests, 88 assertions, all PASS; verified the sqlc drift check in BOTH modes (tampered->exit 1, restored->exit 0); applied all 13 migrations to a scratch DB. NOTE: verification exposed a spec-level gap - version rows are MUTABLE (UPDATE succeeds), contradicting Master Gate A. Not a T0005 defect (canonical schema declares no immutability mechanism); raised as SPEC_BLOCKED, see decisions.md L2-SPEC-20260912-15.",
       "worker_run_id": "worker-T0005-77ee212",
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "accepted_by_supervisor_at": "2026-09-12T15:40:00Z",
+      "merged_at": "2026-09-12T15:45:00Z"
     },
     "T0006": {
-      "status": "todo",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-09-12T15:48:00Z",
       "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
+      "notes": "Dispatched in parallel with T0009. Scope excludes cmd/rddev/** and internal/devorchestrator/** (T0009 owns them). Carries three REQUIRED carry-over fixes from T0004 (decisions.md L1-20260912-14): wire internal/config into cmd/api, wire loadWebConfig into apps/web/app/page.tsx removing silent localhost fallbacks, and resolve the port 9000 collision.",
+      "worker_run_id": "worker-T0006-44a21bb",
       "accepted_by_supervisor_at": null,
       "merged_at": null
     },

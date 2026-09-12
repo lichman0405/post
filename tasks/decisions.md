@@ -357,6 +357,54 @@ follow-up 列表里：
 **理由**：README/规格声称的行为与实际运行时行为不一致，属于"看起来通过、实际没有生效"的失效模式——
 与本轮安全 review 反复暴露的模式同类（`L1-20260912-12` 第 3 条）。宁可把它变成阻塞性验收项。
 
+## L2-SPEC-20260912-15 — ★ 待 owner 裁定：版本历史在存储层可变（Master Gate A 不变量未被强制）
+
+**发现方式**：T0005 G2/G3 验收时，Supervisor 把 13 个 migration 应用到 scratch 数据库后**直接做了
+一次历史改写尝试**（不是读代码推断）：
+
+```sql
+UPDATE scientific_object_versions SET title='REWRITTEN HISTORY', integrity_hash='tampered';
+-- UPDATE 1        ← 成功
+```
+
+即**已提交的版本行可以被原地修改**。`ON DELETE RESTRICT` 只阻止*删除*被引用的行，不阻止*修改*。
+
+**这不是 T0005 的缺陷**：canonical schema `specs/database/postgres.sql` 中**没有任何**不可变性
+机制（append/immutable/trigger/rule/revoke 全部 0 匹配），而 T0005 的要求是**忠实移植**该 schema
+——Worker 做到了，并用 SQLSTATE 断言（23503/23505）真实测试了约束。Supervisor 独立复核确认移植无误。
+
+**但它与以下既定要求冲突**：
+- `CLAUDE.md` §9 不变量 5「Release / Asset Version immutable」、不变量 8「Nothing disappears;
+  state only evolves」；
+- `docs/adr/ADR-007-append-only-abort.md`；
+- **`docs/31_MASTER_ACCEPTANCE.md` Gate A**：「Object/relation 版本不可改写历史」。
+
+**为什么不由 Supervisor 自行修复**：如何在存储层强制不可变性是一个**存储边界 + 科研完整性**决策，
+至少属 L2（`CLAUDE.md` §5：跨模块接口、存储边界必须新增/更新 ADR，不得静默改变既定架构），其中
+"版本不可改写历史"属科研语义，触及 L3。可选项各有实质取舍：
+1. `BEFORE UPDATE/DELETE` 触发器（改动最小，但触发器对批量操作与 superuser 的语义需明确）；
+2. `REVOKE UPDATE, DELETE` 配合只写角色（更彻底，但要求应用连接使用受限角色，影响连接配置）；
+3. 改为 append-only 表设计 / 事件日志投影（改动最大，与 ADR-021 相关）。
+
+**因此标记为 `SPEC_BLOCKED`，等待 owner 决定**，不影响其他任务继续执行（T0006/T0009 与其无关）。
+
+**影响面**：所有依赖"版本不可改写"的能力——Research PR 的 RSG diff 可信性、Release 的
+immutable pinning、Audit/证据链。V1 Master Gate A 在此项通过前不应判为满足。
+
+## L1-20260912-16 — guard/collect 第四次误报：refs 比对把 Supervisor 自己的分支操作判成 Worker 违规
+
+T0005 collect 报 `refs changed`，实际是 **Supervisor 自己**在 Worker 运行期间合并并删除了
+`refs/heads/task/T0004-config-secrets`、又新建了 `refs/heads/task/T0009-rddev-cli`。该 Worker 未做
+任何 git 操作。
+
+**修复**：refs 比对排除 `refs/remotes/**`（共享）与 `refs/heads/task/**`（Supervisor 的 task
+分支命名空间）。**并做了双向验证**：修好后误报消失；我**故意植入** `refs/heads/worker-created-evil`
+后 collect 立刻 REJECTED，删除后恢复 COLLECTED——即真实越界仍会被抓住，不是把检查关掉。
+
+这已是隔离层第四次"拦截过宽"。规律已记录在 `L1-20260912-13`：**共享资源（git ref store、宿主
+环境）上写的检查，必须区分"Supervisor 的正常活动"与"Worker 的越界"**，否则会产生系统性误报，
+而误报会训练出"忽略红灯"的习惯——那比漏报更危险。
+
 ---
 
 ## 环境发现（非决策，必须显式记录）
