@@ -1,0 +1,29 @@
+# sqlc configuration (docs/68: pgx + sqlc).
+#
+# Schema input is the migration set itself (infra/migrations) — the generated
+# code always matches what migrations actually ship, never a shadow copy of
+# the canonical schema. Queries are explicit SQL under internal/persistence/queries.
+#
+# Generated code is CHECKED IN under internal/persistence/sqlc. After editing
+# any query or migration, run:
+#
+#   sqlc generate          # v1.31.1 (pin recorded in infra/migrations/README.md)
+#   tests/integration/check-sqlc-drift.sh
+#
+# The drift check regenerates and fails if the checked-in code does not match.
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "infra/migrations"
+    queries: "internal/persistence/queries"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/persistence/sqlc"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_pointers_for_null_types: true
+        emit_enum_valid_method: true
+        emit_all_enum_values: true
+        emit_interface: true
+        omit_unused_structs: true
