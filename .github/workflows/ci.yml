@@ -84,7 +84,7 @@ jobs:
         with:
           node-version: '24'
       - name: "web: install (pnpm via corepack, frozen lockfile)"
-        run: corepack enable && pnpm install --frozen-lockfile
+        run: corepack enable pnpm && pnpm install --frozen-lockfile
       - name: "web: typecheck @post/ui"
         run: pnpm --filter @post/ui typecheck
       - name: "web: typecheck @post/web"

@@ -1093,3 +1093,38 @@ ok   real PostgreSQL (...): ready                  <- 证明没有矫枉过正
 用 `$(...)` 捕获，而后台进程持有那个管道不关闭，命令替换会一直等到进程退出——测试自己把自己挂住。
 改成"listener 把端口写进文件、调用方读文件"，端口在 `listen()` 之后才写出，因此读到端口即已可连接。
 **"捕获一个后台进程的输出"和"等待一个后台进程"是同一件事**，这在这里是不想要的。
+
+## L1-20260912-38 — G2 的第一次真实执行，抓到一个只在本地才失败的门
+
+**背景**：`rddev task accept T0101` 是**这个仓库第一次真正运行 G2**。此前 P0 的 13 个任务是我手工验收
+的，`.rddev/runtime/gates/T00*` 下没有任何 G2 记录——T0012 交付的 G2 机制有 e2e 覆盖，但**从未对
+一个真实任务执行过**。它第一次跑就红了，而且红得很有价值。
+
+**失败**：
+
+```
+web step 0: corepack enable && pnpm install --frozen-lockfile
+  Internal Error: EACCES: permission denied, symlink
+  '../lib/node_modules/corepack/dist/yarn.js' -> '/usr/bin/yarn'
+```
+
+**根因**：`corepack enable` 不带参数时会给**所有**已知包管理器建符号链接，包括 **yarn**。
+`/usr/bin` 需要 root 才能写；本机 `/usr/bin/pnpm` 与 `/usr/bin/pnpx` 已存在（12:00 建好），
+**唯独 `/usr/bin/yarn` 缺失**，于是整条命令以 EACCES 失败——**而这个仓库根本不用 yarn**
+（`package.json` 只声明 `"packageManager": "pnpm@12.4.1"`）。
+
+**这不是 T0101 的缺陷，也不是"本机环境坏了"**：`Makefile`/`local ci.sh` 的 web 阶段**根本不包含
+这一步**（`stage_web` 从 `pnpm typecheck` 开始），所以本地复刻一直是绿的；
+只有 G2（严格照抄 CI 的 step 列表）才会走到它。**"本地复刻绿"与"CI 绿"在这里不是同一个命题。**
+
+**处置**：把这一步改成 `corepack enable pnpm && pnpm install --frozen-lockfile`
+（`ci.yml` 与 `gates.json` 同步，SPEC_VERSION 重算）。理由不是"绕过错误"，而是
+**这一步的目标是让 pnpm 可用，而 yarn 从不在目标内**：让一个仓库不使用的包管理器的符号链接失败
+去阻塞整条流水线，是纯粹的脆弱性。已实测 `corepack enable pnpm` 在本机 rc=0 且 `pnpm --version` 正常。
+
+**教训（与 rework 的 `--session-id` 是同一个）**：**只被 fixture 覆盖的机制等于没被执行过。**
+T0012 的 e2e 用假 `gh`、假 `git`、假 `claude` 演示了四层 Gate 的**逻辑**；
+但 G2 的 step 列表是**真实的 CI 命令**，一旦真的去跑，环境依赖就暴露了。
+"机制有测试"和"机制跑过"是两件事——这已经是本会话第三次遇到同一形状
+（`--output-format stream-json` 需要 `--verbose`、rework 的 `--session-id`、这次的 `corepack enable`），
+三次都是**第一次遇到真实二进制/真实环境时**才发现。
