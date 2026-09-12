@@ -38,7 +38,8 @@
             "enum": [
               "spec_not_canonical", "expectation_unrecorded", "expectation_invalid",
               "remote_not_canonical", "remote_unparseable", "remote_unverifiable", "remote_missing",
-              "branch_mismatch", "visibility_mismatch", "visibility_unverifiable",
+              "branch_mismatch", "branch_unverifiable",
+              "visibility_mismatch", "visibility_unverifiable",
               "version_stale", "version_missing", null
             ]
           }

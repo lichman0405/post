@@ -41,15 +41,30 @@ host or the network. In fixture mode NO real git/gh command is executed:
   git-remote-get-url.txt  raw `git remote get-url origin` output
   origin-head.txt         raw `git symbolic-ref refs/remotes/origin/HEAD`
                           output (e.g. 'refs/remotes/origin/main')
+  default-branch.txt      authoritative remote default branch
   visibility.txt          observed visibility: public|private|internal|
                           unknown
   gh-visibility.txt       raw `gh api ... --jq .visibility` output
+                          (used when --check-visibility is set)
+  gh-default-branch.txt   raw `gh api ... --jq .default_branch` output
                           (used when --check-visibility is set)
 
 --observed-visibility VALUE takes precedence over fixtures and the gh
 probe (it is the operator's explicit statement of what they observed).
 Output: human lines, or --json per specs/orchestrator/
 source-repo-preflight.schema.json.
+
+Credential safety: a remote URL may embed a token
+(`https://x-access-token:ghp_...@github.com/o/n.git`, as CI checkouts do).
+Every URL that reaches `measured`/`detail` is passed through
+speclib.redact_url() first, so tokens never land in stdout, the --json
+document, or CI logs.
+
+Branch enforcement: BRANCH-DEFAULT is a *gating* check. The local
+origin/HEAD record is commonly absent (CI checkouts, fresh clones), so the
+operator opt-in also resolves the authoritative remote default branch via
+`gh api ... --jq .default_branch`; if neither source can determine it, the
+verdict refuses rather than blessing a push over an unverified branch.
 """
 import argparse
 import json
@@ -286,7 +301,7 @@ def run_preflight(root, spec_path, fixture_dir, observed_flag,
             checks.append(speclib.make_check(
                 "REPO-CANONICAL", "origin remote normalizes to the canonical "
                 "owner/name",
-                "failed", source, origin, f"origin -> {canonical}",
+                "failed", source, speclib.redact_url(origin), f"origin -> {canonical}",
                 "origin URL is not a recognizable GitHub owner/name URL",
                 gating=True, block_reason="remote_unparseable"))
         elif norm["full_name"].lower() != canonical.lower():
@@ -294,7 +309,8 @@ def run_preflight(root, spec_path, fixture_dir, observed_flag,
                 "REPO-CANONICAL", "origin remote normalizes to the canonical "
                 "owner/name",
                 "failed", source, norm["full_name"], canonical,
-                f"origin '{origin}' normalizes to {norm['full_name']}, "
+                f"origin '{speclib.redact_url(origin)}' normalizes to "
+                f"{norm['full_name']}, "
                 f"not canonical {canonical} (docs/69 §2)",
                 gating=True, block_reason="remote_not_canonical"))
         else:
@@ -302,41 +318,72 @@ def run_preflight(root, spec_path, fixture_dir, observed_flag,
                 "REPO-CANONICAL", "origin remote normalizes to the canonical "
                 "owner/name",
                 "passed", source, norm["full_name"], canonical,
-                f"origin '{origin}' ({norm['form']} form) normalizes to "
+                f"origin '{speclib.redact_url(origin)}' "
+                f"({norm['form']} form) normalizes to "
                 f"{norm['full_name']}",
                 gating=True))
 
-    # BRANCH-DEFAULT — observed integration branch vs. spec default_branch.
+    # BRANCH-DEFAULT — the integration branch must be *verifiable* and match.
+    # The local origin/HEAD record is routinely absent (CI checkouts, fresh
+    # clones), so fall back to the authoritative remote answer that the
+    # operator opt-in unlocks. Unknown is gating: a gate that cannot verify
+    # the integration branch must refuse, exactly as the visibility gate
+    # does — a push blessed over an unverified branch is not verifiable.
     if fixture_dir is not None:
         txt = speclib.fixture_text(fixture_dir,
                                    speclib.FIXTURE_FILES["origin_head"])
         ref = speclib.parse_get_url_output(txt) if txt is not None else ""
         source = "fixture"
+        detail = "fixture mode: no origin-head.txt provided"
     else:
         source, ref, detail = speclib.capture_origin_head(root)
-    if ref:
-        observed_branch = ref.rsplit("/", 1)[-1]
-        if observed_branch == default_branch:
+    local_branch = ref.rsplit("/", 1)[-1] if ref else ""
+
+    auth_branch, auth_source, auth_detail = speclib.resolve_default_branch(
+        fixture_dir, check_visibility, owner, name)
+
+    # `expected` must always be a string for the report; an unrecorded
+    # default_branch is already a gating failure via SPEC-CANONICAL.
+    expected_branch = (str(default_branch)
+                       if isinstance(default_branch, str) and default_branch
+                       else "<unrecorded>")
+
+    if local_branch and auth_branch and local_branch != auth_branch:
+        checks.append(speclib.make_check(
+            "BRANCH-DEFAULT", "integration branch matches spec "
+            "default_branch",
+            "failed", f"{source}+{auth_source}", local_branch, expected_branch,
+            f"state drift: local origin/HEAD records '{local_branch}' but the "
+            f"remote reports '{auth_branch}'",
+            gating=True, block_reason="branch_mismatch"))
+    else:
+        observed_branch = local_branch or auth_branch
+        observed_source = source if local_branch else auth_source
+        observed_detail = (f"origin/HEAD -> {ref}" if local_branch
+                           else auth_detail)
+        if not observed_branch:
             checks.append(speclib.make_check(
                 "BRANCH-DEFAULT", "integration branch matches spec "
                 "default_branch",
-                "passed", source, observed_branch, default_branch,
-                f"origin/HEAD -> {ref}"))
+                "unknown", observed_source, "", expected_branch,
+                f"{detail}; cannot verify the integration branch "
+                f"(no determinable source) — refusing to bless",
+                gating=True, block_reason="branch_unverifiable"))
+        elif observed_branch == default_branch:
+            checks.append(speclib.make_check(
+                "BRANCH-DEFAULT", "integration branch matches spec "
+                "default_branch",
+                "passed", observed_source, observed_branch, expected_branch,
+                observed_detail))
         else:
             checks.append(speclib.make_check(
                 "BRANCH-DEFAULT", "integration branch matches spec "
                 "default_branch",
-                "failed", source, observed_branch, default_branch,
-                f"origin/HEAD ({ref}) records branch {observed_branch}, "
-                f"spec default_branch is {default_branch}",
+                "failed", observed_source, observed_branch, expected_branch,
+                f"integration branch is '{observed_branch}' "
+                f"({observed_detail}), spec default_branch is "
+                f"'{default_branch}'",
                 gating=True, block_reason="branch_mismatch"))
-    else:
-        checks.append(speclib.make_check(
-            "BRANCH-DEFAULT", "integration branch matches spec "
-            "default_branch",
-            "unknown", source, "", default_branch,
-            detail or ("origin/HEAD not determinable; reported only, "
-                       "not enforced"), gating=False))
 
     # VISIBILITY — the three-way model verdict (docs/69 §5).
     if not exp_valid:

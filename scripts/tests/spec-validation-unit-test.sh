@@ -318,6 +318,77 @@ else
 fi
 
 # ==========================================================================
+# Regression: BRANCH-DEFAULT must FAIL CLOSED (security review finding
+# "fail-open-state-drift"). A gate that cannot verify the integration branch
+# must refuse, exactly as VISIBILITY does, instead of reporting it and
+# blessing the push anyway.
+
+# -- branch undeterminable from either source -> gating refusal
+FIX="$WORK/pf-branch-unknown"; mkfix "$FIX" 1 canon
+printf 'private\n' > "$FIX/visibility.txt"
+# no origin-head.txt, no default-branch.txt
+run_pf branch-unknown "$FIX" "$FIX/source-repository.yaml"
+assert_eq "pf branch-unknown: exit code" "1" "$RC"
+assert_eq "pf branch-unknown: BRANCH-DEFAULT status" "unknown" "$(find_check "$OUT" BRANCH-DEFAULT status)"
+assert_eq "pf branch-unknown: BRANCH-DEFAULT gating" "True" "$(find_check "$OUT" BRANCH-DEFAULT gating)"
+assert_contains "pf branch-unknown: reason is branch_unverifiable" "$OUT" "branch_unverifiable"
+assert_eq "pf branch-unknown: push_blessing" "refused" "$(jget "$OUT" verdict push_blessing)"
+
+# -- authoritative remote default branch resolves it -> pass
+FIX="$WORK/pf-branch-remote"; mkfix "$FIX" 1 canon
+printf 'private\n' > "$FIX/visibility.txt"
+printf 'main\n' > "$FIX/default-branch.txt"
+run_pf branch-remote "$FIX" "$FIX/source-repository.yaml"
+assert_eq "pf branch-remote: exit code" "0" "$RC"
+assert_eq "pf branch-remote: BRANCH-DEFAULT status" "passed" "$(find_check "$OUT" BRANCH-DEFAULT status)"
+assert_eq "pf branch-remote: BRANCH-DEFAULT source" "fixture" "$(find_check "$OUT" BRANCH-DEFAULT source)"
+
+# -- state drift: local origin/HEAD and the remote disagree -> refuse
+FIX="$WORK/pf-branch-drift"; mkfix "$FIX" 1 canon
+printf 'private\n' > "$FIX/visibility.txt"
+printf 'refs/remotes/origin/main\n' > "$FIX/origin-head.txt"
+printf 'release\n' > "$FIX/default-branch.txt"
+run_pf branch-drift "$FIX" "$FIX/source-repository.yaml"
+assert_eq "pf branch-drift: exit code" "1" "$RC"
+assert_eq "pf branch-drift: BRANCH-DEFAULT status" "failed" "$(find_check "$OUT" BRANCH-DEFAULT status)"
+assert_contains "pf branch-drift: reason is branch_mismatch" "$OUT" "branch_mismatch"
+assert_contains "pf branch-drift: detail names the drift" "$OUT" "state drift"
+
+# -- determinable mismatch still blocks
+FIX="$WORK/pf-branch-wrong"; mkfix "$FIX" 1 canon
+printf 'private\n' > "$FIX/visibility.txt"
+printf 'refs/remotes/origin/develop\n' > "$FIX/origin-head.txt"
+run_pf branch-wrong "$FIX" "$FIX/source-repository.yaml"
+assert_eq "pf branch-wrong: exit code" "1" "$RC"
+assert_eq "pf branch-wrong: BRANCH-DEFAULT status" "failed" "$(find_check "$OUT" BRANCH-DEFAULT status)"
+
+# ==========================================================================
+# Regression: remote URLs with embedded credentials must never be emitted
+# (security review finding "sensitive-data-to-observability"). CI checkouts
+# commonly use https://x-access-token:<PAT>@github.com/owner/name.git.
+
+FIX="$WORK/pf-redact"; mkfix "$FIX" 1 canon
+printf 'private\n' > "$FIX/visibility.txt"
+printf 'refs/remotes/origin/main\n' > "$FIX/origin-head.txt"
+printf 'origin\thttps://x-access-token:ghp_FAKEsecretTOKEN123@github.com/lichman0405/post.git (fetch)\norigin\thttps://x-access-token:ghp_FAKEsecretTOKEN123@github.com/lichman0405/post.git (push)\n' > "$FIX/git-remote-v.txt"
+run_pf redact "$FIX" "$FIX/source-repository.yaml"
+assert_eq "pf redact: still blesses the canonical repo" "0" "$RC"
+assert_eq "pf redact: REPO-CANONICAL passed" "passed" "$(find_check "$OUT" REPO-CANONICAL status)"
+assert_absent "pf redact: token absent from --json output" "$OUT" "ghp_FAKEsecretTOKEN123"
+"$PREFLIGHT" --spec "$FIX/source-repository.yaml" --fixture "$FIX" \
+  >"$WORK/pf-redact.human" 2>/dev/null
+assert_absent "pf redact: token absent from human output" "$WORK/pf-redact.human" "ghp_FAKEsecretTOKEN123"
+assert_contains "pf redact: redaction marker present" "$WORK/pf-redact.human" "***"
+
+# -- unparseable URL with credentials must also be redacted on the failure path
+FIX="$WORK/pf-redact-bad"; mkfix "$FIX" 1 canon
+printf 'private\n' > "$FIX/visibility.txt"
+printf 'origin\thttps://user:ghp_FAKEsecretTOKEN456@gitlab.example.com/o/n.git (fetch)\norigin\thttps://user:ghp_FAKEsecretTOKEN456@gitlab.example.com/o/n.git (push)\n' > "$FIX/git-remote-v.txt"
+run_pf redact-bad "$FIX" "$FIX/source-repository.yaml"
+assert_eq "pf redact-bad: exit code" "1" "$RC"
+assert_absent "pf redact-bad: token absent from --json output" "$OUT" "ghp_FAKEsecretTOKEN456"
+
+# ==========================================================================
 echo
 if [[ "$FAILS" == 0 ]]; then
   echo "ALL UNIT TESTS PASSED"
