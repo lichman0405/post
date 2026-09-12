@@ -1,8 +1,11 @@
 package devorchestrator
 
 import (
+	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -313,12 +316,60 @@ func RunGitControl(opts *GitControlOpts, action string) (*GitActionResult, error
 	return nil, fmt.Errorf("unknown git action %q (valid: commit, push, pr-open, pr-merge)", action)
 }
 
-// taskWorktreeDiff returns the diff text of the task worktree against its
-// baseline (used by the review prompt renderer).
+// taskWorktreeDiff returns the COMPLETE change in the task worktree against
+// its baseline: the tracked diff plus every untracked file, which `git diff`
+// omits entirely (used by the review prompt renderer).
+//
+// The omission is not cosmetic. A task that adds files adds them untracked, so
+// the review input described a fraction of the work: T0101's diff.txt carried
+// 9 of its 39 changed paths, and a Reviewer that trusted the document would
+// have reviewed under a quarter of the change and been entitled to approve the
+// rest unseen. The second Reviewer noticed and read the worktree instead —
+// which is exactly the diligence a review input must not depend on.
 func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
 	out, err := gitOutput(rec.Worktree, "diff", rec.BaselineSHA, "--")
 	if err != nil {
 		return "", fmt.Errorf("diffing the worktree against the baseline: %w", err)
 	}
-	return out, nil
+	untracked, err := gitOutput(rec.Worktree, "ls-files", "--others", "--exclude-standard")
+	if err != nil {
+		return "", fmt.Errorf("listing untracked files for the review diff: %w", err)
+	}
+	var b strings.Builder
+	if out != "" {
+		b.WriteString(out)
+		b.WriteString("\n")
+	}
+	for _, p := range strings.Split(untracked, "\n") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		abs := filepath.Join(rec.Worktree, p)
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			return "", fmt.Errorf("reading untracked %s for the review diff: %w", p, err)
+		}
+		mode := "100644"
+		if st, err := os.Stat(abs); err == nil && st.Mode()&0o111 != 0 {
+			mode = "100755"
+		}
+		fmt.Fprintf(&b, "diff --git a/%s b/%s\nnew file mode %s\n--- /dev/null\n+++ b/%s\n", p, p, mode, p)
+		// A NUL byte means Git would call it binary; say so rather than emit a
+		// body that is not a valid patch.
+		if bytes.IndexByte(data, 0) >= 0 {
+			fmt.Fprintf(&b, "Binary files /dev/null and b/%s differ\n", p)
+			continue
+		}
+		body := strings.TrimSuffix(string(data), "\n")
+		if body == "" {
+			continue
+		}
+		lines := strings.Split(body, "\n")
+		fmt.Fprintf(&b, "@@ -0,0 +1,%d @@\n", len(lines))
+		for _, l := range lines {
+			b.WriteString("+" + l + "\n")
+		}
+	}
+	return b.String(), nil
 }
