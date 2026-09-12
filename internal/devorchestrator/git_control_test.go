@@ -145,3 +145,55 @@ func TestGateRefusalErrorMessage(t *testing.T) {
 		t.Errorf("error = %q, want action and all reasons", msg)
 	}
 }
+
+// The review input must be the COMPLETE change. `git diff` shows only tracked
+// changes, and a task that adds files adds them untracked — so T0101's
+// diff.txt carried 9 of its 39 changed paths, and a Reviewer trusting the
+// document would have reviewed under a quarter of the work. The Reviewer that
+// caught this read the worktree instead; the document must not depend on that.
+func TestWorktreeDiffIncludesUntrackedFiles(t *testing.T) {
+	dir := t.TempDir()
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init", "-q")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "-A")
+	runGit("commit", "-q", "-m", "baseline")
+	baseline := runGit("rev-parse", "HEAD")
+
+	// One tracked modification and one NEW file, as a real task has.
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("after\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	newFile := filepath.Join(dir, "new_auth_test.go")
+	if err := os.WriteFile(newFile, []byte("package x\n\nfunc TestX(t *testing.T) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := taskWorktreeDiff(&WorkerRecord{Worktree: dir, BaselineSHA: baseline})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "after") {
+		t.Errorf("the tracked modification is missing from the review diff:\n%s", diff)
+	}
+	if !strings.Contains(diff, "new_auth_test.go") {
+		t.Errorf("the NEW file is missing from the review diff — a Reviewer trusting this document reviews a fraction of the change:\n%s", diff)
+	}
+	if !strings.Contains(diff, "func TestX(t *testing.T) {}") {
+		t.Errorf("the new file's contents are missing, only its name appears:\n%s", diff)
+	}
+}

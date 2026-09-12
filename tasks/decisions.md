@@ -1473,3 +1473,64 @@ TestRequiredTestCoverageNotSatisfiedByAnUnrelatedLabel -> 随便写一个 label 
 它两次都跑对了测试，两次都被同一处 Gate 的表达能力所限。因此**仍然是 rework，不是 respawn**；
 而且这次的返工要求是**最小**的（只补 `label` 字段），worktree 的 diff 一个字都不需要动。
 **若把 Gate 自己无法表达的要求记在 Worker 头上，就会让"修 Gate"永远排在"罚 Worker"之后。**
+
+## L1-20260912-45 — 第一个 G3 跑通了，但 T0101 的 G3 在 Gate 账本里仍是 `not_required`
+
+**事实，必须先说清楚，避免被读成"T0101 的 G3 通过了"：**
+
+- 我**手工**对 T0101 的 worktree 跑了 `tests/acceptance/auth-real-services-e2e.sh`，
+  全部通过（真实 PostgreSQL + 真实 Redis + 真实 HTTP，含跨源 signup 与会话跨进程重启存活）。
+- **但 `rddev task accept T0101` 会记录的 G3 仍然是 `not_required`**，
+  因为 `gates.json` 的 `task_overrides` 里没有 T0101 的 `g3_jobs`。
+
+**为什么不给它补上：** 补上之后 `accept` 会执行 `rddev gate run G3 T0101`，
+而**步骤在任务 worktree 里运行**（这正是 L1-20260912-43 修好的行为）——
+T0101 的 worktree 基线（`ee50f7f`）**早于这个脚本被加进仓库**，那里根本没有这个文件，
+于是 G3 会以满足不了的方式变红，accept 死锁。**为了让账本好看而制造一个新的死锁，不是修复。**
+
+**这是基线时序问题，不是设计问题**：从 T0102 起，worktree 由当时的主分支创建，
+`tests/acceptance/**` 已经在里面，G3 job 直接可用（脚本按自身位置推导 ROOT，
+所以在 worktree 里跑就是测 worktree 的代码）。
+
+**因此本次的诚实表述是**：T0101 的跨服务链路**由 Supervisor 亲自验证过**（证据在本条与 T0101 的 PR 里），
+**但 Gate 账本上 G3 记为 `not_required`**。这两句话必须同时说，
+否则读者会把"我手工跑过"当成"Gate 要求并验证过"。
+
+**后续（P1 其余任务开工前）**：`task_overrides` 仍是 `{}`，即 132 个任务的 G3 全部 `not_required`
+（L1-20260912-40 已记录该缺口）。现在机制已被证明可用（第一个 job + 脚本 + 真实服务），
+缺的是**按 phase 定义各自的 G3 job**：P1 的身份/组织/Project shell、P2 的 RSG、
+P3 的 Gitea branch protection/webhook、P7 的 MinIO hash……**每一条都是 docs/67 G3 点名的链路**。
+这需要一次专门的设计工作，不应继续以"为一个任务临时补一条"的方式进行。
+
+## L1-20260912-46 — Review 的输入 diff 只有 9/39 个文件：`git diff` 不含未跟踪文件
+
+**由 Reviewer 自己发现并顶住的**，原文：
+
+> I reviewed the FULL change from the worker worktree (the review-input diff.txt contains
+> only 9 of the 39 changed files — **untracked new files are excluded from `git diff HEAD`**;
+> the worktree matches the collect report's 39-file list)
+
+`taskWorktreeDiff` 就是 `git diff <baseline> --`。**新建文件在提交前是 untracked，因此不出现在这个 diff 里**——
+而 T0101 的改动**绝大部分正是新文件**（`cmd/api/authhttp/*`、`internal/application/authn/*`、
+`tests/e2e/*`……）。于是交给 Reviewer 的"完整改动"只覆盖 39 个路径中的 9 个。
+
+**这次的后果没有发生，纯粹因为这位 Reviewer 足够谨慎**：它对照 collect report 的 39 文件清单发现数目对不上，
+于是**绕过 diff.txt 直接读了 worktree**。**下一任 Reviewer 没有这个义务，也不该被要求有。**
+
+这仍然属于同一个病根（**证据与它声称的对象不对应**），只是这次的受害者是 Reviewer：
+它被交给一份写着"这是该任务的完整改动"的文档，而文档不是完整的。
+
+**处置**：`taskWorktreeDiff` 在 tracked diff 之后**补齐每个 untracked 文件**，合成标准的 new-file diff
+（`new file mode`、`--- /dev/null`、`+++ b/<path>`、`@@ -0,0 +1,N @@`），
+二进制文件按 Git 的约定标注 `Binary files … differ` 而不是输出非法补丁。
+**不修改 index**：`git add -N` 也能让 untracked 出现在 diff 里，但它会改变工作区的 index，
+而 review 的指纹（`review-code-unchanged`）正是基于 `git diff` + `ls-files --others` 计算的——
+为了让评审看得更全而去动被评审对象的指纹基础，是拿一个 Gate 换另一个 Gate。
+
+**回归测试（用隔离变量的方式做了干净的对照实验）**：
+
+```
+关闭 untracked 补齐 -> FAIL："the NEW file is missing from the review diff —
+                             a Reviewer trusting this document reviews a fraction of the change"
+恢复               -> PASS
+```
