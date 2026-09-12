@@ -15,8 +15,8 @@ from __future__ import annotations
 import json
 import logging
 import sys
-
 from datetime import datetime, timezone
+from typing import IO
 
 REQUEST_LOGGER = "post.scientific.adapter"
 
@@ -38,7 +38,7 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False)
 
 
-def configure_request_logging(stream: object = sys.stderr) -> None:
+def configure_request_logging(stream: IO[str] = sys.stderr) -> None:
     """Attach the JSON handler to the adapter's request logger.
 
     Idempotent: repeated calls (tests, embedded use) replace the handler

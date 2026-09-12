@@ -1,0 +1,15 @@
+# staticcheck baseline (T0008, CI stage "go", make staticcheck).
+# Pre-existing findings that predate the staticcheck gate; grandfathered
+# until fixed by their owning tasks. Format: path/file.go:line:CHECK —
+# one entry per finding, so everything else in the same file/package is
+# still checked (filtering is per finding, not per package).
+# Follow-up: fix each finding (or add a //lint:ignore with a reason), then
+# delete its line. New code is never added to this list — any finding not
+# listed here fails the gate.
+cmd/rddev/main_test.go:178:SA4006
+internal/devorchestrator/doctor/catalog.go:11:U1000
+internal/devorchestrator/doctor/catalog.go:13:U1000
+internal/devorchestrator/doctor/eval.go:28:U1000
+internal/worker/queue.go:63:SA1019
+internal/worker/queue.go:111:SA1019
+internal/worker/worker_test.go:144:SA1019

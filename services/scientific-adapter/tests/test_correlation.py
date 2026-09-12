@@ -4,7 +4,6 @@ import json
 import logging
 import threading
 import urllib.request
-
 from unittest import mock
 
 import pytest
@@ -91,7 +90,7 @@ def test_request_echoes_header_and_logs_correlation_id() -> None:
                 assert response.status == 200
                 assert response.headers[CORRELATION_HEADER] == "web-trace-abc123"
             info.assert_called_once()
-            args, kwargs = info.call_args
+            _args, kwargs = info.call_args
             assert kwargs["extra"]["correlation_id"] == "web-trace-abc123"
             assert kwargs["extra"]["path"] == "/healthz"
     finally:
@@ -113,7 +112,7 @@ def test_request_without_header_gets_fresh_echoed_id() -> None:
                 assert response.status == 200
                 cid = response.headers[CORRELATION_HEADER]
                 assert is_valid_correlation_id(cid), f"echoed id {cid} invalid"
-            args, kwargs = info.call_args
+            _args, kwargs = info.call_args
             assert kwargs["extra"]["correlation_id"] == cid
     finally:
         server.shutdown()
@@ -136,7 +135,7 @@ def test_logged_path_never_carries_the_query_string() -> None:
                     f"http://127.0.0.1:{port}/nope?token=topsecret", timeout=5
                 )
             assert exc_info.value.code == 404
-            args, kwargs = info.call_args
+            _args, kwargs = info.call_args
             assert kwargs["extra"]["path"] == "/nope"
             assert "token" not in kwargs["extra"]["path"]
             assert "topsecret" not in kwargs["extra"]["path"]

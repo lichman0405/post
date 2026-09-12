@@ -1,0 +1,19 @@
+# Ruff config for the scientific adapter lint gate (T0008, CI stage
+# "python", make lint-python). Lives here — not in
+# services/scientific-adapter/pyproject.toml — because the CI gate config
+# is part of the CI scope; the adapter project file belongs to the adapter
+# tasks. Keep in sync with scripts/ci.sh and .github/workflows/ci.yml.
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "I", "N", "RUF"]
+
+# Baseline exceptions for pre-existing adapter code. Each line is a
+# follow-up issue: fix the code, then drop the ignore — new files get the
+# full rule set.
+[lint.per-file-ignores]
+# follow-up: drop the stale `# noqa: N802` comment (N802 does not fire on
+# the stdlib handler method names).
+"src/post_scientific_adapter/app.py" = ["RUF100"]
+# follow-up: sort the import block.
+"tests/test_config.py" = ["I001"]

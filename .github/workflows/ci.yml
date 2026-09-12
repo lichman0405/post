@@ -1,0 +1,152 @@
+# ci — POST CI baseline (T0008). One job per stage; a failing stage is
+# identified by its job/step name in the PR check summary. Local replica:
+# scripts/ci.sh (keep the stage lists in sync).
+#
+# All jobs run on ubuntu-24.04 (docs/25, docs/64: CI runner aligned with
+# the canonical dev environment). Only migration-integration requires
+# infrastructure; everything else passes on a bare runner.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # Stage 1 — spec bundle + task DAG validation (supersedes the former
+  # spec-validation workflow, steps kept verbatim).
+  spec-validation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PyYAML (YAML spec parsing)
+        run: pip install pyyaml
+      - name: Validate machine-readable specs and task DAG
+        run: python3 scripts/validate_specs.py
+      - name: Verify derived spec version marker
+        run: python3 scripts/spec_version.py --check
+      - name: OpenAPI contract check (parse + $ref integrity + structure)
+        run: python3 scripts/validate_openapi.py
+      - name: OpenAPI contract fixture unit tests
+        run: bash scripts/tests/openapi-unit-test.sh
+      - name: Spec validation unit tests (fixture-driven, no network)
+        run: bash scripts/tests/spec-validation-unit-test.sh
+      - name: Source repository remote smoke test (real git remote capture)
+        run: bash scripts/tests/spec-validation-smoke-test.sh
+
+  # Stage 2 — task DAG/state/test-registry coverage and shape (T0008 fix 2:
+  # the T0013 drift class, where a DAG task had no task_status entry).
+  task-state:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: DAG/state/test coverage + task_status/tests JSON shape
+        run: python3 scripts/validate_task_state.py
+      - name: Task-state validator fixture unit tests
+        run: bash scripts/tests/task-state-unit-test.sh
+      - name: Progress-view helper fixture tests
+        run: bash scripts/tests/progress-update-test.sh
+
+  # Stage 3 — Go: fmt / vet / staticcheck / unit (no database).
+  go:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+      - name: "go: fmt check"
+        run: make fmt-check
+      - name: "go: vet"
+        run: go vet ./...
+      - name: "go: staticcheck (pinned, baseline via ops/ci/staticcheck-baseline.txt)"
+        run: make staticcheck
+      - name: "go: staticcheck gate fixture unit tests"
+        run: bash scripts/tests/staticcheck-unit-test.sh
+      - name: "go: unit tests (integration package excluded — it needs PostgreSQL)"
+        run: go test $(go list ./... | grep -v '/tests/integration')
+
+  # Stage 4 — Web: lint / typecheck / unit / production build.
+  web:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: "web: install (pnpm via corepack, frozen lockfile)"
+        run: corepack enable && pnpm install --frozen-lockfile
+      - name: "web: typecheck @post/ui"
+        run: pnpm --filter @post/ui typecheck
+      - name: "web: typecheck @post/web"
+        run: pnpm --filter @post/web typecheck
+      - name: "web: lint"
+        run: pnpm --filter @post/web lint
+      - name: "web: unit tests (node --test)"
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test "apps/web/lib/config.test.mjs"
+      - name: "web: production build (Next requires POST_ENV=prod at build)"
+        env:
+          POST_ENV: prod
+          API_BASE_URL: http://127.0.0.1:18080
+          SCIENTIFIC_ADAPTER_URL: http://127.0.0.1:19100
+        run: pnpm --filter @post/web build
+
+  # Stage 5 — Python: lint / type / pytest (configs: ops/ci/ruff.toml,
+  # ops/ci/mypy.ini).
+  python:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: "python: toolchain (uv, ruff, mypy)"
+        run: pip install uv ruff mypy
+      - name: "python: sync adapter env"
+        run: cd services/scientific-adapter && uv sync --frozen
+      - name: "python: lint (ruff)"
+        run: cd services/scientific-adapter && ruff check . --config ../../ops/ci/ruff.toml
+      - name: "python: type (mypy)"
+        run: cd services/scientific-adapter && mypy --config-file ../../ops/ci/mypy.ini src/post_scientific_adapter
+      - name: "python: pytest"
+        run: cd services/scientific-adapter && uv run pytest -q
+
+  # Stage 6 — migration + integration against real PostgreSQL. The only
+  # infrastructure-requiring stage; it is a separate job (and uses a
+  # dedicated service container) so it stays separable from the bare-runner
+  # stages above. Service image matches docker-compose.yml
+  # (pgvector/pgvector:0.8.6-pg16, docs/66).
+  migration-integration:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_dev_pw
+          POSTGRES_DB: post
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+      - name: "integration: migrations + data-access suite (make test-integration)"
+        env:
+          POSTGRES_TEST_ADMIN_URL: postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post
+        run: make test-integration
