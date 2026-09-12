@@ -1,0 +1,70 @@
+{
+  "task_id": "T0008",
+  "status": "completed",
+  "summary": "CI baseline and multi-language gates implemented and evidenced. Makefile gates split (make check/test infrastructure-free; test-integration with pg-ready preflight that fails loudly with a printed reason and never skips silently). scripts/validate_task_state.py closes the T0013 drift class (DAG/state/tests coverage + JSON shape, both directions). scripts/validate_openapi.py (contract parse + $ref integrity + structure), scripts/update_progress.py (progress view regenerator with --check), scripts/ci.sh (local 6-stage CI replica with genuine per-stage errexit), .github/workflows/ci.yml (six jobs on ubuntu-24.04; only migration-integration needs infrastructure, with pgvector/pgvector:0.8.6-pg16 service). gofmt and staticcheck gates carry documented grandfathered baselines (ops/ci/) for pre-existing debt in out-of-scope files, each with a follow-up; four fixture test suites prove the gates including their fail paths. Full 6-stage local CI replication is green (ALL STAGES PASSED).",
+  "files_changed": [
+    "Makefile",
+    ".github/workflows/ci.yml",
+    ".github/workflows/spec-validation.yml (removed, consolidated)",
+    "scripts/pg-ready.py",
+    "scripts/validate_task_state.py",
+    "scripts/validate_openapi.py",
+    "scripts/update_progress.py",
+    "scripts/ci.sh",
+    "scripts/staticcheck.sh",
+    "scripts/tests/task-state-unit-test.sh",
+    "scripts/tests/openapi-unit-test.sh",
+    "scripts/tests/progress-update-test.sh",
+    "scripts/tests/staticcheck-unit-test.sh",
+    "ops/ci/ruff.toml",
+    "ops/ci/mypy.ini",
+    "ops/ci/gofmt-baseline.txt",
+    "ops/ci/staticcheck-baseline.txt",
+    "ops/DEV_COMMANDS.md"
+  ],
+  "tests": [
+    {"command": "make check", "status": "passed", "evidence": "rc=0 on bare host (no docker, no database), final-tree rerun: check-schema-drift, check-openapi, go vet+build+unit, web typecheck/lint/unit, uv run pytest -q (32 passed in 1.05s); 0 FAIL/ERROR lines"},
+    {"command": "make test", "status": "passed", "evidence": "rc=0 on bare host, final-tree rerun: go unit + web config test + pytest 32 passed in 1.55s"},
+    {"command": "make test-integration with no PostgreSQL reachable", "status": "passed", "evidence": "rc=2, loud: 'pg-ready: no PostgreSQL reachable at 127.0.0.1:15432 ([Errno 111] Connection refused)' + remediation 'start the infra stack (make infra-up && make infra-init) or set POSTGRES_TEST_ADMIN_URL...' + 'test-integration: FAILED — integration tests require a real PostgreSQL and none is reachable'. Never skips silently."},
+    {"command": "make test-integration with PostgreSQL present (scratch conda PostgreSQL 16.15 + pgvector 0.7.4, 127.0.0.1:15433)", "status": "passed", "evidence": "rc=0, full integration suite against real PostgreSQL with run-scoped namespaced databases; final-tree rerun: 'ok github.com/lichman0405/post/tests/integration 2.823s'"},
+    {"command": "python3 scripts/validate_task_state.py on planted mismatch", "status": "passed", "evidence": "tasks/tasks.json transiently planted with T9999 (file restored byte-identical afterwards, git diff --stat empty): 'FAIL TASKSTATE-SET — dag_only=['T9999']', exit 1"},
+    {"command": "python3 scripts/validate_task_state.py on restored state", "status": "passed", "evidence": "9/9 checks ok, exit 0"},
+    {"command": "bash scripts/ci.sh failing-stage clarity", "status": "passed", "evidence": "two real failing runs: 'STAGE FAILED: go' (gofmt gate: 'make: *** [Makefile:77: fmt-check] Error 1', exit code: 2) and 'STAGE FAILED: integration' (pg-ready connection refused, exit code: 2); the run prints the failing stage name + exit code and stops"},
+    {"command": "bash scripts/ci.sh (full 6-stage local CI replication)", "status": "passed", "evidence": "rc=0, 'ALL STAGES PASSED: spec task-state go web python integration' with POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:15433/post; 0 FAIL lines; integration 'ok ... tests/integration 2.823s' (a first attempt lost only the integration stage to a host reboot that wiped the scratch PostgreSQL mid-run; rebuilt and re-run)"},
+    {"command": "bash scripts/tests/task-state-unit-test.sh", "status": "passed", "evidence": "13/13 fixture cases pass (clean, dag_only, status_only, count drift, bad enum, bad timestamp, dup id, malformed JSON, missing file, unknown test ref, uncovered task, test shape, --json)"},
+    {"command": "bash scripts/tests/openapi-unit-test.sh", "status": "passed", "evidence": "14/14 fixture cases pass (clean, dangling ref, external ref, bad version, missing info, empty paths, no responses, bad param, dup operationId, undefined scheme, invalid YAML, missing file, $ref-parameter regression, canonical contract)"},
+    {"command": "bash scripts/tests/progress-update-test.sh", "status": "passed", "evidence": "7/7 sandbox cases pass (seed, table content, idempotent rewrite, --check fresh, --check stale, regeneration, --check with no markers); never touches the real tasks/progress.md"},
+    {"command": "bash scripts/tests/staticcheck-unit-test.sh", "status": "passed", "evidence": "7/7 fixture cases pass: only-baseline findings rc=0, new finding rc=1 + named, new finding in baselined package rc=1, baseline per line not per file rc=1, unparseable line rc=1, empty report rc=0, missing baseline file rc=2"},
+    {"command": "make fmt-check (baseline + adversarial probe)", "status": "passed", "evidence": "with grandfathered baseline: 'gofmt: clean' rc=0. Planted NEW unformatted scripts/zz_fmt_probe.go: rc=2 'gofmt: these files are not formatted: scripts/zz_fmt_probe.go' — new drift still fails the gate; probe removed"},
+    {"command": "make staticcheck (live, with baseline)", "status": "passed", "evidence": "'staticcheck: clean (7 grandfathered baseline finding(s))' rc=0; all 7 are pre-existing findings in out-of-scope files (cmd/rddev, internal/devorchestrator, internal/worker)"},
+    {"command": "python3 scripts/update_progress.py --check (read-only on the real tree)", "status": "passed", "evidence": "rc=0, 'notice: tasks/progress.md has no auto section yet — run without --check once to seed it'; git status tasks/ empty — the real Supervisor-owned file was never written"}
+  ],
+  "acceptance": [
+    {"criterion": "make check / make test pass with no Docker and no database", "status": "passed", "evidence": "make check rc=0, make test rc=0 on a bare host (final-tree reruns); tests/integration excluded from both (GO_UNIT_PKGS), all infra-requiring coverage moved to test-integration"},
+    {"criterion": "make test-integration works in both modes (present/absent database), never a silent skip", "status": "passed", "evidence": "absent: pg-ready prints the unreachable endpoint + remediation, make exits 2 with 'test-integration: FAILED — ... none is reachable'. present: rc=0, 'ok ... tests/integration 2.823s' against real PostgreSQL 16.15 + pgvector"},
+    {"criterion": "DAG/state coverage check fails on planted mismatch, passes restored", "status": "passed", "evidence": "planted T9999 -> FAIL TASKSTATE-SET dag_only=['T9999'] exit 1; restored -> 9/9 ok exit 0; both directions (dag_only/status_only) plus enum/timestamps/tests-shape/tests-ref/tests-coverage checks"},
+    {"criterion": "failing stage clearly identified in a real failing run", "status": "passed", "evidence": "real runs: 'STAGE FAILED: go' (exit code: 2) and 'STAGE FAILED: integration' (exit code: 2); ci.sh prints the stage banner, failing stage name, and exit code, then stops. CI workflow maps stages 1:1 to job/step names"},
+    {"criterion": "CI stages: spec validation, Go fmt/vet/staticcheck/unit, Web lint/typecheck/unit/build, Python lint/type/pytest, separable migration/integration on ubuntu-24.04", "status": "passed", "evidence": ".github/workflows/ci.yml: six jobs (spec-validation, task-state, go, web, python, migration-integration), all runs-on ubuntu-24.04; migration-integration is the only job with a service container (pgvector/pgvector:0.8.6-pg16, health-checked, matches docker-compose.yml) and only it runs make test-integration"},
+    {"criterion": "task_status/tests JSON shape validation", "status": "passed", "evidence": "scripts/validate_task_state.py TASKSTATE-TESTS-SHAPE/TESTS-REF/TESTS-COVERAGE checks validate tasks/tests.json entries against tasks.json ids, with unknown-ref and uncovered-task failure modes covered by fixture unit tests"},
+    {"criterion": "OpenAPI/schema generation drift check", "status": "passed", "evidence": "make check-openapi (scripts/validate_openapi.py: parse, version 3.1.x, info, paths, operations with $ref-resolved parameters, JSON-pointer ref integrity, unique operationIds, defined security schemes) wired into make check and the CI spec stage; check-schema-drift keeps packages/schemas/ in sync with specs/schemas/; 14 fixture cases including failure modes"},
+    {"criterion": "progress-update helper regenerating the progress view from task_status", "status": "passed", "evidence": "scripts/update_progress.py regenerates only the AUTO-PROGRESS marked section of tasks/progress.md from tasks/task_status.json + tasks/tasks.json (hand-written content preserved byte-identical), --check fails when stale, --stamp for determinism; 7 sandbox fixture cases pass; real file exercised read-only (--check notice, rc=0). Seeding the real section is a Supervisor step (runtime state is Supervisor-owned)"},
+    {"criterion": "full local CI replication green (bash scripts/ci.sh, all 6 stages)", "status": "passed", "evidence": "rc=0, 'ALL STAGES PASSED: spec task-state go web python integration', 0 FAIL lines, integration 2.823s (scratch PostgreSQL on 15433)"}
+  ],
+  "risks": [
+    "Docker socket, sudo, and system package mutation are blocked for this task (worker-guard); the integration 'database present' mode is demonstrated against a scratch user-level conda PostgreSQL 16.15 + pgvector 0.7.4 at /tmp/t8-pgdata, port 15433 — no shared infra touched. The host rebooted once mid-evidence and wiped /tmp; the cluster was rebuilt and all evidence re-run.",
+    "tasks/progress.md, tasks/task_status.json, tasks/tests.json are Supervisor-owned runtime state; they were read but never written. tasks/tasks.json was only transiently planted for the required mismatch demo and restored byte-identical (git diff --stat empty).",
+    "The gofmt/staticcheck gates carry grandfathered baselines for pre-existing debt in out-of-scope files (cmd/rddev, internal/devorchestrator, internal/worker, internal/config); each baseline entry has a follow-up to fix and remove. Adversarial probes prove new drift in any file still fails both gates.",
+    "ci.yml is written but not yet executed on GitHub Actions (no git control-plane for Workers); scripts/ci.sh is the same stage list and is fully green locally, which is the strongest evidence available within the Worker constraint."
+  ],
+  "follow_up_issues": [
+    "gofmt: reformat the 10 grandfathered files listed in ops/ci/gofmt-baseline.txt (cmd/rddev/*, internal/config/config_test.go, internal/devorchestrator/*), verify go vet/build/test stay green, then delete their lines from the baseline",
+    "staticcheck: fix (or //lint:ignore with a reason) the 7 grandfathered findings in ops/ci/staticcheck-baseline.txt (SA4006 in cmd/rddev/main_test.go; U1000 x3 in internal/devorchestrator/doctor; SA1019 x3 in internal/worker — BRPopLPush/RPopLPush deprecated, migrate to BLMove/LMove), then delete their lines",
+    "ruff: remove the per-file ignores in ops/ci/ruff.toml once the owning tasks fix src/post_scientific_adapter/app.py (RUF100 stale noqa) and tests/test_config.py (I001 import order)",
+    "mypy: replace [mypy-post_scientific_adapter.app] ignore_errors = True in ops/ci/mypy.ini with a targeted fix of the dict-invariance arg-type at app.py:46 (per-module disable_error_code crashes mypy 2.3.1)",
+    "progress.md: Supervisor should run `make progress` once to seed the AUTO-PROGRESS section in tasks/progress.md; the task-state stage currently runs only the sandbox fixture tests because the real file is Supervisor-owned runtime state",
+    "branch protection: required-check names may need updating since the former spec-validation workflow was consolidated into ci.yml",
+    "OpenAPI generation drift: when the OpenAPI client generator lands, wire a generated-vs-checked-in comparison into scripts/validate_openapi.py",
+    "scratch evidence infra: /tmp/t8-pgdata and /tmp/pgscratch are disposable evidence artifacts (conda env + PostgreSQL cluster); safe to delete after acceptance"
+  ],
+  "notes_for_supervisor": "Environment constraints: no docker grant for T0008, no sudo, no apt mutation, no git control-plane (worker-guard). Scratch PostgreSQL: /tmp/pgscratch (conda env, PostgreSQL 16.15 + pgvector 0.7.4), /tmp/t8-pgdata (cluster), port 15433, trust auth, user postgres, database post with vector+pgcrypto extensions. The host rebooted once mid-evidence (uptime reset, /tmp wiped); the scratch cluster was rebuilt from the conda package cache + conda-forge and all evidence re-run. bash errexit caveat documented in scripts/ci.sh: stages run as re-exec'ed child processes (CI_STAGE_SINGLE) because bash suppresses errexit inside if/|| conditions, subshells, and function bodies called from them — proven with a real failing validator run that the naive version let pass."
+}
