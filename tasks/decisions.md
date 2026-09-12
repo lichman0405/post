@@ -967,3 +967,47 @@ shell 统计匹配数，**为 0 就大声失败**，并明确告诉后来者"如
 **但告警指向的方向是对的**，所以我没有简单忽略：真正需要审的是"放宽 scope 是否让 Worker 能绕过 Gate"。
 上面 (a) 的结论正是对它的回答——`specs/**`、`Makefile`、`.github/**`、`tasks/**` 一律不给，
 且这次的放宽**没有**触及其中任何一个。
+
+## L1-20260912-35 — T0101 第一次 collect 的四个判定：三个真、两个是工具自己的缺陷
+
+**结论：T0101 被 rejected 是正确的，但 collect 给出的四个失败里有两条是工具自身的缺陷，两条是真的。**
+先把真的钉住：**Worker 在 status: completed 的同时把 `go test ./tests/integration -run
+TestCredentialStorePasswordRoundtrip` 标成 `not_run`**——理由是它需要的 migration 超出它的 scope。
+这条是**真缺陷**，不是误报：完成声明不能骑在一个自己承认没跑过的测试上。状态维持 rejected。
+
+另外两条是工具的错，都已修（PR #51）：
+
+### (a) `refs`：refsSnapshot 存的是 `"<refname> <objectname>"`，collect 却整条比较
+
+于是**任何"移动"的 ref 都会被读成"新建"**。而 ref 在 Worker 运行期间移动是常态——**因为那正是
+Supervisor 在合并别的工作**。T0101 的 run 期间我合并了 PR #49 与 #50，于是 collect 报告
+`new ref(s) created: refs/heads/main a07ac01…`，**用我自己的合法操作否决了这个任务**。
+
+更糟的是：**代码和它自己的注释互相矛盾**。注释一直写着"moving an existing ref is normal Supervisor
+activity — other PRs merge while a Worker runs; creating one is a Worker capability the guard denies"，
+实现却按整条字符串比较。这是"注释描述了正确策略、代码实现了另一个"的典型，而它只在**恰好有并发合并
+时**才暴露——单任务开发时永远不会触发。
+
+### (b) `result-tests-coverage`：要求的测试是**标签**，entries 的 `command` 是**命令**，却要求两者字符串相等
+
+DAG 里 `tests: ["auth unit", "auth e2e"]` 是标签；契约里 `tests[].command` 是实际跑的命令。
+T0101 **跑了这两个套件并且把标签写进了命令**
+（`go test ./internal/application/authn/... -count=1 (T0101-TEST-01 auth unit, blocking)`），
+却被判"两个必需测试都没有 passed 条目"。
+
+**这个检查对任何诚实 Worker 都不可满足**——它不是"严格"，是"错"。已改为按标签出现匹配
+（entry 仍必须是 `passed`）。
+
+### (c) 对第二条安全告警（"Substring/Unanchored Allowlist Bypass"）的处置：**成立但不改变边界**
+
+告警指出 (b) 引入的 `strings.Contains` 让必需测试更容易"满足"。**这个观察成立**：Worker 完全可以把
+标签塞进一条没跑过的 passed 条目里。
+
+**但它不构成安全边界的削弱**，理由必须说清楚，而不是拿"误报"打发：
+`RESULT.json` **不是证据，是主张，而且是被审查方自己写的**。一个愿意编造的 Worker 用字符串相等
+一样能编（直接写 `"command": "auth unit", "status": "passed"`）。真正的执行者是 **Supervisor 在 G2
+独立重跑必需测试**（CLAUDE.md §6）——这正是为什么 (b) 的原实现是**更糟的失败**：它挡住了每一个诚实
+的 run，却挡不住任何一个不诚实的 run。
+
+已把这段判断**写进代码注释**（`commandNamesTest`），以免下一个人重新推导一遍，也以免有人误以为
+这个检查承担了它从未承担的职责。

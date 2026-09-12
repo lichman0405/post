@@ -169,3 +169,40 @@ func TestClaudeArgs(t *testing.T) {
 		t.Errorf("wrapped command[4] = %q, want the claude binary (wrapper must precede it)", wrapped[4])
 	}
 }
+
+// A rework resumes the Worker's own session; it must NOT also name a session
+// id. Real claude 2.1.269 refuses the whole invocation when both are present:
+//
+//	Error: --session-id can only be used with --continue or --resume if
+//	--fork-session is also specified.
+//
+// Every rework dispatch died at startup with exit 1 and a 125-byte log — the
+// path had only ever been exercised against a stubbed claude binary, so the
+// flag combination was never seen by the real one.
+func TestClaudeArgsDoNotMixResumeWithSessionID(t *testing.T) {
+	// Fresh spawn: names the session it creates.
+	args, err := claudeArgs(&SpawnOpts{TaskID: "T0001"}, "sess-new", "/s", "/m", "p", "{}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--session-id sess-new") {
+		t.Errorf("a fresh spawn must name its new session: %v", args)
+	}
+	if strings.Contains(joined, "--resume") {
+		t.Errorf("a fresh spawn must not carry --resume: %v", args)
+	}
+
+	// Rework: resumes, and says nothing about a session id.
+	args, err = claudeArgs(&SpawnOpts{TaskID: "T0001", ResumeSession: "sess-old"}, "sess-old", "/s", "/m", "p", "{}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined = strings.Join(args, " ")
+	if !strings.Contains(joined, "--resume sess-old") {
+		t.Errorf("a rework must resume the Worker's session: %v", args)
+	}
+	if strings.Contains(joined, "--session-id") {
+		t.Errorf("a rework passed --session-id alongside --resume; real claude refuses this combination: %v", args)
+	}
+}

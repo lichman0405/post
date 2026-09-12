@@ -201,7 +201,21 @@ func claudeArgs(opts *SpawnOpts, sessionID, settingsPath, systemPath, prompt, re
 	args := []string{
 		"-p", prompt,
 		"--name", "rddev-worker-" + opts.TaskID,
-		"--session-id", sessionID,
+	}
+	// --session-id names a session this invocation CREATES. Passing it
+	// alongside --resume is contradictory, and real claude (2.1.269) refuses
+	// the entire invocation:
+	//   "Error: --session-id can only be used with --continue or --resume if
+	//    --fork-session is also specified."
+	// A rework resumes the Worker's own session rather than naming a new one,
+	// and --resume carries the identity, so the flag is only added when no
+	// resume is happening. Found by running `rddev worker rework` for real:
+	// every rework died at startup with exit 1 and a 125-byte log, because the
+	// path had only ever been exercised against a stubbed claude.
+	if opts.ResumeSession == "" {
+		args = append(args, "--session-id", sessionID)
+	}
+	args = append(args,
 		"--permission-mode", "dontAsk",
 		"--permission-prompts", "none",
 		// T0011 Defect 1: without this, the Worker's claude loads
@@ -220,7 +234,7 @@ func claudeArgs(opts *SpawnOpts, sessionID, settingsPath, systemPath, prompt, re
 		"--json-schema", resultSchema,
 		"--append-system-prompt-file", systemPath,
 		"--settings", settingsPath,
-	}
+	)
 	// A rework resumes the Worker's own session — the same Worker continues
 	// with its context intact (T0012: first rejection = rework same Worker).
 	if opts.ResumeSession != "" {
