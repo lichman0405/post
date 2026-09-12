@@ -1,0 +1,22 @@
+# pnpm workspace scope (docs/65): web app + shared web/UI/contracts packages.
+# The Go root module and the uv-managed Python adapter are NOT pnpm workspace
+# members — cross-language commands live in the root Makefile.
+packages:
+  - apps/*
+  - packages/*
+allowBuilds:
+  unrs-resolver: true
+minimumReleaseAgeExclude:
+  - '@next/env@16.3.5'
+  - '@next/eslint-plugin-next@16.3.5'
+  - '@next/swc-darwin-arm64@16.3.5'
+  - '@next/swc-darwin-x64@16.3.5'
+  - '@next/swc-linux-arm64-gnu@16.3.5'
+  - '@next/swc-linux-arm64-musl@16.3.5'
+  - '@next/swc-linux-x64-gnu@16.3.5'
+  - '@next/swc-linux-x64-musl@16.3.5'
+  - '@next/swc-win32-arm64-msvc@16.3.5'
+  - '@next/swc-win32-x64-msvc@16.3.5'
+  - '@primer/react@38.39.0'
+  - eslint-config-next@16.3.5
+  - next@16.3.5

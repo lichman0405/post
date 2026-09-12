@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-rd.example/schemas/experiment.schema.json",
+  "title": "Experiment",
+  "type": "object",
+  "required": [
+    "id",
+    "type",
+    "version",
+    "project_id",
+    "title",
+    "lifecycle_state",
+    "schema_ref",
+    "created_by",
+    "created_at",
+    "objective"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 8
+    },
+    "type": {
+      "const": "experiment"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "branch_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "lifecycle_state": {
+      "enum": [
+        "active",
+        "aborted",
+        "reopened",
+        "superseded"
+      ]
+    },
+    "schema_ref": {
+      "type": "object",
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "created_by": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "visibility_policy_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "objective": {
+      "type": "string"
+    },
+    "operator_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "sample_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "protocol_version_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "conditions": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "raw_blob_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "processed_blob_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "result_summary": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

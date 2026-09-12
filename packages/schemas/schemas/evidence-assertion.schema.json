@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EvidenceAssertion",
+  "type": "object",
+  "required": [
+    "id",
+    "target_version_ref",
+    "evidence_version_ref",
+    "relation",
+    "evidence_type",
+    "review_state",
+    "created_by",
+    "created_at"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "target_version_ref": {
+      "type": "string"
+    },
+    "evidence_version_ref": {
+      "type": "string"
+    },
+    "relation": {
+      "enum": [
+        "supports",
+        "contradicts",
+        "consistent_with",
+        "inconsistent_with",
+        "reproduces",
+        "fails_to_reproduce",
+        "validates",
+        "challenges",
+        "contextualizes"
+      ]
+    },
+    "evidence_type": {
+      "enum": [
+        "experimental",
+        "computational",
+        "dataset",
+        "literature",
+        "external_attestation",
+        "other"
+      ]
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "directness": {
+      "enum": [
+        "direct",
+        "indirect",
+        "unknown"
+      ]
+    },
+    "inference_nature": {
+      "enum": [
+        "observational",
+        "associational",
+        "causal",
+        "mechanistic",
+        "predictive",
+        "descriptive",
+        "unknown"
+      ]
+    },
+    "reasoning_note": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "review_state": {
+      "enum": [
+        "unreviewed",
+        "reviewed",
+        "rejected"
+      ]
+    },
+    "created_by": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

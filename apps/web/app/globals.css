@@ -1,0 +1,51 @@
+/* POST web scaffold styles — GitHub/Primer design tokens (ADR-012).
+   @primer/react v38 has no `sx` prop; layout lives in these classes. */
+
+.status-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+}
+
+.status-main {
+  padding: 12px 16px;
+  max-width: 720px;
+}
+
+.status-list {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.status-row:last-child {
+  border-bottom: none;
+}
+
+.status-row-body {
+  flex: 1;
+}
+
+.status-row-title {
+  font-weight: 600;
+}
+
+.status-row-detail {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.status-note {
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}

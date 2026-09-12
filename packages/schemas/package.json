@@ -1,0 +1,10 @@
+{
+  "name": "@post/schemas",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Canonical JSON Schema copies for the POST domain objects. The single source of truth is specs/schemas/; schemas/ here is a synced copy (make sync-schemas), never hand-edited (docs/65).",
+  "scripts": {
+    "sync": "bash scripts/sync-schemas.sh",
+    "check-drift": "bash scripts/check-schema-drift.sh"
+  }
+}
