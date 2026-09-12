@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-rd.example/ops/doctor-output.schema.json",
+  "title": "POST environment preflight output (ops/doctor.sh --json)",
+  "description": "Machine-readable output of the canonical environment preflight. Emitted by ops/doctor.sh --json; T0009 must reproduce this exact shape in `rddev doctor --json`. See ops/doctor-checks.md for semantics.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract", "verdict", "exit_code", "environment", "baselines", "checks", "summary"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "contract": {"const": "ops/doctor-checks.md"},
+    "verdict": {"enum": ["ok", "toolchain_failure", "unsupported"]},
+    "exit_code": {
+      "type": "integer",
+      "enum": [0, 1, 2, 3],
+      "description": "0 = ok, 1 = toolchain failure, 2 = unsupported environment, 3 = usage error (usage errors are not emitted as JSON; they go to stderr with exit 3, but the schema reserves the code)"
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kernel", "arch", "distro_id", "distro_version_id", "distro_pretty", "codename", "wsl", "repo_path", "repo_fs_mount"],
+      "properties": {
+        "kernel": {"type": "string", "description": "uname -s (or fixture os.kernel)"},
+        "arch": {"type": "string", "description": "uname -m (or fixture os.arch)"},
+        "distro_id": {"type": "string", "description": "/etc/os-release ID (or fixture os.id)"},
+        "distro_version_id": {"type": "string", "description": "/etc/os-release VERSION_ID (or fixture os.version_id)"},
+        "distro_pretty": {"type": "string", "description": "/etc/os-release PRETTY_NAME (or fixture os.pretty)"},
+        "codename": {"type": "string", "description": "/etc/os-release VERSION_CODENAME (or fixture os.codename)"},
+        "wsl": {"enum": ["none", "wsl1", "wsl2"], "description": "detected from /proc/version (or fixture os.wsl)"},
+        "repo_path": {"type": "string", "description": "invocation directory (pwd -P); anchors disk/package.json/WSL checks"},
+        "repo_fs_mount": {"type": "string", "description": "mount point of repo_path per df -Pk"}
+      }
+    },
+    "baselines": {
+      "type": "object",
+      "description": "Pinned toolchain/resource baselines this run compared against (docs/64_UBUNTU_DEV_ENV.md is the pin authority; this object records what the preflight enforced).",
+      "additionalProperties": false,
+      "required": ["go", "node", "python3", "psql", "redis-cli", "git", "git-lfs", "jq", "make", "shellcheck", "docker-compose", "claude", "uv", "pnpm", "cpu", "ram", "swap", "disk", "fd", "docker-disk"],
+      "properties": {
+        "go": {"const": "1.27.x"},
+        "node": {"const": "24.x"},
+        "python3": {"const": ">= 3.12"},
+        "psql": {"const": "16.x"},
+        "redis-cli": {"const": "7.x"},
+        "git": {"const": "2.x"},
+        "git-lfs": {"const": "3.x"},
+        "jq": {"const": "1.x"},
+        "make": {"const": "4.x"},
+        "shellcheck": {"const": "recorded"},
+        "docker-compose": {"const": "v2 plugin lineage (>= 2)"},
+        "claude": {"const": "recorded"},
+        "uv": {"const": "recorded"},
+        "pnpm": {"const": "packageManager pin"},
+        "cpu": {"const": ">= 8"},
+        "ram": {"const": ">= 32 GiB"},
+        "swap": {"const": ">= 8 GiB"},
+        "disk": {"const": ">= 20 GiB"},
+        "fd": {"const": ">= 65535"},
+        "docker-disk": {"const": ">= 100 GiB"}
+      }
+    },
+    "checks": {
+      "type": "array",
+      "description": "All checks in canonical id order: ENV-OS-KERNEL, ENV-OS-DISTRO, ENV-OS-ARCH, ENV-WSL, then RES-* in catalog order, then T-* in catalog order (see ops/doctor-checks.md §7). Order is part of the contract.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "category", "severity", "status", "measured", "version", "baseline", "remediation", "reason"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^(ENV|RES|T)-[A-Z0-9-]+$"},
+          "name": {"type": "string"},
+          "category": {"enum": ["env", "resource", "tool"]},
+          "severity": {"enum": ["required", "advisory"]},
+          "status": {"enum": ["passed", "failed", "warn", "skipped"], "description": "required checks: passed|failed|skipped; advisory checks: passed|warn|skipped. A failed env-category required check maps to verdict 'unsupported' (exit 2); any other failed required check maps to 'toolchain_failure' (exit 1)."},
+          "measured": {"type": "string", "description": "human-readable measurement; for tools, the first line of the version command output (truncated to 120 chars), or 'missing'"},
+          "version": {"type": ["string", "null"], "description": "first X.Y numeric pair parsed from the version output, or null when not applicable"},
+          "baseline": {"type": "string", "description": "pinned baseline this check compared against"},
+          "remediation": {"type": ["string", "null"], "description": "concrete remediation; non-null exactly when status is failed or warn"},
+          "reason": {"type": ["string", "null"], "description": "present exactly when status is skipped"}
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "advisory"],
+      "properties": {
+        "required": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["total", "passed", "failed", "skipped"],
+          "properties": {
+            "total": {"type": "integer", "minimum": 0},
+            "passed": {"type": "integer", "minimum": 0},
+            "failed": {"type": "integer", "minimum": 0},
+            "skipped": {"type": "integer", "minimum": 0}
+          }
+        },
+        "advisory": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["total", "passed", "warn", "skipped"],
+          "properties": {
+            "total": {"type": "integer", "minimum": 0},
+            "passed": {"type": "integer", "minimum": 0},
+            "warn": {"type": "integer", "minimum": 0},
+            "skipped": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    }
+  }
+}
