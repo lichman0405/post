@@ -742,6 +742,37 @@ live e2e：**PASS=28 FAIL=0**；并在自己的运行中确认**全部七个凭�
 **统计**：本会话我（Supervisor）的失误已累计到四类：scope 过窄（3 次）、子集门禁（3 次）、
 带着红灯合并（1 次）、虚假并发验证（1 次）。**全部已成为 T0012 的机械检查项**，而不是停留在文档里。
 
+## L1-20260912-30 — ★★ T0011 合并后被发现：**gate 的输入本身是 Worker 可写的**
+
+自动 security review 报 `internal/devorchestrator/worker_collect.go` 的 `gate-input-tampering` /
+`security-check-evasion`。**经代码检查确认属实**，且命中整个编排器最核心的不变量：
+
+```
+spawn   → 把 task-package.json 与 registry.json 写进  .rddev/workers/<TASK>/
+collect → 从该 task-package.json 读 allowed_scope
+          从该 registry.json 读 baseline_sha
+guard   → 明确**允许** Worker 写 .rddev/workers/<TASK>/（它必须能写 RESULT.json）
+```
+
+**即：gate 用"被检查方可以改写"的输入来判定被检查方。** 具体可利用点：
+
+- Worker 可以**放宽自己的 `allowed_scope`** → 越界写入随即通过 scope 检查；
+- Worker 可以**改写自己记录的 `baseline_sha`** → 它做过的 commit 随即通过 HEAD 检查。
+
+而这两条正是 collect 的核心不变量——本会话中它们**正确地拒绝过多个任务**（T0006 的越界、T0001 的
+refs 等）。**一个能被被检查方篡改的检查，等于没有检查**，而且它此前一直在"看起来有效"地工作，
+所以没人怀疑。
+
+**处置**：该缺陷位于 T0012 的职责范围（gate runner），且 T0012 **尚在早期**（26 次 tool call、
+worktree 零改动），因此**停止并携带该要求重新派发**，而不是由我并行修改同一文件造成三方冲突。要求
+包括：把权威 gate 输入移出 Worker 可写范围（guard 只允许写 worktree / `$POST_WORKER_RESULT_DIR` /
+`/tmp`，因此其余路径天然对它不可写），并**演示**篡改无效。同时要求考虑同一目录下 `worker-settings.json`
+与 `guard/` 的同类向量（Worker 改写自己的 guard）。
+
+**元观察**：这是本会话第四次针对 orchestrator 的 security review 命中**真实**问题，且这次打在最核心的
+不变量上。共同模式是"**门禁信任了不该信任的输入**"——与 `L1-20260912-27`（spawn 后环境变量被 settings
+重新注入）同类：**验证必须发生在权威输入上，而不是被验证对象自报的状态上**。
+
 ---
 
 ## 环境发现（非决策，必须显式记录）
