@@ -99,8 +99,6 @@ type WorkerView struct {
 	LogAgeS  int64 // seconds since the log last grew; 0 if not running
 }
 
-func (v WorkerView) running() bool { return v.Status == WorkerRunning }
-
 // WorkersDir returns the per-repo workers directory for repoRoot.
 func WorkersDir(repoRoot string) string { return filepath.Join(repoRoot, ".rddev", "workers") }
 

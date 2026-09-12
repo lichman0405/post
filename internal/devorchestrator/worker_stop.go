@@ -32,7 +32,7 @@ func StopWorker(repoRoot string, rec *WorkerRecord) error {
 		if err != nil {
 			return err
 		}
-		return fmt.Errorf("Worker %s (pid %d) is not running (stale) — nothing was signalled; see `rddev worker list`", rec.TaskID, rec.PID)
+		return fmt.Errorf("worker %s (pid %d) is not running (stale) — nothing was signalled; see `rddev worker list`", rec.TaskID, rec.PID)
 	}
 
 	if err := syscall.Kill(rec.PID, syscall.SIGTERM); err != nil && err != syscall.ESRCH {

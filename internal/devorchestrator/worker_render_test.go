@@ -82,10 +82,6 @@ func TestValidateTaskPackageRejectsTampering(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc["sneaky_extra"] = "x"
-	raw, err = json.Marshal(doc)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := validateAgainst(doc, loadSchema(t), "task-package"); err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("unknown field accepted: %v", err)
 	}
