@@ -105,7 +105,7 @@ const (
 // allowed addition.
 var canonicalTables = map[string]tableExp{
 	"users": {
-		cols:    []colExp{c("id", u, false, true), c("handle", txt, false, false), c("email", txt, true, false), c("display_name", txt, false, false), c("created_at", ts, false, true), c("disabled_at", ts, true, false)},
+		cols:    []colExp{c("id", u, false, true), c("handle", txt, false, false), c("email", txt, true, false), c("display_name", txt, false, false), c("created_at", ts, false, true), c("disabled_at", ts, true, false), c("password_hash", txt, true, false)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"handle"}, {"email"}},
 	},

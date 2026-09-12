@@ -15,7 +15,7 @@ const createUser = `-- name: CreateUser :one
 
 INSERT INTO users (handle, email, display_name)
 VALUES ($1, $2, $3)
-RETURNING id, handle, email, display_name, created_at, disabled_at
+RETURNING id, handle, email, display_name, created_at, disabled_at, password_hash
 `
 
 type CreateUserParams struct {
@@ -35,12 +35,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.DisplayName,
 		&i.CreatedAt,
 		&i.DisabledAt,
+		&i.PasswordHash,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, handle, email, display_name, created_at, disabled_at FROM users WHERE email = $1
+SELECT id, handle, email, display_name, created_at, disabled_at, password_hash FROM users WHERE email = $1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email *string) (User, error) {
@@ -53,12 +54,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email *string) (User, erro
 		&i.DisplayName,
 		&i.CreatedAt,
 		&i.DisabledAt,
+		&i.PasswordHash,
 	)
 	return i, err
 }
 
 const getUserByHandle = `-- name: GetUserByHandle :one
-SELECT id, handle, email, display_name, created_at, disabled_at FROM users WHERE handle = $1
+SELECT id, handle, email, display_name, created_at, disabled_at, password_hash FROM users WHERE handle = $1
 `
 
 func (q *Queries) GetUserByHandle(ctx context.Context, handle string) (User, error) {
@@ -71,12 +73,13 @@ func (q *Queries) GetUserByHandle(ctx context.Context, handle string) (User, err
 		&i.DisplayName,
 		&i.CreatedAt,
 		&i.DisabledAt,
+		&i.PasswordHash,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, handle, email, display_name, created_at, disabled_at FROM users WHERE id = $1
+SELECT id, handle, email, display_name, created_at, disabled_at, password_hash FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error) {
@@ -89,12 +92,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.DisplayName,
 		&i.CreatedAt,
 		&i.DisabledAt,
+		&i.PasswordHash,
 	)
 	return i, err
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, handle, email, display_name, created_at, disabled_at FROM users
+SELECT id, handle, email, display_name, created_at, disabled_at, password_hash FROM users
 ORDER BY created_at, id
 LIMIT $2 OFFSET $1
 `
@@ -120,6 +124,7 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 			&i.DisplayName,
 			&i.CreatedAt,
 			&i.DisabledAt,
+			&i.PasswordHash,
 		); err != nil {
 			return nil, err
 		}

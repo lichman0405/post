@@ -42,6 +42,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/lichman0405/post/cmd/api/authhttp"
+	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/config"
 	"github.com/lichman0405/post/internal/health"
 	"github.com/lichman0405/post/internal/observability"
@@ -114,6 +116,25 @@ func run(args []string) int {
 	queue := worker.NewRedisQueue(redisClient, "post")
 	mux.Handle("POST /internal/jobs", newJobHandler(queue, logger))
 
+	// Authentication (T0101): the /api/v1 subtree is guarded by default —
+	// every state-changing request under it requires a valid session + CSRF
+	// token unless it is an explicit pre-auth route (login/signup). Future
+	// product routes register on the same subtree and inherit the guard.
+	authCfg, err := authnLoader().Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "post-api: authentication configuration error:\n%v\n", err)
+		return exitConfig
+	}
+	authAPI := authhttp.New(authhttp.Deps{
+		Users:      persistence.NewCredentialStore(pool),
+		Sessions:   persistence.NewRedisSessionStore(redisClient),
+		Limiter:    persistence.NewRedisRateLimiter(redisClient),
+		OIDCClient: newOIDCClientOrNil(authCfg),
+		Cfg:        *authCfg,
+		Secure:     cfg.Layer == config.LayerProd,
+	})
+	mux.Handle("/api/v1/", authAPI.Routes())
+
 	srv := &http.Server{
 		Addr:              cfg.Server.Addr,
 		Handler:           observability.Middleware(logger)(mux),
@@ -179,4 +200,20 @@ func databaseDSN(cfg *config.Config) string {
 	q.Set("sslmode", cfg.Database.SSLMode)
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// authnLoader resolves the auth configuration environment (the loader is
+// injectable so main_test can run without real env).
+var authnLoader = func() authn.Loader { return authn.Loader{} }
+
+// newOIDCClientOrNil builds the provider client when OIDC is configured.
+// The redirect URI is always derived from the callback request (the API's
+// own origin is unknowable at startup), so the client's default stays
+// empty; the callback handler passes the request-derived URI explicitly.
+func newOIDCClientOrNil(cfg *authn.Config) authn.OIDCProvider {
+	if cfg == nil || !cfg.OIDC.Enabled {
+		return nil
+	}
+	return authn.NewOIDCClient(cfg.OIDC.Issuer, cfg.OIDC.ClientID,
+		string(cfg.OIDC.ClientSecret), "")
 }
