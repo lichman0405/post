@@ -1,71 +1,1194 @@
 {
-  "task_id": "T0012",
-  "goal": "Implement the Supervisor's four-gate acceptance loop end to end so a task can go Worker -> G1 -> G2 -> commit -> PR -> G3 -> G4 -> merge with evidence at every step, and a failing task can never reach merged.",
-  "baseline_sha": "fd1195b74328abc443781923b69d7eed6ef912a1",
-  "allowed_scope": [
-    "cmd/rddev/**",
-    "internal/devorchestrator/**",
-    "specs/orchestrator/**",
-    "tasks/tasks.json",
-    "tests/acceptance/**",
-    "docs/61_DEVELOPMENT_ORCHESTRATION.md",
-    "specs/SPEC_VERSION.json",
-    "go.mod",
-    "go.sum"
-  ],
-  "forbidden_scope": [
-    "tasks/task_status.json",
-    "tasks/tests.json",
-    "tasks/progress.md",
-    "tasks/decisions.md",
-    "tasks/results/**",
-    "CLAUDE.md",
-    ".github/**",
-    "Makefile",
-    "apps/**",
-    "services/**",
-    "internal/config/**",
-    "internal/persistence/**"
-  ],
-  "requirements": [
-    "G1/G2/G3/G4 are task metadata AND an executor: `rddev task verify|accept|reject` drive them, and each gate records its evidence (commands, exit status, output) so the chain Requirement -> Task -> Worker -> RESULT -> Verification -> Commit -> PR -> Merge -> Tests is reconstructible from disk.",
-    "Supervisor can accept, reject, rework (same worker) or respawn (new worker); a rejected task records the rejection evidence.",
-    "After acceptance, ONLY the Supervisor performs commit/push/PR/merge - and the tooling must refuse any of those steps when a blocking gate is red.",
-    "Support an independent Review Worker (no Git control-plane) and record its verdict as evidence.",
-    "REQUIRED: detect a self-contradictory RESULT at collect - one that claims status completed while a required test is not_run, or whose summary/payload says it is an interim snapshot. A previous worker did exactly this and shipped a false completion; the check must be mechanical, not a human reading it.",
-    "REQUIRED: G2 must run the CI workflow's EXACT steps, and the merge gate must assert EVERY required job is green rather than grepping for one check name. The Supervisor merged a red PR once because G2 ran a similar-looking subset; the runner must make that impossible.",
-    "REQUIRED: validate every allowed_scope glob against the real file tree before dispatch, and require that a task whose scope covers a marker input (specs/**, tasks/tasks.json) also covers the derived artifacts it necessarily changes (specs/SPEC_VERSION.json). Three separate tasks were blocked or falsely rejected because the Supervisor wrote a scope narrower than the work required.",
-    "Reuse T0011's collect-time invariants (HEAD==baseline, refs, allowed_scope diff, RESULT schema, host residue) rather than re-implementing them.",
-    "REQUIRED (security review, confirmed by inspection): the GATE INPUTS must not be Worker-writable. spawn writes task-package.json (the source of allowed_scope) and registry.json (the source of baseline_sha) into .rddev/workers/<TASK>/, which is the Worker's own result dir - and the guard's write allow-list explicitly permits that dir. A Worker can therefore widen its own allowed_scope or rewrite its recorded baseline_sha, defeating the two central collect invariants. Move the authoritative gate inputs outside the Worker's write allow-list (the guard permits only the worktree, $POST_WORKER_RESULT_DIR and /tmp, so any other path is already off-limits) and have collect read them from there. Also consider the same vector for the generated guard and settings files in that dir. Demonstrate: tamper with a package/registry in the Worker-writable location and show collect still judges by the authoritative values."
-  ],
-  "acceptance_criteria": [
-    "an example task completes the full Worker -> G2 -> commit -> PR flow with recorded evidence",
-    "a failed Worker never reaches accepted",
-    "a blocking test that is red prevents merge - demonstrated, not asserted",
-    "the Supervisor can resume an interrupted workflow from on-disk state alone",
-    "a RESULT claiming completed with a not_run required test is REJECTED at collect - demonstrated by planting one",
-    "the merge gate refuses when any of the six required CI jobs is not green - demonstrated",
-    "no file outside allowed_scope is modified",
-    "a Worker that widens its own allowed_scope or rewrites its recorded baseline_sha in its result dir is still judged by the authoritative gate inputs - demonstrated, not asserted"
-  ],
-  "required_tests": [
-    "four-gate acceptance e2e",
-    "rejection/retry e2e",
-    "supervisor git control e2e"
-  ],
-  "relevant_specs": [
-    "docs/61_DEVELOPMENT_ORCHESTRATION.md",
-    "docs/62_SUPERVISOR_GOVERNANCE.md",
-    "docs/63_WORKER_CONTRACT.md",
-    "docs/67_TEST_GATES.md",
-    "docs/30_TASK_EXECUTION_STANDARD.md",
-    "docs/48_DEFINITION_OF_DONE.md",
-    "specs/orchestrator/rddev-cli.yaml",
-    "specs/orchestrator/worker-result.schema.json",
-    "tasks/decisions.md"
-  ],
-  "decision_level_max": "L2",
-  "max_turns": null,
-  "max_budget_usd": 40,
-  "continuation": "Attempt 1 exhausted $25 without writing any RESULT. Work is present and coherent; continue in the same worktree, verify it rather than rebuild it. go.mod/go.sum are now IN scope (the previous prohibition was stale - T0010 owned them and is merged)."
+  "version": 2,
+  "overall": "P0_in_progress",
+  "tasks": {
+    "T0000": {
+      "status": "merged",
+      "started_at": "2026-09-12T12:30:00Z",
+      "completed_at": "2026-09-12T13:05:00Z",
+      "notes": "G2 accepted independently. collect.sh: HEAD==baseline fecf24d, no worker refs, 8/8 paths in scope, RESULT.json schema-valid. Both required tests re-run by Supervisor: PASS. Negative path (missing go/rg) and Windows Native path reproduced independently. PR #3 open, awaiting owner review (product-code PR). Merged as PR #3 (squash) at d1a83b5 per owner approval.",
+      "worker_run_id": "worker-T0000-fecf24d",
+      "accepted_by_supervisor_at": "2026-09-12T13:05:00Z",
+      "merged_at": "2026-09-12T13:20:00Z"
+    },
+    "T0001": {
+      "status": "merged",
+      "started_at": "2026-09-12T13:30:00Z",
+      "completed_at": "2026-09-12T13:35:00Z",
+      "notes": "G2 accepted independently; merged as PR #6 (squash) at 7c8a9d2 under the autonomous authority L3-20260912-4. 13/13 paths in scope, HEAD==baseline, both required tests re-run PASS, visibility verdict matrix reproduced independently, real gh probe bless.",
+      "worker_run_id": "worker-T0001-c473f6c",
+      "accepted_by_supervisor_at": "2026-09-12T13:35:00Z",
+      "merged_at": "2026-09-12T13:36:00Z"
+    },
+    "T0002": {
+      "status": "merged",
+      "started_at": "2026-09-12T13:37:00Z",
+      "completed_at": "2026-09-12T14:20:00Z",
+      "notes": "G2 accepted independently; merged as PR #10 (squash) at 1aa8528 under L3-20260912-4. 74/74 paths in scope, HEAD==baseline, registry check passed. Supervisor re-ran go build/vet/test, web typecheck/lint, pytest, make check - all exit 0. Verified no TS backend placeholder (no app/api, no route handlers, no server actions). Verified the schema drift check actually FAILS on divergence (Worker had disclosed only exercising the passing mode). T-PNPM-PIN skipped->passed.",
+      "worker_run_id": "worker-T0002-7c8a9d2",
+      "accepted_by_supervisor_at": "2026-09-12T14:20:00Z",
+      "merged_at": "2026-09-12T14:22:00Z"
+    },
+    "T0003": {
+      "status": "merged",
+      "started_at": "2026-09-12T14:25:00Z",
+      "completed_at": "2026-09-12T14:35:00Z",
+      "notes": "G2/G3 accepted independently; merged as PR #13 (squash) at 77ee212 under L3-20260912-4. Supervisor verified against real containers: all 5 services healthy from a clean start, all ports on 127.0.0.1, pgvector 0.8.6 with a real vector op, fresh-install init creation path, init idempotency, and data persistence across down/up for postgres/redis/minio/gitea. Post-merge security follow-up: PR #14 fixed a token printed to stdout, SQL interpolation in the Postgres bootstrap, and silently non-functional env overrides (decisions.md L1-20260912-12).",
+      "worker_run_id": "worker-T0003-1aa8528",
+      "accepted_by_supervisor_at": "2026-09-12T14:35:00Z",
+      "merged_at": "2026-09-12T14:40:00Z"
+    },
+    "T0004": {
+      "status": "merged",
+      "started_at": "2026-09-12T14:45:00Z",
+      "completed_at": "2026-09-12T15:05:00Z",
+      "notes": "G2 accepted independently; merged as PR #16 (squash) at 9430396 under L3-20260912-4. 19/19 paths in scope, go.mod/go.sum untouched (parallel-scope constraint held). Supervisor re-ran go vet/build/test, web typecheck/lint/unit, adapter pytest, make check, doctor - all exit 0. Reproduced the secret-scan FAILING mode independently (planted canary -> exit 1 -> revert -> exit 0) and verified RedactURL by direct execution. Cross-task follow-ups (page.tsx wiring, port 9000 collision) recorded as REQUIRED T0006 acceptance items per decisions.md L1-20260912-14.",
+      "worker_run_id": "worker-T0004-77ee212",
+      "accepted_by_supervisor_at": "2026-09-12T15:05:00Z",
+      "merged_at": "2026-09-12T15:10:00Z"
+    },
+    "T0005": {
+      "status": "merged",
+      "started_at": "2026-09-12T14:45:00Z",
+      "completed_at": "2026-09-12T15:40:00Z",
+      "notes": "G2/G3 accepted independently; merged as PR #19 (squash) at 44a21bb. 56/56 paths in scope. Supervisor ran the integration suite against real PostgreSQL: 7 tests, 88 assertions, all PASS; verified the sqlc drift check in BOTH modes (tampered->exit 1, restored->exit 0); applied all 13 migrations to a scratch DB. NOTE: verification exposed a spec-level gap - version rows are MUTABLE (UPDATE succeeds), contradicting Master Gate A. Not a T0005 defect (canonical schema declares no immutability mechanism); raised as SPEC_BLOCKED, see decisions.md L2-SPEC-20260912-15.",
+      "worker_run_id": "worker-T0005-77ee212",
+      "accepted_by_supervisor_at": "2026-09-12T15:40:00Z",
+      "merged_at": "2026-09-12T15:45:00Z"
+    },
+    "T0006": {
+      "status": "merged",
+      "started_at": "2026-09-12T15:48:00Z",
+      "completed_at": "2026-09-12T16:35:00Z",
+      "notes": "SECOND dispatch merged as PR #32. First attempt was worker_failed (budget exhausted at the RESULT write; decisions.md L1-20260912-22). Supervisor verified at runtime, not by reading: cmd/api fails fast naming POST_ENV (exit 2); /healthz 200 ok; /readyz 503 not_ready with per-dependency detail and the real dial error; make smoke proves the worker consumed a real job over the Redis protocol with no Docker; the web renders live API status; and all three T0004 carry-over fixes are demonstrably in effect. The two make check/go test failures are the known T0008 item, not this task.",
+      "worker_run_id": "worker-T0006-44a21bb",
+      "accepted_by_supervisor_at": "2026-09-12T16:35:00Z",
+      "merged_at": "2026-09-12T16:35:00Z"
+    },
+    "T0007": {
+      "status": "merged",
+      "started_at": "2026-09-12T17:00:00Z",
+      "completed_at": "2026-09-12T17:20:00Z",
+      "notes": "G2 accepted; merged as PR #34 (01c375e). Supervisor ran the scripts itself: one correlation id traced web->API->adapter AND a request id carried into the job enqueue, with real log lines. The canary sweep includes a NEGATIVE CONTROL proving it can fail plus positive evidence that values were masked rather than dropped. Redaction reuses internal/config (no second redactor). Collect initially REJECTED on my own scope error - I had narrowed the declared tests/** to invented globs; see decisions.md L1-20260912-23. The Worker also started its own PostgreSQL on the host and left it running; stopped by the Supervisor (L1-20260912-24).",
+      "worker_run_id": "worker-T0007-cbeff16",
+      "accepted_by_supervisor_at": "2026-09-12T17:20:00Z",
+      "merged_at": "2026-09-12T17:20:00Z"
+    },
+    "T0008": {
+      "status": "merged",
+      "started_at": "2026-09-12T17:00:00Z",
+      "completed_at": "2026-09-12T17:35:00Z",
+      "notes": "G2 accepted; merged as PR #36 (8e3a73f) with all six CI jobs green. Supervisor verified both required fixes independently: make check/make test exit 0 with NO database or Docker; make test-integration exits 2 loudly naming the address and the remedy (no silent skip); and the DAG/state coverage check fails on a mismatch the Supervisor planted itself. BUT the delivered ci.yml was INVALID YAML and had replaced spec-validation.yml, so merging as-is would have left the repo with no working CI - fixed by the Supervisor (quoting + a new scripts/validate_workflows.py gate). The workflow then ran and exposed 6 pre-existing ruff/mypy violations in T0007 code, also fixed. See decisions.md L1-20260912-25.",
+      "worker_run_id": "worker-T0008-cbeff16",
+      "accepted_by_supervisor_at": "2026-09-12T17:35:00Z",
+      "merged_at": "2026-09-12T17:35:00Z"
+    },
+    "T0009": {
+      "status": "merged",
+      "started_at": "2026-09-12T15:12:00Z",
+      "completed_at": "2026-09-12T16:35:00Z",
+      "notes": "G2 accepted after independent verification (rddev doctor matches ops/doctor.sh exactly, 35/35 checks; scheduling proven on a synthetic DAG; 10-way concurrency race -> 1 success / 9 loud rejections; honest stubs exit 4). Merged as PR #23 at b810338 BUT that merge was a process failure: CI was RED (stale spec version marker from an unreviewed specs/ edit) and G2 had run only a subset of the CI steps. Fixed on main by PR #24 (794b2c6). See decisions.md L1-20260912-18.",
+      "worker_run_id": "worker-T0009-9430396",
+      "accepted_by_supervisor_at": "2026-09-12T16:35:00Z",
+      "merged_at": "2026-09-12T16:36:00Z"
+    },
+    "T0010": {
+      "status": "merged",
+      "started_at": "2026-09-12T17:00:00Z",
+      "completed_at": "2026-09-12T18:05:00Z",
+      "notes": "G2 accepted; merged as PR #38 (14b3ace) with all six CI jobs green. Supervisor verified the ported guard behaviourally (147/147 regression, and the two over-blocking cases now correctly ALLOWED), proved the nested worker is a separate process from the ps snapshot (orphaned to pid 1, no Claude ancestor), read the e2e log showing two concurrent workers in disjoint worktrees, and confirmed restart discovery from a fresh process. Supervisor interventions: regenerated specs/SPEC_VERSION.json (scope gap was mine), normalised RESULT.json into the published schema (the worker emitted its own shape - root cause is that spawn.sh never passed --json-schema; T0011 must close it), gofmt on 5 new files and fixed 4 staticcheck findings that the new T0008 gates surfaced.",
+      "worker_run_id": "worker-T0010-cbeff16",
+      "accepted_by_supervisor_at": "2026-09-12T18:05:00Z",
+      "merged_at": "2026-09-12T18:05:00Z"
+    },
+    "T0011": {
+      "status": "merged",
+      "started_at": null,
+      "completed_at": "2026-09-12T20:20:00Z",
+      "notes": "ATTEMPT 3 accepted; merged as PR #41 (fd1195b) with all six CI jobs green. Supervisor ran the live e2e itself: PASS=28 FAIL=0, and confirmed in its own run that ALL SEVEN credential variables (including the leaking GITHUB_PERSONAL_ACCESS_TOKEN) report absent in a real Worker. Defect 1 fixed with both a flag (--setting-sources project) and a post-spawn /proc/<pid>/environ assertion; Defect 2 fixed by switching residue attribution to a POST_WORKER_RUN_ID env marker (the session scan missed a nohup survivor because claude runs each Bash command in its own session); Defect 3 honoured (interim writes used blocked, never completed). Supervisor-side: background Bash refused by the guard, JSON boolean check replaced with a real parse that fails closed, 154-case regression, example guard re-synced (my out-of-scope edit was the last red), and two staticcheck findings cleared.",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": "2026-09-12T20:20:00Z",
+      "merged_at": "2026-09-12T20:20:00Z"
+    },
+    "T0012": {
+      "status": "worker_failed",
+      "started_at": "2026-09-12T20:25:00Z",
+      "completed_at": null,
+      "notes": "Attempt 1 budget-exhausted: $25.13 of $25, with NO RESULT.json written at all (despite the write-early instruction) -> worker_failed per docs/62 §4. The work is substantive and coherent (43 paths, builds, package tests pass, and internal/devorchestrator/gate_inputs.go appears to be the gate-tampering fix). The single collect rejection is go.mod, which the package forbade STALELY - written when T0010 still owned go.mod; T0010 is merged, nothing contends. Re-dispatched in the same worktree with a corrected scope, a $40 budget, and a hard requirement to write RESULT.json within the first tool calls.",
+      "worker_run_id": "worker-T0012-fd1195b",
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0101": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0102": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0103": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0104": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0105": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0106": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0107": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0108": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0109": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0110": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0201": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0202": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0203": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0204": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0205": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0206": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0207": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0208": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0209": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0210": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0211": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0212": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0213": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0214": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0301": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0302": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0303": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0304": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0305": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0306": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0307": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0308": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0309": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0401": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0402": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0403": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0404": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0405": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0406": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0407": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0408": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0409": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0410": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0501": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0502": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0503": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0504": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0505": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0506": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0507": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0508": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0509": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0510": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0601": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0602": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0603": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0604": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0605": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0606": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0607": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0608": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0609": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0701": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0702": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0703": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0704": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0705": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0706": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0707": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0708": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0709": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0710": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0711": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0801": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0802": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0803": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0804": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0805": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0806": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0807": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0808": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0809": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0810": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0811": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0812": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0901": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0902": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0903": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0904": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0905": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0906": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0907": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0908": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1001": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1002": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1003": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1004": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1005": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1006": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1007": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1101": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1102": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1103": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1104": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1105": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1106": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1107": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1108": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1109": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1110": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1201": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1202": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1203": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1204": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1205": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1206": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1207": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1208": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0013": {
+      "status": "merged",
+      "started_at": "2026-09-12T15:15:00Z",
+      "completed_at": "2026-09-12T15:55:00Z",
+      "notes": "G2 accepted after independent verification: Supervisor re-ran its own original probe - the UPDATE that previously succeeded is now rejected with P0001, DELETE rejected, legitimate INSERT still succeeds, 13 row + 13 statement triggers enabled. Merged as PR #28 (eb1fc6d); its disclosed TRUNCATE gap closed by the Supervisor in PR #29 (a530fef). Residual bypass (session_replication_role / DISABLE TRIGGER) demonstrated but NOT closed; needs a restricted write role the owner did not select - decisions.md L1-20260912-21.",
+      "worker_run_id": "worker-T0013-6308664",
+      "accepted_by_supervisor_at": "2026-09-12T15:55:00Z",
+      "merged_at": "2026-09-12T15:55:00Z"
+    }
+  }
 }
