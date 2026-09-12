@@ -39,13 +39,13 @@
       "merged_at": "2026-09-12T14:40:00Z"
     },
     "T0004": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-12T14:45:00Z",
-      "completed_at": null,
-      "notes": "Dispatched in parallel with T0005. allowed_scope narrowed vs the DAG to keep the write surface disjoint: Makefile kept, but go.mod/go.sum forbidden (assigned to T0005, which needs pgx) so the two could run concurrently without a go.mod conflict.",
+      "completed_at": "2026-09-12T15:05:00Z",
+      "notes": "G2 accepted independently; merged as PR #16 (squash) at 9430396 under L3-20260912-4. 19/19 paths in scope, go.mod/go.sum untouched (parallel-scope constraint held). Supervisor re-ran go vet/build/test, web typecheck/lint/unit, adapter pytest, make check, doctor - all exit 0. Reproduced the secret-scan FAILING mode independently (planted canary -> exit 1 -> revert -> exit 0) and verified RedactURL by direct execution. Cross-task follow-ups (page.tsx wiring, port 9000 collision) recorded as REQUIRED T0006 acceptance items per decisions.md L1-20260912-14.",
       "worker_run_id": "worker-T0004-77ee212",
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "accepted_by_supervisor_at": "2026-09-12T15:05:00Z",
+      "merged_at": "2026-09-12T15:10:00Z"
     },
     "T0005": {
       "status": "running",
@@ -84,11 +84,11 @@
       "merged_at": null
     },
     "T0009": {
-      "status": "todo",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-09-12T15:12:00Z",
       "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
+      "notes": "Dispatched in parallel with T0005. Scope narrowed to cmd/rddev + internal/devorchestrator + specs/orchestrator + tasks/tasks.json; go.mod/go.sum forbidden (T0005 owns them) so the worker must use the standard library only. Supervisor-owned task state files explicitly excluded.",
+      "worker_run_id": "worker-T0009-9430396",
       "accepted_by_supervisor_at": null,
       "merged_at": null
     },

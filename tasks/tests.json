@@ -107,9 +107,9 @@
       "name": "config unit",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T15:05:00Z",
+      "evidence": "go test ./internal/config/ (config unit) + go vet/build ./... -> exit 0, Supervisor re-ran. Covers: layer missing/unknown fail-closed, missing required keys named, secret never defaults, empty secret rejected, value not satisfied by another layer, RedactURL canary, canary sweep across all output paths, validation errors never echo secrets."
     },
     {
       "id": "T0004-TEST-02",
@@ -117,9 +117,9 @@
       "name": "secret scan",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T15:05:00Z",
+      "evidence": "Secret scan: TestRepoExampleFilesAreSecretFree. Supervisor reproduced the FAILING mode independently - planted a canary ghp_ value in .env.example -> exit 1; reverted -> exit 0. Also scanned all committed example files for secret-shaped values (none found)."
     },
     {
       "id": "T0005-TEST-01",

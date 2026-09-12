@@ -45,6 +45,7 @@ owner 于 2026-09-12 授予**默认自主推进**授权（`L3-20260912-4`，持�
 | T0001 | merged | #6 | 12 项 spec 校验 + source-repo preflight（三态 visibility、fail-closed）+ 派生版本标记 + CI 强制 |
 | T0002 | merged | #10 | Monorepo：Go module 4 binary + Next.js 16.3.5 + uv Python adapter + Makefile，无 TS backend |
 | T0003 | merged | #13 | Docker Compose 基设：pgvector/Redis/MinIO/Gitea/Mailpit，全 pinned + healthcheck + 幂等 init |
+| T0004 | merged | #16 | 配置与密钥基线：Go typed loader（stdlib）+ web/python 独立校验 + 分层 + RedactURL + secret scan |
 | 安全修复 | merged | #8 #11 #14 | preflight 凭据泄漏 + fail-open 分支门；schema 注解；infra init token/SQL/环境变量 |
 
 ## 进行中
