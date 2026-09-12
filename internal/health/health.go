@@ -10,17 +10,21 @@
 //     dependencies are reachable; any failed probe answers 503 with the
 //     per-dependency state in the body — a down dependency is reported
 //     truthfully, never as a crash and never as a false "ok";
-//   - probe error strings appear verbatim in the response detail, so probes
-//     must never put credential values into an error (they carry connection
-//     outcomes only).
+//   - /readyz is unauthenticated and often internet-reachable, so the body
+//     carries ONLY the per-dependency status: probe error strings name internal
+//     topology (host, port, database, user) and go to the operator log instead,
+//     redacted. The response stays truthful about up/down without disclosing
+//     how the service is wired (docs/23 §5, §10).
 package health
 
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/lichman0405/post/internal/config"
 	"github.com/lichman0405/post/internal/version"
 )
 
@@ -86,7 +90,6 @@ func (h *Handler) healthz(w http.ResponseWriter) {
 
 type checkState struct {
 	Status string `json:"status"`
-	Detail string `json:"detail,omitempty"`
 }
 
 type readyPayload struct {
@@ -108,7 +111,13 @@ func (h *Handler) readyz(w http.ResponseWriter, ctx context.Context) {
 		cancel()
 		state := checkState{Status: "up"}
 		if err != nil {
-			state = checkState{Status: "down", Detail: err.Error()}
+			// Operator-facing detail, never the public body: this names host,
+			// port, database and user. Redacted so a probe whose error embeds a
+			// DSN cannot leak its credentials into the log either.
+			slog.Warn("readiness probe failed",
+				"service", h.service, "dependency", p.Name,
+				"error", config.RedactForOutput(err.Error()))
+			state = checkState{Status: "down"}
 			allUp = false
 		}
 		checks[p.Name] = state
