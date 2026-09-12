@@ -1612,3 +1612,37 @@ rddev worker rework T0101                            # 重新记录权威 gate-i
   而且它重置到 HEAD 而基线取分支 tip，两者不一致时 collect 的 `head-baseline` 仍会红。
 - **这条应固化为 `rddev` 的一个显式子命令**（如 `rddev worker rebaseline TASK`），
   而不是继续靠手工 git 序列。列为后续项——手工序列正确但不可审计、不可复现。
+
+## L1-20260912-48 — 对"symlink 任意文件读取"告警的处置：**成立**，已修（不是误报）
+
+push 触发了安全复查告警：`Path Traversal / Arbitrary File Read (symlink bypass)`，
+位置是我刚改的 `internal/devorchestrator/git_control.go`（L1-20260912-46 的 untracked 补齐）。
+**这次不是误报，是真的，而且是我自己引入的。**
+
+**缺陷**：`taskWorktreeDiff` 用 `os.ReadFile(filepath.Join(worktree, p))` 读取 `git ls-files --others` 给出的路径。
+路径由 **Worker 自己的树**决定，而读取者是 **Supervisor**，结果被写进**持久化产物**（review 输入）。
+于是 Worker 只要放一个指向树外的符号链接：
+
+```
+ln -s ~/.ssh/id_rsa innocent.txt      # 一个 untracked "新文件"
+```
+
+Supervisor 就会**跟着链接把目标内容读出来并嵌进 review 输入**——
+"总结这次改动"因此变成了**任意文件读取原语**，而且读取的是比 Worker 权限更高的主体。
+
+**修法**：`os.Stat` → **`os.Lstat`**，并且**永不打开非普通文件**。
+符号链接按 Git 自己的表示法记录（`new file mode 120000` + 目标路径），
+目录与 gitlink 直接跳过。**两者都记录链接本身而不是目标内容**——
+这正是 Git 的做法，所以既安全又忠实。
+
+**回归测试（隔离验证）**：造一个指向树外 `SUPER-SECRET-CONTENT` 的符号链接。
+
+```
+把 Lstat 换回 Stat -> FAIL："the review diff followed a symlink and embedded the target's contents"
+恢复              -> PASS（且断言 120000 模式存在、链接名出现在 diff 里）
+```
+
+**为什么这条值得单独记**：本会话我处理过几次"误报"告警并说明了理由；
+这一条我**没有**用同样的口气打发，因为方向确实成立。
+区分它们的方法不是看告警的标题，而是问**"最坏情况下，谁会读到/写到什么？"**——
+L1-20260912-34 的那条（IAM/RBAC）问不出任何具体的最坏情况；这一条一问就出来了。

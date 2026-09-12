@@ -197,3 +197,54 @@ func TestWorktreeDiffIncludesUntrackedFiles(t *testing.T) {
 		t.Errorf("the new file's contents are missing, only its name appears:\n%s", diff)
 	}
 }
+
+// The untracked paths come from the Worker's own tree, so following a symlink
+// would let the Worker make the SUPERVISOR read an arbitrary file and embed it
+// in the review input — a durable artifact. Lstat, never Stat: a symlink is
+// recorded as its target path, the way Git records it, and the target is never
+// opened.
+func TestWorktreeDiffDoesNotFollowSymlinksOutOfTheTree(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(t.TempDir(), "outside-secret.txt")
+	if err := os.WriteFile(secret, []byte("SUPER-SECRET-CONTENT\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init", "-q")
+	if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "-A")
+	runGit("commit", "-q", "-m", "baseline")
+	baseline := runGit("rev-parse", "HEAD")
+
+	if err := os.Symlink(secret, filepath.Join(dir, "innocent.txt")); err != nil {
+		t.Skipf("symlinks unavailable here: %v", err)
+	}
+
+	diff, err := taskWorktreeDiff(&WorkerRecord{Worktree: dir, BaselineSHA: baseline})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(diff, "SUPER-SECRET-CONTENT") {
+		t.Errorf("the review diff followed a symlink and embedded the target's contents:\n%s", diff)
+	}
+	if !strings.Contains(diff, "innocent.txt") {
+		t.Errorf("the symlink is missing from the diff entirely — it should be recorded as a link, not omitted:\n%s", diff)
+	}
+	if !strings.Contains(diff, "120000") {
+		t.Errorf("the symlink was not recorded with Git's symlink mode 120000:\n%s", diff)
+	}
+}
