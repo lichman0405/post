@@ -1011,3 +1011,42 @@ T0101 **跑了这两个套件并且把标签写进了命令**
 
 已把这段判断**写进代码注释**（`commandNamesTest`），以免下一个人重新推导一遍，也以免有人误以为
 这个检查承担了它从未承担的职责。
+
+## L1-20260912-36 — `make test-integration` 的默认端口是错的，而 Worker 无法自己修
+
+**现象**：我按文档起 infra（`make infra-up`）后，`make test-integration` 报
+"no PostgreSQL reachable"。原因不是环境，是**默认值写错了**：
+
+| 位置 | 端口 |
+|---|---|
+| `docker-compose.yml`（`${POSTGRES_PORT:-5432}`） | **5432** |
+| `infra/docker/README.md`（端口表 + `POSTGRES_PORT` 默认值） | **5432** |
+| `.env.example`（`POST_DB_PORT`） | **5432** |
+| `ops/DEV_COMMANDS.md` §默认端口 | **5432** |
+| GitHub CI 的 `migration-integration` service container | **5432** |
+| **`Makefile` 的 `test-integration` 默认 URL** | **15432** ← 唯一的例外 |
+
+15432 在 compose 文件里是**"再起第二个隔离栈时"的覆盖示例**，不是主栈端口。也就是说
+**文档描述的流程（`make infra-up` → `make test-integration`）在全新克隆上必然失败**，
+而 `ops/DEV_COMMANDS.md` 第 44 行把这个错误默认值抄了一遍，于是错的地方看起来是两处、源头是一处。
+
+**为什么这条比看上去严重**：Worker **没有 Docker 权限**（Docker 是按任务 opt-in 的），所以
+Worker 无法自己 `make infra-up`。数据库必须由 Supervisor 预先起好，而"起好"的标准是
+**`make test-integration` 能不改配置直接通过**。默认值错了，等于每一个需要真实 PostgreSQL 的任务
+（T0101 起，P1–P10 大量任务）都会在这句话上原地卡住，并把责任错误地显示成"Worker 没跑集成测试"。
+
+**处置**：`Makefile` 默认改为 `5432`，`ops/DEV_COMMANDS.md` 同步。**并且实测过**：起一个同配置的
+临时 PostgreSQL 在 5432，`make test-integration` **不做任何环境变量覆盖**直接通过
+（`ok github.com/lichman0405/post/tests/integration 3.074s`），随后删除该容器。
+
+**验证过程中的一个小教训（记录以免下次误判）**：第一次跑失败了，报
+`failed to receive message: read tcp …: connection reset by peer`。这不是代码问题，也不是配置问题：
+`pg-ready.py` 在 PostgreSQL 初始化期间会短暂成功（它会在这期间先监听再重启），于是探针过了、
+测试连接被重置。**"探针说 ready" 与 "服务真的可用" 是两件事**——判据应该是
+`database system is ready to accept connections` 这类来自服务自身的就绪信号。
+本次 CI 的 `migration-integration` job 用的是 service container 加健康检查，不受此影响；
+但本地/Worker 场景下 `pg-ready.py` 是唯一探针，这个假阳性值得后续修（列为 follow-up，未在本 PR 处理）。
+
+**当前环境**：为不打断正在运行的 T0101 rework，本次把 infra 起在
+`POSTGRES_PORT=15432 REDIS_PORT=16379 …`（即 compose 文档中的覆盖形式）。**T0101 结束后应改回默认端口**，
+让本机状态与修复后的文档一致。

@@ -55,7 +55,15 @@ test: ## unit test suites (Go + web + Python adapter); no Docker, no database
 	cd services/scientific-adapter && uv run pytest
 
 test-integration: ## integration suite against real PostgreSQL; loud failure (with reason) when unreachable
-	@PG_TEST_URL="$${POSTGRES_TEST_ADMIN_URL:-postgres://postgres:postgres_dev_pw@127.0.0.1:15432/post}"; \
+# The default port is 5432, the port `make infra-up` actually publishes: it is
+# what docker-compose.yml defaults to, what infra/docker/README.md and
+# ops/DEV_COMMANDS.md document, and what CI's service container uses. This line
+# used to say 15432 — the port the compose file documents as the override for a
+# *second* stack — so the documented flow (`make infra-up && make
+# test-integration`) failed with "no PostgreSQL reachable" on a fresh clone, and
+# a Worker, which cannot start Docker itself, had no way to reach a database.
+# Override with POSTGRES_TEST_ADMIN_URL for a non-default stack.
+	@PG_TEST_URL="$${POSTGRES_TEST_ADMIN_URL:-postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post}"; \
 	if python3 scripts/pg-ready.py "$$PG_TEST_URL"; then \
 		echo ">> test-integration: running integration suite against $$PG_TEST_URL"; \
 		POSTGRES_TEST_ADMIN_URL="$$PG_TEST_URL" go test ./tests/integration -count=1; \
