@@ -1045,8 +1045,51 @@ Worker 无法自己 `make infra-up`。数据库必须由 Supervisor 预先起好
 测试连接被重置。**"探针说 ready" 与 "服务真的可用" 是两件事**——判据应该是
 `database system is ready to accept connections` 这类来自服务自身的就绪信号。
 本次 CI 的 `migration-integration` job 用的是 service container 加健康检查，不受此影响；
-但本地/Worker 场景下 `pg-ready.py` 是唯一探针，这个假阳性值得后续修（列为 follow-up，未在本 PR 处理）。
+但本地/Worker 场景下 `pg-ready.py` 是唯一探针，这个假阳性值得后续修——**已在 L1-20260912-37 修复**。
 
 **当前环境**：为不打断正在运行的 T0101 rework，本次把 infra 起在
 `POSTGRES_PORT=15432 REDIS_PORT=16379 …`（即 compose 文档中的覆盖形式）。**T0101 结束后应改回默认端口**，
 让本机状态与修复后的文档一致。
+
+## L1-20260912-37 — `pg-ready.py` 只做 TCP connect，所以会把"正在初始化"报成"就绪"
+
+**L1-36 里我记下的那个假阳性，根因比"时序问题"更具体：探针从来没有问对问题。**
+
+`scripts/pg-ready.py` 原实现只有一句 `socket.create_connection(...)`——**TCP 连上就算 ready**。
+但 PostgreSQL **在真正可用之前就已经在监听端口**，随后会重启。于是：
+
+- 探针报告 ready（它确实连上了）；
+- `make test-integration` 立刻连接，被 `connection reset by peer` 打断。
+
+**更一般地说，它无法区分"PostgreSQL"和"任何监听该端口的进程"。** 一个 nginx、一个别的数据库、
+一个刚 bind 还没 listen 完的服务，都会被判成"PostgreSQL 可达"。
+
+**处置**：探针改为**真正做一次 PostgreSQL 协议握手**——发送 protocol 3.0 的 StartupMessage，
+要求对方回一个协议响应：
+
+- 回 `'R'`（Authentication）→ 是 PostgreSQL 且在接受连接 → ready；
+- 回 `'E'`（ErrorResponse）→ 把**服务端自己的话**（`M` 字段）打印出来（例如
+  "the database system is starting up"），比探针自己编一句有用得多；
+- 连上但对方不说话 / 直接关闭 → **不是** ready（这正是我踩到的那一种）；
+- 第一个字节不是 `R`/`E` → 不是 PostgreSQL。
+
+**明确不做的事（写进 docstring）**：**不校验凭据**。握手成功即视为 ready，密码错了会由测试套件自己
+以更好的错误暴露——要在这里也判密码，就得在本脚本里重实现 SCRAM，那是把探针变成半个驱动。
+
+**回归测试 `scripts/tests/pg-ready-unit-test.sh`**（已接入 `ci.sh stage_integration` 与 CI 的
+`migration-integration` job，gates.json 同步）：
+
+```
+ok   close listener: rc=1, not reported ready      <- 这次踩到的那个形状
+ok   silent listener: rc=1, not reported ready     <- accept 后一言不发（初始化中）
+ok   malformed URL: rc=2 (usage error)
+ok   real PostgreSQL (...): ready                  <- 证明没有矫枉过正
+```
+
+**最后一条是必要的**：只测"假的必须失败"会得到一个"永远失败"的探针，那也是坏的。
+一个探针必须**同时**被证明会拒假的、会收真的。
+
+**写这个测试时我自己先犯了一次同类错误**（记录以免重犯）：第一版把后台 listener 的 stdout
+用 `$(...)` 捕获，而后台进程持有那个管道不关闭，命令替换会一直等到进程退出——测试自己把自己挂住。
+改成"listener 把端口写进文件、调用方读文件"，端口在 `listen()` 之后才写出，因此读到端口即已可连接。
+**"捕获一个后台进程的输出"和"等待一个后台进程"是同一件事**，这在这里是不想要的。

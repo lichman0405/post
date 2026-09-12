@@ -1,6 +1,6 @@
 {
   "algorithm": "sha256",
-  "combined_digest": "b3716f08460db70c533c03185026450b87ccb5dfde38732c367f67ccbf6aff92",
+  "combined_digest": "21c29bacc100e90bcee996f07e36beb8dbbbdbab33386489329908befbe050e7",
   "files": {
     "specs/README.md": "2a0398dfb3ead0586034364d7411d845b84fd33b7c43d1ce9199d6a14ef4cf1a",
     "specs/api/openapi.yaml": "62655a7ac3428d320258de2bc8ce3d331357ffce309bf7a725390869d20c243b",
@@ -9,7 +9,7 @@
     "specs/mcp/tools.json": "f6b5fb023aba882a259bbe7d001bdd2755c1120f1dc768fe7512a7383fdbaca9",
     "specs/orchestrator/decision-levels.yaml": "8a06ec18b8abd79c2462e3d3bcc5b785c51a8f970c54aaa279f174882e0f5a3f",
     "specs/orchestrator/derived-artifacts.json": "3b3e7174d1aa2d095e6a99356109b913133080db4898986ad8bb9203e760a4cb",
-    "specs/orchestrator/gates.json": "700e86ed99c032eec24a61f73574ed87070ed12707496b47d0e3e5d86b7f80a3",
+    "specs/orchestrator/gates.json": "ec3c7c2a74bd7a2fb47e85df377ad4266e1f567a2e5023d7dd466f5e71928c16",
     "specs/orchestrator/rddev-cli.yaml": "f73576090a3f8bb3b78d560e662e0a180c480917b12f731ad579879ed174a397",
     "specs/orchestrator/review-verdict.schema.json": "78940ff58ba1d84e05d739d1c4af2a4d47b2fa834e7ba2ce2bca5b337f66f9fd",
     "specs/orchestrator/source-repo-preflight.schema.json": "a69dd6840fd2c5558dfba7fdb19019430f1c9a3b248c19c6f0a93b2912882932",
@@ -43,5 +43,5 @@
   },
   "input_count": 38,
   "marker_format": 1,
-  "spec_version": "sha256:b3716f08460db70c"
+  "spec_version": "sha256:21c29bacc100e90b"
 }

@@ -107,6 +107,11 @@ stage_python() {
 }
 
 stage_integration() {
+  # The probe is a gate input: `make test-integration` decides whether to run
+  # at all from its verdict. A probe that says "ready" for a socket that never
+  # speaks PostgreSQL turns a missing database into a confusing postgres reset
+  # error instead of the loud, actionable failure this stage promises.
+  bash scripts/tests/pg-ready-unit-test.sh
   make test-integration
 }
 
