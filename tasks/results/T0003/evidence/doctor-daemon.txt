@@ -1,0 +1,45 @@
+POST environment preflight (ops/doctor.sh) — contract ops/doctor-checks.md
+Environment: kernel=Linux arch=x86_64 distro=ubuntu 24.04 (noble) wsl=none
+Repo: /home/shibo/code/post/.rddev/worktrees/T0003 (fs mount: /home)
+
+[PASS] ENV-OS-KERNEL     kernel: Linux — baseline: Linux
+[PASS] ENV-OS-DISTRO     distro: Ubuntu 24.04.5 LTS 24.04 (noble) — baseline: ubuntu 24.04 (noble)
+[PASS] ENV-OS-ARCH       arch: x86_64 — baseline: x86_64 (amd64)
+[PASS] ENV-WSL           WSL: none — baseline: wsl2 or none
+[PASS] RES-CPU           16 cores — baseline: >= 8
+[PASS] RES-CPU-TIER      16 cores — baseline: >= 16 (recommended)
+[PASS] RES-RAM           46 GiB total — baseline: >= 32 GiB
+[WARN] RES-RAM-TIER      46 GiB total — baseline: >= 64 GiB (recommended)
+       fix: recommended >= 64 GiB RAM (docs/64 §2)
+[PASS] RES-SWAP          63 GiB total — baseline: >= 8 GiB
+[PASS] RES-SWAP-TIER     63 GiB total — baseline: >= 16 GiB (recommended)
+[PASS] RES-DISK          193 GiB free — baseline: >= 20 GiB free
+[PASS] RES-DISK-TIER     193 GiB free — baseline: >= 100 GiB free (recommended)
+[PASS] RES-FD            1048576 — baseline: >= 65535
+[PASS] RES-DOCKER-DISK   129 GiB free — baseline: >= 100 GiB free on docker data-root
+[SKIP] RES-REPO-FS       not running under WSL — baseline: repo not under /mnt/
+       note: only checked under WSL
+[WARN] RES-BWRAP         bubblewrap: missing — baseline: present
+       fix: sudo apt-get install -y bubblewrap (Claude Code sandbox prerequisite, docs/64 §3)
+[PASS] RES-SOCAT         socat: present — baseline: present
+[PASS] T-GIT             git version 2.43.0 — baseline: 2.x
+[PASS] T-GIT-LFS         git-lfs/3.4.1 (GitHub; linux amd64; go 1.22.2) — baseline: 3.x
+[PASS] T-CLAUDE          2.1.269 (Claude Code) — baseline: recorded (manual upgrade policy)
+[PASS] T-GO              go version go1.27.1 linux/amd64 — baseline: 1.27.x
+[PASS] T-NODE            v24.21.0 — baseline: 24.x (LTS)
+[PASS] T-PNPM            12.4.1 — baseline: packageManager pin (recorded)
+[PASS] T-PNPM-PIN        pnpm 12.4.1 == pin 12.4.1 — baseline: == packageManager field
+[PASS] T-PYTHON3         Python 3.12.7 — baseline: >= 3.12
+[PASS] T-UV              uv 0.7.9 — baseline: recorded
+[PASS] T-DOCKER          Docker version 29.8.0, build 88096ef — baseline: Engine + Compose v2 (recorded)
+[PASS] T-DOCKER-COMPOSE  Docker Compose version v5.5.1 — baseline: v2 plugin lineage (major >= 2)
+[PASS] T-DOCKER-DAEMON   reachable — baseline: reachable
+[PASS] T-JQ              jq-1.6 — baseline: 1.x
+[PASS] T-PSQL            psql (PostgreSQL) 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) — baseline: 16.x
+[PASS] T-REDIS-CLI       redis-cli 7.0.15 — baseline: 7.x
+[PASS] T-MAKE            GNU Make 4.3 — baseline: 4.x
+[PASS] T-RG              ripgrep 14.1.0 — baseline: present (binary: rg)
+[PASS] T-SHELLCHECK      ShellCheck - shell script analysis tool — baseline: recorded
+
+Summary: required 27 checks: 26 passed, 0 failed, 1 skipped | advisory 8 checks: 6 passed, 2 warn, 0 skipped
+Verdict: ok (exit 0)

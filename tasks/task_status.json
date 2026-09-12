@@ -30,29 +30,29 @@
       "merged_at": "2026-09-12T14:22:00Z"
     },
     "T0003": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-12T14:25:00Z",
-      "completed_at": null,
-      "notes": "Dispatched with an EXPLICIT per-task Docker socket grant (docs/64 §8 integration-task exception) and COMPOSE_PROJECT_NAME=posttask-t0003 for namespacing. Daemon-wide destructive docker ops remain blocked. branch task/T0003-docker-compose, baseline 1aa8528.",
+      "completed_at": "2026-09-12T14:35:00Z",
+      "notes": "G2/G3 accepted independently; merged as PR #13 (squash) at 77ee212 under L3-20260912-4. Supervisor verified against real containers: all 5 services healthy from a clean start, all ports on 127.0.0.1, pgvector 0.8.6 with a real vector op, fresh-install init creation path, init idempotency, and data persistence across down/up for postgres/redis/minio/gitea. Post-merge security follow-up: PR #14 fixed a token printed to stdout, SQL interpolation in the Postgres bootstrap, and silently non-functional env overrides (decisions.md L1-20260912-12).",
       "worker_run_id": "worker-T0003-1aa8528",
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "accepted_by_supervisor_at": "2026-09-12T14:35:00Z",
+      "merged_at": "2026-09-12T14:40:00Z"
     },
     "T0004": {
-      "status": "todo",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-09-12T14:45:00Z",
       "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
+      "notes": "Dispatched in parallel with T0005. allowed_scope narrowed vs the DAG to keep the write surface disjoint: Makefile kept, but go.mod/go.sum forbidden (assigned to T0005, which needs pgx) so the two could run concurrently without a go.mod conflict.",
+      "worker_run_id": "worker-T0004-77ee212",
       "accepted_by_supervisor_at": null,
       "merged_at": null
     },
     "T0005": {
-      "status": "todo",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-09-12T14:45:00Z",
       "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
+      "notes": "Dispatched in parallel with T0004 with an explicit per-task Docker grant (real PostgreSQL required by its integration test per docs/67 G3), COMPOSE_PROJECT_NAME=posttask-t0005. go.mod/go.sum added to scope; Makefile explicitly out of scope.",
+      "worker_run_id": "worker-T0005-77ee212",
       "accepted_by_supervisor_at": null,
       "merged_at": null
     },

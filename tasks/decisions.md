@@ -292,6 +292,39 @@ schema，那才是真正的 L3 安全决策，Supervisor 不得自行决定。
   属于**实现 External Reference fetch 的那个任务**（P5）的验收项，必须在其 task package 的
   acceptance criteria 中显式写入，否则会重演"标准没写清楚"的老问题。
 
+## L1-20260912-12 — T0003 init 脚本的三个安全缺陷（Supervisor 直接修复）
+
+**触发**：自动 commit security review 报出 `credential-exposure`、`sensitive-to-observability`
+（`infra/docker/gitea/init-gitea.sh`）与 `sql-injection`（`infra/docker/postgres/initdb.d/01-init.sh`）。
+**复核确认三条全部为真**，且前两条在我的 G3 输出里**明文可见**——我读过那段输出却没有质疑。
+
+1. **Gitea token 被打印到 stdout**：`gitea admin user create --access-token` 会把 token 明文
+   输出，于是 `make infra-init` 会把一个真实凭据写进终端 scrollback、`tee` 捕获与 CI 日志。
+   违反 `docs/23` §10（日志 redact）。**修复**：init 不再自动签发 token；改为显式 opt-in
+   （`GITEA_SVC_MINT_TOKEN=1`），并由 README 指引直接重定向进 secret store；签发时显式指定
+   窄 `--scopes`，不再用 Gitea 默认的 `all`（`docs/23` §8 服务 token 最小权限）。
+2. **SQL 注入**：Gitea 角色名/密码/库名被从环境变量直接拼进 SQL 文本，被覆盖的值可越出字符串
+   字面量。**修复**：改用 psql 变量 + `:"ident"` / `:'literal'`，由 psql 负责转义。
+3. **（修复过程中发现，review 未报）环境变量覆盖从未生效**：`docker compose exec` 不转发宿主
+   env，因此所有文档化的覆盖变量（`GITEA_ADMIN_USER`、`MINIO_INIT_BUCKET`、
+   `GITEA_SVC_MINT_TOKEN` …）一直被**静默忽略**并退回默认值，而 README 与脚本都声称可覆盖。
+   **修复**：`init.sh` 显式用 `-e` 转发白名单。以 `MINIO_INIT_BUCKET` 建桶验证——只有转发到位
+   才会成功。
+   
+   第 3 条最值得警惕：它是**正确性故障却不报错**，安静地成功，产出的是默认值。
+
+**决策**：仍由 Supervisor 直接修复（安全缺陷 + 与在跑的 T0004/T0005 无写冲突），并在 PR 中
+如实标注为 Supervisor 作者身份，不伪装成 Worker 交付。
+
+**验证**：全新 volume → 五个服务全 healthy；`make infra-init` exit 0 且输出中 40-hex 形态 token
+**零个**；显式签发路径仍可用；重复 init 全部 no-op；`down -v` 无残留；shellcheck 干净。
+PR #14（`29625a5`）。
+
+**流程教训（比缺陷本身更重要）**：这是同一模式第三次出现——**验收标准没覆盖**该检查项。
+我在 G2 里核对了 acceptance criteria，却没有核对"这个输出里是否含凭据"。自本条起，凡涉及
+配置/密钥/初始化脚本的任务，task package 的 acceptance criteria **必须**显式包含：
+"输出/日志/快照中不得出现凭据（以 canary 值扫描验证）"与"无法验证时必须 fail-closed"。
+
 ---
 
 ## 环境发现（非决策，必须显式记录）

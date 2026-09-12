@@ -1,0 +1,184 @@
+{
+  "task_id": "T0003",
+  "status": "completed",
+  "summary": "Delivered the POST local infrastructure stack as a Docker Compose project: PostgreSQL 16 + pgvector 0.8.6 (pgvector/pgvector:0.8.6-pg16), Redis 7.4.11-alpine, MinIO RELEASE.2025-09-07T16-13-09Z (quay.io — MinIO no longer publishes to Docker Hub), Gitea 1.27.3, Mailpit v1.31.1. All exact tags, healthchecks with real readiness probes on every service, named volumes, all host ports bound to 127.0.0.1 only, overridable ports/credentials via environment variables (no root .env created, no COMPOSE_PROJECT_NAME hardcoded). One-command idempotent init (make infra-init) creates the MinIO bucket 'post' and the Gitea admin 'postadmin', test org 'post-test', and service account 'post-git-svc' — re-runs are pure no-ops (verified twice back-to-back plus once after a down/up cycle). Gitea's dev mailer is wired to Mailpit (nothing leaves the host). Applications remain host-native. Makefile targets (infra-up/infra-init/infra/infra-down/infra-ps/infra-logs) documented in make help; ops/DEV_COMMANDS.md updated; full dev guide in infra/docker/README.md. All G1 tests executed with real output: all-healthy compose ps, idempotency, pgvector enable-ability, down/up persistence, ./ops/doctor.sh still exit 0. Note: Gitea >= 1.27 removed native 'service accounts' — the service account is modeled as a token-only bot user plus an org team (the supported machine-identity mechanism in 1.27); flagged for Supervisor confirmation in risks.",
+  "files_changed": [
+    "docker-compose.yml",
+    "infra/docker/README.md",
+    "infra/docker/init.sh",
+    "infra/docker/wait-healthy.sh",
+    "infra/docker/gitea/init-gitea.sh",
+    "infra/docker/minio/init-minio.sh",
+    "infra/docker/postgres/initdb.d/01-init.sh",
+    "Makefile",
+    "ops/DEV_COMMANDS.md"
+  ],
+  "tests": [
+    {
+      "command": "docker compose config --quiet",
+      "status": "passed",
+      "evidence": "exit 0, 'config valid' (no warnings; run from the worktree root with COMPOSE_PROJECT_NAME=posttask-t0003 preset by rddev)."
+    },
+    {
+      "command": "make infra-up  (fresh volumes after 'docker compose down -v' for the fresh-install path)",
+      "status": "passed",
+      "evidence": "All 5 services healthy on first boot: postgres Healthy, redis Healthy, minio Healthy, gitea Healthy, mailpit Healthy (docker compose ps shows 'Up ... (healthy)' for every service; full output archived in evidence/)."
+    },
+    {
+      "command": "make infra-init  (run 1 — creation path)",
+      "status": "passed",
+      "evidence": "MinIO: 'Bucket created successfully local/post' (bucket list: 1 bucket). Gitea: 'New user postadmin created', org 'post-test' created, bot 'post-git-svc' created with access token, team 'svc' created (id=2), bot added to team. Exit 0."
+    },
+    {
+      "command": "make infra-init  (run 2 — idempotency, immediately repeated)",
+      "status": "passed",
+      "evidence": "Exit 0, every step 'already exists (no-op)'. Post-state: bucket-count=1, exactly 1 admin (postadmin), 1 org (post-test), teams = Owners + svc (no duplicates). mc mb --ignore-existing does not recreate the bucket (original 06:11:00 timestamp unchanged)."
+    },
+    {
+      "command": "make infra-init  (run 3 — idempotency after docker compose down / up cycle)",
+      "status": "passed",
+      "evidence": "Exit 0, all steps 'already exists (no-op)' including bucket, admin, org, bot, team, membership."
+    },
+    {
+      "command": "pgvector availability: psql in 'post' DB + scratch-database extension test",
+      "status": "passed",
+      "evidence": "vector 0.8.6 already enabled in 'post' (bootstrap script): 'SELECT extversion FROM pg_extension WHERE extname='vector'' -> 0.8.6; distance query '[1,2,3]'::vector <-> '[3,1,2]'::vector -> 2.449489742783178. In a scratch DB: 'CREATE DATABASE vector_probe; CREATE EXTENSION vector;' -> extversion 0.8.6, pg_available_extensions count=1 (extension genuinely prebuilt in pgvector/pgvector:0.8.6-pg16, no runtime install script; scratch DB dropped afterwards)."
+    },
+    {
+      "command": "Data persistence: markers in postgres/redis/minio/gitea + mailpit SMTP, then docker compose down -> up -d --wait",
+      "status": "passed",
+      "evidence": "After down/up all 5 services healthy again. Postgres: persistence_probe row 'survives-down-up' still selected. Redis: GET post:persistence-probe -> 'survives-down-up'. MinIO: object persistence-probe.txt (25B, original 06:11:35 timestamp) still readable after re-running the init's alias set (alias config is container-ephemeral by design). Gitea: repo 'persistence-probe' (created by the bot in post-test, HTTP 201), org post-test, bot post-git-svc all present. Mailpit: '/mailpit sendmail' message 'persistence probe' captured (checked via API from the gitea container); mailpit messages are ephemeral by design (documented). All markers removed afterwards to leave a clean dev state."
+    },
+    {
+      "command": "make infra  (combined up + init on existing stack)",
+      "status": "passed",
+      "evidence": "Exit 0; all services healthy; init steps all no-op."
+    },
+    {
+      "command": "./ops/doctor.sh",
+      "status": "passed",
+      "evidence": "Exit 0, 'Verdict: ok'. Required 27 checks: 25 passed, 0 failed, 2 skipped (the two docker-daemon-gated checks, disabled by default). Full output archived in evidence/doctor-after.txt."
+    },
+    {
+      "command": "./ops/doctor.sh --check-docker-daemon",
+      "status": "passed",
+      "evidence": "Exit 0, 'Verdict: ok'. RES-DOCKER-DISK 129 GiB free >= 100 GiB, T-DOCKER-DAEMON reachable. Archived in evidence/doctor-daemon.txt."
+    },
+    {
+      "command": "bash ops/tests/doctor-unit-test.sh && bash ops/tests/doctor-smoke-test.sh",
+      "status": "passed",
+      "evidence": "unit: 19 cases, 0 assertion failures — PASS; smoke: 0 failure group(s) — PASS. Archived in evidence/."
+    },
+    {
+      "command": "shellcheck infra/docker/init.sh wait-healthy.sh minio/init-minio.sh gitea/init-gitea.sh postgres/initdb.d/01-init.sh",
+      "status": "passed",
+      "evidence": "No findings ('shellcheck clean') after fixing one SC2143 style warning in wait-healthy.sh; script re-verified against the live stack (exit 0)."
+    },
+    {
+      "command": "Port binding audit: ss -ltn on all 8 exposed host ports",
+      "status": "passed",
+      "evidence": "Every listener bound to 127.0.0.1 only: 5432, 6379, 9000, 9001, 3000, 2222, 8025, 1025 — none on 0.0.0.0 or ::."
+    },
+    {
+      "command": "Gitea service account end-to-end: bot creates a repo in the test org",
+      "status": "passed",
+      "evidence": "POST /api/v1/orgs/post-test/repos with the post-git-svc token -> HTTP 201; repo visible in the org ('name':'persistence-probe'). Proves the created service account can act in the test organization."
+    },
+    {
+      "command": "make help",
+      "status": "passed",
+      "evidence": "All six infra targets listed with one-line documentation (infra-up, infra-init, infra, infra-down, infra-ps, infra-logs)."
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "docker compose up 后所有依赖 healthy (task-package AC1; requirement 1/2)",
+      "status": "passed",
+      "evidence": "make infra-up -> docker compose ps shows postgres, redis, minio, gitea, mailpit all 'Up ... (healthy)'. Healthchecks use real readiness probes (pg_isready, redis-cli ping, mc ready local, Gitea /api/healthz, mailpit readyz) with interval/retries/start_period set per service; a container that is up but not accepting connections does not report healthy (gitea only became healthy after its first-boot DB migration finished)."
+    },
+    {
+      "criterion": "重复启动幂等 (task-package AC2; requirement 4)",
+      "status": "passed",
+      "evidence": "make infra-init run 3 times (twice back-to-back, once after down/up) — every later run exits 0 with every step 'already exists (no-op)'; bucket-count stays 1, single admin/org/bot/team; nothing is deleted or recreated (mc mb --ignore-existing; Gitea steps are existence-checked)."
+    },
+    {
+      "criterion": "README/脚本说明完整 (task-package AC3; requirements 9/10)",
+      "status": "passed",
+      "evidence": "infra/docker/README.md documents quickstart, the exact ports/credentials table, what init creates, override variables, parallel-worker isolation, persistence/reset, image pins and troubleshooting; ops/DEV_COMMANDS.md gained a 本地基础设施 section; Makefile targets are self-documented via make help."
+    },
+    {
+      "criterion": "PostgreSQL with pgvector, Redis, MinIO, Gitea, Mailpit, exact pinned tags (requirement 1)",
+      "status": "passed",
+      "evidence": "pgvector/pgvector:0.8.6-pg16 (extension prebuilt in image, proven by scratch-DB CREATE EXTENSION test), redis:7.4.11-alpine, quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z, gitea/gitea:1.27.3, axllent/mailpit:v1.31.1. No 'latest' anywhere."
+    },
+    {
+      "criterion": "Healthchecks on every service with sensible timing (requirement 2)",
+      "status": "passed",
+      "evidence": "All 5 services define test/interval/timeout/retries/start_period (5-10s intervals, 10-30s start_period, gitea 18 retries for first-boot migrations). docker compose up --wait --wait-timeout 300 waits on them; all healthy in real output."
+    },
+    {
+      "criterion": "Named volumes for all stateful data; data survives down/up (requirement 3)",
+      "status": "passed",
+      "evidence": "postgres_data, redis_data, minio_data, gitea_data declared top-level; persistence test: down -> up preserved the postgres row, redis key, minio object and gitea org/repo/bot (see tests). make infra-down keeps volumes (verified: all 4 volumes still listed after final down)."
+    },
+    {
+      "criterion": "One-command idempotent init: MinIO bucket + Gitea service account + test org (requirement 4)",
+      "status": "passed",
+      "evidence": "make infra-init (bash infra/docker/init.sh): waits for health, creates bucket 'post', admin 'postadmin', org 'post-test', service account 'post-git-svc' (token-only bot user — Gitea >= 1.27 removed native service accounts, see risks) + 'svc' org team with write permission. Runs entirely inside the service containers (docker compose exec), no host HTTP client needed."
+    },
+    {
+      "criterion": "Ports bind to 127.0.0.1 only (requirement 5)",
+      "status": "passed",
+      "evidence": "ss -ltn audit: all 8 host ports (5432/6379/9000/9001/3000/2222/8025/1025) LISTEN on 127.0.0.1, none on 0.0.0.0."
+    },
+    {
+      "criterion": "No production credentials; no root .env.example; dev-only defaults marked and documented (requirement 6)",
+      "status": "passed",
+      "evidence": "Only dev-only values (postgres_dev_pw, gitea_dev_pw, minio_dev_pw, postadmin_dev_pw — all suffixed _dev/_dev_pw and labeled 'DEV-ONLY' in compose comments and README). No .env/.env.example created at repo root (T0004's scope untouched). Defaults are inline ${VAR:-default} in docker-compose.yml, exactly as the requirement allows."
+    },
+    {
+      "criterion": "Parameterizable project/ports; no hardcoded COMPOSE_PROJECT_NAME (requirement 7)",
+      "status": "passed",
+      "evidence": "docker-compose.yml sets no name: — the project ran under rddev's preset posttask-t0003. All 8 host ports are ${VAR:-default} variables (override table in README); the README shows a full second-isolated-stack example."
+    },
+    {
+      "criterion": "Gitea is infrastructure only (requirement 8)",
+      "status": "passed",
+      "evidence": "Compose comments and README state ADR-019: internal Git provider, UI for debugging only, nothing presents it as product surface. Registration disabled (GITEA__service__DISABLE_REGISTRATION=true), offline mode on, dev mail to Mailpit only."
+    },
+    {
+      "criterion": "ops/ documentation updated (requirement 9)",
+      "status": "passed",
+      "evidence": "ops/DEV_COMMANDS.md: new 本地基础设施 section with all make infra commands, ports, credentials summary, isolation and pin notes, pointing to infra/docker/README.md for the full table."
+    },
+    {
+      "criterion": "Stack wired into the Makefile as documented targets (requirement 10)",
+      "status": "passed",
+      "evidence": "infra-up, infra-init, infra, infra-down, infra-ps, infra-logs added to .PHONY with ## help lines; all appear in make help; all exercised successfully during G1."
+    },
+    {
+      "criterion": "Applications remain host-native; this task delivers infrastructure only (task-package requirement)",
+      "status": "passed",
+      "evidence": "The compose file defines only the five infrastructure services; no Go API, worker, MCP server, rddev, Next.js or Python adapter image is built or run anywhere in the diff."
+    }
+  ],
+  "risks": [
+    "Gitea >= 1.27 removed native 'service accounts' (verified: 1.27.3 swagger has no service_accounts endpoints, no ServiceAccount types, no membership endpoints). The task's 'Gitea service account' is delivered as a token-only bot user (post-git-svc, gitea admin user create --user-type bot) plus an org team 'svc' with write permission (Gitea 1.27 routes org membership through teams). This is a judgment call for Supervisor confirmation; downgrading to gitea/gitea:1.26.4 (which still has native service accounts) is a one-line change if literal service accounts are preferred.",
+    "MinIO no longer publishes to Docker Hub (pull denied: 'requested access to the resource is denied'; Hub API 404 for the minio namespace). The pinned official registry is quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z.",
+    "Product specs do not pin bucket/org/account names: I chose bucket 'post', org 'post-test', service account 'post-git-svc', admin 'postadmin' (all clearly dev-flavored, overridable via env vars). L1 judgment call — confirm or rename with Supervisor before T0004+ consumes them.",
+    "The pinned MinIO release has a newer hotfix variant tag (RELEASE.2025-09-07T16-13-09Z.hotfix.7aa24e772) on quay.io; I pinned the plain RELEASE tag (canonical release identifier). Bump decision left to Supervisor.",
+    "Admin/service-account passwords and the bot access token are initial-only: they are set at first creation and printed once (token). Re-runs are no-ops by design, so later env overrides of the password do not retroactively apply. Admins can mint new bot tokens via 'gitea admin user generate-access-token'. Documented in the README.",
+    "Gitea logs a warning on boot ('connecting over insecure SMTP protocol to non-local address is not recommended'): expected — dev mail goes to Mailpit in plain SMTP on purpose; documented in README troubleshooting.",
+    "Mailpit messages are ephemeral by design (in-memory, no volume) — documented; not product state.",
+    "Worker-guard false positive: a read-only grep command containing the words 'service'/'system' was blocked as 'package/system service mutation'. Reported as a constraint; no retry attempted.",
+    "Leftover host cruft from testing: one stopped scratch container 'mc-ready-test' (a minio probe used to verify mc behavior) remains on the Docker host; 'docker rm' is blocked for Workers, so the Supervisor/operator may remove it. Also the test volumes posttask-t0003_* were intentionally kept (persistence evidence) with the stack down.",
+    "initdb bootstrap (01-init.sh) and init scripts interpolate dev credentials into SQL/shell; they are dev-only values and the scripts run once per volume lifetime or are existence-checked, but quoting assumes no exotic characters in overridden values."
+  ],
+  "follow_up_issues": [
+    "GitProvider adapter tasks should consume the post-git-svc bot/token flow for Gitea API access (token printed on first init run; 'gitea admin user generate-access-token' mints more).",
+    "Consider bumping the MinIO pin to the hotfix variant tag or the next RELEASE when image pins are next reviewed.",
+    "T0009 (rddev env up / env reset) should delegate to these compose targets rather than reimplementing them; rddev doctor remains the canonical preflight.",
+    "If Supervisor prefers native Gitea service accounts, downgrade the gitea pin to 1.26.4 and simplify the init script (direct service_accounts endpoints)."
+  ],
+  "notes_for_supervisor": "Volumes from my G1 runs were intentionally kept (posttask-t0003_* — postgres/redis/minio/gitea data, currently initialized with the dev state minus my cleaned-up markers); the stack itself is down. Wipe with 'docker compose down -v' if a pristine state is wanted before other Workers attach. Image tags were chosen by registry-tag discovery on 2026-09-12 (gitea 1.27.3, mailpit v1.31.1, pgvector 0.8.6-pg16, redis 7.4.11-alpine, minio RELEASE.2025-09-07T16-13-09Z on quay.io); no 'latest' was ever used in the committed file. No git operations were performed (worktree diff only). Full evidence logs archived next to this file in evidence/. One worker-guard false positive encountered (read-only grep with trigger words 'service'/'system' denied); not retried, per guard instruction."
+}

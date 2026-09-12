@@ -1,0 +1,31 @@
+ok   bash -n ops/doctor.sh
+ok   human output produced
+ok   human mode stderr empty
+ok   json mode stderr empty
+ok   deterministic: two --json runs are byte-identical (parsed equality)
+ok   check catalog: all 35 ids in contract order
+ok   exit_code field == real exit code (0)
+ok   human and json runs agree on exit code
+ok   verdict 'ok' maps to exit 0
+ok   host identified as Ubuntu 24.04 amd64 Linux
+ok   verdict is 'ok' (not unsupported, as expected on this host)
+ok   summary counts match checks: required={'total': 27, 'passed': 25, 'failed': 0, 'skipped': 2} advisory={'total': 8, 'passed': 5, 'warn': 2, 'skipped': 1}
+ok   schema: top-level keys match
+ok   schema: schema_version/contract consts hold
+ok   schema: verdict enum
+ok   schema: environment shape
+ok   schema: baselines keys + consts hold
+ok   per-check invariants hold (remediation/reason/severity rules)
+ok   human output tags match JSON: PASS=30 FAIL=0 WARN=2 SKIP=3
+ok   human verdict line matches JSON verdict
+SMOKE VERDICT: ok (exit 0) | required 25/27 passed, 0 failed, 2 skipped
+  [WARN] RES-RAM-TIER: 46 GiB total — baseline: >= 64 GiB (recommended)
+       fix: recommended >= 64 GiB RAM (docs/64 §2)
+  [SKIP] RES-DOCKER-DISK: disabled by default — probing the Docker daemon needs socket access; enable with --check-docker-daemon
+  [SKIP] RES-REPO-FS: only checked under WSL
+  [WARN] RES-BWRAP: bubblewrap: missing — baseline: present
+       fix: sudo apt-get install -y bubblewrap (Claude Code sandbox prerequisite, docs/64 §3)
+  [SKIP] T-DOCKER-DAEMON: disabled by default — probing the Docker daemon needs socket access; enable with --check-docker-daemon
+
+smoke: 0 failure group(s)
+SMOKE TEST RESULT: PASS
