@@ -346,12 +346,33 @@ func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
 			continue
 		}
 		abs := filepath.Join(rec.Worktree, p)
+		// Lstat, not Stat: a symlink is reported as the link, never followed.
+		// The paths come from the Worker's own tree, so a symlink pointing at
+		// /etc/… or a credential file would otherwise have the SUPERVISOR read
+		// the target and embed it in a durable artifact (the review input),
+		// turning "summarise the change" into an arbitrary-file-read primitive.
+		// Git records a symlink as its target path, and so do we.
+		st, err := os.Lstat(abs)
+		if err != nil {
+			return "", fmt.Errorf("stat-ing untracked %s for the review diff: %w", p, err)
+		}
+		if !st.Mode().IsRegular() {
+			if st.Mode()&os.ModeSymlink != 0 {
+				target, err := os.Readlink(abs)
+				if err != nil {
+					return "", fmt.Errorf("reading symlink %s for the review diff: %w", p, err)
+				}
+				fmt.Fprintf(&b, "diff --git a/%s b/%s\nnew file mode 120000\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1 @@\n+%s\n\\ No newline at end of file\n", p, p, p, target)
+			}
+			// Directories (a gitlink or an empty dir) carry no content.
+			continue
+		}
 		data, err := os.ReadFile(abs)
 		if err != nil {
 			return "", fmt.Errorf("reading untracked %s for the review diff: %w", p, err)
 		}
 		mode := "100644"
-		if st, err := os.Stat(abs); err == nil && st.Mode()&0o111 != 0 {
+		if st.Mode()&0o111 != 0 {
 			mode = "100755"
 		}
 		fmt.Fprintf(&b, "diff --git a/%s b/%s\nnew file mode %s\n--- /dev/null\n+++ b/%s\n", p, p, mode, p)
