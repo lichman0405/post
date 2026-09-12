@@ -203,6 +203,11 @@
         "auth-real-services"
       ]
     },
+    "T0104": {
+      "g3_jobs": [
+        "auth-real-services"
+      ]
+    },
     "T0105": {
       "g3_jobs": [
         "auth-real-services"
