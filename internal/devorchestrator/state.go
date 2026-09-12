@@ -28,6 +28,15 @@ const (
 // specs/orchestrator/task-state-machine.yaml (L1 decision, T0009; T0012 adds
 // rejected -> running for rework/respawn — a rejected task re-dispatching a
 // Worker never detours through ready).
+//
+// accepted -> rejected exists so that an acceptance can be revoked before
+// merge. Acceptance is not final until the merge: a required-for-merge gate
+// that turns red afterwards — the independent review returning
+// request_changes, a CI job failing on the PR, a defect found during the merge
+// review — must be able to send the task back. Without it the only escapes
+// from accepted are merging something known-bad or hand-editing the state
+// file, and T0101 sat in exactly that position: accepted, with a blocking
+// review finding, and no legal move.
 var transitions = map[State][]State{
 	StateTodo:         {StateReady, StateBlocked},
 	StateReady:        {StateRunning, StateBlocked},
@@ -36,7 +45,7 @@ var transitions = map[State][]State{
 	StateWorkerFailed: {StateReady},
 	StateRejected:     {StateReady, StateRunning},
 	StateBlocked:      {StateReady},
-	StateAccepted:     {StateMerged},
+	StateAccepted:     {StateMerged, StateRejected},
 	StateMerged:       {},
 }
 

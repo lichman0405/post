@@ -22,9 +22,11 @@ Commands:
                     where the task defines one) and verification -> accepted;
                     REFUSES (exit 1, state unchanged, AcceptRecord evidence
                     written) while any gate is red or missing
-  reject TASK       running|verification -> rejected (requires --reason or
-                    --reason-file); the rejection is recorded as a RejectRecord
-                    (reasons + evidence paths) that rework/respawn carry
+  reject TASK       running|verification|accepted -> rejected (requires
+                    --reason or --reason-file); the rejection is recorded as a
+                    RejectRecord (reasons + evidence paths) that rework/respawn
+                    carry. accepted -> rejected revokes a pre-merge acceptance
+                    whose required-for-merge gate has since turned red.
   merged TASK       accepted -> merged (Supervisor merge bookkeeping)
 
 Flags:

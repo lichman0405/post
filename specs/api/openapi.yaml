@@ -287,12 +287,129 @@ paths:
           schema: {type: string}
       responses:
         '200': {description: OK}
+  # --- Authentication (T0101) ---------------------------------------------
+  # Session-cookie auth, not bearer: /auth/* establishes an opaque server-side
+  # session (Redis) and returns a CSRF token bound to it. Everything under
+  # /api/v1 that is neither an /auth/* route nor marked `security: []` is
+  # default-deny — an unauthenticated write is 401 before routing, so a new
+  # product route inherits the guard by being mounted in the subtree rather
+  # than by opting in.
+  /auth/signup:
+    post:
+      # Pre-authentication route: reachable without a session.
+      security: []
+      summary: Create an account with email and password; establishes a session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, handle, display_name]
+              properties:
+                email: {type: string, format: email}
+                password: {type: string}
+                handle: {type: string}
+                display_name: {type: string}
+      responses:
+        '201': {description: Account created; session and CSRF cookies set}
+        '409': {description: Email already registered (EMAIL_ALREADY_REGISTERED)}
+        '415': {description: Unsupported media type}
+        '429': {description: Rate limited; Retry-After set}
+  /auth/login:
+    post:
+      security: []
+      summary: Sign in with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: {type: string}
+                password: {type: string}
+      responses:
+        '200': {description: Signed in; session cookie set and csrf_token returned}
+        '401':
+          description: >-
+            Credentials rejected. Unknown email and wrong password return a
+            byte-identical envelope and perform the same key-derivation work,
+            so the endpoint does not disclose whether an account exists.
+        '429': {description: Rate limited per email and per IP; Retry-After set}
+  /auth/logout:
+    post:
+      security: [{cookieAuth: []}]
+      summary: Revoke the current session
+      parameters: [{$ref: '#/components/parameters/CsrfToken'}]
+      responses:
+        '204': {description: Session revoked server-side and cookie cleared}
+        '401': {description: No valid session}
+        '403': {description: Missing or invalid CSRF token}
+  /auth/session:
+    get:
+      security: [{cookieAuth: []}]
+      summary: Current session identity
+      responses:
+        '200': {description: The authenticated identity plus a fresh CSRF token}
+        '401': {description: Not authenticated}
+  /auth/oidc/authorize-url:
+    get:
+      security: []
+      summary: Start an OIDC login flow, binding its state to this browser
+      responses:
+        '200':
+          description: >-
+            The provider URL to redirect the browser to, plus a state cookie
+            that the callback is verified against.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authorize_url]
+                properties:
+                  authorize_url: {type: string, format: uri}
+        '501': {description: OIDC is not configured for this deployment}
+  /auth/oidc/callback:
+    get:
+      security: []
+      summary: OIDC provider redirect target; establishes the session
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: {type: string}
+        - name: state
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '302': {description: Session established; redirects to the web origin}
+        '400':
+          description: >-
+            State mismatch or replay, missing or unverified email, or a token
+            that failed signature/issuer/audience/time validation.
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
+    cookieAuth:
+      # The opaque server-side session established by /auth/login, /auth/signup
+      # or the OIDC callback. HttpOnly, SameSite=Lax, Secure outside dev.
+      type: apiKey
+      in: cookie
+      name: post_session
   parameters:
+    CsrfToken:
+      # Session-bound, returned by /auth/session (and on login/signup) and
+      # compared in constant time. Required on every state-changing request
+      # that is authenticated by cookie rather than bearer token.
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema: {type: string}
     IdempotencyKey:
       name: Idempotency-Key
       in: header

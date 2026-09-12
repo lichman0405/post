@@ -630,3 +630,36 @@ func TestCLIAcceptSucceedsOnceTheMergeGateIsSatisfied(t *testing.T) {
 		t.Errorf("state = %s, want accepted", got)
 	}
 }
+
+// An acceptance must be revocable before the merge. A required-for-merge gate
+// that turns red AFTER acceptance — the independent review returning
+// request_changes, a CI job failing on the PR — has to be able to send the
+// task back; otherwise the only escapes from accepted are merging something
+// known-bad or hand-editing the state file. T0101 sat there: accepted, one
+// blocking review finding, and no legal move.
+func TestCLIRejectRevokesAnAcceptance(t *testing.T) {
+	e := newTaskEnv(t)
+	e.seedState(t, map[string]devorchestrator.State{"T1000": devorchestrator.StateAccepted})
+
+	code, _, stderr := e.runTaskCLI(t, "reject", "T1000", "--reason", "independent review: request_changes (1 blocking)")
+	if code != 0 {
+		t.Fatalf("reject from accepted refused (exit %d): %s", code, stderr)
+	}
+	state := e.readState(t, "T1000")
+	if state.Status != devorchestrator.StateRejected {
+		t.Fatalf("state = %s, want rejected", state.Status)
+	}
+	if !strings.Contains(state.RejectionReason, "request_changes") {
+		t.Errorf("rejection reason not recorded: %q", state.RejectionReason)
+	}
+
+	// The revocation must be usable: rework/respawn require rejected, and the
+	// rejected task re-enters running rather than detouring through ready.
+	store, err := devorchestrator.OpenStore(e.dagPath, e.statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Transition("T1000", devorchestrator.StateRunning, devorchestrator.NewRunID(), "rework"); err != nil {
+		t.Errorf("a revoked acceptance cannot re-enter running: %v", err)
+	}
+}

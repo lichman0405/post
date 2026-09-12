@@ -48,7 +48,7 @@ transitions:
   worker_failed: [ready]
   rejected:      [running, ready]  # running = rework/respawn (T0012)
   blocked:       [ready]
-  accepted:      [merged]
+  accepted:      [merged, rejected]  # rejected = revoked before merge, see below
   merged:        []                # terminal
 
 command_mapping:
@@ -58,8 +58,16 @@ command_mapping:
   task verify:   [running -> verification]
   task accept:   [verification -> accepted]          # sets accepted_by_supervisor_at;
                                                      # refuses while G2/G3 red (T0012)
-  task reject:   [running -> rejected, verification -> rejected]  # records RejectRecord
-                                                                  # evidence (T0012)
+  task reject:   [running -> rejected, verification -> rejected,
+                  accepted -> rejected]  # records RejectRecord evidence (T0012).
+                                         # accepted -> rejected revokes a
+                                         # pre-merge acceptance: a
+                                         # required-for-merge gate that turns
+                                         # red after acceptance (a review
+                                         # returning request_changes, a CI job
+                                         # failing on the PR) must be able to
+                                         # send the task back. Acceptance is
+                                         # final only at merged.
   task merged:   [accepted -> merged]                  # sets merged_at; kept as bare
                                                        # bookkeeping for merges performed
                                                        # outside rddev pr merge

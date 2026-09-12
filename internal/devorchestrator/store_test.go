@@ -148,21 +148,32 @@ func TestNextOnlyDependencySatisfied(t *testing.T) {
 }
 
 func TestEveryIllegalTransitionRejectedAndFileUnchanged(t *testing.T) {
-	// A task in "running": only verification, worker_failed, rejected are legal.
-	// Every other target must be rejected and leave the state file untouched.
-	// T0012: rejected -> running is LEGAL (rework/respawn re-dispatch a
-	// Worker for a rejected task; the state machine no longer detours through
-	// ready), so it is absent from the rejected row and asserted below.
-	illegal := map[State][]State{
-		StateTodo:         {StateRunning, StateVerification, StateWorkerFailed, StateRejected, StateAccepted, StateMerged, StateTodo},
-		StateReady:        {StateVerification, StateWorkerFailed, StateRejected, StateAccepted, StateMerged, StateTodo, StateReady},
-		StateRunning:      {StateReady, StateAccepted, StateMerged, StateBlocked, StateTodo, StateRunning},
-		StateVerification: {StateRunning, StateMerged, StateBlocked, StateReady, StateTodo, StateVerification},
-		StateWorkerFailed: {StateRunning, StateVerification, StateRejected, StateAccepted, StateMerged, StateTodo, StateWorkerFailed},
-		StateRejected:     {StateVerification, StateRejected, StateAccepted, StateMerged, StateBlocked, StateTodo},
-		StateBlocked:      {StateRunning, StateVerification, StateRejected, StateAccepted, StateMerged, StateBlocked, StateTodo},
-		StateAccepted:     {StateReady, StateRunning, StateVerification, StateRejected, StateBlocked, StateAccepted, StateTodo},
-		StateMerged:       {StateReady, StateRunning, StateVerification, StateRejected, StateAccepted, StateBlocked, StateMerged, StateTodo},
+	// The illegal set is DERIVED from the transition table, never hand-listed.
+	//
+	// It used to be a hand-written complement, and adding accepted -> rejected
+	// left a stale row asserting that exact pair was illegal — the test failed
+	// only because it happened to cover the pair. A hand-maintained complement
+	// is wrong in the other direction too: forget to remove a pair and the
+	// suite silently stops testing it. Deriving it means every (from, to) pair
+	// is covered by construction, including pairs added later.
+	allStates := []State{
+		StateTodo, StateReady, StateRunning, StateWorkerFailed, StateVerification,
+		StateRejected, StateBlocked, StateAccepted, StateMerged,
+	}
+	illegal := map[State][]State{}
+	for _, from := range allStates {
+		legal := map[State]bool{}
+		for _, to := range transitions[from] {
+			legal[to] = true
+		}
+		for _, to := range allStates {
+			if !legal[to] {
+				illegal[from] = append(illegal[from], to)
+			}
+		}
+	}
+	if len(illegal) != len(allStates) {
+		t.Fatalf("derived illegal set covers %d states, want %d", len(illegal), len(allStates))
 	}
 	for from, targets := range illegal {
 		for _, to := range targets {
