@@ -27,9 +27,9 @@
       "name": "spec validation unit",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T13:36:00Z",
+      "evidence": "bash scripts/tests/spec-validation-unit-test.sh -> exit 0 (fixture-driven). Supervisor re-ran independently: PASS. Covers DAG missing-dep/cycle/missing-field and the repository-preflight verdict matrix (match/mismatch/unrecorded/unknown) via the documented --fixture contract."
     },
     {
       "id": "T0001-TEST-02",
@@ -37,9 +37,9 @@
       "name": "source repository remote validation",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T13:36:00Z",
+      "evidence": "bash scripts/tests/spec-validation-smoke-test.sh -> exit 0. Supervisor re-ran independently: PASS. Normalizes real `git remote -v` output for HTTPS/SSH/trailing-.git forms, rejects non-canonical origin, and exercises the real supervisor-only gh visibility probe (bless)."
     },
     {
       "id": "T0002-TEST-01",

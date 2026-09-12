@@ -12,20 +12,20 @@
       "merged_at": "2026-09-12T13:20:00Z"
     },
     "T0001": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "merged",
+      "started_at": "2026-09-12T13:30:00Z",
+      "completed_at": "2026-09-12T13:35:00Z",
+      "notes": "G2 accepted independently; merged as PR #6 (squash) at 7c8a9d2 under the autonomous authority L3-20260912-4. 13/13 paths in scope, HEAD==baseline, both required tests re-run PASS, visibility verdict matrix reproduced independently, real gh probe bless.",
+      "worker_run_id": "worker-T0001-c473f6c",
+      "accepted_by_supervisor_at": "2026-09-12T13:35:00Z",
+      "merged_at": "2026-09-12T13:36:00Z"
     },
     "T0002": {
-      "status": "todo",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-09-12T13:37:00Z",
       "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
+      "notes": "Dispatched under autonomous-merge authorization. branch task/T0002-monorepo-init, baseline 7c8a9d2.",
+      "worker_run_id": "worker-T0002-7c8a9d2",
       "accepted_by_supervisor_at": null,
       "merged_at": null
     },
