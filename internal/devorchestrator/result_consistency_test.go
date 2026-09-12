@@ -3,6 +3,7 @@ package devorchestrator
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -173,5 +174,57 @@ func TestResultConsistencyFewerAcceptanceEntriesThanCriteriaRejected(t *testing.
 	}
 	if st, detail := checkStatus(t, checks, "result-acceptance"); st != "failed" || detail == "" {
 		t.Errorf("result-acceptance = %s %q, want failed with detail", st, detail)
+	}
+}
+
+// A required test is named by LABEL in the DAG ("auth unit"), while the
+// contract's tests[].command holds the command that ran. T0101 ran both
+// required suites and labelled them in its commands, and collect rejected it
+// with "2 required test(s) have no passed entry: auth unit; auth e2e" —
+// because the two strings were compared for equality. Equality was never
+// satisfiable; this test pins the real requirement: the label must be named by
+// a PASSED entry.
+func TestRequiredTestMatchedByLabelNotEquality(t *testing.T) {
+	path := writeResult(t, `{"task_id":"T0101","status":"completed","summary":"x","files_changed":[],"tests":[
+		{"command":"go test ./internal/application/authn/... ./cmd/api/... -count=1 (T0101-TEST-01 auth unit, blocking)","status":"passed","evidence":"ok"},
+		{"command":"go test ./tests/e2e -run TestE2E -count=1 (T0101-TEST-02 auth e2e, blocking)","status":"passed","evidence":"ok"}
+	],"acceptance":[{"criterion":"c1","status":"passed","evidence":"ok"}],"risks":[],"follow_up_issues":[],"notes_for_supervisor":""}`)
+	checks, consistent, err := CheckResultConsistency(path, []string{"c1"}, []string{"auth unit", "auth e2e"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !consistent {
+		st, detail := checkStatus(t, checks, "result-tests-coverage")
+		t.Fatalf("a RESULT that ran and named both required suites was judged inconsistent: %s %s", st, detail)
+	}
+	if st, _ := checkStatus(t, checks, "result-tests-coverage"); st != "passed" {
+		t.Errorf("result-tests-coverage = %s, want passed", st)
+	}
+}
+
+// The looser matching must not become a hole: a required test whose only
+// matching entry is not_run still fails coverage, and a required test named
+// nowhere still fails it.
+func TestRequiredTestCoverageStillRejectsMissingAndUnrun(t *testing.T) {
+	path := writeResult(t, `{"task_id":"T0101","status":"completed","summary":"x","files_changed":[],"tests":[
+		{"command":"go test ./tests/e2e -run TestE2E (T0101-TEST-02 auth e2e)","status":"not_run","evidence":"no database"}
+	],"acceptance":[{"criterion":"c1","status":"passed","evidence":"ok"}],"risks":[],"follow_up_issues":[],"notes_for_supervisor":""}`)
+	checks, consistent, err := CheckResultConsistency(path, []string{"c1"}, []string{"auth unit", "auth e2e"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if consistent {
+		t.Fatal("a required test that is not_run, and one named nowhere, were judged covered")
+	}
+	st, detail := checkStatus(t, checks, "result-tests-coverage")
+	if st != "failed" {
+		t.Errorf("result-tests-coverage = %s, want failed", st)
+	}
+	// "auth e2e" is present but not_run; "auth unit" is absent entirely. Both
+	// must be named as missing.
+	for _, want := range []string{"auth unit", "auth e2e (not_run)"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("coverage detail does not name %q: %s", want, detail)
+		}
 	}
 }

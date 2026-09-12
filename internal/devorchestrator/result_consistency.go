@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -120,17 +121,29 @@ func CheckResultConsistency(resultPath string, packageCriteria, requiredTests []
 	// Every REQUIRED test must have a passed entry — the omission neighbour of
 	// the shipped not_run defect: dropping a required test from tests[]
 	// entirely must not smuggle a completion through.
+	//
+	// Matching is by label mention, not string equality. The DAG names its
+	// required tests as LABELS ("auth unit", "auth e2e"), while an entry's
+	// command field holds the command that was run. Demanding equality between
+	// the two is not a stricter check, it is an unsatisfiable one: T0101 ran
+	// both required suites and labelled them
+	// ("go test … -count=1 (T0101-TEST-01 auth unit, blocking)"), and was told
+	// it had covered neither. The entry must still be `passed` — only the way
+	// the label is located changed.
 	var missing []string
 	if len(requiredTests) > 0 {
-		covered := map[string]string{}
-		for _, t := range doc.Tests {
-			covered[t.Command] = t.Status
-		}
 		for _, rt := range requiredTests {
-			if st, ok := covered[rt]; !ok {
+			var statuses []string
+			for _, t := range doc.Tests {
+				if commandNamesTest(t.Command, rt) {
+					statuses = append(statuses, t.Status)
+				}
+			}
+			switch {
+			case len(statuses) == 0:
 				missing = append(missing, rt)
-			} else if st != "passed" {
-				missing = append(missing, rt+" ("+st+")")
+			case !slices.Contains(statuses, "passed"):
+				missing = append(missing, rt+" ("+strings.Join(statuses, ", ")+")")
 			}
 		}
 	}
@@ -165,4 +178,23 @@ func CheckResultConsistency(resultPath string, packageCriteria, requiredTests []
 		}
 	}
 	return checks, consistent, nil
+}
+
+// commandNamesTest reports whether a RESULT tests[].command names the required
+// test label.
+//
+// The DAG lists required tests as labels ("auth unit") and the contract's
+// command field holds the command that was run, so the two are never literally
+// equal. Matching by label mention is what makes the coverage rule satisfiable
+// by an honest Worker; the caller still requires the matched entry to be
+// `passed`, so this loosens only the way a label is located, not what counts
+// as evidence.
+func commandNamesTest(command, label string) bool {
+	if label == "" {
+		return false
+	}
+	if command == label {
+		return true
+	}
+	return strings.Contains(strings.ToLower(command), strings.ToLower(label))
 }

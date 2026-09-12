@@ -415,3 +415,40 @@ func TestMarkerResidueFindsEnvAttributedChild(t *testing.T) {
 		t.Errorf("marker scan with a post-start cutoff attributed pre-existing processes: %v", found)
 	}
 }
+
+// newRefsSince decides whether the Worker created a ref. refsSnapshot stores
+// "<refname> <objectname>", and comparing whole entries made any ref that
+// merely MOVED look newly created — while refs move routinely during a run
+// precisely because the Supervisor merges other work. T0101 was rejected with
+// "new ref(s) created: refs/heads/main a07ac01…" because two unrelated PRs
+// merged while it ran.
+func TestMovingAnExistingRefIsNotANewRef(t *testing.T) {
+	before := []string{"refs/heads/main aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"refs/tags/v0 1111111111111111111111111111111111111111"}
+
+	// The Supervisor merges during the run: main advances, nothing is created.
+	moved := []string{"refs/heads/main bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"refs/tags/v0 1111111111111111111111111111111111111111"}
+	if got := newRefsSince(before, moved); len(got) != 0 {
+		t.Errorf("advancing an existing ref was reported as a new ref: %v — the Supervisor's own merges would reject the collect", got)
+	}
+
+	// An entry recorded without a sha (older records, fixtures) must still
+	// suppress by name.
+	if got := newRefsSince([]string{"refs/heads/main", "refs/tags/v0"}, moved); len(got) != 0 {
+		t.Errorf("a sha-less before entry did not suppress by name: %v", got)
+	}
+
+	// Creating one is still caught — that is the capability the guard denies.
+	created := append([]string{}, moved...)
+	created = append(created, "refs/heads/sneaky cccccccccccccccccccccccccccccccccccccccc")
+	got := newRefsSince(before, created)
+	if len(got) != 1 || !strings.HasPrefix(got[0], "refs/heads/sneaky") {
+		t.Errorf("a genuinely new ref was not reported: %v", got)
+	}
+
+	// Deleting a ref is not "creating" one.
+	if got := newRefsSince(before, []string{"refs/heads/main bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}); len(got) != 0 {
+		t.Errorf("a removed ref was reported as new: %v", got)
+	}
+}

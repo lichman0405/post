@@ -232,21 +232,12 @@ func Collect(opts *CollectOpts) (*CollectReport, error) {
 	if err != nil {
 		return report, err
 	}
-	before := map[string]bool{}
-	for _, r := range rec.RefsBefore {
-		before[r] = true
-	}
-	var newRefs []string
-	for _, r := range currentRefs {
-		if !before[r] {
-			newRefs = append(newRefs, r)
-		}
-	}
+	newRefs := newRefsSince(rec.RefsBefore, currentRefs)
 	sort.Strings(newRefs)
 	if len(newRefs) > 0 {
 		fail("refs", fmt.Sprintf("new ref(s) created during the run: %s — creating refs is Git control-plane", strings.Join(newRefs, ", ")))
 	} else {
-		pass("refs", fmt.Sprintf("no new refs created (snapshot of %d refs unchanged)", len(currentRefs)))
+		pass("refs", fmt.Sprintf("no new ref names (snapshot of %d refs, existing ones free to move)", len(currentRefs)))
 	}
 
 	// 6) every changed path matches allowed_scope. The scope comes from the
@@ -563,4 +554,39 @@ func scanSecrets(files []string, worktree, resultPath string) ([]string, error) 
 	}
 	sort.Strings(findings)
 	return findings, nil
+}
+
+// refName returns the ref name from a snapshot entry of the form
+// "<refname> <objectname>". An entry without a sha (older records, fixtures)
+// is returned unchanged.
+func refName(entry string) string {
+	if i := strings.IndexByte(entry, ' '); i >= 0 {
+		return entry[:i]
+	}
+	return entry
+}
+
+// newRefsSince returns the entries of current whose ref NAME was absent from
+// before.
+//
+// Names, not whole entries. refsSnapshot stores "<refname> <objectname>", so
+// comparing entries made any ref that merely MOVED look newly created — and
+// refs move routinely while a Worker runs, because that is the Supervisor
+// merging other people's work. The policy this implements is the one the
+// surrounding comment always stated: creating a ref is a Worker capability the
+// guard denies, moving one is normal Supervisor activity. T0101 was rejected
+// with "new ref(s) created: refs/heads/main a07ac01…" purely because two
+// unrelated PRs merged during its run.
+func newRefsSince(before, current []string) []string {
+	seen := make(map[string]bool, len(before))
+	for _, r := range before {
+		seen[refName(r)] = true
+	}
+	var out []string
+	for _, r := range current {
+		if !seen[refName(r)] {
+			out = append(out, r)
+		}
+	}
+	return out
 }

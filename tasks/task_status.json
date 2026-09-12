@@ -128,9 +128,10 @@
       "merged_at": "2026-09-12T15:55:00Z"
     },
     "T0101": {
-      "status": "running",
+      "status": "rejected",
       "started_at": "2026-09-12T15:02:49Z",
       "worker_run_id": "run-e039c17685f3df4a",
+      "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/main a07ac01d43d1e0ee4f022cb8d18a9bae15083b95 — creating refs is Git control-plane; result-consistency: result-tests: status completed but 1 test(s) not_run (go test ./tests/integration -run TestCredentialStorePasswordRoundtrip (pgx CredentialStore 集成)) and 0 test(s) failed () — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed; result-consistency: result-tests-coverage: status completed but 2 required test(s) have no passed entry: auth unit; auth e2e — every required test needs a passed entry with evidence",
       "history": [
         {
           "from": "todo",
@@ -144,6 +145,13 @@
           "at": "2026-09-12T15:02:49Z",
           "run_id": "run-e039c17685f3df4a",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-12T16:01:40Z",
+          "run_id": "run-baf55efdc4580c76",
+          "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/main a07ac01d43d1e0ee4f022cb8d18a9bae15083b95 — creating refs is Git control-plane; result-consistency: result-tests: status completed but 1 test(s) not_run (go test ./tests/integration -run TestCredentialStorePasswordRoundtrip (pgx CredentialStore 集成)) and 0 test(s) failed () — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed; result-consistency: result-tests-coverage: status completed but 2 required test(s) have no passed entry: auth unit; auth e2e — every required test needs a passed entry with evidence"
         }
       ]
     },
