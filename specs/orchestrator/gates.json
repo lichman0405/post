@@ -75,7 +75,7 @@
     },
     "web": {
       "steps": [
-        {"run": "corepack enable && pnpm install --frozen-lockfile"},
+        {"run": "corepack enable pnpm && pnpm install --frozen-lockfile"},
         {"run": "pnpm --filter @post/ui typecheck"},
         {"run": "pnpm --filter @post/web typecheck"},
         {"run": "pnpm --filter @post/web lint"},
