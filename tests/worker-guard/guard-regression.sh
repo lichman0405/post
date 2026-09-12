@@ -1,0 +1,283 @@
+#!/bin/bash
+# shellcheck disable=SC2016,SC2088  # the single-quoted $HOME/~/$VAR strings are
+#                                   # literal guard inputs, deliberately unexpanded
+# guard-regression.sh — two-sided regression suite for worker-guard.sh.
+#
+# Every isolation rule is tested BOTH ways: the dangerous action is blocked
+# AND the legitimate neighbouring action is allowed. Over-blocking has been
+# the recurring defect of this isolation layer (tasks/decisions.md
+# L1-20260912-9/13/16), so an allow-side failure is a regression exactly like
+# a block-side failure.
+#
+# The suite drives the guard the way Claude Code does: the tool call JSON on
+# stdin, the worker environment variables in the process environment, and the
+# verdict as the exit code (0 = allow, 2 = block). It needs no Claude Code,
+# no network and no git repository.
+#
+# Usage: bash tests/worker-guard/guard-regression.sh [path-to-worker-guard.sh]
+# The canonical source of worker-guard.sh is embedded in the rddev binary
+# (internal/devorchestrator/embed/worker-guard.sh); the default here runs the
+# checked-out copy, which a drift test keeps identical to the embedded one.
+
+set -u
+
+GUARD=${1:-"$(dirname "$0")/../../internal/devorchestrator/embed/worker-guard.sh"}
+GUARD=$(realpath "$GUARD")
+
+# Default worker environment, mirroring what rddev worker spawn sets.
+export POST_REPO_ROOT=/repo
+export POST_WORKER_TASK_ID=T0010
+export POST_WORKER_WORKTREE=/repo/.rddev/worktrees/T0010
+export POST_WORKER_RESULT_DIR=/repo/.rddev/workers/T0010
+export POST_WORKER_DOCKER_GRANT=""
+
+pass=0
+fail=0
+failed_cases=""
+
+# check NAME EXPECT REASON TOOL FIELD VALUE [ENV_KEY=VAL ...]
+# EXPECT is "allow" or "block". REASON is a fragment the block message must
+# contain ("" for allow). The tool call is {"tool_name":TOOL,
+# "tool_input":{FIELD:VALUE}}; additional arguments override the worker
+# environment for this one case.
+check() {
+	name=$1
+	expect=$2
+	reason=$3
+	tool=$4
+	field=$5
+	value=$6
+	shift 6
+
+	json=$(python3 - "$tool" "$field" "$value" <<'PYEOF'
+import json, sys
+print(json.dumps({"tool_name": sys.argv[1], "tool_input": {sys.argv[2]: sys.argv[3]}}))
+PYEOF
+	)
+
+	# build the per-case environment (env -u clears a default)
+	env_args=()
+	for kv in "$@"; do
+		key=${kv%%=*}
+		val=${kv#*=}
+		if [ -n "$val" ]; then
+			env_args+=( "$key=$val" )
+		else
+			env_args+=( -u "$key" )
+		fi
+	done
+
+	out=$(printf '%s\n' "$json" | env "${env_args[@]}" sh "$GUARD" 2>&1)
+	code=$?
+	# hook protocol: exit 2 = block, exit 0 = allow
+	case "$code:$expect" in
+		2:block|0:allow)
+			if [ "$expect" = "block" ] && [ -n "$reason" ]; then
+				case "$out" in
+					*"$reason"*) : ;;
+					*) record_fail "$name" "blocked but message missing '$reason': $out"; return ;;
+				esac
+			fi
+			pass=$((pass + 1)) ;;
+		*)
+			record_fail "$name" "expected $expect, got exit $code: $out" ;;
+	esac
+}
+
+record_fail() {
+	fail=$((fail + 1))
+	failed_cases="$failed_cases\n  - $1: $2"
+}
+
+# ---------------------------------------------------------------------------
+# Shell write confinement — own worktree / own result dir / /tmp / /dev sinks
+# allowed, everything else blocked.
+
+check "redirect into worktree"            allow ""  Bash command 'echo hi > notes.txt'
+check "redirect into /etc"                block "confined" Bash command 'echo hi > /etc/x'
+check "redirect into /tmp"                allow ""  Bash command 'echo hi > /tmp/x'
+check "redirect to /dev/null"             allow ""  Bash command 'echo hi > /dev/null'
+check "stderr redirect to /dev/null"      allow ""  Bash command 'go build 2>/dev/null'
+check "fd dup 2>&1 plus local log"        allow ""  Bash command 'make check 2>&1 > build.log'
+check "quoted redirect to /etc (conservative over-block)" block "confined" Bash command 'echo "x > /etc/y"'
+check "quoted absolute redirect caught"   block "confined" Bash command 'echo hi > "/etc/quoted"'
+check "append to /tmp allowed"            allow ""  Bash command 'echo hi >> /tmp/log.txt'
+
+check "rm own worktree file"              allow ""  Bash command 'rm -f file.txt'
+check "rm relative dir inside worktree"   allow ""  Bash command 'rm -rf internal/config/tmp'
+check "rm /etc"                           block "confined" Bash command 'rm -f /etc/hosts'
+check "rm /home"                          block "confined" Bash command 'rm -rf /home/o/x'
+check "rm ~"                              block "confined" Bash command 'rm ~/x'
+check "rm \$HOME"                         block "confined" Bash command 'rm $HOME/x'
+check "rm \${HOME}"                       block "confined" Bash command 'rm ${HOME}/x'
+check "rm /tmp allowed"                   allow ""  Bash command 'rm /tmp/x'
+check "rm unresolved var fails closed"    block "confined" Bash command 'rm $UNKNOWN/x'
+
+check "cp inside worktree"                allow ""  Bash command 'cp a b'
+check "cp to /etc"                        block "confined" Bash command 'cp a /etc/b'
+check "cp -t /etc"                        block "confined" Bash command 'cp -t /etc a'
+check "cp --target-directory=/etc"        block "confined" Bash command 'cp --target-directory=/etc a'
+check "cp -t/etc attached value"          block "confined" Bash command 'cp -t/etc a'
+check "cp -t /tmp allowed"                allow ""  Bash command 'cp -t /tmp a'
+check "mv inside worktree"                allow ""  Bash command 'mv a b'
+check "mv to /etc"                        block "confined" Bash command 'mv a /etc/b'
+check "ln inside worktree"                allow ""  Bash command 'ln -s a b'
+check "ln to /etc"                        block "confined" Bash command 'ln -s a /etc/b'
+check "install inside worktree"           allow ""  Bash command 'install -m 644 a b'
+check "install -d /etc"                   block "confined" Bash command 'install -d /etc/x'
+check "tee inside worktree"               allow ""  Bash command 'tee notes.log'
+check "tee piped to /etc"                 block "confined" Bash command 'echo x | tee /etc/x'
+check "tee -a /tmp allowed"               allow ""  Bash command 'tee -a /tmp/x'
+
+check "write own RESULT.json (contract path)" allow "" Bash command 'echo done > /repo/.rddev/workers/T0010/RESULT.json'
+check "write another workers result dir"  block "confined" Bash command 'echo x > /repo/.rddev/workers/T0009/x'
+
+# ---------------------------------------------------------------------------
+# Git control plane — command-position matching, read-only forms stay usable.
+
+check "git commit"                        block "control-plane" Bash command 'git commit --allow-empty -m x'
+check "git push"                          block "control-plane" Bash command 'git push origin main'
+check "git merge"                         block "control-plane" Bash command 'git merge main'
+check "git rebase"                        block "control-plane" Bash command 'git rebase main'
+check "git tag create"                    block "control-plane" Bash command 'git tag v1'
+check "git tag --list (harness state)"    block "control-plane" Bash command 'git tag --list'
+check "git cherry-pick"                   block "control-plane" Bash command 'git cherry-pick abc'
+check "git stash"                         block "control-plane" Bash command 'git stash'
+check "git reset"                         block "control-plane" Bash command 'git reset --hard HEAD~1'
+check "git fetch"                         block "control-plane" Bash command 'git fetch origin'
+check "git pull"                          block "control-plane" Bash command 'git pull'
+check "git worktree list (harness state)" block "control-plane" Bash command 'git worktree list'
+check "git checkout -b"                   block "control-plane" Bash command 'git checkout -b worker-branch'
+check "git checkout branch"               block "control-plane" Bash command 'git checkout main'
+check "git checkout restore form"         allow ""  Bash command 'git checkout -- file.txt'
+check "git branch list"                   allow ""  Bash command 'git branch'
+check "git branch -a"                     allow ""  Bash command 'git branch -a'
+check "git branch -r"                     allow ""  Bash command 'git branch -r'
+check "git branch --show-current"         allow ""  Bash command 'git branch --show-current'
+check "git branch --list"                 allow ""  Bash command 'git branch --list'
+check "git branch --merged main"          allow ""  Bash command 'git branch --merged main'
+check "git branch --contains bare"        allow ""  Bash command 'git branch --contains'
+check "git branch --contains value"       block "control-plane" Bash command 'git branch --contains HEAD'
+check "git branch create"                 block "control-plane" Bash command 'git branch foo'
+check "git branch -D"                     block "control-plane" Bash command 'git branch -D foo'
+check "git branch -m"                     block "control-plane" Bash command 'git branch -m foo bar'
+check "git branch --set-upstream-to"      block "control-plane" Bash command 'git branch --set-upstream-to=origin/main'
+check "git remote list"                   allow ""  Bash command 'git remote'
+check "git remote -v"                     allow ""  Bash command 'git remote -v'
+check "git remote get-url"                allow ""  Bash command 'git remote get-url origin'
+check "git remote show"                   allow ""  Bash command 'git remote show origin'
+check "git remote add"                    block "control-plane" Bash command 'git remote add x url'
+check "git remote set-url"                block "control-plane" Bash command 'git remote set-url origin url'
+check "git remote prune"                  block "control-plane" Bash command 'git remote prune origin'
+check "git status"                        allow ""  Bash command 'git status --short'
+check "git log"                           allow ""  Bash command 'git log --oneline -5'
+check "git diff"                          allow ""  Bash command 'git diff HEAD'
+check "git rev-parse"                     allow ""  Bash command 'git rev-parse HEAD'
+check "git global -C flag skipped"        allow ""  Bash command 'git -C /tmp status'
+check "git config"                        block "control-plane" Bash command 'git config user.name x'
+check "git grep"                          allow ""  Bash command 'git grep -n foo'
+check "git blame"                         allow ""  Bash command 'git blame file.go'
+check "git show"                          allow ""  Bash command 'git show HEAD:README.md'
+check "git init"                          block "control-plane" Bash command 'git init'
+check "git clone"                         block "control-plane" Bash command 'git clone url'
+check "git reflog (read-only)"            allow ""  Bash command 'git reflog'
+check "git reflog delete"                 block "control-plane" Bash command 'git reflog delete HEAD@{0}'
+check "git am"                            block "control-plane" Bash command 'git am patch'
+check "unknown git subcommand fail closed" block "control-plane" Bash command 'git frobnicate'
+
+# Command position only — forbidden words in arguments or quoted text are not
+# matched (the false positive the harness fixed; tasks/decisions.md).
+check "echo git commit is not git"        allow ""  Bash command 'echo "git commit"'
+check "grep service is not control-plane" allow ""  Bash command 'grep -n "service" docs/'
+check "second segment after && caught"    block "control-plane" Bash command 'cd x && git push origin main'
+check "segment after pipe caught"         block "control-plane" Bash command 'git log | git push'
+check "assignment prefix still caught"    block "control-plane" Bash command 'VAR=x git push'
+check "env assignment prefix caught"      block "control-plane" Bash command 'env FOO=x git push'
+check "env -u option prefix caught"       block "control-plane" Bash command 'env -u VAR git push'
+check "env direct caught"                 block "control-plane" Bash command 'env git push'
+check "env of read-only git allowed"      allow ""  Bash command 'env FOO=x git log --oneline'
+check "sh -c quoting is not parsed (documented limit)" allow "" Bash command 'sh -c "echo git commit"'
+
+# ---------------------------------------------------------------------------
+# Control-plane CLIs and privilege escalation.
+
+check "gh auth status"                    block "control-plane" Bash command 'gh auth status'
+check "gh --version"                      block "control-plane" Bash command 'gh --version'
+check "glab"                              block "control-plane" Bash command 'glab mr list'
+check "tea (gitea)"                       block "control-plane" Bash command 'tea issues'
+check "sudo"                              block "privilege escalation" Bash command 'sudo -n true'
+check "su"                                block "privilege escalation" Bash command 'su -'
+check "doas"                              block "privilege escalation" Bash command 'doas x'
+check "pkexec"                            block "privilege escalation" Bash command 'pkexec x'
+check "echo sudo is not sudo"             allow ""  Bash command 'echo sudo'
+
+# ---------------------------------------------------------------------------
+# Docker — version queries allowed, socket access needs the explicit grant.
+
+check "docker --version"                  allow ""  Bash command 'docker --version'
+check "docker compose version"            allow ""  Bash command 'docker compose version'
+check "docker-compose version"            allow ""  Bash command 'docker-compose version'
+check "docker ps"                         block "Docker socket" Bash command 'docker ps'
+check "docker compose up"                 block "Docker socket" Bash command 'docker compose up -d'
+check "docker exec"                       block "Docker socket" Bash command 'docker exec -it x sh'
+check "docker ps with explicit grant"     allow ""  Bash command 'docker ps' POST_WORKER_DOCKER_GRANT=1
+check "docker compose up with explicit grant" allow "" Bash command 'docker compose up -d' POST_WORKER_DOCKER_GRANT=1
+
+# ---------------------------------------------------------------------------
+# Credential probes.
+
+check "printenv credential probe"         block "credential" Bash command 'printenv GITHUB_PERSONAL_ACCESS_TOKEN'
+check "printenv two credentials"          block "credential" Bash command 'printenv GITHUB_TOKEN GH_TOKEN'
+check "printenv PATH allowed"             allow ""  Bash command 'printenv PATH'
+check "env sets a fake token for a test"  allow ""  Bash command 'env GITHUB_TOKEN=smoke-tok go test ./...'
+
+# ---------------------------------------------------------------------------
+# File-read confinement — credential stores, .env, other Workers' state.
+
+check "Read gh hosts.yml"                 block "credential store" Read file_path '/home/shibo/.config/gh/hosts.yml'
+check "Read ssh private key"              block "credential store" Read file_path '~/.ssh/id_rsa'
+check "Read ssh config"                   block "credential store" Read file_path '~/.ssh/config'
+check "Read gnupg"                        block "credential store" Read file_path '~/.gnupg/secring.gpg'
+check "Read docker config"                block "credential store" Read file_path '~/.docker/config.json'
+check "Read aws credentials"              block "credential store" Read file_path '~/.aws/credentials'
+check "Read git-credentials"              block "credential store" Read file_path '~/.git-credentials'
+check "Read netrc"                        block "credential store" Read file_path '~/.netrc'
+check "Read claude settings"              block "credential store" Read file_path '~/.claude/settings.json'
+check "Read harmless home file"           allow ""  Read file_path '~/notes.md'
+check "Read .env"                         block ".env" Read file_path '.env'
+check "Read .env.dev"                     block ".env" Read file_path '.env.dev'
+check "Read .env.example"                 allow ""  Read file_path '.env.example'
+check "Read repo .env"                    block ".env" Read file_path '/repo/.env'
+check "Read nested .env.local"            block ".env" Read file_path '/repo/docs/.env.local'
+check "Read ordinary repo file"           allow ""  Read file_path '/repo/README.md'
+check "Grep in .env"                      block ".env" Grep path '.env'
+check "Grep in docs"                      allow ""  Grep path 'docs/'
+check "Glob go files"                     allow ""  Glob pattern '**/*.go'
+check "Glob .env files"                   block ".env" Glob pattern '**/.env*'
+check "Glob .env.example"                 allow ""  Glob pattern '**/.env.example'
+check "Glob ssh keys"                     block "credential store" Glob pattern '~/.ssh/*'
+check "Read own worktree"                 allow ""  Read file_path '/repo/.rddev/worktrees/T0010/README.md'
+check "Read other workers worktree"       block "another Worker" Read file_path '/repo/.rddev/worktrees/T0009/README.md'
+check "Read own RESULT.json"              allow ""  Read file_path '/repo/.rddev/workers/T0010/RESULT.json'
+check "Read other workers RESULT.json"    block "another Worker" Read file_path '/repo/.rddev/workers/T0009/RESULT.json'
+check "Read dispatch harness"             block "dispatch" Read file_path '/repo/.rddev/dispatch/spawn.sh'
+check "Read main checkout spec"           allow ""  Read file_path '/repo/specs/orchestrator/worker-permissions.yaml'
+check "NotebookRead matcher on .env"      block ".env" NotebookRead notebook_path '/repo/.env'
+check "Read dynamic path fails closed"    block "static path" Read file_path '$FOO/x'
+
+# ---------------------------------------------------------------------------
+# Fail-closed without the worker contract env: an unset POST_WORKER_WORKTREE
+# used to collapse the write allow-pattern to `/*` and admit every absolute
+# path; both policies must refuse to decide instead (L1-20260912-3 regression).
+
+check "write without contract env fails closed"  block "contract environment" Bash command 'echo x | tee /etc/x' POST_WORKER_WORKTREE= POST_WORKER_RESULT_DIR=
+check "read without contract env fails closed"   block "contract environment" Read file_path '/repo/specs/README.md' POST_REPO_ROOT= POST_WORKER_WORKTREE= POST_WORKER_RESULT_DIR=
+
+# ---------------------------------------------------------------------------
+
+if [ "$fail" -gt 0 ]; then
+	printf 'guard-regression: %d/%d PASS, %d FAILED\n' "$pass" "$((pass + fail))" "$fail" >&2
+	printf '%b\n' "$failed_cases" >&2
+	exit 1
+fi
+printf 'guard-regression: %d/%d PASS\n' "$pass" "$pass"

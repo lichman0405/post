@@ -103,7 +103,7 @@ func writeDoctorFixture(t *testing.T) string {
 		"res.swap_total_kb": "67108864\n", "res.fd_limit": "1048576\n",
 		"res.disk_free_kb": "209715200\n", "res.docker_reachable": "true\n",
 		"res.docker_root_free_kb": "131072000\n",
-		"res.bwrap": "present\n", "res.socat": "present\n",
+		"res.bwrap":               "present\n", "res.socat": "present\n",
 		"git": "git version 2.43.0\n", "git-lfs": "git-lfs/3.4.1 (GitHub; linux amd64)\n",
 		"claude": "2.1.269 (Claude Code)\n", "go": "go version go1.27.1 linux/amd64\n",
 		"node": "v24.21.0\n", "pnpm": "12.4.1\n", "python3": "Python 3.12.7\n",
@@ -147,6 +147,8 @@ func TestRunDoctorJSONFlagReachesEngine(t *testing.T) {
 
 // Honest stubs: every command owned by a later task fails with exit 4 and an
 // explicit message naming the owning task — never a silent no-op.
+// (spawn/list/logs/stop became real in T0010 and are covered in
+// worker_test.go; collect stays an honest T0011 stub.)
 func TestStubsExitNotImplemented(t *testing.T) {
 	cases := []struct {
 		args    []string
@@ -156,15 +158,11 @@ func TestStubsExitNotImplemented(t *testing.T) {
 		{[]string{"git", "commit", "T0009"}, "T0012", false},
 		{[]string{"pr", "open", "T0009"}, "T0012", false},
 		{[]string{"pr", "merge", "T0009"}, "T0012", false},
-		{[]string{"worker", "spawn", "T0009"}, "T0010", false},
-		{[]string{"worker", "list"}, "T0010", false},
-		{[]string{"worker", "logs", "T0009"}, "T0010", false},
-		{[]string{"worker", "stop", "T0009"}, "T0010", false},
 		{[]string{"worker", "collect", "T0009"}, "T0011", false},
 		{[]string{"env", "reset", "--test-only"}, "T0010/T0011", false},
 		{[]string{"env", "gc"}, "T0010/T0011", false},
 		{[]string{"--json", "git", "commit", "T0009"}, "T0012", true},
-		{[]string{"worker", "spawn", "T0009", "--json"}, "T0010", true},
+		{[]string{"worker", "collect", "T0009", "--json"}, "T0011", true},
 	}
 	for _, tc := range cases {
 		var stdout, stderr bytes.Buffer
@@ -175,7 +173,6 @@ func TestStubsExitNotImplemented(t *testing.T) {
 		}
 		msg := stderr.String()
 		if tc.jsonErr {
-			msg = stdout.String()
 			var doc map[string]any
 			if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
 				t.Errorf("run(%v) stdout is not valid JSON: %v\n%s", tc.args, err, stdout.String())
