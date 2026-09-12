@@ -89,7 +89,13 @@ PY
     # Attempt 2 = rework: the SAME session must have been resumed with the
     # recorded rejection reasons in the prompt.
     if [ -z "$FG_RESUME_ID" ]; then echo "rework ran without --resume" >&2; exit 9; fi
-    if [ "$FG_RESUME_ID" != "$FG_SESSION_ID" ]; then echo "resume id != session id" >&2; exit 9; fi
+    # A rework must NOT also name a session id: real claude (2.1.269) refuses
+    # the whole invocation with "--session-id can only be used with --continue
+    # or --resume if --fork-session is also specified", and every rework died
+    # at startup until that was fixed. This assertion used to demand the
+    # opposite — it encoded the bug — which went unnoticed because nothing ran
+    # tests/acceptance/*.sh.
+    if [ -n "$FG_SESSION_ID" ]; then echo "rework also passed --session-id" >&2; exit 9; fi
     if [ "$FG_PROMPT_HAS_REJECTION" != "1" ]; then echo "rework prompt lacks the rejection reasons" >&2; exit 9; fi
     ;;
   T0002)
@@ -145,9 +151,16 @@ fg_wait_exit "$REPO" T0001 30 || fg_fail "rework attempt did not exit"
 fg_run "$REPO" worker collect T0001
 fg_assert_eq 0 "$FG_RC" "collect accepts the reworked attempt"
 fg_assert_contains "collect ok" "$FG_OUT" "the reworked run is clean"
+# Attempt 1 CREATES the session (--session-id), the rework RESUMES it
+# (--resume) and must not name one — see the fake's rework branch above.
 SESSIONS="$(cat "$REPO/.rddev/workers/T0001/session-ids.txt")"
-fg_assert_eq "$(printf '%s\n' "$SESSIONS" | sed -n 1p)" "$(printf '%s\n' "$SESSIONS" | sed -n 2p)" \
-  "rework resumed the SAME claude session"
+FIRST="$(printf '%s\n' "$SESSIONS" | sed -n 1p)"
+SECOND="$(printf '%s\n' "$SESSIONS" | sed -n 2p)"
+[ -n "$FIRST" ] && fg_ok "attempt 1 named its session: $FIRST" || fg_fail "attempt 1 passed no --session-id"
+[ -z "$SECOND" ] && fg_ok "the rework passed no --session-id (resume carries the identity)" \
+  || fg_fail "the rework also passed --session-id ($SECOND)"
+RESUMED="$(cat "$REPO/.rddev/workers/T0001/resumed-ids.txt" 2>/dev/null | sed -n 2p)"
+fg_assert_eq "$FIRST" "$RESUMED" "rework resumed the SAME claude session"
 fg_run "$REPO" task accept T0001
 fg_assert_eq 0 "$FG_RC" "task accept T0001 after rework"
 fg_run "$REPO" task inspect T0001 --json

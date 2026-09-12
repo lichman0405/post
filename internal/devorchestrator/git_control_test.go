@@ -16,8 +16,16 @@ func fakeGitBin(t *testing.T) (binDir, marker string) {
 	t.Helper()
 	binDir = t.TempDir()
 	marker = filepath.Join(binDir, "invocations.log")
+	// `gh pr checks` must answer with parseable JSON: pr merge refuses while
+	// the PR's required checks are not green, so a fake that stays silent
+	// would make every merge test fail for the wrong reason.
+	ghChecks := `[{"name":"job-a","state":"SUCCESS"},{"name":"job-b","state":"SUCCESS"}]`
 	for _, name := range []string{"git", "gh"} {
-		script := "#!/bin/sh\necho \"$0 $*\" >> \"$FAKE_INVOCATIONS\"\nexit 0\n"
+		script := "#!/bin/sh\necho \"$0 $*\" >> \"$FAKE_INVOCATIONS\"\n"
+		if name == "gh" {
+			script += "case \"$1 $2\" in\n  \"pr checks\") printf '%s' '" + ghChecks + "';;\nesac\n"
+		}
+		script += "exit 0\n"
 		if err := os.WriteFile(filepath.Join(binDir, name), []byte(script), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -246,5 +254,55 @@ func TestWorktreeDiffDoesNotFollowSymlinksOutOfTheTree(t *testing.T) {
 	}
 	if !strings.Contains(diff, "120000") {
 		t.Errorf("the symlink was not recorded with Git's symlink mode 120000:\n%s", diff)
+	}
+}
+
+// A green LOCAL G2 record is a replica of CI, not CI. The historical defect
+// this tooling exists to prevent was a merge that happened while GitHub's own
+// CI was red, and nothing here checked GitHub at all: MergePR ran the local
+// four-gate assertion and then invoked `gh pr merge` unconditionally.
+func TestMergeRefusesWhileThePRChecksAreRed(t *testing.T) {
+	repoRoot, specPath := mergeGateFixture(t) // green collect + green G2 on disk
+	binDir := t.TempDir()
+	marker := filepath.Join(binDir, "invocations.log")
+	// A gh whose `pr checks` reports the second required job red.
+	script := "#!/bin/sh\necho \"$0 $*\" >> \"$FAKE_INVOCATIONS\"\n" +
+		"case \"$1 $2\" in\n" +
+		"  \"pr checks\") printf '%s' '[{\"name\":\"job-a\",\"state\":\"SUCCESS\"},{\"name\":\"job-b\",\"state\":\"FAILURE\"}]';;\n" +
+		"  \"pr merge\") echo MERGED;;\n" +
+		"esac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeWorktreeRecord(t, repoRoot)
+	if err := os.WriteFile(marker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_INVOCATIONS", marker)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	_, err := MergePR(&GitControlOpts{RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001"})
+	if err == nil {
+		t.Fatal("pr merge succeeded while a required check was failing on GitHub")
+	}
+	if !strings.Contains(err.Error(), "job-b") {
+		t.Errorf("refusal does not name the failing check: %v", err)
+	}
+	if invoked, _ := os.ReadFile(marker); strings.Contains(string(invoked), "pr merge") {
+		t.Errorf("gh pr merge was invoked despite the red check:\n%s", invoked)
+	}
+}
+
+// writeWorktreeRecord gives the task a registry entry so loadWorktreeRecord
+// resolves; the merge path needs a branch to name.
+func writeWorktreeRecord(t *testing.T, repoRoot string) {
+	t.Helper()
+	if err := SaveRegistry(repoRoot, &WorkerRecord{
+		TaskID: "T0001", RunID: "run-1", SessionID: "s", ClaudeVersion: "v",
+		PID: 1, StartTime: 1, Worktree: repoRoot, Branch: "task/T0001-x",
+		BaselineSHA: "0123456789abcdef", RefsBefore: []string{},
+		LogPath: filepath.Join(repoRoot, "w.log"), ResultDir: repoRoot, StartedAt: "t",
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -71,6 +71,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 printf '%s\n' "$SESSION_ID" >> "$POST_WORKER_RESULT_DIR/session-ids.txt"
+printf '%s\n' "$RESUME_ID" >> "$POST_WORKER_RESULT_DIR/resumed-ids.txt"
 HAS_REJ=0
 case "$ALL_ARGS" in *REJECTED*) HAS_REJ=1;; esac
 export FG_SESSION_ID="$SESSION_ID" FG_RESUME_ID="$RESUME_ID" FG_PROMPT_HAS_REJECTION="$HAS_REJ"

@@ -28,7 +28,7 @@ export LC_ALL=C
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-ALL_STAGES=(workflows spec task-state go web python integration)
+ALL_STAGES=(workflows spec task-state go web python acceptance integration)
 
 STAGES=("$@")
 if [[ ${#STAGES[@]} -eq 0 ]]; then
@@ -106,6 +106,17 @@ stage_python() {
   uv run pytest -q
 }
 
+stage_acceptance() {
+  # The gate machinery's own e2e: the four-gate loop, rework/respawn, and the
+  # Supervisor git control plane. These were written for T0012 and then not run
+  # by anything, and rejection-retry rotted the moment a bug it had encoded was
+  # fixed — it asserted the invalid --session-id/--resume combination that real
+  # claude refuses. Self-contained: scratch repos, a fake claude, a fake gh.
+  bash tests/acceptance/four-gate-e2e.sh
+  bash tests/acceptance/rejection-retry-e2e.sh
+  bash tests/acceptance/supervisor-git-e2e.sh
+}
+
 stage_integration() {
   # The probe is a gate input: `make test-integration` decides whether to run
   # at all from its verdict. A probe that says "ready" for a socket that never
@@ -123,6 +134,7 @@ if [[ -n "${CI_STAGE_SINGLE:-}" ]]; then
     workflows)    stage_workflows ;;
     spec)         stage_spec ;;
     task-state)   stage_task_state ;;
+    acceptance)   stage_acceptance ;;
     go)           stage_go ;;
     web)          stage_web ;;
     python)       stage_python ;;
@@ -137,6 +149,7 @@ for name in "${STAGES[@]}"; do
     workflows)    run_stage workflows ;;
     spec)         run_stage spec ;;
     task-state)   run_stage task-state ;;
+    acceptance)   run_stage acceptance ;;
     go)           run_stage go ;;
     web)          run_stage web ;;
     python)       run_stage python ;;

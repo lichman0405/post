@@ -84,6 +84,7 @@ echo "gh \$*" >> "$FG_SCRATCH/gh-invocations.log"
 case "\$1 \$2" in
   "pr view") exit 1;;
   "pr create") echo "42";;
+  "pr checks") printf '%s' '[{"name":"job-a","state":"SUCCESS"},{"name":"job-b","state":"SUCCESS"}]';;
   "pr merge") echo "0000000000000000000000000000000000000000";;
   *) echo "unexpected gh call: \$*" >&2; exit 9;;
 esac
