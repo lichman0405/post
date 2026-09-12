@@ -91,8 +91,8 @@ jobs:
         run: pnpm --filter @post/web typecheck
       - name: "web: lint"
         run: pnpm --filter @post/web lint
-      - name: "web: unit tests (node --test)"
-        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test "apps/web/lib/config.test.mjs"
+      - name: "web: unit tests (every apps/web/lib/*.test.mjs, no-match guard)"
+        run: bash scripts/web-unit-tests.sh
       - name: "web: production build (Next requires POST_ENV=prod at build)"
         env:
           POST_ENV: prod

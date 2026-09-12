@@ -90,7 +90,10 @@ stage_web() {
   pnpm --filter @post/ui typecheck
   pnpm --filter @post/web typecheck
   pnpm --filter @post/web lint
-  node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test "apps/web/lib/config.test.mjs"
+  # Every apps/web test file, with a guard against the glob matching none
+  # (a "tests 0" run is a green stage that tested nothing).
+  bash scripts/web-unit-tests.sh
+  bash scripts/tests/web-tests-unit-test.sh
   POST_ENV=prod API_BASE_URL=http://127.0.0.1:18080 \
     SCIENTIFIC_ADAPTER_URL=http://127.0.0.1:19100 \
     pnpm --filter @post/web build
