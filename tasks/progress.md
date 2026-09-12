@@ -37,6 +37,14 @@ owner 于 2026-09-12 授予**默认自主推进**授权（`L3-20260912-4`，持�
     Windows Native 负路径；scope/HEAD/refs/RESULT schema 全部通过。
   - 汇总：Worker→G2→commit→PR 的完整闭环已经跑通一次。
 
+## 已完成任务
+
+| Task | 状态 | PR | 交付 |
+|---|---|---|---|
+| T0000 | merged | #3 | `ops/doctor.sh` 35 项确定性 preflight + 检查契约 + 2 套测试 |
+| T0001 | merged | #6 | 12 项 spec 校验 + source-repo preflight（三态 visibility、fail-closed）+ 派生版本标记 + CI 强制 |
+| T0002 | merged | #10 | Monorepo：Go module 4 binary + Next.js 16.3.5 + uv Python adapter + Makefile，无 TS backend |
+
 ## 进行中
 
 - **T0002 运行中** — Monorepo 初始化（Go module + Next.js + Python adapter + Makefile）。
