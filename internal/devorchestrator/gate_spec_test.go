@@ -181,3 +181,38 @@ func TestGateSpecLoadValidation(t *testing.T) {
 		}
 	}
 }
+
+// G3 was vacuous for all 132 tasks: task_overrides was empty, so every task
+// recorded G3 as not_required while docs/67 requires real services for
+// cross-boundary work. This asserts the wiring against the REAL spec rather
+// than a fixture, because the failure mode is silence — a missing or
+// misspelled override simply makes G3 disappear again, and nothing else
+// notices.
+func TestG3IsWiredForTheTasksThatNeedIt(t *testing.T) {
+	root := repoRootOf(t)
+	spec, err := LoadGateSpec(filepath.Join(root, DefaultGatesPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, taskID := range []string{"T0102", "T0103"} {
+		jobs, err := spec.JobsForGate("G3", taskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(jobs) == 0 {
+			t.Errorf("task %s has no G3 jobs — it would be accepted with G3 recorded as not_required", taskID)
+			continue
+		}
+		for _, j := range jobs {
+			if _, ok := spec.Jobs[j]; !ok {
+				t.Errorf("task %s names G3 job %q which is not defined in %s", taskID, j, DefaultGatesPath)
+			}
+		}
+	}
+	// A G3 job is not a CI job: it must not leak into the G4 assertion.
+	for _, j := range spec.RequiredJobs {
+		if j == "auth-real-services" {
+			t.Errorf("the G3-only job leaked into required_jobs (%v) — G4 would then demand it from every task's G2 record", spec.RequiredJobs)
+		}
+	}
+}

@@ -48,70 +48,144 @@
   "jobs": {
     "spec-validation": {
       "steps": [
-        {"run": "pip install pyyaml"},
-        {"run": "python3 scripts/validate_specs.py"},
-        {"run": "python3 scripts/spec_version.py --check"},
-        {"run": "python3 scripts/validate_openapi.py"},
-        {"run": "bash scripts/tests/openapi-unit-test.sh"},
-        {"run": "bash scripts/tests/spec-validation-unit-test.sh"},
-        {"run": "bash scripts/tests/spec-validation-smoke-test.sh"}
+        {
+          "run": "pip install pyyaml"
+        },
+        {
+          "run": "python3 scripts/validate_specs.py"
+        },
+        {
+          "run": "python3 scripts/spec_version.py --check"
+        },
+        {
+          "run": "python3 scripts/validate_openapi.py"
+        },
+        {
+          "run": "bash scripts/tests/openapi-unit-test.sh"
+        },
+        {
+          "run": "bash scripts/tests/spec-validation-unit-test.sh"
+        },
+        {
+          "run": "bash scripts/tests/spec-validation-smoke-test.sh"
+        }
       ]
     },
     "task-state": {
       "steps": [
-        {"run": "python3 scripts/validate_task_state.py"},
-        {"run": "bash scripts/tests/task-state-unit-test.sh"},
-        {"run": "bash scripts/tests/progress-update-test.sh"}
+        {
+          "run": "python3 scripts/validate_task_state.py"
+        },
+        {
+          "run": "bash scripts/tests/task-state-unit-test.sh"
+        },
+        {
+          "run": "bash scripts/tests/progress-update-test.sh"
+        }
       ]
     },
     "go": {
       "steps": [
-        {"run": "make fmt-check"},
-        {"run": "go vet ./..."},
-        {"run": "make staticcheck"},
-        {"run": "bash scripts/tests/staticcheck-unit-test.sh"},
-        {"run": "go test $(go list ./... | grep -v '/tests/integration')"}
+        {
+          "run": "make fmt-check"
+        },
+        {
+          "run": "go vet ./..."
+        },
+        {
+          "run": "make staticcheck"
+        },
+        {
+          "run": "bash scripts/tests/staticcheck-unit-test.sh"
+        },
+        {
+          "run": "go test $(go list ./... | grep -v '/tests/integration')"
+        }
       ]
     },
     "web": {
       "steps": [
-        {"run": "corepack enable pnpm && pnpm install --frozen-lockfile"},
-        {"run": "pnpm --filter @post/ui typecheck"},
-        {"run": "pnpm --filter @post/web typecheck"},
-        {"run": "pnpm --filter @post/web lint"},
-        {"run": "bash scripts/web-unit-tests.sh"},
-        {"run": "pnpm --filter @post/web build",
-         "env": {
-           "POST_ENV": "prod",
-           "API_BASE_URL": "http://127.0.0.1:18080",
-           "SCIENTIFIC_ADAPTER_URL": "http://127.0.0.1:19100"
-         }}
+        {
+          "run": "corepack enable pnpm && pnpm install --frozen-lockfile"
+        },
+        {
+          "run": "pnpm --filter @post/ui typecheck"
+        },
+        {
+          "run": "pnpm --filter @post/web typecheck"
+        },
+        {
+          "run": "pnpm --filter @post/web lint"
+        },
+        {
+          "run": "bash scripts/web-unit-tests.sh"
+        },
+        {
+          "run": "pnpm --filter @post/web build",
+          "env": {
+            "POST_ENV": "prod",
+            "API_BASE_URL": "http://127.0.0.1:18080",
+            "SCIENTIFIC_ADAPTER_URL": "http://127.0.0.1:19100"
+          }
+        }
       ]
     },
     "python": {
       "steps": [
-        {"run": "pip install uv ruff mypy"},
-        {"run": "cd services/scientific-adapter && uv sync --frozen"},
-        {"run": "cd services/scientific-adapter && ruff check . --config ../../ops/ci/ruff.toml"},
-        {"run": "cd services/scientific-adapter && mypy --config-file ../../ops/ci/mypy.ini src/post_scientific_adapter"},
-        {"run": "cd services/scientific-adapter && uv run pytest -q"}
+        {
+          "run": "pip install uv ruff mypy"
+        },
+        {
+          "run": "cd services/scientific-adapter && uv sync --frozen"
+        },
+        {
+          "run": "cd services/scientific-adapter && ruff check . --config ../../ops/ci/ruff.toml"
+        },
+        {
+          "run": "cd services/scientific-adapter && mypy --config-file ../../ops/ci/mypy.ini src/post_scientific_adapter"
+        },
+        {
+          "run": "cd services/scientific-adapter && uv run pytest -q"
+        }
       ]
     },
     "migration-integration": {
       "steps": [
-        {"run": "bash scripts/tests/pg-ready-unit-test.sh",
-         "env": {
-           "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post"
-         }},
-        {"run": "make test-integration",
-         "env": {
-           "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post"
-         }}
+        {
+          "run": "bash scripts/tests/pg-ready-unit-test.sh",
+          "env": {
+            "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post"
+          }
+        },
+        {
+          "run": "make test-integration",
+          "env": {
+            "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post"
+          }
+        }
+      ]
+    },
+    "auth-real-services": {
+      "steps": [
+        {
+          "run": "bash tests/acceptance/auth-real-services-e2e.sh"
+        }
       ]
     }
   },
   "review": {
     "required_for_merge": true
   },
-  "task_overrides": {}
+  "task_overrides": {
+    "T0102": {
+      "g3_jobs": [
+        "auth-real-services"
+      ]
+    },
+    "T0103": {
+      "g3_jobs": [
+        "auth-real-services"
+      ]
+    }
+  }
 }
