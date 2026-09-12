@@ -274,6 +274,8 @@ type User struct {
 	DisplayName string             `json:"display_name"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	DisabledAt  pgtype.Timestamptz `json:"disabled_at"`
+	// argon2id PHC encoding ($argon2id$v=19$m=65536,t=3,p=2$...); NULL = OIDC-only account
+	PasswordHash *string `json:"password_hash"`
 }
 
 type ValidationResult struct {

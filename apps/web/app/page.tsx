@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { StatusPanel } from "./status-panel";
 import type { ServiceStatus } from "./status-panel";
+import { AuthStatus } from "./auth-status";
 import { getWebConfig } from "../lib/server-config";
 import { describeConfig } from "../lib/config";
 import { CORRELATION_HEADER, correlationHeaders, resolveCorrelationId } from "../lib/correlation";
@@ -120,10 +121,13 @@ export default async function Home() {
   ];
 
   return (
-    <StatusPanel
-      webVersion={pkg.version}
-      services={services}
-      correlationId={correlationId}
-    />
+    <div>
+      <StatusPanel
+        webVersion={pkg.version}
+        services={services}
+        correlationId={correlationId}
+      />
+      <AuthStatus apiBaseUrl={cfg.apiBaseUrl} />
+    </div>
   );
 }
