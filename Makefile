@@ -41,7 +41,7 @@ check: ## one-command basic check: Go + Web + Python (+ schema/OpenAPI drift); n
 	pnpm --filter @post/ui typecheck
 	pnpm --filter @post/web typecheck
 	pnpm --filter @post/web lint
-	node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test "apps/web/lib/config.test.mjs"
+	bash scripts/web-unit-tests.sh
 	cd services/scientific-adapter && uv run pytest -q
 
 build: ## production builds and smoke across the three languages
@@ -49,9 +49,9 @@ build: ## production builds and smoke across the three languages
 	pnpm --filter @post/web build
 	cd services/scientific-adapter && uv run python -c "import post_scientific_adapter; print('scientific-adapter', post_scientific_adapter.__version__)"
 
-test: ## unit test suites (Go + web config + Python adapter); no Docker, no database
+test: ## unit test suites (Go + web + Python adapter); no Docker, no database
 	go test $(GO_UNIT_PKGS)
-	node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test "apps/web/lib/config.test.mjs"
+	bash scripts/web-unit-tests.sh
 	cd services/scientific-adapter && uv run pytest
 
 test-integration: ## integration suite against real PostgreSQL; loud failure (with reason) when unreachable

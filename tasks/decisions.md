@@ -900,3 +900,70 @@ Supervisor 应在 spawn 前**收窄**。这里反向操作，理由是：那条�
 "按具体 Task 再缩小/核对"这一步。**但即使我做了那一步，也只会照抄同一条错误的默认。** 真正的问题是
 我没有在 P1 开工前**核对默认 scope 是否覆盖任务规程要求的目录**。这条检查应作为 phase 开工前的
 固定动作，而不是等 Worker 撞墙后由 Worker 来告诉我。
+
+## L1-20260912-34 — 同一缺陷类的第二次：P1–P11 默认 scope 也漏掉 `go.mod` / `go.sum` / `.env.example`
+
+### (a) 证据：T0101 被迫把 argon2id 降级成 PBKDF2，只为不碰 `go.mod`
+
+T0101 的 Worker 在收尾时发现：它用了 `golang.org/x/crypto/argon2` 与 `github.com/google/uuid`，
+两者都是**新的直接依赖**，必须改 `go.mod`/`go.sum`——而这两个文件不在 allowed_scope 里，
+collect 会因此整体拒绝。它的处置是**把两个依赖全部去掉**：
+
+- `argon2id (64MiB,t=3,p=2)` → 标准库 `crypto/pbkdf2`（先实测 69ms/hash 确认测试耗时可接受）；
+- `google/uuid` → 自写的标准库 v4 生成器（`internal/domain/user.go` 的 ID 变成 string）。
+
+**它不是偷懒，是在我的 scope 缺陷下唯一能交付的路径。** 但这个结果是：`golang.org/x/crypto` 与
+`google/uuid` 是 Go 生态里最主流的两个库，而本仓库的 phase 默认 scope 让**任何**任务都无法引入任何
+依赖——除非像它这样把依赖去掉。**这不是一个个案**：本会话早前 T0010 的 scope 修正记录
+（"`forbidden: go.mod`……新增 `go.yaml.in/yaml/v3` 是合理依赖。已修正 scope"）说明这条我已经撞过一次。
+
+**处置**：给 **P1–P11 的 110 个任务**补上 `go.mod`、`go.sum`、`.env.example`。
+
+- `go.mod`/`go.sum`：Go 代码任务引入依赖的唯一合法途径。
+- `.env.example`：T0101 Worker 明确列为 follow-up（新增 `POST_WEB_ORIGIN`、`POST_AUTH_*`、
+  `POST_OIDC_*` 等变量）。每个加配置的任务都需要它。
+- P12（最终验收：`tests/acceptance/**`、`ops/**`、`docs/**`）不加：它不实现产品代码。
+
+**明确不给 Worker 的（一并记录，避免下次重新讨论）**：`Makefile`、`.github/**`。原因不是保守，
+是**这两个文件就是 Gate 本身**——把它们交给被 Gate 约束的一方，等于允许 Worker 通过修改 Gate 来让
+Gate 变绿。T0101 报告的 Makefile 需求（web 测试 glob）由我以 Supervisor 身份修复，见 (b)。
+
+### (b) 一个已经存在、且一直在漏的 Gate 洞：`apps/web/lib/correlation.test.mjs` 从未被执行
+
+T0101 的 follow-up 指出 Makefile 的 web 测试写死了文件名：
+
+```
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test "apps/web/lib/config.test.mjs"
+```
+
+同一行也出现在 `scripts/ci.sh` 的 `stage_web` 与 `.github/workflows/ci.yml` 的 web job 里。
+后果不是"T0101 的新测试没跑"，而是**已经有一个测试文件在树上、一直是绿的、从来没有人运行过它**：
+
+```
+apps/web/lib/config.test.mjs
+apps/web/lib/correlation.test.mjs   <-- 自它被写下起，从未被 make check / make test / CI 执行
+```
+
+**"写死的文件名"是一种静默失败**：Gate 看起来很绿，但它只覆盖了被记住的那一个文件。
+
+**处置**：新增 `scripts/web-unit-tests.sh`，跑 `apps/web/lib/*.test.mjs` 全部文件，Makefile 两处
+（`check`、`test`）、`ci.sh` 的 `stage_web`、CI workflow 全部改为调用它。
+
+**同时修掉 glob 自身的 fail-open**：glob 匹配不到任何文件时，`node --test` 会以 **exit 0** 报
+`tests 0`——那是一个"什么都没测"的绿灯，与空的 baseline 是同一种失败形状。因此脚本在跑之前先用
+shell 统计匹配数，**为 0 就大声失败**，并明确告诉后来者"如果测试搬家了就改 glob，不要删掉守卫"。
+
+守卫本身有 fixture 测试 `scripts/tests/web-tests-unit-test.sh`（三例：空 glob 必须失败、真实 glob
+必须找到文件、故意失败的测试必须仍然失败），已接入 `stage_web`。实测：修复前 `correlation.test.mjs`
+不跑；修复后 `2 file(s) matched`、17 个测试通过。
+
+### (c) 对 push 安全复查告警的处置（记录为误报）
+
+本次 push 触发了后台安全复查告警 "Overly Permissive IAM/RBAC in tasks/tasks.json"。
+**这是误报**：`tasks/tasks.json` 是任务 DAG，不是 IAM/RBAC 策略；告警来自 PR #49 把
+`infra/migrations/**` 加进 Worker 的 allowed_scope，被按"IAM 权限放宽"模式匹配。allowed_scope 约束的是
+**文件写入范围**（由 guard + collect 强制），不是身份/角色权限。已确认无实际权限模型变更。
+
+**但告警指向的方向是对的**，所以我没有简单忽略：真正需要审的是"放宽 scope 是否让 Worker 能绕过 Gate"。
+上面 (a) 的结论正是对它的回答——`specs/**`、`Makefile`、`.github/**`、`tasks/**` 一律不给，
+且这次的放宽**没有**触及其中任何一个。
