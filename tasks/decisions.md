@@ -405,6 +405,39 @@ T0005 collect 报 `refs changed`，实际是 **Supervisor 自己**在 Worker 运
 环境）上写的检查，必须区分"Supervisor 的正常活动"与"Worker 的越界"**，否则会产生系统性误报，
 而误报会训练出"忽略红灯"的习惯——那比漏报更危险。
 
+## L1-20260912-17 — Search 查询缺失访问控制（已修）+ 同类枚举查询的系统性缺口（已归档到授权任务）
+
+**发现**：自动 security review 报 `internal/persistence/queries/search.sql` 两条
+`broken-access-control`。复核确认：`SearchDocuments` **完全没有过滤**——没有 visibility、没有
+project/tenant 限定，而且**根本无法接受 actor 的 scope 参数**，于是文本命中的**每一行**都会返回。
+这正是 `docs/54` 的**头号威胁场景**「Private Project/Branch 内容出现在 Search/Explore」，
+也违反 `docs/23` §5「所有 query/search/export/download 进行 policy 过滤」与 Master Gate E
+「Search 无 private leakage」。既有测试**从未执行过这个查询**，所以没被发现。
+
+**修复**（PR #21）：查询改为必须接受调用方的 scope，只有 `visibility='public'` 或
+`project_id = ANY(@allowed_project_ids)` 的行才返回。**传空数组只返回 public，绝不返回全表**——
+即"结构上不可能返回未授权私有行"，而不是依赖每个调用方记得加过滤（与 `badValue` 的
+fail-closed-by-construction 同一手法）。新增 `TestSearchDocumentsEnforcesAccessControl`
+以真实 PostgreSQL 证明三档 scope 行为。sqlc 已重新生成，drift check 干净。
+
+**主动扩大排查（不只修被报的那条）**：我扫描了全部 `internal/persistence/queries/*.sql` 的读查询。
+绝大多数是按主键的实体读取（`GetUserByID`、`GetBlobByContentHash` 等），其授权本就属于调用方，
+**不是**同类问题。但发现**同类枚举查询**：
+
+| 查询 | 问题 |
+|---|---|
+| `ListOrganizations` | 返回**全部**组织，无任何过滤 |
+| `ListUsers` | 返回**全部**用户，无任何过滤 |
+| `ListProjectsByOrganization` | 仅按调用方传入的 org 过滤，**无 visibility** → 非成员传入 org id 即可拿到该组织的 private project |
+
+**决定：不在本轮顺带改写它们。** 这些查询的正确 scope 取决于授权模型（谁能看到哪个 org/project、
+Project membership 语义、Explore 的 public 可见性规则），改写它们等于**由我设计授权模型**——属
+L2/L3。正确做法是：把这些查询的 scope 作为 **P1（Identity/Organization/Project shell）与
+P8（Explore/Fork/Contribution）任务的必需验收项**，由对应任务在授权框架内实现。
+
+**给后续任务的强制要求**：任何返回**集合**的读查询都必须显式接受并应用 scope；只按主键返回单实体的
+查询不在此列。这条已写入下方"后续任务强制项"。
+
 ---
 
 ## 环境发现（非决策，必须显式记录）
