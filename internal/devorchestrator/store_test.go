@@ -150,13 +150,16 @@ func TestNextOnlyDependencySatisfied(t *testing.T) {
 func TestEveryIllegalTransitionRejectedAndFileUnchanged(t *testing.T) {
 	// A task in "running": only verification, worker_failed, rejected are legal.
 	// Every other target must be rejected and leave the state file untouched.
+	// T0012: rejected -> running is LEGAL (rework/respawn re-dispatch a
+	// Worker for a rejected task; the state machine no longer detours through
+	// ready), so it is absent from the rejected row and asserted below.
 	illegal := map[State][]State{
 		StateTodo:         {StateRunning, StateVerification, StateWorkerFailed, StateRejected, StateAccepted, StateMerged, StateTodo},
 		StateReady:        {StateVerification, StateWorkerFailed, StateRejected, StateAccepted, StateMerged, StateTodo, StateReady},
 		StateRunning:      {StateReady, StateAccepted, StateMerged, StateBlocked, StateTodo, StateRunning},
 		StateVerification: {StateRunning, StateMerged, StateBlocked, StateReady, StateTodo, StateVerification},
 		StateWorkerFailed: {StateRunning, StateVerification, StateRejected, StateAccepted, StateMerged, StateTodo, StateWorkerFailed},
-		StateRejected:     {StateRunning, StateVerification, StateRejected, StateAccepted, StateMerged, StateBlocked, StateTodo},
+		StateRejected:     {StateVerification, StateRejected, StateAccepted, StateMerged, StateBlocked, StateTodo},
 		StateBlocked:      {StateRunning, StateVerification, StateRejected, StateAccepted, StateMerged, StateBlocked, StateTodo},
 		StateAccepted:     {StateReady, StateRunning, StateVerification, StateRejected, StateBlocked, StateAccepted, StateTodo},
 		StateMerged:       {StateReady, StateRunning, StateVerification, StateRejected, StateAccepted, StateBlocked, StateMerged, StateTodo},
@@ -194,6 +197,28 @@ func TestEveryIllegalTransitionRejectedAndFileUnchanged(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestRejectedToRunningLegalIsTheReworkRespawnPath: T0012 makes
+// rejected -> running the rework/respawn transition (the state machine no
+// longer detours a rejected task through ready). The transition records a
+// fresh worker run and the rejection reason stays on the state.
+func TestRejectedToRunningLegalIsTheReworkRespawnPath(t *testing.T) {
+	s := openScratch(t)
+	drive(t, s, "T1000", StateVerification)
+	if _, err := s.Transition("T1000", StateRejected, NewRunID(), "G2 red: staticcheck fails"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.Transition("T1000", StateRunning, NewRunID(), "rework dispatched")
+	if err != nil {
+		t.Fatalf("rejected -> running must be legal (T0012 rework/respawn): %v", err)
+	}
+	if res.From != StateRejected || res.To != StateRunning {
+		t.Errorf("transition = %s -> %s, want rejected -> running", res.From, res.To)
+	}
+	if got := statusOf(t, s.StatePath(), "T1000"); got != string(StateRunning) {
+		t.Fatalf("status = %s, want running", got)
 	}
 }
 

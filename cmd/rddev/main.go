@@ -16,9 +16,6 @@
 // exit 4 and an explicit message naming the owning task — never silent
 // no-ops that look like success:
 //
-//	rddev worker ...   -> T0010 (worktree/process management), T0011 (collect)
-//	rddev git commit   -> T0012 (Git control plane)
-//	rddev pr open|merge-> T0012 (Git control plane)
 //	rddev env reset|gc -> infra clients (T0010/T0011)
 package main
 
@@ -50,9 +47,12 @@ Usage:
   rddev task verify TASK [--json]
   rddev task accept TASK [--json]
   rddev task reject TASK (--reason TEXT | --reason-file FILE) [--json]
-  rddev worker spawn|list|logs|collect|stop ...
-  rddev git commit TASK
-  rddev pr open|merge TASK
+  rddev worker spawn|list|logs|stop|collect|rework|respawn ...
+  rddev review spawn|collect TASK
+  rddev gate list|run|status|records ...
+  rddev git commit|push TASK
+  rddev pr open|merge|status TASK
+  rddev workflow TASK
   rddev version
   rddev help
 
@@ -60,6 +60,11 @@ Flags may appear before or after positional arguments. Task commands accept
 --tasks-json PATH and --state-json PATH (DAG/state file overrides, default
 tasks/tasks.json and tasks/task_status.json in the current directory) and
 --run-id ID (default: a fresh run id is generated and reported).
+
+The four-gate loop (T0012): G1 runs at worker collect; G2/G3 run via
+rddev gate run (G2 = CI's exact six jobs); G4 is the merge gate asserted by
+rddev git/pr, which refuse while any required CI job is red or missing.
+rddev workflow TASK resumes an interrupted Supervisor session from disk alone.
 
 Exit codes: 0 ok · 1 operational failure · 2 usage error · 3 doctor usage
 error · 4 not implemented (subsystem belongs to a later task).
@@ -104,10 +109,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runTask(cmdArgs, stdout, stderr, jsonOut)
 	case "worker":
 		return runWorker(cmdArgs, stdout, stderr, jsonOut)
+	case "review":
+		return runReview(cmdArgs, stdout, stderr, jsonOut)
+	case "gate":
+		return runGate(cmdArgs, stdout, stderr, jsonOut)
 	case "git":
 		return runGit(cmdArgs, stdout, stderr, jsonOut)
 	case "pr":
 		return runPR(cmdArgs, stdout, stderr, jsonOut)
+	case "workflow":
+		return runWorkflow(cmdArgs, stdout, stderr, jsonOut)
 	default:
 		fmt.Fprintf(stderr, "rddev: unknown subcommand %q\n\n%s", cmd, usage)
 		return exitUsage

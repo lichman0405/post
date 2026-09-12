@@ -340,9 +340,11 @@ func TestCLIReadyListAndUsage(t *testing.T) {
 }
 
 // TestSubprocessConcurrencyRunsTwoRealProcesses exercises the atomicity
-// guarantee end to end: two `rddev task accept` processes race on the same
+// guarantee end to end: two `rddev task verify` processes race on the same
 // state file; exactly one wins and the loser fails loudly with exit 1 (no
-// silent overwrite, history has exactly one entry).
+// silent overwrite, history has exactly one entry). (T0012: accept now runs
+// the acceptance gate first, so the plain-transition race is exercised with
+// verify, whose semantics are a bare running -> verification transition.)
 func TestSubprocessConcurrencyRunsTwoRealProcesses(t *testing.T) {
 	bin := buildRDDDev(t)
 	dir := t.TempDir()
@@ -359,12 +361,12 @@ func TestSubprocessConcurrencyRunsTwoRealProcesses(t *testing.T) {
 	writeJSONFile(t, filepath.Join(dir, "tasks", "task_status.json"), map[string]any{
 		"version": 2,
 		"tasks": map[string]any{
-			"T1000": map[string]any{"status": "verification"},
+			"T1000": map[string]any{"status": "running"},
 		},
 	})
 
 	runOne := func() (int, string, error) {
-		cmd := exec.Command(bin, "task", "accept", "T1000")
+		cmd := exec.Command(bin, "task", "verify", "T1000")
 		cmd.Dir = dir
 		var errb bytes.Buffer
 		cmd.Stderr = &errb
@@ -432,8 +434,8 @@ func TestSubprocessConcurrencyRunsTwoRealProcesses(t *testing.T) {
 	env := &taskEnv{dir: dir, dagPath: filepath.Join(dir, "tasks", "tasks.json"),
 		statePath: filepath.Join(dir, "tasks", "task_status.json")}
 	ts := env.readState(t, "T1000")
-	if ts.Status != devorchestrator.StateAccepted {
-		t.Errorf("final status = %s, want accepted", ts.Status)
+	if ts.Status != devorchestrator.StateVerification {
+		t.Errorf("final status = %s, want verification", ts.Status)
 	}
 	if len(ts.History) != 1 {
 		t.Errorf("history = %+v, want exactly one entry", ts.History)

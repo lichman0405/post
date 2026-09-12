@@ -241,6 +241,14 @@ func reconcileWorker(repoRoot string, rec *WorkerRecord) (WorkerView, error) {
 	v.Status, v.LogBytes, v.LogAgeS = deriveStatus(rec)
 
 	if rec.ExitStatus == nil && v.Status == WorkerExited {
+		// The reaper wrapper (the session leader) writes both exit.status
+		// copies and exits a moment after the Worker dies. Wait for it to
+		// finish so the code merged here can never be the previous attempt's
+		// stale copy or a half-written pair (T0012 rework race: collect read
+		// the new task-dir copy next to the stale authoritative one).
+		if rec.SessionLeaderPID > 0 {
+			waitPidGone(rec.SessionLeaderPID, 5*time.Second)
+		}
 		// The reaper recorded an exit after this registry was written; merge
 		// it in so the exit code survives process restarts of the reader.
 		code, err := readExitStatus(repoRoot, rec.TaskID)
@@ -281,6 +289,30 @@ func deriveStatus(rec *WorkerRecord) (WorkerStatus, int64, int64) {
 	return WorkerStale, bytes, 0
 }
 
+// waitPidGone polls until pid no longer exists, bounded by timeout. The
+// reaper wrapper is the session leader: its exit orders every file write it
+// performed, so waiting on it makes the two exit.status copies
+// observationally atomic for any reader that runs afterwards.
+func waitPidGone(pid int, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !pidExists(pid) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// pidExists reports whether a process with this pid exists at all (no
+// start-time check — the caller only needs liveness, not identity).
+func pidExists(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	_, err := os.Stat(fmt.Sprintf("/proc/%d", pid))
+	return err == nil
+}
+
 // pidAlive reports whether pid exists with the recorded process start time.
 func pidAlive(pid int, startTime uint64) bool {
 	if pid <= 0 {
@@ -312,8 +344,16 @@ func pidAlive(pid int, startTime uint64) bool {
 	return st == startTime
 }
 
-// readExitStatus reads the reaper-written exit.status file.
+// readExitStatus reads the reaper-recorded exit code. The authoritative copy
+// in the Supervisor-owned runtime dir wins (T0012: the Worker-writable
+// result-dir copy must never be the value a judgement rests on); the
+// result-dir copy is the fallback for pre-T0012 spawns.
 func readExitStatus(repoRoot, taskID string) (int, error) {
+	if code, ok, err := readAuthoritativeExitStatus(repoRoot, taskID); err != nil {
+		return 0, err
+	} else if ok {
+		return code, nil
+	}
 	data, err := os.ReadFile(exitStatusPath(repoRoot, taskID))
 	if err != nil {
 		return 0, fmt.Errorf("reading exit status for %s: %w", taskID, err)

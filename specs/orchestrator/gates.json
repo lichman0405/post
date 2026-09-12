@@ -1,0 +1,113 @@
+{
+  "$comment": "Four-gate acceptance loop (T0012, docs/67). G1 is enforced by `rddev worker collect` (RESULT consistency, worker boundary); G2 re-runs CI's EXACT steps — the six jobs of .github/workflows/ci.yml, steps verbatim (a sync unit test fails when this file drifts from ci.yml); G4 (merge gate) asserts EVERY required job is green in the task's latest G2 record. G3 is per-task integration/E2E via task_overrides (absent = not required, recorded as such, never silently skipped).",
+  "version": 1,
+  "required_jobs": [
+    "spec-validation",
+    "task-state",
+    "go",
+    "web",
+    "python",
+    "migration-integration"
+  ],
+  "gates": {
+    "G1": {
+      "name": "Worker local gate",
+      "description": "The Worker ran the task's required tests and its RESULT is internally consistent. Enforced mechanically by `rddev worker collect`: a completed claim with not_run/failed tests, an INTERIM-marked RESULT, or a failed/blocked RESULT is rejected.",
+      "runs_jobs": []
+    },
+    "G2": {
+      "name": "Supervisor acceptance gate",
+      "description": "CI's exact steps re-run locally by the Supervisor before accept. `rddev task accept` runs (or reuses a fresh) G2 record and refuses the verification -> accepted transition on any red job. This is the fix for the red-PR merge: G2 is never a similar-looking subset.",
+      "runs_jobs": [
+        "spec-validation",
+        "task-state",
+        "go",
+        "web",
+        "python",
+        "migration-integration"
+      ]
+    },
+    "G3": {
+      "name": "Integration / E2E gate",
+      "description": "Cross-boundary checks against real services, defined per task in task_overrides (docs/67). A task without a G3 entry has G3 recorded as not_required.",
+      "runs_jobs": []
+    },
+    "G4": {
+      "name": "Merge gate",
+      "description": "Asserts EVERY required CI job is green in the task's latest G2 record (and that the record postdates the collect that verified the task). `rddev pr merge` runs this and refuses to merge while any required job is red or missing.",
+      "asserts_jobs": [
+        "spec-validation",
+        "task-state",
+        "go",
+        "web",
+        "python",
+        "migration-integration"
+      ]
+    }
+  },
+  "jobs": {
+    "spec-validation": {
+      "steps": [
+        {"run": "pip install pyyaml"},
+        {"run": "python3 scripts/validate_specs.py"},
+        {"run": "python3 scripts/spec_version.py --check"},
+        {"run": "python3 scripts/validate_openapi.py"},
+        {"run": "bash scripts/tests/openapi-unit-test.sh"},
+        {"run": "bash scripts/tests/spec-validation-unit-test.sh"},
+        {"run": "bash scripts/tests/spec-validation-smoke-test.sh"}
+      ]
+    },
+    "task-state": {
+      "steps": [
+        {"run": "python3 scripts/validate_task_state.py"},
+        {"run": "bash scripts/tests/task-state-unit-test.sh"},
+        {"run": "bash scripts/tests/progress-update-test.sh"}
+      ]
+    },
+    "go": {
+      "steps": [
+        {"run": "make fmt-check"},
+        {"run": "go vet ./..."},
+        {"run": "make staticcheck"},
+        {"run": "bash scripts/tests/staticcheck-unit-test.sh"},
+        {"run": "go test $(go list ./... | grep -v '/tests/integration')"}
+      ]
+    },
+    "web": {
+      "steps": [
+        {"run": "corepack enable && pnpm install --frozen-lockfile"},
+        {"run": "pnpm --filter @post/ui typecheck"},
+        {"run": "pnpm --filter @post/web typecheck"},
+        {"run": "pnpm --filter @post/web lint"},
+        {"run": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"apps/web/lib/config.test.mjs\""},
+        {"run": "pnpm --filter @post/web build",
+         "env": {
+           "POST_ENV": "prod",
+           "API_BASE_URL": "http://127.0.0.1:18080",
+           "SCIENTIFIC_ADAPTER_URL": "http://127.0.0.1:19100"
+         }}
+      ]
+    },
+    "python": {
+      "steps": [
+        {"run": "pip install uv ruff mypy"},
+        {"run": "cd services/scientific-adapter && uv sync --frozen"},
+        {"run": "cd services/scientific-adapter && ruff check . --config ../../ops/ci/ruff.toml"},
+        {"run": "cd services/scientific-adapter && mypy --config-file ../../ops/ci/mypy.ini src/post_scientific_adapter"},
+        {"run": "cd services/scientific-adapter && uv run pytest -q"}
+      ]
+    },
+    "migration-integration": {
+      "steps": [
+        {"run": "make test-integration",
+         "env": {
+           "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post"
+         }}
+      ]
+    }
+  },
+  "review": {
+    "required_for_merge": true
+  },
+  "task_overrides": {}
+}

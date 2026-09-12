@@ -44,6 +44,14 @@ rddev worker collect T0204
 rddev task verify T0204
 rddev task accept T0204
 rddev task reject T0204 --reason-file rejection.md
+rddev worker rework T0204     # 拒收后原 session 返工（rejected -> running）
+rddev worker respawn T0204    # 拒收后新 Worker 重派（rejected -> running）
+rddev review spawn T0204      # 独立 Review Worker
+rddev review collect T0204
+rddev gate list T0204
+rddev gate run G2 T0204
+rddev gate status T0204
+rddev workflow T0204          # 完整 gate 证据链与下一步
 rddev git commit T0204
 rddev pr open T0204
 rddev pr merge T0204
@@ -108,3 +116,45 @@ Worker 不能把“建议改 scope”直接变成代码；只能写 `follow_up_i
 ## 9. 可恢复性
 
 Supervisor 崩溃或 context 被压缩后，通过：task_status、worker registry、worktree registry、PID、日志、Git state、RESULT 恢复。不得把关键调度状态只放在聊天上下文。
+
+Gate 证据同样全部落盘：`.rddev/runtime/gates/<TASK>/` 下的 collect/accept/reject/review/git 记录与 gate-run 记录（含每步 command/exit/log），`rddev workflow <TASK>` 可从磁盘重建完整证据链。
+
+## 10. 四层 Gate 验收循环（T0012）
+
+语义定义见 docs/67；本节规定执行与审计机制（机器规格：`specs/orchestrator/gates.json`）。
+
+### 10.1 四个 Gate 的强制点
+
+| Gate | 强制点 | 机制 |
+|------|--------|------|
+| G1 | `rddev worker collect` | RESULT 一致性机械检查：`completed` 声明 + required test `not_run`/failed、或 "INTERIM" 标记的 RESULT 一律拒收；一致性检查不可被 status 字段绕过 |
+| G2 | `rddev task accept` | 本地重跑 CI 的**精确步骤**（六个 job：spec-validation、task-state、go、web、python、migration-integration；同步单测保证 gates.json 与 ci.yml 不漂移）；任一 job 红灯拒绝 verification -> accepted，并记录 accept-refused 证据 |
+| G3 | `rddev task accept` | 按任务 `task_overrides` 定义的集成/E2E job；未定义记 not_required，从不静默跳过 |
+| G4 | `rddev git commit/push`、`rddev pr open/merge` | merge gate 断言**全部** required job 在最新 G2 记录中绿灯、G2 不早于最新 collect、G3 绿、review verdict approve（若要求）；红灯时在调用 git/gh **之前**拒绝并打印理由 |
+
+### 10.2 Gate 输入完整性（防 Worker 自改 gate 输入）
+
+spawn 时把 gate 输入（baseline_sha、allowed_scope、required_tests、进程身份等）写入 Supervisor 专属目录 `.rddev/runtime/tasks/<TASK>/`（Worker 不可写）；`.rddev/workers/<TASK>/` 里的 task-package.json、registry.json、guard/、exit.status 是 Worker 可写副本。collect 以权威记录为准，对副本做逐字节比对；任何改写被记为 tamper 证据。reaper 把 exit status 同时写入权威目录。
+
+### 10.3 拒收后的返工
+
+- 第一次不通过：`rddev worker rework` —— 同一 session `--resume`，保留 worktree diff，rejection 理由随 prompt 注入；
+- 再次失败/架构误解：`rddev worker respawn` —— 新 session，worktree 重置到 baseline；
+- 两者都要求任务处于 rejected 且 Worker 已退出；rejection 证据（collect report、G2 红灯记录、review verdict）保留在 gate 目录。
+
+### 10.4 Review Worker 与 Git 控制
+
+Review Worker 是伪任务 `<TASK>-review`：独立 session、无 Git control-plane、只读 diff + task package，verdict 以 schema 校验后记入 gate 证据。commit/push/PR/merge 仅 Supervisor 可执行，且每个动作执行前都重跑 G4 断言。
+
+### 10.5 全流程示例
+
+```bash
+rddev task ready T0204            # todo -> ready
+rddev worker spawn T0204          # ready -> running, 写权威 gate 输入
+rddev worker collect T0204        # running -> verification（G1 机械检查）
+rddev gate run G2 T0204           # Supervisor 重跑 CI 精确步骤
+rddev review spawn T0204 && rddev review collect T0204   # 独立审查
+rddev task accept T0204           # G2/G3 绿才允许 verification -> accepted
+rddev git commit T0204 && rddev pr open T0204
+rddev pr merge T0204              # G4 断言通过才 merge（accepted -> merged）
+```

@@ -13,26 +13,28 @@ type State string
 // The full state set, in canonical order. Absence of a status entry in
 // task_status.json is equivalent to StateTodo.
 const (
-	StateTodo          State = "todo"
-	StateReady         State = "ready"
-	StateRunning       State = "running"
-	StateWorkerFailed  State = "worker_failed"
-	StateVerification  State = "verification"
-	StateRejected      State = "rejected"
-	StateBlocked       State = "blocked"
-	StateAccepted      State = "accepted"
-	StateMerged        State = "merged"
+	StateTodo         State = "todo"
+	StateReady        State = "ready"
+	StateRunning      State = "running"
+	StateWorkerFailed State = "worker_failed"
+	StateVerification State = "verification"
+	StateRejected     State = "rejected"
+	StateBlocked      State = "blocked"
+	StateAccepted     State = "accepted"
+	StateMerged       State = "merged"
 )
 
 // transitions is the legal transition graph, recorded in
-// specs/orchestrator/task-state-machine.yaml (L1 decision, T0009).
+// specs/orchestrator/task-state-machine.yaml (L1 decision, T0009; T0012 adds
+// rejected -> running for rework/respawn — a rejected task re-dispatching a
+// Worker never detours through ready).
 var transitions = map[State][]State{
 	StateTodo:         {StateReady, StateBlocked},
 	StateReady:        {StateRunning, StateBlocked},
 	StateRunning:      {StateVerification, StateWorkerFailed, StateRejected},
 	StateVerification: {StateAccepted, StateRejected},
 	StateWorkerFailed: {StateReady},
-	StateRejected:     {StateReady},
+	StateRejected:     {StateReady, StateRunning},
 	StateBlocked:      {StateReady},
 	StateAccepted:     {StateMerged},
 	StateMerged:       {},
@@ -90,8 +92,8 @@ func checkTransition(id string, from, to State) error {
 type StateChange struct {
 	From   State  `json:"from"`
 	To     State  `json:"to"`
-	At     string `json:"at"`              // RFC 3339 UTC
-	RunID  string `json:"run_id"`          // carried on every state change
+	At     string `json:"at"`               // RFC 3339 UTC
+	RunID  string `json:"run_id"`           // carried on every state change
 	Reason string `json:"reason,omitempty"` // rejection reason or similar
 }
 

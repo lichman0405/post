@@ -147,20 +147,17 @@ func TestRunDoctorJSONFlagReachesEngine(t *testing.T) {
 
 // Honest stubs: every command owned by a later task fails with exit 4 and an
 // explicit message naming the owning task — never a silent no-op.
-// (spawn/list/logs/stop became real in T0010 and collect in T0011; only the
-// T0012 control-plane stubs and the env stubs remain.)
+// (spawn/list/logs/stop became real in T0010, collect in T0011, and the
+// T0012 git/pr control plane became real with the four-gate assertion — only
+// the env stubs remain.)
 func TestStubsExitNotImplemented(t *testing.T) {
 	cases := []struct {
 		args    []string
 		owner   string
 		jsonErr bool
 	}{
-		{[]string{"git", "commit", "T0009"}, "T0012", false},
-		{[]string{"pr", "open", "T0009"}, "T0012", false},
-		{[]string{"pr", "merge", "T0009"}, "T0012", false},
 		{[]string{"env", "reset", "--test-only"}, "T0010/T0011", false},
 		{[]string{"env", "gc"}, "T0010/T0011", false},
-		{[]string{"--json", "git", "commit", "T0009"}, "T0012", true},
 	}
 	for _, tc := range cases {
 		var stdout, stderr bytes.Buffer
@@ -187,6 +184,40 @@ func TestStubsExitNotImplemented(t *testing.T) {
 	}
 }
 
+// TestGitPRActionsRefusedByRedGate: the T0012 control plane replaced the
+// exit-4 stubs with real actions whose FIRST step is the four-gate assertion.
+// With no evidence records on disk the assertion is red, so every action
+// refuses (exit 1) and states plainly that git/gh was never invoked.
+func TestGitPRActionsRefusedByRedGate(t *testing.T) {
+	// The real repo's gates.json (relative to the package dir the tests run
+	// in) so the assertion loads, then fails on the missing evidence.
+	gates := filepath.Join("..", "..", "specs", "orchestrator", "gates.json")
+	for _, args := range [][]string{
+		{"git", "commit", "T0009"},
+		{"git", "push", "T0009"},
+		{"pr", "open", "T0009"},
+		{"pr", "merge", "T0009"},
+		{"--json", "pr", "merge", "T0009"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := run(append(args, "--gates", gates), &stdout, &stderr)
+		if code != 1 {
+			t.Errorf("run(%v) exit code = %d, want 1 (refused)", args, code)
+			continue
+		}
+		msg := stderr.String()
+		if !strings.Contains(msg, "REFUSED") {
+			t.Errorf("run(%v) stderr = %q, want an explicit four-gate refusal", args, msg)
+		}
+		if !strings.Contains(msg, "was never invoked") {
+			t.Errorf("run(%v) stderr = %q, must state git/gh was never invoked", args, msg)
+		}
+		if strings.Contains(msg, "not implemented") {
+			t.Errorf("run(%v) stderr = %q, the T0012 stub is still there", args, msg)
+		}
+	}
+}
+
 func TestRunEnvUsageErrors(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"env"}, &stdout, &stderr); code != 2 {
@@ -199,6 +230,66 @@ func TestRunEnvUsageErrors(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), `unknown subcommand "bogus"`) {
 		t.Errorf("run(env bogus) stderr = %q", stderr.String())
+	}
+}
+
+// TestGateRunCLIParsesAndExecutes: `rddev gate run GATE TASK` takes TWO
+// positionals (a regression: the first version read pos[0] — "run" — as the
+// gate name and always exited with a usage error). The gate's steps really
+// execute and the evidence record lands on disk.
+func TestGateRunCLIParsesAndExecutes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "specs", "orchestrator"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spec := `{
+  "version": 1,
+  "required_jobs": ["job-a"],
+  "gates": {
+    "G1": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": []},
+    "G2": {"name": "", "description": "", "runs_jobs": ["job-a"], "asserts_jobs": []},
+    "G3": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": []},
+    "G4": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": ["job-a"]}
+  },
+  "jobs": {"job-a": {"steps": [{"run": "echo cli-ok"}]}},
+  "review": {"required_for_merge": false},
+  "task_overrides": {}
+}`
+	if err := os.WriteFile(filepath.Join(dir, "specs", "orchestrator", "gates.json"), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"gate", "run", "G2", "T0009"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(gate run G2 T0009) exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "G2 passed") {
+		t.Errorf("stdout = %q, want the passed G2 run", stdout.String())
+	}
+	// The evidence record exists on disk (the executor really ran the step).
+	entries, err := os.ReadDir(filepath.Join(dir, ".rddev", "runtime", "gates", "T0009"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "gate-run-") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no gate-run record written under .rddev/runtime/gates/T0009: %v", entries)
+	}
+
+	// G1/G4 are not executable by hand: explicit refusal, never a silent no-op.
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"gate", "run", "G4", "T0009"}, &stdout, &stderr); code != 2 {
+		t.Errorf("run(gate run G4) exit code = %d, want 2 (usage refusal)", code)
+	}
+	if !strings.Contains(stderr.String(), "not executable") {
+		t.Errorf("run(gate run G4) stderr = %q, want the not-executable refusal", stderr.String())
 	}
 }
 

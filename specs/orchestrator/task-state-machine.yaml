@@ -1,4 +1,4 @@
-# Task state machine — rddev (T0009)
+# Task state machine — rddev (T0009, amended T0012)
 #
 # The authoritative transition table for rddev's task state machine. The state
 # set comes from docs/30_TASK_EXECUTION_STANDARD.md §2; the transition graph is
@@ -6,6 +6,15 @@
 # Supervisor charter (CLAUDE.md §4). It was not previously written down; T0009
 # records it here so the enforcement is auditable (L1 decision, reversible —
 # the Supervisor may amend this table in G2).
+#
+# T0012 amendments (docs/67):
+#   - rejected -> running is the rework/respawn path: a rejected task
+#     re-dispatches a Worker directly (rework = the same Worker session
+#     resumed; respawn = a fresh Worker with the worktree reset). The state
+#     machine no longer detours a rejected task through ready.
+#   - pr merge folds `task merged` bookkeeping: `rddev pr merge` performs the
+#     accepted -> merged transition as part of the merge action (a merge whose
+#     bookkeeping fails is reported, not silently re-merged later).
 #
 # Determinism rules:
 #   - An illegal transition is REJECTED with a non-zero exit and a clear error;
@@ -25,7 +34,8 @@ states:
   - running         # a Worker has been dispatched (T0010 spawn)
   - worker_failed   # Worker crashed / budget exhausted (docs/62 §64)
   - verification    # RESULT collected, awaiting Supervisor G2
-  - rejected        # G2 failed or collect validation failed; may re-enter ready
+  - rejected        # G2 failed or collect validation failed; re-enters running
+                    # directly via rework/respawn (T0012) or ready
   - blocked         # SPEC_BLOCKED / ENV_BLOCKED (docs/30 §6); may re-enter ready
   - accepted        # G2 passed; awaiting commit/PR/G4 merge
   - merged          # terminal (docs/30 §5)
@@ -36,22 +46,30 @@ transitions:
   running:       [verification, worker_failed, rejected]
   verification:  [accepted, rejected]
   worker_failed: [ready]
-  rejected:      [ready]
+  rejected:      [running, ready]  # running = rework/respawn (T0012)
   blocked:       [ready]
   accepted:      [merged]
   merged:        []                # terminal
 
 command_mapping:
-  # Which rddev subcommand performs which transition (T0009 surface).
+  # Which rddev subcommand performs which transition (T0009 surface, T0012
+  # additions).
   task ready:    [todo -> ready, blocked -> ready]   # deps must all be merged
   task verify:   [running -> verification]
-  task accept:   [verification -> accepted]          # sets accepted_by_supervisor_at
-  task reject:   [running -> rejected, verification -> rejected]
-  task merged:   [accepted -> merged]                  # sets merged_at; Supervisor merge
-                                                       # bookkeeping; T0012 may fold this
-                                                       # into pr merge
+  task accept:   [verification -> accepted]          # sets accepted_by_supervisor_at;
+                                                     # refuses while G2/G3 red (T0012)
+  task reject:   [running -> rejected, verification -> rejected]  # records RejectRecord
+                                                                  # evidence (T0012)
+  task merged:   [accepted -> merged]                  # sets merged_at; kept as bare
+                                                       # bookkeeping for merges performed
+                                                       # outside rddev pr merge
   # worker spawn (T0010) performs ready -> running;
+  # worker rework (T0012) performs rejected -> running with the SAME Worker
+  #   (resumed claude session, rejection reasons in the prompt);
+  # worker respawn (T0012) performs rejected -> running with a NEW Worker
+  #   (fresh session, worktree reset to the baseline);
   # worker collect (T0011) performs running -> verification / worker_failed / rejected;
+  # pr merge (T0012) performs accepted -> merged as part of the merge action;
   # `blocked` is written by the Supervisor (no dedicated subcommand in T0009).
 
 dependency_satisfied: "all of the task's dependencies have status == merged

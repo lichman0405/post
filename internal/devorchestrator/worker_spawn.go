@@ -44,6 +44,19 @@ type SpawnOpts struct {
 	Parallel     int // 0 means DefaultParallelWorkers
 	RunID        string
 	ClaudeBin    string // resolved claude binary; empty means "claude"
+	// FromState is the state the spawn transitions from: ready for a first
+	// dispatch, rejected for a respawn (T0012 — a rejected task re-dispatching
+	// a Worker never detours through ready). Empty means ready.
+	FromState State
+	// ResumeSession resumes an existing claude session instead of starting a
+	// new one (rework: the same Worker continues with its context intact).
+	ResumeSession string
+	// ReworkReason is appended to the prompt (the rejection evidence the
+	// Worker must address).
+	ReworkReason string
+	// ResetWorktree discards the worktree's uncommitted diff before dispatch
+	// (respawn only — the rejected diff's evidence is already recorded).
+	ResetWorktree bool
 }
 
 // SpawnResult reports a successful spawn.
@@ -99,22 +112,51 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 	// 1) Worktree: one per task, Supervisor-owned, never shared. A
 	// pre-existing worktree is adopted only if it is a real git worktree; a
 	// conflicting plain directory is an error, never deleted.
+	taskSpec := store.dag.Get(opts.TaskID)
 	worktree := filepath.Join(WorktreesDir(repoRoot), opts.TaskID)
-	branch := TaskBranch(opts.TaskID, store.dag.Get(opts.TaskID).Title)
+	branch := TaskBranch(opts.TaskID, taskSpec.Title)
 	if err := ensureWorktree(repoRoot, opts.TaskID, branch); err != nil {
 		return nil, err
 	}
 
+	// 1b) A respawn starts from a clean tree: the rejected diff is discarded
+	// (its evidence lives in the collect report and the reject record) and
+	// the worktree is reset to the branch tip — the new Worker starts from
+	// the baseline, never from a rejected attempt's leftovers.
+	if opts.ResetWorktree {
+		if _, err := gitOutput(worktree, "reset", "--hard", "HEAD"); err != nil {
+			return nil, fmt.Errorf("resetting the rejected worktree for a respawn: %w", err)
+		}
+		if _, err := gitOutput(worktree, "clean", "-fd"); err != nil {
+			return nil, fmt.Errorf("cleaning the rejected worktree for a respawn: %w", err)
+		}
+	}
+
 	// 2) Baseline + refs snapshot (L1-20260912-16: refs/remotes/** and
 	// refs/heads/task/** are shared Supervisor state, excluded from the
-	// collect-time comparison).
-	baseline, err := gitOutput(repoRoot, "rev-parse", "HEAD")
+	// collect-time comparison). The baseline is the TASK BRANCH's head — the
+	// repo-root HEAD is the Supervisor's working branch, not the code the
+	// Worker starts from.
+	baseline, err := gitOutput(repoRoot, "rev-parse", "--verify", "refs/heads/"+branch)
 	if err != nil {
-		return nil, fmt.Errorf("reading baseline HEAD: %w", err)
+		return nil, fmt.Errorf("reading baseline of refs/heads/%s: %w", branch, err)
 	}
 	refsBefore, err := refsSnapshot(repoRoot)
 	if err != nil {
 		return nil, err
+	}
+
+	// 2b) Pre-dispatch scope validation (T0012 requirement 3): the
+	// allowed_scope is checked against the real tree before dispatch — a
+	// plain entry matching nothing is a hard error, a dead /** entry a
+	// warning, and a scope covering a derived artifact's marker inputs must
+	// also cover the derived artifact.
+	scopeV, err := ValidateScopeAgainstTree(taskSpec.AllowedScope, repoRoot, derivedAt(repoRoot))
+	if err != nil {
+		return nil, fmt.Errorf("validating allowed_scope before dispatch: %w", err)
+	}
+	if len(scopeV.HardErrors) > 0 {
+		return nil, fmt.Errorf("allowed_scope of %s does not validate against the real tree: %s", opts.TaskID, strings.Join(scopeV.HardErrors, "; "))
 	}
 
 	// 3) Parallelism gate: count live Workers from disk (never from memory)
@@ -126,7 +168,6 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 
 	// 4) Render the task package and validate it against the schema the repo
 	// itself carries (no embedded copy to drift).
-	taskSpec := store.dag.Get(opts.TaskID)
 	pkg, err := RenderTaskPackage(taskSpec, baseline, opts.MaxTurns, opts.MaxBudgetUSD)
 	if err != nil {
 		return nil, err
@@ -136,19 +177,69 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 		return nil, err
 	}
 
-	// 5) Write the runtime files: task package, prompts, guard layer.
+	// 5) Write the runtime files: task package, prompts, guard layer. A
+	// rework appends the rejection evidence to the prompt — the Worker must
+	// address the recorded reasons, not re-read them from memory.
 	taskDir := WorkerTaskDir(repoRoot, opts.TaskID)
 	env, err := BuildWorkerEnv(os.Environ(), repoRoot, opts.TaskID, worktree, taskDir, opts.Docker)
 	if err != nil {
 		return nil, err
 	}
 	prompt := RenderPrompt(pkg, worktree, taskDir, WorktreesDir(repoRoot), WorkersDir(repoRoot))
+	if opts.ReworkReason != "" {
+		prompt += fmt.Sprintf("\n## Rework\n\nThe previous attempt was REJECTED. Fix these recorded reasons, then re-verify:\n\n%s\n", opts.ReworkReason)
+	}
 	system := RenderSystemPrompt(opts.TaskID, repoRoot, worktree, taskDir, WorktreesDir(repoRoot))
 	if err := writeSpawnFiles(taskDir, pkg, prompt, system, GuardOpts{
 		RepoRoot: repoRoot, TaskID: opts.TaskID, Worktree: worktree,
 		ResultDir: taskDir, DockerGrant: opts.Docker,
 	}); err != nil {
 		return nil, err
+	}
+
+	// 5b) Record the AUTHORITATIVE gate inputs before the Worker starts
+	// (T0012 security fix): collect judges by these spawn-time values — never
+	// by the copies in the Worker-writable task dir. Byte copies of the
+	// package and guard layer are stored alongside, so any Worker edit of its
+	// own gate inputs is detected as a tamper, not accepted as a judgement
+	// input.
+	runID := opts.RunID
+	if runID == "" {
+		runID = NewRunID()
+	}
+	// A rework resumes the SAME claude session (context survives); a fresh
+	// spawn creates a new one.
+	sessionID := opts.ResumeSession
+	if sessionID == "" {
+		sessionID, err = newUUID()
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Rework attempts get their own log file — the evidence trail keeps every
+	// attempt's log, not just the last one. Computed BEFORE the authoritative
+	// gate-inputs record so gate-inputs.json and the registry agree on the
+	// same path (a stale worker.log here read as a registry tamper on rework).
+	logPath := filepath.Join(taskDir, "worker.log")
+	if opts.ReworkReason != "" {
+		logPath = filepath.Join(taskDir, "worker-"+runID+".log")
+	}
+	gateInputs := &GateInputs{
+		TaskID:             opts.TaskID,
+		RunID:              runID,
+		SessionID:          sessionID,
+		BaselineSHA:        baseline,
+		Branch:             branch,
+		Worktree:           worktree,
+		ResultDir:          taskDir,
+		LogPath:            logPath,
+		RefsBefore:         refsBefore,
+		AllowedScope:       pkg.AllowedScope,
+		RequiredTests:      pkg.RequiredTests,
+		AcceptanceCriteria: pkg.AcceptanceCriteria,
+	}
+	if err := WriteGateInputs(repoRoot, opts.TaskID, gateInputs, taskDir); err != nil {
+		return nil, fmt.Errorf("recording authoritative gate inputs before dispatch: %w", err)
 	}
 
 	// 6) Record the claude version the Worker will run with (L1-20260912-5),
@@ -165,11 +256,8 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 	}
 
 	// 7) Start the reaper detached; it writes claude.pid, prints the pid,
-	// waits for claude and records exit.status — surviving rddev's own exit.
-	runID := opts.RunID
-	if runID == "" {
-		runID = NewRunID()
-	}
+	// waits for claude and records exit.status in BOTH the task dir and the
+	// Supervisor-owned authoritative runtime dir — surviving rddev's own exit.
 	// The run marker is the residue-attribution signal collect reads back
 	// from /proc/<pid>/environ (T0011 Defect 2): real claude's Bash tool
 	// runs each command in its own session, so a nohup'd survivor escapes
@@ -178,13 +266,18 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 	// travels into every descendant's environment unless the descendant
 	// deliberately scrubs it, which is exactly the attribution boundary.
 	env.Vars = append(env.Vars, "POST_WORKER_RUN_ID="+runID)
-	sessionID, err := newUUID()
-	if err != nil {
-		return nil, err
-	}
-	logPath := filepath.Join(taskDir, "worker.log")
 	pidFile := filepath.Join(taskDir, "claude.pid")
 	statusFile := filepath.Join(taskDir, "exit.status")
+	// A re-dispatch (rework/respawn) must not leave the previous attempt's
+	// exit.status behind: observers would read the old attempt's code as the
+	// new attempt's (the rework e2e caught a reconcile merging attempt 1's
+	// stale authoritative 0 while attempt 2's reaper was mid-write). Both
+	// copies are removed; the reaper rewrites them when THIS attempt ends.
+	for _, f := range []string{statusFile, authoritativeExitStatusPath(repoRoot, opts.TaskID)} {
+		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("removing the previous attempt's exit status %s: %w", f, err)
+		}
+	}
 	settingsPath := filepath.Join(taskDir, "worker-settings.json")
 	systemPath := filepath.Join(taskDir, "system.md")
 	args, err := claudeArgs(opts, sessionID, settingsPath, systemPath, prompt, resultSchema)
@@ -192,17 +285,18 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 		return nil, err
 	}
 	reaper := filepath.Join(taskDir, "run-worker.sh")
-	// The reaper runs "$@" after the four path args. Without a timeout the
-	// command is `claude <args>`; with one, the wrapper must surround the
-	// binary (`timeout ... claude <args>`) so the reaper records 124 on
-	// expiry — a timed-out Worker is exited-with-124, never "completed".
+	// The reaper runs "$@" after the five path args (arg 5 is the
+	// authoritative exit.status copy, T0012). Without a timeout the command
+	// is `claude <args>`; with one, the wrapper must surround the binary
+	// (`timeout ... claude <args>`) so the reaper records 124 on expiry — a
+	// timed-out Worker is exited-with-124, never "completed".
 	var workerCmd []string
 	if opts.Timeout > 0 {
 		workerCmd = wrapTimeout(opts.Timeout, claudeBin, args)
 	} else {
 		workerCmd = append([]string{claudeBin}, args...)
 	}
-	cmdArgs := append([]string{reaper, worktree, logPath, pidFile, statusFile}, workerCmd...)
+	cmdArgs := append([]string{reaper, worktree, logPath, pidFile, statusFile, authoritativeExitStatusPath(repoRoot, opts.TaskID)}, workerCmd...)
 	cmd := exec.Command("bash", cmdArgs...)
 	cmd.Dir = repoRoot
 	cmd.Env = env.Vars
@@ -276,6 +370,15 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 		killWorker(workerPID)
 		return nil, fmt.Errorf("reading /proc starttime for pid %d: %w", workerPID, err)
 	}
+	// Finalize the authoritative gate inputs with the process identity the
+	// early WriteGateInputs could not know (the Worker exists now); collect
+	// compares the registry against these values, so a Worker-edited
+	// registry.json (changed pid/start time/listener baseline) is a detected
+	// tamper, not a judged-on input.
+	if err := FinalizeGateInputs(repoRoot, opts.TaskID, runID, sessionID, workerPID, startTime, sessionLeaderPID, startedAt, listenersBefore); err != nil {
+		killWorker(workerPID)
+		return nil, fmt.Errorf("finalizing the authoritative gate inputs: %w", err)
+	}
 	rec := &WorkerRecord{
 		TaskID:        opts.TaskID,
 		RunID:         runID,
@@ -306,13 +409,17 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 		return nil, fmt.Errorf("writing worker registry: %w", err)
 	}
 
-	// 9) ready -> running (the spawn command owns this transition,
-	// task-state-machine.yaml). If the state file refuses it, kill the Worker
-	// and undo nothing else — the registry remains as an honest record of an
-	// aborted attempt.
-	if _, err := store.StartWorker(opts.TaskID, runID, startedAt); err != nil {
+	// 9) ready -> running, or rejected -> running for a rework/respawn (the
+	// spawn command owns these transitions, task-state-machine.yaml). If the
+	// state file refuses it, kill the Worker and undo nothing else — the
+	// registry remains as an honest record of an aborted attempt.
+	from := StateReady
+	if opts.FromState != "" {
+		from = opts.FromState
+	}
+	if _, err := store.StartWorkerFrom(opts.TaskID, runID, startedAt, from); err != nil {
 		killWorker(workerPID)
-		return nil, fmt.Errorf("worker started but the ready -> running transition failed; the worker was killed: %w", err)
+		return nil, fmt.Errorf("worker started but the %s -> running transition failed; the worker was killed: %w", from, err)
 	}
 
 	return &SpawnResult{
@@ -334,16 +441,25 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 // (the spawn command owns this transition, specs/orchestrator/
 // task-state-machine.yaml command_mapping).
 func (s *Store) StartWorker(id, runID, startedAt string) (*TransitionResult, error) {
+	return s.StartWorkerFrom(id, runID, startedAt, StateReady)
+}
+
+// StartWorkerFrom applies from -> running (ready for a first dispatch,
+// rejected for a T0012 rework/respawn) and stamps worker_run_id/started_at.
+func (s *Store) StartWorkerFrom(id, runID, startedAt string, from State) (*TransitionResult, error) {
 	var result *TransitionResult
-	err := s.mutate(id, func(ts *TaskState, from State, states map[string]State) error {
-		if err := checkTransition(id, from, StateRunning); err != nil {
+	err := s.mutate(id, func(ts *TaskState, fromSt State, states map[string]State) error {
+		if fromSt != from {
+			return &IllegalTransitionError{ID: id, From: fromSt, To: StateRunning}
+		}
+		if err := checkTransition(id, fromSt, StateRunning); err != nil {
 			return err
 		}
 		ts.Status = StateRunning
-		ts.History = append(ts.History, StateChange{From: from, To: StateRunning, At: startedAt, RunID: runID, Reason: "worker spawn"})
+		ts.History = append(ts.History, StateChange{From: fromSt, To: StateRunning, At: startedAt, RunID: runID, Reason: "worker spawn"})
 		ts.WorkerRunID = runID
 		ts.StartedAt = strptr(startedAt)
-		result = &TransitionResult{TaskID: id, From: from, To: StateRunning, RunID: runID, At: startedAt}
+		result = &TransitionResult{TaskID: id, From: fromSt, To: StateRunning, RunID: runID, At: startedAt}
 		return nil
 	})
 	if err != nil {
@@ -577,4 +693,93 @@ func newUUID() (string, error) {
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
+// requireRejectedAndExited gates rework/respawn: the task must be rejected
+// and the previous Worker must have exited. A restart of an accepted or
+// running task is refused — the state machine is the truth, not the caller's
+// intention.
+func requireRejectedAndExited(opts *SpawnOpts) error {
+	store, err := OpenStore(opts.DagPath, opts.StatePath)
+	if err != nil {
+		return err
+	}
+	insp, err := store.Inspect(opts.TaskID)
+	if err != nil {
+		return err
+	}
+	if insp.State.Status != StateRejected {
+		return fmt.Errorf("task %s is %s, not rejected — rework/respawn re-dispatch a rejected task only (an accepted or running task must never be restarted)", opts.TaskID, insp.State.Status)
+	}
+	// Reconcile the exit status from disk first (the reaper may have recorded
+	// it after the last discovery).
+	if _, err := DiscoverWorkers(opts.RepoRoot); err != nil {
+		return err
+	}
+	rec, err := LoadRegistry(opts.RepoRoot, opts.TaskID)
+	if err != nil {
+		return err
+	}
+	if rec == nil || rec.ExitStatus == nil {
+		return fmt.Errorf("the previous Worker for %s has not exited (or was never recorded) — rework/respawn requires the previous attempt to be over", opts.TaskID)
+	}
+	return nil
+}
+
+// reworkReason renders the rejection evidence the rework prompt carries: the
+// newest RejectRecord's reasons (with evidence paths), falling back to the
+// state file's rejection reason.
+func reworkReason(opts *SpawnOpts) string {
+	if rej, ok, err := LatestRecord[RejectRecord](opts.RepoRoot, opts.TaskID, RecordReject); err == nil && ok {
+		var b strings.Builder
+		for _, r := range rej.Reasons {
+			fmt.Fprintf(&b, "- %s\n", r)
+		}
+		if len(rej.Evidence) > 0 {
+			fmt.Fprintf(&b, "\nEvidence: %s\n", strings.Join(rej.Evidence, ", "))
+		}
+		return b.String()
+	}
+	store, err := OpenStore(opts.DagPath, opts.StatePath)
+	if err != nil {
+		return ""
+	}
+	if insp, err := store.Inspect(opts.TaskID); err == nil && insp.State.RejectionReason != "" {
+		return insp.State.RejectionReason
+	}
+	return "the recorded rejection reasons were not found on disk — inspect the collect report and gate records"
+}
+
+// ReworkWorker re-dispatches the SAME Worker on a rejected task (first
+// rejection policy): the session is resumed (context intact), the worktree
+// keeps its accumulated diff, the prompt carries the rejection evidence, and
+// the state moves rejected -> running.
+func ReworkWorker(opts *SpawnOpts) (*SpawnResult, error) {
+	if err := requireRejectedAndExited(opts); err != nil {
+		return nil, err
+	}
+	rec, err := LoadRegistry(opts.RepoRoot, opts.TaskID)
+	if err != nil || rec == nil {
+		return nil, fmt.Errorf("loading the previous Worker record for the rework: %w", err)
+	}
+	opts.ResumeSession = rec.SessionID
+	opts.ReworkReason = reworkReason(opts)
+	opts.FromState = StateRejected
+	opts.ResetWorktree = false
+	return Spawn(opts)
+}
+
+// RespawnWorker re-dispatches a FRESH Worker on a rejected task (second
+// rejection or architecture mismatch policy): a new session, a clean
+// worktree reset to the baseline, the rejection evidence in the prompt, and
+// rejected -> running.
+func RespawnWorker(opts *SpawnOpts) (*SpawnResult, error) {
+	if err := requireRejectedAndExited(opts); err != nil {
+		return nil, err
+	}
+	opts.ResumeSession = ""
+	opts.ReworkReason = reworkReason(opts)
+	opts.FromState = StateRejected
+	opts.ResetWorktree = true
+	return Spawn(opts)
 }

@@ -28,7 +28,7 @@ type TaskSpec struct {
 
 // DAG is the task dependency graph.
 type DAG struct {
-	Tasks []TaskSpec        `json:"tasks"`
+	Tasks []TaskSpec `json:"tasks"`
 	byID  map[string]*TaskSpec
 }
 

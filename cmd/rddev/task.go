@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/lichman0405/post/internal/devorchestrator"
 )
@@ -17,14 +18,20 @@ Commands:
                     (requires all dependencies merged)
   inspect TASK      print the DAG entry and the full recorded state
   verify TASK       running -> verification
-  accept TASK       verification -> accepted (stamps accepted_by_supervisor_at)
-  reject TASK       running|verification -> rejected (requires --reason or --reason-file)
+  accept TASK       run the acceptance gate (G2 = CI's exact six jobs, then G3
+                    where the task defines one) and verification -> accepted;
+                    REFUSES (exit 1, state unchanged, AcceptRecord evidence
+                    written) while any gate is red or missing
+  reject TASK       running|verification -> rejected (requires --reason or
+                    --reason-file); the rejection is recorded as a RejectRecord
+                    (reasons + evidence paths) that rework/respawn carry
   merged TASK       accepted -> merged (Supervisor merge bookkeeping)
 
 Flags:
   --json                machine-readable output
   --tasks-json PATH     task DAG file (default tasks/tasks.json)
   --state-json PATH     task status file (default tasks/task_status.json)
+  --gates PATH          gate spec file (default specs/orchestrator/gates.json)
   --run-id ID           run id stamped on state changes (default: generated)
   --reason TEXT         rejection reason
   --reason-file FILE    rejection reason read from FILE
@@ -41,6 +48,8 @@ type taskRunner struct {
 	stderr    io.Writer
 	jsonOut   bool
 	runID     string
+	gatesPath string
+	repoRoot  string
 }
 
 func runTask(args []string, stdout, stderr io.Writer, jsonOut bool) int {
@@ -52,6 +61,7 @@ func runTask(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		flagSpec{"--json", false},
 		flagSpec{"--tasks-json", true},
 		flagSpec{"--state-json", true},
+		flagSpec{"--gates", true},
 		flagSpec{"--run-id", true},
 		flagSpec{"--reason", true},
 		flagSpec{"--reason-file", true},
@@ -79,12 +89,18 @@ func runTask(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 	if err != nil {
 		return operationalError(stderr, "rddev task", err)
 	}
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		return operationalError(stderr, "rddev task", fmt.Errorf("resolving the repo root: %w", err))
+	}
 	tr := &taskRunner{
-		store:  store,
-		stdout: stdout,
-		stderr: stderr,
-		jsonOut: jsonOut,
-		runID:  stringOr(vals["--run-id"], devorchestrator.NewRunID()),
+		store:     store,
+		stdout:    stdout,
+		stderr:    stderr,
+		jsonOut:   jsonOut,
+		runID:     stringOr(vals["--run-id"], devorchestrator.NewRunID()),
+		gatesPath: vals["--gates"],
+		repoRoot:  repoRoot,
 	}
 
 	switch cmd {
@@ -103,7 +119,7 @@ func runTask(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 	case "verify":
 		return tr.transition(taskArg, devorchestrator.StateVerification, "")
 	case "accept":
-		return tr.transition(taskArg, devorchestrator.StateAccepted, "")
+		return tr.accept(taskArg)
 	case "reject":
 		if taskArg == "" {
 			return usageError(stderr, "rddev task reject: missing TASK", taskUsage)
@@ -121,7 +137,7 @@ func runTask(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		if reason == "" {
 			return usageError(stderr, "rddev task reject: requires --reason TEXT or --reason-file FILE", taskUsage)
 		}
-		return tr.transition(taskArg, devorchestrator.StateRejected, reason)
+		return tr.reject(taskArg, reason)
 	case "merged":
 		return tr.transition(taskArg, devorchestrator.StateMerged, "")
 	default:
@@ -204,6 +220,216 @@ func (tr *taskRunner) transition(id string, to devorchestrator.State, reason str
 		return exitOK
 	}
 	fmt.Fprintf(tr.stdout, "%s: %s -> %s (run_id=%s, at=%s)\n", res.TaskID, res.From, res.To, res.RunID, res.At)
+	return exitOK
+}
+
+// accept runs the acceptance gate (T0012): G2 = CI's exact six jobs (a fresh
+// all-green G2 record at/after the latest collect is reused; anything else is
+// executed now), then G3 where the task defines one. Any red or missing gate
+// refuses the verification -> accepted transition with the refusal recorded as
+// an AcceptRecord — accepting on a subset-G2 is the defect this makes
+// impossible.
+func (tr *taskRunner) accept(id string) int {
+	if id == "" {
+		return usageError(tr.stderr, "rddev task accept: missing TASK", taskUsage)
+	}
+	repoRoot := tr.repoRoot
+	if repoRoot == "" {
+		var err error
+		repoRoot, err = os.Getwd()
+		if err != nil {
+			return operationalError(tr.stderr, "rddev task accept", fmt.Errorf("resolving the repo root: %w", err))
+		}
+	}
+	gatesPath := tr.gatesPath
+	runID := tr.runID
+	// A wrong-state accept is refused by the transition machinery BEFORE any
+	// gate work: an illegal transition must report the illegal transition,
+	// not a missing gate spec (and must never burn a six-job G2 run first).
+	insp, err := tr.store.Inspect(id)
+	if err != nil {
+		return operationalError(tr.stderr, "rddev task accept", err)
+	}
+	if insp.State.Status != devorchestrator.StateVerification {
+		_, err := tr.store.Transition(id, devorchestrator.StateAccepted, runID, "")
+		return operationalError(tr.stderr, "rddev task accept", err)
+	}
+	recordRefusal := func(status map[string]string, reasons []string) {
+		if _, err := devorchestrator.WriteRecord(repoRoot, id, devorchestrator.RecordAccept, runID, devorchestrator.NewAcceptRecord(id, runID, "refused", status, reasons)); err != nil {
+			fmt.Fprintf(tr.stderr, "rddev task accept: writing the refusal evidence: %v\n", err)
+		}
+	}
+
+	// G1: the task must have collected clean (it is in verification, but the
+	// evidence must agree — state and records are both on disk).
+	status, err := devorchestrator.AcceptGateStatus(repoRoot, gatesPath, id)
+	if err != nil {
+		return operationalError(tr.stderr, "rddev task accept", err)
+	}
+	reasons := []string{}
+	if status["G1"] != "passed" {
+		reasons = append(reasons, "G1 is not green: no ok collect record exists — collect the Worker first (rddev worker collect "+id+")")
+	}
+
+	// G2: CI's exact six jobs, all green.
+	g2, err := devorchestrator.EnsureG2Green(&devorchestrator.GateRunOpts{
+		RepoRoot: repoRoot, GatesPath: gatesPath, TaskID: id, RunID: runID,
+	})
+	if err != nil {
+		status["G2"] = "failed"
+		reasons = append(reasons, "G2 could not run: "+err.Error())
+		recordRefusal(status, reasons)
+		return operationalError(tr.stderr, "rddev task accept", err)
+	}
+	if g2.Status != "passed" {
+		status["G2"] = "failed"
+		reasons = append(reasons, "G2 (CI's exact six jobs) is red in run "+g2.RunID+" — see "+g2.RecordPath+" and the step logs")
+		recordRefusal(status, reasons)
+		fmt.Fprintf(tr.stderr, "rddev task accept: REFUSED — G2 is red (state unchanged):\n")
+		for _, r := range reasons {
+			fmt.Fprintf(tr.stderr, "  - %s\n", r)
+		}
+		return exitOperational
+	}
+	status["G2"] = "passed"
+
+	// G3: run when the task defines integration/E2E jobs and no green run
+	// covers them at/after the latest collect.
+	spec, err := devorchestrator.LoadGateSpec(devorchestrator.GateSpecPath(repoRoot, stringOr(gatesPath, devorchestrator.DefaultGatesPath)))
+	if err != nil {
+		return operationalError(tr.stderr, "rddev task accept", err)
+	}
+	g3Jobs, err := spec.JobsForGate("G3", id)
+	if err != nil {
+		return operationalError(tr.stderr, "rddev task accept", err)
+	}
+	if len(g3Jobs) > 0 {
+		needRun := true
+		if g3, ok, err := devorchestrator.LatestGateRunRecord(repoRoot, id, "G3"); err != nil {
+			return operationalError(tr.stderr, "rddev task accept", err)
+		} else if ok && g3.Status == "passed" {
+			covered := true
+			for _, j := range g3Jobs {
+				found := false
+				for _, jr := range g3.Jobs {
+					if jr.Job == j && jr.Status == "passed" {
+						found = true
+					}
+				}
+				if !found {
+					covered = false
+				}
+			}
+			if covered {
+				if coll, cok, err := devorchestrator.LatestRecord[devorchestrator.CollectRecord](repoRoot, id, devorchestrator.RecordCollect); err != nil {
+					return operationalError(tr.stderr, "rddev task accept", err)
+				} else if cok && g3.At >= coll.At {
+					needRun = false
+				}
+			}
+		}
+		if needRun {
+			g3, err := devorchestrator.RunGate(&devorchestrator.GateRunOpts{
+				RepoRoot: repoRoot, GatesPath: gatesPath, TaskID: id, Gate: "G3", RunID: runID,
+			})
+			if err != nil {
+				status["G3"] = "failed"
+				reasons = append(reasons, "G3 could not run: "+err.Error())
+				recordRefusal(status, reasons)
+				return operationalError(tr.stderr, "rddev task accept", err)
+			}
+			if g3.Status != "passed" {
+				status["G3"] = "failed"
+				reasons = append(reasons, "G3 (task integration/E2E) is red in run "+g3.RunID+" — see "+g3.RecordPath)
+				recordRefusal(status, reasons)
+				fmt.Fprintf(tr.stderr, "rddev task accept: REFUSED — G3 is red (state unchanged):\n")
+				for _, r := range reasons {
+					fmt.Fprintf(tr.stderr, "  - %s\n", r)
+				}
+				return exitOperational
+			}
+		}
+		status["G3"] = "passed"
+	} else {
+		status["G3"] = "not_required"
+	}
+
+	if len(reasons) > 0 {
+		recordRefusal(status, reasons)
+		fmt.Fprintf(tr.stderr, "rddev task accept: REFUSED (state unchanged):\n")
+		for _, r := range reasons {
+			fmt.Fprintf(tr.stderr, "  - %s\n", r)
+		}
+		return exitOperational
+	}
+	status["G4"] = "not_required"
+
+	res, err := tr.store.Transition(id, devorchestrator.StateAccepted, runID, "")
+	if err != nil {
+		return operationalError(tr.stderr, "rddev task accept", err)
+	}
+	// The accept evidence is written only after the transition succeeded.
+	if _, err := devorchestrator.WriteRecord(repoRoot, id, devorchestrator.RecordAccept, runID, devorchestrator.NewAcceptRecord(id, runID, "accepted", status, nil)); err != nil {
+		return operationalError(tr.stderr, "rddev task accept", err)
+	}
+	if tr.jsonOut {
+		tr.writeJSON(struct {
+			*devorchestrator.TransitionResult
+			Gates map[string]string `json:"gates"`
+		}{TransitionResult: res, Gates: status})
+		return exitOK
+	}
+	fmt.Fprintf(tr.stdout, "%s: %s -> %s (run_id=%s, gates: G1=%s G2=%s G3=%s)\n",
+		res.TaskID, res.From, res.To, res.RunID, status["G1"], status["G2"], status["G3"])
+	return exitOK
+}
+
+// reject applies running|verification -> rejected and records the RejectRecord
+// evidence (reasons + the evidence paths that back them) — the record rework
+// and respawn carry into the Worker's next prompt.
+func (tr *taskRunner) reject(id, reason string) int {
+	res, err := tr.store.Transition(id, devorchestrator.StateRejected, tr.runID, reason)
+	if err != nil {
+		return operationalError(tr.stderr, "rddev task reject", err)
+	}
+	repoRoot := tr.repoRoot
+	if repoRoot == "" {
+		var err error
+		repoRoot, err = os.Getwd()
+		if err != nil {
+			return operationalError(tr.stderr, "rddev task reject", fmt.Errorf("resolving the repo root: %w", err))
+		}
+	}
+	// The evidence paths backing the rejection: the collect report (G1), the
+	// review verdict and the latest G2 record, whatever exists on disk.
+	evidence := []string{}
+	if rec, err := devorchestrator.LoadRegistry(repoRoot, id); err == nil && rec != nil {
+		report := filepath.Join(rec.ResultDir, "collect-report.json")
+		if _, err := os.Stat(report); err == nil {
+			evidence = append(evidence, report)
+		}
+	}
+	if rv, ok, err := devorchestrator.LatestRecord[devorchestrator.ReviewRecord](repoRoot, id, devorchestrator.RecordReview); err == nil && ok && rv.VerdictPath != "" {
+		evidence = append(evidence, rv.VerdictPath)
+	}
+	if g2, ok, err := devorchestrator.LatestGateRunRecord(repoRoot, id, "G2"); err == nil && ok {
+		evidence = append(evidence, filepath.Join(devorchestrator.GatesDir(repoRoot, id), devorchestrator.RecordGateRun+"-"+g2.RunID+".json"))
+	}
+	reasons := []string{reason}
+	if _, err := devorchestrator.WriteRecord(repoRoot, id, devorchestrator.RecordReject, tr.runID, devorchestrator.NewRejectRecord(id, tr.runID, reasons, evidence)); err != nil {
+		return operationalError(tr.stderr, "rddev task reject", err)
+	}
+	if tr.jsonOut {
+		tr.writeJSON(struct {
+			*devorchestrator.TransitionResult
+			Evidence []string `json:"evidence"`
+		}{TransitionResult: res, Evidence: evidence})
+		return exitOK
+	}
+	fmt.Fprintf(tr.stdout, "%s: %s -> %s (run_id=%s, at=%s, reason recorded)\n", res.TaskID, res.From, res.To, res.RunID, res.At)
+	for _, e := range evidence {
+		fmt.Fprintf(tr.stdout, "  evidence: %s\n", e)
+	}
 	return exitOK
 }
 
