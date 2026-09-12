@@ -583,6 +583,7 @@
         "internal/application/**",
         "internal/authz/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "apps/web/**",
         "packages/api-contracts/**",
         "tests/**"
@@ -626,6 +627,7 @@
         "internal/application/**",
         "internal/authz/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "apps/web/**",
         "packages/api-contracts/**",
         "tests/**"
@@ -669,6 +671,7 @@
         "internal/application/**",
         "internal/authz/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "apps/web/**",
         "packages/api-contracts/**",
         "tests/**"
@@ -712,6 +715,7 @@
         "internal/application/**",
         "internal/authz/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "apps/web/**",
         "packages/api-contracts/**",
         "tests/**"
@@ -753,6 +757,7 @@
         "internal/application/**",
         "internal/authz/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "apps/web/**",
         "packages/api-contracts/**",
         "tests/**"
@@ -796,6 +801,7 @@
         "internal/application/**",
         "internal/authz/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "apps/web/**",
         "packages/api-contracts/**",
         "tests/**"
@@ -841,6 +847,7 @@
         "internal/application/**",
         "internal/authz/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "apps/web/**",
         "packages/api-contracts/**",
         "tests/**"
@@ -884,6 +891,7 @@
         "internal/application/**",
         "internal/authz/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "apps/web/**",
         "packages/api-contracts/**",
         "tests/**"
@@ -927,6 +935,7 @@
         "internal/application/**",
         "internal/authz/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "apps/web/**",
         "packages/api-contracts/**",
         "tests/**"
@@ -969,6 +978,7 @@
         "internal/application/**",
         "internal/authz/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "apps/web/**",
         "packages/api-contracts/**",
         "tests/**"
@@ -1013,6 +1023,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "packages/schemas/**",
         "specs/schemas/**",
         "tests/**"
@@ -1055,6 +1066,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "packages/schemas/**",
         "specs/schemas/**",
         "tests/**"
@@ -1097,6 +1109,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "packages/schemas/**",
         "specs/schemas/**",
         "tests/**"
@@ -1141,6 +1154,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "packages/schemas/**",
         "specs/schemas/**",
         "tests/**"
@@ -1184,6 +1198,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "packages/schemas/**",
         "specs/schemas/**",
         "tests/**"
@@ -1227,6 +1242,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "packages/schemas/**",
         "specs/schemas/**",
         "tests/**"
@@ -1270,6 +1286,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "packages/schemas/**",
         "specs/schemas/**",
         "tests/**"
@@ -1312,6 +1329,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "packages/schemas/**",
         "specs/schemas/**",
         "tests/**"
@@ -1355,6 +1373,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "packages/schemas/**",
         "specs/schemas/**",
         "tests/**"
@@ -1398,6 +1417,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "packages/schemas/**",
         "specs/schemas/**",
         "tests/**"
@@ -1441,6 +1461,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "packages/schemas/**",
         "specs/schemas/**",
         "tests/**"
@@ -1482,6 +1503,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "packages/schemas/**",
         "specs/schemas/**",
         "tests/**"
@@ -1525,6 +1547,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "packages/schemas/**",
         "specs/schemas/**",
         "tests/**"
@@ -1569,6 +1592,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "packages/schemas/**",
         "specs/schemas/**",
         "tests/**"
@@ -1608,6 +1632,7 @@
         "gitea integration"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/gitprovider/**",
         "cmd/api/**",
         "apps/web/**",
@@ -1648,6 +1673,7 @@
         "git protection e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/gitprovider/**",
         "cmd/api/**",
         "apps/web/**",
@@ -1687,6 +1713,7 @@
         "git branch integration"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/gitprovider/**",
         "cmd/api/**",
         "apps/web/**",
@@ -1727,6 +1754,7 @@
         "git auth integration"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/gitprovider/**",
         "cmd/api/**",
         "apps/web/**",
@@ -1767,6 +1795,7 @@
         "git ingestion integration"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/gitprovider/**",
         "cmd/api/**",
         "apps/web/**",
@@ -1806,6 +1835,7 @@
         "unstructured negative"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/gitprovider/**",
         "cmd/api/**",
         "apps/web/**",
@@ -1847,6 +1877,7 @@
         "files api"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/gitprovider/**",
         "cmd/api/**",
         "apps/web/**",
@@ -1887,6 +1918,7 @@
         "files read-only e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/gitprovider/**",
         "cmd/api/**",
         "apps/web/**",
@@ -1927,6 +1959,7 @@
         "reconciliation integration"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/gitprovider/**",
         "cmd/api/**",
         "apps/web/**",
@@ -1966,6 +1999,7 @@
         "golden diff"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/rsg/**",
         "internal/application/**",
         "internal/domain/**",
@@ -2007,6 +2041,7 @@
         "pr integration"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/rsg/**",
         "internal/application/**",
         "internal/domain/**",
@@ -2046,6 +2081,7 @@
         "integrity tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/rsg/**",
         "internal/application/**",
         "internal/domain/**",
@@ -2087,6 +2123,7 @@
         "review tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/rsg/**",
         "internal/application/**",
         "internal/domain/**",
@@ -2126,6 +2163,7 @@
         "conflict unit"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/rsg/**",
         "internal/application/**",
         "internal/domain/**",
@@ -2167,6 +2205,7 @@
         "merge integration"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/rsg/**",
         "internal/application/**",
         "internal/domain/**",
@@ -2208,6 +2247,7 @@
         "conflict e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/rsg/**",
         "internal/application/**",
         "internal/domain/**",
@@ -2249,6 +2289,7 @@
         "pr ui e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/rsg/**",
         "internal/application/**",
         "internal/domain/**",
@@ -2290,6 +2331,7 @@
         "merge governance e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/rsg/**",
         "internal/application/**",
         "internal/domain/**",
@@ -2328,6 +2370,7 @@
         "playwright pr flows"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/rsg/**",
         "internal/application/**",
         "internal/domain/**",
@@ -2367,6 +2410,7 @@
         "knowledge relation tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/evidence/**",
         "internal/rsg/**",
         "internal/domain/**",
@@ -2409,6 +2453,7 @@
         "claim unit"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/evidence/**",
         "internal/rsg/**",
         "internal/domain/**",
@@ -2449,6 +2494,7 @@
         "finding tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/evidence/**",
         "internal/rsg/**",
         "internal/domain/**",
@@ -2491,6 +2537,7 @@
         "evidence tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/evidence/**",
         "internal/rsg/**",
         "internal/domain/**",
@@ -2532,6 +2579,7 @@
         "provenance integration"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/evidence/**",
         "internal/rsg/**",
         "internal/domain/**",
@@ -2573,6 +2621,7 @@
         "evidence graph integration"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/evidence/**",
         "internal/rsg/**",
         "internal/domain/**",
@@ -2616,6 +2665,7 @@
         "graph e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/evidence/**",
         "internal/rsg/**",
         "internal/domain/**",
@@ -2658,6 +2708,7 @@
         "external ref tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/evidence/**",
         "internal/rsg/**",
         "internal/domain/**",
@@ -2700,6 +2751,7 @@
         "literature evidence negative"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/evidence/**",
         "internal/rsg/**",
         "internal/domain/**",
@@ -2742,6 +2794,7 @@
         "knowledge e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/evidence/**",
         "internal/rsg/**",
         "internal/domain/**",
@@ -2785,6 +2838,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "cmd/api/**",
         "apps/web/**",
         "tests/**"
@@ -2826,6 +2880,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "cmd/api/**",
         "apps/web/**",
         "tests/**"
@@ -2866,6 +2921,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "cmd/api/**",
         "apps/web/**",
         "tests/**"
@@ -2906,6 +2962,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "cmd/api/**",
         "apps/web/**",
         "tests/**"
@@ -2946,6 +3003,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "cmd/api/**",
         "apps/web/**",
         "tests/**"
@@ -2987,6 +3045,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "cmd/api/**",
         "apps/web/**",
         "tests/**"
@@ -3028,6 +3087,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "cmd/api/**",
         "apps/web/**",
         "tests/**"
@@ -3066,6 +3126,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "cmd/api/**",
         "apps/web/**",
         "tests/**"
@@ -3106,6 +3167,7 @@
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
+        "infra/migrations/**",
         "cmd/api/**",
         "apps/web/**",
         "tests/**"
@@ -3143,6 +3205,7 @@
         "asset core"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/assets/**",
         "internal/rights/**",
         "cmd/api/**",
@@ -3182,6 +3245,7 @@
         "asset validators"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/assets/**",
         "internal/rights/**",
         "cmd/api/**",
@@ -3223,6 +3287,7 @@
         "rights tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/assets/**",
         "internal/rights/**",
         "cmd/api/**",
@@ -3262,6 +3327,7 @@
         "publish preview tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/assets/**",
         "internal/rights/**",
         "cmd/api/**",
@@ -3302,6 +3368,7 @@
         "publish security e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/assets/**",
         "internal/rights/**",
         "cmd/api/**",
@@ -3340,6 +3407,7 @@
         "asset metadata tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/assets/**",
         "internal/rights/**",
         "cmd/api/**",
@@ -3379,6 +3447,7 @@
         "asset dependency tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/assets/**",
         "internal/rights/**",
         "cmd/api/**",
@@ -3419,6 +3488,7 @@
         "asset lineage"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/assets/**",
         "internal/rights/**",
         "cmd/api/**",
@@ -3459,6 +3529,7 @@
         "asset ui e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/assets/**",
         "internal/rights/**",
         "cmd/api/**",
@@ -3497,6 +3568,7 @@
         "asset canonical e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/assets/**",
         "internal/rights/**",
         "cmd/api/**",
@@ -3537,6 +3609,7 @@
         "asset governance tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/assets/**",
         "internal/rights/**",
         "cmd/api/**",
@@ -3577,6 +3650,7 @@
         "anonymous e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/contribution/**",
         "internal/application/**",
         "cmd/api/**",
@@ -3615,6 +3689,7 @@
         "explore e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/contribution/**",
         "internal/application/**",
         "cmd/api/**",
@@ -3654,6 +3729,7 @@
         "contribution opportunity tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/contribution/**",
         "internal/application/**",
         "cmd/api/**",
@@ -3694,6 +3770,7 @@
         "external fork e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/contribution/**",
         "internal/application/**",
         "cmd/api/**",
@@ -3734,6 +3811,7 @@
         "knowledge publish tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/contribution/**",
         "internal/application/**",
         "cmd/api/**",
@@ -3774,6 +3852,7 @@
         "external evidence tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/contribution/**",
         "internal/application/**",
         "cmd/api/**",
@@ -3815,6 +3894,7 @@
         "contribution projection"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/contribution/**",
         "internal/application/**",
         "cmd/api/**",
@@ -3856,6 +3936,7 @@
         "profile e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/contribution/**",
         "internal/application/**",
         "cmd/api/**",
@@ -3894,6 +3975,7 @@
         "credit dispute"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/contribution/**",
         "internal/application/**",
         "cmd/api/**",
@@ -3933,6 +4015,7 @@
         "network e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/contribution/**",
         "internal/application/**",
         "cmd/api/**",
@@ -3973,6 +4056,7 @@
         "discussion promotion e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/contribution/**",
         "internal/application/**",
         "cmd/api/**",
@@ -4013,6 +4097,7 @@
         "attestation privacy e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/contribution/**",
         "internal/application/**",
         "cmd/api/**",
@@ -4053,6 +4138,7 @@
         "search projection"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/search/**",
         "cmd/api/**",
         "apps/web/**",
@@ -4092,6 +4178,7 @@
         "embedding tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/search/**",
         "cmd/api/**",
         "apps/web/**",
@@ -4130,6 +4217,7 @@
         "planner contract"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/search/**",
         "cmd/api/**",
         "apps/web/**",
@@ -4168,6 +4256,7 @@
         "retrieval integration"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/search/**",
         "cmd/api/**",
         "apps/web/**",
@@ -4205,6 +4294,7 @@
         "ranking golden"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/search/**",
         "cmd/api/**",
         "apps/web/**",
@@ -4243,6 +4333,7 @@
         "answer grounding tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/search/**",
         "cmd/api/**",
         "apps/web/**",
@@ -4280,6 +4371,7 @@
         "search ui e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/search/**",
         "cmd/api/**",
         "apps/web/**",
@@ -4319,6 +4411,7 @@
         "start project e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/search/**",
         "cmd/api/**",
         "apps/web/**",
@@ -4356,6 +4449,7 @@
         "outbox integration"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/events/**",
         "internal/application/**",
         "cmd/worker/**",
@@ -4396,6 +4490,7 @@
         "subscription tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/events/**",
         "internal/application/**",
         "cmd/worker/**",
@@ -4435,6 +4530,7 @@
         "inbox e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/events/**",
         "internal/application/**",
         "cmd/worker/**",
@@ -4474,6 +4570,7 @@
         "feed tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/events/**",
         "internal/application/**",
         "cmd/worker/**",
@@ -4513,6 +4610,7 @@
         "email tests"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/events/**",
         "internal/application/**",
         "cmd/worker/**",
@@ -4554,6 +4652,7 @@
         "webhook security"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/events/**",
         "internal/application/**",
         "cmd/worker/**",
@@ -4595,6 +4694,7 @@
         "impact golden/e2e"
       ],
       "allowed_scope": [
+        "infra/migrations/**",
         "internal/events/**",
         "internal/application/**",
         "cmd/worker/**",

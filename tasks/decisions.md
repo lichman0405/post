@@ -840,3 +840,63 @@ PR 流程保证。若 owner 升级 plan 或调整 visibility，应重新尝试�
 
 Supervisor 环境变量中存在 `GITHUB_PERSONAL_ACCESS_TOKEN`。Worker spawn 时已被显式剥离
 （见 L1-20260912-3）。任何绕过 `spawn.sh` 直接启动 Worker 的做法都会破坏这条隔离，禁止使用。
+
+## L1-20260912-33 — ★ DAG 缺陷：P1–P10 的 phase 默认 scope 全部漏掉 `infra/migrations/**`
+
+**发现方式**：T0101（用户认证与 session）的 Worker 在实现中途报告——email+password 登录需要
+`users.password_hash`，而 `users` 表在 `00002_identity.sql` 里没有这一列；新增列必须写
+`infra/migrations/**`，但该目录**不在它的 allowed_scope 里**。Worker 的处理是正确的：它没有越界写入，
+而是把迁移交给 Supervisor 作为 integration glue，并把这个发现写进 `notes_for_supervisor`。
+
+**这不是 T0101 一个任务的疏漏。** 逐 phase 核对后（`tasks/tasks.json`）：
+
+| phase | 任务数 | scope 形态 | 覆盖 migrations |
+|---|---|---|---|
+| P0 | 14 | 每个任务**各自定制** | 只有 T0005、T0013 有 |
+| P1–P10 | 100 | **每 phase 一条统一默认** | **0 个任务有** |
+| P11 | 10 | `infra/**` | 有 |
+| P12 | 8 | 验收类 | 不需要 |
+
+即：**除了 P0 是手工定制的，P1–P10 全部 100 个任务用的是同一条 phase 默认 scope，而这条默认里没有
+`infra/migrations/**`。** 后续每一个需要 schema 演进的任务（RSG 状态、关系、Evidence、Release、
+Rights、Contribution、Search projection、Events…）都会**以完全相同的方式卡住**。
+
+**判据不是我的猜测，是仓库自己的规程。** `infra/migrations/README.md` 的 "Adding a migration" 明确
+规定新增迁移要改 `infra/migrations/**`、必要时 `sqlc generate`、并更新
+`tests/integration/migration_test.go` 的 expected-catalog fixture。也就是说：**要给这个项目加一列，
+就必须写 `infra/migrations/`；而 DAG 没给任何一个 P1–P10 任务这个权限。** 这是一个自相矛盾的 DAG。
+
+**处置**：给 P1–P10 的 **100 个任务**统一补上 `infra/migrations/**`（插入在
+`internal/persistence/**` 之后，与数据层相邻）。`specs/SPEC_VERSION.json` 同步重算
+（`sha256:eaa4067e63134ee4`）。本地 `ci.sh spec` 与 `ci.sh task-state` 全绿。
+
+**这是"放宽"而不是"收窄"，需要说明理由。** `tasks.json` 的 `scope_note` 说 phase 列表是"上限"、
+Supervisor 应在 spawn 前**收窄**。这里反向操作，理由是：那条默认**不是上限，是错的**——它漏掉了一个
+该项目规程要求写入的目录。收窄的前提是上限本身正确；上限本身错误时，正确的动作是修上限，而不是让
+100 个任务各自撞一次墙再各自把 SQL 交回给我。**后者才是真正的失职**：它把"实现业务功能"从 Worker
+手里挪回 Supervisor 手里（每次迁移由我转抄），而 CLAUDE.md §1 明确禁止那样。
+
+**放宽没有削弱 Gate**：迁移是否与任务相关，仍在 G2 由我逐 diff 判定；`infra/migrations/**` 只是允许
+写入，不等于允许任意写入。
+
+**明确的边界——`specs/**` 仍然不给 Worker**：
+
+1. `specs/**` 是契约本身，应当只有单一写者（Supervisor）。10 个并行 Worker 同时改
+   `specs/database/postgres.sql` 必然冲突。
+2. 更硬的理由：`specs/**` 参与 `SPEC_VERSION` 摘要，而 `specs/SPEC_VERSION.json` **不在**
+   `specs/database/**` 这类子目录 glob 里。Worker 改了 spec 却无法重算 marker，结果就是 CI 的
+   spec-validation 必然红灯、merge 必然被自己的 Gate 挡住。这是一个陷阱，不能靠把 marker 也塞进
+   scope 来解决——那等于让被约束方自己签发一致性证明。
+3. 实践上也不需要：`infra/migrations/README.md` 把 `postgres.sql` 定义为 **seed**，迁移集才是活的
+   schema。自 `fecf24d`（初始规格提交）以来 `postgres.sql` 从未被修改过，T0013 的 append-only
+   触发器（00014/00015）也没有回写它——**既有惯例就是"迁移是活的，seed 冻结"**。本次沿用该惯例。
+
+**同时记录的运维规则（并行迁移编号）**：T0102、T0103 在 T0101 之后**可以并行**，两者都可能新增迁移。
+若都选 `00016`，合并时会产生**编号冲突**。规则：**编号冲突在 merge 时由 Supervisor 解决**——后合并
+的一支在合并前重编号。这是允许的，因为 "never edit an existing numbered file"（README）约束的是
+**已发布**的迁移，分支上的迁移在合并前尚未发布。
+
+**教训（对我自己）**：我 spawn T0101 时直接照抄了 phase 默认 scope，没有执行 `scope_note` 要求的
+"按具体 Task 再缩小/核对"这一步。**但即使我做了那一步，也只会照抄同一条错误的默认。** 真正的问题是
+我没有在 P1 开工前**核对默认 scope 是否覆盖任务规程要求的目录**。这条检查应作为 phase 开工前的
+固定动作，而不是等 Worker 撞墙后由 Worker 来告诉我。
