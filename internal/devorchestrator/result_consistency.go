@@ -189,6 +189,16 @@ func CheckResultConsistency(resultPath string, packageCriteria, requiredTests []
 // by an honest Worker; the caller still requires the matched entry to be
 // `passed`, so this loosens only the way a label is located, not what counts
 // as evidence.
+//
+// What this is NOT — stated plainly because a security review rightly asked: it
+// is a self-contradiction detector, not an anti-forgery control. A Worker that
+// invents an entry ("command": "true  # auth unit", "status": "passed") defeats
+// label matching exactly as easily as it defeats string equality; a Worker that
+// admits not_run is caught either way. Nothing in a RESULT.json is evidence —
+// it is a claim, and the subject writes it. The enforcement of "the required
+// tests were really run" is the Supervisor's independent G2 re-run of those
+// tests (CLAUDE.md §6), which is why an unsatisfiable check here was the worse
+// failure: it rejected every honest run while stopping no dishonest one.
 func commandNamesTest(command, label string) bool {
 	if label == "" {
 		return false
