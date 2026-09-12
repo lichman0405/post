@@ -1755,3 +1755,42 @@ if [ "$FG_RESUME_ID" != "$FG_SESSION_ID" ]; then echo "resume id != session id";
 **为什么仍然合并**：这不是被忽略的失败，而是一个**已被记录、已被加固、且现在受强制**的未解释项；
 留着 PR 挂着并不能推进定位，而合并后它每次都会跑。
 若再次出现，诊断输出会把原因直接印在日志里。
+
+## F-20260912-5 — 基线漂移不是一次性事故：它是**每次 main 移动 Gate 基础设施时**都会发生的事
+
+L1-20260912-47 我把"推进任务基线"当成一次性的应急处置。**不是。** T0102 与 T0103 的基线（`75f90de`）
+早于今天下午的 Gate 修复，于是它们的 G2 会：
+
+- 用**当前** `gates.json` 的步骤列表（含新的 `acceptance` job）；
+- 跑到**它们 worktree 里**的**旧** `tests/acceptance/*.sh` 上。
+
+而那个旧脚本**把 PR #52 修掉的 bug 写成了断言**（`resume id != session id`），
+配着已经修好的 rddev，必然 exit 9 → `acceptance` 红 → G2 红 → **无法 accept**。
+**两个任务都会因为它们自己的代码完全无关的原因被卡住。**
+
+**已核实**（不是推测）：
+```
+git -C .rddev/worktrees/T0103 show HEAD:tests/acceptance/rejection-retry-e2e.sh | grep -c 'resume id != session id'  -> 1
+```
+
+**处置**：把 L1-47 的手工序列固化成 `rebaseline.sh`（暂放在 Supervisor 的临时目录），对两个任务执行：
+
+1. `git add -A` + `git diff --cached` 导出**完整改动**（含新文件——`git diff` 不含 untracked，那是 L1-46 的教训）；
+2. 在**临时 worktree** 里 `apply --check` 先 dry-run（`git apply` 原子，失败即整体不落盘）；
+3. `reset --hard <main>` 同时移动**任务分支与 worktree**，`clean -fd`，再 `apply`；
+4. **逐个文件比对前后改动集合**：T0103 26 文件 / 20 路径、T0102 31 文件 / 23 路径，**两次都是 IDENTICAL**；
+5. `rework` 重新写入权威 gate-inputs（这是唯一被允许写那份记录的路径），
+   实测 `baseline_sha` 已变为 `7649c1e`。
+
+**rework 的理由文本明确写了"这不是缺陷"** —— 否则 Worker 会以为自己的实现被否定，
+去改本不该动的东西。**返工的理由必须与真实原因一致**，否则它就是一次误导。
+
+### 真正的结论：这需要一个命令，而且需要一条纪律
+
+- **命令**：`rddev worker rebaseline TASK` 应把这个序列变成一步可审计的操作（L1-47 已列为后续项，
+  本条把它从"最好有"升级为"反复需要"）。
+- **纪律**：Gate 基础设施的改动**会让所有在飞任务的基线漂移**。
+  因此这类改动应**成批**合并，而不是在任务运行期间零散地推——本次是因为我在一个任务跑的同时
+  连续修了 10 个 Gate 缺陷，才把这条代价付了两次。
+  代价本身可接受（工作没丢，已逐文件验证），但它**不该被忘记**：
+  **修工具的人和被工具约束的任务，共用同一条 main。**
