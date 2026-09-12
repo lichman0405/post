@@ -1,0 +1,201 @@
+{
+  "task_id": "T0002",
+  "status": "completed",
+  "summary": "Monorepo skeleton per docs/65 initialized and verified: Go 1.27 root module github.com/lichman0405/post with four building/running cmd/ binaries (api/worker/mcp-server/rddev) and 13 documented internal/ boundary packages; apps/web on Next.js 16.3.5 + React 19.3.0 + strict TS + Primer 38.39.0/Octicons 19.35.0 (builds, typechecks, lints, renders a dev-status page whose server side fetches the Go API over HTTP; zero route handlers/server actions); services/scientific-adapter on Python 3.12 + uv with uv.lock, runnable CLI and 3 passing pytest smokes; packages/{schemas,api-contracts,ui,domain-fixtures} with schemas synced from specs/schemas under a drift check; root Makefile with `make check` as the one-command Go/Web/Python basic check (exit 0). doctor.sh after: verdict ok, T-PNPM-PIN skipped -> passed, no required regression. 74 files created. One out-of-scope file (pnpm-workspace.yaml) required by pnpm 12.4.1 for the Supervisor-mandated workspace — flagged in risks/notes for confirmation.",
+  "files_changed": [
+    "Makefile",
+    "apps/web/.env.example",
+    "apps/web/.gitignore",
+    "apps/web/README.md",
+    "apps/web/app/globals.css",
+    "apps/web/app/layout.tsx",
+    "apps/web/app/page.tsx",
+    "apps/web/app/providers.tsx",
+    "apps/web/app/status-panel.tsx",
+    "apps/web/eslint.config.mjs",
+    "apps/web/next-env.d.ts",
+    "apps/web/next.config.ts",
+    "apps/web/package.json",
+    "apps/web/tsconfig.json",
+    "cmd/api/main.go",
+    "cmd/api/main_test.go",
+    "cmd/mcp-server/main.go",
+    "cmd/rddev/main.go",
+    "cmd/rddev/main_test.go",
+    "cmd/worker/main.go",
+    "go.mod",
+    "internal/application/doc.go",
+    "internal/assets/doc.go",
+    "internal/authz/doc.go",
+    "internal/contribution/doc.go",
+    "internal/domain/doc.go",
+    "internal/events/doc.go",
+    "internal/evidence/doc.go",
+    "internal/gitprovider/doc.go",
+    "internal/persistence/doc.go",
+    "internal/rights/doc.go",
+    "internal/rsg/doc.go",
+    "internal/search/doc.go",
+    "internal/storage/doc.go",
+    "internal/version/version.go",
+    "package.json",
+    "packages/api-contracts/README.md",
+    "packages/api-contracts/package.json",
+    "packages/domain-fixtures/README.md",
+    "packages/domain-fixtures/package.json",
+    "packages/schemas/README.md",
+    "packages/schemas/package.json",
+    "packages/schemas/schemas/calculation.schema.json",
+    "packages/schemas/schemas/claim.schema.json",
+    "packages/schemas/schemas/core-scientific-object.schema.json",
+    "packages/schemas/schemas/dataset.schema.json",
+    "packages/schemas/schemas/evidence-assertion.schema.json",
+    "packages/schemas/schemas/experiment.schema.json",
+    "packages/schemas/schemas/external_reference.schema.json",
+    "packages/schemas/schemas/finding.schema.json",
+    "packages/schemas/schemas/hypothesis.schema.json",
+    "packages/schemas/schemas/material.schema.json",
+    "packages/schemas/schemas/protocol.schema.json",
+    "packages/schemas/schemas/relation.schema.json",
+    "packages/schemas/schemas/research-asset-version.schema.json",
+    "packages/schemas/schemas/research_question.schema.json",
+    "packages/schemas/schemas/rsg-manifest.schema.json",
+    "packages/schemas/schemas/sample.schema.json",
+    "packages/schemas/scripts/check-schema-drift.sh",
+    "packages/schemas/scripts/sync-schemas.sh",
+    "packages/ui/package.json",
+    "packages/ui/src/DevStatus.tsx",
+    "packages/ui/src/index.ts",
+    "packages/ui/tsconfig.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "services/scientific-adapter/README.md",
+    "services/scientific-adapter/pyproject.toml",
+    "services/scientific-adapter/src/post_scientific_adapter/__init__.py",
+    "services/scientific-adapter/src/post_scientific_adapter/__main__.py",
+    "services/scientific-adapter/src/post_scientific_adapter/app.py",
+    "services/scientific-adapter/src/post_scientific_adapter/cli.py",
+    "services/scientific-adapter/tests/test_health.py",
+    "services/scientific-adapter/uv.lock"
+  ],
+  "tests": [
+    {
+      "command": "go build ./...",
+      "status": "passed",
+      "evidence": "exit 0; all four cmd binaries compile. Also GOMODCACHE=$(mktemp -d) go build ./cmd/... -> 'clean-cache build OK' (no external deps; resolves from clean module cache)"
+    },
+    {
+      "command": "go vet ./...",
+      "status": "passed",
+      "evidence": "exit 0, no findings"
+    },
+    {
+      "command": "go test ./...",
+      "status": "passed",
+      "evidence": "exit 0; real tests: ok github.com/lichman0405/post/cmd/api (TestHandleHealthz: 200, application/json, service=api/status=ok/version) and ok github.com/lichman0405/post/cmd/rddev (3 run() cases: version output, unknown subcommand exit 2, no-args usage); no t.Skip"
+    },
+    {
+      "command": "go run binaries smoke",
+      "status": "passed",
+      "evidence": "api -addr 127.0.0.1:18080 + GET /healthz -> 200 {\"service\":\"api\",\"status\":\"ok\",\"version\":\"0.1.0-dev\"}; worker -version / mcp-server -version / rddev version all print; worker SIGTERM -> 'shutting down' clean exit; mcp-server GET /mcp -> 501 honest stub"
+    },
+    {
+      "command": "pnpm --filter @post/ui typecheck",
+      "status": "passed",
+      "evidence": "tsc --noEmit exit 0 (strict)"
+    },
+    {
+      "command": "pnpm --filter @post/web typecheck",
+      "status": "passed",
+      "evidence": "tsc --noEmit exit 0 (strict: true)"
+    },
+    {
+      "command": "pnpm --filter @post/web lint",
+      "status": "passed",
+      "evidence": "eslint . (ESLint 9.39.5 + eslint-config-next 16.3.5 flat presets core-web-vitals+typescript) exit 0; no suppressions added"
+    },
+    {
+      "command": "pnpm --filter @post/web build",
+      "status": "passed",
+      "evidence": "next build 16.3.5: Compiled successfully, TypeScript ok, route / dynamic (no-store fetch), 3/3 static pages generated"
+    },
+    {
+      "command": "cd services/scientific-adapter && uv run pytest -q",
+      "status": "passed",
+      "evidence": "3 passed in 1.03s (health payload stable; /healthz 200 JSON over HTTP on ephemeral port; unknown path 404)"
+    },
+    {
+      "command": "full-stack render smoke",
+      "status": "passed",
+      "evidence": "next start -p 13000 with API_BASE_URL=http://127.0.0.1:18080, SCIENTIFIC_ADAPTER_URL=http://127.0.0.1:19000 and both services up: page contains 'Development status', 'service=api version=0.1.0-dev', 'service=scientific-adapter version=0.1.0', 'web 0.1.0'"
+    },
+    {
+      "command": "make check",
+      "status": "passed",
+      "evidence": "exit 0 on final tree: schema drift in sync -> go vet/build/test ok -> @post/ui+@post/web typecheck ok -> web lint ok -> pytest 3 passed (the one-command acceptance check)"
+    },
+    {
+      "command": "make build",
+      "status": "passed",
+      "evidence": "exit 0: go build ./cmd/..., next production build, python import smoke 'scientific-adapter 0.1.0'"
+    },
+    {
+      "command": "make bootstrap",
+      "status": "passed",
+      "evidence": "exit 0: pnpm install --frozen-lockfile, go mod download, uv sync --frozen, schema sync (16 schemas)"
+    },
+    {
+      "command": "./ops/doctor.sh (before)",
+      "status": "passed",
+      "evidence": "verdict ok exit 0; required 24 passed/0 failed/3 skipped (T-PNPM-PIN skipped: package.json absent)"
+    },
+    {
+      "command": "./ops/doctor.sh (after)",
+      "status": "passed",
+      "evidence": "verdict ok exit 0; required 25 passed/0 failed/2 skipped; T-PNPM-PIN PASS 'pnpm 12.4.1 == pin 12.4.1' — moved skipped->passed, no required check regressed"
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "根目录一条命令完成 Go/Web/Python 基础检查",
+      "status": "passed",
+      "evidence": "`make check` from repo root, exit 0: schema drift check -> go vet -> go build -> go test (2 real test packages) -> ui typecheck -> web typecheck -> web lint -> uv pytest (3 passed). Documented as the T0002 acceptance command in the Makefile header + `make help`."
+    },
+    {
+      "criterion": "Go API/Web/Python adapter 均有最小 build/smoke",
+      "status": "passed",
+      "evidence": "Go: 4 binaries build from clean GOMODCACHE and run (api /healthz 200 JSON; worker/mcp/rddev version flags; worker/mcp graceful shutdown; mcp 501 honest stub). Web: next build success + production server renders status page. Python: uv sync --frozen, uv run scientific-adapter --port 19000 serves /healthz 200, pytest 3 passed."
+    },
+    {
+      "criterion": "不存在 TypeScript API backend placeholder",
+      "status": "passed",
+      "evidence": "find apps/web -name 'route.ts|route.tsx' = 0; grep 'use server' = 0; no app/api/ directories. apps/web/app contains only layout.tsx/page.tsx/providers.tsx/status-panel.tsx/globals.css. page.tsx (server component) only fetches the Go API + adapter /healthz over HTTP and passes serializable props to a client panel; README documents the no-backend rule."
+    },
+    {
+      "criterion": "workspace/跨语言契约边界与 docs/65 一致",
+      "status": "passed",
+      "evidence": "pnpm workspace = apps/* + packages/* only (Go module and uv adapter outside it, stated in pnpm-workspace.yaml header); no Turborepo — root Makefile is the single entry; packages/schemas synced from specs/schemas (16 files) with check-schema-drift.sh failing on divergence, wired into make check; packages/api-contracts README pins canonical OpenAPI to specs/api/openapi.yaml with no hand-forked client."
+    }
+  ],
+  "risks": [
+    "JUDGEMENT CALL for Supervisor confirmation: created pnpm-workspace.yaml although it is NOT in allowed_scope. pnpm 12.4.1 ignores package.json 'workspaces' ('The \"workspaces\" field in package.json is not supported by pnpm') and requires pnpm-workspace.yaml; the Supervisor decision mandates pnpm workspaces and allowed_scope includes pnpm-lock.yaml (the workspace's own artefact), so the omission reads as an oversight. File is 6 lines, reversible, no product semantics. Reject it and I'll rework if not accepted.",
+    "pnpm 12 auto-appended minimumReleaseAgeExclude entries to pnpm-workspace.yaml and required allowBuilds approval for unrs-resolver@1.12.2 (native build needed by the ESLint import plugin); approved with allowBuilds: unrs-resolver: true.",
+    "Primer v38 removed the Box component and the sx prop; scaffold styles use Primer design tokens in CSS classes (globals.css) plus Primer Heading/Text/Label components — still the mandated Primer/Octicons system, no substitute library.",
+    "Next.js pinned to 16.3.5 (latest patch of the Active LTS 16.3.x line; docs/64 wrote 16.3.3 as 'spec-safe at spec time'). Exact pins throughout, no floats.",
+    "next build auto-modified apps/web/tsconfig.json (jsx react-jsx mandatory, incremental: true, added .next/dev/types/**/*.ts); strict remains true. tsconfig.tsbuildinfo ignored via apps/web/.gitignore (root .gitignore was out of allowed_scope).",
+    "Go module currently has zero external dependencies (go.sum absent); cmd/api uses stdlib ServeMux method patterns (chi-style per docs/68). The chi dependency and OpenAPI-first endpoints arrive with the API tasks — flagged so the Supervisor knows this is deliberate.",
+    "internal/ packages are compiling boundary packages containing only doc.go with governing-spec references (allowed by the task: 'a doc comment plus a compiling package'); no product types invented. tasks.json mentioned ports/adapters but the Task Package target layout and docs/65 tree do not include them — followed docs/65; ports/adapters will be introduced with the API/application tasks.",
+    "packages/api-contracts and packages/domain-fixtures are scaffold-only (package.json + README contracts); the generated TS client and the fixture corpus arrive with later tasks. specs/api/openapi.yaml is still a 1.0.0-draft seed.",
+    "page.tsx fetches http://127.0.0.1:8080 and :9000 by default (API_BASE_URL / SCIENTIFIC_ADAPTER_URL server env vars; .env.example provided). At build time these fetch failures degrade to a 'down' status row, never a build failure."
+  ],
+  "follow_up_issues": [
+    "Wire chi routing + OpenAPI-first endpoints into cmd/api (implement specs/api/openapi.yaml contract).",
+    "Add the OpenAPI -> TypeScript client generation step into packages/api-contracts (no hand-forked DTOs).",
+    "Populate packages/domain-fixtures with schema-validated fixtures derived from examples/.",
+    "Implement rddev doctor (ops/doctor-checks.md) and rddev env up/reset in Go (T0009 area).",
+    "Implement the MCP protocol wiring in cmd/mcp-server (specs/mcp, docs/47).",
+    "Wire the worker outbox consumer (ADR-013) with idempotency/retry/dead-letter.",
+    "Add scientific payload endpoints (pymatgen/ASE) behind the adapter's stable API boundary."
+  ],
+  "notes_for_supervisor": "1) pnpm-workspace.yaml is the single out-of-scope file — required by pnpm 12.4.1 for the workspace you mandated; please confirm or amend allowed_scope (details in risks[0]). 2) T-PNPM-PIN moved skipped->passed as required; doctor.sh before/after verdicts both ok with no required regression. 3) All version pins are exact: next 16.3.5, react/react-dom 19.3.0, @primer/react 38.39.0, @primer/octicons-react 19.35.0, typescript 5.9.3, eslint 9.39.5, eslint-config-next 16.3.5, @types/node 24.13.4, pnpm@12.4.1; uv.lock and pnpm-lock.yaml committed. 4) The page is intentionally a server-component fetcher (no-store) of Go API /healthz — no route handlers, no server actions, no app/api/. 5) packages/schemas/schemas/*.json are machine-synced copies; 'make check-schema-drift' fails on divergence (verified failing mode? no — verified passing mode after sync; the diff logic is diff -r, standard). 6) tsconfig.json carries Next's mandatory jsx change; everything else strict-mode clean."
+}

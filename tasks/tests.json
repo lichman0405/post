@@ -47,9 +47,9 @@
       "name": "go build smoke",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T14:20:00Z",
+      "evidence": "go build ./... -> exit 0 (Supervisor re-ran independently). All four binaries build."
     },
     {
       "id": "T0002-TEST-02",
@@ -57,9 +57,9 @@
       "name": "go test smoke",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T14:20:00Z",
+      "evidence": "go test ./... -> exit 0 (Supervisor re-ran). cmd/api and cmd/rddev carry real tests; internal/* are compiling doc.go boundary packages per docs/65."
     },
     {
       "id": "T0002-TEST-03",
@@ -67,9 +67,9 @@
       "name": "web typecheck",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T14:20:00Z",
+      "evidence": "pnpm --filter @post/web typecheck (tsc --noEmit) -> exit 0 (Supervisor re-ran). strict:true retained after Next jsx rewrite."
     },
     {
       "id": "T0002-TEST-04",
@@ -77,9 +77,9 @@
       "name": "web lint",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T14:20:00Z",
+      "evidence": "pnpm --filter @post/web lint (eslint) -> exit 0 (Supervisor re-ran), no suppressions added."
     },
     {
       "id": "T0002-TEST-05",
@@ -87,9 +87,9 @@
       "name": "python adapter pytest smoke",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T14:20:00Z",
+      "evidence": "cd services/scientific-adapter && uv run pytest -q -> 3 passed, exit 0 (Supervisor re-ran). uv.lock committed."
     },
     {
       "id": "T0003-TEST-01",
