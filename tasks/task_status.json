@@ -102,20 +102,20 @@
       "merged_at": "2026-09-12T18:05:00Z"
     },
     "T0011": {
-      "status": "rejected",
+      "status": "merged",
       "started_at": null,
-      "completed_at": null,
-      "notes": "REJECTED after the Supervisor ran the live e2e the Worker left unrun: PASS=19 FAIL=3, and two failures are real. (1) CREDENTIAL LEAK: a real Worker's own Bash reported PRESENT: GITHUB_PERSONAL_ACCESS_TOKEN while every other stripped variable was absent. Root cause: rddev's spawn omits --setting-sources project, so the worker's Claude Code loads ~/.claude/settings.json, whose env block re-injects the token AFTER spawn-time env stripping. The hand-rolled harness passed that flag, which is why it never leaked - the port dropped it. (2) Residue detection returned collect exit 0 where its own scenario expects a rejection. (3) The RESULT claimed status=completed while self-describing as an INTERIM SNAPSHOT with 2 required tests not_run. Deliverable is largely there (builds, unit tests pass, 6-scenario e2e harness written); re-dispatched in the same worktree for these three defects.",
+      "completed_at": "2026-09-12T20:20:00Z",
+      "notes": "ATTEMPT 3 accepted; merged as PR #41 (fd1195b) with all six CI jobs green. Supervisor ran the live e2e itself: PASS=28 FAIL=0, and confirmed in its own run that ALL SEVEN credential variables (including the leaking GITHUB_PERSONAL_ACCESS_TOKEN) report absent in a real Worker. Defect 1 fixed with both a flag (--setting-sources project) and a post-spawn /proc/<pid>/environ assertion; Defect 2 fixed by switching residue attribution to a POST_WORKER_RUN_ID env marker (the session scan missed a nohup survivor because claude runs each Bash command in its own session); Defect 3 honoured (interim writes used blocked, never completed). Supervisor-side: background Bash refused by the guard, JSON boolean check replaced with a real parse that fails closed, 154-case regression, example guard re-synced (my out-of-scope edit was the last red), and two staticcheck findings cleared.",
       "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "accepted_by_supervisor_at": "2026-09-12T20:20:00Z",
+      "merged_at": "2026-09-12T20:20:00Z"
     },
     "T0012": {
-      "status": "todo",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-09-12T20:25:00Z",
       "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
+      "notes": "Dispatched: the final P0 task. Carries the session's accumulated gate lessons as required items: detect a RESULT that claims completed while required tests are not_run or the summary says INTERIM; run CI's EXACT steps in G2 (a similar-looking gate is not the gate); validate allowed_scope globs against the real tree and include derived artifacts (spec marker) they necessarily touch; use the host-residue check from T0011.",
+      "worker_run_id": "worker-T0012-fd1195b",
       "accepted_by_supervisor_at": null,
       "merged_at": null
     },

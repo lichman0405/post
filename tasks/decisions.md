@@ -714,6 +714,34 @@ Claude Code 会加载 **用户级** `~/.claude/settings.json`，而该文件的 
 带证据的必需项交给新 Worker。这是本会话第一次真正的 `rejected`（此前的失败都是 `worker_failed` 或
 我自己的门禁缺陷）。
 
+## L1-20260912-29 — T0011 第三次尝试通过：凭据泄漏已修复并有独立证据
+
+**结果**：T0011 在第三次尝试被接受并合并（PR #41，`fd1195b`），六项 CI 全绿。Supervisor **亲自运行**
+live e2e：**PASS=28 FAIL=0**；并在自己的运行中确认**全部七个凭据变量**——包括此前泄漏的
+`GITHUB_PERSONAL_ACCESS_TOKEN`——在真实 Worker 环境中均为 `absent`。
+
+**三处缺陷的修复方式**：
+1. **凭据泄漏**：既传 `--setting-sources project`，**又**增加了 spawn 后读取 `/proc/<pid>/environ`
+   的断言，发现任何被剥离变量即让 spawn 大声失败。**只加 flag 不够**——这正是本会话反复出现的
+   "请求不等于强制"的教训。
+2. **residue 检测**：Worker 诊断出根因——**真实 claude 的 Bash 工具让每条命令跑在自己的 session 里**，
+   于是 `nohup` 的残留进程逃出了 reaper 的 session 扫描。改为在环境中植入 `POST_WORKER_RUN_ID`
+   标记，从 `/proc/<pid>/environ` 读回做归属判定：可归属的残留 → 硬拒绝；无法归属的监听端口 → 仅告警。
+3. **虚假完成**：中间态一律写 `blocked`，绝不写 `completed`；collect 侧机械检测（见 T0012 必需项 1）。
+
+**★ 第三条"子集门禁"教训（本会话第三次）**：我在本地跑 `make check` 得到绿灯就据此认为 go 阶段没问题，
+但 **`make check` 不包含 staticcheck**——CI 的 go job 额外跑 `make fmt-check` 与 `make staticcheck`，
+它们发现了 2 处新代码问题（ST1005 大写错误串、U1000 死代码 `procSession`）。这与
+`L1-20260912-18`（带着红灯合并）和"近似 ruff 命令"同源：**永远跑真实门禁，且要跑全**。
+
+**我的第四次越界影响**：我在 worktree 里改了 embedded guard，导致
+`TestGuardScriptEmbeddedMatchesExample` 因 `.rddev.example/guard/worker-guard.sh` 未同步而失败——
+而该文件**不在 T0011 的 allowed_scope 内**。Worker **正确地拒绝去改它**（改了就会违反本任务正在强制的
+隔离规则），并如实报告 `blocked` 与原因。由 Supervisor 同步该文件后 `go test`/`make check` 转绿。
+
+**统计**：本会话我（Supervisor）的失误已累计到四类：scope 过窄（3 次）、子集门禁（3 次）、
+带着红灯合并（1 次）、虚假并发验证（1 次）。**全部已成为 T0012 的机械检查项**，而不是停留在文档里。
+
 ---
 
 ## 环境发现（非决策，必须显式记录）
