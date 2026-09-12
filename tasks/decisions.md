@@ -1794,3 +1794,35 @@ git -C .rddev/worktrees/T0103 show HEAD:tests/acceptance/rejection-retry-e2e.sh 
   连续修了 10 个 Gate 缺陷，才把这条代价付了两次。
   代价本身可接受（工作没丢，已逐文件验证），但它**不该被忘记**：
   **修工具的人和被工具约束的任务，共用同一条 main。**
+
+## L1-20260912-51 — Review verdict 只写在一半的契约里：从 session log 机械恢复
+
+T0102 的 Review Worker 判定 **approve**（0 blocking、0 major），
+`review collect` 却报：
+
+```
+review-verdict-schema  failed  reading RESULT.json: no such file or directory
+```
+
+**那个 verdict 是真的、schema 是合法的、harness 已经在 session 结束时校验过它**——
+它只是进了 `StructuredOutput` 工具，而**没有落到 `RESULT.json`**。
+
+**契约本来就要求两份都写**（`renderReviewPrompt`："the file you write to RESULT.json is
+re-validated at collection — **write the same document to both**"）。
+T0103 的 reviewer 两份都写了 ✓，T0102 的只写了一份。
+
+> **这又是"散文不是强制"**——而且我上一次已经为一模一样的问题写过结论（L1-20260912-31：
+> "让合约的默认状态是存在，而不是缺失"）。**这次不再加一句提示，而是把它机械化。**
+
+**处置**：`CollectReview` 在 `RESULT.json` 缺失时，**从 Reviewer 的 stream log 里恢复 verdict**——
+`--output-format stream-json` 的最后一个 `result` 事件带 `result` 字段，
+即 harness 自己序列化的最终结构化输出，**是同一份文档、由 harness 捕获而非手写**，
+因此它不是"坏文件的兜底"，而是两份副本里**更可靠的那一份**。
+
+- 恢复出的文档**仍然过 `review-verdict.schema.json`**（走原有校验路径），再回写 `RESULT.json` 留痕；
+- **两侧都测**：真正的日志必须恢复出 approve；**没有 `verdict` 字段的日志必须拒绝**（否则一次无关的运行会被当成证据）；日志不存在不是错误，只是恢复不到东西。
+- 实测：T0102 的 verdict 被恢复为 **approve**，**一个合法且真实的批准没有被丢掉、也没有被迫重跑一轮评审**。
+
+**边界（诚实说明）**：这解决的是"**验证者做了工作但没落到文件**"，
+**不**解决"验证者根本没做工作"——那种情况下日志里没有 `result` 事件，
+恢复不到东西，`review-verdict-schema` 仍然失败 ✓（fail-closed 保持不变）。
