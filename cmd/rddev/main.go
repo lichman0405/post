@@ -52,6 +52,7 @@ Usage:
   rddev gate list|run|status|records ...
   rddev git commit|push TASK
   rddev pr open|merge|status TASK
+  rddev db migrate [--url URL]
   rddev workflow TASK
   rddev version
   rddev help
@@ -117,6 +118,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runGit(cmdArgs, stdout, stderr, jsonOut)
 	case "pr":
 		return runPR(cmdArgs, stdout, stderr, jsonOut)
+	case "db":
+		return runDB(cmdArgs, stdout, stderr, jsonOut)
 	case "workflow":
 		return runWorkflow(cmdArgs, stdout, stderr, jsonOut)
 	default:

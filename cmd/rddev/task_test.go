@@ -495,7 +495,7 @@ func TestSubprocessJSONShape(t *testing.T) {
 	writeJSONFile(t, filepath.Join(dir, "tasks", "tasks.json"), dag)
 	writeJSONFile(t, filepath.Join(dir, "tasks", "task_status.json"), map[string]any{
 		"version": 2,
-		"tasks": map[string]any{"T1000": map[string]any{"status": "todo"}},
+		"tasks":   map[string]any{"T1000": map[string]any{"status": "todo"}},
 	})
 
 	cmd := exec.Command(bin, "task", "ready", "T1000", "--json", "--run-id", "run-sub")

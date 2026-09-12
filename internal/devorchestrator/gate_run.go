@@ -137,7 +137,20 @@ func runGateStep(repoRoot, taskID, runID, jobName string, index int, step GateSt
 	}
 	fmt.Fprintf(logf, "$ %s\n", step.Run)
 	cmd := exec.Command("bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step.Run)
-	cmd.Dir = repoRoot
+	// The steps must run against the code the gate is making a claim about.
+	//
+	// For a task with a Worker, that code lives in the task's worktree and
+	// nowhere else until `rddev pr open` commits it — so running in the repo
+	// root judged `main` instead. Nothing failed loudly, because `main` is
+	// green: T0101's G2 record shows a `go test` that compiled cmd/api and
+	// internal/authz and never once mentioned cmd/api/authhttp or
+	// internal/application/authn, the two packages the task exists to add.
+	// The gate certified a tree nobody was working on.
+	//
+	// Falls back to the repo root when there is no worktree (a task that was
+	// never spawned, or a fixture), so this is a correction and not a new
+	// precondition.
+	cmd.Dir = gateWorkingDir(repoRoot, taskID)
 	cmd.Env = os.Environ()
 	for k, v := range jobEnv {
 		cmd.Env = append(cmd.Env, k+"="+v)
@@ -429,4 +442,26 @@ func EnsureG2Green(opts *GateRunOpts) (*GateRunResult, error) {
 	}
 	opts.Gate = "G2"
 	return RunGate(opts)
+}
+
+// gateWorkingDir returns the tree a gate's steps must run in: the task's
+// Worker worktree when one exists, otherwise the repo root.
+//
+// Gate steps are CI's commands, and CI runs them against the code under
+// review. Before a commit that code exists only in the worktree, so running
+// in the repo root measured `main` — a tree that is green by construction and
+// contains none of the task's changes. The failure is silent and total: every
+// task's G2 passes regardless of what the task actually did.
+func gateWorkingDir(repoRoot, taskID string) string {
+	if taskID == "" {
+		return repoRoot
+	}
+	rec, err := LoadRegistry(repoRoot, taskID)
+	if err != nil || rec == nil || rec.Worktree == "" {
+		return repoRoot
+	}
+	if st, err := os.Stat(rec.Worktree); err == nil && st.IsDir() {
+		return rec.Worktree
+	}
+	return repoRoot
 }

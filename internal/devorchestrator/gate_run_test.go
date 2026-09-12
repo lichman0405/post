@@ -438,3 +438,70 @@ func TestCheckMergeGateReviewVerdictMustBeFresh(t *testing.T) {
 		t.Fatalf("merge gate = %s on a fresh approving verdict, reasons %v", res.Status, res.Reasons)
 	}
 }
+
+// A gate must run its steps against the code it is making a claim about.
+//
+// For a task with a Worker that code lives in the task's worktree and nowhere
+// else until `rddev pr open` commits it. Running in the repo root judged
+// `main` instead, and nothing failed loudly because main is green: T0101's G2
+// record contains a `go test` that compiled cmd/api and internal/authz and
+// never mentioned cmd/api/authhttp or internal/application/authn — the two
+// packages the task existed to add. Every task's G2 passed regardless of what
+// the task did.
+func TestGateStepsRunInTheTaskWorktree(t *testing.T) {
+	repoRoot, specPath := writeGateSpec(t, `{
+  "version": 1,
+  "required_jobs": ["where"],
+  "gates": {
+    "G1": {"name": "", "description": "", "runs_jobs": []},
+    "G2": {"name": "", "description": "", "runs_jobs": ["where"]},
+    "G3": {"name": "", "description": "", "runs_jobs": []},
+    "G4": {"name": "", "description": "", "asserts_jobs": ["where"]}
+  },
+  "jobs": {"where": {"steps": [{"run": "pwd"}]}},
+  "review": {"required_for_merge": false},
+  "task_overrides": {}
+}`)
+
+	worktree := filepath.Join(t.TempDir(), "T0001")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveRegistry(repoRoot, &WorkerRecord{
+		TaskID: "T0001", RunID: "run-1", SessionID: "s", ClaudeVersion: "v",
+		PID: 1, StartTime: 1, Worktree: worktree, Branch: "task/T0001-x",
+		BaselineSHA: "0123456789abcdef", RefsBefore: []string{},
+		LogPath: filepath.Join(worktree, "worker.log"), ResultDir: worktree,
+		StartedAt: "t",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := RunGate(&GateRunOpts{RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001", Gate: "G2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "passed" {
+		t.Fatalf("gate status = %s, reasons %+v", res.Status, res.Jobs)
+	}
+	got, err := os.ReadFile(res.Jobs[0].Steps[0].OutputFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The log's first line is "$ pwd"; the step's own output follows.
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	ran := lines[len(lines)-1]
+	// t.TempDir() may be a symlinked path (/tmp -> /private/tmp); compare the
+	// resolved directories rather than the spellings.
+	wantResolved, err := filepath.EvalSymlinks(worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotResolved, err := filepath.EvalSymlinks(ran)
+	if err != nil {
+		t.Fatalf("the step's cwd %q does not exist: %v", ran, err)
+	}
+	if gotResolved != wantResolved {
+		t.Errorf("the gate step ran in %q, want the task worktree %q — a gate that runs in the repo root certifies main, not the task", gotResolved, wantResolved)
+	}
+}

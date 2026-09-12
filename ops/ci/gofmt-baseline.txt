@@ -5,7 +5,6 @@
 # everything not listed here must be gofmt-clean.
 cmd/rddev/main_test.go
 cmd/rddev/task.go
-cmd/rddev/task_test.go
 internal/config/config_test.go
 internal/devorchestrator/dag.go
 internal/devorchestrator/doctor/catalog.go
