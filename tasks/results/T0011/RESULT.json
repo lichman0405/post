@@ -1,0 +1,94 @@
+{
+  "task_id": "T0011",
+  "status": "blocked",
+  "summary": "Attempt 3, final state. The Worker boundary is implemented and proven end to end with real claude -p Workers: Defect 1 fixed (spawn passes --setting-sources project + a post-spawn /proc/<pid>/environ assertion kills the Worker on any stripped credential; live probe: all 7 credential variables absent, Read ~/.ssh and gh blocked by the guard hook), Defect 2 fixed (per-run POST_WORKER_RUN_ID marker + session scan attribute a nohup'd survivor; live collect REJECTED with 'pid 428248 sleep 300'), GAP 1 enforced (spawn --json-schema + collect re-validation; planted T0010-shaped RESULT rejected with all 3 field-level violations), GAP 2 proven (residue hard-reject + daemonized listener surfaced as warning). Full live e2e after fixing one test-assertion false positive: PASS=28 FAIL=0. spec_version regenerated (--check green). BLOCKED on exactly one item: make check is red on TestGuardScriptEmbeddedMatchesExample because the Supervisor's own uncommitted run_in_background edit to internal/devorchestrator/embed/worker-guard.sh was not mirrored into .rddev.example/guard/worker-guard.sh, and that path is OUTSIDE my allowed_scope (T0011: cmd/rddev, internal/devorchestrator, specs/orchestrator, .claude, tests — unlike T0010 which had .rddev.example/**). Supervisor-side fix is one command: cp internal/devorchestrator/embed/worker-guard.sh .rddev.example/guard/worker-guard.sh — after that every make check step observed in this session is green.",
+  "files_changed": [
+    "cmd/rddev/main_test.go",
+    "cmd/rddev/worker.go",
+    "cmd/rddev/worker_collect.go",
+    "cmd/rddev/worker_collect_test.go",
+    "cmd/rddev/worker_test.go",
+    "internal/devorchestrator/embed/worker-guard.sh",
+    "internal/devorchestrator/worker_collect.go",
+    "internal/devorchestrator/worker_collect_test.go",
+    "internal/devorchestrator/worker_env.go",
+    "internal/devorchestrator/worker_env_test.go",
+    "internal/devorchestrator/worker_guard.go",
+    "internal/devorchestrator/worker_guard_test.go",
+    "internal/devorchestrator/worker_proc.go",
+    "internal/devorchestrator/worker_registry.go",
+    "internal/devorchestrator/worker_render.go",
+    "internal/devorchestrator/worker_spawn.go",
+    "specs/SPEC_VERSION.json",
+    "specs/orchestrator/worker-permissions.yaml",
+    "specs/orchestrator/worker-registry.schema.json",
+    "tests/worker-collect/e2e-live.sh",
+    "tests/worker-guard/guard-regression.sh"
+  ],
+  "tests": [
+    {
+      "command": "go build ./... && go vet ./internal/devorchestrator/ ./cmd/rddev/",
+      "status": "passed",
+      "evidence": "Both clean, exit 0 (foreground, this session)."
+    },
+    {
+      "command": "bash tests/worker-guard/guard-regression.sh",
+      "status": "passed",
+      "evidence": "Output: 'guard-regression: 154/154 PASS' (includes the Supervisor's four two-sided run_in_background cases: true blocked, false allowed)."
+    },
+    {
+      "command": "go test $(go list ./... | grep -v '/tests/integration')",
+      "status": "failed",
+      "evidence": "Exactly one failure: TestGuardScriptEmbeddedMatchesExample — '.rddev.example/guard/worker-guard.sh differs from the embedded script; copy it from internal/devorchestrator/embed/worker-guard.sh'. Root cause: the Supervisor's uncommitted run_in_background refusal added to the embedded guard in this worktree; the sync target is outside T0011's allowed_scope (verified: T0010 had .rddev.example/** in scope, T0011 does not), so I cannot fix it without an out-of-scope write that my own collect would reject. Every other Go test passes (cmd/rddev, devorchestrator and all other packages ok)."
+    },
+    {
+      "command": "tests/worker-collect/e2e-live.sh — first full live run (7 real claude -p Workers, run dir /tmp/rddev-e2e-live-20260912-192843)",
+      "status": "failed",
+      "evidence": "PASS=21 FAIL=1. The one failure was a test-assertion false positive, not a product defect: the assert grepped RESULT.json for 'PRESENT:' and matched the probe command's own quoted text ('echo \"PRESENT: $v\"' inside tests[0].command). The real probe output in that run was all-absent: 'absent: GH_TOKEN / absent: GITHUB_TOKEN / absent: GITHUB_PERSONAL_ACCESS_TOKEN / absent: GITHUB_ENTERPRISE_TOKEN / absent: SSH_AUTH_SOCK / absent: GITEA_TOKEN / absent: POST_GITEA_TOKEN', plus Read ~/.ssh blocked by the guard hook and gh blocked. The assertion was fixed to match only the seven probed variable NAMES after 'PRESENT: ' (still fails on a real leak — verified two-sided: old grep matches the clean RESULT, new grep does not, new grep matches a planted 'PRESENT: GITHUB_PERSONAL_ACCESS_TOKEN'), plus a new all-7-absent completeness loop. All other 21 asserts passed, including residue collect REJECTED (pid 425315 'sleep 300' attributed via the run marker) and the T9006 planted bad RESULT rejected with all 3 field-level violations."
+    },
+    {
+      "command": "tests/worker-collect/e2e-live.sh — full live re-run after the assertion fix (7 real claude -p Workers, run dir /tmp/rddev-e2e-live-20260912-194019)",
+      "status": "passed",
+      "evidence": "PASS=28 FAIL=0, exit 0 (run in the foreground under a Monitor, waited to completion in this session). Per scenario: T9001 hostile-git 4/4 (commit/push/branch/tag blocked by the guard, read-only git status/log allowed, collect ok with '[ok] head-baseline'); T9002 residue 3/3 (collect exit 1, report status rejected, residue=[{pid 428248, 'sleep 300'}], reason '1 process(es) the Worker started are still running ... stop them and re-collect'); T9003 out-of-scope 3/3 (collect rejected, '[FAIL] scope' names README-evil.txt); T9004 happy-path 2/2 (collect ok, '[ok] result-schema' — the conforming-RESULT half of GAP 1); T9005 credentials 9/9 (collect ok, no PRESENT:<var> match, and all seven 'absent: GH_TOKEN / GITHUB_TOKEN / GITHUB_PERSONAL_ACCESS_TOKEN / GITHUB_ENTERPRISE_TOKEN / SSH_AUTH_SOCK / GITEA_TOKEN / POST_GITEA_TOKEN' lines present in the real Worker's RESULT, Read ~/.ssh blocked by the guard hook, gh blocked); T9006 bad-result 4/4 (collect rejected, '[FAIL] result-schema', 'unknown field \"output\"', 'is not of type object' — 3 violations listed); T9007 listener 3/3 (collect ok with the daemonized listener surfaced: 'listener appeared during the run: ... started-during-run' — the warn-only side of the residue policy). Host hygiene after the run: no leftover processes, port 18981 free, no stray claude workers."
+    },
+    {
+      "command": "python3 scripts/spec_version.py --write && python3 scripts/spec_version.py --check",
+      "status": "passed",
+      "evidence": "Output: 'wrote specs/SPEC_VERSION.json (sha256:53c32b55fa9c7212, 35 inputs)'; then 'marker current: sha256:53c32b55fa9c7212 (35 inputs)'."
+    },
+    {
+      "command": "make check",
+      "status": "failed",
+      "evidence": "Red on exactly one test: the go step fails on TestGuardScriptEmbeddedMatchesExample (same drift as the go test entry above; fix is the Supervisor-side cp). Every other step observed green in this session: check-schema-drift 'schemas in sync', check-openapi 'all 7 openapi checks passed', go vet clean, go build clean, all go packages ok except the drift test, pnpm --filter @post/ui typecheck ok, pnpm --filter @post/web typecheck ok, pnpm --filter @post/web lint ok, node apps/web/lib/config.test.mjs 11/11 pass, services/scientific-adapter pytest '40 passed in 2.58s'. After the Supervisor syncs the example file, make check is fully green."
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "尝试 git commit/push/branch mutation 的测试 Worker 被阻断或最终强制 rejected",
+      "status": "passed",
+      "evidence": "Live e2e T9001 (both runs): a real claude -p Worker ran git commit/push/branch/tag; all four were blocked by the guard (block messages captured in worker.log), while the legitimate neighbours git log and git status worked — the two-sided proof. Collect then passed '[ok] head-baseline' and '[ok] refs' because the guard held; the force-reject side is covered by unit tests TestWorkerCollectRejectsHeadMoved and TestWorkerCollectRejectsNewRef (HEAD moved / new ref created -> collect rejected)."
+    },
+    {
+      "criterion": "越界文件修改被 rejected",
+      "status": "passed",
+      "evidence": "Live e2e T9003 (both runs): the Worker wrote README-evil.txt at the worktree root (outside allowed_scope t9003/**); collect exited 1 with '[FAIL] scope: 1 changed path(s) outside allowed_scope ... README-evil.txt'. Unit-level: TestWorkerCollectRejectsOutOfScopeWrite. My own final diff contains no out-of-scope path (verified: every changed path matches cmd/rddev/**, internal/devorchestrator/**, specs/orchestrator/**, specs/SPEC_VERSION.json, tests/**)."
+    },
+    {
+      "criterion": "合法代码修改可正常测试和收集",
+      "status": "passed",
+      "evidence": "Live e2e T9004 (both runs): the Worker created t9004/marker.txt in scope, verified it with cat, wrote a schema-conforming RESULT (forced through claude's --json-schema StructuredOutput at spawn) — collect ok, exit 0, '[ok] result-schema'. Unit-level: TestWorkerCollectHappyPath. Also the guard-regression allow-side cases (read-only git, in-scope writes, run_in_background:false) all pass."
+    },
+    {
+      "criterion": "Worker 不需要 Git remote credentials",
+      "status": "passed",
+      "evidence": "Live e2e T9005 re-run: the real Worker's own Bash reported every credential variable absent — 'absent: GH_TOKEN / GITHUB_TOKEN / GITHUB_PERSONAL_ACCESS_TOKEN / GITHUB_ENTERPRISE_TOKEN / SSH_AUTH_SOCK / GITEA_TOKEN / POST_GITEA_TOKEN' (quoted verbatim in its RESULT; the first live run had leaked GITHUB_PERSONAL_ACCESS_TOKEN, fixed by --setting-sources project + the post-spawn /proc/<pid>/environ assertion that kills the Worker on any stripped credential var). The Read-tool bypass class is closed: the guard hook (wired to Read) blocked ~/.ssh/id_ed25519 and ~/.ssh/known_hosts ('reading credential store path ... is not permitted to Workers'), and gh was blocked before execution. Two-sided: spawn succeeds and ordinary env/auth vars pass (ANTHROPIC_* inherited, verified by the workers completing their tasks). Unit-level: TestBuildWorkerEnvStripsCredentials (12 credential shapes stripped, benign vars pass) and TestAssertCleanWorkerEnv (leak reported by name only, clean env allowed)."
+    }
+  ],
+  "risks": [
+    "make check stays red on TestGuardScriptEmbeddedMatchesExample until the Supervisor syncs the example guard file (out of my allowed_scope): cp internal/devorchestrator/embed/worker-guard.sh .rddev.example/guard/worker-guard.sh. This is the ONLY green-blocking item; the drift is the Supervisor's own uncommitted run_in_background edit and the copy is a pure sync (the only diff between the two files is that edit)."
+  ],
+  "follow_up_issues": [
+    "Supervisor-side L0 sync: mirror internal/devorchestrator/embed/worker-guard.sh into .rddev.example/guard/worker-guard.sh, then re-run make check (expected fully green)."
+  ],
+  "notes_for_supervisor": "Status blocked is deliberate and precise: everything in my scope is done and proven, but I cannot leave the tree CI-green because the drift test's fix target (.rddev.example/guard/worker-guard.sh) is outside T0011's allowed_scope — writing it would make my own collect reject this diff for the exact violation this task enforces. All required tests ran in this session, in the foreground (background Bash is refused by the guard — observed on my own session), with real output: guard-regression 154/154, live e2e PASS=28 FAIL=0, spec_version current, make check green on every step except the single drift test. No host residue left (no stray processes, no listeners, no claude workers). Interim RESULT writes during this session used status blocked, never completed (Defect 3)."
+}
