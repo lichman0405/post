@@ -1358,3 +1358,72 @@ TestCheckMergeGateReviewVerdictMustBeFresh
 发现不了"变更后又改回去"。真正严格的判据是**把评审时的 worktree 指纹存进 ReviewRecord，
 合并时与当前指纹比对**。`CollectReview` 已经算了这个指纹（`review-code-unchanged` 用的就是它），
 只是没有落到记录里。作为后续项记录——它比时间戳强，但本次的时间戳规则已经关闭了实际可达的洞。
+
+## L1-20260912-43 — ★★★ G2 跑在错误的目录上：它一直在验证 `main`，而不是任务的代码
+
+**这是本会话最严重的一条，因为它不是"某个检查漏了"，而是"整套 G2 证据都不成立"。**
+
+### 证据（不是推理）
+
+T0101 的 G2 记录里，`go` job 的步骤日志列出了它编译/测试过的包：
+
+```
+github.com/lichman0405/post/cmd/api
+github.com/lichman0405/post/internal/authz
+...
+```
+
+**`cmd/api/authhttp` 与 `internal/application/authn` 一次都没有出现**——而这两个包正是 T0101
+存在的全部意义，且它们**只存在于 worktree 里**（当时还没 commit）。
+
+**根因**：`gate_run.go` 的步骤执行器写死
+
+```go
+cmd.Dir = repoRoot
+```
+
+而 `repoRoot` 是**当前工作目录（主仓库根）**，不是任务的 worktree。
+于是 G2 的六个 job 全部在 `main` 上运行。
+
+### 为什么它从不报错，因而极其危险
+
+`main` **永远是绿的**（它已经通过了它自己那一轮 Gate）。所以：
+
+- 无论任务写了什么、写没写、写对没写对，**G2 都会绿**；
+- G4 又只断言"最新的 G2 记录覆盖六个 job 全绿"，于是**合并门也是绿的**；
+- 唯一真正验证任务代码的，是 GitHub 上 PR 的 CI——但 G4 看的是**本地 G2 记录**，不是 GitHub。
+
+**这解释了 T0101 为什么能带着一个"交付的 web 登录无法登录交付的 API"的阻塞缺陷一路走到 accept。**
+
+### 处置
+
+`runGateStep` 改为在**任务 worktree** 中执行（`gateWorkingDir`：有 worktree 用之，否则回落 repoRoot，
+因此这是修正而不是新增前置条件）。
+
+**回归测试双向验证**（撤销修复实测）：
+
+```
+TestGateStepsRunInTheTaskWorktree
+  撤销修复 -> FAIL（"the gate step ran in <repoRoot>, want the task worktree …"）
+  恢复修复 -> PASS
+```
+
+### 与我此前几条修复的关系（同一个病根）
+
+这是本会话第四次遇到同一个形状，而这次的代价最大：
+
+| 编号 | 症状 |
+|---|---|
+| L1-20260912-18 | G2 跑的是 CI 步骤的**子集**（红色 PR 被合并） |
+| L1-20260912-39 | accept 不跑 G4，把任务推到不可合并的状态 |
+| L1-20260912-42 | review verdict 可以比它评审的代码**活得更久** |
+| **L1-20260912-43** | **G2 跑在错的目录上，证据属于另一棵树** |
+
+**共同点：证据与它声称的对象不对应。** Gate 的每一环都必须回答"这份证据是关于**哪一个**树的、
+**哪一个**时刻的"，否则它在形式上通过、在实质上空转。
+
+### 必须的后续动作（不是可选项）
+
+**T0101 现有的 G2 记录（`run-dbb818143867122b`）是无效证据**，因为它是关于 `main` 的。
+修复落地后必须**重跑 G2**（rework → collect → review → accept 的流程里本来就会重跑），
+而且这次它才会真正编译 auth 代码。**预计重跑会因真实缺陷而变红——那正是它应有的行为。**

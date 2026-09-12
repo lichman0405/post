@@ -21,7 +21,7 @@ STATICCHECK_VER := 2026.2.1
 
 .PHONY: help bootstrap check build test test-integration dev smoke sync-schemas \
 	check-schema-drift check-openapi fmt-check staticcheck lint-python type-python \
-	progress ci infra-up infra-init infra infra-down infra-ps infra-logs
+	progress ci migrate infra-up infra-init infra infra-down infra-ps infra-logs
 
 help: ## list targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN { FS = ":.*## " } { printf "  %-20s %s\n", $$1, $$2 }'
@@ -53,6 +53,13 @@ test: ## unit test suites (Go + web + Python adapter); no Docker, no database
 	go test $(GO_UNIT_PKGS)
 	bash scripts/web-unit-tests.sh
 	cd services/scientific-adapter && uv run pytest
+
+migrate: ## apply the embedded migrations to the dev database (idempotent)
+# The missing half of the documented local flow: `make infra-up` starts
+# PostgreSQL and `make dev` starts the applications, but nothing ever created
+# the schema, so the apps ran against an empty database. URL comes from
+# POSTGRES_TEST_ADMIN_URL or the same default as test-integration.
+	go run ./cmd/rddev db migrate
 
 test-integration: ## integration suite against real PostgreSQL; loud failure (with reason) when unreachable
 # The default port is 5432, the port `make infra-up` actually publishes: it is

@@ -65,9 +65,19 @@ make ci               # 本地复刻 CI 全部 6 个 stage（= bash scripts/ci.s
 make infra-up     # 启动 Postgres+pgvector / Redis / MinIO / Gitea / Mailpit，等待全部 healthy
 make infra-init   # 一键幂等初始化：MinIO bucket + Gitea admin/测试 org/服务账户（可重复执行，no-op）
 make infra        # = infra-up + infra-init
+make migrate      # 把仓库内嵌的 migration 应用到 dev 数据库（幂等；已到 head 则报 0 applied）
 make infra-down   # 停止（保留 named volume，数据不丢）
 make infra-ps     # 查看状态
 make infra-logs   # 跟踪日志
+```
+
+**`make migrate` 是 `make dev` 的前置步骤。** 先前的文档只写了 `infra-up` → `dev`，
+但没有任何一步创建 schema，因此应用是连着一个**空数据库**起来的——
+唯一会执行 migration 的代码是集成测试，而它建的是用完即删的临时库。
+需要真实数据库的检查（G3、手工联调）必须先把 `post` 迁到 head：
+
+```bash
+make infra && make migrate && make dev
 ```
 
 要点：
