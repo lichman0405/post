@@ -342,6 +342,14 @@ func CheckMergeGate(repoRoot, gatesPath, taskID string) (*Gate4Result, error) {
 			fail("review is required for merge but no review verdict exists (rddev review spawn " + taskID + ", then rddev review collect " + taskID + ")")
 		} else if rv.Verdict != "approve" {
 			fail(fmt.Sprintf("the latest review verdict is %q with %d blocking finding(s) — an approving Review Worker verdict is required for merge", rv.Verdict, rv.BlockingFindings))
+		} else if cok && rv.At < coll.At {
+			// Freshness, the same rule the G2 checks above apply: a verdict
+			// describes the diff that existed when it was written. Approving
+			// code that has since changed — a rework, a Supervisor glue edit —
+			// must not satisfy the merge gate, or the verdict becomes evidence
+			// for a tree nobody reviewed.
+			fail(fmt.Sprintf("the review verdict (%s, %s) is older than the latest collect (%s, %s) — it judged a different tree; re-review the current diff (rddev review spawn %s)",
+				rv.RunID, rv.At, coll.RunID, coll.At, taskID))
 		} else {
 			res.Checks = append(res.Checks, fmt.Sprintf("review verdict approve (%s)", rv.RunID))
 		}

@@ -1317,3 +1317,44 @@ CLAUDE.md §11 写的是：「Worker 第一次不通过：可返工同一 sessio
   若 rework 改了路由名/形状则同步修正。
 - **流程改正（写进规则，不靠记性）**：**在 `main` 上不留未提交的改动**。
   要么先提交到独立分支，要么用显式路径 `git add <paths>`，**不再使用 `git add -A` 来"提交本次工作"**。
+
+## L1-20260912-42 — G4 的 review 条款没有新鲜度要求：一个 approve 可以比它评审的代码活得更久
+
+**审计 G4 时发现的第三个同族缺陷。** `CheckMergeGate` 里 G2 与 collect 之间已有两条新鲜度规则：
+
+```
+G2 record … covers all 6 required jobs      # 每个必需 job 都绿
+G2 evidence (…) is at/after the latest collect   # G2 判的是被 collect 的那份代码
+```
+
+**但紧挨着的 review 条款只检查 verdict 是不是 `approve`，不比时间**：
+
+```go
+if !rok { fail("no review verdict exists") }
+else if rv.Verdict != "approve" { fail(...) }
+else { pass("review verdict approve") }        // <- 没有 At 比较
+```
+
+**后果**：一个在**改动之前**写的 approve 会继续满足 merge gate。具体路径：
+review 通过 → 之后 worktree 被改动（一次 rework、或 Supervisor 的 glue edit）→
+`accept`/`pr merge` 仍然看到那个 approve → **合并一份从未被任何人评审过的代码，
+而理由来自一份描述旧代码的 verdict。**
+
+`review collect` 确实有 `review-code-unchanged` 检查（指纹），但它保证的是
+**"评审期间代码没变"**，不是 **"评审之后代码没变"**。两者之间正是这个洞。
+
+**处置**：加一条与 G2 同形的规则——verdict 的 `At` 必须 **>= 最新 collect 的 `At`**，
+否则拒绝合并并提示重新评审。
+
+**回归测试双向验证**（用撤销修复的方式实测过）：
+
+```
+TestCheckMergeGateReviewVerdictMustBeFresh
+  撤销修复 -> FAIL（"merge gate passed on an approve verdict older than the latest collect"）
+  恢复修复 -> PASS（且一个新鲜的 approve **必须**通过，否则规则会变成"永远不满足"）
+```
+
+**顺带记一个更弱的点（未在本次实现）**：时间戳只能发现"collect 之后又发生了变更"，
+发现不了"变更后又改回去"。真正严格的判据是**把评审时的 worktree 指纹存进 ReviewRecord，
+合并时与当前指纹比对**。`CollectReview` 已经算了这个指纹（`review-code-unchanged` 用的就是它），
+只是没有落到记录里。作为后续项记录——它比时间戳强，但本次的时间戳规则已经关闭了实际可达的洞。
