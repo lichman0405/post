@@ -1,0 +1,153 @@
+# POST local development infrastructure — Docker Compose (T0003).
+#
+# Infrastructure runs in containers; every application stays host-native
+# (docs/66 §2). This is a LOCAL DEV stack only: every host port binds to
+# 127.0.0.1 (never reachable from the network), and every credential below is
+# a DEV-ONLY default, overridable through environment variables. Never reuse
+# these values anywhere outside local development.
+#
+# This file intentionally does NOT set `name:` — COMPOSE_PROJECT_NAME comes
+# from the environment (rddev presets it per task), which lets several Workers
+# run isolated stacks on the same host (docs/66 §3). To run a second isolated
+# stack, override the project name and the host ports, e.g.:
+#
+#   COMPOSE_PROJECT_NAME=post-dev2 \
+#   POSTGRES_PORT=15432 REDIS_PORT=16379 MINIO_API_PORT=19000 \
+#   MINIO_CONSOLE_PORT=19001 GITEA_WEB_PORT=13000 GITEA_SSH_PORT=12222 \
+#   MAILPIT_WEB_PORT=18025 MAILPIT_SMTP_PORT=11025 \
+#   docker compose up -d
+#
+# Quickstart, ports, credentials, init and reset: infra/docker/README.md.
+
+services:
+  postgres:
+    # PostgreSQL 16 + pgvector 0.8.6, prebuilt in the image — the extension is
+    # genuinely available, not installed by a runtime script.
+    image: pgvector/pgvector:0.8.6-pg16
+    restart: unless-stopped
+    environment:
+      # DEV-ONLY defaults.
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_dev_pw}
+      POSTGRES_DB: ${POSTGRES_DB:-post}
+      # Passed through to the one-time bootstrap script
+      # (infra/docker/postgres/initdb.d/) so the Gitea database/role match
+      # whatever the gitea service uses.
+      GITEA_DB_USER: ${GITEA_DB_USER:-gitea}
+      GITEA_DB_PASSWORD: ${GITEA_DB_PASSWORD:-gitea_dev_pw}
+      GITEA_DB_NAME: ${GITEA_DB_NAME:-gitea}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/docker/postgres/initdb.d:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:7.4.11-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  minio:
+    # MinIO no longer publishes to Docker Hub; quay.io/minio/minio is the
+    # official registry.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      # DEV-ONLY defaults (MinIO requires a password of 8+ chars).
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio_dev}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio_dev_pw}
+    ports:
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  gitea:
+    # Infrastructure only (ADR-019): the product's internal Git provider, not
+    # a user-facing surface. The local UI exists for debugging; the product
+    # never presents it to users.
+    image: gitea/gitea:1.27.3
+    restart: unless-stopped
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      GITEA__database__DB_TYPE: postgres
+      GITEA__database__HOST: postgres:5432
+      GITEA__database__NAME: ${GITEA_DB_NAME:-gitea}
+      GITEA__database__USER: ${GITEA_DB_USER:-gitea}
+      GITEA__database__PASSWD: ${GITEA_DB_PASSWORD:-gitea_dev_pw}
+      GITEA__server__DOMAIN: localhost
+      GITEA__server__ROOT_URL: http://localhost:${GITEA_WEB_PORT:-3000}/
+      GITEA__server__HTTP_PORT: "3000"
+      GITEA__server__SSH_DOMAIN: localhost
+      GITEA__server__SSH_PORT: ${GITEA_SSH_PORT:-2222}
+      GITEA__server__LFS_START_SERVER: "true"
+      GITEA__server__OFFLINE_MODE: "true"
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      # Dev mail goes to Mailpit (catch-all); nothing is ever sent externally.
+      GITEA__mailer__ENABLED: "true"
+      GITEA__mailer__PROTOCOL: smtp
+      GITEA__mailer__SMTP_ADDR: mailpit
+      GITEA__mailer__SMTP_PORT: "1025"
+      GITEA__mailer__FROM: post-dev@localhost
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${GITEA_WEB_PORT:-3000}:3000"
+      # Gitea's internal sshd and its advertised clone port use the same
+      # value, so the container-side port follows the override as well.
+      - "127.0.0.1:${GITEA_SSH_PORT:-2222}:${GITEA_SSH_PORT:-2222}"
+    volumes:
+      - gitea_data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fk", "http://localhost:3000/api/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  mailpit:
+    image: axllent/mailpit:v1.31.1
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MAILPIT_WEB_PORT:-8025}:8025"
+      - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  gitea_data:
