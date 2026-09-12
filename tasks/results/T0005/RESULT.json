@@ -1,0 +1,171 @@
+{
+  "task_id": "T0005",
+  "status": "completed",
+  "summary": "Turned specs/database/postgres.sql into 13 forward-only numbered goose migrations under infra/migrations/ (v3.28.0, embedded, transactional, advisory-locked), preserving every table, column type, nullability, default, FK action, CHECK, UNIQUE and explicit index of the canonical schema. Stood up the pgx v5.11 + sqlc v1.31.1 data-access layer: 63 typed query methods generated from explicit SQL (internal/persistence/queries) and checked in (internal/persistence/sqlc) with a drift check that regenerates and diffs. Added panic-safe WithTx (rollback on error/panic, commit otherwise) and a task/run-scoped test database namespace (test_T0005_<run_id>, docs/66 §3, created and dropped per test). All required G1/G3 tests ran against REAL PostgreSQL (compose project posttask-t0005 on 127.0.0.1:15432): fresh-install catalog verified by querying pg_catalog against a 1:1 fixture of the canonical schema (37 tables + goose_db_version, 84 FKs, 16 uniques, all checks, 5 explicit indexes, vector+pgcrypto extensions), repeat migrate proven a byte-identical no-op, upgrade path (version 6 → head) proven indistinguishable from a fresh install, and 9 constraint violations rejected with exact SQLSTATEs (23503/23505/23514) including forbidden UPDATE and DELETE. Drift check exercised in BOTH modes: passing (clean) and failing (injected probe query detected with diff, tree restored). ops/doctor.sh still passes (exit 0). Docker stack torn down: no containers/volumes left behind for this project. L1 decision: pressly/goose as migration tool, recorded in infra/migrations/README.md.",
+  "files_changed": [
+    "go.mod",
+    "go.sum",
+    "infra/migrations/00001_extensions.sql",
+    "infra/migrations/00002_identity.sql",
+    "infra/migrations/00003_projects.sql",
+    "infra/migrations/00004_rsg_state.sql",
+    "infra/migrations/00005_scientific_objects.sql",
+    "infra/migrations/00006_relations.sql",
+    "infra/migrations/00007_evidence.sql",
+    "infra/migrations/00008_blobs.sql",
+    "infra/migrations/00009_issues_pull_requests.sql",
+    "infra/migrations/00010_releases_assets.sql",
+    "infra/migrations/00011_external_contribution.sql",
+    "infra/migrations/00012_events_audit.sql",
+    "infra/migrations/00013_search_projection.sql",
+    "infra/migrations/migrations.go",
+    "infra/migrations/README.md",
+    "internal/persistence/db.go",
+    "internal/persistence/doc.go",
+    "internal/persistence/migrate.go",
+    "internal/persistence/queries/blobs.sql",
+    "internal/persistence/queries/events_audit.sql",
+    "internal/persistence/queries/evidence.sql",
+    "internal/persistence/queries/issues_prs.sql",
+    "internal/persistence/queries/organizations.sql",
+    "internal/persistence/queries/projects.sql",
+    "internal/persistence/queries/relations.sql",
+    "internal/persistence/queries/releases_assets.sql",
+    "internal/persistence/queries/rsg.sql",
+    "internal/persistence/queries/scientific_objects.sql",
+    "internal/persistence/queries/search.sql",
+    "internal/persistence/queries/users.sql",
+    "internal/persistence/sqlc/blobs.sql.go",
+    "internal/persistence/sqlc/db.go",
+    "internal/persistence/sqlc/events_audit.sql.go",
+    "internal/persistence/sqlc/evidence.sql.go",
+    "internal/persistence/sqlc/issues_prs.sql.go",
+    "internal/persistence/sqlc/models.go",
+    "internal/persistence/sqlc/organizations.sql.go",
+    "internal/persistence/sqlc/projects.sql.go",
+    "internal/persistence/sqlc/querier.go",
+    "internal/persistence/sqlc/relations.sql.go",
+    "internal/persistence/sqlc/releases_assets.sql.go",
+    "internal/persistence/sqlc/rsg.sql.go",
+    "internal/persistence/sqlc/scientific_objects.sql.go",
+    "internal/persistence/sqlc/search.sql.go",
+    "internal/persistence/sqlc/users.sql.go",
+    "internal/persistence/testdb/testdb.go",
+    "internal/persistence/tx.go",
+    "sqlc.yaml",
+    "tests/integration/catalog_test.go",
+    "tests/integration/check-sqlc-drift.sh",
+    "tests/integration/drift_test.go",
+    "tests/integration/migration_test.go",
+    "tests/integration/queries_test.go",
+    "tests/integration/tx_test.go"
+  ],
+  "tests": [
+    {
+      "command": "POSTGRES_PORT=15432 docker compose up -d --wait postgres",
+      "status": "passed",
+      "evidence": "Container posttask-t0005-postgres-1 Healthy (pgvector/pgvector:0.8.6-pg16 on 127.0.0.1:15432). All DB tests below ran against this real PostgreSQL."
+    },
+    {
+      "command": "go test ./tests/integration/ -count=1 -v",
+      "status": "passed",
+      "evidence": "ok github.com/lichman0405/post/tests/integration 1.882s — all 6 tests pass: TestFreshInstallCatalog (catalog fixture vs pg_catalog: 38 tables incl. goose_db_version, columns/types/nullability/defaults, PKs, 16 uniques, 84 FKs with exact RESTRICT/SET NULL actions, checks, 5 explicit GIN/btree indexes, extensions pgcrypto+plpgsql+vector), TestRepeatMigrateIsNoop (applied=0, version unchanged, catalog byte-identical), TestUpgradePath (MigrateTo(6) applies exactly 6; intermediate state has exactly the 00001-00006 tables and relation_versions_source_idx; Migrate to head applies 7; upgraded snapshot == fresh-install snapshot == canonical fixture), TestConstraintEnforcement, TestSQLCQueriesRoundTrip (typed query layer: user/org/project/branch/state/object/versions round-trip, append-only version log), TestWithTx, TestSQLCGenerationDrift."
+    },
+    {
+      "command": "go test ./tests/integration/ -count=1 -v -run TestConstraintEnforcement",
+      "status": "passed",
+      "evidence": "9 real rejections with exact SQLSTATEs: DELETE FROM users referenced by projects.created_by → 23503 'update or delete on table \"users\" violates foreign key constraint \"projects_created_by_fkey\"'; DELETE FROM project_states referenced by scientific_object_versions.state_id → 23503 \"scientific_object_versions_state_id_fkey\"; UPDATE users SET handle (duplicate) → 23505 \"users_handle_key\"; UPDATE branches SET lifecycle_state='bogus' → 23514 \"branches_lifecycle_state_check\"; INSERT duplicate scientific_object_version version_no=1 → 23505 \"scientific_object_versions_object_id_version_no_key\"; INSERT version_no=0 → 23514 \"scientific_object_versions_version_no_check\"; INSERT organization_memberships role='admin' → 23514 \"organization_memberships_role_check\"; INSERT blobs size_bytes=-1 → 23514 \"blobs_size_bytes_check\"; INSERT policy_versions with both scopes → 23514 \"policy_versions_check\". Append-only flow itself still works (version 2 appends cleanly, 2 rows intact)."
+    },
+    {
+      "command": "tests/integration/check-sqlc-drift.sh (passing mode)",
+      "status": "passed",
+      "evidence": "exit 0: 'DRIFT CHECK [verify]: clean — checked-in generated code matches generator output'. sqlc v1.31.1 regenerate + diff vs snapshot of checked-in internal/persistence/sqlc."
+    },
+    {
+      "command": "tests/integration/check-sqlc-drift.sh --demo-fail (failing mode)",
+      "status": "passed",
+      "evidence": "Both modes exercised as required. Failing mode: script injected '-- name: DriftProbeQuery :one / SELECT 42 AS answer;' into internal/persistence/queries/users.sql, regenerated, and the check FAILED with a real diff ('DRIFT CHECK [demo]: FAILED — regeneration differs from checked-in code': querier.go gained 'DriftProbeQuery(ctx context.Context) (int32, error)' and users.sql.go gained the generated method + query const). Tree then restored and regenerated by the EXIT trap; script exit 0 means detection demonstrably works. A drift check never observed failing is not evidence — this one was."
+    },
+    {
+      "command": "go vet ./...",
+      "status": "passed",
+      "evidence": "no findings, exit 0."
+    },
+    {
+      "command": "staticcheck ./... (staticcheck 2026.2.1)",
+      "status": "passed",
+      "evidence": "no findings, exit 0. (One style finding S1011 fixed during development; staticcheck also caught a structural flaw: tests/integration/catalog.go was a non-test file referencing declarations from _test.go files — renamed to catalog_test.go.)"
+    },
+    {
+      "command": "gofmt -l infra internal tests",
+      "status": "passed",
+      "evidence": "no files listed (all formatted)."
+    },
+    {
+      "command": "go test ./...",
+      "status": "passed",
+      "evidence": "all packages pass; ok github.com/lichman0405/post/tests/integration 1.895s; remaining packages have no test files."
+    },
+    {
+      "command": "go build ./...",
+      "status": "passed",
+      "evidence": "exit 0, no output."
+    },
+    {
+      "command": "./ops/doctor.sh",
+      "status": "passed",
+      "evidence": "Verdict: ok (exit 0). 'Summary: required 27 checks: 25 passed, 0 failed, 2 skipped | advisory 8 checks: 5 passed, 2 warn, 1 skipped'."
+    },
+    {
+      "command": "POSTGRES_PORT=15432 docker compose down -v; docker ps -a | grep posttask-t0005; docker volume ls | grep posttask-t0005",
+      "status": "passed",
+      "evidence": "Volume posttask-t0005_postgres_data Removed; Network posttask-t0005_default Removed. Both grep lookups return nothing: no containers or volumes left behind for this project. The T0003 stack (posttask-t0003-*, port 5432) was never touched."
+    },
+    {
+      "command": "psql scratch migration smoke test (infra/migrations/*.sql applied in order to scratch_t0005)",
+      "status": "passed",
+      "evidence": "All 13 files applied with ON_ERROR_STOP, then: pg_tables=37, pg_constraint=161, pg_indexes=58, extensions pgcrypto/plpgsql/vector; named constraints branches_base_state_fk (f), organization_memberships_role_check (c), policy_versions_check (c) and all 5 explicit indexes present. Scratch database dropped afterwards."
+    },
+    {
+      "command": "persistence.Migrate / MigrationVersion smoke via one-off program (scratch db)",
+      "status": "passed",
+      "evidence": "Fresh database: applied=13, version=13. Second run: applied=0 err=<nil> (clean no-op). goose also correctly aborted with 'partial migration error (type:sql,version:2): ERROR: relation \"users\" already exists (SQLSTATE 42P07)' when pointed at a dirty database — transactional application proven."
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "fresh DB migration 成功",
+      "status": "passed",
+      "evidence": "TestFreshInstallCatalog: empty namespaced database migrated to head (13/13 applied, goose version 13); the resulting catalog verified by querying pg_catalog/information_schema against a fixture derived 1:1 from specs/database/postgres.sql: 37 canonical tables + goose_db_version as the only extra, every column with exact type/nullability/default presence (incl. text[] udt '_text' and vector udt 'vector'), PKs, 16 unique constraints, 84 FKs with exact ON DELETE actions (83 RESTRICT, 1 SET NULL), all CHECK constraints, the 5 explicit indexes (gin payload, source/target btree, fts gin, structured gin) with correct definitions, and extensions pgcrypto+plpgsql+vector."
+    },
+    {
+      "criterion": "upgrade/repeat migrate 安全",
+      "status": "passed",
+      "evidence": "TestRepeatMigrateIsNoop: second Migrate applies 0 migrations, version stays 13, catalog snapshot byte-identical. TestUpgradePath: MigrateTo(6) applies exactly 6 and the intermediate state contains exactly the 00001-00006 tables; Migrate to head applies the remaining 7; the upgraded catalog is byte-identical to a fresh install AND matches the canonical fixture. Forward-only by design: no down migrations exist; infra/migrations/README.md documents the policy (numbered files immutable, changes = new higher number) and the upgrade path."
+    },
+    {
+      "criterion": "sqlc/generator 无 drift",
+      "status": "passed",
+      "evidence": "Passing mode: 'DRIFT CHECK [verify]: clean' (exit 0). Failing mode exercised and recorded: injected probe query → check FAILED with diff showing the new generated method in querier.go/users.sql.go → tree restored (exit 0). Same single implementation (tests/integration/check-sqlc-drift.sh) is wired into go test via TestSQLCGenerationDrift (skips only if the sqlc binary is absent, with the exact install command). sqlc v1.31.1 pinned in sqlc.yaml and README."
+    },
+    {
+      "criterion": "关键约束 integration test 通过",
+      "status": "passed",
+      "evidence": "TestConstraintEnforcement: 9 forbidden operations rejected with exact SQLSTATEs — FK RESTRICT blocks DELETE of referenced users (23503) and DELETE of project_states referenced by object versions (23503), UNIQUE blocks duplicate handle UPDATE (23505) and duplicate version INSERT (23505), CHECK blocks invalid lifecycle UPDATE (23514), version_no=0 (23514), role='admin' (23514), negative blob size (23514), and the policy_versions XOR (23514). Append-only append itself verified working (2 versions intact). TestWithTx additionally proves rollback-on-error, rollback-on-panic with panic re-raised, rollback under ctx cancellation, and commit on success."
+    }
+  ],
+  "risks": [
+    "Canonical seed is not executable in file order: specs/database/postgres.sql creates project_states (which references branches(id) inline) before branches exists — PostgreSQL rejects that. The migration set creates branches first; no constraint was changed, only statement order, and branches_base_state_fk is still added via the canonical ALTER TABLE. Documented in infra/migrations/README.md §Deviations; flagged for Supervisor confirmation.",
+    "go.mod and go.sum were modified (pgx v5.11.0, goose v3.28.0 + indirects). Per the worker environment contract these are assigned to T0005; the other in-flight worker was told not to touch them. sqlc itself is a dev-time tool (go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1), not a module dependency, so it does not appear in go.mod.",
+    "goose's bookkeeping table goose_db_version (id, version_id, is_applied, tstamp) is the only non-canonical table in the public schema and is asserted as such in the test fixture. If a future task wants a different table name, use goose.WithStore.",
+    "Migration tool choice is an L1 decision: pressly/goose v3.28.0 as a library (golang-migrate and a hand-rolled runner were considered and rejected; rationale in infra/migrations/README.md).",
+    "The drift Go test (TestSQLCGenerationDrift) skips when the sqlc binary is unavailable, with an explicit skip reason and install command. CI wiring (.github/workflows, Makefile) is outside T0005's allowed_scope; the Supervisor should ensure CI installs sqlc v1.31.1 and runs the integration tests with a PostgreSQL service, otherwise the drift check will skip there."
+  ],
+  "follow_up_issues": [
+    "Wire CI: add a job that installs sqlc v1.31.1 and runs go test ./tests/integration/ (needs a PostgreSQL service; tests use POSTGRES_TEST_ADMIN_URL or the 127.0.0.1:15432 default). .github/workflows is outside T0005 scope.",
+    "Add Makefile targets (e.g. make migrate-up, make check-sqlc-drift) wrapping internal/persistence.Migrate and tests/integration/check-sqlc-drift.sh — Makefile is outside T0005 scope.",
+    "Add pgvector/embedding queries to internal/persistence/queries/search.sql when the V1 search work (docs/14) needs vector similarity; currently only FTS is exposed, which is all V1 requires.",
+    "When specs/database/postgres.sql is next updated, port the delta as a new numbered migration and extend the fixture in tests/integration/migration_test.go — both must change together."
+  ],
+  "notes_for_supervisor": "Docker grant used as instructed: compose project posttask-t0005, postgres on 127.0.0.1:15432 (POSTGRES_PORT=15432), down -v afterwards — nothing left behind, the T0003 stack on 5432 untouched. Two implementation gotchas worth knowing: (1) pgx's ConnConfig.ConnString() returns the ORIGINAL parsed string, so rewriting cfg.ConnConfig.Database is a silent no-op — internal/persistence/testdb.WithDatabase rewrites the URL with net/url instead (this bug initially made all tests share the admin database; caught by the tests themselves and fixed). (2) staticcheck compiles non-test files without _test.go files, so test machinery must live in _test.go files — tests/integration/catalog_test.go. sqlc config uses the migration files themselves as its schema input, so generated code always matches what migrations ship — no shadow schema copy. All test evidence commands are in the tests[] array with real observed output; nothing was skipped except the two doctor checks that are opt-in by design."
+}

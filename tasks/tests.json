@@ -127,9 +127,9 @@
       "name": "db migration integration",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T15:40:00Z",
+      "evidence": "Supervisor ran go test ./tests/integration/ against REAL PostgreSQL on 15432: 7 tests, 88 assertions, all PASS - fresh-install catalog verified via pg_catalog, repeat-migrate no-op, upgrade path vs fresh install, constraint enforcement asserted by SQLSTATE (23503/23505), sqlc round trips, transaction helper. All 13 migrations also applied by hand to a scratch database."
     },
     {
       "id": "T0005-TEST-02",
@@ -137,9 +137,9 @@
       "name": "sql generation drift",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T15:40:00Z",
+      "evidence": "sqlc generation drift check verified by the Supervisor in BOTH modes: tampered internal/persistence/sqlc/models.go -> exit 1; restored -> exit 0."
     },
     {
       "id": "T0006-TEST-01",

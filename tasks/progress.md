@@ -46,6 +46,22 @@ owner 于 2026-09-12 授予**默认自主推进**授权（`L3-20260912-4`，持�
 | T0002 | merged | #10 | Monorepo：Go module 4 binary + Next.js 16.3.5 + uv Python adapter + Makefile，无 TS backend |
 | T0003 | merged | #13 | Docker Compose 基设：pgvector/Redis/MinIO/Gitea/Mailpit，全 pinned + healthcheck + 幂等 init |
 | T0004 | merged | #16 | 配置与密钥基线：Go typed loader（stdlib）+ web/python 独立校验 + 分层 + RedactURL + secret scan |
+| T0005 | merged | #19 | 13 个 forward-only migration + pgx/sqlc + tx helper + run-scoped 测试库命名空间 |
+| 安全修复 | merged | #8 #11 #14 #18 | preflight 凭据泄漏/fail-open；schema 注解；infra init token/SQL；config 三条泄漏路径 |
+
+## ★ SPEC_BLOCKED（待 owner 裁定）
+
+**版本历史在存储层可变**（`decisions.md` L2-SPEC-20260912-15）。实测：对
+`scientific_object_versions` 已提交行执行 `UPDATE` **成功**（`UPDATE 1`）。`ON DELETE RESTRICT`
+只防删除、不防修改。
+
+- **不是 T0005 的缺陷**：canonical `specs/database/postgres.sql` 未声明任何不可变性机制，T0005
+  的任务是忠实移植，已做到并独立复核通过。
+- **但与 Master Gate A「Object/relation 版本不可改写历史」、`CLAUDE.md` §9 不变量 5/8、
+  ADR-007 冲突**。
+- 如何在存储层强制属 L2/L3（存储边界 + 科研完整性），three 个可选实现各有权衡，Supervisor 不
+  自行决定。**不影响其他任务继续执行**（T0006/T0009 与其无关）。
+- V1 Master Gate A 在此项解决前不应判为满足。
 | 安全修复 | merged | #8 #11 #14 | preflight 凭据泄漏 + fail-open 分支门；schema 注解；infra init token/SQL/环境变量 |
 
 ## 进行中
