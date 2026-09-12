@@ -83,6 +83,13 @@ func TestGitControlCommitOnGreenGate(t *testing.T) {
 		return strings.TrimSpace(string(out))
 	}
 	git("init", "-q", "-b", "main")
+	// Hermetic: configure an identity IN the scratch repo. The code under test
+	// (CommitTask) shells out to `git commit` and must inherit one; relying on the
+	// ambient developer/CI git config made this test pass locally and fail on a
+	// bare CI runner with "Author identity unknown". Tests must not depend on
+	// developer machine state.
+	git("config", "user.name", "test")
+	git("config", "user.email", "test@test")
 	if err := os.WriteFile(filepath.Join(wt, "file.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
