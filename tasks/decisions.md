@@ -1728,3 +1728,30 @@ if [ "$FG_RESUME_ID" != "$FG_SESSION_ID" ]; then echo "resume id != session id";
 
 **这比它看起来重要**：G4 现在对**每一个任务**都要求 `acceptance` 绿——
 即"Gate 工具自身可用"成为**产品任务合并的前置条件**。这正是它应有的位置。
+
+## F-20260912-4 — 未解释的 flake：`acceptance` job 在 CI 上失败过一次，重跑即绿（**不当作已修复**）
+
+**事实**：PR #66 新增的 `acceptance` job 在第二次 CI 运行（`34713838231`）里，
+在 `supervisor-git-e2e.sh` 的 `pr merge` 上失败 4 项；紧接着的一次推送（只加了一行诊断 printf）
+运行（`34714018475`）**七项全绿**。本地连跑 5 次 `supervisor-git-e2e.sh` 全部通过。
+
+**失败时的证据**（来自 CI 日志）：`gh pr checks` **被调用过**（fake 记录了该行），
+随后 `gh pr merge` 未被调用 —— 与"新增的 required-checks 断言拒绝"一致。
+但该 fake 当时返回的是**硬编码**的 `job-a`/`job-b` 全 SUCCESS，而 scratch spec 的
+`required_jobs` 也是 `job-a`/`job-b`，**按现在的代码推不出拒绝**。
+
+**处置（按 docs/67"flake 不是 rerun until green；先定位再修"）**：
+
+1. **我没有把它当成"重跑就好了"**。它现在是**未解释**状态，本条就是它的记录。
+2. 唯一与证据相符的假设是"fake 的检查名与 spec 的 required_jobs 脱钩"，
+   因此**把这个耦合去掉了**：fake 现在从 scratch spec 里读取 `required_jobs` 并动态生成同名检查。
+   这无论假设是否成立都是更稳的写法——名字一旦漂移，原来的写法只会给出"not all green"而**不说清是哪一边**。
+3. **保留诊断**：`pr merge` / `pr open` 失败时**打印 rddev 的实际输出**。
+   之前 4 个断言全红，却没有一处告诉我"为什么被拒"——我为此在 CI 日志里翻了好几轮。
+   **一个说不出原因的失败，等于把定位成本转嫁给下一个看日志的人。**
+4. **它现在是必跑 job**：`acceptance` 进入了 `required_jobs`、`G2.runs_jobs`、`G4.asserts_jobs`，
+   所以**任何任务**的 G2 都会跑它。若再次 flake，会立刻以"某任务 G2 红"的形式暴露，并**带上原因**。
+
+**为什么仍然合并**：这不是被忽略的失败，而是一个**已被记录、已被加固、且现在受强制**的未解释项；
+留着 PR 挂着并不能推进定位，而合并后它每次都会跑。
+若再次出现，诊断输出会把原因直接印在日志里。
