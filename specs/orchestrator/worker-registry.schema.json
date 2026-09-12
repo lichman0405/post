@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Worker Registry Record",
+  "description": "One file per task attempt at .rddev/workers/<TASK_ID>/registry.json, written by `rddev worker spawn` and reconciled by `rddev worker list`/`stop` when the reaper has recorded an exit status. The registry is pure runtime state (docs/65, L1-20260912-4); nothing in it is a source of truth beyond the run facts it records.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "run_id", "session_id", "claude_version", "pid", "start_time", "worktree", "branch", "baseline_sha", "refs_before", "log_path", "result_dir", "started_at"],
+  "properties": {
+    "task_id": {"type": "string", "pattern": "^T[0-9]{4}$"},
+    "run_id": {"type": "string", "minLength": 1},
+    "session_id": {"type": "string", "minLength": 1},
+    "claude_version": {"type": "string"},
+    "model": {"type": "string"},
+    "effort": {"type": "string"},
+    "max_budget_usd": {"type": ["number", "null"]},
+    "max_turns": {"type": ["integer", "null"], "minimum": 1},
+    "timeout": {"type": "string"},
+    "docker_grant": {"type": "boolean"},
+    "pid": {"type": "integer", "minimum": 1},
+    "start_time": {"type": "integer", "minimum": 1},
+    "worktree": {"type": "string"},
+    "branch": {"type": "string"},
+    "baseline_sha": {"type": "string", "minLength": 7},
+    "refs_before": {"type": "array", "items": {"type": "string"}},
+    "log_path": {"type": "string"},
+    "result_dir": {"type": "string"},
+    "started_at": {"type": "string"},
+    "ended_at": {"type": "string"},
+    "exit_status": {"type": ["integer", "null"]},
+    "exit_source": {"enum": ["reaper", "stop", "reconciled"]},
+    "reconciled_at": {"type": "string"}
+  }
+}

@@ -147,6 +147,8 @@ func TestRunDoctorJSONFlagReachesEngine(t *testing.T) {
 
 // Honest stubs: every command owned by a later task fails with exit 4 and an
 // explicit message naming the owning task — never a silent no-op.
+// (spawn/list/logs/stop became real in T0010 and are covered in
+// worker_test.go; collect stays an honest T0011 stub.)
 func TestStubsExitNotImplemented(t *testing.T) {
 	cases := []struct {
 		args    []string
@@ -156,15 +158,11 @@ func TestStubsExitNotImplemented(t *testing.T) {
 		{[]string{"git", "commit", "T0009"}, "T0012", false},
 		{[]string{"pr", "open", "T0009"}, "T0012", false},
 		{[]string{"pr", "merge", "T0009"}, "T0012", false},
-		{[]string{"worker", "spawn", "T0009"}, "T0010", false},
-		{[]string{"worker", "list"}, "T0010", false},
-		{[]string{"worker", "logs", "T0009"}, "T0010", false},
-		{[]string{"worker", "stop", "T0009"}, "T0010", false},
 		{[]string{"worker", "collect", "T0009"}, "T0011", false},
 		{[]string{"env", "reset", "--test-only"}, "T0010/T0011", false},
 		{[]string{"env", "gc"}, "T0010/T0011", false},
 		{[]string{"--json", "git", "commit", "T0009"}, "T0012", true},
-		{[]string{"worker", "spawn", "T0009", "--json"}, "T0010", true},
+		{[]string{"worker", "collect", "T0009", "--json"}, "T0011", true},
 	}
 	for _, tc := range cases {
 		var stdout, stderr bytes.Buffer

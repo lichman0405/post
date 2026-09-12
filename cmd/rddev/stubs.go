@@ -9,16 +9,10 @@ import (
 // explicit message naming the owning task — never a silent no-op that looks
 // like success (rddev-cli.yaml: commands whose subsystem does not exist yet).
 //
-//	worker ...      -> T0010 (worktree/process management), T0011 (collect)
+//	worker collect  -> T0011 (RESULT validation; spawn/list/logs/stop are real
+//	                   since T0010)
 //	git commit      -> T0012 (Git control plane, Supervisor-only)
 //	pr open|merge   -> T0012 (Git control plane, Supervisor-only)
-
-const workerUsage = `Usage: rddev worker spawn|list|logs|collect|stop [TASK]
-
-NOT IMPLEMENTED (exit 4): the worker subsystem (spawn/list/logs/stop and
-worktree lifecycle) belongs to T0010; collect (RESULT validation, scope diff,
-HEAD baseline) belongs to T0011.
-`
 
 // hasJSONFlag reports whether args carry --json (the stubs accept it in any
 // position, like the task/env subcommands).
@@ -29,23 +23,6 @@ func hasJSONFlag(args []string) bool {
 		}
 	}
 	return false
-}
-
-func runWorker(args []string, stdout, stderr io.Writer, jsonOut bool) int {
-	if wantsHelp(args) {
-		fmt.Fprint(stdout, workerUsage)
-		return exitOK
-	}
-	jsonOut = jsonOut || hasJSONFlag(args)
-	sub := "worker"
-	if len(args) > 0 {
-		sub = "worker " + args[0]
-	}
-	owner := "T0010 (worktree and process management)"
-	if len(args) > 0 && args[0] == "collect" {
-		owner = "T0011 (RESULT validation)"
-	}
-	return notImplemented(stdout, stderr, jsonOut, sub, owner)
 }
 
 func runGit(args []string, stdout, stderr io.Writer, jsonOut bool) int {
