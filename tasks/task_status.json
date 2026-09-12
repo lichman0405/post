@@ -111,10 +111,10 @@
       "merged_at": "2026-09-12T20:20:00Z"
     },
     "T0012": {
-      "status": "running",
+      "status": "worker_failed",
       "started_at": "2026-09-12T20:25:00Z",
       "completed_at": null,
-      "notes": "Dispatched: the final P0 task. Carries the session's accumulated gate lessons as required items: detect a RESULT that claims completed while required tests are not_run or the summary says INTERIM; run CI's EXACT steps in G2 (a similar-looking gate is not the gate); validate allowed_scope globs against the real tree and include derived artifacts (spec marker) they necessarily touch; use the host-residue check from T0011.",
+      "notes": "Attempt 1 budget-exhausted: $25.13 of $25, with NO RESULT.json written at all (despite the write-early instruction) -> worker_failed per docs/62 §4. The work is substantive and coherent (43 paths, builds, package tests pass, and internal/devorchestrator/gate_inputs.go appears to be the gate-tampering fix). The single collect rejection is go.mod, which the package forbade STALELY - written when T0010 still owned go.mod; T0010 is merged, nothing contends. Re-dispatched in the same worktree with a corrected scope, a $40 budget, and a hard requirement to write RESULT.json within the first tool calls.",
       "worker_run_id": "worker-T0012-fd1195b",
       "accepted_by_supervisor_at": null,
       "merged_at": null
