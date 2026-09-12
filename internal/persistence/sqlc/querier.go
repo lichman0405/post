@@ -12,7 +12,7 @@ import (
 
 type Querier interface {
 	AddOrganizationMembership(ctx context.Context, arg AddOrganizationMembershipParams) error
-	AddProjectMembership(ctx context.Context, arg AddProjectMembershipParams) error
+	AddProjectMembership(ctx context.Context, arg AddProjectMembershipParams) (ProjectMembership, error)
 	AttachBlob(ctx context.Context, arg AttachBlobParams) error
 	CountActiveOrganizationOwners(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	// Blobs and their attachments (canonical tables: blobs, blob_attachments).
@@ -73,8 +73,10 @@ type Querier interface {
 	GetOrganizationByIDForUpdate(ctx context.Context, id pgtype.UUID) (Organization, error)
 	GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error)
 	GetOrganizationMembership(ctx context.Context, arg GetOrganizationMembershipParams) (OrganizationMembership, error)
+	GetProgramByID(ctx context.Context, id pgtype.UUID) (Program, error)
 	GetProjectByID(ctx context.Context, id pgtype.UUID) (Project, error)
 	GetProjectBySlug(ctx context.Context, arg GetProjectBySlugParams) (Project, error)
+	GetProjectMembership(ctx context.Context, arg GetProjectMembershipParams) (ProjectMembership, error)
 	GetProjectStateByHash(ctx context.Context, arg GetProjectStateByHashParams) (ProjectState, error)
 	GetProjectStateByID(ctx context.Context, id pgtype.UUID) (ProjectState, error)
 	GetPullRequestByProjectAndNumber(ctx context.Context, arg GetPullRequestByProjectAndNumberParams) (PullRequest, error)
@@ -96,6 +98,9 @@ type Querier interface {
 	ListPendingOutboxEvents(ctx context.Context, batchSize int32) ([]OutboxEvent, error)
 	ListProjectMembers(ctx context.Context, projectID pgtype.UUID) ([]ListProjectMembersRow, error)
 	ListProjectsByOrganization(ctx context.Context, arg ListProjectsByOrganizationParams) ([]Project, error)
+	// Projects the user belongs to (any project membership), most recently
+	// created first.
+	ListProjectsForUser(ctx context.Context, userID pgtype.UUID) ([]Project, error)
 	ListPullRequestsByProject(ctx context.Context, projectID pgtype.UUID) ([]PullRequest, error)
 	ListRelationVersionsForSource(ctx context.Context, objectVersionID pgtype.UUID) ([]RelationVersion, error)
 	ListRelationVersionsForTarget(ctx context.Context, objectVersionID pgtype.UUID) ([]RelationVersion, error)

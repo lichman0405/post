@@ -55,6 +55,13 @@ as it has since the initial spec commit: T0013's append-only triggers and
 T0101's 00016 are equally absent from it, and the migration set - not the
 seed - is the living schema. Nothing is back-ported.
 
+Additional deviation (T0104): `00019_project_provisioning.sql` adds
+`projects.provision_status` and the partial unique index
+`projects_personal_slug_idx` (personal projects have organization_id NULL,
+which the canonical `UNIQUE (organization_id, slug)` constraint cannot
+cover — PostgreSQL treats NULLs as distinct). Same seed policy: the
+migration set is the living schema.
+
 ## Layout
 
 | File | Content (canonical lines) |
@@ -77,6 +84,7 @@ seed - is the living schema. Nothing is back-ported.
 | `00016_auth_password.sql` | users.password_hash (T0101 email+password auth) |
 | `00017_profiles.sql` | research profile columns (T0102) |
 | `00018_organization_governance.sql` | organizations.deactivated_at, organization_memberships(user_id) index (T0103) |
+| `00019_project_provisioning.sql` | projects.provision_status (pending/provisioned/failed), personal-project slug index (T0104) |
 
 `migrations.go` embeds the files (`//go:embed *.sql`) for the runner.
 

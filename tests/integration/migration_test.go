@@ -134,10 +134,12 @@ var canonicalTables = map[string]tableExp{
 		fks:     []fkExp{fk("organization_id", "organizations", "RESTRICT")},
 	},
 	"projects": {
-		cols:    []colExp{c("id", u, false, true), c("organization_id", u, true, false), c("program_id", u, true, false), c("slug", txt, false, false), c("name", txt, false, false), c("purpose", txt, false, false), c("activity_status", txt, false, true), c("visibility", txt, false, false), c("main_frozen", bl, false, true), c("git_repository_external_id", txt, true, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
+		// provision_status is the T0104 addition (00019): every new project
+		// is provision-pending until T0301 provisions the GitProvider repo.
+		cols:    []colExp{c("id", u, false, true), c("organization_id", u, true, false), c("program_id", u, true, false), c("slug", txt, false, false), c("name", txt, false, false), c("purpose", txt, false, false), c("activity_status", txt, false, true), c("visibility", txt, false, false), c("main_frozen", bl, false, true), c("git_repository_external_id", txt, true, false), c("created_by", u, false, false), c("created_at", ts, false, true), c("provision_status", txt, false, true)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"organization_id", "slug"}},
-		checks:  []string{"activity_status = ANY", "visibility = ANY"},
+		checks:  []string{"activity_status = ANY", "visibility = ANY", "provision_status = ANY"},
 		fks:     []fkExp{fk("organization_id", "organizations", "RESTRICT"), fk("program_id", "programs", "SET NULL"), fk("created_by", "users", "RESTRICT")},
 	},
 	"project_memberships": {
@@ -343,6 +345,10 @@ var explicitIndexes = map[string][]string{
 	"search_documents_fts_idx":               {"USING gin", "to_tsvector"},
 	"search_documents_structured_gin":        {"USING gin", "structured"},
 	"organization_memberships_user_idx":      {"user_id"},
+	// T0104: personal projects (organization_id NULL) escape the
+	// UNIQUE(organization_id, slug) constraint, so their slug uniqueness is
+	// a partial unique index instead.
+	"projects_personal_slug_idx": {"organization_id IS NULL", "UNIQUE"},
 }
 
 // headVersion is the number of migrations in infra/migrations, DERIVED from the

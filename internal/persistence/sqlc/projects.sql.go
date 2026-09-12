@@ -11,9 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const addProjectMembership = `-- name: AddProjectMembership :exec
+const addProjectMembership = `-- name: AddProjectMembership :one
 INSERT INTO project_memberships (project_id, user_id, role)
 VALUES ($1, $2, $3)
+RETURNING project_id, user_id, role, created_at
 `
 
 type AddProjectMembershipParams struct {
@@ -22,9 +23,16 @@ type AddProjectMembershipParams struct {
 	Role      string      `json:"role"`
 }
 
-func (q *Queries) AddProjectMembership(ctx context.Context, arg AddProjectMembershipParams) error {
-	_, err := q.db.Exec(ctx, addProjectMembership, arg.ProjectID, arg.UserID, arg.Role)
-	return err
+func (q *Queries) AddProjectMembership(ctx context.Context, arg AddProjectMembershipParams) (ProjectMembership, error) {
+	row := q.db.QueryRow(ctx, addProjectMembership, arg.ProjectID, arg.UserID, arg.Role)
+	var i ProjectMembership
+	err := row.Scan(
+		&i.ProjectID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const createProgram = `-- name: CreateProgram :one
@@ -65,7 +73,7 @@ func (q *Queries) CreateProgram(ctx context.Context, arg CreateProgramParams) (P
 const createProject = `-- name: CreateProject :one
 INSERT INTO projects (organization_id, program_id, slug, name, purpose, visibility, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, organization_id, program_id, slug, name, purpose, activity_status, visibility, main_frozen, git_repository_external_id, created_by, created_at
+RETURNING id, organization_id, program_id, slug, name, purpose, activity_status, visibility, main_frozen, git_repository_external_id, created_by, created_at, provision_status
 `
 
 type CreateProjectParams struct {
@@ -102,12 +110,31 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.GitRepositoryExternalID,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.ProvisionStatus,
+	)
+	return i, err
+}
+
+const getProgramByID = `-- name: GetProgramByID :one
+SELECT id, organization_id, slug, name, description, created_at FROM programs WHERE id = $1
+`
+
+func (q *Queries) GetProgramByID(ctx context.Context, id pgtype.UUID) (Program, error) {
+	row := q.db.QueryRow(ctx, getProgramByID, id)
+	var i Program
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getProjectByID = `-- name: GetProjectByID :one
-SELECT id, organization_id, program_id, slug, name, purpose, activity_status, visibility, main_frozen, git_repository_external_id, created_by, created_at FROM projects WHERE id = $1
+SELECT id, organization_id, program_id, slug, name, purpose, activity_status, visibility, main_frozen, git_repository_external_id, created_by, created_at, provision_status FROM projects WHERE id = $1
 `
 
 func (q *Queries) GetProjectByID(ctx context.Context, id pgtype.UUID) (Project, error) {
@@ -126,12 +153,13 @@ func (q *Queries) GetProjectByID(ctx context.Context, id pgtype.UUID) (Project, 
 		&i.GitRepositoryExternalID,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.ProvisionStatus,
 	)
 	return i, err
 }
 
 const getProjectBySlug = `-- name: GetProjectBySlug :one
-SELECT id, organization_id, program_id, slug, name, purpose, activity_status, visibility, main_frozen, git_repository_external_id, created_by, created_at FROM projects WHERE organization_id = $1 AND slug = $2
+SELECT id, organization_id, program_id, slug, name, purpose, activity_status, visibility, main_frozen, git_repository_external_id, created_by, created_at, provision_status FROM projects WHERE organization_id = $1 AND slug = $2
 `
 
 type GetProjectBySlugParams struct {
@@ -154,6 +182,29 @@ func (q *Queries) GetProjectBySlug(ctx context.Context, arg GetProjectBySlugPara
 		&i.MainFrozen,
 		&i.GitRepositoryExternalID,
 		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.ProvisionStatus,
+	)
+	return i, err
+}
+
+const getProjectMembership = `-- name: GetProjectMembership :one
+SELECT project_id, user_id, role, created_at FROM project_memberships
+WHERE project_id = $1 AND user_id = $2
+`
+
+type GetProjectMembershipParams struct {
+	ProjectID pgtype.UUID `json:"project_id"`
+	UserID    pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) GetProjectMembership(ctx context.Context, arg GetProjectMembershipParams) (ProjectMembership, error) {
+	row := q.db.QueryRow(ctx, getProjectMembership, arg.ProjectID, arg.UserID)
+	var i ProjectMembership
+	err := row.Scan(
+		&i.ProjectID,
+		&i.UserID,
+		&i.Role,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -202,7 +253,7 @@ func (q *Queries) ListProjectMembers(ctx context.Context, projectID pgtype.UUID)
 }
 
 const listProjectsByOrganization = `-- name: ListProjectsByOrganization :many
-SELECT id, organization_id, program_id, slug, name, purpose, activity_status, visibility, main_frozen, git_repository_external_id, created_by, created_at FROM projects
+SELECT id, organization_id, program_id, slug, name, purpose, activity_status, visibility, main_frozen, git_repository_external_id, created_by, created_at, provision_status FROM projects
 WHERE organization_id = $1
 ORDER BY created_at, id
 LIMIT $3 OFFSET $2
@@ -236,6 +287,51 @@ func (q *Queries) ListProjectsByOrganization(ctx context.Context, arg ListProjec
 			&i.GitRepositoryExternalID,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.ProvisionStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectsForUser = `-- name: ListProjectsForUser :many
+SELECT p.id, p.organization_id, p.program_id, p.slug, p.name, p.purpose, p.activity_status, p.visibility, p.main_frozen, p.git_repository_external_id, p.created_by, p.created_at, p.provision_status
+FROM projects p
+JOIN project_memberships m ON m.project_id = p.id
+WHERE m.user_id = $1
+ORDER BY p.created_at DESC, p.id
+`
+
+// Projects the user belongs to (any project membership), most recently
+// created first.
+func (q *Queries) ListProjectsForUser(ctx context.Context, userID pgtype.UUID) ([]Project, error) {
+	rows, err := q.db.Query(ctx, listProjectsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Project
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrganizationID,
+			&i.ProgramID,
+			&i.Slug,
+			&i.Name,
+			&i.Purpose,
+			&i.ActivityStatus,
+			&i.Visibility,
+			&i.MainFrozen,
+			&i.GitRepositoryExternalID,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.ProvisionStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -251,7 +347,7 @@ const updateProjectActivityStatus = `-- name: UpdateProjectActivityStatus :one
 UPDATE projects
 SET activity_status = $1
 WHERE id = $2
-RETURNING id, organization_id, program_id, slug, name, purpose, activity_status, visibility, main_frozen, git_repository_external_id, created_by, created_at
+RETURNING id, organization_id, program_id, slug, name, purpose, activity_status, visibility, main_frozen, git_repository_external_id, created_by, created_at, provision_status
 `
 
 type UpdateProjectActivityStatusParams struct {
@@ -275,6 +371,7 @@ func (q *Queries) UpdateProjectActivityStatus(ctx context.Context, arg UpdatePro
 		&i.GitRepositoryExternalID,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.ProvisionStatus,
 	)
 	return i, err
 }

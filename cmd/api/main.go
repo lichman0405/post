@@ -45,6 +45,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/profilehttp"
+	"github.com/lichman0405/post/cmd/api/projectshttp"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/config"
 	"github.com/lichman0405/post/internal/health"
@@ -136,8 +137,8 @@ func run(args []string) int {
 		Cfg:        *authCfg,
 		Secure:     cfg.Layer == config.LayerProd,
 	})
-	// Product APIs (T0102+): one shared mux under one guard. The auth, profile
-	// and organization surfaces all register here and inherit the
+	// Product APIs (T0102+): one shared mux under one guard. The auth, profile,
+	// organization and project surfaces all register here and inherit the
 	// session/CSRF guard structurally — anonymous reads flow, writes are
 	// 401/403 before routing.
 	v1 := http.NewServeMux()
@@ -146,12 +147,19 @@ func run(args []string) int {
 		Profiles: persistence.NewProfileStore(pool),
 	})
 	profileAPI.Register(v1)
-	orgAPI := orgshttp.New(orgshttp.Deps{Store: persistence.NewOrgStore(pool)})
+	orgStore := persistence.NewOrgStore(pool)
+	orgAPI := orgshttp.New(orgshttp.Deps{Store: orgStore})
 	// The bare path is registered alongside the subtree so requests to
 	// /api/v1/organizations (create + list) hit the routes directly instead of
 	// being redirected for a trailing slash.
 	v1.Handle("/api/v1/organizations", orgAPI.Routes())
 	v1.Handle("/api/v1/organizations/", orgAPI.Routes())
+	projectAPI := projectshttp.New(projectshttp.Deps{
+		Store: persistence.NewProjectStore(pool),
+		Orgs:  orgStore,
+	})
+	v1.Handle("/api/v1/projects", projectAPI.Routes())
+	v1.Handle("/api/v1/projects/", projectAPI.Routes())
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	srv := &http.Server{

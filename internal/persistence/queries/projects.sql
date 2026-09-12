@@ -29,9 +29,10 @@ SET activity_status = @activity_status
 WHERE id = @id
 RETURNING *;
 
--- name: AddProjectMembership :exec
+-- name: AddProjectMembership :one
 INSERT INTO project_memberships (project_id, user_id, role)
-VALUES (@project_id, @user_id, @role);
+VALUES (@project_id, @user_id, @role)
+RETURNING *;
 
 -- name: ListProjectMembers :many
 SELECT u.id AS user_id, u.handle, u.display_name, pm.role, pm.created_at AS joined_at
@@ -39,3 +40,19 @@ FROM project_memberships pm
 JOIN users u ON u.id = pm.user_id
 WHERE pm.project_id = @project_id
 ORDER BY pm.created_at, u.id;
+
+-- name: GetProgramByID :one
+SELECT * FROM programs WHERE id = @id;
+
+-- name: GetProjectMembership :one
+SELECT * FROM project_memberships
+WHERE project_id = @project_id AND user_id = @user_id;
+
+-- name: ListProjectsForUser :many
+-- Projects the user belongs to (any project membership), most recently
+-- created first.
+SELECT p.*
+FROM projects p
+JOIN project_memberships m ON m.project_id = p.id
+WHERE m.user_id = @user_id
+ORDER BY p.created_at DESC, p.id;
