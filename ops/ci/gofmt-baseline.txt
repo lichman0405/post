@@ -1,0 +1,15 @@
+# gofmt baseline (T0008, CI stage "go", make fmt-check).
+# Legacy files that predate the fmt gate; grandfathered until reformatted.
+# Follow-up: run `gofmt -w` on each file, verify go vet/build/test stay
+# green, then delete its line. New files are never added to this list —
+# everything not listed here must be gofmt-clean.
+cmd/rddev/main_test.go
+cmd/rddev/task.go
+cmd/rddev/task_test.go
+internal/config/config_test.go
+internal/devorchestrator/dag.go
+internal/devorchestrator/doctor/catalog.go
+internal/devorchestrator/doctor/doctor_test.go
+internal/devorchestrator/doctor/measure.go
+internal/devorchestrator/doctor/output.go
+internal/devorchestrator/state.go

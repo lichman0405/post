@@ -5,12 +5,23 @@
 # adapter stay out of it (T0002 decision).
 #
 # `make check` is the single documented command covering the basic Go, Web
-# and Python checks (T0002 acceptance criterion).
+# and Python checks (T0002 acceptance criterion). Gate split (T0008):
+# `make check` / `make test` are infrastructure-free — no Docker, no
+# database, they must pass on a bare host. Everything that needs a real
+# PostgreSQL lives in `make test-integration`, which fails loudly with a
+# printed reason when no database is reachable (never a silent skip).
 
 SHELL := /bin/bash
 
-.PHONY: help bootstrap check build test dev smoke sync-schemas check-schema-drift \
-	infra-up infra-init infra infra-down infra-ps infra-logs
+# Unit-test packages only: tests/integration connects to real PostgreSQL
+# (default postgres://postgres:postgres_dev_pw@127.0.0.1:15432/post, docs/66)
+# and belongs to test-integration, not check/test.
+GO_UNIT_PKGS := $(shell go list ./... | grep -v '/tests/integration')
+STATICCHECK_VER := 2026.2.1
+
+.PHONY: help bootstrap check build test test-integration dev smoke sync-schemas \
+	check-schema-drift check-openapi fmt-check staticcheck lint-python type-python \
+	progress ci infra-up infra-init infra infra-down infra-ps infra-logs
 
 help: ## list targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN { FS = ":.*## " } { printf "  %-20s %s\n", $$1, $$2 }'
@@ -21,11 +32,12 @@ bootstrap: ## install every toolchain's pinned dependencies
 	cd services/scientific-adapter && uv sync --frozen
 	$(MAKE) sync-schemas
 
-check: ## one-command basic check: Go + Web + Python (+ schema drift)
+check: ## one-command basic check: Go + Web + Python (+ schema/OpenAPI drift); no Docker, no database
 	$(MAKE) check-schema-drift
+	$(MAKE) check-openapi
 	go vet ./...
 	go build ./...
-	go test ./...
+	go test $(GO_UNIT_PKGS)
 	pnpm --filter @post/ui typecheck
 	pnpm --filter @post/web typecheck
 	pnpm --filter @post/web lint
@@ -37,16 +49,55 @@ build: ## production builds and smoke across the three languages
 	pnpm --filter @post/web build
 	cd services/scientific-adapter && uv run python -c "import post_scientific_adapter; print('scientific-adapter', post_scientific_adapter.__version__)"
 
-test: ## full test suites (Go unit + web config + Python adapter)
-	go test ./...
+test: ## unit test suites (Go + web config + Python adapter); no Docker, no database
+	go test $(GO_UNIT_PKGS)
 	node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test "apps/web/lib/config.test.mjs"
 	cd services/scientific-adapter && uv run pytest
+
+test-integration: ## integration suite against real PostgreSQL; loud failure (with reason) when unreachable
+	@PG_TEST_URL="$${POSTGRES_TEST_ADMIN_URL:-postgres://postgres:postgres_dev_pw@127.0.0.1:15432/post}"; \
+	if python3 scripts/pg-ready.py "$$PG_TEST_URL"; then \
+		echo ">> test-integration: running integration suite against $$PG_TEST_URL"; \
+		POSTGRES_TEST_ADMIN_URL="$$PG_TEST_URL" go test ./tests/integration -count=1; \
+	else \
+		echo ">> test-integration: FAILED — integration tests require a real PostgreSQL and none is reachable (see pg-ready above)." >&2; \
+		exit 1; \
+	fi
 
 sync-schemas: ## copy canonical JSON Schemas from specs/schemas/ to packages/schemas/
 	bash packages/schemas/scripts/sync-schemas.sh
 
 check-schema-drift: ## fail when packages/schemas/ diverges from specs/schemas/
 	bash packages/schemas/scripts/check-schema-drift.sh
+
+check-openapi: ## validate the OpenAPI contract: parse + internal $ref integrity + structure
+	python3 scripts/validate_openapi.py
+
+fmt-check: ## fail when any Go file is not gofmt-formatted (legacy baseline: ops/ci/gofmt-baseline.txt)
+	@out="$$(gofmt -l . | grep -vxF -f <(grep -v '^#' ops/ci/gofmt-baseline.txt) || true)"; \
+	if [ -n "$$out" ]; then \
+		echo "gofmt: these files are not formatted:" >&2; \
+		echo "$$out" >&2; \
+		echo "run: gofmt -w <file> (new files must be clean; grandfathered list: ops/ci/gofmt-baseline.txt)" >&2; \
+		exit 1; \
+	else \
+		echo "gofmt: clean"; \
+	fi
+
+staticcheck: ## honnef.co static analysis, pinned version (grandfathered baseline: ops/ci/staticcheck-baseline.txt)
+	bash scripts/staticcheck.sh
+
+lint-python: ## ruff lint over the scientific adapter (config: ops/ci/ruff.toml)
+	cd services/scientific-adapter && uvx ruff check . --config ../../ops/ci/ruff.toml
+
+type-python: ## mypy type-check over the scientific adapter source (config: ops/ci/mypy.ini)
+	cd services/scientific-adapter && uvx mypy --config-file ../../ops/ci/mypy.ini src/post_scientific_adapter
+
+progress: ## regenerate the auto section of tasks/progress.md from task_status.json
+	python3 scripts/update_progress.py
+
+ci: ## run every CI stage locally in order (scripts/ci.sh); integration stage needs a database
+	bash scripts/ci.sh
 
 dev: ## start all five applications host-native from .env.dev (Ctrl-C stops them all)
 	@test -f .env.dev || { \
