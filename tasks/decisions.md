@@ -16,6 +16,30 @@
   ADR、fixture）按**非公开**信息处理；即使将来改为 public，也不得依赖"当前是公开的"这一假设。
 - **可逆性**：完全可逆（外部治理状态，由 owner 控制）。若将来 visibility 再变，必须重新确认。
 
+## L3-20260912-2 — Merge 授权分级（owner 裁定）
+
+- **决策**：owner 采用**分级授权**。
+  - **状态类 PR 自主 merge**：`chore(supervisor)` / `docs` / `tasks` 状态类改动（编排状态、
+    decisions/progress 记录、CI/脚手架 bookkeeping），在 required CI 全绿且 Supervisor 完成
+    G2 验收后，由 Supervisor 自主 squash-merge。
+  - **产品代码需人工 review**：涉及产品实现、OpenAPI/schema 契约、migration、权限/安全语义的
+    PR，Supervisor 开好 PR 后必须停下等 owner approve，得到显式批准后才 merge。
+  - **边界判定**：以 PR 的实际 diff 内容为准，而非 PR 标题或 task phase。若一个 PR 同时包含
+    状态类与产品类改动，按产品类处理（需 review）。
+- **背景**：仓库无法启用 branch protection（见 F-20260912-1），因此"无 review 即 merge"必须由
+  owner 显式授权。
+- **后果**：Supervisor 不再对每个 PR 都停下；但对产品代码 PR 必须停下。
+- **可逆性**：完全可逆，owner 可随时改为全人工或全自主。
+
+## L3-20260912-3 — 保留 CodeRabbit（owner 裁定）
+
+- **决策**：保留 CodeRabbit 第三方 AI code review 服务，接受其读取 PR 完整 diff。
+- **背景**：仓库为 PRIVATE 且包含完整产品规格；CodeRabbit 已安装，会读取每个 PR 的内容
+  （PR #1 已发生）。Supervisor 已向 owner 明示该第三方数据流，owner 选择保留。
+- **后果**：CodeRabbit 作为 **advisory** review 信号，不是 required check；Supervisor 不等待
+  其完成即按上述授权策略处理 PR。
+- **可逆性**：可逆（owner 可在 GitHub 端卸载该 App）。
+
 ## L1-20260912-1 — Canonical merge strategy
 
 - **决策**：合并进 `main` 的唯一 canonical 策略是 **squash merge**。
@@ -51,6 +75,31 @@
   commit/push/checkout/tag/remote/worktree/gh/docker/sudo 全部被阻断，HEAD 保持 `fecf24d`。
 - **已知缺口**：Claude Code 无参数可关闭 worktree 内 `CLAUDE.md` 自动发现，Worker 目前靠
   system prompt 显式声明优先级来忽略 Supervisor 的 `CLAUDE.md`。T0010 需给出结构性方案。
+
+### 隔离层加固（2026-09-12，T0000 运行期间发现并修复）
+
+观察第一个真实 Worker 的行为后，发现并修复了三个真实缺口：
+
+1. **`Read` 工具绕过**（真实漏洞，已修复）。原本 `worker-guard.sh` 只挂 `Bash` matcher，
+   Worker 可以直接用 `Read`/`Grep`/`Glob` 读取 `~/.config/gh/hosts.yml`、`~/.ssh/*`、
+   `~/.claude/*` 等凭据存储 —— 即绕过整个 Credential 剥离层。修复：hook matcher 扩展为
+   `Bash|Read|Grep|Glob|NotebookRead`，并在 `permissions.deny` 中补 `Read(...)` 规则。
+   已验证 13 个用例（含"读自己的 worktree 允许 / 读别人的 worktree 阻断"）。
+2. **命令 allow-list 过窄**。原先逐条枚举 `Bash(cmd:*)`，导致 `for`/`&&`/管道等复合命令
+   被整体拒绝，Worker 大量时间浪费在试错。修复：`allow` 改为整体允许 `Bash`，把细粒度判定
+   完全交给 hook（deny 规则仍保留为第二层）。这与 `specs/orchestrator/worker-permissions.yaml`
+   的 `explicitly_denied_shell_intents` 设计一致。
+3. **`docker` 规则过粗**。原规则阻断任何含 `docker` 的命令，连 `docker --version` 都拒绝，
+   与 T0000（环境 preflight 必须检查 docker/compose 版本）直接冲突。修复：只允许版本查询
+   （`docker --version`、`docker compose version`），其余仍需 socket 的操作继续阻断。
+   同时新增**写入收敛**规则：shell 重定向/`tee` 的目标路径必须在自己的 worktree 或 `/tmp`
+   之内，防止 Worker 通过 shell 写到仓库之外（Claude Code 原生文件工具本身已收敛，shell 没有）。
+
+加固后 hook 回归测试 25/25 通过（`shellcheck -w` 无告警）。T0011 应把上述用例固化为
+自动化 e2e 测试，而不是依赖人工回归。
+
+- **仍在的缺口（T0011 必须解决）**：hook 对 `cp`/`mv`/`ln`/`install` 的绝对路径目标尚未收敛；
+  Worker 仍可读自己 worktree 之外的任意非敏感路径（如其它项目目录）。
 
 ## L1-20260912-4 — `.rddev/` 为纯 runtime 状态
 
