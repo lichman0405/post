@@ -22,7 +22,13 @@
 # becomes a no-op is worse than no G3, because the gate then reports green.
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# ROOT is normally the tree this script lives in, which is what a gate wants:
+# `rddev gate run G3` executes steps in the task's worktree, so the script
+# builds and starts THAT tree's code. G3_REPO_ROOT exists for the one case the
+# gate cannot express — auditing an already-collected worktree whose baseline
+# predates this file — and is explicit precisely so it cannot be used by
+# accident.
+ROOT="${G3_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 
 PG_URL="${POSTGRES_TEST_ADMIN_URL:-postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post}"
@@ -56,12 +62,49 @@ fi
 exec 3<&- 2>/dev/null || true
 
 # --- the schema the API writes to --------------------------------------------
-if ! go run ./cmd/rddev db migrate --url "$PG_URL" >"$WORK/migrate.log" 2>&1; then
-  fail "migration to head against $PG_URL: $(tail -3 "$WORK/migrate.log")"
+#
+# The migrations are applied by THIS tree's own code, not by the Supervisor's
+# copy elsewhere: a task's diff may add a migration (T0101 adds
+# 00016_auth_password.sql), and applying someone else's migrations would leave
+# the schema under test missing exactly the column the task is about.
+#
+# The helper lives under bin/, which the repository root .gitignore excludes,
+# so it is invisible to `git status` and cannot disturb the planned review's
+# fingerprint. `go run` from this directory resolves the import against this
+# tree's module.
+mkdir -p "$ROOT/bin/g3migrate"
+cat >"$ROOT/bin/g3migrate/main.go" <<'GOMIGRATE'
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/lichman0405/post/internal/persistence"
+)
+
+func main() {
+	if len(os.Args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: g3migrate postgres://…")
+		os.Exit(2)
+	}
+	n, err := persistence.Migrate(context.Background(), os.Args[1])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Printf("%d migration(s) applied\n", n)
+}
+GOMIGRATE
+if ! (cd "$ROOT" && go run ./bin/g3migrate "$PG_URL") >"$WORK/migrate.log" 2>&1; then
+  rm -rf "$ROOT/bin/g3migrate"
+  fail "migration to head against $PG_URL using $ROOT's own migrations: $(tail -3 "$WORK/migrate.log")"
   printf '\nG3 auth-real-services: %d failure(s)\n' "$FAILS"
   exit 1
 fi
-ok "migrated: $(tail -1 "$WORK/migrate.log")"
+rm -rf "$ROOT/bin/g3migrate"
+ok "migrated ($ROOT's own migration set): $(tail -1 "$WORK/migrate.log")"
 
 # --- a real API process ------------------------------------------------------
 if ! go build -o "$WORK/api" ./cmd/api >"$WORK/build.log" 2>&1; then
