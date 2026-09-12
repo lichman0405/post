@@ -41,7 +41,7 @@ make ci               # 本地复刻 CI 全部 6 个 stage（= bash scripts/ci.s
 
 语义要点：
 
-- `test-integration` 先经 `scripts/pg-ready.py` 探测 `POSTGRES_TEST_ADMIN_URL`（默认 `postgres://postgres:postgres_dev_pw@127.0.0.1:15432/post`）；不可达时打印探测结论与修复提示后以非零退出 —— **绝不静默跳过**。
+- `test-integration` 先经 `scripts/pg-ready.py` 探测 `POSTGRES_TEST_ADMIN_URL`（默认 `postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post`，即 `make infra-up` 实际发布的端口）；不可达时打印探测结论与修复提示后以非零退出 —— **绝不静默跳过**。
 - `bash scripts/ci.sh [stage...]` 逐 stage 运行，每个 stage 是独立子进程（errexit 真正生效），失败会打印 `STAGE FAILED: <name>` 并立即停止 —— 与 `.github/workflows/ci.yml` 的 job/step 命名一一对应。不带参数运行全部 6 个 stage（integration 需要数据库）。
 - `python3 scripts/validate_task_state.py` 校验 `tasks/tasks.json` 与 `tasks/task_status.json` 覆盖**同一任务集合**（双向：DAG 多出的任务、状态表多出的条目都会失败）、状态枚举、时间戳格式、`tasks/tests.json` 的测试引用与覆盖 —— 堵住「DAG 加了任务但状态表漏登记、被静默当 todo」的漂移类。
 - 历史基线（gofmt 10 个文件、staticcheck 7 条、ruff/mypy 逐文件忽略）只放行**已存在的**旧债，新代码必须全绿；修复基线中条目后应删除对应行，新代码永不进基线。
