@@ -792,6 +792,36 @@ RESULT.json**（`status: blocked`、`task_id`、全部 required test 标 `not_ru
 耗尽或崩溃，磁盘上仍有一个**可解析、诚实**的产物：collect 能报告"blocked + 哪些没跑"，Supervisor 能
 看到 diff 范围，而不是面对"什么都没有"。**让合约的默认状态是存在，而不是缺失。**
 
+## L1-20260912-32 — ★★ P0 完成：T0012 合并，开发系统自身的 Gate 已可执行
+
+**里程碑**：T0012 合并（PR #45，`b80ef60`），六项 CI 全绿。**P0 全部 14 个任务（T0000–T0013）merged。**
+`docs/31` 的 Development System Gate 各项现在都有**被演示过的证据**，而不是声明。
+
+**Supervisor 亲自运行的三套验收 e2e**：
+
+```
+four-gate-e2e        tamper worker 被拒；collect 按"权威 scope"判定越界文件
+                     T0002 被 rejected，never verification；此时 accept 被拒绝
+rejection-retry-e2e  诚实未完成被拒；respawn 进入**新的 claude session** 并清空被拒 worktree
+supervisor-git-e2e   gh pr create/merge 只在 **green gate** 上被调用；commit/merge 留下 GitRecord 证据
+```
+
+**Gate/一致性测试**（含完整红灯矩阵）全过：`no G2 record`、**`subset G2 — the shipped defect`**（即我自己
+犯过的错，现在是一个具名测试）、`red required job`、`stale G2`、`non-ok collect`、`missing G3`；以及
+自身矛盾的 RESULT 被拒（interim 标记、completed + not_run、漏掉必需测试、acceptance 条目少于标准），
+且**诚实的未完成不被误判为矛盾**。
+
+**本轮修掉的 hermeticity 缺陷（只在 CI 暴露）**：`TestGitControlCommitOnGreenGate` 在本地通过、在 CI
+失败于 `Author identity unknown`——fixture 为自己的初始 commit 传了身份，但**被测代码路径**
+（`CommitTask`）依赖**环境**的 git 身份。已让 fixture 在 scratch repo 内配置身份，并在**类 CI 条件**
+（无 HOME、`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` 指向 `/dev/null`）下重跑整套 Go 测试与 e2e 全绿，
+确认那是唯一的环境依赖。
+
+**这与本会话我自己的失误是同一类**：验证通过是因为它恰好在某个环境里运行，而不是因为被测对象正确。
+
+**P0 之后的下一步**：P1（Identity / Organization / Project shell）。`rddev` 现在可以正式接管 Worker
+调度——`.rddev/dispatch/` 手工 harness 的使命结束。
+
 ---
 
 ## 环境发现（非决策，必须显式记录）

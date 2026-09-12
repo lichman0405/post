@@ -1,7 +1,7 @@
 # 开发进度
 
-状态：P0 进行中。
-最后更新：2026-09-12（T0008 merged；T0010 运行中）
+状态：**P0 完成**（14/14 merged）。
+最后更新：2026-09-12（T0012 merged）
 
 ## 当前阶段
 
@@ -27,6 +27,7 @@ owner 于 2026-09-12 授予**默认自主推进**授权（`L3-20260912-4`，持�
 | T0006 | merged | #32 | `/healthz` 200 / `/readyz` 503 如实 + 三处接线修复 + Docker-free `make smoke` |
 | T0007 | merged | #34 | 结构化日志 + 端到端 correlation id（含 canary 负对照）+ go-redis 日志归口 |
 | T0008 | merged | #36 | CI 六阶段 gate + `make check` 不再依赖数据库 + DAG/state 一致性检查 + workflow YAML 校验 |
+| T0012 | merged | #45 | 四层 Gate 可执行闭环：G1-G4 执行器、accept/reject/rework/respawn、Review Worker、red 矩阵、gate 输入防篡改 |
 | T0011 | merged | #41 | Worker 隔离 e2e：凭据剥离（含 spawn 后断言）、残留归属、RESULT 契约机械强制 |
 | T0010 | merged | #38 | `rddev worker spawn`：worktree 生命周期 + registry + 移植的 guard（147/147 双向回归） |
 | T0009 | merged | #23 | `rddev` CLI：doctor 复刻 35 项契约、任务状态机、原子+加锁状态写入、诚实 stub |
@@ -35,7 +36,7 @@ owner 于 2026-09-12 授予**默认自主推进**授权（`L3-20260912-4`，持�
 
 ## 进行中
 
-- **T0012** — Supervisor 四层验收 Gate 与自动开发闭环（P0 最后一个任务）。
+- 无。P0 已全部合并；下一步进入 **P1（Identity / Organization / Project shell）**。
 
 ## 已关闭的 SPEC_BLOCKED
 
