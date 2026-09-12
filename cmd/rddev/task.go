@@ -1,0 +1,234 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/lichman0405/post/internal/devorchestrator"
+)
+
+const taskUsage = `Usage: rddev task <command> [TASK] [flags]
+
+Commands:
+  next              list dispatchable tasks (todo/ready with all dependencies merged)
+  ready [TASK]      without TASK: list the ready pool; with TASK: mark it ready
+                    (requires all dependencies merged)
+  inspect TASK      print the DAG entry and the full recorded state
+  verify TASK       running -> verification
+  accept TASK       verification -> accepted (stamps accepted_by_supervisor_at)
+  reject TASK       running|verification -> rejected (requires --reason or --reason-file)
+  merged TASK       accepted -> merged (Supervisor merge bookkeeping)
+
+Flags:
+  --json                machine-readable output
+  --tasks-json PATH     task DAG file (default tasks/tasks.json)
+  --state-json PATH     task status file (default tasks/task_status.json)
+  --run-id ID           run id stamped on state changes (default: generated)
+  --reason TEXT         rejection reason
+  --reason-file FILE    rejection reason read from FILE
+
+Illegal transitions are rejected (exit 1) and the state file is left unchanged.
+State writes are atomic and serialized on an exclusive lock; run from the repo
+root or pass --tasks-json/--state-json.
+`
+
+// taskRunner carries the resolved store and streams for one rddev task call.
+type taskRunner struct {
+	store     *devorchestrator.Store
+	stdout    io.Writer
+	stderr    io.Writer
+	jsonOut   bool
+	runID     string
+}
+
+func runTask(args []string, stdout, stderr io.Writer, jsonOut bool) int {
+	if wantsHelp(args) {
+		fmt.Fprint(stdout, taskUsage)
+		return exitOK
+	}
+	vals, pos, err := parseFlags(args,
+		flagSpec{"--json", false},
+		flagSpec{"--tasks-json", true},
+		flagSpec{"--state-json", true},
+		flagSpec{"--run-id", true},
+		flagSpec{"--reason", true},
+		flagSpec{"--reason-file", true},
+	)
+	if err != nil {
+		return usageError(stderr, err.Error(), taskUsage)
+	}
+	if _, ok := vals["--json"]; ok {
+		jsonOut = true
+	}
+	if len(pos) == 0 {
+		return usageError(stderr, "rddev task: missing subcommand", taskUsage)
+	}
+	cmd, taskArg := pos[0], ""
+	if len(pos) > 1 {
+		taskArg = pos[1]
+		if len(pos) > 2 {
+			return usageError(stderr, fmt.Sprintf("rddev task %s: unexpected argument %q", cmd, pos[2]), taskUsage)
+		}
+	}
+
+	dagPath := stringOr(vals["--tasks-json"], devorchestrator.DefaultDAGPath)
+	statePath := stringOr(vals["--state-json"], devorchestrator.DefaultStatePath)
+	store, err := devorchestrator.OpenStore(dagPath, statePath)
+	if err != nil {
+		return operationalError(stderr, "rddev task", err)
+	}
+	tr := &taskRunner{
+		store:  store,
+		stdout: stdout,
+		stderr: stderr,
+		jsonOut: jsonOut,
+		runID:  stringOr(vals["--run-id"], devorchestrator.NewRunID()),
+	}
+
+	switch cmd {
+	case "next":
+		return tr.next()
+	case "ready":
+		if taskArg == "" {
+			return tr.readyList()
+		}
+		return tr.transition(taskArg, devorchestrator.StateReady, "")
+	case "inspect":
+		if taskArg == "" {
+			return usageError(stderr, "rddev task inspect: missing TASK", taskUsage)
+		}
+		return tr.inspect(taskArg)
+	case "verify":
+		return tr.transition(taskArg, devorchestrator.StateVerification, "")
+	case "accept":
+		return tr.transition(taskArg, devorchestrator.StateAccepted, "")
+	case "reject":
+		if taskArg == "" {
+			return usageError(stderr, "rddev task reject: missing TASK", taskUsage)
+		}
+		reason := vals["--reason"]
+		if reason == "" {
+			if rf := vals["--reason-file"]; rf != "" {
+				data, err := os.ReadFile(rf)
+				if err != nil {
+					return operationalError(stderr, "rddev task reject", fmt.Errorf("reading reason file %s: %w", rf, err))
+				}
+				reason = string(data)
+			}
+		}
+		if reason == "" {
+			return usageError(stderr, "rddev task reject: requires --reason TEXT or --reason-file FILE", taskUsage)
+		}
+		return tr.transition(taskArg, devorchestrator.StateRejected, reason)
+	case "merged":
+		return tr.transition(taskArg, devorchestrator.StateMerged, "")
+	default:
+		return usageError(stderr, fmt.Sprintf("rddev task: unknown subcommand %q", cmd), taskUsage)
+	}
+}
+
+// next prints the dispatch pool (tasks whose dependencies are all satisfied).
+func (tr *taskRunner) next() int {
+	next, err := tr.store.Next()
+	if err != nil {
+		return operationalError(tr.stderr, "rddev task next", err)
+	}
+	if tr.jsonOut {
+		tr.writeJSON(struct {
+			Next []devorchestrator.NextTask `json:"next"`
+		}{Next: next})
+		return exitOK
+	}
+	for _, n := range next {
+		fmt.Fprintf(tr.stdout, "%s\t%s\t%s\t%s\n", n.ID, n.Status, n.Phase, n.Title)
+	}
+	return exitOK
+}
+
+// readyList prints the current ready pool.
+func (tr *taskRunner) readyList() int {
+	ready, err := tr.store.ReadyList()
+	if err != nil {
+		return operationalError(tr.stderr, "rddev task ready", err)
+	}
+	if tr.jsonOut {
+		tr.writeJSON(struct {
+			Ready []devorchestrator.NextTask `json:"ready"`
+		}{Ready: ready})
+		return exitOK
+	}
+	for _, n := range ready {
+		fmt.Fprintf(tr.stdout, "%s\t%s\t%s\t%s\n", n.ID, n.Status, n.Phase, n.Title)
+	}
+	return exitOK
+}
+
+// inspect prints the DAG entry plus the full recorded state.
+func (tr *taskRunner) inspect(id string) int {
+	res, err := tr.store.Inspect(id)
+	if err != nil {
+		return operationalError(tr.stderr, "rddev task inspect", err)
+	}
+	if tr.jsonOut {
+		tr.writeJSON(res)
+		return exitOK
+	}
+	t, s := res.Task, res.State
+	fmt.Fprintf(tr.stdout, "%s\t%s\t%s\t%s\n", t.ID, s.Status, t.Phase, t.Title)
+	if len(t.Dependencies) > 0 {
+		fmt.Fprintf(tr.stdout, "  dependencies: %v\n", t.Dependencies)
+	}
+	for _, h := range s.History {
+		reason := ""
+		if h.Reason != "" {
+			reason = " reason=" + h.Reason
+		}
+		fmt.Fprintf(tr.stdout, "  %s: %s -> %s run_id=%s%s\n", h.At, h.From, h.To, h.RunID, reason)
+	}
+	return exitOK
+}
+
+// transition applies a guarded state change and reports it.
+func (tr *taskRunner) transition(id string, to devorchestrator.State, reason string) int {
+	if id == "" {
+		return usageError(tr.stderr, fmt.Sprintf("rddev task %s: missing TASK", to), taskUsage)
+	}
+	res, err := tr.store.Transition(id, to, tr.runID, reason)
+	if err != nil {
+		return operationalError(tr.stderr, "rddev task "+string(to), err)
+	}
+	if tr.jsonOut {
+		tr.writeJSON(res)
+		return exitOK
+	}
+	fmt.Fprintf(tr.stdout, "%s: %s -> %s (run_id=%s, at=%s)\n", res.TaskID, res.From, res.To, res.RunID, res.At)
+	return exitOK
+}
+
+// writeJSON emits v as compact JSON with a trailing newline (raw Unicode).
+func (tr *taskRunner) writeJSON(v any) {
+	enc := json.NewEncoder(tr.stdout)
+	enc.SetEscapeHTML(false)
+	enc.Encode(v)
+}
+
+// usageError prints a usage error and the command usage to stderr (exit 2).
+func usageError(stderr io.Writer, msg, usageText string) int {
+	fmt.Fprintf(stderr, "rddev: %s\n\n%s", msg, usageText)
+	return exitUsage
+}
+
+// operationalError prints a runtime failure to stderr (exit 1).
+func operationalError(stderr io.Writer, where string, err error) int {
+	fmt.Fprintf(stderr, "%s: %v\n", where, err)
+	return exitOperational
+}
+
+func stringOr(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
+}

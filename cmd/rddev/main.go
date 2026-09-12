@@ -1,9 +1,25 @@
-// Command rddev is the POST development orchestrator CLI.
+// Command rddev is the POST development orchestrator CLI: the deterministic
+// executor of the Supervisor/Worker development system (docs/61, docs/62,
+// specs/orchestrator/rddev-cli.yaml). It makes no product decisions — it
+// executes the command skeleton, the task state machine, the environment
+// preflight and the compose wrapper.
 //
-// T0002 scaffold: only the version subcommand is wired. The deterministic
-// development commands (`rddev doctor` per ops/doctor-checks.md, `rddev env`
-// per docs/66) arrive with the orchestrator tasks; this process must not
-// half-implement them.
+// Exit codes (deterministic contract):
+//
+//	0  ok
+//	1  operational failure (illegal state transition, unreadable state, ...)
+//	2  usage error (unknown command or flag)
+//	3  doctor usage error (rddev doctor only; ops/doctor-checks.md §2)
+//	4  not implemented (subsystem belongs to a later task — honest stub)
+//
+// Commands whose subsystem does not exist yet are honest stubs that fail with
+// exit 4 and an explicit message naming the owning task — never silent
+// no-ops that look like success:
+//
+//	rddev worker ...   -> T0010 (worktree/process management), T0011 (collect)
+//	rddev git commit   -> T0012 (Git control plane)
+//	rddev pr open|merge-> T0012 (Git control plane)
+//	rddev env reset|gc -> infra clients (T0010/T0011)
 package main
 
 import (
@@ -11,37 +27,113 @@ import (
 	"io"
 	"os"
 
+	"github.com/lichman0405/post/internal/devorchestrator/doctor"
 	"github.com/lichman0405/post/internal/version"
 )
 
-const usage = `rddev — POST development orchestrator (scaffold)
+const (
+	exitOK             = 0
+	exitOperational    = 1
+	exitUsage          = 2
+	exitDoctorUsage    = 3
+	exitNotImplemented = 4
+)
+
+const usage = `rddev — POST development orchestrator (deterministic executor, docs/61)
 
 Usage:
-  rddev version           print the rddev version
-  rddev help              show this help
+  rddev doctor [--json] [--fixture DIR] [--check-docker-daemon]
+  rddev env up|down|reset|gc
+  rddev task next [--json]
+  rddev task ready [TASK] [--json]
+  rddev task inspect TASK [--json]
+  rddev task verify TASK [--json]
+  rddev task accept TASK [--json]
+  rddev task reject TASK (--reason TEXT | --reason-file FILE) [--json]
+  rddev worker spawn|list|logs|collect|stop ...
+  rddev git commit TASK
+  rddev pr open|merge TASK
+  rddev version
+  rddev help
 
-Planned (later tasks): doctor (ops/doctor-checks.md), env up/reset (docs/66).
+Flags may appear before or after positional arguments. Task commands accept
+--tasks-json PATH and --state-json PATH (DAG/state file overrides, default
+tasks/tasks.json and tasks/task_status.json in the current directory) and
+--run-id ID (default: a fresh run id is generated and reported).
+
+Exit codes: 0 ok · 1 operational failure · 2 usage error · 3 doctor usage
+error · 4 not implemented (subsystem belongs to a later task).
 `
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-// run executes the CLI and returns the process exit code.
+// run executes the CLI against the given streams and returns the process
+// exit code (deterministic: same args, same state => same code and output).
 func run(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprint(stdout, usage)
-		return 2
+	// Global --json before the subcommand only. A --json after the subcommand
+	// belongs to that subcommand (each parses its own flags), so it passes
+	// through untouched.
+	jsonOut := false
+	rest := args[:0:0]
+	for _, a := range args {
+		if a == "--json" && len(rest) == 0 {
+			jsonOut = true
+			continue
+		}
+		rest = append(rest, a)
 	}
-	switch args[0] {
+	if len(rest) == 0 {
+		fmt.Fprint(stdout, usage)
+		return exitUsage
+	}
+	cmd, cmdArgs := rest[0], rest[1:]
+	switch cmd {
 	case "version":
 		fmt.Fprintln(stdout, "rddev", version.Version)
-		return 0
+		return exitOK
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
-		return 0
+		return exitOK
+	case "doctor":
+		return runDoctorCmd(cmdArgs, stdout, stderr, jsonOut)
+	case "env":
+		return runEnv(cmdArgs, stdout, stderr, jsonOut)
+	case "task":
+		return runTask(cmdArgs, stdout, stderr, jsonOut)
+	case "worker":
+		return runWorker(cmdArgs, stdout, stderr, jsonOut)
+	case "git":
+		return runGit(cmdArgs, stdout, stderr, jsonOut)
+	case "pr":
+		return runPR(cmdArgs, stdout, stderr, jsonOut)
 	default:
-		fmt.Fprintf(stderr, "rddev: unknown subcommand %q\n\n%s", args[0], usage)
-		return 2
+		fmt.Fprintf(stderr, "rddev: unknown subcommand %q\n\n%s", cmd, usage)
+		return exitUsage
 	}
+}
+
+// runDoctorCmd delegates to the doctor engine (ops/doctor-checks.md):
+// usage problems exit 3, the report is emitted by the engine itself. A
+// leading global --json (already stripped by run) is re-added so
+// `rddev --json doctor` works like `rddev doctor --json`.
+func runDoctorCmd(args []string, stdout, stderr io.Writer, jsonOut bool) int {
+	if jsonOut {
+		args = append([]string{"--json"}, args...)
+	}
+	opts, usageOnErr, err := doctor.ParseArgs(args)
+	if err != nil {
+		ue := err.(*doctor.UsageError)
+		if usageOnErr {
+			doctor.PrintUsage(stderr)
+		}
+		fmt.Fprintln(stderr, ue.Msg)
+		return exitDoctorUsage
+	}
+	if opts == nil { // -h / --help: usage on stdout, exit 0
+		doctor.PrintUsage(stdout)
+		return exitOK
+	}
+	return opts.Run(stdout)
 }
