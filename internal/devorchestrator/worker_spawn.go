@@ -30,20 +30,20 @@ const (
 
 // SpawnOpts parametrizes one spawn.
 type SpawnOpts struct {
-	RepoRoot    string
-	DagPath     string
-	StatePath   string
-	TaskID      string
-	Model       string
-	Effort      string
+	RepoRoot     string
+	DagPath      string
+	StatePath    string
+	TaskID       string
+	Model        string
+	Effort       string
 	MaxBudgetUSD *float64
-	MaxTurns    *int
-	Timeout     time.Duration
-	Docker      bool
-	Bare        bool
-	Parallel    int // 0 means DefaultParallelWorkers
-	RunID       string
-	ClaudeBin   string // resolved claude binary; empty means "claude"
+	MaxTurns     *int
+	Timeout      time.Duration
+	Docker       bool
+	Bare         bool
+	Parallel     int // 0 means DefaultParallelWorkers
+	RunID        string
+	ClaudeBin    string // resolved claude binary; empty means "claude"
 }
 
 // SpawnResult reports a successful spawn.

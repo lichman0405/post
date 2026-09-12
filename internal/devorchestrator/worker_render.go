@@ -19,18 +19,18 @@ import (
 
 // TaskPackage is the validated task package handed to the Worker.
 type TaskPackage struct {
-	TaskID            string   `json:"task_id"`
-	Goal              string   `json:"goal"`
-	BaselineSHA       string   `json:"baseline_sha"`
-	AllowedScope      []string `json:"allowed_scope"`
-	ForbiddenScope    []string `json:"forbidden_scope"`
-	Requirements      []string `json:"requirements"`
+	TaskID             string   `json:"task_id"`
+	Goal               string   `json:"goal"`
+	BaselineSHA        string   `json:"baseline_sha"`
+	AllowedScope       []string `json:"allowed_scope"`
+	ForbiddenScope     []string `json:"forbidden_scope"`
+	Requirements       []string `json:"requirements"`
 	AcceptanceCriteria []string `json:"acceptance_criteria"`
-	RequiredTests     []string `json:"required_tests"`
-	RelevantSpecs     []string `json:"relevant_specs"`
-	DecisionLevelMax  string   `json:"decision_level_max"`
-	MaxTurns          *int     `json:"max_turns,omitempty"`
-	MaxBudgetUSD      *float64 `json:"max_budget_usd,omitempty"`
+	RequiredTests      []string `json:"required_tests"`
+	RelevantSpecs      []string `json:"relevant_specs"`
+	DecisionLevelMax   string   `json:"decision_level_max"`
+	MaxTurns           *int     `json:"max_turns,omitempty"`
+	MaxBudgetUSD       *float64 `json:"max_budget_usd,omitempty"`
 }
 
 // RenderTaskPackage builds the package from the DAG entry and the spawn
@@ -39,10 +39,10 @@ type TaskPackage struct {
 // dispatching a Worker with an invalid contract.
 func RenderTaskPackage(t *TaskSpec, baselineSHA string, maxTurns *int, maxBudgetUSD *float64) (*TaskPackage, error) {
 	pkg := &TaskPackage{
-		TaskID:             t.ID,
-		Goal:               t.Title,
-		BaselineSHA:        baselineSHA,
-		AllowedScope:       t.AllowedScope,
+		TaskID:       t.ID,
+		Goal:         t.Title,
+		BaselineSHA:  baselineSHA,
+		AllowedScope: t.AllowedScope,
 		// nil slices would marshal as JSON null, which the schema's array
 		// types reject — normalize to [] so any valid DAG entry renders a
 		// valid package.

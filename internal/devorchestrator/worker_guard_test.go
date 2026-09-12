@@ -29,8 +29,8 @@ func TestGuardScriptHasFailClosedContract(t *testing.T) {
 	for _, want := range []string{
 		"refusing to decide a shell write",
 		"refusing to decide a file read",
-		"pending = 1",   // segment reset (second segment command position)
-		`*".env"*`,      // glob-pattern .env matching
+		"pending = 1", // segment reset (second segment command position)
+		`*".env"*`,    // glob-pattern .env matching
 	} {
 		if !strings.Contains(GuardScript(), want) {
 			t.Errorf("guard script missing %q", want)
@@ -45,7 +45,7 @@ func TestWriteGuardFiles(t *testing.T) {
 	dir := t.TempDir()
 	guardPath, err := WriteGuardFiles(dir, GuardOpts{
 		RepoRoot: "/repo", TaskID: "T0001",
-		Worktree: "/repo/.rddev/worktrees/T0001",
+		Worktree:  "/repo/.rddev/worktrees/T0001",
 		ResultDir: "/repo/.rddev/workers/T0001",
 	})
 	if err != nil {

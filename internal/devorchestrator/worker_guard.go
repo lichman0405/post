@@ -25,10 +25,10 @@ func GuardScript() string { return guardScript }
 
 // GuardOpts parametrizes the generated guard files.
 type GuardOpts struct {
-	RepoRoot   string
-	TaskID     string
-	Worktree   string
-	ResultDir  string
+	RepoRoot    string
+	TaskID      string
+	Worktree    string
+	ResultDir   string
 	DockerGrant bool
 }
 

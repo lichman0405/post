@@ -186,20 +186,20 @@ func runWorkerList(repoRoot string, stdout, stderr io.Writer, jsonOut bool) int 
 	}
 	if jsonOut {
 		type listEntry struct {
-			TaskID        string `json:"task_id"`
-			RunID         string `json:"run_id"`
-			Status        string `json:"status"`
-			PID           int    `json:"pid"`
-			Model         string `json:"model"`
-			MaxBudgetUSD  *float64 `json:"max_budget_usd,omitempty"`
-			ExitStatus    *int   `json:"exit_status,omitempty"`
-			BaselineSHA   string `json:"baseline_sha"`
-			Worktree      string `json:"worktree"`
-			LogPath       string `json:"log_path"`
-			LogBytes      int64  `json:"log_bytes"`
-			LogAgeS       int64  `json:"log_age_s"`
-			StartedAt     string `json:"started_at"`
-			EndedAt       string `json:"ended_at,omitempty"`
+			TaskID       string   `json:"task_id"`
+			RunID        string   `json:"run_id"`
+			Status       string   `json:"status"`
+			PID          int      `json:"pid"`
+			Model        string   `json:"model"`
+			MaxBudgetUSD *float64 `json:"max_budget_usd,omitempty"`
+			ExitStatus   *int     `json:"exit_status,omitempty"`
+			BaselineSHA  string   `json:"baseline_sha"`
+			Worktree     string   `json:"worktree"`
+			LogPath      string   `json:"log_path"`
+			LogBytes     int64    `json:"log_bytes"`
+			LogAgeS      int64    `json:"log_age_s"`
+			StartedAt    string   `json:"started_at"`
+			EndedAt      string   `json:"ended_at,omitempty"`
 		}
 		out := make([]listEntry, 0, len(views))
 		for _, v := range views {
