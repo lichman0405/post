@@ -1196,3 +1196,61 @@ CredentialStore roundtrip + fresh-install catalog + upgrade path），
 **Redis 用 miniredis**（真实协议、进程内），**OIDC 用真实假 IdP**。
 这不足以宣布 G3 已按 §6 履行。**这是 gate 设计层的缺口，需要一次专门的定义工作（按 phase 定义 G3 jobs），
 不是给单个任务临时补一条**——已作为后续项记录，见 L1-20260912-40。
+
+## L1-20260912-40 — ★★ 独立 Review 抓到阻塞缺陷：交付的 web 登录无法通过交付的 API
+
+**这是本会话最重要的一次验收结果，而且它是 Gate 正常工作的证明。**
+
+`rddev review spawn/collect T0101` 返回 **`request_changes`，1 blocking + 2 major**。
+我独立复核了那条 blocking，**它是真的**：
+
+### BLOCKING：`checkOrigin` 拒绝了本任务自己交付的 web 前端
+
+```go
+u, err := url.Parse(origin)
+if err != nil || u.Host != r.Host {   // 403 cross-site request rejected
+```
+
+`checkOrigin` 要求 `Origin` 的 host **等于 `r.Host`**，并且**从不读取 `g.cfg.WebOrigin`**——
+而 `WebOrigin`（默认 `http://127.0.0.1:3000`）正是为这种场景存在的。
+本仓库的默认拓扑就是跨源：web 在 `127.0.0.1:3000`，API 在另一个端口
+（Makefile 的 smoke 用 `API_BASE_URL=http://127.0.0.1:18080`）。
+
+**后果：浏览器从 web 登录页 POST 到 API，Origin=`http://127.0.0.1:3000`，`r.Host`=API 的 host:port，
+两者不等 → 403。交付的登录页无法登录交付的 API。**
+
+**为什么所有测试都是绿的**：e2e 直接驱动 API，Origin 自然匹配；单元测试用 `web.test` 作 Origin 也同样匹配。
+**两个交付物各自被测试过，但它们之间的那条链路从来没有被跑过。** 这正是"独立 review"存在的理由——
+机械 Gate 检查的是各自是否自洽，而不是两半拼起来是否能用。
+
+### MAJOR（同样复核为真，且直接打在任务自己的验收标准上）
+
+1. **账号枚举的时序 oracle**：`Login` 里 `record.User.Disabled()` 分支**在任何 KDF 计算之前就返回**，
+   而"用户不存在"分支特意烧掉一次 argon2id 计算以求时序不可区分。于是**禁用账号与未知邮箱可被时序区分**。
+   OIDC-only 账号（`password_hash` 为 NULL）走 `VerifyPassword` 也几乎不耗时，同理。
+   任务的验收标准之一就是"账号枚举防护"——**这条不满足**。
+2. **signup 既不要求认证也不限流**：`Service.Signup` 不查 `RateLimiter`（`Login` 查），
+   路由也豁免于写守卫，因此每个匿名请求都能触发一次 argon2id（64MiB）计算。
+
+### 处置：`accepted -> rejected`
+
+T0101 当时处在 `accepted`，而 `rework` 要求 `rejected`，`reject` 只接受 `running|verification`——
+**没有合法出路**。这暴露了状态机的一个真实缺口，而不是 T0101 的特殊情况：
+
+> **验收在 merge 之前不是终局。** 一个 required-for-merge 的 Gate 在验收之后变红
+> （review 返回 `request_changes`、PR 上 CI 失败、merge 前发现缺陷），**必须能够把任务打回去**。
+> 否则唯二的出路是"合并已知有问题的东西"或"手改状态文件"。
+
+因此 `transitions` 增加 `accepted -> rejected`，`task-state-machine.yaml` 同步，
+`task reject` 的用法说明同步。**这不是为 T0101 开的特例**：它是"accept 只是一个中间态"这一事实的补全。
+
+**同时修掉一个测试反模式**：`TestEveryIllegalTransitionRejectedAndFileUnchanged` 原本**手写**了
+合法转移表的补集，所以我一加 `accepted -> rejected`，那行手写清单就过期并让测试失败。
+已改为**从 `transitions` 表推导**非法集合——这样每对 (from,to) 都被自动覆盖，
+包括将来新增的；手写补集在两个方向上都会错（漏删 → 静默不再测试该组合）。
+
+### 教训
+
+`L1-20260912-39` 修的是"accept 与 merge 顺序死锁"，`L1-20260912-40` 修的是"accept 之后无法回退"。
+两条合起来说明同一件事：**我之前把 accept 当成了一个终局状态来设计，而它只是一个中间态。**
+Gate 的价值不在于"拦住坏东西"，而在于**在任何时刻都能把一个判断推翻重来**。
