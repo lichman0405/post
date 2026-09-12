@@ -1,0 +1,539 @@
+// Task T0013: append-only / version immutability enforced at the storage
+// layer by infra/migrations/00014_append_only_enforcement.sql (BEFORE UPDATE
+// OR DELETE triggers that RAISE EXCEPTION). These tests prove, against a REAL
+// PostgreSQL, that:
+//
+//   - every covered table has its guard trigger present and ENABLED
+//     (pg_trigger.tgenabled = 'O'), and no other table carries a trigger;
+//   - an UPDATE of an existing version row is rejected with the exact
+//     SQLSTATE (P0001 raise_exception) and an error naming table + operation;
+//   - a DELETE of an existing version row is rejected the same way;
+//   - a legitimate INSERT of a NEW version row still succeeds;
+//   - the same rejections hold on every other covered append-only table;
+//   - the upgrade path (previous head 13 → new head 14) introduces exactly
+//     these triggers, the upgraded database enforces the guard, and its
+//     trigger set matches a fresh install.
+//
+// Exempt tables (mutable by design; see RESULT.json for the full decision):
+// current state and workflow tables (users, projects, branches, issues, pull
+// requests, reviews, evidence_assertions, credit_disputes, subscriptions,
+// blobs, blob_attachments, asset_dependencies, external_references, …), the
+// worker bookkeeping tables (outbox_events, webhook_deliveries) and the
+// rebuildable search projection (search_documents).
+package integration
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/lichman0405/post/internal/persistence"
+	"github.com/lichman0405/post/internal/persistence/testdb"
+)
+
+// appendOnlyTaskID namespaces this task's test databases
+// (test_T0013_<run_id>, docs/66 §3).
+const appendOnlyTaskID = "T0013"
+
+// appendOnlyTables is the set migration 00014 guards: every table that is
+// append-only BY DESIGN (docs/21 §4, docs/46, ADR-007/008/021, Master
+// Acceptance Gate A). The same list drives the catalog assertion and the
+// per-table rejection loop.
+var appendOnlyTables = []string{
+	"scientific_object_versions",
+	"relation_versions",
+	"project_states",
+	"state_commits",
+	"releases",
+	"research_asset_versions",
+	"asset_lineage",
+	"policy_versions",
+	"validation_results",
+	"contribution_events",
+	"audit_log",
+	"research_events",
+	"external_reference_snapshots",
+}
+
+// triggerRows returns every user trigger in the public schema as sorted
+// "relname:tgname:tgenabled:tgtype" strings, from pg_trigger itself.
+func triggerRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []string {
+	t.Helper()
+	rows, err := pool.Query(ctx, `
+		SELECT c.relname, t.tgname, t.tgenabled, t.tgtype
+		FROM pg_trigger t
+		JOIN pg_class c ON c.oid = t.tgrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = 'public' AND NOT t.tgisinternal
+		ORDER BY c.relname, t.tgname`)
+	if err != nil {
+		t.Fatalf("triggerRows: %v", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var rel, name, enabled string
+		var tgtype int16
+		if err := rows.Scan(&rel, &name, &enabled, &tgtype); err != nil {
+			t.Fatalf("triggerRows: scan: %v", err)
+		}
+		out = append(out, fmt.Sprintf("%s:%s:%s:%d", rel, name, enabled, tgtype))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("triggerRows: %v", err)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// assertTriggers verifies that exactly the append-only set carries a guard
+// trigger, that each one is ENABLED ('O'), and that it is a BEFORE UPDATE OR
+// DELETE per-row trigger (tgtype bits: ROW=1, BEFORE=2, DELETE=8, UPDATE=16).
+func assertTriggers(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tables []string) {
+	t.Helper()
+	got := map[string]string{}
+	for _, tr := range triggerRows(t, ctx, pool) {
+		parts := strings.Split(tr, ":")
+		got[parts[0]] = tr
+	}
+	for _, tbl := range tables {
+		tr, ok := got[tbl]
+		if !ok {
+			t.Errorf("table %s: append-only trigger missing", tbl)
+			continue
+		}
+		if !strings.HasSuffix(tr, ":O:27") {
+			t.Errorf("table %s: trigger not enabled/before-update-or-delete: %s", tbl, tr)
+		}
+	}
+	for rel, tr := range got {
+		found := false
+		for _, tbl := range tables {
+			if rel == tbl {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("unexpected trigger on table %s (guard must cover exactly the append-only set): %s", rel, tr)
+		}
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_proc WHERE proname = 'append_only_guard'`).Scan(&n); err != nil {
+		t.Fatalf("assertTriggers: guard function lookup: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("append_only_guard function: found %d, want 1", n)
+	}
+}
+
+// wantAppendOnlyErr asserts the guard rejected the statement with SQLSTATE
+// P0001 and an error naming both the table and the forbidden operation.
+func wantAppendOnlyErr(t *testing.T, stmt, table, op string, err error) {
+	t.Helper()
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("%s: expected a PostgreSQL error from the append-only guard, got %v", stmt, err)
+	}
+	if pgErr.Code != "P0001" {
+		t.Errorf("%s: SQLSTATE = %s, want P0001 (raise_exception)", stmt, pgErr.Code)
+	}
+	if !strings.Contains(pgErr.Message, table) {
+		t.Errorf("%s: error %q must name the table %s", stmt, pgErr.Message, table)
+	}
+	if !strings.Contains(pgErr.Message, op) {
+		t.Errorf("%s: error %q must name the forbidden operation %s", stmt, pgErr.Message, op)
+	}
+	if pgErr.Code == "P0001" && strings.Contains(pgErr.Message, table) && strings.Contains(pgErr.Message, op) {
+		t.Logf("%s → rejected: SQLSTATE %s: %s", stmt, pgErr.Code, pgErr.Message)
+	}
+}
+
+// TestAppendOnlyEnforcement proves the guard actually fires on a fresh
+// install: UPDATE and DELETE of an existing version row are rejected, a new
+// version INSERT still succeeds, and the same holds on every other covered
+// append-only table (a legitimate INSERT into each one succeeds first).
+func TestAppendOnlyEnforcement(t *testing.T) {
+	ctx := testCtx(t)
+	pool, _ := testdb.Setup(t, ctx, adminURL(t), appendOnlyTaskID)
+
+	assertTriggers(t, ctx, pool, appendOnlyTables)
+
+	mustQueryUUID := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("setup query failed: %s: %v", sql, err)
+		}
+		return id
+	}
+
+	// Minimal RSG graph: user → project → branch → state → object → version.
+	u1 := mustQueryUUID(`INSERT INTO users (handle, display_name) VALUES ('alice', 'Alice') RETURNING id`)
+	o1 := mustQueryUUID(`INSERT INTO organizations (slug, name) VALUES ('acme', 'Acme') RETURNING id`)
+	p1 := mustQueryUUID(`INSERT INTO projects (organization_id, slug, name, purpose, visibility, created_by)
+		VALUES ($1, 'p1', 'P1', 'testing append-only', 'private', $2) RETURNING id`, o1, u1)
+	b1 := mustQueryUUID(`INSERT INTO branches (project_id, name, visibility, git_ref, created_by)
+		VALUES ($1, 'main', 'private', 'refs/heads/main', $2) RETURNING id`, p1, u1)
+	s1 := mustQueryUUID(`INSERT INTO project_states (project_id, branch_id, state_hash, manifest_version)
+		VALUES ($1, $2, 'hash-1', 'v1') RETURNING id`, p1, b1)
+	so1 := mustQueryUUID(`INSERT INTO scientific_objects (project_id, object_type, created_by)
+		VALUES ($1, 'dataset', $2) RETURNING id`, p1, u1)
+	sov := func(versionNo int) string {
+		t.Helper()
+		return mustQueryUUID(`INSERT INTO scientific_object_versions
+			(object_id, version_no, state_id, schema_id, schema_version, title,
+			 lifecycle_state, payload, integrity_hash, created_by)
+			VALUES ($1, $2, $3, 'core/dataset', '1.0', 'Dataset A', 'active',
+			        '{}'::jsonb, 'ih-1', $4) RETURNING id`, so1, versionNo, s1, u1)
+	}
+	sov1 := sov(1)
+	r1 := mustQueryUUID(`INSERT INTO relations (project_id) VALUES ($1) RETURNING id`, p1)
+
+	// --- The explicit acceptance cases on scientific_object_versions. ---
+
+	// 1. UPDATE of an existing version row is rejected (the exact tamper the
+	//    Supervisor demonstrated pre-T0013).
+	_, err := pool.Exec(ctx, `UPDATE scientific_object_versions
+		SET title = 'REWRITTEN HISTORY', integrity_hash = 'tampered' WHERE id = $1`, sov1)
+	wantAppendOnlyErr(t, "UPDATE scientific_object_versions", "scientific_object_versions", "UPDATE", err)
+
+	// 2. DELETE of an existing version row is rejected.
+	_, err = pool.Exec(ctx, `DELETE FROM scientific_object_versions WHERE id = $1`, sov1)
+	wantAppendOnlyErr(t, "DELETE FROM scientific_object_versions", "scientific_object_versions", "DELETE", err)
+
+	// 3. A legitimate INSERT of a NEW version row still succeeds.
+	sov2 := sov(2)
+	var versionCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM scientific_object_versions WHERE object_id = $1`, so1).Scan(&versionCount); err != nil {
+		t.Fatalf("count versions: %v", err)
+	}
+	if versionCount != 2 {
+		t.Errorf("append-only flow: %d versions after appending v2, want 2", versionCount)
+	}
+	if sov1 == sov2 {
+		t.Error("append-only flow: v1 and v2 share an id; the INSERT must create a new row")
+	}
+
+	// --- Every other covered table: legitimate INSERT succeeds, then UPDATE
+	//     and DELETE are rejected. ---
+
+	// Shared dependencies for the later cases.
+	s2 := mustQueryUUID(`INSERT INTO project_states (project_id, branch_id, state_hash, manifest_version)
+		VALUES ($1, $2, 'hash-2', 'v1') RETURNING id`, p1, b1)
+	ra1 := mustQueryUUID(`INSERT INTO research_assets (asset_type, slug, title, origin_project_id)
+		VALUES ('dataset', 'ds-1', 'DS1', $1) RETURNING id`, p1)
+	av1 := mustQueryUUID(`INSERT INTO research_asset_versions
+		(asset_id, version, manifest, rights_json, visibility, integrity_hash, published_by)
+		VALUES ($1, '1.0', '{}'::jsonb, '{}'::jsonb, 'private', 'h', $2) RETURNING id`, ra1, u1)
+	av2 := mustQueryUUID(`INSERT INTO research_asset_versions
+		(asset_id, version, manifest, rights_json, visibility, integrity_hash, published_by)
+		VALUES ($1, '2.0', '{}'::jsonb, '{}'::jsonb, 'private', 'h', $2) RETURNING id`, ra1, u1)
+	er1 := mustQueryUUID(`INSERT INTO external_references (source_type, external_identifier)
+		VALUES ('Publication/DOI', '10.1000/1') RETURNING id`)
+
+	type rowCase struct {
+		table  string
+		insert func() string // returns a stable row identifier for the case
+		update func(id string) error
+		del    func(id string) error
+	}
+	cases := []rowCase{
+		{
+			table: "relation_versions",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO relation_versions
+					(relation_id, version_no, state_id, relation_type,
+					 source_object_version_id, target_object_version_id,
+					 integrity_hash, created_by)
+					VALUES ($1, 1, $2, 'uses', $3, $4, 'h', $5) RETURNING id`,
+					r1, s1, sov1, sov2, u1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE relation_versions SET payload = '{"x":1}'::jsonb WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM relation_versions WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			table: "project_states",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO project_states (project_id, branch_id, state_hash, manifest_version)
+					VALUES ($1, $2, 'hash-3', 'v1') RETURNING id`, p1, b1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE project_states SET state_hash = 'rewritten' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM project_states WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			table: "state_commits",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO state_commits
+					(project_id, branch_id, base_state_id, result_state_id, actor_id, via, message, operation_summary)
+					VALUES ($1, $2, $3, $4, $5, 'web', 'create dataset', '{}'::jsonb) RETURNING id`,
+					p1, b1, s1, s2, u1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE state_commits SET message = 'rewritten' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM state_commits WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			table: "releases",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO releases
+					(project_id, version, title, state_id, manifest, manifest_hash, created_by)
+					VALUES ($1, '0.1.0', 'R1', $2, '{}'::jsonb, 'mh', $3) RETURNING id`, p1, s1, u1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE releases SET title = 'REWRITTEN' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM releases WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			table: "research_asset_versions",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO research_asset_versions
+					(asset_id, version, manifest, rights_json, visibility, integrity_hash, published_by)
+					VALUES ($1, '3.0', '{}'::jsonb, '{}'::jsonb, 'private', 'h', $2) RETURNING id`, ra1, u1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE research_asset_versions SET version = 'REWRITTEN' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM research_asset_versions WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			table: "asset_lineage",
+			insert: func() string {
+				if _, err := pool.Exec(ctx, `INSERT INTO asset_lineage
+					(parent_asset_version_id, child_asset_version_id, relation_type)
+					VALUES ($1, $2, 'forked_from')`, av1, av2); err != nil {
+					t.Fatalf("setup: INSERT asset_lineage: %v", err)
+				}
+				return "forked_from"
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE asset_lineage SET relation_type = 'supersedes'
+					WHERE parent_asset_version_id = $1 AND child_asset_version_id = $2 AND relation_type = $3`,
+					av1, av2, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM asset_lineage
+					WHERE parent_asset_version_id = $1 AND child_asset_version_id = $2 AND relation_type = $3`,
+					av1, av2, id)
+				return err
+			},
+		},
+		{
+			table: "policy_versions",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO policy_versions
+					(organization_id, version, policy_json, created_by)
+					VALUES ($1, 'v1', '{}'::jsonb, $2) RETURNING id`, o1, u1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE policy_versions SET policy_json = '{"tampered":true}'::jsonb WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM policy_versions WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			table: "validation_results",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO validation_results
+					(project_id, state_id, gate, status, result_json)
+					VALUES ($1, $2, 'pr', 'passed', '{}'::jsonb) RETURNING id`, p1, s1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE validation_results SET status = 'warning' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM validation_results WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			table: "contribution_events",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO contribution_events (actor_id, event_type)
+					VALUES ($1, 'object.created') RETURNING id`, u1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE contribution_events SET event_type = 'rewritten' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM contribution_events WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			table: "audit_log",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO audit_log (via, action, correlation_id)
+					VALUES ('web', 'object.create', 'corr-1') RETURNING id`)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE audit_log SET action = 'rewritten' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM audit_log WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			table: "research_events",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO research_events
+					(event_type, visibility, payload, correlation_id)
+					VALUES ('project.created', 'private', '{}'::jsonb, 'corr-2') RETURNING id`)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE research_events SET payload = '{"tampered":true}'::jsonb WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM research_events WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			table: "external_reference_snapshots",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO external_reference_snapshots
+					(external_reference_id, accessed_at, metadata, snapshot_hash)
+					VALUES ($1, now(), '{}'::jsonb, 'sh-1') RETURNING id`, er1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE external_reference_snapshots SET metadata = '{"tampered":true}'::jsonb WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM external_reference_snapshots WHERE id = $1`, id)
+				return err
+			},
+		},
+	}
+
+	for _, c := range cases {
+		id := c.insert() // legitimate INSERT into the covered table succeeds
+		wantAppendOnlyErr(t, fmt.Sprintf("UPDATE %s", c.table), c.table, "UPDATE", c.update(id))
+		wantAppendOnlyErr(t, fmt.Sprintf("DELETE FROM %s", c.table), c.table, "DELETE", c.del(id))
+	}
+
+	// Sanity: current-state tables stay mutable (the guard must not leak onto
+	// them) — the earlier version INSERTs would already have failed otherwise,
+	// but an in-place pointer move is the documented mechanism (docs/21 §5).
+	if _, err := pool.Exec(ctx, `UPDATE branches SET base_state_id = $1 WHERE id = $2`, s2, b1); err != nil {
+		t.Errorf("current-state UPDATE (branches.base_state_id pointer) must remain allowed: %v", err)
+	}
+}
+
+// TestAppendOnlyUpgradePath proves the migration upgrade path for 00014: a
+// database at the previous head (13) has no guard, migrating to the new head
+// (14) introduces exactly the guard triggers (present and ENABLED per
+// pg_trigger), the upgraded database actually enforces them, and its trigger
+// set matches a fresh install.
+func TestAppendOnlyUpgradePath(t *testing.T) {
+	ctx := testCtx(t)
+
+	// Intermediate database at the previous head, version 13.
+	pool, url := testdb.SetupEmpty(t, ctx, adminURL(t), appendOnlyTaskID)
+	applied, err := persistence.MigrateTo(ctx, url, 13)
+	if err != nil {
+		t.Fatalf("upgrade path: migrate to 13: %v", err)
+	}
+	if applied != 13 {
+		t.Errorf("upgrade path: applied %d to reach version 13, want 13", applied)
+	}
+	if v := appliedVersion(t, ctx, pool); v != 13 {
+		t.Fatalf("upgrade path: version after MigrateTo(13) = %d, want 13", v)
+	}
+	if tr := triggerRows(t, ctx, pool); len(tr) != 0 {
+		t.Errorf("upgrade path: %d triggers at version 13, want 0 (00014 must be the sole source): %v", len(tr), tr)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_proc WHERE proname = 'append_only_guard'`).Scan(&n); err != nil {
+		t.Fatalf("upgrade path: guard function lookup at v13: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("upgrade path: append_only_guard exists at version 13, want none")
+	}
+
+	// Continue to the new head.
+	applied, err = persistence.Migrate(ctx, url)
+	if err != nil {
+		t.Fatalf("upgrade path: migrate to head: %v", err)
+	}
+	if applied != 1 {
+		t.Errorf("upgrade path: applied %d on the way from 13 to head, want 1", applied)
+	}
+	if v := appliedVersion(t, ctx, pool); v != headVersion {
+		t.Fatalf("upgrade path: version after head = %d, want %d", v, headVersion)
+	}
+
+	assertTriggers(t, ctx, pool, appendOnlyTables)
+
+	// The upgraded database must actually ENFORCE the guard, not merely show
+	// it in pg_catalog: an in-place UPDATE of a ledger row is rejected.
+	var auditID string
+	if err := pool.QueryRow(ctx, `INSERT INTO audit_log (via, action, correlation_id)
+		VALUES ('web', 'object.create', 'corr-upgrade') RETURNING id`).Scan(&auditID); err != nil {
+		t.Fatalf("upgrade path: insert audit_log row: %v", err)
+	}
+	_, err = pool.Exec(ctx, `UPDATE audit_log SET action = 'rewritten' WHERE id = $1`, auditID)
+	wantAppendOnlyErr(t, "UPDATE audit_log (upgraded database)", "audit_log", "UPDATE", err)
+
+	// Fresh reference install: identical trigger set.
+	freshPool, _ := testdb.Setup(t, ctx, adminURL(t), appendOnlyTaskID)
+	upgradedTr := triggerRows(t, ctx, pool)
+	freshTr := triggerRows(t, ctx, freshPool)
+	if len(upgradedTr) != len(freshTr) {
+		t.Fatalf("upgrade path: trigger count upgraded=%d fresh=%d", len(upgradedTr), len(freshTr))
+	}
+	for i := range upgradedTr {
+		if upgradedTr[i] != freshTr[i] {
+			t.Errorf("upgrade path: trigger %d differs from fresh install: %q vs %q", i, upgradedTr[i], freshTr[i])
+		}
+	}
+
+	// And the full catalog matches a fresh install, exactly as TestUpgradePath
+	// requires for any upgrade (takeSnapshot reads pg_catalog, not exit codes).
+	upgradedSnap := takeSnapshot(t, ctx, pool)
+	freshSnap := takeSnapshot(t, ctx, freshPool)
+	if snapshotJSON(t, upgradedSnap) != snapshotJSON(t, freshSnap) {
+		t.Error("upgrade path: upgraded catalog differs from fresh install")
+	}
+}

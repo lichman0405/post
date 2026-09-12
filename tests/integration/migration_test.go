@@ -336,7 +336,7 @@ var explicitIndexes = map[string][]string{
 	"search_documents_structured_gin":        {"USING gin", "structured"},
 }
 
-const headVersion = 13 // number of migrations in infra/migrations
+const headVersion = 14 // number of migrations in infra/migrations
 
 // ---------------------------------------------------------------------------
 //  1. Fresh install: empty database → head, then the catalog IS the canonical
@@ -554,10 +554,11 @@ func TestConstraintEnforcement(t *testing.T) {
 	_, err := pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, u1)
 	wantErr("DELETE FROM users (referenced by projects.created_by)", err, "23503")
 
-	// FK RESTRICT rejects DELETE of a project state that object versions
-	// reference — the append-only version log pins its history rows.
+	// The append-only guard (00014) rejects DELETE of a project state even
+	// before FK RESTRICT is consulted — history rows are pinned by the
+	// database, not merely by referential integrity (P0001 raise_exception).
 	_, err = pool.Exec(ctx, `DELETE FROM project_states WHERE id = $1`, s1)
-	wantErr("DELETE FROM project_states (referenced by scientific_object_versions.state_id)", err, "23503")
+	wantErr("DELETE FROM project_states (append-only guard)", err, "P0001")
 
 	// UNIQUE rejects an UPDATE that would duplicate the other user's handle
 	// (23505).
