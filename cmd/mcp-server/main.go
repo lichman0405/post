@@ -1,9 +1,12 @@
 // Command mcp-server is the POST MCP endpoint.
 //
-// T0002 scaffold: the listener exists and answers the MCP route with 501 Not
-// Implemented. The MCP protocol wiring (tool catalog per specs/mcp and
-// docs/47) arrives with the agent tasks; this process deliberately does not
-// fake an MCP handshake.
+// T0006: the server loads the validated configuration (fail closed, like
+// every Go entry point) and serves GET /healthz (liveness) plus GET /readyz.
+// /readyz answers "ready" with no checks: no downstream dependency is wired
+// yet, and reporting a false dependency state would be a lie — the MCP tool
+// wiring (tool catalog per specs/mcp and docs/47) arrives with the agent
+// tasks, which will add real readiness probes. The /mcp route still answers
+// 501: this process deliberately does not fake an MCP handshake.
 package main
 
 import (
@@ -18,28 +21,57 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lichman0405/post/internal/config"
+	"github.com/lichman0405/post/internal/health"
 	"github.com/lichman0405/post/internal/version"
 )
 
+const (
+	exitOK      = 0
+	exitRuntime = 1
+	exitConfig  = 2
+)
+
 func main() {
-	showVersion := flag.Bool("version", false, "print version and exit")
-	addr := flag.String("addr", envOr("POST_MCP_ADDR", ":9080"), "HTTP listen address")
-	flag.Parse()
+	os.Exit(run(os.Args[1:]))
+}
+
+func run(args []string) int {
+	flags := flag.NewFlagSet("post-mcp-server", flag.ContinueOnError)
+	showVersion := flags.Bool("version", false, "print version and exit")
+	addr := flags.String("addr", "", "HTTP listen address (default: POST_MCP_ADDR)")
+	if err := flags.Parse(args); err != nil {
+		return exitConfig
+	}
 
 	if *showVersion {
 		fmt.Println("post-mcp-server", version.Version)
-		return
+		return exitOK
+	}
+
+	// Validated configuration first (T0006): the server never starts on a
+	// guessed environment; a missing/invalid variable fails fast naming it.
+	cfg, err := config.LoadFromCwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "post-mcp-server: configuration error:\n%v\n", err)
+		return exitConfig
+	}
+	if *addr != "" {
+		cfg.Server.MCPAddr = *addr
 	}
 
 	mux := http.NewServeMux()
+	healthHandler := health.NewHandler("mcp-server")
+	mux.Handle("/healthz", healthHandler)
+	mux.Handle("/readyz", healthHandler)
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotImplemented)
-		fmt.Fprintf(w, `{"error":"MCP protocol wiring not implemented yet (T0002 scaffold)"}`)
+		fmt.Fprintf(w, `{"error":"MCP protocol wiring not implemented yet (agent tasks)"}`)
 	})
 
 	srv := &http.Server{
-		Addr:              *addr,
+		Addr:              cfg.Server.MCPAddr,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
@@ -49,7 +81,8 @@ func main() {
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("post-mcp-server scaffold listening", "addr", *addr, "version", version.Version)
+		slog.Info("post-mcp-server listening",
+			"addr", cfg.Server.MCPAddr, "version", version.Version, "cfg", cfg)
 		errCh <- srv.ListenAndServe()
 	}()
 
@@ -60,19 +93,13 @@ func main() {
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			slog.Error("shutdown failed", "error", err)
-			os.Exit(1)
+			return exitRuntime
 		}
 	case err := <-errCh:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("post-mcp-server exited", "error", err)
-			os.Exit(1)
+			return exitRuntime
 		}
 	}
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
+	return exitOK
 }

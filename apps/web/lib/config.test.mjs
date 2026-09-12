@@ -28,7 +28,7 @@ function validEnv(layer) {
   return {
     POST_ENV: layer,
     API_BASE_URL: "http://127.0.0.1:8080",
-    SCIENTIFIC_ADAPTER_URL: "http://127.0.0.1:9000",
+    SCIENTIFIC_ADAPTER_URL: "http://127.0.0.1:9100",
   };
 }
 
@@ -69,7 +69,7 @@ test("every layer is accepted with a full environment", () => {
     const cfg = loadWebConfig(validEnv(layer));
     assert.equal(cfg.layer, layer);
     assert.equal(cfg.apiBaseUrl, "http://127.0.0.1:8080");
-    assert.equal(cfg.scientificAdapterUrl, "http://127.0.0.1:9000");
+    assert.equal(cfg.scientificAdapterUrl, "http://127.0.0.1:9100");
   }
 });
 
@@ -122,7 +122,7 @@ test("malformed URLs are named with the offending variable", () => {
     ["API_BASE_URL", "not-a-url"],
     ["API_BASE_URL", "ftp://127.0.0.1:8080"],
     ["API_BASE_URL", "http://"],
-    ["SCIENTIFIC_ADAPTER_URL", "127.0.0.1:9000"],
+    ["SCIENTIFIC_ADAPTER_URL", "127.0.0.1:9100"],
   ]) {
     assert.throws(
       () => loadWebConfig({ ...validEnv("dev"), [key]: bad }),
@@ -141,7 +141,7 @@ test("web variables are never satisfied by Python adapter variables", () => {
   const pythonOnly = {
     POST_ENV: "dev",
     POST_SCIENTIFIC_ADAPTER_HOST: "127.0.0.1",
-    POST_SCIENTIFIC_ADAPTER_PORT: "9000",
+    POST_SCIENTIFIC_ADAPTER_PORT: "9100",
   };
   assert.throws(
     () => loadWebConfig(pythonOnly),
@@ -192,7 +192,7 @@ test("canary sweep: secrets never reach web config output", () => {
   const cfg = loadWebConfig({
     POST_ENV: "dev",
     API_BASE_URL: `https://u:${CANARY}@127.0.0.1:8080`,
-    SCIENTIFIC_ADAPTER_URL: "http://127.0.0.1:9000",
+    SCIENTIFIC_ADAPTER_URL: "http://127.0.0.1:9100",
   });
   assertSwept("describeConfig", describeConfig(cfg));
   assert.ok(describeConfig(cfg).includes("***"));

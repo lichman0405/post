@@ -33,7 +33,10 @@ ENV_HOST = "POST_SCIENTIFIC_ADAPTER_HOST"
 ENV_PORT = "POST_SCIENTIFIC_ADAPTER_PORT"
 
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 9000
+# 9100, not 9000: 9000/9001 are the MinIO S3 API/console ports from
+# docker-compose.yml (T0003), and the adapter must never collide with the
+# blob store (T0006 port-collision fix).
+DEFAULT_PORT = 9100
 
 _LAYER_FIX = (
     f"set {ENV_LAYER} to dev, test or prod (see .env.example)"

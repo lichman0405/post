@@ -66,6 +66,8 @@ type Config struct {
 type ServerConfig struct {
 	// Addr is the HTTP listen address (POST_API_ADDR).
 	Addr string
+	// MCPAddr is the MCP server listen address (POST_MCP_ADDR).
+	MCPAddr string
 }
 
 // DatabaseConfig configures the PostgreSQL semantic store.
@@ -104,8 +106,8 @@ func (c *Config) String() string {
 		return "config(nil)"
 	}
 	return fmt.Sprintf(
-		"config{layer:%s server:{addr:%s} database:{host:%s port:%d user:%s password:%s name:%s sslmode:%s} redis:{addr:%s} blob:{endpoint:%s access_key:%s secret_key:%s bucket:%s use_tls:%t} gitprovider:{base_url:%s token:%s}}",
-		c.Layer, c.Server.Addr,
+		"config{layer:%s server:{addr:%s mcp_addr:%s} database:{host:%s port:%d user:%s password:%s name:%s sslmode:%s} redis:{addr:%s} blob:{endpoint:%s access_key:%s secret_key:%s bucket:%s use_tls:%t} gitprovider:{base_url:%s token:%s}}",
+		c.Layer, c.Server.Addr, c.Server.MCPAddr,
 		c.Database.Host, c.Database.Port, c.Database.User, c.Database.Password,
 		c.Database.Name, c.Database.SSLMode,
 		c.Redis.Addr,
@@ -122,7 +124,10 @@ func (c *Config) LogValue() slog.Value {
 	}
 	return slog.GroupValue(
 		slog.String("layer", c.Layer),
-		slog.Group("server", slog.String("addr", c.Server.Addr)),
+		slog.Group("server",
+			slog.String("addr", c.Server.Addr),
+			slog.String("mcp_addr", c.Server.MCPAddr),
+		),
 		slog.Group("database",
 			slog.String("host", c.Database.Host),
 			slog.Int("port", c.Database.Port),
@@ -346,6 +351,8 @@ type fieldSpec struct {
 var fieldSpecs = []fieldSpec{
 	{key: "POST_API_ADDR", def: ":8080", fix: "set POST_API_ADDR to an HTTP listen address (e.g. :8080)",
 		set: func(c *Config, v string, _ *fieldSpec) *Problem { c.Server.Addr = v; return nil }},
+	{key: "POST_MCP_ADDR", def: ":9080", fix: "set POST_MCP_ADDR to an HTTP listen address (e.g. :9080)",
+		set: func(c *Config, v string, _ *fieldSpec) *Problem { c.Server.MCPAddr = v; return nil }},
 	{key: "POST_DB_HOST", def: "127.0.0.1", fix: "set POST_DB_HOST to the PostgreSQL host",
 		set: func(c *Config, v string, _ *fieldSpec) *Problem { c.Database.Host = v; return nil }},
 	{key: "POST_DB_PORT", def: "5432", fix: "set POST_DB_PORT to the PostgreSQL port (1-65535)",
