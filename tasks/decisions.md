@@ -1646,3 +1646,33 @@ Supervisor 就会**跟着链接把目标内容读出来并嵌进 review 输入**
 这一条我**没有**用同样的口气打发，因为方向确实成立。
 区分它们的方法不是看告警的标题，而是问**"最坏情况下，谁会读到/写到什么？"**——
 L1-20260912-34 的那条（IAM/RBAC）问不出任何具体的最坏情况；这一条一问就出来了。
+
+## L1-20260912-49 — G3 从"记账上不存在"变成"真的被要求"
+
+docs/67 的 G3 明确点名 **"auth/visibility"**，而 `gates.json` 的 `task_overrides` 是 `{}`——
+于是 **132 个任务的 G3 全部记为 `not_required`，这个 Gate 只存在于名字上**。
+T0101 把这件事暴露得很清楚：它的跨边界链路**跑过了真实服务**（我手工执行，9 项全过），
+而账本上写着"不需要"。
+
+> **真实的证据，与"被要求的证据"，不是同一件东西。**
+
+**处置**：接上第一个 G3 job 并指派给正在运行的两个任务：
+
+```
+jobs.auth-real-services                = bash tests/acceptance/auth-real-services-e2e.sh
+task_overrides.T0102/T0103.g3_jobs     = ["auth-real-services"]
+```
+
+**它是真检查，不是仪式**：T0102 与 T0103 都要改 API 与 web 前端，而这个脚本对真实 PostgreSQL 与
+真实 Redis 跑 signup / session / logout / CSRF / 枚举 / 限流，
+并且**故意让 web Origin 与 API host 不同**——正是那种跨源形状的缺失，让 T0101 第一次交付的登录页
+被它自己交付的 API 拒绝。
+
+**它不是 CI job**：因此永远不会进入 `required_jobs`，G4 仍然只对六个 CI job 断言
+（测试里专门断言了这一点，防止 G3 的 job 泄漏进 G4 的必需集合）。
+
+**测试对"真实 spec"断言而不是 fixture**：因为这个失效模式是**沉默的**——
+override 缺失或写错，G3 就再次消失，而别的任何地方都不会发现。
+
+**仍然的边界**：目前只覆盖 T0102/T0103。P2（RSG）、P3（Gitea branch protection/webhook）、
+P7（MinIO hash）等 phase 各自的 G3 仍待定义；这份记录不假装它们已经完成。
