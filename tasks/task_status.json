@@ -423,9 +423,11 @@
       ]
     },
     "T0104": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-12T20:54:36Z",
       "worker_run_id": "run-a147f3be299fdb8b",
+      "accepted_by_supervisor_at": "2026-09-12T22:45:16Z",
+      "merged_at": "2026-09-12T22:56:07Z",
       "history": [
         {
           "from": "todo",
@@ -439,17 +441,48 @@
           "at": "2026-09-12T20:54:36Z",
           "run_id": "run-a147f3be299fdb8b",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-12T22:35:58Z",
+          "run_id": "run-48d9b3813cd2e321",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-12T22:45:16Z",
+          "run_id": "run-a8e87ee76a82d63d"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-12T22:56:07Z",
+          "run_id": "run-ff1bc6c4487cad6c",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0105": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-12T22:56:22Z",
+      "worker_run_id": "run-6f43201d9dd709b6",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-12T22:56:21Z",
+          "run_id": "run-d985075c4a5d17ea"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-12T22:56:22Z",
+          "run_id": "run-6f43201d9dd709b6",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0106": {
       "status": "todo",
@@ -461,13 +494,24 @@
       "merged_at": null
     },
     "T0107": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-12T22:56:23Z",
+      "worker_run_id": "run-9c8d2e0cb29ae675",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-12T22:56:21Z",
+          "run_id": "run-f152146e517bc83f"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-12T22:56:23Z",
+          "run_id": "run-9c8d2e0cb29ae675",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0108": {
       "status": "todo",
