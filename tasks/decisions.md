@@ -222,6 +222,39 @@ T0000 之后加固隔离时引入的，属实测发现，必须记录：
 
 **待办**：T0011 必须把上述 20 条 guard 用例与两个契约路径用例固化为自动化 e2e。
 
+## L1-20260912-10 — 修复 T0001 preflight 的两个安全缺陷（Supervisor 直接修复）
+
+**触发**：自动 commit security review 对 `scripts/source_repo_preflight.py` 报出
+`sensitive-data-to-observability` 与 `fail-open-state-drift`。Supervisor 独立复核后**确认两者均为真
+实缺陷**，且 T0001 自带的测试都没有覆盖到。
+
+1. **凭据泄漏（真实）**：remote URL 可能内嵌 token（CI checkout 常见形式
+   `https://x-access-token:<PAT>@github.com/owner/name.git`）。
+   `normalize_remote_url()` 只在**解析时**剥离 userinfo，但原始 URL 被原样写进
+   `REPO-CANONICAL` 的 `measured`/`detail` —— token 会进入 stdout、`--json` 文档与 CI 日志。
+   修复：新增 `speclib.redact_url()`（保留 user、密文替换为 `***`），在所有可能输出 origin URL
+   的位置调用，**包括 URL 无法解析的失败路径**（最易漏的地方）。
+2. **fail-open（真实）**：`BRANCH-DEFAULT` 在 `origin/HEAD` 不可确定时 `gating=False`，而
+   `VISIBILITY` 对 unknown 是 fail-closed —— 同一个 gate 内自相矛盾，且与其 docstring 的
+   "never silently passes" 承诺不符，可出现"integration branch 从未被验证却 bless push"。
+   修复：`BRANCH-DEFAULT` 改为 gating（unknown → `branch_unverifiable` → refused）；
+   由于 `origin/HEAD` 在 CI/fresh clone 中通常缺失，operator opt-in 现在同时用
+   `gh api ... --jq .default_branch` 取远端权威值，使**真实 operator 路径从"只能失败"变为"能验证"**；
+   本地与远端记录矛盾按 state drift 显式失败。
+
+**决策：由 Supervisor 直接修复，而非派 Worker。** 理由：(a) 安全缺陷应尽快落地而非排队等
+Worker 往返；(b) 在飞行中的 T0002 的 `allowed_scope` 含 `scripts/**`，并行 Worker 会写冲突。
+这是一次对"业务实现交 Worker"原则的**有意识偏离**，已如实记录而非掩饰。修复范围小且带回归
+测试（新增 8 个用例），并顺带发现 smoke test 的 schema 一致性检查确实拦住了新增 reason code
+未入 enum —— 契约校验按设计工作。
+
+**结果**：PR #8（`862b78b`）。unit/smoke/validate_specs/doctor 全绿，marker 已重生成，
+shellcheck 干净，真实 `--check-visibility` 路径现可验证 BRANCH-DEFAULT 并 bless。
+
+**教训**：安全 review 报的"fail-open"和"数据外泄"类问题，即使出自我方已验收的代码，也必须
+独立复核后当真——这两个都不是 Worker 的疏漏，而是"验收标准本身没覆盖"的缺口。后续 task 的
+acceptance criteria 应显式包含"输出中不得出现凭据"与"无法验证时必须 fail-closed"。
+
 ---
 
 ## 环境发现（非决策，必须显式记录）
