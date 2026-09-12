@@ -128,11 +128,12 @@
       "merged_at": "2026-09-12T15:55:00Z"
     },
     "T0101": {
-      "status": "verification",
-      "started_at": "2026-09-12T17:41:28Z",
-      "worker_run_id": "run-243135d1f193a7a5",
-      "accepted_by_supervisor_at": "2026-09-12T16:42:45Z",
-      "rejection_reason": "collect rejected: result-consistency: result-tests-coverage: status completed but 2 required test(s) have no passed entry: auth unit; auth e2e — every required test needs a passed entry with evidence",
+      "status": "merged",
+      "started_at": "2026-09-12T18:07:10Z",
+      "worker_run_id": "run-6d2985d921956b7f",
+      "accepted_by_supervisor_at": "2026-09-12T18:35:07Z",
+      "merged_at": "2026-09-12T18:42:00Z",
+      "rejection_reason": "G2 现在**真正在你的代码上运行**了（此前它跑在主仓库根目录上，从未编译过你写的任何代码——\n这是 Supervisor 侧一个已修复的 Gate 缺陷，与本任务无关）。它抓到一个真实问题：\n\n【必改 · G2 在 T0101 的代码上发现的 staticcheck 违规】\n  make staticcheck\n  internal/domain/user.go:70:34: should use strings.Contains(n[at+1:], \"@\") instead (S1003)\n这是 `ops/ci/staticcheck.sh` 的 NEW finding（不在 grandfather baseline 里），因此 CI 的 go job 会红。\n请按 staticcheck 的建议修正（`strings.Contains`），并**本地跑一次 `make staticcheck` 确认清零**——\n你此前跑了 `go vet` 与 `gofmt`，但没有跑 staticcheck，而它是 CI 的 go job 的一部分。\n\n【已为你准备好的环境变更（说明，无需你处理）】\n在你的 attempt 运行期间，main 前进了多个提交（Gate 工具自身的修复）。你的 worktree 与任务分支\n已被 Supervisor **整体推进到当前 main**，并把你的完整改动**原样重新应用**在上面\n（改动集合逐个文件比对过，与推进前完全一致）。\n因此：`infra/migrations/00016_auth_password.sql`、`tests/integration/migration_test.go` 的 catalog fixture、\n新增的 `scripts/*` 与 CI 步骤现在都在你的树里可用，`make staticcheck` 等命令可以直接跑。\n你的实现一个字都没有被改动——只是它现在坐在一个更新的基线上。\n\n【已完成的独立评审：verdict = approve】\n第二轮独立 Review Worker 判定 **approve**（0 blocking）。它独立复核并确认：上一轮的\nB1（Origin 守卫拒绝自家 web 前端）、M1（OIDC-only/禁用账号的登录时序 oracle）、\nM2（signup 未限流）以及全部 minor/nit **都已真正修好**，\n并独立重跑了套件（含它自己新增的 B1 回归测试 TestE2ECrossOriginWebLoginJourney）。\n**唯一剩下的就是上面那条 staticcheck。** 不要为了它重构别的任何东西。\n\n【约束不变】decision level 上限 L1；不要弱化任何测试；完成后 RESULT.json 必须自洽\n（completed 要求 tests[] 全部 passed，且满足 required test 的条目要带 `label`）。\n",
       "history": [
         {
           "from": "todo",
@@ -222,26 +223,82 @@
           "at": "2026-09-12T17:43:56Z",
           "run_id": "run-c8f5e10e77fa32fb",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-12T18:07:03Z",
+          "run_id": "run-ae23c379cfc3af0c",
+          "reason": "G2 现在**真正在你的代码上运行**了（此前它跑在主仓库根目录上，从未编译过你写的任何代码——\n这是 Supervisor 侧一个已修复的 Gate 缺陷，与本任务无关）。它抓到一个真实问题：\n\n【必改 · G2 在 T0101 的代码上发现的 staticcheck 违规】\n  make staticcheck\n  internal/domain/user.go:70:34: should use strings.Contains(n[at+1:], \"@\") instead (S1003)\n这是 `ops/ci/staticcheck.sh` 的 NEW finding（不在 grandfather baseline 里），因此 CI 的 go job 会红。\n请按 staticcheck 的建议修正（`strings.Contains`），并**本地跑一次 `make staticcheck` 确认清零**——\n你此前跑了 `go vet` 与 `gofmt`，但没有跑 staticcheck，而它是 CI 的 go job 的一部分。\n\n【已为你准备好的环境变更（说明，无需你处理）】\n在你的 attempt 运行期间，main 前进了多个提交（Gate 工具自身的修复）。你的 worktree 与任务分支\n已被 Supervisor **整体推进到当前 main**，并把你的完整改动**原样重新应用**在上面\n（改动集合逐个文件比对过，与推进前完全一致）。\n因此：`infra/migrations/00016_auth_password.sql`、`tests/integration/migration_test.go` 的 catalog fixture、\n新增的 `scripts/*` 与 CI 步骤现在都在你的树里可用，`make staticcheck` 等命令可以直接跑。\n你的实现一个字都没有被改动——只是它现在坐在一个更新的基线上。\n\n【已完成的独立评审：verdict = approve】\n第二轮独立 Review Worker 判定 **approve**（0 blocking）。它独立复核并确认：上一轮的\nB1（Origin 守卫拒绝自家 web 前端）、M1（OIDC-only/禁用账号的登录时序 oracle）、\nM2（signup 未限流）以及全部 minor/nit **都已真正修好**，\n并独立重跑了套件（含它自己新增的 B1 回归测试 TestE2ECrossOriginWebLoginJourney）。\n**唯一剩下的就是上面那条 staticcheck。** 不要为了它重构别的任何东西。\n\n【约束不变】decision level 上限 L1；不要弱化任何测试；完成后 RESULT.json 必须自洽\n（completed 要求 tests[] 全部 passed，且满足 required test 的条目要带 `label`）。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-12T18:07:10Z",
+          "run_id": "run-6d2985d921956b7f",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-12T18:14:46Z",
+          "run_id": "run-9fa33d40a00db5d2",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-12T18:35:07Z",
+          "run_id": "run-533737fe8197eb81"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-12T18:42:00Z",
+          "run_id": "run-f7947f1cadba71dd",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0102": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-12T18:42:28Z",
+      "worker_run_id": "run-7f5fed2811f431fd",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-12T18:42:19Z",
+          "run_id": "run-d830a26b20574d14"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-12T18:42:28Z",
+          "run_id": "run-7f5fed2811f431fd",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0103": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-12T18:42:34Z",
+      "worker_run_id": "run-adba7bff863f2739",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-12T18:42:20Z",
+          "run_id": "run-b58af6afc63957a0"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-12T18:42:34Z",
+          "run_id": "run-adba7bff863f2739",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0104": {
       "status": "todo",
