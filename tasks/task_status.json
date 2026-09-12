@@ -465,9 +465,11 @@
       ]
     },
     "T0105": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-12T22:56:22Z",
       "worker_run_id": "run-6f43201d9dd709b6",
+      "accepted_by_supervisor_at": "2026-09-12T23:29:57Z",
+      "merged_at": "2026-09-12T23:33:35Z",
       "history": [
         {
           "from": "todo",
@@ -481,6 +483,26 @@
           "at": "2026-09-12T22:56:22Z",
           "run_id": "run-6f43201d9dd709b6",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-12T23:21:09Z",
+          "run_id": "run-f7ba9bd4ae719bf3",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-12T23:29:57Z",
+          "run_id": "run-8461260f516d1327"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-12T23:33:35Z",
+          "run_id": "run-39ddcd96669ad07d",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -495,8 +517,9 @@
     },
     "T0107": {
       "status": "running",
-      "started_at": "2026-09-12T22:56:23Z",
-      "worker_run_id": "run-9c8d2e0cb29ae675",
+      "started_at": "2026-09-12T23:38:53Z",
+      "worker_run_id": "run-c9244aacb5713b6b",
+      "rejection_reason": "独立 Review Worker 的 verdict 是 **request_changes**（1 blocking + 1 minor + 2 nit）。\n完整 verdict 见 .rddev/workers/T0107-review/RESULT.json。Supervisor 已复核，两条都成立。\n\n【B1 · BLOCKING — 主页有两个 <main> 地标】\napps/web/app/(main)/layout.tsx:21 现在把每个页面包在 `<main id=\"main\" tabIndex={-1}>` 里，\n但 `apps/web/app/(main)/status-panel.tsx:38` 仍然渲染它自己的 `<main className=\"status-main\">`，\n于是 `\"/\"` 上有**两个非 hidden 的 main 地标**。这是 HTML 一致性违规\n（一个文档不得有两个不带 hidden 的 main），会让屏幕阅读器的地标导航出现两个 main，\n并与 docs/06 §10 的语义 HTML 要求冲突。\n修法：`StatusPanel` 的外层改为 `<section>`（或 `<div>`）并保留其内部结构；\n只有当它**不是**在 `(main)/layout.tsx` 之内时才用 `<main>`。\n补一个能**在修复前失败**的断言：`\"/\"` 渲染结果中非 hidden 的 `<main>` 恰好一个。\n\n【M1 · MINOR，但请一并修 —— 这是一条\"永远不会失败\"的检查】\ntests/web-smoke/a11y-smoke.mjs:31 的 axe `runOnly` 标签集\n（wcag2a / wcag2aa / wcag21a / wcag21aa / wcag22aa）**排除了全部 best-practice 规则**，\n因此 `landmark-no-duplicate-main`、地标唯一性、heading-order、page-has-heading-one\n这类**结构性**违规**永远不可能让这个 harness 变红**。\n所以 \"0 violations\" 这句证据在它覆盖的范围内是真的，但 RESULT 把它当作无障碍安全网来呈现——\n而这份 diff 里唯一一个真实的语义缺陷（B1）正好落在它看不到的地方。\n\n**一个无法失败的检查比没有检查更糟**：它会把\"没测到\"报告成\"没问题\"。\n请把 best-practice（至少 landmark 与 heading 相关的）规则纳入 `runOnly`，\n并**证明它能失败**：人为制造一次重复 main / 跳级标题，确认 harness 变红，再撤掉。\n（CLAUDE.md §6：禁止为了让 Gate 变绿而弱化测试；反向也成立——**测试必须真的能变红**。）\n\n【nit（顺手修）】\n- global-nav.tsx:62：桌面端 \"Notifications\" 出现两次（目的行 + 头部铃铛快捷键），\n  产生两个相邻且**无障碍名相同**的 tab stop。docs/05 §1 只列一次目的地。\n- nav-destinations.ts:44：`NAV_DESTINATIONS.find(...) as NavDestination` 用了非空断言；\n  若 Search 条目被移除或改 href，抽屉列表会 spread `undefined` 而**编译不报错**。\n  请改为字面量条目或类型安全的查找。\n\n【约束不变】decision level 上限 L1；不要放宽任何测试；不要趁这次重构无关代码；\nRESULT.json 必须自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 `label`）。\n",
       "history": [
         {
           "from": "todo",
@@ -509,6 +532,27 @@
           "to": "running",
           "at": "2026-09-12T22:56:23Z",
           "run_id": "run-9c8d2e0cb29ae675",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-12T23:26:56Z",
+          "run_id": "run-fecb971bcb4bfd6e",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-12T23:38:53Z",
+          "run_id": "run-ceaa361c70a022a5",
+          "reason": "独立 Review Worker 的 verdict 是 **request_changes**（1 blocking + 1 minor + 2 nit）。\n完整 verdict 见 .rddev/workers/T0107-review/RESULT.json。Supervisor 已复核，两条都成立。\n\n【B1 · BLOCKING — 主页有两个 <main> 地标】\napps/web/app/(main)/layout.tsx:21 现在把每个页面包在 `<main id=\"main\" tabIndex={-1}>` 里，\n但 `apps/web/app/(main)/status-panel.tsx:38` 仍然渲染它自己的 `<main className=\"status-main\">`，\n于是 `\"/\"` 上有**两个非 hidden 的 main 地标**。这是 HTML 一致性违规\n（一个文档不得有两个不带 hidden 的 main），会让屏幕阅读器的地标导航出现两个 main，\n并与 docs/06 §10 的语义 HTML 要求冲突。\n修法：`StatusPanel` 的外层改为 `<section>`（或 `<div>`）并保留其内部结构；\n只有当它**不是**在 `(main)/layout.tsx` 之内时才用 `<main>`。\n补一个能**在修复前失败**的断言：`\"/\"` 渲染结果中非 hidden 的 `<main>` 恰好一个。\n\n【M1 · MINOR，但请一并修 —— 这是一条\"永远不会失败\"的检查】\ntests/web-smoke/a11y-smoke.mjs:31 的 axe `runOnly` 标签集\n（wcag2a / wcag2aa / wcag21a / wcag21aa / wcag22aa）**排除了全部 best-practice 规则**，\n因此 `landmark-no-duplicate-main`、地标唯一性、heading-order、page-has-heading-one\n这类**结构性**违规**永远不可能让这个 harness 变红**。\n所以 \"0 violations\" 这句证据在它覆盖的范围内是真的，但 RESULT 把它当作无障碍安全网来呈现——\n而这份 diff 里唯一一个真实的语义缺陷（B1）正好落在它看不到的地方。\n\n**一个无法失败的检查比没有检查更糟**：它会把\"没测到\"报告成\"没问题\"。\n请把 best-practice（至少 landmark 与 heading 相关的）规则纳入 `runOnly`，\n并**证明它能失败**：人为制造一次重复 main / 跳级标题，确认 harness 变红，再撤掉。\n（CLAUDE.md §6：禁止为了让 Gate 变绿而弱化测试；反向也成立——**测试必须真的能变红**。）\n\n【nit（顺手修）】\n- global-nav.tsx:62：桌面端 \"Notifications\" 出现两次（目的行 + 头部铃铛快捷键），\n  产生两个相邻且**无障碍名相同**的 tab stop。docs/05 §1 只列一次目的地。\n- nav-destinations.ts:44：`NAV_DESTINATIONS.find(...) as NavDestination` 用了非空断言；\n  若 Search 条目被移除或改 href，抽屉列表会 spread `undefined` 而**编译不报错**。\n  请改为字面量条目或类型安全的查找。\n\n【约束不变】decision level 上限 L1；不要放宽任何测试；不要趁这次重构无关代码；\nRESULT.json 必须自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 `label`）。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-12T23:38:53Z",
+          "run_id": "run-c9244aacb5713b6b",
           "reason": "worker spawn"
         }
       ]
