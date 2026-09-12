@@ -1,0 +1,157 @@
+{
+  "task_id": "T0010",
+  "status": "completed",
+  "summary": "Port of .rddev/dispatch harness behavior into rddev Go code, submitted for acceptance. Go implementation complete: registry with disk-only discovery + /proc starttime pid-reuse pairing (worker_registry.go), env credential stripping + neutralised GH_CONFIG_DIR (worker_env.go), task-package renderer + fail-closed schema validator (worker_render.go), guard/settings/reaper generation (worker_guard.go), spawn pipeline with one-per-task worktree lifecycle + parallelism gate (worker_spawn.go), stop (worker_stop.go), cmd/rddev worker CLI (worker.go). Canonical worker-guard.sh with 147-case two-sided regression suite (shellcheck-clean) and .rddev.example copy byte-identical (drift-tested). CLI integration suite 8/8 green with real separate processes: two concurrent workers in disjoint worktrees without cross-pollution, separate-process parentage, crash exit 3 / timeout exit 124 recorded never-completed, parallelism gate (default 3 / hard max 4, refused spawn starts nothing), restart-style disk discovery + stale detection, stop, 8 generated-guard two-sided probes. REAL-claude e2e (third run, /tmp/t0010-e2e-kiC8, log /tmp/t0010-e2e.log): two genuine claude -p workers ran concurrently and both produced complete RESULT.json + hello.txt byte-exact in their own scopes; T0001 exited 0, T0002 hit its hard $0.30 budget mid-final-turn (recorded exited-1, never completed — designed behavior); refs unchanged outside task/** and remotes/**; three isolation probes through the spawn-generated guard PASS (control-plane blocked, neighbour allowed, device write allowed); ps snapshot proves the workers are reaper children (bash run-worker.sh ppid 1 after rddev exited, claude -p as its child) — separate processes, no subagent. Three production bugs found and fixed with regression assertions: (1) gitOutput stringified *exec.ExitError with %s so branchExists could never see exit 1 (worktree creation broken on any repo without the task branch) — fixed %w + errors.As; (2) the --timeout wrapper was passed to claude as its FIRST ARGUMENT so timed-out workers were never killed — fixed by wrapping the full command in Spawn; (3) renderer emitted JSON null for nil slices, which the task-package schema rejects — fixed with strSlice normalization. Additionally the e2e exposed that the generated settings (Bash-only allow) denied the Write tool entirely in dontAsk mode; two real-claude probes proved claude 2.1.269 ignores path-scoped Write/Edit allow rules (absolute and env: forms both deny even allowed paths), while the dispatch harness demonstrably allows the Write tool (this Worker's own session runs its settings); the port now matches dispatch: bare Write/Edit allows, envelope enforced at the guard (shell writes) and collect-time allowed_scope diff (worktree), with a unit test forbidding dead path-scoped entries from reappearing. A third real-claude probe confirms Write works under the generated settings (2 files, 0 denials) and Edit is permitted (its only error was claude's own read-before-edit rule). Boundary with T0011 confirmed via task-state-machine.yaml command_mapping: T0010 = spawn/list/logs/stop + worktree lifecycle + registry + prompt renderer + guard generation; T0011 = collect validation.",
+  "files_changed": [
+    "internal/devorchestrator/embed/worker-guard.sh",
+    "tests/worker-guard/guard-regression.sh",
+    "internal/devorchestrator/worker_registry.go",
+    "internal/devorchestrator/worker_registry_test.go",
+    "internal/devorchestrator/worker_env.go",
+    "internal/devorchestrator/worker_env_test.go",
+    "internal/devorchestrator/worker_render.go",
+    "internal/devorchestrator/worker_render_test.go",
+    "internal/devorchestrator/worker_guard.go",
+    "internal/devorchestrator/worker_guard_test.go",
+    "internal/devorchestrator/worker_spawn.go",
+    "internal/devorchestrator/worker_stop.go",
+    "cmd/rddev/worker.go",
+    "cmd/rddev/worker_test.go",
+    "cmd/rddev/stubs.go",
+    "cmd/rddev/main_test.go",
+    "specs/orchestrator/worker-registry.schema.json",
+    ".rddev.example/guard/worker-guard.sh",
+    ".rddev.example/README.md"
+  ],
+  "tests": [
+    {
+      "command": "bash tests/worker-guard/guard-regression.sh",
+      "status": "passed",
+      "evidence": "guard-regression: 147/147 PASS (re-run after final guard sync)"
+    },
+    {
+      "command": "shellcheck -s sh internal/devorchestrator/embed/worker-guard.sh",
+      "status": "passed",
+      "evidence": "guard: clean"
+    },
+    {
+      "command": "shellcheck tests/worker-guard/guard-regression.sh",
+      "status": "passed",
+      "evidence": "suite: clean"
+    },
+    {
+      "command": "go test ./internal/devorchestrator/ -count=1",
+      "status": "passed",
+      "evidence": "ok github.com/lichman0405/post/internal/devorchestrator 0.153s (incl. guard/settings drift, bare-Write/Edit pin + dead-rule forbidden, timeout-in-claudeArgs regression, wrapTimeout unit checks)"
+    },
+    {
+      "command": "go test ./cmd/rddev/ -count=1",
+      "status": "passed",
+      "evidence": "ok github.com/lichman0405/post/cmd/rddev 7.885s (8 CLI tests: two concurrent workers + cross-pollution marker, crash 3, timeout 124, parallelism gate, restart discovery + stale, stop, guard probes)"
+    },
+    {
+      "command": "go vet ./...",
+      "status": "passed",
+      "evidence": "silent (clean)"
+    },
+    {
+      "command": "go build ./...",
+      "status": "passed",
+      "evidence": "silent (clean)"
+    },
+    {
+      "command": "make check-schema-drift",
+      "status": "passed",
+      "evidence": "schemas in sync (specs/schemas == packages/schemas/schemas)"
+    },
+    {
+      "command": "go test ./... -count=1",
+      "status": "failed",
+      "evidence": "only tests/integration fails: all 10 tests dial 127.0.0.1:15432 (PostgreSQL) connection refused — G3 infra not running in this Worker environment; POST_WORKER_ALLOW_DOCKER=0 so this Worker cannot start docker-compose. Every non-infra package is ok. Failure is environmental and pre-existing — the T0010 diff touches no database code."
+    },
+    {
+      "command": "make check",
+      "status": "failed",
+      "evidence": "reaches go test ./... then stops (Makefile order); failure is exactly the tests/integration Postgres-refused case above. Web typecheck/lint and pytest stages were never reached; they are unaffected by this diff (Go-only + specs/orchestrator + .rddev.example + tests/worker-guard)."
+    },
+    {
+      "command": "python3 scripts/spec_version.py --check",
+      "status": "failed",
+      "evidence": "MISMATCH: checked-in digest != derived — because worker-registry.schema.json was added under specs/orchestrator/ (allowed scope). Regeneration writes specs/SPEC_VERSION.json which is OUTSIDE this task's allowed_scope; the Supervisor must run scripts/spec_version.py --write before CI (spec-validation.yml) turns green."
+    },
+    {
+      "command": "e2e (real claude, run 3): two concurrent workers on a fake repo",
+      "status": "passed",
+      "evidence": "/tmp/e2e-real.sh against /tmp/t0010-e2e-kiC8 (log /tmp/t0010-e2e.log). T0001: exit.status 0, RESULT.json completed with 7 tests (incl. negative/byte-exact), one/hello.txt == 'hello\\n', git status shows only ?? one/. T0002: complete RESULT.json (8 adversarial tests) and two/hello.txt byte-exact, exit.status 1 because claude hit its hard --max-budget-usd 0.30 mid-final-turn (terminal_reason budget_exhausted, total_cost 0.305) — recorded exited-1, never auto-completed: designed recoverable-failure behavior. refs before/after identical excluding refs/heads/task/** and refs/remotes/** (REFS UNCHANGED: PASS). Fresh-process worker list re-derived both workers from disk (restart-style discovery)."
+    },
+    {
+      "command": "e2e (real claude): isolation probes through the spawn-generated guard",
+      "status": "passed",
+      "evidence": "real spawned guard: control-plane blocked PASS (git commit -am x -> exit 2), neighbour allowed PASS (ls one), device write allowed PASS (echo ok > /dev/null)"
+    },
+    {
+      "command": "e2e (real claude): separate-process proof",
+      "status": "passed",
+      "evidence": "raw ps snapshot /tmp/t0010-ps-snapshot.txt captured while both workers were live: bash .../workers/T0001/run-worker.sh (pid 334917, ppid 1 — orphaned after the rddev spawner exited) with claude -p (pid 334918) as its child; same pair for T0002 (334938/334939). The workers are reaper children of an exited rddev process, not subagents of any Claude session (this Worker's own session is pid 257229). NOTE: the e2e script's own grep printed nothing because the worker prompt embedded in argv contains the word 'grep', so its naive 'grep -v grep' self-filter removed every real match — the raw snapshot is the evidence."
+    },
+    {
+      "command": "e2e (real claude): crash/timeout recorded failed, not completed",
+      "status": "passed",
+      "evidence": "CLI integration tests with a real process + reaper: crash exit 3 and timeout exit 124 recorded as exited, task state left running (never completed). Real-claude run adds budget exhaustion (exit 1) with the same guarantee."
+    },
+    {
+      "command": "e2e (real claude): supervisor-restart discovery from disk",
+      "status": "passed",
+      "evidence": "CLI test TestWorkerRestartDiscoveryAndStale: fresh-process list re-derives running (live pid + starttime) and stale (dead pid, no exit.status) purely from disk; e2e run 3 polls used a fresh rddev process per poll."
+    },
+    {
+      "command": "probe (real claude): Write-tool settings grammar",
+      "status": "passed",
+      "evidence": "three probe runs (/tmp/t0010-wprobe*.sh): path-scoped Write allow rules (absolute Write(/tmp/x/**) and env: Write(env:POST_WORKER_RESULT_DIR/**)) are IGNORED by claude 2.1.269 in dontAsk mode — every write denied including allowed paths (8/8 denials across two runs); bare Write/Edit allows (dispatch parity, what renderSettings now generates) work — run 3: res/a.txt and wt/c.txt created via Write tool, 0 permission_denied, Edit call permitted (errored only on claude's own read-before-edit harness rule)."
+    },
+    {
+      "command": "e2e (real claude): isolation probes blocked with legitimate neighbours allowed",
+      "status": "passed",
+      "evidence": "CLI test TestWorkerGuardFilesGeneratedWithIsolation: 8 two-sided probes through a spawn-generated guard (control-plane blocked, credential-store read blocked, outside write blocked; git status / words-in-arguments / own-worktree write / own read / device write allowed) + real-claude run's 3 probes above."
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "Two Workers for different tasks ran concurrently without sharing a writable tree.",
+      "status": "passed",
+      "evidence": "Supervisor verified from the worker's e2e artifact /tmp/t0010-e2e.log: T0001 (pid 334918) and T0002 (pid 334939) were spawned into disjoint worktrees with distinct run_ids and registries."
+    },
+    {
+      "criterion": "The Worker is a separate Claude Code process, not a subagent.",
+      "status": "passed",
+      "evidence": "Supervisor verified from /tmp/t0010-ps-snapshot.txt: the nested worker appears as `claude -p --name worker-...` orphaned to pid 1 after rddev exited - no ancestor is a Claude session."
+    },
+    {
+      "criterion": "After a Supervisor restart, running and stale workers are discovered from disk alone.",
+      "status": "passed",
+      "evidence": "Supervisor verified from the e2e log: a FRESH `rddev worker list` process reported both workers as exited with their exit_status read from the on-disk registry."
+    },
+    {
+      "criterion": "A Worker crash/timeout is recorded as failed and never accepted as completed.",
+      "status": "passed",
+      "evidence": "Worker reported exit 3 (crash), 124 (timeout) and 1 (budget) all recorded as exited/failed with the task left running. Supervisor independently confirmed the timeout wiring is correct (the timeout binary precedes `claude`, not passed as its first argument) - a bug the worker found and fixed."
+    },
+    {
+      "criterion": "The ported isolation is demonstrated two-sided.",
+      "status": "passed",
+      "evidence": "Supervisor ran tests/worker-guard/guard-regression.sh: 147/147 PASS, and spot-checked the exact cases from the hand-rolled harness - `git commit` blocked, `docker ps` blocked without a grant, while `grep -n docker docker-compose.yml` and `grep -rn service docs/` are ALLOWED (the two over-blocking bugs fixed in L1-20260912-13)."
+    }
+  ],
+  "risks": [
+    "Guard derives from documented harness behavior (tasks/decisions.md L1-20260912-3/9/13/16, T0011 isolation-smoke evidence, specs/orchestrator/worker-permissions.yaml, docs/61/63); .rddev/dispatch/* is permission-denied to this Worker. Divergence risk mitigated by the two-sided suite and real-claude isolation probes.",
+    "The Write/Edit tools are allowed bare (dispatch parity) and are NOT interceptable by the PreToolUse guard (matcher Bash|Read|Grep|Glob|NotebookRead, as in the dispatch harness). Out-of-scope worktree writes are caught at collect (T0011, allowed_scope diff); writes outside the repo are bounded only by worker instructions. Path-scoped Write allow rules would be the fix but claude 2.1.269 ignores them (probed) — see follow_up_issues.",
+    "go test ./... is red on tests/integration because local PostgreSQL (127.0.0.1:15432) is not running and this Worker has no Docker grant; the Supervisor's G3 environment should re-run it — the failing tests do not exercise T0010 code.",
+    "The e2e 'grep -v grep' artifact (worker argv contains 'grep' from the embedded prompt) is a note for future evidence scripts, not a product bug."
+  ],
+  "follow_up_issues": [
+    "Supervisor: run scripts/spec_version.py --write to refresh specs/SPEC_VERSION.json after worker-registry.schema.json landed (CI spec-validation.yml --check is red until then).",
+    "T0011 (collect): consider a PostToolUse audit hook that rejects Write/Edit tool calls outside the shell-write envelope after the fact, since claude 2.1.269's PreToolUse matcher does not cover Write/Edit and path-scoped allow rules are ignored in dontAsk mode (probed 2026-09-12).",
+    "When a future claude version honors path-scoped Write/Edit allows, replace the bare entries in renderSettings with Write(env:POST_WORKER_WORKTREE/**) etc.; the unit test forbids dead path-scoped entries today so the change must be re-proven first."
+  ],
+  "notes_for_supervisor": "RESULT normalised by the Supervisor into the published schema: the worker emitted tests[].output instead of .evidence and acceptance[] as plain strings. No content was dropped; the raw artifact is preserved as RESULT.worker-raw.json. Acceptance statuses are the SUPERVISOR's G2 verdicts, not the worker's. Root cause is a harness gap: spawn.sh never passed --json-schema to claude, so the result contract was prose-only with no machine enforcement (T0011 must close this). Original notes: Two production bugs were found only because the CLI tests use a real separate process: gitOutput stringified *exec.ExitError with %s (branchExists could never see exit 1, breaking worktree creation on any repo without the task branch), and the --timeout wrapper was passed to claude as its first argument (timed-out workers would never be killed). Both fixed with regression assertions. Real-claude e2e evidence: /tmp/e2e-real.sh, log /tmp/t0010-e2e.log, repo kept at /tmp/t0010-e2e-kiC8, ps snapshot /tmp/t0010-ps-snapshot.txt, Write-tool grammar probes /tmp/t0010-wprobe*.sh."
+}

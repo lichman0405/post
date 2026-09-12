@@ -27,15 +27,14 @@ owner 于 2026-09-12 授予**默认自主推进**授权（`L3-20260912-4`，持�
 | T0006 | merged | #32 | `/healthz` 200 / `/readyz` 503 如实 + 三处接线修复 + Docker-free `make smoke` |
 | T0007 | merged | #34 | 结构化日志 + 端到端 correlation id（含 canary 负对照）+ go-redis 日志归口 |
 | T0008 | merged | #36 | CI 六阶段 gate + `make check` 不再依赖数据库 + DAG/state 一致性检查 + workflow YAML 校验 |
+| T0010 | merged | #38 | `rddev worker spawn`：worktree 生命周期 + registry + 移植的 guard（147/147 双向回归） |
 | T0009 | merged | #23 | `rddev` CLI：doctor 复刻 35 项契约、任务状态机、原子+加锁状态写入、诚实 stub |
 | T0013 | merged | #28 #29 | append-only 不可变性：13 表 × (BEFORE UPDATE/DELETE 行级 + BEFORE TRUNCATE 语句级) |
 | 安全修复 | merged | #8 #11 #14 #18 #21 #26 | preflight 凭据泄漏/fail-open；schema 注解；infra token/SQL；config 三条泄漏路径；search 访问控制；state 锁与 drift |
 
 ## 进行中
 
-- **T0010** — Worktree 生命周期与独立 Worker 调度（`rddev worker spawn`）。
-  必须**移植** `.rddev/dispatch/` 已积累的隔离加固（四轮误报修复），而不是重新发明。
-  它落地后，Supervisor 手工调度阶段结束。
+- **T0011** — Worker 权限隔离与结果收集（依赖 T0010）。
 
 ## 已关闭的 SPEC_BLOCKED
 
