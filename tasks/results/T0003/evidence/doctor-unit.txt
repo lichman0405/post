@@ -1,0 +1,85 @@
+ok   canonical: exit code
+ok   canonical: verdict
+ok   canonical: exit_code field
+ok   canonical: T-GO status
+ok   canonical: T-GO version
+ok   canonical: T-PNPM-PIN status
+ok   canonical: RES-DOCKER-DISK status
+ok   canonical: T-DOCKER-DAEMON status
+ok   canonical: RES-REPO-FS status
+ok   canonical: required.failed
+ok   canonical: advisory.warn
+ok   canonical: human exit code
+ok   canonical: human verdict line
+ok   canonical: no FAIL lines
+ok   go-missing: exit code
+ok   go-missing: verdict
+ok   go-missing: T-GO status
+ok   go-missing: names go in remediation
+ok   go-missing: measured is missing
+ok   go-missing: human exit code
+ok   go-missing: human names T-GO
+ok   go-missing: human has fix line
+ok   go-missing: human remediation names Go
+ok   go-missing: human verdict
+ok   go-drift: exit code
+ok   go-drift: T-GO status
+ok   go-drift: T-GO version parsed
+ok   go-drift: remediation names pinned baseline
+ok   go-drift: remediation mentions Supervisor sign-off
+ok   python-below: exit code
+ok   python-below: T-PYTHON3 status
+ok   python-below: remediation names 3.12
+ok   windows-native: exit code
+ok   windows-native: verdict
+ok   windows-native: ENV-OS-KERNEL status
+ok   windows-native: remediation names WSL2
+ok   windows-native: remediation names Linux filesystem
+ok   windows-native: human exit code
+ok   windows-native: human says Windows Native
+ok   windows-native: human says WSL2
+ok   darwin: exit code
+ok   darwin: verdict
+ok   debian: exit code
+ok   debian: verdict
+ok   debian: ENV-OS-DISTRO status
+ok   wsl1: exit code
+ok   wsl1: ENV-WSL status
+ok   wsl1: advisory.warn
+ok   wsl2-repo-on-mnt: exit code
+ok   wsl2-repo-on-mnt: RES-REPO-FS status
+ok   wsl2-repo-on-mnt: remediation names /mnt
+ok   pnpm-pin-mismatch: exit code
+ok   pnpm-pin-mismatch: T-PNPM-PIN status
+ok   pnpm-pin-mismatch: remediation names pin
+ok   pnpm-pin-malformed: exit code
+ok   pnpm-pin-malformed: T-PNPM-PIN status
+ok   docker-daemon-down: exit code
+ok   docker-daemon-down: T-DOCKER-DAEMON status
+ok   docker-daemon-down: RES-DOCKER-DISK status
+ok   compose-missing: exit code
+ok   compose-missing: T-DOCKER-COMPOSE status
+ok   compose-missing: remediation names plugin
+ok   compose-v5: exit code
+ok   compose-v5: T-DOCKER-COMPOSE status
+ok   compose-v5: T-DOCKER-COMPOSE version recorded
+ok   compose-v1: exit code
+ok   compose-v1: T-DOCKER-COMPOSE status
+ok   compose-v1: remediation names v2 plugin lineage
+ok   default-no-daemon: exit code
+ok   default-no-daemon: RES-DOCKER-DISK status
+ok   default-no-daemon: T-DOCKER-DAEMON status
+ok   default-no-daemon: reason mentions opt-in flag
+ok   usage: unknown option exit code
+ok   usage: no stdout on usage error
+ok   usage: stderr names the option
+ok   usage: bad fixture dir exit code
+ok   usage: bad fixture dir message
+ok   determinism: JSON byte-identical
+ok   determinism: human output byte-identical
+ok   rg-missing: exit code
+ok   rg-missing: T-RG status
+ok   rg-missing: remediation notes binary name
+
+unit: 19 cases, 0 assertion failures
+UNIT TEST RESULT: PASS

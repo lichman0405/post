@@ -97,9 +97,9 @@
       "name": "service health integration",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T14:35:00Z",
+      "evidence": "Supervisor G3 against real containers: docker compose up -d --wait returned 0 with all five services Healthy from a clean start; every port bound to 127.0.0.1; pgvector 0.8.6 present with a real vector distance computed; fresh-install init created bucket/users/team; repeat init all no-ops; data markers survived down/up for postgres, redis, minio and gitea."
     },
     {
       "id": "T0004-TEST-01",
