@@ -1,6 +1,6 @@
 {
   "algorithm": "sha256",
-  "combined_digest": "4c56237da6e92473b44f8409c1b1420f5afebde27c15a76057984b24f2b01c0f",
+  "combined_digest": "61df2f89f3331f7f0aba476d91c0311dfd6e2e6016f759670cce0bd8db1debb8",
   "files": {
     "specs/README.md": "2a0398dfb3ead0586034364d7411d845b84fd33b7c43d1ce9199d6a14ef4cf1a",
     "specs/api/openapi.yaml": "62655a7ac3428d320258de2bc8ce3d331357ffce309bf7a725390869d20c243b",
@@ -9,7 +9,7 @@
     "specs/mcp/tools.json": "f6b5fb023aba882a259bbe7d001bdd2755c1120f1dc768fe7512a7383fdbaca9",
     "specs/orchestrator/decision-levels.yaml": "8a06ec18b8abd79c2462e3d3bcc5b785c51a8f970c54aaa279f174882e0f5a3f",
     "specs/orchestrator/rddev-cli.yaml": "c1ec20d23a9362e508cbbb8b1fbbd67f671d6c7c18c9b3de6cccc2b171c350ed",
-    "specs/orchestrator/source-repo-preflight.schema.json": "f6f9191301deb4f7e5e20268cabd00c73f3e57dd89d424a96483b838f88e1bf4",
+    "specs/orchestrator/source-repo-preflight.schema.json": "a69dd6840fd2c5558dfba7fdb19019430f1c9a3b248c19c6f0a93b2912882932",
     "specs/orchestrator/source-repository.yaml": "78876127b54ca1f61e88d0a9841245b54d6f50df63c14b0768a47907f602e6b9",
     "specs/orchestrator/task-package.schema.json": "1e82282384a2bf06ca47d4275bfa859612c3e28854fa1bc1c43e83c8b1caa794",
     "specs/orchestrator/worker-permissions.yaml": "9f9341a2313dacab7ac295eff97ecb1ebb7c805b44c97130658a67d68c80fd5c",
@@ -38,5 +38,5 @@
   },
   "input_count": 33,
   "marker_format": 1,
-  "spec_version": "sha256:4c56237da6e92473"
+  "spec_version": "sha256:61df2f89f3331f7f"
 }

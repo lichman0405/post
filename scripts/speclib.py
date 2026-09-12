@@ -42,7 +42,8 @@ SPEC_BLOCKED_REASONS = {
     "expectation_unrecorded", "expectation_invalid",
     "visibility_mismatch", "visibility_unverifiable",
     "remote_not_canonical", "remote_unparseable", "remote_unverifiable",
-    "remote_missing", "branch_mismatch", "spec_not_canonical",
+    "remote_missing", "branch_mismatch", "branch_unverifiable",
+    "spec_not_canonical",
 }
 PROCESS_REASONS = {"version_stale", "version_missing", "spec_unreadable"}
 
@@ -133,6 +134,34 @@ def load_yaml(path: Path):
 # ---------------------------------------------------------------------------
 # Remote URL normalization (git remote output parsing)
 # ---------------------------------------------------------------------------
+
+def redact_url(url):
+    """Strip embedded credentials from a URL before it is ever emitted.
+
+    `https://x-access-token:ghp_xxx@github.com/owner/name.git` is a common
+    remote form (CI checkouts, PAT-authenticated clones). The token must not
+    reach stdout, the --json document, or CI logs, so every URL that lands in
+    a check's `measured`/`detail` goes through here first.
+
+    Only scheme://userinfo@host is rewritten; scp-like `git@host:path` keeps
+    its conventional user and is left alone. Returns the input unchanged when
+    it is not a string or carries no userinfo."""
+    if not isinstance(url, str):
+        return url
+    if "://" not in url:
+        return url
+    scheme, rest = url.split("://", 1)
+    if "@" not in rest:
+        return url
+    userinfo, hostpart = rest.rsplit("@", 1)
+    if not userinfo:
+        return url
+    if ":" in userinfo:
+        # user:secret@host -> user:***@host (keeps the user, drops the secret)
+        user = userinfo.split(":", 1)[0]
+        return f"{scheme}://{user}:***@{hostpart}"
+    return f"{scheme}://***@{hostpart}"
+
 
 def normalize_remote_url(url):
     """Normalize a git remote URL to {owner, name, full_name, form}.
@@ -366,6 +395,8 @@ FIXTURE_FILES = {
     "origin_head": "origin-head.txt",
     "visibility": "visibility.txt",
     "gh_visibility": "gh-visibility.txt",
+    "default_branch": "default-branch.txt",
+    "gh_default_branch": "gh-default-branch.txt",
 }
 
 
@@ -414,3 +445,36 @@ def resolve_observed_visibility(flag_value, fixture_dir, check_visibility,
     return "unknown", "none", ("no visibility input provided "
                                "(use --observed-visibility or "
                                "--check-visibility)")
+
+
+def resolve_default_branch(fixture_dir, check_visibility, owner, name):
+    """Resolve the *authoritative remote* default branch.
+
+    `git symbolic-ref refs/remotes/origin/HEAD` is the local clone's record
+    and is frequently absent (CI checkouts, fresh clones), which is why the
+    BRANCH-DEFAULT check could not be enforced. In operator context the
+    remote answers definitively, so the same opt-in that unlocks the gh
+    visibility probe also unlocks this one.
+
+    Precedence: fixture default-branch.txt > gh probe > unknown.
+    Returns (value, source, detail); value is '' when undeterminable."""
+    txt = fixture_text(fixture_dir, FIXTURE_FILES["default_branch"])
+    if txt is not None:
+        lines = [l.strip() for l in txt.splitlines() if l.strip()]
+        return (lines[0] if lines else ""), "fixture", "fixture default-branch.txt"
+    if check_visibility:
+        if fixture_dir is not None:
+            txt = fixture_text(fixture_dir, FIXTURE_FILES["gh_default_branch"])
+            if txt is not None:
+                lines = [l.strip() for l in txt.splitlines() if l.strip()]
+                return (lines[-1] if lines else ""), "fixture", \
+                    "fixture gh-default-branch.txt"
+        rc, out, err = run_cmd(["gh", "api", f"repos/{owner}/{name}",
+                                "--jq", ".default_branch"])
+        if rc == 0 and out.strip():
+            lines = [l.strip() for l in out.splitlines() if l.strip()]
+            return lines[-1], "gh", \
+                f"gh api repos/{owner}/{name} --jq .default_branch"
+        return "", "gh", f"gh probe failed: rc={rc} ({err.strip()})"
+    return "", "none", ("no default-branch input provided (use "
+                        "--check-visibility); origin/HEAD only")

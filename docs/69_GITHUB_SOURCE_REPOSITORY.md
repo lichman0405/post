@@ -36,9 +36,12 @@ CI 通过 `scripts/tests/spec-validation-smoke-test.sh` 在真实 checkout 上�
   `2` usage / `3` spec 不可读无法继续；
 - 默认行为是**安全、可测试、无需凭据**的：不触碰网络、不运行 `gh`；visibility 观测报告
   `unknown / cannot verify`，verdict 拒绝 bless。真实探测必须显式 opt-in：
-  `--check-visibility`（执行 `gh api repos/{owner}/{name} --jq .visibility`，需要
-  Supervisor 的 gh credential），或 `--observed-visibility <value>` 直接给出操作者实测值
-  （优先级最高）。与 T0000 的 `ops/doctor.sh --check-docker-daemon` 同一模式。
+  `--check-visibility`（执行 `gh api repos/{owner}/{name} --jq .visibility` **与**
+  `--jq .default_branch`，需要 Supervisor 的 gh credential），或 `--observed-visibility <value>`
+  直接给出操作者实测值（优先级最高）。与 T0000 的 `ops/doctor.sh --check-docker-daemon` 同一模式。
+- **凭据安全**：remote URL 可能内嵌 token（CI checkout 常见形式
+  `https://x-access-token:<PAT>@github.com/owner/name.git`）。任何进入 `measured`/`detail`
+  的 URL 都必须先经 `speclib.redact_url()` 脱敏，token 绝不进入 stdout、`--json` 文档或 CI 日志。
 
 注入契约（test-only）：`--fixture DIR` 用 fixture 文件覆盖测量输入，决策逻辑在**不触碰真实
 主机与网络**的情况下可测（fixture 模式下不执行任何真实 git/gh 命令；未提供的输入按 unknown
@@ -49,8 +52,10 @@ CI 通过 `scripts/tests/spec-validation-smoke-test.sh` 在真实 checkout 上�
 | `git-remote-v.txt` | 原始 `git remote -v` 输出（`#` 开头的行忽略） |
 | `git-remote-get-url.txt` | 原始 `git remote get-url origin` 输出 |
 | `origin-head.txt` | 原始 `git symbolic-ref refs/remotes/origin/HEAD` 输出（如 `refs/remotes/origin/main`） |
+| `default-branch.txt` | 远端权威 default branch（如 `main`） |
 | `visibility.txt` | 观测 visibility：`public` / `private` / `internal` / `unknown` |
 | `gh-visibility.txt` | `gh api ... --jq .visibility` 原始输出（`--check-visibility` 时使用） |
+| `gh-default-branch.txt` | `gh api ... --jq .default_branch` 原始输出（`--check-visibility` 时使用） |
 
 校验项（固定顺序，每个结果含 id/status/measured/expected/detail/source）：
 
@@ -60,7 +65,7 @@ CI 通过 `scripts/tests/spec-validation-smoke-test.sh` 在真实 checkout 上�
 | `SPEC-CANONICAL` | provider=github、full_name=owner/name、default_branch=main、clone URL 自洽 | 失败 → `spec_not_canonical` |
 | `SPEC-EXPECTATION` | `visibility_expectation`（value/confirmed_by/confirmed_at）已记录且有效 | 失败 → `expectation_unrecorded` / `expectation_invalid` |
 | `REPO-CANONICAL` | `origin` 归一化后 == spec 记录的 owner/name | 不一致 → `remote_not_canonical`；无法解析 → `remote_unparseable`；无 origin → `remote_missing`；无法确定 → `remote_unverifiable` |
-| `BRANCH-DEFAULT` | 观测到的 integration branch（`refs/remotes/origin/HEAD`）== spec default_branch | 不一致 → `branch_mismatch`；**无法确定仅报告，不阻塞** |
+| `BRANCH-DEFAULT` | integration branch == spec default_branch。来源优先 `refs/remotes/origin/HEAD`，本地记录缺失时回退到远端权威 `.default_branch`（`--check-visibility`） | 不一致 → `branch_mismatch`（含本地与远端记录互相矛盾的 state drift）；**无法确定 → `branch_unverifiable`，阻塞**（fail-closed：无法验证 integration branch 的 gate 不得 bless） |
 | `VISIBILITY` | 实时观测 == owner 确认预期（三态模型，§5） | 不一致 → `visibility_mismatch`；无法确定 → `visibility_unverifiable` |
 | `SPEC-VERSION` | checked-in 规格版本标记 == 推导 digest（`scripts/spec_version.py`） | 过期 → `version_stale`；缺失 → `version_missing` |
 
