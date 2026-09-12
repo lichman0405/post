@@ -3,13 +3,13 @@
   "overall": "P0_in_progress",
   "tasks": {
     "T0000": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-12T12:30:00Z",
       "completed_at": "2026-09-12T13:05:00Z",
-      "notes": "G2 accepted independently. collect.sh: HEAD==baseline fecf24d, no worker refs, 8/8 paths in scope, RESULT.json schema-valid. Both required tests re-run by Supervisor: PASS. Negative path (missing go/rg) and Windows Native path reproduced independently. PR #3 open, awaiting owner review (product-code PR).",
+      "notes": "G2 accepted independently. collect.sh: HEAD==baseline fecf24d, no worker refs, 8/8 paths in scope, RESULT.json schema-valid. Both required tests re-run by Supervisor: PASS. Negative path (missing go/rg) and Windows Native path reproduced independently. PR #3 open, awaiting owner review (product-code PR). Merged as PR #3 (squash) at d1a83b5 per owner approval.",
       "worker_run_id": "worker-T0000-fecf24d",
       "accepted_by_supervisor_at": "2026-09-12T13:05:00Z",
-      "merged_at": null
+      "merged_at": "2026-09-12T13:20:00Z"
     },
     "T0001": {
       "status": "todo",
