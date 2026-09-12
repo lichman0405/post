@@ -21,7 +21,7 @@ from post_scientific_adapter.config import (
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="scientific-adapter",
-        description="POST scientific adapter (T0002 scaffold: /healthz only).",
+        description="POST scientific adapter (/healthz liveness, /readyz readiness).",
     )
     parser.add_argument(
         "--host",
@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=None,
         help=("listen port (default: POST_SCIENTIFIC_ADAPTER_PORT "
-              "or 9000)"),
+              "or 9100)"),
     )
     parser.add_argument(
         "--version",

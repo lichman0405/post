@@ -1,51 +1,113 @@
 // Command api is the POST HTTP API server.
 //
-// T0002 scaffold: it serves GET /healthz only. Product endpoints arrive with
-// the OpenAPI-first API tasks; the contract seed lives in
-// specs/api/openapi.yaml (docs/52: transport/http -> application -> domain).
+// T0006: the server now loads the validated configuration (internal/config)
+// and fails closed when it is missing or invalid — configuration is in
+// effect at runtime, not just validated (the T0004 "looks green, isn't in
+// effect" closure). It serves:
+//
+//	GET /healthz  process liveness only (never depends on downstream services)
+//	GET /readyz   readiness: PostgreSQL and Redis are probed and reported
+//	              truthfully — a down dependency answers 503 not_ready, the
+//	              process never crashes and never answers a false "ok".
+//
+// The database pool is opened lazily on purpose: the API must start (and
+// report "not ready") while PostgreSQL is down, not refuse to start.
+//
+// Product endpoints arrive with the OpenAPI-first API tasks; the contract
+// seed lives in specs/api/openapi.yaml (docs/52: transport/http ->
+// application -> domain).
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/lichman0405/post/internal/config"
+	"github.com/lichman0405/post/internal/health"
+	"github.com/lichman0405/post/internal/persistence"
 	"github.com/lichman0405/post/internal/version"
 )
 
+// Exit codes: 0 ok, 1 runtime failure, 2 configuration failure (the same
+// convention as the scientific adapter).
+const (
+	exitOK      = 0
+	exitRuntime = 1
+	exitConfig  = 2
+)
+
 func main() {
-	showVersion := flag.Bool("version", false, "print version and exit")
-	addr := flag.String("addr", envOr("POST_API_ADDR", ":8080"), "HTTP listen address")
-	flag.Parse()
+	os.Exit(run(os.Args[1:]))
+}
+
+func run(args []string) int {
+	flags := flag.NewFlagSet("post-api", flag.ContinueOnError)
+	showVersion := flags.Bool("version", false, "print version and exit")
+	addr := flags.String("addr", "", "HTTP listen address (default: POST_API_ADDR)")
+	if err := flags.Parse(args); err != nil {
+		return exitConfig
+	}
 
 	if *showVersion {
 		fmt.Println("post-api", version.Version)
-		return
+		return exitOK
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", handleHealthz)
-
-	srv := &http.Server{
-		Addr:              *addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
+	// The validated configuration is in effect at runtime: a missing or
+	// invalid variable fails fast here, naming the offending key (T0006).
+	cfg, err := config.LoadFromCwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "post-api: configuration error:\n%v\n", err)
+		return exitConfig
+	}
+	if *addr != "" {
+		cfg.Server.Addr = *addr
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Lazy pool: the API starts while the database is down and reports it
+	// through /readyz instead of refusing to start.
+	pool, err := persistence.OpenLazy(ctx, databaseDSN(cfg))
+	if err != nil {
+		slog.Error("post-api: database pool setup failed", "error", err)
+		return exitRuntime
+	}
+	defer pool.Close()
+
+	redisClient := redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr})
+	defer redisClient.Close()
+
+	mux := http.NewServeMux()
+	healthz := newHealthHandler(pool, redisClient)
+	mux.Handle("/healthz", healthz)
+	mux.Handle("/readyz", healthz)
+
+	srv := &http.Server{
+		Addr:              cfg.Server.Addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("post-api listening", "addr", *addr, "version", version.Version)
+		slog.Info("post-api listening",
+			"addr", cfg.Server.Addr, "version", version.Version, "cfg", cfg)
 		errCh <- srv.ListenAndServe()
 	}()
 
@@ -56,28 +118,49 @@ func main() {
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			slog.Error("shutdown failed", "error", err)
-			os.Exit(1)
+			return exitRuntime
 		}
 	case err := <-errCh:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("post-api exited", "error", err)
-			os.Exit(1)
+			return exitRuntime
 		}
 	}
+	return exitOK
 }
 
-func handleHealthz(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"service": "api",
-		"status":  "ok",
-		"version": version.Version,
-	})
+// newHealthHandler wires the health surface: liveness never touches a
+// dependency; readiness probes PostgreSQL and Redis and reports the truth.
+func newHealthHandler(pool *pgxpool.Pool, redisClient *redis.Client) http.Handler {
+	return health.NewHandler("api",
+		health.Probe{
+			Name: "postgresql",
+			Check: func(ctx context.Context) error {
+				return pool.Ping(ctx)
+			},
+		},
+		health.Probe{
+			Name: "redis",
+			Check: func(ctx context.Context) error {
+				return redisClient.Ping(ctx).Err()
+			},
+		},
+	)
 }
 
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+// databaseDSN builds the pgx connection URL from the validated config.
+// Reading the raw password here is the one legitimate use of a config.Secret:
+// only code that actually opens the connection may call Raw/string forms
+// (internal/config).
+func databaseDSN(cfg *config.Config) string {
+	u := url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(cfg.Database.User, string(cfg.Database.Password)),
+		Host:   net.JoinHostPort(cfg.Database.Host, strconv.Itoa(cfg.Database.Port)),
+		Path:   "/" + cfg.Database.Name,
 	}
-	return fallback
+	q := u.Query()
+	q.Set("sslmode", cfg.Database.SSLMode)
+	u.RawQuery = q.Encode()
+	return u.String()
 }

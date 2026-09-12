@@ -47,17 +47,18 @@ def test_every_layer_is_accepted() -> None:
         cfg = load_config(valid_env(layer))
         assert cfg.layer == layer
         assert cfg.host == "127.0.0.1"
-        assert cfg.port == 9000
+        # 9100, not 9000: 9000 is the MinIO S3 API port (T0006 fix).
+        assert cfg.port == 9100
 
 
 def test_env_values_override_defaults() -> None:
     cfg = load_config({
         ENV_LAYER: "prod",
         ENV_HOST: "0.0.0.0",
-        ENV_PORT: "9100",
+        ENV_PORT: "9200",
     })
     assert cfg.host == "0.0.0.0"
-    assert cfg.port == 9100
+    assert cfg.port == 9200
     assert isinstance(cfg, AdapterConfig)
 
 
@@ -71,11 +72,11 @@ def test_malformed_port_is_named(bad_port: str) -> None:
 
 def test_layer_file_applies_only_for_the_matching_layer(tmp_path) -> None:
     dev_file = tmp_path / ".env.dev"
-    dev_file.write_text(f"{ENV_PORT}=9100\n", encoding="utf-8")
+    dev_file.write_text(f"{ENV_PORT}=9200\n", encoding="utf-8")
 
     # dev layer: the file applies.
     cfg = load_config(valid_env("dev"), env_file=dev_file)
-    assert cfg.port == 9100
+    assert cfg.port == 9200
 
     # test layer: the same file is refused — no cross-layer fallback.
     with pytest.raises(ConfigError) as exc_info:
@@ -88,7 +89,7 @@ def test_layer_file_applies_only_for_the_matching_layer(tmp_path) -> None:
 def test_process_env_overrides_layer_file(tmp_path) -> None:
     dev_file = tmp_path / ".env.dev"
     dev_file.write_text(
-        f"{ENV_HOST}=file-host\n{ENV_PORT}=9100\n", encoding="utf-8"
+        f"{ENV_HOST}=file-host\n{ENV_PORT}=9300\n", encoding="utf-8"
     )
     cfg = load_config(
         {ENV_LAYER: "dev", ENV_PORT: "9200"}, env_file=dev_file
@@ -103,9 +104,9 @@ def test_missing_file_value_is_not_satisfied_by_another_layers_file(
     # A .env.dev file may exist on disk, but the loader only ever reads an
     # explicit matching file — the value is simply not picked up.
     dev_file = tmp_path / ".env.dev"
-    dev_file.write_text(f"{ENV_PORT}=9100\n", encoding="utf-8")
+    dev_file.write_text(f"{ENV_PORT}=9200\n", encoding="utf-8")
     cfg = load_config(valid_env("test"))
-    assert cfg.port == 9000
+    assert cfg.port == 9100
 
 
 def test_broken_layer_file_fails_loudly(tmp_path) -> None:
@@ -126,11 +127,11 @@ def test_adapter_variables_are_never_satisfied_by_web_variables() -> None:
     web_only = {
         ENV_LAYER: "dev",
         "API_BASE_URL": "http://127.0.0.1:8080",
-        "SCIENTIFIC_ADAPTER_URL": "http://127.0.0.1:9000",
+        "SCIENTIFIC_ADAPTER_URL": "http://127.0.0.1:9100",
     }
     cfg = load_config(web_only)
     assert cfg.host == "127.0.0.1"  # neutral default, not a web value
-    assert cfg.port == 9000
+    assert cfg.port == 9100
 
 
 def test_adapter_still_requires_its_own_layer() -> None:
@@ -138,7 +139,7 @@ def test_adapter_still_requires_its_own_layer() -> None:
     with pytest.raises(ConfigError) as exc_info:
         load_config({
             "API_BASE_URL": "http://127.0.0.1:8080",
-            "SCIENTIFIC_ADAPTER_URL": "http://127.0.0.1:9000",
+            "SCIENTIFIC_ADAPTER_URL": "http://127.0.0.1:9100",
         })
     assert ENV_LAYER in problems_of(exc_info.value)
 
@@ -162,4 +163,4 @@ def test_parse_env_file_handles_comments_quotes_and_crlf(tmp_path) -> None:
 def test_describe_contains_no_secret_material() -> None:
     cfg = load_config(valid_env("prod"))
     assert "layer=prod" in cfg.describe()
-    assert "listen=127.0.0.1:9000" in cfg.describe()
+    assert "listen=127.0.0.1:9100" in cfg.describe()
