@@ -1,13 +1,13 @@
 {
   "version": 2,
-  "overall": "not_started",
+  "overall": "P0_in_progress",
   "tasks": {
     "T0000": {
-      "status": "todo",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-09-12T12:30:00Z",
       "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
+      "notes": "Dispatched via .rddev/dispatch/spawn.sh (bootstrap precursor to rddev worker spawn). branch task/T0000-ubuntu-preflight, baseline fecf24d.",
+      "worker_run_id": "worker-T0000-fecf24d",
       "accepted_by_supervisor_at": null,
       "merged_at": null
     },
