@@ -90,6 +90,17 @@ type Organization struct {
 	Name        string             `json:"name"`
 	Description *string            `json:"description"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	// soft-delete marker: set when the organization is deactivated by its owner; NULL = active
+	DeactivatedAt pgtype.Timestamptz `json:"deactivated_at"`
+}
+
+type OrganizationMembership struct {
+	OrganizationID   pgtype.UUID `json:"organization_id"`
+	UserID           pgtype.UUID `json:"user_id"`
+	Role             string      `json:"role"`
+	AffiliationStart pgtype.Date `json:"affiliation_start"`
+	AffiliationEnd   pgtype.Date `json:"affiliation_end"`
+	Verified         bool        `json:"verified"`
 }
 
 type OutboxEvent struct {

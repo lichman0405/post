@@ -42,23 +42,38 @@ type guard struct {
 	webHost string
 }
 
-// principal carries the authenticated actor through the request.
-type principal struct {
+// Principal carries the authenticated actor through the request. It is
+// resolved by the guard and read by every product handler that needs the
+// current user (orgshttp imports it — the guard is the one authority on
+// who the caller is, handlers never re-resolve sessions).
+type Principal struct {
 	User    domain.User
 	Session authn.Session
 }
 
 type principalKey struct{}
 
-func withPrincipal(ctx context.Context, p principal) context.Context {
+func withPrincipal(ctx context.Context, p Principal) context.Context {
 	return context.WithValue(ctx, principalKey{}, p)
 }
 
-// principalFrom returns the authenticated actor, if the guard resolved one.
-func principalFrom(ctx context.Context) (principal, bool) {
-	p, ok := ctx.Value(principalKey{}).(principal)
+// PrincipalFrom returns the authenticated actor, if the guard resolved one.
+func PrincipalFrom(ctx context.Context) (Principal, bool) {
+	p, ok := ctx.Value(principalKey{}).(Principal)
 	return p, ok
 }
+
+// principal is the same type as Principal. T0102 and T0103 each named the
+// authenticated actor (principal/PrincipalID and Principal/PrincipalFrom);
+// the two types are field-identical, so the merge points both names at one
+// type and keeps each task's call sites untouched rather than renaming code
+// from a merged task inside a merge resolution. Unifying the two spellings is
+// recorded as a follow-up.
+type principal = Principal
+
+// principalFrom is PrincipalFrom's unexported spelling, kept for the same
+// reason: T0102's PrincipalID calls it, T0103's callers use the exported one.
+func principalFrom(ctx context.Context) (principal, bool) { return PrincipalFrom(ctx) }
 
 // PrincipalID returns the authenticated actor's user id, or "" when the
 // request carries no valid session. Product handlers (T0102+ profilehttp)
@@ -114,7 +129,7 @@ func (g *guard) guard(next http.Handler) http.Handler {
 			user, sess, err := g.svc.Authenticate(ctx, cookie.Value)
 			switch {
 			case err == nil:
-				ctx = withPrincipal(ctx, principal{User: user, Session: sess})
+				ctx = withPrincipal(ctx, Principal{User: user, Session: sess})
 			case errors.Is(err, authn.ErrSessionNotFound):
 				// No/expired session: reads continue, writes answer 401.
 			default:
@@ -139,7 +154,7 @@ func (g *guard) guard(next http.Handler) http.Handler {
 					return
 				}
 			} else {
-				p, ok := principalFrom(ctx)
+				p, ok := PrincipalFrom(ctx)
 				if !ok {
 					// Structural 401 for unauthenticated writes — the
 					// T0101 acceptance criterion lives here, before

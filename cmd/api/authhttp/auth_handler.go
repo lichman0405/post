@@ -111,7 +111,7 @@ func (h *handlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 // handleLogout: POST /api/v1/auth/logout — the guard already required a
 // valid session + CSRF token; revocation is idempotent.
 func (h *handlers) handleLogout(w http.ResponseWriter, r *http.Request) {
-	p, ok := principalFrom(r.Context())
+	p, ok := PrincipalFrom(r.Context())
 	if ok {
 		if err := h.svc.Logout(r.Context(), p.Session.Token); err != nil {
 			WriteError(w, r, http.StatusServiceUnavailable, authn.CodeServiceUnavailable,
@@ -126,7 +126,7 @@ func (h *handlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 // handleSession: GET /api/v1/auth/session — whoami. 401 without a session
 // (the web app renders login state from this).
 func (h *handlers) handleSession(w http.ResponseWriter, r *http.Request) {
-	p, ok := principalFrom(r.Context())
+	p, ok := PrincipalFrom(r.Context())
 	if !ok {
 		WriteError(w, r, http.StatusUnauthorized, authn.CodeUnauthenticated,
 			"no active session")

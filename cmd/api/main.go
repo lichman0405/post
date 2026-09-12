@@ -43,6 +43,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/lichman0405/post/cmd/api/authhttp"
+	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/config"
@@ -117,10 +118,11 @@ func run(args []string) int {
 	queue := worker.NewRedisQueue(redisClient, "post")
 	mux.Handle("POST /internal/jobs", newJobHandler(queue, logger))
 
-	// Authentication (T0101): the /api/v1 subtree is guarded by default —
-	// every state-changing request under it requires a valid session + CSRF
-	// token unless it is an explicit pre-auth route (login/signup). Future
-	// product routes register on the same subtree and inherit the guard.
+	// Authentication (T0101) + organizations (T0103): the /api/v1 subtree
+	// is guarded by default — every state-changing request under it
+	// requires a valid session + CSRF token unless it is an explicit
+	// pre-auth route (login/signup). Product routes register on the same
+	// apiMux inside the guard and inherit it structurally.
 	authCfg, err := authnLoader().Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "post-api: authentication configuration error:\n%v\n", err)
@@ -134,17 +136,22 @@ func run(args []string) int {
 		Cfg:        *authCfg,
 		Secure:     cfg.Layer == config.LayerProd,
 	})
-
-	// Product APIs (T0102+): one shared mux under one guard — the profile
-	// surface registers here and inherits the session/CSRF guard
-	// structurally (anonymous reads flow, writes are 401/403 before
-	// routing).
+	// Product APIs (T0102+): one shared mux under one guard. The auth, profile
+	// and organization surfaces all register here and inherit the
+	// session/CSRF guard structurally — anonymous reads flow, writes are
+	// 401/403 before routing.
 	v1 := http.NewServeMux()
 	authAPI.Register(v1)
 	profileAPI := profilehttp.New(profilehttp.Deps{
 		Profiles: persistence.NewProfileStore(pool),
 	})
 	profileAPI.Register(v1)
+	orgAPI := orgshttp.New(orgshttp.Deps{Store: persistence.NewOrgStore(pool)})
+	// The bare path is registered alongside the subtree so requests to
+	// /api/v1/organizations (create + list) hit the routes directly instead of
+	// being redirected for a trailing slash.
+	v1.Handle("/api/v1/organizations", orgAPI.Routes())
+	v1.Handle("/api/v1/organizations/", orgAPI.Routes())
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	srv := &http.Server{

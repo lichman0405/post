@@ -14,6 +14,7 @@ type Querier interface {
 	AddOrganizationMembership(ctx context.Context, arg AddOrganizationMembershipParams) error
 	AddProjectMembership(ctx context.Context, arg AddProjectMembershipParams) error
 	AttachBlob(ctx context.Context, arg AttachBlobParams) error
+	CountActiveOrganizationOwners(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	// Blobs and their attachments (canonical tables: blobs, blob_attachments).
 	// Blob rows are metadata only; bytes live in S3/MinIO (invariant 7: knowledge
 	// visibility != blob accessibility).
@@ -31,7 +32,7 @@ type Querier interface {
 	// (invariant 6).
 	CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue, error)
 	// Organizations and memberships (canonical tables: organizations,
-	// organization_memberships).
+	// organization_memberships; 00017 adds organizations.deactivated_at).
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	// Projects, programs, memberships (canonical tables: programs, projects,
 	// project_memberships).
@@ -54,13 +55,24 @@ type Querier interface {
 	CreateStateCommit(ctx context.Context, arg CreateStateCommitParams) (StateCommit, error)
 	// Users (canonical table: users).
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeactivateOrganization(ctx context.Context, id pgtype.UUID) (Organization, error)
+	// Stamps affiliation_end and keeps the row (离职不删除历史 — history is
+	// never deleted, docs/04 §6). The store only executes this for
+	// still-open affiliations (it reads the row first under the organization
+	// lock): ending an already-ended membership is a no-op, so the historical
+	// end date is never re-stamped.
+	EndOrganizationAffiliation(ctx context.Context, arg EndOrganizationAffiliationParams) (OrganizationMembership, error)
 	EnqueueOutboxEvent(ctx context.Context, arg EnqueueOutboxEventParams) (OutboxEvent, error)
 	GetBlobByContentHash(ctx context.Context, arg GetBlobByContentHashParams) (Blob, error)
 	GetBranchByID(ctx context.Context, id pgtype.UUID) (Branch, error)
 	GetIssueByProjectAndNumber(ctx context.Context, arg GetIssueByProjectAndNumberParams) (Issue, error)
 	GetLatestScientificObjectVersion(ctx context.Context, objectID pgtype.UUID) (ScientificObjectVersion, error)
 	GetOrganizationByID(ctx context.Context, id pgtype.UUID) (Organization, error)
+	// Row-locks the organization: governance writes serialize on this lock, so
+	// the last-owner check and the change that depends on it are atomic.
+	GetOrganizationByIDForUpdate(ctx context.Context, id pgtype.UUID) (Organization, error)
 	GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error)
+	GetOrganizationMembership(ctx context.Context, arg GetOrganizationMembershipParams) (OrganizationMembership, error)
 	GetProjectByID(ctx context.Context, id pgtype.UUID) (Project, error)
 	GetProjectBySlug(ctx context.Context, arg GetProjectBySlugParams) (Project, error)
 	GetProjectStateByHash(ctx context.Context, arg GetProjectStateByHashParams) (ProjectState, error)
@@ -76,7 +88,11 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	ListBranchesByProject(ctx context.Context, projectID pgtype.UUID) ([]Branch, error)
 	ListEvidenceAssertionsForTarget(ctx context.Context, objectVersionID pgtype.UUID) ([]EvidenceAssertion, error)
+	ListOrganizationMemberships(ctx context.Context, organizationID pgtype.UUID) ([]OrganizationMembership, error)
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
+	// Organizations the user currently belongs to (open affiliation), most
+	// recently created first.
+	ListOrganizationsForUser(ctx context.Context, userID pgtype.UUID) ([]Organization, error)
 	ListPendingOutboxEvents(ctx context.Context, batchSize int32) ([]OutboxEvent, error)
 	ListProjectMembers(ctx context.Context, projectID pgtype.UUID) ([]ListProjectMembersRow, error)
 	ListProjectsByOrganization(ctx context.Context, arg ListProjectsByOrganizationParams) ([]Project, error)
@@ -114,6 +130,13 @@ type Querier interface {
 	// filtering on every query, search, export and download. Master Gate E ("Search
 	// 无 private leakage") holds this invariant too.
 	SearchDocuments(ctx context.Context, arg SearchDocumentsParams) ([]SearchDocumentsRow, error)
+	UpdateOrganization(ctx context.Context, arg UpdateOrganizationParams) (Organization, error)
+	// Adjusts role/affiliation_start/verified. affiliation_end is deliberately
+	// NOT a column of this statement: it is written exclusively by
+	// EndOrganizationAffiliation, so no adjustment path can clear or re-stamp
+	// a departure date (离职不删除历史 — the historical end date survives by
+	// construction, whatever the caller passes).
+	UpdateOrganizationMembership(ctx context.Context, arg UpdateOrganizationMembershipParams) (OrganizationMembership, error)
 	UpdateProjectActivityStatus(ctx context.Context, arg UpdateProjectActivityStatusParams) (Project, error)
 	// Search projection (canonical table: search_documents). Rebuildable by
 	// construction (docs/14: Postgres FTS + structured filters; embeddings are a

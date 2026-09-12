@@ -39,7 +39,10 @@ type e2eEnv struct {
 }
 
 // newE2EEnv mirrors cmd/api main.go's wiring: same Deps construction, same
-// Routes() handler — only the storage is in-process.
+// guard + subtree composition — only the storage is in-process. The org
+// subtree is absent here (it needs PostgreSQL, the org store has no
+// in-memory adapter); org coverage lives in tests/integration against the
+// real database.
 func newE2EEnv(t *testing.T, cfg authn.Config, oidc authn.OIDCProvider) *e2eEnv {
 	t.Helper()
 	users := memstore.NewUsers()
@@ -53,7 +56,9 @@ func newE2EEnv(t *testing.T, cfg authn.Config, oidc authn.OIDCProvider) *e2eEnv 
 		Cfg:        cfg,
 		Secure:     false,
 	})
-	ts := httptest.NewServer(api.Routes())
+	apiMux := http.NewServeMux()
+	apiMux.Handle("/api/v1/auth/", api.Routes())
+	ts := httptest.NewServer(api.Guard(apiMux))
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() { _ = redisClient.Close() })
 	jar, _ := cookiejar.New(nil)
@@ -507,7 +512,9 @@ func TestE2ESessionIsServerSide(t *testing.T) {
 		Cfg:        defaultCfg(),
 		Secure:     false,
 	})
-	ts2 := httptest.NewServer(second.Routes())
+	secondMux := http.NewServeMux()
+	secondMux.Handle("/api/v1/auth/", second.Routes())
+	ts2 := httptest.NewServer(second.Guard(secondMux))
 	defer ts2.Close()
 
 	resp := env.do(t, http.MethodPost, "/api/v1/auth/signup", signupBody2, nil)
