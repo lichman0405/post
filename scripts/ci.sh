@@ -28,7 +28,7 @@ export LC_ALL=C
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-ALL_STAGES=(spec task-state go web python integration)
+ALL_STAGES=(workflows spec task-state go web python integration)
 
 STAGES=("$@")
 if [[ ${#STAGES[@]} -eq 0 ]]; then
@@ -55,6 +55,14 @@ run_stage() {
     echo ""
     exit 1
   fi
+}
+
+stage_workflows() {
+  # A workflow that does not parse never runs at all — GitHub fails the run in
+  # 0 seconds and the repository silently has no CI. The local replica tests
+  # the commands the workflow runs, never the document itself, so this is the
+  # only place that can catch it.
+  python3 scripts/validate_workflows.py
 }
 
 stage_spec() {
@@ -104,6 +112,7 @@ if [[ -n "${CI_STAGE_SINGLE:-}" ]]; then
   # name -> function mapping must stay in sync with the case below
   # (function names cannot contain the hyphen in "task-state").
   case "$CI_STAGE_SINGLE" in
+    workflows)    stage_workflows ;;
     spec)         stage_spec ;;
     task-state)   stage_task_state ;;
     go)           stage_go ;;
@@ -117,6 +126,7 @@ fi
 
 for name in "${STAGES[@]}"; do
   case "$name" in
+    workflows)    run_stage workflows ;;
     spec)         run_stage spec ;;
     task-state)   run_stage task-state ;;
     go)           run_stage go ;;

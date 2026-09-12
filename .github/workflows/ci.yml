@@ -64,15 +64,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27'
-      - name: go: fmt check
+      - name: "go: fmt check"
         run: make fmt-check
-      - name: go: vet
+      - name: "go: vet"
         run: go vet ./...
-      - name: go: staticcheck (pinned, baseline via ops/ci/staticcheck-baseline.txt)
+      - name: "go: staticcheck (pinned, baseline via ops/ci/staticcheck-baseline.txt)"
         run: make staticcheck
-      - name: go: staticcheck gate fixture unit tests
+      - name: "go: staticcheck gate fixture unit tests"
         run: bash scripts/tests/staticcheck-unit-test.sh
-      - name: go: unit tests (integration package excluded — it needs PostgreSQL)
+      - name: "go: unit tests (integration package excluded — it needs PostgreSQL)"
         run: go test $(go list ./... | grep -v '/tests/integration')
 
   # Stage 4 — Web: lint / typecheck / unit / production build.
@@ -83,17 +83,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: web: install (pnpm via corepack, frozen lockfile)
+      - name: "web: install (pnpm via corepack, frozen lockfile)"
         run: corepack enable && pnpm install --frozen-lockfile
-      - name: web: typecheck @post/ui
+      - name: "web: typecheck @post/ui"
         run: pnpm --filter @post/ui typecheck
-      - name: web: typecheck @post/web
+      - name: "web: typecheck @post/web"
         run: pnpm --filter @post/web typecheck
-      - name: web: lint
+      - name: "web: lint"
         run: pnpm --filter @post/web lint
-      - name: web: unit tests (node --test)
+      - name: "web: unit tests (node --test)"
         run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test "apps/web/lib/config.test.mjs"
-      - name: web: production build (Next requires POST_ENV=prod at build)
+      - name: "web: production build (Next requires POST_ENV=prod at build)"
         env:
           POST_ENV: prod
           API_BASE_URL: http://127.0.0.1:18080
@@ -109,15 +109,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: python: toolchain (uv, ruff, mypy)
+      - name: "python: toolchain (uv, ruff, mypy)"
         run: pip install uv ruff mypy
-      - name: python: sync adapter env
+      - name: "python: sync adapter env"
         run: cd services/scientific-adapter && uv sync --frozen
-      - name: python: lint (ruff)
+      - name: "python: lint (ruff)"
         run: cd services/scientific-adapter && ruff check . --config ../../ops/ci/ruff.toml
-      - name: python: type (mypy)
+      - name: "python: type (mypy)"
         run: cd services/scientific-adapter && mypy --config-file ../../ops/ci/mypy.ini src/post_scientific_adapter
-      - name: python: pytest
+      - name: "python: pytest"
         run: cd services/scientific-adapter && uv run pytest -q
 
   # Stage 6 — migration + integration against real PostgreSQL. The only
@@ -146,7 +146,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27'
-      - name: integration: migrations + data-access suite (make test-integration)
+      - name: "integration: migrations + data-access suite (make test-integration)"
         env:
           POSTGRES_TEST_ADMIN_URL: postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post
         run: make test-integration
