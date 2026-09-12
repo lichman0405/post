@@ -121,6 +121,31 @@
   记录而非强制特定模型。
 - **可逆性**：可逆，后续可为 Worker 单独指定模型。
 
+## L1-20260912-6 — T0000 预检基线确认（Worker 提出，Supervisor 裁定）
+
+T0000 Worker 没有静默选择，而是把三处基线校准作为待确认项写进 RESULT。Supervisor 裁定：
+
+1. **Docker Compose 基线 = "v2 插件 lineage，major ≥ 2，版本记录"**。`docs/64` §4 的 "Compose v2"
+   指 Go 版 compose plugin 这条产品线（相对于已废弃的 python `docker-compose` v1），不是字面
+   `major == 2`。本机实测 `Docker Compose version v5.5.1`，按 major ≥ 2 接受并记录实际版本；
+   v1 仍判为不合法。可逆：若将来要求精确 pin，改 `docs/64` §4.1 与 `ops/doctor-checks.md` 即可。
+2. **shellcheck 不 pin**（presence + 记录版本）。`docs/64` 从未 pin 过 shellcheck，noble 仓库
+   提供 0.9.x。
+3. **`python3` 解析到 anaconda 3.12.7** 满足 `>= 3.12` 基线。服务侧 canonical Python 仍是
+   `uv` 管理的虚拟环境（T0002），因此系统解释器来源属开发机细节，不构成契约变更。
+
+## L1-20260912-7 — Worker 长思考阶段的调度容忍度
+
+- **观察**：T0000 的 Worker 在写第一个文件之前，先用掉约 30 分钟与两个超长 thinking block
+  （约 22k + 20k tokens），期间 tool call 长时间停在 24 次不变；随后在约 20 分钟内完成全部交付
+  （92 次 tool call、8 个文件、1543 行）。
+- **结论**：这是该模型在 `effort=max` 下"先做完整设计再动手"的行为特征，**不是卡死**。
+  判断 Worker 是否卡死应看 stream log 是否仍在增长（实测约 70 tok/s），而不是看 tool call 计数。
+- **决策**：不因单次长思考就 kill Worker；仅在 log 完全静止时才判定 hang。
+  T0010 的 worker 健康检查应按"log 是否增长"实现，而不是按"多久没有 tool call"。
+- **代价提示**：该模式对长链路任务吞吐不利。若 P0 后半段吞吐成为瓶颈，可考虑对规格明确的
+  实现类任务下调 Worker `--effort`，但需先用数据证明不影响 G2 通过率。
+
 ---
 
 ## 环境发现（非决策，必须显式记录）

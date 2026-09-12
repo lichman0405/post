@@ -7,9 +7,9 @@
       "name": "environment preflight unit",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T13:05:00Z",
+      "evidence": "bash ops/tests/doctor-unit-test.sh -> PASS (19 fixture cases, 84 assertions). Supervisor re-ran independently: PASS. Covers missing-tool remediation, major drift, Windows Native, WSL1, repo-on-/mnt, compose lineage, usage errors, determinism."
     },
     {
       "id": "T0000-TEST-02",
@@ -17,9 +17,9 @@
       "name": "ubuntu smoke",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T13:05:00Z",
+      "evidence": "bash ops/tests/doctor-smoke-test.sh -> PASS (0 failure groups). Supervisor re-ran independently: PASS. Real host verdict ok/exit 0, required 24/27 passed 0 failed 3 skipped; two --json runs byte-identical; schema conformance asserted."
     },
     {
       "id": "T0001-TEST-01",
