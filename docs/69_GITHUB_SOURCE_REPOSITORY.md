@@ -60,6 +60,32 @@ PR: [T0042] <task title>
 
 如果一个 GitHub Issue 对应多个 machine tasks，则 PR body 中列出全部 Task IDs；不得强行一任务一 Issue。
 
+## 3.1 Review 与 merge 授权（owner 授权，2026-09-12）
+
+对 L0/L1 级别的常规实现任务与产品代码 PR，Supervisor 无需逐 PR 请求人工批准，可自行
+review 并 merge，前提是 `docs/62` §3.1 的六项条件**同时**成立：
+
+1. Worker 已 `completed` 且 Supervisor 完成独立 G2；
+2. G1/G2/G3/G4 全部通过；
+3. CI 全绿；
+4. 无未解决 review 意见；
+5. diff 未超出 `allowed_scope`；
+6. 未改动既定产品语义、安全边界、权限模型、科研语义或核心架构原则。
+
+必须停止并请求人工决定：**L3** 决策；改变既定核心架构原则的**重大 L2** 决策；需要新的
+外部凭证/付费服务/账号授权；无法用现有规格解决的 `SPEC_BLOCKED`。
+
+**不得**因等待批准而停滞的类别：普通实现、bug fix、测试、重构、依赖范围内的技术选型。
+
+现状约束（如实记录，不得伪造）：本仓库在私有 + 当前 plan 下**无法启用 GitHub branch
+protection**（见 `tasks/decisions.md` F-20260912-1）。因此 "required review" 与 "禁 force push"
+**不是**平台强制的，只由 Supervisor 纪律 + credential 独占保证。不得在任何文档或 PR 中声称
+已启用 branch protection。CI（`.github/workflows/spec-validation.yml`）是真实的 required gate，
+必须全绿。
+
+第三方 app（CodeRabbit）对本仓库 PR 提供 **advisory** review，不是 required check；owner 已知悉
+其会读取私有仓库 PR 内容并选择保留（`tasks/decisions.md` L3-20260912-3）。
+
 ## 4. Worker security boundary
 
 Worker 启动时：

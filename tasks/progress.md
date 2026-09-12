@@ -1,11 +1,21 @@
 # 开发进度
 
 状态：P0 进行中。
-最后更新：2026-09-12（T0000 G2 通过，等待 PR review）
+最后更新：2026-09-12（T0000 merged；自主推进授权生效）
 
 ## 当前阶段
 
 P0 — Canonical 开发环境、Orchestrator 与工程脚手架（T0000–T0012）。
+
+## 治理状态（★ 影响每次调度）
+
+owner 于 2026-09-12 授予**默认自主推进**授权（`L3-20260912-4`，持久化于 `CLAUDE.md` §5.1、
+`docs/62` §3.1、`docs/69` §3.1）：
+
+- L0/L1 常规实现任务与产品代码 PR，满足六项条件即由 Supervisor 自行 review + merge，
+  **不再逐 PR 请求人工批准**。
+- 仅 L3、重大 L2、新外部凭证/付费服务/账号授权、无法用规格解决的 `SPEC_BLOCKED` 才停止请求人工。
+- 授权不降低 Gate 标准；仅对本仓库 `main` 有效；每次 merge 仍须留完整可追溯链。
 
 ## 已完成
 
@@ -29,12 +39,12 @@ P0 — Canonical 开发环境、Orchestrator 与工程脚手架（T0000–T0012�
 
 ## 进行中
 
-- **PR #3（T0000）等待 owner review**。按 L3-20260912-2 分级授权，该 PR 属产品代码类，
-  必须 owner approve 后才能 squash-merge。合并后 T0001 解锁。
+- **T0001 派发中** — 规格仓库与任务依赖图校验脚本化 + source-repository preflight。
+  任务包/系统提示词已预置；baseline 取 T0000 merge 后的 main。
 
 ## 阻塞
 
-- 无硬阻塞。关键路径当前停在 PR #3 的人工 review。
+- 无。`main` = T0000 merge 后状态；T0001 已解锁。
 
 ## 已知风险 / 需 owner 关注
 
