@@ -99,6 +99,10 @@
     },
     "migration-integration": {
       "steps": [
+        {"run": "bash scripts/tests/pg-ready-unit-test.sh",
+         "env": {
+           "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post"
+         }},
         {"run": "make test-integration",
          "env": {
            "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post"
