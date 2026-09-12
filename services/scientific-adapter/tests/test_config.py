@@ -8,13 +8,12 @@ to start, and layer files never fall back across layers.
 from __future__ import annotations
 
 import pytest
-
 from post_scientific_adapter.config import (
-    ConfigError,
     ENV_HOST,
     ENV_LAYER,
     ENV_PORT,
     AdapterConfig,
+    ConfigError,
     load_config,
     parse_env_file,
 )

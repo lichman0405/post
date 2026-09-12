@@ -41,7 +41,7 @@ def ready_payload() -> dict[str, object]:
 class HealthHandler(BaseHTTPRequestHandler):
     """HTTP handler exposing GET /healthz and GET /readyz only."""
 
-    def do_GET(self) -> None:  # noqa: N802 (stdlib naming)
+    def do_GET(self) -> None:
         if self.path == "/healthz":
             self._json(200, health_payload())
         elif self.path == "/readyz":
