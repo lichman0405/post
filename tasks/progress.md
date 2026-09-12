@@ -58,6 +58,16 @@ T0001 Worker 报告了两个由我引入的隔离缺陷（见 `decisions.md` L1-
 `RESULT.json` 契约路径被自己的 Read-deny 封死；`git remote` deny 与 Worker 契约矛盾。
 另有一处 spawn.sh registry 写入在多行值上崩溃。三者已修复，guard 回归 20/20。
 
+## 安全修复（本轮）
+
+自动 commit security review 报出 T0001 preflight 的两个真实缺陷（`decisions.md` L1-20260912-10）：
+remote URL 内嵌 token 会被原样写进输出/CI 日志；`BRANCH-DEFAULT` 在无法验证时 fail-open。
+两者均已修复并补回归测试，PR #8（`862b78b`）。真实 operator 路径现在会同时验证
+visibility 与 integration branch。
+
+**已关闭的 T0000 follow-up**：`ops/doctor.sh --check-docker-daemon` 已在 Supervisor 上下文
+真实执行 —— daemon reachable、data-root 130 GiB free、verdict ok。该检查此前仅有 fixture 覆盖。
+
 ## 已知风险 / 需 owner 关注
 
 - **Branch protection 不可用**：私有仓库在当前 GitHub plan 下无法启用 branch protection
