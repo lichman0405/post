@@ -84,6 +84,7 @@ echo "gh \$*" >> "$FG_SCRATCH/gh-invocations.log"
 case "\$1 \$2" in
   "pr view") exit 1;;
   "pr create") echo "42";;
+  "pr checks") python3 -c "import json,sys;d=json.load(open('$FG_SCRATCH/repo/specs/orchestrator/gates.json'));print(json.dumps([{'name':n,'state':'SUCCESS'} for n in d['required_jobs']]))";;
   "pr merge") echo "0000000000000000000000000000000000000000";;
   *) echo "unexpected gh call: \$*" >&2; exit 9;;
 esac

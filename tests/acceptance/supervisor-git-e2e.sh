@@ -66,6 +66,7 @@ echo "gh \$*" >> "$FG_SCRATCH/gh-invocations.log"
 case "\$1 \$2" in
   "pr view") exit 1;;
   "pr create") echo "7";;
+  "pr checks") python3 -c "import json,sys;d=json.load(open('$FG_SCRATCH/repo/specs/orchestrator/gates.json'));print(json.dumps([{'name':n,'state':'SUCCESS'} for n in d['required_jobs']]))";;
   "pr merge") echo "1111111111111111111111111111111111111111";;
   *) echo "unexpected gh call: \$*" >&2; exit 9;;
 esac
@@ -122,10 +123,14 @@ fg_assert_eq "$SHA" "$(cd "$REPO" && git rev-parse refs/heads/task/T0001-git-con
   "the push reached the bare origin (branch still at the commit)"
 FG_OUT="$(cd "$REPO" && PATH="$FG_SCRATCH/gh-bin:$PATH" "$FG_SCRATCH/bin/rddev" pr open T0001 2>&1)"
 FG_RC=$?
+[ "$FG_RC" -eq 0 ] || printf '     pr open said: %s\n' "$FG_OUT"
 fg_assert_eq 0 "$FG_RC" "pr open T0001"
 fg_assert_contains "7" "$FG_OUT" "pr open returned the PR number"
 FG_OUT="$(cd "$REPO" && PATH="$FG_SCRATCH/gh-bin:$PATH" "$FG_SCRATCH/bin/rddev" pr merge T0001 2>&1)"
 FG_RC=$?
+# Say WHY when it refuses. A bare "want [0], got [1]" sent me hunting through
+# a CI log for a message the harness had captured and discarded.
+[ "$FG_RC" -eq 0 ] || printf '     pr merge said: %s\n' "$FG_OUT"
 fg_assert_eq 0 "$FG_RC" "pr merge T0001"
 fg_dump
 for want in "pr create" "pr merge"; do

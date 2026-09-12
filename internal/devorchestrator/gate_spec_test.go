@@ -24,8 +24,8 @@ func TestGatesSpecSyncsWithCIWorkflow(t *testing.T) {
 	}
 
 	ci := parseCIWorkflow(t, filepath.Join(root, ".github", "workflows", "ci.yml"))
-	if len(ci) != 6 {
-		t.Fatalf("ci.yml declares %d jobs, want 6", len(ci))
+	if len(ci) != 7 {
+		t.Fatalf("ci.yml declares %d jobs, want 7", len(ci))
 	}
 	for job, steps := range ci {
 		gj, ok := spec.Jobs[job]
@@ -51,7 +51,7 @@ func TestGatesSpecSyncsWithCIWorkflow(t *testing.T) {
 
 	// The required-jobs list is the G4 assertion's backbone: every CI job,
 	// exactly the CI jobs, in canonical order.
-	if !equalStrings(spec.RequiredJobs, []string{"spec-validation", "task-state", "go", "web", "python", "migration-integration"}) {
+	if !equalStrings(spec.RequiredJobs, []string{"spec-validation", "task-state", "go", "web", "python", "migration-integration", "acceptance"}) {
 		t.Errorf("required_jobs = %v, want the six CI jobs in canonical order", spec.RequiredJobs)
 	}
 }

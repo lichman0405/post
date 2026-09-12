@@ -1676,3 +1676,82 @@ override 缺失或写错，G3 就再次消失，而别的任何地方都不会�
 
 **仍然的边界**：目前只覆盖 T0102/T0103。P2（RSG）、P3（Gitea branch protection/webhook）、
 P7（MinIO hash）等 phase 各自的 G3 仍待定义；这份记录不假装它们已经完成。
+
+## L1-20260912-50 — ★★ `pr merge` 从不检查 GitHub 的 CI；以及 Gate 工具自身的 e2e **没有任何东西在跑**
+
+### (a) `MergePR` 直接调 `gh pr merge`，不看 PR 的 CI
+
+```go
+gateRes, err := assertGateGreen(opts, "merge")   // 本地四层 Gate 记录
+...
+out, err := runGh(opts.RepoRoot, "pr", "merge", rec.Branch, "--squash", "--delete-branch")
+```
+
+**本地 G2 是 CI 的复刻，不是 CI 本身**：runner 镜像不同、步骤在那边可能表现不同。
+而这套工具存在的**历史原因**（L1-20260912-18）就是"**在 GitHub CI 还是红的时候合并了 PR**"——
+那次我是手工合并的，但**工具路径上这个洞一直没堵**：本地记录绿、PR 红，`rddev pr merge` 照合不误。
+
+**我每次都是靠手工等 `gh pr checks` 再合并的**——又一次把本该机械化的纪律留在了脑子里。
+
+**处置**：`MergePR` 在调用 `gh pr merge` **之前**断言 PR 的 required checks 在 GitHub 上全绿：
+
+- 新增 `runGhJSON`（容忍非零退出）：`gh pr checks` 在有检查失败时**退出 1**，
+  而那正是最需要它输出的情形——丢掉 stdout 的 runner 表达不出这个拒绝。
+- 缺任何一个 required job、或任何一个不是 `SUCCESS` → 拒绝，并指名是哪个。
+- 两个 fake `gh`（Go fixture 与 `supervisor-git-e2e.sh`）同步补上 `pr checks` 的应答；
+  新增测试断言：**必须拒绝，且 `gh pr merge` 一次都没有被调用**。
+
+### (b) 更根本的：`tests/acceptance/*.sh` 没有任何东西在运行
+
+修 (a) 时，`four-gate-e2e.sh` 与 `rejection-retry-e2e.sh` 各红了 5 项。
+追下去发现 **`rejection-retry-e2e.sh` 早就坏了——而且是被我修好的 bug 弄坏的**：
+
+它的假 claude 断言 `--resume` 的 id **等于** `--session-id` 的 id：
+
+```
+if [ "$FG_RESUME_ID" != "$FG_SESSION_ID" ]; then echo "resume id != session id"; exit 9; fi
+```
+
+**那正是 L1-20260912-52 修掉的那个非法组合**（真实 claude：`--session-id` 不能与 `--resume` 同用）。
+也就是说：**这个 e2e 把 bug 写成了断言**；我一修 bug，它就红——
+而它红了很久都没人知道，因为 **`tests/acceptance/*.sh` 不在任何 CI stage 里**。
+
+> **一套用来强制别人的测试，自己必须被强制。** 否则它会安静地腐烂，
+> 而且腐烂的方向恰恰是"**把已经修好的东西重新锁回错误的样子**"。
+
+**处置**：
+1. 修正那个断言（改为：attempt 1 用 `--session-id` 命名，rework 用 `--resume` 且**不得**再传 `--session-id`），
+   并在 helper 里记录 `resumed-ids.txt` 以便断言"resume 的就是同一个 session"。
+2. **新增 CI job `acceptance`**（三个自包含 e2e：four-gate / rejection-retry / supervisor-git），
+   同步进 `gates.json` 的 `jobs`、`required_jobs`、**G2.runs_jobs**（否则 G2 不会跑它、G4 会对每个任务喊缺）、`G4.asserts_jobs`，
+   以及 `scripts/ci.sh` 的 `acceptance` stage。required job 从六个变七个，同步测试一并更新。
+
+**这比它看起来重要**：G4 现在对**每一个任务**都要求 `acceptance` 绿——
+即"Gate 工具自身可用"成为**产品任务合并的前置条件**。这正是它应有的位置。
+
+## F-20260912-4 — 未解释的 flake：`acceptance` job 在 CI 上失败过一次，重跑即绿（**不当作已修复**）
+
+**事实**：PR #66 新增的 `acceptance` job 在第二次 CI 运行（`34713838231`）里，
+在 `supervisor-git-e2e.sh` 的 `pr merge` 上失败 4 项；紧接着的一次推送（只加了一行诊断 printf）
+运行（`34714018475`）**七项全绿**。本地连跑 5 次 `supervisor-git-e2e.sh` 全部通过。
+
+**失败时的证据**（来自 CI 日志）：`gh pr checks` **被调用过**（fake 记录了该行），
+随后 `gh pr merge` 未被调用 —— 与"新增的 required-checks 断言拒绝"一致。
+但该 fake 当时返回的是**硬编码**的 `job-a`/`job-b` 全 SUCCESS，而 scratch spec 的
+`required_jobs` 也是 `job-a`/`job-b`，**按现在的代码推不出拒绝**。
+
+**处置（按 docs/67"flake 不是 rerun until green；先定位再修"）**：
+
+1. **我没有把它当成"重跑就好了"**。它现在是**未解释**状态，本条就是它的记录。
+2. 唯一与证据相符的假设是"fake 的检查名与 spec 的 required_jobs 脱钩"，
+   因此**把这个耦合去掉了**：fake 现在从 scratch spec 里读取 `required_jobs` 并动态生成同名检查。
+   这无论假设是否成立都是更稳的写法——名字一旦漂移，原来的写法只会给出"not all green"而**不说清是哪一边**。
+3. **保留诊断**：`pr merge` / `pr open` 失败时**打印 rddev 的实际输出**。
+   之前 4 个断言全红，却没有一处告诉我"为什么被拒"——我为此在 CI 日志里翻了好几轮。
+   **一个说不出原因的失败，等于把定位成本转嫁给下一个看日志的人。**
+4. **它现在是必跑 job**：`acceptance` 进入了 `required_jobs`、`G2.runs_jobs`、`G4.asserts_jobs`，
+   所以**任何任务**的 G2 都会跑它。若再次 flake，会立刻以"某任务 G2 红"的形式暴露，并**带上原因**。
+
+**为什么仍然合并**：这不是被忽略的失败，而是一个**已被记录、已被加固、且现在受强制**的未解释项；
+留着 PR 挂着并不能推进定位，而合并后它每次都会跑。
+若再次出现，诊断输出会把原因直接印在日志里。

@@ -71,6 +71,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 printf '%s\n' "$SESSION_ID" >> "$POST_WORKER_RESULT_DIR/session-ids.txt"
+printf '%s\n' "$RESUME_ID" >> "$POST_WORKER_RESULT_DIR/resumed-ids.txt"
 HAS_REJ=0
 case "$ALL_ARGS" in *REJECTED*) HAS_REJ=1;; esac
 export FG_SESSION_ID="$SESSION_ID" FG_RESUME_ID="$RESUME_ID" FG_PROMPT_HAS_REJECTION="$HAS_REJ"
@@ -109,6 +110,14 @@ PY
   (
     cd "$repo" &&
     git init -q -b main &&
+    # The identity belongs to the REPO, not to these commands. The code under
+    # test shells out a plain `git commit` (CommitTask), which reads the repo
+    # config — a per-command -c override never reaches it, so on a runner with
+    # no global identity the commit died with "empty ident name ... not
+    # allowed" while passing on a developer machine that happens to have one.
+    # Same defect, and the same fix, as T0012's TestGitControlCommitOnGreenGate.
+    git config user.name e2e &&
+    git config user.email e2e@test &&
     git -c user.name=e2e -c user.email=e2e@test add -A &&
     git -c user.name=e2e -c user.email=e2e@test commit -q -m "scratch base"
   ) || { fg_fail "initializing the scratch repo"; return 1; }

@@ -2,6 +2,7 @@ package devorchestrator
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -186,6 +187,72 @@ func runGh(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// runGhJSON runs gh and returns stdout even when it exits non-zero.
+// `gh pr checks` exits 1 when a check is failing — the very case whose output
+// we need in order to say which one — so a runner that discards stdout on
+// failure cannot express the refusal.
+func runGhJSON(dir string, args ...string) ([]byte, error) {
+	gh, err := exec.LookPath("gh")
+	if err != nil {
+		return nil, fmt.Errorf("gh not found on PATH — PR operations require the GitHub CLI")
+	}
+	cmd := exec.Command(gh, args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		if _, ok := err.(*exec.ExitError); ok && len(out) > 0 {
+			return out, nil
+		}
+		return nil, fmt.Errorf("gh %s: %w", strings.Join(args, " "), err)
+	}
+	return out, nil
+}
+
+// assertRequiredChecksGreen refuses to merge while the PR's required checks
+// are not all green ON GITHUB.
+//
+// The four-gate assertion reads records written by the LOCAL G2 run, which
+// executes CI's steps on this machine. That is a faithful replica, not the
+// thing itself: a runner image differs, a step can behave differently there,
+// and the historical defect this tooling exists to prevent was a merge that
+// happened while GitHub's own CI was red. The local record can therefore be
+// green while the PR is red, and the merge must refuse on the PR.
+func assertRequiredChecksGreen(repoRoot, branch string, required []string) error {
+	if len(required) == 0 {
+		return nil
+	}
+	out, err := runGhJSON(repoRoot, "pr", "checks", branch, "--json", "name,state")
+	if err != nil {
+		return fmt.Errorf("reading the PR's checks for %s: %w", branch, err)
+	}
+	var checks []struct {
+		Name  string `json:"name"`
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(out, &checks); err != nil {
+		return fmt.Errorf("parsing gh pr checks output for %s: %w (got %q)", branch, err, strings.TrimSpace(string(out)))
+	}
+	state := map[string]string{}
+	for _, c := range checks {
+		state[c.Name] = c.State
+	}
+	var missing, bad []string
+	for _, want := range required {
+		got, ok := state[want]
+		switch {
+		case !ok:
+			missing = append(missing, want)
+		case got != "SUCCESS":
+			bad = append(bad, want+" ("+got+")")
+		}
+	}
+	if len(missing) > 0 || len(bad) > 0 {
+		return fmt.Errorf("the PR's required checks are not all green on GitHub — missing: %s; not passing: %s — the local G2 record is a replica of CI, not CI itself",
+			strings.Join(missing, ", "), strings.Join(bad, ", "))
+	}
+	return nil
+}
+
 // OpenPR opens a pull request for the task branch (base main). It refuses
 // while any gate is red and refuses when a PR for the branch already exists
 // (gh pr view succeeds). The returned number is the PR's own identifier.
@@ -244,6 +311,17 @@ func MergePR(opts *GitControlOpts) (string, error) {
 	}
 	rec, err := loadWorktreeRecord(opts.RepoRoot, opts.TaskID)
 	if err != nil {
+		return "", err
+	}
+	gatesPath := opts.GatesPath
+	if gatesPath == "" {
+		gatesPath = DefaultGatesPath
+	}
+	spec, err := gateSpecAt(opts.RepoRoot, gatesPath)
+	if err != nil {
+		return "", err
+	}
+	if err := assertRequiredChecksGreen(opts.RepoRoot, rec.Branch, spec.RequiredJobs); err != nil {
 		return "", err
 	}
 	out, err := runGh(opts.RepoRoot, "pr", "merge", rec.Branch, "--squash", "--delete-branch")

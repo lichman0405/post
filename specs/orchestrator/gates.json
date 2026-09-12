@@ -7,7 +7,8 @@
     "go",
     "web",
     "python",
-    "migration-integration"
+    "migration-integration",
+    "acceptance"
   ],
   "gates": {
     "G1": {
@@ -24,7 +25,8 @@
         "go",
         "web",
         "python",
-        "migration-integration"
+        "migration-integration",
+        "acceptance"
       ]
     },
     "G3": {
@@ -41,7 +43,8 @@
         "go",
         "web",
         "python",
-        "migration-integration"
+        "migration-integration",
+        "acceptance"
       ]
     }
   },
@@ -169,6 +172,19 @@
       "steps": [
         {
           "run": "bash tests/acceptance/auth-real-services-e2e.sh"
+        }
+      ]
+    },
+    "acceptance": {
+      "steps": [
+        {
+          "run": "bash tests/acceptance/four-gate-e2e.sh"
+        },
+        {
+          "run": "bash tests/acceptance/rejection-retry-e2e.sh"
+        },
+        {
+          "run": "bash tests/acceptance/supervisor-git-e2e.sh"
         }
       ]
     }

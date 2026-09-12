@@ -100,6 +100,25 @@ jobs:
           SCIENTIFIC_ADAPTER_URL: http://127.0.0.1:19100
         run: pnpm --filter @post/web build
 
+  # The gate machinery's own e2e. Nothing ran these until now, and one of them
+  # rotted the moment a bug it had ENCODED was fixed: rejection-retry asserted
+  # that a rework passes --session-id equal to --resume, which real claude
+  # refuses outright. A suite that enforces everything else has to be enforced
+  # itself. Self-contained: scratch repos, a fake claude, a fake gh.
+  acceptance:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+      - name: "acceptance: the four-gate loop (collect, accept, PR) is executable"
+        run: bash tests/acceptance/four-gate-e2e.sh
+      - name: "acceptance: rejection and retry (rework resumes, respawn resets)"
+        run: bash tests/acceptance/rejection-retry-e2e.sh
+      - name: "acceptance: Supervisor git control (four gates before any gh call)"
+        run: bash tests/acceptance/supervisor-git-e2e.sh
+
   # Stage 5 — Python: lint / type / pytest (configs: ops/ci/ruff.toml,
   # ops/ci/mypy.ini).
   python:
