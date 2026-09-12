@@ -128,9 +128,10 @@
       "merged_at": "2026-09-12T15:55:00Z"
     },
     "T0101": {
-      "status": "verification",
+      "status": "accepted",
       "started_at": "2026-09-12T16:17:18Z",
       "worker_run_id": "run-c3335a7ba5770ac9",
+      "accepted_by_supervisor_at": "2026-09-12T16:42:45Z",
       "rejection_reason": "第一次 collect（run-e039c17685f3df4a）判定为 rejected。完整原始报告见\n.rddev/workers/T0101/collect-report.json。三条里**只有一条是真的**，Supervisor 已核实：\n\n【必改 —— 这是唯一需要你处理的】\nresult-tests: status completed 但有一个测试标成 not_run：\n  go test ./tests/integration -run TestCredentialStorePasswordRoundtrip (pgx CredentialStore 集成)\n理由是你当时需要 users.password_hash 列，而 infra/migrations/** 不在你的 allowed_scope 里。\n**这个限制已经解除，本次 rework 的 task package 里 infra/migrations/** 已在 allowed_scope 内。**\n因此现在可以并且必须：\n  1) 自己写迁移 infra/migrations/00016_*.sql（下一个可用编号是 00016；按\n     infra/migrations/README.md：新编号文件、-- +goose Up、**不要写 down migration**——\n     该仓库明确\"no down migrations by design\"，已有 00015 的 Down 段是空占位，\n     你的 notes 里给出的 -- +goose Down / DROP COLUMN 不要照抄）；\n  2) 按同一个 README 更新 tests/integration/migration_test.go 的 expected-catalog fixture\n     （users 增加一列，canonical schema 变了就必须同步，否则 go test ./tests/integration 会红）；\n  3) 跑真实 PostgreSQL 验证。**数据库现在可达**：本机 infra 栈已由 Supervisor 起在\n     127.0.0.1:15432（make test-integration 的默认 admin URL 就是这个），\n     直接 `make test-integration` 即可，不需要 Docker、不需要自己起服务；\n  4) RESULT.json 里那个条目改成真实结果，并保证 status 与 tests[] 自洽\n     （completed 要求所有列出的测试都是 passed）。\n\n【无需处理 —— 这两条是 Supervisor 工具自身的缺陷，已修，不要去追】\n- refs: \"new ref(s) created: refs/heads/main a07ac01…\" —— 误报。collect 当时把\"ref 移动\"\n  误判成\"ref 新建\"，而 refs/heads/main 的移动是因为**我**在你运行期间合并了 PR #49/#50。\n  已修（PR #51），与本任务无关。\n- result-tests-coverage: \"auth unit; auth e2e 无 passed 条目\" —— 不可满足的检查。DAG 里给的\n  是标签而契约里是命令，却要求两者字符串相等。你其实**跑了**这两个套件并把标签写进了命令。\n  已修（PR #51），与本任务无关。\n\n【一次性说明：上一次 rework 派发为何失败】\nrun-3740e48aaf5e0715 在启动瞬间以 exit 1 退出，日志只有一行：\n  \"Error: --session-id can only be used with --continue or --resume if --fork-session is also specified.\"\n这是 **Supervisor 自己的 dispatch bug**（rework 同时传了 --session-id 与 --resume），\n已在 PR #52 修复。那一次**没有执行任何工作**，你的 worktree diff 完好无损，本次是同一 session 的继续。\n\n【仍然是 L1 上限】\n你可以决定迁移的具体 DDL 形态、索引、以及新的依赖（go.mod/go.sum 现在也在 scope 内）。\n超出 L1 的（例如密码重置/邮箱验证这类产品流程、注册端是否也做防枚举）仍然只能上报，不得自行决定。\n",
       "history": [
         {
@@ -180,6 +181,12 @@
           "at": "2026-09-12T16:32:41Z",
           "run_id": "run-f4a11573b5bb88bc",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-12T16:42:45Z",
+          "run_id": "run-dbb818143867122b"
         }
       ]
     },

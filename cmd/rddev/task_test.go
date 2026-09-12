@@ -532,3 +532,101 @@ func TestSubprocessJSONShape(t *testing.T) {
 		t.Errorf("subprocess next = %s, want T1000 ready", out.String())
 	}
 }
+
+// acceptReviewGateFixture builds a scratch repo whose gate spec has one
+// trivially-passing job so G2 can go green, and requires a review verdict for
+// merge. It returns the repo dir and the gate spec path.
+func acceptReviewGateFixture(t *testing.T, e *taskEnv) (string, string) {
+	t.Helper()
+	spec := map[string]any{
+		"version":       1,
+		"required_jobs": []string{"job-a"},
+		"gates": map[string]any{
+			"G1": map[string]any{"name": "worker", "description": "", "runs_jobs": []string{}},
+			"G2": map[string]any{"name": "accept", "description": "", "runs_jobs": []string{"job-a"}},
+			"G3": map[string]any{"name": "e2e", "description": "", "runs_jobs": []string{}},
+			"G4": map[string]any{"name": "merge", "description": "", "asserts_jobs": []string{"job-a"}},
+		},
+		"jobs": map[string]any{
+			"job-a": map[string]any{"steps": []map[string]any{{"run": "echo a-ok"}}},
+		},
+		"review":         map[string]any{"required_for_merge": true},
+		"task_overrides": map[string]any{},
+	}
+	specPath := filepath.Join(e.dir, "gates.json")
+	writeJSONFile(t, specPath, spec)
+	// A green collect that predates the G2 run accept is about to make.
+	if _, err := devorchestrator.WriteRecord(e.dir, "T1000", devorchestrator.RecordCollect, "run-collect-1", &devorchestrator.CollectRecord{
+		RecordType: devorchestrator.RecordCollect, TaskID: "T1000", RunID: "run-collect-1",
+		At: "2020-01-01T00:00:00Z", Status: "ok", ReportPath: "/none",
+		ResultState: "verification", Summary: "fixture",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return e.dir, specPath
+}
+
+// accept must not be reachable in an order that makes a LATER gate impossible
+// to satisfy. It used to hard-code G4 as "not_required" and move the task to
+// accepted; `rddev pr open` then refused because a review verdict is required
+// for merge, and a Review Worker may only review a task in verification. The
+// task was accepted and unmergeable at the same time, with no legal transition
+// out — T0101 sat exactly there.
+func TestCLIAcceptRefusesWhenTheMergeGateIsUnsatisfied(t *testing.T) {
+	e := newTaskEnv(t)
+	e.seedState(t, map[string]devorchestrator.State{"T1000": devorchestrator.StateVerification})
+	repo, specPath := acceptReviewGateFixture(t, e)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(cwd) }()
+
+	code, _, stderr := e.runTaskCLI(t, "accept", "T1000", "--gates", specPath)
+	if code == 0 {
+		t.Fatalf("accept succeeded while the merge gate was unsatisfied (review required, no verdict) — the task would be accepted and unmergeable")
+	}
+	if !strings.Contains(stderr, "review") {
+		t.Errorf("refusal does not name the review requirement: %q", stderr)
+	}
+	if got := e.readState(t, "T1000").Status; got != devorchestrator.StateVerification {
+		t.Errorf("state = %s after a refused accept, want verification (a refusal must not move the task)", got)
+	}
+}
+
+// The neighbour: with the same spec and a review verdict on record, accept
+// must go through. Without this, the test above would pass for a check that
+// simply refuses everything.
+func TestCLIAcceptSucceedsOnceTheMergeGateIsSatisfied(t *testing.T) {
+	e := newTaskEnv(t)
+	e.seedState(t, map[string]devorchestrator.State{"T1000": devorchestrator.StateVerification})
+	repo, specPath := acceptReviewGateFixture(t, e)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(cwd) }()
+
+	if _, err := devorchestrator.WriteRecord(repo, "T1000", devorchestrator.RecordReview, "run-review-1", &devorchestrator.ReviewRecord{
+		RecordType: devorchestrator.RecordReview, TaskID: "T1000", RunID: "run-review-1",
+		At: "2030-01-01T00:00:00Z", Verdict: "approve", BlockingFindings: 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, stderr := e.runTaskCLI(t, "accept", "T1000", "--gates", specPath)
+	if code != 0 {
+		t.Fatalf("accept refused with a review verdict on record: %s%s", out, stderr)
+	}
+	if got := e.readState(t, "T1000").Status; got != devorchestrator.StateAccepted {
+		t.Errorf("state = %s, want accepted", got)
+	}
+}

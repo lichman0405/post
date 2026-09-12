@@ -1128,3 +1128,71 @@ T0012 的 e2e 用假 `gh`、假 `git`、假 `claude` 演示了四层 Gate 的**�
 "机制有测试"和"机制跑过"是两件事——这已经是本会话第三次遇到同一形状
 （`--output-format stream-json` 需要 `--verbose`、rework 的 `--session-id`、这次的 `corepack enable`），
 三次都是**第一次遇到真实二进制/真实环境时**才发现。
+
+## L1-20260912-39 — ★ accept 与 merge 的顺序死锁：G4 必须在 accept **之前**满足
+
+**这是本会话最严重的一个自己造的 Gate 缺陷，因为它把一次正确的验收变成了不可合并的状态。**
+
+**经过**：T0101 collect 全绿 → `rddev task accept T0101` → `verification -> accepted`（G1=passed G2=passed）。
+接着 `rddev pr status T0101` 才报：
+
+```
+T0101: merge gate REFUSES pr open/merge:
+  - review is required for merge but no review verdict exists
+```
+
+而 `rddev review spawn` 拒绝在 `accepted` 上运行：
+
+```
+rddev review spawn: task T0101 is accepted, not verification
+```
+
+**状态机里 `accepted -> {merged}`**，没有任何合法迁出。于是 T0101 **同时是"已验收"和"永远不可合并"**。
+
+### 根因：accept 里写死了一行 `status["G4"] = "not_required"`
+
+`cmd/rddev/task.go` 的 accept 依次检查 G1、G2、G3，然后**直接断言 G4 不适用**——
+从来**没有调用 `CheckMergeGate`**。但 `rddev pr open` / `rddev pr merge` **都**调用它，
+而 `specs/orchestrator/gates.json` 里 `"review": {"required_for_merge": true}`。
+
+**所以两个命令对"需要什么"的看法不一致，而 accept 是那个把任务推入不可逆状态的命令。**
+更本质的说法：**accept 可以在一个让"后续 Gate 无法满足"的顺序上被触发。**
+一个 Gate 的存在意义是约束决策，而 accept 是"这个任务通过了"的**宣告**——
+宣告不应该发生在一个之后必然失败的位置上。这和本会话反复修的是同一类错误：
+**能通过，但通过之后系统坏了。**
+
+### 处置（两处，都已加回归测试）
+
+1. **`accept` 现在运行与 `pr open`/`pr merge` 完全相同的 `CheckMergeGate` 断言**，
+   不满足就 refuse 并记录 AcceptRecord（状态不变）。于是顺序被强制为
+   **collect → review → accept**，而不是反过来。
+2. **`review spawn` 允许 `accepted`**（原先只允许 `verification`）。这是**恢复通道**，不是常规路径：
+   一次 review 需要的是"已 collect 且未变动过的 diff"，这一点在 accepted 上同样成立。
+   它不削弱任何东西——verdict 仍然被 merge gate 要求，`request_changes` 仍然挡住合并；
+   但没有它，任何"先 accept 后想起 review"的任务都无路可走。
+
+### 回归测试（用实际撤销修复的方式验证过）
+
+```
+TestCLIAcceptRefusesWhenTheMergeGateIsUnsatisfied   撤销修复 -> FAIL（accept 成功了）；
+                                                    恢复修复 -> PASS
+TestCLIAcceptSucceedsOnceTheMergeGateIsSatisfied    neighbor：有 verdict 时必须**成功**通过
+```
+
+**第二个测试是必要的**：只测"必须拒绝"会得到一个"什么都拒绝"的 accept，那同样坏。
+
+**另记（同一个坑第二次踩）**：验证过程中我用 `cp` 覆盖文件来恢复被撤销的修复，**又撞上 `cp -i` 别名**——
+命令停在 `overwrite 'cmd/rddev/task.go'?` 上，文件没被恢复，测试因此"失败"。
+这次没有产生悬挂进程（命令很快结束），但**结果是一个被静默改坏的工作树**。
+我此前已经记过"要用 `command cp` 或 Python"，仍然写成了 `cp`。
+**结论：这条不能靠记性，只能靠不再使用裸 `cp`。** 后续一律 `command cp`。
+
+### 遗留：G3 在全项目范围内是空的
+
+`gates.json` 的 `task_overrides` 是 `{}`，因此 **132 个任务的 G3 全部记为 `not_required`**。
+CLAUDE.md §6 要求跨边界任务使用真实 PostgreSQL/Gitea/MinIO/Redis/浏览器。
+T0101 的真实覆盖是：**PostgreSQL 用真实服务**（`make test-integration` 跑了
+CredentialStore roundtrip + fresh-install catalog + upgrade path），
+**Redis 用 miniredis**（真实协议、进程内），**OIDC 用真实假 IdP**。
+这不足以宣布 G3 已按 §6 履行。**这是 gate 设计层的缺口，需要一次专门的定义工作（按 phase 定义 G3 jobs），
+不是给单个任务临时补一条**——已作为后续项记录，见 L1-20260912-40。

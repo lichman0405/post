@@ -82,8 +82,17 @@ func SpawnReview(opts *ReviewSpawnOpts) (*SpawnResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if insp.State.Status != StateVerification {
-		return nil, fmt.Errorf("task %s is %s, not verification — a Review Worker reviews a collected diff only (rddev worker collect first)", opts.TaskID, insp.State.Status)
+	// verification is the normal state to review from. accepted is allowed
+	// too, and deliberately: what a review needs is a collected diff that has
+	// not moved since, which is equally true of an accepted task. Without
+	// this, a task accepted before its review requirement was noticed could
+	// never be reviewed and therefore never merged — accepted and unmergeable
+	// at once. `rddev task accept` now refuses in that order, so this is a
+	// recovery affordance rather than the normal path, and it weakens nothing:
+	// the verdict is still demanded by the merge gate, and a
+	// request_changes verdict still blocks the merge.
+	if insp.State.Status != StateVerification && insp.State.Status != StateAccepted {
+		return nil, fmt.Errorf("task %s is %s, not verification or accepted — a Review Worker reviews a collected diff only (rddev worker collect first)", opts.TaskID, insp.State.Status)
 	}
 	rec, err := LoadRegistry(opts.RepoRoot, opts.TaskID)
 	if err != nil {
