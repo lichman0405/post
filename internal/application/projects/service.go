@@ -7,12 +7,13 @@ import (
 	"strings"
 
 	"github.com/lichman0405/post/internal/application/orgs"
+	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/domain"
 )
 
-// Service orchestrates the project-creation shell (T0104). All policy
-// lives here; the transport layer only translates requests into these
-// calls. The rules:
+// Service orchestrates the project-creation shell (T0104) and enforces
+// the project permission matrix (T0105). All policy lives here; the
+// transport layer only translates requests into these calls. The rules:
 //
 //   - creating a project makes the creator its owner;
 //   - every new project starts provision-pending (provision_status
@@ -24,15 +25,23 @@ import (
 //     membership in it (L1 decision, see ports.OrgGate);
 //   - personal projects (no organization) need no gate;
 //   - the slug is unique inside the organization (globally for personal
-//     projects) — conflicts answer ErrSlugTaken with a clear code.
+//     projects) — conflicts answer ErrSlugTaken with a clear code;
+//   - every public action passes an explicit authorization check through
+//     the policy engine (docs/50, T0105): Create asks create_project,
+//     Get asks read_private_project. A denied (or unresolved) decision
+//     refuses the action server-side — hiding a control in a client
+//     never substitutes for this check.
 type Service struct {
 	store ProjectStore
 	orgs  OrgGate
+	authz authz.Engine
 }
 
-// NewService wires the service on the store and organization gate ports.
-func NewService(store ProjectStore, gate OrgGate) *Service {
-	return &Service{store: store, orgs: gate}
+// NewService wires the service on the store, the organization gate and
+// the policy engine. The engine is the one authority on project
+// permissions; pass authz.NewMatrixEngine() in production.
+func NewService(store ProjectStore, gate OrgGate, engine authz.Engine) *Service {
+	return &Service{store: store, orgs: gate, authz: engine}
 }
 
 // maxPurpose bounds the free-text purpose (generous but finite — a hostile
@@ -43,6 +52,17 @@ const maxPurpose = 4000
 // project comes back provision-pending: the row exists, the GitProvider
 // repository does not yet (T0301).
 func (s *Service) Create(ctx context.Context, actor domain.User, in CreateProjectInput) (domain.Project, domain.ProjectMembership, error) {
+	// Explicit authorization first (docs/50): the matrix allows
+	// create_project for any authenticated actor (the caller has no
+	// project membership yet — the organization gate below adds the
+	// per-organization rule). A denied decision refuses the write
+	// regardless of what any client UI chose to render.
+	if err := s.require(ctx, authz.Request{
+		Action: authz.ActionCreateProject,
+		Class:  authz.ClassOf(true, nil, false),
+	}); err != nil {
+		return domain.Project{}, domain.ProjectMembership{}, err
+	}
 	if !domain.ValidProjectSlug(in.Slug) {
 		return domain.Project{}, domain.ProjectMembership{}, fmt.Errorf("%w: slug may only contain lowercase letters, digits and dashes (max 64 characters)", ErrValidation)
 	}
@@ -96,21 +116,33 @@ func (s *Service) Create(ctx context.Context, actor domain.User, in CreateProjec
 	return created, membership, nil
 }
 
-// Get returns the project for a current member. Non-members (and unknown
-// projects) answer ErrProjectNotFound — the project's existence is not
-// disclosed to outsiders (read existence hiding; T0106 extends reads to
-// public projects). Store failures answer ErrStore (503), never a masked
-// 404.
+// Get returns the project for a current member. The read passes an
+// explicit policy-engine check (read_private_project): the actor's
+// membership role resolves the matrix column, and a denied decision —
+// non-members included — answers ErrProjectNotFound, so the project's
+// existence is not disclosed to outsiders (read existence hiding; T0106
+// extends reads to public projects with the visibility-aware action
+// choice). Store failures answer ErrStore (503), never a masked 404.
 func (s *Service) Get(ctx context.Context, actor domain.User, projectID string) (domain.Project, error) {
 	project, err := s.store.GetProject(ctx, projectID)
 	if err != nil {
 		return domain.Project{}, wrapStoreError(err)
 	}
-	if _, err := s.store.GetMembership(ctx, projectID, actor.ID); err != nil {
-		if errors.Is(err, ErrMemberNotFound) {
+	role, err := s.membershipRole(ctx, projectID, actor.ID)
+	if err != nil {
+		return domain.Project{}, wrapStoreError(err)
+	}
+	if err := s.require(ctx, authz.Request{
+		Action: authz.ActionReadPrivateProject,
+		Class:  authz.ClassOf(true, role, false),
+	}); err != nil {
+		if errors.Is(err, ErrForbidden) {
+			// Read existence hiding: a denied read looks exactly like an
+			// unknown project (docs/45; the same 404 shape as the org
+			// surface).
 			return domain.Project{}, ErrProjectNotFound
 		}
-		return domain.Project{}, wrapStoreError(err)
+		return domain.Project{}, err
 	}
 	return project, nil
 }
@@ -122,6 +154,42 @@ func (s *Service) List(ctx context.Context, actor domain.User) ([]domain.Project
 		return nil, wrapStoreError(err)
 	}
 	return projects, nil
+}
+
+// membershipRole returns the actor's project membership role, or nil
+// when they hold no membership. A store failure (as opposed to "no
+// row") is returned as an error — the difference decides between an
+// existence-hidden 404 and a fail-closed 503.
+func (s *Service) membershipRole(ctx context.Context, projectID, userID string) (*domain.ProjectRole, error) {
+	membership, err := s.store.GetMembership(ctx, projectID, userID)
+	switch {
+	case err == nil:
+		return &membership.Role, nil
+	case errors.Is(err, ErrMemberNotFound):
+		return nil, nil
+	default:
+		return nil, err
+	}
+}
+
+// require evaluates one authorization request and fails closed. A
+// permitting verdict passes; every other verdict — an outright deny, or
+// a conditional form this site does not resolve — answers ErrForbidden;
+// an engine failure (or a service wired without an engine) answers
+// ErrStore: state is unknowable, so the action is refused rather than
+// guessed (default deny, docs/12).
+func (s *Service) require(ctx context.Context, req authz.Request) error {
+	if s.authz == nil {
+		return fmt.Errorf("%w: no policy engine configured", ErrStore)
+	}
+	decision, err := s.authz.Authorize(ctx, req)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrStore, err)
+	}
+	if !decision.Permits() {
+		return ErrForbidden
+	}
+	return nil
 }
 
 // requireActiveOrgMember enforces the organization gate: the organization

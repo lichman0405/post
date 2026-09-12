@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lichman0405/post/internal/application/orgs"
+	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/domain"
 )
 
@@ -49,6 +50,15 @@ func (s *fakeStore) freshID() string {
 // seedOrg registers an active organization and an active owner membership
 // in the gate.
 func (s *fakeStore) seedOrg(orgID, ownerID string) { s.gate.seedOrg(orgID, ownerID) }
+
+// seedMember writes one project membership row directly (the production
+// member-management API arrives with T0109; T0105 tests seed state to
+// exercise the role columns of the permission matrix).
+func (s *fakeStore) seedMember(projectID, userID string, role domain.ProjectRole) {
+	s.members[[2]string{projectID, userID}] = domain.ProjectMembership{
+		ProjectID: projectID, UserID: userID, Role: role,
+	}
+}
 
 func (s *fakeStore) seedProgram(programID, orgID string) {
 	s.programs[programID] = domain.Program{ID: programID, OrganizationID: &orgID, Slug: "prog-" + programID, Name: "Program " + programID}
@@ -177,7 +187,7 @@ func testUser(id string) domain.User { return domain.User{ID: id, Handle: "u-" +
 func TestCreatePersonalProject(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()
-	svc := NewService(store, store.gate)
+	svc := NewService(store, store.gate, authz.NewMatrixEngine())
 
 	project, membership, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
 		Slug: "MOF-Lab", Name: "MOF Lab", Purpose: "screen MOFs", Visibility: domain.VisibilityPrivate,
@@ -205,7 +215,7 @@ func TestCreatePersonalProject(t *testing.T) {
 func TestCreateRejectsInvalidInput(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()
-	svc := NewService(store, store.gate)
+	svc := NewService(store, store.gate, authz.NewMatrixEngine())
 	base := CreateProjectInput{
 		Slug: "ok-slug", Name: "OK", Purpose: "purpose", Visibility: domain.VisibilityPublic,
 	}
@@ -234,7 +244,7 @@ func TestCreateRejectsInvalidInput(t *testing.T) {
 func TestCreatePersonalSlugConflict(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()
-	svc := NewService(store, store.gate)
+	svc := NewService(store, store.gate, authz.NewMatrixEngine())
 	if _, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
 		Slug: "solo", Name: "Solo", Purpose: "x", Visibility: domain.VisibilityPublic,
 	}); err != nil {
@@ -254,7 +264,7 @@ func TestCreateInOrgGate(t *testing.T) {
 	t.Run("active member creates", func(t *testing.T) {
 		store := newFakeStore()
 		store.seedOrg(orgID, "alice")
-		svc := NewService(store, store.gate)
+		svc := NewService(store, store.gate, authz.NewMatrixEngine())
 		project, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
 			OrganizationID: &orgID, Slug: "team-project", Name: "Team", Purpose: "x",
 			Visibility: domain.VisibilityPublic,
@@ -269,7 +279,7 @@ func TestCreateInOrgGate(t *testing.T) {
 
 	t.Run("unknown org", func(t *testing.T) {
 		store := newFakeStore()
-		svc := NewService(store, store.gate)
+		svc := NewService(store, store.gate, authz.NewMatrixEngine())
 		if _, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
 			OrganizationID: &orgID, Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPublic,
 		}); !errors.Is(err, ErrOrgNotFound) {
@@ -280,7 +290,7 @@ func TestCreateInOrgGate(t *testing.T) {
 	t.Run("non-member", func(t *testing.T) {
 		store := newFakeStore()
 		store.seedOrg(orgID, "alice")
-		svc := NewService(store, store.gate)
+		svc := NewService(store, store.gate, authz.NewMatrixEngine())
 		if _, _, err := svc.Create(ctx, testUser("bob"), CreateProjectInput{
 			OrganizationID: &orgID, Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPublic,
 		}); !errors.Is(err, ErrForbidden) {
@@ -295,7 +305,7 @@ func TestCreateInOrgGate(t *testing.T) {
 		past := o.CreatedAt.Add(-time.Hour)
 		o.DeactivatedAt = &past
 		store.gate.orgs[orgID] = o
-		svc := NewService(store, store.gate)
+		svc := NewService(store, store.gate, authz.NewMatrixEngine())
 		if _, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
 			OrganizationID: &orgID, Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPublic,
 		}); !errors.Is(err, ErrOrgDeactivated) {
@@ -312,7 +322,7 @@ func TestCreateWithProgram(t *testing.T) {
 		store := newFakeStore()
 		store.seedOrg(orgID, "alice")
 		store.seedProgram("prog-1", orgID)
-		svc := NewService(store, store.gate)
+		svc := NewService(store, store.gate, authz.NewMatrixEngine())
 		project, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
 			OrganizationID: &orgID, ProgramID: strPtr("prog-1"),
 			Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPublic,
@@ -328,7 +338,7 @@ func TestCreateWithProgram(t *testing.T) {
 	t.Run("unknown program", func(t *testing.T) {
 		store := newFakeStore()
 		store.seedOrg(orgID, "alice")
-		svc := NewService(store, store.gate)
+		svc := NewService(store, store.gate, authz.NewMatrixEngine())
 		if _, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
 			OrganizationID: &orgID, ProgramID: strPtr("ghost"),
 			Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPublic,
@@ -341,7 +351,7 @@ func TestCreateWithProgram(t *testing.T) {
 		store := newFakeStore()
 		store.seedOrg(orgID, "alice")
 		store.seedProgram("prog-1", "org-2")
-		svc := NewService(store, store.gate)
+		svc := NewService(store, store.gate, authz.NewMatrixEngine())
 		if _, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
 			OrganizationID: &orgID, ProgramID: strPtr("prog-1"),
 			Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPublic,
@@ -356,7 +366,7 @@ func TestCreateRejectsOverlongPurpose(t *testing.T) {
 	// research-goal statement must not lose its ending.
 	ctx := context.Background()
 	store := newFakeStore()
-	svc := NewService(store, store.gate)
+	svc := NewService(store, store.gate, authz.NewMatrixEngine())
 	_, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
 		Slug: "p", Name: "P", Purpose: strings.Repeat("x", maxPurpose+1),
 		Visibility: domain.VisibilityPublic,
@@ -369,7 +379,7 @@ func TestCreateRejectsOverlongPurpose(t *testing.T) {
 func TestGetHidesExistence(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()
-	svc := NewService(store, store.gate)
+	svc := NewService(store, store.gate, authz.NewMatrixEngine())
 	project, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
 		Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPublic,
 	})
@@ -390,7 +400,7 @@ func TestGetHidesExistence(t *testing.T) {
 func TestList(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()
-	svc := NewService(store, store.gate)
+	svc := NewService(store, store.gate, authz.NewMatrixEngine())
 	if _, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
 		Slug: "a", Name: "A", Purpose: "x", Visibility: domain.VisibilityPublic,
 	}); err != nil {
@@ -420,7 +430,7 @@ func TestList(t *testing.T) {
 func TestStoreFailureWrapsAsErrStore(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()
-	svc := NewService(store, store.gate)
+	svc := NewService(store, store.gate, authz.NewMatrixEngine())
 	store.failWith = errors.New("boom")
 	if _, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
 		Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPublic,
@@ -430,3 +440,126 @@ func TestStoreFailureWrapsAsErrStore(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// stubEngine is a test policy engine: fixed decision, fixed error.
+type stubEngine struct {
+	decision authz.Decision
+	err      error
+}
+
+func (e *stubEngine) Authorize(ctx context.Context, req authz.Request) (authz.Decision, error) {
+	return e.decision, e.err
+}
+
+// TestGetRoleMatrix (T0105): the read of a private project passes an
+// explicit engine check per role — viewer, contributor, maintainer and
+// owner all read; a non-member is refused with the existence-hiding 404
+// shape. The four role columns are the server-side authorization, not a
+// client-side visibility choice.
+func TestGetRoleMatrix(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	svc := NewService(store, store.gate, authz.NewMatrixEngine())
+	project, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
+		Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPrivate,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	roles := []domain.ProjectRole{
+		domain.ProjectRoleViewer,
+		domain.ProjectRoleContributor,
+		domain.ProjectRoleMaintainer,
+		domain.ProjectRoleOwner,
+	}
+	for _, role := range roles {
+		store.seedMember(project.ID, "bob", role)
+		if _, err := svc.Get(ctx, testUser("bob"), project.ID); err != nil {
+			t.Errorf("Get as %s: %v, want nil", role, err)
+		}
+	}
+	if _, err := svc.Get(ctx, testUser("outsider"), project.ID); !errors.Is(err, ErrProjectNotFound) {
+		t.Errorf("outsider Get = %v, want ErrProjectNotFound (existence hiding)", err)
+	}
+	// Defense in depth: a membership row with a role outside the four
+	// canonical ones resolves to no matrix class and denies.
+	store.seedMember(project.ID, "bogus", domain.ProjectRole("admin"))
+	if _, err := svc.Get(ctx, testUser("bogus"), project.ID); !errors.Is(err, ErrProjectNotFound) {
+		t.Errorf("unknown-role Get = %v, want ErrProjectNotFound (default deny)", err)
+	}
+}
+
+// TestServiceEngineDenied: when the policy engine denies, the service
+// refuses — Create answers ErrForbidden, Get keeps the existence-hiding
+// shape. The denial originates server-side in the engine; no client can
+// opt out of it by calling the API differently.
+func TestServiceEngineDenied(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	deny := &stubEngine{decision: authz.Decision{Verdict: authz.VerdictDeny}}
+	svc := NewService(store, store.gate, deny)
+	if _, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
+		Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPublic,
+	}); !errors.Is(err, ErrForbidden) {
+		t.Errorf("Create under deny = %v, want ErrForbidden", err)
+	}
+	// Get with an engine that denies (even for a member) masks to the
+	// same 404 shape outsiders see.
+	okSvc := NewService(store, store.gate, authz.NewMatrixEngine())
+	project, _, err := okSvc.Create(ctx, testUser("alice"), CreateProjectInput{
+		Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPrivate,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := svc.Get(ctx, testUser("alice"), project.ID); !errors.Is(err, ErrProjectNotFound) {
+		t.Errorf("member Get under deny = %v, want ErrProjectNotFound", err)
+	}
+}
+
+// TestServiceConditionalVerdictFailsClosed: a conditional verdict the
+// site does not resolve (T0105 has no condition resolvers yet) refuses
+// the action — the safe default for an unresolved condition is denial,
+// never allow.
+func TestServiceConditionalVerdictFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	cond := &stubEngine{decision: authz.Decision{Verdict: authz.VerdictConditional}}
+	svc := NewService(store, store.gate, cond)
+	if _, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
+		Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPublic,
+	}); !errors.Is(err, ErrForbidden) {
+		t.Errorf("Create under conditional = %v, want ErrForbidden (fail closed)", err)
+	}
+}
+
+// TestServiceEngineFailureFailsClosed: an engine error means state is
+// unknowable — the action is refused with ErrStore (503), never guessed.
+func TestServiceEngineFailureFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	broken := &stubEngine{err: errors.New("engine down")}
+	svc := NewService(store, store.gate, broken)
+	if _, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
+		Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPublic,
+	}); !errors.Is(err, ErrStore) {
+		t.Errorf("Create under engine failure = %v, want wrapped ErrStore", err)
+	}
+}
+
+// TestServiceWithoutEngineFailsClosed: a service wired without a policy
+// engine refuses everything — a missing engine is never "everyone
+// allowed" (default deny, docs/12).
+func TestServiceWithoutEngineFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	svc := NewService(store, store.gate, nil)
+	if _, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
+		Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPublic,
+	}); !errors.Is(err, ErrStore) {
+		t.Errorf("Create without engine = %v, want wrapped ErrStore (fail closed)", err)
+	}
+	if _, err := svc.List(ctx, testUser("alice")); err != nil {
+		t.Errorf("List without engine = %v (list needs no project-scoped check: the query is the filter)", err)
+	}
+}

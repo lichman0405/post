@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/lichman0405/post/internal/application/projects"
+	"github.com/lichman0405/post/internal/authz"
 )
 
 // The project API wiring: the store adapter and the organization gate go
@@ -20,12 +21,17 @@ type Deps struct {
 	// (organization exists, active, actor is an active member). The
 	// production adapter is persistence.OrgStore.
 	Orgs projects.OrgGate
+	// Authz is the policy engine the service enforces through (T0105,
+	// docs/50: every public action passes an explicit authorization
+	// check — hiding a control in a client never substitutes for it).
+	// Production composes authz.NewMatrixEngine().
+	Authz authz.Engine
 }
 
 // New wires the service.
 func New(deps Deps) *API {
 	return &API{
-		handlers: &handlers{svc: projects.NewService(deps.Store, deps.Orgs)},
+		handlers: &handlers{svc: projects.NewService(deps.Store, deps.Orgs, deps.Authz)},
 	}
 }
 
