@@ -107,19 +107,6 @@ func sessionOf(fields []string) int {
 	return sess
 }
 
-// procSession returns the session id of pid (/proc/<pid>/stat field 6, the
-// 4th field after the comm field: state, ppid, pgrp, session).
-func procSession(pid int) (int, error) {
-	f, err := procStatFields(pid)
-	if err != nil {
-		return 0, err
-	}
-	if len(f) < 4 {
-		return 0, fmt.Errorf("/proc/%d/stat has only %d fields after the command", pid, len(f))
-	}
-	return strconv.Atoi(f[3])
-}
-
 // procStartTicks returns the process start time in clock ticks (/proc/<pid>/
 // stat field 22, index 19 after the comm field).
 func procStartTicks(pid int) (uint64, error) {

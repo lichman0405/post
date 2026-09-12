@@ -114,7 +114,7 @@ func Collect(opts *CollectOpts) (*CollectReport, error) {
 		return nil, err
 	}
 	if rec.ExitStatus == nil {
-		return nil, fmt.Errorf("Worker %s has no recorded exit status (still running or stale) — collect refuses to judge an unfinished run; see `rddev worker list`", taskID)
+		return nil, fmt.Errorf("worker %s has no recorded exit status (still running or stale) — collect refuses to judge an unfinished run; see `rddev worker list`", taskID)
 	}
 
 	report := &CollectReport{
