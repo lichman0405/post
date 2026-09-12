@@ -1826,3 +1826,55 @@ T0103 的 reviewer 两份都写了 ✓，T0102 的只写了一份。
 **边界（诚实说明）**：这解决的是"**验证者做了工作但没落到文件**"，
 **不**解决"验证者根本没做工作"——那种情况下日志里没有 `result` 事件，
 恢复不到东西，`review-verdict-schema` 仍然失败 ✓（fail-closed 保持不变）。
+
+## L1-20260912-52 — ★★ G2 与 G3 的记录**同名互覆**：所有带 G3 的任务都不可合并
+
+**这是"接通 G3"（L1-20260912-49）之后立刻暴露的一个潜伏缺陷，而且它是我自己引入的那次改动的直接后果。**
+
+**现象**：T0102 的 `accept` 被拒：
+
+```
+rddev task accept: REFUSED — the merge gate (G4) is not satisfied
+  - no G2 gate-run record exists — ... (rddev gate run G2 T0102)
+```
+
+而 `accept` **刚刚**跑过 G2 并且通过了（否则它会以另一个消息拒绝）。磁盘上：
+
+```
+.rddev/runtime/gates/T0102/gate-run-run-bff61dc4b380c550.json   Gate=G3  {'auth-real-services': 'passed'}
+```
+
+**只有一个 gate-run 文件，而它是 G3。**
+
+**根因**：gate run 的记录文件名是 `gate-run-<runID>.json`，
+而 `task accept` 用**同一个** `opts.RunID` 依次调用 `RunGate(G2)` 与 `RunGate(G3)`。
+于是 **G3 的写入把 G2 的记录文件覆盖掉了**——文件名相同，内容被替换，**没有任何报错**。
+
+**后果的严重程度**：G4（合并门）**必须**看到 G2 记录。因此
+**任何一个定义了 G3 的任务，在 accept 之后都会失去 G2 证据，从而永远无法通过合并门。**
+不是"某个任务有问题"，而是"**启用 G3 就等于让这些任务不可合并**"。
+
+**为什么此前没被发现**：`task_overrides` 一直是 `{}`，**G3 从来没有真正运行过**。
+我今天下午刚把 G3 接上（L1-49），它就立刻踩中了这个洞——
+**两个我自己的改动相互作用**，而单独看每一个都是对的。
+
+**处置**：run id 带上 gate，让一次 gate run 的身份包含它自己：
+
+```go
+runID = runID + "-" + strings.ToLower(opts.Gate)
+```
+
+记录名成为 `gate-run-<runID>-g2.json` / `-g3.json`，两个 gate 不再同名。
+**回归测试双向验证**（撤销修复实测）：
+
+```
+TestG2AndG3DoNotCollideOnOneRunID
+  撤销修复 -> FAIL："the G2 record is gone — running G3 under the same run id
+                     overwrote it, and the merge gate would refuse this task"
+  恢复修复 -> PASS（且断言 G3 的记录也在）
+```
+
+**同一形状的第 N 次**：这不是逻辑错误，是**命名冲突**，
+而它之所以能潜伏，是因为**那条代码路径从来没有被执行过**——
+`task_overrides` 为空意味着 `RunGate(G3)` 从未被真实调用。
+**"接通一个从未运行过的分支"本身就是一个测试动作**：它会把该分支上所有潜伏的东西一次性打出来。

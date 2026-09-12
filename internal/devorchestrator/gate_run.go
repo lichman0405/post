@@ -73,6 +73,15 @@ func RunGate(opts *GateRunOpts) (*GateRunResult, error) {
 	if runID == "" {
 		runID = NewRunID()
 	}
+	// A gate run's record is named gate-run-<runID>.json, so two gates run by
+	// ONE command under the same caller-supplied run id collide on the
+	// filename — and the second silently overwrites the first. That is not
+	// hypothetical: `task accept` runs G2 and then G3 with the same run id, so
+	// every task with a G3 override lost its G2 record the moment G3 ran, and
+	// the merge gate then refused with "no G2 gate-run record exists" for a
+	// task whose G2 had just passed. The gate belongs in the identity of its
+	// own run.
+	runID = runID + "-" + strings.ToLower(opts.Gate)
 	res := &GateRunResult{TaskID: opts.TaskID, Gate: opts.Gate, RunID: runID, At: nowRFC3339(), Status: "passed"}
 	overallFailed := false
 	for _, jobName := range jobs {

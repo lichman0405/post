@@ -505,3 +505,50 @@ func TestGateStepsRunInTheTaskWorktree(t *testing.T) {
 		t.Errorf("the gate step ran in %q, want the task worktree %q — a gate that runs in the repo root certifies main, not the task", gotResolved, wantResolved)
 	}
 }
+
+// Two gates run by ONE command must not collide on their record filename.
+// `task accept` runs G2 and then G3 with the same caller-supplied run id, and
+// the record is gate-run-<runID>.json — so G3's write silently replaced G2's,
+// and the merge gate then refused with "no G2 gate-run record exists" for a
+// task whose G2 had just passed. Every task with a G3 override was unmergeable.
+func TestG2AndG3DoNotCollideOnOneRunID(t *testing.T) {
+	repoRoot, specPath := writeGateSpec(t, `{
+  "version": 1,
+  "required_jobs": ["job-a"],
+  "gates": {
+    "G1": {"name": "", "description": "", "runs_jobs": []},
+    "G2": {"name": "", "description": "", "runs_jobs": ["job-a"], "asserts_jobs": []},
+    "G3": {"name": "", "description": "", "runs_jobs": ["job-b"], "asserts_jobs": []},
+    "G4": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": ["job-a"]}
+  },
+  "jobs": {
+    "job-a": {"steps": [{"run": "true"}]},
+    "job-b": {"steps": [{"run": "true"}]}
+  },
+  "review": {"required_for_merge": false},
+  "task_overrides": {"T0001": {"g3_jobs": ["job-b"]}}
+}`)
+	const shared = "run-shared-by-both-gates"
+	for _, gate := range []string{"G2", "G3"} {
+		res, err := RunGate(&GateRunOpts{RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001", Gate: gate, RunID: shared})
+		if err != nil {
+			t.Fatalf("%s: %v", gate, err)
+		}
+		if res.Status != "passed" {
+			t.Fatalf("%s status = %s", gate, res.Status)
+		}
+	}
+	g2, ok, err := LatestGateRunRecord(repoRoot, "T0001", "G2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("the G2 record is gone — running G3 under the same run id overwrote it, and the merge gate would refuse this task")
+	}
+	if g2.Status != "passed" {
+		t.Errorf("G2 record status = %s, want passed", g2.Status)
+	}
+	if _, ok, err := LatestGateRunRecord(repoRoot, "T0001", "G3"); err != nil || !ok {
+		t.Errorf("the G3 record is missing (ok=%v err=%v)", ok, err)
+	}
+}
