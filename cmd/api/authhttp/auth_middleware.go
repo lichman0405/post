@@ -63,6 +63,30 @@ func PrincipalFrom(ctx context.Context) (Principal, bool) {
 	return p, ok
 }
 
+// principal is the same type as Principal. T0102 and T0103 each named the
+// authenticated actor (principal/PrincipalID and Principal/PrincipalFrom);
+// the two types are field-identical, so the merge points both names at one
+// type and keeps each task's call sites untouched rather than renaming code
+// from a merged task inside a merge resolution. Unifying the two spellings is
+// recorded as a follow-up.
+type principal = Principal
+
+// principalFrom is PrincipalFrom's unexported spelling, kept for the same
+// reason: T0102's PrincipalID calls it, T0103's callers use the exported one.
+func principalFrom(ctx context.Context) (principal, bool) { return PrincipalFrom(ctx) }
+
+// PrincipalID returns the authenticated actor's user id, or "" when the
+// request carries no valid session. Product handlers (T0102+ profilehttp)
+// read the actor here — the guard resolved the session, handlers must not
+// resolve it again (one session lookup per request, and a product handler
+// can never be reached with a forged principal).
+func PrincipalID(ctx context.Context) string {
+	if p, ok := principalFrom(ctx); ok {
+		return p.User.ID
+	}
+	return ""
+}
+
 const (
 	cookieSession  = "post_session"
 	cookieOIDC     = "post_oidc_state"

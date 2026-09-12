@@ -1,7 +1,8 @@
 // Package memstore provides in-memory implementations of the authn ports
-// (UserStore, SessionStore, RateLimiter). It exists for two consumers:
-// development with zero infrastructure and the test suites (unit + e2e),
-// where the adapters' behaviour is exact but the storage is ephemeral.
+// (UserStore, SessionStore, RateLimiter) and the profile port
+// (profile.ProfileStore). It exists for two consumers: development with
+// zero infrastructure and the test suites (unit + e2e), where the
+// adapters' behaviour is exact but the storage is ephemeral.
 //
 // NOT for production identity storage: POST canonical truth is PostgreSQL
 // (CLAUDE.md §8); the production adapters are the pgx credential store and
@@ -16,24 +17,31 @@ import (
 	"time"
 
 	"github.com/lichman0405/post/internal/application/authn"
+	"github.com/lichman0405/post/internal/application/profile"
 	"github.com/lichman0405/post/internal/domain"
 )
 
-// Users is an in-memory UserStore. Email lookups run on the normalized
-// form; the store is safe for concurrent use.
+// Users is an in-memory UserStore + profile.ProfileStore: one identity
+// space with the profile content attached, mirroring how production keeps
+// users and profiles side by side in PostgreSQL. Email lookups run on the
+// normalized form; the store is safe for concurrent use.
 type Users struct {
-	mu      sync.Mutex
-	byEmail map[string]authn.UserRecord
-	byID    map[string]authn.UserRecord
-	nextID  int
+	mu       sync.Mutex
+	byEmail  map[string]authn.UserRecord
+	byID     map[string]authn.UserRecord
+	byHandle map[string]string // handle -> user id
+	bio      map[string]string // user id -> bio
+	nextID   int
 }
 
 // NewUsers builds an empty in-memory user store.
 func NewUsers() *Users {
 	return &Users{
-		byEmail: map[string]authn.UserRecord{},
-		byID:    map[string]authn.UserRecord{},
-		nextID:  1,
+		byEmail:  map[string]authn.UserRecord{},
+		byID:     map[string]authn.UserRecord{},
+		byHandle: map[string]string{},
+		bio:      map[string]string{},
+		nextID:   1,
 	}
 }
 
@@ -43,6 +51,10 @@ func (s *Users) Seed(rec authn.UserRecord) {
 	defer s.mu.Unlock()
 	s.byEmail[domain.NormalizeEmail(rec.User.Email)] = rec
 	s.byID[rec.User.ID] = rec
+	s.byHandle[rec.User.Handle] = rec.User.ID
+	if _, ok := s.bio[rec.User.ID]; !ok {
+		s.bio[rec.User.ID] = ""
+	}
 }
 
 // freshID returns a deterministic id shaped like a uuid v4 text form, so
@@ -99,6 +111,8 @@ func (s *Users) CreateWithPassword(_ context.Context, email, passwordHash, handl
 	rec := authn.UserRecord{User: user, PasswordHash: passwordHash}
 	s.byEmail[email] = rec
 	s.byID[user.ID] = rec
+	s.byHandle[user.Handle] = user.ID
+	s.bio[user.ID] = ""
 	return user, nil
 }
 
@@ -120,7 +134,61 @@ func (s *Users) CreateOIDC(_ context.Context, email, handle, displayName string)
 	rec := authn.UserRecord{User: user}
 	s.byEmail[email] = rec
 	s.byID[user.ID] = rec
+	s.byHandle[user.Handle] = user.ID
+	s.bio[user.ID] = ""
 	return user, nil
+}
+
+// GetByUserID implements profile.ProfileStore.
+func (s *Users) GetByUserID(_ context.Context, userID string) (domain.Profile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.byID[userID]
+	if !ok {
+		return domain.Profile{}, profile.ErrNotFound
+	}
+	return domain.Profile{User: rec.User, Bio: s.bio[userID]}, nil
+}
+
+// GetByHandle implements profile.ProfileStore. Callers pass the
+// normalized handle (the service normalizes).
+func (s *Users) GetByHandle(_ context.Context, handle string) (domain.Profile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id, ok := s.byHandle[handle]
+	if !ok {
+		return domain.Profile{}, profile.ErrNotFound
+	}
+	rec := s.byID[id]
+	return domain.Profile{User: rec.User, Bio: s.bio[id]}, nil
+}
+
+// Update implements profile.ProfileStore. The same uniqueness rule as
+// creation applies: a handle held by another identity is ErrHandleTaken.
+func (s *Users) Update(_ context.Context, userID string, upd profile.Update) (domain.Profile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.byID[userID]
+	if !ok {
+		return domain.Profile{}, profile.ErrNotFound
+	}
+	if upd.Handle != nil {
+		if other, taken := s.byHandle[*upd.Handle]; taken && other != userID {
+			return domain.Profile{}, profile.ErrHandleTaken
+		}
+		delete(s.byHandle, rec.User.Handle)
+		rec.User.Handle = *upd.Handle
+		s.byHandle[rec.User.Handle] = userID
+	}
+	if upd.DisplayName != nil {
+		rec.User.DisplayName = *upd.DisplayName
+	}
+	if upd.Bio != nil {
+		s.bio[userID] = *upd.Bio
+	}
+	s.byID[userID] = rec
+	s.byEmail[domain.NormalizeEmail(rec.User.Email)] = rec
+	return domain.Profile{User: rec.User, Bio: s.bio[userID]}, nil
 }
 
 // uniqueHandle de-duplicates a handle against existing users with a
@@ -255,5 +323,6 @@ func (errLimiter) Check(context.Context, string, int, time.Duration) (bool, time
 func Broken() authn.RateLimiter { return errLimiter{} }
 
 var _ authn.UserStore = (*Users)(nil)
+var _ profile.ProfileStore = (*Users)(nil)
 var _ authn.SessionStore = (*Sessions)(nil)
 var _ authn.RateLimiter = (*Limiter)(nil)

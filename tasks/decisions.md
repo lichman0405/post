@@ -1755,3 +1755,126 @@ if [ "$FG_RESUME_ID" != "$FG_SESSION_ID" ]; then echo "resume id != session id";
 **为什么仍然合并**：这不是被忽略的失败，而是一个**已被记录、已被加固、且现在受强制**的未解释项；
 留着 PR 挂着并不能推进定位，而合并后它每次都会跑。
 若再次出现，诊断输出会把原因直接印在日志里。
+
+## F-20260912-5 — 基线漂移不是一次性事故：它是**每次 main 移动 Gate 基础设施时**都会发生的事
+
+L1-20260912-47 我把"推进任务基线"当成一次性的应急处置。**不是。** T0102 与 T0103 的基线（`75f90de`）
+早于今天下午的 Gate 修复，于是它们的 G2 会：
+
+- 用**当前** `gates.json` 的步骤列表（含新的 `acceptance` job）；
+- 跑到**它们 worktree 里**的**旧** `tests/acceptance/*.sh` 上。
+
+而那个旧脚本**把 PR #52 修掉的 bug 写成了断言**（`resume id != session id`），
+配着已经修好的 rddev，必然 exit 9 → `acceptance` 红 → G2 红 → **无法 accept**。
+**两个任务都会因为它们自己的代码完全无关的原因被卡住。**
+
+**已核实**（不是推测）：
+```
+git -C .rddev/worktrees/T0103 show HEAD:tests/acceptance/rejection-retry-e2e.sh | grep -c 'resume id != session id'  -> 1
+```
+
+**处置**：把 L1-47 的手工序列固化成 `rebaseline.sh`（暂放在 Supervisor 的临时目录），对两个任务执行：
+
+1. `git add -A` + `git diff --cached` 导出**完整改动**（含新文件——`git diff` 不含 untracked，那是 L1-46 的教训）；
+2. 在**临时 worktree** 里 `apply --check` 先 dry-run（`git apply` 原子，失败即整体不落盘）；
+3. `reset --hard <main>` 同时移动**任务分支与 worktree**，`clean -fd`，再 `apply`；
+4. **逐个文件比对前后改动集合**：T0103 26 文件 / 20 路径、T0102 31 文件 / 23 路径，**两次都是 IDENTICAL**；
+5. `rework` 重新写入权威 gate-inputs（这是唯一被允许写那份记录的路径），
+   实测 `baseline_sha` 已变为 `7649c1e`。
+
+**rework 的理由文本明确写了"这不是缺陷"** —— 否则 Worker 会以为自己的实现被否定，
+去改本不该动的东西。**返工的理由必须与真实原因一致**，否则它就是一次误导。
+
+### 真正的结论：这需要一个命令，而且需要一条纪律
+
+- **命令**：`rddev worker rebaseline TASK` 应把这个序列变成一步可审计的操作（L1-47 已列为后续项，
+  本条把它从"最好有"升级为"反复需要"）。
+- **纪律**：Gate 基础设施的改动**会让所有在飞任务的基线漂移**。
+  因此这类改动应**成批**合并，而不是在任务运行期间零散地推——本次是因为我在一个任务跑的同时
+  连续修了 10 个 Gate 缺陷，才把这条代价付了两次。
+  代价本身可接受（工作没丢，已逐文件验证），但它**不该被忘记**：
+  **修工具的人和被工具约束的任务，共用同一条 main。**
+
+## L1-20260912-51 — Review verdict 只写在一半的契约里：从 session log 机械恢复
+
+T0102 的 Review Worker 判定 **approve**（0 blocking、0 major），
+`review collect` 却报：
+
+```
+review-verdict-schema  failed  reading RESULT.json: no such file or directory
+```
+
+**那个 verdict 是真的、schema 是合法的、harness 已经在 session 结束时校验过它**——
+它只是进了 `StructuredOutput` 工具，而**没有落到 `RESULT.json`**。
+
+**契约本来就要求两份都写**（`renderReviewPrompt`："the file you write to RESULT.json is
+re-validated at collection — **write the same document to both**"）。
+T0103 的 reviewer 两份都写了 ✓，T0102 的只写了一份。
+
+> **这又是"散文不是强制"**——而且我上一次已经为一模一样的问题写过结论（L1-20260912-31：
+> "让合约的默认状态是存在，而不是缺失"）。**这次不再加一句提示，而是把它机械化。**
+
+**处置**：`CollectReview` 在 `RESULT.json` 缺失时，**从 Reviewer 的 stream log 里恢复 verdict**——
+`--output-format stream-json` 的最后一个 `result` 事件带 `result` 字段，
+即 harness 自己序列化的最终结构化输出，**是同一份文档、由 harness 捕获而非手写**，
+因此它不是"坏文件的兜底"，而是两份副本里**更可靠的那一份**。
+
+- 恢复出的文档**仍然过 `review-verdict.schema.json`**（走原有校验路径），再回写 `RESULT.json` 留痕；
+- **两侧都测**：真正的日志必须恢复出 approve；**没有 `verdict` 字段的日志必须拒绝**（否则一次无关的运行会被当成证据）；日志不存在不是错误，只是恢复不到东西。
+- 实测：T0102 的 verdict 被恢复为 **approve**，**一个合法且真实的批准没有被丢掉、也没有被迫重跑一轮评审**。
+
+**边界（诚实说明）**：这解决的是"**验证者做了工作但没落到文件**"，
+**不**解决"验证者根本没做工作"——那种情况下日志里没有 `result` 事件，
+恢复不到东西，`review-verdict-schema` 仍然失败 ✓（fail-closed 保持不变）。
+
+## L1-20260912-52 — ★★ G2 与 G3 的记录**同名互覆**：所有带 G3 的任务都不可合并
+
+**这是"接通 G3"（L1-20260912-49）之后立刻暴露的一个潜伏缺陷，而且它是我自己引入的那次改动的直接后果。**
+
+**现象**：T0102 的 `accept` 被拒：
+
+```
+rddev task accept: REFUSED — the merge gate (G4) is not satisfied
+  - no G2 gate-run record exists — ... (rddev gate run G2 T0102)
+```
+
+而 `accept` **刚刚**跑过 G2 并且通过了（否则它会以另一个消息拒绝）。磁盘上：
+
+```
+.rddev/runtime/gates/T0102/gate-run-run-bff61dc4b380c550.json   Gate=G3  {'auth-real-services': 'passed'}
+```
+
+**只有一个 gate-run 文件，而它是 G3。**
+
+**根因**：gate run 的记录文件名是 `gate-run-<runID>.json`，
+而 `task accept` 用**同一个** `opts.RunID` 依次调用 `RunGate(G2)` 与 `RunGate(G3)`。
+于是 **G3 的写入把 G2 的记录文件覆盖掉了**——文件名相同，内容被替换，**没有任何报错**。
+
+**后果的严重程度**：G4（合并门）**必须**看到 G2 记录。因此
+**任何一个定义了 G3 的任务，在 accept 之后都会失去 G2 证据，从而永远无法通过合并门。**
+不是"某个任务有问题"，而是"**启用 G3 就等于让这些任务不可合并**"。
+
+**为什么此前没被发现**：`task_overrides` 一直是 `{}`，**G3 从来没有真正运行过**。
+我今天下午刚把 G3 接上（L1-49），它就立刻踩中了这个洞——
+**两个我自己的改动相互作用**，而单独看每一个都是对的。
+
+**处置**：run id 带上 gate，让一次 gate run 的身份包含它自己：
+
+```go
+runID = runID + "-" + strings.ToLower(opts.Gate)
+```
+
+记录名成为 `gate-run-<runID>-g2.json` / `-g3.json`，两个 gate 不再同名。
+**回归测试双向验证**（撤销修复实测）：
+
+```
+TestG2AndG3DoNotCollideOnOneRunID
+  撤销修复 -> FAIL："the G2 record is gone — running G3 under the same run id
+                     overwrote it, and the merge gate would refuse this task"
+  恢复修复 -> PASS（且断言 G3 的记录也在）
+```
+
+**同一形状的第 N 次**：这不是逻辑错误，是**命名冲突**，
+而它之所以能潜伏，是因为**那条代码路径从来没有被执行过**——
+`task_overrides` 为空意味着 `RunGate(G3)` 从未被真实调用。
+**"接通一个从未运行过的分支"本身就是一个测试动作**：它会把该分支上所有潜伏的东西一次性打出来。

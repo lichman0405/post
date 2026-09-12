@@ -44,6 +44,7 @@ import (
 
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
+	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/config"
 	"github.com/lichman0405/post/internal/health"
@@ -135,15 +136,23 @@ func run(args []string) int {
 		Cfg:        *authCfg,
 		Secure:     cfg.Layer == config.LayerProd,
 	})
+	// Product APIs (T0102+): one shared mux under one guard. The auth, profile
+	// and organization surfaces all register here and inherit the
+	// session/CSRF guard structurally — anonymous reads flow, writes are
+	// 401/403 before routing.
+	v1 := http.NewServeMux()
+	authAPI.Register(v1)
+	profileAPI := profilehttp.New(profilehttp.Deps{
+		Profiles: persistence.NewProfileStore(pool),
+	})
+	profileAPI.Register(v1)
 	orgAPI := orgshttp.New(orgshttp.Deps{Store: persistence.NewOrgStore(pool)})
-	apiMux := http.NewServeMux()
-	apiMux.Handle("/api/v1/auth/", authAPI.Routes())
 	// The bare path is registered alongside the subtree so requests to
-	// /api/v1/organizations (create + list) hit the routes directly
-	// instead of being redirected for a trailing slash.
-	apiMux.Handle("/api/v1/organizations", orgAPI.Routes())
-	apiMux.Handle("/api/v1/organizations/", orgAPI.Routes())
-	mux.Handle("/api/v1/", authAPI.Guard(apiMux))
+	// /api/v1/organizations (create + list) hit the routes directly instead of
+	// being redirected for a trailing slash.
+	v1.Handle("/api/v1/organizations", orgAPI.Routes())
+	v1.Handle("/api/v1/organizations/", orgAPI.Routes())
+	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	srv := &http.Server{
 		Addr:              cfg.Server.Addr,

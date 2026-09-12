@@ -48,11 +48,12 @@ made executable, and `branches.base_state_id` is still added by the same
 If the canonical schema is updated, port the delta as a new numbered
 migration and extend the fixture in `tests/integration/migration_test.go`.
 
-Additional deviation (T0103): `00017_organization_governance.sql` adds
+Additional deviation (T0103): `00018_organization_governance.sql` adds
 `organizations.deactivated_at` and the `organization_memberships(user_id)`
-index, which the canonical seed does not declare yet. The seed stays frozen
-per the established convention; the Supervisor back-ports the column to
-`specs/database/postgres.sql` (Worker scope does not include specs/).
+index, which the canonical seed does not declare yet. The seed stays frozen,
+as it has since the initial spec commit: T0013's append-only triggers and
+T0101's 00016 are equally absent from it, and the migration set - not the
+seed - is the living schema. Nothing is back-ported.
 
 ## Layout
 
@@ -71,10 +72,11 @@ per the established convention; the Supervisor back-ports the column to
 | `00011_external_contribution.sql` | external_references(+snapshots), contribution_events, credit_disputes |
 | `00012_events_audit.sql` | research_events, outbox_events, subscriptions, webhook_deliveries, audit_log |
 | `00013_search_projection.sql` | search_documents (rebuildable projection) |
-| `00014_append_only_enforcement.sql` | append-only triggers (version/event tables) |
-| `00015_append_only_truncate.sql` | TRUNCATE guards for append-only tables |
+| `00014_append_only_enforcement.sql` | append-only triggers on the version/history/ledger tables (T0013) |
+| `00015_append_only_truncate.sql` | TRUNCATE refused on the same tables (T0013) |
 | `00016_auth_password.sql` | users.password_hash (T0101 email+password auth) |
-| `00017_organization_governance.sql` | organizations.deactivated_at, organization_memberships(user_id) index (T0103) |
+| `00017_profiles.sql` | research profile columns (T0102) |
+| `00018_organization_governance.sql` | organizations.deactivated_at, organization_memberships(user_id) index (T0103) |
 
 `migrations.go` embeds the files (`//go:embed *.sql`) for the runner.
 

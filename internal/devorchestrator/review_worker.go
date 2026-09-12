@@ -2,6 +2,7 @@ package devorchestrator
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -424,7 +425,25 @@ func CollectReview(opts *CollectOpts) (*ReviewCollectReport, error) {
 	}
 
 	// The verdict document: schema + task id + verdict recorded as evidence.
+	//
+	// The Reviewer's own file is preferred, but its verdict is also carried by
+	// the harness: --output-format stream-json ends with a `result` event whose
+	// payload is the final structured output, already validated against the
+	// same schema at the end of the session. The prompt asks for both, and a
+	// Reviewer that follows half of it — T0102's wrote an approving verdict
+	// into StructuredOutput and never touched the file — would otherwise lose
+	// a valid verdict and force a re-review of work that was fine. Asking in
+	// prose is not a mechanism; this is.
 	verdictPath := filepath.Join(rec.ResultDir, "RESULT.json")
+	if _, err := os.Stat(verdictPath); os.IsNotExist(err) {
+		if recovered, ok, rerr := verdictFromSessionLog(rec.LogPath); rerr != nil {
+			return nil, fmt.Errorf("recovering the verdict from the Reviewer's session log: %w", rerr)
+		} else if ok {
+			if werr := os.WriteFile(verdictPath, recovered, 0o644); werr != nil {
+				return nil, fmt.Errorf("recording the recovered verdict: %w", werr)
+			}
+		}
+	}
 	verdictSchema := filepath.Join(repoRoot, "specs", "orchestrator", "review-verdict.schema.json")
 	if err := ValidateWorkerResultFile(verdictSchema, verdictPath); err != nil {
 		fail("review-verdict-schema", err.Error())
@@ -559,4 +578,57 @@ func renderReviewSystem(taskID string) string {
 Your verdict is recorded as gate evidence: an approving verdict is required
 for the merge gate (G4).
 `, taskID)
+}
+
+// verdictFromSessionLog recovers the final structured output from a
+// stream-json session log.
+//
+// The last `result` event carries `result`, the harness's own serialisation of
+// the final message — the same document the CLI validated against
+// review-verdict.schema.json before ending the session. It is the Reviewer's
+// verdict, captured by the harness rather than typed into a file, which makes
+// it the more reliable of the two copies rather than the fallback for a
+// broken one.
+func verdictFromSessionLog(logPath string) ([]byte, bool, error) {
+	f, err := os.Open(logPath)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+	var last string
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 || line[0] != '{' {
+			continue
+		}
+		var ev struct {
+			Type   string `json:"type"`
+			Result string `json:"result"`
+		}
+		if err := json.Unmarshal(line, &ev); err != nil {
+			continue
+		}
+		if ev.Type == "result" && ev.Result != "" {
+			last = ev.Result
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, false, err
+	}
+	if last == "" {
+		return nil, false, nil
+	}
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(last), &doc); err != nil {
+		return nil, false, nil
+	}
+	if _, ok := doc["verdict"]; !ok {
+		return nil, false, nil
+	}
+	return []byte(last), true, nil
 }
