@@ -79,7 +79,7 @@
         {"run": "pnpm --filter @post/ui typecheck"},
         {"run": "pnpm --filter @post/web typecheck"},
         {"run": "pnpm --filter @post/web lint"},
-        {"run": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"apps/web/lib/config.test.mjs\""},
+        {"run": "bash scripts/web-unit-tests.sh"},
         {"run": "pnpm --filter @post/web build",
          "env": {
            "POST_ENV": "prod",
