@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 131,
+  "task_count": 132,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -5339,6 +5339,64 @@
       "decision_level_max": "L1",
       "relevant_specs": [],
       "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0013",
+      "title": "Enforce append-only / version immutability at the storage layer",
+      "phase": "P0",
+      "phase_name": "Canonical 开发环境、Orchestrator 与工程脚手架",
+      "v1_required": true,
+      "dependencies": [
+        "T0005"
+      ],
+      "requirements": [
+        "Add a forward-only migration enforcing immutability on the append-only/version tables.",
+        "Owner-decided mechanism: BEFORE UPDATE OR DELETE triggers that RAISE EXCEPTION, applied to the version/history tables (at minimum scientific_object_versions, relation_versions, state commits, and the append-only ledger tables such as audit/contribution ledger).",
+        "The trigger must reject in-place mutation of a committed version row and reject DELETE, with an error message that names the table/operation.",
+        "Preserve every existing constraint; add no new column semantics.",
+        "Evidence must be reproduced against a real PostgreSQL, not asserted from reading DDL."
+      ],
+      "deliverables": [
+        "infra/migrations/00014_append_only_enforcement.sql",
+        "integration tests covering the enforced invariant"
+      ],
+      "acceptance_criteria": [
+        "an UPDATE of an existing scientific_object_versions row is rejected by the database",
+        "a DELETE of an existing version row is rejected by the database",
+        "legitimate INSERT of a new version row still succeeds",
+        "the rejection is proven by SQLSTATE/exception evidence against a real PostgreSQL, and by a regression test",
+        "fresh install and upgrade path both apply the migration cleanly",
+        "no existing constraint is weakened; migration is forward-only and repeat-migrate safe",
+        "ops/doctor.sh and make check still pass; no file outside allowed_scope is modified"
+      ],
+      "tests": [
+        "append-only enforcement integration",
+        "migration upgrade path"
+      ],
+      "allowed_scope": [
+        "infra/migrations/**",
+        "tests/integration/**",
+        "internal/persistence/**"
+      ],
+      "forbidden_scope": [
+        ".github/**",
+        "tasks/**",
+        "docs/**",
+        "CLAUDE.md",
+        "apps/**",
+        "services/**",
+        "cmd/**",
+        "specs/**"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/adr/ADR-007-append-only-abort.md",
+        "docs/31_MASTER_ACCEPTANCE.md",
+        "docs/46_ABORT_RETENTION.md",
+        "docs/53_DATABASE_STANDARD.md",
+        "docs/67_TEST_GATES.md",
+        "infra/migrations/00005_scientific_objects.sql"
+      ]
     }
   ]
 }
