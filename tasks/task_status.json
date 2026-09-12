@@ -111,13 +111,13 @@
       "merged_at": "2026-09-12T20:20:00Z"
     },
     "T0012": {
-      "status": "worker_failed",
+      "status": "merged",
       "started_at": "2026-09-12T20:25:00Z",
-      "completed_at": null,
-      "notes": "Attempt 1 budget-exhausted: $25.13 of $25, with NO RESULT.json written at all (despite the write-early instruction) -> worker_failed per docs/62 §4. The work is substantive and coherent (43 paths, builds, package tests pass, and internal/devorchestrator/gate_inputs.go appears to be the gate-tampering fix). The single collect rejection is go.mod, which the package forbade STALELY - written when T0010 still owned go.mod; T0010 is merged, nothing contends. Re-dispatched in the same worktree with a corrected scope, a $40 budget, and a hard requirement to write RESULT.json within the first tool calls.",
+      "completed_at": "2026-09-12T21:55:00Z",
+      "notes": "Attempt 2 accepted; merged as PR #45 (b80ef60) with all six CI jobs green. Supervisor ran all three acceptance e2e suites (four-gate with a TAMPER worker judged by the authoritative scope, rejection/retry with respawn into a NEW session, supervisor-git with gh invoked only on a green gate) and the gate/consistency tests (the full red matrix including \"subset G2 - the shipped defect\"). Fixed one hermeticity defect found only in CI: the git-control fixture relied on the ambient git identity, so it passed locally and failed on a bare runner; the fixture now configures one, verified under CI-like conditions. P0 is complete.",
       "worker_run_id": "worker-T0012-fd1195b",
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "accepted_by_supervisor_at": "2026-09-12T21:55:00Z",
+      "merged_at": "2026-09-12T21:55:00Z"
     },
     "T0101": {
       "status": "todo",

@@ -1,0 +1,276 @@
+{
+  "task_id": "T0012",
+  "status": "completed",
+  "summary": "The four-gate acceptance loop is executable and enforced end to end, with evidence recorded at every step. All four required items are implemented and demonstrated: (1) a self-contradictory RESULT (status completed + INTERIM marker + not_run tests) is mechanically rejected at collect — CheckResultConsistency compares the completion claim against the document itself, requires a passed entry for every required test, and treats any not_run/failed entry as a contradiction; planted in e2e and refused with the not_run test named. (2) G2 runs CI's EXACT steps — gates.json holds the six jobs of .github/workflows/ci.yml verbatim and TestGatesSpecSyncsWithCIWorkflow fails the build on drift — and the merge gate asserts EVERY required job (TestCheckMergeGateRedScenarios subcases: no G2 record, subset G2 'the shipped defect', red required job, stale G2, non-ok collect, missing G3). (3) allowed_scope is validated against the real tree before dispatch — a glob matching nothing is a hard error, an all-dead scope refuses dispatch, and a task covering a marker input (specs/**) must also cover its derived marker (specs/SPEC_VERSION.json) — with the derived marker accepted at collect via the derived-artifacts rules. (4) A blocking red gate prevents merge, demonstrated: all four git/PR actions (commit, push, pr open, pr merge) exit 1 with REFUSED and the fake git/gh recorders prove no git/gh invocation while the gate is red; on green they run and write GitRecord evidence. The pre-dispatch gate-integrity defect is fixed: authoritative gate inputs (allowed_scope, baseline_sha, log path, guard files, settings) live in .rddev/runtime/tasks/<TASK>/gate-inputs.json — outside the Worker write envelope — and collect judges by them; a tamper Worker that edits its own task-package.json/registry.json is rejected with the out-of-scope file named. accept/reject/rework (same claude session)/respawn (new session, reset tree) work with rejection evidence kept; an independent Review Worker (no git control) records its verdict; rddev workflow TASK rebuilds the whole trail (state, G1-G4, rejection, review, git/PR) from disk alone and reports the exact resume command. An example task completes Worker -> G1 collect -> G2 -> G3 -> review approve -> accept -> commit -> push -> PR open -> PR merge -> merged, all steps with recorded evidence. Local CI runs: spec-validation, task-state, go, web and python jobs all green with their exact steps; migration-integration could not run locally (the worker guard blocks docker-socket access for this task and the contract forbids starting infrastructure) — CI provides the service container, and the G2 executor runs that job's exact step on the Supervisor side. 114 acceptance e2e checks (58 + 25 + 31) pass, plus the full Go unit suite, fmt-check, staticcheck and vet.",
+  "files_changed": [
+    "cmd/rddev/gate.go",
+    "cmd/rddev/git.go",
+    "cmd/rddev/main.go",
+    "cmd/rddev/main_test.go",
+    "cmd/rddev/pr.go",
+    "cmd/rddev/review.go",
+    "cmd/rddev/stubs.go (deleted — cli wiring moved into main.go/task.go)",
+    "cmd/rddev/task.go",
+    "cmd/rddev/task_test.go",
+    "cmd/rddev/worker.go",
+    "cmd/rddev/worker_test.go",
+    "cmd/rddev/workflow.go",
+    "docs/61_DEVELOPMENT_ORCHESTRATION.md",
+    "go.mod",
+    "internal/devorchestrator/dag.go",
+    "internal/devorchestrator/gate_inputs.go",
+    "internal/devorchestrator/gate_inputs_test.go",
+    "internal/devorchestrator/gate_records.go",
+    "internal/devorchestrator/gate_run.go",
+    "internal/devorchestrator/gate_run_test.go",
+    "internal/devorchestrator/gate_spec.go",
+    "internal/devorchestrator/gate_spec_test.go",
+    "internal/devorchestrator/git_control.go",
+    "internal/devorchestrator/git_control_test.go",
+    "internal/devorchestrator/result_consistency.go",
+    "internal/devorchestrator/result_consistency_test.go",
+    "internal/devorchestrator/review_worker.go",
+    "internal/devorchestrator/scope_validate.go",
+    "internal/devorchestrator/scope_validate_test.go",
+    "internal/devorchestrator/state.go",
+    "internal/devorchestrator/store_test.go",
+    "internal/devorchestrator/worker_collect.go",
+    "internal/devorchestrator/worker_collect_test.go",
+    "internal/devorchestrator/worker_guard.go",
+    "internal/devorchestrator/worker_registry.go",
+    "internal/devorchestrator/worker_spawn.go",
+    "internal/devorchestrator/worker_stop.go",
+    "internal/devorchestrator/workflow.go",
+    "specs/orchestrator/derived-artifacts.json",
+    "specs/orchestrator/gates.json",
+    "specs/orchestrator/rddev-cli.yaml",
+    "specs/orchestrator/review-verdict.schema.json",
+    "specs/orchestrator/task-state-machine.yaml",
+    "specs/SPEC_VERSION.json (regenerated — new specs/orchestrator inputs)",
+    "tests/acceptance/four-gate-e2e.sh",
+    "tests/acceptance/four-gate-helpers.sh",
+    "tests/acceptance/rejection-retry-e2e.sh",
+    "tests/acceptance/supervisor-git-e2e.sh"
+  ],
+  "tests": [
+    {
+      "command": "go build ./...",
+      "status": "passed",
+      "evidence": "exit 0, no output"
+    },
+    {
+      "command": "go vet ./...",
+      "status": "passed",
+      "evidence": "exit 0, no findings"
+    },
+    {
+      "command": "go test -count=1 $(go list ./... | grep -v '/tests/integration')",
+      "status": "passed",
+      "evidence": "all packages ok, fresh run: ok cmd/api 3.436s; ok cmd/rddev 78.706s; ok internal/config; ok internal/devorchestrator 0.308s; ok internal/devorchestrator/doctor; ok internal/health; ok internal/observability; ok internal/worker 7.047s; rest [no test files]"
+    },
+    {
+      "command": "make fmt-check",
+      "status": "passed",
+      "evidence": "gofmt: clean"
+    },
+    {
+      "command": "make staticcheck",
+      "status": "passed",
+      "evidence": "staticcheck: clean (6 grandfathered baseline finding(s))"
+    },
+    {
+      "command": "bash scripts/tests/staticcheck-unit-test.sh",
+      "status": "passed",
+      "evidence": "staticcheck-unit-test: all cases passed"
+    },
+    {
+      "command": "python3 scripts/validate_specs.py",
+      "status": "passed",
+      "evidence": "OK: 12/12 checks passed (exit 0)"
+    },
+    {
+      "command": "python3 scripts/spec_version.py --check",
+      "status": "passed",
+      "evidence": "marker current: sha256:660eda409b4e2459 (38 inputs)"
+    },
+    {
+      "command": "python3 scripts/validate_openapi.py",
+      "status": "passed",
+      "evidence": "all 7 openapi checks passed"
+    },
+    {
+      "command": "python3 scripts/validate_task_state.py",
+      "status": "passed",
+      "evidence": "all 9 task-state checks passed"
+    },
+    {
+      "command": "bash scripts/tests/openapi-unit-test.sh",
+      "status": "passed",
+      "evidence": "openapi-unit-test: all cases passed"
+    },
+    {
+      "command": "bash scripts/tests/spec-validation-unit-test.sh",
+      "status": "passed",
+      "evidence": "ALL UNIT TESTS PASSED"
+    },
+    {
+      "command": "bash scripts/tests/spec-validation-smoke-test.sh",
+      "status": "passed",
+      "evidence": "ALL SMOKE TESTS PASSED"
+    },
+    {
+      "command": "bash scripts/tests/task-state-unit-test.sh",
+      "status": "passed",
+      "evidence": "task-state-unit-test: all cases passed"
+    },
+    {
+      "command": "bash scripts/tests/progress-update-test.sh",
+      "status": "passed",
+      "evidence": "progress-update-test: all cases passed"
+    },
+    {
+      "command": "corepack enable && pnpm install --frozen-lockfile",
+      "status": "passed",
+      "evidence": "Done in 135ms using pnpm v12.4.1 (resolved 363, reused 363, downloaded 0)"
+    },
+    {
+      "command": "pnpm --filter @post/ui typecheck",
+      "status": "passed",
+      "evidence": "tsc --noEmit, exit 0, no errors"
+    },
+    {
+      "command": "pnpm --filter @post/web typecheck",
+      "status": "passed",
+      "evidence": "tsc --noEmit, exit 0, no errors"
+    },
+    {
+      "command": "pnpm --filter @post/web lint",
+      "status": "passed",
+      "evidence": "eslint . exit 0, no findings"
+    },
+    {
+      "command": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"apps/web/lib/config.test.mjs\"",
+      "status": "passed",
+      "evidence": "pass 11, fail 0, cancelled 0, skipped 0, todo 0 (duration_ms 70.09)"
+    },
+    {
+      "command": "POST_ENV=prod API_BASE_URL=http://127.0.0.1:18080 SCIENTIFIC_ADAPTER_URL=http://127.0.0.1:19100 pnpm --filter @post/web build",
+      "status": "passed",
+      "evidence": "web config: layer=prod api=http://127.0.0.1:18080 adapter=http://127.0.0.1:19100; Generating static pages (3/3); route table emitted, exit 0"
+    },
+    {
+      "command": "pip install uv ruff mypy",
+      "status": "passed",
+      "evidence": "Successfully installed ruff-0.16.7 uv-0.12.13 (mypy already present)"
+    },
+    {
+      "command": "cd services/scientific-adapter && uv sync --frozen",
+      "status": "passed",
+      "evidence": "env synced (installed pygments==2.21.0, pytest==9.1.1, ...), exit 0"
+    },
+    {
+      "command": "cd services/scientific-adapter && ruff check . --config ../../ops/ci/ruff.toml",
+      "status": "passed",
+      "evidence": "All checks passed!"
+    },
+    {
+      "command": "cd services/scientific-adapter && mypy --config-file ../../ops/ci/mypy.ini src/post_scientific_adapter",
+      "status": "passed",
+      "evidence": "Success: no issues found in 8 source files"
+    },
+    {
+      "command": "cd services/scientific-adapter && uv run pytest -q",
+      "status": "passed",
+      "evidence": "40 passed in 3.10s"
+    },
+    {
+      "command": "go test ./internal/devorchestrator/ -run 'TestCheckMergeGate' -v",
+      "status": "passed",
+      "evidence": "PASS TestCheckMergeGateGreen; PASS TestCheckMergeGateRedScenarios (subtests: no G2 record, subset G2 - the shipped defect, red required job, stale G2 - collect after the gate run, non-ok collect, G3 required and missing); PASS TestCheckMergeGateReviewVerdictRequired"
+    },
+    {
+      "command": "bash tests/acceptance/four-gate-e2e.sh",
+      "status": "passed",
+      "evidence": "all e2e checks passed — 58 ok lines, exit 0. Covers: red-gate refusal of commit/push/pr open/pr merge with 'proves no git/gh invocation' via fake recorders; merge gate refuses with G2 missing; full flow spawn -> collect -> G2 green -> G3 green -> G2/G3 records on disk -> review spawn/collect -> verdict approve -> accept -> merge gate green -> commit -> push -> pr open (PR number recorded) -> pr merge -> merged; rddev workflow rebuilds the trail from disk, shows terminal state and gate evidence; tamper worker: collect refuses, names apps/evil.txt, judges by the AUTHORITATIVE scope, gate-inputs check failed; T0002 rejected, never verification; task accept refused while rejected with the illegal transition named"
+    },
+    {
+      "command": "bash tests/acceptance/rejection-retry-e2e.sh",
+      "status": "passed",
+      "evidence": "all e2e checks passed — 25 ok lines, exit 0. Covers: collect refuses the contradictory RESULT (exit 1) with the INTERIM marker check failed and the not_run test named; the failed Worker is rejected, never verification; worker rework T0001 (attempt 2) resumes the SAME claude session, collect accepts, task accepted after rework; worker respawn T0002 (attempt 2) starts a NEW claude session and resets the rejected worktree (leftover gone), task accepted after respawn"
+    },
+    {
+      "command": "bash tests/acceptance/supervisor-git-e2e.sh",
+      "status": "passed",
+      "evidence": "all e2e checks passed — 31 ok lines, exit 0. Covers: red-gate refusal of commit/push/pr open/pr merge/status with 'git/gh was never invoked while the gate was red' and 'the refusal enumerates the missing G2 reason'; green flow: gate run G2 -> accept -> pr status shows the green G4 assertion -> commit landed on the task branch -> push reached the bare origin -> pr open returned the PR number -> gh pr create/merge invoked on the green gate -> pr merge folded accepted -> merged -> commit and merge wrote their GitRecord evidence"
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "Detect a self-contradictory RESULT mechanically (status completed on a document that marks itself INTERIM or carries not_run/failed tests); demonstrated by planting one",
+      "status": "passed",
+      "evidence": "Unit: TestResultConsistencyInterimMarkerRejected, TestResultConsistencyCompletedWithNotRunRejected, TestResultConsistencyFewerAcceptanceEntriesThanCriteriaRejected, TestResultConsistencyHonestNonCompletionIsNotAContradiction (green neighbour). E2e: 'collect refuses the contradictory RESULT (exit 1)', 'the INTERIM marker check failed', 'the not_run test is named in the refusal' (rejection-retry-e2e, 25 checks)"
+    },
+    {
+      "criterion": "G2 runs CI's EXACT steps and the merge gate asserts EVERY required job (all six: spec-validation, task-state, go, web, python, migration-integration)",
+      "status": "passed",
+      "evidence": "specs/orchestrator/gates.json holds the six jobs with ci.yml steps verbatim; TestGatesSpecSyncsWithCIWorkflow parses the real .github/workflows/ci.yml and fails the build on any drift. TestCheckMergeGateRedScenarios subcases refuse on: no G2 record, subset G2 ('the shipped defect'), red required job, stale G2, non-ok collect, missing G3. E2e: 'merge gate refuses with G2 missing', 'git commit refused after collect with no G2'. The runner records every command, exit status and output (TestRunGateRecordsCommandsExitAndLogs)"
+    },
+    {
+      "criterion": "Validate allowed_scope against the real tree before dispatch, including derived artifacts",
+      "status": "passed",
+      "evidence": "Unit: TestScopeValidationDeadGlobRefused (glob matching nothing = hard error), TestScopeValidationScopeCoveringNothingRefused (all-dead scope refuses dispatch), TestScopeValidationStarGlobMatchesNothingIsWarning (legitimate /** neighbour still dispatches with a warning), TestScopeValidationCoveredMarkerRequiresDerivedArtifact (scope covering specs/** must also cover specs/SPEC_VERSION.json), TestScopeValidationHappyPath, TestDerivedScopeAllowance. E2e: collect judges the diff by the AUTHORITATIVE scope and names the out-of-scope file"
+    },
+    {
+      "criterion": "A blocking red gate prevents merge — demonstrated, not asserted",
+      "status": "passed",
+      "evidence": "E2e with fake git/gh recorders: commit, push, pr open and pr merge each exit 1, print REFUSED, and 'prove no git/gh invocation' while the gate is red; the same actions succeed and record GitRecord evidence once green (four-gate-e2e 58 checks, supervisor-git-e2e 31 checks). The GateRefusalError is raised by the four-gate assertion BEFORE any git/gh invocation in git_control.go"
+    },
+    {
+      "criterion": "G1/G2/G3/G4 exist as task metadata AND an executor that records commands, exit status and output",
+      "status": "passed",
+      "evidence": "specs/orchestrator/gates.json defines G1..G4 with runs_jobs/asserts_jobs and task_overrides (G3 per-task jobs, review override); gate_run.go executes jobs and writes GateRunRecord evidence with per-step command/exit/output. Unit: TestRunGateRecordsCommandsExitAndLogs, TestRunGateRefusesG1AndG4 (G1 is the collect suite, G4 asserts — never runs), TestRunGateAllGreenPasses. E2e: 'gate run G2 T0001', 'G2 is green', 'gate run G3 T0001 (task override)', 'G3 is green', 'G2/G3 records exist on disk'"
+    },
+    {
+      "criterion": "accept, reject, rework (same worker) and respawn (new worker) work, with rejection evidence kept",
+      "status": "passed",
+      "evidence": "E2e rejection-retry (25 checks): 'the failed Worker is rejected, never verification'; 'worker rework T0001 (attempt 2)' with 'rework resumed the SAME claude session' and 'collect accepts the reworked attempt'; 'worker respawn T0002 (attempt 2)' with 'respawn started a NEW claude session' and 'respawn reset the rejected worktree (leftover gone)'; accept refused while rejected ('the refusal names the illegal transition explicitly'); RejectRecord evidence persisted (workflow view surfaces 'the newest rejection, if any')"
+    },
+    {
+      "criterion": "An independent Review Worker (no Git control-plane) exists and its verdict is recorded as evidence",
+      "status": "passed",
+      "evidence": "review_worker.go spawns/collects a Review Worker with the same guard envelope and no git control; the verdict is stored as a ReviewRecord (specs/orchestrator/review-verdict.schema.json). E2e: 'review spawn T0001', 'review collect T0001', 'the review verdict is approve'; TestCheckMergeGateReviewVerdictRequired proves a request-changes verdict blocks merge while approve passes"
+    },
+    {
+      "criterion": "Only the Supervisor performs commit/push/PR/merge and the tooling refuses while any gate is red",
+      "status": "passed",
+      "evidence": "git_control.go: every action runs the four-gate assertion first and returns GateRefusalError before touching git/gh. E2e supervisor-git (31 checks): red gate refuses all five actions with the reason enumerated and 'git/gh was never invoked while the gate was red'; green gate: commit on the task branch, push to bare origin, gh pr create/merge invoked, accepted -> merged folded. The Worker guard denies all git control-plane commands to Workers (worker-guard.sh)"
+    },
+    {
+      "criterion": "The Supervisor can resume an interrupted workflow from disk alone",
+      "status": "passed",
+      "evidence": "workflow.go: BuildWorkflow rebuilds state, G1..G4 status, rejection, review verdict and the git/PR trail from the state file and gate records only ('Nothing lives in memory: a new Supervisor session reading the same disk sees the same workflow') and reports the exact next rddev command. E2e: 'rddev workflow T0001 rebuilds the trail from disk', 'workflow shows the terminal state', 'workflow lists the gate evidence'. Worker-side: rework resumes the same claude session; respawn starts a fresh one from the recorded state"
+    },
+    {
+      "criterion": "An example task completes the full flow Worker -> G2 -> commit -> PR with recorded evidence at every step",
+      "status": "passed",
+      "evidence": "four-gate-e2e T0001: task ready -> worker spawn -> worker collect (G1) -> gate run G2 (green) -> gate run G3 (green) -> review spawn/collect (approve) -> task accept -> merge gate green -> git commit (sha recorded) -> git push -> pr open (PR number recorded) -> pr merge -> task merged; every step writes a dated record file (.rddev/runtime/gates/<TASK>/) and 'G2/G3 records exist on disk' is asserted; commit/push/pr open/pr merge each write action-qualified GitRecord evidence (git-commit-<run>.json, git-push-<run>.json, git-pr-open-<run>.json, git-pr-merge-<run>.json)"
+    },
+    {
+      "criterion": "Gate-integrity fix: collect judges by authoritative gate inputs the Worker cannot write; tampering has no effect; worker-settings.json/guard integrity handled",
+      "status": "passed",
+      "evidence": "gate_inputs.go: spawn writes the authoritative gate-inputs.json to .rddev/runtime/tasks/<TASK>/ (outside the Worker write envelope — the guard permits only the worktree, the result dir and /tmp) plus byte copies of task-package.json, guard/worker-guard.sh, worker-settings.json and run-worker.sh; collect verifies every byte copy via VerifyGateInputs against the authoritative record and judges allowed_scope and baseline_sha by it. Unit: TestGateInputsUntamperedPasses, TestGateInputsRegistryTamperDetected, TestGateInputsPackageAndGuardTamperDetected, TestGateInputsExitStatusTamperDetected, TestFinalizeGateInputsRefusesRewrittenRecord, TestLoadGateInputsRejectsForeignRecord. E2e tamper worker: 'worker collect T0002 refuses the tamper', 'collect detects the gate-input tamper', 'collect judged the diff by the AUTHORITATIVE scope (out-of-scope file named)' — editing the Worker-writable task-package.json/registry.json has no effect on the judgement"
+    },
+    {
+      "criterion": "A failed Worker never reaches accepted",
+      "status": "passed",
+      "evidence": "E2e: a Worker whose RESULT is contradictory is rejected at collect — 'T0002 is rejected, never verification' and 'task accept T0002 is refused while rejected'; an honest non-completed RESULT (failed/blocked status) is an unconditional rejection at collect (worker_collect.go checks it outside the consistency branch), unit-tested by TestResultConsistencyHonestNonCompletionIsNotAContradiction"
+    }
+  ],
+  "risks": [
+    "migration-integration was not executed locally: the worker guard blocks docker-socket access for this task ('Docker socket access requires an explicit per-task grant (docs/64 §8); this task has none'), no PostgreSQL is listening on the host, and the Worker contract forbids starting infrastructure. The job's exact step (make test-integration with POSTGRES_TEST_ADMIN_URL against the pgvector service container) is pinned in gates.json and enforced by the drift test, and G2 runs it on the Supervisor side. Watch this job in CI.",
+    "The three acceptance e2e scripts create scratch git repos under /tmp with a fake claude binary and fake gh/git recorders; they self-clean on exit via trap. They run the real rddev binary against those scratch repos, so they exercise the real refusal paths but not the real remote GitHub.",
+    "cmd/rddev/worker_collect.go and worker_guard.go moved between files in attempt 1 (collect CLI wiring); the full unit suite and the live e2e boundary tests both pass, but a diff review of cmd/rddev/ is advisable."
+  ],
+  "follow_up_issues": [],
+  "notes_for_supervisor": "Gate-inputs tampering (the pre-dispatch defect): authoritative allowed_scope/baseline_sha now live in .rddev/runtime/tasks/<TASK>/gate-inputs.json — a path outside the Worker write envelope. Spawn also snapshots byte copies of task-package.json, guard/worker-guard.sh, worker-settings.json and run-worker.sh; collect runs VerifyGateInputs (byte comparison) against the authoritative record and judges the scope/HEAD invariants by it. The worker-settings.json and guard files are therefore integrity-verified the same way: any edit is a tamper rejection, demonstrated for the package and registry by the e2e tamper worker.\n\nExit-status race fixed: the reaper wrapper now writes the authoritative runtime copy FIRST (program-order guarantee), spawn deletes stale exit.status copies from both locations at re-dispatch, and reconcileWorker waits for the reaper process to die (waitPidGone, 5s) before reading — fixes the attempt-1 flake where a reworked worker's stale exit status 0 was read for attempt 2.\n\nRecord timestamps are now millisecond-precision RFC3339 with mtime/name tie-breaks in LatestRecord and LatestGateRunRecord — fixes the flaky 'G1 is not green: no ok collect record exists' refusal when two records landed in the same second.\n\nGit evidence files are action-qualified (git-commit-<run>.json, git-push-<run>.json, git-pr-open-<run>.json, git-pr-merge-<run>.json; record_type stays \"git\") so 'gate records' and the merge trail list each action distinctly.\n\ngo.mod: added go.yaml.in/yaml/v3 — used only by TestGatesSpecSyncsWithCIWorkflow to parse the real ci.yml for the drift test. The updated task package puts go.mod/go.sum in scope.\n\nmigration-integration could not run locally (guard blocks docker; see risks). All other five CI jobs ran green locally with their exact steps; the CI run on the PR will cover the sixth.\n\nspecs/SPEC_VERSION.json was regenerated (marker current: 38 inputs) because new specs/orchestrator files were added — spec_version.py --check passes.\n\nLocal reruns for the record: three e2e suites re-run after the final staticcheck/gofmt cleanup edits — four-gate 58 checks, rejection-retry 25 checks, supervisor-git 31 checks, all green. No host processes or services were left running (pip/uv/pnpm foreground only; e2e scratch dirs self-cleaned)."
+}
