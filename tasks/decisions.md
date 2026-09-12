@@ -1878,3 +1878,61 @@ TestG2AndG3DoNotCollideOnOneRunID
 而它之所以能潜伏，是因为**那条代码路径从来没有被执行过**——
 `task_overrides` 为空意味着 `RunGate(G3)` 从未被真实调用。
 **"接通一个从未运行过的分支"本身就是一个测试动作**：它会把该分支上所有潜伏的东西一次性打出来。
+
+## L1-20260912-53 — ★★ 合并冲突：**一个"干净"的合并不等于正确的合并**，以及冲突 PR 会静默地没有 CI
+
+### (a) 冲突的 PR **完全没有 CI**，而且不报错
+
+T0103 的 PR 开出来之后，七项检查一项都没跑。`gh run list` 空、`gh pr checks` 只有 CodeRabbit。
+原因不在 workflow：`gh pr view --json mergeable` 返回 **`CONFLICTING`**——
+**GitHub 无法构造 merge commit，于是直接不调度 `pull_request` workflow**。
+
+**为什么这很危险**：一个"没有失败"的 PR 看起来和"还没开始跑"一样。
+如果有人只看"有没有红灯"，会得到**"绿"**——因为**根本没有检查**。
+（我这次是靠"预期有七项、实际一项都没有"发现的，不是靠红灯。）
+
+**缓解**：L1-20260912-50 新增的 `rddev pr merge` 会读取 PR 的 required checks——
+**缺项即拒绝** ✓ fail-closed。所以"冲突 PR 无 CI"在工具路径上表现为**拒绝**，而不是通过。
+
+**根因**：T0102 与 T0103 **同时**改了同样六个文件，而它们**并行运行**（DAG 允许，冲突面当时判断为可控）。
+本次是那条判断的代价：两个任务各自都对了，合在一起就冲突。
+
+### (b) 四处解决（都已复核）
+
+1. `auth_wiring.go` — **采用 main 的整份文件**：它是双方意图的**超集**（既有 T0102 的 `Register(mux)`，
+   也保留了 `Routes()` 薄包装，且双方都有 `Guard`）。
+2. `envelope.go` — 仅注释冲突，保留 T0103 的（它说明了 `WriteError` 为何必须导出）。
+3. `main.go` — **采用 main 的"单 mux 单 guard"组合**（T0102 建立、T0104+ 将沿用），
+   并保留 T0103 的**裸路径注册**（避免 `/api/v1/organizations` 被尾斜杠重定向）。
+4. `infra/migrations/` — **两边都占了 `00017`**。T0102 已合并，故 T0103 改为 `00018_organization_governance.sql`
+   （未发布，重编号合法；README 的"不可修改"针对已发布迁移）。
+
+### (c) ★ 两处 **git 说"合并干净"、结果是错的**
+
+这是本条最重要的部分：
+
+- `auth_middleware.go` **无冲突合并**，却**丢掉了 main 的 `principalFrom` 定义、留下了它的调用点**
+  → 编译失败。根因是两个任务给同一概念起了不同名字（`principal`/`PrincipalID` vs
+  `Principal`/`PrincipalFrom`）。两者字段完全相同，故以 `type principal = Principal`（别名）
+  + 未导出包装解决，**双方调用点都不改**。
+- `README.md` **无冲突合并**，却**丢掉了 main 的 `00017_profiles.sql` 行**。
+
+> **git 的"无冲突"只说明文本能拼在一起，不说明拼出来的东西是对的。**
+> 两处都是**语义**冲突（同一概念的两种命名、同一列表的两处追加），文本层面毫无提示。
+> 因此本次没有"看一眼就提交"：**编译 + 跑完整集成测试套件**才是判据——
+> 而编译立刻就把 `principalFrom` 那处暴露了。
+
+### (d) 一个可能就是撞号原因的基础设施缺陷
+
+`infra/migrations/README.md` 的迁移索引**停在 `00013`**，而目录已经到 `00017`。
+而那份 README 正是**规定"下一个编号"的地方**（"Add `NNNNN_description.sql` (next number)"）。
+**照它取号会直接撞上已存在的文件** ✓ 索引已补全到 00018。
+（这也解释了 T0013/T0101 的条目为何缺失：索引自 T0013 起就没人更新。）
+
+### (e) 另一个操作教训
+
+我第一次跑 `rddev task reject T0103` 时**cwd 在 T0103 的 worktree 里**，
+于是 `--state-json` 的默认相对路径解析到了**worktree 内部**，改掉了那份基线状态文件——
+而 `tasks/**` 是任务的 **forbidden_scope**。
+我把它恢复了（那是 Supervisor 注入的、不是 Worker 的产物），但它**本会让 collect 以越界拒绝整个交付**。
+**教训：`rddev` 的状态文件路径是相对 cwd 的；对任务执行 Supervisor 命令必须在仓库根目录。**

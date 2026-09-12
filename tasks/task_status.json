@@ -319,9 +319,10 @@
     },
     "T0103": {
       "status": "running",
-      "started_at": "2026-09-12T19:49:12Z",
-      "worker_run_id": "run-3b8aa199ebbdfefe",
-      "rejection_reason": "独立 Review Worker 的 verdict 是 **request_changes**（1 blocking + 1 major + 3 minor + 1 nit）。\n完整 verdict 见 .rddev/workers/T0103-review/RESULT.json。Supervisor 已复核，blocking 成立。\n\n【B1 · BLOCKING — 必须修：成员关系更新会把 affiliation_end 写成 NULL】\ninternal/persistence/queries/organizations.sql:66 的 `UpdateOrganizationMembership` **总是**写\n`affiliation_end = @affiliation_end`，而调用方\n`internal/persistence/org_store.go:242-250 UpdateMembershipRoleAndDates` **没有传 AffiliationEnd**，\n于是它被当作 NULL 写入。`internal/application/orgs/service.go:164-193` 对**任何**成员都会走到这条路径，\n所以一次\"改角色/改日期\"的操作会**清掉已有的隶属结束日期**——这是**历史数据的静默丢失**，\n而这个项目的不变量是 \"Nothing disappears; state only evolves\"（CLAUDE.md §9.8）、\n\"历史对象 Abort，不物理删除\"。\n修法：要么让调用方显式传递（并在语义上区分\"未提供\"与\"清空\"），要么把\n`affiliation_end` 从\"总是写\"改成\"仅在提供时更新\"。**请选择一种并说明它如何保证历史不被抹掉**，\n并补一个能**在修复前失败**的测试：先设置一个结束日期，再做一次不涉及该日期的更新，断言结束日期不变。\n\n【M1 · MAJOR — PATCH 的部分更新语义是坏的】\ncmd/api/orgshttp/orgs_handlers.go:153：`updateOrgRequest.Name/Description` 是普通 string，\n于是 PATCH 只带 `{\"name\":\"x\"}` 会把 description 清成 NULL，\n只带 `{\"description\":\"...\"}` 会把 name 清成空——因为 service 层把两列都写。\n修法：用指针/`*string`（或显式 presence 标记）区分\"未提供\"与\"显式置空\"。\n同样补一个能**在修复前失败**的测试。\n\n【minor（一并修）】\n- `EndAffiliation` 对**已经结束**的成员会再次盖当天的日期，覆盖历史结束日期\n  （SQL 注释自称是 no-op 语义，实现却不是）。已结束时应当 no-op 或拒绝。\n- `requireGovernor` 把**任何** store 错误都映射成 403；`Get` 把 store 错误映射成 404。\n  按既有契约，存储不可用应是 503（ErrStore）。fail-closed 是安全的，但把可用性问题伪装成权限问题会误导运维。\n- `AddMembership` 在组织行锁**之外**执行、且事务内不检查 `deactivated_at`：\n  邀请与并发停用竞争时，可能给已停用的组织插入成员。考虑 FOR UPDATE + 事务内检查。\n\n【nit】\n- `internal/domain/organization.go:53` 的 `OrgRole.rank()` 是死代码；\n  `ports.go` 里 \"governance first\" 的契约注释与 SQL 的实际排序不符。请让注释与实现一致。\n\n【约束不变】\n- decision level 上限 L1；不要放宽任何测试来让它们变绿；新测试必须能在修复前失败；\n- 不要趁这次重构别的代码；\n- RESULT.json 必须自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目要带 `label`）。\n",
+      "started_at": "2026-09-12T20:32:29Z",
+      "worker_run_id": "run-b55afcce5294691b",
+      "accepted_by_supervisor_at": "2026-09-12T20:24:29Z",
+      "rejection_reason": "【这不是缺陷：T0103 与 T0102 合并时的冲突已由 Supervisor 解决，现在需要你在合并后的树上重新验证】\n\n**发生了什么**：T0102（Research Profile）先合并进 main，而它与 T0103 改了同样的六个文件，\n于是 T0103 的 PR 处于 CONFLICTING，**GitHub 因此完全没有为它启动 CI**\n（它无法构造 merge commit）。Supervisor 已在你的 worktree 上完成 `git merge main` 并解决冲突。\n\n**Supervisor 做的四处决定（请你复核，有异议就报上来，不要默默接受）**：\n\n1. `cmd/api/authhttp/auth_wiring.go` —— **整体采用 main 的版本**。\n   main 的版本是双方意图的**超集**：既有 `Register(mux)`（T0102 建立、T0104+ 会沿用），\n   也保留了 `Routes()` 的薄包装，并且同样有 `Guard`。\n2. `cmd/api/authhttp/envelope.go` —— 只是注释冲突；保留了你的版本（它说明了 `WriteError`\n   为何导出：让产品包渲染出**完全相同**的错误信封）。\n3. `cmd/api/main.go` —— **采用 main 的\"单 mux 单 guard\"组合方式**（auth/profile/orgs 都注册到同一个\n   `v1` 上，整体由 `authAPI.Guard(v1)` 包裹），同时保留你的**裸路径注册**\n   （`/api/v1/organizations` 与 `/api/v1/organizations/`），避免尾斜杠重定向。\n4. `infra/migrations/` —— **两个任务都占了 00017**。T0102 的已合并，所以你的迁移改名为\n   `00018_organization_governance.sql`（它尚未发布，重编号合法；README 的\"不可修改\"约束针对已发布的迁移）。\n   README 的迁移索引此前**只写到 00013**（而目录已经到 00017）——**照着\"下一个编号\"去取会撞号**，\n   这很可能就是本次撞号的原因。索引现已补全到 00018。\n\n**两处\"git 说合并成功、但其实是错的\"**（所以本次不是看一眼就提交，而是**编译 + 跑集成测试**）：\n\n- `auth_middleware.go` **无冲突合并，却丢掉了 main 的 `principalFrom` 定义、留下了它的调用点**。\n  根因是两个任务给同一个概念起了不同名字：main 用 `principal`/`PrincipalID`，\n  你用 `Principal`/`PrincipalFrom`。两者字段完全相同，因此现在\n  `type principal = Principal`（类型别名）+ 一个未导出的 `principalFrom` 包装，\n  **双方调用点都不必改**。统一命名是**后续项**，不该在一次合并解决里改名别的任务的代码。\n- `README.md` **无冲突合并，却丢掉了 main 的 `00017_profiles.sql` 行**。\n\n**已在合并后的树上验证通过**：`go build`、`go vet`、全部单测包、\n**完整集成测试套件（真实 PostgreSQL：fresh install / catalog / upgrade path）**、gofmt、schema drift、OpenAPI。\n\n【你要做的】\n1. **在合并后的树上重跑你的验证**（required tests：`org permission integration` 等 + `make test-integration`），\n   确认没有因为合并而失效；\n2. **复核上面的四处决定**，特别是第 3 点（组合方式）与第 4 点（编号）——\n   如果你认为某处改变了你的实现语义，明确说明并给出依据；**如果你认为要改，就改并说明**；\n3. RESULT.json 必须自洽（completed 要求 tests[] 全部 passed；覆盖任务要求的条目要带 `label`）；\n4. 不要借这次机会重构别的代码；不要删除或放宽任何测试。\n\n**说明**：你上一次的独立评审结论是 **approve（0 blocking、0 major）**，\n上一轮 review 发现的 `affiliation_end` 被写成 NULL 的阻塞缺陷**已确认修好**。\n本次重新验证是因为**代码树变了**（合并了 main），不是因为你的实现被否定。\n",
       "history": [
         {
           "from": "todo",
@@ -369,6 +370,33 @@
           "to": "running",
           "at": "2026-09-12T19:49:12Z",
           "run_id": "run-3b8aa199ebbdfefe",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-12T20:12:04Z",
+          "run_id": "run-3c1729a2643c6a14",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-12T20:24:29Z",
+          "run_id": "run-3617c57ac2e442f1"
+        },
+        {
+          "from": "accepted",
+          "to": "rejected",
+          "at": "2026-09-12T20:32:29Z",
+          "run_id": "run-88daf8d1ff773c2f",
+          "reason": "【这不是缺陷：T0103 与 T0102 合并时的冲突已由 Supervisor 解决，现在需要你在合并后的树上重新验证】\n\n**发生了什么**：T0102（Research Profile）先合并进 main，而它与 T0103 改了同样的六个文件，\n于是 T0103 的 PR 处于 CONFLICTING，**GitHub 因此完全没有为它启动 CI**\n（它无法构造 merge commit）。Supervisor 已在你的 worktree 上完成 `git merge main` 并解决冲突。\n\n**Supervisor 做的四处决定（请你复核，有异议就报上来，不要默默接受）**：\n\n1. `cmd/api/authhttp/auth_wiring.go` —— **整体采用 main 的版本**。\n   main 的版本是双方意图的**超集**：既有 `Register(mux)`（T0102 建立、T0104+ 会沿用），\n   也保留了 `Routes()` 的薄包装，并且同样有 `Guard`。\n2. `cmd/api/authhttp/envelope.go` —— 只是注释冲突；保留了你的版本（它说明了 `WriteError`\n   为何导出：让产品包渲染出**完全相同**的错误信封）。\n3. `cmd/api/main.go` —— **采用 main 的\"单 mux 单 guard\"组合方式**（auth/profile/orgs 都注册到同一个\n   `v1` 上，整体由 `authAPI.Guard(v1)` 包裹），同时保留你的**裸路径注册**\n   （`/api/v1/organizations` 与 `/api/v1/organizations/`），避免尾斜杠重定向。\n4. `infra/migrations/` —— **两个任务都占了 00017**。T0102 的已合并，所以你的迁移改名为\n   `00018_organization_governance.sql`（它尚未发布，重编号合法；README 的\"不可修改\"约束针对已发布的迁移）。\n   README 的迁移索引此前**只写到 00013**（而目录已经到 00017）——**照着\"下一个编号\"去取会撞号**，\n   这很可能就是本次撞号的原因。索引现已补全到 00018。\n\n**两处\"git 说合并成功、但其实是错的\"**（所以本次不是看一眼就提交，而是**编译 + 跑集成测试**）：\n\n- `auth_middleware.go` **无冲突合并，却丢掉了 main 的 `principalFrom` 定义、留下了它的调用点**。\n  根因是两个任务给同一个概念起了不同名字：main 用 `principal`/`PrincipalID`，\n  你用 `Principal`/`PrincipalFrom`。两者字段完全相同，因此现在\n  `type principal = Principal`（类型别名）+ 一个未导出的 `principalFrom` 包装，\n  **双方调用点都不必改**。统一命名是**后续项**，不该在一次合并解决里改名别的任务的代码。\n- `README.md` **无冲突合并，却丢掉了 main 的 `00017_profiles.sql` 行**。\n\n**已在合并后的树上验证通过**：`go build`、`go vet`、全部单测包、\n**完整集成测试套件（真实 PostgreSQL：fresh install / catalog / upgrade path）**、gofmt、schema drift、OpenAPI。\n\n【你要做的】\n1. **在合并后的树上重跑你的验证**（required tests：`org permission integration` 等 + `make test-integration`），\n   确认没有因为合并而失效；\n2. **复核上面的四处决定**，特别是第 3 点（组合方式）与第 4 点（编号）——\n   如果你认为某处改变了你的实现语义，明确说明并给出依据；**如果你认为要改，就改并说明**；\n3. RESULT.json 必须自洽（completed 要求 tests[] 全部 passed；覆盖任务要求的条目要带 `label`）；\n4. 不要借这次机会重构别的代码；不要删除或放宽任何测试。\n\n**说明**：你上一次的独立评审结论是 **approve（0 blocking、0 major）**，\n上一轮 review 发现的 `affiliation_end` 被写成 NULL 的阻塞缺陷**已确认修好**。\n本次重新验证是因为**代码树变了**（合并了 main），不是因为你的实现被否定。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-12T20:32:29Z",
+          "run_id": "run-b55afcce5294691b",
           "reason": "worker spawn"
         }
       ]
