@@ -3,6 +3,9 @@
 The adapter validates its own environment (config.load_config_from_cwd):
 POST_ENV selects the layer and a missing or ambiguous layer refuses to
 start. --host/--port override the environment when given.
+
+T0007: request logs are structured JSON lines on stderr, each carrying the
+request's correlation id (see observability.configure_request_logging).
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from post_scientific_adapter.config import (
     ConfigError,
     load_config_from_cwd,
 )
+from post_scientific_adapter.observability import configure_request_logging
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -54,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
 
     host = args.host if args.host is not None else cfg.host
     port = args.port if args.port is not None else cfg.port
+
+    configure_request_logging()
 
     server = make_server(host, port)
     print(
