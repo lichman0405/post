@@ -23,8 +23,12 @@ var deniedDevCredentials = []string{
 	"postgres_dev_pw", "gitea_dev_pw", "minio_dev_pw", "postadmin_dev_pw",
 }
 
-// secretKeyRe matches assignment keys that name a secret.
-var secretKeyRe = regexp.MustCompile(`(?i)(password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)`)
+// secretKeyRe matches assignment keys that name a secret. It deliberately
+// over-matches: a missed key name is a missed secret, whereas a false
+// positive only means someone documents why the value is safe.
+var secretKeyRe = regexp.MustCompile(
+	`(?i)(password|passwd|pwd|secret|token|credential|auth|api[_-]?key|` +
+		`access[_-]?key|private[_-]?key|_key$|^key|dsn|webhook)`)
 
 // placeholderValues are the only "values" an example file may pair with a
 // secret-shaped key. Anything else on the right-hand side is a finding.
@@ -35,8 +39,11 @@ var placeholderValues = []string{
 	"xxx", "***", "****", "<change-me>", "<secret>", "<token>", "<password>",
 }
 
-// urlCredRe matches userinfo with a concrete password embedded in a URL.
-var urlCredRe = regexp.MustCompile(`://[^/\s:@]+:[^/\s@]+@`)
+// urlCredRe matches ANY userinfo embedded in a URL — `user:pass@` and also
+// the token-only `scheme://token@host` form. RedactURL already treats both as
+// credential-bearing, so the scanner must too; matching only `user:pass@`
+// meant the scanner and the redactor disagreed about what a credential is.
+var urlCredRe = regexp.MustCompile(`://[^/\s@]+@`)
 
 // Finding is one secret-shaped value located in a scanned file.
 type Finding struct {
@@ -99,7 +106,8 @@ func ScanExampleContent(content, path string) []Finding {
 				break
 			}
 		}
-		if !allowed && len(value) >= 4 {
+		// No length floor: a short secret is still a secret.
+		if !allowed {
 			findings = append(findings, Finding{
 				File: path, Line: lineNo,
 				What: fmt.Sprintf("secret-shaped value for %s (not a documented placeholder)", key),
@@ -107,6 +115,20 @@ func ScanExampleContent(content, path string) []Finding {
 		}
 	}
 	return findings
+}
+
+// isExampleFileName reports whether a file is a committed example file that
+// must never contain a real secret. The previous exact match on
+// ".env.example" missed the equally committable .env.sample / .env.template
+// spellings.
+func isExampleFileName(name string) bool {
+	lower := strings.ToLower(name)
+	if lower == ".env.example" || lower == ".env.sample" || lower == ".env.template" {
+		return true
+	}
+	return strings.HasSuffix(lower, ".env.example") ||
+		strings.HasSuffix(lower, ".env.sample") ||
+		strings.HasSuffix(lower, ".env.template")
 }
 
 // ScanRepoExampleFiles sweeps the repository for committed example files
@@ -124,7 +146,7 @@ func ScanRepoExampleFiles(root string) ([]Finding, error) {
 			}
 			return nil
 		}
-		if filepath.Base(path) != ".env.example" {
+		if !isExampleFileName(filepath.Base(path)) {
 			return nil
 		}
 		data, err := os.ReadFile(path)

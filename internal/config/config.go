@@ -153,11 +153,11 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 		return json.Marshal(nil)
 	}
 	return json.Marshal(struct {
-		Layer       string            `json:"layer"`
-		Server      ServerConfig      `json:"server"`
-		Database    redactedDatabase  `json:"database"`
-		Redis       RedisConfig       `json:"redis"`
-		Blob        redactedBlob      `json:"blob"`
+		Layer       string              `json:"layer"`
+		Server      ServerConfig        `json:"server"`
+		Database    redactedDatabase    `json:"database"`
+		Redis       RedisConfig         `json:"redis"`
+		Blob        redactedBlob        `json:"blob"`
 		GitProvider redactedGitProvider `json:"gitprovider"`
 	}{
 		Layer:  c.Layer,
@@ -421,10 +421,17 @@ func parseBool(c *Config, v string, s *fieldSpec, assign func(*Config, bool)) *P
 	return nil
 }
 
+// badValue builds a validation error for an unacceptable value.
+//
+// The echoed value goes through RedactForOutput by default, so a credential
+// cannot leak through a field that is not itself secret-shaped. Relying on
+// each call site to redact was the defect this replaces: only the two URL
+// fields did, so a DSN or token pasted into POST_DB_PORT was echoed in full.
 func badValue(s *fieldSpec, value, want string) *Problem {
 	return &Problem{
 		Key: s.key,
-		Msg: fmt.Sprintf("%s has an invalid value %s: %s", s.key, strconv.Quote(value), want),
+		Msg: fmt.Sprintf("%s has an invalid value %s: %s",
+			s.key, strconv.Quote(RedactForOutput(value)), want),
 		Fix: s.fix,
 	}
 }
