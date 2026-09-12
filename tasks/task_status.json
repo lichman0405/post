@@ -423,13 +423,24 @@
       ]
     },
     "T0104": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-12T20:54:36Z",
+      "worker_run_id": "run-a147f3be299fdb8b",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-12T20:54:35Z",
+          "run_id": "run-60a1b0566453bbb2"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-12T20:54:36Z",
+          "run_id": "run-a147f3be299fdb8b",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0105": {
       "status": "todo",
