@@ -228,3 +228,42 @@ func TestRequiredTestCoverageStillRejectsMissingAndUnrun(t *testing.T) {
 		}
 	}
 }
+
+// The coverage rule needs a way for an honest Worker to state WHICH required
+// test an entry satisfies. Without one it matched on a substring of a free-text
+// command — a convention nobody wrote down, which T0101 failed twice while
+// running both required suites both times.
+func TestRequiredTestCoveredByExplicitLabel(t *testing.T) {
+	path := writeResult(t, `{"task_id":"T0101","status":"completed","summary":"x","files_changed":[],"tests":[
+		{"command":"go test ./internal/application/authn/ ./cmd/api/... -count=1","label":"auth unit","status":"passed","evidence":"ok"},
+		{"command":"go test ./tests/e2e -count=1 -v","label":"auth e2e","status":"passed","evidence":"ok"}
+	],"acceptance":[{"criterion":"c1","status":"passed","evidence":"ok"}],"risks":[],"follow_up_issues":[],"notes_for_supervisor":""}`)
+	checks, consistent, err := CheckResultConsistency(path, []string{"c1"}, []string{"auth unit", "auth e2e"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !consistent {
+		st, detail := checkStatus(t, checks, "result-tests-coverage")
+		t.Fatalf("entries that declare their required test were judged uncovered: %s %s", st, detail)
+	}
+}
+
+// The neighbour: a label only counts when it names the requirement. An entry
+// labelled something else, with the label absent from its command, still does
+// not cover it — otherwise the field would be a way to satisfy the check by
+// writing any string at all.
+func TestRequiredTestCoverageNotSatisfiedByAnUnrelatedLabel(t *testing.T) {
+	path := writeResult(t, `{"task_id":"T0101","status":"completed","summary":"x","files_changed":[],"tests":[
+		{"command":"go test ./internal/application/authn/... -count=1","label":"some other suite","status":"passed","evidence":"ok"}
+	],"acceptance":[{"criterion":"c1","status":"passed","evidence":"ok"}],"risks":[],"follow_up_issues":[],"notes_for_supervisor":""}`)
+	checks, consistent, err := CheckResultConsistency(path, []string{"c1"}, []string{"auth unit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if consistent {
+		t.Fatal("an unrelated label was accepted as covering a required test")
+	}
+	if st, _ := checkStatus(t, checks, "result-tests-coverage"); st != "failed" {
+		t.Errorf("result-tests-coverage = %s, want failed", st)
+	}
+}

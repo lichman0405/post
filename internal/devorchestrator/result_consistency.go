@@ -24,6 +24,7 @@ type WorkerResultDoc struct {
 	Summary string `json:"summary"`
 	Tests   []struct {
 		Command  string `json:"command"`
+		Label    string `json:"label"`
 		Status   string `json:"status"`
 		Evidence string `json:"evidence"`
 	} `json:"tests"`
@@ -122,20 +123,20 @@ func CheckResultConsistency(resultPath string, packageCriteria, requiredTests []
 	// the shipped not_run defect: dropping a required test from tests[]
 	// entirely must not smuggle a completion through.
 	//
-	// Matching is by label mention, not string equality. The DAG names its
-	// required tests as LABELS ("auth unit", "auth e2e"), while an entry's
-	// command field holds the command that was run. Demanding equality between
-	// the two is not a stricter check, it is an unsatisfiable one: T0101 ran
-	// both required suites and labelled them
-	// ("go test … -count=1 (T0101-TEST-01 auth unit, blocking)"), and was told
-	// it had covered neither. The entry must still be `passed` — only the way
-	// the label is located changed.
+	// The entry declares which requirement it covers (`label`), or names it in
+	// the command. The explicit field is the point: the DAG names required
+	// tests as labels ("auth unit") while `command` holds the command that was
+	// run, so before `label` existed the two could only be matched by
+	// coincidence. T0101 was rejected twice on this check while running both
+	// required suites both times — once with the label spelled inside the
+	// command and once without. The entry must still be `passed`; nothing about
+	// what counts as evidence changed.
 	var missing []string
 	if len(requiredTests) > 0 {
 		for _, rt := range requiredTests {
 			var statuses []string
 			for _, t := range doc.Tests {
-				if commandNamesTest(t.Command, rt) {
+				if testCovers(t.Label, t.Command, rt) {
 					statuses = append(statuses, t.Status)
 				}
 			}
@@ -178,6 +179,27 @@ func CheckResultConsistency(resultPath string, packageCriteria, requiredTests []
 		}
 	}
 	return checks, consistent, nil
+}
+
+// testCovers reports whether a RESULT tests[] entry covers the required test
+// label, either because it declares the label explicitly or because its
+// command names the label.
+//
+// The explicit field is the point. The DAG names required tests as labels
+// ("auth unit") while the contract's command holds what was run, so a Worker
+// that runs exactly the right suite has no way to say which requirement it
+// satisfied — T0101 was rejected twice for that reason, once with the label
+// spelled in the command and once without, while having run both suites both
+// times. Matching on a substring of a free-text field is a convention nobody
+// wrote down; `label` is the same fact stated rather than inferred.
+func testCovers(label, command, required string) bool {
+	if required == "" {
+		return false
+	}
+	if label == required {
+		return true
+	}
+	return commandNamesTest(command, required)
 }
 
 // commandNamesTest reports whether a RESULT tests[].command names the required

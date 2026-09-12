@@ -4,22 +4,70 @@
   "title": "Claude Code Worker Result",
   "type": "object",
   "additionalProperties": false,
-  "required": ["task_id", "status", "summary", "files_changed", "tests", "acceptance", "risks", "follow_up_issues", "notes_for_supervisor"],
+  "required": [
+    "task_id",
+    "status",
+    "summary",
+    "files_changed",
+    "tests",
+    "acceptance",
+    "risks",
+    "follow_up_issues",
+    "notes_for_supervisor"
+  ],
   "properties": {
-    "task_id": {"type": "string", "pattern": "^T[0-9]{4}$"},
-    "status": {"enum": ["completed", "failed", "blocked"]},
-    "summary": {"type": "string", "minLength": 1},
-    "files_changed": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "task_id": {
+      "type": "string",
+      "pattern": "^T[0-9]{4}$"
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "failed",
+        "blocked"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "files_changed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
     "tests": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["command", "status"],
+        "required": [
+          "command",
+          "status"
+        ],
         "properties": {
-          "command": {"type": "string"},
-          "status": {"enum": ["passed", "failed", "not_run"]},
-          "evidence": {"type": ["string", "null"]}
+          "command": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "not_run"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "description": "The required test this entry satisfies, verbatim as the task package names it (e.g. \"auth unit\"). Required on every entry that covers a required test: the DAG names required tests as labels while `command` holds what was run, so without this field the two can only be matched by coincidence. Optional, but an entry carrying no label and no mention of the label in its command cannot cover one."
+          },
+          "evidence": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
         }
       }
     },
@@ -28,16 +76,42 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["criterion", "status", "evidence"],
+        "required": [
+          "criterion",
+          "status",
+          "evidence"
+        ],
         "properties": {
-          "criterion": {"type": "string"},
-          "status": {"enum": ["passed", "failed", "not_applicable"]},
-          "evidence": {"type": "string"}
+          "criterion": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "not_applicable"
+            ]
+          },
+          "evidence": {
+            "type": "string"
+          }
         }
       }
     },
-    "risks": {"type": "array", "items": {"type": "string"}},
-    "follow_up_issues": {"type": "array", "items": {"type": "string"}},
-    "notes_for_supervisor": {"type": "string"}
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "follow_up_issues": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "notes_for_supervisor": {
+      "type": "string"
+    }
   }
 }
