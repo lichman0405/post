@@ -29,6 +29,7 @@ check: ## one-command basic check: Go + Web + Python (+ schema drift)
 	pnpm --filter @post/ui typecheck
 	pnpm --filter @post/web typecheck
 	pnpm --filter @post/web lint
+	node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test "apps/web/lib/config.test.mjs"
 	cd services/scientific-adapter && uv run pytest -q
 
 build: ## production builds and smoke across the three languages
@@ -36,8 +37,9 @@ build: ## production builds and smoke across the three languages
 	pnpm --filter @post/web build
 	cd services/scientific-adapter && uv run python -c "import post_scientific_adapter; print('scientific-adapter', post_scientific_adapter.__version__)"
 
-test: ## full test suites (Go unit + Python adapter)
+test: ## full test suites (Go unit + web config + Python adapter)
 	go test ./...
+	node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test "apps/web/lib/config.test.mjs"
 	cd services/scientific-adapter && uv run pytest
 
 sync-schemas: ## copy canonical JSON Schemas from specs/schemas/ to packages/schemas/
