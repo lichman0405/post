@@ -94,17 +94,25 @@ func (s *CredentialStore) CreateOIDC(ctx context.Context, email, handle, display
 		 VALUES ($1, $2, $3)`, handle, email, displayName)
 }
 
-// createUser runs one INSERT and translates constraint violations:
+// createUser runs one statement and translates constraint violations:
 // email uniqueness -> ErrEmailTaken, handle uniqueness -> retry with a
-// suffix, missing password_hash column -> ErrAuthMigrationMissing. The
-// args slice is always (handle, email, display_name[, password_hash])
-// matching the SQL column order, and handle is always args[0] for the
-// collision retry.
+// suffix, missing password_hash column -> ErrAuthMigrationMissing, missing
+// profiles table -> ErrProfilesMigrationMissing. The args slice is always
+// (handle, email, display_name[, password_hash]) matching the SQL column
+// order, and handle is always args[0] for the collision retry.
+//
+// T0102: the statement is a data-modifying CTE that also inserts the
+// profiles row — user and profile land atomically (or neither does), so
+// the 1:1 shape of migration 00017 holds for every account the stores
+// create, not only for the migration's backfill.
 func (s *CredentialStore) createUser(ctx context.Context, handle, sql string, args ...any) (domain.User, error) {
+	insert := `WITH u AS (` + sql + ` RETURNING id, handle, email, display_name, created_at, disabled_at),
+	p AS (INSERT INTO profiles (user_id) SELECT id FROM u)
+SELECT id, handle, email, display_name, created_at, disabled_at FROM u`
 	// Insert with the given handle; on handle collision derive a new one
 	// and retry once. Collisions are rare (derived handles), so a single
 	// retry is enough in practice.
-	row := s.pool.QueryRow(ctx, sql+" RETURNING id, handle, email, display_name, created_at, disabled_at", args...)
+	row := s.pool.QueryRow(ctx, insert, args...)
 	var user domain.User
 	if err := row.Scan(&user.ID, &user.Handle, &user.Email, &user.DisplayName, &user.CreatedAt, &user.DisabledAt); err != nil {
 		var pgErr *pgconn.PgError
@@ -114,7 +122,7 @@ func (s *CredentialStore) createUser(ctx context.Context, handle, sql string, ar
 				return domain.User{}, authn.ErrEmailTaken
 			case pgErr.Code == "23505" && strings.Contains(pgErr.ConstraintName, "handle"):
 				retry := handle + "-" + shortSuffix()
-				row = s.pool.QueryRow(ctx, sql+" RETURNING id, handle, email, display_name, created_at, disabled_at",
+				row = s.pool.QueryRow(ctx, insert,
 					replaceArg(args, 0, retry)...)
 				err = row.Scan(&user.ID, &user.Handle, &user.Email, &user.DisplayName, &user.CreatedAt, &user.DisabledAt)
 				if err != nil {
@@ -125,6 +133,9 @@ func (s *CredentialStore) createUser(ctx context.Context, handle, sql string, ar
 		}
 		if isUndefinedColumn(err) {
 			return domain.User{}, ErrAuthMigrationMissing
+		}
+		if isUndefinedTable(err) {
+			return domain.User{}, ErrProfilesMigrationMissing
 		}
 		return domain.User{}, fmt.Errorf("persistence: create user: %w", err)
 	}

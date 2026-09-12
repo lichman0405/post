@@ -66,9 +66,11 @@ func (s *Service) Signup(ctx context.Context, email, password, handle, displayNa
 	}
 	if displayName == "" {
 		displayName = handle
-	}
-	if len(handle) > 64 || len(displayName) > 200 {
-		return SignupResult{}, fmt.Errorf("%w: handle or display name too long", ErrValidation)
+	} else if !domain.ValidDisplayName(displayName) {
+		// T0102: signup and profile update share the one display-name rule
+		// (non-empty visible text, max 200 bytes); the handle length is
+		// already bounded by ValidHandle / deriveHandle above.
+		return SignupResult{}, fmt.Errorf("%w: display name must be 1-200 characters and contain visible text", ErrValidation)
 	}
 	hash, err := HashPassword(password)
 	if err != nil {

@@ -43,6 +43,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/lichman0405/post/cmd/api/authhttp"
+	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/config"
 	"github.com/lichman0405/post/internal/health"
@@ -133,7 +134,18 @@ func run(args []string) int {
 		Cfg:        *authCfg,
 		Secure:     cfg.Layer == config.LayerProd,
 	})
-	mux.Handle("/api/v1/", authAPI.Routes())
+
+	// Product APIs (T0102+): one shared mux under one guard — the profile
+	// surface registers here and inherits the session/CSRF guard
+	// structurally (anonymous reads flow, writes are 401/403 before
+	// routing).
+	v1 := http.NewServeMux()
+	authAPI.Register(v1)
+	profileAPI := profilehttp.New(profilehttp.Deps{
+		Profiles: persistence.NewProfileStore(pool),
+	})
+	profileAPI.Register(v1)
+	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	srv := &http.Server{
 		Addr:              cfg.Server.Addr,

@@ -60,6 +60,18 @@ func principalFrom(ctx context.Context) (principal, bool) {
 	return p, ok
 }
 
+// PrincipalID returns the authenticated actor's user id, or "" when the
+// request carries no valid session. Product handlers (T0102+ profilehttp)
+// read the actor here — the guard resolved the session, handlers must not
+// resolve it again (one session lookup per request, and a product handler
+// can never be reached with a forged principal).
+func PrincipalID(ctx context.Context) string {
+	if p, ok := principalFrom(ctx); ok {
+		return p.User.ID
+	}
+	return ""
+}
+
 const (
 	cookieSession  = "post_session"
 	cookieOIDC     = "post_oidc_state"
@@ -112,7 +124,7 @@ func (g *guard) guard(next http.Handler) http.Handler {
 				log := observability.LoggerFromContext(ctx)
 				log.Error("auth guard: session resolution failed", "error", err)
 				if stateChangingMethods[r.Method] {
-					writeError(w, r, http.StatusUnauthorized, authn.CodeUnauthenticated,
+					WriteError(w, r, http.StatusUnauthorized, authn.CodeUnauthenticated,
 						"authentication required")
 					return
 				}
@@ -134,7 +146,7 @@ func (g *guard) guard(next http.Handler) http.Handler {
 					// routing: an unimplemented product endpoint answers
 					// 401, not 404, when the caller is anonymous.
 					logAuthFailure(r, authn.CodeUnauthenticated)
-					writeError(w, r, http.StatusUnauthorized, authn.CodeUnauthenticated,
+					WriteError(w, r, http.StatusUnauthorized, authn.CodeUnauthenticated,
 						"authentication required")
 					return
 				}
@@ -154,13 +166,13 @@ func (g *guard) checkCSRF(w http.ResponseWriter, r *http.Request, want string) b
 	got := r.Header.Get(headerCSRF)
 	if got == "" || len(got) > 128 {
 		logAuthFailure(r, authn.CodeCSRFFailed)
-		writeError(w, r, http.StatusForbidden, authn.CodeCSRFFailed,
+		WriteError(w, r, http.StatusForbidden, authn.CodeCSRFFailed,
 			"missing or invalid CSRF token")
 		return false
 	}
 	if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
 		logAuthFailure(r, authn.CodeCSRFFailed)
-		writeError(w, r, http.StatusForbidden, authn.CodeCSRFFailed,
+		WriteError(w, r, http.StatusForbidden, authn.CodeCSRFFailed,
 			"missing or invalid CSRF token")
 		return false
 	}
@@ -189,7 +201,7 @@ func (g *guard) checkOrigin(w http.ResponseWriter, r *http.Request) bool {
 			// Sandboxed/private-context browsers send the literal "null":
 			// treat like an untrusted origin, not like a curl client.
 			logAuthFailure(r, authn.CodeCSRFFailed)
-			writeError(w, r, http.StatusForbidden, authn.CodeCSRFFailed,
+			WriteError(w, r, http.StatusForbidden, authn.CodeCSRFFailed,
 				"cross-site request rejected")
 			return false
 		}
@@ -201,7 +213,7 @@ func (g *guard) checkOrigin(w http.ResponseWriter, r *http.Request) bool {
 	u, err := url.Parse(origin)
 	if err != nil || u.Host != r.Host {
 		logAuthFailure(r, authn.CodeCSRFFailed)
-		writeError(w, r, http.StatusForbidden, authn.CodeCSRFFailed,
+		WriteError(w, r, http.StatusForbidden, authn.CodeCSRFFailed,
 			"cross-site request rejected")
 		return false
 	}
@@ -241,7 +253,7 @@ func (g *guard) checkJSONBody(w http.ResponseWriter, r *http.Request) bool {
 	mediaType, _, err := mime.ParseMediaType(ct)
 	if err != nil || mediaType != "application/json" {
 		logAuthFailure(r, authn.CodeCSRFFailed)
-		writeError(w, r, http.StatusUnsupportedMediaType, authn.CodeValidationFailed,
+		WriteError(w, r, http.StatusUnsupportedMediaType, authn.CodeValidationFailed,
 			"requests with a body must use Content-Type: application/json")
 		return false
 	}
