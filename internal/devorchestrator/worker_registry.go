@@ -77,13 +77,22 @@ type WorkerRecord struct {
 	Branch        string   `json:"branch"`
 	BaselineSHA   string   `json:"baseline_sha"`
 	RefsBefore    []string `json:"refs_before"`
-	LogPath       string   `json:"log_path"`
-	ResultDir     string   `json:"result_dir"`
-	StartedAt     string   `json:"started_at"`
-	EndedAt       string   `json:"ended_at,omitempty"`
-	ExitStatus    *int     `json:"exit_status,omitempty"`
-	ExitSource    string   `json:"exit_source,omitempty"`
-	ReconciledAt  string   `json:"reconciled_at,omitempty"`
+	// SessionLeaderPID is the reaper wrapper's pid — the session id every
+	// process the Worker spawns inherits (the reaper is launched with
+	// setsid). Collect scans /proc for survivors of that session: a Worker
+	// that left a process running is rejected. ListenersBefore is the
+	// listening-TCP-socket baseline taken at spawn; listeners that appear
+	// during the run are surfaced at collect (a daemonized service escapes
+	// the session but keeps its listener).
+	SessionLeaderPID int      `json:"session_leader_pid,omitempty"`
+	ListenersBefore  []string `json:"listeners_before,omitempty"`
+	LogPath          string   `json:"log_path"`
+	ResultDir        string   `json:"result_dir"`
+	StartedAt        string   `json:"started_at"`
+	EndedAt          string   `json:"ended_at,omitempty"`
+	ExitStatus       *int     `json:"exit_status,omitempty"`
+	ExitSource       string   `json:"exit_source,omitempty"`
+	ReconciledAt     string   `json:"reconciled_at,omitempty"`
 }
 
 // WorkerView is a registry entry plus its derived status, as printed by

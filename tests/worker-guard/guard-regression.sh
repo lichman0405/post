@@ -274,6 +274,63 @@ check "write without contract env fails closed"  block "contract environment" Ba
 check "read without contract env fails closed"   block "contract environment" Read file_path '/repo/specs/README.md' POST_REPO_ROOT= POST_WORKER_WORKTREE= POST_WORKER_RESULT_DIR=
 
 # ---------------------------------------------------------------------------
+# Background execution (T0011). A Worker that backgrounds long-running work and
+# then ends its turn leaves the session with that work still pending: the
+# session exits, the work is never done, and whatever RESULT is on disk
+# describes a state that never completed. That happened twice, once producing a
+# RESULT that falsely claimed success, so it is refused mechanically. These
+# cases take raw JSON because the rule keys off a BOOLEAN field
+# (`run_in_background`), which the string-only `check` helper cannot express.
+
+check_json() { # name expect-reason raw-json
+	name=$1
+	expect=$2
+	reason=$3
+	json=$4
+	out=$(printf '%s\n' "$json" | sh "$GUARD" 2>&1)
+	code=$?
+	case "$code:$expect" in
+		2:block|0:allow)
+			if [ "$expect" = "block" ] && [ -n "$reason" ]; then
+				case "$out" in
+					*"$reason"*) : ;;
+					*) record_fail "$name" "blocked but message missing '$reason': $out"; return ;;
+				esac
+			fi
+			pass=$((pass + 1)) ;;
+		*)
+			record_fail "$name" "expected $expect, got exit $code: $out" ;;
+	esac
+}
+
+check_json "background bash is refused"          block "background execution" \
+	'{"tool_name":"Bash","tool_input":{"command":"make test","run_in_background":true}}'
+check_json "background bash is refused even for read-only git" block "background execution" \
+	'{"tool_name":"Bash","tool_input":{"command":"git status","run_in_background":true}}'
+check_json "run_in_background false is allowed"  allow "" \
+	'{"tool_name":"Bash","tool_input":{"command":"make test","run_in_background":false}}'
+check_json "the same command in the foreground is allowed" allow "" \
+	'{"tool_name":"Bash","tool_input":{"command":"make test"}}'
+
+# Adversarial shapes a text scan gets wrong. A security review flagged the
+# original raw-text check as fail-open; the specific injection below (the key
+# inside the model-controlled command text) does NOT actually work, because a
+# quote inside a JSON string is escaped - but duplicate keys and a changed
+# serialisation would break a text scan, so the rule parses the JSON instead.
+check_json "duplicate run_in_background (true last) is refused" block "background execution" \
+	'{"tool_name":"Bash","tool_input":{"run_in_background":false,"run_in_background":true,"command":"make test"}}'
+check_json "pretty-printed multi-line payload is refused" block "background execution" \
+	'{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "make test",
+    "run_in_background": true
+  }
+}'
+check_json "the key inside the command text does not fool the rule" block "background execution" \
+	'{"tool_name":"Bash","tool_input":{"command":"echo \"run_in_background\": false","run_in_background":true}}'
+
+# ---------------------------------------------------------------------------
 
 if [ "$fail" -gt 0 ]; then
 	printf 'guard-regression: %d/%d PASS, %d FAILED\n' "$pass" "$((pass + fail))" "$fail" >&2

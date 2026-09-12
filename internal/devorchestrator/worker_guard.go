@@ -180,19 +180,33 @@ func WriteGuardFiles(dir string, opts GuardOpts) (guardPath string, err error) {
 // claudeArgs assembles the claude command line from the spawn options. The
 // prompt is passed as the -p argument (task packages are a few KB, far below
 // ARG_MAX), and the stream-json log is what hang detection measures
-// (L1-20260912-7).
-func claudeArgs(opts *SpawnOpts, sessionID, settingsPath, systemPath, prompt string) ([]string, error) {
+// (L1-20260912-7). The RESULT contract is mechanically enforced from the
+// start (T0011): --json-schema forces the Worker's final message through
+// claude's StructuredOutput validation against worker-result.schema.json
+// (live-probed on 2.1.269: the model is made to call a StructuredOutput tool
+// whose payload the harness validates against the schema), instead of the
+// contract being prose the Worker may ignore.
+func claudeArgs(opts *SpawnOpts, sessionID, settingsPath, systemPath, prompt, resultSchema string) ([]string, error) {
 	args := []string{
 		"-p", prompt,
 		"--name", "rddev-worker-" + opts.TaskID,
 		"--session-id", sessionID,
 		"--permission-mode", "dontAsk",
 		"--permission-prompts", "none",
+		// T0011 Defect 1: without this, the Worker's claude loads
+		// ~/.claude/settings.json, whose env block can re-inject credentials
+		// BuildWorkerEnv just stripped (the live probe found
+		// GITHUB_PERSONAL_ACCESS_TOKEN PRESENT in a Worker env). Project
+		// settings only: the task's worker-settings.json (passed via
+		// --settings, verified live) still loads — user/local settings cannot
+		// inject env into a Worker.
+		"--setting-sources", "project",
 		// real claude (2.1.269) refuses -p + stream-json without --verbose:
 		// "Error: When using --print, --output-format=stream-json requires
 		// --verbose" (caught by the real-claude e2e run, exit 1)
 		"--output-format", "stream-json",
 		"--verbose",
+		"--json-schema", resultSchema,
 		"--append-system-prompt-file", systemPath,
 		"--settings", settingsPath,
 	}
@@ -219,6 +233,33 @@ func claudeArgs(opts *SpawnOpts, sessionID, settingsPath, systemPath, prompt str
 // wrapTimeout prefixes the full command (binary + args) with the timeout
 // wrapper. It is applied by Spawn around the whole command the reaper starts
 // — the wrapper must sit in front of the claude binary, not inside its args.
+// resultSchemaForCLI returns the repo's worker-result.schema.json as the
+// inline --json-schema argument. --json-schema takes inline JSON, not a
+// path, and claude 2.1.269 rejects the draft-2020-12 $schema URI ("no schema
+// with key or ref ..."), so the header metadata keys are stripped; every
+// validation keyword is passed through untouched. The transform is
+// deterministic (the schema is the repo's own), and a missing or unparseable
+// schema fails spawn instead of spawning an unenforced Worker.
+func resultSchemaForCLI(repoRoot string) (string, error) {
+	schemaPath := filepath.Join(repoRoot, "specs", "orchestrator", "worker-result.schema.json")
+	data, err := os.ReadFile(schemaPath)
+	if err != nil {
+		return "", fmt.Errorf("reading the RESULT schema for --json-schema: %w", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return "", fmt.Errorf("parsing %s: %w", schemaPath, err)
+	}
+	for _, k := range []string{"$schema", "$id", "title"} {
+		delete(doc, k)
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return "", fmt.Errorf("encoding the RESULT schema for --json-schema: %w", err)
+	}
+	return string(out), nil
+}
+
 func wrapTimeout(dur time.Duration, claudeBin string, args []string) []string {
 	return append([]string{"timeout", "--signal=TERM", "--kill-after=15", formatDuration(dur), claudeBin}, args...)
 }

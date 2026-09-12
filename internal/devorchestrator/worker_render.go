@@ -101,32 +101,57 @@ func ValidateTaskPackage(pkg *TaskPackage, schemaPath string) error {
 }
 
 // validateAgainst implements the subset of draft 2020-12 used by
-// task-package.schema.json: type (object/string/array/integer/number/
-// boolean/null), required, additionalProperties, properties, items,
-// minItems/minLength/minimum, enum, pattern. Unsupported keywords are an
-// error — validating less than the schema demands would be fail-open.
+// task-package.schema.json and worker-result.schema.json: type (object/
+// string/array/integer/number/boolean/null), required, additionalProperties,
+// properties, items, minItems/minLength/minimum, enum, pattern, uniqueItems.
+// Unsupported keywords are an error — validating less than the schema
+// demands would be fail-open. Every violation is reported (a rejected
+// RESULT lists all of its defects, not just the first one found).
 func validateAgainst(doc any, schema map[string]any, where string) error {
+	var errs []error
+	validateInto(doc, schema, where, &errs)
+	switch len(errs) {
+	case 0:
+		return nil
+	case 1:
+		return errs[0]
+	default:
+		msgs := make([]string, 0, len(errs))
+		for _, e := range errs {
+			msgs = append(msgs, e.Error())
+		}
+		return fmt.Errorf("%d violations: %s", len(errs), strings.Join(msgs, "; "))
+	}
+}
+
+// validateInto appends every violation found in doc to errs. Checks that
+// depend on a type the value does not have stop descending (further checks
+// against the wrong type would only add noise), but sibling checks continue.
+func validateInto(doc any, schema map[string]any, where string, errs *[]error) {
 	if t, ok := schema["type"]; ok {
 		if !typeMatches(doc, t) {
-			return fmt.Errorf("%s: value %v is not of type %v", where, doc, t)
+			*errs = append(*errs, fmt.Errorf("%s: value %v is not of type %v", where, doc, t))
+			return
 		}
 	}
 	if req, ok := schema["required"].([]any); ok {
 		obj, isObj := doc.(map[string]any)
 		if !isObj {
-			return fmt.Errorf("%s: required is set but value is not an object", where)
+			*errs = append(*errs, fmt.Errorf("%s: required is set but value is not an object", where))
+			return
 		}
 		for _, r := range req {
 			key := r.(string)
 			if _, present := obj[key]; !present {
-				return fmt.Errorf("%s: missing required field %q", where, key)
+				*errs = append(*errs, fmt.Errorf("%s: missing required field %q", where, key))
 			}
 		}
 	}
 	if props, ok := schema["properties"].(map[string]any); ok {
 		obj, isObj := doc.(map[string]any)
 		if !isObj {
-			return fmt.Errorf("%s: properties is set but value is not an object", where)
+			*errs = append(*errs, fmt.Errorf("%s: properties is set but value is not an object", where))
+			return
 		}
 		for key, sub := range props {
 			v, present := obj[key]
@@ -135,37 +160,35 @@ func validateAgainst(doc any, schema map[string]any, where string) error {
 			}
 			subSchema, isMap := sub.(map[string]any)
 			if !isMap {
-				return fmt.Errorf("%s.%s: schema entry is not an object", where, key)
+				*errs = append(*errs, fmt.Errorf("%s.%s: schema entry is not an object", where, key))
+				continue
 			}
-			if err := validateAgainst(v, subSchema, where+"."+key); err != nil {
-				return err
-			}
+			validateInto(v, subSchema, where+"."+key, errs)
 		}
 	}
 	if items, ok := schema["items"].(map[string]any); ok {
 		arr, isArr := doc.([]any)
 		if !isArr {
-			return fmt.Errorf("%s: items is set but value is not an array", where)
+			*errs = append(*errs, fmt.Errorf("%s: items is set but value is not an array", where))
+			return
 		}
 		for i, v := range arr {
-			if err := validateAgainst(v, items, where+"["+strconv.Itoa(i)+"]"); err != nil {
-				return err
-			}
+			validateInto(v, items, where+"["+strconv.Itoa(i)+"]", errs)
 		}
 	}
 	if n, ok := schema["minItems"].(float64); ok {
 		if arr, isArr := doc.([]any); !isArr || len(arr) < int(n) {
-			return fmt.Errorf("%s: expected at least %d items", where, int(n))
+			*errs = append(*errs, fmt.Errorf("%s: expected at least %d items", where, int(n)))
 		}
 	}
 	if n, ok := schema["minLength"].(float64); ok {
 		if s, isStr := doc.(string); !isStr || len(s) < int(n) {
-			return fmt.Errorf("%s: expected a string of at least %d characters", where, int(n))
+			*errs = append(*errs, fmt.Errorf("%s: expected a string of at least %d characters", where, int(n)))
 		}
 	}
 	if n, ok := schema["minimum"].(float64); ok {
 		if num, isNum := doc.(float64); !isNum || num < n {
-			return fmt.Errorf("%s: %v is below minimum %v", where, doc, n)
+			*errs = append(*errs, fmt.Errorf("%s: %v is below minimum %v", where, doc, n))
 		}
 	}
 	if enum, ok := schema["enum"].([]any); ok {
@@ -177,27 +200,50 @@ func validateAgainst(doc any, schema map[string]any, where string) error {
 			}
 		}
 		if !found {
-			return fmt.Errorf("%s: %v is not one of the allowed values %v", where, doc, enum)
+			*errs = append(*errs, fmt.Errorf("%s: %v is not one of the allowed values %v", where, doc, enum))
 		}
 	}
 	if pat, ok := schema["pattern"].(string); ok {
 		s, isStr := doc.(string)
 		if !isStr {
-			return fmt.Errorf("%s: pattern is set but value is not a string", where)
+			*errs = append(*errs, fmt.Errorf("%s: pattern is set but value is not a string", where))
+			return
 		}
 		re, err := regexp.Compile(pat)
 		if err != nil {
-			return fmt.Errorf("%s: schema pattern %q does not compile: %w", where, pat, err)
+			*errs = append(*errs, fmt.Errorf("%s: schema pattern %q does not compile: %w", where, pat, err))
+			return
 		}
 		if !re.MatchString(s) {
-			return fmt.Errorf("%s: %q does not match pattern %q", where, s, pat)
+			*errs = append(*errs, fmt.Errorf("%s: %q does not match pattern %q", where, s, pat))
+		}
+	}
+	if ui, ok := schema["uniqueItems"]; ok {
+		if ui == true {
+			if arr, isArr := doc.([]any); isArr {
+				seen := map[string]bool{}
+				for i, v := range arr {
+					// JSON values are not comparable in Go; the canonical
+					// encoding is a stable identity for dedup purposes.
+					key, err := json.Marshal(v)
+					if err != nil {
+						*errs = append(*errs, fmt.Errorf("%s[%d]: cannot encode item for uniqueness: %w", where, i, err))
+						continue
+					}
+					if seen[string(key)] {
+						*errs = append(*errs, fmt.Errorf("%s[%d]: duplicate of an earlier item (uniqueItems)", where, i))
+					}
+					seen[string(key)] = true
+				}
+			}
 		}
 	}
 	if ap, ok := schema["additionalProperties"]; ok {
 		if ap == false {
 			obj, isObj := doc.(map[string]any)
 			if !isObj {
-				return fmt.Errorf("%s: additionalProperties is set but value is not an object", where)
+				*errs = append(*errs, fmt.Errorf("%s: additionalProperties is set but value is not an object", where))
+				return
 			}
 			known := map[string]bool{}
 			if props, ok := schema["properties"].(map[string]any); ok {
@@ -207,7 +253,7 @@ func validateAgainst(doc any, schema map[string]any, where string) error {
 			}
 			for k := range obj {
 				if !known[k] {
-					return fmt.Errorf("%s: unknown field %q", where, k)
+					*errs = append(*errs, fmt.Errorf("%s: unknown field %q", where, k))
 				}
 			}
 		}
@@ -215,13 +261,42 @@ func validateAgainst(doc any, schema map[string]any, where string) error {
 	// Fail closed on constructs this validator does not implement.
 	for k := range schema {
 		switch k {
-		case "$schema", "title", "description", "type", "required",
+		case "$schema", "$id", "title", "description", "type", "required",
 			"additionalProperties", "properties", "items", "minItems",
-			"minLength", "minimum", "enum", "pattern":
+			"minLength", "minimum", "enum", "pattern", "uniqueItems":
 			// implemented above
 		default:
-			return fmt.Errorf("%s: schema keyword %q is not supported by the task-package validator — refusing to validate less than the schema demands", where, k)
+			*errs = append(*errs, fmt.Errorf("%s: schema keyword %q is not supported by the task-package validator — refusing to validate less than the schema demands", where, k))
+			return
 		}
+	}
+}
+
+// ValidateWorkerResultFile reads RESULT.json at resultPath and validates it
+// against the worker-result schema at schemaPath. The error lists every
+// violation with its JSON path (e.g. `tests[0]: unknown field "output"`), so
+// a rejected Worker sees exactly what to fix — the T0010 rejection lesson
+// (tests[].output instead of .evidence, acceptance[] as plain strings) is
+// caught here mechanically.
+func ValidateWorkerResultFile(schemaPath, resultPath string) error {
+	schemaData, err := os.ReadFile(schemaPath)
+	if err != nil {
+		return fmt.Errorf("reading result schema %s: %w", schemaPath, err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(schemaData, &schema); err != nil {
+		return fmt.Errorf("parsing result schema %s: %w", schemaPath, err)
+	}
+	resultData, err := os.ReadFile(resultPath)
+	if err != nil {
+		return fmt.Errorf("reading RESULT.json: %w", err)
+	}
+	var doc any
+	if err := json.Unmarshal(resultData, &doc); err != nil {
+		return fmt.Errorf("RESULT.json is not valid JSON: %w", err)
+	}
+	if err := validateAgainst(doc, schema, "RESULT.json"); err != nil {
+		return fmt.Errorf("RESULT.json does not validate against %s: %w", schemaPath, err)
 	}
 	return nil
 }
@@ -313,6 +388,7 @@ func RenderPrompt(pkg *TaskPackage, worktree, resultDir string, worktreesDir, wo
 		fmt.Fprintf(&b, "- Max turns: %d.\n", *pkg.MaxTurns)
 	}
 	b.WriteString("\nWrite your RESULT.json EARLY and keep it updated — do not leave it to the\nlast operation. `completed` means \"submitted for acceptance\", not accepted:\nthe Supervisor re-runs your tests and re-reads your diff.\n")
+	b.WriteString("\nThis claude session is started with --json-schema: your FINAL message must\nbe the RESULT.json document and is mechanically validated against\nspecs/orchestrator/worker-result.schema.json (the RESULT contract is\nenforced, not requested). The RESULT.json file you write is re-validated\nagainst the same schema at collection — write the same document to both.\n")
 	b.WriteString("\nVerify by trying to make things fail, not by running the happy path.\n")
 	return b.String()
 }
@@ -332,6 +408,7 @@ func RenderSystemPrompt(taskID, repoRoot, worktree, resultDir, worktreesDir stri
 	b.WriteString("- A PreToolUse guard hook confines your shell writes, file reads and\n  control-plane commands; a blocked tool call is the isolation working as\n  designed — adjust your approach, never try to bypass it.\n\n")
 	fmt.Fprintf(&b, "## Paths\n\n- Repo root: %s\n- Your worktree: %s\n- Your RESULT.json: %s\n- Other Workers' worktrees: %s (readable, never writable)\n", repoRoot, worktree, filepath.Join(resultDir, "RESULT.json"), worktreesDir)
 	b.WriteString("\n## RESULT.json\n\nWrite it EARLY and overwrite it as evidence improves. `completed` means\n\"submitted for acceptance\", not accepted. Report exact commands and real\nobserved output; anything not executed is `not_run` with a reason. If blocked,\nreturn `status: \"blocked\"` with the concrete blocker.\n")
+	b.WriteString("Your final message must be this document: the session runs with\n--json-schema, so the final output is schema-validated by claude itself, and\n`rddev worker collect` re-validates the file you wrote. A RESULT that does\nnot match specs/orchestrator/worker-result.schema.json (e.g. tests[].output\ninstead of evidence, acceptance[] as plain strings) is rejected at\ncollection.\n")
 	b.WriteString("\nThe worktree root contains CLAUDE.md — that is the Supervisor's\nconstitutional document, not yours. Your contract is your task package, then\nthis prompt.\n")
 	return b.String()
 }

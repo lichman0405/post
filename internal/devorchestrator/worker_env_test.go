@@ -102,3 +102,42 @@ func TestStrippedTable(t *testing.T) {
 		t.Error("stripped() over-stripped a benign variable")
 	}
 }
+
+// TestAssertCleanWorkerEnv: the post-spawn assertion reports every stripped
+// credential shape by name and never its value, and leaves the legitimate
+// neighbours (auth gateway, contract vars, ordinary env) alone — two-sided
+// proof the assertion neither misses a leak nor over-blocks a clean Worker.
+func TestAssertCleanWorkerEnv(t *testing.T) {
+	// raw /proc/<pid>/environ layout: NUL-separated KEY=VALUE pairs
+	environ := strings.Join([]string{
+		"PATH=/usr/bin",
+		"ANTHROPIC_BASE_URL=http://gateway",
+		"GH_TOKEN=ghp_0123456789abcdef0123456789abcdef",
+		"HOME=/home/x",
+		"POST_WORKER_TASK_ID=T0001",
+	}, "\x00") + "\x00"
+	if leak := assertCleanWorkerEnv([]byte(environ)); leak != "GH_TOKEN" {
+		t.Errorf("leak = %q, want GH_TOKEN", leak)
+	}
+	// a prefix-stripped credential is reported too
+	environAWS := strings.Join([]string{"AWS_ACCESS_KEY_ID=AKIAEXAMPLE", "PATH=/usr/bin"}, "\x00")
+	if leak := assertCleanWorkerEnv([]byte(environAWS)); leak != "AWS_ACCESS_KEY_ID" {
+		t.Errorf("leak = %q, want AWS_ACCESS_KEY_ID", leak)
+	}
+	// the legitimate neighbours pass
+	clean := strings.Join([]string{
+		"PATH=/usr/bin",
+		"ANTHROPIC_BASE_URL=http://gateway",
+		"ANTHROPIC_AUTH_TOKEN=sk-ant-xyz",
+		"HOME=/home/x",
+		"GITHUB_USER=someone",
+		"POST_WORKER_RUN_ID=run-1",
+		"COMPOSE_PROJECT_NAME=post-t0001",
+	}, "\x00")
+	if leak := assertCleanWorkerEnv([]byte(clean)); leak != "" {
+		t.Errorf("clean environment reported as leaking %q", leak)
+	}
+	if leak := assertCleanWorkerEnv(nil); leak != "" {
+		t.Errorf("empty environment reported as leaking %q", leak)
+	}
+}

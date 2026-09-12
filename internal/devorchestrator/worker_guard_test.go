@@ -131,16 +131,17 @@ func TestWriteGuardFiles(t *testing.T) {
 }
 
 // TestClaudeArgs: the assembled command line carries the session, permission
-// mode, budget, and optional timeout wrapper.
+// mode, budget, optional timeout wrapper, and the inline RESULT schema
+// (T0011: the contract is enforced at spawn, not requested in prose).
 func TestClaudeArgs(t *testing.T) {
 	budget := 1.25
 	opts := &SpawnOpts{TaskID: "T0001", MaxBudgetUSD: &budget, Model: "deepseek-v4-pro"}
-	args, err := claudeArgs(opts, "sess-1", "/s/worker-settings.json", "/s/system.md", "do the task")
+	args, err := claudeArgs(opts, "sess-1", "/s/worker-settings.json", "/s/system.md", "do the task", `{"type":"object"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"-p do the task", "--session-id sess-1", "--permission-mode dontAsk", "--output-format stream-json", "--verbose", "--max-budget-usd 1.25", "--model deepseek-v4-pro", "--settings /s/worker-settings.json"} {
+	for _, want := range []string{"-p do the task", "--session-id sess-1", "--permission-mode dontAsk", "--setting-sources project", "--output-format stream-json", "--verbose", "--max-budget-usd 1.25", "--model deepseek-v4-pro", "--settings /s/worker-settings.json", `--json-schema {"type":"object"}`} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("claude args missing %q: %v", want, args)
 		}
@@ -150,7 +151,7 @@ func TestClaudeArgs(t *testing.T) {
 	// claude as its first argument (regression: `claude timeout ... 1s -p`
 	// silently ran without any timeout)
 	opts.Timeout = 90 * time.Second
-	args, err = claudeArgs(opts, "s", "/s", "/m", "p")
+	args, err = claudeArgs(opts, "s", "/s", "/m", "p", `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}

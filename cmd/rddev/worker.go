@@ -23,8 +23,12 @@ Commands:
   logs TASK    print the tail of the Worker's stream log
   stop TASK    terminate the Worker (SIGTERM, then SIGKILL after a grace
                period) and record the exit; never marks the task completed
-  collect TASK NOT IMPLEMENTED (exit 4): RESULT validation (HEAD baseline,
-               refs, allowed_scope diff, RESULT.json schema) belongs to T0011
+  collect TASK verify the finished run against real state and advance it:
+               HEAD == baseline, task branch unmoved, no new refs, diff inside
+               allowed_scope, RESULT.json validates worker-result.schema.json,
+               no secret material, no host residue; running -> verification /
+               rejected / worker_failed. Exit 0 = clean, 1 = rejected/failed.
+               The report is also written to the task dir (collect-report.json)
 
 Flags:
   --json                machine-readable output
@@ -113,7 +117,10 @@ func runWorker(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		}
 		return runWorkerStop(repoRoot, taskArg, stdout, stderr, jsonOut)
 	case "collect":
-		return notImplemented(stdout, stderr, jsonOut, "worker collect", "T0011 (RESULT validation)")
+		if taskArg == "" {
+			return usageError(stderr, "rddev worker collect: missing TASK", workerUsage)
+		}
+		return runWorkerCollect(vals, taskArg, repoRoot, stdout, stderr, jsonOut)
 	default:
 		return usageError(stderr, fmt.Sprintf("rddev worker: unknown subcommand %q", cmd), workerUsage)
 	}
