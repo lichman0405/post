@@ -45,13 +45,19 @@ func ParseEnvBytes(content, path string) (map[string]string, error) {
 		}
 		key, value, ok := strings.Cut(line, "=")
 		if !ok {
+			// Never echo the raw line. A line without '=' is often a
+			// credential-bearing URL pasted on its own, and echoing it put
+			// the password straight into the error message.
 			return nil, envFileError(path, lineNo,
-				fmt.Sprintf("not a KEY=VALUE line: %q", trimmed))
+				fmt.Sprintf("not a KEY=VALUE line (line begins %q); "+
+					"every non-comment line must be KEY=VALUE",
+					truncateRedacted(trimmed)))
 		}
 		key = strings.TrimSpace(key)
 		if !envKeyRe.MatchString(key) {
 			return nil, envFileError(path, lineNo,
-				fmt.Sprintf("invalid KEY %q (must match [A-Za-z_][A-Za-z0-9_]*)", key))
+				fmt.Sprintf("invalid KEY %q (must match [A-Za-z_][A-Za-z0-9_]*)",
+					truncateRedacted(key)))
 		}
 		value = strings.TrimSpace(value)
 		if len(value) >= 2 {
