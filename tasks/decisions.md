@@ -255,6 +255,43 @@ shellcheck 干净，真实 `--check-visibility` 路径现可验证 BRANCH-DEFAUL
 独立复核后当真——这两个都不是 Worker 的疏漏，而是"验收标准本身没覆盖"的缺口。后续 task 的
 acceptance criteria 应显式包含"输出中不得出现凭据"与"无法验证时必须 fail-closed"。
 
+## L1-20260912-11 — 自动安全 review 对 JSON Schema 的两条发现：判定为"已在别处受控，缺可追溯提示"
+
+**触发**：自动 commit security review 对 T0002 复制进 `packages/schemas/` 的 schema 报出
+`authorization-metadata-client-controlled`（`core-scientific-object.schema.json`）与
+`ssrf-validation-differential`（`external_reference.schema.json`）。
+
+**先查了"是不是规格缺口"** —— 结论是**两条都已在规格中受控**，只是控制点不在 JSON Schema 层：
+
+1. **SSRF**：`docs/23` §7 明确要求 "SSRF guard for External Reference fetch、URL allow/deny
+   strategy"；`docs/54` 把 "External Reference fetch SSRF 内网" 列为威胁场景 #5，并要求
+   **每个场景必须有对应 automated negative test**。控制点在 **fetch 层**，不在数据形状层。
+2. **客户端可控的授权元数据**：`docs/23` §3 规定授权 "默认 deny。每个 command 明确 actor +
+   org + project + object + action + policy context"；`docs/12` §3 "不扩大可见性原则" 规定任何
+   private→public 必须由有权限的人显式确认并产生 audit/event。即 `created_by` /
+   `visibility_policy_id` 本就**不是客户端可决定的**，控制点在**应用层**。
+
+**判定**：这不是规格语义缺失，而是"schema 没告诉实现者控制点在哪"。而 schema 作为**数据形状**
+描述，本来就不该、也不能表达 fetch 层与授权层的控制——若把 scheme allowlist 之类的**策略**写进
+schema，那才是真正的 L3 安全决策，Supervisor 不得自行决定。
+
+**采取的动作（仅注解，非策略）**：为全部 16 个 schema 补充 `description`：
+- 顶层说明该 schema 是 **entity-shape、不是 request DTO**，不得把客户端 body 直接绑定到它；
+  列出 server-authoritative 字段；
+- `created_by`（14 个）与 `visibility_policy_id`（12 个）注明 server-authoritative 及依据；
+- `external_reference.canonical_url` 注明解引用时必须走 `docs/23` §7 的 SSRF guard，
+  schema 本身**永不足以**作为校验，且抓取内容按 `docs/23` §8 视为不可信数据。
+
+**证据（这是本次判断的关键）**：把新旧 schema 的所有 `description` 键剥离后逐文件比对，
+**非 description 内容零差异** —— 即纯注解改动，未触碰任何 validation 关键字、`required`、
+`enum`、`additionalProperties`。因此**没有做出任何安全策略决策**。
+
+**未做（留给 owner / 后续）**：
+- 若要在 schema 层**强制** URL scheme allowlist 或字段不可变性，那属于 L3 安全策略，需 owner 决定。
+- `docs/54` 要求威胁场景 #5 有 automated negative test 并映射到 traceability 文档。该负向测试
+  属于**实现 External Reference fetch 的那个任务**（P5）的验收项，必须在其 task package 的
+  acceptance criteria 中显式写入，否则会重演"标准没写清楚"的老问题。
+
 ---
 
 ## 环境发现（非决策，必须显式记录）
