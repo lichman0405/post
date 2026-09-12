@@ -1962,3 +1962,20 @@ T0103 的 PR 开出来之后，七项检查一项都没跑。`gh run list` 空�
 **边界（诚实）**：本条只修正**描述**，没有改变 diff 的计算方式，也没有让 Reviewer 自动看到
 任务的完整贡献。后者是一个更大的设计选择（例如用 `main...HEAD` 的 PR diff），
 记录为后续项，不在本次临时决定。
+
+## L1-20260912-55 — G3 覆盖 P1 其余任务
+
+L1-20260912-49 只把 G3 接到了 T0102/T0103。T0104 的 accept 因此记录 `G3=not_required`，
+而 P1 还有 6 个任务会以同样方式跳过跨边界验证。**docs/67 的 G3 点名 "auth/visibility"，
+而 P1 的每一个任务都在改 API 组合与 web 前端——也就是那条链路的两端。**
+
+已把 `auth-real-services` 接到 **T0105–T0110**（T0102/T0103 早已接了）。
+从 T0105 起，spawn 时的基线会带上这份 `gates.json`，accept 会自动运行 G3 ✓。
+
+**T0104 例外**：它在本次接线之前已被 accept，账本上记的是 `not_required`。
+按 L1-20260912-45 的同一原则（**不为了让账本好看而制造死锁**），
+我不回改它已记录的 accept；改为**单独运行 `rddev gate run G3 T0104`** 取得真实验证证据，
+再合并——G4 会因为 override 要求 G3 绿，所以这一步也是合并的前置条件。
+
+**仍未覆盖**：P2（RSG）、P3（Gitea branch protection/webhook）、P7（MinIO hash）等 phase
+各自的 G3 尚无 job。这份记录不假装它们完成。
