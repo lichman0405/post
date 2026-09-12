@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/lichman0405/post/infra/migrations"
 	"github.com/lichman0405/post/internal/persistence"
 	"github.com/lichman0405/post/internal/persistence/testdb"
 )
@@ -336,7 +337,24 @@ var explicitIndexes = map[string][]string{
 	"search_documents_structured_gin":        {"USING gin", "structured"},
 }
 
-const headVersion = 14 // number of migrations in infra/migrations
+// headVersion is the number of migrations in infra/migrations, DERIVED from the
+// embedded set rather than hand-maintained. A hardcoded number silently
+// invalidated three tests the first time a migration was added (T0013's 00014,
+// then its TRUNCATE follow-up 00015); deriving it means the tests track the
+// head automatically and can never go stale.
+var headVersion = func() int64 {
+	entries, err := migrations.FS.ReadDir(".")
+	if err != nil {
+		panic("reading embedded migrations: " + err.Error())
+	}
+	var n int64
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".sql") {
+			n++
+		}
+	}
+	return n
+}()
 
 // ---------------------------------------------------------------------------
 //  1. Fresh install: empty database → head, then the catalog IS the canonical

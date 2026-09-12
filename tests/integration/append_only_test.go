@@ -92,36 +92,50 @@ func triggerRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []string
 	return out
 }
 
-// assertTriggers verifies that exactly the append-only set carries a guard
-// trigger, that each one is ENABLED ('O'), and that it is a BEFORE UPDATE OR
-// DELETE per-row trigger (tgtype bits: ROW=1, BEFORE=2, DELETE=8, UPDATE=16).
+// assertTriggers verifies that exactly the append-only set carries guard
+// triggers, that each is ENABLED ('O'), and that BOTH halves of the guard are
+// present on every guarded table:
+//
+//	<table>_append_only  BEFORE UPDATE OR DELETE, FOR EACH ROW   (tgtype 27)
+//	<table>_no_truncate  BEFORE TRUNCATE,         FOR EACH STATEMENT (tgtype 34)
+//
+// The TRUNCATE half was added by 00015: row triggers do not fire on TRUNCATE,
+// so the 00014 guard alone could still be bypassed wholesale. A table carrying
+// only one of the two is no longer sufficient, so both are asserted rather
+// than just the first trigger found for the table.
 func assertTriggers(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tables []string) {
 	t.Helper()
+	// Keyed by "table:trigger" — a table legitimately has more than one now.
 	got := map[string]string{}
 	for _, tr := range triggerRows(t, ctx, pool) {
 		parts := strings.Split(tr, ":")
-		got[parts[0]] = tr
+		got[parts[0]+":"+parts[1]] = tr
 	}
 	for _, tbl := range tables {
-		tr, ok := got[tbl]
+		row, ok := got[tbl+":"+tbl+"_append_only"]
 		if !ok {
-			t.Errorf("table %s: append-only trigger missing", tbl)
-			continue
+			t.Errorf("table %s: append-only UPDATE/DELETE trigger missing", tbl)
+		} else if !strings.HasSuffix(row, ":O:27") {
+			t.Errorf("table %s: trigger not enabled/before-update-or-delete: %s", tbl, row)
 		}
-		if !strings.HasSuffix(tr, ":O:27") {
-			t.Errorf("table %s: trigger not enabled/before-update-or-delete: %s", tbl, tr)
+		trow, ok := got[tbl+":"+tbl+"_no_truncate"]
+		if !ok {
+			t.Errorf("table %s: TRUNCATE guard missing (history could be erased wholesale)", tbl)
+		} else if !strings.HasSuffix(trow, ":O:34") {
+			t.Errorf("table %s: TRUNCATE trigger not enabled/before-truncate: %s", tbl, trow)
 		}
 	}
 	for rel, tr := range got {
+		name := strings.SplitN(rel, ":", 2)[0]
 		found := false
 		for _, tbl := range tables {
-			if rel == tbl {
+			if name == tbl {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("unexpected trigger on table %s (guard must cover exactly the append-only set): %s", rel, tr)
+			t.Errorf("unexpected trigger on table %s (guard must cover exactly the append-only set): %s", name, tr)
 		}
 	}
 	var n int
@@ -497,8 +511,10 @@ func TestAppendOnlyUpgradePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upgrade path: migrate to head: %v", err)
 	}
-	if applied != 1 {
-		t.Errorf("upgrade path: applied %d on the way from 13 to head, want 1", applied)
+	// Derived, not hardcoded: this used to say "want 1" and went stale the
+	// moment a second migration was added above 00013.
+	if want := headVersion - 13; applied != want {
+		t.Errorf("upgrade path: applied %d on the way from 13 to head, want %d", applied, want)
 	}
 	if v := appliedVersion(t, ctx, pool); v != headVersion {
 		t.Fatalf("upgrade path: version after head = %d, want %d", v, headVersion)
