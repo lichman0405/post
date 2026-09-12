@@ -7,6 +7,12 @@
 // job type is "smoke" — the domain event outbox consumer arrives with the
 // event tasks; this loop already consumes and completes real jobs end to
 // end.
+//
+// T0007: logs are structured JSON on stderr, go-redis's internal retry
+// chatter is routed through the structured logger, and every job log line
+// carries the correlation id of whatever triggered the job (the loop
+// attaches it per job; the enqueueing request's id is embedded in the job
+// payload by the API).
 package main
 
 import (
@@ -21,6 +27,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/lichman0405/post/internal/config"
+	"github.com/lichman0405/post/internal/observability"
 	"github.com/lichman0405/post/internal/version"
 	"github.com/lichman0405/post/internal/worker"
 )
@@ -55,6 +62,12 @@ func run(args []string) int {
 		return exitConfig
 	}
 
+	// Structured JSON logs on stderr; go-redis chatter through the same
+	// logger (T0007).
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	slog.SetDefault(logger)
+	observability.RouteRedisLogging(logger)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -62,14 +75,17 @@ func run(args []string) int {
 	defer redisClient.Close()
 
 	queue := worker.NewRedisQueue(redisClient, "post")
-	loop := worker.NewLoop(queue, worker.WithLogger(slog.Default()))
+	loop := worker.NewLoop(queue, worker.WithLogger(logger))
 	// The minimal registered job type: completes a real job end to end. The
 	// outbox dispatcher handlers arrive with the event tasks.
 	loop.Register("smoke", func(ctx context.Context, job worker.Job) error {
+		// The payload is caller-controlled input on this scaffold path, so
+		// it goes through the shared redactor before it reaches the log —
+		// a credential-shaped value must never be logged raw (T0007).
 		slog.Info("post-worker smoke job",
 			"job_id", job.ID,
 			"correlation_id", job.CorrelationID,
-			"payload", string(job.Payload),
+			"payload", config.RedactForOutput(string(job.Payload)),
 		)
 		return nil
 	})

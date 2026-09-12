@@ -57,29 +57,29 @@
       "merged_at": "2026-09-12T15:45:00Z"
     },
     "T0006": {
-      "status": "worker_failed",
+      "status": "merged",
       "started_at": "2026-09-12T15:48:00Z",
-      "completed_at": null,
-      "notes": "FIRST ATTEMPT: budget exhausted. Worker produced substantial work (26 changed paths) but ran out of its $15 cap (total_cost_usd 15.23) at the moment it was about to write RESULT.json, so no RESULT was delivered and collect rejected on that plus 6 out-of-scope paths. Per docs/62 §4 this is worker_failed, not a discipline failure. TWO of the scope violations are SUPERVISOR error: the task package used the glob \"internal/config/wiring*\" which matches no real file, so the worker could not legitimately touch internal/config/config.go. Re-dispatched in the SAME worktree to preserve the work, with corrected scope, a larger budget, and an explicit instruction to write RESULT.json FIRST.",
+      "completed_at": "2026-09-12T16:35:00Z",
+      "notes": "SECOND dispatch merged as PR #32. First attempt was worker_failed (budget exhausted at the RESULT write; decisions.md L1-20260912-22). Supervisor verified at runtime, not by reading: cmd/api fails fast naming POST_ENV (exit 2); /healthz 200 ok; /readyz 503 not_ready with per-dependency detail and the real dial error; make smoke proves the worker consumed a real job over the Redis protocol with no Docker; the web renders live API status; and all three T0004 carry-over fixes are demonstrably in effect. The two make check/go test failures are the known T0008 item, not this task.",
       "worker_run_id": "worker-T0006-44a21bb",
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "accepted_by_supervisor_at": "2026-09-12T16:35:00Z",
+      "merged_at": "2026-09-12T16:35:00Z"
     },
     "T0007": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "merged",
+      "started_at": "2026-09-12T17:00:00Z",
+      "completed_at": "2026-09-12T17:20:00Z",
+      "notes": "G2 accepted; merged as PR #34 (01c375e). Supervisor ran the scripts itself: one correlation id traced web->API->adapter AND a request id carried into the job enqueue, with real log lines. The canary sweep includes a NEGATIVE CONTROL proving it can fail plus positive evidence that values were masked rather than dropped. Redaction reuses internal/config (no second redactor). Collect initially REJECTED on my own scope error - I had narrowed the declared tests/** to invented globs; see decisions.md L1-20260912-23. The Worker also started its own PostgreSQL on the host and left it running; stopped by the Supervisor (L1-20260912-24).",
+      "worker_run_id": "worker-T0007-cbeff16",
+      "accepted_by_supervisor_at": "2026-09-12T17:20:00Z",
+      "merged_at": "2026-09-12T17:20:00Z"
     },
     "T0008": {
-      "status": "todo",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-09-12T17:00:00Z",
       "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
+      "notes": "Running in parallel. Owns Makefile/.github/scripts/ops/tasks.json. Carries two REQUIRED fixes identified by the Supervisor: (1) make check must not require a live PostgreSQL - split from make test-integration which must fail loudly or skip with a printed reason (decisions.md L1-20260912-19); (2) add a DAG/state coverage check, the gap found after T0013 where a task existed in tasks.json but not in task_status.json.",
+      "worker_run_id": "worker-T0008-cbeff16",
       "accepted_by_supervisor_at": null,
       "merged_at": null
     },
@@ -93,11 +93,11 @@
       "merged_at": "2026-09-12T16:36:00Z"
     },
     "T0010": {
-      "status": "todo",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-09-12T17:00:00Z",
       "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
+      "notes": "Running in parallel. Owns go.mod/go.sum. Must PORT the .rddev/dispatch/ hardening (four rounds of fixes) rather than re-derive it, with two-sided regression tests for every rule.",
+      "worker_run_id": "worker-T0010-cbeff16",
       "accepted_by_supervisor_at": null,
       "merged_at": null
     },
