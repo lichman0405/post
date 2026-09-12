@@ -8,6 +8,9 @@
 # orchestrator transient state (Supervisor-owned runtime; never committed)
 .worktrees/
 .rddev/
+# rddev state-file lock (derived from the state file's directory; see
+# internal/devorchestrator/store.go lockPathFor)
+.task_status.lock
 
 # Go
 /bin/
