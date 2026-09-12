@@ -49,6 +49,7 @@ owner 于 2026-09-12 授予**默认自主推进**授权（`L3-20260912-4`，持�
 | T0005 | merged | #19 | 13 个 forward-only migration + pgx/sqlc + tx helper + run-scoped 测试库命名空间 |
 | T0009 | merged | #23 | `rddev` CLI：doctor 复刻 35 项契约、任务状态机、原子+加锁状态写入、诚实 stub |
 | T0013 | merged | #28 #29 | append-only 不可变性：13 表 × (BEFORE UPDATE/DELETE 行级 + BEFORE TRUNCATE 语句级) 触发器 |
+| T0007 | merged | #34 | 结构化日志 + 端到端 correlation id（含 canary 负对照）+ go-redis 日志归口 |
 | T0006 | merged | #32 | 健康检查（/healthz 200、/readyz 503 如实）+ 三处接线修复 + Docker-free `make smoke` |
 
 **T0006 第一次派发为 `worker_failed`**（预算耗尽，见 `decisions.md` L1-20260912-22）：Worker 在即将写

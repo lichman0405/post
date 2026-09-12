@@ -157,9 +157,9 @@
       "name": "logging integration",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T17:20:00Z",
+      "evidence": "logging integration: Supervisor ran trace-e2e.sh and canary-sweep.sh. One id traced across web -> API -> adapter and an API request id carried into the job it enqueued, shown with real log lines. Canary sweep clean over real log output, WITH a negative control proving the sweep can fail and positive evidence that values were masked rather than dropped. go-redis retry logs now structured."
     },
     {
       "id": "T0008-TEST-01",
