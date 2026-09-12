@@ -507,13 +507,24 @@
       ]
     },
     "T0106": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-12T23:39:06Z",
+      "worker_run_id": "run-df909f2e57c9e43b",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-12T23:39:06Z",
+          "run_id": "run-d7d023ac2a68fc65"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-12T23:39:06Z",
+          "run_id": "run-df909f2e57c9e43b",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0107": {
       "status": "running",
@@ -576,13 +587,24 @@
       "merged_at": null
     },
     "T0110": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-12T23:39:07Z",
+      "worker_run_id": "run-88ba7dea7c52c48e",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-12T23:39:06Z",
+          "run_id": "run-214ee447eec457c5"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-12T23:39:07Z",
+          "run_id": "run-88ba7dea7c52c48e",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0201": {
       "status": "todo",
