@@ -2,10 +2,10 @@ import { headers } from "next/headers";
 import { StatusPanel } from "./status-panel";
 import type { ServiceStatus } from "./status-panel";
 import { AuthStatus } from "./auth-status";
-import { getWebConfig } from "../lib/server-config";
-import { describeConfig } from "../lib/config";
-import { CORRELATION_HEADER, correlationHeaders, resolveCorrelationId } from "../lib/correlation";
-import pkg from "../package.json";
+import { getWebConfig } from "../../lib/server-config";
+import { describeConfig } from "../../lib/config";
+import { CORRELATION_HEADER, correlationHeaders, resolveCorrelationId } from "../../lib/correlation";
+import pkg from "../../package.json";
 
 // The validated configuration is in effect at runtime (T0006 closure of the
 // T0004 gap): API_BASE_URL and SCIENTIFIC_ADAPTER_URL come from

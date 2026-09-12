@@ -1,0 +1,15 @@
+{
+  "name": "@post/web-smoke",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser smoke tests for the POST web app: visual smoke (T0107 global nav, responsive baseline, no gradient/glass policy) and a11y smoke (axe-core WCAG A/AA + keyboard walkthrough).",
+  "type": "module",
+  "scripts": {
+    "visual": "node visual-smoke.mjs",
+    "a11y": "node a11y-smoke.mjs"
+  },
+  "dependencies": {
+    "axe-core": "4.10.3",
+    "playwright": "1.55.0"
+  }
+}

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { getWebConfig } from "../../../lib/server-config";
+import { getWebConfig } from "../../../../lib/server-config";
 import { ProfileCard } from "./profile-card";
 
 export const metadata: Metadata = {
@@ -26,10 +26,10 @@ export default async function ProfilePage({
   const cfg = getWebConfig();
   const { id } = await params;
   return (
-    <main className="profile-main">
+    <div className="profile-main">
       <Suspense fallback={null}>
         <ProfileCard apiBaseUrl={cfg.apiBaseUrl} userId={id} />
       </Suspense>
-    </main>
+    </div>
   );
 }

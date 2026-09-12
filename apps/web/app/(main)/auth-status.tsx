@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Link, Spinner, Text } from "@primer/react";
 import { PersonIcon, SignInIcon } from "@primer/octicons-react";
 
-import { createAuthClient, type AuthUser } from "../lib/auth";
+import { createAuthClient, type AuthUser } from "../../lib/auth";
 
 /**
  * The sign-in state strip (client component): resolves the current session
