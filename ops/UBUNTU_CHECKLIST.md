@@ -1,5 +1,7 @@
 # Ubuntu 开发机准备清单
 
+最后一步验证：仓库根目录运行 `./ops/doctor.sh`（T0009 后为 `rddev doctor`），required 检查必须全绿；退出码 1/2 时按 `fix:` 提示修复。
+
 - [ ] Ubuntu 24.04 LTS amd64
 - [ ] >=16 vCPU 推荐
 - [ ] >=64 GB RAM 推荐

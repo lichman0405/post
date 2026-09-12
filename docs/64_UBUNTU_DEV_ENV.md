@@ -8,6 +8,8 @@ Windows Native 不作为支持的开发环境。Windows 11 用户使用 WSL2 Ubu
 
 CI、Supervisor、Worker、`rddev`、Docker Compose 与生产容器全部以 Linux 行为为准。
 
+**预检验证**：在仓库根目录运行 `ops/doctor.sh`（T0000 起的参考实现；T0009 后为 `rddev doctor`）。检查契约见 `ops/doctor-checks.md`。退出码：0 = required 全过；1 = 工具链缺失/漂移；2 = 非 canonical 环境（含 Windows Native）；3 = 用法错误。默认不探测 Docker daemon（Worker 无 socket 权限）；宿主可用 `--check-docker-daemon` 开启 daemon 与 data-root 磁盘检查。
+
 ## 2. 硬件
 
 ### 最低可用（Supervisor + 1–2 Worker）
@@ -36,6 +38,21 @@ CI、Supervisor、Worker、`rddev`、Docker Compose 与生产容器全部以 Lin
 
 更高配置主要改善并行 Next.js build、Go tests、Playwright、Docker services 与多 Worker 同时运行，不提升 Claude 模型本身推理速度。
 
+### 2.1 doctor 检查阈值（ops/doctor.sh / rddev doctor 执行）
+
+预检按以下阈值判定（required 失败 → 退出码 1；推荐档不足 → advisory 警告，不影响退出码）：
+
+| 检查 | required | 推荐（advisory） |
+|---|---|---|
+| CPU（`nproc`） | ≥ 8 vCPU | ≥ 16 vCPU |
+| RAM（`/proc/meminfo` MemTotal） | ≥ 32 GiB | ≥ 64 GiB |
+| Swap（`/proc/meminfo` SwapTotal） | ≥ 8 GiB | ≥ 16 GiB |
+| 仓库文件系统可用空间（`df`） | ≥ 20 GiB | ≥ 100 GiB |
+| docker data-root 可用空间（需 `--check-docker-daemon`） | ≥ 100 GiB | — |
+| `ulimit -n` | ≥ 65535 | — |
+
+推荐档对应上面"推荐（Supervisor + 3–4 Worker）"配置；"最低可用"档的 250 GB NVMe 属整机采购指引，运行时检查以"可用空间"为准。
+
 ## 3. 基础系统软件
 
 建议安装：
@@ -54,6 +71,28 @@ Ubuntu 24.04 上若启用 Claude Code sandbox，需要 `bubblewrap` + `socat`，
 - Docker Engine + Compose v2。
 - Claude Code：使用 Ubuntu apt stable channel或 native stable 安装；团队开发机应锁定/记录版本，升级由 Supervisor/人工显式执行，不在 Worker 运行中自动漂移。
 
+### 4.1 预检基线表与漂移策略（ops/doctor.sh 执行）
+
+预检对以下版本做 **major 级基线比对**（详见 `ops/doctor-checks.md` §7–8，Go 版 `rddev doctor` 按同一契约实现）：
+
+| 工具 | 基线 | 比较 |
+|---|---|---|
+| Go | 1.27.x | == 1.27 |
+| Node.js | 24 LTS | == 24 |
+| Python | ≥ 3.12 | >= 3.12 |
+| pnpm | package.json `packageManager` 精确 pin | 精确 ==（无 package.json 时仅记录） |
+| psql | 16.x（noble 仓库） | == 16 |
+| redis-cli | 7.x（noble 仓库） | == 7 |
+| git | 2.x | == 2 |
+| git-lfs | 3.x | == 3 |
+| jq | 1.x | == 1 |
+| make | 4.x | == 4 |
+| shellcheck | 记录（noble 仓库 0.9.x，未 pin） | presence |
+| Docker Compose | v2 插件 lineage（major ≥ 2；major 记录审计，v1 不合法） | >= 2 |
+| Docker Engine / uv / ripgrep(rg) / Claude Code | 记录版本，不比较 | presence |
+
+**漂移策略**：任何 major 版本漂移（含"高于"基线）都会被预检判为 required 失败并**显式报告**（remediation 注明需 Supervisor 批准），绝不自动修复、绝不静默放行。基线变更必须由 Supervisor 显式决策：先更新本文件 §4.1 与 `ops/doctor-checks.md`，再升级开发机；反向操作会被预检拦截。
+
 ## 5. 基础设施容器
 
 Docker Compose：
@@ -71,8 +110,8 @@ Docker Compose：
 
 - repo、worktree、node_modules、Go build cache 必须在 ext4/Linux filesystem。
 - `.rddev/worktrees` 与主仓库在同一高性能 SSD。
-- Docker data-root 保证至少 100 GB free；定期 prune 由 `rddev env gc` 管理，不能在 Worker 中无条件 `docker system prune -a`。
-- `ulimit -n` 建议 >= 65535；并行浏览器/Node 文件 watcher 容易耗 fd。
+- Docker data-root 保证至少 100 GB free（预检在 `--check-docker-daemon` 时测量，required）；定期 prune 由 `rddev env gc` 管理，不能在 Worker 中无条件 `docker system prune -a`。
+- `ulimit -n` required >= 65535（预检失败时：立即 `ulimit -n 65535`，并持久化到 `/etc/security/limits.conf` 的 nofile）；并行浏览器/Node 文件 watcher 容易耗 fd。
 
 ## 7. Claude Code
 
