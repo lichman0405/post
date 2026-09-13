@@ -118,6 +118,10 @@ stage_acceptance() {
   bash tests/acceptance/rejection-retry-e2e.sh
   bash tests/acceptance/supervisor-git-e2e.sh
   bash tests/acceptance/driver-persistence-e2e.sh
+  # The G3 gate script is graded against a fake instance, offline: it was once
+  # run in a tree it had already committed to (L1-20260913-16), and a gate that
+  # mutates what it grades cannot be believed about anything else it reports.
+  bash scripts/tests/gitea-e2e-guard-unit-test.sh
 }
 
 stage_integration() {

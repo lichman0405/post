@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // writeSyntheticDAG writes a scratch DAG: A -> B -> C, plus a no-deps task D.
@@ -674,5 +675,82 @@ func TestInspectReturnsSpecAndState(t *testing.T) {
 	// Unknown id is an error.
 	if _, err := s.Inspect("T9999"); err == nil {
 		t.Error("inspect of unknown task succeeded")
+	}
+}
+
+// The task state's timestamps are validated in CI
+// (scripts/validate_task_state.py, ISO_TS_RE: no fractional seconds) and the
+// run start spawn hands the store carries nanoseconds, because a start to the
+// second cannot order a verdict written inside the same second (#105). Both
+// have to hold at once, and they hold in different files: the run records keep
+// the nanosecond start (collect compares the registry against the gate inputs,
+// never against this), and tasks/task_status.json keeps the shape the validator
+// accepts. This pins the second half through the one place that writes it —
+// reverting the store's rendering leaves the state file unusable to CI on the
+// next spawn, which the round-1 review measured directly (the validator exits
+// 1 on a ns-shaped started_at).
+func TestStartWorkerFromStampsTheTaskStateInItsValidatedFormat(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "task_status.json")
+	s, err := OpenStore(writeSyntheticDAG(t, dir), statusPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition("T1000", StateReady, NewRunID(), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// The shape spawn actually passes in, from the same helper spawn uses.
+	runStart := runStartedAtFrom(time.Date(2026, 9, 13, 11, 51, 44, 877690809, time.UTC))
+	if runStart != "2026-09-13T11:51:44.877690809Z" {
+		t.Fatalf("fixture run start = %q, want the nanosecond form spawn records", runStart)
+	}
+
+	res, err := s.StartWorkerFrom("T1000", "run-ns", runStart, StateReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw struct {
+		Tasks map[string]TaskState `json:"tasks"`
+	}
+	data, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	ts := raw.Tasks["T1000"]
+	if ts.StartedAt == nil {
+		t.Fatal("started_at not stamped")
+	}
+	if len(ts.History) == 0 {
+		t.Fatal("no history entry for the running transition")
+	}
+
+	const want = "2026-09-13T11:51:44Z"
+	for _, c := range []struct{ what, got string }{
+		{"the transition result's at", res.At},
+		{"started_at", *ts.StartedAt},
+		{"the history entry's at", ts.History[len(ts.History)-1].At},
+	} {
+		if c.got != want {
+			t.Errorf("%s = %q, want %q — the format scripts/validate_task_state.py enforces on this file", c.what, c.got, want)
+		}
+	}
+
+	// A second-precision start is passed through unchanged: the store renders
+	// the task state's format, it does not round every caller's value to
+	// whatever it likes.
+	if _, err := s.Transition("T1003", StateReady, NewRunID(), ""); err != nil {
+		t.Fatal(err)
+	}
+	res, err = s.StartWorkerFrom("T1003", "run-s", "2026-09-13T00:00:00Z", StateReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.At != "2026-09-13T00:00:00Z" {
+		t.Errorf("a second-precision start came back as %q, want it unchanged", res.At)
 	}
 }
