@@ -803,7 +803,16 @@ func assertTheCleanIsCovered(worktree string, entries []snapshotEntry) error {
 		return err
 	}
 	for _, p := range append(keysOf(dirs), files...) {
-		if !held[p] && !heldByAnAncestor(held, p) {
+		// The snapshot holding the PATH is the whole of the test — not the path or
+		// any directory around it. Holding an ancestor is what a directory's own
+		// entry means, and it means it only for the paths that were inside it when
+		// the walk ran: `gathered/` being walked is a record of that moment, and a
+		// file that arrived afterwards is in no entry. The clean names that file
+		// individually whenever it cannot name the directory whole — a directory
+		// holding an ignore rule of its own is one it cannot remove whole, so what
+		// is inside it goes out one name at a time (T9049) — and then the question
+		// is about the path itself.
+		if !held[p] {
 			return fmt.Errorf("the clean that follows the reset would delete %s, and the snapshot does not hold it — the advance refuses rather than delete work it could not put back. Move it out of the way and dispatch again", p)
 		}
 		if dirs[p] {
@@ -818,33 +827,6 @@ func assertTheCleanIsCovered(worktree string, entries []snapshotEntry) error {
 		}
 	}
 	return nil
-}
-
-// heldByAnAncestor reports whether the snapshot holds one of the path's parents,
-// which is what holding a path inside a directory that was walked means: the
-// directory's own entry is the record of everything under it.
-//
-// Nothing end-to-end reaches this today, and that is worth writing down rather
-// than leaving to be rediscovered. Every path the clean names is a key of the
-// snapshot's own set (the files as themselves, the directories whole), so the
-// second ask can only name something the snapshot does not hold when a directory
-// became removable as the reset ran — and that is a directory, which the walk
-// records contents and all. What this arm guards is the case where a path arrives
-// that the snapshot holds only through the directory around it; the test for it is
-// a unit test of this function, because no fixture produces one. It stays because
-// the two directions are not equally bad: a wrong `false` here refuses an advance
-// that had nothing to lose, and a wrong `true` deletes work that no copy holds.
-func heldByAnAncestor(held map[string]bool, p string) bool {
-	for {
-		i := strings.LastIndex(p, "/")
-		if i < 0 {
-			return false
-		}
-		p = p[:i]
-		if held[p] {
-			return true
-		}
-	}
 }
 
 // obstructedDirs names the directories in the worktree that stand where one of
@@ -1212,9 +1194,8 @@ var restore = restoreWorktree
 // was keeping it. Both are work the restore cannot write back.
 //
 // A path the walk cannot list counts as unheld. What cannot be listed cannot be
-// promised, and the two directions are not equally bad — the same reason
-// heldByAnAncestor keeps its cautious arm: leaving a path costs the next
-// dispatch a confusing extra file, and deleting one costs the work.
+// promised, and the two directions are not equally bad: leaving a path costs the
+// next dispatch a confusing extra file, and deleting one costs the work.
 func unheldInside(worktree, dir string, held map[string]bool) []string {
 	var unheld []string
 	root := filepath.Join(worktree, filepath.FromSlash(dir))
@@ -1278,10 +1259,10 @@ func restoreWorktree(worktree, head, keep string, entries []snapshotEntry) ([]st
 	}
 	var safe, left []string
 	for _, p := range append(keysOf(dirs), files...) {
-		// The snapshot holding the path is the whole of the test here, and
-		// heldByAnAncestor is deliberately not asked: a path the snapshot holds
-		// only through the directory around it is one it has no copy of, and a
-		// path in neither category is named to the caller rather than deleted.
+		// The snapshot holding the PATH is the whole of the test here, exactly as
+		// it is in the ask above: a path the snapshot holds only through the
+		// directory around it is one it has no copy of, and a path in neither
+		// category is named to the caller rather than deleted.
 		if !held[p] {
 			left = append(left, p)
 			continue

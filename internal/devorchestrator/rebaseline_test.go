@@ -2555,33 +2555,50 @@ func TestTheCleanReadsTheLocaleItCanReadTheAnswerIn(t *testing.T) {
 
 // T9038.
 //
-// The record of what is inside a directory that was walked WHOLE is the
-// directory's own entry: the walk under it records every path beneath it, so a
-// path arriving later — from the clean's second answer, or from anywhere else —
-// is held by the ancestor even though it is not an entry of its own. Nothing
-// end-to-end reaches this today (see the function's own note); it is tested here
-// so that the arm is a claim with a test rather than a line nothing exercises.
+// What a directory that was walked holds, and what it does not. The walk under a
+// directory the snapshot takes WHOLE records every path beneath it — the
+// subdirectories as themselves, every file as itself — so a directory's entry and
+// its contents' entries are the record of ONE MOMENT, and the directory's entry
+// says nothing about a path that was not there yet.
+//
+// This is the question both callers ask before a directory they would remove
+// whole, and the answer is the one that cannot be given by walking a path's
+// parents: `scratch` is held, `scratch/late.txt` is inside it, and there is no
+// copy of `scratch/late.txt` anywhere. A lookup of ancestors answers "covered"
+// for exactly that path — which is how the advance used to delete it and report
+// the worktree put back (T9049).
 func TestTheSnapshotHoldsWhatIsInsideADirectoryItWalked(t *testing.T) {
-	held := map[string]bool{"scratch": true, "docs/a.md": true, "internal": true}
-	for _, c := range []struct {
-		path string
-		want bool
-	}{
-		{path: "scratch/pipe", want: true},
-		{path: "scratch/deep/inside.txt", want: true},
-		{path: "internal/legacy", want: true},
-		{path: "internal/legacy/old.txt", want: true},
-		// A path that IS an entry is the caller's first question, not this one:
-		// this arm answers only for what the ancestor's entry stands for.
-		{path: "docs/a.md", want: false},
-		{path: "docs/b.md", want: false},
-		{path: "scratchpad", want: false},
-		{path: "docs", want: false},
-		{path: "", want: false},
-	} {
-		if got := heldByAnAncestor(held, c.path); got != c.want {
-			t.Errorf("heldByAnAncestor(%q) = %v, want %v — a directory that was walked holds everything under it, and nothing else is held", c.path, got, c.want)
+	worktree := t.TempDir()
+	for _, p := range []string{"scratch/deep", "scratch"} {
+		if err := os.MkdirAll(filepath.Join(worktree, filepath.FromSlash(p)), 0o755); err != nil {
+			t.Fatal(err)
 		}
+	}
+	for _, p := range []string{"scratch/one.txt", "scratch/deep/inside.txt"} {
+		if err := os.WriteFile(filepath.Join(worktree, filepath.FromSlash(p)), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// What the walk recorded, as entries: the directory, the subdirectory under it,
+	// and the two files inside them.
+	held := map[string]bool{
+		"scratch": true, "scratch/deep": true, "scratch/deep/inside.txt": true, "scratch/one.txt": true,
+	}
+	// Every path under `scratch` is an entry, so the walk over it finds nothing
+	// unheld: the difference between holding a directory and holding its contents
+	// has to answer both ways, or it is not a difference.
+	if got := unheldInside(worktree, "scratch", held); len(got) != 0 {
+		t.Errorf("a directory whose every path is an entry reported %v as unheld", got)
+	}
+	// A file that arrived after the walk is in no entry, and no ancestor stands for
+	// it: the entry for `scratch` is the record of what was inside it when the walk
+	// ran, which is the whole of what it says.
+	late := filepath.Join(worktree, "scratch", "late.txt")
+	if err := os.WriteFile(late, []byte("arrived later\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := unheldInside(worktree, "scratch", held); !slices.Equal(got, []string{"scratch/late.txt"}) {
+		t.Errorf("unheldInside(scratch) = %v, want only the path that is in no entry: %v", got, []string{"scratch/late.txt"})
 	}
 }
 
@@ -2789,6 +2806,24 @@ func TestTheCleanBatchesPartitionThePathsInOrder(t *testing.T) {
 	}
 	if got := restoreCleanBatches(nil); len(got) != 0 {
 		t.Errorf("no paths became %v, want no invocations at all", got)
+	}
+
+	// The DEFAULT — `prev`, which is what the package holds before this test lowers
+	// it, and the whole of this fix in production. Every test here overrides the
+	// budget with one its own fixture crosses, so a default no argument list can
+	// reach leaves the loop running and batching nothing with the suite green
+	// through it: the defect would arrive by the default rather than by removing
+	// the code. So the number is pinned, against both ends of what it has to be.
+	// Too large and it spends the room ARG_MAX reserves for the environment — Linux
+	// takes 2 MiB of argv in total and 128 KiB in any one string (ARG_MAX,
+	// MAX_ARG_STRLEN), and one invocation carries this budget plus, at most, the
+	// single path that may exceed it; too small and a tree of ordinary paths runs
+	// the clean once per path, which is the one command line again, split up.
+	if prev != 64<<10 {
+		t.Errorf("the restore's clean batches by %d bytes by default, want the 64 KiB the batching was measured at (80,000 paths went out in 51 invocations): the default decides what the restore does on every real worktree, and no test that lowers it can see it change", prev)
+	}
+	if prev >= 128<<10 {
+		t.Errorf("a default budget of %d bytes can build an argument list longer than the %d the kernel takes in any one string (MAX_ARG_STRLEN)", prev, 128<<10)
 	}
 }
 
@@ -3065,5 +3100,94 @@ func TestTheRestoreKeepsAFileWrittenIntoADirectoryTheCleanNamesFileByFile(t *tes
 	}
 	if rest != before {
 		t.Errorf("the refused advance changed the tree it refused to advance:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
+	}
+}
+
+// T9049.
+//
+// The advance's ask, at the granularity git names when it cannot name the
+// directory whole. T9044 is the same ask where the clean names `gathered/` and
+// the rule is about the directory's contents; this is the other half, where the
+// path the clean names is not the directory at all. A directory holding an ignore
+// rule of its own cannot be removed whole — something inside it is staying — so
+// git names what is inside it FILE BY FILE, the rule included.
+//
+// What is being pinned is that an ancestor in the snapshot is not a copy of the
+// path. `gathered` was walked, and every path inside it at that moment is an
+// entry; a path that arrived afterwards is in none. The lookup that walks up the
+// parents answers "covered" for exactly that path, and the advance then deletes
+// it and says the worktree was put back. It is the rule the restore's own loop
+// already follows (T9048), asked one step earlier, where nothing has been deleted
+// yet and the refusal still has a tree to name.
+func TestTheAdvanceRefusesRatherThanCleanADirectoryItNamesFileByFile(t *testing.T) {
+	f := newRebaselineFixture(t, "T9049")
+	f.write("gathered/first.txt", "the task gathered this\n", 0o644)
+	f.mainRewritesTheSameRegion()
+
+	const late = "arrived after the snapshot was taken\n"
+	const ignored = "ignored by the rule beside it\n"
+	real := snapshot
+	snapshot = func(worktree, head, target string, paths map[string]bool, keep string) ([]snapshotEntry, error) {
+		entries, err := real(worktree, head, target, paths, keep)
+		if err != nil {
+			return nil, err
+		}
+		// AFTER the walk, so all three are in no entry and in no kept copy. The
+		// rule is what decides the granularity: with something inside ignored, git
+		// cannot name the directory whole, and the files inside it are named one at
+		// a time — which is the branch the walk up the parents covers and the
+		// entries do not.
+		for name, content := range map[string]string{
+			".gitignore":  "*.secret\n",
+			"late.secret": ignored,
+			"late.txt":    late,
+		} {
+			if err := os.WriteFile(filepath.Join(worktree, "gathered", name), []byte(content), 0o644); err != nil {
+				t.Error(err)
+			}
+		}
+		return entries, nil
+	}
+	defer func() { snapshot = real }()
+
+	before := f.pathsAndContents(f.baseline)
+	_, err := RebaselineTask(f.root, "T9049", "", "")
+	if err == nil {
+		t.Fatal("the advance deleted a file it had no copy of and reported success")
+	}
+	// Refused BEFORE the clean: the path the snapshot does not hold, and the one
+	// it does, are both still there with their bytes. The `gathered/` the walk
+	// recorded holds `first.txt` and nothing that arrived afterwards, which is the
+	// distance between holding a directory and holding a path inside it. The read
+	// comes first because the opposite outcome — the advance walking up the path's
+	// parents, calling it covered, and deleting it — is what this test exists to
+	// notice, and the loss is what the failure has to name.
+	if _, serr := os.Lstat(filepath.Join(f.worktree, "gathered", "late.txt")); serr != nil {
+		t.Fatalf("the file the advance refused over is not there any more: %v — the clean named it, no entry held it, and no refusal came first", serr)
+	}
+	if got := readFileOrFail(t, filepath.Join(f.worktree, "gathered", "late.txt")); got != late {
+		t.Errorf("the file the advance refused over holds %q, want %q", got, late)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "would delete gathered/.gitignore, and the snapshot does not hold it") {
+		t.Fatalf("the refusal this test is about is not the one that reached it: %s", msg)
+	}
+	if got := readFileOrFail(t, filepath.Join(f.worktree, "gathered", "first.txt")); got != "the task gathered this\n" {
+		t.Errorf("the task's own file in that directory did not survive the refusal: %q", got)
+	}
+	if got := readFileOrFail(t, filepath.Join(f.worktree, "gathered", "late.secret")); got != ignored {
+		t.Errorf("the ignored file beside them holds %q, want %q", got, ignored)
+	}
+	after := f.pathsAndContents(f.baseline)
+	var rest = after
+	for _, p := range []string{"gathered/.gitignore", "gathered/late.txt"} {
+		line := f.describe(p)
+		if !strings.Contains(rest, line) {
+			t.Fatalf("the fingerprint of the tree the refusal left does not hold %s: %s", p, rest)
+		}
+		rest = strings.Replace(rest, line, "", 1)
+	}
+	if rest != before {
+		t.Errorf("the refusal changed the tree it refused to advance:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
 	}
 }
