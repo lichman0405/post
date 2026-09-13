@@ -180,18 +180,34 @@ func validateInto(doc any, schema map[string]any, where string, errs *[]error) {
 			validateInto(v, items, where+"["+strconv.Itoa(i)+"]", errs)
 		}
 	}
+	// A bound can only fire on a value of the type it bounds. Draft 2020-12
+	// says as much, and the type check at the top of this function already
+	// refused every type the schema did not list — so a value of some other
+	// type is one the schema admits. Reading "not a number" as "below the
+	// minimum" rejected a Review verdict whose own type list allowed null
+	// (`"line": {"type": ["integer", "null"], "minimum": 0}`) and left a
+	// finished task's review uncollectable.
+	for _, b := range bounds {
+		if _, set := schema[b.keyword]; !set {
+			continue
+		}
+		if !typeAllowsAny(schema["type"], b.types) {
+			*errs = append(*errs, fmt.Errorf("%s: schema sets %q but its type %v can never carry that bound — the bound would silently do nothing", where, b.keyword, schema["type"]))
+			return
+		}
+	}
 	if n, ok := schema["minItems"].(float64); ok {
-		if arr, isArr := doc.([]any); !isArr || len(arr) < int(n) {
+		if arr, isArr := doc.([]any); isArr && len(arr) < int(n) {
 			*errs = append(*errs, fmt.Errorf("%s: expected at least %d items", where, int(n)))
 		}
 	}
 	if n, ok := schema["minLength"].(float64); ok {
-		if s, isStr := doc.(string); !isStr || len(s) < int(n) {
+		if s, isStr := doc.(string); isStr && len(s) < int(n) {
 			*errs = append(*errs, fmt.Errorf("%s: expected a string of at least %d characters", where, int(n)))
 		}
 	}
 	if n, ok := schema["minimum"].(float64); ok {
-		if num, isNum := doc.(float64); !isNum || num < n {
+		if num, isNum := doc.(float64); isNum && num < n {
 			*errs = append(*errs, fmt.Errorf("%s: %v is below minimum %v", where, doc, n))
 		}
 	}
@@ -303,6 +319,44 @@ func ValidateWorkerResultFile(schemaPath, resultPath string) error {
 		return fmt.Errorf("RESULT.json does not validate against %s: %w", schemaPath, err)
 	}
 	return nil
+}
+
+// bounds pairs each bound validateInto implements with the JSON types that
+// bound can apply to.
+var bounds = []struct {
+	keyword string
+	types   []string
+}{
+	{"minItems", []string{"array"}},
+	{"minLength", []string{"string"}},
+	{"minimum", []string{"integer", "number"}},
+}
+
+// typeAllowsAny reports whether a schema's "type" declaration lists any of
+// want. A schema that declares no type allows none of them: the value could
+// be of any type, so the bound could never be applied.
+func typeAllowsAny(t any, want []string) bool {
+	declared := []any{}
+	switch v := t.(type) {
+	case string:
+		declared = []any{v}
+	case []any:
+		declared = v
+	default:
+		return false
+	}
+	for _, d := range declared {
+		s, isStr := d.(string)
+		if !isStr {
+			continue
+		}
+		for _, w := range want {
+			if s == w {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func typeMatches(doc any, t any) bool {
