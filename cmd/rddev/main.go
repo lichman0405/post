@@ -67,7 +67,7 @@ tasks/tasks.json and tasks/task_status.json in the current directory) and
 --run-id ID (default: a fresh run id is generated and reported).
 
 The four-gate loop (T0012): G1 runs at worker collect; G2/G3 run via
-rddev gate run (G2 = CI's exact six jobs); G4 is the merge gate asserted by
+rddev gate run (G2 = CI's exact jobs); G4 is the merge gate asserted by
 rddev git/pr, which refuse while any required CI job is red or missing.
 rddev workflow TASK resumes an interrupted Supervisor session from disk alone.
 

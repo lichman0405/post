@@ -189,6 +189,20 @@ func TestCheckMergeGateGreen(t *testing.T) {
 	if res.Status != "passed" {
 		t.Fatalf("merge gate = %s, reasons %v", res.Status, res.Reasons)
 	}
+
+	// The G4 check line must describe the spec it actually read. It once said
+	// "the six required CI jobs" while ci.yml had seven — a number written into
+	// a message is a claim that decays. This fixture has exactly two, so a
+	// literal that does not come from the spec is caught here.
+	checks := strings.Join(res.Checks, "\n")
+	if !strings.Contains(checks, "(2 required CI jobs)") {
+		t.Errorf("the G4 check does not report the spec's own job count:\n%s", checks)
+	}
+	for _, job := range []string{"job-a", "job-b"} {
+		if !strings.Contains(checks, job) {
+			t.Errorf("the G4 check does not name %s:\n%s", job, checks)
+		}
+	}
 }
 
 // TestCheckMergeGateRedScenarios walks the failure matrix: each single

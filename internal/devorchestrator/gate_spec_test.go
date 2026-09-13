@@ -55,7 +55,7 @@ func TestGatesSpecSyncsWithCIWorkflow(t *testing.T) {
 	// The required-jobs list is the G4 assertion's backbone: every CI job,
 	// exactly the CI jobs, in canonical order.
 	if !equalStrings(spec.RequiredJobs, []string{"spec-validation", "task-state", "go", "web", "python", "migration-integration", "acceptance"}) {
-		t.Errorf("required_jobs = %v, want the six CI jobs in canonical order", spec.RequiredJobs)
+		t.Errorf("required_jobs = %v, want ci.yml's jobs in canonical order", spec.RequiredJobs)
 	}
 }
 
@@ -131,7 +131,7 @@ func TestGateSpecLoadValidation(t *testing.T) {
 		}
 	}
 
-	// G2 must run the same six jobs (the exact-steps requirement).
+	// G2 must run the same jobs (the exact-steps requirement).
 	jobs, err := spec.JobsForGate("G2", "T0000")
 	if err != nil {
 		t.Fatal(err)
