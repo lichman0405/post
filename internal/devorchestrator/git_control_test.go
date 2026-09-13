@@ -438,6 +438,8 @@ func TestAMergeRefusalSaysWaitOrDecisionAndNeverBoth(t *testing.T) {
 		{"PENDING", true, "still running: a wait"},
 		{"QUEUED", true, "not started yet: a wait"},
 		{"IN_PROGRESS", true, "still running: a wait"},
+		{"WAITING", true, "held by an environment or concurrency gate: still running, a wait"},
+		{"REQUESTED", true, "requested but not started: a wait"},
 		{"EXPECTED", true, "required but not posted yet: a wait"},
 		{"FAILURE", false, "finished red: a decision — this is #139"},
 		{"ERROR", false, "finished red: a decision"},
@@ -497,6 +499,67 @@ func TestAMergeRefusalSaysWaitOrDecisionAndNeverBoth(t *testing.T) {
 				if strings.Contains(err.Error(), checksNotYet) {
 					t.Errorf("a decision carried the wait wording, so it will be retried forever:\n  %v", err)
 				}
+			}
+		})
+	}
+}
+
+// gh does not collapse same-named entries, and it lists them newest-first, so
+// the obvious map[name]=state is last-wins and a PENDING entry can overwrite a
+// FAILURE of the same name. That reads a red check as a wait: #139 again, by a
+// road the two-sentence split does not close. The classification must therefore
+// not depend on which entry came last.
+func TestASameNamedEntryCannotHideARedCheck(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+		want string // "green", "wait" or "decision"
+		why  string
+	}{
+		{"a red then a pending, in gh's newest-first order",
+			`[{"name":"job-a","state":"FAILURE"},{"name":"job-a","state":"PENDING"}]`,
+			"decision", "the newer entry is PENDING but the same name already finished red"},
+		{"a pending then a red",
+			`[{"name":"job-a","state":"PENDING"},{"name":"job-a","state":"FAILURE"}]`,
+			"decision", "the red must decide however the entries are ordered"},
+		{"a green then a red",
+			`[{"name":"job-a","state":"SUCCESS"},{"name":"job-a","state":"FAILURE"}]`,
+			"decision", "a later green does not undo a red of the same name"},
+		{"a red then a green",
+			`[{"name":"job-a","state":"FAILURE"},{"name":"job-a","state":"SUCCESS"}]`,
+			"decision", "a green does not undo an earlier red of the same name"},
+		{"a green and a still-running duplicate",
+			`[{"name":"job-a","state":"SUCCESS"},{"name":"job-a","state":"PENDING"}]`,
+			"wait", "nothing finished red, but the name is not settled yet"},
+		{"both green",
+			`[{"name":"job-a","state":"SUCCESS"},{"name":"job-a","state":"SUCCESS"}]`,
+			"green", "both entries green is the only way this name counts as green"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			binDir := t.TempDir()
+			script := "#!/bin/sh\n" +
+				"case \"$1 $2\" in\n" +
+				"  \"pr checks\") printf '%s' '" + tc.json + "';;\n" +
+				"esac\nexit 0\n"
+			if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			err := assertRequiredChecksGreen(t.TempDir(), "task/T0001-x", []string{"job-a"})
+			if tc.want == "green" {
+				if err != nil {
+					t.Fatalf("every entry for job-a is green but the merge refused: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("job-a %s and the merge was allowed (%s)", tc.json, tc.why)
+			}
+			if got := ciStillRunning(err.Error()); got != (tc.want == "wait") {
+				t.Errorf("job-a is %s (%s), so the driver should read this as a %s, but the refusal read as wait=%v:\n  %v",
+					tc.json, tc.why, tc.want, got, err)
 			}
 		})
 	}

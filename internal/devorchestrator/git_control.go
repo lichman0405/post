@@ -237,21 +237,6 @@ func runGhJSON(dir string, args ...string) ([]byte, error) {
 	return out, nil
 }
 
-// assertRequiredChecksGreen refuses to merge while the PR's required checks
-// are not all green ON GITHUB.
-//
-// The four-gate assertion reads records written by the LOCAL G2 run, which
-// executes CI's steps on this machine. That is a faithful replica, not the
-// thing itself: a runner image differs, a step can behave differently there,
-// and the historical defect this tooling exists to prevent was a merge that
-// happened while GitHub's own CI was red. The local record can therefore be
-// green while the PR is red, and the merge must refuse on the PR.
-//
-// It refuses with one of two sentences, and they are not interchangeable: a
-// check that has not finished is a wait the driver retries, while a check that
-// has finished red is a decision it hands to the Supervisor. Both refuse; only
-// the reason differs. See the constants above for why that distinction is
-// load-bearing rather than cosmetic.
 // A merge refusal says one of two things, and which one it says decides whether
 // the driver waits or escalates. `rddev pr merge` runs as a child process, so
 // that classification cannot travel as a Go error type — it travels as this
@@ -266,6 +251,16 @@ func runGhJSON(dir string, args ...string) ([]byte, error) {
 // gate was green, so nothing else interceded.
 //
 // The names say which is which, and neither string may contain the other.
+//
+// That disjointness is necessary but not sufficient, and the remaining hole is
+// a deliberate acceptance rather than an oversight: the refusal interpolates
+// the check names it is talking about, so a required check deliberately named
+// "the PR's required checks have not all finished" would put both phrases in a
+// decision and read as a wait. Closing it needs a sentinel the interpolated
+// text cannot fabricate — a distinct exit code, say — which is a change to the
+// command's contract rather than to this string. Left open and recorded
+// (L1-20260914-17); the trigger is a self-inflicted check name and the symptom
+// is a task that stops advancing visibly, not a merge that goes wrong.
 const (
 	// checksNotYet is the wait: every required check is still running or has
 	// not been reported yet.
@@ -293,14 +288,40 @@ const noChecksReported = "no checks reported"
 // A state GitHub adds later falls through to the refusing side and so lands in
 // escalate rather than wait. That direction is deliberate: an unfamiliar state
 // treated as a wait reproduces #139 silently, whereas one treated as a decision
-// asks the Supervisor. EXPECTED is included because it is gh's name for a
-// required check that has not been posted yet.
+// asks the Supervisor.
+//
+// "Unfamiliar" means genuinely unfamiliar, though, and the first version of this
+// set was wrong about which states those are: WAITING and REQUESTED are in the
+// check-run status vocabulary GitHub documents today (reserved for Actions) and
+// gh prints them verbatim, so leaving them out did not fall safe — it took a
+// check that was plainly still running and escalated it to the Supervisor, a
+// refusal the previous single-sentence form would have retried. EXPECTED is
+// gh's name for a required check that has not been posted yet. With these six,
+// the set is exactly what gh's own output buckets as pending.
 func checkStateWorthWaitingFor(state string) bool {
 	switch state {
-	case "PENDING", "QUEUED", "IN_PROGRESS", "EXPECTED":
+	case "PENDING", "QUEUED", "IN_PROGRESS", "EXPECTED", "WAITING", "REQUESTED":
 		return true
 	}
 	return false
+}
+
+// stateSeverity orders states by how much they must not be waited past: 0 is
+// green, 1 is not finished yet, 2 is finished and not green.
+//
+// It exists to fold the entries that share a name. gh returns one entry per
+// check run and does not collapse same-named ones, and its array is ordered
+// newest-first — so a last-wins map lets a PENDING entry hide a FAILURE of the
+// same name, which reads a red check as a wait and is #139 arriving by another
+// road. Taking the maximum over a name means no ordering can hide a red.
+func stateSeverity(state string) int {
+	switch {
+	case state == "SUCCESS":
+		return 0
+	case checkStateWorthWaitingFor(state):
+		return 1
+	}
+	return 2
 }
 
 // ciStillRunning reports whether a merge refusal is a "not yet" rather than a
@@ -312,6 +333,21 @@ func ciStillRunning(refusal string) bool {
 		strings.Contains(refusal, noChecksReported)
 }
 
+// assertRequiredChecksGreen refuses to merge while the PR's required checks
+// are not all green ON GITHUB.
+//
+// The four-gate assertion reads records written by the LOCAL G2 run, which
+// executes CI's steps on this machine. That is a faithful replica, not the
+// thing itself: a runner image differs, a step can behave differently there,
+// and the historical defect this tooling exists to prevent was a merge that
+// happened while GitHub's own CI was red. The local record can therefore be
+// green while the PR is red, and the merge must refuse on the PR.
+//
+// It refuses with one of two sentences, and they are not interchangeable: a
+// check that has not finished is a wait the driver retries, while a check that
+// has finished red is a decision it hands to the Supervisor. Both refuse; only
+// the reason differs. See the constants above for why that distinction is
+// load-bearing rather than cosmetic.
 func assertRequiredChecksGreen(repoRoot, branch string, required []string) error {
 	if len(required) == 0 {
 		return nil
@@ -329,7 +365,9 @@ func assertRequiredChecksGreen(repoRoot, branch string, required []string) error
 	}
 	state := map[string]string{}
 	for _, c := range checks {
-		state[c.Name] = c.State
+		if prev, seen := state[c.Name]; !seen || stateSeverity(c.State) > stateSeverity(prev) {
+			state[c.Name] = c.State
+		}
 	}
 	var missing, waiting, bad []string
 	for _, want := range required {
