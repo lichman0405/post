@@ -232,7 +232,24 @@ func Collect(opts *CollectOpts) (*CollectReport, error) {
 	if err != nil {
 		return report, err
 	}
-	newRefs := newRefsSince(rec.RefsBefore, currentRefs)
+	// Only the TASK NAMESPACE is judged. The intended risk is a Worker turning
+	// its work into a ref, and that would land under refs/heads/task/**. Watched
+	// the other way round — "any new ref anywhere" — the check fires on the
+	// Supervisor's own pull-request branches, which are created during runs
+	// constantly: the first version of this rejected T0201 because PR #96's
+	// branch appeared while its Worker ran. A gate that fires on every run is as
+	// broken as one that never fires, and this one had the rule inverted
+	// relative to its purpose.
+	taskRefs := map[string]bool{}
+	for _, r := range newRefsSince(rec.RefsBefore, currentRefs) {
+		if trackedRef(r) {
+			taskRefs[r] = true
+		}
+	}
+	newRefs := make([]string, 0, len(taskRefs))
+	for r := range taskRefs {
+		newRefs = append(newRefs, r)
+	}
 	sort.Strings(newRefs)
 	if len(newRefs) > 0 {
 		fail("refs", fmt.Sprintf("new ref(s) created during the run: %s — creating refs is Git control-plane", strings.Join(newRefs, ", ")))
@@ -589,4 +606,12 @@ func newRefsSince(before, current []string) []string {
 		}
 	}
 	return out
+}
+
+// trackedRef reports whether a snapshot entry names a ref whose creation is a
+// Worker capability the guard denies — the task namespace. Everything else a
+// new ref could be, including every pull-request branch the Supervisor opens
+// while a Worker runs, is not the Worker's doing.
+func trackedRef(entry string) bool {
+	return strings.HasPrefix(refName(entry), "refs/heads/task/")
 }

@@ -492,3 +492,25 @@ func waitForEnvironWithoutMarker(t *testing.T, pid int, marker string) {
 	}
 	t.Fatalf("pid %d still carries %s after 10s — the fixture was supposed to scrub it before exec", pid, marker)
 }
+
+// Only the task namespace is judged. The intended risk is a Worker turning its
+// work into a ref, which would land under refs/heads/task/**; watched the other
+// way round the check fires on the Supervisor's own pull-request branches, which
+// are created during runs constantly. T0201 was rejected because PR #96's branch
+// appeared while its Worker ran — a gate that fires on every run is as broken as
+// one that never fires. (The rule had been inverted relative to its purpose.)
+func TestOnlyTaskNamespaceRefsAreJudged(t *testing.T) {
+	if !trackedRef("refs/heads/task/T0201-rsg-schemas 1111111111111111111111111111111111111111") {
+		t.Error("a ref in the task namespace is not judged — a Worker could turn its work into a branch unnoticed")
+	}
+	for _, r := range []string{
+		"refs/heads/feat/rebaseline 2222222222222222222222222222222222222222",
+		"refs/heads/fix/driver 3333333333333333333333333333333333333333",
+		"refs/heads/main 4444444444444444444444444444444444444444",
+		"refs/remotes/origin/main 5555555555555555555555555555555555555555",
+	} {
+		if trackedRef(r) {
+			t.Errorf("%q is judged as a Worker-created ref — that is the Supervisor's own work, and every pull request creates one", r)
+		}
+	}
+}

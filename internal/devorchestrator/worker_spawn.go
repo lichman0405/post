@@ -585,7 +585,11 @@ func refsSnapshot(repoRoot string) ([]string, error) {
 		if l == "" {
 			continue
 		}
-		if strings.HasPrefix(l, "refs/remotes/") || strings.HasPrefix(l, "refs/heads/task/") {
+		// refs/remotes/** is shared Supervisor state (fetches, other clones).
+		// refs/heads/task/** is INCLUDED: it is the namespace a Worker would
+		// plausibly reach for, and the task's own branch is already in the
+		// snapshot because it is created before this runs.
+		if strings.HasPrefix(l, "refs/remotes/") {
 			continue
 		}
 		kept = append(kept, l)
