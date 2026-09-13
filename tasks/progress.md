@@ -1,15 +1,20 @@
 # 开发进度
 
 状态：**P0 完成**（14/14）、**P1 完成**（10/10 merged）；P2/P3/P6 各有 1 个任务在飞。
-最后更新：2026-09-13 21:30（driver 停摆 4 小时后已恢复；**4 项 orchestrator 变更待人工批准**，见下）
+最后更新：2026-09-13 23:20（**5 项 orchestrator 变更待人工批准**；#108 已合入，CI 变绿的路径通了）
 
 ## 当前阶段
 
-- P2 — T0201：独立 review **approve** ✓，只因 main 前进而 accept 被拒 ✓ →
-  **已 rebaseline 到 `42379ea`**（38 个文件 carried ✓），worker 返工中 ✓
-- P6 — T0603：独立 review **approve** ✓，同上 → **已 rebaseline 到 `42379ea`**
-  （24 个文件 carried ✓，重新生成 `SPEC_VERSION.json` + `specs/database/postgres.sql` ✓），worker 返工中 ✓
-- P3 — T0301：collect 拒绝是**真阳性**（main 自己的 G3 脚本在被评测的树里提交 ✓）→
+- **P2 — T0201**：CI 全绿 ✓（8/8）—— 挡住它的那条 flake 是 #108 修的 ✓。
+  我把 main 合进任务分支后，**四门断言拒绝了 push** ✓：记录在案的 review 针对的代码身份
+  （`9cf62620f396…`）已不是当前树（`0135d3b8e60a…`）✓ —— 这条拒绝是对的 ✓，
+  "判决不能活得比它judged的代码久" ✓。已 `rddev review spawn T0201` 重派独立 review ✓，等它回来。
+- **P6 — T0603**：G3 红有**两个**原因 ✓。①`gitea-real-services` 一直红，因为
+  **driver 进程的环境里没有 `POST_GITEA_TOKEN`** ✓ —— 任务 worktree 里没有 `.env.dev` ✓，
+  脚本的两条取 token 路径都走不通 ✓。已带 token 重启 driver ✓（worker 侧仍然被剥离 ✓，
+  `worker_env.go` 的剥离清单里有它 ✓）。②`rsg-real-services` 红是因为 **P2 的接口还没写** ✓，
+  这是设计如此 ✓（门自己写着"P2 builds them"）✓ —— 所以 T0603 仍卡在 P2 链上 ✓。
+- **P3 — T0301**：collect 拒绝是**真阳性**（main 自己的 G3 脚本在被评测的树里提交 ✓）→
   **阻塞在 #99** ✓，交付完好保存在 worktree ✓
 - P0 / P1 已全部合并 ✓
 
@@ -41,12 +46,20 @@ diff 改动了既定安全边界 / 权限模型 / 核心架构原则的范畴，
 |---|---|---|
 | #98 | Worker 权限模型 spec 的 ref 归因规则 + ref 台账（`internal/devorchestrator/ref_ledger.go`） | **已合入 `e599931`**，待事后复核 |
 | #100 | driver 对"被取代的 review"重派而非停摆（L1-20260913-17） | **已合入 `43a63fb`**（owner 于 08:55Z 合入）|
-| #99 | G3 脚本 `tests/acceptance/gitea-real-services-e2e.sh` 不再改动被测树 + 非侵入性断言（L1-20260913-16） | 第七轮 review 已答完、CI 绿、**等合入** —— 它同时是 T0301 的解除条件 |
-| #103 | rebaseline 拒绝时把任务的工作原样放回 + 一条路径一种拼写 | 第七轮已答完、CI 绿、**待 delta review 回来** |
+| #99 | G3 脚本 `tests/acceptance/gitea-real-services-e2e.sh` 不再改动被测树 + 非侵入性断言（L1-20260913-16） | **第九轮已推**（`cb0c9e3` + 合并 main `d29d90c`）、CI 绿、**等合入** —— 它同时是 T0301 的解除条件 |
+| #103 | rebaseline 拒绝时把任务的工作原样放回 + 一条路径一种拼写 | **第九轮已推**（`101fdc7`）、CI 绿（8/8）、**等合入** —— 它同时是 T0301 交付被毁的解药 |
 | #104 | 门的消息不再声称一个规范决定的任务数 | CI 绿、**等合入** |
 | #105 | 一次运行的开始必须能排序一个判决 | CI 绿、**等合入** |
+| #106 | orchestrator 误读两份文档的判决/变更 | CI 绿、**等合入** |
+| #108 | （**已自行合入 `b00c9ee`**）残留检测的等待等的是"读到了什么"，而不是"exec 完成了没有" | 测试专属改动 ✓ 不碰门语义 ✓ 六项条件满足 ✓ CI 全绿 ✓ review 的四条意见全部落实 ✓ |
 
-**合入顺序**：#104 / #105 → **#99** → **#103** ✓。
+**合入顺序**：#104 / #105 → **#99** → **#103** ✓（#106 独立 ✓）。
+
+**★ 2026-09-13 23:20：driver 带着 `POST_GITEA_TOKEN` 重启了 ✓。** 原因是 G3 的 `gitea-real-services`
+一直在红 ✓，而红的理由与产品无关 ✓：门在**任务的 worktree** 里跑 ✓，那里没有 `.env.dev` ✓，
+`POST_GITEA_TOKEN` 也不在 driver 的环境里 ✓ —— 三条取 token 的路全断 ✓。
+现在只把这一条变量给了 driver ✓（这正是 CI 给它的方式 ✓）；worker 拿到它的路仍是封的 ✓
+（`strippedEnvVars` 里有 `POST_GITEA_TOKEN` ✓，spawn 后还会断言它不在 ✓）。
 
 **★ 更正（21:50 实测）：GitHub 的 `MERGEABLE` 是过期的 ✓。**
 把四条分支各自对着当前 main 做一次真实合并（scratch worktree ✓，已删除 ✓）：
