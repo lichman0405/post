@@ -171,10 +171,21 @@ $out"
     next="$(dispatchable | head -1)"
     [[ -z "$next" ]] && break
     log "dispatch $next"
-    if ! out="$(rddev task ready "$next" 2>&1)"; then
-      STATUS="decision"; DECISION="ready refused for $next:
+    # A task left `ready` by an earlier attempt is already where `ready` would
+    # put it; re-issuing the transition is an illegal ready->ready and would
+    # stop the loop for no reason.
+    st="$(python3 - "$next" <<'PYEOF'
+import json, sys
+t = sys.argv[1]
+print(json.load(open("tasks/task_status.json")).get("tasks", {}).get(t, {}).get("status", "todo"))
+PYEOF
+)"
+    if [[ "$st" == "todo" ]]; then
+      if ! out="$(rddev task ready "$next" 2>&1)"; then
+        STATUS="decision"; DECISION="ready refused for $next:
 $out"
-      break 2
+        break 2
+      fi
     fi
     if ! out="$(rddev worker spawn "$next" --timeout 90m 2>&1)"; then
       STATUS="decision"; DECISION="spawn refused for $next (a phase with no G3 refuses here):
