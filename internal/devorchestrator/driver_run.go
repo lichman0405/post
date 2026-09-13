@@ -186,6 +186,15 @@ func (o *DriveOpts) runningTasks() ([]string, error) {
 
 // tick performs at most one action per task and returns whether it did anything.
 func (o *DriveOpts) tick(st *DriverStatus) (bool, error) {
+	// Reconcile every tick. The registry's exit_status is written by
+	// DiscoverWorkers, not by the reaper, so a driver that only reconciles at
+	// startup never notices a Worker exiting — it reports "still working"
+	// forever. That was masked while the Supervisor happened to run `rddev
+	// status` by hand, which reconciles as a side effect: the driver depended on
+	// someone else to tell it the news.
+	if _, err := DiscoverWorkers(o.RepoRoot); err != nil {
+		return false, fmt.Errorf("reconciling Workers: %w", err)
+	}
 	if err := staleDecisions(o.RepoRoot); err != nil {
 		return false, err
 	}
