@@ -2637,8 +2637,21 @@ author/committer identity 由**提交者本人**选择 ✓，`git -c user.email=
 - 它给 `README.md` 追加的那一行是 **"should not land"** ✓。
 
 两条字符串都来自 `tests/acceptance/gitea-real-services-e2e.sh` 自己 ✓：脚本第 101 行 `cd "$ROOT"`，
-`ROOT` 是脚本的 `../..`；当这个脚本作为 G3 步骤运行时，**cwd 就是被测任务的 worktree** ✓，
-于是"直接 push 到受保护的 main 必须被拒"那段检查，是在**被测分支上真的提交了一次** ✓：
+`ROOT` 是脚本的 `../..`；**脚本不改 cwd 的来处，只认自己文件所在的那棵树** ✓，
+于是"直接 push 到受保护的 main 必须被拒"那段检查，是在**那棵树上真的提交了一次** ✓：
+
+> **★ 事后更正（同日，晚些时候实测）：原文这里写的是"当这个脚本作为 G3 步骤运行时，cwd 就是
+> 被测任务的 worktree"，这句是错的。** 读 `gate_run.go:509` 起：G3 在**一次性集成树**里跑 ✓
+> （`worktree add --detach <main>` ✓，再把该任务的改动以 patch 打进去 ✓，跑完删除 ✓），
+> **不在任务的 worktree 里** ✓。另有两条实测佐证：①T0301 **没有 g3 记录** ✓
+> （`gates/T0301/` 只有 collect/accept/review/verdict ✓），它的 G3 根本没跑到 ✓，
+> 所以那次提交**不是 G3 干的** ✓；②T0603 的 G3 记录里只跑了一个 job ✓
+> （`rsg-real-services` 失败后就没往下跑 ✓），`gitea-real-services` 那一项根本没执行 ✓。
+> **结论不变的部分**：那条 `git commit -am` 就在 main 自己的脚本里 ✓，谁在那棵树里跑它，
+> 就在那棵树里留下一个提交和一行 `should not land` ✓。**变了的部分**：跑它的是谁，
+> 对 T0301 我没有直接证据 ✓（Worker 当时正在改这个脚本 ✓，最可能是它自己跑了一次验证 ✓，
+> 但这是推断 ✓）；本文下面"三重危害"里对 G3 的归因要按这一条读 ✓。
+> 危害本身没有缩水：**门报告的树，不是它收到的那棵树** ✓ —— 换成集成树也一样成立 ✓。
 
 ```bash
 echo "should not land" >> README.md
