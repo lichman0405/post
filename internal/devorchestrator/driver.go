@@ -87,6 +87,17 @@ func (s *DriverStatus) Alive(now time.Time) bool {
 	return now.Sub(hb) < StaleAfter
 }
 
+// driverFile is the syscall flag that makes an open refuse to follow a symlink.
+//
+// The driver's files live under .rddev/runtime/, which the Worker guard blocks
+// for both reads and writes, so a Worker cannot plant a link there today. The
+// guard is not the reason to skip this: the driver runs as the Supervisor, and
+// an open that follows a link would truncate or disclose whatever it pointed at
+// with the Supervisor's reach. The question "who controls this path" has the
+// same answer here as it did for the review diff and the driver's scratch
+// files — so the open refuses rather than trusting the answer to stay the same.
+const noFollow = syscall.O_NOFOLLOW
+
 // DriverLock is a held exclusive lock on the driver slot.
 type DriverLock struct{ f *os.File }
 
@@ -97,9 +108,11 @@ func AcquireDriverLock(repoRoot string) (*DriverLock, error) {
 	if err := os.MkdirAll(filepath.Dir(paths.Lock), 0o755); err != nil {
 		return nil, fmt.Errorf("creating the driver runtime dir: %w", err)
 	}
-	f, err := os.OpenFile(paths.Lock, os.O_CREATE|os.O_RDWR, 0o644)
+	// O_NOFOLLOW: a symlink at the lock path is an error, not a path to follow.
+	// Truncating through one would destroy the linked file.
+	f, err := os.OpenFile(paths.Lock, os.O_CREATE|os.O_RDWR|noFollow, 0o644)
 	if err != nil {
-		return nil, fmt.Errorf("opening the driver lock: %w", err)
+		return nil, fmt.Errorf("opening the driver lock %s (refusing to follow a symlink): %w", paths.Lock, err)
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		// Whoever holds it wrote their pid into the lock file.
@@ -134,6 +147,9 @@ func WriteDriverStatus(repoRoot string, st *DriverStatus) error {
 
 // ReadDriverStatus reads the heartbeat; nil when none has ever been written.
 func ReadDriverStatus(repoRoot string) (*DriverStatus, error) {
+	if err := refuseSymlink(DriverFilesAt(repoRoot).Status); err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(DriverFilesAt(repoRoot).Status)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -166,6 +182,9 @@ type Decision struct {
 
 // ReadDecisions returns the open decisions, newest last.
 func ReadDecisions(repoRoot string) ([]Decision, error) {
+	if err := refuseSymlink(DriverFilesAt(repoRoot).Decisions); err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(DriverFilesAt(repoRoot).Decisions)
 	if os.IsNotExist(err) {
 		return []Decision{}, nil
@@ -268,4 +287,22 @@ func staleDecisions(repoRoot string) error {
 		return nil
 	}
 	return writeDecisions(repoRoot, keep)
+}
+
+// refuseSymlink rejects a driver path that is a symlink. Reads through one
+// would pull an arbitrary file into the status output; the writes go through a
+// temp file and a rename, which replaces the link rather than following it, so
+// only the read side needs saying out loud.
+func refuseSymlink(path string) error {
+	st, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if st.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to read %s: it is a symlink, and the driver will not follow one with the Supervisor's reach", path)
+	}
+	return nil
 }

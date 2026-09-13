@@ -113,3 +113,56 @@ func TestDecisionsSurviveAndClearThemselves(t *testing.T) {
 	}
 	_ = os.Remove(filepath.Join(root, ".rddev", "runtime", "decisions.json"))
 }
+
+// The driver's files live under .rddev/runtime/, which the Worker guard blocks
+// for reads and writes — so a Worker cannot plant a symlink there today. This is
+// not about today: the driver runs as the Supervisor, and an open that follows a
+// link would truncate or disclose whatever it pointed at with the Supervisor's
+// reach. Verified both ways, because a refusal that never fires is not a guard.
+func TestTheDriverRefusesToFollowASymlink(t *testing.T) {
+	root := t.TempDir()
+	paths := DriverFilesAt(root)
+	if err := os.MkdirAll(filepath.Dir(paths.Status), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(t.TempDir(), "victim.json")
+	if err := os.WriteFile(victim, []byte(`{"pid":1,"state":"planted"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The lock: truncating through a link would destroy the linked file.
+	if err := os.Symlink(victim, paths.Lock); err != nil {
+		t.Skipf("symlinks unavailable here: %v", err)
+	}
+	if _, err := AcquireDriverLock(root); err == nil {
+		t.Fatal("the driver lock followed a symlink — it would truncate whatever the link pointed at")
+	}
+	if b, _ := os.ReadFile(victim); !strings.Contains(string(b), "planted") {
+		t.Fatal("the linked file was modified by the refused lock open")
+	}
+
+	// The status and decisions reads: following one pulls an arbitrary file
+	// into the Supervisor's view.
+	for _, p := range []string{paths.Status, paths.Decisions} {
+		_ = os.Remove(p)
+		if err := os.Symlink(victim, p); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReadDriverStatus(root); err == nil && p == paths.Status {
+			t.Errorf("%s was read through a symlink", p)
+		}
+		if _, err := ReadDecisions(root); err == nil && p == paths.Decisions {
+			t.Errorf("%s was read through a symlink", p)
+		}
+	}
+
+	// And a real file in the same place still works, so the guard is not just
+	// refusing everything.
+	_ = os.Remove(paths.Status)
+	if err := WriteDriverStatus(root, &DriverStatus{PID: 7, HeartbeatAt: time.Now().UTC().Format(time.RFC3339)}); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := ReadDriverStatus(root); err != nil || st == nil || st.PID != 7 {
+		t.Fatalf("a genuine status file was refused: %v %+v", err, st)
+	}
+}
