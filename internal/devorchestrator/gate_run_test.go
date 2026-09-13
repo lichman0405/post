@@ -160,6 +160,21 @@ func mergeGateFixtureWithJobs(t *testing.T, jobs []string) (repoRoot, specPath s
 		defs[i] = quoted[i] + `: {"steps": [{"run": "true"}]}`
 	}
 	list := strings.Join(quoted, ", ")
+	// The other three lists in this spec are deliberately NOT equal to
+	// required_jobs. They were, and that made the assertion below weaker than it
+	// reads: a line built from G2's runs_jobs, from G4's asserts_jobs, or from
+	// the sorted keys of the jobs map prints exactly the same text as one built
+	// from required_jobs, so all three pass — including the third, which against
+	// the shipped spec prints ten jobs where required_jobs has seven. A fixture
+	// whose lists are equal by construction cannot tell "reads the field it
+	// names" from "reads something that happens to agree with it", which is the
+	// whole question. Reversed here, plus a job defined and not required, so each
+	// wrong source prints something visibly different.
+	rev := make([]string, len(quoted))
+	for i := range quoted {
+		rev[i] = quoted[len(quoted)-1-i]
+	}
+	revList := strings.Join(rev, ", ")
 	repoRoot, specPath = writeGateSpec(t, fmt.Sprintf(`{
   "version": 1,
   "required_jobs": [%s],
@@ -172,7 +187,7 @@ func mergeGateFixtureWithJobs(t *testing.T, jobs []string) (repoRoot, specPath s
   "jobs": {%s},
   "review": {"required_for_merge": false},
   "task_overrides": {}
-}`, list, list, list, strings.Join(defs, ", ")))
+}`, list, revList, revList, strings.Join(append(defs, `"job-extra": {"steps": [{"run": "true"}]}`), ", ")))
 	taskID := "T0001"
 	writeCollect(t, repoRoot, taskID, "coll-1", "ok", "2026-09-12T10:00:00Z")
 	passed := make([]GateJobResult, len(jobs))
