@@ -47,6 +47,11 @@ type GateJob struct {
 	// This exists because a chain gate wired onto tasks that cannot satisfy it
 	// is red by construction: the task stays un-acceptable however good its
 	// work is, and the failure is indistinguishable from a real one.
+	//
+	// It is meaningful only for the jobs that can be wired onto a task. The
+	// required jobs (spec.RequiredJobs) run on every push against the
+	// repository, never against a task's tree, so they leave it empty by
+	// definition and the test asserts that they do.
 	RequiresTasks []string `json:"requires_tasks,omitempty"`
 }
 

@@ -424,11 +424,13 @@ func TestEveryTaskScopeSatisfiesTheDerivedArtifactRule(t *testing.T) {
 //     depends on their own work, so the edge that would add the requirement
 //     closes a cycle.
 //
-// The check has two ways to be wrong, and both are checked rather than
-// assumed: a task carrying a job it cannot satisfy (the loop), and a job that
-// declares nothing at all (the pin after it). The second is the quieter one —
-// a new job running the very same product script, wired onto any task, with no
-// requires_tasks would leave the loop nothing to compare and pass by vacuity.
+// The check has three ways to be wrong, and all three are checked rather than
+// assumed: a task carrying a job it cannot satisfy (the loop); a job that
+// declares nothing at all, leaving the loop nothing to compare (the pin after
+// it); and a required job claiming work of its own, where the list would never
+// be consulted (the derivation). The middle one is the quieter of the first
+// two — a new job running the very same product script, wired onto any task,
+// with no requires_tasks would pass by vacuity.
 func TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt(t *testing.T) {
 	root := repoRootOf(t)
 	spec, err := LoadGateSpec(filepath.Join(root, DefaultGatesPath))
@@ -515,28 +517,43 @@ func TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt(t *testing.T) {
 	}
 	// A job that declares nothing is not exempt, it is unchecked: the loop
 	// above has nothing to compare, so wiring it onto any task passes. Every
-	// job must therefore either name the tasks whose work it asserts, or be
-	// listed here with the reason it grades something other than the product
-	// path a task builds. The list is exact in both directions, so a stale
-	// entry cannot quietly exempt a future job that reuses the name.
+	// job that can be wired onto a task must therefore either name the tasks
+	// whose work it asserts, or be listed here with the reason it grades
+	// something other than the product path. The list is exact in both
+	// directions, so a stale entry cannot quietly exempt a future job that
+	// reuses the name.
+	//
+	// The required (G2) jobs are neither listed nor asked: they are derived from
+	// spec.RequiredJobs because "declare nothing" is the correct answer for a
+	// job that runs against the repository on every push and never against a
+	// task's tree. Two rules, and hand-listing the seven derived names under one
+	// of them made the other unfirable — a new CI job was reported as an
+	// undeclared G3 job. What IS asserted about them is the converse, since
+	// requires_tasks on a job that runs everywhere would read as if it were
+	// consulted: a required job must declare nothing.
+	required := map[string]bool{}
+	for _, name := range spec.RequiredJobs {
+		required[name] = true
+	}
 	jobsThatGradeNoProductWork := map[string]string{
-		"spec-validation":       "machine-readable specs and the task DAG — repository files",
-		"task-state":            "DAG/state/test coverage — repository files",
-		"go":                    "fmt/vet/staticcheck/unit — the Go source, no running product",
-		"web":                   "typecheck/lint/unit/build — the frontend source",
-		"python":                "lint/type/test — the scientific adapter source",
-		"migration-integration": "migrations against a bare PostgreSQL — the schema, not the API",
-		"acceptance":            "the gate machinery's own e2e — scratch repos and fakes, no product instance",
-		"gitea-real-services":   "the Gitea INSTANCE's capabilities (provisioning, protection, webhooks) — the dev stack, not the task's API",
+		"gitea-real-services": "the Gitea INSTANCE's capabilities (provisioning, protection, webhooks) — the dev stack, not the task's API",
 	}
 	for name := range jobsThatGradeNoProductWork {
 		if _, defined := spec.Jobs[name]; !defined {
 			t.Errorf("jobsThatGradeNoProductWork names %q, which %s does not define — an exemption for a job that no longer exists, or a typo", name, DefaultGatesPath)
+			continue
+		}
+		if required[name] {
+			t.Errorf("jobsThatGradeNoProductWork exempts %q from naming the work it asserts, but %q is in spec.RequiredJobs: it runs against the repository on every push, so the exemption is dead weight that hides which of the two rules applies", name, name)
 		}
 	}
 	for name, job := range spec.Jobs {
 		why, exempt := jobsThatGradeNoProductWork[name]
 		switch {
+		case required[name]:
+			if len(job.RequiresTasks) > 0 {
+				t.Errorf("required job %q declares requires_tasks %v, but it runs against the repository on every push, not against a task's tree — nothing would ever consult the list, and its presence claims a check that does not happen", name, job.RequiresTasks)
+			}
 		case len(job.RequiresTasks) == 0 && !exempt:
 			t.Errorf("G3 job %q declares no requires_tasks, so nothing checks that the tasks carrying it can satisfy it: it would run against a tree that does not serve what it asserts, and this test would pass it. Name the tasks whose work it asserts, or add it to jobsThatGradeNoProductWork with the reason it grades something other than the product path", name)
 		case len(job.RequiresTasks) > 0 && exempt:
