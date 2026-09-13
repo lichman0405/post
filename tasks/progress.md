@@ -91,9 +91,9 @@ Supervisor 不再自行合入（本次已停止）。**T0301 / T0201 因此被�
 
 | Task | 状态 | 说明 |
 |---|---|---|
-| T0201 | verification | review verdict 绑定的代码指纹已被一次返工取代 → 等 **#100** 合入后 `rddev drive --clear-decision T0201`，driver 会重派 review |
-| T0301 | rejected | 拒绝的三条 check 全部由 G3 脚本污染被测树造成（L1-20260913-16）→ 等 **#99** 合入后 `rddev rebaseline T0301` + `worker rework` |
-| T0603 | running | 唯一失败项是已被 #98 证伪的 refs finding → 已 rebaseline 到 e599931 并返工，真实理由经 `SUPERVISOR-NOTE.md` 交付（L1-20260913-18） |
+| T0201 | running（返工中） | 独立 review **approve** ✓；只因 **#100 合入**使 main 前进 ✓、accept 拒绝而停 ✓ → **已 rebaseline 到 `42379ea`**（38 文件 carried ✓），worker 已在新基线上返工 ✓ |
+| T0301 | rejected（等 #99） | 拒绝的四条**全部不是 worker 的错** ✓：三条来自 main 自己的 G3 脚本在被评测的树里提交 ✓（= #99 的缺陷 ✓），一条来自**我自己**的分支 ✓（= 已删的 `f2170d1` ✓）→ 等 **#99** 合入后 `rddev rebaseline T0301` + `worker rework` ✓ |
+| T0603 | running（返工中） | 独立 review **approve** ✓；同样只因 main 前进而 accept 拒绝 ✓ → **已 rebaseline 到 `42379ea`**（24 文件 carried ✓，重新生成 `SPEC_VERSION.json` + `specs/database/postgres.sql` ✓），worker 已在新基线上返工 ✓ |
 
 ## 已关闭的 SPEC_BLOCKED
 
@@ -105,10 +105,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 - **T0301**：等 #99 合入。其 G3 脚本就是"改了被测树"的那个脚本，
   在 #99 落地前返工只会**再次**污染它自己的分支。
-- **T0201**：等 #100 合入。当前 review verdict 的描述对象已被取代，
-  唯一能解开的动作（重派 review）就在 #100 里。
-- **#99 / #100 需要 owner 批准**（见"治理状态"）。这是当前唯一的人工依赖。
-- 非阻塞但未关闭：`/readyz` 泄露内部拓扑（见"已知风险"）。
+- **#99 / #103 / #104 / #105 需要 owner 批准**（见"治理状态"）——
+  这是当前**唯一**的人工依赖 ✓。四者都已 review 完、CI 绿、`MERGEABLE` ✓。
+- 非阻塞但未关闭：`/readyz` 泄露内部拓扑（见"已知风险"）✓。
 
 ## 已知风险 / 需 owner 关注
 
