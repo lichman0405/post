@@ -3380,3 +3380,120 @@ error: internal/persistence/sqlc/querier.go: patch does not apply
 **同族第三次** ✓：`L1-20260913-19`（把自己推的当成查过的 ✓）、
 `L1-20260914-2`（给出处补了个过程 ✓）、这一次（把查空当成不存在 ✓）。
 形状一样 ✓：**我的结论总比证据硬** ✓，而且**总朝着让我显得更果断的方向** ✓。
+
+## L1-20260914-5 — 我带着一条 minor 覆盖缺口接受了 T0203，缺口另立 T0215
+
+T0203 的独立 review verdict = `approve` ✓（1 minor + 3 nit ✓）。minor 是：00025 的
+backfill（`UPDATE relations SET current_version_no = max(version_no)
+FROM relation_versions` ✓）从来没有在「升级前已经有 relation 行」的库上跑过 ✓ ——
+`TestUpgradePath` 迁的是空库 ✓，`TestAppendOnlyUpgradePath` 不种 relation 数据 ✓。
+reviewer 同时点名了先例：T0102 的 profiles backfill 在**同一个测试函数里**有一条
+「先种数据、再升到 head、然后断言 backfill 生效」的检查 ✓。
+
+**我逐条核对了，三条都成立** ✓：
+
+| # | 断言 | 核对方式 | 结果 |
+|---|---|---|---|
+| 1 | 先例属实 | 读 `tests/integration/migration_test.go:535` | ✓ `// T0102 data-level upgrade check`，种两个 pre-profile user，升到 head 后数 `profiles` 行 |
+| 2 | 缺口属实 | `grep -n "data-level upgrade check" tests/integration/migration_test.go` | ✓ **全文件只有这一条**（第 535 行） |
+| 3 | 缺口不是 T0203 独有 | `grep -n "INSERT INTO relation" tests/integration/migration_test.go` | ✓ 无输出：这个文件从不种 relation 行；00024 与 00025 的 backfill 是同一个形状 |
+
+**决定：接受，不返工。** 写在这里是因为它看起来像放水 ✓：
+
+- reviewer 自己把这条降级成 minor ✓，verdict 是 approve ✓。把一条被降级为 minor 的
+  覆盖缺口在 review 之后改判成 reject ✓，等于**事后收紧验收标准** ✓；§5.1 条件 4 要的是
+  「没有未解决的 review 意见」✓，不是「没有 minor」✓。
+- 单独把 T0203 打回去只会修好一半 ✓：已合并的 00024 还是同一个未验证的 backfill ✓。
+  **一条任务同时覆盖两个**比一次返工更值 ✓。
+- T0203 是 P2 的关键路径（T0204 → T0205 → T0207 → T0208 全等它 ✓），返工一圈还要重跑
+  一遍 review ✓，代价大于收益 ✓。
+
+**代价我认，并且写在能被找到的地方** ✓：补测落地之前 ✓，main 上这两个 backfill **只有
+catalog 级覆盖** ✓。为此做了三件事 ✓：
+
+1. **T0215**（deps = `T0203` ✓，scope 只有 `tests/**` ✓，`infra/migrations/**` 明确禁止 ✓）
+   承接两条迁移的数据级升级断言 ✓，验收标准写明「backfill 的 UPDATE 被删掉时断言必须变红」✓。
+   它在 17:51:38 已被 driver 自动派工 ✓，基线 = `e708de6`（当前 main）✓。
+2. **PR #125 的正文**加了 `Known gap` 一节 ✓。**说明：这一节是合并之后补上去的** ✓ ——
+   合并时正文只有一行 gate evidence ✓。补写记录不是改写历史 ✓，但读的人该知道正文晚于合并 ✓。
+3. 本条 ✓。
+
+**这一条与同族前三条的区别** ✓：`L1-20260914-2` / `-4` 是我把结论写得比证据硬 ✓，
+本条不是 ✓ —— 结论与证据一致 ✓，是**取舍** ✓。它上榜只因为一个理由 ✓：
+**凡是「我知道有缺口还是放它过去了」的决定 ✓，都必须留下带代价的那一行** ✓，
+否则它下次就会以「当时没人反对」的样子被引用 ✓。
+
+## L1-20260914-6 — 自动安全扫描报的 relation 越权：**成立但当前不可达**，补的是 DAG 的漏洞而不是代码
+
+自动安全扫描在已合并的 T0203（`internal/application/relations/service.go` ✓）上报了一条
+MEDIUM：`GetRelation` / `CreateVersion` / `ListVersionsByType` 只收一个 id ✓，
+不解析调用者、不校验它属于哪个 project ✓ —— 典型的 IDOR ✓。
+
+**我先把「能不能被利用」查清楚，再决定动手 ✓**：
+
+| 问题 | 证据 | 结论 |
+|---|---|---|
+| 有没有 HTTP 面？ | `cmd/api/` 只有 `audithttp authhttp orgshttp profilehttp projectshttp` ✓，无 relations ✓ | **没有入口** ✓ |
+| 谁能构造这个 service？ | `grep -rn "relations.NewService"` ✓ → 只有 `tests/integration/relation_repository_test.go:149` ✓ | **只有测试** ✓ |
+| 这是不是 T0203 漏做？ | `internal/application/relations/ports.go:75-76` ✓：「authz belongs to the **consuming API task**」✓（`sciobjects/ports.go:60` 同一句 ✓） | **是设计上的显式推迟** ✓ |
+| 推迟给了谁？ | DAG 里消费它的 API 任务是 **T0209**（RSG Query API ✓，deps 含 T0203 ✓）；对象侧是 **T0208** ✓ | 有归属 ✓ |
+| 那两个任务真接住了吗？ | T0209 只写了「permission-aware」✓ + 「private relation 不泄漏」✓；**T0208 一个字没提 authz** ✓ | **写路径没人接** ✓ |
+
+**所以真正的缺陷不在代码里 ✓，在 DAG 里** ✓：`ports.go` 把 authz 指派给「消费方 API 任务」✓，
+而**读路径只被含糊地提了一句、写路径根本无人认领** ✓。一句注释做的委托 ✓，
+如果没有一个任务接收 ✓，就是永久豁免 ✓。
+
+**我没有自己发明权限规则 ✓**，因为不需要 ✓ —— 规则已经存在且已在使用 ✓：
+`internal/authz` 有 `ActionReadPrivateProject` ✓ 与 `ActionWriteScientificState` ✓，
+`matrix.go:22/49` 已把两者映射到角色 ✓，
+`projects/service.go` 的 `requireRead` 就是现成范式（先解析 membership/role ✓，
+再 `authz.ClassOf(authenticated, role, false)` ✓）。把既有动作接到 relation 上属 **L1** ✓，
+不属于「创造权限模型」✓。**给出动作与范式的名字，是为了让 worker 没有空间自己发明一套** ✓。
+
+**做了两件事** ✓：给 **T0208**（写路径 ✓）和 **T0209**（读路径 ✓，并要求 traversal 的每一跳
+都带 project 范围 ✓，只过滤起点是这类漏洞最常见的漏网形状 ✓）各补了一条 requirement + 一条
+acceptance criteria ✓，`origin` 字段记下依据 ✓；本条目 ✓。
+
+**上报，但不阻塞 ✓**：这是安全相关的 ✓，owner 该知道 ✓ —— 但它不构成 `SPEC_BLOCKED` ✓，
+因为它不需要新规则 ✓；把它排进 T0208/T0209 是对**既有**规则的落实 ✓。
+
+**一处我不假装知道的** ✓：扫描建议的修法是「把 actor 象传进 service 并在每次读写前校验」✓，
+方向对 ✓，但**具体哪个角色可以写 scientific state 由矩阵决定，不由我决定** ✓ ——
+矩阵已给出答案 ✓，我照它写 ✓，没有替它改一个格子 ✓。
+
+## L1-20260914-7 — 我差一步就重写了一个已经在 PR 里等着的修复（同族第四次）
+
+**事实** ✓：`rejection-retry-e2e.sh` 那条 flake（`collect refuses a verdict that predates
+its own run: want [1], got [0]` ✓）在我的待办里写着「已诊断 ✓，待修」✓。我把它诊断到底了 ✓：
+`StartedAt` 用 `time.RFC3339` 存 ✓ → 截断到整秒 ✓ → `st.ModTime().Before(startedAt)`
+把边界**往前挪** ✓ → 前一次尝试的 verdict 只要落在同一秒内就**判不出来** ✓，
+被当成这一次的裁决收下 ✓。我还写了小程序实测确认 ✓（同一秒内 300ms 的差 ✓，
+截断版 fires=false ✓、全精度版 fires=true ✓），并确认 `time.Parse(time.RFC3339, …)`
+**接受**小数秒 ✓，所以改格式不会打爆读取方 ✓。**下一步就是动手改。** ✓
+
+**然后我看到 `git branch --list "fix/*"` 里有一条 `fix/run-start-orders-the-verdict`** ✓。
+它就是这件事 ✓：
+
+| # | 我的计划 | PR #105 里已有的 |
+|---|---|---|
+| 1 | 把 `StartedAt` 改成带小数秒 | ✓ `runStartedAtFrom(t)` ✓，**纳秒** ✓，还写清了为什么是纳秒而 `nowRFC3339()` 是毫秒 ✓ |
+| 2 | 改 `review_worker.go` 的 spawn | ✓ 改 ✓，`worker_spawn.go` 也改了 ✓（**我只想到 review 一处** ✓） |
+| 3 | 让拒绝信息可读 | ✓ 把报错也渲染成 `RFC3339Nano` ✓ —— 「written 11:51:44Z, before this run started (11:51:44Z)」✓ 这句我**根本没想到** ✓ |
+| 4 | 加回归测试 | ✓ `TestReviewCollectRefusesAVerdictWrittenBeforeItsRunInTheSameSecond` ✓，把 e2e 那条时序碰运气的情形**做成确定性的** ✓ |
+
+**它比我要写的更好 ✓，而且已经在 owner 队列里躺着等 ✓**（#105 ✓，CI 八项全绿 ✓，
+commit `c64c017` 已是第二次 review 后 ✓）。我要写的话 ✓，就是**一份更差的重复品** ✓，
+外加一轮 review 和一条新的分支 ✓。
+
+**同族第四次** ✓：`L1-20260913-19` ✓、`L1-20260914-2` ✓、`L1-20260914-4` ✓、这一次 ✓。
+前三次的形状是**结论比证据硬** ✓；这一次形状不同 ✓ —— **结论是对的、证据也是真的** ✓，
+我错在**没查有没有人已经在做** ✓。但病根一样 ✓：**我拿「我记得的状态」当「现在的状态」** ✓，
+而它总朝着让我显得更果断的方向 ✓（「待修」读起来像一块空地 ✓，其实上面已经种了东西 ✓）。
+
+**规则（照 `L1-20260914-4` 的写法 ✓，连着搜索范围一起写 ✓）**：
+在为一个缺陷设计修复之前 ✓，必须先枚举**已经拥有它的东西** ✓，三处都要 ✓：
+`gh pr list --state all` ✓、`git branch --list` ✓（**包括没有 PR 的本地分支** ✓）、
+`tasks/decisions.md` 里同族的条目 ✓。**并且把枚举结果写进待办那一行** ✓ ——
+写「已诊断 ✓，待修」而不写「查过 #105/分支 ✓，确实没人做」✓，
+下一轮的我就会照着重做一遍 ✓。**待办里的一句断言，就是下一轮的我的证据** ✓，
+它和 main 上的文本一样要经得起查 ✓。

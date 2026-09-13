@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 132,
+  "task_count": 133,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -1407,12 +1407,14 @@
       ],
       "requirements": [
         "ResearchQuestion/Hypothesis/Material/Sample/Experiment/Calculation/Dataset/Protocol/Claim/Finding/ExternalReference create/version commands",
-        "domain-specific semantic checks"
+        "domain-specific semantic checks",
+        "所有对 relation 与 scientific object 的**写**命令（CreateRelation / CreateVersion 及同类）必须先用既有 `internal/authz` 判定：解析调用者在该对象所属 project 的 membership/role，再以 `authz.ActionWriteScientificState` 评估 `authz.ClassOf(authenticated, role, false)`，与 `internal/application/projects/service.go` 的 require 写法同形；`internal/application/relations/ports.go` 已把 authz 明确指派给「consuming API task」，本任务就是它"
       ],
       "deliverables": [],
       "acceptance_criteria": [
         "每类对象 API+service 可创建版本",
-        "Claim atomicity只做提示不硬 NLP 判断"
+        "Claim atomicity只做提示不硬 NLP 判断",
+        "relation/object 的任何写命令在调用者不是该项目成员（或矩阵判 deny）时被拒，且有测试覆盖；拒绝时不泄漏对象是否存在"
       ],
       "tests": [
         "object type tests"
@@ -1441,7 +1443,8 @@
       ],
       "decision_level_max": "L1",
       "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。",
+      "origin": "authz 落到本任务的依据：internal/application/relations/ports.go 的注释把 authz 指派给 consuming API task（2026-09-14 由 Supervisor 补齐，见 tasks/decisions.md L1-20260914-6）。"
     },
     {
       "id": "T0209",
@@ -1457,12 +1460,14 @@
       "requirements": [
         "按 type/relation/question/finding/material 查询",
         "recursive relation traversal 限深",
-        "permission-aware"
+        "permission-aware",
+        "所有 relation 读取与 traversal 必须按 `internal/application/projects/service.go` 的 requireRead 同形授权：public project 走 `authz.ActionReadPrivateProject`/`ActionReadPublicProject` 的可见性选择，private project 由成员角色决定；递归 traversal 的每一跳都要带同样的 project 范围，不能只过滤起点"
       ],
       "deliverables": [],
       "acceptance_criteria": [
         "查询可返回 state-specific graph slice",
-        "private relation 不泄漏"
+        "private relation 不泄漏",
+        "非成员读取 private project 的 relation 返回 not-found 而非 forbidden（不泄漏存在性）；跨 project 的 traversal 不会经由中间节点泄漏私有 relation"
       ],
       "tests": [
         "rsg query integration"
@@ -1491,7 +1496,8 @@
       ],
       "decision_level_max": "L1",
       "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。",
+      "origin": "authz 落到本任务的依据：internal/application/relations/ports.go 的注释把 authz 指派给 consuming API task（2026-09-14 由 Supervisor 补齐，见 tasks/decisions.md L1-20260914-6）。"
     },
     {
       "id": "T0210",
@@ -6062,6 +6068,46 @@
         "docs/67_TEST_GATES.md",
         "infra/migrations/00005_scientific_objects.sql"
       ]
+    },
+    {
+      "id": "T0215",
+      "phase": "P2",
+      "phase_name": "RSG 核心与 Scientific Objects",
+      "title": "版本计数 backfill 的数据级升级断言（00024 + 00025）",
+      "v1_required": true,
+      "dependencies": [
+        "T0203"
+      ],
+      "requirements": [
+        "在 tests/integration/migration_test.go 里为 00024（scientific objects）与 00025（relations）各加一条数据级升级断言：把一个库升到迁移之前的版本，种入版本行，再升到 head，然后断言 current_version_no 等于该对象的 max(version_no)",
+        "种子数据必须走真实 SQL 写入（对象 + 版本行），不得只在 catalog 层断言列存在",
+        "沿用 T0102 的既有形状（migration_test.go:535 的 'data-level upgrade check'）"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "两条断言在 00024/00025 的 backfill UPDATE 被删掉时变红（mutation 验证，须给出实测输出）",
+        "断言不只数行数：必须对每个种入的对象比对具体的 current_version_no 值",
+        "测试在真实 PostgreSQL 上运行，不 mock"
+      ],
+      "tests": [
+        "go test ./tests/integration/ -run Migration"
+      ],
+      "allowed_scope": [
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md",
+        "infra/migrations/**"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/21"
+      ],
+      "scope_note": "只补测试覆盖，不改迁移。infra/migrations/** 明确禁止：本条任务的目的是让既有迁移被验证，不是让它被修改。",
+      "origin": "T0203 的独立 review 提出的 minor 覆盖缺口；同一缺口也存在于已合并的 T0202(00024)。"
     }
   ]
 }

@@ -1061,9 +1061,12 @@
       ]
     },
     "T0203": {
-      "status": "running",
-      "started_at": "2026-09-13T16:34:16Z",
-      "worker_run_id": "run-e2b19db243113c29",
+      "status": "merged",
+      "started_at": "2026-09-13T17:22:20Z",
+      "worker_run_id": "run-475a29930e9b276c",
+      "accepted_by_supervisor_at": "2026-09-13T17:40:44Z",
+      "merged_at": "2026-09-13T17:47:30Z",
+      "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/fix/the-baseline-is-cut-from-main-and-main-is-kept-current 7d59be5f8b1f501433224272b6a7d7ee42179769 — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
       "history": [
         {
           "from": "todo",
@@ -1077,17 +1080,91 @@
           "at": "2026-09-13T16:34:16Z",
           "run_id": "run-e2b19db243113c29",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-13T17:05:22Z",
+          "run_id": "run-bdef7283b1c44114",
+          "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/fix/the-g3-step-gets-the-dev-stacks-environment 35e2fcf042157f70bd116b20bbf6535066a65eb6 — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check; result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test -count=1 -race ./tests/integration/) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T17:14:24Z",
+          "run_id": "run-73a5faad644db9af",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-13T17:19:31Z",
+          "run_id": "run-4fc43c595da9e500",
+          "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/fix/the-baseline-is-cut-from-main-and-main-is-kept-current 7d59be5f8b1f501433224272b6a7d7ee42179769 — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T17:22:20Z",
+          "run_id": "run-475a29930e9b276c",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T17:24:31Z",
+          "run_id": "run-2d53565a1de073ce",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-13T17:40:44Z",
+          "run_id": "run-3af4000f4d0edcf3"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-13T17:47:30Z",
+          "run_id": "run-9a60a2721346aa5e",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0204": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-13T17:50:10Z",
+      "worker_run_id": "run-b8aec24bfcfb3b2c",
+      "rejection_reason": "【这不是缺陷 —— 你的基线本来就是错的，现在给你一条对的】\n\nT0204 是在 T0203（Typed Relation repository）合并后 **6 秒** 被派出去的，而本\n次派发的基线读的是「本机 main 的缓存」。你 17:47:36 开始时，本机 main 还停在\nT0203 合并之前（c3bdee7），所以你手上的树里**没有 T0203 的代码**，尽管任务包把\nT0203 列为已合并的依赖。\n\n这是已知缺陷 #123：派发读 refs/heads/main（本机缓存），而合并发生在 forge 上，\n两者之间有窗口。修复 PR #124 仍在等 owner 批准。\n\nSupervisor 已做的事：把本机 main 快进到合并后的 e708de6，并把你这条任务分支一并\n推进到同一提交。你的树现在 = 当前 main，**包含 T0203**。\n\n【你要做的】按任务包从头做即可。你前几分钟只在读任务包，没有任何改动被丢弃。\n不要试图「自行补上 T0203 缺的东西」—— 它已经在你的基线里了。\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-13T17:47:31Z",
+          "run_id": "run-f6ff13b7487447ee"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-13T17:47:36Z",
+          "run_id": "run-01a1046d986f4de1",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-13T17:50:09Z",
+          "run_id": "run-fb4bf8d3c4932fe5",
+          "reason": "【这不是缺陷 —— 你的基线本来就是错的，现在给你一条对的】\n\nT0204 是在 T0203（Typed Relation repository）合并后 **6 秒** 被派出去的，而本\n次派发的基线读的是「本机 main 的缓存」。你 17:47:36 开始时，本机 main 还停在\nT0203 合并之前（c3bdee7），所以你手上的树里**没有 T0203 的代码**，尽管任务包把\nT0203 列为已合并的依赖。\n\n这是已知缺陷 #123：派发读 refs/heads/main（本机缓存），而合并发生在 forge 上，\n两者之间有窗口。修复 PR #124 仍在等 owner 批准。\n\nSupervisor 已做的事：把本机 main 快进到合并后的 e708de6，并把你这条任务分支一并\n推进到同一提交。你的树现在 = 当前 main，**包含 T0203**。\n\n【你要做的】按任务包从头做即可。你前几分钟只在读任务包，没有任何改动被丢弃。\n不要试图「自行补上 T0203 缺的东西」—— 它已经在你的基线里了。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T17:50:10Z",
+          "run_id": "run-b8aec24bfcfb3b2c",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0205": {
       "status": "todo",
@@ -1178,6 +1255,26 @@
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null
+    },
+    "T0215": {
+      "status": "running",
+      "started_at": "2026-09-13T17:51:38Z",
+      "worker_run_id": "run-d4bec99ce0da153d",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-13T17:51:34Z",
+          "run_id": "run-9229950f5b38cd03"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-13T17:51:38Z",
+          "run_id": "run-d4bec99ce0da153d",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0301": {
       "status": "rejected",
