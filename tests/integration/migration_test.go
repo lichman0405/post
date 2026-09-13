@@ -360,6 +360,12 @@ var explicitIndexes = map[string][]string{
 	"search_documents_fts_idx":          {"USING gin", "to_tsvector"},
 	"search_documents_structured_gin":   {"USING gin", "structured"},
 	"organization_memberships_user_idx": {"user_id"},
+	// T0204: the state snapshot projections — a state's member versions by
+	// state_id and a branch's state/commit lineage (migration 00026).
+	"scientific_object_versions_state_idx": {"state_id"},
+	"relation_versions_state_idx":          {"state_id"},
+	"project_states_branch_created_idx":    {"branch_id", "created_at"},
+	"state_commits_branch_created_idx":     {"branch_id", "created_at"},
 	// T0104: personal projects (organization_id NULL) escape the
 	// UNIQUE(organization_id, slug) constraint, so their slug uniqueness is
 	// a partial unique index instead.

@@ -33,6 +33,7 @@
 --   00020_audit_scopes.sql
 --   00024_scientific_object_version_counter.sql
 --   00025_relation_version_counter.sql
+--   00026_state_snapshot_indexes.sql
 
 
 -- ===== 00001_extensions.sql =====
@@ -824,3 +825,30 @@ UPDATE relations r
 -- relations.project_id had no index (the canonical seed indexes only the
 -- relation_versions endpoints).
 CREATE INDEX relations_project_idx ON relations(project_id);
+
+
+-- ===== 00026_state_snapshot_indexes.sql =====
+
+-- State snapshot projection indexes (task T0204). The two projection shapes
+-- of the state model (docs/21 §5, docs/07 §7) are:
+--
+--   1. reading a state's direct members — the scientific object versions and
+--      relation versions whose state_id equals the state (the transition each
+--      row was created in); and
+--   2. walking a branch's state lineage — the project_states chain and the
+--      state_commits history, both filtered by branch_id.
+--
+-- All four projections are rebuildable from the canonical append-only
+-- history; these indexes are performance-only, no semantic content.
+
+CREATE INDEX scientific_object_versions_state_idx
+  ON scientific_object_versions (state_id);
+
+CREATE INDEX relation_versions_state_idx
+  ON relation_versions (state_id);
+
+CREATE INDEX project_states_branch_created_idx
+  ON project_states (branch_id, created_at, id);
+
+CREATE INDEX state_commits_branch_created_idx
+  ON state_commits (branch_id, created_at, id);
