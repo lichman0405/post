@@ -246,6 +246,72 @@ func runGhJSON(dir string, args ...string) ([]byte, error) {
 // and the historical defect this tooling exists to prevent was a merge that
 // happened while GitHub's own CI was red. The local record can therefore be
 // green while the PR is red, and the merge must refuse on the PR.
+//
+// It refuses with one of two sentences, and they are not interchangeable: a
+// check that has not finished is a wait the driver retries, while a check that
+// has finished red is a decision it hands to the Supervisor. Both refuse; only
+// the reason differs. See the constants above for why that distinction is
+// load-bearing rather than cosmetic.
+// A merge refusal says one of two things, and which one it says decides whether
+// the driver waits or escalates. `rddev pr merge` runs as a child process, so
+// that classification cannot travel as a Go error type — it travels as this
+// text. The writer (assertRequiredChecksGreen, below) and the reader
+// (stepAccepted, driver_run.go) name it through the constants here instead of
+// through a string literal each.
+//
+// Two literals is how they drifted, and the drift was issue #139: a required
+// check that had finished FAILURE produced the same sentence as one still
+// PENDING, so the driver retried it on every tick forever — the task never
+// finished and never asked, which is the one outcome §8.2 forbids. The local
+// gate was green, so nothing else interceded.
+//
+// The names say which is which, and neither string may contain the other.
+const (
+	// checksNotYet is the wait: every required check is still running or has
+	// not been reported yet.
+	checksNotYet = "the PR's required checks have not all finished"
+	// checksRed is the decision: at least one required check is terminal and
+	// not green.
+	checksRed = "the PR's required checks did not pass on GitHub"
+)
+
+// noChecksReported is gh's own wording, read out of the installed binary — not
+// ours. `gh pr checks` prints it on stderr when a branch's CI has not
+// registered yet, which is the same "not yet" as checksNotYet arriving by a
+// different road.
+const noChecksReported = "no checks reported"
+
+// checkStateWorthWaitingFor reports whether a required check's state means "not
+// finished" rather than "finished and not green".
+//
+// The set is deliberately small. Only SUCCESS is green, which is the standard
+// this function already enforced and which this change does not widen:
+// SKIPPED and NEUTRAL stay on the refusing side, because promoting them would
+// weaken the gate, and what is being fixed here is how a refusal is *reported*,
+// never whether one happens.
+//
+// A state GitHub adds later falls through to the refusing side and so lands in
+// escalate rather than wait. That direction is deliberate: an unfamiliar state
+// treated as a wait reproduces #139 silently, whereas one treated as a decision
+// asks the Supervisor. EXPECTED is included because it is gh's name for a
+// required check that has not been posted yet.
+func checkStateWorthWaitingFor(state string) bool {
+	switch state {
+	case "PENDING", "QUEUED", "IN_PROGRESS", "EXPECTED":
+		return true
+	}
+	return false
+}
+
+// ciStillRunning reports whether a merge refusal is a "not yet" rather than a
+// judgement. This is the single definition of that question; stepAccepted calls
+// it instead of matching the wording itself, so the writer and the reader
+// cannot drift apart again.
+func ciStillRunning(refusal string) bool {
+	return strings.Contains(refusal, checksNotYet) ||
+		strings.Contains(refusal, noChecksReported)
+}
+
 func assertRequiredChecksGreen(repoRoot, branch string, required []string) error {
 	if len(required) == 0 {
 		return nil
@@ -265,19 +331,39 @@ func assertRequiredChecksGreen(repoRoot, branch string, required []string) error
 	for _, c := range checks {
 		state[c.Name] = c.State
 	}
-	var missing, bad []string
+	var missing, waiting, bad []string
 	for _, want := range required {
 		got, ok := state[want]
 		switch {
 		case !ok:
+			// Required by the task spec but absent from the PR's checks: a report
+			// that has not been posted yet, which is a wait.
 			missing = append(missing, want)
-		case got != "SUCCESS":
+		case got == "SUCCESS":
+			// green
+		case checkStateWorthWaitingFor(got):
+			waiting = append(waiting, want+" ("+got+")")
+		default:
 			bad = append(bad, want+" ("+got+")")
 		}
 	}
-	if len(missing) > 0 || len(bad) > 0 {
-		return fmt.Errorf("the PR's required checks are not all green on GitHub — missing: %s; not passing: %s — the local G2 record is a replica of CI, not CI itself",
-			strings.Join(missing, ", "), strings.Join(bad, ", "))
+	// A finished red check is a decision even while other checks are still
+	// running — no amount of waiting turns it green, and calling it a wait is
+	// what left the task looping quietly. Tested first for that reason.
+	if len(bad) > 0 {
+		return fmt.Errorf("%s — not passing: %s — the local G2 record is a replica of CI, not CI itself",
+			checksRed, strings.Join(bad, ", "))
+	}
+	if len(missing) > 0 || len(waiting) > 0 {
+		var parts []string
+		if len(waiting) > 0 {
+			parts = append(parts, "still running: "+strings.Join(waiting, ", "))
+		}
+		if len(missing) > 0 {
+			parts = append(parts, "not reported yet: "+strings.Join(missing, ", "))
+		}
+		return fmt.Errorf("%s — %s — the local G2 record is a replica of CI, not CI itself",
+			checksNotYet, strings.Join(parts, "; "))
 	}
 	return nil
 }
