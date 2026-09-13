@@ -105,6 +105,17 @@ func RunGate(opts *GateRunOpts) (*GateRunResult, error) {
 	// needs one cannot run at all. See devStackEnv for why G2 must not get
 	// them.
 	extraEnv := opts.JobEnv
+	// No gate inherits the local dev stack from the shell that started it. For a
+	// gate that mirrors CI that is the whole point (CI has no .env.dev, and see
+	// devStackEnv); for G3 it is what makes "the values are read from the
+	// repository's own .env.dev at the moment of the run, not inherited from
+	// whatever shell started the driver" literally true rather than nearly true.
+	//
+	// Nearly was the problem. G3 layered the file's keys on top of the inherited
+	// environment, so a key the file also defined arrived TWICE, and which one
+	// bash used was decided by the last-occurrence rule rather than by any stated
+	// precedence. Removing the inherited copy first leaves exactly one.
+	notInherited := devStackShellKeys(opts.RepoRoot)
 	if opts.Gate == "G3" {
 		devEnv, err := devStackEnv(opts.RepoRoot)
 		if err != nil {
@@ -127,7 +138,7 @@ func RunGate(opts *GateRunOpts) (*GateRunResult, error) {
 				jr.Steps = append(jr.Steps, GateStepResult{Index: i, Run: step.Run, Exit: -1, Skipped: true})
 				continue
 			}
-			sr, err := runGateStep(workDir, opts.RepoRoot, opts.TaskID, runID, jobName, i, step, nil, extraEnv)
+			sr, err := runGateStep(workDir, opts.RepoRoot, opts.TaskID, runID, jobName, i, step, nil, extraEnv, notInherited)
 			if err != nil {
 				return nil, fmt.Errorf("gate %s job %s step %d: %w", opts.Gate, jobName, i, err)
 			}
@@ -233,6 +244,61 @@ func devStackEnv(repoRoot string) (map[string]string, error) {
 	return out, nil
 }
 
+// devStackShellKeys is every key a gate that mirrors CI must not INHERIT from
+// the shell that started it: the keys .env.dev defines — that file is the local
+// dev stack's definition of its own environment — plus devStackEnvKeys, so the
+// exclusion still holds where .env.dev is missing or unreadable.
+//
+// devStackEnv deliberately withholds the file from G2 through the job list, for
+// the reason that decides this too: CI has no .env.dev, and a local G2 handed
+// one grades an environment the pull request never sees. Inheriting the
+// operator's copy is that same defect arriving through the environment instead
+// of through the job list, and `cmd.Env = os.Environ()` did exactly that.
+//
+// It is not a theoretical leak. The driver is started from a session that
+// exports these variables, because that is how the dev stack is reachable;
+// TestG3RunsWithoutADevStackEnvironment asserts `test -z "${POST_GITEA_TOKEN:-}"`
+// on the premise that a missing .env.dev leaves nothing to inject, and every
+// task accepted from such a driver came back with a red G2 for a credential the
+// gate itself had handed the step. The task was then refused for it.
+//
+// A file that does not parse contributes only the pinned keys: this is an
+// exclusion, and failing a gate over a file the gate is not otherwise reading
+// would be a new refusal, not a caught leak.
+func devStackShellKeys(repoRoot string) map[string]bool {
+	drop := make(map[string]bool, len(devStackEnvKeys)+16)
+	for _, k := range devStackEnvKeys {
+		drop[k] = true
+	}
+	if values, err := config.ParseEnvFile(filepath.Join(repoRoot, ".env.dev")); err == nil {
+		for k := range values {
+			drop[k] = true
+		}
+	}
+	return drop
+}
+
+// inheritedEnvWithout is os.Environ() with the named keys removed — the
+// environment a CI-shaped gate step runs in. Removing rather than overwriting
+// matters: bash resolves a duplicated name to the LAST occurrence, so leaving an
+// inherited entry in place and appending another would work by a rule nothing
+// here states, and would stop working the moment the order changed or the step
+// was run by something that resolves the other way.
+func inheritedEnvWithout(drop map[string]bool) []string {
+	env := os.Environ()
+	if len(drop) == 0 {
+		return env
+	}
+	kept := make([]string, 0, len(env))
+	for _, kv := range env {
+		if k, _, ok := strings.Cut(kv, "="); ok && drop[k] {
+			continue
+		}
+		kept = append(kept, kv)
+	}
+	return kept
+}
+
 // mergeEnv layers over on top of base without mutating either, so a caller's
 // explicit JobEnv takes precedence over the file. Nil is a valid argument for
 // both and is returned as-is when there is nothing to layer.
@@ -253,8 +319,10 @@ func mergeEnv(base, over map[string]string) map[string]string {
 // runGateStep executes one step of a CI job the way GitHub Actions does
 // (bash --noprofile --norc -eo pipefail -c), captures stdout+stderr into a
 // per-step log, and returns the exit code. The step's own env merges over
-// the job env, which merges over the inherited environment.
-func runGateStep(workDir, repoRoot, taskID, runID, jobName string, index int, step GateStep, jobEnv, extraEnv map[string]string) (GateStepResult, error) {
+// the job env, which merges over the inherited environment — less notInherited,
+// which names the keys the local dev stack contributed and a CI-shaped gate
+// must not be graded in the presence of. See devStackShellKeys.
+func runGateStep(workDir, repoRoot, taskID, runID, jobName string, index int, step GateStep, jobEnv, extraEnv map[string]string, notInherited map[string]bool) (GateStepResult, error) {
 	sr := GateStepResult{Index: index, Run: step.Run, StartedAt: nowRFC3339()}
 	outDir := filepath.Join(GateOutputDir(repoRoot, taskID, runID), jobName)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
@@ -270,7 +338,7 @@ func runGateStep(workDir, repoRoot, taskID, runID, jobName string, index int, st
 	// The cwd is chosen once per gate run by prepareIntegrationTree: current
 	// main plus the task's complete change. See RunGate.
 	cmd.Dir = workDir
-	cmd.Env = os.Environ()
+	cmd.Env = inheritedEnvWithout(notInherited)
 	for k, v := range jobEnv {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}

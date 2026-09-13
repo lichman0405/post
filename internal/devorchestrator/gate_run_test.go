@@ -642,6 +642,73 @@ func TestG3GetsTheDevStackEnvironmentAndG2DoesNot(t *testing.T) {
 	}
 }
 
+// G2 re-runs CI's steps, and CI has no dev stack. The shell that starts the
+// driver does: the dev-stack variables are exported there, because that is how
+// the stack is reachable at all. `cmd.Env = os.Environ()` handed them to every
+// gate step regardless, so a G2 step saw credentials CI never provides — the
+// defect devStackEnv refuses to introduce through the job list, arriving through
+// the environment instead.
+//
+// That is not hypothetical, and this is the test that was missing. When the
+// variable is present, TestG3RunsWithoutADevStackEnvironment — whose whole
+// assertion is `test -z "${POST_GITEA_TOKEN:-}"`, on the premise that a missing
+// .env.dev means nothing to inject — goes red, and every task accepted from that
+// driver is refused for it.
+//
+// The sentinel is SET here rather than merely observed. The suite passes on a
+// shell that exports nothing, which is exactly why this survived: the leak was
+// visible only from the one environment the gate actually runs in.
+func TestG2StepsDoNotInheritTheShellsDevStackEnvironment(t *testing.T) {
+	const sentinel = "left-in-the-shell-that-started-the-driver"
+	t.Setenv("POST_GITEA_TOKEN", sentinel)
+	// A key that is in .env.dev but is not one of the two devStackEnvKeys, so the
+	// exclusion is pinned to "the local dev stack", not to the pair G3 needs.
+	t.Setenv("POST_DB_PASSWORD", sentinel)
+
+	repoRoot, specPath := writeGateSpec(t, `{
+  "version": 1,
+  "required_jobs": ["job-a"],
+  "gates": {
+    "G1": {"name": "", "description": "", "runs_jobs": []},
+    "G2": {"name": "", "description": "", "runs_jobs": ["job-a"], "asserts_jobs": []},
+    "G3": {"name": "", "description": "", "runs_jobs": ["job-b"], "asserts_jobs": []},
+    "G4": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": ["job-a"]}
+  },
+  "jobs": {
+    "job-a": {"steps": [{"run": "test -z \"${POST_GITEA_TOKEN:-}\" && test -z \"${POST_DB_PASSWORD:-}\""}]},
+    "job-b": {"steps": [{"run": "test \"${POST_GITEA_TOKEN:-}\" = from-the-file"}]}
+  },
+  "review": {"required_for_merge": false},
+  "task_overrides": {"T0001": {"g3_jobs": ["job-b"]}}
+}`)
+	if err := os.WriteFile(filepath.Join(repoRoot, ".env.dev"),
+		[]byte("POST_GITEA_TOKEN=from-the-file\nPOST_DB_PASSWORD=from-the-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	g2, err := RunGate(&GateRunOpts{RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001", Gate: "G2", RunID: "r-shell"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g2.Status != "passed" {
+		data, _ := os.ReadFile(g2.Jobs[0].Steps[0].OutputFile)
+		t.Errorf("a G2 step inherited a dev-stack variable from the shell that started the gate — CI has no .env.dev, so this G2 graded an environment the pull request will never be graded in:\n%s", data)
+	}
+
+	// G3 is the other half: it is the LOCAL dev-stack gate, and scrubbing must not
+	// have taken the file's value away from it. Asserting the positive value —
+	// rather than "not the sentinel" — is what keeps this from passing on a G3
+	// that simply saw nothing.
+	g3, err := RunGate(&GateRunOpts{RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001", Gate: "G3", RunID: "r-shell-g3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g3.Status != "passed" {
+		data, _ := os.ReadFile(g3.Jobs[0].Steps[0].OutputFile)
+		t.Errorf("G3 must still get the dev stack: the file is read at run time and its value must beat the shell's, sentinel or not:\n%s", data)
+	}
+}
+
 // The file's other keys must not reach the step. A gate step runs a script out
 // of the tree under test, and whatever is in its environment is readable by that
 // script and lands in the step's captured output the first time anything prints,
