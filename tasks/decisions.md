@@ -2493,3 +2493,39 @@ if err != nil { return nil }   // ← 把"没能问出问题"当成"没有任务
 e2e 断言了"driver 会接管运行中的 Worker" ✓ —— 那是**唯一**它真的验证过的事 ✓；
 它**没有**让 driver 执行任何动作 ✗ → 于是我关于"动作"的全部代码都没被测过 ✓。
 **夹具必须让被测对象真正做事** ✓，否则测的是它的启动脚本 ✓。
+
+## L1-20260913-11 — 把"phase 必须有 G3"从 P1–P3 **推广到所有仍在开发的 phase**
+
+驱动第一次真正跑起来之后 ✓，它在 P6 上停下并给出：
+
+```
+phase P6 has no G3 job for any of its tasks: dispatching T0603 would develop the
+whole phase against mocks, with every task accepted against G3=not_required.
+```
+
+**这是我的守卫在正确工作** ✓ ——也正是 checkpoint 要求的效果 ✓。但它暴露了同一类问题的另一半 ✓：
+我只给 **P1/P2/P3** 接了 G3 ✓，而 P4–P12 **一个都没有** ✓ →
+驱动会在接下来的每一个 phase 边界上**再停一次** ✗，一次一个 ✗。
+
+**已在源头修掉** ✓：按每个 phase 的**跨边界链路**接上对应的真实服务门 ✓（85 个任务 ✓）：
+
+| phase | G3 |
+|---|---|
+| P4（PR/review/semantic merge） | rsg + gitea |
+| P5（Evidence/Knowledge/External refs） | rsg |
+| P6（Frozen main/Abort/Policy/Release） | rsg + gitea |
+| P7（Asset hub/Rights/Publish） | rsg |
+| P8（开放网络/Fork/Contribution） | rsg + gitea |
+| P9（Search/Answer） | rsg |
+| P10（Events/Subscriptions） | rsg |
+| P11（UI/安全/a11y/性能/运维） | auth + rsg |
+| P12（Canonical workflow/最终交付） | auth + rsg + gitea |
+
+**测试也从"P1–P3"改成"所有仍有未合并任务的 phase"** ✓：
+规则是"**phase 在它的任务开跑前就要有真实服务门**" ✓，因此它**约束还没跑完的 phase** ✓，
+而**已经完成的 phase 不再被它约束** ✓ ——给 T0000 的环境预检任务今天补一个 G3 是**仪式而不是验证** ✗，
+而 P0 里真正需要真实服务的任务（T0005 的 migration 集成、T0006 的 smoke ✓）
+**在当时就是以 G2 步骤的形式跑过的** ✓。
+
+**这条修正本身是对"点名"的又一次去手工化** ✓：我先前把 phase 名字写死在测试里 ✗，
+和用户当初指出的"不要靠人记得"是同一个错误 ✓ ——**只不过程序化的是名字，而不是纪律。**

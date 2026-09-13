@@ -380,6 +380,488 @@
       "g3_jobs": [
         "gitea-real-services"
       ]
+    },
+    "T0401": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0402": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0403": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0404": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0405": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0406": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0407": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0408": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0409": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0410": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0501": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0502": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0503": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0504": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0505": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0506": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0507": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0508": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0509": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0510": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0601": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0602": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0603": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0604": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0605": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0606": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0607": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0608": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0609": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0701": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0702": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0703": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0704": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0705": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0706": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0707": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0708": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0709": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0710": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0711": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0801": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0802": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0803": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0804": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0805": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0806": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0807": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0808": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0809": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0810": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0811": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0812": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0901": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0902": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0903": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0904": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0905": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0906": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0907": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0908": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T1001": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T1002": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T1003": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T1004": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T1005": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T1006": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T1007": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T1101": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services"
+      ]
+    },
+    "T1102": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services"
+      ]
+    },
+    "T1103": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services"
+      ]
+    },
+    "T1104": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services"
+      ]
+    },
+    "T1105": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services"
+      ]
+    },
+    "T1106": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services"
+      ]
+    },
+    "T1107": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services"
+      ]
+    },
+    "T1108": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services"
+      ]
+    },
+    "T1109": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services"
+      ]
+    },
+    "T1110": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services"
+      ]
+    },
+    "T1201": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T1202": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T1203": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T1204": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T1205": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T1206": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T1207": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T1208": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
     }
   }
 }
