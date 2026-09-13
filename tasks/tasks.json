@@ -1267,7 +1267,9 @@
         "main 与 branch state 不混淆"
       ],
       "tests": [
-        "branch unit/integration"
+        "branch unit/integration",
+        "TestBranchHeadEvolvesIndependently (branch head 可独立演化)",
+        "TestMainAndBranchStateDoNotMix (main 与 branch state 不混淆)"
       ],
       "allowed_scope": [
         "cmd/api/**",
@@ -1366,7 +1368,9 @@
         "command 再次 server validate"
       ],
       "tests": [
-        "validation unit/integration"
+        "validation unit/integration",
+        "TestGatesDifferInStrictnessAndSayWhy (不同 gate 严格度不同且可解释)",
+        "TestServerRevalidatesWhatTheCommandValidated (command 再次 server validate)"
       ],
       "allowed_scope": [
         "cmd/api/**",

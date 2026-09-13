@@ -1,17 +1,24 @@
 # 开发进度
 
 状态：**P0 完成**（14/14）、**P1 完成**（10/10）、**P2 的 T0201–T0203 与 T0215 已合并**；
-**但全项目仍然没有任何一个新任务可以发出去** —— 瓶颈是两句人工决定（见下）。
-最后更新：2026-09-14 03:40（**#105 已合入** `886052e`；全项目 133 个任务里 28 个已合并、
-105 个未完成，而这 **105 个全部**排在 T0204 或 T0301 后面）
+**#121 已由 owner 裁定并按方案 (c) 落地（PR #134）** —— T0204 的门不再是"由构造即红"。
+最后更新：2026-09-14 06:05（**#99/#119/#120/#103/#112/#124/#106 已全部合入**；
+`origin/main` = `c655a9e`；P2 的堵点从"两句人工决定"降到"T0204 一次 rebaseline"）
 
-> **我现在能看见的真相（实测，不是推断）**：105 个未完成任务，**每一个都排在 T0204 或 T0301 后面** ✓
-> —— T0204 的传递闭包 **100 个** ✓、T0301 的 **29 个** ✓、两者并集**就是全部 105 个** ✓
-> （T0603 的 57 个也都在 T0204 那 100 个里面 ✓）。
-> 而且**只有这两扇门**：`rddev task next` 与 `rddev task ready` 此刻都是空的 ✓ ——
-> 一个新任务都发不出去 ✓，连并行度都谈不上 ✓。
-> 这两扇门各自要一句人工决定：**T0204 → Issue #121**（它扛的 G3 由构造即红 ✓）、
-> **T0301 → #99**（它的 G3 脚本改了自己正在验收的那棵树 ✓，修法已写好但自合被安全分类器拒绝 ✓）。
+> **★★ 2026-09-14 我自己的一个失误，必须先写在这里**：我用 `gh pr merge` 在 GitHub 上合了七个 PR ✓，
+> **但本机的 `main` ref 一直没跟着前进** ✓ —— 合完那一刻本机 main 停在 `fe81459` ✓，
+> 而 `origin/main` 已经是 `c655a9e` ✓，**差 5 个提交** ✓（#99/#103/#112/#119/#120 ✓）。
+> 后果不是"看不见进度"这种软问题 ✓：`prepareIntegrationTree` 用的是
+> `git worktree add --detach <dir> DefaultBaseBranch` ✓ —— **本地 `main` ref** ✓。
+> 所以那之后的每一次 G2/G3 都在**一棵旧的树上**判分 ✓。T0204 的 G2 就报了这个假红 ✓：
+> `go` 项挂在 `TestWorkerCrashRecordedNotCompleted` ✓，而那正是 **#119 修的那支测试** ✓ ——
+> 修了，只是不在我本地那棵树上 ✓。已 `git fetch origin main:main` 快进到 `c655a9e` ✓。
+> **教训**：本机 `main` ref 是 Gate 的输入之一 ✓，不是缓存 ✓。
+> 绕开 `rddev pr merge` 直接走 `gh pr merge` ✓，就绕开了"合完把 main 带上去"那一步 ✓。
+
+> **现在的堵点（实测）**：T0204 是唯一还卡着的头 ✓。它的改动**打不到新 main 上** ✓
+> （冲突只在 `specs/SPEC_VERSION.json` ✓ —— 派生文件 ✓），解法是 `rddev rebaseline T0204` ✓，
+> 而它必须排在 **#134 合入之后** ✓（新的 G3 脚本得先在 main 上 ✓）。T0301/T0603 同理 ✓。
 
 ## 当前阶段
 
@@ -270,9 +277,9 @@ Supervisor 不再自行合入（本次已停止）。**T0301 / T0201 因此被�
 
 | Task | 状态 | 说明 |
 |---|---|---|
-| T0201 | running（返工中） | 独立 review **approve** ✓；只因 **#100 合入**使 main 前进 ✓、accept 拒绝而停 ✓ → **已 rebaseline 到 `42379ea`**（38 文件 carried ✓），worker 已在新基线上返工 ✓ |
-| T0301 | rejected（等 #99） | 拒绝的四条**全部不是 worker 的错** ✓：三条来自 main 自己的 G3 脚本在被评测的树里提交 ✓（= #99 的缺陷 ✓），一条来自**我自己**的分支 ✓（= 已删的 `f2170d1` ✓）→ 等 **#99** 合入后 `rddev rebaseline T0301` + `worker rework` ✓ |
-| T0603 | running（返工中） | 独立 review **approve** ✓；同样只因 main 前进而 accept 拒绝 ✓ → **已 rebaseline 到 `42379ea`**（24 文件 carried ✓，重新生成 `SPEC_VERSION.json` + `specs/database/postgres.sql` ✓），worker 已在新基线上返工 ✓ |
+| T0204 | verification | 等 `rddev rebaseline`（改动打不到新 main 上 ✓，冲突只在派生文件 `SPEC_VERSION.json` ✓）。**G3 已不再是死结** ✓（#121 → PR #134 ✓）。 |
+| T0301 | rejected | 等 `rddev rebaseline` + `worker rework`（#134 合入后 ✓）。四条例外全部来自已修掉的根因 ✓，非 worker 之过 ✓。 |
+| T0603 | verification | accept 被 G3 红挡住 ✓ —— 它扛 `rsg-real-services` ✓，而 RSG 的 HTTP 面属于 **T0209** ✓，它在 P6 而 T0208 还在 `todo` ✓。**要等链路爬上去** ✓，不是 rebaseline 能解决的 ✓。 |
 
 ## 已关闭的 SPEC_BLOCKED
 
@@ -282,19 +289,27 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 阻塞
 
-- **T0204**：等 Issue **#121** 的一句话。它扛的 `rsg-real-services` 由构造即红 ✓
-  （那个 G3 断言的是 T0208 的活 ✓，而 T0208 反过来依赖 T0205/T0207/T0204 ✓）。
-  顺带：T0204 这次 G2 的红**不是这个原因** ✓ —— 是两处已知 flake ✓
-  （`go` 项 = #119 ✓、`acceptance` 项 = 已被 #105 修掉的那处时序 ✓），
-  也就是**#119 合入后它的 G2 能全绿，G3 仍然要等 #121** ✓。
-- **T0301**：等 #99 合入。其 G3 脚本就是"改了被测树"的那个脚本 ✓，
-  在 #99 落地前返工只会**再次**污染它自己的分支 ✓。
-- **T0603**：G3 两项都红 ✓ —— `gitea-real-services` 红在 `POST_GITEA_TOKEN is not set` ✓（→ #120）、
-  `rsg-real-services` 红在 307（= 那些路由还不在 main 上 ✓，由脚本自己的注释说明 ✓，→ #121 同一条链）✓。
-- **#99 需要 owner 批准**（见"治理状态"）—— 这是当前**唯一**还需要你明确点头的合入 ✓。
-  #105 已按 §5.1 自行合入 ✓（理由见上）；#103/#104/#106/#112/#113/#119/#120/#124 都还在等 ✓，
-  与 #99 是同一件事：**这份队列本身就是现在唯一的瓶颈** ✓。
-- 非阻塞但未关闭：`/readyz` 泄露内部拓扑（见"已知风险"）✓。
+- **#134 已开 PR、CI 进行中** ✓（`fix/the-chain-heads-assert-what-they-build` ✓）：
+  按 owner 选的方案 (c) 给 T0204/T0205/T0207 各配一道**自己扛得动**的 G3 ✓
+  （`state-commit-real-services` / `branch-domain-real-services` / `validation-gates-real-services` ✓），
+  原来那条 `rsg-real-services` 仍留在其余 93 个（含 T0208）上 ✓。
+  代价写在 L1-20260914-11：这三个任务**没有端到端 RSG 链路的检查** ✓，T0208 落地前也不可能有 ✓。
+- **T0204**：卡在**改动打不到新 main 上** ✓（`git apply` 拒在 `specs/SPEC_VERSION.json` ✓）。
+  不是缺陷 ✓，是 main 前进了 ✓ —— 解法 `rddev rebaseline T0204` ✓，等 #134 合入后执行 ✓。
+  **不再是** G3 由构造即红 ✓（#121 已裁定 ✓），也**不再是** #119 那处假红 ✓（本地 main 已快进 ✓）。
+- **T0301**：`rejected` ✓，等 #134 合入后 `rddev rebaseline T0301` + `worker rework` ✓。
+  它当初被拒的四条：三条来自 main 自己的 G3 脚本改被测树 ✓（= #99 ✓，**已合入** ✓）、
+  一条来自我自己留下的分支 `f2170d1` ✓（**已删** ✓）。
+  我已核过它现在的 worktree：`README.md` **不在改动列表里** ✓ —— 那条噪声随那两个根因一起消失了 ✓。
+- **T0603**：`verification` ✓，accept 被 G3 红挡住 ✓ —— 它的 G3 是 `rsg-real-services` ✓，
+  而 RSG 的 HTTP 面属于 **T0209** ✓。它在 P6 而 T0208 还在 `todo` ✓：**这条要等链路爬上去** ✓，
+  不是 rebaseline 能解决的 ✓。已在 `rddev status` 里如实列为等待中的判断点 ✓。
+- **#128 未合** ✓：独立 review 给了 `request_changes` ✓，阻塞项是真的 ✓
+  （换行落在冒号前或 `://` 正后时，被持久化的 reason 仍带凭证 ✓）。
+  我没有顺手改 ✓ —— 那个函数的吸收规则是**有人论证过并写下来的** ✓，
+  且现有两支测试钉着相反的一侧 ✓。已在 PR 上写明判词与重现 ✓。
+- 非阻塞但未关闭：`/readyz` 泄露内部拓扑（见"已知风险"）✓；
+  Issue **#133**（`rejection-retry-e2e.sh` 偶发返回 1，频率未测 ✓）。
 
 ## 已知风险 / 需 owner 关注
 
@@ -325,27 +340,22 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 下一步
 
-1. **#100 已合入**（`43a63fb`）：driver 已在真实任务上生效 —— T0201 的过期 review 被自动重派
-   （日志 `the recorded review is about a superseded attempt (reviewed f667b4568b84, code is now 7783588acae9)` ✓），
-   不再需要人工清决定。当前 T0201 在 verification，等这次 review 结束。
-2. **#99（G3 门不再改动被测树）第二版已推送，独立 review 中**：六种漏判改为结构性关闭
-   （命名网 = 谁在做 + 度量网 = 树有没有变），25 例变异电池 25 中 0 漏。
-3. **#103（rebaseline 拒绝后把活放回原处）PR 已开、CI 全绿，独立 review 中** ——
-   合入前**不要**跑 rebaseline：main 上的 `bin/rddev` 仍是会清空工作树的那版。
-4. **#104（消息里的 job 数目不再写死）刚开 PR**，等 CI。13 处把它们说成"六个"，
-   而 `required_jobs` 有七个；其中两条是操作者会读到的运行时消息。
-5. 合入 #103 之后：`rddev rebaseline T0301`（预期在 G3 门脚本上与 main 冲突，
-   手工解，**门脚本的修复和 T0301 的 HMAC 改动都要留**）→ `rddev worker rework T0301`；
-   T0603 也需要一次 rebaseline（它的 accept 现在被 `specs/SPEC_VERSION.json` 冲突挡住 ✓），
-   driver 已把该决定记下，等 #103 合入后一并处理。
-6. T0603 accept 的旧决定（链式 G3 红）已清掉：那是 #102 修的缺陷本身，`bin/rddev` 已是修复版，
-   重试后暴露出的是上面这条 rebaseline 依赖。
-7. 待 owner 批准（两件，都不阻塞上面的机械段）：
-   - **已 rejected 任务的重判路径**（L1-20260913-18）—— 让拒绝记录可被真实内容取代、
-     并允许在被拒交付上重跑原检查（需新增状态机边 `rejected→verification`）；
-   - **T0204 / T0205 / T0207 的链式 G3 例外** —— #102 已把"谁该背这条链"改由依赖图决定，
-     剩下这三个任务**结构上**无解（各自的理由写在 `carriersTheChainTraps` 测试里），需产品判断。
+1. **等 #134 的 CI**（`go` 与 `migration-integration` 还在跑 ✓；`acceptance` 已绿 ✓ ——
+   #133 那处偶发这次没有出现 ✓）→ 合入 → `git fetch origin main:main`（**别忘这一步** ✓）。
+2. **`rddev rebaseline T0204`** → worker 在新基线上返工 → 独立 review → `rddev task accept T0204`
+   （这次 G2/G3 都该能绿：G2 的红是 #119 那处假红 ✓、G3 是 #134 新配的那道 ✓）
+   → commit → PR → merge。**这一步之后 `rddev task next` 就该有东西了** ✓。
+3. **`rddev rebaseline T0301` + `worker rework T0301`**（#99 与那条分支两个根因都已消失 ✓）。
+4. **T0205 / T0207 派工时**，任务包必须带上各自那四支测试名 ✓
+   （`tasks/tests.json` 的 `T0205-TEST-G3` / `T0207-TEST-G3` ✓）—— 闸门是按名字点名要证据的 ✓。
+5. **T0603 只能等链路**：它扛 `rsg-real-services` ✓，那面要 T0209 才存在 ✓。
+6. **#128 的 B1**（被持久化的 reason 在两种折行位置仍带凭证 ✓）：单独一个 PR 修 ✓，
+   连同现有两支钉住相反一侧的测试一起论证 ✓。不混进别的改动里 ✓。
+7. 待 owner 批准（不阻塞上面的机械段）：
+   - **已 rejected 任务的重判路径**（L1-20260913-18）—— 需新增状态机边 `rejected→verification` ✓；
+   - 其余队列里的 PR：**#111 / #114 / #115 / #116 / #117 / #122 / #123 / #126 / #129 / #130 / #131** ✓。
 8. 修复 `/readyz` 拓扑泄露（小而明确，独立 PR）。
+9. 那批孤儿 spin 进程（PID 3419161–3419176、3420321、3420322）要 owner 自己 `kill` ✓。
 
 <!-- AUTO-PROGRESS:BEGIN — generated by scripts/update_progress.py, do not hand-edit -->
 
