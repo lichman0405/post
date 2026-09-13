@@ -146,3 +146,96 @@
   align-items: center;
   gap: 8px;
 }
+
+/* T0107 global layout: skip link (first tab stop, visible on focus) and
+   the shared visually-hidden utility. Nav styles live in nav/nav.css. */
+
+.skip-link {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 50;
+  padding: 6px 12px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--bgColor-default, #ffffff);
+  color: var(--accent-fgColor, #0969da);
+  font-size: 14px;
+  text-decoration: none;
+  transform: translateY(-300%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Stub pages: one centered column for the coming-soon panel. */
+
+.coming-soon-main {
+  max-width: 1012px;
+  margin: 0 auto;
+  padding: 48px 16px;
+}
+
+.coming-soon {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 32px 24px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--bgColor-default, #ffffff);
+  text-align: center;
+}
+
+.coming-soon-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 8px;
+  border-radius: 50%;
+  background-color: var(--bgColor-accent-muted, #ddf4ff);
+  color: var(--accent-fgColor, #0969da);
+}
+
+.coming-soon-title {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.coming-soon-desc {
+  margin: 0 0 16px;
+  font-size: 14px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.coming-soon-button {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 16px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--button-primary-bgColor-rest, #1f883d);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.coming-soon-button:hover {
+  background-color: var(--button-primary-bgColor-hover, #1a7f37);
+}

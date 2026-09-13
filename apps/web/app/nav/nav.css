@@ -1,0 +1,265 @@
+/* POST global header — GitHub/Primer light header (docs/06 §2, ADR-012).
+   Plain Primer design tokens only: no gradients, no backdrop filters, no
+   purple. Day-mode palette; dark mode inherits the same tokens later. */
+
+/* The header: sticky, light inset background, hairline bottom border.
+   56px tall on desktop — compact enough to keep page real estate for
+   content (docs/06 §3: high density), tall enough for 24px touch targets. */
+.global-nav {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background-color: var(--bgColor-inset, #f6f8fa);
+  border-bottom: 1px solid var(--borderColor-default, #d1d9e0);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.global-nav-inner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 56px;
+  padding: 0 16px;
+}
+
+/* Left group: logo, search, nav links. */
+.global-nav-start,
+.global-nav-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.global-nav-links {
+  flex: 1;
+  min-width: 0;
+  margin-left: 8px;
+}
+
+.global-nav-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.global-nav-list li {
+  display: flex;
+}
+
+/* Wordmark: icon + name, 14px semibold like the GitHub mark. */
+.global-nav-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 6px;
+  color: var(--fgColor-default, #1f2328);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.global-nav-logo:hover {
+  background-color: var(--bgColor-accent-muted, #ddf4ff);
+}
+
+/* Nav links: 14px, icon + label, hairline hover background. The active
+   route is marked with aria-current="page" and a semibold label. */
+.global-nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--fgColor-default, #1f2328);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.global-nav-link:hover {
+  background-color: var(--bgColor-accent-muted, #ddf4ff);
+}
+
+.global-nav-link[aria-current="page"] {
+  font-weight: 600;
+}
+
+/* Search form: compact input with the magnifier inside, Primer focus ring. */
+.global-nav-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 280px;
+  max-width: 32vw;
+}
+
+.global-nav-search-icon {
+  position: absolute;
+  left: 8px;
+  color: var(--fgColor-muted, #59636e);
+  pointer-events: none;
+}
+
+.global-nav-search input[type="search"] {
+  width: 100%;
+  height: 32px;
+  padding: 0 8px 0 28px;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 6px;
+  background-color: var(--bgColor-default, #ffffff);
+  color: var(--fgColor-default, #1f2328);
+  font-size: 14px;
+}
+
+.global-nav-search input[type="search"]::placeholder {
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* Icon buttons (notifications bell, mobile menu toggle): 24px hit area,
+   accent hover, Primer-style focus ring inherited from BaseStyles. */
+.global-nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fgColor-muted, #59636e);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.global-nav-icon:hover {
+  background-color: var(--bgColor-accent-muted, #ddf4ff);
+  color: var(--fgColor-default, #1f2328);
+}
+
+/* Signed-out "Sign in" entry in the header end group. */
+.global-nav-signin {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--fgColor-default, #1f2328);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.global-nav-signin:hover {
+  background-color: var(--bgColor-accent-muted, #ddf4ff);
+}
+
+/* Account menu trigger (signed in): icon + handle + caret, truncates long
+   handles instead of pushing the header wider. */
+.global-nav-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 160px;
+}
+
+.global-nav-user-handle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Mobile menu: a disclosure panel below the header. */
+.global-nav-mobile {
+  position: relative;
+}
+
+.global-nav-mobile-toggle {
+  display: none;
+}
+
+.global-nav-drawer {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  width: 260px;
+  padding: 8px;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 6px;
+  background-color: var(--bgColor-default, #ffffff);
+  box-shadow: 0 8px 24px rgba(31, 35, 40, 0.12);
+}
+
+.global-nav-drawer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.global-nav-drawer-list li {
+  display: flex;
+}
+
+.global-nav-drawer-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--fgColor-default, #1f2328);
+  font-size: 14px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.global-nav-drawer-link:hover {
+  background-color: var(--bgColor-accent-muted, #ddf4ff);
+}
+
+.global-nav-drawer-link[aria-current="page"] {
+  font-weight: 600;
+}
+
+.global-nav-drawer-divider {
+  height: 1px;
+  margin: 8px 4px;
+  background-color: var(--borderColor-muted, #d8dee4);
+}
+
+.global-nav-drawer-session {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.global-nav-drawer-actions {
+  display: flex;
+  gap: 8px;
+  padding: 4px 8px;
+}
+
+/* Responsive baseline: below 768px the link row and the search form give
+   way to the drawer; the logo, bell and the menu toggle stay. The search
+   entry remains reachable as the first drawer item (docs/05 §1: Search is
+   part of global navigation on every size). */
+@media (max-width: 767px) {
+  .global-nav-links,
+  .global-nav-search {
+    display: none;
+  }
+
+  .global-nav-mobile-toggle {
+    display: inline-flex;
+  }
+}

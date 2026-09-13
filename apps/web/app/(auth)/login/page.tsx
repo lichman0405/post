@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { getWebConfig } from "../../lib/server-config";
+import { getWebConfig } from "../../../lib/server-config";
 import { LoginCard } from "./login-card";
 
 export const metadata: Metadata = {
@@ -18,10 +18,10 @@ export const metadata: Metadata = {
 export default function LoginPage() {
   const cfg = getWebConfig();
   return (
-    <main className="auth-main">
+    <div className="auth-main">
       <Suspense fallback={null}>
         <LoginCard apiBaseUrl={cfg.apiBaseUrl} />
       </Suspense>
-    </main>
+    </div>
   );
 }

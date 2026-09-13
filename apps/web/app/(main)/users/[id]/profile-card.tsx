@@ -14,12 +14,12 @@ import {
 } from "@primer/react";
 import { PencilIcon, PersonIcon } from "@primer/octicons-react";
 
-import { ApiError, createAuthClient, type AuthSession } from "../../../lib/auth";
+import { ApiError, createAuthClient, type AuthSession } from "../../../../lib/auth";
 import {
   createProfileClient,
   messageForProfileCode,
   type ProfileUser,
-} from "../../../lib/profile";
+} from "../../../../lib/profile";
 
 /**
  * The profile card (client component): fetches the public profile and the
