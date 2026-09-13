@@ -426,7 +426,10 @@ func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
 	if mb, err := gitOutput(rec.Worktree, "merge-base", DefaultBaseBranch, "HEAD"); err == nil && mb != "" {
 		base = mb
 	}
-	out, err := gitOutput(rec.Worktree, "diff", base, "--")
+	// Raw, not trimmed: a diff's trailing whitespace is part of it. See
+	// gitOutputRaw — trimming it here produced patches `git apply` called
+	// corrupt, so prepareIntegrationTree could not build the tree G2 grades.
+	out, err := gitOutputRaw(rec.Worktree, "diff", base, "--")
 	if err != nil {
 		return "", fmt.Errorf("diffing the worktree against the baseline: %w", err)
 	}
@@ -437,7 +440,12 @@ func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
 	var b strings.Builder
 	if out != "" {
 		b.WriteString(out)
-		b.WriteString("\n")
+		// The diff already ends in a newline; a second one would leave a blank
+		// line, which is where the trimmed version's short hunk used to be
+		// reported as corruption. Keep exactly one.
+		if !strings.HasSuffix(out, "\n") {
+			b.WriteString("\n")
+		}
 	}
 	for _, p := range strings.Split(untracked, "\n") {
 		p = strings.TrimSpace(p)

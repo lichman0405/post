@@ -670,6 +670,30 @@ func gitOutput(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// gitOutputRaw is gitOutput without the trim, for output whose whitespace is
+// data — a patch above all.
+//
+// Trimming a diff is not cosmetic. `git diff` writes an empty context line as a
+// single space, and the last line of a diff is very often one; TrimSpace deletes
+// it and the final hunk is then one line short of the count in its own @@ header.
+// `git apply` reads that as a malformed patch and dies with "corrupt patch at
+// line N" — on a change that applies perfectly. The corruption is
+// content-dependent (the task's diff has to end on a blank or trailing-space
+// line), so it surfaces as an intermittent "does not apply to current main" for
+// a branch that is merely behind, and G2 never runs.
+func gitOutputRaw(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), ee, strings.TrimSpace(string(ee.Stderr)))
+		}
+		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return string(out), nil
+}
+
 // gitOutput2 runs bin and returns trimmed stdout (used for claude --version).
 func gitOutput2(bin string, args ...string) (string, error) {
 	cmd := exec.Command(bin, args...)
