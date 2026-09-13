@@ -306,6 +306,20 @@ func (o *DriveOpts) stepVerification(id string, st *DriverStatus) (bool, error) 
 	if rec.ExitStatus == nil {
 		return false, nil // reviewer still working
 	}
+	// A verdict describes the code it was produced against, and a rework
+	// changes that code. Collecting a review of a superseded attempt fails
+	// forever — the reviewer exited and its verdict cannot change — so the
+	// decision it used to raise was the driver handing the Supervisor a
+	// condition only the driver could fix. Ask again instead (L1-20260913-17).
+	if stale, why, err := ReviewIsStale(o.RepoRoot, id); err != nil {
+		return false, err
+	} else if stale {
+		o.logf("%s: %s — dispatching a fresh review", id, why)
+		if out, code := o.run("review", "spawn", id); code != 0 {
+			return true, o.decide(id, "review-spawn", out)
+		}
+		return true, nil
+	}
 	if _, code := o.run("review", "collect", id); code != 0 {
 		return true, o.decide(id, "review-collect", "the reviewer's verdict needs a decision (see the report in .rddev/runtime/gates/"+id+")")
 	}

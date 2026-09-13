@@ -562,6 +562,59 @@ func codeIdentity(rec *WorkerRecord) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// ReviewIsStale reports whether the recorded review describes code the task's
+// worktree has since moved past, and why.
+//
+// It is the same comparison review collect makes (ReviewDiffSHA against the
+// current code identity), asked one step earlier and by the party that can act
+// on it. A rework after a refusal changes the diff, so the previous review is
+// about code that no longer exists; collecting it can only fail, correctly and
+// permanently — the reviewer is not working and never will again, so the
+// verdict will never change. The driver used to record that as a decision for
+// the Supervisor, which turned every rework into a stalled task waiting for a
+// human to say "review it again": the driver's own staleness, reported as
+// someone else's problem (L1-20260913-17).
+//
+// The comparison is deliberately the collect's, not a new one: two definitions
+// of "the code the verdict is about" would drift, and the one that matters is
+// the one the gate enforces.
+func ReviewIsStale(repoRoot, taskID string) (bool, string, error) {
+	taskRec, err := LoadRegistry(repoRoot, taskID)
+	if err != nil {
+		return false, "", err
+	}
+	if taskRec == nil {
+		return false, "", nil // no task record: nothing to compare against
+	}
+	revGate, err := LoadGateInputs(repoRoot, ReviewTaskID(taskID))
+	if err != nil {
+		return false, "", err
+	}
+	// No review record, or one from before the fingerprint was recorded: the
+	// collect owns that judgement (it refuses an unanchored review), and
+	// guessing staleness here would respawn reviews the gate would have
+	// accepted.
+	if revGate == nil || revGate.ReviewDiffSHA == "" {
+		return false, "", nil
+	}
+	fp, err := codeIdentity(taskRec)
+	if err != nil {
+		return false, "", fmt.Errorf("fingerprinting %s's worktree to judge its review: %w", taskID, err)
+	}
+	if fp == revGate.ReviewDiffSHA {
+		return false, "", nil
+	}
+	return true, fmt.Sprintf("the recorded review is about a superseded attempt (reviewed %s, code is now %s)", abbrevSHA(revGate.ReviewDiffSHA), abbrevSHA(fp)), nil
+}
+
+// abbrevSHA shortens a fingerprint for a log line.
+func abbrevSHA(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
+}
+
 // renderReviewPrompt builds the Reviewer's task: read the inputs in its
 // result dir and produce a verdict document.
 func renderReviewPrompt(taskID, reviewDir string, gate *GateInputs) string {
