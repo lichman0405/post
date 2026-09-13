@@ -3497,3 +3497,43 @@ commit `c64c017` 已是第二次 review 后 ✓）。我要写的话 ✓，就�
 写「已诊断 ✓，待修」而不写「查过 #105/分支 ✓，确实没人做」✓，
 下一轮的我就会照着重做一遍 ✓。**待办里的一句断言，就是下一轮的我的证据** ✓，
 它和 main 上的文本一样要经得起查 ✓。
+
+## L1-20260914-8 — T0215 的拒收是我任务包的缺陷；顺带暴露 rddev 少一扇门
+
+**第一件事：拒收的责任在我 ✓。** T0215 的 Worker 交回来的东西我逐条核对过 ✓：
+只改了 `tests/integration/migration_test.go` ✓，`infra/migrations/**` 逐字节还原 ✓，
+两个 subtest 断言的是**值**不是行数 ✓，变异证据是真的 ✓（删掉 00024 的 backfill 后红在
+`current_version_no = 0, want max(version_no) = 3` ✓），全量 integration 通过 ✓。
+它被 collect 拒的唯一原因是 ✓：**我把「故意跑红」的变异运行写进了验收标准 ✓，却没写它该记在哪里 ✓** ✓。
+Worker 只能猜 ✓，猜成了 `tests[]` 里两条 `"status": "failed"` ✓，
+而 `result_consistency.go:100-120` 的不变量是「`status: completed` 时 `tests[]` 必须全部 passed」✓ ——
+**规则没错 ✓，是我出的题漏了一个字段 ✓**。
+
+**修法（两条都做 ✓）：**
+1. **改题** ✓：`tasks/tasks.json` 的 T0215 验收标准[0] 现在明文写明 ✓ ——
+   变异运行的原文输出（删了哪个文件的哪条 UPDATE、命令、`go test` 的失败断言行、迁移已还原）
+   写进对应 **acceptance 条目的 `evidence`** ✓；故意跑红的运行**不得**登记为 `tests[]` 里的
+   failed/not_run 条目 ✓。标准是**补明记录位置** ✓，不是放宽 ✓ —— 要求仍是「必须给出实测输出」✓。
+2. **返工** ✓：`worker rework T0215`（run-4130c5688df4e473 ✓，同一 session `--resume` ✓，
+   worktree diff 保留 ✓）。
+
+**第二件事：这扇门本来不存在 ✓。** 我原本要用 `task reject --reason-file` 把返工说明交给 Worker ✓，
+发现走不通 ✓：`task reject` 把「记下拒收证据」和「状态变成 rejected」**绑在一起** ✓，
+而状态机里 `rejected -> rejected` **不是合法迁移** ✓（`state.go:46` 只给 `{ready, running}` ✓），
+`state.rejection_reason` 里躺着的是 collect 那句机器话 ✓（「run them or report status blocked/failed」✓ ——
+Worker 读它可能直接把任务标 blocked ✓，那正是我不想要的 ✓），
+而 `worker rework/respawn` **没有 `--reason-file`** ✓（`buildSpawnOpts` 只认那十个开关 ✓）。
+**结果：机器拒收之后，Supervisor 想换一句话说，没有任何一条支持的路径 ✓。**
+
+我这次的做法 ✓：写了一个十几行的临时程序 ✓，调用 `devorchestrator.NewRejectRecord` +
+`WriteRecord` ✓，把 3827 字的说明写成**一条新的 RejectRecord** ✓
+（`reject-run-713dad15a1e6df14.json` ✓）—— `reworkReason` 优先读的就是它 ✓，
+不是改状态文件 ✓、不是手写 JSON ✓、不是发明记录格式 ✓（构造函数自己的注释就写着
+「builds a rejection evidence record from outside the package ✓：the CLI supplies the content ✓」✓）。
+程序已删除 ✓，没有留在仓库里 ✓。**但这是绕路 ✓，不是通路 ✓** ——
+`rework` 的 prompt 随后被我实测确认带上了这段话 ✓（`prompt.md` 里 `记录形状` ✓、
+`result-tests-coverage` ✓、改后的验收标准 ✓ 都能搜到 ✓），所以这次结果是好的 ✓，
+**但这不该靠临时程序达成 ✓**。
+
+**规则** ✓：任务包如果要求「故意失败的证据」✓，必须**同时写明记在哪个字段** ✓ ——
+这次是我漏了 ✓。工具侧的缺口另开 Issue 追踪 ✓，不再用临时程序顶 ✓。

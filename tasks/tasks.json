@@ -6085,7 +6085,7 @@
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "两条断言在 00024/00025 的 backfill UPDATE 被删掉时变红（mutation 验证，须给出实测输出）",
+        "两条断言在 00024/00025 的 backfill UPDATE 被删掉时变红（mutation 验证，须给出实测输出）：变异运行的原文输出 —— 删了哪个文件的哪条 UPDATE、命令、从 go test 输出抄下的失败断言行、以及迁移已逐字节还原 —— 写进对应 acceptance 条目的 evidence 字段；故意跑红的变异运行**不得**登记为 tests[] 里的 failed/not_run 条目，因为 status=completed 时 tests[] 必须全部 passed（result_consistency.go 的 result-tests 不变量）",
         "断言不只数行数：必须对每个种入的对象比对具体的 current_version_no 值",
         "测试在真实 PostgreSQL 上运行，不 mock"
       ],
