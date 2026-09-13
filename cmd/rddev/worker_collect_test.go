@@ -279,8 +279,9 @@ func TestWorkerCollectSurfacesDaemonizedListener(t *testing.T) {
 	//   - the pre-existing listener's port: python exits ("Address already in
 	//     use") and the test still PASSES — but that pass is NOT vacuous, and a
 	//     previous version of this comment said it was. The holder is in the
-	//     spawn baseline, so the negative assertion below is live against it:
-	//     disabling the baseline subtraction makes the run fail on "the
+	//     spawn baseline, so the negative assertion below is live against it —
+	//     when it binds loopback, which is the address form the assertion greps
+	//     for. Disabling the baseline subtraction makes the run fail on "the
 	//     pre-existing listener … was flagged", on the holder. What is lost is
 	//     narrower — the listener being asserted about is not the one this test
 	//     started. Seen with a holder on 18982: the pre-fix test reported ok.
