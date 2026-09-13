@@ -13,6 +13,12 @@ import type { Project, ProjectRole } from "../../../../lib/projects";
 export interface ShellData {
   project: Project;
   role: ProjectRole | null;
+  /** The signed-in actor's user id (null when not a member). */
+  userId: string | null;
+  /** The API origin the shell fetched from; tab pages reuse it for their writes. */
+  apiBaseUrl: string;
+  /** Replace the shell's project copy after a settings write, so the header reflects it. */
+  applyProject: (project: Project) => void;
 }
 
 export const ProjectShellContext = createContext<ShellData | null>(null);

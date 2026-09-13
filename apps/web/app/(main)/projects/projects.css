@@ -320,6 +320,208 @@
   background: var(--bgColor-attention-muted, #fff8c5);
 }
 
+/* ---------- settings (T0109) ---------- */
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-section {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  padding: 16px;
+  background: var(--bgColor-default, #ffffff);
+}
+
+.settings-section-title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-section-desc,
+.settings-section-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.settings-section-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.settings-members-error {
+  margin-top: 12px;
+  border: 1px solid var(--borderColor-danger-muted, #ff818266);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--fgColor-danger, #d1242f);
+  background: var(--bgColor-danger-muted, #ffebe9);
+}
+
+.settings-members {
+  width: 100%;
+  margin-top: 12px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.settings-members th {
+  padding: 6px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--fgColor-muted, #59636e);
+  border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+}
+
+.settings-members td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.settings-members tr:last-child td {
+  border-bottom: none;
+}
+
+.settings-member-identity {
+  min-width: 180px;
+}
+
+.settings-member-name {
+  display: block;
+  font-weight: 600;
+}
+
+.settings-member-handle {
+  display: block;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.settings-role-select,
+.settings-visibility-select,
+.settings-input {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--fgColor-default, #1f2328);
+  background: var(--bgColor-default, #ffffff);
+}
+
+.settings-role-select {
+  padding: 4px 8px;
+  max-width: 160px;
+}
+
+.settings-role-select:disabled,
+.settings-visibility-select:disabled,
+.settings-input:disabled {
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+.settings-role-static {
+  color: var(--fgColor-default, #1f2328);
+}
+
+.settings-role-note {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.settings-member-joined {
+  color: var(--fgColor-muted, #59636e);
+  white-space: nowrap;
+}
+
+.settings-visibility-select {
+  margin-top: 12px;
+  padding: 4px 8px;
+  max-width: 160px;
+}
+
+.settings-label {
+  display: block;
+  margin: 12px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.settings-input {
+  display: block;
+  width: 100%;
+  max-width: 560px;
+  padding: 6px 8px;
+  font-family: inherit;
+}
+
+.settings-purpose-input {
+  resize: vertical;
+}
+
+.settings-activity-select {
+  width: auto;
+  min-width: 160px;
+}
+
+.settings-save-row {
+  margin-top: 16px;
+}
+
+.settings-save {
+  padding: 5px 16px;
+  border: 1px solid var(--borderColor-accent-emphasis, #0969da);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #ffffff;
+  background: var(--bgColor-accent-emphasis, #0969da);
+  cursor: pointer;
+}
+
+.settings-save:disabled {
+  border-color: var(--borderColor-default, #d0d7de);
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+  cursor: default;
+}
+
+.settings-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.settings-notice-success {
+  border: 1px solid var(--borderColor-success-muted, #4ac26b66);
+  color: var(--fgColor-success, #1a7f37);
+  background: var(--bgColor-success-muted, #dafbe1);
+}
+
+.settings-notice-error {
+  border: 1px solid var(--borderColor-danger-muted, #ff818266);
+  color: var(--fgColor-danger, #d1242f);
+  background: var(--bgColor-danger-muted, #ffebe9);
+}
+
+.settings-audit-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
 @media (max-width: 640px) {
   .project-overview dl {
     grid-template-columns: 1fr;

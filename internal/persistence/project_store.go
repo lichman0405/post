@@ -215,7 +215,10 @@ func mapProjectWriteError(err error) error {
 		errors.Is(err, projects.ErrOrgDeactivated),
 		errors.Is(err, projects.ErrForbidden),
 		errors.Is(err, projects.ErrProgramNotFound),
-		errors.Is(err, projects.ErrProgramOrgMismatch):
+		errors.Is(err, projects.ErrProgramOrgMismatch),
+		errors.Is(err, projects.ErrProjectNotFound),
+		errors.Is(err, projects.ErrTargetMemberNotFound),
+		errors.Is(err, projects.ErrLastOwner):
 		return err
 	}
 	var pgErr *pgconn.PgError

@@ -278,7 +278,10 @@ func wrapStoreError(err error) error {
 		errors.Is(err, ErrOrgDeactivated),
 		errors.Is(err, ErrProgramNotFound),
 		errors.Is(err, ErrProgramOrgMismatch),
-		errors.Is(err, ErrMemberNotFound):
+		errors.Is(err, ErrMemberNotFound),
+		errors.Is(err, ErrTargetMemberNotFound),
+		errors.Is(err, ErrLastOwner),
+		errors.Is(err, ErrSettingsForbidden):
 		return err
 	default:
 		return fmt.Errorf("%w: %v", ErrStore, err)

@@ -35,6 +35,18 @@ func (q *Queries) AddProjectMembership(ctx context.Context, arg AddProjectMember
 	return i, err
 }
 
+const countProjectOwners = `-- name: CountProjectOwners :one
+SELECT count(*)::integer AS owner_count FROM project_memberships
+WHERE project_id = $1 AND role = 'owner'
+`
+
+func (q *Queries) CountProjectOwners(ctx context.Context, projectID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countProjectOwners, projectID)
+	var owner_count int32
+	err := row.Scan(&owner_count)
+	return owner_count, err
+}
+
 const createProgram = `-- name: CreateProgram :one
 
 INSERT INTO programs (organization_id, slug, name, description)
@@ -139,6 +151,34 @@ SELECT id, organization_id, program_id, slug, name, purpose, activity_status, vi
 
 func (q *Queries) GetProjectByID(ctx context.Context, id pgtype.UUID) (Project, error) {
 	row := q.db.QueryRow(ctx, getProjectByID, id)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.ProgramID,
+		&i.Slug,
+		&i.Name,
+		&i.Purpose,
+		&i.ActivityStatus,
+		&i.Visibility,
+		&i.MainFrozen,
+		&i.GitRepositoryExternalID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.ProvisionStatus,
+	)
+	return i, err
+}
+
+const getProjectByIDForUpdate = `-- name: GetProjectByIDForUpdate :one
+SELECT id, organization_id, program_id, slug, name, purpose, activity_status, visibility, main_frozen, git_repository_external_id, created_by, created_at, provision_status FROM projects WHERE id = $1 FOR UPDATE
+`
+
+// The project-scoped lock serializing membership writes: role changes run
+// inside a transaction and lock the project row first, so the last-owner
+// count can never race a concurrent demotion.
+func (q *Queries) GetProjectByIDForUpdate(ctx context.Context, id pgtype.UUID) (Project, error) {
+	row := q.db.QueryRow(ctx, getProjectByIDForUpdate, id)
 	var i Project
 	err := row.Scan(
 		&i.ID,
@@ -357,6 +397,66 @@ type UpdateProjectActivityStatusParams struct {
 
 func (q *Queries) UpdateProjectActivityStatus(ctx context.Context, arg UpdateProjectActivityStatusParams) (Project, error) {
 	row := q.db.QueryRow(ctx, updateProjectActivityStatus, arg.ActivityStatus, arg.ID)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.ProgramID,
+		&i.Slug,
+		&i.Name,
+		&i.Purpose,
+		&i.ActivityStatus,
+		&i.Visibility,
+		&i.MainFrozen,
+		&i.GitRepositoryExternalID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.ProvisionStatus,
+	)
+	return i, err
+}
+
+const updateProjectMembershipRole = `-- name: UpdateProjectMembershipRole :one
+UPDATE project_memberships
+SET role = $1
+WHERE project_id = $2 AND user_id = $3
+RETURNING project_id, user_id, role, created_at
+`
+
+type UpdateProjectMembershipRoleParams struct {
+	Role      string      `json:"role"`
+	ProjectID pgtype.UUID `json:"project_id"`
+	UserID    pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) UpdateProjectMembershipRole(ctx context.Context, arg UpdateProjectMembershipRoleParams) (ProjectMembership, error) {
+	row := q.db.QueryRow(ctx, updateProjectMembershipRole, arg.Role, arg.ProjectID, arg.UserID)
+	var i ProjectMembership
+	err := row.Scan(
+		&i.ProjectID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateProjectSettings = `-- name: UpdateProjectSettings :one
+UPDATE projects
+SET purpose = $1,
+    activity_status = $2
+WHERE id = $3
+RETURNING id, organization_id, program_id, slug, name, purpose, activity_status, visibility, main_frozen, git_repository_external_id, created_by, created_at, provision_status
+`
+
+type UpdateProjectSettingsParams struct {
+	Purpose        string      `json:"purpose"`
+	ActivityStatus string      `json:"activity_status"`
+	ID             pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateProjectSettings(ctx context.Context, arg UpdateProjectSettingsParams) (Project, error) {
+	row := q.db.QueryRow(ctx, updateProjectSettings, arg.Purpose, arg.ActivityStatus, arg.ID)
 	var i Project
 	err := row.Scan(
 		&i.ID,

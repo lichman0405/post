@@ -110,6 +110,25 @@ const OWNER_MEMBERSHIP = {
   created_at: "2026-09-10T08:00:00Z",
 };
 
+// The member list the real settings tab (T0109) renders for the owner
+// scenario — memberPayload rows, as cmd/api/projectshttp answers.
+const ALLOY_MEMBERS = [
+  {
+    user_id: "00000000-0000-4000-8000-000000000001",
+    handle: "alice",
+    display_name: "Alice Guo",
+    role: "owner",
+    joined_at: "2026-09-10",
+  },
+  {
+    user_id: "00000000-0000-4000-8000-000000000002",
+    handle: "bob",
+    display_name: "Bob Chen",
+    role: "viewer",
+    joined_at: "2026-09-11",
+  },
+];
+
 const NOT_FOUND = {
   code: "PROJECT_NOT_FOUND",
   message: "project not found",
@@ -165,6 +184,9 @@ function installApiMock(page) {
       }
       return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify(MEMBERSHIP_NOT_FOUND) });
     }
+    if (method === "GET" && pathname === `/api/v1/projects/${ALLOY.id}/members`) {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ members: ALLOY_MEMBERS }) });
+    }
     // The private project (and its membership) answers the existence-
     // hiding 404 for everyone, like the API's read policy for a private
     // project the caller is not authorized for.
@@ -189,7 +211,7 @@ const TAB_LABELS = [
   "Assets", "Files", "Activity", "Settings",
 ];
 
-const assertTab = async (tabKey, pathSuffix, placeholderTitle) => {
+const assertTab = async (tabKey, pathSuffix, placeholderTitle, contentSelector = '[data-project-tab-content="overview"]') => {
   await page.click(`[data-project-tab="${tabKey}"]`);
   await page.waitForURL(`**/projects/${ALLOY.id}${pathSuffix}`);
   const current = await page.getAttribute(`[data-project-tab="${tabKey}"]`, "aria-current");
@@ -202,7 +224,7 @@ const assertTab = async (tabKey, pathSuffix, placeholderTitle) => {
     await page.waitForSelector(`[data-tab-placeholder="${placeholderTitle}"]`);
     ok(`tab ${tabKey}: renders its content`);
   } else {
-    await page.waitForSelector('[data-project-tab-content="overview"]');
+    await page.waitForSelector(contentSelector);
     ok(`tab ${tabKey}: renders its content`);
   }
 };
@@ -285,11 +307,12 @@ const TAB_ROUTES = [
   ["assets", "/assets", "Assets"],
   ["files", "/files", "Files"],
   ["activity", "/activity", "Activity"],
-  ["settings", "/settings", "Settings"],
+  // T0109 replaced the Settings placeholder with the real settings page.
+  ["settings", "/settings", null, "[data-settings]"],
   ["overview", "", null],
 ];
-for (const [key, suffix, placeholder] of TAB_ROUTES) {
-  await assertTab(key, suffix, placeholder);
+for (const [key, suffix, placeholder, contentSelector] of TAB_ROUTES) {
+  await assertTab(key, suffix, placeholder, contentSelector);
 }
 ok("navigability: all nine routes reachable from the tab bar");
 
@@ -314,10 +337,10 @@ if ((await page.locator('[data-project-tab="settings"]').count()) !== 0) {
   ok("settings: Settings tab hidden when the API answers no role");
 }
 await page.waitForSelector("[data-settings-unauthorized]");
-if ((await page.locator('[data-tab-placeholder="Settings"]').count()) !== 0) {
+if ((await page.locator("[data-settings]").count()) !== 0) {
   fail("settings: direct /settings below the gate role must not render settings chrome");
 } else {
-  ok("settings: direct /settings below the gate role renders the not-authorized answer");
+  ok("settings: direct /settings below the gate role renders the not-authorized answer, never settings chrome");
 }
 
 // And the same direct hit as a signed-out stranger of the public project

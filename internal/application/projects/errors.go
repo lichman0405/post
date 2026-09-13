@@ -33,6 +33,25 @@ const (
 	// CodeProgramOrgMismatch is returned when the program belongs to a
 	// different organization than the project.
 	CodeProgramOrgMismatch = "PROGRAM_ORG_MISMATCH"
+	// CodeSettingsForbidden is returned when the actor may not manage the
+	// project's settings (below maintainer, or not a member).
+	CodeSettingsForbidden = "SETTINGS_FORBIDDEN"
+	// CodeMemberNotFound is returned when the user a role change targets
+	// holds no membership in the project.
+	CodeMemberNotFound = "MEMBER_NOT_FOUND"
+	// CodeLastOwner is returned when a role change would demote or remove
+	// the project's last owner.
+	CodeLastOwner = "LAST_OWNER"
+	// CodeSelfRoleChangeForbidden is returned when the actor tries to
+	// change their own role (self-demotion could orphan the project).
+	CodeSelfRoleChangeForbidden = "SELF_ROLE_CHANGE_FORBIDDEN"
+	// CodeOwnerRoleChangeForbidden is returned when a maintainer tries to
+	// grant or revoke the owner role (owner management is owner-only).
+	CodeOwnerRoleChangeForbidden = "OWNER_ROLE_CHANGE_FORBIDDEN"
+	// CodeVisibilityChangeNotSupported is returned when a client asks to
+	// change visibility: the setting is preview-only until the publishing
+	// guard lands (T0109 requirement).
+	CodeVisibilityChangeNotSupported = "VISIBILITY_CHANGE_NOT_SUPPORTED"
 	// CodeValidationFailed is returned for malformed input.
 	CodeValidationFailed = "VALIDATION_FAILED"
 	// CodeServiceUnavailable is returned when the store failed.
@@ -67,6 +86,23 @@ var (
 	ErrProgramOrgMismatch = errors.New("projects: program does not belong to the project's organization")
 	// ErrMemberNotFound: the project membership does not exist.
 	ErrMemberNotFound = errors.New("projects: membership not found")
+	// ErrTargetMemberNotFound: the user a role change targets holds no
+	// membership in the project.
+	ErrTargetMemberNotFound = errors.New("projects: target membership not found")
+	// ErrSettingsForbidden: the actor may not manage the project's
+	// settings (below maintainer, or not a member at all — the same
+	// default-deny answer for both, so a stranger learns nothing).
+	ErrSettingsForbidden = errors.New("projects: settings action not allowed")
+	// ErrLastOwner: the change would demote the project's last owner.
+	ErrLastOwner = errors.New("projects: project must keep at least one owner")
+	// ErrSelfRoleChange: the actor may not change their own role.
+	ErrSelfRoleChange = errors.New("projects: cannot change your own role")
+	// ErrOwnerRoleChange: a maintainer may not grant or revoke the owner
+	// role.
+	ErrOwnerRoleChange = errors.New("projects: only owners manage the owner role")
+	// ErrVisibilityChangeNotSupported: visibility is preview-only until
+	// the publishing guard lands.
+	ErrVisibilityChangeNotSupported = errors.New("projects: visibility changes are not supported yet")
 	// ErrStore: the store itself failed (dependency down, driver error).
 	ErrStore = errors.New("projects: store failure")
 )

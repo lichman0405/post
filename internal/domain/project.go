@@ -61,6 +61,16 @@ func ValidProjectVisibility(v ProjectVisibility) bool {
 	return v == VisibilityPublic || v == VisibilityPrivate
 }
 
+// ValidActivityStatus reports whether s is one of the four canonical
+// lifecycle states (projects.activity_status CHECK).
+func ValidActivityStatus(s string) bool {
+	switch s {
+	case "planning", "active", "paused", "archived":
+		return true
+	}
+	return false
+}
+
 // ProvisionStatus is the GitProvider provisioning state
 // (projects.provision_status CHECK). New projects are pending by default;
 // T0301's Gitea adapter moves them to provisioned (or failed).
@@ -135,6 +145,49 @@ type ProjectMembership struct {
 	UserID    string
 	Role      ProjectRole
 	CreatedAt time.Time
+}
+
+// ProjectMember is one row of the settings member list: the membership
+// joined with the user's public identity (handle + display name). The
+// store's ListProjectMembers query is the only producer.
+type ProjectMember struct {
+	UserID      string
+	Handle      string
+	DisplayName string
+	Role        ProjectRole
+	JoinedAt    time.Time
+}
+
+// AuditEntry is one audit_log row (canonical table, migration 00012):
+// who acted, through which surface, what they did, on which target, under
+// which correlation id, and the before/after summaries. T0109 writes the
+// placeholder records for the settings actions; T0110 owns the audit
+// application surface (append-only queries, the Activity page) on top of
+// the same table.
+type AuditEntry struct {
+	// ActorID is the acting user's id (audit_log.actor_id).
+	ActorID string
+	// Via names the acting surface ("api" today; the MCP/agent surface
+	// passes its own value when it lands).
+	Via string
+	// Action is the dotted action name (T0110 defines the vocabulary;
+	// T0109 uses "project.member_role_changed" and
+	// "project.settings_updated").
+	Action string
+	// TargetRef names the affected entity inside the project (optional:
+	// the member user id for role changes; nil for project-level edits).
+	TargetRef *string
+	// ProjectID scopes the entry (audit_log.project_id).
+	ProjectID string
+	// CorrelationID traces the request that caused the action
+	// (audit_log.correlation_id is NOT NULL — T0110's acceptance requires
+	// actor/via/request id on high-risk actions, so the placeholder
+	// already carries all three).
+	CorrelationID string
+	// Before/After are the JSON summaries of the state around the change
+	// (audit_log.before_summary / after_summary; nil writes NULL).
+	Before any
+	After  any
 }
 
 // Program is a long-term research direction that optionally groups projects

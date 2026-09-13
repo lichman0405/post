@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AlertIcon, RepoIcon } from "@primer/octicons-react";
@@ -60,6 +60,16 @@ export function ProjectShell({
   // fetch lands.
   const [loaded, setLoaded] = useState<ShellLoaded | null>(null);
   const [failure, setFailure] = useState<ShellFailure | null>(null);
+
+  // The settings page hands the PATCH answer back so the header purpose
+  // shows the saved value without a full refetch.
+  const applyProject = useCallback((updated: Project) => {
+    setLoaded((prev) =>
+      prev === null || prev.projectId !== updated.id
+        ? prev
+        : { projectId: prev.projectId, project: updated, membership: prev.membership },
+    );
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -183,7 +193,9 @@ export function ProjectShell({
           );
         })}
       </nav>
-      <ProjectShellContext.Provider value={{ project, role }}>
+      <ProjectShellContext.Provider
+        value={{ project, role, userId: membership?.user_id ?? null, apiBaseUrl, applyProject }}
+      >
         <div className="project-tab-content">{children}</div>
       </ProjectShellContext.Provider>
     </div>
