@@ -33,8 +33,13 @@ func (o *DriveOpts) logf(format string, a ...any) {
 // would for a human. That is the property that keeps automation from lowering a
 // gate.
 func (o *DriveOpts) run(args ...string) (string, int) {
-	full := append([]string{"--tasks-json", o.dagPath(), "--state-json", o.statePath()}, args...)
-	cmd := exec.Command(o.binary(), full...)
+	// The DAG/state overrides are PER-COMMAND flags, not globals: placed before
+	// the subcommand they are read as the subcommand, and every action fails
+	// with a usage error. That is exactly what happened - the driver recorded
+	// twelve of them as decisions and then sat looking alive, because a
+	// recorded decision (correctly) stops it retrying. Written once, here,
+	// because there is only one place that assembles a command.
+	cmd := exec.Command(o.binary(), o.rddevArgs(args)...)
 	cmd.Dir = o.RepoRoot
 	out, err := cmd.CombinedOutput()
 	if err == nil {
@@ -44,6 +49,15 @@ func (o *DriveOpts) run(args ...string) (string, int) {
 		return string(out), ee.ExitCode()
 	}
 	return string(out), -1
+}
+
+// rddevArgs assembles one rddev invocation. Pure, and separate, because the
+// order is the whole correctness of it: --tasks-json before the subcommand is
+// read AS the subcommand, which turned every action the driver took into a
+// usage error — recorded as a decision, which then (correctly) stopped it
+// retrying. The driver looked alive and did nothing for ten minutes.
+func (o *DriveOpts) rddevArgs(args []string) []string {
+	return append(append([]string{}, args...), "--tasks-json", o.dagPath(), "--state-json", o.statePath())
 }
 
 func (o *DriveOpts) dagPath() string {
@@ -128,7 +142,11 @@ func (o *DriveOpts) Drive(ctx context.Context) error {
 
 // exhausted reports whether there is nothing left the driver can act on.
 func (o *DriveOpts) exhausted() (bool, error) {
-	if len(o.runningTasks()) > 0 {
+	running, err := o.runningTasks()
+	if err != nil {
+		return false, err
+	}
+	if len(running) > 0 {
 		return false, nil
 	}
 	out, _ := o.run("task", "next")
@@ -145,10 +163,15 @@ func (o *DriveOpts) exhausted() (bool, error) {
 
 // runningTasks lists tasks whose Worker has been dispatched and not yet
 // collected — the set the parallelism limit counts.
-func (o *DriveOpts) runningTasks() []string {
+//
+// It returns an error rather than an empty slice on failure. Swallowing it made
+// the driver answer "no running tasks" to a question it had failed to ask, and
+// then sit in a loop looking healthy while a finished Worker waited forever:
+// exactly the silent no-op this driver exists to remove.
+func (o *DriveOpts) runningTasks() ([]string, error) {
 	store, err := OpenStore(o.dagPath(), o.statePath())
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("reading the task state: %w", err)
 	}
 	var out []string
 	for _, id := range store.dag.IDs() {
@@ -158,20 +181,39 @@ func (o *DriveOpts) runningTasks() []string {
 		}
 		out = append(out, id)
 	}
-	return out
+	return out, nil
 }
 
 // tick performs at most one action per task and returns whether it did anything.
 func (o *DriveOpts) tick(st *DriverStatus) (bool, error) {
-	_ = staleDecisions(o.RepoRoot)
+	if err := staleDecisions(o.RepoRoot); err != nil {
+		return false, err
+	}
 	open, err := ReadDecisions(o.RepoRoot)
 	if err != nil {
 		return false, err
 	}
-	st.RunningTasks = o.runningTasks()
+	running, err := o.runningTasks()
+	if err != nil {
+		return false, err
+	}
+	st.RunningTasks = running
+
+	// Every task the driver still owes something, not only the running ones.
+	// Collecting and then stopping — because verification and accepted were
+	// never revisited — was the first version of this loop: it did the one
+	// step whose input is a running Worker and left everything after it
+	// untouched, which is a pipeline that stops at the first gate.
+	pending, err := o.tasksNeedingAction()
+	if err != nil {
+		return false, err
+	}
+	if len(pending) > 0 {
+		o.logf("pending %v", pending)
+	}
 
 	acted := false
-	for _, id := range append([]string{}, st.RunningTasks...) {
+	for _, id := range pending {
 		if len(OpenDecisionsFor(open, id)) > 0 {
 			continue // waiting on the Supervisor; retrying would just re-fail
 		}
@@ -182,8 +224,16 @@ func (o *DriveOpts) tick(st *DriverStatus) (bool, error) {
 		acted = acted || did
 	}
 
-	if len(o.runningTasks()) < o.Parallel {
-		if did := o.dispatch(st); did {
+	since, err := o.runningTasks()
+	if err != nil {
+		return false, err
+	}
+	if len(since) < o.Parallel {
+		open, err = ReadDecisions(o.RepoRoot)
+		if err != nil {
+			return false, err
+		}
+		if did := o.dispatch(st, open); did {
 			acted = true
 		}
 	}
@@ -203,9 +253,18 @@ func (o *DriveOpts) stepTask(id string, st *DriverStatus) (bool, error) {
 	switch insp.State.Status {
 	case StateRunning:
 		rec, err := LoadRegistry(o.RepoRoot, id)
-		if err != nil || rec == nil || rec.ExitStatus == nil {
-			return false, nil // still working
+		if err != nil {
+			return false, fmt.Errorf("reading the Worker record for %s: %w", id, err)
 		}
+		if rec == nil {
+			o.logf("%s is running with no Worker record — nothing to collect", id)
+			return false, nil
+		}
+		if rec.ExitStatus == nil {
+			o.logf("%s still working", id)
+			return false, nil
+		}
+		o.logf("%s's Worker exited (%d) — collecting", id, *rec.ExitStatus)
 		if out, code := o.run("worker", "collect", id); code != 0 {
 			return true, o.decide(id, "collect", out)
 		}
@@ -282,7 +341,7 @@ func (o *DriveOpts) stepAccepted(id string, st *DriverStatus) (bool, error) {
 }
 
 // dispatch starts the next task the DAG allows, up to the parallelism limit.
-func (o *DriveOpts) dispatch(st *DriverStatus) bool {
+func (o *DriveOpts) dispatch(st *DriverStatus, open []Decision) bool {
 	out, code := o.run("task", "next")
 	if code != 0 {
 		return false
@@ -296,6 +355,11 @@ func (o *DriveOpts) dispatch(st *DriverStatus) bool {
 		}
 	}
 	if next == "" {
+		return false
+	}
+	// A task with an open decision is waiting on the Supervisor. Retrying it
+	// every tick would re-record the same decision forever and bury the log.
+	if len(OpenDecisionsFor(open, next)) > 0 {
 		return false
 	}
 	if _, code := o.run("task", "ready", next); code != 0 {
@@ -340,4 +404,27 @@ func firstLine(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+// tasksNeedingAction lists the tasks the driver owes something: one whose Worker
+// is running (collect when it exits), one that is collected (review, accept) and
+// one that is accepted (commit, PR, merge). Iterating only the running ones
+// silently stops the pipeline at the first gate.
+func (o *DriveOpts) tasksNeedingAction() ([]string, error) {
+	store, err := OpenStore(o.dagPath(), o.statePath())
+	if err != nil {
+		return nil, fmt.Errorf("reading the task state: %w", err)
+	}
+	var out []string
+	for _, id := range store.dag.IDs() {
+		insp, err := store.Inspect(id)
+		if err != nil {
+			continue
+		}
+		switch insp.State.Status {
+		case StateRunning, StateVerification, StateAccepted:
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
