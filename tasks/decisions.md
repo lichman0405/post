@@ -3643,3 +3643,73 @@ branch while letting a planted tag through」✓，`60a7bd6`（#97）就是取�
 
 到这里，同一句话（"需要你本人点名" ✓）在两个不同的出口各出现一次 ✓（合 PR、删远端 ref ✓）。
 **我不再逐个试了** ✓：拒信不是噪音 ✓，它是唯一能告诉我"这件事的授权不在我手上"的通道 ✓。
+
+## L1-20260914-11 — #121 按 owner 选的方案 (c) 落地：三个任务各配一道自己扛得动的 G3（我定了，并按 L1 记录）
+
+**背景** ✓：`rsg-real-services` 挂在 96 个任务上 ✓，其中 93 个扛得动 ✓，
+T0204 / T0205 / T0207 三个**由构造即红** ✓ —— 那脚本驱动的是 RSG 的 HTTP 面 ✓
+（projects → branches → objects → versions → relations → `:validate` ✓），
+而这些路由**一个都还不存在** ✓：`cmd/api/` 下只有 audithttp / authhttp / orgshttp /
+profilehttp / projectshttp ✓，RSG 的 HTTP 面属于 **T0209 RSG Query API** ✓。
+更要命的是 T0209 在 T0208 后面 ✓，T0208 又在 T0205/T0207 后面 ✓，
+而 T0205/T0207 在 T0204 后面 ✓ —— 环 ✓。
+
+我在 #121 里已更正过一次自己的说法 ✓：`requires_tasks` **运行时根本不读** ✓
+（`grep -rn RequiresTasks --include='*.go' .` 只有三处 ✓：字段定义、注释、那条 spec 测试 ✓）。
+所以它不是"缺一条依赖边" ✓，而是**闸门描述的东西在任务的下游** ✓。
+
+owner 选了 **(c)：各配一道自己的检查** ✓ ——
+不动那 93 个 ✓，也不给这三个任务发"免检" ✓（方案 (a) 已被安全分类器拒过一次 ✓，
+理由正是"把卡住的任务标成不需要检查" ✓）。
+
+### 我做了什么
+
+三个新 G3 作业 ✓，`requires_tasks` 各自只写自己 ✓（**这是由构造可满足的** ✓）：
+
+| 作业 | 任务 | 脚本 |
+|---|---|---|
+| `state-commit-real-services` | T0204 | `tests/acceptance/state-commit-real-services-e2e.sh` |
+| `branch-domain-real-services` | T0205 | `tests/acceptance/branch-domain-real-services-e2e.sh` |
+| `validation-gates-real-services` | T0207 | `tests/acceptance/validation-gates-real-services-e2e.sh` |
+
+每个脚本**点名**该任务两条 acceptance_criteria 各自对应的那一支测试 ✓，**打真 PostgreSQL** ✓。
+命名不是我起的 ✓ —— T0204 自己的套件就是"一条准则一个同名测试" ✓：
+
+```
+TestStateCommitCreatesTraceableTransition            ← 每次 semantic write 形成可追溯 state transition
+TestStateCommitFailedTransactionLeavesNoHalfState    ← 失败 transaction 不产生半状态
+```
+
+T0205 / T0207 还没开工 ✓，所以那四支测试名是**我写进任务包的契约** ✓，
+与 T0204 同一约定 ✓（`tasks/tests.json` 里已登记为 `*-TEST-G3` ✓）。
+
+### 为什么要"点名"，而不是"跑整个包"
+
+G2 的 `migration-integration` 作业已经跑 `go test ./tests/integration` ✓ —— 整包 ✓。
+整包意味着**这两条准则的判词由"当时恰好存在的测试"承载** ✓。
+点名之后 ✓：**删掉、改名、skip 掉那支测试，闸门照样红** ✓ ——
+`go test -run` 在选择器匹配不到任何东西时**打印 `no tests to run` 并返回 0** ✓，
+这正是"看起来绿的、其实什么都没断言"的形状 ✓。
+这条我实测过 ✓：在 main 上（那两支测试都还不存在）三个脚本**全部拒收** ✓，报的就是这句话 ✓。
+
+### 实测（不是推理）
+
+在**真的集成树**上跑过 ✓ —— `git worktree add --detach <dir> main` + T0204 的完整改动 ✓
+（含未跟踪文件 ✓；注意 `git diff` **不含**未跟踪文件 ✓，我第一次就是这样跑出假红的 ✓，
+生产路径用的是 `taskWorktreeDiff` ✓，它是 `git diff` + `git ls-files --others` ✓）：
+
+```
+$ bash tests/acceptance/state-commit-real-services-e2e.sh
+ok   TestStateCommitCreatesTraceableTransition
+ok   TestStateCommitFailedTransactionLeavesNoHalfState
+G3 state-commit-real-services: all checks passed against real PostgreSQL   → rc=0
+```
+
+`internal/devorchestrator` 测试通过 ✓（`gate_spec_test.go` 里那份钉死的
+`carriersTheChainTraps` **清空并留注释** ✓，机制保留 ✓ —— 下一个环还要靠它记录理由 ✓）。
+
+### 代价，写在这里而不是暗示掉
+
+T0204 / T0205 / T0207 **没有端到端 RSG 链路的检查** ✓，而且**在 T0208 存在之前也不可能有** ✓。
+`rsg-real-services` 仍在其余 93 个（含 T0208 自己 ✓）上跑 ✓，链路断言没丢 ✓ ——
+丢的是这三个**头**上的那一份 ✓。这就是方案 (c) 明码标价的东西 ✓。
