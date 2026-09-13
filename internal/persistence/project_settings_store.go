@@ -2,7 +2,6 @@ package persistence
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -15,10 +14,13 @@ import (
 
 // The settings half of the project store (T0109): the member list, the
 // role change and the purpose/activity-status edit. Both writes record
-// their audit placeholder in the SAME transaction as the state change
-// (docs/53: audit + state are one unit — a governance action can never
-// land without its audit row, and vice versa). T0110 builds the audit
-// application surface on these rows.
+// their audit entry in the SAME transaction as the state change via the
+// shared appendAudit helper (docs/53: audit + state are one unit — a
+// governance action can never land without its audit row, and vice
+// versa). The entries are T0110's domain.AuditEntry: settings actions and
+// the audit application surface are two halves of the same audit_log
+// table, so there is one type, one writer and one action-name registry;
+// T0110's Activity queries read the rows written here.
 
 // ListProjectMembers implements projects.ProjectStore.
 func (s *ProjectStore) ListProjectMembers(ctx context.Context, projectID string) ([]domain.ProjectMember, error) {
@@ -86,7 +88,7 @@ func (s *ProjectStore) UpdateMembershipRole(ctx context.Context, projectID, user
 			return mapProjectWriteError(err)
 		}
 		updated = projectMembershipFromRow(row)
-		return insertAuditEntry(ctx, q, audit)
+		return appendAudit(ctx, q, audit)
 	})
 	if err != nil {
 		return domain.ProjectMembership{}, err
@@ -129,50 +131,12 @@ func (s *ProjectStore) UpdateProjectSettings(ctx context.Context, projectID stri
 			return mapProjectWriteError(err)
 		}
 		updated = projectFromRow(row)
-		return insertAuditEntry(ctx, q, audit)
+		return appendAudit(ctx, q, audit)
 	})
 	if err != nil {
 		return domain.Project{}, err
 	}
 	return updated, nil
-}
-
-// insertAuditEntry writes one audit_log row (the T0109 placeholder;
-// T0110 owns the audit store). The entry's summaries are marshalled to
-// JSONB here; a malformed actor/project id fails the transaction —
-// fail closed, a governance write without its audit row must not land.
-func insertAuditEntry(ctx context.Context, q *sqlc.Queries, e domain.AuditEntry) error {
-	actorID, err := textUUID(e.ActorID)
-	if err != nil {
-		return fmt.Errorf("persistence: audit actor id: %w", err)
-	}
-	projectID, err := textUUID(e.ProjectID)
-	if err != nil {
-		return fmt.Errorf("persistence: audit project id: %w", err)
-	}
-	before, err := json.Marshal(e.Before)
-	if err != nil {
-		return fmt.Errorf("persistence: audit before summary: %w", err)
-	}
-	after, err := json.Marshal(e.After)
-	if err != nil {
-		return fmt.Errorf("persistence: audit after summary: %w", err)
-	}
-	_, err = q.RecordAuditLogEntry(ctx, sqlc.RecordAuditLogEntryParams{
-		ActorID:       actorID,
-		Via:           e.Via,
-		Action:        e.Action,
-		TargetRef:     e.TargetRef,
-		ProjectID:     projectID,
-		CorrelationID: e.CorrelationID,
-		BeforeSummary: before,
-		AfterSummary:  after,
-		Metadata:      []byte(`{}`),
-	})
-	if err != nil {
-		return fmt.Errorf("persistence: record audit entry: %w", err)
-	}
-	return nil
 }
 
 // projectMemberFromRow converts a sqlc member-list row to the domain

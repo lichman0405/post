@@ -23,9 +23,12 @@ import (
 type fakeStore struct {
 	projects map[string]domain.Project
 	members  map[[2]string]domain.ProjectMembership
-	programs map[string]domain.Program
-	audits   []domain.AuditEntry
-	nextID   int
+	// memberOrder records the join order (the production ListProjectMembers
+	// contract is "oldest membership first"; the map alone has no order).
+	memberOrder [][2]string
+	programs    map[string]domain.Program
+	audits      []domain.AuditEntry
+	nextID      int
 	// gate is the organization state the store re-checks inside
 	// CreateProject, mirroring the production transaction.
 	gate *fakeGate
@@ -56,7 +59,11 @@ func (s *fakeStore) seedOrg(orgID, ownerID string) { s.gate.seedOrg(orgID, owner
 // member-management API arrives with T0109; T0105 tests seed state to
 // exercise the role columns of the permission matrix).
 func (s *fakeStore) seedMember(projectID, userID string, role domain.ProjectRole) {
-	s.members[[2]string{projectID, userID}] = domain.ProjectMembership{
+	key := [2]string{projectID, userID}
+	if _, exists := s.members[key]; !exists {
+		s.memberOrder = append(s.memberOrder, key)
+	}
+	s.members[key] = domain.ProjectMembership{
 		ProjectID: projectID, UserID: userID, Role: role,
 	}
 }
@@ -103,7 +110,9 @@ func (s *fakeStore) CreateProject(ctx context.Context, p domain.Project, creator
 	p.ID = s.freshID()
 	s.projects[p.ID] = p
 	m := domain.ProjectMembership{ProjectID: p.ID, UserID: creatorUserID, Role: domain.ProjectRoleOwner}
-	s.members[[2]string{p.ID, creatorUserID}] = m
+	key := [2]string{p.ID, creatorUserID}
+	s.members[key] = m
+	s.memberOrder = append(s.memberOrder, key)
 	return p, m, nil
 }
 
@@ -129,9 +138,13 @@ func (s *fakeStore) GetMembership(ctx context.Context, projectID, userID string)
 func (s *fakeStore) auditEntries() []domain.AuditEntry { return s.audits }
 
 func (s *fakeStore) ListProjectMembers(ctx context.Context, projectID string) ([]domain.ProjectMember, error) {
+	// Walk the join order (oldest first, like the production ORDER BY
+	// joined_at) and read the CURRENT value — a role change must not
+	// reshuffle the list.
 	out := []domain.ProjectMember{}
-	for _, m := range s.members {
-		if m.ProjectID != projectID {
+	for _, key := range s.memberOrder {
+		m, ok := s.members[key]
+		if !ok || m.ProjectID != projectID {
 			continue
 		}
 		out = append(out, domain.ProjectMember{

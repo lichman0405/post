@@ -181,7 +181,7 @@ func TestSettingsWireMapping(t *testing.T) {
 		if payload.Role != "maintainer" || payload.UserID != target || payload.ProjectID != settingsProjectID {
 			t.Errorf("payload = %+v, want the maintainer membership", payload)
 		}
-		if len(store.audits) != 1 || store.audits[0].Action != "project.member_role_changed" {
+		if len(store.audits) != 1 || store.audits[0].Action != domain.ActionProjectMemberRoleChanged {
 			t.Errorf("audits = %+v, want one member_role_changed placeholder", store.audits)
 		}
 	})
@@ -226,7 +226,7 @@ func TestSettingsWireMapping(t *testing.T) {
 		if payload.Purpose != "A sharper goal." || payload.ActivityStatus != "active" {
 			t.Errorf("payload = %+v, want the updated purpose/status", payload)
 		}
-		if len(store.audits) != 1 || store.audits[0].Action != "project.settings_updated" {
+		if len(store.audits) != 1 || store.audits[0].Action != domain.ActionProjectSettingsUpdated {
 			t.Errorf("audits = %+v, want one settings_updated placeholder", store.audits)
 		}
 

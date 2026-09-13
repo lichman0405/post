@@ -94,9 +94,10 @@ func TestSetMemberRoleRules(t *testing.T) {
 			t.Fatalf("audit entries = %d, want 1", len(audits))
 		}
 		a := audits[0]
-		if a.Action != "project.member_role_changed" || a.ActorID != "owner" ||
-			a.ProjectID != projectID || a.TargetRef == nil || *a.TargetRef != "viewer" ||
-			a.Via == "" || a.CorrelationID == "" || a.Before == nil || a.After == nil {
+		if a.Action != domain.ActionProjectMemberRoleChanged || a.ActorID != "owner" ||
+			a.ProjectID != projectID || a.TargetRef != "user:viewer" ||
+			a.Via != domain.ViaSession || a.CorrelationID == "" ||
+			a.BeforeSummary == nil || a.AfterSummary == nil {
 			t.Errorf("audit entry = %+v, want complete placeholder (actor/via/action/target/project/correlation/before/after)", a)
 		}
 	})
@@ -223,19 +224,20 @@ func TestUpdateSettings(t *testing.T) {
 			t.Fatalf("audit entries = %d, want 1", len(audits))
 		}
 		a := audits[0]
-		if a.Action != "project.settings_updated" || a.ActorID != "owner" ||
-			a.ProjectID != projectID || a.TargetRef != nil ||
-			a.Via == "" || a.CorrelationID == "" || a.Before == nil || a.After == nil {
+		if a.Action != domain.ActionProjectSettingsUpdated || a.ActorID != "owner" ||
+			a.ProjectID != projectID || a.TargetRef != "" ||
+			a.Via != domain.ViaSession || a.CorrelationID == "" ||
+			a.BeforeSummary == nil || a.AfterSummary == nil {
 			t.Errorf("audit entry = %+v, want complete placeholder", a)
 		}
 		// The summaries record the state around the change.
-		before, ok := a.Before.(map[string]any)
+		before, ok := a.BeforeSummary.(map[string]any)
 		if !ok || before["purpose"] != "exercise the settings surface" {
-			t.Errorf("before summary = %v, want the previous purpose", a.Before)
+			t.Errorf("before summary = %v, want the previous purpose", a.BeforeSummary)
 		}
-		after, ok := a.After.(map[string]any)
+		after, ok := a.AfterSummary.(map[string]any)
 		if !ok || after["purpose"] != purpose || after["activity_status"] != "active" {
-			t.Errorf("after summary = %v, want the new purpose/status", a.After)
+			t.Errorf("after summary = %v, want the new purpose/status", a.AfterSummary)
 		}
 	})
 

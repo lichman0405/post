@@ -33,10 +33,14 @@ import (
 // Supervisor).
 //
 // Audit placeholder. Every owner/maintainer action here writes an
-// audit_log row (domain.AuditEntry) in the same transaction as the state
-// change, carrying actor id, via, action, target, project and the
-// request's correlation id — the shape T0110's append-only audit surface
-// queries (T0109 acceptance: owner/maintainer 动作有 audit placeholder).
+// audit_log row in the same transaction as the state change, carrying
+// actor id, via, action, target, project and the request's correlation id
+// (T0109 acceptance: owner/maintainer 动作有 audit placeholder). The
+// entry type is T0110's shared domain.AuditEntry — settings actions and
+// the audit surface (append-only Activity queries) are two halves of the
+// same audit_log table, so there is exactly one type and one action-name
+// registry (internal/domain/audit.go); T0110 owns the reading surface,
+// these rows feed it.
 
 // UpdateSettingsInput carries the settings edit. Nil fields stay
 // unchanged. Visibility must stay nil: the setting is preview-only.
@@ -110,7 +114,7 @@ func (s *Service) SetMemberRole(ctx context.Context, actor domain.User, projectI
 		return target, nil
 	}
 	audit, err := s.settingsAudit(ctx, actor, projectID,
-		"project.member_role_changed", &targetUserID,
+		domain.ActionProjectMemberRoleChanged, "user:"+targetUserID,
 		map[string]any{"user_id": targetUserID, "role": string(target.Role)},
 		map[string]any{"user_id": targetUserID, "role": string(role)})
 	if err != nil {
@@ -149,7 +153,7 @@ func (s *Service) UpdateSettings(ctx context.Context, actor domain.User, project
 		return domain.Project{}, wrapStoreError(err)
 	}
 	audit, err := s.settingsAudit(ctx, actor, projectID,
-		"project.settings_updated", nil,
+		domain.ActionProjectSettingsUpdated, "",
 		map[string]any{"purpose": current.Purpose, "activity_status": current.ActivityStatus},
 		map[string]any{
 			"purpose":         firstOr(in.Purpose, current.Purpose),
@@ -183,13 +187,16 @@ func (s *Service) requireManager(ctx context.Context, projectID, userID string) 
 	return membership.Role, nil
 }
 
-// settingsAudit builds the audit placeholder entry for a settings action.
-// The correlation id is the request's own (the observability middleware
-// attaches it); a context without one — a direct service call — gets a
-// fresh id so the NOT NULL column always holds something traceable. A
-// failure to mint the id refuses the action (fail closed: an audit-less
-// governance write must not happen).
-func (s *Service) settingsAudit(ctx context.Context, actor domain.User, projectID, action string, targetRef *string, before, after any) (domain.AuditEntry, error) {
+// settingsAudit builds the audit placeholder entry (T0110's shared
+// domain.AuditEntry — see the file header) for a settings action. Via is
+// the audit vocabulary's ViaSession: every settings write arrives as a
+// session-authenticated /api/v1 request. The correlation id is the
+// request's own (the observability middleware attaches it); a context
+// without one — a direct service call — gets a fresh id so the NOT NULL
+// column always holds something traceable. A failure to mint the id
+// refuses the action (fail closed: an audit-less governance write must
+// not happen).
+func (s *Service) settingsAudit(ctx context.Context, actor domain.User, projectID, action, targetRef string, before, after any) (domain.AuditEntry, error) {
 	correlationID, ok := observability.FromContext(ctx)
 	if !ok {
 		id, err := observability.NewCorrelationID()
@@ -200,13 +207,13 @@ func (s *Service) settingsAudit(ctx context.Context, actor domain.User, projectI
 	}
 	return domain.AuditEntry{
 		ActorID:       actor.ID,
-		Via:           "api",
+		Via:           domain.ViaSession,
 		Action:        action,
 		TargetRef:     targetRef,
 		ProjectID:     projectID,
 		CorrelationID: correlationID.String(),
-		Before:        before,
-		After:         after,
+		BeforeSummary: before,
+		AfterSummary:  after,
 	}, nil
 }
 

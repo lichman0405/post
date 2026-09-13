@@ -29,6 +29,9 @@ const (
 	ActionOrgMemberUpdated = "org.member.updated"
 	ActionOrgMemberRemoved = "org.member.removed"
 	ActionProjectCreated   = "project.created"
+	// T0109 settings actions: written by the project settings surface.
+	ActionProjectMemberRoleChanged = "project.member_role_changed"
+	ActionProjectSettingsUpdated   = "project.settings_updated"
 )
 
 // Stable via values (the audit_log.via column): how the action arrived.

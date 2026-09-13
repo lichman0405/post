@@ -209,6 +209,13 @@ func TestProjectSettings(t *testing.T) {
 	})
 
 	t.Run("viewer is refused on every settings route", func(t *testing.T) {
+		// The audit_log already holds T0110's project.created row (settings
+		// and project creation share the table — the merged contract). The
+		// viewer's attempts must not ADD any row.
+		before := listAuditRows(t, ctx, pool, projectID)
+		if len(before) != 1 || before[0].Action != domain.ActionProjectCreated {
+			t.Fatalf("audit rows before = %+v, want exactly the project.created row", before)
+		}
 		for _, tc := range []struct {
 			method, path, body string
 		}{
@@ -222,22 +229,23 @@ func TestProjectSettings(t *testing.T) {
 		}
 		// The viewer's attempts must not have landed anything in the audit
 		// log.
-		if audits := listAuditRows(t, ctx, pool, projectID); len(audits) != 0 {
-			t.Errorf("viewer attempts wrote %d audit rows, want 0", len(audits))
+		if audits := listAuditRows(t, ctx, pool, projectID); len(audits) != len(before) {
+			t.Errorf("viewer attempts wrote audit rows: before %d after %d, want equal", len(before), len(audits))
 		}
 	})
 
 	t.Run("owner changes roles with audit placeholder", func(t *testing.T) {
+		before := listAuditRows(t, ctx, pool, projectID)
 		resp := alice.do(t, http.MethodPut,
 			"/api/v1/projects/"+projectID+"/members/"+carolID, `{"role":"maintainer"}`)
 		mustStatus(t, resp, http.StatusOK)
 		audits := listAuditRows(t, ctx, pool, projectID)
-		if len(audits) != 1 {
-			t.Fatalf("audit rows = %d, want 1", len(audits))
+		if len(audits) != len(before)+1 {
+			t.Fatalf("audit rows = %d, want %d (exactly one added)", len(audits), len(before)+1)
 		}
 		a := audits[0]
-		if a.ActorID != aliceID || a.Via != "api" || a.Action != "project.member_role_changed" ||
-			a.TargetRef != carolID || a.ProjectID != projectID || a.CorrelationID == "" {
+		if a.ActorID != aliceID || a.Via != domain.ViaSession || a.Action != domain.ActionProjectMemberRoleChanged ||
+			a.TargetRef != "user:"+carolID || a.ProjectID != projectID || a.CorrelationID == "" {
 			t.Errorf("audit row = %+v, want actor/via/action/target/project/correlation", a)
 		}
 		// And the role really changed.
@@ -280,6 +288,7 @@ func TestProjectSettings(t *testing.T) {
 		// A second owner (eve) lets alice exercise the demote-an-owner
 		// path: allowed while two owners exist.
 		seedMember(t, ctx, pool, projectID, eveID, "owner")
+		before := listAuditRows(t, ctx, pool, projectID)
 		resp := alice.do(t, http.MethodPut,
 			"/api/v1/projects/"+projectID+"/members/"+eveID, `{"role":"maintainer"}`)
 		mustStatus(t, resp, http.StatusOK)
@@ -290,22 +299,26 @@ func TestProjectSettings(t *testing.T) {
 		_, err := store.UpdateMembershipRole(ctx, projectID, aliceID,
 			domain.ProjectRoleMaintainer, domain.AuditEntry{
 				ActorID:       bobID,
-				Via:           "api",
-				Action:        "project.member_role_changed",
-				TargetRef:     &aliceID,
+				Via:           domain.ViaSession,
+				Action:        domain.ActionProjectMemberRoleChanged,
+				TargetRef:     "user:" + aliceID,
 				ProjectID:     projectID,
 				CorrelationID: "integration-last-owner",
-				Before:        map[string]any{"role": "owner"},
-				After:         map[string]any{"role": "maintainer"},
+				BeforeSummary: map[string]any{"role": "owner"},
+				AfterSummary:  map[string]any{"role": "maintainer"},
 			})
 		if !errors.Is(err, projects.ErrLastOwner) {
 			t.Fatalf("last-owner demotion = %v, want ErrLastOwner", err)
 		}
-		// The refused write must not have produced an audit row (the
-		// refusal happens before the audit insert, inside the same tx).
+		// Only the accepted alice->eve demotion may have added a row; the
+		// refused write must not have produced one (the refusal happens
+		// before the audit insert, inside the same tx).
 		audits := listAuditRows(t, ctx, pool, projectID)
-		if len(audits) != 3 { // 1 (alice->carol) + 1 (carol->bob) + 1 (alice->eve)
-			t.Errorf("audit rows = %d, want 3 (refused writes are never audited)", len(audits))
+		if len(audits) != len(before)+1 {
+			t.Errorf("audit rows = %d, want %d (refused writes are never audited)", len(audits), len(before)+1)
+		}
+		if audits[0].Action != domain.ActionProjectMemberRoleChanged || audits[0].TargetRef != "user:"+eveID {
+			t.Errorf("newest audit row = %+v, want the accepted eve demotion", audits[0])
 		}
 	})
 
@@ -321,15 +334,15 @@ func TestProjectSettings(t *testing.T) {
 			t.Errorf("payload = %+v, want the new purpose/status", payload)
 		}
 		audits := listAuditRows(t, ctx, pool, projectID)
-		if len(audits) == 0 || audits[0].Action != "project.settings_updated" ||
+		if len(audits) == 0 || audits[0].Action != domain.ActionProjectSettingsUpdated ||
 			audits[0].ActorID != aliceID || audits[0].CorrelationID == "" {
 			t.Errorf("newest audit row = %+v, want the settings_updated placeholder", audits[0])
 		}
 		// The before/after summaries hold the state around the change.
 		var before, after map[string]string
 		if err := pool.QueryRow(ctx, `SELECT before_summary, after_summary FROM audit_log
-			WHERE project_id = $1 AND action = 'project.settings_updated'
-			ORDER BY occurred_at DESC LIMIT 1`, projectID).Scan(&before, &after); err != nil {
+			WHERE project_id = $1 AND action = $2
+			ORDER BY occurred_at DESC LIMIT 1`, projectID, domain.ActionProjectSettingsUpdated).Scan(&before, &after); err != nil {
 			t.Fatalf("audit summaries: %v", err)
 		}
 		if before["purpose"] != "exercise the settings surface" || after["activity_status"] != "active" ||
