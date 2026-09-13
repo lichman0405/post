@@ -336,7 +336,10 @@ var bounds = []struct {
 // want. A schema that declares no type allows none of them: the value could
 // be of any type, so the bound could never be applied.
 func typeAllowsAny(t any, want []string) bool {
-	declared := []any{}
+	// var, not an empty literal: every branch that does not return assigns
+	// declared, so an initialized value here is dead — SA4006, and the repo's
+	// rule is that new code is fixed rather than baselined.
+	var declared []any
 	switch v := t.(type) {
 	case string:
 		declared = []any{v}
