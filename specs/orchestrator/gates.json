@@ -175,6 +175,9 @@
       ]
     },
     "auth-real-services": {
+      "requires_tasks": [
+        "T0101"
+      ],
       "steps": [
         {
           "run": "bash tests/acceptance/auth-real-services-e2e.sh"
@@ -206,7 +209,10 @@
     },
     "rsg-real-services": {
       "requires_tasks": [
+        "T0101",
+        "T0104",
         "T0203",
+        "T0205",
         "T0207",
         "T0208"
       ],

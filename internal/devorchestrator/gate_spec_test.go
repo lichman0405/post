@@ -414,17 +414,21 @@ func TestEveryTaskScopeSatisfiesTheDerivedArtifactRule(t *testing.T) {
 // Fixed here in two halves:
 //
 //   - tasks.json gained the missing edges (T0208 += T0207 for the chain
-//     itself, and each phase entry task += T0208), so a task carrying the
-//     RSG gate now waits for the task that completes the chain. That is 92 of
-//     the 96 carriers, and this test is what keeps it true.
+//     itself, T0206 += T0208 for the one task that read the chain's result
+//     without waiting for it, and each phase entry task += T0208), so a task
+//     carrying the RSG gate now waits for the task that completes the chain.
+//     That is 93 of the 96 carriers, and this test is what keeps it true.
 //
-//   - The four tasks that BUILD the chain stay unsatisfiable, and that is
-//     structural rather than an oversight: they must be accepted before the
-//     task that completes the chain can even be dispatched, so no dependency
-//     edge can exist that would help them. Their names are pinned below so
-//     the set cannot grow, and resolving them — change their gate, or change
-//     the shape of the chain so the script's paths exist earlier — is a
-//     decision about what the gate means, not wiring.
+//   - Three tasks cannot be repaired by an edge at all; they are pinned below
+//     with the reason that makes each one structural. The chain's completion
+//     depends on their own work, so the edge that would add the requirement
+//     closes a cycle.
+//
+// The check has two ways to be wrong, and both are checked rather than
+// assumed: a task carrying a job it cannot satisfy (the loop), and a job that
+// declares nothing at all (the pin after it). The second is the quieter one —
+// a new job running the very same product script, wired onto any task, with no
+// requires_tasks would leave the loop nothing to compare and pass by vacuity.
 func TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt(t *testing.T) {
 	root := repoRootOf(t)
 	spec, err := LoadGateSpec(filepath.Join(root, DefaultGatesPath))
@@ -439,14 +443,25 @@ func TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt(t *testing.T) {
 	for _, task := range dag.Tasks {
 		byID[task.ID] = task
 	}
-	// The DAG is acyclic (LoadDAG refuses otherwise), so a plain recursive
-	// walk terminates; the memo keeps it linear over 132 tasks.
+	// The walk below answers "what does this task transitively depend on", and
+	// on a cyclic graph that question has no answer: the memo returns a
+	// half-built closure, and the verdicts computed from it are about the wrong
+	// tasks. LoadDAG does NOT reject cycles (it checks duplicate ids and unknown
+	// dependencies); scripts/validate_specs.py's TASKS-ACYCLIC check does, in
+	// the spec-validation job. So this test refuses rather than guesses — a
+	// cycle that got past that check fails here by name.
 	closure := map[string]map[string]bool{}
+	visiting := map[string]bool{}
 	var reach func(id string) map[string]bool
 	reach = func(id string) map[string]bool {
+		if visiting[id] {
+			t.Fatalf("the task DAG has a dependency cycle through %s, so no dependency closure exists — scripts/validate_specs.py (TASKS-ACYCLIC) should have refused this spec first, and satisfiability cannot be judged on a cyclic graph", id)
+		}
 		if c, ok := closure[id]; ok {
 			return c
 		}
+		visiting[id] = true
+		defer delete(visiting, id)
 		c := map[string]bool{}
 		closure[id] = c
 		for _, dep := range byID[id].Dependencies {
@@ -457,8 +472,17 @@ func TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt(t *testing.T) {
 		}
 		return c
 	}
-	// The chain's own tasks: they cannot depend on the task that completes it.
-	buildsTheChain := map[string]bool{"T0204": true, "T0205": true, "T0206": true, "T0207": true}
+	// The carriers wiring cannot help, pinned so the set cannot grow. Each is a
+	// knot rather than an oversight: the work the job asserts is downstream of
+	// the carrier itself, so the edge that would add the requirement closes a
+	// cycle. Fixing one is a decision about what the gate means (change the
+	// task's gate, or split the work so the asserted paths exist earlier), not
+	// a missing edge — L1-20260913-19.
+	carriersTheChainTraps := map[string]string{
+		"T0204": "Project State & State Commit: T0208 (objects and versions) needs T0205 and T0207, and both need this task — an edge to T0208 closes a cycle",
+		"T0205": "Research Branch Domain: T0208 needs this task's branches directly",
+		"T0207": "Progressive Validation Gates: T0208 needs this task's :validate directly",
+	}
 	unsatisfiable := map[string]bool{}
 	for id, override := range spec.TaskOverrides {
 		task, ok := byID[id]
@@ -480,7 +504,7 @@ func TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt(t *testing.T) {
 				if needed == id || reach(id)[needed] {
 					continue
 				}
-				if buildsTheChain[id] {
+				if _, trapped := carriersTheChainTraps[id]; trapped {
 					unsatisfiable[id] = true
 					continue
 				}
@@ -489,17 +513,53 @@ func TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt(t *testing.T) {
 			}
 		}
 	}
-	// Pinned, not merely tolerated: exactly the tasks that build the chain.
-	// A new entry here means a task was wired with a gate it cannot satisfy —
-	// which is the defect this test exists to catch, not an exemption to
-	// extend.
-	want := []string{"T0204", "T0205", "T0206", "T0207"}
+	// A job that declares nothing is not exempt, it is unchecked: the loop
+	// above has nothing to compare, so wiring it onto any task passes. Every
+	// job must therefore either name the tasks whose work it asserts, or be
+	// listed here with the reason it grades something other than the product
+	// path a task builds. The list is exact in both directions, so a stale
+	// entry cannot quietly exempt a future job that reuses the name.
+	jobsThatGradeNoProductWork := map[string]string{
+		"spec-validation":       "machine-readable specs and the task DAG — repository files",
+		"task-state":            "DAG/state/test coverage — repository files",
+		"go":                    "fmt/vet/staticcheck/unit — the Go source, no running product",
+		"web":                   "typecheck/lint/unit/build — the frontend source",
+		"python":                "lint/type/test — the scientific adapter source",
+		"migration-integration": "migrations against a bare PostgreSQL — the schema, not the API",
+		"acceptance":            "the gate machinery's own e2e — scratch repos and fakes, no product instance",
+		"gitea-real-services":   "the Gitea INSTANCE's capabilities (provisioning, protection, webhooks) — the dev stack, not the task's API",
+	}
+	for name := range jobsThatGradeNoProductWork {
+		if _, defined := spec.Jobs[name]; !defined {
+			t.Errorf("jobsThatGradeNoProductWork names %q, which %s does not define — an exemption for a job that no longer exists, or a typo", name, DefaultGatesPath)
+		}
+	}
+	for name, job := range spec.Jobs {
+		why, exempt := jobsThatGradeNoProductWork[name]
+		switch {
+		case len(job.RequiresTasks) == 0 && !exempt:
+			t.Errorf("G3 job %q declares no requires_tasks, so nothing checks that the tasks carrying it can satisfy it: it would run against a tree that does not serve what it asserts, and this test would pass it. Name the tasks whose work it asserts, or add it to jobsThatGradeNoProductWork with the reason it grades something other than the product path", name)
+		case len(job.RequiresTasks) > 0 && exempt:
+			t.Errorf("G3 job %q declares requires_tasks %v and is also listed in jobsThatGradeNoProductWork (%s) — one of the two is wrong", name, job.RequiresTasks, why)
+		}
+	}
+
+	// The exemption set is pinned, not merely tolerated. A name in `unsatisfiable`
+	// that is not pinned is the defect this test exists to catch, and a pinned
+	// name that is no longer unsatisfiable means the knot moved: the recorded
+	// reason is then about a task that can satisfy its job, and the pin has to
+	// be updated deliberately rather than rot into a stale allowance.
+	want := make([]string, 0, len(carriersTheChainTraps))
+	for id := range carriersTheChainTraps {
+		want = append(want, id)
+	}
+	sort.Strings(want)
 	got := make([]string, 0, len(unsatisfiable))
 	for id := range unsatisfiable {
 		got = append(got, id)
 	}
 	sort.Strings(got)
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("tasks carrying a chain gate they cannot satisfy = %v, want exactly %v (the four that build the chain); anything else is a wiring defect — see L1-20260913-11", got, want)
+		t.Errorf("tasks carrying a gate they cannot satisfy = %v, pinned as %v. A name in the first list that is not in the second is a wiring defect: give the task the edge to the work its job asserts. A name in the second that is not in the first means the knot was resolved — remove it from carriersTheChainTraps and record why (L1-20260913-19)", got, want)
 	}
 }

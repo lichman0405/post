@@ -1302,7 +1302,8 @@
       "title": "RSG Manifest 导出与 hash",
       "v1_required": true,
       "dependencies": [
-        "T0204"
+        "T0204",
+        "T0208"
       ],
       "requirements": [
         "canonical serialization",
