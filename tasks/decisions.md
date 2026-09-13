@@ -4282,3 +4282,193 @@ job 清单，不管继承来的环境。结果是：同一个 commit，从 A 的
   而不是「不等于哨兵」——后者无论漏没漏都会过）。
 - G2 里那条 acceptance 步骤的红（`rejection-retry-e2e.sh`）**不是**这一条，
   它能在干净的 main、干净的 shell 上复现（见 Issue #133），是另一件事。
+
+## L1-20260914-14 — #140：一个刚推上去的 PR 被当成「合并失败」报上来（我修了，并按 L1 记录）
+
+### 症状
+
+T0204 的 PR #138 推上去**一秒钟**之后，driver 就报了一个判断点：
+
+```
+06:52:57 drive: T0204 pushed; awaiting merge
+06:52:58 drive: DECISION NEEDED: T0204 merge — rddev pr merge: reading the PR's
+  checks for task/T0204-project-state-state-commit: gh pr checks
+  task/T0204-project-state-state-commit --json name,state: exit status 1
+```
+
+八项检查随后几秒才出现，而且**每一项都通过**，06:56:15 正常合入。
+
+### 根因
+
+`gh pr checks` 在**两种相反**的情形下都退出码 1：
+
+- 检查跑了并且**失败** —— 这正是我们要点名的那份输出；
+- **一项检查都还没跑** —— 刚推上去的 PR 就是这样，而 gh 只在 **stderr** 上说这句话，
+  stdout 是**空的**。
+
+`runGhJSON`（`git_control.go`）写的是「**stdout 非空就用 stdout，否则报 `gh <args>: exit status 1`**」，
+把 stderr 丢掉了 —— 于是第二种情形丢掉的恰好是**唯一能区分两者**的那句话。
+
+### 为什么这是要紧的
+
+这个区分是**承重**的。`stepAccepted`（`driver_run.go:374`）正是靠那句话决定：
+
+```go
+if strings.Contains(out, "required checks are not all green") || strings.Contains(out, "no checks reported") {
+    return false, nil // CI still running; try again next tick
+}
+```
+
+「等一等」和「要判断」—— 这正是 §8.2 划的那条线。两者被压平之后，
+一个**一秒钟大的 PR** 被当成合并失败交到 Supervisor 手上。
+
+### 决定
+
+- 规则改成「**stdout 有就用 stdout，否则用 stderr**」；两者都没有才按退出码报。
+- `no checks reported on the '<branch>' branch` 这句话是**从装着的那个 gh 二进制里读出来的**，
+  不是猜的 —— 它也正是既有重试条件**早就在匹配**的那句话：
+  条件是对的，只是**从来不可能生效**。
+- **没有放宽任何重试清单，没有动任何超时。** 这个改动是让一条**已经存在的检查**开始生效，
+  不是让闸门更宽容 —— 两种情形**都仍然拒绝**，变的只是**拒绝的理由**。
+- 回归测试 `TestMergeRefusesWhileThePRHasNoChecksYetAndStillSaysWhy`：
+  把修复**暂存掉**跑过，它带着生产的原话失败（`gh pr checks task/T0001-x --json name,state: exit status 1`）。
+  刻意把那句话**钉死**：它是这次拒绝与 driver 重试之间的**契约**，
+  只钉「拒绝了没有」会让理由下次又被丢掉而测试仍然绿。
+
+### 同一枚硬币的另一面（新开 #139，**故意不并入这个 PR**）
+
+`assertRequiredChecksGreen` 把**所有**非 `SUCCESS` 一视同仁，于是 **PENDING** 与 **FAILURE**
+说出同一句话 —— 而 driver 对那句话是**永远重试**。一条**真的红了**的必检项因此不会上报，
+任务安静地转下去，`rddev status` 里看起来一切「在跑」。
+
+这是 #140 的**镜像**：那边把「等」报成了「判断」，这边把「判断」报成了「等」，同一处混淆。
+**不合并**的理由是具体的：在按状态分类之前先放宽重试清单，只会让它更深。
+
+## L1-20260914-15 — T0301 被退回：API 会因为一个**还没存在**的可选集成缺配置而拒绝启动（我判的，按 L1 记录）
+
+### 事实（逐条核实过，不是推测）
+
+- `cmd/api/main.go` 新加的 `gitproviderLoader().Load()` 是 **fail-closed** 的；
+  `internal/gitprovider/config.go` 把 `POST_GITEA_TOKEN` 与 `POST_GITEA_WEBHOOK_URL`
+  都定为**必填、无默认值**，缺一个就 `return exitConfig`。
+- `tests/acceptance/` 里那三个会启动真实 `cmd/api` 的 G3 脚本，
+  **三个都设了 token，三个都从不设 webhook URL**（逐文件核对）——
+  于是 API **在监听之前就以 exit 2 退出**，脚本必然挂在「the API did not become healthy」。
+- `specs/orchestrator/gates.json` 把 `auth-real-services` / `rsg-real-services`
+  作为 G3 job 挂在 **106 个任务**上。合入之后，这 106 个任务的 G3 **全部「由构造即红」**。
+
+### 但真正让我判它 blocking 的不是这个规模，是**方向反了**
+
+T0301 的验收标准只有两条 ——「新 Project 可 provision repo」和「domain 不引用 Gitea DB」——
+**没有任何一条授权「Gitea 配置缺失时整个 API 不启动」**。
+
+而仓库自己的规矩就写在**同一个文件的紧邻几行**里：
+
+- `cmd/api/main.go`：「Lazy pool: the API starts while the database is down and
+  reports it through /readyz instead of refusing to start.」
+- authn 的 loader 同样是可选的，注释写着「the API starts without them」。
+
+**数据库宕机都允许 API 启动**，而一个（在 T0305 之前）**连接收端都不存在**的 webhook URL 却不允许。
+
+### 决定（要求它按这三条实现，而不是绕开）
+
+1. 变量**未设置**时 **API 必须照常启动**：provisioning 关闭，打一条**已脱敏**的 warning
+   说明缺哪一项、因此关了什么，`/readyz` 可以反映它。
+2. 变量**设置了但格式非法**时**仍然** fail-closed，并**点名是哪个键** ——
+   这一条保留，它与 T0006 的约定一致：**校验的是值，不是缺失**。
+3. **不许靠「给那三个脚本补上变量」绕过**：它们代表的是真实部署里
+   「这台机器没配 Gitea、也不想要 webhook」这一**合法**状态；
+   要求在三个测试脚本里补变量，等于把这条产品可用性规则**偷偷钉进测试脚手架**。
+
+### 代价与边界
+
+- 评审同时确认了**核心契约本身是对的**（GitPort、project→repo 1:1、service-account auth、
+  per-repo HMAC secret），**这一条不涉及重做设计**，只涉及「缺配置时进程该不该死」这一件事。
+- 走的是 `task reject --reason-file` → **`worker rework`**，**不是 respawn** ——
+  它的 25 个文件必须留着（`respawn` 会 `reset --hard + clean -fd`，那会是第二次销毁）。
+- 派工理由**确实到了 Worker 手里**：四条特征句逐条在 `.rddev/workers/T0301/prompt.md` 里核到。
+  **这更正了 Issue #126 的前提**（那条路是存在的），证据已贴回 issue。
+
+## L1-20260914-16 — 合入 #128 之后我去验它，先差点误报一次泄露（结论：没有泄露；新开 #141）
+
+### 为什么要验
+
+#128 的整个主张是「**被持久化的 reason 里不再带凭证**」。它是我合的，
+而它的证据是一套**测试**。测试说的是函数，不是**已经躺在文件里的数据**。
+所以合完我去扫了那棵树 —— 用的是 #128 自己要抹掉的那几个形状。
+
+### 结果一：状态文件里**确实**有凭证形状，而且都是真的
+
+`tasks/task_status.json` 里扫到：
+
+- 三个 `.env.dev` 的密钥值（`POST_DB_PASSWORD` / `POST_BLOB_ACCESS_KEY` / `POST_BLOB_SECRET_KEY`，
+  各出现 2 次，**HEAD 里 0 次** —— 是这一轮新写进去的）；
+- 一条 `postgres://<user>:<15 字符>@127.0.0.1:5432/post` 的 DSN（HEAD 里就有）。
+
+**形状是真的，值也是真的** —— 我的第一反应是「泄露」，而且是**当场、未公开地**泄露，
+因为它是这一轮才出现的。这个反应是**错的**，但错的理由值得写下来。
+
+### 结果二：把它们区分开的**不是形状，是「这个值是不是早就在仓库里」**
+
+这一步是**决定性的**，而且它会打印任何值 —— 所以结论全部以布尔和计数给出：
+
+| 值 | 结论 |
+|---|---|
+| `.env.dev` 的 `POST_DB_PASSWORD` / `POST_BLOB_ACCESS_KEY` / `POST_BLOB_SECRET_KEY` / `POST_DB_NAME` / `POST_DB_USER` | 与 **`.env.example` 逐字节相同** ✓ —— 那是**进了 git 的**文件 ✓ |
+| 那条 DSN 的密码（15 字符） | 出现在 **28 个 tracked 文件**里 ✓ —— `docker-compose.yml` ✓、`.github/workflows/ci.yml` ✓、`Makefile` ✓、`specs/orchestrator/gates.json` ✓ |
+| `tasks/results/T0004` 的 `POST_GITEA_TOKEN`（31 字符，**全仓库只有它一份**） | 是那个 Worker **故意种下的**假值 ✓ —— 它自己的 evidence 写着「种一行 → 闸门报错 → 再删掉」✓ |
+| `tasks/results/T0007` 的 `CANARY_SECRET` | 就是 `tests/observability/canary-sweep.sh` 里的那个 canary ✓ |
+| **`.env.dev` 的 `POST_GITEA_TOKEN`（40 字符，唯一一个与 `.env.example` 不同的 ✓）** | **一个 tracked 文件里都没有** ✓ |
+
+**所以一个都没泄露** ✓。顺带得到一个**真实的卫生观察** ✓：
+`.env.dev` 里除 `POST_GITEA_TOKEN` 之外的值**就是 `.env.example` 的值** ✓ ——
+本地的 dev stack 一直跑在**示例值**上 ✓，这本身没危险（那些值本来就是公开的 ✓），
+但它意味着「.env.dev 里的东西都是秘密」这个直觉**在这里不成立** ✓，
+而我就是差点被这个直觉带偏的 ✓。
+
+### 结果三：#128 的生产函数**实测会脱敏**（不是看测试，是调用它）
+
+写了一个**临时**测试文件（`internal/config/zz_probe_test.go` ✓，跑完**立刻删除** ✓，
+`git status` 确认没留下 ✓），直接调 `RedactTextForOutput` ✓：
+
+| 输入形状 | 结果 |
+|---|---|
+| reason 里一条完整的 DSN ✓ | `postgres://***@127.0.0.1:5432/post` ✓ **脱敏** ✓ |
+| 行尾的 DSN ✓ | 脱敏 ✓ |
+| 反引号里的 DSN ✓ | 脱敏 ✓ |
+| 当裸 JSON 值用的 DSN ✓ | 脱敏 ✓ |
+| `POST_GITEA_TOKEN=<40 字符>` ✓ | `POST_GITEA_TOKEN=***` ✓ **脱敏** ✓ |
+
+五种形状全部拦住 ✓。**这才是「#128 在生产路径上成立」的证据** ✓，
+而不是「它的测试是绿的」✓。
+
+### 结果四：**它不会自愈** —— 记下来，别以后以为它会
+
+那条历史 DSN **仍然躺在文件里** ✓。原因是：脱敏在**写入时**作用于**新的** reason ✓，
+而旧条目是从磁盘读进来、原样再序列化回去的 ✓ —— 不会路过那个函数 ✓。
+所以它**不会**因为下一次状态写入而被清掉 ✓。我**没有**手改那个文件 ✓：
+值本来就是公开的 dev 默认值 ✓，而手改 driver 拥有的状态文件会引入一个我无法验证的竞态 ✓，
+收益是纯装饰 ✓。**如实记在这里，比悄悄抹掉更有用** ✓。
+
+### 剩下的**真的**是一个缺口（新开 #141）
+
+`store.go:342-345` 自己写着这个缺口 ✓：**`RESULT.json` 从 Worker 的 worktree 经任务 PR 进仓库，
+不路过这个 store** ✓ —— 所以脱敏覆盖不到它 ✓。这不是理论 ✓：15 个已提交的
+`tasks/results/*/RESULT.json` 里，**4 个**带凭证形状 ✓（10 条带 userinfo 的 DSN ✓、
+2 条 `KEY=<字面量>` ✓）。
+
+今天那些值**全部无害** ✓（上表逐个查过 ✓）。但机制是 T0011 那一类 ✓，
+而且是**结构性的** ✓：`RESULT.json` 记的就是「Worker 跑了什么命令」✓，
+而一条启动服务的命令**天然**内联着自己的 DSN ✓。
+一个测试命令里带了**真** token 的 Worker ✓，会把它**永久**提交进一个没人再读的文件 ✓，
+而那个文件**设计上**就是会被合进 main 的 ✓。
+
+它值得修而不是留在注释里的理由很具体 ✓：**store 在出口脱敏 ✓，而 `RESULT.json` 走的是另一条路 ✓**，
+于是「被持久化的产物不带凭证」这句保证**半真** ✓ —— 而半真的保证读起来像整句 ✓。
+
+### 教训
+
+**凭证的判据不是形状，是「这个值是不是已经公开了」** ✓。
+我差点因为一个**已经是公开 dev 默认值**的 DSN 去惊动 owner ✓ ——
+而真正危险的那一个（`.env.dev` 的 `POST_GITEA_TOKEN` ✓）**一次都没出现** ✓。
+**先问「它公开了吗」，再问「它像不像秘密」** ✓。

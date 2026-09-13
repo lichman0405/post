@@ -1132,10 +1132,12 @@
       ]
     },
     "T0204": {
-      "status": "verification",
-      "started_at": "2026-09-13T18:26:24Z",
-      "worker_run_id": "run-2ff301763a1634d6",
-      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（084e09c130b6），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
+      "status": "merged",
+      "started_at": "2026-09-13T22:10:18Z",
+      "worker_run_id": "run-89e545ab0860b813",
+      "accepted_by_supervisor_at": "2026-09-13T22:52:41Z",
+      "merged_at": "2026-09-13T22:56:15Z",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你\nworktree 里那棵孤立的树。你运行期间 main 前进了（Supervisor 合并了别的工作，包括\n#106、#119、#120、#121/#134），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main，你的完整改动原样重新应用，改动\n集合逐个文件比对一致；唯一被排除的是生成物 `specs/SPEC_VERSION.json`、\n`specs/database/postgres.sql`（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n**这次基线推进还带来一件与你直接相关的事**：你所属的那条检查链被修好了。\n在此之前，你被要求过的 `rsg-real-services` 端到端脚本驱动的是 RSG 的 HTTP 接口，\n而那个接口由 T0209 交付、在你之后 —— 也就是说那道检查在你这里**永远不可能变绿**，\n与你的工作对不对无关。现在你的任务改用 `state-commit-real-services`\n（`tests/acceptance/state-commit-real-services-e2e.sh`），它断言的正是你\n`acceptance_criteria` 里的两件事，并且按**名字**钉住你交付的测试：\n\n- `TestStateCommitCreatesTraceableTransition`\n- `TestStateCommitFailedTransactionLeavesNoHalfState`\n\n代价是公开的：你现在**没有**端到端 RSG 链路的检查，而且在 T0208 存在之前也不可能有。\n这是已知并已记录的取舍，不是你的问题。\n\n【你要做的】\n\n1. 在合并后的基线上重跑 required tests 与 `make test-integration`，确认没有因合并而失效；\n2. 确认上面那两个测试**确实存在于你的工作里、名字就是这两个、并且真的跑绿了**——\n   脚本会逐名核对，`go test` 整体绿但这两个没跑，同样判红；\n3. 确认 `RESULT.json` 自洽（`completed` 要求 `tests[]` 全部 `passed`，覆盖任务要求的条目带 label）；\n4. 若一切照旧，原样重新提交 `RESULT.json`。\n\n【不要做的事】\n\n不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要改测试的名字去迎合脚本；\n不要趁机重构无关代码。\n",
       "history": [
         {
           "from": "todo",
@@ -1191,17 +1193,62 @@
           "at": "2026-09-13T18:32:06Z",
           "run_id": "run-9d3e0417039f5ac4",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-13T22:10:17Z",
+          "run_id": "run-d3746300fd8201fb",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你\nworktree 里那棵孤立的树。你运行期间 main 前进了（Supervisor 合并了别的工作，包括\n#106、#119、#120、#121/#134），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main，你的完整改动原样重新应用，改动\n集合逐个文件比对一致；唯一被排除的是生成物 `specs/SPEC_VERSION.json`、\n`specs/database/postgres.sql`（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n**这次基线推进还带来一件与你直接相关的事**：你所属的那条检查链被修好了。\n在此之前，你被要求过的 `rsg-real-services` 端到端脚本驱动的是 RSG 的 HTTP 接口，\n而那个接口由 T0209 交付、在你之后 —— 也就是说那道检查在你这里**永远不可能变绿**，\n与你的工作对不对无关。现在你的任务改用 `state-commit-real-services`\n（`tests/acceptance/state-commit-real-services-e2e.sh`），它断言的正是你\n`acceptance_criteria` 里的两件事，并且按**名字**钉住你交付的测试：\n\n- `TestStateCommitCreatesTraceableTransition`\n- `TestStateCommitFailedTransactionLeavesNoHalfState`\n\n代价是公开的：你现在**没有**端到端 RSG 链路的检查，而且在 T0208 存在之前也不可能有。\n这是已知并已记录的取舍，不是你的问题。\n\n【你要做的】\n\n1. 在合并后的基线上重跑 required tests 与 `make test-integration`，确认没有因合并而失效；\n2. 确认上面那两个测试**确实存在于你的工作里、名字就是这两个、并且真的跑绿了**——\n   脚本会逐名核对，`go test` 整体绿但这两个没跑，同样判红；\n3. 确认 `RESULT.json` 自洽（`completed` 要求 `tests[]` 全部 `passed`，覆盖任务要求的条目带 label）；\n4. 若一切照旧，原样重新提交 `RESULT.json`。\n\n【不要做的事】\n\n不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要改测试的名字去迎合脚本；\n不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T22:10:18Z",
+          "run_id": "run-89e545ab0860b813",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T22:14:08Z",
+          "run_id": "run-8b847ef86eb73acf",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-13T22:52:41Z",
+          "run_id": "run-5312c35430ad366c"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-13T22:56:15Z",
+          "run_id": "run-dc83b55f9902dcec",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0205": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-13T22:56:16Z",
+      "worker_run_id": "run-4f37417e88ba2709",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-13T22:56:15Z",
+          "run_id": "run-736a8b3deb6c6730"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-13T22:56:16Z",
+          "run_id": "run-4f37417e88ba2709",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0206": {
       "status": "todo",
@@ -1213,13 +1260,24 @@
       "merged_at": null
     },
     "T0207": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-13T22:56:28Z",
+      "worker_run_id": "run-bf64aa6c09945e5c",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-13T22:56:27Z",
+          "run_id": "run-9f950f02d698978f"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-13T22:56:28Z",
+          "run_id": "run-bf64aa6c09945e5c",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0208": {
       "status": "todo",
@@ -1342,10 +1400,10 @@
       ]
     },
     "T0301": {
-      "status": "rejected",
-      "started_at": "2026-09-13T05:57:10Z",
-      "worker_run_id": "run-a19df21e8d1ad866",
-      "rejection_reason": "collect rejected: head-baseline: worktree HEAD is 029380b547f5f38cc8d235d225d5d0c8e059db64, baseline was 5cfc4c3aed86a2bdfd7931a02e973f4269d9b18e — the Worker moved HEAD (Git control-plane); branch-ref: refs/heads/task/T0301-gitea-adapter-repo-provisioning is 029380b547f5f38cc8d235d225d5d0c8e059db64, baseline was 5cfc4c3aed86a2bdfd7931a02e973f4269d9b18e — the task branch moved; refs: new ref(s) created during the run: refs/heads/fix/judge-the-task-namespace f2170d195eaf5597e4131576bf369f10c458bf0e — creating refs is Git control-plane; scope: 1 changed path(s) outside allowed_scope [infra/migrations/** specs/database/postgres.sql specs/SPEC_VERSION.json internal/gitprovider/** go.mod go.sum .env.example cmd/api/** apps/web/** infra/gitea/** tests/**]: README.md",
+      "status": "running",
+      "started_at": "2026-09-13T22:58:10Z",
+      "worker_run_id": "run-e3147e1f6a127328",
+      "rejection_reason": "## 独立评审给出 request_changes：1 条 blocking、1 条 minor、1 条 nit。请修复后重新提交。\n\n---\n\n### Blocking — API 现在会因为「一个尚未存在的可选集成」缺配置而拒绝启动，而 106 个任务的 G3 都要启动真实 cmd/api\n\n`cmd/api/main.go:101` 新增的 `gitproviderLoader().Load()` 是 fail-closed 的：\n`internal/gitprovider/config.go:108` 与 `:115` 把 `POST_GITEA_TOKEN` 和\n`POST_GITEA_WEBHOOK_URL` 都定为**必填、无默认值**，两处都走到 `return exitConfig`。\n\n后果已经独立核实（不是猜测）：\n\n- `tests/acceptance/auth-real-services-e2e.sh`、`rsg-real-services-e2e.sh`、\n  `profile-real-services-e2e.sh` 这三个会启动真实 `cmd/api` 的 G3 脚本，\n  都设了 `POST_GITEA_TOKEN`，**三个都从不设 `POST_GITEA_WEBHOOK_URL`**（逐文件核对过）。\n  于是 API 在监听之前就以 exit 2 退出，脚本必然挂在「the API did not become healthy」。\n- `specs/orchestrator/gates.json` 把 `auth-real-services` / `rsg-real-services`\n  作为 G3 job 挂在 **106 个任务**上。合入后，这 106 个任务的 G3 全部「由构造即红」。\n\n**更要紧的是：这不是任务包授权的事。** T0301 的验收标准只有两条——\n「新 Project 可 provision repo」和「domain 不引用 Gitea DB」——\n没有任何一条授权「Gitea 配置缺失时整个 API 不启动」。\n\n而仓库自己的规矩就写在同一个文件的紧邻几行里：\n\n- `cmd/api/main.go`：「Lazy pool: the API starts while the database is down and\n  reports it through /readyz instead of refusing to start.」\n- authn 的 loader 同样是可选的，注释写着「the API starts without them」。\n\n数据库宕机都允许 API 启动，一个（T0305 之前）连接收端都不存在的 webhook URL 却不允许。\n方向反了。\n\n**要求（按此实现，不要用别的方式绕开）：**\n\n1. 变量**未设置**时，**API 必须照常启动**；provisioning 功能关闭，\n   并打一条**已脱敏**的 warning 说明哪一项缺失、因此关闭了什么。`/readyz` 可以反映它。\n2. 变量**设置了但格式非法**时，仍然 fail-closed：拒绝启动并点名是哪个键。\n   这一条保留，它与 T0006 的约定一致——**校验的是值，不是缺失**。\n3. 不要靠「给那三个脚本补上变量」来绕过。它们代表的是真实部署中\n   「这台机器没配 Gitea、也不想要 webhook」这一**合法**状态；\n   要求它必须在三个测试脚本里被补齐，等于把这条产品可用性规则偷偷钉进测试脚手架。\n\n---\n\n### Minor — 多个问题时 Error() 不点名键，恰好违背 T0006\n\n`internal/gitprovider/config.go:83`：多于一个问题时只报\n`gitprovider config: N problems`，不点名具体键。\n\n而**最常见**的首次运行场景恰恰是两个键都缺——也就是最需要点名的那一次。\n单个问题的分支是点名的，聚合分支应该把各条 per-problem 消息 join 起来\n（它们本身已按构造脱敏）。\n\n`TestConfigDefaultsFailClosed` 只断言了问题的**数量**，所以这个诊断回归没被测到：\n请补一条断言**键名出现在消息里**的测试。\n\n---\n\n### Nit — `.env.example` 的占位值不是合法 URL\n\n`.env.example:51` 的 `POST_GITEA_WEBHOOK_URL=change-me` 不是合法的 http(s) URL，\n新克隆照抄后拿到的是 `invalid value` 而不是更清楚的 `missing value`。\n请改成合法占位（例如 `http://127.0.0.1:8080/api/v1/git/hooks/gitea`）或在该行说明留空即可。\n\n---\n\n### 边界\n\n不要改动 `allowed_scope` 之外的文件。修好后跑完整 G1（含你自己那两项验收标准），\n再申请验收。评审同时确认了核心契约本身是对的——GitPort、project→repo 1:1、\nservice-account auth、per-repo HMAC secret 都没问题——**这一条 blocking 不涉及重做设计**，\n只涉及「缺配置时进程该不该死」这一件事。\n",
       "history": [
         {
           "from": "todo",
@@ -1387,6 +1445,34 @@
           "at": "2026-09-13T06:24:32Z",
           "run_id": "run-6404a5c61d215a52",
           "reason": "collect rejected: head-baseline: worktree HEAD is 029380b547f5f38cc8d235d225d5d0c8e059db64, baseline was 5cfc4c3aed86a2bdfd7931a02e973f4269d9b18e — the Worker moved HEAD (Git control-plane); branch-ref: refs/heads/task/T0301-gitea-adapter-repo-provisioning is 029380b547f5f38cc8d235d225d5d0c8e059db64, baseline was 5cfc4c3aed86a2bdfd7931a02e973f4269d9b18e — the task branch moved; refs: new ref(s) created during the run: refs/heads/fix/judge-the-task-namespace f2170d195eaf5597e4131576bf369f10c458bf0e — creating refs is Git control-plane; scope: 1 changed path(s) outside allowed_scope [infra/migrations/** specs/database/postgres.sql specs/SPEC_VERSION.json internal/gitprovider/** go.mod go.sum .env.example cmd/api/** apps/web/** infra/gitea/** tests/**]: README.md"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T22:17:03Z",
+          "run_id": "run-5a11e552dd5259da",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T22:39:09Z",
+          "run_id": "run-50dd20f28eb06531",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-13T22:58:07Z",
+          "run_id": "run-95b2bb4c05174bb3",
+          "reason": "## 独立评审给出 request_changes：1 条 blocking、1 条 minor、1 条 nit。请修复后重新提交。\n\n---\n\n### Blocking — API 现在会因为「一个尚未存在的可选集成」缺配置而拒绝启动，而 106 个任务的 G3 都要启动真实 cmd/api\n\n`cmd/api/main.go:101` 新增的 `gitproviderLoader().Load()` 是 fail-closed 的：\n`internal/gitprovider/config.go:108` 与 `:115` 把 `POST_GITEA_TOKEN` 和\n`POST_GITEA_WEBHOOK_URL` 都定为**必填、无默认值**，两处都走到 `return exitConfig`。\n\n后果已经独立核实（不是猜测）：\n\n- `tests/acceptance/auth-real-services-e2e.sh`、`rsg-real-services-e2e.sh`、\n  `profile-real-services-e2e.sh` 这三个会启动真实 `cmd/api` 的 G3 脚本，\n  都设了 `POST_GITEA_TOKEN`，**三个都从不设 `POST_GITEA_WEBHOOK_URL`**（逐文件核对过）。\n  于是 API 在监听之前就以 exit 2 退出，脚本必然挂在「the API did not become healthy」。\n- `specs/orchestrator/gates.json` 把 `auth-real-services` / `rsg-real-services`\n  作为 G3 job 挂在 **106 个任务**上。合入后，这 106 个任务的 G3 全部「由构造即红」。\n\n**更要紧的是：这不是任务包授权的事。** T0301 的验收标准只有两条——\n「新 Project 可 provision repo」和「domain 不引用 Gitea DB」——\n没有任何一条授权「Gitea 配置缺失时整个 API 不启动」。\n\n而仓库自己的规矩就写在同一个文件的紧邻几行里：\n\n- `cmd/api/main.go`：「Lazy pool: the API starts while the database is down and\n  reports it through /readyz instead of refusing to start.」\n- authn 的 loader 同样是可选的，注释写着「the API starts without them」。\n\n数据库宕机都允许 API 启动，一个（T0305 之前）连接收端都不存在的 webhook URL 却不允许。\n方向反了。\n\n**要求（按此实现，不要用别的方式绕开）：**\n\n1. 变量**未设置**时，**API 必须照常启动**；provisioning 功能关闭，\n   并打一条**已脱敏**的 warning 说明哪一项缺失、因此关闭了什么。`/readyz` 可以反映它。\n2. 变量**设置了但格式非法**时，仍然 fail-closed：拒绝启动并点名是哪个键。\n   这一条保留，它与 T0006 的约定一致——**校验的是值，不是缺失**。\n3. 不要靠「给那三个脚本补上变量」来绕过。它们代表的是真实部署中\n   「这台机器没配 Gitea、也不想要 webhook」这一**合法**状态；\n   要求它必须在三个测试脚本里被补齐，等于把这条产品可用性规则偷偷钉进测试脚手架。\n\n---\n\n### Minor — 多个问题时 Error() 不点名键，恰好违背 T0006\n\n`internal/gitprovider/config.go:83`：多于一个问题时只报\n`gitprovider config: N problems`，不点名具体键。\n\n而**最常见**的首次运行场景恰恰是两个键都缺——也就是最需要点名的那一次。\n单个问题的分支是点名的，聚合分支应该把各条 per-problem 消息 join 起来\n（它们本身已按构造脱敏）。\n\n`TestConfigDefaultsFailClosed` 只断言了问题的**数量**，所以这个诊断回归没被测到：\n请补一条断言**键名出现在消息里**的测试。\n\n---\n\n### Nit — `.env.example` 的占位值不是合法 URL\n\n`.env.example:51` 的 `POST_GITEA_WEBHOOK_URL=change-me` 不是合法的 http(s) URL，\n新克隆照抄后拿到的是 `invalid value` 而不是更清楚的 `missing value`。\n请改成合法占位（例如 `http://127.0.0.1:8080/api/v1/git/hooks/gitea`）或在该行说明留空即可。\n\n---\n\n### 边界\n\n不要改动 `allowed_scope` 之外的文件。修好后跑完整 G1（含你自己那两项验收标准），\n再申请验收。评审同时确认了核心契约本身是对的——GitPort、project→repo 1:1、\nservice-account auth、per-repo HMAC secret 都没问题——**这一条 blocking 不涉及重做设计**，\n只涉及「缺配置时进程该不该死」这一件事。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T22:58:10Z",
+          "run_id": "run-e3147e1f6a127328",
+          "reason": "worker spawn"
         }
       ]
     },
