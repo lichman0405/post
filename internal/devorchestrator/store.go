@@ -318,7 +318,7 @@ func (s *Store) Transition(id string, to State, runID, reason string) (*Transiti
 				return &DependencyError{ID: id, Unmet: unmet}
 			}
 		}
-		at := time.Now().UTC().Format(time.RFC3339)
+		at := taskStateTime(time.Now())
 		ts.Status = to
 		ts.History = append(ts.History, StateChange{From: from, To: to, At: at, RunID: runID, Reason: reason})
 		if to == StateAccepted {
