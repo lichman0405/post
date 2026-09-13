@@ -2342,3 +2342,31 @@ T0013 覆盖 `infra/migrations/**` ✓ → 需 `specs/database/postgres.sql` ✓
 **这条本身值得记**：**"驱动脚本第一次运行就停下"不是驱动脚本的失败，是它的第一次产出** ✓。
 它把"我手工 dispatch 时才会撞到的检查"变成了"无人值守的第一秒就撞到" ✓——
 **这正是把机械段自动化所买到的东西** ✓。
+
+## L1-20260913-7 — 对驱动脚本"symlink 任意文件覆写"告警的处置：**成立**，已修（并实测复现）
+
+push 触发了安全复查告警：`Symlink Attack / Arbitrary File Read and Overwrite in scripts/supervise.sh` ✓。
+**这次也是真的** ✓，而且是我刚写的驱动脚本 ✓。
+
+**缺陷**：驱动脚本把两份临时文件**写在 Worker 的 worktree 里**：
+
+```bash
+git -C "$wt" merge main --no-edit >"$wt/.supervise-merge.log" 2>&1
+printf '...' > "$wt/.supervise-reason"
+```
+
+而 **worktree 是 Worker 可写的** ✓ → Worker 事先放一个指向任意路径的符号链接 ✓，
+Supervisor 的 `>` 就会**顺着链接覆写那个文件** ✗。
+
+**已实测复现**（不是推理）：
+
+```
+ln -s /tmp/victim.txt .rddev/worktrees/T0201/.supervise-reason
+printf '...' > .rddev/worktrees/T0201/.supervise-reason
+→ victim file content: "baseline advanced"   # 原内容 "ORIGINAL CONTENT" 被覆盖
+```
+
+**修法**：临时文件改用 `mktemp -d` 创建的目录 ✓ ——**绝不写进被检查对象控制的路径** ✓。
+这与 L1-20260912-48 是**同一条原则的第二次落地** ✓
+（那次是 review diff 跟随符号链接读出了 worktree 之外的文件 ✓，这次是驱动脚本写入 ✓）。
+**"谁控制这个路径"必须成为写文件前的固定一问。**

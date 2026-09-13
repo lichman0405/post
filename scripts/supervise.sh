@@ -92,16 +92,22 @@ $out"
       if echo "$out" | grep -q 'DIFFERENT code state'; then
         log "$task's verdict is stale (main advanced); advancing its baseline"
         wt=".rddev/worktrees/$task"
+        # Scratch files go OUTSIDE the Worker's tree. It is Worker-writable, so
+        # a symlink planted at a fixed path there would have the Supervisor
+        # write through it - the same defect as the review diff following a
+        # symlink out of the worktree, and the same fix: do not write through a
+        # path the subject of the check controls.
+        sdir="$(mktemp -d)"
         if git -C "$wt" -c user.name=supervisor -c user.email=supervisor@post.local \
-             merge main --no-edit >"$wt/.supervise-merge.log" 2>&1; then
+             merge main --no-edit >"$sdir/merge.log" 2>&1; then
           printf '%s\n' "Baseline advanced: main moved under this task while it was reviewed, so the \
 review verdict no longer describes the composed code. The branch was merged with the \
 current main and your work reapplied unchanged. Re-verify on the merged baseline: run \
 the required tests and make test-integration again, confirm nothing broke, and re-submit \
 RESULT.json (keep the label fields). Do not weaken or delete any test." \
-            > ".rddev/worktrees/$task/.supervise-reason"
-          rddev task reject "$task" --reason-file "$wt/.supervise-reason" >/dev/null 2>&1
-          rm -f "$wt/.supervise-reason"
+            > "$sdir/reason"
+          rddev task reject "$task" --reason-file "$sdir/reason" >/dev/null 2>&1
+          rm -rf "$sdir"
           if rddev worker rework "$task" --timeout 60m >/dev/null 2>&1; then
             log "$task reworking on the advanced baseline"
             continue
