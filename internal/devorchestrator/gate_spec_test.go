@@ -1,6 +1,7 @@
 package devorchestrator
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -202,14 +203,39 @@ func TestEveryTaskOfThePhasesUnderDevelopmentHasG3(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// P1 is merged, but its overrides stay wired: a task that is re-opened
-	// must not silently lose its integration gate. P2 and P3 are next.
+	// Every phase that still has work in it. The rule is "a phase has its
+	// real-services gate before its tasks run", so it binds on phases that can
+	// still run and stops binding on phases that are finished — wiring a gate
+	// onto T0000's environment preflight today would be ceremony, not
+	// verification, and the tasks that needed real services in P0 carried them
+	// in their own G2 steps at the time.
+	//
+	// The first version of this test named P1-P3 explicitly. That is the same
+	// discovery-by-hand the rule exists to remove: the driver hit it for P6
+	// within the hour, and would have hit it again for P4, P5 and P7 to P12.
+	merged := map[string]bool{}
+	if raw, err := os.ReadFile(filepath.Join(root, DefaultStatePath)); err == nil {
+		var doc struct {
+			Tasks map[string]struct {
+				Status string `json:"status"`
+			} `json:"tasks"`
+		}
+		if err := json.Unmarshal(raw, &doc); err == nil {
+			for id, e := range doc.Tasks {
+				merged[id] = e.Status == string(StateMerged)
+			}
+		}
+	}
+	livePhases := map[string]bool{}
+	for _, task := range dag.Tasks {
+		if !merged[task.ID] {
+			livePhases[task.Phase] = true
+		}
+	}
 	covered := 0
 	for _, task := range dag.Tasks {
-		switch task.Phase {
-		case "P1", "P2", "P3":
-		default:
-			continue
+		if !livePhases[task.Phase] {
+			continue // the phase is finished; its gate no longer binds
 		}
 		jobs, err := spec.JobsForGate("G3", task.ID)
 		if err != nil {
@@ -228,7 +254,7 @@ func TestEveryTaskOfThePhasesUnderDevelopmentHasG3(t *testing.T) {
 		}
 	}
 	if covered == 0 {
-		t.Fatal("no task in P1-P3 carries a G3 job — task_overrides has gone vacuous again")
+		t.Fatal("no task carries a G3 job — task_overrides has gone vacuous again")
 	}
 	// A G3 job is not a CI job: it must not leak into the G4 assertion, which
 	// checks the required CI jobs against every task's G2 record.
