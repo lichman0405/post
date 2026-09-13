@@ -3107,3 +3107,66 @@ accept 用的集成树是从 `main` 这个 **ref** 新建的 detached worktree �
 这个窗口实测中位 **29.5µs**、p90 **118µs**、最大 **2.0ms**（200 次里 123 次能抓到 ✓）。
 
 **结论不变** ✓（等待不能把"读了个空"当成"洗掉了" ✓），**变的只是为什么** ✓。
+
+
+## L1-20260914-1 — ★★ 驱动读的是**工作区**里那份状态文件：把 checkout 停在功能分支上，等于把它的时钟倒拨
+
+**现象**：`16:51:37Z` 驱动记了一条决定 ✓ ——
+
+```
+T0202: collect  (state -> )
+  …
+rddev worker collect: reading worktree HEAD: git rev-parse HEAD: chdir …/.rddev/worktrees/T0202: no such file or directory
+```
+
+—— 而 T0202 **在 `16:34:10Z` 就已经 merged 了** ✓（`run-ee270c57d866d44e` ✓，"pr merge via rddev (four gates green)" ✓）。
+
+**机制**（四步，全部实测 ✓）：
+
+1. `DefaultStatePath = "tasks/task_status.json"` ✓（`store.go:19` ✓）——
+   驱动读的状态真相源是**一个被 git 跟踪的、相对仓库根的文件** ✓。
+2. 我为 #120 从 `14987ed` —— **T0202 的合并提交本身** ✓ —— 切出
+   `fix/the-g3-step-gets-the-dev-stacks-environment` ✓。
+3. 把 T0202 写成 `merged` 的那次写入落在 **main** 上 ✓
+   （`c2cfcc2` ✓，`tasks/task_status.json` +45/−8 ✓）。
+4. `00:51:22` 本地 ✓ 我 `git checkout` 回功能分支 ✓ —— **这一刻工作区那份文件退回分支的快照** ✓，
+   T0202 变回 `running` ✓（驱动看到 25 个 merged ✓，实际 26 个 ✓）。
+
+**15 秒后**驱动记下了那条决定 ✓。
+
+各提交里 `tasks/task_status.json` 的 T0202：`14987ed` / `f7fc4d5` / `35e2fcf` = `running` ✓；
+`c2cfcc2`（**只在 main 上** ✓）= `merged` ✓。
+
+**为什么它不会自愈**：
+
+- `tasksNeedingAction` 只收 `running/verification/accepted` ✓（`driver_run.go:466-469` ✓）。
+  状态一回到 `merged` ✓，T0202 就不再是驱动的工作 ✓ ——
+  这条决定**永远不会被重试** ✓，也**永远不会被回答** ✓。
+- `staleDecisions` 清的是"任务被重新派发"的决定 ✓（registry RunID 变了 ✓，`driver.go:281` ✓）。
+  T0202 不会再派发 ✓，它的 registry 也已随合并消失 ✓ ——
+  走的是 `rec == nil → keep` 那一支 ✓（`driver.go:277-280` ✓）。
+
+**它挡住的不是工作 ✓，是三件小事**：
+(1) 每次 `rddev status` 都报"2 条决定等 Supervisor" ✓，其中一条指向一个已经做完的任务 ✓；
+(2) 驱动的收工条件里有一条 `len(decisions)==0` ✓（`driver_run.go:173` ✓）——
+这条残留会让它**永远不能宣布"没活了"** ✓；
+(3) 读到它的人会去查一个不存在的问题 ✓。
+
+**已执行**：
+
+- 工作区切回 main ✓。驱动 **15 秒后自己就对了** ✓：
+  `driver.out` `00:54:25` 还是 `pending [T0202 T0603]` ✓，`00:55:22` 已是 `pending [T0203 T0603]` ✓。
+- `./bin/rddev drive --clear-decision T0202` ✓ —— 队列只剩 T0301、T0603 两条真决定 ✓。
+- **敢清的理由**：清决定等于让驱动**重试**那个动作 ✓，而 T0202 是 `merged` ✓，
+  不在 `tasksNeedingAction` 的三种状态里 ✓ —— 这一条是在代码里核对过的 ✓，不是推测 ✓。
+
+**规则（L1，即时生效）**：**Supervisor 的共用 checkout 必须停在 main ✓；要改代码就另开 worktree ✓。**
+这条对 Worker 是 CLAUDE.md §2 的明文规定 ✓ —— 对我同样成立 ✓，理由甚至更硬 ✓：
+**问题不是"我编辑了那个文件"** ✓，**而是"我把整个工作区的时间倒回去了"** ✓ ——
+被倒回去的是驱动**唯一**的状态真相源 ✓。
+
+**诚实记录**：这条假决定是我自己制造 ✓、自己发现 ✓ 的，中间没有第二个人读过 ✓；
+存活 **3.5 分钟** ✓（`16:51:37Z` → `16:55:07Z` ✓）。
+它**不是驱动的缺陷** ✓ —— 驱动如实地读了它被告知的状态 ✓。
+要真修，方向是让状态源不被 checkout 影响 ✓（或驱动拒绝在非 main 分支上跑 ✓）——
+**先记下，不现在改** ✓：CLAUDE.md §1 说我不是业务编码者 ✓，这里也没有实际损失 ✓。
