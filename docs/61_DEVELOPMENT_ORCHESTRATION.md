@@ -128,7 +128,7 @@ Gate 证据同样全部落盘：`.rddev/runtime/gates/<TASK>/` 下的 collect/ac
 | Gate | 强制点 | 机制 |
 |------|--------|------|
 | G1 | `rddev worker collect` | RESULT 一致性机械检查：`completed` 声明 + required test `not_run`/failed、或 "INTERIM" 标记的 RESULT 一律拒收；一致性检查不可被 status 字段绕过 |
-| G2 | `rddev task accept` | 本地重跑 CI 的**精确步骤**（六个 job：spec-validation、task-state、go、web、python、migration-integration；同步单测保证 gates.json 与 ci.yml 不漂移）；任一 job 红灯拒绝 verification -> accepted，并记录 accept-refused 证据 |
+| G2 | `rddev task accept` | 本地重跑 CI 的**精确步骤**（job 清单以 `specs/orchestrator/gates.json` 的 `required_jobs` 为准，此处不抄一份；同步单测保证 gates.json 与 ci.yml 逐步骤不漂移）；任一 job 红灯拒绝 verification -> accepted，并记录 accept-refused 证据 |
 | G3 | `rddev task accept` | 按任务 `task_overrides` 定义的集成/E2E job；未定义记 not_required，从不静默跳过 |
 | G4 | `rddev git commit/push`、`rddev pr open/merge` | merge gate 断言**全部** required job 在最新 G2 记录中绿灯、G2 不早于最新 collect、G3 绿、review verdict approve（若要求）；红灯时在调用 git/gh **之前**拒绝并打印理由 |
 

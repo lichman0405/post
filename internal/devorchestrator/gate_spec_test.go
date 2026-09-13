@@ -57,6 +57,19 @@ func TestGatesSpecSyncsWithCIWorkflow(t *testing.T) {
 	if !equalStrings(spec.RequiredJobs, []string{"spec-validation", "task-state", "go", "web", "python", "migration-integration", "acceptance"}) {
 		t.Errorf("required_jobs = %v, want ci.yml's jobs in canonical order", spec.RequiredJobs)
 	}
+
+	// G4 asserts spec.required_jobs (gate_run.go), and its check line says so.
+	// G4.asserts_jobs is a separate field that nothing reads — it is the spec's
+	// own description of the same assertion, and two descriptions of one thing
+	// drift apart silently. Nothing enforces this at runtime, deliberately: a
+	// list that disagrees with the one the gate consults is a spec defect, and
+	// the gate's job is to assert CI, not to adjudicate its own spec. So the
+	// drift is caught here, in CI, where the fix is an edit rather than a
+	// refusal in the middle of a merge.
+	if g4 := spec.Gates["G4"]; !equalStrings(g4.AssertsJobs, spec.RequiredJobs) {
+		t.Errorf("G4 asserts_jobs = %v, but the merge gate asserts required_jobs = %v — the two must name the same jobs in the same order",
+			g4.AssertsJobs, spec.RequiredJobs)
+	}
 }
 
 // ciStep is one run step of ci.yml (uses/ actions and name lines are
@@ -526,7 +539,7 @@ func TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt(t *testing.T) {
 	// The required (G2) jobs are neither listed nor asked: they are derived from
 	// spec.RequiredJobs because "declare nothing" is the correct answer for a
 	// job that runs against the repository on every push and never against a
-	// task's tree. Two rules, and hand-listing the seven derived names under one
+	// task's tree. Two rules, and hand-listing the derived names under one
 	// of them made the other unfirable — a new CI job was reported as an
 	// undeclared G3 job. What IS asserted about them is the converse, since
 	// requires_tasks on a job that runs everywhere would read as if it were

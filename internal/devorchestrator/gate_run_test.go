@@ -144,32 +144,46 @@ func TestRunGateAllGreenPasses(t *testing.T) {
 // collect and an all-green G2 covering every required job, at/after the
 // collect.
 func mergeGateFixture(t *testing.T) (repoRoot, specPath string) {
-	repoRoot, specPath = writeGateSpec(t, `{
+	t.Helper()
+	return mergeGateFixtureWithJobs(t, []string{"job-a", "job-b"})
+}
+
+// mergeGateFixtureWithJobs is mergeGateFixture over a spec whose required jobs
+// are exactly the ones named — so a caller can ask the same gate about a
+// differently sized spec.
+func mergeGateFixtureWithJobs(t *testing.T, jobs []string) (repoRoot, specPath string) {
+	t.Helper()
+	quoted := make([]string, len(jobs))
+	defs := make([]string, len(jobs))
+	for i, j := range jobs {
+		quoted[i] = `"` + j + `"`
+		defs[i] = quoted[i] + `: {"steps": [{"run": "true"}]}`
+	}
+	list := strings.Join(quoted, ", ")
+	repoRoot, specPath = writeGateSpec(t, fmt.Sprintf(`{
   "version": 1,
-  "required_jobs": ["job-a", "job-b"],
+  "required_jobs": [%s],
   "gates": {
     "G1": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": []},
-    "G2": {"name": "", "description": "", "runs_jobs": ["job-a", "job-b"], "asserts_jobs": []},
+    "G2": {"name": "", "description": "", "runs_jobs": [%s], "asserts_jobs": []},
     "G3": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": []},
-    "G4": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": ["job-a", "job-b"]}
+    "G4": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": [%s]}
   },
-  "jobs": {
-    "job-a": {"steps": [{"run": "true"}]},
-    "job-b": {"steps": [{"run": "true"}]}
-  },
+  "jobs": {%s},
   "review": {"required_for_merge": false},
   "task_overrides": {}
-}`)
+}`, list, list, list, strings.Join(defs, ", ")))
 	taskID := "T0001"
 	writeCollect(t, repoRoot, taskID, "coll-1", "ok", "2026-09-12T10:00:00Z")
+	passed := make([]GateJobResult, len(jobs))
+	for i, j := range jobs {
+		passed[i] = GateJobResult{Job: j, Status: "passed"}
+	}
 	green := &GateRunRecord{
 		recordMeta: recordMeta{RecordType: RecordGateRun, TaskID: taskID, RunID: "g2-1", At: "2026-09-12T11:00:00Z"},
 		Gate:       "G2",
 		Status:     "passed",
-		Jobs: []GateJobResult{
-			{Job: "job-a", Status: "passed"},
-			{Job: "job-b", Status: "passed"},
-		},
+		Jobs:       passed,
 	}
 	if _, err := WriteRecord(repoRoot, taskID, RecordGateRun, "g2-1", green); err != nil {
 		t.Fatal(err)
@@ -179,29 +193,41 @@ func mergeGateFixture(t *testing.T) (repoRoot, specPath string) {
 
 // TestCheckMergeGateGreen: with an ok collect, an all-green G2 covering
 // every required job (at/after the collect) and review not required, the
-// merge gate passes.
+// merge gate passes — and its check line reports the spec it read.
 func TestCheckMergeGateGreen(t *testing.T) {
-	repoRoot, specPath := mergeGateFixture(t)
-	res, err := CheckMergeGate(repoRoot, specPath, "T0001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Status != "passed" {
-		t.Fatalf("merge gate = %s, reasons %v", res.Status, res.Reasons)
-	}
-
-	// The G4 check line must describe the spec it actually read. It once said
-	// "the six required CI jobs" while ci.yml had seven — a number written into
-	// a message is a claim that decays. This fixture has exactly two, so a
-	// literal that does not come from the spec is caught here.
-	checks := strings.Join(res.Checks, "\n")
-	if !strings.Contains(checks, "(2 required CI jobs)") {
-		t.Errorf("the G4 check does not report the spec's own job count:\n%s", checks)
-	}
-	for _, job := range []string{"job-a", "job-b"} {
-		if !strings.Contains(checks, job) {
-			t.Errorf("the G4 check does not name %s:\n%s", job, checks)
-		}
+	// The same gate is asked twice, over specs of different sizes, because the
+	// property is the derivation and not the fixture's numbers: one literal
+	// cannot satisfy both cases — a hard-coded count or a hard-coded job name is
+	// contradicted by the other one — while a line that reads the spec passes
+	// both. The shipped defect was the literal "six" against a spec of seven;
+	// asserting only that the line says what this fixture would also have
+	// accepted would leave "hard-code 2" passing here and wrong in production.
+	for _, tc := range []struct {
+		name string
+		jobs []string
+	}{
+		{"two-jobs", []string{"job-a", "job-b"}},
+		{"three-jobs", []string{"job-a", "job-b", "job-c"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repoRoot, specPath := mergeGateFixtureWithJobs(t, tc.jobs)
+			res, err := CheckMergeGate(repoRoot, specPath, "T0001")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Status != "passed" {
+				t.Fatalf("merge gate = %s, reasons %v", res.Status, res.Reasons)
+			}
+			checks := strings.Join(res.Checks, "\n")
+			if want := fmt.Sprintf("(%d required CI jobs)", len(tc.jobs)); !strings.Contains(checks, want) {
+				t.Errorf("the G4 check does not report the spec's own job count (%s):\n%s", want, checks)
+			}
+			for _, job := range tc.jobs {
+				if !strings.Contains(checks, job) {
+					t.Errorf("the G4 check does not name %s:\n%s", job, checks)
+				}
+			}
+		})
 	}
 }
 

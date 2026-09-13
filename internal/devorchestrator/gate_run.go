@@ -269,9 +269,13 @@ func CheckMergeGate(repoRoot, gatesPath, taskID string) (*Gate4Result, error) {
 		res.Reasons = append(res.Reasons, reason)
 	}
 
-	// G4 asserts_jobs: every required CI job, green in the latest G2 record.
+	// G4 asserts every required CI job green in the latest G2 record. The list
+	// it asserts is spec.required_jobs — not G4.asserts_jobs, a separate field
+	// nothing reads — and the check line names the field it actually read, so it
+	// cannot describe a list the gate never consulted. The sync test keeps the
+	// shipped spec's two fields equal, which is what makes the label meaningful.
 	required := spec.RequiredJobs
-	res.Checks = append(res.Checks, fmt.Sprintf("G4 asserts_jobs = %s (%d required CI jobs)", strings.Join(required, ", "), len(required)))
+	res.Checks = append(res.Checks, fmt.Sprintf("G4 required_jobs = %s (%d required CI jobs)", strings.Join(required, ", "), len(required)))
 
 	g2, g2ok, err := LatestGateRunRecord(repoRoot, taskID, "G2")
 	if err != nil {
