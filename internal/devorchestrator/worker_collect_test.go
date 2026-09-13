@@ -473,7 +473,10 @@ func TestMovingAnExistingRefIsNotANewRef(t *testing.T) {
 // firstArgv returns argv[0] from a /proc/<pid>/cmdline read. The file is
 // NUL-separated with no terminator, and reads as EMPTY in a window INSIDE
 // execve — after the new image's mm has been installed and before its argv and
-// environment have been published there.
+// environment have been published there. The two do not become readable at the
+// same instant: the wait this replaces was observed returning with argv[0]
+// reading `env` — the exec of `env` is over — while the environment still read
+// empty, which is the same window seen one step later.
 //
 // That window is not the pre-exec state, and saying it was is worth correcting
 // rather than conserving: a forked child that has not exec'd reads its PARENT's
