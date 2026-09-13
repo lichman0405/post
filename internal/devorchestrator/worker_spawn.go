@@ -552,11 +552,21 @@ func ensureWorktree(repoRoot, taskID, branch string) error {
 		return err
 	}
 	if !exists {
-		if _, err := gitOutput(repoRoot, "checkout", "-b", branch); err != nil {
-			return fmt.Errorf("creating task branch %s: %w", branch, err)
+		// The baseline is what the integration branch is NOW — fetched, and
+		// named explicitly. Never the checkout's current HEAD, which is a shared
+		// resource (reviews, merges, one-off probes) and may be on anything: a
+		// task cut from an unrelated checkout inherits commits nobody merged,
+		// and a task cut from a stale main starts without the dependency the DAG
+		// has just called merged (#123).
+		base, err := IntegrationTip(repoRoot)
+		if err != nil {
+			return err
 		}
-		if _, err := gitOutput(repoRoot, "checkout", "-"); err != nil {
-			return fmt.Errorf("returning to the previous branch after creating %s: %w", branch, err)
+		// `git branch` rather than `checkout -b`: creating the branch must not
+		// move the shared checkout, which is how the checkout could be left
+		// sitting on a task branch (L1-20260914-1).
+		if _, err := gitOutput(repoRoot, "branch", branch, base); err != nil {
+			return fmt.Errorf("creating task branch %s from %s: %w", branch, base, err)
 		}
 	}
 	if _, err := gitOutput(repoRoot, "worktree", "add", wtDir, branch); err != nil {
