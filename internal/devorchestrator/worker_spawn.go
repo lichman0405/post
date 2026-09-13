@@ -471,7 +471,23 @@ func (s *Store) StartWorker(id, runID, startedAt string) (*TransitionResult, err
 
 // StartWorkerFrom applies from -> running (ready for a first dispatch,
 // rejected for a T0012 rework/respawn) and stamps worker_run_id/started_at.
+//
+// The stamp written into the TASK STATE is rendered into that file's own
+// format — ISO 8601 to the second — and not at the precision the caller
+// passed in. `tasks/task_status.json` is validated in CI by
+// scripts/validate_task_state.py, whose ISO_TS_RE admits no fractional seconds
+// and is enforced on started_at and on every history entry's at, while the run
+// start spawn hands this function carries nanoseconds: a start to the second
+// cannot order a verdict written in the same second, which is the defect that
+// precision exists for. Both have to hold, and they hold in different files —
+// the registry record and the gate inputs keep the full-precision start (and
+// collect compares THOSE two against each other), the task state keeps the
+// shape the validator accepts. Reverting this leaves the state file unusable to
+// CI on the next spawn; the round-1 review measured exactly that (the validator
+// exits 1 on a ns-shaped started_at). Pinned by
+// TestStartWorkerFromStampsTheTaskStateInItsValidatedFormat.
 func (s *Store) StartWorkerFrom(id, runID, startedAt string, from State) (*TransitionResult, error) {
+	at := taskStateStamp(startedAt)
 	var result *TransitionResult
 	err := s.mutate(id, func(ts *TaskState, fromSt State, states map[string]State) error {
 		if fromSt != from {
@@ -481,10 +497,10 @@ func (s *Store) StartWorkerFrom(id, runID, startedAt string, from State) (*Trans
 			return err
 		}
 		ts.Status = StateRunning
-		ts.History = append(ts.History, StateChange{From: fromSt, To: StateRunning, At: startedAt, RunID: runID, Reason: "worker spawn"})
+		ts.History = append(ts.History, StateChange{From: fromSt, To: StateRunning, At: at, RunID: runID, Reason: "worker spawn"})
 		ts.WorkerRunID = runID
-		ts.StartedAt = strptr(startedAt)
-		result = &TransitionResult{TaskID: id, From: fromSt, To: StateRunning, RunID: runID, At: startedAt}
+		ts.StartedAt = strptr(at)
+		result = &TransitionResult{TaskID: id, From: fromSt, To: StateRunning, RunID: runID, At: at}
 		return nil
 	})
 	if err != nil {

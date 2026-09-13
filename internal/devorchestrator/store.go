@@ -40,6 +40,32 @@ func lockPathFor(statePath string) (string, error) {
 	return filepath.Join(filepath.Dir(filepath.Clean(abs)), LockFileName), nil
 }
 
+// taskStateTime renders a time the way tasks/task_status.json records time:
+// UTC, ISO 8601, to the second. That is the shape scripts/validate_task_state.py
+// enforces in CI — its ISO_TS_RE admits no fractional seconds, on started_at,
+// completed_at, merged_at and every history entry's at — so this is the one
+// place the rule is written down. It is NOT the shape of the run-record times
+// (nowRFC3339, milliseconds): those order records, this one describes a task's
+// lifecycle to the Supervisor and to CI.
+func taskStateTime(t time.Time) string { return t.UTC().Format(time.RFC3339) }
+
+// taskStateStamp is taskStateTime for a timestamp some other layer recorded.
+// The run start spawn passes to StartWorkerFrom carries nanoseconds — a start to
+// the second could not order a verdict written inside the same second (#105) —
+// and this file must not carry them.
+//
+// A value that does not parse is passed through unchanged rather than replaced
+// with a clock reading: this runs inside a state transition, and inventing a
+// time there would hide the wrong value instead of letting the validator name
+// it. The only production caller passes runStartedAt(), which always parses.
+func taskStateStamp(recorded string) string {
+	t, err := time.Parse(time.RFC3339, recorded)
+	if err != nil {
+		return recorded
+	}
+	return taskStateTime(t)
+}
+
 // NewRunID returns a random run_id for a state change (crypto/rand, 8 bytes
 // hex). Callers may instead pass a Supervisor-supplied run id via --run-id.
 func NewRunID() string {

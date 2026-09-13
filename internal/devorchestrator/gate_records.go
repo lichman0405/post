@@ -237,11 +237,10 @@ func nowRFC3339() string {
 	return time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
 }
 
-// runStartedAtFrom renders the moment a run begins: the same fixed-width
-// RFC 3339 shape as the other record times, at nanoseconds rather than
-// milliseconds.
-//
-// A record's `at` only has to order records; a run's start has to order events
+// runStartedAtFrom renders the moment a run begins: fixed-width RFC 3339, at
+// NANOSECONDS — a different width from the other record times, which are
+// milliseconds (nowRFC3339 above), because this value has a different job. A
+// record's `at` only has to order records; a run's start has to order events
 // inside the run. Review collect refuses a verdict file written before the run
 // being collected started — the check that keeps an earlier attempt's verdict
 // from being recorded as this run's — by comparing the file's mtime with this
@@ -252,6 +251,24 @@ func nowRFC3339() string {
 // rendered "…:44Z" i.e. 44.000, so `Before` says no and the stale verdict is
 // accepted. The rejection-retry e2e caught exactly that in CI, where the whole
 // attempt sequence runs inside one second.
+//
+// Fixed width is what keeps lexicographic order chronological, and it holds
+// within this format (the layout always emits 9 fractional digits). It is NOT
+// a claim that these strings sort correctly among nowRFC3339's: mixing the two
+// widths inside one second sorts wrongly, and nothing does that today — the
+// sorts that exist (LatestRecord, the driver's decision records) are over
+// millisecond record times, and no consumer sorts a run start against one.
+//
+// What this cannot answer, stated rather than left to be rediscovered: spawn
+// takes this reading AFTER the reviewer process exists (it reads /proc for the
+// starttime and runs `claude --version` first), so a verdict written in the
+// window between the process starting and this value being recorded is refused
+// as belonging to an earlier attempt although it belongs to this run. Measured
+// in the rejection-retry e2e, that window is small next to the work a reviewer
+// does: a reviewer's own RESULT.json landed 13.2 ms after the recorded start,
+// against a reviewer that runs for minutes. It is not closed here because
+// closing it means comparing against the process start time in the worker
+// record — a different value, recorded for a different purpose.
 func runStartedAtFrom(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
 }
