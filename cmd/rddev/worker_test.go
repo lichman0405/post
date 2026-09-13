@@ -347,9 +347,14 @@ func TestWorkerCrashRecordedNotCompleted(t *testing.T) {
 	//       directory not empty
 	//
 	// measured once in 40 runs of this test alone and once in 3 full-package
-	// runs. Stop the Workers first: Cleanup is LIFO, and the cleanup that
-	// removes the whole tree is registered by the *first* t.TempDir() call in
-	// the test — fakeClaudePath's, not fakeRepo's — so this runs before it.
+	// runs. It was first reported as a pre-existing flake — not caused by the
+	// pull request it reddened — by the independent adversarial review of
+	// #109 (verdict of 2026-09-13, delivered to the Supervisor as a review
+	// rather than posted to the forge), which measured it as load-sensitive
+	// and recommended merging that pull request and filing this separately.
+	// Stop the Workers first: Cleanup is LIFO, and the cleanup that removes
+	// the whole tree is registered by the *first* t.TempDir() call in the
+	// test — fakeClaudePath's, not fakeRepo's — so this runs before it.
 	t.Cleanup(func() { stopAll(t, repo) })
 
 	code, out, errOut := runWorkerCLI(t, repo, "worker", "spawn", "T0001")
@@ -597,7 +602,9 @@ func TestWorkerGuardFilesGeneratedWithIsolation(t *testing.T) {
 	// TestWorkerCrashRecordedNotCompleted was fixed for: the reaper writes
 	// exit.status under .rddev/runtime/tasks/T0001 after RemoveAll has walked
 	// past, which leaks a tree in $TMPDIR and fails the run when the write
-	// lands mid-walk. Measured 3 leftovers in 5 isolated runs before this.
+	// lands mid-walk. Measured before this: 3 leftover trees in 5 isolated
+	// runs; a reviewer measuring under heavier load saw 5 in 5, so the count
+	// is load-dependent and the race's presence, not its rate, is the point.
 	// Every assertion in this test is made before teardown, so stopping the
 	// Worker here changes no verdict.
 	t.Cleanup(func() { stopAll(t, repo) })
