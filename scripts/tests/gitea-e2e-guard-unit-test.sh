@@ -243,7 +243,7 @@ file_bytes() { # path -> the digest of its bytes, or `unreadable` if it has none
   if d="$(sha256sum -- "$1" 2>/dev/null)"; then printf '%s' "${d%% *}"
   else printf 'unreadable'; fi
 }
-record_of() { # state kind path -> the ONE record for that path, or nothing
+record_of() { # state label kind path -> the ONE record for that path, or nothing
   # Every claim about a record has to be about that record alone. A `case`
   # pattern is matched against the whole state string, so
   # `*"<path>"*unreadable*` is also satisfied by any OTHER record that says
@@ -252,8 +252,15 @@ record_of() { # state kind path -> the ONE record for that path, or nothing
   # file record beside it carried the word. Splitting the state back into
   # records and keeping the one for the path makes the claim about it. The
   # records are `;`-separated inside a section and the sections are
-  # `|`-separated, so both become line breaks and the path prefix selects.
-  printf '%s' "$1" | tr '|;' '\n\n' | grep -F "$2 $3 " || true
+  # `|`-separated, so both become line breaks and the label, kind and path
+  # select the one line. All three, because a record is `label kind path …`:
+  # selecting on the label alone hands back every record in the walk, and
+  # selecting on the label and kind hands back every record of that kind —
+  # which is the round-8 leak again, one narrowing later. The ninth review
+  # found it that way: the assertion that a mode-000 file is marked was
+  # satisfied by a sibling file's record, so the file's own `unreadable`
+  # could have been dropped and the suite would not have noticed.
+  printf '%s' "$1" | tr '|;' '\n\n' | grep -F "$2 $3 $4 " || true
 }
 dot_git_walk() { # git dir, label, resolved path to exclude (the tree's own index)
   # The label is not decoration. Every record here is a path RELATIVE to the
@@ -973,6 +980,14 @@ shell_probes = [
     # shares the name, and a rule that skipped `-name index` would have let it
     # through. The one exclusion left in the net is the one this probe pins.
     ': > "$ROOT/.git/refs/index"\n',
+    # And the opposite of every probe above: a write that takes a record AWAY.
+    # chmod'ing a directory to 000 hides everything inside it, so a path the
+    # before-state held is in the after-state as a removal and as nothing else.
+    # The control after the shape assertions reads the delta for exactly this
+    # path, because "does the report name X" searched over both sides of a diff
+    # is satisfied by a record that vanished — which is what the shape
+    # assertions below did until this round.
+    'chmod 000 "$ROOT/.git/g3-hidden"\n',
 ]
 open(shell_out, "w").write(src.replace(anchor, probe + "".join(shell_probes) + anchor, 1))
 
@@ -1018,6 +1033,10 @@ worktree_probes = [
     'chmod 750 "$ROOT/internal/config/probe-dir"\n',
     'ln -sfn probe-mode.txt "$ROOT/internal/config/probe-link"\n',
     'touch -h -d "2001-01-01 00:00:00" "$ROOT/internal/config/probe-link2"\n',
+    # And a write that takes a record away instead of writing one: the same
+    # chmod-to-000 shape as the gitdir probes above, in the worktree this time,
+    # for the reader control after the shape assertions below.
+    'chmod 000 "$ROOT/internal/config/g3-hidden"\n',
 ]
 open(worktree_out, "w").write(src.replace(anchor, probe + "".join(worktree_probes) + anchor, 1))
 
@@ -1052,6 +1071,11 @@ gitfile_lock_probes = [
     # the same way the first probe derives its gitdir.
     'gd="$(sed -n "1s/^gitdir: //p" "$ROOT/.git")"\n'
     'touch "${gd%/worktrees/*}/index"\n',
+    # And a record the run takes away rather than adds, for the reader control
+    # after the shape assertions of the first tree below: the worktree walk runs
+    # in this shape too, and a directory chmod'ed to 000 hides what is inside it
+    # from the after-state while the before-state holds it.
+    'chmod 000 "$ROOT/internal/config/g3-hidden"\n',
 ]
 open(gitfile_lock_out, "w").write(src.replace(anchor, probe + "".join(gitfile_lock_probes) + anchor, 1))
 gitfile_corrupt_probes = [
@@ -1090,9 +1114,16 @@ fi
 TREE="$WORK/tree-g"
 new_tree "$TREE"
 cp "$BROKEN/gate-shell.sh" "$TREE/tests/acceptance/gitea-real-services-e2e.sh"
+# The record the run takes away, for the control after the shape assertions: a
+# file that exists before the run and is hidden by it. It is built here and not
+# in new_tree because it is a target rather than a fixture — no other case in
+# this file wants a directory that disappears under it.
+mkdir -p "$TREE/.git/g3-hidden"
+printf 'x\n' > "$TREE/.git/g3-hidden/inside.txt"
 SHELLONLY="$(judge_tree "$TREE")"
 judge_fields "$SHELLONLY"
 S_MUT="$J_MUT" S_PARSE="$J_PARSE" S_MEASURED="$J_MEASURED" S_ADDED="$J_ADDED"
+S_MERGED="$J_VIOLATIONS"
 if (( S_MEASURED == 1 )); then
   ok "the measuring net saw the tree change with no command logged to parse"
 else
@@ -1136,6 +1167,28 @@ if (( S_PARSE == 0 )); then
 else
   fail "the naming net claims to have judged a write that ran no command at all: $SHELLONLY"
 fi
+# The two checks below are about the READER above, not about the net, and they
+# exist because the sentence in the comment was not true of the code: the
+# shapes are read from `$S_ADDED_DETAIL`, and for a round that variable held the
+# merged delta, so the fix could be reverted without the suite noticing. The
+# first check is the control's own: one of the probes must take a record away,
+# or "the reader is not fooled by a vanished record" is a claim about nothing.
+# The second is the claim — the record taken away must NOT be in the field the
+# shapes are searched in, and must be in the delta, which is where it can be
+# read without being mistaken for a record the net made.
+S_VANISHED="gitdir f ./g3-hidden/inside.txt"
+case "$S_MERGED" in
+  *"$S_VANISHED"*) ;;
+  *) fail "no probe hides a record the before-state held, so the after-side control below proves nothing: $SHELLONLY" ;;
+esac
+case "$S_ADDED_DETAIL" in
+  *"$S_VANISHED"*)
+    fail "the shapes above are being searched in a diff of two states rather than in what the net recorded after the run: a record the run had just LOST would count as one it named" ;;
+  *) ok "a record the run hides is not counted as one the net named, and the removal it leaves is in the delta — the shapes are read from the after side" ;;
+esac
+# The probe leaves a directory nothing can search; the tree is finished with, so
+# it goes back to a mode the cleanup can walk.
+chmod 755 "$TREE/.git/g3-hidden"
 
 # The same question one region out. The five above are all inside .git; these
 # three are in the worktree, which the net reached only through porcelain — and
@@ -1146,6 +1199,8 @@ fi
 TREE="$WORK/tree-h"
 new_tree "$TREE"
 cp "$BROKEN/gate-worktree.sh" "$TREE/tests/acceptance/gitea-real-services-e2e.sh"
+mkdir -p "$TREE/internal/config/g3-hidden"
+printf 'x\n' > "$TREE/internal/config/g3-hidden/inside.txt"
 WORKTREEONLY="$(judge_tree "$TREE")"
 judge_fields "$WORKTREEONLY"
 W_MUT="$J_MUT" W_PARSE="$J_PARSE" W_MEASURED="$J_MEASURED" W_ADDED="$J_ADDED" W_DETAIL="$J_VIOLATIONS"
@@ -1187,6 +1242,21 @@ if (( W_PARSE == 0 )); then
 else
   fail "the naming net claims to have judged a worktree write that ran no command at all: $WORKTREEONLY"
 fi
+# The same reader control as the gitdir block's, one region out — the worktree
+# walk, where the shape assertions above are read from `$W_ADDED_DETAIL`. A
+# record the run took away must be in the delta and must NOT be in the field the
+# shapes are searched in; the first check keeps the second from being vacuous.
+W_VANISHED="worktree f ./internal/config/g3-hidden/inside.txt"
+case "$W_DETAIL" in
+  *"$W_VANISHED"*) ;;
+  *) fail "no worktree probe hides a record the before-state held, so the after-side control below proves nothing: $WORKTREEONLY" ;;
+esac
+case "$W_ADDED_DETAIL" in
+  *"$W_VANISHED"*)
+    fail "the worktree shapes above are being searched in a diff of two states rather than in what the net recorded after the run: a record the run had just LOST would count as one it named" ;;
+  *) ok "a worktree record the run hides is not counted as one the net named, and the removal it leaves is in the delta" ;;
+esac
+chmod 755 "$TREE/internal/config/g3-hidden"
 
 # --- 3b. a tree that IS a linked worktree ------------------------------------
 # The shape the G3 gate actually runs in, and the one the measuring net used to
@@ -1226,6 +1296,8 @@ new_worktree() { # name -> WTREE, a linked worktree of $MAIN holding the fixture
 new_worktree tree-i
 TREE="$WTREE"
 cp "$BROKEN/gate-gitfile-lock.sh" "$TREE/tests/acceptance/gitea-real-services-e2e.sh"
+mkdir -p "$TREE/internal/config/g3-hidden"
+printf 'x\n' > "$TREE/internal/config/g3-hidden/inside.txt"
 LINKED="$(judge_tree "$TREE")"
 judge_fields "$LINKED"
 L_MUT="$J_MUT" L_PARSE="$J_PARSE" L_MEASURED="$J_MEASURED" L_ADDED="$J_ADDED" L_DETAIL="$J_VIOLATIONS"
@@ -1267,6 +1339,19 @@ if (( L_PARSE == 0 )); then
 else
   fail "the naming net claims to have judged a worktree write that ran no command at all: $LINKED"
 fi
+# And the reader control in the shape the G3 gate actually runs in: three
+# assertions above read `$L_ADDED`, and one of the probes takes a record away.
+L_VANISHED="worktree f ./internal/config/g3-hidden/inside.txt"
+case "$L_DETAIL" in
+  *"$L_VANISHED"*) ;;
+  *) fail "no probe in the linked worktree hides a record the before-state held, so the after-side control below proves nothing: $LINKED" ;;
+esac
+case "$L_ADDED" in
+  *"$L_VANISHED"*)
+    fail "the linked-worktree shapes above are being searched in a diff of two states rather than in what the net recorded after the run: a record the run had just LOST would count as one it named" ;;
+  *) ok "a linked-worktree record the run hides is not counted as one the net named, and the removal it leaves is in the delta" ;;
+esac
+chmod 755 "$TREE/internal/config/g3-hidden"
 
 # (ii) the gitfile itself. Its own case, because appending to it leaves git
 # unable to resolve the worktree — the gitdir walk comes back empty, and the
@@ -1397,6 +1482,11 @@ new_tree "$UNREADABLE"
 printf 'nothing may read this\n' > "$UNREADABLE/internal/config/probe-secret.txt"
 mkdir -p "$UNREADABLE/internal/config/probe-secret-dir"
 chmod 000 "$UNREADABLE/internal/config/probe-secret.txt" "$UNREADABLE/internal/config/probe-secret-dir"
+# Two neighbours the mode does NOT deny, so the word below can be shown to name
+# a path rather than a net that simply says it could not read anything.
+printf 'anyone may read this\n' > "$UNREADABLE/internal/config/probe-readable.txt"
+mkdir -p "$UNREADABLE/internal/config/probe-readable-dir"
+printf 'x\n' > "$UNREADABLE/internal/config/probe-readable-dir/inside.txt"
 U_STATE="$(tree_state "$UNREADABLE")"
 u_missing=""
 u_file_rec="$(record_of "$U_STATE" worktree f ./internal/config/probe-secret.txt)"
@@ -1415,6 +1505,30 @@ if [[ -z "$u_missing" ]]; then
   ok "a path whose mode denies reading is recorded as unreadable, not as a file with no bytes or an empty directory"
 else
   fail "the record does not say it could not read:$u_missing — an empty digest and a directory with no visible contents are claims this net never measured: $U_STATE"
+fi
+# The other half, and the half the ninth review found unasserted: every check
+# above asks whether the word APPEARS, and a net that wrote it on every record
+# would satisfy all of them while telling a later reader nothing — "somebody
+# made a path unreadable" is only a statement about the tree if the paths
+# somebody did NOT touch are recorded as measured. The two neighbours the mode
+# left alone are asserted in their own right: the file's digest is a digest,
+# and the directory is not marked. (Each is asked for its OWN record: a `case`
+# over the whole state is satisfied by any record in it that says the word.)
+u_read_file="$(record_of "$U_STATE" worktree f ./internal/config/probe-readable.txt)"
+u_read_dir="$(record_of "$U_STATE" worktree d ./internal/config/probe-readable-dir)"
+u_false=""
+case "$u_read_file" in
+  "") u_false="$u_false [no record at all for the readable file beside them]" ;;
+  *unreadable*) u_false="$u_false [the readable file's digest says it could not be read]" ;;
+esac
+case "$u_read_dir" in
+  "") u_false="$u_false [no record at all for the searchable directory beside them]" ;;
+  *:unreadable*) u_false="$u_false [the searchable directory's record says it could not be searched]" ;;
+esac
+if [[ -z "$u_false" ]]; then
+  ok "and the readable file and directory beside them are recorded as measured, so the word names the path and not the net"
+else
+  fail "the mark is not about the path:$u_false — a net that reports it could not read everything has told a later reader nothing about which write it saw: $U_STATE"
 fi
 chmod 755 "$UNREADABLE/internal/config/probe-secret-dir"
 
