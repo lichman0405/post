@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -240,4 +241,117 @@ func firstLineOf(s string) string {
 		return s[:200] + "…"
 	}
 	return s
+}
+
+const rebaselineUsage = `Usage: rddev rebaseline TASK [--reason-file FILE] [--json]
+
+Advance a task's baseline onto main while keeping its work, then send it back
+for re-verification: baseline frozen -> changed, the Worker is rejected with the
+reason, and reworked on the new baseline.
+
+Why it exists: the task branch IS the baseline, and main moves under a task while
+it is reviewed — the Supervisor merges other work, and the scratch gate then
+correctly refuses a change that no longer composes. Doing the ten-step git
+sequence by hand, five times, is not the correct part of that.
+
+Generated files are handled by REGENERATION, never by merging text. A derived
+artifact is a function of its inputs: applying the branch's copy would restore a
+digest describing the branch's old specs, and applying main's would drop the
+task's spec edits. Both are wrong; the artifact is recomputed from the merged
+tree instead, which is what declaring it derived means.
+
+The advance is refused, leaving the worktree untouched, when the task's change
+does not apply even with generated files excluded, or when a path the task had
+changed would be lost.
+`
+
+func runRebaseline(args []string, stdout, stderr io.Writer, jsonOut bool) int {
+	if wantsHelp(args) || len(args) == 0 {
+		fmt.Fprint(stdout, rebaselineUsage)
+		if wantsHelp(args) {
+			return exitOK
+		}
+		return usageError(stderr, "rddev rebaseline: missing TASK", rebaselineUsage)
+	}
+	vals, pos, err := parseFlags(args,
+		flagSpec{"--json", false},
+		flagSpec{"--tasks-json", true}, flagSpec{"--state-json", true},
+		flagSpec{"--repo-root", true}, flagSpec{"--reason-file", true},
+	)
+	if err != nil {
+		return usageError(stderr, err.Error(), rebaselineUsage)
+	}
+	if _, ok := vals["--json"]; ok {
+		jsonOut = true
+	}
+	if len(pos) != 1 {
+		return usageError(stderr, "rddev rebaseline: requires exactly one TASK", rebaselineUsage)
+	}
+	task := pos[0]
+	repoRoot := vals["--repo-root"]
+	if repoRoot == "" {
+		if repoRoot, err = os.Getwd(); err != nil {
+			return operationalError(stderr, "rddev rebaseline", err)
+		}
+	}
+	dagPath := stringOr(vals["--tasks-json"], devorchestrator.DefaultDAGPath)
+	statePath := stringOr(vals["--state-json"], devorchestrator.DefaultStatePath)
+
+	res, err := devorchestrator.RebaselineTask(repoRoot, task, dagPath, statePath)
+	if err != nil {
+		return operationalError(stderr, "rddev rebaseline", err)
+	}
+	if jsonOut {
+		out, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			return operationalError(stderr, "rddev rebaseline", err)
+		}
+		fmt.Fprintln(stdout, string(out))
+	} else {
+		fmt.Fprintf(stdout, "%s: baseline %s -> %s (%d file(s) carried", task, res.FromSHA[:12], res.ToSHA[:12], res.Files)
+		if len(res.Regenerated) > 0 {
+			fmt.Fprintf(stdout, "; regenerated %s", strings.Join(res.Regenerated, ", "))
+		}
+		fmt.Fprintln(stdout, ")")
+	}
+
+	// Hand it back for re-verification with a reason that says what happened —
+	// the Worker did nothing wrong, and a reason that reads like a defect would
+	// send it looking for one.
+	reason := vals["--reason-file"]
+	if reason == "" {
+		reason = filepath.Join(os.TempDir(), "post-rebaseline-reason.txt")
+		_ = os.WriteFile(reason, []byte(rebaselineReason(res)), 0o600)
+		defer os.Remove(reason)
+	}
+	if out, code := devorchestrator.RunRDDev(repoRoot, dagPath, statePath, "task", "reject", task, "--reason-file", reason); code != 0 {
+		return operationalError(stderr, "rddev rebaseline: the tree advanced but the rejection failed", fmt.Errorf("task reject %s: %s", task, strings.TrimSpace(out)))
+	}
+	if out, code := devorchestrator.RunRDDev(repoRoot, dagPath, statePath, "worker", "rework", task, "--timeout", "60m"); code != 0 {
+		return operationalError(stderr, "rddev rebaseline: the tree advanced and the task was rejected, but the rework failed", fmt.Errorf("worker rework %s: %s", task, strings.TrimSpace(out)))
+	}
+	fmt.Fprintf(stdout, "%s: rejected (baseline advanced, not a defect) and reworking on %s\n", task, res.ToSHA[:12])
+	return exitOK
+}
+
+func rebaselineReason(res *devorchestrator.RebaselineResult) string {
+	return "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n" +
+		"你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n" +
+		"**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n" +
+		"你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n" +
+		"**Supervisor 已完成**：你的任务分支已合并当前 main（" + res.ToSHA[:12] + "）" +
+		"，你的完整改动原样重新应用，改动集合逐个文件比对一致" +
+		regeneratedNote(res.Regenerated) + "。\n\n" +
+		"【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，" +
+		"确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，" +
+		"覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n" +
+		"【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+}
+
+func regeneratedNote(regenerated []string) string {
+	if len(regenerated) == 0 {
+		return ""
+	}
+	return "；唯一被排除的是生成物 " + strings.Join(regenerated, ", ") +
+		"（文本冲突对生成物没有意义，已在合并后的树上重新生成）"
 }

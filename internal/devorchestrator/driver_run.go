@@ -437,3 +437,11 @@ func (o *DriveOpts) tasksNeedingAction() ([]string, error) {
 	}
 	return out, nil
 }
+
+// RunRDDev invokes rddev with the DAG/state overrides in place, for callers
+// outside this package that must go through the CLI rather than around it. The
+// flags are PER-COMMAND: before the subcommand they are read as the subcommand.
+func RunRDDev(repoRoot, dagPath, statePath string, args ...string) (string, int) {
+	o := &DriveOpts{RepoRoot: repoRoot, DagPath: dagPath, StatePath: statePath}
+	return o.run(args...)
+}
