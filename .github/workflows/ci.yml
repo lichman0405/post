@@ -124,6 +124,8 @@ jobs:
         run: bash tests/acceptance/supervisor-git-e2e.sh
       - name: "acceptance: the driver outlives the turn that started it"
         run: bash tests/acceptance/driver-persistence-e2e.sh
+      - name: "acceptance: a gate cannot grade a tree it changed or failed to measure"
+        run: bash scripts/tests/gitea-e2e-guard-unit-test.sh
 
   # Stage 5 — Python: lint / type / pytest (configs: ops/ci/ruff.toml,
   # ops/ci/mypy.ini).
