@@ -2910,3 +2910,183 @@ T0208 → 依赖 T0202, T0205 → T0205 → 依赖 T0204
 
 同样的错误会在任何"跨阶段脚本 + 逐任务分配"的组合上复现 ✓，
 所以修的不是那张分配表 ✓，是"分配必须有依赖图兜底"这条规则 ✓。
+
+## L1-20260913-20 — ★★ driver 停了 6 小时：它在等 Supervisor，而没有任何东西告诉 Supervisor
+
+### 经过
+
+**事实（可复现）**：`rddev drive`（pid 2763033，16:57 启动）从 17:07 起持续打印
+`drive: pending [T0201 T0603]` ✓，每 10 秒一行 ✓，到 21:19 仍是同一行 ✓ ——
+**4 小时 12 分钟没有任何状态变化** ✓，而 `rddev status` 一直写着
+`decisions waiting for the Supervisor: 3` ✓。
+
+driver 的行为**没有错** ✓：它把需要判断的三件事写进了 `.rddev/runtime/decisions.json` ✓，
+并在 `rddev status` 里报出来 ✓，这正是设计（"the Supervisor can be absent and return" ✓）。
+错的是**没有任何东西把这件事送到 Supervisor 面前** ✓ —— 我是在手动翻
+`.rddev/runtime/driver.out` 时才发现的 ✓。**一个只在被问到时才回答的机制，等同于没有机制** ✓。
+
+三件事里有两件是同一类：**任务改动不再适用于当前 main** ✓。
+
+### 决定（已执行）
+
+1. **T0201 rebaseline**：`rddev rebaseline T0201` —— 基线 `91ecb72df026 → 42379ea3f510` ✓，
+   携带 38 个文件 ✓，`specs/SPEC_VERSION.json` 按派生规则**重新生成** ✓（不是合并文本 ✓）。
+   起因与上一次同类拒绝无关 ✓：main 在 08:55Z 因 **#100 合入**前进 ✓。
+2. **T0603 rebaseline**：`rddev rebaseline T0603` —— 基线 `e59993164944 → 42379ea3f510` ✓，
+   携带 24 个文件 ✓，重新生成 `specs/SPEC_VERSION.json` **与** `specs/database/postgres.sql` ✓。
+3. 两次之后 driver **立即恢复**：`workers: 2 running (T0201, T0603)` ✓ ——
+   **卡住的不是 worker，是判断** ✓。
+
+**T0301 的决定是"继续等 #99"，并且有证据** ✓：
+
+- collect 拒绝的四条里，三条是真阳性 ✓，但**不是 worker 的错** ✓。
+- `git reflog` 在 T0301 worktree 里留下 `HEAD@{1} commit: g3 should be refused` ✓；
+  该 commit 作者是 `g3 <g3@test>` ✓，父提交是 `5cfc4c3a`（当时的 main）✓ ——
+  即**有人在被评测的那棵树里提交了** ✓。
+- 那条命令**在 main 自己的 G3 脚本里** ✓：`tests/acceptance/gitea-real-services-e2e.sh:124`
+  的 `git -c user.name=g3 -c user.email=g3@test commit -q -am "g3 should be refused"` ✓ ——
+  这**正是 #99 要修的缺陷** ✓（the G3 gate must not mutate the tree it grades ✓）。
+- T0301 对该文件的改动与它**无关** ✓（只加了 webhook 的 HMAC secret ✓，22 增 6 删 ✓）。
+- 所以 T0301 的返工**必须等 #99 合入** ✓，否则会在同一条脚本上再红一次 ✓；
+  它的交付完好保存在 worktree 里 ✓，HEAD 已被 collect 重置回 `5cfc4c3a` ✓。
+
+### 顺带修掉的一件事（诚实记录）
+
+main 的 `go.mod` / `go.sum` 里有**未提交的** `github.com/santhosh-tekuri/jsonschema/v6 v6.0.3` ✓
+（mtime 17:03:30 ✓），而**整棵树里没有任何代码 import 它** ✓。**来源我没能确定** ✓：
+accept 用的集成树是从 `main` 这个 **ref** 新建的 detached worktree ✓（`gate_run.go:509` ✓），
+不会写主工作树 ✓；但时间点与 T0603 的 accept 拒绝（17:03:25 ✓）重合 ✓，所以不敢断言它无害 ✓。
+按"不留下无法解释的状态"处理 ✓：diff 存档到 `main-gomod-residue.patch` ✓，
+`git checkout -- go.mod go.sum` 恢复 ✓，其后 `go build ./...` 通过 ✓。
+**T0201 的分支自带这个依赖** ✓（`worktrees/T0201/go.mod:10` ✓），合入时会随它的代码一起来 ✓。
+
+### 修复：把"需要判断"送到 Supervisor 面前
+
+已挂常驻监视 ✓：只在**新出现** `DECISION NEEDED` / `REFUSED` / `G?-red` / `panic` 时通知 ✓，
+并**覆盖 driver 猝死** ✓ —— pid 不在时明确报"没人驱动队列" ✓。
+**静默不等于正常** ✓：这既是这次的教训 ✓，也是监视必须覆盖失败路径的原因 ✓。
+
+### 教训
+
+**"记录在盘上"不等于"送达"** ✓。driver 把判断写得很清楚 ✓，清楚到可以放六小时没人看 ✓ ——
+**信息完整性和信息可达性是两件事** ✓，这一轮缺的是后者 ✓。
+
+## L1-20260913-21 — 那条挂着没开的游离分支：它已被 #98 整个取代，删掉
+
+**事实**：`fix/judge-the-task-namespace`（`f2170d1`，我 14:08 写的 ✓，commit message 自洽 ✓，
+但从未开 PR ✓）主张的规则是"**只判 `task/**` 命名空间**" ✓ ——
+修的是"Supervisor 自己的 PR 分支害得 concurrent collect 误报" ✓。
+
+**它被读到的原因正是 T0301** ✓：那条 collect 拒绝里的
+`refs/heads/fix/judge-the-task-namespace` **就是这条分支本身** ✓ ——
+我为修这个假阳性开的分支 ✓，成了这个假阳性的一次实例 ✓。
+
+**合并 main 时冲突，冲突暴露的是规则分歧** ✓：main（**#98** ✓）已经把这条规则做成
+**记录制** ✓ —— `unattributableNewRefs(before, current, ledger)` ✓：
+新 ref **一律判** ✓，除非它**在 Supervisor 的 ref 台账上** ✓。
+记录强于推断 ✓，因为 commit 身份是"谁提交谁填"的字段 ✓（`git -c user.email=…` ✓），
+守卫读它等于对它要防的那一方 fail-open ✓。
+`refsSnapshot` 也已经**包含** `task/**` ✓（只排除 `refs/remotes/**` ✓）—— 我那条改动 main 已有 ✓。
+
+**结论**：`f2170d1` **没有任何一处是 main 没有的** ✓，合并它只会把一条更弱的规则带回来 ✓。
+**已删** ✓：`git merge --abort` ✓ → `git worktree remove` ✓ → `git branch -D` ✓
+（tip `f2170d195eaf…` 记在这里 ✓，可复原 ✓）。
+
+**并做了正确的修法** ✓：把 6 条我自己的 PR 分支 `rddev refs adopt` 进台账 ✓
+（`refs list` 原本就标着 `adopt` ✓）。**改台账比改规则根本** ✓ ——
+断言"这条 ref 是我建的" ✓，而不是推断"这条 ref 不像 Worker 建的" ✓。
+
+### 教训
+
+**一条"待处理"的分支放了 7 小时才被读** ✓ ——
+和 driver 停摆是同一个病 ✓：**东西写下来了，但没有人被叫去看** ✓。
+
+## L1-20260913-23 — ★★ 那个"环境已洗掉"的等待，问的是"文件里有没有"，而**空读**不等于洗掉了
+
+（编号 22 留给 #103 分支上的条目 ✓，见上一轮 `tasks/progress.md` 的冲突解法 ✓。）
+
+**现象**：`TestMarkerResidueFindsEnvAttributedChild` 在 CI 上反复变红 ✓，
+报的是**最容易误判方向**的那条断言 ✓：
+
+```
+--- FAIL: TestMarkerResidueFindsEnvAttributedChild (0.01s)
+    marker scan attributed the environment-scrubbed child 12182 —
+    the warn-only class must stay unattributable
+```
+
+读起来像检测器的 bug ✓（"本该不可归因的进程被归因了" ✓）。**不是** ✓ ——
+是**夹具自己的等待提前返回了** ✓。
+
+**夹具的形状**：起一个 `env -i PATH=/usr/bin:/bin sleep 30` ✓，带 run marker ✓。
+`env` 自己带着 marker ✓，exec `sleep` 时内核才把 `/proc/<pid>/environ` 换成洗过的 ✓。
+所以**扫描之前要等 marker 消失** ✓。这一条没错 ✓。
+
+**等待问的问题是**："`/proc/<pid>/environ` 里还有没有 marker？" ✓
+**而 fork 到 execve 之间，这个问题的答案是"没有"** ✓ ——
+那个文件此时读出来是**一次成功的、零字节的读** ✓，空文件里当然没有 marker ✓。
+
+**实测**（本机 40 个刚 fork 的 `env -i … sleep` 子进程 ✓）：
+
+| 观测 | 计数 |
+|---|---|
+| 第一次读 `/proc/<pid>/environ` 读出**空** | **37 / 40** |
+| 同一个 pid 约 100us 之后又带上了 marker | 读回去是 `env -i PATH=/usr/bin:/bin sleep 30`，即**尚未 exec 的 `env`** |
+
+于是等待**立刻**返回 ✓，扫描在几百微秒后跑 ✓，把夹具**正要洗掉**的 marker 归因了 ✓ ——
+红在了"本该不可归因"的那条断言上 ✓。
+
+**修法**：等待改成要求**exec 已经发生**这个正证据 ✓ ——
+**先**读 `/proc/<pid>/cmdline` ✓，要求 `argv[0]` 是夹具真正要运行的程序 ✓，
+**然后**才接受"环境里没有 marker" ✓。
+两个文件是**不同时刻的两次读** ✓，所以只有 exec 先成立 ✓，"环境干净"才是证据 ✓。
+空的环境**永远不算证据** ✓，失败消息也改成说清是**哪一半**没达成 ✓。
+
+**证据**（这条最要紧的部分 ✓）：
+新的端到端测试对**修前**的条件**十次里红九次** ✓ ——
+`argv[0]` 读成 `""`（exec 之前 ✓）或 `"env"`（exec 了但还没洗 ✓）✓；
+对修后通过 ✓。十次循环把"全部侥幸通过"压到 1e-10 量级 ✓。
+
+**但必须诚实说清没做到的那一半** ✓：**原测试在修前的条件下，本机连跑 200 次全绿** ✓，
+再在 16 路 CPU 满载下跑 60 次，**也全绿** ✓。窗口只有几百微秒 ✓，
+要红还得**扫描在这几百微秒内跑完** ✓ —— 那是 **CI runner 的形状** ✓
+（`/proc` 小 ✓、子进程的 fork/exec 被负载拖慢 ✓），不是这台机器的形状 ✓。
+所以这里给出的是**机制的直接实测** ✓ + 一个**确定性**的检测测试 ✓，
+**不是本机复现出来的那次红** ✓。
+
+**没有顺手动的东西** ✓：同一个窗口对检测器也是盲区 ✓
+（没 exec 的进程读起来是"没有 marker" ✓，会被**漏掉** ✓），
+但 collect 发生在任何 exec 之后很久 ✓，今天没有可达路径 ✓，
+**写在这里而不是糊过去** ✓。
+
+### 教训
+
+**"没找到"和"读了个空"不是一回事** ✓。
+这个等待的错法和 `L1-20260913-15` 是一族的 ✓：
+**把"没能观测到"当成"观测到了没有"** ✓ —— fail-open 的判定 ✓，
+只不过这次 fail-open 的代价不是放过一个 Worker ✓，是**一条门随机变红** ✓，
+而红的那条断言**指向了错误的地方** ✓，于是真正的原因被藏了两轮 ✓。
+
+### 更正（同日，实测）：初稿把"空读"归因错了
+
+本条初稿的标题和正文写的是"fork 之后文件是**空的**" ✓ —— **这句是错的** ✓，
+而错的机制比没有机制更坏：它把人指向错误的方向 ✓。
+
+实测（200 次 `env -i PATH=/usr/bin:/bin sleep 30`，`Start()` 一返回就**立刻**读一眼 `/proc/<pid>/cmdline`）：
+
+| 第一眼读到 | 次数 |
+|---|---|
+| **空的**（0 字节） | 81 |
+| `env`（**父进程那份环境还在、marker 在**） | 87 |
+| 已经是 `sleep` | 32 |
+
+两条结论：
+
+1. `Start()` 返回时子进程**可能还没 exec** ✓（81 次空读里有一部分随后读到的是 `env` ✓）——
+   所以"`os/exec` 用 `CLONE_VFORK`、`Start()` 返回即已 exec"这句话**不能当作前提** ✓。
+2. fork 之后还没 exec 的子进程，读到的**不是空文件，是父进程的那份内容** ✓
+   （另测：`python3` 子进程读到 5506 字节、marker 在 ✓）。
+
+空读出现在**execve 内部** ✓：新的 mm 已经装上、argv 和环境还没往那里发布 ✓。
+这个窗口实测中位 **29.5µs**、p90 **118µs**、最大 **2.0ms**（200 次里 123 次能抓到 ✓）。
+
+**结论不变** ✓（等待不能把"读了个空"当成"洗掉了" ✓），**变的只是为什么** ✓。
