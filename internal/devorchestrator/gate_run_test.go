@@ -218,14 +218,26 @@ func TestCheckMergeGateGreen(t *testing.T) {
 			if res.Status != "passed" {
 				t.Fatalf("merge gate = %s, reasons %v", res.Status, res.Reasons)
 			}
-			checks := strings.Join(res.Checks, "\n")
-			if want := fmt.Sprintf("(%d required CI jobs)", len(tc.jobs)); !strings.Contains(checks, want) {
-				t.Errorf("the G4 check does not report the spec's own job count (%s):\n%s", want, checks)
-			}
-			for _, job := range tc.jobs {
-				if !strings.Contains(checks, job) {
-					t.Errorf("the G4 check does not name %s:\n%s", job, checks)
+			// The line is read back, not searched: the assertion is that it
+			// reports THIS spec's list and nothing else. `Contains` for each
+			// name would pass a line that names the spec's jobs and then adds
+			// one — two jobs reported as three passes both subtests that way.
+			line := ""
+			for _, c := range res.Checks {
+				if strings.HasPrefix(c, "G4 required_jobs = ") {
+					line = c
+					break
 				}
+			}
+			if line == "" {
+				t.Fatalf("the G4 check line is not in the result: %v", res.Checks)
+			}
+			rest := strings.TrimPrefix(line, "G4 required_jobs = ")
+			want := fmt.Sprintf(" (%d required CI jobs)", len(tc.jobs))
+			if !strings.HasSuffix(rest, want) {
+				t.Errorf("the G4 check does not report the spec's own job count (%s):\n%s", want, line)
+			} else if got := strings.Split(strings.TrimSuffix(rest, want), ", "); !equalStrings(got, tc.jobs) {
+				t.Errorf("the G4 check names %v, but the spec requires exactly %v:\n%s", got, tc.jobs, line)
 			}
 		})
 	}
