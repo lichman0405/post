@@ -18,12 +18,12 @@ func loader(e testEnv) Loader { return Loader{Getenv: e.getenv} }
 // fullEnv returns a valid minimal environment for one layer.
 func fullEnv(layer string) testEnv {
 	return testEnv{
-		EnvLayer:            layer,
-		"POST_DB_PASSWORD":  "pw-" + layer,
-		"POST_DB_SSLMODE":   "disable",
+		EnvLayer:               layer,
+		"POST_DB_PASSWORD":     "pw-" + layer,
+		"POST_DB_SSLMODE":      "disable",
 		"POST_BLOB_ACCESS_KEY": "ak-" + layer,
 		"POST_BLOB_SECRET_KEY": "sk-" + layer,
-		"POST_GITEA_TOKEN":  "tok-" + layer,
+		"POST_GITEA_TOKEN":     "tok-" + layer,
 	}
 }
 

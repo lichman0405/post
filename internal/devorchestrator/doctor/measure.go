@@ -14,14 +14,14 @@ import (
 // measurements holds every measured input, before and after fixture
 // overrides. Mirrors the variables of ops/doctor.sh.
 type measurements struct {
-	kernel, arch                                            string
-	distroID, distroVersionID, distroPretty, codename       string
-	wslKind                                                 string // none | wsl1 | wsl2
-	repoPath, repoFSMount                                   string
-	nproc, memKB, swapKB, fdLimit, diskKB                   string
-	dockerReachable                                         bool
-	dockerRoot                                              string
-	dockerDiskKB                                            string
+	kernel, arch                                      string
+	distroID, distroVersionID, distroPretty, codename string
+	wslKind                                           string // none | wsl1 | wsl2
+	repoPath, repoFSMount                             string
+	nproc, memKB, swapKB, fdLimit, diskKB             string
+	dockerReachable                                   bool
+	dockerRoot                                        string
+	dockerDiskKB                                      string
 }
 
 // fixtureVal returns the first line of the fixture file ("" if absent),
