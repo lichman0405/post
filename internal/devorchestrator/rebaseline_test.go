@@ -85,12 +85,40 @@ func newRebaselineFixture(t *testing.T, taskID string) *rebaselineFixture {
 	if err := os.WriteFile(filepath.Join(f.root, "internal/old.txt"), []byte("the task deletes this\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// A file whose mode is the only thing a task can change about it. Git
+	// records exactly one permission bit, so this is the smallest change there
+	// is — and the one a comparison of path names could not tell apart from the
+	// work being lost when main makes the same change.
+	if err := os.MkdirAll(filepath.Join(f.root, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.root, "scripts", "helper.sh"), []byte("#!/bin/sh\necho helper\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(f.root, "scripts", "helper.sh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	// A TRACKED symlink in the baseline, which the task is about to replace with
 	// a regular file. That is the shape that makes a restore dangerous: `reset
 	// --hard` puts the link back, and writing the task's bytes to that path
 	// follows it into whatever it points at — a different file, which the
 	// restore would then report as intact.
 	if err := os.Symlink("docs/task-notes.md", filepath.Join(f.root, "tracked-link")); err != nil {
+		t.Fatal(err)
+	}
+	// A tracked DIRECTORY holding a file, for the task that puts a file where
+	// the directory was: the one shape where the restore has to empty a
+	// directory head put back before it can write what stands there now.
+	if err := os.MkdirAll(filepath.Join(f.root, "internal", "legacy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.root, "internal", "legacy", "old.txt"), []byte("the task deletes this too\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A second tracked symlink, for the task that replaces it with a DIRECTORY —
+	// the mirror of tracked-link, and the shape where MkdirAll follows the link
+	// instead of replacing it.
+	if err := os.Symlink("internal", filepath.Join(f.root, "tracked-dir-link")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -120,6 +148,12 @@ func newRebaselineFixture(t *testing.T, taskID string) *rebaselineFixture {
 	// path sets.
 	f.write("docs/no-final-newline.txt", "no trailing newline here", 0o644)
 	f.write("docs/one-newline.txt", "\n", 0o644)
+	// A file with no bytes at all. The synthetic new-file patch has a branch of
+	// its own for it — the header with no body — and a branch nothing exercises
+	// is a branch that quietly stops working: the code before it emitted a hunk
+	// with one empty line, which git applies happily and which turns this file
+	// into a file containing a newline.
+	f.write("docs/empty.txt", "", 0o644)
 	// A path git C-quotes by default. The quoted string is not a path on disk.
 	f.write("docs/设计.md", "非 ASCII 路径\n", 0o644)
 	if err := os.Symlink("docs/task-notes.md", filepath.Join(f.worktree, "notes-link")); err != nil {
@@ -223,7 +257,10 @@ func (f *rebaselineFixture) describe(p string) string {
 	f.t.Helper()
 	abs := filepath.Join(f.worktree, filepath.FromSlash(p))
 	st, err := os.Lstat(abs)
-	if os.IsNotExist(err) {
+	// ENOTDIR says the path cannot exist for a different reason than ENOENT —
+	// one of its parents is a file — and it is the shape a path list produces
+	// on its own when a task replaces a directory with a file.
+	if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) {
 		return "absent\t" + p + "\n"
 	}
 	if err != nil {
@@ -334,6 +371,7 @@ func TestRebaselineRefusalDoesNotTakeTheTasksWorkWithIt(t *testing.T) {
 		"docs/task-notes.md":        "what the task did and why\n",
 		"docs/no-final-newline.txt": "no trailing newline here",
 		"docs/one-newline.txt":      "\n",
+		"docs/empty.txt":            "",
 		"docs/设计.md":                "非 ASCII 路径\n",
 	} {
 		if got := readFileOrFail(t, filepath.Join(f.worktree, path)); got != want {
@@ -439,6 +477,9 @@ func TestRebaselineAdvanceKeepsTheWorkAndLeavesNoCopy(t *testing.T) {
 	}
 	if got := readFileOrFail(t, filepath.Join(f.worktree, "docs/one-newline.txt")); got != "\n" {
 		t.Errorf("the file that is a single newline came back as %q", got)
+	}
+	if got := readFileOrFail(t, filepath.Join(f.worktree, "docs/empty.txt")); got != "" {
+		t.Errorf("the empty file came back as %q — a header-only patch creates it empty, while a body of one empty line makes it a file containing a newline", got)
 	}
 	if got := readFileOrFail(t, filepath.Join(f.worktree, "docs/设计.md")); got != "非 ASCII 路径\n" {
 		t.Errorf("the file at a path git would C-quote came back as %q", got)
@@ -551,6 +592,23 @@ func TestRebaselinePostApplyFailurePutsTheWorkBackAndNamesIt(t *testing.T) {
 	if err == nil {
 		t.Fatalf("the advance was not refused, and it must be: there is no scripts/spec_version.py in the fixture to regenerate the marker with (result %+v)", res)
 	}
+	// 1. The tree is exactly as it was found, and so is the branch tip. The ref
+	//    matters as much as the bytes: gate inputs were written at spawn against
+	//    this tip, and a collect compares them.
+	//
+	//    This comes FIRST, before anything is asserted about the error text. The
+	//    reversion battery names this test as the one that has to die when the
+	//    added-artifact branch is reverted, and it can only mean that if the
+	//    assertions about the tree are the ones that fail: a test whose first
+	//    assertion is a string match dies at the string when the failure MODE
+	//    changes, and says nothing about whether the work was put back.
+	if after := f.pathsAndContents(f.baseline); after != before {
+		t.Errorf("a failed advance after the rebuild changed the tree:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
+	}
+	if head := f.git(f.worktree, "rev-parse", "HEAD"); head != beforeHead {
+		t.Errorf("the worktree HEAD is at %s after the failure; it was %s — the advance moved it and nothing moved it back", head, beforeHead)
+	}
+
 	msg := err.Error()
 	if !strings.Contains(msg, "spec_version.py") {
 		t.Fatalf("expected the regeneration failure, got: %s", msg)
@@ -559,16 +617,6 @@ func TestRebaselinePostApplyFailurePutsTheWorkBackAndNamesIt(t *testing.T) {
 	// sentences are different claims and only one of them is true here.
 	if !strings.Contains(msg, "put back") {
 		t.Errorf("the refusal does not say what happened to the worktree: %s", msg)
-	}
-
-	// 1. The tree is exactly as it was found, and so is the branch tip. The ref
-	//    matters as much as the bytes: gate inputs were written at spawn against
-	//    this tip, and a collect compares them.
-	if after := f.pathsAndContents(f.baseline); after != before {
-		t.Errorf("a failed advance after the rebuild changed the tree:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
-	}
-	if head := f.git(f.worktree, "rev-parse", "HEAD"); head != beforeHead {
-		t.Errorf("the worktree HEAD is at %s after the failure; it was %s — the advance moved it and nothing moved it back", head, beforeHead)
 	}
 
 	// 2. The copy is kept, and the failure names it. This is the only pointer a
@@ -596,8 +644,21 @@ func TestRebaselineSecondAdvanceIsNotRefusedAsLostPaths(t *testing.T) {
 	f := newRebaselineFixture(t, "T9005")
 	newMain := f.mainMovesElsewhere()
 
-	if _, err := RebaselineTask(f.root, "T9005", "", ""); err != nil {
+	// The task's change, counted from the tree: this is what an advance carries.
+	// The count is asserted because the set it comes from says which commit the
+	// change is measured against, and that is what the check below compares.
+	changed, err := worktreeChangedPaths(f.worktree, f.baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := len(changed)
+
+	first, err := RebaselineTask(f.root, "T9005", "", "")
+	if err != nil {
 		t.Fatalf("the first advance was refused: %v", err)
+	}
+	if first.Files != want {
+		t.Errorf("the first advance carried %d path(s), want %d — the task's own change and nothing else", first.Files, want)
 	}
 	// Nothing on main has moved since, and the registry still records the
 	// original baseline: the task's contribution is unchanged.
@@ -609,6 +670,14 @@ func TestRebaselineSecondAdvanceIsNotRefusedAsLostPaths(t *testing.T) {
 	}
 	if res.ToSHA != newMain {
 		t.Errorf("the second advance landed on %s, want %s", res.ToSHA, newMain)
+	}
+	// The same work is the same size. Measured from the RECORDED baseline, which
+	// after the first advance is an older commit than the one the patch is
+	// measured from, main's own files join the set: the advance reports carrying
+	// more than the task changed, and every kept copy describes main's work as
+	// the task's.
+	if res.Files != want {
+		t.Errorf("the second advance carried %d path(s), want %d — the same work, and main's own files are not part of it", res.Files, want)
 	}
 	if after := f.pathsAndContents(newMain); after != before {
 		t.Errorf("the second advance altered the task's work:\n--- before ---\n%s\n--- after ---\n%s", before, after)
@@ -765,6 +834,22 @@ func TestRebaselineRefusesWhenTheRegeneratedArtifactDoesNotDescribeTheTree(t *te
 	if head := f.git(f.worktree, "rev-parse", "HEAD"); head != beforeHead {
 		t.Errorf("the worktree HEAD is at %s after the postcondition refusal; it was %s", head, beforeHead)
 	}
+	// And no ledger entry: an implementation that records the ref before this
+	// point leaves a record naming a move the restore behind it undid, and the
+	// next collect reads that as "the Supervisor moved this branch" and stops
+	// looking. This is the latest failure a test can drive — the only thing after
+	// it is the work-survival postcondition, whose failure branch nothing can
+	// reach through RebaselineTask (a test drives that one directly, in
+	// TestTheWorkSurvivalCheckReportsALossAndSaysNothingAboutOneThatIsNotOne).
+	refs, err := ListSupervisorRefs(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range refs {
+		if r.Name == "refs/heads/"+f.branch {
+			t.Errorf("the postcondition refusal recorded %s at %s; the ref is back at the task's own tip", r.Name, r.SHA)
+		}
+	}
 }
 
 // A derived artifact is a function of its inputs, so a textual merge of it is
@@ -772,6 +857,295 @@ func TestRebaselineRefusesWhenTheRegeneratedArtifactDoesNotDescribeTheTree(t *te
 // from the merged tree — and the exclusion is what makes that possible when main
 // has moved the same generated file, which is the normal case rather than an
 // exotic one.
+// A task whose tree contains a nested git repository. `git clean -fdq` refuses
+// to remove one without -ff, so the directory it names is still there, non-empty,
+// when the restore runs — and the restore's clear-first step used to os.Remove it
+// for every state, which fails with ENOTEMPTY. Every refusal of such a task then
+// claimed a failure that had not happened, with the tree half-restored and stopped
+// at whatever the sorted order put after the directory.
+func TestRebaselineADirectoryCleanWouldNotRemoveDoesNotAbortTheRestore(t *testing.T) {
+	f := newRebaselineFixture(t, "T9011")
+	nested := filepath.Join(f.worktree, "vendor", "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.git(nested, "init", "-q")
+	if err := os.WriteFile(filepath.Join(nested, "f.txt"), []byte("inside a repository of its own\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.mainRewritesTheSameRegion() // the task's patch no longer applies, so the restore runs
+
+	before := f.pathsAndContents(f.baseline)
+	_, err := RebaselineTask(f.root, "T9011", "", "")
+	if err == nil {
+		t.Fatal("the advance was not refused")
+	}
+	// The refusal is the apply; the restore behind it is what this test is for.
+	if msg := err.Error(); !strings.Contains(msg, "patch does not apply") {
+		t.Fatalf("expected git to refuse the patch, got: %s", msg)
+	}
+	if msg := err.Error(); strings.Contains(msg, "could NOT be put back") {
+		t.Errorf("the restore reported a failure it did not have: %s", msg)
+	}
+	if after := f.pathsAndContents(f.baseline); after != before {
+		t.Errorf("the refused advance changed the tree it refused to advance:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
+	}
+	if got := readFileOrFail(t, filepath.Join(nested, "f.txt")); got != "inside a repository of its own\n" {
+		t.Errorf("the nested repository did not survive the refusal: %q", got)
+	}
+}
+
+// A mode-only change that main has since made too. Git records one permission
+// bit, so "the task made this executable" and "main made this executable" are
+// the same change — and after the advance the path agrees with main entirely,
+// which is indistinguishable from lost work to anything that compares path
+// NAMES. The postcondition compares the kept copy instead, and it must not
+// refuse this: the work is there, main just made it too.
+func TestRebaselineAModeOnlyChangeMainAlsoMade(t *testing.T) {
+	f := newRebaselineFixture(t, "T9012")
+	if err := os.Chmod(filepath.Join(f.worktree, "scripts", "helper.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(f.root, "scripts", "helper.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.git(f.root, "add", "-A")
+	f.git(f.root, "commit", "-q", "-m", "main makes the helper executable")
+	newMain := f.git(f.root, "rev-parse", "HEAD")
+
+	res, err := RebaselineTask(f.root, "T9012", "", "")
+	if err != nil {
+		t.Fatalf("the advance was refused: the task's change is a mode main has since made too, which is not a loss: %v", err)
+	}
+	if res.ToSHA != newMain {
+		t.Errorf("the advance landed on %s, want %s", res.ToSHA, newMain)
+	}
+	if out := f.git(f.worktree, "status", "--porcelain"); strings.Contains(out, "helper.sh") {
+		t.Errorf("the advanced tree still differs from main at scripts/helper.sh:\n%s", out)
+	}
+	st, err := os.Lstat(filepath.Join(f.worktree, "scripts", "helper.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm()&0o111 == 0 {
+		t.Errorf("the executable bit the task set did not survive the advance: scripts/helper.sh is %v", st.Mode())
+	}
+}
+
+// A task that replaced a tracked directory with a file. `reset --hard head`
+// puts the directory back, so the restore has to empty it before it can write
+// what stands there now — and the file the task deleted inside it is a snapshot
+// entry of its own, which sorts AFTER the path it has to empty. In name order
+// the restore met a directory it could not remove and reported a tree it could
+// have reproduced as one it could not.
+func TestRebaselineATaskThatReplacedADirectoryWithAFile(t *testing.T) {
+	f := newRebaselineFixture(t, "T9014")
+	legacy := filepath.Join(f.worktree, "internal", "legacy")
+	if err := os.Remove(filepath.Join(legacy, "old.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(legacy); err != nil {
+		t.Fatal(err)
+	}
+	f.write("internal/legacy", "the task put a file where the directory was\n", 0o644)
+	f.mainRewritesTheSameRegion() // refused, so the restore is what has to rebuild this shape
+
+	before := f.pathsAndContents(f.baseline)
+	_, err := RebaselineTask(f.root, "T9014", "", "")
+	if err == nil {
+		t.Fatal("the advance was not refused")
+	}
+	if msg := err.Error(); strings.Contains(msg, "could NOT be put back") {
+		t.Errorf("the restore reported a failure it did not have: %s", msg)
+	} else if !strings.Contains(msg, "was put back") {
+		t.Errorf("the refusal does not say what happened to the worktree: %s", msg)
+	}
+	if after := f.pathsAndContents(f.baseline); after != before {
+		t.Errorf("the refused advance changed the tree it refused to advance:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
+	}
+	st, err := os.Lstat(legacy)
+	if err != nil {
+		t.Fatalf("internal/legacy is gone: %v", err)
+	}
+	if !st.Mode().IsRegular() {
+		t.Errorf("internal/legacy came back as %v; the task had made it a regular file", st.Mode())
+	}
+	if got := readFileOrFail(t, legacy); got != "the task put a file where the directory was\n" {
+		t.Errorf("internal/legacy came back as %q", got)
+	}
+	if _, err := os.Lstat(filepath.Join(legacy, "old.txt")); err == nil {
+		t.Errorf("internal/legacy/old.txt is back; the task deleted it along with the directory it lived in")
+	}
+}
+
+// The mirror of the tracked-link case: the task replaced a tracked SYMLINK with
+// a directory. `reset --hard head` puts the link back, and MkdirAll follows a
+// symlink to a directory — so the restore reported success with the link still
+// standing, and the file that belongs under the new directory was written
+// THROUGH the link, into a subtree the snapshot never mentioned.
+func TestRebaselineATaskThatReplacedATrackedSymlinkWithADirectory(t *testing.T) {
+	f := newRebaselineFixture(t, "T9015")
+	if err := os.Remove(filepath.Join(f.worktree, "tracked-dir-link")); err != nil {
+		t.Fatal(err)
+	}
+	f.write("tracked-dir-link/inner.txt", "inside the directory that replaced the link\n", 0o644)
+	f.mainRewritesTheSameRegion()
+
+	before := f.pathsAndContents(f.baseline)
+	_, err := RebaselineTask(f.root, "T9015", "", "")
+	if err == nil {
+		t.Fatal("the advance was not refused")
+	}
+	if after := f.pathsAndContents(f.baseline); after != before {
+		t.Errorf("the refused advance changed the tree it refused to advance:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
+	}
+	replaced := filepath.Join(f.worktree, "tracked-dir-link")
+	st, err := os.Lstat(replaced)
+	if err != nil {
+		t.Fatalf("tracked-dir-link is gone: %v", err)
+	}
+	if !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("tracked-dir-link came back as %v; the task had made it a directory", st.Mode())
+	}
+	if got := readFileOrFail(t, filepath.Join(replaced, "inner.txt")); got != "inside the directory that replaced the link\n" {
+		t.Errorf("tracked-dir-link/inner.txt came back as %q", got)
+	}
+	// The link's target is a different subtree, and nothing the task did belongs
+	// in it.
+	if _, err := os.Lstat(filepath.Join(f.worktree, "internal", "inner.txt")); err == nil {
+		t.Errorf("the restore wrote through the symlink: internal/inner.txt exists, and the snapshot never mentioned it")
+	}
+}
+
+// The ledger entry is what tells a sibling Worker collecting right now that the
+// branch moved under the Supervisor's hand rather than the Worker's, so it must
+// not describe a move that was undone. Every failure after the rebuild restores
+// the ref, which is why the write is last; an entry naming main while the ref is
+// back at the task's own tip is worse than no entry at all, because the next
+// collect reads it as "the Supervisor moved this" and stops looking.
+func TestRebaselineARefusedAdvanceLeavesNoLedgerEntry(t *testing.T) {
+	f := newRebaselineFixture(t, "T9013")
+	f.mainRewritesTheSameRegion()
+
+	if _, err := RebaselineTask(f.root, "T9013", "", ""); err == nil {
+		t.Fatal("the advance was not refused")
+	}
+	refs, err := ListSupervisorRefs(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range refs {
+		if r.Name == "refs/heads/"+f.branch {
+			t.Errorf("the refused advance recorded %s at %s; the ref is back at the task's own tip, so the ledger describes a move that was undone", r.Name, r.SHA)
+		}
+	}
+}
+
+// The work-survival postcondition is the instrument that replaced the comparison
+// of path SETS, and what it reports IS its whole value: a path set cannot tell
+// "the task's bytes" from "main's bytes", and everything it says about a change
+// the task never made is a refusal invented rather than observed.
+//
+// Nothing in RebaselineTask can reach its failure branch — the advance either
+// carries the work or dies earlier — so the branch is driven here, on real files,
+// which is also what dies when it is removed. Three rules are pinned with it:
+//
+//   - a path whose bytes came back different is a loss, named with both digests;
+//   - an executable bit the TASK set and the advance dropped is a loss;
+//   - an executable bit MAIN set, on a path whose mode the task never touched, is
+//     not — the advanced tree holding main's mode there is main's change, and
+//     calling it a loss refuses ordinary advances.
+func TestTheWorkSurvivalCheckReportsALossAndSaysNothingAboutOneThatIsNotOne(t *testing.T) {
+	f := newRebaselineFixture(t, "T9016")
+	keep := t.TempDir()
+
+	writeKept := func(rel, content string) {
+		t.Helper()
+		dst := filepath.Join(keep, "files", filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dst, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The two shapes a byte comparison has to separate: the task's bytes, and
+	// main's bytes where the task's used to be.
+	const theTasks = "what the task wrote\n"
+	const mains = "what main wrote over it, with a different length\n"
+	f.write("docs/kept.txt", theTasks, 0o644)
+	writeKept("docs/kept.txt", theTasks)
+
+	loss := func(entries []snapshotEntry, regenerated []string) string {
+		t.Helper()
+		err := verifyTheWorkSurvived(f.worktree, keep, f.baseline, entries, regenerated)
+		if err == nil {
+			return ""
+		}
+		return err.Error()
+	}
+	entry := func(p, state string, mode os.FileMode) snapshotEntry {
+		return snapshotEntry{Path: p, State: state, Mode: mode}
+	}
+
+	// The advance carried it: the bytes are the task's, and the check says so by
+	// saying nothing.
+	if got := loss([]snapshotEntry{entry("docs/kept.txt", "file", 0o644)}, nil); got != "" {
+		t.Fatalf("the check called an advance that carried the work a loss: %s", got)
+	}
+	// Main's bytes in its place: the path is still there and still a file, so
+	// nothing but a comparison of content can see this.
+	f.write("docs/kept.txt", mains, 0o644)
+	got := loss([]snapshotEntry{entry("docs/kept.txt", "file", 0o644)}, nil)
+	if !strings.Contains(got, "did not carry the task's work across") || !strings.Contains(got, "docs/kept.txt") {
+		t.Fatalf("a path holding main's bytes instead of the task's was not reported as a loss: %q", got)
+	}
+	for _, want := range []string{shortDigest([]byte(theTasks)), shortDigest([]byte(mains))} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the loss of docs/kept.txt does not say what it found vs. what it lost (%s): %s", want, got)
+		}
+	}
+
+	// The executable bit the task created, dropped by the advance. The path is
+	// new — nothing in the baseline to compare a mode against — so the task's own
+	// bit is the only thing the check can mean.
+	f.write("docs/created.sh", "#!/bin/sh\n", 0o755)
+	writeKept("docs/created.sh", "#!/bin/sh\n")
+	created := []snapshotEntry{entry("docs/created.sh", "file", 0o755)}
+	// os.WriteFile does not change the mode of a file that is already there, so
+	// the drop this is about is made the way the advance would make it.
+	if err := os.Chmod(filepath.Join(f.worktree, "docs", "created.sh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := loss(created, nil); !strings.Contains(got, "docs/created.sh came back not executable") {
+		t.Errorf("a dropped executable bit the task had set was not reported as a loss: %q", got)
+	}
+	if err := os.Chmod(filepath.Join(f.worktree, "docs", "created.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := loss(created, nil); got != "" {
+		t.Errorf("the check called the task's own executable bit, carried across intact, a loss: %s", got)
+	}
+
+	// The same bit, set by MAIN while the task was in review, on a path whose mode
+	// the task never touched. git records one permission bit; the task's copy of
+	// it is 644 and the tree's is 755, and that difference is main's own change.
+	if err := os.Chmod(filepath.Join(f.worktree, "scripts", "helper.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	untouched := []snapshotEntry{entry("scripts/helper.sh", "file", 0o644)}
+	writeKept("scripts/helper.sh", "#!/bin/sh\necho helper\n") // the bytes are the task's; only the mode moved
+	if got := loss(untouched, nil); got != "" {
+		t.Errorf("main making a file executable was reported as work the advance lost: %s", got)
+	}
+
+	// A regenerated artifact is correct by construction: it is a function of the
+	// merged tree, so the task's own copy of it is expected to be gone.
+	if got := loss([]snapshotEntry{entry("specs/SPEC_VERSION.json", "file", 0o644)}, []string{"specs/SPEC_VERSION.json"}); got != "" {
+		t.Errorf("a regenerated artifact was compared against the task's copy of it: %s", got)
+	}
+}
+
 func TestRebaselineRegeneratesADerivedArtifactItWillNotMergeAsText(t *testing.T) {
 	f := newRebaselineFixture(t, "T9008")
 	f.taskEditsADerivedArtifact("{\"marker\":\"the task's spec edit\"}\n")
