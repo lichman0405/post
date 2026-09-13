@@ -997,7 +997,7 @@
       ]
     },
     "T0202": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-13T15:27:42Z",
       "worker_run_id": "run-29326633d0310ba4",
       "history": [
@@ -1013,6 +1013,13 @@
           "at": "2026-09-13T15:27:42Z",
           "run_id": "run-29326633d0310ba4",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T15:57:58Z",
+          "run_id": "run-703b9771cb6408d6",
+          "reason": "collect: all checks passed"
         }
       ]
     },
