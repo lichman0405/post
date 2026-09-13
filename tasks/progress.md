@@ -1,14 +1,17 @@
 # 开发进度
 
 状态：**P0 完成**（14/14）、**P1 完成**（10/10 merged）；P2/P3/P6 各有 1 个任务在飞。
-最后更新：2026-09-13（driver 在合并后的 main 上无人值守运行；**3 项 orchestrator 变更待人工批准**，见下）
+最后更新：2026-09-13 21:30（driver 停摆 4 小时后已恢复；**4 项 orchestrator 变更待人工批准**，见下）
 
 ## 当前阶段
 
-- P2 — Scientific Object / RSG 核心：T0201 在 verification（等 #100 合入后 driver 重派 review）
-- P3 — Git infrastructure：T0301 已 rejected，**等 #99 合入后 rebaseline + 返工**（其 G3 脚本正是 #99 的修复对象）
-- P6 — Governance / Release：T0603 返工中（基线已推进到 e599931，24 个文件原样carried）
-- P0 / P1 已全部合并。
+- P2 — T0201：独立 review **approve** ✓，只因 main 前进而 accept 被拒 ✓ →
+  **已 rebaseline 到 `42379ea`**（38 个文件 carried ✓），worker 返工中 ✓
+- P6 — T0603：独立 review **approve** ✓，同上 → **已 rebaseline 到 `42379ea`**
+  （24 个文件 carried ✓，重新生成 `SPEC_VERSION.json` + `specs/database/postgres.sql` ✓），worker 返工中 ✓
+- P3 — T0301：collect 拒绝是**真阳性**（main 自己的 G3 脚本在被评测的树里提交 ✓）→
+  **阻塞在 #99** ✓，交付完好保存在 worktree ✓
+- P0 / P1 已全部合并 ✓
 
 ## 治理状态（★ 影响每次调度）
 
@@ -30,8 +33,15 @@ diff 改动了既定安全边界 / 权限模型 / 核心架构原则的范畴，
 | PR | 内容 | 状态 |
 |---|---|---|
 | #98 | Worker 权限模型 spec 的 ref 归因规则 + ref 台账（`internal/devorchestrator/ref_ledger.go`） | **已合入 `e599931`**，待事后复核 |
-| #99 | G3 脚本 `tests/acceptance/gitea-real-services-e2e.sh` 不再改动被测树 + 非侵入性断言（L1-20260913-16） | 完成、CI 就绪、**未合入** |
-| #100 | driver 对"被取代的 review"重派而非停摆（L1-20260913-17） | 完成、CI 就绪、**未合入** |
+| #100 | driver 对"被取代的 review"重派而非停摆（L1-20260913-17） | **已合入 `43a63fb`**（owner 于 08:55Z 合入）|
+| #99 | G3 脚本 `tests/acceptance/gitea-real-services-e2e.sh` 不再改动被测树 + 非侵入性断言（L1-20260913-16） | 第七轮 review 已答完、CI 绿、**等合入** —— 它同时是 T0301 的解除条件 |
+| #103 | rebaseline 拒绝时把任务的工作原样放回 + 一条路径一种拼写 | 第七轮已答完、CI 绿、**待 delta review 回来** |
+| #104 | 门的消息不再声称一个规范决定的任务数 | CI 绿、**等合入** |
+| #105 | 一次运行的开始必须能排序一个判决 | CI 绿、**等合入** |
+
+**合入顺序**：#104 / #105 → **#99** → **#103** ✓。GitHub 现在对四者都报 `MERGEABLE` ✓，
+但每合入一个，main 就前进一次 ✓，所以**下一个合入前要重新确认** ✓ ——
+#99 的 blocker 是它自己 ✓，而 #103 的每一条都要在**新的 main** 上重新成立 ✓。
 
 **必须明说的结构性事实**：这类变更（安全边界 / 权限模型 / Gate 行为 / 状态机）**
 在本项目里没有独立 reviewer** —— Supervisor 既是作者又是批准者，而 §5.1 条件 6 恰恰是

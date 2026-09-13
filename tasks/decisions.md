@@ -2910,3 +2910,63 @@ T0208 → 依赖 T0202, T0205 → T0205 → 依赖 T0204
 
 同样的错误会在任何"跨阶段脚本 + 逐任务分配"的组合上复现 ✓，
 所以修的不是那张分配表 ✓，是"分配必须有依赖图兜底"这条规则 ✓。
+
+## L1-20260913-20 — ★★ driver 停了 6 小时：它在等 Supervisor，而没有任何东西告诉 Supervisor
+
+### 经过
+
+**事实（可复现）**：`rddev drive`（pid 2763033，16:57 启动）从 17:07 起持续打印
+`drive: pending [T0201 T0603]` ✓，每 10 秒一行 ✓，到 21:19 仍是同一行 ✓ ——
+**4 小时 12 分钟没有任何状态变化** ✓，而 `rddev status` 一直写着
+`decisions waiting for the Supervisor: 3` ✓。
+
+driver 的行为**没有错** ✓：它把需要判断的三件事写进了 `.rddev/runtime/decisions.json` ✓，
+并在 `rddev status` 里报出来 ✓，这正是设计（"the Supervisor can be absent and return" ✓）。
+错的是**没有任何东西把这件事送到 Supervisor 面前** ✓ —— 我是在手动翻
+`.rddev/runtime/driver.out` 时才发现的 ✓。**一个只在被问到时才回答的机制，等同于没有机制** ✓。
+
+三件事里有两件是同一类：**任务改动不再适用于当前 main** ✓。
+
+### 决定（已执行）
+
+1. **T0201 rebaseline**：`rddev rebaseline T0201` —— 基线 `91ecb72df026 → 42379ea3f510` ✓，
+   携带 38 个文件 ✓，`specs/SPEC_VERSION.json` 按派生规则**重新生成** ✓（不是合并文本 ✓）。
+   起因与上一次同类拒绝无关 ✓：main 在 08:55Z 因 **#100 合入**前进 ✓。
+2. **T0603 rebaseline**：`rddev rebaseline T0603` —— 基线 `e59993164944 → 42379ea3f510` ✓，
+   携带 24 个文件 ✓，重新生成 `specs/SPEC_VERSION.json` **与** `specs/database/postgres.sql` ✓。
+3. 两次之后 driver **立即恢复**：`workers: 2 running (T0201, T0603)` ✓ ——
+   **卡住的不是 worker，是判断** ✓。
+
+**T0301 的决定是"继续等 #99"，并且有证据** ✓：
+
+- collect 拒绝的四条里，三条是真阳性 ✓，但**不是 worker 的错** ✓。
+- `git reflog` 在 T0301 worktree 里留下 `HEAD@{1} commit: g3 should be refused` ✓；
+  该 commit 作者是 `g3 <g3@test>` ✓，父提交是 `5cfc4c3a`（当时的 main）✓ ——
+  即**有人在被评测的那棵树里提交了** ✓。
+- 那条命令**在 main 自己的 G3 脚本里** ✓：`tests/acceptance/gitea-real-services-e2e.sh:124`
+  的 `git -c user.name=g3 -c user.email=g3@test commit -q -am "g3 should be refused"` ✓ ——
+  这**正是 #99 要修的缺陷** ✓（the G3 gate must not mutate the tree it grades ✓）。
+- T0301 对该文件的改动与它**无关** ✓（只加了 webhook 的 HMAC secret ✓，22 增 6 删 ✓）。
+- 所以 T0301 的返工**必须等 #99 合入** ✓，否则会在同一条脚本上再红一次 ✓；
+  它的交付完好保存在 worktree 里 ✓，HEAD 已被 collect 重置回 `5cfc4c3a` ✓。
+
+### 顺带修掉的一件事（诚实记录）
+
+main 的 `go.mod` / `go.sum` 里有**未提交的** `github.com/santhosh-tekuri/jsonschema/v6 v6.0.3` ✓
+（mtime 17:03:30 ✓），而**整棵树里没有任何代码 import 它** ✓。**来源我没能确定** ✓：
+accept 用的集成树是从 `main` 这个 **ref** 新建的 detached worktree ✓（`gate_run.go:509` ✓），
+不会写主工作树 ✓；但时间点与 T0603 的 accept 拒绝（17:03:25 ✓）重合 ✓，所以不敢断言它无害 ✓。
+按"不留下无法解释的状态"处理 ✓：diff 存档到 `main-gomod-residue.patch` ✓，
+`git checkout -- go.mod go.sum` 恢复 ✓，其后 `go build ./...` 通过 ✓。
+**T0201 的分支自带这个依赖** ✓（`worktrees/T0201/go.mod:10` ✓），合入时会随它的代码一起来 ✓。
+
+### 修复：把"需要判断"送到 Supervisor 面前
+
+已挂常驻监视 ✓：只在**新出现** `DECISION NEEDED` / `REFUSED` / `G?-red` / `panic` 时通知 ✓，
+并**覆盖 driver 猝死** ✓ —— pid 不在时明确报"没人驱动队列" ✓。
+**静默不等于正常** ✓：这既是这次的教训 ✓，也是监视必须覆盖失败路径的原因 ✓。
+
+### 教训
+
+**"记录在盘上"不等于"送达"** ✓。driver 把判断写得很清楚 ✓，清楚到可以放六小时没人看 ✓ ——
+**信息完整性和信息可达性是两件事** ✓，这一轮缺的是后者 ✓。
