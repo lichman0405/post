@@ -214,6 +214,99 @@ func TestTheLoopRevisitsVerificationAndAccepted(t *testing.T) {
 	}
 }
 
+// The classification in git_control.go is only half of issue #139. It decides
+// which sentence a refusal carries; stepAccepted decides what the sentence
+// MEANS for the pipeline, and until this test nothing exercised that half:
+// replacing `if ciStillRunning(out)` with an unconditional retry left every
+// test in the package green, while in production it would have put the driver
+// straight back into retrying a finished red check on every tick forever.
+//
+// The stub is rddev itself, so the whole of stepAccepted runs — commit, push,
+// open, status, merge — in the order it really does, and only the merge fails.
+func TestARedMergeRefusalBecomesADecisionAndAWaitDoesNot(t *testing.T) {
+	cases := []struct {
+		name     string
+		refusal  string
+		decision bool
+	}{
+		{
+			"a required check that finished red",
+			checksRed + " — not passing: go (FAILURE) — the local G2 record is a replica of CI, not CI itself",
+			true,
+		},
+		{
+			"a required check still running",
+			checksNotYet + " — still running: go (IN_PROGRESS) — the local G2 record is a replica of CI, not CI itself",
+			false,
+		},
+		{
+			"a PR whose checks have not registered yet",
+			noChecksReported + " on the 'task/T0001-x' branch",
+			false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			dagPath, statePath := writeDAG(t, root), filepath.Join(root, "task_status.json")
+			if err := os.WriteFile(statePath, []byte(`{"version":2,"tasks":{"T0001":{"status":"accepted"}}}`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			// The refusal travels beside the stub rather than inside its text,
+			// so the fixture is not also a shell-quoting exercise.
+			bin := filepath.Join(t.TempDir(), "rddev")
+			script := "#!/bin/sh\n" +
+				"case \"$1 $2\" in\n" +
+				"  \"pr merge\") cat \"$0.refusal\" >&2; exit 1;;\n" +
+				"esac\nexit 0\n"
+			if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(bin+".refusal", []byte(tc.refusal+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			o := &DriveOpts{RepoRoot: root, DagPath: dagPath, StatePath: statePath, Binary: bin}
+			st := &DriverStatus{}
+			acted, err := o.stepAccepted("T0001", st)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ds, err := ReadDecisions(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.decision {
+				if !acted {
+					t.Error("a red check produced no action, so the next tick would run the merge again — the loop of #139")
+				}
+				if len(ds) != 1 {
+					t.Fatalf("a finished red check must become exactly one decision for the Supervisor; got %d", len(ds))
+				}
+				if ds[0].Task != "T0001" || ds[0].Action != "merge" {
+					t.Errorf("the decision names %s/%s, not the task's merge", ds[0].Task, ds[0].Action)
+				}
+				if !strings.Contains(ds[0].Reason, "FAILURE") {
+					t.Errorf("the decision does not say which check failed:\n  %s", ds[0].Reason)
+				}
+				if st.Merged != 0 {
+					t.Errorf("a refused merge was counted as merged (%d)", st.Merged)
+				}
+				return
+			}
+			if acted {
+				t.Error("a still-running check was treated as an action: the driver records a decision and stops retrying, so the merge the CI would have allowed never happens")
+			}
+			if len(ds) != 0 {
+				t.Fatalf("a still-running check produced %d decisions; it is a wait to retry next tick, not a judgement:\n  %s", len(ds), ds[0].Reason)
+			}
+			if st.Merged != 0 {
+				t.Errorf("nothing merged, but Merged=%d", st.Merged)
+			}
+		})
+	}
+}
+
 // A derived artifact is a FUNCTION of its inputs, so merging it as text is
 // meaningless: the branch's copy restores a digest describing the branch's old
 // specs, and main's drops the task's spec edits. Rebaseline regenerates them

@@ -415,6 +415,203 @@ func TestMergeRefusesWhileThePRHasNoChecksYetAndStillSaysWhy(t *testing.T) {
 	}
 }
 
+// A refusal has to say WHICH of two things happened, because the driver acts on
+// the difference: stepAccepted retries a "not yet" and escalates everything
+// else. Before this, every non-SUCCESS state produced the same sentence, and
+// that sentence was the one the driver retries on — so a required check that
+// had finished FAILURE was retried on every tick forever. The task never
+// finished and never asked, which is the outcome §8.2 forbids; the local gate
+// was green, so nothing else interceded.
+//
+// So the assertion is not "it refused" — it always did — but "which of the two
+// it said", asked through ciStillRunning, the same predicate the driver uses
+// rather than a copy of its logic. The test also pins that the two sentences do
+// not overlap, so reverting the classification cannot pass by accident: with a
+// single sentence for both, one of the two branches below has to fail.
+func TestAMergeRefusalSaysWaitOrDecisionAndNeverBoth(t *testing.T) {
+	cases := []struct {
+		state string
+		wait  bool
+		why   string
+	}{
+		{"SUCCESS", false, "green — no refusal at all"},
+		{"PENDING", true, "still running: a wait"},
+		{"QUEUED", true, "not started yet: a wait"},
+		{"IN_PROGRESS", true, "still running: a wait"},
+		{"WAITING", true, "held by an environment or concurrency gate: still running, a wait"},
+		{"REQUESTED", true, "requested but not started: a wait"},
+		{"EXPECTED", true, "required but not posted yet: a wait"},
+		{"FAILURE", false, "finished red: a decision — this is #139"},
+		{"ERROR", false, "finished red: a decision"},
+		{"CANCELLED", false, "terminal: a decision"},
+		{"TIMED_OUT", false, "terminal: a decision"},
+		{"STARTUP_FAILURE", false, "terminal: a decision"},
+		{"ACTION_REQUIRED", false, "terminal: a decision"},
+		{"STALE", false, "terminal: a decision"},
+		{"SKIPPED", false, "not green — the standard is not widened here"},
+		{"NEUTRAL", false, "not green — the standard is not widened here"},
+		{"A_STATE_GITHUB_ADDS_LATER", false, "unknown falls to a decision, never a silent loop"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.state, func(t *testing.T) {
+			// The unit under test needs no gate fixture: it asks gh and
+			// classifies the answer. MergePR's plumbing to the driver is pinned
+			// by TestMergeRefusesWhileThePRChecksAreRed and its neighbour.
+			binDir := t.TempDir()
+			script := "#!/bin/sh\n" +
+				"case \"$1 $2\" in\n" +
+				"  \"pr checks\") printf '%s' '[{\"name\":\"job-a\",\"state\":\"" + tc.state + "\"},{\"name\":\"job-b\",\"state\":\"SUCCESS\"}]';;\n" +
+				"esac\nexit 0\n"
+			if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			err := assertRequiredChecksGreen(t.TempDir(), "task/T0001-x", []string{"job-a", "job-b"})
+
+			if tc.state == "SUCCESS" {
+				if err != nil {
+					t.Fatalf("every required check is green but the merge refused: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("job-a was %s (%s) and no refusal was produced", tc.state, tc.why)
+			}
+			got := ciStillRunning(err.Error())
+			if got != tc.wait {
+				t.Errorf("job-a is %s (%s), so the driver should treat this as wait=%v, but the refusal said wait=%v:\n  %v",
+					tc.state, tc.why, tc.wait, got, err)
+			}
+			// The vocabulary itself, so one sentence for both cases cannot
+			// satisfy every row above.
+			if tc.wait {
+				if !strings.Contains(err.Error(), checksNotYet) {
+					t.Errorf("a wait did not carry the wait wording:\n  %v", err)
+				}
+				if strings.Contains(err.Error(), checksRed) {
+					t.Errorf("a wait carried the red wording:\n  %v", err)
+				}
+			} else {
+				if !strings.Contains(err.Error(), checksRed) {
+					t.Errorf("a decision did not carry the red wording:\n  %v", err)
+				}
+				if strings.Contains(err.Error(), checksNotYet) {
+					t.Errorf("a decision carried the wait wording, so it will be retried forever:\n  %v", err)
+				}
+			}
+		})
+	}
+}
+
+// gh does not collapse same-named entries, and it lists them newest-first, so
+// the obvious map[name]=state is last-wins and a PENDING entry can overwrite a
+// FAILURE of the same name. That reads a red check as a wait: #139 again, by a
+// road the two-sentence split does not close. The classification must therefore
+// not depend on which entry came last.
+func TestASameNamedEntryCannotHideARedCheck(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+		want string // "green", "wait" or "decision"
+		why  string
+	}{
+		{"a red then a pending, in gh's newest-first order",
+			`[{"name":"job-a","state":"FAILURE"},{"name":"job-a","state":"PENDING"}]`,
+			"decision", "the newer entry is PENDING but the same name already finished red"},
+		{"a pending then a red",
+			`[{"name":"job-a","state":"PENDING"},{"name":"job-a","state":"FAILURE"}]`,
+			"decision", "the red must decide however the entries are ordered"},
+		{"a green then a red",
+			`[{"name":"job-a","state":"SUCCESS"},{"name":"job-a","state":"FAILURE"}]`,
+			"decision", "a later green does not undo a red of the same name"},
+		{"a red then a green",
+			`[{"name":"job-a","state":"FAILURE"},{"name":"job-a","state":"SUCCESS"}]`,
+			"decision", "a green does not undo an earlier red of the same name"},
+		{"a green and a still-running duplicate",
+			`[{"name":"job-a","state":"SUCCESS"},{"name":"job-a","state":"PENDING"}]`,
+			"wait", "nothing finished red, but the name is not settled yet"},
+		{"both green",
+			`[{"name":"job-a","state":"SUCCESS"},{"name":"job-a","state":"SUCCESS"}]`,
+			"green", "both entries green is the only way this name counts as green"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			binDir := t.TempDir()
+			script := "#!/bin/sh\n" +
+				"case \"$1 $2\" in\n" +
+				"  \"pr checks\") printf '%s' '" + tc.json + "';;\n" +
+				"esac\nexit 0\n"
+			if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			err := assertRequiredChecksGreen(t.TempDir(), "task/T0001-x", []string{"job-a"})
+			if tc.want == "green" {
+				if err != nil {
+					t.Fatalf("every entry for job-a is green but the merge refused: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("job-a %s and the merge was allowed (%s)", tc.json, tc.why)
+			}
+			if got := ciStillRunning(err.Error()); got != (tc.want == "wait") {
+				t.Errorf("job-a is %s (%s), so the driver should read this as a %s, but the refusal read as wait=%v:\n  %v",
+					tc.json, tc.why, tc.want, got, err)
+			}
+		})
+	}
+}
+
+// A required check the PR has never reported is the third way to be "not
+// finished", and it is a wait: a PR pushed a second ago has none of them yet.
+func TestARequiredCheckThatWasNeverReportedIsAWait(t *testing.T) {
+	binDir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"case \"$1 $2\" in\n" +
+		"  \"pr checks\") printf '%s' '[{\"name\":\"job-a\",\"state\":\"SUCCESS\"}]';;\n" +
+		"esac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	err := assertRequiredChecksGreen(t.TempDir(), "task/T0001-x", []string{"job-a", "job-b"})
+	if err == nil {
+		t.Fatal("a required check absent from the PR's checks was accepted")
+	}
+	if !ciStillRunning(err.Error()) {
+		t.Errorf("an unreported required check was not treated as a wait:\n  %v", err)
+	}
+	if !strings.Contains(err.Error(), "job-b") {
+		t.Errorf("the refusal does not name the unreported check:\n  %v", err)
+	}
+}
+
+// ciStillRunning is a substring test over two constants, so their disjointness
+// is a real invariant and not a stylistic preference: if either contained the
+// other — or contained gh's "no checks reported" — then one of the two answers
+// would silently become the other, which is exactly the defect.
+func TestTheTwoRefusalsDoNotReadAsEachOther(t *testing.T) {
+	if strings.Contains(checksNotYet, checksRed) || strings.Contains(checksRed, checksNotYet) {
+		t.Fatalf("the wait and the decision read as each other: %q / %q", checksNotYet, checksRed)
+	}
+	for _, s := range []string{checksNotYet, checksRed} {
+		if strings.Contains(s, noChecksReported) {
+			t.Fatalf("%q contains gh's own %q, so ciStillRunning cannot tell them apart", s, noChecksReported)
+		}
+	}
+	// And each input the driver must retry on is sufficient on its own.
+	if !ciStillRunning(checksNotYet) || !ciStillRunning(noChecksReported) {
+		t.Fatal("a wait the driver is supposed to retry was not recognised as one")
+	}
+	if ciStillRunning(checksRed) {
+		t.Fatal("a decision would be retried as though it were a wait — #139 is back")
+	}
+}
+
 // writeWorktreeRecord gives the task a registry entry so loadWorktreeRecord
 // resolves; the merge path needs a branch to name.
 func writeWorktreeRecord(t *testing.T, repoRoot string) {
