@@ -414,16 +414,22 @@ func RunGitControl(opts *GitControlOpts, action string) (*GitActionResult, error
 // rest unseen. The second Reviewer noticed and read the worktree instead —
 // which is exactly the diligence a review input must not depend on.
 func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
-	// The diff base is where the branch diverged from main, NOT the recorded
-	// baseline. Those are the same value until a baseline is advanced, and
-	// then they diverge badly: after a rework onto a newer main the recorded
-	// baseline already contains the task's earlier work, so the delta is a
-	// sliver - T0103's review input was 5 files out of a 27-file task, and a
-	// Reviewer would be asked to approve the whole from a fragment.
+	// The diff base is where the branch diverged from the integration branch,
+	// NOT the recorded baseline. Those are the same value until a baseline is
+	// advanced, and then they diverge badly: after a rework onto a newer main
+	// the recorded baseline already contains the task's earlier work, so the
+	// delta is a sliver - T0103's review input was 5 files out of a 27-file
+	// task, and a Reviewer would be asked to approve the whole from a fragment.
 	// merge-base gives the branch's actual contribution in both cases, which
 	// is the same diff the pull request shows.
+	//
+	// The anchor of that merge-base is the integration tip rather than the local
+	// branch, and the difference is not academic: this diff is what gets APPLIED
+	// to the tree the gate verifies, so measuring against a different ref than
+	// that tree was cut from produces a patch carrying commits the tree already
+	// has, which does not apply at all. See integrationBase.
 	base := rec.BaselineSHA
-	if mb, err := gitOutput(rec.Worktree, "merge-base", DefaultBaseBranch, "HEAD"); err == nil && mb != "" {
+	if mb, err := gitOutput(rec.Worktree, "merge-base", integrationBase(rec.Worktree), "HEAD"); err == nil && mb != "" {
 		base = mb
 	}
 	out, err := gitOutput(rec.Worktree, "diff", base, "--")

@@ -36,10 +36,15 @@ const integrationFetchTimeout = 2 * time.Minute
 //
 // The fix is not to fast-forward the checkout. The shared checkout carries
 // uncommitted state by design (`tasks/task_status.json` moves on every
-// transition) and the merge commits that land on main touch that same file, so
-// a fast-forward is REFUSED exactly when it is needed — a routine block, not a
-// rare one. Instead: origin is the answer, and the local ref stops being
-// authoritative for anything a verdict depends on.
+// transition), and a fast-forward refuses to overwrite a locally modified file —
+// so it is refused whenever the incoming commits touch that file. That is not
+// every merge (a task PR's own squash merge does not touch it; the bookkeeping
+// commits on main do), so an ff would usually have worked. Usually is not
+// enough: the reader must be right for the next commit rather than this week's,
+// it shares the tree with the Supervisor's own git work and the driver's own
+// bookkeeping, and a fast-forward is a mutation of that shared state performed
+// by the wrong code. Reading the ref that merges move cannot be refused by local
+// state and mutates nothing.
 
 // IntegrationTip fetches the integration branch and returns the ref that names
 // its current state.
@@ -76,7 +81,11 @@ func IntegrationTip(repoRoot string) (string, error) {
 	// the fetch's own proof: if the fetch exits 0, it wrote this ref.
 	tip := "refs/remotes/origin/" + DefaultBaseBranch
 	refspec := "+refs/heads/" + DefaultBaseBranch + ":" + tip
-	if _, err := runGit(repoRoot, integrationFetchTimeout, "fetch", "origin", refspec); err != nil {
+	// --no-tags: a fetch follows tags by default, so it writes refs this
+	// function did not ask for and cannot vouch for. `collect` reads the ref
+	// ledger to attribute a change, and a tag that arrived as a side effect of
+	// reading main would be attributed to whoever happened to trigger the fetch.
+	if _, err := runGit(repoRoot, integrationFetchTimeout, "fetch", "--no-tags", "origin", refspec); err != nil {
 		// A failed fetch is not one condition. "I cannot reach the forge" and
 		// "the forge has no such branch" both fail it, and only the first is a
 		// ref of unknown age: if the branch is not on the remote, the local
@@ -144,7 +153,42 @@ func remoteHasBranch(repoRoot, branch string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return strings.TrimSpace(out) != "", nil
+	// The argument is a PATTERN, matched against the ref name, so "main" also
+	// matches refs/heads/feature/main — and then "the remote has this branch"
+	// is answered yes for a remote that has no such branch, which is the
+	// fall-back decision made on a false premise. Compare the ref name.
+	want := "refs/heads/" + branch
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == want {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// integrationBase names the ref a task's change is measured against, and it has
+// to be the ref the integration tree is cut from or the patch does not apply.
+//
+// Both cuts name the same thing — ensureWorktree creates the task branch from
+// IntegrationTip, and prepareIntegrationTree builds the verified tree from
+// IntegrationTip — so measuring against anything else is measuring against a
+// different commit. refs/heads/main, this clone's copy, is behind the tip
+// whenever a merge has landed and nobody has pulled: merge-base(local main,
+// HEAD) then reaches back PAST the branch point, the "task's change" comes out
+// carrying every commit merged since, and applying it to a tree that already
+// has them fails — in the gate and in rebaseline alike.
+//
+// refs/remotes/origin/main is where merges actually land, and every dispatch,
+// gate and rebaseline refreshes it (IntegrationTip), so the two readers agree at
+// the moment they are used. Without an origin — every fixture in this package —
+// the local branch is the only answer there is, and is correct by construction.
+func integrationBase(dir string) string {
+	tracking := "refs/remotes/origin/" + DefaultBaseBranch
+	if ok, err := refExists(dir, tracking); err == nil && ok {
+		return tracking
+	}
+	return DefaultBaseBranch
 }
 
 func remoteExists(repoRoot, name string) (bool, error) {

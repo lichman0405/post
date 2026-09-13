@@ -670,11 +670,29 @@ func gitOutput(dir string, args ...string) (string, error) {
 	return runGit(dir, 0, args...)
 }
 
+// runGitWaitDelay bounds how long Wait keeps reading a command's output after
+// the process itself is gone.
+//
+// A deadline alone is not a bound, which is the whole reason this exists: git
+// spawns helpers (`git-remote-http`, `git-remote-ext`), those helpers inherit
+// git's stdout and stderr, and `cmd.Output()` reads until the WRITE END of the
+// pipe closes — which the helper holds. Killing git on the deadline therefore
+// leaves Wait blocked on a pipe an orphan is still holding, and the fetch returns
+// at the deadline plus however long the orphan lives. Measured with an
+// `ext::sleep 30` remote and a 300ms deadline: without this, the call did not
+// return until the sleep exited. WaitDelay makes Go close the pipes itself once
+// it has elapsed, so the deadline is the deadline.
+const runGitWaitDelay = 5 * time.Second
+
 // runGit runs git in dir. A positive timeout bounds the call, which matters for
 // the one git command this package makes over the network: an unbounded fetch
 // does not fail a dispatch, it STALLS it — and under `rddev drive` a dispatch
 // that never returns is the whole DAG not moving, with nothing in the log to say
 // why. A deadline turns that into an error the driver can retry.
+//
+// WaitDelay is set even when there is no deadline: a local git that exits while a
+// helper holds the pipe hangs the caller exactly the same way, and every caller
+// here is on a path where hanging is worse than an error.
 func runGit(dir string, timeout time.Duration, args ...string) (string, error) {
 	ctx := context.Background()
 	if timeout > 0 {
@@ -684,6 +702,7 @@ func runGit(dir string, timeout time.Duration, args ...string) (string, error) {
 	}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	cmd.WaitDelay = runGitWaitDelay
 	out, err := cmd.Output()
 	if err != nil {
 		if timeout > 0 && ctx.Err() != nil {

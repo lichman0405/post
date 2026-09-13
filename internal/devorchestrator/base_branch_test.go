@@ -140,26 +140,182 @@ func TestIntegrationTipDoesNotTrustTheConfiguredRefspec(t *testing.T) {
 
 // TestAGitCallOverTheNetworkIsBounded pins the mechanism, not the value: a call
 // with a deadline that has passed reports the deadline rather than whatever the
-// remote said. The 2-minute bound the fetch actually uses cannot be exercised
-// here — it would need a remote that hangs, and a suite that waits out a hang is
-// its own problem. What is pinned is that a bound exists at all: an unbounded
-// fetch does not fail a dispatch, it stalls it, and a stalled dispatch under
-// `rddev drive` is the whole DAG not moving.
+// remote said.
+//
+// It uses a remote that HANGS, because an overdue deadline against a remote that
+// fails immediately proves nothing about the hang this bound exists for — and
+// the earlier version of this test did exactly that, which is how it passed
+// while the bound was removable. An unbounded fetch does not fail a dispatch, it
+// stalls it, and a stalled dispatch under `rddev drive` is the whole DAG not
+// moving; so the assertion is on the CLOCK: with a 20-second hang and a 300ms
+// deadline, the call has to come back long before the hang ends.
 func TestAGitCallOverTheNetworkIsBounded(t *testing.T) {
 	repo := t.TempDir()
 	bbGit(t, repo, "init", "-q", "-b", "main")
 	bbCommitFile(t, repo, "README.md", "x\n")
-	// Unreachable as well as overdue, so the command fails whatever the race
-	// between the deadline and the process start.
-	bbGit(t, repo, "remote", "add", "origin", filepath.Join(t.TempDir(), "does-not-exist.git"))
+	// An ext:: remote runs a command of our choosing, which is the only portable
+	// way to make git block. It needs the transport allowed explicitly.
+	bbGit(t, repo, "config", "protocol.ext.allow", "always")
+	bbGit(t, repo, "remote", "add", "origin", "ext::sleep 20")
 
-	_, err := runGit(repo, time.Nanosecond, "fetch", "origin", DefaultBaseBranch)
+	start := time.Now()
+	_, err := runGit(repo, 300*time.Millisecond, "fetch", "origin", DefaultBaseBranch)
+	elapsed := time.Since(start)
 	if err == nil {
-		t.Fatal("runGit returned no error for a fetch whose deadline had already passed")
+		t.Fatal("runGit returned no error for a fetch whose deadline had passed")
 	}
 	if !strings.Contains(err.Error(), "timed out") {
 		t.Errorf("error = %q, want it to name the deadline rather than the remote's failure", err)
 	}
+	// The deadline is 300ms and the remote hangs for 20s. Waiting out the hang is
+	// the failure this catches: killing git is not enough, because git's helper
+	// inherits the output pipe and WaitDelay is what stops Wait blocking on it.
+	if elapsed > 10*time.Second {
+		t.Errorf("the call took %s for a 300ms deadline against a 20s hang — the bound does not bound", elapsed)
+	}
+}
+
+// TestTheDiffIsMeasuredFromTheRefTheTreeIsCutFrom is the composition failure
+// that the dispatch-side change would otherwise have introduced, and it is the
+// reason the anchor of the merge-base matters.
+//
+// A task branch is cut from the integration TIP (ensureWorktree). The tree a
+// gate verifies is cut from that same tip (prepareIntegrationTree). If the change
+// is measured from refs/heads/main instead — what this clone last heard — then
+// with a merge on the forge that nobody has pulled, merge-base reaches back past
+// the branch point and the "task's change" carries the merge as well. The gate
+// then applies a patch whose contents are already in the tree it is applying to,
+// which fails, and the task is refused for a defect in the measuring.
+func TestTheDiffIsMeasuredFromTheRefTheTreeIsCutFrom(t *testing.T) {
+	origin, _, workspace := bbOriginAndClones(t)
+
+	// The forge moves; the shared checkout's local main does not.
+	stage := filepath.Join(filepath.Dir(workspace), "stage")
+	bbGit(t, filepath.Dir(workspace), "clone", "-q", origin, stage)
+	bbGit(t, stage, "config", "user.name", "test")
+	bbGit(t, stage, "config", "user.email", "test@test")
+	bbCommitFile(t, stage, "dependency.sql", "-- the dependency's migration\n")
+	bbGit(t, stage, "push", "-q", "origin", "main")
+
+	// Dispatch, through the production path: branch from the tip, linked
+	// worktree of the shared checkout (so refs/heads/main is the stale one on
+	// both sides).
+	const branch = "task/T0001-x"
+	if err := ensureWorktree(workspace, "T0001", branch); err != nil {
+		t.Fatalf("ensureWorktree: %v", err)
+	}
+	taskWT := filepath.Join(WorktreesDir(workspace), "T0001")
+	if err := os.WriteFile(filepath.Join(taskWT, "README.md"), []byte("# seed\nthe task's change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tip, err := IntegrationTip(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveRegistry(workspace, &WorkerRecord{
+		TaskID: "T0001", RunID: "r", Branch: branch, Worktree: taskWT,
+		ResultDir: taskWT, BaselineSHA: bbResolve(t, workspace, tip), StartedAt: "t",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(IntegrationTreeDir(workspace, "T0001")), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// The diff is the task's contribution and nothing else. The merge is not the
+	// task's work, and it is already in the tree the diff gets applied to.
+	rec, err := LoadRegistry(workspace, "T0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	change, err := taskWorktreeDiff(rec)
+	if err != nil {
+		t.Fatalf("taskWorktreeDiff: %v", err)
+	}
+	if strings.Contains(change, "dependency.sql") {
+		t.Errorf("the task's change carries a merge the branch was cut from — measuring against refs/heads/main instead of the tip:\n%s", nonEmptyLines(change, 40))
+	}
+	if !strings.Contains(change, "the task's change") {
+		t.Errorf("the task's own change is missing from the diff:\n%s", nonEmptyLines(change, 40))
+	}
+
+	// And the tree the gate builds must take that diff: this is the failure the
+	// measuring prevents, so assert the outcome rather than the text.
+	dir, cleanup, err := prepareIntegrationTree(workspace, "T0001")
+	if err != nil {
+		t.Fatalf("the task's change does not apply to the tree it was measured against: %v", err)
+	}
+	defer cleanup()
+	if _, err := os.Stat(filepath.Join(dir, "dependency.sql")); err != nil {
+		t.Errorf("the integration tree is missing the merge: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "the task's change") {
+		t.Errorf("the integration tree does not carry the task's change: %q", body)
+	}
+}
+
+// TestTheRemoteBranchCheckIsNotAPatternMatch: `git ls-remote origin main` takes a
+// PATTERN, and a pattern without a slash matches the last path component — so a
+// remote whose only branch is feature/main answers "yes, it has main". That
+// answer is the whole judgement in the failure path ("nothing is ahead of a
+// branch the forge does not have"), so it has to be about the ref, not a match.
+func TestTheRemoteBranchCheckIsNotAPatternMatch(t *testing.T) {
+	origin, publisher, workspace := bbOriginAndClones(t)
+	bbGit(t, publisher, "checkout", "-q", "-b", "feature/main")
+	bbGit(t, publisher, "push", "-q", "origin", "feature/main")
+	// The branch really is absent from the forge — delete it there, so this
+	// cannot pass by the fixture quietly having the ref it asks about.
+	bbGit(t, origin, "branch", "-D", "main")
+
+	has, err := remoteHasBranch(workspace, DefaultBaseBranch)
+	if err != nil {
+		t.Fatalf("remoteHasBranch: %v", err)
+	}
+	if has {
+		t.Error("the remote has no main for this repository (only feature/main), but the check said it does — a pattern match read as an answer")
+	}
+}
+
+// TestAFetchDoesNotFollowTags: the fetch exists to read ONE ref, and a fetch
+// follows tags by default. The refs it writes are attributed to whoever
+// triggered the fetch, so a tag arriving as a side effect becomes a change
+// somebody is asked to account for.
+func TestAFetchDoesNotFollowTags(t *testing.T) {
+	_, publisher, workspace := bbOriginAndClones(t)
+	bbGit(t, publisher, "tag", "v-from-the-forge")
+	bbGit(t, publisher, "push", "-q", "origin", "v-from-the-forge")
+
+	if _, err := IntegrationTip(workspace); err != nil {
+		t.Fatalf("IntegrationTip: %v", err)
+	}
+	if out, err := bbGitErr(workspace, "rev-parse", "--verify", "--quiet", "refs/tags/v-from-the-forge"); err == nil {
+		t.Errorf("the fetch wrote refs/tags/v-from-the-forge (%s) — a dispatch or a gate is not the publisher of a release", strings.TrimSpace(out))
+	}
+}
+
+func nonEmptyLines(s string, max int) string {
+	var kept []string
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			kept = append(kept, line)
+		}
+		if len(kept) == max {
+			break
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
+// bbGitErr is bbGit for the calls whose FAILURE is the expected answer.
+func bbGitErr(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 // TestIntegrationTipIsTheLocalBranchWhenTheRemoteHasNoSuchBranch: "the remote
