@@ -108,6 +108,18 @@ func (o *DriveOpts) Drive(ctx context.Context) error {
 	// disk and continues from there. Nothing is re-spawned that already exists.
 	_, _ = DiscoverWorkers(o.RepoRoot)
 
+	// The ref ledger is part of that adoption. Collect exempts a new ref only
+	// when it is on the Supervisor's record, and a dispatch that predates the
+	// ledger would look like a ref its sibling created — a false finding
+	// produced by the fix that introduced the ledger. Recording the branches of
+	// the dispatches already on disk, once, at startup, closes that window
+	// (ref_ledger.go: ReconcileSupervisorRefs).
+	if refs, err := ReconcileSupervisorRefs(o.RepoRoot); err != nil {
+		o.logf("ref ledger reconcile failed: %v (collects may report unattributable new refs until this is fixed)", err)
+	} else if len(refs) > 0 {
+		o.logf("ref ledger: %d existing dispatch branch(es) recorded", len(refs))
+	}
+
 	for {
 		acted, err := o.tick(st)
 		st.HeartbeatAt = nowRFC3339()

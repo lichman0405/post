@@ -22,7 +22,13 @@ explicitly_denied_shell_intents:
   - production deployment
 collection_invariants:
   - HEAD must equal baseline_sha
-  - no unauthorized refs created
+  - no unauthorized refs created (a new ref name seen during a run is attributed
+    to the Supervisor only when it is on the Supervisor's own ref ledger —
+    spawn, commit and rebaseline record themselves, `rddev refs adopt` records
+    anything created by hand, `rddev refs reconcile` covers dispatches that
+    predate the ledger, and `rddev refs list` shows the record. Attribution
+    never reads the commit identity: whoever makes a commit chooses its author,
+    so a check that trusted it was forgeable with one flag)
   - every changed path matches allowed_scope
   - RESULT.json validates worker-result.schema.json
   - RESULT.json task_id must equal the collected task

@@ -493,13 +493,16 @@ func waitForEnvironWithoutMarker(t *testing.T, pid int, marker string) {
 	t.Fatalf("pid %d still carries %s after 10s — the fixture was supposed to scrub it before exec", pid, marker)
 }
 
-// Only the task namespace is judged. The intended risk is a Worker turning its
-// work into a ref, which would land under refs/heads/task/**; watched the other
-// way round the check fires on the Supervisor's own pull-request branches, which
-// are created during runs constantly. T0201 was rejected because PR #96's branch
-// appeared while its Worker ran — a gate that fires on every run is as broken as
-// one that never fires. (The rule had been inverted relative to its purpose.)
-func TestARefIsJudgedByWhoseWorkItCarries(t *testing.T) {
+// A ref is attributed to the Supervisor by RECORD, not by the identity its
+// commit happens to carry.
+//
+// The rule before this compared the commit's author email against the
+// repository's configured identity. That field is chosen by whoever makes the
+// commit — `git -c user.email=…` sets it per invocation — so a Worker that got
+// past the guard could mint a ref under the Supervisor's name and the check
+// would wave it through. A security check that reads a committer-controlled
+// field is fail-open against exactly the adversary it is defence in depth for.
+func TestAForgedCommitIdentityDoesNotLaunderANewRef(t *testing.T) {
 	root := t.TempDir()
 	run := func(args ...string) string {
 		t.Helper()
@@ -522,14 +525,41 @@ func TestARefIsJudgedByWhoseWorkItCarries(t *testing.T) {
 	run("add", "-A")
 	run("commit", "-q", "-m", "base")
 
-	// The Supervisor's own branch, opened while a Worker ran, carries a commit
-	// the Supervisor authored — not a Worker's doing, and every pull request
-	// creates one.
-	if got := refAuthor(root, "HEAD"); got != "sup@post.local" {
-		t.Fatalf("fixture: HEAD author = %q", got)
+	// The ref a Worker would mint: created while its sibling ran, carrying the
+	// Supervisor's own identity, on a name no dispatch ever used.
+	run("branch", "plausible-name")
+
+	// The identity is forged — this is what the old rule trusted, and asserting
+	// it here is what keeps the test honest: if the fixture ever stops producing
+	// a commit that would have passed the old rule, this test would be checking
+	// nothing and would fail loudly instead.
+	if got := run("log", "-1", "--format=%ae", "plausible-name"); got != "sup@post.local" {
+		t.Fatalf("fixture: the planted ref's author is %q, not the configured identity — the forgery this test is about did not happen", got)
 	}
-	// A commit made with a different identity is unattributable to the
-	// Supervisor, so a ref carrying it is a finding however it is named.
+
+	// Nothing is on record: the ref is unattributable, identity or not.
+	before := []string{"refs/heads/main 0000000000000000000000000000000000000000"}
+	current := before[:1]
+	for _, r := range []string{"refs/heads/main", "refs/heads/plausible-name"} {
+		sha := run("rev-parse", r)
+		current = append(current, r+" "+sha)
+	}
+	ledger := map[string]SupervisorRef{}
+	got := unattributableNewRefs(before, current, ledger)
+	if len(got) != 1 || !strings.HasPrefix(got[0], "refs/heads/plausible-name") {
+		t.Fatalf("a ref carrying the Supervisor's forged identity was not reported: %v", got)
+	}
+
+	// The legitimate neighbour: the same ref, this time on the Supervisor's
+	// record, is its own work — and the record is the only thing that changed.
+	ledger["refs/heads/plausible-name"] = SupervisorRef{Name: "refs/heads/plausible-name", SHA: "abc", Source: "adopt"}
+	if got := unattributableNewRefs(before, current, ledger); len(got) != 0 {
+		t.Errorf("a ref the Supervisor recorded creating was still reported: %v", got)
+	}
+
+	// And the inverse direction of the same rule: a ref whose commit carries
+	// SOMEONE ELSE's identity is still a finding when it is not on record —
+	// attribution never reads the identity at all.
 	cmd := exec.Command("git", "commit", "-q", "--allow-empty", "-m", "planted")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(),
@@ -538,7 +568,13 @@ func TestARefIsJudgedByWhoseWorkItCarries(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("planting: %v\n%s", err, out)
 	}
-	if got := refAuthor(root, "HEAD"); got == "sup@post.local" {
-		t.Fatal("fixture: the planted commit reports the Supervisor's identity")
+	run("branch", "someone-elses")
+	sha := run("rev-parse", "someone-elses")
+	current = append(current, "refs/heads/someone-elses "+sha)
+	got = unattributableNewRefs(before, current, map[string]SupervisorRef{
+		"refs/heads/plausible-name": {Name: "refs/heads/plausible-name"},
+	})
+	if len(got) != 1 || !strings.HasPrefix(got[0], "refs/heads/someone-elses") {
+		t.Errorf("an unrecorded ref was not reported: %v", got)
 	}
 }

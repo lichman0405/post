@@ -201,6 +201,13 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 		}
 	}
 
+	// The advance moved the task branch onto the new baseline; the ledger
+	// follows the ref (ref_ledger.go), so a sibling Worker collecting right now
+	// still finds this branch attributed to the Supervisor.
+	if err := RecordSupervisorRef(repoRoot, "refs/heads/"+rec.Branch, to, "rebaseline", taskID); err != nil {
+		return nil, fmt.Errorf("recording refs/heads/%s in the Supervisor ref ledger: %w", rec.Branch, err)
+	}
+
 	after, err := worktreeChangedPaths(rec.Worktree, to)
 	if err != nil {
 		return nil, err
