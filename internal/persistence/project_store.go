@@ -127,7 +127,29 @@ func (s *ProjectStore) CreateProject(ctx context.Context, p domain.Project, crea
 			return mapProjectWriteError(err)
 		}
 		membership = projectMembershipFromRow(mRow)
-		return nil
+		// The audit row commits (or rolls back) with the project itself.
+		// Visibility is part of the creation preset, so the record pins
+		// what the project was born as (T0110: project visibility/action).
+		after := map[string]any{
+			"slug":       p.Slug,
+			"name":       p.Name,
+			"visibility": string(p.Visibility),
+		}
+		entry := domain.AuditEntry{
+			Action:       domain.ActionProjectCreated,
+			ActorID:      creatorUserID,
+			TargetRef:    "project:" + pgUUIDToText(row.ID),
+			ProjectID:    pgUUIDToText(row.ID),
+			AfterSummary: after,
+		}
+		if orgID.Valid {
+			entry.OrganizationID = pgUUIDToText(orgID)
+			after["organization_id"] = pgUUIDToText(orgID)
+		}
+		if programID.Valid {
+			after["program_id"] = pgUUIDToText(programID)
+		}
+		return appendAudit(ctx, q, entry)
 	})
 	if err != nil {
 		return domain.Project{}, domain.ProjectMembership{}, err

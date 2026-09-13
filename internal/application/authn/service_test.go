@@ -26,7 +26,7 @@ func testService(t *testing.T, users *memstore.Users) (*authn.Service, *memstore
 		LoginWindow:        time.Minute,
 		SignupLimitPerIP:   100,
 	}
-	return authn.NewService(users, sessions, limiter, nil, cfg), sessions, limiter
+	return authn.NewService(users, sessions, limiter, nil, nil, cfg), sessions, limiter
 }
 
 func seedPasswordUser(t *testing.T, users *memstore.Users, email, password, handle string) string {
@@ -260,7 +260,7 @@ func TestLoginFailsClosedWhenLimiterErrors(t *testing.T) {
 	users := memstore.NewUsers()
 	seedPasswordUser(t, users, "x@example.com", "right-password-123", "x")
 	cfg := authn.Config{SessionTTL: time.Hour, LoginLimitPerEmail: 5, LoginLimitPerIP: 100, LoginWindow: time.Minute}
-	svc := authn.NewService(users, memstore.NewSessions(), memstore.Broken(), nil, cfg)
+	svc := authn.NewService(users, memstore.NewSessions(), memstore.Broken(), nil, nil, cfg)
 
 	_, err := svc.Login(ctx, "x@example.com", "right-password-123", "10.0.0.1")
 	if !errors.Is(err, authn.ErrUnavailable) {
@@ -369,7 +369,7 @@ func TestOIDCLoginLinksOnVerifiedEmailOnly(t *testing.T) {
 		Subject: "sub-1", Email: "Oidc@Example.com", EmailVerified: true,
 		PreferredUsername: "oidc-alice", Name: "Alice O",
 	}}
-	svc := authn.NewService(users, sessions, memstore.AllowAll(), provider, cfg)
+	svc := authn.NewService(users, sessions, memstore.AllowAll(), provider, nil, cfg)
 
 	result, err := svc.OIDCLogin(ctx, "code", "https://api/cb")
 	if err != nil {
@@ -402,7 +402,7 @@ func TestOIDCLoginLinksOnVerifiedEmailOnly(t *testing.T) {
 	}
 
 	// Disabled OIDC config: not configured error.
-	svcDisabled := authn.NewService(users, sessions, memstore.AllowAll(), provider, authn.Config{})
+	svcDisabled := authn.NewService(users, sessions, memstore.AllowAll(), provider, nil, authn.Config{})
 	if _, err := svcDisabled.OIDCLogin(ctx, "code", "https://api/cb"); !errors.Is(err, authn.ErrOIDCNotConfigured) {
 		t.Errorf("disabled OIDC = %v, want authn.ErrOIDCNotConfigured", err)
 	}
@@ -441,7 +441,7 @@ func TestSignupRateLimitPerIP(t *testing.T) {
 		SessionTTL: time.Hour, LoginLimitPerEmail: 5, LoginLimitPerIP: 100,
 		LoginWindow: time.Minute, SignupLimitPerIP: 3,
 	}
-	svc := authn.NewService(memstore.NewUsers(), memstore.NewSessions(), memstore.NewLimiter(), nil, cfg)
+	svc := authn.NewService(memstore.NewUsers(), memstore.NewSessions(), memstore.NewLimiter(), nil, nil, cfg)
 
 	for i := 0; i < 3; i++ {
 		email := fmt.Sprintf("s%d@example.com", i)
@@ -471,7 +471,7 @@ func TestSignupFailsClosedWhenLimiterErrors(t *testing.T) {
 		SessionTTL: time.Hour, LoginLimitPerEmail: 5, LoginLimitPerIP: 100,
 		LoginWindow: time.Minute, SignupLimitPerIP: 3,
 	}
-	svc := authn.NewService(memstore.NewUsers(), memstore.NewSessions(), memstore.Broken(), nil, cfg)
+	svc := authn.NewService(memstore.NewUsers(), memstore.NewSessions(), memstore.Broken(), nil, nil, cfg)
 
 	_, err := svc.Signup(ctx, "x@example.com", "long-enough-password", "", "", "10.0.0.1")
 	if !errors.Is(err, authn.ErrUnavailable) {
@@ -534,5 +534,176 @@ func TestDomainEmailValidation(t *testing.T) {
 	}
 	if domain.NormalizeEmail("  ALICE@Example.COM ") != "alice@example.com" {
 		t.Error("NormalizeEmail must lowercase and trim")
+	}
+}
+
+// fakeAuditRecorder captures the auth audit entries in memory (unit fake
+// for the AuditRecorder port; the pgx adapter is exercised in the
+// integration suite).
+type fakeAuditRecorder struct {
+	entries []domain.AuditEntry
+	err     error
+}
+
+func (f *fakeAuditRecorder) Record(_ context.Context, e domain.AuditEntry) error {
+	f.entries = append(f.entries, e)
+	return f.err
+}
+
+// TestAuthEventsAreRecorded pins the audit contract of the auth service
+// (T0110): signup, login success, login failure (known actor for a known
+// account, no actor for an unknown one) and logout each append one entry
+// with actor/via/target, and the correlation id flows from the request
+// context.
+func TestAuthEventsAreRecorded(t *testing.T) {
+	ctx := context.Background()
+	users := memstore.NewUsers()
+	knownID := seedPasswordUser(t, users, "known@example.com", "right-password-123", "known")
+	rec := &fakeAuditRecorder{}
+	sessions := memstore.NewSessions()
+	cfg := authn.Config{
+		WebOrigin:          "http://127.0.0.1:3000",
+		SessionTTL:         time.Hour,
+		LoginLimitPerEmail: 5,
+		LoginLimitPerIP:    100,
+		LoginWindow:        time.Minute,
+		SignupLimitPerIP:   100,
+	}
+	svc := authn.NewService(users, sessions, memstore.NewLimiter(), nil, rec, cfg)
+
+	reqCtx := domain.WithRequestInfo(ctx, domain.RequestInfo{
+		CorrelationID: "corr-123",
+	})
+
+	// Signup records auth.account.signup with the new user as actor.
+	signup, err := svc.Signup(reqCtx, "fresh@example.com", "long-enough-password", "fresh", "", "10.0.0.1")
+	if err != nil {
+		t.Fatalf("Signup: %v", err)
+	}
+	// Login success records auth.login.success.
+	login, err := svc.Login(reqCtx, "known@example.com", "right-password-123", "10.0.0.1")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	// Wrong password for a known account records a failure naming the account.
+	if _, err := svc.Login(reqCtx, "known@example.com", "wrong-password-456", "10.0.0.1"); !errors.Is(err, authn.ErrInvalidCredentials) {
+		t.Fatalf("wrong-password login = %v, want ErrInvalidCredentials", err)
+	}
+	// Unknown email records a failure with no actor.
+	if _, err := svc.Login(reqCtx, "nobody@example.com", "whatever-password", "10.0.0.1"); !errors.Is(err, authn.ErrInvalidCredentials) {
+		t.Fatalf("unknown-email login = %v, want ErrInvalidCredentials", err)
+	}
+	// Logout records auth.logout with the actor from the request context.
+	logoutCtx := domain.WithRequestInfo(ctx, domain.RequestInfo{
+		ActorID:       knownID,
+		Via:           domain.ViaSession,
+		CorrelationID: "corr-logout",
+	})
+	if err := svc.Logout(logoutCtx, login.Session.Token); err != nil {
+		t.Fatalf("Logout: %v", err)
+	}
+
+	if len(rec.entries) != 5 {
+		t.Fatalf("recorded %d entries, want 5: %+v", len(rec.entries), rec.entries)
+	}
+	signupEntry := rec.entries[0]
+	if signupEntry.Action != domain.ActionAuthSignup || signupEntry.ActorID != signup.User.ID ||
+		signupEntry.Via != domain.ViaPassword || signupEntry.TargetRef != "user:"+signup.User.ID {
+		t.Errorf("signup entry = %+v", signupEntry)
+	}
+	if signupEntry.CorrelationID != "corr-123" {
+		t.Errorf("signup correlation id = %q, want corr-123", signupEntry.CorrelationID)
+	}
+	if signupEntry.AfterSummary.(map[string]any)["handle"] != "fresh" {
+		t.Errorf("signup after_summary = %+v", signupEntry.AfterSummary)
+	}
+
+	loginEntry := rec.entries[1]
+	if loginEntry.Action != domain.ActionAuthLoginSuccess || loginEntry.ActorID != knownID ||
+		loginEntry.Via != domain.ViaPassword {
+		t.Errorf("login success entry = %+v", loginEntry)
+	}
+
+	failKnown := rec.entries[2]
+	if failKnown.Action != domain.ActionAuthLoginFailed || failKnown.ActorID != knownID {
+		t.Errorf("known-account failure entry = %+v", failKnown)
+	}
+	if failKnown.Metadata.(map[string]any)["reason"] != "invalid_credentials" {
+		t.Errorf("failure metadata = %+v", failKnown.Metadata)
+	}
+
+	failUnknown := rec.entries[3]
+	if failUnknown.Action != domain.ActionAuthLoginFailed || failUnknown.ActorID != "" {
+		t.Errorf("unknown-account failure entry = %+v", failUnknown)
+	}
+
+	logoutEntry := rec.entries[4]
+	if logoutEntry.Action != domain.ActionAuthLogout || logoutEntry.ActorID != knownID ||
+		logoutEntry.Via != domain.ViaSession || logoutEntry.CorrelationID != "corr-logout" {
+		t.Errorf("logout entry = %+v", logoutEntry)
+	}
+}
+
+// TestDisabledAccountLoginRecordsAccountDisabledReason pins the single
+// failure-reason vocabulary (review M3): a disabled account's password
+// login records metadata reason "account_disabled" — the same word the
+// disabled-account OIDC branch records — so downstream analysis of
+// disabled-account attempts sees one vocabulary across channels.
+func TestDisabledAccountLoginRecordsAccountDisabledReason(t *testing.T) {
+	ctx := context.Background()
+	users := memstore.NewUsers()
+	id := seedPasswordUser(t, users, "disabled@example.com", "right-password-123", "disabled")
+	rec, _ := users.GetByID(ctx, id)
+	disabledAt := time.Now().Add(-time.Hour)
+	rec.User.DisabledAt = &disabledAt
+	users.Seed(rec)
+	auditRec := &fakeAuditRecorder{}
+	cfg := authn.Config{
+		WebOrigin:          "http://127.0.0.1:3000",
+		SessionTTL:         time.Hour,
+		LoginLimitPerEmail: 5,
+		LoginLimitPerIP:    100,
+		LoginWindow:        time.Minute,
+		SignupLimitPerIP:   100,
+	}
+	svc := authn.NewService(users, memstore.NewSessions(), memstore.NewLimiter(), nil, auditRec, cfg)
+
+	if _, err := svc.Login(ctx, "disabled@example.com", "right-password-123", "10.0.0.1"); !errors.Is(err, authn.ErrInvalidCredentials) {
+		t.Fatalf("disabled login = %v, want ErrInvalidCredentials (the wire answer is unchanged)", err)
+	}
+	if len(auditRec.entries) != 1 {
+		t.Fatalf("recorded %d entries, want 1", len(auditRec.entries))
+	}
+	e := auditRec.entries[0]
+	if e.Action != domain.ActionAuthLoginFailed || e.ActorID != id || e.Via != domain.ViaPassword {
+		t.Errorf("entry = %+v, want auth.login.failed naming the disabled account", e)
+	}
+	if e.Metadata.(map[string]any)["reason"] != "account_disabled" {
+		t.Errorf("reason = %v, want account_disabled", e.Metadata)
+	}
+}
+
+// TestAuthAuditRecordingIsBestEffort: an audit store failure must never
+// change the auth outcome (the log write is not the action) — it is
+// logged, not returned.
+func TestAuthAuditRecordingIsBestEffort(t *testing.T) {
+	ctx := context.Background()
+	users := memstore.NewUsers()
+	rec := &fakeAuditRecorder{err: errors.New("audit store down")}
+	cfg := authn.Config{
+		SessionTTL:         time.Hour,
+		LoginLimitPerEmail: 5,
+		LoginLimitPerIP:    100,
+		LoginWindow:        time.Minute,
+		SignupLimitPerIP:   100,
+	}
+	svc := authn.NewService(users, memstore.NewSessions(), memstore.NewLimiter(), nil, rec, cfg)
+
+	_, err := svc.Signup(ctx, "alice@example.com", "long-enough-password", "alice", "", "10.0.0.1")
+	if err != nil {
+		t.Fatalf("Signup with failing audit recorder = %v, want success", err)
+	}
+	if len(rec.entries) != 1 {
+		t.Errorf("recorded %d entries, want 1 (the failed one)", len(rec.entries))
 	}
 }

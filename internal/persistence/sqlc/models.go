@@ -9,17 +9,18 @@ import (
 )
 
 type AuditLog struct {
-	ID            pgtype.UUID        `json:"id"`
-	ActorID       pgtype.UUID        `json:"actor_id"`
-	Via           string             `json:"via"`
-	Action        string             `json:"action"`
-	TargetRef     *string            `json:"target_ref"`
-	ProjectID     pgtype.UUID        `json:"project_id"`
-	CorrelationID string             `json:"correlation_id"`
-	BeforeSummary []byte             `json:"before_summary"`
-	AfterSummary  []byte             `json:"after_summary"`
-	Metadata      []byte             `json:"metadata"`
-	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	ID             pgtype.UUID        `json:"id"`
+	ActorID        pgtype.UUID        `json:"actor_id"`
+	Via            string             `json:"via"`
+	Action         string             `json:"action"`
+	TargetRef      *string            `json:"target_ref"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	CorrelationID  string             `json:"correlation_id"`
+	BeforeSummary  []byte             `json:"before_summary"`
+	AfterSummary   []byte             `json:"after_summary"`
+	Metadata       []byte             `json:"metadata"`
+	OccurredAt     pgtype.Timestamptz `json:"occurred_at"`
+	OrganizationID pgtype.UUID        `json:"organization_id"`
 }
 
 type Blob struct {

@@ -319,9 +319,12 @@ var canonicalTables = map[string]tableExp{
 		fks:  []fkExp{fk("event_id", "research_events", "RESTRICT")},
 	},
 	"audit_log": {
-		cols: []colExp{c("id", u, false, true), c("actor_id", u, true, false), c("via", txt, false, false), c("action", txt, false, false), c("target_ref", txt, true, false), c("project_id", u, true, false), c("correlation_id", txt, false, false), c("before_summary", jb, true, false), c("after_summary", jb, true, false), c("metadata", jb, false, true), c("occurred_at", ts, false, true)},
+		cols: []colExp{c("id", u, false, true), c("actor_id", u, true, false), c("via", txt, false, false), c("action", txt, false, false), c("target_ref", txt, true, false), c("project_id", u, true, false), c("correlation_id", txt, false, false), c("before_summary", jb, true, false), c("after_summary", jb, true, false), c("metadata", jb, false, true), c("occurred_at", ts, false, true), c("organization_id", u, true, false)},
 		pk:   []string{"id"},
-		fks:  []fkExp{fk("actor_id", "users", "RESTRICT"), fk("project_id", "projects", "RESTRICT")},
+		// T0110: organization_id arrived in migration 00020; the canonical
+		// seed (specs/database/postgres.sql) will be back-ported, like the
+		// organizations.deactivated_at column.
+		fks: []fkExp{fk("actor_id", "users", "RESTRICT"), fk("project_id", "projects", "RESTRICT"), fk("organization_id", "organizations", "RESTRICT")},
 	},
 	"search_documents": {
 		cols: []colExp{c("entity_ref", txt, false, false), c("entity_type", txt, false, false), c("visibility", txt, false, false), c("project_id", u, true, false), c("title", txt, false, false), c("content", txt, false, false), c("structured", jb, false, true), colExp{name: "embedding", dataType: vec, udtName: "vector", nullable: true}, c("updated_at", ts, false, true)},
@@ -349,6 +352,11 @@ var explicitIndexes = map[string][]string{
 	// UNIQUE(organization_id, slug) constraint, so their slug uniqueness is
 	// a partial unique index instead.
 	"projects_personal_slug_idx": {"organization_id IS NULL", "UNIQUE"},
+	// T0110: Activity page scan paths (newest-first, keyset on
+	// (occurred_at, id)) per scope and per actor.
+	"audit_log_project_occurred_idx":      {"project_id", "occurred_at"},
+	"audit_log_organization_occurred_idx": {"organization_id", "occurred_at"},
+	"audit_log_actor_occurred_idx":        {"actor_id", "occurred_at"},
 }
 
 // headVersion is the number of migrations in infra/migrations, DERIVED from the
