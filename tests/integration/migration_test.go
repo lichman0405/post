@@ -190,9 +190,14 @@ var canonicalTables = map[string]tableExp{
 		fks:     []fkExp{fk("object_id", "scientific_objects", "RESTRICT"), fk("state_id", "project_states", "RESTRICT"), fk("branch_id", "branches", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
 	},
 	"relations": {
-		cols: []colExp{c("id", u, false, true), c("project_id", u, false, false), c("created_at", ts, false, true)},
-		pk:   []string{"id"},
-		fks:  []fkExp{fk("project_id", "projects", "RESTRICT")},
+		// current_version_no is the T0203 addition (00025): the
+		// materialized head pointer that doubles as the expected_version
+		// compare-and-swap cell, exactly as 00024 does for scientific
+		// objects (T0202).
+		cols:   []colExp{c("id", u, false, true), c("project_id", u, false, false), c("created_at", ts, false, true), c("current_version_no", i4, false, true)},
+		pk:     []string{"id"},
+		checks: []string{"current_version_no >= 0"},
+		fks:    []fkExp{fk("project_id", "projects", "RESTRICT")},
 	},
 	"relation_versions": {
 		cols:    []colExp{c("id", u, false, true), c("relation_id", u, false, false), c("version_no", i4, false, false), c("state_id", u, false, false), c("relation_type", txt, false, false), c("source_object_version_id", u, false, false), c("target_object_version_id", u, false, false), c("payload", jb, false, true), c("integrity_hash", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
@@ -349,9 +354,12 @@ var explicitIndexes = map[string][]string{
 	"scientific_object_versions_payload_gin": {"USING gin", "payload"},
 	"relation_versions_source_idx":           {"source_object_version_id", "relation_type"},
 	"relation_versions_target_idx":           {"target_object_version_id", "relation_type"},
-	"search_documents_fts_idx":               {"USING gin", "to_tsvector"},
-	"search_documents_structured_gin":        {"USING gin", "structured"},
-	"organization_memberships_user_idx":      {"user_id"},
+	// T0203: the query-by-type paths join relation_versions to relations
+	// on the project boundary (migration 00025).
+	"relations_project_idx":             {"project_id"},
+	"search_documents_fts_idx":          {"USING gin", "to_tsvector"},
+	"search_documents_structured_gin":   {"USING gin", "structured"},
+	"organization_memberships_user_idx": {"user_id"},
 	// T0104: personal projects (organization_id NULL) escape the
 	// UNIQUE(organization_id, slug) constraint, so their slug uniqueness is
 	// a partial unique index instead.
