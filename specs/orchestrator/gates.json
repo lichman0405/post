@@ -193,12 +193,31 @@
           "run": "bash tests/acceptance/supervisor-git-e2e.sh"
         }
       ]
+    },
+    "gitea-real-services": {
+      "steps": [
+        {
+          "run": "bash tests/acceptance/gitea-real-services-e2e.sh"
+        }
+      ]
+    },
+    "rsg-real-services": {
+      "steps": [
+        {
+          "run": "bash tests/acceptance/rsg-real-services-e2e.sh"
+        }
+      ]
     }
   },
   "review": {
     "required_for_merge": true
   },
   "task_overrides": {
+    "T0101": {
+      "g3_jobs": [
+        "auth-real-services"
+      ]
+    },
     "T0102": {
       "g3_jobs": [
         "auth-real-services"
@@ -242,6 +261,121 @@
     "T0110": {
       "g3_jobs": [
         "auth-real-services"
+      ]
+    },
+    "T0201": {
+      "g3_jobs": [
+        "auth-real-services"
+      ]
+    },
+    "T0202": {
+      "g3_jobs": [
+        "auth-real-services"
+      ]
+    },
+    "T0203": {
+      "g3_jobs": [
+        "auth-real-services"
+      ]
+    },
+    "T0204": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0205": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0206": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0207": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0208": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0209": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0210": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0211": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0212": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0213": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0214": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0301": {
+      "g3_jobs": [
+        "gitea-real-services"
+      ]
+    },
+    "T0302": {
+      "g3_jobs": [
+        "gitea-real-services"
+      ]
+    },
+    "T0303": {
+      "g3_jobs": [
+        "gitea-real-services"
+      ]
+    },
+    "T0304": {
+      "g3_jobs": [
+        "gitea-real-services"
+      ]
+    },
+    "T0305": {
+      "g3_jobs": [
+        "gitea-real-services"
+      ]
+    },
+    "T0306": {
+      "g3_jobs": [
+        "gitea-real-services"
+      ]
+    },
+    "T0307": {
+      "g3_jobs": [
+        "gitea-real-services"
+      ]
+    },
+    "T0308": {
+      "g3_jobs": [
+        "gitea-real-services"
+      ]
+    },
+    "T0309": {
+      "g3_jobs": [
+        "gitea-real-services"
       ]
     }
   }

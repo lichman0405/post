@@ -44,10 +44,11 @@ GATES='{
   },
   "jobs": {
     "job-a": {"steps": [{"run": "echo a-ok"}]},
-    "job-b": {"steps": [{"run": "echo b-ok"}]}
+    "job-b": {"steps": [{"run": "echo b-ok"}]},
+    "job-g3": {"steps": [{"run": "echo g3-ok"}]}
   },
   "review": {"required_for_merge": false},
-  "task_overrides": {}
+  "task_overrides": {"T0001": {"g3_jobs": ["job-g3"]}}
 }'
 
 REPO="$(fg_setup_repo "$FG_SCRATCH" "$TASKS" "$GATES")" || exit 1
@@ -106,6 +107,7 @@ fg_assert_eq 0 "$FG_RC" "worker collect T0001"
 fg_run "$REPO" gate run G2 T0001
 fg_assert_eq 0 "$FG_RC" "gate run G2 T0001"
 fg_run "$REPO" task accept T0001
+[ "$FG_RC" -eq 0 ] || printf '     task accept said: %s\n' "$FG_OUT"
 fg_assert_eq 0 "$FG_RC" "task accept T0001"
 FG_OUT="$(cd "$REPO" && PATH="$FG_SCRATCH/gh-bin:$PATH" "$FG_SCRATCH/bin/rddev" pr status T0001 2>&1)"
 FG_RC=$?

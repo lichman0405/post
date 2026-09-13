@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+#
+# G3 — the RSG core path against real services (docs/67, P2/T0202+).
+#
+# The RSG is the scientific state model: objects have immutable versions,
+# versions relate to each other, and a branch advances through state commits.
+# Every one of those words is a durability and ordering claim, which is exactly
+# what an all-mock test cannot check — a fake store will happily let a version
+# mutate, or a relation point at a version from another branch.
+#
+# So this drives the real HTTP surface against real PostgreSQL (and Redis for
+# the session), along the paths specs/api/openapi.yaml already fixes — the
+# contract is openapi-first, so the paths are not a guess and this doubles as a
+# check that the implementation honours them.
+#
+# It is assigned to the P2 tasks from T0204 onward, where the whole chain
+# (object, version, relation, state transition) exists. Until then it fails
+# loudly, and that is the point: a G3 that passes vacuously certifies nothing.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+
+PG_URL="${POSTGRES_TEST_ADMIN_URL:-postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post}"
+REDIS_ADDR="${POST_G3_REDIS_ADDR:-127.0.0.1:6379}"
+API_PORT="${POST_G3_RSG_API_PORT:-18082}"
+API_ADDR="127.0.0.1:${API_PORT}"
+WEB_ORIGIN="${POST_G3_WEB_ORIGIN:-http://127.0.0.1:3000}"
+
+WORK="$(mktemp -d)"
+API_PID=""
+cleanup() {
+  [[ -n "$API_PID" ]] && kill "$API_PID" 2>/dev/null
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
+
+FAILS=0
+MISSING=()
+fail() { printf 'FAIL %s\n' "$*"; FAILS=$((FAILS+1)); }
+ok()   { printf 'ok   %s\n' "$*"; }
+
+# A Go ServeMux answers 307 for an unregistered path under a registered
+# subtree, so "not built yet" arrives looking like a redirect. Say what it
+# actually is: the list below is the P2 work list, and it is far more useful
+# than six unexplained statuses.
+served() { # served STATUS METHOD PATH
+  case "$1" in
+    200|201|202|204) return 0 ;;
+    307|404|405|501) MISSING+=("$2 $3 (unserved: $1)"); return 1 ;;
+    *) return 1 ;;
+  esac
+}
+
+if ! python3 scripts/pg-ready.py "$PG_URL" >/dev/null 2>&1; then
+  echo "G3 rsg-real-services: FAILED — no PostgreSQL accepting connections at $PG_URL (make infra-up)" >&2
+  exit 1
+fi
+if ! (exec 3<>"/dev/tcp/${REDIS_ADDR%:*}/${REDIS_ADDR#*:}") 2>/dev/null; then
+  echo "G3 rsg-real-services: FAILED — no Redis at $REDIS_ADDR (make infra-up)" >&2
+  exit 1
+fi
+exec 3<&- 2>/dev/null || true
+
+mkdir -p "$ROOT/bin/g3migrate"
+cat >"$ROOT/bin/g3migrate/main.go" <<'GOMIGRATE'
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/lichman0405/post/internal/persistence"
+)
+
+func main() {
+	if len(os.Args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: g3migrate postgres://…")
+		os.Exit(2)
+	}
+	if _, err := persistence.Migrate(context.Background(), os.Args[1]); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+GOMIGRATE
+(cd "$ROOT" && go run ./bin/g3migrate "$PG_URL") >/dev/null 2>&1 || {
+  rm -rf "$ROOT/bin/g3migrate"
+  echo "G3 rsg-real-services: FAILED — could not migrate the database with this tree's migrations" >&2
+  exit 1
+}
+rm -rf "$ROOT/bin/g3migrate"
+
+go build -o "$WORK/api" ./cmd/api >"$WORK/build.log" 2>&1 || {
+  fail "building cmd/api: $(tail -3 "$WORK/build.log")"
+  printf '\nG3 rsg-real-services: %d failure(s)\n' "$FAILS"; exit 1
+}
+
+start_api() {
+  env POST_ENV=test POST_API_ADDR="$API_ADDR" POST_REDIS_ADDR="$REDIS_ADDR" \
+      POST_DB_HOST=127.0.0.1 POST_DB_PORT=5432 POST_DB_PASSWORD=postgres_dev_pw POST_DB_SSLMODE=disable \
+      POST_BLOB_ACCESS_KEY=g3-ak POST_BLOB_SECRET_KEY=g3-sk POST_GITEA_TOKEN=g3-tok \
+      POST_WEB_ORIGIN="$WEB_ORIGIN" "$WORK/api" >>"$WORK/api.log" 2>&1 &
+  API_PID=$!
+  for _ in $(seq 1 60); do
+    curl -fsS "http://$API_ADDR/healthz" >/dev/null 2>&1 && return 0
+    kill -0 "$API_PID" 2>/dev/null || return 1
+    sleep 0.5
+  done
+  return 1
+}
+stop_api() { [[ -n "$API_PID" ]] && kill "$API_PID" 2>/dev/null; wait "$API_PID" 2>/dev/null; API_PID=""; }
+
+start_api || { fail "the API did not become healthy: $(tail -5 "$WORK/api.log")"; printf '\nG3 rsg-real-services: %d failure(s)\n' "$FAILS"; exit 1; }
+ok "real API against real PostgreSQL and Redis"
+
+JAR="$WORK/cookies.txt"
+EMAIL="g3rsg-$(date +%s)-$$@example.test"
+curl -sS -c "$JAR" -b "$JAR" -o "$WORK/signup.json" -X POST \
+  -H "Origin: $WEB_ORIGIN" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$EMAIL\",\"password\":\"g3-rsg-password\",\"handle\":\"g3rsg$$\",\"display_name\":\"G3 RSG\"}" \
+  "http://$API_ADDR/api/v1/auth/signup" >/dev/null
+CSRF="$(python3 -c "import json;print(json.load(open('$WORK/signup.json')).get('csrf_token',''))" 2>/dev/null)"
+[[ -n "$CSRF" ]] && ok "authenticated (session + CSRF)" || fail "could not sign up: $(cat "$WORK/signup.json")"
+
+# req METHOD PATH [BODY] -> body on stdout, status in $STATUS
+req() {
+  local method="$1" path="$2" body="${3:-}"
+  local args=(-sS -c "$JAR" -b "$JAR" -o "$WORK/resp.json" -w '%{http_code}'
+              -X "$method" -H "Origin: $WEB_ORIGIN" -H "X-CSRF-Token: $CSRF" -H "Idempotency-Key: g3-$RANDOM$RANDOM")
+  [[ -n "$body" ]] && args+=(-H 'Content-Type: application/json' -d "$body")
+  STATUS="$(curl "${args[@]}" "http://$API_ADDR/api/v1$path")"
+}
+jq_get() { python3 -c "import json,sys;d=json.load(open('$WORK/resp.json'));print(d$1)" 2>/dev/null; }
+
+# --- project -----------------------------------------------------------------
+req POST /projects "{\"name\":\"G3 RSG\",\"slug\":\"g3-rsg-$$\",\"visibility\":\"private\",\"purpose\":\"integration\"}"
+[[ "$STATUS" == "201" || "$STATUS" == "200" ]] || fail "create project -> $STATUS: $(head -c 200 "$WORK/resp.json")"
+PROJECT="$(jq_get "['id']")"
+[[ -n "$PROJECT" ]] && ok "created a project" || fail "no project id in the response"
+
+# --- branch ------------------------------------------------------------------
+req POST "/projects/$PROJECT/branches" '{"name":"main"}'
+if [[ "$STATUS" == "201" || "$STATUS" == "200" ]]; then ok "created a research branch"; else fail "create branch -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
+BRANCH="$(jq_get "['id']")"
+
+# --- object + immutable version ---------------------------------------------
+req POST "/projects/$PROJECT/branches/$BRANCH/objects" '{"type":"material","data":{"name":"MOF-5"}}'
+if served "$STATUS" POST "/projects/{id}/branches/{id}/objects"; then ok "created a scientific object"; else fail "create object -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
+OBJECT="$(jq_get "['id']")"
+V1="$(jq_get "['version_id']")"
+
+req POST "/projects/$PROJECT/branches/$BRANCH/objects/$OBJECT:version" '{"data":{"name":"MOF-5","surface_area_m2_g":3800}}'
+if served "$STATUS" POST "/projects/{id}/branches/{id}/objects/{id}:version"; then ok "created a second version (a state transition, not a mutation)"; else fail "create version -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
+V2="$(jq_get "['version_id']")"
+[[ -n "$V1" && -n "$V2" && "$V1" != "$V2" ]] \
+  && ok "the two versions have distinct identities" \
+  || fail "the second version did not produce a new identity (v1=$V1 v2=$V2) — versions are being mutated in place"
+
+# --- relation ----------------------------------------------------------------
+req POST "/projects/$PROJECT/branches/$BRANCH/relations" "{\"source_object_version_id\":\"$V2\",\"target_object_version_id\":\"$V1\",\"type\":\"derived_from\"}"
+if served "$STATUS" POST "/projects/{id}/branches/{id}/relations"; then ok "created a typed relation between two versions"; else fail "create relation -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
+
+# --- validation gate ---------------------------------------------------------
+req POST "/projects/$PROJECT/branches/$BRANCH:validate" '{}'
+case "$STATUS" in
+  200|201|202) ok "the branch validates (:validate) -> $STATUS" ;;
+  *) fail ":validate -> $STATUS: $(head -c 200 "$WORK/resp.json")" ;;
+esac
+
+# --- durability of history ---------------------------------------------------
+stop_api
+start_api || fail "the API did not come back up after a restart"
+req GET "/projects/$PROJECT/branches/$BRANCH/objects/$OBJECT"
+if [[ "$STATUS" == "200" ]]; then
+  CUR="$(jq_get "['version_id']")"
+  [[ "$CUR" == "$V2" ]] \
+    && ok "the object's current version survived an API restart" \
+    || fail "the current version changed across a restart ($CUR != $V2)"
+else
+  fail "re-reading the object after a restart -> $STATUS"
+fi
+
+printf '\n'
+if (( FAILS )); then
+  if (( ${#MISSING[@]} )); then
+    printf 'The following paths from specs/api/openapi.yaml are not served yet —\n'
+    printf 'P2 builds them, and this gate is assigned from the task that completes the chain:\n'
+    printf '  - %s\n' "${MISSING[@]}"
+  fi
+  printf 'G3 rsg-real-services: %d failure(s)\n' "$FAILS"
+  exit 1
+fi
+printf 'G3 rsg-real-services: all checks passed against real PostgreSQL and Redis\n'

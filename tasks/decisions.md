@@ -2198,3 +2198,65 @@ Worker 对 `specs/` 的写入**只有一条路**：
 
 规则同时写入 **`CLAUDE.md` §8.1** 与 **`docs/53_DATABASE_STANDARD.md`** ✓——
 不是留在我的记忆里，而是留在下一个人会读到的地方。
+
+## L1-20260913-3 — ★★ Phase Boundary Hardening 3/4：P2/P3 的真实 G3，以及"没有 G3"不再是默认
+
+### (a) P3 / Gitea：真实验证**实例的能力**，在任何 P3 代码之前就抓到一个环境缺口
+
+`tests/acceptance/gitea-real-services-e2e.sh` 对**真实 Gitea 实例**验证 P3 依赖的三件事：
+仓库供给、main 的双层保护、push webhook 投递 ✓。
+
+**它当场抓到一个真实缺口**——而且是在**写完任何 P3 代码之前**：
+
+```
+services/webhook: unable to deliver webhook task[7] in http://172.17.0.1:18099/hook
+due to error in http.client: webhook can only call allowed HTTP servers
+(check your security.ALLOWED_HOST_LIST setting), deny '172.17.0.1'
+```
+
+dev 栈的 Gitea **默认拒绝一切 webhook 目标** ✓，而 **T0305 的语义摄入依赖 push webhook** ✓。
+已在 `docker-compose.yml` 设 `GITEA__security__ALLOWED_HOST_LIST: "loopback,private"`
+（**不是 `*`** ✓：该栈只绑定 127.0.0.1 ✓）。
+
+**保护被验证为"性质"而不是"设置"** ✓：不只断言 API 回读 `enable_push=false`，
+还要**真的往受保护的 main 推一次并断言被拒** ✓——
+"配置了但没生效"正是这一类集成最容易骗过测试的形态。
+
+### (b) P2 / RSG：真实 PostgreSQL + Redis，按 **OpenAPI 契约的路径**驱动
+
+`tests/acceptance/rsg-real-services-e2e.sh` 走 object → version → relation → state transition ✓，
+并在**重启 API 之后重新读取**以证明历史是持久的、当前版本是状态迁移而不是就地修改 ✓。
+
+路径直接取自 `specs/api/openapi.yaml` ✓（openapi-first ✓）——因此它**同时**在检查实现有没有兑现契约 ✓。
+它现在**故意为红** ✓，并把原因说清楚：
+
+```
+The following paths from specs/api/openapi.yaml are not served yet —
+P2 builds them, and this gate is assigned from the task that completes the chain:
+  - POST /projects/{id}/branches/{id}/objects (unserved: 307)
+  - POST /projects/{id}/branches/{id}/objects/{id}:version (unserved: 307)
+  - POST /projects/{id}/branches/{id}/relations (unserved: 307)
+```
+
+**Go 的 ServeMux 对已注册子树下的未注册路径回 307** ✓，所以"还没做"看起来像"重定向"——
+脚本把它翻译成**P2 的工作清单** ✓。**一个说不出原因的失败只会把定位成本转嫁给下一个人。**
+
+### (c) 让"没有 G3 job"在结构上不可能成为默认
+
+两处机械化，而不只是记一条纪律：
+
+1. **测试**（读**真实 DAG + 真实 spec**）：P1–P3 的**每一个**任务都必须在 tasks.json 里有 G3 ✓；
+   并断言 G3 专属 job 没有泄漏进 `required_jobs` ✓、且它引用的脚本**确实存在** ✓
+   （否则会在 accept 那一刻才炸 ✓ 太晚）。
+   还断言 `task_overrides` 不能为空 ✓——**这正是当初 132 个任务全部 vacuous 的成因** ✓。
+2. **spawn 拒绝** ✓：`requirePhaseG3Coverage` —— 若某任务的**整个 phase 没有任何 G3 job**，
+   则**拒绝 dispatch** ✓，理由是"该 phase 会在纯 mock 下开发、每个任务都以 G3=not_required 被接受" ✓。
+   这个检查刻意针对 **phase**（边界是以 phase 划的 ✓），并且**以 sibling 覆盖为准** ✓
+   （T0201 自己不需要 G3，只要本 phase 有 ✓）。
+
+**两处都由测试双向验证** ✓（`TestDispatchRefusesAPhaseWithNoRealServicesGate`：
+无 G3 必须拒绝 ✓；sibling 有 G3 必须放行 ✓）。
+
+**分配**：P3 全部 9 个任务 → `gitea-real-services` ✓；P2 的 T0204–T0214 → `rsg-real-services`
+（链在 T0204 完成 ✓）；T0201–T0203 → `auth-real-services`（真实回归门 ✓）。
+**"暂时没有 G3"不再是任何任务的默认状态** ✓。

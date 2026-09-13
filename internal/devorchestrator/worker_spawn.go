@@ -168,6 +168,16 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 
 	// 4) Render the task package and validate it against the schema the repo
 	// itself carries (no embedded copy to drift).
+	// A phase must have a real-services gate before any of its tasks run.
+	//
+	// G3 was vacuous for all 132 tasks because task_overrides started empty,
+	// and nothing noticed: every task was simply accepted with G3 recorded as
+	// not_required. That is how an entire phase ships with no integration gate,
+	// and it is invisible in every individual task's evidence. Refusing the
+	// dispatch is the only place the default can be made impossible.
+	if err := requirePhaseG3Coverage(repoRoot, DefaultGatesPath, DefaultDAGPath, taskSpec); err != nil {
+		return nil, err
+	}
 	pkg, err := RenderTaskPackage(taskSpec, baseline, opts.MaxTurns, opts.MaxBudgetUSD)
 	if err != nil {
 		return nil, err
@@ -790,4 +800,47 @@ func RespawnWorker(opts *SpawnOpts) (*SpawnResult, error) {
 	opts.FromState = StateRejected
 	opts.ResetWorktree = true
 	return Spawn(opts)
+}
+
+// requirePhaseG3Coverage refuses to dispatch a task whose phase has no G3 job
+// anywhere in it.
+//
+// Not "this task has no G3" — some tasks legitimately need none — but "this
+// PHASE has none", which means every task in it would be accepted against
+// nothing but its own mocks. The check is deliberately about the phase because
+// that is the unit a boundary is drawn at: the checkpoint before P2/P3 wired
+// real RSG and real Gitea gates precisely so that "there is no G3 job yet"
+// could not be the default they were developed under.
+func requirePhaseG3Coverage(repoRoot, gatesPath, dagPath string, task *TaskSpec) error {
+	if task == nil {
+		return nil
+	}
+	spec, err := gateSpecAt(repoRoot, gatesPath)
+	if err != nil {
+		// No gate spec at all: a scratch repository, not a phase under
+		// development. Nothing to enforce here — and every other gate refuses
+		// without a spec anyway, so this cannot become a way past one.
+		// errors.Is, not os.IsNotExist: gateSpecAt wraps the read error, and
+		// the unwrapping form is the one that sees through the wrap.
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	dag, err := LoadDAG(dagPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	for _, other := range dag.Tasks {
+		if other.Phase != task.Phase {
+			continue
+		}
+		if jobs, err := spec.JobsForGate("G3", other.ID); err == nil && len(jobs) > 0 {
+			return nil
+		}
+	}
+	return fmt.Errorf("phase %s has no G3 job for any of its tasks: dispatching %s would develop the whole phase against mocks, with every task accepted against G3=not_required. Wire the phase's real-services gate first (specs/orchestrator/gates.json task_overrides)", task.Phase, task.ID)
 }
