@@ -376,10 +376,14 @@ func TestMarkerResidueFindsEnvAttributedChild(t *testing.T) {
 	// the scrubbed one. Reading during that window observes `env`, which
 	// genuinely does carry the marker — and the detector is right to attribute
 	// it, because "this process carries the marker" is the rule. So the race is
-	// in this fixture's assumption, not in the detector: the window is tiny and
-	// load-dependent, which is why it passed on a developer machine and failed
-	// on a loaded CI runner.
-	waitForEnvironWithoutMarker(t, scrubbed.Process.Pid, "POST_WORKER_RUN_ID="+runID)
+	// in this fixture's assumption, not in the detector.
+	//
+	// Waiting for the marker to be absent was not enough to close it: inside
+	// execve /proc/<pid>/environ reads as a successful EMPTY read, and an empty
+	// file has no marker in it. The wait returned with `env` still running, and
+	// the scan then attributed the marker the fixture was about to scrub. This
+	// waits for the exec itself. See waitForExecWithoutMarker.
+	waitForExecWithoutMarker(t, scrubbed.Process.Pid, "sleep", "POST_WORKER_RUN_ID="+runID)
 
 	startTicks, err := procStartTicks(marked.Process.Pid)
 	if err != nil {
@@ -466,31 +470,118 @@ func TestMovingAnExistingRefIsNotANewRef(t *testing.T) {
 	}
 }
 
-// waitForEnvironWithoutMarker blocks until pid's environment no longer carries
-// marker, or fails. It waits for the condition the test actually depends on
-// rather than assuming it, and a fixture that never scrubs its environment
-// fails here with a message that says so instead of surfacing later as a
-// confusing attribution failure.
-func waitForEnvironWithoutMarker(t *testing.T, pid int, marker string) {
+// firstArgv returns argv[0] from a /proc/<pid>/cmdline read. The file is
+// NUL-separated with no terminator, and reads as EMPTY in a window INSIDE
+// execve — after the new image's mm has been installed and before its argv and
+// environment have been published there. The two do not become readable at the
+// same instant: the wait this replaces was observed returning with argv[0]
+// reading `env` — the exec of `env` is over — while the environment still read
+// empty, which is the same window seen one step later.
+//
+// That window is not the pre-exec state, and saying it was is worth correcting
+// rather than conserving: a forked child that has not exec'd reads its PARENT's
+// cmdline and its PARENT's environment (measured by hand — a child forked from
+// python3 and left sleeping before its exec read `python3\x00-\x00` and 5506
+// environment bytes, marker included).
+//
+// Start() returning is no promise that the exec is over, either. Measured over
+// 200 `env -i … sleep 30` children started the way the fixture starts them, the
+// first read taken right after Start() returned was empty 81 times, still `env`
+// with the parent's environment in place 87 times, and already `sleep` 32 times.
+// The window recurs at EVERY exec, the child's own included — which is why the
+// gate below has to be argv[0] rather than any amount of waiting.
+func firstArgv(cmdline []byte) string {
+	if i := bytes.IndexByte(cmdline, 0); i >= 0 {
+		return string(cmdline[:i])
+	}
+	return string(cmdline)
+}
+
+// environIsScrubbed reports whether an /proc/<pid>/environ read is EVIDENCE that
+// marker has been scrubbed from pid's environment.
+//
+// An empty read is not evidence, and reading it as evidence is the whole defect
+// this function exists to make unrepresentable. Inside execve
+// /proc/<pid>/environ reads as a SUCCESSFUL read of zero bytes; there is no
+// marker in an empty file, so "is the marker gone?" answers yes before the child
+// has run at all. The wait below read exactly that and returned, and the scan a
+// few hundred microseconds later read the marker the fixture was about to scrub
+// — which is the attribution failure the test exists to catch, reported against
+// the fixture that was supposed to prevent it.
+//
+// It is not a hypothetical window. Measured on this machine over 200 `env -i …
+// sleep 30` children started the way the fixture starts them: the first read
+// taken right after Start() returned was empty 81 times, and a probe polling
+// through the window caught it at a median of 29.5us, a p90 of 118us and a
+// maximum of 2.0ms. Of the 123 windows that probe caught, the next non-empty
+// read was `env` 102 times, with the parent's environment — marker included —
+// still in place, which is the attribution the scan then makes.
+func environIsScrubbed(environ []byte, marker string) bool {
+	if len(environ) == 0 {
+		return false
+	}
+	for _, kv := range bytes.Split(environ, []byte{0}) {
+		if string(kv) == marker {
+			return false
+		}
+	}
+	return true
+}
+
+// waitForExecWithoutMarker blocks until pid is running want with an environment
+// that no longer carries marker, or fails naming which half was not reached.
+//
+// The condition is the one the fixture actually depends on, which is that the
+// exec HAS HAPPENED — not merely that a marker-free environment was observed
+// once. cmdline is read BEFORE environ on purpose: they are separate reads at
+// separate instants, so the exec has to be established first for a marker-free
+// environment to be a statement about anything.
+//
+// `want` is compared against argv[0] EXACTLY, so it is the name the program is
+// exec'd as and not a path to it: a caller passing `/usr/bin/sleep` for a
+// process whose argv[0] is `sleep` waits out the whole deadline, with a message
+// that keeps saying the exec has not happened.
+func waitForExecWithoutMarker(t *testing.T, pid int, want, marker string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
+	why := "nothing was readable"
 	for time.Now().Before(deadline) {
-		environ, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
-		if err == nil {
-			has := false
-			for _, kv := range bytes.Split(environ, []byte{0}) {
-				if string(kv) == marker {
-					has = true
-					break
-				}
-			}
-			if !has {
-				return
-			}
+		cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+		if err != nil {
+			why = err.Error()
+			time.Sleep(2 * time.Millisecond)
+			continue
 		}
+		if argv0 := firstArgv(cmdline); argv0 != want {
+			why = fmt.Sprintf("argv[0] reads %q, not %q yet — the exec has not happened", argv0, want)
+			time.Sleep(2 * time.Millisecond)
+			continue
+		}
+		environ, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
+		if err != nil {
+			why = err.Error()
+			time.Sleep(2 * time.Millisecond)
+			continue
+		}
+		if environIsScrubbed(environ, marker) {
+			return
+		}
+		// argv[0] reads `want` and the environment is EMPTY: that is the window
+		// inside the exec, not a scrubbed environment, and not a marker-carrying
+		// one either. Saying "it still carries the marker" here would be false,
+		// and it is the message a reader would have to trust — a fixture that
+		// really does run with no environment at all reaches this state too, and
+		// this wait cannot tell the two apart.
+		if len(environ) == 0 {
+			why = "its environment reads EMPTY, which is either an exec still in progress or a fixture that genuinely runs with no environment — this wait cannot tell those apart"
+			time.Sleep(2 * time.Millisecond)
+			continue
+		}
+		why = fmt.Sprintf("its environment still carries %s", marker)
 		time.Sleep(2 * time.Millisecond)
 	}
-	t.Fatalf("pid %d still carries %s after 10s — the fixture was supposed to scrub it before exec", pid, marker)
+	t.Fatalf("pid %d did not reach `%s` with %s scrubbed within 10s: %s — this is the fixture failing to reach the state the test asserts about, not the detector misreading it",
+		pid, want, marker, why)
 }
 
 // A ref is attributed to the Supervisor by RECORD, not by the identity its
@@ -576,5 +667,93 @@ func TestAForgedCommitIdentityDoesNotLaunderANewRef(t *testing.T) {
 	})
 	if len(got) != 1 || !strings.HasPrefix(got[0], "refs/heads/someone-elses") {
 		t.Errorf("an unrecorded ref was not reported: %v", got)
+	}
+}
+
+// TestAnEmptyEnvironIsNotEvidenceOfAScrubbedOne pins the reading that made the
+// residue fixture flake: /proc/<pid>/environ answers the "is the marker gone?"
+// question with YES before the child has exec'd, because the file is empty then.
+// Each case below is a byte shape measured off a real process.
+func TestAnEmptyEnvironIsNotEvidenceOfAScrubbedOne(t *testing.T) {
+	const marker = "POST_WORKER_RUN_ID=run-test-marker"
+
+	// Between fork and execve — a successful read of zero bytes. Accepting this
+	// is what let the wait return before the child ran.
+	if environIsScrubbed([]byte{}, marker) {
+		t.Errorf("an empty environ was accepted as evidence that %s had been scrubbed — it is the shape of a process that has not exec'd yet, and the scan that follows attributes exactly the marker this was supposed to see gone", marker)
+	}
+	// Still `env`, marker intact: not scrubbed, whatever it is asked.
+	if environIsScrubbed([]byte("PATH=/a\x00"+marker+"\x00"), marker) {
+		t.Errorf("an environ holding %s was accepted as scrubbed", marker)
+	}
+	// The real post-exec state: `env -i PATH=/usr/bin:/bin sleep` — non-empty,
+	// no marker. This must keep being accepted or the wait never returns.
+	if !environIsScrubbed([]byte("PATH=/usr/bin:/bin\x00"), marker) {
+		t.Errorf("the scrubbed environment was rejected — the wait would spin to its deadline on a fixture that did everything right")
+	}
+	// The comparison is of WHOLE NUL-separated entries, as execve leaves them —
+	// the same delimiter rule as pathMatchesScope above. Text that merely
+	// contains the marker inside another variable is not the marker, and a
+	// near-miss name is not one either. Both of these are environments with no
+	// marker in them, so the wait has to be able to return on them; treating
+	// either as the marker would spin it to its deadline on a fixture that had
+	// done everything right.
+	if !environIsScrubbed([]byte("NOTE=see POST_WORKER_RUN_ID=run-test-marker\x00"), marker) {
+		t.Errorf("the marker appearing inside another variable's value was read as the marker itself")
+	}
+	if !environIsScrubbed([]byte("POST_WORKER_RUN_ID=run-test-marke\x00"), marker) {
+		t.Errorf("a name one byte short of the marker was read as the marker")
+	}
+}
+
+// TestFirstArgvReadsAnEmptyCmdlineAsNoProgram keeps the other half honest: a
+// read taken inside an exec window is empty, so firstArgv must not answer "env"
+// or "" in a way that would let the wait conclude the exec had happened.
+func TestFirstArgvReadsAnEmptyCmdlineAsNoProgram(t *testing.T) {
+	if got := firstArgv(nil); got != "" {
+		t.Errorf("an empty cmdline read as %q — an empty read names no program, whatever the process is in the middle of becoming", got)
+	}
+	if got := firstArgv([]byte("sleep\x0030\x00")); got != "sleep" {
+		t.Errorf("argv[0] of `sleep 30` read as %q", got)
+	}
+	if got := firstArgv([]byte("env\x00-i\x00PATH=/usr/bin:/bin\x00sleep\x0030\x00")); got != "env" {
+		t.Errorf("argv[0] of the pre-scrub `env` read as %q — the wait must not accept it", got)
+	}
+}
+
+// TestTheScrubWaitReturnsOnlyAfterTheExec is the end-to-end half, and the one
+// that would have caught the defect in CI: run the real fixture and assert that
+// when the wait returns, the process is running the program the fixture meant it
+// to be running. The loop is what makes it deterministic rather than lucky —
+// measured on this machine, 81 of 200 first reads taken after Start() returned
+// landed inside the exec window, so a wait that accepted an empty read returns
+// pre-exec in two trials out of five, and ten trials leave it about a 1-in-160
+// chance of passing by luck.
+func TestTheScrubWaitReturnsOnlyAfterTheExec(t *testing.T) {
+	const runID = "run-test-marker"
+	for trial := 0; trial < 10; trial++ {
+		cmd := exec.Command("env", "-i", "PATH=/usr/bin:/bin", "sleep", "30")
+		cmd.Env = append(os.Environ(), "POST_WORKER_RUN_ID="+runID)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		// The t.Fatal above and the wait's own t.Fatalf both unwind past the
+		// kill at the end of the trial, so without this a failure leaves `env`
+		// and its `sleep 30` behind for the rest of the run. On the path that
+		// does reach the kill, this second one finds no process and its error is
+		// discarded.
+		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+		waitForExecWithoutMarker(t, cmd.Process.Pid, "sleep", "POST_WORKER_RUN_ID="+runID)
+
+		cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", cmd.Process.Pid))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := firstArgv(cmdline); got != "sleep" {
+			t.Errorf("trial %d: the wait returned with argv[0] = %q — it accepted a read taken inside an exec window, which is the state the scan then attributes", trial, got)
+		}
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 	}
 }

@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -265,17 +267,53 @@ func TestWorkerCollectRejectsResidue(t *testing.T) {
 func TestWorkerCollectSurfacesDaemonizedListener(t *testing.T) {
 	fakeClaudePath(t, "listener")
 	t.Setenv("FAKE_CLAUDE_SECONDS", "1")
-	t.Setenv("FAKE_CLAUDE_PORT", "18981")
+	// Both ports are chosen from what the kernel says is free. They used to be
+	// 18981 and 18982, and a constant here is a claim about the whole machine.
+	// What a foreign holder does depends on WHICH of the two it takes, and the
+	// two are not the same failure — measured, not reasoned:
+	//
+	//   - the fixture's own port: the daemonized listener cannot bind, so
+	//     nothing appears during the run and the test fails on "daemonized
+	//     listener not surfaced" — a red for a reason that is not the code. Seen
+	//     with a `python3 -m http.server 18981` holding it.
+	//   - the pre-existing listener's port: python exits ("Address already in
+	//     use") and the test still PASSES — but that pass is NOT vacuous, and a
+	//     previous version of this comment said it was. The holder is in the
+	//     spawn baseline, so the negative assertion below is live against it —
+	//     when it binds loopback, which is the address form the assertion greps
+	//     for. Disabling the baseline subtraction makes the run fail on "the
+	//     pre-existing listener … was flagged", on the holder. What is lost is
+	//     narrower — the listener being asserted about is not the one this test
+	//     started. Seen with a holder on 18982: the pre-fix test reported ok.
+	//
+	// Asking the kernel closes the first. The wait below closes the third case,
+	// which IS the vacuous one: nothing holds the port and the fixture's python
+	// fails for any reason, so nothing is listening at the baseline, the
+	// assertion below cannot fail, and the run is green having proved nothing.
+	// Measured with a stub python3 that cannot serve: without the wait the test
+	// reported ok; with it, the run is abandoned rather than reported green.
+	ports := freePorts(t, 2)
+	port, prePort := ports[0], ports[1]
+	t.Setenv("FAKE_CLAUDE_PORT", strconv.Itoa(port))
 	repo := fakeRepo(t)
 	killPidFromFile(t, repo, "T0001", "listener.pid")
 
 	// a pre-existing listener (started before spawn) must stay unflagged
-	pre := exec.Command("python3", "-m", "http.server", "18982", "--bind", "127.0.0.1")
+	pre := exec.Command("python3", "-m", "http.server", strconv.Itoa(prePort), "--bind", "127.0.0.1")
 	if err := pre.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = pre.Process.Kill() })
-	time.Sleep(300 * time.Millisecond) // let the pre-existing server bind
+	// Wait for it to be REACHABLE, not for a fixed delay to pass. This is the
+	// negative half's whole premise: if nothing is listening here, the
+	// assertion below cannot fail and therefore proves nothing. A sleep was
+	// also a bet on how fast python binds — measured at 92-242ms idle, against
+	// a baseline taken roughly half a second after the spawn — and losing that
+	// bet would report this fixture's own late bind as the product flagging a
+	// pre-existing listener. Dialing answers the question directly.
+	if err := waitForListener(prePort, 10*time.Second); err != nil {
+		t.Fatalf("the pre-existing listener never came up on 127.0.0.1:%d (%v) — this test's negative half needs a listener that really exists before the spawn, so the run is abandoned rather than reported green", prePort, err)
+	}
 
 	spawnAndWaitExited(t, repo, "T0001")
 	code, out, errOut := collectCLI(t, repo, "T0001")
@@ -285,11 +323,112 @@ func TestWorkerCollectSurfacesDaemonizedListener(t *testing.T) {
 	if !strings.Contains(out, "collect ok") {
 		t.Errorf("collect output missing clean verdict:\n%s", out)
 	}
-	if !strings.Contains(out, "listener appeared during the run") || !strings.Contains(out, "18981") {
+	// The whole address, not the number: `:1898` is a prefix of `:18981`, so a
+	// one-number check can be satisfied by the other listener's port. The form
+	// is what /proc/net/tcp prints — loopback in hex, the port in decimal.
+	if !strings.Contains(out, "listener appeared during the run") || !strings.Contains(out, "0100007F:"+strconv.Itoa(port)) {
 		t.Errorf("daemonized listener not surfaced:\n%s", out)
 	}
-	if strings.Contains(out, "18982") {
-		t.Errorf("pre-existing listener 18982 was flagged — the spawn baseline comparison over-blocks:\n%s", out)
+	if strings.Contains(out, "0100007F:"+strconv.Itoa(prePort)) {
+		t.Errorf("the pre-existing listener %d was flagged — the spawn baseline comparison over-blocks:\n%s", prePort, out)
+	}
+}
+
+// freePorts asks the kernel for n ports nothing is holding, for a test that
+// needs a real listener on a number it can name to the fixture and then look
+// for in the output. Binding :0 and closing is the only way to ask; the port is
+// free when it is asked for, which is what these tests need and what a constant
+// does not give them.
+//
+// The n sockets are held at once and closed together, so the returned ports are
+// pairwise distinct. Asking twice in sequence could return a number the kernel
+// had just handed back, and this fixture needs two listeners that are not each
+// other: the pre-existing one must not be sitting on the port the Worker's
+// daemonized listener is about to claim.
+//
+// The contract is check-then-use: a port is free at the instant it is asked for
+// and nothing keeps it free. What closes the window is not this function but
+// waitForListener below, which proves the listener a caller started is actually
+// there — reuse this for a port that must stay free across a longer stretch,
+// and the window reopens wherever it is used.
+func freePorts(t *testing.T, n int) []int {
+	t.Helper()
+	held := make([]net.Listener, 0, n)
+	defer func() {
+		for _, l := range held {
+			// Closing a fresh listener does not fail; if it ever did, failing
+			// the test here would abort this loop and leave the rest of the
+			// sockets open for the remainder of the run. Cleanup is not the
+			// assertion — the second half of the test is what catches a port
+			// that was not really free.
+			_ = l.Close()
+		}
+	}()
+	ports := make([]int, 0, n)
+	for range n {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, l)
+		ports = append(ports, l.Addr().(*net.TCPAddr).Port)
+	}
+	return ports
+}
+
+// waitForListener blocks until something accepts a connection on 127.0.0.1:port
+// or the timeout expires. It answers "is a listener really there?", which a
+// sleep can only guess at — and which a test that asserts "this listener was not
+// flagged" has to know, since the assertion is vacuously true when nothing is
+// listening.
+func waitForListener(port int, timeout time.Duration) error {
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+	deadline := time.Now().Add(timeout)
+	var last error
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 250*time.Millisecond)
+		if err == nil {
+			// The close result is not this function's question: the contract is
+			// "nil only when something accepted", and returning Close's error
+			// would report a successful accept as "nothing came up".
+			_ = conn.Close()
+			return nil
+		}
+		last = err
+		time.Sleep(20 * time.Millisecond)
+	}
+	if last == nil {
+		last = fmt.Errorf("nothing accepted on %s", addr)
+	}
+	return fmt.Errorf("nothing accepted on %s within %s (last attempt: %w)", addr, timeout, last)
+}
+
+// TestWaitForListenerTellsListeningFromNotListening pins the helper's two
+// answers, because the whole point of the wait is that "no listener" must not
+// read as success: a version that returned nil for a dead port would restore
+// exactly the silent vacuity this test exists to prevent.
+func TestWaitForListenerTellsListeningFromNotListening(t *testing.T) {
+	up := freePorts(t, 1)[0]
+	l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(up))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	if err := waitForListener(up, 2*time.Second); err != nil {
+		t.Errorf("a port with a live listener: %v, want nil", err)
+	}
+
+	down := freePorts(t, 1)[0]
+	start := time.Now()
+	err = waitForListener(down, 300*time.Millisecond)
+	if err == nil {
+		t.Fatalf("port %d has no listener, but the wait reported success", down)
+	}
+	if elapsed := time.Since(start); elapsed < 250*time.Millisecond {
+		t.Errorf("the wait gave up after %s, before its 300ms deadline — it must keep trying, not fail fast", elapsed)
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(down)) {
+		t.Errorf("the error does not name the port it waited on: %v", err)
 	}
 }
 

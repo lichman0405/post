@@ -898,9 +898,12 @@
       ]
     },
     "T0201": {
-      "status": "running",
-      "started_at": "2026-09-13T04:49:53Z",
-      "worker_run_id": "run-0f223220a18cc689",
+      "status": "merged",
+      "started_at": "2026-09-13T13:21:01Z",
+      "worker_run_id": "run-fdba5586c788874e",
+      "accepted_by_supervisor_at": "2026-09-13T14:06:20Z",
+      "merged_at": "2026-09-13T15:27:35Z",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（42379ea3f510），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 specs/SPEC_VERSION.json（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
       "history": [
         {
           "from": "todo",
@@ -914,35 +917,254 @@
           "at": "2026-09-13T04:49:53Z",
           "run_id": "run-0f223220a18cc689",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T05:28:18Z",
+          "run_id": "run-1b0443048716eb3c",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-13T05:48:18Z",
+          "run_id": "run-e0d259aed2226a73",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n**经过**：你的交付在本地的合并态 G2 上被拒，原因是**你的改动无法应用到当前 main**：\n```\ngit apply … patch failed: specs/SPEC_VERSION.json:1\n```\n**这是 Gate 在正确工作** ✓：G2 现在验证的是\"**当前 main + 本任务完整改动**\"，\n而不是你 worktree 里那棵孤立的树 ✓。在你运行期间，**我**为了让每个 phase 都有真实服务门，\n改了 `specs/orchestrator/gates.json` ✓，因此 `specs/SPEC_VERSION.json` 的期望值变了 ✓ ——\n**与你无关** ✓。\n\n**Supervisor 已完成**：\n- 你的任务分支已 **merge 当前 main** ✓；\n- 你的完整改动（38 个文件）**原样重新应用** ✓，**改动集合逐个文件比对：完全一致** ✓；\n- 唯一被排除的是 `specs/SPEC_VERSION.json` ✓ ——它是**生成物** ✓，\n  已在你合并后的树上**重新生成** ✓（文本冲突对生成物没有意义 ✓，正确做法是重算 ✓）。\n\n【你要做的（很少）】\n1. 在合并后的树上重跑 required tests（`schema unit` 等）+ `make check-schema-drift` +\n   `make test-integration`，确认没有因合并而失效；\n2. 确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed；覆盖任务要求的条目带 `label`）；\n3. 若一切照旧，原样重新提交 RESULT.json（更新 evidence 的命令输出更佳）。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T05:48:18Z",
+          "run_id": "run-df896dae35c530ad",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-13T06:03:15Z",
+          "run_id": "run-c5350109764f466d",
+          "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/feat/rebaseline 4756c335762e04538eb1a169633c35cbb2db67c2 — creating refs is Git control-plane"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T06:18:36Z",
+          "run_id": "run-281c23c6a5956602",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T06:24:21Z",
+          "run_id": "run-0f6a63f2e0682f96",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-13T13:21:01Z",
+          "run_id": "run-3fb519141f27c006",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（42379ea3f510），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 specs/SPEC_VERSION.json（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T13:21:01Z",
+          "run_id": "run-fdba5586c788874e",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T13:26:55Z",
+          "run_id": "run-35a39ffb5122637a",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-13T14:06:20Z",
+          "run_id": "run-67abd67da6bc4ff2"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-13T15:27:35Z",
+          "run_id": "run-150d5fad3dd126c2",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0202": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "merged",
+      "started_at": "2026-09-13T16:12:13Z",
+      "worker_run_id": "run-dc51b7bd7f3fc800",
+      "accepted_by_supervisor_at": "2026-09-13T16:30:50Z",
+      "merged_at": "2026-09-13T16:34:10Z",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上把同一份交付重新验证并重新提交】\n\n你的交付**已被独立 review 批准**（verdict = approve），代码本身没有问题。\n被拒的唯一原因是：main 前进了，你的改动无法再原样应用到当前 main。\n\n    落实后重跑 accept 的实测：\n    git apply /tmp/post-integration-T0202.patch\n      → exit status 1: patch failed: specs/SPEC_VERSION.json:1\n         patch does not apply\n\n**只有 `specs/SPEC_VERSION.json` 这一个文件对不上**，而它是 §8.1 规定的**生成物**\n（`infra/migrations/**` 的 derived artifact），不是你的判断。main 的输入变了，\n你在自己基线上重新生成的那份摘要就不再描述合并后的树 —— 合并后的正确值既不等于\n你的、也不等于 main 的，只能**在合并后的树上重新生成**。\n\nSupervisor 已用 `rddev rebaseline` 把你的任务分支推进到当前 main，并按规矩\n**重新生成**派生工件（不手工合文本）。\n\n**请你做的事：**\n1. 在新基线上确认你原有的全部改动仍然完整（25 个文件）。\n2. 按 `scripts/gen_schema_snapshot.py` / `make sync-schemas` 的既定路径**重新生成**\n   `specs/database/postgres.sql` 与 `specs/SPEC_VERSION.json`，不要手工编辑。\n3. 重跑你 RESULT.json 里列出的测试与两条 acceptance criteria，确认结论不变。\n4. 只报告差异；**不要把已批准的实现改掉**。如果新基线上某项判断必须改变，\n   在 RESULT.json 里明确写出来并说明原因，不要沉默地改。\n\n**另外一条本次刚修好的 orchestrator 缺陷（与你的交付无关，不必处理）：**\nG2 建集成树时用的 patch 曾被 `strings.TrimSpace` 截掉末尾的空白上下文行，\n导致 `git apply` 报 `corrupt patch`。已修复。所以你现在看到的错误信息如果\n仍然提到 \"corrupt patch\"，请立刻上报；正常情况下它只会是上面那条 patch failed。\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-13T15:27:37Z",
+          "run_id": "run-b5c85aa062e0380a"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-13T15:27:42Z",
+          "run_id": "run-29326633d0310ba4",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T15:57:58Z",
+          "run_id": "run-703b9771cb6408d6",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-13T16:12:12Z",
+          "run_id": "run-7bbd1576950f0ae7",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上把同一份交付重新验证并重新提交】\n\n你的交付**已被独立 review 批准**（verdict = approve），代码本身没有问题。\n被拒的唯一原因是：main 前进了，你的改动无法再原样应用到当前 main。\n\n    落实后重跑 accept 的实测：\n    git apply /tmp/post-integration-T0202.patch\n      → exit status 1: patch failed: specs/SPEC_VERSION.json:1\n         patch does not apply\n\n**只有 `specs/SPEC_VERSION.json` 这一个文件对不上**，而它是 §8.1 规定的**生成物**\n（`infra/migrations/**` 的 derived artifact），不是你的判断。main 的输入变了，\n你在自己基线上重新生成的那份摘要就不再描述合并后的树 —— 合并后的正确值既不等于\n你的、也不等于 main 的，只能**在合并后的树上重新生成**。\n\nSupervisor 已用 `rddev rebaseline` 把你的任务分支推进到当前 main，并按规矩\n**重新生成**派生工件（不手工合文本）。\n\n**请你做的事：**\n1. 在新基线上确认你原有的全部改动仍然完整（25 个文件）。\n2. 按 `scripts/gen_schema_snapshot.py` / `make sync-schemas` 的既定路径**重新生成**\n   `specs/database/postgres.sql` 与 `specs/SPEC_VERSION.json`，不要手工编辑。\n3. 重跑你 RESULT.json 里列出的测试与两条 acceptance criteria，确认结论不变。\n4. 只报告差异；**不要把已批准的实现改掉**。如果新基线上某项判断必须改变，\n   在 RESULT.json 里明确写出来并说明原因，不要沉默地改。\n\n**另外一条本次刚修好的 orchestrator 缺陷（与你的交付无关，不必处理）：**\nG2 建集成树时用的 patch 曾被 `strings.TrimSpace` 截掉末尾的空白上下文行，\n导致 `git apply` 报 `corrupt patch`。已修复。所以你现在看到的错误信息如果\n仍然提到 \"corrupt patch\"，请立刻上报；正常情况下它只会是上面那条 patch failed。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T16:12:13Z",
+          "run_id": "run-dc51b7bd7f3fc800",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T16:17:36Z",
+          "run_id": "run-b466bf9db974644a",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-13T16:30:50Z",
+          "run_id": "run-b6ad95b6bb78ab08"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-13T16:34:10Z",
+          "run_id": "run-ee270c57d866d44e",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T0203": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "merged",
+      "started_at": "2026-09-13T17:22:20Z",
+      "worker_run_id": "run-475a29930e9b276c",
+      "accepted_by_supervisor_at": "2026-09-13T17:40:44Z",
+      "merged_at": "2026-09-13T17:47:30Z",
+      "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/fix/the-baseline-is-cut-from-main-and-main-is-kept-current 7d59be5f8b1f501433224272b6a7d7ee42179769 — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-13T16:34:12Z",
+          "run_id": "run-b708482957121801"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-13T16:34:16Z",
+          "run_id": "run-e2b19db243113c29",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-13T17:05:22Z",
+          "run_id": "run-bdef7283b1c44114",
+          "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/fix/the-g3-step-gets-the-dev-stacks-environment 35e2fcf042157f70bd116b20bbf6535066a65eb6 — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check; result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test -count=1 -race ./tests/integration/) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T17:14:24Z",
+          "run_id": "run-73a5faad644db9af",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-13T17:19:31Z",
+          "run_id": "run-4fc43c595da9e500",
+          "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/fix/the-baseline-is-cut-from-main-and-main-is-kept-current 7d59be5f8b1f501433224272b6a7d7ee42179769 — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T17:22:20Z",
+          "run_id": "run-475a29930e9b276c",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T17:24:31Z",
+          "run_id": "run-2d53565a1de073ce",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-13T17:40:44Z",
+          "run_id": "run-3af4000f4d0edcf3"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-13T17:47:30Z",
+          "run_id": "run-9a60a2721346aa5e",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T0204": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-13T17:50:10Z",
+      "worker_run_id": "run-b8aec24bfcfb3b2c",
+      "rejection_reason": "【这不是缺陷 —— 你的基线本来就是错的，现在给你一条对的】\n\nT0204 是在 T0203（Typed Relation repository）合并后 **6 秒** 被派出去的，而本\n次派发的基线读的是「本机 main 的缓存」。你 17:47:36 开始时，本机 main 还停在\nT0203 合并之前（c3bdee7），所以你手上的树里**没有 T0203 的代码**，尽管任务包把\nT0203 列为已合并的依赖。\n\n这是已知缺陷 #123：派发读 refs/heads/main（本机缓存），而合并发生在 forge 上，\n两者之间有窗口。修复 PR #124 仍在等 owner 批准。\n\nSupervisor 已做的事：把本机 main 快进到合并后的 e708de6，并把你这条任务分支一并\n推进到同一提交。你的树现在 = 当前 main，**包含 T0203**。\n\n【你要做的】按任务包从头做即可。你前几分钟只在读任务包，没有任何改动被丢弃。\n不要试图「自行补上 T0203 缺的东西」—— 它已经在你的基线里了。\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-13T17:47:31Z",
+          "run_id": "run-f6ff13b7487447ee"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-13T17:47:36Z",
+          "run_id": "run-01a1046d986f4de1",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-13T17:50:09Z",
+          "run_id": "run-fb4bf8d3c4932fe5",
+          "reason": "【这不是缺陷 —— 你的基线本来就是错的，现在给你一条对的】\n\nT0204 是在 T0203（Typed Relation repository）合并后 **6 秒** 被派出去的，而本\n次派发的基线读的是「本机 main 的缓存」。你 17:47:36 开始时，本机 main 还停在\nT0203 合并之前（c3bdee7），所以你手上的树里**没有 T0203 的代码**，尽管任务包把\nT0203 列为已合并的依赖。\n\n这是已知缺陷 #123：派发读 refs/heads/main（本机缓存），而合并发生在 forge 上，\n两者之间有窗口。修复 PR #124 仍在等 owner 批准。\n\nSupervisor 已做的事：把本机 main 快进到合并后的 e708de6，并把你这条任务分支一并\n推进到同一提交。你的树现在 = 当前 main，**包含 T0203**。\n\n【你要做的】按任务包从头做即可。你前几分钟只在读任务包，没有任何改动被丢弃。\n不要试图「自行补上 T0203 缺的东西」—— 它已经在你的基线里了。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T17:50:10Z",
+          "run_id": "run-b8aec24bfcfb3b2c",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0205": {
       "status": "todo",
@@ -1034,10 +1256,31 @@
       "accepted_by_supervisor_at": null,
       "merged_at": null
     },
-    "T0301": {
+    "T0215": {
       "status": "running",
-      "started_at": "2026-09-13T04:49:54Z",
-      "worker_run_id": "run-1b96625507591559",
+      "started_at": "2026-09-13T17:51:38Z",
+      "worker_run_id": "run-d4bec99ce0da153d",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-13T17:51:34Z",
+          "run_id": "run-9229950f5b38cd03"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-13T17:51:38Z",
+          "run_id": "run-d4bec99ce0da153d",
+          "reason": "worker spawn"
+        }
+      ]
+    },
+    "T0301": {
+      "status": "rejected",
+      "started_at": "2026-09-13T05:57:10Z",
+      "worker_run_id": "run-a19df21e8d1ad866",
+      "rejection_reason": "collect rejected: head-baseline: worktree HEAD is 029380b547f5f38cc8d235d225d5d0c8e059db64, baseline was 5cfc4c3aed86a2bdfd7931a02e973f4269d9b18e — the Worker moved HEAD (Git control-plane); branch-ref: refs/heads/task/T0301-gitea-adapter-repo-provisioning is 029380b547f5f38cc8d235d225d5d0c8e059db64, baseline was 5cfc4c3aed86a2bdfd7931a02e973f4269d9b18e — the task branch moved; refs: new ref(s) created during the run: refs/heads/fix/judge-the-task-namespace f2170d195eaf5597e4131576bf369f10c458bf0e — creating refs is Git control-plane; scope: 1 changed path(s) outside allowed_scope [infra/migrations/** specs/database/postgres.sql specs/SPEC_VERSION.json internal/gitprovider/** go.mod go.sum .env.example cmd/api/** apps/web/** infra/gitea/** tests/**]: README.md",
       "history": [
         {
           "from": "todo",
@@ -1051,6 +1294,34 @@
           "at": "2026-09-13T04:49:54Z",
           "run_id": "run-1b96625507591559",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T05:46:18Z",
+          "run_id": "run-94fc9e7f876ea61d",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-13T05:57:10Z",
+          "run_id": "run-40054c801e6353f8",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（5cfc4c3aed86），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 specs/SPEC_VERSION.json, specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T05:57:10Z",
+          "run_id": "run-a19df21e8d1ad866",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-13T06:24:32Z",
+          "run_id": "run-6404a5c61d215a52",
+          "reason": "collect rejected: head-baseline: worktree HEAD is 029380b547f5f38cc8d235d225d5d0c8e059db64, baseline was 5cfc4c3aed86a2bdfd7931a02e973f4269d9b18e — the Worker moved HEAD (Git control-plane); branch-ref: refs/heads/task/T0301-gitea-adapter-repo-provisioning is 029380b547f5f38cc8d235d225d5d0c8e059db64, baseline was 5cfc4c3aed86a2bdfd7931a02e973f4269d9b18e — the task branch moved; refs: new ref(s) created during the run: refs/heads/fix/judge-the-task-namespace f2170d195eaf5597e4131576bf369f10c458bf0e — creating refs is Git control-plane; scope: 1 changed path(s) outside allowed_scope [infra/migrations/** specs/database/postgres.sql specs/SPEC_VERSION.json internal/gitprovider/** go.mod go.sum .env.example cmd/api/** apps/web/** infra/gitea/** tests/**]: README.md"
         }
       ]
     },
@@ -1325,13 +1596,67 @@
       "merged_at": null
     },
     "T0603": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-13T13:20:52Z",
+      "worker_run_id": "run-ee9d0626234e599f",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（42379ea3f510），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-13T05:28:18Z",
+          "run_id": "run-a25613f8428c0fa7"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-13T05:45:26Z",
+          "run_id": "run-62edeb5c06118ac1",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-13T06:19:12Z",
+          "run_id": "run-0cd484705eb2f5fb",
+          "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/fix/judge-the-task-namespace f2170d195eaf5597e4131576bf369f10c458bf0e — creating refs is Git control-plane"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T06:52:44Z",
+          "run_id": "run-8420327028da402b",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T06:56:49Z",
+          "run_id": "run-03b020362f9ae46e",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-13T13:20:52Z",
+          "run_id": "run-cb2e8d7dd093ec7a",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（42379ea3f510），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T13:20:52Z",
+          "run_id": "run-ee9d0626234e599f",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T13:24:29Z",
+          "run_id": "run-0c89019199b38692",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T0604": {
       "status": "todo",
