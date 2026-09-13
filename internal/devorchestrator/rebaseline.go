@@ -69,9 +69,22 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 		return nil, fmt.Errorf("worktree %s: %w", rec.Worktree, err)
 	}
 	from := rec.BaselineSHA
-	to, err := gitOutput(repoRoot, "rev-parse", DefaultBaseBranch)
+	// The advance goes to what the integration branch IS, not to what this
+	// clone last heard — the third reader of the same question, answered by the
+	// same function. A rebaseline exists to bring a task up to date with a
+	// dependency that just merged, and the driver runs it exactly then, so a
+	// target read from the local branch is stale precisely when it matters: the
+	// task would be "advanced" onto a tree that still lacks the dependency it
+	// was sent back for. Resolved to a sha because everything below — the
+	// nothing-to-advance comparison, the reset, the ref ledger, the result —
+	// names a commit.
+	toRef, err := IntegrationTip(repoRoot)
 	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", DefaultBaseBranch, err)
+		return nil, err
+	}
+	to, err := gitOutput(repoRoot, "rev-parse", toRef)
+	if err != nil {
+		return nil, fmt.Errorf("resolving %s as the advance target: %w", toRef, err)
 	}
 	if to == from {
 		return nil, fmt.Errorf("%s is already at %s — nothing to advance", taskID, from[:12])
