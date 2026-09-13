@@ -11,11 +11,49 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const bumpScientificObjectVersionNo = `-- name: BumpScientificObjectVersionNo :one
+UPDATE scientific_objects
+   SET current_version_no = current_version_no + 1
+ WHERE id = $1 AND current_version_no = $2
+RETURNING current_version_no
+`
+
+type BumpScientificObjectVersionNoParams struct {
+	ObjectID          pgtype.UUID `json:"object_id"`
+	ExpectedVersionNo int32       `json:"expected_version_no"`
+}
+
+// The expected_version compare-and-swap (T0202): advance the head pointer
+// from @expected_version_no to @expected_version_no + 1, but only while it
+// still equals @expected_version_no. Zero rows returned means the object
+// does not exist or the expectation lost a race — the caller distinguishes
+// the two and reports EXPECTED_VERSION_MISMATCH (docs/45) either way.
+func (q *Queries) BumpScientificObjectVersionNo(ctx context.Context, arg BumpScientificObjectVersionNoParams) (int32, error) {
+	row := q.db.QueryRow(ctx, bumpScientificObjectVersionNo, arg.ObjectID, arg.ExpectedVersionNo)
+	var current_version_no int32
+	err := row.Scan(&current_version_no)
+	return current_version_no, err
+}
+
+const canonicalizeScientificObjectPayload = `-- name: CanonicalizeScientificObjectPayload :one
+SELECT $1::jsonb AS payload
+`
+
+// jsonb normalizes JSON on input (key order, whitespace). The repository
+// stores that canonical form, and the integrity hash is the sha256 of the
+// canonical text, so a read payload always re-hashes to its stored hash.
+func (q *Queries) CanonicalizeScientificObjectPayload(ctx context.Context, payload []byte) ([]byte, error) {
+	row := q.db.QueryRow(ctx, canonicalizeScientificObjectPayload, payload)
+	var payload_2 []byte
+	err := row.Scan(&payload_2)
+	return payload_2, err
+}
+
 const createScientificObject = `-- name: CreateScientificObject :one
 
 INSERT INTO scientific_objects (project_id, object_type, created_by)
 VALUES ($1, $2, $3)
-RETURNING id, project_id, object_type, created_by, created_at
+RETURNING id, project_id, object_type, created_by, created_at, current_version_no
 `
 
 type CreateScientificObjectParams struct {
@@ -36,6 +74,7 @@ func (q *Queries) CreateScientificObject(ctx context.Context, arg CreateScientif
 		&i.ObjectType,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.CurrentVersionNo,
 	)
 	return i, err
 }
@@ -130,7 +169,7 @@ func (q *Queries) GetLatestScientificObjectVersion(ctx context.Context, objectID
 }
 
 const getScientificObjectByID = `-- name: GetScientificObjectByID :one
-SELECT id, project_id, object_type, created_by, created_at FROM scientific_objects WHERE id = $1
+SELECT id, project_id, object_type, created_by, created_at, current_version_no FROM scientific_objects WHERE id = $1
 `
 
 func (q *Queries) GetScientificObjectByID(ctx context.Context, id pgtype.UUID) (ScientificObject, error) {
@@ -142,6 +181,7 @@ func (q *Queries) GetScientificObjectByID(ctx context.Context, id pgtype.UUID) (
 		&i.ObjectType,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.CurrentVersionNo,
 	)
 	return i, err
 }

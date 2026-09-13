@@ -14,6 +14,16 @@ type Querier interface {
 	AddOrganizationMembership(ctx context.Context, arg AddOrganizationMembershipParams) error
 	AddProjectMembership(ctx context.Context, arg AddProjectMembershipParams) (ProjectMembership, error)
 	AttachBlob(ctx context.Context, arg AttachBlobParams) error
+	// The expected_version compare-and-swap (T0202): advance the head pointer
+	// from @expected_version_no to @expected_version_no + 1, but only while it
+	// still equals @expected_version_no. Zero rows returned means the object
+	// does not exist or the expectation lost a race — the caller distinguishes
+	// the two and reports EXPECTED_VERSION_MISMATCH (docs/45) either way.
+	BumpScientificObjectVersionNo(ctx context.Context, arg BumpScientificObjectVersionNoParams) (int32, error)
+	// jsonb normalizes JSON on input (key order, whitespace). The repository
+	// stores that canonical form, and the integrity hash is the sha256 of the
+	// canonical text, so a read payload always re-hashes to its stored hash.
+	CanonicalizeScientificObjectPayload(ctx context.Context, payload []byte) ([]byte, error)
 	CountActiveOrganizationOwners(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	CountProjectOwners(ctx context.Context, projectID pgtype.UUID) (int32, error)
 	// Blobs and their attachments (canonical tables: blobs, blob_attachments).

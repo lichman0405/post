@@ -251,11 +251,12 @@ type Review struct {
 }
 
 type ScientificObject struct {
-	ID         pgtype.UUID        `json:"id"`
-	ProjectID  pgtype.UUID        `json:"project_id"`
-	ObjectType string             `json:"object_type"`
-	CreatedBy  pgtype.UUID        `json:"created_by"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	ID               pgtype.UUID        `json:"id"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	ObjectType       string             `json:"object_type"`
+	CreatedBy        pgtype.UUID        `json:"created_by"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	CurrentVersionNo int32              `json:"current_version_no"`
 }
 
 type ScientificObjectVersion struct {
