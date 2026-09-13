@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // RebaselineTask advances a task's baseline onto the integration branch while
@@ -92,49 +93,15 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 	if err != nil {
 		return nil, err
 	}
-	patch := filepath.Join(os.TempDir(), "post-rebaseline-"+taskID+".patch")
-	if err := os.WriteFile(patch, []byte(change), 0o600); err != nil {
-		return nil, err
-	}
-	defer os.Remove(patch)
 
 	// Which derived artifacts does this change touch? Those travel as a
-	// regeneration, not as text.
+	// regeneration, not as text. Decided BEFORE anything is touched, so a
+	// derived artifact with no regenerator is a refusal that never had to
+	// rebuild the worktree to find out.
 	derived, err := DerivedArtifactsAt(repoRoot, DefaultDerivedArtifactsPath)
 	if err != nil {
 		return nil, err
 	}
-	exclude := map[string]bool{}
-	for _, r := range derived.Rules {
-		exclude[r.Derived] = true
-	}
-	applyArgs := []string{"apply"}
-	for d := range exclude {
-		applyArgs = append(applyArgs, "--exclude="+d)
-	}
-	applyArgs = append(applyArgs, patch)
-
-	if _, err := gitOutput(rec.Worktree, "reset", "--hard", to); err != nil {
-		return nil, fmt.Errorf("resetting the worktree to %s: %w", to[:12], err)
-	}
-	if _, err := gitOutput(rec.Worktree, "clean", "-fdq"); err != nil {
-		return nil, fmt.Errorf("cleaning the worktree: %w", err)
-	}
-	if _, err := gitOutput(rec.Worktree, applyArgs...); err != nil {
-		return nil, fmt.Errorf("the task's change does not apply to %s even after excluding generated files — this needs a human: %w", DefaultBaseBranch, err)
-	}
-
-	// Regenerate the excluded artifacts from the MERGED tree, to a fixed point.
-	//
-	// One pass is not enough, and the reason is a real dependency: the spec
-	// version marker is derived from ALL of specs/**, which includes
-	// specs/database/postgres.sql — itself derived from infra/migrations/**.
-	// Regenerating the marker in the same pass as postgres.sql computes a digest
-	// of the tree as it was BEFORE postgres.sql was rewritten, and the result is
-	// a marker that describes the old specs. That is what this did the first
-	// time: T0301 came out with a marker matching main while its schema
-	// snapshot did not, which spec-validation would have caught later, at CI,
-	// after a rework had already been spent on it.
 	wanted := map[string]bool{}
 	var regenerated []string
 	for _, r := range derived.Rules {
@@ -149,6 +116,77 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 	}
 	sort.Strings(regenerated)
 
+	exclude := map[string]bool{}
+	for _, r := range derived.Rules {
+		exclude[r.Derived] = true
+	}
+	applyArgs := []string{"apply"}
+	for d := range exclude {
+		applyArgs = append(applyArgs, "--exclude="+d)
+	}
+
+	// The advance rebuilds the worktree in place, and every step of that can
+	// fail: `reset --hard` drops the task's tracked modifications and
+	// `clean -fdq` deletes its untracked files outright, so from the reset
+	// onwards the task's deliverable exists nowhere but here. The first version
+	// of this kept it in a temp file deleted on the way out, which made a
+	// refused apply a *destructive* outcome — and T0301 was one `git apply`
+	// away from exactly that: its Worker had extended the G3 gate script, main
+	// had rewritten the same region, and the patch no longer applied.
+	//
+	// So the change is copied to a durable directory first — the diff for a
+	// human to read, plus the exact bytes to restore from — and every failure
+	// puts the worktree back. Only a completed advance removes the copy.
+	head, err := gitOutput(rec.Worktree, "rev-parse", "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("reading the worktree's HEAD before advancing it: %w", err)
+	}
+	keep := filepath.Join(repoRoot, ".rddev", "runtime", "rebaseline",
+		taskID+"-"+time.Now().UTC().Format("20060102T150405Z"))
+	if err := os.MkdirAll(keep, 0o755); err != nil {
+		return nil, fmt.Errorf("creating %s to keep the task's work: %w", keep, err)
+	}
+	if err := os.WriteFile(filepath.Join(keep, "change.patch"), []byte(change), 0o600); err != nil {
+		return nil, fmt.Errorf("keeping the task's change at %s: %w", keep, err)
+	}
+	entries, err := snapshotWorktree(rec.Worktree, before, keep)
+	if err != nil {
+		return nil, err
+	}
+	completed := false
+	defer func() {
+		if completed {
+			os.RemoveAll(keep)
+		}
+	}()
+	fail := func(err error) error {
+		if rerr := restoreWorktree(rec.Worktree, head, keep, entries); rerr != nil {
+			return fmt.Errorf("%w\nThe worktree could NOT be put back: %v\nThe task's work is kept at %s — restore it by hand before dispatching %s again", err, rerr, keep, taskID)
+		}
+		return fmt.Errorf("%w\nThe worktree was put back the way it was found; the change is also kept at %s", err, keep)
+	}
+
+	if _, err := gitOutput(rec.Worktree, "reset", "--hard", to); err != nil {
+		return nil, fail(fmt.Errorf("resetting the worktree to %s: %w", to[:12], err))
+	}
+	if _, err := gitOutput(rec.Worktree, "clean", "-fdq"); err != nil {
+		return nil, fail(fmt.Errorf("cleaning the worktree: %w", err))
+	}
+	if _, err := gitOutput(rec.Worktree, append(applyArgs, filepath.Join(keep, "change.patch"))...); err != nil {
+		return nil, fail(fmt.Errorf("the task's change does not apply to %s even after excluding generated files — this needs a human: %w", DefaultBaseBranch, err))
+	}
+
+	// Regenerate the excluded artifacts from the MERGED tree, to a fixed point.
+	//
+	// One pass is not enough, and the reason is a real dependency: the spec
+	// version marker is derived from ALL of specs/**, which includes
+	// specs/database/postgres.sql — itself derived from infra/migrations/**.
+	// Regenerating the marker in the same pass as postgres.sql computes a digest
+	// of the tree as it was BEFORE postgres.sql was rewritten, and the result is
+	// a marker that describes the old specs. That is what this did the first
+	// time: T0301 came out with a marker matching main while its schema
+	// snapshot did not, which spec-validation would have caught later, at CI,
+	// after a rework had already been spent on it.
 	runAll := func() error {
 		for _, art := range regenerated {
 			cmd := regenerators[art].Write
@@ -225,7 +263,147 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("the advance lost %d path(s) the task had changed: %v — refusing, the worktree is at %s", len(missing), keysOf(missing), to[:12])
 	}
+	// Everything below is done; the copy kept for a failure that did not happen
+	// is now redundant. A refusal after this point still keeps it, which is why
+	// this is a flag rather than a defer os.RemoveAll at the top.
+	completed = true
 	return &RebaselineResult{TaskID: taskID, FromSHA: from, ToSHA: to, Files: len(after), Regenerated: regenerated}, nil
+}
+
+// snapshotEntry is one changed path's exact state in the task worktree, as
+// taken before the advance overwrites it.
+type snapshotEntry struct {
+	Path  string      // worktree-relative, as worktreeChangedPaths names it
+	State string      // file | symlink | dir | absent
+	Mode  os.FileMode // regular files: the permission bits to restore
+}
+
+// snapshotWorktree copies every changed path out of the worktree into keep,
+// so a refused advance can be undone by CONTENT rather than by re-applying the
+// patch. The patch is a document (a human reads it, a PR shows it); this is the
+// copy that restores, and it works even when the patch no longer fits — which
+// is precisely the case that reaches it. A path that is tracked and deleted is
+// recorded as "absent": the content is in git and its absence is the change, so
+// restoring means removing the file again.
+func snapshotWorktree(worktree string, paths map[string]bool, keep string) ([]snapshotEntry, error) {
+	files := filepath.Join(keep, "files")
+	if err := os.MkdirAll(files, 0o755); err != nil {
+		return nil, fmt.Errorf("creating %s: %w", files, err)
+	}
+	entries := make([]snapshotEntry, 0, len(paths))
+	var manifest strings.Builder
+	for _, p := range keysOf(paths) { // sorted: the manifest is read by a human
+		if p == "" {
+			continue
+		}
+		src := filepath.Join(worktree, p)
+		st, err := os.Lstat(src)
+		if os.IsNotExist(err) {
+			entries = append(entries, snapshotEntry{Path: p, State: "absent"})
+			fmt.Fprintf(&manifest, "absent\t-\t%s\n", p)
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading %s to keep the task's work: %w", p, err)
+		}
+		dst := filepath.Join(files, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return nil, fmt.Errorf("creating %s: %w", filepath.Dir(dst), err)
+		}
+		switch {
+		case st.Mode()&os.ModeSymlink != 0:
+			// The link's TARGET is recorded, never followed: a Worker's tree may
+			// hold a symlink, and resolving it here would have the Supervisor copy
+			// whatever it points at into a durable artifact. Same reasoning as
+			// taskWorktreeDiff's Lstat.
+			target, err := os.Readlink(src)
+			if err != nil {
+				return nil, fmt.Errorf("reading symlink %s to keep the task's work: %w", p, err)
+			}
+			if err := os.WriteFile(dst, []byte(target), 0o600); err != nil {
+				return nil, fmt.Errorf("keeping symlink %s: %w", p, err)
+			}
+			entries = append(entries, snapshotEntry{Path: p, State: "symlink"})
+			fmt.Fprintf(&manifest, "symlink\t-\t%s\n", p)
+		case st.Mode().IsRegular():
+			data, err := os.ReadFile(src)
+			if err != nil {
+				return nil, fmt.Errorf("reading %s to keep the task's work: %w", p, err)
+			}
+			if err := os.WriteFile(dst, data, 0o600); err != nil {
+				return nil, fmt.Errorf("keeping %s: %w", p, err)
+			}
+			entries = append(entries, snapshotEntry{Path: p, State: "file", Mode: st.Mode().Perm()})
+			fmt.Fprintf(&manifest, "file\t%04o\t%s\n", st.Mode().Perm(), p)
+		default:
+			// A directory (empty and untracked, or a gitlink) carries no content
+			// of its own; its existence is all there is to restore.
+			if err := os.MkdirAll(dst, 0o755); err != nil {
+				return nil, fmt.Errorf("keeping directory %s: %w", p, err)
+			}
+			entries = append(entries, snapshotEntry{Path: p, State: "dir"})
+			fmt.Fprintf(&manifest, "dir\t-\t%s\n", p)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(keep, "MANIFEST.txt"), []byte(manifest.String()), 0o600); err != nil {
+		return nil, fmt.Errorf("writing the restore manifest in %s: %w", keep, err)
+	}
+	return entries, nil
+}
+
+// restoreWorktree puts the worktree back the way the caller found it: the
+// branch tip it had, no files the failed advance left behind, and the task's
+// own files written back from the snapshot. `reset --hard head` plus the
+// snapshot is what makes it exact — head restores everything the task did NOT
+// change, the snapshot restores everything it did.
+func restoreWorktree(worktree, head, keep string, entries []snapshotEntry) error {
+	if _, err := gitOutput(worktree, "reset", "--hard", head); err != nil {
+		return fmt.Errorf("resetting the worktree to %s: %w", head, err)
+	}
+	if _, err := gitOutput(worktree, "clean", "-fdq"); err != nil {
+		return fmt.Errorf("cleaning the worktree: %w", err)
+	}
+	for _, e := range entries {
+		dst := filepath.Join(worktree, e.Path)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return fmt.Errorf("recreating the directory for %s: %w", e.Path, err)
+		}
+		switch e.State {
+		case "absent":
+			if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("removing %s again (the task deleted it): %w", e.Path, err)
+			}
+		case "dir":
+			if err := os.MkdirAll(dst, 0o755); err != nil {
+				return fmt.Errorf("recreating the directory %s: %w", e.Path, err)
+			}
+		case "symlink":
+			target, err := os.ReadFile(filepath.Join(keep, "files", filepath.FromSlash(e.Path)))
+			if err != nil {
+				return fmt.Errorf("reading the kept symlink %s: %w", e.Path, err)
+			}
+			if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("clearing %s for the symlink: %w", e.Path, err)
+			}
+			if err := os.Symlink(string(target), dst); err != nil {
+				return fmt.Errorf("recreating the symlink %s: %w", e.Path, err)
+			}
+		default:
+			data, err := os.ReadFile(filepath.Join(keep, "files", filepath.FromSlash(e.Path)))
+			if err != nil {
+				return fmt.Errorf("reading the kept copy of %s: %w", e.Path, err)
+			}
+			if err := os.WriteFile(dst, data, e.Mode); err != nil {
+				return fmt.Errorf("writing %s back: %w", e.Path, err)
+			}
+			// WriteFile applies the umask; the gate scripts a task may have
+			// changed have to come back executable.
+			if err := os.Chmod(dst, e.Mode); err != nil {
+				return fmt.Errorf("restoring the mode of %s: %w", e.Path, err)
+			}
+		}
+	}
+	return nil
 }
 
 // worktreeChangedPaths lists every path that differs from base, tracked or not.
