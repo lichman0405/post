@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -133,7 +134,7 @@ func SpawnReview(opts *ReviewSpawnOpts) (*SpawnResult, error) {
 
 	// Fingerprint the reviewed worktree BEFORE the Reviewer exists: collect
 	// rejects a verdict produced against different code.
-	fp, err := taskWorktreeFingerprint(rec, gate.BaselineSHA)
+	fp, err := codeIdentity(rec)
 	if err != nil {
 		return nil, fmt.Errorf("fingerprinting the reviewed worktree: %w", err)
 	}
@@ -386,11 +387,11 @@ func CollectReview(opts *CollectOpts) (*ReviewCollectReport, error) {
 	if err != nil {
 		return nil, err
 	}
+	// fp is the code identity this verdict is bound to; it is recorded with the
+	// verdict so the merge gate can refuse a verdict that no longer describes
+	// the code (a rebase, a baseline advance, a merge repair, any edit).
+	var fp string
 	if taskRec != nil {
-		gate, err := LoadGateInputs(repoRoot, opts.TaskID)
-		if err != nil {
-			return nil, err
-		}
 		revGate, err := LoadGateInputs(repoRoot, reviewID)
 		if err != nil {
 			return nil, err
@@ -407,13 +408,7 @@ func CollectReview(opts *CollectOpts) (*ReviewCollectReport, error) {
 			report.Status = "rejected"
 			return report, nil
 		}
-		baseline := ""
-		if gate != nil {
-			baseline = gate.BaselineSHA
-		} else {
-			baseline = taskRec.BaselineSHA
-		}
-		fp, err := taskWorktreeFingerprint(taskRec, baseline)
+		fp, err = codeIdentity(taskRec)
 		if err != nil {
 			return nil, err
 		}
@@ -498,6 +493,7 @@ func CollectReview(opts *CollectOpts) (*ReviewCollectReport, error) {
 		BlockingFindings:  blocking,
 		MajorFindings:     major,
 		VerdictPath:       verdictPath,
+		DiffSHA:           fp,
 		ReviewerSessionID: rec.SessionID,
 	}); err != nil {
 		return nil, err
@@ -505,31 +501,63 @@ func CollectReview(opts *CollectOpts) (*ReviewCollectReport, error) {
 	return report, nil
 }
 
-// taskWorktreeFingerprint hashes everything the review judges: the tracked
-// diff against the baseline plus every untracked file's name and content. A
-// change of either during the review invalidates the verdict.
-func taskWorktreeFingerprint(rec *WorkerRecord, baseline string) (string, error) {
-	h := sha256.New()
-	diff, err := gitOutput(rec.Worktree, "diff", baseline, "--")
-	if err != nil {
-		return "", fmt.Errorf("diffing the worktree for the review fingerprint: %w", err)
+// codeIdentity returns the identity of the code state a verdict is about:
+// the commit the task's work sits on (its merge-base with the integration
+// branch) together with the task's complete change.
+//
+// Both halves are load-bearing.
+//
+//   - The change alone is stable across `rddev pr open`, which commits exactly
+//     that content, so a verdict survives the commit it authorised.
+//   - The merge-base changes the moment main moves under the branch — a
+//     rebase, a baseline advance, a merge repair, or main simply advancing
+//     while the review runs — and the COMPOSITION is precisely what the
+//     verdict has not seen. P1 produced five cross-task collisions that a
+//     verdict about "the task's own tree" could not have caught; a verdict
+//     must not outlive the state it judged.
+func codeIdentity(rec *WorkerRecord) (string, error) {
+	base := rec.BaselineSHA
+	if mb, err := gitOutput(rec.Worktree, "merge-base", DefaultBaseBranch, "HEAD"); err == nil && mb != "" {
+		base = mb
 	}
-	h.Write([]byte(diff))
+	// Hash (path, content) for every file that differs from the base — the
+	// union of tracked changes and untracked files — rather than the rendered
+	// diff. A diff renders a new file differently depending on whether it is
+	// untracked or committed, so hashing the text would make the identity
+	// change the moment `rddev pr open` commits exactly the content the
+	// verdict approved, invalidating a verdict for a commit that changed
+	// nothing. Content is the thing the review is about.
+	changed, err := gitOutput(rec.Worktree, "diff", "--name-only", base, "--")
+	if err != nil {
+		return "", fmt.Errorf("listing the task's changed files: %w", err)
+	}
 	untracked, err := gitOutput(rec.Worktree, "ls-files", "--others", "--exclude-standard")
 	if err != nil {
-		return "", fmt.Errorf("listing untracked files for the review fingerprint: %w", err)
+		return "", fmt.Errorf("listing the task's untracked files: %w", err)
 	}
-	for _, p := range strings.Split(untracked, "\n") {
-		if p == "" {
-			continue
+	paths := map[string]bool{}
+	for _, list := range []string{changed, untracked} {
+		for _, p := range strings.Split(list, "\n") {
+			if p = strings.TrimSpace(p); p != "" {
+				paths[p] = true
+			}
 		}
-		h.Write([]byte(p + "\n"))
-		data, err := os.ReadFile(filepath.Join(rec.Worktree, p))
-		if err == nil {
-			h.Write(data)
+	}
+	sorted := make([]string, 0, len(paths))
+	for p := range paths {
+		sorted = append(sorted, p)
+	}
+	sort.Strings(sorted)
+	h := sha256.New()
+	h.Write([]byte(base + "\x00"))
+	for _, p := range sorted {
+		sum := sha256.New()
+		if data, err := os.ReadFile(filepath.Join(rec.Worktree, p)); err == nil {
+			sum.Write(data)
 		} else {
-			h.Write([]byte("(unreadable)"))
+			sum.Write([]byte("(unreadable)"))
 		}
+		h.Write([]byte(p + "\x00" + hex.EncodeToString(sum.Sum(nil)) + "\n"))
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

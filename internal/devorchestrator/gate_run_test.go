@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -439,40 +440,75 @@ func TestCheckMergeGateReviewVerdictMustBeFresh(t *testing.T) {
 	}
 }
 
-// A gate must run its steps against the code it is making a claim about.
+// A gate must verify what MERGING would produce: current main with the task's
+// change applied. Running in the task's own worktree reported green for trees
+// that cannot be composed with main at all — five such collisions in P1, each
+// of which git called MERGEABLE while the merge did not compile.
 //
-// For a task with a Worker that code lives in the task's worktree and nowhere
-// else until `rddev pr open` commits it. Running in the repo root judged
-// `main` instead, and nothing failed loudly because main is green: T0101's G2
-// record contains a `go test` that compiled cmd/api and internal/authz and
-// never mentioned cmd/api/authhttp or internal/application/authn — the two
-// packages the task existed to add. Every task's G2 passed regardless of what
-// the task did.
-func TestGateStepsRunInTheTaskWorktree(t *testing.T) {
-	repoRoot, specPath := writeGateSpec(t, `{
+// This builds the exact shape: the task's branch adds a declaration that main
+// has since added too. It compiles on the branch, and cannot compile merged.
+func TestGateVerifiesMainPlusTheTaskChange(t *testing.T) {
+	repoRoot := t.TempDir()
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v (in %s): %v\n%s", args, dir, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git(repoRoot, "init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repoRoot, "go.mod"), []byte("module example.test/x\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "base.go"), []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(repoRoot, "add", "-A")
+	git(repoRoot, "commit", "-q", "-m", "base")
+	base := git(repoRoot, "rev-parse", "HEAD")
+
+	// The task's branch: a declaration of its own, uncommitted, as a Worker
+	// leaves it.
+	wt := filepath.Join(t.TempDir(), "wt")
+	git(repoRoot, "worktree", "add", "-q", "-b", "task/T0001-x", wt, base)
+	if err := os.WriteFile(filepath.Join(wt, "task.go"), []byte("package x\n\ntype Collision struct{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// main moves on and adds the same declaration.
+	if err := os.WriteFile(filepath.Join(repoRoot, "main.go"), []byte("package x\n\ntype Collision struct{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(repoRoot, "add", "-A")
+	git(repoRoot, "commit", "-q", "-m", "main adds the same name")
+
+	specPath := filepath.Join(repoRoot, "gates.json")
+	if err := os.WriteFile(specPath, []byte(`{
   "version": 1,
-  "required_jobs": ["where"],
+  "required_jobs": ["j"],
   "gates": {
     "G1": {"name": "", "description": "", "runs_jobs": []},
-    "G2": {"name": "", "description": "", "runs_jobs": ["where"]},
+    "G2": {"name": "", "description": "", "runs_jobs": ["j"]},
     "G3": {"name": "", "description": "", "runs_jobs": []},
-    "G4": {"name": "", "description": "", "asserts_jobs": ["where"]}
+    "G4": {"name": "", "description": "", "asserts_jobs": ["j"]}
   },
-  "jobs": {"where": {"steps": [{"run": "pwd"}]}},
+  "jobs": {"j": {"steps": [{"run": "go build ./..."}]}},
   "review": {"required_for_merge": false},
   "task_overrides": {}
-}`)
-
-	worktree := filepath.Join(t.TempDir(), "T0001")
-	if err := os.MkdirAll(worktree, 0o755); err != nil {
+}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := SaveRegistry(repoRoot, &WorkerRecord{
 		TaskID: "T0001", RunID: "run-1", SessionID: "s", ClaudeVersion: "v",
-		PID: 1, StartTime: 1, Worktree: worktree, Branch: "task/T0001-x",
-		BaselineSHA: "0123456789abcdef", RefsBefore: []string{},
-		LogPath: filepath.Join(worktree, "worker.log"), ResultDir: worktree,
-		StartedAt: "t",
+		PID: 1, StartTime: 1, Worktree: wt, Branch: "task/T0001-x",
+		BaselineSHA: base, RefsBefore: []string{},
+		LogPath: filepath.Join(wt, "worker.log"), ResultDir: wt, StartedAt: "t",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -481,28 +517,18 @@ func TestGateStepsRunInTheTaskWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != "passed" {
-		t.Fatalf("gate status = %s, reasons %+v", res.Status, res.Jobs)
+	if res.Status != "failed" {
+		t.Fatalf("G2 passed on a change that compiles alone and cannot compile merged — MERGEABLE is not compilable:\n%+v", res.Jobs)
 	}
-	got, err := os.ReadFile(res.Jobs[0].Steps[0].OutputFile)
-	if err != nil {
-		t.Fatal(err)
+	// And the same change alone DOES build, so the gate is distinguishing the
+	// composition rather than failing for some unrelated reason.
+	if out, err := exec.Command("go", "build", "./...").CombinedOutput(); err == nil {
+		_ = out
 	}
-	// The log's first line is "$ pwd"; the step's own output follows.
-	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
-	ran := lines[len(lines)-1]
-	// t.TempDir() may be a symlinked path (/tmp -> /private/tmp); compare the
-	// resolved directories rather than the spellings.
-	wantResolved, err := filepath.EvalSymlinks(worktree)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gotResolved, err := filepath.EvalSymlinks(ran)
-	if err != nil {
-		t.Fatalf("the step's cwd %q does not exist: %v", ran, err)
-	}
-	if gotResolved != wantResolved {
-		t.Errorf("the gate step ran in %q, want the task worktree %q — a gate that runs in the repo root certifies main, not the task", gotResolved, wantResolved)
+	cmd := exec.Command("go", "build", "./...")
+	cmd.Dir = wt
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("the fixture is wrong: the change does not even build on its own branch:\n%s", out)
 	}
 }
 
@@ -550,5 +576,140 @@ func TestG2AndG3DoNotCollideOnOneRunID(t *testing.T) {
 	}
 	if _, ok, err := LatestGateRunRecord(repoRoot, "T0001", "G3"); err != nil || !ok {
 		t.Errorf("the G3 record is missing (ok=%v err=%v)", ok, err)
+	}
+}
+
+// A verdict must not outlive the code it judged. Writing approve for one code
+// state and then changing the code — an edit, a rebase, a baseline advance, a
+// merge repair — must invalidate it, not silently carry it forward. The
+// identity is base-sensitive AND stable across the commit pr open makes, so it
+// survives the commit the verdict authorised and nothing else.
+func TestReviewVerdictIsBoundToTheCodeItJudged(t *testing.T) {
+	repoRoot := t.TempDir()
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v (in %s): %v\n%s", args, dir, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git(repoRoot, "init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repoRoot, "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(repoRoot, "add", "-A")
+	git(repoRoot, "commit", "-q", "-m", "base")
+	base := git(repoRoot, "rev-parse", "HEAD")
+
+	wt := filepath.Join(t.TempDir(), "wt")
+	git(repoRoot, "worktree", "add", "-q", "-b", "task/T0001-x", wt, base)
+	if err := os.WriteFile(filepath.Join(wt, "deliverable.txt"), []byte("the task's work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := &WorkerRecord{
+		TaskID: "T0001", RunID: "run-1", SessionID: "s", ClaudeVersion: "v",
+		PID: 1, StartTime: 1, Worktree: wt, Branch: "task/T0001-x",
+		BaselineSHA: base, RefsBefore: []string{},
+		LogPath: filepath.Join(wt, "worker.log"), ResultDir: wt, StartedAt: "t",
+	}
+	if err := SaveRegistry(repoRoot, rec); err != nil {
+		t.Fatal(err)
+	}
+	specPath := filepath.Join(repoRoot, "gates.json")
+	if err := os.WriteFile(specPath, []byte(`{
+  "version": 1, "required_jobs": ["j"],
+  "gates": {"G1": {"name":"","description":"","runs_jobs":[]},
+            "G2": {"name":"","description":"","runs_jobs":["j"]},
+            "G3": {"name":"","description":"","runs_jobs":[]},
+            "G4": {"name":"","description":"","asserts_jobs":["j"]}},
+  "jobs": {"j": {"steps": [{"run": "true"}]}},
+  "review": {"required_for_merge": true}, "task_overrides": {}
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeCollect(t, repoRoot, "T0001", "coll-1", "ok", "2020-01-01T00:00:00Z")
+	green := &GateRunRecord{
+		recordMeta: recordMeta{RecordType: RecordGateRun, TaskID: "T0001", RunID: "g2-1", At: "2020-01-02T00:00:00Z"},
+		Gate:       "G2", Status: "passed",
+		Jobs: []GateJobResult{{Job: "j", Status: "passed"}},
+	}
+	if _, err := WriteRecord(repoRoot, "T0001", RecordGateRun, "g2-1", green); err != nil {
+		t.Fatal(err)
+	}
+	writeVerdict := func(diffSHA string) {
+		t.Helper()
+		if _, err := WriteRecord(repoRoot, "T0001", RecordReview, "rev-"+diffSHA[:6], &ReviewRecord{
+			recordMeta: recordMeta{RecordType: RecordReview, TaskID: "T0001", RunID: "rev-" + diffSHA[:6], At: "2030-01-01T00:00:00Z"},
+			Verdict:    "approve", Summary: "fixture", DiffSHA: diffSHA,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A verdict from another code state is refused.
+	writeVerdict("0000000000000000000000000000000000000000000000000000000000000000")
+	res, err := CheckMergeGate(repoRoot, specPath, "T0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "failed" {
+		t.Fatalf("the merge gate accepted a verdict written for a different code state: %v", res.Checks)
+	}
+	if !containsAny(strings.Join(res.Reasons, " "), "DIFFERENT code state") {
+		t.Errorf("refusal does not name the mismatch: %v", res.Reasons)
+	}
+
+	// The verdict for the CURRENT state passes — otherwise the rule would
+	// refuse every verdict, which is its own kind of broken.
+	want, err := codeIdentity(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeVerdict(want)
+	if res, err = CheckMergeGate(repoRoot, specPath, "T0001"); err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "passed" {
+		t.Fatalf("the merge gate refused a verdict bound to the current code, reasons %v", res.Reasons)
+	}
+
+	// Committing exactly that content must NOT invalidate the verdict: it is
+	// still the code the reviewer read, and `rddev pr open` commits it as part
+	// of authorising the merge. Hashing the rendered diff broke this — a new
+	// file renders differently untracked vs committed — which the four-gate e2e
+	// caught. The identity hashes content, so it survives.
+	git(wt, "add", "-A")
+	git(wt, "commit", "-q", "-m", "the task's work, committed")
+	if committed, err := codeIdentity(rec); err != nil {
+		t.Fatal(err)
+	} else if committed != want {
+		t.Fatalf("committing the reviewed content changed the code identity:\n  before %s\n  after  %s", want, committed)
+	}
+	if res, err = CheckMergeGate(repoRoot, specPath, "T0001"); err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "passed" {
+		t.Fatalf("the merge gate refused after the reviewed content was committed: %v", res.Reasons)
+	}
+
+	// Main moving under the branch changes the composition, so the same
+	// verdict is now stale — this is the baseline-drift case specifically.
+	if err := os.WriteFile(filepath.Join(repoRoot, "main-moved.txt"), []byte("main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(repoRoot, "add", "-A")
+	git(repoRoot, "commit", "-q", "-m", "main moves")
+	git(wt, "merge", "-q", "--no-edit", "main")
+	if res, err = CheckMergeGate(repoRoot, specPath, "T0001"); err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "failed" {
+		t.Fatalf("a baseline advance left the old verdict valid — the composition changed and the verdict never saw it: %v", res.Checks)
 	}
 }

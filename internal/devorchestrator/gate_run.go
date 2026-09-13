@@ -59,6 +59,20 @@ func RunGate(opts *GateRunOpts) (*GateRunResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The tree these steps run in: current main PLUS this task's complete
+	// change — the same thing a pull request is, and the only thing whose
+	// compilability matters, because it is what merging produces. Running in
+	// the task's own worktree (the previous behaviour) reported green for
+	// trees that cannot be composed with main at all: five separate collisions
+	// across P1, every one of which git called MERGEABLE.
+	workDir, cleanupTree, err := prepareIntegrationTree(opts.RepoRoot, opts.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanupTree()
+	if workDir == "" {
+		workDir = opts.RepoRoot // no Worker worktree (a fixture): nothing to compose
+	}
 	if opts.Gate != "G2" && opts.Gate != "G3" {
 		return nil, fmt.Errorf("gate %s is not executable — G1 runs at collect and G4 asserts against G2 records (run `rddev git commit`/`rddev pr merge`, which run the G4 assertion)", opts.Gate)
 	}
@@ -96,7 +110,7 @@ func RunGate(opts *GateRunOpts) (*GateRunResult, error) {
 				jr.Steps = append(jr.Steps, GateStepResult{Index: i, Run: step.Run, Exit: -1, Skipped: true})
 				continue
 			}
-			sr, err := runGateStep(opts.RepoRoot, opts.TaskID, runID, jobName, i, step, nil, opts.JobEnv)
+			sr, err := runGateStep(workDir, opts.RepoRoot, opts.TaskID, runID, jobName, i, step, nil, opts.JobEnv)
 			if err != nil {
 				return nil, fmt.Errorf("gate %s job %s step %d: %w", opts.Gate, jobName, i, err)
 			}
@@ -133,7 +147,7 @@ func RunGate(opts *GateRunOpts) (*GateRunResult, error) {
 // (bash --noprofile --norc -eo pipefail -c), captures stdout+stderr into a
 // per-step log, and returns the exit code. The step's own env merges over
 // the job env, which merges over the inherited environment.
-func runGateStep(repoRoot, taskID, runID, jobName string, index int, step GateStep, jobEnv, extraEnv map[string]string) (GateStepResult, error) {
+func runGateStep(workDir, repoRoot, taskID, runID, jobName string, index int, step GateStep, jobEnv, extraEnv map[string]string) (GateStepResult, error) {
 	sr := GateStepResult{Index: index, Run: step.Run, StartedAt: nowRFC3339()}
 	outDir := filepath.Join(GateOutputDir(repoRoot, taskID, runID), jobName)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
@@ -146,20 +160,9 @@ func runGateStep(repoRoot, taskID, runID, jobName string, index int, step GateSt
 	}
 	fmt.Fprintf(logf, "$ %s\n", step.Run)
 	cmd := exec.Command("bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step.Run)
-	// The steps must run against the code the gate is making a claim about.
-	//
-	// For a task with a Worker, that code lives in the task's worktree and
-	// nowhere else until `rddev pr open` commits it — so running in the repo
-	// root judged `main` instead. Nothing failed loudly, because `main` is
-	// green: T0101's G2 record shows a `go test` that compiled cmd/api and
-	// internal/authz and never once mentioned cmd/api/authhttp or
-	// internal/application/authn, the two packages the task exists to add.
-	// The gate certified a tree nobody was working on.
-	//
-	// Falls back to the repo root when there is no worktree (a task that was
-	// never spawned, or a fixture), so this is a correction and not a new
-	// precondition.
-	cmd.Dir = gateWorkingDir(repoRoot, taskID)
+	// The cwd is chosen once per gate run by prepareIntegrationTree: current
+	// main plus the task's complete change. See RunGate.
+	cmd.Dir = workDir
 	cmd.Env = os.Environ()
 	for k, v := range jobEnv {
 		cmd.Env = append(cmd.Env, k+"="+v)
@@ -372,8 +375,19 @@ func CheckMergeGate(repoRoot, gatesPath, taskID string) (*Gate4Result, error) {
 			// for a tree nobody reviewed.
 			fail(fmt.Sprintf("the review verdict (%s, %s) is older than the latest collect (%s, %s) — it judged a different tree; re-review the current diff (rddev review spawn %s)",
 				rv.RunID, rv.At, coll.RunID, coll.At, taskID))
+		} else if want, werr := currentCodeIdentity(repoRoot, taskID); werr != nil {
+			fail(fmt.Sprintf("could not recompute the code identity the verdict must be bound to: %v", werr))
+		} else if want == "" {
+			// No code state to bind to (a fixture, or a task that was never
+			// spawned). Production always has a worktree, so this branch can
+			// never be why a stale verdict passes.
+			res.Checks = append(res.Checks, fmt.Sprintf("review verdict approve (%s); no worktree to bind to, binding not asserted", rv.RunID))
+		} else if rv.DiffSHA == "" {
+			fail("the review verdict carries no diff identity — it cannot be bound to the code it judged. Re-review (" + "rddev review spawn " + taskID + ").")
+		} else if rv.DiffSHA != want {
+			fail("the review verdict is about a DIFFERENT code state: it was written for code identity " + rv.DiffSHA[:12] + "…, the tree is now " + want[:12] + "… (a rebase, a baseline advance, a merge repair, or any edit since the review). A verdict must not outlive the code it judged — re-review the current diff.")
 		} else {
-			res.Checks = append(res.Checks, fmt.Sprintf("review verdict approve (%s)", rv.RunID))
+			res.Checks = append(res.Checks, fmt.Sprintf("review verdict approve (%s), bound to code identity %s…", rv.RunID, rv.DiffSHA[:12]))
 		}
 	} else {
 		res.Checks = append(res.Checks, "review not required for merge (task override)")
@@ -453,24 +467,87 @@ func EnsureG2Green(opts *GateRunOpts) (*GateRunResult, error) {
 	return RunGate(opts)
 }
 
-// gateWorkingDir returns the tree a gate's steps must run in: the task's
-// Worker worktree when one exists, otherwise the repo root.
+// IntegrationTreeDir is where the tree a gate verifies is built: current main
+// plus the task's complete change. Supervisor-owned and gitignored.
+func IntegrationTreeDir(repoRoot, taskID string) string {
+	return filepath.Join(repoRoot, ".rddev", "runtime", "integration", taskID)
+}
+
+// prepareIntegrationTree builds the tree G2 and G3 verify.
 //
-// Gate steps are CI's commands, and CI runs them against the code under
-// review. Before a commit that code exists only in the worktree, so running
-// in the repo root measured `main` — a tree that is green by construction and
-// contains none of the task's changes. The failure is silent and total: every
-// task's G2 passes regardless of what the task actually did.
-func gateWorkingDir(repoRoot, taskID string) string {
+// The gates must judge what merging would produce, so the tree is current main
+// with the task's complete change applied — not the task's own worktree, which
+// says nothing about whether the two compose. That distinction cost P1 five
+// cross-task collisions (a principal/Principal naming split, an interface that
+// kept an old signature, two declarations of domain.AuditEntry for one table),
+// each of which git reported as MERGEABLE while the merge did not compile.
+//
+// Returns dir="" with a no-op cleanup when the task has no Worker worktree
+// (fixtures, e2e), so the caller keeps using the repository root.
+//
+// A change that does not apply to current main is reported as an error naming
+// that, rather than as a step failure: it means the branch must be brought up
+// to date, which is a different repair from a red test.
+func prepareIntegrationTree(repoRoot, taskID string) (string, func(), error) {
+	noop := func() {}
 	if taskID == "" {
-		return repoRoot
+		return "", noop, nil
 	}
 	rec, err := LoadRegistry(repoRoot, taskID)
 	if err != nil || rec == nil || rec.Worktree == "" {
-		return repoRoot
+		return "", noop, nil
 	}
-	if st, err := os.Stat(rec.Worktree); err == nil && st.IsDir() {
-		return rec.Worktree
+	if st, err := os.Stat(rec.Worktree); err != nil || !st.IsDir() {
+		return "", noop, nil
 	}
-	return repoRoot
+	dir := IntegrationTreeDir(repoRoot, taskID)
+	if _, err := gitOutput(repoRoot, "worktree", "remove", "--force", dir); err != nil {
+		// Stale or absent: both are fine, but a leftover directory would make
+		// `worktree add` fail, so clear it.
+		_ = os.RemoveAll(dir)
+	}
+	if _, err := gitOutput(repoRoot, "worktree", "add", "--detach", dir, DefaultBaseBranch); err != nil {
+		return "", noop, fmt.Errorf("creating the integration tree at %s from %s: %w", dir, DefaultBaseBranch, err)
+	}
+	cleanup := func() {
+		_, _ = gitOutput(repoRoot, "worktree", "remove", "--force", dir)
+		_ = os.RemoveAll(dir)
+	}
+	change, err := taskWorktreeDiff(rec)
+	if err != nil {
+		cleanup()
+		return "", noop, fmt.Errorf("reading the task's change for the integration tree: %w", err)
+	}
+	if strings.TrimSpace(change) == "" {
+		// No change yet: the tree is main, which is a meaningful (if not yet
+		// useful) thing to verify.
+		return dir, cleanup, nil
+	}
+	patch := filepath.Join(os.TempDir(), "post-integration-"+taskID+".patch")
+	if err := os.WriteFile(patch, []byte(change), 0o600); err != nil {
+		cleanup()
+		return "", noop, fmt.Errorf("writing the task's change as a patch: %w", err)
+	}
+	defer os.Remove(patch)
+	if _, err := gitOutput(dir, "apply", patch); err != nil {
+		cleanup()
+		return "", noop, fmt.Errorf("the task's change does not apply to current %s — bring the branch up to date and re-run: %w", DefaultBaseBranch, err)
+	}
+	return dir, cleanup, nil
+}
+
+// currentCodeIdentity recomputes the identity of the code the task's verdict
+// must be bound to. Returns "" when there is no worktree to bind to (fixtures,
+// e2e, a task that was never spawned), in which case the binding is not
+// asserted — but a verdict with NO recorded identity is still refused, so this
+// can never be the reason a stale verdict passes.
+func currentCodeIdentity(repoRoot, taskID string) (string, error) {
+	rec, err := LoadRegistry(repoRoot, taskID)
+	if err != nil || rec == nil || rec.Worktree == "" {
+		return "", nil
+	}
+	if st, err := os.Stat(rec.Worktree); err != nil || !st.IsDir() {
+		return "", nil
+	}
+	return codeIdentity(rec)
 }
