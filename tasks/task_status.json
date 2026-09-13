@@ -997,9 +997,11 @@
       ]
     },
     "T0202": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-13T16:12:13Z",
       "worker_run_id": "run-dc51b7bd7f3fc800",
+      "accepted_by_supervisor_at": "2026-09-13T16:30:50Z",
+      "merged_at": "2026-09-13T16:34:10Z",
       "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上把同一份交付重新验证并重新提交】\n\n你的交付**已被独立 review 批准**（verdict = approve），代码本身没有问题。\n被拒的唯一原因是：main 前进了，你的改动无法再原样应用到当前 main。\n\n    落实后重跑 accept 的实测：\n    git apply /tmp/post-integration-T0202.patch\n      → exit status 1: patch failed: specs/SPEC_VERSION.json:1\n         patch does not apply\n\n**只有 `specs/SPEC_VERSION.json` 这一个文件对不上**，而它是 §8.1 规定的**生成物**\n（`infra/migrations/**` 的 derived artifact），不是你的判断。main 的输入变了，\n你在自己基线上重新生成的那份摘要就不再描述合并后的树 —— 合并后的正确值既不等于\n你的、也不等于 main 的，只能**在合并后的树上重新生成**。\n\nSupervisor 已用 `rddev rebaseline` 把你的任务分支推进到当前 main，并按规矩\n**重新生成**派生工件（不手工合文本）。\n\n**请你做的事：**\n1. 在新基线上确认你原有的全部改动仍然完整（25 个文件）。\n2. 按 `scripts/gen_schema_snapshot.py` / `make sync-schemas` 的既定路径**重新生成**\n   `specs/database/postgres.sql` 与 `specs/SPEC_VERSION.json`，不要手工编辑。\n3. 重跑你 RESULT.json 里列出的测试与两条 acceptance criteria，确认结论不变。\n4. 只报告差异；**不要把已批准的实现改掉**。如果新基线上某项判断必须改变，\n   在 RESULT.json 里明确写出来并说明原因，不要沉默地改。\n\n**另外一条本次刚修好的 orchestrator 缺陷（与你的交付无关，不必处理）：**\nG2 建集成树时用的 patch 曾被 `strings.TrimSpace` 截掉末尾的空白上下文行，\n导致 `git apply` 报 `corrupt patch`。已修复。所以你现在看到的错误信息如果\n仍然提到 \"corrupt patch\"，请立刻上报；正常情况下它只会是上面那条 patch failed。\n",
       "history": [
         {
@@ -1035,17 +1037,48 @@
           "at": "2026-09-13T16:12:13Z",
           "run_id": "run-dc51b7bd7f3fc800",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T16:17:36Z",
+          "run_id": "run-b466bf9db974644a",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-13T16:30:50Z",
+          "run_id": "run-b6ad95b6bb78ab08"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-13T16:34:10Z",
+          "run_id": "run-ee270c57d866d44e",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0203": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-13T16:34:16Z",
+      "worker_run_id": "run-e2b19db243113c29",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-13T16:34:12Z",
+          "run_id": "run-b708482957121801"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-13T16:34:16Z",
+          "run_id": "run-e2b19db243113c29",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0204": {
       "status": "todo",
