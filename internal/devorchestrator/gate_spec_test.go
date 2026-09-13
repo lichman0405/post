@@ -311,3 +311,53 @@ func TestDispatchRefusesAPhaseWithNoRealServicesGate(t *testing.T) {
 		t.Fatalf("dispatch refused although a sibling task carries the phase's G3: %v", err)
 	}
 }
+
+// Every task whose scope covers a spec file must also cover the marker derived
+// from it (specs/orchestrator/derived-artifacts.json). 116 tasks did not, and
+// nothing noticed because the rule is only enforced at dispatch — the first P2
+// dispatch found it, which is a checkpoint too late to be cheap. A test over
+// the real DAG finds it here instead.
+func TestEveryTaskScopeSatisfiesTheDerivedArtifactRule(t *testing.T) {
+	root := repoRootOf(t)
+	dag, err := LoadDAG(filepath.Join(root, DefaultDAGPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules, err := LoadDerivedArtifacts(filepath.Join(root, DefaultDerivedArtifactsPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The same matcher the dispatch-time validation uses, so the test cannot
+	// disagree with the gate it is standing in for.
+	// The same matcher the dispatch-time validation uses (nil derived: this is
+	// the plain glob check), so the test cannot disagree with the gate it
+	// stands in for.
+	covers := func(entry, scope string) bool {
+		return ScopeMatchesPathWithDerived(entry, []string{scope}, nil)
+	}
+	for _, task := range dag.Tasks {
+		for _, rule := range rules.Rules {
+			markerCovered := false
+			for _, s := range task.AllowedScope {
+				if covers(rule.Marker, s) {
+					markerCovered = true
+					break
+				}
+			}
+			if !markerCovered {
+				continue
+			}
+			covered := false
+			for _, s := range task.AllowedScope {
+				if covers(rule.Derived, s) {
+					covered = true
+					break
+				}
+			}
+			if !covered {
+				t.Errorf("task %s: allowed_scope covers %q but not its derived artifact %q — dispatch refuses this, and the Worker cannot regenerate the artifact it must keep consistent",
+					task.ID, rule.Marker, rule.Derived)
+			}
+		}
+	}
+}
