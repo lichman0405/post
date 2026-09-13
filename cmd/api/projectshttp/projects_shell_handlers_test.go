@@ -68,6 +68,13 @@ func (s *stubProjectStore) ListProjectsForUser(context.Context, string) ([]domai
 	return nil, projects.ErrStore
 }
 
+// T0106 added ListPublicProjects to the store interface (visibility-aware
+// reads); the stub answers like its siblings so the shell tests keep testing
+// the shell rather than the store.
+func (s *stubProjectStore) ListPublicProjects(context.Context) ([]domain.Project, error) {
+	return nil, projects.ErrStore
+}
+
 func (s *stubProjectStore) GetProgram(context.Context, string) (domain.Program, error) {
 	return domain.Program{}, projects.ErrProgramNotFound
 }

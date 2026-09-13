@@ -13,10 +13,11 @@ import (
 	"github.com/lichman0405/post/internal/observability"
 )
 
-// The project HTTP surface. Every handler: resolve the principal (the
-// guard put it there — reads require a session too, project visibility is
-// member-only until T0106), parse the request, call the Service, render
-// the payload or the standard error envelope.
+// The project HTTP surface. Every handler: resolve the caller (the guard
+// put the principal there when a session exists — writes require it, reads
+// resolve to an anonymous reader when it does not, T0106), parse the
+// request, call the Service, render the payload or the standard error
+// envelope.
 
 // handlers owns the project routes.
 type handlers struct {
@@ -87,9 +88,9 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 	return true
 }
 
-// principal resolves the authenticated actor; reads require a session
-// too (project visibility is member-only until T0106), so the 401 is
-// written here.
+// principal resolves the authenticated actor for writes; a missing
+// session is answered in place with 401 (the guard enforces the same
+// before routing — this is the handler-level backstop).
 func principal(w http.ResponseWriter, r *http.Request) (domain.User, bool) {
 	p, ok := authhttp.PrincipalFrom(r.Context())
 	if !ok {
@@ -98,6 +99,18 @@ func principal(w http.ResponseWriter, r *http.Request) (domain.User, bool) {
 		return domain.User{}, false
 	}
 	return p.User, true
+}
+
+// reader resolves the caller for visibility-aware reads (T0106): a
+// session makes them authenticated, its absence makes them anonymous.
+// Reads never 401 — anonymous callers may read public projects; the
+// service hides private ones behind the existence-hiding 404.
+func reader(r *http.Request) projects.Reader {
+	p, ok := authhttp.PrincipalFrom(r.Context())
+	if !ok {
+		return projects.Reader{}
+	}
+	return projects.Reader{UserID: p.User.ID, Authenticated: true}
 }
 
 type createProjectRequest struct {
@@ -138,14 +151,12 @@ func (h *handlers) handleCreate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleList: GET /api/v1/projects — the actor's projects (any role),
-// newest first. Visibility-based listing arrives with T0106.
+// handleList: GET /api/v1/projects — the projects the caller may see,
+// newest first: every public project plus the caller's own (T0106
+// visibility filtering; anonymous callers get the public list only —
+// a private project never appears for a non-member).
 func (h *handlers) handleList(w http.ResponseWriter, r *http.Request) {
-	actor, ok := principal(w, r)
-	if !ok {
-		return
-	}
-	list, err := h.svc.List(r.Context(), actor)
+	list, err := h.svc.List(r.Context(), reader(r))
 	if err != nil {
 		h.projectError(w, r, err)
 		return
@@ -157,14 +168,12 @@ func (h *handlers) handleList(w http.ResponseWriter, r *http.Request) {
 	authhttp.WriteJSON(w, http.StatusOK, map[string]any{"projects": out})
 }
 
-// handleGet: GET /api/v1/projects/{projectId} — member-only read (read
-// existence hiding; T0106 extends reads to public projects).
+// handleGet: GET /api/v1/projects/{projectId} — visibility-aware read
+// (T0106): public projects are readable by anyone (anonymous included);
+// private projects answer the existence-hiding 404 for everyone but
+// members.
 func (h *handlers) handleGet(w http.ResponseWriter, r *http.Request) {
-	actor, ok := principal(w, r)
-	if !ok {
-		return
-	}
-	project, err := h.svc.Get(r.Context(), actor, r.PathValue("projectId"))
+	project, err := h.svc.Get(r.Context(), reader(r), r.PathValue("projectId"))
 	if err != nil {
 		h.projectError(w, r, err)
 		return

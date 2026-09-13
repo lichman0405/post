@@ -47,6 +47,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
+	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/config"
@@ -175,7 +176,7 @@ func run(args []string) int {
 	// exactly as visible as the resource itself.
 	auditAPI := audithttp.New(audithttp.Deps{
 		Store:    auditStore,
-		Projects: projectAPI.Service(),
+		Projects: audit.ProjectsReadGate(projectAPI.Service()),
 		Orgs:     orgAPI.Service(),
 	})
 	auditAPI.Register(v1)

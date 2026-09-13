@@ -343,6 +343,50 @@ func (q *Queries) ListProjectsForUser(ctx context.Context, userID pgtype.UUID) (
 	return items, nil
 }
 
+const listPublicProjects = `-- name: ListPublicProjects :many
+SELECT id, organization_id, program_id, slug, name, purpose, activity_status, visibility, main_frozen, git_repository_external_id, created_by, created_at, provision_status FROM projects
+WHERE visibility = 'public'
+ORDER BY created_at DESC, id
+`
+
+// Public projects readable by every matrix class (read_public_project,
+// T0106 — anonymous included), most recently created first. The
+// visibility predicate is the read policy: a private row can never reach
+// this result set.
+func (q *Queries) ListPublicProjects(ctx context.Context) ([]Project, error) {
+	rows, err := q.db.Query(ctx, listPublicProjects)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Project
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrganizationID,
+			&i.ProgramID,
+			&i.Slug,
+			&i.Name,
+			&i.Purpose,
+			&i.ActivityStatus,
+			&i.Visibility,
+			&i.MainFrozen,
+			&i.GitRepositoryExternalID,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.ProvisionStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateProjectActivityStatus = `-- name: UpdateProjectActivityStatus :one
 UPDATE projects
 SET activity_status = $1

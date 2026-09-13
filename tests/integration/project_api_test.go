@@ -137,13 +137,21 @@ func TestProjectAPI(t *testing.T) {
 	}
 	mustStatus(t, resp, http.StatusUnauthorized)
 	_ = resp.Body.Close()
-	// Anonymous reads are refused too (member-only until T0106).
+	// Anonymous reads answer with an empty (not yet populated) list —
+	// visibility-aware reads arrived with T0106 (before it, reads were
+	// 401 like the write above).
 	resp, err = anon.client.Get(ts.URL + "/api/v1/projects")
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustStatus(t, resp, http.StatusUnauthorized)
-	_ = resp.Body.Close()
+	mustStatus(t, resp, http.StatusOK)
+	var anonList projectListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&anonList); err != nil {
+		t.Fatalf("anonymous list payload: %v", err)
+	}
+	if len(anonList.Projects) != 0 {
+		t.Errorf("anonymous list has %d entries, want 0 (no projects yet): %+v", len(anonList.Projects), anonList.Projects)
+	}
 
 	// --- malformed JSON and empty bodies answer a clear validation
 	// envelope, never a crash ---
@@ -376,8 +384,8 @@ func TestProjectAPI(t *testing.T) {
 	mustStatus(t, resp, http.StatusBadRequest)
 	mustEnvelope(t, resp, "VALIDATION_FAILED")
 
-	// --- read isolation: only members read (T0106 extends this to public
-	// projects; existence is hidden from outsiders) ---
+	// --- read isolation (T0106): public projects are readable by anyone;
+	// private projects stay hidden from non-members (existence hiding) ---
 	resp = alice.do(t, http.MethodGet, "/api/v1/projects/"+pub.ID, "")
 	mustStatus(t, resp, http.StatusOK)
 	// GET returns the bare project payload (only create wraps it in
@@ -389,7 +397,26 @@ func TestProjectAPI(t *testing.T) {
 	if got.Project.Visibility != "public" || got.Project.ProvisionStatus != "pending" {
 		t.Errorf("get project = %+v, want visibility public and provision pending", got.Project)
 	}
+	// The public project is readable by a non-member and by an anonymous
+	// caller alike (T0106).
 	resp = bob.do(t, http.MethodGet, "/api/v1/projects/"+pub.ID, "")
+	mustStatus(t, resp, http.StatusOK)
+	_ = readAll(t, resp)
+	resp, err = anon.client.Get(ts.URL + "/api/v1/projects/" + pub.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustStatus(t, resp, http.StatusOK)
+	_ = readAll(t, resp)
+	// The private project stays hidden: bob and the anonymous caller get
+	// the same existence-hiding 404 an unknown project produces.
+	resp = bob.do(t, http.MethodGet, "/api/v1/projects/"+priv.Project.ID, "")
+	mustStatus(t, resp, http.StatusNotFound)
+	mustEnvelope(t, resp, "PROJECT_NOT_FOUND")
+	resp, err = anon.client.Get(ts.URL + "/api/v1/projects/" + priv.Project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	mustStatus(t, resp, http.StatusNotFound)
 	mustEnvelope(t, resp, "PROJECT_NOT_FOUND")
 	// Unknown project: same 404 shape.
@@ -430,7 +457,10 @@ func TestProjectAPI(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
 		t.Fatalf("bob list payload: %v", err)
 	}
-	if len(list.Projects) != 0 {
-		t.Errorf("bob's project list has %d entries, want 0: %+v", len(list.Projects), list.Projects)
+	// Bob belongs to nothing, so his list is the visibility-filtered
+	// public list (T0106): exactly the one public project — the private
+	// ones never appear.
+	if len(list.Projects) != 1 || list.Projects[0].Slug != "mof-screening" {
+		t.Errorf("bob's project list = %+v, want exactly the public mof-screening (visibility filtering)", list.Projects)
 	}
 }
