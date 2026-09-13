@@ -245,7 +245,8 @@ func (o *DriveOpts) stepVerification(id string, st *DriverStatus) (bool, error) 
 		return true, o.decide(id, "accept", out)
 	}
 	o.logf("%s accepted", id)
-	st.Merged = st.Merged // unchanged; merging happens in stepAccepted
+	// The merge happens in stepAccepted, on a later tick, so a red CI never
+	// blocks the rest of the pipeline.
 	return true, nil
 }
 
