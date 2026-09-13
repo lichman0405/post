@@ -33,7 +33,12 @@ type Projects struct {
 	programs map[string]domain.Program
 	projects map[string]domain.Project
 	members  map[[2]string]domain.ProjectMembership
-	nextID   int
+	// audits records the AuditEntry each settings write produced (the
+	// production adapter writes the audit_log row in the same transaction
+	// as the state change; the in-memory space has no table, so the
+	// entries accumulate here).
+	audits []domain.AuditEntry
+	nextID int
 }
 
 // NewProjects builds an empty in-memory project store.
@@ -141,6 +146,88 @@ func (s *Projects) GetMembership(_ context.Context, projectID, userID string) (d
 		return domain.ProjectMembership{}, projects.ErrMemberNotFound
 	}
 	return m, nil
+}
+
+// ListProjectMembers implements projects.ProjectStore: every membership of
+// the project joined with the member's identity, oldest membership first
+// (CreatedAt, user id as the deterministic tie-breaker). The in-memory
+// space has no user table; the identity is derived the way the other
+// in-memory doubles derive it.
+func (s *Projects) ListProjectMembers(_ context.Context, projectID string) ([]domain.ProjectMember, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []domain.ProjectMember
+	for _, m := range s.members {
+		if m.ProjectID != projectID {
+			continue
+		}
+		out = append(out, domain.ProjectMember{
+			UserID:      m.UserID,
+			Handle:      "u-" + m.UserID,
+			DisplayName: "User " + m.UserID,
+			Role:        m.Role,
+			JoinedAt:    m.CreatedAt,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if c := out[i].JoinedAt.Compare(out[j].JoinedAt); c != 0 {
+			return c < 0
+		}
+		return out[i].UserID < out[j].UserID
+	})
+	return out, nil
+}
+
+// UpdateMembershipRole implements projects.ProjectStore: updates the role
+// and records the audit entry, refusing the demotion of the last owner —
+// the same invariants the production transaction enforces under the
+// project-row lock (the store mutex is the single-writer stand-in).
+func (s *Projects) UpdateMembershipRole(_ context.Context, projectID, userID string, role domain.ProjectRole, audit domain.AuditEntry) (domain.ProjectMembership, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.projects[projectID]; !ok {
+		return domain.ProjectMembership{}, projects.ErrProjectNotFound
+	}
+	key := [2]string{projectID, userID}
+	current, ok := s.members[key]
+	if !ok {
+		return domain.ProjectMembership{}, projects.ErrTargetMemberNotFound
+	}
+	if current.Role == domain.ProjectRoleOwner && role != domain.ProjectRoleOwner {
+		owners := 0
+		for _, m := range s.members {
+			if m.ProjectID == projectID && m.Role == domain.ProjectRoleOwner {
+				owners++
+			}
+		}
+		if owners <= 1 {
+			return domain.ProjectMembership{}, projects.ErrLastOwner
+		}
+	}
+	current.Role = role
+	s.members[key] = current
+	s.audits = append(s.audits, audit)
+	return current, nil
+}
+
+// UpdateProjectSettings implements projects.ProjectStore: applies the
+// non-nil fields and records the audit entry.
+func (s *Projects) UpdateProjectSettings(_ context.Context, projectID string, purpose, activityStatus *string, audit domain.AuditEntry) (domain.Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.projects[projectID]
+	if !ok {
+		return domain.Project{}, projects.ErrProjectNotFound
+	}
+	if purpose != nil {
+		p.Purpose = *purpose
+	}
+	if activityStatus != nil {
+		p.ActivityStatus = *activityStatus
+	}
+	s.projects[projectID] = p
+	s.audits = append(s.audits, audit)
+	return p, nil
 }
 
 // ListProjectsForUser implements projects.ProjectStore.

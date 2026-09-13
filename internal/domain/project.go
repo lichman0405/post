@@ -61,6 +61,16 @@ func ValidProjectVisibility(v ProjectVisibility) bool {
 	return v == VisibilityPublic || v == VisibilityPrivate
 }
 
+// ValidActivityStatus reports whether s is one of the four canonical
+// lifecycle states (projects.activity_status CHECK).
+func ValidActivityStatus(s string) bool {
+	switch s {
+	case "planning", "active", "paused", "archived":
+		return true
+	}
+	return false
+}
+
 // ProvisionStatus is the GitProvider provisioning state
 // (projects.provision_status CHECK). New projects are pending by default;
 // T0301's Gitea adapter moves them to provisioned (or failed).
@@ -135,6 +145,17 @@ type ProjectMembership struct {
 	UserID    string
 	Role      ProjectRole
 	CreatedAt time.Time
+}
+
+// ProjectMember is one row of the settings member list: the membership
+// joined with the user's public identity (handle + display name). The
+// store's ListProjectMembers query is the only producer.
+type ProjectMember struct {
+	UserID      string
+	Handle      string
+	DisplayName string
+	Role        ProjectRole
+	JoinedAt    time.Time
 }
 
 // Program is a long-term research direction that optionally groups projects

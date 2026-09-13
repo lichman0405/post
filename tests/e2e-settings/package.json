@@ -1,0 +1,13 @@
+{
+  "name": "@post/e2e-settings",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Project settings e2e (T0109 required test \"settings e2e\"): real Chromium drives the built web app through the settings tab — the member list and role changes (with the CSRF-bearing PUT wire), the maintainer's locked owner rows, the visibility preview, the purpose/activity-status edit (PATCH wire) and the viewer's no-settings answer. The API is mocked at the network layer with the exact wire shapes cmd/api produces (the Go integration suite locks those shapes against real PostgreSQL).",
+  "type": "module",
+  "scripts": {
+    "e2e": "node settings-e2e.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}

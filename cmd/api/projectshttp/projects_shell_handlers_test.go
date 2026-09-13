@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -33,12 +34,18 @@ import (
 // stubProjectStore implements just enough of projects.ProjectStore. The
 // membership answer is keyed dynamically on the requested user id — the
 // real signup decides the actor's id, so the fixture cannot know it in
-// advance; the assertions below check the round-tripped id instead.
+// advance; the assertions below check the round-tripped id instead. The
+// settings methods (T0109) run against a small in-memory member map.
 type stubProjectStore struct {
 	project domain.Project
 	// member, when true, answers owner for every caller; when false the
 	// store answers ErrMemberNotFound.
 	member bool
+	// settingsMembers is the member map the settings endpoints operate on
+	// (nil for the shell-only tests). The audit entries the writes
+	// produce land in audits.
+	settingsMembers map[string]domain.ProjectMembership
+	audits          []domain.AuditEntry
 }
 
 func (s *stubProjectStore) CreateProject(context.Context, domain.Project, string) (domain.Project, domain.ProjectMembership, error) {
@@ -53,6 +60,12 @@ func (s *stubProjectStore) GetProject(_ context.Context, projectID string) (doma
 }
 
 func (s *stubProjectStore) GetMembership(_ context.Context, projectID, userID string) (domain.ProjectMembership, error) {
+	if s.settingsMembers != nil {
+		if m, ok := s.settingsMembers[userID]; ok && m.ProjectID == projectID {
+			return m, nil
+		}
+		return domain.ProjectMembership{}, projects.ErrMemberNotFound
+	}
 	if s.member && s.project.ID == projectID {
 		return domain.ProjectMembership{
 			ProjectID: projectID,
@@ -62,6 +75,56 @@ func (s *stubProjectStore) GetMembership(_ context.Context, projectID, userID st
 		}, nil
 	}
 	return domain.ProjectMembership{}, projects.ErrMemberNotFound
+}
+
+func (s *stubProjectStore) ListProjectMembers(_ context.Context, projectID string) ([]domain.ProjectMember, error) {
+	if s.project.ID != projectID {
+		return nil, projects.ErrProjectNotFound
+	}
+	out := []domain.ProjectMember{}
+	for _, m := range s.settingsMembers {
+		out = append(out, domain.ProjectMember{
+			UserID:      m.UserID,
+			Handle:      "u-" + m.UserID,
+			DisplayName: "User " + m.UserID,
+			Role:        m.Role,
+			JoinedAt:    m.CreatedAt,
+		})
+	}
+	// The map has no order; the adapter orders by joined-at, oldest
+	// membership first — mirror that for a deterministic answer.
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].JoinedAt.Equal(out[j].JoinedAt) {
+			return out[i].JoinedAt.Before(out[j].JoinedAt)
+		}
+		return out[i].UserID < out[j].UserID
+	})
+	return out, nil
+}
+
+func (s *stubProjectStore) UpdateMembershipRole(_ context.Context, projectID, userID string, role domain.ProjectRole, audit domain.AuditEntry) (domain.ProjectMembership, error) {
+	current, ok := s.settingsMembers[userID]
+	if !ok || current.ProjectID != projectID {
+		return domain.ProjectMembership{}, projects.ErrTargetMemberNotFound
+	}
+	current.Role = role
+	s.settingsMembers[userID] = current
+	s.audits = append(s.audits, audit)
+	return current, nil
+}
+
+func (s *stubProjectStore) UpdateProjectSettings(_ context.Context, projectID string, purpose, activityStatus *string, audit domain.AuditEntry) (domain.Project, error) {
+	if s.project.ID != projectID {
+		return domain.Project{}, projects.ErrProjectNotFound
+	}
+	if purpose != nil {
+		s.project.Purpose = *purpose
+	}
+	if activityStatus != nil {
+		s.project.ActivityStatus = *activityStatus
+	}
+	s.audits = append(s.audits, audit)
+	return s.project, nil
 }
 
 func (s *stubProjectStore) ListProjectsForUser(context.Context, string) ([]domain.Project, error) {

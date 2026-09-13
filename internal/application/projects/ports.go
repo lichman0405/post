@@ -61,6 +61,22 @@ type ProjectStore interface {
 	GetProject(ctx context.Context, projectID string) (domain.Project, error)
 	// GetMembership returns one project membership or ErrMemberNotFound.
 	GetMembership(ctx context.Context, projectID, userID string) (domain.ProjectMembership, error)
+	// ListProjectMembers returns every membership of the project joined
+	// with the member's identity, oldest membership first.
+	ListProjectMembers(ctx context.Context, projectID string) ([]domain.ProjectMember, error)
+	// UpdateMembershipRole changes one membership's role and records the
+	// audit entry in the same transaction. It fails with
+	// ErrProjectNotFound for an unknown project, ErrTargetMemberNotFound
+	// when the target user holds no membership, and ErrLastOwner when the
+	// change would demote the project's last owner (checked inside the
+	// transaction under the project-row lock, so concurrent demotions
+	// cannot orphan the project).
+	UpdateMembershipRole(ctx context.Context, projectID, userID string, role domain.ProjectRole, audit domain.AuditEntry) (domain.ProjectMembership, error)
+	// UpdateProjectSettings applies the settings edit (purpose and/or
+	// activity status) and records the audit entry in the same
+	// transaction. It fails with ErrProjectNotFound for an unknown
+	// project.
+	UpdateProjectSettings(ctx context.Context, projectID string, purpose, activityStatus *string, audit domain.AuditEntry) (domain.Project, error)
 	// ListProjectsForUser returns the projects the user belongs to
 	// (any project membership), newest first.
 	ListProjectsForUser(ctx context.Context, userID string) ([]domain.Project, error)

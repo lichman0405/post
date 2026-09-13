@@ -212,6 +212,24 @@ func (h *handlers) projectError(w http.ResponseWriter, r *http.Request, err erro
 	case errors.Is(err, projects.ErrProgramOrgMismatch):
 		authhttp.WriteError(w, r, http.StatusBadRequest, projects.CodeProgramOrgMismatch,
 			"the program does not belong to the project's organization")
+	case errors.Is(err, projects.ErrSettingsForbidden):
+		authhttp.WriteError(w, r, http.StatusForbidden, projects.CodeSettingsForbidden,
+			"you may not manage this project's settings")
+	case errors.Is(err, projects.ErrTargetMemberNotFound):
+		authhttp.WriteError(w, r, http.StatusNotFound, projects.CodeMemberNotFound,
+			"this user is not a member of the project")
+	case errors.Is(err, projects.ErrLastOwner):
+		authhttp.WriteError(w, r, http.StatusConflict, projects.CodeLastOwner,
+			"the project must keep at least one owner")
+	case errors.Is(err, projects.ErrSelfRoleChange):
+		authhttp.WriteError(w, r, http.StatusForbidden, projects.CodeSelfRoleChangeForbidden,
+			"you cannot change your own role")
+	case errors.Is(err, projects.ErrOwnerRoleChange):
+		authhttp.WriteError(w, r, http.StatusForbidden, projects.CodeOwnerRoleChangeForbidden,
+			"only owners may grant or revoke the owner role")
+	case errors.Is(err, projects.ErrVisibilityChangeNotSupported):
+		authhttp.WriteError(w, r, http.StatusBadRequest, projects.CodeVisibilityChangeNotSupported,
+			"visibility is preview-only; changes land with the publishing guard")
 	case errors.Is(err, projects.ErrStore):
 		authhttp.WriteError(w, r, http.StatusServiceUnavailable, projects.CodeServiceUnavailable,
 			"project data is temporarily unavailable")

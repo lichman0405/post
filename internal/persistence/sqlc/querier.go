@@ -15,6 +15,7 @@ type Querier interface {
 	AddProjectMembership(ctx context.Context, arg AddProjectMembershipParams) (ProjectMembership, error)
 	AttachBlob(ctx context.Context, arg AttachBlobParams) error
 	CountActiveOrganizationOwners(ctx context.Context, organizationID pgtype.UUID) (int64, error)
+	CountProjectOwners(ctx context.Context, projectID pgtype.UUID) (int32, error)
 	// Blobs and their attachments (canonical tables: blobs, blob_attachments).
 	// Blob rows are metadata only; bytes live in S3/MinIO (invariant 7: knowledge
 	// visibility != blob accessibility).
@@ -75,6 +76,10 @@ type Querier interface {
 	GetOrganizationMembership(ctx context.Context, arg GetOrganizationMembershipParams) (OrganizationMembership, error)
 	GetProgramByID(ctx context.Context, id pgtype.UUID) (Program, error)
 	GetProjectByID(ctx context.Context, id pgtype.UUID) (Project, error)
+	// The project-scoped lock serializing membership writes: role changes run
+	// inside a transaction and lock the project row first, so the last-owner
+	// count can never race a concurrent demotion.
+	GetProjectByIDForUpdate(ctx context.Context, id pgtype.UUID) (Project, error)
 	GetProjectBySlug(ctx context.Context, arg GetProjectBySlugParams) (Project, error)
 	GetProjectMembership(ctx context.Context, arg GetProjectMembershipParams) (ProjectMembership, error)
 	GetProjectStateByHash(ctx context.Context, arg GetProjectStateByHashParams) (ProjectState, error)
@@ -155,6 +160,8 @@ type Querier interface {
 	// construction, whatever the caller passes).
 	UpdateOrganizationMembership(ctx context.Context, arg UpdateOrganizationMembershipParams) (OrganizationMembership, error)
 	UpdateProjectActivityStatus(ctx context.Context, arg UpdateProjectActivityStatusParams) (Project, error)
+	UpdateProjectMembershipRole(ctx context.Context, arg UpdateProjectMembershipRoleParams) (ProjectMembership, error)
+	UpdateProjectSettings(ctx context.Context, arg UpdateProjectSettingsParams) (Project, error)
 	// Search projection (canonical table: search_documents). Rebuildable by
 	// construction (docs/14: Postgres FTS + structured filters; embeddings are a
 	// later concern, OpenSearch explicitly post-V1).
