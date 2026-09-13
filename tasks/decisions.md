@@ -2413,3 +2413,34 @@ printf '...' > .rddev/worktrees/T0201/.supervise-reason
 2. 夹具里 `start_time` 不能随便填 ✓——`DiscoverWorkers` 用它和 `/proc` 比对**防 PID 复用** ✓，
    填错就等于宣告"这个 Worker 不在了" ✓，于是"接管"看起来失败了 ✓。
    **夹具必须如实描述它模拟的东西**，否则测的是夹具的谎话 ✓。
+
+## L1-20260913-9 — 对 driver "symlink 任意文件覆写" 告警的处置：**当前不可利用**，仍按原则加硬
+
+安全复查对 `internal/devorchestrator/driver.go` 报了 symlink 路径穿越 ✓。
+**核对结论：Worker 今天无法利用它** ✓ ——
+Worker 的 guard **阻断对 `.rddev/` runtime state 的读取** ✓（guard 第 447 行明确如此 ✓），
+写入则被收敛在 worktree + result dir + `/tmp` ✓，因此 `.rddev/runtime/` **不在任何 Worker 的写包络内** ✓
+→ Worker **无法在那里种下一个符号链接** ✓。
+
+**但仍然加了硬** ✓，理由是**这种"今天不可利用"的结论会过期，而成本是一个 flag**：
+
+- `driver.lock` 的打开加 **`O_NOFOLLOW`** ✓ ——**透过链接 `Truncate` 会毁掉链接指向的那个文件** ✓，
+  而 driver 是以 **Supervisor 的权限**运行的 ✓；
+- `driver.json` / `decisions.json` 的**读取**先 `Lstat` 拒符号链接 ✓ ——
+  跟随链接读取会把任意文件的内容**拉进 Supervisor 的视图** ✓；
+- **写入**不必额外处理 ✓：它们走 temp + rename ✓，而 `rename` **替换链接本身**而不是跟随 ✓ ——
+  这一点在注释里说明 ✓，避免下一个人以为漏了一半。
+
+**"谁控制这个路径"在本会话已经是第三次了** ✓：review diff 读过 worktree 之外的符号链接（L1-48）✓、
+驱动脚本写进 Worker 的 worktree（L1-13-7）✓、现在是 driver 自己的锁与状态文件 ✓。
+**三次的答案不同**（不可利用 / 可利用 / 不可利用），**但问题相同** ——
+所以做法统一：**问它，并且不依赖答案保持不变** ✓。
+
+**测试** `TestTheDriverRefusesToFollowASymlink` ✓ **双向验证**：
+撤掉硬化的 `O_NOFOLLOW` + `refuseSymlink` → **FAIL**（"the driver lock followed a symlink —
+it would truncate whatever the link pointed at" ✓）；恢复 → PASS ✓；
+并断言**同位置的真实文件仍然可读写** ✓（守卫不是"什么都拒绝" ✓）。
+
+**一处诚实说明**：**正在运行的 driver（pid 2171109）是用加固前的二进制启动的** ✓。
+该加固针对的是今天不可利用的情形 ✓，**重启 driver 只为它并不划算**（重启虽有接管语义 ✓，
+但会引入不必要的扰动 ✓）。它会在下一次启动时生效 ✓；`rddev status` 的心跳/接管行为不受影响 ✓。
