@@ -83,6 +83,35 @@ $out"
     fi
     log "accepting $task"
     if ! out="$(rddev task accept "$task" 2>&1)"; then
+      # A parallel task merging advances main, which invalidates THIS task's
+      # verdict by design: it was written for a code state that no longer
+      # exists. That is the binding working, not a failure - and the repair is
+      # mechanical, so the loop performs it instead of stopping. A merge
+      # CONFLICT is a different thing and does stop: resolving one is a
+      # judgement call.
+      if echo "$out" | grep -q 'DIFFERENT code state'; then
+        log "$task's verdict is stale (main advanced); advancing its baseline"
+        wt=".rddev/worktrees/$task"
+        if git -C "$wt" -c user.name=supervisor -c user.email=supervisor@post.local \
+             merge main --no-edit >"$wt/.supervise-merge.log" 2>&1; then
+          printf '%s\n' "Baseline advanced: main moved under this task while it was reviewed, so the \
+review verdict no longer describes the composed code. The branch was merged with the \
+current main and your work reapplied unchanged. Re-verify on the merged baseline: run \
+the required tests and make test-integration again, confirm nothing broke, and re-submit \
+RESULT.json (keep the label fields). Do not weaken or delete any test." \
+            > ".rddev/worktrees/$task/.supervise-reason"
+          rddev task reject "$task" --reason-file "$wt/.supervise-reason" >/dev/null 2>&1
+          rm -f "$wt/.supervise-reason"
+          if rddev worker rework "$task" --timeout 60m >/dev/null 2>&1; then
+            log "$task reworking on the advanced baseline"
+            continue
+          fi
+        fi
+        STATUS="decision"
+        DECISION="advancing $task's baseline needs the Supervisor (a merge conflict, or the rework was refused):
+$out"
+        break 2
+      fi
       STATUS="decision"; DECISION="accept refused for $task:
 $out"
       break 2
