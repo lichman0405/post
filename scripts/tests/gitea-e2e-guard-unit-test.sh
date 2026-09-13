@@ -182,7 +182,7 @@ new_tree() { # -> a repo path with the script in place and a dirty file
   printf 'nothing writes these bytes\n' > "$d/internal/config/probe-mode.txt"
   printf 'nor these\n' > "$d/internal/config/probe-time.txt"
   chmod 644 "$d/internal/config/probe-mode.txt" "$d/internal/config/probe-time.txt"
-  # A directory and two symlinks, for the fields the eighth review showed were
+  # A directory and two symlinks, for the fields the seventh review showed were
   # IN the record and pinned by nothing: a probe that only CREATES an entry is
   # named by the entry appearing, so a later refactor could drop what the record
   # says about an entry's kind — a directory's mode, a symlink's target, a
@@ -964,7 +964,7 @@ shell_probes = [
     # Two more of the same kind one field down: writes that change only what the
     # record says about an entry that was already there — a gitdir FILE's
     # mode@mtime, a gitdir DIRECTORY's mode — where the four above all announce
-    # themselves by appearing. The eighth review reverted each of these fields
+    # themselves by appearing. The seventh review reverted each of these fields
     # separately and the suite stayed green.
     'chmod 600 "$ROOT/.git/description"\n',
     'chmod 750 "$ROOT/.git/refs"\n',
@@ -1011,7 +1011,7 @@ worktree_probes = [
     # file whose name starts with `.git`. `-path ./.git` covers it; `-path
     # './.git*'` — a spelling nobody would question in review — drops it.
     'printf "the gate rewrote the ignore rules\\n" > "$ROOT/.gitignore"\n',
-    # The eighth review's three: writes that change only the fields describing
+    # The seventh review's three: writes that change only the fields describing
     # an entry the fixture already had — a directory's mode, a symlink's target,
     # a symlink's own time. A record can name every path in the tree and still
     # be blind to all three, which is what the suite was.
@@ -1295,7 +1295,7 @@ else
 fi
 
 # The read half, in the shape the gate ACTUALLY runs in. This is the control the
-# eighth review asked for, and the reason it is a second control rather than an
+# seventh review asked for, and the reason it is a second control rather than an
 # extension of the one below: that one is built by new_tree, a STANDALONE
 # repository, where the index is `./index` — exactly the spelling the exclusion
 # was written for. In a linked worktree the index is
