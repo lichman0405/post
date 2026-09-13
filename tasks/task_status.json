@@ -898,13 +898,22 @@
       ]
     },
     "T0201": {
-      "status": "ready",
+      "status": "running",
+      "started_at": "2026-09-13T04:49:53Z",
+      "worker_run_id": "run-0f223220a18cc689",
       "history": [
         {
           "from": "todo",
           "to": "ready",
           "at": "2026-09-13T03:58:59Z",
           "run_id": "run-588ed12246e1d034"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-13T04:49:53Z",
+          "run_id": "run-0f223220a18cc689",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -1026,13 +1035,24 @@
       "merged_at": null
     },
     "T0301": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-13T04:49:54Z",
+      "worker_run_id": "run-1b96625507591559",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-13T04:49:54Z",
+          "run_id": "run-4a8968863678c507"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-13T04:49:54Z",
+          "run_id": "run-1b96625507591559",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0302": {
       "status": "todo",

@@ -107,13 +107,24 @@ bash ops/tests/doctor-smoke-test.sh # 宿主端到端自洽性冒烟测试（bas
 ## Supervisor 无人值守驱动（2026-09-13）
 
 ```bash
-PARALLEL=2 MAX_TASKS=0 bash scripts/supervise.sh   # 0 = 不设上限
+setsid rddev drive --parallel 2 > .rddev/runtime/driver.out 2>&1 &   # long-lived process
+rddev status                                                          # driver alive/dead, Workers, decisions
 ```
 
-机械段全自动：dispatch → 等 Worker → collect → review → accept → commit → push → PR →
-等 CI → merge → 再 dispatch。**它只决定下一步尝试什么，从不决定某个 Gate 是否通过**——
-每个动作都经 `rddev`，由 `rddev` 按其自身规则拒绝。
+`rddev drive` 是**独立于 Supervisor 会话生命周期**的长期进程：
 
-停下来（并交回 Supervisor，而非交回用户）的情形：collect 被拒、review 需要改动、
-accept 被拒、push/merge 被拒、CI 红、或 DAG 前沿为空（阶段完成）。
-**它不会因为一个任务结束而停下**——那正是它存在的理由。
+- **单实例**：`flock` 抢占 `.rddev/runtime/driver.lock`；第二个 driver **立即拒绝并指名持有者**
+  （两个 driver 会重复 collect、重复 merge）；
+- **心跳**：`.rddev/runtime/driver.json`——"是否活着"是**可从磁盘读出的事实**，
+  而不是翻进程表推断；`rddev status` 由心跳年龄判定 alive/dead（崩溃的 driver 显示 dead，不是"联系不上"）；
+- **接管**：启动时读磁盘状态，**接管已在运行的 Worker**，绝不重新 spawn；
+- **待决事项**：需要判断的一律写入 `.rddev/runtime/decisions.json`，且**记录它所针对的 run_id**——
+  rework/respawn 改变了那个 run，待决事项即自动清除，driver 自行恢复；
+- **不降低任何 Gate**：每个动作都是**调用 rddev 本身**完成的；driver 只决定"下一步尝试什么"，
+  rddev 按自己的规则拒绝。
+
+契约：driver 是长期进程，**Supervisor 会话是它的一个窗口，不是它的前提**。
+
+回归测试：`tests/acceptance/driver-persistence-e2e.sh`（已接入 acceptance stage / CI / gates.json）——
+断言从"启动后立即退出的父进程"启动的 driver **仍然活着**、被 reparent 到 init、心跳在推进、
+**接管**了已有 Worker 而未重新 spawn、第二个 driver 被拒、以及退出后锁会释放。

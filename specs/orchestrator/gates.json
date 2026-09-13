@@ -191,6 +191,9 @@
         },
         {
           "run": "bash tests/acceptance/supervisor-git-e2e.sh"
+        },
+        {
+          "run": "bash tests/acceptance/driver-persistence-e2e.sh"
         }
       ]
     },

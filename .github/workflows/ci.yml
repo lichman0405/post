@@ -122,6 +122,8 @@ jobs:
         run: bash tests/acceptance/rejection-retry-e2e.sh
       - name: "acceptance: Supervisor git control (four gates before any gh call)"
         run: bash tests/acceptance/supervisor-git-e2e.sh
+      - name: "acceptance: the driver outlives the turn that started it"
+        run: bash tests/acceptance/driver-persistence-e2e.sh
 
   # Stage 5 — Python: lint / type / pytest (configs: ops/ci/ruff.toml,
   # ops/ci/mypy.ini).

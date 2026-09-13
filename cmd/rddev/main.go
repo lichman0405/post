@@ -52,6 +52,8 @@ Usage:
   rddev gate list|run|status|records ...
   rddev git commit|push TASK
   rddev pr open|merge|status TASK
+  rddev drive [--parallel N] [--poll DUR] [--once]   (persistent Supervisor loop)
+  rddev status [--json]                                (driver, workers, decisions)
   rddev db migrate [--url URL]
   rddev workflow TASK
   rddev version
@@ -118,6 +120,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runGit(cmdArgs, stdout, stderr, jsonOut)
 	case "pr":
 		return runPR(cmdArgs, stdout, stderr, jsonOut)
+	case "drive":
+		return runDrive(cmdArgs, stdout, stderr, jsonOut)
+	case "status":
+		return runStatus(cmdArgs, stdout, stderr, jsonOut)
 	case "db":
 		return runDB(cmdArgs, stdout, stderr, jsonOut)
 	case "workflow":
