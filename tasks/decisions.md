@@ -2970,3 +2970,33 @@ accept 用的集成树是从 `main` 这个 **ref** 新建的 detached worktree �
 
 **"记录在盘上"不等于"送达"** ✓。driver 把判断写得很清楚 ✓，清楚到可以放六小时没人看 ✓ ——
 **信息完整性和信息可达性是两件事** ✓，这一轮缺的是后者 ✓。
+
+## L1-20260913-21 — 那条挂着没开的游离分支：它已被 #98 整个取代，删掉
+
+**事实**：`fix/judge-the-task-namespace`（`f2170d1`，我 14:08 写的 ✓，commit message 自洽 ✓，
+但从未开 PR ✓）主张的规则是"**只判 `task/**` 命名空间**" ✓ ——
+修的是"Supervisor 自己的 PR 分支害得 concurrent collect 误报" ✓。
+
+**它被读到的原因正是 T0301** ✓：那条 collect 拒绝里的
+`refs/heads/fix/judge-the-task-namespace` **就是这条分支本身** ✓ ——
+我为修这个假阳性开的分支 ✓，成了这个假阳性的一次实例 ✓。
+
+**合并 main 时冲突，冲突暴露的是规则分歧** ✓：main（**#98** ✓）已经把这条规则做成
+**记录制** ✓ —— `unattributableNewRefs(before, current, ledger)` ✓：
+新 ref **一律判** ✓，除非它**在 Supervisor 的 ref 台账上** ✓。
+记录强于推断 ✓，因为 commit 身份是"谁提交谁填"的字段 ✓（`git -c user.email=…` ✓），
+守卫读它等于对它要防的那一方 fail-open ✓。
+`refsSnapshot` 也已经**包含** `task/**` ✓（只排除 `refs/remotes/**` ✓）—— 我那条改动 main 已有 ✓。
+
+**结论**：`f2170d1` **没有任何一处是 main 没有的** ✓，合并它只会把一条更弱的规则带回来 ✓。
+**已删** ✓：`git merge --abort` ✓ → `git worktree remove` ✓ → `git branch -D` ✓
+（tip `f2170d195eaf…` 记在这里 ✓，可复原 ✓）。
+
+**并做了正确的修法** ✓：把 6 条我自己的 PR 分支 `rddev refs adopt` 进台账 ✓
+（`refs list` 原本就标着 `adopt` ✓）。**改台账比改规则根本** ✓ ——
+断言"这条 ref 是我建的" ✓，而不是推断"这条 ref 不像 Worker 建的" ✓。
+
+### 教训
+
+**一条"待处理"的分支放了 7 小时才被读** ✓ ——
+和 driver 停摆是同一个病 ✓：**东西写下来了，但没有人被叫去看** ✓。
