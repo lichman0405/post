@@ -1,5 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-rd.example/schemas/relation.schema.json",
   "title": "RSGRelation",
   "description": "Entity-shape schema for a persisted scientific object. It is NOT a request DTO: do not bind a client-supplied body directly to it. The fields id, version, schema_ref, lifecycle_state, created_by, created_at and visibility_policy_id are server-authoritative (docs/23 \u00a73, docs/12 \u00a73).",
   "type": "object",
