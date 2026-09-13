@@ -338,3 +338,125 @@ func TestWorkerCollectRefusesUnfinishedRun(t *testing.T) {
 		t.Errorf("task state = %s, want running (collect must not judge an unfinished run)", got)
 	}
 }
+
+// gitIn runs git in dir and fails the test on error (control-plane setup for
+// the refs scenarios below).
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// A ref minted under the Supervisor's own commit identity is still a finding.
+//
+// This is the regression for the fail-open rule: collect used to exempt a new
+// ref whose tip commit carried the repository's configured author email. That
+// email is a field the committer sets — `git -c user.email=…` — so a Worker
+// that got past the guard could launder a ref with one flag. Attribution is now
+// the Supervisor's own record, and nothing about the commit's identity can
+// enter it.
+func TestWorkerCollectRejectsARefCarryingTheSupervisorsIdentity(t *testing.T) {
+	fakeClaudePath(t, "write-scope")
+	t.Setenv("FAKE_CLAUDE_SECONDS", "1")
+	repo := fakeRepo(t)
+
+	spawnAndWaitExited(t, repo, "T0001")
+
+	// The Supervisor's identity, as the old rule read it, then a ref whose
+	// commit claims exactly that identity — made the way a Worker would forge
+	// it, per-invocation rather than through git config.
+	gitIn(t, repo, "config", "user.email", "sup@post.local")
+	gitIn(t, repo, "config", "user.name", "Supervisor")
+	gitIn(t, repo, "checkout", "-q", "-b", "feat/plausible")
+	gitIn(t, repo, "-c", "user.email=sup@post.local", "-c", "user.name=Supervisor",
+		"commit", "-q", "--allow-empty", "-m", "forged identity")
+	gitIn(t, repo, "checkout", "-q", "-")
+
+	// The fixture must actually produce the forgery under test: if the ref's
+	// author is not the configured identity, this test would pass for the wrong
+	// reason and stop testing anything.
+	forged := gitIn(t, repo, "log", "-1", "--format=%ae", "feat/plausible")
+	if configured := gitIn(t, repo, "config", "user.email"); forged != configured {
+		t.Fatalf("fixture: the planted ref's author is %q but the configured identity is %q — no forgery to defeat", forged, configured)
+	}
+
+	code, out, errOut := collectCLI(t, repo, "T0001")
+	if code != 1 {
+		t.Fatalf("collect with a forged-identity ref: exit %d, want 1\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	for _, want := range []string{"collect rejected", "[FAIL] refs", "feat/plausible"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("collect output missing %q:\n%s", want, out)
+		}
+	}
+	if got := stateOf(t, repo, "T0001"); got != "rejected" {
+		t.Errorf("task state = %s, want rejected", got)
+	}
+}
+
+// The legitimate neighbour of the test above, and the real incident it came
+// from: the Supervisor opens a branch while a Worker runs (T0201 was rejected
+// because PR #96's branch appeared mid-run). Recording it — `rddev refs adopt`
+// — attributes it without widening the check.
+func TestWorkerCollectAcceptsASupervisorRecordedRef(t *testing.T) {
+	fakeClaudePath(t, "write-scope")
+	t.Setenv("FAKE_CLAUDE_SECONDS", "1")
+	repo := fakeRepo(t)
+
+	spawnAndWaitExited(t, repo, "T0001")
+
+	gitIn(t, repo, "branch", "feat/rebaseline")
+	code, out, errOut := runWorkerCLI(t, repo, "refs", "adopt", "feat/rebaseline")
+	if code != 0 {
+		t.Fatalf("refs adopt: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	if !strings.Contains(out, "feat/rebaseline") {
+		t.Errorf("adopt did not report the ref it recorded:\n%s", out)
+	}
+
+	code, out, errOut = collectCLI(t, repo, "T0001")
+	if code != 0 {
+		t.Fatalf("collect after adopting the Supervisor's own branch: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	if !strings.Contains(out, "[ok] refs") {
+		t.Errorf("collect output missing the refs pass:\n%s", out)
+	}
+	if got := stateOf(t, repo, "T0001"); got != "verification" {
+		t.Errorf("task state = %s, want verification", got)
+	}
+
+	// `rddev refs list` shows what the ledger holds.
+	code, out, errOut = runWorkerCLI(t, repo, "refs", "list", "--json")
+	if code != 0 {
+		t.Fatalf("refs list: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	var doc struct {
+		Refs []struct {
+			Name   string `json:"name"`
+			Source string `json:"source"`
+		} `json:"refs"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("refs list --json is not JSON: %v\n%s", err, out)
+	}
+	var sawAdopted, sawSpawn bool
+	for _, r := range doc.Refs {
+		switch {
+		case r.Name == "refs/heads/feat/rebaseline" && r.Source == "adopt":
+			sawAdopted = true
+		case strings.HasPrefix(r.Name, "refs/heads/task/T0001-") && r.Source == "spawn":
+			sawSpawn = true
+		}
+	}
+	if !sawAdopted {
+		t.Errorf("the adopted ref is not in the ledger: %s", out)
+	}
+	if !sawSpawn {
+		t.Errorf("spawn did not record the task branch — a sibling Worker would see it as a new ref: %s", out)
+	}
+}

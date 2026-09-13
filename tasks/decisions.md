@@ -2581,3 +2581,48 @@ new ref(s) created during the run: refs/heads/feat/rebaseline 4756c335…
 
 **三次的教训是同一条**：**修一个检查之前先问它的目的是什么** ✓ ——
 我三次都在优化"怎么比" ✓，而问题是"比什么" ✓。
+
+---
+
+## L1-20260913-15 — ★★ 安全复查命中 L1-20260913-14 自己写下的"限制"：**fail-open 的 Gate 就是缺陷**
+
+**背景**：对 PR #97 的提交做安全复查，发现 `worker_collect.go` 的 refs 检查是
+**Security Gate Bypass / Fail-open (Forgeable Commit Identity)**。
+
+**这个发现成立** ✓，而且**L1-20260913-14 里我自己把它当成"诚实的边界"写进了注释** ✓：
+
+> LIMITATION：伪造 Supervisor 身份的 Worker 可以绕过本规则（`git -c user.email=…` 不像
+> `git config` 那样被拦）✓。
+
+**"写下来"不等于"修好"** ✓ ✓。这条注释描述的是一个**安全检查读取了对手可以设置的字段** ✓ ——
+author/committer identity 由**提交者本人**选择 ✓，`git -c user.email=… commit-tree` 一个 flag 就能伪造 ✓。
+一个**只对"已经绕过 guard 的 Worker"生效**的纵深防御 ✓，**恰好对那个 Worker 无效** ✓ ——
+那么它守的到底是什么？**为什么我上一轮会用"反正它已经绕过 guard 了"来给自己开脱** ✓。
+
+### 修复：把"推断"换成"记录"
+
+- **`internal/devorchestrator/ref_ledger.go`**（新）：Supervisor 自己的 ref 台账 ✓
+  （`.rddev/runtime/supervisor-refs.json`，与 driver 的 lock/status/decisions 同目录 ✓）。
+  **attribution 不再读 commit 的任何字段** ✓：新出现的 ref 名**只有在台账上**才算 Supervisor 的 ✓。
+- **写入点**：spawn（分支创建即记录 ✓）、commit（跟随分支移动 ✓）、rebaseline（同上 ✓）、
+  `rddev refs adopt`（手工创建的分支 ✓）、`rddev refs reconcile` / driver 启动时的 reconcile
+  （**早于台账存在的 dispatch** ✓）。
+- **fail-closed**：台账**读不出来 = error** ✓，绝不静默当成"空台账" ✓
+  （那会把**每一个并发 dispatch 都拒掉** ✓；反过来则正是要终结的 fail-open ✓）。
+- **`refAuthor` 已删除** ✓ ——**代码里不再存在"读身份"这条路径** ✓。
+
+### 验收
+
+- `TestAForgedCommitIdentityDoesNotLaunderANewRef`：**先断言 fixture 真的伪造成功** ✓
+  （`%ae` == 配置身份 ✓）——否则这测试会因为"根本没有伪造"而**假绿** ✓；
+  然后断言**同样的 ref，只有"在台账上"这一件事改变结果** ✓。
+- `TestWorkerCollectRejectsARefCarryingTheSupervisorsIdentity`（CLI 端到端，**对旧代码会失败** ✓）✓
+- `TestWorkerCollectAcceptsASupervisorRecordedRef`（adopt 路径 ✓，并断言 spawn 确实记了台账 ✓）
+- `TestAnUnreadableRefLedgerIsNotAnEmptyLedger` / `TestRefLedgerRefusesASymlink` /
+  `TestReconcileRecordsDispatchBranchesOnly`（**task 形状但无 dispatch 记录的 ref 不被收编** ✓）
+
+### 教训
+
+**把一个已知的 fail-open 写成注释，是在给缺陷做记录，不是在修缺陷** ✓。
+检查的**信任锚**必须是**对手不能设置的东西** ✓；如果它读了对手的字段 ✓，
+那它**不是弱一点的 Gate，而是假的 Gate** ✓。

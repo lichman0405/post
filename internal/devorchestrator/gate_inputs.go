@@ -26,10 +26,15 @@ import (
 // the tampered values. The reaper also writes its exit.status into this
 // directory, so the exit code collect trusts is not Worker-writable either.
 
+// RuntimeTasksRoot is the parent of every task's authoritative input dir.
+func RuntimeTasksRoot(repoRoot string) string {
+	return filepath.Join(repoRoot, ".rddev", "runtime", "tasks")
+}
+
 // RuntimeTasksDir returns the Supervisor-owned authoritative input directory
 // for one task (outside the Worker's write envelope).
 func RuntimeTasksDir(repoRoot, taskID string) string {
-	return filepath.Join(repoRoot, ".rddev", "runtime", "tasks", taskID)
+	return filepath.Join(RuntimeTasksRoot(repoRoot), taskID)
 }
 
 // GateInputs is the authoritative spawn-time record collect judges by. Every
