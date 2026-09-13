@@ -142,11 +142,20 @@ func RedactTextForOutput(v string) string {
 //
 // and the credential goes into the committed file. RedactURL cannot see this
 // from one token: it needs both the "://" and the "@". So a token that is a URL
-// whose userinfo is still OPEN — userinfoIsOpen below has the two ways it can
-// look — is not a token yet. It absorbs the separator and the next token when
-// that token supplies the "@", and the credential is the whole span between
-// them. The separators inside it are part of the password, so they are redacted
-// with it rather than copied.
+// whose userinfo is still OPEN — userinfoCrosses below decides that, and the
+// separator is half the question — is not a token yet. It absorbs the separator
+// and the next token when that token supplies the "@", and the credential is the
+// whole span between them. The separators inside it are part of the password, so
+// they are redacted with it rather than copied.
+//
+// Where the wrap lands is not fixed, and the colon was the wrong thing to lean
+// on for deciding that a run is unfinished. A `:<newline>` is one of four
+// positions; `postgres://postgres\<newline>:hunter2@h` and
+// `postgres://\<newline>postgres:hunter2@h` put the first token where neither of
+// userinfoIsOpen's two tests fires, because the colon it looks for is on the
+// other side of the wrap. The shell line continuation is what is actually
+// visible at all four, so it is what userinfoCrosses requires before it lets one
+// line be joined to the next.
 //
 // Keeping that narrow is what stops this collapsing back into the whole-string
 // rule the function exists to replace. Two shapes that look similar are left
@@ -162,10 +171,17 @@ func RedactTextForOutput(v string) string {
 //
 // It is the second of those that would otherwise repeat the old bug: the old
 // rule redacted the host and deleted everything between, on a line that
-// contained no credential at all. The residual gap is a password containing
-// MORE than one whitespace run ("u:pa ss word@h"), where the next token alone
-// does not reach the "@"; that is left as-is and named here rather than papered
-// over, because absorbing further tokens is exactly the over-redaction above.
+// contained no credential at all. That is still true with a newline instead of a
+// space, and by the same route — the fix is only that a newline now has to be
+// earned by a continuation, so
+//
+//	postgres://host:5432<newline>owner@example.com
+//
+// is left alone rather than becoming `postgres://host:***@example.com`. The
+// residual gap is a password containing MORE than one whitespace run
+// ("u:pa ss word@h"), where the next token alone does not reach the "@"; that is
+// left as-is and named here rather than papered over, because absorbing further
+// tokens is exactly the over-redaction above.
 func redactUserinfoPerToken(v string) string {
 	if !strings.Contains(v, "://") {
 		return v
@@ -187,25 +203,60 @@ func redactUserinfoPerToken(v string) string {
 			k++
 		}
 		tok := v[j:k]
-		if userinfoIsOpen(tok) {
-			m := k
-			for m < len(v) && isSpaceByte(v[m]) {
-				m++
-			}
-			n := m
-			for n < len(v) && !isSpaceByte(v[n]) {
-				n++
-			}
-			if n > m && strings.ContainsRune(v[m:n], '@') {
-				b.WriteString(redactOpenUserinfo(tok + v[k:m] + v[m:n]))
-				i = n
-				continue
-			}
+		m := k
+		for m < len(v) && isSpaceByte(v[m]) {
+			m++
+		}
+		n := m
+		for n < len(v) && !isSpaceByte(v[n]) {
+			n++
+		}
+		if n > m && strings.ContainsRune(v[m:n], '@') && userinfoCrosses(tok, v[k:m]) {
+			b.WriteString(redactOpenUserinfo(tok + v[k:m] + v[m:n]))
+			i = n
+			continue
 		}
 		b.WriteString(RedactURL(tok))
 		i = k
 	}
 	return b.String()
+}
+
+// userinfoCrosses reports whether the separator after tok may be crossed — that
+// is, whether tok and the token after it are really one token that whitespace
+// happens to have cut in half.
+//
+// The two separators are not the same question, and treating them as one is
+// what let a credential through at two of the four wrap positions.
+//
+// A space or a tab is crossed on userinfoIsOpen alone: the run before it looks
+// like a userinfo still being written, so it is one.
+//
+// A NEWLINE is crossed only at a VISIBLE cut. A shell line continuation puts a
+// "\" at the end of the line — the token did not end there, it was cut there,
+// and everything the shell joins onto that line belongs to it. Nothing else
+// justifies joining two lines: a line that ends without one has ended. Without
+// this, `postgres://host:5432` on one line and an email address on the next are
+// read as a userinfo that spans them, the port is deleted and an address is
+// rewritten on a line containing no credential at all.
+//
+// Requiring the "\" is also what closes the two positions userinfoIsOpen cannot
+// see. The token on the first line is then only required to BE half a token —
+// "://", no "@" — because a dangling continuation is itself proof of that: at
+//
+//	POSTGRES_TEST_ADMIN_URL=postgres://postgres\<newline>:hunter2@127.0.0.1:5432/post
+//	POSTGRES_TEST_ADMIN_URL=postgres://\<newline>postgres:hunter2@127.0.0.1:5432/post
+//
+// the first token is `postgres://postgres\` and `postgres://\`, which have no
+// colon and nothing credential-shaped after the "//". userinfoIsOpen says a
+// complete URL with no userinfo; the continuation says otherwise, and is right.
+func userinfoCrosses(tok, sep string) bool {
+	if strings.ContainsAny(sep, "\n\r") {
+		return strings.HasSuffix(tok, `\`) &&
+			strings.Contains(tok, "://") &&
+			!strings.ContainsRune(tok, '@')
+	}
+	return userinfoIsOpen(tok)
 }
 
 // userinfoIsOpen reports whether a token carries "://" and then the beginning
@@ -218,6 +269,9 @@ func redactUserinfoPerToken(v string) string {
 // in progress, and a URL whose host is `ghp_xxx` is not a thing. The second
 // test is what keeps `postgres://host` (a real host, no path) a complete URL:
 // it is neither colon-leading nor credential-shaped, so nothing is absorbed.
+//
+// This answers only the space-and-tab half of the question; a newline is
+// userinfoCrosses' to decide, and it asks a narrower one.
 func userinfoIsOpen(tok string) bool {
 	if strings.ContainsRune(tok, '@') {
 		return false

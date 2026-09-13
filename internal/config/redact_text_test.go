@@ -185,6 +185,23 @@ func TestRedactTextForOutputRedactsAUserinfoThatSpansWhitespace(t *testing.T) {
 			in:   "clone https://ghp_AAAAAAAAAAAAAAAAAAAAAAAA\\\n@github.com/o/r.git",
 			want: "clone https://***@github.com/o/r.git",
 		},
+		// The wrap does not have to land after the colon. At these two
+		// positions the first token is `postgres://postgres\` or `postgres://\`
+		// — no colon, nothing credential-shaped after the "//" — so a rule that
+		// asks only "does this look like a userinfo" calls it a complete URL
+		// with no userinfo, and the credential rides into the committed file
+		// behind a second token that has no "://" of its own. What is visible
+		// at all four positions is the line continuation.
+		{
+			what: "a line continuation landing before the colon",
+			in:   "POSTGRES_TEST_ADMIN_URL=postgres://postgres\\\n:" + proseCredential + "@127.0.0.1:5432/post go test -count=1",
+			want: "POSTGRES_TEST_ADMIN_URL=postgres://postgres\\\n:***@127.0.0.1:5432/post go test -count=1",
+		},
+		{
+			what: "a line continuation landing immediately after the scheme",
+			in:   "POSTGRES_TEST_ADMIN_URL=postgres://\\\npostgres:" + proseCredential + "@127.0.0.1:5432/post go test -count=1",
+			want: "POSTGRES_TEST_ADMIN_URL=postgres://\\\npostgres:***@127.0.0.1:5432/post go test -count=1",
+		},
 		// The two shapes that must NOT be touched, and the reason the rule is
 		// narrow: absorbing the following token whenever the run has an "@"
 		// would redact a host and delete the middle of a line that contains no
@@ -198,6 +215,22 @@ func TestRedactTextForOutputRedactsAUserinfoThatSpansWhitespace(t *testing.T) {
 			what: "a host:port that is not a userinfo, followed by an email address",
 			in:   "PGURL=postgres://host:5432 go test --to dev@example.com",
 			want: "PGURL=postgres://host:5432 go test --to dev@example.com",
+		},
+		// The same shape with the "@" on the NEXT line rather than two tokens
+		// away. Here the colon test alone says "open", the following token does
+		// have an "@", and the span is rewritten: the port is deleted, an email
+		// becomes a userinfo, and two lines are joined — on a line with no
+		// credential anywhere. A newline is not evidence of a wrap; a trailing
+		// continuation is.
+		{
+			what: "a host:port with no userinfo and an address on the next line",
+			in:   "PGURL=postgres://host:5432\n      owner@example.com",
+			want: "PGURL=postgres://host:5432\n      owner@example.com",
+		},
+		{
+			what: "a complete URL with no userinfo and an address on the next line",
+			in:   "PGURL=postgres://h/db\n      owner@example.com",
+			want: "PGURL=postgres://h/db\n      owner@example.com",
 		},
 	}
 	for _, tc := range cases {
