@@ -277,11 +277,20 @@ func TestWorkerCollectSurfacesDaemonizedListener(t *testing.T) {
 	//     listener not surfaced" — a red for a reason that is not the code. Seen
 	//     with a `python3 -m http.server 18981` holding it.
 	//   - the pre-existing listener's port: python exits ("Address already in
-	//     use"), nothing is listening at the baseline, and the test PASSES with
-	//     its negative half missing. Seen with a holder on 18982: the pre-fix
-	//     test reported ok. A silently vacuous proof is the worse of the two.
+	//     use") and the test still PASSES — but that pass is NOT vacuous, and a
+	//     previous version of this comment said it was. The holder is in the
+	//     spawn baseline, so the negative assertion below is live against it:
+	//     disabling the baseline subtraction makes the run fail on "the
+	//     pre-existing listener … was flagged", on the holder. What is lost is
+	//     narrower — the listener being asserted about is not the one this test
+	//     started. Seen with a holder on 18982: the pre-fix test reported ok.
 	//
-	// Asking the kernel closes the first. The wait below closes the second.
+	// Asking the kernel closes the first. The wait below closes the third case,
+	// which IS the vacuous one: nothing holds the port and the fixture's python
+	// fails for any reason, so nothing is listening at the baseline, the
+	// assertion below cannot fail, and the run is green having proved nothing.
+	// Measured with a stub python3 that cannot serve: without the wait the test
+	// reported ok; with it, the run is abandoned rather than reported green.
 	ports := freePorts(t, 2)
 	port, prePort := ports[0], ports[1]
 	t.Setenv("FAKE_CLAUDE_PORT", strconv.Itoa(port))
@@ -378,7 +387,11 @@ func waitForListener(port int, timeout time.Duration) error {
 	for time.Now().Before(deadline) {
 		conn, err := net.DialTimeout("tcp", addr, 250*time.Millisecond)
 		if err == nil {
-			return conn.Close()
+			// The close result is not this function's question: the contract is
+			// "nil only when something accepted", and returning Close's error
+			// would report a successful accept as "nothing came up".
+			_ = conn.Close()
+			return nil
 		}
 		last = err
 		time.Sleep(20 * time.Millisecond)
