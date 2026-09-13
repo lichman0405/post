@@ -180,18 +180,34 @@ func validateInto(doc any, schema map[string]any, where string, errs *[]error) {
 			validateInto(v, items, where+"["+strconv.Itoa(i)+"]", errs)
 		}
 	}
+	// The content keywords apply only to values of the type they govern, which
+	// is what draft 2020-12 says and what the `type` list already decides.
+	// They used to fire on any value of another type — "!isArr ||" and
+	// friends — which made a schema that admits null alongside a number
+	// unusable: {"type": ["integer","null"], "minimum": 0} rejected the null
+	// with "<nil> is below minimum 0".
+	//
+	// That is not hypothetical. On 14 Sep 2026 a Reviewer said "this finding is
+	// not line-specific" the only way review-verdict.schema.json allows —
+	// line: null — in an otherwise approving verdict, and rddev review collect
+	// refused it. claude's own --json-schema validation of the same document
+	// (santhosh-tekuri/jsonschema/v6, the library this repo already depends on)
+	// had accepted it: the Worker was told to fix something that was not wrong,
+	// by a second validator that disagreed with the first about one document.
+	//
+	// uniqueItems below already had the right shape. These four did not.
 	if n, ok := schema["minItems"].(float64); ok {
-		if arr, isArr := doc.([]any); !isArr || len(arr) < int(n) {
+		if arr, isArr := doc.([]any); isArr && len(arr) < int(n) {
 			*errs = append(*errs, fmt.Errorf("%s: expected at least %d items", where, int(n)))
 		}
 	}
 	if n, ok := schema["minLength"].(float64); ok {
-		if s, isStr := doc.(string); !isStr || len(s) < int(n) {
+		if s, isStr := doc.(string); isStr && len(s) < int(n) {
 			*errs = append(*errs, fmt.Errorf("%s: expected a string of at least %d characters", where, int(n)))
 		}
 	}
 	if n, ok := schema["minimum"].(float64); ok {
-		if num, isNum := doc.(float64); !isNum || num < n {
+		if num, isNum := doc.(float64); isNum && num < n {
 			*errs = append(*errs, fmt.Errorf("%s: %v is below minimum %v", where, doc, n))
 		}
 	}
@@ -208,18 +224,15 @@ func validateInto(doc any, schema map[string]any, where string, errs *[]error) {
 		}
 	}
 	if pat, ok := schema["pattern"].(string); ok {
-		s, isStr := doc.(string)
-		if !isStr {
-			*errs = append(*errs, fmt.Errorf("%s: pattern is set but value is not a string", where))
-			return
-		}
-		re, err := regexp.Compile(pat)
-		if err != nil {
-			*errs = append(*errs, fmt.Errorf("%s: schema pattern %q does not compile: %w", where, pat, err))
-			return
-		}
-		if !re.MatchString(s) {
-			*errs = append(*errs, fmt.Errorf("%s: %q does not match pattern %q", where, s, pat))
+		if s, isStr := doc.(string); isStr {
+			re, err := regexp.Compile(pat)
+			if err != nil {
+				*errs = append(*errs, fmt.Errorf("%s: schema pattern %q does not compile: %w", where, pat, err))
+				return
+			}
+			if !re.MatchString(s) {
+				*errs = append(*errs, fmt.Errorf("%s: %q does not match pattern %q", where, s, pat))
+			}
 		}
 	}
 	if ui, ok := schema["uniqueItems"]; ok {
