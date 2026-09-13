@@ -206,7 +206,7 @@ func validateInto(doc any, schema map[string]any, where string, errs *[]error) {
 	// value of another type, which is the same mistake. It is latent rather
 	// than live, because the only schemas this validator is handed are
 	// task-package, worker-result and review-verdict — but
-	// specs/orchestrator/worker-registry.schema.json:27 is a real instance of
+	// specs/orchestrator/worker-registry.schema.json:26 is a real instance of
 	// the shape ("listeners_before": {"type": ["array","null"], "items": …}), so
 	// the next schema to add that pairing meets this bug. Left alone here
 	// deliberately: those guards also stop the traversal descending, so
