@@ -98,7 +98,18 @@ if git -c user.name=g3 -c user.email=g3@test push -q \
 else
   fail "push failed: $(tail -2 "$WORK/push.err")"
 fi
-cd "$ROOT"
+
+# Deliberately still inside $WORK/work. Every git command from here down is a
+# probe against the repository this script just created in Gitea, and the clone
+# is the only tree this file may write to. An earlier version returned to $ROOT
+# here, which sent both probes below into the tree UNDER TEST: the "should not
+# land" commit landed in the graded repository — it moved that tree's HEAD and
+# its task branch, and added a README.md that the task's scope never allowed.
+# T0301's delivery was rejected for a README.md its Worker never touched, and
+# the gate reported "the Worker moved HEAD (Git control-plane)". A G3 step that
+# writes to the tree it grades can fail any task, on any branch, for a change
+# no Worker made. The clone exists for exactly this; stay in it. The pushes
+# below still address the Gitea repository — the remote URL is absolute.
 
 # --- two-layer main protection (T0302's premise) ------------------------------
 PROT='{"branch_name":"main","enable_push":false,"required_approvals":1,"enable_status_check":false}'
