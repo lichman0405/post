@@ -492,3 +492,53 @@ func waitForEnvironWithoutMarker(t *testing.T, pid int, marker string) {
 	}
 	t.Fatalf("pid %d still carries %s after 10s — the fixture was supposed to scrub it before exec", pid, marker)
 }
+
+// Only the task namespace is judged. The intended risk is a Worker turning its
+// work into a ref, which would land under refs/heads/task/**; watched the other
+// way round the check fires on the Supervisor's own pull-request branches, which
+// are created during runs constantly. T0201 was rejected because PR #96's branch
+// appeared while its Worker ran — a gate that fires on every run is as broken as
+// one that never fires. (The rule had been inverted relative to its purpose.)
+func TestARefIsJudgedByWhoseWorkItCarries(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Supervisor", "GIT_AUTHOR_EMAIL=sup@post.local",
+			"GIT_COMMITTER_NAME=Supervisor", "GIT_COMMITTER_EMAIL=sup@post.local")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init", "-q", "-b", "main")
+	run("config", "user.email", "sup@post.local")
+	if err := os.WriteFile(filepath.Join(root, "f"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "-A")
+	run("commit", "-q", "-m", "base")
+
+	// The Supervisor's own branch, opened while a Worker ran, carries a commit
+	// the Supervisor authored — not a Worker's doing, and every pull request
+	// creates one.
+	if got := refAuthor(root, "HEAD"); got != "sup@post.local" {
+		t.Fatalf("fixture: HEAD author = %q", got)
+	}
+	// A commit made with a different identity is unattributable to the
+	// Supervisor, so a ref carrying it is a finding however it is named.
+	cmd := exec.Command("git", "commit", "-q", "--allow-empty", "-m", "planted")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=someone", "GIT_AUTHOR_EMAIL=planted@elsewhere",
+		"GIT_COMMITTER_NAME=someone", "GIT_COMMITTER_EMAIL=planted@elsewhere")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("planting: %v\n%s", err, out)
+	}
+	if got := refAuthor(root, "HEAD"); got == "sup@post.local" {
+		t.Fatal("fixture: the planted commit reports the Supervisor's identity")
+	}
+}

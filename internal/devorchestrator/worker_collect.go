@@ -232,7 +232,38 @@ func Collect(opts *CollectOpts) (*CollectReport, error) {
 	if err != nil {
 		return report, err
 	}
-	newRefs := newRefsSince(rec.RefsBefore, currentRefs)
+	// Judge a new ref only when its tip is NOT the Supervisor's own work.
+	//
+	// The question that separates the two cases is not the ref's name — a Worker
+	// turning its work into a ref and the Supervisor opening a pull-request
+	// branch are both "a new ref" — it is whose work the ref carries. The
+	// Supervisor commits under the repository's configured identity; a Worker's
+	// worktree has no such identity, so anything else is unattributable and is
+	// a finding.
+	//
+	// Two wrong rules preceded this one. "Any new ref" rejected T0101 for a ref
+	// that had merely moved (L1-20260912-35), and "the task namespace only"
+	// rejected T0201 for PR #96's branch while letting a planted tag through —
+	// which the existing test correctly caught. Both times the comparison was
+	// fixed and the rule was not.
+	// LIMITATION, stated because it is the honest boundary of this rule: a Worker
+	// that forges the Supervisor's commit identity defeats it (git -c user.email=…
+	// is not blocked the way `git config` is). Such a Worker has already bypassed
+	// the guard — the precondition for everything here — and head-baseline still
+	// catches any commit it makes in its own worktree, which is the mechanism
+	// that actually covers the case. This check is defence in depth against a
+	// Worker that got past layers it should not have; it is not the layer.
+	supervisorEmail, err := gitOutput(repoRoot, "config", "user.email")
+	if err != nil {
+		supervisorEmail = ""
+	}
+	var newRefs []string
+	for _, r := range newRefsSince(rec.RefsBefore, currentRefs) {
+		if supervisorEmail != "" && refAuthor(repoRoot, refName(r)) == supervisorEmail {
+			continue // the Supervisor's own branch, opened while this Worker ran
+		}
+		newRefs = append(newRefs, r)
+	}
 	sort.Strings(newRefs)
 	if len(newRefs) > 0 {
 		fail("refs", fmt.Sprintf("new ref(s) created during the run: %s — creating refs is Git control-plane", strings.Join(newRefs, ", ")))
@@ -587,6 +618,17 @@ func newRefsSince(before, current []string) []string {
 		if !seen[refName(r)] {
 			out = append(out, r)
 		}
+	}
+	return out
+}
+
+// refAuthor returns the author email of the commit a ref points at. "" when the
+// ref is unreadable. Used to decide whether a new ref carries the Supervisor's
+// own work (excluded) or unrelated work (a finding).
+func refAuthor(repoRoot, ref string) string {
+	out, err := gitOutput(repoRoot, "log", "-1", "--format=%ae", ref)
+	if err != nil {
+		return ""
 	}
 	return out
 }
