@@ -80,38 +80,38 @@ func EmitHuman(w io.Writer, scriptName string, m *measurements, checks []Check, 
 // JSON field order is part of the contract (ops/doctor-output.schema.json and
 // the reference implementation): struct field order = emission order.
 type environmentJSON struct {
-	Kernel           string `json:"kernel"`
-	Arch             string `json:"arch"`
-	DistroID         string `json:"distro_id"`
-	DistroVersionID  string `json:"distro_version_id"`
-	DistroPretty     string `json:"distro_pretty"`
-	Codename         string `json:"codename"`
-	WSL              string `json:"wsl"`
-	RepoPath         string `json:"repo_path"`
-	RepoFSMount      string `json:"repo_fs_mount"`
+	Kernel          string `json:"kernel"`
+	Arch            string `json:"arch"`
+	DistroID        string `json:"distro_id"`
+	DistroVersionID string `json:"distro_version_id"`
+	DistroPretty    string `json:"distro_pretty"`
+	Codename        string `json:"codename"`
+	WSL             string `json:"wsl"`
+	RepoPath        string `json:"repo_path"`
+	RepoFSMount     string `json:"repo_fs_mount"`
 }
 
 type baselinesJSON struct {
-	Go           string `json:"go"`
-	Node         string `json:"node"`
-	Python3      string `json:"python3"`
-	Psql         string `json:"psql"`
-	RedisCLI     string `json:"redis-cli"`
-	Git          string `json:"git"`
-	GitLFS       string `json:"git-lfs"`
-	Jq           string `json:"jq"`
-	Make         string `json:"make"`
-	Shellcheck   string `json:"shellcheck"`
+	Go            string `json:"go"`
+	Node          string `json:"node"`
+	Python3       string `json:"python3"`
+	Psql          string `json:"psql"`
+	RedisCLI      string `json:"redis-cli"`
+	Git           string `json:"git"`
+	GitLFS        string `json:"git-lfs"`
+	Jq            string `json:"jq"`
+	Make          string `json:"make"`
+	Shellcheck    string `json:"shellcheck"`
 	DockerCompose string `json:"docker-compose"`
-	Claude       string `json:"claude"`
-	UV           string `json:"uv"`
-	Pnpm         string `json:"pnpm"`
-	CPU          string `json:"cpu"`
-	RAM          string `json:"ram"`
-	Swap         string `json:"swap"`
-	Disk         string `json:"disk"`
-	FD           string `json:"fd"`
-	DockerDisk   string `json:"docker-disk"`
+	Claude        string `json:"claude"`
+	UV            string `json:"uv"`
+	Pnpm          string `json:"pnpm"`
+	CPU           string `json:"cpu"`
+	RAM           string `json:"ram"`
+	Swap          string `json:"swap"`
+	Disk          string `json:"disk"`
+	FD            string `json:"fd"`
+	DockerDisk    string `json:"docker-disk"`
 }
 
 type checkJSON struct {
