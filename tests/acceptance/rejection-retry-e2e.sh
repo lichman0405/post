@@ -10,7 +10,11 @@
 #     same session id, rejection reasons carried in the prompt) and the second
 #     attempt is collected and accepted;
 #   - reject -> worker respawn starts a NEW session and resets the rejected
-#     worktree (the rejected attempt's leftover file is gone).
+#     worktree (the rejected attempt's leftover file is gone);
+#   - a re-dispatched Review Worker never inherits the previous attempt's
+#     verdict: an earlier RESULT.json is archived at spawn and cannot be
+#     collected as the new run's judgement, and a verdict that predates the run
+#     it is collected for is refused even when it is put back by hand.
 #
 # Runnable on a host with bash + coreutils + git + go + python3.
 set -u
@@ -24,7 +28,7 @@ fg_build "$FG_SCRATCH" || exit 1
 
 TASKS='{
   "version": 1,
-  "task_count": 2,
+  "task_count": 3,
   "phases": [{"id": "P0", "name": "e2e"}],
   "tasks": [
     {"id": "T0001", "phase": "P0", "phase_name": "e2e", "title": "retry task one",
@@ -39,6 +43,13 @@ TASKS='{
      "requirements": ["respawn after rejection"],
      "deliverables": ["internal/config/deliverable.txt"],
      "acceptance_criteria": ["respawn starts from a clean worktree"],
+     "tests": ["e2e-check.sh"],
+     "allowed_scope": ["internal/config/**"]},
+    {"id": "T0003", "phase": "P0", "phase_name": "e2e", "title": "re-reviewed task",
+     "v1_required": false, "dependencies": [],
+     "requirements": ["be reviewed again after the code moves"],
+     "deliverables": ["internal/config/deliverable.txt"],
+     "acceptance_criteria": ["every verdict collected belongs to the run that produced it"],
      "tests": ["e2e-check.sh"],
      "allowed_scope": ["internal/config/**"]}
   ]
@@ -191,5 +202,104 @@ S2="$(printf '%s\n' "$SESSIONS" | sed -n 2p)"
 [ ! -e "$REPO/.rddev/worktrees/T0002/internal/config/leftover.txt" ] && fg_ok "respawn reset the rejected worktree (leftover gone)" || fg_fail "rejected leftover still present after respawn"
 fg_run "$REPO" task accept T0002
 fg_assert_eq 0 "$FG_RC" "task accept T0002 after respawn"
+
+# --- T0003: a re-dispatched review never inherits the old verdict ---------
+# A verdict describes the code of ONE attempt. The Reviewer may leave
+# RESULT.json unwritten (its verdict is also carried by the session log), and
+# collect prefers the file — so a RESULT.json surviving from an earlier attempt
+# would be recorded as the NEW attempt's judgement: an approve outliving the
+# rework that invalidated it, with nobody having looked at the current code.
+# Both ways such a file can be collected are pinned here.
+cat > "$FG_SCRATCH/review-approve.sh" <<'EOF'
+#!/usr/bin/env bash
+set -u
+python3 - <<'PY'
+import json, os
+rdir = os.environ["POST_WORKER_RESULT_DIR"]
+task = os.environ["POST_WORKER_TASK_ID"]
+task = task[:-len("-review")] if task.endswith("-review") else task
+json.dump({"task_id": task, "verdict": "approve",
+           "summary": "reads correctly", "findings": [], "risks": []},
+          open(os.path.join(rdir, "RESULT.json"), "w"))
+PY
+EOF
+chmod +x "$FG_SCRATCH/review-approve.sh"
+fg_fake_claude "$FG_SCRATCH/bin/claude-approve" "$FG_SCRATCH/review-approve.sh"
+
+# A Reviewer that completes the session and writes no verdict at all.
+printf '#!/usr/bin/env bash\nset -u\nprintf "no verdict written\\n"\n' > "$FG_SCRATCH/review-silent.sh"
+chmod +x "$FG_SCRATCH/review-silent.sh"
+fg_fake_claude "$FG_SCRATCH/bin/claude-silent" "$FG_SCRATCH/review-silent.sh"
+
+# The earlier attempt's verdict, put back exactly as it was — mtime included.
+cat > "$FG_SCRATCH/review-replay.sh" <<'EOF'
+#!/usr/bin/env bash
+set -u
+rdir="$POST_WORKER_RESULT_DIR"
+for f in "$rdir"/RESULT.superseded-*.json; do
+  [ -e "$f" ] || continue
+  cp -p "$f" "$rdir/RESULT.json"
+  break
+done
+EOF
+chmod +x "$FG_SCRATCH/review-replay.sh"
+fg_fake_claude "$FG_SCRATCH/bin/claude-replay" "$FG_SCRATCH/review-replay.sh"
+
+REVIEW_DIR="$REPO/.rddev/workers/T0003-review"
+
+fg_run "$REPO" task ready T0003
+fg_assert_eq 0 "$FG_RC" "task ready T0003"
+fg_run "$REPO" worker spawn T0003 --claude-bin "$FG_SCRATCH/bin/claude"
+fg_assert_eq 0 "$FG_RC" "worker spawn T0003"
+fg_wait_exit "$REPO" T0003 30 || fg_fail "worker T0003 did not exit"
+fg_run "$REPO" worker collect T0003
+fg_assert_eq 0 "$FG_RC" "worker collect T0003"
+fg_run "$REPO" task inspect T0003 --json
+fg_assert_contains '"verification"' "$FG_OUT" "T0003 is in verification"
+
+fg_run "$REPO" review spawn T0003 --claude-bin "$FG_SCRATCH/bin/claude-approve"
+fg_assert_eq 0 "$FG_RC" "review spawn T0003 (attempt 1)"
+fg_wait_exit "$REPO" T0003-review 30 || fg_fail "review T0003 attempt 1 did not exit"
+fg_run "$REPO" review collect T0003
+fg_assert_eq 0 "$FG_RC" "review collect T0003 (attempt 1)"
+fg_assert_contains "approve" "$FG_OUT" "attempt 1's verdict is approve"
+
+# The code moves: exactly the rework a second review exists for.
+echo "more" >> "$REPO/.rddev/worktrees/T0003/internal/config/deliverable.txt"
+
+fg_run "$REPO" review spawn T0003 --claude-bin "$FG_SCRATCH/bin/claude-silent"
+fg_assert_eq 0 "$FG_RC" "review spawn T0003 (attempt 2, writing no verdict)"
+fg_wait_exit "$REPO" T0003-review 30 || fg_fail "review T0003 attempt 2 did not exit"
+if ls "$REVIEW_DIR"/RESULT.superseded-*.json >/dev/null 2>&1; then
+  fg_ok "the previous verdict was archived under the attempt it belongs to"
+else
+  fg_fail "the previous attempt's verdict was not archived"
+fi
+if [ -e "$REVIEW_DIR/RESULT.json" ]; then
+  fg_fail "attempt 1's verdict is still in place when attempt 2 is collected"
+else
+  fg_ok "the new attempt starts with no verdict of its own"
+fi
+fg_run "$REPO" review collect T0003
+fg_assert_eq 1 "$FG_RC" "collect refuses a run that produced no verdict"
+fg_assert_not_contains "review ok — approve" "$FG_OUT" "an earlier attempt's approve is NOT recorded as this run's verdict"
+
+# ... and a verdict that survives anyway (here: put back with its original
+# mtime) is refused for the reason that makes the archive a belt rather than
+# the only brace: it belongs to a run that has ended.
+fg_run "$REPO" review spawn T0003 --claude-bin "$FG_SCRATCH/bin/claude-replay"
+fg_assert_eq 0 "$FG_RC" "review spawn T0003 (attempt 3, the old verdict put back)"
+fg_wait_exit "$REPO" T0003-review 30 || fg_fail "review T0003 attempt 3 did not exit"
+fg_run "$REPO" review collect T0003
+fg_assert_eq 1 "$FG_RC" "collect refuses a verdict that predates its own run"
+fg_assert_contains "review-verdict-run" "$FG_OUT" "the refusal names the run the verdict does not belong to"
+
+# The refusals are not a dead end: a review of the current code is collected.
+fg_run "$REPO" review spawn T0003 --claude-bin "$FG_SCRATCH/bin/claude-approve"
+fg_assert_eq 0 "$FG_RC" "review spawn T0003 (attempt 4)"
+fg_wait_exit "$REPO" T0003-review 30 || fg_fail "review T0003 attempt 4 did not exit"
+fg_run "$REPO" review collect T0003
+fg_assert_eq 0 "$FG_RC" "review collect T0003 (attempt 4)"
+fg_assert_contains "approve" "$FG_OUT" "the re-dispatched review approved the current code"
 
 fg_finish

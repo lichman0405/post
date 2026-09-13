@@ -1,14 +1,17 @@
 # 开发进度
 
 状态：**P0 完成**（14/14）、**P1 完成**（10/10 merged）；P2/P3/P6 各有 1 个任务在飞。
-最后更新：2026-09-13（driver 在合并后的 main 上无人值守运行；**3 项 orchestrator 变更待人工批准**，见下）
+最后更新：2026-09-13 21:30（driver 停摆 4 小时后已恢复；**4 项 orchestrator 变更待人工批准**，见下）
 
 ## 当前阶段
 
-- P2 — Scientific Object / RSG 核心：T0201 在 verification（等 #100 合入后 driver 重派 review）
-- P3 — Git infrastructure：T0301 已 rejected，**等 #99 合入后 rebaseline + 返工**（其 G3 脚本正是 #99 的修复对象）
-- P6 — Governance / Release：T0603 返工中（基线已推进到 e599931，24 个文件原样carried）
-- P0 / P1 已全部合并。
+- P2 — T0201：独立 review **approve** ✓，只因 main 前进而 accept 被拒 ✓ →
+  **已 rebaseline 到 `42379ea`**（38 个文件 carried ✓），worker 返工中 ✓
+- P6 — T0603：独立 review **approve** ✓，同上 → **已 rebaseline 到 `42379ea`**
+  （24 个文件 carried ✓，重新生成 `SPEC_VERSION.json` + `specs/database/postgres.sql` ✓），worker 返工中 ✓
+- P3 — T0301：collect 拒绝是**真阳性**（main 自己的 G3 脚本在被评测的树里提交 ✓）→
+  **阻塞在 #99** ✓，交付完好保存在 worktree ✓
+- P0 / P1 已全部合并 ✓
 
 ## 治理状态（★ 影响每次调度）
 
@@ -16,6 +19,13 @@ owner 于 2026-09-12 授予**默认自主推进**授权（`L3-20260912-4`，持�
 `docs/62` §3.1、`docs/69` §3.1）：L0/L1 常规实现与产品代码 PR，满足六项条件即由 Supervisor
 自行 review + merge；仅 L3、重大 L2、新外部凭证/付费服务/账号授权、无法用规格解决的
 `SPEC_BLOCKED` 才停止请求人工。授权不降低 Gate 标准。
+
+### ★ 每轮开工的第一件事：`rddev status` —— 看 driver 在等什么
+
+`./bin/rddev status` 的第一屏就是答案 ✓，尤其是 `decisions waiting for the Supervisor` ✓。
+2026-09-13 17:07–21:19 停摆 4 小时 12 分 ✓（L1-20260913-20 ✓）的原因就是"没人看这一屏" ✓：
+driver 一直在**正确地**等 ✓，把三件事写得很清楚 ✓，只是没有任何东西把它送到 Supervisor 面前 ✓。
+**driver 的 pending 不清，后面所有事都在等这个 pending** ✓ —— 包括那些看起来"只是慢"的任务 ✓。
 
 ### ★ 2026-09-13：本类变更被判定为**需要人工批准**（Supervisor 已停止自行合入）
 
@@ -30,8 +40,31 @@ diff 改动了既定安全边界 / 权限模型 / 核心架构原则的范畴，
 | PR | 内容 | 状态 |
 |---|---|---|
 | #98 | Worker 权限模型 spec 的 ref 归因规则 + ref 台账（`internal/devorchestrator/ref_ledger.go`） | **已合入 `e599931`**，待事后复核 |
-| #99 | G3 脚本 `tests/acceptance/gitea-real-services-e2e.sh` 不再改动被测树 + 非侵入性断言（L1-20260913-16） | 完成、CI 就绪、**未合入** |
-| #100 | driver 对"被取代的 review"重派而非停摆（L1-20260913-17） | 完成、CI 就绪、**未合入** |
+| #100 | driver 对"被取代的 review"重派而非停摆（L1-20260913-17） | **已合入 `43a63fb`**（owner 于 08:55Z 合入）|
+| #99 | G3 脚本 `tests/acceptance/gitea-real-services-e2e.sh` 不再改动被测树 + 非侵入性断言（L1-20260913-16） | 第七轮 review 已答完、CI 绿、**等合入** —— 它同时是 T0301 的解除条件 |
+| #103 | rebaseline 拒绝时把任务的工作原样放回 + 一条路径一种拼写 | 第七轮已答完、CI 绿、**待 delta review 回来** |
+| #104 | 门的消息不再声称一个规范决定的任务数 | CI 绿、**等合入** |
+| #105 | 一次运行的开始必须能排序一个判决 | CI 绿、**等合入** |
+
+**合入顺序**：#104 / #105 → **#99** → **#103** ✓。
+
+**★ 更正（21:50 实测）：GitHub 的 `MERGEABLE` 是过期的 ✓。**
+把四条分支各自对着当前 main 做一次真实合并（scratch worktree ✓，已删除 ✓）：
+`#104` 干净 ✓、`#105` 干净 ✓、**`#99` 冲突**（`specs/SPEC_VERSION.json` ✓）、
+**`#103` 冲突**（`tasks/decisions.md` ✓）。**GitHub 仍报四者全 `MERGEABLE` ✓ —— 与实测不符 ✓。**
+
+两处冲突的原因和解法都清楚 ✓，且两处都是**我的**痕迹 ✓：
+
+- **#99 × `specs/SPEC_VERSION.json`**：派生工件 ✓。按本项目规则**只能重新生成** ✓
+  （`python3 scripts/spec_version.py --write` ✓，scratch 里验证过：`--check` 由它变成 current ✓）。
+- **#103 × `tasks/decisions.md`**：**编号撞车** ✓ —— 我在 main 上写的 `L1-20260913-20`（driver 停摆 ✓）
+  与 #103 分支上写的 `L1-20260913-20`（rebaseline 的拒绝是破坏性的 ✓）是**两条不同的记录** ✓。
+  解法：把**分支上那条改号为 `L1-20260913-22`** ✓（main 的 20/21 已推送 ✓，不动 ✓）。
+
+**执行时机**：**等两个 delta review 回来再动** ✓ ——
+rebase/merge 会移动分支 HEAD ✓，而本项目的规矩是"判决绑定它读过的那份代码" ✓
+（#100 修的就是这条 ✓），中途改字节会让正在跑的 review 变成"针对已被取代的版本" ✓。
+**顺序**：先收 review ✓ → 按需改代码 ✓ → merge-forward + 重新生成 ✓ → 复核 ✓ → 交给 owner 合入 ✓。
 
 **必须明说的结构性事实**：这类变更（安全边界 / 权限模型 / Gate 行为 / 状态机）**
 在本项目里没有独立 reviewer** —— Supervisor 既是作者又是批准者，而 §5.1 条件 6 恰恰是
@@ -74,9 +107,9 @@ Supervisor 不再自行合入（本次已停止）。**T0301 / T0201 因此被�
 
 | Task | 状态 | 说明 |
 |---|---|---|
-| T0201 | verification | review verdict 绑定的代码指纹已被一次返工取代 → 等 **#100** 合入后 `rddev drive --clear-decision T0201`，driver 会重派 review |
-| T0301 | rejected | 拒绝的三条 check 全部由 G3 脚本污染被测树造成（L1-20260913-16）→ 等 **#99** 合入后 `rddev rebaseline T0301` + `worker rework` |
-| T0603 | running | 唯一失败项是已被 #98 证伪的 refs finding → 已 rebaseline 到 e599931 并返工，真实理由经 `SUPERVISOR-NOTE.md` 交付（L1-20260913-18） |
+| T0201 | running（返工中） | 独立 review **approve** ✓；只因 **#100 合入**使 main 前进 ✓、accept 拒绝而停 ✓ → **已 rebaseline 到 `42379ea`**（38 文件 carried ✓），worker 已在新基线上返工 ✓ |
+| T0301 | rejected（等 #99） | 拒绝的四条**全部不是 worker 的错** ✓：三条来自 main 自己的 G3 脚本在被评测的树里提交 ✓（= #99 的缺陷 ✓），一条来自**我自己**的分支 ✓（= 已删的 `f2170d1` ✓）→ 等 **#99** 合入后 `rddev rebaseline T0301` + `worker rework` ✓ |
+| T0603 | running（返工中） | 独立 review **approve** ✓；同样只因 main 前进而 accept 拒绝 ✓ → **已 rebaseline 到 `42379ea`**（24 文件 carried ✓，重新生成 `SPEC_VERSION.json` + `specs/database/postgres.sql` ✓），worker 已在新基线上返工 ✓ |
 
 ## 已关闭的 SPEC_BLOCKED
 
@@ -88,10 +121,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 - **T0301**：等 #99 合入。其 G3 脚本就是"改了被测树"的那个脚本，
   在 #99 落地前返工只会**再次**污染它自己的分支。
-- **T0201**：等 #100 合入。当前 review verdict 的描述对象已被取代，
-  唯一能解开的动作（重派 review）就在 #100 里。
-- **#99 / #100 需要 owner 批准**（见"治理状态"）。这是当前唯一的人工依赖。
-- 非阻塞但未关闭：`/readyz` 泄露内部拓扑（见"已知风险"）。
+- **#99 / #103 / #104 / #105 需要 owner 批准**（见"治理状态"）——
+  这是当前**唯一**的人工依赖 ✓。四者都已 review 完、CI 绿、`MERGEABLE` ✓。
+- 非阻塞但未关闭：`/readyz` 泄露内部拓扑（见"已知风险"）✓。
 
 ## 已知风险 / 需 owner 关注
 
@@ -122,13 +154,27 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 下一步
 
-1. **等 owner 批准 #99 / #100** → 合入后立即：`rddev rebaseline T0301` + `worker rework T0301`；
-   `rddev drive --clear-decision T0201`（driver 会自动重派过期 review）。
-2. T0603 返工由 driver 自动收集 → review → accept（无人工介入）。
-3. P2 其余 13 个任务由 driver 按 DAG 继续派发（并行上限 2，当前 driver 在跑）。
-4. 待批准：**已 rejected 任务的重判路径**（L1-20260913-18）——
-   让拒绝记录可被真实内容取代、并允许在被拒交付上重跑原检查（需新增状态机边 `rejected→verification`）。
-5. 修复 `/readyz` 拓扑泄露（小而明确，独立 PR）。
+1. **#100 已合入**（`43a63fb`）：driver 已在真实任务上生效 —— T0201 的过期 review 被自动重派
+   （日志 `the recorded review is about a superseded attempt (reviewed f667b4568b84, code is now 7783588acae9)` ✓），
+   不再需要人工清决定。当前 T0201 在 verification，等这次 review 结束。
+2. **#99（G3 门不再改动被测树）第二版已推送，独立 review 中**：六种漏判改为结构性关闭
+   （命名网 = 谁在做 + 度量网 = 树有没有变），25 例变异电池 25 中 0 漏。
+3. **#103（rebaseline 拒绝后把活放回原处）PR 已开、CI 全绿，独立 review 中** ——
+   合入前**不要**跑 rebaseline：main 上的 `bin/rddev` 仍是会清空工作树的那版。
+4. **#104（消息里的 job 数目不再写死）刚开 PR**，等 CI。13 处把它们说成"六个"，
+   而 `required_jobs` 有七个；其中两条是操作者会读到的运行时消息。
+5. 合入 #103 之后：`rddev rebaseline T0301`（预期在 G3 门脚本上与 main 冲突，
+   手工解，**门脚本的修复和 T0301 的 HMAC 改动都要留**）→ `rddev worker rework T0301`；
+   T0603 也需要一次 rebaseline（它的 accept 现在被 `specs/SPEC_VERSION.json` 冲突挡住 ✓），
+   driver 已把该决定记下，等 #103 合入后一并处理。
+6. T0603 accept 的旧决定（链式 G3 红）已清掉：那是 #102 修的缺陷本身，`bin/rddev` 已是修复版，
+   重试后暴露出的是上面这条 rebaseline 依赖。
+7. 待 owner 批准（两件，都不阻塞上面的机械段）：
+   - **已 rejected 任务的重判路径**（L1-20260913-18）—— 让拒绝记录可被真实内容取代、
+     并允许在被拒交付上重跑原检查（需新增状态机边 `rejected→verification`）；
+   - **T0204 / T0205 / T0207 的链式 G3 例外** —— #102 已把"谁该背这条链"改由依赖图决定，
+     剩下这三个任务**结构上**无解（各自的理由写在 `carriersTheChainTraps` 测试里），需产品判断。
+8. 修复 `/readyz` 拓扑泄露（小而明确，独立 PR）。
 
 <!-- AUTO-PROGRESS:BEGIN — generated by scripts/update_progress.py, do not hand-edit -->
 
