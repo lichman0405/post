@@ -31,6 +31,8 @@
 --   00018_organization_governance.sql
 --   00019_project_provisioning.sql
 --   00020_audit_scopes.sql
+--   00024_scientific_object_version_counter.sql
+--   00025_relation_version_counter.sql
 
 
 -- ===== 00001_extensions.sql =====
@@ -769,3 +771,56 @@ ALTER TABLE audit_log ADD COLUMN organization_id uuid REFERENCES organizations(i
 CREATE INDEX audit_log_project_occurred_idx ON audit_log (project_id, occurred_at DESC, id DESC);
 CREATE INDEX audit_log_organization_occurred_idx ON audit_log (organization_id, occurred_at DESC, id DESC);
 CREATE INDEX audit_log_actor_occurred_idx ON audit_log (actor_id, occurred_at DESC, id DESC);
+
+
+-- ===== 00024_scientific_object_version_counter.sql =====
+
+-- Scientific object version counter (task T0202): current_version_no is both
+-- the materialized current head of the append-only version log (docs/21 §5)
+-- and the atomic compare-and-swap cell behind expected_version creation. The
+-- version rows themselves stay append-only (migrations 00014/00015); this
+-- pointer is the one deliberately mutable projection on scientific_objects
+-- and is maintained by the repository inside the same transaction that
+-- inserts the version row.
+ALTER TABLE scientific_objects
+  ADD COLUMN current_version_no integer NOT NULL DEFAULT 0
+  CHECK (current_version_no >= 0);
+
+-- Backfill from the version log so the pointer matches history on any
+-- database where rows were written before this migration.
+UPDATE scientific_objects o
+   SET current_version_no = v.latest
+  FROM (SELECT object_id, max(version_no) AS latest
+          FROM scientific_object_versions
+         GROUP BY object_id) v
+ WHERE v.object_id = o.id;
+
+
+-- ===== 00025_relation_version_counter.sql =====
+
+-- Relation version counter (task T0203): current_version_no is both the
+-- materialized current head of the append-only relation_versions log
+-- (docs/21 §5) and the atomic compare-and-swap cell behind expected_version
+-- creation, exactly as 00024 does for scientific objects (T0202). The
+-- version rows themselves stay append-only (migrations 00014/00015); this
+-- pointer is the one deliberately mutable projection on relations and is
+-- maintained by the repository inside the same transaction that inserts the
+-- version row.
+ALTER TABLE relations
+  ADD COLUMN current_version_no integer NOT NULL DEFAULT 0
+  CHECK (current_version_no >= 0);
+
+-- Backfill from the version log so the pointer matches history on any
+-- database where rows were written before this migration.
+UPDATE relations r
+   SET current_version_no = v.latest
+  FROM (SELECT relation_id, max(version_no) AS latest
+          FROM relation_versions
+         GROUP BY relation_id) v
+ WHERE v.relation_id = r.id;
+
+-- The query-by-type paths (relations of a project filtered by relation
+-- type) join relation_versions to relations on the project boundary;
+-- relations.project_id had no index (the canonical seed indexes only the
+-- relation_versions endpoints).
+CREATE INDEX relations_project_idx ON relations(project_id);

@@ -516,8 +516,8 @@ func TestAppendOnlyUpgradePath(t *testing.T) {
 	if want := headVersion - 13; applied != want {
 		t.Errorf("upgrade path: applied %d on the way from 13 to head, want %d", applied, want)
 	}
-	if v := appliedVersion(t, ctx, pool); v != headVersion {
-		t.Fatalf("upgrade path: version after head = %d, want %d", v, headVersion)
+	if v := appliedVersion(t, ctx, pool); v != maxVersionNo {
+		t.Fatalf("upgrade path: version after head = %d, want %d", v, maxVersionNo)
 	}
 
 	assertTriggers(t, ctx, pool, appendOnlyTables)
