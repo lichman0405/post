@@ -16,7 +16,43 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$ROOT"
+
+# Git's environment variables outrank the working directory, and they are
+# inherited: rddev runs a gate with the ambient environment and cwd = the tree
+# under test. With GIT_DIR set, `git init "$WORK/work"` exits 0 having created
+# nothing, the next `git add -A` and `git commit` address the repository it
+# names, and the probe commit lands in the tree this script is grading — the
+# L1-20260913-16 harm, reached before any guard below can refuse it. A commit
+# would already sit on the Worker's branch by the time the end-of-run check
+# noticed. Every git command here addresses its repository by path (-C, a cwd,
+# an explicit init target); none of them may be redirected from outside.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_COMMON_DIR
+
+# The tree this script runs in is under test-adjacent conditions, not a scratch
+# space: the G3 gate runs it from inside a task worktree. Its state is therefore
+# captured here and asserted unchanged at the end — a gate that quietly mutates
+# the tree it grades makes every result it reports suspect, and this one did:
+# a probe commit built in $ROOT took the Worker's whole working-tree diff, put
+# it on the checked-out task branch under this test's identity and message, and
+# appended this file's own probe text to the repository's README, which then
+# reached main (L1-20260913-16).
+#
+# "Was the tree unchanged" is only an answer if the state could be read at all.
+# `|| echo '<no git>'` made an unreadable tree compare equal to an unreadable
+# tree, and the check reported green having measured nothing. An empty
+# `status --porcelain` is a legal value (a clean tree), so the exit status is
+# the only thing that distinguishes "clean" from "could not ask".
+if ! ROOT_HEAD="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)"; then
+  echo "G3 gitea-real-services: FAILED — cannot read HEAD in $ROOT." >&2
+  echo "This script asserts the tree it runs in is unchanged, and will not grade one it cannot read." >&2
+  exit 1
+fi
+if ! ROOT_TREE="$(git -C "$ROOT" status --porcelain 2>/dev/null)"; then
+  echo "G3 gitea-real-services: FAILED — cannot read the working tree in $ROOT." >&2
+  echo "This script asserts the tree it runs in is unchanged, and will not grade one it cannot read." >&2
+  exit 1
+fi
 
 # Credentials come from the same place `make dev` reads them: .env.dev (local,
 # gitignored). The gate step inherits the Supervisor's environment, and a token
@@ -63,6 +99,12 @@ code() { # code METHOD PATH [BODY]
     curl -sS -o /dev/null -w '%{http_code}' -X "$method" -H "Authorization: token $TOKEN" "$BASE$path"
   fi
 }
+inst_main_sha() { # the instance's main, or empty when it cannot be read
+  # `/branches/main` answers 500 on this Gitea (checked against the running
+  # instance, not read from a doc), so the refs API is the one that can answer.
+  api GET "/api/v1/repos/$REPO/git/refs/heads/main" 2>/dev/null \
+    | python3 -c 'import json,sys; refs=json.load(sys.stdin) or []; print(refs[0]["object"]["sha"] if refs else "")' 2>/dev/null
+}
 
 if [[ -z "$TOKEN" ]]; then
   echo "G3 gitea-real-services: FAILED — POST_GITEA_TOKEN is not set." >&2
@@ -88,8 +130,26 @@ else
 fi
 
 # A real push, with the token as the credential — the path the adapter uses.
-git init -q "$WORK/work" && cd "$WORK/work"
-git -c init.defaultBranch=main init -q >/dev/null 2>&1 || true
+#
+# The scratch repo is created ONCE, guarded, and the whole rest of the script
+# runs inside it. It used to be `git init "$WORK/work" && cd "$WORK/work"` in a
+# script without `set -e`: when the init failed, `&&` short-circuited the `cd`,
+# the shell stayed in $ROOT, and the next lines wrote a README, staged the whole
+# tree and committed — in the tree under test, as the "g3" identity. The failure
+# of a setup step is precisely when the tree under test is at risk, so the setup
+# now ends the run instead of falling through it.
+if ! git init -q "$WORK/work"; then
+  fail "could not create the scratch repository at $WORK/work"
+  printf '\nG3 gitea-real-services: %d failure(s)\n' "$FAILS"; exit 1
+fi
+if ! cd "$WORK/work"; then
+  fail "could not enter the scratch repository at $WORK/work"
+  printf '\nG3 gitea-real-services: %d failure(s)\n' "$FAILS"; exit 1
+fi
+# Every push below names its destination ref (HEAD:main, HEAD:refs/heads/g3-probe),
+# so which branch this scratch repo starts on does not matter; the second
+# `git init` that used to "force" a name only re-initialised the directory it
+# was already in.
 echo "g3" > README.md && git add -A
 git -c user.name=g3 -c user.email=g3@test commit -q -m "g3 probe"
 if git -c user.name=g3 -c user.email=g3@test push -q \
@@ -98,7 +158,6 @@ if git -c user.name=g3 -c user.email=g3@test push -q \
 else
   fail "push failed: $(tail -2 "$WORK/push.err")"
 fi
-cd "$ROOT"
 
 # --- two-layer main protection (T0302's premise) ------------------------------
 PROT='{"branch_name":"main","enable_push":false,"required_approvals":1,"enable_status_check":false}'
@@ -120,13 +179,45 @@ then ok "protection reads back with enable_push=false (frozen main is enforceabl
 else fail "protection did not read back as written: $GOT"; fi
 
 # A direct push to a protected main must be refused — the property, not the setting.
-echo "should not land" >> README.md
-git -c user.name=g3 -c user.email=g3@test commit -q -am "g3 should be refused"
-if git -c user.name=g3 -c user.email=g3@test push -q \
-     "http://post-git-svc:$TOKEN@${BASE#http://}/$REPO.git" HEAD:main >/dev/null 2>&1; then
-  fail "a direct push to a protected main SUCCEEDED — protection is configured but not enforced"
+#
+# Two things here are the difference between an assertion and a green light:
+#
+#   * the probe commit is built in the SCRATCH repo, never in $ROOT. This script
+#     is run by the G3 gate with the tree under test as the working directory (a
+#     task worktree, per gates.json), so a commit in $ROOT takes the Worker's
+#     whole diff onto its branch under this test's identity. The property being
+#     checked is the INSTANCE's protection of $REPO; the local tree has nothing
+#     to do with it.
+#   * "the push failed" is not the property. Every way this can go wrong — no
+#     scratch repo, a commit that cannot be made, a dead network, a rejected
+#     token, an actual refusal — used to reach the same `ok` line, so a probe
+#     that never got to ask the question reported that the answer was no. The
+#     question is asked of the INSTANCE: did main move? And when it did not, the
+#     refusal has to name protection, or the failure is unexplained and this
+#     gate refuses to call it a pass.
+BEFORE_MAIN="$(inst_main_sha)"
+if [[ -z "$BEFORE_MAIN" ]]; then
+  fail "cannot read main on the instance before the refusal probe — the probe cannot be judged"
+elif ! ( echo "should not land" >> README.md \
+         && git -c user.name=g3 -c user.email=g3@test commit -q -am "g3 should be refused" ); then
+  fail "could not build the refusal probe commit in $WORK/work — see the commit error above"
 else
-  ok "a direct push to protected main is refused"
+  push_rc=0
+  git -c user.name=g3 -c user.email=g3@test push -q \
+    "http://post-git-svc:$TOKEN@${BASE#http://}/$REPO.git" HEAD:main \
+    >/dev/null 2>"$WORK/refuse.err" || push_rc=$?
+  AFTER_MAIN="$(inst_main_sha)"
+  if [[ -z "$AFTER_MAIN" ]]; then
+    fail "cannot read main on the instance after the refusal probe — an unreadable state is not a refusal"
+  elif [[ "$AFTER_MAIN" != "$BEFORE_MAIN" ]]; then
+    fail "a direct push to a protected main SUCCEEDED — protection is configured but not enforced (main moved $BEFORE_MAIN -> $AFTER_MAIN)"
+  elif (( push_rc == 0 )); then
+    fail "the probe push reported success but main did not move — this probe is not measuring what it claims to"
+  elif ! grep -qiE 'protected|pre-receive hook declined' "$WORK/refuse.err"; then
+    fail "the push to protected main failed for a reason that is not protection: $(tail -3 "$WORK/refuse.err" | tr '\n' ' ')"
+  else
+    ok "a direct push to protected main is refused (main is still $BEFORE_MAIN)"
+  fi
 fi
 
 # --- push webhook (T0305's premise) ------------------------------------------
@@ -175,14 +266,25 @@ else
   fail "could not register a push webhook"
 fi
 
-# Trigger a delivery with a push to a NON-protected branch.
+# Trigger a delivery with a push to a NON-protected branch — from the scratch
+# repo, whose HEAD is the probe commit above. This push used to run after a
+# `cd "$ROOT"`, so the delivery was triggered by sending the TREE UNDER TEST's
+# HEAD to the instance: the content of the repository being graded, published to
+# a service, as a side effect of grading it.
+push_rc=0
 git -c user.name=g3 -c user.email=g3@test push -q \
-  "http://post-git-svc:$TOKEN@${BASE#http://}/$REPO.git" HEAD:refs/heads/g3-probe >/dev/null 2>&1 || true
+  "http://post-git-svc:$TOKEN@${BASE#http://}/$REPO.git" HEAD:refs/heads/g3-probe \
+  >/dev/null 2>"$WORK/hook-push.err" || push_rc=$?
 delivered=0
-for _ in $(seq 1 40); do
-  if [[ -s "$WORK/deliveries.jsonl" ]]; then delivered=1; break; fi
-  sleep 0.5
-done
+if (( push_rc != 0 )); then
+  fail "the webhook trigger push failed ($(tail -2 "$WORK/hook-push.err" | tr '\n' ' ')) — no delivery can arrive, and the cause is here"
+else
+  ok "pushed a real commit to a non-protected branch (the webhook trigger)"
+  for _ in $(seq 1 40); do
+    if [[ -s "$WORK/deliveries.jsonl" ]]; then delivered=1; break; fi
+    sleep 0.5
+  done
+fi
 if (( delivered )); then
   python3 - "$WORK/deliveries.jsonl" <<'PY'
 import json, sys
@@ -193,14 +295,25 @@ for key in ("ref", "repository", "commits", "pusher"):
     assert key in b, f"a real push payload has no {key!r}: {sorted(b)}"
 PY
   ok "a real push delivered a webhook with ref/repository/commits/pusher"
-else
+elif (( push_rc == 0 )); then
   # Ask the instance why, rather than reporting only that nothing arrived.
   HOOK_ID="$(api GET "/api/v1/repos/$REPO/hooks" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d[0]["id"] if d else "")' 2>/dev/null)"
   DETAIL="$(api GET "/api/v1/repos/$REPO/hooks/$HOOK_ID/deliveries" 2>/dev/null | head -c 400)"
   fail "no webhook delivery arrived — the payload shape the ingestion path depends on is unverified. Gitea reports: ${DETAIL:-<no deliveries recorded>}"
 fi
 
-cd "$ROOT"
+# Non-interference, asserted rather than assumed. Everything above pushes to the
+# INSTANCE and talks to its API; nothing needs to write in the tree under test.
+NOW_HEAD="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)"
+NOW_TREE="$(git -C "$ROOT" status --porcelain 2>/dev/null)"
+if [[ "$NOW_HEAD" != "$ROOT_HEAD" ]]; then
+  fail "this script moved HEAD in $ROOT ($ROOT_HEAD -> $NOW_HEAD) — the gate graded a tree it had already changed"
+elif [[ "$NOW_TREE" != "$ROOT_TREE" ]]; then
+  fail "this script changed the working tree in $ROOT — the gate graded a tree it had already changed: $(printf '%s' "$NOW_TREE" | head -3 | tr '\n' ' ')"
+else
+  ok "the tree under test is exactly as this script found it (HEAD and working tree unchanged)"
+fi
+
 printf '\n'
 if (( FAILS )); then
   printf 'G3 gitea-real-services: %d failure(s)\n' "$FAILS"
