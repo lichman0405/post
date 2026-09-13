@@ -170,14 +170,30 @@ run_gate() { # tree [extra env] -> sets RC/OUT
 
 # Everything about a tree that a write can change: HEAD, its refs (a tag leaves
 # HEAD and every file alone, so byte-identity of the worktree cannot see it),
-# its config, and its files. One string, so a comparison is one `[[ ]]`.
+# its config, its files, and — added after a review walked through them — the
+# rest of what is inside .git. Refs and config were the first two things anyone
+# thought of; a blob written straight into the object store, or a hook file
+# dropped into .git/hooks by a shell redirection, changes neither, and both are
+# writes into the tree being graded.
+#
+# `.git/index` is excluded because reading can rewrite it: `git status`
+# refreshes stat information, so fingerprinting it would make this net fire on
+# its own bookkeeping. Its content is covered from the other side — a staged
+# change is exactly what `status --porcelain` reports.
+dot_git_state() { # tree -> "path=digest;" for every file under .git
+  local t="$1"
+  ( cd "$t/.git" 2>/dev/null || return 0
+    find . -type f ! -name index ! -name '*.lock' -print0 2>/dev/null \
+      | sort -z | xargs -0 -r sha256sum 2>/dev/null | tr '\n' ';' )
+}
 tree_state() { # tree -> state string
   local t="$1"
-  printf '%s|%s|%s|%s' \
+  printf '%s|%s|%s|%s|%s' \
     "$(git -C "$t" rev-parse HEAD 2>/dev/null)" \
     "$(git -C "$t" for-each-ref --format='%(refname)=%(objectname)' 2>/dev/null | sort | tr '\n' ';')" \
     "$(sha256sum "$t/.git/config" 2>/dev/null | cut -d' ' -f1)" \
-    "$(git -C "$t" status --porcelain 2>/dev/null | tr '\n' ';')"
+    "$(git -C "$t" status --porcelain 2>/dev/null | tr '\n' ';')" \
+    "$(dot_git_state "$t")"
 }
 
 # --- 1. a push that fails for a reason other than protection -----------------
@@ -306,7 +322,12 @@ cat > "$WORK/logshim/git" <<SH
 # the cwd, the subcommand, the paths the command could act on, and the
 # arguments after the subcommand — because the judge, not the shim, owns the
 # question of what that adds up to.
-import os, sys
+#
+# One JSON object per line, not tab-joined fields: an argument containing a tab
+# would otherwise move the boundary between two fields and let a command
+# describe itself as something it is not. The judge treats a line it cannot
+# parse as a violation for the same reason.
+import json, os, sys
 
 # Global options that take a separate value. The value is not a subcommand:
 # reading \`git --work-tree X reset --hard\` as "subcommand X" is how a write
@@ -361,9 +382,17 @@ else:
         targets.append(git_dir)
     if work_tree:
         targets.append(work_tree)
+    # The environment can name where a write lands just as --git-dir does, and
+    # a command whose cwd is outside the tree has no other trace of it: the
+    # third review wrote objects into the tree with GIT_OBJECT_DIRECTORY from
+    # the scratch directory. Recorded, not resolved — the judge decides.
+    for var in ("GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR", "GIT_INDEX_FILE"):
+        v = os.environ.get(var)
+        if v:
+            targets.append(v)
 
 with open(os.environ["GIT_LOG"], "a") as f:
-    f.write("%s\t%s\t%s\t%s\n" % (cwd, sub or "", ",".join(targets), " ".join(rest)))
+    f.write(json.dumps({"cwd": cwd, "sub": sub or "", "targets": targets, "argv": rest}) + "\n")
 os.execv("$REAL_GIT", ["$REAL_GIT"] + args)
 SH
 chmod +x "$WORK/logshim/git"
@@ -373,7 +402,7 @@ chmod +x "$WORK/logshim/git"
 # violation. Deliberately conservative: a git command the gate grows later
 # starts out distrusted, and the fix is to name it here, in the open.
 cat > "$WORK/judge.py" <<'PY'
-import os, sys
+import json, os, sys
 
 # Subcommands that only read, in every form.
 READ_ONLY = {
@@ -382,10 +411,16 @@ READ_ONLY = {
     "merge-base", "describe", "check-ignore", "check-ref-format",
     "blame", "shortlog", "whatchanged", "name-rev", "verify-commit", "verify-tag",
     "is-inside-work-tree", "var", "version", "help",
+    # Added after a third review reported them as false alarms: each is a read
+    # in the form that reaches here. A net that accuses a correct gate is a net
+    # someone weakens, which costs more than the accusations are worth.
+    "diff-index", "ls-tree", "grep", "count-objects", "fsck", "verify-pack",
+    "check-attr", "cherry", "merge-tree",
     # Not listed, though they are usually reads: `symbolic-ref` writes when it is
     # given a target, `config` when it is given a value, `branch`/`remote` when
-    # they are given arguments. A command that is not always a read is not
-    # allowlisted wholesale — the FORM that writes has to be named to pass.
+    # they are given arguments, `stash` unless it is asked to list, and
+    # `hash-object` unless it is given -w. A command that is not always a read is
+    # not allowlisted wholesale — the FORM that writes has to be named to pass.
 }
 # `git config` reads with a key alone or with an explicit read flag, and writes
 # with a value, --add, --unset, --edit and friends. --file is NOT a read flag:
@@ -438,6 +473,10 @@ def writes(sub, argv):
         return len(pos) >= 1 and pos[0] != "list"
     if sub == "tag":
         return not (any(f in ("-l", "--list") for f in argv) or not pos)
+    if sub == "stash":
+        return not (pos and pos[0] in ("list", "show"))
+    if sub == "hash-object":
+        return "-w" in argv  # without -w it prints the hash and writes nothing
     return sub not in READ_ONLY
 
 
@@ -453,13 +492,25 @@ if not os.path.exists(log):
     print("0\t0\tno log file was written")
     raise SystemExit(0)
 bad, n = [], 0
-for line in open(log):
-    parts = (line.rstrip("\n").split("\t") + ["", "", "", ""])[:4]
-    cwd, sub, targets, argv = parts
-    if not writes(sub, argv.split()):
+for lineno, line in enumerate(open(log), 1):
+    if not line.strip():
+        continue
+    try:
+        rec = json.loads(line)
+    except ValueError as e:
+        # Not skipped: a record the judge cannot read is a record whose command
+        # went unjudged, and "unjudged" must never be reported as "clean".
+        bad.append("a log line could not be read (%s): %s" % (e, line[:80]))
+        continue
+    cwd = rec.get("cwd") or ""
+    sub = rec.get("sub") or ""
+    argv = rec.get("argv") or []
+    if isinstance(argv, str):
+        argv = argv.split()
+    if not writes(sub, argv):
         continue
     n += 1
-    for t in [x for x in targets.split(",") if x]:
+    for t in [x for x in (rec.get("targets") or []) if x]:
         if inside(t, cwd, tree):
             bad.append("%s acting on %s (cwd %s)" % (sub or "?", t, cwd))
             break
@@ -482,8 +533,10 @@ judge_tree() { # tree -> "n_mutating \t n_parse_bad \t measured \t violations"
   measured=0
   if [[ "$before" != "$after" ]]; then
     measured=1
-    delta="$(diff <(printf '%s' "$before" | tr '|' '\n') \
-                  <(printf '%s' "$after" | tr '|' '\n') | grep '^[<>]' | head -4 | tr '\n' ' ')"
+    # Split on both separators: one field per ref, one per file inside .git, so
+    # the report names what changed rather than printing two whole states.
+    delta="$(diff <(printf '%s' "$before" | tr '|;' '\n\n') \
+                  <(printf '%s' "$after" | tr '|;' '\n\n') | grep '^[<>]' | head -4 | tr '\n' ' ')"
     violations="${violations:+$violations; }the tree itself changed during the run: $delta"
   fi
   printf '%s\t%s\t%s\t%s\n' "$n_mut" "$n_parse" "$measured" "$violations"
@@ -524,9 +577,10 @@ fi
 # the gate for the life of the host.
 BROKEN="$WORK/broken"
 mkdir -p "$BROKEN"
-python3 - "$GATE" "$BROKEN/gate.sh" <<'PY'
+python3 - "$GATE" "$BROKEN/gate.sh" "$BROKEN/gate-shell.sh" <<'PY'
 import sys
 src = open(sys.argv[1]).read()
+out, shell_out = sys.argv[2], sys.argv[3]
 probe = '# a probe the nets must not miss\n'
 cases = [
     # The first seven: a `-C` into a subdirectory, an absolute --git-dir, a
@@ -565,19 +619,33 @@ cases = [
     # exists — a defence with no probe that isolates it is a defence nobody
     # would notice losing.
     'git -C "$(dirname "$ROOT")" --git-dir="$(basename "$ROOT")/.git" tag g3-escape-tag\n',
+    # The third review's: a write that names its destination through the
+    # ENVIRONMENT rather than the argument vector. The gate is in the scratch
+    # repo when this runs, so the cwd says nothing; only the recorded
+    # GIT_OBJECT_DIRECTORY names the tree, which is why the shim records it.
+    # (The companion case — a write that runs no command at all — is the
+    # shell-only gate below, and only the fingerprint can see that one.)
+    'GIT_OBJECT_DIRECTORY="$ROOT/.git/objects" git hash-object -w README.md\n',
 ]
-body = "".join(
-    p + c for p, c in zip(
-        [probe + "# case %d\n" % i for i in range(len(cases))], cases))
 # Far enough in that ROOT is set and the environment has been unset (the probes
 # must be run through the shim, not neutralised by the gate's own hygiene), and
 # after the tree's state has been captured, so the gate goes on to report the
 # change rather than exiting at the setup.
 anchor = "# --- two-layer main protection"
 assert src.count(anchor) == 1, "the insertion point moved: %d matches" % src.count(anchor)
-open(sys.argv[2], "w").write(src.replace(anchor, body + anchor, 1))
+body = "".join(
+    p + c for p, c in zip(
+        [probe + "# case %d\n" % i for i in range(len(cases))], cases))
+open(out, "w").write(src.replace(anchor, body + anchor, 1))
+
+# The same broken gate with ONE probe, and a probe that is not a git command:
+# a shell redirection into the tree's own .git. Nothing is logged, so the
+# naming net has nothing to read — if the fingerprint does not see it, this
+# write is invisible to the guard, and the suite must be red.
+shell_probe = ('printf "#!/bin/sh\\n" > "$ROOT/.git/hooks/commit-msg"\n')
+open(shell_out, "w").write(src.replace(anchor, probe + shell_probe + anchor, 1))
 PY
-chmod +x "$BROKEN/gate.sh"
+chmod +x "$BROKEN/gate.sh" "$BROKEN/gate-shell.sh"
 # The mutations have to be in the tree under test for the nets to have
 # something to find, so the gate is copied into a tree of its own.
 TREE="$WORK/tree-e"
@@ -587,10 +655,10 @@ ESCAPED="$(judge_tree "$TREE")"
 E_MUT="${ESCAPED%%$'\t'}"; E_REST="${ESCAPED#*$'\t'}"
 E_PARSE="${E_REST%%$'\t'*}"; E_REST="${E_REST#*$'\t'}"
 E_MEASURED="${E_REST%%$'\t'*}"
-if (( E_PARSE >= 17 )); then
-  ok "the naming net names all 17 spellings of a write into the tree under test"
+if (( E_PARSE == 18 )); then
+  ok "the naming net names all 18 spellings of a write into the tree under test, and accuses nothing else"
 else
-  fail "the naming net only named $E_PARSE of 17 writes into the tree under test — it judges the spelling, not the target: $ESCAPED"
+  fail "the naming net named $E_PARSE writes into the tree under test, not 18 — it judges the spelling, not the target: $ESCAPED"
 fi
 # The measuring net has to stand on its own: a spelling the naming net cannot
 # parse must still be visible as a changed tree, or the naming net's blind
@@ -598,29 +666,74 @@ fi
 if (( E_MEASURED == 1 )); then
   ok "the measuring net saw the tree change without needing to parse the command"
 else
-  fail "17 writes into the tree under test left the tree's own state unchanged — the net that cannot be spelled past is not connected: $ESCAPED"
+  fail "18 writes into the tree under test left the tree's own state unchanged — the net that cannot be spelled past is not connected: $ESCAPED"
+fi
+
+# And it has to stand alone in the other direction too: here is a write that
+# runs no git command, so there is no log line for any parse to read. If the
+# fingerprint does not see it, the guard does not see it — the two nets are
+# only independent if one of them can catch what the other provably cannot.
+TREE="$WORK/tree-g"
+new_tree "$TREE"
+cp "$BROKEN/gate-shell.sh" "$TREE/tests/acceptance/gitea-real-services-e2e.sh"
+SHELLONLY="$(judge_tree "$TREE")"
+S_MUT="${SHELLONLY%%$'\t'}"; S_REST="${SHELLONLY#*$'\t'}"
+S_PARSE="${S_REST%%$'\t'*}"; S_REST="${S_REST#*$'\t'}"
+S_MEASURED="${S_REST%%$'\t'*}"
+if (( S_MEASURED == 1 )); then
+  ok "the measuring net saw a shell redirection into .git that logged no command at all"
+else
+  fail "a shell redirection wrote into the tree's own .git and the measuring net did not see it: $SHELLONLY"
+fi
+if (( S_PARSE == 0 )); then
+  ok "no command was logged for it, so the naming net was blind to it by construction"
+else
+  fail "the naming net claims to have judged a write that ran no command at all: $SHELLONLY"
 fi
 
 # The other half of a naming net's worth: one that accuses a correct gate is a
-# net someone will cut, and the accusation reads as evidence. These twelve are
-# the read-only forms a later change to the gate could legitimately use, and
-# every one of them was reported as a write by the version before this — a
-# false alarm is how the next person concludes the check is broken.
+# net someone will cut, and the accusation reads as evidence. These are the
+# read-only forms a later change to the gate could legitimately use, and every
+# one of them was reported as a write by a version of the judge — a false alarm
+# is how the next person concludes the check is broken.
 READS="$WORK/reads.log"
-: > "$READS"
-for line in \
-    "config user.name" "config --get user.name" "branch --show-current" \
-    "remote -v" "symbolic-ref HEAD" "worktree list" "tag -l" \
-    "status --porcelain" "rev-parse HEAD" "ls-files" "log --oneline -3" "diff --stat"
-do
-  printf '%s\t%s\t%s\t%s\n' "$TREE" "${line%% *}" "$TREE" "${line#* }" >> "$READS"
-done
+python3 - "$TREE" "$READS" <<'PY'
+import json, sys
+tree, out = sys.argv[1], sys.argv[2]
+lines = [
+    "config user.name", "config --get user.name", "branch --show-current",
+    "remote -v", "symbolic-ref HEAD", "worktree list", "tag -l",
+    "status --porcelain", "rev-parse HEAD", "ls-files", "log --oneline -3",
+    "diff --stat",
+    # Reported by the third review as false alarms.
+    "diff-index --quiet HEAD", "ls-tree HEAD", "grep -l x", "count-objects -v",
+    "stash list", "hash-object README.md",
+]
+with open(out, "w") as f:
+    for line in lines:
+        sub, _, rest = line.partition(" ")
+        f.write(json.dumps({"cwd": tree, "sub": sub, "targets": [tree],
+                            "argv": rest.split()}) + "\n")
+PY
 FALSE_ALARMS="$(python3 "$WORK/judge.py" "$READS" "$TREE" | cut -f2)"
 if (( FALSE_ALARMS == 0 )); then
-  ok "the naming net does not accuse 12 read-only forms of writing in the tree"
+  ok "the naming net does not accuse 18 read-only forms of writing in the tree"
 else
-  fail "the naming net accuses $FALSE_ALARMS of 12 read-only forms of writing in the tree: $(python3 "$WORK/judge.py" "$READS" "$TREE" | cut -f3)"
+  fail "the naming net accuses $FALSE_ALARMS of 18 read-only forms of writing in the tree: $(python3 "$WORK/judge.py" "$READS" "$TREE" | cut -f3)"
 fi
+
+# A record the judge cannot read is not a record it judged. The log is JSON so
+# that no argument can forge a field; the price is that a format mismatch
+# between the shim and the judge would leave every command unread — and every
+# command unread must not read as every command clean.
+BADLOG="$WORK/badlog"
+printf 'this line is not a record\n' > "$BADLOG"
+UNREADABLE="$(python3 "$WORK/judge.py" "$BADLOG" "$TREE")"
+U_REST="${UNREADABLE#*$'\t'*}"; U_VIOLATIONS="${U_REST#*$'\t'*}"
+case "$U_VIOLATIONS" in
+  *"could not be read"*) ok "a record the judge cannot read is reported, not skipped" ;;
+  *) fail "an unreadable record was passed over in silence: $UNREADABLE" ;;
+esac
 
 # --- 5. git's environment cannot redirect the gate into the tree -------------
 # GIT_DIR outranks the working directory and is inherited: with it set, a
