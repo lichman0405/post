@@ -2615,3 +2615,455 @@ func TestThePathListKeepsNamesThatAreNotLines(t *testing.T) {
 		}
 	}
 }
+
+// T9043.
+//
+// The restore's clean is limited to the paths the snapshot holds, and a directory
+// the snapshot walked is held as ONE name plus one entry per path inside it — while
+// `git clean -fd` removes a directory whole. So the directory's own name standing
+// in the held set was not the claim the clean needed: it needed the contents. A
+// file written into one of those directories after the snapshot was taken is in no
+// entry, and it rode out on the removal unnamed, with the error saying the worktree
+// was put back the way it was found — a deletion reported as a restoration.
+func TestTheRestoreKeepsAFileWrittenInsideADirectoryItRemovesWhole(t *testing.T) {
+	f := newRebaselineFixture(t, "T9043")
+	f.write("gathered/first.txt", "the task gathered this\n", 0o644)
+	f.mainRewritesTheSameRegion() // the task's patch no longer applies, so the restore runs
+
+	const late = "written into a directory the clean removes whole\n"
+	real := restore
+	restore = func(worktree, head, keep string, entries []snapshotEntry) ([]string, error) {
+		// The advance's own clean has already taken `gathered` and put nothing
+		// back, so the directory the restore is about to decide over does not exist
+		// yet: this writes it, and a file in it, in the window between the snapshot
+		// and the clean the restore asks about — which is exactly the window a
+		// Worker's own process, or anything else on the machine, can write in.
+		if err := os.MkdirAll(filepath.Join(worktree, "gathered"), 0o755); err != nil {
+			t.Error(err)
+		}
+		if err := os.WriteFile(filepath.Join(worktree, "gathered", "late.txt"), []byte(late), 0o644); err != nil {
+			t.Error(err)
+		}
+		return real(worktree, head, keep, entries)
+	}
+	defer func() { restore = real }()
+
+	before := f.pathsAndContents(f.baseline)
+	_, err := RebaselineTask(f.root, "T9043", "", "")
+	if err == nil {
+		t.Fatal("the advance was not refused")
+	}
+	msg := err.Error()
+	// The refusal has to be the apply's, or the restore never ran and the rest of
+	// this test is about nothing.
+	if !strings.Contains(msg, "patch does not apply") {
+		t.Fatalf("the refusal this test needs is the apply's, so that the restore ran at all: %s", msg)
+	}
+	if !strings.Contains(msg, "left gathered/late.txt in place") {
+		t.Errorf("the restore did not say it left the file, so a reader believes the tree is as it was found: %s", msg)
+	}
+	if got := readFileOrFail(t, filepath.Join(f.worktree, "gathered", "late.txt")); got != late {
+		t.Errorf("the file the restore left in place holds %q, want %q", got, late)
+	}
+	if got := readFileOrFail(t, filepath.Join(f.worktree, "gathered", "first.txt")); got != "the task gathered this\n" {
+		t.Errorf("the task's own file in that directory did not come back: %q", got)
+	}
+	// Everything else is as it was found, and the one line the fingerprint gained
+	// is the file the restore deliberately left. Leaving it is the point; stopping
+	// halfway through the tree is not, so nothing else may differ.
+	after := f.pathsAndContents(f.baseline)
+	leftLine := f.describe("gathered/late.txt")
+	if !strings.Contains(after, leftLine) {
+		t.Fatalf("the fingerprint of the restored tree does not hold the file that was left: %s", after)
+	}
+	if rest := strings.Replace(after, leftLine, "", 1); rest != before {
+		t.Errorf("the refused advance changed the tree it refused to advance:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
+	}
+}
+
+// T9044.
+//
+// The same rule at the point where nothing has been deleted yet. The snapshot's
+// reach was computed one reset ago, so the advance asks the clean again where it is
+// about to run — and a directory the snapshot walked is one whose every path it
+// holds, except the ones that arrived in between. Refusing here costs a dispatch;
+// not refusing costs the file, and the tree it was in.
+func TestTheAdvanceRefusesRatherThanCleanADirectoryItHasNoCopyOf(t *testing.T) {
+	f := newRebaselineFixture(t, "T9044")
+	f.write("gathered/first.txt", "the task gathered this\n", 0o644)
+	f.mainRewritesTheSameRegion()
+
+	const late = "arrived after the snapshot was taken\n"
+	real := snapshot
+	snapshot = func(worktree, head, target string, paths map[string]bool, keep string) ([]snapshotEntry, error) {
+		entries, err := real(worktree, head, target, paths, keep)
+		if err != nil {
+			return nil, err
+		}
+		// AFTER the walk, so the file is in no entry and in no kept copy — which is
+		// what makes the clean that follows unsafe for it rather than merely
+		// unrecorded.
+		if err := os.WriteFile(filepath.Join(worktree, "gathered", "late.txt"), []byte(late), 0o644); err != nil {
+			t.Error(err)
+		}
+		return entries, nil
+	}
+	defer func() { snapshot = real }()
+
+	before := f.pathsAndContents(f.baseline)
+	_, err := RebaselineTask(f.root, "T9044", "", "")
+	if err == nil {
+		t.Fatal("the advance deleted a file it had no copy of and reported success")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "would delete the directory gathered") || !strings.Contains(msg, "gathered/late.txt") {
+		t.Fatalf("the refusal this test is about is not the one that reached it: %s", msg)
+	}
+	// Refused BEFORE the clean: the file is still there with its bytes. A refusal
+	// that arrives after the deletion names a path it has already taken.
+	if got := readFileOrFail(t, filepath.Join(f.worktree, "gathered", "late.txt")); got != late {
+		t.Errorf("the file the advance refused over holds %q, want %q", got, late)
+	}
+	if got := readFileOrFail(t, filepath.Join(f.worktree, "gathered", "first.txt")); got != "the task gathered this\n" {
+		t.Errorf("the task's own file in that directory did not survive the refusal: %q", got)
+	}
+	after := f.pathsAndContents(f.baseline)
+	lateLine := f.describe("gathered/late.txt")
+	if !strings.Contains(after, lateLine) {
+		t.Fatalf("the fingerprint of the tree the refusal left does not hold the file it refused over: %s", after)
+	}
+	if rest := strings.Replace(after, lateLine, "", 1); rest != before {
+		t.Errorf("the refusal changed the tree it refused to advance:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
+	}
+}
+
+// T9045 (batching, as a partition).
+//
+// The restore's clean carries one pathspec per path, and a worktree holding about
+// 80,000 untracked paths made that one argument list longer than the kernel
+// accepts: fork/exec failed with E2BIG on a tree this code restores, and the
+// refusal it produced said the worktree could NOT be put back where nothing had
+// been lost. The paths now go out in batches, and what has to stay true of them is
+// that the batches are the list: in order, once each, and nothing dropped for being
+// too big to pair up.
+func TestTheCleanBatchesPartitionThePathsInOrder(t *testing.T) {
+	prev := restoreCleanBatchBytes
+	restoreCleanBatchBytes = 40
+	defer func() { restoreCleanBatchBytes = prev }()
+
+	const budget = 40
+	cost := func(batch []string) int {
+		n := 0
+		for _, p := range batch {
+			n += len(p) + len(":(literal)") + 1
+		}
+		return n
+	}
+	paths := []string{"a", "bb", "ccc", "dddd", "eeeee"}
+	batches := restoreCleanBatches(paths)
+	if len(batches) < 2 {
+		t.Fatalf("a list of %d bytes went out in %d batch(es): the split this test is about did not happen", cost(paths), len(batches))
+	}
+	var flat []string
+	for _, b := range batches {
+		if len(b) == 0 {
+			t.Errorf("an empty batch: a clean invocation that removes nothing, for no reason")
+		}
+		// A batch over the budget is allowed only when it is one path, which cannot
+		// be made smaller — and then it still has to go out.
+		if c := cost(b); c > budget && len(b) != 1 {
+			t.Errorf("a batch of %d paths costs %d bytes, over the %d it was split by: %v", len(b), c, budget, b)
+		}
+		flat = append(flat, b...)
+	}
+	if !slices.Equal(flat, paths) {
+		t.Errorf("the batches read %v, want the list they partition, in order and once each: %v", flat, paths)
+	}
+
+	// A path longer than the whole budget. Dropping it deletes nothing and says the
+	// worktree was put back; a loop that never bounds itself is the E2BIG this
+	// exists to avoid. Neither is what one long name should produce.
+	long := strings.Repeat("x", 200)
+	if got := restoreCleanBatches([]string{long}); len(got) != 1 || !slices.Equal(got[0], []string{long}) {
+		t.Errorf("one path over the budget became %v, want it alone in one batch", got)
+	}
+	if got := restoreCleanBatches(nil); len(got) != 0 {
+		t.Errorf("no paths became %v, want no invocations at all", got)
+	}
+}
+
+// T9046 (batching, end to end).
+//
+// The partition is not the claim; the claim is that batching changes nothing about
+// what the restore removes. So the same refused advance is run twice — once with
+// the real budget, once with one the fixture's own paths cross — and the two
+// sentences are compared: the paths the clean was given, in order, and the tree the
+// restore produced. Without the seam the second half would need a tree of 80,000
+// paths, which is the one shape a test cannot carry.
+func TestTheRestoreCleanIsBatchedWithoutChangingWhatItRemoves(t *testing.T) {
+	// Long enough that a small budget splits between them, and in a TRACKED
+	// directory, so git names each one individually rather than collapsing the
+	// directory to a single name: the batching is about the length of the list.
+	const gathered = 12
+
+	run := func(taskID string, budget int) (before, after string, invocations [][]string) {
+		t.Helper()
+		prevBudget := restoreCleanBatchBytes
+		restoreCleanBatchBytes = budget
+		defer func() { restoreCleanBatchBytes = prevBudget }()
+		real := restoreClean
+		restoreClean = func(worktree string, args ...string) (string, error) {
+			invocations = append(invocations, slices.Clone(args))
+			return real(worktree, args...)
+		}
+		defer func() { restoreClean = real }()
+
+		f := newRebaselineFixture(t, taskID)
+		for i := 0; i < gathered; i++ {
+			f.write(fmt.Sprintf("scripts/gathered-%02d.txt", i), "one more path\n", 0o644)
+		}
+		f.mainRewritesTheSameRegion()
+
+		// The advance's own clean has already taken every untracked path in this
+		// tree, so by the time the restore runs, its clean has nothing left to
+		// remove and the list this test is about would be empty — which is what the
+		// first version of this test found. Writing them back asks the restore's
+		// clean the question it is about: a list of held paths, long enough that the
+		// budget decides how it goes out. It is the same window T9043 covers, a path
+		// present at the snapshot and at the restore and not in between, with the
+		// paths coming back recorded rather than unrecorded.
+		realRestore := restore
+		restore = func(worktree, head, keep string, entries []snapshotEntry) ([]string, error) {
+			for i := 0; i < gathered; i++ {
+				p := filepath.Join(worktree, fmt.Sprintf("scripts/gathered-%02d.txt", i))
+				if err := os.WriteFile(p, []byte("one more path\n"), 0o644); err != nil {
+					t.Error(err)
+				}
+			}
+			return realRestore(worktree, head, keep, entries)
+		}
+		defer func() { restore = realRestore }()
+
+		before = f.pathsAndContents(f.baseline)
+		if _, err := RebaselineTask(f.root, taskID, "", ""); err == nil {
+			t.Fatalf("%s: the advance was not refused", taskID)
+		} else if msg := err.Error(); !strings.Contains(msg, "patch does not apply") {
+			t.Fatalf("%s: the refusal this test needs is the apply's, so that the restore ran at all: %s", taskID, msg)
+		}
+		after = f.pathsAndContents(f.baseline)
+		return
+	}
+
+	beforeOne, afterOne, one := run("T9046A", 64<<10)
+	beforeMany, afterMany, many := run("T9046B", 100)
+
+	// The outcome batching must not change: the tree the advance was refused on.
+	if beforeOne != afterOne {
+		t.Errorf("with one invocation the restore did not reproduce the tree:\n--- as found ---\n%s\n--- after ---\n%s", beforeOne, afterOne)
+	}
+	if beforeMany != afterMany {
+		t.Errorf("with the paths batched the restore did not reproduce the tree:\n--- as found ---\n%s\n--- after ---\n%s", beforeMany, afterMany)
+	}
+	if beforeOne != beforeMany {
+		t.Fatalf("the two runs did not start from the same tree, so comparing what they removed says nothing")
+	}
+	if afterOne != afterMany {
+		t.Errorf("the batched restore produced a different tree than the single invocation it replaced:\n--- one ---\n%s\n--- many ---\n%s", afterOne, afterMany)
+	}
+
+	// The paths an invocation was given, which are the clean's own flags followed by
+	// `--` and one `:(literal)` pathspec each.
+	pathsOf := func(args []string) []string {
+		t.Helper()
+		i := slices.Index(args, "--")
+		if i < 0 {
+			t.Fatalf("a restore clean with no `--` before the paths: %q", args)
+		}
+		if want := restoreCleanArgs(nil); !slices.Equal(args[:i+1], want) {
+			t.Errorf("a batched invocation is not the clean whose reach was asked: %q, want it to open with %q", args, want)
+		}
+		out := make([]string, 0, len(args)-i-1)
+		for _, a := range args[i+1:] {
+			if !strings.HasPrefix(a, ":(literal)") {
+				t.Fatalf("%q is not a literal pathspec, so a name holding `*` or `[` would match some other file: %q", a, args)
+			}
+			out = append(out, strings.TrimPrefix(a, ":(literal)"))
+		}
+		return out
+	}
+
+	if len(one) != 1 {
+		t.Fatalf("with the whole list inside the budget the restore ran the clean %d times, want exactly 1: %v", len(one), one)
+	}
+	want := pathsOf(one[0])
+	// A list short enough to fit anywhere would make the split below true for a
+	// reason that has nothing to do with the budget.
+	if len(want) < gathered {
+		t.Fatalf("only %d paths reached the restore's clean, fewer than the %d this fixture wrote: %v", len(want), gathered, want)
+	}
+	if len(many) < 2 {
+		t.Fatalf("with a 100-byte budget the restore still ran the clean %d time(s): the paths went out in one argument list: %v", len(many), many)
+	}
+	var got []string
+	for _, args := range many {
+		got = append(got, pathsOf(args)...)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("the batches carry %v, want the same paths in the same order as the one invocation they replace: %v", got, want)
+	}
+}
+
+// T9047.
+//
+// The sentence a refusal ends with, in the numbers it can be read in. One path and
+// two are the same code and different English, and a reader told "it" about two
+// files goes looking for the one that is not there. A name holding a comma would
+// read as two names in a comma-separated list, and the list is cut rather than
+// unbounded because it is written into an error a human reads — with the count of
+// what was left out, since silence about the rest reads as "eight".
+func TestTheLeftInPlaceSentenceReadsForOnePathAndForMany(t *testing.T) {
+	one := leftInPlace([]string{"gathered/late.txt"})
+	for _, want := range []string{
+		"left gathered/late.txt in place rather than delete it with nothing to write back",
+		"the snapshot holds no copy of it ",
+		"it is still where the task left it",
+	} {
+		if !strings.Contains(one, want) {
+			t.Errorf("the one-path sentence is missing %q: %s", want, one)
+		}
+	}
+	for _, wrong := range []string{"delete them", "no copy of them", "they are still where"} {
+		if strings.Contains(one, wrong) {
+			t.Errorf("the one-path sentence says %q, which reads as more than one path: %s", wrong, one)
+		}
+	}
+
+	two := leftInPlace([]string{"gathered/late.txt", "docs/a,b.md"})
+	for _, want := range []string{
+		`left gathered/late.txt, "docs/a,b.md" in place rather than delete them with nothing to write back`,
+		"the snapshot holds no copy of them ",
+		"they are still where the task left them",
+	} {
+		if !strings.Contains(two, want) {
+			t.Errorf("the two-path sentence is missing %q: %s", want, two)
+		}
+	}
+	for _, wrong := range []string{"delete it with", "no copy of it ", "it is still where"} {
+		if strings.Contains(two, wrong) {
+			t.Errorf("the two-path sentence says %q, which reads as one path: %s", wrong, two)
+		}
+	}
+
+	// The comma is not decoration: without the quote this reads as three names, and
+	// the third — `b.md` — is a path that is not there.
+	if !strings.Contains(named([]string{"docs/a,b.md"}), `"docs/a,b.md"`) {
+		t.Errorf("a name holding a comma was written as it is, so the list names paths that do not exist: %s", named([]string{"docs/a,b.md"}))
+	}
+
+	// More names than a reader will take in. Both halves matter: the eight, and the
+	// count that says the list is not the whole of it.
+	var many []string
+	for i := 0; i < 17; i++ {
+		many = append(many, fmt.Sprintf("docs/p%02d.txt", i))
+	}
+	got := named(many)
+	if !strings.HasSuffix(got, " (and 9 more)") {
+		t.Errorf("17 paths were listed as %q, want a count of the rest", got)
+	}
+	if n := strings.Count(got, "docs/p"); n != 8 {
+		t.Errorf("named() listed %d paths of 17: %s", n, got)
+	}
+	if !strings.Contains(got, "docs/p07.txt") || strings.Contains(got, "docs/p08.txt") {
+		t.Errorf("the cut is not the first eight in order: %s", got)
+	}
+}
+
+// T9048.
+//
+// The same rule where the CLEAN names the file itself, which is the shape that
+// makes "an ancestor of this path is held" the wrong question. A directory git
+// cannot name whole is named file by file, and the reason is the ordinary one: it
+// holds an ignore rule of its own, so the ignored file inside it must stay and git
+// removes the rest one path at a time. The directory is held all the same — an
+// obstruction the target's own commit put there holds it contents and all — and a
+// file that arrived after the snapshot is inside a held directory and in no entry.
+// Leaving it costs a re-dispatch; deleting it costs the work.
+func TestTheRestoreKeepsAFileWrittenIntoADirectoryTheCleanNamesFileByFile(t *testing.T) {
+	f := newRebaselineFixture(t, "T9048")
+	// The task's own directory, with the task's own file in it.
+	f.write("notes/plain.txt", "the task's own file in its own directory\n", 0o644)
+	// main has a FILE exactly where the task has that directory: the reset writes
+	// it, the directory goes whole, and the snapshot is what holds the contents.
+	f.mainAddsItsOwnFileAt("notes")
+	f.mainRewritesTheSameRegion() // and the task's patch no longer applies
+
+	const late = "written after the snapshot was taken\n"
+	const ignored = "ignored by the rule beside it\n"
+	real := restore
+	restore = func(worktree, head, keep string, entries []snapshotEntry) ([]string, error) {
+		// The target's file stands at `notes` until the restore's own reset takes it
+		// away, and the directory has to be there for the clean to name anything
+		// inside it — so the tree this describes is the one the clean is about to
+		// look at, not the one the reset found.
+		notes := filepath.Join(worktree, "notes")
+		if err := os.RemoveAll(notes); err != nil {
+			t.Error(err)
+		}
+		if err := os.MkdirAll(notes, 0o755); err != nil {
+			t.Error(err)
+		}
+		for name, content := range map[string]string{
+			".gitignore":  "*.secret\n",
+			"late.secret": ignored,
+			"late.txt":    late,
+		} {
+			if err := os.WriteFile(filepath.Join(notes, name), []byte(content), 0o644); err != nil {
+				t.Error(err)
+			}
+		}
+		return real(worktree, head, keep, entries)
+	}
+	defer func() { restore = real }()
+
+	before := f.pathsAndContents(f.baseline)
+	_, err := RebaselineTask(f.root, "T9048", "", "")
+	if err == nil {
+		t.Fatal("the advance was not refused")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "patch does not apply") {
+		t.Fatalf("the refusal this test needs is the apply's, so that the restore ran at all: %s", msg)
+	}
+	// The clean named the files, not the directory, so this is the file-granularity
+	// half of the rule: the directory is held, and what is inside it that arrived
+	// afterwards is not.
+	if !strings.Contains(msg, "left notes/.gitignore, notes/late.txt in place") {
+		t.Errorf("the restore did not name both files it left, so a reader believes the tree is as it was found: %s", msg)
+	}
+	if got := readFileOrFail(t, filepath.Join(f.worktree, "notes", "late.txt")); got != late {
+		t.Errorf("the file the restore left in place holds %q, want %q", got, late)
+	}
+	// The ignored file is not in the clean's reach at all, and it is still there:
+	// the ignore rule the clean obeyed is the one in the directory it was reading.
+	if got := readFileOrFail(t, filepath.Join(f.worktree, "notes", "late.secret")); got != ignored {
+		t.Errorf("the ignored file beside it holds %q, want %q", got, ignored)
+	}
+	if got := readFileOrFail(t, filepath.Join(f.worktree, "notes", "plain.txt")); got != "the task's own file in its own directory\n" {
+		t.Errorf("the task's own file in that directory did not come back: %q", got)
+	}
+	// The tree is as it was found, plus exactly the two files the clean would have
+	// removed and the restore therefore left. The ignored one is in no listing by
+	// construction, which is the whole reason it is still there.
+	after := f.pathsAndContents(f.baseline)
+	var rest = after
+	for _, p := range []string{"notes/.gitignore", "notes/late.txt"} {
+		line := f.describe(p)
+		if !strings.Contains(rest, line) {
+			t.Fatalf("the fingerprint of the restored tree does not hold %s: %s", p, rest)
+		}
+		rest = strings.Replace(rest, line, "", 1)
+	}
+	if rest != before {
+		t.Errorf("the refused advance changed the tree it refused to advance:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
+	}
+}

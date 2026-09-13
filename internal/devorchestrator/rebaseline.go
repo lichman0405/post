@@ -150,6 +150,54 @@ func restoreCleanArgs(safe []string) []string {
 	return args
 }
 
+// restoreCleanBatchBytes bounds one invocation's names. argv is capped by
+// ARG_MAX (2 MiB here, shared with the environment), and a path costs its own
+// bytes plus `:(literal)` plus a pointer — so a task worktree holding about
+// 80,000 untracked paths made the restore fail with `argument list too long`
+// (fork/exec: E2BIG), on a tree the code before this one restored: a refusal
+// reported as "the worktree could NOT be put back" where nothing had been lost.
+// The budget is deliberately far under the limit rather than just under it,
+// because the environment occupies the same space and is not this function's to
+// measure. It is a variable rather than a constant so that a test can lower it:
+// the tree that makes one invocation fail for real holds some 80,000 paths,
+// which is not a fixture, and a budget of a few hundred bytes takes the same
+// loop through the same number of batches.
+var restoreCleanBatchBytes = 64 << 10
+
+// restoreClean runs one batch of the restore's clean. It is a variable for the
+// same reason restore and snapshot are: what a test has to be able to see here
+// is the BATCHING — that the paths went out in more than one invocation, and
+// that each invocation is the clean whose reach was asked — and the shape that
+// would show it without a seam is the 80,000-path tree again.
+var restoreClean = func(worktree string, args ...string) (string, error) {
+	return gitOutput(worktree, args...)
+}
+
+// restoreCleanBatches splits the paths into runs of one clean each, in order and
+// without repeating a path. Batching does not change what the restore removes:
+// the union of the batches is the set of paths, every invocation carries the
+// same flags (cleanArgs) and its own `:(literal)` pathspecs, and running them one
+// after another is what running one would have done — minus the argument list
+// that cannot be built.
+func restoreCleanBatches(safe []string) [][]string {
+	var batches [][]string
+	var cur []string
+	size := 0
+	for _, p := range safe {
+		n := len(p) + len(":(literal)") + 1
+		if len(cur) > 0 && size+n > restoreCleanBatchBytes {
+			batches = append(batches, cur)
+			cur, size = nil, 0
+		}
+		cur = append(cur, p)
+		size += n
+	}
+	if len(cur) > 0 {
+		batches = append(batches, cur)
+	}
+	return batches
+}
+
 // Regenerators maps a derived artifact to the command that regenerates it, run
 // with the worktree as cwd so it reads that tree's inputs rather than the
 // Supervisor's.
@@ -755,10 +803,19 @@ func assertTheCleanIsCovered(worktree string, entries []snapshotEntry) error {
 		return err
 	}
 	for _, p := range append(keysOf(dirs), files...) {
-		if held[p] || heldByAnAncestor(held, p) {
-			continue
+		if !held[p] && !heldByAnAncestor(held, p) {
+			return fmt.Errorf("the clean that follows the reset would delete %s, and the snapshot does not hold it — the advance refuses rather than delete work it could not put back. Move it out of the way and dispatch again", p)
 		}
-		return fmt.Errorf("the clean that follows the reset would delete %s, and the snapshot does not hold it — the advance refuses rather than delete work it could not put back. Move it out of the way and dispatch again", p)
+		if dirs[p] {
+			// Holding the DIRECTORY is not holding what is inside it, and the
+			// clean removes a directory whole: the entries beside it are the
+			// record, one path each, and a path that arrived after the snapshot
+			// was taken is in none of them. The same rule as the branch above, at
+			// the granularity git actually removes.
+			if unheld := unheldInside(worktree, p, held); len(unheld) > 0 {
+				return fmt.Errorf("the clean that follows the reset would delete the directory %s, and the snapshot holds no copy of %s inside it — the advance refuses rather than delete work it could not put back. Move %s out of the way and dispatch again", p, named(unheld), named(unheld))
+			}
+		}
 	}
 	return nil
 }
@@ -1091,19 +1148,48 @@ func restoreOrExplain(worktree, head, keep string, entries []snapshotEntry, caus
 		return fmt.Errorf("%w\nThe worktree could NOT be put back: %v\nThe task's work is kept at %s — restore it by hand before dispatching %s again", cause, rerr, keep, taskID)
 	}
 	if len(left) > 0 {
-		return fmt.Errorf("%w\nThe worktree was put back, except that the restore left %s in place rather than delete %s with nothing to write back: the snapshot holds no copy of it, because the ignore rule that hid it belonged to a change the task had not committed — the advance's reset dropped that rule, and this restore's reset cannot bring it back. Nothing was lost: %s is where the task left %s, and it is what the advance refused over. The change is also kept at %s",
-			cause, strings.Join(left, ", "), plural(left, "it"), strings.Join(left, ", "), plural(left, "it"), keep)
+		return fmt.Errorf("%w\nThe worktree was put back, except that %s. The change is also kept at %s", cause, leftInPlace(left), keep)
 	}
 	return fmt.Errorf("%w\nThe worktree was put back the way it was found; the change is also kept at %s", cause, keep)
 }
 
-// plural keeps the refusal above readable whether one path or several were left
-// in place. It is a phrasing helper and nothing depends on it for meaning.
-func plural(paths []string, one string) string {
-	if len(paths) == 1 {
-		return one
+// leftInPlace is the sentence that says which paths the restore kept and why it
+// could not remove them. It is written for both numbers — a refusal that leaves
+// two files and says "it" reads as if one were meant — and it names both ways a
+// path ends up with no copy in the snapshot, because the fix that reads the
+// clean's reach at the path's own granularity made the second one reachable: a
+// path hidden by an ignore rule the task had not committed, and a path written
+// after the snapshot was taken inside a directory the clean removes whole.
+func leftInPlace(left []string) string {
+	if len(left) == 1 {
+		return fmt.Sprintf("the restore left %s in place rather than delete it with nothing to write back: the snapshot holds no copy of it — either an ignore rule the task had not committed hid it (the advance's reset drops that rule, and this restore's reset cannot bring it back), or it was written after the snapshot was taken, inside a directory the clean removes whole. Nothing was lost: it is still where the task left it", named(left))
 	}
-	return "them"
+	return fmt.Sprintf("the restore left %s in place rather than delete them with nothing to write back: the snapshot holds no copy of them — either an ignore rule the task had not committed hid them (the advance's reset drops that rule, and this restore's reset cannot bring it back), or they were written after the snapshot was taken, inside a directory the clean removes whole. Nothing was lost: they are still where the task left them", named(left))
+}
+
+// named is a list of paths as one readable phrase. A name holding a comma would
+// read as two names in it, and the list is the only place these paths are ever
+// reported, so the ones that cannot stand for themselves are written the way the
+// manifest writes them. A list longer than a reader will take in is cut, and the
+// rest is a count rather than silence: the number is what says how much is still
+// there.
+func named(paths []string) string {
+	const shown = 8
+	cut := paths
+	var more string
+	if len(cut) > shown {
+		more = fmt.Sprintf(" (and %d more)", len(cut)-shown)
+		cut = cut[:shown]
+	}
+	out := make([]string, len(cut))
+	for i, p := range cut {
+		if strings.Contains(p, ",") {
+			out[i] = strconv.Quote(p)
+			continue
+		}
+		out[i] = manifestPath(p)
+	}
+	return strings.Join(out, ", ") + more
 }
 
 // restore is restoreWorktree, as a variable, so that a test can make it fail
@@ -1113,6 +1199,46 @@ func plural(paths []string, one string) string {
 // directory, an unwritable file) is bypassed by root, and the tests run as
 // whatever the CI user is.
 var restore = restoreWorktree
+
+// unheldInside names what a directory the clean would remove holds that the
+// snapshot has no copy of. It is the difference between "the snapshot holds this
+// directory" and "the snapshot holds everything under it", and the clean needs
+// the second: `git clean -fd` takes a directory whole, so everything inside goes
+// with it whether or not anything recorded it.
+//
+// The entries beside the directory are the record of what the walk saw: a path
+// written after the snapshot was taken is in neither, and so is everything under
+// a directory that only became removable when the reset deleted the file that
+// was keeping it. Both are work the restore cannot write back.
+//
+// A path the walk cannot list counts as unheld. What cannot be listed cannot be
+// promised, and the two directions are not equally bad — the same reason
+// heldByAnAncestor keeps its cautious arm: leaving a path costs the next
+// dispatch a confusing extra file, and deleting one costs the work.
+func unheldInside(worktree, dir string, held map[string]bool) []string {
+	var unheld []string
+	root := filepath.Join(worktree, filepath.FromSlash(dir))
+	_ = filepath.WalkDir(root, func(full string, _ fs.DirEntry, werr error) error {
+		rel, rerr := filepath.Rel(worktree, full)
+		if rerr != nil {
+			unheld = append(unheld, dir)
+			return fs.SkipAll
+		}
+		rel = onePathName(filepath.ToSlash(rel))
+		if werr != nil {
+			unheld = append(unheld, rel)
+			return nil
+		}
+		if rel == onePathName(dir) {
+			return nil // the directory itself: held, which is why it is walked
+		}
+		if !held[rel] {
+			unheld = append(unheld, rel)
+		}
+		return nil
+	})
+	return unheld
+}
 
 // restoreWorktree puts the worktree back the way the caller found it: the
 // branch tip it had, no files the failed advance left behind, and the task's
@@ -1152,14 +1278,31 @@ func restoreWorktree(worktree, head, keep string, entries []snapshotEntry) ([]st
 	}
 	var safe, left []string
 	for _, p := range append(keysOf(dirs), files...) {
-		if held[p] || heldByAnAncestor(held, p) {
-			safe = append(safe, p)
+		// The snapshot holding the path is the whole of the test here, and
+		// heldByAnAncestor is deliberately not asked: a path the snapshot holds
+		// only through the directory around it is one it has no copy of, and a
+		// path in neither category is named to the caller rather than deleted.
+		if !held[p] {
+			left = append(left, p)
 			continue
 		}
-		left = append(left, p)
+		if dirs[p] {
+			// A directory goes in one piece, so holding the directory is not the
+			// claim the clean needs — it needs the contents, which is what the
+			// entries beside it are and what the clean removes with it. A path
+			// written after the snapshot was taken is held by neither, and it
+			// would ride out on the removal, unnamed, with the message saying the
+			// worktree was put back. This is the rule above, at the granularity
+			// git actually removes.
+			if unheld := unheldInside(worktree, p, held); len(unheld) > 0 {
+				left = append(left, unheld...)
+				continue
+			}
+		}
+		safe = append(safe, p)
 	}
-	if len(safe) > 0 {
-		if _, err := gitOutput(worktree, restoreCleanArgs(safe)...); err != nil {
+	for _, batch := range restoreCleanBatches(safe) {
+		if _, err := restoreClean(worktree, restoreCleanArgs(batch)...); err != nil {
 			return left, fmt.Errorf("cleaning the worktree: %w", err)
 		}
 	}
