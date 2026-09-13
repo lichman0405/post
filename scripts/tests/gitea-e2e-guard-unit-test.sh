@@ -180,11 +180,37 @@ run_gate() { # tree [extra env] -> sets RC/OUT
 # refreshes stat information, so fingerprinting it would make this net fire on
 # its own bookkeeping. Its content is covered from the other side — a staged
 # change is exactly what `status --porcelain` reports.
-dot_git_state() { # tree -> "path=digest;" for every file under .git
+dot_git_state() { # tree -> one record per entry under .git, whatever its type
   local t="$1"
   ( cd "$t/.git" 2>/dev/null || return 0
-    find . -type f ! -name index ! -name '*.lock' -print0 2>/dev/null \
-      | sort -z | xargs -0 -r sha256sum 2>/dev/null | tr '\n' ';' )
+    # EVERY entry, not every file, and nothing excluded by name. The first
+    # version of this digested `-type f`, skipped `*.lock`, and a review walked
+    # three writes straight through it: a hook installed as a SYMLINK (which git
+    # will run), an empty directory, and a leftover lock file. None of the three
+    # is a regular file and one of them was excluded by its name. The same
+    # question applies to the ONE exclusion that is still here, which is why it
+    # is written as a path and not as a name.
+    #
+    # The lock exclusion had no reason to exist. This fingerprint is taken
+    # before and after a COMPLETED run, so a transient lock is already gone;
+    # what survives to be fingerprinted is a lock somebody left behind.
+    #
+    # `.git/index` is still excluded, and only that exact path: reading can
+    # rewrite it (`git status` refreshes stat information), so digesting it would
+    # make this net fire on its own bookkeeping. Its content is covered from the
+    # other side — a staged change is exactly what `status --porcelain` reports.
+    find . ! -path ./index -printf '%y %p\0' 2>/dev/null | sort -z | \
+      while IFS= read -r -d '' rec; do
+        local kind="${rec%% *}" path="${rec#* }"
+        case "$kind" in
+          # A regular file: its bytes. A symlink: where it points, because the
+          # target's content is not what was written into the tree.
+          f) printf '%s %s %s;' "$kind" "$path" \
+               "$(sha256sum -- "$path" 2>/dev/null | cut -d' ' -f1)" ;;
+          l) printf '%s %s ->%s;' "$kind" "$path" "$(readlink -- "$path" 2>/dev/null)" ;;
+          *) printf '%s %s %s;' "$kind" "$path" "$(stat -c '%a:%s' -- "$path" 2>/dev/null)" ;;
+        esac
+      done )
 }
 tree_state() { # tree -> state string
   local t="$1"
@@ -477,6 +503,14 @@ def writes(sub, argv):
         return not (pos and pos[0] in ("list", "show"))
     if sub == "hash-object":
         return "-w" in argv  # without -w it prints the hash and writes nothing
+    # Two more that are reads in the form a gate uses and writes in the form it
+    # does not. Both landed in .git, so the measuring net caught them anyway —
+    # but "the other net will get it" is not a reason to let this one name a
+    # write a read, and here it costs nothing: same shape as hash-object.
+    if sub == "merge-tree":
+        return "--write-tree" in argv  # writes the merged tree as an object
+    if sub == "fsck":
+        return "--lost-found" in argv  # writes .git/lost-found/
     return sub not in READ_ONLY
 
 
@@ -536,7 +570,7 @@ judge_tree() { # tree -> "n_mutating \t n_parse_bad \t measured \t violations"
     # Split on both separators: one field per ref, one per file inside .git, so
     # the report names what changed rather than printing two whole states.
     delta="$(diff <(printf '%s' "$before" | tr '|;' '\n\n') \
-                  <(printf '%s' "$after" | tr '|;' '\n\n') | grep '^[<>]' | head -4 | tr '\n' ' ')"
+                  <(printf '%s' "$after" | tr '|;' '\n\n') | grep '^[<>]' | head -12 | tr '\n' ' ')"
     violations="${violations:+$violations; }the tree itself changed during the run: $delta"
   fi
   printf '%s\t%s\t%s\t%s\n' "$n_mut" "$n_parse" "$measured" "$violations"
@@ -626,6 +660,22 @@ cases = [
     # (The companion case — a write that runs no command at all — is the
     # shell-only gate below, and only the fingerprint can see that one.)
     'GIT_OBJECT_DIRECTORY="$ROOT/.git/objects" git hash-object -w README.md\n',
+    # The fourth review's: two more commands that read in the form a gate uses
+    # and write in another, and that the judge called reads in BOTH forms. The
+    # tree is fingerprinted now, so the measuring net would have reported the
+    # object either way — but "the other net will get it" is not a reason to
+    # let this one name a write a read, and the reads case below pins the
+    # opposite direction for the same two names.
+    #
+    # `merge-tree --write-tree` writes the merged tree as an object. The plain
+    # form prints it.
+    'git -C "$ROOT" merge-tree --write-tree HEAD HEAD\n',
+    # `fsck --lost-found` writes .git/lost-found/. It writes only when there is
+    # something to lose — and here there is, because the hash-object probe
+    # above has just left a dangling blob behind; the reported delta names
+    # `d ./lost-found`. Before this probe existed the judge called the form a
+    # read, which is the finding it answers.
+    'git -C "$ROOT" fsck --lost-found\n',
 ]
 # Far enough in that ROOT is set and the environment has been unset (the probes
 # must be run through the shim, not neutralised by the gate's own hygiene), and
@@ -638,12 +688,30 @@ body = "".join(
         [probe + "# case %d\n" % i for i in range(len(cases))], cases))
 open(out, "w").write(src.replace(anchor, body + anchor, 1))
 
-# The same broken gate with ONE probe, and a probe that is not a git command:
-# a shell redirection into the tree's own .git. Nothing is logged, so the
-# naming net has nothing to read — if the fingerprint does not see it, this
-# write is invisible to the guard, and the suite must be red.
-shell_probe = ('printf "#!/bin/sh\\n" > "$ROOT/.git/hooks/commit-msg"\n')
-open(shell_out, "w").write(src.replace(anchor, probe + shell_probe + anchor, 1))
+# The same broken gate with FIVE probes, none of them a git command: writes that
+# run no command at all, so the naming net has nothing to read — if the
+# fingerprint does not see them, they are invisible to the guard.
+#
+# One is a shell redirection into the tree's own .git. Three are the shapes a
+# review found after the fingerprint digested only regular files: a hook
+# installed as a SYMLINK (git runs it — this is a functional change to the
+# gate's environment, not litter), a leftover `.lock`, and an empty directory.
+# They are here because "which kind of thing did the write create" is the same
+# class of question as "how was the command spelled", and a net that answers it
+# for one kind of file is a net with a spelling problem. The fifth closes the
+# same question one level down, about the one exclusion the net keeps.
+shell_probes = [
+    'printf "#!/bin/sh\\n" > "$ROOT/.git/hooks/commit-msg"\n',
+    'ln -sf /bin/true "$ROOT/.git/hooks/pre-commit"\n',
+    ': > "$ROOT/.git/g3-leftover.lock"\n',
+    'mkdir -p "$ROOT/.git/g3-empty-dir"\n',
+    # And the exclusion that survives: `.git/index` is skipped because READING
+    # can rewrite it. It is skipped by PATH — this write is a file that merely
+    # shares the name, and a rule that skipped `-name index` would have let it
+    # through. The one exclusion left in the net is the one this probe pins.
+    ': > "$ROOT/.git/refs/index"\n',
+]
+open(shell_out, "w").write(src.replace(anchor, probe + "".join(shell_probes) + anchor, 1))
 PY
 chmod +x "$BROKEN/gate.sh" "$BROKEN/gate-shell.sh"
 # The mutations have to be in the tree under test for the nets to have
@@ -655,10 +723,10 @@ ESCAPED="$(judge_tree "$TREE")"
 E_MUT="${ESCAPED%%$'\t'}"; E_REST="${ESCAPED#*$'\t'}"
 E_PARSE="${E_REST%%$'\t'*}"; E_REST="${E_REST#*$'\t'}"
 E_MEASURED="${E_REST%%$'\t'*}"
-if (( E_PARSE == 18 )); then
-  ok "the naming net names all 18 spellings of a write into the tree under test, and accuses nothing else"
+if (( E_PARSE == 20 )); then
+  ok "the naming net names all 20 spellings of a write into the tree under test, and accuses nothing else"
 else
-  fail "the naming net named $E_PARSE writes into the tree under test, not 18 — it judges the spelling, not the target: $ESCAPED"
+  fail "the naming net named $E_PARSE writes into the tree under test, not 20 — it judges the spelling, not the target: $ESCAPED"
 fi
 # The measuring net has to stand on its own: a spelling the naming net cannot
 # parse must still be visible as a changed tree, or the naming net's blind
@@ -666,7 +734,7 @@ fi
 if (( E_MEASURED == 1 )); then
   ok "the measuring net saw the tree change without needing to parse the command"
 else
-  fail "18 writes into the tree under test left the tree's own state unchanged — the net that cannot be spelled past is not connected: $ESCAPED"
+  fail "20 writes into the tree under test left the tree's own state unchanged — the net that cannot be spelled past is not connected: $ESCAPED"
 fi
 
 # And it has to stand alone in the other direction too: here is a write that
@@ -681,12 +749,34 @@ S_MUT="${SHELLONLY%%$'\t'}"; S_REST="${SHELLONLY#*$'\t'}"
 S_PARSE="${S_REST%%$'\t'*}"; S_REST="${S_REST#*$'\t'}"
 S_MEASURED="${S_REST%%$'\t'*}"
 if (( S_MEASURED == 1 )); then
-  ok "the measuring net saw a shell redirection into .git that logged no command at all"
+  ok "the measuring net saw the tree change with no command logged to parse"
 else
-  fail "a shell redirection wrote into the tree's own .git and the measuring net did not see it: $SHELLONLY"
+  fail "5 shell-level writes went into the tree's own .git and the measuring net saw nothing: $SHELLONLY"
+fi
+# One write being visible is not the claim, and "the tree differs" does not say
+# what was seen. The fingerprint digested regular files only until a review put
+# a SYMLINKED HOOK, an empty directory and a leftover `.lock` past it — and the
+# third of those is a regular file, which is why the exclusion that skipped it
+# is part of the same finding rather than a separate one. So the assertion is
+# that the report names all five, by kind and by path. A net that sees one kind
+# of file is a net with a spelling problem, and so is one that skips by name
+# what it meant to skip by path.
+S_DETAIL="${S_REST#*$'\t'}"
+unseen=""
+for shape in "hooks/commit-msg" "hooks/pre-commit ->/bin/true" "g3-leftover.lock" \
+             "g3-empty-dir" "refs/index"; do
+  case "$S_DETAIL" in
+    *"$shape"*) ;;
+    *) unseen="$unseen [$shape]" ;;
+  esac
+done
+if [[ -z "$unseen" ]]; then
+  ok "the measuring net named all five: two that are not regular files, the one it skipped for its name, and the one that only shares a name with the index"
+else
+  fail "the measuring net did not report:$unseen — what it digests is a spelling too, and this one excluded symlinks, directories and anything named *.lock: $SHELLONLY"
 fi
 if (( S_PARSE == 0 )); then
-  ok "no command was logged for it, so the naming net was blind to it by construction"
+  ok "no command was logged for any of them, so the naming net was blind to them by construction"
 else
   fail "the naming net claims to have judged a write that ran no command at all: $SHELLONLY"
 fi
