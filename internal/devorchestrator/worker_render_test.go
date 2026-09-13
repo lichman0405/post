@@ -115,6 +115,30 @@ func TestValidatorFailsClosedOnUnknownKeywords(t *testing.T) {
 	}
 }
 
+// TestValidatorRefusesABoundItsTypeCanNeverCarry: bounding only the types a
+// bound applies to must not become not bounding at all. A schema that sets a
+// bound where it can never fire is an authoring error, and validating past it
+// would be validating less than the schema demands.
+func TestValidatorRefusesABoundItsTypeCanNeverCarry(t *testing.T) {
+	cases := []struct {
+		name   string
+		doc    any
+		schema map[string]any
+	}{
+		{"bound next to an incompatible type", "x", map[string]any{"type": "string", "minimum": 0}},
+		{"bound with no type declared", "x", map[string]any{"minimum": 0}},
+		// the value passes the type check (integer) and still cannot carry a
+		// string-length bound
+		{"bound no type in the list mentions", float64(5), map[string]any{"type": []any{"integer", "null"}, "minLength": 1}},
+	}
+	for _, tc := range cases {
+		err := validateAgainst(tc.doc, tc.schema, "x")
+		if err == nil || !strings.Contains(err.Error(), "can never carry") {
+			t.Errorf("%s: a bound that can never fire was silently dropped: %v", tc.name, err)
+		}
+	}
+}
+
 // TestValidatorAppliesAKeywordOnlyToItsOwnType pins the defect that stopped
 // T0215's review from collecting on 14 Sep 2026.
 //
@@ -211,7 +235,12 @@ func TestValidateReviewVerdictAcceptsAFindingWithoutALine(t *testing.T) {
 
 func loadSchema(t *testing.T) map[string]any {
 	t.Helper()
-	data, err := os.ReadFile(taskPackageSchemaPath(t))
+	return loadSchemaAt(t, taskPackageSchemaPath(t))
+}
+
+func loadSchemaAt(t *testing.T, path string) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}

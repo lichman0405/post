@@ -206,6 +206,85 @@ func TestWorktreeDiffIncludesUntrackedFiles(t *testing.T) {
 	}
 }
 
+// A diff IS a patch, and a patch's trailing whitespace is part of it: `git diff`
+// writes an empty context line as a single space, and the last line of a diff is
+// often one. The trim every other gitOutput caller wants deleted that space, and
+// the final hunk was then one line short of the count in its own @@ header — so
+// `git apply` called the whole patch corrupt and G2 never ran, for a task whose
+// only real problem was being behind main.
+//
+// The assertion is the one the gate makes: apply it, into a tree at the baseline
+// the way prepareIntegrationTree does. Checking for the trailing space is not
+// enough on its own — a diff can keep its bytes and still be unappliable — so
+// this test also fails if the fixture stops ending on a blank context line,
+// which would quietly retire the case.
+func TestWorktreeDiffEndsOnABlankContextLineApplies(t *testing.T) {
+	dir := t.TempDir()
+	runGitIn := func(where string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = where
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, where, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGitIn(dir, "init", "-q")
+	// The file ends on a blank line, so the hunk that edits its first line ends
+	// with a context line that is empty — which git renders as " ".
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("line1\nline2\n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(dir, "add", "-A")
+	runGitIn(dir, "commit", "-q", "-m", "baseline")
+	baseline := runGitIn(dir, "rev-parse", "HEAD")
+
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("LINE1\nline2\n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := taskWorktreeDiff(&WorkerRecord{Worktree: dir, BaselineSHA: baseline})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A tree at the baseline, as prepareIntegrationTree builds one from main.
+	other := t.TempDir()
+	runGitIn(other, "clone", "-q", dir, ".")
+	patch := filepath.Join(t.TempDir(), "change.patch")
+	if err := os.WriteFile(patch, []byte(diff), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", other, "apply", patch).CombinedOutput(); err != nil {
+		t.Fatalf("git apply rejected the diff the integration tree is built from: %v\n%s", err, out)
+	}
+	after, err := os.ReadFile(filepath.Join(other, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != "LINE1\nline2\n\n" {
+		t.Errorf("the patch applied but produced %q, want the Worker's content", after)
+	}
+
+	// Last, so that a diff which no longer exercises the case fails the apply
+	// above rather than being silently retired here.
+	if !strings.HasSuffix(diff, "\n \n") {
+		t.Fatalf("the fixture no longer ends on a blank context line, so this test would not have exercised the case it exists for; the diff ends %q", tail(diff, 20))
+	}
+}
+
+// tail is the last n bytes of s, for an error message that has to show why a
+// prefix/suffix assertion failed without dumping a whole diff.
+func tail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[len(s)-n:]
+}
+
 // The untracked paths come from the Worker's own tree, so following a symlink
 // would let the Worker make the SUPERVISOR read an arbitrary file and embed it
 // in the review input — a durable artifact. Lstat, never Stat: a symlink is
@@ -363,5 +442,74 @@ func TestWorktreeDiffSurvivesABaselineAdvance(t *testing.T) {
 	}
 	if strings.Contains(diff, "unrelated.txt") {
 		t.Errorf("main's own changes leaked into the review of the task:\n%s", diff)
+	}
+}
+
+// The same string is not only the review input: prepareIntegrationTree writes
+// it out and applies it to build the tree G2 and G3 verify. So the property
+// that has to hold is that APPLYING it reproduces the worktree byte for byte —
+// checking the text for a marker would pass on a patch that still loses a
+// byte. A file that ends at its last byte (every canonical schema does: they
+// end with a closing brace) must not arrive with a newline added, and an empty
+// file must arrive empty rather than as a one-line file, and a file of one
+// blank line must not arrive empty.
+func TestWorktreeDiffReproducesTheWorktreeByteForByte(t *testing.T) {
+	dir := t.TempDir()
+	runGitIn := func(where string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = where
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, where, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGitIn(dir, "init", "-q")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(dir, "add", "-A")
+	runGitIn(dir, "commit", "-q", "-m", "baseline")
+	baseline := runGitIn(dir, "rev-parse", "HEAD")
+
+	files := map[string]string{
+		"tracked.txt":  "after\n",    // modified, newline at the end
+		"no_eol.json":  "{\"a\": 1}", // the shape every specs/schemas file has
+		"empty.txt":    "",
+		"blank.txt":    "\n",
+		"with_eol.txt": "a\nb\n",
+		"one_byte.txt": "x",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	diff, err := taskWorktreeDiff(&WorkerRecord{Worktree: dir, BaselineSHA: baseline})
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied := filepath.Join(t.TempDir(), "applied")
+	runGitIn(dir, "worktree", "add", "-q", "--detach", applied, baseline)
+	patch := filepath.Join(t.TempDir(), "change.patch")
+	if err := os.WriteFile(patch, []byte(diff), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(applied, "apply", patch)
+
+	for name, want := range files {
+		got, err := os.ReadFile(filepath.Join(applied, name))
+		if err != nil {
+			t.Errorf("%s: the patch did not reproduce the file: %v", name, err)
+			continue
+		}
+		if string(got) != want {
+			t.Errorf("%s: applying the diff produced %q, the worktree holds %q — the tree the gate verifies would not be the tree the task produced", name, got, want)
+		}
 	}
 }

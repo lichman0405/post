@@ -551,7 +551,11 @@ func CollectReview(opts *CollectOpts) (*ReviewCollectReport, error) {
 //     must not outlive the state it judged.
 func codeIdentity(rec *WorkerRecord) (string, error) {
 	base := rec.BaselineSHA
-	if mb, err := gitOutput(rec.Worktree, "merge-base", DefaultBaseBranch, "HEAD"); err == nil && mb != "" {
+	// Anchored on the integration tip for the same reason taskWorktreeDiff is:
+	// refs/heads/main is what this clone last heard, so a pull that changes no
+	// commit the branch was cut from would still move the merge-base and
+	// invalidate a verdict about identical code. One reader, one answer.
+	if mb, err := gitOutput(rec.Worktree, "merge-base", integrationBase(rec.Worktree), "HEAD"); err == nil && mb != "" {
 		base = mb
 	}
 	// Hash (path, content) for every file that differs from the base — the

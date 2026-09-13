@@ -180,6 +180,21 @@ func validateInto(doc any, schema map[string]any, where string, errs *[]error) {
 			validateInto(v, items, where+"["+strconv.Itoa(i)+"]", errs)
 		}
 	}
+	// A schema that declares a bound its own type list can never carry is one
+	// whose bound silently does nothing. The blocks below enforce the first
+	// half of the rule — a bound fires only on a value of the type it bounds,
+	// which is what draft 2020-12 says; this reports the second half, where the
+	// dead bound is written, instead of leaving it to be discovered as a value
+	// that slipped through.
+	for _, b := range bounds {
+		if _, set := schema[b.keyword]; !set {
+			continue
+		}
+		if !typeAllowsAny(schema["type"], b.types) {
+			*errs = append(*errs, fmt.Errorf("%s: schema sets %q but its type %v can never carry that bound — the bound would silently do nothing", where, b.keyword, schema["type"]))
+			return
+		}
+	}
 	// The content keywords apply only to values of the type they govern, which
 	// is what draft 2020-12 says and what the `type` list already decides.
 	// They used to fire on any value of another type — "!isArr ||" and
@@ -331,6 +346,47 @@ func ValidateWorkerResultFile(schemaPath, resultPath string) error {
 		return fmt.Errorf("RESULT.json does not validate against %s: %w", schemaPath, err)
 	}
 	return nil
+}
+
+// bounds pairs each bound validateInto implements with the JSON types that
+// bound can apply to.
+var bounds = []struct {
+	keyword string
+	types   []string
+}{
+	{"minItems", []string{"array"}},
+	{"minLength", []string{"string"}},
+	{"minimum", []string{"integer", "number"}},
+}
+
+// typeAllowsAny reports whether a schema's "type" declaration lists any of
+// want. A schema that declares no type allows none of them: the value could
+// be of any type, so the bound could never be applied.
+func typeAllowsAny(t any, want []string) bool {
+	// var, not an empty literal: every branch that does not return assigns
+	// declared, so an initialized value here is dead — SA4006, and the repo's
+	// rule is that new code is fixed rather than baselined.
+	var declared []any
+	switch v := t.(type) {
+	case string:
+		declared = []any{v}
+	case []any:
+		declared = v
+	default:
+		return false
+	}
+	for _, d := range declared {
+		s, isStr := d.(string)
+		if !isStr {
+			continue
+		}
+		for _, w := range want {
+			if s == w {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func typeMatches(doc any, t any) bool {
