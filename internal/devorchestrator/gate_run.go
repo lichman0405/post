@@ -613,8 +613,18 @@ func prepareIntegrationTree(repoRoot, taskID string) (string, func(), error) {
 		// `worktree add` fail, so clear it.
 		_ = os.RemoveAll(dir)
 	}
-	if _, err := gitOutput(repoRoot, "worktree", "add", "--detach", dir, DefaultBaseBranch); err != nil {
-		return "", noop, fmt.Errorf("creating the integration tree at %s from %s: %w", dir, DefaultBaseBranch, err)
+	// The tree is "current main plus the task's change", so it has to be built
+	// from what main IS rather than from what the clone last heard. A stale ref
+	// grades a composition the forge stopped having at the last merge — and it
+	// is the same ref a task branch is cut from, so both readers answer the same
+	// way (IntegrationTip). A fetch that fails REFUSES the gate: a gate that
+	// cannot establish its own premise has no verdict to give.
+	tip, err := IntegrationTip(repoRoot)
+	if err != nil {
+		return "", noop, err
+	}
+	if _, err := gitOutput(repoRoot, "worktree", "add", "--detach", dir, tip); err != nil {
+		return "", noop, fmt.Errorf("creating the integration tree at %s from %s: %w", dir, tip, err)
 	}
 	cleanup := func() {
 		_, _ = gitOutput(repoRoot, "worktree", "remove", "--force", dir)

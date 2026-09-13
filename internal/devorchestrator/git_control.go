@@ -506,12 +506,21 @@ func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
 }
 
 // taskDiffBase is the commit a task's contribution is measured from: where its
-// branch diverged from main, not the recorded baseline. RebaselineTask takes
-// its "before" path set from here as well, so the set it compares after the
-// advance describes the same thing the patch does.
+// branch diverged from the integration tip, not the recorded baseline.
+// RebaselineTask takes its "before" path set from here as well, so the set it
+// compares after the advance describes the same thing the patch does.
+//
+// The anchor of that merge-base is the integration TIP rather than the local
+// branch, and the difference is not academic. This diff is what gets APPLIED to
+// the tree the gate verifies, so measuring against a different ref than that
+// tree was cut from produces a patch carrying commits the tree already has,
+// which does not apply at all. The driver also runs a rebaseline exactly when a
+// dependency has just been recorded merged — precisely when this clone's own
+// main is behind the forge — so the local branch is stale whenever it matters.
+// See integrationBase.
 func taskDiffBase(rec *WorkerRecord) string {
 	base := rec.BaselineSHA
-	if mb, err := gitOutput(rec.Worktree, "merge-base", DefaultBaseBranch, "HEAD"); err == nil && mb != "" {
+	if mb, err := gitOutput(rec.Worktree, "merge-base", integrationBase(rec.Worktree), "HEAD"); err == nil && mb != "" {
 		base = mb
 	}
 	return base

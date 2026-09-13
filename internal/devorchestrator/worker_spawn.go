@@ -2,6 +2,7 @@ package devorchestrator
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -569,11 +570,21 @@ func ensureWorktree(repoRoot, taskID, branch string) error {
 		return err
 	}
 	if !exists {
-		if _, err := gitOutput(repoRoot, "checkout", "-b", branch); err != nil {
-			return fmt.Errorf("creating task branch %s: %w", branch, err)
+		// The baseline is what the integration branch is NOW — fetched, and
+		// named explicitly. Never the checkout's current HEAD, which is a shared
+		// resource (reviews, merges, one-off probes) and may be on anything: a
+		// task cut from an unrelated checkout inherits commits nobody merged,
+		// and a task cut from a stale main starts without the dependency the DAG
+		// has just called merged (#123).
+		base, err := IntegrationTip(repoRoot)
+		if err != nil {
+			return err
 		}
-		if _, err := gitOutput(repoRoot, "checkout", "-"); err != nil {
-			return fmt.Errorf("returning to the previous branch after creating %s: %w", branch, err)
+		// `git branch` rather than `checkout -b`: creating the branch must not
+		// move the shared checkout, which is how the checkout could be left
+		// sitting on a task branch (L1-20260914-1).
+		if _, err := gitOutput(repoRoot, "branch", branch, base); err != nil {
+			return fmt.Errorf("creating task branch %s from %s: %w", branch, base, err)
 		}
 	}
 	if _, err := gitOutput(repoRoot, "worktree", "add", wtDir, branch); err != nil {
@@ -673,10 +684,47 @@ func writeSpawnFiles(taskDir string, pkg *TaskPackage, prompt, system string, gu
 // gitOutput runs git in dir and returns trimmed stdout; on failure the error
 // carries the command's stderr.
 func gitOutput(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	return runGit(dir, 0, args...)
+}
+
+// runGitWaitDelay bounds how long Wait keeps reading a command's output after
+// the process itself is gone.
+//
+// A deadline alone is not a bound, which is the whole reason this exists: git
+// spawns helpers (`git-remote-http`, `git-remote-ext`), those helpers inherit
+// git's stdout and stderr, and `cmd.Output()` reads until the WRITE END of the
+// pipe closes — which the helper holds. Killing git on the deadline therefore
+// leaves Wait blocked on a pipe an orphan is still holding, and the fetch returns
+// at the deadline plus however long the orphan lives. Measured with an
+// `ext::sleep 30` remote and a 300ms deadline: without this, the call did not
+// return until the sleep exited. WaitDelay makes Go close the pipes itself once
+// it has elapsed, so the deadline is the deadline.
+const runGitWaitDelay = 5 * time.Second
+
+// runGit runs git in dir. A positive timeout bounds the call, which matters for
+// the one git command this package makes over the network: an unbounded fetch
+// does not fail a dispatch, it STALLS it — and under `rddev drive` a dispatch
+// that never returns is the whole DAG not moving, with nothing in the log to say
+// why. A deadline turns that into an error the driver can retry.
+//
+// WaitDelay is set even when there is no deadline: a local git that exits while a
+// helper holds the pipe hangs the caller exactly the same way, and every caller
+// here is on a path where hanging is worse than an error.
+func runGit(dir string, timeout time.Duration, args ...string) (string, error) {
+	ctx := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	cmd.WaitDelay = runGitWaitDelay
 	out, err := cmd.Output()
 	if err != nil {
+		if timeout > 0 && ctx.Err() != nil {
+			return "", fmt.Errorf("git %s: timed out after %s", strings.Join(args, " "), timeout)
+		}
 		// %w keeps the *exec.ExitError in the chain so callers can inspect the
 		// exit code (branchExists treats exit 1 as "no such branch").
 		if ee, ok := err.(*exec.ExitError); ok {
