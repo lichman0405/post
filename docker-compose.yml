@@ -96,6 +96,14 @@ services:
       USER_GID: "1000"
       GITEA__database__DB_TYPE: postgres
       GITEA__database__HOST: postgres:5432
+      # Webhooks must be able to reach the host. T0305's semantic ingestion
+      # depends on push webhooks, and this bridge exists so delivery can be
+      # verified before that code is written - but Gitea's default allow-list
+      # refuses both loopback and private addresses, so every delivery failed
+      # with "webhook can only call allowed HTTP servers". Loopback and private
+      # only, not "*": Gitea here reaches the developer's own machine, and the
+      # whole stack already binds 127.0.0.1 (docs/66 section 2).
+      GITEA__security__ALLOWED_HOST_LIST: "loopback,private"
       GITEA__database__NAME: ${GITEA_DB_NAME:-gitea}
       GITEA__database__USER: ${GITEA_DB_USER:-gitea}
       GITEA__database__PASSWD: ${GITEA_DB_PASSWORD:-gitea_dev_pw}
