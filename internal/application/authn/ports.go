@@ -111,6 +111,20 @@ type OIDCProvider interface {
 	ExchangeCode(ctx context.Context, code, redirectURI string) (OIDCClaims, error)
 }
 
+// AuditRecorder receives the audit entries for auth events (signup, login
+// success/failure, logout — T0110). The production adapter is
+// persistence.AuditStore; a nil recorder (tests, or a deployment that
+// decides not to keep an auth audit trail) disables recording. Auth
+// events are best-effort: a recorder failure never fails the auth outcome
+// (unlike the store-side audit rows on state changes, which commit with
+// the state they describe).
+type AuditRecorder interface {
+	// Record appends one entry. The call may be on its own connection —
+	// auth events have no PostgreSQL state change to share a transaction
+	// with.
+	Record(ctx context.Context, entry domain.AuditEntry) error
+}
+
 // NewToken returns a fresh opaque token: 32 random bytes base64url —
 // 256 bits of entropy, unguessable and unencodable-invalid (URL- and
 // cookie-safe alphabet).

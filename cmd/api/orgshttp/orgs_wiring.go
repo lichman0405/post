@@ -29,6 +29,11 @@ type API struct {
 	handlers *handlers
 }
 
+// Service exposes the wired service so sibling surfaces can share the exact
+// same instance: the Activity feed (audithttp) authorizes organization
+// reads with the same object that serves the organization itself.
+func (a *API) Service() *orgs.Service { return a.handlers.svc }
+
 // Routes registers the organization surface (no guard — main.go wraps the
 // whole /api/v1 subtree in authhttp.API.Guard, so every write here is
 // session + CSRF protected by construction).

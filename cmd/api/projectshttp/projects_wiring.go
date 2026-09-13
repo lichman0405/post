@@ -40,6 +40,12 @@ type API struct {
 	handlers *handlers
 }
 
+// Service exposes the wired service so sibling surfaces can share the exact
+// same instance: the Activity feed (audithttp) authorizes project reads
+// with the same object that serves the project itself, so visibility rules
+// can never drift between a resource and its activity.
+func (a *API) Service() *projects.Service { return a.handlers.svc }
+
 // Routes registers the project surface (no guard — main.go wraps the whole
 // /api/v1 subtree in authhttp.API.Guard, so every write here is session +
 // CSRF protected by construction).

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -18,14 +19,16 @@ type Service struct {
 	users    UserStore
 	sessions SessionStore
 	limiter  RateLimiter
-	oidc     OIDCProvider // nil when OIDC is not configured
+	oidc     OIDCProvider  // nil when OIDC is not configured
+	audit    AuditRecorder // nil disables auth audit recording
 	cfg      Config
 }
 
 // NewService wires the service. oidc may be nil (OIDC disabled); the OIDC
-// endpoints then answer CodeOIDCNotConfigured.
-func NewService(users UserStore, sessions SessionStore, limiter RateLimiter, oidc OIDCProvider, cfg Config) *Service {
-	return &Service{users: users, sessions: sessions, limiter: limiter, oidc: oidc, cfg: cfg}
+// endpoints then answer CodeOIDCNotConfigured. audit may be nil — auth
+// audit recording then stays off (tests, minimal deployments).
+func NewService(users UserStore, sessions SessionStore, limiter RateLimiter, oidc OIDCProvider, audit AuditRecorder, cfg Config) *Service {
+	return &Service{users: users, sessions: sessions, limiter: limiter, oidc: oidc, audit: audit, cfg: cfg}
 }
 
 // SignupResult is the outcome of a successful signup or login: the user
@@ -80,7 +83,12 @@ func (s *Service) Signup(ctx context.Context, email, password, handle, displayNa
 	if err != nil {
 		return SignupResult{}, wrapStoreError(err)
 	}
-	return s.startSession(ctx, user)
+	result, err := s.startSession(ctx, user)
+	if err == nil {
+		s.recordAuth(ctx, user.ID, domain.ActionAuthSignup, domain.ViaPassword,
+			"user:"+user.ID, nil, map[string]any{"handle": user.Handle}, nil)
+	}
+	return result, err
 }
 
 // Login authenticates an email+password pair. The response is identical
@@ -115,6 +123,12 @@ func (s *Service) Login(ctx context.Context, email, password, ip string) (Signup
 		// Burn the same argon2id work a real verification would, so the
 		// two outcomes are timing-indistinguishable.
 		_, _ = VerifyPassword(dummyHash, password)
+		// The account is unknown: the failure is recorded with no actor.
+		// The audit log is internal state, so recording a known-account
+		// failure (below) cannot leak through the enumeration-safe
+		// response.
+		s.recordAuth(ctx, "", domain.ActionAuthLoginFailed, domain.ViaPassword,
+			"", nil, nil, map[string]any{"reason": "invalid_credentials"})
 		return SignupResult{}, fmt.Errorf("%w: invalid email or password", ErrInvalidCredentials)
 	case err != nil:
 		return SignupResult{}, wrapStoreError(err)
@@ -125,6 +139,13 @@ func (s *Service) Login(ctx context.Context, email, password, ip string) (Signup
 		// login failure (a fast return here would be an enumeration
 		// oracle for "registered account").
 		_, _ = VerifyPassword(dummyHash, password)
+		// reason is auditReasonAccountDisabled — the same word the
+		// disabled-account OIDC branch records (review M3): downstream
+		// analysis of disabled-account attempts sees one vocabulary
+		// across channels. The audit log is internal state, so naming
+		// the reason cannot leak through the enumeration-safe response.
+		s.recordAuth(ctx, record.User.ID, domain.ActionAuthLoginFailed, domain.ViaPassword,
+			"user:"+record.User.ID, nil, nil, map[string]any{"reason": auditReasonAccountDisabled})
 		return SignupResult{}, fmt.Errorf("%w: invalid email or password", ErrInvalidCredentials)
 	}
 	ok, err := VerifyPassword(record.PasswordHash, password)
@@ -136,18 +157,35 @@ func (s *Service) Login(ctx context.Context, email, password, ip string) (Signup
 		if record.PasswordHash == "" || err != nil {
 			_, _ = VerifyPassword(dummyHash, password)
 		}
+		s.recordAuth(ctx, record.User.ID, domain.ActionAuthLoginFailed, domain.ViaPassword,
+			"user:"+record.User.ID, nil, nil, map[string]any{"reason": "invalid_credentials"})
 		return SignupResult{}, fmt.Errorf("%w: invalid email or password", ErrInvalidCredentials)
 	}
-	return s.startSession(ctx, record.User)
+	result, err := s.startSession(ctx, record.User)
+	if err == nil {
+		s.recordAuth(ctx, record.User.ID, domain.ActionAuthLoginSuccess, domain.ViaPassword,
+			"user:"+record.User.ID, nil, nil, nil)
+	}
+	return result, err
 }
 
 // Logout revokes the session. Revoking an unknown session is not an
-// error (idempotent logout; the cookie is cleared either way).
+// error (idempotent logout; the cookie is cleared either way). The audit
+// record names the actor from the request context (the guard resolves the
+// principal before the handler runs).
 func (s *Service) Logout(ctx context.Context, token string) error {
 	if token == "" {
 		return nil
 	}
-	return s.sessions.Delete(ctx, token)
+	if err := s.sessions.Delete(ctx, token); err != nil {
+		return err
+	}
+	actor := ""
+	if info, ok := domain.RequestInfoFrom(ctx); ok {
+		actor = info.ActorID
+	}
+	s.recordAuth(ctx, actor, domain.ActionAuthLogout, domain.ViaSession, "", nil, nil, nil)
+	return nil
 }
 
 // Authenticate resolves a session token to the current user. It reloads
@@ -223,14 +261,28 @@ func (s *Service) OIDCLogin(ctx context.Context, code, redirectURI string) (Sign
 		if err != nil {
 			return SignupResult{}, wrapStoreError(err)
 		}
-		return s.startSession(ctx, user)
+		result, err := s.startSession(ctx, user)
+		if err == nil {
+			s.recordAuth(ctx, user.ID, domain.ActionAuthSignup, domain.ViaOIDC,
+				"user:"+user.ID, nil, map[string]any{"handle": user.Handle}, nil)
+			s.recordAuth(ctx, user.ID, domain.ActionAuthLoginSuccess, domain.ViaOIDC,
+				"user:"+user.ID, nil, nil, nil)
+		}
+		return result, err
 	case err != nil:
 		return SignupResult{}, wrapStoreError(err)
 	}
 	if record.User.Disabled() {
+		s.recordAuth(ctx, record.User.ID, domain.ActionAuthLoginFailed, domain.ViaOIDC,
+			"user:"+record.User.ID, nil, nil, map[string]any{"reason": auditReasonAccountDisabled})
 		return SignupResult{}, fmt.Errorf("%w: account disabled", ErrInvalidCredentials)
 	}
-	return s.startSession(ctx, record.User)
+	result, err := s.startSession(ctx, record.User)
+	if err == nil {
+		s.recordAuth(ctx, record.User.ID, domain.ActionAuthLoginSuccess, domain.ViaOIDC,
+			"user:"+record.User.ID, nil, nil, nil)
+	}
+	return result, err
 }
 
 // startSession mints a fresh session for a user: new token, fresh CSRF
@@ -257,6 +309,40 @@ func (s *Service) startSession(ctx context.Context, user domain.User) (SignupRes
 	}
 	return SignupResult{User: user, Session: sess}, nil
 }
+
+// recordAuth appends one auth audit entry (T0110). Recording is
+// best-effort — an auth outcome must never fail because the audit store
+// failed — but a failure is logged, never swallowed silently. The
+// correlation id comes from the request context (the auth guard attaches
+// it); the via and actor are explicit because this service knows which
+// authentication method ran and which account it touched.
+func (s *Service) recordAuth(ctx context.Context, actorID, action, via, targetRef string, before, after, metadata map[string]any) {
+	if s.audit == nil {
+		return
+	}
+	corr := ""
+	if info, ok := domain.RequestInfoFrom(ctx); ok {
+		corr = info.CorrelationID
+	}
+	err := s.audit.Record(ctx, domain.AuditEntry{
+		ActorID:       actorID,
+		Via:           via,
+		Action:        action,
+		TargetRef:     targetRef,
+		CorrelationID: corr,
+		BeforeSummary: before,
+		AfterSummary:  after,
+		Metadata:      metadata,
+	})
+	if err != nil {
+		slog.Warn("authn: audit record failed", "action", action, "error", err)
+	}
+}
+
+// auditReasonAccountDisabled is the one metadata reason for auth.login.failed
+// rows caused by a disabled account, on every channel (password and OIDC):
+// downstream analysis of disabled-account attempts sees a single vocabulary.
+const auditReasonAccountDisabled = "account_disabled"
 
 // Errors the handler maps to wire codes (each wraps a stable sentinel so
 // callers use errors.Is).
