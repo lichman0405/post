@@ -2315,3 +2315,30 @@ PR → 等 CI → merge → 再 dispatch）每一步都是我手工敲的**，�
 
 **这正是"停在判断点，而不是停在等待点"的一个具体落点** ✓：
 同一条报错路径上，一个分支是"接着跑"，另一个分支是"停下"，**判据是它需要不需要判断** ✓。
+
+## L1-20260913-6 — ★ 无人值守驱动的**第一次运行**就抓到一个自 T0012 起潜伏的 scope 缺陷
+
+驱动脚本启动后 **45 秒内停下** ✓，并给出：
+
+```
+spawn refused for T0201: allowed_scope of T0201 does not validate against the real tree:
+allowed_scope covers marker input "specs/**" but not its derived artifact "specs/SPEC_VERSION.json"
+```
+
+**P2 从 T0012 起就无法 dispatch** ✓——因为 P2 的 phase 默认 scope 含 `specs/schemas/**` ✓，
+而 `derived-artifacts.json` 的规则要求"覆盖任一 spec 文件者，必须同时覆盖由它们派生的
+`specs/SPEC_VERSION.json`" ✓。这条规则一直存在 ✓，**只是从来没有任务真正走到过它** ✓
+（P0 是手工派发的 ✓，P1 的 scope 当时不含 `specs/**` ✓）。
+
+**逐条核对后共 116 个任务**存在同一缺陷 ✗——**并且我自己的 part 2 改动（给 110 个任务加
+`specs/database/postgres.sql`）又制造了一批新的** ✗。全部修复 ✓，并补了两处 script 漏掉的
+（T0008 覆盖 `tasks/tasks.json` ✓ → 需 `specs/SPEC_VERSION.json` ✓；
+T0013 覆盖 `infra/migrations/**` ✓ → 需 `specs/database/postgres.sql` ✓）。
+
+**机械化**：新增 `TestEveryTaskScopeSatisfiesTheDerivedArtifactRule` ✓ ——
+用**与 dispatch 校验同一个匹配函数**（`ScopeMatchesPathWithDerived` ✓）遍历**真实 DAG** ✓，
+因此测试不可能与它所替代的 Gate 意见不一致 ✓。**这类缺陷从此在测试阶段暴露，而不是在第一次派发时。**
+
+**这条本身值得记**：**"驱动脚本第一次运行就停下"不是驱动脚本的失败，是它的第一次产出** ✓。
+它把"我手工 dispatch 时才会撞到的检查"变成了"无人值守的第一秒就撞到" ✓——
+**这正是把机械段自动化所买到的东西** ✓。
