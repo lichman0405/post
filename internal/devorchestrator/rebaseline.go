@@ -116,6 +116,25 @@ type RebaselineResult struct {
 	Regenerated []string `json:"regenerated"`
 }
 
+// cleanWhat is the half of the clean's flags that decides WHAT it removes: `-d`,
+// without which git leaves whole untracked directories behind. It is written once
+// because both command lines below are built from it and they have to agree — the
+// snapshot's reach is the dry run's answer, so a flag the dry run did not have
+// would be a deletion that nothing recorded, and one it had alone would refuse an
+// advance over work that was never at risk.
+const cleanWhat = "d"
+
+// cleanArgs is the clean the advance runs (dry false) or the dry run of the very
+// same command (dry true). The two differ only in the flags that are about doing
+// it rather than about what it does: a dry run has nothing to force, and it must
+// not be quiet, because its output is the whole point of it.
+func cleanArgs(dry bool) []string {
+	if dry {
+		return []string{"clean", "-n" + cleanWhat}
+	}
+	return []string{"clean", "-f" + cleanWhat + "q"}
+}
+
 // Regenerators maps a derived artifact to the command that regenerates it, run
 // with the worktree as cwd so it reads that tree's inputs rather than the
 // Supervisor's.
@@ -270,7 +289,16 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 	if _, err := gitOutput(rec.Worktree, "reset", "--hard", to); err != nil {
 		return nil, fail(fmt.Errorf("resetting the worktree to %s: %w", to[:12], err))
 	}
-	if _, err := gitOutput(rec.Worktree, "clean", "-fdq"); err != nil {
+	// The clean's reach, asked again where it is about to happen. The snapshot
+	// took its answer one reset ago, and a reset moves what the clean can see: a
+	// directory that was not removable while a tracked file sat inside it becomes
+	// removable the moment main deletes that file. Nothing has been deleted yet,
+	// so a name the snapshot does not hold is a refusal that still has a tree —
+	// and the alternative is a clean that deletes it with no other copy anywhere.
+	if err := assertTheCleanIsCovered(rec.Worktree, entries); err != nil {
+		return nil, fail(err)
+	}
+	if _, err := gitOutput(rec.Worktree, cleanArgs(false)...); err != nil {
 		return nil, fail(fmt.Errorf("cleaning the worktree: %w", err))
 	}
 	if _, err := gitOutput(rec.Worktree, append(applyArgs, filepath.Join(keep, "change.patch"))...); err != nil {
@@ -385,8 +413,12 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 	completed = true
 	// Files is the number of paths this advance carried — the entries the
 	// snapshot holds — not how many of them still differ from the new baseline.
-	// Both describe the change; only the first is the same number on every
-	// advance of the same work, which is what makes it reportable.
+	// Most of them are the task's change; a few are directories the clean removes
+	// whole, which the snapshot carries because nothing else would (cleanReach). So
+	// it is the same number on every advance of the same work against the same
+	// tree, and it can move by one when main moves a file into or out of one of
+	// those directories — a change in what the clean deletes, not in what the task
+	// did (T9005 pins both directions of that).
 	return &RebaselineResult{TaskID: taskID, FromSHA: from, ToSHA: to, Files: len(entries), Regenerated: regenerated}, nil
 }
 
@@ -414,8 +446,9 @@ var snapshot = snapshotWorktree
 // recorded as "absent": the content is in git and its absence is the change, so
 // restoring means removing the file again.
 //
-// What is recorded is the union of two questions, because the resets that
-// rebuild this worktree destroy two different sets of paths:
+// What is recorded is the union of three questions, because the two operations
+// that rebuild this worktree — `reset --hard <target>` and `git clean -fdq` —
+// destroy what git's path lists do not name:
 //
 //   - the paths the task changed, which is what the advance has to carry;
 //   - the directories standing where HEAD or the target commit has a FILE. Both
@@ -428,6 +461,17 @@ var snapshot = snapshotWorktree
 //     the only way it is found at all (T9026 is that shape: the directory is
 //     invisible to git, the target has a file at that path, and without this
 //     the reset deleted the task's work in silence).
+//   - the paths the CLEAN removes, which is the other operation and had no such
+//     question asked of it. It is the one that reaches furthest: it takes a
+//     whole untracked directory, and everything inside that directory goes with
+//     it without being named by anything — an empty directory, a fifo, a socket,
+//     an ignored file standing next to an untracked one. `git status` collapses
+//     the directory to one `?? dir/` line and `ls-files --others` lists only the
+//     files the ignore rules do not cover, so a plain untracked directory
+//     holding a fifo was in neither list, nothing recorded it, and the advance
+//     deleted it and reported success (T9027). The answer comes from the clean
+//     itself — see cleanReach — and the directories in it are walked for the
+//     same reason the obstructed ones are.
 func snapshotWorktree(worktree, head, target string, paths map[string]bool, keep string) ([]snapshotEntry, error) {
 	files := filepath.Join(keep, "files")
 	if err := os.MkdirAll(files, 0o755); err != nil {
@@ -437,17 +481,41 @@ func snapshotWorktree(worktree, head, target string, paths map[string]bool, keep
 	if err != nil {
 		return nil, err
 	}
-	recorded := make(map[string]bool, len(paths)+len(obstructing))
+	cleaned, cleanedFiles, err := cleanReach(worktree)
+	if err != nil {
+		return nil, err
+	}
+	// whole is every directory the advance deletes CONTENTS AND ALL: the ones a
+	// reset clears to write a tracked path, and the ones the clean removes.
+	whole := make(map[string]bool, len(obstructing)+len(cleaned))
+	recorded := make(map[string]bool, len(paths)+len(obstructing)+len(cleaned))
 	for p := range paths {
+		recorded[p] = true
+	}
+	for _, p := range cleanedFiles {
 		recorded[p] = true
 	}
 	for p := range obstructing {
 		recorded[p] = true
+		whole[p] = true
+	}
+	for p := range cleaned {
+		recorded[p] = true
+		whole[p] = true
 	}
 	entries := make([]snapshotEntry, 0, len(recorded))
 	var manifest strings.Builder
+	// taken is what the entries ALREADY hold, which is not the same thing as
+	// recorded being true: a walk under one directory reaches paths that are
+	// themselves keys of the set — a directory the advance deletes whole standing
+	// inside another one that it does too — and the main loop would take them a
+	// second time, once from the walk and once as its own key. Both walks and the
+	// main loop share this map so that each path is taken exactly once: the same
+	// work named twice in the manifest, and counted twice in Files, is a report
+	// that says the advance carried two paths where it carried one (T9030).
+	taken := make(map[string]bool, len(recorded))
 	for _, p := range keysOf(recorded) { // sorted: the manifest is read by a human
-		if p == "" {
+		if p == "" || taken[p] {
 			continue
 		}
 		e, err := snapshotOne(worktree, files, p)
@@ -455,15 +523,17 @@ func snapshotWorktree(worktree, head, target string, paths map[string]bool, keep
 			return nil, err
 		}
 		entries = append(entries, e)
+		taken[p] = true
 		manifest.WriteString(manifestLine(e))
 		// A directory standing where one of those commits has a file: the reset
 		// does not merely leave it alone, it DELETES it to write the tracked
 		// path — so what is inside travels with the snapshot, or the restore
-		// cannot reproduce the tree it promises to have put back.
-		if e.State != "dir" || !obstructing[p] {
+		// cannot reproduce the tree it promises to have put back. The clean
+		// deletes the other kind just as whole, so the same answer follows.
+		if e.State != "dir" || !whole[p] {
 			continue
 		}
-		sub, err := snapshotDirContents(worktree, files, recorded, p)
+		sub, err := snapshotDirContents(worktree, files, taken, p)
 		if err != nil {
 			return nil, err
 		}
@@ -522,17 +592,20 @@ func snapshotOne(worktree, files, p string) (snapshotEntry, error) {
 		// A directory (a gitlink, or a tracked path the task turned into a
 		// directory) carries no content of its own; its existence is all
 		// there is to restore. What is INSIDE one of these is walked by
-		// snapshotDirContents, which is where a directory the task put where a
-		// tracked path was is handled.
+		// snapshotDirContents, and only when the advance is going to delete it:
+		// the directories a reset clears arrive through obstructedDirs, and the
+		// ones the clean removes through cleanReach, both of them contents and
+		// all.
 		//
-		// An EMPTY UNTRACKED directory that no reset clears does not reach here
-		// and is not restored, because it never reaches the path list either: git
-		// cannot represent an empty directory, so `ls-files --others` omits it,
-		// and `clean -fdq` removes it on the advance. This is git's own boundary
-		// rather than an oversight, but it is a case where a successful advance
-		// does not carry everything the task left behind, so it is written down
-		// instead of assumed. A directory that a reset WILL clear is a different
-		// matter: it arrives here through obstructedDirs, contents and all.
+		// An EMPTY UNTRACKED directory used to be named here as a boundary git
+		// imposes — `ls-files --others` cannot list one, so nothing recorded it,
+		// and `clean -fdq` removed it on the advance. That was true of the two
+		// path lists and false of the advance: the clean removes such a directory
+		// whole, and the reach of the clean is now asked of the clean. It arrives
+		// here as an entry, and the advance then REFUSES rather than drop it,
+		// because a directory is one more thing a patch cannot carry (T9028). A
+		// directory that neither operation clears still never reaches here, and no
+		// longer needs to: nothing is going to delete it.
 		if err := os.MkdirAll(dst, 0o755); err != nil {
 			return snapshotEntry{}, fmt.Errorf("keeping directory %s: %w", p, err)
 		}
@@ -590,13 +663,19 @@ func fileKindWord(m os.FileMode) string {
 // invent. What that "invent" looks like when it is got wrong is in snapshotOne:
 // a fifo came back as an empty directory.
 //
-// recorded holds every path already taken at the top level, and they are skipped
+// taken holds every path the snapshot has already taken, and they are skipped
 // here: a file inside this directory can be in the task's path list AND in the
 // walk (an untracked file under a directory that replaced a tracked path is
-// named by `ls-files --others`), and recording it twice would put two lines in
-// the manifest and two entries in the count — a report that says the advance
-// carried two paths where it carried one. T9023 pins it.
-func snapshotDirContents(worktree, files string, recorded map[string]bool, p string) ([]snapshotEntry, error) {
+// named by `ls-files --others`), and taking it twice would put two lines in the
+// manifest and two entries in the count — a report that says the advance carried
+// two paths where it carried one. T9023 pins the path list's half of that; T9030
+// pins the walk's, where the outer directory reaches the inner one's contents
+// before the inner directory has been walked as a directory of its own.
+//
+// The map is UPDATED as paths are taken, and it is the caller's map: the caller
+// reads it before choosing the next key, which is what makes the two walks and
+// the main loop one act of taking rather than three that have to agree.
+func snapshotDirContents(worktree, files string, taken map[string]bool, p string) ([]snapshotEntry, error) {
 	var out []snapshotEntry
 	err := filepath.WalkDir(filepath.Join(worktree, filepath.FromSlash(p)), func(full string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -607,13 +686,14 @@ func snapshotDirContents(worktree, files string, recorded map[string]bool, p str
 			return rerr
 		}
 		rel = filepath.ToSlash(rel)
-		if rel == "." || recorded[rel] {
+		if rel == "." || taken[rel] {
 			return nil
 		}
 		e, kerr := snapshotOne(worktree, files, rel)
 		if kerr != nil {
 			return kerr
 		}
+		taken[rel] = true
 		out = append(out, e)
 		return nil
 	})
@@ -621,6 +701,65 @@ func snapshotDirContents(worktree, files string, recorded map[string]bool, p str
 		return nil, err
 	}
 	return out, nil
+}
+
+// assertTheCleanIsCovered asks the clean a second time — where it is about to run
+// rather than where the snapshot was taken — and refuses if it names anything the
+// snapshot does not hold.
+//
+// The snapshot's reach was computed one reset ago, and a reset moves what a clean
+// can see. A directory is removable only while it holds nothing tracked, so the
+// one whose single tracked file main has just deleted becomes removable the
+// moment the reset runs, and everything invisible inside it — an empty directory,
+// a fifo — would be deleted along with it, out of a tree nothing took a copy of.
+// Asking again costs one dry run and closes the window: the answer is then about
+// the tree the clean itself is looking at. If it names something the snapshot
+// does not hold, the advance refuses HERE, where the clean has not run: the
+// restore behind the refusal puts the tracked file back, the directory stops
+// being removable, and the tree comes back whole.
+func assertTheCleanIsCovered(worktree string, entries []snapshotEntry) error {
+	held := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		held[e.Path] = true
+	}
+	dirs, files, err := cleanReach(worktree)
+	if err != nil {
+		return err
+	}
+	for _, p := range append(keysOf(dirs), files...) {
+		if held[p] || heldByAnAncestor(held, p) {
+			continue
+		}
+		return fmt.Errorf("the clean that follows the reset would delete %s, and the snapshot does not hold it — the advance refuses rather than delete work it could not put back. Move it out of the way and dispatch again", p)
+	}
+	return nil
+}
+
+// heldByAnAncestor reports whether the snapshot holds one of the path's parents,
+// which is what holding a path inside a directory that was walked means: the
+// directory's own entry is the record of everything under it.
+//
+// Nothing end-to-end reaches this today, and that is worth writing down rather
+// than leaving to be rediscovered. Every path the clean names is a key of the
+// snapshot's own set (the files as themselves, the directories whole), so the
+// second ask can only name something the snapshot does not hold when a directory
+// became removable as the reset ran — and that is a directory, which the walk
+// records contents and all. What this arm guards is the case where a path arrives
+// that the snapshot holds only through the directory around it; the test for it is
+// a unit test of this function, because no fixture produces one. It stays because
+// the two directions are not equally bad: a wrong `false` here refuses an advance
+// that had nothing to lose, and a wrong `true` deletes work that no copy holds.
+func heldByAnAncestor(held map[string]bool, p string) bool {
+	for {
+		i := strings.LastIndex(p, "/")
+		if i < 0 {
+			return false
+		}
+		p = p[:i]
+		if held[p] {
+			return true
+		}
+	}
 }
 
 // obstructedDirs names the directories in the worktree that stand where one of
@@ -654,6 +793,188 @@ func obstructedDirs(worktree string, revs ...string) (map[string]bool, error) {
 		}
 	}
 	return out, nil
+}
+
+// cleanEnv is the environment the clean's dry run reads.
+//
+// LC_ALL=C is DROPPED-then-APPENDED, not merely appended. glibc's getenv answers
+// with the FIRST match, so a locale variable inherited from the Supervisor's shell
+// would be the one git read and an LC_ALL added at the end would be read by
+// nobody — the parser below would then be reading English sentences in a language
+// it does not know, and every line would be a refusal. Dropping LANG, LANGUAGE and
+// every LC_* first makes LC_ALL=C the only answer.
+func cleanEnv() []string {
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if name == "LANG" || name == "LANGUAGE" || strings.HasPrefix(name, "LC_") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env, "LC_ALL=C")
+}
+
+// cleanReach asks the clean what it is about to remove and answers in paths on
+// disk: the directories it will delete whole, and the files it will delete.
+//
+// It is asked of the command itself rather than of a listing that describes it.
+// `git status --porcelain` collapses a wholly untracked directory into one `??`
+// line and says nothing about what is inside it, and `ls-files --others
+// --exclude-standard` names only the files in there that the ignore rules do not
+// cover — so a directory whose content is a fifo, a socket, an empty directory,
+// or an ignored file standing beside an untracked one is in NEITHER list, and
+// `git clean -fd` deletes it whole anyway. What a listing does not name is
+// invisible (#99 learned that shape twice), so the reach of an operation is taken
+// from the operation: `git clean -nd` is `git clean -fdq` told to do nothing and
+// say what it would have done, built from the same flags (cleanArgs).
+//
+// git has no machine-readable form of that answer — `git clean` has no -z — so it
+// is read out of the two sentences git says:
+//
+//	Would remove <path>
+//	Would skip repository <path>
+//
+// The second is not a removal: a repository inside the tree is left alone, which
+// also keeps everything around it from becoming removable, so there is nothing to
+// carry. ANY OTHER LINE IS A REFUSAL — that is the reason this parse is not
+// lenient. A line it does not understand is a clean whose reach is unknown, and
+// an unknown reach is the defect, not something to advance on. LC_ALL=C pins
+// those words (the environment is cleared of any other locale setting first,
+// because getenv takes the FIRST match and an inherited LC_ALL would win);
+// -c core.quotePath=false keeps a name with a non-ASCII character out of the
+// octal escapes git would write it in; and the quoting that is left — a quote, a
+// backslash, a control character, a newline above all, which would otherwise turn
+// one removal into two lines — is read back by unquoteC.
+//
+// Every name is also Lstat-ed. A dry run names what exists, so a name this got
+// wrong is a refusal here, where nothing has been touched, rather than a path
+// that quietly is not there when the restore reaches it.
+func cleanReach(worktree string) (dirs map[string]bool, files []string, err error) {
+	args := append([]string{"-c", "core.quotePath=false"}, cleanArgs(true)...)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = worktree
+	cmd.Env = cleanEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return nil, nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), ee, strings.TrimSpace(string(ee.Stderr)))
+		}
+		return nil, nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	dirs = map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		if line == "" {
+			continue
+		}
+		p, isDir, skip, err := parseCleanLine(line)
+		if err != nil {
+			return nil, nil, err
+		}
+		if skip {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(worktree, filepath.FromSlash(p))); err != nil {
+			return nil, nil, fmt.Errorf("git clean said it would remove %q, which is not in the worktree (%v) — the advance reads that answer instead of trusting it, and will not act on one it cannot check", p, err)
+		}
+		if isDir {
+			dirs[p] = true
+			continue
+		}
+		files = append(files, p)
+	}
+	return dirs, files, nil
+}
+
+// parseCleanLine reads one line of `git clean -nd`: the path it names, whether
+// the path is a whole directory (git says so with a trailing slash), and whether
+// the line is one of the skips. Anything else is an error, and the error is the
+// point of the function: the caller cannot tell what the clean would delete from
+// a line it does not understand, and a clean whose reach is unknown is exactly the
+// defect this whole path exists to close.
+func parseCleanLine(line string) (p string, isDir, skip bool, err error) {
+	rest, ok := strings.CutPrefix(line, "Would remove ")
+	if !ok {
+		if strings.HasPrefix(line, "Would skip repository ") {
+			return "", false, true, nil
+		}
+		return "", false, false, fmt.Errorf("git clean said %q and this does not know what that means — the advance cannot tell what the clean would remove and will not guess", line)
+	}
+	p, err = unquoteC(rest)
+	if err != nil {
+		return "", false, false, fmt.Errorf("reading a path out of git clean's %q: %w", line, err)
+	}
+	// The trailing slash is git's mark for "the whole directory, contents
+	// included". It arrives INSIDE the quotes when the name is quoted — measured,
+	// git writes `"back\\slash/"` and `"new\nline/"` — and outside them when the
+	// name is written as it is (`sp ace/`). Reading it after the name is decoded
+	// catches both, and nothing else can put a slash at the end of a decoded path:
+	// the slash is the separator, so it never stands for itself.
+	isDir = strings.HasSuffix(p, "/")
+	p = strings.TrimSuffix(p, "/")
+	return p, isDir, false, nil
+}
+
+// unquoteC reads back the one form git writes a path in when it cannot write the
+// path itself: a double-quoted C string. git quotes a name holding a quote, a
+// backslash or a control character — and, unless core.quotePath is off, one
+// holding any byte outside ASCII, which is what the caller turns off. Every other
+// name arrives as itself, so the caller never has to decide which of the two it
+// is looking at: a name that begins with a quote was quoted, because a name that
+// begins with a quote is one git cannot write as it is.
+func unquoteC(s string) (string, error) {
+	if !strings.HasPrefix(s, `"`) {
+		return s, nil
+	}
+	if len(s) < 2 || !strings.HasSuffix(s, `"`) {
+		return "", fmt.Errorf("%s opens a quote it does not close", s)
+	}
+	body := s[1 : len(s)-1]
+	var b strings.Builder
+	for i := 0; i < len(body); i++ {
+		c := body[i]
+		if c != '\\' {
+			b.WriteByte(c)
+			continue
+		}
+		i++
+		if i >= len(body) {
+			return "", fmt.Errorf("%s ends in half an escape", s)
+		}
+		switch e := body[i]; e {
+		case 'a':
+			b.WriteByte('\a')
+		case 'b':
+			b.WriteByte('\b')
+		case 'f':
+			b.WriteByte('\f')
+		case 'n':
+			b.WriteByte('\n')
+		case 'r':
+			b.WriteByte('\r')
+		case 't':
+			b.WriteByte('\t')
+		case 'v':
+			b.WriteByte('\v')
+		case '\\', '"':
+			b.WriteByte(e)
+		case '0', '1', '2', '3', '4', '5', '6', '7':
+			// One byte, three octal digits: how git writes everything it cannot
+			// write as itself, including each byte of a multi-byte character.
+			if i+2 >= len(body) {
+				return "", fmt.Errorf("%s ends in half an octal escape", s)
+			}
+			n, err := strconv.ParseUint(body[i:i+3], 8, 8)
+			if err != nil {
+				return "", fmt.Errorf("%s has %q where an octal escape should be", s, body[i:i+3])
+			}
+			b.WriteByte(byte(n))
+			i += 2
+		default:
+			return "", fmt.Errorf("%s escapes %q, which is not an escape this knows", s, string(e))
+		}
+	}
+	return b.String(), nil
 }
 
 // lsTreeRecord is one entry of `git ls-tree -r -z <rev>`: the mode, the object
@@ -697,20 +1018,38 @@ func lsTreeRecords(worktree, rev string) ([]lsTreeRecord, error) {
 	return recs, nil
 }
 
-// manifestLine is one line of the manifest a human reads after a refusal.
+// manifestLine is one line of the manifest a human reads after a refusal. The
+// path is written by manifestPath, so that one entry is one line whatever the
+// name holds: written as it is, a name with a newline in it produced two lines and
+// a reader counting them counted one path where the advance carried two.
 func manifestLine(e snapshotEntry) string {
 	switch e.State {
 	case "file":
-		return fmt.Sprintf("file\t%04o\t%s\n", e.Mode.Perm(), e.Path)
+		return fmt.Sprintf("file\t%04o\t%s\n", e.Mode.Perm(), manifestPath(e.Path))
 	case "symlink":
-		return fmt.Sprintf("symlink\t-\t%s\n", e.Path)
+		return fmt.Sprintf("symlink\t-\t%s\n", manifestPath(e.Path))
 	case "dir":
-		return fmt.Sprintf("dir\t-\t%s\n", e.Path)
+		return fmt.Sprintf("dir\t-\t%s\n", manifestPath(e.Path))
 	case "fifo":
-		return fmt.Sprintf("fifo\t%04o\t%s\n", e.Mode.Perm(), e.Path)
+		return fmt.Sprintf("fifo\t%04o\t%s\n", e.Mode.Perm(), manifestPath(e.Path))
 	default:
-		return fmt.Sprintf("absent\t-\t%s\n", e.Path)
+		return fmt.Sprintf("absent\t-\t%s\n", manifestPath(e.Path))
 	}
+}
+
+// manifestPath writes a path so that it can be read back. A name that needs
+// nothing — no quote, no backslash, no control character — is written as it is,
+// which is what almost every path is; anything else is written the way Go writes a
+// string literal, in quotes. The two forms cannot be confused: the quoted one
+// always opens with a quote, and a name that opens with a quote is always quoted,
+// because a quote is one of the three things that send a name down that branch.
+func manifestPath(p string) string {
+	if strings.IndexFunc(p, func(r rune) bool {
+		return r < 0x20 || r == 0x7f || r == '"' || r == '\\'
+	}) < 0 {
+		return p
+	}
+	return strconv.Quote(p)
 }
 
 // restoreOrExplain puts the worktree back and says which of the two happened.
@@ -742,7 +1081,7 @@ func restoreWorktree(worktree, head, keep string, entries []snapshotEntry) error
 	if _, err := gitOutput(worktree, "reset", "--hard", head); err != nil {
 		return fmt.Errorf("resetting the worktree to %s: %w", head, err)
 	}
-	if _, err := gitOutput(worktree, "clean", "-fdq"); err != nil {
+	if _, err := gitOutput(worktree, cleanArgs(false)...); err != nil {
 		return fmt.Errorf("cleaning the worktree: %w", err)
 	}
 	// Removals first, then everything that puts something back. The order is not
@@ -988,8 +1327,20 @@ func describeState(root, p string) (string, os.FileMode, []byte, error) {
 			return "", 0, nil, fmt.Errorf("reading %s: %w", p, err)
 		}
 		return "file", st.Mode().Perm(), data, nil
-	default:
+	case st.IsDir():
 		return "dir", 0, nil, nil
+	case st.Mode()&os.ModeNamedPipe != 0:
+		// A fifo, in the word the snapshot records it as. Not "dir", which is
+		// what the arm below this one used to call everything that was not a
+		// file or a symlink: an entry recorded as a fifo and read back as a
+		// directory is work reported as lost when it is sitting right there.
+		return "fifo", 0, nil, nil
+	default:
+		// A socket or a device node: a kind the snapshot refuses rather than
+		// copies, so a path in this state cannot be one of the entries — and the
+		// words are this function's own naming rather than "dir", which it was,
+		// for a reason that was only ever one edit away from mattering.
+		return fileKindWord(st.Mode()), 0, nil, nil
 	}
 }
 

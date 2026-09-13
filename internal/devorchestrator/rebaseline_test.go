@@ -5,9 +5,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -651,7 +654,21 @@ func TestRebaselineSecondAdvanceIsNotRefusedAsLostPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := len(changed)
+	// Plus the directories the clean removes WHOLE, which are entries of their
+	// own now (a restore has to be able to put one back, and an empty one cannot
+	// be rebuilt from the patch at all). The fixture's `docs/` is one: nothing in
+	// it is tracked, so the clean deletes the directory along with everything the
+	// task put inside it. The claim the count is about is untouched — the set is
+	// measured against the commit the patch is measured from, and main's own files
+	// are not in it — so the sum is pinned to a shape rather than to a number.
+	whole, _, err := cleanReach(f.worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(whole) != 1 || !whole["docs"] {
+		t.Fatalf("the clean removes whole directories %v, want just docs — this test's arithmetic is about that shape", keysOf(whole))
+	}
+	want := len(changed) + len(whole)
 
 	first, err := RebaselineTask(f.root, "T9005", "", "")
 	if err != nil {
@@ -671,13 +688,20 @@ func TestRebaselineSecondAdvanceIsNotRefusedAsLostPaths(t *testing.T) {
 	if res.ToSHA != newMain {
 		t.Errorf("the second advance landed on %s, want %s", res.ToSHA, newMain)
 	}
-	// The same work is the same size. Measured from the RECORDED baseline, which
-	// after the first advance is an older commit than the one the patch is
-	// measured from, main's own files join the set: the advance reports carrying
-	// more than the task changed, and every kept copy describes main's work as
-	// the task's.
-	if res.Files != want {
-		t.Errorf("the second advance carried %d path(s), want %d — the same work, and main's own files are not part of it", res.Files, want)
+	// The same work is the same size — measured, as before, against the commit the
+	// patch is measured from, so main's own files are not part of it. It is one
+	// path smaller for a reason that is not main's files: after the first advance
+	// main's OWN `docs/main-moved.md` is in the tree, so `docs/` no longer stands
+	// as a directory the clean removes whole, and the entry that stood for it goes
+	// with it. What the count is measured from has not moved; what moved is how
+	// much of the tree the clean would delete.
+	if now, _, err := cleanReach(f.worktree); err != nil {
+		t.Fatal(err)
+	} else if len(now) != 0 {
+		t.Fatalf("after the first advance the clean still removes whole directories %v — this test's arithmetic is about main's file having made docs/ unremovable", keysOf(now))
+	}
+	if res.Files != want-len(whole) {
+		t.Errorf("the second advance carried %d path(s), want %d — the same work, and main's own files are not part of it", res.Files, want-len(whole))
 	}
 	if after := f.pathsAndContents(newMain); after != before {
 		t.Errorf("the second advance altered the task's work:\n--- before ---\n%s\n--- after ---\n%s", before, after)
@@ -1552,6 +1576,8 @@ func TestRebaselinePutsBackAFifoAsAFifo(t *testing.T) {
 	}
 }
 
+// T9025.
+//
 // A socket is a rendezvous rather than content: there is nothing to keep and
 // nothing to put back, and calling it a directory — which is what the snapshot's
 // default arm did — is a refusal that reports a tree put back and hands back a
@@ -1657,5 +1683,604 @@ func TestRebaselineNoticesADirectoryOnlyTheTargetWouldDelete(t *testing.T) {
 	keptFile := filepath.Join(kept[0], "files", "notes", "scratch", "x.txt")
 	if got, err := os.ReadFile(keptFile); err != nil || string(got) != hidden {
 		t.Errorf("the kept copy of the ignored file is (%q, %v)", got, err)
+	}
+}
+
+// treeDump describes every path in the worktree outside `.git` — the kind, the
+// mode and the content. It is what "the tree is exactly as it was found" means
+// when part of the tree is content git cannot name: a fifo, an empty directory, a
+// socket. `pathsAndContents` cannot say it, because it is built from git's path
+// lists, and those are precisely what leave such content out.
+//
+// `.git` is skipped: reading the tree moves it (that is a thing the round-7 work
+// on #99 learned the hard way), and it is not part of the task's work either way.
+func (f *rebaselineFixture) treeDump() string {
+	f.t.Helper()
+	var b strings.Builder
+	err := filepath.WalkDir(f.worktree, func(full string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, rerr := filepath.Rel(f.worktree, full)
+		if rerr != nil {
+			return rerr
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		if rel == ".git" {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil // a linked worktree: .git is a file
+		}
+		st, lerr := os.Lstat(full)
+		if lerr != nil {
+			return lerr
+		}
+		switch {
+		case st.Mode()&os.ModeSymlink != 0:
+			target, lerr := os.Readlink(full)
+			if lerr != nil {
+				return lerr
+			}
+			fmt.Fprintf(&b, "symlink\t%s\t%s\n", rel, target)
+		case st.Mode().IsRegular():
+			data, rerr := os.ReadFile(full)
+			if rerr != nil {
+				return rerr
+			}
+			sum := sha256.Sum256(data)
+			fmt.Fprintf(&b, "file\t%04o\t%s\t%s\n", st.Mode().Perm(), rel, hex.EncodeToString(sum[:]))
+		case st.IsDir():
+			fmt.Fprintf(&b, "dir\t%s\n", rel)
+		case st.Mode()&os.ModeNamedPipe != 0:
+			fmt.Fprintf(&b, "fifo\t%04o\t%s\n", st.Mode().Perm(), rel)
+		default:
+			fmt.Fprintf(&b, "other\t%v\t%s\n", st.Mode(), rel)
+		}
+		return nil
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return b.String()
+}
+
+// mainDeletes removes a tracked path on main: the shape where a directory in the
+// task's tree stops being one a clean will leave alone.
+func (f *rebaselineFixture) mainDeletes(rel string) string {
+	f.t.Helper()
+	f.git(f.root, "rm", "-q", rel)
+	f.git(f.root, "commit", "-q", "-m", "main deleted "+rel)
+	return f.git(f.root, "rev-parse", "HEAD")
+}
+
+// A fifo inside a PLAIN untracked directory — nothing tracked stands where the
+// directory is, so no reset is involved — was deleted by the advance with no
+// refusal, no record and no copy. It is in neither of git's path lists: `git
+// status` says `?? scratchpad/` and stops at the directory, and `ls-files --others
+// --exclude-standard` lists files, which a fifo is not. The clean removes the
+// directory WHOLE, so the fifo goes with it, and the advance then reported that
+// it had carried the task's work across.
+//
+// The refusal is the designed outcome — a fifo cannot travel in a patch, which is
+// T9024's shape — and what this pins is that it happens and that the tree comes
+// back whole: a refusal that quietly loses the fifo while saying the worktree was
+// put back the way it was found is the same defect wearing the other face.
+func TestRebaselineCarriesAFifoInAPlainUntrackedDirectory(t *testing.T) {
+	f := newRebaselineFixture(t, "T9027")
+	f.mainMovesElsewhere()
+	pipe := filepath.Join(f.worktree, "scratchpad", "pipe")
+	if err := os.MkdirAll(filepath.Dir(pipe), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(pipe, 0o644); err != nil {
+		t.Fatalf("making the fifo the fixture is about: %v", err)
+	}
+	before := f.treeDump()
+
+	_, err := RebaselineTask(f.root, "T9027", "", "")
+	if err == nil {
+		t.Fatal("the advance deleted the task's fifo and reported success")
+	}
+	if msg := err.Error(); !strings.Contains(msg, "did not carry the task's work across") || !strings.Contains(msg, "scratchpad/pipe") {
+		t.Fatalf("a different refusal reached this test: %v", err)
+	}
+	st, err := os.Lstat(pipe)
+	if err != nil {
+		t.Fatalf("the fifo is gone after the refusal: %v", err)
+	}
+	if st.Mode()&os.ModeNamedPipe == 0 {
+		t.Errorf("scratchpad/pipe came back as %v — the refusal reports a tree put back the way it was found", st.Mode())
+	}
+	if got := st.Mode().Perm(); got != 0o644 {
+		t.Errorf("the fifo came back with mode %04o, want 0644", got)
+	}
+	if after := f.treeDump(); after != before {
+		t.Errorf("the refused advance did not put the tree back the way it was found:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
+	}
+}
+
+// An empty untracked directory is the other shape git cannot represent at all: it
+// is in no commit, so `ls-files --others` cannot list it and `git status` never
+// mentions it — and `clean -fdq` removes it, and any empty directory under it,
+// without a word. Before this the advance reported success and the task's
+// directories were gone.
+func TestRebaselineCarriesAnEmptyUntrackedDirectory(t *testing.T) {
+	f := newRebaselineFixture(t, "T9028")
+	f.mainMovesElsewhere()
+	if err := os.MkdirAll(filepath.Join(f.worktree, "notes-dir", "empty", "deeper"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before := f.treeDump()
+
+	_, err := RebaselineTask(f.root, "T9028", "", "")
+	if err == nil {
+		t.Fatal("the advance deleted the task's empty directories and reported success")
+	}
+	if msg := err.Error(); !strings.Contains(msg, "did not carry the task's work across") || !strings.Contains(msg, "notes-dir") {
+		t.Fatalf("a different refusal reached this test: %v", err)
+	}
+	if after := f.treeDump(); after != before {
+		t.Errorf("the refused advance did not put the tree back the way it was found:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
+	}
+}
+
+// The other side of the same question: a directory the clean does NOT remove. An
+// ignored file keeps one alive — git will not delete it without -x, and it will
+// not delete a directory it cannot empty — so that file survives the advance and
+// nothing about it is carried or refused. A reach that took the whole directory
+// anyway would refuse an advance over a file the advance never touches.
+func TestRebaselineLeavesAnIgnoredFileTheCleanWouldNotRemove(t *testing.T) {
+	f := newRebaselineFixture(t, "T9029")
+	f.write(".gitignore", "*.ign\n", 0o644)
+	f.write("staging/keep.txt", "the task's own file\n", 0o644)
+	f.write("staging/notes.ign", "ignored, and left alone\n", 0o644)
+	newMain := f.mainMovesElsewhere()
+
+	res, err := RebaselineTask(f.root, "T9029", "", "")
+	if err != nil {
+		t.Fatalf("the advance was refused over a file it does not touch: %v", err)
+	}
+	if res.ToSHA != newMain {
+		t.Errorf("the advance landed on %s, want %s", res.ToSHA, newMain)
+	}
+	if got := readFileOrFail(t, filepath.Join(f.worktree, "staging", "notes.ign")); got != "ignored, and left alone\n" {
+		t.Errorf("the ignored file the clean does not remove came back as %q", got)
+	}
+	if got := readFileOrFail(t, filepath.Join(f.worktree, "staging", "keep.txt")); got != "the task's own file\n" {
+		t.Errorf("the task's own file next to it came back as %q", got)
+	}
+}
+
+// A directory the advance deletes whole, standing INSIDE another one it deletes
+// whole: the outer walk reaches the inner directory's contents before the inner
+// one is reached as a directory of its own, and both take it. The walk used to
+// append what it found without adding it to the set of what had been taken, so
+// the manifest named the same file twice and Files counted the advance as having
+// carried two paths where it carried one. The outer directory here is one the
+// clean removes; the inner one stands where main put a file.
+func TestTheSnapshotRecordsNestedWholeDirectoriesOnce(t *testing.T) {
+	f := newRebaselineFixture(t, "T9030")
+	target := f.mainAddsItsOwnFileAt("scratch/inner")
+	const inner = "scratch/inner/notes.txt"
+	f.write(inner, "the task's own file\n", 0o644)
+
+	paths, err := worktreeChangedPaths(f.worktree, f.baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := f.git(f.worktree, "rev-parse", "HEAD")
+	keep := t.TempDir()
+	entries, err := snapshotWorktree(f.worktree, head, target, paths, keep)
+	if err != nil {
+		t.Fatalf("the snapshot refused a tree it has to be able to record: %v", err)
+	}
+
+	counts := map[string]int{}
+	for _, e := range entries {
+		counts[e.Path]++
+	}
+	for p, n := range counts {
+		if n != 1 {
+			t.Errorf("the snapshot holds %d entries for %s; it is carried once, from whichever walk reaches it first", n, p)
+		}
+	}
+	// The fixture is the shape the test is about only if both directories are
+	// there as directories of their own — the outer from the clean, the inner
+	// from main's file standing where the task has a directory.
+	for _, p := range []string{"scratch", "scratch/inner"} {
+		found := false
+		for _, e := range entries {
+			if e.Path == p && e.State == "dir" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("the snapshot does not hold %s as a directory — the fixture is not this test's shape", p)
+		}
+	}
+	manifest := readFileOrFail(t, filepath.Join(keep, "MANIFEST.txt"))
+	if got := strings.Count(manifest, "\t"+inner+"\n"); got != 1 {
+		t.Errorf("the manifest names %s %d times:\n%s", inner, got, manifest)
+	}
+}
+
+// T9031.
+//
+// One entry, one line — whatever the name holds. A path with a newline in it was
+// written as it is, so one entry produced two lines and a reader counting them
+// counted a path the advance never carried. The path is the last field and it is
+// escaped by one rule: written as it is when it needs nothing, quoted the way Go
+// quotes a string when it holds a quote, a backslash or a control character. The
+// two forms cannot be confused, because a quoted one always opens with a quote
+// and a name that opens with a quote is always the quoted form.
+func TestTheManifestWritesOneEntryToOneLine(t *testing.T) {
+	names := []string{
+		"docs/task-notes.md",
+		"docs/设计.md",
+		"a name with spaces.txt",
+		"a\nnewline.txt",
+		"a\tname.txt",
+		`a"quote.txt`,
+		`a\backslash.txt`,
+	}
+	for _, name := range names {
+		line := manifestLine(snapshotEntry{Path: name, State: "file", Mode: 0o644})
+		if got := strings.Count(line, "\n"); got != 1 || !strings.HasSuffix(line, "\n") {
+			t.Errorf("the manifest entry for %q is %d lines, want exactly one: %q", name, got, line)
+			continue
+		}
+		fields := strings.Split(strings.TrimSuffix(line, "\n"), "\t")
+		if len(fields) != 3 {
+			t.Errorf("the manifest entry for %q has %d fields, want 3: %q", name, len(fields), line)
+			continue
+		}
+		field := fields[2]
+		if strings.HasPrefix(field, `"`) {
+			back, err := strconv.Unquote(field)
+			if err != nil {
+				t.Errorf("the manifest entry for %q is quoted in a form that cannot be read back: %q", name, field)
+				continue
+			}
+			if back != name {
+				t.Errorf("the manifest entry for %q reads back as %q", name, back)
+			}
+			continue
+		}
+		if field != name {
+			t.Errorf("the manifest entry for %q is written as %q", name, field)
+		}
+	}
+}
+
+// T9034.
+//
+// The names of what a clean removes, read off a real tree. Everything here is a
+// name git cannot write as it is — a newline, a quote, a backslash, a space, a
+// character outside ASCII — and the answer has to be the names on disk, because
+// they are what the walk and the restore go on to use. The nested repository is
+// the skip arm: git leaves it and everything around it alone, so the directory
+// holding it is not a removal and never appears.
+func TestTheCleanReachIsTheNamesOnDisk(t *testing.T) {
+	root := t.TempDir()
+	gitIn(t, root, "init", "-q", ".")
+	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("tracked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "commit", "-q", "-m", "base")
+
+	odd := []string{"new\nline", `quote"dir`, `back\slash`, "sp ace", "naïve"}
+	for _, name := range odd {
+		dir := filepath.Join(root, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A repository of its own inside a directory that would otherwise be removed
+	// whole, with an untracked file beside it.
+	if err := os.MkdirAll(filepath.Join(root, "e1", "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "e1", "u.txt"), []byte("u\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, filepath.Join(root, "e1", "sub"), "init", "-q")
+	// Files whose names are quoted too, standing where they are files rather than
+	// directories: the quoting is the same and the answer has to come back the
+	// other way round, or every quoted name would be read as a directory.
+	quoted := []string{"a\nb.txt", `q"f.txt`, `b\f.txt`}
+	for _, name := range quoted {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("y\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	dirs, files, err := cleanReach(root)
+	if err != nil {
+		t.Fatalf("cleanReach refused a tree it has to be able to read: %v", err)
+	}
+	for _, name := range odd {
+		if !dirs[name] {
+			t.Errorf("cleanReach does not name %q, which the clean removes whole (dirs: %v)", name, keysOf(dirs))
+		}
+	}
+	for _, name := range quoted {
+		if dirs[name] {
+			t.Errorf("cleanReach reads %q as a directory; it is a file with a name git cannot write as it is", name)
+		}
+	}
+	if dirs["e1"] || dirs["e1/sub"] {
+		t.Errorf("cleanReach names %v, which git skips — a repository inside the tree is left alone", keysOf(dirs))
+	}
+	want := append([]string{"e1/u.txt"}, quoted...)
+	sort.Strings(want)
+	if len(files) != len(want) {
+		t.Fatalf("cleanReach names the files %v, want %v", files, want)
+	}
+	sort.Strings(files)
+	for i := range want {
+		if files[i] != want[i] {
+			t.Errorf("cleanReach names the files %v, want %v", files, want)
+			break
+		}
+	}
+}
+
+// T9035.
+//
+// The two sentences git says about a clean, and the refusal for anything else.
+// The refusal is the point: a line this does not understand is a clean whose reach
+// is unknown, and an unknown reach is the defect this exists to close — so the
+// parser fails closed, on the line, before anything has been touched.
+func TestTheCleanLineIsReadOnlyInTheTwoFormsGitWrites(t *testing.T) {
+	for _, c := range []struct {
+		line  string
+		path  string
+		isDir bool
+		skip  bool
+		bad   bool
+	}{
+		{line: "Would remove docs/x.md", path: "docs/x.md"},
+		{line: "Would remove docs/", path: "docs", isDir: true},
+		{line: "Would remove sp ace/", path: "sp ace", isDir: true},
+		// The trailing slash is INSIDE the quotes when the name is quoted. That
+		// is what git writes — measured against `git clean -nd` on a real tree
+		// rather than taken from the documentation — and reading it after the
+		// name is decoded is the only way these lines come out as directories.
+		{line: `Would remove "new\nline/"`, path: "new\nline", isDir: true},
+		{line: `Would remove "quote\"dir/"`, path: `quote"dir`, isDir: true},
+		{line: `Would remove "back\\slash/"`, path: `back\slash`, isDir: true},
+		{line: `Would remove "na\303\257ve/"`, path: "naïve", isDir: true},
+		{line: `Would remove "tab\tdir/"`, path: "tab\tdir", isDir: true},
+		{line: `Would remove "a\nb.txt"`, path: "a\nb.txt"},
+		// A slash OUTSIDE the quotes on a quoted name is refused, not read: git
+		// does not write it, and a parser that guesses at a line it has never
+		// seen is the parser that fails to notice the day git starts writing
+		// something else. Refusing means the advance stops and says so.
+		{line: `Would remove "back\\slash"/`, bad: true},
+		{line: "Would skip repository e1/sub", skip: true},
+		{line: "Would remove", bad: true},
+		{line: "Removing docs/x.md", bad: true},
+		{line: `Would remove "unterminated`, bad: true},
+		{line: `Would remove "bad\qescape"/`, bad: true},
+		{line: `Would remove "half\`, bad: true},
+	} {
+		p, isDir, skip, err := parseCleanLine(c.line)
+		if c.bad {
+			if err == nil {
+				t.Errorf("parseCleanLine(%q) read %q out of a line it does not understand", c.line, p)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("parseCleanLine(%q) failed: %v", c.line, err)
+			continue
+		}
+		if p != c.path || isDir != c.isDir || skip != c.skip {
+			t.Errorf("parseCleanLine(%q) = (%q, %v, %v), want (%q, %v, %v)", c.line, p, isDir, skip, c.path, c.isDir, c.skip)
+		}
+	}
+}
+
+// The snapshot's reach is taken one reset before the clean runs, and a reset moves
+// what a clean can see. A directory is removable only while it holds nothing
+// tracked, so the one whose only tracked file main has deleted becomes removable
+// the moment the reset runs — and a fifo inside it was in neither path list: git
+// cannot name a fifo, and the directory was not removable when the lists were
+// taken. Without asking again the clean deleted the fifo and the advance reported
+// success. The refusal comes before the clean, and the tree comes back whole,
+// which is what makes it a refusal rather than a loss.
+func TestRebaselineAsksTheCleanAgainWhereItRuns(t *testing.T) {
+	f := newRebaselineFixture(t, "T9032")
+	f.mainDeletes("internal/legacy/old.txt")
+	pipe := filepath.Join(f.worktree, "internal", "legacy", "pipe")
+	if err := syscall.Mkfifo(pipe, 0o644); err != nil {
+		t.Fatalf("making the fifo the fixture is about: %v", err)
+	}
+	before := f.treeDump()
+
+	_, err := RebaselineTask(f.root, "T9032", "", "")
+	if err == nil {
+		t.Fatal("the clean deleted the task's fifo and the advance reported success")
+	}
+	if msg := err.Error(); !strings.Contains(msg, "would delete internal/legacy") {
+		t.Fatalf("a different refusal reached this test: %v", err)
+	}
+	st, err := os.Lstat(pipe)
+	if err != nil {
+		t.Fatalf("the fifo is gone after the refusal: %v", err)
+	}
+	if st.Mode()&os.ModeNamedPipe == 0 {
+		t.Errorf("internal/legacy/pipe came back as %v", st.Mode())
+	}
+	if after := f.treeDump(); after != before {
+		t.Errorf("the refused advance did not put the tree back the way it was found:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
+	}
+}
+
+// A socket is the kind the advance cannot carry across at all: it is a rendezvous
+// rather than content, and a copy of one is not a socket. Standing in a plain
+// untracked directory — where git names the directory and nothing inside it — it
+// used to be deleted by the clean with no refusal and no record. The reach now
+// finds it, and the refusal is the one the snapshot already makes for that kind:
+// before the reset, with "Nothing has been touched" in the message and true.
+func TestTheSnapshotRefusesASocketInAPlainUntrackedDirectory(t *testing.T) {
+	f := newRebaselineFixture(t, "T9033")
+	f.mainMovesElsewhere()
+	dir := filepath.Join(f.worktree, "sockdir")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sock := filepath.Join(dir, "s")
+	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatalf("making the socket the fixture is about: %v", err)
+	}
+	defer func() { _ = syscall.Close(fd) }()
+	if err := syscall.Bind(fd, &syscall.SockaddrUnix{Name: sock}); err != nil {
+		t.Fatalf("binding %s: %v", sock, err)
+	}
+	beforeHead := f.git(f.worktree, "rev-parse", "HEAD")
+	before := f.treeDump()
+
+	_, err = RebaselineTask(f.root, "T9033", "", "")
+	if err == nil {
+		t.Fatal("a socket was carried across as something it is not")
+	}
+	for _, want := range []string{"sockdir/s is a socket", "Nothing has been touched"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
+	}
+	if after := f.treeDump(); after != before {
+		t.Errorf("the snapshot changed the tree it refused to advance:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
+	}
+	if head := f.git(f.worktree, "rev-parse", "HEAD"); head != beforeHead {
+		t.Errorf("the refused advance moved the branch to %s", head)
+	}
+}
+
+// gitIn runs git in a directory of a test's own making, for the tests that need a
+// tree rather than the full fixture.
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// T9037.
+//
+// The locale the clean's answer is read in. The answer is two English sentences
+// and the parser reads them as written, so git has to be asked in a locale that
+// writes them that way — and the one that arrives with the test is not it, which
+// is the point: an LC_ALL appended to an inherited locale variable would be read
+// by nobody, because getenv answers with the FIRST match. The variables that
+// decide the locale are therefore dropped before LC_ALL=C is added, and this is
+// the test of that rule. It is a unit test because it cannot be an end-to-end one
+// here: the machine has no second locale installed, so a clean run under an
+// inherited zh_CN.UTF-8 answers in English anyway and the difference would be
+// invisible in the output.
+func TestTheCleanReadsTheLocaleItCanReadTheAnswerIn(t *testing.T) {
+	t.Setenv("LANG", "fr_FR.UTF-8")
+	t.Setenv("LANGUAGE", "fr:de")
+	t.Setenv("LC_ALL", "de_DE.UTF-8")
+	t.Setenv("LC_MESSAGES", "ja_JP.UTF-8")
+	t.Setenv("POST_KEEP_ME", "yes")
+
+	env := cleanEnv()
+	var locales []string
+	kept := false
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		switch {
+		case name == "LANG" || name == "LANGUAGE" || strings.HasPrefix(name, "LC_"):
+			locales = append(locales, kv)
+		case name == "POST_KEEP_ME":
+			kept = true
+		}
+	}
+	if len(locales) != 1 || locales[0] != "LC_ALL=C" {
+		t.Errorf("the clean would run with the locale variables %v, want only LC_ALL=C: the answer is read in English, and an inherited locale would be the one read", locales)
+	}
+	if !kept {
+		t.Error("the environment the clean runs in is not the one it was given, minus the locale variables")
+	}
+}
+
+// T9038.
+//
+// The record of what is inside a directory that was walked WHOLE is the
+// directory's own entry: the walk under it records every path beneath it, so a
+// path arriving later — from the clean's second answer, or from anywhere else —
+// is held by the ancestor even though it is not an entry of its own. Nothing
+// end-to-end reaches this today (see the function's own note); it is tested here
+// so that the arm is a claim with a test rather than a line nothing exercises.
+func TestTheSnapshotHoldsWhatIsInsideADirectoryItWalked(t *testing.T) {
+	held := map[string]bool{"scratch": true, "docs/a.md": true, "internal": true}
+	for _, c := range []struct {
+		path string
+		want bool
+	}{
+		{path: "scratch/pipe", want: true},
+		{path: "scratch/deep/inside.txt", want: true},
+		{path: "internal/legacy", want: true},
+		{path: "internal/legacy/old.txt", want: true},
+		// A path that IS an entry is the caller's first question, not this one:
+		// this arm answers only for what the ancestor's entry stands for.
+		{path: "docs/a.md", want: false},
+		{path: "docs/b.md", want: false},
+		{path: "scratchpad", want: false},
+		{path: "docs", want: false},
+		{path: "", want: false},
+	} {
+		if got := heldByAnAncestor(held, c.path); got != c.want {
+			t.Errorf("heldByAnAncestor(%q) = %v, want %v — a directory that was walked holds everything under it, and nothing else is held", c.path, got, c.want)
+		}
+	}
+}
+
+// Two names that are not lines: one with a newline in it, one that begins with a
+// space. The path lists are read with -z for this — a NUL-separated field is the
+// whole name whatever is in it, and a line is not. Read as lines, the first name
+// becomes two paths that exist nowhere, and the second loses its leading space to
+// the trim that a line-based read needs; both then travel as names of files that
+// were never there, and the work they stood for is not carried.
+func TestThePathListKeepsNamesThatAreNotLines(t *testing.T) {
+	f := newRebaselineFixture(t, "T9036")
+	const newline = "docs/a\nb.md"
+	const spaced = " docs/space.md"
+	f.write(newline, "one name\n", 0o644)
+	f.write(spaced, "another name\n", 0o644)
+
+	paths, err := worktreeChangedPaths(f.worktree, f.baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{newline, spaced} {
+		if !paths[p] {
+			t.Errorf("the path list does not name %q, which is a file in the worktree with work in it", p)
+		}
+	}
+	// The fragments a line-based read produces instead. Naming one of these is
+	// naming a path that is not there.
+	for _, p := range []string{"docs/a", "b.md", "docs/space.md"} {
+		if paths[p] {
+			t.Errorf("the path list names %q, which no file answers to — the listing was read as lines", p)
+		}
 	}
 }
