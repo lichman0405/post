@@ -508,10 +508,10 @@
     },
     "T0106": {
       "status": "running",
-      "started_at": "2026-09-13T00:40:14Z",
-      "worker_run_id": "run-3fb8c179ebf79d37",
-      "accepted_by_supervisor_at": "2026-09-13T00:21:55Z",
-      "rejection_reason": "【这不是缺陷 —— 你的实现没有任何问题，这是一次**基线推进**，需要你在新基线上重新确认】\n\n**发生了什么**：你的交付在 CI 上被一个 **Supervisor 自己测试夹具里的 flake** 卡住了：\n`internal/devorchestrator` 的 `TestMarkerResidueFindsEnvAttributedChild`\n（残留检测的测试）在 CI 负载下会随机失败——**它与你的代码毫无关系**。\n该 flake 已定位并修复（`decisions.md` L1-20260912-56）。\n\n**问题**：修复落在 main，而你的分支早于它，所以**你的分支上那个测试仍是旧版本**，\n重跑 CI 依然会红（已实测重跑一次仍失败）。唯一出路是**推进你的基线**。\n\n**Supervisor 已完成**：把你的任务分支 **merge 了当前 main**（你的工作此前已提交，所以这里是正常 merge，\n不是 reset+重放）。合并**无冲突**，并且：\n- 你的树现在包含那个 flake 修复 ✓（已在你的 worktree 里实测该测试通过）；\n- 也包含 main 上其它任务的成果（T0107 的 `tests/web-smoke/` 等）。\n\n【你要做的（很少）】\n1. 在**合并后的基线**上重跑你自己的验证（required tests：`public/private isolation` 等 +\n   `make test-integration` + `make fmt-check`），确认没有因合并而失效；\n2. 确认 RESULT.json 仍自洽（completed 要求 tests[] 全部 passed；\n   覆盖任务要求的条目要带 `label`）；\n3. 若一切照旧，把 RESULT.json 原样重新提交即可（更新 evidence 里的命令输出更佳）；\n   若**确实**发现合并导致的问题，修好并如实说明。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
+      "started_at": "2026-09-13T01:32:29Z",
+      "worker_run_id": "run-af41d09300d1246b",
+      "accepted_by_supervisor_at": "2026-09-13T01:21:06Z",
+      "rejection_reason": "【这不是缺陷 —— 你的实现没有任何问题，这是一次**基线推进**，需要你在新基线上重新确认】\n\n**发生了什么**：你的交付在 CI 上被一个 **Supervisor 自己测试夹具里的 flake** 卡住了：\n`internal/devorchestrator` 的 `TestMarkerResidueFindsEnvAttributedChild`\n（残留检测的测试）在 CI 负载下会随机失败——**它与你的代码毫无关系**。\n该 flake 已定位并修复（`decisions.md` L1-20260912-56）。\n\n**问题**：修复落在 main，而你的分支早于它，所以**你的分支上那个测试仍是旧版本**，\n重跑 CI 依然会红（已实测重跑一次仍失败）。唯一出路是**推进你的基线**。\n\n**Supervisor 已完成**：把你的任务分支 **merge 了当前 main**（你的工作此前已提交，所以这里是正常 merge，\n不是 reset+重放）。合并**无冲突**，并且：\n- 你的树现在包含那个 flake 修复 ✓（已在你的 worktree 里实测该测试通过）；\n- 也包含 main 上其它任务的成果（T0107 的 `tests/web-smoke/` 等）。\n\n【你要做的（很少）】\n1. 在**合并后的基线**上重跑你自己的验证（required tests：`read isolation` 等 +\n   `make test-integration` + `make fmt-check`），确认没有因合并而失效；\n2. 确认 RESULT.json 仍自洽（completed 要求 tests[] 全部 passed；\n   覆盖任务要求的条目要带 `label`）；\n3. 若一切照旧，把 RESULT.json 原样重新提交即可（更新 evidence 里的命令输出更佳）；\n   若**确实**发现合并导致的问题，修好并如实说明。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n\n【本次补充：你的分支与 T0108/T0110 的合并已由 Supervisor 解决，请复核】\n1. `internal/application/projects/service.go`：两边都新增了方法。**保留你的 `List(ctx, Reader)`**——\n   它是 T0108 那版 `List(ctx, domain.User)` 的**超集**（公开项目 + 已认证调用者自己的项目），\n   丢掉较窄的那版没有任何损失。\n2. `audit.ProjectReadGate` 需要 `Get(ctx, domain.User, projectID)`，而你已把\n   `projects.Service.Get` 改成接收 `projects.Reader`（因为可见性矩阵要决定**匿名读者**能看什么，\n   而活动流是成员专属）。新增了 `audit.ProjectsReadGate` 作为**唯一**适配器\n   （放在 audit 里：audit → projects 无环，且它的测试本就 import projects），\n   而不是让任一方学会对方的词汇、也不是维护两份。\n3. `cmd/api/projectshttp/projects_shell_handlers_test.go` 的 stub 补上了你新增的\n   `ListPublicProjects` 方法。\n\n**已在合并后的树上验证**：build / vet / 全部单测包 / 真实 PostgreSQL 集成测试 / gofmt / schema drift / OpenAPI 全过。\n**如果你认为第 1 或第 2 处的语义判断有误（尤其是 List 的可见性语义），请明确说明并给出依据。**\n",
       "history": [
         {
           "from": "todo",
@@ -551,6 +551,33 @@
           "to": "running",
           "at": "2026-09-13T00:40:14Z",
           "run_id": "run-3fb8c179ebf79d37",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T01:08:46Z",
+          "run_id": "run-e8efa0a8df0a51c5",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-13T01:21:06Z",
+          "run_id": "run-13e261e34f971ece"
+        },
+        {
+          "from": "accepted",
+          "to": "rejected",
+          "at": "2026-09-13T01:32:28Z",
+          "run_id": "run-b281991bdf7ec17b",
+          "reason": "【这不是缺陷 —— 你的实现没有任何问题，这是一次**基线推进**，需要你在新基线上重新确认】\n\n**发生了什么**：你的交付在 CI 上被一个 **Supervisor 自己测试夹具里的 flake** 卡住了：\n`internal/devorchestrator` 的 `TestMarkerResidueFindsEnvAttributedChild`\n（残留检测的测试）在 CI 负载下会随机失败——**它与你的代码毫无关系**。\n该 flake 已定位并修复（`decisions.md` L1-20260912-56）。\n\n**问题**：修复落在 main，而你的分支早于它，所以**你的分支上那个测试仍是旧版本**，\n重跑 CI 依然会红（已实测重跑一次仍失败）。唯一出路是**推进你的基线**。\n\n**Supervisor 已完成**：把你的任务分支 **merge 了当前 main**（你的工作此前已提交，所以这里是正常 merge，\n不是 reset+重放）。合并**无冲突**，并且：\n- 你的树现在包含那个 flake 修复 ✓（已在你的 worktree 里实测该测试通过）；\n- 也包含 main 上其它任务的成果（T0107 的 `tests/web-smoke/` 等）。\n\n【你要做的（很少）】\n1. 在**合并后的基线**上重跑你自己的验证（required tests：`read isolation` 等 +\n   `make test-integration` + `make fmt-check`），确认没有因合并而失效；\n2. 确认 RESULT.json 仍自洽（completed 要求 tests[] 全部 passed；\n   覆盖任务要求的条目要带 `label`）；\n3. 若一切照旧，把 RESULT.json 原样重新提交即可（更新 evidence 里的命令输出更佳）；\n   若**确实**发现合并导致的问题，修好并如实说明。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n\n【本次补充：你的分支与 T0108/T0110 的合并已由 Supervisor 解决，请复核】\n1. `internal/application/projects/service.go`：两边都新增了方法。**保留你的 `List(ctx, Reader)`**——\n   它是 T0108 那版 `List(ctx, domain.User)` 的**超集**（公开项目 + 已认证调用者自己的项目），\n   丢掉较窄的那版没有任何损失。\n2. `audit.ProjectReadGate` 需要 `Get(ctx, domain.User, projectID)`，而你已把\n   `projects.Service.Get` 改成接收 `projects.Reader`（因为可见性矩阵要决定**匿名读者**能看什么，\n   而活动流是成员专属）。新增了 `audit.ProjectsReadGate` 作为**唯一**适配器\n   （放在 audit 里：audit → projects 无环，且它的测试本就 import projects），\n   而不是让任一方学会对方的词汇、也不是维护两份。\n3. `cmd/api/projectshttp/projects_shell_handlers_test.go` 的 stub 补上了你新增的\n   `ListPublicProjects` 方法。\n\n**已在合并后的树上验证**：build / vet / 全部单测包 / 真实 PostgreSQL 集成测试 / gofmt / schema drift / OpenAPI 全过。\n**如果你认为第 1 或第 2 处的语义判断有误（尤其是 List 的可见性语义），请明确说明并给出依据。**\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T01:32:29Z",
+          "run_id": "run-af41d09300d1246b",
           "reason": "worker spawn"
         }
       ]
@@ -663,8 +690,10 @@
     },
     "T0109": {
       "status": "running",
-      "started_at": "2026-09-13T00:58:23Z",
-      "worker_run_id": "run-41294e84869d9514",
+      "started_at": "2026-09-13T01:42:54Z",
+      "worker_run_id": "run-dc657e84e62c2cac",
+      "accepted_by_supervisor_at": "2026-09-13T01:41:09Z",
+      "rejection_reason": "【这不是缺陷 —— 是一次**跨任务类型冲突**，需要你把两边的同一概念合并成一个】\n\n**背景**：你的 PR 在 GitHub CI 上红了，而**本地 G2 是绿的**——这不是矛盾，是两种测试的对象不同：\nG2 编译的是**你 worktree 里的树**（不含别的任务），CI 编译的是**你的分支与 main 合并之后的结果**。\n你与 **T0110（基础 Audit Log）并行**运行，两个任务都声明了同一个类型：\n\n```\ninternal/domain/project.go:167:6: AuditEntry redeclared in this block\ninternal/domain/audit.go:45:6: other declaration of AuditEntry\n```\n\n**注意：git 对此报\"可合并\"（两个文件不同，无文本冲突）——\"能合并\"不等于\"能编译\"。**\n\n**你自己的代码里已经预见到了这件事**（`project.go` 的注释）：\n> T0109 writes the placeholder records for the settings actions; **T0110 owns the audit application surface** (append-only queries, the Activity page) on top of the **same table**.\n\n**结论：它们是同一个概念（一行 `audit_log`），必须只剩一个类型。**\nSupervisor 已把 main 合并进你的分支（无冲突），T0110 的 `internal/domain/audit.go` 现在在你的树里。\n\n**字段映射（T0110 的类型更全，请以它为准）**：\n\n| 你的 `AuditEntry` | T0110 的 `domain.AuditEntry` |\n|---|---|\n| `TargetRef *string` | `TargetRef string`（`\"\"` = 无；不再用指针） |\n| `Before any` | `BeforeSummary any` |\n| `After any` | `AfterSummary any` |\n| `ActorID` / `Via` / `Action` / `ProjectID` / `CorrelationID` | 同名同类型 ✓ |\n| — | 另有 `OrganizationID string`、`Metadata any`（零值即可，项目范围的事件不需要） |\n\n【你要做的】\n1. **删除 `internal/domain/project.go` 里你自己的 `AuditEntry`**（连同它的注释）；\n2. 把使用点改为 T0110 的 `domain.AuditEntry`——至少包括\n   `internal/application/projects/settings.go`（构造处：`Before`→`BeforeSummary`、`After`→`AfterSummary`、\n   `TargetRef` 去指针）、`internal/persistence/project_store.go`（写入处）、以及受影响的测试；\n3. **保留你注释里那句\"同一张表\"的说明**（把它移到使用点或改成对 T0110 类型的引用），\n   因为它是这次合并的依据；\n4. 在合并后的树上重跑你的验证（required tests + `make test-integration` + `make fmt-check` + `sqlc generate` 若查询受影响）；\n5. RESULT.json 必须自洽（completed 要求 tests[] 全部 passed；覆盖任务要求的条目要带 `label`）。\n\n【不要做的事】不要为了让编译通过而删掉功能或放宽测试；不要改动 T0110 的类型去迁就你；\n不要趁机重构无关代码。**若你认为两个类型其实不该合并（语义不同），请给出依据并说明。**\n",
       "history": [
         {
           "from": "todo",
@@ -678,14 +707,42 @@
           "at": "2026-09-13T00:58:23Z",
           "run_id": "run-41294e84869d9514",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T01:32:52Z",
+          "run_id": "run-1aaa0bf68529833c",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-13T01:41:09Z",
+          "run_id": "run-dd1daac3ad6a64bb"
+        },
+        {
+          "from": "accepted",
+          "to": "rejected",
+          "at": "2026-09-13T01:42:54Z",
+          "run_id": "run-8d29a6b6f17509cb",
+          "reason": "【这不是缺陷 —— 是一次**跨任务类型冲突**，需要你把两边的同一概念合并成一个】\n\n**背景**：你的 PR 在 GitHub CI 上红了，而**本地 G2 是绿的**——这不是矛盾，是两种测试的对象不同：\nG2 编译的是**你 worktree 里的树**（不含别的任务），CI 编译的是**你的分支与 main 合并之后的结果**。\n你与 **T0110（基础 Audit Log）并行**运行，两个任务都声明了同一个类型：\n\n```\ninternal/domain/project.go:167:6: AuditEntry redeclared in this block\ninternal/domain/audit.go:45:6: other declaration of AuditEntry\n```\n\n**注意：git 对此报\"可合并\"（两个文件不同，无文本冲突）——\"能合并\"不等于\"能编译\"。**\n\n**你自己的代码里已经预见到了这件事**（`project.go` 的注释）：\n> T0109 writes the placeholder records for the settings actions; **T0110 owns the audit application surface** (append-only queries, the Activity page) on top of the **same table**.\n\n**结论：它们是同一个概念（一行 `audit_log`），必须只剩一个类型。**\nSupervisor 已把 main 合并进你的分支（无冲突），T0110 的 `internal/domain/audit.go` 现在在你的树里。\n\n**字段映射（T0110 的类型更全，请以它为准）**：\n\n| 你的 `AuditEntry` | T0110 的 `domain.AuditEntry` |\n|---|---|\n| `TargetRef *string` | `TargetRef string`（`\"\"` = 无；不再用指针） |\n| `Before any` | `BeforeSummary any` |\n| `After any` | `AfterSummary any` |\n| `ActorID` / `Via` / `Action` / `ProjectID` / `CorrelationID` | 同名同类型 ✓ |\n| — | 另有 `OrganizationID string`、`Metadata any`（零值即可，项目范围的事件不需要） |\n\n【你要做的】\n1. **删除 `internal/domain/project.go` 里你自己的 `AuditEntry`**（连同它的注释）；\n2. 把使用点改为 T0110 的 `domain.AuditEntry`——至少包括\n   `internal/application/projects/settings.go`（构造处：`Before`→`BeforeSummary`、`After`→`AfterSummary`、\n   `TargetRef` 去指针）、`internal/persistence/project_store.go`（写入处）、以及受影响的测试；\n3. **保留你注释里那句\"同一张表\"的说明**（把它移到使用点或改成对 T0110 类型的引用），\n   因为它是这次合并的依据；\n4. 在合并后的树上重跑你的验证（required tests + `make test-integration` + `make fmt-check` + `sqlc generate` 若查询受影响）；\n5. RESULT.json 必须自洽（completed 要求 tests[] 全部 passed；覆盖任务要求的条目要带 `label`）。\n\n【不要做的事】不要为了让编译通过而删掉功能或放宽测试；不要改动 T0110 的类型去迁就你；\n不要趁机重构无关代码。**若你认为两个类型其实不该合并（语义不同），请给出依据并说明。**\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T01:42:54Z",
+          "run_id": "run-dc657e84e62c2cac",
+          "reason": "worker spawn"
         }
       ]
     },
     "T0110": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-13T00:58:14Z",
       "worker_run_id": "run-caa79354c3cf6efe",
-      "accepted_by_supervisor_at": "2026-09-13T00:53:56Z",
+      "accepted_by_supervisor_at": "2026-09-13T01:23:12Z",
+      "merged_at": "2026-09-13T01:26:45Z",
       "rejection_reason": "【这不是缺陷 —— 你的实现没有任何问题，这是一次**基线推进**，需要你在新基线上重新确认】\n\n**发生了什么**：你的交付在 CI 上被一个 **Supervisor 自己测试夹具里的 flake** 卡住了：\n`internal/devorchestrator` 的 `TestMarkerResidueFindsEnvAttributedChild`\n（残留检测的测试）在 CI 负载下会随机失败——**它与你的代码毫无关系**。\n该 flake 已定位并修复（`decisions.md` L1-20260912-56）。\n\n**问题**：修复落在 main，而你的分支早于它，所以**你的分支上那个测试仍是旧版本**，\n重跑 CI 依然会红（已实测重跑一次仍失败）。唯一出路是**推进你的基线**。\n\n**Supervisor 已完成**：把你的任务分支 **merge 了当前 main**（你的工作此前已提交，所以这里是正常 merge，\n不是 reset+重放）。合并**无冲突**，并且：\n- 你的树现在包含那个 flake 修复 ✓（已在你的 worktree 里实测该测试通过）；\n- 也包含 main 上其它任务的成果（T0107 的 `tests/web-smoke/` 等）。\n\n【你要做的（很少）】\n1. 在**合并后的基线**上重跑你自己的验证（required tests：`audit log` 等 +\n   `make test-integration` + `make fmt-check`），确认没有因合并而失效；\n2. 确认 RESULT.json 仍自洽（completed 要求 tests[] 全部 passed；\n   覆盖任务要求的条目要带 `label`）；\n3. 若一切照旧，把 RESULT.json 原样重新提交即可（更新 evidence 里的命令输出更佳）；\n   若**确实**发现合并导致的问题，修好并如实说明。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
       "history": [
         {
@@ -748,6 +805,26 @@
           "at": "2026-09-13T00:58:14Z",
           "run_id": "run-caa79354c3cf6efe",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T01:08:46Z",
+          "run_id": "run-04f5e5f42d579877",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-13T01:23:12Z",
+          "run_id": "run-7ee3f10de61c721a"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-13T01:26:45Z",
+          "run_id": "run-b272713e7c838929",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
