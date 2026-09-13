@@ -166,3 +166,50 @@ func TestTheDriverRefusesToFollowASymlink(t *testing.T) {
 		t.Fatalf("a genuine status file was refused: %v %+v", err, st)
 	}
 }
+
+// Two defects in the first version of the loop, each of which left the driver
+// alive, heartbeating and doing nothing. Both are pinned here rather than left
+// to the e2e, which exercised neither.
+func TestTheDriverInvokesRddevWithFlagsAfterTheSubcommand(t *testing.T) {
+	o := &DriveOpts{DagPath: "tasks/tasks.json", StatePath: "tasks/task_status.json"}
+	got := o.rddevArgs([]string{"worker", "collect", "T0201"})
+	want := []string{"worker", "collect", "T0201", "--tasks-json", "tasks/tasks.json", "--state-json", "tasks/task_status.json"}
+	if len(got) != len(want) {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("args = %v, want %v — --tasks-json is a PER-COMMAND flag: before the subcommand it IS read as the subcommand, and every action fails with a usage error", got, want)
+		}
+	}
+}
+
+// Collecting and then stopping — because verification and accepted were never
+// revisited — is a pipeline that ends at the first gate.
+func TestTheLoopRevisitsVerificationAndAccepted(t *testing.T) {
+	root := t.TempDir()
+	dagPath, statePath := writeDAG(t, root), filepath.Join(root, "task_status.json")
+	if err := os.WriteFile(statePath, []byte(`{"version":2,"tasks":{
+		"T0001":{"status":"running"},"T0002":{"status":"verification"},"T0003":{"status":"todo"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// writeDAG's fixture has T0001 and T0002; add a third so accepted is covered.
+	o := &DriveOpts{RepoRoot: root, DagPath: dagPath, StatePath: statePath}
+	pending, err := o.tasksNeedingAction()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, id := range pending {
+		seen[id] = true
+	}
+	if !seen["T0001"] {
+		t.Error("a running task is not revisited: its Worker's exit would never be noticed")
+	}
+	if !seen["T0002"] {
+		t.Error("a task in verification is not revisited: it would be collected and then never reviewed, accepted, merged or dispatched to CI")
+	}
+	if seen["T0003"] {
+		t.Error("a todo task was treated as needing action — that is what the DAG's dependencies are for")
+	}
+}

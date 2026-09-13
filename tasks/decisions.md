@@ -2444,3 +2444,52 @@ it would truncate whatever the link pointed at" ✓）；恢复 → PASS ✓；
 **一处诚实说明**：**正在运行的 driver（pid 2171109）是用加固前的二进制启动的** ✓。
 该加固针对的是今天不可利用的情形 ✓，**重启 driver 只为它并不划算**（重启虽有接管语义 ✓，
 但会引入不必要的扰动 ✓）。它会在下一次启动时生效 ✓；`rddev status` 的心跳/接管行为不受影响 ✓。
+
+## L1-20260913-10 — ★★ 我的 driver 有两个 P0 缺陷：它会**活着但不干活**
+
+用户报告的 P0 症状（"worker 完成后没有进程会 collect → …"）**在 Go driver 上真实发生了** ✓——
+而且原因是我自己的两处错误 ✓，**它们合起来让 driver 心跳正常、状态显示 alive、却什么都不做** ✓。
+
+### 缺陷 A：`--tasks-json` 放在了子命令**前面** → 每个动作都是 usage error
+
+```
+rddev: unknown subcommand "--tasks-json"
+```
+
+`run()` 组装成 `rddev --tasks-json … <subcommand> …` ✗——而 `--tasks-json` 是**子命令级** flag ✓，
+放在前面就被当成子命令 ✓ → **driver 发出的每一个动作都失败** ✓ →
+`decide()` 把它记成待决事项 ✓ → **待决事项（正确地）阻止重试** ✓ → driver 从此一动不动 ✓。
+
+**这正是我当天早些时候在 e2e 里修过的同一个错误** ✓（L1-20260913-8 记录的两处坑之一 ✓）——
+我在测试里修了 ✓、**在 driver 里没修** ✓。**同一个知识点在同一个会话里犯两次，因为第二次我没回头检查产品代码。**
+
+### 缺陷 B：`tick` 只遍历 `running` 任务 → 收集之后就停了
+
+review / accept / merge 三个状态**永远不会被访问** ✗ →
+**"收集完就停"的流水线** ✓——而 `status` 会显示一切正常 ✓。
+
+### 缺陷 C（放大前两者）：错误被静默吞掉
+
+```go
+store, err := OpenStore(...)
+if err != nil { return nil }   // ← 把"没能问出问题"当成"没有任务"
+```
+于是 driver 对**它没能问出的问题**回答"没有运行中的任务" ✓ → 看起来一切正常 ✓。
+
+### 修复与验证
+
+- 三处全部修复 ✓；`run()` 的组装抽成**纯函数** `rddevArgs` ✓ 以便测试 ✓；
+- **单测**（均双向验证 ✓）：
+  `TestTheDriverInvokesRddevWithFlagsAfterTheSubcommand` ✓（把顺序摆错 → FAIL ✓）、
+  `TestTheLoopRevisitsVerificationAndAccepted` ✓（只遍历 running → FAIL ✓）；
+- **e2e 扩展**：夹具原来只有"一个**仍在运行**的 Worker" ✓ → **driver 一个动作都不必做** ✗ →
+  所以两个缺陷都藏得住 ✓。现在增加一个"**Worker 已退出**"的任务 ✓，
+  断言 driver **确实行动了** ✓、且**拒绝来自 gate 而不是 usage error** ✓。
+  把 flag 顺序改回去 → e2e **FAIL** ✓（已实测 ✓）。
+
+### 教训（与本会话反复出现的是同一条）
+
+**"测试通过"与"代码正确"之间的距离，等于测试没有覆盖的部分。**
+e2e 断言了"driver 会接管运行中的 Worker" ✓ —— 那是**唯一**它真的验证过的事 ✓；
+它**没有**让 driver 执行任何动作 ✗ → 于是我关于"动作"的全部代码都没被测过 ✓。
+**夹具必须让被测对象真正做事** ✓，否则测的是它的启动脚本 ✓。

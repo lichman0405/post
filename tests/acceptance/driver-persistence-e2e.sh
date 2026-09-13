@@ -30,14 +30,32 @@ trap cleanup EXIT
 REPO="$WORK/repo"
 mkdir -p "$REPO/tasks" "$REPO/.rddev/workers/T9001" "$REPO/.rddev/worktrees/T9001"
 cat > "$REPO/tasks/tasks.json" <<'JSON'
-{"version":1,"task_count":1,"phases":{"P1":"x"},"tasks":[
+{"version":1,"task_count":2,"phases":{"P1":"x"},"tasks":[
  {"id":"T9001","phase":"P1","title":"a task with a Worker already running",
+  "dependencies":[],"requirements":["r"],"acceptance_criteria":["a"],
+  "allowed_scope":["x/**"],"decision_level_max":"L1"},
+ {"id":"T9002","phase":"P1","title":"a task whose Worker has already exited",
   "dependencies":[],"requirements":["r"],"acceptance_criteria":["a"],
   "allowed_scope":["x/**"],"decision_level_max":"L1"}]}
 JSON
 cat > "$REPO/tasks/task_status.json" <<'JSON'
-{"version":2,"tasks":{"T9001":{"status":"running","started_at":"2026-09-13T00:00:00Z","worker_run_id":"run-existing"}}}
+{"version":2,"tasks":{
+ "T9001":{"status":"running","started_at":"2026-09-13T00:00:00Z","worker_run_id":"run-existing"},
+ "T9002":{"status":"running","started_at":"2026-09-13T00:00:00Z","worker_run_id":"run-finished"}}}
 JSON
+# T9002's Worker is over, so the driver owes it a collect. That collect will
+# fail - the scratch repo has no worktree or gate spec - and that is the point:
+# the refusal must come from a gate, not from the driver mis-invoking rddev.
+mkdir -p "$REPO/.rddev/workers/T9002"
+cat > "$REPO/.rddev/workers/T9002/registry.json" <<JSON
+{"task_id":"T9002","run_id":"run-finished","session_id":"s","claude_version":"v",
+ "pid":999999,"start_time":1,"worktree":"$REPO/.rddev/worktrees/T9002",
+ "branch":"task/T9002-x","baseline_sha":"0000000000000000000000000000000000000000",
+ "refs_before":[],"log_path":"$REPO/.rddev/workers/T9002/worker.log",
+ "result_dir":"$REPO/.rddev/workers/T9002","started_at":"2026-09-13T00:00:00Z",
+ "exit_status":0,"exit_source":"fixture"}
+JSON
+: > "$REPO/.rddev/workers/T9002/worker.log"
 
 # A Worker that is already running: the driver must ADOPT this, not replace it.
 sleep 300 & SLEEPER_PID=$!
@@ -100,6 +118,33 @@ if pgrep -f "rddev-worker-T9001" >/dev/null 2>&1; then
   fail "a second Worker was spawned for a task whose Worker was still running"
 else
   ok "the running Worker was adopted, not re-spawned"
+fi
+
+# The driver must ACT, and act correctly. Two defects in its first version —
+# flags placed before the subcommand, and a loop that only revisited running
+# tasks — left it alive, heartbeating and doing nothing. Neither could surface
+# here while the fixture gave it nothing to do, so now it has something.
+DECISIONS="$REPO/.rddev/runtime/decisions.json"
+acted_ok=1
+python3 - "$DECISIONS" <<'PYEOF' || acted_ok=0
+import json, os, sys
+path = sys.argv[1]
+if not os.path.exists(path):
+    print("no decisions file: the driver never acted on the finished Worker")
+    raise SystemExit(1)
+ds = json.load(open(path))
+if not any(d.get("task") == "T9002" for d in ds):
+    print(f"the driver never acted on T9002: {ds}")
+    raise SystemExit(1)
+bad = [d for d in ds if "unknown subcommand" in d.get("reason", "")]
+if bad:
+    print(f"the driver mis-invoked rddev: {bad[0]['reason'][:80]}")
+    raise SystemExit(1)
+PYEOF
+if (( acted_ok )); then
+  ok "the driver acted on the finished Worker, and the refusal came from a gate"
+else
+  fail "the driver did not act, or mis-invoked rddev (see above)"
 fi
 
 # The slot is exclusive across processes.
