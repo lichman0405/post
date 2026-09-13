@@ -2529,3 +2529,22 @@ whole phase against mocks, with every task accepted against G3=not_required.
 
 **这条修正本身是对"点名"的又一次去手工化** ✓：我先前把 phase 名字写死在测试里 ✗，
 和用户当初指出的"不要靠人记得"是同一个错误 ✓ ——**只不过程序化的是名字，而不是纪律。**
+
+## L1-20260913-12 — driver 只在启动时 reconcile：**Worker 退出了它永远不知道**
+
+修完前两个缺陷后 ✓，driver 仍然对 T0301 报 `still working` ✗ ——而 `worker list` 明说它 `exited` ✓。
+
+**根因**：registry 的 `exit_status` 是 **`DiscoverWorkers` 写的** ✓，不是 reaper 写的 ✓
+（reaper 写的是 `exit.status` 文件 ✓）✓。而 driver **只在启动时调用一次** `DiscoverWorkers` ✗ →
+此后**任何 Worker 退出它都不会知道** ✗ → 永远报"还在工作" ✓。
+
+**为什么一直没暴露**：**我**每次手工跑 `rddev status` / `worker list` 都会顺手 reconcile ✓ ✓ ——
+**driver 一直在靠别人把消息带给它** ✓ ✓。这和"turn 结束就没人推进"是同一个形状 ✓：
+**一个进程的职责不能依赖另一个进程碰巧经过。**
+
+**修法**：每个 tick 开头 `DiscoverWorkers` ✓（廉价 ✓，且这正是 registry 的更新路径 ✓）。
+
+**同时补上**：`rddev drive --clear-decision TASK` ✓ ——
+记录在**从未 spawn 过**的任务上的待决事项（例如"该 phase 没有 G3"✓）没有 run 可以变化 ✓，
+因此不会自动清除 ✓；条件是否消失由 Supervisor 判断 ✓，所以给一个显式动词 ✓，
+而不是让 driver 去猜 ✓。**已经在运行的 driver 无法自证这一点，只能由我声明。**

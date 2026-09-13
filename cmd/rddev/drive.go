@@ -17,6 +17,7 @@ import (
 
 const driveUsage = `Usage:
   rddev drive [--parallel N] [--poll DUR] [--once] [--worker-timeout DUR]
+  rddev drive --clear-decision TASK
   rddev status [--json]
 
 drive runs the persistent Supervisor loop: it adopts whatever Workers already
@@ -35,6 +36,12 @@ the driver chooses what to attempt and rddev refuses on its own terms.
 
 status reports the driver (alive or dead, from the heartbeat), the Workers it
 can see, and the decisions waiting for the Supervisor.
+
+--clear-decision TASK drops the decisions recorded for one task. A decision
+bracketed to a run clears itself the moment a rework or respawn supersedes that
+attempt; one recorded for a task that was never spawned has no run to change
+(a phase refusing dispatch because it had no G3, say), so the Supervisor says
+the condition is gone rather than the driver guessing.
 `
 
 func runDrive(args []string, stdout, stderr io.Writer, jsonOut bool) int {
@@ -52,6 +59,7 @@ func runDrive(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		flagSpec{"--state-json", true},
 		flagSpec{"--gates", true},
 		flagSpec{"--repo-root", true},
+		flagSpec{"--clear-decision", true},
 	)
 	if err != nil {
 		return usageError(stderr, err.Error(), driveUsage)
@@ -98,6 +106,17 @@ func runDrive(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 	}
 	if _, ok := vals["--once"]; ok {
 		opts.Once = true
+	}
+	// A decision recorded for a task that was NEVER spawned has no run to
+	// change, so it cannot clear itself when the condition behind it goes away
+	// (P6 refusing dispatch because the phase had no G3, say). The Supervisor
+	// resolves that by saying so — the condition is theirs to judge.
+	if task := vals["--clear-decision"]; task != "" {
+		if err := devorchestrator.ClearDecisions(repoRoot, task, ""); err != nil {
+			return operationalError(stderr, "rddev drive", err)
+		}
+		fmt.Fprintf(stdout, "cleared decisions for %s\n", task)
+		return exitOK
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
