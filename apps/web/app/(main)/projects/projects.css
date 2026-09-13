@@ -1,0 +1,327 @@
+/* T0108 project surfaces — GitHub/Primer design tokens (ADR-012, docs/06).
+   The directory and the project shell share the badge language below so a
+   project's governance state reads the same everywhere. Neutral, dense,
+   bordered; no gradients, no glass. */
+
+/* ---------- directory ---------- */
+
+.project-directory-main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.project-directory-title {
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.project-directory-sub {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.project-list {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.project-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+  text-decoration: none;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.project-row:last-child {
+  border-bottom: none;
+}
+
+.project-row:hover {
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+.project-row-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.project-row-name {
+  font-weight: 600;
+  color: var(--fgColor-accent, #0969da);
+}
+
+.project-row-slug {
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+  white-space: nowrap;
+}
+
+.project-row-purpose {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.project-list-empty {
+  padding: 24px 16px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+}
+
+/* ---------- badges (shared: directory + shell) ---------- */
+
+.project-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 2em;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.badge-public {
+  color: var(--fgColor-success, #1a7f37);
+  background: var(--bgColor-success-muted, #dafbe1);
+  border-color: transparent;
+}
+
+.badge-private {
+  color: var(--fgColor-attention, #9a6700);
+  background: var(--bgColor-attention-muted, #fff8c5);
+  border-color: transparent;
+}
+
+.badge-frozen {
+  color: var(--fgColor-attention, #9a6700);
+  background: var(--bgColor-attention-muted, #fff8c5);
+  border-color: transparent;
+}
+
+.badge-muted {
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+/* ---------- shell ---------- */
+
+.project-shell-header {
+  padding: 16px 16px 0;
+  border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+  background: var(--bgColor-inset, #f6f8fa);
+}
+
+.project-shell-breadcrumb {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.project-shell-breadcrumb a {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.project-shell-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+}
+
+.project-shell-name {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.project-shell-purpose {
+  margin: 8px 0 12px;
+  max-width: 860px;
+  font-size: 13px;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.project-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 16px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+  background: var(--bgColor-inset, #f6f8fa);
+}
+
+.project-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px 8px;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  color: var(--fgColor-default, #1f2328);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.project-tab:hover {
+  border-bottom-color: var(--borderColor-muted, #d8dee4);
+}
+
+.project-tab[aria-current="page"] {
+  border-bottom-color: var(--fgColor-accent, #0969da);
+  font-weight: 600;
+}
+
+.project-tab-content {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+/* ---------- shell states (no chrome) ---------- */
+
+.project-state-main {
+  display: flex;
+  justify-content: center;
+  padding: 64px 16px;
+}
+
+.project-state {
+  width: 100%;
+  max-width: 560px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  padding: 24px;
+  text-align: center;
+}
+
+.project-state-icon {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.project-state-title {
+  margin: 12px 0 4px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.project-state-desc {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.project-state-button {
+  display: inline-block;
+  padding: 5px 16px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--fgColor-default, #1f2328);
+  text-decoration: none;
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+/* ---------- overview + placeholders ---------- */
+
+.project-overview dl {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 8px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.project-overview dt {
+  font-weight: 600;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.project-overview dd {
+  margin: 0;
+}
+
+.project-overview-purpose {
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--bgColor-default, #ffffff);
+}
+
+.tab-placeholder {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  padding: 24px;
+  text-align: center;
+}
+
+.tab-placeholder-title {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.tab-placeholder-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.tab-placeholder-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* Files tab: the read-only covenant (docs/10). */
+.tab-placeholder-readonly {
+  margin-top: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 2em;
+  font-size: 12px;
+  color: var(--fgColor-success, #1a7f37);
+  background: var(--bgColor-success-muted, #dafbe1);
+}
+
+/* Settings: the not-authorized answer for a direct URL hit. */
+.settings-unauthorized {
+  border: 1px solid var(--borderColor-attention-muted, #d4a72c);
+  border-radius: 6px;
+  padding: 16px;
+  font-size: 13px;
+  color: var(--fgColor-attention, #9a6700);
+  background: var(--bgColor-attention-muted, #fff8c5);
+}
+
+@media (max-width: 640px) {
+  .project-overview dl {
+    grid-template-columns: 1fr;
+  }
+}

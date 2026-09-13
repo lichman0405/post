@@ -451,6 +451,84 @@ func (e *stubEngine) Authorize(ctx context.Context, req authz.Request) (authz.De
 	return e.decision, e.err
 }
 
+// TestGetMembership (T0108): the shell's own-membership read resolves the
+// actor's role from the store — the permission-aware Settings gate is
+// driven by this data, never by a client claim.
+func TestGetMembership(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	svc := NewService(store, store.gate, authz.NewMatrixEngine())
+	project, created, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
+		Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPrivate,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// The creator reads their owner membership back.
+	got, err := svc.GetMembership(ctx, testUser("alice"), project.ID)
+	if err != nil {
+		t.Fatalf("GetMembership(owner): %v", err)
+	}
+	if got.Role != created.Role || got.ProjectID != project.ID || got.UserID != "alice" {
+		t.Errorf("GetMembership(owner) = %+v, want role %s on project %s for alice",
+			got, created.Role, project.ID)
+	}
+	// A seeded viewer reads their own role — the same row the engine used
+	// for the project read.
+	store.seedMember(project.ID, "bob", domain.ProjectRoleViewer)
+	got, err = svc.GetMembership(ctx, testUser("bob"), project.ID)
+	if err != nil {
+		t.Fatalf("GetMembership(viewer): %v", err)
+	}
+	if got.Role != domain.ProjectRoleViewer {
+		t.Errorf("GetMembership(viewer) role = %q, want viewer", got.Role)
+	}
+}
+
+// TestGetMembershipHidesExistence: a caller who may not read the project
+// may not learn their membership in it — the same existence-hiding shape
+// as Get (in the current member-only read policy a non-member's
+// membership read of any project answers ErrProjectNotFound).
+func TestGetMembershipHidesExistence(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	svc := NewService(store, store.gate, authz.NewMatrixEngine())
+	project, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
+		Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPrivate,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := svc.GetMembership(ctx, testUser("outsider"), project.ID); !errors.Is(err, ErrProjectNotFound) {
+		t.Errorf("outsider GetMembership = %v, want ErrProjectNotFound (existence hiding)", err)
+	}
+	if _, err := svc.GetMembership(ctx, testUser("alice"), "no-such-id"); !errors.Is(err, ErrProjectNotFound) {
+		t.Errorf("unknown GetMembership = %v, want ErrProjectNotFound", err)
+	}
+}
+
+// TestGetMembershipNoRoleWhenReadable: when the project read is permitted
+// but the actor holds no membership (the public-read policy T0106 brings
+// for public projects), the answer is ErrMemberNotFound — "no role", which
+// the shell renders as no Settings tab, not as an error. The permissive
+// engine stands in for the visibility-aware read so the branch is
+// testable before T0106 lands.
+func TestGetMembershipNoRoleWhenReadable(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	allowAll := &stubEngine{decision: authz.Decision{Verdict: authz.VerdictAllow}}
+	svc := NewService(store, store.gate, allowAll)
+	project, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
+		Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPublic,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := svc.GetMembership(ctx, testUser("bob"), project.ID); !errors.Is(err, ErrMemberNotFound) {
+		t.Errorf("nonmember GetMembership under permissive read = %v, want ErrMemberNotFound", err)
+	}
+}
+
 // TestGetRoleMatrix (T0105): the read of a private project passes an
 // explicit engine check per role — viewer, contributor, maintainer and
 // owner all read; a non-member is refused with the existence-hiding 404
