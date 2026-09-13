@@ -15,6 +15,18 @@ import (
 // (T0103); the production adapter is persistence.OrgStore, which satisfies
 // it structurally.
 
+// Reader is the caller identity for visibility-aware reads (T0106): a
+// session-authenticated user, or nobody. It carries exactly the facts the
+// read policies need — the user id (membership lookups) and whether a
+// session resolved (anonymous vs authenticated matrix columns). The
+// transport layer builds it from the guard's optional principal.
+type Reader struct {
+	// UserID is the authenticated user's id; "" means anonymous.
+	UserID string
+	// Authenticated reports whether a session resolved the caller.
+	Authenticated bool
+}
+
 // CreateProjectInput carries the client's creation request after transport
 // decoding. Slug/Name/Purpose are the raw values — normalization and
 // validation happen in the service.
@@ -68,6 +80,11 @@ type ProjectStore interface {
 	// ListProjectsForUser returns the projects the user belongs to
 	// (any project membership), newest first.
 	ListProjectsForUser(ctx context.Context, userID string) ([]domain.Project, error)
+	// ListPublicProjects returns every public project, newest first.
+	// Public projects are readable by every matrix class — anonymous
+	// included (read_public_project, T0106) — so the query needs no
+	// caller identity; the visibility filter IS the policy.
+	ListPublicProjects(ctx context.Context) ([]domain.Project, error)
 	// GetProgram returns the program or ErrProgramNotFound.
 	GetProgram(ctx context.Context, programID string) (domain.Program, error)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/lichman0405/post/internal/application/orgs"
@@ -11,9 +12,10 @@ import (
 	"github.com/lichman0405/post/internal/domain"
 )
 
-// Service orchestrates the project-creation shell (T0104) and enforces
-// the project permission matrix (T0105). All policy lives here; the
-// transport layer only translates requests into these calls. The rules:
+// Service orchestrates the project-creation shell (T0104), enforces
+// the project permission matrix (T0105) and isolates reads by visibility
+// (T0106). All policy lives here; the transport layer only translates
+// requests into these calls. The rules:
 //
 //   - creating a project makes the creator its owner;
 //   - every new project starts provision-pending (provision_status
@@ -27,10 +29,23 @@ import (
 //   - the slug is unique inside the organization (globally for personal
 //     projects) — conflicts answer ErrSlugTaken with a clear code;
 //   - every public action passes an explicit authorization check through
-//     the policy engine (docs/50, T0105): Create asks create_project,
-//     Get asks read_private_project. A denied (or unresolved) decision
-//     refuses the action server-side — hiding a control in a client
-//     never substitutes for this check.
+//     the policy engine (docs/50, T0105): Create asks create_project;
+//     reads ask the visibility-aware action (T0106): public projects ask
+//     read_public_project (anonymous allowed), private projects ask
+//     read_private_project (membership role decides). A denied (or
+//     unresolved) decision refuses the action server-side — hiding a
+//     control in a client never substitutes for this check;
+//   - a denied read answers ErrProjectNotFound for members and outsiders
+//     alike: the project's existence is never disclosed to a caller who
+//     may not see it (read existence hiding, docs/45 — the same shape an
+//     unknown project produces);
+//   - the list is the union of public projects (visible to every matrix
+//     class) and the caller's own projects (membership), newest first —
+//     the query is the visibility filter, so a private project can only
+//     appear for one of its members (T0106 L1: the docs name no explicit
+//     list semantics beyond "anonymous must not see private"; the union
+//     follows read_public_project, which allows every class, and
+//     docs/31 Gate D "Explore/Search 可发现 public project").
 type Service struct {
 	store ProjectStore
 	orgs  OrgGate
@@ -116,26 +131,27 @@ func (s *Service) Create(ctx context.Context, actor domain.User, in CreateProjec
 	return created, membership, nil
 }
 
-// Get returns the project for a current member. The read passes an
-// explicit policy-engine check (read_private_project): the actor's
-// membership role resolves the matrix column, and a denied decision —
-// non-members included — answers ErrProjectNotFound, so the project's
-// existence is not disclosed to outsiders (read existence hiding; T0106
-// extends reads to public projects with the visibility-aware action
-// choice). Store failures answer ErrStore (503), never a masked 404.
-func (s *Service) Get(ctx context.Context, actor domain.User, projectID string) (domain.Project, error) {
+// Get returns the project when the caller may read it, and hides its
+// existence otherwise (T0106). The read passes an explicit policy-engine
+// check with the visibility-aware action: a public project asks
+// read_public_project — allowed for every matrix class, anonymous
+// included; a private project asks read_private_project, where the
+// actor's membership role resolves the matrix column. A denied decision
+// — non-members and anonymous callers included — answers
+// ErrProjectNotFound, so the project's existence (and every metadata
+// field) is not disclosed to a caller who may not see it (read existence
+// hiding, docs/45). Store failures answer ErrStore (503), never a masked
+// 404.
+func (s *Service) Get(ctx context.Context, r Reader, projectID string) (domain.Project, error) {
 	project, err := s.store.GetProject(ctx, projectID)
 	if err != nil {
 		return domain.Project{}, wrapStoreError(err)
 	}
-	role, err := s.membershipRole(ctx, projectID, actor.ID)
+	role, err := s.membershipRole(ctx, projectID, r.UserID)
 	if err != nil {
 		return domain.Project{}, wrapStoreError(err)
 	}
-	if err := s.require(ctx, authz.Request{
-		Action: authz.ActionReadPrivateProject,
-		Class:  authz.ClassOf(true, role, false),
-	}); err != nil {
+	if err := s.requireRead(ctx, project, r, role); err != nil {
 		if errors.Is(err, ErrForbidden) {
 			// Read existence hiding: a denied read looks exactly like an
 			// unknown project (docs/45; the same 404 shape as the org
@@ -156,11 +172,10 @@ func (s *Service) Get(ctx context.Context, actor domain.User, projectID string) 
 // project the caller may read but is not a member of, the answer is
 // ErrMemberNotFound — "no role", not an error.
 //
-// T0106 (in flight) renames Get's caller parameter to a Reader; when
-// that merge lands, the call below becomes the mechanical one-liner
-// s.Get(ctx, Reader{UserID: actor.ID, Authenticated: true}, projectID).
+// T0106 landed: Get now takes a Reader, so the read authorization below is
+// the one-liner its own comment anticipated.
 func (s *Service) GetMembership(ctx context.Context, actor domain.User, projectID string) (domain.ProjectMembership, error) {
-	if _, err := s.Get(ctx, actor, projectID); err != nil {
+	if _, err := s.Get(ctx, Reader{UserID: actor.ID, Authenticated: true}, projectID); err != nil {
 		return domain.ProjectMembership{}, err
 	}
 	membership, err := s.store.GetMembership(ctx, projectID, actor.ID)
@@ -170,13 +185,64 @@ func (s *Service) GetMembership(ctx context.Context, actor domain.User, projectI
 	return membership, nil
 }
 
-// List returns the projects the actor belongs to (any role), newest first.
-func (s *Service) List(ctx context.Context, actor domain.User) ([]domain.Project, error) {
-	projects, err := s.store.ListProjectsForUser(ctx, actor.ID)
+// requireRead picks the visibility-aware matrix action for one read and
+// evaluates it: public projects ask read_public_project (every class
+// allowed), private projects ask read_private_project (the membership
+// role decides — anonymous and non-member classes deny).
+func (s *Service) requireRead(ctx context.Context, p domain.Project, r Reader, role *domain.ProjectRole) error {
+	action := authz.ActionReadPrivateProject
+	if p.Visibility == domain.VisibilityPublic {
+		action = authz.ActionReadPublicProject
+	}
+	return s.require(ctx, authz.Request{
+		Action: action,
+		Class:  authz.ClassOf(r.Authenticated, role, false),
+	})
+}
+
+// List returns the projects the caller may see, newest first: every
+// public project (readable by all matrix classes, T0106) plus, for an
+// authenticated caller, the projects they belong to at any role. A
+// private project therefore only ever appears for one of its members —
+// the store queries are the filter, and both halves of the union are
+// visibility-filtered before they reach the caller.
+func (s *Service) List(ctx context.Context, r Reader) ([]domain.Project, error) {
+	public, err := s.store.ListPublicProjects(ctx)
 	if err != nil {
 		return nil, wrapStoreError(err)
 	}
-	return projects, nil
+	var own []domain.Project
+	if r.Authenticated {
+		own, err = s.store.ListProjectsForUser(ctx, r.UserID)
+		if err != nil {
+			return nil, wrapStoreError(err)
+		}
+	}
+	return mergeNewestFirst(public, own), nil
+}
+
+// mergeNewestFirst unions two project lists (the caller's own projects
+// may already be in the public half), dropping duplicates and ordering by
+// creation time, newest first (id as the deterministic tie-breaker).
+func mergeNewestFirst(lists ...[]domain.Project) []domain.Project {
+	seen := make(map[string]bool)
+	var out []domain.Project
+	for _, list := range lists {
+		for _, p := range list {
+			if seen[p.ID] {
+				continue
+			}
+			seen[p.ID] = true
+			out = append(out, p)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.Project) int {
+		if c := b.CreatedAt.Compare(a.CreatedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return out
 }
 
 // membershipRole returns the actor's project membership role, or nil

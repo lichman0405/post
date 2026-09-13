@@ -38,6 +38,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
+	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/orgs"
 	"github.com/lichman0405/post/internal/application/projects"
@@ -202,7 +203,7 @@ func TestAuditIntegration(t *testing.T) {
 	})
 	auditAPI := audithttp.New(audithttp.Deps{
 		Store:    auditStore,
-		Projects: projectAPI.Service(),
+		Projects: audit.ProjectsReadGate(projectAPI.Service()),
 		Orgs:     orgAPI.Service(),
 	})
 	apiMux := http.NewServeMux()

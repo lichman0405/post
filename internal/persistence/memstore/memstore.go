@@ -62,9 +62,16 @@ func (s *Users) Seed(rec authn.UserRecord) {
 // column.
 func (s *Users) freshID() string {
 	s.nextID++
+	return freshUUID(s.nextID)
+}
+
+// freshUUID builds a deterministic uuid-v4-shaped id from a counter value
+// (the production uuid column's shape), shared by every memstore identity
+// space so ids stay reproducible across tests.
+func freshUUID(n int) string {
 	var b [16]byte
 	for i := range b {
-		b[i] = byte(s.nextID * (i + 1))
+		b[i] = byte(n * (i + 1))
 	}
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant

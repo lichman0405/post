@@ -12,8 +12,8 @@
 //     member-role columns are exercised over the wire: viewer,
 //     contributor, maintainer and owner memberships (seeded with SQL —
 //     the member-management API is T0109) all read a private project,
-//     while a non-member gets the existence-hiding 404 and an anonymous
-//     caller gets 401.
+//     while a non-member and an anonymous caller both get the
+//     existence-hiding 404 (T0106 read isolation).
 //   - "前端隐藏不代替后端拒绝" → this test never touches a UI: every
 //     request is raw HTTP against the API. The refusals observed below
 //     come from the server (guard + engine + service), so no client-side
@@ -133,16 +133,18 @@ func TestProjectAuthzMatrix(t *testing.T) {
 	mustStatus(t, resp, http.StatusNotFound)
 	mustEnvelope(t, resp, "PROJECT_NOT_FOUND")
 
-	// --- anonymous: the guard refuses before routing (401), reads
-	// included (member-only until T0106 extends public reads).
+	// --- anonymous: the guard lets reads through without a session, and
+	// the service hides the private project behind the same
+	// existence-hiding 404 a non-member gets (T0106 — before it, the
+	// anonymous read was 401 at the guard).
 	anon := newTestUserClient(ts.URL)
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/projects/"+projectID, nil)
 	r, err := anon.client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustStatus(t, r, http.StatusUnauthorized)
-	_ = r.Body.Close()
+	mustStatus(t, r, http.StatusNotFound)
+	mustEnvelope(t, r, "PROJECT_NOT_FOUND")
 
 	// --- the roles asserted over the wire are the roles stored
 	// server-side: the matrix columns come from the database membership

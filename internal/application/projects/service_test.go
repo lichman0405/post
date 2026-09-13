@@ -32,8 +32,8 @@ type fakeStore struct {
 	// gate is the organization state the store re-checks inside
 	// CreateProject, mirroring the production transaction.
 	gate *fakeGate
-	// failWith, when set, makes CreateProject return it (wrapped by the
-	// service as ErrStore).
+	// failWith, when set, makes every store method return it (wrapped by
+	// the service as ErrStore) — fail-closed tests for reads and writes.
 	failWith error
 }
 
@@ -207,6 +207,19 @@ func (s *fakeStore) ListProjectsForUser(ctx context.Context, userID string) ([]d
 	return out, nil
 }
 
+func (s *fakeStore) ListPublicProjects(ctx context.Context) ([]domain.Project, error) {
+	if s.failWith != nil {
+		return nil, s.failWith
+	}
+	out := []domain.Project{}
+	for _, p := range s.projects {
+		if p.Visibility == domain.VisibilityPublic {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
 func (s *fakeStore) GetProgram(ctx context.Context, programID string) (domain.Program, error) {
 	p, ok := s.programs[programID]
 	if !ok {
@@ -258,6 +271,12 @@ var (
 )
 
 func testUser(id string) domain.User { return domain.User{ID: id, Handle: "u-" + id} }
+
+// member is the Reader for a session-authenticated user; anonymous is the
+// Reader for a caller without a session (T0106 reads accept both).
+func member(id string) Reader { return Reader{UserID: id, Authenticated: true} }
+
+var anonymous = Reader{}
 
 func TestCreatePersonalProject(t *testing.T) {
 	ctx := context.Background()
@@ -451,54 +470,166 @@ func TestCreateRejectsOverlongPurpose(t *testing.T) {
 	}
 }
 
+// TestGetHidesExistence (T0106 visibility-aware): a private project's
+// existence is hidden from outsiders — a denied read answers the same
+// ErrProjectNotFound an unknown project produces, for an authenticated
+// non-member and an anonymous caller alike. A public project, by
+// contrast, is readable by anyone: members, authenticated non-members,
+// anonymous.
 func TestGetHidesExistence(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()
 	svc := NewService(store, store.gate, authz.NewMatrixEngine())
-	project, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
-		Slug: "p", Name: "P", Purpose: "x", Visibility: domain.VisibilityPublic,
+	private, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
+		Slug: "secret", Name: "Secret", Purpose: "x", Visibility: domain.VisibilityPrivate,
 	})
 	if err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatalf("Create private: %v", err)
 	}
-	if _, err := svc.Get(ctx, testUser("alice"), project.ID); err != nil {
-		t.Errorf("owner Get: %v", err)
+	public, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
+		Slug: "open", Name: "Open", Purpose: "x", Visibility: domain.VisibilityPublic,
+	})
+	if err != nil {
+		t.Fatalf("Create public: %v", err)
 	}
-	if _, err := svc.Get(ctx, testUser("bob"), project.ID); !errors.Is(err, ErrProjectNotFound) {
-		t.Errorf("outsider Get = %v, want ErrProjectNotFound (existence hiding)", err)
+	// The owner reads both.
+	for _, id := range []string{private.ID, public.ID} {
+		if _, err := svc.Get(ctx, member("alice"), id); err != nil {
+			t.Errorf("owner Get %s: %v", id, err)
+		}
 	}
-	if _, err := svc.Get(ctx, testUser("alice"), "no-such-id"); !errors.Is(err, ErrProjectNotFound) {
-		t.Errorf("unknown Get = %v, want ErrProjectNotFound", err)
+	// The private project is invisible to a non-member and to an
+	// anonymous caller — the same shape as an unknown id (existence
+	// hiding, no metadata disclosure).
+	for _, r := range []Reader{member("bob"), anonymous} {
+		if _, err := svc.Get(ctx, r, private.ID); !errors.Is(err, ErrProjectNotFound) {
+			t.Errorf("%+v Get private = %v, want ErrProjectNotFound (existence hiding)", r, err)
+		}
+		if _, err := svc.Get(ctx, r, "no-such-id"); !errors.Is(err, ErrProjectNotFound) {
+			t.Errorf("%+v Get unknown = %v, want ErrProjectNotFound", r, err)
+		}
+	}
+	// The public project is readable by everyone, anonymous included.
+	for _, r := range []Reader{member("bob"), anonymous} {
+		if _, err := svc.Get(ctx, r, public.ID); err != nil {
+			t.Errorf("%+v Get public = %v, want nil", r, err)
+		}
 	}
 }
 
-func TestList(t *testing.T) {
+// TestListVisibilityFilter (T0106): the list is the union of public
+// projects (visible to everyone) and the caller's own projects — a
+// private project only ever appears for one of its members, and the
+// anonymous list contains public projects only.
+func TestListVisibilityFilter(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeStore()
 	svc := NewService(store, store.gate, authz.NewMatrixEngine())
 	if _, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
-		Slug: "a", Name: "A", Purpose: "x", Visibility: domain.VisibilityPublic,
+		Slug: "alice-open", Name: "Alice Open", Purpose: "x", Visibility: domain.VisibilityPublic,
 	}); err != nil {
-		t.Fatalf("Create a: %v", err)
+		t.Fatalf("Create alice public: %v", err)
+	}
+	if _, _, err := svc.Create(ctx, testUser("alice"), CreateProjectInput{
+		Slug: "alice-secret", Name: "Alice Secret", Purpose: "x", Visibility: domain.VisibilityPrivate,
+	}); err != nil {
+		t.Fatalf("Create alice private: %v", err)
 	}
 	if _, _, err := svc.Create(ctx, testUser("bob"), CreateProjectInput{
-		Slug: "b", Name: "B", Purpose: "x", Visibility: domain.VisibilityPublic,
+		Slug: "bob-secret", Name: "Bob Secret", Purpose: "x", Visibility: domain.VisibilityPrivate,
 	}); err != nil {
-		t.Fatalf("Create b: %v", err)
+		t.Fatalf("Create bob private: %v", err)
 	}
-	aliceList, err := svc.List(ctx, testUser("alice"))
+
+	listSlugs := func(r Reader) map[string]bool {
+		t.Helper()
+		list, err := svc.List(ctx, r)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		slugs := map[string]bool{}
+		for _, p := range list {
+			slugs[p.Slug] = true
+		}
+		return slugs
+	}
+
+	// Anonymous: the public project only — neither private project leaks.
+	anon := listSlugs(anonymous)
+	if !anon["alice-open"] || anon["alice-secret"] || anon["bob-secret"] {
+		t.Errorf("anonymous list = %v, want only alice-open", anon)
+	}
+	// Bob: the public project plus his own — alice's private project
+	// stays hidden even from an authenticated caller.
+	bob := listSlugs(member("bob"))
+	if !bob["alice-open"] || !bob["bob-secret"] || bob["alice-secret"] {
+		t.Errorf("bob list = %v, want alice-open + bob-secret", bob)
+	}
+	// Alice: both of hers plus... her own public one (deduplicated) — and
+	// nothing private from bob.
+	alice := listSlugs(member("alice"))
+	if !alice["alice-open"] || !alice["alice-secret"] || alice["bob-secret"] {
+		t.Errorf("alice list = %v, want alice-open + alice-secret", alice)
+	}
+	// The union never duplicates a project (alice's public project is in
+	// both halves).
+	list, err := svc.List(ctx, member("alice"))
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(aliceList) != 1 || aliceList[0].Slug != "a" {
-		t.Errorf("alice list = %+v, want only project a", aliceList)
+	seen := map[string]int{}
+	for _, p := range list {
+		seen[p.ID]++
 	}
-	bobList, err := svc.List(ctx, testUser("bob"))
-	if err != nil {
-		t.Fatalf("List: %v", err)
+	for id, n := range seen {
+		if n != 1 {
+			t.Errorf("project %s appears %d times, want 1 (deduplicated union)", id, n)
+		}
 	}
-	if len(bobList) != 1 || bobList[0].Slug != "b" {
-		t.Errorf("bob list = %+v, want only project b", bobList)
+}
+
+// TestMergeNewestFirst locks the union helper's contract: duplicates
+// collapse to one entry and the result orders by creation time, newest
+// first (id as the deterministic tie-breaker).
+func TestMergeNewestFirst(t *testing.T) {
+	mk := func(id string, at time.Time) domain.Project {
+		return domain.Project{ID: id, CreatedAt: at}
+	}
+	oldest := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	middle := oldest.Add(time.Hour)
+	newest := oldest.Add(2 * time.Hour)
+
+	// The same project appears in both halves (a member's public project)
+	// and a tie on CreatedAt resolves by id.
+	got := mergeNewestFirst(
+		[]domain.Project{mk("a", oldest), mk("b", newest), mk("c", middle)},
+		[]domain.Project{mk("b", newest), mk("d", middle)},
+	)
+	var ids []string
+	for _, p := range got {
+		ids = append(ids, p.ID)
+	}
+	want := []string{"b", "c", "d", "a"} // newest first; c<d on the middle tie
+	if len(ids) != len(want) {
+		t.Fatalf("merge = %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("merge = %v, want %v", ids, want)
+		}
+	}
+}
+
+// TestStoreFailureWrapsAsErrStore: a store failure on the public half of
+// the list answers ErrStore (503) — a caller can never mistake a broken
+// store for "no projects" (fail closed).
+func TestListStoreFailureFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	svc := NewService(store, store.gate, authz.NewMatrixEngine())
+	store.failWith = errors.New("boom")
+	if _, err := svc.List(ctx, anonymous); !errors.Is(err, ErrStore) {
+		t.Errorf("anonymous List under store failure = %v, want wrapped ErrStore", err)
 	}
 }
 
@@ -627,17 +758,17 @@ func TestGetRoleMatrix(t *testing.T) {
 	}
 	for _, role := range roles {
 		store.seedMember(project.ID, "bob", role)
-		if _, err := svc.Get(ctx, testUser("bob"), project.ID); err != nil {
+		if _, err := svc.Get(ctx, member("bob"), project.ID); err != nil {
 			t.Errorf("Get as %s: %v, want nil", role, err)
 		}
 	}
-	if _, err := svc.Get(ctx, testUser("outsider"), project.ID); !errors.Is(err, ErrProjectNotFound) {
+	if _, err := svc.Get(ctx, member("outsider"), project.ID); !errors.Is(err, ErrProjectNotFound) {
 		t.Errorf("outsider Get = %v, want ErrProjectNotFound (existence hiding)", err)
 	}
 	// Defense in depth: a membership row with a role outside the four
 	// canonical ones resolves to no matrix class and denies.
 	store.seedMember(project.ID, "bogus", domain.ProjectRole("admin"))
-	if _, err := svc.Get(ctx, testUser("bogus"), project.ID); !errors.Is(err, ErrProjectNotFound) {
+	if _, err := svc.Get(ctx, member("bogus"), project.ID); !errors.Is(err, ErrProjectNotFound) {
 		t.Errorf("unknown-role Get = %v, want ErrProjectNotFound (default deny)", err)
 	}
 }
@@ -665,7 +796,7 @@ func TestServiceEngineDenied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if _, err := svc.Get(ctx, testUser("alice"), project.ID); !errors.Is(err, ErrProjectNotFound) {
+	if _, err := svc.Get(ctx, member("alice"), project.ID); !errors.Is(err, ErrProjectNotFound) {
 		t.Errorf("member Get under deny = %v, want ErrProjectNotFound", err)
 	}
 }
@@ -712,7 +843,7 @@ func TestServiceWithoutEngineFailsClosed(t *testing.T) {
 	}); !errors.Is(err, ErrStore) {
 		t.Errorf("Create without engine = %v, want wrapped ErrStore (fail closed)", err)
 	}
-	if _, err := svc.List(ctx, testUser("alice")); err != nil {
+	if _, err := svc.List(ctx, member("alice")); err != nil {
 		t.Errorf("List without engine = %v (list needs no project-scoped check: the query is the filter)", err)
 	}
 }
