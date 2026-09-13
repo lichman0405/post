@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -234,15 +235,26 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 	// for it. A copy that names the task and holds half a snapshot — or nothing
 	// at all — is worse than no copy to whoever finds it after a refusal, since
 	// the directory is what the error names as "where the work is kept".
+	//
+	// One armed discard rather than one os.RemoveAll per failure: there were
+	// two, and the third failure added between them would have been the one
+	// nobody removed. Everything that can refuse from here to the reset is
+	// under this defer by construction, and the disarm is a single line after
+	// the reset, which is the point past which the copy is the only copy.
+	discard := true
+	defer func() {
+		if discard {
+			os.RemoveAll(keep)
+		}
+	}()
 	if err := os.WriteFile(filepath.Join(keep, "change.patch"), []byte(change), 0o600); err != nil {
-		os.RemoveAll(keep)
 		return nil, fmt.Errorf("keeping the task's change at %s: %w", keep, err)
 	}
-	entries, err := snapshotWorktree(rec.Worktree, before, keep)
+	entries, err := snapshot(rec.Worktree, before, keep)
 	if err != nil {
-		os.RemoveAll(keep)
 		return nil, err
 	}
+	discard = false
 	completed := false
 	defer func() {
 		if completed {
@@ -357,11 +369,11 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 	// now that this branch moved under the Supervisor's hand rather than the
 	// Worker's (ref_ledger.go), so it must describe a ref that really moved: every
 	// failure above it restores the ref to where the ledger still believes it is,
-	// and nothing below it can fail. "Last" means after every check that can
-	// refuse the advance — the apply and the artifact postcondition are pinned by
-	// the reversion battery; the work-survival postcondition cannot be driven to
-	// failure through this function at all, so its failure branch is tested
-	// directly instead.
+	// and nothing below it can fail. "Last" means after EVERY check that can
+	// refuse the advance, and each of the three has a test that drives it here —
+	// the apply, the artifact postcondition, and the work-survival postcondition,
+	// which the task-replaces-a-tracked-path-with-a-directory shape does reach
+	// (T9019) — so the position is pinned rather than argued.
 	if err := RecordSupervisorRef(repoRoot, "refs/heads/"+rec.Branch, to, "rebaseline", taskID); err != nil {
 		return nil, fail(fmt.Errorf("recording refs/heads/%s in the Supervisor ref ledger: %w", rec.Branch, err))
 	}
@@ -384,13 +396,22 @@ type snapshotEntry struct {
 	Mode  os.FileMode // regular files: the permission bits to restore
 }
 
+// snapshot is snapshotWorktree, as a variable, for the same reason restore is:
+// the failure it guards cannot be produced on demand here. It is the one that
+// happens a second before the worktree is rebuilt, and its whole handling is
+// "do not leave a directory that names the task and holds nothing" — a claim
+// about what is on disk after an error, which needs a real advance to be worth
+// anything. A test drives it during one.
+var snapshot = snapshotWorktree
+
 // snapshotWorktree copies every changed path out of the worktree into keep,
 // so a refused advance can be undone by CONTENT rather than by re-applying the
 // patch. The patch is a document (a human reads it, a PR shows it); this is the
 // copy that restores, and it works even when the patch no longer fits — which
 // is precisely the case that reaches it. A path that is tracked and deleted is
 // recorded as "absent": the content is in git and its absence is the change, so
-// restoring means removing the file again.
+// restoring means removing the file again. What is inside a directory the task
+// put where a TRACKED path was is copied too: see the loop below.
 func snapshotWorktree(worktree string, paths map[string]bool, keep string) ([]snapshotEntry, error) {
 	files := filepath.Join(keep, "files")
 	if err := os.MkdirAll(files, 0o755); err != nil {
@@ -402,68 +423,173 @@ func snapshotWorktree(worktree string, paths map[string]bool, keep string) ([]sn
 		if p == "" {
 			continue
 		}
-		src := filepath.Join(worktree, p)
-		st, err := os.Lstat(src)
-		if isAbsentPath(err) {
-			entries = append(entries, snapshotEntry{Path: p, State: "absent"})
-			fmt.Fprintf(&manifest, "absent\t-\t%s\n", p)
+		e, err := snapshotOne(worktree, files, p)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+		manifest.WriteString(manifestLine(e))
+		// A directory standing where a tracked path is: the task replaced that
+		// path with a directory, and what is inside it is a changed path git
+		// never named — the ignored content `ls-files --others
+		// --exclude-standard` leaves out, and any empty directory it cannot
+		// represent at all. `reset --hard` does not merely leave this directory
+		// alone, it DELETES it, contents and all, because the directory stands
+		// in the way of the tracked path it is restoring. So the content has to
+		// travel with the snapshot or the restore cannot reproduce the tree it
+		// promises to have put back.
+		if e.State != "dir" {
 			continue
 		}
+		tracked, err := trackedInHead(worktree, p)
 		if err != nil {
-			return nil, fmt.Errorf("reading %s to keep the task's work: %w", p, err)
+			return nil, err
 		}
-		dst := filepath.Join(files, filepath.FromSlash(p))
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return nil, fmt.Errorf("creating %s: %w", filepath.Dir(dst), err)
+		if !tracked {
+			continue
 		}
-		switch {
-		case st.Mode()&os.ModeSymlink != 0:
-			// The link's TARGET is recorded, never followed: a Worker's tree may
-			// hold a symlink, and resolving it here would have the Supervisor copy
-			// whatever it points at into a durable artifact. Same reasoning as
-			// taskWorktreeDiff's Lstat.
-			target, err := os.Readlink(src)
-			if err != nil {
-				return nil, fmt.Errorf("reading symlink %s to keep the task's work: %w", p, err)
-			}
-			if err := os.WriteFile(dst, []byte(target), 0o600); err != nil {
-				return nil, fmt.Errorf("keeping symlink %s: %w", p, err)
-			}
-			entries = append(entries, snapshotEntry{Path: p, State: "symlink"})
-			fmt.Fprintf(&manifest, "symlink\t-\t%s\n", p)
-		case st.Mode().IsRegular():
-			data, err := os.ReadFile(src)
-			if err != nil {
-				return nil, fmt.Errorf("reading %s to keep the task's work: %w", p, err)
-			}
-			if err := os.WriteFile(dst, data, 0o600); err != nil {
-				return nil, fmt.Errorf("keeping %s: %w", p, err)
-			}
-			entries = append(entries, snapshotEntry{Path: p, State: "file", Mode: st.Mode().Perm()})
-			fmt.Fprintf(&manifest, "file\t%04o\t%s\n", st.Mode().Perm(), p)
-		default:
-			// A directory (a gitlink, or a tracked path the task turned into a
-			// directory) carries no content of its own; its existence is all
-			// there is to restore.
-			//
-			// An EMPTY UNTRACKED directory does not reach here and is not
-			// restored, because it never reaches the path list either: git
-			// cannot represent an empty directory, so `ls-files --others`
-			// omits it, and `clean -fdq` removes it on the advance. This is
-			// git's own boundary rather than an oversight, but it is a case
-			// where a successful advance does not carry everything the task
-			// left behind, so it is written down instead of assumed.
-			if err := os.MkdirAll(dst, 0o755); err != nil {
-				return nil, fmt.Errorf("keeping directory %s: %w", p, err)
-			}
-			entries = append(entries, snapshotEntry{Path: p, State: "dir"})
-			fmt.Fprintf(&manifest, "dir\t-\t%s\n", p)
+		sub, err := snapshotDirContents(worktree, files, paths, p)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range sub {
+			entries = append(entries, s)
+			manifest.WriteString(manifestLine(s))
 		}
 	}
 	if err := os.WriteFile(filepath.Join(keep, "MANIFEST.txt"), []byte(manifest.String()), 0o600); err != nil {
 		return nil, fmt.Errorf("writing the restore manifest in %s: %w", keep, err)
 	}
 	return entries, nil
+}
+
+// snapshotOne records one changed path into the kept copy and returns what the
+// restore has to replay. A path that is tracked and deleted is recorded as
+// "absent": the content is in git and its absence is the change, so restoring
+// means removing the file again.
+func snapshotOne(worktree, files, p string) (snapshotEntry, error) {
+	src := filepath.Join(worktree, p)
+	st, err := os.Lstat(src)
+	if isAbsentPath(err) {
+		return snapshotEntry{Path: p, State: "absent"}, nil
+	}
+	if err != nil {
+		return snapshotEntry{}, fmt.Errorf("reading %s to keep the task's work: %w", p, err)
+	}
+	dst := filepath.Join(files, filepath.FromSlash(p))
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return snapshotEntry{}, fmt.Errorf("creating %s: %w", filepath.Dir(dst), err)
+	}
+	switch {
+	case st.Mode()&os.ModeSymlink != 0:
+		// The link's TARGET is recorded, never followed: a Worker's tree may
+		// hold a symlink, and resolving it here would have the Supervisor copy
+		// whatever it points at into a durable artifact. Same reasoning as
+		// taskWorktreeDiff's Lstat.
+		target, err := os.Readlink(src)
+		if err != nil {
+			return snapshotEntry{}, fmt.Errorf("reading symlink %s to keep the task's work: %w", p, err)
+		}
+		if err := os.WriteFile(dst, []byte(target), 0o600); err != nil {
+			return snapshotEntry{}, fmt.Errorf("keeping symlink %s: %w", p, err)
+		}
+		return snapshotEntry{Path: p, State: "symlink"}, nil
+	case st.Mode().IsRegular():
+		data, err := os.ReadFile(src)
+		if err != nil {
+			return snapshotEntry{}, fmt.Errorf("reading %s to keep the task's work: %w", p, err)
+		}
+		if err := os.WriteFile(dst, data, 0o600); err != nil {
+			return snapshotEntry{}, fmt.Errorf("keeping %s: %w", p, err)
+		}
+		return snapshotEntry{Path: p, State: "file", Mode: st.Mode().Perm()}, nil
+	default:
+		// A directory (a gitlink, or a tracked path the task turned into a
+		// directory) carries no content of its own; its existence is all
+		// there is to restore. What is INSIDE one of these is walked by
+		// snapshotDirContents, which is where a directory the task put where a
+		// tracked path was is handled.
+		//
+		// An EMPTY UNTRACKED directory does not reach here and is not
+		// restored, because it never reaches the path list either: git
+		// cannot represent an empty directory, so `ls-files --others`
+		// omits it, and `clean -fdq` removes it on the advance. This is
+		// git's own boundary rather than an oversight, but it is a case
+		// where a successful advance does not carry everything the task
+		// left behind, so it is written down instead of assumed.
+		if err := os.MkdirAll(dst, 0o755); err != nil {
+			return snapshotEntry{}, fmt.Errorf("keeping directory %s: %w", p, err)
+		}
+		return snapshotEntry{Path: p, State: "dir"}, nil
+	}
+}
+
+// snapshotDirContents records everything inside a directory the task put where
+// a tracked path was, for the reason given at its caller: `reset --hard` deletes
+// that directory to restore the tracked path, so nothing inside it survives on
+// its own — and git named none of it, since a path covered by the ignore rules
+// is exactly what `ls-files --others --exclude-standard` omits.
+//
+// The walk is of the FILESYSTEM, not of another git listing, for the reason the
+// guard tests in #99 learned twice over: a listing is a selection criterion
+// written down once, and what it does not name is invisible. A directory inside
+// this one that is empty, a fifo, a symlink — git has no opinion about any of
+// them, and all of them are content the restore would have to invent.
+func snapshotDirContents(worktree, files string, paths map[string]bool, p string) ([]snapshotEntry, error) {
+	var out []snapshotEntry
+	err := filepath.WalkDir(filepath.Join(worktree, filepath.FromSlash(p)), func(full string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("reading what is inside %s to keep the task's work: %w", p, err)
+		}
+		rel, rerr := filepath.Rel(worktree, full)
+		if rerr != nil {
+			return rerr
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." || paths[rel] {
+			return nil
+		}
+		e, kerr := snapshotOne(worktree, files, rel)
+		if kerr != nil {
+			return kerr
+		}
+		out = append(out, e)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// trackedInHead reports whether HEAD has a path exactly at p — the question that
+// decides whether `reset --hard` will delete a directory standing there, since
+// git removes what obstructs the tracked paths it is writing.
+func trackedInHead(worktree, p string) (bool, error) {
+	out, err := gitOutput(worktree, "ls-tree", "--name-only", "-z", "HEAD", "--", p)
+	if err != nil {
+		return false, fmt.Errorf("asking whether HEAD tracks %s: %w", p, err)
+	}
+	for _, name := range strings.Split(out, "\x00") {
+		if strings.TrimSpace(name) == p {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// manifestLine is one line of the manifest a human reads after a refusal.
+func manifestLine(e snapshotEntry) string {
+	switch e.State {
+	case "file":
+		return fmt.Sprintf("file\t%04o\t%s\n", e.Mode.Perm(), e.Path)
+	case "symlink":
+		return fmt.Sprintf("symlink\t-\t%s\n", e.Path)
+	case "dir":
+		return fmt.Sprintf("dir\t-\t%s\n", e.Path)
+	default:
+		return fmt.Sprintf("absent\t-\t%s\n", e.Path)
+	}
 }
 
 // restoreOrExplain puts the worktree back and says which of the two happened.
@@ -612,11 +738,20 @@ func verifyTheWorkSurvived(worktree, keep, base string, entries []snapshotEntry,
 	for _, r := range regenerated {
 		skip[r] = true
 	}
-	// Git records exactly one permission bit, and that bit is the whole of a
-	// file's mode as anything downstream — the commit, the review diff, CI — can
-	// see it. It is compared only where it is the TASK's own change: where the
-	// task left the mode alone, the mode in the advanced tree is main's, which
-	// is a change main made rather than work the advance lost.
+	// Git records WHETHER a file is executable, not how: the one bit it has is
+	// 100755 for any exec bit the task set, and `git apply` writes that mode
+	// masked by the umask, so a file the task left at 0700 comes back 0755. Both
+	// are executable and both are the same change as anything downstream — the
+	// commit, the review diff, CI — can see it, which is why this compares the
+	// BIT and not the three-bit mask. Comparing the mask refuses a task-created
+	// 0700 file forever, with a message that contradicts itself ("came back
+	// executable; the task left it executable"), because 0755&0111 is 0111 and
+	// 0700&0111 is 0100; it is also exactly the umask-sensitive comparison this
+	// check exists to avoid.
+	//
+	// It is compared only where it is the TASK's own change: where the task left
+	// the mode alone, the mode in the advanced tree is main's, which is a change
+	// main made rather than work the advance lost.
 	baseExec, err := baseExecBits(worktree, base)
 	if err != nil {
 		return err
@@ -649,7 +784,7 @@ func verifyTheWorkSurvived(worktree, keep, base string, entries []snapshotEntry,
 			lost = append(lost, fmt.Sprintf("%s came back as %s; the task left %s", e.Path, shortDigest(data), shortDigest(want)))
 			continue
 		}
-		if e.State == "file" && mode&0o111 != e.Mode&0o111 {
+		if e.State == "file" && (mode&0o111 != 0) != (e.Mode&0o111 != 0) {
 			if fromBase, tracked := baseExec[e.Path]; !tracked || fromBase != (e.Mode&0o111 != 0) {
 				lost = append(lost, fmt.Sprintf("%s came back %s; the task left it %s", e.Path, execWord(mode), execWord(e.Mode)))
 			}
