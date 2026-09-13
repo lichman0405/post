@@ -2150,3 +2150,113 @@ cannot compile merged — MERGEABLE is not compilable"；恢复 → PASS ✓。
 **测试**：`TestReviewVerdictIsBoundToTheCodeItJudged` 覆盖四种情形——
 身份不符 → 拒绝；身份相符 → 通过；**提交同一内容 → 仍然通过**（commit 稳定性）；
 **main 前进后合并 → 失效**（基线漂移）✓。
+
+## L1-20260913-2 — ★★ Phase Boundary Hardening 2/4：迁移编号**分配**、canonical schema snapshot **生成**、Worker 写 specs 的**唯一入口**
+
+### (a) 迁移编号从"每个 Worker 自己猜"改为"Supervisor 在 dispatch 时分配"
+
+P1 里两个并行 Worker **各自创建了 `00017_*.sql`**。**两个都不粗心**：
+仓库自己的指令就是"add `NNNNN_description.sql` (**next number**)"，而那份索引当时停在 `00013`——
+**它烂了五条迁移**。**照着仓库的指令做，就会撞号。**
+
+**编号是跨并行 Worker 的共享资源，因此必须被分配，不能被各自推断。**
+
+- `AllocateMigrationNumber(repoRoot, taskID)`：取 max(**磁盘上最高编号**, **台账里最高预留**) + 1 ✓
+- 台账在 `.rddev/runtime/migration-numbers.json`（Supervisor 独占、原子写 ✓）
+- **对 rework/respawn 幂等**：任务保留它签约时的编号，已写好的文件不必改名 ✓
+- **单调**：被取消任务释放的编号**不复用**（可能已经在别人的分支里 ✓）
+- 编号随**任务包**下发（`migration_number`，schema 已同步 ✓），prompt 明说
+  "**不要自己选号**" ✓
+
+**测试** `TestMigrationNumbersAreAllocatedNotInferred`：三个任务在**任何迁移文件都不存在**时
+也必须拿到三个不同编号 ✓；重复分配不变 ✓；释放后不复用 ✓。
+
+### (b) canonical schema snapshot 从"手工 seed"改为**生成物**
+
+原状：`specs/database/postgres.sql` 被声明为 source of truth、迁移是它的"faithful decomposition"，
+而实际上**文件冻结、迁移前进**——P1 结束时它落后 **5 条迁移**，
+而 `infra/migrations/README.md` 自己都记录着**它甚至不可执行**（先建 `project_states` 再建 `branches`，
+PostgreSQL 直接拒绝）。**一个会静默滞后的 canonical artifact 比没有更糟，因为它被相信。**
+
+**方向反转**：**迁移是 canonical history**；该文件是 `scripts/gen_schema_snapshot.py`
+按序取每条迁移的 **Up 段**生成的快照 ✓（无数据库依赖、无判断、无漂移 ✓）。
+`make check-schema-snapshot` 与 CI 的 spec-validation 在两者不一致时失败 ✓。
+
+**测试** `scripts/tests/schema-snapshot-test.sh`（已接入 spec stage/CI/gates.json）：
+Up 段齐全且**Down 段不得进入** ✓、`--check` 对当前快照通过 ✓、**再生成字节一致** ✓、
+**schema 前进而快照不前进时必须报错**（这正是机制存在的理由 ✓）、无迁移时不得静默通过 ✓。
+
+### (c) "specs Supervisor-only"与 schema evolution 的冲突：**已声明的 derived artifact**
+
+Worker 对 `specs/` 的写入**只有一条路**：
+`specs/orchestrator/derived-artifacts.json` 新增规则
+`infra/migrations/** → specs/database/postgres.sql` ✓。
+于是：
+- 覆盖迁移目录的任务**必须同时覆盖该快照**（spawn 前的 scope 校验强制 ✓，110 个任务已更新 ✓）；
+- 写入方式**只有重新生成** ✓；
+- **其余 `specs/**` 与 `docs/**` 仍为 Supervisor-only** ✓。
+
+规则同时写入 **`CLAUDE.md` §8.1** 与 **`docs/53_DATABASE_STANDARD.md`** ✓——
+不是留在我的记忆里，而是留在下一个人会读到的地方。
+
+## L1-20260913-3 — ★★ Phase Boundary Hardening 3/4：P2/P3 的真实 G3，以及"没有 G3"不再是默认
+
+### (a) P3 / Gitea：真实验证**实例的能力**，在任何 P3 代码之前就抓到一个环境缺口
+
+`tests/acceptance/gitea-real-services-e2e.sh` 对**真实 Gitea 实例**验证 P3 依赖的三件事：
+仓库供给、main 的双层保护、push webhook 投递 ✓。
+
+**它当场抓到一个真实缺口**——而且是在**写完任何 P3 代码之前**：
+
+```
+services/webhook: unable to deliver webhook task[7] in http://172.17.0.1:18099/hook
+due to error in http.client: webhook can only call allowed HTTP servers
+(check your security.ALLOWED_HOST_LIST setting), deny '172.17.0.1'
+```
+
+dev 栈的 Gitea **默认拒绝一切 webhook 目标** ✓，而 **T0305 的语义摄入依赖 push webhook** ✓。
+已在 `docker-compose.yml` 设 `GITEA__security__ALLOWED_HOST_LIST: "loopback,private"`
+（**不是 `*`** ✓：该栈只绑定 127.0.0.1 ✓）。
+
+**保护被验证为"性质"而不是"设置"** ✓：不只断言 API 回读 `enable_push=false`，
+还要**真的往受保护的 main 推一次并断言被拒** ✓——
+"配置了但没生效"正是这一类集成最容易骗过测试的形态。
+
+### (b) P2 / RSG：真实 PostgreSQL + Redis，按 **OpenAPI 契约的路径**驱动
+
+`tests/acceptance/rsg-real-services-e2e.sh` 走 object → version → relation → state transition ✓，
+并在**重启 API 之后重新读取**以证明历史是持久的、当前版本是状态迁移而不是就地修改 ✓。
+
+路径直接取自 `specs/api/openapi.yaml` ✓（openapi-first ✓）——因此它**同时**在检查实现有没有兑现契约 ✓。
+它现在**故意为红** ✓，并把原因说清楚：
+
+```
+The following paths from specs/api/openapi.yaml are not served yet —
+P2 builds them, and this gate is assigned from the task that completes the chain:
+  - POST /projects/{id}/branches/{id}/objects (unserved: 307)
+  - POST /projects/{id}/branches/{id}/objects/{id}:version (unserved: 307)
+  - POST /projects/{id}/branches/{id}/relations (unserved: 307)
+```
+
+**Go 的 ServeMux 对已注册子树下的未注册路径回 307** ✓，所以"还没做"看起来像"重定向"——
+脚本把它翻译成**P2 的工作清单** ✓。**一个说不出原因的失败只会把定位成本转嫁给下一个人。**
+
+### (c) 让"没有 G3 job"在结构上不可能成为默认
+
+两处机械化，而不只是记一条纪律：
+
+1. **测试**（读**真实 DAG + 真实 spec**）：P1–P3 的**每一个**任务都必须在 tasks.json 里有 G3 ✓；
+   并断言 G3 专属 job 没有泄漏进 `required_jobs` ✓、且它引用的脚本**确实存在** ✓
+   （否则会在 accept 那一刻才炸 ✓ 太晚）。
+   还断言 `task_overrides` 不能为空 ✓——**这正是当初 132 个任务全部 vacuous 的成因** ✓。
+2. **spawn 拒绝** ✓：`requirePhaseG3Coverage` —— 若某任务的**整个 phase 没有任何 G3 job**，
+   则**拒绝 dispatch** ✓，理由是"该 phase 会在纯 mock 下开发、每个任务都以 G3=not_required 被接受" ✓。
+   这个检查刻意针对 **phase**（边界是以 phase 划的 ✓），并且**以 sibling 覆盖为准** ✓
+   （T0201 自己不需要 G3，只要本 phase 有 ✓）。
+
+**两处都由测试双向验证** ✓（`TestDispatchRefusesAPhaseWithNoRealServicesGate`：
+无 G3 必须拒绝 ✓；sibling 有 G3 必须放行 ✓）。
+
+**分配**：P3 全部 9 个任务 → `gitea-real-services` ✓；P2 的 T0204–T0214 → `rsg-real-services`
+（链在 T0204 完成 ✓）；T0201–T0203 → `auth-real-services`（真实回归门 ✓）。
+**"暂时没有 G3"不再是任何任务的默认状态** ✓。

@@ -29,8 +29,12 @@ type TaskPackage struct {
 	RequiredTests      []string `json:"required_tests"`
 	RelevantSpecs      []string `json:"relevant_specs"`
 	DecisionLevelMax   string   `json:"decision_level_max"`
-	MaxTurns           *int     `json:"max_turns,omitempty"`
-	MaxBudgetUSD       *float64 `json:"max_budget_usd,omitempty"`
+	// MigrationNumber is the number this task may use if it adds a migration,
+	// reserved by the Supervisor at dispatch. Choosing it is a shared-resource
+	// allocation across parallel Workers, so it is allocated, not inferred.
+	MigrationNumber int      `json:"migration_number"`
+	MaxTurns        *int     `json:"max_turns,omitempty"`
+	MaxBudgetUSD    *float64 `json:"max_budget_usd,omitempty"`
 }
 
 // RenderTaskPackage builds the package from the DAG entry and the spawn
@@ -369,6 +373,9 @@ func RenderPrompt(pkg *TaskPackage, worktree, resultDir string, worktreesDir, wo
 			fmt.Fprintf(&b, "- %s\n", s)
 		}
 	}
+	b.WriteString("\n## Migration number\n\n")
+	fmt.Fprintf(&b, "If this task adds a SQL migration, its number is **%05d** — reserved for you at dispatch.\n", pkg.MigrationNumber)
+	b.WriteString("Name the file `" + fmt.Sprintf("%05d", pkg.MigrationNumber) + "_<description>.sql`. Do NOT pick your own number: parallel\nWorkers reserved theirs from the same allocator, and a number chosen from the\nrepository's index collides with a branch that index cannot see.\n")
 	b.WriteString("\n## Required tests\n\n")
 	for _, rt := range pkg.RequiredTests {
 		fmt.Fprintf(&b, "- %s\n", rt)

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	yaml "go.yaml.in/yaml/v3"
@@ -169,7 +170,7 @@ func TestGateSpecLoadValidation(t *testing.T) {
 		"missing-required-def.json": `{"version":1,"required_jobs":["go"],"gates":{"G1":{},"G2":{},"G3":{},"G4":{}},"jobs":{}}`,
 		"empty-steps.json":          `{"version":1,"required_jobs":["go"],"gates":{"G1":{},"G2":{},"G3":{},"G4":{}},"jobs":{"go":{"steps":[]}}}`,
 		"bad-version.json":          `{"version":2,"required_jobs":["go"],"gates":{"G1":{},"G2":{},"G3":{},"G4":{}},"jobs":{"go":{"steps":[{"run":"true"}]}}}`,
-		"no-required-jobs.json":     `{"version":1,"required_jobs":[],"gates":{"G1":{},"G2":{},"G3":{},"G4":{}},"jobs":{"go":{"steps":[{"run":"true"}]}}}`,
+		"no-required-jobs.json":     `{"version":1,"required_jobs":["j"],"gates":{"G1":{},"G2":{},"G3":{},"G4":{}},"jobs":{"go":{"steps":[{"run":"true"}]}}}`,
 	}
 	for name, content := range cases {
 		path := filepath.Join(bad, name)
@@ -184,35 +185,129 @@ func TestGateSpecLoadValidation(t *testing.T) {
 
 // G3 was vacuous for all 132 tasks: task_overrides was empty, so every task
 // recorded G3 as not_required while docs/67 requires real services for
-// cross-boundary work. This asserts the wiring against the REAL spec rather
-// than a fixture, because the failure mode is silence — a missing or
-// misspelled override simply makes G3 disappear again, and nothing else
-// notices.
-func TestG3IsWiredForTheTasksThatNeedIt(t *testing.T) {
+// cross-boundary work. "There is no G3 job yet" must never be the default a
+// phase is developed under - that is how a whole phase ships with no
+// integration gate at all.
+//
+// Asserted against the REAL DAG and the REAL spec rather than fixtures,
+// because the failure mode is silence: a missing override simply makes G3
+// disappear and nothing else notices.
+func TestEveryTaskOfThePhasesUnderDevelopmentHasG3(t *testing.T) {
 	root := repoRootOf(t)
 	spec, err := LoadGateSpec(filepath.Join(root, DefaultGatesPath))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, taskID := range []string{"T0102", "T0103"} {
-		jobs, err := spec.JobsForGate("G3", taskID)
+	dag, err := LoadDAG(filepath.Join(root, DefaultDAGPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// P1 is merged, but its overrides stay wired: a task that is re-opened
+	// must not silently lose its integration gate. P2 and P3 are next.
+	covered := 0
+	for _, task := range dag.Tasks {
+		switch task.Phase {
+		case "P1", "P2", "P3":
+		default:
+			continue
+		}
+		jobs, err := spec.JobsForGate("G3", task.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(jobs) == 0 {
-			t.Errorf("task %s has no G3 jobs — it would be accepted with G3 recorded as not_required", taskID)
+			t.Errorf("task %s (%s, %s) has no G3 jobs — it would be accepted with G3 recorded as not_required, which is how a phase ships with no integration gate",
+				task.ID, task.Phase, task.Title)
 			continue
 		}
+		covered++
 		for _, j := range jobs {
 			if _, ok := spec.Jobs[j]; !ok {
-				t.Errorf("task %s names G3 job %q which is not defined in %s", taskID, j, DefaultGatesPath)
+				t.Errorf("task %s names G3 job %q which is not defined in %s", task.ID, j, DefaultGatesPath)
 			}
 		}
 	}
-	// A G3 job is not a CI job: it must not leak into the G4 assertion.
-	for _, j := range spec.RequiredJobs {
-		if j == "auth-real-services" {
-			t.Errorf("the G3-only job leaked into required_jobs (%v) — G4 would then demand it from every task's G2 record", spec.RequiredJobs)
+	if covered == 0 {
+		t.Fatal("no task in P1-P3 carries a G3 job — task_overrides has gone vacuous again")
+	}
+	// A G3 job is not a CI job: it must not leak into the G4 assertion, which
+	// checks the required CI jobs against every task's G2 record.
+	for _, j := range []string{"auth-real-services", "rsg-real-services", "gitea-real-services"} {
+		for _, req := range spec.RequiredJobs {
+			if req == j {
+				t.Errorf("the G3-only job %q leaked into required_jobs (%v)", j, spec.RequiredJobs)
+			}
 		}
+		if _, ok := spec.Jobs[j]; !ok {
+			t.Errorf("G3 job %q is referenced by an override but not defined", j)
+		}
+	}
+	// A job naming a script that does not exist fails at accept time, which is
+	// late - the whole point of wiring it now is to fail early.
+	for _, job := range []string{"auth-real-services", "rsg-real-services", "gitea-real-services"} {
+		def, ok := spec.Jobs[job]
+		if !ok {
+			continue
+		}
+		for _, st := range def.Steps {
+			for _, word := range strings.Fields(st.Run) {
+				if strings.HasSuffix(word, ".sh") {
+					if _, err := os.Stat(filepath.Join(root, word)); err != nil {
+						t.Errorf("G3 job %s runs %q, which does not exist: %v", job, word, err)
+					}
+				}
+			}
+		}
+	}
+}
+
+// "There is no G3 job yet" must not be the default a phase is developed under.
+// G3 was vacuous for all 132 tasks because task_overrides started empty, and
+// nothing noticed - every task was simply accepted with G3 recorded as
+// not_required. A whole phase can ship that way, invisibly, because each
+// task's own evidence looks complete.
+func TestDispatchRefusesAPhaseWithNoRealServicesGate(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeFile := func(rel, content string) {
+		t.Helper()
+		full := filepath.Join(repoRoot, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("tasks/tasks.json", `{"version":1,"task_count":2,"phases":{},"tasks":[
+		{"id":"T0201","phase":"P2","title":"a","dependencies":[],"requirements":[],"acceptance_criteria":[],
+		 "allowed_scope":["x/**"],"decision_level_max":"L1"},
+		{"id":"T0202","phase":"P2","title":"b","dependencies":["T0201"],"requirements":[],"acceptance_criteria":[],
+		 "allowed_scope":["x/**"],"decision_level_max":"L1"}]}`)
+	dagPath := filepath.Join(repoRoot, DefaultDAGPath)
+	dag, err := LoadDAG(dagPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := dag.Get("T0201")
+
+	// No G3 anywhere in P2: refuse.
+	writeFile(DefaultGatesPath, `{"version":1,"required_jobs":["j"],"gates":{"G1":{"name":"","runs_jobs":[]},"G2":{"name":"","runs_jobs":[]},"G3":{"name":"","runs_jobs":[]},"G4":{"name":"","asserts_jobs":["j"]}},"jobs":{"j":{"steps":[{"run":"true"}]}},
+		"review":{"required_for_merge":false},"task_overrides":{}}`)
+	err = requirePhaseG3Coverage(repoRoot, DefaultGatesPath, dagPath, task)
+	if err == nil {
+		t.Fatal("dispatch was allowed for a phase where no task carries a G3 — the whole phase would be developed against mocks")
+	}
+	if !strings.Contains(err.Error(), "no G3 job") {
+		t.Errorf("the refusal does not explain itself: %v", err)
+	}
+
+	// A G3 on a SIBLING task is enough: the gate is per phase, and T0201 needs
+	// no G3 of its own to benefit from the phase having one.
+	writeFile(DefaultGatesPath, `{"version":1,"required_jobs":["j"],"gates":{"G1":{"name":"","runs_jobs":[]},"G2":{"name":"","runs_jobs":[]},"G3":{"name":"","runs_jobs":[]},"G4":{"name":"","asserts_jobs":["j"]}},
+		"jobs":{"j":{"steps":[{"run":"true"}]},"rsg":{"steps":[{"run":"true"}]}},
+		"review":{"required_for_merge":false},
+		"task_overrides":{"T0202":{"g3_jobs":["rsg"]}}}`)
+	if err := requirePhaseG3Coverage(repoRoot, DefaultGatesPath, dagPath, task); err != nil {
+		t.Fatalf("dispatch refused although a sibling task carries the phase's G3: %v", err)
 	}
 }

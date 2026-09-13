@@ -52,9 +52,10 @@ GATES='{
     "G3": {"name": "e2e", "description": "per task", "runs_jobs": [], "asserts_jobs": []},
     "G4": {"name": "merge", "description": "assert", "runs_jobs": [], "asserts_jobs": ["job-a"]}
   },
-  "jobs": {"job-a": {"steps": [{"run": "echo a-ok"}]}},
+  "jobs": {"job-a": {"steps": [{"run": "echo a-ok"}]},
+           "job-g3": {"steps": [{"run": "echo g3-ok"}]}},
   "review": {"required_for_merge": false},
-  "task_overrides": {}
+  "task_overrides": {"T0001": {"g3_jobs": ["job-g3"]}}
 }'
 
 REPO="$(fg_setup_repo "$FG_SCRATCH" "$TASKS" "$GATES")" || exit 1
