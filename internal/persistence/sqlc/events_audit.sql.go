@@ -38,6 +38,86 @@ func (q *Queries) EnqueueOutboxEvent(ctx context.Context, arg EnqueueOutboxEvent
 	return i, err
 }
 
+const listOrganizationAuditEntries = `-- name: ListOrganizationAuditEntries :many
+SELECT a.id, a.actor_id, a.via, a.action, a.target_ref, a.project_id,
+       a.organization_id, a.correlation_id, a.before_summary,
+       a.after_summary, a.metadata, a.occurred_at,
+       u.handle AS actor_handle, u.display_name AS actor_display_name
+FROM audit_log a
+LEFT JOIN users u ON u.id = a.actor_id
+WHERE a.organization_id = $1
+  AND ($2::timestamptz IS NULL
+       OR (a.occurred_at, a.id) < ($2::timestamptz, $3::uuid))
+ORDER BY a.occurred_at DESC, a.id DESC
+LIMIT $4
+`
+
+type ListOrganizationAuditEntriesParams struct {
+	OrganizationID pgtype.UUID        `json:"organization_id"`
+	BeforeTs       pgtype.Timestamptz `json:"before_ts"`
+	BeforeID       pgtype.UUID        `json:"before_id"`
+	PageLimit      int32              `json:"page_limit"`
+}
+
+type ListOrganizationAuditEntriesRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	ActorID          pgtype.UUID        `json:"actor_id"`
+	Via              string             `json:"via"`
+	Action           string             `json:"action"`
+	TargetRef        *string            `json:"target_ref"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	OrganizationID   pgtype.UUID        `json:"organization_id"`
+	CorrelationID    string             `json:"correlation_id"`
+	BeforeSummary    []byte             `json:"before_summary"`
+	AfterSummary     []byte             `json:"after_summary"`
+	Metadata         []byte             `json:"metadata"`
+	OccurredAt       pgtype.Timestamptz `json:"occurred_at"`
+	ActorHandle      *string            `json:"actor_handle"`
+	ActorDisplayName *string            `json:"actor_display_name"`
+}
+
+// Organization Activity page: the organization's audit rows newest-first,
+// same keyset shape as the project query.
+func (q *Queries) ListOrganizationAuditEntries(ctx context.Context, arg ListOrganizationAuditEntriesParams) ([]ListOrganizationAuditEntriesRow, error) {
+	rows, err := q.db.Query(ctx, listOrganizationAuditEntries,
+		arg.OrganizationID,
+		arg.BeforeTs,
+		arg.BeforeID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrganizationAuditEntriesRow
+	for rows.Next() {
+		var i ListOrganizationAuditEntriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ActorID,
+			&i.Via,
+			&i.Action,
+			&i.TargetRef,
+			&i.ProjectID,
+			&i.OrganizationID,
+			&i.CorrelationID,
+			&i.BeforeSummary,
+			&i.AfterSummary,
+			&i.Metadata,
+			&i.OccurredAt,
+			&i.ActorHandle,
+			&i.ActorDisplayName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingOutboxEvents = `-- name: ListPendingOutboxEvents :many
 SELECT id, event_type, payload, correlation_id, created_at, published_at, attempts FROM outbox_events
 WHERE published_at IS NULL
@@ -73,6 +153,87 @@ func (q *Queries) ListPendingOutboxEvents(ctx context.Context, batchSize int32) 
 	return items, nil
 }
 
+const listProjectAuditEntries = `-- name: ListProjectAuditEntries :many
+SELECT a.id, a.actor_id, a.via, a.action, a.target_ref, a.project_id,
+       a.organization_id, a.correlation_id, a.before_summary,
+       a.after_summary, a.metadata, a.occurred_at,
+       u.handle AS actor_handle, u.display_name AS actor_display_name
+FROM audit_log a
+LEFT JOIN users u ON u.id = a.actor_id
+WHERE a.project_id = $1
+  AND ($2::timestamptz IS NULL
+       OR (a.occurred_at, a.id) < ($2::timestamptz, $3::uuid))
+ORDER BY a.occurred_at DESC, a.id DESC
+LIMIT $4
+`
+
+type ListProjectAuditEntriesParams struct {
+	ProjectID pgtype.UUID        `json:"project_id"`
+	BeforeTs  pgtype.Timestamptz `json:"before_ts"`
+	BeforeID  pgtype.UUID        `json:"before_id"`
+	PageLimit int32              `json:"page_limit"`
+}
+
+type ListProjectAuditEntriesRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	ActorID          pgtype.UUID        `json:"actor_id"`
+	Via              string             `json:"via"`
+	Action           string             `json:"action"`
+	TargetRef        *string            `json:"target_ref"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	OrganizationID   pgtype.UUID        `json:"organization_id"`
+	CorrelationID    string             `json:"correlation_id"`
+	BeforeSummary    []byte             `json:"before_summary"`
+	AfterSummary     []byte             `json:"after_summary"`
+	Metadata         []byte             `json:"metadata"`
+	OccurredAt       pgtype.Timestamptz `json:"occurred_at"`
+	ActorHandle      *string            `json:"actor_handle"`
+	ActorDisplayName *string            `json:"actor_display_name"`
+}
+
+// Project Activity page: the project's audit rows newest-first, with the
+// actor's handle/display name joined for rendering. Keyset pagination on
+// (occurred_at, id): a nil before pair means "from the top".
+func (q *Queries) ListProjectAuditEntries(ctx context.Context, arg ListProjectAuditEntriesParams) ([]ListProjectAuditEntriesRow, error) {
+	rows, err := q.db.Query(ctx, listProjectAuditEntries,
+		arg.ProjectID,
+		arg.BeforeTs,
+		arg.BeforeID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProjectAuditEntriesRow
+	for rows.Next() {
+		var i ListProjectAuditEntriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ActorID,
+			&i.Via,
+			&i.Action,
+			&i.TargetRef,
+			&i.ProjectID,
+			&i.OrganizationID,
+			&i.CorrelationID,
+			&i.BeforeSummary,
+			&i.AfterSummary,
+			&i.Metadata,
+			&i.OccurredAt,
+			&i.ActorHandle,
+			&i.ActorDisplayName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markOutboxEventPublished = `-- name: MarkOutboxEventPublished :exec
 UPDATE outbox_events
 SET published_at = now(), attempts = attempts + 1
@@ -86,24 +247,25 @@ func (q *Queries) MarkOutboxEventPublished(ctx context.Context, id pgtype.UUID) 
 
 const recordAuditLogEntry = `-- name: RecordAuditLogEntry :one
 INSERT INTO audit_log
-    (actor_id, via, action, target_ref, project_id, correlation_id,
-     before_summary, after_summary, metadata)
+    (actor_id, via, action, target_ref, project_id, organization_id,
+     correlation_id, before_summary, after_summary, metadata)
 VALUES
     ($1, $2, $3, $4, $5, $6,
-     $7, $8, $9)
-RETURNING id, actor_id, via, action, target_ref, project_id, correlation_id, before_summary, after_summary, metadata, occurred_at
+     $7, $8, $9, $10)
+RETURNING id, actor_id, via, action, target_ref, project_id, correlation_id, before_summary, after_summary, metadata, occurred_at, organization_id
 `
 
 type RecordAuditLogEntryParams struct {
-	ActorID       pgtype.UUID `json:"actor_id"`
-	Via           string      `json:"via"`
-	Action        string      `json:"action"`
-	TargetRef     *string     `json:"target_ref"`
-	ProjectID     pgtype.UUID `json:"project_id"`
-	CorrelationID string      `json:"correlation_id"`
-	BeforeSummary []byte      `json:"before_summary"`
-	AfterSummary  []byte      `json:"after_summary"`
-	Metadata      []byte      `json:"metadata"`
+	ActorID        pgtype.UUID `json:"actor_id"`
+	Via            string      `json:"via"`
+	Action         string      `json:"action"`
+	TargetRef      *string     `json:"target_ref"`
+	ProjectID      pgtype.UUID `json:"project_id"`
+	OrganizationID pgtype.UUID `json:"organization_id"`
+	CorrelationID  string      `json:"correlation_id"`
+	BeforeSummary  []byte      `json:"before_summary"`
+	AfterSummary   []byte      `json:"after_summary"`
+	Metadata       []byte      `json:"metadata"`
 }
 
 func (q *Queries) RecordAuditLogEntry(ctx context.Context, arg RecordAuditLogEntryParams) (AuditLog, error) {
@@ -113,6 +275,7 @@ func (q *Queries) RecordAuditLogEntry(ctx context.Context, arg RecordAuditLogEnt
 		arg.Action,
 		arg.TargetRef,
 		arg.ProjectID,
+		arg.OrganizationID,
 		arg.CorrelationID,
 		arg.BeforeSummary,
 		arg.AfterSummary,
@@ -131,6 +294,7 @@ func (q *Queries) RecordAuditLogEntry(ctx context.Context, arg RecordAuditLogEnt
 		&i.AfterSummary,
 		&i.Metadata,
 		&i.OccurredAt,
+		&i.OrganizationID,
 	)
 	return i, err
 }

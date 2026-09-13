@@ -90,12 +90,19 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	ListBranchesByProject(ctx context.Context, projectID pgtype.UUID) ([]Branch, error)
 	ListEvidenceAssertionsForTarget(ctx context.Context, objectVersionID pgtype.UUID) ([]EvidenceAssertion, error)
+	// Organization Activity page: the organization's audit rows newest-first,
+	// same keyset shape as the project query.
+	ListOrganizationAuditEntries(ctx context.Context, arg ListOrganizationAuditEntriesParams) ([]ListOrganizationAuditEntriesRow, error)
 	ListOrganizationMemberships(ctx context.Context, organizationID pgtype.UUID) ([]OrganizationMembership, error)
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
 	// Organizations the user currently belongs to (open affiliation), most
 	// recently created first.
 	ListOrganizationsForUser(ctx context.Context, userID pgtype.UUID) ([]Organization, error)
 	ListPendingOutboxEvents(ctx context.Context, batchSize int32) ([]OutboxEvent, error)
+	// Project Activity page: the project's audit rows newest-first, with the
+	// actor's handle/display name joined for rendering. Keyset pagination on
+	// (occurred_at, id): a nil before pair means "from the top".
+	ListProjectAuditEntries(ctx context.Context, arg ListProjectAuditEntriesParams) ([]ListProjectAuditEntriesRow, error)
 	ListProjectMembers(ctx context.Context, projectID pgtype.UUID) ([]ListProjectMembersRow, error)
 	ListProjectsByOrganization(ctx context.Context, arg ListProjectsByOrganizationParams) ([]Project, error)
 	// Projects the user belongs to (any project membership), most recently

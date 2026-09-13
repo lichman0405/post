@@ -163,6 +163,28 @@ func (s *Service) Get(ctx context.Context, r Reader, projectID string) (domain.P
 	return project, nil
 }
 
+// GetMembership returns the actor's own membership in the project (the
+// shell's permission-aware Settings gate reads this; T0109's member
+// management builds on the same store method). The project-read
+// authorization runs first — a caller who may not read the project may
+// not learn their membership in it either (the same existence hiding as
+// Get, and the same public-read extension when T0106 lands). For a
+// project the caller may read but is not a member of, the answer is
+// ErrMemberNotFound — "no role", not an error.
+//
+// T0106 landed: Get now takes a Reader, so the read authorization below is
+// the one-liner its own comment anticipated.
+func (s *Service) GetMembership(ctx context.Context, actor domain.User, projectID string) (domain.ProjectMembership, error) {
+	if _, err := s.Get(ctx, Reader{UserID: actor.ID, Authenticated: true}, projectID); err != nil {
+		return domain.ProjectMembership{}, err
+	}
+	membership, err := s.store.GetMembership(ctx, projectID, actor.ID)
+	if err != nil {
+		return domain.ProjectMembership{}, wrapStoreError(err)
+	}
+	return membership, nil
+}
+
 // requireRead picks the visibility-aware matrix action for one read and
 // evaluates it: public projects ask read_public_project (every class
 // allowed), private projects ask read_private_project (the membership

@@ -145,6 +145,15 @@ func (g *guard) guard(next http.Handler) http.Handler {
 				}
 			}
 		}
+		// Attach the audit request identity (T0110): who acted, how, and
+		// the request's correlation id. Stores read it back and write the
+		// audit row in the same transaction as the state change they own.
+		info := domain.RequestInfo{CorrelationID: corrID(ctx)}
+		if p, ok := PrincipalFrom(ctx); ok {
+			info.ActorID = p.User.ID
+			info.Via = domain.ViaSession
+		}
+		ctx = domain.WithRequestInfo(ctx, info)
 		r = r.WithContext(ctx)
 
 		if stateChangingMethods[r.Method] {
@@ -334,6 +343,16 @@ func oidcStateCookie(state string, secure bool) *http.Cookie {
 		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	}
+}
+
+// corrID returns the request's correlation id (docs/26), or "" when the
+// edge middleware is not in the chain (tests without the observability
+// layer).
+func corrID(ctx context.Context) string {
+	if id, ok := observability.FromContext(ctx); ok {
+		return id.String()
+	}
+	return ""
 }
 
 // clientIP extracts the client address for rate limiting (direct conn or

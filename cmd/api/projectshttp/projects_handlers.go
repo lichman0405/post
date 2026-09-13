@@ -192,6 +192,9 @@ func (h *handlers) projectError(w http.ResponseWriter, r *http.Request, err erro
 	case errors.Is(err, projects.ErrSlugTaken):
 		authhttp.WriteError(w, r, http.StatusConflict, projects.CodeProjectSlugTaken,
 			"a project with this slug already exists")
+	case errors.Is(err, projects.ErrMemberNotFound):
+		authhttp.WriteError(w, r, http.StatusNotFound, projects.CodeProjectMembershipNotFound,
+			"you are not a member of this project")
 	case errors.Is(err, projects.ErrForbidden):
 		authhttp.WriteError(w, r, http.StatusForbidden, projects.CodeProjectForbidden,
 			"you are not an active member of this organization")

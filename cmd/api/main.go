@@ -42,10 +42,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/lichman0405/post/cmd/api/audithttp"
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
+	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/config"
@@ -130,6 +132,11 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "post-api: authentication configuration error:\n%v\n", err)
 		return exitConfig
 	}
+	// Audit (T0110): one store writes auth events and serves the Activity
+	// reads; the state-changing stores append audit rows inside their own
+	// transactions. The auth surface records through it best-effort (the
+	// sessions live in Redis, there is no PostgreSQL transaction to join).
+	auditStore := persistence.NewAuditStore(pool)
 	authAPI := authhttp.New(authhttp.Deps{
 		Users:      persistence.NewCredentialStore(pool),
 		Sessions:   persistence.NewRedisSessionStore(redisClient),
@@ -137,6 +144,7 @@ func run(args []string) int {
 		OIDCClient: newOIDCClientOrNil(authCfg),
 		Cfg:        *authCfg,
 		Secure:     cfg.Layer == config.LayerProd,
+		Audit:      auditStore,
 	})
 	// Product APIs (T0102+): one shared mux under one guard. The auth, profile,
 	// organization and project surfaces all register here and inherit the
@@ -162,6 +170,16 @@ func run(args []string) int {
 	})
 	v1.Handle("/api/v1/projects", projectAPI.Routes())
 	v1.Handle("/api/v1/projects/", projectAPI.Routes())
+	// Activity feeds (T0110): read-only GET routes on the same guarded v1
+	// mux. Read authorization reuses the owning surfaces' service instances
+	// (projectAPI.Service()/orgAPI.Service()), so a resource's activity is
+	// exactly as visible as the resource itself.
+	auditAPI := audithttp.New(audithttp.Deps{
+		Store:    auditStore,
+		Projects: audit.ProjectsReadGate(projectAPI.Service()),
+		Orgs:     orgAPI.Service(),
+	})
+	auditAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	srv := &http.Server{
