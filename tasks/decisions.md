@@ -2260,3 +2260,37 @@ P2 builds them, and this gate is assigned from the task that completes the chain
 **分配**：P3 全部 9 个任务 → `gitea-real-services` ✓；P2 的 T0204–T0214 → `rsg-real-services`
 （链在 T0204 完成 ✓）；T0201–T0203 → `auth-real-services`（真实回归门 ✓）。
 **"暂时没有 G3"不再是任何任务的默认状态** ✓。
+
+## L1-20260913-4 — ★★ Phase Boundary Hardening 4/4：无人值守推进 + checkpoint 自身的验收
+
+### (a) `scripts/supervise.sh`：机械段自动跑，判断点交回 Supervisor
+
+用户的要求是"**正常完成一个阶段、任务或对话轮次后不应该因为需要再次输入'继续'而停止**" ✓。
+根因不是"我忘了继续"，而是**机械段（dispatch → 等待 → collect → review → accept → commit → push →
+PR → 等 CI → merge → 再 dispatch）每一步都是我手工敲的**，而手工序列在任务之间必然停顿。
+
+驱动脚本的边界划得很清楚：
+
+- **只决定下一步尝试什么，从不决定某个 Gate 是否通过** ✓——每个动作都走 `rddev`，
+  由 `rddev` 按其自身规则拒绝（`accept` 仍会因 G2/G3/G4 红而拒绝 ✓，`pr merge` 仍会因
+  GitHub required checks 缺失而拒绝 ✓）。**自动化不以降低 Gate 为代价。**
+- **停在判断点，不停在等待点** ✓：collect 被拒 / review request_changes / accept 被拒 /
+  push·merge 被拒 / CI 红 / DAG 前沿为空。前五类**交回 Supervisor**（我）理解并处置 ✓，
+  最后一类才是"阶段完成" ✓。
+- 规则写进 **CLAUDE.md §8.2**（含四类必须停下的人工情形）与 `ops/DEV_COMMANDS.md` ✓。
+
+### (b) checkpoint 自身的验收：`tests/acceptance/phase-boundary-checkpoint.sh`
+
+**一个只声称"关掉了五个结构性缺陷"的 checkpoint，和"报了绿灯却没跑"的 Gate 是同一个失败模式** ✓。
+该脚本逐条**验证**七项：G2 验证合并结果 ✓、verdict 绑定代码身份 ✓、schema snapshot 是生成的且当前 ✓、
+编号是分配的 ✓、P2/P3 的 G3 已接线且 RSG 门**因为正确的原因**为红 ✓、Gate 机制自身被 Gate 跑 ✓、
+无人值守驱动存在且可解析 ✓。
+
+**它必须能失败** ✓——我按这个标准检查了它，**并且它当场抓到了我自己写弱的一条**：
+"snapshot 是 derived artifact"最初用 `grep 'infra/migrations/**'` 检查 ✗，
+而**那条规则的 note 文本里也含这个路径** ✓ → 规则被删掉后 grep 依然通过 ✗。
+改为**结构化检查 JSON 的 `marker`/`derived` 字段** ✓，并**双向验证**：
+删掉规则 → FAIL ✓；恢复 → 全过 ✓。
+
+**这正是"checkpoint 必须有测试"的意义**：不是写一个脚本让它打印 ok，
+而是**证明它在被验证的属性消失时会红** ✓。

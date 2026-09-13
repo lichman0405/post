@@ -103,3 +103,17 @@ bash ops/tests/doctor-smoke-test.sh # 宿主端到端自洽性冒烟测试（bas
 退出码契约：`0` = required 检查全过（advisory 警告不影响）；`1` = 工具链缺失或版本超出基线（显式漂移报告，不自动修复）；`2` = 非 canonical 环境（非 Linux / Windows Native / 非 Ubuntu 24.04 / 非 amd64）；`3` = 用法错误。
 
 检查契约（id、severity、baseline、remediation）见 `ops/doctor-checks.md` —— 这是 T0009 实现 `rddev doctor` 的规范，不可在实现时重新发明检查语义。
+
+## Supervisor 无人值守驱动（2026-09-13）
+
+```bash
+PARALLEL=2 MAX_TASKS=0 bash scripts/supervise.sh   # 0 = 不设上限
+```
+
+机械段全自动：dispatch → 等 Worker → collect → review → accept → commit → push → PR →
+等 CI → merge → 再 dispatch。**它只决定下一步尝试什么，从不决定某个 Gate 是否通过**——
+每个动作都经 `rddev`，由 `rddev` 按其自身规则拒绝。
+
+停下来（并交回 Supervisor，而非交回用户）的情形：collect 被拒、review 需要改动、
+accept 被拒、push/merge 被拒、CI 红、或 DAG 前沿为空（阶段完成）。
+**它不会因为一个任务结束而停下**——那正是它存在的理由。

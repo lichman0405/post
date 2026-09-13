@@ -138,6 +138,22 @@ Supervisor 必须独立检查 diff、scope、acceptance criteria，并重新运�
   scope 校验强制"覆盖迁移目录者必须覆盖它"，写入方式只有重新生成。
   其余 `specs/**` 与 `docs/**` 仍为 Supervisor-only。
 
+## 8.2 无人值守推进（2026-09-13）
+
+Supervisor **不因"一个任务/一个阶段/一轮对话结束了"而停止等待人工输入**。
+机械段（dispatch → 等待 → collect → review → accept → commit → push → PR → 等 CI → merge → 再 dispatch）
+由 `scripts/supervise.sh` 驱动；**只有四类情形才停下来**：
+
+1. **L3**：产品、科研语义、安全、权限、隐私、法律或公开性决策；
+2. **重大 L2**：会改变既定核心架构原则；
+3. **需要新的外部凭证、付费服务或账号授权**；
+4. **SPEC_BLOCKED**：无法通过现有规格合理解决。
+
+其余情形（collect 被拒、review request_changes、accept 被拒、PR 冲突、CI 红）
+**回到 Supervisor 判断，而不是回到用户**——它们是判断点，不是等待点。
+驱动脚本**只决定下一步尝试什么，从不决定某个 Gate 是否通过**：每个动作都走 `rddev`，
+由它按自己的规则拒绝。**自动化不得以降低 Gate 为代价。**
+
 ## 9. Domain 不变量
 
 1. Project 是研发边界；RSG 是科研状态模型。
