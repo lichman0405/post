@@ -2697,7 +2697,14 @@ collect 重新计算指纹、发现不一致、**正确地**拒绝 ✓。
   stale 就**重新 `review spawn`** 一次 ✓（`SpawnReview` 对已存在的 review registry 没有守卫 ✓，
   所以重派是幂等的、安全的 ✓），把"过期产物"这件事按它本来的性质处理：机械问题，机械解决 ✓。
 - **`review_staleness_test.go`**：无记录 → 不 stale ✓；当前代码的 review → 不 stale ✓；
-  改了工作文件 → stale ✓ 且理由含 "superseded" ✓；指纹为空 → 不 stale ✓。
+  改了工作文件 → stale ✓ 且理由含 "superseded" ✓。
+  **判不出"这份 verdict 说的是哪份代码"的 review，一律判 stale ✓** ——
+  指纹为空 ✓、没有 spawn 期的权威记录 ✓：这两种情况 collect 会**永久**拒绝
+  （没有哪个 Reviewer 会给一条已经存在的记录补上指纹 ✓），留着不动只是同一个停摆晚一步发生 ✓，
+  所以重派是唯一能推动任务的动作 ✓。
+  **这一条是 review 追加的 ✓**：第一版写成"指纹为空 → 不 stale ✓"，
+  unit 与 e2e 却全绿 ✓ —— 因为两边都没覆盖这个分支 ✓；一个没有指纹的 verdict
+  因此能在 merge gate 眼里充当"有效绑定" ✓，正是本 L1 要消灭的东西 ✓。
   fixture 把 worktree 嵌在 `root/.rddev/worktrees/T0100` ✓ —— 第一版直接用 `t.TempDir()` 当任务 worktree ✓，
   于是"写 review gate 记录"这个动作本身创建了一个未跟踪文件 ✓，
   `codeIdentity` 因此改变、测试假失败 ✓：**测试自己就是那个变化** ✓。POST 仓库里 `.rddev/` 被 gitignore ✓，

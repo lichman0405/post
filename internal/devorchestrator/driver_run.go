@@ -318,6 +318,27 @@ func (o *DriveOpts) stepVerification(id string, st *DriverStatus) (bool, error) 
 	if rec.ExitStatus == nil {
 		return false, nil // reviewer still working
 	}
+	// A verdict describes the code it was produced against, and a rework
+	// changes that code. Collecting a review of a superseded attempt fails
+	// forever — the reviewer exited and its verdict cannot change — so the
+	// decision it used to raise was the driver handing the Supervisor a
+	// condition only the driver could fix. Ask again instead (L1-20260913-17).
+	//
+	// Failing to ANSWER that question is not a reason to stop: returning this
+	// error ends the long-lived driver (Drive propagates it), so one unreadable
+	// file becomes a dead pipeline that still looks alive. Falling through
+	// cannot lower a gate — collect asks the same question of the same facts
+	// and refuses on its own terms, and that refusal is recorded as a decision
+	// the Supervisor sees.
+	if stale, why, err := ReviewIsStale(o.RepoRoot, id); err != nil {
+		o.logf("%s: cannot tell whether the review is superseded (%v) — leaving that judgement to collect", id, err)
+	} else if stale {
+		o.logf("%s: %s — dispatching a fresh review", id, why)
+		if out, code := o.run("review", "spawn", id); code != 0 {
+			return true, o.decide(id, "review-spawn", out)
+		}
+		return true, nil
+	}
 	if _, code := o.run("review", "collect", id); code != 0 {
 		return true, o.decide(id, "review-collect", "the reviewer's verdict needs a decision (see the report in .rddev/runtime/gates/"+id+")")
 	}

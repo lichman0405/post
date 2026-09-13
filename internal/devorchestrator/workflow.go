@@ -135,6 +135,16 @@ func nextActionFor(repoRoot, taskID string, state State, view *WorkflowView) (st
 			}
 			return "collected clean (G1 green) — spawn an independent Review Worker", "rddev review spawn " + taskID
 		}
+		// An approve verdict is evidence about ONE code state. A rework after
+		// an earlier refusal, a rebase, a baseline advance, a Supervisor glue
+		// edit — any change since — leaves it describing code that no longer
+		// exists, and the merge gate refuses it by name ("the review verdict is
+		// about a DIFFERENT code state"). Advice that sends the Supervisor to
+		// `task accept` on a verdict the next gate will reject on sight is not
+		// advice: the next action is a fresh review, and the command says so.
+		if why, superseded := reviewRecordIsSuperseded(repoRoot, taskID, view.Review); superseded {
+			return "the approve verdict is about superseded code (" + why + ") — dispatch a fresh review", "rddev review spawn " + taskID
+		}
 		return "review approved — run the acceptance gate (G2/G3)", "rddev task accept " + taskID
 	case StateRejected:
 		reasons := ""
@@ -160,4 +170,44 @@ func nextActionFor(repoRoot, taskID string, state State, view *WorkflowView) (st
 		return "done — merged", ""
 	}
 	return "unknown state " + string(state), "rddev task inspect " + taskID
+}
+
+// reviewRecordIsSuperseded reports whether the recorded verdict still describes
+// the code in the task's worktree, and why not when it does not.
+//
+// It asks the merge gate's questions in the merge gate's ORDER (gate_run.go:
+// the collect freshness check, then the code identity), so the advice and the
+// refusal cannot disagree. Asking only the identity question left the gate's
+// other review refusal unmirrored: a verdict OLDER than the latest collect is
+// refused by the gate — "it judged a different tree" — while the advice, seeing
+// an unchanged identity, sent the Supervisor to `task accept` to be refused by
+// a message naming the command the advice should have given. A re-collect of
+// the same attempt, or a rework that reproduces identical content, reaches it
+// without any code moving.
+//
+// Cases it cannot judge answer "not superseded": a worktree that is gone, a
+// record with no identity — those produce their own, better reasons at the
+// gate, and a view that invents staleness would send the Supervisor to
+// re-review work that nothing has invalidated.
+func reviewRecordIsSuperseded(repoRoot, taskID string, rv *ReviewRecord) (string, bool) {
+	if rv == nil {
+		return "", false
+	}
+	// The gate only reaches its freshness refusal for a collect it accepted
+	// (a collect that is not ok fails G1 first, and that is not this function's
+	// judgement to make), so the same restriction applies here.
+	if coll, ok, err := LatestRecord[CollectRecord](repoRoot, taskID, RecordCollect); err == nil && ok && coll.Status == "ok" && rv.At < coll.At {
+		return "the verdict (" + rv.At + ") is older than the latest collect (" + coll.RunID + ", " + coll.At + ")", true
+	}
+	want, err := currentCodeIdentity(repoRoot, taskID)
+	if err != nil || want == "" {
+		return "", false
+	}
+	if rv.DiffSHA == "" {
+		return "the verdict carries no code identity, so the merge gate refuses it", true
+	}
+	if rv.DiffSHA == want {
+		return "", false
+	}
+	return "reviewed " + abbrevSHA(rv.DiffSHA) + ", the tree is now " + abbrevSHA(want), true
 }
