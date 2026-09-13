@@ -476,15 +476,16 @@ func (s *Store) StartWorker(id, runID, startedAt string) (*TransitionResult, err
 // format — ISO 8601 to the second — and not at the precision the caller
 // passed in. `tasks/task_status.json` is validated in CI by
 // scripts/validate_task_state.py, whose ISO_TS_RE admits no fractional seconds
-// and is enforced on started_at and on every history entry's at, while the run
-// start spawn hands this function carries nanoseconds: a start to the second
-// cannot order a verdict written in the same second, which is the defect that
-// precision exists for. Both have to hold, and they hold in different files —
-// the registry record and the gate inputs keep the full-precision start (and
-// collect compares THOSE two against each other), the task state keeps the
-// shape the validator accepts. Reverting this leaves the state file unusable to
-// CI on the next spawn; the round-1 review measured exactly that (the validator
-// exits 1 on a ns-shaped started_at). Pinned by
+// and is applied to started_at, completed_at and merged_at (see taskStateTime
+// for what that check does and does not read), while the run start spawn hands
+// this function carries nanoseconds: a start to the second cannot order a
+// verdict written in the same second, which is the defect that precision exists
+// for. Both have to hold, and they hold in different files — the registry record
+// and the gate inputs keep the full-precision start (and collect compares THOSE
+// two against each other), the task state keeps the shape the validator accepts.
+// Reverting this leaves the state file unusable to CI on the next spawn; the
+// round-1 review measured exactly that (the validator exits 1 on a ns-shaped
+// started_at). Pinned by
 // TestStartWorkerFromStampsTheTaskStateInItsValidatedFormat.
 func (s *Store) StartWorkerFrom(id, runID, startedAt string, from State) (*TransitionResult, error) {
 	at := taskStateStamp(startedAt)
