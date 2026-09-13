@@ -302,7 +302,7 @@ func SpawnReview(opts *ReviewSpawnOpts) (*SpawnResult, error) {
 		}
 	}
 
-	startedAt := time.Now().UTC().Format(time.RFC3339)
+	startedAt := runStartedAt()
 	startTime, err := procStartTime(reviewPID)
 	if err != nil {
 		killWorker(reviewPID)
@@ -456,8 +456,13 @@ func CollectReview(opts *CollectOpts) (*ReviewCollectReport, error) {
 	if startedAt, perr := time.Parse(time.RFC3339, rec.StartedAt); perr != nil {
 		fail("review-verdict-run", fmt.Sprintf("the Review Worker's record has no usable start time (%q) — a verdict cannot be attributed to a run", rec.StartedAt))
 	} else if st, serr := os.Stat(verdictPath); serr == nil && st.ModTime().Before(startedAt) {
+		// Both times at full precision: rendered to the second they are the
+		// same string whenever the two fall inside one second, and the refusal
+		// would read "written 11:51:44Z, before this run started (11:51:44Z)" —
+		// a sentence that asks the reader to take on faith the very ordering it
+		// is asserting.
 		fail("review-verdict-run", fmt.Sprintf("the verdict file was written %s, before this review run started (%s) — it is an earlier attempt's verdict about different code; review again",
-			st.ModTime().UTC().Format(time.RFC3339), startedAt.UTC().Format(time.RFC3339)))
+			st.ModTime().UTC().Format(time.RFC3339Nano), startedAt.UTC().Format(time.RFC3339Nano)))
 	}
 	if _, err := os.Stat(verdictPath); os.IsNotExist(err) {
 		if recovered, ok, rerr := verdictFromSessionLog(rec.LogPath); rerr != nil {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Review collect is where a verdict BECOMES merge evidence: the ReviewRecord it
@@ -29,6 +30,15 @@ import (
 // fingerprint, and a test that failed there would be testing the fixture.
 func writeReviewAttempt(t *testing.T, repoRoot, taskID, fingerprint string, taskRec *WorkerRecord) {
 	t.Helper()
+	writeReviewAttemptAt(t, repoRoot, taskID, fingerprint, taskRec, "2026-09-12T12:00:00Z")
+}
+
+// writeReviewAttemptAt is writeReviewAttempt with the run's recorded start
+// time under the caller's control: the freshness check compares a verdict
+// file's mtime with it, and a test of that comparison has to place both inside
+// the same second — which is where the check used to fail.
+func writeReviewAttemptAt(t *testing.T, repoRoot, taskID, fingerprint string, taskRec *WorkerRecord, startedAt string) {
+	t.Helper()
 	reviewID := ReviewTaskID(taskID)
 	resultDir := WorkerTaskDir(repoRoot, reviewID)
 	if err := os.MkdirAll(resultDir, 0o755); err != nil {
@@ -41,7 +51,7 @@ func writeReviewAttempt(t *testing.T, repoRoot, taskID, fingerprint string, task
 		Worktree: taskRec.Worktree, Branch: taskRec.Branch, BaselineSHA: taskRec.BaselineSHA,
 		RefsBefore: []string{}, ListenersBefore: []string{},
 		LogPath: filepath.Join(resultDir, "worker.log"), ResultDir: resultDir,
-		StartedAt: "2026-09-12T12:00:00Z", ExitStatus: &exited, ExitSource: ExitSourceReaper,
+		StartedAt: startedAt, ExitStatus: &exited, ExitSource: ExitSourceReaper,
 	}
 	if err := SaveRegistry(repoRoot, rec); err != nil {
 		t.Fatal(err)
@@ -237,5 +247,80 @@ func TestReviewCollectRefusesAVerdictWithNoSpawnFingerprint(t *testing.T) {
 		t.Fatal(err)
 	} else if ok {
 		t.Errorf("a verdict with no fingerprint became merge evidence: %+v", rec)
+	}
+}
+
+// A verdict written before its own run started belongs to an earlier attempt
+// even when the two times fall inside the same second — and on a fast machine
+// they do.
+//
+// This is the rejection-retry e2e's "put the old verdict back with its
+// original mtime" case, made deterministic. That e2e fails only in CI, where
+// the whole attempt sequence (spawn, replay, collect) runs inside one second:
+// with the run's start recorded to the second (time.RFC3339), 44.500 was
+// compared against 44.000, `Before` said no, and the stale approve was
+// recorded as the new run's verdict. On a slower machine the two straddle a
+// second boundary and the e2e passes over the same defect — so the e2e is not
+// a pin, this is.
+func TestReviewCollectRefusesAVerdictWrittenBeforeItsRunInTheSameSecond(t *testing.T) {
+	taskID := "T0105"
+	root, taskRec, _, fp := taskFixture(t, taskID)
+	writtenAt := time.Date(2026, 9, 13, 11, 51, 44, 500_000_000, time.UTC)
+	startedAt := time.Date(2026, 9, 13, 11, 51, 44, 900_000_000, time.UTC)
+	if startedAt.Truncate(time.Second) != writtenAt.Truncate(time.Second) {
+		t.Fatalf("fixture is not the case under test: %s and %s are not in the same second", writtenAt, startedAt)
+	}
+	writeReviewAttemptAt(t, root, taskID, fp, taskRec, runStartedAtFrom(startedAt))
+	writeVerdict(t, root, taskID)
+	verdict := filepath.Join(WorkerTaskDir(root, ReviewTaskID(taskID)), "RESULT.json")
+	if err := os.Chtimes(verdict, writtenAt, writtenAt); err != nil {
+		t.Fatal(err)
+	}
+
+	report := collectReview(t, root, taskID)
+	if report.Status != "rejected" {
+		t.Fatalf("collect accepted a verdict written %s, before its run started %s: %s %v",
+			writtenAt.Format(time.RFC3339Nano), startedAt.Format(time.RFC3339Nano), report.Status, report.Reasons)
+	}
+	status, detail := checkDetail(report, "review-verdict-run")
+	if status != "failed" {
+		t.Fatalf("review-verdict-run = %q (%s), want failed", status, detail)
+	}
+	// The refusal has to name the run the verdict does not belong to, and both
+	// times: "it is stale" without saying when it was written and when the run
+	// started is not something a Supervisor can act on.
+	if !strings.Contains(detail, "2026-09-13T11:51:44.5") || !strings.Contains(detail, "2026-09-13T11:51:44.9") {
+		t.Errorf("the refusal does not name the verdict's mtime and the run's start: %s", detail)
+	}
+	if rec, ok, err := LatestRecord[ReviewRecord](root, taskID, RecordReview); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Errorf("an earlier attempt's verdict became this run's merge evidence: %+v", rec)
+	}
+}
+
+// The control for the test above: same second, same check, and the verdict is
+// written AFTER the run started — the ordinary case, which must still be
+// accepted. Without it, "same second is refused" would also be satisfied by a
+// check that refuses everything in the second a run starts.
+func TestReviewCollectAcceptsAVerdictWrittenAfterItsRunInTheSameSecond(t *testing.T) {
+	taskID := "T0106"
+	root, taskRec, _, fp := taskFixture(t, taskID)
+	startedAt := time.Date(2026, 9, 13, 11, 51, 44, 500_000_000, time.UTC)
+	writtenAt := time.Date(2026, 9, 13, 11, 51, 44, 900_000_000, time.UTC)
+	writeReviewAttemptAt(t, root, taskID, fp, taskRec, runStartedAtFrom(startedAt))
+	writeVerdict(t, root, taskID)
+	verdict := filepath.Join(WorkerTaskDir(root, ReviewTaskID(taskID)), "RESULT.json")
+	if err := os.Chtimes(verdict, writtenAt, writtenAt); err != nil {
+		t.Fatal(err)
+	}
+
+	report := collectReview(t, root, taskID)
+	if report.Status != "ok" {
+		t.Fatalf("collect refused this run's own verdict, written %s after it started %s: %s %v",
+			writtenAt.Format(time.RFC3339Nano), startedAt.Format(time.RFC3339Nano), report.Status, report.Reasons)
+	}
+	if status, detail := checkDetail(report, "review-verdict-run"); status != "" {
+		t.Errorf("review-verdict-run = %q (%s), want the check to say nothing about a verdict that belongs", status, detail)
 	}
 }

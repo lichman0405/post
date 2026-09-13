@@ -40,6 +40,41 @@ func lockPathFor(statePath string) (string, error) {
 	return filepath.Join(filepath.Dir(filepath.Clean(abs)), LockFileName), nil
 }
 
+// taskStateTime renders a time the way tasks/task_status.json records time:
+// UTC, ISO 8601, to the second. That is the shape scripts/validate_task_state.py
+// enforces in CI — its ISO_TS_RE admits no fractional seconds, and the check
+// applies it to started_at, completed_at and merged_at (NOT to history entries:
+// the validator iterates those four named keys only, so a history `at` it would
+// never read. History is rendered through here because the file should hold one
+// shape, not because CI would catch it) — so this is the one place the rule is
+// written down. It is NOT the shape of the run-record times (nowRFC3339,
+// milliseconds): those order records, this one describes a task's lifecycle to
+// the Supervisor and to CI.
+func taskStateTime(t time.Time) string { return t.UTC().Format(time.RFC3339) }
+
+// taskStateStamp is taskStateTime for a timestamp some other layer recorded.
+// The run start spawn passes to StartWorkerFrom carries nanoseconds — a start to
+// the second could not order a verdict written inside the same second (#105) —
+// and this file must not carry them.
+//
+// A value that does not parse is passed through unchanged rather than replaced
+// with a clock reading: this runs inside a state transition, and inventing a
+// time there would hide the wrong value. What the pass-through does NOT
+// guarantee is that CI names it: the validator's ISO_TS_RE accepts a date with
+// no time at all — `2026-09-13` fails time.Parse here and passes that regex — so
+// a date-only value would go through silently. Passing it through is still the
+// right half of the trade (a wrong value that survives is reported as itself,
+// where a clock reading would replace it with a plausible lie), but the value
+// being wrong is only visible if it is wrong in a way the regex rejects. The
+// only production caller passes runStartedAt(), which always parses.
+func taskStateStamp(recorded string) string {
+	t, err := time.Parse(time.RFC3339, recorded)
+	if err != nil {
+		return recorded
+	}
+	return taskStateTime(t)
+}
+
 // NewRunID returns a random run_id for a state change (crypto/rand, 8 bytes
 // hex). Callers may instead pass a Supervisor-supplied run id via --run-id.
 func NewRunID() string {
@@ -292,7 +327,7 @@ func (s *Store) Transition(id string, to State, runID, reason string) (*Transiti
 				return &DependencyError{ID: id, Unmet: unmet}
 			}
 		}
-		at := time.Now().UTC().Format(time.RFC3339)
+		at := taskStateTime(time.Now())
 		ts.Status = to
 		ts.History = append(ts.History, StateChange{From: from, To: to, At: at, RunID: runID, Reason: reason})
 		if to == StateAccepted {
