@@ -232,43 +232,31 @@ func Collect(opts *CollectOpts) (*CollectReport, error) {
 	if err != nil {
 		return report, err
 	}
-	// Judge a new ref only when its tip is NOT the Supervisor's own work.
+	// Whose ref is it? By RECORD, not by inference.
 	//
 	// The question that separates the two cases is not the ref's name — a Worker
 	// turning its work into a ref and the Supervisor opening a pull-request
-	// branch are both "a new ref" — it is whose work the ref carries. The
-	// Supervisor commits under the repository's configured identity; a Worker's
-	// worktree has no such identity, so anything else is unattributable and is
-	// a finding.
+	// branch are both "a new ref" — it is whether the Supervisor created it. The
+	// Supervisor writes down every ref it creates (spawn, commit, rebaseline,
+	// reconciliation, and `rddev refs adopt` for anything opened by hand); a new
+	// ref name that is not on that record is unattributable and is a finding.
 	//
-	// Two wrong rules preceded this one. "Any new ref" rejected T0101 for a ref
-	// that had merely moved (L1-20260912-35), and "the task namespace only"
-	// rejected T0201 for PR #96's branch while letting a planted tag through —
-	// which the existing test correctly caught. Both times the comparison was
-	// fixed and the rule was not.
-	// LIMITATION, stated because it is the honest boundary of this rule: a Worker
-	// that forges the Supervisor's commit identity defeats it (git -c user.email=…
-	// is not blocked the way `git config` is). Such a Worker has already bypassed
-	// the guard — the precondition for everything here — and head-baseline still
-	// catches any commit it makes in its own worktree, which is the mechanism
-	// that actually covers the case. This check is defence in depth against a
-	// Worker that got past layers it should not have; it is not the layer.
-	supervisorEmail, err := gitOutput(repoRoot, "config", "user.email")
+	// The rule before this one read the commit's author email. That field is set
+	// by whoever makes the commit (`git -c user.email=…`), so it was fail-open
+	// against exactly the Worker that got past the guard — see ref_ledger.go for
+	// the three rules this replaces and why each was wrong.
+	ledger, err := ReadSupervisorRefs(repoRoot)
 	if err != nil {
-		supervisorEmail = ""
+		// Fail closed, and loudly: without the ledger "the Supervisor created
+		// this ref" is unknowable, and answering it either way would be worse
+		// than stopping the collect.
+		return report, err
 	}
-	var newRefs []string
-	for _, r := range newRefsSince(rec.RefsBefore, currentRefs) {
-		if supervisorEmail != "" && refAuthor(repoRoot, refName(r)) == supervisorEmail {
-			continue // the Supervisor's own branch, opened while this Worker ran
-		}
-		newRefs = append(newRefs, r)
-	}
-	sort.Strings(newRefs)
+	newRefs := unattributableNewRefs(rec.RefsBefore, currentRefs, ledger)
 	if len(newRefs) > 0 {
-		fail("refs", fmt.Sprintf("new ref(s) created during the run: %s — creating refs is Git control-plane", strings.Join(newRefs, ", ")))
+		fail("refs", fmt.Sprintf("new ref(s) created during the run: %s — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check", strings.Join(newRefs, ", ")))
 	} else {
-		pass("refs", fmt.Sprintf("no new ref names (snapshot of %d refs, existing ones free to move)", len(currentRefs)))
+		pass("refs", fmt.Sprintf("no unattributable new ref names (snapshot of %d refs, existing ones free to move; %d Supervisor ref(s) on record)", len(currentRefs), len(ledger)))
 	}
 
 	// 6) every changed path matches allowed_scope. The scope comes from the
@@ -587,6 +575,22 @@ func scanSecrets(files []string, worktree, resultPath string) ([]string, error) 
 	return findings, nil
 }
 
+// unattributableNewRefs returns the refs that appeared during the run and are
+// NOT on the Supervisor's own record of refs it created (ref_ledger.go). This
+// is the collected rule, factored out so the test asserts the same function
+// collect executes rather than a paraphrase of it.
+func unattributableNewRefs(before, current []string, ledger map[string]SupervisorRef) []string {
+	var out []string
+	for _, r := range newRefsSince(before, current) {
+		if _, ok := ledger[refName(r)]; ok {
+			continue
+		}
+		out = append(out, r)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // refName returns the ref name from a snapshot entry of the form
 // "<refname> <objectname>". An entry without a sha (older records, fixtures)
 // is returned unchanged.
@@ -618,17 +622,6 @@ func newRefsSince(before, current []string) []string {
 		if !seen[refName(r)] {
 			out = append(out, r)
 		}
-	}
-	return out
-}
-
-// refAuthor returns the author email of the commit a ref points at. "" when the
-// ref is unreadable. Used to decide whether a new ref carries the Supervisor's
-// own work (excluded) or unrelated work (a finding).
-func refAuthor(repoRoot, ref string) string {
-	out, err := gitOutput(repoRoot, "log", "-1", "--format=%ae", ref)
-	if err != nil {
-		return ""
 	}
 	return out
 }

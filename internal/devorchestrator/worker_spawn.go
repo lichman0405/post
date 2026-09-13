@@ -141,6 +141,13 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading baseline of refs/heads/%s: %w", branch, err)
 	}
+	// Record the branch in the Supervisor's ref ledger BEFORE the Worker
+	// exists, because a sibling Worker running right now will see this ref
+	// appear: collect exempts a new ref only when the Supervisor recorded
+	// creating it (ref_ledger.go), and this is where the Supervisor does that.
+	if err := RecordSupervisorRef(repoRoot, "refs/heads/"+branch, baseline, "spawn", opts.TaskID); err != nil {
+		return nil, fmt.Errorf("recording refs/heads/%s in the Supervisor ref ledger: %w", branch, err)
+	}
 	refsBefore, err := refsSnapshot(repoRoot)
 	if err != nil {
 		return nil, err

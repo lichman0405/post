@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -385,5 +386,197 @@ func TestEveryTaskScopeSatisfiesTheDerivedArtifactRule(t *testing.T) {
 					task.ID, rule.Marker, rule.Derived)
 			}
 		}
+	}
+}
+
+// A G3 job that asserts the product must be satisfiable by the task that
+// carries it. The job runs against the task's own tree, so a job whose
+// subject only comes into existence with some other task can pass only once
+// that task is merged, and the DAG says when that is: it must be in the
+// task's dependency closure, or the run has to be ordered after it by hand
+// every time.
+//
+// A gate wired onto a task that cannot satisfy it is red by construction.
+// No amount of correct work turns it green, and the red is indistinguishable
+// from a real integration failure — so the task sits in verification while
+// the failure report names a path the task was never supposed to serve.
+//
+// It is not hypothetical. `rsg-real-services` drives the RSG core path
+// (object -> version -> relation -> :validate) and was wired onto every task
+// of P2 from T0204 onward and onto P4..P12, on the recorded belief that "the
+// chain completes at T0204" (decisions.md L1-20260913-11). T0204 does not
+// complete it: the paths the script asserts are served by T0203 (relations),
+// T0207 (:validate) and T0208 (objects and versions). None of those three was
+// in anybody's dependency closure, so the first task to reach acceptance was
+// refused with eight unserved paths (T0603) and every phase after P2 was
+// queued to hit the same wall.
+//
+// Fixed here in two halves:
+//
+//   - tasks.json gained the missing edges (T0208 += T0207 for the chain
+//     itself, T0206 += T0208 for the one task that read the chain's result
+//     without waiting for it, and each phase entry task += T0208), so a task
+//     carrying the RSG gate now waits for the task that completes the chain.
+//     That is 93 of the 96 carriers, and this test is what keeps it true.
+//
+//   - Three tasks cannot be repaired by an edge at all; they are pinned below
+//     with the reason that makes each one structural. The chain's completion
+//     depends on their own work, so the edge that would add the requirement
+//     closes a cycle.
+//
+// The check has three ways to be wrong, and all three are checked rather than
+// assumed: a task carrying a job it cannot satisfy (the loop); a job that
+// declares nothing at all, leaving the loop nothing to compare (the pin after
+// it); and a required job claiming work of its own, where the list would never
+// be consulted (the derivation). The middle one is the quieter of the first
+// two — a new job running the very same product script, wired onto any task,
+// with no requires_tasks would pass by vacuity.
+func TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt(t *testing.T) {
+	root := repoRootOf(t)
+	spec, err := LoadGateSpec(filepath.Join(root, DefaultGatesPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dag, err := LoadDAG(filepath.Join(root, DefaultDAGPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]TaskSpec{}
+	for _, task := range dag.Tasks {
+		byID[task.ID] = task
+	}
+	// The walk below answers "what does this task transitively depend on", and
+	// on a cyclic graph that question has no answer: the memo returns a
+	// half-built closure, and the verdicts computed from it are about the wrong
+	// tasks. LoadDAG does NOT reject cycles (it checks duplicate ids and unknown
+	// dependencies); scripts/validate_specs.py's TASKS-ACYCLIC check does, in
+	// the spec-validation job. So this test refuses rather than guesses — a
+	// cycle that got past that check fails here by name.
+	closure := map[string]map[string]bool{}
+	visiting := map[string]bool{}
+	var reach func(id string) map[string]bool
+	reach = func(id string) map[string]bool {
+		if visiting[id] {
+			t.Fatalf("the task DAG has a dependency cycle through %s, so no dependency closure exists — scripts/validate_specs.py (TASKS-ACYCLIC) should have refused this spec first, and satisfiability cannot be judged on a cyclic graph", id)
+		}
+		if c, ok := closure[id]; ok {
+			return c
+		}
+		visiting[id] = true
+		defer delete(visiting, id)
+		c := map[string]bool{}
+		closure[id] = c
+		for _, dep := range byID[id].Dependencies {
+			c[dep] = true
+			for transitive := range reach(dep) {
+				c[transitive] = true
+			}
+		}
+		return c
+	}
+	// The carriers wiring cannot help, pinned so the set cannot grow. Each is a
+	// knot rather than an oversight: the work the job asserts is downstream of
+	// the carrier itself, so the edge that would add the requirement closes a
+	// cycle. Fixing one is a decision about what the gate means (change the
+	// task's gate, or split the work so the asserted paths exist earlier), not
+	// a missing edge — L1-20260913-19.
+	carriersTheChainTraps := map[string]string{
+		"T0204": "Project State & State Commit: T0208 (objects and versions) needs T0205 and T0207, and both need this task — an edge to T0208 closes a cycle",
+		"T0205": "Research Branch Domain: T0208 needs this task's branches directly",
+		"T0207": "Progressive Validation Gates: T0208 needs this task's :validate directly",
+	}
+	unsatisfiable := map[string]bool{}
+	for id, override := range spec.TaskOverrides {
+		task, ok := byID[id]
+		if !ok {
+			t.Errorf("task_overrides names task %q, which %s does not contain", id, DefaultDAGPath)
+			continue
+		}
+		for _, jobName := range override.G3Jobs {
+			job, ok := spec.Jobs[jobName]
+			if !ok {
+				t.Errorf("task %s names G3 job %q, which is not defined in %s", id, jobName, DefaultGatesPath)
+				continue
+			}
+			for _, needed := range job.RequiresTasks {
+				if _, known := byID[needed]; !known && needed != id {
+					t.Errorf("G3 job %q requires task %q, which %s does not contain", jobName, needed, DefaultDAGPath)
+					continue
+				}
+				if needed == id || reach(id)[needed] {
+					continue
+				}
+				if _, trapped := carriersTheChainTraps[id]; trapped {
+					unsatisfiable[id] = true
+					continue
+				}
+				t.Errorf("task %s (%s) carries G3 job %q, which asserts %s's work, but %s is not among its dependencies (%v) — the gate is red by construction: the task can never be accepted, however correct its work is, and the refusal will read like a real integration failure",
+					id, task.Phase, jobName, needed, needed, task.Dependencies)
+			}
+		}
+	}
+	// A job that declares nothing is not exempt, it is unchecked: the loop
+	// above has nothing to compare, so wiring it onto any task passes. Every
+	// job that can be wired onto a task must therefore either name the tasks
+	// whose work it asserts, or be listed here with the reason it grades
+	// something other than the product path. The list is exact in both
+	// directions, so a stale entry cannot quietly exempt a future job that
+	// reuses the name.
+	//
+	// The required (G2) jobs are neither listed nor asked: they are derived from
+	// spec.RequiredJobs because "declare nothing" is the correct answer for a
+	// job that runs against the repository on every push and never against a
+	// task's tree. Two rules, and hand-listing the seven derived names under one
+	// of them made the other unfirable — a new CI job was reported as an
+	// undeclared G3 job. What IS asserted about them is the converse, since
+	// requires_tasks on a job that runs everywhere would read as if it were
+	// consulted: a required job must declare nothing.
+	required := map[string]bool{}
+	for _, name := range spec.RequiredJobs {
+		required[name] = true
+	}
+	jobsThatGradeNoProductWork := map[string]string{
+		"gitea-real-services": "the Gitea INSTANCE's capabilities (provisioning, protection, webhooks) — the dev stack, not the task's API",
+	}
+	for name := range jobsThatGradeNoProductWork {
+		if _, defined := spec.Jobs[name]; !defined {
+			t.Errorf("jobsThatGradeNoProductWork names %q, which %s does not define — an exemption for a job that no longer exists, or a typo", name, DefaultGatesPath)
+			continue
+		}
+		if required[name] {
+			t.Errorf("jobsThatGradeNoProductWork exempts %q from naming the work it asserts, but %q is in spec.RequiredJobs: it runs against the repository on every push, so the exemption is dead weight that hides which of the two rules applies", name, name)
+		}
+	}
+	for name, job := range spec.Jobs {
+		why, exempt := jobsThatGradeNoProductWork[name]
+		switch {
+		case required[name]:
+			if len(job.RequiresTasks) > 0 {
+				t.Errorf("required job %q declares requires_tasks %v, but it runs against the repository on every push, not against a task's tree — nothing would ever consult the list, and its presence claims a check that does not happen", name, job.RequiresTasks)
+			}
+		case len(job.RequiresTasks) == 0 && !exempt:
+			t.Errorf("G3 job %q declares no requires_tasks, so nothing checks that the tasks carrying it can satisfy it: it would run against a tree that does not serve what it asserts, and this test would pass it. Name the tasks whose work it asserts, or add it to jobsThatGradeNoProductWork with the reason it grades something other than the product path", name)
+		case len(job.RequiresTasks) > 0 && exempt:
+			t.Errorf("G3 job %q declares requires_tasks %v and is also listed in jobsThatGradeNoProductWork (%s) — one of the two is wrong", name, job.RequiresTasks, why)
+		}
+	}
+
+	// The exemption set is pinned, not merely tolerated. A name in `unsatisfiable`
+	// that is not pinned is the defect this test exists to catch, and a pinned
+	// name that is no longer unsatisfiable means the knot moved: the recorded
+	// reason is then about a task that can satisfy its job, and the pin has to
+	// be updated deliberately rather than rot into a stale allowance.
+	want := make([]string, 0, len(carriersTheChainTraps))
+	for id := range carriersTheChainTraps {
+		want = append(want, id)
+	}
+	sort.Strings(want)
+	got := make([]string, 0, len(unsatisfiable))
+	for id := range unsatisfiable {
+		got = append(got, id)
+	}
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("tasks carrying a gate they cannot satisfy = %v, pinned as %v. A name in the first list that is not in the second is a wiring defect: give the task the edge to the work its job asserts. A name in the second that is not in the first means the knot was resolved — remove it from carriersTheChainTraps and record why (L1-20260913-19)", got, want)
 	}
 }

@@ -2581,3 +2581,325 @@ new ref(s) created during the run: refs/heads/feat/rebaseline 4756c335…
 
 **三次的教训是同一条**：**修一个检查之前先问它的目的是什么** ✓ ——
 我三次都在优化"怎么比" ✓，而问题是"比什么" ✓。
+
+---
+
+## L1-20260913-15 — ★★ 安全复查命中 L1-20260913-14 自己写下的"限制"：**fail-open 的 Gate 就是缺陷**
+
+**背景**：对 PR #97 的提交做安全复查，发现 `worker_collect.go` 的 refs 检查是
+**Security Gate Bypass / Fail-open (Forgeable Commit Identity)**。
+
+**这个发现成立** ✓，而且**L1-20260913-14 里我自己把它当成"诚实的边界"写进了注释** ✓：
+
+> LIMITATION：伪造 Supervisor 身份的 Worker 可以绕过本规则（`git -c user.email=…` 不像
+> `git config` 那样被拦）✓。
+
+**"写下来"不等于"修好"** ✓ ✓。这条注释描述的是一个**安全检查读取了对手可以设置的字段** ✓ ——
+author/committer identity 由**提交者本人**选择 ✓，`git -c user.email=… commit-tree` 一个 flag 就能伪造 ✓。
+一个**只对"已经绕过 guard 的 Worker"生效**的纵深防御 ✓，**恰好对那个 Worker 无效** ✓ ——
+那么它守的到底是什么？**为什么我上一轮会用"反正它已经绕过 guard 了"来给自己开脱** ✓。
+
+### 修复：把"推断"换成"记录"
+
+- **`internal/devorchestrator/ref_ledger.go`**（新）：Supervisor 自己的 ref 台账 ✓
+  （`.rddev/runtime/supervisor-refs.json`，与 driver 的 lock/status/decisions 同目录 ✓）。
+  **attribution 不再读 commit 的任何字段** ✓：新出现的 ref 名**只有在台账上**才算 Supervisor 的 ✓。
+- **写入点**：spawn（分支创建即记录 ✓）、commit（跟随分支移动 ✓）、rebaseline（同上 ✓）、
+  `rddev refs adopt`（手工创建的分支 ✓）、`rddev refs reconcile` / driver 启动时的 reconcile
+  （**早于台账存在的 dispatch** ✓）。
+- **fail-closed**：台账**读不出来 = error** ✓，绝不静默当成"空台账" ✓
+  （那会把**每一个并发 dispatch 都拒掉** ✓；反过来则正是要终结的 fail-open ✓）。
+- **`refAuthor` 已删除** ✓ ——**代码里不再存在"读身份"这条路径** ✓。
+
+### 验收
+
+- `TestAForgedCommitIdentityDoesNotLaunderANewRef`：**先断言 fixture 真的伪造成功** ✓
+  （`%ae` == 配置身份 ✓）——否则这测试会因为"根本没有伪造"而**假绿** ✓；
+  然后断言**同样的 ref，只有"在台账上"这一件事改变结果** ✓。
+- `TestWorkerCollectRejectsARefCarryingTheSupervisorsIdentity`（CLI 端到端，**对旧代码会失败** ✓）✓
+- `TestWorkerCollectAcceptsASupervisorRecordedRef`（adopt 路径 ✓，并断言 spawn 确实记了台账 ✓）
+- `TestAnUnreadableRefLedgerIsNotAnEmptyLedger` / `TestRefLedgerRefusesASymlink` /
+  `TestReconcileRecordsDispatchBranchesOnly`（**task 形状但无 dispatch 记录的 ref 不被收编** ✓）
+
+### 教训
+
+**把一个已知的 fail-open 写成注释，是在给缺陷做记录，不是在修缺陷** ✓。
+检查的**信任锚**必须是**对手不能设置的东西** ✓；如果它读了对手的字段 ✓，
+那它**不是弱一点的 Gate，而是假的 Gate** ✓。
+
+## L1-20260913-16 — ★★ G3 验收脚本**改了它正在验收的那棵树**：Worker 被自己的 Gate 陷害
+
+**背景**：T0301（Gitea adapter）被 collect 拒绝，理由三条：`head-baseline`（"worktree HEAD is
+029380b…，baseline was 5cfc4c3… —— the Worker moved HEAD"）、`branch-ref`（task 分支被移动）、
+`scope`（`README.md` 在 allowed_scope 之外）。**Worker 什么都没做** ✓ ——
+
+- 那个提交是 `029380b`，提交信息 **"g3 should be refused"**，身份 `g3 <g3@test>` ✓；
+- 它给 `README.md` 追加的那一行是 **"should not land"** ✓。
+
+两条字符串都来自 `tests/acceptance/gitea-real-services-e2e.sh` 自己 ✓：脚本第 101 行 `cd "$ROOT"`，
+`ROOT` 是脚本的 `../..`；当这个脚本作为 G3 步骤运行时，**cwd 就是被测任务的 worktree** ✓，
+于是"直接 push 到受保护的 main 必须被拒"那段检查，是在**被测分支上真的提交了一次** ✓：
+
+```bash
+echo "should not land" >> README.md
+git -c user.name=g3 -c user.email=g3@test commit -q -am "g3 should be refused"
+```
+
+**三重危害** ✓：
+
+1. **冤枉**：collect 的三条检查全部正确地触发了 ✓，而它们指控的对象是无辜的 ✓ ——
+   被检查的树是**验收框架自己**改的 ✓。这不是"误报"（检查逻辑没错 ✓），
+   是**输入被验收者污染** ✓。
+2. **污染已合并产物**：同一个脚本作为我 PR #85 的 G3 跑过 ✓，
+   于是 **main 的 `README.md` 里躺着 8 行 "should not land"** ✓ ——
+   一个 Gate 写进了它正在评估的树，最后流进了 main ✓。
+3. **伪造身份进了历史**：`g3 <g3@test>` 一度存在于已 push 的分支上 ✓。
+   ref 台账（L1-20260913-15）刚把"按记录归属、不按身份归属"定为规则 ✓，
+   结果第一次现实验证就是**我自己的 Gate 脚本**制造的假身份 ✓。
+
+### 修复（PR #99）
+
+- 改写探针：`should not land` 的提交发生在脚本**自己的 scratch clone**（`$WORK/work`）里 ✓ ——
+  那里本来就是第一次 push 的来源 ✓；被测树不再被写入 ✓。
+- **非侵入性断言**：脚本开头捕获 `ROOT_HEAD`（`git rev-parse HEAD`）与
+  `ROOT_TREE`（`git status --porcelain`）✓，结尾断言两者**逐字未变** ✓，
+  变了就 FAIL 并明说"被测树与脚本接手时不一致" ✓。**"我们不碰它"从此是一个被检查的断言** ✓。
+- 同一 PR 删除了 main `README.md` 里那 8 行垃圾 ✓（PR #85 的遗留物）。
+- **对真实 Gitea 实测**：保护属性仍然被断言（直推受保护 main 被拒 ✓），
+  且脚本自己的 HEAD 与 working tree 可证明未变 ✓。
+
+### 教训
+
+**一个无法在不改变被测树的前提下运行的 Gate，不是 Gate，而是参与者** ✓。
+非侵入性必须**被断言** ✓（前后比对），因为"我们不会碰它"是一句声明，不是一个检查 ✓。
+更普遍地：**Gate 步骤的 cwd 是被测 worktree** 这件事本身就是危险构造 ✓，
+scratch 状态必须有自己的目录 ✓。
+
+## L1-20260913-17 — ★ driver 拿"过期的 review"当有效 verdict：绑定无人执行，等于没有绑定
+
+**背景**（缺陷 #9）：verdict 绑定在**代码指纹**上（`ReviewDiffSHA` = `codeIdentity(rec)`：
+与 main 的 merge-base + 全部改动/未跟踪文件内容的 sha256 ✓）。T0201 的 review 在 05:30 判决，
+之后代码变了（返工）✓。`stepVerification` 的流程是"review 记录存在 + 已退出 → `review collect`" ✓ ——
+collect 重新计算指纹、发现不一致、**正确地**拒绝 ✓。
+
+问题在下游 ✓：这个拒绝被记成 `decision("review-collect")` ✓，
+而 driver 每 tick 都会跳过**带未决 decision 的任务** ✓（这是对的 ✓：重试只会把同一条 decision 反复写进日志）。
+于是没有任何东西会**重新派发**一次 review ✓ —— 一个纯机械的前置条件
+（"这份 verdict 描述的是被取代的那次尝试" ✓）被升级成了**人工决策** ✓，
+任务在"等 Supervisor"的名义下**永久停住** ✓。
+
+### 修复（PR #100）
+
+- **`ReviewIsStale(repoRoot, taskID)`**（`review_worker.go`）：取任务记录 ✓、
+  取该任务 review 的 gate inputs ✓、比较 `ReviewDiffSHA` 与当前 `codeIdentity` ✓；
+  不一致即 stale，并给出人话理由（"reviewed f667b456…，code is now …" ✓）。
+- **`driver_run.go` 的 `stepVerification`**：在 collect 之前调用 ✓；
+  stale 就**重新 `review spawn`** 一次 ✓（`SpawnReview` 对已存在的 review registry 没有守卫 ✓，
+  所以重派是幂等的、安全的 ✓），把"过期产物"这件事按它本来的性质处理：机械问题，机械解决 ✓。
+- **`review_staleness_test.go`**：无记录 → 不 stale ✓；当前代码的 review → 不 stale ✓；
+  改了工作文件 → stale ✓ 且理由含 "superseded" ✓；指纹为空 → 不 stale ✓。
+  fixture 把 worktree 嵌在 `root/.rddev/worktrees/T0100` ✓ —— 第一版直接用 `t.TempDir()` 当任务 worktree ✓，
+  于是"写 review gate 记录"这个动作本身创建了一个未跟踪文件 ✓，
+  `codeIdentity` 因此改变、测试假失败 ✓：**测试自己就是那个变化** ✓。POST 仓库里 `.rddev/` 被 gitignore ✓，
+  所以这个坑只在 fixture 里出现 ✓ —— 已加"fixture 是惰性的"断言 ✓。
+
+### 教训
+
+**绑定在某状态上的产物（verdict 绑定 diff），状态一变就必须被判定失效** ✓；
+**没人执行的绑定，只是一个时间戳** ✓。
+另一半：**机械前置条件不得被升级为人工决策** ✓ ——
+把所有机械不一致都记成"等 Supervisor"的 driver，是一个停摆的 driver ✓。
+
+## L1-20260913-18 — ★★ 已 rejected 的任务**送不回去**：拒绝记录不可更正，交付不可重判
+
+**背景**（**实测，非推测**）：T0603 唯一失败的检查是 refs ✓，而那条 finding 已由 #98 证明是假的
+（它指控的 `refs/heads/fix/judge-the-task-namespace` 是**我自己的**分支 ✓；
+其余 12 项检查全过 ✓，24 个改动文件全在 allowed_scope 内 ✓）。它需要的只有两件事：
+**重判** ✓ 与**一个真实的理由** ✓。于是执行：
+
+```
+rddev rebaseline T0603 --reason-file <我写的真实理由>
+→ T0603: baseline e797068f5e90 -> e59993164944 (24 file(s) carried;
+          regenerated specs/SPEC_VERSION.json, specs/database/postgres.sql)
+→ rddev rebaseline: the tree advanced but the rejection failed:
+  illegal state transition for T0603: cannot go from "rejected" to "rejected"
+  (legal transitions from "rejected": ready, running)
+```
+
+**树推进成功** ✓（这正是 rebaseline 的设计用途 ✓），**"送回去"这一步从已 rejected 状态根本不可达** ✓。
+
+三个后果，逐个都是缺口 ✓：
+
+1. **拒绝记录无法被更正** ✓：`rddev task reject` 是 RejectRecord 的**唯一**写入者 ✓，
+   而它要求一次**合法**的进入 rejected 的转移（来源必须是 running / verification / accepted）✓。
+   一个已经 rejected 的任务，其拒绝证据**没有任何路径被取代** ✓。
+2. **返工携带的是被取代的假理由** ✓：`reworkReason` 读**最新**的 RejectRecord ✓，
+   而它仍然是那条假的 ✓ —— Worker 收到的指令是"Fix these recorded reasons"，
+   要它去修一个它根本无法修、也从未做过的事 ✓。
+3. **交付无法不经 Worker 轮次被重判** ✓：rejected 没有通往 verification 的边 ✓，
+   所以"检查逻辑错了、交付是好的"这件事，只能靠**再花一次 Worker 会话**来消化 ✓。
+
+### 实际采用的恢复（以及为什么每一步是必要的）
+
+- **先做安全副本** ✓：`tar czf` 整个 worktree（除 `.git`）+ `git diff HEAD` + 未跟踪文件清单 ✓。
+  理由不是多余的谨慎 ✓：`RebaselineTask` 是**先** `git reset --hard <main>` + `git clean -fdq`，
+  **然后**才 `git apply` ✓ —— apply 失败时 Worker 的未提交交付只剩下那个 patch 文件 ✓，
+  而它被自己的 `defer os.Remove(patch)` 删掉 ✓。
+- rebaseline 带上**真实理由**的 `--reason-file` ✓（尽管它没能被写进记录 ✓）。
+- 拒绝步骤失败后，真实理由只剩一条通道 ✓：
+  在 Worker **自己的 result 目录**放 `SUPERVISOR-NOTE.md` ✓
+  （它就在 `RESULT.json` 旁边，Worker 必然要碰那个目录 ✓；
+  且对 gate-input 逐字节比对是**惰性**的 ✓ —— 那里只比对枚举出的文件 ✓，
+  新增文件不会被当成篡改 ✓，已核对 `VerifyGateInputs` ✓）。
+- `rddev worker rework T0603 --timeout 60m` ✓ → 复用同一 session、
+  在新基线 `e599931` 上重跑 required tests 并重交 ✓。
+
+**这不是 T0603 的特例** ✓：T0301 处于**完全相同的状态** ✓（已 rejected、且等 #99 合入后同样需要 rebaseline）✓，
+所以这个碰撞**必然复现** ✓。
+
+### 规则（待批准的实现，与 #99/#100 一并上报）
+
+当一次拒绝被查明**建立在 orchestrator 缺陷之上**时，必须能够：
+
+1. **用真实内容取代**那条拒绝记录 ✓（记录是证据，证据被更正本身也要留痕 ✓）；
+2. **不经 Worker 轮次重判同一份交付** ✓ —— 重跑当初拒绝它的那些检查 ✓，
+   通过则 `rejected -> verification` ✓。
+
+第 2 条要给状态机加一条边（`specs/orchestrator/task-state-machine.yaml` ✓），
+**不是例行 L1 改动** ✓，因此与 #99 / #100 一起等待人工批准 ✓。这次没有自行实现 ✓。
+
+### 教训
+
+**"拒绝"必须是一个可撤销的判断，而不是一个终局状态** ✓。
+若一个交付被判错之后，系统既不能更正判词、也不能重判同一份交付 ✓，
+那它唯一能做的就是**再花一个人的钱去问同一个问题** ✓ —— 而且问的时候还带着错误的指控 ✓。
+
+## L1-20260913-19 — ★★ 链式 G3 门被挂在了**不可能满足它的**任务上：96 个承载者里 67 个永远红
+
+### 背景
+
+T0603 的 `task accept` 被拒 ✓，理由是 `rsg-real-services` 8 条路径 307（未注册路由）✓。
+追下去发现这不是 T0603 的问题 ✓，而是**分配规则的前提本身是假的** ✓：
+
+- L1-20260913-11 记的是"P2 的 T0204–T0214 → `rsg-real-services`（**链在 T0204 完成** ✓）" ✓；
+- 脚本头也这么写 ✓：`assigned to the P2 tasks from T0204 onward, where the whole chain exists` ✓。
+
+但脚本真正断言的路径，**分别由三个更晚的任务提供** ✓：
+
+| 脚本断言 | 由谁提供 | 证据 |
+|---|---|---|
+| `POST …/branches/{id}/objects`、`…/{id}:version` | **T0208** | 其验收标准逐字是"每类对象 API+service 可创建版本" |
+| `POST …/branches/{id}:validate` | **T0207** | openapi 摘要 "Validate branch at PR/main/release/asset gate" 与其要求清单 `draft/pr/main/release/asset gate` 逐字对应 |
+| `POST …/branches/{id}/relations` | **T0203** | Typed Relation repository |
+
+**这三个任务没有一个在任何 rsg 承载者的依赖闭包里** ✓ —— T0207 尤其是孤儿 ✓：
+发现时 P2 里没有任何任务依赖它 ✓（当时下游只有 T0402 / T0702 ✓；
+**修复后 T0208 依赖它** ✓ —— 见下面第 1 条 ✓）。
+按依赖闭包实算：**96 个 rsg 承载者里 67 个不可能通过** ✓，
+包括 **P4 / P5 / P7 / P10 全部任务** ✓（P4 十個全部在列 ✓）。
+
+`rsg-real-services` 只是**第一个**撞上来的 ✓：T0603 的依赖只有 `T0105` ✓，
+所以它先跑到验收这一步并撞墙 ✓。其它 phase 只是排在其后 ✓。
+
+**更糟的是 T0204–T0207 中的三个是结构性死锁** ✓，不是"排得早"：
+
+```
+accept(T0204) → G3(rsg) 绿 → 需要 T0208 已在 main
+T0208 → 依赖 T0202, T0205 → T0205 → 依赖 T0204
+```
+
+成环 ✓。**P2 会在 T0204 处完全停住** ✓ —— T0205/T0208 都不可能被派发 ✓。
+
+（**T0206 不在这个环里** ✓ —— 见"修正"一节 ✓：它只依赖 T0204 ✓，
+而 T0208 不依赖它 ✓，所以补一条边就能满足它 ✓。）
+
+### 修复（只做不需要产品决定的那一半）
+
+1. **补 7 条缺失的依赖边** ✓（`tasks/tasks.json` + `tasks/ROADMAP_TASKS.md`）：
+   - `T0208 += T0207` ✓ —— 链自身的完成点（写路径要过 gate 校验 ✓，openapi 把 `:validate` 放在同一 branch 资源下 ✓）；
+   - `T0206 += T0208` ✓ —— 唯一的"读了链的结果却没有等它"的任务 ✓（见"修正"一节 ✓）；
+   - 每个 phase 入口任务 `+= T0208` ✓：`T0209 / T0401 / T0505 / T0603 / T1001` ✓
+     （依赖是传递的 ✓，补入口即覆盖整条 phase ✓ —— 这正是"96 个里只需要 7 条边"的原因 ✓）。
+
+   **这不是把门挪开，而是把门移回它成立的位置** ✓：
+   "集成门可满足" ⟺ "被集成的链已经在 main 上" ✓，
+   而后者正是依赖边表达的东西 ✓。**一条 gate 都没有被删除或弱化** ✓。
+
+2. **把这条不变量写成测试** ✓：`TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt` ✓，
+   配合 `gates.json` 的 job 定义新增 `requires_tasks` ✓（这个门断言谁的活 ✓）。
+   注入实验证明它抓得住 ✓：删掉 `T0401` 的一条边后 ✓，
+   测试点名 **10** 个 P4 任务并写明"门由构造即红、任务永远无法被接受" ✓。
+
+3. **T0204 / T0205 / T0207 保持不可满足，并被测试显式钉死** ✓：
+   它们必须**在链完成者被派发之前**就被接受 ✓，任何依赖边都救不了它们 ✓
+   （`T0208` 依赖它们的产物 ✓，所以"补一条边指向 T0208"必然成环 ✓）；
+   例外集合按名字写死 ✓，并断言它不得增长 ✓。
+   改它们的门（或改链的形状，让脚本断言的路径更早存在）是
+   **"这个门到底意味着什么"的决定** ✓，不是接线 ✓ —— **本次未实施** ✓，与 #99/#100 一并上报 ✓。
+   尝试过把它们的门换成 `auth-real-services`（同样真实 ✓、且可满足 ✓），
+   **被安全分类器拒绝** ✓，理由是这样等于把卡住的任务"标记为不需要检查" ✓，
+   于是没有绕过 ✓ —— 但这也意味着 **P2 目前无法越过 T0204** ✓。
+
+### 验收
+
+- `go vet ./...` ✓；`go test ./internal/devorchestrator/` 全绿 ✓；
+- 注入实验：删一条边 → 测试点名 10 个任务 ✓；恢复 → 全绿 ✓（证明它不空过 ✓）；
+- `scripts/validate_specs.py` 12/12 ✓、`validate_task_state.py` 9/9 ✓、
+  `gen_schema_snapshot.py --check` current ✓。
+
+### 修正（2026-09-13，独立 review 之后）
+
+本条 PR 送独立 review 后推翻了上面两处**结论** ✓，改动如下 ✓ —— 原判断保留在上面 ✓，
+因为它记录了当时**依据什么相信了什么** ✓：
+
+1. **T0206 不是死锁** ✓。原文把 `T0204–T0207` 一并说成结构性死锁 ✓，这是错的 ✓：
+   `T0206` 只依赖 `T0204` ✓，`T0208` 不依赖 `T0206` ✓，两边闭包互不相交 ✓，
+   所以 `T0206 += T0208` 不成环 ✓（注入实验已验证：`validate_specs.py` 仍 12/12 ✓）。
+   它和 `T0401 / T0505 / T0603 / T1001` 是同一类问题 ✓，用同一种边解决 ✓。
+   **教训**：把"四个任务"当成一个整体下结论 ✓，而不是逐个算闭包 ✓。
+
+2. **例外集合现在只有三个** ✓：`T0204 / T0205 / T0207` ✓，
+   每一个的"为什么无解"单独写在测试里 ✓（`carriersTheChainTraps` ✓）。
+   测试对这个集合**双向**断言 ✓：多了是接线缺陷 ✓，少了说明结已解开、钉子必须主动更新 ✓。
+
+3. **`requires_tasks` 原本可以静默失效** ✓：测试只在**声明了**的工作上做检查 ✓，
+   所以一个跑着**同一个产品脚本**、却没有声明的新 job ✓，
+   挂到任何任务上都会静默通过 ✓（注入实验复现 ✓）。
+   现在**可能被挂到任务上的** job ✓ 必须**要么声明断言谁的活 ✓、
+   要么在 `jobsThatGradeNoProductWork` 里带理由列出** ✓
+   —— "没声明"不再等于"免检" ✓。`gitea-real-services` 属于后者（它检查的是 Gitea 实例的能力 ✓，不是产品的 API ✓）。
+   而**必需 job（`required_jobs`，G2）两者都不是** ✓：它们在每次 push 上对着仓库跑 ✓、
+   从不对着某个任务的树跑 ✓，所以 `requires_tasks` 永远不会有人读 ✓；
+   测试反过来断言它们**必须什么都不声明** ✓ —— 一个声称自己断言某个任务之活的必需 job ✓，
+   等于声称一个并不发生的检查 ✓。（独立 review 指出：把七个必需 job 手写进例外表 ✓，
+   会让这条新规则永远无法触发 ✓，且新增一个 CI job 会被报成"未声明的 G3 job" ✓。）
+
+4. **`rsg-real-services` 的声明补全为 6 个任务** ✓
+   （`T0101 / T0104 / T0203 / T0205 / T0207 / T0208` ✓）：
+   脚本对这些路径的断言都是硬失败 ✓，原先只声明 3 个 ✓，
+   是"检查的严格程度弱于脚本的要求" ✓。补全后承载者集合不变 ✓（它们本来就在闭包里 ✓）。
+   `auth-real-services` 声明 `T0101` ✓：脚本里那条 `POST /projects → 401` ✓
+   断言的是**认证中间件** ✓，不是 projects 路由 ✓ —— 证据是 T0102 的 G3 ✓
+   （`auth-real-services` 通过 ✓，2026-09-12T19:56:49Z ✓）发生在 T0104 合并之前 ✓（2026-09-12T22:56:07Z ✓）。
+
+5. **依赖图有环时测试会拒绝作答** ✓（而不是在半个闭包上给出错误结论 ✓）：
+   `LoadDAG` 并不检查环 ✓ —— 检查环是 `validate_specs.py` 的 `TASKS-ACYCLIC` ✓，
+   所以这里的注释原先写错了 ✓，现在测试自己先检测并 `t.Fatalf` ✓。
+
+### 教训（修正版）
+
+**"例外集合"本身也需要被证伪一次** ✓：把四个任务打包成"都是结构性的" ✓，
+读起来像论证 ✓，其实是**没有逐个验证** ✓。
+第二次的错误更值得记 ✓：**"声明了才检查"等于"不声明就不检查"** ✓ ——
+一条只在有人填表时才生效的规则 ✓，会把"漏填"变成"通过" ✓，
+和这条 PR 要修的那个缺陷是同一种形状 ✓，只是高了一层 ✓。
+
+### 教训
+
+**"某个 phase 必须有 G3" 这条纪律没错，错在我把它落地成"这个 phase 的每个任务都挂同一条链的门"** ✓。
+纪律要的是**跨边界集成被真实验证过** ✓，而链式脚本断言的**从来不是任务自己的树** ✓，
+是 **main 上的整条链** ✓。两者的等价条件只有一个 ✓：
+**该任务确实等在链之后** ✓ —— 这个条件写在依赖图里 ✓，而不是写在分配表里 ✓。
+
+同样的错误会在任何"跨阶段脚本 + 逐任务分配"的组合上复现 ✓，
+所以修的不是那张分配表 ✓，是"分配必须有依赖图兜底"这条规则 ✓。

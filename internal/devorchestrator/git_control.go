@@ -120,6 +120,11 @@ func CommitTask(opts *GitControlOpts) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("reading the new commit sha: %w", err)
 	}
+	// The commit moved the task branch; the ledger follows the ref so its record
+	// describes where the ref actually is (ref_ledger.go).
+	if err := RecordSupervisorRef(opts.RepoRoot, "refs/heads/"+rec.Branch, sha, "commit", opts.TaskID); err != nil {
+		return "", fmt.Errorf("recording refs/heads/%s in the Supervisor ref ledger: %w", rec.Branch, err)
+	}
 	if _, err := WriteRecord(opts.RepoRoot, opts.TaskID, RecordGit+"-commit", runIDOr(opts.RunID), &GitRecord{
 		recordMeta: recordMeta{RecordType: RecordGit, TaskID: opts.TaskID, RunID: runIDOr(opts.RunID), At: nowRFC3339()},
 		Action:     "commit",
