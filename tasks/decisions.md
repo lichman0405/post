@@ -3209,3 +3209,106 @@ rddev worker collect: reading worktree HEAD: git rev-parse HEAD: chdir …/.rdde
 这次代价小一些 ✓（review 抓住了 ✓），但形状一样 ✓：
 **我不是在骗人，我是在"补一个听起来合理的过程"** ✓ —— 而捏造的过程比没有过程更坏 ✓，
 因为它让人**不再去看真的那一个** ✓。
+
+
+## L1-20260914-3 — ★★ T0203 被拒两条理由都不是它的错；而**我为了救它，先把它的活删了**
+
+**事实链（本地时区 UTC+8，全部可查）** ✓：
+
+| 时刻 | 事件 | 出处 |
+|---|---|---|
+| 00:34:08 | T0202 的 PR #118 在 GitHub 合并（`14987ed`）| `git show -s --format=%cI 14987ed` |
+| 00:34:10 | 状态机记 T0202 = `merged` | `tasks/task_status.json` history |
+| **00:34:16** | **T0203 被 spawn**，基线 `fb13e5d` | `gate-inputs.json` `baseline_sha` |
+| 00:35:58 | 本地 `main` 才 fast-forward 到 `14987ed` | `git reflog show main` |
+| 01:05:22 | T0203 collect 被拒 | `decisions` |
+
+`fb13e5d` 是 `14987ed` 的**父提交** ✓。所以 T0203 的基线**没有它自己依赖任务的工作** ✓：
+没有 `infra/migrations/00024_*.sql` ✓，也没有 T0202 把 `migration_test.go` 里
+写死的 `21` 改成从迁移目录推导的那次修改 ✓。T0203 干净地加了 `00025` ✓，
+于是 `TestAppendOnlyUpgradePath` / `TestFreshInstallCatalog` / `TestUpgradePath`
+**必然**报 `version after head = 25, want 21` ✓。
+
+**Worker 自己诊断对了** ✓：它写了"合并树模拟"（取 T0202 的测试文件 + 临时 `00024` +
+自己的完整 diff → 整套通过 ✓），并在 `notes_for_supervisor` 里写明了 ✓。
+**那正是 rebaseline 要做的事** ✓，它替我把该做的做了 ✓。
+
+### 缺陷 A（编排器）：任务分支切自"仓库根当时的 HEAD"
+
+`worker_spawn.go:521` `ensureWorktree`，第 555 行：`git checkout -b <branch>` ✓。
+两层问题叠加 ✓：
+
+1. **它没有指定基点** ✓ —— 切的是仓库根**当时的 HEAD** ✓，没有任何东西断言那是 `main` ✓。
+   共用 checkout 是共享资源 ✓，`L1-20260914-1` 已经记过一次它不在 main 上的事故 ✓。
+   今天"让 checkout 停在 main"**只靠自觉** ✓。
+2. **本地 `main` 不是最新的** ✓ —— `MergePR`（`git_control.go:316`）用
+   `gh pr merge --squash --delete-branch`（第 336 行）合完就转状态 ✓，
+   **从不 fetch、也不快进本地 `main`** ✓。于是"合并"与"某人下一次 `git pull`"之间有一个窗口 ✓，
+   窗口里 spawn 出来的基线**缺一个刚被判定为已合并的依赖** ✓。
+
+任务基线必须满足的不变量是：**它含有 DAG 说"已合并"的每一个依赖** ✓。
+spawn 路径上没有任何一处检查它 ✓，而且**失败是静默的** ✓ ——
+Worker 拿到一棵自洽的树 ✓，只是里面少了别人的工作 ✓，随之而来的红灯被读成**它自己的缺陷** ✓。
+代价：一整轮 Worker ✓、一次拒绝 ✓、一次返工 ✓，和一份**指控无辜交付**的 collect 报告 ✓。
+P2 是链式的（T0204 → T0205 → T0207 → T0208）✓，每个前任一合并，下一个立刻 ready ✓，
+**每一个都可能落在窗口里** ✓。已立案 **#123** ✓。
+
+### 缺陷 B（编排器）：`rddev rebaseline` 的失败路径**先把活删掉**
+
+我要把 T0203 推到新基线 ✓，于是跑了 `rddev rebaseline T0203 --reason-file …` ✓。它失败了 ✓：
+
+```
+patch failed: internal/persistence/sqlc/querier.go:14
+error: internal/persistence/sqlc/querier.go: patch does not apply
+```
+
+**它失败之前已经做了这些** ✓（`rebaseline.go`：先 `reset --hard to` ✓、再 `clean -fdq` ✓、
+**然后**才 apply ✓）。apply 一失败就 return ✓，而唯一那份补丁被 `defer os.Remove(patch)` 删掉 ✓。
+**结果：worktree 被清空、任务分支被移到 main、改动一点不剩** ✓。
+
+而它的文档注释写的是 ✓：
+
+> The advance is refused, **leaving the worktree untouched**
+
+**这句话是假的** ✓。**唯一没丢东西的原因是我跑之前手工做了备份** ✓
+（`git diff` + 未跟踪文件打 tar）✓ —— 不是工具的功劳，是我的习惯 ✓。
+
+**这件事里我的错最大** ✓：**我用一个从没跑过的破坏性工具，没有先读它的失败路径** ✓。
+`#103`（"a refused rebaseline puts the task's work back" ✓）正开着、**就是在修这个** ✓，
+但它没合 ✓ —— 也就是说**今天 main 上的 `rebaseline` 就是会吃掉交付的版本** ✓，
+而我是在它吃掉之后才知道的 ✓。
+
+### collect 的第一条理由也是我造成的
+
+`refs: new ref(s) created during the run: refs/heads/fix/the-g3-step-gets-the-dev-stacks-environment`
+—— **那是我自己的分支**（PR #120）✓，在 T0203 这一轮里建的 ✓，我没有提前登记 ✓。
+已用 `rddev refs adopt` 记录归属 ✓，理由作废 ✓。
+**这是我自己的并发动作第二次绊到检查** ✓（上一次是 `L1-20260914-1` 的 checkout）✓。
+
+### 恢复（已做完，全部有证据）
+
+1. 3-way apply 备份 ✓ → 只有 3 处冲突 ✓，**全部是生成物** ✓
+   （`sqlc/querier.go` ✓、`SPEC_VERSION.json` ✓、`postgres.sql` ✓）。
+2. 冲突按**重新生成**解决 ✓，不做文本合并 ✓：`sqlc generate` ✓、
+   `gen_schema_snapshot.py` ✓、`spec_version.py --write` ✓ —— 迁移数 21 → **22** ✓，
+   两个 artifact 自校验通过 ✓。**这一步很关键** ✓：
+   原来那份快照是从缺 `00024` 的基线生成的 ✓，直接合过来会**悄悄抹掉 T0202 的迁移** ✓。
+3. 发现**一个真实的合并碰撞** ✓：`scientific_object_repository_test.go:125`（T0202，已合）与
+   `relation_repository_test.go:179`（T0203，在飞）**都定义了包级 `wantHash`** ✓，
+   两份逐字节相同 ✓。
+   **判定：在飞的让已合入的** ✓ —— 改 T0203 那份为 `wantRelationHash` ✓（6 处）✓。
+   `go vet ./tests/integration/` rc=0 ✓。
+4. 整套集成测试：`ok 40.369s` ✓；限定范围：`ok 6.008s` ✓；
+   gofmt ✓ / build ✓ / sqlc drift ✓ / snapshot ✓ / marker ✓。
+5. 交回同一个 Worker 重新报告 ✓（`rddev worker rework T0203 --timeout 25m` ✓）——
+   `RESULT.json` 还得它自己改 ✓（collect 会拒"status=completed 但有红灯" ✓）。
+
+### 规则（即时生效）
+
+1. **跑破坏性工具之前，先读它的失败路径** ✓ —— 不是读它的说明，是读**它失败时留下什么** ✓。
+   这次的教训不是"rebaseline 有 bug" ✓，是"**我信任了一份没验证过的说明**" ✓。
+2. **碰任务 worktree 之前先备份** ✓（`git diff` + 未跟踪 tar）✓ ——
+   这次是它救了场 ✓，不要因为这次没出事就省掉 ✓。
+3. **合并碰撞的让位规则**：在飞的让已合入的 ✓；
+   生成物冲突一律**重新生成** ✓，不做文本合并 ✓。
+4. **我自己的并发动作要提前登记** ✓ —— 建分支就 `refs adopt` ✓，别让兄弟 Worker 的 collect 替我报警 ✓。
