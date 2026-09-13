@@ -710,10 +710,11 @@
       ]
     },
     "T0109": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-13T02:21:56Z",
       "worker_run_id": "run-c6c4e82e3982e21f",
-      "accepted_by_supervisor_at": "2026-09-13T02:16:12Z",
+      "accepted_by_supervisor_at": "2026-09-13T02:43:11Z",
+      "merged_at": "2026-09-13T02:46:38Z",
       "rejection_reason": "【这不是缺陷 —— 是又一次**跨任务类型冲突**，需要一处机械适配】\n\n你在本地全绿，CI 却红了——**因为两者编译的不是同一棵树**：G2 编译**你的 worktree**，\nCI 编译**你的分支与 main 合并之后**的结果。你与 T0106/T0110 并行，它们的改动已进 main。\n\nSupervisor 已把**当前 main**合并进你的分支（无冲突）。合并后唯一的编译错误是：\n\n```\ninternal/application/projects/settings.go:60:26: cannot use actor (variable of struct type domain.User) as Reader value in argument to s.Get\ninternal/application/projects/settings.go:91:26:  (同上)\ninternal/application/projects/settings.go:133:26: (同上)\n```\n\n**原因**：**T0106 把 `projects.Service.Get` 的调用者参数从 `domain.User` 改成了 `projects.Reader**\n（因为可见性矩阵要决定**匿名读者**能看什么，而 `domain.User` 表达不了\"匿名\"）。\n\n**修法（三处，同一个形状）**：\n```go\n// 前\nif _, err := s.Get(ctx, actor, projectID); err != nil {\n// 后\nif _, err := s.Get(ctx, Reader{UserID: actor.ID, Authenticated: true}, projectID); err != nil {\n```\n**语义不变**：设置页是成员专属操作，调用者必然是已认证用户 ✓。\n（同一个模式在 T0108 的 `GetMembership` 与 `audit.ProjectsReadGate` 里已经用过，照抄即可。）\n\n【你要做的】\n1. 按上面改这**三处**（若还有别的 `s.Get(ctx, actor, ...)` 也一并改）；\n2. 在**合并后的树**上重跑验证（required tests + `make test-integration` + `make fmt-check`）；\n3. 确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed；覆盖要求的条目带 `label`）。\n\n【不要做的事】不要改 `Get` 的签名去迁就调用方（`Reader` 是 T0106 已合并的设计）；\n不要放宽任何测试；不要趁机重构无关代码。\n",
       "history": [
         {
@@ -782,6 +783,26 @@
           "at": "2026-09-13T02:21:56Z",
           "run_id": "run-c6c4e82e3982e21f",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T02:29:50Z",
+          "run_id": "run-80064e2b810aefb6",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-13T02:43:11Z",
+          "run_id": "run-63d45ab615d2347e"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-13T02:46:38Z",
+          "run_id": "run-ae8fd14cc208e35a",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },

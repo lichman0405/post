@@ -86,9 +86,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-13T00:00:52Z
+生成时间：2026-09-13T02:46:40Z
 
-状态分布：todo 110 · ready 0 · running 2 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 20（合计 132/132 个任务）
+状态分布：todo 108 · ready 0 · running 0 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 24（合计 132/132 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -111,11 +111,11 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0103 | Organization 创建与成员关系 | P1 | merged | 2026-09-12T20:32:29Z |  | 2026-09-12T20:50:52Z | 2026-09-12T20:54:16Z |
 | T0104 | Project 创建与 Purpose/Program | P1 | merged | 2026-09-12T20:54:36Z |  | 2026-09-12T22:45:16Z | 2026-09-12T22:56:07Z |
 | T0105 | Project 成员权限框架 | P1 | merged | 2026-09-12T22:56:22Z |  | 2026-09-12T23:29:57Z | 2026-09-12T23:33:35Z |
-| T0106 | Public/Private 读取隔离 | P1 | running | 2026-09-12T23:39:06Z |  |  |  |
+| T0106 | Public/Private 读取隔离 | P1 | merged | 2026-09-13T01:32:29Z |  | 2026-09-13T02:14:06Z | 2026-09-13T02:19:50Z |
 | T0107 | 全局 GitHub-style 导航与 Layout | P1 | merged | 2026-09-12T23:38:53Z |  | 2026-09-12T23:56:38Z | 2026-09-13T00:00:41Z |
-| T0108 | Project Shell 与 tabs | P1 | todo |  |  |  |  |
-| T0109 | Project Settings 与成员管理 UI | P1 | todo |  |  |  |  |
-| T0110 | 基础 Audit Log | P1 | running | 2026-09-12T23:39:07Z |  |  |  |
+| T0108 | Project Shell 与 tabs | P1 | merged | 2026-09-13T00:00:56Z |  | 2026-09-13T00:51:52Z | 2026-09-13T00:57:38Z |
+| T0109 | Project Settings 与成员管理 UI | P1 | merged | 2026-09-13T02:21:56Z |  | 2026-09-13T02:43:11Z | 2026-09-13T02:46:38Z |
+| T0110 | 基础 Audit Log | P1 | merged | 2026-09-13T00:58:14Z |  | 2026-09-13T01:23:12Z | 2026-09-13T01:26:45Z |
 | T0201 | Core Scientific Object Schema registry | P2 | todo |  |  |  |  |
 | T0202 | Scientific Object immutable version repository | P2 | todo |  |  |  |  |
 | T0203 | Typed Relation repository | P2 | todo |  |  |  |  |
