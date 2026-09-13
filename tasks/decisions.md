@@ -2104,3 +2104,49 @@ T0109 第一次修好 `AuditEntry` 之后，我跑了 `rddev git push T0109` **�
 （"the tree has uncommitted changes that this push would not carry"），
 而不是安静地推一个不完整的分支。列为后续项——**这与本会话反复出现的
 "把该机械化的纪律留在脑子里"是同一个形状**。
+
+## L1-20260913-1 — ★★ Phase Boundary Hardening 1/4：G2 验证**合并结果**，review 绑定**精确代码状态**
+
+### (a) G2/G3 现在在"**当前 main + 本任务完整改动**"上运行
+
+这是 L1-20260912-58 记录的结构性缺口的实现。此前 G2 在**任务自己的 worktree** 里跑 CI 的步骤——
+那棵树**与 main 是否能组合，完全没被验证**，而**能组合才是 merge 会产生的唯一东西**。
+P1 的 10 个任务里**5 次**跨任务类型冲突，**每一次 git 都报 MERGEABLE**。
+
+实现：`prepareIntegrationTree` 在 `.rddev/runtime/integration/<TASK>/` 建一棵 scratch worktree
+（`git worktree add --detach <dir> main`），再把任务的**完整改动**（`taskWorktreeDiff`：
+tracked diff + untracked 文件）`git apply` 上去，G2/G3 的步骤在这棵树上执行。
+- **改动无法 apply 到当前 main** → 以**明确的错误**拒绝（"bring the branch up to date"），
+  而不是伪装成一次测试失败——那是两种不同的修复动作。
+- 没有 worktree（fixture/e2e）→ 回落到 repoRoot ✓。
+
+**测试（双向验证）**：`TestGateVerifiesMainPlusTheTaskChange` 造出真实形状——
+任务分支新增一个声明，而 main 之后也新增了同名声明：
+*在分支上能编译，合并后不能*。
+撤销修复（改回"跑在任务 worktree 里"）→ **FAIL**："G2 passed on a change that compiles alone and
+cannot compile merged — MERGEABLE is not compilable"；恢复 → PASS ✓。
+
+### (b) Review verdict 绑定到**代码身份**（内容寻址）
+
+`ReviewRecord.DiffSHA` 记录 verdict 所审代码的身份，`CheckMergeGate` **重算并比对**，
+不一致即拒绝："A verdict must not outlive the code it judged"。
+
+身份 = `sha256(merge-base(main, HEAD) + 每个差异文件的内容哈希)`，两个性质都是必需的：
+
+- **对 base 敏感** → 推进基线 / rebase / merge 修复 / main 前进，**组合变了** → 旧 verdict 立即失效 ✓
+  （这正是 P1 五次冲突里 verdict 看不见的部分）；
+- **对 commit 稳定** → `rddev pr open` 提交的正是 verdict 批准的那份内容，
+  **不应当**因此失效 ✓。
+
+**第二点我在第一版写错了，是 e2e 抓出来的**：最初身份哈希的是**渲染后的 diff 文本**，
+而**同一个新文件在"未跟踪"与"已提交"两种状态下渲染不同** →
+`pr open` 一提交就让 verdict 失效，`four-gate-e2e` 的 `git push`/`pr open` 全部被拒 ✓。
+改为**内容寻址**（路径 + 内容哈希，排序后拼接）后两边都过 ✓。
+
+**规则的精确定义**（避免用"跳过"掩盖漏洞）：**有代码状态可绑定时，verdict 必须带身份且必须匹配**；
+只有在没有 worktree（fixture/e2e）时才不断言——而生产环境永远有 worktree，
+所以这条回落**不可能**成为"陈旧 verdict 通过"的原因 ✓。
+
+**测试**：`TestReviewVerdictIsBoundToTheCodeItJudged` 覆盖四种情形——
+身份不符 → 拒绝；身份相符 → 通过；**提交同一内容 → 仍然通过**（commit 稳定性）；
+**main 前进后合并 → 失效**（基线漂移）✓。

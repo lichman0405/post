@@ -138,11 +138,15 @@ func NewAcceptRecord(taskID, runID, status string, gates map[string]string, reas
 // ReviewRecord is the evidence of one Review Worker verdict.
 type ReviewRecord struct {
 	recordMeta
-	Verdict           string `json:"verdict"` // approve | request_changes
-	Summary           string `json:"summary"`
-	BlockingFindings  int    `json:"blocking_findings"`
-	MajorFindings     int    `json:"major_findings"`
-	VerdictPath       string `json:"verdict_path"`
+	Verdict          string `json:"verdict"` // approve | request_changes
+	Summary          string `json:"summary"`
+	BlockingFindings int    `json:"blocking_findings"`
+	MajorFindings    int    `json:"major_findings"`
+	VerdictPath      string `json:"verdict_path"`
+	// DiffSHA is the code identity the verdict is about (see codeIdentity).
+	// The merge gate recomputes it and refuses when it differs: a verdict must
+	// not outlive the code state it judged.
+	DiffSHA           string `json:"diff_sha,omitempty"`
 	ReviewerSessionID string `json:"reviewer_session_id,omitempty"`
 }
 
