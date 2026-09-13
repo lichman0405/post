@@ -57,7 +57,7 @@ type UpdateSettingsInput struct {
 // ListMembers returns the project's member list (identity + role + join
 // time), oldest membership first. Owner/maintainer only.
 func (s *Service) ListMembers(ctx context.Context, actor domain.User, projectID string) ([]domain.ProjectMember, error) {
-	if _, err := s.Get(ctx, actor, projectID); err != nil {
+	if _, err := s.Get(ctx, Reader{UserID: actor.ID, Authenticated: true}, projectID); err != nil {
 		return nil, err
 	}
 	if _, err := s.requireManager(ctx, projectID, actor.ID); err != nil {
@@ -88,7 +88,7 @@ func (s *Service) SetMemberRole(ctx context.Context, actor domain.User, projectI
 	if !domain.ValidProjectRole(role) {
 		return domain.ProjectMembership{}, fmt.Errorf("%w: role must be owner, maintainer, contributor or viewer", ErrValidation)
 	}
-	if _, err := s.Get(ctx, actor, projectID); err != nil {
+	if _, err := s.Get(ctx, Reader{UserID: actor.ID, Authenticated: true}, projectID); err != nil {
 		return domain.ProjectMembership{}, err
 	}
 	actorRole, err := s.requireManager(ctx, projectID, actor.ID)
@@ -130,7 +130,7 @@ func (s *Service) SetMemberRole(ctx context.Context, actor domain.User, projectI
 // UpdateSettings edits the project purpose and/or activity status.
 // Visibility changes are refused (preview-only). Owner/maintainer only.
 func (s *Service) UpdateSettings(ctx context.Context, actor domain.User, projectID string, in UpdateSettingsInput) (domain.Project, error) {
-	if _, err := s.Get(ctx, actor, projectID); err != nil {
+	if _, err := s.Get(ctx, Reader{UserID: actor.ID, Authenticated: true}, projectID); err != nil {
 		return domain.Project{}, err
 	}
 	if _, err := s.requireManager(ctx, projectID, actor.ID); err != nil {
