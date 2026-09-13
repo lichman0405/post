@@ -180,13 +180,12 @@ func validateInto(doc any, schema map[string]any, where string, errs *[]error) {
 			validateInto(v, items, where+"["+strconv.Itoa(i)+"]", errs)
 		}
 	}
-	// A bound can only fire on a value of the type it bounds. Draft 2020-12
-	// says as much, and the type check at the top of this function already
-	// refused every type the schema did not list — so a value of some other
-	// type is one the schema admits. Reading "not a number" as "below the
-	// minimum" rejected a Review verdict whose own type list allowed null
-	// (`"line": {"type": ["integer", "null"], "minimum": 0}`) and left a
-	// finished task's review uncollectable.
+	// A schema that declares a bound its own type list can never carry is one
+	// whose bound silently does nothing. The blocks below enforce the first
+	// half of the rule — a bound fires only on a value of the type it bounds,
+	// which is what draft 2020-12 says; this reports the second half, where the
+	// dead bound is written, instead of leaving it to be discovered as a value
+	// that slipped through.
 	for _, b := range bounds {
 		if _, set := schema[b.keyword]; !set {
 			continue
@@ -196,6 +195,37 @@ func validateInto(doc any, schema map[string]any, where string, errs *[]error) {
 			return
 		}
 	}
+	// The content keywords apply only to values of the type they govern, which
+	// is what draft 2020-12 says and what the `type` list already decides.
+	// They used to fire on any value of another type — "!isArr ||" and
+	// friends — which made a schema that admits null alongside a number
+	// unusable: {"type": ["integer","null"], "minimum": 0} rejected the null
+	// with "<nil> is below minimum 0".
+	//
+	// That is not hypothetical. On 14 Sep 2026 a Reviewer said "this finding is
+	// not line-specific" the only way review-verdict.schema.json allows —
+	// line: null — in an otherwise approving verdict, and rddev review collect
+	// refused it. The Reviewer's own session had ended successfully with that
+	// document, and claude applies --json-schema to a Worker's final message
+	// before it is written; so the document was accepted by one validator and
+	// refused by this one, and the Worker was told to fix something that was not
+	// wrong. Which validator claude uses is not something this comment can
+	// establish (the CLI is a self-contained binary, not this repo's Go
+	// dependencies), so the claim here is the narrower, checkable one: the
+	// schema admits a null, draft 2020-12 says `minimum` has nothing to say
+	// about one, and this function was the only dissenter.
+	//
+	// uniqueItems below already had the right shape. These four did not — and
+	// the four STRUCTURAL keywords (required, properties, additionalProperties,
+	// items) still do not: they report "value is not an object/array" for a
+	// value of another type, which is the same mistake. It is latent rather
+	// than live, because the only schemas this validator is handed are
+	// task-package, worker-result and review-verdict — but
+	// specs/orchestrator/worker-registry.schema.json:26 is a real instance of
+	// the shape ("listeners_before": {"type": ["array","null"], "items": …}), so
+	// the next schema to add that pairing meets this bug. Left alone here
+	// deliberately: those guards also stop the traversal descending, so
+	// loosening them is a bigger change than this fix. Filed.
 	if n, ok := schema["minItems"].(float64); ok {
 		if arr, isArr := doc.([]any); isArr && len(arr) < int(n) {
 			*errs = append(*errs, fmt.Errorf("%s: expected at least %d items", where, int(n)))
@@ -224,18 +254,15 @@ func validateInto(doc any, schema map[string]any, where string, errs *[]error) {
 		}
 	}
 	if pat, ok := schema["pattern"].(string); ok {
-		s, isStr := doc.(string)
-		if !isStr {
-			*errs = append(*errs, fmt.Errorf("%s: pattern is set but value is not a string", where))
-			return
-		}
-		re, err := regexp.Compile(pat)
-		if err != nil {
-			*errs = append(*errs, fmt.Errorf("%s: schema pattern %q does not compile: %w", where, pat, err))
-			return
-		}
-		if !re.MatchString(s) {
-			*errs = append(*errs, fmt.Errorf("%s: %q does not match pattern %q", where, s, pat))
+		if s, isStr := doc.(string); isStr {
+			re, err := regexp.Compile(pat)
+			if err != nil {
+				*errs = append(*errs, fmt.Errorf("%s: schema pattern %q does not compile: %w", where, pat, err))
+				return
+			}
+			if !re.MatchString(s) {
+				*errs = append(*errs, fmt.Errorf("%s: %q does not match pattern %q", where, s, pat))
+			}
 		}
 	}
 	if ui, ok := schema["uniqueItems"]; ok {

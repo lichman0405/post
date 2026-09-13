@@ -1,15 +1,15 @@
 {
   "algorithm": "sha256",
-  "combined_digest": "e9bcdf9c34102ca3b247370f07460a8e13c16e45de97a5ee29f86015cdf0901e",
+  "combined_digest": "3daed5bd7d5d353cadcdb509a378b2df3d936eedd4bba85f9a4682f7afde5a03",
   "files": {
     "specs/README.md": "2a0398dfb3ead0586034364d7411d845b84fd33b7c43d1ce9199d6a14ef4cf1a",
     "specs/api/openapi.yaml": "8f2e4cb78ae6c66991d8ad1a4ca15a67248b2cbeee4ebe259323af4a8f08aad1",
-    "specs/database/postgres.sql": "2689d1b1255d350cecbc785bffef7e34e2dea3e8072acaca2fff850bcac95bd2",
+    "specs/database/postgres.sql": "2c4fc185950cd2a5d9cbcd82e64e76c747b2f8adeaf847c919c5f83c246743c5",
     "specs/events/event-types.yaml": "5987d653a176348dd86cb6563578de8095e9f8390cca72b332f51dac5edf954c",
     "specs/mcp/tools.json": "f6b5fb023aba882a259bbe7d001bdd2755c1120f1dc768fe7512a7383fdbaca9",
     "specs/orchestrator/decision-levels.yaml": "8a06ec18b8abd79c2462e3d3bcc5b785c51a8f970c54aaa279f174882e0f5a3f",
     "specs/orchestrator/derived-artifacts.json": "b51cce26d578245d6269f82da0f053cde846a1ead0fea0c4bbe7413a0b89d415",
-    "specs/orchestrator/gates.json": "21b55ea679203d006cacf66874555cbb94264b876d9ddfb7e4bfe9ef651f9581",
+    "specs/orchestrator/gates.json": "550cae51283c1141cb07898cb96577a48ff4de6ea2e8d44e0734727889633189",
     "specs/orchestrator/rddev-cli.yaml": "f73576090a3f8bb3b78d560e662e0a180c480917b12f731ad579879ed174a397",
     "specs/orchestrator/review-verdict.schema.json": "78940ff58ba1d84e05d739d1c4af2a4d47b2fa834e7ba2ce2bca5b337f66f9fd",
     "specs/orchestrator/source-repo-preflight.schema.json": "a69dd6840fd2c5558dfba7fdb19019430f1c9a3b248c19c6f0a93b2912882932",
@@ -25,23 +25,23 @@
     "specs/schemas/claim.schema.json": "9b2bb36a9524d889c2416cd5a8c400ffdf779dc8e3c06c97bd3a5e54ed114c26",
     "specs/schemas/core-scientific-object.schema.json": "73eb81ee09f8328320b41cda7de7451e69a68ec761524b7644a02499c7b8125b",
     "specs/schemas/dataset.schema.json": "c39c8cf532a346f039b592edbf9239ece07f22e592da7a7cc40a31ef325bf4ce",
-    "specs/schemas/evidence-assertion.schema.json": "ba07c01ad36ced8df4e4bb4190eab7edd7b323a274825465be6a4963d782c667",
+    "specs/schemas/evidence-assertion.schema.json": "a52cde81730bc9b7bc2ce76155f0f763d161cfa13a5d13ed9e7492d7d434afaf",
     "specs/schemas/experiment.schema.json": "0e7f3644373b0d962435211d1355e1a561cc474e4285f7022fa930495b485977",
     "specs/schemas/external_reference.schema.json": "d47f0c8e6589a02099ae3cd3570b27427cd3a186808f4ea8342893130b87ebb8",
     "specs/schemas/finding.schema.json": "835b7727a12085473e9e5e3e87ed9c138cd259a2e7f71e499c2367192a3041e0",
     "specs/schemas/hypothesis.schema.json": "53b2739fee6f32c4e28f48fe2b83072902c2e0adf6ee507cca4dd6a13e8f194d",
     "specs/schemas/material.schema.json": "72430e9d9f03ac39cd6f5445cdea3e09eaa2a81ebc213d451c7820425917db88",
     "specs/schemas/protocol.schema.json": "f87ac30de2d4264a427fb851ca19e7cca37a80ac3523d3fb85a46b92554b5dfb",
-    "specs/schemas/relation.schema.json": "f802b825574353c655d8646f442bf41254e6167852caf7400e92fa83039943f4",
-    "specs/schemas/research-asset-version.schema.json": "22ba48c522560a074e77868a147edae0bb63baaf5583db373c94ec17012a7792",
+    "specs/schemas/relation.schema.json": "6ab11709b0f9a67bc974a54d29d2b9e4896088a0bcc06f9bf0ac601fe005cb49",
+    "specs/schemas/research-asset-version.schema.json": "e7272daba5c2617dfce17c57e47bb7d820faadd5fa85f55a433c27f65eacd88d",
     "specs/schemas/research_question.schema.json": "9584284e1c820e9fa5dda85254daaedfc7a398ea11e2282b511cd164416da279",
-    "specs/schemas/rsg-manifest.schema.json": "97283149dcfa858c7c49b988017385afdc345bc568ae1903216f0d4d068a6f09",
+    "specs/schemas/rsg-manifest.schema.json": "c32906f395ce7f60288e8b90e986ca70236c86543bbac91fb46e1286bbaa52d7",
     "specs/schemas/sample.schema.json": "fed5737f271de54c07ebcb429740b224023ce0ffee84e173ff48b7fa7639732a",
     "specs/ui/page-inventory.csv": "c89311bf12526e5d5762a351d71a447caa1c9a79912a172449dd3639141387fb",
     "specs/ui/routes.yaml": "88ae6cb829eae37dd8ae5f8815ce2b4eabc9ec82c51c95cf43223be91922f570",
-    "tasks/tasks.json": "01f2ab5c742765cef02b9e3688fd257e2368365274002fc255db8eedc267050c"
+    "tasks/tasks.json": "4ab1a3c405ed107ae2447843ee886449993259a978b288e217fc13557e41d077"
   },
   "input_count": 38,
   "marker_format": 1,
-  "spec_version": "sha256:e9bcdf9c34102ca3"
+  "spec_version": "sha256:3daed5bd7d5d353c"
 }

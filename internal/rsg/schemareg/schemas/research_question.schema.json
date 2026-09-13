@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-rd.example/schemas/research_question.schema.json",
+  "title": "ResearchQuestion",
+  "description": "Entity-shape schema for a persisted scientific object. It is NOT a request DTO: do not bind a client-supplied body directly to it. The fields id, version, schema_ref, lifecycle_state, created_by, created_at and visibility_policy_id are server-authoritative (docs/23 \u00a73, docs/12 \u00a73).",
+  "type": "object",
+  "required": [
+    "id",
+    "type",
+    "version",
+    "project_id",
+    "title",
+    "lifecycle_state",
+    "schema_ref",
+    "created_by",
+    "created_at",
+    "statement"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 8
+    },
+    "type": {
+      "const": "research_question"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "branch_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "lifecycle_state": {
+      "enum": [
+        "active",
+        "aborted",
+        "reopened",
+        "superseded"
+      ]
+    },
+    "schema_ref": {
+      "type": "object",
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "created_by": {
+      "type": "string",
+      "description": "Server-authoritative: the server derives this from the authenticated actor and the evaluated policy context. It MUST NOT be accepted from client input. Authorization is default-deny and evaluated per command against actor+org+project+object+action+policy context (docs/23 \u00a73); visibility expansion requires explicit authorized human action with an audit event (docs/12 \u00a73, docs/23 \u00a74)."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "visibility_policy_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Server-authoritative: the server derives this from the authenticated actor and the evaluated policy context. It MUST NOT be accepted from client input. Authorization is default-deny and evaluated per command against actor+org+project+object+action+policy context (docs/23 \u00a73); visibility expansion requires explicit authorized human action with an audit event (docs/12 \u00a73, docs/23 \u00a74)."
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "statement": {
+      "type": "string",
+      "minLength": 3
+    },
+    "purpose": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parent_question_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "question_state": {
+      "enum": [
+        "open",
+        "partially_answered",
+        "unresolved",
+        "superseded",
+        "aborted"
+      ]
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
