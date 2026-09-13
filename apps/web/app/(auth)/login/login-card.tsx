@@ -11,7 +11,7 @@ import {
   messageForCode,
   messageForOIDCError,
   type AuthClient,
-} from "../../lib/auth";
+} from "../../../lib/auth";
 
 /**
  * The sign-in card (client component): email+password login/signup and an

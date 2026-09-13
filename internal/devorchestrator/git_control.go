@@ -20,6 +20,10 @@ import (
 // recorder; git runs in the task worktree (commit) and the repo root
 // (ref/push plumbing).
 
+// DefaultBaseBranch is the integration branch: PRs target it and a task
+// branch's contribution is measured against the merge-base with it.
+const DefaultBaseBranch = "main"
+
 // GitControlOpts parametrizes one Supervisor git/PR action.
 type GitControlOpts struct {
 	RepoRoot  string
@@ -282,7 +286,7 @@ func OpenPR(opts *GitControlOpts) (string, error) {
 		title = fmt.Sprintf("[%s] %s", opts.TaskID, spec.Title)
 		body = fmt.Sprintf("Gate evidence: .rddev/runtime/gates/%s/ (four-gate status %s).\n", opts.TaskID, gateRes.Status)
 	}
-	number, err := runGh(opts.RepoRoot, "pr", "create", "--base", "main", "--head", rec.Branch, "--title", title, "--body", body)
+	number, err := runGh(opts.RepoRoot, "pr", "create", "--base", DefaultBaseBranch, "--head", rec.Branch, "--title", title, "--body", body)
 	if err != nil {
 		return "", fmt.Errorf("opening the PR: %w", err)
 	}
@@ -405,7 +409,19 @@ func RunGitControl(opts *GitControlOpts, action string) (*GitActionResult, error
 // rest unseen. The second Reviewer noticed and read the worktree instead —
 // which is exactly the diligence a review input must not depend on.
 func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
-	out, err := gitOutput(rec.Worktree, "diff", rec.BaselineSHA, "--")
+	// The diff base is where the branch diverged from main, NOT the recorded
+	// baseline. Those are the same value until a baseline is advanced, and
+	// then they diverge badly: after a rework onto a newer main the recorded
+	// baseline already contains the task's earlier work, so the delta is a
+	// sliver - T0103's review input was 5 files out of a 27-file task, and a
+	// Reviewer would be asked to approve the whole from a fragment.
+	// merge-base gives the branch's actual contribution in both cases, which
+	// is the same diff the pull request shows.
+	base := rec.BaselineSHA
+	if mb, err := gitOutput(rec.Worktree, "merge-base", DefaultBaseBranch, "HEAD"); err == nil && mb != "" {
+		base = mb
+	}
+	out, err := gitOutput(rec.Worktree, "diff", base, "--")
 	if err != nil {
 		return "", fmt.Errorf("diffing the worktree against the baseline: %w", err)
 	}
