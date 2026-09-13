@@ -131,6 +131,15 @@ func SpawnReview(opts *ReviewSpawnOpts) (*SpawnResult, error) {
 	if err := os.MkdirAll(reviewDir, 0o755); err != nil {
 		return nil, err
 	}
+	// A new attempt starts with no verdict of its own. The Reviewer may leave
+	// the file unwritten (its verdict is also carried by the session log), and
+	// collect prefers the file — so a RESULT.json surviving from an earlier
+	// attempt would be collected as THIS run's verdict, about code this
+	// Reviewer never saw. Archived rather than deleted: it is the evidence of
+	// the attempt it belongs to, and the task's gate dir keeps its copy anyway.
+	if err := archivePreviousVerdict(opts.RepoRoot, reviewID, reviewDir); err != nil {
+		return nil, err
+	}
 
 	// Fingerprint the reviewed worktree BEFORE the Reviewer exists: collect
 	// rejects a verdict produced against different code.
@@ -412,9 +421,18 @@ func CollectReview(opts *CollectOpts) (*ReviewCollectReport, error) {
 		if err != nil {
 			return nil, err
 		}
-		if revGate != nil && revGate.ReviewDiffSHA != "" && fp != revGate.ReviewDiffSHA {
+		switch {
+		case revGate.ReviewDiffSHA == "":
+			// Fail closed. An empty fingerprint is not a match: the check below
+			// is the whole guarantee that a verdict describes the current tree,
+			// and a review that carries no fingerprint cannot express it. The
+			// message must not claim one either — "matches the spawn-time
+			// fingerprint" for a review that has none is a green light over an
+			// unasked question.
+			fail("review-code-unchanged", "the review carries no spawn-time code fingerprint — the verdict cannot be tied to the code it describes; review again")
+		case fp != revGate.ReviewDiffSHA:
 			fail("review-code-unchanged", "the reviewed worktree changed during the review — the verdict describes different code; review again")
-		} else {
+		default:
 			pass("review-code-unchanged", "the reviewed worktree matches the spawn-time fingerprint")
 		}
 	}
@@ -430,6 +448,17 @@ func CollectReview(opts *CollectOpts) (*ReviewCollectReport, error) {
 	// a valid verdict and force a re-review of work that was fine. Asking in
 	// prose is not a mechanism; this is.
 	verdictPath := filepath.Join(rec.ResultDir, "RESULT.json")
+	// The verdict must belong to the run being collected. A verdict file left
+	// behind by an earlier attempt describes code this Reviewer never saw, and
+	// recording it here would attribute one attempt's judgement to another —
+	// it would even outlive the rework that invalidated it. Spawn archives the
+	// previous file; this is the assertion that nothing slipped past that.
+	if startedAt, perr := time.Parse(time.RFC3339, rec.StartedAt); perr != nil {
+		fail("review-verdict-run", fmt.Sprintf("the Review Worker's record has no usable start time (%q) — a verdict cannot be attributed to a run", rec.StartedAt))
+	} else if st, serr := os.Stat(verdictPath); serr == nil && st.ModTime().Before(startedAt) {
+		fail("review-verdict-run", fmt.Sprintf("the verdict file was written %s, before this review run started (%s) — it is an earlier attempt's verdict about different code; review again",
+			st.ModTime().UTC().Format(time.RFC3339), startedAt.UTC().Format(time.RFC3339)))
+	}
 	if _, err := os.Stat(verdictPath); os.IsNotExist(err) {
 		if recovered, ok, rerr := verdictFromSessionLog(rec.LogPath); rerr != nil {
 			return nil, fmt.Errorf("recovering the verdict from the Reviewer's session log: %w", rerr)
@@ -579,29 +608,41 @@ func codeIdentity(rec *WorkerRecord) (string, error) {
 // of "the code the verdict is about" would drift, and the one that matters is
 // the one the gate enforces.
 func ReviewIsStale(repoRoot, taskID string) (bool, string, error) {
-	taskRec, err := LoadRegistry(repoRoot, taskID)
+	reviewID := ReviewTaskID(taskID)
+	reviewRec, err := LoadRegistry(repoRoot, reviewID)
 	if err != nil {
 		return false, "", err
 	}
-	if taskRec == nil {
-		return false, "", nil // no task record: nothing to compare against
-	}
-	revGate, err := LoadGateInputs(repoRoot, ReviewTaskID(taskID))
-	if err != nil {
-		return false, "", err
-	}
-	// No review record, or one from before the fingerprint was recorded: the
-	// collect owns that judgement (it refuses an unanchored review), and
-	// guessing staleness here would respawn reviews the gate would have
-	// accepted.
-	if revGate == nil || revGate.ReviewDiffSHA == "" {
+	// No review has been dispatched: this is the driver's other branch (spawn
+	// one), not a stale verdict. Answering "stale" here would be a predicate
+	// that means "there is nothing to collect yet", and the two are different
+	// questions with different consequences.
+	if reviewRec == nil {
 		return false, "", nil
 	}
-	fp, err := codeIdentity(taskRec)
+	revGate, err := LoadGateInputs(repoRoot, reviewID)
+	if err != nil {
+		return false, "", err
+	}
+	// A review that cannot be tied to any code state is not "current": collect
+	// refuses it outright (review-code-unchanged), and the refusal is
+	// permanent, because no reviewer will ever add a fingerprint to a record
+	// that already exists. Waiting for a human to say "review it again" is not
+	// a judgement — a fresh review is the only thing that can move the task.
+	if revGate == nil {
+		return true, "the recorded review has no authoritative spawn record — collect refuses an unanchored review", nil
+	}
+	if revGate.ReviewDiffSHA == "" {
+		return true, "the recorded review carries no spawn-time fingerprint — its verdict cannot be tied to the code it describes", nil
+	}
+	// No worktree (never spawned, or already cleaned up): there is no code state
+	// to compare against, so this is not evidence that the review is stale. The
+	// collect owns the judgement and asks the same question of the same facts.
+	fp, err := currentCodeIdentity(repoRoot, taskID)
 	if err != nil {
 		return false, "", fmt.Errorf("fingerprinting %s's worktree to judge its review: %w", taskID, err)
 	}
-	if fp == revGate.ReviewDiffSHA {
+	if fp == "" || fp == revGate.ReviewDiffSHA {
 		return false, "", nil
 	}
 	return true, fmt.Sprintf("the recorded review is about a superseded attempt (reviewed %s, code is now %s)", abbrevSHA(revGate.ReviewDiffSHA), abbrevSHA(fp)), nil
@@ -613,6 +654,42 @@ func abbrevSHA(s string) string {
 		return s[:12]
 	}
 	return s
+}
+
+// archivePreviousVerdict moves an earlier attempt's verdict out of the way
+// before a new review run starts, so the new run cannot be collected under the
+// old run's judgement.
+//
+// The file is renamed to RESULT.<run-id>.json in the same directory (the
+// attempt it belongs to is named in its own name, which is the point), and only
+// when a previous review is actually recorded — a directory that merely
+// contains a hand-written RESULT.json with no registry behind it is not this
+// function's business to move.
+func archivePreviousVerdict(repoRoot, reviewID, reviewDir string) error {
+	verdictPath := filepath.Join(reviewDir, "RESULT.json")
+	if _, err := os.Stat(verdictPath); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	prev, err := LoadRegistry(repoRoot, reviewID)
+	if err != nil {
+		return err
+	}
+	if prev == nil {
+		// No recorded attempt owns this file. Leave it: nothing here knows
+		// what it is, and the freshness check in collect refuses it.
+		return nil
+	}
+	name := "RESULT.superseded"
+	if prev.RunID != "" {
+		name += "-" + prev.RunID
+	}
+	archived := filepath.Join(reviewDir, name+".json")
+	if err := os.Rename(verdictPath, archived); err != nil {
+		return fmt.Errorf("archiving the previous review verdict (%s): %w", verdictPath, err)
+	}
+	return nil
 }
 
 // renderReviewPrompt builds the Reviewer's task: read the inputs in its
