@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -265,12 +267,22 @@ func TestWorkerCollectRejectsResidue(t *testing.T) {
 func TestWorkerCollectSurfacesDaemonizedListener(t *testing.T) {
 	fakeClaudePath(t, "listener")
 	t.Setenv("FAKE_CLAUDE_SECONDS", "1")
-	t.Setenv("FAKE_CLAUDE_PORT", "18981")
+	// Both ports are chosen from what the kernel says is free. They used to be
+	// 18981 and 18982, and a constant here is a claim about the whole machine:
+	// this fixture's own product is a listener that escapes its session, so a
+	// previous run that leaked one — or any other process that took the port —
+	// leaves the next run's fixture unable to bind, and the test then fails on
+	// "daemonized listener not surfaced" for a reason that has nothing to do
+	// with what it asserts. Measured: a `python3 -m http.server 18982` left by
+	// an earlier run of this very test was still holding the port.
+	ports := freePorts(t, 2)
+	port, prePort := ports[0], ports[1]
+	t.Setenv("FAKE_CLAUDE_PORT", strconv.Itoa(port))
 	repo := fakeRepo(t)
 	killPidFromFile(t, repo, "T0001", "listener.pid")
 
 	// a pre-existing listener (started before spawn) must stay unflagged
-	pre := exec.Command("python3", "-m", "http.server", "18982", "--bind", "127.0.0.1")
+	pre := exec.Command("python3", "-m", "http.server", strconv.Itoa(prePort), "--bind", "127.0.0.1")
 	if err := pre.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -285,12 +297,48 @@ func TestWorkerCollectSurfacesDaemonizedListener(t *testing.T) {
 	if !strings.Contains(out, "collect ok") {
 		t.Errorf("collect output missing clean verdict:\n%s", out)
 	}
-	if !strings.Contains(out, "listener appeared during the run") || !strings.Contains(out, "18981") {
+	// The whole address, not the number: `:1898` is a prefix of `:18981`, so a
+	// one-number check can be satisfied by the other listener's port. The form
+	// is what /proc/net/tcp prints — loopback in hex, the port in decimal.
+	if !strings.Contains(out, "listener appeared during the run") || !strings.Contains(out, "0100007F:"+strconv.Itoa(port)) {
 		t.Errorf("daemonized listener not surfaced:\n%s", out)
 	}
-	if strings.Contains(out, "18982") {
-		t.Errorf("pre-existing listener 18982 was flagged — the spawn baseline comparison over-blocks:\n%s", out)
+	if strings.Contains(out, "0100007F:"+strconv.Itoa(prePort)) {
+		t.Errorf("the pre-existing listener %d was flagged — the spawn baseline comparison over-blocks:\n%s", prePort, out)
 	}
+}
+
+// freePorts asks the kernel for n ports nothing is holding, for a test that
+// needs a real listener on a number it can name to the fixture and then look
+// for in the output. Binding :0 and closing is the only way to ask; the port is
+// free when it is asked for, which is what these tests need and what a constant
+// does not give them.
+//
+// The n sockets are held at once and closed together, so the returned ports are
+// pairwise distinct. Asking twice in sequence could return a number the kernel
+// had just handed back, and this fixture needs two listeners that are not each
+// other: the pre-existing one must not be sitting on the port the Worker's
+// daemonized listener is about to claim.
+func freePorts(t *testing.T, n int) []int {
+	t.Helper()
+	held := make([]net.Listener, 0, n)
+	defer func() {
+		for _, l := range held {
+			if err := l.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}()
+	ports := make([]int, 0, n)
+	for range n {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, l)
+		ports = append(ports, l.Addr().(*net.TCPAddr).Port)
+	}
+	return ports
 }
 
 // TestWorkerCollectFailedWorker: a Worker that exits nonzero is collected as
