@@ -1077,7 +1077,11 @@ func TestTheWorkSurvivalCheckReportsALossAndSaysNothingAboutOneThatIsNotOne(t *t
 
 	loss := func(entries []snapshotEntry, regenerated []string) string {
 		t.Helper()
-		err := verifyTheWorkSurvived(f.worktree, keep, f.baseline, entries, regenerated)
+		// The same commit on both sides: nothing in this fixture is in the
+		// baseline and the target at once with different bytes, so "what main
+		// has" and "what the base has" are the same question here. The merge
+		// with a main that moved is T9022, through RebaselineTask.
+		err := verifyTheWorkSurvived(f.worktree, keep, f.baseline, f.baseline, entries, regenerated)
 		if err == nil {
 			return ""
 		}
@@ -1322,7 +1326,7 @@ func TestRebaselineLeavesNoKeptCopyWhenTheSnapshotCannotBeTaken(t *testing.T) {
 	f.mainRewritesTheSameRegion() // a refusal is coming either way
 
 	real := snapshot
-	snapshot = func(string, map[string]bool, string) ([]snapshotEntry, error) {
+	snapshot = func(string, string, string, map[string]bool, string) ([]snapshotEntry, error) {
 		return nil, errors.New("the snapshot could not be taken")
 	}
 	defer func() { snapshot = real }()
@@ -1384,5 +1388,274 @@ func TestRebaselineADirectoryReplacedByAFileOnAMainThatMoved(t *testing.T) {
 	}
 	if got := readFileOrFail(t, legacy); got != "the task put a file where the directory was\n" {
 		t.Errorf("internal/legacy came back as %q", got)
+	}
+}
+
+// mainAddsItsOwnFileAt advances main with a new tracked FILE at the path given —
+// the shape where the target commit has a file exactly where the task may have
+// put a directory.
+func (f *rebaselineFixture) mainAddsItsOwnFileAt(rel string) string {
+	f.t.Helper()
+	p := filepath.Join(f.root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("main's own file\n"), 0o644); err != nil {
+		f.t.Fatal(err)
+	}
+	f.git(f.root, "add", "-A")
+	f.git(f.root, "commit", "-q", "-m", "main added a file where the task has a directory")
+	return f.git(f.root, "rev-parse", "HEAD")
+}
+
+// mainChangesTheSameFileElsewhere is the clean merge: main edits the SAME file
+// the task edited, in a different region of it, so neither change is lost and
+// neither side is overwritten.
+func (f *rebaselineFixture) mainChangesTheSameFileElsewhere() string {
+	f.t.Helper()
+	p := filepath.Join(f.root, "tests", "acceptance", "gate.sh")
+	base := readFileOrFail(f.t, p)
+	if err := os.WriteFile(p, []byte(base+"\nprobe_main() { echo \"main's own probe\"; }\n"), 0o755); err != nil {
+		f.t.Fatal(err)
+	}
+	f.git(f.root, "add", "-A")
+	f.git(f.root, "commit", "-q", "-m", "main added its own probe to the gate script")
+	return f.git(f.root, "rev-parse", "HEAD")
+}
+
+// A file both sides changed, in different places, is the ordinary clean merge —
+// and the advance has to carry BOTH changes, because it applies the task's
+// change TO MAIN rather than replacing main with the task's copy.
+//
+// The check that ran before this one compared the merged file against the
+// task's own copy and refused when they differed, which is precisely what a
+// merge makes them do. The refusal came with "the advance did not carry the
+// task's work across" — the opposite of what had happened — and it could never
+// be resolved by reworking the task, because there was nothing wrong with it.
+func TestRebaselineCarriesBothChangesToTheSameFile(t *testing.T) {
+	f := newRebaselineFixture(t, "T9022")
+	newMain := f.mainChangesTheSameFileElsewhere()
+
+	res, err := RebaselineTask(f.root, "T9022", "", "")
+	if err != nil {
+		t.Fatalf("a clean merge of two changes to one file was refused: %v", err)
+	}
+	if res.ToSHA != newMain {
+		t.Errorf("the advance landed on %s, want %s", res.ToSHA, newMain)
+	}
+	got := readFileOrFail(t, filepath.Join(f.worktree, "tests", "acceptance", "gate.sh"))
+	for _, want := range []string{"probe_hmac", "probe_main"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the advanced gate script does not hold %s — one side's change was dropped:\n%s", want, got)
+		}
+	}
+	if kept := f.keptDirs(); len(kept) != 0 {
+		t.Errorf("a completed advance left %v behind", kept)
+	}
+}
+
+// A file inside the directory that replaced a tracked path can be named TWICE:
+// once by the task's own path list (it is untracked and not ignored, so
+// `ls-files --others` lists it) and once by the walk that records what is inside
+// that directory. Recording it twice would put two lines in the manifest and two
+// entries in Files — a report of one path as two, which is how a measurement
+// stops agreeing with what it measures.
+//
+// The name ends in a space on purpose: it is the shape a comparison that trims
+// whitespace gets wrong, and nothing between the path list and the manifest may
+// trim it here either.
+func TestTheWalkDoesNotRecordAPathTwice(t *testing.T) {
+	f := newRebaselineFixture(t, "T9023")
+	// The task replaces the tracked scripts/helper.sh with a directory holding
+	// one file — untracked, not ignored, so git names it.
+	if err := os.Remove(filepath.Join(f.worktree, "scripts", "helper.sh")); err != nil {
+		t.Fatal(err)
+	}
+	const inner = "scripts/helper.sh/scratch/notes "
+	f.write(inner, "named twice if the walk forgets what the path list took\n", 0o644)
+
+	paths, err := worktreeChangedPaths(f.worktree, f.baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !paths[inner] {
+		t.Fatalf("the fixture is not the shape this test is about: %q is not in the task's path list", inner)
+	}
+	head := f.git(f.worktree, "rev-parse", "HEAD")
+	keep := t.TempDir()
+	entries, err := snapshotWorktree(f.worktree, head, f.baseline, paths, keep)
+	if err != nil {
+		t.Fatalf("the snapshot refused a tree it has to be able to record: %v", err)
+	}
+
+	n := 0
+	for _, e := range entries {
+		if e.Path == inner {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("the snapshot holds %d entries for %s; the path list took it, so the walk must leave it alone", n, inner)
+	}
+	manifest := readFileOrFail(t, filepath.Join(keep, "MANIFEST.txt"))
+	if got := strings.Count(manifest, inner); got != 1 {
+		t.Errorf("the manifest names %s %d times:\n%s", inner, got, manifest)
+	}
+	if !strings.Contains(manifest, inner) {
+		t.Errorf("the manifest does not name %s at all — the name was trimmed somewhere between the path list and the file:\n%s", inner, manifest)
+	}
+}
+
+// A fifo inside a directory a reset deletes is content the restore has to put
+// back AS a fifo. Recorded as a "dir" — which is what the default arm of the
+// snapshot did with it — it came back as an empty directory: the refusal says
+// the tree was put back the way it was found and hands back a different tree.
+// (The fifo is only ever reached through the walk: git does not list one at all,
+// so `ls-files --others` never names it and the path list never holds it.)
+func TestRebaselinePutsBackAFifoAsAFifo(t *testing.T) {
+	f := newRebaselineFixture(t, "T9024")
+	f.mainMovesElsewhere()
+	f.write(".gitignore", "scratch/\n", 0o644)
+	if err := os.Remove(filepath.Join(f.worktree, "scripts", "helper.sh")); err != nil {
+		t.Fatal(err)
+	}
+	const hidden = "an ignored file the task left\n"
+	f.write("scripts/helper.sh/scratch/x.txt", hidden, 0o644)
+	pipe := filepath.Join(f.worktree, "scripts", "helper.sh", "scratch", "pipe")
+	if err := syscall.Mkfifo(pipe, 0o644); err != nil {
+		t.Fatalf("making the fifo the fixture is about: %v", err)
+	}
+
+	// The ignored content cannot travel in a patch, so the advance refuses —
+	// which is what makes the restore, and the fifo's kind, the thing under test.
+	_, err := RebaselineTask(f.root, "T9024", "", "")
+	if err == nil {
+		t.Fatal("the advance succeeded with the task's ignored content deleted")
+	}
+	if !strings.Contains(err.Error(), "did not carry the task's work across") {
+		t.Fatalf("a different refusal reached this test: %v", err)
+	}
+	if got := readFileOrFail(t, filepath.Join(f.worktree, "scripts", "helper.sh", "scratch", "x.txt")); got != hidden {
+		t.Errorf("the restore left the ignored file as %q", got)
+	}
+	st, err := os.Lstat(pipe)
+	if err != nil {
+		t.Fatalf("the fifo is gone after the refusal: %v", err)
+	}
+	if st.Mode()&os.ModeNamedPipe == 0 {
+		t.Errorf("the task's fifo came back as %v — the refusal reports a tree put back the way it was found", st.Mode())
+	}
+	// Nothing opened it: a fifo with no writer blocks the reader forever, which
+	// is why the kept copy holds no bytes for one.
+	if got := st.Mode().Perm(); got != 0o644 {
+		t.Errorf("the fifo came back with mode %04o, want 0644", got)
+	}
+}
+
+// A socket is a rendezvous rather than content: there is nothing to keep and
+// nothing to put back, and calling it a directory — which is what the snapshot's
+// default arm did — is a refusal that reports a tree put back and hands back a
+// different one. The advance refuses instead, and refuses in the SNAPSHOT, which
+// runs before the reset: the tree still holds everything and the copy is not yet
+// the only copy.
+//
+// This drives the snapshot directly rather than through RebaselineTask: a unix
+// socket's address is at most about a hundred bytes and the fixture's root is a
+// path as long as the test's own name, so the socket is made where there is
+// room. What the advance-level refusal does about the tree and the copy is
+// T9020's shape, which drives the snapshot failing for any reason at all.
+func TestTheSnapshotRefusesASocketRatherThanCallingItADirectory(t *testing.T) {
+	root, err := os.MkdirTemp("", "rd-sock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(root) }()
+	sock := filepath.Join(root, "s")
+	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatalf("making the socket the fixture is about: %v", err)
+	}
+	defer func() { _ = syscall.Close(fd) }()
+	if err := syscall.Bind(fd, &syscall.SockaddrUnix{Name: sock}); err != nil {
+		t.Fatalf("binding %s: %v", sock, err)
+	}
+	fifo := filepath.Join(root, "p")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	keep := t.TempDir()
+	_, err = snapshotOne(root, keep, "s")
+	if err == nil {
+		t.Fatal("a socket was recorded as something it can be restored into")
+	}
+	for _, want := range []string{"s is a socket", "Nothing has been touched"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(keep, "files", "s")); !os.IsNotExist(err) {
+		t.Errorf("the refused kind was written into the kept copy anyway (%v)", err)
+	}
+	// The fifo is the control: the arm above is a refusal for kinds that cannot
+	// be reproduced, not a refusal of everything that is not a regular file.
+	e, err := snapshotOne(root, keep, "p")
+	if err != nil {
+		t.Fatalf("a fifo was refused as a kind that cannot be carried: %v", err)
+	}
+	if e.State != "fifo" {
+		t.Errorf("a fifo was recorded as %q", e.State)
+	}
+}
+
+// A directory the task created, holding only content the ignore rules cover,
+// standing where the TARGET commit has a file. git cannot name the directory at
+// all — a directory whose whole content is ignored is invisible to `git status`,
+// to `ls-files --others --exclude-standard` and to `git diff` — so it is in no
+// path list, and `reset --hard <target>` deletes it whole to write main's file.
+// The reset is silent about it (that is what ignored means), and the advance
+// was silent too: it succeeded with the task's work deleted.
+//
+// Asking the TASK's HEAD whether it tracks the path is the wrong question here
+// twice over: HEAD has never heard of a file main added after the branch point,
+// and the only reset that matters for the preservation is the one being made to
+// the target. The directors are found by asking both commits instead, which is
+// what makes the refusal below possible at all. (Before that, the walk was
+// triggered from an entry in the path list, and there was never an entry.)
+func TestRebaselineNoticesADirectoryOnlyTheTargetWouldDelete(t *testing.T) {
+	f := newRebaselineFixture(t, "T9026")
+	f.write(".gitignore", "scratch/\n", 0o644) // the task's own ignore rule
+	const hidden = "the task's ignored work\n"
+	inner := filepath.Join(f.worktree, "notes", "scratch", "x.txt")
+	if err := os.MkdirAll(filepath.Dir(inner), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inner, []byte(hidden), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// main's own file, exactly where the task has a directory.
+	newMain := f.mainAddsItsOwnFileAt("notes")
+
+	_, err := RebaselineTask(f.root, "T9026", "", "")
+	if err == nil {
+		t.Fatal("the advance deleted the task's directory of ignored content and reported success")
+	}
+	if !strings.Contains(err.Error(), "did not carry the task's work across") || !strings.Contains(err.Error(), "notes") {
+		t.Fatalf("a different refusal reached this test: %v", err)
+	}
+	if got := readFileOrFail(t, inner); got != hidden {
+		t.Errorf("the refusal kept the work and put it back as %q", got)
+	}
+	if head := f.git(f.worktree, "rev-parse", "HEAD"); head == newMain {
+		t.Errorf("the refused advance left the branch at main's tip %s", head)
+	}
+	// The copy is where the error says the work is kept, and it holds the file.
+	kept := f.keptDirs()
+	if len(kept) != 1 {
+		t.Fatalf("the refusal kept %v; the error names that directory as where the work is", kept)
+	}
+	keptFile := filepath.Join(kept[0], "files", "notes", "scratch", "x.txt")
+	if got, err := os.ReadFile(keptFile); err != nil || string(got) != hidden {
+		t.Errorf("the kept copy of the ignored file is (%q, %v)", got, err)
 	}
 }

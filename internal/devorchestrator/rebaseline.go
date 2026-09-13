@@ -239,8 +239,10 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 	// One armed discard rather than one os.RemoveAll per failure: there were
 	// two, and the third failure added between them would have been the one
 	// nobody removed. Everything that can refuse from here to the reset is
-	// under this defer by construction, and the disarm is a single line after
-	// the reset, which is the point past which the copy is the only copy.
+	// under this defer by construction. The disarm is a single line after the
+	// SNAPSHOT — not after the reset, which is where the comment used to put it
+	// (the fifth round): by then the copy has content, and every failure from the
+	// reset onwards goes through fail(), which keeps it.
 	discard := true
 	defer func() {
 		if discard {
@@ -250,7 +252,7 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 	if err := os.WriteFile(filepath.Join(keep, "change.patch"), []byte(change), 0o600); err != nil {
 		return nil, fmt.Errorf("keeping the task's change at %s: %w", keep, err)
 	}
-	entries, err := snapshot(rec.Worktree, before, keep)
+	entries, err := snapshot(rec.Worktree, head, to, before, keep)
 	if err != nil {
 		return nil, err
 	}
@@ -361,7 +363,7 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 	// Comparing against the kept copy rather than against a set of path names
 	// is what makes the claim about the WORK rather than about its shape; see
 	// verifyTheWorkSurvived for what the set comparison could not see.
-	if err := verifyTheWorkSurvived(rec.Worktree, keep, diffBase, entries, regenerated); err != nil {
+	if err := verifyTheWorkSurvived(rec.Worktree, keep, diffBase, to, entries, regenerated); err != nil {
 		return nil, fail(err)
 	}
 
@@ -410,16 +412,41 @@ var snapshot = snapshotWorktree
 // copy that restores, and it works even when the patch no longer fits — which
 // is precisely the case that reaches it. A path that is tracked and deleted is
 // recorded as "absent": the content is in git and its absence is the change, so
-// restoring means removing the file again. What is inside a directory the task
-// put where a TRACKED path was is copied too: see the loop below.
-func snapshotWorktree(worktree string, paths map[string]bool, keep string) ([]snapshotEntry, error) {
+// restoring means removing the file again.
+//
+// What is recorded is the union of two questions, because the resets that
+// rebuild this worktree destroy two different sets of paths:
+//
+//   - the paths the task changed, which is what the advance has to carry;
+//   - the directories standing where HEAD or the target commit has a FILE. Both
+//     resets — `reset --hard <target>` and the restore's `reset --hard <head>` —
+//     delete such a directory WHOLE, contents and all, because it stands in the
+//     way of the tracked path they are writing. What is inside one is exactly
+//     what git's path lists do not name: content the ignore rules cover, an
+//     empty directory, a fifo. `git status` calls the whole directory ignored,
+//     so nothing in worktreeChangedPaths mentions it, and asking the commits is
+//     the only way it is found at all (T9026 is that shape: the directory is
+//     invisible to git, the target has a file at that path, and without this
+//     the reset deleted the task's work in silence).
+func snapshotWorktree(worktree, head, target string, paths map[string]bool, keep string) ([]snapshotEntry, error) {
 	files := filepath.Join(keep, "files")
 	if err := os.MkdirAll(files, 0o755); err != nil {
 		return nil, fmt.Errorf("creating %s: %w", files, err)
 	}
-	entries := make([]snapshotEntry, 0, len(paths))
+	obstructing, err := obstructedDirs(worktree, head, target)
+	if err != nil {
+		return nil, err
+	}
+	recorded := make(map[string]bool, len(paths)+len(obstructing))
+	for p := range paths {
+		recorded[p] = true
+	}
+	for p := range obstructing {
+		recorded[p] = true
+	}
+	entries := make([]snapshotEntry, 0, len(recorded))
 	var manifest strings.Builder
-	for _, p := range keysOf(paths) { // sorted: the manifest is read by a human
+	for _, p := range keysOf(recorded) { // sorted: the manifest is read by a human
 		if p == "" {
 			continue
 		}
@@ -429,26 +456,14 @@ func snapshotWorktree(worktree string, paths map[string]bool, keep string) ([]sn
 		}
 		entries = append(entries, e)
 		manifest.WriteString(manifestLine(e))
-		// A directory standing where a tracked path is: the task replaced that
-		// path with a directory, and what is inside it is a changed path git
-		// never named — the ignored content `ls-files --others
-		// --exclude-standard` leaves out, and any empty directory it cannot
-		// represent at all. `reset --hard` does not merely leave this directory
-		// alone, it DELETES it, contents and all, because the directory stands
-		// in the way of the tracked path it is restoring. So the content has to
-		// travel with the snapshot or the restore cannot reproduce the tree it
-		// promises to have put back.
-		if e.State != "dir" {
+		// A directory standing where one of those commits has a file: the reset
+		// does not merely leave it alone, it DELETES it to write the tracked
+		// path — so what is inside travels with the snapshot, or the restore
+		// cannot reproduce the tree it promises to have put back.
+		if e.State != "dir" || !obstructing[p] {
 			continue
 		}
-		tracked, err := trackedInHead(worktree, p)
-		if err != nil {
-			return nil, err
-		}
-		if !tracked {
-			continue
-		}
-		sub, err := snapshotDirContents(worktree, files, paths, p)
+		sub, err := snapshotDirContents(worktree, files, recorded, p)
 		if err != nil {
 			return nil, err
 		}
@@ -503,39 +518,85 @@ func snapshotOne(worktree, files, p string) (snapshotEntry, error) {
 			return snapshotEntry{}, fmt.Errorf("keeping %s: %w", p, err)
 		}
 		return snapshotEntry{Path: p, State: "file", Mode: st.Mode().Perm()}, nil
-	default:
+	case st.IsDir():
 		// A directory (a gitlink, or a tracked path the task turned into a
 		// directory) carries no content of its own; its existence is all
 		// there is to restore. What is INSIDE one of these is walked by
 		// snapshotDirContents, which is where a directory the task put where a
 		// tracked path was is handled.
 		//
-		// An EMPTY UNTRACKED directory does not reach here and is not
-		// restored, because it never reaches the path list either: git
-		// cannot represent an empty directory, so `ls-files --others`
-		// omits it, and `clean -fdq` removes it on the advance. This is
-		// git's own boundary rather than an oversight, but it is a case
-		// where a successful advance does not carry everything the task
-		// left behind, so it is written down instead of assumed.
+		// An EMPTY UNTRACKED directory that no reset clears does not reach here
+		// and is not restored, because it never reaches the path list either: git
+		// cannot represent an empty directory, so `ls-files --others` omits it,
+		// and `clean -fdq` removes it on the advance. This is git's own boundary
+		// rather than an oversight, but it is a case where a successful advance
+		// does not carry everything the task left behind, so it is written down
+		// instead of assumed. A directory that a reset WILL clear is a different
+		// matter: it arrives here through obstructedDirs, contents and all.
 		if err := os.MkdirAll(dst, 0o755); err != nil {
 			return snapshotEntry{}, fmt.Errorf("keeping directory %s: %w", p, err)
 		}
 		return snapshotEntry{Path: p, State: "dir"}, nil
+	case st.Mode()&os.ModeNamedPipe != 0:
+		// A fifo. git has no opinion about it — `ls-files --others` does not even
+		// list one — so it is only ever reached through the walk, and it is
+		// content the restore has to reproduce AS what it is. Recorded as a `dir`
+		// it came back as an empty directory: a refusal that says the tree was
+		// put back the way it was found, and hands back a different tree.
+		//
+		// Nothing is written into the kept copy: a fifo has no bytes, and opening
+		// one to copy it would wait for a writer that never comes. The kind and
+		// the mode are in the manifest, which is the document a human reads.
+		return snapshotEntry{Path: p, State: "fifo", Mode: st.Mode().Perm()}, nil
+	default:
+		// A socket or a device node. Neither can be reproduced from a copy: a
+		// socket is a rendezvous rather than content, and a device node needs a
+		// privilege the Supervisor may not have. Recording it as a `dir` and
+		// restoring an empty directory is the defect class this function exists
+		// to close — a restore that reports success and hands back a different
+		// tree — so the advance refuses instead, and refuses HERE: the snapshot
+		// runs before the reset, so the worktree still holds everything it had
+		// and the copy is not yet the only copy.
+		return snapshotEntry{}, fmt.Errorf("%s is a %s, which the advance cannot carry across and will not silently replace with something else — move it out of the way and dispatch again. Nothing has been touched", p, fileKindWord(st.Mode()))
 	}
 }
 
-// snapshotDirContents records everything inside a directory the task put where
-// a tracked path was, for the reason given at its caller: `reset --hard` deletes
-// that directory to restore the tracked path, so nothing inside it survives on
-// its own — and git named none of it, since a path covered by the ignore rules
-// is exactly what `ls-files --others --exclude-standard` omits.
+// fileKindWord names what an Lstat says a path is, for the paths that are not a
+// file, a symlink, a directory or a fifo.
+func fileKindWord(m os.FileMode) string {
+	switch {
+	case m&os.ModeSocket != 0:
+		return "socket"
+	case m&os.ModeDevice != 0 && m&os.ModeCharDevice != 0:
+		return "character device"
+	case m&os.ModeDevice != 0:
+		return "block device"
+	default:
+		return "kind of file this does not handle"
+	}
+}
+
+// snapshotDirContents records everything inside a directory that stands where a
+// reset will write a tracked path, for the reason given at its caller: the reset
+// deletes that directory whole, so nothing inside it survives on its own — and
+// git named none of it, since a path covered by the ignore rules is exactly what
+// `ls-files --others --exclude-standard` omits.
 //
 // The walk is of the FILESYSTEM, not of another git listing, for the reason the
 // guard tests in #99 learned twice over: a listing is a selection criterion
 // written down once, and what it does not name is invisible. A directory inside
 // this one that is empty, a fifo, a symlink — git has no opinion about any of
-// them, and all of them are content the restore would have to invent.
-func snapshotDirContents(worktree, files string, paths map[string]bool, p string) ([]snapshotEntry, error) {
+// them, and every one of them is content the restore would otherwise have to
+// invent. What that "invent" looks like when it is got wrong is in snapshotOne:
+// a fifo came back as an empty directory.
+//
+// recorded holds every path already taken at the top level, and they are skipped
+// here: a file inside this directory can be in the task's path list AND in the
+// walk (an untracked file under a directory that replaced a tracked path is
+// named by `ls-files --others`), and recording it twice would put two lines in
+// the manifest and two entries in the count — a report that says the advance
+// carried two paths where it carried one. T9023 pins it.
+func snapshotDirContents(worktree, files string, recorded map[string]bool, p string) ([]snapshotEntry, error) {
 	var out []snapshotEntry
 	err := filepath.WalkDir(filepath.Join(worktree, filepath.FromSlash(p)), func(full string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -546,7 +607,7 @@ func snapshotDirContents(worktree, files string, paths map[string]bool, p string
 			return rerr
 		}
 		rel = filepath.ToSlash(rel)
-		if rel == "." || paths[rel] {
+		if rel == "." || recorded[rel] {
 			return nil
 		}
 		e, kerr := snapshotOne(worktree, files, rel)
@@ -562,20 +623,78 @@ func snapshotDirContents(worktree, files string, paths map[string]bool, p string
 	return out, nil
 }
 
-// trackedInHead reports whether HEAD has a path exactly at p — the question that
-// decides whether `reset --hard` will delete a directory standing there, since
-// git removes what obstructs the tracked paths it is writing.
-func trackedInHead(worktree, p string) (bool, error) {
-	out, err := gitOutput(worktree, "ls-tree", "--name-only", "-z", "HEAD", "--", p)
-	if err != nil {
-		return false, fmt.Errorf("asking whether HEAD tracks %s: %w", p, err)
-	}
-	for _, name := range strings.Split(out, "\x00") {
-		if strings.TrimSpace(name) == p {
-			return true, nil
+// obstructedDirs names the directories in the worktree that stand where one of
+// the given commits has a FILE. Both resets this function's callers perform do
+// the same thing with such a directory: they delete it whole, contents and all,
+// because it is in the way of the tracked path being written. That is the only
+// reason a directory the ignore rules cover has to be recorded at all.
+//
+// The names come from the commit, not from a pathspec per path: a file name is
+// not a pattern, and asking about a path one at a time is how a name that needs
+// quoting — or a name that is only whitespace apart from another — gets treated
+// as something it is not. `-z` gives the name as it is on disk. A gitlink is
+// skipped: it is a directory on disk, but no reset writes a file over it, and
+// walking into one would be walking into another repository.
+func obstructedDirs(worktree string, revs ...string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, rev := range revs {
+		recs, err := lsTreeRecords(worktree, rev)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range recs {
+			if r.Mode&0o170000 == 0o160000 {
+				continue // a gitlink: a commit pointer, not a path a reset writes
+			}
+			st, err := os.Lstat(filepath.Join(worktree, filepath.FromSlash(r.Path)))
+			if err != nil || !st.IsDir() {
+				continue // nothing stands in the way there
+			}
+			out[r.Path] = true
 		}
 	}
-	return false, nil
+	return out, nil
+}
+
+// lsTreeRecord is one entry of `git ls-tree -r -z <rev>`: the mode, the object
+// holding the content, and the path — which -z gives as the name on disk rather
+// than as git's quoted rendering of it.
+type lsTreeRecord struct {
+	Mode   uint64 // octal, as git records it: 100644, 100755, 120000, 160000
+	Path   string
+	Object string
+}
+
+func lsTreeRecords(worktree, rev string) ([]lsTreeRecord, error) {
+	cmd := exec.Command("git", "ls-tree", "-r", "-z", rev)
+	cmd.Dir = worktree
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("git ls-tree %s: %w: %s", rev, ee, strings.TrimSpace(string(ee.Stderr)))
+		}
+		return nil, fmt.Errorf("git ls-tree %s: %w", rev, err)
+	}
+	var recs []lsTreeRecord
+	for _, rec := range strings.Split(string(out), "\x00") {
+		if rec == "" {
+			continue
+		}
+		meta, p, ok := strings.Cut(rec, "\t")
+		if !ok {
+			continue
+		}
+		fields := strings.Split(meta, " ")
+		if len(fields) != 3 {
+			continue
+		}
+		mode, err := strconv.ParseUint(fields[0], 8, 32)
+		if err != nil {
+			return nil, fmt.Errorf("reading the mode git recorded for %s: %w", p, err)
+		}
+		recs = append(recs, lsTreeRecord{Mode: mode, Path: p, Object: fields[2]})
+	}
+	return recs, nil
 }
 
 // manifestLine is one line of the manifest a human reads after a refusal.
@@ -587,6 +706,8 @@ func manifestLine(e snapshotEntry) string {
 		return fmt.Sprintf("symlink\t-\t%s\n", e.Path)
 	case "dir":
 		return fmt.Sprintf("dir\t-\t%s\n", e.Path)
+	case "fifo":
+		return fmt.Sprintf("fifo\t%04o\t%s\n", e.Mode.Perm(), e.Path)
 	default:
 		return fmt.Sprintf("absent\t-\t%s\n", e.Path)
 	}
@@ -686,6 +807,17 @@ func restoreEntry(worktree, keep string, e snapshotEntry) error {
 		if err := os.MkdirAll(dst, 0o755); err != nil {
 			return fmt.Errorf("recreating the directory %s: %w", e.Path, err)
 		}
+	case "fifo":
+		// Whatever head put at this path has to go first — mkfifo(2) fails with
+		// EEXIST — and what goes back is a fifo, not a directory with the same
+		// name. syscall.Mkfifo is mkfifo(2); os has no wrapper for it, and the
+		// canonical platform here is Linux (CLAUDE.md §7).
+		if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("clearing %s before restoring it: %w", e.Path, err)
+		}
+		if err := syscall.Mkfifo(dst, uint32(e.Mode.Perm())); err != nil {
+			return fmt.Errorf("recreating the fifo %s: %w", e.Path, err)
+		}
 	case "symlink":
 		// WriteFile and MkdirAll follow a symlink and head can hold one here, so
 		// the destination is cleared first: writing "through" it would put the
@@ -722,22 +854,42 @@ func restoreEntry(worktree, keep string, e snapshotEntry) error {
 }
 
 // verifyTheWorkSurvived is the postcondition: after the advance, every path the
-// task changed still holds what the task put there — except the artifacts that
-// are regenerated by construction, whose value is a function of the tree and
-// therefore correct by definition.
+// task changed holds what the advance was supposed to put there — the task's
+// change, merged with whatever main did to the same path — except the artifacts
+// that are regenerated by construction, whose value is a function of the tree
+// and therefore correct by definition.
 //
-// It replaces a comparison of path SETS, which was the wrong instrument twice
-// over. A set of names says nothing about content: the advance could put main's
-// bytes over the task's, or drop the executable bit the task had set, and the
-// sets would still match. And it refused the ordinary case of a change main has
-// since made itself — a path that now matches main is in neither set, so the
-// check called it lost. The kept copy is the exact pre-advance state, so
-// comparing against it is the promise stated rather than inferred.
-func verifyTheWorkSurvived(worktree, keep, base string, entries []snapshotEntry, regenerated []string) error {
+// It replaces a comparison of path SETS, which could not see content at all. It
+// used to compare against the kept copy, which could not see a MERGE: the
+// advance applies the task's change to main, so a path main also changed holds
+// both changes, and the task's copy is not what should be there. That version
+// refused the ordinary clean merge — forever, and with a message saying the
+// advance had not carried the work across, which was the opposite of true
+// (T9022 is that shape, and it is the fifth round's first finding).
+//
+// So the expectation is built independently of the patch: the three-way merge of
+// the same three versions the advance had — main's at the target commit, the
+// merge base's, and the task's. diff3 rather than `git apply`, which makes it a
+// measurement of the result instead of a restatement of the input.
+func verifyTheWorkSurvived(worktree, keep, base, target string, entries []snapshotEntry, regenerated []string) error {
 	skip := map[string]bool{}
 	for _, r := range regenerated {
 		skip[r] = true
 	}
+	// Both trees as git records them. One listing each serves everything below:
+	// the exec bit git gives a path in the base, and the object holding each
+	// path's content on either side of the advance.
+	baseRecs, err := lsTreeRecords(worktree, base)
+	if err != nil {
+		return err
+	}
+	targetRecs, err := lsTreeRecords(worktree, target)
+	if err != nil {
+		return err
+	}
+	baseExec := execBits(baseRecs)
+	baseBlobs := blobIndex(baseRecs)
+	targetBlobs := blobIndex(targetRecs)
 	// Git records WHETHER a file is executable, not how: the one bit it has is
 	// 100755 for any exec bit the task set, and `git apply` writes that mode
 	// masked by the umask, so a file the task left at 0700 comes back 0755. Both
@@ -752,10 +904,6 @@ func verifyTheWorkSurvived(worktree, keep, base string, entries []snapshotEntry,
 	// It is compared only where it is the TASK's own change: where the task left
 	// the mode alone, the mode in the advanced tree is main's, which is a change
 	// main made rather than work the advance lost.
-	baseExec, err := baseExecBits(worktree, base)
-	if err != nil {
-		return err
-	}
 	var lost []string
 	for _, e := range entries {
 		if e.Path == "" || skip[e.Path] {
@@ -769,19 +917,38 @@ func verifyTheWorkSurvived(worktree, keep, base string, entries []snapshotEntry,
 			lost = append(lost, fmt.Sprintf("%s is now %s; the task left it %s", e.Path, state, e.State))
 			continue
 		}
-		if e.State == "dir" || e.State == "absent" {
-			// A directory's existence is the whole of its state here, and an
-			// absent path has just been compared by the line above.
+		if e.State != "file" && e.State != "symlink" {
+			// A directory's existence is the whole of its state here, an absent
+			// path has just been compared by the line above, and a fifo has no
+			// content to compare — there is no kept copy of one, because a fifo
+			// is not bytes.
 			continue
 		}
 		// The kept copy holds what the restore would write back: the bytes of a
-		// file, the target of a symlink. Reading it is reading the snapshot.
+		// file, the target of a symlink. Reading it is reading the snapshot, and
+		// it is one of the three versions the expectation is built from.
 		want, err := os.ReadFile(filepath.Join(keep, "files", filepath.FromSlash(e.Path)))
 		if err != nil {
 			return fmt.Errorf("reading the kept copy of %s: %w", e.Path, err)
 		}
-		if !bytes.Equal(data, want) {
-			lost = append(lost, fmt.Sprintf("%s came back as %s; the task left %s", e.Path, shortDigest(data), shortDigest(want)))
+		expected, why, err := expectedContent(worktree, baseBlobs, targetBlobs, e.Path, want)
+		if err != nil {
+			return err
+		}
+		if why != "" {
+			lost = append(lost, why)
+			continue
+		}
+		if !bytes.Equal(data, expected) {
+			// The words the loss is measured in have to be the true ones: where
+			// main left the path alone the task's own bytes are the whole of what
+			// belongs there, and where main changed it too, what belongs there is
+			// the merge of the two changes.
+			against := fmt.Sprintf("the task left %s", shortDigest(want))
+			if !bytes.Equal(expected, want) {
+				against = fmt.Sprintf("the merge of main's, the base's and the task's copies of it is %s", shortDigest(expected))
+			}
+			lost = append(lost, fmt.Sprintf("%s came back as %s; %s", e.Path, shortDigest(data), against))
 			continue
 		}
 		if e.State == "file" && (mode&0o111 != 0) != (e.Mode&0o111 != 0) {
@@ -826,40 +993,126 @@ func describeState(root, p string) (string, os.FileMode, []byte, error) {
 	}
 }
 
-// baseExecBits returns, for every path git has in base, whether git records it
-// as executable. A path the task created has no entry — it did not exist in
+// execBits returns, for every path git has in a tree, whether git records it as
+// executable. A path the task created has no entry — it did not exist in the
 // base — and the caller judges those by a different rule: git creates a file
 // from a patch with the mode the patch names.
-func baseExecBits(worktree, base string) (map[string]bool, error) {
-	cmd := exec.Command("git", "ls-tree", "-r", "-z", base)
-	cmd.Dir = worktree
+func execBits(recs []lsTreeRecord) map[string]bool {
+	bits := make(map[string]bool, len(recs))
+	for _, r := range recs {
+		bits[r.Path] = r.Mode&0o111 != 0
+	}
+	return bits
+}
+
+// blobIndex maps each path in a tree to the object holding its content.
+func blobIndex(recs []lsTreeRecord) map[string]string {
+	out := make(map[string]string, len(recs))
+	for _, r := range recs {
+		out[r.Path] = r.Object
+	}
+	return out
+}
+
+// expectedContent is what the advanced tree should hold at p, and where that
+// comes from. The task's own copy is one of the three inputs, never the answer:
+// the advance applies the task's change TO MAIN, so a path main also changed
+// holds both changes together, and the task's copy on its own is not what should
+// be there. Comparing against it refused the ordinary clean merge forever, with
+// a message saying the work had come back different.
+//
+// The returned reason is empty when the path is fine, and names the loss when it
+// is not.
+func expectedContent(worktree string, baseBlobs, targetBlobs map[string]string, p string, theirs []byte) ([]byte, string, error) {
+	targetSHA, inTarget := targetBlobs[p]
+	if !inTarget {
+		// Main has nothing at this path. The task's version is the whole of it:
+		// either the task created the path, or main deleted it and the patch
+		// would not have applied.
+		return theirs, "", nil
+	}
+	if baseSHA, inBase := baseBlobs[p]; inBase && baseSHA == targetSHA {
+		// The same object on both sides: main did not touch this path, so the
+		// task's bytes are the whole of the change — and no blob has to be read
+		// to know it. This is also the ordinary case, so it is worth the branch.
+		return theirs, "", nil
+	}
+	ours, err := gitBytes(worktree, "cat-file", "blob", targetSHA)
+	if err != nil {
+		return nil, "", fmt.Errorf("reading what %s holds at the target commit: %w", p, err)
+	}
+	if bytes.Equal(ours, theirs) {
+		return ours, "", nil // both sides hold the same bytes; the merge is those
+	}
+	var base []byte
+	if sha, ok := baseBlobs[p]; ok {
+		if base, err = gitBytes(worktree, "cat-file", "blob", sha); err != nil {
+			return nil, "", fmt.Errorf("reading %s as the merge base has it: %w", p, err)
+		}
+	}
+	// No second look at base is needed before merging: the branch above returned
+	// early when the target's object IS the base's, and two different objects
+	// hold different bytes — a comparison here would be a line nothing can
+	// reach, which is how a check starts reading as coverage it does not have.
+	merged, conflicting, err := mergeTheSameThreeWays(ours, base, theirs)
+	if err != nil {
+		return nil, "", err
+	}
+	if conflicting {
+		return nil, fmt.Sprintf("%s: main and the task changed the same lines of it, and the advance spliced the task's change in where a three-way merge of the same three versions reports a conflict", p), nil
+	}
+	return merged, "", nil
+}
+
+// mergeTheSameThreeWays runs git's own three-way merge (diff3, the algorithm a
+// merge without conflicts uses) on the same three versions, in a scratch
+// directory that is not the worktree: the worktree is being measured, and a
+// measurement that writes into it is not one.
+func mergeTheSameThreeWays(ours, base, theirs []byte) ([]byte, bool, error) {
+	dir, err := os.MkdirTemp("", "rddev-merge")
+	if err != nil {
+		return nil, false, fmt.Errorf("making a scratch directory for the three-way merge: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	paths := make([]string, 0, 3)
+	for i, data := range [][]byte{ours, base, theirs} {
+		p := filepath.Join(dir, []string{"ours", "base", "theirs"}[i])
+		if err := os.WriteFile(p, data, 0o600); err != nil {
+			return nil, false, fmt.Errorf("writing the %s copy for the three-way merge: %w", []string{"ours", "base", "theirs"}[i], err)
+		}
+		paths = append(paths, p)
+	}
+	out, err := exec.Command("git", "merge-file", "-p", paths[0], paths[1], paths[2]).Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			if ee.ExitCode() == 1 {
+				// Exit 1 means the two changes conflict; the output is the merged
+				// text with conflict markers in it, which is a result the advance
+				// must never have produced.
+				return nil, true, nil
+			}
+			return nil, false, fmt.Errorf("git merge-file: %w: %s", ee, strings.TrimSpace(string(ee.Stderr)))
+		}
+		return nil, false, fmt.Errorf("git merge-file: %w", err)
+	}
+	return out, false, nil
+}
+
+// gitBytes is gitOutput for content rather than for a message: gitOutput trims
+// whitespace, and a file's bytes are not a message — the trailing newline is
+// part of what has to match.
+func gitBytes(dir string, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("git ls-tree %s: %w: %s", base, ee, strings.TrimSpace(string(ee.Stderr)))
+			return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), ee, strings.TrimSpace(string(ee.Stderr)))
 		}
-		return nil, fmt.Errorf("git ls-tree %s: %w", base, err)
+		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
-	bits := map[string]bool{}
-	for _, rec := range strings.Split(string(out), "\x00") {
-		if rec == "" {
-			continue
-		}
-		meta, p, ok := strings.Cut(rec, "\t")
-		if !ok {
-			continue
-		}
-		modeStr, _, ok := strings.Cut(meta, " ")
-		if !ok {
-			continue
-		}
-		mode, err := strconv.ParseUint(modeStr, 8, 32)
-		if err != nil {
-			return nil, fmt.Errorf("reading the mode git recorded for %s: %w", p, err)
-		}
-		bits[p] = mode&0o111 != 0
-	}
-	return bits, nil
+	return out, nil
 }
 
 func execWord(m os.FileMode) string {
