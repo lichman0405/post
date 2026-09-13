@@ -210,11 +210,20 @@ func AdoptSupervisorRef(repoRoot, name string) (*SupervisorRef, error) {
 // Spawn records its branch from now on, but a dispatch that predates the ledger
 // has no entry, and a Worker running across the upgrade would otherwise look
 // like a ref its sibling created — a false finding produced by the fix itself.
-// Only branches that the Supervisor's own records name are adopted: the
-// authoritative spawn record first, the Worker-writable registry only as a
-// fallback for pre-T0012 spawns, and only when the ref actually exists. A ref
+// Only branches that the Supervisor's OWN record names are adopted: the
+// authoritative spawn record, and only when the ref actually exists. A ref
 // under a task-shaped name that no dispatch ever recorded stays a finding —
 // which is the whole point of the ledger.
+//
+// The registry is deliberately NOT consulted, though it too names a branch. It
+// lives in .rddev/workers/<TASK>/, a directory the Worker must be able to write
+// (RESULT.json is its deliverable), so a registry-sourced entry would let a
+// Worker nominate the very ref the check exists to report — it would create a
+// branch and then write the record that exempts it. That is the same fail-open
+// as the author-email rule, one level up: a trust anchor sourced from the gated
+// party. A dispatch with no authoritative record is adopted by hand instead
+// (`rddev refs adopt <name>`), which is a Supervisor act on a ref the
+// Supervisor can see.
 func ReconcileSupervisorRefs(repoRoot string) ([]string, error) {
 	// Both dispatch records: the authoritative spawn record lives under
 	// runtime/tasks (T0012), the registry under workers/. A dispatch from an
@@ -242,15 +251,16 @@ func ReconcileSupervisorRefs(repoRoot string) ([]string, error) {
 
 	var recorded []string
 	for _, taskID := range taskIDs {
-		branch := ""
-		if gate, err := LoadGateInputs(repoRoot, taskID); err == nil && gate != nil {
-			branch = gate.Branch
-		} else if rec, err := LoadRegistry(repoRoot, taskID); err == nil && rec != nil {
-			branch = rec.Branch
-		}
-		if branch == "" {
+		// An unreadable or absent authoritative record means "nothing this
+		// dispatch recorded", never "ask the Worker instead": skipping leaves
+		// the ref a finding, which is the fail-closed direction. (Collect treats
+		// an unreadable authoritative record as an error in its own right, so
+		// skipping here cannot hide one.)
+		gate, err := LoadGateInputs(repoRoot, taskID)
+		if err != nil || gate == nil || gate.Branch == "" {
 			continue
 		}
+		branch := gate.Branch
 		ref := "refs/heads/" + branch
 		sha, err := gitOutput(repoRoot, "rev-parse", "--verify", ref)
 		if err != nil {

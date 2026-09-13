@@ -190,7 +190,12 @@ func TestReconcileRecordsDispatchBranchesOnly(t *testing.T) {
 	})); err != nil {
 		t.Fatal(err)
 	}
-	// T9002: no gate inputs — the registry fallback for a pre-T0012 dispatch.
+	// T9002: a dispatch record in the WORKER-WRITABLE registry and nothing in
+	// the authoritative one. The registry names a branch like the spawn record
+	// does, so reading it here would let the gated party nominate its own
+	// exemption: create the branch, write the registry, and the reconcile
+	// records it as the Supervisor's (the security review's finding, one level
+	// up from the author-email rule).
 	if err := SaveRegistry(root, &WorkerRecord{
 		TaskID: "T9002", RunID: "r", Branch: "task/T9002-registry-only",
 		Worktree: root, ResultDir: root, StartedAt: "t",
@@ -203,19 +208,19 @@ func TestReconcileRecordsDispatchBranchesOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(recorded) != 2 {
-		t.Errorf("recorded %v, want the two dispatch branches", recorded)
+	if len(recorded) != 1 || recorded[0] != "refs/heads/task/T9001-real-dispatch" {
+		t.Errorf("recorded %v, want only the dispatch the authoritative record names", recorded)
 	}
 	refs, err := ReadSupervisorRefs(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"refs/heads/task/T9001-real-dispatch", "refs/heads/task/T9002-registry-only"} {
-		if _, ok := refs[want]; !ok {
-			t.Errorf("%s was not recorded by the reconcile", want)
-		}
+	if _, ok := refs["refs/heads/task/T9001-real-dispatch"]; !ok {
+		t.Error("the authoritative dispatch branch was not recorded by the reconcile")
 	}
-	if _, ok := refs["refs/heads/task/T9999-ghost"]; ok {
-		t.Error("the reconcile adopted a task-shaped ref that no dispatch recorded — the ledger would then exempt exactly the refs it exists to catch")
+	for _, bad := range []string{"refs/heads/task/T9999-ghost", "refs/heads/task/T9002-registry-only"} {
+		if _, ok := refs[bad]; ok {
+			t.Errorf("%s was adopted: a ref no authoritative record names (a task-shaped name, or one only the Worker's own registry claims) must stay a finding — the ledger would otherwise exempt exactly the refs it exists to catch", bad)
+		}
 	}
 }

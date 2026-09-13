@@ -27,8 +27,11 @@ collection_invariants:
     spawn, commit and rebaseline record themselves, `rddev refs adopt` records
     anything created by hand, `rddev refs reconcile` covers dispatches that
     predate the ledger, and `rddev refs list` shows the record. Attribution
-    never reads the commit identity — whoever makes a commit chooses its author,
-    so a check that trusted one was forgeable with a single flag)
+    reads Supervisor-owned records only — never a field the gated party can
+    write or choose. The commit identity is one such field, since whoever makes
+    a commit selects its author, so a check that trusted one was forgeable with
+    a single flag; the Worker's registry.json is another, so the reconciliation
+    that seeds the ledger does not read it)
   - every changed path matches allowed_scope
   - RESULT.json validates worker-result.schema.json
   - RESULT.json task_id must equal the collected task

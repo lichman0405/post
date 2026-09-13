@@ -25,10 +25,14 @@ against the Worker it exists to catch.
              for an investigation — so concurrent collects do not report it as a
              Worker-created ref. The sha is read from the ref; an unknown ref is
              an error, never a silent no-op.
-  reconcile  record the task branch of every dispatch on disk that still exists.
-             This is the upgrade path for dispatches that predate the ledger; the
-             driver runs it at startup, and it is available here for a
-             repository whose driver has not been restarted.
+  reconcile  record the task branch of every dispatch whose AUTHORITATIVE spawn
+             record names it and whose branch still exists. This is the upgrade
+             path for dispatches that predate the ledger; the driver runs it at
+             startup, and it is available here for a repository whose driver has
+             not been restarted. The registry under .rddev/workers/ is
+             deliberately not read — the Worker writes there, so a record
+             sourced from it would let the gated party nominate its own
+             exemption.
 
 Spawn, commit and rebaseline record their own refs automatically; adopt is for
 everything else the Supervisor does by hand.
