@@ -579,6 +579,175 @@ func TestG2AndG3DoNotCollideOnOneRunID(t *testing.T) {
 	}
 }
 
+// A G3 step runs in the integration tree — a worktree of main holding only what
+// Git tracks — so the credentials that live only in .env.dev are not there. The
+// Gitea probe is the job that needs one and has no substitute for it: it stops
+// on "POST_GITEA_TOKEN is not set" before any assertion, which makes every task
+// carrying gitea-real-services un-acceptable whatever its work. G3 therefore
+// gets the file's environment. G2 must not: CI has no .env.dev, and a local G2
+// more permissive than the pull request's is the subset-G2 defect arriving
+// through the environment instead of through the job list.
+func TestG3GetsTheDevStackEnvironmentAndG2DoesNot(t *testing.T) {
+	// A name nothing else defines, so "the value arrived" and "the value is the
+	// file's" are the same assertion.
+	const key = "POST_G3_TEST_FILE_ONLY_TOKEN"
+	repoRoot, specPath := writeGateSpec(t, `{
+  "version": 1,
+  "required_jobs": ["job-a"],
+  "gates": {
+    "G1": {"name": "", "description": "", "runs_jobs": []},
+    "G2": {"name": "", "description": "", "runs_jobs": ["job-a"], "asserts_jobs": []},
+    "G3": {"name": "", "description": "", "runs_jobs": ["job-b"], "asserts_jobs": []},
+    "G4": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": ["job-a"]}
+  },
+  "jobs": {
+    "job-a": {"steps": [{"run": "test -z \"${POST_G3_TEST_FILE_ONLY_TOKEN:-}\""}]},
+    "job-b": {"steps": [{"run": "test \"${POST_G3_TEST_FILE_ONLY_TOKEN:-}\" = from-the-file"}]}
+  },
+  "review": {"required_for_merge": false},
+  "task_overrides": {"T0001": {"g3_jobs": ["job-b"]}}
+}`)
+	if err := os.WriteFile(filepath.Join(repoRoot, ".env.dev"), []byte(key+"=from-the-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The step's own command is the assertion, so a failure here is the exit
+	// code; the log is read back only to say which way it went.
+	stepOutput := func(res *GateRunResult) string {
+		t.Helper()
+		data, err := os.ReadFile(res.Jobs[0].Steps[0].OutputFile)
+		if err != nil {
+			return "<no output file: " + err.Error() + ">"
+		}
+		return string(data)
+	}
+
+	g2, err := RunGate(&GateRunOpts{RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001", Gate: "G2", RunID: "r-g2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g2.Status != "passed" {
+		t.Errorf("G2 must NOT see .env.dev — CI has no such file, so a local G2 that has it is a different, more permissive gate than the one that grades the pull request:\n%s", stepOutput(g2))
+	}
+
+	g3, err := RunGate(&GateRunOpts{RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001", Gate: "G3", RunID: "r-g3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g3.Status != "passed" {
+		t.Errorf("G3 must see .env.dev — a job whose script needs a credential that lives only there cannot run at all, and the gate then refuses a task for work it never checked:\n%s", stepOutput(g3))
+	}
+}
+
+// JobEnv is documented as "extra environment for every job", so a caller that
+// sets one is stating the value it wants. The dev-stack file is read by the
+// executor on the caller's behalf, not named by it, so it must not overrule
+// what the caller did name — otherwise the same task grades differently in the
+// driver and in a test that passes JobEnv, with nothing to say which is right.
+func TestG3JobEnvWinsOverTheDevStackFile(t *testing.T) {
+	const key = "POST_G3_TEST_FILE_ONLY_TOKEN"
+	repoRoot, specPath := writeGateSpec(t, `{
+  "version": 1,
+  "required_jobs": ["job-a"],
+  "gates": {
+    "G1": {"name": "", "description": "", "runs_jobs": []},
+    "G2": {"name": "", "description": "", "runs_jobs": ["job-a"], "asserts_jobs": []},
+    "G3": {"name": "", "description": "", "runs_jobs": ["job-b"], "asserts_jobs": []},
+    "G4": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": ["job-a"]}
+  },
+  "jobs": {
+    "job-a": {"steps": [{"run": "true"}]},
+    "job-b": {"steps": [{"run": "test \"${POST_G3_TEST_FILE_ONLY_TOKEN:-}\" = from-the-caller"}]}
+  },
+  "review": {"required_for_merge": false},
+  "task_overrides": {"T0001": {"g3_jobs": ["job-b"]}}
+}`)
+	if err := os.WriteFile(filepath.Join(repoRoot, ".env.dev"), []byte(key+"=from-the-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err := RunGate(&GateRunOpts{
+		RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001", Gate: "G3", RunID: "r-override",
+		JobEnv: map[string]string{key: "from-the-caller"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "passed" {
+		data, readErr := os.ReadFile(res.Jobs[0].Steps[0].OutputFile)
+		t.Errorf("the caller's JobEnv must win over .env.dev; the step neither saw the caller's value nor errored: %v\n%s", readErr, data)
+	}
+}
+
+// A missing file is not a broken one, and must not be: .env.dev is gitignored,
+// so a fresh clone has none, and refusing the gate outright would take G3 from
+// "one job cannot run" to "no task can be graded" for everyone who has not
+// configured the dev stack. The step is left to say what it is missing — the
+// Gitea probe already names the variable, how to mint it and where to put it,
+// which is more than a parse error would.
+func TestG3RunsWithoutADevStackEnvironment(t *testing.T) {
+	repoRoot, specPath := writeGateSpec(t, `{
+  "version": 1,
+  "required_jobs": ["job-a"],
+  "gates": {
+    "G1": {"name": "", "description": "", "runs_jobs": []},
+    "G2": {"name": "", "description": "", "runs_jobs": ["job-a"], "asserts_jobs": []},
+    "G3": {"name": "", "description": "", "runs_jobs": ["job-b"], "asserts_jobs": []},
+    "G4": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": ["job-a"]}
+  },
+  "jobs": {
+    "job-a": {"steps": [{"run": "true"}]},
+    "job-b": {"steps": [{"run": "test -z \"${POST_G3_TEST_FILE_ONLY_TOKEN:-}\""}]}
+  },
+  "review": {"required_for_merge": false},
+  "task_overrides": {"T0001": {"g3_jobs": ["job-b"]}}
+}`)
+	if _, err := os.Stat(filepath.Join(repoRoot, ".env.dev")); err == nil {
+		t.Fatal("the fixture has a .env.dev — this test is about there being none")
+	}
+
+	// An error here would be the whole gate refusing over an unconfigured dev
+	// stack; a failed job would be the step seeing a value that is not on disk.
+	res, err := RunGate(&GateRunOpts{RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001", Gate: "G3", RunID: "r-none"})
+	if err != nil {
+		t.Fatalf("G3 must still run when there is no .env.dev: %v", err)
+	}
+	if res.Status != "passed" {
+		t.Errorf("G3 status = %s, want passed — with no .env.dev there is nothing to inject and the step's own command decides the outcome", res.Status)
+	}
+}
+
+// The file is parsed with the repository's own reader, so a malformed one fails
+// the gate loudly rather than being half-applied: a gate that silently drops the
+// credentials it could not parse is the same un-acceptable-every-task failure as
+// not reading the file at all, with no error to explain it.
+func TestG3RefusesAMalformedDevStackEnvironment(t *testing.T) {
+	repoRoot, specPath := writeGateSpec(t, `{
+  "version": 1,
+  "required_jobs": ["job-a"],
+  "gates": {
+    "G1": {"name": "", "description": "", "runs_jobs": []},
+    "G2": {"name": "", "description": "", "runs_jobs": ["job-a"], "asserts_jobs": []},
+    "G3": {"name": "", "description": "", "runs_jobs": ["job-b"], "asserts_jobs": []},
+    "G4": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": ["job-a"]}
+  },
+  "jobs": {
+    "job-a": {"steps": [{"run": "true"}]},
+    "job-b": {"steps": [{"run": "true"}]}
+  },
+  "review": {"required_for_merge": false},
+  "task_overrides": {"T0001": {"g3_jobs": ["job-b"]}}
+}`)
+	if err := os.WriteFile(filepath.Join(repoRoot, ".env.dev"), []byte("POST_GITEA_TOKEN\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := RunGate(&GateRunOpts{RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001", Gate: "G3", RunID: "r-bad"})
+	if err == nil {
+		t.Fatal("a malformed .env.dev was accepted — the G3 job would have run without the credentials it needs and the failure would be reported as the task's")
+	}
+	if !strings.Contains(err.Error(), ".env.dev") {
+		t.Errorf("the refusal does not name the file: %v", err)
+	}
+}
+
 // A verdict must not outlive the code it judged. Writing approve for one code
 // state and then changing the code — an edit, a rebase, a baseline advance, a
 // merge repair — must invalidate it, not silently carry it forward. The

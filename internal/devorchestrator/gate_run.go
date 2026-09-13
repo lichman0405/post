@@ -2,11 +2,14 @@ package devorchestrator
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/lichman0405/post/internal/config"
 )
 
 // The gate executor (T0012 requirement: "G1/G2/G3/G4 as task metadata and an
@@ -96,6 +99,20 @@ func RunGate(opts *GateRunOpts) (*GateRunResult, error) {
 	// task whose G2 had just passed. The gate belongs in the identity of its
 	// own run.
 	runID = runID + "-" + strings.ToLower(opts.Gate)
+	// G3 grades the local dev stack, and a gate step runs in the integration
+	// tree — a worktree of main holding only what Git tracks. The credentials
+	// that live only in .env.dev are therefore absent, and a job whose script
+	// needs one cannot run at all. See devStackEnv for why G2 must not get
+	// them.
+	extraEnv := opts.JobEnv
+	if opts.Gate == "G3" {
+		devEnv, err := devStackEnv(opts.RepoRoot)
+		if err != nil {
+			return nil, err
+		}
+		// The caller's explicit JobEnv wins over the file.
+		extraEnv = mergeEnv(devEnv, opts.JobEnv)
+	}
 	res := &GateRunResult{TaskID: opts.TaskID, Gate: opts.Gate, RunID: runID, At: nowRFC3339(), Status: "passed"}
 	overallFailed := false
 	for _, jobName := range jobs {
@@ -110,7 +127,7 @@ func RunGate(opts *GateRunOpts) (*GateRunResult, error) {
 				jr.Steps = append(jr.Steps, GateStepResult{Index: i, Run: step.Run, Exit: -1, Skipped: true})
 				continue
 			}
-			sr, err := runGateStep(workDir, opts.RepoRoot, opts.TaskID, runID, jobName, i, step, nil, opts.JobEnv)
+			sr, err := runGateStep(workDir, opts.RepoRoot, opts.TaskID, runID, jobName, i, step, nil, extraEnv)
 			if err != nil {
 				return nil, fmt.Errorf("gate %s job %s step %d: %w", opts.Gate, jobName, i, err)
 			}
@@ -141,6 +158,62 @@ func RunGate(opts *GateRunOpts) (*GateRunResult, error) {
 	}
 	res.RecordPath = path
 	return res, nil
+}
+
+// devStackEnv is the environment a G3 job needs and a G2 job must not have.
+//
+// A gate step runs in the integration tree — `git worktree add <dir> main` plus
+// the task's change — so it holds exactly what Git tracks. `.env.dev` does not
+// travel with it: the file is gitignored, and the credentials that exist only
+// there are therefore missing. One of them has no substitute: the Gitea service
+// token, minted once by `make infra-init` and named nowhere else. The job that
+// probes the Gitea instance stops before its first assertion —
+//
+//	G3 gitea-real-services: FAILED — POST_GITEA_TOKEN is not set.
+//
+// — which is not a failed check but a missing prerequisite. Every task carrying
+// gitea-real-services is then un-acceptable whatever its work, and the refusal
+// reads as that task's defect.
+//
+// The values are read from the repository's own .env.dev at the moment of the
+// run, not inherited from whatever shell started the driver, so a token rotated
+// since the driver started is the one the gate uses.
+//
+// G2 deliberately does NOT get them. G2 re-runs CI's exact steps and CI has no
+// .env.dev; handing the local G2 a file CI does not have would make the local
+// gate more permissive than the one that grades the pull request — the
+// subset-G2 defect this executor exists to prevent, arriving through the
+// environment instead of through the job list.
+func devStackEnv(repoRoot string) (map[string]string, error) {
+	path := filepath.Join(repoRoot, ".env.dev")
+	values, err := config.ParseEnvFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// No dev stack configured here, which is not an error: the
+			// acceptance scripts carry their own defaults and refuse loudly
+			// when a service is missing.
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading %s for the G3 job environment: %w", path, err)
+	}
+	return values, nil
+}
+
+// mergeEnv layers over on top of base without mutating either, so a caller's
+// explicit JobEnv takes precedence over the file. Nil is a valid argument for
+// both and is returned as-is when there is nothing to layer.
+func mergeEnv(base, over map[string]string) map[string]string {
+	if len(over) == 0 {
+		return base
+	}
+	merged := make(map[string]string, len(base)+len(over))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for k, v := range over {
+		merged[k] = v
+	}
+	return merged
 }
 
 // runGateStep executes one step of a CI job the way GitHub Actions does
