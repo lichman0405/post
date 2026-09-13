@@ -25,10 +25,11 @@
 #      say which command did it, but it reasons about git's command line, and
 #      a spelling it mis-parses walks past it (six of them did) — and a
 #      MEASURING net fingerprints the tree's own state (HEAD, its refs, its
-#      config, its files) before and after the run — it needs no grammar, so
-#      nothing can be spelled past it, but it cannot say who did it. The run
-#      fails if either net fires; the self-check below requires the naming net
-#      to name every spelling AND the measuring net to see the write on its own;
+#      config, every entry in the worktree and every entry in .git, by kind)
+#      before and after the run — it needs no grammar, so nothing can be
+#      spelled past it, but it cannot say who did it. The run fails if either
+#      net fires; the self-check below requires the naming net to name every
+#      spelling AND the measuring net to see the write on its own;
 #   4. an environment that redirects git (GIT_DIR) is not a way around any of
 #      it.
 #
@@ -212,13 +213,41 @@ dot_git_state() { # tree -> one record per entry under .git, whatever its type
         esac
       done )
 }
+# Everything in the worktree OUTSIDE .git, every entry, by kind. `git status
+# --porcelain` is not this and cannot be: it collapses a wholly untracked
+# directory to a single `?? dir/` line and never looks inside, and git cannot
+# represent an empty directory at all. That is the region a gate would land in
+# — the Worker's deliverable is untracked by construction, since the task
+# branch's work is uncommitted, and the gate copy itself sits in an untracked
+# `tests/` — so a gate that overwrote the deliverable, or left scratch files
+# beside it, changed nothing porcelain reports. Same shape as dot_git_state,
+# for the same reason: the question "what kind of thing is this" is not
+# answered by the fact that it is under a directory git happens to summarize.
+worktree_state() { # tree -> one record per entry outside .git, whatever its type
+  local t="$1"
+  ( cd "$t" 2>/dev/null || return 0
+    # -prune, not a filter on the print: a path test alone would still walk
+    # into .git and print every entry under it (./.git/config does not match
+    # ./.git), which is dot_git_state's job and not this one's.
+    find . -path ./.git -prune -o -printf '%y %p\0' 2>/dev/null | sort -z | \
+      while IFS= read -r -d '' rec; do
+        local kind="${rec%% *}" path="${rec#* }"
+        case "$kind" in
+          f) printf '%s %s %s;' "$kind" "$path" \
+               "$(sha256sum -- "$path" 2>/dev/null | cut -d' ' -f1)" ;;
+          l) printf '%s %s ->%s;' "$kind" "$path" "$(readlink -- "$path" 2>/dev/null)" ;;
+          *) printf '%s %s %s;' "$kind" "$path" "$(stat -c '%a:%s' -- "$path" 2>/dev/null)" ;;
+        esac
+      done )
+}
 tree_state() { # tree -> state string
   local t="$1"
-  printf '%s|%s|%s|%s|%s' \
+  printf '%s|%s|%s|%s|%s|%s' \
     "$(git -C "$t" rev-parse HEAD 2>/dev/null)" \
     "$(git -C "$t" for-each-ref --format='%(refname)=%(objectname)' 2>/dev/null | sort | tr '\n' ';')" \
     "$(sha256sum "$t/.git/config" 2>/dev/null | cut -d' ' -f1)" \
     "$(git -C "$t" status --porcelain 2>/dev/null | tr '\n' ';')" \
+    "$(worktree_state "$t")" \
     "$(dot_git_state "$t")"
 }
 
@@ -611,10 +640,10 @@ fi
 # the gate for the life of the host.
 BROKEN="$WORK/broken"
 mkdir -p "$BROKEN"
-python3 - "$GATE" "$BROKEN/gate.sh" "$BROKEN/gate-shell.sh" <<'PY'
+python3 - "$GATE" "$BROKEN/gate.sh" "$BROKEN/gate-shell.sh" "$BROKEN/gate-worktree.sh" <<'PY'
 import sys
 src = open(sys.argv[1]).read()
-out, shell_out = sys.argv[2], sys.argv[3]
+out, shell_out, worktree_out = sys.argv[2], sys.argv[3], sys.argv[4]
 probe = '# a probe the nets must not miss\n'
 cases = [
     # The first seven: a `-C` into a subdirectory, an absolute --git-dir, a
@@ -712,8 +741,28 @@ shell_probes = [
     ': > "$ROOT/.git/refs/index"\n',
 ]
 open(shell_out, "w").write(src.replace(anchor, probe + "".join(shell_probes) + anchor, 1))
+
+# And three more of the same kind OUTSIDE .git, where the fingerprint looked
+# only through `git status --porcelain`. Porcelain collapses a wholly untracked
+# directory to one `?? dir/` line and never looks inside it, and git cannot
+# represent an empty directory at all — so the region the gate actually lands
+# in, the one holding the Worker's uncommitted deliverable and the gate's own
+# copy, was the region nothing digested. A gate that overwrote the deliverable
+# or littered its directory changed nothing this net could see, and the suite
+# said the tree was untouched.
+worktree_probes = [
+    # The deliverable itself: an untracked file, so overwriting it is invisible
+    # to porcelain.
+    'printf "the gate overwrote the deliverable\\n" > "$ROOT/internal/config/deliverable.txt"\n',
+    # A new file inside an untracked directory: visible to `-uall` as an entry,
+    # invisible to plain porcelain, and its CONTENT invisible either way.
+    'printf "x\\n" > "$ROOT/tests/acceptance/g3-extra.sh"\n',
+    # A directory git cannot represent at all, in the tree's root.
+    'mkdir -p "$ROOT/g3-empty-root"\n',
+]
+open(worktree_out, "w").write(src.replace(anchor, probe + "".join(worktree_probes) + anchor, 1))
 PY
-chmod +x "$BROKEN/gate.sh" "$BROKEN/gate-shell.sh"
+chmod +x "$BROKEN/gate.sh" "$BROKEN/gate-shell.sh" "$BROKEN/gate-worktree.sh"
 # The mutations have to be in the tree under test for the nets to have
 # something to find, so the gate is copied into a tree of its own.
 TREE="$WORK/tree-e"
@@ -779,6 +828,42 @@ if (( S_PARSE == 0 )); then
   ok "no command was logged for any of them, so the naming net was blind to them by construction"
 else
   fail "the naming net claims to have judged a write that ran no command at all: $SHELLONLY"
+fi
+
+# The same question one region out. The five above are all inside .git; these
+# three are in the worktree, which the net reached only through porcelain — and
+# porcelain is not a fingerprint: it summarizes a wholly untracked directory in
+# one line, and sees no directory git cannot represent. This is the region the
+# gate lands in, since the Worker's deliverable and the gate's own copy are both
+# untracked, so a write here was the most likely one and the least visible.
+TREE="$WORK/tree-h"
+new_tree "$TREE"
+cp "$BROKEN/gate-worktree.sh" "$TREE/tests/acceptance/gitea-real-services-e2e.sh"
+WORKTREEONLY="$(judge_tree "$TREE")"
+W_MUT="${WORKTREEONLY%%$'\t'}"; W_REST="${WORKTREEONLY#*$'\t'}"
+W_PARSE="${W_REST%%$'\t'*}"; W_REST="${W_REST#*$'\t'}"
+W_MEASURED="${W_REST%%$'\t'*}"; W_DETAIL="${W_REST#*$'\t'}"
+if (( W_MEASURED == 1 )); then
+  ok "the measuring net saw writes in the worktree, not only inside .git"
+else
+  fail "3 shell-level writes went into the worktree outside .git and the measuring net saw nothing: $WORKTREEONLY"
+fi
+w_unseen=""
+for shape in "internal/config/deliverable.txt" "tests/acceptance/g3-extra.sh" "g3-empty-root"; do
+  case "$W_DETAIL" in
+    *"$shape"*) ;;
+    *) w_unseen="$w_unseen [$shape]" ;;
+  esac
+done
+if [[ -z "$w_unseen" ]]; then
+  ok "the measuring net named all three: the overwritten untracked deliverable, the file left in an untracked directory, and the empty directory"
+else
+  fail "the measuring net did not report:$w_unseen — it reached the worktree through 'git status --porcelain', which summarizes an untracked directory instead of reading it and cannot see an empty one: $WORKTREEONLY"
+fi
+if (( W_PARSE == 0 )); then
+  ok "no command was logged for any of them either, so only the fingerprint could have seen them"
+else
+  fail "the naming net claims to have judged a worktree write that ran no command at all: $WORKTREEONLY"
 fi
 
 # The other half of a naming net's worth: one that accuses a correct gate is a
