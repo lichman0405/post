@@ -67,8 +67,13 @@ case "$mode" in
 		# leaves an environment-scrubbing daemon listening: it escapes both
 		# the session (setsid) and the run marker (env -i) — the warn-only
 		# class collect surfaces but does not reject.
+		#
+		# FAKE_CLAUDE_PORT is required, not defaulted: this test used to hardcode
+		# 18981 here, and a default would quietly restore it for any caller that
+		# forgets — which is the whole defect, in one line. There is no sensible
+		# default for "a port nothing else is using".
 		write_result '[]'
-		env -i PATH=/usr/bin:/bin setsid sh -c 'echo $$ > "$1"; exec python3 -m http.server "${2:-18981}" --bind 127.0.0.1' sh "$POST_WORKER_RESULT_DIR/listener.pid" "${FAKE_CLAUDE_PORT:-18981}" >/dev/null 2>&1 &
+		env -i PATH=/usr/bin:/bin setsid sh -c 'echo $$ > "$1"; exec python3 -m http.server "${2:?the listener fixture needs a port}" --bind 127.0.0.1' sh "$POST_WORKER_RESULT_DIR/listener.pid" "${FAKE_CLAUDE_PORT:?the listener fixture needs FAKE_CLAUDE_PORT}" >/dev/null 2>&1 &
 		exec sleep "${FAKE_CLAUDE_SECONDS:-2}" ;;
 esac
 `
