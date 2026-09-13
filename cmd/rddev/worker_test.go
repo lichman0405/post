@@ -336,6 +336,20 @@ func TestWorkerSpawnTwoConcurrentWorkers(t *testing.T) {
 func TestWorkerCrashRecordedNotCompleted(t *testing.T) {
 	fakeClaudePath(t, "crash")
 	repo := fakeRepo(t)
+	// The second spawn below is still running when the test returns, and
+	// `t.TempDir` removes the directory on the way out. The two race: the
+	// Worker writes under .rddev/workers/T0002 while RemoveAll walks it, and
+	// the run dies in cleanup rather than in an assertion —
+	//
+	//   --- FAIL: TestWorkerCrashRecordedNotCompleted (6.38s)
+	//       testing.go:1617: TempDir RemoveAll cleanup: unlinkat
+	//       /tmp/TestWorkerCrashRecordedNotCompleted…/.rddev/workers/T0002:
+	//       directory not empty
+	//
+	// measured once in 40 runs of this test alone and once in 3 full-package
+	// runs. Stop the Workers first: Cleanup is LIFO, and the directory's own
+	// removal was registered inside fakeRepo, so this runs before it.
+	t.Cleanup(func() { stopAll(t, repo) })
 
 	code, out, errOut := runWorkerCLI(t, repo, "worker", "spawn", "T0001")
 	if code != 0 {
