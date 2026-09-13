@@ -17,6 +17,18 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+# Git's environment variables outrank the working directory, and they are
+# inherited: rddev runs a gate with the ambient environment and cwd = the tree
+# under test. With GIT_DIR set, `git init "$WORK/work"` exits 0 having created
+# nothing, the next `git add -A` and `git commit` address the repository it
+# names, and the probe commit lands in the tree this script is grading — the
+# L1-20260913-16 harm, reached before any guard below can refuse it. A commit
+# would already sit on the Worker's branch by the time the end-of-run check
+# noticed. Every git command here addresses its repository by path (-C, a cwd,
+# an explicit init target); none of them may be redirected from outside.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_COMMON_DIR
+
 # The tree this script runs in is under test-adjacent conditions, not a scratch
 # space: the G3 gate runs it from inside a task worktree. Its state is therefore
 # captured here and asserted unchanged at the end — a gate that quietly mutates
