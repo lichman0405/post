@@ -136,11 +136,22 @@ var canonicalTables = map[string]tableExp{
 	"projects": {
 		// provision_status is the T0104 addition (00019): every new project
 		// is provision-pending until T0301 provisions the GitProvider repo.
+		// The consistency CHECK is the T0301 addition (00022); the failure
+		// reason deliberately has no projects column (see 00022's header).
 		cols:    []colExp{c("id", u, false, true), c("organization_id", u, true, false), c("program_id", u, true, false), c("slug", txt, false, false), c("name", txt, false, false), c("purpose", txt, false, false), c("activity_status", txt, false, true), c("visibility", txt, false, false), c("main_frozen", bl, false, true), c("git_repository_external_id", txt, true, false), c("created_by", u, false, false), c("created_at", ts, false, true), c("provision_status", txt, false, true)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"organization_id", "slug"}},
-		checks:  []string{"activity_status = ANY", "visibility = ANY", "provision_status = ANY"},
+		checks:  []string{"activity_status = ANY", "visibility = ANY", "provision_status = ANY", "provision_status <> 'provisioned'"},
 		fks:     []fkExp{fk("organization_id", "organizations", "RESTRICT"), fk("program_id", "programs", "SET NULL"), fk("created_by", "users", "RESTRICT")},
+	},
+	"git_repository_provisions": {
+		// T0301 (00022): the platform→GitProvider repository mapping and the
+		// push-webhook HMAC secret. project_id PK IS the project→repo 1:1
+		// invariant.
+		cols:    []colExp{c("project_id", u, false, false), c("owner", txt, false, false), c("name", txt, false, false), c("gitea_repo_id", i8, false, false), c("webhook_id", i8, false, false), c("webhook_secret", txt, false, false), c("provisioned_at", ts, false, true)},
+		pk:      []string{"project_id"},
+		uniques: [][]string{{"owner", "name"}},
+		fks:     []fkExp{fk("project_id", "projects", "RESTRICT")},
 	},
 	"project_memberships": {
 		cols:   []colExp{c("project_id", u, false, false), c("user_id", u, false, false), c("role", txt, false, false), c("created_at", ts, false, true)},
@@ -379,30 +390,51 @@ var explicitIndexes = map[string][]string{
 	"audit_log_actor_occurred_idx":        {"actor_id", "occurred_at"},
 }
 
-// headVersion is the number of migrations in infra/migrations, DERIVED from the
-// embedded set rather than hand-maintained. A hardcoded number silently
-// invalidated three tests the first time a migration was added (T0013's 00014,
-// then its TRUNCATE follow-up 00015); deriving it means the tests track the
-// head automatically and can never go stale.
-var headVersion = func() int64 {
+// migrationVersions returns the numeric prefix of every embedded
+// migration file. Derived, never hand-maintained (see appliedAbove); the
+// prefix is the version the runner records when it applies the file.
+func migrationVersions() []int64 {
 	entries, err := migrations.FS.ReadDir(".")
 	if err != nil {
 		panic("reading embedded migrations: " + err.Error())
 	}
-	var n int64
+	var out []int64
 	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".sql") {
+		if !strings.HasSuffix(e.Name(), ".sql") {
+			continue
+		}
+		var v int64
+		for _, r := range e.Name() {
+			if r < '0' || r > '9' {
+				break
+			}
+			v = v*10 + int64(r-'0')
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// appliedAbove counts the embedded migrations with a prefix above floor —
+// the exact set the runner applies next from a database at floor. Sparse
+// numbering (parallel tasks holding reserved numbers) makes "head - floor"
+// wrong, so the count comes from the same embedded set the runner uses.
+func appliedAbove(floor int64) int64 {
+	var n int64
+	for _, v := range migrationVersions() {
+		if v > floor {
 			n++
 		}
 	}
 	return n
-}()
+}
 
 // maxVersionNo is the highest migration version NUMBER in infra/migrations,
-// DERIVED like headVersion. The two differ once the numbering space has
-// gaps: the Supervisor reserves numbers for parallel Workers (T0202 was
-// assigned 00024 while 00021-00023 were held for others), so goose's
-// max(version_id) is the largest number, not the file count.
+// DERIVED from the embedded set, like appliedAbove. "Highest number" and
+// "file count" differ once the numbering space has gaps: the Supervisor
+// reserves numbers for parallel Workers (T0202 was assigned 00024 while
+// 00021-00023 were held for others), so goose's max(version_id) is the
+// largest number, not the file count.
 var maxVersionNo = func() int64 {
 	entries, err := migrations.FS.ReadDir(".")
 	if err != nil {
@@ -559,8 +591,8 @@ func TestUpgradePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upgrade path: migrate to head: %v", err)
 	}
-	if applied != headVersion-6 {
-		t.Errorf("upgrade path: applied %d on the way to head, want %d", applied, headVersion-6)
+	if applied != appliedAbove(6) {
+		t.Errorf("upgrade path: applied %d on the way to head, want %d", applied, appliedAbove(6))
 	}
 	if v := appliedVersion(t, ctx, pool); v != maxVersionNo {
 		t.Fatalf("upgrade path: version after head = %d, want %d", v, maxVersionNo)
@@ -612,16 +644,17 @@ func TestMigrationVersionCounterBackfill(t *testing.T) {
 		// for parallel Workers): scientific_objects exists but has no
 		// current_version_no column, so the seed can only reach the counter
 		// through the version log.
+		intermediate := int64(20)
 		pool, url := testdb.SetupEmpty(t, ctx, adminURL(t), taskID)
-		toIntermediate, err := persistence.MigrateTo(ctx, url, 20)
+		toIntermediate, err := persistence.MigrateTo(ctx, url, intermediate)
 		if err != nil {
 			t.Fatalf("00024 backfill: migrate to 20: %v", err)
 		}
-		if toIntermediate != 20 {
-			t.Errorf("00024 backfill: applied %d to reach version 20, want 20", toIntermediate)
+		if toIntermediate != intermediate {
+			t.Errorf("00024 backfill: applied %d to reach version %d, want %d", toIntermediate, intermediate, intermediate)
 		}
-		if v := appliedVersion(t, ctx, pool); v != 20 {
-			t.Fatalf("00024 backfill: version after MigrateTo(20) = %d, want 20", v)
+		if v := appliedVersion(t, ctx, pool); v != intermediate {
+			t.Fatalf("00024 backfill: version after MigrateTo(%d) = %d, want %d", intermediate, v, intermediate)
 		}
 
 		// Seed rows written BEFORE the migration: three objects whose
@@ -660,13 +693,16 @@ func TestMigrationVersionCounterBackfill(t *testing.T) {
 		objEmpty := seedObject()
 
 		// Continue to head: 00024's backfill UPDATE must set each counter
-		// from the version log that exists at that moment.
+		// from the version log that exists at that moment. The applied count
+		// comes from the embedded set (appliedAbove), not "head - 20":
+		// numbering is sparse (21 and 23 are reserved; T0301's 00022 sits
+		// between), and the runner applies exactly the files that exist.
 		toHead, err := persistence.Migrate(ctx, url)
 		if err != nil {
 			t.Fatalf("00024 backfill: migrate to head: %v", err)
 		}
-		if toHead != headVersion-toIntermediate {
-			t.Errorf("00024 backfill: applied %d on the way to head, want %d", toHead, headVersion-toIntermediate)
+		if toHead != appliedAbove(intermediate) {
+			t.Errorf("00024 backfill: applied %d on the way to head, want %d", toHead, appliedAbove(intermediate))
 		}
 		if v := appliedVersion(t, ctx, pool); v != maxVersionNo {
 			t.Fatalf("00024 backfill: version after head = %d, want %d", v, maxVersionNo)
@@ -704,16 +740,18 @@ func TestMigrationVersionCounterBackfill(t *testing.T) {
 		// landed, so scientific_objects carries its counter here — the
 		// relation backfill must read relation_versions, not the object
 		// pointer.
+		intermediate := int64(24)
 		pool, url := testdb.SetupEmpty(t, ctx, adminURL(t), taskID)
-		toIntermediate, err := persistence.MigrateTo(ctx, url, 24)
+		_, err := persistence.MigrateTo(ctx, url, intermediate)
 		if err != nil {
 			t.Fatalf("00025 backfill: migrate to 24: %v", err)
 		}
-		// No exact applied count here: if the reserved numbers 21-23 land
-		// later they are <= 24 and would ride along. The semantic check is
-		// the version.
-		if v := appliedVersion(t, ctx, pool); v != 24 {
-			t.Fatalf("00025 backfill: version after MigrateTo(24) = %d, want 24", v)
+		// No exact applied count here: migrations numbered <= 24 that are
+		// not 00025 itself ride along (T0301's 00022 does today; the
+		// reserved numbers 21-23 would, if they land later). The semantic
+		// check is the version.
+		if v := appliedVersion(t, ctx, pool); v != intermediate {
+			t.Fatalf("00025 backfill: version after MigrateTo(%d) = %d, want %d", intermediate, v, intermediate)
 		}
 
 		// Seed rows written BEFORE the migration: the two scientific-object
@@ -770,13 +808,17 @@ func TestMigrationVersionCounterBackfill(t *testing.T) {
 		relEmpty := seedRelation()
 
 		// Continue to head: 00025's backfill UPDATE must set each counter
-		// from the relation_versions log that exists at that moment.
+		// from the relation_versions log that exists at that moment. The
+		// applied count is appliedAbove(intermediate) — the embedded files
+		// numbered above 24 — not "head - 24": maxVersionNo is the largest
+		// numeric prefix (sparse numbering: 21/23 reserved, 00022 present),
+		// and the runner applies exactly the files that exist.
 		toHead, err := persistence.Migrate(ctx, url)
 		if err != nil {
 			t.Fatalf("00025 backfill: migrate to head: %v", err)
 		}
-		if toHead != headVersion-toIntermediate {
-			t.Errorf("00025 backfill: applied %d on the way to head, want %d", toHead, headVersion-toIntermediate)
+		if toHead != appliedAbove(intermediate) {
+			t.Errorf("00025 backfill: applied %d on the way to head, want %d", toHead, appliedAbove(intermediate))
 		}
 		if v := appliedVersion(t, ctx, pool); v != maxVersionNo {
 			t.Fatalf("00025 backfill: version after head = %d, want %d", v, maxVersionNo)
