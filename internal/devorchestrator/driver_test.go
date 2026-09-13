@@ -213,3 +213,35 @@ func TestTheLoopRevisitsVerificationAndAccepted(t *testing.T) {
 		t.Error("a todo task was treated as needing action — that is what the DAG's dependencies are for")
 	}
 }
+
+// A derived artifact is a FUNCTION of its inputs, so merging it as text is
+// meaningless: the branch's copy restores a digest describing the branch's old
+// specs, and main's drops the task's spec edits. Rebaseline regenerates them
+// instead — which requires knowing how. A new derived artifact without a
+// regenerator would make the advance refuse at the moment it is needed, so the
+// gap is asserted here, where it is cheap.
+func TestEveryDerivedArtifactHasARegenerator(t *testing.T) {
+	root := repoRootOf(t)
+	derived, err := LoadDerivedArtifacts(filepath.Join(root, DefaultDerivedArtifactsPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range derived.Rules {
+		gen, ok := regenerators[r.Derived]
+		if !ok {
+			t.Errorf("%s is declared derived from %s with no regenerator — rebaseline would refuse to advance any task that touches it. Add one to regenerators in rebaseline.go", r.Derived, r.Marker)
+			continue
+		}
+		// And both commands must exist, or the refusal happens at the worst
+		// time — the write during an advance, the check right after it.
+		for _, cmd := range [][]string{gen.Write, gen.Check} {
+			if len(cmd) < 2 {
+				t.Errorf("%s has a malformed regenerator %v", r.Derived, cmd)
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(root, cmd[1])); err != nil {
+				t.Errorf("the regenerator for %s runs %q, which does not exist: %v", r.Derived, cmd[1], err)
+			}
+		}
+	}
+}
