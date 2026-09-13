@@ -481,14 +481,32 @@ func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
 			fmt.Fprintf(&b, "Binary files /dev/null and b/%s differ\n", p)
 			continue
 		}
-		body := strings.TrimSuffix(string(data), "\n")
+		body := string(data)
 		if body == "" {
+			// An empty new file: the header above creates it and there is
+			// nothing to carry, which is also what `git diff` writes.
 			continue
 		}
+		// Reproduce the last line's newline state, not just the lines. A patch
+		// hunk ends every line with "\n" and says so when the file does not:
+		// without the marker a file that ends at its last byte arrives with one
+		// more. The canonical schemas are exactly this shape (specs/schemas/
+		// *.json end with a closing brace and no newline), and this string is
+		// not only the review input — prepareIntegrationTree applies it to
+		// build the tree G2 verifies, so a lost byte here makes the gate judge
+		// a tree that is not the one it claims to, and a byte-equality drift
+		// check reddens on a change that is correct.
+		endsWithNewline := strings.HasSuffix(body, "\n")
 		lines := strings.Split(body, "\n")
+		if endsWithNewline {
+			lines = lines[:len(lines)-1]
+		}
 		fmt.Fprintf(&b, "@@ -0,0 +1,%d @@\n", len(lines))
 		for _, l := range lines {
 			b.WriteString("+" + l + "\n")
+		}
+		if !endsWithNewline {
+			b.WriteString("\\ No newline at end of file\n")
 		}
 	}
 	return b.String(), nil

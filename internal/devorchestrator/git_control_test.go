@@ -206,6 +206,75 @@ func TestWorktreeDiffIncludesUntrackedFiles(t *testing.T) {
 	}
 }
 
+// The same string is not only the review input: prepareIntegrationTree writes
+// it out and applies it to build the tree G2 and G3 verify. So the property
+// that has to hold is that APPLYING it reproduces the worktree byte for byte —
+// checking the text for a marker would pass on a patch that still loses a
+// byte. A file that ends at its last byte (every canonical schema does: they
+// end with a closing brace) must not arrive with a newline added, and an empty
+// file must arrive empty rather than as a one-line file, and a file of one
+// blank line must not arrive empty.
+func TestWorktreeDiffReproducesTheWorktreeByteForByte(t *testing.T) {
+	dir := t.TempDir()
+	runGitIn := func(where string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = where
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, where, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGitIn(dir, "init", "-q")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(dir, "add", "-A")
+	runGitIn(dir, "commit", "-q", "-m", "baseline")
+	baseline := runGitIn(dir, "rev-parse", "HEAD")
+
+	files := map[string]string{
+		"tracked.txt":  "after\n",    // modified, newline at the end
+		"no_eol.json":  "{\"a\": 1}", // the shape every specs/schemas file has
+		"empty.txt":    "",
+		"blank.txt":    "\n",
+		"with_eol.txt": "a\nb\n",
+		"one_byte.txt": "x",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	diff, err := taskWorktreeDiff(&WorkerRecord{Worktree: dir, BaselineSHA: baseline})
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied := filepath.Join(t.TempDir(), "applied")
+	runGitIn(dir, "worktree", "add", "-q", "--detach", applied, baseline)
+	patch := filepath.Join(t.TempDir(), "change.patch")
+	if err := os.WriteFile(patch, []byte(diff), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(applied, "apply", patch)
+
+	for name, want := range files {
+		got, err := os.ReadFile(filepath.Join(applied, name))
+		if err != nil {
+			t.Errorf("%s: the patch did not reproduce the file: %v", name, err)
+			continue
+		}
+		if string(got) != want {
+			t.Errorf("%s: applying the diff produced %q, the worktree holds %q — the tree the gate verifies would not be the tree the task produced", name, got, want)
+		}
+	}
+}
+
 // The untracked paths come from the Worker's own tree, so following a symlink
 // would let the Worker make the SUPERVISOR read an arbitrary file and embed it
 // in the review input — a durable artifact. Lstat, never Stat: a symlink is
