@@ -306,3 +306,62 @@ func writeWorktreeRecord(t *testing.T, repoRoot string) {
 		t.Fatal(err)
 	}
 }
+
+// After a baseline is advanced (a rework onto a newer main), the recorded
+// baseline IS the merge commit, so diffing against it shows only what changed
+// since — while the task's earlier work sits inside the baseline. T0103's
+// review input collapsed to 5 files out of a 27-file task that way. The review
+// unit must be the branch's contribution, which is the same diff the pull
+// request shows.
+func TestWorktreeDiffSurvivesABaselineAdvance(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(dir, "base.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "-q", "-m", "base")
+
+	// The task branch: its deliverable, committed.
+	git("checkout", "-q", "-b", "task/T0001-x")
+	if err := os.WriteFile(filepath.Join(dir, "task_deliverable.go"), []byte("package task\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "-q", "-m", "task work")
+
+	// main moves on, then the baseline is advanced by merging it in.
+	git("checkout", "-q", "main")
+	if err := os.WriteFile(filepath.Join(dir, "unrelated.txt"), []byte("main moved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "-q", "-m", "main moved")
+	git("checkout", "-q", "task/T0001-x")
+	git("merge", "-q", "--no-edit", "main")
+	advanced := git("rev-parse", "HEAD")
+
+	diff, err := taskWorktreeDiff(&WorkerRecord{Worktree: dir, BaselineSHA: advanced})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "task_deliverable.go") {
+		t.Errorf("the task's own deliverable is missing once the baseline was advanced — a Reviewer would be handed a fragment of a task and asked to approve the whole:\n%s", diff)
+	}
+	if strings.Contains(diff, "unrelated.txt") {
+		t.Errorf("main's own changes leaked into the review of the task:\n%s", diff)
+	}
+}
