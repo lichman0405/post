@@ -347,8 +347,9 @@ func TestWorkerCrashRecordedNotCompleted(t *testing.T) {
 	//       directory not empty
 	//
 	// measured once in 40 runs of this test alone and once in 3 full-package
-	// runs. Stop the Workers first: Cleanup is LIFO, and the directory's own
-	// removal was registered inside fakeRepo, so this runs before it.
+	// runs. Stop the Workers first: Cleanup is LIFO, and the cleanup that
+	// removes the whole tree is registered by the *first* t.TempDir() call in
+	// the test — fakeClaudePath's, not fakeRepo's — so this runs before it.
 	t.Cleanup(func() { stopAll(t, repo) })
 
 	code, out, errOut := runWorkerCLI(t, repo, "worker", "spawn", "T0001")
@@ -591,6 +592,15 @@ func TestWorkerGuardFilesGeneratedWithIsolation(t *testing.T) {
 	fakeClaudePath(t, "write")
 	t.Setenv("FAKE_CLAUDE_SECONDS", "2")
 	repo := fakeRepo(t)
+	// The Worker spawned below sleeps 2s and this test returns in about one,
+	// so it is still running when `t.TempDir` removes the tree — the same race
+	// TestWorkerCrashRecordedNotCompleted was fixed for: the reaper writes
+	// exit.status under .rddev/runtime/tasks/T0001 after RemoveAll has walked
+	// past, which leaks a tree in $TMPDIR and fails the run when the write
+	// lands mid-walk. Measured 3 leftovers in 5 isolated runs before this.
+	// Every assertion in this test is made before teardown, so stopping the
+	// Worker here changes no verdict.
+	t.Cleanup(func() { stopAll(t, repo) })
 
 	code, _, errOut := runWorkerCLI(t, repo, "worker", "spawn", "T0001")
 	if code != 0 {
