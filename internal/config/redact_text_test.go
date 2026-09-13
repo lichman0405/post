@@ -113,9 +113,100 @@ func TestRedactTextForOutputRedactsEachRule(t *testing.T) {
 			in:   "scope violation: internal/foo/x.go is outside allowed_scope",
 			want: "scope violation: internal/foo/x.go is outside allowed_scope",
 		},
+		// The prefixed assignment names. `\b` cannot see these: the character
+		// before the keyword is `_`, a word character, so there is no boundary
+		// to anchor on and the value was never masked at all.
+		{
+			what: "a prefixed password name",
+			in:   "make test POST_DB_PASSWORD=hunter2 POST_GITEA_TOKEN=another",
+			want: "make test POST_DB_PASSWORD=*** POST_GITEA_TOKEN=***",
+		},
+		{
+			what: "an unprefixed PGPASSWORD",
+			in:   "PGPASSWORD=hunter2 psql -h db",
+			want: "PGPASSWORD=*** psql -h db",
+		},
+		{
+			what: "a JSON assignment",
+			in:   `{"user": "u", "password": "hunter2"}`,
+			want: `{"user": "u", "password": ***}`,
+		},
+		{
+			what: "a YAML assignment",
+			in:   "database:\n  password: hunter2\n  port: 5432",
+			want: "database:\n  password: ***\n  port: 5432",
+		},
+		{
+			what: "an Authorization header",
+			in:   "curl -H 'Authorization: Bearer hunter2' $URL",
+			want: "curl -H 'Authorization: Bearer ***' $URL",
+		},
+		{
+			what: "a flag with its value as the next argument",
+			in:   "mytool --password hunter2 --verbose",
+			want: "mytool --password *** --verbose",
+		},
 	}
 	for _, tc := range cases {
 		if got := RedactTextForOutput(tc.in); got != tc.want {
+			t.Errorf("%s:\n  in   %q\n  got  %q\n  want %q", tc.what, tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestRedactTextForOutputRedactsAUserinfoThatSpansWhitespace pins the gap that
+// the per-token splitter opened. RedactURL needs both the "://" and the "@" to
+// see a userinfo at all, and splitting on whitespace can put them in different
+// tokens — so the credential was handed back untouched, and committed. The old
+// whole-string rule happened to catch these, which is what made it a weakening
+// rather than a gap that had always been there.
+//
+// Wrapping a shell line is how this happens for real: a pasted DSN broken after
+// the colon, with the continuation sitting between the credential and its host.
+func TestRedactTextForOutputRedactsAUserinfoThatSpansWhitespace(t *testing.T) {
+	cases := []struct{ what, in, want string }{
+		{
+			what: "a shell line continuation inside the userinfo",
+			in:   "POSTGRES_TEST_ADMIN_URL=postgres://postgres:" + proseCredential + "\\\n@127.0.0.1:5432/post go test -count=1 ./tests/integration/",
+			want: "POSTGRES_TEST_ADMIN_URL=postgres://postgres:***@127.0.0.1:5432/post go test -count=1 ./tests/integration/",
+		},
+		{
+			what: "a tab between the user and the password",
+			in:   "dsn=postgres://postgres:\t" + proseCredential + "@127.0.0.1:5432/post",
+			want: "dsn=postgres://postgres:***@127.0.0.1:5432/post",
+		},
+		{
+			what: "a space between the user and the password",
+			in:   "dsn=postgres://postgres:" + proseCredential + " @127.0.0.1:5432/post",
+			want: "dsn=postgres://postgres:***@127.0.0.1:5432/post",
+		},
+		{
+			what: "a token-only userinfo split across the newline",
+			in:   "clone https://ghp_AAAAAAAAAAAAAAAAAAAAAAAA\\\n@github.com/o/r.git",
+			want: "clone https://***@github.com/o/r.git",
+		},
+		// The two shapes that must NOT be touched, and the reason the rule is
+		// narrow: absorbing the following token whenever the run has an "@"
+		// would redact a host and delete the middle of a line that contains no
+		// credential — which is precisely the old bug this function replaced.
+		{
+			what: "a complete URL with no userinfo, followed by an email address",
+			in:   "PGURL=postgres://h/db go test --to dev@example.com",
+			want: "PGURL=postgres://h/db go test --to dev@example.com",
+		},
+		{
+			what: "a host:port that is not a userinfo, followed by an email address",
+			in:   "PGURL=postgres://host:5432 go test --to dev@example.com",
+			want: "PGURL=postgres://host:5432 go test --to dev@example.com",
+		},
+	}
+	for _, tc := range cases {
+		got := RedactTextForOutput(tc.in)
+		if strings.Contains(got, proseCredential) {
+			t.Errorf("%s: the credential survived:\n  in   %q\n  got  %q", tc.what, tc.in, got)
+		}
+		// The sha rule is not what is under test here; only the exact shape is.
+		if tc.want != "" && got != tc.want {
 			t.Errorf("%s:\n  in   %q\n  got  %q\n  want %q", tc.what, tc.in, got, tc.want)
 		}
 	}

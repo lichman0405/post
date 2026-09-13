@@ -492,8 +492,19 @@ func TestPersistedReasonsCarryNoCredentialAndLoseNoText(t *testing.T) {
 	drive(t, s, "T1003", StateRunning)
 
 	const credential = "hunter2"
+	// Two more shapes an adversarial review of this change found leaking, and
+	// both belong here rather than only in the unit test, because the property
+	// that matters is about the FILE: a credential in a persisted reason is
+	// committed, and nothing downstream re-reads it. Distinct values so a
+	// failure names which shape got through.
+	const (
+		prefixedCredential = "hunter3" // POST_DB_PASSWORD=hunter3 — `\b` cannot see the key
+		wrappedCredential  = "hunter4" // the userinfo's "@" lands on the next line
+	)
 	reason := "G2 failed: out of scope internal/foo/bar.go\n" +
 		"command: POSTGRES_TEST_ADMIN_URL=postgres://postgres:" + credential + "@127.0.0.1:5432/post go test -count=1 ./tests/integration/\n" +
+		"env: POST_DB_PASSWORD=" + prefixedCredential + " POST_GITEA_TOKEN=" + prefixedCredential + "\n" +
+		"wrapped: PGURL=postgres://postgres:" + wrappedCredential + "\\\n@127.0.0.1:5432/post\n" +
 		"ref " + strings.Repeat("a", 40)
 
 	if _, err := s.Transition("T1003", StateRejected, NewRunID(), reason); err != nil {
@@ -503,8 +514,10 @@ func TestPersistedReasonsCarryNoCredentialAndLoseNoText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(raw, []byte(credential)) {
-		t.Errorf("the credential reached the committed state file:\n%s", raw)
+	for _, secret := range []string{credential, prefixedCredential, wrappedCredential} {
+		if bytes.Contains(raw, []byte(secret)) {
+			t.Errorf("the credential %q reached the committed state file:\n%s", secret, raw)
+		}
 	}
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &top); err != nil {

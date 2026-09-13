@@ -300,6 +300,16 @@ type TransitionResult struct {
 	At     string `json:"at"`
 }
 
+// persistedReason is how a reason reaches a committed file. Every writer of
+// ts.History and ts.RejectionReason goes through here, so the redaction is a
+// property of the store rather than of one method: Transition carries the
+// reasoning below, and StartWorkerFrom — which appends its own history entry
+// without one — calls the same function, because "the reason is already
+// redacted" is a claim about the file, not about the caller.
+func persistedReason(reason string) string {
+	return config.RedactTextForOutput(reason)
+}
+
 // Transition applies id -> to under the exclusive lock: it validates the
 // transition against the current state (re-read after acquiring the lock),
 // appends a history entry carrying runID, and commits with an atomic rename.
@@ -333,7 +343,7 @@ func (s *Store) Transition(id string, to State, runID, reason string) (*Transiti
 	// RESULT.json is authored by the Worker in its own worktree and reaches the
 	// repository through the task PR, not through this store. Redacting it
 	// needs a collect-time pass over a file this package does not write.
-	reason = config.RedactTextForOutput(reason)
+	reason = persistedReason(reason)
 	var result *TransitionResult
 	err := s.mutate(id, func(ts *TaskState, from State, states map[string]State) error {
 		if err := checkTransition(id, from, to); err != nil {
