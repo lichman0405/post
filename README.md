@@ -30,3 +30,4 @@
 先读：`PROJECT_REPOSITORY.md` → `START_HERE.md` → `docs/64_UBUNTU_DEV_ENV.md` → `BOOTSTRAP_PROMPT.md`。
 
 产品定义以 `docs/01...19` 为准；开发实现以 `CLAUDE.md`、ADR、`docs/20+`、`tasks/tasks.json` 和 machine specs 为准。
+should not land
