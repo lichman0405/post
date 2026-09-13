@@ -587,6 +587,246 @@ func TestUpgradePath(t *testing.T) {
 	compareCatalog(t, upgraded, want)
 }
 
+// ---------------------------------------------------------------------------
+//  4. Version-counter backfills (00024/00025): the T0102 'data-level upgrade
+//     check' shape, applied to the two counter migrations. Each phase brings
+//     a database to the last version BEFORE its migration, writes version-log
+//     rows through raw SQL (the pre-migration schema has no counter column to
+//     lean on yet), then upgrades to head and asserts every seeded object's
+//     current_version_no equals the specific head of its own log — concrete
+//     values, not row counts. Deleting the backfill UPDATE from either
+//     migration must turn its phase red.
+func TestMigrationVersionCounterBackfill(t *testing.T) {
+	t.Run("00024 scientific objects", func(t *testing.T) {
+		ctx := testCtx(t)
+
+		// Version 20 is the last migration before 00024 (21-23 are reserved
+		// for parallel Workers): scientific_objects exists but has no
+		// current_version_no column, so the seed can only reach the counter
+		// through the version log.
+		pool, url := testdb.SetupEmpty(t, ctx, adminURL(t), taskID)
+		toIntermediate, err := persistence.MigrateTo(ctx, url, 20)
+		if err != nil {
+			t.Fatalf("00024 backfill: migrate to 20: %v", err)
+		}
+		if toIntermediate != 20 {
+			t.Errorf("00024 backfill: applied %d to reach version 20, want 20", toIntermediate)
+		}
+		if v := appliedVersion(t, ctx, pool); v != 20 {
+			t.Fatalf("00024 backfill: version after MigrateTo(20) = %d, want 20", v)
+		}
+
+		// Seed rows written BEFORE the migration: three objects whose
+		// version logs have different depths — one with three versions, one
+		// with two, one with none (its counter must stay at the column
+		// default, 0).
+		projectID, stateID, userID := seedCounterGraph(t, ctx, pool, "24")
+		seedObject := func() string {
+			t.Helper()
+			var id string
+			if err := pool.QueryRow(ctx,
+				`INSERT INTO scientific_objects (project_id, object_type, created_by)
+				 VALUES ($1, 'dataset', $2) RETURNING id`, projectID, userID).Scan(&id); err != nil {
+				t.Fatalf("00024 backfill: seed object: %v", err)
+			}
+			return id
+		}
+		seedVersion := func(objectID string, versionNo int) {
+			t.Helper()
+			if _, err := pool.Exec(ctx, `INSERT INTO scientific_object_versions
+				(object_id, version_no, state_id, schema_id, schema_version, title,
+				 lifecycle_state, payload, integrity_hash, created_by)
+				VALUES ($1, $2, $3, 'core/dataset', '1.0', 'Dataset', 'active',
+				        '{}'::jsonb, 'ih-counter', $4)`,
+				objectID, versionNo, stateID, userID); err != nil {
+				t.Fatalf("00024 backfill: seed version %d: %v", versionNo, err)
+			}
+		}
+		objDeep := seedObject()
+		seedVersion(objDeep, 1)
+		seedVersion(objDeep, 2)
+		seedVersion(objDeep, 3)
+		objShallow := seedObject()
+		seedVersion(objShallow, 1)
+		seedVersion(objShallow, 2)
+		objEmpty := seedObject()
+
+		// Continue to head: 00024's backfill UPDATE must set each counter
+		// from the version log that exists at that moment.
+		toHead, err := persistence.Migrate(ctx, url)
+		if err != nil {
+			t.Fatalf("00024 backfill: migrate to head: %v", err)
+		}
+		if toHead != headVersion-toIntermediate {
+			t.Errorf("00024 backfill: applied %d on the way to head, want %d", toHead, headVersion-toIntermediate)
+		}
+		if v := appliedVersion(t, ctx, pool); v != maxVersionNo {
+			t.Fatalf("00024 backfill: version after head = %d, want %d", v, maxVersionNo)
+		}
+
+		// Data-level upgrade check: each pre-migration object's counter must
+		// equal the specific head of ITS OWN version log.
+		wantCounter := map[string]int32{objDeep: 3, objShallow: 2, objEmpty: 0}
+		for objectID, want := range wantCounter {
+			var counter, logMax int32
+			if err := pool.QueryRow(ctx, `
+				SELECT o.current_version_no,
+				       COALESCE((SELECT max(v.version_no)
+				                   FROM scientific_object_versions v
+				                  WHERE v.object_id = o.id), 0)
+				  FROM scientific_objects o
+				 WHERE o.id = $1`, objectID).Scan(&counter, &logMax); err != nil {
+				t.Fatalf("00024 backfill: probe counter: %v", err)
+			}
+			if counter != logMax {
+				t.Errorf("00024 backfill: object %s: current_version_no = %d, want max(version_no) = %d",
+					objectID, counter, logMax)
+			}
+			if counter != want {
+				t.Errorf("00024 backfill: object %s: current_version_no = %d, want %d", objectID, counter, want)
+			}
+		}
+	})
+
+	t.Run("00025 relations", func(t *testing.T) {
+		ctx := testCtx(t)
+
+		// Version 24 is the last migration before 00025: relations exists
+		// but has no current_version_no column yet. 00024 has already
+		// landed, so scientific_objects carries its counter here — the
+		// relation backfill must read relation_versions, not the object
+		// pointer.
+		pool, url := testdb.SetupEmpty(t, ctx, adminURL(t), taskID)
+		toIntermediate, err := persistence.MigrateTo(ctx, url, 24)
+		if err != nil {
+			t.Fatalf("00025 backfill: migrate to 24: %v", err)
+		}
+		// No exact applied count here: if the reserved numbers 21-23 land
+		// later they are <= 24 and would ride along. The semantic check is
+		// the version.
+		if v := appliedVersion(t, ctx, pool); v != 24 {
+			t.Fatalf("00025 backfill: version after MigrateTo(24) = %d, want 24", v)
+		}
+
+		// Seed rows written BEFORE the migration: the two scientific-object
+		// endpoints relation_versions references, then three relations whose
+		// version logs have different depths — one with two versions, one
+		// with one, one with none (its counter must stay at the column
+		// default, 0).
+		projectID, stateID, userID := seedCounterGraph(t, ctx, pool, "25")
+		seedEndpoint := func() string {
+			t.Helper()
+			var objectID, versionID string
+			if err := pool.QueryRow(ctx,
+				`INSERT INTO scientific_objects (project_id, object_type, created_by)
+				 VALUES ($1, 'dataset', $2) RETURNING id`, projectID, userID).Scan(&objectID); err != nil {
+				t.Fatalf("00025 backfill: seed endpoint object: %v", err)
+			}
+			if err := pool.QueryRow(ctx, `INSERT INTO scientific_object_versions
+				(object_id, version_no, state_id, schema_id, schema_version, title,
+				 lifecycle_state, payload, integrity_hash, created_by)
+				VALUES ($1, 1, $2, 'core/dataset', '1.0', 'Dataset', 'active',
+				        '{}'::jsonb, 'ih-counter', $3) RETURNING id`,
+				objectID, stateID, userID).Scan(&versionID); err != nil {
+				t.Fatalf("00025 backfill: seed endpoint version: %v", err)
+			}
+			return versionID
+		}
+		sourceV := seedEndpoint()
+		targetV := seedEndpoint()
+		seedRelation := func() string {
+			t.Helper()
+			var id string
+			if err := pool.QueryRow(ctx,
+				`INSERT INTO relations (project_id) VALUES ($1) RETURNING id`, projectID).Scan(&id); err != nil {
+				t.Fatalf("00025 backfill: seed relation: %v", err)
+			}
+			return id
+		}
+		seedVersion := func(relationID string, versionNo int) {
+			t.Helper()
+			if _, err := pool.Exec(ctx, `INSERT INTO relation_versions
+				(relation_id, version_no, state_id, relation_type,
+				 source_object_version_id, target_object_version_id,
+				 payload, integrity_hash, created_by)
+				VALUES ($1, $2, $3, 'depends_on', $4, $5, '{}'::jsonb, 'ih-counter', $6)`,
+				relationID, versionNo, stateID, sourceV, targetV, userID); err != nil {
+				t.Fatalf("00025 backfill: seed version %d: %v", versionNo, err)
+			}
+		}
+		relDeep := seedRelation()
+		seedVersion(relDeep, 1)
+		seedVersion(relDeep, 2)
+		relShallow := seedRelation()
+		seedVersion(relShallow, 1)
+		relEmpty := seedRelation()
+
+		// Continue to head: 00025's backfill UPDATE must set each counter
+		// from the relation_versions log that exists at that moment.
+		toHead, err := persistence.Migrate(ctx, url)
+		if err != nil {
+			t.Fatalf("00025 backfill: migrate to head: %v", err)
+		}
+		if toHead != headVersion-toIntermediate {
+			t.Errorf("00025 backfill: applied %d on the way to head, want %d", toHead, headVersion-toIntermediate)
+		}
+		if v := appliedVersion(t, ctx, pool); v != maxVersionNo {
+			t.Fatalf("00025 backfill: version after head = %d, want %d", v, maxVersionNo)
+		}
+
+		// Data-level upgrade check: each pre-migration relation's counter
+		// must equal the specific head of ITS OWN version log.
+		wantCounter := map[string]int32{relDeep: 2, relShallow: 1, relEmpty: 0}
+		for relationID, want := range wantCounter {
+			var counter, logMax int32
+			if err := pool.QueryRow(ctx, `
+				SELECT r.current_version_no,
+				       COALESCE((SELECT max(v.version_no)
+				                   FROM relation_versions v
+				                  WHERE v.relation_id = r.id), 0)
+				  FROM relations r
+				 WHERE r.id = $1`, relationID).Scan(&counter, &logMax); err != nil {
+				t.Fatalf("00025 backfill: probe counter: %v", err)
+			}
+			if counter != logMax {
+				t.Errorf("00025 backfill: relation %s: current_version_no = %d, want max(version_no) = %d",
+					relationID, counter, logMax)
+			}
+			if counter != want {
+				t.Errorf("00025 backfill: relation %s: current_version_no = %d, want %d", relationID, counter, want)
+			}
+		}
+	})
+}
+
+// seedCounterGraph writes the minimal user → organization → project → branch →
+// state graph that version rows reference (the same shape
+// TestConstraintEnforcement uses), through raw SQL so it works against any
+// intermediate schema. Returns the project, state and user ids.
+func seedCounterGraph(t *testing.T, ctx context.Context, pool interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}, suffix string) (projectID, stateID, userID string) {
+	t.Helper()
+	mustID := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("seed counter graph: %s: %v", sql, err)
+		}
+		return id
+	}
+	userID = mustID(`INSERT INTO users (handle, display_name) VALUES ($1, $1) RETURNING id`, "counter-"+suffix)
+	orgID := mustID(`INSERT INTO organizations (slug, name) VALUES ($1, $1) RETURNING id`, "counter-org-"+suffix)
+	projectID = mustID(`INSERT INTO projects (organization_id, slug, name, purpose, visibility, created_by)
+		VALUES ($1, $2, 'Counter project', 'testing version counter backfill', 'private', $3) RETURNING id`,
+		orgID, "counter-"+suffix, userID)
+	branchID := mustID(`INSERT INTO branches (project_id, name, visibility, git_ref, created_by)
+		VALUES ($1, 'main', 'private', 'refs/heads/main', $2) RETURNING id`, projectID, userID)
+	stateID = mustID(`INSERT INTO project_states (project_id, branch_id, state_hash, manifest_version)
+		VALUES ($1, $2, 'hash-counter', 'v1') RETURNING id`, projectID, branchID)
+	return projectID, stateID, userID
+}
+
 // appliedVersion reads the last applied migration version from the goose
 // bookkeeping table through the pool.
 func appliedVersion(t *testing.T, ctx context.Context, pool interface {
@@ -609,7 +849,7 @@ func appliedVersion(t *testing.T, ctx context.Context, pool interface {
 }
 
 // ---------------------------------------------------------------------------
-//  4. Append-only / constraint enforcement: each constraint must actually
+//  5. Append-only / constraint enforcement: each constraint must actually
 //     REJECT a forbidden UPDATE/DELETE/INSERT, with the exact SQLSTATE —
 //     not merely exist in the catalog.
 func TestConstraintEnforcement(t *testing.T) {
