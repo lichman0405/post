@@ -584,13 +584,17 @@ func TestG2AndG3DoNotCollideOnOneRunID(t *testing.T) {
 // Gitea probe is the job that needs one and has no substitute for it: it stops
 // on "POST_GITEA_TOKEN is not set" before any assertion, which makes every task
 // carrying gitea-real-services un-acceptable whatever its work. G3 therefore
-// gets the file's environment. G2 must not: CI has no .env.dev, and a local G2
-// more permissive than the pull request's is the subset-G2 defect arriving
-// through the environment instead of through the job list.
+// gets the keys listed in devStackEnvKeys. G2 must not: CI has no .env.dev, and a
+// local G2 more permissive than the pull request's is the subset-G2 defect
+// arriving through the environment instead of through the job list.
+//
+// Both steps compare against the literal the file holds, never against "empty".
+// The key is a real one and the machine running this may already have it in the
+// environment — an `-z` assertion would then pass without the file being read at
+// all, and a failure message would blame the wrong thing. Comparing to the
+// literal is also what pins the documented precedence: the file's value is read
+// at run time and must beat whatever the driver's shell was started with.
 func TestG3GetsTheDevStackEnvironmentAndG2DoesNot(t *testing.T) {
-	// A name nothing else defines, so "the value arrived" and "the value is the
-	// file's" are the same assertion.
-	const key = "POST_G3_TEST_FILE_ONLY_TOKEN"
 	repoRoot, specPath := writeGateSpec(t, `{
   "version": 1,
   "required_jobs": ["job-a"],
@@ -601,13 +605,13 @@ func TestG3GetsTheDevStackEnvironmentAndG2DoesNot(t *testing.T) {
     "G4": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": ["job-a"]}
   },
   "jobs": {
-    "job-a": {"steps": [{"run": "test -z \"${POST_G3_TEST_FILE_ONLY_TOKEN:-}\""}]},
-    "job-b": {"steps": [{"run": "test \"${POST_G3_TEST_FILE_ONLY_TOKEN:-}\" = from-the-file"}]}
+    "job-a": {"steps": [{"run": "test \"${POST_GITEA_TOKEN:-}\" != from-the-file"}]},
+    "job-b": {"steps": [{"run": "test \"${POST_GITEA_TOKEN:-}\" = from-the-file"}]}
   },
   "review": {"required_for_merge": false},
   "task_overrides": {"T0001": {"g3_jobs": ["job-b"]}}
 }`)
-	if err := os.WriteFile(filepath.Join(repoRoot, ".env.dev"), []byte(key+"=from-the-file\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoRoot, ".env.dev"), []byte("POST_GITEA_TOKEN=from-the-file\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// The step's own command is the assertion, so a failure here is the exit
@@ -638,13 +642,18 @@ func TestG3GetsTheDevStackEnvironmentAndG2DoesNot(t *testing.T) {
 	}
 }
 
-// JobEnv is documented as "extra environment for every job", so a caller that
-// sets one is stating the value it wants. The dev-stack file is read by the
-// executor on the caller's behalf, not named by it, so it must not overrule
-// what the caller did name — otherwise the same task grades differently in the
-// driver and in a test that passes JobEnv, with nothing to say which is right.
-func TestG3JobEnvWinsOverTheDevStackFile(t *testing.T) {
-	const key = "POST_G3_TEST_FILE_ONLY_TOKEN"
+// The file's other keys must not reach the step. A gate step runs a script out
+// of the tree under test, and whatever is in its environment is readable by that
+// script and lands in the step's captured output the first time anything prints,
+// fails or dumps state — so exposing the whole file to satisfy one job's need
+// for a token leaks the database password and the blob secret by accident rather
+// than by intent.
+//
+// This is the regression test for the shape that shipped first: devStackEnv
+// returned every parsed key, and `gitea-real-services` got POST_DB_PASSWORD
+// along with the token it actually needed.
+func TestG3DoesNotGetTheRestOfTheDevStackFile(t *testing.T) {
+	const secret = "super-secret-from-the-file"
 	repoRoot, specPath := writeGateSpec(t, `{
   "version": 1,
   "required_jobs": ["job-a"],
@@ -656,17 +665,78 @@ func TestG3JobEnvWinsOverTheDevStackFile(t *testing.T) {
   },
   "jobs": {
     "job-a": {"steps": [{"run": "true"}]},
-    "job-b": {"steps": [{"run": "test \"${POST_G3_TEST_FILE_ONLY_TOKEN:-}\" = from-the-caller"}]}
+    "job-b": {"steps": [
+      {"run": "test \"${POST_GITEA_TOKEN:-}\" = from-the-file"},
+      {"run": "test \"${POST_DB_PASSWORD:-}\" != super-secret-from-the-file"},
+      {"run": "test \"${POST_BLOB_SECRET_KEY:-}\" != super-secret-from-the-file"}
+    ]}
   },
   "review": {"required_for_merge": false},
   "task_overrides": {"T0001": {"g3_jobs": ["job-b"]}}
 }`)
-	if err := os.WriteFile(filepath.Join(repoRoot, ".env.dev"), []byte(key+"=from-the-file\n"), 0o600); err != nil {
+	env := "POST_GITEA_TOKEN=from-the-file\n" +
+		"POST_DB_PASSWORD=" + secret + "\n" +
+		"POST_BLOB_SECRET_KEY=" + secret + "\n"
+	if err := os.WriteFile(filepath.Join(repoRoot, ".env.dev"), []byte(env), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err := RunGate(&GateRunOpts{RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001", Gate: "G3", RunID: "r-scope"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "passed" {
+		for i, s := range res.Jobs[0].Steps {
+			if s.Exit != 0 {
+				data, _ := os.ReadFile(s.OutputFile)
+				t.Errorf("step %d (%s) exit=%d — a G3 step must get devStackEnvKeys and nothing else from .env.dev:\n%s", i, s.Run, s.Exit, data)
+			}
+		}
+	}
+}
+
+// The exposed set is pinned, so widening it is a deliberate edit with a test
+// that has to be changed too — not a line that quietly rides along with the next
+// key someone adds to .env.dev.
+func TestDevStackEnvKeysIsPinned(t *testing.T) {
+	want := []string{"POST_GITEA_BASE_URL", "POST_GITEA_TOKEN"}
+	if len(devStackEnvKeys) != len(want) {
+		t.Fatalf("devStackEnvKeys = %v, want exactly %v — widening what a G3 step may see needs a reason recorded next to it, not just an entry", devStackEnvKeys, want)
+	}
+	for i, k := range want {
+		if devStackEnvKeys[i] != k {
+			t.Fatalf("devStackEnvKeys = %v, want %v", devStackEnvKeys, want)
+		}
+	}
+}
+
+// JobEnv is documented as "extra environment for every job", so a caller that
+// sets one is stating the value it wants. The dev-stack file is read by the
+// executor on the caller's behalf, not named by it, so it must not overrule
+// what the caller did name — otherwise the same task grades differently in the
+// driver and in a test that passes JobEnv, with nothing to say which is right.
+func TestG3JobEnvWinsOverTheDevStackFile(t *testing.T) {
+	repoRoot, specPath := writeGateSpec(t, `{
+  "version": 1,
+  "required_jobs": ["job-a"],
+  "gates": {
+    "G1": {"name": "", "description": "", "runs_jobs": []},
+    "G2": {"name": "", "description": "", "runs_jobs": ["job-a"], "asserts_jobs": []},
+    "G3": {"name": "", "description": "", "runs_jobs": ["job-b"], "asserts_jobs": []},
+    "G4": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": ["job-a"]}
+  },
+  "jobs": {
+    "job-a": {"steps": [{"run": "true"}]},
+    "job-b": {"steps": [{"run": "test \"${POST_GITEA_TOKEN:-}\" = from-the-caller"}]}
+  },
+  "review": {"required_for_merge": false},
+  "task_overrides": {"T0001": {"g3_jobs": ["job-b"]}}
+}`)
+	if err := os.WriteFile(filepath.Join(repoRoot, ".env.dev"), []byte("POST_GITEA_TOKEN=from-the-file\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	res, err := RunGate(&GateRunOpts{
 		RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001", Gate: "G3", RunID: "r-override",
-		JobEnv: map[string]string{key: "from-the-caller"},
+		JobEnv: map[string]string{"POST_GITEA_TOKEN": "from-the-caller"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -695,7 +765,7 @@ func TestG3RunsWithoutADevStackEnvironment(t *testing.T) {
   },
   "jobs": {
     "job-a": {"steps": [{"run": "true"}]},
-    "job-b": {"steps": [{"run": "test -z \"${POST_G3_TEST_FILE_ONLY_TOKEN:-}\""}]}
+    "job-b": {"steps": [{"run": "test -z \"${POST_GITEA_TOKEN:-}\""}]}
   },
   "review": {"required_for_merge": false},
   "task_overrides": {"T0001": {"g3_jobs": ["job-b"]}}

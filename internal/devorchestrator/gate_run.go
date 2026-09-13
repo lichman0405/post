@@ -160,7 +160,30 @@ func RunGate(opts *GateRunOpts) (*GateRunResult, error) {
 	return res, nil
 }
 
-// devStackEnv is the environment a G3 job needs and a G2 job must not have.
+// devStackEnvKeys is every key a G3 step may receive from .env.dev — the whole
+// of the exposure, pinned here so it can be read in one place and widened only
+// on purpose.
+//
+// It is deliberately not "the file". A gate step runs `bash
+// tests/acceptance/*.sh` out of the integration tree, which is main plus the
+// task's change: whatever is in a step's environment is readable by that script
+// and, more to the point, ends up in its captured output the first time anything
+// prints, fails or dumps state. `.env.dev` also holds the database password, the
+// blob access key and the blob secret. Handing all of it to every G3 job to
+// satisfy one job's need for a token is a broader exposure than the problem, and
+// the kind that leaks by accident rather than by intent.
+//
+// POST_GITEA_BASE_URL and POST_GITEA_TOKEN are the complete set any G3 script
+// reads out of the file: the Gitea probe needs both, and the other two jobs
+// (auth-real-services, rsg-real-services) read only POST_G3_* names, which are
+// not in the file at all, and hand their configuration to the API with explicit
+// `env POST_DB_HOST=... POST_GITEA_TOKEN=...` assignments that override anything
+// inherited. A test pins this slice exactly, and a second one proves a key
+// outside it stays out of the step's environment.
+var devStackEnvKeys = []string{"POST_GITEA_BASE_URL", "POST_GITEA_TOKEN"}
+
+// devStackEnv is the environment a G3 job needs and a G2 job must not have: the
+// keys in devStackEnvKeys, and nothing else from the file they live in.
 //
 // A gate step runs in the integration tree — `git worktree add <dir> main` plus
 // the task's change — so it holds exactly what Git tracks. `.env.dev` does not
@@ -194,9 +217,20 @@ func devStackEnv(repoRoot string) (map[string]string, error) {
 			// when a service is missing.
 			return nil, nil
 		}
+		// A file that exists but does not parse is different: it is configured
+		// and broken, and the keys this gate needs may be in the part that
+		// failed. Refusing is the only answer that does not run a job without
+		// the credential it needs and then report the absence as the task's
+		// defect — which is the whole failure this function exists to remove.
 		return nil, fmt.Errorf("reading %s for the G3 job environment: %w", path, err)
 	}
-	return values, nil
+	out := make(map[string]string, len(devStackEnvKeys))
+	for _, key := range devStackEnvKeys {
+		if value, ok := values[key]; ok {
+			out[key] = value
+		}
+	}
+	return out, nil
 }
 
 // mergeEnv layers over on top of base without mutating either, so a caller's
