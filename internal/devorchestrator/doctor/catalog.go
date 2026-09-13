@@ -150,10 +150,10 @@ const (
 
 	reasonDaemonStart = "start Docker: sudo systemctl enable --now docker (host privileges — never in a Worker context)"
 
-	reasonPinPnpm     = "depends on T-PNPM (pnpm missing)"
-	reasonPinNoPkg    = "package.json arrives with the T0002 scaffold; pin check deferred"
+	reasonPinPnpm      = "depends on T-PNPM (pnpm missing)"
+	reasonPinNoPkg     = "package.json arrives with the T0002 scaffold; pin check deferred"
 	reasonPinMalformed = "packageManager field is missing or not a pnpm pin in %s"
-	remPinDrift       = "align pnpm with the pin: corepack enable && corepack prepare pnpm@%s --activate — pin drift requires Supervisor sign-off"
+	remPinDrift        = "align pnpm with the pin: corepack enable && corepack prepare pnpm@%s --activate — pin drift requires Supervisor sign-off"
 )
 
 // Resource thresholds in kB (contract §9).
