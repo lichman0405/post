@@ -56,3 +56,12 @@ FROM projects p
 JOIN project_memberships m ON m.project_id = p.id
 WHERE m.user_id = @user_id
 ORDER BY p.created_at DESC, p.id;
+
+-- name: ListPublicProjects :many
+-- Public projects readable by every matrix class (read_public_project,
+-- T0106 — anonymous included), most recently created first. The
+-- visibility predicate is the read policy: a private row can never reach
+-- this result set.
+SELECT * FROM projects
+WHERE visibility = 'public'
+ORDER BY created_at DESC, id;

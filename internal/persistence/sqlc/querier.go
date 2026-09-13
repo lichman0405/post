@@ -101,6 +101,11 @@ type Querier interface {
 	// Projects the user belongs to (any project membership), most recently
 	// created first.
 	ListProjectsForUser(ctx context.Context, userID pgtype.UUID) ([]Project, error)
+	// Public projects readable by every matrix class (read_public_project,
+	// T0106 — anonymous included), most recently created first. The
+	// visibility predicate is the read policy: a private row can never reach
+	// this result set.
+	ListPublicProjects(ctx context.Context) ([]Project, error)
 	ListPullRequestsByProject(ctx context.Context, projectID pgtype.UUID) ([]PullRequest, error)
 	ListRelationVersionsForSource(ctx context.Context, objectVersionID pgtype.UUID) ([]RelationVersion, error)
 	ListRelationVersionsForTarget(ctx context.Context, objectVersionID pgtype.UUID) ([]RelationVersion, error)

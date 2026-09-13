@@ -187,6 +187,22 @@ func (s *ProjectStore) ListProjectsForUser(ctx context.Context, userID string) (
 	return out, nil
 }
 
+// ListPublicProjects implements projects.ProjectStore: every public
+// project, newest first. The visibility predicate is the read policy
+// (T0106) — private rows are excluded by the query itself, so no caller
+// identity participates and nothing can leak into the result set.
+func (s *ProjectStore) ListPublicProjects(ctx context.Context) ([]domain.Project, error) {
+	rows, err := sqlc.New(s.pool).ListPublicProjects(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("persistence: list public projects: %w", err)
+	}
+	out := make([]domain.Project, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, projectFromRow(row))
+	}
+	return out, nil
+}
+
 // GetProgram implements projects.ProjectStore.
 func (s *ProjectStore) GetProgram(ctx context.Context, programID string) (domain.Program, error) {
 	id, err := textUUID(programID)
