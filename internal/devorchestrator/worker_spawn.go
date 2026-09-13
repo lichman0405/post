@@ -2,6 +2,7 @@ package devorchestrator
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -666,10 +667,28 @@ func writeSpawnFiles(taskDir string, pkg *TaskPackage, prompt, system string, gu
 // gitOutput runs git in dir and returns trimmed stdout; on failure the error
 // carries the command's stderr.
 func gitOutput(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	return runGit(dir, 0, args...)
+}
+
+// runGit runs git in dir. A positive timeout bounds the call, which matters for
+// the one git command this package makes over the network: an unbounded fetch
+// does not fail a dispatch, it STALLS it — and under `rddev drive` a dispatch
+// that never returns is the whole DAG not moving, with nothing in the log to say
+// why. A deadline turns that into an error the driver can retry.
+func runGit(dir string, timeout time.Duration, args ...string) (string, error) {
+	ctx := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
+		if timeout > 0 && ctx.Err() != nil {
+			return "", fmt.Errorf("git %s: timed out after %s", strings.Join(args, " "), timeout)
+		}
 		// %w keeps the *exec.ExitError in the chain so callers can inspect the
 		// exit code (branchExists treats exit 1 as "no such branch").
 		if ee, ok := err.(*exec.ExitError); ok {

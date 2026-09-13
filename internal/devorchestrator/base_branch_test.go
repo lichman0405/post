@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // These pin the property that a task's baseline — and the tree a gate grades —
@@ -134,6 +135,30 @@ func TestIntegrationTipDoesNotTrustTheConfiguredRefspec(t *testing.T) {
 	}
 	if got := bbResolve(t, workspace, tip); got != merged {
 		t.Errorf("%s resolves to %s, want the merge %s — the fetch did not update the ref it names", tip, got, merged)
+	}
+}
+
+// TestAGitCallOverTheNetworkIsBounded pins the mechanism, not the value: a call
+// with a deadline that has passed reports the deadline rather than whatever the
+// remote said. The 2-minute bound the fetch actually uses cannot be exercised
+// here — it would need a remote that hangs, and a suite that waits out a hang is
+// its own problem. What is pinned is that a bound exists at all: an unbounded
+// fetch does not fail a dispatch, it stalls it, and a stalled dispatch under
+// `rddev drive` is the whole DAG not moving.
+func TestAGitCallOverTheNetworkIsBounded(t *testing.T) {
+	repo := t.TempDir()
+	bbGit(t, repo, "init", "-q", "-b", "main")
+	bbCommitFile(t, repo, "README.md", "x\n")
+	// Unreachable as well as overdue, so the command fails whatever the race
+	// between the deadline and the process start.
+	bbGit(t, repo, "remote", "add", "origin", filepath.Join(t.TempDir(), "does-not-exist.git"))
+
+	_, err := runGit(repo, time.Nanosecond, "fetch", "origin", DefaultBaseBranch)
+	if err == nil {
+		t.Fatal("runGit returned no error for a fetch whose deadline had already passed")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("error = %q, want it to name the deadline rather than the remote's failure", err)
 	}
 }
 

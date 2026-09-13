@@ -5,7 +5,14 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// integrationFetchTimeout bounds the one git command this package makes over the
+// network. Generous for a fetch of one branch; short enough that a wedged
+// connection is an error the driver retries rather than a dispatch that never
+// returns.
+const integrationFetchTimeout = 2 * time.Minute
 
 // The integration branch is load-bearing, and nothing was keeping it current.
 //
@@ -64,7 +71,7 @@ func IntegrationTip(repoRoot string) (string, error) {
 	// the fetch's own proof: if the fetch exits 0, it wrote this ref.
 	tip := "refs/remotes/origin/" + DefaultBaseBranch
 	refspec := "+refs/heads/" + DefaultBaseBranch + ":" + tip
-	if _, err := gitOutput(repoRoot, "fetch", "origin", refspec); err != nil {
+	if _, err := runGit(repoRoot, integrationFetchTimeout, "fetch", "origin", refspec); err != nil {
 		return "", fmt.Errorf("fetching origin/%s: %w — a dispatch or a gate must not proceed from a %s of unknown age", DefaultBaseBranch, err, DefaultBaseBranch)
 	}
 	exists, err := refExists(repoRoot, tip)
