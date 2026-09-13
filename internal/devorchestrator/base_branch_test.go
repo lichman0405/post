@@ -162,6 +162,45 @@ func TestAGitCallOverTheNetworkIsBounded(t *testing.T) {
 	}
 }
 
+// TestIntegrationTipIsTheLocalBranchWhenTheRemoteHasNoSuchBranch: "the remote
+// does not have this branch" is not "I cannot tell how current the branch is".
+// Nothing on the forge is ahead of a branch the forge does not have, so the
+// local branch is the answer and not a failure.
+//
+// This is not a hypothetical. The four-gate e2e fixture
+// (tests/acceptance/supervisor-git-e2e.sh) is a repository whose origin is a
+// bare repo the script has just created — empty. `git fetch origin
+// +refs/heads/main:refs/remotes/origin/main` fails there with "couldn't find
+// remote ref refs/heads/main", exit 128, and treating that as fatal turned every
+// dispatch in that fixture into `worker spawn T0001` returning 1.
+func TestIntegrationTipIsTheLocalBranchWhenTheRemoteHasNoSuchBranch(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin.git")
+	if err := os.MkdirAll(origin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bbGit(t, root, "init", "-q", "--bare", "-b", "main", origin)
+
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bbGit(t, repo, "init", "-q", "-b", "main")
+	head := bbCommitFile(t, repo, "README.md", "# only local\n")
+	bbGit(t, repo, "remote", "add", "origin", origin)
+
+	tip, err := IntegrationTip(repo)
+	if err != nil {
+		t.Fatalf("IntegrationTip failed because the remote has no main yet (%v) — a repository whose origin is empty cannot be dispatched to", err)
+	}
+	if want := "refs/heads/" + DefaultBaseBranch; tip != want {
+		t.Errorf("IntegrationTip = %q, want the local %q", tip, want)
+	}
+	if got := bbResolve(t, repo, tip); got != head {
+		t.Errorf("%s resolves to %s, want the local %s", tip, got, head)
+	}
+}
+
 // TestIntegrationTipLeavesADirtyCheckoutAlone is why this returns a ref instead
 // of fast-forwarding one. The shared checkout is dirty by design — every state
 // transition rewrites tasks/task_status.json, and merges touch that same file —

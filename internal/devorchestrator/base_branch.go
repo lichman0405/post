@@ -55,6 +55,11 @@ const integrationFetchTimeout = 2 * time.Minute
 // unknown age. A delayed dispatch costs less than a Worker run spent building
 // on, or a gate spent grading, the wrong tree. A fetch that SUCCEEDS but leaves
 // no remote-tracking ref is an error for the same reason — see below.
+//
+// The one fetch failure that is NOT an error is "the remote does not have this
+// branch at all": there is nothing there to be behind, so the local branch is
+// the answer. That case is asked of the remote directly rather than inferred
+// from the fetch's stderr — see the failure path below.
 func IntegrationTip(repoRoot string) (string, error) {
 	remote, err := remoteExists(repoRoot, "origin")
 	if err != nil {
@@ -72,6 +77,24 @@ func IntegrationTip(repoRoot string) (string, error) {
 	tip := "refs/remotes/origin/" + DefaultBaseBranch
 	refspec := "+refs/heads/" + DefaultBaseBranch + ":" + tip
 	if _, err := runGit(repoRoot, integrationFetchTimeout, "fetch", "origin", refspec); err != nil {
+		// A failed fetch is not one condition. "I cannot reach the forge" and
+		// "the forge has no such branch" both fail it, and only the first is a
+		// ref of unknown age: if the branch is not on the remote, the local
+		// branch is not behind it, it IS the integration branch. Ask the remote
+		// which of the two this is rather than reading the fetch's stderr.
+		//
+		// Getting this wrong is not hypothetical. The four-gate e2e fixture
+		// (tests/acceptance/supervisor-git-e2e.sh) is a repository whose origin
+		// is a bare repo it has just created, and it is empty: treating "no
+		// such branch on the remote" as a hard error failed every dispatch in
+		// it — `worker spawn T0001` returned 1 before the Worker ever started.
+		onRemote, lerr := remoteHasBranch(repoRoot, DefaultBaseBranch)
+		if lerr != nil {
+			return "", fmt.Errorf("fetching origin/%s: %w (and asking the remote whether it has the branch: %v) — a dispatch or a gate must not proceed from a %s of unknown age", DefaultBaseBranch, err, lerr, DefaultBaseBranch)
+		}
+		if !onRemote {
+			return localTip(repoRoot)
+		}
 		return "", fmt.Errorf("fetching origin/%s: %w — a dispatch or a gate must not proceed from a %s of unknown age", DefaultBaseBranch, err, DefaultBaseBranch)
 	}
 	exists, err := refExists(repoRoot, tip)
@@ -106,6 +129,22 @@ func localTip(repoRoot string) (string, error) {
 		return "HEAD", nil
 	}
 	return ref, nil
+}
+
+// remoteHasBranch asks `origin` whether it has the branch, which is a different
+// question from whether a fetch of it succeeded: an unreachable remote fails
+// both, and only the first of those two failures means "there is nothing to be
+// current with". `ls-remote` answers it without writing any local ref — exit 0
+// with no output is "no such ref", which is the answer this asks for, not an
+// error.
+//
+// Bounded like the fetch, because it is the same network and the same reason.
+func remoteHasBranch(repoRoot, branch string) (bool, error) {
+	out, err := runGit(repoRoot, integrationFetchTimeout, "ls-remote", "--heads", "origin", branch)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
 }
 
 func remoteExists(repoRoot, name string) (bool, error) {
