@@ -1,9 +1,24 @@
 # 开发进度
 
 状态：**P0 完成**（14/14）、**P1 完成**（10/10）、**P2 的 T0201–T0203 与 T0215 已合并**；
-**#121 已由 owner 裁定并按方案 (c) 落地（PR #134）** —— T0204 的门不再是"由构造即红"。
-最后更新：2026-09-14 06:05（**#99/#119/#120/#103/#112/#124/#106 已全部合入**；
-`origin/main` = `c655a9e`；P2 的堵点从"两句人工决定"降到"T0204 一次 rebaseline"）
+**#121 已由 owner 裁定并按方案 (c) 落地（PR #134 已合入）** —— T0204 的门不再是"由构造即红"。
+最后更新：2026-09-14 06:25（**#121/#134 已合入 `27ef5a8`**，本机 main 已同步；
+**T0204 与 T0301 都已 rebaseline 到新基线并回到 Worker 手里**；
+两扇门都开了，`rddev task next` 即将重新有东西）
+
+> **★★ 2026-09-14 我的第二个失误，同样必须先写在这里**：我用**八小时前构建的**
+> `./bin/rddev` 跑了 `rddev rebaseline T0301` ✓。那个二进制来自 `111f2fd` ✓（02:49 构建 ✓），
+> 而**"被拒的基线推进要把任务工作放回"这段代码是 `4eee191`（#103）** ✓，
+> **它进入 main 的时间晚于 02:49** ✓。旧版本把补丁放在临时文件里、退出路上删掉 ✓ ——
+> 于是**推进失败的那一刻，T0301 那 24 个文件、+3718 行的未提交交付从工作树上消失了** ✓
+> （reflog 有 reset ✓、`git status` 干净 ✓、`/tmp/*.patch` 不在 ✓、
+> `.rddev/runtime/rebaseline/` **根本没被创建** ✓、368 个悬空对象里没有一个带着那份交付 ✓）。
+> **已逐字节恢复** ✓：评审 Worker 的 `diff.txt`（23 个文件 ✓）＋ 返工那一轮的完整会话记录
+> （30 处编辑按顺序重放 ✓，`old_string` **30/30 精确命中** ✓）→ 重建的树
+> `go build`/`go vet`/单测全绿 ✓。`bin/rddev` 已用当前 main 重新构建 ✓。
+> **教训（与上一条同族）**：本机 `main` ref 是 Gate 的输入 ✓，**跑 Gate 的那个二进制也是** ✓ ——
+> 两者都"没人负责让它新鲜" ✓，也都能让 Gate 在一棵它不是以为的树上打分 ✓。
+> 只是这一次不是假红，是**静默销毁** ✓。危险本身未修 ✓ —— 见 **Issue #135** ✓。
 
 > **★★ 2026-09-14 我自己的一个失误，必须先写在这里**：我用 `gh pr merge` 在 GitHub 上合了七个 PR ✓，
 > **但本机的 `main` ref 一直没跟着前进** ✓ —— 合完那一刻本机 main 停在 `fe81459` ✓，
@@ -16,9 +31,10 @@
 > **教训**：本机 `main` ref 是 Gate 的输入之一 ✓，不是缓存 ✓。
 > 绕开 `rddev pr merge` 直接走 `gh pr merge` ✓，就绕开了"合完把 main 带上去"那一步 ✓。
 
-> **现在的堵点（实测）**：T0204 是唯一还卡着的头 ✓。它的改动**打不到新 main 上** ✓
-> （冲突只在 `specs/SPEC_VERSION.json` ✓ —— 派生文件 ✓），解法是 `rddev rebaseline T0204` ✓，
-> 而它必须排在 **#134 合入之后** ✓（新的 G3 脚本得先在 main 上 ✓）。T0301/T0603 同理 ✓。
+> **现在的堵点（实测）**：**两扇门都开了** ✓ —— #134 已合入 ✓、两条 rebaseline 都已执行 ✓，
+> T0204 与 T0301 都在 Worker 手里 ✓。剩下的是**跑完** ✓：
+> T0204 已在 `verification` ✓（独立 review 进行中 ✓），T0301 刚重新派出去 ✓。
+> T0603 仍是唯一要**等链路**的 ✓（见下）。
 
 ## 当前阶段
 
@@ -57,12 +73,12 @@
   脚本的两条取 token 路径都走不通 ✓。已带 token 重启 driver ✓（worker 侧仍然被剥离 ✓，
   `worker_env.go` 的剥离清单里有它 ✓）。②`rsg-real-services` 红是因为 **P2 的接口还没写** ✓，
   这是设计如此 ✓（门自己写着"P2 builds them"）✓ —— 所以 T0603 仍卡在 P2 链上 ✓。
-- **P3 — T0301**：collect 拒绝**不是 Worker 的错** ✓ —— 检查逻辑没错 ✓，但**被检查的树是验收
+- **P3 — T0301**：第一次 collect 拒绝**不是 Worker 的错** ✓ —— 检查逻辑没错 ✓，但**被检查的树是验收
   框架自己改的** ✓（L1-20260913-16 ✓）：main 自己的 G3 脚本在被评测的树里 `-am` 提交了
   `029380b`（身份 `g3 <g3@test>`）✓，顺带把 `README.md` 写进 allowed_scope 之外 ✓；
-  另一条 `refs` 是我自己建的 PR 分支 ✓（那部分已由 #97 修掉 ✓）。**交付完好保存在 worktree** ✓
-  （25 个改动路径 ✓，worktree 仍在 baseline `5cfc4c3` ✓，我给的是实测 ✓）
-  → **阻塞在 #99** ✓，且**它后面排着 29 个任务** ✓。
+  另一条 `refs` 是我自己建的 PR 分支 ✓（那部分已由 #97 修掉 ✓）。第二次那三条才是 Worker 自己的错 ✓
+  （动 HEAD ✓、建 ref ✓、越界改 `README.md` ✓），已在派工原因里逐条写明 ✓。
+  **交付在 06:20 被我的旧工具销毁过一次，已逐字节恢复** ✓（见文件顶部那条 ★★ ✓）。
 - **两条 orchestrator 自修，已在本轮自行合入** ✓（都只动测试/格式 ✓，不碰门语义 ✓）：
   - **#110 → `4f23500`**：`gofmt -l` 还点名的 5 个文件 ✓（纯空白 ✓，`git diff --ignore-all-space` 为空 ✓）。
   - **#108 → `b00c9ee`**：残留检测的等待等的是"读到了什么" ✓。
@@ -277,8 +293,8 @@ Supervisor 不再自行合入（本次已停止）。**T0301 / T0201 因此被�
 
 | Task | 状态 | 说明 |
 |---|---|---|
-| T0204 | verification | 等 `rddev rebaseline`（改动打不到新 main 上 ✓，冲突只在派生文件 `SPEC_VERSION.json` ✓）。**G3 已不再是死结** ✓（#121 → PR #134 ✓）。 |
-| T0301 | rejected | 等 `rddev rebaseline` + `worker rework`（#134 合入后 ✓）。四条例外全部来自已修掉的根因 ✓，非 worker 之过 ✓。 |
+| T0204 | verification | rebaseline 到 `27ef5a8` ✓ → 返工 Worker 只用了 4 分钟 ✓（重跑测试 + 原样重交 `RESULT.json` ✓）→ collect 全过 ✓ → **独立 review 进行中** ✓（pid 1975328 ✓）。G2 的红（#119 假红 ✓）与 G3 的死结（#121 ✓）都已消失 ✓。 |
+| T0301 | running | rebaseline 到 `27ef5a8` 成功 ✓（25 个文件原样带走 ✓，两处生成物**重新生成** ✓），**交付已从损坏中逐字节恢复** ✓，走的是 `worker rework`（不是 `respawn` ✓ —— `respawn` 会 `reset --hard + clean -fd` ✓，那会是**第二次销毁** ✓）。 |
 | T0603 | verification | accept 被 G3 红挡住 ✓ —— 它扛 `rsg-real-services` ✓，而 RSG 的 HTTP 面属于 **T0209** ✓，它在 P6 而 T0208 还在 `todo` ✓。**要等链路爬上去** ✓，不是 rebaseline 能解决的 ✓。 |
 
 ## 已关闭的 SPEC_BLOCKED
@@ -289,18 +305,12 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 阻塞
 
-- **#134 已开 PR、CI 进行中** ✓（`fix/the-chain-heads-assert-what-they-build` ✓）：
-  按 owner 选的方案 (c) 给 T0204/T0205/T0207 各配一道**自己扛得动**的 G3 ✓
-  （`state-commit-real-services` / `branch-domain-real-services` / `validation-gates-real-services` ✓），
-  原来那条 `rsg-real-services` 仍留在其余 93 个（含 T0208）上 ✓。
-  代价写在 L1-20260914-11：这三个任务**没有端到端 RSG 链路的检查** ✓，T0208 落地前也不可能有 ✓。
-- **T0204**：卡在**改动打不到新 main 上** ✓（`git apply` 拒在 `specs/SPEC_VERSION.json` ✓）。
-  不是缺陷 ✓，是 main 前进了 ✓ —— 解法 `rddev rebaseline T0204` ✓，等 #134 合入后执行 ✓。
-  **不再是** G3 由构造即红 ✓（#121 已裁定 ✓），也**不再是** #119 那处假红 ✓（本地 main 已快进 ✓）。
-- **T0301**：`rejected` ✓，等 #134 合入后 `rddev rebaseline T0301` + `worker rework` ✓。
-  它当初被拒的四条：三条来自 main 自己的 G3 脚本改被测树 ✓（= #99 ✓，**已合入** ✓）、
-  一条来自我自己留下的分支 `f2170d1` ✓（**已删** ✓）。
-  我已核过它现在的 worktree：`README.md` **不在改动列表里** ✓ —— 那条噪声随那两个根因一起消失了 ✓。
+- **★ #135（新开，未修）**：`./bin/rddev` 是一个**没人负责重新构建**的产物 ✓ ——
+  `.gitignore` 忽略它 ✓、Makefile 没有目标 ✓、`supervise.sh` 也不重建 ✓。
+  它和它正在评分的源码可以任意地不同步 ✓，而这次的后果是**静默销毁一个 Worker 的未提交交付** ✓。
+  已做的只是**缓解**（用当前 main 重建 ✓）；**危险本身没修** ✓。
+  同族的前一件是 #124（本机 `main` ref 不是缓存 ✓）—— 形状相同：**评测输入没人保证新鲜** ✓。
+  Issue 里给了三条候选修法，推荐第 2 条（二进制自己记构建版本，落后于 main 就拒绝执行 Gate 动作）。
 - **T0603**：`verification` ✓，accept 被 G3 红挡住 ✓ —— 它的 G3 是 `rsg-real-services` ✓，
   而 RSG 的 HTTP 面属于 **T0209** ✓。它在 P6 而 T0208 还在 `todo` ✓：**这条要等链路爬上去** ✓，
   不是 rebaseline 能解决的 ✓。已在 `rddev status` 里如实列为等待中的判断点 ✓。
@@ -340,30 +350,35 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 下一步
 
-1. **等 #134 的 CI**（`go` 与 `migration-integration` 还在跑 ✓；`acceptance` 已绿 ✓ ——
-   #133 那处偶发这次没有出现 ✓）→ 合入 → `git fetch origin main:main`（**别忘这一步** ✓）。
-2. **`rddev rebaseline T0204`** → worker 在新基线上返工 → 独立 review → `rddev task accept T0204`
-   （这次 G2/G3 都该能绿：G2 的红是 #119 那处假红 ✓、G3 是 #134 新配的那道 ✓）
-   → commit → PR → merge。**这一步之后 `rddev task next` 就该有东西了** ✓。
-3. **`rddev rebaseline T0301` + `worker rework T0301`**（#99 与那条分支两个根因都已消失 ✓）。
-4. **T0205 / T0207 派工时**，任务包必须带上各自那四支测试名 ✓
+1. **收 T0204 的独立 review** ✓（`rddev review collect T0204` ✓）→ 按其判决处理 ✓ →
+   `rddev task accept T0204` ✓（G2 的假红与 G3 的死结都已消失 ✓）→ commit → PR → 等 CI → merge。
+   **这一步之后 `rddev task next` 就该有东西了** ✓。
+2. **跟随 T0301 的返工** ✓（pid 1980193 ✓）→ collect → review → accept。
+   它的 `RESULT.json` 若在这次重跑里报出与恢复前不同的任何东西，**以测试为准** ✓，不要当成噪声 ✓。
+3. **`bin/rddev` 一旦 main 前进就要重建** ✓（`go build -o bin/rddev ./cmd/rddev` ✓）——
+   在 #135 修好之前，这一步是**手工的** ✓，忘了就会重演这次的事故 ✓。
+4. **修 #135**（推荐第 2 条修法：二进制记构建版本，落后于 main 就拒绝执行 Gate 动作）——
+   独立 PR ✓，带测试 ✓。它是"危险本身"，现在只是被缓解 ✓。
+5. **T0205 / T0207 派工时**，任务包必须带上各自那四支测试名 ✓
    （`tasks/tests.json` 的 `T0205-TEST-G3` / `T0207-TEST-G3` ✓）—— 闸门是按名字点名要证据的 ✓。
-5. **T0603 只能等链路**：它扛 `rsg-real-services` ✓，那面要 T0209 才存在 ✓。
-6. **#128 的 B1**（被持久化的 reason 在两种折行位置仍带凭证 ✓）：单独一个 PR 修 ✓，
+6. **T0603 只能等链路**：它扛 `rsg-real-services` ✓，那面要 T0209 才存在 ✓。
+7. **#128 的 B1**（被持久化的 reason 在两种折行位置仍带凭证 ✓）：单独一个 PR 修 ✓，
    连同现有两支钉住相反一侧的测试一起论证 ✓。不混进别的改动里 ✓。
-7. 待 owner 批准（不阻塞上面的机械段）：
+8. 待 owner 批准（不阻塞上面的机械段）：
    - **已 rejected 任务的重判路径**（L1-20260913-18）—— 需新增状态机边 `rejected→verification` ✓；
+     这次实测又撞上它一次 ✓：`rebaseline` 做完了全部 git 工作 ✓，
+     却因为 T0301 已经在 `rejected` 而**无法记录那次 reject** ✓（`rejected→rejected` 不合法 ✓）。
    - 其余队列里的 PR：**#111 / #114 / #115 / #116 / #117 / #122 / #123 / #126 / #129 / #130 / #131** ✓。
-8. 修复 `/readyz` 拓扑泄露（小而明确，独立 PR）。
-9. 那批孤儿 spin 进程（PID 3419161–3419176、3420321、3420322）要 owner 自己 `kill` ✓。
+9. 修复 `/readyz` 拓扑泄露（小而明确，独立 PR）。
+10. 那批孤儿 spin 进程（PID 3419161–3419176、3420321、3420322）要 owner 自己 `kill` ✓。
 
 <!-- AUTO-PROGRESS:BEGIN — generated by scripts/update_progress.py, do not hand-edit -->
 
 ## 任务状态自动总览
 
-生成时间：2026-09-13T06:54:20Z
+生成时间：2026-09-13T22:18:35Z
 
-状态分布：todo 105 · ready 0 · running 1 · worker_failed 0 · verification 1 · rejected 1 · blocked 0 · accepted 0 · merged 24（合计 132/132 个任务）
+状态分布：todo 102 · ready 0 · running 1 · worker_failed 0 · verification 2 · rejected 0 · blocked 0 · accepted 0 · merged 28（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -391,10 +406,10 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0108 | Project Shell 与 tabs | P1 | merged | 2026-09-13T00:00:56Z |  | 2026-09-13T00:51:52Z | 2026-09-13T00:57:38Z |
 | T0109 | Project Settings 与成员管理 UI | P1 | merged | 2026-09-13T02:21:56Z |  | 2026-09-13T02:43:11Z | 2026-09-13T02:46:38Z |
 | T0110 | 基础 Audit Log | P1 | merged | 2026-09-13T00:58:14Z |  | 2026-09-13T01:23:12Z | 2026-09-13T01:26:45Z |
-| T0201 | Core Scientific Object Schema registry | P2 | verification | 2026-09-13T06:18:36Z |  |  |  |
-| T0202 | Scientific Object immutable version repository | P2 | todo |  |  |  |  |
-| T0203 | Typed Relation repository | P2 | todo |  |  |  |  |
-| T0204 | Project State 与 State Commit | P2 | todo |  |  |  |  |
+| T0201 | Core Scientific Object Schema registry | P2 | merged | 2026-09-13T13:21:01Z |  | 2026-09-13T14:06:20Z | 2026-09-13T15:27:35Z |
+| T0202 | Scientific Object immutable version repository | P2 | merged | 2026-09-13T16:12:13Z |  | 2026-09-13T16:30:50Z | 2026-09-13T16:34:10Z |
+| T0203 | Typed Relation repository | P2 | merged | 2026-09-13T17:22:20Z |  | 2026-09-13T17:40:44Z | 2026-09-13T17:47:30Z |
+| T0204 | Project State 与 State Commit | P2 | verification | 2026-09-13T22:10:18Z |  |  |  |
 | T0205 | Research Branch Domain | P2 | todo |  |  |  |  |
 | T0206 | RSG Manifest 导出与 hash | P2 | todo |  |  |  |  |
 | T0207 | Progressive Validation Gates | P2 | todo |  |  |  |  |
@@ -405,7 +420,8 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0212 | Project Overview Research Summary | P2 | todo |  |  |  |  |
 | T0213 | Project Schema Extension 与 Custom Metadata | P2 | todo |  |  |  |  |
 | T0214 | 官方材料研发 Project Templates | P2 | todo |  |  |  |  |
-| T0301 | Gitea adapter 与 repo provisioning | P3 | rejected | 2026-09-13T05:57:10Z |  |  |  |
+| T0215 | 版本计数 backfill 的数据级升级断言（00024 + 00025） | P2 | merged | 2026-09-13T18:06:02Z |  | 2026-09-13T18:55:01Z | 2026-09-13T19:03:58Z |
+| T0301 | Gitea adapter 与 repo provisioning | P3 | running | 2026-09-13T22:17:03Z |  |  |  |
 | T0302 | Git main 双层保护 | P3 | todo |  |  |  |  |
 | T0303 | Branch Git ref 同步 | P3 | todo |  |  |  |  |
 | T0304 | Git 用户认证/PAT/SSH key 基础 | P3 | todo |  |  |  |  |
@@ -436,7 +452,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0510 | Knowledge workflow E2E | P5 | todo |  |  |  |  |
 | T0601 | Freeze Main Governance | P6 | todo |  |  |  |  |
 | T0602 | Abort/Reopen State Transition | P6 | todo |  |  |  |  |
-| T0603 | Organization/Project Policy Engine | P6 | running | 2026-09-13T06:52:44Z |  |  |  |
+| T0603 | Organization/Project Policy Engine | P6 | verification | 2026-09-13T13:20:52Z |  |  |  |
 | T0604 | Scientific Responsibility / Reviewer Routing | P6 | todo |  |  |  |  |
 | T0605 | Release Manifest Builder | P6 | todo |  |  |  |  |
 | T0606 | Immutable Release API/UI | P6 | todo |  |  |  |  |

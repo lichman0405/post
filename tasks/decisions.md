@@ -4157,3 +4157,69 @@ G3 state-commit-real-services: all checks passed against real PostgreSQL   → r
 T0204 / T0205 / T0207 **没有端到端 RSG 链路的检查** ✓，而且**在 T0208 存在之前也不可能有** ✓。
 `rsg-real-services` 仍在其余 93 个（含 T0208 自己 ✓）上跑 ✓，链路断言没丢 ✓ ——
 丢的是这三个**头**上的那一份 ✓。这就是方案 (c) 明码标价的东西 ✓。
+
+## L1-20260914-12 — ★★ 我用了八小时前构建的 rddev，把 T0301 的未提交工作弄丢了，又逐字节重建了回来
+
+### 发生了什么
+
+`rddev rebaseline T0301` 推进失败（三条文本冲突），**工具在失败的那一刻把 T0301 的
+未提交改动从工作树上删掉了**：分支被 reset 到 `27ef5a8`，`git status` 干净，
+`/tmp/post-rebaseline-T0301.patch` 不存在，`.rddev/runtime/rebaseline/` 根本没有被创建，
+`git fsck` 扫过 368 个悬空对象也没有任何一个带着 `internal/gitprovider/gitea.go`。
+
+### 根因：`bin/rddev` 是一个没人负责重新构建的产物
+
+`go version -m ./bin/rddev` 说它来自 `v0.0.0-20260913184812-111f2fd709e0+dirty`，
+构建时间 2026-09-14 02:49。而**保住任务工作的那段代码在 `4eee191`
+（`fix(rddev): a refused rebaseline puts the task's work back (#103)`）里，
+它进入 main 的时间晚于 02:49**。旧版本把补丁放在临时文件里、退出路上删掉 ——
+这恰恰是 #103 的提交信息里描述的那个「被拒的推进是一件破坏性的事」。
+
+**这不是一次意外，是一类**：`bin/rddev` 被 `.gitignore` 忽略、没有 Makefile 目标、
+`scripts/supervise.sh` 也不重建它，于是它**和它正在评分的源码可以任意地不同步**。
+上一件同族的事是「本机 `main` ref 是 Gate 的输入，不是缓存」（#124）：同一个形状 ——
+**评测工具自己依赖一个没人保证新鲜的输入**。两者都让 Gate 在一棵不是它以为的树上打分。
+
+### 恢复
+
+两个来源，都是工具自己留下的：
+
+1. `.rddev/workers/T0301-review/diff.txt`（142KB，13:46 生成）—— 评审 Worker 拿到的
+   完整 diff，24 个文件里的 23 个；
+2. `.rddev/workers/T0301/worker-run-a19df21e8d1ad866.log`（10MB）—— 返工那一轮的完整
+   会话记录，含最后一次 `Write` 的全文与 30 处 `Edit` 的 old/new。
+
+把它重建成一棵树：在 `5cfc4c3` 上另开工作树 → apply `diff.txt`（只排除生成物
+`SPEC_VERSION.json`）→ **按顺序重放那 30 处编辑，30 命中、0 失败**。
+`old_string` 逐条精确匹配本身就是「基底正确」的证据：基底错一个字节，第一批就会挂。
+
+重建后 `go build ./...`、`go vet`、`internal/gitprovider` 与 `cmd/api` 全部单测皆绿，
+与 Worker 在 `RESULT.json` 里报的一致（24 个文件，+3718/−28）。
+
+### 把它放回新基线，以及一个必须记住的陷阱
+
+`rework` 保留工作树 diff，`respawn` 会 `reset --hard + clean -fd`。
+**在「改动只存在于工作树、没有被任何记录固化」的这一刻，`respawn` 就是第二次销毁。**
+所以走的是 `worker rework T0301`（同一个 Worker，`--resume`，上下文还在）。
+
+合并冲突三处，各自解决：
+
+- `specs/database/postgres.sql` —— 生成物，`checkout --ours` 之后**重新生成**，不按文本合并；
+- `tests/acceptance/gitea-real-services-e2e.sh` —— 主分支改了**控制流**
+  （`else` → `elif (( push_rc == 0 ))`，push 自己失败时不重复报「没有投递」），
+  Worker 改了**提示文案**（点名验签）。两边改的是不同的东西，**都保留**；
+- `tests/integration/migration_test.go`、`append_only_test.go` —— git 自动合并干净。
+
+### 已做的整改与仍然存在的风险
+
+已做：`bin/rddev` 用当前 main 重新构建（`go build -o bin/rddev ./cmd/rddev`），
+现在带 #103 的保底逻辑。
+
+**仍然存在**：没有任何东西阻止它再次变旧。同一个错误可以再犯一次。
+这条按 Issue 排队，不在此处顺手扩大改动面。
+
+### 代价，写在这里而不是暗示掉
+
+T0204/T0301 两条流水线为此各多花了一轮 ✓；T0301 的 Worker 被要求
+**以当前工作树为准重跑测试**，不许假设「和上次一样」✓ —— 重建是逐字节等价的，
+但「等价」是我验证过的主张，不是它应该相信的前提 ✓。
