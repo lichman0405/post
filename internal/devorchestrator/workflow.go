@@ -175,15 +175,29 @@ func nextActionFor(repoRoot, taskID string, state State, view *WorkflowView) (st
 // reviewRecordIsSuperseded reports whether the recorded verdict still describes
 // the code in the task's worktree, and why not when it does not.
 //
-// It asks the merge gate's question (ReviewRecord.DiffSHA against the current
-// code identity) from the view's side, so the advice and the refusal cannot
-// disagree. Cases it cannot judge answer "not superseded": a worktree that is
-// gone, a record with no identity — those produce their own, better reasons at
-// the gate, and a view that invents staleness would send the Supervisor to
+// It asks the merge gate's questions in the merge gate's ORDER (gate_run.go:
+// the collect freshness check, then the code identity), so the advice and the
+// refusal cannot disagree. Asking only the identity question left the gate's
+// other review refusal unmirrored: a verdict OLDER than the latest collect is
+// refused by the gate — "it judged a different tree" — while the advice, seeing
+// an unchanged identity, sent the Supervisor to `task accept` to be refused by
+// a message naming the command the advice should have given. A re-collect of
+// the same attempt, or a rework that reproduces identical content, reaches it
+// without any code moving.
+//
+// Cases it cannot judge answer "not superseded": a worktree that is gone, a
+// record with no identity — those produce their own, better reasons at the
+// gate, and a view that invents staleness would send the Supervisor to
 // re-review work that nothing has invalidated.
 func reviewRecordIsSuperseded(repoRoot, taskID string, rv *ReviewRecord) (string, bool) {
 	if rv == nil {
 		return "", false
+	}
+	// The gate only reaches its freshness refusal for a collect it accepted
+	// (a collect that is not ok fails G1 first, and that is not this function's
+	// judgement to make), so the same restriction applies here.
+	if coll, ok, err := LatestRecord[CollectRecord](repoRoot, taskID, RecordCollect); err == nil && ok && coll.Status == "ok" && rv.At < coll.At {
+		return "the verdict (" + rv.At + ") is older than the latest collect (" + coll.RunID + ", " + coll.At + ")", true
 	}
 	want, err := currentCodeIdentity(repoRoot, taskID)
 	if err != nil || want == "" {
