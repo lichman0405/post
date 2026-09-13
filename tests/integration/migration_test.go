@@ -366,6 +366,8 @@ var explicitIndexes = map[string][]string{
 	"relation_versions_state_idx":          {"state_id"},
 	"project_states_branch_created_idx":    {"branch_id", "created_at"},
 	"state_commits_branch_created_idx":     {"branch_id", "created_at"},
+	// T0205: branch listing scans (migration 00028).
+	"branches_project_created_idx": {"project_id", "created_at"},
 	// T0104: personal projects (organization_id NULL) escape the
 	// UNIQUE(organization_id, slug) constraint, so their slug uniqueness is
 	// a partial unique index instead.

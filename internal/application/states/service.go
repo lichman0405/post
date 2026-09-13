@@ -275,7 +275,8 @@ func wrapStoreError(err error) error {
 		errors.Is(err, ErrBranchNotFound) ||
 		errors.Is(err, ErrStateExists) ||
 		errors.Is(err, ErrValidation) ||
-		errors.As(err, new(*StateConflictError)) {
+		errors.As(err, new(*StateConflictError)) ||
+		errors.As(err, new(*BranchNotActiveError)) {
 		return err
 	}
 	var we *CommitWriteError
