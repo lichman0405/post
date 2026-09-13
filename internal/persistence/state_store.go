@@ -139,10 +139,11 @@ func (s *StateStore) CommitState(ctx context.Context, in states.CommitStateParam
 	return state, commit, nil
 }
 
-// branchCASConflict distinguishes the two zero-row CAS outcomes: the
-// branch does not exist in the project (never leak another project's
-// entity existence — same error either way), or the head moved underneath
-// the commit.
+// branchCASConflict distinguishes the zero-row CAS outcomes: the branch
+// does not exist in the project (never leak another project's entity
+// existence — same error either way), its lifecycle is terminal (merged/
+// aborted branches accept no commits, docs/43 — the head CAS requires
+// lifecycle_state = 'active'), or the head moved underneath the commit.
 func (s *StateStore) branchCASConflict(ctx context.Context, q *sqlc.Queries, branchID, projectID pgtype.UUID, expected *string) error {
 	branch, err := q.GetBranchByID(ctx, branchID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -154,8 +155,15 @@ func (s *StateStore) branchCASConflict(ctx context.Context, q *sqlc.Queries, bra
 	if branch.ProjectID != projectID {
 		// The branch exists but belongs to another project — the same
 		// "not found" outcome, never a foreign project's entity
-		// existence (docs/45).
+		// existence (docs/45). The foreign lifecycle is equally
+		// undisclosed.
 		return states.ErrBranchNotFound
+	}
+	if branch.LifecycleState != "active" {
+		return &states.BranchNotActiveError{
+			BranchID:  pgUUIDToText(branchID),
+			Lifecycle: branch.LifecycleState,
+		}
 	}
 	return &states.StateConflictError{
 		BranchID: pgUUIDToText(branchID),

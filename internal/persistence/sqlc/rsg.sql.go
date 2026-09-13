@@ -31,8 +31,65 @@ type CreateBranchParams struct {
 // RSG state model (canonical tables: branches, project_states, state_commits).
 // Branch = research state evolution path; commit = state transition
 // (docs/03_GLOSSARY_DOMAIN_MODEL.md, invariants 2-4).
+// CreateBranch is the raw, unguarded insert: seeding fixtures and the
+// canonical headless form (base_state_id NULL — a branch before its first
+// state). The domain creation path is CreateBranchFromState below, which
+// re-checks the fork point's project inside the insert.
 func (q *Queries) CreateBranch(ctx context.Context, arg CreateBranchParams) (Branch, error) {
 	row := q.db.QueryRow(ctx, createBranch,
+		arg.ProjectID,
+		arg.Name,
+		arg.Visibility,
+		arg.Purpose,
+		arg.GitRef,
+		arg.BaseStateID,
+		arg.CreatedBy,
+	)
+	var i Branch
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Visibility,
+		&i.Purpose,
+		&i.GitRef,
+		&i.BaseStateID,
+		&i.LifecycleState,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createBranchFromState = `-- name: CreateBranchFromState :one
+INSERT INTO branches (project_id, name, visibility, purpose, git_ref, base_state_id, created_by)
+SELECT $1, $2, $3, $4, $5, $6, $7
+WHERE EXISTS (
+  SELECT 1 FROM project_states
+  WHERE id = $6 AND project_id = $1
+)
+RETURNING id, project_id, name, visibility, purpose, git_ref, base_state_id, lifecycle_state, created_by, created_at
+`
+
+type CreateBranchFromStateParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	Name        string      `json:"name"`
+	Visibility  string      `json:"visibility"`
+	Purpose     *string     `json:"purpose"`
+	GitRef      string      `json:"git_ref"`
+	BaseStateID pgtype.UUID `json:"base_state_id"`
+	CreatedBy   pgtype.UUID `json:"created_by"`
+}
+
+// Guarded insert (T0205): a branch always forks a state of the SAME
+// project — the EXISTS re-checks the fork point inside the insert, so a
+// base state of another project (or a missing one) yields zero rows
+// instead of a row, and the adapter reports ErrBaseStateNotFound for
+// both without leaking which state exists where. The project row itself is
+// read (and visibility-defaulted against) in the same transaction by the
+// adapter.
+func (q *Queries) CreateBranchFromState(ctx context.Context, arg CreateBranchFromStateParams) (Branch, error) {
+	row := q.db.QueryRow(ctx, createBranchFromState,
 		arg.ProjectID,
 		arg.Name,
 		arg.Visibility,
@@ -147,6 +204,36 @@ SELECT id, project_id, name, visibility, purpose, git_ref, base_state_id, lifecy
 
 func (q *Queries) GetBranchByID(ctx context.Context, id pgtype.UUID) (Branch, error) {
 	row := q.db.QueryRow(ctx, getBranchByID, id)
+	var i Branch
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Visibility,
+		&i.Purpose,
+		&i.GitRef,
+		&i.BaseStateID,
+		&i.LifecycleState,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getBranchByProjectAndID = `-- name: GetBranchByProjectAndID :one
+SELECT id, project_id, name, visibility, purpose, git_ref, base_state_id, lifecycle_state, created_by, created_at FROM branches WHERE id = $1 AND project_id = $2
+`
+
+type GetBranchByProjectAndIDParams struct {
+	ID        pgtype.UUID `json:"id"`
+	ProjectID pgtype.UUID `json:"project_id"`
+}
+
+// Project-scoped read: a branch id of another project matches nothing and
+// reports the same "not found" outcome (never leak another project's
+// entity existence, docs/45).
+func (q *Queries) GetBranchByProjectAndID(ctx context.Context, arg GetBranchByProjectAndIDParams) (Branch, error) {
+	row := q.db.QueryRow(ctx, getBranchByProjectAndID, arg.ID, arg.ProjectID)
 	var i Branch
 	err := row.Scan(
 		&i.ID,
@@ -423,11 +510,51 @@ func (q *Queries) ListStateRelationVersionsByState(ctx context.Context, stateID 
 	return items, nil
 }
 
+const setBranchLifecycle = `-- name: SetBranchLifecycle :one
+UPDATE branches
+SET lifecycle_state = $1
+WHERE id = $2
+  AND project_id = $3
+  AND name <> 'main'
+  AND lifecycle_state = 'active'
+RETURNING id, project_id, name, visibility, purpose, git_ref, base_state_id, lifecycle_state, created_by, created_at
+`
+
+type SetBranchLifecycleParams struct {
+	LifecycleState string      `json:"lifecycle_state"`
+	ID             pgtype.UUID `json:"id"`
+	ProjectID      pgtype.UUID `json:"project_id"`
+}
+
+// The lifecycle compare-and-swap (T0205): active → merged | aborted is
+// the only transition (docs/43), terminal once made. Zero rows mean
+// either the branch is not in the project, it is main (protected — its
+// lifecycle is the project's), or it already closed; the adapter
+// distinguishes by one read.
+func (q *Queries) SetBranchLifecycle(ctx context.Context, arg SetBranchLifecycleParams) (Branch, error) {
+	row := q.db.QueryRow(ctx, setBranchLifecycle, arg.LifecycleState, arg.ID, arg.ProjectID)
+	var i Branch
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Visibility,
+		&i.Purpose,
+		&i.GitRef,
+		&i.BaseStateID,
+		&i.LifecycleState,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const updateBranchBaseState = `-- name: UpdateBranchBaseState :one
 UPDATE branches
 SET base_state_id = $1
 WHERE id = $2
   AND project_id = $3
+  AND lifecycle_state = 'active'
   AND base_state_id IS NOT DISTINCT FROM $4
 RETURNING id, project_id, name, visibility, purpose, git_ref, base_state_id, lifecycle_state, created_by, created_at
 `
@@ -447,6 +574,11 @@ type UpdateBranchBaseStateParams struct {
 // branch of another project never matches, and the caller-side read after
 // zero rows reports the same "not found" outcome for it (never leak
 // another project's entity existence).
+//
+// T0205 adds the lifecycle guard: a merged/aborted branch's head never
+// moves (docs/43: history immutable), so the CAS also requires the branch
+// to be active. The adapter's read after zero rows reports that case as
+// *states.BranchNotActiveError instead of a conflict.
 func (q *Queries) UpdateBranchBaseState(ctx context.Context, arg UpdateBranchBaseStateParams) (Branch, error) {
 	row := q.db.QueryRow(ctx, updateBranchBaseState,
 		arg.BaseStateID,

@@ -55,6 +55,28 @@ func (e *StateConflictError) Error() string {
 // Code is the stable wire code of this outcome (docs/45).
 func (e *StateConflictError) Code() string { return CodeBranchStateConflict }
 
+// BranchNotActiveError reports a commit attempted on a branch whose
+// lifecycle is merged or aborted — closed research paths are immutable
+// (docs/43: "merged/aborted history immutable"), so no state transition
+// can land on them. The same stable outcome as the branches package's
+// *branches.NotActiveError for lifecycle transitions; both carry the
+// BRANCH_NOT_ACTIVE wire code (T0205).
+type BranchNotActiveError struct {
+	// BranchID is the branch that no longer accepts commits.
+	BranchID string
+	// Lifecycle is the terminal state the branch is in.
+	Lifecycle string
+}
+
+// Error implements error.
+func (e *BranchNotActiveError) Error() string {
+	return fmt.Sprintf("states: branch %s is %s — merged/aborted history is immutable (docs/43), no commits land on it",
+		e.BranchID, e.Lifecycle)
+}
+
+// Code is the stable wire code of this outcome (docs/45).
+func (e *BranchNotActiveError) Code() string { return CodeBranchNotActive }
+
 // CommitWriteError wraps a failure raised by the commit's operation
 // callback — the semantic writes that ran inside the commit transaction.
 // The adapter wraps callback errors in it so the service can tell them
@@ -83,6 +105,7 @@ const (
 	CodeStateNotFound       = "STATE_NOT_FOUND"
 	CodeCommitNotFound      = "STATE_COMMIT_NOT_FOUND"
 	CodeBranchNotFound      = "BRANCH_NOT_FOUND"
+	CodeBranchNotActive     = "BRANCH_NOT_ACTIVE"
 	CodeStateExists         = "STATE_ALREADY_EXISTS"
 	CodeValidation          = "VALIDATION_FAILED"
 	CodeUnavailable         = "SERVICE_UNAVAILABLE"

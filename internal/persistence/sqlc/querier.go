@@ -43,7 +43,19 @@ type Querier interface {
 	// RSG state model (canonical tables: branches, project_states, state_commits).
 	// Branch = research state evolution path; commit = state transition
 	// (docs/03_GLOSSARY_DOMAIN_MODEL.md, invariants 2-4).
+	// CreateBranch is the raw, unguarded insert: seeding fixtures and the
+	// canonical headless form (base_state_id NULL — a branch before its first
+	// state). The domain creation path is CreateBranchFromState below, which
+	// re-checks the fork point's project inside the insert.
 	CreateBranch(ctx context.Context, arg CreateBranchParams) (Branch, error)
+	// Guarded insert (T0205): a branch always forks a state of the SAME
+	// project — the EXISTS re-checks the fork point inside the insert, so a
+	// base state of another project (or a missing one) yields zero rows
+	// instead of a row, and the adapter reports ErrBaseStateNotFound for
+	// both without leaking which state exists where. The project row itself is
+	// read (and visibility-defaulted against) in the same transaction by the
+	// adapter.
+	CreateBranchFromState(ctx context.Context, arg CreateBranchFromStateParams) (Branch, error)
 	// Evidence assertions (canonical table: evidence_assertions). Evidence is a
 	// directed, typed relation between object versions — separate from the RSG
 	// relation graph (invariant 10: Provenance Graph != Evidence Graph).
@@ -88,6 +100,10 @@ type Querier interface {
 	EnqueueOutboxEvent(ctx context.Context, arg EnqueueOutboxEventParams) (OutboxEvent, error)
 	GetBlobByContentHash(ctx context.Context, arg GetBlobByContentHashParams) (Blob, error)
 	GetBranchByID(ctx context.Context, id pgtype.UUID) (Branch, error)
+	// Project-scoped read: a branch id of another project matches nothing and
+	// reports the same "not found" outcome (never leak another project's
+	// entity existence, docs/45).
+	GetBranchByProjectAndID(ctx context.Context, arg GetBranchByProjectAndIDParams) (Branch, error)
 	GetIssueByProjectAndNumber(ctx context.Context, arg GetIssueByProjectAndNumberParams) (Issue, error)
 	GetLatestRelationVersion(ctx context.Context, relationID pgtype.UUID) (RelationVersion, error)
 	GetLatestScientificObjectVersion(ctx context.Context, objectID pgtype.UUID) (ScientificObjectVersion, error)
@@ -190,6 +206,12 @@ type Querier interface {
 	// filtering on every query, search, export and download. Master Gate E ("Search
 	// 无 private leakage") holds this invariant too.
 	SearchDocuments(ctx context.Context, arg SearchDocumentsParams) ([]SearchDocumentsRow, error)
+	// The lifecycle compare-and-swap (T0205): active → merged | aborted is
+	// the only transition (docs/43), terminal once made. Zero rows mean
+	// either the branch is not in the project, it is main (protected — its
+	// lifecycle is the project's), or it already closed; the adapter
+	// distinguishes by one read.
+	SetBranchLifecycle(ctx context.Context, arg SetBranchLifecycleParams) (Branch, error)
 	// UpdateBranchBaseState is the branch head compare-and-swap behind
 	// CommitState (T0204): the head pointer advances to the new state only
 	// while it still equals the base the commit was built on, so the branch
@@ -198,6 +220,11 @@ type Querier interface {
 	// branch of another project never matches, and the caller-side read after
 	// zero rows reports the same "not found" outcome for it (never leak
 	// another project's entity existence).
+	//
+	// T0205 adds the lifecycle guard: a merged/aborted branch's head never
+	// moves (docs/43: history immutable), so the CAS also requires the branch
+	// to be active. The adapter's read after zero rows reports that case as
+	// *states.BranchNotActiveError instead of a conflict.
 	UpdateBranchBaseState(ctx context.Context, arg UpdateBranchBaseStateParams) (Branch, error)
 	UpdateOrganization(ctx context.Context, arg UpdateOrganizationParams) (Organization, error)
 	// Adjusts role/affiliation_start/verified. affiliation_end is deliberately

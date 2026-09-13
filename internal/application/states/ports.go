@@ -31,7 +31,10 @@ type Repository interface {
 	//     new state through a compare-and-swap — a head that moved
 	//     underneath the commit fails with *StateConflictError
 	//     (BRANCH_STATE_CONFLICT); a branch that does not exist in the
-	//     project fails with ErrBranchNotFound;
+	//     project fails with ErrBranchNotFound; a branch whose lifecycle
+	//     is merged/aborted fails with *BranchNotActiveError
+	//     (BRANCH_NOT_ACTIVE, docs/43: closed research paths are
+	//     immutable, T0205);
 	//  3. write runs inside the same transaction and receives the new
 	//     state id, so the semantic rows it writes reference the state
 	//     they belong to; its error is returned wrapped in
