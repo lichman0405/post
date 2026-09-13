@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -800,8 +801,8 @@ func TestRebaselineReportsARestoreThatFailedDuringARealAdvance(t *testing.T) {
 	f.mainRewritesTheSameRegion() // the task's patch no longer applies
 
 	real := restore
-	restore = func(string, string, string, []snapshotEntry) error {
-		return errors.New("the restore could not run at all")
+	restore = func(string, string, string, []snapshotEntry) ([]string, error) {
+		return nil, errors.New("the restore could not run at all")
 	}
 	defer func() { restore = real }()
 
@@ -1318,6 +1319,12 @@ func TestRebaselinePutsBackWhatWasInsideTheDirectoryThatReplacedATrackedPath(t *
 	}
 	if after := f.pathsAndContents(f.baseline); after != before {
 		t.Errorf("the refused advance changed the tree it refused to advance:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
+	}
+	if _, err := os.Lstat(hidden); err != nil {
+		// Said as what it means rather than left to the read below: this path is
+		// ignored, so it is in no listing the test compares and this line is the
+		// only one that notices it is gone.
+		t.Fatalf("the ignored file the task left is not in the tree the restore says it put back: %v", err)
 	}
 	if got := readFileOrFail(t, hidden); got != "an ignored file the task left\n" {
 		t.Errorf("the restore claims the tree is as it was found, but the ignored file came back as %q", got)
@@ -1855,6 +1862,155 @@ func TestRebaselineLeavesAnIgnoredFileTheCleanWouldNotRemove(t *testing.T) {
 	}
 }
 
+// The refusal above is right, and the restore that follows it has to ask the
+// same question of its own clean. The rule that hid this file belonged to a
+// change the task had not committed, so `reset --hard <target>` dropped it —
+// and the restore's `reset --hard head` cannot bring it back either, because
+// head does not hold it. The restore's clean therefore saw an ordinary untracked
+// file, deleted it, and the placement of the task's `.gitignore` a moment later
+// hid the hole: the error said the worktree had been put back the way it was
+// found, and the file the advance had just refused over was gone.
+//
+// What it pins is the outcome, not the mechanism: the file is still there, byte
+// for byte, and the report says it was left rather than deleted. A restore that
+// deletes it still fails the first check; one that deletes it and reports the
+// tree put back fails both.
+func TestTheRestoreKeepsAFileTheResetsOwnIgnoreRuleHid(t *testing.T) {
+	f := newRebaselineFixture(t, "T9039")
+	// The ignore file has to be TRACKED for any of this to happen. A rule the
+	// task adds to an untracked `.gitignore` survives both resets, so the clean
+	// never sees the file it hides and nothing is refused; main's new commit is a
+	// fast-forward of the task's branch, which is the ordinary case.
+	f.mainAddsItsOwnFileAt(".gitignore")
+	f.git(f.worktree, "merge", "--ff-only", "main")
+	const secret = "notes.secret"
+	const content = "the task's own ignored deliverable\n"
+	f.write(".gitignore", "main's own file\n*.secret\n", 0o644)
+	f.write(secret, content, 0o644)
+	f.mainMovesElsewhere()
+
+	_, err := RebaselineTask(f.root, "T9039", "", "")
+	if err == nil {
+		t.Fatal("the advance deleted a file it had no copy of and reported success")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "would delete "+secret) {
+		t.Errorf("the refusal this test is about is not the one that reached it: %v", err)
+	}
+	if !strings.Contains(msg, "left "+secret+" in place") {
+		t.Errorf("the report does not name the file the restore left behind, so a reader believes the tree is as it was found: %v", err)
+	}
+	got, rerr := os.ReadFile(filepath.Join(f.worktree, secret))
+	if rerr != nil {
+		t.Fatalf("the restore deleted the file the advance refused over, and says the tree was put back: %v", rerr)
+	}
+	if string(got) != content {
+		t.Errorf("the file the advance refused to delete holds %q, want %q", got, content)
+	}
+	if got := readFileOrFail(t, filepath.Join(f.worktree, ".gitignore")); !strings.Contains(got, "*.secret") {
+		t.Errorf("the task's ignore rule did not come back, so the tree is not the one the restore found: %q", got)
+	}
+}
+
+// The same directory can reach the snapshot under two spellings, and only one
+// of them is a path. `git ls-files --others` names an untracked DIRECTORY with a
+// trailing slash — which is what it does for a nested repository — while every
+// other listing names the same directory without one, so a nested repository
+// standing where main has a FILE arrived twice: once from the obstruction the
+// reset clears, once from the listing. Nothing was lost (the restore treats both
+// idempotently), but the manifest named the directory on two lines and Files
+// counted the advance as having carried two paths where it carried one — and
+// Files is len(entries), which is the number this test counts.
+//
+// A trailing slash is the whole of the difference, and it is never part of a
+// path: the slash is the separator. So the assertion is not about this fixture
+// alone — no entry and no manifest line may end in one.
+func TestTheSnapshotSpellsANestedRepositoryOneWay(t *testing.T) {
+	f := newRebaselineFixture(t, "T9040")
+	target := f.mainAddsItsOwnFileAt("scratch/inner")
+	nested := filepath.Join(f.worktree, "scratch", "inner")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.git(nested, "init", "-q", ".")
+	// A file inside the nested repository, and one beside it. Neither can be
+	// written by a patch, both are inside a directory the reset clears whole.
+	f.git(nested, "add", "-A")
+	if err := os.WriteFile(filepath.Join(nested, "notes.txt"), []byte("the task's own file\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	paths, err := worktreeChangedPaths(f.worktree, f.baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := f.git(f.worktree, "rev-parse", "HEAD")
+	keep := t.TempDir()
+	entries, err := snapshotWorktree(f.worktree, head, target, paths, keep)
+	if err != nil {
+		t.Fatalf("the snapshot refused a tree it has to be able to record: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("the snapshot recorded nothing, so this test is not the shape it is about")
+	}
+	// Counted by the path, not by the spelling: a trailing slash is the only
+	// difference between the two, so trimming it here is what the test means by
+	// "the same directory" — the production function is deliberately not used, so
+	// that a wrong answer in it cannot move the line this test draws.
+	distinct := map[string]bool{}
+	for _, e := range entries {
+		distinct[strings.TrimRight(e.Path, "/")] = true
+		if strings.HasSuffix(e.Path, "/") {
+			t.Errorf("the snapshot holds a path spelled with a trailing slash: %q", e.Path)
+		}
+	}
+	if len(distinct) != len(entries) {
+		t.Errorf("the snapshot holds %d entries for %d paths — the same directory under two spellings is carried once:\n%+v", len(entries), len(distinct), entries)
+	}
+	// The fixture is this shape only if the nested repository is in the snapshot
+	// as the directory the reset clears — reached from the obstruction, since the
+	// clean skips repositories and the listing names no file inside one.
+	found := false
+	for _, e := range entries {
+		if e.Path == "scratch/inner" && e.State == "dir" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the snapshot does not hold scratch/inner as a directory — the fixture is not this test's shape: %+v", entries)
+	}
+	manifest := readFileOrFail(t, filepath.Join(keep, "MANIFEST.txt"))
+	for _, line := range strings.Split(strings.TrimSuffix(manifest, "\n"), "\n") {
+		fields := strings.Split(line, "\t")
+		p := manifestFieldPath(t, fields)
+		if strings.HasSuffix(p, "/") {
+			t.Errorf("the manifest names a directory with a trailing slash: %q", line)
+		}
+	}
+	if got := strings.Count(manifest, "\tscratch/inner\n"); got != 1 {
+		t.Errorf("the manifest names scratch/inner %d times:\n%s", got, manifest)
+	}
+}
+
+// manifestFieldPath reads the path back out of a manifest line the way the
+// manifest writes it, so the test above compares paths rather than spellings of
+// them: the last field is quoted when it holds a quote, a backslash or a control
+// character, and written as it is otherwise.
+func manifestFieldPath(t *testing.T, fields []string) string {
+	t.Helper()
+	if len(fields) != 3 {
+		t.Fatalf("a manifest line has %d fields, want 3", len(fields))
+	}
+	if !strings.HasPrefix(fields[2], `"`) {
+		return fields[2]
+	}
+	p, err := strconv.Unquote(fields[2])
+	if err != nil {
+		t.Fatalf("the manifest's path field cannot be read back: %q", fields[2])
+	}
+	return p
+}
+
 // A directory the advance deletes whole, standing INSIDE another one it deletes
 // whole: the outer walk reaches the inner directory's contents before the inner
 // one is reached as a directory of its own, and both take it. The walk used to
@@ -2030,6 +2186,181 @@ func TestTheCleanReachIsTheNamesOnDisk(t *testing.T) {
 			t.Errorf("cleanReach names the files %v, want %v", files, want)
 			break
 		}
+	}
+}
+
+// T9041.
+//
+// What the ask names is what the act removes — measured, in both directions.
+// The dry run's answer IS the snapshot's reach, which is why the two command
+// lines are built from one constant; the constant is a claim about the code, and
+// this is the measurement behind it. A flag the dry run carried alone would
+// refuse an advance over work that was never at risk; a flag the act carried
+// alone would delete what nothing recorded, which is the defect this file exists
+// to prevent. The tree holds the shapes where the two answers could plausibly
+// differ: an untracked file standing BESIDE an ignored one, a directory holding
+// only an ignored file, an empty directory, a directory holding a fifo, a nested
+// repository, and a bare fifo.
+func TestTheCleanRemovesWhatTheDryRunNames(t *testing.T) {
+	root := t.TempDir()
+	gitIn(t, root, "init", "-q", ".")
+	write := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fifo := func(rel string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := syscall.Mkfifo(p, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".gitignore", "*.ign\n")
+	write("plain/f.txt", "untracked, in a directory it is the only thing in\n")
+	write("mixed/u.txt", "untracked, standing beside an ignored file\n")
+	write("mixed/i.ign", "ignored\n")
+	write("ignonly/i.ign", "ignored, and alone — the clean cannot empty this directory\n")
+	if err := os.MkdirAll(filepath.Join(root, "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fifo("withfifo/pipe")
+	fifo("bare-pipe")
+	write("repo/inner.txt", "tracked by the repository inside\n")
+	gitIn(t, filepath.Join(root, "repo"), "init", "-q", ".")
+	gitIn(t, filepath.Join(root, "repo"), "add", "-A")
+	gitIn(t, filepath.Join(root, "repo"), "commit", "-q", "-m", "inner")
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "commit", "-q", "-m", "base")
+
+	before := walkPaths(t, root)
+	for _, p := range []string{"mixed/i.ign", "ignonly/i.ign", "empty", "withfifo/pipe", "bare-pipe", "repo/inner.txt"} {
+		if !before[p] {
+			t.Fatalf("the fixture does not hold %s, so it is not the shape this test is about: %v", p, keysOf(before))
+		}
+	}
+	dirs, files, err := cleanReach(root)
+	if err != nil {
+		t.Fatalf("cleanReach refused a tree it has to be able to read: %v", err)
+	}
+	// What the dry run promises: the names themselves, and — for a directory it
+	// names whole — everything standing inside it.
+	named := map[string]bool{}
+	for _, p := range append(keysOf(dirs), files...) {
+		named[p] = true
+		for _, q := range keysOf(before) {
+			if strings.HasPrefix(q, p+"/") {
+				named[q] = true
+			}
+		}
+	}
+	if _, err := gitOutput(root, cleanArgs(false)...); err != nil {
+		t.Fatalf("running the clean the advance runs: %v", err)
+	}
+	after := walkPaths(t, root)
+	for _, p := range keysOf(named) {
+		if after[p] {
+			t.Errorf("the dry run names %s and the clean left it in place; an advance would be refused over work that is not at risk", p)
+		}
+	}
+	for _, p := range keysOf(before) {
+		if !after[p] && !named[p] {
+			t.Errorf("the clean removed %s, which the dry run never named; the snapshot holds no copy of it", p)
+		}
+	}
+}
+
+// walkPaths is every path under root, in slash form, as a set. `.git` is skipped
+// — reading it is not this test's business, and the fixture has two of them.
+func walkPaths(t *testing.T, root string) map[string]bool {
+	t.Helper()
+	out := map[string]bool{}
+	err := filepath.WalkDir(root, func(full string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, rerr := filepath.Rel(root, full)
+		if rerr != nil {
+			return rerr
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		if d.IsDir() && d.Name() == ".git" {
+			return fs.SkipDir
+		}
+		out[rel] = true
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// T9042.
+//
+// Every clean the advance runs comes from one constant, and what that constant
+// holds is the flags that decide WHAT is removed. The three command lines this
+// file builds — the ask, the act, and the restore's own act — have to differ in
+// nothing else. That is the property `cleanWhat` buys, and it is not visible in
+// any one of the three: `-x` (or `-e`, or dropping `-d`) on the ask alone
+// refuses an advance over work that was never at risk, and on an act alone
+// deletes what nothing recorded. Nothing else in this suite would notice, since
+// each shape the suite builds is fed to whichever of the three the path under
+// test happens to run.
+func TestTheThreeCleanCommandLinesDifferOnlyInDoingIt(t *testing.T) {
+	// The flags that decide what is removed: everything on the command line
+	// except the ones that are about doing it rather than about what it does —
+	// -n asks instead of acting, -f refuses to ask whether to act, -q says less.
+	what := func(args []string) string {
+		t.Helper()
+		if len(args) < 2 || args[0] != "clean" {
+			t.Fatalf("a clean command line that does not start with `git clean`: %q", args)
+		}
+		var b strings.Builder
+		for _, a := range args[1:] {
+			if a == "--" {
+				break
+			}
+			if !strings.HasPrefix(a, "-") {
+				t.Fatalf("%q is not a flag, and it comes before the end of the flags in %q", a, args)
+			}
+			for _, r := range strings.TrimPrefix(a, "-") {
+				switch r {
+				case 'n', 'f', 'q':
+				default:
+					b.WriteRune(r)
+				}
+			}
+		}
+		return b.String()
+	}
+	ask, act := what(cleanArgs(true)), what(cleanArgs(false))
+	if ask != act {
+		t.Errorf("the ask is `%s` and the act is `%s`: a flag about what is removed that only one of them has is either a deletion nothing recorded or a refusal over work that is not at risk", ask, act)
+	}
+	if ask == "" {
+		t.Errorf("the two command lines share no flag about what is removed, so this test would pass on any pair of them")
+	}
+	if got := what(restoreCleanArgs([]string{"a"})); got != act {
+		t.Errorf("the restore's clean is `%s` and the advance's act is `%s`", got, act)
+	}
+	// And what it was given is named literally: a path on disk may hold `[`, `*`
+	// or `?`, which a pathspec would read as a pattern and match some OTHER name
+	// with.
+	want := []string{"clean", "-" + "f" + cleanWhat + "q", "--", ":(literal)a.txt", ":(literal)na[me].txt"}
+	if got := restoreCleanArgs([]string{"a.txt", "na[me].txt"}); !slices.Equal(got, want) {
+		t.Errorf("the restore's clean is %q, want %q", got, want)
 	}
 }
 

@@ -135,6 +135,21 @@ func cleanArgs(dry bool) []string {
 	return []string{"clean", "-f" + cleanWhat + "q"}
 }
 
+// restoreCleanArgs is the clean the RESTORE runs: the advance's own clean,
+// limited to the paths the snapshot holds. It is built from cleanArgs for the
+// same reason the advance's own two command lines are built from one constant —
+// a flag that decides WHAT is removed, added here alone, would make the restore
+// a different command from the one whose reach was asked (T9042) — and the paths
+// arrive as `:(literal)` pathspecs, because a path on disk may hold `[`, `*` or
+// `?`, which a pathspec would read as a pattern and match some OTHER name with.
+func restoreCleanArgs(safe []string) []string {
+	args := append(cleanArgs(false), "--")
+	for _, p := range safe {
+		args = append(args, ":(literal)"+p)
+	}
+	return args
+}
+
 // Regenerators maps a derived artifact to the command that regenerates it, run
 // with the worktree as cwd so it reads that tree's inputs rather than the
 // Supervisor's.
@@ -490,16 +505,18 @@ func snapshotWorktree(worktree, head, target string, paths map[string]bool, keep
 	whole := make(map[string]bool, len(obstructing)+len(cleaned))
 	recorded := make(map[string]bool, len(paths)+len(obstructing)+len(cleaned))
 	for p := range paths {
-		recorded[p] = true
+		recorded[onePathName(p)] = true
 	}
 	for _, p := range cleanedFiles {
-		recorded[p] = true
+		recorded[onePathName(p)] = true
 	}
 	for p := range obstructing {
+		p = onePathName(p)
 		recorded[p] = true
 		whole[p] = true
 	}
 	for p := range cleaned {
+		p = onePathName(p)
 		recorded[p] = true
 		whole[p] = true
 	}
@@ -547,6 +564,17 @@ func snapshotWorktree(worktree, head, target string, paths map[string]bool, keep
 	}
 	return entries, nil
 }
+
+// onePathName is the single spelling of a path in the record. `git ls-files
+// --others` names an untracked DIRECTORY with a trailing slash — a nested
+// repository is what it does that for — while every other listing names the
+// same directory without one, so the same directory arrived as two keys and was
+// recorded, counted in Files and written to the manifest twice, once as
+// `scratch/inner` and once as `scratch/inner/` (the sixth round's second
+// finding; no work was lost, the report a human reads overstated what was
+// carried). A trailing slash is the only difference between the two spellings:
+// the slash is the separator and never stands for itself in a path.
+func onePathName(p string) string { return strings.TrimRight(p, "/") }
 
 // snapshotOne records one changed path into the kept copy and returns what the
 // restore has to replay. A path that is tracked and deleted is recorded as
@@ -1058,10 +1086,24 @@ func manifestPath(p string) string {
 // when it could not be made, the error says so and names the copy, because the
 // copy is then the only place the task's work exists.
 func restoreOrExplain(worktree, head, keep string, entries []snapshotEntry, cause error, taskID string) error {
-	if rerr := restore(worktree, head, keep, entries); rerr != nil {
+	left, rerr := restore(worktree, head, keep, entries)
+	if rerr != nil {
 		return fmt.Errorf("%w\nThe worktree could NOT be put back: %v\nThe task's work is kept at %s — restore it by hand before dispatching %s again", cause, rerr, keep, taskID)
 	}
+	if len(left) > 0 {
+		return fmt.Errorf("%w\nThe worktree was put back, except that the restore left %s in place rather than delete %s with nothing to write back: the snapshot holds no copy of it, because the ignore rule that hid it belonged to a change the task had not committed — the advance's reset dropped that rule, and this restore's reset cannot bring it back. Nothing was lost: %s is where the task left %s, and it is what the advance refused over. The change is also kept at %s",
+			cause, strings.Join(left, ", "), plural(left, "it"), strings.Join(left, ", "), plural(left, "it"), keep)
+	}
 	return fmt.Errorf("%w\nThe worktree was put back the way it was found; the change is also kept at %s", cause, keep)
+}
+
+// plural keeps the refusal above readable whether one path or several were left
+// in place. It is a phrasing helper and nothing depends on it for meaning.
+func plural(paths []string, one string) string {
+	if len(paths) == 1 {
+		return one
+	}
+	return "them"
 }
 
 // restore is restoreWorktree, as a variable, so that a test can make it fail
@@ -1077,12 +1119,49 @@ var restore = restoreWorktree
 // own files written back from the snapshot. `reset --hard head` plus the
 // snapshot is what makes it exact — head restores everything the task did NOT
 // change, the snapshot restores everything it did.
-func restoreWorktree(worktree, head, keep string, entries []snapshotEntry) error {
+//
+// It returns the paths it deliberately did NOT delete (see below); the caller
+// reports them, because "the worktree was put back the way it was found" is
+// false for a tree that still holds one of them.
+func restoreWorktree(worktree, head, keep string, entries []snapshotEntry) ([]string, error) {
 	if _, err := gitOutput(worktree, "reset", "--hard", head); err != nil {
-		return fmt.Errorf("resetting the worktree to %s: %w", head, err)
+		return nil, fmt.Errorf("resetting the worktree to %s: %w", head, err)
 	}
-	if _, err := gitOutput(worktree, cleanArgs(false)...); err != nil {
-		return fmt.Errorf("cleaning the worktree: %w", err)
+	// The restore's own clean asks first, and it has to. `reset --hard head`
+	// above has already written head's ignore files, so every rule the task added
+	// and had not committed is gone by the time the clean runs and a file those
+	// rules hid is now an ordinary untracked file the clean would delete. The
+	// snapshot holds no copy of it — `--exclude-standard` is blind to ignored
+	// files, which is exactly why the advance's own ask refused over this file —
+	// so the restore would delete work it cannot write back and then report the
+	// worktree put back. That is the sixth round's first finding, reproduced in
+	// TestTheRestoreKeepsAFileTheResetsOwnIgnoreRuleHid.
+	//
+	// So the clean is limited to the paths the snapshot holds, which the
+	// placements below write back. A path in neither category is not deleted: it
+	// is named to the caller instead. Leaving a file the task wrote costs a
+	// re-dispatch a confusing extra path; deleting one it cannot be given back
+	// costs the work, which is the defect.
+	held := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		held[e.Path] = true
+	}
+	dirs, files, err := cleanReach(worktree)
+	if err != nil {
+		return nil, err
+	}
+	var safe, left []string
+	for _, p := range append(keysOf(dirs), files...) {
+		if held[p] || heldByAnAncestor(held, p) {
+			safe = append(safe, p)
+			continue
+		}
+		left = append(left, p)
+	}
+	if len(safe) > 0 {
+		if _, err := gitOutput(worktree, restoreCleanArgs(safe)...); err != nil {
+			return left, fmt.Errorf("cleaning the worktree: %w", err)
+		}
 	}
 	// Removals first, then everything that puts something back. The order is not
 	// cosmetic: a task that replaced a tracked directory with a file has BOTH a
@@ -1097,7 +1176,7 @@ func restoreWorktree(worktree, head, keep string, entries []snapshotEntry) error
 	for _, e := range entries {
 		if e.State == "absent" {
 			if err := restoreEntry(worktree, keep, e); err != nil {
-				return err
+				return left, err
 			}
 			continue
 		}
@@ -1105,10 +1184,10 @@ func restoreWorktree(worktree, head, keep string, entries []snapshotEntry) error
 	}
 	for _, e := range placements {
 		if err := restoreEntry(worktree, keep, e); err != nil {
-			return err
+			return left, err
 		}
 	}
-	return nil
+	return left, nil
 }
 
 // restoreEntry puts one path back the way the snapshot recorded it: the state it
