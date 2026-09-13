@@ -1,0 +1,13 @@
+{
+  "name": "@post/e2e-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Project shell e2e (T0108 required test): real Chromium drives the built web app through the project directory, the shell tabs, the visibility/frozen badges, the permission-aware Settings gate and the private-unauthorized no-shell state. The API is mocked at the network layer with the exact wire shapes cmd/api produces (the Go integration suite locks those shapes against real PostgreSQL).",
+  "type": "module",
+  "scripts": {
+    "e2e": "node shell-e2e.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}
