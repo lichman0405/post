@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/lichman0405/post/internal/config"
 )
 
 // DefaultDAGPath and DefaultStatePath are the in-repo locations of the DAG
@@ -311,6 +313,27 @@ func (s *Store) Transition(id string, to State, runID, reason string) (*Transiti
 	if runID == "" {
 		return nil, fmt.Errorf("internal error: transition without run_id")
 	}
+	// A reason is a persisted artifact and task_status.json is committed, so
+	// this is an output path like any other — but the text is free prose
+	// composed elsewhere (a check's detail, a Worker's own test command), so it
+	// goes through the text redactor rather than the value one. RedactForOutput
+	// would replace a multi-kilobyte reason with "***" the moment it contained
+	// one 40-character sha, which is how a leak turns into a deleted audit
+	// trail; see RedactTextForOutput.
+	//
+	// Found by a scan of the committed tree: a rejection reason carried the
+	// test command's inline environment verbatim, including a
+	// `postgres://user:pw@host` DSN. The value was one of the dev fixtures in
+	// internal/config/secretscan.go — already in docker-compose.yml and CI by
+	// design, so nothing was disclosed — but the mechanism is the T0011 class,
+	// and a command carrying a real token would have been committed
+	// permanently to a file nobody re-reads.
+	//
+	// What this does not cover, stated so it is not read as full coverage:
+	// RESULT.json is authored by the Worker in its own worktree and reaches the
+	// repository through the task PR, not through this store. Redacting it
+	// needs a collect-time pass over a file this package does not write.
+	reason = config.RedactTextForOutput(reason)
 	var result *TransitionResult
 	err := s.mutate(id, func(ts *TaskState, from State, states map[string]State) error {
 		if err := checkTransition(id, from, to); err != nil {

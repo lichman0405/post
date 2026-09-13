@@ -40,6 +40,79 @@ func RedactForOutput(v string) string {
 	return v
 }
 
+// RedactTextForOutput masks credentials inside free text — a command line, an
+// error detail, a rejection reason — and leaves the text otherwise intact.
+//
+// RedactForOutput is the wrong tool for prose, and the difference is not a
+// matter of taste. That function is built for a *value*: when secretTokenRe
+// matches it returns "***" for the entire input, because a value that looks
+// like a token must not be echoed at all. Applied to a persisted reason it is
+// destructive rather than conservative. Measured against the 126 reason texts
+// in tasks/task_status.json: 13 of them lose more than 40 characters, and the
+// worst goes from 2,999 characters to the 3-character string "***", because a
+// 2.9 KB explanation happens to contain one 40+ character alphanumeric run (a
+// commit sha). A committed reason that reads "***" is an audit trail that has
+// been deleted — and this repository already states the standard it violates:
+// redact_test.go fails on "output lost non-secret values (over-redaction?)".
+//
+// So every rule here rewrites the match and never the surrounding text:
+//
+//   - URL userinfo, per whitespace-separated token. RedactURL splits at the
+//     LAST '@' of whatever it is given, which is right for one URL and wrong
+//     for a command line containing a URL plus a later '@':
+//     "PGURL=postgres://u:p@h/db go test --to dev@example.com" came back as
+//     "PGURL=postgres://u:***@example.com" — the credential removed, but the
+//     host silently replaced and everything between deleted.
+//   - password/token key=value pairs and the well-known credential prefixes.
+//   - the generic long-run heuristic last, because it is the only rule that can
+//     fire on something that is not a secret. A 40-character commit sha does
+//     become "***" and the reader loses which commit the text was about; that
+//     loss is bounded here to the sha rather than to the whole reason.
+func RedactTextForOutput(v string) string {
+	if v == "" {
+		return v
+	}
+	out := redactUserinfoPerToken(v)
+	out = dsnSecretRe.ReplaceAllString(out, "${1}=***")
+	out = secretTokenRe.ReplaceAllString(out, "***")
+	return out
+}
+
+// redactUserinfoPerToken applies RedactURL to each whitespace-separated token
+// and copies everything else byte for byte, whitespace included. Splitting into
+// tokens is what keeps a URL-shaped redactor from being applied to a string
+// that merely contains a URL; copying the separators is what keeps the result
+// faithful enough to be committed as a record.
+func redactUserinfoPerToken(v string) string {
+	if !strings.Contains(v, "://") {
+		return v
+	}
+	var b strings.Builder
+	b.Grow(len(v))
+	i := 0
+	for i < len(v) {
+		j := i
+		for j < len(v) && isSpaceByte(v[j]) {
+			j++
+		}
+		b.WriteString(v[i:j]) // separators verbatim
+		if j == len(v) {
+			break
+		}
+		k := j
+		for k < len(v) && !isSpaceByte(v[k]) {
+			k++
+		}
+		b.WriteString(RedactURL(v[j:k]))
+		i = k
+	}
+	return b.String()
+}
+
+func isSpaceByte(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f'
+}
+
 // truncateRedacted redacts a value and caps its length for an error message.
 // Error text should help locate a bad line, not reproduce its contents — an
 // unbounded echo is how a credential reaches a log in the first place.

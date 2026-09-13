@@ -1,6 +1,7 @@
 package devorchestrator
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -474,6 +475,78 @@ func TestAcceptSetsAcceptedAtAndRejectRecordsReason(t *testing.T) {
 	}
 	if res.State.AcceptedBySupervisorAt == nil {
 		t.Fatalf("accepted_by_supervisor_at lost after merged: %+v", res.State)
+	}
+}
+
+// TestPersistedReasonsCarryNoCredentialAndLoseNoText: a reason is written into
+// tasks/task_status.json, which is committed to the repository, so it is an
+// output path — and the text is composed elsewhere, by whichever check failed.
+// A reason that carries a Worker's inline environment verbatim puts a DSN in
+// git permanently; a reason redacted into "***" deletes the audit trail the
+// reason exists to be.
+//
+// Both halves are asserted against the FILE rather than the returned value,
+// because the file is the artifact that gets committed.
+func TestPersistedReasonsCarryNoCredentialAndLoseNoText(t *testing.T) {
+	s := openScratch(t)
+	drive(t, s, "T1003", StateRunning)
+
+	const credential = "hunter2"
+	reason := "G2 failed: out of scope internal/foo/bar.go\n" +
+		"command: POSTGRES_TEST_ADMIN_URL=postgres://postgres:" + credential + "@127.0.0.1:5432/post go test -count=1 ./tests/integration/\n" +
+		"ref " + strings.Repeat("a", 40)
+
+	if _, err := s.Transition("T1003", StateRejected, NewRunID(), reason); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(s.StatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(credential)) {
+		t.Errorf("the credential reached the committed state file:\n%s", raw)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		t.Fatal(err)
+	}
+	var tasks map[string]json.RawMessage
+	if err := json.Unmarshal(top["tasks"], &tasks); err != nil {
+		t.Fatal(err)
+	}
+	var ts TaskState
+	if err := json.Unmarshal(tasks["T1003"], &ts); err != nil {
+		t.Fatal(err)
+	}
+
+	// Not "***": the reason's own words are still there to be read.
+	if ts.RejectionReason == "***" || ts.RejectionReason == "" {
+		t.Fatalf("the reason was deleted rather than redacted: %q", ts.RejectionReason)
+	}
+	for _, must := range []string{
+		"G2 failed: out of scope internal/foo/bar.go",
+		"postgres://postgres:***@127.0.0.1:5432/post",
+		"go test -count=1 ./tests/integration/",
+	} {
+		if !strings.Contains(ts.RejectionReason, must) {
+			t.Errorf("the persisted reason lost %q:\n%s", must, ts.RejectionReason)
+		}
+	}
+	if !strings.Contains(ts.RejectionReason, "\n") {
+		t.Errorf("the persisted reason lost its line structure: %q", ts.RejectionReason)
+	}
+	// The one loss this design accepts, asserted so it is a decision rather
+	// than a surprise: a 40+ character opaque run is masked, because the rule
+	// that catches a bare token cannot tell it from a commit sha.
+	if !strings.Contains(ts.RejectionReason, "ref ***") {
+		t.Errorf("expected the long opaque run to be masked, got:\n%s", ts.RejectionReason)
+	}
+	// History carries the same text, so it must be redacted by the same rule —
+	// a leak in the history entry would be committed just the same.
+	if n := len(ts.History); n == 0 {
+		t.Fatal("no history entry recorded")
+	} else if last := ts.History[n-1]; strings.Contains(last.Reason, credential) {
+		t.Errorf("the credential reached the history entry: %q", last.Reason)
 	}
 }
 
