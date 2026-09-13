@@ -174,9 +174,13 @@ var canonicalTables = map[string]tableExp{
 		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("branch_id", "branches", "RESTRICT"), fk("base_state_id", "project_states", "RESTRICT"), fk("result_state_id", "project_states", "RESTRICT"), fk("actor_id", "users", "RESTRICT")},
 	},
 	"scientific_objects": {
-		cols: []colExp{c("id", u, false, true), c("project_id", u, false, false), c("object_type", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
-		pk:   []string{"id"},
-		fks:  []fkExp{fk("project_id", "projects", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
+		// current_version_no is the T0202 addition (00024): the
+		// materialized head pointer that doubles as the expected_version
+		// compare-and-swap cell.
+		cols:   []colExp{c("id", u, false, true), c("project_id", u, false, false), c("object_type", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true), c("current_version_no", i4, false, true)},
+		pk:     []string{"id"},
+		checks: []string{"current_version_no >= 0"},
+		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
 	},
 	"scientific_object_versions": {
 		cols:    []colExp{c("id", u, false, true), c("object_id", u, false, false), c("version_no", i4, false, false), c("state_id", u, false, false), c("branch_id", u, true, false), c("schema_id", txt, false, false), c("schema_version", txt, false, false), c("title", txt, false, false), c("lifecycle_state", txt, false, false), c("payload", jb, false, false), c("visibility_policy_id", u, true, false), c("integrity_hash", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
@@ -378,6 +382,39 @@ var headVersion = func() int64 {
 	return n
 }()
 
+// maxVersionNo is the highest migration version NUMBER in infra/migrations,
+// DERIVED like headVersion. The two differ once the numbering space has
+// gaps: the Supervisor reserves numbers for parallel Workers (T0202 was
+// assigned 00024 while 00021-00023 were held for others), so goose's
+// max(version_id) is the largest number, not the file count.
+var maxVersionNo = func() int64 {
+	entries, err := migrations.FS.ReadDir(".")
+	if err != nil {
+		panic("reading embedded migrations: " + err.Error())
+	}
+	var max int64
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".sql") {
+			continue
+		}
+		underscore := strings.IndexByte(e.Name(), '_')
+		if underscore < 1 {
+			panic("migration filename without numeric prefix: " + e.Name())
+		}
+		var n int64
+		for _, c := range e.Name()[:underscore] {
+			if c < '0' || c > '9' {
+				panic("migration filename without numeric prefix: " + e.Name())
+			}
+			n = n*10 + int64(c-'0')
+		}
+		if n > max {
+			max = n
+		}
+	}
+	return max
+}()
+
 // ---------------------------------------------------------------------------
 //  1. Fresh install: empty database → head, then the catalog IS the canonical
 //     schema (columns, nullability, defaults, PKs, uniques, checks, FKs,
@@ -395,8 +432,8 @@ func TestFreshInstallCatalog(t *testing.T) {
 	want["goose_db_version"] = gooseTable
 	compareCatalog(t, got, want)
 
-	if v := appliedVersion(t, ctx, pool); v != headVersion {
-		t.Errorf("fresh install: applied version = %d, want %d", v, headVersion)
+	if v := appliedVersion(t, ctx, pool); v != maxVersionNo {
+		t.Errorf("fresh install: applied version = %d, want %d", v, maxVersionNo)
 	}
 }
 
@@ -509,8 +546,8 @@ func TestUpgradePath(t *testing.T) {
 	if applied != headVersion-6 {
 		t.Errorf("upgrade path: applied %d on the way to head, want %d", applied, headVersion-6)
 	}
-	if v := appliedVersion(t, ctx, pool); v != headVersion {
-		t.Fatalf("upgrade path: version after head = %d, want %d", v, headVersion)
+	if v := appliedVersion(t, ctx, pool); v != maxVersionNo {
+		t.Fatalf("upgrade path: version after head = %d, want %d", v, maxVersionNo)
 	}
 	upgraded := takeSnapshot(t, ctx, pool)
 
