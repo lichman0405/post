@@ -1,9 +1,16 @@
 # POST database migrations
 
 Forward-only, numbered SQL migrations for the canonical semantic store
-(PostgreSQL, docs/53_DATABASE_STANDARD.md). The canonical logical schema —
-`specs/database/postgres.sql` — is the source of truth; this directory is its
-faithful, executable decomposition.
+(PostgreSQL, docs/53_DATABASE_STANDARD.md).
+
+**These migrations are the canonical schema history.** `specs/database/postgres.sql`
+is their generated snapshot, not a hand-maintained source: it is produced by
+`scripts/gen_schema_snapshot.py` and `make check-schema-snapshot` fails when the
+two diverge. The direction used to be the other way round — the snapshot was
+declared the source of truth and the migrations its "faithful decomposition" —
+and the result was a snapshot that froze while the schema moved five migrations
+past it, in a file everything still trusted. A canonical artifact that silently
+lags is worse than none, because it is believed.
 
 ## Tool (L1 decision, task T0005)
 
@@ -48,6 +55,11 @@ made executable, and `branches.base_state_id` is still added by the same
 If the canonical schema is updated, port the delta as a new numbered
 migration and extend the fixture in `tests/integration/migration_test.go`.
 
+The `specs/database/postgres.sql` snapshot is the one place a Worker writes
+under `specs/`: it is a declared derived artifact of `infra/migrations/**`
+(`specs/orchestrator/derived-artifacts.json`), regenerated mechanically, and
+never edited by hand.
+
 Additional deviation (T0103): `00018_organization_governance.sql` adds
 `organizations.deactivated_at` and the `organization_memberships(user_id)`
 index, which the canonical seed does not declare yet. The seed stays frozen,
@@ -90,15 +102,27 @@ migration set is the living schema.
 
 ## Adding a migration
 
-1. Add `NNNNN_description.sql` (next number) with `-- +goose Up` and the DDL.
+1. Name it with **the migration number in your task package** — the Supervisor
+   reserves it at dispatch. Do not choose one yourself and do not read one out
+   of this file's index: two Workers in parallel once both created
+   `00017_*.sql`, each following this README's old advice of "the next number"
+   against an index that had stopped five migrations earlier. A number is a
+   shared resource, so it is allocated, not inferred. Write
+   `NNNNN_description.sql` with `-- +goose Up` and the DDL.
 2. If it touches any table a query uses, regenerate:
    `sqlc generate` (v1.31.1 — pinned; see sqlc.yaml).
 3. Extend the expected-catalog fixture in `tests/integration/migration_test.go`
    if the canonical schema changed.
-4. Run the gates:
+4. Regenerate the canonical schema snapshot — it is derived from these files,
+   so adding a migration without it leaves the snapshot stale and CI fails:
+   ```bash
+   python3 scripts/gen_schema_snapshot.py       # regenerate specs/database/postgres.sql
+   ```
+5. Run the gates:
    ```bash
    go test ./tests/integration/ -count=1        # fresh install, repeat, upgrade path, constraints
    tests/integration/check-sqlc-drift.sh        # generation drift (fails on mismatch)
+   make check-schema-snapshot                   # snapshot == ordered migrations
    ```
 
 Never edit an existing numbered file. Never add a down migration.

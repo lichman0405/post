@@ -1,20 +1,20 @@
 {
   "algorithm": "sha256",
-  "combined_digest": "a94725d2a1f3dac06cef4b9e167e18ba9f1e6e59a4867d2430a3f566ff53e87f",
+  "combined_digest": "015abd06b9a9a6ead7796623c893d05d392ace1794589425c805f7670cda2bdb",
   "files": {
     "specs/README.md": "2a0398dfb3ead0586034364d7411d845b84fd33b7c43d1ce9199d6a14ef4cf1a",
     "specs/api/openapi.yaml": "8f2e4cb78ae6c66991d8ad1a4ca15a67248b2cbeee4ebe259323af4a8f08aad1",
-    "specs/database/postgres.sql": "e53fc9c2a13ea4593fdfc7fe82c1aa6aff3323949bf66034add20f78cfe77dd8",
+    "specs/database/postgres.sql": "2689d1b1255d350cecbc785bffef7e34e2dea3e8072acaca2fff850bcac95bd2",
     "specs/events/event-types.yaml": "5987d653a176348dd86cb6563578de8095e9f8390cca72b332f51dac5edf954c",
     "specs/mcp/tools.json": "f6b5fb023aba882a259bbe7d001bdd2755c1120f1dc768fe7512a7383fdbaca9",
     "specs/orchestrator/decision-levels.yaml": "8a06ec18b8abd79c2462e3d3bcc5b785c51a8f970c54aaa279f174882e0f5a3f",
-    "specs/orchestrator/derived-artifacts.json": "3b3e7174d1aa2d095e6a99356109b913133080db4898986ad8bb9203e760a4cb",
-    "specs/orchestrator/gates.json": "ac4c1c54fdaf4e937c757d78a4fdb3e920c785b9ab3bba9219e72e890cb3de6d",
+    "specs/orchestrator/derived-artifacts.json": "b51cce26d578245d6269f82da0f053cde846a1ead0fea0c4bbe7413a0b89d415",
+    "specs/orchestrator/gates.json": "bf4eeafd30abc0c16252d90067fed2a4c4b678f482082d7b82546ba0de25d9b3",
     "specs/orchestrator/rddev-cli.yaml": "f73576090a3f8bb3b78d560e662e0a180c480917b12f731ad579879ed174a397",
     "specs/orchestrator/review-verdict.schema.json": "78940ff58ba1d84e05d739d1c4af2a4d47b2fa834e7ba2ce2bca5b337f66f9fd",
     "specs/orchestrator/source-repo-preflight.schema.json": "a69dd6840fd2c5558dfba7fdb19019430f1c9a3b248c19c6f0a93b2912882932",
     "specs/orchestrator/source-repository.yaml": "78876127b54ca1f61e88d0a9841245b54d6f50df63c14b0768a47907f602e6b9",
-    "specs/orchestrator/task-package.schema.json": "1e82282384a2bf06ca47d4275bfa859612c3e28854fa1bc1c43e83c8b1caa794",
+    "specs/orchestrator/task-package.schema.json": "0d5a66ee1b401725883625f2a97f0bca31e0aaf7b3b6fdcb5dbe875ae11c0abc",
     "specs/orchestrator/task-state-machine.yaml": "43b6e557bff0d32337ab4e3b083daaf356685d0cddca254252489cdc0578e029",
     "specs/orchestrator/worker-permissions.yaml": "cd26e1fff62107feccf8c1948642b0aea417f94f983d1a36fbea82821ae69cda",
     "specs/orchestrator/worker-registry.schema.json": "907fe9143712217ba6983cacb1f5a61a6203d7cf61306f5cd0914ebba1cf9358",
@@ -39,9 +39,9 @@
     "specs/schemas/sample.schema.json": "fed5737f271de54c07ebcb429740b224023ce0ffee84e173ff48b7fa7639732a",
     "specs/ui/page-inventory.csv": "c89311bf12526e5d5762a351d71a447caa1c9a79912a172449dd3639141387fb",
     "specs/ui/routes.yaml": "88ae6cb829eae37dd8ae5f8815ce2b4eabc9ec82c51c95cf43223be91922f570",
-    "tasks/tasks.json": "ad10c5242eb483bfa7d7fe3b867f730001c2779d5011bd5bc13271440a129509"
+    "tasks/tasks.json": "eab109b32f2b131be406c10154645526f42de5f78faadbf663cccdfeafae4b67"
   },
   "input_count": 38,
   "marker_format": 1,
-  "spec_version": "sha256:a94725d2a1f3dac0"
+  "spec_version": "sha256:015abd06b9a9a6ea"
 }

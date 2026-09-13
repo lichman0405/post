@@ -29,6 +29,10 @@ jobs:
         run: pip install pyyaml
       - name: Validate machine-readable specs and task DAG
         run: python3 scripts/validate_specs.py
+      - name: Canonical schema snapshot is the ordered migrations
+        run: python3 scripts/gen_schema_snapshot.py --check
+      - name: The snapshot drift check can itself report drift
+        run: bash scripts/tests/schema-snapshot-test.sh
       - name: Verify derived spec version marker
         run: python3 scripts/spec_version.py --check
       - name: OpenAPI contract check (parse + $ref integrity + structure)

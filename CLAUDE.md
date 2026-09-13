@@ -127,6 +127,17 @@ Supervisor 必须独立检查 diff、scope、acceptance criteria，并重新运�
 - Release：把 RSG snapshot hash + Git commit SHA + blob hashes + schema/policy/rights version 固定为不可变状态。
 - 正常 relational current state + append-only version/domain-event log；V1 不采用纯 Event Sourcing。
 
+## 8.1 Schema 演进与 canonical snapshot（2026-09-13）
+
+- `infra/migrations/**` 是 **canonical schema history**；`specs/database/postgres.sql` 是它的
+  **生成物**（`scripts/gen_schema_snapshot.py`，`make check-schema-snapshot` 校验）。
+  **不手工同步、不手工编辑**。
+- **迁移编号由 Supervisor 在 dispatch 时分配**并写进任务包；Worker **不得自行选号**。
+- **这是 Worker 写入 `specs/` 的唯一入口**：该快照在
+  `specs/orchestrator/derived-artifacts.json` 中声明为 `infra/migrations/**` 的 derived artifact，
+  scope 校验强制"覆盖迁移目录者必须覆盖它"，写入方式只有重新生成。
+  其余 `specs/**` 与 `docs/**` 仍为 Supervisor-only。
+
 ## 9. Domain 不变量
 
 1. Project 是研发边界；RSG 是科研状态模型。

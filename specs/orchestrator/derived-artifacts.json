@@ -11,6 +11,11 @@
       "marker": "tasks/tasks.json",
       "derived": "specs/SPEC_VERSION.json",
       "note": "the task DAG is an input of the derived spec version marker"
+    },
+    {
+      "marker": "infra/migrations/**",
+      "derived": "specs/database/postgres.sql",
+      "note": "The canonical schema snapshot is generated from the migration history (scripts/gen_schema_snapshot.py). It is a derived artifact, not a product spec a Worker edits by judgement: a task whose scope covers infra/migrations/** regenerates it mechanically, and CI fails when the two diverge. This is the auditable path for schema evolution, and it is the whole of the Worker's access to specs/."
     }
   ]
 }

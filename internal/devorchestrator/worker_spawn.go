@@ -172,6 +172,14 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Reserve this task's migration number before the Worker exists, so two
+	// parallel Workers cannot pick the same one. Idempotent across rework and
+	// respawn: a task keeps the number it was contracted with.
+	migrationNumber, err := AllocateMigrationNumber(repoRoot, opts.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	pkg.MigrationNumber = migrationNumber
 	schemaPath := filepath.Join(repoRoot, "specs", "orchestrator", "task-package.schema.json")
 	if err := ValidateTaskPackage(pkg, schemaPath); err != nil {
 		return nil, err

@@ -67,6 +67,8 @@ stage_workflows() {
 
 stage_spec() {
   python3 scripts/validate_specs.py
+  python3 scripts/gen_schema_snapshot.py --check
+  bash scripts/tests/schema-snapshot-test.sh
   python3 scripts/spec_version.py --check
   bash scripts/tests/spec-validation-unit-test.sh
   bash scripts/tests/spec-validation-smoke-test.sh
