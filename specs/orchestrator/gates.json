@@ -197,6 +197,9 @@
         },
         {
           "run": "bash tests/acceptance/driver-persistence-e2e.sh"
+        },
+        {
+          "run": "bash scripts/tests/gitea-e2e-guard-unit-test.sh"
         }
       ]
     },
@@ -345,6 +348,11 @@
     "T0214": {
       "g3_jobs": [
         "rsg-real-services"
+      ]
+    },
+    "T0215": {
+      "g3_jobs": [
+        "migration-integration"
       ]
     },
     "T0301": {

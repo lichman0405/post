@@ -14,6 +14,26 @@ type Querier interface {
 	AddOrganizationMembership(ctx context.Context, arg AddOrganizationMembershipParams) error
 	AddProjectMembership(ctx context.Context, arg AddProjectMembershipParams) (ProjectMembership, error)
 	AttachBlob(ctx context.Context, arg AttachBlobParams) error
+	// The expected_version compare-and-swap (T0203): advance the head pointer
+	// from @expected_version_no to @expected_version_no + 1, but only while it
+	// still equals @expected_version_no. Zero rows returned means the relation
+	// does not exist or the expectation lost a race — the caller distinguishes
+	// the two and reports EXPECTED_VERSION_MISMATCH (docs/45) either way.
+	BumpRelationVersionNo(ctx context.Context, arg BumpRelationVersionNoParams) (int32, error)
+	// The expected_version compare-and-swap (T0202): advance the head pointer
+	// from @expected_version_no to @expected_version_no + 1, but only while it
+	// still equals @expected_version_no. Zero rows returned means the object
+	// does not exist or the expectation lost a race — the caller distinguishes
+	// the two and reports EXPECTED_VERSION_MISMATCH (docs/45) either way.
+	BumpScientificObjectVersionNo(ctx context.Context, arg BumpScientificObjectVersionNoParams) (int32, error)
+	// jsonb normalizes JSON on input (key order, whitespace). The repository
+	// stores that canonical form, and the integrity hash is the sha256 of the
+	// canonical text, so a read payload always re-hashes to its stored hash.
+	CanonicalizeRelationPayload(ctx context.Context, payload []byte) ([]byte, error)
+	// jsonb normalizes JSON on input (key order, whitespace). The repository
+	// stores that canonical form, and the integrity hash is the sha256 of the
+	// canonical text, so a read payload always re-hashes to its stored hash.
+	CanonicalizeScientificObjectPayload(ctx context.Context, payload []byte) ([]byte, error)
 	CountActiveOrganizationOwners(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	CountProjectOwners(ctx context.Context, projectID pgtype.UUID) (int32, error)
 	// Blobs and their attachments (canonical tables: blobs, blob_attachments).
@@ -41,8 +61,10 @@ type Querier interface {
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
 	CreateProjectState(ctx context.Context, arg CreateProjectStateParams) (ProjectState, error)
 	CreatePullRequest(ctx context.Context, arg CreatePullRequestParams) (PullRequest, error)
-	// Relations between scientific object versions (canonical tables: relations,
-	// relation_versions).
+	// Typed relations and their append-only version log (canonical tables:
+	// relations, relation_versions). Historical content is never UPDATEd in
+	// place; a new version row is inserted instead (docs/53). Every version
+	// pins its endpoints to exact scientific object versions (docs/07 §3).
 	CreateRelation(ctx context.Context, projectID pgtype.UUID) (Relation, error)
 	CreateRelationVersion(ctx context.Context, arg CreateRelationVersionParams) (RelationVersion, error)
 	CreateRelease(ctx context.Context, arg CreateReleaseParams) (Release, error)
@@ -67,6 +89,7 @@ type Querier interface {
 	GetBlobByContentHash(ctx context.Context, arg GetBlobByContentHashParams) (Blob, error)
 	GetBranchByID(ctx context.Context, id pgtype.UUID) (Branch, error)
 	GetIssueByProjectAndNumber(ctx context.Context, arg GetIssueByProjectAndNumberParams) (Issue, error)
+	GetLatestRelationVersion(ctx context.Context, relationID pgtype.UUID) (RelationVersion, error)
 	GetLatestScientificObjectVersion(ctx context.Context, objectID pgtype.UUID) (ScientificObjectVersion, error)
 	GetOrganizationByID(ctx context.Context, id pgtype.UUID) (Organization, error)
 	// Row-locks the organization: governance writes serialize on this lock, so
@@ -85,6 +108,8 @@ type Querier interface {
 	GetProjectStateByHash(ctx context.Context, arg GetProjectStateByHashParams) (ProjectState, error)
 	GetProjectStateByID(ctx context.Context, id pgtype.UUID) (ProjectState, error)
 	GetPullRequestByProjectAndNumber(ctx context.Context, arg GetPullRequestByProjectAndNumberParams) (PullRequest, error)
+	GetRelationByID(ctx context.Context, id pgtype.UUID) (Relation, error)
+	GetRelationVersionByNo(ctx context.Context, arg GetRelationVersionByNoParams) (RelationVersion, error)
 	GetReleaseByProjectAndVersion(ctx context.Context, arg GetReleaseByProjectAndVersionParams) (Release, error)
 	GetResearchAssetVersion(ctx context.Context, arg GetResearchAssetVersionParams) (ResearchAssetVersion, error)
 	GetScientificObjectByID(ctx context.Context, id pgtype.UUID) (ScientificObject, error)
@@ -119,8 +144,13 @@ type Querier interface {
 	// this result set.
 	ListPublicProjects(ctx context.Context) ([]Project, error)
 	ListPullRequestsByProject(ctx context.Context, projectID pgtype.UUID) ([]PullRequest, error)
-	ListRelationVersionsForSource(ctx context.Context, objectVersionID pgtype.UUID) ([]RelationVersion, error)
-	ListRelationVersionsForTarget(ctx context.Context, objectVersionID pgtype.UUID) ([]RelationVersion, error)
+	ListRelationVersions(ctx context.Context, relationID pgtype.UUID) ([]RelationVersion, error)
+	// All versions of one relation type inside one project (the project
+	// boundary rides on the relations container row).
+	ListRelationVersionsByType(ctx context.Context, arg ListRelationVersionsByTypeParams) ([]RelationVersion, error)
+	// The category query: callers expand a catalog category (dependency,
+	// provenance, ...) to its type names.
+	ListRelationVersionsByTypes(ctx context.Context, arg ListRelationVersionsByTypesParams) ([]RelationVersion, error)
 	ListScientificObjectVersions(ctx context.Context, objectID pgtype.UUID) ([]ScientificObjectVersion, error)
 	ListStateCommitsByBranch(ctx context.Context, branchID pgtype.UUID) ([]StateCommit, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)

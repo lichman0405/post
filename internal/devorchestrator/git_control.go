@@ -414,18 +414,7 @@ func RunGitControl(opts *GitControlOpts, action string) (*GitActionResult, error
 // rest unseen. The second Reviewer noticed and read the worktree instead —
 // which is exactly the diligence a review input must not depend on.
 func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
-	// The diff base is where the branch diverged from main, NOT the recorded
-	// baseline. Those are the same value until a baseline is advanced, and
-	// then they diverge badly: after a rework onto a newer main the recorded
-	// baseline already contains the task's earlier work, so the delta is a
-	// sliver - T0103's review input was 5 files out of a 27-file task, and a
-	// Reviewer would be asked to approve the whole from a fragment.
-	// merge-base gives the branch's actual contribution in both cases, which
-	// is the same diff the pull request shows.
-	base := rec.BaselineSHA
-	if mb, err := gitOutput(rec.Worktree, "merge-base", DefaultBaseBranch, "HEAD"); err == nil && mb != "" {
-		base = mb
-	}
+	base := taskDiffBase(rec)
 	// Raw, not trimmed: a diff's trailing whitespace is part of it. See
 	// gitOutputRaw — trimming it here produced patches `git apply` called
 	// corrupt, so prepareIntegrationTree could not build the tree G2 grades.
@@ -433,7 +422,10 @@ func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("diffing the worktree against the baseline: %w", err)
 	}
-	untracked, err := gitOutput(rec.Worktree, "ls-files", "--others", "--exclude-standard")
+	// -z, because these names are used as PATHS below (Lstat, ReadFile) and
+	// git's default C-quoting turns a name that needs quoting into a string no
+	// filesystem has.
+	untracked, err := gitPaths(rec.Worktree, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return "", fmt.Errorf("listing untracked files for the review diff: %w", err)
 	}
@@ -447,11 +439,7 @@ func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
 			b.WriteString("\n")
 		}
 	}
-	for _, p := range strings.Split(untracked, "\n") {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
+	for _, p := range untracked {
 		abs := filepath.Join(rec.Worktree, p)
 		// Lstat, not Stat: a symlink is reported as the link, never followed.
 		// The paths come from the Worker's own tree, so a symlink pointing at
@@ -489,15 +477,42 @@ func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
 			fmt.Fprintf(&b, "Binary files /dev/null and b/%s differ\n", p)
 			continue
 		}
-		body := strings.TrimSuffix(string(data), "\n")
-		if body == "" {
+		// The body is built from the raw bytes. It used to be TrimSuffix'd and
+		// re-emitted one "\n" per line, which added a byte to a file that had no
+		// final newline and turned a file that was a single newline into an empty
+		// one — silently, on the advance path, whose whole promise is that it
+		// carries the task's work across. Both are byte-level corruption of the
+		// deliverable and neither shows up in a path list.
+		lines := strings.Split(string(data), "\n")
+		finalNewline := false
+		if n := len(lines); n > 0 && lines[n-1] == "" {
+			lines = lines[:n-1] // Split leaves an empty tail for a file that ends with a newline
+			finalNewline = true
+		}
+		if len(lines) == 0 {
+			// An empty file. The header above is the whole patch and git creates
+			// the file from it — checked against git, not assumed.
 			continue
 		}
-		lines := strings.Split(body, "\n")
 		fmt.Fprintf(&b, "@@ -0,0 +1,%d @@\n", len(lines))
-		for _, l := range lines {
+		for i, l := range lines {
 			b.WriteString("+" + l + "\n")
+			if i == len(lines)-1 && !finalNewline {
+				b.WriteString("\\ No newline at end of file\n")
+			}
 		}
 	}
 	return b.String(), nil
+}
+
+// taskDiffBase is the commit a task's contribution is measured from: where its
+// branch diverged from main, not the recorded baseline. RebaselineTask takes
+// its "before" path set from here as well, so the set it compares after the
+// advance describes the same thing the patch does.
+func taskDiffBase(rec *WorkerRecord) string {
+	base := rec.BaselineSHA
+	if mb, err := gitOutput(rec.Worktree, "merge-base", DefaultBaseBranch, "HEAD"); err == nil && mb != "" {
+		base = mb
+	}
+	return base
 }

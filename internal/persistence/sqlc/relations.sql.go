@@ -11,19 +11,64 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const bumpRelationVersionNo = `-- name: BumpRelationVersionNo :one
+UPDATE relations
+   SET current_version_no = current_version_no + 1
+ WHERE id = $1 AND current_version_no = $2
+RETURNING current_version_no
+`
+
+type BumpRelationVersionNoParams struct {
+	RelationID        pgtype.UUID `json:"relation_id"`
+	ExpectedVersionNo int32       `json:"expected_version_no"`
+}
+
+// The expected_version compare-and-swap (T0203): advance the head pointer
+// from @expected_version_no to @expected_version_no + 1, but only while it
+// still equals @expected_version_no. Zero rows returned means the relation
+// does not exist or the expectation lost a race — the caller distinguishes
+// the two and reports EXPECTED_VERSION_MISMATCH (docs/45) either way.
+func (q *Queries) BumpRelationVersionNo(ctx context.Context, arg BumpRelationVersionNoParams) (int32, error) {
+	row := q.db.QueryRow(ctx, bumpRelationVersionNo, arg.RelationID, arg.ExpectedVersionNo)
+	var current_version_no int32
+	err := row.Scan(&current_version_no)
+	return current_version_no, err
+}
+
+const canonicalizeRelationPayload = `-- name: CanonicalizeRelationPayload :one
+SELECT $1::jsonb AS payload
+`
+
+// jsonb normalizes JSON on input (key order, whitespace). The repository
+// stores that canonical form, and the integrity hash is the sha256 of the
+// canonical text, so a read payload always re-hashes to its stored hash.
+func (q *Queries) CanonicalizeRelationPayload(ctx context.Context, payload []byte) ([]byte, error) {
+	row := q.db.QueryRow(ctx, canonicalizeRelationPayload, payload)
+	var payload_2 []byte
+	err := row.Scan(&payload_2)
+	return payload_2, err
+}
+
 const createRelation = `-- name: CreateRelation :one
 
 INSERT INTO relations (project_id)
 VALUES ($1)
-RETURNING id, project_id, created_at
+RETURNING id, project_id, created_at, current_version_no
 `
 
-// Relations between scientific object versions (canonical tables: relations,
-// relation_versions).
+// Typed relations and their append-only version log (canonical tables:
+// relations, relation_versions). Historical content is never UPDATEd in
+// place; a new version row is inserted instead (docs/53). Every version
+// pins its endpoints to exact scientific object versions (docs/07 §3).
 func (q *Queries) CreateRelation(ctx context.Context, projectID pgtype.UUID) (Relation, error) {
 	row := q.db.QueryRow(ctx, createRelation, projectID)
 	var i Relation
-	err := row.Scan(&i.ID, &i.ProjectID, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.CreatedAt,
+		&i.CurrentVersionNo,
+	)
 	return i, err
 }
 
@@ -80,14 +125,85 @@ func (q *Queries) CreateRelationVersion(ctx context.Context, arg CreateRelationV
 	return i, err
 }
 
-const listRelationVersionsForSource = `-- name: ListRelationVersionsForSource :many
+const getLatestRelationVersion = `-- name: GetLatestRelationVersion :one
 SELECT id, relation_id, version_no, state_id, relation_type, source_object_version_id, target_object_version_id, payload, integrity_hash, created_by, created_at FROM relation_versions
-WHERE source_object_version_id = $1
-ORDER BY created_at, id
+WHERE relation_id = $1
+ORDER BY version_no DESC
+LIMIT 1
 `
 
-func (q *Queries) ListRelationVersionsForSource(ctx context.Context, objectVersionID pgtype.UUID) ([]RelationVersion, error) {
-	rows, err := q.db.Query(ctx, listRelationVersionsForSource, objectVersionID)
+func (q *Queries) GetLatestRelationVersion(ctx context.Context, relationID pgtype.UUID) (RelationVersion, error) {
+	row := q.db.QueryRow(ctx, getLatestRelationVersion, relationID)
+	var i RelationVersion
+	err := row.Scan(
+		&i.ID,
+		&i.RelationID,
+		&i.VersionNo,
+		&i.StateID,
+		&i.RelationType,
+		&i.SourceObjectVersionID,
+		&i.TargetObjectVersionID,
+		&i.Payload,
+		&i.IntegrityHash,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getRelationByID = `-- name: GetRelationByID :one
+SELECT id, project_id, created_at, current_version_no FROM relations WHERE id = $1
+`
+
+func (q *Queries) GetRelationByID(ctx context.Context, id pgtype.UUID) (Relation, error) {
+	row := q.db.QueryRow(ctx, getRelationByID, id)
+	var i Relation
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.CreatedAt,
+		&i.CurrentVersionNo,
+	)
+	return i, err
+}
+
+const getRelationVersionByNo = `-- name: GetRelationVersionByNo :one
+SELECT id, relation_id, version_no, state_id, relation_type, source_object_version_id, target_object_version_id, payload, integrity_hash, created_by, created_at FROM relation_versions
+WHERE relation_id = $1 AND version_no = $2
+`
+
+type GetRelationVersionByNoParams struct {
+	RelationID pgtype.UUID `json:"relation_id"`
+	VersionNo  int32       `json:"version_no"`
+}
+
+func (q *Queries) GetRelationVersionByNo(ctx context.Context, arg GetRelationVersionByNoParams) (RelationVersion, error) {
+	row := q.db.QueryRow(ctx, getRelationVersionByNo, arg.RelationID, arg.VersionNo)
+	var i RelationVersion
+	err := row.Scan(
+		&i.ID,
+		&i.RelationID,
+		&i.VersionNo,
+		&i.StateID,
+		&i.RelationType,
+		&i.SourceObjectVersionID,
+		&i.TargetObjectVersionID,
+		&i.Payload,
+		&i.IntegrityHash,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const listRelationVersions = `-- name: ListRelationVersions :many
+SELECT id, relation_id, version_no, state_id, relation_type, source_object_version_id, target_object_version_id, payload, integrity_hash, created_by, created_at FROM relation_versions
+WHERE relation_id = $1
+ORDER BY version_no
+`
+
+func (q *Queries) ListRelationVersions(ctx context.Context, relationID pgtype.UUID) ([]RelationVersion, error) {
+	rows, err := q.db.Query(ctx, listRelationVersions, relationID)
 	if err != nil {
 		return nil, err
 	}
@@ -118,14 +234,70 @@ func (q *Queries) ListRelationVersionsForSource(ctx context.Context, objectVersi
 	return items, nil
 }
 
-const listRelationVersionsForTarget = `-- name: ListRelationVersionsForTarget :many
-SELECT id, relation_id, version_no, state_id, relation_type, source_object_version_id, target_object_version_id, payload, integrity_hash, created_by, created_at FROM relation_versions
-WHERE target_object_version_id = $1
-ORDER BY created_at, id
+const listRelationVersionsByType = `-- name: ListRelationVersionsByType :many
+SELECT rv.id, rv.relation_id, rv.version_no, rv.state_id, rv.relation_type, rv.source_object_version_id, rv.target_object_version_id, rv.payload, rv.integrity_hash, rv.created_by, rv.created_at
+  FROM relation_versions rv
+  JOIN relations r ON r.id = rv.relation_id
+ WHERE r.project_id = $1 AND rv.relation_type = $2
+ ORDER BY rv.created_at, rv.id
 `
 
-func (q *Queries) ListRelationVersionsForTarget(ctx context.Context, objectVersionID pgtype.UUID) ([]RelationVersion, error) {
-	rows, err := q.db.Query(ctx, listRelationVersionsForTarget, objectVersionID)
+type ListRelationVersionsByTypeParams struct {
+	ProjectID    pgtype.UUID `json:"project_id"`
+	RelationType string      `json:"relation_type"`
+}
+
+// All versions of one relation type inside one project (the project
+// boundary rides on the relations container row).
+func (q *Queries) ListRelationVersionsByType(ctx context.Context, arg ListRelationVersionsByTypeParams) ([]RelationVersion, error) {
+	rows, err := q.db.Query(ctx, listRelationVersionsByType, arg.ProjectID, arg.RelationType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RelationVersion
+	for rows.Next() {
+		var i RelationVersion
+		if err := rows.Scan(
+			&i.ID,
+			&i.RelationID,
+			&i.VersionNo,
+			&i.StateID,
+			&i.RelationType,
+			&i.SourceObjectVersionID,
+			&i.TargetObjectVersionID,
+			&i.Payload,
+			&i.IntegrityHash,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRelationVersionsByTypes = `-- name: ListRelationVersionsByTypes :many
+SELECT rv.id, rv.relation_id, rv.version_no, rv.state_id, rv.relation_type, rv.source_object_version_id, rv.target_object_version_id, rv.payload, rv.integrity_hash, rv.created_by, rv.created_at
+  FROM relation_versions rv
+  JOIN relations r ON r.id = rv.relation_id
+ WHERE r.project_id = $1 AND rv.relation_type = ANY($2::text[])
+ ORDER BY rv.created_at, rv.id
+`
+
+type ListRelationVersionsByTypesParams struct {
+	ProjectID     pgtype.UUID `json:"project_id"`
+	RelationTypes []string    `json:"relation_types"`
+}
+
+// The category query: callers expand a catalog category (dependency,
+// provenance, ...) to its type names.
+func (q *Queries) ListRelationVersionsByTypes(ctx context.Context, arg ListRelationVersionsByTypesParams) ([]RelationVersion, error) {
+	rows, err := q.db.Query(ctx, listRelationVersionsByTypes, arg.ProjectID, arg.RelationTypes)
 	if err != nil {
 		return nil, err
 	}

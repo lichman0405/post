@@ -1510,6 +1510,16 @@
       "status": "passed",
       "last_run": "2026-09-12T15:55:00Z",
       "evidence": "migration upgrade path: 0 triggers at 00013, 26 after head, upgraded DB enforces the guard, trigger set matches a fresh install. Full integration suite 11/11 against real PostgreSQL."
+    },
+    {
+      "id": "T0215-TEST-01",
+      "task_id": "T0215",
+      "name": "version-counter backfill on a pre-existing database (00024 + 00025)",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
     }
   ]
 }
