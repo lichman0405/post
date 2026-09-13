@@ -117,6 +117,7 @@ stage_acceptance() {
   bash tests/acceptance/four-gate-e2e.sh
   bash tests/acceptance/rejection-retry-e2e.sh
   bash tests/acceptance/supervisor-git-e2e.sh
+  bash tests/acceptance/driver-persistence-e2e.sh
 }
 
 stage_integration() {

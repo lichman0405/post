@@ -2370,3 +2370,46 @@ printf '...' > .rddev/worktrees/T0201/.supervise-reason
 这与 L1-20260912-48 是**同一条原则的第二次落地** ✓
 （那次是 review diff 跟随符号链接读出了 worktree 之外的文件 ✓，这次是驱动脚本写入 ✓）。
 **"谁控制这个路径"必须成为写文件前的固定一问。**
+
+## L1-20260913-8 — ★★ P0：driver 必须是**独立于会话生命周期**的长期进程
+
+### 事实先钉清楚（用户的判断与实测不完全一致，两条都要记）
+
+用户报告："T0201/T0301 的 run-worker.sh 已是 PPID 1，进程表里没有 driver"。
+实测：**driver 当时还活着** ✓（`bash scripts/supervise.sh` pid 2101103 ✓ **PPID 1** ✓，
+有一个 `sleep 30` 子进程 ✓ → 正在轮询 ✓）；两个 Worker 的 **PPID 1 是 `setsid` 的正常结果** ✓，
+不是 driver 消失的证据 ✓。Worker 日志"不增长"也一度让我怀疑停滞 ✓，
+但拉长采样后可见 **T0201 正在写 errcheck 测试、T0301 正在创建 `gitprovider/config.go`** ✓——**都在正常干活** ✓。
+
+**但用户的结论方向是对的，而且要求全部成立** ✓：我用 `nohup … &` 从工具调用里启动它 ✓，
+**它活下来是运气**（同一进程组在别的 harness 配置下就会被清掉 ✓），而且那个 shell 脚本
+**没有锁、没有心跳、没有状态、没有接管** ✓——**两条 driver 会互相重复 collect / merge** ✗。
+**"进程表里查不到"与"没有持久化契约"是同一个问题的两种表现** ✓。
+
+### 实现：`rddev drive` + `rddev status`
+
+- **单实例**：`flock` 抢占 `.rddev/runtime/driver.lock` ✓，第二个 driver **立即拒绝并指名 pid** ✓。
+- **心跳**：`.rddev/runtime/driver.json` ✓，"活着"是**磁盘上的事实** ✓，
+  `status` 按心跳年龄判定 ✓ → **崩溃的 driver 显示 dead，而不是"联系不上"** ✓。
+- **接管**：启动即 `DiscoverWorkers` ✓，从**磁盘状态**继续 ✓；**绝不重新 spawn 已存在的 Worker** ✓
+  （这是用户明确要求的一条 ✓）。
+- **待决事项**：`.rddev/runtime/decisions.json` ✓，每条**记录它所针对的 `run_id`** ✓——
+  rework/respawn 改变了那个 run，**待决事项自动失效并清除** ✓ → driver 自行恢复 ✓，
+  不需要被通知第二次 ✓。
+- **不降低 Gate**：每个动作都是**调用 rddev 本身**完成的 ✓；driver 只决定"下一步尝试什么" ✓，
+  rddev 按自己的规则拒绝 ✓（这正是"自动化不得以降低 Gate 为代价"的机械化 ✓）。
+- `scripts/supervise.sh` **已删除** ✓（它就是那个没有锁/心跳/状态的版本 ✓）。
+
+### 回归测试：`tests/acceptance/driver-persistence-e2e.sh`（已接入 CI）
+
+**断言的是进程性质，不是代码路径** ✓：
+从**启动后立即退出的父进程**（subshell ✓）用 `setsid` 拉起 driver ✓，然后断言
+**driver 仍然活着** ✓、**被 reparent 到 init** ✓、**心跳在推进** ✓、
+**接管了已运行的 Worker 而没有重新 spawn** ✓、**第二个 driver 被拒** ✓、
+**退出后锁会释放** ✓（崩溃不会把仓库永久锁死 ✓）。
+
+写这条测试时踩了两次自己的坑 ✓，都值得记：
+1. `rddev` 的 `--tasks-json` 是**子命令级** flag ✗ 不是全局 ✗ → 放在子命令前是 usage error ✓；
+2. 夹具里 `start_time` 不能随便填 ✓——`DiscoverWorkers` 用它和 `/proc` 比对**防 PID 复用** ✓，
+   填错就等于宣告"这个 Worker 不在了" ✓，于是"接管"看起来失败了 ✓。
+   **夹具必须如实描述它模拟的东西**，否则测的是夹具的谎话 ✓。
