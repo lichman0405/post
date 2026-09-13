@@ -372,6 +372,49 @@ func TestMergeRefusesWhileThePRChecksAreRed(t *testing.T) {
 	}
 }
 
+// The other half of the same refusal, and the one that actually happened.
+// `gh pr checks` exits 1 both when a check ran and failed and when no check has
+// run at all — a PR pushed one second ago — and it says which only on stderr,
+// with nothing on stdout. A runner that keeps stdout and drops the rest reports
+// both as `exit status 1`, and the caller cannot tell a WAIT from a DECISION:
+// stepAccepted retries while the text says "no checks reported" and escalates
+// on everything else, so flattening the reason escalated a PR whose CI had not
+// started yet, as "merge failed — needs the Supervisor".
+//
+// So the assertion is deliberately about the text and not only the refusal. The
+// substring is the contract between this function and the driver's retry.
+func TestMergeRefusesWhileThePRHasNoChecksYetAndStillSaysWhy(t *testing.T) {
+	repoRoot, specPath := mergeGateFixture(t) // green collect + green G2 on disk
+	binDir := t.TempDir()
+	marker := filepath.Join(binDir, "invocations.log")
+	// gh's own wording, taken from the binary, on stderr; stdout stays empty.
+	script := "#!/bin/sh\necho \"$0 $*\" >> \"$FAKE_INVOCATIONS\"\n" +
+		"case \"$1 $2\" in\n" +
+		"  \"pr checks\") echo \"no checks reported on the 'task/T0001-x' branch\" >&2; exit 1;;\n" +
+		"  \"pr merge\") echo MERGED;;\n" +
+		"esac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeWorktreeRecord(t, repoRoot)
+	if err := os.WriteFile(marker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_INVOCATIONS", marker)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	_, err := MergePR(&GitControlOpts{RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001"})
+	if err == nil {
+		t.Fatal("pr merge proceeded on a branch whose checks GitHub had never reported")
+	}
+	if !strings.Contains(err.Error(), "no checks reported") {
+		t.Errorf("the refusal did not carry gh's reason, so no caller can tell a wait from a failure:\n  %v", err)
+	}
+	if invoked, _ := os.ReadFile(marker); strings.Contains(string(invoked), "pr merge") {
+		t.Errorf("gh pr merge was invoked with no check ever reported:\n%s", invoked)
+	}
+}
+
 // writeWorktreeRecord gives the task a registry entry so loadWorktreeRecord
 // resolves; the merge path needs a branch to name.
 func writeWorktreeRecord(t *testing.T, repoRoot string) {
