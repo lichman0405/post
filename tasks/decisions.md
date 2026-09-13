@@ -3582,3 +3582,64 @@ Worker 读它可能直接把任务标 blocked ✓，那正是我不想要的 ✓
 我把 `progress.md` 里那张队列表重数了一遍 ✓：每一行的状态都标成**查来的** ✓，
 并把"#99 与 #103 / #104 / #105 混在一起"这件事**在表里写开** ✓ ——
 表自己不能再说"这一批都等批准" ✓，因为那句话正是这次停摆的原因 ✓。
+
+## L1-20260914-10 — #99 与 #113 是同一处修复的两份，#99 严格包含 #113（我定了，并按 L1 记录）
+
+### 事实（查来的）
+
+同一个缺陷 —— **G3 的 gitea 探针会在它正在评分的树里提交** —— 有两份修复在队里：
+
+- `#113 fix/g3: the gitea probe must not commit into the tree it grades` —— 1 个文件，`+12/-1`。
+- `#99 fix/acceptance: the G3 gate must not mutate the tree it grades` —— 7 个文件，`+1784/-29`。
+
+我数了 main 里那份脚本**每一处 `cd`**，而不是读两份 PR 的自述：
+
+```
+main : 19:cd "$ROOT"   91:git init -q "$WORK/work" && cd "$WORK/work"   101:cd "$ROOT"   203:cd "$ROOT"
+#113 : 19:cd "$ROOT"   91:git init … && cd "$WORK/work"                   —(删了 101)      214:cd "$ROOT"
+#99  : 18:ROOT=…（19 删）  145:if ! cd "$WORK/work"                      —(101/203 全删)
+```
+
+**main 有三处会把探针送回被测树 ✓；#113 删掉其中一处 ✓；#99 三处全删 ✓**，并且把
+`git init "$WORK/work" && cd` 换成**带失败判断的 `if ! cd "$WORK/work"`** ✓。
+
+#99 另外做了三件 #113 完全没有触及的事 ✓：
+
+1. **`unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_COMMON_DIR`** ✓ ——
+   这是**第二条通往同一后果的路** ✓：`rddev` 用环境变量加 cwd 跑门 ✓，`GIT_DIR` 一旦被设 ✓，
+   `git init "$WORK/work"` 会**退出 0 而什么都没建** ✓，随后的 `git add -A` / `git commit`
+   直接落到被测仓库上 ✓ —— **在任何一道断言有机会拒绝之前就已经提交了** ✓。
+   **#113 对此一个字都没有** ✓（它改的是 `cd`，而 `GIT_DIR` 压过 `cd` ✓）。
+2. **末尾那条"被测树未变"的断言改成失败关闭** ✓ —— 旧写法 `|| echo '<no git>'` 让
+   "读不到"和"读不到"比成相等 ✓，于是"量了个空"被报成绿灯 ✓。
+3. **加了 `scripts/tests/gitea-e2e-guard-unit-test.sh`** ✓，并**同时**挂进
+   `.github/workflows/ci.yml` 与 `specs/orchestrator/gates.json` 的 `acceptance` 作业 ✓
+   —— **纯新增一步 ✓，没有删任何一步 ✓**（我逐行看过这两个文件的 diff ✓）。
+
+**还有一条只有 #99 有的东西** ✓：它删掉了 `README.md` 末尾八行 `should not land` ✓。
+我查了 `origin/main:README.md` ✓ —— **那八行现在就在 main 上** ✓（`grep -c` = 8 ✓）。
+那是 L1-20260913-16 的探针提交**真的落进 main 时留下的残渣** ✓，不是新东西 ✓。
+
+### 判断
+
+**#99 严格包含 #113 ✓；#113 是 #99 的一个真子集 ✓。** 合 #113 不但不够（还剩两处 `cd` ✓
+和整条 `GIT_DIR` 路 ✓），而且会**删掉 #99 里那八行清理所依赖的上下文** ✓。
+
+所以：**合 #99，把 #113 作为已被取代关掉** ✓。#113 的洞察（"待在克隆里别回 `$ROOT`" ✓）
+是 #99 三处删除里的一处 ✓，不是被丢掉的东西 ✓。
+**这是 L1 实现决策，我决定并记录，不占你的时间** ✓（CLAUDE.md §5.1 ✓）。
+
+### 第二条拒信（治理事实，补进 L1-9 的那组样本）
+
+我试图删掉那条自己留下的远端分支 `origin/fix/judge-the-task-namespace` ✓
+（尖 `f2170d1` ✓，从没开过 PR ✓，本地那半早就删了 ✓，它**正在**让 T0301 的 collect
+报一条假 FAIL ✓）。**被拒** ✓，理由是「Deleting the remote branch … rewrites remote refs
+without the user naming that operation and target」✓，放行条件是**你本人点名** ✓。
+
+我先查了**这条分支的修复是不是已经被取代** ✓ 才动手的：`origin/main` 自己的注释里写着
+「Two wrong rules preceded this one … 'the task namespace only' rejected T0201 for PR #96's
+branch while letting a planted tag through」✓，`60a7bd6`（#97）就是取代它的那次 ✓。
+**所以删它不丢东西** ✓ —— 但**仍然要你点名** ✓。
+
+到这里，同一句话（"需要你本人点名" ✓）在两个不同的出口各出现一次 ✓（合 PR、删远端 ref ✓）。
+**我不再逐个试了** ✓：拒信不是噪音 ✓，它是唯一能告诉我"这件事的授权不在我手上"的通道 ✓。
