@@ -220,7 +220,7 @@ else
   fi
 fi
 
-# --- push webhook (T0305's premise) ------------------------------------------
+# --- push webhook (T0305's premise, T0301's secret) --------------------------
 python3 - "$WORK/deliveries.jsonl" <<'PY' &
 import http.server, json, sys
 out = open(sys.argv[1], "w")
@@ -228,8 +228,12 @@ class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(n)
+        # The signature is verified over the RAW body bytes, so the recorder
+        # keeps them hex-exact alongside the parsed payload.
         out.write(json.dumps({
             "event": self.headers.get("X-Gitea-Event"),
+            "signature": self.headers.get("X-Gitea-Signature"),
+            "body_hex": body.hex(),
             "body": json.loads(body.decode() or "{}"),
         }) + "\n"); out.flush()
         self.send_response(204); self.end_headers()
@@ -259,9 +263,14 @@ if [[ -z "$HOOK_HOST" ]]; then
   fail "could not determine an address the Gitea container can reach this listener on"
 fi
 
-HOOK="{\"type\":\"gitea\",\"active\":true,\"events\":[\"push\"],\"config\":{\"url\":\"http://$HOOK_HOST:18099/hook\",\"content_type\":\"json\"}}"
+# The hook is registered WITH an HMAC secret (T0301's webhook-secret
+# requirement). Gitea never returns the secret — the platform-side stored
+# value stays the only authority — and every delivery must arrive signed
+# with X-Gitea-Signature = hex(hmac-sha256(secret, raw body)).
+HOOK_SECRET="$(python3 -c 'import secrets;print(secrets.token_hex(32))')"
+HOOK="{\"type\":\"gitea\",\"active\":true,\"events\":[\"push\"],\"config\":{\"url\":\"http://$HOOK_HOST:18099/hook\",\"content_type\":\"json\",\"secret\":\"$HOOK_SECRET\"}}"
 if [[ "$(code POST "/api/v1/repos/$REPO/hooks" "$HOOK")" == "201" ]]; then
-  ok "registered a push webhook"
+  ok "registered a push webhook with an HMAC secret"
 else
   fail "could not register a push webhook"
 fi
@@ -286,15 +295,22 @@ else
   done
 fi
 if (( delivered )); then
-  python3 - "$WORK/deliveries.jsonl" <<'PY'
-import json, sys
+  HOOK_SECRET="$HOOK_SECRET" python3 - "$WORK/deliveries.jsonl" <<'PY'
+import hashlib, hmac, json, os, sys
 d = json.loads(open(sys.argv[1]).readline())
 assert d["event"] == "push", d
 b = d["body"]
 for key in ("ref", "repository", "commits", "pusher"):
     assert key in b, f"a real push payload has no {key!r}: {sorted(b)}"
+# X-Gitea-Signature = hex(hmac-sha256(secret, raw body)): verified over the
+# RAW bytes the provider signed, against the secret the platform registered
+# — the exact check T0305's receiver performs per delivery.
+assert d["signature"], "delivery carries no X-Gitea-Signature"
+raw = bytes.fromhex(d["body_hex"])
+want = hmac.new(os.environ["HOOK_SECRET"].encode(), raw, hashlib.sha256).hexdigest()
+assert hmac.compare_digest(d["signature"], want), f"signature {d['signature']!r} != {want!r}"
 PY
-  ok "a real push delivered a webhook with ref/repository/commits/pusher"
+  ok "a real push delivered a webhook whose X-Gitea-Signature verifies against the registered secret"
 elif (( push_rc == 0 )); then
   # Ask the instance why, rather than reporting only that nothing arrived.
   HOOK_ID="$(api GET "/api/v1/repos/$REPO/hooks" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d[0]["id"] if d else "")' 2>/dev/null)"

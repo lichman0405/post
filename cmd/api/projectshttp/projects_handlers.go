@@ -1,6 +1,7 @@
 package projectshttp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,8 +10,11 @@ import (
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/projects"
+	"github.com/lichman0405/post/internal/config"
 	"github.com/lichman0405/post/internal/domain"
+	"github.com/lichman0405/post/internal/gitprovider"
 	"github.com/lichman0405/post/internal/observability"
+	"github.com/lichman0405/post/internal/worker"
 )
 
 // The project HTTP surface. Every handler: resolve the caller (the guard
@@ -22,6 +26,9 @@ import (
 // handlers owns the project routes.
 type handlers struct {
 	svc *projects.Service
+	// jobs is the provisioning-job sink (T0301); nil disables the enqueue
+	// (unit tests compose without it).
+	jobs JobSink
 }
 
 // projectPayload is the client-visible project shape.
@@ -145,10 +152,60 @@ func (h *handlers) handleCreate(w http.ResponseWriter, r *http.Request) {
 		h.projectError(w, r, err)
 		return
 	}
+	// T0301: the project row exists provision-pending; enqueue the
+	// repository provisioning job. Best effort — an enqueue failure never
+	// fails the create (the row is the truth and the API's startup sweep
+	// back-fills pending projects).
+	h.enqueueProvisioning(r, project.ID)
 	authhttp.WriteJSON(w, http.StatusCreated, map[string]any{
 		"project":    projectPayloadFromDomain(project),
 		"membership": membershipPayloadFromDomain(membership),
 	})
+}
+
+// enqueueProvisioning puts the new project's provisioning job on the
+// queue. The job carries the project id only (docs/52 §17); the worker
+// derives repository name, owner and webhook secret server-side.
+func (h *handlers) enqueueProvisioning(r *http.Request, projectID string) {
+	if h.jobs == nil {
+		return
+	}
+	jobID, err := observability.NewRandomID()
+	if err != nil {
+		observability.LoggerFromContext(r.Context()).Error("projects: provisioning job id failed",
+			"project_id", projectID, "error", err)
+		return
+	}
+	cid, ok := observability.FromContext(r.Context())
+	if !ok {
+		cid, err = observability.NewCorrelationID()
+		if err != nil {
+			observability.LoggerFromContext(r.Context()).Error("projects: correlation id failed",
+				"project_id", projectID, "error", err)
+			return
+		}
+	}
+	payload, err := json.Marshal(gitprovider.ProvisionJobPayload{ProjectID: projectID})
+	if err != nil {
+		observability.LoggerFromContext(r.Context()).Error("projects: provisioning payload failed",
+			"project_id", projectID, "error", err)
+		return
+	}
+	// The enqueue is best effort and bounded: the row is already
+	// committed, and the API's startup sweep back-fills — a slow Redis
+	// must not stall the request until the Redis client's dial timeout.
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := h.jobs.Enqueue(ctx, worker.Job{
+		ID:            jobID,
+		Type:          gitprovider.ProvisionJobType,
+		CorrelationID: string(cid),
+		Payload:       payload,
+	}); err != nil {
+		observability.LoggerFromContext(r.Context()).Warn(
+			"projects: provisioning job enqueue failed (the startup sweep back-fills)",
+			"project_id", projectID, "error", config.RedactForOutput(err.Error()))
+	}
 }
 
 // handleList: GET /api/v1/projects — the projects the caller may see,

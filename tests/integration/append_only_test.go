@@ -535,8 +535,11 @@ func TestAppendOnlyUpgradePath(t *testing.T) {
 		t.Fatalf("upgrade path: migrate to head: %v", err)
 	}
 	// Derived, not hardcoded: this used to say "want 1" and went stale the
-	// moment a second migration was added above 00013.
-	if want := headVersion - 13; applied != want {
+	// moment a second migration was added above 00013. The count comes from
+	// the embedded set (appliedAbove) rather than "head - 13": numbering is
+	// sparse while parallel tasks hold reserved numbers, and the runner
+	// applies exactly the files that exist.
+	if want := appliedAbove(13); applied != want {
 		t.Errorf("upgrade path: applied %d on the way from 13 to head, want %d", applied, want)
 	}
 	if v := appliedVersion(t, ctx, pool); v != maxVersionNo {
