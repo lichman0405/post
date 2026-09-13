@@ -33,7 +33,9 @@
 #      about what the record HOLDS: bytes were not enough for a `chmod`, which
 #      the sixth review walked through, and the record is now the bytes, the
 #      mode and the timestamp. What it still cannot see is a write that leaves
-#      all of them identical. The run fails if either
+#      all of them identical — and whatever is inside a path whose mode denies
+#      reading, which the record names out loud as `unreadable` instead of
+#      carrying an empty field that reads as "no bytes". The run fails if either
 #      net fires; the self-check below requires the naming net to name every
 #      spelling AND the measuring net to see the write on its own;
 #   4. an environment that redirects git (GIT_DIR) is not a way around any of
@@ -180,6 +182,16 @@ new_tree() { # -> a repo path with the script in place and a dirty file
   printf 'nothing writes these bytes\n' > "$d/internal/config/probe-mode.txt"
   printf 'nor these\n' > "$d/internal/config/probe-time.txt"
   chmod 644 "$d/internal/config/probe-mode.txt" "$d/internal/config/probe-time.txt"
+  # A directory and two symlinks, for the fields the eighth review showed were
+  # IN the record and pinned by nothing: a probe that only CREATES an entry is
+  # named by the entry appearing, so a later refactor could drop what the record
+  # says about an entry's kind — a directory's mode, a symlink's target, a
+  # symlink's own time — and the whole suite stayed green while the net lost a
+  # class of write. These are the targets of writes that change only those
+  # fields: a chmod with no new entry, a re-pointed link, a `touch -h`.
+  mkdir -p "$d/internal/config/probe-dir"
+  ln -s deliverable.txt "$d/internal/config/probe-link"
+  ln -s deliverable.txt "$d/internal/config/probe-link2"
   python3 - "$GATE" "$d/tests/acceptance/gitea-real-services-e2e.sh" <<'PY'
 import shutil, sys
 shutil.copyfile(sys.argv[1], sys.argv[2])
@@ -203,38 +215,75 @@ run_gate() { # tree [extra env] -> sets RC/OUT
 # dropped into .git/hooks by a shell redirection, changes neither, and both are
 # writes into the tree being graded.
 #
-# `.git/index` is excluded because reading can rewrite it: `git status`
-# refreshes stat information, so fingerprinting it would make this net fire on
-# its own bookkeeping. Its content is covered from the other side — a staged
-# change is exactly what `status --porcelain` reports.
-dot_git_walk() { # git dir, label -> one record per entry, whatever its type
+# The graded tree's OWN index is the one path excluded, and it is excluded by
+# RESOLVED PATH rather than by name. Reading rewrites it (`git status` refreshes
+# stat information), so recording it makes this net fire on its own bookkeeping;
+# but in a LINKED worktree — the shape the G3 gate actually runs in — that index
+# is not the entry called `./index` in either walk: it lives in the COMMON dir,
+# at `./worktrees/<id>/index`. Excluding the literal `./index` therefore left
+# the net recording the one file every read rewrites, and it fired on its own
+# `git status`: the fingerprint differed from itself with nothing in between, in
+# the linked shape only, measured 10 of 10 runs. `git rev-parse --git-path index`
+# says where the file is, whatever layout produced the worktree.
+#
+# Its CONTENT is covered from the other side — a staged change is exactly what
+# `status --porcelain` reports — and its FLAGS, which porcelain does not report,
+# are covered by the `ls-files -v` field of tree_state below.
+file_bytes() { # path -> the digest of its bytes, or `unreadable` if it has none
+  # An empty field here is a claim: "these are the bytes, and they are nothing".
+  # A file this process cannot open is not a file with no bytes — it is a file
+  # whose bytes nobody measured — and the difference decides what a later
+  # equality means. A Worker's `chmod 000` deliverable was recorded as
+  # `… 0@<time>@` with the digest missing, so a rewrite of it, with mode and
+  # time restored, compared equal. (It still does: see the header — a write that
+  # leaves every field identical is beyond any fingerprint.) What changes is
+  # that the record now says WHICH of the two it is instead of looking like a
+  # digest of nothing.
+  local d
+  if d="$(sha256sum -- "$1" 2>/dev/null)"; then printf '%s' "${d%% *}"
+  else printf 'unreadable'; fi
+}
+record_of() { # state kind path -> the ONE record for that path, or nothing
+  # Every claim about a record has to be about that record alone. A `case`
+  # pattern is matched against the whole state string, so
+  # `*"<path>"*unreadable*` is also satisfied by any OTHER record that says
+  # `unreadable` — the round-8 mutation battery caught exactly that: a
+  # directory record stripped of its `:unreadable` still passed, because the
+  # file record beside it carried the word. Splitting the state back into
+  # records and keeping the one for the path makes the claim about it. The
+  # records are `;`-separated inside a section and the sections are
+  # `|`-separated, so both become line breaks and the path prefix selects.
+  printf '%s' "$1" | tr '|;' '\n\n' | grep -F "$2 $3 " || true
+}
+dot_git_walk() { # git dir, label, resolved path to exclude (the tree's own index)
   # The label is not decoration. Every record here is a path RELATIVE to the
   # directory walked (`./hooks/pre-commit`), and so is every record the
   # worktree walk makes; a diff of two states therefore showed `d .` for the
   # tree's root AND for the git dir, and the report could not say which. A
   # linked worktree walks THREE directories, two of which print the same
   # `./objects/…` paths as each other. Prefixed, a delta line names its tree.
-  local gd="$1" label="$2"
-  ( cd "$gd" 2>/dev/null || return 0
+  local gd="$1" label="$2" excl="${3:-}"
+  # Resolved before anything is compared against it: the path the caller has and
+  # the path `find` prints are only comparable as resolved paths.
+  gd="$(cd -- "$gd" 2>/dev/null && pwd)" || return 0
+  ( cd "$gd" || return 0
     # EVERY entry, not every file, and nothing excluded by name. The first
     # version of this digested `-type f`, skipped `*.lock`, and a review walked
     # three writes straight through it: a hook installed as a SYMLINK (which git
     # will run), an empty directory, and a leftover lock file. None of the three
     # is a regular file and one of them was excluded by its name. The same
-    # question applies to the ONE exclusion that is still here, which is why it
-    # is written as a path and not as a name.
+    # question applies to the ONE exclusion that is still here, which is why the
+    # file is matched by its resolved path and not by its name.
     #
     # The lock exclusion had no reason to exist. This fingerprint is taken
     # before and after a COMPLETED run, so a transient lock is already gone;
     # what survives to be fingerprinted is a lock somebody left behind.
-    #
-    # `.git/index` is still excluded, and only that exact path: reading can
-    # rewrite it (`git status` refreshes stat information), so digesting it would
-    # make this net fire on its own bookkeeping. Its content is covered from the
-    # other side — a staged change is exactly what `status --porcelain` reports.
-    find . ! -path ./index -printf '%y %p\0' 2>/dev/null | sort -z | \
+    find . -printf '%y %p\0' 2>/dev/null | sort -z | \
       while IFS= read -r -d '' rec; do
         local kind="${rec%% *}" path="${rec#* }"
+        # The exclusion, on the resolved path: see file_bytes' neighbour above
+        # for the measured failure that put a path here where a name used to be.
+        [[ -n "$excl" && "$(realpath -m -- "$path" 2>/dev/null)" == "$excl" ]] && continue
         case "$kind" in
           # A regular file: its bytes AND its mode and timestamp. Bytes alone
           # was the sixth review's shape of a net with a spelling problem:
@@ -244,7 +293,7 @@ dot_git_walk() { # git dir, label -> one record per entry, whatever its type
           # script, changed nothing the record held and the run reported "the
           # tree under test is as this script found it".
           f) printf '%s %s %s %s@%s;' "$label" "$kind" "$path" "$(stat -c '%a@%y' -- "$path" 2>/dev/null)" \
-               "$(sha256sum -- "$path" 2>/dev/null | cut -d' ' -f1)" ;;
+               "$(file_bytes "$path")" ;;
           # A symlink: where it points, because the target's content is not what
           # was written into the tree — and when it was made, for the same
           # reason as the timestamp above.
@@ -262,12 +311,25 @@ dot_git_walk() { # git dir, label -> one record per entry, whatever its type
           # fire on the gate's own reads, which is a net somebody would cut.
           # The mode stays: `chmod 000` on the directory holding the
           # deliverable is a write that changes no entry and no byte.
-          *) printf '%s %s %s %s;' "$label" "$kind" "$path" "$(stat -c '%a:%s' -- "$path" 2>/dev/null)" ;;
+          #
+          # A directory this process cannot search is marked, for the reason
+          # file_bytes marks an unreadable file: `d ./secret 0:4096` reads as an
+          # empty directory of that mode, and it is not one — it is a directory
+          # whose contents nobody measured.
+          *) printf '%s %s %s %s%s;' "$label" "$kind" "$path" "$(stat -c '%a:%s' -- "$path" 2>/dev/null)" \
+               "$([[ -r "$path" && -x "$path" ]] || printf ':unreadable')" ;;
         esac
       done )
 }
 dot_git_state() { # tree -> one record per entry under .git, whatever its type
-  local t="$1" gd common
+  local t="$1" gd common excl=""
+  # Where the graded tree's own index is, for the walks below to skip — computed
+  # from git's own answer rather than from a rule about where indexes live.
+  excl="$(git -C "$t" rev-parse --git-path index 2>/dev/null)" || excl=""
+  if [[ -n "$excl" ]]; then
+    [[ "$excl" == /* ]] || excl="$t/$excl"
+    excl="$(realpath -m -- "$excl" 2>/dev/null)" || excl=""
+  fi
   if [[ -f "$t/.git" ]]; then
     # The shape the gate ACTUALLY runs in: this tree is a linked worktree, so
     # `.git` is a FILE naming the real gitdir. `cd "$t/.git"` fails there — and
@@ -278,19 +340,25 @@ dot_git_state() { # tree -> one record per entry under .git, whatever its type
     # gitfile is recorded, and BOTH directories it stands between are walked:
     # the worktree's own gitdir (its HEAD) and the common dir (objects, refs,
     # hooks) — the second is where a blob or a hook lands.
-    printf 'gitfile %s %s;' "$t/.git" "$(sha256sum -- "$t/.git" 2>/dev/null | cut -d' ' -f1)"
+    #
+    # Its mode and timestamp are recorded too, not only its digest: a `touch` on
+    # the gitfile changes no byte, and the record used to hold the bytes alone —
+    # so the file that says which gitdir this tree is was the one entry in it a
+    # write could reach without moving the fingerprint.
+    printf 'gitfile %s %s@%s;' "$t/.git" "$(stat -c '%a@%y' -- "$t/.git" 2>/dev/null)" \
+           "$(file_bytes "$t/.git")"
     gd="$(git -C "$t" rev-parse --git-dir 2>/dev/null)" || gd=""
     # rev-parse answers relative to the cwd it ran in, and `-C` makes that the
     # tree; resolve it here rather than handing a relative path to `cd`.
     [[ "$gd" == /* ]] || gd="$t/$gd"
     gd="$(cd "$gd" 2>/dev/null && pwd)" || gd=""
     if [[ -n "$gd" ]]; then
-      dot_git_walk "$gd" gitdir
+      dot_git_walk "$gd" gitdir "$excl"
       common="$(git -C "$t" rev-parse --git-common-dir 2>/dev/null)" || common=""
       [[ "$common" == /* ]] || common="$t/$common"
       common="$(cd "$common" 2>/dev/null && pwd)" || common=""
       if [[ -n "$common" && "$common" != "$gd" ]]; then
-        dot_git_walk "$common" common
+        dot_git_walk "$common" common "$excl"
       fi
     fi
     return 0
@@ -303,7 +371,7 @@ dot_git_state() { # tree -> one record per entry under .git, whatever its type
     printf 'no-git-dir %s;' "$t"
     return 0
   fi
-  dot_git_walk "$t/.git" gitdir
+  dot_git_walk "$t/.git" gitdir "$excl"
 }
 # Everything in the worktree OUTSIDE .git, every entry, by kind. `git status
 # --porcelain` is not this and cannot be: it collapses a wholly untracked
@@ -343,26 +411,42 @@ worktree_state() { # tree -> one record per entry outside .git, whatever its typ
           # dot_git_walk: `chmod` and `touch` write none of git's bookkeeping,
           # no new entry and not one byte, so a record holding only the digest
           # says a tree is untouched after a gate has made the Worker's
-          # deliverable read-only or taken the exec bit off a script.
+          # deliverable read-only or taken the exec bit off a script. The
+          # digest comes from file_bytes, so a file this process cannot open is
+          # recorded as unreadable rather than as a file with no bytes.
           f) printf 'worktree %s %s %s@%s;' "$kind" "$path" "$(stat -c '%a@%y' -- "$path" 2>/dev/null)" \
-               "$(sha256sum -- "$path" 2>/dev/null | cut -d' ' -f1)" ;;
+               "$(file_bytes "$path")" ;;
           l) printf 'worktree %s %s ->%s@%s;' "$kind" "$path" "$(readlink -- "$path" 2>/dev/null)" \
                "$(stat -c '%y' -- "$path" 2>/dev/null)" ;;
           # Mode and size, no timestamp — same rule and same reason as the git
           # walk above. What it costs is a write that creates and removes an
           # entry without leaving one behind: the tree IS as it was found, and
-          # this net says so, which is the claim it exists to make.
-          *) printf 'worktree %s %s %s;' "$kind" "$path" "$(stat -c '%a:%s' -- "$path" 2>/dev/null)" ;;
+          # this net says so, which is the claim it exists to make. A directory
+          # this process cannot search is marked, for the reason file_bytes
+          # marks a file it cannot read.
+          *) printf 'worktree %s %s %s%s;' "$kind" "$path" "$(stat -c '%a:%s' -- "$path" 2>/dev/null)" \
+               "$([[ -r "$path" && -x "$path" ]] || printf ':unreadable')" ;;
         esac
       done )
 }
+# The state string: HEAD, every ref, the config, porcelain, the index FLAGS,
+# the worktree walk, the git dirs. The flags field is not porcelain's job:
+# `git update-index --assume-unchanged` (and `--skip-worktree`) makes every later
+# `git status` and `git diff` in that tree stop mentioning the file, and changes
+# no byte, no mode, no entry and no blob — a gate that hid the Worker's
+# deliverable from the Supervisor's inspection left this fingerprint equal. It is
+# the one write in the index whose content is not read from anywhere else, which
+# is why the index is excluded from the walks but named here. `ls-files -v`
+# prints the flag letter per entry: `H` normal, `h` assume-unchanged, `S`
+# skip-worktree.
 tree_state() { # tree -> state string
   local t="$1"
-  printf '%s|%s|%s|%s|%s|%s' \
+  printf '%s|%s|%s|%s|%s|%s|%s' \
     "$(git -C "$t" rev-parse HEAD 2>/dev/null)" \
     "$(git -C "$t" for-each-ref --format='%(refname)=%(objectname)' 2>/dev/null | sort | tr '\n' ';')" \
     "$(sha256sum "$t/.git/config" 2>/dev/null | cut -d' ' -f1)" \
     "$(git -C "$t" status --porcelain 2>/dev/null | tr '\n' ';')" \
+    "$(git -C "$t" ls-files -v 2>/dev/null | tr '\n' ';')" \
     "$(worktree_state "$t")" \
     "$(dot_git_state "$t")"
 }
@@ -696,8 +780,8 @@ for lineno, line in enumerate(open(log), 1):
 print("%d\t%d\t%s" % (n, len(bad), "; ".join(bad)))
 PY
 
-judge_tree() { # tree -> "n_mutating \t n_parse_bad \t measured \t violations"
-  local tree="$1" before after parsed rest n_mut n_parse measured violations delta
+judge_tree() { # tree -> "n_mutating \t n_parse_bad \t measured \t added \t violations"
+  local tree="$1" before after parsed rest n_mut n_parse measured violations delta added
   rm -f "$WORK/gitlog"
   before="$(tree_state "$tree")"
   run_gate "$tree" "PATH=$WORK/logshim:$PATH" "GIT_LOG=$WORK/gitlog" >/dev/null 2>&1
@@ -710,6 +794,7 @@ judge_tree() { # tree -> "n_mutating \t n_parse_bad \t measured \t violations"
   # still fails the run. Both are reported: one names the offender, the other
   # is the guarantee, and the self-check below requires each to stand alone.
   measured=0
+  added=""
   if [[ "$before" != "$after" ]]; then
     measured=1
     # Split on both separators: one field per ref, one per file inside .git, so
@@ -723,9 +808,28 @@ judge_tree() { # tree -> "n_mutating \t n_parse_bad \t measured \t violations"
     # changed", which is how an instrument starts lying about its own reach.
     delta="$(diff <(printf '%s' "$before" | tr '|;' '\n\n') \
                   <(printf '%s' "$after" | tr '|;' '\n\n') | grep '^[<>]' | tr '\n' ' ')"
+    # And the after side on its own. A delta line starting with `<` is what the
+    # BEFORE state held, so an assertion asking "does the report name X" could
+    # be satisfied by a record that VANISHED: `chmod 000` on a directory hides
+    # everything the probe wrote inside it, the probe's own record then appears
+    # only as a removal, and the run — which had just lost the record of a real
+    # write — passed the shape assertion. What has to be named is what the net
+    # recorded AFTER the run.
+    added="$(diff <(printf '%s' "$before" | tr '|;' '\n\n') \
+                  <(printf '%s' "$after" | tr '|;' '\n\n') | grep '^>' | tr '\n' ' ')"
     violations="${violations:+$violations; }the tree itself changed during the run: $delta"
   fi
-  printf '%s\t%s\t%s\t%s\n' "$n_mut" "$n_parse" "$measured" "$violations"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$n_mut" "$n_parse" "$measured" "$added" "$violations"
+}
+# One place that knows judge_tree's field layout. Four call sites read four
+# fields out of one tab-separated string positionally, and a fifth field inserted
+# in the middle would have been read as the fourth at every one of them — the
+# suite would have reported somebody else's delta as the violations, silently.
+judge_fields() { # judge_tree output -> J_MUT J_PARSE J_MEASURED J_ADDED J_VIOLATIONS
+  J_MUT="${1%%$'\t'*}"; local rest="${1#*$'\t'}"
+  J_PARSE="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+  J_MEASURED="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+  J_ADDED="${rest%%$'\t'*}"; J_VIOLATIONS="${rest#*$'\t'}"
 }
 
 TREE="$WORK/tree-d"
@@ -737,9 +841,8 @@ AFTER="$(tree_state "$TREE")"
   && ok "the logged run left the tree byte-identical" \
   || fail "the logged run changed the tree it graded: [$BEFORE] -> [$AFTER]"
 
-N_MUTATING="${JUDGE%%$'\t'*}"; REST="${JUDGE#*$'\t'}"
-N_PARSE="${REST%%$'\t'*}"; REST="${REST#*$'\t'}"
-MEASURED="${REST%%$'\t'*}"; VIOLATIONS="${REST#*$'\t'}"
+judge_fields "$JUDGE"
+N_MUTATING="$J_MUT" N_PARSE="$J_PARSE" MEASURED="$J_MEASURED" VIOLATIONS="$J_VIOLATIONS"
 N_BAD=$(( N_PARSE + MEASURED ))
 if (( N_MUTATING == 0 )); then
   fail "no mutating git command was logged at all — the gate cannot have done its work in the scratch repo, so this check would be vacuous"
@@ -858,6 +961,13 @@ shell_probes = [
     'ln -sf /bin/true "$ROOT/.git/hooks/pre-commit"\n',
     ': > "$ROOT/.git/g3-leftover.lock"\n',
     'mkdir -p "$ROOT/.git/g3-empty-dir"\n',
+    # Two more of the same kind one field down: writes that change only what the
+    # record says about an entry that was already there — a gitdir FILE's
+    # mode@mtime, a gitdir DIRECTORY's mode — where the four above all announce
+    # themselves by appearing. The eighth review reverted each of these fields
+    # separately and the suite stayed green.
+    'chmod 600 "$ROOT/.git/description"\n',
+    'chmod 750 "$ROOT/.git/refs"\n',
     # And the exclusion that survives: `.git/index` is skipped because READING
     # can rewrite it. It is skipped by PATH — this write is a file that merely
     # shares the name, and a rule that skipped `-name index` would have let it
@@ -901,6 +1011,13 @@ worktree_probes = [
     # file whose name starts with `.git`. `-path ./.git` covers it; `-path
     # './.git*'` — a spelling nobody would question in review — drops it.
     'printf "the gate rewrote the ignore rules\\n" > "$ROOT/.gitignore"\n',
+    # The eighth review's three: writes that change only the fields describing
+    # an entry the fixture already had — a directory's mode, a symlink's target,
+    # a symlink's own time. A record can name every path in the tree and still
+    # be blind to all three, which is what the suite was.
+    'chmod 750 "$ROOT/internal/config/probe-dir"\n',
+    'ln -sfn probe-mode.txt "$ROOT/internal/config/probe-link"\n',
+    'touch -h -d "2001-01-01 00:00:00" "$ROOT/internal/config/probe-link2"\n',
 ]
 open(worktree_out, "w").write(src.replace(anchor, probe + "".join(worktree_probes) + anchor, 1))
 
@@ -919,6 +1036,22 @@ open(worktree_out, "w").write(src.replace(anchor, probe + "".join(worktree_probe
 gitfile_lock_probes = [
     'gd="$(sed -n "1s/^gitdir: //p" "$ROOT/.git")"\n'
     ': > "$gd/g3-leftover.lock"\n',
+    # And a write to the gitfile that changes no byte of it: the record held its
+    # digest alone, so the one file that says which gitdir this tree is could be
+    # touched without moving the fingerprint. `-h` here is inert (the gitfile is
+    # a regular file) and is written so the probe reads the same as the symlink
+    # one above.
+    'touch -h -d "2001-01-01 00:00:00" "$ROOT/.git"\n',
+    # And the index the exclusion was NOT written for: the COMMON dir has an
+    # index of its own, belonging to the main worktree, and the graded tree's
+    # index is a different file under it (`worktrees/<id>/index`). An exclusion
+    # spelled as a name, or as the literal `./index` the old walk carried, drops
+    # this one too — from the very directory being walked. The write is a touch,
+    # so the main repo stays usable for the cases after this one, and the shell
+    # has no command for the naming net to read: it is derived from the gitfile
+    # the same way the first probe derives its gitdir.
+    'gd="$(sed -n "1s/^gitdir: //p" "$ROOT/.git")"\n'
+    'touch "${gd%/worktrees/*}/index"\n',
 ]
 open(gitfile_lock_out, "w").write(src.replace(anchor, probe + "".join(gitfile_lock_probes) + anchor, 1))
 gitfile_corrupt_probes = [
@@ -934,9 +1067,8 @@ TREE="$WORK/tree-e"
 new_tree "$TREE"
 cp "$BROKEN/gate.sh" "$TREE/tests/acceptance/gitea-real-services-e2e.sh"
 ESCAPED="$(judge_tree "$TREE")"
-E_MUT="${ESCAPED%%$'\t'}"; E_REST="${ESCAPED#*$'\t'}"
-E_PARSE="${E_REST%%$'\t'*}"; E_REST="${E_REST#*$'\t'}"
-E_MEASURED="${E_REST%%$'\t'*}"
+judge_fields "$ESCAPED"
+E_MUT="$J_MUT" E_PARSE="$J_PARSE" E_MEASURED="$J_MEASURED" E_ADDED="$J_ADDED"
 if (( E_PARSE == 20 )); then
   ok "the naming net names all 20 spellings of a write into the tree under test, and accuses nothing else"
 else
@@ -959,38 +1091,45 @@ TREE="$WORK/tree-g"
 new_tree "$TREE"
 cp "$BROKEN/gate-shell.sh" "$TREE/tests/acceptance/gitea-real-services-e2e.sh"
 SHELLONLY="$(judge_tree "$TREE")"
-S_MUT="${SHELLONLY%%$'\t'}"; S_REST="${SHELLONLY#*$'\t'}"
-S_PARSE="${S_REST%%$'\t'*}"; S_REST="${S_REST#*$'\t'}"
-S_MEASURED="${S_REST%%$'\t'*}"
+judge_fields "$SHELLONLY"
+S_MUT="$J_MUT" S_PARSE="$J_PARSE" S_MEASURED="$J_MEASURED" S_ADDED="$J_ADDED"
 if (( S_MEASURED == 1 )); then
   ok "the measuring net saw the tree change with no command logged to parse"
 else
-  fail "5 shell-level writes went into the tree's own .git and the measuring net saw nothing: $SHELLONLY"
+  fail "7 shell-level writes went into the tree's own .git and the measuring net saw nothing: $SHELLONLY"
 fi
 # One write being visible is not the claim, and "the tree differs" does not say
 # what was seen. The fingerprint digested regular files only until a review put
 # a SYMLINKED HOOK, an empty directory and a leftover `.lock` past it — and the
 # third of those is a regular file, which is why the exclusion that skipped it
 # is part of the same finding rather than a separate one. So the assertion is
-# that the report names all five, by kind and by path. A net that sees one kind
+# that the report names all seven, by kind and by path. A net that sees one kind
 # of file is a net with a spelling problem, and so is one that skips by name
 # what it meant to skip by path.
-S_DETAIL="${S_REST#*$'\t'}"
+#
+# The shapes are required on the AFTER side of the delta (the `>` lines), not
+# merely somewhere in a diff of two states. Both sides used to be searched, and
+# a record that VANISHED satisfied the search: `chmod 000` on the directory
+# holding a probe's file hides the file from the net, the file's record shows up
+# only as a removal, and the run — which had just lost the record of a real
+# write — passed. What has to be named is what the net recorded after the run.
+S_ADDED_DETAIL="$J_ADDED"
 unseen=""
-# With the label of the walk, for the same reason as the worktree six below:
+# With the label of the walk, for the same reason as the worktree shapes below:
 # the delta is one string merged from every net, so a path on its own does not
 # say which net named it.
 for shape in "gitdir f ./hooks/commit-msg" "gitdir l ./hooks/pre-commit ->/bin/true" \
-             "gitdir f ./g3-leftover.lock" "gitdir d ./g3-empty-dir" "gitdir f ./refs/index"; do
-  case "$S_DETAIL" in
+             "gitdir f ./g3-leftover.lock" "gitdir d ./g3-empty-dir" "gitdir f ./refs/index" \
+             "gitdir f ./description 600@" "gitdir d ./refs 750:"; do
+  case "$S_ADDED_DETAIL" in
     *"$shape"*) ;;
     *) unseen="$unseen [$shape]" ;;
   esac
 done
 if [[ -z "$unseen" ]]; then
-  ok "the measuring net named all five, each under the label of the walk that found it: two that are not regular files, the one it skipped for its name, and the one that only shares a name with the index"
+  ok "the measuring net named all seven on the after side, each under the label of the walk that found it: two that are not regular files, the one it skipped for its name, the one that only shares a name with the index, and the two whose mode alone moved"
 else
-  fail "the measuring net did not report:$unseen — what it digests is a spelling too, and this one excluded symlinks, directories and anything named *.lock: $SHELLONLY"
+  fail "the measuring net did not report:$unseen — what it digests is a spelling too, and this one excluded symlinks, directories and anything named *.lock, and recorded an entry's path without what its kind is worth: $SHELLONLY"
 fi
 if (( S_PARSE == 0 )); then
   ok "no command was logged for any of them, so the naming net was blind to them by construction"
@@ -1008,13 +1147,12 @@ TREE="$WORK/tree-h"
 new_tree "$TREE"
 cp "$BROKEN/gate-worktree.sh" "$TREE/tests/acceptance/gitea-real-services-e2e.sh"
 WORKTREEONLY="$(judge_tree "$TREE")"
-W_MUT="${WORKTREEONLY%%$'\t'}"; W_REST="${WORKTREEONLY#*$'\t'}"
-W_PARSE="${W_REST%%$'\t'*}"; W_REST="${W_REST#*$'\t'}"
-W_MEASURED="${W_REST%%$'\t'*}"; W_DETAIL="${W_REST#*$'\t'}"
+judge_fields "$WORKTREEONLY"
+W_MUT="$J_MUT" W_PARSE="$J_PARSE" W_MEASURED="$J_MEASURED" W_ADDED="$J_ADDED" W_DETAIL="$J_VIOLATIONS"
 if (( W_MEASURED == 1 )); then
   ok "the measuring net saw writes in the worktree, not only inside .git"
 else
-  fail "6 shell-level writes went into the worktree outside .git and the measuring net saw nothing: $WORKTREEONLY"
+  fail "9 shell-level writes went into the worktree outside .git and the measuring net saw nothing: $WORKTREEONLY"
 fi
 w_unseen=""
 # Each shape is asserted WITH the label of the walk that has to name it, for the
@@ -1023,18 +1161,26 @@ w_unseen=""
 # tracked, and porcelain names it too (` M .gitignore`) — asserting the bare
 # path here let the whole suite pass while the worktree walk was dropping that
 # very file, which is what `-path './.git*'` does.
+#
+# On the AFTER side of the delta, for the reason the gitdir shapes above state:
+# a probe whose record vanishes (here by chmod'ing a directory to 000 around it)
+# would otherwise be "named" by its own removal.
+W_ADDED_DETAIL="$J_ADDED"
 for shape in "worktree f ./internal/config/deliverable.txt" "worktree f ./tests/acceptance/g3-extra.sh" \
              "worktree d ./g3-empty-root" "worktree f ./internal/config/probe-mode.txt" \
-             "worktree f ./internal/config/probe-time.txt" "worktree f ./.gitignore"; do
-  case "$W_DETAIL" in
+             "worktree f ./internal/config/probe-time.txt" "worktree f ./.gitignore" \
+             "worktree d ./internal/config/probe-dir 750:" \
+             "worktree l ./internal/config/probe-link ->probe-mode.txt@" \
+             "worktree l ./internal/config/probe-link2 ->deliverable.txt@2001-01-01"; do
+  case "$W_ADDED_DETAIL" in
     *"$shape"*) ;;
     *) w_unseen="$w_unseen [$shape]" ;;
   esac
 done
 if [[ -z "$w_unseen" ]]; then
-  ok "the measuring net named all six, each under the label of the walk that found it: the overwritten untracked deliverable, the file left in an untracked directory, the empty directory, the chmod'ed file, the touched file, and the tracked .gitignore at the boundary of the .git exclusion"
+  ok "the measuring net named all nine on the after side, each under the label of the walk that found it: the overwritten untracked deliverable, the file left in an untracked directory, the empty directory, the chmod'ed file, the touched file, the tracked .gitignore at the boundary of the .git exclusion, and the three writes that change only what an entry's kind is worth — a directory's mode, a symlink's target, a symlink's own time"
 else
-  fail "the measuring net did not report:$w_unseen — it reached the worktree through 'git status --porcelain', which summarizes an untracked directory instead of reading it and cannot see an empty one, and it recorded each file by its BYTES, which a chmod and a touch do not change; a shape named only by porcelain is not named here: $WORKTREEONLY"
+  fail "the measuring net did not report:$w_unseen — it reached the worktree through 'git status --porcelain', which summarizes an untracked directory instead of reading it and cannot see an empty one, it recorded each file by its BYTES, which a chmod and a touch do not change, and it recorded a path without what its kind is worth, which a re-pointed symlink or a chmod'ed directory does not change either; a shape named only by porcelain is not named here: $WORKTREEONLY"
 fi
 if (( W_PARSE == 0 )); then
   ok "no command was logged for any of them either, so only the fingerprint could have seen them"
@@ -1066,6 +1212,12 @@ new_worktree() { # name -> WTREE, a linked worktree of $MAIN holding the fixture
     || fail "the fixture $1 is not a linked worktree, so this case cannot speak about the shape it exists for"
   mkdir -p "$WTREE/tests/acceptance" "$WTREE/internal/config"
   printf 'worker deliverable\n' > "$WTREE/internal/config/deliverable.txt"
+  # The target of the metadata-only write in the read control below. It is here
+  # and not only in new_tree because the control that needs it has to run in a
+  # LINKED worktree: the standalone control cannot speak for that shape, which
+  # is the whole reason the second one exists.
+  printf 'nothing writes these bytes\n' > "$WTREE/internal/config/probe-mode.txt"
+  chmod 644 "$WTREE/internal/config/probe-mode.txt"
 }
 
 # (i) a file dropped in the gitdir the gitfile names. This is the path the old
@@ -1075,21 +1227,40 @@ new_worktree tree-i
 TREE="$WTREE"
 cp "$BROKEN/gate-gitfile-lock.sh" "$TREE/tests/acceptance/gitea-real-services-e2e.sh"
 LINKED="$(judge_tree "$TREE")"
-L_MUT="${LINKED%%$'\t'}"; L_REST="${LINKED#*$'\t'}"
-L_PARSE="${L_REST%%$'\t'*}"; L_REST="${L_REST#*$'\t'}"
-L_MEASURED="${L_REST%%$'\t'*}"; L_DETAIL="${L_REST#*$'\t'}"
+judge_fields "$LINKED"
+L_MUT="$J_MUT" L_PARSE="$J_PARSE" L_MEASURED="$J_MEASURED" L_ADDED="$J_ADDED" L_DETAIL="$J_VIOLATIONS"
 if (( L_MEASURED == 1 )); then
   ok "the measuring net saw a write in a tree whose .git is a FILE, not a directory"
 else
   fail "a shell write went into the gitdir of a linked worktree and the measuring net measured nothing at all: $LINKED"
 fi
-case "$L_DETAIL" in
+case "$L_ADDED" in
   # The label is asserted with the path, not decoration: the same file reads as
   # `f ./g3-leftover.lock` in whichever walk found it, and the claim here is
-  # that the walk of the GITDIR found it.
+  # that the walk of the GITDIR found it. On the after side, for the reason the
+  # other shape assertions state: a record that vanished is not a record that
+  # named anything.
   *"gitdir f ./g3-leftover.lock"*)
     ok "the measuring net named the file dropped in the gitdir the gitfile points at, under the label of the walk that found it" ;;
   *) fail "in a linked worktree the measuring net did not report 'gitdir f ./g3-leftover.lock' in its delta: $LINKED" ;;
+esac
+# And the one path in that region the old exclusion reached by accident: the
+# COMMON dir's index, which is not this tree's index and is not rewritten by
+# this tree's reads. Naming it here is what makes "excluded by resolved path,
+# scoped to the graded tree" a claim with a probe rather than a preference.
+case "$L_ADDED" in
+  *"common f ./index "*)
+    ok "the common dir's own index — which the graded tree's reads do not rewrite — is recorded, not swept up by the exclusion written for this tree's" ;;
+  *) fail "the index exclusion reached the COMMON dir's index too, a file this tree's reads never touch: $LINKED" ;;
+esac
+# And the gitfile itself, with a write that changes none of its bytes. The
+# record was the digest alone, so the one file that says which gitdir this tree
+# IS could be touched without moving the fingerprint — a write the naming net
+# cannot see either, since it runs no command.
+case "$L_ADDED" in
+  *"gitfile $TREE/.git "*@2001-01-01*)
+    ok "the measuring net named the gitfile itself by its mode and time, not only by its digest" ;;
+  *) fail "a touch on the gitfile — no byte of it changed — left the net naming nothing about it: $LINKED" ;;
 esac
 if (( L_PARSE == 0 )); then
   ok "no command was logged for that write, so only the fingerprint could have seen it"
@@ -1106,22 +1277,66 @@ new_worktree tree-j
 TREE="$WTREE"
 cp "$BROKEN/gate-gitfile-corrupt.sh" "$TREE/tests/acceptance/gitea-real-services-e2e.sh"
 CORRUPT="$(judge_tree "$TREE")"
-C_MUT="${CORRUPT%%$'\t'}"; C_REST="${CORRUPT#*$'\t'}"
-C_PARSE="${C_REST%%$'\t'*}"; C_REST="${C_REST#*$'\t'}"
-C_MEASURED="${C_REST%%$'\t'*}"; C_DETAIL="${C_REST#*$'\t'}"
+judge_fields "$CORRUPT"
+C_MUT="$J_MUT" C_PARSE="$J_PARSE" C_MEASURED="$J_MEASURED" C_DETAIL="$J_VIOLATIONS"
 if (( C_MEASURED == 1 )); then
   ok "the measuring net saw the gitfile itself change"
 else
   fail "a write to the gitfile left the linked worktree's state unchanged: $CORRUPT"
 fi
 case "$C_DETAIL" in
-  *"gitfile $TREE/.git "*) ok "the measuring net named the gitfile, with the digest it recorded" ;;
+  *"gitfile $TREE/.git "*) ok "the measuring net named the gitfile, with the mode, the time and the digest it recorded" ;;
   *) fail "the measuring net did not name the gitfile as what changed: $CORRUPT" ;;
 esac
 if (( C_PARSE == 0 )); then
   ok "no command was logged for that write either"
 else
-  fail "the naming net claims to have judged a write that ran no command at all: $CORRUPT"
+  fail "the naming net claimed to have judged a write that ran no command at all: $CORRUPT"
+fi
+
+# The read half, in the shape the gate ACTUALLY runs in. This is the control the
+# eighth review asked for, and the reason it is a second control rather than an
+# extension of the one below: that one is built by new_tree, a STANDALONE
+# repository, where the index is `./index` — exactly the spelling the exclusion
+# was written for. In a linked worktree the index is
+# `<common>/worktrees/<id>/index`, and a net that excluded the NAME recorded it,
+# so `git status` rewrote a file the net was fingerprinting and the net fired on
+# its own bookkeeping: measured, the fingerprint differed from itself with
+# nothing in between in 10 runs out of 10, and the delta was the index's mtime
+# and nothing else. A control that cannot fail in the shape under test is how
+# that defect survived a round whose whole subject was the linked worktree.
+#
+# The gate here is the real one, unmodified, and the claim is made only if it
+# ran to the end — the same sentence case 1 asserts — so "the gate read the
+# tree" is measured rather than assumed.
+READONLY_WT="$WORK/tree-k2"
+new_worktree tree-k2
+RW_TREE="$WTREE"
+cp "$GATE" "$RW_TREE/tests/acceptance/gitea-real-services-e2e.sh"
+RW_BEFORE="$(tree_state "$RW_TREE")"
+run_gate "$RW_TREE"
+RW_AFTER="$(tree_state "$RW_TREE")"
+case "$OUT" in
+  *"the tree under test is exactly as this script found it"*) RW_RAN=1 ;;
+  *) RW_RAN=0 ;;
+esac
+if [[ "$RW_BEFORE" == "$RW_AFTER" ]]; then
+  ok "the whole gate, run in a linked worktree, leaves the fingerprint equal — reading rewrites the index git keeps for that worktree in the common dir, and it is excluded wherever it is"
+else
+  fail "the measuring net fired on a read in the shape the gate runs in: $(diff <(printf '%s' "$RW_BEFORE" | tr '|;' '\n\n') <(printf '%s' "$RW_AFTER" | tr '|;' '\n\n') | grep '^[<>]' | tr '\n' ' ')"
+fi
+if (( RW_RAN == 1 )); then
+  ok "and that run reached the non-interference check, so the control above is a whole run and not an early exit"
+else
+  fail "the linked-worktree control did not run the gate to its end, so it asserts nothing about the net: $(printf '%s' "$OUT" | head -3 | tr '\n' ' ')"
+fi
+RW_BEFORE="$(tree_state "$RW_TREE")"
+chmod 604 "$RW_TREE/internal/config/probe-mode.txt"
+RW_AFTER="$(tree_state "$RW_TREE")"
+if [[ "$RW_BEFORE" == "$RW_AFTER" ]]; then
+  fail "a chmod in a linked worktree left the fingerprint equal — the net is blind to it there, so the assertion above proves nothing about that shape"
+else
+  ok "and a metadata-only write in that same linked worktree is still a change it sees"
 fi
 
 # The other half of a net's worth, and the one this round's own review asked
@@ -1151,6 +1366,57 @@ if [[ "$R_BEFORE" == "$R_AFTER" ]]; then
 else
   ok "and a metadata-only write in that same tree is still a change it sees"
 fi
+
+# The index has a third thing to say besides its contents, and it is the one the
+# net had nothing for: its FLAGS. `git update-index --assume-unchanged` (and
+# `--skip-worktree`) makes every later `git status` and `git diff` in that tree
+# stop mentioning the file — a gate that hid the Worker's deliverable from the
+# Supervisor's inspection wrote no byte, no mode and no entry, and the
+# fingerprint called the tree unchanged. `ls-files -v` is the field that sees it;
+# the file here is tracked and unmodified, so nothing else in the state moves.
+FLAGS="$WORK/tree-m"
+new_tree "$FLAGS"
+F_BEFORE="$(tree_state "$FLAGS")"
+git -C "$FLAGS" update-index --assume-unchanged README.md
+F_AFTER="$(tree_state "$FLAGS")"
+if [[ "$F_BEFORE" == "$F_AFTER" ]]; then
+  fail "an index flag write — which hides a file from every later git status and diff — left the fingerprint equal, so no later inspection can be trusted to mention the Worker's files: $F_BEFORE"
+else
+  ok "an index flag write the tree's files and porcelain both hide is a change the fingerprint sees"
+fi
+
+# And what the record says about a path it could not read at all. `0@<time>@`
+# with an empty field after the last `@` is a claim: these are the bytes, and
+# they are nothing. A file whose mode denies reading is not that, and a
+# directory whose mode denies searching is not an empty one — so the record
+# names the measurement it did not make. (What the net still cannot see INSIDE
+# such a path is stated at the top of this file: no fingerprint reads what the
+# mode forbids. What it must not do is record the two as the same string.)
+UNREADABLE="$WORK/tree-n"
+new_tree "$UNREADABLE"
+printf 'nothing may read this\n' > "$UNREADABLE/internal/config/probe-secret.txt"
+mkdir -p "$UNREADABLE/internal/config/probe-secret-dir"
+chmod 000 "$UNREADABLE/internal/config/probe-secret.txt" "$UNREADABLE/internal/config/probe-secret-dir"
+U_STATE="$(tree_state "$UNREADABLE")"
+u_missing=""
+u_file_rec="$(record_of "$U_STATE" worktree f ./internal/config/probe-secret.txt)"
+u_dir_rec="$(record_of "$U_STATE" worktree d ./internal/config/probe-secret-dir)"
+case "$u_file_rec" in
+  "") u_missing="$u_missing [no record at all for the file it could not digest]" ;;
+  *unreadable*) ;;
+  *) u_missing="$u_missing [the file's own record does not say it could not digest it]" ;;
+esac
+case "$u_dir_rec" in
+  "") u_missing="$u_missing [no record at all for the directory it could not search]" ;;
+  *unreadable*) ;;
+  *) u_missing="$u_missing [the directory's own record does not say it could not search it]" ;;
+esac
+if [[ -z "$u_missing" ]]; then
+  ok "a path whose mode denies reading is recorded as unreadable, not as a file with no bytes or an empty directory"
+else
+  fail "the record does not say it could not read:$u_missing — an empty digest and a directory with no visible contents are claims this net never measured: $U_STATE"
+fi
+chmod 755 "$UNREADABLE/internal/config/probe-secret-dir"
 
 # The third thing the git walk can be handed, and the one that must not read as
 # "unchanged": a tree with no git dir at all. The record names the absence, so
@@ -1197,10 +1463,22 @@ with open(out, "w") as f:
                             "argv": rest.split()}) + "\n")
 PY
 FALSE_ALARMS="$(python3 "$WORK/judge.py" "$READS" "$TREE" | cut -f2)"
-if (( FALSE_ALARMS == 0 )); then
-  ok "the naming net does not accuse 18 read-only forms of writing in the tree"
+# The count is a CHECK, not a caption. `grep -l x` could be deleted from the
+# fixture — or a line could be added for a command the judge does accuse — and
+# the suite stayed green and went on printing "18", because the assertion is
+# "no form in this file is accused", which fewer forms satisfy just as well. A
+# form that is not in the fixture cannot be a form the judge is asked about, so
+# the number in the sentence is asserted against the file it describes.
+READS_N="$(grep -c . "$READS")"
+if (( READS_N != 18 )); then
+  fail "the reads fixture holds $READS_N forms, not the 18 this check's reach is written as — a form that is not in it was never asked about"
 else
-  fail "the naming net accuses $FALSE_ALARMS of 18 read-only forms of writing in the tree: $(python3 "$WORK/judge.py" "$READS" "$TREE" | cut -f3)"
+  ok "the reads fixture holds all 18 forms the naming net has to pass"
+fi
+if (( FALSE_ALARMS == 0 )); then
+  ok "the naming net does not accuse $READS_N read-only forms of writing in the tree"
+else
+  fail "the naming net accuses $FALSE_ALARMS of $READS_N read-only forms of writing in the tree: $(python3 "$WORK/judge.py" "$READS" "$TREE" | cut -f3)"
 fi
 
 # A record the judge cannot read is not a record it judged. The log is JSON so
