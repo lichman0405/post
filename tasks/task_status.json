@@ -1132,10 +1132,10 @@
       ]
     },
     "T0204": {
-      "status": "running",
-      "started_at": "2026-09-13T17:50:10Z",
-      "worker_run_id": "run-b8aec24bfcfb3b2c",
-      "rejection_reason": "【这不是缺陷 —— 你的基线本来就是错的，现在给你一条对的】\n\nT0204 是在 T0203（Typed Relation repository）合并后 **6 秒** 被派出去的，而本\n次派发的基线读的是「本机 main 的缓存」。你 17:47:36 开始时，本机 main 还停在\nT0203 合并之前（c3bdee7），所以你手上的树里**没有 T0203 的代码**，尽管任务包把\nT0203 列为已合并的依赖。\n\n这是已知缺陷 #123：派发读 refs/heads/main（本机缓存），而合并发生在 forge 上，\n两者之间有窗口。修复 PR #124 仍在等 owner 批准。\n\nSupervisor 已做的事：把本机 main 快进到合并后的 e708de6，并把你这条任务分支一并\n推进到同一提交。你的树现在 = 当前 main，**包含 T0203**。\n\n【你要做的】按任务包从头做即可。你前几分钟只在读任务包，没有任何改动被丢弃。\n不要试图「自行补上 T0203 缺的东西」—— 它已经在你的基线里了。\n",
+      "status": "verification",
+      "started_at": "2026-09-13T18:26:24Z",
+      "worker_run_id": "run-2ff301763a1634d6",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（084e09c130b6），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
       "history": [
         {
           "from": "todo",
@@ -1163,6 +1163,34 @@
           "at": "2026-09-13T17:50:10Z",
           "run_id": "run-b8aec24bfcfb3b2c",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T18:10:25Z",
+          "run_id": "run-9f6212e16690222e",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-13T18:26:23Z",
+          "run_id": "run-7efff041a278f1ec",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（084e09c130b6），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T18:26:24Z",
+          "run_id": "run-2ff301763a1634d6",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T18:32:06Z",
+          "run_id": "run-9d3e0417039f5ac4",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -1257,9 +1285,12 @@
       "merged_at": null
     },
     "T0215": {
-      "status": "running",
-      "started_at": "2026-09-13T17:51:38Z",
-      "worker_run_id": "run-d4bec99ce0da153d",
+      "status": "merged",
+      "started_at": "2026-09-13T18:06:02Z",
+      "worker_run_id": "run-4130c5688df4e473",
+      "accepted_by_supervisor_at": "2026-09-13T18:55:01Z",
+      "merged_at": "2026-09-13T19:03:58Z",
+      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 2 test(s) failed (go test ./tests/integration/ -run 'TestMigrationVersionCounterBackfill/00024' -count=1 (mutation: backfill UPDATE temporarily deleted from infra/migrations/00024_scientific_object_version_counter.sql, then restored byte-identical); go test ./tests/integration/ -run 'TestMigrationVersionCounterBackfill/00025' -count=1 (mutation: backfill UPDATE temporarily deleted from infra/migrations/00025_relation_version_counter.sql, then restored byte-identical)) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
       "history": [
         {
           "from": "todo",
@@ -1273,6 +1304,40 @@
           "at": "2026-09-13T17:51:38Z",
           "run_id": "run-d4bec99ce0da153d",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-13T17:59:55Z",
+          "run_id": "run-b95dd8a7d3453032",
+          "reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 2 test(s) failed (go test ./tests/integration/ -run 'TestMigrationVersionCounterBackfill/00024' -count=1 (mutation: backfill UPDATE temporarily deleted from infra/migrations/00024_scientific_object_version_counter.sql, then restored byte-identical); go test ./tests/integration/ -run 'TestMigrationVersionCounterBackfill/00025' -count=1 (mutation: backfill UPDATE temporarily deleted from infra/migrations/00025_relation_version_counter.sql, then restored byte-identical)) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T18:06:02Z",
+          "run_id": "run-4130c5688df4e473",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T18:07:04Z",
+          "run_id": "run-75e09beb966ee509",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-13T18:55:01Z",
+          "run_id": "run-5c7a6d2ce8d79672"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-13T19:03:58Z",
+          "run_id": "run-33f86a3e3dd143c6",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
