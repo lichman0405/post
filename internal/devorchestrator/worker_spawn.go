@@ -499,7 +499,11 @@ func (s *Store) StartWorkerFrom(id, runID, startedAt string, from State) (*Trans
 			return err
 		}
 		ts.Status = StateRunning
-		ts.History = append(ts.History, StateChange{From: fromSt, To: StateRunning, At: at, RunID: runID, Reason: "worker spawn"})
+		// Both halves survive the merge: `at` is #105's rendering into the task
+		// state's own format (the one scripts/validate_task_state.py accepts),
+		// and persistedReason is #128's choke point — a reason is redacted as
+		// text before it is persisted, not replaced wholesale.
+		ts.History = append(ts.History, StateChange{From: fromSt, To: StateRunning, At: at, RunID: runID, Reason: persistedReason("worker spawn")})
 		ts.WorkerRunID = runID
 		ts.StartedAt = strptr(at)
 		result = &TransitionResult{TaskID: id, From: fromSt, To: StateRunning, RunID: runID, At: at}
