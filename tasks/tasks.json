@@ -1401,7 +1401,8 @@
       "v1_required": true,
       "dependencies": [
         "T0202",
-        "T0205"
+        "T0205",
+        "T0207"
       ],
       "requirements": [
         "ResearchQuestion/Hypothesis/Material/Sample/Experiment/Calculation/Dataset/Protocol/Claim/Finding/ExternalReference create/version commands",
@@ -1449,7 +1450,8 @@
       "v1_required": true,
       "dependencies": [
         "T0203",
-        "T0205"
+        "T0205",
+        "T0208"
       ],
       "requirements": [
         "按 type/relation/question/finding/material 查询",
@@ -2155,7 +2157,8 @@
       "title": "Research State Diff 引擎",
       "v1_required": true,
       "dependencies": [
-        "T0206"
+        "T0206",
+        "T0208"
       ],
       "requirements": [
         "base/source/target object+relation diff",
@@ -2805,7 +2808,8 @@
       "title": "Provenance Graph Projection",
       "v1_required": true,
       "dependencies": [
-        "T0203"
+        "T0203",
+        "T0208"
       ],
       "requirements": [
         "uses/produces/derived/follows etc traversal",
@@ -3184,7 +3188,8 @@
       "title": "Organization/Project Policy Engine",
       "v1_required": true,
       "dependencies": [
-        "T0105"
+        "T0105",
+        "T0208"
       ],
       "requirements": [
         "versioned policy",
@@ -4906,7 +4911,8 @@
       "title": "Transactional Outbox",
       "v1_required": true,
       "dependencies": [
-        "T0204"
+        "T0204",
+        "T0208"
       ],
       "requirements": [
         "domain transaction 写 outbox",

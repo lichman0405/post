@@ -32,6 +32,18 @@ type GateStep struct {
 type GateJob struct {
 	Name  string     `json:"name"`
 	Steps []GateStep `json:"steps"`
+	// RequiresTasks names the tasks whose work the job asserts: the job runs
+	// against the task's tree, so a task may only carry this job when every
+	// named task is in its dependency closure (or is the task itself). A job
+	// without it asserts something that does not depend on the product — the
+	// Gitea instance script checks the dev stack's capabilities, not the
+	// task's own work.
+	//
+	// This exists because a chain gate wired onto tasks that cannot satisfy it
+	// is red by construction: the task stays un-acceptable however good its
+	// work is, and the failure is indistinguishable from a real one. See
+	// TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt.
+	RequiresTasks []string `json:"requires_tasks,omitempty"`
 }
 
 // GateDef describes one of G1..G4.

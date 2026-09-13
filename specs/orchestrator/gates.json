@@ -205,6 +205,11 @@
       ]
     },
     "rsg-real-services": {
+      "requires_tasks": [
+        "T0203",
+        "T0207",
+        "T0208"
+      ],
       "steps": [
         {
           "run": "bash tests/acceptance/rsg-real-services-e2e.sh"

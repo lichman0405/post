@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -385,5 +386,120 @@ func TestEveryTaskScopeSatisfiesTheDerivedArtifactRule(t *testing.T) {
 					task.ID, rule.Marker, rule.Derived)
 			}
 		}
+	}
+}
+
+// A G3 job that asserts the product must be satisfiable by the task that
+// carries it. The job runs against the task's own tree, so a job whose
+// subject only comes into existence with some other task can pass only once
+// that task is merged, and the DAG says when that is: it must be in the
+// task's dependency closure, or the run has to be ordered after it by hand
+// every time.
+//
+// A gate wired onto a task that cannot satisfy it is red by construction.
+// No amount of correct work turns it green, and the red is indistinguishable
+// from a real integration failure — so the task sits in verification while
+// the failure report names a path the task was never supposed to serve.
+//
+// It is not hypothetical. `rsg-real-services` drives the RSG core path
+// (object -> version -> relation -> :validate) and was wired onto every task
+// of P2 from T0204 onward and onto P4..P12, on the recorded belief that "the
+// chain completes at T0204" (decisions.md L1-20260913-11). T0204 does not
+// complete it: the paths the script asserts are served by T0203 (relations),
+// T0207 (:validate) and T0208 (objects and versions). None of those three was
+// in anybody's dependency closure, so the first task to reach acceptance was
+// refused with eight unserved paths (T0603) and every phase after P2 was
+// queued to hit the same wall.
+//
+// Fixed here in two halves:
+//
+//   - tasks.json gained the missing edges (T0208 += T0207 for the chain
+//     itself, and each phase entry task += T0208), so a task carrying the
+//     RSG gate now waits for the task that completes the chain. That is 92 of
+//     the 96 carriers, and this test is what keeps it true.
+//
+//   - The four tasks that BUILD the chain stay unsatisfiable, and that is
+//     structural rather than an oversight: they must be accepted before the
+//     task that completes the chain can even be dispatched, so no dependency
+//     edge can exist that would help them. Their names are pinned below so
+//     the set cannot grow, and resolving them — change their gate, or change
+//     the shape of the chain so the script's paths exist earlier — is a
+//     decision about what the gate means, not wiring.
+func TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt(t *testing.T) {
+	root := repoRootOf(t)
+	spec, err := LoadGateSpec(filepath.Join(root, DefaultGatesPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dag, err := LoadDAG(filepath.Join(root, DefaultDAGPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]TaskSpec{}
+	for _, task := range dag.Tasks {
+		byID[task.ID] = task
+	}
+	// The DAG is acyclic (LoadDAG refuses otherwise), so a plain recursive
+	// walk terminates; the memo keeps it linear over 132 tasks.
+	closure := map[string]map[string]bool{}
+	var reach func(id string) map[string]bool
+	reach = func(id string) map[string]bool {
+		if c, ok := closure[id]; ok {
+			return c
+		}
+		c := map[string]bool{}
+		closure[id] = c
+		for _, dep := range byID[id].Dependencies {
+			c[dep] = true
+			for transitive := range reach(dep) {
+				c[transitive] = true
+			}
+		}
+		return c
+	}
+	// The chain's own tasks: they cannot depend on the task that completes it.
+	buildsTheChain := map[string]bool{"T0204": true, "T0205": true, "T0206": true, "T0207": true}
+	unsatisfiable := map[string]bool{}
+	for id, override := range spec.TaskOverrides {
+		task, ok := byID[id]
+		if !ok {
+			t.Errorf("task_overrides names task %q, which %s does not contain", id, DefaultDAGPath)
+			continue
+		}
+		for _, jobName := range override.G3Jobs {
+			job, ok := spec.Jobs[jobName]
+			if !ok {
+				t.Errorf("task %s names G3 job %q, which is not defined in %s", id, jobName, DefaultGatesPath)
+				continue
+			}
+			for _, needed := range job.RequiresTasks {
+				if _, known := byID[needed]; !known && needed != id {
+					t.Errorf("G3 job %q requires task %q, which %s does not contain", jobName, needed, DefaultDAGPath)
+					continue
+				}
+				if needed == id || reach(id)[needed] {
+					continue
+				}
+				if buildsTheChain[id] {
+					unsatisfiable[id] = true
+					continue
+				}
+				t.Errorf("task %s (%s) carries G3 job %q, which asserts %s's work, but %s is not among its dependencies (%v) — the gate is red by construction: the task can never be accepted, however correct its work is, and the refusal will read like a real integration failure",
+					id, task.Phase, jobName, needed, needed, task.Dependencies)
+			}
+		}
+	}
+	// Pinned, not merely tolerated: exactly the tasks that build the chain.
+	// A new entry here means a task was wired with a gate it cannot satisfy —
+	// which is the defect this test exists to catch, not an exemption to
+	// extend.
+	want := []string{"T0204", "T0205", "T0206", "T0207"}
+	got := make([]string, 0, len(unsatisfiable))
+	for id := range unsatisfiable {
+		got = append(got, id)
+	}
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("tasks carrying a chain gate they cannot satisfy = %v, want exactly %v (the four that build the chain); anything else is a wiring defect — see L1-20260913-11", got, want)
 	}
 }
