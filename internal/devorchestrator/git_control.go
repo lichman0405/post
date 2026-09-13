@@ -200,6 +200,19 @@ func runGh(dir string, args ...string) (string, error) {
 // `gh pr checks` exits 1 when a check is failing — the very case whose output
 // we need in order to say which one — so a runner that discards stdout on
 // failure cannot express the refusal.
+//
+// The rule is "stdout if there is any, otherwise stderr", and the second half
+// is not symmetry for its own sake. When gh fails with nothing on stdout, its
+// stderr is the ONLY account of why, and reducing it to `exit status 1` throws
+// away the one fact the caller needed. `gh pr checks` on a branch whose CI has
+// not started yet prints `no checks reported on the '<branch>' branch` and
+// exits 1 — indistinguishable, once flattened, from a check that ran and
+// failed. Those are opposite answers: "CI has not begun" is a wait, "CI is red"
+// is a decision, and the driver acts on the difference (driver_run.go stepAccepted
+// retries on the text and escalates on everything else). It escalated a PR that
+// was one second old.
+//
+// An exit that carries nothing on either stream is still reported by status.
 func runGhJSON(dir string, args ...string) ([]byte, error) {
 	gh, err := exec.LookPath("gh")
 	if err != nil {
@@ -209,8 +222,15 @@ func runGhJSON(dir string, args ...string) ([]byte, error) {
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
-		if _, ok := err.(*exec.ExitError); ok && len(out) > 0 {
+		ee, ok := err.(*exec.ExitError)
+		if !ok {
+			return nil, fmt.Errorf("gh %s: %w", strings.Join(args, " "), err)
+		}
+		if len(out) > 0 {
 			return out, nil
+		}
+		if reason := strings.TrimSpace(string(ee.Stderr)); reason != "" {
+			return nil, fmt.Errorf("gh %s: %s", strings.Join(args, " "), reason)
 		}
 		return nil, fmt.Errorf("gh %s: %w", strings.Join(args, " "), err)
 	}
