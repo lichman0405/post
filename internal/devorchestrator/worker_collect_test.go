@@ -1,6 +1,7 @@
 package devorchestrator
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -368,6 +369,18 @@ func TestMarkerResidueFindsEnvAttributedChild(t *testing.T) {
 	})
 	other := startMarkerChild(t, []string{"POST_WORKER_RUN_ID=run-other"}, "sleep", "30")
 
+	// Precondition: the scrubbed child must have EXEC'd before the scan.
+	//
+	// `env -i ... sleep` carries the marker in its own environment until it
+	// execs sleep, at which point the kernel replaces /proc/PID/environ with
+	// the scrubbed one. Reading during that window observes `env`, which
+	// genuinely does carry the marker — and the detector is right to attribute
+	// it, because "this process carries the marker" is the rule. So the race is
+	// in this fixture's assumption, not in the detector: the window is tiny and
+	// load-dependent, which is why it passed on a developer machine and failed
+	// on a loaded CI runner.
+	waitForEnvironWithoutMarker(t, scrubbed.Process.Pid, "POST_WORKER_RUN_ID="+runID)
+
 	startTicks, err := procStartTicks(marked.Process.Pid)
 	if err != nil {
 		t.Fatal(err)
@@ -451,4 +464,31 @@ func TestMovingAnExistingRefIsNotANewRef(t *testing.T) {
 	if got := newRefsSince(before, []string{"refs/heads/main bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}); len(got) != 0 {
 		t.Errorf("a removed ref was reported as new: %v", got)
 	}
+}
+
+// waitForEnvironWithoutMarker blocks until pid's environment no longer carries
+// marker, or fails. It waits for the condition the test actually depends on
+// rather than assuming it, and a fixture that never scrubs its environment
+// fails here with a message that says so instead of surfacing later as a
+// confusing attribution failure.
+func waitForEnvironWithoutMarker(t *testing.T, pid int, marker string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		environ, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
+		if err == nil {
+			has := false
+			for _, kv := range bytes.Split(environ, []byte{0}) {
+				if string(kv) == marker {
+					has = true
+					break
+				}
+			}
+			if !has {
+				return
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("pid %d still carries %s after 10s — the fixture was supposed to scrub it before exec", pid, marker)
 }

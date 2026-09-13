@@ -1979,3 +1979,63 @@ L1-20260912-49 只把 G3 接到了 T0102/T0103。T0104 的 accept 因此记录 `
 
 **仍未覆盖**：P2（RSG）、P3（Gitea branch protection/webhook）、P7（MinIO hash）等 phase
 各自的 G3 尚无 job。这份记录不假装它们完成。
+
+## L1-20260912-56 — 一个**阻塞所有合并**的 flake，在我自己的测试夹具里
+
+T0106 的 PR 里 `go` job 在 CI 上红了，而**本地 G2 是绿的**——这恰恰是 L1-20260912-50
+新增的"合并前必须看 GitHub CI"所拦住的东西。失败的是**我自己的测试**，不是 T0106 的代码：
+
+```
+--- FAIL: TestMarkerResidueFindsEnvAttributedChild
+    marker scan attributed the environment-scrubbed child 5960 —
+    the warn-only class must stay unattributable
+FAIL	github.com/lichman0405/post/internal/devorchestrator
+```
+
+**根因（测试的假设，不是检测器的缺陷）**：该测试用
+`env -i PATH=… sleep 30` 造一个"继承了 marker、但在 exec 前把环境洗干净"的子进程，
+并断言扫描**不应**把它算作残留。
+
+但 `env` 进程在 **exec 成 `sleep` 之前**，它自己的环境**确实带着 marker**
+（父进程用 `Env = os.Environ() + marker` 启动它）。内核只在 exec 时替换 `/proc/PID/environ`。
+所以**在 fork→exec 的那个窗口里读到它，检测器把它算作残留是完全正确的**——
+规则就是"这个进程当前带着 marker"。
+
+**窗口极小且依赖负载**：本地几千次都过，CI 负载下被打中。
+
+**修法（等条件，而不是假设条件）**：扫描前先**等**子进程的环境真的不再带 marker
+（`waitForEnvironWithoutMarker`，10s 上限）。这直接编码了测试真正依赖的前提；
+若夹具本身坏了（`env -i` 没有清干净），会在这里以明确的报错失败，
+而不是在后面伪装成一次"归因错误"。
+
+**诚实的边界**：我**无法确定性地复现**这次 CI 失败（往扫描前加延迟只会**掩盖**它——
+因为那反而给了子进程完成 exec 的时间）。因此这条修复是**移除假设**，不是针对一个被复现的
+失败下药。另外本地连跑 10 次该包：0 次失败 ✓ —— 只有 CI 负载能触发。
+
+**同时说明一个流程判断**：这个红是**我的基础设施**的 flake，与 T0106 的产品代码无关。
+修复落在 main；T0106 的分支不含它，所以那个 job 需要**重跑**。
+docs/67 说"flake 不是 rerun until green；先定位再修"——**这两步都已做完**（定位 + 修复），
+重跑是对已知原因的重试，不是盲目重试。
+
+## L1-20260912-57 — Review 的单位是**分支的贡献**，不是"相对当前基线的增量"（L1-54 的后续项已实现）
+
+L1-20260912-54 修正了提示词的**描述**，但没修 diff 的**算法**，并把"让 Reviewer 看到 PR diff"
+记为后续项。现在实现了：
+
+`taskWorktreeDiff` 的 diff 基从"记录的基线"改为 **`git merge-base main HEAD`**。
+
+**两者在基线未推进时是同一个值**（分支的起点就是与 main 的分叉点），
+**一旦推进基线就分道扬镳**：记录的基线**已经包含任务先前的工作**，于是增量只剩一条缝——
+T0103 的 review 输入就是这么变成 27 文件任务里的 5 个文件的。
+**merge-base 在两种情况下给出的都是分支的真实贡献**，也就是 PR 上显示的那份 diff。
+
+**回归测试双向验证**（造一个真实的"分支 + main 前进 + 合并 main"场景）：
+
+```
+TestWorktreeDiffSurvivesABaselineAdvance
+  旧行为 -> FAIL："the task's own deliverable is missing once the baseline was advanced —
+                   a Reviewer would be handed a fragment of a task and asked to approve the whole"
+  新行为 -> PASS（且断言 main 自己的改动**不**泄漏进任务的评审）
+```
+
+第二条断言同样重要：换基之后不能把 main 的改动算进"任务的改动"，否则 scope 判断与评审都会失真。

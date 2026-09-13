@@ -507,18 +507,60 @@
       ]
     },
     "T0106": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-13T00:40:14Z",
+      "worker_run_id": "run-3fb8c179ebf79d37",
+      "accepted_by_supervisor_at": "2026-09-13T00:21:55Z",
+      "rejection_reason": "【这不是缺陷 —— 你的实现没有任何问题，这是一次**基线推进**，需要你在新基线上重新确认】\n\n**发生了什么**：你的交付在 CI 上被一个 **Supervisor 自己测试夹具里的 flake** 卡住了：\n`internal/devorchestrator` 的 `TestMarkerResidueFindsEnvAttributedChild`\n（残留检测的测试）在 CI 负载下会随机失败——**它与你的代码毫无关系**。\n该 flake 已定位并修复（`decisions.md` L1-20260912-56）。\n\n**问题**：修复落在 main，而你的分支早于它，所以**你的分支上那个测试仍是旧版本**，\n重跑 CI 依然会红（已实测重跑一次仍失败）。唯一出路是**推进你的基线**。\n\n**Supervisor 已完成**：把你的任务分支 **merge 了当前 main**（你的工作此前已提交，所以这里是正常 merge，\n不是 reset+重放）。合并**无冲突**，并且：\n- 你的树现在包含那个 flake 修复 ✓（已在你的 worktree 里实测该测试通过）；\n- 也包含 main 上其它任务的成果（T0107 的 `tests/web-smoke/` 等）。\n\n【你要做的（很少）】\n1. 在**合并后的基线**上重跑你自己的验证（required tests：`public/private isolation` 等 +\n   `make test-integration` + `make fmt-check`），确认没有因合并而失效；\n2. 确认 RESULT.json 仍自洽（completed 要求 tests[] 全部 passed；\n   覆盖任务要求的条目要带 `label`）；\n3. 若一切照旧，把 RESULT.json 原样重新提交即可（更新 evidence 里的命令输出更佳）；\n   若**确实**发现合并导致的问题，修好并如实说明。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-12T23:39:06Z",
+          "run_id": "run-d7d023ac2a68fc65"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-12T23:39:06Z",
+          "run_id": "run-df909f2e57c9e43b",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T00:11:29Z",
+          "run_id": "run-7a0d836189acf074",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-13T00:21:55Z",
+          "run_id": "run-326fa20f007bcfd5"
+        },
+        {
+          "from": "accepted",
+          "to": "rejected",
+          "at": "2026-09-13T00:40:13Z",
+          "run_id": "run-30bf73ccf9055538",
+          "reason": "【这不是缺陷 —— 你的实现没有任何问题，这是一次**基线推进**，需要你在新基线上重新确认】\n\n**发生了什么**：你的交付在 CI 上被一个 **Supervisor 自己测试夹具里的 flake** 卡住了：\n`internal/devorchestrator` 的 `TestMarkerResidueFindsEnvAttributedChild`\n（残留检测的测试）在 CI 负载下会随机失败——**它与你的代码毫无关系**。\n该 flake 已定位并修复（`decisions.md` L1-20260912-56）。\n\n**问题**：修复落在 main，而你的分支早于它，所以**你的分支上那个测试仍是旧版本**，\n重跑 CI 依然会红（已实测重跑一次仍失败）。唯一出路是**推进你的基线**。\n\n**Supervisor 已完成**：把你的任务分支 **merge 了当前 main**（你的工作此前已提交，所以这里是正常 merge，\n不是 reset+重放）。合并**无冲突**，并且：\n- 你的树现在包含那个 flake 修复 ✓（已在你的 worktree 里实测该测试通过）；\n- 也包含 main 上其它任务的成果（T0107 的 `tests/web-smoke/` 等）。\n\n【你要做的（很少）】\n1. 在**合并后的基线**上重跑你自己的验证（required tests：`public/private isolation` 等 +\n   `make test-integration` + `make fmt-check`），确认没有因合并而失效；\n2. 确认 RESULT.json 仍自洽（completed 要求 tests[] 全部 passed；\n   覆盖任务要求的条目要带 `label`）；\n3. 若一切照旧，把 RESULT.json 原样重新提交即可（更新 evidence 里的命令输出更佳）；\n   若**确实**发现合并导致的问题，修好并如实说明。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T00:40:14Z",
+          "run_id": "run-3fb8c179ebf79d37",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0107": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-12T23:38:53Z",
       "worker_run_id": "run-c9244aacb5713b6b",
+      "accepted_by_supervisor_at": "2026-09-12T23:56:38Z",
+      "merged_at": "2026-09-13T00:00:41Z",
       "rejection_reason": "独立 Review Worker 的 verdict 是 **request_changes**（1 blocking + 1 minor + 2 nit）。\n完整 verdict 见 .rddev/workers/T0107-review/RESULT.json。Supervisor 已复核，两条都成立。\n\n【B1 · BLOCKING — 主页有两个 <main> 地标】\napps/web/app/(main)/layout.tsx:21 现在把每个页面包在 `<main id=\"main\" tabIndex={-1}>` 里，\n但 `apps/web/app/(main)/status-panel.tsx:38` 仍然渲染它自己的 `<main className=\"status-main\">`，\n于是 `\"/\"` 上有**两个非 hidden 的 main 地标**。这是 HTML 一致性违规\n（一个文档不得有两个不带 hidden 的 main），会让屏幕阅读器的地标导航出现两个 main，\n并与 docs/06 §10 的语义 HTML 要求冲突。\n修法：`StatusPanel` 的外层改为 `<section>`（或 `<div>`）并保留其内部结构；\n只有当它**不是**在 `(main)/layout.tsx` 之内时才用 `<main>`。\n补一个能**在修复前失败**的断言：`\"/\"` 渲染结果中非 hidden 的 `<main>` 恰好一个。\n\n【M1 · MINOR，但请一并修 —— 这是一条\"永远不会失败\"的检查】\ntests/web-smoke/a11y-smoke.mjs:31 的 axe `runOnly` 标签集\n（wcag2a / wcag2aa / wcag21a / wcag21aa / wcag22aa）**排除了全部 best-practice 规则**，\n因此 `landmark-no-duplicate-main`、地标唯一性、heading-order、page-has-heading-one\n这类**结构性**违规**永远不可能让这个 harness 变红**。\n所以 \"0 violations\" 这句证据在它覆盖的范围内是真的，但 RESULT 把它当作无障碍安全网来呈现——\n而这份 diff 里唯一一个真实的语义缺陷（B1）正好落在它看不到的地方。\n\n**一个无法失败的检查比没有检查更糟**：它会把\"没测到\"报告成\"没问题\"。\n请把 best-practice（至少 landmark 与 heading 相关的）规则纳入 `runOnly`，\n并**证明它能失败**：人为制造一次重复 main / 跳级标题，确认 harness 变红，再撤掉。\n（CLAUDE.md §6：禁止为了让 Gate 变绿而弱化测试；反向也成立——**测试必须真的能变红**。）\n\n【nit（顺手修）】\n- global-nav.tsx:62：桌面端 \"Notifications\" 出现两次（目的行 + 头部铃铛快捷键），\n  产生两个相邻且**无障碍名相同**的 tab stop。docs/05 §1 只列一次目的地。\n- nav-destinations.ts:44：`NAV_DESTINATIONS.find(...) as NavDestination` 用了非空断言；\n  若 Search 条目被移除或改 href，抽屉列表会 spread `undefined` 而**编译不报错**。\n  请改为字面量条目或类型安全的查找。\n\n【约束不变】decision level 上限 L1；不要放宽任何测试；不要趁这次重构无关代码；\nRESULT.json 必须自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 `label`）。\n",
       "history": [
         {
@@ -554,17 +596,48 @@
           "at": "2026-09-12T23:38:53Z",
           "run_id": "run-c9244aacb5713b6b",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-12T23:49:26Z",
+          "run_id": "run-a7b5f4903da873c3",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-12T23:56:38Z",
+          "run_id": "run-3524289f65200739"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-13T00:00:41Z",
+          "run_id": "run-d7d02f1ca608f973",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0108": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-13T00:00:56Z",
+      "worker_run_id": "run-336fd4a59c96c5ba",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-13T00:00:56Z",
+          "run_id": "run-b4b86f0a1dcf2d20"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-13T00:00:56Z",
+          "run_id": "run-336fd4a59c96c5ba",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0109": {
       "status": "todo",
@@ -576,13 +649,46 @@
       "merged_at": null
     },
     "T0110": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-13T00:22:08Z",
+      "worker_run_id": "run-7edcebc01a06eca2",
+      "rejection_reason": "独立 Review Worker 的 verdict 是 **request_changes**（1 blocking + 2 minor + 2 nit）。\n完整 verdict 见 .rddev/workers/T0110-review/RESULT.json。Supervisor 已复核，blocking 成立。\n\n【B1 · BLOCKING — 客户端可控的 cursor 能让 API handler **panic**】\n`internal/application/audit/cursor.go:37` 的 `DecodeCursor` 只要时间戳能被 RFC3339Nano 解析、\n且 id 非空就接受**任意** id；而 `internal/persistence/audit_store.go:156` 的 `textUUIDMust`\n在 id 不是 UUID 时会 **panic**（`pgtype.UUID.Scan` 拒绝 `zzz` 这类值）。\n\n**任何已认证的成员**都可以触发：\n```\nGET /api/v1/projects/{id}/activity?cursor=<base64url('2026-09-12T10:00:00Z|zzz')>\n```\n——这不是\"返回 400\"，而是**panic**。一个用户可控的输入能打到 panic 路径，属于必须修的缺陷\n（panic 会中断请求、可能被上限中间件吞掉并产生 500，且掩盖真实错误）。\n\n修法（两条都要）：\n1. 在 **DecodeCursor 里**做严格校验：id 必须是合法 UUID，否则返回可识别的\n   `ErrInvalidCursor`（→ 400），**绝不把无法解析的值传下去**；\n2. `textUUIDMust` 不要 panic——它现在把\"不可能发生\"当成了前提，而这条路径证明它可以发生。\n   改为返回错误，让调用方决定。\n\n**请在修复前先写出能失败的测试**：用 `...|zzz` 构造 cursor，断言返回 **400**（而不是 panic/500）。\n再补一条：id 里含 `|`（如 `a|b`）也必须被拒（见下）。\n\n【M2 · MINOR —— 同一个校验还有结构缺口，请一并修】\n`DecodeCursor` 用 `strings.Cut` 取**第一个** `|`，所以形如 `a|b` 的 id 能通过非空检查并流到 store\n（也就是上面的 panic 路径）。修 UUID 校验时请**同时把 token 形状定严**：分隔符**恰好一个**。\n\n【M3 · MINOR —— 同一类事件两种 reason 词表】\n`internal/application/authn/service.go:142` 附近：禁用账号的**密码**登录记\n`reason: 'invalid_credentials'`，而禁用账号的 **OIDC** 分支记 `'account_disabled'`——\n两者都是 `auth.login.failed` 行。下游分析\"禁用账号尝试\"会拿到两套词表。请统一为一种。\n\n【nit（顺手）】\n- `apps/web/lib/activity.ts:131`：只把 `status >= 400` 当错误，3xx 会落到 `res.json()` 并被报成\n  \"unexpected shape\" 而不是稳定的 ApiError。请把非 2xx 处理对称化（与文件头的说明一致）。\n- `cmd/api/audithttp/audit_handlers.go:144`：`readOnly` 对 HEAD 也返回 405。\n  标准 REST 语义下 HEAD 应当镜像 GET（200、无 body）。无害，但顺手改掉更好。\n\n【约束不变】decision level 上限 L1；不要放宽任何测试来让它们变绿；\n新测试必须能在修复前失败；不要趁这次重构无关代码；\nRESULT.json 必须自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 `label`）。\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-12T23:39:06Z",
+          "run_id": "run-214ee447eec457c5"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-12T23:39:07Z",
+          "run_id": "run-88ba7dea7c52c48e",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T00:11:29Z",
+          "run_id": "run-d2b20cbad0aed05d",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-13T00:22:07Z",
+          "run_id": "run-8acfe09b0d8d79fb",
+          "reason": "独立 Review Worker 的 verdict 是 **request_changes**（1 blocking + 2 minor + 2 nit）。\n完整 verdict 见 .rddev/workers/T0110-review/RESULT.json。Supervisor 已复核，blocking 成立。\n\n【B1 · BLOCKING — 客户端可控的 cursor 能让 API handler **panic**】\n`internal/application/audit/cursor.go:37` 的 `DecodeCursor` 只要时间戳能被 RFC3339Nano 解析、\n且 id 非空就接受**任意** id；而 `internal/persistence/audit_store.go:156` 的 `textUUIDMust`\n在 id 不是 UUID 时会 **panic**（`pgtype.UUID.Scan` 拒绝 `zzz` 这类值）。\n\n**任何已认证的成员**都可以触发：\n```\nGET /api/v1/projects/{id}/activity?cursor=<base64url('2026-09-12T10:00:00Z|zzz')>\n```\n——这不是\"返回 400\"，而是**panic**。一个用户可控的输入能打到 panic 路径，属于必须修的缺陷\n（panic 会中断请求、可能被上限中间件吞掉并产生 500，且掩盖真实错误）。\n\n修法（两条都要）：\n1. 在 **DecodeCursor 里**做严格校验：id 必须是合法 UUID，否则返回可识别的\n   `ErrInvalidCursor`（→ 400），**绝不把无法解析的值传下去**；\n2. `textUUIDMust` 不要 panic——它现在把\"不可能发生\"当成了前提，而这条路径证明它可以发生。\n   改为返回错误，让调用方决定。\n\n**请在修复前先写出能失败的测试**：用 `...|zzz` 构造 cursor，断言返回 **400**（而不是 panic/500）。\n再补一条：id 里含 `|`（如 `a|b`）也必须被拒（见下）。\n\n【M2 · MINOR —— 同一个校验还有结构缺口，请一并修】\n`DecodeCursor` 用 `strings.Cut` 取**第一个** `|`，所以形如 `a|b` 的 id 能通过非空检查并流到 store\n（也就是上面的 panic 路径）。修 UUID 校验时请**同时把 token 形状定严**：分隔符**恰好一个**。\n\n【M3 · MINOR —— 同一类事件两种 reason 词表】\n`internal/application/authn/service.go:142` 附近：禁用账号的**密码**登录记\n`reason: 'invalid_credentials'`，而禁用账号的 **OIDC** 分支记 `'account_disabled'`——\n两者都是 `auth.login.failed` 行。下游分析\"禁用账号尝试\"会拿到两套词表。请统一为一种。\n\n【nit（顺手）】\n- `apps/web/lib/activity.ts:131`：只把 `status >= 400` 当错误，3xx 会落到 `res.json()` 并被报成\n  \"unexpected shape\" 而不是稳定的 ApiError。请把非 2xx 处理对称化（与文件头的说明一致）。\n- `cmd/api/audithttp/audit_handlers.go:144`：`readOnly` 对 HEAD 也返回 405。\n  标准 REST 语义下 HEAD 应当镜像 GET（200、无 body）。无害，但顺手改掉更好。\n\n【约束不变】decision level 上限 L1；不要放宽任何测试来让它们变绿；\n新测试必须能在修复前失败；不要趁这次重构无关代码；\nRESULT.json 必须自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 `label`）。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T00:22:08Z",
+          "run_id": "run-7edcebc01a06eca2",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0201": {
       "status": "todo",

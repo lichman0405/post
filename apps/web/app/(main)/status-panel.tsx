@@ -35,7 +35,10 @@ export function StatusPanel({
         </Heading>
         <Label>web {webVersion}</Label>
       </header>
-      <main className="status-main">
+      {/* A <div>, not a second <main>: (main)/layout.tsx already provides the
+          page's single <main id="main"> landmark (docs/06 §10, one non-hidden
+          main per document). */}
+      <div className="status-main">
         <Heading as="h2" style={{ fontSize: 16, margin: "0 0 8px" }}>
           Development status
         </Heading>
@@ -63,7 +66,7 @@ export function StatusPanel({
             and adapter logs with this id to follow this render.
           </Text>
         )}
-      </main>
+      </div>
     </div>
   );
 }

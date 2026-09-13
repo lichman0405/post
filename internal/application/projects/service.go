@@ -147,6 +147,29 @@ func (s *Service) Get(ctx context.Context, actor domain.User, projectID string) 
 	return project, nil
 }
 
+// GetMembership returns the actor's own membership in the project (the
+// shell's permission-aware Settings gate reads this; T0109's member
+// management builds on the same store method). The project-read
+// authorization runs first — a caller who may not read the project may
+// not learn their membership in it either (the same existence hiding as
+// Get, and the same public-read extension when T0106 lands). For a
+// project the caller may read but is not a member of, the answer is
+// ErrMemberNotFound — "no role", not an error.
+//
+// T0106 (in flight) renames Get's caller parameter to a Reader; when
+// that merge lands, the call below becomes the mechanical one-liner
+// s.Get(ctx, Reader{UserID: actor.ID, Authenticated: true}, projectID).
+func (s *Service) GetMembership(ctx context.Context, actor domain.User, projectID string) (domain.ProjectMembership, error) {
+	if _, err := s.Get(ctx, actor, projectID); err != nil {
+		return domain.ProjectMembership{}, err
+	}
+	membership, err := s.store.GetMembership(ctx, projectID, actor.ID)
+	if err != nil {
+		return domain.ProjectMembership{}, wrapStoreError(err)
+	}
+	return membership, nil
+}
+
 // List returns the projects the actor belongs to (any role), newest first.
 func (s *Service) List(ctx context.Context, actor domain.User) ([]domain.Project, error) {
 	projects, err := s.store.ListProjectsForUser(ctx, actor.ID)

@@ -17,6 +17,10 @@ const (
 	// CodeProjectForbidden is returned when the actor may not create a
 	// project in the organization (not an active member).
 	CodeProjectForbidden = "PROJECT_FORBIDDEN"
+	// CodeProjectMembershipNotFound is returned when the actor holds no
+	// membership in a project they may read (the shell's Settings gate
+	// treats this as "no role", not as an error).
+	CodeProjectMembershipNotFound = "PROJECT_MEMBERSHIP_NOT_FOUND"
 	// CodeOrgNotFound is returned when the organization named at creation
 	// does not exist.
 	CodeOrgNotFound = "ORG_NOT_FOUND"
