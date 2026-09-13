@@ -1979,3 +1979,40 @@ L1-20260912-49 只把 G3 接到了 T0102/T0103。T0104 的 accept 因此记录 `
 
 **仍未覆盖**：P2（RSG）、P3（Gitea branch protection/webhook）、P7（MinIO hash）等 phase
 各自的 G3 尚无 job。这份记录不假装它们完成。
+
+## L1-20260912-56 — 一个**阻塞所有合并**的 flake，在我自己的测试夹具里
+
+T0106 的 PR 里 `go` job 在 CI 上红了，而**本地 G2 是绿的**——这恰恰是 L1-20260912-50
+新增的"合并前必须看 GitHub CI"所拦住的东西。失败的是**我自己的测试**，不是 T0106 的代码：
+
+```
+--- FAIL: TestMarkerResidueFindsEnvAttributedChild
+    marker scan attributed the environment-scrubbed child 5960 —
+    the warn-only class must stay unattributable
+FAIL	github.com/lichman0405/post/internal/devorchestrator
+```
+
+**根因（测试的假设，不是检测器的缺陷）**：该测试用
+`env -i PATH=… sleep 30` 造一个"继承了 marker、但在 exec 前把环境洗干净"的子进程，
+并断言扫描**不应**把它算作残留。
+
+但 `env` 进程在 **exec 成 `sleep` 之前**，它自己的环境**确实带着 marker**
+（父进程用 `Env = os.Environ() + marker` 启动它）。内核只在 exec 时替换 `/proc/PID/environ`。
+所以**在 fork→exec 的那个窗口里读到它，检测器把它算作残留是完全正确的**——
+规则就是"这个进程当前带着 marker"。
+
+**窗口极小且依赖负载**：本地几千次都过，CI 负载下被打中。
+
+**修法（等条件，而不是假设条件）**：扫描前先**等**子进程的环境真的不再带 marker
+（`waitForEnvironWithoutMarker`，10s 上限）。这直接编码了测试真正依赖的前提；
+若夹具本身坏了（`env -i` 没有清干净），会在这里以明确的报错失败，
+而不是在后面伪装成一次"归因错误"。
+
+**诚实的边界**：我**无法确定性地复现**这次 CI 失败（往扫描前加延迟只会**掩盖**它——
+因为那反而给了子进程完成 exec 的时间）。因此这条修复是**移除假设**，不是针对一个被复现的
+失败下药。另外本地连跑 10 次该包：0 次失败 ✓ —— 只有 CI 负载能触发。
+
+**同时说明一个流程判断**：这个红是**我的基础设施**的 flake，与 T0106 的产品代码无关。
+修复落在 main；T0106 的分支不含它，所以那个 job 需要**重跑**。
+docs/67 说"flake 不是 rerun until green；先定位再修"——**这两步都已做完**（定位 + 修复），
+重跑是对已知原因的重试，不是盲目重试。
