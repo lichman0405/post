@@ -1,6 +1,7 @@
 package devorchestrator
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,6 +70,15 @@ func writeReviewAttempt(t *testing.T, repoRoot, taskID, fingerprint string, task
 // directory as the working directory.
 func writeVerdict(t *testing.T, repoRoot, taskID string) {
 	t.Helper()
+	writeVerdictDoc(t, repoRoot, taskID, `{"task_id":"`+taskID+`","verdict":"approve","summary":"the change is correct","findings":[],"risks":[]}`)
+}
+
+// writeVerdictDoc is writeVerdict with the document as a parameter, for the
+// cases that are about what the document CONTAINS rather than about the
+// fingerprint. Same real schema in the same place, so a verdict that collects
+// here is one the product would collect.
+func writeVerdictDoc(t *testing.T, repoRoot, taskID, verdict string) {
+	t.Helper()
 	schemaSrc := filepath.Join("..", "..", "specs", "orchestrator", "review-verdict.schema.json")
 	schema, err := os.ReadFile(schemaSrc)
 	if err != nil {
@@ -81,10 +91,55 @@ func writeVerdict(t *testing.T, repoRoot, taskID string) {
 	if err := os.WriteFile(filepath.Join(schemaDir, "review-verdict.schema.json"), schema, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	verdict := `{"task_id":"` + taskID + `","verdict":"approve","summary":"the change is correct","findings":[],"risks":[]}`
 	path := filepath.Join(WorkerTaskDir(repoRoot, ReviewTaskID(taskID)), "RESULT.json")
 	if err := os.WriteFile(path, []byte(verdict), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestReviewCollectAcceptsAVerdictWithAnUnanchoredFinding drives the T0215
+// document through the path that refused it. The unit test beside the validator
+// pins the keyword's scope; this pins the WIRING — that the schema collect reads
+// is the repository's, that a nil line survives the file, the parse and the
+// check, and that the verdict is recorded rather than rejected. Every other
+// fixture in this file has an empty findings array, so before this no verdict
+// carrying a finding had ever been collected here at all.
+func TestReviewCollectAcceptsAVerdictWithAnUnanchoredFinding(t *testing.T) {
+	taskID := "T0103"
+	root, taskRec, _, fp := taskFixture(t, taskID)
+	writeReviewAttempt(t, root, taskID, fp, taskRec)
+	// "This finding is not line-specific", as the schema spells it — plus the
+	// inclusive boundary, because line 0 is a line and must not be confused with
+	// absent.
+	writeVerdictDoc(t, root, taskID, `{"task_id":"`+taskID+`","verdict":"approve","summary":"s",
+		"findings":[
+			{"severity":"nit","file":"RESULT.json","line":null,"finding":"not line-specific"},
+			{"severity":"nit","file":"RESULT.json","line":0,"finding":"about the first line"}],
+		"risks":[]}`)
+
+	report := collectReview(t, root, taskID)
+	// The schema check is only recorded when it REFUSES — passing it falls
+	// through to the verdict checks below — so a failed entry is the whole
+	// signal, and the walk continuing past it is the rest.
+	if status, detail := checkDetail(report, "review-verdict-schema"); status == "failed" {
+		t.Fatalf("the repository's schema refused the T0215 document: %s; ran: %s", detail, describeChecks(report))
+	}
+	if report.Status != "ok" {
+		t.Fatalf("collect status = %q, want ok: %v (%s)", report.Status, report.Reasons, describeChecks(report))
+	}
+	if status, detail := checkDetail(report, "review-verdict"); status != "passed" {
+		t.Fatalf("review-verdict = %q (%s), want passed — the verdict was not walked; ran: %s", status, detail, describeChecks(report))
+	}
+	// And the point of collecting at all: the document became merge evidence.
+	rec, ok, err := LatestRecord[ReviewRecord](root, taskID, RecordReview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("an accepted verdict with an unanchored finding was not recorded as merge evidence; ran: %s", describeChecks(report))
+	}
+	if rec.Verdict != "approve" {
+		t.Errorf("recorded verdict = %q, want approve", rec.Verdict)
 	}
 }
 
@@ -95,6 +150,24 @@ func collectReview(t *testing.T, repoRoot, taskID string) *ReviewCollectReport {
 		t.Fatalf("collecting the review: %v", err)
 	}
 	return report
+}
+
+// describeChecks renders the checks that ran, in order, for a failure message.
+func describeChecks(report *ReviewCollectReport) string {
+	var b strings.Builder
+	for i, c := range report.Checks {
+		if i > 0 {
+			b.WriteString("; ")
+		}
+		fmt.Fprintf(&b, "%s=%s", c.Name, c.Status)
+		if c.Detail != "" {
+			fmt.Fprintf(&b, "(%s)", c.Detail)
+		}
+	}
+	if b.Len() == 0 {
+		return "no checks ran"
+	}
+	return b.String()
 }
 
 // checkDetail returns the detail of one named collect check.

@@ -190,12 +190,27 @@ func validateInto(doc any, schema map[string]any, where string, errs *[]error) {
 	// That is not hypothetical. On 14 Sep 2026 a Reviewer said "this finding is
 	// not line-specific" the only way review-verdict.schema.json allows —
 	// line: null — in an otherwise approving verdict, and rddev review collect
-	// refused it. claude's own --json-schema validation of the same document
-	// (santhosh-tekuri/jsonschema/v6, the library this repo already depends on)
-	// had accepted it: the Worker was told to fix something that was not wrong,
-	// by a second validator that disagreed with the first about one document.
+	// refused it. The Reviewer's own session had ended successfully with that
+	// document, and claude applies --json-schema to a Worker's final message
+	// before it is written; so the document was accepted by one validator and
+	// refused by this one, and the Worker was told to fix something that was not
+	// wrong. Which validator claude uses is not something this comment can
+	// establish (the CLI is a self-contained binary, not this repo's Go
+	// dependencies), so the claim here is the narrower, checkable one: the
+	// schema admits a null, draft 2020-12 says `minimum` has nothing to say
+	// about one, and this function was the only dissenter.
 	//
-	// uniqueItems below already had the right shape. These four did not.
+	// uniqueItems below already had the right shape. These four did not — and
+	// the four STRUCTURAL keywords (required, properties, additionalProperties,
+	// items) still do not: they report "value is not an object/array" for a
+	// value of another type, which is the same mistake. It is latent rather
+	// than live, because the only schemas this validator is handed are
+	// task-package, worker-result and review-verdict — but
+	// specs/orchestrator/worker-registry.schema.json:27 is a real instance of
+	// the shape ("listeners_before": {"type": ["array","null"], "items": …}), so
+	// the next schema to add that pairing meets this bug. Left alone here
+	// deliberately: those guards also stop the traversal descending, so
+	// loosening them is a bigger change than this fix. Filed.
 	if n, ok := schema["minItems"].(float64); ok {
 		if arr, isArr := doc.([]any); isArr && len(arr) < int(n) {
 			*errs = append(*errs, fmt.Errorf("%s: expected at least %d items", where, int(n)))

@@ -126,12 +126,10 @@ func TestValidatorFailsClosedOnUnknownKeywords(t *testing.T) {
 //
 // In draft 2020-12 `minimum` constrains numbers only; it says nothing about a
 // null, and the type keyword is what decides whether a null may appear here.
-// The library this repo already depends on (santhosh-tekuri/jsonschema/v6,
-// which schemareg uses, and which claude's own --json-schema path applies to
-// the same document before the Worker writes it) accepts it. Two validators
-// disagreeing about one document is worse than either one being wrong: the
-// document that claude accepted is refused at collection, and the Worker is
-// told to fix something that is not wrong.
+// The document was accepted by the validator claude applied to the Reviewer's
+// own final message and refused by this one, which is what made it a defect
+// rather than a disagreement about style: the Worker was told to fix something
+// that was not wrong.
 //
 // Each case is (what, schema, value) where the value's type is admitted by the
 // schema's own type list and only the sibling keyword used to reject it.
