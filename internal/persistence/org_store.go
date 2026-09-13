@@ -70,7 +70,19 @@ func (s *OrgStore) CreateOrganization(ctx context.Context, org domain.Organizati
 			AffiliationStart: affiliationStart,
 			Verified:         true,
 		}
-		return nil
+		// The audit row commits (or rolls back) with the organization
+		// itself (T0110: a governance action is never recorded without
+		// its audit record, or recorded without the action).
+		return appendAudit(ctx, q, domain.AuditEntry{
+			Action:         domain.ActionOrgCreated,
+			ActorID:        creatorUserID,
+			TargetRef:      "organization:" + pgUUIDToText(row.ID),
+			OrganizationID: pgUUIDToText(row.ID),
+			AfterSummary: map[string]any{
+				"slug": org.Slug,
+				"name": org.Name,
+			},
+		})
 	})
 	if err != nil {
 		return domain.Organization{}, domain.OrganizationMembership{}, err
@@ -94,36 +106,80 @@ func (s *OrgStore) GetOrganization(ctx context.Context, orgID string) (domain.Or
 	return orgFromRow(row), nil
 }
 
-// UpdateOrganization implements orgs.OrgStore.
+// UpdateOrganization implements orgs.OrgStore. The rename/description
+// rewrite runs inside one transaction with its audit row: the before
+// summary is read in the same transaction the UPDATE commits.
 func (s *OrgStore) UpdateOrganization(ctx context.Context, org domain.Organization) (domain.Organization, error) {
 	id, err := textUUID(org.ID)
 	if err != nil {
 		return domain.Organization{}, orgs.ErrOrgNotFound
 	}
-	row, err := sqlc.New(s.pool).UpdateOrganization(ctx, sqlc.UpdateOrganizationParams{
-		ID:          id,
-		Name:        org.Name,
-		Description: nullString(org.Description),
+	var updated domain.Organization
+	err = WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		q := sqlc.New(tx)
+		before, err := q.GetOrganizationByID(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return orgs.ErrOrgNotFound
+		}
+		if err != nil {
+			return err
+		}
+		row, err := q.UpdateOrganization(ctx, sqlc.UpdateOrganizationParams{
+			ID:          id,
+			Name:        org.Name,
+			Description: nullString(org.Description),
+		})
+		if err != nil {
+			return err
+		}
+		updated = orgFromRow(row)
+		return appendAudit(ctx, q, domain.AuditEntry{
+			Action:         domain.ActionOrgUpdated,
+			TargetRef:      "organization:" + org.ID,
+			OrganizationID: org.ID,
+			BeforeSummary: map[string]any{
+				"name":        before.Name,
+				"description": nullStringToValue(before.Description),
+			},
+			AfterSummary: map[string]any{
+				"name":        org.Name,
+				"description": nullString(org.Description),
+			},
+		})
 	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.Organization{}, orgs.ErrOrgNotFound
-	}
 	if err != nil {
-		return domain.Organization{}, fmt.Errorf("persistence: update organization: %w", err)
+		return domain.Organization{}, err
 	}
-	return orgFromRow(row), nil
+	return updated, nil
 }
 
-// DeactivateOrganization implements orgs.OrgStore.
+// DeactivateOrganization implements orgs.OrgStore. The soft-delete and its
+// audit row commit in one transaction.
 func (s *OrgStore) DeactivateOrganization(ctx context.Context, orgID string) error {
 	id, err := textUUID(orgID)
 	if err != nil {
 		return orgs.ErrOrgNotFound
 	}
-	if _, err := sqlc.New(s.pool).DeactivateOrganization(ctx, id); errors.Is(err, pgx.ErrNoRows) {
-		return orgs.ErrOrgNotFound
-	} else if err != nil {
-		return fmt.Errorf("persistence: deactivate organization: %w", err)
+	err = WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		q := sqlc.New(tx)
+		row, err := q.DeactivateOrganization(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return orgs.ErrOrgNotFound
+		}
+		if err != nil {
+			return err
+		}
+		return appendAudit(ctx, q, domain.AuditEntry{
+			Action:         domain.ActionOrgDeactivated,
+			TargetRef:      "organization:" + orgID,
+			OrganizationID: orgID,
+			AfterSummary: map[string]any{
+				"deactivated_at": timestamptzPtr(row.DeactivatedAt),
+			},
+		})
+	})
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -223,12 +279,25 @@ func (s *OrgStore) AddMembership(ctx context.Context, m domain.OrganizationMembe
 		if !orgFromRow(orgRow).Active() {
 			return orgs.ErrOrgDeactivated
 		}
-		return q.AddOrganizationMembership(ctx, sqlc.AddOrganizationMembershipParams{
+		if err := q.AddOrganizationMembership(ctx, sqlc.AddOrganizationMembershipParams{
 			OrganizationID:   oID,
 			UserID:           uID,
 			Role:             string(m.Role),
 			AffiliationStart: dateToPG(m.AffiliationStart),
 			Verified:         m.Verified,
+		}); err != nil {
+			return err
+		}
+		return appendAudit(ctx, q, domain.AuditEntry{
+			Action:         domain.ActionOrgMemberInvited,
+			TargetRef:      "user:" + m.UserID,
+			OrganizationID: m.OrganizationID,
+			AfterSummary: map[string]any{
+				"user_id":           m.UserID,
+				"role":              string(m.Role),
+				"affiliation_start": m.AffiliationStart,
+				"verified":          m.Verified,
+			},
 		})
 	})
 	if err != nil {
@@ -284,7 +353,24 @@ func (s *OrgStore) UpdateMembershipRoleAndDates(ctx context.Context, orgID, user
 			return err
 		}
 		updated = membershipFromRow(row)
-		return nil
+		// The before summary comes from the row read under the same lock
+		// as the UPDATE — the audit pair can never disagree with what
+		// actually changed.
+		return appendAudit(ctx, q, domain.AuditEntry{
+			Action:         domain.ActionOrgMemberUpdated,
+			TargetRef:      "user:" + userID,
+			OrganizationID: orgID,
+			BeforeSummary: map[string]any{
+				"role":              current.Role,
+				"affiliation_start": dateFromPG(current.AffiliationStart),
+				"verified":          current.Verified,
+			},
+			AfterSummary: map[string]any{
+				"role":              string(role),
+				"affiliation_start": affiliationStart,
+				"verified":          verified,
+			},
+		})
 	})
 	if err != nil {
 		return domain.OrganizationMembership{}, mapMembershipWriteError(err)
@@ -337,7 +423,14 @@ func (s *OrgStore) EndAffiliation(ctx context.Context, orgID, userID string, end
 		}); err != nil {
 			return err
 		}
-		return nil
+		return appendAudit(ctx, q, domain.AuditEntry{
+			Action:         domain.ActionOrgMemberRemoved,
+			TargetRef:      "user:" + userID,
+			OrganizationID: orgID,
+			AfterSummary: map[string]any{
+				"affiliation_end": end,
+			},
+		})
 	})
 	if err != nil {
 		return mapMembershipWriteError(err)

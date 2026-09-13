@@ -20,11 +20,14 @@ type Deps struct {
 	OIDCClient authn.OIDCProvider // nil = OIDC disabled
 	Cfg        authn.Config
 	Secure     bool // prod layer: Secure cookies
+	// Audit receives the auth audit entries (signup, login success/
+	// failure, logout — T0110). Optional: nil disables auth auditing.
+	Audit authn.AuditRecorder
 }
 
 // New wires the service and its routes.
 func New(deps Deps) *API {
-	svc := authn.NewService(deps.Users, deps.Sessions, deps.Limiter, deps.OIDCClient, deps.Cfg)
+	svc := authn.NewService(deps.Users, deps.Sessions, deps.Limiter, deps.OIDCClient, deps.Audit, deps.Cfg)
 	return &API{
 		handlers: &handlers{
 			svc:    svc,
