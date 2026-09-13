@@ -389,7 +389,7 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 	}
 
 	// 8) Record the registry fact (status running; exit info merged later).
-	startedAt := time.Now().UTC().Format(time.RFC3339)
+	startedAt := runStartedAt()
 	startTime, err := procStartTime(workerPID)
 	if err != nil {
 		killWorker(workerPID)

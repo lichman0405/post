@@ -237,6 +237,29 @@ func nowRFC3339() string {
 	return time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
 }
 
+// runStartedAtFrom renders the moment a run begins: the same fixed-width
+// RFC 3339 shape as the other record times, at nanoseconds rather than
+// milliseconds.
+//
+// A record's `at` only has to order records; a run's start has to order events
+// inside the run. Review collect refuses a verdict file written before the run
+// being collected started — the check that keeps an earlier attempt's verdict
+// from being recorded as this run's — by comparing the file's mtime with this
+// value. A start recorded to the second (time.RFC3339, what spawn used) cannot
+// answer that question: on a fast machine an attempt's verdict and the next
+// attempt's start fall in the same second, and the earlier verdict's mtime —
+// replayed with its original mtime intact — reads as 44.500 against a start
+// rendered "…:44Z" i.e. 44.000, so `Before` says no and the stale verdict is
+// accepted. The rejection-retry e2e caught exactly that in CI, where the whole
+// attempt sequence runs inside one second.
+func runStartedAtFrom(t time.Time) string {
+	return t.UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
+}
+
+// runStartedAt is the clock reading spawn records as a Worker's or Reviewer's
+// start.
+func runStartedAt() string { return runStartedAtFrom(time.Now()) }
+
 // SortedRecordNames lists all record files of the given type, oldest first,
 // for evidence listing (`rddev gate records`).
 func SortedRecordNames(repoRoot, taskID, recordType string) ([]string, error) {
