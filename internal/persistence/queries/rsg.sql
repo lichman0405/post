@@ -37,3 +37,42 @@ RETURNING *;
 SELECT * FROM state_commits
 WHERE branch_id = @branch_id
 ORDER BY created_at, id;
+
+-- name: GetStateCommitByID :one
+SELECT * FROM state_commits WHERE id = @id;
+
+-- UpdateBranchBaseState is the branch head compare-and-swap behind
+-- CommitState (T0204): the head pointer advances to the new state only
+-- while it still equals the base the commit was built on, so the branch
+-- chain stays linear and concurrent commits serialize into one winner and
+-- stable BRANCH_STATE_CONFLICT losers. project_id is part of the guard: a
+-- branch of another project never matches, and the caller-side read after
+-- zero rows reports the same "not found" outcome for it (never leak
+-- another project's entity existence).
+-- name: UpdateBranchBaseState :one
+UPDATE branches
+SET base_state_id = @base_state_id
+WHERE id = @id
+  AND project_id = @project_id
+  AND base_state_id IS NOT DISTINCT FROM @expected_base_state_id
+RETURNING *;
+
+-- name: ListProjectStatesByBranch :many
+SELECT * FROM project_states
+WHERE branch_id = @branch_id
+ORDER BY created_at, id;
+
+-- The state snapshot projections (docs/21 §5, docs/07 §7): a state's
+-- direct members are the version rows whose state_id equals it — the
+-- transition each row was created in. Rebuildable from the canonical
+-- history by construction.
+
+-- name: ListStateObjectVersionsByState :many
+SELECT * FROM scientific_object_versions
+WHERE state_id = @state_id
+ORDER BY created_at, id;
+
+-- name: ListStateRelationVersionsByState :many
+SELECT * FROM relation_versions
+WHERE state_id = @state_id
+ORDER BY created_at, id;

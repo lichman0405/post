@@ -208,6 +208,28 @@ func (q *Queries) GetProjectStateByID(ctx context.Context, id pgtype.UUID) (Proj
 	return i, err
 }
 
+const getStateCommitByID = `-- name: GetStateCommitByID :one
+SELECT id, project_id, branch_id, base_state_id, result_state_id, actor_id, via, message, operation_summary, created_at FROM state_commits WHERE id = $1
+`
+
+func (q *Queries) GetStateCommitByID(ctx context.Context, id pgtype.UUID) (StateCommit, error) {
+	row := q.db.QueryRow(ctx, getStateCommitByID, id)
+	var i StateCommit
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.BranchID,
+		&i.BaseStateID,
+		&i.ResultStateID,
+		&i.ActorID,
+		&i.Via,
+		&i.Message,
+		&i.OperationSummary,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listBranchesByProject = `-- name: ListBranchesByProject :many
 SELECT id, project_id, name, visibility, purpose, git_ref, base_state_id, lifecycle_state, created_by, created_at FROM branches
 WHERE project_id = $1
@@ -233,6 +255,41 @@ func (q *Queries) ListBranchesByProject(ctx context.Context, projectID pgtype.UU
 			&i.BaseStateID,
 			&i.LifecycleState,
 			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectStatesByBranch = `-- name: ListProjectStatesByBranch :many
+SELECT id, project_id, branch_id, parent_state_id, state_hash, git_commit_sha, manifest_version, created_at FROM project_states
+WHERE branch_id = $1
+ORDER BY created_at, id
+`
+
+func (q *Queries) ListProjectStatesByBranch(ctx context.Context, branchID pgtype.UUID) ([]ProjectState, error) {
+	rows, err := q.db.Query(ctx, listProjectStatesByBranch, branchID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ProjectState
+	for rows.Next() {
+		var i ProjectState
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.BranchID,
+			&i.ParentStateID,
+			&i.StateHash,
+			&i.GitCommitSha,
+			&i.ManifestVersion,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -280,4 +337,135 @@ func (q *Queries) ListStateCommitsByBranch(ctx context.Context, branchID pgtype.
 		return nil, err
 	}
 	return items, nil
+}
+
+const listStateObjectVersionsByState = `-- name: ListStateObjectVersionsByState :many
+
+SELECT id, object_id, version_no, state_id, branch_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by, created_at FROM scientific_object_versions
+WHERE state_id = $1
+ORDER BY created_at, id
+`
+
+// The state snapshot projections (docs/21 §5, docs/07 §7): a state's
+// direct members are the version rows whose state_id equals it — the
+// transition each row was created in. Rebuildable from the canonical
+// history by construction.
+func (q *Queries) ListStateObjectVersionsByState(ctx context.Context, stateID pgtype.UUID) ([]ScientificObjectVersion, error) {
+	rows, err := q.db.Query(ctx, listStateObjectVersionsByState, stateID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ScientificObjectVersion
+	for rows.Next() {
+		var i ScientificObjectVersion
+		if err := rows.Scan(
+			&i.ID,
+			&i.ObjectID,
+			&i.VersionNo,
+			&i.StateID,
+			&i.BranchID,
+			&i.SchemaID,
+			&i.SchemaVersion,
+			&i.Title,
+			&i.LifecycleState,
+			&i.Payload,
+			&i.VisibilityPolicyID,
+			&i.IntegrityHash,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStateRelationVersionsByState = `-- name: ListStateRelationVersionsByState :many
+SELECT id, relation_id, version_no, state_id, relation_type, source_object_version_id, target_object_version_id, payload, integrity_hash, created_by, created_at FROM relation_versions
+WHERE state_id = $1
+ORDER BY created_at, id
+`
+
+func (q *Queries) ListStateRelationVersionsByState(ctx context.Context, stateID pgtype.UUID) ([]RelationVersion, error) {
+	rows, err := q.db.Query(ctx, listStateRelationVersionsByState, stateID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RelationVersion
+	for rows.Next() {
+		var i RelationVersion
+		if err := rows.Scan(
+			&i.ID,
+			&i.RelationID,
+			&i.VersionNo,
+			&i.StateID,
+			&i.RelationType,
+			&i.SourceObjectVersionID,
+			&i.TargetObjectVersionID,
+			&i.Payload,
+			&i.IntegrityHash,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateBranchBaseState = `-- name: UpdateBranchBaseState :one
+UPDATE branches
+SET base_state_id = $1
+WHERE id = $2
+  AND project_id = $3
+  AND base_state_id IS NOT DISTINCT FROM $4
+RETURNING id, project_id, name, visibility, purpose, git_ref, base_state_id, lifecycle_state, created_by, created_at
+`
+
+type UpdateBranchBaseStateParams struct {
+	BaseStateID         pgtype.UUID `json:"base_state_id"`
+	ID                  pgtype.UUID `json:"id"`
+	ProjectID           pgtype.UUID `json:"project_id"`
+	ExpectedBaseStateID pgtype.UUID `json:"expected_base_state_id"`
+}
+
+// UpdateBranchBaseState is the branch head compare-and-swap behind
+// CommitState (T0204): the head pointer advances to the new state only
+// while it still equals the base the commit was built on, so the branch
+// chain stays linear and concurrent commits serialize into one winner and
+// stable BRANCH_STATE_CONFLICT losers. project_id is part of the guard: a
+// branch of another project never matches, and the caller-side read after
+// zero rows reports the same "not found" outcome for it (never leak
+// another project's entity existence).
+func (q *Queries) UpdateBranchBaseState(ctx context.Context, arg UpdateBranchBaseStateParams) (Branch, error) {
+	row := q.db.QueryRow(ctx, updateBranchBaseState,
+		arg.BaseStateID,
+		arg.ID,
+		arg.ProjectID,
+		arg.ExpectedBaseStateID,
+	)
+	var i Branch
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Visibility,
+		&i.Purpose,
+		&i.GitRef,
+		&i.BaseStateID,
+		&i.LifecycleState,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
 }

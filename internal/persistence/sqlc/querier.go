@@ -115,6 +115,7 @@ type Querier interface {
 	GetScientificObjectByID(ctx context.Context, id pgtype.UUID) (ScientificObject, error)
 	GetScientificObjectVersionByID(ctx context.Context, id pgtype.UUID) (ScientificObjectVersion, error)
 	GetScientificObjectVersionByNo(ctx context.Context, arg GetScientificObjectVersionByNoParams) (ScientificObjectVersion, error)
+	GetStateCommitByID(ctx context.Context, id pgtype.UUID) (StateCommit, error)
 	GetUserByEmail(ctx context.Context, email *string) (User, error)
 	GetUserByHandle(ctx context.Context, handle string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
@@ -134,6 +135,7 @@ type Querier interface {
 	// (occurred_at, id): a nil before pair means "from the top".
 	ListProjectAuditEntries(ctx context.Context, arg ListProjectAuditEntriesParams) ([]ListProjectAuditEntriesRow, error)
 	ListProjectMembers(ctx context.Context, projectID pgtype.UUID) ([]ListProjectMembersRow, error)
+	ListProjectStatesByBranch(ctx context.Context, branchID pgtype.UUID) ([]ProjectState, error)
 	ListProjectsByOrganization(ctx context.Context, arg ListProjectsByOrganizationParams) ([]Project, error)
 	// Projects the user belongs to (any project membership), most recently
 	// created first.
@@ -153,6 +155,12 @@ type Querier interface {
 	ListRelationVersionsByTypes(ctx context.Context, arg ListRelationVersionsByTypesParams) ([]RelationVersion, error)
 	ListScientificObjectVersions(ctx context.Context, objectID pgtype.UUID) ([]ScientificObjectVersion, error)
 	ListStateCommitsByBranch(ctx context.Context, branchID pgtype.UUID) ([]StateCommit, error)
+	// The state snapshot projections (docs/21 §5, docs/07 §7): a state's
+	// direct members are the version rows whose state_id equals it — the
+	// transition each row was created in. Rebuildable from the canonical
+	// history by construction.
+	ListStateObjectVersionsByState(ctx context.Context, stateID pgtype.UUID) ([]ScientificObjectVersion, error)
+	ListStateRelationVersionsByState(ctx context.Context, stateID pgtype.UUID) ([]RelationVersion, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
 	MarkBlobIntegrity(ctx context.Context, arg MarkBlobIntegrityParams) error
 	MarkOutboxEventPublished(ctx context.Context, id pgtype.UUID) error
@@ -182,6 +190,15 @@ type Querier interface {
 	// filtering on every query, search, export and download. Master Gate E ("Search
 	// 无 private leakage") holds this invariant too.
 	SearchDocuments(ctx context.Context, arg SearchDocumentsParams) ([]SearchDocumentsRow, error)
+	// UpdateBranchBaseState is the branch head compare-and-swap behind
+	// CommitState (T0204): the head pointer advances to the new state only
+	// while it still equals the base the commit was built on, so the branch
+	// chain stays linear and concurrent commits serialize into one winner and
+	// stable BRANCH_STATE_CONFLICT losers. project_id is part of the guard: a
+	// branch of another project never matches, and the caller-side read after
+	// zero rows reports the same "not found" outcome for it (never leak
+	// another project's entity existence).
+	UpdateBranchBaseState(ctx context.Context, arg UpdateBranchBaseStateParams) (Branch, error)
 	UpdateOrganization(ctx context.Context, arg UpdateOrganizationParams) (Organization, error)
 	// Adjusts role/affiliation_start/verified. affiliation_end is deliberately
 	// NOT a column of this statement: it is written exclusively by
