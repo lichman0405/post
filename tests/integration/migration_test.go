@@ -460,6 +460,21 @@ var canonicalTables = map[string]tableExp{
 		pk:   []string{"entity_ref"},
 		fks:  []fkExp{fk("project_id", "projects", "RESTRICT")},
 	},
+	"provenance_edges": {
+		// T0505 (00043): the rebuildable provenance graph projection — one
+		// row per provenance-category relation version with both endpoint
+		// labels resolved. created_at deliberately has no default: the
+		// trigger and the rebuild copy the relation version's timestamp
+		// (the projection's row is born the moment its source row is).
+		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("relation_id", u, false, false), c("relation_version_id", u, false, false), c("relation_type", txt, false, false), c("source_object_id", u, false, false), c("source_object_version_id", u, false, false), c("source_object_type", txt, false, false), c("source_title", txt, false, false), c("source_version_no", i4, false, false), c("target_object_id", u, false, false), c("target_object_version_id", u, false, false), c("target_object_type", txt, false, false), c("target_title", txt, false, false), c("target_version_no", i4, false, false), c("created_by", u, false, false), c("created_at", ts, false, false)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"relation_version_id"}},
+		// T0505 (00043): the membership invariant the table itself
+		// enforces — relation_type must be a provenance type (the same
+		// IMMUTABLE list the trigger and the rebuild consult).
+		checks: []string{"relation_type = ANY"},
+		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("relation_id", "relations", "RESTRICT"), fk("relation_version_id", "relation_versions", "RESTRICT"), fk("source_object_id", "scientific_objects", "RESTRICT"), fk("source_object_version_id", "scientific_object_versions", "RESTRICT"), fk("target_object_id", "scientific_objects", "RESTRICT"), fk("target_object_version_id", "scientific_object_versions", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
+	},
 }
 
 // gooseTable is the only non-canonical table the runner may create.
@@ -516,12 +531,17 @@ var explicitIndexes = map[string][]string{
 	// T0502: claim projection query paths (00041) — by object, by type,
 	// by subject (partial: only rows that name one), and GIN over the
 	// normalized scope conditions and the declared bases.
+	// T0505: the provenance projection's read paths (00043) — the
+	// whole-project graph scan and the per-endpoint lineage walks.
 	"project_schema_profiles_project_idx": {"project_id", "schema_id", "created_at"},
 	"claims_object_idx":                   {"object_id"},
 	"claims_type_idx":                     {"claim_type"},
 	"claims_subject_idx":                  {"subject_ref", "WHERE"},
 	"claims_scope_conditions_gin":         {"USING gin", "scope_conditions"},
 	"claims_basis_gin":                    {"USING gin", "basis"},
+	"provenance_edges_project_idx":        {"project_id", "relation_type"},
+	"provenance_edges_source_version_idx": {"source_object_version_id"},
+	"provenance_edges_target_version_idx": {"target_object_version_id"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
