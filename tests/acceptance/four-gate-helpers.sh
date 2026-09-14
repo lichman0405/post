@@ -49,8 +49,11 @@ fg_build() { # fg_build WORK — build rddev into $WORK/bin/rddev
 # fg_fake_claude PATH BODY_FILE — write a fake claude script. The wrapper
 # handles --version, records the --session-id it is dispatched with
 # (session-ids.txt in the result dir, one line per dispatch — rework must
-# append the SAME id, respawn a DIFFERENT one), and then runs BODY_FILE with
-# env POST_WORKER_TASK_ID / POST_WORKER_WORKTREE / POST_WORKER_RESULT_DIR set.
+# append the SAME id, respawn a DIFFERENT one), waits until the spawn has
+# finished recording THIS run's process identity (see the wait below — a fake
+# that exits first is refused as an unverifiable Worker), and then runs
+# BODY_FILE with env POST_WORKER_TASK_ID / POST_WORKER_WORKTREE /
+# POST_WORKER_RESULT_DIR set.
 fg_fake_claude() {
   local path="$1" body="$2"
   cat > "$path" <<'EOF'
@@ -75,6 +78,25 @@ printf '%s\n' "$RESUME_ID" >> "$POST_WORKER_RESULT_DIR/resumed-ids.txt"
 HAS_REJ=0
 case "$ALL_ARGS" in *REJECTED*) HAS_REJ=1;; esac
 export FG_SESSION_ID="$SESSION_ID" FG_RESUME_ID="$RESUME_ID" FG_PROMPT_HAS_REJECTION="$HAS_REJ"
+# A Worker is a live process to rddev: spawn reads its /proc entry (environment,
+# start time) and records its pid the moment it has started it. A fake that
+# finishes and exits before those reads lands loses that race, and rddev then
+# refuses the spawn ("reading /proc/<pid>/environ: no such file or directory:
+# spawn aborted") — a red gate that says nothing about the behaviour under
+# test. Observed exactly that in CI (PR #196's acceptance job): the review
+# spawn at attempt 4 lost a race a ~2s stall had opened. Real claude is a
+# seconds-long process; the fake has to be at least as observable as the thing
+# it stands in for. So it waits for spawn's own last step to appear — the
+# authoritative gate inputs gain this run's non-zero pid only after the
+# post-spawn assertions have passed. (The previous attempt's pid is gone from
+# that file by now: spawn rewrites it before it starts anything.)
+gi="$POST_REPO_ROOT/.rddev/runtime/tasks/$POST_WORKER_TASK_ID/gate-inputs.json"
+tries=0
+while [ "$tries" -lt 600 ]; do
+  if [ -f "$gi" ] && grep -qE '"pid": [1-9][0-9]*' "$gi" 2>/dev/null; then break; fi
+  sleep 0.05
+  tries=$((tries+1))
+done
 EOF
   cat >> "$path" <<EOF
 exec bash "$body"

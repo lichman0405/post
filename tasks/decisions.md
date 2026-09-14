@@ -7982,3 +7982,50 @@ T1006（Signed Webhooks，迁移 `00059`）交付的 diff 是**对的**，collec
 4. rework 会按 DAG **重渲染** gate-inputs 与两份 task-package，所以补的那一格 `internal/persistence/sqlc/**`
    在渲染后**又消失过一次**——已在渲染后立即重新补上（权威记录 + 两份字节一致的任务包，md5 `51dde759`），
    与 L1-89 同一条处置；DAG 那一格仍留到下次 DAG 编辑。
+
+## L1-20260915-92 —— PR #196 那道 CI 红不是"flake"：两个真缺陷，都修在工具面
+
+**症状**：PR #196（T0606）run 34875631200 的 `acceptance` 作业 40 秒红，其余作业全绿。红的两条原文：
+
+> `FAIL review spawn T0003 (attempt 4): want [0], got [1]`
+> `FAIL review collect T0003 (attempt 4): want [0], got [1]`
+
+**不接受"flake"这个结论**——先复现。CI 日志只印标签、不印子命令的输出（`fg_fail` 只打 label，
+transcript 在一个已被删掉的临时目录里），所以先把 harness 复制一份并给 `fg_fail` 加一份错误转储，
+把 CI 从来看不见的那行原文取出来；再写探针 `spawn-race-probe.sh`：用**秒退的假 Reviewer**
+对着 `rddev review spawn` 连打 720 次。
+
+**缺陷一（真因）——post-spawn 的 `/proc` 读与子进程退出赛跑**。
+`worker_spawn.go:388-412` 在 `cmd.Start()` 之后才去读 `/proc/<pid>/environ`、`procStartTime`、
+会话首进程的 environ，做 `assertCleanWorkerEnv`；**子进程若在读之前就退出，这几读全失败，spawn 立刻
+fail-closed**（"spawn aborted and the Reviewer killed"）。真 claude 是秒级进程，e2e 里的假 claude 毫秒级——
+CI 那台机器上 attempt 4 前有 ~2.27 秒的停顿（transcript 时间戳差），窗口一开就中。探针结果：
+**720 次里 9 次红**，错误原文正是
+`review post-spawn environment assertion: reading /proc/<pid>/environ: open /proc/<pid>/environ: no such file or directory`。
+
+**修法（测试面，不动机制）**：`four-gate-helpers.sh` 的假 claude 在跑自己的 body 之前，
+**等 spawn 的最后一步落盘**——`gate-inputs.json` 里出现**本轮的非零 pid**（那个字段是 spawn 过了 post-spawn
+断言之后才写的；上一轮的 pid 在 spawn 重写它之前就已不在）。**假 claude 必须至少和它顶替的真身一样
+可被观测**。机制本身的 fail-closed **一个字没动**：那是它该有的行为，不是要绕开的东西。
+
+**缺陷二（验证时撞见的另一个真 bug，不是这次的 CI 因）**：`gate_run.go` 把任务的改动写成补丁时用了
+**共享固定路径** `/tmp/post-integration-<taskID>.patch`，又 `defer os.Remove`。两个调用同时给**同一个
+task id** 评分（一次 drain 加一次 driver，或同一台机上两次 acceptance）就会互相踩：先写的那份被后者
+删掉，后 apply 的那个读到
+`git apply /tmp/post-integration-T0001.patch: can't open patch: No such file or directory`。
+本地 10 并发跑出 3 次。**修法**：`os.CreateTemp(os.TempDir(), "post-integration-<taskID>-*.patch")`
+（名字保留 task id，报错仍可读），显式处理 write/close 的错误，`defer os.Remove` 照旧。
+CI 的 acceptance 是同一台 runner 上**顺序**跑这几个脚本，所以这条不是 #196 的因——但它是真的。
+
+**证据**：修完两个之后，`rejection-retry-e2e.sh` **16 路并发 16/16 全绿**（修之前 10 并发 3 红、12 并发 4 红）；
+main 上 `make fmt-check` / `go vet ./...` / `make staticcheck` / 四个 acceptance 脚本 / gitea guard 单测全绿。
+
+**26（新欠账，工具面）**：Worker **秒死**时，spawn 报的是"post-spawn environment assertion"，
+读起来像"环境不干净"，实际情形是"**它还来不及被观测就没了**"。两件事共用一个报错。
+owner：下次改 `rddev` 的 spawn 时，把这两条分开报（例如"Worker exited before it could be observed"）。
+**不给它加自动重试**——重试掩盖的是调度层的问题，不是这一条。
+
+**与 L1-89 的同一口径**：`specs/orchestrator/derived-artifacts.json` 要求"谁改了 `infra/migrations/**`
+就得连生成物一起重新生成"，而任务包的 `allowed_scope` **可能没给生成物那一格**（T1006 这一轮就是）——
+两句话自相矛盾。T1006 这一次仍按 L1-89/L1-91 的老办法在**渲染后补记录**过关；
+**根治**是把 `internal/persistence/sqlc/**` 写进 `tasks/tasks.json` 的 T1006 条目（下次 DAG 编辑时做）。
