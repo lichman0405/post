@@ -73,10 +73,25 @@ rddev workflow TASK resumes an interrupted Supervisor session from disk alone.
 
 Exit codes: 0 ok · 1 operational failure · 2 usage error · 3 doctor usage
 error · 4 not implemented (subsystem belongs to a later task).
+
+A grading command (task, worker, review, gate, git, pr, rebaseline, refs, drive,
+workflow) refuses to run when main has changed the orchestrator's own source since
+this binary was built — a Gate must not grade from a tool older than the rules it
+enforces (#135). Rebuild with "make rddev"; set RDDEV_ALLOW_STALE_BINARY=1 to run
+an older build on purpose. git and pr are checked one step later, after the
+four-gate assertion rather than before it, so that a red gate still refuses
+without git or gh being invoked at all.
 `
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	args := os.Args[1:]
+	// Before anything else: a grading command must not run from a binary older
+	// than the rules it enforces (#135). The check is on the process rather than
+	// in run, so the test suite is unaffected by the git state of the checkout.
+	if code, refused := guardAgainstStaleBinary(args, os.Stderr); refused {
+		os.Exit(code)
+	}
+	os.Exit(run(args, os.Stdout, os.Stderr))
 }
 
 // run executes the CLI against the given streams and returns the process

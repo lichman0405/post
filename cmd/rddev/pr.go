@@ -88,6 +88,9 @@ func runPR(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		PRBody:    vals["--body"],
 		DagPath:   stringOr(vals["--tasks-json"], devorchestrator.DefaultDAGPath),
 		StatePath: stringOr(vals["--state-json"], devorchestrator.DefaultStatePath),
+		// Checked after the four-gate assertion, not before it: the refusal
+		// above must stay decidable from disk alone (#135).
+		FreshnessCheck: freshnessCheck(repoRoot),
 	}
 	res, err := devorchestrator.RunGitControl(opts, action)
 	if err != nil {
@@ -96,6 +99,10 @@ func runPR(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 			for _, r := range refusal.Reasons {
 				fmt.Fprintf(stderr, "  - %s\n", r)
 			}
+			return exitOperational
+		}
+		if stale, ok := err.(*staleRefusal); ok {
+			fmt.Fprintf(stderr, "rddev pr %s: REFUSED — %s\n", cmd, stale.reason)
 			return exitOperational
 		}
 		return operationalError(stderr, "rddev pr "+cmd, err)

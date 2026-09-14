@@ -1,10 +1,12 @@
 package projectshttp
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/authz"
+	"github.com/lichman0405/post/internal/worker"
 )
 
 // The project API wiring: the store adapter and the organization gate go
@@ -26,12 +28,24 @@ type Deps struct {
 	// check — hiding a control in a client never substitutes for it).
 	// Production composes authz.NewMatrixEngine().
 	Authz authz.Engine
+	// ProvisionJobs is the T0301 provisioning-job sink: a successful
+	// create enqueues one project-provision job for the new project (the
+	// consuming loop lives in cmd/api/main.go). Optional: nil (unit
+	// tests) disables the enqueue — the project row stays the source of
+	// truth (provision_status='pending') and the API's startup sweep
+	// back-fills anything a missing queue skipped.
+	ProvisionJobs JobSink
+}
+
+// JobSink is the slice of the job queue the create path needs.
+type JobSink interface {
+	Enqueue(ctx context.Context, job worker.Job) error
 }
 
 // New wires the service.
 func New(deps Deps) *API {
 	return &API{
-		handlers: &handlers{svc: projects.NewService(deps.Store, deps.Orgs, deps.Authz)},
+		handlers: &handlers{svc: projects.NewService(deps.Store, deps.Orgs, deps.Authz), jobs: deps.ProvisionJobs},
 	}
 }
 

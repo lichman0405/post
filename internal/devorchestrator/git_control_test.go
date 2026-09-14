@@ -1,6 +1,7 @@
 package devorchestrator
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,6 +67,55 @@ func TestGitControlRefusesRedGateBeforeAnyInvocation(t *testing.T) {
 	if len(data) != 0 {
 		t.Fatalf("git/gh was invoked despite the red gate:\n%s", data)
 	}
+}
+
+// The freshness check's POSITION is the whole point of it: after the four-gate
+// assertion, so a red gate still refuses without git being invoked; before the
+// action, so a stale binary refuses without git or gh being invoked either.
+// Both halves are asserted, because either one alone is satisfied by a design
+// that breaks the other — and the first half is what the acceptance e2e caught
+// when the check sat at process start (#135, PR #147).
+func TestTheFreshnessCheckRunsAfterTheGateAssertionAndBeforeTheAction(t *testing.T) {
+	t.Run("a red gate never reaches the freshness check", func(t *testing.T) {
+		// The check answers its question BY INVOKING GIT. Running it before the
+		// assertion would put a git call in front of the refusal that promises
+		// "git was never invoked" and quietly retire that promise.
+		repoRoot, specPath := writeGateSpec(t, miniGateSpec)
+		_, marker := fakeGitBin(t)
+		ran := false
+		_, err := RunGitControl(&GitControlOpts{
+			RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001",
+			FreshnessCheck: func() error { ran = true; return nil },
+		}, "commit")
+		if _, ok := err.(*GateRefusalError); !ok {
+			t.Fatalf("error = %v, want GateRefusalError", err)
+		}
+		if ran {
+			t.Error("the freshness check ran on a red gate")
+		}
+		if data, _ := os.ReadFile(marker); len(data) != 0 {
+			t.Errorf("git/gh was invoked despite the red gate:\n%s", data)
+		}
+	})
+
+	t.Run("a stale binary refuses without touching the control plane", func(t *testing.T) {
+		// The affirmative half: on a GREEN gate the check is consulted, and what
+		// it refuses costs nothing — the fake git/gh marker proves the action
+		// never ran. A check placed after the dispatch would invoke git first.
+		repoRoot, specPath := mergeGateFixture(t)
+		_, marker := fakeGitBin(t)
+		stale := errors.New("this rddev was built from a commit main has moved past")
+		_, err := RunGitControl(&GitControlOpts{
+			RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001",
+			FreshnessCheck: func() error { return stale },
+		}, "commit")
+		if err != stale {
+			t.Fatalf("error = %v, want the freshness check's own error", err)
+		}
+		if data, _ := os.ReadFile(marker); len(data) != 0 {
+			t.Errorf("a refused stale binary still invoked the control plane:\n%s", data)
+		}
+	})
 }
 
 // TestGitControlCommitOnGreenGate: the legitimate neighbour — with green
@@ -206,6 +256,85 @@ func TestWorktreeDiffIncludesUntrackedFiles(t *testing.T) {
 	}
 }
 
+// A diff IS a patch, and a patch's trailing whitespace is part of it: `git diff`
+// writes an empty context line as a single space, and the last line of a diff is
+// often one. The trim every other gitOutput caller wants deleted that space, and
+// the final hunk was then one line short of the count in its own @@ header — so
+// `git apply` called the whole patch corrupt and G2 never ran, for a task whose
+// only real problem was being behind main.
+//
+// The assertion is the one the gate makes: apply it, into a tree at the baseline
+// the way prepareIntegrationTree does. Checking for the trailing space is not
+// enough on its own — a diff can keep its bytes and still be unappliable — so
+// this test also fails if the fixture stops ending on a blank context line,
+// which would quietly retire the case.
+func TestWorktreeDiffEndsOnABlankContextLineApplies(t *testing.T) {
+	dir := t.TempDir()
+	runGitIn := func(where string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = where
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, where, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGitIn(dir, "init", "-q")
+	// The file ends on a blank line, so the hunk that edits its first line ends
+	// with a context line that is empty — which git renders as " ".
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("line1\nline2\n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(dir, "add", "-A")
+	runGitIn(dir, "commit", "-q", "-m", "baseline")
+	baseline := runGitIn(dir, "rev-parse", "HEAD")
+
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("LINE1\nline2\n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := taskWorktreeDiff(&WorkerRecord{Worktree: dir, BaselineSHA: baseline})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A tree at the baseline, as prepareIntegrationTree builds one from main.
+	other := t.TempDir()
+	runGitIn(other, "clone", "-q", dir, ".")
+	patch := filepath.Join(t.TempDir(), "change.patch")
+	if err := os.WriteFile(patch, []byte(diff), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", other, "apply", patch).CombinedOutput(); err != nil {
+		t.Fatalf("git apply rejected the diff the integration tree is built from: %v\n%s", err, out)
+	}
+	after, err := os.ReadFile(filepath.Join(other, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != "LINE1\nline2\n\n" {
+		t.Errorf("the patch applied but produced %q, want the Worker's content", after)
+	}
+
+	// Last, so that a diff which no longer exercises the case fails the apply
+	// above rather than being silently retired here.
+	if !strings.HasSuffix(diff, "\n \n") {
+		t.Fatalf("the fixture no longer ends on a blank context line, so this test would not have exercised the case it exists for; the diff ends %q", tail(diff, 20))
+	}
+}
+
+// tail is the last n bytes of s, for an error message that has to show why a
+// prefix/suffix assertion failed without dumping a whole diff.
+func tail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[len(s)-n:]
+}
+
 // The untracked paths come from the Worker's own tree, so following a symlink
 // would let the Worker make the SUPERVISOR read an arbitrary file and embed it
 // in the review input — a durable artifact. Lstat, never Stat: a symlink is
@@ -293,6 +422,246 @@ func TestMergeRefusesWhileThePRChecksAreRed(t *testing.T) {
 	}
 }
 
+// The other half of the same refusal, and the one that actually happened.
+// `gh pr checks` exits 1 both when a check ran and failed and when no check has
+// run at all — a PR pushed one second ago — and it says which only on stderr,
+// with nothing on stdout. A runner that keeps stdout and drops the rest reports
+// both as `exit status 1`, and the caller cannot tell a WAIT from a DECISION:
+// stepAccepted retries while the text says "no checks reported" and escalates
+// on everything else, so flattening the reason escalated a PR whose CI had not
+// started yet, as "merge failed — needs the Supervisor".
+//
+// So the assertion is deliberately about the text and not only the refusal. The
+// substring is the contract between this function and the driver's retry.
+func TestMergeRefusesWhileThePRHasNoChecksYetAndStillSaysWhy(t *testing.T) {
+	repoRoot, specPath := mergeGateFixture(t) // green collect + green G2 on disk
+	binDir := t.TempDir()
+	marker := filepath.Join(binDir, "invocations.log")
+	// gh's own wording, taken from the binary, on stderr; stdout stays empty.
+	script := "#!/bin/sh\necho \"$0 $*\" >> \"$FAKE_INVOCATIONS\"\n" +
+		"case \"$1 $2\" in\n" +
+		"  \"pr checks\") echo \"no checks reported on the 'task/T0001-x' branch\" >&2; exit 1;;\n" +
+		"  \"pr merge\") echo MERGED;;\n" +
+		"esac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeWorktreeRecord(t, repoRoot)
+	if err := os.WriteFile(marker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_INVOCATIONS", marker)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	_, err := MergePR(&GitControlOpts{RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001"})
+	if err == nil {
+		t.Fatal("pr merge proceeded on a branch whose checks GitHub had never reported")
+	}
+	if !strings.Contains(err.Error(), "no checks reported") {
+		t.Errorf("the refusal did not carry gh's reason, so no caller can tell a wait from a failure:\n  %v", err)
+	}
+	if invoked, _ := os.ReadFile(marker); strings.Contains(string(invoked), "pr merge") {
+		t.Errorf("gh pr merge was invoked with no check ever reported:\n%s", invoked)
+	}
+}
+
+// A refusal has to say WHICH of two things happened, because the driver acts on
+// the difference: stepAccepted retries a "not yet" and escalates everything
+// else. Before this, every non-SUCCESS state produced the same sentence, and
+// that sentence was the one the driver retries on — so a required check that
+// had finished FAILURE was retried on every tick forever. The task never
+// finished and never asked, which is the outcome §8.2 forbids; the local gate
+// was green, so nothing else interceded.
+//
+// So the assertion is not "it refused" — it always did — but "which of the two
+// it said", asked through ciStillRunning, the same predicate the driver uses
+// rather than a copy of its logic. The test also pins that the two sentences do
+// not overlap, so reverting the classification cannot pass by accident: with a
+// single sentence for both, one of the two branches below has to fail.
+func TestAMergeRefusalSaysWaitOrDecisionAndNeverBoth(t *testing.T) {
+	cases := []struct {
+		state string
+		wait  bool
+		why   string
+	}{
+		{"SUCCESS", false, "green — no refusal at all"},
+		{"PENDING", true, "still running: a wait"},
+		{"QUEUED", true, "not started yet: a wait"},
+		{"IN_PROGRESS", true, "still running: a wait"},
+		{"WAITING", true, "held by an environment or concurrency gate: still running, a wait"},
+		{"REQUESTED", true, "requested but not started: a wait"},
+		{"EXPECTED", true, "required but not posted yet: a wait"},
+		{"FAILURE", false, "finished red: a decision — this is #139"},
+		{"ERROR", false, "finished red: a decision"},
+		{"CANCELLED", false, "terminal: a decision"},
+		{"TIMED_OUT", false, "terminal: a decision"},
+		{"STARTUP_FAILURE", false, "terminal: a decision"},
+		{"ACTION_REQUIRED", false, "terminal: a decision"},
+		{"STALE", false, "terminal: a decision"},
+		{"SKIPPED", false, "not green — the standard is not widened here"},
+		{"NEUTRAL", false, "not green — the standard is not widened here"},
+		{"A_STATE_GITHUB_ADDS_LATER", false, "unknown falls to a decision, never a silent loop"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.state, func(t *testing.T) {
+			// The unit under test needs no gate fixture: it asks gh and
+			// classifies the answer. MergePR's plumbing to the driver is pinned
+			// by TestMergeRefusesWhileThePRChecksAreRed and its neighbour.
+			binDir := t.TempDir()
+			script := "#!/bin/sh\n" +
+				"case \"$1 $2\" in\n" +
+				"  \"pr checks\") printf '%s' '[{\"name\":\"job-a\",\"state\":\"" + tc.state + "\"},{\"name\":\"job-b\",\"state\":\"SUCCESS\"}]';;\n" +
+				"esac\nexit 0\n"
+			if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			err := assertRequiredChecksGreen(t.TempDir(), "task/T0001-x", []string{"job-a", "job-b"})
+
+			if tc.state == "SUCCESS" {
+				if err != nil {
+					t.Fatalf("every required check is green but the merge refused: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("job-a was %s (%s) and no refusal was produced", tc.state, tc.why)
+			}
+			got := ciStillRunning(err.Error())
+			if got != tc.wait {
+				t.Errorf("job-a is %s (%s), so the driver should treat this as wait=%v, but the refusal said wait=%v:\n  %v",
+					tc.state, tc.why, tc.wait, got, err)
+			}
+			// The vocabulary itself, so one sentence for both cases cannot
+			// satisfy every row above.
+			if tc.wait {
+				if !strings.Contains(err.Error(), checksNotYet) {
+					t.Errorf("a wait did not carry the wait wording:\n  %v", err)
+				}
+				if strings.Contains(err.Error(), checksRed) {
+					t.Errorf("a wait carried the red wording:\n  %v", err)
+				}
+			} else {
+				if !strings.Contains(err.Error(), checksRed) {
+					t.Errorf("a decision did not carry the red wording:\n  %v", err)
+				}
+				if strings.Contains(err.Error(), checksNotYet) {
+					t.Errorf("a decision carried the wait wording, so it will be retried forever:\n  %v", err)
+				}
+			}
+		})
+	}
+}
+
+// gh does not collapse same-named entries, and it lists them newest-first, so
+// the obvious map[name]=state is last-wins and a PENDING entry can overwrite a
+// FAILURE of the same name. That reads a red check as a wait: #139 again, by a
+// road the two-sentence split does not close. The classification must therefore
+// not depend on which entry came last.
+func TestASameNamedEntryCannotHideARedCheck(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+		want string // "green", "wait" or "decision"
+		why  string
+	}{
+		{"a red then a pending, in gh's newest-first order",
+			`[{"name":"job-a","state":"FAILURE"},{"name":"job-a","state":"PENDING"}]`,
+			"decision", "the newer entry is PENDING but the same name already finished red"},
+		{"a pending then a red",
+			`[{"name":"job-a","state":"PENDING"},{"name":"job-a","state":"FAILURE"}]`,
+			"decision", "the red must decide however the entries are ordered"},
+		{"a green then a red",
+			`[{"name":"job-a","state":"SUCCESS"},{"name":"job-a","state":"FAILURE"}]`,
+			"decision", "a later green does not undo a red of the same name"},
+		{"a red then a green",
+			`[{"name":"job-a","state":"FAILURE"},{"name":"job-a","state":"SUCCESS"}]`,
+			"decision", "a green does not undo an earlier red of the same name"},
+		{"a green and a still-running duplicate",
+			`[{"name":"job-a","state":"SUCCESS"},{"name":"job-a","state":"PENDING"}]`,
+			"wait", "nothing finished red, but the name is not settled yet"},
+		{"both green",
+			`[{"name":"job-a","state":"SUCCESS"},{"name":"job-a","state":"SUCCESS"}]`,
+			"green", "both entries green is the only way this name counts as green"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			binDir := t.TempDir()
+			script := "#!/bin/sh\n" +
+				"case \"$1 $2\" in\n" +
+				"  \"pr checks\") printf '%s' '" + tc.json + "';;\n" +
+				"esac\nexit 0\n"
+			if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			err := assertRequiredChecksGreen(t.TempDir(), "task/T0001-x", []string{"job-a"})
+			if tc.want == "green" {
+				if err != nil {
+					t.Fatalf("every entry for job-a is green but the merge refused: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("job-a %s and the merge was allowed (%s)", tc.json, tc.why)
+			}
+			if got := ciStillRunning(err.Error()); got != (tc.want == "wait") {
+				t.Errorf("job-a is %s (%s), so the driver should read this as a %s, but the refusal read as wait=%v:\n  %v",
+					tc.json, tc.why, tc.want, got, err)
+			}
+		})
+	}
+}
+
+// A required check the PR has never reported is the third way to be "not
+// finished", and it is a wait: a PR pushed a second ago has none of them yet.
+func TestARequiredCheckThatWasNeverReportedIsAWait(t *testing.T) {
+	binDir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"case \"$1 $2\" in\n" +
+		"  \"pr checks\") printf '%s' '[{\"name\":\"job-a\",\"state\":\"SUCCESS\"}]';;\n" +
+		"esac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	err := assertRequiredChecksGreen(t.TempDir(), "task/T0001-x", []string{"job-a", "job-b"})
+	if err == nil {
+		t.Fatal("a required check absent from the PR's checks was accepted")
+	}
+	if !ciStillRunning(err.Error()) {
+		t.Errorf("an unreported required check was not treated as a wait:\n  %v", err)
+	}
+	if !strings.Contains(err.Error(), "job-b") {
+		t.Errorf("the refusal does not name the unreported check:\n  %v", err)
+	}
+}
+
+// ciStillRunning is a substring test over two constants, so their disjointness
+// is a real invariant and not a stylistic preference: if either contained the
+// other — or contained gh's "no checks reported" — then one of the two answers
+// would silently become the other, which is exactly the defect.
+func TestTheTwoRefusalsDoNotReadAsEachOther(t *testing.T) {
+	if strings.Contains(checksNotYet, checksRed) || strings.Contains(checksRed, checksNotYet) {
+		t.Fatalf("the wait and the decision read as each other: %q / %q", checksNotYet, checksRed)
+	}
+	for _, s := range []string{checksNotYet, checksRed} {
+		if strings.Contains(s, noChecksReported) {
+			t.Fatalf("%q contains gh's own %q, so ciStillRunning cannot tell them apart", s, noChecksReported)
+		}
+	}
+	// And each input the driver must retry on is sufficient on its own.
+	if !ciStillRunning(checksNotYet) || !ciStillRunning(noChecksReported) {
+		t.Fatal("a wait the driver is supposed to retry was not recognised as one")
+	}
+	if ciStillRunning(checksRed) {
+		t.Fatal("a decision would be retried as though it were a wait — #139 is back")
+	}
+}
+
 // writeWorktreeRecord gives the task a registry entry so loadWorktreeRecord
 // resolves; the merge path needs a branch to name.
 func writeWorktreeRecord(t *testing.T, repoRoot string) {
@@ -363,5 +732,74 @@ func TestWorktreeDiffSurvivesABaselineAdvance(t *testing.T) {
 	}
 	if strings.Contains(diff, "unrelated.txt") {
 		t.Errorf("main's own changes leaked into the review of the task:\n%s", diff)
+	}
+}
+
+// The same string is not only the review input: prepareIntegrationTree writes
+// it out and applies it to build the tree G2 and G3 verify. So the property
+// that has to hold is that APPLYING it reproduces the worktree byte for byte —
+// checking the text for a marker would pass on a patch that still loses a
+// byte. A file that ends at its last byte (every canonical schema does: they
+// end with a closing brace) must not arrive with a newline added, and an empty
+// file must arrive empty rather than as a one-line file, and a file of one
+// blank line must not arrive empty.
+func TestWorktreeDiffReproducesTheWorktreeByteForByte(t *testing.T) {
+	dir := t.TempDir()
+	runGitIn := func(where string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = where
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, where, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGitIn(dir, "init", "-q")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(dir, "add", "-A")
+	runGitIn(dir, "commit", "-q", "-m", "baseline")
+	baseline := runGitIn(dir, "rev-parse", "HEAD")
+
+	files := map[string]string{
+		"tracked.txt":  "after\n",    // modified, newline at the end
+		"no_eol.json":  "{\"a\": 1}", // the shape every specs/schemas file has
+		"empty.txt":    "",
+		"blank.txt":    "\n",
+		"with_eol.txt": "a\nb\n",
+		"one_byte.txt": "x",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	diff, err := taskWorktreeDiff(&WorkerRecord{Worktree: dir, BaselineSHA: baseline})
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied := filepath.Join(t.TempDir(), "applied")
+	runGitIn(dir, "worktree", "add", "-q", "--detach", applied, baseline)
+	patch := filepath.Join(t.TempDir(), "change.patch")
+	if err := os.WriteFile(patch, []byte(diff), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(applied, "apply", patch)
+
+	for name, want := range files {
+		got, err := os.ReadFile(filepath.Join(applied, name))
+		if err != nil {
+			t.Errorf("%s: the patch did not reproduce the file: %v", name, err)
+			continue
+		}
+		if string(got) != want {
+			t.Errorf("%s: applying the diff produced %q, the worktree holds %q — the tree the gate verifies would not be the tree the task produced", name, got, want)
+		}
 	}
 }

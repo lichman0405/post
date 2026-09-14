@@ -2,11 +2,14 @@ package devorchestrator
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/lichman0405/post/internal/config"
 )
 
 // The gate executor (T0012 requirement: "G1/G2/G3/G4 as task metadata and an
@@ -96,6 +99,31 @@ func RunGate(opts *GateRunOpts) (*GateRunResult, error) {
 	// task whose G2 had just passed. The gate belongs in the identity of its
 	// own run.
 	runID = runID + "-" + strings.ToLower(opts.Gate)
+	// G3 grades the local dev stack, and a gate step runs in the integration
+	// tree — a worktree of main holding only what Git tracks. The credentials
+	// that live only in .env.dev are therefore absent, and a job whose script
+	// needs one cannot run at all. See devStackEnv for why G2 must not get
+	// them.
+	extraEnv := opts.JobEnv
+	// No gate inherits the local dev stack from the shell that started it. For a
+	// gate that mirrors CI that is the whole point (CI has no .env.dev, and see
+	// devStackEnv); for G3 it is what makes "the values are read from the
+	// repository's own .env.dev at the moment of the run, not inherited from
+	// whatever shell started the driver" literally true rather than nearly true.
+	//
+	// Nearly was the problem. G3 layered the file's keys on top of the inherited
+	// environment, so a key the file also defined arrived TWICE, and which one
+	// bash used was decided by the last-occurrence rule rather than by any stated
+	// precedence. Removing the inherited copy first leaves exactly one.
+	notInherited := devStackShellKeys(opts.RepoRoot)
+	if opts.Gate == "G3" {
+		devEnv, err := devStackEnv(opts.RepoRoot)
+		if err != nil {
+			return nil, err
+		}
+		// The caller's explicit JobEnv wins over the file.
+		extraEnv = mergeEnv(devEnv, opts.JobEnv)
+	}
 	res := &GateRunResult{TaskID: opts.TaskID, Gate: opts.Gate, RunID: runID, At: nowRFC3339(), Status: "passed"}
 	overallFailed := false
 	for _, jobName := range jobs {
@@ -110,7 +138,7 @@ func RunGate(opts *GateRunOpts) (*GateRunResult, error) {
 				jr.Steps = append(jr.Steps, GateStepResult{Index: i, Run: step.Run, Exit: -1, Skipped: true})
 				continue
 			}
-			sr, err := runGateStep(workDir, opts.RepoRoot, opts.TaskID, runID, jobName, i, step, nil, opts.JobEnv)
+			sr, err := runGateStep(workDir, opts.RepoRoot, opts.TaskID, runID, jobName, i, step, nil, extraEnv, notInherited)
 			if err != nil {
 				return nil, fmt.Errorf("gate %s job %s step %d: %w", opts.Gate, jobName, i, err)
 			}
@@ -143,11 +171,158 @@ func RunGate(opts *GateRunOpts) (*GateRunResult, error) {
 	return res, nil
 }
 
+// devStackEnvKeys is every key a G3 step may receive from .env.dev — the whole
+// of the exposure, pinned here so it can be read in one place and widened only
+// on purpose.
+//
+// It is deliberately not "the file". A gate step runs `bash
+// tests/acceptance/*.sh` out of the integration tree, which is main plus the
+// task's change: whatever is in a step's environment is readable by that script
+// and, more to the point, ends up in its captured output the first time anything
+// prints, fails or dumps state. `.env.dev` also holds the database password, the
+// blob access key and the blob secret. Handing all of it to every G3 job to
+// satisfy one job's need for a token is a broader exposure than the problem, and
+// the kind that leaks by accident rather than by intent.
+//
+// POST_GITEA_BASE_URL and POST_GITEA_TOKEN are the complete set any G3 script
+// reads out of the file: the Gitea probe needs both, and the other two jobs
+// (auth-real-services, rsg-real-services) read only POST_G3_* names, which are
+// not in the file at all, and hand their configuration to the API with explicit
+// `env POST_DB_HOST=... POST_GITEA_TOKEN=...` assignments that override anything
+// inherited. A test pins this slice exactly, and a second one proves a key
+// outside it stays out of the step's environment.
+var devStackEnvKeys = []string{"POST_GITEA_BASE_URL", "POST_GITEA_TOKEN"}
+
+// devStackEnv is the environment a G3 job needs and a G2 job must not have: the
+// keys in devStackEnvKeys, and nothing else from the file they live in.
+//
+// A gate step runs in the integration tree — `git worktree add <dir> main` plus
+// the task's change — so it holds exactly what Git tracks. `.env.dev` does not
+// travel with it: the file is gitignored, and the credentials that exist only
+// there are therefore missing. One of them has no substitute: the Gitea service
+// token, minted once by `make infra-init` and named nowhere else. The job that
+// probes the Gitea instance stops before its first assertion —
+//
+//	G3 gitea-real-services: FAILED — POST_GITEA_TOKEN is not set.
+//
+// — which is not a failed check but a missing prerequisite. Every task carrying
+// gitea-real-services is then un-acceptable whatever its work, and the refusal
+// reads as that task's defect.
+//
+// The values are read from the repository's own .env.dev at the moment of the
+// run, not inherited from whatever shell started the driver, so a token rotated
+// since the driver started is the one the gate uses.
+//
+// G2 deliberately does NOT get them. G2 re-runs CI's exact steps and CI has no
+// .env.dev; handing the local G2 a file CI does not have would make the local
+// gate more permissive than the one that grades the pull request — the
+// subset-G2 defect this executor exists to prevent, arriving through the
+// environment instead of through the job list.
+func devStackEnv(repoRoot string) (map[string]string, error) {
+	path := filepath.Join(repoRoot, ".env.dev")
+	values, err := config.ParseEnvFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// No dev stack configured here, which is not an error: the
+			// acceptance scripts carry their own defaults and refuse loudly
+			// when a service is missing.
+			return nil, nil
+		}
+		// A file that exists but does not parse is different: it is configured
+		// and broken, and the keys this gate needs may be in the part that
+		// failed. Refusing is the only answer that does not run a job without
+		// the credential it needs and then report the absence as the task's
+		// defect — which is the whole failure this function exists to remove.
+		return nil, fmt.Errorf("reading %s for the G3 job environment: %w", path, err)
+	}
+	out := make(map[string]string, len(devStackEnvKeys))
+	for _, key := range devStackEnvKeys {
+		if value, ok := values[key]; ok {
+			out[key] = value
+		}
+	}
+	return out, nil
+}
+
+// devStackShellKeys is every key a gate that mirrors CI must not INHERIT from
+// the shell that started it: the keys .env.dev defines — that file is the local
+// dev stack's definition of its own environment — plus devStackEnvKeys, so the
+// exclusion still holds where .env.dev is missing or unreadable.
+//
+// devStackEnv deliberately withholds the file from G2 through the job list, for
+// the reason that decides this too: CI has no .env.dev, and a local G2 handed
+// one grades an environment the pull request never sees. Inheriting the
+// operator's copy is that same defect arriving through the environment instead
+// of through the job list, and `cmd.Env = os.Environ()` did exactly that.
+//
+// It is not a theoretical leak. The driver is started from a session that
+// exports these variables, because that is how the dev stack is reachable;
+// TestG3RunsWithoutADevStackEnvironment asserts `test -z "${POST_GITEA_TOKEN:-}"`
+// on the premise that a missing .env.dev leaves nothing to inject, and every
+// task accepted from such a driver came back with a red G2 for a credential the
+// gate itself had handed the step. The task was then refused for it.
+//
+// A file that does not parse contributes only the pinned keys: this is an
+// exclusion, and failing a gate over a file the gate is not otherwise reading
+// would be a new refusal, not a caught leak.
+func devStackShellKeys(repoRoot string) map[string]bool {
+	drop := make(map[string]bool, len(devStackEnvKeys)+16)
+	for _, k := range devStackEnvKeys {
+		drop[k] = true
+	}
+	if values, err := config.ParseEnvFile(filepath.Join(repoRoot, ".env.dev")); err == nil {
+		for k := range values {
+			drop[k] = true
+		}
+	}
+	return drop
+}
+
+// inheritedEnvWithout is os.Environ() with the named keys removed — the
+// environment a CI-shaped gate step runs in. Removing rather than overwriting
+// matters: bash resolves a duplicated name to the LAST occurrence, so leaving an
+// inherited entry in place and appending another would work by a rule nothing
+// here states, and would stop working the moment the order changed or the step
+// was run by something that resolves the other way.
+func inheritedEnvWithout(drop map[string]bool) []string {
+	env := os.Environ()
+	if len(drop) == 0 {
+		return env
+	}
+	kept := make([]string, 0, len(env))
+	for _, kv := range env {
+		if k, _, ok := strings.Cut(kv, "="); ok && drop[k] {
+			continue
+		}
+		kept = append(kept, kv)
+	}
+	return kept
+}
+
+// mergeEnv layers over on top of base without mutating either, so a caller's
+// explicit JobEnv takes precedence over the file. Nil is a valid argument for
+// both and is returned as-is when there is nothing to layer.
+func mergeEnv(base, over map[string]string) map[string]string {
+	if len(over) == 0 {
+		return base
+	}
+	merged := make(map[string]string, len(base)+len(over))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for k, v := range over {
+		merged[k] = v
+	}
+	return merged
+}
+
 // runGateStep executes one step of a CI job the way GitHub Actions does
 // (bash --noprofile --norc -eo pipefail -c), captures stdout+stderr into a
 // per-step log, and returns the exit code. The step's own env merges over
-// the job env, which merges over the inherited environment.
-func runGateStep(workDir, repoRoot, taskID, runID, jobName string, index int, step GateStep, jobEnv, extraEnv map[string]string) (GateStepResult, error) {
+// the job env, which merges over the inherited environment — less notInherited,
+// which names the keys the local dev stack contributed and a CI-shaped gate
+// must not be graded in the presence of. See devStackShellKeys.
+func runGateStep(workDir, repoRoot, taskID, runID, jobName string, index int, step GateStep, jobEnv, extraEnv map[string]string, notInherited map[string]bool) (GateStepResult, error) {
 	sr := GateStepResult{Index: index, Run: step.Run, StartedAt: nowRFC3339()}
 	outDir := filepath.Join(GateOutputDir(repoRoot, taskID, runID), jobName)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
@@ -163,7 +338,7 @@ func runGateStep(workDir, repoRoot, taskID, runID, jobName string, index int, st
 	// The cwd is chosen once per gate run by prepareIntegrationTree: current
 	// main plus the task's complete change. See RunGate.
 	cmd.Dir = workDir
-	cmd.Env = os.Environ()
+	cmd.Env = inheritedEnvWithout(notInherited)
 	for k, v := range jobEnv {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
@@ -510,8 +685,18 @@ func prepareIntegrationTree(repoRoot, taskID string) (string, func(), error) {
 		// `worktree add` fail, so clear it.
 		_ = os.RemoveAll(dir)
 	}
-	if _, err := gitOutput(repoRoot, "worktree", "add", "--detach", dir, DefaultBaseBranch); err != nil {
-		return "", noop, fmt.Errorf("creating the integration tree at %s from %s: %w", dir, DefaultBaseBranch, err)
+	// The tree is "current main plus the task's change", so it has to be built
+	// from what main IS rather than from what the clone last heard. A stale ref
+	// grades a composition the forge stopped having at the last merge — and it
+	// is the same ref a task branch is cut from, so both readers answer the same
+	// way (IntegrationTip). A fetch that fails REFUSES the gate: a gate that
+	// cannot establish its own premise has no verdict to give.
+	tip, err := IntegrationTip(repoRoot)
+	if err != nil {
+		return "", noop, err
+	}
+	if _, err := gitOutput(repoRoot, "worktree", "add", "--detach", dir, tip); err != nil {
+		return "", noop, fmt.Errorf("creating the integration tree at %s from %s: %w", dir, tip, err)
 	}
 	cleanup := func() {
 		_, _ = gitOutput(repoRoot, "worktree", "remove", "--force", dir)

@@ -371,7 +371,11 @@ func (o *DriveOpts) stepAccepted(id string, st *DriverStatus) (bool, error) {
 	// The merge itself is a separate tick once CI is green, so a red CI never
 	// blocks the rest of the pipeline.
 	if out, code := o.run("pr", "merge", id); code != 0 {
-		if strings.Contains(out, "required checks are not all green") || strings.Contains(out, "no checks reported") {
+		// The classification lives with the refusal that produces it
+		// (git_control.go), not here: a literal in each file is how the two
+		// drifted, and the drift was #139 — a required check that had finished
+		// red was retried forever as though it were still running.
+		if ciStillRunning(out) {
 			return false, nil // CI still running; try again next tick
 		}
 		return true, o.decide(id, "merge", out)

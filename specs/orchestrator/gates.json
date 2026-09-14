@@ -197,6 +197,9 @@
         },
         {
           "run": "bash tests/acceptance/driver-persistence-e2e.sh"
+        },
+        {
+          "run": "bash scripts/tests/gitea-e2e-guard-unit-test.sh"
         }
       ]
     },
@@ -219,6 +222,36 @@
       "steps": [
         {
           "run": "bash tests/acceptance/rsg-real-services-e2e.sh"
+        }
+      ]
+    },
+    "state-commit-real-services": {
+      "requires_tasks": [
+        "T0204"
+      ],
+      "steps": [
+        {
+          "run": "bash tests/acceptance/state-commit-real-services-e2e.sh"
+        }
+      ]
+    },
+    "branch-domain-real-services": {
+      "requires_tasks": [
+        "T0205"
+      ],
+      "steps": [
+        {
+          "run": "bash tests/acceptance/branch-domain-real-services-e2e.sh"
+        }
+      ]
+    },
+    "validation-gates-real-services": {
+      "requires_tasks": [
+        "T0207"
+      ],
+      "steps": [
+        {
+          "run": "bash tests/acceptance/validation-gates-real-services-e2e.sh"
         }
       ]
     }
@@ -294,12 +327,12 @@
     },
     "T0204": {
       "g3_jobs": [
-        "rsg-real-services"
+        "state-commit-real-services"
       ]
     },
     "T0205": {
       "g3_jobs": [
-        "rsg-real-services"
+        "branch-domain-real-services"
       ]
     },
     "T0206": {
@@ -309,7 +342,7 @@
     },
     "T0207": {
       "g3_jobs": [
-        "rsg-real-services"
+        "validation-gates-real-services"
       ]
     },
     "T0208": {
@@ -345,6 +378,11 @@
     "T0214": {
       "g3_jobs": [
         "rsg-real-services"
+      ]
+    },
+    "T0215": {
+      "g3_jobs": [
+        "migration-integration"
       ]
     },
     "T0301": {

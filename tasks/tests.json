@@ -1510,6 +1510,46 @@
       "status": "passed",
       "last_run": "2026-09-12T15:55:00Z",
       "evidence": "migration upgrade path: 0 triggers at 00013, 26 after head, upgraded DB enforces the guard, trigger set matches a fresh install. Full integration suite 11/11 against real PostgreSQL."
+    },
+    {
+      "id": "T0215-TEST-01",
+      "task_id": "T0215",
+      "name": "version-counter backfill on a pre-existing database (00024 + 00025)",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0204-TEST-G3",
+      "task_id": "T0204",
+      "name": "state-commit-real-services (G3)",
+      "gate": "G3",
+      "blocking": true,
+      "status": "passed",
+      "last_run": "2026-09-14T00:00:00Z",
+      "evidence": "bash tests/acceptance/state-commit-real-services-e2e.sh -> rc=0 in the integration tree (main + T0204's complete change). Pins TestStateCommitCreatesTraceableTransition (每次 semantic write 形成可追溯 state transition) and TestStateCommitFailedTransactionLeavesNoHalfState (失败 transaction 不产生半状态) by name against real PostgreSQL. Anti-vacuity verified: on main, where neither test exists, go test exits 0 and the script refuses with 'go test was green but these criteria-bearing tests did not run'."
+    },
+    {
+      "id": "T0205-TEST-G3",
+      "task_id": "T0205",
+      "name": "branch-domain-real-services (G3)",
+      "gate": "G3",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": "Contract for the T0205 task package: deliver TestBranchHeadEvolvesIndependently (branch head 可独立演化) and TestMainAndBranchStateDoNotMix (main 与 branch state 不混淆) in tests/integration, against real PostgreSQL. bash tests/acceptance/branch-domain-real-services-e2e.sh fails loudly by name until they exist, and fails if either does not actually run."
+    },
+    {
+      "id": "T0207-TEST-G3",
+      "task_id": "T0207",
+      "name": "validation-gates-real-services (G3)",
+      "gate": "G3",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": "Contract for the T0207 task package: deliver TestGatesDifferInStrictnessAndSayWhy (不同 gate 严格度不同且可解释) and TestServerRevalidatesWhatTheCommandValidated (command 再次 server validate) in tests/integration, against real PostgreSQL. bash tests/acceptance/validation-gates-real-services-e2e.sh fails loudly by name until they exist, and fails if either does not actually run."
     }
   ]
 }

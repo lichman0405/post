@@ -1,6 +1,7 @@
 package devorchestrator
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // writeSyntheticDAG writes a scratch DAG: A -> B -> C, plus a no-deps task D.
@@ -338,6 +340,156 @@ func TestReadyRequiresDependenciesMerged(t *testing.T) {
 	}
 }
 
+// scratchStore is openScratch with the paths kept, so a test can edit the DAG
+// while a task is already in flight — the thing that actually happens here.
+func scratchStore(t *testing.T) (dagPath, statePath string, s *Store) {
+	t.Helper()
+	dir := t.TempDir()
+	dagPath = writeSyntheticDAG(t, dir)
+	statePath = filepath.Join(dir, "task_status.json")
+	var err error
+	if s, err = OpenStore(dagPath, statePath); err != nil {
+		t.Fatal(err)
+	}
+	return dagPath, statePath, s
+}
+
+// writeDAGWithT1003DependingOn is the fixture DAG after somebody adds an edge
+// to the one task in it that starts with none.
+func writeDAGWithT1003DependingOn(t *testing.T, dagPath, dep string) {
+	t.Helper()
+	deps := []string{}
+	if dep != "" {
+		deps = []string{dep}
+	}
+	writeJSON(t, dagPath, map[string]any{
+		"version":    1,
+		"task_count": 4,
+		"tasks": []map[string]any{
+			{"id": "T1000", "phase": "P1", "title": "task A", "dependencies": []string{}},
+			{"id": "T1001", "phase": "P1", "title": "task B", "dependencies": []string{"T1000"}},
+			{"id": "T1002", "phase": "P1", "title": "task C", "dependencies": []string{"T1001"}},
+			{"id": "T1003", "phase": "P1", "title": "task D", "dependencies": deps},
+		},
+	})
+}
+
+// mergeT1000 walks the fixture's no-dependency task through to merged.
+func mergeT1000(t *testing.T, s *Store) {
+	t.Helper()
+	for _, st := range []State{StateReady, StateRunning, StateVerification, StateAccepted, StateMerged} {
+		if _, err := s.Transition("T1000", st, NewRunID(), ""); err != nil {
+			t.Fatalf("T1000 -> %s: %v", st, err)
+		}
+	}
+}
+
+// A dependency edge added to a task that is already past ready must still bind
+// at the moment the task actually starts.
+//
+// The rule docs/30 §3 states — and depsMet's own comment repeats — is about
+// starting, but the check ran only on the transition into ready. The DAG is
+// edited while tasks are in flight: #102 added T0208 to T0603's closure three
+// hours after T0603 was marked ready, and a task already past that point never
+// met the check again. T0603 was spawned anyway, ran a full Worker session, and
+// reached verification carrying rsg-real-services — a gate that cannot go green
+// until T0208 is on main (L1-20260914-19).
+//
+// Both edges into running are exercised: spawning and reworking are the two
+// ways a task starts, and what this guards against is a Worker burning a whole
+// session on work whose gate is red by construction.
+func TestADependencyEdgeAddedInFlightBindsWhenTheTaskStarts(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edge string
+		set  func(t *testing.T, s *Store, statePath string)
+		from State
+	}{
+		{
+			name: "the spawn edge, ready -> running",
+			edge: "spawn",
+			set: func(t *testing.T, s *Store, _ string) {
+				t.Helper()
+				if _, err := s.Transition("T1003", StateReady, NewRunID(), ""); err != nil {
+					t.Fatal(err)
+				}
+			},
+			from: StateReady,
+		},
+		{
+			name: "the rework edge, rejected -> running",
+			edge: "rework",
+			set: func(t *testing.T, s *Store, statePath string) {
+				t.Helper()
+				for _, st := range []State{StateReady, StateRunning, StateRejected} {
+					if _, err := s.Transition("T1003", st, NewRunID(), ""); err != nil {
+						t.Fatalf("-> %s: %v", st, err)
+					}
+				}
+				if got := statusOf(t, statePath, "T1003"); got != string(StateRejected) {
+					t.Fatalf("setup: status = %q, want rejected", got)
+				}
+			},
+			from: StateRejected,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dagPath, statePath, s := scratchStore(t)
+			tc.set(t, s, statePath)
+
+			// The edge arrives while the task is in flight.
+			writeDAGWithT1003DependingOn(t, dagPath, "T1000")
+			reopened, err := OpenStore(dagPath, statePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			_, err = reopened.Transition("T1003", StateRunning, NewRunID(), "")
+			var de *DependencyError
+			if !asErr[*DependencyError](err, &de) {
+				t.Fatalf("start (%s) with a dependency added in flight: error = %v, want DependencyError", tc.edge, err)
+			}
+			if !strings.Contains(err.Error(), "T1000") {
+				t.Fatalf("error %q does not name the unmet dependency", err)
+			}
+			if got := statusOf(t, statePath, "T1003"); got != string(tc.from) {
+				t.Fatalf("status = %q, want %q — a refused transition must not have moved it", got, tc.from)
+			}
+		})
+	}
+}
+
+// The other direction, so the check cannot pass by refusing everything: with
+// the dependency merged, starting is allowed from both edges.
+func TestStartingIsStillAllowedWhenTheDependenciesAreMerged(t *testing.T) {
+	dagPath, statePath, _ := scratchStore(t)
+	writeDAGWithT1003DependingOn(t, dagPath, "T1000")
+	s, err := OpenStore(dagPath, statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Ready itself already refuses while T1000 is todo, so T1003 cannot reach
+	// the start edge at all until the dependency is merged.
+	if _, err := s.Transition("T1003", StateReady, NewRunID(), ""); err == nil {
+		t.Fatal("ready accepted while T1000 is todo")
+	}
+	mergeT1000(t, s)
+
+	if _, err := s.Transition("T1003", StateReady, NewRunID(), ""); err != nil {
+		t.Fatalf("ready after the dependency merged: %v", err)
+	}
+	if _, err := s.Transition("T1003", StateRunning, NewRunID(), ""); err != nil {
+		t.Fatalf("spawn after the dependency merged: %v", err)
+	}
+	// And the rework edge: rejected -> running, reached through a rejection.
+	if _, err := s.Transition("T1003", StateRejected, NewRunID(), ""); err != nil {
+		t.Fatalf("-> rejected: %v", err)
+	}
+	if _, err := s.Transition("T1003", StateRunning, NewRunID(), ""); err != nil {
+		t.Fatalf("rework after the dependency merged: %v", err)
+	}
+}
+
 func TestTransitionCarriesRunIDInHistory(t *testing.T) {
 	s := openScratch(t)
 	res, err := s.Transition("T1003", StateReady, "run-abc123", "")
@@ -473,6 +625,91 @@ func TestAcceptSetsAcceptedAtAndRejectRecordsReason(t *testing.T) {
 	}
 	if res.State.AcceptedBySupervisorAt == nil {
 		t.Fatalf("accepted_by_supervisor_at lost after merged: %+v", res.State)
+	}
+}
+
+// TestPersistedReasonsCarryNoCredentialAndLoseNoText: a reason is written into
+// tasks/task_status.json, which is committed to the repository, so it is an
+// output path — and the text is composed elsewhere, by whichever check failed.
+// A reason that carries a Worker's inline environment verbatim puts a DSN in
+// git permanently; a reason redacted into "***" deletes the audit trail the
+// reason exists to be.
+//
+// Both halves are asserted against the FILE rather than the returned value,
+// because the file is the artifact that gets committed.
+func TestPersistedReasonsCarryNoCredentialAndLoseNoText(t *testing.T) {
+	s := openScratch(t)
+	drive(t, s, "T1003", StateRunning)
+
+	const credential = "hunter2"
+	// Two more shapes an adversarial review of this change found leaking, and
+	// both belong here rather than only in the unit test, because the property
+	// that matters is about the FILE: a credential in a persisted reason is
+	// committed, and nothing downstream re-reads it. Distinct values so a
+	// failure names which shape got through.
+	const (
+		prefixedCredential = "hunter3" // POST_DB_PASSWORD=hunter3 — `\b` cannot see the key
+		wrappedCredential  = "hunter4" // the userinfo's "@" lands on the next line
+	)
+	reason := "G2 failed: out of scope internal/foo/bar.go\n" +
+		"command: POSTGRES_TEST_ADMIN_URL=postgres://postgres:" + credential + "@127.0.0.1:5432/post go test -count=1 ./tests/integration/\n" +
+		"env: POST_DB_PASSWORD=" + prefixedCredential + " POST_GITEA_TOKEN=" + prefixedCredential + "\n" +
+		"wrapped: PGURL=postgres://postgres:" + wrappedCredential + "\\\n@127.0.0.1:5432/post\n" +
+		"ref " + strings.Repeat("a", 40)
+
+	if _, err := s.Transition("T1003", StateRejected, NewRunID(), reason); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(s.StatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{credential, prefixedCredential, wrappedCredential} {
+		if bytes.Contains(raw, []byte(secret)) {
+			t.Errorf("the credential %q reached the committed state file:\n%s", secret, raw)
+		}
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		t.Fatal(err)
+	}
+	var tasks map[string]json.RawMessage
+	if err := json.Unmarshal(top["tasks"], &tasks); err != nil {
+		t.Fatal(err)
+	}
+	var ts TaskState
+	if err := json.Unmarshal(tasks["T1003"], &ts); err != nil {
+		t.Fatal(err)
+	}
+
+	// Not "***": the reason's own words are still there to be read.
+	if ts.RejectionReason == "***" || ts.RejectionReason == "" {
+		t.Fatalf("the reason was deleted rather than redacted: %q", ts.RejectionReason)
+	}
+	for _, must := range []string{
+		"G2 failed: out of scope internal/foo/bar.go",
+		"postgres://postgres:***@127.0.0.1:5432/post",
+		"go test -count=1 ./tests/integration/",
+	} {
+		if !strings.Contains(ts.RejectionReason, must) {
+			t.Errorf("the persisted reason lost %q:\n%s", must, ts.RejectionReason)
+		}
+	}
+	if !strings.Contains(ts.RejectionReason, "\n") {
+		t.Errorf("the persisted reason lost its line structure: %q", ts.RejectionReason)
+	}
+	// The one loss this design accepts, asserted so it is a decision rather
+	// than a surprise: a 40+ character opaque run is masked, because the rule
+	// that catches a bare token cannot tell it from a commit sha.
+	if !strings.Contains(ts.RejectionReason, "ref ***") {
+		t.Errorf("expected the long opaque run to be masked, got:\n%s", ts.RejectionReason)
+	}
+	// History carries the same text, so it must be redacted by the same rule —
+	// a leak in the history entry would be committed just the same.
+	if n := len(ts.History); n == 0 {
+		t.Fatal("no history entry recorded")
+	} else if last := ts.History[n-1]; strings.Contains(last.Reason, credential) {
+		t.Errorf("the credential reached the history entry: %q", last.Reason)
 	}
 }
 
@@ -674,5 +911,82 @@ func TestInspectReturnsSpecAndState(t *testing.T) {
 	// Unknown id is an error.
 	if _, err := s.Inspect("T9999"); err == nil {
 		t.Error("inspect of unknown task succeeded")
+	}
+}
+
+// The task state's timestamps are validated in CI
+// (scripts/validate_task_state.py, ISO_TS_RE: no fractional seconds) and the
+// run start spawn hands the store carries nanoseconds, because a start to the
+// second cannot order a verdict written inside the same second (#105). Both
+// have to hold at once, and they hold in different files: the run records keep
+// the nanosecond start (collect compares the registry against the gate inputs,
+// never against this), and tasks/task_status.json keeps the shape the validator
+// accepts. This pins the second half through the one place that writes it —
+// reverting the store's rendering leaves the state file unusable to CI on the
+// next spawn, which the round-1 review measured directly (the validator exits
+// 1 on a ns-shaped started_at).
+func TestStartWorkerFromStampsTheTaskStateInItsValidatedFormat(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "task_status.json")
+	s, err := OpenStore(writeSyntheticDAG(t, dir), statusPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition("T1000", StateReady, NewRunID(), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// The shape spawn actually passes in, from the same helper spawn uses.
+	runStart := runStartedAtFrom(time.Date(2026, 9, 13, 11, 51, 44, 877690809, time.UTC))
+	if runStart != "2026-09-13T11:51:44.877690809Z" {
+		t.Fatalf("fixture run start = %q, want the nanosecond form spawn records", runStart)
+	}
+
+	res, err := s.StartWorkerFrom("T1000", "run-ns", runStart, StateReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw struct {
+		Tasks map[string]TaskState `json:"tasks"`
+	}
+	data, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	ts := raw.Tasks["T1000"]
+	if ts.StartedAt == nil {
+		t.Fatal("started_at not stamped")
+	}
+	if len(ts.History) == 0 {
+		t.Fatal("no history entry for the running transition")
+	}
+
+	const want = "2026-09-13T11:51:44Z"
+	for _, c := range []struct{ what, got string }{
+		{"the transition result's at", res.At},
+		{"started_at", *ts.StartedAt},
+		{"the history entry's at", ts.History[len(ts.History)-1].At},
+	} {
+		if c.got != want {
+			t.Errorf("%s = %q, want %q — the format scripts/validate_task_state.py enforces on this file", c.what, c.got, want)
+		}
+	}
+
+	// A second-precision start is passed through unchanged: the store renders
+	// the task state's format, it does not round every caller's value to
+	// whatever it likes.
+	if _, err := s.Transition("T1003", StateReady, NewRunID(), ""); err != nil {
+		t.Fatal(err)
+	}
+	res, err = s.StartWorkerFrom("T1003", "run-s", "2026-09-13T00:00:00Z", StateReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.At != "2026-09-13T00:00:00Z" {
+		t.Errorf("a second-precision start came back as %q, want it unchanged", res.At)
 	}
 }

@@ -2,6 +2,7 @@ package devorchestrator
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -389,7 +390,7 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 	}
 
 	// 8) Record the registry fact (status running; exit info merged later).
-	startedAt := time.Now().UTC().Format(time.RFC3339)
+	startedAt := runStartedAt()
 	startTime, err := procStartTime(workerPID)
 	if err != nil {
 		killWorker(workerPID)
@@ -471,7 +472,24 @@ func (s *Store) StartWorker(id, runID, startedAt string) (*TransitionResult, err
 
 // StartWorkerFrom applies from -> running (ready for a first dispatch,
 // rejected for a T0012 rework/respawn) and stamps worker_run_id/started_at.
+//
+// The stamp written into the TASK STATE is rendered into that file's own
+// format — ISO 8601 to the second — and not at the precision the caller
+// passed in. `tasks/task_status.json` is validated in CI by
+// scripts/validate_task_state.py, whose ISO_TS_RE admits no fractional seconds
+// and is applied to started_at, completed_at and merged_at (see taskStateTime
+// for what that check does and does not read), while the run start spawn hands
+// this function carries nanoseconds: a start to the second cannot order a
+// verdict written in the same second, which is the defect that precision exists
+// for. Both have to hold, and they hold in different files — the registry record
+// and the gate inputs keep the full-precision start (and collect compares THOSE
+// two against each other), the task state keeps the shape the validator accepts.
+// Reverting this leaves the state file unusable to CI on the next spawn; the
+// round-1 review measured exactly that (the validator exits 1 on a ns-shaped
+// started_at). Pinned by
+// TestStartWorkerFromStampsTheTaskStateInItsValidatedFormat.
 func (s *Store) StartWorkerFrom(id, runID, startedAt string, from State) (*TransitionResult, error) {
+	at := taskStateStamp(startedAt)
 	var result *TransitionResult
 	err := s.mutate(id, func(ts *TaskState, fromSt State, states map[string]State) error {
 		if fromSt != from {
@@ -481,10 +499,14 @@ func (s *Store) StartWorkerFrom(id, runID, startedAt string, from State) (*Trans
 			return err
 		}
 		ts.Status = StateRunning
-		ts.History = append(ts.History, StateChange{From: fromSt, To: StateRunning, At: startedAt, RunID: runID, Reason: "worker spawn"})
+		// Both halves survive the merge: `at` is #105's rendering into the task
+		// state's own format (the one scripts/validate_task_state.py accepts),
+		// and persistedReason is #128's choke point — a reason is redacted as
+		// text before it is persisted, not replaced wholesale.
+		ts.History = append(ts.History, StateChange{From: fromSt, To: StateRunning, At: at, RunID: runID, Reason: persistedReason("worker spawn")})
 		ts.WorkerRunID = runID
-		ts.StartedAt = strptr(startedAt)
-		result = &TransitionResult{TaskID: id, From: fromSt, To: StateRunning, RunID: runID, At: startedAt}
+		ts.StartedAt = strptr(at)
+		result = &TransitionResult{TaskID: id, From: fromSt, To: StateRunning, RunID: runID, At: at}
 		return nil
 	})
 	if err != nil {
@@ -552,11 +574,21 @@ func ensureWorktree(repoRoot, taskID, branch string) error {
 		return err
 	}
 	if !exists {
-		if _, err := gitOutput(repoRoot, "checkout", "-b", branch); err != nil {
-			return fmt.Errorf("creating task branch %s: %w", branch, err)
+		// The baseline is what the integration branch is NOW — fetched, and
+		// named explicitly. Never the checkout's current HEAD, which is a shared
+		// resource (reviews, merges, one-off probes) and may be on anything: a
+		// task cut from an unrelated checkout inherits commits nobody merged,
+		// and a task cut from a stale main starts without the dependency the DAG
+		// has just called merged (#123).
+		base, err := IntegrationTip(repoRoot)
+		if err != nil {
+			return err
 		}
-		if _, err := gitOutput(repoRoot, "checkout", "-"); err != nil {
-			return fmt.Errorf("returning to the previous branch after creating %s: %w", branch, err)
+		// `git branch` rather than `checkout -b`: creating the branch must not
+		// move the shared checkout, which is how the checkout could be left
+		// sitting on a task branch (L1-20260914-1).
+		if _, err := gitOutput(repoRoot, "branch", branch, base); err != nil {
+			return fmt.Errorf("creating task branch %s from %s: %w", branch, base, err)
 		}
 	}
 	if _, err := gitOutput(repoRoot, "worktree", "add", wtDir, branch); err != nil {
@@ -656,10 +688,47 @@ func writeSpawnFiles(taskDir string, pkg *TaskPackage, prompt, system string, gu
 // gitOutput runs git in dir and returns trimmed stdout; on failure the error
 // carries the command's stderr.
 func gitOutput(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	return runGit(dir, 0, args...)
+}
+
+// runGitWaitDelay bounds how long Wait keeps reading a command's output after
+// the process itself is gone.
+//
+// A deadline alone is not a bound, which is the whole reason this exists: git
+// spawns helpers (`git-remote-http`, `git-remote-ext`), those helpers inherit
+// git's stdout and stderr, and `cmd.Output()` reads until the WRITE END of the
+// pipe closes — which the helper holds. Killing git on the deadline therefore
+// leaves Wait blocked on a pipe an orphan is still holding, and the fetch returns
+// at the deadline plus however long the orphan lives. Measured with an
+// `ext::sleep 30` remote and a 300ms deadline: without this, the call did not
+// return until the sleep exited. WaitDelay makes Go close the pipes itself once
+// it has elapsed, so the deadline is the deadline.
+const runGitWaitDelay = 5 * time.Second
+
+// runGit runs git in dir. A positive timeout bounds the call, which matters for
+// the one git command this package makes over the network: an unbounded fetch
+// does not fail a dispatch, it STALLS it — and under `rddev drive` a dispatch
+// that never returns is the whole DAG not moving, with nothing in the log to say
+// why. A deadline turns that into an error the driver can retry.
+//
+// WaitDelay is set even when there is no deadline: a local git that exits while a
+// helper holds the pipe hangs the caller exactly the same way, and every caller
+// here is on a path where hanging is worse than an error.
+func runGit(dir string, timeout time.Duration, args ...string) (string, error) {
+	ctx := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	cmd.WaitDelay = runGitWaitDelay
 	out, err := cmd.Output()
 	if err != nil {
+		if timeout > 0 && ctx.Err() != nil {
+			return "", fmt.Errorf("git %s: timed out after %s", strings.Join(args, " "), timeout)
+		}
 		// %w keeps the *exec.ExitError in the chain so callers can inspect the
 		// exit code (branchExists treats exit 1 as "no such branch").
 		if ee, ok := err.(*exec.ExitError); ok {
@@ -668,6 +737,30 @@ func gitOutput(dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// gitOutputRaw is gitOutput without the trim, for output whose whitespace is
+// data — a patch above all.
+//
+// Trimming a diff is not cosmetic. `git diff` writes an empty context line as a
+// single space, and the last line of a diff is very often one; TrimSpace deletes
+// it and the final hunk is then one line short of the count in its own @@ header.
+// `git apply` reads that as a malformed patch and dies with "corrupt patch at
+// line N" — on a change that applies perfectly. The corruption is
+// content-dependent (the task's diff has to end on a blank or trailing-space
+// line), so it surfaces as an intermittent "does not apply to current main" for
+// a branch that is merely behind, and G2 never runs.
+func gitOutputRaw(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), ee, strings.TrimSpace(string(ee.Stderr)))
+		}
+		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return string(out), nil
 }
 
 // gitOutput2 runs bin and returns trimmed stdout (used for claude --version).

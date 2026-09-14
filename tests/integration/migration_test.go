@@ -136,11 +136,22 @@ var canonicalTables = map[string]tableExp{
 	"projects": {
 		// provision_status is the T0104 addition (00019): every new project
 		// is provision-pending until T0301 provisions the GitProvider repo.
+		// The consistency CHECK is the T0301 addition (00022); the failure
+		// reason deliberately has no projects column (see 00022's header).
 		cols:    []colExp{c("id", u, false, true), c("organization_id", u, true, false), c("program_id", u, true, false), c("slug", txt, false, false), c("name", txt, false, false), c("purpose", txt, false, false), c("activity_status", txt, false, true), c("visibility", txt, false, false), c("main_frozen", bl, false, true), c("git_repository_external_id", txt, true, false), c("created_by", u, false, false), c("created_at", ts, false, true), c("provision_status", txt, false, true)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"organization_id", "slug"}},
-		checks:  []string{"activity_status = ANY", "visibility = ANY", "provision_status = ANY"},
+		checks:  []string{"activity_status = ANY", "visibility = ANY", "provision_status = ANY", "provision_status <> 'provisioned'"},
 		fks:     []fkExp{fk("organization_id", "organizations", "RESTRICT"), fk("program_id", "programs", "SET NULL"), fk("created_by", "users", "RESTRICT")},
+	},
+	"git_repository_provisions": {
+		// T0301 (00022): the platform→GitProvider repository mapping and the
+		// push-webhook HMAC secret. project_id PK IS the project→repo 1:1
+		// invariant.
+		cols:    []colExp{c("project_id", u, false, false), c("owner", txt, false, false), c("name", txt, false, false), c("gitea_repo_id", i8, false, false), c("webhook_id", i8, false, false), c("webhook_secret", txt, false, false), c("provisioned_at", ts, false, true)},
+		pk:      []string{"project_id"},
+		uniques: [][]string{{"owner", "name"}},
+		fks:     []fkExp{fk("project_id", "projects", "RESTRICT")},
 	},
 	"project_memberships": {
 		cols:   []colExp{c("project_id", u, false, false), c("user_id", u, false, false), c("role", txt, false, false), c("created_at", ts, false, true)},
@@ -174,9 +185,13 @@ var canonicalTables = map[string]tableExp{
 		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("branch_id", "branches", "RESTRICT"), fk("base_state_id", "project_states", "RESTRICT"), fk("result_state_id", "project_states", "RESTRICT"), fk("actor_id", "users", "RESTRICT")},
 	},
 	"scientific_objects": {
-		cols: []colExp{c("id", u, false, true), c("project_id", u, false, false), c("object_type", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
-		pk:   []string{"id"},
-		fks:  []fkExp{fk("project_id", "projects", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
+		// current_version_no is the T0202 addition (00024): the
+		// materialized head pointer that doubles as the expected_version
+		// compare-and-swap cell.
+		cols:   []colExp{c("id", u, false, true), c("project_id", u, false, false), c("object_type", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true), c("current_version_no", i4, false, true)},
+		pk:     []string{"id"},
+		checks: []string{"current_version_no >= 0"},
+		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
 	},
 	"scientific_object_versions": {
 		cols:    []colExp{c("id", u, false, true), c("object_id", u, false, false), c("version_no", i4, false, false), c("state_id", u, false, false), c("branch_id", u, true, false), c("schema_id", txt, false, false), c("schema_version", txt, false, false), c("title", txt, false, false), c("lifecycle_state", txt, false, false), c("payload", jb, false, false), c("visibility_policy_id", u, true, false), c("integrity_hash", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
@@ -186,9 +201,14 @@ var canonicalTables = map[string]tableExp{
 		fks:     []fkExp{fk("object_id", "scientific_objects", "RESTRICT"), fk("state_id", "project_states", "RESTRICT"), fk("branch_id", "branches", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
 	},
 	"relations": {
-		cols: []colExp{c("id", u, false, true), c("project_id", u, false, false), c("created_at", ts, false, true)},
-		pk:   []string{"id"},
-		fks:  []fkExp{fk("project_id", "projects", "RESTRICT")},
+		// current_version_no is the T0203 addition (00025): the
+		// materialized head pointer that doubles as the expected_version
+		// compare-and-swap cell, exactly as 00024 does for scientific
+		// objects (T0202).
+		cols:   []colExp{c("id", u, false, true), c("project_id", u, false, false), c("created_at", ts, false, true), c("current_version_no", i4, false, true)},
+		pk:     []string{"id"},
+		checks: []string{"current_version_no >= 0"},
+		fks:    []fkExp{fk("project_id", "projects", "RESTRICT")},
 	},
 	"relation_versions": {
 		cols:    []colExp{c("id", u, false, true), c("relation_id", u, false, false), c("version_no", i4, false, false), c("state_id", u, false, false), c("relation_type", txt, false, false), c("source_object_version_id", u, false, false), c("target_object_version_id", u, false, false), c("payload", jb, false, true), c("integrity_hash", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
@@ -345,9 +365,20 @@ var explicitIndexes = map[string][]string{
 	"scientific_object_versions_payload_gin": {"USING gin", "payload"},
 	"relation_versions_source_idx":           {"source_object_version_id", "relation_type"},
 	"relation_versions_target_idx":           {"target_object_version_id", "relation_type"},
-	"search_documents_fts_idx":               {"USING gin", "to_tsvector"},
-	"search_documents_structured_gin":        {"USING gin", "structured"},
-	"organization_memberships_user_idx":      {"user_id"},
+	// T0203: the query-by-type paths join relation_versions to relations
+	// on the project boundary (migration 00025).
+	"relations_project_idx":             {"project_id"},
+	"search_documents_fts_idx":          {"USING gin", "to_tsvector"},
+	"search_documents_structured_gin":   {"USING gin", "structured"},
+	"organization_memberships_user_idx": {"user_id"},
+	// T0204: the state snapshot projections — a state's member versions by
+	// state_id and a branch's state/commit lineage (migration 00026).
+	"scientific_object_versions_state_idx": {"state_id"},
+	"relation_versions_state_idx":          {"state_id"},
+	"project_states_branch_created_idx":    {"branch_id", "created_at"},
+	"state_commits_branch_created_idx":     {"branch_id", "created_at"},
+	// T0205: branch listing scans (migration 00028).
+	"branches_project_created_idx": {"project_id", "created_at"},
 	// T0104: personal projects (organization_id NULL) escape the
 	// UNIQUE(organization_id, slug) constraint, so their slug uniqueness is
 	// a partial unique index instead.
@@ -359,23 +390,77 @@ var explicitIndexes = map[string][]string{
 	"audit_log_actor_occurred_idx":        {"actor_id", "occurred_at"},
 }
 
-// headVersion is the number of migrations in infra/migrations, DERIVED from the
-// embedded set rather than hand-maintained. A hardcoded number silently
-// invalidated three tests the first time a migration was added (T0013's 00014,
-// then its TRUNCATE follow-up 00015); deriving it means the tests track the
-// head automatically and can never go stale.
-var headVersion = func() int64 {
+// migrationVersions returns the numeric prefix of every embedded
+// migration file. Derived, never hand-maintained (see appliedAbove); the
+// prefix is the version the runner records when it applies the file.
+func migrationVersions() []int64 {
 	entries, err := migrations.FS.ReadDir(".")
 	if err != nil {
 		panic("reading embedded migrations: " + err.Error())
 	}
-	var n int64
+	var out []int64
 	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".sql") {
+		if !strings.HasSuffix(e.Name(), ".sql") {
+			continue
+		}
+		var v int64
+		for _, r := range e.Name() {
+			if r < '0' || r > '9' {
+				break
+			}
+			v = v*10 + int64(r-'0')
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// appliedAbove counts the embedded migrations with a prefix above floor —
+// the exact set the runner applies next from a database at floor. Sparse
+// numbering (parallel tasks holding reserved numbers) makes "head - floor"
+// wrong, so the count comes from the same embedded set the runner uses.
+func appliedAbove(floor int64) int64 {
+	var n int64
+	for _, v := range migrationVersions() {
+		if v > floor {
 			n++
 		}
 	}
 	return n
+}
+
+// maxVersionNo is the highest migration version NUMBER in infra/migrations,
+// DERIVED from the embedded set, like appliedAbove. "Highest number" and
+// "file count" differ once the numbering space has gaps: the Supervisor
+// reserves numbers for parallel Workers (T0202 was assigned 00024 while
+// 00021-00023 were held for others), so goose's max(version_id) is the
+// largest number, not the file count.
+var maxVersionNo = func() int64 {
+	entries, err := migrations.FS.ReadDir(".")
+	if err != nil {
+		panic("reading embedded migrations: " + err.Error())
+	}
+	var max int64
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".sql") {
+			continue
+		}
+		underscore := strings.IndexByte(e.Name(), '_')
+		if underscore < 1 {
+			panic("migration filename without numeric prefix: " + e.Name())
+		}
+		var n int64
+		for _, c := range e.Name()[:underscore] {
+			if c < '0' || c > '9' {
+				panic("migration filename without numeric prefix: " + e.Name())
+			}
+			n = n*10 + int64(c-'0')
+		}
+		if n > max {
+			max = n
+		}
+	}
+	return max
 }()
 
 // ---------------------------------------------------------------------------
@@ -395,8 +480,8 @@ func TestFreshInstallCatalog(t *testing.T) {
 	want["goose_db_version"] = gooseTable
 	compareCatalog(t, got, want)
 
-	if v := appliedVersion(t, ctx, pool); v != headVersion {
-		t.Errorf("fresh install: applied version = %d, want %d", v, headVersion)
+	if v := appliedVersion(t, ctx, pool); v != maxVersionNo {
+		t.Errorf("fresh install: applied version = %d, want %d", v, maxVersionNo)
 	}
 }
 
@@ -506,11 +591,11 @@ func TestUpgradePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upgrade path: migrate to head: %v", err)
 	}
-	if applied != headVersion-6 {
-		t.Errorf("upgrade path: applied %d on the way to head, want %d", applied, headVersion-6)
+	if applied != appliedAbove(6) {
+		t.Errorf("upgrade path: applied %d on the way to head, want %d", applied, appliedAbove(6))
 	}
-	if v := appliedVersion(t, ctx, pool); v != headVersion {
-		t.Fatalf("upgrade path: version after head = %d, want %d", v, headVersion)
+	if v := appliedVersion(t, ctx, pool); v != maxVersionNo {
+		t.Fatalf("upgrade path: version after head = %d, want %d", v, maxVersionNo)
 	}
 	upgraded := takeSnapshot(t, ctx, pool)
 
@@ -542,6 +627,256 @@ func TestUpgradePath(t *testing.T) {
 	compareCatalog(t, upgraded, want)
 }
 
+// ---------------------------------------------------------------------------
+//  4. Version-counter backfills (00024/00025): the T0102 'data-level upgrade
+//     check' shape, applied to the two counter migrations. Each phase brings
+//     a database to the last version BEFORE its migration, writes version-log
+//     rows through raw SQL (the pre-migration schema has no counter column to
+//     lean on yet), then upgrades to head and asserts every seeded object's
+//     current_version_no equals the specific head of its own log — concrete
+//     values, not row counts. Deleting the backfill UPDATE from either
+//     migration must turn its phase red.
+func TestMigrationVersionCounterBackfill(t *testing.T) {
+	t.Run("00024 scientific objects", func(t *testing.T) {
+		ctx := testCtx(t)
+
+		// Version 20 is the last migration before 00024 (21-23 are reserved
+		// for parallel Workers): scientific_objects exists but has no
+		// current_version_no column, so the seed can only reach the counter
+		// through the version log.
+		intermediate := int64(20)
+		pool, url := testdb.SetupEmpty(t, ctx, adminURL(t), taskID)
+		toIntermediate, err := persistence.MigrateTo(ctx, url, intermediate)
+		if err != nil {
+			t.Fatalf("00024 backfill: migrate to 20: %v", err)
+		}
+		if toIntermediate != intermediate {
+			t.Errorf("00024 backfill: applied %d to reach version %d, want %d", toIntermediate, intermediate, intermediate)
+		}
+		if v := appliedVersion(t, ctx, pool); v != intermediate {
+			t.Fatalf("00024 backfill: version after MigrateTo(%d) = %d, want %d", intermediate, v, intermediate)
+		}
+
+		// Seed rows written BEFORE the migration: three objects whose
+		// version logs have different depths — one with three versions, one
+		// with two, one with none (its counter must stay at the column
+		// default, 0).
+		projectID, stateID, userID := seedCounterGraph(t, ctx, pool, "24")
+		seedObject := func() string {
+			t.Helper()
+			var id string
+			if err := pool.QueryRow(ctx,
+				`INSERT INTO scientific_objects (project_id, object_type, created_by)
+				 VALUES ($1, 'dataset', $2) RETURNING id`, projectID, userID).Scan(&id); err != nil {
+				t.Fatalf("00024 backfill: seed object: %v", err)
+			}
+			return id
+		}
+		seedVersion := func(objectID string, versionNo int) {
+			t.Helper()
+			if _, err := pool.Exec(ctx, `INSERT INTO scientific_object_versions
+				(object_id, version_no, state_id, schema_id, schema_version, title,
+				 lifecycle_state, payload, integrity_hash, created_by)
+				VALUES ($1, $2, $3, 'core/dataset', '1.0', 'Dataset', 'active',
+				        '{}'::jsonb, 'ih-counter', $4)`,
+				objectID, versionNo, stateID, userID); err != nil {
+				t.Fatalf("00024 backfill: seed version %d: %v", versionNo, err)
+			}
+		}
+		objDeep := seedObject()
+		seedVersion(objDeep, 1)
+		seedVersion(objDeep, 2)
+		seedVersion(objDeep, 3)
+		objShallow := seedObject()
+		seedVersion(objShallow, 1)
+		seedVersion(objShallow, 2)
+		objEmpty := seedObject()
+
+		// Continue to head: 00024's backfill UPDATE must set each counter
+		// from the version log that exists at that moment. The applied count
+		// comes from the embedded set (appliedAbove), not "head - 20":
+		// numbering is sparse (21 and 23 are reserved; T0301's 00022 sits
+		// between), and the runner applies exactly the files that exist.
+		toHead, err := persistence.Migrate(ctx, url)
+		if err != nil {
+			t.Fatalf("00024 backfill: migrate to head: %v", err)
+		}
+		if toHead != appliedAbove(intermediate) {
+			t.Errorf("00024 backfill: applied %d on the way to head, want %d", toHead, appliedAbove(intermediate))
+		}
+		if v := appliedVersion(t, ctx, pool); v != maxVersionNo {
+			t.Fatalf("00024 backfill: version after head = %d, want %d", v, maxVersionNo)
+		}
+
+		// Data-level upgrade check: each pre-migration object's counter must
+		// equal the specific head of ITS OWN version log.
+		wantCounter := map[string]int32{objDeep: 3, objShallow: 2, objEmpty: 0}
+		for objectID, want := range wantCounter {
+			var counter, logMax int32
+			if err := pool.QueryRow(ctx, `
+				SELECT o.current_version_no,
+				       COALESCE((SELECT max(v.version_no)
+				                   FROM scientific_object_versions v
+				                  WHERE v.object_id = o.id), 0)
+				  FROM scientific_objects o
+				 WHERE o.id = $1`, objectID).Scan(&counter, &logMax); err != nil {
+				t.Fatalf("00024 backfill: probe counter: %v", err)
+			}
+			if counter != logMax {
+				t.Errorf("00024 backfill: object %s: current_version_no = %d, want max(version_no) = %d",
+					objectID, counter, logMax)
+			}
+			if counter != want {
+				t.Errorf("00024 backfill: object %s: current_version_no = %d, want %d", objectID, counter, want)
+			}
+		}
+	})
+
+	t.Run("00025 relations", func(t *testing.T) {
+		ctx := testCtx(t)
+
+		// Version 24 is the last migration before 00025: relations exists
+		// but has no current_version_no column yet. 00024 has already
+		// landed, so scientific_objects carries its counter here — the
+		// relation backfill must read relation_versions, not the object
+		// pointer.
+		intermediate := int64(24)
+		pool, url := testdb.SetupEmpty(t, ctx, adminURL(t), taskID)
+		_, err := persistence.MigrateTo(ctx, url, intermediate)
+		if err != nil {
+			t.Fatalf("00025 backfill: migrate to 24: %v", err)
+		}
+		// No exact applied count here: migrations numbered <= 24 that are
+		// not 00025 itself ride along (T0301's 00022 does today; the
+		// reserved numbers 21-23 would, if they land later). The semantic
+		// check is the version.
+		if v := appliedVersion(t, ctx, pool); v != intermediate {
+			t.Fatalf("00025 backfill: version after MigrateTo(%d) = %d, want %d", intermediate, v, intermediate)
+		}
+
+		// Seed rows written BEFORE the migration: the two scientific-object
+		// endpoints relation_versions references, then three relations whose
+		// version logs have different depths — one with two versions, one
+		// with one, one with none (its counter must stay at the column
+		// default, 0).
+		projectID, stateID, userID := seedCounterGraph(t, ctx, pool, "25")
+		seedEndpoint := func() string {
+			t.Helper()
+			var objectID, versionID string
+			if err := pool.QueryRow(ctx,
+				`INSERT INTO scientific_objects (project_id, object_type, created_by)
+				 VALUES ($1, 'dataset', $2) RETURNING id`, projectID, userID).Scan(&objectID); err != nil {
+				t.Fatalf("00025 backfill: seed endpoint object: %v", err)
+			}
+			if err := pool.QueryRow(ctx, `INSERT INTO scientific_object_versions
+				(object_id, version_no, state_id, schema_id, schema_version, title,
+				 lifecycle_state, payload, integrity_hash, created_by)
+				VALUES ($1, 1, $2, 'core/dataset', '1.0', 'Dataset', 'active',
+				        '{}'::jsonb, 'ih-counter', $3) RETURNING id`,
+				objectID, stateID, userID).Scan(&versionID); err != nil {
+				t.Fatalf("00025 backfill: seed endpoint version: %v", err)
+			}
+			return versionID
+		}
+		sourceV := seedEndpoint()
+		targetV := seedEndpoint()
+		seedRelation := func() string {
+			t.Helper()
+			var id string
+			if err := pool.QueryRow(ctx,
+				`INSERT INTO relations (project_id) VALUES ($1) RETURNING id`, projectID).Scan(&id); err != nil {
+				t.Fatalf("00025 backfill: seed relation: %v", err)
+			}
+			return id
+		}
+		seedVersion := func(relationID string, versionNo int) {
+			t.Helper()
+			if _, err := pool.Exec(ctx, `INSERT INTO relation_versions
+				(relation_id, version_no, state_id, relation_type,
+				 source_object_version_id, target_object_version_id,
+				 payload, integrity_hash, created_by)
+				VALUES ($1, $2, $3, 'depends_on', $4, $5, '{}'::jsonb, 'ih-counter', $6)`,
+				relationID, versionNo, stateID, sourceV, targetV, userID); err != nil {
+				t.Fatalf("00025 backfill: seed version %d: %v", versionNo, err)
+			}
+		}
+		relDeep := seedRelation()
+		seedVersion(relDeep, 1)
+		seedVersion(relDeep, 2)
+		relShallow := seedRelation()
+		seedVersion(relShallow, 1)
+		relEmpty := seedRelation()
+
+		// Continue to head: 00025's backfill UPDATE must set each counter
+		// from the relation_versions log that exists at that moment. The
+		// applied count is appliedAbove(intermediate) — the embedded files
+		// numbered above 24 — not "head - 24": maxVersionNo is the largest
+		// numeric prefix (sparse numbering: 21/23 reserved, 00022 present),
+		// and the runner applies exactly the files that exist.
+		toHead, err := persistence.Migrate(ctx, url)
+		if err != nil {
+			t.Fatalf("00025 backfill: migrate to head: %v", err)
+		}
+		if toHead != appliedAbove(intermediate) {
+			t.Errorf("00025 backfill: applied %d on the way to head, want %d", toHead, appliedAbove(intermediate))
+		}
+		if v := appliedVersion(t, ctx, pool); v != maxVersionNo {
+			t.Fatalf("00025 backfill: version after head = %d, want %d", v, maxVersionNo)
+		}
+
+		// Data-level upgrade check: each pre-migration relation's counter
+		// must equal the specific head of ITS OWN version log.
+		wantCounter := map[string]int32{relDeep: 2, relShallow: 1, relEmpty: 0}
+		for relationID, want := range wantCounter {
+			var counter, logMax int32
+			if err := pool.QueryRow(ctx, `
+				SELECT r.current_version_no,
+				       COALESCE((SELECT max(v.version_no)
+				                   FROM relation_versions v
+				                  WHERE v.relation_id = r.id), 0)
+				  FROM relations r
+				 WHERE r.id = $1`, relationID).Scan(&counter, &logMax); err != nil {
+				t.Fatalf("00025 backfill: probe counter: %v", err)
+			}
+			if counter != logMax {
+				t.Errorf("00025 backfill: relation %s: current_version_no = %d, want max(version_no) = %d",
+					relationID, counter, logMax)
+			}
+			if counter != want {
+				t.Errorf("00025 backfill: relation %s: current_version_no = %d, want %d", relationID, counter, want)
+			}
+		}
+	})
+}
+
+// seedCounterGraph writes the minimal user → organization → project → branch →
+// state graph that version rows reference (the same shape
+// TestConstraintEnforcement uses), through raw SQL so it works against any
+// intermediate schema. Returns the project, state and user ids.
+func seedCounterGraph(t *testing.T, ctx context.Context, pool interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}, suffix string) (projectID, stateID, userID string) {
+	t.Helper()
+	mustID := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("seed counter graph: %s: %v", sql, err)
+		}
+		return id
+	}
+	userID = mustID(`INSERT INTO users (handle, display_name) VALUES ($1, $1) RETURNING id`, "counter-"+suffix)
+	orgID := mustID(`INSERT INTO organizations (slug, name) VALUES ($1, $1) RETURNING id`, "counter-org-"+suffix)
+	projectID = mustID(`INSERT INTO projects (organization_id, slug, name, purpose, visibility, created_by)
+		VALUES ($1, $2, 'Counter project', 'testing version counter backfill', 'private', $3) RETURNING id`,
+		orgID, "counter-"+suffix, userID)
+	branchID := mustID(`INSERT INTO branches (project_id, name, visibility, git_ref, created_by)
+		VALUES ($1, 'main', 'private', 'refs/heads/main', $2) RETURNING id`, projectID, userID)
+	stateID = mustID(`INSERT INTO project_states (project_id, branch_id, state_hash, manifest_version)
+		VALUES ($1, $2, 'hash-counter', 'v1') RETURNING id`, projectID, branchID)
+	return projectID, stateID, userID
+}
+
 // appliedVersion reads the last applied migration version from the goose
 // bookkeeping table through the pool.
 func appliedVersion(t *testing.T, ctx context.Context, pool interface {
@@ -564,7 +899,7 @@ func appliedVersion(t *testing.T, ctx context.Context, pool interface {
 }
 
 // ---------------------------------------------------------------------------
-//  4. Append-only / constraint enforcement: each constraint must actually
+//  5. Append-only / constraint enforcement: each constraint must actually
 //     REJECT a forbidden UPDATE/DELETE/INSERT, with the exact SQLSTATE —
 //     not merely exist in the catalog.
 func TestConstraintEnforcement(t *testing.T) {

@@ -61,6 +61,15 @@ var appendOnlyTables = []string{
 	"external_reference_snapshots",
 }
 
+// targetedGuardTriggers are the NON-append-only row guards added after
+// 00014/00015, keyed "table:trigger" → the ":enabled:tgtype" suffix the
+// catalog row must end with. Migration 00028 adds the branch lifecycle
+// guard (BEFORE UPDATE, FOR EACH ROW → tgtype 19): a merged/aborted
+// branch's lifecycle and head pointer are immutable for ANY update path.
+var targetedGuardTriggers = map[string]string{
+	"branches:branch_lifecycle_guard_trigger": ":O:19",
+}
+
 // triggerRows returns every user trigger in the public schema as sorted
 // "relname:tgname:tgenabled:tgtype" strings, from pg_trigger itself.
 func triggerRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []string {
@@ -103,6 +112,9 @@ func triggerRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []string
 // so the 00014 guard alone could still be bypassed wholesale. A table carrying
 // only one of the two is no longer sufficient, so both are asserted rather
 // than just the first trigger found for the table.
+//
+// The set stays exact: besides the append-only pairs, the targeted guards in
+// targetedGuardTriggers are expected — anything else is a surprise.
 func assertTriggers(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tables []string) {
 	t.Helper()
 	// Keyed by "table:trigger" — a table legitimately has more than one now.
@@ -134,8 +146,19 @@ func assertTriggers(t *testing.T, ctx context.Context, pool *pgxpool.Pool, table
 				break
 			}
 		}
+		if _, ok := targetedGuardTriggers[rel]; ok {
+			continue
+		}
 		if !found {
-			t.Errorf("unexpected trigger on table %s (guard must cover exactly the append-only set): %s", name, tr)
+			t.Errorf("unexpected trigger on table %s (guards must cover exactly the expected set): %s", name, tr)
+		}
+	}
+	for key, want := range targetedGuardTriggers {
+		tr, ok := got[key]
+		if !ok {
+			t.Errorf("targeted guard %s missing", key)
+		} else if !strings.HasSuffix(tr, want) {
+			t.Errorf("targeted guard %s not enabled/expected event set: %s", key, tr)
 		}
 	}
 	var n int
@@ -512,12 +535,15 @@ func TestAppendOnlyUpgradePath(t *testing.T) {
 		t.Fatalf("upgrade path: migrate to head: %v", err)
 	}
 	// Derived, not hardcoded: this used to say "want 1" and went stale the
-	// moment a second migration was added above 00013.
-	if want := headVersion - 13; applied != want {
+	// moment a second migration was added above 00013. The count comes from
+	// the embedded set (appliedAbove) rather than "head - 13": numbering is
+	// sparse while parallel tasks hold reserved numbers, and the runner
+	// applies exactly the files that exist.
+	if want := appliedAbove(13); applied != want {
 		t.Errorf("upgrade path: applied %d on the way from 13 to head, want %d", applied, want)
 	}
-	if v := appliedVersion(t, ctx, pool); v != headVersion {
-		t.Fatalf("upgrade path: version after head = %d, want %d", v, headVersion)
+	if v := appliedVersion(t, ctx, pool); v != maxVersionNo {
+		t.Fatalf("upgrade path: version after head = %d, want %d", v, maxVersionNo)
 	}
 
 	assertTriggers(t, ctx, pool, appendOnlyTables)

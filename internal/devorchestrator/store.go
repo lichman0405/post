@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/lichman0405/post/internal/config"
 )
 
 // DefaultDAGPath and DefaultStatePath are the in-repo locations of the DAG
@@ -38,6 +40,41 @@ func lockPathFor(statePath string) (string, error) {
 		return "", fmt.Errorf("resolving state path %s: %w", statePath, err)
 	}
 	return filepath.Join(filepath.Dir(filepath.Clean(abs)), LockFileName), nil
+}
+
+// taskStateTime renders a time the way tasks/task_status.json records time:
+// UTC, ISO 8601, to the second. That is the shape scripts/validate_task_state.py
+// enforces in CI — its ISO_TS_RE admits no fractional seconds, and the check
+// applies it to started_at, completed_at and merged_at (NOT to history entries:
+// the validator iterates those four named keys only, so a history `at` it would
+// never read. History is rendered through here because the file should hold one
+// shape, not because CI would catch it) — so this is the one place the rule is
+// written down. It is NOT the shape of the run-record times (nowRFC3339,
+// milliseconds): those order records, this one describes a task's lifecycle to
+// the Supervisor and to CI.
+func taskStateTime(t time.Time) string { return t.UTC().Format(time.RFC3339) }
+
+// taskStateStamp is taskStateTime for a timestamp some other layer recorded.
+// The run start spawn passes to StartWorkerFrom carries nanoseconds — a start to
+// the second could not order a verdict written inside the same second (#105) —
+// and this file must not carry them.
+//
+// A value that does not parse is passed through unchanged rather than replaced
+// with a clock reading: this runs inside a state transition, and inventing a
+// time there would hide the wrong value. What the pass-through does NOT
+// guarantee is that CI names it: the validator's ISO_TS_RE accepts a date with
+// no time at all — `2026-09-13` fails time.Parse here and passes that regex — so
+// a date-only value would go through silently. Passing it through is still the
+// right half of the trade (a wrong value that survives is reported as itself,
+// where a clock reading would replace it with a plausible lie), but the value
+// being wrong is only visible if it is wrong in a way the regex rejects. The
+// only production caller passes runStartedAt(), which always parses.
+func taskStateStamp(recorded string) string {
+	t, err := time.Parse(time.RFC3339, recorded)
+	if err != nil {
+		return recorded
+	}
+	return taskStateTime(t)
 }
 
 // NewRunID returns a random run_id for a state change (crypto/rand, 8 bytes
@@ -263,6 +300,16 @@ type TransitionResult struct {
 	At     string `json:"at"`
 }
 
+// persistedReason is how a reason reaches a committed file. Every writer of
+// ts.History and ts.RejectionReason goes through here, so the redaction is a
+// property of the store rather than of one method: Transition carries the
+// reasoning below, and StartWorkerFrom — which appends its own history entry
+// without one — calls the same function, because "the reason is already
+// redacted" is a claim about the file, not about the caller.
+func persistedReason(reason string) string {
+	return config.RedactTextForOutput(reason)
+}
+
 // Transition applies id -> to under the exclusive lock: it validates the
 // transition against the current state (re-read after acquiring the lock),
 // appends a history entry carrying runID, and commits with an atomic rename.
@@ -276,12 +323,53 @@ func (s *Store) Transition(id string, to State, runID, reason string) (*Transiti
 	if runID == "" {
 		return nil, fmt.Errorf("internal error: transition without run_id")
 	}
+	// A reason is a persisted artifact and task_status.json is committed, so
+	// this is an output path like any other — but the text is free prose
+	// composed elsewhere (a check's detail, a Worker's own test command), so it
+	// goes through the text redactor rather than the value one. RedactForOutput
+	// would replace a multi-kilobyte reason with "***" the moment it contained
+	// one 40-character sha, which is how a leak turns into a deleted audit
+	// trail; see RedactTextForOutput.
+	//
+	// Found by a scan of the committed tree: a rejection reason carried the
+	// test command's inline environment verbatim, including a
+	// `postgres://user:pw@host` DSN. The value was one of the dev fixtures in
+	// internal/config/secretscan.go — already in docker-compose.yml and CI by
+	// design, so nothing was disclosed — but the mechanism is the T0011 class,
+	// and a command carrying a real token would have been committed
+	// permanently to a file nobody re-reads.
+	//
+	// What this does not cover, stated so it is not read as full coverage:
+	// RESULT.json is authored by the Worker in its own worktree and reaches the
+	// repository through the task PR, not through this store. Redacting it
+	// needs a collect-time pass over a file this package does not write.
+	reason = persistedReason(reason)
 	var result *TransitionResult
 	err := s.mutate(id, func(ts *TaskState, from State, states map[string]State) error {
 		if err := checkTransition(id, from, to); err != nil {
 			return err
 		}
-		if to == StateReady {
+		// Both transitions that mean "this task is about to be worked on" are
+		// checked, not only ready. The rule docs/30 §3 states is about starting
+		// ("dependencies are verified merged before a task starts"), and a task
+		// does not start when it becomes ready — it starts when it is spawned
+		// or reworked.
+		//
+		// The difference is not academic. The DAG is edited while tasks are in
+		// flight, and an edge added to a task already past ready is never
+		// re-examined by a check that only runs on the way in: T0603 was marked
+		// ready against ['T0105'], #102 later added T0208 to its closure, and it
+		// was dispatched anyway, ran a full Worker session, and reached
+		// verification carrying a gate (rsg-real-services) that cannot go green
+		// until the dependency it names is on main. Nothing could catch it
+		// afterwards — the Worker was already running — so the moment worth
+		// guarding is this one (L1-20260914-19).
+		//
+		// What this does not do, stated so it is not read as full coverage: it
+		// cannot stop an edge from being added to a running task, and it cannot
+		// unwind one that has already run. It only refuses to let it start
+		// again.
+		if to == StateReady || to == StateRunning {
 			unmet := map[string]State{}
 			for _, dep := range s.dag.Get(id).Dependencies {
 				if states[dep] != StateMerged {
@@ -292,7 +380,7 @@ func (s *Store) Transition(id string, to State, runID, reason string) (*Transiti
 				return &DependencyError{ID: id, Unmet: unmet}
 			}
 		}
-		at := time.Now().UTC().Format(time.RFC3339)
+		at := taskStateTime(time.Now())
 		ts.Status = to
 		ts.History = append(ts.History, StateChange{From: from, To: to, At: at, RunID: runID, Reason: reason})
 		if to == StateAccepted {

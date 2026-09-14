@@ -493,11 +493,24 @@ func TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt(t *testing.T) {
 	// cycle. Fixing one is a decision about what the gate means (change the
 	// task's gate, or split the work so the asserted paths exist earlier), not
 	// a missing edge — L1-20260913-19.
-	carriersTheChainTraps := map[string]string{
-		"T0204": "Project State & State Commit: T0208 (objects and versions) needs T0205 and T0207, and both need this task — an edge to T0208 closes a cycle",
-		"T0205": "Research Branch Domain: T0208 needs this task's branches directly",
-		"T0207": "Progressive Validation Gates: T0208 needs this task's :validate directly",
-	}
+	//
+	// EMPTY, and that is the resolved state rather than an unfilled one. The
+	// three knots were T0204, T0205 and T0207 carrying rsg-real-services, whose
+	// script drives the RSG HTTP surface — built by T0209, downstream of all
+	// three — so they could never be green however correct their work was. The
+	// knot was untied by giving each of the three a job that asserts its own
+	// acceptance criteria over real PostgreSQL (state-commit-real-services,
+	// branch-domain-real-services, validation-gates-real-services), which is
+	// "split the work so the asserted paths exist earlier" read the other way
+	// round: the gate now names what the task itself delivers. rsg-real-services
+	// keeps all 93 carriers that can satisfy it, T0208 among them.
+	//
+	// The map itself stays. It is what makes a future knot recordable instead of
+	// fatal — the alternative was deleting the allowance and the error branch
+	// that reads it, which would turn the next chain gate into a test failure
+	// with no way to state the reason. A name added here that is not actually
+	// unsatisfiable still fails the exactness check below.
+	carriersTheChainTraps := map[string]string{}
 	unsatisfiable := map[string]bool{}
 	for id, override := range spec.TaskOverrides {
 		task, ok := byID[id]

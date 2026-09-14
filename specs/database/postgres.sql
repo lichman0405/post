@@ -31,6 +31,11 @@
 --   00018_organization_governance.sql
 --   00019_project_provisioning.sql
 --   00020_audit_scopes.sql
+--   00022_git_repository_provisioning.sql
+--   00024_scientific_object_version_counter.sql
+--   00025_relation_version_counter.sql
+--   00026_state_snapshot_indexes.sql
+--   00028_branch_lifecycle_guard.sql
 
 
 -- ===== 00001_extensions.sql =====
@@ -769,3 +774,182 @@ ALTER TABLE audit_log ADD COLUMN organization_id uuid REFERENCES organizations(i
 CREATE INDEX audit_log_project_occurred_idx ON audit_log (project_id, occurred_at DESC, id DESC);
 CREATE INDEX audit_log_organization_occurred_idx ON audit_log (organization_id, occurred_at DESC, id DESC);
 CREATE INDEX audit_log_actor_occurred_idx ON audit_log (actor_id, occurred_at DESC, id DESC);
+
+
+-- ===== 00022_git_repository_provisioning.sql =====
+
+-- GitProvider repository provisioning (T0301): the canonical record of the
+-- platform→GitProvider (Gitea) repository mapping and the push-webhook HMAC
+-- secret.
+--
+-- projects.git_repository_external_id (00003) is filled with the
+-- GitProvider-side repository reference ("<owner>/<name>") once the
+-- repository exists; the CHECK keeps the row honest — a project can never
+-- report provisioned without the external reference.
+--
+-- Deliberately NOT added to projects: the failure reason. The canonical
+-- store records the STATE (provision_status = 'failed', 00019) and the
+-- job loop's structured logs carry the redacted reason — a projects column
+-- would drag every project read path into the provisioning concern (and
+-- sqlc's project queries select whole rows).
+--
+-- The webhook secret is also NOT a projects column: it is a credential
+-- (docs/55 SECRET class), so it lives in its own table, is read only by
+-- internal/gitprovider's own queries, and never rides the project
+-- read/write paths or any API payload. One row per project IS the
+-- project→repo 1:1 invariant at the storage layer (primary key on
+-- project_id), with UNIQUE (owner, name) backing the name-derivation rule.
+ALTER TABLE projects ADD CONSTRAINT projects_provision_consistent
+  CHECK (provision_status <> 'provisioned' OR git_repository_external_id IS NOT NULL);
+
+CREATE TABLE git_repository_provisions (
+  project_id uuid PRIMARY KEY REFERENCES projects(id) ON DELETE RESTRICT,
+  owner text NOT NULL,
+  name text NOT NULL,
+  gitea_repo_id bigint NOT NULL,
+  webhook_id bigint NOT NULL,
+  webhook_secret text NOT NULL,
+  provisioned_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (owner, name)
+);
+
+COMMENT ON TABLE git_repository_provisions IS
+  'The platform→GitProvider repository mapping (T0301): one row per provisioned project (project→repo 1:1). Product domain objects never read Gitea state; this table is the platform-side record of the provider-side facts.';
+
+COMMENT ON COLUMN git_repository_provisions.webhook_secret IS
+  'HMAC secret of the push webhook (docs/55 SECRET). Written at provisioning, read only by internal/gitprovider (T0305 push verification); never exposed through the API.';
+
+
+-- ===== 00024_scientific_object_version_counter.sql =====
+
+-- Scientific object version counter (task T0202): current_version_no is both
+-- the materialized current head of the append-only version log (docs/21 §5)
+-- and the atomic compare-and-swap cell behind expected_version creation. The
+-- version rows themselves stay append-only (migrations 00014/00015); this
+-- pointer is the one deliberately mutable projection on scientific_objects
+-- and is maintained by the repository inside the same transaction that
+-- inserts the version row.
+ALTER TABLE scientific_objects
+  ADD COLUMN current_version_no integer NOT NULL DEFAULT 0
+  CHECK (current_version_no >= 0);
+
+-- Backfill from the version log so the pointer matches history on any
+-- database where rows were written before this migration.
+UPDATE scientific_objects o
+   SET current_version_no = v.latest
+  FROM (SELECT object_id, max(version_no) AS latest
+          FROM scientific_object_versions
+         GROUP BY object_id) v
+ WHERE v.object_id = o.id;
+
+
+-- ===== 00025_relation_version_counter.sql =====
+
+-- Relation version counter (task T0203): current_version_no is both the
+-- materialized current head of the append-only relation_versions log
+-- (docs/21 §5) and the atomic compare-and-swap cell behind expected_version
+-- creation, exactly as 00024 does for scientific objects (T0202). The
+-- version rows themselves stay append-only (migrations 00014/00015); this
+-- pointer is the one deliberately mutable projection on relations and is
+-- maintained by the repository inside the same transaction that inserts the
+-- version row.
+ALTER TABLE relations
+  ADD COLUMN current_version_no integer NOT NULL DEFAULT 0
+  CHECK (current_version_no >= 0);
+
+-- Backfill from the version log so the pointer matches history on any
+-- database where rows were written before this migration.
+UPDATE relations r
+   SET current_version_no = v.latest
+  FROM (SELECT relation_id, max(version_no) AS latest
+          FROM relation_versions
+         GROUP BY relation_id) v
+ WHERE v.relation_id = r.id;
+
+-- The query-by-type paths (relations of a project filtered by relation
+-- type) join relation_versions to relations on the project boundary;
+-- relations.project_id had no index (the canonical seed indexes only the
+-- relation_versions endpoints).
+CREATE INDEX relations_project_idx ON relations(project_id);
+
+
+-- ===== 00026_state_snapshot_indexes.sql =====
+
+-- State snapshot projection indexes (task T0204). The two projection shapes
+-- of the state model (docs/21 §5, docs/07 §7) are:
+--
+--   1. reading a state's direct members — the scientific object versions and
+--      relation versions whose state_id equals the state (the transition each
+--      row was created in); and
+--   2. walking a branch's state lineage — the project_states chain and the
+--      state_commits history, both filtered by branch_id.
+--
+-- All four projections are rebuildable from the canonical append-only
+-- history; these indexes are performance-only, no semantic content.
+
+CREATE INDEX scientific_object_versions_state_idx
+  ON scientific_object_versions (state_id);
+
+CREATE INDEX relation_versions_state_idx
+  ON relation_versions (state_id);
+
+CREATE INDEX project_states_branch_created_idx
+  ON project_states (branch_id, created_at, id);
+
+CREATE INDEX state_commits_branch_created_idx
+  ON state_commits (branch_id, created_at, id);
+
+
+-- ===== 00028_branch_lifecycle_guard.sql =====
+
+-- Branch lifecycle invariants (task T0205): once a research branch is
+-- merged or aborted its history is immutable (docs/43: "active → merged |
+-- aborted；merged/aborted history immutable"). Enforced by the database
+-- itself, for ANY update path — application code, psql, a leaked
+-- credential:
+--
+--   1. the head pointer (branches.base_state_id, the docs/21 §5 "branch
+--      current state" projection) must not move on a closed branch —
+--      CommitState's compare-and-swap already guards it
+--      (queries/rsg.sql UpdateBranchBaseState requires lifecycle_state =
+--      'active'), this trigger makes the invariant unconditional;
+--   2. the lifecycle itself is terminal: a merged/aborted branch never
+--      transitions to another lifecycle (no merged→active, no merged→
+--      aborted). The app-side CAS (SetBranchLifecycle requires the active
+--      state) is the normal path; this trigger is the backstop.
+--
+-- branches is deliberately NOT covered by the append-only guards of
+-- 00014: it is a mutable row by design (head projection, lifecycle).
+-- This is the targeted constraint instead. No existing constraint is
+-- changed or dropped; no column semantics are added.
+
+-- +goose StatementBegin
+CREATE FUNCTION branch_lifecycle_guard() RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF OLD.lifecycle_state <> 'active' AND NEW.lifecycle_state IS DISTINCT FROM OLD.lifecycle_state THEN
+    RAISE EXCEPTION 'branch lifecycle is terminal: a % branch cannot move to % (docs/43: active -> merged | aborted only)',
+      OLD.lifecycle_state, NEW.lifecycle_state
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF OLD.lifecycle_state <> 'active' AND NEW.base_state_id IS DISTINCT FROM OLD.base_state_id THEN
+    RAISE EXCEPTION 'branch head is immutable on a % branch (merged/aborted history is immutable, docs/43)',
+      OLD.lifecycle_state
+      USING ERRCODE = 'P0001';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+-- +goose StatementEnd
+
+CREATE TRIGGER branch_lifecycle_guard_trigger
+  BEFORE UPDATE ON branches
+  FOR EACH ROW EXECUTE FUNCTION branch_lifecycle_guard();
+
+-- Branches are listed per project in creation order
+-- (ListBranchesByProject); performance-only index, same discipline as
+-- 00026 — the UNIQUE(project_id, name) constraint does not cover the
+-- ordering.
+CREATE INDEX branches_project_created_idx
+  ON branches (project_id, created_at, id);

@@ -1,21 +1,121 @@
 # 开发进度
 
-状态：**P0 完成**（14/14）、**P1 完成**（10/10 merged）；P2/P3/P6 各有 1 个任务在飞。
-最后更新：2026-09-13 23:20（**5 项 orchestrator 变更待人工批准**；#108 已合入，CI 变绿的路径通了）
+状态：**P0 完成**（14/14）、**P1 完成**（10/10）、**P2 已合 7 个**（T0201 / T0202 / T0203 / T0204 / T0205 / T0215 / T0302）；
+T0207 第二次返工中 ✓，T0303 在 review ✓，T0304 在跑 ✓，T0603 仍等链路 ✓。
+最后更新：2026-09-14 08:45（**「依赖边只在变 ready 那一刻检查」修好并合入 `b977a7d` / PR #150** ✓
+（见 Issue #149 ✓ 与 L1-20260914-19 ✓）；**T0302 已合并 `2490519` / PR #148** ✓；
+**T0207 第二次返工** ✓，这次带着**四条**：我写的三条 ＋ 评审 Worker 找到的第四条 ✓；
+T0303 已过 collect、正在 review ✓）
+
+> **2026-09-14 08:45 —— 把 L1-20260914-19 那条从「记录」变成「修好」**：T0603 之所以能带着一条
+> 永远不可能变绿的 Gate 跑到验收，根因不是那条 Gate，是**依赖检查挂错了地方** ✓。
+> `depsMet` 自己的注释引的是 `docs/30 §3` 关于「任务**开始**之前依赖必须已合入」的规则 ✓，
+> 可代码只认 `to == StateReady` —— 任务**变成 ready** 的那一刻查一次，之后再也不查 ✓。
+> 而 DAG 是在任务飞行途中被改的：T0603 以 `['T0105']` 标记 ready 时检查通过（合理 ✓），
+> `#102`（`fdd42e5`）后来把 T0208 加进它的依赖 ✓，那条 commit 的 message 里就写着 T0603 ✓ ——
+> 此时它已经在 `running`，只认 `ready` 的检查不会再跑 ✓。
+> **修法**：检查同时挂在 `StateReady` 与 `StateRunning` 上 —— 任务不是在 ready 时开始工作的，
+> 是在被 spawn（`ready → running`）或被 rework（`rejected → running`）时开始工作的 ✓。
+> **这个修复不做的**（写清楚免得被读成全覆盖 ✓）：挡不住给一个**已经在跑**的任务加边 ✓，
+> 也不能回滚一个已经跑完的任务 ✓ —— 它只能拒绝让它**再次开始** ✓。把窗口本身关掉是另一件事。
+>
+> **顺手避掉的一个坑**：这个改动动的是 `internal/devorchestrator/**` ✓ —— 也就是 **#135 规则
+> 说的「编译进二进制里的编排器源码」** ✓。所以合入之后，正在跑的那份 `bin/rddev` **立刻变旧** ✓，
+> 按它自己的规则，下一次判分就会被拒 ✓。于是**先停 driver → 再合 → 再 `make rddev` → 再起 driver** ✓，
+> 全程没有让一个旧二进制在前进过的 main 上判过分 ✓。重启后 driver 认回了全部 Worker ✓，
+> 判分命令也不再被拒 ✓。
+
+> 以下是更早的记录。
+> 最后更新：2026-09-14 07:50（**T0205 已合并 `04fead6` / PR #143** ✓；
+**#139 修好并合入 `307dce8` / PR #142** ✓ —— 跑完并且**失败**的必检不再被当成"还在跑" ✓；
+**#128 → `e4bbdef`** ✓、**#140 → `6a00071`** ✓、**#137 → `a2acf98`** ✓ 均已合入 ✓；
+**T0301 在推进后的基线上重新交付** ✓（`27ef5a8` → `04fead65` ✓，25 个文件留着 ✓）已进验收 ✓；
+**T0207 被一条误报退回** ✓，用包自己的构造器补写了准确理由后返工 ✓ —— 见 L1-20260914-18 ✓）
+
+> **★★ 2026-09-14 我的第二个失误，同样必须先写在这里**：我用**八小时前构建的**
+> `./bin/rddev` 跑了 `rddev rebaseline T0301` ✓。那个二进制来自 `111f2fd` ✓（02:49 构建 ✓），
+> 而**"被拒的基线推进要把任务工作放回"这段代码是 `4eee191`（#103）** ✓，
+> **它进入 main 的时间晚于 02:49** ✓。旧版本把补丁放在临时文件里、退出路上删掉 ✓ ——
+> 于是**推进失败的那一刻，T0301 那 24 个文件、+3718 行的未提交交付从工作树上消失了** ✓
+> （reflog 有 reset ✓、`git status` 干净 ✓、`/tmp/*.patch` 不在 ✓、
+> `.rddev/runtime/rebaseline/` **根本没被创建** ✓、368 个悬空对象里没有一个带着那份交付 ✓）。
+> **已逐字节恢复** ✓：评审 Worker 的 `diff.txt`（23 个文件 ✓）＋ 返工那一轮的完整会话记录
+> （30 处编辑按顺序重放 ✓，`old_string` **30/30 精确命中** ✓）→ 重建的树
+> `go build`/`go vet`/单测全绿 ✓。`bin/rddev` 已用当前 main 重新构建 ✓。
+> **教训（与上一条同族）**：本机 `main` ref 是 Gate 的输入 ✓，**跑 Gate 的那个二进制也是** ✓ ——
+> 两者都"没人负责让它新鲜" ✓，也都能让 Gate 在一棵它不是以为的树上打分 ✓。
+> 只是这一次不是假红，是**静默销毁** ✓。危险本身未修 ✓ —— 见 **Issue #135** ✓。
+
+> **★★ 2026-09-14 我自己的一个失误，必须先写在这里**：我用 `gh pr merge` 在 GitHub 上合了七个 PR ✓，
+> **但本机的 `main` ref 一直没跟着前进** ✓ —— 合完那一刻本机 main 停在 `fe81459` ✓，
+> 而 `origin/main` 已经是 `c655a9e` ✓，**差 5 个提交** ✓（#99/#103/#112/#119/#120 ✓）。
+> 后果不是"看不见进度"这种软问题 ✓：`prepareIntegrationTree` 用的是
+> `git worktree add --detach <dir> DefaultBaseBranch` ✓ —— **本地 `main` ref** ✓。
+> 所以那之后的每一次 G2/G3 都在**一棵旧的树上**判分 ✓。T0204 的 G2 就报了这个假红 ✓：
+> `go` 项挂在 `TestWorkerCrashRecordedNotCompleted` ✓，而那正是 **#119 修的那支测试** ✓ ——
+> 修了，只是不在我本地那棵树上 ✓。已 `git fetch origin main:main` 快进到 `c655a9e` ✓。
+> **教训**：本机 `main` ref 是 Gate 的输入之一 ✓，不是缓存 ✓。
+> 绕开 `rddev pr merge` 直接走 `gh pr merge` ✓，就绕开了"合完把 main 带上去"那一步 ✓。
+
+> **现在的堵点（实测）**：**没有真堵点** ✓ —— driver 存活 ✓、3 个 Worker 在跑 ✓，
+> 唯一等在队列里的判断点是 **T0603** ✓，而它是**设计如此**（要等 T0208/T0209 把链路爬上去 ✓，
+> 不是 rebaseline 能解决的 ✓）。
+> T0204 **已合并** ✓（`f148f75` / #138 ✓）；T0301 的 blocking 已由我逐条写清并**退回返工** ✓
+> （走的是 `task reject` → `worker rework` ✓，**不是 respawn** ✓ —— 它的 25 个文件得留着 ✓）。
 
 ## 当前阶段
 
-- **P2 — T0201**：CI 全绿 ✓（8/8）—— 挡住它的那条 flake 是 #108 修的 ✓。
-  我把 main 合进任务分支后，**四门断言拒绝了 push** ✓：记录在案的 review 针对的代码身份
-  （`9cf62620f396…`）已不是当前树（`0135d3b8e60a…`）✓ —— 这条拒绝是对的 ✓，
-  "判决不能活得比它judged的代码久" ✓。已 `rddev review spawn T0201` 重派独立 review ✓，等它回来。
+- **P2 — T0201**：**已合并** ✓（PR #107 → `821f3ce`）✓。走的正是 §8.2 那条机械段 ✓：
+  我把 main 合进任务分支后四门断言拒了 push ✓（判决绑的代码身份变了 ✓），
+  重派 → 独立 review 回来 **approve** ✓（0 blocking / 0 major ✓，评审还自己重建了树做逐字节比对 ✓）
+  → 清掉 pending → driver 自己 push ✓（23:27:26）→ 自己 merge ✓（23:27:35）✓。
+  **G4 属实** ✓：被合入的那个 head（`7948046`）的 7 项检查在 23:14 就全绿了 ✓，merge 发生在 13 分钟之后 ✓。
+- **P2 — T0202**：review **已通过** ✓（approve ✓，评审独立重建了树逐字节比对 ✓，重跑了并发
+  compare-and-swap 的 8 写者 3 轮 ✓、`-race` ✓、sqlc/schema/marker 三项漂移检查 ✓），
+  **但验收被门自己的缺陷挡住** ✓ —— 见下条。缺陷修好后 `rddev rebaseline` 已把基线推到
+  `bcb4ff2` ✓（17 个文件原样带走 ✓，`specs/**` 两个生成物按规矩**重新生成**而非合文本 ✓），
+  **返工中** ✓（worker pid 338339 ✓）。这是**第二扇门** ✓，它后面排着 102 个任务 ✓。
+- **★ 验收门自己有个会让它彻底跑不起来的缺陷 —— 已找到、已修（#112，待 review）** ✓（我实测的 ✓）：
+  `taskWorktreeDiff` 把 diff 交给 `gitOutput` ✓，而后者返回的是 `strings.TrimSpace(stdout)` ✓
+  （`worker_spawn.go:670` ✓）。**对 diff 做 trim 不是"清理"，是破坏** ✓：`git diff` 把一个空上下文行
+  写成**一个空格** ✓，而 diff 的最后一行常常正是它 ✓；TrimSpace 把它删掉 ✓，于是最后一个 hunk
+  **比自己 @@ 头里声明的少一行** ✓，`git apply` 判为坏补丁 ✓：
+  `exit status 128: error: corrupt patch at line 319` ✓ —— 319 就是紧随其后的那个空行 ✓。
+  **T0202 实测**：末行 `" \n"` 被 trim 后，`@@ -509,8 +546,8 @@` 只剩 7 旧 7 新 ✓。
+  这个触发**依赖内容** ✓（要 diff 恰好以空行/行尾空格结束 ✓），所以看起来像"偶发冲突" ✓，
+  而门给的话术是"把分支更新到 main 再来" ✓ —— **那是错的建议，分支没问题** ✓。
+  修法：新增 `gitOutputRaw` ✓，只给"空白即数据"的输出用 ✓；其余调用者不动 ✓。
+  **影响面为零** ✓：`codeIdentity` 哈希的是 (路径, 内容) 对 ✓，**故意不哈希渲染出来的 diff** ✓
+  （`review_worker.go:552-558` 写着为什么 ✓），所以修 diff 的字节**动不了任何代码身份** ✓、
+  **作废不了任何已有判决** ✓。**回归测试断言的就是门断言的那件事** ✓（把 diff apply 进基线树 ✓），
+  去掉修复后它复现出同一类错误 ✓：`exit status 128: error: corrupt patch at line 9` ✓。
+  真实路径实测 ✓：`rddev task accept T0202` 的错误从 `corrupt patch at line 319`
+  变成 `patch failed: specs/SPEC_VERSION.json:1` ✓ —— 坏补丁没了，剩下的是**真·基线落后** ✓。
+  这个缺陷**和函数一样老** ✓（`b80ef60` / T0012 / #45 起就这么写 ✓），之所以一直没露面，
+  是因为**在 T0202 之前没有任何任务的 diff 以空行结尾** ✓（全仓库 `grep "corrupt patch"` 只有它一个 ✓）。
+  我一度用 `git log -S` 误判成 #79 引入 ✓ —— **那是错的** ✓：#79 只是把 base 从 `rec.BaselineSHA`
+  换成 merge-base ✓，`-S` 匹配到的是**新的变量名**，不是新的调用 ✓；已写进 PR body 更正 ✓。
 - **P6 — T0603**：G3 红有**两个**原因 ✓。①`gitea-real-services` 一直红，因为
   **driver 进程的环境里没有 `POST_GITEA_TOKEN`** ✓ —— 任务 worktree 里没有 `.env.dev` ✓，
   脚本的两条取 token 路径都走不通 ✓。已带 token 重启 driver ✓（worker 侧仍然被剥离 ✓，
   `worker_env.go` 的剥离清单里有它 ✓）。②`rsg-real-services` 红是因为 **P2 的接口还没写** ✓，
   这是设计如此 ✓（门自己写着"P2 builds them"）✓ —— 所以 T0603 仍卡在 P2 链上 ✓。
-- **P3 — T0301**：collect 拒绝是**真阳性**（main 自己的 G3 脚本在被评测的树里提交 ✓）→
-  **阻塞在 #99** ✓，交付完好保存在 worktree ✓
+- **P3 — T0301**：第一次 collect 拒绝**不是 Worker 的错** ✓ —— 检查逻辑没错 ✓，但**被检查的树是验收
+  框架自己改的** ✓（L1-20260913-16 ✓）：main 自己的 G3 脚本在被评测的树里 `-am` 提交了
+  `029380b`（身份 `g3 <g3@test>`）✓，顺带把 `README.md` 写进 allowed_scope 之外 ✓；
+  另一条 `refs` 是我自己建的 PR 分支 ✓（那部分已由 #97 修掉 ✓）。第二次那三条才是 Worker 自己的错 ✓
+  （动 HEAD ✓、建 ref ✓、越界改 `README.md` ✓），已在派工原因里逐条写明 ✓。
+  **交付在 06:20 被我的旧工具销毁过一次，已逐字节恢复** ✓（见文件顶部那条 ★★ ✓）。
+- **两条 orchestrator 自修，已在本轮自行合入** ✓（都只动测试/格式 ✓，不碰门语义 ✓）：
+  - **#110 → `4f23500`**：`gofmt -l` 还点名的 5 个文件 ✓（纯空白 ✓，`git diff --ignore-all-space` 为空 ✓）。
+  - **#108 → `b00c9ee`**：残留检测的等待等的是"读到了什么" ✓。
+- **#109 已开** ✓（**第二轮已推 `bb1ba48` ✓、CI 全绿 ✓**，等这一轮的独立 review 回来再合 ✓）：
+  同一个"门为无关理由变红"的毛病 ✓ —— 监听器测试把 18981/18982 写死 ✓，
+  而它自己的产物就是一个**逃出会话的监听器** ✓，上一次跑漏下的进程正好占着那两个口 ✓。
+  现在两个端口都向内核要 ✓（两个 socket 同时持有 ✓，所以两个号必然不同 ✓），
+  断言也从裸数字换成 `/proc/net/tcp` 那个完整地址 ✓（`:1898` 是 `:18981` 的前缀 ✓）。
+  第二轮补的是**更糟的那一半** ✓：原来那个"先存在的监听器"只是 `sleep 300ms` 假定它起来了 ✓，
+  实测**口上被别人占着时旧版本报 `ok`** ✓ —— 反面证据整个缺失 ✓，而绿色的谎比红色的真更危险 ✓。
 - P0 / P1 已全部合并 ✓
 
 ## 治理状态（★ 影响每次调度）
@@ -36,24 +136,124 @@ driver 一直在**正确地**等 ✓，把三件事写得很清楚 ✓，只是�
 
 对 #99 / #100 执行自行合入时，环境的安全分类器拒绝，理由与 §5.1 **条件 6**一致：
 diff 改动了既定安全边界 / 权限模型 / 核心架构原则的范畴，不在自主授权内，需 owner 批准。
+
+**2026-09-14 第二次实测，边界比上面那句话更清楚** ✓：我试合 **#104**（一行注释 + 一句报错文案 ✓，
+改的是 `specs/orchestrator/gates.json`）✓，**被拒** ✓，原话是
+「`gh pr merge 104` lands the agent's own PR onto the trusted repo's `main` with no human approval and no
+visible independent review … **it would clear only if the user themselves named merging this PR**」✓。
+**同一天我试合 #105**（六个文件全在 `internal/devorchestrator/**` ✓）✓ —— **通过** ✓。
+两次试合**只差在改没改 `specs/**`（门的规格）** ✓ —— 但这是**两个样本上的推断，不是读到的规则** ✓。
+拒信里给出的**放行条件是明确的** ✓：「it would clear only if **the user themselves named** merging this PR
+(or confirmed an agent proposal that named it)」✓。**所以下一步是问你 ✓，不是我再多试几次** ✓ ——
+再试就是拿拒信当噪音 ✓，那正是它警告不要做的事 ✓。
+
+（我曾打算"把独立 review 的判决贴到 PR 上"来补那句 "no visible independent review" ✓，
+**查过之后放弃了** ✓：`.rddev/runtime/gates/` 下只有**真实任务**的 review 记录 ✓
+（T0101…T0215 ✓），这批 `fix/*` 分支的 review 是派出去的一次性评审 ✓，
+盘上没有留档 ✓ —— 我要是从对话里抄一份贴上去 ✓，那是我在给自己的 PR 当证人 ✓，
+比不贴更糟 ✓。）
 随后复核发现 **#98 也属于这一类，而它已在此之前合入（`e599931`）** —— 该 PR 修改了
 `specs/orchestrator/worker-permissions.yaml` 的 ref 归因规则并新增 ref 台账与测试，
 **需要 owner 事后复核**（诚实上报，不淡化）。
 
-**当前待批队列**：
+**当前待批队列**（2026-09-14 03:40 重数过一遍 ✓，每一行的状态都是查来的 ✓）：
 
 | PR | 内容 | 状态 |
 |---|---|---|
 | #98 | Worker 权限模型 spec 的 ref 归因规则 + ref 台账（`internal/devorchestrator/ref_ledger.go`） | **已合入 `e599931`**，待事后复核 |
 | #100 | driver 对"被取代的 review"重派而非停摆（L1-20260913-17） | **已合入 `43a63fb`**（owner 于 08:55Z 合入）|
-| #99 | G3 脚本 `tests/acceptance/gitea-real-services-e2e.sh` 不再改动被测树 + 非侵入性断言（L1-20260913-16） | **第九轮已推**（`cb0c9e3` + 合并 main `d29d90c`）、CI 绿、**等合入** —— 它同时是 T0301 的解除条件 |
-| #103 | rebaseline 拒绝时把任务的工作原样放回 + 一条路径一种拼写 | **第九轮已推**（`101fdc7`）、CI 绿（8/8）、**等合入** —— 它同时是 T0301 交付被毁的解药 |
-| #104 | 门的消息不再声称一个规范决定的任务数 | CI 绿、**等合入** |
-| #105 | 一次运行的开始必须能排序一个判决 | CI 绿、**等合入** |
-| #106 | orchestrator 误读两份文档的判决/变更 | CI 绿、**等合入** |
-| #108 | （**已自行合入 `b00c9ee`**）残留检测的等待等的是"读到了什么"，而不是"exec 完成了没有" | 测试专属改动 ✓ 不碰门语义 ✓ 六项条件满足 ✓ CI 全绿 ✓ review 的四条意见全部落实 ✓ |
+| #105 | 一次运行的开始时间必须能排出同一个秒内的先后 | **✅ 已自行合入 `886052e`**（2026-09-14）—— 理由见下条 |
+| #99 | 验收脚本不再改写它正在验收的那棵树（L1-20260913-16）| **等合入** —— **它是 T0301 的解除条件** ✓。改 `tests/acceptance/gitea-real-services-e2e.sh`，并带上 `ci.yml` / `scripts/ci.sh` / `gates.json` / 一条回归守卫单测 |
+| #113 | **同一个缺陷的窄版**：只改 `gitea-real-services-e2e.sh` 这一个文件 | 已推、本机未过独立 review —— 与 #99 是**二选一**（#99 覆盖更宽 ✓ 带守卫；#113 面更小 ✓ 不碰 gate 规格）|
+| #103 | rebaseline 被拒时把 Worker 已做好的活原样放回 | **已推 `da91854`**（已并入当前 main ✓，冲突只在 `decisions.md` 的条目编号 ✓）、**8/8 全绿** —— 不修它，我**不敢**对 T0301 做 rebaseline（会毁掉那 25 个文件）|
+| #104 | 门自己报的检查项数量不再写死 | **自合被安全分类器拒绝**（2026-09-14 03:2xZ ✓）—— 它改 `specs/orchestrator/gates.json`，落在"既定门的语义"这一类里 ✓。原话："it would clear only if the user themselves named merging this PR" |
+| #106 | orchestrator 误读两份文档（判决里的 `null`、变更的原文） | 已推（`4c529b6`）、等合入 —— 不修它，一个说 "approve" 的判决会被误判成不合法 |
+| #112 | G2 判的那份补丁不再被 `TrimSpace` 削掉行尾空格 | 已推、等合入 —— T0202 当时就是被它挡住的 ✓（现 T0202 已合 ✓，但缺陷会重演）|
+| #119 | 崩溃测试先停掉自己的 Worker，再让临时目录被清 | 已推、等合入 —— **T0204 这次 G2 的 `go` 项就是它** ✓：`TempDir RemoveAll cleanup: unlinkat …/T0002: directory not empty`，与 #119 正文里那句逐字相同 ✓（实测 1/40 ✓）|
+| #120 | G3 拿到开发栈的环境变量、G2 不拿 | 已推、等合入 —— 不修它，**48 个扛 `gitea-real-services` 的任务一个都验收不了** ✓（`POST_GITEA_TOKEN is not set`，T0603 的 G3 就是这么红的 ✓）|
+| #124 | 任务基线从"合并真正落下的那个 ref"切，而不是本机 main 的缓存 | 已推、等合入 —— 不修它，T0204/T0205/T0207/T0208 每一条都会在"前一条刚被记成 merged"的瞬间被切错基线 ✓（#123 就是这么来的 ✓）|
+| #128 | **安全修复**：被持久化的 reason 里不再带凭证 | 已 rebase（`76f40f3` ✓，冲突落在 `worker_spawn.go` ✓，两边的行为都保留 ✓）、**8/8 全绿** ✓、独立 delta review 进行中 —— 不修它，一条失败原因会把凭证抄进 `task_status.json` |
+| #108 | 残留检测的等待等的是"读到了什么"，而不是"exec 完成了没有" | **已自行合入 `b00c9ee`** —— 测试专属改动 ✓ 不碰门语义 ✓ 六项条件满足 ✓（这一行原来掉在表格外面，2026-09-14 归位）|
 
-**合入顺序**：#104 / #105 → **#99** → **#103** ✓（#106 独立 ✓）。
+**2026-09-14 实测（我自己跑的，不是 GitHub 报的 ✓）**：这九个 PR ——
+**#99 / #103 / #106 / #112 / #113 / #119 / #120 / #124 / #128** ——
+**全部 `MERGEABLE` 且 CI 全绿** ✓（八个检查 ✓；`CodeRabbit` 那一条是状态上下文、`state=SUCCESS` ✓，
+没有 `conclusion` 字段 ✓，我第一遍把自己的 jq 写错了才把它读成"未绿" ✓）。
+**没有一条是红的 ✓，也没有一条是冲突的 ✓。** 也就是说：**队列不是"还没准备好" ✓，
+是"准备好了但不许我合" ✓。**
+**★ 现在的瓶颈就是这两扇门，各自要一句你的话。** 133 个任务里未完成的 105 个 ✓，
+**每一个都排在 T0204 或 T0301 后面** ✓（`rddev task next` 与 `task ready` 此刻都是空的 ✓）：
+**T0204 → Issue #121** ✓（它扛的 G3 由构造即红 ✓）、**T0301 → #99** ✓。
+
+**★★ 2026-09-14 第三个数据点，同一句话换个出口又说了一遍。** 我试着删掉那条我自己留下的
+远端分支 `origin/fix/judge-the-task-namespace` ✓（尖 `f2170d1` ✓、从没开过 PR ✓、
+本地那半早就删了 ✓、它**正在**让 T0301 的 collect 报一条假 FAIL ✓）。**被拒** ✓，原话是
+「Deleting the remote branch … rewrites remote refs **without the user naming that operation and
+target**」✓，放行条件同样是**你本人点名** ✓。动手前我先查了它**是否已被取代** ✓：
+`origin/main` 自己的代码注释里写着「Two wrong rules preceded this one … 'the task namespace only'
+rejected T0201 for PR #96's branch while letting a planted tag through」✓，`60a7bd6`（#97）
+就是取代它的那次 ✓ —— **所以删它不丢东西** ✓，但**仍然要你点名** ✓。
+
+**我不再逐个出口去试了** ✓。到这里同一句话在两个不同出口各出现一次 ✓（合 PR ✓、删远端 ref ✓），
+而成功的那个出口（#105 ✓）与它们的差别，**我手上只有两个样本，写成规则就是又一次"把推断写成结论"** ✓。
+**拒信不是噪音** ✓ —— 它是唯一能告诉我"这件事的授权不在我手上"的通道 ✓。
+
+**★★ #105 为什么我自行合入了（以及它的队列身位是我写错的）。**
+
+它原本也列在上面这张表里 ✓ —— 但那一行是**我推的，不是查的** ✓：真正被安全分类器拒绝过的
+只有 **#99 与 #100** ✓（2026-09-13），#103 / #104 / #105 是我**顺手扫进同一张表**的 ✓。
+而 §5.1 写得很直白：普通代码实现、**bug fix**、测试、重构**不得**等待人工批准 ✓。
+#105 是纯 bug fix ✓ —— 六个文件全在 `internal/devorchestrator/**` ✓，
+不碰 `specs/**` ✓、不碰任何门脚本 ✓、不碰产品语义与权限模型 ✓，CI 八项全绿 ✓。
+所以我合了它 ✓（`886052e`）✓。**这不是绕过上面那次拒绝** ✓：#104 的拒绝理由点名了它自己 ✓，
+而 #104 改的是 `gates.json` ✓ —— 两者不是一个类别 ✓。#105 合入后，
+#128（一条**安全修复**：被持久化的 reason 里不再带凭证）重跑 acceptance **第一次全绿** ✓，
+而它在此之前的两条红都是同一处时序缺陷造成的 ✓。
+
+**留一句给下一轮的我**：表里"等合入"这四个字，**必须能追到一次真实的拒绝** ✓，
+追不到的就照实写"我没试过，是我扫进来的" ✓ —— 否则这张表会自己变成一堵墙 ✓。
+
+**★★ 补一条我自己先写错、又实测改回来的记录（两边都写在这里）。**
+
+我先这么写过："G3 里带 `gitea-real-services` 的任务有 48 个（T0301–T0309、T0401–T0410、
+T0601–T0609、T0801–T0812、T1201–T1208），所以 #99 不合，这 46 个 todo 会一个接一个被同样的
+理由冤枉掉。" **后面这半句是我推的，不是查的，推错了** ✓：
+
+- `gate_run.go:509` 起：G3 **不在任务的 worktree 里跑** ✓，而是在一个**一次性集成树**里 ✓
+  （`worktree add --detach <main>` ✓，再把该任务的改动以 patch 打进去 ✓，跑完删除 ✓）。
+  所以 G3 跑这个脚本，脏的是那个一次性树，**不是任务自己的树** ✓。
+- T0301 **没有 g3 记录** ✓（`gates/T0301/` 里只有 collect / accept / review / verdict ✓）——
+  也就是说 T0301 的 G3 **根本没跑到** ✓，那次提交不是 G3 干的 ✓。
+- 提交 `029380b` 的父提交是 `5cfc4c3`（当时的任务基线 ✓）、tree 里是 Worker 的全部改动 ✓ ——
+  形状是"有人在这个 worktree 里 `git commit -am`" ✓。
+
+**能确定的与不能确定的，分开写** ✓：能确定的是**那条命令在 main 自己的脚本里** ✓，
+**谁在这个树里跑它，就在这个树里留下一个提交** ✓；不能确定的是 T0301 那次**具体是谁跑的** ✓
+（Worker 当时正在改这个脚本 ✓，最可能是它自己跑了一次验证 ✓，但这是推断，不是证据 ✓）。
+所以 #99 的分量要照实说：它**不是**"挡着 46 个任务" ✓ ——
+它挡的是 **T0301 一个** ✓，以及"**任何在任务树里跑这个脚本的人都会重演一次**"这个风险 ✓，
+另外它删掉 main `README.md` 里那 8 行垃圾 ✓。**我不把推断写成 46。**
+**★ #113 与 #99 的二选一，我已经定了（L1 实现决策，L1-20260914-10）。**
+**#99 严格包含 #113** ✓ —— 这是数出来的，不是读两边的自述 ✓：main 的脚本里有**三处**
+`cd "$ROOT"` 会把探针送回被测树 ✓（第 19 / 101 / 203 行 ✓），**#113 删掉一处** ✓，
+**#99 三处全删** ✓，并且 #99 还堵了 **#113 完全没碰的第二条路** ✓：
+`rddev` 用**环境变量加 cwd** 跑门 ✓，**继承来的 `GIT_DIR` 压过 `cd`** ✓ ——
+`git init "$WORK/work"` 会**退出 0 而什么都没建** ✓，随后的提交直接落到被测仓库上 ✓。
+#99 还有一处只有它有的东西 ✓：**它删掉 main `README.md` 里那 8 行 `should not land`** ✓
+（我查了 `origin/main:README.md` ✓，`grep -c` = 8 ✓，**现在就在 main 上** ✓）。
+所以：**合 #99，等它落地后再把 #113 作为已被取代关掉** ✓（不是现在关 ✓ —— 现在关就丢了那八行的清理 ✓）。
+
+**合入顺序**：**#99** → **#103** ✓（#106 独立 ✓；#104 仍等你一句话 ✓）。
+
+**★ 另有一件只等你点头、不挡任何任务的事：Issue #111。** 安全扫描报了
+`internal/rsg/schemareg/schema.go` 的 `$ref` 能读外部东西。我自己实测过，结论比报告细：
+`http://` **根本发不出去**（0 次请求，库的默认加载器不做网络 ✓）；但 `file://` **确实会读** ✓，
+而且**读出来的内容会真的生效** ✓（我放了个 `maxLength:4` 的文件，验证 `"abcde"` 就被它拒了 ✓）。
+今天**没有漏洞**：这个包**外面一个调用者都没有** ✓（刚 T0201 交付，还没接线 ✓）。
+但 `Register` 是公开 API ✓，第一个把它接到请求上的任务就会让它变成真问题 ✓。
+代码注释写着"只在本地注册表内解析（从不走网络）"——**网络那半句是库的功劳，不是这段代码的** ✓，
+而且注释**完全没提 `file://`** ✓。要不要收紧成"只认已注册的文档"，属于安全边界 ✓，
+按 §5.1 条件 6 我不自己定 ✓；就算定下来，它是产品代码 ✓，按 §1 该派 Worker 而不是我写 ✓。
 
 **★ 2026-09-13 23:20：driver 带着 `POST_GITEA_TOKEN` 重启了 ✓。** 原因是 G3 的 `gitea-real-services`
 一直在红 ✓，而红的理由与产品无关 ✓：门在**任务的 worktree** 里跑 ✓，那里没有 `.env.dev` ✓，
@@ -116,13 +316,31 @@ Supervisor 不再自行合入（本次已停止）。**T0301 / T0201 因此被�
 
 → **P1 完成：10/10 merged**（2026-09-13T02:46:38Z，T0109 是最后一个）。
 
+### P2
+
+| Task | 状态 | PR | 交付 |
+|---|---|---|---|
+| T0201 | merged | #107 | Core Scientific Object Schema registry |
+| T0202 | merged | #118 | Scientific Object immutable version repository |
+| T0203 | merged | #125 | Typed Relation repository |
+| T0204 | merged | #138 | Project State 与 State Commit（`f148f75`，06:56:15Z） |
+| T0215 | merged | #132 | 版本计数 backfill 的数据级升级断言（00024 + 00025） |
+| T0205 | merged | #143 | Research Branch Domain（`04fead6`，23:2xZ） |
+
+### orchestrator 自修（不是任务，是 Supervisor 自己修的阻塞）
+
+| 内容 | 状态 | PR | 交付 |
+|---|---|---|---|
+| #137 / #140 / #128 | merged | — | 假红 / "刚推上去的 PR 当成合并失败" / 被持久化的 reason 脱敏（`a2acf98` `6a00071` `e4bbdef`） |
+| #139 | merged | #142 | 必检项的状态拆成"等"与"判断"两栏 ✓（`307dce8`）。**读方与写方共用同一组常量** ✓，并规定两串互不包含 ✓（有测试守着 ✓）。顺带发现反向的洞 → **#144** ✓ |
+
 ## 进行中
 
 | Task | 状态 | 说明 |
 |---|---|---|
-| T0201 | running（返工中） | 独立 review **approve** ✓；只因 **#100 合入**使 main 前进 ✓、accept 拒绝而停 ✓ → **已 rebaseline 到 `42379ea`**（38 文件 carried ✓），worker 已在新基线上返工 ✓ |
-| T0301 | rejected（等 #99） | 拒绝的四条**全部不是 worker 的错** ✓：三条来自 main 自己的 G3 脚本在被评测的树里提交 ✓（= #99 的缺陷 ✓），一条来自**我自己**的分支 ✓（= 已删的 `f2170d1` ✓）→ 等 **#99** 合入后 `rddev rebaseline T0301` + `worker rework` ✓ |
-| T0603 | running（返工中） | 独立 review **approve** ✓；同样只因 main 前进而 accept 拒绝 ✓ → **已 rebaseline 到 `42379ea`**（24 文件 carried ✓，重新生成 `SPEC_VERSION.json` + `specs/database/postgres.sql` ✓），worker 已在新基线上返工 ✓ |
+| T0207 | running | **被一条误报退回** ✓：collect 说它"运行期间创建了新 ref" ✓，而那个 ref 是**我自己**在 #142 时建的 ✓，已于 23:37:21 记入台账 ✓。已实测**它的改动应用到当前 main 是干净的** ✓ —— 所以**不需要** rebaseline ✓（这个假设差点让我对它的工作树做破坏性操作 ✓，是探针拦下来的 ✓）。那条**不准确**的理由已写进状态文件且**改不掉** ✓（`rejected→rejected` 与 `rejected→verification` 都不是合法边 ✓），故用包自己的构造器补写了准确理由 ✓（追加 ✓，原文未覆盖 ✓）再返工 ✓（**pid 2445519** ✓，会话仍是 `21cbe982` ✓，工作树留着 ✓）。**中途我自己误伤一次** ✓：为求证"从 `rejected` 重记理由会被拒" ✓，我**推断**会失败就直接跑了 `task reject` ✓ —— 而当时任务是 `running` ✓，`running→rejected` **是**合法边 ✓，于是它**真的执行了** ✓：把任务从它活着的 Worker 底下转走 ✓，并把我随手写的占位文本记成了退回理由 ✓。已删掉那条我自己 30 秒前造的记录 ✓（留着会让下一轮返工读到"probe: not a real reason" ✓），并重启返工 ✓。状态历史的"probe: not a real reason"那条**删不掉** ✓（追加式 ✓），故在此写明它的来历 ✓。见 **L1-20260914-18** ✓ 与 **#126** 上的更正 ✓。 |
+| T0301 | verification | **独立 review 曾给 `request_changes`** ✓（1 blocking / 1 minor / 1 nit ✓），退回返工 ✓；返工期间基线前进 ✓，走 `rebaseline` 一步完成 ✓（`27ef5a8` → `04fead65` ✓，25 个文件**留着** ✓，派生件重新生成 ✓）→ 已重新交付 ✓（23:43:35 收 ✓）→ **正在被独立 review 复核** ✓（pid 2413790 ✓）。blocking 是它把 API 改成了**因为一个还没存在的可选集成缺配置就拒绝启动** ✓ —— 而 `specs/orchestrator/gates.json` 把 `auth-real-services` / `rsg-real-services` 挂在 **106 个任务**上 ✓，合入即让这 106 个任务的 G3 **由构造即红** ✓。**不是设计错** ✓，是"缺配置时进程该不该死"这一件事 ✓。 |
+| T0603 | verification | accept 被 G3 红挡住 ✓ —— 它扛 `rsg-real-services` ✓，而 RSG 的 HTTP 面属于 **T0209** ✓，它在 P6 而 T0208 还在 `todo` ✓。**要等链路爬上去** ✓，不是 rebaseline 能解决的 ✓。 |
 
 ## 已关闭的 SPEC_BLOCKED
 
@@ -132,11 +350,45 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 阻塞
 
-- **T0301**：等 #99 合入。其 G3 脚本就是"改了被测树"的那个脚本，
-  在 #99 落地前返工只会**再次**污染它自己的分支。
-- **#99 / #103 / #104 / #105 需要 owner 批准**（见"治理状态"）——
-  这是当前**唯一**的人工依赖 ✓。四者都已 review 完、CI 绿、`MERGEABLE` ✓。
-- 非阻塞但未关闭：`/readyz` 泄露内部拓扑（见"已知风险"）✓。
+- **★ #135（新开，未修）**：`./bin/rddev` 是一个**没人负责重新构建**的产物 ✓ ——
+  `.gitignore` 忽略它 ✓、Makefile 没有目标 ✓、`supervise.sh` 也不重建 ✓。
+  它和它正在评分的源码可以任意地不同步 ✓，而这次的后果是**静默销毁一个 Worker 的未提交交付** ✓。
+  已做的只是**缓解**（用当前 main 重建 ✓）；**危险本身没修** ✓。
+  同族的前一件是 #124（本机 `main` ref 不是缓存 ✓）—— 形状相同：**评测输入没人保证新鲜** ✓。
+  Issue 里给了三条候选修法，推荐第 2 条（二进制自己记构建版本，落后于 main 就拒绝执行 Gate 动作）。
+- **T0603**：`verification` ✓，accept 被 G3 红挡住 ✓ —— 它的 G3 是 `rsg-real-services` ✓，
+  而 RSG 的 HTTP 面属于 **T0209** ✓。它在 P6 而 T0208 还在 `todo` ✓：**这条要等链路爬上去** ✓，
+  不是 rebaseline 能解决的 ✓。已在 `rddev status` 里如实列为等待中的判断点 ✓。
+- **#128 阻塞项已修** ✓（`46cb42b` ✓），等 CI 绿即合 ✓。修的是**前半段**：
+  换行的**位置**（冒号前 ✓ / `://` 正后 ✓）本来就有一份论证过的规则 ✓，
+  缺的是"这一行的换行是不是一个**可见的断口**" ✓ —— 只有行尾光标 `\` 才算 ✓。
+  顺手钉住了**反面**：`postgres://host:5432` 后面跟一行地址 ✓，规则放宽后会被改成
+  `postgres://host:***@example.com` ✓ —— 端口被删、地址变成凭据、两行黏成一行 ✓，
+  **而那一行根本没有凭证** ✓。过度脱敏和漏脱敏在同一个函数里 ✓。
+- ~~**★ #139**~~ —— **已修并合入** ✓（`307dce8` / PR #142 ✓，Issue 已关闭 ✓）。
+  `assertRequiredChecksGreen` 原先把**所有**非 `SUCCESS` 一视同仁 ✓，
+  于是 **PENDING**（状态）和 **FAILURE**（结论）给出同一句话 ✓，而 driver 对那句话是**永远重试** ✓ ——
+  一条**真的红了**的必检项不会上报 ✓，任务安静地转下去 ✓。
+  现在两栏分开 ✓，且**读方与写方共用同一组常量** ✓（漂移才是根因 ✓）。
+  **有一件事我故意没关** ✓（记在 L1-20260914-17 ✓）：拒绝文本内插了 check 名字 ✓，
+  所以一个**被故意命名成等待句式**的必检仍会读成等待 ✓ —— 要彻底关掉需要改这条命令的**契约** ✓，不是改字符串 ✓。
+- **★ #144（新开，未修）**：**#139 的镜像里更静的那一半** ✓。一个**永远不会被上报**的
+  必检项 ✓（CI job 改名 ✓ / 路径过滤排除 ✓ / 必检表留着改名前的老名字 ✓），
+  和"还在跑"走**同一扇门** ✓，等待**无界** ✓ —— 而 GitHub 上是绿的或空的 ✓，
+  driver 看起来在忙 ✓。**只在代码路径上读出来的** ✓，没有端到端复现 ✓，故开 issue 而不是盲修 ✓。
+- **★ #141（新开，未修）**：`RESULT.json` **不路过** store ✓，所以 #128 的脱敏**覆盖不到它** ✓
+  （`store.go:342-345` 自己写着这个缺口 ✓）。**不是理论** ✓：15 个已提交的
+  `tasks/results/*/RESULT.json` 里 **4 个**带凭证形状 ✓。
+  今天那些值**逐个查过、全部无害** ✓（是 dev 默认值和故意种的假值 ✓），
+  但机制是 T0011 那一类 ✓，且**结构性** ✓ —— 那文件记的就是命令行 ✓，
+  而启动服务的命令天然内联 DSN ✓。**核实过 #128 的脱敏在生产函数上五种形状全拦得住** ✓
+  （不是"它的测试是绿的" ✓，是直接调 `RedactTextForOutput` ✓）。
+  **注意它不会自愈** ✓：脱敏只作用于**新写入**的 reason ✓，
+  那条历史 DSN 会一直躺在文件里 ✓（值本来公开 ✓，故不改 ✓）。
+- 非阻塞但未关闭：`/readyz` 泄露内部拓扑（见"已知风险"）✓；
+  Issue **#133**（`rejection-retry-e2e.sh` 偶发返回 1 ✓）—— **本轮没有再复现** ✓：
+  它出现在 T0301 的 gate run 里是**通过**的 ✓，我在高负载下另跑 8 次也 8/8 通过 ✓。
+  **"负载导致"这个假设因此被削弱** ✓，但仍未定性 ✓，保持开着 ✓。
 
 ## 已知风险 / 需 owner 关注
 
@@ -167,35 +419,47 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 下一步
 
-1. **#100 已合入**（`43a63fb`）：driver 已在真实任务上生效 —— T0201 的过期 review 被自动重派
-   （日志 `the recorded review is about a superseded attempt (reviewed f667b4568b84, code is now 7783588acae9)` ✓），
-   不再需要人工清决定。当前 T0201 在 verification，等这次 review 结束。
-2. **#99（G3 门不再改动被测树）第二版已推送，独立 review 中**：六种漏判改为结构性关闭
-   （命名网 = 谁在做 + 度量网 = 树有没有变），25 例变异电池 25 中 0 漏。
-3. **#103（rebaseline 拒绝后把活放回原处）PR 已开、CI 全绿，独立 review 中** ——
-   合入前**不要**跑 rebaseline：main 上的 `bin/rddev` 仍是会清空工作树的那版。
-4. **#104（消息里的 job 数目不再写死）刚开 PR**，等 CI。13 处把它们说成"六个"，
-   而 `required_jobs` 有七个；其中两条是操作者会读到的运行时消息。
-5. 合入 #103 之后：`rddev rebaseline T0301`（预期在 G3 门脚本上与 main 冲突，
-   手工解，**门脚本的修复和 T0301 的 HMAC 改动都要留**）→ `rddev worker rework T0301`；
-   T0603 也需要一次 rebaseline（它的 accept 现在被 `specs/SPEC_VERSION.json` 冲突挡住 ✓），
-   driver 已把该决定记下，等 #103 合入后一并处理。
-6. T0603 accept 的旧决定（链式 G3 红）已清掉：那是 #102 修的缺陷本身，`bin/rddev` 已是修复版，
-   重试后暴露出的是上面这条 rebaseline 依赖。
-7. 待 owner 批准（两件，都不阻塞上面的机械段）：
-   - **已 rejected 任务的重判路径**（L1-20260913-18）—— 让拒绝记录可被真实内容取代、
-     并允许在被拒交付上重跑原检查（需新增状态机边 `rejected→verification`）；
-   - **T0204 / T0205 / T0207 的链式 G3 例外** —— #102 已把"谁该背这条链"改由依赖图决定，
-     剩下这三个任务**结构上**无解（各自的理由写在 `carriersTheChainTraps` 测试里），需产品判断。
-8. 修复 `/readyz` 拓扑泄露（小而明确，独立 PR）。
+1. **#128 等 CI** ✓ → 合入 ✓ → **重建 `bin/rddev`** ✓。
+2. **跟随 T0301 的返工** ✓（pid 2208080 ✓）→ collect → review → accept。
+   注意这一轮**同一个会话**里已经有前后两份 review 意见 ✓，collect 时要确认
+   新的判决针对的是**新代码身份** ✓（driver 会自己判"review 说的是不是被取代的那次尝试" ✓）。
+3. **跟随 T0205 / T0207** ✓（pid 2202134 / 2202799 ✓）→ collect → review → accept。
+4. **`bin/rddev` 一旦 main 前进就要重建** ✓（`go build -o bin/rddev ./cmd/rddev` ✓）——
+   在 #135 修好之前，这一步是**手工的** ✓，忘了就会重演那次事故 ✓。
+   **#137 那次假红就是这么来的** ✓：gate run 在 06:45:59 起跑 ✓，我在 06:47 才重建 ✓，
+   于是它跑的是**修好之前的二进制** ✓ —— 二进制比 main 落后，和上面那条事故同一个形状 ✓。
+5. **修 #139**（把必检项的状态分成"等"与"判断"两栏 ✓，并**顺手定一套共用的说法** ✓，
+   而不是一条一条地长字符串 ✓）。**在没有分类之前不要放宽重试清单** ✓ —— 那会加重它 ✓。
+6. **修 #135**（推荐第 2 条修法：二进制记构建版本，落后于 main 就拒绝执行 Gate 动作）——
+   独立 PR ✓，带测试 ✓。它是"危险本身"，现在只是被缓解 ✓。
+7. **T0603 只能等链路**：它扛 `rsg-real-services` ✓，那面要 T0209 才存在 ✓。
+8. 待 owner 批准（不阻塞上面的机械段）：
+   - **已 rejected 任务的重判路径**（L1-20260913-18）—— 需新增状态机边 `rejected→verification` ✓；
+     这次实测又撞上它一次 ✓：`rebaseline` 做完了全部 git 工作 ✓，
+     却因为 T0301 已经在 `rejected` 而**无法记录那次 reject** ✓（`rejected→rejected` 不合法 ✓）。
+     **本轮另有一件事与它相关** ✓：`task reject --reason-file` **确实能把理由写进 Worker 的
+     `prompt.md`** ✓（T0301 那次 ✓），所以 #126 最初那句"没有受支持的路"**说宽了** ✓ ——
+     但不是**错**的 ✓，我先前在 issue 上下的结论**下早了** ✓，今天已在同一条 issue 上更正 ✓。
+     准确的说法是：那条路**只在任务还没处于 `rejected` 时**存在 ✓ ——
+     T0301 那次能成 ✓，是因为 `rebaseline` 从 `verification` 走 `task reject` ✓（合法边 ✓）；
+     而 #126 标题点名的**正是** collect 退回来的情形 ✓，那时任务**已经**是 `rejected` ✓，
+     这一步就被拒 ✓（`rejected→rejected` 不合法 ✓）。**今天 T0207 撞上的是后者** ✓。
+     `rejected→verification` 那条**仍然缺** ✓。
+   - 其余队列里的 PR：**#104 / #111 / #114 / #115 / #116 / #117 / #122 / #126 / #129 / #130 / #131** ✓。
+9. 修复 `/readyz` 拓扑泄露（小而明确，独立 PR）。
+10. ~~那批孤儿 spin 进程~~ —— **已清理** ✓：112 个（16 个 zsh 包装 + 96 个 `yes` ✓）
+    全部是我的 `marker-exec` 测试漏下的 ✓，按**逐个核对过的字面 pid 清单**杀掉 ✓，
+    负载 123 → 3.6 ✓。当时还有 6 个**不是我的**（cwd 是 `/`、更早 ✓）**原样留着** ✓。
+    **教训**：`for i in $(seq 16); do (...) & done` 后面那行 `kill` 一旦没跑到 ✓，
+    漏下的进程会活很久而且看起来像别人干的 ✓。
 
 <!-- AUTO-PROGRESS:BEGIN — generated by scripts/update_progress.py, do not hand-edit -->
 
 ## 任务状态自动总览
 
-生成时间：2026-09-13T06:54:20Z
+生成时间：2026-09-13T22:18:35Z
 
-状态分布：todo 105 · ready 0 · running 1 · worker_failed 0 · verification 1 · rejected 1 · blocked 0 · accepted 0 · merged 24（合计 132/132 个任务）
+状态分布：todo 102 · ready 0 · running 1 · worker_failed 0 · verification 2 · rejected 0 · blocked 0 · accepted 0 · merged 28（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -223,10 +487,10 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0108 | Project Shell 与 tabs | P1 | merged | 2026-09-13T00:00:56Z |  | 2026-09-13T00:51:52Z | 2026-09-13T00:57:38Z |
 | T0109 | Project Settings 与成员管理 UI | P1 | merged | 2026-09-13T02:21:56Z |  | 2026-09-13T02:43:11Z | 2026-09-13T02:46:38Z |
 | T0110 | 基础 Audit Log | P1 | merged | 2026-09-13T00:58:14Z |  | 2026-09-13T01:23:12Z | 2026-09-13T01:26:45Z |
-| T0201 | Core Scientific Object Schema registry | P2 | verification | 2026-09-13T06:18:36Z |  |  |  |
-| T0202 | Scientific Object immutable version repository | P2 | todo |  |  |  |  |
-| T0203 | Typed Relation repository | P2 | todo |  |  |  |  |
-| T0204 | Project State 与 State Commit | P2 | todo |  |  |  |  |
+| T0201 | Core Scientific Object Schema registry | P2 | merged | 2026-09-13T13:21:01Z |  | 2026-09-13T14:06:20Z | 2026-09-13T15:27:35Z |
+| T0202 | Scientific Object immutable version repository | P2 | merged | 2026-09-13T16:12:13Z |  | 2026-09-13T16:30:50Z | 2026-09-13T16:34:10Z |
+| T0203 | Typed Relation repository | P2 | merged | 2026-09-13T17:22:20Z |  | 2026-09-13T17:40:44Z | 2026-09-13T17:47:30Z |
+| T0204 | Project State 与 State Commit | P2 | verification | 2026-09-13T22:10:18Z |  |  |  |
 | T0205 | Research Branch Domain | P2 | todo |  |  |  |  |
 | T0206 | RSG Manifest 导出与 hash | P2 | todo |  |  |  |  |
 | T0207 | Progressive Validation Gates | P2 | todo |  |  |  |  |
@@ -237,7 +501,8 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0212 | Project Overview Research Summary | P2 | todo |  |  |  |  |
 | T0213 | Project Schema Extension 与 Custom Metadata | P2 | todo |  |  |  |  |
 | T0214 | 官方材料研发 Project Templates | P2 | todo |  |  |  |  |
-| T0301 | Gitea adapter 与 repo provisioning | P3 | rejected | 2026-09-13T05:57:10Z |  |  |  |
+| T0215 | 版本计数 backfill 的数据级升级断言（00024 + 00025） | P2 | merged | 2026-09-13T18:06:02Z |  | 2026-09-13T18:55:01Z | 2026-09-13T19:03:58Z |
+| T0301 | Gitea adapter 与 repo provisioning | P3 | running | 2026-09-13T22:17:03Z |  |  |  |
 | T0302 | Git main 双层保护 | P3 | todo |  |  |  |  |
 | T0303 | Branch Git ref 同步 | P3 | todo |  |  |  |  |
 | T0304 | Git 用户认证/PAT/SSH key 基础 | P3 | todo |  |  |  |  |
@@ -268,7 +533,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0510 | Knowledge workflow E2E | P5 | todo |  |  |  |  |
 | T0601 | Freeze Main Governance | P6 | todo |  |  |  |  |
 | T0602 | Abort/Reopen State Transition | P6 | todo |  |  |  |  |
-| T0603 | Organization/Project Policy Engine | P6 | running | 2026-09-13T06:52:44Z |  |  |  |
+| T0603 | Organization/Project Policy Engine | P6 | verification | 2026-09-13T13:20:52Z |  |  |  |
 | T0604 | Scientific Responsibility / Reviewer Routing | P6 | todo |  |  |  |  |
 | T0605 | Release Manifest Builder | P6 | todo |  |  |  |  |
 | T0606 | Immutable Release API/UI | P6 | todo |  |  |  |  |

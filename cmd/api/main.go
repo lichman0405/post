@@ -36,6 +36,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -51,6 +52,7 @@ import (
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/config"
+	"github.com/lichman0405/post/internal/gitprovider"
 	"github.com/lichman0405/post/internal/health"
 	"github.com/lichman0405/post/internal/observability"
 	"github.com/lichman0405/post/internal/persistence"
@@ -94,6 +96,18 @@ func run(args []string) int {
 		cfg.Server.Addr = *addr
 	}
 
+	// GitProvider adapter configuration (T0301): a PRESENT variable must be
+	// valid — an invalid value fails fast here, naming the offending key
+	// (T0006 validates values, not absence) — while an unset token or
+	// webhook URL is a legal deployment: the API starts with provisioning
+	// disabled (see the wiring below), mirroring how the database being
+	// down or the authn loader being optional never prevents startup.
+	gitCfg, err := gitproviderLoader().Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "post-api: gitprovider configuration error:\n%v\n", err)
+		return exitConfig
+	}
+
 	// Structured JSON logs on stderr; every request-scoped line carries the
 	// correlation id (T0007).
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
@@ -119,8 +133,60 @@ func run(args []string) int {
 	healthz := newHealthHandler(pool, redisClient)
 	mux.Handle("/healthz", healthz)
 	mux.Handle("/readyz", healthz)
-	queue := worker.NewRedisQueue(redisClient, "post")
-	mux.Handle("POST /internal/jobs", newJobHandler(queue, logger))
+	// The scaffold enqueue surface (POST /internal/jobs, T0007) keeps its
+	// own queue: it feeds cmd/worker's "post" queue with smoke jobs, and
+	// that flow is unchanged by T0301.
+	scaffoldQueue := worker.NewRedisQueue(redisClient, "post")
+	mux.Handle("POST /internal/jobs", newJobHandler(scaffoldQueue, logger))
+
+	// Repository provisioning (T0301): the GitPort adapter on the service
+	// account token, the canonical-store adapter, and the job loop that
+	// consumes project-provision jobs (enqueued by the project create
+	// handler below and by the startup sweep of pending projects). Its
+	// own queue prefix keeps it from stealing or dead-lettering the
+	// scaffold's smoke jobs, and vice versa.
+	//
+	// The queue exists unconditionally — project creation enqueues its job
+	// either way, and a later restart with the full configuration sweeps
+	// the canonical backlog and provisions every pending project — but the
+	// pipeline itself only runs on a full configuration. A deployment that
+	// does not set the token or the webhook URL is not an error (the API
+	// stays up, like it does while the database is down): provisioning is
+	// simply off, and the warning names exactly which keys are missing.
+	provisioningQueue := worker.NewRedisQueue(redisClient, provisioningQueuePrefix)
+	if gitCfg.ProvisioningEnabled() {
+		provisioningStore := gitprovider.NewProvisionStore(pool)
+		giteaAdapter := gitprovider.NewGiteaAdapter(*gitCfg)
+		provisioner := gitprovider.NewProvisioner(giteaAdapter, provisioningStore, gitCfg.WebhookURL)
+		provisioningLoop := worker.NewLoop(provisioningQueue, worker.WithLogger(logger))
+		provisioningLoop.Register(gitprovider.ProvisionJobType, newProvisioningHandler(provisioner))
+		go func() {
+			if err := provisioningLoop.Run(ctx); err != nil {
+				slog.Error("post-api: provisioning loop failed", "error", err)
+			}
+		}()
+		// Sweep projects left pending by an earlier run (or a down Redis at
+		// creation time). Own timeout: the pool is lazy and PostgreSQL may
+		// still be starting — a failure here retries on the next API start.
+		go func() {
+			sweepCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			enqueuePendingProvisioning(sweepCtx, provisioningStore, provisioningQueue, logger)
+		}()
+		// Main-protection sweep (T0302): the platform layer of main's
+		// double protection — re-applies the canonical Gitea rule on every
+		// provisioned repository once at startup and then on a schedule, so
+		// a rule an operator removed or drifted is healed without a
+		// restart. Best effort: failures are logged per repository and
+		// retried on the next pass.
+		go runMainProtectionSweep(ctx,
+			gitprovider.NewProtectionSweeper(giteaAdapter, provisioningStore), logger)
+	} else {
+		// Redacted by construction: key names only, never values.
+		slog.Warn("post-api: GitProvider provisioning disabled — missing configuration",
+			"missing", strings.Join(gitCfg.Missing, ", "),
+			"effect", "no repositories or webhooks are provisioned; set the named variables and restart to enable")
+	}
 
 	// Authentication (T0101) + organizations (T0103): the /api/v1 subtree
 	// is guarded by default — every state-changing request under it
@@ -164,9 +230,10 @@ func run(args []string) int {
 	v1.Handle("/api/v1/organizations", orgAPI.Routes())
 	v1.Handle("/api/v1/organizations/", orgAPI.Routes())
 	projectAPI := projectshttp.New(projectshttp.Deps{
-		Store: persistence.NewProjectStore(pool),
-		Orgs:  orgStore,
-		Authz: authz.NewMatrixEngine(),
+		Store:         persistence.NewProjectStore(pool),
+		Orgs:          orgStore,
+		Authz:         authz.NewMatrixEngine(),
+		ProvisionJobs: provisioningQueue,
 	})
 	v1.Handle("/api/v1/projects", projectAPI.Routes())
 	v1.Handle("/api/v1/projects/", projectAPI.Routes())
@@ -252,6 +319,10 @@ func databaseDSN(cfg *config.Config) string {
 // authnLoader resolves the auth configuration environment (the loader is
 // injectable so main_test can run without real env).
 var authnLoader = func() authn.Loader { return authn.Loader{} }
+
+// gitproviderLoader resolves the GitProvider configuration environment
+// (injectable, same reason as authnLoader).
+var gitproviderLoader = func() gitprovider.Loader { return gitprovider.Loader{} }
 
 // newOIDCClientOrNil builds the provider client when OIDC is configured.
 // The redirect URI is always derived from the callback request (the API's

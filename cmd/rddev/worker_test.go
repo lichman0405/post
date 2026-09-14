@@ -67,8 +67,13 @@ case "$mode" in
 		# leaves an environment-scrubbing daemon listening: it escapes both
 		# the session (setsid) and the run marker (env -i) — the warn-only
 		# class collect surfaces but does not reject.
+		#
+		# FAKE_CLAUDE_PORT is required, not defaulted: this test used to hardcode
+		# 18981 here, and a default would quietly restore it for any caller that
+		# forgets — which is the whole defect, in one line. There is no sensible
+		# default for "a port nothing else is using".
 		write_result '[]'
-		env -i PATH=/usr/bin:/bin setsid sh -c 'echo $$ > "$1"; exec python3 -m http.server "${2:-18981}" --bind 127.0.0.1' sh "$POST_WORKER_RESULT_DIR/listener.pid" "${FAKE_CLAUDE_PORT:-18981}" >/dev/null 2>&1 &
+		env -i PATH=/usr/bin:/bin setsid sh -c 'echo $$ > "$1"; exec python3 -m http.server "${2:?the listener fixture needs a port}" --bind 127.0.0.1' sh "$POST_WORKER_RESULT_DIR/listener.pid" "${FAKE_CLAUDE_PORT:?the listener fixture needs FAKE_CLAUDE_PORT}" >/dev/null 2>&1 &
 		exec sleep "${FAKE_CLAUDE_SECONDS:-2}" ;;
 esac
 `
@@ -331,6 +336,26 @@ func TestWorkerSpawnTwoConcurrentWorkers(t *testing.T) {
 func TestWorkerCrashRecordedNotCompleted(t *testing.T) {
 	fakeClaudePath(t, "crash")
 	repo := fakeRepo(t)
+	// The second spawn below is still running when the test returns, and
+	// `t.TempDir` removes the directory on the way out. The two race: the
+	// Worker writes under .rddev/workers/T0002 while RemoveAll walks it, and
+	// the run dies in cleanup rather than in an assertion —
+	//
+	//   --- FAIL: TestWorkerCrashRecordedNotCompleted (6.38s)
+	//       testing.go:1617: TempDir RemoveAll cleanup: unlinkat
+	//       /tmp/TestWorkerCrashRecordedNotCompleted…/.rddev/workers/T0002:
+	//       directory not empty
+	//
+	// measured once in 40 runs of this test alone and once in 3 full-package
+	// runs. It was first reported as a pre-existing flake — not caused by the
+	// pull request it reddened — by the independent adversarial review of
+	// #109 (verdict of 2026-09-13, delivered to the Supervisor as a review
+	// rather than posted to the forge), which measured it as load-sensitive
+	// and recommended merging that pull request and filing this separately.
+	// Stop the Workers first: Cleanup is LIFO, and the cleanup that removes
+	// the whole tree is registered by the *first* t.TempDir() call in the
+	// test — fakeClaudePath's, not fakeRepo's — so this runs before it.
+	t.Cleanup(func() { stopAll(t, repo) })
 
 	code, out, errOut := runWorkerCLI(t, repo, "worker", "spawn", "T0001")
 	if code != 0 {
@@ -572,6 +597,17 @@ func TestWorkerGuardFilesGeneratedWithIsolation(t *testing.T) {
 	fakeClaudePath(t, "write")
 	t.Setenv("FAKE_CLAUDE_SECONDS", "2")
 	repo := fakeRepo(t)
+	// The Worker spawned below sleeps 2s and this test returns in about one,
+	// so it is still running when `t.TempDir` removes the tree — the same race
+	// TestWorkerCrashRecordedNotCompleted was fixed for: the reaper writes
+	// exit.status under .rddev/runtime/tasks/T0001 after RemoveAll has walked
+	// past, which leaks a tree in $TMPDIR and fails the run when the write
+	// lands mid-walk. Measured before this: 3 leftover trees in 5 isolated
+	// runs; a reviewer measuring under heavier load saw 5 in 5, so the count
+	// is load-dependent and the race's presence, not its rate, is the point.
+	// Every assertion in this test is made before teardown, so stopping the
+	// Worker here changes no verdict.
+	t.Cleanup(func() { stopAll(t, repo) })
 
 	code, _, errOut := runWorkerCLI(t, repo, "worker", "spawn", "T0001")
 	if code != 0 {

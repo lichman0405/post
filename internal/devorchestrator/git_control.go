@@ -35,6 +35,24 @@ type GitControlOpts struct {
 	PRBody    string // default: rendered from the DAG entry
 	DagPath   string
 	StatePath string
+
+	// FreshnessCheck, when set, runs after the four-gate assertion has passed
+	// and before git or gh is invoked — the last moment at which refusing is
+	// still free.
+	//
+	// It is consulted HERE rather than at process start because of an
+	// invariant this package already keeps: `git commit` on a red gate refuses
+	// WITHOUT ever invoking git (git was never invoked, main.go, and the
+	// acceptance e2e's recorder). The freshness question can only be answered
+	// by asking git, so a check placed before the assertion would put a git
+	// invocation in front of that refusal and the promise would stop being
+	// true. After the assertion, there is nothing left to protect: the gate is
+	// green and the action is about to touch the control plane.
+	//
+	// nil means "no check", which is what a caller that is not the CLI wants —
+	// a library test asserting gate behaviour must not have its answer depend
+	// on the git state of the machine running it.
+	FreshnessCheck func() error
 }
 
 // GateRefusalError is returned when a git/PR action is refused by a red
@@ -200,6 +218,19 @@ func runGh(dir string, args ...string) (string, error) {
 // `gh pr checks` exits 1 when a check is failing — the very case whose output
 // we need in order to say which one — so a runner that discards stdout on
 // failure cannot express the refusal.
+//
+// The rule is "stdout if there is any, otherwise stderr", and the second half
+// is not symmetry for its own sake. When gh fails with nothing on stdout, its
+// stderr is the ONLY account of why, and reducing it to `exit status 1` throws
+// away the one fact the caller needed. `gh pr checks` on a branch whose CI has
+// not started yet prints `no checks reported on the '<branch>' branch` and
+// exits 1 — indistinguishable, once flattened, from a check that ran and
+// failed. Those are opposite answers: "CI has not begun" is a wait, "CI is red"
+// is a decision, and the driver acts on the difference (driver_run.go stepAccepted
+// retries on the text and escalates on everything else). It escalated a PR that
+// was one second old.
+//
+// An exit that carries nothing on either stream is still reported by status.
 func runGhJSON(dir string, args ...string) ([]byte, error) {
 	gh, err := exec.LookPath("gh")
 	if err != nil {
@@ -209,12 +240,115 @@ func runGhJSON(dir string, args ...string) ([]byte, error) {
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
-		if _, ok := err.(*exec.ExitError); ok && len(out) > 0 {
+		ee, ok := err.(*exec.ExitError)
+		if !ok {
+			return nil, fmt.Errorf("gh %s: %w", strings.Join(args, " "), err)
+		}
+		if len(out) > 0 {
 			return out, nil
+		}
+		if reason := strings.TrimSpace(string(ee.Stderr)); reason != "" {
+			return nil, fmt.Errorf("gh %s: %s", strings.Join(args, " "), reason)
 		}
 		return nil, fmt.Errorf("gh %s: %w", strings.Join(args, " "), err)
 	}
 	return out, nil
+}
+
+// A merge refusal says one of two things, and which one it says decides whether
+// the driver waits or escalates. `rddev pr merge` runs as a child process, so
+// that classification cannot travel as a Go error type — it travels as this
+// text. The writer (assertRequiredChecksGreen, below) and the reader
+// (stepAccepted, driver_run.go) name it through the constants here instead of
+// through a string literal each.
+//
+// Two literals is how they drifted, and the drift was issue #139: a required
+// check that had finished FAILURE produced the same sentence as one still
+// PENDING, so the driver retried it on every tick forever — the task never
+// finished and never asked, which is the one outcome §8.2 forbids. The local
+// gate was green, so nothing else interceded.
+//
+// The names say which is which, and neither string may contain the other.
+//
+// That disjointness is necessary but not sufficient, and the remaining hole is
+// a deliberate acceptance rather than an oversight: the refusal interpolates
+// the check names it is talking about, so a required check deliberately named
+// "the PR's required checks have not all finished" would put both phrases in a
+// decision and read as a wait. Closing it needs a sentinel the interpolated
+// text cannot fabricate — a distinct exit code, say — which is a change to the
+// command's contract rather than to this string. Left open and recorded
+// (L1-20260914-17); the trigger is a self-inflicted check name and the symptom
+// is a task that stops advancing visibly, not a merge that goes wrong.
+const (
+	// checksNotYet is the wait: every required check is still running or has
+	// not been reported yet.
+	checksNotYet = "the PR's required checks have not all finished"
+	// checksRed is the decision: at least one required check is terminal and
+	// not green.
+	checksRed = "the PR's required checks did not pass on GitHub"
+)
+
+// noChecksReported is gh's own wording, read out of the installed binary — not
+// ours. `gh pr checks` prints it on stderr when a branch's CI has not
+// registered yet, which is the same "not yet" as checksNotYet arriving by a
+// different road.
+const noChecksReported = "no checks reported"
+
+// checkStateWorthWaitingFor reports whether a required check's state means "not
+// finished" rather than "finished and not green".
+//
+// The set is deliberately small. Only SUCCESS is green, which is the standard
+// this function already enforced and which this change does not widen:
+// SKIPPED and NEUTRAL stay on the refusing side, because promoting them would
+// weaken the gate, and what is being fixed here is how a refusal is *reported*,
+// never whether one happens.
+//
+// A state GitHub adds later falls through to the refusing side and so lands in
+// escalate rather than wait. That direction is deliberate: an unfamiliar state
+// treated as a wait reproduces #139 silently, whereas one treated as a decision
+// asks the Supervisor.
+//
+// "Unfamiliar" means genuinely unfamiliar, though, and the first version of this
+// set was wrong about which states those are: WAITING and REQUESTED are in the
+// check-run status vocabulary GitHub documents today (reserved for Actions) and
+// gh prints them verbatim, so leaving them out did not fall safe — it took a
+// check that was plainly still running and escalated it to the Supervisor, a
+// refusal the previous single-sentence form would have retried. EXPECTED is
+// gh's name for a required check that has not been posted yet. With these six,
+// the set is exactly what gh's own output buckets as pending.
+func checkStateWorthWaitingFor(state string) bool {
+	switch state {
+	case "PENDING", "QUEUED", "IN_PROGRESS", "EXPECTED", "WAITING", "REQUESTED":
+		return true
+	}
+	return false
+}
+
+// stateSeverity orders states by how much they must not be waited past: 0 is
+// green, 1 is not finished yet, 2 is finished and not green.
+//
+// It exists to fold the entries that share a name. gh returns one entry per
+// check run and does not collapse same-named ones, and its array is ordered
+// newest-first — so a last-wins map lets a PENDING entry hide a FAILURE of the
+// same name, which reads a red check as a wait and is #139 arriving by another
+// road. Taking the maximum over a name means no ordering can hide a red.
+func stateSeverity(state string) int {
+	switch {
+	case state == "SUCCESS":
+		return 0
+	case checkStateWorthWaitingFor(state):
+		return 1
+	}
+	return 2
+}
+
+// ciStillRunning reports whether a merge refusal is a "not yet" rather than a
+// judgement. This is the single definition of that question; stepAccepted calls
+// it instead of matching the wording itself, so the writer and the reader
+// cannot drift apart again.
+func ciStillRunning(refusal string) bool {
+	return strings.Contains(refusal, checksNotYet) ||
+		strings.Contains(refusal, noChecksReported)
 }
 
 // assertRequiredChecksGreen refuses to merge while the PR's required checks
@@ -226,6 +360,12 @@ func runGhJSON(dir string, args ...string) ([]byte, error) {
 // and the historical defect this tooling exists to prevent was a merge that
 // happened while GitHub's own CI was red. The local record can therefore be
 // green while the PR is red, and the merge must refuse on the PR.
+//
+// It refuses with one of two sentences, and they are not interchangeable: a
+// check that has not finished is a wait the driver retries, while a check that
+// has finished red is a decision it hands to the Supervisor. Both refuse; only
+// the reason differs. See the constants above for why that distinction is
+// load-bearing rather than cosmetic.
 func assertRequiredChecksGreen(repoRoot, branch string, required []string) error {
 	if len(required) == 0 {
 		return nil
@@ -243,21 +383,43 @@ func assertRequiredChecksGreen(repoRoot, branch string, required []string) error
 	}
 	state := map[string]string{}
 	for _, c := range checks {
-		state[c.Name] = c.State
+		if prev, seen := state[c.Name]; !seen || stateSeverity(c.State) > stateSeverity(prev) {
+			state[c.Name] = c.State
+		}
 	}
-	var missing, bad []string
+	var missing, waiting, bad []string
 	for _, want := range required {
 		got, ok := state[want]
 		switch {
 		case !ok:
+			// Required by the task spec but absent from the PR's checks: a report
+			// that has not been posted yet, which is a wait.
 			missing = append(missing, want)
-		case got != "SUCCESS":
+		case got == "SUCCESS":
+			// green
+		case checkStateWorthWaitingFor(got):
+			waiting = append(waiting, want+" ("+got+")")
+		default:
 			bad = append(bad, want+" ("+got+")")
 		}
 	}
-	if len(missing) > 0 || len(bad) > 0 {
-		return fmt.Errorf("the PR's required checks are not all green on GitHub — missing: %s; not passing: %s — the local G2 record is a replica of CI, not CI itself",
-			strings.Join(missing, ", "), strings.Join(bad, ", "))
+	// A finished red check is a decision even while other checks are still
+	// running — no amount of waiting turns it green, and calling it a wait is
+	// what left the task looping quietly. Tested first for that reason.
+	if len(bad) > 0 {
+		return fmt.Errorf("%s — not passing: %s — the local G2 record is a replica of CI, not CI itself",
+			checksRed, strings.Join(bad, ", "))
+	}
+	if len(missing) > 0 || len(waiting) > 0 {
+		var parts []string
+		if len(waiting) > 0 {
+			parts = append(parts, "still running: "+strings.Join(waiting, ", "))
+		}
+		if len(missing) > 0 {
+			parts = append(parts, "not reported yet: "+strings.Join(missing, ", "))
+		}
+		return fmt.Errorf("%s — %s — the local G2 record is a replica of CI, not CI itself",
+			checksNotYet, strings.Join(parts, "; "))
 	}
 	return nil
 }
@@ -375,6 +537,14 @@ func RunGitControl(opts *GitControlOpts, action string) (*GitActionResult, error
 	if gateRes.Status != "passed" {
 		return nil, &GateRefusalError{Action: action, Reasons: gateRes.Reasons}
 	}
+	// The gate is green and this is the last point before the control plane is
+	// touched. See GitControlOpts.FreshnessCheck for why this is the position
+	// and not process start.
+	if opts.FreshnessCheck != nil {
+		if err := opts.FreshnessCheck(); err != nil {
+			return nil, err
+		}
+	}
 	switch action {
 	case "commit":
 		sha, err := CommitTask(opts)
@@ -414,36 +584,32 @@ func RunGitControl(opts *GitControlOpts, action string) (*GitActionResult, error
 // rest unseen. The second Reviewer noticed and read the worktree instead —
 // which is exactly the diligence a review input must not depend on.
 func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
-	// The diff base is where the branch diverged from main, NOT the recorded
-	// baseline. Those are the same value until a baseline is advanced, and
-	// then they diverge badly: after a rework onto a newer main the recorded
-	// baseline already contains the task's earlier work, so the delta is a
-	// sliver - T0103's review input was 5 files out of a 27-file task, and a
-	// Reviewer would be asked to approve the whole from a fragment.
-	// merge-base gives the branch's actual contribution in both cases, which
-	// is the same diff the pull request shows.
-	base := rec.BaselineSHA
-	if mb, err := gitOutput(rec.Worktree, "merge-base", DefaultBaseBranch, "HEAD"); err == nil && mb != "" {
-		base = mb
-	}
-	out, err := gitOutput(rec.Worktree, "diff", base, "--")
+	base := taskDiffBase(rec)
+	// Raw, not trimmed: a diff's trailing whitespace is part of it. See
+	// gitOutputRaw — trimming it here produced patches `git apply` called
+	// corrupt, so prepareIntegrationTree could not build the tree G2 grades.
+	out, err := gitOutputRaw(rec.Worktree, "diff", base, "--")
 	if err != nil {
 		return "", fmt.Errorf("diffing the worktree against the baseline: %w", err)
 	}
-	untracked, err := gitOutput(rec.Worktree, "ls-files", "--others", "--exclude-standard")
+	// -z, because these names are used as PATHS below (Lstat, ReadFile) and
+	// git's default C-quoting turns a name that needs quoting into a string no
+	// filesystem has.
+	untracked, err := gitPaths(rec.Worktree, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return "", fmt.Errorf("listing untracked files for the review diff: %w", err)
 	}
 	var b strings.Builder
 	if out != "" {
 		b.WriteString(out)
-		b.WriteString("\n")
-	}
-	for _, p := range strings.Split(untracked, "\n") {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
+		// The diff already ends in a newline; a second one would leave a blank
+		// line, which is where the trimmed version's short hunk used to be
+		// reported as corruption. Keep exactly one.
+		if !strings.HasSuffix(out, "\n") {
+			b.WriteString("\n")
 		}
+	}
+	for _, p := range untracked {
 		abs := filepath.Join(rec.Worktree, p)
 		// Lstat, not Stat: a symlink is reported as the link, never followed.
 		// The paths come from the Worker's own tree, so a symlink pointing at
@@ -481,15 +647,51 @@ func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
 			fmt.Fprintf(&b, "Binary files /dev/null and b/%s differ\n", p)
 			continue
 		}
-		body := strings.TrimSuffix(string(data), "\n")
-		if body == "" {
+		// The body is built from the raw bytes. It used to be TrimSuffix'd and
+		// re-emitted one "\n" per line, which added a byte to a file that had no
+		// final newline and turned a file that was a single newline into an empty
+		// one — silently, on the advance path, whose whole promise is that it
+		// carries the task's work across. Both are byte-level corruption of the
+		// deliverable and neither shows up in a path list.
+		lines := strings.Split(string(data), "\n")
+		finalNewline := false
+		if n := len(lines); n > 0 && lines[n-1] == "" {
+			lines = lines[:n-1] // Split leaves an empty tail for a file that ends with a newline
+			finalNewline = true
+		}
+		if len(lines) == 0 {
+			// An empty file. The header above is the whole patch and git creates
+			// the file from it — checked against git, not assumed.
 			continue
 		}
-		lines := strings.Split(body, "\n")
 		fmt.Fprintf(&b, "@@ -0,0 +1,%d @@\n", len(lines))
-		for _, l := range lines {
+		for i, l := range lines {
 			b.WriteString("+" + l + "\n")
+			if i == len(lines)-1 && !finalNewline {
+				b.WriteString("\\ No newline at end of file\n")
+			}
 		}
 	}
 	return b.String(), nil
+}
+
+// taskDiffBase is the commit a task's contribution is measured from: where its
+// branch diverged from the integration tip, not the recorded baseline.
+// RebaselineTask takes its "before" path set from here as well, so the set it
+// compares after the advance describes the same thing the patch does.
+//
+// The anchor of that merge-base is the integration TIP rather than the local
+// branch, and the difference is not academic. This diff is what gets APPLIED to
+// the tree the gate verifies, so measuring against a different ref than that
+// tree was cut from produces a patch carrying commits the tree already has,
+// which does not apply at all. The driver also runs a rebaseline exactly when a
+// dependency has just been recorded merged — precisely when this clone's own
+// main is behind the forge — so the local branch is stale whenever it matters.
+// See integrationBase.
+func taskDiffBase(rec *WorkerRecord) string {
+	base := rec.BaselineSHA
+	if mb, err := gitOutput(rec.Worktree, "merge-base", integrationBase(rec.Worktree), "HEAD"); err == nil && mb != "" {
+		base = mb
+	}
+	return base
 }
