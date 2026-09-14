@@ -489,6 +489,9 @@ func (s *Store) StartWorker(id, runID, startedAt string) (*TransitionResult, err
 // started_at). Pinned by
 // TestStartWorkerFromStampsTheTaskStateInItsValidatedFormat.
 func (s *Store) StartWorkerFrom(id, runID, startedAt string, from State) (*TransitionResult, error) {
+	if s.dag.Get(id) == nil {
+		return nil, fmt.Errorf("unknown task %s in task DAG", id)
+	}
 	at := taskStateStamp(startedAt)
 	var result *TransitionResult
 	err := s.mutate(id, func(ts *TaskState, fromSt State, states map[string]State) error {
@@ -496,6 +499,16 @@ func (s *Store) StartWorkerFrom(id, runID, startedAt string, from State) (*Trans
 			return &IllegalTransitionError{ID: id, From: fromSt, To: StateRunning}
 		}
 		if err := checkTransition(id, fromSt, StateRunning); err != nil {
+			return err
+		}
+		// The dependency rule binds here, not only in Transition: this function
+		// is the whole of the start path (`rddev worker spawn`, and rework and
+		// respawn through it), and the check wired to Transition in #150 is
+		// reached by none of them. Before the transition is applied and before
+		// the run is stamped, so a refused start leaves the task exactly where it
+		// was — including not having recorded a worker_run_id for a Worker that
+		// was already killed by the caller.
+		if err := s.requireDepsMerged(id, states); err != nil {
 			return err
 		}
 		ts.Status = StateRunning
