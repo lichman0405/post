@@ -77,6 +77,12 @@ var appendOnlyTables = []string{
 // ingestion record and the inspected change set join the append-only set
 // (both halves of the guard), while the candidate table carries its own
 // content-immutable guard (status-only transitions) plus the TRUNCATE half.
+// Migration 00040 (T0501) adds the two DEFERRED constraint triggers
+// (AFTER INSERT, FOR EACH ROW → tgtype 5: row bit 1 + insert bit 4,
+// AFTER being the absence of the BEFORE bit) on the append-only tables
+// themselves: knowledge-relation endpoint types and the
+// question_id/parent_question_id references. They pin presence and event
+// set here even though the tables already carry the append-only pair.
 var targetedGuardTriggers = map[string]string{
 	"branches:branch_lifecycle_guard_trigger":                                ":O:19",
 	"branches:branch_git_ref_guard_trigger":                                  ":O:23",
@@ -85,6 +91,8 @@ var targetedGuardTriggers = map[string]string{
 	"git_branch_refs:git_branch_ref_guard_trigger":                           ":O:23",
 	"git_push_semantic_candidates:git_push_semantic_candidate_guard_trigger": ":O:27",
 	"git_push_semantic_candidates:git_push_semantic_candidates_no_truncate":  ":O:34",
+	"scientific_object_versions:scientific_object_versions_reference_guard":  ":O:5",
+	"relation_versions:relation_versions_knowledge_endpoints":                ":O:5",
 }
 
 // triggerRows returns every user trigger in the public schema as sorted

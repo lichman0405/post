@@ -231,6 +231,57 @@ V2_STATE="$(jq_get "['state_id']")"
 req POST "/projects/$PROJECT/branches/$BRANCH/relations" "{\"relation_type\":\"derived_from\",\"source_object_version_id\":\"$V2\",\"target_object_version_id\":\"$V1\"}"
 if served "$STATUS" POST "/projects/{id}/branches/{id}/relations"; then ok "created a typed relation between two versions"; else fail "create relation -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
 
+# --- knowledge relations (T0501) ---------------------------------------------
+# The question↔hypothesis model: a hypothesis names a real research
+# question; the knowledge edges pin only the endpoint their name states
+# (addresses_question -> research_question target, tests_hypothesis ->
+# hypothesis target) and the source end stays open — a finding addressing
+# a question is the main-line shape. The database guard itself refuses a
+# dangling reference or a target of the wrong type (surfacing as 503
+# today; a follow-up maps the guard refusal to a cleaner 4xx on the wire).
+req POST "/projects/$PROJECT/branches/$BRANCH/objects" '{"object_type":"research_question","payload":{"statement":"Which MOF maximizes CO2 uptake at 298 K?","question_state":"open"}}'
+if served "$STATUS" POST "/projects/{id}/branches/{id}/objects"; then ok "created a research question"; else fail "create research question -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
+QUESTION="$(jq_get "['id']")"
+QUESTION_V="$(jq_get "['version_id']")"
+
+req POST "/projects/$PROJECT/branches/$BRANCH/objects" "{\"object_type\":\"hypothesis\",\"payload\":{\"statement\":\"MOF-5 maximizes uptake\",\"question_id\":\"$QUESTION\",\"hypothesis_type\":\"mechanistic\",\"scope\":{\"detail\":\"probe\"}}}"
+if served "$STATUS" POST "/projects/{id}/branches/{id}/objects"; then ok "created a hypothesis naming the real question"; else fail "create hypothesis -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
+HYPOTHESIS_V="$(jq_get "['version_id']")"
+
+# The guard refuses what the schemas cannot: a question_id that is not a
+# uuid of an existing research question never reaches the version log.
+req POST "/projects/$PROJECT/branches/$BRANCH/objects" '{"object_type":"hypothesis","payload":{"statement":"bad reference","question_id":"q-1"}}'
+[[ "$STATUS" == "503" ]] \
+  && ok "dangling question_id refused by the database guard (503)" \
+  || fail "dangling question_id -> $STATUS (want 503 guard refusal): $(head -c 200 "$WORK/resp.json")"
+
+req POST "/projects/$PROJECT/branches/$BRANCH/objects" '{"object_type":"experiment","payload":{"name":"N2 isotherm run"}}'
+if served "$STATUS" POST "/projects/{id}/branches/{id}/objects"; then ok "created an experiment"; else fail "create experiment -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
+EXPERIMENT_V="$(jq_get "['version_id']")"
+
+req POST "/projects/$PROJECT/branches/$BRANCH/relations" "{\"relation_type\":\"addresses_question\",\"source_object_version_id\":\"$HYPOTHESIS_V\",\"target_object_version_id\":\"$QUESTION_V\"}"
+if served "$STATUS" POST "/projects/{id}/branches/{id}/relations"; then ok "created addresses_question (hypothesis -> question)"; else fail "addresses_question -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
+
+req POST "/projects/$PROJECT/branches/$BRANCH/relations" "{\"relation_type\":\"tests_hypothesis\",\"source_object_version_id\":\"$EXPERIMENT_V\",\"target_object_version_id\":\"$HYPOTHESIS_V\"}"
+if served "$STATUS" POST "/projects/{id}/branches/{id}/relations"; then ok "created tests_hypothesis (experiment -> hypothesis)"; else fail "tests_hypothesis -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
+
+# The source end of addresses_question is deliberately unconstrained: the
+# edge's name pins only its target, and the main-line shape is a finding
+# addressing a question (T0209). Both must work over the wire.
+req POST "/projects/$PROJECT/branches/$BRANCH/objects" '{"object_type":"finding","payload":{"statement":"MOF-5 maximizes uptake","claim_version_refs":["00000000-0000-4000-8000-000000000000"]}}'
+if served "$STATUS" POST "/projects/{id}/branches/{id}/objects"; then ok "created a finding"; else fail "create finding -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
+FINDING_V="$(jq_get "['version_id']")"
+
+req POST "/projects/$PROJECT/branches/$BRANCH/relations" "{\"relation_type\":\"addresses_question\",\"source_object_version_id\":\"$FINDING_V\",\"target_object_version_id\":\"$QUESTION_V\"}"
+if served "$STATUS" POST "/projects/{id}/branches/{id}/relations"; then ok "created addresses_question (finding -> question) — the main-line shape"; else fail "finding addresses_question -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
+
+# The guard still refuses a target the edge's name does not pin: a
+# material is not a research question.
+req POST "/projects/$PROJECT/branches/$BRANCH/relations" "{\"relation_type\":\"addresses_question\",\"source_object_version_id\":\"$EXPERIMENT_V\",\"target_object_version_id\":\"$V1\"}"
+[[ "$STATUS" == "503" ]] \
+  && ok "addresses_question with a non-question target refused by the database guard (503)" \
+  || fail "wrong-target addresses_question -> $STATUS (want 503 guard refusal): $(head -c 200 "$WORK/resp.json")"
+
 # --- validation gate ---------------------------------------------------------
 req POST "/projects/$PROJECT/branches/$BRANCH:validate" '{"gate":"pr"}'
 case "$STATUS" in

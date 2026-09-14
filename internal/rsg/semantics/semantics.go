@@ -8,7 +8,8 @@
 //
 //   - a HARD failure is a rule whose violation can be decided mechanically
 //     from the payload alone (a research question that names itself as its
-//     parent, a present-but-empty hypothesis question reference);
+//     parent, a present-but-empty question reference on either a
+//     hypothesis or a research question);
 //   - a HINT is a judgement a machine cannot make — most importantly Claim
 //     atomicity (docs/08: "一个可独立判断的命题...如果一句话可被 reviewer
 //     部分同意部分反对，应拆 Claim"). Atomicity is only ever hinted at,
@@ -188,8 +189,17 @@ func checkResearchQuestion(ownObjectID string, payload map[string]any) ([]error,
 	if !ok {
 		return nil, nil
 	}
-	if s, isString := parent.(string); isString && s == ownObjectID {
-		return []error{fmt.Errorf("semantics: research question cannot be its own parent (parent_question_id names the question itself)")}, nil
+	if s, isString := parent.(string); isString {
+		// A present-but-empty parent is as meaningless as the empty
+		// hypothesis question_id (same rule, same reason): "no parent"
+		// is expressed by omitting the field (a root question), never
+		// by an empty string. JSON null means absent and stays legal.
+		if strings.TrimSpace(s) == "" {
+			return []error{fmt.Errorf("semantics: research question parent_question_id must not be empty when present")}, nil
+		}
+		if s == ownObjectID {
+			return []error{fmt.Errorf("semantics: research question cannot be its own parent (parent_question_id names the question itself)")}, nil
+		}
 	}
 	return nil, nil
 }

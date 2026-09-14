@@ -69,6 +69,23 @@ func TestResearchQuestionSelfParentHardFailure(t *testing.T) {
 	}
 }
 
+func TestResearchQuestionEmptyParentHardFailure(t *testing.T) {
+	own := "11111111-2222-4333-8444-555555555555"
+	// A present-but-empty parent is as meaningless as an empty hypothesis
+	// question_id: "no parent" is expressed by omitting the field, never
+	// by an empty string.
+	errs, hints := Check("research_question", own, map[string]any{
+		"statement":          "What is the stability of MOF-5 in water?",
+		"parent_question_id": "   ",
+	})
+	if len(errs) != 1 || len(hints) != 0 {
+		t.Fatalf("empty parent: errs=%v hints=%v, want exactly one hard failure", errs, hints)
+	}
+	if !strings.Contains(errs[0].Error(), "must not be empty") {
+		t.Fatalf("empty parent error = %q, want the must-not-be-empty explanation", errs[0])
+	}
+}
+
 func TestHypothesisQuestionRef(t *testing.T) {
 	// A present-but-empty question_id is mechanically wrong: hard failure.
 	errs, _ := Check("hypothesis", "", map[string]any{"question_id": "  "})

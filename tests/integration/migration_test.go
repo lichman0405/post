@@ -288,6 +288,13 @@ var canonicalTables = map[string]tableExp{
 		checks:  []string{"version_no > 0"},
 		fks:     []fkExp{fk("relation_id", "relations", "RESTRICT"), fk("state_id", "project_states", "RESTRICT"), fk("source_object_version_id", "scientific_object_versions", "RESTRICT"), fk("target_object_version_id", "scientific_object_versions", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
 	},
+	// knowledge_relation_endpoint_types is the T0501 addition (00040): the
+	// DB-side endpoint-type declaration of the two knowledge edges, kept in
+	// lockstep with internal/rsg/relationcatalog by an integration test.
+	"knowledge_relation_endpoint_types": {
+		cols: []colExp{c("relation_type", txt, false, false), arr("source_object_types", true, false), arr("target_object_types", false, false)},
+		pk:   []string{"relation_type"},
+	},
 	"evidence_assertions": {
 		cols:   []colExp{c("id", u, false, true), c("project_id", u, false, false), c("state_id", u, false, false), c("target_object_version_id", u, false, false), c("evidence_object_version_id", u, false, false), c("relation_type", txt, false, false), c("evidence_type", txt, false, false), c("scope", jb, false, true), c("directness", txt, false, true), c("inference_nature", txt, false, true), c("reasoning_note", txt, true, false), c("review_state", txt, false, true), c("created_by", u, false, false), c("created_at", ts, false, true)},
 		pk:     []string{"id"},
