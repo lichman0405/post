@@ -5870,3 +5870,59 @@ a condition only the driver could fix. **Ask again instead**" ✓（`L1-20260913
 分类器在**子进程**（`bin/rddev` ✓）里，而"记不记决策"的判断在**驱动进程的内存**里 ✓
 （`o.run` 是 `exec.Command(o.binary(), ...)` ✓，驱动自己那份代码是启动时载入的 ✓）。
 ⇒ **重建二进制不够，必须重启驱动** ✓。
+
+## L1-20260914-49
+
+**T0305 的 `git_branch_ref_guard` 放宽得比它声称的多 —— 实证，不是推理** ✓
+
+**事由** ✓：T0305（`00034_push_ingestion.sql` ✓）用 `CREATE OR REPLACE FUNCTION` 换掉了 00031 的
+`git_branch_ref_guard` ✓，加了一条 fast path（"tip 动了、状态机没动"就放行 ✓，因为 push ingestion
+必须刷新 `head_sha` ✓，而原守卫**禁止任何不移动 `sync_state` 的 UPDATE** ✓）。
+
+**先核对声明** ✓：它说 "the transition rules are otherwise copied verbatim from 00031" ✓ ——
+我逐行比对了 00031:166-213 与 00034 里的函数 ✓：四条迁移规则（pending/synced/failed/closing）
+的**列表与错误文本逐字相同** ✓，fast path 位于 `OLD.sync_state = 'closed'` 之后 ✓（closed 仍是终态 ✓）。
+**这句声明属实** ✓。
+
+**但 fast path 的注释是另一句话** ✓："an update that leaves `sync_state` (and every other lifecycle
+column) untouched **changes nothing but the tip pointer**" ✓ ——
+**"只有 tip 指针变"是它声称的效果** ✓，而实现是"**五个指定列**不变就放行" ✓：
+
+```
+sync_state = OLD.sync_state
+AND fork_sha / close_requested_at / synced_at / closed_at  IS NOT DISTINCT FROM
+```
+
+**表里还有两列不在这个名单里** ✓：`branch_id`（PK ✓ —— SQL 里 PK **可以** UPDATE ✓）
+与 `created_at` ✓。⇒ **它们也能被改** ✓。
+
+**我实证了，不是我想的** ✓（独立临时库 ✓、不碰开发库 ✓、脚本 `$CLAUDE_JOB_DIR/tmp/probe-guard.sh` ✓，
+guard 函数从迁移文件 **原样 sed 提取**、不手抄 ✓）：
+
+| UPDATE | 结果 |
+|---|---|
+| 只改 `head_sha` | **通过** ✓（设计意图 ✓）|
+| 只改 `synced_at` | 被拒 ✓ |
+| 只改 `fork_sha` | 被拒 ✓ |
+| **只改 `created_at`** | **通过** ✓（且落地 ✓）|
+| **只改 `branch_id`** | **通过** ✓（**真的挪到了另一个同名分支上** ✓）|
+
+对照组（`synced_at`/`fork_sha` 被拒 ✓）证明守卫**确实在工作** ✓，只是**名单不全** ✓。
+`branch_id` 那一格成立的前提是**两个项目下有同名分支** ✓ —— 否则 `git_ref` 的既有检查会先拦下 ✓。
+
+**可达性：平台代码路径不可达** ✓ —— 我把这张表的**全部写者**过了一遍 ✓
+（`refstore.go:139/165/182` ✓、`push_ingestion_store.go:130/135` ✓），
+**清一色是定向单列 UPDATE** ✓（`SET head_sha = $1 WHERE branch_id = $2` ✓），
+没有一处碰 `branch_id` 或 `created_at` ✓。⇒ 这**不是可利用缺陷** ✓，是**防御深度**问题 ✓。
+
+**为什么仍然要修** ✓：这是 T0305 **自己新引入**的一条放宽 ✓（原版在 pending/synced/closing 下
+**任何** UPDATE 都被拒 ✓，`failed` 状态是既有例外 ✓）。守卫的价值在于挡住"代码不该做的事" ✓；
+一个**放行它声称不放行之物**的守卫 ✓，即使当下不可达 ✓，也正是在下一次重构时**没人会再看第二眼**的那种地方 ✓。
+这与本仓库反复的立场一致 ✓：#139（两个字面量两处漂移 ✓）、00015（TRUNCATE 半截 ✓）、
+`ciStillRunning`（"absence is only a wait when waiting can end it" ✓）——
+**守卫必须按它声称的写，而不是按当下的调用方写** ✓。
+
+**修法方向**（留给实现者，不代写 ✓）：把 `branch_id`/`created_at` 补进名单是**最小修复** ✓；
+更稳的是**白名单化** ✓ —— 让"允许变的列"成为被列举的那一侧 ✓（如 `to_jsonb(NEW) - 'head_sha' - 'updated_at'`
+与旧值的同式相减比较 ✓），这样**将来给这张表加列时守卫自动收紧** ✓，而不是又漏一个 ✓。
+无论哪种，都要**补一条测试**把本次实证的场景固化 ✓（`branch_id` 与 `created_at` 各自被拒 ✓）。
