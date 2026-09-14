@@ -2402,12 +2402,14 @@
       "v1_required": true,
       "dependencies": [
         "T0405",
-        "T0404"
+        "T0404",
+        "T0310"
       ],
       "requirements": [
         "three-way merge non-conflicting object/relations",
         "human resolution plan input",
-        "transaction + Git update saga"
+        "transaction + Git update saga",
+        "合并流程要么对『读分支生命周期』加锁、要么在规格里明确接受该窗口（T0402 复核 minor #2 转移而来：并发 Merge 可能在读与 PR 插入之间提交）"
       ],
       "deliverables": [],
       "acceptance_criteria": [
@@ -6121,6 +6123,35 @@
       ],
       "scope_note": "只补测试覆盖，不改迁移。infra/migrations/** 明确禁止：本条任务的目的是让既有迁移被验证，不是让它被修改。",
       "origin": "T0203 的独立 review 提出的 minor 覆盖缺口；同一缺口也存在于已合并的 T0202(00024)。"
+    },
+    {
+      "id": "T0310",
+      "phase": "P3",
+      "phase_name": "Git 兼容层与只读 Files",
+      "title": "非 push 来源 head 的 semantic completeness 派生（规格问题，L3）",
+      "v1_required": true,
+      "dependencies": [],
+      "requirements": [
+        "回答：当一个 head 不是经 push ingestion 到达——merge saga 自己推进的 head、syncer 采纳的 out-of-band ref、fork 导入的 state——branch semantic completeness flag（00042 git_branch_semantic_states）由谁、按什么证据派生",
+        "两种读法的后果都写清：(a) 一律视为 complete，是否让 T0306 的『不可绕过 semantic validation merge』在非 push 路径上失效；(b) 若必须派生，新的证据来源与写入者是谁、merge 之后 flag 如何保持一致"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "owner 给出 L3 裁定；据此要么关闭本任务，要么派生一个实现任务（含 00042 的写入者与 fork 流程 T0804 的约束）"
+      ],
+      "tests": [],
+      "allowed_scope": [],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md"
+      ],
+      "decision_level_max": "L3",
+      "relevant_specs": [
+        "docs/16"
+      ],
+      "scope_note": "规格问题，不派发 Worker：答案写进 tasks/decisions.md 后再决定是否派生实现任务。证据（2026-09-14 核对）：(1) 00042 的列默认 DEFAULT 'semantic_complete'，迁移把已存在的每个分支回填为 complete；(2) 全仓库写这张表的只有 internal/gitprovider/push_ingestion_store.go（push ingestion，另加 semantic_state.go 的读/gate 辅助）；(3) merge saga（T0406 的 transaction + Git update saga）、syncer 采纳的 out-of-band head（T0309）、fork 导入（T0804，v1_required）都会造出非 push 来源的 head。"
     }
   ]
 }

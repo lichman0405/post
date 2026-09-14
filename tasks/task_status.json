@@ -1273,9 +1273,11 @@
       ]
     },
     "T0206": {
-      "status": "verification",
+      "status": "merged",
       "started_at": "2026-09-14T07:01:46Z",
       "worker_run_id": "run-37f610e7eea914c9",
+      "accepted_by_supervisor_at": "2026-09-14T07:47:19Z",
+      "merged_at": "2026-09-14T07:50:40Z",
       "rejection_reason": "# T0206：基线搬到新 main 上重做一遍 —— 不是你的代码有问题，是主线上多了东西\n\n## 先说结论\n\n**你的代码不用改。** 独立复核的结论是 `approve`：0 blocking、0 major，只有两条 minor 和三条 nit。\n\n但验收 Gate 拒了，原话是：\n\n```\nthe task's change does not apply to current main — bring the branch up to date and re-run:\ngit apply /tmp/post-integration-T0206.patch: exit status 1:\nerror: patch failed: specs/SPEC_VERSION.json:1\n```\n\n## 为什么会这样\n\n你开工以后，主线上合进了 T0305（迁移 `00034`）和 T0307。\n\n`specs/SPEC_VERSION.json` 是**生成物** —— 它是 specs 的一份摘要，主线上任何与 spec 有关的改动都会让它变。\n你树里那份，是按**你开工时的主线**算出来的；跟现在主线上的那份自然对不上，\n补丁的上下文贴不住，于是 `git apply` 失败。\n\n**这道拒绝是对的**：一个已经贴不到主线上的改动，不该被硬合进去。\n\n## 工具会怎么搬\n\n派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`）**不靠合并文本**，而是在新树上**重新生成**。\n\n道理很直白：派生文件是它输入的**函数**。\n留你那份 → 摘要描述的是旧的 specs；留主线那份 → 你在 specs 上的改动就丢了。\n两个都不对，所以只能按合并后的树**重算**。\n\n## 请你做的\n\n1. **逻辑一个字都不要改。** 复核已经确认你的导出机制是正确的，验收标准也都成立。\n2. 在新基线上**重新跑一遍**你在 RESULT.json 里承诺过的测试\n   （单元、集成、`make test-integration`，以及 `gofmt`/`go vet`/`staticcheck` 那一套）。\n   **跑出什么就写什么**：新基线上真有测试红了，就照实报红，我按红的处理。\n   不许为了让 collect 过而删测试、skip、放宽断言或放大超时。\n3. `RESULT.json` 里 `tests[]` 的每一条，都必须是**你这次实际跑出来的结果**。\n   历史写进 `notes_for_supervisor`，**不要写进 `tests[]`** —— 上一次 collect 被拒就是因为这个\n   （顶上写 `completed`、数组里躺着一条 `failed`，两句话互相打架）。\n4. `status` 只有在上面这些**真的都过了**之后才写 `completed`。\n5. 你的迁移号 **`00035` 不变**，在主线上排在 `00034` 之后，位置我留着。\n\n## 一条 minor，可做可不做\n\n复核提到 `examples/rsg-manifest.example.json` 还停在这次改动**之前**的形状，和这个任务交付的\ncanonical schema 对不上。它还在的话，顺手改对是好事；**但它不阻塞，别为了它冒险**。\n",
       "history": [
         {
@@ -1388,6 +1390,19 @@
           "at": "2026-09-14T07:09:07Z",
           "run_id": "run-d79615c482fc08f2",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T07:47:19Z",
+          "run_id": "run-70daa2d5a2c45c9b"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T07:50:40Z",
+          "run_id": "run-ee1afb4d68890fb2",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -1561,10 +1576,12 @@
       ]
     },
     "T0209": {
-      "status": "rejected",
-      "started_at": "2026-09-14T06:33:30Z",
-      "worker_run_id": "run-33200dcfd88b6eab",
-      "rejection_reason": "# T0209：按迁移号序停等你自己的轮次 —— 不是你的交付有缺陷\n\n## 这一条不是在做质量判断\n\n你的工作树一件没删，你的迁移号 `00036` 不变。这条记录的作用只有一个：**把你停在这里，等前一个号合进主线。**\n\n## 为什么必须等\n\n主线的迁移必须**严格按号递增**落地。T0209 带着 `00036`，而 `00035`（T0206）还在队列里没合。\n只要 `00035` 还没进主线，你这个任务就**不可能**合并 —— 验收 Gate 会在合并顺序那一步拒绝，\n而那一步是设计成拒绝的：库一旦按乱序升级过，goose 会直接拒绝启动，而 CI 看不见这一点\n（CI 每次都用全新的库，1..N 顺序天然正确）。\n\n**所以现在做什么都是白做**：主线马上就要因为 `00035` 落地而再动一次，\n你的基线会跟着再搬一次。在你前面那位合进去之前先搬基线，等于搬两遍。\n\n## 轮到你的那天会发生什么\n\n1. 我把你的基线搬到当时的主线上；\n2. 派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n   会**在新的树上重新生成**，不靠合并文本 —— 因为它们是输入的函数，合并文本两种结果都是错的；\n3. 你在新基线上重新验证一遍，然后照常走复核 → 验收 → 合并。\n\n## 在此之前\n\n**不要动工作树，不要重跑，不要为了让 collect 过改任何断言。**\n你现在什么都不用做。\n",
+      "status": "merged",
+      "started_at": "2026-09-14T08:22:52Z",
+      "worker_run_id": "run-29558a4713f9880b",
+      "accepted_by_supervisor_at": "2026-09-14T08:39:32Z",
+      "merged_at": "2026-09-14T08:42:52Z",
+      "rejection_reason": "collect rejected: scope: 19 changed path(s) outside allowed_scope [cmd/api/** internal/rsg/** internal/domain/** internal/application/** internal/persistence/** go.mod go.sum .env.example infra/migrations/** specs/database/postgres.sql packages/schemas/** specs/schemas/** specs/SPEC_VERSION.json tests/**]: _tmp_sec_cmd_api_main.go, _tmp_sec_cmd_api_rsghttp_handler_test.go, _tmp_sec_cmd_api_rsghttp_handlers.go, _tmp_sec_cmd_api_rsghttp_wiring.go, _tmp_sec_infra_migrations_00036_rsg_query_indexes.sql, _tmp_sec_internal_application_rsg_ports.go, _tmp_sec_internal_application_rsg_query.go, _tmp_sec_internal_application_rsg_query_test.go, _tmp_sec_internal_application_rsg_service.go, _tmp_sec_internal_persistence_queries_rsg_query.sql, _tmp_sec_internal_persistence_rsg_query_store.go, _tmp_sec_internal_persistence_sqlc_querier.go, _tmp_sec_internal_persistence_sqlc_rsg_query.sql.go, _tmp_sec_specs_SPEC_VERSION.json, _tmp_sec_specs_database_postgres.sql, _tmp_sec_tests_acceptance_rsg-real-services-e2e.sh, _tmp_sec_tests_integration_migration_test.go, _tmp_sec_tests_integration_rsg_domain_services_test.go, _tmp_sec_tests_integration_rsg_query_test.go",
       "history": [
         {
           "from": "todo",
@@ -1648,6 +1665,47 @@
           "at": "2026-09-14T07:02:08Z",
           "run_id": "run-e34a357c3d3e563b",
           "reason": "# T0209：按迁移号序停等你自己的轮次 —— 不是你的交付有缺陷\n\n## 这一条不是在做质量判断\n\n你的工作树一件没删，你的迁移号 `00036` 不变。这条记录的作用只有一个：**把你停在这里，等前一个号合进主线。**\n\n## 为什么必须等\n\n主线的迁移必须**严格按号递增**落地。T0209 带着 `00036`，而 `00035`（T0206）还在队列里没合。\n只要 `00035` 还没进主线，你这个任务就**不可能**合并 —— 验收 Gate 会在合并顺序那一步拒绝，\n而那一步是设计成拒绝的：库一旦按乱序升级过，goose 会直接拒绝启动，而 CI 看不见这一点\n（CI 每次都用全新的库，1..N 顺序天然正确）。\n\n**所以现在做什么都是白做**：主线马上就要因为 `00035` 落地而再动一次，\n你的基线会跟着再搬一次。在你前面那位合进去之前先搬基线，等于搬两遍。\n\n## 轮到你的那天会发生什么\n\n1. 我把你的基线搬到当时的主线上；\n2. 派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n   会**在新的树上重新生成**，不靠合并文本 —— 因为它们是输入的函数，合并文本两种结果都是错的；\n3. 你在新基线上重新验证一遍，然后照常走复核 → 验收 → 合并。\n\n## 在此之前\n\n**不要动工作树，不要重跑，不要为了让 collect 过改任何断言。**\n你现在什么都不用做。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T08:07:40Z",
+          "run_id": "run-07e1576972bd54a0",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T08:13:27Z",
+          "run_id": "run-507559ab717273e0",
+          "reason": "collect rejected: scope: 19 changed path(s) outside allowed_scope [cmd/api/** internal/rsg/** internal/domain/** internal/application/** internal/persistence/** go.mod go.sum .env.example infra/migrations/** specs/database/postgres.sql packages/schemas/** specs/schemas/** specs/SPEC_VERSION.json tests/**]: _tmp_sec_cmd_api_main.go, _tmp_sec_cmd_api_rsghttp_handler_test.go, _tmp_sec_cmd_api_rsghttp_handlers.go, _tmp_sec_cmd_api_rsghttp_wiring.go, _tmp_sec_infra_migrations_00036_rsg_query_indexes.sql, _tmp_sec_internal_application_rsg_ports.go, _tmp_sec_internal_application_rsg_query.go, _tmp_sec_internal_application_rsg_query_test.go, _tmp_sec_internal_application_rsg_service.go, _tmp_sec_internal_persistence_queries_rsg_query.sql, _tmp_sec_internal_persistence_rsg_query_store.go, _tmp_sec_internal_persistence_sqlc_querier.go, _tmp_sec_internal_persistence_sqlc_rsg_query.sql.go, _tmp_sec_specs_SPEC_VERSION.json, _tmp_sec_specs_database_postgres.sql, _tmp_sec_tests_acceptance_rsg-real-services-e2e.sh, _tmp_sec_tests_integration_migration_test.go, _tmp_sec_tests_integration_rsg_domain_services_test.go, _tmp_sec_tests_integration_rsg_query_test.go"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T08:22:52Z",
+          "run_id": "run-29558a4713f9880b",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T08:23:59Z",
+          "run_id": "run-0254cfcac3637ae2",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T08:39:32Z",
+          "run_id": "run-db914e338a499161"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T08:42:52Z",
+          "run_id": "run-d93b77d76b314568",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -1716,28 +1774,145 @@
       ]
     },
     "T0211": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "merged",
+      "started_at": "2026-09-14T10:46:47Z",
+      "worker_run_id": "run-bcc10709aeaf869f",
+      "accepted_by_supervisor_at": "2026-09-14T11:11:59Z",
+      "merged_at": "2026-09-14T11:17:54Z",
+      "rejection_reason": "# T0211：复核给了 `approve`，但有一条我判它阻断 —— 错在\"这个对象在不在这个项目里\"这句话上\n\n## 先说清楚这不是什么\n\n**这不是\"你连着两次没做好\"。** 你这一轮的复核结论是 **`approve`**，而且复核做得很实\n（自己搭了架子把钉在旧版本上的边跑出来验、重跑了真实 PostgreSQL 上的端到端）。\n你这一轮修的三件事我都独立看过：blocking 项（端点改按容器对象 id 解析）修对了，\n两条小意见也真修了，每条都留了\"修前红、修后绿\"的证据。**这个标准是对的，继续按它做。**\n\n下面的阻断项**不是复核判的**——复核把它标成 **major / 不阻断**。**是我改判的。**\n理由写在下面第 3 节，你有权看到我为什么推翻它。\n\n## 1. 阻断项：`Resolved` 的含义和它的文档不一致，渲染出来的是一句假话\n\n`internal/application/rsg/outline.go:122` 那行注释原文：\n\n> `Resolved` reports whether the claim object lives in this project (a …\n\n**实现做的不是这件事。** 同一个文件里：\n\n- `:238-242` 建 `byVersion`，每行是**这个项目里每个对象的最新版本**（一行一个对象）；\n- `:372-377` 的 `claimsByVersion` 从这个 `byVersion` 里筛出 `object_type == \"claim\"` 的，\n  **键是版本 id，而集合里只有\"最新那一版\"的版本 id**；\n- `:389-395` 解析 finding 的 `claim_version_refs` 时，用的是\n  `claimsByVersion[versionID]` —— **拿\"引用里钉死的版本 id\"去和\"最新版本 id\"比**。\n\n而 `claim_version_refs` 钉的是**确切的版本 id**，claim 升版之后没有任何东西会去重钉它。\n所以这个流程一走，`ok` 就是 `false`：\n\n```\nfinding 引用 claim 的 c-v1  →  claim 升到 v2  →  引用仍然钉着 c-v1\n→ claimsByVersion 里只有 c-v2  →  Resolved = false\n```\n\n于是 `cmd/api/rsghttp/research.html:153` 对它渲染 **\"not in this project\"**。\n\n**这句话是假的：那个 claim 就在这个项目里，只是在新版本上。** 而且因为\n`assigned[ref.ObjectID] = true` 只写在 `ok` 那个分支里，同一个 claim 还会落进\n\"没有关联到 question\" 的剩余清单——**页面自己和自己打架**：\nfingding 那栏说它不在项目里，剩余清单里又把它作为项目内的对象列出来（带链接）。\n\n**为什么会走到这一步，不是边角情形**：先有 finding 引用 claim、之后 claim 升版，\n这是这个域里**最正常的状态演进**（`docs/` 的不变量：\"Nothing disappears; state only evolves\"）。\n所以这不是\"罕见的坏数据\"，是常规流程。\n\n## 2. 你说它需要\"新查询\"，这一条不成立（所以它不能再当风险挂着）\n\n你上一轮的 `notes_for_supervisor` 里写：claim 轴\"需要 all-versions 读取（新查询）才能解析到容器\"。\n**这个端口已经存在了**，不用新查询：\n\n- `internal/application/rsg/ports.go:76-78` —— `GetVersionByID(ctx, versionID)` 就在 `ObjectPort` 上；\n- `internal/persistence/scientific_object_tx.go:138` —— 真实存储实现好了；\n- `internal/application/rsg/service.go:437` —— **本服务里已经在用它**；\n- 测试里的假实现也有（`service_test.go:180`），所以单测路径也是通的。\n\n一个技术细节，免得你走弯路：`buildOutline`（`:228`）是**只吃已经取好的 rows 的纯函数**\n（签名里没有 ctx、也没有端口），所以这个解析**不要塞进它**——放在 `ResearchOutline`\n（`:149`，有 ctx 和 `s.objects`）里做，或者在调 `buildOutline` 之前先把需要的版本行取齐再传进去。\n**两种都行，选你认为更干净的那种，但请在 `notes_for_supervisor` 里说清你选了哪种、为什么。**\n\n## 3. 我为什么改判为阻断（这一段是给你判断依据的，不是让你复述）\n\n复核把它的影响面框在\"findings 视图里 claim 那个子列表 + 剩余清单的位置\"，据此判不阻断。\n**这个框法对，我推翻的是它的结论，不是它的事实。** 两条理由：\n\n1. **触发它的流程是常规的**，不是罕见的坏数据（第 1 节末尾）。\n2. **错的是一句\"存在性\"的陈述。** \"这个对象在不在这个项目里\"这个问题的答案，\n   在这个项目里已经被单独判过一次级：T0213 复核发现自定义属性里的 `$ref` 会变成一个\n   **跨项目的存在性预言机**（编译成功/失败本身就回答了\"别的项目有没有这个 id\"），\n   我把它记成 issue #181 而不是当小事。**同一个判断在这里必须一致——只不过这里不是泄漏，\n   是直接印了一句假话给科研人员看。**\n\n**为什么这一条不能像 #181 那样\"记下来以后再说\"**：T0213 那四条我确实是记进 issue 就合了，\n因为它们的触达面窄（要项目维护者自己构造 schema）、而且**没有一条会印出假话**。\n这一条会。\n\n## 4. 最小可接受的修法（如果你不想动解析）\n\n上面的可能用：解析改成走 `GetVersionByID`，`Resolved` 就真的等于\"这个 claim 对象在本项目里\n（不论哪个版本）\"。\n\n**最小的可接受修法**：解析先不动，但**不许再断言成员关系**——\n\n- 那句话不能再说 \"not in this project\"，只能说你**实际知道**的事\n  （例如\"钉在一个没有出现在本大纲里的版本上\"）；\n- 同一个 claim **不能**同时出现在\"不在项目里\"和\"项目内的剩余清单\"两处、还互相矛盾；\n- `outline.go:122` 那行注释改成**描述代码实际做的事**。注释不许比代码说得更大。\n\n**两条路你选一条，但\"留着不动、记成风险\"这一条我不接受。**\n\n## 5. 顺手（**不阻断**，能改就改，不值得单独为它跑一轮）\n\n`cmd/api/rsghttp/outline.go:105` 在路由顶部加了 `Vary: Accept`，而\n`renderObjectPageError`（`page.go:147`）在 HTML 错误分支上又加一次，\n于是研究页的错误响应会带出 `Vary: Accept, Accept`。**无害**（Vary 是列表值头的合法形式），\n只是毛糙。\n\n## 6. 交付要求\n\n- **不删、不 skip、不弱化任何测试，不放宽 assertion，不放大 timeout。** 红着报红。\n- 新修的每一条，按你上一轮那个标准来：**修前能复现失败、修后过**，把两段都写进 `tests[]`。\n  上一轮你那三条（`***`、\n  `***`、e2e 的\n  `edges_pinned_to_superseded_versions_still_appear`）就是我要的样子。\n- `RESULT.json` 里 `tests[]` 只写**这一次真跑过的**结果；上一轮的写在\n  `notes_for_supervisor` 里。\n- 基线可能在我这边再动（这条链还在往前推），**如果基线变了我会再发一封信说明**；\n  你只按当前 worktree 的实际情况做，不要自己去 rebase。\n- 改完就停。我这边重新 collect → **重新复核一次**（这是机器规则：复核结论绑在\n  \"基线 + 内容\"上，内容一改旧结论就作废，不是不信任你）→ G2 → 合并。\n\n---\n\n## 7. 一句话版本\n\n`Resolved` 现在回答的是\"这个 claim 的最新版本 id 是否等于引用里钉的这个版本 id\"，\n而注释说它回答的是\"这个 claim 在不在这个项目里\"。常规的 claim 升版会让它答错，\n错的那句话会被印在页面上。**把这句话改成真的。**\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T08:47:13Z",
+          "run_id": "run-318d07675117ce06"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T08:47:14Z",
+          "run_id": "run-7deeea6171b614ac",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T09:16:59Z",
+          "run_id": "run-df75fd3873a512f8",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T09:34:53Z",
+          "run_id": "run-a6e82b436b3bec48",
+          "reason": "# T0211（Research Outline 与基础 Research 页面）：复核 `request_changes` —— 一处必须改，另两条小意见一起收\n\n> 这一轮**不是**让你重做。复核对交付本身是肯定的：ResearchOutline 服务聚合、JSON 契约、\n> 只读 HTML 页面、单元测试、真 PostgreSQL 上的 research page e2e 都在；两条验收标准\n> （默认按 Research Question 组织、可从 question 下钻）**在已跑过的单版本数据上确实通过**；\n> `RESULT.json` 的证据与 diff 一致；机械门全绿。\n>\n> 但有一条 **blocking**，而且它正好落在\"**版本化**\"这件平台天天在做的事上。\n\n## 一、阻断项：端点对象升过版之后，`addresses_question` 的边从 outline 上**消失了**\n\n复核原文（摘）：\n\n> The outline aggregation silently drops `addresses_question` edges whose endpoints are pinned to\n> superseded object versions. `buildOutline` resolves relation endpoints via `byVersion`, which only\n> holds each object's newest overall version (`ListObjectVersions` with nil lineage), while relations\n> stay pinned to the version they were created against (edges are version-pinned and\n> `CreateObjectVersion` never re-pins). Once either endpoint object is updated, the edge vanishes from\n> the outline … Reproduced empirically: hypothesis addressing question-v1 with the question at v2 lands\n> in `Unassigned`; a finding at v2 loses its `Questions`.\n\n**我逐条核对过，这条成立**（下面每一条你都能自己验）：\n\n1. **`byVersion` 只装\"每个对象的最新版本\"**：`ResearchOutline` 调的是\n   `ListObjectVersions(ctx, projectID, nil, nil)`；store 的注释自己写着\n   *\"each object of the project with its as-of version …（nil lineage = newest overall）\"*，\n   底下是 `ListObjectVersionsAsOf` 的 `DISTINCT ON`。\n2. **关系是钉版本的、而且不会被重新钉**：`relation_versions.source_object_version_id` /\n   `target_object_version_id`（`infra/migrations/00006_relations.sql:14-15`），\n   对象出新版本时**没有任何地方去更新这些端点**。\n3. **两个轴都用 `byVersion[...]` 解析端点，解不出就 `continue`**：question 侧在\n   `internal/application/rsg/outline.go:272` 附近，finding 侧在 `:417` 附近。⇒ 端点版本不是最新版，\n   **整条边被丢掉**。\n4. **后果是\"outline 说了假话\"**，不只是少显示一行：\n   - 说明问题的那个对象掉进 `Unassigned`（\"Not linked to a question\"）—— 而这条边**仍然存在**，\n     query 接口与详情页都还看得到它；\n   - 一个 finding 的 addressed questions **悄悄变空**。\n5. **工具箱里已经有现成的东西**：`RelationQueryRow.Source` / `.Target` 是\n   `EndpointContext{VersionID, ObjectID, ObjectType, ProjectID}` —— 容器 id 和类型**在 SQL 里就 join 出来了**。\n   所以这一处**不需要新查询、也不需要新端口**。\n\n**这一轮怎么改**（复核给的方向，我同意）：**按容器的 object id 解析端点**\n（`byObject[rel.Source.ObjectID]` / `byObject[rel.Target.ObjectID]`），标题与 branch 取该对象的\n**当前行**。这样\"钉在旧版本上的边\"仍然算数 —— 这也正是你自己那段去重注释（按**对象**去重）想表达的口径：\n两个指向不同版本的边，在 outline 里本来就是\"同一个对象\"。\n\n**要一条能在旧行为下红的测试**：construct 一个\"对象已有 v1/v2、边钉在 v1\"的场景，断言这条边\n**仍然**出现在 outline 上 —— **两侧都要**：question 的 addressed-by 与 finding 的 questions。\n在修好之前它必须是红的；如果你写出来的测试在修复前就绿，那说明它没测到这件事。\n\n**另外自查一遍**：这个文件里（以及 RSG 查询路径上）还有没有别处也在用 `byVersion` 当端点解析器？\n有的话一并修，或者在 notes 里写清为什么不修。\n\n## 二、另两条小意见（这一轮一并收）\n\n| # | 级别 | 位置 | 问题 | 这一轮做什么 |\n|---|---|---|---|---|\n| 1 | minor | `cmd/api/rsghttp/research.html:148` | findings 视图渲染 addressed questions 时写成 `<a href=\"{{$q.Href}}\">`，**没有** `reflink` 模板里那个 `{{if .Href}}` 守卫。当被指向的问题的最新版本没有 branch 时，页面会吐出 `href=\"\"` 的链接（复核在临时 harness 里验过），与你页面自己那条\"没有 branch 的行渲染成纯文本\"的规矩冲突 | **改**：补上守卫，与 `reflink` 一致 |\n| 2 | minor | `cmd/api/rsghttp/outline.go` | `handleResearch` 的 **JSON 分支**没设 `Vary: Accept`（HTML 分支设了）。共享缓存可能把同一 URL 的两种表示互相串出去 | **改**：两个分支都设 `Vary`。（复核说这是既有的 object 路由的老毛病 —— 那正是**不要**照抄它的理由；新的路由别把这个毛病带进来） |\n\n## 三、这一轮要交什么\n\n1. §一 的阻断项改掉，§二 的两条一并收掉。\n2. **每条都要有能在旧行为下红的测试**；做不出测试的，在 notes 里说明**为什么**——\n   不要用\"测不了\"当理由跳过，也不要写一个永远绿的测试凑数。\n3. **基线前移到 main**。生成物（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、\n   `internal/persistence/sqlc/*`）是**重新生成**的，不是文本合并。在新基线上重跑受影响的测试，\n   `RESULT.json` 的 `tests[]` **只写这次真跑过的**。\n4. `status` 按实情写：全绿才 `completed`；还有红就 `blocked`/`failed` 并如实登记。\n   **红着报告比造假绿好。**\n5. `RESULT.json` 的 `notes_for_supervisor` 是**一个字符串**（不是列表）。\n6. 复核这两条小意见如果你认为**不该这么改**，在 notes 里写明**哪一条、为什么**，不要闷声做也不要闷声跳过。\n\n## 四、不要动的\n\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n- **生成物只能重新生成，不要手工编辑。**\n- 不要动 `allowed_scope` 外的文件（你的范围里没有 `specs/**` 除生成物、也没有 `docs/**`）。\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（它自己建一次性库，起在 5432）。\n  **不要**用裸 `go test ./...` 下结论：那条路上几个测试会去连 `127.0.0.1:15432` 然后 connection refused，\n  那是 Makefile 注释里记着的历史端口 bug，不是你的代码问题。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T10:18:53Z",
+          "run_id": "run-a0d021f2e975114a",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T10:28:14Z",
+          "run_id": "run-4df0568c6d76fb41",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T10:42:36Z",
+          "run_id": "run-151100858d02a38b"
+        },
+        {
+          "from": "accepted",
+          "to": "rejected",
+          "at": "2026-09-14T10:44:07Z",
+          "run_id": "run-28a560792d77b21d",
+          "reason": "# T0211：复核给了 `approve`，但有一条我判它阻断 —— 错在\"这个对象在不在这个项目里\"这句话上\n\n## 先说清楚这不是什么\n\n**这不是\"你连着两次没做好\"。** 你这一轮的复核结论是 **`approve`**，而且复核做得很实\n（自己搭了架子把钉在旧版本上的边跑出来验、重跑了真实 PostgreSQL 上的端到端）。\n你这一轮修的三件事我都独立看过：blocking 项（端点改按容器对象 id 解析）修对了，\n两条小意见也真修了，每条都留了\"修前红、修后绿\"的证据。**这个标准是对的，继续按它做。**\n\n下面的阻断项**不是复核判的**——复核把它标成 **major / 不阻断**。**是我改判的。**\n理由写在下面第 3 节，你有权看到我为什么推翻它。\n\n## 1. 阻断项：`Resolved` 的含义和它的文档不一致，渲染出来的是一句假话\n\n`internal/application/rsg/outline.go:122` 那行注释原文：\n\n> `Resolved` reports whether the claim object lives in this project (a …\n\n**实现做的不是这件事。** 同一个文件里：\n\n- `:238-242` 建 `byVersion`，每行是**这个项目里每个对象的最新版本**（一行一个对象）；\n- `:372-377` 的 `claimsByVersion` 从这个 `byVersion` 里筛出 `object_type == \"claim\"` 的，\n  **键是版本 id，而集合里只有\"最新那一版\"的版本 id**；\n- `:389-395` 解析 finding 的 `claim_version_refs` 时，用的是\n  `claimsByVersion[versionID]` —— **拿\"引用里钉死的版本 id\"去和\"最新版本 id\"比**。\n\n而 `claim_version_refs` 钉的是**确切的版本 id**，claim 升版之后没有任何东西会去重钉它。\n所以这个流程一走，`ok` 就是 `false`：\n\n```\nfinding 引用 claim 的 c-v1  →  claim 升到 v2  →  引用仍然钉着 c-v1\n→ claimsByVersion 里只有 c-v2  →  Resolved = false\n```\n\n于是 `cmd/api/rsghttp/research.html:153` 对它渲染 **\"not in this project\"**。\n\n**这句话是假的：那个 claim 就在这个项目里，只是在新版本上。** 而且因为\n`assigned[ref.ObjectID] = true` 只写在 `ok` 那个分支里，同一个 claim 还会落进\n\"没有关联到 question\" 的剩余清单——**页面自己和自己打架**：\nfingding 那栏说它不在项目里，剩余清单里又把它作为项目内的对象列出来（带链接）。\n\n**为什么会走到这一步，不是边角情形**：先有 finding 引用 claim、之后 claim 升版，\n这是这个域里**最正常的状态演进**（`docs/` 的不变量：\"Nothing disappears; state only evolves\"）。\n所以这不是\"罕见的坏数据\"，是常规流程。\n\n## 2. 你说它需要\"新查询\"，这一条不成立（所以它不能再当风险挂着）\n\n你上一轮的 `notes_for_supervisor` 里写：claim 轴\"需要 all-versions 读取（新查询）才能解析到容器\"。\n**这个端口已经存在了**，不用新查询：\n\n- `internal/application/rsg/ports.go:76-78` —— `GetVersionByID(ctx, versionID)` 就在 `ObjectPort` 上；\n- `internal/persistence/scientific_object_tx.go:138` —— 真实存储实现好了；\n- `internal/application/rsg/service.go:437` —— **本服务里已经在用它**；\n- 测试里的假实现也有（`service_test.go:180`），所以单测路径也是通的。\n\n一个技术细节，免得你走弯路：`buildOutline`（`:228`）是**只吃已经取好的 rows 的纯函数**\n（签名里没有 ctx、也没有端口），所以这个解析**不要塞进它**——放在 `ResearchOutline`\n（`:149`，有 ctx 和 `s.objects`）里做，或者在调 `buildOutline` 之前先把需要的版本行取齐再传进去。\n**两种都行，选你认为更干净的那种，但请在 `notes_for_supervisor` 里说清你选了哪种、为什么。**\n\n## 3. 我为什么改判为阻断（这一段是给你判断依据的，不是让你复述）\n\n复核把它的影响面框在\"findings 视图里 claim 那个子列表 + 剩余清单的位置\"，据此判不阻断。\n**这个框法对，我推翻的是它的结论，不是它的事实。** 两条理由：\n\n1. **触发它的流程是常规的**，不是罕见的坏数据（第 1 节末尾）。\n2. **错的是一句\"存在性\"的陈述。** \"这个对象在不在这个项目里\"这个问题的答案，\n   在这个项目里已经被单独判过一次级：T0213 复核发现自定义属性里的 `$ref` 会变成一个\n   **跨项目的存在性预言机**（编译成功/失败本身就回答了\"别的项目有没有这个 id\"），\n   我把它记成 issue #181 而不是当小事。**同一个判断在这里必须一致——只不过这里不是泄漏，\n   是直接印了一句假话给科研人员看。**\n\n**为什么这一条不能像 #181 那样\"记下来以后再说\"**：T0213 那四条我确实是记进 issue 就合了，\n因为它们的触达面窄（要项目维护者自己构造 schema）、而且**没有一条会印出假话**。\n这一条会。\n\n## 4. 最小可接受的修法（如果你不想动解析）\n\n上面的可能用：解析改成走 `GetVersionByID`，`Resolved` 就真的等于\"这个 claim 对象在本项目里\n（不论哪个版本）\"。\n\n**最小的可接受修法**：解析先不动，但**不许再断言成员关系**——\n\n- 那句话不能再说 \"not in this project\"，只能说你**实际知道**的事\n  （例如\"钉在一个没有出现在本大纲里的版本上\"）；\n- 同一个 claim **不能**同时出现在\"不在项目里\"和\"项目内的剩余清单\"两处、还互相矛盾；\n- `outline.go:122` 那行注释改成**描述代码实际做的事**。注释不许比代码说得更大。\n\n**两条路你选一条，但\"留着不动、记成风险\"这一条我不接受。**\n\n## 5. 顺手（**不阻断**，能改就改，不值得单独为它跑一轮）\n\n`cmd/api/rsghttp/outline.go:105` 在路由顶部加了 `Vary: Accept`，而\n`renderObjectPageError`（`page.go:147`）在 HTML 错误分支上又加一次，\n于是研究页的错误响应会带出 `Vary: Accept, Accept`。**无害**（Vary 是列表值头的合法形式），\n只是毛糙。\n\n## 6. 交付要求\n\n- **不删、不 skip、不弱化任何测试，不放宽 assertion，不放大 timeout。** 红着报红。\n- 新修的每一条，按你上一轮那个标准来：**修前能复现失败、修后过**，把两段都写进 `tests[]`。\n  上一轮你那三条（`***`、\n  `***`、e2e 的\n  `edges_pinned_to_superseded_versions_still_appear`）就是我要的样子。\n- `RESULT.json` 里 `tests[]` 只写**这一次真跑过的**结果；上一轮的写在\n  `notes_for_supervisor` 里。\n- 基线可能在我这边再动（这条链还在往前推），**如果基线变了我会再发一封信说明**；\n  你只按当前 worktree 的实际情况做，不要自己去 rebase。\n- 改完就停。我这边重新 collect → **重新复核一次**（这是机器规则：复核结论绑在\n  \"基线 + 内容\"上，内容一改旧结论就作废，不是不信任你）→ G2 → 合并。\n\n---\n\n## 7. 一句话版本\n\n`Resolved` 现在回答的是\"这个 claim 的最新版本 id 是否等于引用里钉的这个版本 id\"，\n而注释说它回答的是\"这个 claim 在不在这个项目里\"。常规的 claim 升版会让它答错，\n错的那句话会被印在页面上。**把这句话改成真的。**\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T10:46:47Z",
+          "run_id": "run-bcc10709aeaf869f",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T10:55:26Z",
+          "run_id": "run-029d03e19e9a2966",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T11:11:59Z",
+          "run_id": "run-3cef6df564ff17bb"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T11:17:54Z",
+          "run_id": "run-0aa2998932f94c87",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T0212": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "merged",
+      "started_at": "2026-09-14T11:18:06Z",
+      "worker_run_id": "run-28219056e80311b9",
+      "accepted_by_supervisor_at": "2026-09-14T12:00:35Z",
+      "merged_at": "2026-09-14T12:03:51Z",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T11:18:04Z",
+          "run_id": "run-9db561e1506c7f27"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T11:18:06Z",
+          "run_id": "run-28219056e80311b9",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T11:47:20Z",
+          "run_id": "run-5767f0cbf4f7da1b",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T12:00:35Z",
+          "run_id": "run-adcbb4aa10d7dfd6"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T12:03:51Z",
+          "run_id": "run-7f1aec3ac07b8bbb",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T0213": {
-      "status": "rejected",
-      "started_at": "2026-09-14T05:00:30Z",
-      "worker_run_id": "run-55c30ea94bd88582",
-      "rejection_reason": "# T0213：代码停住等前面的号落地 —— 不是退回，是顺序安排\n\n你的交付本身没问题。**停在这里是刻意的顺序安排**，原因和代码无关。\n\n## 为什么必须等你前面的号\n\nmain 现在的最高迁移号是 `00033`。已经分配出去的顺序是：\n\n| 号 | 任务 |\n|---|---|\n| `00034` | T0305（Push Webhook 与 Semantic Ingestion） |\n| `00035` | T0206（Blob Attachment） |\n| `00036` | T0209（RSG Query API） |\n| `00038` | **你（T0213，Project Schema Profiles）** |\n\n本仓库的迁移运行器是 **goose v3.28.0**（`internal/persistence/migrate.go`），它**默认拒绝乱序迁移**：\n一个库已经应用过 `00038` 之后，再出现比它小的号，`Migrate` 会直接停：\n\n```\nfound 1 missing (out-of-order) migration: [00036_*.sql]\n```\n\n而 **CI 用的是全新库**，按名字排序一次跑完，**永远看不到这个问题** —— 它会静默地砸在\n任何**已经升级过**的库上（本地开发库、以后的生产库）。\n\n编排器现在已经在**合并那一步**把这道关堵上了（本轮 Supervisor 的改动）：\n带着 `00038` 的任务，在前面的号落地之前，合并会被工具自己拒绝。\n\n⇒ 顺序：**T0305(34) → T0206(35) → T0209(36) → 你(38)**。\n\n## 现在这一轮的东西都留着\n\n工作树里的改动**一件没删**，`RESULT.json` 也在。不用重做已经做过的事。\n\n等前面三个依次落地后，我会对你的分支做一次**机械的基线前移**\n（Supervisor 用 `rddev rebaseline`，生成物照例由脚本重新生成），\n然后请你**在那个 main 上重新证明一遍**并更新 `tasks/results/T0213/RESULT.json`。\n预期是一轮很短的返工。\n\n## 不变的约束\n\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n  红着报告比造假绿好。\n- 生成物只能**重新生成**，不要手工编辑 `specs/database/postgres.sql` 或 `internal/persistence/sqlc/*.go`。\n- 不要改迁移号（`00038` 是你的，不变）、不要动 `allowed_scope` 外的文件。\n",
+      "status": "merged",
+      "started_at": "2026-09-14T09:33:12Z",
+      "worker_run_id": "run-51898ff4d42039fb",
+      "accepted_by_supervisor_at": "2026-09-14T10:22:06Z",
+      "merged_at": "2026-09-14T10:25:27Z",
+      "rejection_reason": "# T0213（Project Schema Extension）：复核回来了 —— 一处必须改，另六条小意见一起收掉\n\n> 这一轮**不是**让你重做。复核对扩展本身是肯定的，逐项验过：profile 命名空间\n> （`project:<project_id>:<name>`，服务端派生）、版本化、只能扩展已注册的 canonical 类型基 schema、\n> 生成文档快照 base 的属性定义并保留 `additionalProperties:false` 与 metadata/conditions 逃生口、\n> 注册表是文档编译的唯一权威、`scientific_object_versions` 钉住创建时解析出的\n> `(schema_id, schema_version)`、pr-gate 阶梯执行 profile 的自定义必填项、profile v2 是新行\n> （UPDATE/DELETE 被 DB guard 拒 `P0001`、重复插入 `23505`）、v1 历史仍按它钉住的 v1 校验；\n> 要求的 `schema extension integration` 测试在（`tests/integration/schema_profile_test.go`），\n> scope 干净（24 个文件，全在 `allowed_scope` 内）。\n>\n> 复核结论是 **`request_changes`**：**一条 blocking，再加 6 条 minor/nit**。下面第一条必须改，\n> 其余六条这一轮一并收掉 —— §5.1 的条件 4 是\"没有未解决的复核意见\"，\"不阻断\"和\"解决了\"不是一回事。\n\n## 一、阻断项：API 启动**不该**依赖数据库（`cmd/api/main.go:370`）\n\n复核原文（摘）：\n\n> `profileSvc.LoadAll(ctx)` at startup is the first synchronous, fatal DB query in `run()`: with\n> PostgreSQL down the API now either exits with `exitRuntime` (connection refused — 'schema profile\n> load failed') or blocks in the pool acquire with no deadline (ctx is the signal ctx), so the process\n> never reaches `ListenAndServe` and `/healthz` is never served. This reverses the documented\n> lazy-start contract … and contradicts the platform's own precedent …\n\n**我自己核对过，这条成立**，它不是口味问题，是**这套代码自己写下来的规矩被反过来了**：\n\n- `cmd/api/main.go` 头部第 13–14 行（就在你改的这个文件里）：\n  *\"The database pool is opened lazily on purpose: the API must start (and report \"not ready\")\n  while PostgreSQL is down, not refuse to start.\"*\n- `internal/persistence/db.go:30-33`，`OpenLazy` 的注释：\n  *\"… reports database reachability through /readyz instead of refusing to start …\"*\n- `cmd/api/main_test.go:66`，T0006 的验收用例：\n  *\"Readiness: PostgreSQL down => 503 not_ready, never a crash, never 200.\"*\n\n**为什么既有测试没抓到它**（这点值得你知道，不是因为你的错）：那条测试走的是\n`newHealthHandler(...)` 这个**处理函数**，不是 `run()` 这条**进程启动路径**。所以它证明的是\n\"处理函数说实话\"，而你把新的致命查询放进了它没覆盖的那一段。⇒ 补的测试要落在**启动路径**上。\n\n**这一轮怎么改**（复核给了方向，我同意）：\n\n- `LoadAll` 不要挡在启动路径上。放到**后台重试循环**里（和 `run()` 里已有的 provisioning / pending sweep\n  那几处后台 goroutine 一个样子）。加载完成前，**依赖 profile 的校验一律 fail closed**\n  （拒绝，不是放过）；canonical 基 schema 不受影响。\n- 错误要分两类：**连不上库** → 重试并照常服务（`/readyz` 本来就反映 DB 的真实状态）；\n  **内容坏了**（hash 对不上、注册表冲突这类）→ 保持 fail-fast 退出。这两类混在一起才是问题。\n- **要有一条能在旧行为下红的测试**：PostgreSQL 不可达时进程仍起得来（`/healthz` 200、\n  `/readyz` 503 `not_ready`）。现在的 bug 之所以存在，恰恰是因为**没有这条测试**——\n  所以\"补一条启动路径的测试\"是这一轮的主交付之一，不是可选项。\n\n## 二、另外六条小意见（这一轮一并收）\n\n| # | 级别 | 位置 | 问题 | 这一轮做什么 |\n|---|---|---|---|---|\n| 1 | minor | `***.go:249` | `generateProfileDoc` 只搬 `properties`/`required`/`title`，base 里的其它顶层关键字（`$defs`、`$ref` 目标、`if/then`、`allOf` …）**静默丢掉**。当前 16 个 canonical schema 都没用到（复核验过），所以现在安全；将来一个用了 `$defs` 的 base 会**悄悄**产出坏 profile（编译失败=该 base 无法被扩展）或**被削弱的** profile（约束丢了） | **改**：注册时**拒绝**带不支持顶层关键字的 base（宁可拒绝，不要静默丢） |\n| 2 | minor | `internal/domain/schema_profile.go:56` | `ValidProfileName` 只管形状不管长度：超长名字过了服务层校验、进了内存注册表，然后倒在 DB 的 `CHECK`（`char_length(schema_id) <= 512`）上 —— 于是注册表里有一条**库里没有**的条目，这个 id+version 到重启前一直答 `ErrProfileVersionExists` | **改**：在服务层给名字加上界（例如 ≤64，与\"DB 上界减去 project 前缀\"相称），并加测试证明超长名字在**注册之前**就被拒 |\n| 3 | minor | `internal/application/rsg/service.go:687` | 内存注册表里没有该 profile 时（另一个 API 实例注册的、或注册表与库分叉了），`TypeConst` 失败、`resolveSchemaRef` 报的是 `governs type \"\"`（**空类型**），看不出真正的原因；而且 `LoadAll` 只在启动跑一次，这个实例会一直失败到重启 | **改**：**至少**把拒绝理由写清楚（点名\"该 profile 在本实例注册表里尚未加载\"）。若你顺手在 miss 时从 store 重读再判也可以，但**读不到仍然要拒绝** —— fail closed 不许放松。注意：§一 把加载挪到后台之后，\"注册表还没加载好\"从异常变成了**启动期的正常状态**，这条消息必须能如实描述它 |\n| 4 | minor | `***.go:61` | `Register` 不要求\"同名 profile 的新版本继承同一个 base/type\"：v2 可以钉另一个 base（比如 v1 钉 experiment、v2 钉 hypothesis）。之后对象创建解析**最新版本**，实验负载会被类型不匹配拒掉 —— 等于把这个 profile 名字对它的原使用者**废掉**，直到再发一版改回来 | **改**：拒绝 base（或至少权威 type）与同名既有版本不一致的新版本，并加测试 |\n| 5 | minor | `***.go:26` | `Store` 端口在 `***` 里没有 nil 保护，而 `Deps` 契约的 fail-closed 只覆盖 registry 与 project gate（docs/12：\"没接线的服务在调用时拒绝，而不是猜\"）。没接 Store 的 Service 会 **panic** 而不是回 `ErrStore` | **改**（与 T0209 复核对 rsg 服务提的同类意见同一个形状） |\n| 6 | nit | `***.go:68` | `Register` 先校验 name/version、后跑鉴权，所以未授权 + 畸形 payload 得到 **400** 而不是 403/404。没有信息泄露（消息只反映调用者自己的输入），但其它接口都是**先鉴权** | **改**：顺序与其它接口一致。若这让某个既有测试的期望值变化，**改测试的期望值并在 `RESULT.json` 里写明**（这是把顺序改对，不是放宽标准）；若你发现改顺序会削弱\"存在性隐藏\"（403/404 语义），**停下来在 notes 里说明**，不要硬改 |\n\n## 三、这一轮要交什么\n\n1. §一 的阻断项改掉，§二 的六条一并收掉。\n2. **每条都要有能在旧行为下红的测试**；§一 那条尤其（它就是因为没测试才漏过去的）。\n   做不出测试的，在 notes 里说明**为什么**——不要用\"测不了\"当理由跳过，也不要写一个永远绿的测试凑数。\n3. **基线已前移到 main**。生成物（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、\n   `internal/persistence/sqlc/*`）是**重新生成**的，不是文本合并 —— 手工改出来的\"一致\"不算一致。\n   在新基线上重跑受影响的测试，`RESULT.json` 的 `tests[]` **只写这次真跑过的**。\n4. `status` 按实情写：全绿才 `completed`；还有红就 `blocked`/`failed` 并如实登记。\n   **红着报告比造假绿好。**\n5. `RESULT.json` 的 `notes_for_supervisor` 是**一个字符串**（不是列表）。\n6. 复核的六条如果有一条你认为**不该这么改**，在 notes 里写明**哪一条、为什么**，不要闷声跳过；\n   也**不要**闷声照做。判断错了算我的。\n\n## 四、不要动的\n\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n- **生成物只能重新生成，不要手工编辑。**\n- **迁移号 `00038` 不变**，文件名别动。**37/39/44 永远空着**（链子约束：goose 默认拒绝乱序迁移，\n  CI 用全新库看不到这个问题，但任何已经升级过的库都会中招）。\n- 不要动 `allowed_scope` 外的文件。\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（它自己建一次性库，起在 5432）。\n  **不要**用裸 `go test ./...` 下结论：那条路上几个测试会去连 `127.0.0.1:15432` 然后 connection refused，\n  那是 Makefile 注释里记着的历史端口 bug，不是你的代码问题。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n",
       "history": [
         {
           "from": "todo",
@@ -1765,17 +1940,83 @@
           "at": "2026-09-14T05:41:17Z",
           "run_id": "run-3237b000b37f37ba",
           "reason": "# T0213：代码停住等前面的号落地 —— 不是退回，是顺序安排\n\n你的交付本身没问题。**停在这里是刻意的顺序安排**，原因和代码无关。\n\n## 为什么必须等你前面的号\n\nmain 现在的最高迁移号是 `00033`。已经分配出去的顺序是：\n\n| 号 | 任务 |\n|---|---|\n| `00034` | T0305（Push Webhook 与 Semantic Ingestion） |\n| `00035` | T0206（Blob Attachment） |\n| `00036` | T0209（RSG Query API） |\n| `00038` | **你（T0213，Project Schema Profiles）** |\n\n本仓库的迁移运行器是 **goose v3.28.0**（`internal/persistence/migrate.go`），它**默认拒绝乱序迁移**：\n一个库已经应用过 `00038` 之后，再出现比它小的号，`Migrate` 会直接停：\n\n```\nfound 1 missing (out-of-order) migration: [00036_*.sql]\n```\n\n而 **CI 用的是全新库**，按名字排序一次跑完，**永远看不到这个问题** —— 它会静默地砸在\n任何**已经升级过**的库上（本地开发库、以后的生产库）。\n\n编排器现在已经在**合并那一步**把这道关堵上了（本轮 Supervisor 的改动）：\n带着 `00038` 的任务，在前面的号落地之前，合并会被工具自己拒绝。\n\n⇒ 顺序：**T0305(34) → T0206(35) → T0209(36) → 你(38)**。\n\n## 现在这一轮的东西都留着\n\n工作树里的改动**一件没删**，`RESULT.json` 也在。不用重做已经做过的事。\n\n等前面三个依次落地后，我会对你的分支做一次**机械的基线前移**\n（Supervisor 用 `rddev rebaseline`，生成物照例由脚本重新生成），\n然后请你**在那个 main 上重新证明一遍**并更新 `tasks/results/T0213/RESULT.json`。\n预期是一轮很短的返工。\n\n## 不变的约束\n\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n  红着报告比造假绿好。\n- 生成物只能**重新生成**，不要手工编辑 `specs/database/postgres.sql` 或 `internal/persistence/sqlc/*.go`。\n- 不要改迁移号（`00038` 是你的，不变）、不要动 `allowed_scope` 外的文件。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T09:05:44Z",
+          "run_id": "run-cdb7acb593c9f101",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T09:11:15Z",
+          "run_id": "run-f09bb8bb1204ec3d",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T09:33:11Z",
+          "run_id": "run-30811bdf901034c4",
+          "reason": "# T0213（Project Schema Extension）：复核回来了 —— 一处必须改，另六条小意见一起收掉\n\n> 这一轮**不是**让你重做。复核对扩展本身是肯定的，逐项验过：profile 命名空间\n> （`project:<project_id>:<name>`，服务端派生）、版本化、只能扩展已注册的 canonical 类型基 schema、\n> 生成文档快照 base 的属性定义并保留 `additionalProperties:false` 与 metadata/conditions 逃生口、\n> 注册表是文档编译的唯一权威、`scientific_object_versions` 钉住创建时解析出的\n> `(schema_id, schema_version)`、pr-gate 阶梯执行 profile 的自定义必填项、profile v2 是新行\n> （UPDATE/DELETE 被 DB guard 拒 `P0001`、重复插入 `23505`）、v1 历史仍按它钉住的 v1 校验；\n> 要求的 `schema extension integration` 测试在（`tests/integration/schema_profile_test.go`），\n> scope 干净（24 个文件，全在 `allowed_scope` 内）。\n>\n> 复核结论是 **`request_changes`**：**一条 blocking，再加 6 条 minor/nit**。下面第一条必须改，\n> 其余六条这一轮一并收掉 —— §5.1 的条件 4 是\"没有未解决的复核意见\"，\"不阻断\"和\"解决了\"不是一回事。\n\n## 一、阻断项：API 启动**不该**依赖数据库（`cmd/api/main.go:370`）\n\n复核原文（摘）：\n\n> `profileSvc.LoadAll(ctx)` at startup is the first synchronous, fatal DB query in `run()`: with\n> PostgreSQL down the API now either exits with `exitRuntime` (connection refused — 'schema profile\n> load failed') or blocks in the pool acquire with no deadline (ctx is the signal ctx), so the process\n> never reaches `ListenAndServe` and `/healthz` is never served. This reverses the documented\n> lazy-start contract … and contradicts the platform's own precedent …\n\n**我自己核对过，这条成立**，它不是口味问题，是**这套代码自己写下来的规矩被反过来了**：\n\n- `cmd/api/main.go` 头部第 13–14 行（就在你改的这个文件里）：\n  *\"The database pool is opened lazily on purpose: the API must start (and report \"not ready\")\n  while PostgreSQL is down, not refuse to start.\"*\n- `internal/persistence/db.go:30-33`，`OpenLazy` 的注释：\n  *\"… reports database reachability through /readyz instead of refusing to start …\"*\n- `cmd/api/main_test.go:66`，T0006 的验收用例：\n  *\"Readiness: PostgreSQL down => 503 not_ready, never a crash, never 200.\"*\n\n**为什么既有测试没抓到它**（这点值得你知道，不是因为你的错）：那条测试走的是\n`newHealthHandler(...)` 这个**处理函数**，不是 `run()` 这条**进程启动路径**。所以它证明的是\n\"处理函数说实话\"，而你把新的致命查询放进了它没覆盖的那一段。⇒ 补的测试要落在**启动路径**上。\n\n**这一轮怎么改**（复核给了方向，我同意）：\n\n- `LoadAll` 不要挡在启动路径上。放到**后台重试循环**里（和 `run()` 里已有的 provisioning / pending sweep\n  那几处后台 goroutine 一个样子）。加载完成前，**依赖 profile 的校验一律 fail closed**\n  （拒绝，不是放过）；canonical 基 schema 不受影响。\n- 错误要分两类：**连不上库** → 重试并照常服务（`/readyz` 本来就反映 DB 的真实状态）；\n  **内容坏了**（hash 对不上、注册表冲突这类）→ 保持 fail-fast 退出。这两类混在一起才是问题。\n- **要有一条能在旧行为下红的测试**：PostgreSQL 不可达时进程仍起得来（`/healthz` 200、\n  `/readyz` 503 `not_ready`）。现在的 bug 之所以存在，恰恰是因为**没有这条测试**——\n  所以\"补一条启动路径的测试\"是这一轮的主交付之一，不是可选项。\n\n## 二、另外六条小意见（这一轮一并收）\n\n| # | 级别 | 位置 | 问题 | 这一轮做什么 |\n|---|---|---|---|---|\n| 1 | minor | `***.go:249` | `generateProfileDoc` 只搬 `properties`/`required`/`title`，base 里的其它顶层关键字（`$defs`、`$ref` 目标、`if/then`、`allOf` …）**静默丢掉**。当前 16 个 canonical schema 都没用到（复核验过），所以现在安全；将来一个用了 `$defs` 的 base 会**悄悄**产出坏 profile（编译失败=该 base 无法被扩展）或**被削弱的** profile（约束丢了） | **改**：注册时**拒绝**带不支持顶层关键字的 base（宁可拒绝，不要静默丢） |\n| 2 | minor | `internal/domain/schema_profile.go:56` | `ValidProfileName` 只管形状不管长度：超长名字过了服务层校验、进了内存注册表，然后倒在 DB 的 `CHECK`（`char_length(schema_id) <= 512`）上 —— 于是注册表里有一条**库里没有**的条目，这个 id+version 到重启前一直答 `ErrProfileVersionExists` | **改**：在服务层给名字加上界（例如 ≤64，与\"DB 上界减去 project 前缀\"相称），并加测试证明超长名字在**注册之前**就被拒 |\n| 3 | minor | `internal/application/rsg/service.go:687` | 内存注册表里没有该 profile 时（另一个 API 实例注册的、或注册表与库分叉了），`TypeConst` 失败、`resolveSchemaRef` 报的是 `governs type \"\"`（**空类型**），看不出真正的原因；而且 `LoadAll` 只在启动跑一次，这个实例会一直失败到重启 | **改**：**至少**把拒绝理由写清楚（点名\"该 profile 在本实例注册表里尚未加载\"）。若你顺手在 miss 时从 store 重读再判也可以，但**读不到仍然要拒绝** —— fail closed 不许放松。注意：§一 把加载挪到后台之后，\"注册表还没加载好\"从异常变成了**启动期的正常状态**，这条消息必须能如实描述它 |\n| 4 | minor | `***.go:61` | `Register` 不要求\"同名 profile 的新版本继承同一个 base/type\"：v2 可以钉另一个 base（比如 v1 钉 experiment、v2 钉 hypothesis）。之后对象创建解析**最新版本**，实验负载会被类型不匹配拒掉 —— 等于把这个 profile 名字对它的原使用者**废掉**，直到再发一版改回来 | **改**：拒绝 base（或至少权威 type）与同名既有版本不一致的新版本，并加测试 |\n| 5 | minor | `***.go:26` | `Store` 端口在 `***` 里没有 nil 保护，而 `Deps` 契约的 fail-closed 只覆盖 registry 与 project gate（docs/12：\"没接线的服务在调用时拒绝，而不是猜\"）。没接 Store 的 Service 会 **panic** 而不是回 `ErrStore` | **改**（与 T0209 复核对 rsg 服务提的同类意见同一个形状） |\n| 6 | nit | `***.go:68` | `Register` 先校验 name/version、后跑鉴权，所以未授权 + 畸形 payload 得到 **400** 而不是 403/404。没有信息泄露（消息只反映调用者自己的输入），但其它接口都是**先鉴权** | **改**：顺序与其它接口一致。若这让某个既有测试的期望值变化，**改测试的期望值并在 `RESULT.json` 里写明**（这是把顺序改对，不是放宽标准）；若你发现改顺序会削弱\"存在性隐藏\"（403/404 语义），**停下来在 notes 里说明**，不要硬改 |\n\n## 三、这一轮要交什么\n\n1. §一 的阻断项改掉，§二 的六条一并收掉。\n2. **每条都要有能在旧行为下红的测试**；§一 那条尤其（它就是因为没测试才漏过去的）。\n   做不出测试的，在 notes 里说明**为什么**——不要用\"测不了\"当理由跳过，也不要写一个永远绿的测试凑数。\n3. **基线已前移到 main**。生成物（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、\n   `internal/persistence/sqlc/*`）是**重新生成**的，不是文本合并 —— 手工改出来的\"一致\"不算一致。\n   在新基线上重跑受影响的测试，`RESULT.json` 的 `tests[]` **只写这次真跑过的**。\n4. `status` 按实情写：全绿才 `completed`；还有红就 `blocked`/`failed` 并如实登记。\n   **红着报告比造假绿好。**\n5. `RESULT.json` 的 `notes_for_supervisor` 是**一个字符串**（不是列表）。\n6. 复核的六条如果有一条你认为**不该这么改**，在 notes 里写明**哪一条、为什么**，不要闷声跳过；\n   也**不要**闷声照做。判断错了算我的。\n\n## 四、不要动的\n\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n- **生成物只能重新生成，不要手工编辑。**\n- **迁移号 `00038` 不变**，文件名别动。**37/39/44 永远空着**（链子约束：goose 默认拒绝乱序迁移，\n  CI 用全新库看不到这个问题，但任何已经升级过的库都会中招）。\n- 不要动 `allowed_scope` 外的文件。\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（它自己建一次性库，起在 5432）。\n  **不要**用裸 `go test ./...` 下结论：那条路上几个测试会去连 `127.0.0.1:15432` 然后 connection refused，\n  那是 Makefile 注释里记着的历史端口 bug，不是你的代码问题。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T09:33:12Z",
+          "run_id": "run-51898ff4d42039fb",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T10:06:49Z",
+          "run_id": "run-2cdb2bfc0a4241bc",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T10:22:06Z",
+          "run_id": "run-4fa1916486e8dad8"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T10:25:27Z",
+          "run_id": "run-20955de1ee18b945",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0214": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-14T11:18:23Z",
+      "worker_run_id": "run-59e7ac1dc44fd6fa",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T11:18:22Z",
+          "run_id": "run-601357e1ff8c291c"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T11:18:23Z",
+          "run_id": "run-59e7ac1dc44fd6fa",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T11:50:08Z",
+          "run_id": "run-c353605c422753bf",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T0215": {
       "status": "merged",
@@ -2397,9 +2638,11 @@
       ]
     },
     "T0306": {
-      "status": "rejected",
-      "started_at": "2026-09-14T06:55:53Z",
-      "worker_run_id": "run-f2937d1d6341d808",
+      "status": "merged",
+      "started_at": "2026-09-14T11:54:25Z",
+      "worker_run_id": "run-93f0478ecce94d3b",
+      "accepted_by_supervisor_at": "2026-09-14T12:25:49Z",
+      "merged_at": "2026-09-14T12:29:12Z",
       "rejection_reason": "# T0306：按迁移号序停等你自己的轮次 —— 不是你的交付有缺陷\n\n## 这一条不是在做质量判断\n\n你的工作树一件没删，你的迁移号 `00042` 不变。这条记录的作用只有一个：**把你停在这里，等前一个号合进主线。**\n\n## 为什么必须等\n\n主线的迁移必须**严格按号递增**落地。T0306 带着 `00042`，而前面 `00035`..`00041` 六个号都还没合。\n只要前面还有一个号没进主线，你这个任务就**不可能**合并 —— 验收 Gate 会在合并顺序那一步拒绝，\n而那一步是设计成拒绝的：库一旦按乱序升级过，goose 会直接拒绝启动，而 CI 看不见这一点\n（CI 每次都用全新的库，1..N 顺序天然正确）。\n\n**所以现在做什么都是白做**：主线马上还要为 `00035`..`00041` 各动一次，\n你的基线会跟着再搬一次。在你前面那位合进去之前先搬基线，等于搬两遍。\n\n## 轮到你的那天会发生什么\n\n1. 我把你的基线搬到当时的主线上；\n2. 派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n   会**在新的树上重新生成**，不靠合并文本 —— 因为它们是输入的函数，合并文本两种结果都是错的；\n3. 你在新基线上重新验证一遍，然后照常走复核 → 验收 → 合并。\n\n## 在此之前\n\n**不要动工作树，不要重跑，不要为了让 collect 过改任何断言。**\n你现在什么都不用做。\n",
       "history": [
         {
@@ -2442,6 +2685,33 @@
           "at": "2026-09-14T07:02:37Z",
           "run_id": "run-365929eee9ba6f0b",
           "reason": "# T0306：按迁移号序停等你自己的轮次 —— 不是你的交付有缺陷\n\n## 这一条不是在做质量判断\n\n你的工作树一件没删，你的迁移号 `00042` 不变。这条记录的作用只有一个：**把你停在这里，等前一个号合进主线。**\n\n## 为什么必须等\n\n主线的迁移必须**严格按号递增**落地。T0306 带着 `00042`，而前面 `00035`..`00041` 六个号都还没合。\n只要前面还有一个号没进主线，你这个任务就**不可能**合并 —— 验收 Gate 会在合并顺序那一步拒绝，\n而那一步是设计成拒绝的：库一旦按乱序升级过，goose 会直接拒绝启动，而 CI 看不见这一点\n（CI 每次都用全新的库，1..N 顺序天然正确）。\n\n**所以现在做什么都是白做**：主线马上还要为 `00035`..`00041` 各动一次，\n你的基线会跟着再搬一次。在你前面那位合进去之前先搬基线，等于搬两遍。\n\n## 轮到你的那天会发生什么\n\n1. 我把你的基线搬到当时的主线上；\n2. 派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n   会**在新的树上重新生成**，不靠合并文本 —— 因为它们是输入的函数，合并文本两种结果都是错的；\n3. 你在新基线上重新验证一遍，然后照常走复核 → 验收 → 合并。\n\n## 在此之前\n\n**不要动工作树，不要重跑，不要为了让 collect 过改任何断言。**\n你现在什么都不用做。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T11:54:25Z",
+          "run_id": "run-93f0478ecce94d3b",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T12:06:52Z",
+          "run_id": "run-7fc1a2cecceb2b1a",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T12:25:49Z",
+          "run_id": "run-1a096c83a7715b29"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T12:29:12Z",
+          "run_id": "run-b245f6e0db35c84f",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -2503,9 +2773,11 @@
       ]
     },
     "T0308": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-14T07:02:46Z",
       "worker_run_id": "run-244edcaeba47a9e4",
+      "accepted_by_supervisor_at": "2026-09-14T07:47:08Z",
+      "merged_at": "2026-09-14T07:50:21Z",
       "history": [
         {
           "from": "todo",
@@ -2519,35 +2791,140 @@
           "at": "2026-09-14T07:02:46Z",
           "run_id": "run-244edcaeba47a9e4",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T07:31:38Z",
+          "run_id": "run-ff64c97f566e9391",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T07:47:08Z",
+          "run_id": "run-76f4455f6bd20006"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T07:50:21Z",
+          "run_id": "run-7e0cee2b97d71bc5",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0309": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "rejected",
+      "started_at": "2026-09-14T07:50:42Z",
+      "worker_run_id": "run-195b9d46d8f8696d",
+      "rejection_reason": "collect rejected: result-schema: RESULT.json does not validate against ***-result.schema.json: RESULT.json.notes_for_supervisor: value [Design decision (L1, documented in code comments): refs/heads/main is platform-managed (T0302 MainRef) and no branch row names it — the unmapped-ref check skips it explicitly, otherwise every provisioned repository would flag on every pass. Provider outage != findings: a failed provider section is recorded as provider_error on the run row; provider-kind findings are neither created (no false 'everything missing') nor resolved (not re-verified) on such a pass — covered by unit + integration tests. Resolution semantics: an open finding is resolved only by a pass that re-verified its dimension and no longer observes the drift; resolved rows never reopen (guard) and recurring drift is a new row — enforced at the storage layer (migration 00047). The canonical fixture updates in tests/integration/migration_test.go (canonicalTables, explicitIndexes) and tests/integration/append_only_test.go (targetedGuardTriggers) are required catalog maintenance for the new tables/index/triggers — the tests pin the full schema inventory by design, and they still pass. No test was weakened, skipped or deleted. specs/database/postgres.sql and specs/SPEC_VERSION.json are regenerated derived artifacts (gen_schema_snapshot.py / spec_version.py), not hand edits; check targets confirm them current. Baseline commit ***: no git control-plane operations performed; all changes are uncommitted working-tree diffs confined to the allowed scope. The cmd/api wiring runs the sweep unconditionally (nil port when provisioning is disabled → canonical-store checks only), matching the provisioning gate's shape in main.go.] is not of type string",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T07:50:41Z",
+          "run_id": "run-9d60160603667c15"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T07:50:42Z",
+          "run_id": "run-195b9d46d8f8696d",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T08:39:53Z",
+          "run_id": "run-39a0c641ddc4f4d3",
+          "reason": "collect rejected: result-schema: RESULT.json does not validate against ***-result.schema.json: RESULT.json.notes_for_supervisor: value [Design decision (L1, documented in code comments): refs/heads/main is platform-managed (T0302 MainRef) and no branch row names it — the unmapped-ref check skips it explicitly, otherwise every provisioned repository would flag on every pass. Provider outage != findings: a failed provider section is recorded as provider_error on the run row; provider-kind findings are neither created (no false 'everything missing') nor resolved (not re-verified) on such a pass — covered by unit + integration tests. Resolution semantics: an open finding is resolved only by a pass that re-verified its dimension and no longer observes the drift; resolved rows never reopen (guard) and recurring drift is a new row — enforced at the storage layer (migration 00047). The canonical fixture updates in tests/integration/migration_test.go (canonicalTables, explicitIndexes) and tests/integration/append_only_test.go (targetedGuardTriggers) are required catalog maintenance for the new tables/index/triggers — the tests pin the full schema inventory by design, and they still pass. No test was weakened, skipped or deleted. specs/database/postgres.sql and specs/SPEC_VERSION.json are regenerated derived artifacts (gen_schema_snapshot.py / spec_version.py), not hand edits; check targets confirm them current. Baseline commit ***: no git control-plane operations performed; all changes are uncommitted working-tree diffs confined to the allowed scope. The cmd/api wiring runs the sweep unconditionally (nil port when provisioning is disabled → canonical-store checks only), matching the provisioning gate's shape in main.go.] is not of type string"
+        }
+      ]
     },
     "T0401": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "merged",
+      "started_at": "2026-09-14T08:24:01Z",
+      "worker_run_id": "run-0c44011b768eb8ac",
+      "accepted_by_supervisor_at": "2026-09-14T09:05:38Z",
+      "merged_at": "2026-09-14T09:08:52Z",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T08:13:28Z",
+          "run_id": "run-c676275ec939ee97"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T08:24:01Z",
+          "run_id": "run-0c44011b768eb8ac",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T08:54:06Z",
+          "run_id": "run-dcc071f6c3164c4f",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T09:05:38Z",
+          "run_id": "run-72b005cc99d6f08b"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T09:08:52Z",
+          "run_id": "run-5316e4e1f526668f",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T0402": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-14T10:13:57Z",
+      "worker_run_id": "run-770ba478ad70e1e4",
+      "rejection_reason": "collect rejected: scope: 4 changed path(s) outside allowed_scope [infra/migrations/** specs/database/postgres.sql specs/SPEC_VERSION.json internal/rsg/** internal/application/** internal/domain/** go.mod go.sum .env.example cmd/api/** apps/web/** tests/**]: internal/persistence/pullrequest_store.go, internal/persistence/queries/issues_prs.sql, internal/persistence/sqlc/issues_prs.sql.go, internal/persistence/sqlc/querier.go",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T09:11:15Z",
+          "run_id": "run-f842b9b2c75a0224"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T09:11:16Z",
+          "run_id": "run-8d78e7499a2473e6",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T09:37:55Z",
+          "run_id": "run-5933c840116b9280",
+          "reason": "collect rejected: scope: 4 changed path(s) outside allowed_scope [infra/migrations/** specs/database/postgres.sql specs/SPEC_VERSION.json internal/rsg/** internal/application/** internal/domain/** go.mod go.sum .env.example cmd/api/** apps/web/** tests/**]: internal/persistence/pullrequest_store.go, internal/persistence/queries/issues_prs.sql, internal/persistence/sqlc/issues_prs.sql.go, internal/persistence/sqlc/querier.go"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T10:13:57Z",
+          "run_id": "run-770ba478ad70e1e4",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T10:19:27Z",
+          "run_id": "run-1d27460654dfb7d2",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T0403": {
       "status": "todo",
@@ -2568,13 +2945,68 @@
       "merged_at": null
     },
     "T0405": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "merged",
+      "started_at": "2026-09-14T10:19:26Z",
+      "worker_run_id": "run-9de87dfd13e28be9",
+      "accepted_by_supervisor_at": "2026-09-14T10:46:43Z",
+      "merged_at": "2026-09-14T10:50:01Z",
+      "rejection_reason": "# T0405（Semantic Conflict Detector）：两条阻断项，第二条是 G2 的红\n\n复核给的是 `approve`，但它那条 **major** 我自己核过一遍——**它是对的**，而且错的是一台\n\"什么能自动合、什么必须留给人\"的判定机，这种地方判错是**静默地把科学冲突自动合掉**。\n所以这一轮按阻断处理。\n\n## 一、阻断项 1：base 是 JSON `null` 时，`appendOnly` 把它当成了空数组\n\n`internal/rsg/conflict/payload.go:78`：\n\n```go\nfunc appendOnly(bOK bool, base json.RawMessage, hOK bool, head json.RawMessage) bool {\n\tif !bOK || !hOK {\n\t\treturn false\n\t}\n\tvar b, h []json.RawMessage\n\tif json.Unmarshal(base, &b) != nil || json.Unmarshal(head, &h) != nil {\n\t\treturn false\n\t}\n\t...\n```\n\n**`json.Unmarshal([]byte(\"null\"), &b)` 的返回值是 `nil`（没有错误），`b` 仍然是 `nil`（长度 0）。**\n所以 base 是 `null` 时，`len(b) == 0`，前缀循环一次都不跑，函数返回 **true** —— 语境是\n\"head 只是把 base 那张表往后接了一段\"。\n\n于是 `diverged()` 里那条 `continue` 生效：\n\n```\nbase:   {\"statement\": \"s\", \"evidence_refs\": null}\nsource: {\"statement\": \"s\", \"evidence_refs\": [\"e2\"]}\ntarget: {\"statement\": \"s\", \"evidence_refs\": [\"e3\"]}\n```\n\n两边都把同一个键换成了**不同的**数组 —— 按 docs/09 §6 这是 attribute/knowledge 的\n\"同字段不同值\"，**必须**由人解决；现在它会被判成 `auto_mergeable = true`、冲突数为 0。\n\n**这个函数自己的注释就已经写对了一半**：\n\n> 「A missing base key is not an append — there is no anchor list to extend.」\n\n作者想到了\"没有锚点就不能算追加\"，但漏了 `null` 跟\"键不存在\"一样**没有锚点**，\n却从 `Unmarshal` 那里拿到了一个不报错的空切片。\n\n### 要交什么\n\n1. **修**：把 **base 值为 JSON `null`** 当作\"没有锚点\"处理（在取前缀之前先挡掉）。\n   这样上面那个例子必须变成**冲突**，`auto_mergeable` 必须是 **false**。\n   修法你定，但语义必须是这一条：**`null` 不等于 `[]`**。\n2. **一个在旧行为下会红的测试**：至少覆盖上面这组输入（base `null` → 两边各换成不同数组），\n   断言\"这是一个冲突、不是 auto_mergeable\"。\n3. **顺带自查**：包里（以及你这次新增的代码里）**还有没有别的地方**用\n   `json.Unmarshal` 到切片/映射来判断\"这个键存不存在、是不是空的\"。\n   有就在 `notes_for_supervisor` 里列出来（那是字符串，不是列表），**不要**顺手改范围外的东西。\n\n## 二、阻断项 2：G2 红，`make staticcheck`\n\nG2（CI 的精确步骤）在 `go` 这个 job 红在 step 2：\n\n```\n$ make staticcheck\nbash scripts/staticcheck.sh\ntests/integration/conflict_test.go:33:7: const conflictTaskID is unused (U1000)\n\nstaticcheck: NEW findings above are not in ops/ci/staticcheck-baseline.txt.\nFix them; only pre-existing findings may be baselined, with a\nfollow-up issue to fix them — never baseline new code.\nmake: *** [Makefile:125: staticcheck] Error 1\n```\n\n`const conflictTaskID = \"T0405\"`（`tests/integration/conflict_test.go:33`）**没有任何地方用到**。\n这是你这轮新增的文件里的新代码。\n\n- **不许**把它加进 `ops/ci/staticcheck-baseline.txt` —— 门自己的话写着\"never baseline new code\"。\n- 要么删掉它，要么真的用上它；**删掉**大概率是对的（它看起来是一个残留的 fixture 常量）。\n- 因为 step 2 红了，**step 3、step 4 根本没跑**（`bash scripts/tests/staticcheck-unit-test.sh` 和\n  `go test $(go list ./... | grep -v '/tests/integration')`）。这两条你要自己跑通。\n- **交回之前自己跑一遍 `make staticcheck`**，把输出留着。\n\n## 三、不阻断，但顺手说清\n\n- **次要对**（`payload.go:48`）：两边**都删掉**同一个键时不判\"收敛\"，会报成冲突。\n  方向是安全的（只会多报，不会漏报），复核说经写入路径目前够不到。你判断；改了就说改了，没改就说明为什么。\n- **证据里的数字要准**：`RESULT.json` 的冲突单测证据写的是 \"23 tests PASS\"，\n  复核实测是 **25**。方向没错，数字错了。**证据里的数字我会核**，写之前自己数一遍。\n\n## 四、这一轮的交付要求\n\n- `RESULT.json` 的 `tests[]` **只写你这次真跑过的**；`status` 按实情写（还有红就如实登记）。\n  **红着报告比造假绿好。**\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n- 生成物只能重新生成，不要手工编辑。\n- 结论只从 **`make`** 的入口下（`make test-integration` 等），别用裸 `go test ./...` 下结论。\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（它自己建一次性库，起在 5432）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T09:12:54Z",
+          "run_id": "run-705797b87dc844f0"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T09:28:59Z",
+          "run_id": "run-50a82cd822a74a64",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T09:58:32Z",
+          "run_id": "run-d4b87fef00f5f6cd",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T10:15:34Z",
+          "run_id": "run-808b56663c9ef858",
+          "reason": "# T0405（Semantic Conflict Detector）：两条阻断项，第二条是 G2 的红\n\n复核给的是 `approve`，但它那条 **major** 我自己核过一遍——**它是对的**，而且错的是一台\n\"什么能自动合、什么必须留给人\"的判定机，这种地方判错是**静默地把科学冲突自动合掉**。\n所以这一轮按阻断处理。\n\n## 一、阻断项 1：base 是 JSON `null` 时，`appendOnly` 把它当成了空数组\n\n`internal/rsg/conflict/payload.go:78`：\n\n```go\nfunc appendOnly(bOK bool, base json.RawMessage, hOK bool, head json.RawMessage) bool {\n\tif !bOK || !hOK {\n\t\treturn false\n\t}\n\tvar b, h []json.RawMessage\n\tif json.Unmarshal(base, &b) != nil || json.Unmarshal(head, &h) != nil {\n\t\treturn false\n\t}\n\t...\n```\n\n**`json.Unmarshal([]byte(\"null\"), &b)` 的返回值是 `nil`（没有错误），`b` 仍然是 `nil`（长度 0）。**\n所以 base 是 `null` 时，`len(b) == 0`，前缀循环一次都不跑，函数返回 **true** —— 语境是\n\"head 只是把 base 那张表往后接了一段\"。\n\n于是 `diverged()` 里那条 `continue` 生效：\n\n```\nbase:   {\"statement\": \"s\", \"evidence_refs\": null}\nsource: {\"statement\": \"s\", \"evidence_refs\": [\"e2\"]}\ntarget: {\"statement\": \"s\", \"evidence_refs\": [\"e3\"]}\n```\n\n两边都把同一个键换成了**不同的**数组 —— 按 docs/09 §6 这是 attribute/knowledge 的\n\"同字段不同值\"，**必须**由人解决；现在它会被判成 `auto_mergeable = true`、冲突数为 0。\n\n**这个函数自己的注释就已经写对了一半**：\n\n> 「A missing base key is not an append — there is no anchor list to extend.」\n\n作者想到了\"没有锚点就不能算追加\"，但漏了 `null` 跟\"键不存在\"一样**没有锚点**，\n却从 `Unmarshal` 那里拿到了一个不报错的空切片。\n\n### 要交什么\n\n1. **修**：把 **base 值为 JSON `null`** 当作\"没有锚点\"处理（在取前缀之前先挡掉）。\n   这样上面那个例子必须变成**冲突**，`auto_mergeable` 必须是 **false**。\n   修法你定，但语义必须是这一条：**`null` 不等于 `[]`**。\n2. **一个在旧行为下会红的测试**：至少覆盖上面这组输入（base `null` → 两边各换成不同数组），\n   断言\"这是一个冲突、不是 auto_mergeable\"。\n3. **顺带自查**：包里（以及你这次新增的代码里）**还有没有别的地方**用\n   `json.Unmarshal` 到切片/映射来判断\"这个键存不存在、是不是空的\"。\n   有就在 `notes_for_supervisor` 里列出来（那是字符串，不是列表），**不要**顺手改范围外的东西。\n\n## 二、阻断项 2：G2 红，`make staticcheck`\n\nG2（CI 的精确步骤）在 `go` 这个 job 红在 step 2：\n\n```\n$ make staticcheck\nbash scripts/staticcheck.sh\ntests/integration/conflict_test.go:33:7: const conflictTaskID is unused (U1000)\n\nstaticcheck: NEW findings above are not in ops/ci/staticcheck-baseline.txt.\nFix them; only pre-existing findings may be baselined, with a\nfollow-up issue to fix them — never baseline new code.\nmake: *** [Makefile:125: staticcheck] Error 1\n```\n\n`const conflictTaskID = \"T0405\"`（`tests/integration/conflict_test.go:33`）**没有任何地方用到**。\n这是你这轮新增的文件里的新代码。\n\n- **不许**把它加进 `ops/ci/staticcheck-baseline.txt` —— 门自己的话写着\"never baseline new code\"。\n- 要么删掉它，要么真的用上它；**删掉**大概率是对的（它看起来是一个残留的 fixture 常量）。\n- 因为 step 2 红了，**step 3、step 4 根本没跑**（`bash scripts/tests/staticcheck-unit-test.sh` 和\n  `go test $(go list ./... | grep -v '/tests/integration')`）。这两条你要自己跑通。\n- **交回之前自己跑一遍 `make staticcheck`**，把输出留着。\n\n## 三、不阻断，但顺手说清\n\n- **次要对**（`payload.go:48`）：两边**都删掉**同一个键时不判\"收敛\"，会报成冲突。\n  方向是安全的（只会多报，不会漏报），复核说经写入路径目前够不到。你判断；改了就说改了，没改就说明为什么。\n- **证据里的数字要准**：`RESULT.json` 的冲突单测证据写的是 \"23 tests PASS\"，\n  复核实测是 **25**。方向没错，数字错了。**证据里的数字我会核**，写之前自己数一遍。\n\n## 四、这一轮的交付要求\n\n- `RESULT.json` 的 `tests[]` **只写你这次真跑过的**；`status` 按实情写（还有红就如实登记）。\n  **红着报告比造假绿好。**\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n- 生成物只能重新生成，不要手工编辑。\n- 结论只从 **`make`** 的入口下（`make test-integration` 等），别用裸 `go test ./...` 下结论。\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（它自己建一次性库，起在 5432）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T10:19:26Z",
+          "run_id": "run-9de87dfd13e28be9",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T10:31:52Z",
+          "run_id": "run-9feff6afa4b1bd14",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T10:46:43Z",
+          "run_id": "run-a470e0b5c41d0a4a"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T10:50:01Z",
+          "run_id": "run-fdf22046034e0019",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T0406": {
       "status": "todo",
@@ -2586,13 +3018,31 @@
       "merged_at": null
     },
     "T0407": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-14T10:50:03Z",
+      "worker_run_id": "run-bbc8de76657c2789",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T10:50:01Z",
+          "run_id": "run-20a22c3a93642d41"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T10:50:03Z",
+          "run_id": "run-bbc8de76657c2789",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T11:46:43Z",
+          "run_id": "run-3935726e18f0ce7e",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T0408": {
       "status": "todo",
@@ -2622,10 +3072,12 @@
       "merged_at": null
     },
     "T0501": {
-      "status": "rejected",
-      "started_at": "2026-09-14T05:41:47Z",
-      "worker_run_id": "run-60c925ec42ddbe7a",
-      "rejection_reason": "# T0501：按迁移号序停等你自己的轮次 —— 不是你的交付有缺陷\n\n## 这一条不是在做质量判断\n\n你的工作树一件没删，你的迁移号 `00040` 不变。这条记录的作用只有一个：**把你停在这里，等前面几个号合进主线。**\n\n## 为什么必须等\n\n主线的迁移必须**严格按号递增**落地。T0501 带着 `00040`，而 `00035`（T0206）、`00036`（T0209）、\n`00038`（T0213）都还在队列里没合。只要它们还没进主线，你这个任务就**不可能**合并 ——\n验收 Gate 会在合并顺序那一步拒绝，而那一步是设计成拒绝的：库一旦按乱序升级过，goose 会直接\n拒绝启动，而 CI 看不见这一点（CI 每次都用全新的库，1..N 顺序天然正确）。\n\n**所以现在做什么都是白做**：主线马上就要因为 `00035` 落地而再动一次，你的基线会跟着再搬一次。\n在你前面那几位合进去之前先搬基线，等于搬三遍。\n\n## 顺带说明刚才那条拒绝\n\n你上一次验收被拒，原话是：\n\n```\nthe task's change does not apply to current main — bring the branch up to date and re-run:\ngit apply /tmp/post-integration-T0501.patch: exit status 1:\nerror: patch failed: specs/SPEC_VERSION.json:1\n```\n\n**这不是你的代码有问题。** `specs/SPEC_VERSION.json` 是**生成物** —— 它是 specs 的一份摘要，\n主线上任何与 spec 有关的改动都会让它变。你树里那份是按你开工时的主线算出来的，跟现在主线上\n的那份自然对不上。\n\n## 轮到你的那天会发生什么\n\n1. 我把你的基线搬到当时的主线上；\n2. 派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n   会**在新的树上重新生成**，不靠合并文本 —— 因为派生文件是它输入的**函数**：留你那份，\n   摘要描述的旧 specs；留主线那份，你在 specs 上的改动就丢了。两个都不对，只能重算；\n3. 你在新基线上重新验证一遍，然后照常走复核 → 验收 → 合并。\n\n## 在此之前\n\n**不要动工作树，不要重跑，不要为了让 collect 过改任何断言。**\n你现在什么都不用做。\n",
+      "status": "merged",
+      "started_at": "2026-09-14T10:52:04Z",
+      "worker_run_id": "run-7abda6c4e89fbcaa",
+      "accepted_by_supervisor_at": "2026-09-14T11:17:35Z",
+      "merged_at": "2026-09-14T11:21:07Z",
+      "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"failed\" — an honest non-completion is a rejected run, never verification",
       "history": [
         {
           "from": "todo",
@@ -2653,13 +3105,56 @@
           "at": "2026-09-14T07:11:18Z",
           "run_id": "run-97280b05061668a4",
           "reason": "# T0501：按迁移号序停等你自己的轮次 —— 不是你的交付有缺陷\n\n## 这一条不是在做质量判断\n\n你的工作树一件没删，你的迁移号 `00040` 不变。这条记录的作用只有一个：**把你停在这里，等前面几个号合进主线。**\n\n## 为什么必须等\n\n主线的迁移必须**严格按号递增**落地。T0501 带着 `00040`，而 `00035`（T0206）、`00036`（T0209）、\n`00038`（T0213）都还在队列里没合。只要它们还没进主线，你这个任务就**不可能**合并 ——\n验收 Gate 会在合并顺序那一步拒绝，而那一步是设计成拒绝的：库一旦按乱序升级过，goose 会直接\n拒绝启动，而 CI 看不见这一点（CI 每次都用全新的库，1..N 顺序天然正确）。\n\n**所以现在做什么都是白做**：主线马上就要因为 `00035` 落地而再动一次，你的基线会跟着再搬一次。\n在你前面那几位合进去之前先搬基线，等于搬三遍。\n\n## 顺带说明刚才那条拒绝\n\n你上一次验收被拒，原话是：\n\n```\nthe task's change does not apply to current main — bring the branch up to date and re-run:\ngit apply /tmp/post-integration-T0501.patch: exit status 1:\nerror: patch failed: specs/SPEC_VERSION.json:1\n```\n\n**这不是你的代码有问题。** `specs/SPEC_VERSION.json` 是**生成物** —— 它是 specs 的一份摘要，\n主线上任何与 spec 有关的改动都会让它变。你树里那份是按你开工时的主线算出来的，跟现在主线上\n的那份自然对不上。\n\n## 轮到你的那天会发生什么\n\n1. 我把你的基线搬到当时的主线上；\n2. 派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n   会**在新的树上重新生成**，不靠合并文本 —— 因为派生文件是它输入的**函数**：留你那份，\n   摘要描述的旧 specs；留主线那份，你在 specs 上的改动就丢了。两个都不对，只能重算；\n3. 你在新基线上重新验证一遍，然后照常走复核 → 验收 → 合并。\n\n## 在此之前\n\n**不要动工作树，不要重跑，不要为了让 collect 过改任何断言。**\n你现在什么都不用做。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T10:29:05Z",
+          "run_id": "run-36500c222bd6dc15",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T10:46:43Z",
+          "run_id": "run-e09c4ae6f11d00eb",
+          "reason": "collect rejected: result-status: RESULT.json reports status \"failed\" — an honest non-completion is a rejected run, never verification"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T10:52:04Z",
+          "run_id": "run-7abda6c4e89fbcaa",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T11:04:22Z",
+          "run_id": "run-42a69c80150f45f6",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T11:17:35Z",
+          "run_id": "run-39b9d389aad168aa"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T11:21:07Z",
+          "run_id": "run-6bfb708e59f9e0ab",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0502": {
-      "status": "rejected",
-      "started_at": "2026-09-14T05:42:31Z",
-      "worker_run_id": "run-842b56309ee65060",
+      "status": "merged",
+      "started_at": "2026-09-14T11:24:17Z",
+      "worker_run_id": "run-f7875f08bedf4bde",
+      "accepted_by_supervisor_at": "2026-09-14T11:46:32Z",
+      "merged_at": "2026-09-14T11:49:54Z",
       "rejection_reason": "collect rejected: residue: 1 process(es) the Worker started are still running: pid 483465 (sleep 300) session 483464 group 483464. The Worker (pid 388323) has already exited — nothing owns these any more and nothing collects them on its own. Collect them with: kill -TERM -- -483464",
       "history": [
         {
@@ -2681,31 +3176,95 @@
           "at": "2026-09-14T06:03:57Z",
           "run_id": "run-d0f5c351ee4e3136",
           "reason": "collect rejected: residue: 1 process(es) the Worker started are still running: pid 483465 (sleep 300) session 483464 group 483464. The Worker (pid 388323) has already exited — nothing owns these any more and nothing collects them on its own. Collect them with: kill -TERM -- -483464"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T11:24:17Z",
+          "run_id": "run-f7875f08bedf4bde",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T11:32:46Z",
+          "run_id": "run-c99f0f649e71152d",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T11:46:32Z",
+          "run_id": "run-db4a4b6b1f4029fe"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T11:49:54Z",
+          "run_id": "run-3c7b8c27a469ceb0",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0503": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-14T11:49:56Z",
+      "worker_run_id": "run-5c657a38e80e4fab",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T11:49:54Z",
+          "run_id": "run-e6c97527e1bf86ae"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T11:49:56Z",
+          "run_id": "run-5c657a38e80e4fab",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T12:27:47Z",
+          "run_id": "run-2aad035d81d9ef6e",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T0504": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-14T12:06:39Z",
+      "worker_run_id": "run-efcc48155b887fb0",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T11:50:09Z",
+          "run_id": "run-a76fa3a1e4508cac"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T12:06:39Z",
+          "run_id": "run-efcc48155b887fb0",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T12:27:32Z",
+          "run_id": "run-a8e3286f8c39d16d",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T0505": {
-      "status": "running",
-      "started_at": "2026-09-14T06:34:55Z",
-      "worker_run_id": "run-8860ddb8ce505f12",
+      "status": "verification",
+      "started_at": "2026-09-14T12:29:19Z",
+      "worker_run_id": "run-3b32940f1270d93c",
+      "rejection_reason": "# T0505：按迁移号序停等你自己的轮次 —— 不是你的交付有缺陷\n\n## 这一条不是在做质量判断\n\n你的 collect **干净通过**了。工作树一件没删，你的迁移号 `00043` 不变。\n这条记录的作用只有一个：**把你停在这里，等前面六个号合进主线。**\n\n## 为什么必须等\n\n主线的迁移必须**严格按号递增**落地。T0505 带着 `00043`，而排在它前面的六个还都没合：\n\n```\n00035 T0206 ← 队首（复核中）\n00036 T0209\n00038 T0213\n00040 T0501\n00041 T0502\n00042 T0306\n00043 T0505 ← 你在这\n```\n\n只要前面六位还没进主线，你这个任务就**不可能**合并 —— 验收 Gate 会在合并顺序那一步拒绝，\n而那一步是设计成拒绝的：库一旦按乱序升级过，goose 会直接拒绝启动，而 CI 看不见这一点\n（CI 每次都用全新的库，1..N 顺序天然正确）。\n\n**所以现在做什么都是白做**：主线马上就要因为 `00035` 落地而再动一次，你的基线会跟着再搬一次；\n在六位前面的人合进去之前先搬基线，等于搬六遍。\n\n## 轮到你的那天会发生什么\n\n1. 我把你的基线搬到当时的主线上；\n2. 派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n   会**在新的树上重新生成**，不靠合并文本 —— 因为派生文件是它输入的**函数**：留你那份，\n   摘要描述的是旧的 specs；留主线那份，你在 specs 上的改动就丢了。两个都不对，只能重算；\n3. 你在新基线上重新验证一遍，然后照常走复核 → 验收 → 合并。\n\n这条路径前面几位已经走过一遍，流程是通的，不需要你探索什么。\n\n## 在此之前\n\n**不要动工作树，不要重跑，不要为了让 collect 过改任何断言。**\n你现在什么都不用做。\n",
       "history": [
         {
           "from": "todo",
@@ -2719,6 +3278,34 @@
           "at": "2026-09-14T06:34:55Z",
           "run_id": "run-8860ddb8ce505f12",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T07:11:47Z",
+          "run_id": "run-7b5c314a436b0511",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T07:12:14Z",
+          "run_id": "run-8899457e7e2356bb",
+          "reason": "# T0505：按迁移号序停等你自己的轮次 —— 不是你的交付有缺陷\n\n## 这一条不是在做质量判断\n\n你的 collect **干净通过**了。工作树一件没删，你的迁移号 `00043` 不变。\n这条记录的作用只有一个：**把你停在这里，等前面六个号合进主线。**\n\n## 为什么必须等\n\n主线的迁移必须**严格按号递增**落地。T0505 带着 `00043`，而排在它前面的六个还都没合：\n\n```\n00035 T0206 ← 队首（复核中）\n00036 T0209\n00038 T0213\n00040 T0501\n00041 T0502\n00042 T0306\n00043 T0505 ← 你在这\n```\n\n只要前面六位还没进主线，你这个任务就**不可能**合并 —— 验收 Gate 会在合并顺序那一步拒绝，\n而那一步是设计成拒绝的：库一旦按乱序升级过，goose 会直接拒绝启动，而 CI 看不见这一点\n（CI 每次都用全新的库，1..N 顺序天然正确）。\n\n**所以现在做什么都是白做**：主线马上就要因为 `00035` 落地而再动一次，你的基线会跟着再搬一次；\n在六位前面的人合进去之前先搬基线，等于搬六遍。\n\n## 轮到你的那天会发生什么\n\n1. 我把你的基线搬到当时的主线上；\n2. 派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n   会**在新的树上重新生成**，不靠合并文本 —— 因为派生文件是它输入的**函数**：留你那份，\n   摘要描述的是旧的 specs；留主线那份，你在 specs 上的改动就丢了。两个都不对，只能重算；\n3. 你在新基线上重新验证一遍，然后照常走复核 → 验收 → 合并。\n\n这条路径前面几位已经走过一遍，流程是通的，不需要你探索什么。\n\n## 在此之前\n\n**不要动工作树，不要重跑，不要为了让 collect 过改任何断言。**\n你现在什么都不用做。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T12:29:19Z",
+          "run_id": "run-3b32940f1270d93c",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T12:47:01Z",
+          "run_id": "run-57133fa6dab9ff39",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -2742,8 +3329,9 @@
     },
     "T0508": {
       "status": "running",
-      "started_at": "2026-09-14T07:09:08Z",
-      "worker_run_id": "run-2a6fc6a58ccc30a2",
+      "started_at": "2026-09-14T12:34:51Z",
+      "worker_run_id": "run-d2fdd74aed97d4c4",
+      "rejection_reason": "# T0508：这一轮**不是**单纯搬基线 —— 复核是 `approve`，但有 4 条要在这轮落地，其中 1 条 major\n\n先说清楚这封信的口径，免得你按\"又被拒了\"来理解：\n\n- **你的复核结论是 `approve`**（`.rddev/workers/T0508-review/RESULT.json`）。\n  复核**没有**推翻你的做法，它自己重跑了迁移/集成/单元套件并逐条核对了验收标准。\n  这封信里要你改的，是复核提出的 5 条 findings，**不是**你哪里做错了。\n- **基线已经前移**：`00035`/`00036`/`00038`/`00040`/`00041`/`00042` 六节已经合进主线，\n  你的树现在站在 `a111a00`（主线当时的样子）上；只有 `00043`（T0505）还在飞，它会在你交付前后落地，\n  然后合并前你的树会**再被机械地前移一次**（派生文件按树重新生成，不靠文本合并）。\n  这部分和以前一样，**不是你的问题**。\n\n**这次前移是手工合成的（三层合并解不开），它动了这几个文件 —— 要知道它们现在断言的是两边的并集**：\n\n- `tests/integration/append_only_test.go`、`tests/integration/migration_test.go`：主线的清单/注释与你这边的\n  按**并集**合并。两份迁移都在库里，只有并集能让文件里那两条\"钉住清单\"的漂移断言同时成立。\n- `internal/rsg/relationcatalog/catalog.go`：主线的 `SourceTypes`/`TargetTypes` 与你的 `ExternalRefTarget` 并集。\n- `internal/rsg/relationcatalog/catalog_test.go`：两边都是**新增同一路径**，合成时用的是人工写的那一份\n  （主线与你的测试都在里面）。**如果你看到某个测试不是你以为的版本，原因就是这个**：\n  觉得合成错了就在 `RESULT.json` 里说，**别自己改回去**。\n- `specs/database/postgres.sql`、`specs/SPEC_VERSION.json`：已按你现在的树重新生成（36 个迁移）。\n  但你这一轮要改 `00045` 的函数体，**改完必须再生成一次**，并用 `--check` 断言它们描述的就是你交出的树。\n\n**为什么这几条必须现在改、不能留到以后 —— 这是我做这个决定的核心理由，请先读：**\n\n`00045` **还没进主线**（主线现在到 `00042`，你之后是 `00043`，但**不会**到 `00045` ——\n它就是你自己的号）。`infra/migrations/**` 是 **canonical schema history**：\n一旦它合进主线，**任何后续修改都要再开一个新迁移**去 `CREATE OR REPLACE` 一份同名函数 ——\n于是同一个规范化守卫在 schema 历史里躺着**两个定义**，一个是死的。\n所以**现在这一轮是唯一一次能原地改对它的机会**。这不是\"顺手多干点活\"，这是最后一次机会。\n\n---\n\n## 必改 1（major，findings[0]）：SQL 侧的标识符规范化与 Go 侧**不一致**，而且不一致的方式会真的造出重复身份\n\n`infra/migrations/00045_external_reference_live_identity_and_snapshot.sql:83-91`（守卫在 `:113`，同步触发器在 `:154`）\n对照 `internal/domain/external_reference.go:109-123`\n\n你自己在 Go 的注释里写了一句很关键的话（`:114-116`）：\n> \"The 00045 identity-sync trigger applies the same rule in SQL; the integration test pins the two copies together.\"\n\n**这句话现在是假的。** 两边的差别有三处，我逐个对着代码确认过：\n\n| | Go（`NormalizeExternalIdentifier`） | SQL（`external_reference_normalize_identifier`） |\n|---|---|---|\n| 先不先 trim | `strings.TrimSpace` 先整串 trim，**再**拿 trim 后的值去匹配锚定正则 | **直接**拿**没 trim 的**原值去匹配锚定正则 |\n| trim 的字符类 | `strings.TrimSpace` = `unicode.IsSpace`（含 `\\t\\n\\r\\v\\f` 及 Unicode 空格） | 回退分支的 `btrim(x)` **只去 ASCII 空格** |\n| 正则里的空白类 | `\\s` = `[\\t\\n\\f\\r ]`（**不含 `\\v`**） | `[[:space:]]`（**含 `\\v`**，且**随数据库 locale 变**） |\n\n后果（复核在真 PostgreSQL 和真 Go 上都实测过，我照抄）：\n\n- `\"\\t10.1000/ABC\\t\"` → Go `10.1000/abc`；SQL **原样不动**（锚定正则被开头的 `\\t` 顶掉 → 落到 `btrim` → `btrim` 不认 `\\t`）\n- `\"10.1000/xyz\\n\"` → Go `10.1000/xyz`；SQL **保留换行**\n- `\"10.1000/ABC\\vXYZ\"` → Go 会转小写；SQL 原样保留\n- `source_type` 被 tab 包起来时，`btrim` 同样**不**去 tab → 与干净的写法**不是同一个身份**\n\n也就是说：**一个从网页上复制粘贴过来的、带了个多余 tab 或换行的 DOI，会 key 出第二条身份行** ——\n正是迁移头几行声称要防的那个失败模式。而那个\"钉住两份拷贝\"的漂移测试\n（`tests/integration/external_reference_test.go:451-464`）**只喂了没有空白的输入，所以它看不见这一类**。\n\n**要你做的**（要求是硬性的，具体写法你定）：\n\n1. 让**两份拷贝对同一输入给出一模一样的结果**，并把**字符类显式写死**，不要用\n   `[[:space:]]` / `\\s` 这种**随 locale 变**的类。我建议两边都用同一个**确定性的 ASCII 空白集**\n   `space \\t \\n \\r \\f \\v`：Go 侧把 `strings.TrimSpace` 换成 `strings.Trim(s, \" \\t\\n\\r\\f\\v\")`，\n   把正则里的 `\\s` / `[^\\s]` 换成字面类；SQL 侧用 `btrim(x, E' \\t\\n\\r\\f\\v')` 先 trim，\n   再对 **trim 后的值**做锚定匹配。\n   **注意**：PostgreSQL 的 ARE 里字面类怎么写、`\\v` 能不能直接写进 bracket，**你要在真库上验**，\n   不要照抄我这个建议 —— 如果有写法在真库里不成立，换一种能成立的（比如先 `translate`/`btrim`，\n   再对不可能含这些字符的值做匹配）。\n2. **同一个 `btrim` 家族在 00045 里还有四处**，请一并按同一字符类统一：\n   - `:113` 的 `source_type` / `:118` 的 `external_identifier` 空值检查\n   - `:154` 同步触发器里的 `source_type` / `external_identifier`（`NULLIF(btrim(...), '')`）\n   - `:168` 的 `canonical_url` 空值检查\n   - `:211` 的 `upstream_version` 空值检查\n   这些是**检查空**而不是比较：一个\"只有一个 tab\"的值在 Go 侧算空、在 SQL 侧**不算空**，同一类偏差。\n3. **把漂移测试的输入扩到能抓住这一类**：tab 包、换行包、CR 包、`\\v` 包、`\\f` 包、\n   以及**中间含 `\\v`** 的标识符，外加一个被 tab 包起来的 `source_type`。\n   这条测试必须**真的**两边跑同一批输入、逐个断言相等。\n4. **把文档改成实情**：Go 的注释和 00045 的注释现在都声称\"两边同一条规则\"。\n   改完之后如果**确实**逐字符一致，就这么写；**如果哪里还做不到一致，就写清楚那个边界**。\n   证据文档宁可比实际保守，不要比实际好看。\n\n> 这条**不是**\"为了让门禁变绿\"。它覆盖的正是\"两份拷贝会分叉\"这个缺陷。\n> 反过来说：**不许**为了让测试过就把漂移测试的输入改窄、或者把 Go 侧改成去迁就错的 SQL 侧 ——\n> 两边都要落到**你显式声明的那个字符类**上。\n\n---\n\n## 必改 2（minor，findings[1]）：SSRF 守卫在**拨号那一刻**有一个 TOCTOU（DNS rebind）窗口\n\n`internal/rsg/externalref/ssrf.go:44-66`\n\n```\nguard.resolve(ctx, host)   // ← 第一次解析：被 classifyIP 检查的那一批\n...\ndialer.DialContext(ctx, network, addr)   // ← 第二次解析：net.Dialer 内部又查一次 DNS\n```\n\n**被检查的那次解析，和真正被拨号的那个地址，是两次独立的查询。** 这正是 DNS rebind 的经典窗口：\n攻击者先让域名解析到一个**公网**地址（检查通过），再让**紧接着的**那次查询解析到**内网**地址（被拨出去）。\n`CheckURL` 和每一跳的 `CheckRedirect` 缩小了窗口，但**没有关掉它**。\nV1 的第一跳确实是固定的 `doi.org`，但 `doi.org` 会 302 到**由 DOI 注册人选择的**注册机构/出版商主机 ——\n所以这个窗口在 V1 是能碰到的。\n\n**要你做的**：把**被检查过的那批 IP** 拿去拨号，而不是把主机名交回给 `net.Dialer` 再解析一次。\n拨号地址用 `net.JoinHostPort(ip, port)`；**TLS 的 `ServerName` 仍然是原主机名**\n（`http.Transport` 会从请求 URL 取，证书校验照旧对着主机名校验 —— 这一点你必须**实测**确认，\n它是这个修法的关键，不能想当然）。多个 IP 时：按序试，某个拨不通就试下一个，\n但**每一个**都必须是那一批**已经过 `classifyIP` 的**。\n\n**这条必须带一条真测试**，而且这个测试是能写的（`Guard.lookup` 是可注入的接缝，`NewGuard` 就是那个形状）：\n起一个**真的**监听在 `127.0.0.1` 的测试服务器，注入一个\"**第一次查给公网地址、第二次查给 `127.0.0.1`**\"的\nresolver —— 这就是 rebind 本身 —— 然后断言**请求没有到达那个本地服务器**。\n修之前这条测试会红（请求打到了本地），修之后必须绿。\n\n> 如果你发现这个改动**没法**用现有接缝写出这样一条真测试，**不要**悄悄放过：\n> 在 `RESULT.json` 里写清楚卡在哪，我来决定是不是拆成独立任务。宁可报\"这条我没能做到\"，\n> 也不要交一个**没被测过**的安全改动。\n\n---\n\n## 必改 3（minor，findings[2]）：`accessed_at` 的守卫比它自己声称的规则**更严**，会误拒真实的观测\n\n`infra/migrations/00045_...sql:208` —— `IF NEW.accessed_at IS NULL OR NEW.accessed_at > now() THEN`\n\n`now()` 是**事务开始时刻**，不是当前时刻。`BuildSnapshot` 盖的是**应用侧的当前 UTC 时间**，\n所以在一个稍长的事务里（或在应用/数据库时钟有偏差的部署里），一个**真实的观测**会被判成\"未来访问\"而**拒掉**。\n复核说这是\"对消费方接线的运维脆弱性，不是完整性漏洞\" —— 我同意，而且**第一次手工刷新就可能撞上**。\n\n**要你做的**：把比较基准从 `now()` 改成**当前时刻**（`clock_timestamp()`）。守卫**声明的**规则是\n\"`accessed_at` 不能是未来的\"；拿事务开始时刻当基准，实际执行的是**另一条、更严的**规则，\n它会把真实观测拒掉。这一条是**把守卫改回它声称的规则**，不是放宽它。\n\n**边界（很重要，别做过头）**：**不许**顺带加\"容忍时钟偏差 N 秒\"之类的容差 ——\n容差要定多少是**产品语义**，不是这一轮能拍的，我另记待办。\n你要保证的是：**一个明显在未来的时间戳仍然被拒**（比如 `clock_timestamp() + 1 hour`），\n并且**加一条测试**证明这一点；同时加一条测试证明\"事务里 sleep 一段时间后写入的真实观测**不再**被拒\"。\n两条测试都要真的跑。\n\n> 说白了：这条改完之后，守卫拦掉的**东西变了**（少拦了一些真实的），\n> 所以你必须用一条**新测试**把\"仍然拦得住伪造的未来时间戳\"钉住。没有这条新测试，这条改动不算数。\n\n---\n\n## 必改 4（nit，findings[4]）：那张**策略声明表**自己没有守卫\n\n`infra/migrations/00045_...sql:258` 的 `external_reference_relation_types`\n\n它是端点守卫的**策略数据**（哪几种 relation type 允许指向 external reference），\n但它本身是一张**普通可写表**：任何有这张表权限的写入路径 `INSERT` 一行 `'contains'` 进去，\n就能**绕开** citation/dependency-only 的端点策略。迁移给自己打的广告是\"any write path\"都要守规矩，\n而它自己的策略表不守 —— 这跟必改 1 是**同一类**问题：**声称的不变量和实际的不一样**。\n\n**要你做的**：给这张表加 `INSERT`/`UPDATE`/`DELETE` 的拒绝守卫（触发器即可），\n让声明集在迁移之后**只能由一次显式的、被复核过的迁移**来改。\n两个细节：\n- **建守卫的顺序**：迁移自己要先 `INSERT` 那两行，**守卫必须建在这条 INSERT 之后**，否则迁移自己就装不进去；\n- 加一行注释说明：将来要扩这个集合的迁移**必须先 drop 掉这个守卫**，改完再建回来 ——\n  不要让下一个迁移作者踩到\"为什么我插不进去\"。\n\n---\n\n## findings[3]（nit）：**代码不动**，只在迁移头补一行，剩下的记到 T0509\n\n复核说：身份行是由 `DEFERRABLE INITIALLY DEFERRED` 约束触发器写的（`:182`），\n所以**在插入它的那个事务里读不到**，只有 commit 之后才可见；消费方必须在 commit **之后**重读，\n否则会写出一个 read-your-writes 的 bug。\n\n\"store seam 上的注释\"那个位置**这个任务里不存在**（接线是你下游 T0509 的事），所以：\n- 你只在 `00045` 头部的 \"this migration does not do\" 清单里**补一行**，\n  写明身份行的 commit 前不可见性、以及消费方要 commit 后重读；\n- 剩下的作为待办记到 **T0509**（我来记，不用你管）：**Issue #175**。\n\n---\n\n## 这一轮**不要**动的\n\n- **不要**重新设计 00045 的结构，不要动表名/列名/编号。上面四条之外，**其余保持原样**。\n- **不要**顺手去改 `specs/api/openapi.yaml` —— `specs/**` 是 Supervisor-only。\n- 复核 `risks` 里那两条（快照读模型/可见性、endpoint 未接线）是**下游 T0509 的事**，不在本轮。\n\n## 关于你工作树根上可能出现的怪文件\n\n如果你在工作树根看到 `_tmp_sec_*.go` / `_tmp_sec_*.sql` 之类的东西：**那不是你的**，也不是这个仓库里\n任何代码生成的（我在 T0209 上追过一次，没查出来是谁写的，已单独记录）。**不要删它、不要动它**\n（它在你的 `allowed_scope` 之外），在 `RESULT.json` 里**点名报给我**就行，我来处理。**这不是你的错，别停在这上面。**\n\n---\n\n## 不变的约束\n\n- **不许为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n  红着报告比造假绿好。\n- 迁移号 **`00045` 不变**，文件名别动，别重新选号。37/39/44 **永远空着**，不许补。\n- 生成物（`specs/database/postgres.sql`、`internal/persistence/sqlc/*`、`specs/SPEC_VERSION.json`）\n  只能**重新生成**，不要手工编辑。\n- 不要动 `allowed_scope` 外的文件。\n- **这一轮的树是变了的**（和 T0209 那轮不同，那轮树是逐字节相同的）：所以\n  **受影响的那几条测试你必须真的重跑**，`RESULT.json` 里 `tests[]` 的每一条都必须是\n  **你这次实际跑出来的结果**；没跑的就别写进去。`status` 只有真的都过了才写 `completed`。\n- 环境老事实没变：共享 dev 库 `post` 是坏的（**不要**跑 `make migrate` / `rddev db migrate`）；\n  `make test-integration` 不受影响（自己建一次性库，`7842589`）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2 → 合并。\n",
       "history": [
         {
           "from": "todo",
@@ -2756,6 +3344,27 @@
           "to": "running",
           "at": "2026-09-14T07:09:08Z",
           "run_id": "run-2a6fc6a58ccc30a2",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T08:07:41Z",
+          "run_id": "run-b452665393bf14bc",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T12:34:43Z",
+          "run_id": "run-1b6c0d532648625e",
+          "reason": "# T0508：这一轮**不是**单纯搬基线 —— 复核是 `approve`，但有 4 条要在这轮落地，其中 1 条 major\n\n先说清楚这封信的口径，免得你按\"又被拒了\"来理解：\n\n- **你的复核结论是 `approve`**（`.rddev/workers/T0508-review/RESULT.json`）。\n  复核**没有**推翻你的做法，它自己重跑了迁移/集成/单元套件并逐条核对了验收标准。\n  这封信里要你改的，是复核提出的 5 条 findings，**不是**你哪里做错了。\n- **基线已经前移**：`00035`/`00036`/`00038`/`00040`/`00041`/`00042` 六节已经合进主线，\n  你的树现在站在 `a111a00`（主线当时的样子）上；只有 `00043`（T0505）还在飞，它会在你交付前后落地，\n  然后合并前你的树会**再被机械地前移一次**（派生文件按树重新生成，不靠文本合并）。\n  这部分和以前一样，**不是你的问题**。\n\n**这次前移是手工合成的（三层合并解不开），它动了这几个文件 —— 要知道它们现在断言的是两边的并集**：\n\n- `tests/integration/append_only_test.go`、`tests/integration/migration_test.go`：主线的清单/注释与你这边的\n  按**并集**合并。两份迁移都在库里，只有并集能让文件里那两条\"钉住清单\"的漂移断言同时成立。\n- `internal/rsg/relationcatalog/catalog.go`：主线的 `SourceTypes`/`TargetTypes` 与你的 `ExternalRefTarget` 并集。\n- `internal/rsg/relationcatalog/catalog_test.go`：两边都是**新增同一路径**，合成时用的是人工写的那一份\n  （主线与你的测试都在里面）。**如果你看到某个测试不是你以为的版本，原因就是这个**：\n  觉得合成错了就在 `RESULT.json` 里说，**别自己改回去**。\n- `specs/database/postgres.sql`、`specs/SPEC_VERSION.json`：已按你现在的树重新生成（36 个迁移）。\n  但你这一轮要改 `00045` 的函数体，**改完必须再生成一次**，并用 `--check` 断言它们描述的就是你交出的树。\n\n**为什么这几条必须现在改、不能留到以后 —— 这是我做这个决定的核心理由，请先读：**\n\n`00045` **还没进主线**（主线现在到 `00042`，你之后是 `00043`，但**不会**到 `00045` ——\n它就是你自己的号）。`infra/migrations/**` 是 **canonical schema history**：\n一旦它合进主线，**任何后续修改都要再开一个新迁移**去 `CREATE OR REPLACE` 一份同名函数 ——\n于是同一个规范化守卫在 schema 历史里躺着**两个定义**，一个是死的。\n所以**现在这一轮是唯一一次能原地改对它的机会**。这不是\"顺手多干点活\"，这是最后一次机会。\n\n---\n\n## 必改 1（major，findings[0]）：SQL 侧的标识符规范化与 Go 侧**不一致**，而且不一致的方式会真的造出重复身份\n\n`infra/migrations/00045_external_reference_live_identity_and_snapshot.sql:83-91`（守卫在 `:113`，同步触发器在 `:154`）\n对照 `internal/domain/external_reference.go:109-123`\n\n你自己在 Go 的注释里写了一句很关键的话（`:114-116`）：\n> \"The 00045 identity-sync trigger applies the same rule in SQL; the integration test pins the two copies together.\"\n\n**这句话现在是假的。** 两边的差别有三处，我逐个对着代码确认过：\n\n| | Go（`NormalizeExternalIdentifier`） | SQL（`external_reference_normalize_identifier`） |\n|---|---|---|\n| 先不先 trim | `strings.TrimSpace` 先整串 trim，**再**拿 trim 后的值去匹配锚定正则 | **直接**拿**没 trim 的**原值去匹配锚定正则 |\n| trim 的字符类 | `strings.TrimSpace` = `unicode.IsSpace`（含 `\\t\\n\\r\\v\\f` 及 Unicode 空格） | 回退分支的 `btrim(x)` **只去 ASCII 空格** |\n| 正则里的空白类 | `\\s` = `[\\t\\n\\f\\r ]`（**不含 `\\v`**） | `[[:space:]]`（**含 `\\v`**，且**随数据库 locale 变**） |\n\n后果（复核在真 PostgreSQL 和真 Go 上都实测过，我照抄）：\n\n- `\"\\t10.1000/ABC\\t\"` → Go `10.1000/abc`；SQL **原样不动**（锚定正则被开头的 `\\t` 顶掉 → 落到 `btrim` → `btrim` 不认 `\\t`）\n- `\"10.1000/xyz\\n\"` → Go `10.1000/xyz`；SQL **保留换行**\n- `\"10.1000/ABC\\vXYZ\"` → Go 会转小写；SQL 原样保留\n- `source_type` 被 tab 包起来时，`btrim` 同样**不**去 tab → 与干净的写法**不是同一个身份**\n\n也就是说：**一个从网页上复制粘贴过来的、带了个多余 tab 或换行的 DOI，会 key 出第二条身份行** ——\n正是迁移头几行声称要防的那个失败模式。而那个\"钉住两份拷贝\"的漂移测试\n（`tests/integration/external_reference_test.go:451-464`）**只喂了没有空白的输入，所以它看不见这一类**。\n\n**要你做的**（要求是硬性的，具体写法你定）：\n\n1. 让**两份拷贝对同一输入给出一模一样的结果**，并把**字符类显式写死**，不要用\n   `[[:space:]]` / `\\s` 这种**随 locale 变**的类。我建议两边都用同一个**确定性的 ASCII 空白集**\n   `space \\t \\n \\r \\f \\v`：Go 侧把 `strings.TrimSpace` 换成 `strings.Trim(s, \" \\t\\n\\r\\f\\v\")`，\n   把正则里的 `\\s` / `[^\\s]` 换成字面类；SQL 侧用 `btrim(x, E' \\t\\n\\r\\f\\v')` 先 trim，\n   再对 **trim 后的值**做锚定匹配。\n   **注意**：PostgreSQL 的 ARE 里字面类怎么写、`\\v` 能不能直接写进 bracket，**你要在真库上验**，\n   不要照抄我这个建议 —— 如果有写法在真库里不成立，换一种能成立的（比如先 `translate`/`btrim`，\n   再对不可能含这些字符的值做匹配）。\n2. **同一个 `btrim` 家族在 00045 里还有四处**，请一并按同一字符类统一：\n   - `:113` 的 `source_type` / `:118` 的 `external_identifier` 空值检查\n   - `:154` 同步触发器里的 `source_type` / `external_identifier`（`NULLIF(btrim(...), '')`）\n   - `:168` 的 `canonical_url` 空值检查\n   - `:211` 的 `upstream_version` 空值检查\n   这些是**检查空**而不是比较：一个\"只有一个 tab\"的值在 Go 侧算空、在 SQL 侧**不算空**，同一类偏差。\n3. **把漂移测试的输入扩到能抓住这一类**：tab 包、换行包、CR 包、`\\v` 包、`\\f` 包、\n   以及**中间含 `\\v`** 的标识符，外加一个被 tab 包起来的 `source_type`。\n   这条测试必须**真的**两边跑同一批输入、逐个断言相等。\n4. **把文档改成实情**：Go 的注释和 00045 的注释现在都声称\"两边同一条规则\"。\n   改完之后如果**确实**逐字符一致，就这么写；**如果哪里还做不到一致，就写清楚那个边界**。\n   证据文档宁可比实际保守，不要比实际好看。\n\n> 这条**不是**\"为了让门禁变绿\"。它覆盖的正是\"两份拷贝会分叉\"这个缺陷。\n> 反过来说：**不许**为了让测试过就把漂移测试的输入改窄、或者把 Go 侧改成去迁就错的 SQL 侧 ——\n> 两边都要落到**你显式声明的那个字符类**上。\n\n---\n\n## 必改 2（minor，findings[1]）：SSRF 守卫在**拨号那一刻**有一个 TOCTOU（DNS rebind）窗口\n\n`internal/rsg/externalref/ssrf.go:44-66`\n\n```\nguard.resolve(ctx, host)   // ← 第一次解析：被 classifyIP 检查的那一批\n...\ndialer.DialContext(ctx, network, addr)   // ← 第二次解析：net.Dialer 内部又查一次 DNS\n```\n\n**被检查的那次解析，和真正被拨号的那个地址，是两次独立的查询。** 这正是 DNS rebind 的经典窗口：\n攻击者先让域名解析到一个**公网**地址（检查通过），再让**紧接着的**那次查询解析到**内网**地址（被拨出去）。\n`CheckURL` 和每一跳的 `CheckRedirect` 缩小了窗口，但**没有关掉它**。\nV1 的第一跳确实是固定的 `doi.org`，但 `doi.org` 会 302 到**由 DOI 注册人选择的**注册机构/出版商主机 ——\n所以这个窗口在 V1 是能碰到的。\n\n**要你做的**：把**被检查过的那批 IP** 拿去拨号，而不是把主机名交回给 `net.Dialer` 再解析一次。\n拨号地址用 `net.JoinHostPort(ip, port)`；**TLS 的 `ServerName` 仍然是原主机名**\n（`http.Transport` 会从请求 URL 取，证书校验照旧对着主机名校验 —— 这一点你必须**实测**确认，\n它是这个修法的关键，不能想当然）。多个 IP 时：按序试，某个拨不通就试下一个，\n但**每一个**都必须是那一批**已经过 `classifyIP` 的**。\n\n**这条必须带一条真测试**，而且这个测试是能写的（`Guard.lookup` 是可注入的接缝，`NewGuard` 就是那个形状）：\n起一个**真的**监听在 `127.0.0.1` 的测试服务器，注入一个\"**第一次查给公网地址、第二次查给 `127.0.0.1`**\"的\nresolver —— 这就是 rebind 本身 —— 然后断言**请求没有到达那个本地服务器**。\n修之前这条测试会红（请求打到了本地），修之后必须绿。\n\n> 如果你发现这个改动**没法**用现有接缝写出这样一条真测试，**不要**悄悄放过：\n> 在 `RESULT.json` 里写清楚卡在哪，我来决定是不是拆成独立任务。宁可报\"这条我没能做到\"，\n> 也不要交一个**没被测过**的安全改动。\n\n---\n\n## 必改 3（minor，findings[2]）：`accessed_at` 的守卫比它自己声称的规则**更严**，会误拒真实的观测\n\n`infra/migrations/00045_...sql:208` —— `IF NEW.accessed_at IS NULL OR NEW.accessed_at > now() THEN`\n\n`now()` 是**事务开始时刻**，不是当前时刻。`BuildSnapshot` 盖的是**应用侧的当前 UTC 时间**，\n所以在一个稍长的事务里（或在应用/数据库时钟有偏差的部署里），一个**真实的观测**会被判成\"未来访问\"而**拒掉**。\n复核说这是\"对消费方接线的运维脆弱性，不是完整性漏洞\" —— 我同意，而且**第一次手工刷新就可能撞上**。\n\n**要你做的**：把比较基准从 `now()` 改成**当前时刻**（`clock_timestamp()`）。守卫**声明的**规则是\n\"`accessed_at` 不能是未来的\"；拿事务开始时刻当基准，实际执行的是**另一条、更严的**规则，\n它会把真实观测拒掉。这一条是**把守卫改回它声称的规则**，不是放宽它。\n\n**边界（很重要，别做过头）**：**不许**顺带加\"容忍时钟偏差 N 秒\"之类的容差 ——\n容差要定多少是**产品语义**，不是这一轮能拍的，我另记待办。\n你要保证的是：**一个明显在未来的时间戳仍然被拒**（比如 `clock_timestamp() + 1 hour`），\n并且**加一条测试**证明这一点；同时加一条测试证明\"事务里 sleep 一段时间后写入的真实观测**不再**被拒\"。\n两条测试都要真的跑。\n\n> 说白了：这条改完之后，守卫拦掉的**东西变了**（少拦了一些真实的），\n> 所以你必须用一条**新测试**把\"仍然拦得住伪造的未来时间戳\"钉住。没有这条新测试，这条改动不算数。\n\n---\n\n## 必改 4（nit，findings[4]）：那张**策略声明表**自己没有守卫\n\n`infra/migrations/00045_...sql:258` 的 `external_reference_relation_types`\n\n它是端点守卫的**策略数据**（哪几种 relation type 允许指向 external reference），\n但它本身是一张**普通可写表**：任何有这张表权限的写入路径 `INSERT` 一行 `'contains'` 进去，\n就能**绕开** citation/dependency-only 的端点策略。迁移给自己打的广告是\"any write path\"都要守规矩，\n而它自己的策略表不守 —— 这跟必改 1 是**同一类**问题：**声称的不变量和实际的不一样**。\n\n**要你做的**：给这张表加 `INSERT`/`UPDATE`/`DELETE` 的拒绝守卫（触发器即可），\n让声明集在迁移之后**只能由一次显式的、被复核过的迁移**来改。\n两个细节：\n- **建守卫的顺序**：迁移自己要先 `INSERT` 那两行，**守卫必须建在这条 INSERT 之后**，否则迁移自己就装不进去；\n- 加一行注释说明：将来要扩这个集合的迁移**必须先 drop 掉这个守卫**，改完再建回来 ——\n  不要让下一个迁移作者踩到\"为什么我插不进去\"。\n\n---\n\n## findings[3]（nit）：**代码不动**，只在迁移头补一行，剩下的记到 T0509\n\n复核说：身份行是由 `DEFERRABLE INITIALLY DEFERRED` 约束触发器写的（`:182`），\n所以**在插入它的那个事务里读不到**，只有 commit 之后才可见；消费方必须在 commit **之后**重读，\n否则会写出一个 read-your-writes 的 bug。\n\n\"store seam 上的注释\"那个位置**这个任务里不存在**（接线是你下游 T0509 的事），所以：\n- 你只在 `00045` 头部的 \"this migration does not do\" 清单里**补一行**，\n  写明身份行的 commit 前不可见性、以及消费方要 commit 后重读；\n- 剩下的作为待办记到 **T0509**（我来记，不用你管）：**Issue #175**。\n\n---\n\n## 这一轮**不要**动的\n\n- **不要**重新设计 00045 的结构，不要动表名/列名/编号。上面四条之外，**其余保持原样**。\n- **不要**顺手去改 `specs/api/openapi.yaml` —— `specs/**` 是 Supervisor-only。\n- 复核 `risks` 里那两条（快照读模型/可见性、endpoint 未接线）是**下游 T0509 的事**，不在本轮。\n\n## 关于你工作树根上可能出现的怪文件\n\n如果你在工作树根看到 `_tmp_sec_*.go` / `_tmp_sec_*.sql` 之类的东西：**那不是你的**，也不是这个仓库里\n任何代码生成的（我在 T0209 上追过一次，没查出来是谁写的，已单独记录）。**不要删它、不要动它**\n（它在你的 `allowed_scope` 之外），在 `RESULT.json` 里**点名报给我**就行，我来处理。**这不是你的错，别停在这上面。**\n\n---\n\n## 不变的约束\n\n- **不许为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n  红着报告比造假绿好。\n- 迁移号 **`00045` 不变**，文件名别动，别重新选号。37/39/44 **永远空着**，不许补。\n- 生成物（`specs/database/postgres.sql`、`internal/persistence/sqlc/*`、`specs/SPEC_VERSION.json`）\n  只能**重新生成**，不要手工编辑。\n- 不要动 `allowed_scope` 外的文件。\n- **这一轮的树是变了的**（和 T0209 那轮不同，那轮树是逐字节相同的）：所以\n  **受影响的那几条测试你必须真的重跑**，`RESULT.json` 里 `tests[]` 的每一条都必须是\n  **你这次实际跑出来的结果**；没跑的就别写进去。`status` 只有真的都过了才写 `completed`。\n- 环境老事实没变：共享 dev 库 `post` 是坏的（**不要**跑 `make migrate` / `rddev db migrate`）；\n  `make test-integration` 不受影响（自己建一次性库，`7842589`）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2 → 合并。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T12:34:51Z",
+          "run_id": "run-d2fdd74aed97d4c4",
           "reason": "worker spawn"
         }
       ]
@@ -2968,22 +3577,73 @@
       "merged_at": null
     },
     "T0605": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "merged",
+      "started_at": "2026-09-14T08:39:33Z",
+      "worker_run_id": "run-6f7755cb0c8cdc0c",
+      "accepted_by_supervisor_at": "2026-09-14T09:24:39Z",
+      "merged_at": "2026-09-14T09:33:18Z",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T08:33:58Z",
+          "run_id": "run-7b25d72af8c6feda"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T08:39:33Z",
+          "run_id": "run-6f7755cb0c8cdc0c",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T09:12:54Z",
+          "run_id": "run-da303cfab077639e",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T09:24:39Z",
+          "run_id": "run-f16b86f673e16012"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T09:33:18Z",
+          "run_id": "run-58670c6a3e5f33e0",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T0606": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-14T09:37:57Z",
+      "worker_run_id": "run-f9b0a49d3f75b34c",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T09:37:55Z",
+          "run_id": "run-c0709e2c058d37b0"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T09:37:57Z",
+          "run_id": "run-f9b0a49d3f75b34c",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T10:48:54Z",
+          "run_id": "run-83d3951071c81979",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T0607": {
       "status": "todo",
@@ -3292,13 +3952,46 @@
       "merged_at": null
     },
     "T1001": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-14T08:41:35Z",
+      "worker_run_id": "run-e9f0b2fbf1fbe35b",
+      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (tests/integration/check-sqlc-drift.sh) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T07:11:48Z",
+          "run_id": "run-8df8d5f3d4e279d1"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T07:31:39Z",
+          "run_id": "run-173f6a706c90fb45",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T08:33:58Z",
+          "run_id": "run-b4c8bbcb9447696b",
+          "reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (tests/integration/check-sqlc-drift.sh) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T08:41:35Z",
+          "run_id": "run-e9f0b2fbf1fbe35b",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T08:47:12Z",
+          "run_id": "run-23805ddfeaaa798e",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T1002": {
       "status": "todo",
@@ -3512,6 +4205,15 @@
       "started_at": null,
       "completed_at": null,
       "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0310": {
+      "status": "blocked",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "SPEC_BLOCKED（L3）：非 push 来源的 head（merge saga 推进的、syncer 采纳的 out-of-band ref、fork 导入的）其 semantic completeness 由谁按什么证据派生？00042 的默认值是 semantic_complete 且这张表只在 push ingestion 里被 upsert；因此非 push 路径可能绕过 T0306 的 semantic validation merge 门。等 owner 裁定；裁定后写 tasks/decisions.md。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null

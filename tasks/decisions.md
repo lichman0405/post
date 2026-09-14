@@ -7523,3 +7523,199 @@ T0606 的 `internal/domain/audit.go` 又是第三种：两边各往同一个 `co
 `drain-migration-chain.pid` 里记的是 19:47 那个已经死掉的 pid，而 drain 在 19:54 重启过——
 看门脚本因此会**误报"链条停了"**。已改成真实 pid。教训是：靠人维护的状态文件迟早会漂移，
 监视器应该按进程名找（`pgrep -f '[d]rain-migration-chain.sh'`），下次重启监视器时改掉。
+
+## L1-20260914-86
+
+### 一、冲突的第五种形状：不是"两边各加一句"，是"同一件事两种做法"
+
+T1001 的 `internal/application/rsg/service.go`，第四块冲突并集解不开：主线（T0213，已合并）是
+`ref, err := s.resolveSchemaRef(ctx, projectID, in.ObjectType, in.SchemaRef)`；任务写在 T0213
+**之前**，是 `schemaFor` + **"V1 pins the canonical schema per object type"** 的拒绝。不是"都要"，
+是**只能留一个**。**留下了主线的**，理由不是"谁的更新"：`resolveSchemaRef` 内部本来就走
+`schemaFor`，并且照样拒绝"非规范、未登记的 `schema_ref`"——任务那条拒绝是它行为的**真子集**，
+而它多出来的恰恰是 T0213 新加的"项目 schema profile"。留着任务那条，等于把主线现在支持的东西
+重新拒掉。任务那半句 `visibility := eventVisibility(branch.Visibility)` **留下**——它的 outbox 调用要它。
+
+### 二、这种形状**不能**走丢弃清单，也不能悄悄改
+
+L1-85 的丢弃清单只收**注释行**，这是它存在的全部意义（守卫拒绝代码行，一次都不行）。
+把四行代码塞进去，就是把"人工裁定"变成"无声删除"——正是这一整套守卫要防的事。
+所以加了**第二个窄门**：申报式替换（`.override`），由 `union-lossless.py RAW RESOLVED [DROP|-] [OVERRIDE|-]` 校验。
+
+- 形状：成组的 `-` 行（被取代的）后面跟 `+` 行（取代它的）；
+- 每条 `-` 必须**在原始合并里存在**、且**不在成品里**（否则它在描述一件没发生的事）；
+- 每条 `+` 必须**在原始合并里存在**（**只能从冲突已有的行里选，不许发明新行**）、且**在成品里**；
+- 一组只有 `-` 没有 `+` → 拒绝（那叫删除，不叫替换）；重复的 `-` → 拒绝；空文件 → 拒绝；
+- 每条替换都**打印出来**，并且和丢弃清单一样**写进任务信**（T1001 信第二节第 1 条逐条说了
+  "哪四行被取代、哪三行替换进来、为什么"，并请 Worker 认为取舍错了就**在 RESULT.json 里指明哪一行**，
+  不许闷声改回去——**合错了是我的问题，不算它返工**）。
+
+### 三、记录是**生成的**，不是手打的
+
+`make-t1001-drop-and-override.py` 第一版我手抄了一行，抄成了**主线**的报错行而不是任务的，
+守卫当场拒绝。现在脚本按**内容**从原始合并里挑行，写之前逐条断言（在原始合并里出现几次、
+在成品里在不在、在不在成品里），对不上就整体拒绝、什么都不写。**声明必须由事实生成**，
+手打的清单迟早会描述一件没发生的事。
+
+### 四、守卫的验证拿**真实的那一对文件**跑
+
+`verify-override-door.py` 13 个用例：接受的那个用的就是 T1001 的真实 raw merge + 真实人工裁定 +
+真实记录（不是为迁就守卫现编的样本）；其余 12 条是必须拒绝的形状（过期的 `-`、成品里没有的 `+`、
+原始合并里没有的 `+`、只有 `-` 的组、`+` 出现在 `-` 之前、既不是 `-` 也不是 `+` 的行、空文件、
+丢弃清单里的代码行、在原始合并里但不在成品里的替换……）。每条同时断言**退出码**和**拒绝话术**
+——只断退出码的话，一个因为拼错路径而拒绝的守卫也会"通过"。这一轮错的是**测试**两次
+（一次把 override 传进了 drop 的位置，一次用顶层函数模式去数一个方法），守卫两次都是对的，
+两处都写在注释里，不装作没发生。
+
+### 五、派生文件：合成之后必须在**工作树里**重新生成（"上膛"）
+
+`rebaseline` 只重新生成**这次改动碰到过的**派生文件（`derivedTouches`，rebaseline.go:294：
+只有 `derivedTouches(before, r.Derived)` 为真的规则才进重新生成列表；碰到一个**没有**再生器的
+派生文件是硬拒绝，"add one to regenerators … rather than merging it as text"）。
+`compose-link.sh` 按设计**跳过**派生文件——它们由工具从合并后的树生成，不在合成里做第二遍。
+两者接起来有一个洞：合成后的工作树如果**不含**派生文件，工具就**不会**重新生成它们，
+合并进去的会是一份**过期的快照**，而且没有任何一格会红。
+**规则**：合成之后在**工作树里**跑三个生成器（`scripts/gen_schema_snapshot.py`、
+`scripts/spec_version.py --write`、`scripts/gen_sqlc.sh`），各自用 `--check` 收尾，
+让它们出现在改动集合里——这就是"上膛"。T1001 合成后：36 个迁移、38 个输入，三个 `--check` 全绿。
+
+## L1-20260914-87
+
+### 一、accept 失败**不是**代码不合格，几乎总是"树太旧"
+
+`rddev task accept: the task's change does not apply to current main` 今天出现在 **7 个任务**上
+（T1001/T0402/T0606/T0407/T0214/T0503/T0504）。原因不是它们的代码错，是**脚下的基线旧了**：
+每个链接都要重新生成同一批派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、
+`internal/persistence/sqlc/*`），下面任何一个链接合并，都会让它们的补丁打不上。
+**所以这一句的正确处置是"把树前移"，不是"打回重做"**（更不是降低门）。前移的工具是
+`rddev rebaseline`；它解不开的（两边改同一段）才走 L1-83/84/85/86 那套合成。
+
+### 二、迁移号是**分配**的，而且必须严格递增
+
+goose 默认拒绝乱序迁移，而 **CI 看不到这个问题**——CI 每次都在全新库上迁移。今天在飞/已落的号：
+
+| 号 | 任务 | 号 | 任务 |
+|---|---|---|---|
+| 00043 | T0505 | 00053 | T0606 |
+| 00045 | T0508 | 00054 | T0407 |
+| 00046 | T1001 | 00056 | T0214 |
+| 00047 | T0309 | 00057 | T0503 |
+| 00051 | T0402 | 00058 | T0504 |
+
+**永远空着的是 44/48/49/50/52/55**（更早还有 37/39）——空号不是浪费，是"分配过、后来作废"的痕迹，
+**不许回收**；后来者只能从**当前最高号之上**继续分配。这条写进任务包，Worker 不得自行选号（§8.1）。
+
+### 三、链条的推进是三相，每一相都要等上一相落地
+
+`drain-migration-chain.sh`：第一相 `CHAIN`（T0209/T0213/T0501/T0502/T0306/T0505，已全部落地）、
+第二相 `TAIL`（T0508/T1001/T0309，号 45/46/47）、第三相 `PHASE3`
+（T0402/T0606/T0407/T0214/T0503/T0504，号 51/53/54/56/57/58）。
+相内、相间都按号序；前一个不 `merged`，后一个不动。第三相与前面唯一的区别是**它们的冲突还没合成过**，
+所以合成由 `rebaseline_one` 在工具拒绝时自动重跑一遍（合成本身是**有记录的**：每个冲突形状一个解析器、
+每个文件一份人工裁定，重放到新主线上是机械的；**没有记录的形状仍然停下等人**）。
+
+### 四、第二相的两处**静默停摆**（都改了，都做过测试）
+
+1. **`running` 的分支只在话里等**：打印"waiting for it before its advance"，代码却继续往前走，
+   去 rebaseline 一个**有 Worker 正在里面工作**的工作树。T0508 的返工 20:47 还在跑，
+   旧脚本一个 tick 就能把它的树 `reset` 掉（Worker 会对着一个中途变过的仓库继续写）。
+   现在真的等：状态不再是 `running` 才继续。
+2. **被决策冻结的链接永远等不到**：决策让 driver 每个 tick 都跳过该任务，merge 于是永远不会重试，
+   drain 停在 "waiting for X to merge" 上——**一个看起来像耐心的死锁**（20:29 那次 BAIL 之后
+   链条停了一下午，是同一类东西的另一面）。现在等待期间会看：不是 `running` 且有未决决策
+   → 清掉决策 + 重跑它的前移与派工。清决策**不是放水**（Gate 一条都不变），前移是幂等的
+   （已经站在主线尖上的树回 "nothing to advance"）。判据"有未决决策"同时回答了"那棵树里有没有人"：
+   driver 跳过的任务，就是没有 Worker 在里面工作的任务。
+
+### 五、`rebaseline` 的三种拒绝必须分开对待，不能一把 BAIL
+
+（`internal/devorchestrator/rebaseline.go`）
+
+- `:451` "…conflicts with main's own change to the same lines of …— composing them needs a human"：
+  **有书面答案**，就是合成。脚本自动重合成一次，再把树交还给工具。
+- `:458` "…does not apply … even after excluding generated files — this needs a human"：
+  没有冲突可指，补丁本身就是坏的。**不合成**（合成就成了猜），停下等人。
+- 容量（`parallelism limit` / `no free Worker slot`）：根本不是对前移的拒绝，前移已经做完了。
+
+20:29:20 打死 drain 的那句 BAIL，就是把第一种当成了"其它一切"。判据用**工具自己的原话**
+（`grep -qF "composing them needs a human"`），不用改述——守卫认错话，就会去合成一棵没人让它合成的树。
+
+### 六、编排层自己也要有测试（这一带第三次"错的是检查工具"之后）
+
+`verify-drain-flow.py`：把 `wait_for_merge` / `rebaseline_one` 从**真实脚本里抽出来**
+（不是拷贝一份，拷贝会漂移），配桩后跑 8 个用例——`sleep` 空转；状态与 `bin/rddev` 各走一条
+**有限队列**，队列跑空即报错而不是挂住。覆盖：`running` 时不动树、被冻结时解冻并重跑、
+`merged` 时返回、`blocked` 时停、冲突拒绝时**只合成一次**、另一种人肉拒绝**不合成**、
+`nothing to advance` 且有 diff 不算错、容量拒绝既不合成也不停。写测试时错的是**测试自己**两次
+（`ROOT` 在赋值前被引用；桩每次回答同一句而不是逐次出队——后者会让"重试一次"看起来通过，
+而它其实没被验证），都记在脚本注释里。
+
+---
+
+## L1-20260914-88 —— 第三相六封信（复核意见的逐条处置）、收集器的"二进制"口径、T0310（L3）
+
+### 一、第三相的六封信：每条复核意见都必须有落处
+
+六个任务的复核结论是五个 `approve` + 一个 `request_changes`（T0407）。§5.1 条件 4 是"**没有未解决的
+复核意见**"——`approve` 不等于意见解决了（L1-73 已记）。所以六封信（`$TMP/t04xx-rebaseline-reason.md`、
+`t0503/t0504-…`，文件名与 `P3_REASON` 一一对应，drain 在派发前用 `[[ -f … ]]` 断言它们存在）
+按同一条规矩逐条处置：**改**（这一轮就地改，行为变了就带一条能失败的测试）、
+**记录+指人**（不改，但写明谁承接）、**拒绝+理由**（不改，写明为什么）。要点：
+
+- **T0402**：只改 00051 header 对 GUC 门保证范围的夸大；分支生命周期竞态**转给 T0406**
+  （已写进 T0406 的 requirements）；转换表三份副本、docs/45 缺码两条**拒绝**（理由在信里）。
+- **T0606**：改两处注释（`requireCreate` 的机制夸大、`Release.Manifest` 的过期 `jsonb`）；
+  幂等竞态的瞬时假 409、`ErrProjectNotFound`→503 两条**记录**（DB 保证是硬的、分支不可达）。
+- **T0407**（唯一 blocking）：裸 NUL 字节改成转义写法（一行，行为不变）；冲突身份**落库也要归一化**
+  （复用现有的排序函数，带能失败的测试）；未鉴权兜底的码换规范常量；body 尾随垃圾**拒绝**（理由：全仓库
+  约二十个 handler 都只读第一个 JSON 值，唯一的严格 EOF 检查在 canonical JSON 那里）。
+- **T0214**：未接线的 Profiles 门要**每个** profile 都带错（扩展现有单测到每一个，让旧代码在它下面红）；
+  `RecordInstantiation` 的注释改成实际行为（23503 不映射）；路由注释与结尾换行修掉；
+  死映射与 OpenAPI 种子**记录**。
+- **T0503**：TRUNCATE 绕过"no orphan refs"的注释收敛为"**行级写路径**"；补一条集成测试钉住
+  "同一事务里删 refs + 删 findings 行"的合法重建形状；`finding_type` NOT NULL 与 schema 可选的矛盾
+  **不改**——两个改法一个动 `specs/schemas/**`（我的面）、一个是放松投影完整性，投影今天没有 writer，
+  作为 writer 任务的前置条件记名（收紧与否是我的 L1）；`object_id` 交叉校验同转 writer。
+- **T0504**：自指规则补 DB CHECK（`target_object_version_id <> evidence_object_version_id`，带能失败的测试）；
+  两处注释（json tag 声明、docs/43 引用）与 RESULT.json 的过期计数改掉；其余 risk 记名转 writer/聚合任务。
+
+六封信都写明了同一套不能动的：迁移号不变、空号不回收、不许为绿删/skip/弱化测试、生成物只能重新生成、
+`notes_for_supervisor` 是**字符串**（T0309 的形状事故）、共享 dev 库 `post` 是坏的（不许 `make migrate`）。
+
+### 二、收集器说的"二进制"不是 git 说的（这一带**第四次**"错的是检查工具"）
+
+T0407 的 blocking 是"页里有个真的 NUL 字节"。复核的机制解释是"git 因此把整个文件当二进制"——
+**实测不成立**：`git diff --no-index --numstat` 给出 `691 0`，git 只看**前 8000 字节**
+（`FIRST_FEW_BYTES`），NUL 在 24102。把那条 diff 整段替换成 `Binary files … differ` 的是**我们自己的
+收集器**：`internal/devorchestrator/git_control.go:724` 用 `bytes.IndexByte(data, 0) >= 0` 扫**整个文件**，
+而且打印的是 git 的原话（注释写"A NUL byte means Git would call it binary"，同样不准确）。
+**结论**：blocking 依旧成立（补丁里塞不进 NUL 正文，门就看不见交付物；源码里的控制字符该写转义），
+但**理由要用对**——否则很容易改错地方。工具本身的措辞/口径我**没在链条跑的时候动**
+（rddev 是门的地基，中途换地基不是这一轮该做的事），记为候选修法：要么把措辞改成"含 NUL，文本补丁表示不了"，
+要么按 git 的窗口判定、NUL 在窗口外就照常出正文。
+
+### 三、T0310：一个必须问的问题，不是我能猜的语义（L3）
+
+**事实（今天核对过）**：`00042` 的 `git_branch_semantic_states.semantic_state` 默认
+`DEFAULT 'semantic_complete'`，迁移把已存在的每个分支回填成 complete；全仓库**只有 push ingestion**
+（`internal/gitprovider/push_ingestion_store.go`）会 upsert 这张表。而 **merge saga（T0406）自己推进
+branch head**、syncer 采纳 out-of-band head（T0309）、fork 导入（T0804，`v1_required`）——三条路都造出
+**不经 push** 的 head。
+
+**问题**：这些 head 的完整性的**派生规则**是什么？(a) 一律视为 complete，是不是让 T0306 的
+"不可绕过 semantic validation merge" 在非 push 路径上开了一个口子？(b) 若必须派生，证据来源与写入者是谁、
+merge 之后 flag 怎么保持一致？
+
+这是产品/科研语义（还沾安全边界）——**L3，我停**。已落成 `T0310`（`tasks/tasks.json`，
+`decision_level_max: "L3"`，空 `allowed_scope`：它不该被派工），`task_status.json` 里 `blocked`
+（缺条目等价于 `todo`，会被驱动当成可派任务——这是 driver 的规矩，`state.go` 记着），
+并加进 **T0406 的 dependencies**（merge saga 是第一个造出非 push head 的东西）。
+owner 裁定后：要么关掉它，要么派生一个实现任务；答案写这里。
+
+### 四、动 `tasks/tasks.json` 必须重新生成 `specs/SPEC_VERSION.json`
+
+`spec_version.py` 的输入是 **`tasks/tasks.json` + `specs/**`**（不含 `task_status.json`）。
+Makefile 里记着上次没重生成导致的 red main（6ec746c）。这一轮加 T0310 后：
+`--check` 先红（`6e5fb837… != 7fc5d5c6…`），`--write` 后 `--check` 绿（38 个输入），
+两份文件一起提交。改动 DAG 的脚本写文件走**临时文件 + rename**——驱动每 10 秒读一次这两个文件，
+半截文件是我自己制造的故障。
