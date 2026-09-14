@@ -556,6 +556,13 @@ func MergePR(opts *GitControlOpts) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The migration order before the state of the PR, because it is not a state
+	// of the PR: waiting for CI cannot resolve it, and a merge that CI will call
+	// green can still stop every database that has already migrated from ever
+	// migrating again. See assertMigrationMergeOrder.
+	if err := assertMigrationMergeOrder(opts.RepoRoot, rec); err != nil {
+		return "", err
+	}
 	// Before the checks, and that order is the fix rather than a preference: a
 	// PR GitHub cannot build a merge commit for has no check runs, so the
 	// checks assertion would answer "not reported yet" and the driver would
