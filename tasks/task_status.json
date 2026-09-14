@@ -1491,9 +1491,10 @@
       ]
     },
     "T0209": {
-      "status": "running",
-      "started_at": "2026-09-14T04:11:58Z",
-      "worker_run_id": "run-826d3144fbb6b511",
+      "status": "rejected",
+      "started_at": "2026-09-14T05:22:35Z",
+      "worker_run_id": "run-1723d17730834604",
+      "rejection_reason": "# T0209：停在合格状态，等两个小号迁移先落地（不是你的问题）\n\n你这轮返工做得对：并集核对过、三个生成物在合并后的树上重新生成、`go` 作业的自检清单跑了。\n**代码停在合格状态，这是刻意的顺序安排，不是退回。**\n\n## 为什么必须停在前面\n\n合并顺序被**迁移编号**钉死，而且这次不是洁癖 —— 有硬证据：\n\n本仓库的迁移运行器是 **goose v3.28.0**（`internal/persistence/migrate.go`），它**默认拒绝乱序迁移**。\n库已经应用到 00036 之后，如果出现一个比它小的 00035，`Migrate` 会直接停：\n\n```\nfound 1 missing (out-of-order) migration: [00035_*.sql]\n```\n\n而 CI 用的是**全新库**，按名字排序一次跑完，**永远看不到这个问题** —— 于是它会静默地砸在\n任何**已经升级过**的库上（本地开发库、以后的生产库），表现为\"迁移突然跑不动\"。\n\nmain 现在的最高号是 00033。在 T0305（00034）与 T0206（00035）落地之前合并你（00036），\n就会在 main 上**先出现 36、后出现 35**，正好命中上面那条。\n\n⇒ 顺序：**T0305(34) → T0206(35) → T0209(36)**。\n\n## 接下来会发生什么\n\n1. 我先把 T0305、T0206 依次收掉（它们各自也要返工/前移一轮）。\n2. 然后你的分支会做一次**机械的基线前移**（Supervisor 用 `rddev rebaseline`，生成物照例重新生成），\n   你会被要求在**那个** main 上再证明一次 —— 期望是**一轮很短**的返工：重跑证据、更新 RESULT.json。\n3. 之后立刻收你、合并。\n\n## 现在这一轮的东西都留着\n\n你工作树里的东西一件没删，`RESULT.json` 也在。下一轮不用重做已经做过的事，只需要在新基线上重跑证据。\n\n## 不变的约束\n\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n- 生成物只能重新生成，不要手工编辑。\n- 不要改迁移号（00036 是你的，不变）。\n",
       "history": [
         {
           "from": "todo",
@@ -1507,13 +1508,51 @@
           "at": "2026-09-14T04:11:58Z",
           "run_id": "run-826d3144fbb6b511",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T04:53:32Z",
+          "run_id": "run-3d8f1f4899867b66",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T05:22:00Z",
+          "run_id": "run-eb34e24e62c40efc",
+          "reason": "# T0209 基线前移：合并已经替你合好了（不是你做错了什么）\n\n复核给你的是 **approve**，独立复核也确认三条集成测试在真实 PostgreSQL 上通过。\n代码本身没问题。这次返工的**唯一**原因是你脚下这块地动了两次。\n\n## 发生了什么\n\n1. `T0603`（Organization/Project Policy Engine）在你交付之后合入了 main，带来两个新迁移\n   （`00032_git_user_access.sql`、`00033_policy_versioning.sql`），main 上两个**生成物**随之重新生成：\n   `specs/database/postgres.sql`（schema 快照）、`internal/persistence/sqlc/querier.go`（sqlc 输出）。\n2. `T0210`（Scientific Object Detail UI）随后合入，它改了四个**和你同一批**的文件：\n   `cmd/api/main.go`、`cmd/api/rsghttp/wiring.go`、`cmd/api/rsghttp/handler_test.go`、\n   `internal/application/rsg/service.go`。两边都在这四处**各加各的**（各自一个服务端口、\n   各自一个方法、各自的 stub 字段与计数），位置相同，文本对不上。\n\n于是 accept 的贴补丁步骤直接失败。**这不是要你改代码，是要你在新的 main 上重新生一遍\n生成物、并重新证明一遍还在绿。**\n\n## 已经替你做完的（请核对，不要重做）\n\nSupervisor 已经把这次前移和合并做完了（merge conflict 属于 Supervisor 自己的工作）：\n\n- 基线从 `3e786f4` 前移到当前 main（`0cb36e1`）。你的改动一项没丢，现在是\n  **19 项未提交差异**（12 个修改 + 7 个新增），包含你的新迁移 `00036_rsg_query_indexes.sql`。\n  迁移号不用动：main 现在最高 00033，00034/00035 已留给 T0305/T0206，00036 是你的，没有撞号。\n- 上面那四个冲突按**并集**合成：两边的端口/方法/stub/字段都留着，注释两段合并成一段。\n  **没有一处需要取舍**——如果你认为并集的结果哪里不对，直接说出来，不要默默改。\n- 三个生成物已从**合并后的树**重新生成过一遍：`specs/database/postgres.sql`（29 个迁移）、\n  `internal/persistence/sqlc/`、`specs/SPEC_VERSION.json`。`--check` 三项都干净。\n- 合并后的树：`go build ./...`、`go vet` 干净，非集成单测全绿。\n\n## 请你做的四件事\n\n1. **核对上面的合成分**（尤其那四个文件），确认并集没丢掉你的东西。\n\n2. **在新基线上重新跑一遍证据**：`rsg query integration`（`tests/integration/rsg_query_test.go`）\n   以及你在 RESULT.json 里报过的其它条目（含真实 PostgreSQL；G3 不接受全 mock 替代）。\n   上一轮复核指出一个计数小错：新的 e2e query 检查是 **8** 条，RESULT.json 写的是 7 ——\n   顺手改对，**数出来的数字，不是估的**。\n\n3. **把 `specs/orchestrator/gates.json` 里 `go` 作业的步骤当作自检清单逐条跑**\n   （`make fmt-check`、`go vet ./...`、`make staticcheck`，以及该作业里其余步骤）。\n   你没有跑这些，所以\"检查全过\"对你跑过的那些是真的，但不等于 CI 会过 —— 同一个坑\n   T0210 和 T0305 都栽过。\n\n4. 更新 `tasks/results/T0209/RESULT.json`：新的基线、新跑出来的证据、改对的计数。\n\n## 不变的约束\n\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n  红着报告比造假绿好。\n- 不要手工编辑 `internal/persistence/sqlc/*.go` 或 `specs/database/postgres.sql`（只能重新生成）。\n- 不要新增迁移、不要改迁移号、不要动 `allowed_scope` 外的文件。\n- 改动会让代码指纹变化，所以这次 approve 会失效、复核要重跑一次。这是正常的，**不要**为了\n  保住旧结论而不改。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T05:22:35Z",
+          "run_id": "run-1723d17730834604",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T05:27:54Z",
+          "run_id": "run-a88248d98537a3b0",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T05:30:32Z",
+          "run_id": "run-5341e83fd2aeaab3",
+          "reason": "# T0209：停在合格状态，等两个小号迁移先落地（不是你的问题）\n\n你这轮返工做得对：并集核对过、三个生成物在合并后的树上重新生成、`go` 作业的自检清单跑了。\n**代码停在合格状态，这是刻意的顺序安排，不是退回。**\n\n## 为什么必须停在前面\n\n合并顺序被**迁移编号**钉死，而且这次不是洁癖 —— 有硬证据：\n\n本仓库的迁移运行器是 **goose v3.28.0**（`internal/persistence/migrate.go`），它**默认拒绝乱序迁移**。\n库已经应用到 00036 之后，如果出现一个比它小的 00035，`Migrate` 会直接停：\n\n```\nfound 1 missing (out-of-order) migration: [00035_*.sql]\n```\n\n而 CI 用的是**全新库**，按名字排序一次跑完，**永远看不到这个问题** —— 于是它会静默地砸在\n任何**已经升级过**的库上（本地开发库、以后的生产库），表现为\"迁移突然跑不动\"。\n\nmain 现在的最高号是 00033。在 T0305（00034）与 T0206（00035）落地之前合并你（00036），\n就会在 main 上**先出现 36、后出现 35**，正好命中上面那条。\n\n⇒ 顺序：**T0305(34) → T0206(35) → T0209(36)**。\n\n## 接下来会发生什么\n\n1. 我先把 T0305、T0206 依次收掉（它们各自也要返工/前移一轮）。\n2. 然后你的分支会做一次**机械的基线前移**（Supervisor 用 `rddev rebaseline`，生成物照例重新生成），\n   你会被要求在**那个** main 上再证明一次 —— 期望是**一轮很短**的返工：重跑证据、更新 RESULT.json。\n3. 之后立刻收你、合并。\n\n## 现在这一轮的东西都留着\n\n你工作树里的东西一件没删，`RESULT.json` 也在。下一轮不用重做已经做过的事，只需要在新基线上重跑证据。\n\n## 不变的约束\n\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n- 生成物只能重新生成，不要手工编辑。\n- 不要改迁移号（00036 是你的，不变）。\n"
         }
       ]
     },
     "T0210": {
-      "status": "running",
-      "started_at": "2026-09-14T04:16:37Z",
-      "worker_run_id": "run-a733822b85542f73",
+      "status": "merged",
+      "started_at": "2026-09-14T04:52:41Z",
+      "worker_run_id": "run-7535fd20c08db47b",
+      "accepted_by_supervisor_at": "2026-09-14T05:08:10Z",
+      "merged_at": "2026-09-14T05:11:18Z",
+      "rejection_reason": "# T0210 返工要求（第一轮）\n\n独立复核给的是 **approve**（2 minor + 3 nit），但 `rddev task accept` 在 **G2** 被拒：\n`go` 作业的**第一步** `make fmt-check` 就失败，后面每一步都被跳过。\n\n三条都要处理。**没有一条需要改产品语义或范围。**\n\n---\n\n## 1【G2 红，必须修】`make fmt-check` 失败：三个文件没跑 gofmt\n\n```\n$ make fmt-check\ngofmt: these files are not formatted:\ncmd/api/rsghttp/page.go\ncmd/api/rsghttp/page_test.go\ntests/integration/object_detail_test.go\nrun: gofmt -w <file> (new files must be clean; grandfathered list: ops/ci/gofmt-baseline.txt)\nmake: *** [Makefile:105: fmt-check] Error 1\n```\n\n**要求**：`gofmt -w` 这三个文件。\n\n**不许**把它们加进 `ops/ci/gofmt-baseline.txt` —— 那是给**存量**文件的豁免，\n你新建的文件必须干净。（`scripts/*` 对 baseline 的立场与 staticcheck 一致：绝不把新代码列入。）\n\n**顺带一条给你的（上一轮 T0305 也栽在同一件事上）**：你自报的 G1 清单里没有\n`make fmt-check`，所以你报\"检查全过\"对你跑过的那些是**真的**，但它**不等于 CI 会过**。\n这一轮请把 `specs/orchestrator/gates.json` 里 `go` 作业的步骤**当作自检清单逐条跑**：\n`make fmt-check`、`go vet ./...`、`make staticcheck`、以及该作业里其余的步骤。\n（T0305 是在 `make staticcheck` 上被拒的，你很可能有同一类问题。）\n\n---\n\n## 2【minor，复核发现，我认为要修】版本参数被截断，静默渲染错误的版本\n\n**位置**：`cmd/api/rsghttp/page.go:118`\n\n`pageVersionParam` 接受任何装得进 int64 的正整数，但\n`ScientificObjectStore.GetVersion` 会截断成 int32（`internal/persistence/scientific_object_store.go:213`，\n`int32(versionNo)`）。于是 `?version=4294967301`（2^32+5）解析通过、截断成 5，\n页面**静默渲染版本 5**，而不是给出\"版本不存在\"的结果。\n\n**要求**：在**解析时**就设界（例如 `<= math.MaxInt32`），让这种参数落到\n\"object version not found\"那条路上，而不是答非所问。\n\n（权限上没问题：能读到该对象的人本来就能读它的每个版本。这是**答错问题**，\n不是越权 —— 但它让一个\"版本切换\"界面在荒谬输入下安静地撒谎。）\n\n---\n\n## 3【minor，复核发现】RESULT.json 的证据数字与事实不符\n\n`RESULT.json` 的 \"object detail e2e\" 条目声称 **13/13 subtests PASS**（摘要里也写\"13 个端到端场景\"），\n但 `TestObjectDetailE2E` 里**只有 12 个** subtest（复核者数 `t.Run` 块 + 独立跑了一次 `-v`，都是 12）。\n12 个**确实都过**，所以实质结论成立 —— **数字错了**。\n\n**要求**：改成实际跑出来的数字。**证据里的计数必须是数出来的，不是估的。**\n\n---\n\n## 不变的约束\n\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n  这条没有例外：红着报告比造假绿好。\n- 三条全部落在原来的 `allowed_scope` 内；不要动范围外的东西。\n- 迁移号不要动，不要新增迁移。\n- 上一轮 G2 里 **web、python、migration-integration、acceptance、spec-validation、task-state\n  全过** —— 别把它们弄红。\n- 说明：改动会让代码指纹变化，所以这份 approve 结论会失效、复核要重跑一次。\n  这是正常的，**不要**为了保住旧结论而不改。\n",
       "history": [
         {
           "from": "todo",
@@ -1527,6 +1566,47 @@
           "at": "2026-09-14T04:16:37Z",
           "run_id": "run-a733822b85542f73",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T04:41:58Z",
+          "run_id": "run-aff7b5edfb2ecaa5",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T04:52:35Z",
+          "run_id": "run-6029c831cd00e602",
+          "reason": "# T0210 返工要求（第一轮）\n\n独立复核给的是 **approve**（2 minor + 3 nit），但 `rddev task accept` 在 **G2** 被拒：\n`go` 作业的**第一步** `make fmt-check` 就失败，后面每一步都被跳过。\n\n三条都要处理。**没有一条需要改产品语义或范围。**\n\n---\n\n## 1【G2 红，必须修】`make fmt-check` 失败：三个文件没跑 gofmt\n\n```\n$ make fmt-check\ngofmt: these files are not formatted:\ncmd/api/rsghttp/page.go\ncmd/api/rsghttp/page_test.go\ntests/integration/object_detail_test.go\nrun: gofmt -w <file> (new files must be clean; grandfathered list: ops/ci/gofmt-baseline.txt)\nmake: *** [Makefile:105: fmt-check] Error 1\n```\n\n**要求**：`gofmt -w` 这三个文件。\n\n**不许**把它们加进 `ops/ci/gofmt-baseline.txt` —— 那是给**存量**文件的豁免，\n你新建的文件必须干净。（`scripts/*` 对 baseline 的立场与 staticcheck 一致：绝不把新代码列入。）\n\n**顺带一条给你的（上一轮 T0305 也栽在同一件事上）**：你自报的 G1 清单里没有\n`make fmt-check`，所以你报\"检查全过\"对你跑过的那些是**真的**，但它**不等于 CI 会过**。\n这一轮请把 `specs/orchestrator/gates.json` 里 `go` 作业的步骤**当作自检清单逐条跑**：\n`make fmt-check`、`go vet ./...`、`make staticcheck`、以及该作业里其余的步骤。\n（T0305 是在 `make staticcheck` 上被拒的，你很可能有同一类问题。）\n\n---\n\n## 2【minor，复核发现，我认为要修】版本参数被截断，静默渲染错误的版本\n\n**位置**：`cmd/api/rsghttp/page.go:118`\n\n`pageVersionParam` 接受任何装得进 int64 的正整数，但\n`ScientificObjectStore.GetVersion` 会截断成 int32（`internal/persistence/scientific_object_store.go:213`，\n`int32(versionNo)`）。于是 `?version=4294967301`（2^32+5）解析通过、截断成 5，\n页面**静默渲染版本 5**，而不是给出\"版本不存在\"的结果。\n\n**要求**：在**解析时**就设界（例如 `<= math.MaxInt32`），让这种参数落到\n\"object version not found\"那条路上，而不是答非所问。\n\n（权限上没问题：能读到该对象的人本来就能读它的每个版本。这是**答错问题**，\n不是越权 —— 但它让一个\"版本切换\"界面在荒谬输入下安静地撒谎。）\n\n---\n\n## 3【minor，复核发现】RESULT.json 的证据数字与事实不符\n\n`RESULT.json` 的 \"object detail e2e\" 条目声称 **13/13 subtests PASS**（摘要里也写\"13 个端到端场景\"），\n但 `TestObjectDetailE2E` 里**只有 12 个** subtest（复核者数 `t.Run` 块 + 独立跑了一次 `-v`，都是 12）。\n12 个**确实都过**，所以实质结论成立 —— **数字错了**。\n\n**要求**：改成实际跑出来的数字。**证据里的计数必须是数出来的，不是估的。**\n\n---\n\n## 不变的约束\n\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n  这条没有例外：红着报告比造假绿好。\n- 三条全部落在原来的 `allowed_scope` 内；不要动范围外的东西。\n- 迁移号不要动，不要新增迁移。\n- 上一轮 G2 里 **web、python、migration-integration、acceptance、spec-validation、task-state\n  全过** —— 别把它们弄红。\n- 说明：改动会让代码指纹变化，所以这份 approve 结论会失效、复核要重跑一次。\n  这是正常的，**不要**为了保住旧结论而不改。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T04:52:41Z",
+          "run_id": "run-7535fd20c08db47b",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T05:00:29Z",
+          "run_id": "run-338757abab95519c",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T05:08:10Z",
+          "run_id": "run-272c9e0c2ad7a072"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T05:11:18Z",
+          "run_id": "run-9283557a9e5bd4f3",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -1549,13 +1629,24 @@
       "merged_at": null
     },
     "T0213": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-14T05:00:30Z",
+      "worker_run_id": "run-55c30ea94bd88582",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T05:00:29Z",
+          "run_id": "run-89a78587be9ea07b"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T05:00:30Z",
+          "run_id": "run-55c30ea94bd88582",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0214": {
       "status": "todo",
@@ -2060,9 +2151,9 @@
     },
     "T0305": {
       "status": "running",
-      "started_at": "2026-09-14T04:40:26Z",
-      "worker_run_id": "run-29f98c486b7328d0",
-      "rejection_reason": "# T0305 返工要求（第四轮）\n\n独立复核给的是 **approve**，但带了一条 major；`rddev task accept` 又在 **G2** 上被拒（\n`make staticcheck`）。我把两边都独立核实过，下面四条都要修。**没有一条需要改产品语义或范围。**\n\n---\n\n## 1【major，复核发现，我核实成立】ref 创建路径无条件推进 `head_sha`，指针能被重投倒退\n\n**位置**：`internal/gitprovider/push_ingestion_store.go:127-133`\n\n```go\nif isZerosSHA(ev.Before) {\n    // Ref creation: no prior position to match.\n    tx.Exec(ctx, `UPDATE git_branch_refs SET head_sha = $1 WHERE branch_id = $2`, ev.After, *branchID)\n}\n```\n\n这个 UPDATE 只有 `branch_id` 条件。你写它的假设是\"创建时没有先前位置要匹配\"，\n但 `before` 是 zeros **只说明这是一次创建 push，不说明这个 ref 现在没有 head**。\n\n**可达的倒退场景**（每一步我都核过）：\n\n1. 分支创建时 ref-sync 失败 ⇒ `git_branch_refs.head_sha` 停在 NULL；\n2. 创建 push **A** 的投递 503 ⇒ 没有 dedupe 行（`git_push_ingestions` 里没有 A）；\n3. 更新的 push **B** 被 ingest ⇒ B 走的守卫分支是 `WHERE head_sha = before`，\n   而 head 是 NULL，匹配 0 行 ⇒ B 记 `head_skip_reason='stale_before'`，**head 仍是 NULL**；\n4. syncer 的 sweep 重试这个 ref（`refstore.go:182`，pending/failed → synced）⇒ `head_sha = B`；\n5. **A 的重投到达**：`git_push_ingestions` 里没有 A 行 ⇒ INSERT 成功 ⇒ 走创建分支 ⇒\n   **无条件 UPDATE 把 head 从 B 退回到 A**。而且是永久的 —— B 的重投之后会被 dedupe 掉。\n\n**后果**：`git_branch_refs.head_sha` 变成非单调，指向一个**更旧**的 commit。\n而 00034 的注释（`infra/migrations/00034_push_ingestion.sql`，`stale_before` 那段）\n**明确写着**：\"an older push whose first attempt 503'd and whose redelivery arrives after a\nnewer push was ingested **can never rewind the pointer past the newer head**\"。\n**这句话在现有实现下是假的。** 迁移里的注释是对后续任务的承诺（T0309 的 reconciliation\n会照着它设计），承诺必须与行为一致。\n\n**要求**：\n\n- 创建路径也要**守卫**：只在没有\"更新的位置\"可被覆盖时推进（例如\n  `AND (head_sha IS NULL OR head_sha = $1)`）。被拒绝时**同样可见地记录**，不要静默零行 ——\n  可复用 `head_skip_reason`，或新增取值（00034 还没合并，**改 CHECK 是允许的**）。\n- **修正 00034 的注释**：让声明与行为一致。要么让\"永不倒退\"成为真的，要么把边界写清楚。\n- **补一条测试**：把上面 5 步**按顺序**固化成一条集成用例。\n\n---\n\n## 2【major，我独立核实，有实证】fast path 的白名单漏了两列\n\n**位置**：`infra/migrations/00034_push_ingestion.sql` 里 `git_branch_ref_guard` 的 fast path\n\nfast path 是\"这五列不变就放行\"：`sync_state`、`fork_sha`、`close_requested_at`、\n`synced_at`、`closed_at`。但表里**还有两列不在名单里**：`branch_id`（主键 —— SQL 里主键\n**可以** UPDATE）和 `created_at`。注释写的是\"changes nothing but the tip pointer\"，\n**实际放行的不是\"只有 tip 变\"，而是\"这五列没变\"**。\n\n**我做了实证**（独立临时库，不碰开发库；guard 函数是从迁移文件原样提取的，不是手抄）：\n\n| 单列 UPDATE | 结果 |\n|---|---|\n| 只改 `head_sha` | 通过（设计意图，正确）|\n| 只改 `synced_at` | 被拒 |\n| 只改 `fork_sha` | 被拒 |\n| **只改 `created_at`** | **通过**（并且落了地）|\n| **只改 `branch_id`** | **通过**（真的挪到了另一个同名分支上）|\n\n对照组（`synced_at`/`fork_sha` 被拒）说明守卫**确实在工作**，只是**名单不全**。\n`branch_id` 那一格成立的前提是**两个项目下有同名分支**，否则 `git_ref` 的既有检查会先拦下。\n\n**可达性我也查了**：这张表现在的写者全是定向单列 UPDATE（`refstore.go:139/165/182`、\n`push_ingestion_store.go:130/135`），平台代码路径碰不到它。所以**不是可利用缺陷**，\n是**防御深度**问题。但它仍要修，因为它是**这一轮新引入**的放宽\n（原版在 pending/synced/closing 下**任何** UPDATE 都被拒），而且\n**一个放行它自己声称不放行之物的守卫**，正是下一次重构时没人会再看第二眼的地方。\n\n**要求**：\n\n- 把 `branch_id`、`created_at` 补进名单是**最小修复**；\n- **更稳的是反过来列举\"允许变的列\"**（白名单式，例如用\n  `to_jsonb(NEW) - 'head_sha' - 'updated_at'` 与旧值同式相减比较）——\n  这样将来给这张表加列时守卫**自动收紧**，而不是又漏一个；\n- 补测试，把上面那两格固化（`branch_id`、`created_at` 各自**被拒**）。\n\n---\n\n## 3【G2 红，必须修，不许 baseline】`make staticcheck` 报了新代码的新告警\n\n**位置**：`internal/gitprovider/push_ingestion_test.go:167`\n\n```\ninternal/gitprovider/push_ingestion_test.go:167:5: identical expressions on the left and right side of the '!=' operator (SA4000)\n```\n\n```go\nif gitprovider.GitStateHash(testSHA) != gitprovider.GitStateHash(testSHA) {\n    t.Fatal(\"GitStateHash is not deterministic\")\n}\n```\n\n`!=` 两边是**语法相同**的表达式，所以这条断言**永远不会触发** —— 它测不到它想测的\n\"确定性\"。staticcheck 是对的。\n\n`scripts/staticcheck.sh` 的立场是明确的：新代码的告警必须修，只有**预存**的才可 baseline，\n**永远不许 baseline 新代码**。\n\n**要求**：修掉它。要么删掉这条做不到的断言，要么**换一种真的能测到确定性的写法**\n（比如经由不同的调用路径或序列化边界去比较）。**不许**把它加进\n`ops/ci/staticcheck-baseline.txt`。\n\n**顺带一条给你的**：你上一轮的 G1 清单里**没有 staticcheck**，所以你报\"检查全过\"\n对你跑过的那些是**真的**，但它**不等于 CI 会过**。这一轮请把\n`specs/orchestrator/gates.json` 里的 job 列表当作自检清单（`make staticcheck` 就在里面）。\n\n---\n\n## 4【minor，复核发现】`git_push_semantic_candidates` 的自定义守卫没有行为测试\n\n**位置**：`tests/integration/append_only_test.go:84` 附近\n\n现在只有触发器的存在性/事件集断言（`targetedGuardTriggers`）；append-only 用例覆盖了\n`git_push_ingestions` 和 `git_push_changes`，**没有覆盖 candidate 表**。\n所以那三条语义 —— `status` 可迁移、内容不可改、不可删 —— **在套件里测不到**。\n（复核者在 scratch 库里手动验过，三条都对；但将来回归不会被抓住。）\n\n**要求**：补上这三条的行为测试。\n\n---\n\n## 不变的约束\n\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n  这条没有例外：红着报告比造假绿好。\n- 四条全部落在原来的 `allowed_scope` 内；**不要动范围外的东西**。\n- 迁移号仍是 **34**，**不要新增迁移**（00034 还没合并）。\n- 基线仍是 `747847c`，不要动它。\n- G2 的其余 job（spec-validation、task-state、web、python、migration-integration、\n  acceptance）在上一轮**全过**，别把它们弄红。\n",
+      "started_at": "2026-09-14T05:30:41Z",
+      "worker_run_id": "run-2a7d7ec26034631d",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（0cb36e1a3bbd），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
       "history": [
         {
           "from": "todo",
@@ -2139,6 +2230,27 @@
           "at": "2026-09-14T04:40:26Z",
           "run_id": "run-29f98c486b7328d0",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T05:08:10Z",
+          "run_id": "run-4c6cadee7c7cbc32",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T05:22:53Z",
+          "run_id": "run-64e49e757daa0498",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（0cb36e1a3bbd），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T05:30:41Z",
+          "run_id": "run-2a7d7ec26034631d",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -2152,13 +2264,24 @@
       "merged_at": null
     },
     "T0307": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-14T05:08:12Z",
+      "worker_run_id": "run-a14277ce90d673b0",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T05:08:11Z",
+          "run_id": "run-b989821a8fddedb9"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T05:08:12Z",
+          "run_id": "run-a14277ce90d673b0",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0308": {
       "status": "todo",
