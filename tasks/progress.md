@@ -21,10 +21,21 @@
 > **T0501（`00040`）已被我压住**（原来停在 `verification`，验收死于 `patch failed: specs/SPEC_VERSION.json:1`，
 > 与 T0206 当初**同一种**失败）。它前面还压着三个号，现在搬基线等于搬三遍，所以按 `L1-58` 停到 `rejected`，
 > 理由写清楚了"这不是质量判断、轮到你才动"。**待办决策清零**（T0501、T0502 两条已清）。
-> 冻结名单不变：**T0209(00036)、T0213(00038)、T0501(00040)、T0502(00041)、T0306(00042)**。
+> **T0505（`00043`，链尾）15:11:47 collect 干净通过，15:12:14 也被我压住。**
+> 它本来 15:11:59 已经被派了一次复核 —— 我**没有杀**它：T0505 手上**一份 `approve` 都没有**，
+> 让它跑完，下一轮搬基线的理由里就能照抄"复核 `approve`，代码一个字不要改"。
+> （对比 T0209：已存两份 `approve`，第三份换不到东西，所以那次停掉了。）
+> 判据不是"这份复核注定作废"（**每一份都注定作废**），而是"**跑完它会不会改变我下一步做什么**"。见 `L1-59`。
 >
-> **链外两个新名字**：**T0308**（Files Web UI）、**T0508**（external reference live identity snapshot）**都不带迁移**，
-> 所以不进队列，可以照常跑、照常合。
+> **冻结名单**：**T0209(00036)、T0213(00038)、T0501(00040)、T0502(00041)、T0306(00042)、T0505(00043)** —— 六个都在 `rejected`。
+>
+> **判据收紧了一格（`L1-59`）**：冻结与否**不看任务能不能写迁移** —— `allowed_scope` 里那句
+> `infra/migrations/**` 是 **phase 级默认上限**，而 `.rddev/runtime/migration-numbers.json`
+> 给**每个**派工的任务都留号（`T0308`=44、`T0508`=45、`T1001`=46），留号不等于会用号。
+> 唯一诚实的问法是**问文件系统**：这个工作树里有没有一个主线还没有的迁移文件 ——
+> 这正是 `assertMigrationMergeOrder` 自己问的那句，而它对**不带迁移的任务直接放行**。
+> 所以 **T0308**（Files Web UI）、**T0508**（external reference live identity snapshot）到底在不在链上，
+> **要等它们 collect 那天由 `find` 决定**；不带的就照常复核、照常合，哪怕主线正被链堵着。
 >
 > **本次提交**：`f059c28`（残留修复）。驱动 pid 1593913 在跑，并行 3。
 
@@ -1086,9 +1097,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-14T07:11:35Z
+生成时间：2026-09-14T07:14:40Z
 
-状态分布：todo 84 · ready 0 · running 3 · worker_failed 0 · verification 1 · rejected 5 · blocked 0 · accepted 0 · merged 40（合计 133/133 个任务）
+状态分布：todo 83 · ready 1 · running 2 · worker_failed 0 · verification 1 · rejected 6 · blocked 0 · accepted 0 · merged 40（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1154,7 +1165,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0502 | Claim 结构与 scope | P5 | rejected | 2026-09-14T05:42:31Z |  |  |  |
 | T0503 | Finding 聚合模型 | P5 | todo |  |  |  |  |
 | T0504 | Evidence Assertion Domain | P5 | todo |  |  |  |  |
-| T0505 | Provenance Graph Projection | P5 | running | 2026-09-14T06:34:55Z |  |  |  |
+| T0505 | Provenance Graph Projection | P5 | rejected | 2026-09-14T06:34:55Z |  |  |  |
 | T0506 | Evidence Graph Projection | P5 | todo |  |  |  |  |
 | T0507 | Evidence/Provenance UI | P5 | todo |  |  |  |  |
 | T0508 | External Reference live identity + snapshot | P5 | running | 2026-09-14T07:09:08Z |  |  |  |
@@ -1200,7 +1211,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0906 | Evidence-backed Answer Generator/API | P9 | todo |  |  |  |  |
 | T0907 | Search Answer Web UI | P9 | todo |  |  |  |  |
 | T0908 | Search → Draft Research Context | P9 | todo |  |  |  |  |
-| T1001 | Transactional Outbox | P10 | todo |  |  |  |  |
+| T1001 | Transactional Outbox | P10 | ready |  |  |  |  |
 | T1002 | Subscription Model / Follow/Watch | P10 | todo |  |  |  |  |
 | T1003 | Web Research Inbox | P10 | todo |  |  |  |  |
 | T1004 | RSS/Atom Feeds | P10 | todo |  |  |  |  |
