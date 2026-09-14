@@ -53,6 +53,20 @@ func (f *fakeProvisionPort) GetMainProtection(context.Context, gitprovider.Repos
 	return gitprovider.MainProtection{}, gitprovider.ErrNotFound
 }
 
+// The branch-ref methods (T0303) are unreachable from the provisioning
+// tests but the port contract requires them.
+func (f *fakeProvisionPort) EnsureBranch(context.Context, gitprovider.BranchSpec) (gitprovider.BranchRef, error) {
+	return gitprovider.BranchRef{}, gitprovider.ErrNotFound
+}
+
+func (f *fakeProvisionPort) GetBranch(context.Context, gitprovider.Repository, string) (gitprovider.BranchRef, error) {
+	return gitprovider.BranchRef{}, gitprovider.ErrNotFound
+}
+
+func (f *fakeProvisionPort) DeleteBranch(context.Context, gitprovider.Repository, string) error {
+	return nil
+}
+
 // fakeProvisionStore is the canonical-store fake: backlog lists are
 // scripted, Provision invokes the provisioning function (the store
 // contract) and records its outcome.

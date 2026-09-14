@@ -46,6 +46,11 @@ type Repository struct {
 	// was read. EnsureRepository repairs it on adopt: a pre-existing
 	// repository must never stay public.
 	Private bool
+	// DefaultBranch is the provider-side default branch name ("" while the
+	// repository has no refs at all — T0301 provisions with auto_init
+	// false, so this is empty until T0302 creates main or the first push
+	// lands). T0303's fork-point resolution reads it.
+	DefaultBranch string
 }
 
 // WebhookSpec describes the push webhook to ensure on a repository.
@@ -145,11 +150,36 @@ func stringSetEqual(a, b []string) bool {
 	return true
 }
 
+// BranchSpec describes the provider-side branch ref the platform wants to
+// exist (T0303): one semantic branch ↔ one ref, addressed by name — the
+// same name the semantic branch carries (branches.git_ref = refs/heads/<name>).
+type BranchSpec struct {
+	// Repository names the provider repository (the project's provisioned
+	// repository, git_repository_provisions).
+	Repository Repository
+	// Name is the branch name (the ref without the refs/heads/ prefix).
+	Name string
+	// ForkRef names the provider-side ref or commit SHA the branch forks
+	// from: the base state's git_commit_sha when the canonical store has
+	// one (T0305 records those on ingestion), otherwise empty — the adapter
+	// resolves the repository's default branch. Empty-fork resolution is
+	// deliberately inside the adapter: the caller's Repository value does
+	// not carry the default branch.
+	ForkRef string
+}
+
+// BranchRef is the provider-side identity of one branch ref.
+type BranchRef struct {
+	Name string
+	// HeadSHA is the full commit SHA the ref currently points at.
+	HeadSHA string
+}
+
 // GitPort is the port over the internal Git transport: repository
-// provisioning and webhook registration. Future Git-layer tasks extend it
-// (branch protection T0302, ref creation T0303, user tokens T0304) — it is
-// the ADR-003 exit hatch, so nothing outside internal/gitprovider talks to
-// the provider directly.
+// provisioning, webhook registration and branch ref lifecycle (T0303).
+// Future Git-layer tasks extend it (branch protection T0302, user tokens
+// T0304) — it is the ADR-003 exit hatch, so nothing outside
+// internal/gitprovider talks to the provider directly.
 type GitPort interface {
 	// EnsureRepository provisions the repository described by spec, or
 	// returns the existing one. Idempotent: provisioning the same spec
@@ -194,6 +224,20 @@ type GitPort interface {
 	// GetMainProtection reads main's protection rule. ErrNotFound when the
 	// repository has no rule for main.
 	GetMainProtection(ctx context.Context, repo Repository) (MainProtection, error)
+	// EnsureBranch makes sure the branch ref spec.Name exists, forked from
+	// spec.ForkRef (a provider ref or commit SHA; empty resolves to the
+	// repository's default branch inside the adapter). An existing branch
+	// of the same name is adopted, not an error — the sync is idempotent,
+	// a redelivered job never fails on an already-created ref. Fails with
+	// ErrNotFound when the fork point cannot be resolved (including an
+	// empty repository), ErrConflict when the name cannot become a branch.
+	EnsureBranch(ctx context.Context, spec BranchSpec) (BranchRef, error)
+	// GetBranch reads one branch ref. ErrNotFound when it does not exist.
+	GetBranch(ctx context.Context, repo Repository, name string) (BranchRef, error)
+	// DeleteBranch deletes one branch ref. Idempotent: a missing branch is
+	// not an error (the close strategy is "the ref must not exist" — a
+	// concurrent deletion already achieved that).
+	DeleteBranch(ctx context.Context, repo Repository, name string) error
 }
 
 // Sentinel errors every GitPort implementation maps provider failures onto.

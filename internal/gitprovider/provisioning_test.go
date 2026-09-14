@@ -28,6 +28,20 @@ type fakePort struct {
 	protSpecs []gitprovider.MainProtectionSpec
 	seedRepos []gitprovider.Repository
 	calls     []string
+
+	// Branch-ref side (T0303): separate error cells per method — the close
+	// direction must be able to fail its read (ErrNotFound) while the
+	// delete still succeeds, and vice versa.
+	branch       gitprovider.BranchRef
+	branchErr    error
+	getBranchErr error
+	deleteErr    error
+	branchs      []gitprovider.BranchSpec
+	branchGot    []string
+	deleted      []string
+	getRepo      gitprovider.Repository
+	getRepoSet   bool
+	getRepoErr   error
 }
 
 func (f *fakePort) EnsureRepository(_ context.Context, spec gitprovider.RepositorySpec) (gitprovider.Repository, error) {
@@ -39,7 +53,13 @@ func (f *fakePort) EnsureRepository(_ context.Context, spec gitprovider.Reposito
 	return f.repo, nil
 }
 
-func (f *fakePort) GetRepository(context.Context, string, string) (gitprovider.Repository, error) {
+func (f *fakePort) GetRepository(_ context.Context, _, _ string) (gitprovider.Repository, error) {
+	if f.getRepoErr != nil {
+		return gitprovider.Repository{}, f.getRepoErr
+	}
+	if f.getRepoSet {
+		return f.getRepo, nil
+	}
 	return gitprovider.Repository{}, gitprovider.ErrNotFound
 }
 
@@ -73,6 +93,27 @@ func (f *fakePort) EnsureMainProtection(_ context.Context, repo gitprovider.Repo
 
 func (f *fakePort) GetMainProtection(context.Context, gitprovider.Repository) (gitprovider.MainProtection, error) {
 	return gitprovider.MainProtection{}, gitprovider.ErrNotFound
+}
+
+func (f *fakePort) EnsureBranch(_ context.Context, spec gitprovider.BranchSpec) (gitprovider.BranchRef, error) {
+	f.branchs = append(f.branchs, spec)
+	if f.branchErr != nil {
+		return gitprovider.BranchRef{}, f.branchErr
+	}
+	return f.branch, nil
+}
+
+func (f *fakePort) GetBranch(_ context.Context, _ gitprovider.Repository, name string) (gitprovider.BranchRef, error) {
+	f.branchGot = append(f.branchGot, name)
+	if f.getBranchErr != nil {
+		return gitprovider.BranchRef{}, f.getBranchErr
+	}
+	return f.branch, nil
+}
+
+func (f *fakePort) DeleteBranch(_ context.Context, _ gitprovider.Repository, name string) error {
+	f.deleted = append(f.deleted, name)
+	return f.deleteErr
 }
 
 // fakeStore is a scripted ProvisionStore: it invokes the provisioning
