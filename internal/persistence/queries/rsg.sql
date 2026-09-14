@@ -66,6 +66,16 @@ SELECT * FROM project_states WHERE id = @id;
 -- name: GetProjectStateByHash :one
 SELECT * FROM project_states WHERE project_id = @project_id AND state_hash = @state_hash;
 
+-- name: GetLatestProjectState :one
+-- The project's most recent state (T0208): the default fork point for a
+-- branch created without an explicit base_ref. Deterministic on (created_at,
+-- id): states created in one transaction share a timestamp, the id breaks
+-- the tie.
+SELECT * FROM project_states
+WHERE project_id = @project_id
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
 -- name: CreateStateCommit :one
 INSERT INTO state_commits
     (project_id, branch_id, base_state_id, result_state_id, actor_id, via, message, operation_summary)

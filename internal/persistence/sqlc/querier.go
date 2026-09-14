@@ -79,6 +79,10 @@ type Querier interface {
 	// pins its endpoints to exact scientific object versions (docs/07 §3).
 	CreateRelation(ctx context.Context, projectID pgtype.UUID) (Relation, error)
 	CreateRelationVersion(ctx context.Context, arg CreateRelationVersionParams) (RelationVersion, error)
+	// The explicit-id variant (T0208): the consuming API service pre-generates
+	// the relation id so the state commit's operation summary can name the real
+	// entity (commit_linkage checks EntityID + version_no against the row).
+	CreateRelationWithID(ctx context.Context, arg CreateRelationWithIDParams) (Relation, error)
 	CreateRelease(ctx context.Context, arg CreateReleaseParams) (Release, error)
 	CreateResearchAsset(ctx context.Context, arg CreateResearchAssetParams) (ResearchAsset, error)
 	CreateReview(ctx context.Context, arg CreateReviewParams) (Review, error)
@@ -87,6 +91,10 @@ type Querier interface {
 	// UPDATEd in place; a new version row is inserted instead (docs/53).
 	CreateScientificObject(ctx context.Context, arg CreateScientificObjectParams) (ScientificObject, error)
 	CreateScientificObjectVersion(ctx context.Context, arg CreateScientificObjectVersionParams) (ScientificObjectVersion, error)
+	// The explicit-id variant (T0208): the consuming API service pre-generates
+	// the object id so the state commit's operation summary can name the real
+	// entity (commit_linkage checks EntityID + version_no against the row).
+	CreateScientificObjectWithID(ctx context.Context, arg CreateScientificObjectWithIDParams) (ScientificObject, error)
 	CreateStateCommit(ctx context.Context, arg CreateStateCommitParams) (StateCommit, error)
 	// Users (canonical table: users).
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
@@ -105,6 +113,11 @@ type Querier interface {
 	// entity existence, docs/45).
 	GetBranchByProjectAndID(ctx context.Context, arg GetBranchByProjectAndIDParams) (Branch, error)
 	GetIssueByProjectAndNumber(ctx context.Context, arg GetIssueByProjectAndNumberParams) (Issue, error)
+	// The project's most recent state (T0208): the default fork point for a
+	// branch created without an explicit base_ref. Deterministic on (created_at,
+	// id): states created in one transaction share a timestamp, the id breaks
+	// the tie.
+	GetLatestProjectState(ctx context.Context, projectID pgtype.UUID) (ProjectState, error)
 	GetLatestRelationVersion(ctx context.Context, relationID pgtype.UUID) (RelationVersion, error)
 	GetLatestScientificObjectVersion(ctx context.Context, objectID pgtype.UUID) (ScientificObjectVersion, error)
 	GetOrganizationByID(ctx context.Context, id pgtype.UUID) (Organization, error)
