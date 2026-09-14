@@ -8055,3 +8055,105 @@ owner：下次改 `rddev` 的 spawn 时，把这两条分开报（例如"Worker 
 
 **没有预先放宽的东西**：P4 其余任务（T0405/T0406）与 P10 其它任务**没有证据**说要写 persistence，
 不预先放宽。下次它们真的被拒，再和下一次 marker 移动一起批量补——同一把工具、同一个窗口。
+
+## L1-20260915-94 —— 迁移什么时候会让 sqlc 生成物动（两次实验给的判据）、CI 上两处"跳过式全绿"、T0407/T1006 复核意见的处置
+
+2026-09-15 05:55，main `7277b6a`（本条先落盘；DAG 与派生件规则的修改与重新生成的 marker 同一次提交）。
+
+**触发**：三件事同一天撞在一起——T0701 的 collect 被拒、T1006 的复核回来 7 条、T0407 的复核回来 6 条。
+其中两件都指向同一处：`specs/orchestrator/derived-artifacts.json` 里关于 sqlc 的那句话**是错的**。
+
+### 一、判据：迁移什么时候会让 sqlc 生成物动（两次对照实验）
+
+那句话是 "a migration-only change leaves this output byte-identical"。
+**它在"改既有表"这一类上不成立。** 我在 main 的干净副本上做了两次实验：
+
+| 实验 | 迁移做了什么 | `models.go` |
+|---|---|---|
+| 一 | 只**新增**一张表，没有任何签入查询引用它 | **不动** |
+| 二 | 给**既有**表 `research_assets`（被 `queries/releases_assets.sql` 读）加一列 | **动** |
+
+原因是 sqlc 的模型**按被查询引用的表**生成，不按 schema 全表生成：新表没人查询就不产生结构体；
+既有表被查询读着，列一变就跟着变。
+
+**这条判据一次解释了整条链**：链上八棵带迁移的树（T0407/T0214/T0503/T0504/T1006/T0404/T0803/T0609）
+**全部干净**——它们的迁移都是"新表 + 新表上的列"；**只有 T0701 不干净**，它改的是既有表。
+判据的设备：用 `sqlc v1.31.1`（与 `sqlc.yaml` 钉住的版本一致）对每棵树做"把它自己的
+`sqlc.yaml`+`infra/migrations`+`queries`+`sqlc` 抄进临时目录、在那里 regenerate、再 diff"，
+全程不碰工作树。main 的干净副本也跑过同一份检查：clean。
+
+**处置**：
+1. `tasks/tasks.json` 给 T0701 补 `internal/persistence/sqlc/**` 一格（与重新生成的 marker 同一次提交）。
+   **不预先放宽任何别的任务**——没有证据的一律不放（同 L1-93 的口径）。
+2. `derived-artifacts.json` 那条 note 改正：**marker 仍是 `internal/persistence/queries/**`**
+   （"两边都重新生成、文本合并必然在上下文上互撞"那段论据成立，不动），
+   但把那句错的换成一个**能判断的判据**：迁移改到既有表、且该表被签入查询读到，生成物就会动，
+   这类任务**必须**同时带 `internal/persistence/sqlc/**`；只新增表（还没有查询引用它）则不会。
+
+**顺带记一笔 T0701 的真实根因**：它的 collect 被拒是**自相矛盾**（`status: completed` 加一条
+`status: "failed"` 的漂移检查）——而那条红的根因是 DAG 划窄了（scope 没有生成物那一格，
+worker 只能把重新生成的文件还原，于是漂移永远红）。**worker 的做法是对的**，错的是 DAG。
+
+### 二、CI 上两处"跳过式全绿"（都是我的账）
+
+1. **sqlc 漂移检查在 CI 上从来没跑过。** `tests/integration/drift_test.go` 在没有 sqlc 二进制的机器上
+   `t.Skip`，而 `migration-integration` 作业**从不安装 sqlc**（步骤只有 checkout / setup-go /
+   pg-ready 探针 / `make test-integration`）。于是 `derived-artifacts.json` 与 `sqlc.yaml` 里那句
+   "CI fails when it drifts"是**一句没有兑现的话**——它只是"本地装了 sqlc 的人会看见"。
+   **修**：给该作业加一步 `go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1`。
+   **此刻装是安全的**：main 与链上九棵树全部 clean（见 §一），不会让任何在飞的东西变红。
+   （为什么不是"让测试在缺 sqlc 时失败"：本地没有 sqlc 是合理状态，CI 才是那台必须有的机器。）
+2. **T0407 任务要求的 "conflict e2e" 的浏览器半边，没有任何 Makefile 目标或 CI 步骤在跑**；
+   它的 Go 半边在 `go` 作业（runner 上没有数据库）里 skip，而 `make test-integration` 只跑
+   `./tests/integration`。**这一轮不修**——它要的是"每个 UI 任务的浏览器验收怎么进 CI"的**通用**接法，
+   不是给 T0407 单开一条。
+   **判决不受影响**：这条判据的真凭据是复核员在真 PostgreSQL + 真 Chromium 上独立跑出来的 22/22，
+   不是 CI 的那次 skip。
+
+### 三、复核意见的处置
+
+**T1006（7 条，approve）**——折 2 条进它本来就要走的返工轮，记录 4 条，指人 1 条：
+- **折进去**：`deliver.go` 建 client 时没有 `CheckRedirect`（带 Location 的 3xx 会被自动跟随，
+  301/302/303 把签名 POST 降成**空身 GET**，而文档表写着 3xx 走 `outcomeRetryNoStreak`——
+  现有用例只覆盖了不带 Location 的 302，所以一直绿着）；`service.go:138` 的游标守卫只挡"非空 id"，
+  `before=<ts>,` 会一路走到 `(created_at, id) < (ts, NULL)` 的行比较、**静默返回空页**（改成成对语义）。
+- **记录不改**（每条都附我核实过的理由）：扇出与删除的竞态**无害**——`ClaimDueAttempts` 取件时是
+  `AND we.enabled`，而删除过的行 `deleted_at` 非空、`UpdateEndpoint` 的 `WHERE … deleted_at IS NULL`
+  排除了重新启用，所以那条孤儿行**永远不会被投递、也永远不可达**；
+  `decodeBody` 不查尾随内容（全仓 6 份拷贝同形，统一收成一个时一起做）；
+  出站 User-Agent（**复核员的前提有误**：Go 传输层没设时就会发 `Go-http-client/1.1`，缺的是"认出是谁"，
+  写哪个串是全平台出站面的命名约定）。
+- **指人**：webhook 状态变更不写 `audit_log`（要 `internal/domain/**`，不在它 scope）。
+
+**T0407（6 条，approve，0 blocking / 0 major）**——**接受并合并，不为此再返工**，
+口径同 L1-90（第 N 轮的新意见，非阻塞的一律"记录 + 指人"，否则永远收敛不了）。
+**这一条我特意记明**：四条 UI 类意见里有两条是用户看得见的（rights 冲突的三列值全显示 "—"、
+三个类名没有样式），**不是"无所谓"才放行的**，是"再返工一轮的代价 > 把四条并进下一轮 UI 改动"。
+它们的优先级写进欠账（第 26 条最高）。
+
+### 四、欠账台账追加（承接 L1-91 的第 25 条）
+
+- **26**（T0407 minor，**最高优先**）`page.tsx` 的 `fieldValue()` 没有 `visibility_policy_id` 分支：
+  rights 类冲突三列全渲染成 "—"，人**看不见两个候选值**（值在 wire 上，检测器也真的发这个字段）。
+  同页还有两条：**27**（minor）radio group 名不含冲突身份分量，同一目标同 code 的两个冲突
+  共用一个 HTML radio group（React 状态仍各自正确，只是视觉互斥）；**28**（nit）`conflicts.css` 三个类名
+  有用处没定义（`conflicts-body`/`conflicts-hint`/`conflicts-evidence-column`）。owner：下一个动这个页面的 UI 轮。
+- **29**（T0407 nit）`tests/e2e-conflicts/server.log` **被提交**（8 行，含 worker 主机的内网地址
+  `192.168.100.195`），且 `run.sh:74` 写的是**固定路径** → 每次跑这个 harness 都把工作树弄脏。
+  owner：同一轮（改成 `mktemp` 并把已提交的那份删掉）。
+- **30**（工具面）**浏览器验收怎么进 CI**（上面 §二.2）。owner：我，链条静默期。
+- **31**（T1006 minor）`cmd/api` 的输入边界统一：6 份 `decodeBody` 收成一个共享实现
+  （统一上限 + 拒尾随内容）+ path param 的 UUID 校验（webhooks 与 orgs/projects 同形）。
+  owner：后续任务，与 32/33 一批。
+- **32**（T1006 minor）webhook 状态变更不写 `audit_log`（需要 `internal/domain/**`）。
+  owner：后续任务。
+- **33**（T1006 nit）出站面的 User-Agent 命名。owner：与 32 同一批。
+- **34**（我）`$TMP/parked/git_maintenance_test.go`（PR #196 那道 CI 红的加固）落进仓库，
+  并在 `tasks/decisions.md` 记下那次 flake 的形状。**等链条静默期**：它动
+  `internal/devorchestrator/**`，会把正在跑的驱动冻住。
+
+### 五、工具耐久性（继续欠着，但记明）
+
+`prep-handres.sh`、`compose-link.sh`、union/guard 三件套、新增的 `sqlc-audit.sh`、重启脚本，
+全都住在仓库外（`~/.claude/jobs/<sid>/tmp/`）。链条走完之前不搬（它们正被用着），
+但**必须搬进仓库**——这几条判断的可复现性依赖它们，而 `$TMP` 不是个耐久的地方。

@@ -3548,6 +3548,7 @@
         "specs/SPEC_VERSION.json",
         "internal/assets/**",
         "internal/rights/**",
+        "internal/persistence/sqlc/**",
         "go.mod",
         "go.sum",
         ".env.example",
