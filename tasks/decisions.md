@@ -7799,6 +7799,12 @@ T0406 的 dependencies 里的引用同时去掉；`tests.json` / `gates.json` �
    `docs/19 §3` 说 `references` 是"背景知识、不是输入依赖"，而 docs/44/catalog 把它算作 provenance 类型，
    于是溯源里会**把背景文献与真正的输入并列**（T0505 复核 #1）。代码跟着的是 docs/44（有出处），
    所以本轮不动；把两处说法对齐是文档该做的事。
+   **21:3x 补**：查证后这条**不是措辞问题，是科研语义（L3）**——`relationcatalog/catalog.go:75`
+   同一行里既写 `ProvenanceInference: true` 又写 "background knowledge, not as an input dependency"，
+   而 `direction.go` 把 origin 读作"从哪来"（派生来源），于是 `GET …/lineage?direction=upstream`
+   ——验收标准是"可回答 Dataset 从哪来"——**会把被引用的论文算成数据集的来源**。
+   已开 **issue #190**（含两个选项、我的建议是 A：引用进图但不作为 upstream 的一跳、以及代价），
+   等 owner 裁。**不改 T0505 的理由**：方向表跟着有出处的目录走，在飞任务里改它等于我自己发明科研语义。
 3. **T0605 口径**（T0606 复核 risk 2）：导出 release 时重渲染 CanonicalJSON，而不是直接送已验证的原始字节——
    canonicalization 一变，旧 release 的校验就可能失败。归到 T0605 的后续复核。
 4. **收集器的"二进制"判定**（§二）：按 git 的 8000 字节窗口、而不是整文件扫 NUL；措辞也不该署名给 git。
