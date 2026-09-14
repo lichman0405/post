@@ -6487,3 +6487,32 @@ T0505 会走"只搬基线、代码别动"的返工，这条**就合进去了**�
 复核把它列进 `risks` 时明确标了"outside allowed_scope"，是对的。
 
 **可逆性**：纯记录。
+
+## L1-20260914-63
+
+**合同落后是结构性的，不是疏忽：`specs/**` 是 Supervisor-only，而 API 任务不会碰它**
+
+**事实（实测，不是印象）**：非测试的 `cmd/api/**` 注册了 36 条路由，
+`specs/api/openapi.yaml` 声明了 19 条，**差集 25 条**（`servers: url: /api/v1`，
+两边都先去前缀再比）。反方向有 8 条"声明了还没实现"—— 那一半**是 openapi-first 应有的样子**。
+
+**机制**：`CLAUDE.md` §8.1 把 `specs/**` 划成 Supervisor-only，Worker 写 `specs/` 的唯一入口是
+schema 快照。而 API 任务的 `allowed_scope` 里没有 `specs/api/openapi.yaml`
+（T0505 的独立复核就明确写了 "outside allowed_scope"）。于是**每合一条 API 任务，合同落后一条**。
+
+**为什么没有东西拦住它**：`make check-openapi` 只做"parse + 内部 `$ref` 完整性 + 结构"
+（`scripts/validate_openapi.py`），**不比对实现**。所以它不会红，只会一条一条地攒。
+
+**我的决定（不再往上抬级）**：
+1. **原则不用重新定** —— §7 已经写死 openapi-first，所以"合同应当覆盖对外 API 表面"是既有规格，
+   不是新架构决定。要定的只有**边界**：哪些路由不算对外合同（最明显的是 `/git/hooks/gitea`，
+   Gitea 的 webhook 接收口，基础设施而非产品 API）。
+2. **不改 `§8.1`**。把 `specs/api/openapi.yaml` 加进 Worker 的 allowed_scope 看起来省事，
+   但那是**改宪法去迁就流程**；而且合同由实现者顺手写，正是最容易写成"实现了什么就声明什么"的路子，
+   与 openapi-first 的意图相反。这条**留给 ADR**，不在这里静默改。
+3. **谁来补：我**。`specs/**` 是 Supervisor 范围，不派 Worker。
+4. **什么时候补：不抢迁移链的时间片。** 补 25 条要逐条读 handler 的请求/响应形状，
+   **合同写错比缺失更糟** —— 缺失是诚实的，写错会把错的形状固化成契约。
+5. 已开 **#174** 记录量化清单与边界问题。
+
+**可逆性**：纯记录；`specs/` 无改动。
