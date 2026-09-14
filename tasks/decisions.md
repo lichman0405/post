@@ -6683,3 +6683,146 @@ Worker 的活是**未提交**的 diff）。
 下次做这类夹具：把 `LOG` 指向夹具目录、`trap - EXIT` 显式清掉，再 source。
 
 **可逆性**：纯记录（日志里那四行是噪音，不改）。
+
+---
+
+## L1-20260914-68
+
+**排链脚本的守卫：尾部任务的决定一律记下、不再停车；链上任务的决定仍然停车 —— 判据是"谁拥有它"**
+
+**发生了什么**：16:34:38 排链脚本 `BAIL` 了，原因是一条**尾部**任务（T1001，号 00046）的 collect 被拒
+（"T1001: collect rejected"）。它停了一整个排水过程，直到 16:37:56 我把它改好重启。
+
+**为什么那是错的**：迁移顺序守卫只在**更小号还没落地**时拒绝合并。链子是 36/38/40/41/42/43，
+尾部是 45/46/47 —— **每个尾号都大于每个链号**，所以尾部任务无论处于什么状态，
+都**不可能**挡住链子上的任何一次合并。为它停车，是"保护"了一个不存在的风险。
+
+**改成什么**：
+
+- **尾部任务**：任何决定（含"collect 被拒"这种真问题）都**打印一行**、然后继续排水。
+  打印是**每条不同决定一次**（脚本每 60 秒跑一次，否则同一条会刷满日志）——
+  记录在案，但沉默不再等于健康，因为**它自己会说话**。
+- **链上任务**：任何决定一律 `BAIL`（这是判断点，不是交接点）。原来"链上任务也只容忍两种形状"
+  的写法是错的：链上的决定只有我真的去看才安全。
+- **读不出来的记录**（`UNPARSEABLE`）→ 归到链上那一类，`BAIL`（**fail closed**）。
+
+**怎么验的**：`drain-guard-fixtures.sh`（已留档），**10/10**。九条分支：尾部四种形状（order guard /
+补丁不再适用 / collect 被拒 / 大写键的老记录）+ 两条尾部同时存在 → 全 `rc=0`；
+链上 order guard、链上其它、UNPARSEABLE → 全 `rc=1`；空表 → `rc=0`；再加一条去重断言
+（连调三次只写一行）。**夹具这次隔离了整个副作用面**（L1-67 的教训）：脚本截断到 `check_decisions` 结束、
+删掉 `trap`、`LOG`/`TMP`/`DRIVER_LOG` 全部改指夹具目录，并**断言**没有 `trap`、没有链循环活下来。
+
+**代价/边界**：尾部真出问题时不再自动停车 —— 那条线索只剩日志一行。为了防止"没人看"，
+它进的是同一个我盯着的日志和 monitor，而且尾部队列本来就在我手上（尾部要自己走 rebaseline）。
+
+**可逆性**：可逆（一个函数体的改法；日志里留下了它跨过的每一条决定）。
+
+---
+
+## L1-20260914-69
+
+**T1001 的 scope 补上 `internal/persistence/sqlc/**`：collect 拦得对，错的是我画窄了 scope**
+
+**事实**：T1001 的 collect 被拒，理由是**自相矛盾**——它自己跑了 `tests/integration/check-sqlc-drift.sh`
+并且红了，同时 `status` 写了 `completed`。Worker 在 `RESULT.json` 里把原因写得明明白白：
+"DELIBERATE, NOT A BUG: internal/persistence/** is outside allowed_scope"。
+它**没越界**（对），**也没如实降级状态**（错）。而 scope 之所以不含生成物目录，是**我**当初划的。
+
+**为什么补 scope 不是"为了门禁变绿"**：这是仓库自己写死的两条义务 ——
+
+1. `specs/orchestrator/derived-artifacts.json` 声明 `internal/persistence/sqlc` 是
+   `internal/persistence/queries/**` 的**派生生成物**；
+2. `sqlc.yaml` 头部写着"After editing any query **or migration**, run: `sqlc generate`; `check-sqlc-drift.sh`"。
+
+也就是说：**改了迁移就有义务重新生成**，而旧的 scope 让这个义务**无法履行**。
+把生成物目录补进 scope，是让 Worker 能做它本来就该做的事，不是把门放低 ——
+门（drift 检查）一分没动，还要它当场变绿。
+
+**我怎么独立验的**（不抄 Worker 的结论，**还加了一条对照**）：
+
+- **对照**：在临时副本里拿 **main** 的迁移+queries 重新生成 → 与 main 检入的生成物**逐字节一致**。
+  ⇒ main 本身没有旧账，漂移不是历史遗留。
+- **实验**：同一方法并上 **00046** → 只有**两个**文件不同（`models.go`、`events_audit.sql.go`），
+  差异**恰好**是那五列（`outbox_events` 的 actor_id/project_id/visibility/last_error、
+  `research_events` 的 outbox_event_id），连迁移里写的注释都出现在生成物里。⇒ 归因确定。
+- **范围核对**：在飞的全部九个迁移里，**只有 00046 会移动生成物**（其余建的是新表/新索引，
+  没有 query 引用它们 ⇒ 输出逐字节不变）。所以这是一次**单任务**的修补，不是策略改动。
+
+**改法**：`tasks/tasks.json` 的 T1001 `allowed_scope` 加一行。改完验过：JSON 仍可解析、
+全文件**只多一行**、所有任务的 scope 语义 diff **只有 T1001** 变了。rework 用同一份 DAG 重新渲染任务包，
+已确认新包 13 条 scope 含 sqlc，迁移号仍是 `00046`。
+
+**不改产品的什么**：不动任何产品语义、不动迁移内容、不动门禁；Worker 侧只多了一条"重新生成"的路。
+
+**可逆性**：可逆（删掉那一行即可；Worker 重新生成的生成物是内容，不是门禁的豁免）。
+
+---
+
+## L1-20260914-70
+
+**T0309 的 collect 被拒是"形状"不是"内容"：`notes_for_supervisor` 交了数组，schema 要字符串 —— 但不代它改**
+
+**事实**：`result-schema` 拒绝。用 `jsonschema` 复核：`specs/orchestrator/worker-result.schema.json` 里
+`notes_for_supervisor` 是 `{"type": "string"}`，Worker 交的是 **7 条字符串的数组**。
+内容（设计决策、provider 故障语义、resolution 语义、5 条跟进）**都是有价值的、对的**，只是形状错了。
+
+**选择**：**不去手工改 Worker 的 `RESULT.json`**。改一下把一个数组 join 成字符串是"最小动作"，
+但那样等于**Supervisor 的文字进了 Worker 的证据**，而门禁校验的正是"Worker 声称了什么"——
+以后没人能说清这个文件是谁写的。宁可多花一次 rework。
+
+**怎么安排**：T0309 本来就要走 rebaseline（链子六个合并会把主线推走），
+rebaseline 会把 `--reason-file` 交给它内部的 rework，所以把"把这个字段改成字符串、其余不动"
+并进那封信里，**不额外占用一轮**。
+
+**教训**：形状不合规也是不合规；便宜的修法不能是**说不清证据来源**的那个修法。
+
+**可逆性**：纯记录（决定的是"不去改那个文件"）。
+
+---
+
+## L1-20260914-71
+
+**T0213 × T0209 撞的不是文本是名词：两个都叫 `profiles` 的 port —— 解法是让它们不同名，而不是选一边**
+
+**事实**：T0213（项目 schema 扩展）与已并入主线的 T0209（RSG Query API）**都**往
+`rsg.Service` 加了一个叫 `profiles` 的字段、往 `rsg.Deps` 加了一个 `Profiles` 键，而它们指两件事：
+
+| | T0209（main） | T0213 |
+|---|---|---|
+| 类型 | `ProfilePort` | `ProfileResolver` |
+| 方法 | `GetByUserID` | `GetLatestProfile` |
+| 含义 | **用户** profile（对象详情页把 creator id 换成显示名） | **项目 schema** profile（判定 `schema_ref` 是否已注册） |
+
+**判定**：这是 **L1**（接线命名），不是 L2 —— 两个 port 各自的存在理由都由各自的规格决定，
+没有"要不要两个 port"这个架构问题，只有"两个同名怎么并存"这个命名问题。
+
+**工具为什么停手**：`rddev rebaseline` 用 `--3way` 试图合成，冲突后**按设计**拒绝，原文：
+"the two changes rewrite the same lines, and choosing between them needs both halves' reasoning.
+That is the Supervisor's call — docs/61 §G2 — and never this tool's"。⇒ 这一步本来就该是我做。
+
+**解法**：**两个都留，让它们不同名**。main 的保持 `profiles`/`Profiles`（它已在 main 上，调用点也是 main 的）；
+T0213 的改叫 `schemaProfiles`/`SchemaProfiles`。其余全是"两边都在追加"（用例列表、wiring 行），两侧整体保留。
+
+**第四个落点是编译器找到的**：`tests/integration/schema_profile_test.go` 里 T0213 自己的 `Profiles:  profileSvc,`
+必须跟着改名，否则 `*schemaprofiles.Service does not implement rsg.ProfilePort (missing method GetByUserID)`。
+⇒ 这就是**为什么要在真实工作树里跑一遍编译**，只在草稿里看代码是看不出来的。
+
+**安全性做法（每一步都可核对）**：
+
+1. 动手前先证明"工具留的副本 == 现场工作树"：逐个文件 sha256 比对（24/24 相同、路径集合完全一致），
+   再另存一份到作业临时目录 ⇒ 从 reset 往后，工作树里的交付物**只存在于副本里**这件事是有保底的。
+2. 合成完成后，把结果与**动手之前就已经验证过的草稿树**逐文件比对 ⇒ **24/24 逐字节相同**。
+   也就是说"我在草稿里验过的那份"和"真正交给 Worker 的那份"是同一个东西，不是"看起来一样"。
+3. 合成步骤完全复刻一次**成功的 rebaseline** 的终态：分支 ref 指向新主线、改动是**未提交**的 working-tree diff、
+   三个生成物是**重新生成**的（marker `sha256:d18da4eb017b31c5`、快照 32 个迁移、drift check clean）。
+
+**我自己踩的坑（记下来，因为工具的注释里早就写了）**：第一版脚本在 `git reset -q`（取消暂存，让分支保持
+"Worker 交付物必然是未提交 diff"的形状）**之后**才去读冲突路径，结果 `--diff-filter=U` 回答"没有冲突"——
+因为**冲突本身就是索引里的未合并条目，取消暂存会把它们一起带走**。脚本自己把自己拒了
+（"expected 3 conflicted paths, found 0"）——而它上一秒才刚打印出三条冲突。
+`rebaseline.go` 里写得很清楚："Read BEFORE the unstage below"。**顺序是语义，不是风格。**
+
+**ref 账本**：分支 ref 被我手动移动，所以用 `rddev refs adopt` 记一笔（它读的是 ref 当前的 sha，
+不是我说它指向哪），source 记为 `adopt`。collect 的豁免是**按名字**查账本的，所以这一笔既是合规也是诚实。
+
+**可逆性**：完全可逆——合成结果就是一份未提交的 diff，且草稿树与工具副本都还在。
