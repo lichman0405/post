@@ -7712,6 +7712,12 @@ merge 之后 flag 怎么保持一致？
 并加进 **T0406 的 dependencies**（merge saga 是第一个造出非 push head 的东西）。
 owner 裁定后：要么关掉它，要么派生一个实现任务；答案写这里。
 
+**补记（21:15，见第五节）——T0310 这个建法本身是错的，已撤回**：它让主线 CI 红了一次
+（`0989ad1`，三个 job）。DAG 的形状要求每个任务**有注册测试、有 G3 override、任务数对得上**，
+一个纯规格问题无法诚实地满足这三条（编测试、挂空 G3 正是 §5.1 禁止的"为让门变绿"）。
+所以问题改住在 **issue #189**，约束写进 **T0406 / T0804 的 requirements** —— 裁定来之前，
+这两个任务只做与它无关的部分，并在交付记录里点名缺口。
+
 ### 四、动 `tasks/tasks.json` 必须重新生成 `specs/SPEC_VERSION.json`
 
 `spec_version.py` 的输入是 **`tasks/tasks.json` + `specs/**`**（不含 `task_status.json`）。
@@ -7719,3 +7725,55 @@ Makefile 里记着上次没重生成导致的 red main（6ec746c）。这一轮�
 `--check` 先红（`6e5fb837… != 7fc5d5c6…`），`--write` 后 `--check` 绿（38 个输入），
 两份文件一起提交。改动 DAG 的脚本写文件走**临时文件 + rename**——驱动每 10 秒读一次这两个文件，
 半截文件是我自己制造的故障。
+
+### 五、两笔账：DAG 的形状不是随意定的；动 DAG 会打飞在飞任务
+
+**(1) 一个"任务"必须能通过 DAG 的三道形状检查——纯规格问题不能是任务。**
+
+我把 T0310 当成一个任务写进 `tasks/tasks.json`（§三），主线立即红了三个 job（`0989ad1`）：
+
+| job | 检查 | 实际 |
+|---|---|---|
+| spec-validation | `TASKS-COUNT` | `task_count 133 != 134`（我漏改计数器） |
+| task-state | `TASKSTATE-TESTS-COVERAGE` | `uncovered=['T0310']`——每个任务至少要有一条注册测试 |
+| go | `TestEveryTaskOfThePhasesUnderDevelopmentHasG3` | 每个任务要有 G3 override（`specs/orchestrator/gates.json`） |
+
+前两条是手误，第三条是**形状不对**：T0310 的交付物是"一个答案"，没有代码、没有测试、也没有
+真能跑的 G3。要把它塞进这三条里，只能编一份测试 + 挂一个空 G3 —— 那正是 §5.1 点名禁止的。
+**结论**：这类问题不住在 DAG 里，它住在 **issue**（这次是 #189，写法照 #183/#181：
+背景 / 发现（带证据）/ 本轮裁定 / 需要人定的问题 / 不阻断）+ 本文件；需要被它约束的实现任务
+在自己的 `requirements` 里带上约束。已撤回 T0310（`tasks.json` / `task_status.json` 各删一条，
+T0406 的 dependencies 里的引用同时去掉；`tests.json` / `gates.json` 从来没登记过它）。
+撤回后本地复跑了 CI 那几步：`validate_task_state.py` 9/9、`validate_specs.py` 12/12、
+那条 Go 测试、两个 fixture 脚本、`spec_version.py --check` —— 全绿。
+
+**(2) 动 `tasks/tasks.json` = 换掉 `SPEC_VERSION.json` = 打飞每一个在飞任务的补丁。**
+
+§四记了"要重新生成"，这一节记**代价**：生成物换了 digest，而**每个在飞任务的补丁都包含这个文件**，
+于是它们下一次 `accept` 全部变成 "the task's change does not apply to current main"。
+21:04 的 T0505 就是这么白跑一轮的：它 20:29 才前移到 `a111a00`，我 20:5x 的提交让它当场作废。
+
+规矩：
+- **DAG 编辑攒到相与相之间做**（链条里每个链接的 accept 都押在同一个 digest 上）；
+- **`tasks/decisions.md` 不在 digest 的输入里**（输入只有 `tasks/tasks.json` + `specs/**`），
+  所以"只记决策"的提交是**补丁中性**的——该单独提交就单独提交；
+- 真在链条中途改了 DAG，代价是**每个在飞任务一轮返工**，不是永久损坏：drain 会把它搬基线、
+  重新派工（这就是 drain 存在的理由），别把它当"不可挽回"。
+
+### 六、drain 在"链上任务挂着决定"时不该整体停摆（工具缺陷，已修）
+
+21:05:07 drain 退出：`BAIL: chain task T0505 has a decision waiting for the Supervisor`。
+但同一份脚本里 `wait_for_merge()` 的注释和代码都写着：**等待中的链接挂上决定时，要清掉它、
+搬基线、重新派工**——"不是耐心，是死等"。两处矛盾，是 20:50 重写 `check_decisions()` 时
+把"链上任务的两种自身影子"（顺序守卫的 `refusing to merge … still holds`、accept 的
+`does not apply to current main`）那个判据丢了，只剩无条件 bail。
+
+- **为什么没被测出来**：`verify-drain-flow.py` 的 PREAMBLE 把 `check_decisions` 整个 stub 掉了，
+  于是"wait_for_merge[parked]: unfreezes it"这条用例是**对着一个从没被调用的函数**通过的。
+- **修法**：`is_chain_shadow()` 一处定义两种影子形状；链上任务穿影子→打印一行、放行（等 wait 去清），
+  其它任何决定→照旧 bail。**顺带补上 harness**：四个 check_decisions 用例（链上穿影子的两种、
+  链上穿别的、尾链任意），并且**先证明这些用例能红**——把修好的脚本复制一份、只删掉那段判据，
+  同一套 harness 跑出两个 shadow 用例 FAIL、另两个 ok（`prove-check-decisions-case-can-fail.py`）。
+  不能红的用例不算用例。
+- **没有放松任何门**：清的只是"main 动了"这类机械决定，清完照样搬基线、返工、collect、复核、
+  G2 —— 只是多给一次在新基线上的机会。
