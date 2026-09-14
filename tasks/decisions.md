@@ -5991,3 +5991,72 @@ syncer sweep 重试该 ref（`refstore.go:182` ✓，pending/failed → synced �
 pid 4116429 ✓、基线仍 `747847c` ✓、工作树与 diff 保留 ✓；
 **旧的那条 accept 决策被 `staleDecisions` 自动清掉** ✓（run id 不再匹配 ✓，
 `driver.go:281-283` ✓），未决决策从 2 回到 1 ✓（只剩我故意压着的 T0206 那条 ✓）。
+
+## L1-20260914-51
+
+**#166：rddev 建了会话却按 PID 杀 —— 回收整组，并让残渣拒绝可执行** ✓
+
+**形状** ✓：`worker_spawn.go:330` 与 `review_worker.go:256` **故意** `Setsid` ✓ ——
+建独立会话的目的**正是**让"会话"成为可回收单元 ✓。但**所有停止路径都按正数 pid 发信号** ✓
+（`worker_stop.go:38/57` ✓、spawn 失败的 `cmd.Process.Kill()` ✓）。
+**正数只杀那一个进程** ✓，组里其余一个都不动 ✓；而**Worker 自己正常退出时，没有任何人给这个组发过信号** ✓。
+**代价是实测的** ✓：T0206 复核留下的三个孤儿 ✓（`SID=PGID=3904790` ✓，**首领已消失** ✓，
+其中一个 `/exe/check` **单核 R 状态空转 12 分钟** ✓）把 `review collect` 卡死 ✓，
+而拒绝文本只说"有残留" ✓，**不说该怎么办** ✓。
+
+**修法 (a)：在 reaper 里回收整组** ✓。**为什么是 reaper** ✓：它是 Worker 正常退出时
+**唯一还会跑代码**的进程 ✓（`wait` 着 Worker ✓），所以**两条路**（正常退出 ✓、`worker stop` ✓）都覆盖得到；
+**放在任何调用方都是"要记得"= 迟早忘** ✓。加 `set -m` 让 Worker 拿到**自己的组** ✓
+（`$!` 语义不变 ✓，`claude.pid` 不变 ✓）；**退出码先落盘再回收** ✓，清理失败绝不吞掉"怎么结束的"这条记录 ✓。
+Go 侧同类站点一并改成组信号 ✓；**只在该 pid 确实是组长时才用负数** ✓
+（`/proc/<pid>/stat` 的 pgrp == pid 才认 ✓）—— 否则 pid 复用后会打到无关的组 ✓。
+
+**修法 (b)：拒绝文本可执行** ✓。原来只有 pid + cmdline ✓；
+现在区分**"主人还在跑"** ✓（提示先 `rddev worker stop <TASK>` ✓）与
+**"主人已退出、这是它留下的"** ✓（给出可直接执行的 `kill -TERM -- -<pgid>` ✓），并打印 session/pgid ✓。
+**pgid 指向自己所在组时不打印杀命令** ✓ —— 否则等于让 owner 杀掉正在执行这条命令的 shell ✓。
+
+**边界（写清楚，免得以后被误读）** ✓：组杀**够不到**自己 `setsid` 跑掉的进程 ✓
+（real claude 的 Bash 工具会那样 ✓，所以才有 `markerResidue` ✓）。
+**这是有意的** ✓：留在 Worker 组里的是**意外** ✓，被静默收走 ✓；
+**自己另开会话的是"有意做成守护进程"** ✓，继续由 Gate 拦下 ✓ —— 那正是需要人看一眼的情形 ✓。
+**前置确认已做** ✓（issue 自己要求 ✓）：tasks/docs/specs/orchestrator 里
+**没有任何"Worker 应留下后台服务"的要求** ✓ ⇒ 整组回收安全 ✓。
+
+**证据** ✓：先写测试**确认红** ✓（`pid … is still running after the reaper exited` ✓）⇒ 改脚本 ⇒ 绿 ✓；
+**做了反向对照** ✓ —— 把 `signalProcessGroup` 改回正数 pid ✓，测试立刻以
+`survived SIGTERM to the Worker's group: signalling the positive pid would leave exactly this` 变红 ✓，
+证明它**不是空转** ✓。**顺手纠正了我自己测试里的一个错** ✓：`waitProcessGone` 只查 `/proc/<pid>` 存在 ✓，
+**而僵尸仍然有 /proc** ✓ ⇒ 按生产代码自己的规矩（`sessionResidue` 跳过 Z ✓）改成"没了**或**僵尸" ✓，
+断言没变弱 ✓（僵尸不占 CPU/socket/lock ✓，那才是 Gate 所拒之物 ✓）。
+
+**部署约束（这次差点踩）** ✓：`binary_staleness.go` 在 `cmd/rddev` + `internal/devorchestrator`
+有新提交而二进制没重编译时**直接拒绝运行** ✓ ⇒ **"提交源码"与"重编译"必须同一步** ✓，
+否则驱动下一次调用就罢工 ✓。所以顺序是**停驱动 → 提交 → `make rddev` → 重启** ✓
+（正是拒绝信息自己写的流程 ✓；Worker 是 setsid 分离的 ✓，停机期间照跑 ✓）。
+**实测** ✓：新二进制 `vcs.revision=c0eea86` ✓、`<rev>..main` 为空 ✓ ⇒ **不过期** ✓；
+`strings bin/rddev` 里 `set -m` / 组回收 / `kill -TERM -- -%d` **都在** ✓；
+驱动 pid 69584 接管同 4 个待办 ✓。提交 `c0eea86` ✓。
+
+## L1-20260914-52
+
+**T0210：复核 approve，但 G2 死在 `make fmt-check` —— 返工，而且我不能自己 gofmt** ✓
+
+**事实** ✓：复核 `verdict=approve` ✓（2 minor + 3 nit ✓）；
+`rddev task accept` 被 **G2** 拒 ✓ —— `go` 作业**第一步** `make fmt-check` exit 2 ✓，
+后续步骤全部 skip ✓；其余 6 个 job（spec-validation ✓、task-state ✓、web ✓、python ✓、
+migration-integration ✓、acceptance ✓）**全过** ✓。
+三个文件没跑 gofmt ✓：`cmd/api/rsghttp/page.go` ✓、`page_test.go` ✓、`tests/integration/object_detail_test.go` ✓。
+
+**为什么我自己不动手** ✓：复核结论**按代码指纹绑定** ✓（`review-code-unchanged` ✓）——
+我一旦改了工作树 ✓，那份 approve **就不再描述这份代码** ✓，merge gate 会正当地拒它 ✓。
+⇒ 只能走 `reject` + `rework` ✓，让**改代码的人**去改 ✓，指纹与结论重新对齐 ✓。
+（代价是复核要重跑一轮 ✓，已明确告诉 worker **不要**为保住旧结论而不改 ✓。）
+
+**顺带两条 minor 一起修** ✓：`?version=4294967301`（2^32+5）被 `int32()` 截断成 5 ✓
+⇒ 页面**静默渲染版本 5** 而不是"版本不存在" ✓（不是越权 ✓，是**答错问题** ✓）；
+以及 `RESULT.json` 声称 **13/13** subtest 而实际是 **12** ✓（12 个确实都过 ✓，**数字错了** ✓）——
+**证据里的计数必须是数出来的** ✓。
+
+**给 worker 的复发提醒** ✓：T0305 栽在 `make staticcheck` ✓、T0210 栽在同一作业的**更前一步** ✓ ——
+**同一个根因** ✓：自检清单里没有 `gates.json` 的 job 列表 ✓。这轮明确要求照它逐条跑 ✓。
