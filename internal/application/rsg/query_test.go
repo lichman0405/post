@@ -56,6 +56,9 @@ type queryFakePort struct {
 	byIDsArg      []string
 	lastObjectArg []string
 	err           error
+	// byIDsErr fails only the version-id batch fetch (ListObjectVersionsByIDs),
+	// leaving the list reads healthy — the claim-ref fetch failure path.
+	byIDsErr error
 }
 
 func (f *queryFakePort) ListStateLineage(_ context.Context, projectID, stateID string) ([]string, error) {
@@ -113,6 +116,9 @@ func (f *queryFakePort) ListObjectVersionsByIDs(_ context.Context, versionIDs []
 	f.byIDsArg = append(f.byIDsArg, versionIDs...)
 	if f.err != nil {
 		return nil, f.err
+	}
+	if f.byIDsErr != nil {
+		return nil, f.byIDsErr
 	}
 	var out []ObjectQueryRow
 	for _, vid := range versionIDs {
