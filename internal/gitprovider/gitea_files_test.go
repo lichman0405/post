@@ -320,3 +320,62 @@ func TestGiteaGetHistoryRefNotFound(t *testing.T) {
 		t.Fatalf("GetHistory unknown ref = %v, want ErrNotFound", err)
 	}
 }
+
+// TestGiteaGetCommitPatchStreams: the commit patch route
+// (/{owner}/{repo}/commit/{sha}.patch) streams the raw patch with the
+// service token — the raw diff channel, outside /api/v1 like the raw
+// route.
+func TestGiteaGetCommitPatchStreams(t *testing.T) {
+	f := &fakeGitea{routes: []giteaRoute{{
+		method: http.MethodGet, prefix: "/o/n/commit/",
+		status: http.StatusOK, body: "--- a/f\n+++ b/f\n+line\n",
+	}}}
+	a := newGiteaAdapter(t, f)
+
+	size, body, err := a.GetCommitPatch(testCtx(t), filesRepo(), "a1b2c3d4e5f6a7b8")
+	if err != nil {
+		t.Fatalf("GetCommitPatch: %v", err)
+	}
+	got, err := io.ReadAll(body)
+	_ = body.Close()
+	if err != nil {
+		t.Fatalf("read patch body: %v", err)
+	}
+	if string(got) != "--- a/f\n+++ b/f\n+line\n" {
+		t.Errorf("patch body = %q, want the provider patch bytes", got)
+	}
+	if size != 22 {
+		t.Errorf("size = %d, want 22 (the fake's Content-Length parsed)", size)
+	}
+	reqs := f.requests(http.MethodGet, "/o/n/commit/")
+	if len(reqs) != 1 {
+		t.Fatalf("patch requests = %d, want 1", len(reqs))
+	}
+	if reqs[0].path != "/o/n/commit/a1b2c3d4e5f6a7b8.patch" {
+		t.Errorf("patch request path = %q, want the .patch route", reqs[0].path)
+	}
+	if reqs[0].auth != "token test-token" {
+		t.Errorf("patch request auth = %q, want the service token", reqs[0].auth)
+	}
+}
+
+// TestGiteaGetCommitPatchErrorMapping: 404 → ErrNotFound, 401 →
+// ErrUnauthorized — the same mapping as the raw route.
+func TestGiteaGetCommitPatchErrorMapping(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		want   error
+	}{{http.StatusNotFound, gitprovider.ErrNotFound}, {http.StatusUnauthorized, gitprovider.ErrUnauthorized}} {
+		f := &fakeGitea{routes: []giteaRoute{{
+			method: http.MethodGet, prefix: "/o/n/commit/", status: tc.status,
+		}}}
+		a := newGiteaAdapter(t, f)
+		_, body, err := a.GetCommitPatch(testCtx(t), filesRepo(), "a1b2c3d4e5f6a7b8")
+		if !errors.Is(err, tc.want) {
+			t.Errorf("GetCommitPatch status %d = %v, want %v", tc.status, err, tc.want)
+		}
+		if body != nil {
+			t.Errorf("GetCommitPatch status %d left the body open", tc.status)
+		}
+	}
+}

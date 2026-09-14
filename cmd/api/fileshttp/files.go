@@ -37,6 +37,7 @@ const (
 	codeProjectNotFound     = projects.CodeProjectNotFound
 	codeNotProvisioned      = "PROJECT_NOT_PROVISIONED"
 	codeInvalidRef          = "FILES_INVALID_REF"
+	codeInvalidSHA          = "FILES_INVALID_SHA"
 	codeInvalidPath         = "FILES_INVALID_PATH"
 	codeInvalidLimit        = "FILES_INVALID_LIMIT"
 	codePathIsDirectory     = "FILES_PATH_IS_DIRECTORY"
@@ -88,6 +89,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/projects/{projectId}/files/content", h.handleContent)
 	mux.HandleFunc("GET /api/v1/projects/{projectId}/files/history", h.handleHistory)
 	mux.HandleFunc("GET /api/v1/projects/{projectId}/files/raw", h.handleRaw)
+	mux.HandleFunc("GET /api/v1/projects/{projectId}/files/diff", h.handleDiff)
 }
 
 // enabled answers 503 in place when the feature is disabled, returning
@@ -323,6 +325,38 @@ func (h *handlers) handleRaw(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleDiff: GET /api/v1/projects/{projectId}/files/diff?sha= — one
+// commit's raw patch, streamed through unparsed (the raw diff view). The
+// disposition stays inline so the patch renders as plain text in the
+// browser, and nosniff keeps the payload from ever being sniffed into
+// anything executable.
+func (h *handlers) handleDiff(w http.ResponseWriter, r *http.Request) {
+	if !h.enabled(w, r) {
+		return
+	}
+	projectID := r.PathValue("projectId")
+	if !h.authorize(w, r, projectID) {
+		return
+	}
+	sha := r.URL.Query().Get("sha")
+	raw, err := h.files.CommitPatch(r.Context(), projectID, sha)
+	if err != nil {
+		h.filesError(w, r, err)
+		return
+	}
+	defer raw.Body.Close()
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if raw.Size > 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(raw.Size, 10))
+	}
+	w.WriteHeader(http.StatusOK)
+	if _, err := io.Copy(w, raw.Body); err != nil {
+		observability.LoggerFromContext(r.Context()).Warn(
+			"files: diff stream interrupted", "error", err.Error())
+	}
+}
+
 // safeFilename reduces one repository path to a Content-Disposition-safe
 // basename: separators and anything outside [A-Za-z0-9._-] collapse to
 // "-", and an empty result becomes "download". Path values are validated
@@ -385,6 +419,9 @@ func (h *handlers) filesError(w http.ResponseWriter, r *http.Request, err error)
 	case errors.Is(err, gitprovider.ErrInvalidRef):
 		authhttp.WriteError(w, r, http.StatusBadRequest, codeInvalidRef,
 			"invalid ref: use a branch name or a full commit SHA")
+	case errors.Is(err, gitprovider.ErrInvalidSHA):
+		authhttp.WriteError(w, r, http.StatusBadRequest, codeInvalidSHA,
+			"invalid sha: use a commit SHA (7-40 hex characters)")
 	case errors.Is(err, gitprovider.ErrInvalidPath):
 		authhttp.WriteError(w, r, http.StatusBadRequest, codeInvalidPath, err.Error())
 	case errors.Is(err, gitprovider.ErrIsDirectory):

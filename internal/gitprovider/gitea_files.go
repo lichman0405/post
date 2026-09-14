@@ -216,6 +216,38 @@ func contentLength(resp *http.Response) int64 {
 	return 0
 }
 
+// GetCommitPatch implements FilesPort over the commit patch route
+// (/{owner}/{repo}/commit/{sha}.patch) — the raw diff channel, outside
+// /api/v1 exactly like the raw route. Gitea serves this plain-text route
+// on every commit page ("download patch"); the adapter authenticates with
+// the service token so private repositories answer it too.
+func (a *GiteaAdapter) GetCommitPatch(ctx context.Context, repo Repository, sha string) (int64, io.ReadCloser, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		a.baseURL+"/"+urlSegment(repo.Owner)+"/"+urlSegment(repo.Name)+
+			"/commit/"+urlSegment(sha)+".patch", nil)
+	if err != nil {
+		return 0, nil, fmt.Errorf("%w: build commit patch request", ErrUnavailable)
+	}
+	req.Header.Set("Authorization", "token "+a.token)
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("%w: provider request failed", ErrUnavailable)
+	}
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return contentLength(resp), resp.Body, nil
+	case http.StatusNotFound:
+		_ = resp.Body.Close()
+		return 0, nil, ErrNotFound
+	case http.StatusUnauthorized, http.StatusForbidden:
+		_ = resp.Body.Close()
+		return 0, nil, ErrUnauthorized
+	default:
+		_ = resp.Body.Close()
+		return 0, nil, fmt.Errorf("%w (status %d)", ErrUnavailable, resp.StatusCode)
+	}
+}
+
 // commitListBody is the provider-side commits-list element (a subset of
 // Gitea's Commit). The list endpoint is the history channel: newest
 // first, path-filterable, provider-capped at 50 per page.
