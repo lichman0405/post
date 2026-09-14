@@ -244,6 +244,21 @@ func run(args []string) int {
 			"effect", "no repositories or webhooks are provisioned and files reads are disabled; set the named variables and restart to enable")
 	}
 
+	// Git ↔ RSG reconciliation (T0309): the periodic drift check between
+	// the canonical store and the GitProvider (docs/16 §5 — any drift is a
+	// high-severity alert). Runs unconditionally: without provider
+	// configuration the pass still verifies the canonical-store dimensions
+	// (state hashes, mappings); with it, the provider dimensions (refs,
+	// repositories) join in. The reconciler never repairs — every finding
+	// carries a proposal, nothing is applied. Same best-effort policy as
+	// the protection sweep: a failed pass retries on the next tick.
+	var reconcilerPort gitprovider.ReconcilerPort
+	if gitCfg.ProvisioningEnabled() {
+		reconcilerPort = gitprovider.NewGiteaAdapter(*gitCfg)
+	}
+	go runReconciliationSweep(ctx,
+		gitprovider.NewReconciler(reconcilerPort, gitprovider.NewReconcilerStore(pool)), logger)
+
 	// Authentication (T0101) + organizations (T0103): the /api/v1 subtree
 	// is guarded by default — every state-changing request under it
 	// requires a valid session + CSRF token unless it is an explicit

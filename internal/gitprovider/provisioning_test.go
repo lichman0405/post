@@ -43,6 +43,10 @@ type fakePort struct {
 	getRepoSet   bool
 	getRepoErr   error
 
+	// Reconciliation side (T0309): canned ref list.
+	branchesList    []gitprovider.BranchRef
+	listBranchesErr error
+
 	// Push-ingestion side (T0305): canned diff and file reads.
 	changedFiles    []gitprovider.FileChange
 	changedFilesErr error
@@ -115,6 +119,16 @@ func (f *fakePort) GetBranch(_ context.Context, _ gitprovider.Repository, name s
 		return gitprovider.BranchRef{}, f.getBranchErr
 	}
 	return f.branch, nil
+}
+
+// ListBranches returns the canned ref list (T0309's unmapped-ref check);
+// listBranchesErr overrides it.
+func (f *fakePort) ListBranches(_ context.Context, _ gitprovider.Repository) ([]gitprovider.BranchRef, error) {
+	f.calls = append(f.calls, "list-branches")
+	if f.listBranchesErr != nil {
+		return nil, f.listBranchesErr
+	}
+	return f.branchesList, nil
 }
 
 func (f *fakePort) DeleteBranch(_ context.Context, _ gitprovider.Repository, name string) error {

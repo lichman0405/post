@@ -254,6 +254,10 @@ type GitPort interface {
 	EnsureBranch(ctx context.Context, spec BranchSpec) (BranchRef, error)
 	// GetBranch reads one branch ref. ErrNotFound when it does not exist.
 	GetBranch(ctx context.Context, repo Repository, name string) (BranchRef, error)
+	// ListBranches lists every branch ref of the repository. The
+	// reconciliation (T0309) uses it to find refs the canonical store
+	// does not name — a ref created outside the semantic model.
+	ListBranches(ctx context.Context, repo Repository) ([]BranchRef, error)
 	// DeleteBranch deletes one branch ref. Idempotent: a missing branch is
 	// not an error (the close strategy is "the ref must not exist" — a
 	// concurrent deletion already achieved that).
