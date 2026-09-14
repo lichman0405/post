@@ -255,10 +255,10 @@ func runGhJSON(dir string, args ...string) ([]byte, error) {
 	return out, nil
 }
 
-// A merge refusal says one of two things, and which one it says decides whether
-// the driver waits or escalates. `rddev pr merge` runs as a child process, so
-// that classification cannot travel as a Go error type — it travels as this
-// text. The writer (assertRequiredChecksGreen, below) and the reader
+// A merge refusal is either a wait or a decision, and which one it is decides
+// whether the driver waits or escalates. `rddev pr merge` runs as a child
+// process, so that classification cannot travel as a Go error type — it travels
+// as this text. The writers (the assertions below) and the reader
 // (stepAccepted, driver_run.go) name it through the constants here instead of
 // through a string literal each.
 //
@@ -268,7 +268,9 @@ func runGhJSON(dir string, args ...string) ([]byte, error) {
 // finished and never asked, which is the one outcome §8.2 forbids. The local
 // gate was green, so nothing else interceded.
 //
-// The names say which is which, and neither string may contain the other.
+// The names say which is which, and no one of these strings may contain another:
+// a wait that reads as a decision stops a task that was still moving, and a
+// decision that reads as a wait is #139.
 //
 // That disjointness is necessary but not sufficient, and the remaining hole is
 // a deliberate acceptance rather than an oversight: the refusal interpolates
@@ -286,6 +288,11 @@ const (
 	// checksRed is the decision: at least one required check is terminal and
 	// not green.
 	checksRed = "the PR's required checks did not pass on GitHub"
+	// prConflicts is the decision for a PR GitHub cannot build a merge commit
+	// for. It is a decision and not a wait because waiting is exactly what
+	// cannot help: such a PR has no check runs at all, so every check it is
+	// asked about is absent forever. See assertPRMergeable.
+	prConflicts = "the PR conflicts with its base branch"
 )
 
 // noChecksReported is gh's own wording, read out of the installed binary — not
@@ -349,6 +356,63 @@ func stateSeverity(state string) int {
 func ciStillRunning(refusal string) bool {
 	return strings.Contains(refusal, checksNotYet) ||
 		strings.Contains(refusal, noChecksReported)
+}
+
+// assertPRMergeable refuses to merge a PR GitHub cannot build a merge commit
+// for.
+//
+// It exists because a conflicting PR produces NO check runs at all. A
+// `pull_request` workflow is run against refs/pull/N/merge, and on a conflict
+// GitHub cannot create that commit, so no workflow starts and every required
+// check is absent — not pending, absent. assertRequiredChecksGreen reads an
+// absent required check as "not reported yet", which is the WAIT, so the driver
+// retried the merge every tick forever and never raised a decision. Only the
+// log line repeated; the task neither advanced nor asked, which is the one
+// outcome §8.2 forbids. T0304's PR #159 sat there in exactly that state.
+//
+// This is #139's mirror image. #139 was a check that had finished red read as
+// still running; this is a PR that can never produce a check read as still
+// running. Both come from the same place — the wait is inferred from an absence
+// — and the same rule answers both: an absence is only a wait when waiting can
+// change it.
+//
+// Hence the ordering in MergePR: this must be asserted BEFORE the checks, or
+// the checks absorb the conflict into their own "not yet" and this function is
+// never reached.
+func assertPRMergeable(repoRoot, branch, taskID string) error {
+	out, err := runGhJSON(repoRoot, "pr", "view", branch, "--json", "mergeable,mergeStateStatus")
+	if err != nil {
+		// An unreadable mergeability is not evidence of a conflict. Fall
+		// through to the checks assertion, which is the established answer and
+		// says a wait when it means one; inventing a decision out of a failed
+		// read would escalate PRs for a transient network error.
+		return nil
+	}
+	var v struct {
+		Mergeable        string `json:"mergeable"`
+		MergeStateStatus string `json:"mergeStateStatus"`
+	}
+	if err := json.Unmarshal(out, &v); err != nil {
+		return nil
+	}
+	// GitHub computes both fields on demand, and reports UNKNOWN until it has.
+	// A PR pushed a second ago is not conflicted merely for being uncomputed,
+	// and the next tick asks again. This is the only answer that is treated as
+	// "no news": an empty one is not UNKNOWN, it is an answer whose direct
+	// field happens to be absent, and the merge-state field is read on its own
+	// below.
+	if v.Mergeable == "UNKNOWN" {
+		return nil
+	}
+	// CONFLICTING is the direct answer. DIRTY is the same condition reported by
+	// the merge-state field, and the two are named together because the pair is
+	// what the API actually returns — an assertion that reads only one of them
+	// is one GitHub response away from being quietly false.
+	if v.Mergeable != "CONFLICTING" && v.MergeStateStatus != "DIRTY" {
+		return nil
+	}
+	return fmt.Errorf("%s (mergeable=%s, mergeStateStatus=%s) — GitHub cannot build the merge commit, so no check run is ever created and the CI this merge waits for cannot arrive; compose the task's diff onto current main and regenerate the derived artifacts (`rddev rebaseline %s`)",
+		prConflicts, v.Mergeable, v.MergeStateStatus, taskID)
 }
 
 // assertRequiredChecksGreen refuses to merge while the PR's required checks
@@ -490,6 +554,13 @@ func MergePR(opts *GitControlOpts) (string, error) {
 	}
 	spec, err := gateSpecAt(opts.RepoRoot, gatesPath)
 	if err != nil {
+		return "", err
+	}
+	// Before the checks, and that order is the fix rather than a preference: a
+	// PR GitHub cannot build a merge commit for has no check runs, so the
+	// checks assertion would answer "not reported yet" and the driver would
+	// wait on CI that is never going to start. See assertPRMergeable.
+	if err := assertPRMergeable(opts.RepoRoot, rec.Branch, opts.TaskID); err != nil {
 		return "", err
 	}
 	if err := assertRequiredChecksGreen(opts.RepoRoot, rec.Branch, spec.RequiredJobs); err != nil {
