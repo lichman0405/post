@@ -19,7 +19,7 @@ SHELL := /bin/bash
 GO_UNIT_PKGS := $(shell go list ./... | grep -v '/tests/integration')
 STATICCHECK_VER := 2026.2.1
 
-.PHONY: help bootstrap check build test test-integration dev smoke sync-schemas \
+.PHONY: help bootstrap check build rddev test test-integration dev smoke sync-schemas \
 	check-schema-drift check-schema-snapshot check-openapi fmt-check staticcheck lint-python type-python \
 	progress ci migrate infra-up infra-init infra infra-down infra-ps infra-logs
 
@@ -44,6 +44,12 @@ check: ## one-command basic check: Go + Web + Python (+ schema/OpenAPI drift); n
 	pnpm --filter @post/web lint
 	bash scripts/web-unit-tests.sh
 	cd services/scientific-adapter && uv run pytest -q
+
+rddev: ## rebuild bin/rddev — the binary the four-gate loop runs (see #135)
+	@# bin/ is gitignored and nothing else rebuilds it, so this and the guard in
+	@# cmd/rddev/staleness.go are the two halves of one rule: the tool that grades
+	@# the work must be the tool the source describes.
+	go build -o bin/rddev ./cmd/rddev
 
 build: ## production builds and smoke across the three languages
 	go build ./cmd/...

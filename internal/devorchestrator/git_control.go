@@ -35,6 +35,24 @@ type GitControlOpts struct {
 	PRBody    string // default: rendered from the DAG entry
 	DagPath   string
 	StatePath string
+
+	// FreshnessCheck, when set, runs after the four-gate assertion has passed
+	// and before git or gh is invoked — the last moment at which refusing is
+	// still free.
+	//
+	// It is consulted HERE rather than at process start because of an
+	// invariant this package already keeps: `git commit` on a red gate refuses
+	// WITHOUT ever invoking git (git was never invoked, main.go, and the
+	// acceptance e2e's recorder). The freshness question can only be answered
+	// by asking git, so a check placed before the assertion would put a git
+	// invocation in front of that refusal and the promise would stop being
+	// true. After the assertion, there is nothing left to protect: the gate is
+	// green and the action is about to touch the control plane.
+	//
+	// nil means "no check", which is what a caller that is not the CLI wants —
+	// a library test asserting gate behaviour must not have its answer depend
+	// on the git state of the machine running it.
+	FreshnessCheck func() error
 }
 
 // GateRefusalError is returned when a git/PR action is refused by a red
@@ -518,6 +536,14 @@ func RunGitControl(opts *GitControlOpts, action string) (*GitActionResult, error
 	}
 	if gateRes.Status != "passed" {
 		return nil, &GateRefusalError{Action: action, Reasons: gateRes.Reasons}
+	}
+	// The gate is green and this is the last point before the control plane is
+	// touched. See GitControlOpts.FreshnessCheck for why this is the position
+	// and not process start.
+	if opts.FreshnessCheck != nil {
+		if err := opts.FreshnessCheck(); err != nil {
+			return nil, err
+		}
 	}
 	switch action {
 	case "commit":
