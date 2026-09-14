@@ -374,11 +374,17 @@ func prettyJSON(raw []byte) string {
 
 // mustIndentJSON marshals with indentation; the inputs are plain strings
 // and numbers, so a failure is a programming error the page renders as an
-// empty object rather than crashing the request.
+// empty object rather than crashing the request. HTML characters are not
+// escaped in the JSON itself — the template escapes the text node on
+// render, and the browser then shows the JSON with its real characters
+// (< reads badly in a tool reference a person copies).
 func mustIndentJSON(v any) string {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
 		return "{}"
 	}
-	return string(b)
+	return strings.TrimRight(buf.String(), "\n")
 }

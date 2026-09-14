@@ -163,15 +163,23 @@ func (s *Service) ResearchOutline(ctx context.Context, r projects.Reader, projec
 	if err != nil {
 		return ResearchOutline{}, wrapError(err)
 	}
+	return s.buildResearchOutline(ctx, project)
+}
+
+// buildResearchOutline runs the outline reads and the aggregation for an
+// already-gated project (the entry gate fetched the project). The project
+// overview (T0212) shares this builder: its gate runs once and the fetched
+// project serves both the overview facts and the outline.
+func (s *Service) buildResearchOutline(ctx context.Context, project domain.Project) (ResearchOutline, error) {
 	if s.queries == nil {
 		return ResearchOutline{}, fmt.Errorf("%w: no query port configured", ErrStore)
 	}
 
-	objRows, err := s.queries.ListObjectVersions(ctx, projectID, nil, nil)
+	objRows, err := s.queries.ListObjectVersions(ctx, project.ID, nil, nil)
 	if err != nil {
 		return ResearchOutline{}, wrapError(err)
 	}
-	relRows, err := s.queries.ListRelationVersions(ctx, projectID, nil, nil)
+	relRows, err := s.queries.ListRelationVersions(ctx, project.ID, nil, nil)
 	if err != nil {
 		return ResearchOutline{}, wrapError(err)
 	}
@@ -182,11 +190,11 @@ func (s *Service) ResearchOutline(ctx context.Context, r projects.Reader, projec
 	// claim that lives in the project (and then list the same claim in the
 	// unassigned remainder). The fetch runs here, in the service (which
 	// holds ctx and the query port), not inside the pure buildOutline.
-	claimRefRows, err := s.fetchClaimRefRows(ctx, projectID, objRows)
+	claimRefRows, err := s.fetchClaimRefRows(ctx, project.ID, objRows)
 	if err != nil {
 		return ResearchOutline{}, wrapError(err)
 	}
-	out := buildOutline(projectID, objRows, relRows, claimRefRows)
+	out := buildOutline(project.ID, objRows, relRows, claimRefRows)
 	out.ProjectSlug = project.Slug
 	out.ProjectName = project.Name
 	return out, nil

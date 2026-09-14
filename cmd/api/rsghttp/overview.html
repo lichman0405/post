@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview · {{.ProjectSlug}} — POST</title>
+<style>
+  :root {
+    --fg: #1f2328; --muted: #59636e; --border: #d1d9e0; --subtle: #f6f8fa;
+    --accent: #0969da; --accent-subtle: #ddf4ff;
+    --success: #1a7f37; --success-subtle: #dafbe1;
+    --danger: #cf222e; --danger-subtle: #ffebe9;
+    --attention: #9a6700; --attention-subtle: #fff8c5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #ffffff; color: var(--fg);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+      Helvetica, Arial, sans-serif;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre, .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono",
+    Menlo, Consolas, monospace; }
+  .page { max-width: 1280px; margin: 0 auto; padding: 16px 24px 48px; }
+  .breadcrumb { font-size: 12px; color: var(--muted); margin: 0 0 12px; }
+  .breadcrumb .sep { margin: 0 4px; color: var(--border); }
+  .breadcrumb code { color: var(--fg); }
+  .header { border-bottom: 1px solid var(--border); padding-bottom: 16px; }
+  .header h1 { font-size: 24px; font-weight: 600; margin: 0 0 4px; overflow-wrap: anywhere; }
+  .header-meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+  .header-meta code {
+    font-size: 12px; background: var(--subtle); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0 5px; color: var(--fg);
+  }
+  .badge {
+    font-size: 12px; font-weight: 600; border-radius: 9999px; padding: 1px 10px;
+    border: 1px solid transparent; white-space: nowrap;
+  }
+  .badge.public { color: var(--success); background: var(--success-subtle); border-color: rgba(26, 127, 55, .35); }
+  .badge.private { color: var(--muted); background: var(--subtle); border-color: var(--border); }
+  .badge.frozen { color: var(--attention); background: var(--attention-subtle); border-color: rgba(154, 103, 0, .35); }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-top: 16px; overflow-x: auto; }
+  .tab {
+    padding: 8px 12px; color: var(--muted); font-size: 14px;
+    border-bottom: 2px solid transparent; white-space: nowrap;
+  }
+  .tab:hover { color: var(--fg); text-decoration: none; border-bottom-color: var(--border); }
+  .tab.active { color: var(--fg); font-weight: 600; border-bottom-color: #fd8c73; }
+  main { padding-top: 16px; }
+
+  /* The summary grid: two side-by-side sections on wide screens, stacked
+     on narrow ones — the key sections sit on the first screen. */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  section { min-width: 0; }
+  section + section, .grid + .grid, .grid + section { margin-top: 24px; }
+  .section-title { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+  .section-more { font-size: 12px; font-weight: 400; margin-left: 8px; }
+
+  /* Purpose: the first screen's "what is this project about". */
+  .purpose { border-left: 3px solid var(--accent); padding-left: 12px; margin: 0; max-width: 900px; }
+
+  ul.compact { list-style: none; margin: 0; padding: 0; }
+  ul.compact li { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  ul.compact li:last-child { border-bottom: none; }
+  .row-title { font-size: 15px; font-weight: 600; }
+  .row-title.plain { color: var(--fg); }
+  .row-meta { margin-top: 2px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .state-badge {
+    font-size: 12px; font-weight: 600; border-radius: 9999px; padding: 1px 10px;
+    border: 1px solid transparent; vertical-align: middle; white-space: nowrap;
+  }
+  .state-badge.open, .state-badge.accepted { color: var(--success); background: var(--success-subtle); border-color: rgba(26, 127, 55, .35); }
+  .state-badge.partially_answered, .state-badge.preliminary { color: var(--accent); background: var(--accent-subtle); border-color: rgba(9, 105, 218, .35); }
+  .state-badge.unresolved { color: var(--attention); background: var(--attention-subtle); border-color: rgba(154, 103, 0, .35); }
+  .state-badge.contested { color: var(--danger); background: var(--danger-subtle); border-color: rgba(207, 34, 46, .35); }
+  .state-badge.superseded, .state-badge.aborted { color: var(--muted); background: var(--subtle); border-color: var(--border); }
+  .role-badge {
+    font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--accent); background: var(--accent-subtle);
+    border: 1px solid rgba(9, 105, 218, .35); border-radius: 9999px;
+    padding: 0 8px; white-space: nowrap;
+  }
+
+  /* Current main */
+  dl.facts { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; }
+  dl.facts dt { color: var(--muted); font-size: 12px; padding-top: 2px; }
+  dl.facts dd { margin: 0; overflow-wrap: anywhere; }
+  .commit-card {
+    margin-top: 12px; background: var(--subtle); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px 12px; max-width: 900px;
+  }
+  .commit-message { font-weight: 600; }
+  .commit-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* The empty-state start guide */
+  .guide { border: 1px dashed var(--border); border-radius: 6px; padding: 24px; max-width: 900px; }
+  .guide h2 { margin: 0 0 8px; font-size: 16px; }
+  .guide ol.steps { margin: 12px 0; padding-left: 20px; }
+  .guide ol.steps li { margin: 6px 0; }
+  .guide pre {
+    background: var(--subtle); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; overflow-x: auto; font-size: 12px; margin: 8px 0;
+  }
+  .guide .note { font-size: 12px; color: var(--muted); margin: 12px 0 0; }
+
+  .empty-state {
+    border: 1px dashed var(--border); border-radius: 6px; padding: 24px;
+    color: var(--muted); text-align: center;
+  }
+  .footer-note {
+    margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    <span>Projects</span><span class="sep">/</span><code>{{.ProjectSlug}}</code><span class="sep">/</span><span>Overview</span>
+  </nav>
+  <header class="header">
+    <h1>{{.ProjectName}}</h1>
+    <div class="header-meta" data-overview-meta>
+      <span class="badge {{.Visibility}}" data-visibility="{{.Visibility}}">{{.Visibility}}</span>
+      {{if .MainFrozen}}<span class="badge frozen" data-main-frozen>main frozen</span>{{end}}
+      {{if .ActivityStatus}}<span data-activity-status>{{.ActivityStatus}}</span>{{end}}
+      {{if .CountsLine}}<span data-overview-counts>{{.CountsLine}}</span>{{else}}<span data-overview-counts>empty</span>{{end}}
+      {{if .BranchSummary}}<span data-overview-branches>{{.BranchSummary}}</span>{{end}}
+    </div>
+  </header>
+  <nav class="tabs" aria-label="Project sections">
+    <a class="tab active" href="{{.OverviewHref}}" data-project-tab="overview" aria-current="page">Overview</a>
+    <a class="tab" href="{{.ResearchHref}}" data-project-tab="research">Research</a>
+  </nav>
+  <main data-overview>
+    {{if .Empty}}
+    {{if .HasMain}}
+    <div class="guide" data-overview-guide>
+      <h2>No research state yet</h2>
+      <p>{{.ProjectName}} is set up and its main branch exists, but nothing has been recorded on it. The project's purpose is:</p>
+      <p class="purpose">{{.Purpose}}</p>
+      <p>Research state grows through an agent connected to the POST MCP server — the web surface is read-only. The tool references below are pre-filled with this project's coordinates:</p>
+      <ol class="steps">
+        <li>Record the project's research questions with <code>object.create</code> (object_type <code>research_question</code>).</li>
+        <li>Record hypotheses, findings and claims the same way, then link them to their question with <code>relation.create</code> (<code>addresses_question</code>).</li>
+        <li>Read back the aggregated outline on the <a href="{{.ResearchHref}}">Research</a> page or with <code>rsg.query</code>.</li>
+      </ol>
+      <pre data-agent-tool="object.create">{{.AgentQuestionJSON}}</pre>
+      <pre data-agent-tool="relation.create">{{.AgentRelationJSON}}</pre>
+      <p class="note">Agent mutations go through the same validation gates as every other write.</p>
+    </div>
+    {{else}}
+    <div class="guide" data-overview-guide>
+      <h2>Start this project</h2>
+      <p>{{.ProjectName}} has no research state yet — no branches, no questions, no findings. The project's purpose is:</p>
+      <p class="purpose">{{.Purpose}}</p>
+      <p>Research state grows through an agent connected to the POST MCP server — the web surface is read-only. The tool references below are pre-filled with this project's coordinates:</p>
+      <ol class="steps">
+        <li>Create the project's first branch — <code>main</code> is the canonical integration branch — with <code>branch.create</code>.</li>
+        <li>Record the project's research questions on it with <code>object.create</code> (object_type <code>research_question</code>).</li>
+        <li>Record hypotheses, findings and claims the same way, then link them to their question with <code>relation.create</code> (<code>addresses_question</code>).</li>
+        <li>Read back the aggregated outline on the <a href="{{.ResearchHref}}">Research</a> page or with <code>rsg.query</code>.</li>
+      </ol>
+      <pre data-agent-tool="branch.create">{{.AgentBranchJSON}}</pre>
+      <pre data-agent-tool="object.create">{{.AgentQuestionJSON}}</pre>
+      <pre data-agent-tool="relation.create">{{.AgentRelationJSON}}</pre>
+      <p class="note">Agent mutations go through the same validation gates as every other write.</p>
+    </div>
+    {{end}}
+    {{else}}
+    <section class="purpose" data-overview-section="purpose" aria-label="Project purpose">
+      <h2 class="section-title">Purpose</h2>
+      <p class="purpose">{{.Purpose}}</p>
+    </section>
+
+    <div class="grid">
+      <section data-overview-section="questions" aria-label="Key research questions">
+        <h2 class="section-title">Key questions
+          {{if gt .TotalQuestions (len .KeyQuestions)}}<span class="section-more">(<a href="{{.QuestionsHref}}">view all {{.TotalQuestions}} on Research</a>)</span>{{end}}
+        </h2>
+        {{if .KeyQuestions}}
+        <ul class="compact">
+          {{range .KeyQuestions}}
+          <li data-question-id="{{.ObjectID}}">
+            <div>
+              {{if .Href}}<a class="row-title" href="{{.Href}}">{{.Title}}</a>{{else}}<span class="row-title plain">{{.Title}}</span>{{end}}
+              {{if .QuestionState}}<span class="state-badge {{.StateClass}}" data-question-state="{{.QuestionState}}">{{.QuestionState}}</span>{{end}}
+            </div>
+            {{if .Statement}}<div class="row-meta">{{.Statement}}</div>{{end}}
+          </li>
+          {{end}}
+        </ul>
+        {{else}}
+        <div class="empty-state">No research questions yet. Questions organize everything else — create them through the agent or the API.</div>
+        {{end}}
+      </section>
+
+      <section data-overview-section="findings" aria-label="Key findings">
+        <h2 class="section-title">Key findings
+          {{if gt .TotalFindings (len .KeyFindings)}}<span class="section-more">(<a href="{{.FindingsHref}}">view all {{.TotalFindings}} on Research</a>)</span>{{end}}
+        </h2>
+        {{if .KeyFindings}}
+        <ul class="compact">
+          {{range .KeyFindings}}
+          <li data-finding-id="{{.ObjectID}}">
+            <div>
+              {{if .Href}}<a class="row-title" href="{{.Href}}">{{.Title}}</a>{{else}}<span class="row-title plain">{{.Title}}</span>{{end}}
+              {{if .Assessment}}<span class="state-badge {{.Assessment}}" data-assessment="{{.Assessment}}">{{.Assessment}}</span>{{end}}
+            </div>
+            {{if .Statement}}<div class="row-meta">{{.Statement}}</div>{{end}}
+          </li>
+          {{end}}
+        </ul>
+        {{else}}
+        <div class="empty-state">No findings yet. Findings are the human-confirmed summaries; they appear here once recorded.</div>
+        {{end}}
+      </section>
+    </div>
+
+    <div class="grid">
+      <section data-overview-section="branches" aria-label="Active research paths">
+        <h2 class="section-title">Active paths</h2>
+        {{if .ActiveBranches}}
+        <ul class="compact">
+          {{range .ActiveBranches}}
+          <li data-branch-name="{{.Name}}">
+            <div><span class="role-badge">branch</span> <span class="row-title mono">{{.Name}}</span></div>
+            {{if .Purpose}}<div class="row-meta">{{.Purpose}}</div>{{end}}
+            {{if .HeadStateID}}<div class="row-meta">head state <code>{{.HeadStateID}}</code></div>{{end}}
+          </li>
+          {{end}}
+        </ul>
+        {{else}}
+        <div class="empty-state">No active research paths. A new path starts with <code>branch.create</code> through the agent or the API.</div>
+        {{end}}
+        {{if or .MergedBranches .AbortedBranches}}
+        <div class="row-meta" data-overview-closed-branches>
+          {{if .MergedBranches}}{{.MergedBranches}} merged{{end}}{{if and .MergedBranches .AbortedBranches}} · {{end}}{{if .AbortedBranches}}{{.AbortedBranches}} aborted{{end}}
+        </div>
+        {{end}}
+      </section>
+
+      <section data-overview-section="attention" aria-label="Needs attention">
+        <h2 class="section-title">Needs attention
+          {{if gt .AttentionTotal (len .NeedsAttention)}}<span class="section-more">({{.AttentionTotal}} total)</span>{{end}}
+        </h2>
+        {{if .NeedsAttention}}
+        <ul class="compact">
+          {{range .NeedsAttention}}
+          <li data-attention-kind="{{.Kind}}">
+            <div>
+              <span class="role-badge">{{.Kind}}</span>
+              {{if .Href}}<a class="row-title" href="{{.Href}}">{{.Title}}</a>{{else}}<span class="row-title plain">{{.Title}}</span>{{end}}
+              <span class="state-badge {{.SignalClass}}" data-signal="{{.Signal}}">{{.Signal}}</span>
+            </div>
+          </li>
+          {{end}}
+        </ul>
+        {{else}}
+        <div class="empty-state">Nothing needs attention. Contested or unresolved findings and unresolved questions appear here.</div>
+        {{end}}
+      </section>
+    </div>
+
+    <section data-overview-section="main" aria-label="Current main">
+      <h2 class="section-title">Current main</h2>
+      {{if .CurrentMain.Present}}
+      <dl class="facts" data-main>
+        <dt>Branch</dt><dd><code>{{.CurrentMain.Name}}</code> {{if .MainFrozen}}<span class="badge frozen">frozen</span>{{end}}</dd>
+        <dt>Head state</dt><dd>{{if .CurrentMain.HeadStateID}}<code>{{.CurrentMain.HeadStateID}}</code>{{else}}<span class="row-meta">none yet</span>{{end}}</dd>
+        {{if .CurrentMain.StateHash}}<dt>State hash</dt><dd><code>{{.CurrentMain.StateHash}}</code></dd>{{end}}
+        {{if .CurrentMain.GitCommitSHA}}<dt>Git commit</dt><dd><code>{{.CurrentMain.GitCommitSHA}}</code></dd>{{end}}
+        {{if .CurrentMain.HeadAt}}<dt>Accepted at</dt><dd>{{.CurrentMain.HeadAt}}</dd>{{end}}
+      </dl>
+      {{if .CurrentMain.Commit.Present}}
+      <div class="commit-card" data-main-commit>
+        <div class="commit-message">{{.CurrentMain.Commit.Message}}</div>
+        <div class="commit-meta">{{.CurrentMain.Commit.Meta}}</div>
+      </div>
+      {{else}}
+      <div class="row-meta" data-main-commit="none">No commits on main yet — the branch exists, its first transition has not happened.</div>
+      {{end}}
+      {{else}}
+      <div class="empty-state" data-main="none">No main branch yet. Create <code>main</code> through the agent (<code>branch.create</code>) — it is the canonical integration branch, frozen and updated only through Research PR merges.</div>
+      {{end}}
+    </section>
+    {{end}}
+  </main>
+  <footer class="footer-note">
+    This overview is a summary of the project's research state: its purpose, key questions and findings, active paths, attention list and current main — with links into the full Research outline and the object pages. The page is read-only — scientific state changes happen through the agent (MCP) or the API.
+  </footer>
+</div>
+</body>
+</html>

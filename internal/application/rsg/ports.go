@@ -40,6 +40,9 @@ type BranchPort interface {
 	// Get returns the project's branch, or branches.ErrBranchNotFound
 	// (a branch of another project reports the same outcome).
 	Get(ctx context.Context, projectID, branchID string) (domain.Branch, error)
+	// List returns every branch of the project (active, merged and
+	// aborted), oldest first — the overview's branch surface (T0212).
+	List(ctx context.Context, projectID string) ([]domain.Branch, error)
 }
 
 // StatePort is the state-surface slice the RSG service needs: every
@@ -51,6 +54,9 @@ type StatePort interface {
 	// GetBranchHead returns the branch's current head state — the base
 	// every commit is built on.
 	GetBranchHead(ctx context.Context, branchID string) (domain.ProjectState, error)
+	// ListCommits returns the branch's commit history, oldest first —
+	// the overview reads main's newest commit off its tail (T0212).
+	ListCommits(ctx context.Context, branchID string) ([]domain.StateCommit, error)
 }
 
 // LatestStatePort resolves the project's most recent state — the default
