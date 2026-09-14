@@ -1274,9 +1274,9 @@
     },
     "T0206": {
       "status": "running",
-      "started_at": "2026-09-14T06:00:46Z",
-      "worker_run_id": "run-1aade57d3205a109",
-      "rejection_reason": "# T0206：代码停住，等 T0305 的 00034 先落地 —— 不是退回\n\n复核给你的是 **approve**（0 blocking / 0 major，3 minor + 3 nit 都是前瞻性意见），\n两条验收标准都独立复核过，改动 27 个文件全在 `allowed_scope` 内。\n\n**停在这里是刻意的顺序安排**，和你的代码无关。\n\n## 为什么必须等你前面那一个号\n\nmain 现在最高 `00033`。分配顺序：`00034` = T0305，`00035` = 你，`00036` = T0209，`00038` = T0213。\n\n本仓库的迁移运行器是 **goose v3.28.0**（`internal/persistence/migrate.go`），**默认拒绝乱序迁移**：\n库已经应用到 `00035` 之后再出现更小的号，`Migrate` 直接停（`found 1 missing (out-of-order) migration`）。\nCI 用全新库，看不到这个问题；它会静默砸在已经升级过的库上。\n\n编排器现在已经在**合并那一步**堵住这种顺序，所以即使走到合并，工具也会拒绝。\n\n⇒ 顺序：**T0305(34) → 你(35) → T0209(36) → T0213(38)**。\n\n## 接下来会发生什么\n\n1. T0305 先合（它的复核正在跑）。\n2. 然后我给你的分支做一次**机械的基线前移**（`rddev rebaseline`，生成物照例由脚本重新生成）。\n3. 你会被要求在**那个** main 上重新证明一遍，并**顺带处置复核给出的 3 minor + 3 nit**\n   （逐条判断，该改就改；不该改的写下理由）。那一轮的详细要求我会放在返工说明里。\n4. 之后立刻收你、合并。\n\n## 现在这一轮的东西都留着\n\n工作树里的改动**一件没删**，`RESULT.json` 也在。不用重做已经做过的事。\n\n## 不变的约束\n\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n- 生成物只能**重新生成**，不要手工编辑 `internal/persistence/sqlc/*.go` 或\n  `specs/database/postgres.sql`。\n- 不要改迁移号（`00035` 是你的，不变）、不要动 `allowed_scope` 外的文件。\n",
+      "started_at": "2026-09-14T06:18:12Z",
+      "worker_run_id": "run-a5941fd92216e596",
+      "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
       "history": [
         {
           "from": "todo",
@@ -1331,6 +1331,20 @@
           "to": "running",
           "at": "2026-09-14T06:00:46Z",
           "run_id": "run-1aade57d3205a109",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T06:15:08Z",
+          "run_id": "run-7082a7d185ab8267",
+          "reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T06:18:12Z",
+          "run_id": "run-a5941fd92216e596",
           "reason": "worker spawn"
         }
       ]
@@ -2306,16 +2320,27 @@
       ]
     },
     "T0306": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-14T06:15:09Z",
+      "worker_run_id": "run-fdfd92949652682a",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T06:15:08Z",
+          "run_id": "run-0b3c6171a8d7e650"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T06:15:09Z",
+          "run_id": "run-fdfd92949652682a",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0307": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-14T06:06:52Z",
       "worker_run_id": "run-f573c76df8e00eb3",
       "rejection_reason": "collect rejected: residue: 1 process(es) the Worker started are still running: pid 382395 (sleep 300) session 382394 group 382394. The Worker (pid 168392) has already exited — nothing owns these any more and nothing collects them on its own. Collect them with: kill -TERM -- -382394; result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (go test ./tests/integration -count=1) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
@@ -2346,6 +2371,13 @@
           "at": "2026-09-14T06:06:52Z",
           "run_id": "run-f573c76df8e00eb3",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T06:14:25Z",
+          "run_id": "run-753e3949d953033b",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -2458,7 +2490,7 @@
       "merged_at": null
     },
     "T0501": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-14T05:41:47Z",
       "worker_run_id": "run-60c925ec42ddbe7a",
       "history": [
@@ -2474,6 +2506,13 @@
           "at": "2026-09-14T05:41:47Z",
           "run_id": "run-60c925ec42ddbe7a",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T06:23:35Z",
+          "run_id": "run-11baff53e71d51a0",
+          "reason": "collect: all checks passed"
         }
       ]
     },

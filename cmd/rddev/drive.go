@@ -200,9 +200,10 @@ func reportDriverStatus(stdout io.Writer, repoRoot string, jsonOut bool) {
 			Driver    string                     `json:"driver"`
 			Heartbeat string                     `json:"heartbeat_age,omitempty"`
 			PID       int                        `json:"driver_pid,omitempty"`
+			Stale     string                     `json:"driver_stale_binary,omitempty"`
 			Running   []workerLine               `json:"running_workers"`
 			Decisions []devorchestrator.Decision `json:"waiting_decisions"`
-		}{driverState, age, pidOf(st), running, decisions}, "", "  ")
+		}{driverState, age, pidOf(st), staleOf(st), running, decisions}, "", "  ")
 		fmt.Fprintln(stdout, string(out))
 		return
 	}
@@ -216,6 +217,14 @@ func reportDriverStatus(stdout io.Writer, repoRoot string, jsonOut bool) {
 		fmt.Fprintf(stdout, ")")
 	}
 	fmt.Fprintln(stdout)
+	// A driver holding on a stale binary looks exactly like a working one in
+	// every other line here — same heartbeat, same Worker list — so this has to
+	// be said, and said as an instruction rather than a status.
+	if stale := staleOf(st); stale != "" {
+		fmt.Fprintf(stdout, "  HOLDING: this driver's rddev is out of date, so it is acting on nothing.\n")
+		fmt.Fprintf(stdout, "  Rebuild and restart it: make rddev, then re-run it.\n")
+		fmt.Fprintf(stdout, "  %s\n", stale)
+	}
 	fmt.Fprintf(stdout, "workers: %d running\n", len(running))
 	for _, w := range running {
 		fmt.Fprintf(stdout, "  %s pid=%d\n", w.Task, w.PID)
@@ -224,6 +233,17 @@ func reportDriverStatus(stdout io.Writer, repoRoot string, jsonOut bool) {
 	for _, d := range decisions {
 		fmt.Fprintf(stdout, "  %s %s: %s\n", d.Task, d.Action, firstLineOf(d.Reason))
 	}
+}
+
+// staleOf is the staleness the driver recorded about ITS OWN binary, or "" when
+// there is none. Read from the heartbeat rather than re-derived here: the
+// question is what the driver process is running, and `rddev status` is a
+// different process that may well have been rebuilt since.
+func staleOf(st *devorchestrator.DriverStatus) string {
+	if st == nil {
+		return ""
+	}
+	return st.Stale
 }
 
 func pidOf(st *devorchestrator.DriverStatus) int {

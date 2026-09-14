@@ -20,7 +20,7 @@ GO_UNIT_PKGS := $(shell go list ./... | grep -v '/tests/integration')
 STATICCHECK_VER := 2026.2.1
 
 .PHONY: help bootstrap check build rddev test test-integration dev smoke sync-schemas \
-	check-schema-drift check-schema-snapshot check-openapi fmt-check staticcheck lint-python type-python \
+	check-schema-drift check-schema-snapshot check-openapi check-spec-version fmt-check staticcheck lint-python type-python \
 	progress ci migrate infra-up infra-init infra infra-down infra-ps infra-logs
 
 help: ## list targets
@@ -36,6 +36,7 @@ check: ## one-command basic check: Go + Web + Python (+ schema/OpenAPI drift); n
 	$(MAKE) check-schema-drift
 	$(MAKE) check-schema-snapshot
 	$(MAKE) check-openapi
+	$(MAKE) check-spec-version
 	go vet ./...
 	go build ./...
 	go test $(GO_UNIT_PKGS)
@@ -97,6 +98,14 @@ check-schema-snapshot: ## fail when specs/database/postgres.sql is not the order
 
 check-openapi: ## validate the OpenAPI contract: parse + internal $ref integrity + structure
 	python3 scripts/validate_openapi.py
+
+check-spec-version: ## fail when specs/SPEC_VERSION.json is not the digest of its inputs
+# The same family as the two above it: a derived artifact that drifts from its
+# inputs and fails CI, not the local loop. It was missing here, and main went red
+# on 6ec746c for it — a one-line edit to tasks/tasks.json (an INPUT of this
+# digest) committed without regenerating the marker. `make check` is the
+# one-command local check, so the check belongs in it.
+	python3 scripts/spec_version.py --check
 
 fmt-check: ## fail when any Go file is not gofmt-formatted (legacy baseline: ops/ci/gofmt-baseline.txt)
 # .rddev/ is runtime state (Worker worktrees under .rddev/worktrees/<TASK>), not source.

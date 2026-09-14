@@ -19,6 +19,14 @@ type DriveOpts struct {
 	WorkerTimeout                           time.Duration
 	Once                                    bool // one tick then return (tests, cron-style use)
 	Out                                     io.Writer
+
+	// StaleCheck answers "is the rddev running this driver too old to grade
+	// what main now describes?", returning the refusal text when it is. Nil
+	// asks the real guard. A field because the answer is about the PROCESS
+	// (the revision compiled into it), and a test binary is never the stale one
+	// — without this, the only way to exercise the waiting side would be to
+	// build an old rddev and run it.
+	StaleCheck func() (string, bool)
 }
 
 func (o *DriveOpts) logf(format string, a ...any) {
@@ -130,7 +138,11 @@ func (o *DriveOpts) Drive(ctx context.Context) error {
 		if o.Once {
 			return nil
 		}
-		if !acted {
+		// "Nothing to do" is not a conclusion a stale driver is entitled to
+		// draw: it has not looked, because it cannot act on what it would find.
+		// Deciding it here would exit with a message that reads like completion
+		// while the real condition is that the tool is out of date.
+		if !acted && st.Stale == "" {
 			done, err := o.exhausted()
 			if err != nil {
 				return err
@@ -198,6 +210,9 @@ func (o *DriveOpts) runningTasks() ([]string, error) {
 
 // tick performs at most one action per task and returns whether it did anything.
 func (o *DriveOpts) tick(st *DriverStatus) (bool, error) {
+	if o.staleTick(st) {
+		return false, nil
+	}
 	// Reconcile every tick. The registry's exit_status is written by
 	// DiscoverWorkers, not by the reaper, so a driver that only reconciles at
 	// startup never notices a Worker exiting — it reports "still working"
@@ -469,6 +484,68 @@ func (o *DriveOpts) spawnRefusedForCapacity(task, what, refusal string) bool {
 	}
 	o.logf("%s: no free Worker slot for %s — waiting for one to finish (%s)", task, what, firstLine(refusal))
 	return true
+}
+
+// staleTick answers whether this driver is running a binary too old to grade
+// what main now describes, and holds the whole tick when it is.
+//
+// The condition is about THIS PROCESS, not about any task. guardAgainstStaleBinary
+// refuses such a binary at startup, so a driver only reaches this by going stale
+// in flight — which happens every time a commit touching cmd/rddev or
+// internal/devorchestrator lands on main, and that is routine here. From that
+// moment every command the driver runs fails identically: collect, review,
+// accept, push, merge and dispatch all hit the same guard.
+//
+// Recording that per task is what wedges the pipeline. tick skips any task with
+// an open decision, so the task cannot recover even after the binary is rebuilt
+// — the fix and the recorded decision are about different things, and only one
+// of them is on the task. One stale binary therefore leaves one landmine on
+// every task that happened to be at an actionable step (#163, second family:
+// T0304's push at 10:49 and T0307's collect at 14:13 on 2026-09-14).
+//
+// A driver cannot rebuild itself and does not need to: restarting it IS the
+// retry. So it waits, says so once on the way in rather than every tick, and is
+// correct again the moment it is restarted. DriverStatus.Stale carries the same
+// fact to `rddev status`, because a driver that has stopped acting must not look
+// like one with nothing to do.
+func (o *DriveOpts) staleTick(st *DriverStatus) bool {
+	reason, stale := o.staleBinary()
+	if !stale {
+		if st.Stale != "" {
+			st.Stale = ""
+			o.logf("this driver is running a current rddev again")
+		}
+		return false
+	}
+	if st.Stale != reason {
+		st.Stale = reason
+		o.logf("this driver is running a stale rddev and will act on nothing until it is rebuilt and restarted: %s", firstLine(reason))
+	}
+	return true
+}
+
+// staleBinary asks the guard, unless the operator has said to run anyway.
+//
+// The override is honoured here for the same reason the startup guard honours
+// it: RDDEV_ALLOW_STALE_BINARY exists so a build that is deliberately not
+// main's can still run, and a driver that started under it and then refused to
+// tick would make the override mean the opposite of what it says.
+func (o *DriveOpts) staleBinary() (string, bool) {
+	// The override outranks the check, not the other way round: it is the
+	// operator saying "run anyway", and it means the same thing whatever
+	// answered the staleness question.
+	if os.Getenv(AllowStaleBinaryEnv) != "" {
+		return "", false
+	}
+	if o.StaleCheck != nil {
+		return o.StaleCheck()
+	}
+	stamp := CurrentBuildStamp()
+	reason, stale, err := StaleBinaryReason(o.RepoRoot, stamp.Revision)
+	if err != nil {
+		return "", false
+	}
+	return reason, stale
 }
 
 func firstLine(s string) string {

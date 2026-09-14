@@ -59,15 +59,21 @@ func DriverFilesAt(repoRoot string) DriverPaths {
 // heartbeat age, not from a live process handle, so a crashed driver is
 // reported dead rather than merely unreachable.
 type DriverStatus struct {
-	PID           int      `json:"pid"`
-	StartedAt     string   `json:"started_at"`
-	HeartbeatAt   string   `json:"heartbeat_at"`
-	State         string   `json:"state"`
-	Parallel      int      `json:"parallel"`
-	RunningTasks  []string `json:"running_tasks"`
-	Merged        int      `json:"merged"`
-	LastAction    string   `json:"last_action,omitempty"`
-	HeartbeatSeen string   `json:"heartbeat_seen,omitempty"`
+	PID          int      `json:"pid"`
+	StartedAt    string   `json:"started_at"`
+	HeartbeatAt  string   `json:"heartbeat_at"`
+	State        string   `json:"state"`
+	Parallel     int      `json:"parallel"`
+	RunningTasks []string `json:"running_tasks"`
+	Merged       int      `json:"merged"`
+	LastAction   string   `json:"last_action,omitempty"`
+	// Stale carries the staleness guard's refusal when the rddev this driver is
+	// RUNNING is too old to grade what main describes. It is on the record
+	// because the driver stops acting while it is set, and "alive, 4 Workers
+	// running" reads as progress: the Supervisor has to be able to tell a
+	// driver that is holding from one that is working.
+	Stale         string `json:"stale_binary,omitempty"`
+	HeartbeatSeen string `json:"heartbeat_seen,omitempty"`
 }
 
 // StaleAfter is how long a heartbeat may go unheard before the driver is

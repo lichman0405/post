@@ -459,3 +459,156 @@ func writeRefusingRddev(t *testing.T, failing, refusal string) string {
 	}
 	return bin
 }
+
+// A driver whose own rddev has gone out of date cannot grade anything, because
+// every command it runs hits the same guard. What it must NOT do is record that
+// as a decision about each task: tick skips a task with an open decision, so the
+// task stays wedged after the binary is rebuilt, and the fix (restart the
+// driver) and the record (a landmine on T0001) are about different things.
+//
+// The failure this pins is not hypothetical — it happened twice on 2026-09-14
+// alone, to T0304's push and to T0307's collect — so the assertion is on the two
+// things that made it cost something: the driver ran no command at all, and it
+// left nothing behind for a human to clear.
+func TestAStaleDriverHoldsInsteadOfWedgingEveryTask(t *testing.T) {
+	stale := "this rddev was built from aaaaaaaa, and main has since changed the orchestrator's own source:\n  bbbbbbbb orchestration: something"
+	t.Setenv(AllowStaleBinaryEnv, "")
+	root, dagPath, statePath := staleDriverFixture(t)
+	calls := filepath.Join(root, "calls.log")
+	var log strings.Builder
+
+	o := &DriveOpts{
+		RepoRoot: root, DagPath: dagPath, StatePath: statePath,
+		Binary: writeRecordingRddev(t, calls), Out: &log,
+		StaleCheck: func() (string, bool) { return stale, true },
+	}
+	st := &DriverStatus{}
+	acted, err := o.tick(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acted {
+		t.Error("a tick with a stale binary reported that it did something")
+	}
+	if _, err := os.Stat(calls); !os.IsNotExist(err) {
+		t.Errorf("the driver ran a command while its own binary could not be trusted to grade one:\n  %s", readIfAny(t, calls))
+	}
+	ds, err := ReadDecisions(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ds) != 0 {
+		t.Fatalf("a stale binary left %d decision(s) naming a task; the condition is about the driver process, and the task cannot clear it by being reworked:\n  %s", len(ds), ds[0].Reason)
+	}
+	if st.Stale != stale {
+		t.Errorf("the heartbeat does not carry the staleness, so `rddev status` reports a driver holding as one that is working:\n  %q", st.Stale)
+	}
+	if !strings.Contains(log.String(), "stale rddev") {
+		t.Errorf("the driver held without saying why:\n%s", log.String())
+	}
+}
+
+// The other half: once the binary is current again — which in practice means the
+// driver was restarted — the hold is gone by itself. Nothing has to be cleared,
+// and the field does not stay set out of habit, or `rddev status` would report a
+// rebuilt driver as stale forever.
+func TestARebuiltDriverActsAgainWithoutAnythingBeingCleared(t *testing.T) {
+	t.Setenv(AllowStaleBinaryEnv, "")
+	root, dagPath, statePath := staleDriverFixture(t)
+	calls := filepath.Join(root, "calls.log")
+	var log strings.Builder
+
+	o := &DriveOpts{
+		RepoRoot: root, DagPath: dagPath, StatePath: statePath,
+		Binary: writeRecordingRddev(t, calls), Out: &log,
+		StaleCheck: func() (string, bool) { return "", false },
+	}
+	st := &DriverStatus{Stale: "this rddev was built from aaaaaaaa, and main has since changed"}
+	if _, err := o.tick(st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Stale != "" {
+		t.Errorf("a current binary still reports itself stale: %q", st.Stale)
+	}
+	if !strings.Contains(log.String(), "current rddev again") {
+		t.Errorf("the hold was lifted without saying so, which is the same silence the hold exists to break:\n%s", log.String())
+	}
+	if _, err := os.Stat(calls); err != nil {
+		t.Error("a current binary ran no command, so the hold is not what stopped the stale driver above")
+	}
+}
+
+// RDDEV_ALLOW_STALE_BINARY means "run anyway". A driver started under it and
+// then refusing to tick would turn the override into its opposite.
+func TestTheStaleOverrideOutranksTheGuard(t *testing.T) {
+	root, dagPath, statePath := staleDriverFixture(t)
+	t.Setenv(AllowStaleBinaryEnv, "1")
+	calls := filepath.Join(root, "calls.log")
+	var log strings.Builder
+
+	o := &DriveOpts{
+		RepoRoot: root, DagPath: dagPath, StatePath: statePath,
+		Binary: writeRecordingRddev(t, calls), Out: &log,
+		StaleCheck: func() (string, bool) { return "stale, but the operator said to run anyway", true },
+	}
+	st := &DriverStatus{}
+	if _, err := o.tick(st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Stale != "" {
+		t.Errorf("a driver running under the override reported itself as holding: %q", st.Stale)
+	}
+	if _, err := os.Stat(calls); err != nil {
+		t.Error("the override did not take effect: the driver ran no command")
+	}
+}
+
+// staleDriverFixture is one running task whose Worker has exited — the state
+// that makes tick reach for `worker collect` and therefore for the guard.
+//
+// It deliberately does not touch the override: whether the operator has said to
+// run anyway is the test's subject, and a fixture that set it would decide the
+// answer before the test could ask the question.
+func staleDriverFixture(t *testing.T) (root, dagPath, statePath string) {
+	t.Helper()
+	root = t.TempDir()
+	dagPath = writeDAG(t, root)
+	statePath = filepath.Join(root, "task_status.json")
+	if err := os.WriteFile(statePath, []byte(`{"version":2,"tasks":{"T0001":{"status":"running"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exit := 0
+	if err := SaveRegistry(root, &WorkerRecord{TaskID: "T0001", RunID: "run-1", PID: os.Getpid(), ExitStatus: &exit}); err != nil {
+		t.Fatal(err)
+	}
+	if rec, err := LoadRegistry(root, "T0001"); err != nil || rec == nil || rec.ExitStatus == nil {
+		t.Fatalf("the fixture did not survive the registry round trip: %v", err)
+	}
+	return root, dagPath, statePath
+}
+
+// writeRecordingRddev writes a fake rddev that appends every invocation to
+// calls and succeeds, so "the driver acted" and "the driver held" are told
+// apart by a file rather than by reading the code.
+func writeRecordingRddev(t *testing.T, calls string) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "rddev")
+	script := "#!/bin/sh\n" +
+		"echo \"$1 $2\" >> \"" + calls + "\"\n" +
+		"case \"$1 $2\" in\n" +
+		"  \"task next\") echo T0001;;\n" +
+		"esac\nexit 0\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin
+}
+
+func readIfAny(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "(unreadable)"
+	}
+	return strings.TrimSpace(string(b))
+}
