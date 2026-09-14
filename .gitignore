@@ -8,6 +8,11 @@
 # orchestrator transient state (Supervisor-owned runtime; never committed)
 .worktrees/
 .rddev/
+# Supervisor work worktrees (`rddev branch create --worktree post-wt/...`). Same
+# class as /api /rddev below: a whole checkout of this repository, one `git add
+# -A` away from being committed from the main tree. Ignoring it here is what
+# keeps that from being a thing anybody has to remember.
+/post-wt/
 # rddev state-file lock (derived from the state file's directory; see
 # internal/devorchestrator/store.go lockPathFor)
 .task_status.lock
