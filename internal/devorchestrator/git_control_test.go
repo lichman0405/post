@@ -465,6 +465,177 @@ func TestMergeRefusesWhileThePRHasNoChecksYetAndStillSaysWhy(t *testing.T) {
 	}
 }
 
+// A PR GitHub cannot build a merge commit for has NO check runs: a
+// `pull_request` workflow runs against refs/pull/N/merge, and on a conflict
+// that commit does not exist, so no workflow is ever queued and every required
+// check is absent rather than pending. assertRequiredChecksGreen reads an
+// absent required check as "not reported yet" — the wait — so the driver
+// retried the merge every tick forever and never raised a decision. T0304's
+// PR #159 sat in exactly that state.
+//
+// The shim's checks are deliberately ALL GREEN. That is what makes this a test
+// of the ordering rather than of the conflict check alone: with the conflict
+// asserted after the checks — or not at all — every gate passes and gh pr merge
+// runs, so the merge succeeds and this test fails.
+func TestMergeRefusesWhenGitHubCannotBuildTheMergeCommit(t *testing.T) {
+	repoRoot, specPath := mergeGateFixture(t) // green collect + green G2 on disk
+	binDir := t.TempDir()
+	marker := filepath.Join(binDir, "invocations.log")
+	script := "#!/bin/sh\necho \"$0 $*\" >> \"$FAKE_INVOCATIONS\"\n" +
+		"case \"$1 $2\" in\n" +
+		"  \"pr view\") printf '%s' '{\"mergeable\":\"CONFLICTING\",\"mergeStateStatus\":\"DIRTY\"}';;\n" +
+		"  \"pr checks\") printf '%s' '[{\"name\":\"job-a\",\"state\":\"SUCCESS\"},{\"name\":\"job-b\",\"state\":\"SUCCESS\"}]';;\n" +
+		"  \"pr merge\") echo MERGED;;\n" +
+		"esac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeWorktreeRecord(t, repoRoot)
+	if err := os.WriteFile(marker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_INVOCATIONS", marker)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	_, err := MergePR(&GitControlOpts{RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001"})
+	if err == nil {
+		t.Fatal("pr merge proceeded on a PR GitHub cannot build a merge commit for")
+	}
+	if !strings.Contains(err.Error(), prConflicts) {
+		t.Errorf("the refusal did not say the PR conflicts:\n  %v", err)
+	}
+	// The classification, asked through the predicate the driver uses — the
+	// whole point is that this refusal is a decision.
+	if ciStillRunning(err.Error()) {
+		t.Errorf("a conflict was refused as though CI were still running, so the driver will retry it forever:\n  %v", err)
+	}
+	if invoked, _ := os.ReadFile(marker); strings.Contains(string(invoked), "pr merge") {
+		t.Errorf("gh pr merge was invoked despite the conflict:\n%s", invoked)
+	}
+}
+
+// Which `gh pr view --json mergeable,mergeStateStatus` answers mean the merge
+// is impossible, and which mean nothing at all.
+//
+// The rule is not "refuse unless it is green": most non-MERGEABLE answers
+// belong to the checks assertion (a BLOCKED PR is one whose required checks are
+// not satisfied) or to the next tick (UNKNOWN is GitHub saying it has not
+// computed it yet). This function owns exactly one condition — the merge commit
+// cannot be built — and the rows below are the boundary of it.
+func TestAConflictingPRIsADecisionAndAnUncomputedOneIsNot(t *testing.T) {
+	cases := []struct {
+		mergeable, state string
+		refuses          bool
+		why              string
+	}{
+		{"MERGEABLE", "CLEAN", false, "green — no refusal at all"},
+		{"MERGEABLE", "BLOCKED", false, "blocked by required checks: the checks assertion owns this answer"},
+		{"MERGEABLE", "BEHIND", false, "the base moved ahead without a conflict — a merge still builds"},
+		{"MERGEABLE", "UNSTABLE", false, "non-required checks are red: still mergeable"},
+		{"CONFLICTING", "DIRTY", true, "the merge commit cannot be built — this is the loop"},
+		{"CONFLICTING", "", true, "the direct answer alone is enough"},
+		{"", "DIRTY", true, "the merge-state field alone is enough"},
+		{"UNKNOWN", "UNKNOWN", false, "GitHub has not computed it yet: the next tick asks again"},
+		{"", "", false, "no answer at all is not evidence of a conflict"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.mergeable+"/"+tc.state, func(t *testing.T) {
+			binDir := t.TempDir()
+			script := "#!/bin/sh\n" +
+				"case \"$1 $2\" in\n" +
+				"  \"pr view\") printf '%s' '{\"mergeable\":\"" + tc.mergeable + "\",\"mergeStateStatus\":\"" + tc.state + "\"}';;\n" +
+				"esac\nexit 0\n"
+			if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			err := assertPRMergeable(t.TempDir(), "task/T0001-x", "T0001")
+			if !tc.refuses {
+				if err != nil {
+					t.Fatalf("mergeable=%q state=%q (%s) but the merge would refuse: %v",
+						tc.mergeable, tc.state, tc.why, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("mergeable=%q state=%q (%s) and no refusal was produced", tc.mergeable, tc.state, tc.why)
+			}
+			if !strings.Contains(err.Error(), prConflicts) {
+				t.Errorf("the refusal did not carry the conflict wording:\n  %v", err)
+			}
+			if ciStillRunning(err.Error()) {
+				t.Errorf("a decision read as a wait, so it would be retried forever:\n  %v", err)
+			}
+			// The remedy has to be in the refusal: the driver's log line is
+			// all the Supervisor sees, and "conflict" without "compose it onto
+			// main" is a dead end.
+			if !strings.Contains(err.Error(), "rebaseline T0001") {
+				t.Errorf("the refusal does not say what to do about it:\n  %v", err)
+			}
+		})
+	}
+}
+
+// An unreadable mergeability is not evidence of a conflict. A failed or
+// unparseable `gh pr view` must leave the decision to the checks assertion,
+// which says a wait when it means one — otherwise a transient network error
+// escalates a mergeable PR to the Supervisor as a conflict.
+func TestAnUnreadableMergeableIsNotAConflict(t *testing.T) {
+	cases := []struct {
+		name, script string
+	}{
+		{"gh fails with nothing on stdout", "exit 1"},
+		{"gh prints something that is not JSON", "printf '%s' 'not json'; exit 0"},
+		{"gh prints an empty object", "printf '%s' '{}'; exit 0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			binDir := t.TempDir()
+			script := "#!/bin/sh\n" + tc.script + "\n"
+			if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			if err := assertPRMergeable(t.TempDir(), "task/T0001-x", "T0001"); err != nil {
+				t.Fatalf("a mergeability that could not be read was reported as a conflict: %v", err)
+			}
+		})
+	}
+}
+
+// The third refusal must not read as either of the other two, and the property
+// is now pairwise over three strings rather than two — so it is asked as a
+// loop. TestTheTwoRefusalsDoNotReadAsEachOther still pins the #139 pair
+// specifically; this one is what catches a FOURTH refusal added later, which is
+// the way this keeps arriving.
+func TestNoRefusalReadsAsAnother(t *testing.T) {
+	all := []string{checksNotYet, checksRed, prConflicts}
+	for i, a := range all {
+		for j, b := range all {
+			if i != j && strings.Contains(a, b) {
+				t.Fatalf("refusal %q contains %q, so the driver cannot tell them apart", a, b)
+			}
+		}
+		if strings.Contains(a, noChecksReported) {
+			t.Fatalf("%q contains gh's own %q, so ciStillRunning cannot tell them apart", a, noChecksReported)
+		}
+	}
+	// Exactly the two waits, named one by one, so a third "wait" cannot be
+	// added without someone deciding it is one.
+	for _, s := range []string{checksNotYet, noChecksReported} {
+		if !ciStillRunning(s) {
+			t.Fatalf("a wait the driver is supposed to retry was not recognised as one: %q", s)
+		}
+	}
+	for _, s := range []string{checksRed, prConflicts} {
+		if ciStillRunning(s) {
+			t.Fatalf("a decision would be retried as though it were a wait — #139 is back: %q", s)
+		}
+	}
+}
+
 // A refusal has to say WHICH of two things happened, because the driver acts on
 // the difference: stepAccepted retries a "not yet" and escalates everything
 // else. Before this, every non-SUCCESS state produced the same sentence, and
