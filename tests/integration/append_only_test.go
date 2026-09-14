@@ -59,6 +59,8 @@ var appendOnlyTables = []string{
 	"audit_log",
 	"research_events",
 	"external_reference_snapshots",
+	"git_push_ingestions",
+	"git_push_changes",
 }
 
 // targetedGuardTriggers are the NON-append-only row guards added after
@@ -69,12 +71,18 @@ var appendOnlyTables = []string{
 // Migration 00031 adds the branch→git-ref guards (T0303): the derived
 // git_ref and immutable name guard on branches, the per-row mapping and
 // close-direction triggers, and the git_branch_refs sync-state machine.
+// Migration 00034 adds the push-ingestion history tables (T0305): the
+// ingestion record and the inspected change set join the append-only set
+// (both halves of the guard), while the candidate table carries its own
+// content-immutable guard (status-only transitions) plus the TRUNCATE half.
 var targetedGuardTriggers = map[string]string{
-	"branches:branch_lifecycle_guard_trigger":      ":O:19",
-	"branches:branch_git_ref_guard_trigger":        ":O:23",
-	"branches:branch_git_ref_map_trigger":          ":O:5",
-	"branches:branch_git_ref_close_trigger":        ":O:17",
-	"git_branch_refs:git_branch_ref_guard_trigger": ":O:23",
+	"branches:branch_lifecycle_guard_trigger":                                ":O:19",
+	"branches:branch_git_ref_guard_trigger":                                  ":O:23",
+	"branches:branch_git_ref_map_trigger":                                    ":O:5",
+	"branches:branch_git_ref_close_trigger":                                  ":O:17",
+	"git_branch_refs:git_branch_ref_guard_trigger":                           ":O:23",
+	"git_push_semantic_candidates:git_push_semantic_candidate_guard_trigger": ":O:27",
+	"git_push_semantic_candidates:git_push_semantic_candidates_no_truncate":  ":O:34",
 }
 
 // triggerRows returns every user trigger in the public schema as sorted
@@ -288,6 +296,9 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 		update func(id string) error
 		del    func(id string) error
 	}
+	// ingID is captured by the git_push_ingestions case (the loop runs the
+	// cases in order) so the git_push_changes case can reference its FK row.
+	var ingID string
 	cases := []rowCase{
 		{
 			table: "relation_versions",
@@ -489,6 +500,45 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 				return err
 			},
 		},
+		{
+			table: "git_push_ingestions",
+			insert: func() string {
+				id := mustQueryUUID(`INSERT INTO git_push_ingestions
+					(delivery_id, gitea_repo_id, project_id, branch_name, git_ref,
+					 before_sha, after_sha, commit_count, pusher)
+					VALUES ('d-1', 42, $1, 'main', 'refs/heads/main', 'aaa', 'bbb', 1, 'svc')
+					RETURNING id`, p1)
+				ingID = id
+				return id
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE git_push_ingestions SET after_sha = 'rewritten' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM git_push_ingestions WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			table: "git_push_changes",
+			insert: func() string {
+				// The FK row exists: the loop ran the ingestions case first.
+				return mustQueryUUID(`INSERT INTO git_push_changes
+					(ingestion_id, path, change_kind, file_kind)
+					VALUES ($1, 'x.json', 'added', 'unstructured') RETURNING ingestion_id`, ingID)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE git_push_changes SET change_kind = 'rewritten'
+					WHERE ingestion_id = $1 AND path = 'x.json'`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM git_push_changes
+					WHERE ingestion_id = $1 AND path = 'x.json'`, id)
+				return err
+			},
+		},
 	}
 
 	for _, c := range cases {
@@ -502,6 +552,115 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 	// but an in-place pointer move is the documented mechanism (docs/21 §5).
 	if _, err := pool.Exec(ctx, `UPDATE branches SET base_state_id = $1 WHERE id = $2`, s2, b1); err != nil {
 		t.Errorf("current-state UPDATE (branches.base_state_id pointer) must remain allowed: %v", err)
+	}
+}
+
+// TestGitPushSemanticCandidateGuard proves the candidate guard's three
+// semantics as BEHAVIOR (the trigger-set assertions in assertTriggers only
+// prove it exists): the status may transition (candidate → validated |
+// applied | rejected — the validation pipeline's later tasks), everything
+// else is immutable, and a candidate row is never deleted.
+func TestGitPushSemanticCandidateGuard(t *testing.T) {
+	ctx := testCtx(t)
+	pool, _ := testdb.Setup(t, ctx, adminURL(t), appendOnlyTaskID)
+
+	// An ingestion row to hang the candidate on (project_id is nullable —
+	// the guard is about the candidate row itself, not the project graph).
+	var ingID string
+	if err := pool.QueryRow(ctx, `INSERT INTO git_push_ingestions
+		(delivery_id, gitea_repo_id, project_id, branch_name, git_ref, before_sha, after_sha, commit_count, pusher)
+		VALUES ('d-cand', 7, NULL, 'main', 'refs/heads/main', 'aaa', 'bbb', 1, 'svc')
+		RETURNING id`).Scan(&ingID); err != nil {
+		t.Fatalf("candidate guard: insert ingestion: %v", err)
+	}
+	var candID string
+	if err := pool.QueryRow(ctx, `INSERT INTO git_push_semantic_candidates
+		(ingestion_id, path, change_kind, schema_id, candidate)
+		VALUES ($1, 'mat.json', 'added', 'https://open-rd.example/schemas/material.schema.json', '{"id":"mat-0001"}')
+		RETURNING id`, ingID).Scan(&candID); err != nil {
+		t.Fatalf("candidate guard: insert candidate: %v", err)
+	}
+
+	wantGuardErr := func(stmt, wantMsg string, err error) {
+		t.Helper()
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) {
+			t.Fatalf("%s: expected a PostgreSQL error from the candidate guard, got %v", stmt, err)
+		}
+		if pgErr.Code != "P0001" {
+			t.Errorf("%s: SQLSTATE = %s, want P0001 (raise_exception)", stmt, pgErr.Code)
+		}
+		if !strings.Contains(pgErr.Message, wantMsg) {
+			t.Errorf("%s: message %q must contain %q", stmt, pgErr.Message, wantMsg)
+		}
+	}
+
+	// 1. The status is the ONE legal mutation: every transition the
+	// validation pipeline's later tasks perform lands, and none of them
+	// disturb the content.
+	for _, st := range []string{"validated", "applied", "rejected", "candidate"} {
+		if _, err := pool.Exec(ctx,
+			`UPDATE git_push_semantic_candidates SET status = $1 WHERE id = $2`, st, candID); err != nil {
+			t.Fatalf("candidate guard: status → %s: %v", st, err)
+		}
+	}
+	var gotStatus, gotKind, gotPath string
+	var gotCandidate []byte
+	if err := pool.QueryRow(ctx, `SELECT status, change_kind, path, candidate
+		FROM git_push_semantic_candidates WHERE id = $1`, candID).
+		Scan(&gotStatus, &gotKind, &gotPath, &gotCandidate); err != nil {
+		t.Fatalf("candidate guard: probe row: %v", err)
+	}
+	if gotStatus != "candidate" || gotKind != "added" || gotPath != "mat.json" ||
+		string(gotCandidate) != `{"id": "mat-0001"}` {
+		t.Errorf("candidate guard: row after status transitions = %s/%s/%s/%s, want candidate/added/mat.json with the content intact",
+			gotStatus, gotKind, gotPath, gotCandidate)
+	}
+
+	// 2. Content is immutable: every non-status column is pinned by the
+	// guard — the candidate itself and each identity/classification cell.
+	_, err := pool.Exec(ctx, `UPDATE git_push_semantic_candidates SET candidate = '{"tampered":true}' WHERE id = $1`, candID)
+	wantGuardErr("UPDATE candidate (candidate)", "immutable", err)
+	_, err = pool.Exec(ctx, `UPDATE git_push_semantic_candidates SET path = 'other.json' WHERE id = $1`, candID)
+	wantGuardErr("UPDATE candidate (path)", "immutable", err)
+	_, err = pool.Exec(ctx, `UPDATE git_push_semantic_candidates SET change_kind = 'removed' WHERE id = $1`, candID)
+	wantGuardErr("UPDATE candidate (change_kind)", "immutable", err)
+	_, err = pool.Exec(ctx, `UPDATE git_push_semantic_candidates SET schema_id = 'other' WHERE id = $1`, candID)
+	wantGuardErr("UPDATE candidate (schema_id)", "immutable", err)
+	// ingestion_id to ANOTHER existing ingestion (the FK is satisfied, so
+	// only the guard can reject the move).
+	var ing2ID string
+	if err := pool.QueryRow(ctx, `INSERT INTO git_push_ingestions
+		(delivery_id, gitea_repo_id, project_id, branch_name, git_ref, before_sha, after_sha, commit_count, pusher)
+		VALUES ('d-cand2', 8, NULL, 'main', 'refs/heads/main', 'ccc', 'ddd', 1, 'svc')
+		RETURNING id`).Scan(&ing2ID); err != nil {
+		t.Fatalf("candidate guard: insert second ingestion: %v", err)
+	}
+	_, err = pool.Exec(ctx, `UPDATE git_push_semantic_candidates SET ingestion_id = $1 WHERE id = $2`, ing2ID, candID)
+	wantGuardErr("UPDATE candidate (ingestion_id)", "immutable", err)
+
+	// 3. A candidate is never deleted.
+	_, err = pool.Exec(ctx, `DELETE FROM git_push_semantic_candidates WHERE id = $1`, candID)
+	wantGuardErr("DELETE candidate", "never deleted", err)
+
+	// The status domain itself is a CHECK: an unknown status is rejected
+	// before any transition could land (23514, the constraint — not the
+	// guard, which only admits the four legal values).
+	_, err = pool.Exec(ctx, `UPDATE git_push_semantic_candidates SET status = 'bogus' WHERE id = $1`, candID)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Errorf("candidate guard: status = 'bogus': err = %v, want SQLSTATE 23514", err)
+	}
+
+	// Nothing above may have landed: the row is exactly as inserted, with
+	// its final status transition.
+	var finalStatus string
+	if err := pool.QueryRow(ctx, `SELECT status FROM git_push_semantic_candidates WHERE id = $1`, candID).
+		Scan(&finalStatus); err != nil {
+		t.Fatalf("candidate guard: final probe: %v", err)
+	}
+	if finalStatus != "candidate" {
+		t.Errorf("candidate guard: final status = %q, want candidate", finalStatus)
 	}
 }
 

@@ -42,6 +42,12 @@ type fakePort struct {
 	getRepo      gitprovider.Repository
 	getRepoSet   bool
 	getRepoErr   error
+
+	// Push-ingestion side (T0305): canned diff and file reads.
+	changedFiles    []gitprovider.FileChange
+	changedFilesErr error
+	files           map[string][]byte
+	readFileErr     error
 }
 
 func (f *fakePort) EnsureRepository(_ context.Context, spec gitprovider.RepositorySpec) (gitprovider.Repository, error) {
@@ -114,6 +120,30 @@ func (f *fakePort) GetBranch(_ context.Context, _ gitprovider.Repository, name s
 func (f *fakePort) DeleteBranch(_ context.Context, _ gitprovider.Repository, name string) error {
 	f.deleted = append(f.deleted, name)
 	return f.deleteErr
+}
+
+// Push-ingestion side (T0305): scripted diff and file reads.
+
+// ChangedFiles returns the canned diff; ChangedFilesErr overrides it.
+func (f *fakePort) ChangedFiles(_ context.Context, _ gitprovider.Repository, _, _ string) ([]gitprovider.FileChange, error) {
+	f.calls = append(f.calls, "changed-files")
+	if f.changedFilesErr != nil {
+		return nil, f.changedFilesErr
+	}
+	return f.changedFiles, nil
+}
+
+// ReadFile returns canned content per (sha, path) key; ReadFileErr
+// overrides it. The script must be set before the call records the key.
+func (f *fakePort) ReadFile(_ context.Context, _ gitprovider.Repository, sha, path string) ([]byte, error) {
+	f.calls = append(f.calls, "read-file")
+	if f.readFileErr != nil {
+		return nil, f.readFileErr
+	}
+	if v, ok := f.files[sha+":"+path]; ok {
+		return v, nil
+	}
+	return nil, gitprovider.ErrNotFound
 }
 
 // fakeStore is a scripted ProvisionStore: it invokes the provisioning

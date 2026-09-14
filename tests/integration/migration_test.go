@@ -205,6 +205,33 @@ var canonicalTables = map[string]tableExp{
 		checks: []string{"sync_state = ANY"},
 		fks:    []fkExp{fk("branch_id", "branches", "RESTRICT")},
 	},
+	"git_push_ingestions": {
+		// T0305 (00034): one row per accepted push delivery; the dedupe key
+		// (gitea_repo_id, git_ref, after_sha) makes redelivered webhooks a
+		// no-op; head_skip_reason records a refused (guarded) head advance.
+		cols:    []colExp{c("id", u, false, true), c("delivery_id", txt, true, false), c("gitea_repo_id", i8, false, false), c("project_id", u, true, false), c("branch_name", txt, false, false), c("git_ref", txt, false, false), c("before_sha", txt, false, false), c("after_sha", txt, false, false), c("commit_count", i4, false, true), c("pusher", txt, true, false), c("commits", jb, false, true), c("head_skip_reason", txt, true, false), c("created_at", ts, false, true)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"gitea_repo_id", "git_ref", "after_sha"}},
+		checks:  []string{"head_skip_reason = ANY"},
+		fks:     []fkExp{fk("project_id", "projects", "RESTRICT")},
+	},
+	"git_push_changes": {
+		// T0305 (00034): the inspected changed-file set of one ingestion,
+		// classified semantic_manifest vs unstructured.
+		cols:   []colExp{c("ingestion_id", u, false, false), c("path", txt, false, false), c("change_kind", txt, false, false), c("file_kind", txt, false, false), c("schema_id", txt, true, false), c("content_sha256", txt, true, false)},
+		pk:     []string{"ingestion_id", "path"},
+		checks: []string{"change_kind = ANY", "file_kind = ANY"},
+		fks:    []fkExp{fk("ingestion_id", "git_push_ingestions", "RESTRICT")},
+	},
+	"git_push_semantic_candidates": {
+		// T0305 (00034): the candidate semantic diff per changed manifest —
+		// content-immutable, status-only transitions.
+		cols:    []colExp{c("id", u, false, true), c("ingestion_id", u, false, false), c("path", txt, false, false), c("change_kind", txt, false, false), c("schema_id", txt, false, false), c("candidate", jb, false, false), c("status", txt, false, true), c("created_at", ts, false, true)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"ingestion_id", "path"}},
+		checks:  []string{"change_kind = ANY", "status = ANY"},
+		fks:     []fkExp{fk("ingestion_id", "git_push_ingestions", "RESTRICT")},
+	},
 	"project_states": {
 		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("branch_id", u, true, false), c("parent_state_id", u, true, false), c("state_hash", txt, false, false), c("git_commit_sha", txt, true, false), c("manifest_version", txt, false, false), c("created_at", ts, false, true)},
 		pk:      []string{"id"},
@@ -1215,4 +1242,77 @@ func TestConstraintEnforcement(t *testing.T) {
 	}
 	_ = sov1
 	_ = sov2
+}
+
+// TestGitBranchRefGuardFastPathWhitelist proves the 00034 fast path admits
+// EXACTLY the tip pointer: a head_sha-only update passes in a non-terminal
+// state, but an update touching any other column — including the two the
+// original fixed enumeration missed, created_at and the primary key
+// branch_id — is not a head-pointer refresh and falls to the state machine,
+// which rejects it ('synced may only move to failed or closing'). The
+// branch_id cell needs a second, same-named branch in another project: the
+// derived-ref check would reject any other target before the whitelist is
+// consulted.
+func TestGitBranchRefGuardFastPathWhitelist(t *testing.T) {
+	ctx := testCtx(t)
+	pool, _ := testdb.Setup(t, ctx, adminURL(t), taskID)
+
+	mustQueryUUID := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("setup query failed: %s: %v", sql, err)
+		}
+		return id
+	}
+
+	u1 := mustQueryUUID(`INSERT INTO users (handle, display_name) VALUES ('whitelist', 'Whitelist') RETURNING id`)
+	o1 := mustQueryUUID(`INSERT INTO organizations (slug, name) VALUES ('whitelist-org', 'Whitelist Org') RETURNING id`)
+	p1 := mustQueryUUID(`INSERT INTO projects (organization_id, slug, name, purpose, visibility, created_by)
+		VALUES ($1, 'whitelist-1', 'Whitelist 1', 'testing the fast-path whitelist', 'private', $2) RETURNING id`, o1, u1)
+	p2 := mustQueryUUID(`INSERT INTO projects (organization_id, slug, name, purpose, visibility, created_by)
+		VALUES ($1, 'whitelist-2', 'Whitelist 2', 'testing the fast-path whitelist', 'private', $2) RETURNING id`, o1, u1)
+	b1 := mustQueryUUID(`INSERT INTO branches (project_id, name, visibility, git_ref, created_by)
+		VALUES ($1, 'feature-z', 'private', 'refs/heads/feature-z', $2) RETURNING id`, p1, u1)
+	b2 := mustQueryUUID(`INSERT INTO branches (project_id, name, visibility, git_ref, created_by)
+		VALUES ($1, 'feature-z', 'private', 'refs/heads/feature-z', $2) RETURNING id`, p2, u1)
+
+	// b1's mapping row, driven to 'synced' through the machine.
+	if _, err := pool.Exec(ctx, `UPDATE git_branch_refs
+		SET sync_state = 'synced', synced_at = now(), updated_at = now()
+		WHERE branch_id = $1`, b1); err != nil {
+		t.Fatalf("whitelist: drive b1 to synced: %v", err)
+	}
+
+	// The positive cell: a head-only update IS the fast path's purpose —
+	// it must pass (otherwise the rejection cells below would be vacuous).
+	if _, err := pool.Exec(ctx, `UPDATE git_branch_refs SET head_sha = 'cafe'
+		WHERE branch_id = $1`, b1); err != nil {
+		t.Fatalf("whitelist: head-only refresh rejected: %v", err)
+	}
+
+	wantMachineErr := func(stmt string, err error) {
+		t.Helper()
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) {
+			t.Fatalf("%s: expected a PostgreSQL error from the guard, got %v", stmt, err)
+		}
+		if pgErr.Code != "P0001" {
+			t.Errorf("%s: SQLSTATE = %s, want P0001 (raise_exception)", stmt, pgErr.Code)
+		}
+		if !strings.Contains(pgErr.Message, "synced may only move to failed or closing") {
+			t.Errorf("%s: message %q must carry the machine rejection (the fast path must NOT have admitted the change)",
+				stmt, pgErr.Message)
+		}
+	}
+
+	// created_at-only: not a tip refresh — rejected.
+	_, err := pool.Exec(ctx, `UPDATE git_branch_refs SET created_at = now() WHERE branch_id = $1`, b1)
+	wantMachineErr("UPDATE git_branch_refs SET created_at", err)
+
+	// branch_id-only: not a tip refresh — rejected. The target is the
+	// same-named branch in p2, so the derived-ref check passes and the
+	// whitelist is the thing on trial.
+	_, err = pool.Exec(ctx, `UPDATE git_branch_refs SET branch_id = $1 WHERE branch_id = $2`, b2, b1)
+	wantMachineErr("UPDATE git_branch_refs SET branch_id", err)
 }

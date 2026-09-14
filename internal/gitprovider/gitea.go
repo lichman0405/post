@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -553,6 +554,146 @@ func (a *GiteaAdapter) DeleteBranch(ctx context.Context, repo Repository, name s
 		return a.mapGitErr("delete the branch ref", out)
 	}
 	return nil
+}
+
+// maxFileRead is the per-file content bound the ingestion reads (T0305):
+// a manifest beyond it is not inspected, and its classification falls back
+// to unstructured — an ingestion must stay bounded, never balloon on a
+// pushed tarball.
+const maxFileRead = 1 << 20 // 1 MiB
+
+// errFileTooLarge reports a file whose content exceeded maxFileRead. It is
+// a classification input (unstructured), not a provider failure: the push
+// is still ingested with the file recorded as unread.
+var errFileTooLarge = errors.New("gitprovider: file content exceeds the read bound")
+
+// ChangedFiles implements GitPort (T0305): the authoritative changed-path
+// set of a push, from the git protocol — the payload's own commit list is
+// truncated by the provider (checked against the running instance: a
+// 60-commit push delivered 5), so the diff is the truth. An empty baseSHA
+// diffs the head against the empty tree (the ref was born in this push).
+// A baseSHA the provider can no longer serve (its commits became
+// unreachable — a force push) degrades to the same empty-tree diff: the
+// push replaced history, so every file at the head is candidate content.
+// ONLY that missing-ref shape degrades — any other fetch failure (a
+// transient provider error that a retry would clear) propagates, because
+// a --root diff over a half-fetched tree would record every file at the
+// head as added, in append-only rows that cannot be rewritten. The diff
+// runs without rename detection; renames surface as a delete + add pair,
+// which keeps each path's change kind unambiguous.
+func (a *GiteaAdapter) ChangedFiles(ctx context.Context, repo Repository, baseSHA, headSHA string) ([]FileChange, error) {
+	dir, err := a.newScratchRepo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	pushURL := a.pushURL(repo.Owner, repo.Name)
+
+	// One shallow fetch brings the head (and the base when it exists).
+	// A fetch failure that names a missing ref means the base is gone —
+	// force-pushed away — so the diff degrades to --root against the
+	// head alone; the head itself is refetched to prove it is still
+	// fetchable before the empty-tree diff is trusted.
+	fetchArgs := []string{"fetch", "--depth=1", pushURL, headSHA}
+	if baseSHA != "" {
+		fetchArgs = append(fetchArgs, baseSHA)
+	}
+	if out, err := a.gitRun(ctx, dir, fetchArgs...); err != nil {
+		fetchErr := a.mapGitErr("fetch the pushed commit", out)
+		if baseSHA == "" || !errors.Is(fetchErr, ErrNotFound) {
+			return nil, fetchErr
+		}
+		baseSHA = ""
+		if out2, err := a.gitRun(ctx, dir, "fetch", "--depth=1", pushURL, headSHA); err != nil {
+			return nil, a.mapGitErr("fetch the pushed commit", out2)
+		}
+	}
+
+	diffArgs := []string{"diff-tree", "-r", "-z", "--name-status"}
+	if baseSHA == "" {
+		diffArgs = append(diffArgs, "--root")
+		diffArgs = append(diffArgs, headSHA)
+	} else {
+		diffArgs = append(diffArgs, baseSHA, headSHA)
+	}
+	out, err := a.gitRun(ctx, dir, diffArgs...)
+	if err != nil {
+		return nil, a.mapGitErr("diff the push", out)
+	}
+	return parseNameStatus(out)
+}
+
+// parseNameStatus decodes `git diff-tree -r -z --name-status` output:
+// status-prefixed, NUL-terminated entries (the -z form has no tab between
+// status and path and no escaping — paths with tabs or newlines survive).
+func parseNameStatus(out string) ([]FileChange, error) {
+	parts := strings.Split(out, "\x00")
+	// The trailing NUL yields one empty final part; a no-change diff
+	// yields a single empty part.
+	var changes []FileChange
+	for i := 0; i+1 < len(parts); i += 2 {
+		status, path := parts[i], parts[i+1]
+		if path == "" {
+			continue
+		}
+		var kind ChangeKind
+		switch status {
+		case "A":
+			kind = ChangeAdded
+		case "M":
+			kind = ChangeModified
+		case "D":
+			kind = ChangeRemoved
+		case "T":
+			// A type change (file → symlink etc.). The diff runs
+			// without -M/-C, so a type change can only surface as a
+			// change of the file at the same path — map it to
+			// modified: failing the whole ingestion over this status
+			// would put the provider into a permanent redelivery loop
+			// (a delivery error is a 503, not a terminal verdict).
+			kind = ChangeModified
+		default:
+			return nil, fmt.Errorf("%w: unexpected diff-tree status %q", ErrUnavailable, status)
+		}
+		changes = append(changes, FileChange{Path: path, Kind: kind})
+	}
+	return changes, nil
+}
+
+// ReadFile implements GitPort (T0305): one file's content at one commit,
+// read over the git protocol (the repository is private — the API token
+// the adapter carries is the one credential that can read it). The content
+// is bounded to maxFileRead: an oversize file reports errFileTooLarge so
+// the ingestion classifies it unstructured instead of ballooning.
+func (a *GiteaAdapter) ReadFile(ctx context.Context, repo Repository, sha, path string) ([]byte, error) {
+	dir, err := a.newScratchRepo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	if out, err := a.gitRun(ctx, dir, "fetch", "--depth=1", a.pushURL(repo.Owner, repo.Name), sha); err != nil {
+		return nil, a.mapGitErr("fetch the pushed commit", out)
+	}
+	// Bound BEFORE the content is buffered: git show reads the whole blob
+	// into the runner's buffer before any check can see it, so ask the
+	// object database for the blob's size first. An unparseable size
+	// skips this early check rather than failing the classification —
+	// the post-read bound below still holds.
+	if out, err := a.gitRun(ctx, dir, "cat-file", "-s", sha+":"+path); err == nil {
+		if n, perr := strconv.ParseInt(strings.TrimSpace(out), 10, 64); perr == nil && n > maxFileRead {
+			return nil, errFileTooLarge
+		}
+	}
+	out, err := a.gitRun(ctx, dir, "show", sha+":"+path)
+	if err != nil {
+		return nil, a.mapGitErr("read the pushed file", out)
+	}
+	// Defense in depth: the size probe bounds the buffered read above;
+	// this stays as the final word in case the probe was skipped.
+	if len(out) > maxFileRead {
+		return nil, errFileTooLarge
+	}
+	return []byte(out), nil
 }
 
 // call performs one API request and decodes the JSON response body into

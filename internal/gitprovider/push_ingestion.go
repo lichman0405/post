@@ -1,0 +1,380 @@
+package gitprovider
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/lichman0405/post/internal/rsg/schemareg"
+)
+
+// Push ingestion (T0305): the platform half of the push webhook — verify
+// the provider's HMAC signature, inspect the changed files of the push
+// over the git protocol (the payload's commit list is truncated by the
+// provider — checked against the running instance), classify each changed
+// file (known scientific manifest vs unstructured), and record the
+// delivery plus the candidate semantic diff through IngestStore. The
+// store's dedupe key makes redelivered webhooks a no-op: the acceptance
+// criterion "重复 webhook 不重复 state" holds at the database level, not
+// by caller discipline.
+//
+// The canonical receiver path is POST /api/v1/git/hooks/gitea
+// (the handler lives in internal/gitprovider/push_ingestion_http.go,
+// wired into the API server in cmd/api/main.go — outside the session
+// guard, because the HMAC signature IS the authentication). The provider
+// signs the raw body with the per-repository secret T0301 stored in
+// git_repository_provisions: X-Gitea-Signature = hex(hmac-sha256(secret,
+// raw body)) (checked against the running instance).
+
+// ZerosSHA is the all-zero object id the provider uses for "no commit":
+// before is zeros when the push created the ref, after is zeros when the
+// push deleted it (this instance delivers ref deletions as its own
+// "delete" event, so a zeros after never arrives on a push hook — the
+// receiver still tolerates it).
+const ZerosSHA = "0000000000000000000000000000000000000000"
+
+// isZerosSHA reports whether s is the provider's "no commit" marker.
+func isZerosSHA(s string) bool { return s == ZerosSHA }
+
+// VerifyPushSignature checks the provider's delivery signature in constant
+// time: hex(hmac-sha256(secret, raw body)) against the per-repository
+// secret. The body must be the RAW bytes the provider signed — parsing
+// must not happen first, and the signature check must not compare on
+// anything but those bytes.
+func VerifyPushSignature(secret string, body []byte, signature string) bool {
+	if secret == "" || signature == "" {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	want := hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(want), []byte(signature))
+}
+
+// PushCommit is the slice of the delivered commit list the ingestion keeps
+// for audit (the provider already bounds the list).
+type PushCommit struct {
+	ID      string `json:"id"`
+	Message string `json:"message"`
+	Author  string `json:"author_login"`
+}
+
+// PushEvent is the parsed, delivery-shaped slice of a push webhook the
+// ingestion consumes. It is what the provider signs — ParsePushEvent maps
+// the provider's payload onto it and validates the fields the ingestion
+// depends on (ref shape, full commit SHAs).
+type PushEvent struct {
+	// Ref is the pushed ref, refs/heads/<name> for branch pushes (the
+	// only kind this instance delivers on a push hook).
+	Ref string
+	// Before/After are the full commit SHAs the push moved the ref
+	// between; zeros means "no commit on that side".
+	Before string
+	After  string
+	// RepositoryID is the provider's numeric repository id — the delivery
+	// is mapped to its canonical project through it
+	// (git_repository_provisions.gitea_repo_id).
+	RepositoryID int64
+	// Owner and Name are the provider-side repository coordinates, for
+	// the git-protocol calls only (never identity).
+	Owner string
+	Name  string
+	// Pusher is the provider login that pushed (audit only — identity
+	// mapping to platform users is T0304's).
+	Pusher string
+	// TotalCommits is the provider's own commit count; it may exceed the
+	// delivered Commits list.
+	TotalCommits int
+	// Commits is the delivered commit list, as the provider bounded it.
+	Commits []PushCommit
+	// DeliveryID is the provider's per-attempt delivery id
+	// (X-Gitea-Delivery) — correlation only, never the dedupe key.
+	DeliveryID string
+}
+
+// pushPayload is the provider's push delivery shape the receiver parses
+// (a subset of Gitea's payload, checked against the running instance).
+type pushPayload struct {
+	Ref    string `json:"ref"`
+	Before string `json:"before"`
+	After  string `json:"after"`
+	Total  int    `json:"total_commits"`
+	Pusher struct {
+		Login string `json:"login"`
+	} `json:"pusher"`
+	Repository struct {
+		ID    int64 `json:"id"`
+		Owner struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+		Name string `json:"name"`
+	} `json:"repository"`
+	Commits []struct {
+		ID      string `json:"id"`
+		Message string `json:"message"`
+		Author  struct {
+			Login string `json:"login"`
+		} `json:"author"`
+	} `json:"commits"`
+}
+
+// ErrNotABranchPush reports a delivery whose ref is not a branch ref: the
+// delivery is legal, the ingestion simply has nothing to do for it.
+var ErrNotABranchPush = errors.New("gitprovider: not a branch push")
+
+// ParsePushEvent parses one delivery body. The body must be the raw bytes
+// the provider signed (the caller verifies the signature separately).
+// ErrNotABranchPush is returned TOGETHER with the parsed event for a ref
+// outside refs/heads/: the receiver still verifies the delivery's
+// signature (using the event's repository id) before it decides there is
+// nothing to ingest. A plain error for malformed JSON or a payload whose
+// SHAs are not full commit ids.
+func ParsePushEvent(body []byte, deliveryID string) (PushEvent, error) {
+	var p pushPayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		return PushEvent{}, fmt.Errorf("gitprovider: parse push payload: %w", err)
+	}
+	ev := PushEvent{
+		Ref:          p.Ref,
+		Before:       p.Before,
+		After:        p.After,
+		RepositoryID: p.Repository.ID,
+		Owner:        p.Repository.Owner.Login,
+		Name:         p.Repository.Name,
+		Pusher:       p.Pusher.Login,
+		TotalCommits: p.Total,
+		DeliveryID:   deliveryID,
+	}
+	for _, c := range p.Commits {
+		ev.Commits = append(ev.Commits, PushCommit{ID: c.ID, Message: c.Message, Author: c.Author.Login})
+	}
+	if !strings.HasPrefix(p.Ref, "refs/heads/") {
+		return ev, fmt.Errorf("%w: %s", ErrNotABranchPush, p.Ref)
+	}
+	if !isZerosSHA(p.Before) && !isFullSHA(p.Before) {
+		return PushEvent{}, fmt.Errorf("gitprovider: payload before is not a full commit sha")
+	}
+	if !isZerosSHA(p.After) && !isFullSHA(p.After) {
+		return PushEvent{}, fmt.Errorf("gitprovider: payload after is not a full commit sha")
+	}
+	return ev, nil
+}
+
+// FileKind classifies one changed file of a push.
+type FileKind string
+
+// The two classifications the inspection produces: a file whose content
+// validated against a known scientific schema, or everything else (kept —
+// T0306's unstructured change state — but not a candidate).
+const (
+	FileKindManifest     FileKind = "semantic_manifest"
+	FileKindUnstructured FileKind = "unstructured"
+)
+
+// ClassifiedChange is one changed path with its inspection result.
+type ClassifiedChange struct {
+	Path string
+	Kind ChangeKind
+	// File is the classification: semantic_manifest when the content
+	// matched a known scientific schema.
+	File FileKind
+	// SchemaID is the matched schema's registry id (File=manifest only).
+	SchemaID string
+	// ContentSHA256 is the sha256 hex of the content the classification
+	// inspected (File=manifest only; the pushed content for added and
+	// modified, the pre-push content for removed).
+	ContentSHA256 string
+}
+
+// SemanticCandidate is one entry of the candidate RSG diff: a changed
+// manifest whose content matched a known scientific schema. The candidate
+// is the PROPOSAL the push implies — create, update or delete of the
+// manifest's content — awaiting the semantic validation pipeline; T0305
+// never applies it.
+type SemanticCandidate struct {
+	Path     string
+	Kind     ChangeKind
+	SchemaID string
+	// Content is the manifest's raw JSON (the pushed content for added
+	// and modified, the pre-push content for removed) — the proposal the
+	// candidate carries.
+	Content json.RawMessage
+}
+
+// IngestStore is the canonical-store port push ingestion writes through.
+// The concrete adapter is *PGPushIngestStore in this package.
+type IngestStore interface {
+	// WebhookSecretByRepoID returns the provisioned repository's webhook
+	// HMAC secret (T0301's stored value — the only authority, the
+	// provider never returns it). ErrNotFound when no provision row
+	// carries the repository id.
+	WebhookSecretByRepoID(ctx context.Context, giteaRepoID int64) (string, error)
+	// IngestPush records one delivery and its inspection result in one
+	// transaction: the ingestion row (dedupe on repository + ref +
+	// after — a duplicate is a complete no-op and reports inserted
+	// false), the changed-file rows, the candidate rows, the branch
+	// ref's head pointer (guarded — it advances only when it is still
+	// where the push started, or while the ref is still unborn for a
+	// creation push; a refused advance is recorded on the row as
+	// head_skip_reason = 'stale_before' or 'stale_creation'), and the
+	// pushed head as a project state.
+	IngestPush(ctx context.Context, in IngestPushParams) (inserted bool, err error)
+}
+
+// IngestPushParams carries one delivery's inspection result into the
+// store. The store derives project, branch and parent state itself — the
+// service passes facts only.
+type IngestPushParams struct {
+	Event      PushEvent
+	Changes    []ClassifiedChange
+	Candidates []SemanticCandidate
+}
+
+// PushIngester is the push ingestion application service: all policy lives
+// here — signature verification (stateless, exposed for the receiver), the
+// git-diff inspection, the manifest classification — and every canonical
+// fact goes through IngestStore.
+type PushIngester struct {
+	port  GitPort
+	store IngestStore
+	reg   *schemareg.Registry
+}
+
+// NewPushIngester wires the ingester. reg is the canonical schema registry
+// (the same instance the validation surface uses) — manifest
+// classification validates against it, never against a private copy.
+func NewPushIngester(port GitPort, store IngestStore, reg *schemareg.Registry) *PushIngester {
+	return &PushIngester{port: port, store: store, reg: reg}
+}
+
+// Ingest processes one VERIFIED delivery: inspect → classify → record.
+// Idempotency lives in the store's dedupe key; a redelivered webhook
+// returns (false, nil) and writes nothing. A zeros after (a ref-deletion
+// delivery) is recorded without inspection — there is no pushed head to
+// inspect and the provider deletes refs through its own delete event on
+// this instance, so this path is defensive.
+func (i *PushIngester) Ingest(ctx context.Context, ev PushEvent) (bool, error) {
+	params := IngestPushParams{Event: ev}
+	if isZerosSHA(ev.After) {
+		return i.store.IngestPush(ctx, params)
+	}
+	base := ev.Before
+	if isZerosSHA(base) {
+		base = ""
+	}
+	changes, err := i.port.ChangedFiles(ctx,
+		Repository{Owner: ev.Owner, Name: ev.Name, ID: ev.RepositoryID}, base, ev.After)
+	if err != nil {
+		return false, err
+	}
+	repo := Repository{Owner: ev.Owner, Name: ev.Name, ID: ev.RepositoryID}
+	for _, c := range changes {
+		classified, content := i.classify(ctx, repo, base, ev.After, c)
+		params.Changes = append(params.Changes, classified)
+		if classified.File == FileKindManifest {
+			params.Candidates = append(params.Candidates, SemanticCandidate{
+				Path:     classified.Path,
+				Kind:     classified.Kind,
+				SchemaID: classified.SchemaID,
+				Content:  json.RawMessage(content),
+			})
+		}
+	}
+	return i.store.IngestPush(ctx, params)
+}
+
+// classify inspects one changed path: only files whose path ends in .json
+// are read and validated against the known scientific schemas (the
+// canonical manifest format is JSON — specs/schemas); everything else is
+// unstructured without a provider read. A read failure, an oversize file,
+// or content that matches no known schema is unstructured — the file is
+// kept (T0306's retention), it is simply not a semantic candidate. The
+// returned content is the manifest's raw JSON when classified (nil
+// otherwise) — it becomes the candidate's proposed content.
+func (i *PushIngester) classify(ctx context.Context, repo Repository, base, head string, c FileChange) (ClassifiedChange, []byte) {
+	out := ClassifiedChange{Path: c.Path, Kind: c.Kind, File: FileKindUnstructured}
+	if !strings.HasSuffix(c.Path, ".json") {
+		return out, nil
+	}
+	sha := head
+	if c.Kind == ChangeRemoved {
+		sha = base
+	}
+	content, err := i.port.ReadFile(ctx, repo, sha, c.Path)
+	if err != nil {
+		return out, nil
+	}
+	schemaID, ok := classifyManifest(i.reg, content)
+	if !ok {
+		return out, nil
+	}
+	sum := sha256.Sum256(content)
+	out.File = FileKindManifest
+	out.SchemaID = schemaID
+	out.ContentSHA256 = hex.EncodeToString(sum[:])
+	return out, content
+}
+
+// manifestSchemaIDs are the registered schemas that identify a manifest
+// WITHOUT a declared object type: the canonical state manifest itself and
+// the two untyped domain shapes (relation's properties.type is a free
+// string, not a const — the registry's TypeConst does not see it). They
+// are the registry's canonical $ids (the shape the validation surface
+// stores); tried in this order — first match wins.
+var manifestSchemaIDs = []string{
+	schemareg.CanonicalNamespace + "rsg-manifest.schema.json",
+	schemareg.CanonicalNamespace + "evidence-assertion.schema.json",
+	schemareg.CanonicalNamespace + "relation.schema.json",
+}
+
+// classifyManifest validates one JSON document against the known
+// scientific schemas. A document declaring an object "type" must match the
+// schema that pins that type (a document claiming to be a material that
+// violates the material schema is NOT a manifest — it is broken); when no
+// registered schema pins the declared type at all — the type is a free
+// string the domain shapes carry, like a relation's "uses" — the document
+// falls through to the untyped manifest list and matches by shape, which
+// is how relation documents classify. A document without a type matches
+// the untyped list directly. Everything else is not a known manifest.
+func classifyManifest(reg *schemareg.Registry, doc []byte) (string, bool) {
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(doc, &probe) == nil && probe.Type != "" {
+		for _, ref := range reg.List() {
+			if t, ok := reg.TypeConst(ref); ok && t == probe.Type {
+				if reg.Validate(ref, doc) == nil {
+					return ref.ID, true
+				}
+				return "", false
+			}
+		}
+		// No registered schema pins this type: a free-string type, not a
+		// contradicted one. Fall through and let the untyped shapes decide.
+	}
+	for _, id := range manifestSchemaIDs {
+		if reg.Validate(schemareg.Ref{ID: id, Version: schemareg.CanonicalV1}, doc) == nil {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+// GitStateHash derives the state identity of a git-pushed branch head:
+// sha256 hex over the canonical JSON {"git_commit_sha": "<after>"}. It is
+// deterministic (the same commit always maps to the same state, which is
+// what makes a redelivered webhook collide instead of duplicating a
+// state) and distinct from the domain's transition hashes by construction
+// (it pins the commit, not a parent + operations pair).
+func GitStateHash(afterSHA string) string {
+	payload, _ := json.Marshal(struct {
+		GitCommitSHA string `json:"git_commit_sha"`
+	}{afterSHA})
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
+}
