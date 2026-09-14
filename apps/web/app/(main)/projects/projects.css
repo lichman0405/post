@@ -951,6 +951,317 @@
   color: var(--fgColor-accent, #0969da);
 }
 
+/* ---------- pulls (T0403) ---------- */
+
+.pulls-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pulls-section {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  padding: 16px;
+  background: var(--bgColor-default, #ffffff);
+}
+
+.pulls-section-title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pulls-section-desc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.pulls-error {
+  margin-top: 12px;
+  border: 1px solid var(--borderColor-danger-muted, #ff818266);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--fgColor-danger, #d1242f);
+  background: var(--bgColor-danger-muted, #ffebe9);
+}
+
+.pulls-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.pulls-table {
+  width: 100%;
+  margin-top: 12px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.pulls-table th {
+  padding: 6px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--fgColor-muted, #59636e);
+  border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+}
+
+.pulls-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.pulls-table tr:last-child td {
+  border-bottom: none;
+}
+
+.pulls-number {
+  white-space: nowrap;
+}
+
+.pulls-number-link {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.pulls-number-link:hover {
+  text-decoration: underline;
+}
+
+.pulls-title {
+  font-weight: 600;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.pulls-state {
+  display: inline-block;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+.pulls-date {
+  color: var(--fgColor-muted, #59636e);
+  white-space: nowrap;
+}
+
+.pulls-back {
+  margin: 0;
+  font-size: 13px;
+}
+
+.pulls-back a {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.pulls-back a:hover {
+  text-decoration: underline;
+}
+
+.pulls-detail-title {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.pulls-detail-number {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.pulls-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.pulls-detail-body {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--fgColor-default, #1f2328);
+  white-space: pre-wrap;
+}
+
+.pulls-pins {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 4px 16px;
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+
+.pulls-pins dt {
+  font-weight: 600;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.pulls-pins dd {
+  margin: 0;
+}
+
+.pulls-pin-id {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.pulls-verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 13px;
+}
+
+.pulls-verdict-pass {
+  border-color: var(--borderColor-success-muted, #4ac26b66);
+  color: var(--fgColor-success, #1a7f37);
+  background: var(--bgColor-success-muted, #dafbe1);
+}
+
+.pulls-verdict-warn {
+  border-color: var(--borderColor-attention-muted, #d4a72c);
+  color: var(--fgColor-attention, #9a6700);
+  background: var(--bgColor-attention-muted, #fff8c5);
+}
+
+.pulls-verdict-blocked {
+  border-color: var(--borderColor-danger-muted, #ff818266);
+  color: var(--fgColor-danger, #d1242f);
+  background: var(--bgColor-danger-muted, #ffebe9);
+}
+
+.pulls-verdict-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pulls-verdict-explanation {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.pulls-check-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.pulls-check-group {
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.pulls-dimension-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.pulls-check {
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-top: 6px;
+  font-size: 13px;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  background: var(--bgColor-default, #ffffff);
+}
+
+.pulls-check:first-child {
+  margin-top: 0;
+}
+
+.pulls-check-failed {
+  border-color: var(--borderColor-danger-muted, #ff818266);
+  background: var(--bgColor-danger-muted, #ffebe9);
+}
+
+.pulls-check-warning {
+  border-color: var(--borderColor-attention-muted, #d4a72c);
+  background: var(--bgColor-attention-muted, #fff8c5);
+}
+
+.pulls-check-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pulls-check-icon {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.pulls-check-failed .pulls-check-icon {
+  color: var(--fgColor-danger, #d1242f);
+}
+
+.pulls-check-warning .pulls-check-icon {
+  color: var(--fgColor-attention, #9a6700);
+}
+
+.pulls-check-passed .pulls-check-icon {
+  color: var(--fgColor-success, #1a7f37);
+}
+
+.pulls-check-id {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pulls-severity {
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.pulls-severity-blocking {
+  border: 1px solid var(--borderColor-danger-muted, #ff818266);
+  color: var(--fgColor-danger, #d1242f);
+  background: var(--bgColor-default, #ffffff);
+}
+
+.pulls-severity-warning {
+  border: 1px solid var(--borderColor-attention-muted, #d4a72c);
+  color: var(--fgColor-attention, #9a6700);
+  background: var(--bgColor-default, #ffffff);
+}
+
+.pulls-check-subject {
+  font-weight: 600;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.pulls-check-detail {
+  margin-top: 4px;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.pulls-check-why {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+
 /* Releases tab (T0606): immutable release snapshots. Neutral, dense,
    Primer-flavored — the same tokens as the rest of the project shell. */
 
