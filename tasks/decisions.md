@@ -6230,3 +6230,49 @@ T0206 那次能救回来就是因为记录里带着复核结论的路径。
 已补上 `check-spec-version` 目标并挂进 `check`。
 
 **可逆性**：完全可逆（驱动侧新增一个检查与一个状态字段；Makefile 加一个目标）。
+
+## L1-20260914-57
+
+**门禁里的 rddev 是被测对象，不是量尺 —— 那道尺子门在评测树里问错了对象**
+
+**事实**：T0307 的 G2 连红两次（14:29、14:34），红在 `tests/acceptance/driver-persistence-e2e.sh`，
+报的是 "the driver did not survive its launcher"，而跟在后面的**却是尺子门（`cmd/rddev/staleness.go`）的话**。
+T0307 这次的改动是纯产品代码（`cmd/api`、`internal/gitprovider`），一行都没碰 orchestrator。
+所以这件事要么是环境抖动，要么是这个任务被冤枉了 —— 不能用"清掉决策再试一次"糊过去（我第一次就是这么干的，于是它红了第二次）。
+
+**根因**（逐层验出来的，不是猜的）：
+- 门禁**不跑在任务的工作树里**，跑在 `prepareIntegrationTree`（`gate_run.go:670`）造的**评测树**里
+  = **fetch 到的 `origin/main`** + 任务的完整改动。我用 `/proc/<pid>/cwd` 抓到了那一步进程的真实工作目录，
+  确认就是 `.rddev/runtime/integration/T0307`。
+- 而尺子门比的是二进制里的 `vcs.revision` 与**本地 `main`**（`StaleBinaryReason` → `git log <rev>..main -- cmd/rddev internal/devorchestrator`）。
+- 于是：**只要本地 main 比 origin/main 多一个 orchestrator 提交 —— 也就是"我改完还没推"这个每天都在发生的瞬间 ——
+  评测树自己就"旧"了**，在树里启动的**任何长驻 rddev 都会拒绝启动**。
+- 那一步启动的正是长驻驱动进程，cwd 就是评测树 → 它拒绝启动（并退出）→ 脚本把"拒绝启动"读成了"启动后死掉"。
+- 前三个脚本（four-gate / rejection-retry / supervisor-git）之所以没撞上，是因为它们经 `fg_rddev` 调用，
+  而那个 helper 会先 `cd` 进它自己的 scratch 仓库（`four-gate-helpers.sh:147`）—— 那是**巧合**，不是设计。
+
+**这不是 T0307 的问题，也不是"一次性抖动"**：它是一个**假红**，而且**必然复发**。
+我今天已经撞了两次，第二次才动手查；再往后每推一次 orchestrator 代码、只要没推完就再来一次。
+
+**决策**：把这道门**只在门禁里**关掉。
+- 门禁评的是候选树，而树里的 rddev 是**被测对象**，不是量尺：这棵树按定义就是"集成基线 + 任务改动"，
+  它**天生就不是** main 的二进制。问它"你比 main 旧吗"在树里**没有指称对象** ——
+  那道门真正要保护的是 Supervisor 自己的循环，那个循环跑在主检出里。
+- 做法：`runGateStep` 给每一步的环境加上 `RDDEV_ALLOW_STALE_BINARY=1`，
+  加在 job/step 自己的 env **之前**，所以哪一步想把它重新打开仍然可以（有测试钉住这个顺序）。
+- **门禁本身一个字节没变**：required jobs、G1..G4 断言、review 要求、四份验收脚本的断言，全部照旧。
+  变的只是"哪把尺子量哪棵树"。旧二进制照样拒绝判分 —— Supervisor 循环里的保护一分没少。
+
+**为什么不在验收脚本里改**：那是逐脚本打补丁，且这个脚本里有**三处**启动驱动的调用
+（一个长驻 + 两次 `--once`），下一份验收脚本还会再撞一次。根因是"在门禁里问了一个关于 main 的问题"，就修在门禁。
+
+**证据**：
+- 新增 `TestGateStepsRunWithTheStalenessGuardDisarmed`，含对照：某一步用自己的 `env` 仍能重新打开这道门。
+  把那一行删掉 → 测试**变红**；加回来 → **变绿**。
+- 造出原始条件（本地 main 领先 origin/main 一个 orchestrator 提交）重跑 T0307 G2：
+  `driver-persistence-e2e: all checks passed`。
+
+**顺带记一笔（未修）**：`driver-persistence-e2e.sh` 把"驱动拒绝启动"报成"驱动没活过启动它的东西"，
+两者的修法完全不同（前者是工具/环境的事，后者是进程属性的事）。这次是那句话把我引向了错误的方向。
+
+**可逆性**：完全可逆（一行 env + 一个测试）。

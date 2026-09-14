@@ -339,6 +339,33 @@ func runGateStep(workDir, repoRoot, taskID, runID, jobName string, index int, st
 	// main plus the task's complete change. See RunGate.
 	cmd.Dir = workDir
 	cmd.Env = inheritedEnvWithout(notInherited)
+	// A step's rddev is the SUBJECT of the gate, not the instrument, so the
+	// staleness guard is disarmed here and nowhere else.
+	//
+	// The guard answers "is the rddev I am about to run older than the rules on
+	// main?" by asking the repository in the working directory, and its reason
+	// is about the Supervisor's own loop — the four-gate loop that runs from the
+	// main checkout. Inside a gate that question has no referent: this tree is
+	// the integration base plus the task's change, so the binary the step builds
+	// and runs is the candidate's, and it is by construction not main's.
+	//
+	// Armed, it does not protect anything. It converts a difference between the
+	// supervisor's local main and the FETCHED integration base into a red step
+	// about the candidate — and the two differ by design whenever local main
+	// holds an orchestrator commit that has not been pushed yet. On 2026-09-14
+	// exactly that failed T0307's G2 twice, on driver-persistence-e2e.sh: the
+	// tree was at origin/main, local main held one unpushed orchestrator commit,
+	// the driver the e2e launched refused to start, and the e2e reported "the
+	// driver did not survive its launcher". The refusal was correct and it was
+	// about nothing that task had done.
+	//
+	// The three acceptance scripts that reach rddev through fg_rddev dodge the
+	// same refusal today by cd-ing into their scratch repo first, which is an
+	// accident of that helper rather than a decision. This makes it a decision.
+	//
+	// Appended before the job's and the step's own env, so a step that wants the
+	// guard can still turn it back on.
+	cmd.Env = append(cmd.Env, AllowStaleBinaryEnv+"=1")
 	for k, v := range jobEnv {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}

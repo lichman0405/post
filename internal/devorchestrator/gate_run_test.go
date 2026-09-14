@@ -828,6 +828,60 @@ func TestG3DoesNotGetTheRestOfTheDevStackFile(t *testing.T) {
 	}
 }
 
+// A gate grades a candidate tree, so the rddev a step builds and runs is the
+// SUBJECT of the gate rather than the instrument that runs it. The staleness
+// guard asks whether that binary is older than the rules on the supervisor's
+// main — a question about the supervisor's own loop, which has no referent in a
+// tree that is main-plus-the-task's-change by construction.
+//
+// This is the regression test for T0307's G2, which failed twice on
+// driver-persistence-e2e.sh for nothing that task had done: the integration tree
+// was at origin/main, local main held one unpushed orchestrator commit, so the
+// driver the e2e launched refused to start and the e2e reported that it had not
+// survived its launcher.
+//
+// The second step is the control for the ordering claim: the variable is
+// appended before the job's own env and the step's, so a step that wants the
+// guard can still turn it back on. Without that, "the guard is off in here"
+// could be implemented by dropping the key from the environment for good.
+func TestGateStepsRunWithTheStalenessGuardDisarmed(t *testing.T) {
+	repoRoot, specPath := writeGateSpec(t, `{
+  "version": 1,
+  "required_jobs": ["job-a"],
+  "gates": {
+    "G1": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": []},
+    "G2": {"name": "", "description": "", "runs_jobs": ["job-a"], "asserts_jobs": []},
+    "G3": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": []},
+    "G4": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": ["job-a"]}
+  },
+  "jobs": {
+    "job-a": {"steps": [
+      {"run": "test \"${RDDEV_ALLOW_STALE_BINARY:-}\" = 1"},
+      {"run": "test \"${RDDEV_ALLOW_STALE_BINARY:-}\" = 0", "env": {"RDDEV_ALLOW_STALE_BINARY": "0"}}
+    ]}
+  },
+  "review": {"required_for_merge": false},
+  "task_overrides": {}
+}`)
+	// The ambient value must not decide this either way: it is set to something
+	// that satisfies neither assertion, so an implementation that merely left the
+	// inherited environment alone would fail the first step.
+	t.Setenv(AllowStaleBinaryEnv, "inherited-from-the-shell")
+
+	res, err := RunGate(&GateRunOpts{RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001", Gate: "G2", RunID: "r-stale-g2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "passed" {
+		for i, s := range res.Jobs[0].Steps {
+			if s.Exit != 0 {
+				data, _ := os.ReadFile(s.OutputFile)
+				t.Errorf("step %d (%s) exit=%d — a gate step must run with the staleness guard disarmed, and a step's own env must still be able to turn it back on:\n%s", i, s.Run, s.Exit, data)
+			}
+		}
+	}
+}
+
 // The exposed set is pinned, so widening it is a deliberate edit with a test
 // that has to be changed too — not a line that quietly rides along with the next
 // key someone adds to .env.dev.
