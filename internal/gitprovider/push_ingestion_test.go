@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/lichman0405/post/internal/gitprovider"
+	"github.com/lichman0405/post/internal/rsg/manifest"
 	"github.com/lichman0405/post/internal/rsg/schemareg"
 )
 
@@ -464,18 +465,52 @@ func validMaterialDoc() string {
 }
 
 // validManifestDoc is a minimal state manifest the rsg-manifest schema
-// accepts (untyped — no properties.type).
+// accepts (untyped — no properties.type). It carries the T0206 shape: the
+// format version is the exporter's constant (a literal would silently
+// drift from internal/rsg/manifest), git_ref is the state's recorded
+// commit sha string, schema_refs/policy_refs are present (empty: the
+// fixture pins no schema or policy), and the state_hash is the REAL
+// digest — computed with the exporter's own rule (manifest.Digest over the
+// canonical JSON of the semantic content below minus generated_at and
+// state_hash), so the document verifies the way a re-exported manifest
+// would.
 func validManifestDoc() string {
+	sha := testSHA
+	content := struct {
+		FormatVersion    string   `json:"format_version"`
+		ProjectID        string   `json:"project_id"`
+		StateID          string   `json:"state_id"`
+		ObjectVersions   []any    `json:"object_versions"`
+		RelationVersions []any    `json:"relation_versions"`
+		SchemaRefs       []string `json:"schema_refs"`
+		PolicyRefs       []string `json:"policy_refs"`
+		BlobRefs         []any    `json:"blob_refs"`
+		GitRef           *string  `json:"git_ref"`
+	}{
+		FormatVersion:    manifest.FormatV1,
+		ProjectID:        "p1",
+		StateID:          "s1",
+		ObjectVersions:   []any{},
+		RelationVersions: []any{},
+		SchemaRefs:       []string{},
+		PolicyRefs:       []string{},
+		BlobRefs:         []any{},
+		GitRef:           &sha,
+	}
+	contentJSON, _ := json.Marshal(content)
+	stateHash := manifest.Digest(contentJSON)
 	return `{
-	  "format_version": "1",
+	  "format_version": "` + manifest.FormatV1 + `",
 	  "project_id": "p1",
 	  "state_id": "s1",
 	  "generated_at": "2026-09-14T00:00:00Z",
 	  "object_versions": [],
 	  "relation_versions": [],
+	  "schema_refs": [],
+	  "policy_refs": [],
 	  "blob_refs": [],
-	  "git_ref": {"repository_id": "r1", "commit_sha": "` + testSHA + `"},
-	  "state_hash": "h"
+	  "git_ref": "` + testSHA + `",
+	  "state_hash": "` + stateHash + `"
 	}`
 }
 

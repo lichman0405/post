@@ -16,5 +16,9 @@ UPDATE blobs SET integrity_state = @integrity_state
 WHERE id = @id;
 
 -- name: AttachBlob :exec
-INSERT INTO blob_attachments (blob_id, scientific_object_version_id, attachment_role, access_level)
-VALUES (@blob_id, @scientific_object_version_id, @attachment_role, @access_level);
+-- The attachment records the state it was created in (00035): the caller
+-- (a state commit's write function) passes the state being committed, so
+-- a state's manifest enumerates its blob attachments from the state id
+-- alone (internal/domain/state.go).
+INSERT INTO blob_attachments (blob_id, scientific_object_version_id, attachment_role, access_level, state_id)
+VALUES (@blob_id, @scientific_object_version_id, @attachment_role, @access_level, @state_id);

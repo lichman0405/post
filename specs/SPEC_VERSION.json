@@ -1,10 +1,10 @@
 {
   "algorithm": "sha256",
-  "combined_digest": "9559f7eb5bdd822fbf27ae7ff5361a74fa3911ad704cf16569de3c6b06b87d2f",
+  "combined_digest": "82a3598a5adb5a6e7fcca58cf0f96e1d2a8646c21b9658cecb802a0c2eeec4bf",
   "files": {
     "specs/README.md": "2a0398dfb3ead0586034364d7411d845b84fd33b7c43d1ce9199d6a14ef4cf1a",
     "specs/api/openapi.yaml": "8f2e4cb78ae6c66991d8ad1a4ca15a67248b2cbeee4ebe259323af4a8f08aad1",
-    "specs/database/postgres.sql": "298eeb9ad10f3f788f0f2ccc04a1d001e0eba7144c32b729a101d6f3558aa6d6",
+    "specs/database/postgres.sql": "7524250665af5773a4e355d8e7c6b450d06baeebe839b628072c6fab78be0f91",
     "specs/events/event-types.yaml": "5987d653a176348dd86cb6563578de8095e9f8390cca72b332f51dac5edf954c",
     "specs/mcp/tools.json": "f6b5fb023aba882a259bbe7d001bdd2755c1120f1dc768fe7512a7383fdbaca9",
     "specs/orchestrator/decision-levels.yaml": "8a06ec18b8abd79c2462e3d3bcc5b785c51a8f970c54aaa279f174882e0f5a3f",
@@ -35,7 +35,7 @@
     "specs/schemas/relation.schema.json": "6ab11709b0f9a67bc974a54d29d2b9e4896088a0bcc06f9bf0ac601fe005cb49",
     "specs/schemas/research-asset-version.schema.json": "e7272daba5c2617dfce17c57e47bb7d820faadd5fa85f55a433c27f65eacd88d",
     "specs/schemas/research_question.schema.json": "9584284e1c820e9fa5dda85254daaedfc7a398ea11e2282b511cd164416da279",
-    "specs/schemas/rsg-manifest.schema.json": "c32906f395ce7f60288e8b90e986ca70236c86543bbac91fb46e1286bbaa52d7",
+    "specs/schemas/rsg-manifest.schema.json": "2855af7c82afcc59dd061a5b9080f2087eb1bbfdc892f031e05ba5da9ad07696",
     "specs/schemas/sample.schema.json": "fed5737f271de54c07ebcb429740b224023ce0ffee84e173ff48b7fa7639732a",
     "specs/ui/page-inventory.csv": "c89311bf12526e5d5762a351d71a447caa1c9a79912a172449dd3639141387fb",
     "specs/ui/routes.yaml": "88ae6cb829eae37dd8ae5f8815ce2b4eabc9ec82c51c95cf43223be91922f570",
@@ -43,5 +43,5 @@
   },
   "input_count": 38,
   "marker_format": 1,
-  "spec_version": "sha256:9559f7eb5bdd822f"
+  "spec_version": "sha256:82a3598a5adb5a6e"
 }

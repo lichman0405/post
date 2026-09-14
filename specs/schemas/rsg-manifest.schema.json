@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://open-rd.example/schemas/rsg-manifest.schema.json",
   "title": "RSGManifest",
-  "description": "Entity-shape schema for a persisted scientific object. It is NOT a request DTO: do not bind a client-supplied body directly to it. The fields id, version, schema_ref, lifecycle_state, created_by, created_at and visibility_policy_id are server-authoritative (docs/23 \u00a73, docs/12 \u00a73).",
+  "description": "Canonical export manifest of one RSG state (docs/07 §4, task T0206): the project's complete versioned research-state graph as of that state — every scientific object version and relation version in the state's lineage, the blob attachments on those object versions, the schema/policy references, the git ref and the state hash content-addressing the whole document. A server-produced export document, never a request DTO: the exporter (internal/rsg/manifest) renders it; do not bind a client-supplied body directly to it. The state_hash is sha256 over the canonical JSON of the manifest minus generated_at and state_hash (see internal/rsg/manifest for the canonical serialization rules).",
   "type": "object",
   "required": [
     "format_version",
@@ -11,13 +11,16 @@
     "generated_at",
     "object_versions",
     "relation_versions",
+    "schema_refs",
+    "policy_refs",
     "blob_refs",
     "git_ref",
     "state_hash"
   ],
   "properties": {
     "format_version": {
-      "type": "string"
+      "const": "v1",
+      "description": "The manifest format version, which doubles as the hash algorithm version record (docs/21 §10): a future algorithm is a new format version, never a silent rewrite of old hashes."
     },
     "project_id": {
       "type": "string"
@@ -27,34 +30,179 @@
     },
     "generated_at": {
       "type": "string",
-      "format": "date-time"
+      "format": "date-time",
+      "description": "Export timestamp (UTC). Export-time metadata: it moves between exports and is NOT part of the state_hash."
     },
     "schema_refs": {
       "type": "array",
       "items": {
-        "type": "string"
+        "type": "string",
+        "description": "One schema reference as \"<schema $id>@<schema version>\", sorted and unique."
       }
     },
     "policy_refs": {
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "description": "The visibility policy ids pinned by the object versions, sorted and unique."
     },
     "object_versions": {
       "type": "array",
+      "description": "Every scientific object version whose state_id is the state or one of its ancestors, in canonical order ((object_id, version_no, id)).",
       "items": {
-        "type": "string"
+        "type": "object",
+        "required": [
+          "id",
+          "object_id",
+          "object_type",
+          "version_no",
+          "state_id",
+          "branch_id",
+          "schema_ref",
+          "title",
+          "lifecycle_state",
+          "payload",
+          "visibility_policy_id",
+          "integrity_hash",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object_id": {
+            "type": "string"
+          },
+          "object_type": {
+            "type": "string"
+          },
+          "version_no": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "state_id": {
+            "type": "string"
+          },
+          "branch_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schema_ref": {
+            "type": "object",
+            "required": [
+              "id",
+              "version"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            }
+          },
+          "title": {
+            "type": "string"
+          },
+          "lifecycle_state": {
+            "enum": [
+              "active",
+              "aborted",
+              "reopened",
+              "superseded"
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "description": "The versioned scientific content in canonical JSON (sorted keys, compact, numbers preserved)."
+          },
+          "visibility_policy_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "integrity_hash": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
       }
     },
     "relation_versions": {
       "type": "array",
+      "description": "Every relation version whose state_id is the state or one of its ancestors, in canonical order ((relation_id, version_no, id)).",
       "items": {
-        "type": "string"
+        "type": "object",
+        "required": [
+          "id",
+          "relation_id",
+          "version_no",
+          "state_id",
+          "relation_type",
+          "source_object_version_id",
+          "target_object_version_id",
+          "payload",
+          "integrity_hash",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "relation_id": {
+            "type": "string"
+          },
+          "version_no": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "state_id": {
+            "type": "string"
+          },
+          "relation_type": {
+            "type": "string"
+          },
+          "source_object_version_id": {
+            "type": "string"
+          },
+          "target_object_version_id": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object",
+            "description": "The edge's scope/metadata in canonical JSON."
+          },
+          "integrity_hash": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
       }
     },
     "blob_refs": {
       "type": "array",
+      "description": "The blob attachments whose own state_id is in the state's lineage AND whose owning object version is in the lineage: the attachment belongs to the state it was created in, never to the state of the version it attaches to, and every blob ref names a version present in the same manifest — an attachment committed in a later state, or pointing at a version outside the lineage, is not part of earlier states' manifests. Sorted by id. The manifest pins the reference, never the bytes (invariant 7).",
       "items": {
         "type": "object",
         "required": [
@@ -66,28 +214,24 @@
             "type": "string"
           },
           "hash": {
-            "type": "string"
+            "type": "string",
+            "description": "The blob's content hash as stored on blobs.content_hash."
           }
-        }
+        },
+        "additionalProperties": false
       }
     },
     "git_ref": {
-      "type": "object",
-      "required": [
-        "repository_id",
-        "commit_sha"
-      ],
-      "properties": {
-        "repository_id": {
-          "type": "string"
-        },
-        "commit_sha": {
-          "type": "string"
-        }
-      }
+      "description": "The GitProvider commit the state corresponds to: the state's own recorded git_commit_sha (project_states.git_commit_sha, set by the git-compat path), null when the state has none. The project's repository id is deliberately NOT part of the manifest — it is mutable project data, and a state's hash must be a pure function of the state's recorded content (the repository id is resolvable from the manifest's project_id through the project).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "state_hash": {
-      "type": "string"
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "The content address of the manifest: sha256 over the canonical JSON of every field except generated_at and state_hash. The algorithm prefix is part of the value (docs/21 §10)."
     }
   },
   "additionalProperties": false
