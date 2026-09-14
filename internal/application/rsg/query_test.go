@@ -25,6 +25,7 @@ import (
 // that each traversal hop carried its own project check.
 type queryFakeProjects struct {
 	outcomes map[string]error // nil = readable
+	project  domain.Project   // returned when set; zero = the bare default
 	calls    []string
 }
 
@@ -32,6 +33,9 @@ func (f *queryFakeProjects) Get(_ context.Context, _ projects.Reader, projectID 
 	f.calls = append(f.calls, projectID)
 	if err, ok := f.outcomes[projectID]; ok {
 		return domain.Project{}, err
+	}
+	if f.project.ID != "" {
+		return f.project, nil
 	}
 	return domain.Project{ID: projectID, Visibility: domain.VisibilityPublic}, nil
 }
@@ -578,6 +582,10 @@ func (f *queryFakeBranches) Get(_ context.Context, _, _ string) (domain.Branch, 
 	return f.branch, nil
 }
 
+func (f *queryFakeBranches) List(_ context.Context, _ string) ([]domain.Branch, error) {
+	return nil, errors.New("unused")
+}
+
 type queryFakeStates struct {
 	head domain.ProjectState
 }
@@ -592,6 +600,10 @@ func (f *queryFakeStates) CreateInitialState(_ context.Context, _ states.CreateI
 
 func (f *queryFakeStates) GetBranchHead(_ context.Context, _ string) (domain.ProjectState, error) {
 	return f.head, nil
+}
+
+func (f *queryFakeStates) ListCommits(_ context.Context, _ string) ([]domain.StateCommit, error) {
+	return nil, errors.New("unused")
 }
 
 func strPtr(s string) *string { return &s }

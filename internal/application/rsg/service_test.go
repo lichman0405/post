@@ -58,6 +58,8 @@ type fakeBranches struct {
 	getErr  error
 	err     error // Create error override
 	created bool
+	list    []domain.Branch
+	listErr error
 }
 
 func (f *fakeBranches) Create(ctx context.Context, in branches.CreateBranchParams) (domain.Branch, error) {
@@ -77,6 +79,16 @@ func (f *fakeBranches) Get(ctx context.Context, projectID, branchID string) (dom
 		return domain.Branch{}, f.getErr
 	}
 	return domain.Branch{ID: branchID, ProjectID: projectID, Name: "main"}, nil
+}
+
+func (f *fakeBranches) List(ctx context.Context, projectID string) ([]domain.Branch, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	if f.list != nil {
+		return f.list, nil
+	}
+	return []domain.Branch{{ID: "branch-1", ProjectID: projectID, Name: "main"}}, nil
 }
 
 // fakeTx is a states.Transaction stub: the object fake never issues SQL on
@@ -100,6 +112,8 @@ type fakeStates struct {
 	committed  int
 	stateID    string
 	genesisErr error
+	commits    []domain.StateCommit
+	commitsErr error
 }
 
 func (f *fakeStates) Commit(ctx context.Context, in states.CommitParams, write states.WriteFunc) (domain.ProjectState, domain.StateCommit, error) {
@@ -125,6 +139,10 @@ func (f *fakeStates) GetBranchHead(ctx context.Context, branchID string) (domain
 		return domain.ProjectState{}, f.headErr
 	}
 	return f.head, nil
+}
+
+func (f *fakeStates) ListCommits(ctx context.Context, branchID string) ([]domain.StateCommit, error) {
+	return f.commits, f.commitsErr
 }
 
 type fakeLatest struct {

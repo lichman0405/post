@@ -47,6 +47,7 @@ type stubService struct {
 	query    rsg.QueryResult
 	detail   rsg.ObjectDetail
 	outline  rsg.ResearchOutline
+	overview rsg.ProjectOverview
 	err      error
 
 	createBranchCalls        int
@@ -57,6 +58,7 @@ type stubService struct {
 	getObjectDetailCalls     int
 	queryCalls               int
 	researchOutlineCalls     int
+	projectOverviewCalls     int
 
 	lastProjectID string
 	lastBranchID  string
@@ -112,6 +114,12 @@ func (s *stubService) ResearchOutline(_ context.Context, _ projects.Reader, proj
 	s.researchOutlineCalls++
 	s.lastProjectID = projectID
 	return s.outline, s.err
+}
+
+func (s *stubService) ProjectOverview(_ context.Context, _ projects.Reader, projectID string) (rsg.ProjectOverview, error) {
+	s.projectOverviewCalls++
+	s.lastProjectID = projectID
+	return s.overview, s.err
 }
 
 func cannedBranch() domain.Branch {
