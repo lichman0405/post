@@ -7925,3 +7925,60 @@ T1006（Signed Webhooks，迁移 `00059`）交付的 diff 是**对的**，collec
   要改就是新迁移追加约束，不能回改 `00047`）。
 - 处置口径与本条链子上其它复核意见**同一套**（L1-88 §一）：**改** / **记录+指人** / **拒绝+理由**；
   这一次三条都走第二条。
+
+## L1-20260914-91 —— 欠账台账（第 7–24 条）落盘；另记新欠账 25 与 T1006 的会话链恢复
+
+**为什么现在落盘**：这份台账此前只住在本会话的临时目录（`$CLAUDE_JOB_DIR/tmp/owed-items-round4.md`），
+临时目录随作业删除而消失。台账的用处是让**下一个接手的人**（包括以后的我）不必重读全部复核报告，
+所以它必须在仓库里。下列逐条为摘要（原文细节在对应的 review 报告与 PR 里），带 owner/触点。
+"记录+指人"是 L1-88 §一 的口径：不在这一轮新写行里的意见，不为此再返工。
+
+**记录与出处（7–24）**
+
+- **7** `compose-link.sh:255-272` 的 add/add 手写解只有"名声"级守卫。owner：下一次改 compose-link 时。
+- **8** 工装耐久性：drain / `compose-link.sh` / `refit-hand.py` / `handres/` / `arms/` 仍住在临时目录，
+  随作业消失。owner：链子排空后搬进 `scripts/chain/`（digest-neutral），并留一份到 `~/.claude/post-chain-backup/`。
+- **9** drain 的收尾措辞 bug：21:40:31 打过 `=== chain drained ===`，那一刻并未排空。owner：搬工装时顺手改。
+- **10** （minor，记名）`version_no` 超出 int4 时得到 503 而不是 4xx。owner：下一次碰该 handler。
+- **11** （nit，记名）`cmd/api/provenancehttp` 没有单元测试（读面由 5 个集成测试端到端钉住）。
+- **12** （真事故）`tests[]` 装不下"故意跑红"这件事：`status: completed` 加任何 `failed`/`not_run` 条目即被
+  collect 机械判为自相矛盾。**当下的合法写法**（T0309/T1006 两封信都已施行）：红的原文一字不改地搬进
+  对应**绿条目**的 `evidence` 里。工具面仍欠：schema 表达不了"expected red"。
+- **13** （minor）`00045:354` 关系类型策略表的封印挡不住 `TRUNCATE`（封印是行级触发器）。
+- **14** （minor）`internal/rsg/externalref/ssrf.go:223` 的注释说大了：`blockedV4/blockedV6` 自称的范围
+  比实际实现宽。owner：下一次碰 ssrf 时改注释或补实现。
+- **15** （nit）`tests/integration/external_reference_test.go:11` 出处引错（引 `docs/66 §3`）。
+- **16** （nit）`doi.go:121` 的 `UpstreamVersion` 用 Go `TrimSpace`（含 Unicode 空白），与 `00045` 的守卫口径不一致。
+- **17** （nit）`doi.go:112` 的 `Fetch` 把 JSON 解成 `map[string]any`：正文 `null` 时的行为未定义。
+- **18** （nit）`refresh.go:90` 的 `validateRef` 不 trim：`"publication "` 被早拒而非按身份守卫归一。
+- **19** （minor）`tests/integration/outbox_test.go:336` 的注释把 `docs/52 §17` 当出处——该节不存在。
+- **20** （nit）`docs/26 §2` 这个出处同样是编的（`docs/26_OBSERVABILITY.md` 没有 §2）。
+- **21** （nit）`outbox_events.visibility` 没有 CHECK 约束：public/private 只由应用层保证。
+- **22** （nit）`internal/events/publish.go:50` 的 `WithBatchSize` 是导出的且不校验（0/负数会出事）。
+- **23** （工具面）`make check` **不含** `make staticcheck`——Worker 的 G1 与 CI 的 `go` 作业差着这一道，
+  每一轮都白跑一次 collect→review→accept（T0309 第五轮即为此）。**不改 Gate 标准**；
+  owner：下一次改 `rddev`/任务包模板时（不在没有 G2 兜底的时刻改 main 的 `Makefile` 语义）。
+- **24** （工具面）G3 在 G2 一红时**根本没跑**，accept 记录却写成 `"G3": "failed"`——"跑红"与"没跑"
+  在记录里成了同一件事。只记在这里，不为它改 `specs/` 的 schema（会换 digest）。
+
+**25（新，2026-09-15 00:45Z 本会话记录）**：`rddev worker rework` 会 resume **registry 里记的那个会话**。
+若那个会话**从未落盘过一轮**（例如：刚 `spawn` 出来、还没写出第一条消息就被 `stop`），resume 会以
+`No conversation found with session ID: …` 整轮 exit 1，秒死——而 collect 只会看见"Worker 退出 1"。
+**根因**是编排动作的次序，不是 Worker：`stop` 一个刚 spawn 的 Worker 再 `rework`，等于要求恢复一个
+不存在的会话。owner：搬工装/改 rddev 时，让 rework 在"目标会话不在盘上"时**拒绝**，而不是派一个必死的轮次。
+
+**附：T1006 的会话链恢复（本会话的实际处置，记录在案）**。T1006 的上一轮（16:35Z 那封补 `sqlc` scope 的信）
+是在**原始会话**里跑的，产出 18 个改动路径（含 sqlc 生成物与 SPEC_VERSION marker）。我在 16:40Z `stop` 它
+（exit 143）后，collect 把状态推到 `worker_failed`；从 `worker_failed` 到 `rejected` 的唯一合法路径是
+`ready -> running`（spawn），而那条路上的 spawn **改写了 registry 的 session_id**，于是 rework 去 resume
+一个刚出生、没落盘的会话 → 上面第 25 条的事故。处置：
+
+1. 从 `~/.claude/projects/-home-shibo-code-post--rddev-worktrees-T1006/` 找回原始会话
+   `e9eb6022-a9b7-43f4-9c0c-ca4eed55e55c`（3.0 MB，最后写入 16:40Z，即被 stop 的那一刻）；
+2. 把 `.rddev/workers/T1006/registry.json` 的 `session_id` 重新指向它——这是 Supervisor 自己的调度记录
+   （`.rddev/` 不入版本库；`session_id` 不在 gate-inputs 的校验字段清单里），属于 CLAUDE.md §1 允许的
+   "修复 orchestrator 自身阻塞"；
+3. `rework` 带上补 `sqlc` scope 的那封信，工作树 diff **原样保留**；
+4. rework 会按 DAG **重渲染** gate-inputs 与两份 task-package，所以补的那一格 `internal/persistence/sqlc/**`
+   在渲染后**又消失过一次**——已在渲染后立即重新补上（权威记录 + 两份字节一致的任务包，md5 `51dde759`），
+   与 L1-89 同一条处置；DAG 那一格仍留到下次 DAG 编辑。
