@@ -43,6 +43,12 @@ const (
 	// T0606 release governance: one release row per action, written in
 	// the same transaction as the release snapshot itself.
 	ActionReleaseCreated = "release.created"
+
+	// T0407 conflict resolution: one row per saved resolution plan, in the
+	// same transaction as the decisions themselves (docs/60: scientific
+	// conflict final resolution must be human-governed — the audit row is
+	// the record that a human, not an agent, decided).
+	ActionConflictResolutionSaved = "conflict.resolution_saved"
 )
 
 // Stable via values (the audit_log.via column): how the action arrived.

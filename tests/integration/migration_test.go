@@ -491,6 +491,40 @@ var canonicalTables = map[string]tableExp{
 		pk:   []string{"id"},
 		fks:  []fkExp{fk("event_id", "research_events", "RESTRICT")},
 	},
+	// T0407: the conflict resolution decisions (migration 00054). The
+	// per-conflict identity uniqueness is an explicit NULLS NOT DISTINCT
+	// index (a constraint UNIQUE would treat two NULL other-object keys as
+	// distinct and the overwrite would append) — covered in
+	// explicitIndexes, so this table carries no constraint uniques.
+	"conflict_resolutions": {
+		cols: []colExp{
+			c("id", u, false, true),
+			c("project_id", u, false, false),
+			c("base_state_id", u, false, false),
+			c("source_state_id", u, false, false),
+			c("target_state_id", u, false, false),
+			c("target_kind", txt, false, false),
+			c("target_id", u, false, false),
+			c("conflict_code", txt, false, false),
+			c("conflict_fields", jb, false, true),
+			c("conflict_payload_keys", jb, false, true),
+			c("conflict_other_object_id", u, true, false),
+			c("resolution", txt, false, false),
+			c("note", txt, false, true),
+			c("decided_by", u, false, false),
+			c("decided_at", ts, false, true),
+			c("updated_at", ts, false, true),
+		},
+		pk:     []string{"id"},
+		checks: []string{"target_kind", "resolution"},
+		fks: []fkExp{
+			fk("project_id", "projects", "RESTRICT"),
+			fk("base_state_id", "project_states", "RESTRICT"),
+			fk("source_state_id", "project_states", "RESTRICT"),
+			fk("target_state_id", "project_states", "RESTRICT"),
+			fk("decided_by", "users", "RESTRICT"),
+		},
+	},
 	"audit_log": {
 		cols: []colExp{c("id", u, false, true), c("actor_id", u, true, false), c("via", txt, false, false), c("action", txt, false, false), c("target_ref", txt, true, false), c("project_id", u, true, false), c("correlation_id", txt, false, false), c("before_summary", jb, true, false), c("after_summary", jb, true, false), c("metadata", jb, false, true), c("occurred_at", ts, false, true), c("organization_id", u, true, false)},
 		pk:   []string{"id"},
@@ -585,6 +619,10 @@ var explicitIndexes = map[string][]string{
 	// the FK (00045).
 	// T1001: the outbox publish dedupe (one research_event per outbox
 	// row, ever) and the dispatcher's pending-backlog scan (00046).
+	// T0606: the release list's newest-first scan (00053).
+	// T0407: one decision per conflict identity per triple (00054) — the
+	// NULLS NOT DISTINCT unique index the upsert's ON CONFLICT targets, and
+	// the plan read's scan path.
 	"project_schema_profiles_project_idx":  {"project_id", "schema_id", "created_at"},
 	"claims_object_idx":                    {"object_id"},
 	"claims_type_idx":                      {"claim_type"},
@@ -597,8 +635,9 @@ var explicitIndexes = map[string][]string{
 	"external_reference_snapshots_ref_idx": {"external_reference_id"},
 	"research_events_outbox_event_uniq":    {"outbox_event_id", "UNIQUE", "WHERE"},
 	"outbox_events_pending_idx":            {"published_at IS NULL"},
-	// T0606: the release list's newest-first scan (00053).
-	"releases_project_created_idx": {"project_id", "created_at"},
+	"releases_project_created_idx":         {"project_id", "created_at"},
+	"conflict_resolutions_identity_idx":    {"UNIQUE", "NULLS NOT DISTINCT", "project_id"},
+	"conflict_resolutions_plan_idx":        {"project_id", "base_state_id", "target_kind"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
