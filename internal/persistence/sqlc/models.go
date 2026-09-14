@@ -114,6 +114,16 @@ type OutboxEvent struct {
 	Attempts      int32              `json:"attempts"`
 }
 
+type PolicyVersion struct {
+	ID             pgtype.UUID        `json:"id"`
+	OrganizationID pgtype.UUID        `json:"organization_id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	Version        string             `json:"version"`
+	PolicyJson     []byte             `json:"policy_json"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type Program struct {
 	ID             pgtype.UUID        `json:"id"`
 	OrganizationID pgtype.UUID        `json:"organization_id"`

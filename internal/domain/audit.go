@@ -32,6 +32,9 @@ const (
 	// T0109 settings actions: written by the project settings surface.
 	ActionProjectMemberRoleChanged = "project.member_role_changed"
 	ActionProjectSettingsUpdated   = "project.settings_updated"
+	// T0603 policy actions: one version row per action, written in the
+	// same transaction as the policy version itself.
+	ActionPolicyVersionSet = "policy.version_set"
 )
 
 // Stable via values (the audit_log.via column): how the action arrived.

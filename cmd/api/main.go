@@ -47,6 +47,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/gittokenshttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
+	"github.com/lichman0405/post/cmd/api/policyhttp"
 	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
@@ -330,6 +331,15 @@ func run(args []string) int {
 	})
 	rsgAPI := rsghttp.New(rsghttp.Deps{Service: rsgSvc})
 	rsgAPI.Register(v1)
+	// Organization/project policy (T0603): read/write routes for the
+	// versioned governance policy, sharing the v1 guard. The production
+	// adapters are the same pgx stores the org/project surfaces use.
+	policyAPI := policyhttp.New(policyhttp.Deps{
+		Store:    persistence.NewPolicyStore(pool),
+		Orgs:     orgStore,
+		Projects: persistence.NewProjectStore(pool),
+	})
+	policyAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	srv := &http.Server{
