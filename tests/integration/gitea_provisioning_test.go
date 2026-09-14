@@ -299,8 +299,35 @@ func TestGiteaProvisioningEndToEnd(t *testing.T) {
 	if want := "POST project gitea-e2e (Gitea E2E)"; description != want {
 		t.Errorf("gitea integration: description = %q, want %q", description, want)
 	}
-	if !empty {
-		t.Error("gitea integration: repository is not empty — auto_init must stay false (T0302 protects main before any ref exists)")
+	if empty {
+		t.Error("gitea integration: repository is empty — T0302 seeds main with a bootstrap commit during provisioning (the rule blocks main's first push, and the provider refuses PRs against a main that does not exist, so an empty main would deadlock)")
+	}
+	// main carries exactly one commit: the platform's bootstrap, authored by
+	// the service identity.
+	code, raw := giteaCall(t, http.MethodGet, fx.base, fx.token,
+		"/api/v1/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(name)+"/commits?sha=main")
+	if code != http.StatusOK {
+		t.Fatalf("gitea integration: list main commits = %d (body %s)", code, raw)
+	}
+	var commits []struct {
+		Commit struct {
+			Message string `json:"message"`
+			Author  struct {
+				Name string `json:"name"`
+			} `json:"author"`
+		} `json:"commit"`
+	}
+	if err := json.Unmarshal(raw, &commits); err != nil {
+		t.Fatalf("gitea integration: decode main commits: %v", err)
+	}
+	if len(commits) != 1 {
+		t.Fatalf("gitea integration: main commits = %d, want exactly 1 (the bootstrap)", len(commits))
+	}
+	if got := strings.TrimSpace(commits[0].Commit.Message); got != "POST repository bootstrap" {
+		t.Errorf("gitea integration: bootstrap message = %q, want the platform-identifying message", got)
+	}
+	if commits[0].Commit.Author.Name != owner {
+		t.Errorf("gitea integration: bootstrap author = %q, want the service identity %q", commits[0].Commit.Author.Name, owner)
 	}
 
 	// ---- Gitea side: exactly one active gitea-type webhook at the URL.
@@ -686,7 +713,9 @@ func TestGiteaWebhookDeliverySignature(t *testing.T) {
 // pushToRepo pushes one commit through the provider's own Git transport
 // (the exact path future product pushes take), authenticating with the
 // service account token via an extra header so the credential never lands
-// in a URL or process argument list.
+// in a URL or process argument list. The commit goes to a NON-main branch:
+// T0302 protects main from direct pushes (the delivery trigger is the
+// push event, not the branch).
 func pushToRepo(t *testing.T, base, token, owner, name string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -711,5 +740,5 @@ func pushToRepo(t *testing.T, base, token, owner, name string) {
 	run("config", "user.name", "Gitea Integration")
 	run("add", ".")
 	run("commit", "-m", "T0301 webhook delivery round-trip")
-	run("push", remoteURL, "main")
+	run("push", remoteURL, "main:refs/heads/gitea-delivery")
 }

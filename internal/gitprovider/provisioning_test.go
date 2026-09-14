@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -17,12 +18,21 @@ type fakePort struct {
 	repoErr   error
 	hook      gitprovider.Webhook
 	hookErr   error
+	prot      gitprovider.MainProtection
+	protErr   error
+	seedSHA   string
+	seedErr   error
 	repoSpecs []gitprovider.RepositorySpec
 	hookSpecs []gitprovider.WebhookSpec
+	protRepos []gitprovider.Repository
+	protSpecs []gitprovider.MainProtectionSpec
+	seedRepos []gitprovider.Repository
+	calls     []string
 }
 
 func (f *fakePort) EnsureRepository(_ context.Context, spec gitprovider.RepositorySpec) (gitprovider.Repository, error) {
 	f.repoSpecs = append(f.repoSpecs, spec)
+	f.calls = append(f.calls, "repo")
 	if f.repoErr != nil {
 		return gitprovider.Repository{}, f.repoErr
 	}
@@ -33,12 +43,36 @@ func (f *fakePort) GetRepository(context.Context, string, string) (gitprovider.R
 	return gitprovider.Repository{}, gitprovider.ErrNotFound
 }
 
+func (f *fakePort) EnsureInitialMain(_ context.Context, repo gitprovider.Repository) (string, error) {
+	f.seedRepos = append(f.seedRepos, repo)
+	f.calls = append(f.calls, "seed")
+	if f.seedErr != nil {
+		return "", f.seedErr
+	}
+	return f.seedSHA, nil
+}
+
 func (f *fakePort) EnsureWebhook(_ context.Context, spec gitprovider.WebhookSpec) (gitprovider.Webhook, error) {
 	f.hookSpecs = append(f.hookSpecs, spec)
+	f.calls = append(f.calls, "hook")
 	if f.hookErr != nil {
 		return gitprovider.Webhook{}, f.hookErr
 	}
 	return f.hook, nil
+}
+
+func (f *fakePort) EnsureMainProtection(_ context.Context, repo gitprovider.Repository, spec gitprovider.MainProtectionSpec) (gitprovider.MainProtection, error) {
+	f.protRepos = append(f.protRepos, repo)
+	f.protSpecs = append(f.protSpecs, spec)
+	f.calls = append(f.calls, "protect")
+	if f.protErr != nil {
+		return gitprovider.MainProtection{}, f.protErr
+	}
+	return f.prot, nil
+}
+
+func (f *fakePort) GetMainProtection(context.Context, gitprovider.Repository) (gitprovider.MainProtection, error) {
+	return gitprovider.MainProtection{}, gitprovider.ErrNotFound
 }
 
 // fakeStore is a scripted ProvisionStore: it invokes the provisioning
@@ -144,6 +178,17 @@ func TestProvisionHappyPath(t *testing.T) {
 		t.Errorf("repo description = %q, want %q", spec.Description, want)
 	}
 
+	// The provider order is policy (T0302): the bootstrap seed runs while
+	// main is still writable and BEFORE the webhook exists (the bootstrap
+	// push must not fire a delivery), and protection lands before the
+	// store records success.
+	if want := []string{"repo", "seed", "hook", "protect"}; !slices.Equal(port.calls, want) {
+		t.Errorf("port call order = %v, want %v", port.calls, want)
+	}
+	if len(port.seedRepos) != 1 || port.seedRepos[0].Name != "p-"+testProjectID {
+		t.Errorf("EnsureInitialMain repos = %+v, want one call with the provisioned repository", port.seedRepos)
+	}
+
 	if len(port.hookSpecs) != 1 {
 		t.Fatalf("EnsureWebhook calls = %d, want 1", len(port.hookSpecs))
 	}
@@ -182,8 +227,9 @@ func TestProvisionSkipsAlreadyProvisioned(t *testing.T) {
 	if err := p.Provision(t.Context(), testProjectID); err != nil {
 		t.Fatalf("Provision (skipped) = %v, want nil", err)
 	}
-	if len(port.repoSpecs) != 0 || len(port.hookSpecs) != 0 {
-		t.Errorf("skipped provision touched the provider: repos=%d hooks=%d", len(port.repoSpecs), len(port.hookSpecs))
+	if len(port.repoSpecs) != 0 || len(port.hookSpecs) != 0 || len(port.seedRepos) != 0 || len(port.protRepos) != 0 {
+		t.Errorf("skipped provision touched the provider: repos=%d seeds=%d hooks=%d protects=%d",
+			len(port.repoSpecs), len(port.seedRepos), len(port.hookSpecs), len(port.protRepos))
 	}
 }
 
@@ -277,4 +323,78 @@ func TestProvisionHookFailurePropagates(t *testing.T) {
 	if len(port.repoSpecs) != 1 || len(port.hookSpecs) != 1 {
 		t.Errorf("repo/hook calls = %d/%d, want 1/1", len(port.repoSpecs), len(port.hookSpecs))
 	}
+}
+
+// TestProvisionProtectsMainBeforeSuccess: main protection (T0302) is part
+// of provisioning — the repository reaches 'provisioned' only with the
+// rule applied, and a protection or seed failure fails the provisioning.
+func TestProvisionProtectsMainBeforeSuccess(t *testing.T) {
+	t.Run("seeded and protected before the record", func(t *testing.T) {
+		port := &fakePort{
+			repo:    gitprovider.Repository{Owner: "o", Name: "n", ID: 1},
+			hook:    gitprovider.Webhook{ID: 7, Active: true},
+			seedSHA: "sha-seed",
+		}
+		store := &fakeStore{project: gitprovider.PendingProject{ID: testProjectID}}
+		p := newTestProvisioner(port, store)
+
+		if err := p.Provision(t.Context(), testProjectID); err != nil {
+			t.Fatalf("Provision: %v", err)
+		}
+		if len(port.seedRepos) != 1 {
+			t.Fatalf("EnsureInitialMain calls = %d, want 1", len(port.seedRepos))
+		}
+		if len(port.protRepos) != 1 {
+			t.Fatalf("EnsureMainProtection calls = %d, want 1", len(port.protRepos))
+		}
+		if port.seedRepos[0].Name != "n" {
+			t.Errorf("seeded repository = %+v, want the provisioned one", port.seedRepos[0])
+		}
+		if port.protRepos[0].Name != "n" {
+			t.Errorf("protected repository = %+v, want the provisioned one", port.protRepos[0])
+		}
+		if store.record == nil {
+			t.Fatal("no provision record — the store must commit only after seed + protection")
+		}
+	})
+
+	t.Run("seed failure fails the provisioning", func(t *testing.T) {
+		port := &fakePort{
+			repo:    gitprovider.Repository{Owner: "o", Name: "n", ID: 1},
+			hook:    gitprovider.Webhook{ID: 7, Active: true},
+			seedErr: gitprovider.ErrUnavailable,
+		}
+		store := &fakeStore{project: gitprovider.PendingProject{ID: testProjectID}}
+		p := newTestProvisioner(port, store)
+
+		err := p.Provision(t.Context(), testProjectID)
+		if !errors.Is(err, gitprovider.ErrUnavailable) {
+			t.Errorf("Provision error = %v, want ErrUnavailable", err)
+		}
+		if len(port.hookSpecs) != 0 || len(port.protRepos) != 0 {
+			t.Errorf("seed failure still registered hook/protection: hooks=%d protects=%d",
+				len(port.hookSpecs), len(port.protRepos))
+		}
+		if store.record != nil {
+			t.Error("provision record produced despite the seed failure")
+		}
+	})
+
+	t.Run("protection failure fails the provisioning", func(t *testing.T) {
+		port := &fakePort{
+			repo:    gitprovider.Repository{Owner: "o", Name: "n", ID: 1},
+			hook:    gitprovider.Webhook{ID: 7, Active: true},
+			protErr: gitprovider.ErrUnauthorized,
+		}
+		store := &fakeStore{project: gitprovider.PendingProject{ID: testProjectID}}
+		p := newTestProvisioner(port, store)
+
+		err := p.Provision(t.Context(), testProjectID)
+		if !errors.Is(err, gitprovider.ErrUnauthorized) {
+			t.Errorf("Provision error = %v, want ErrUnauthorized", err)
+		}
+		if store.record != nil {
+			t.Error("provision record produced despite the protection failure")
+		}
+	})
 }

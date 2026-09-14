@@ -83,6 +83,28 @@ func (s *PGProvisionStore) ProvisioningBacklog(ctx context.Context) ([]PendingPr
 	return out, rows.Err()
 }
 
+// ProvisionedRepositories lists every provisioned repository, oldest first
+// — the main-protection sweep's work list (T0302): the platform re-verifies
+// the Gitea rule on every one of them, so a rule an operator removed or
+// drifted is re-applied without the platform remembering provider state.
+func (s *PGProvisionStore) ProvisionedRepositories(ctx context.Context) ([]Repository, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT owner, name FROM git_repository_provisions ORDER BY provisioned_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Repository
+	for rows.Next() {
+		var r Repository
+		if err := rows.Scan(&r.Owner, &r.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // Provision serializes one provisioning attempt per project: the project
 // row is locked FOR UPDATE, an already-provisioned project is skipped
 // (idempotency — a redelivered job is a no-op), otherwise fn performs the
