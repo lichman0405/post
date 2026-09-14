@@ -72,6 +72,16 @@ func TestWriteGuardFiles(t *testing.T) {
 	if string(guard) != GuardScript() {
 		t.Error("generated guard differs from the embedded script")
 	}
+	// The reaper the Worker actually runs must be the one this source
+	// describes: #166's collection lives in that script, and a fix that never
+	// reaches the generated file is a fix no Worker ever runs.
+	reaper, err := os.ReadFile(filepath.Join(dir, "run-worker.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(reaper) != reaperScript {
+		t.Error("generated run-worker.sh differs from reaperScript")
+	}
 	// the hook command must be absolute (the hook runs with the worker cwd)
 	var settings map[string]any
 	data, err := os.ReadFile(filepath.Join(dir, "worker-settings.json"))
@@ -273,6 +283,26 @@ func TestReaperCollectsTheWorkerSession(t *testing.T) {
 	if !waitProcessNotRunning(pid, 5*time.Second) {
 		_ = syscall.Kill(pid, syscall.SIGKILL) // do not leak the evidence
 		t.Fatalf("pid %d, started by the Worker, is still running after the reaper exited: the Worker's session was not collected", pid)
+	}
+
+	// ...and the Gate must agree. The end state #166 asks for is not "the pid
+	// died" but "collect passes": the scan is what refuses, so it is what has
+	// to come back empty. Run it on the same run's anchors.
+	workerRaw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("the reaper never wrote claude.pid: %v", err)
+	}
+	workerPID, err := strconv.Atoi(strings.TrimSpace(string(workerRaw)))
+	if err != nil {
+		t.Fatalf("claude.pid holds %q: %v", strings.TrimSpace(string(workerRaw)), err)
+	}
+	rec := &WorkerRecord{TaskID: "T0000", PID: workerPID, SessionLeaderPID: r.Process.Pid}
+	residue, _, err := scanResidue(rec)
+	if err != nil {
+		t.Fatalf("scanning the session for residue: %v", err)
+	}
+	if len(residue) > 0 {
+		t.Errorf("collect would still refuse this run: %s", residueReport("Worker", rec, residue))
 	}
 }
 
