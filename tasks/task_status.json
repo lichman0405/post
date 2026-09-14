@@ -1273,10 +1273,10 @@
       ]
     },
     "T0206": {
-      "status": "running",
-      "started_at": "2026-09-14T06:18:12Z",
-      "worker_run_id": "run-a5941fd92216e596",
-      "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
+      "status": "verification",
+      "started_at": "2026-09-14T06:47:28Z",
+      "worker_run_id": "run-ccf9d24aa45f4307",
+      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (go test ./internal/gitprovider/ -count=1 -run TestIngestUntypedManifest) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
       "history": [
         {
           "from": "todo",
@@ -1346,6 +1346,27 @@
           "at": "2026-09-14T06:18:12Z",
           "run_id": "run-a5941fd92216e596",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T06:34:30Z",
+          "run_id": "run-50992c0379be241e",
+          "reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (go test ./internal/gitprovider/ -count=1 -run TestIngestUntypedManifest) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T06:47:28Z",
+          "run_id": "run-ccf9d24aa45f4307",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T06:49:21Z",
+          "run_id": "run-452903e6c6aef49b",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -1519,10 +1540,10 @@
       ]
     },
     "T0209": {
-      "status": "rejected",
-      "started_at": "2026-09-14T05:22:35Z",
-      "worker_run_id": "run-1723d17730834604",
-      "rejection_reason": "# T0209：停在合格状态，等两个小号迁移先落地（不是你的问题）\n\n你这轮返工做得对：并集核对过、三个生成物在合并后的树上重新生成、`go` 作业的自检清单跑了。\n**代码停在合格状态，这是刻意的顺序安排，不是退回。**\n\n## 为什么必须停在前面\n\n合并顺序被**迁移编号**钉死，而且这次不是洁癖 —— 有硬证据：\n\n本仓库的迁移运行器是 **goose v3.28.0**（`internal/persistence/migrate.go`），它**默认拒绝乱序迁移**。\n库已经应用到 00036 之后，如果出现一个比它小的 00035，`Migrate` 会直接停：\n\n```\nfound 1 missing (out-of-order) migration: [00035_*.sql]\n```\n\n而 CI 用的是**全新库**，按名字排序一次跑完，**永远看不到这个问题** —— 于是它会静默地砸在\n任何**已经升级过**的库上（本地开发库、以后的生产库），表现为\"迁移突然跑不动\"。\n\nmain 现在的最高号是 00033。在 T0305（00034）与 T0206（00035）落地之前合并你（00036），\n就会在 main 上**先出现 36、后出现 35**，正好命中上面那条。\n\n⇒ 顺序：**T0305(34) → T0206(35) → T0209(36)**。\n\n## 接下来会发生什么\n\n1. 我先把 T0305、T0206 依次收掉（它们各自也要返工/前移一轮）。\n2. 然后你的分支会做一次**机械的基线前移**（Supervisor 用 `rddev rebaseline`，生成物照例重新生成），\n   你会被要求在**那个** main 上再证明一次 —— 期望是**一轮很短**的返工：重跑证据、更新 RESULT.json。\n3. 之后立刻收你、合并。\n\n## 现在这一轮的东西都留着\n\n你工作树里的东西一件没删，`RESULT.json` 也在。下一轮不用重做已经做过的事，只需要在新基线上重跑证据。\n\n## 不变的约束\n\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n- 生成物只能重新生成，不要手工编辑。\n- 不要改迁移号（00036 是你的，不变）。\n",
+      "status": "verification",
+      "started_at": "2026-09-14T06:33:30Z",
+      "worker_run_id": "run-33200dcfd88b6eab",
+      "rejection_reason": "# T0209：基线又往前挪了一次（第二次），这一轮很短\n\n**先更正一句**：你刚才读到的那段理由（如果你已经读了）里写的基线是 `0cb36e1`\n—— 那是**上一次**前移。刚刚又发生了一次前移，你现在在 `0c540e3`。\n两个都是\"基线动了\"，不是你做错了什么。以 `git log -1` 看到的为准。\n\n## 这一跳里 main 上多了什么\n\n- `00034`（T0305，Push Webhook 与 Semantic Ingestion）**已合**。\n- 其余是**我自己的 orchestrator 提交**（`cmd/rddev`、`internal/devorchestrator`、`Makefile`、\n  `specs/SPEC_VERSION.json`、`tasks/**`）——**没有和你的文件重叠的产品改动**。\n- `00035`（T0206，RSG Manifest 导出与 hash）**还没合**，它此刻正在返工。\n\n所以这次前移对你的实际影响只有一处：**生成物**要在新树上重新生成一遍\n（`specs/database/postgres.sql`、`internal/persistence/sqlc/`、`specs/SPEC_VERSION.json`）。\n这一步 **Supervisor 已经替你做完了**，不要重做，只需要核对。\n\n## 你的迁移号\n\n**`00036` 不变。** main 现在最高是 `00034`；`00035` 留给 T0206，`00036` 是你的，没有撞号。\n\n## 合并那一步仍要等\n\n迁移必须按号落地（goose 拒绝乱序应用）。所以你这个任务**在验证通过之后，\n仍会在合并那一步等我**：先 `00035`，再 `00036`。\n**那是我这边的事，不是你要处理的**，你不需要为此做任何特殊处理。\n\n## 请你做的（这一轮很短）\n\n1. **核对**前移后的树：你那 19 项改动一项没丢（12 改 + 7 增），\n   `00036_rsg_query_indexes.sql` 还在。上一次那四个文件的**并集合成**（`cmd/api/main.go`、\n   `cmd/api/rsghttp/wiring.go`、`cmd/api/rsghttp/handler_test.go`、\n   `internal/application/rsg/service.go` 各留两边的端口/方法/stub/字段）也原样保留着。\n   **如果并集哪里不对，直接说出来，不要默默改。**\n2. **在新基线上重新跑一遍证据**（`rsg query integration` = `tests/integration/rsg_query_test.go`，\n   真实 PostgreSQL，G3 不接受全 mock 替代），以及你在 RESULT.json 里报过的其它条目。\n   上一轮复核指出一个计数小错：新的 e2e query 检查是 **8** 条，RESULT.json 写的是 7 ——\n   顺手改对，**数出来的数字，不是估的**。\n3. **把 `specs/orchestrator/gates.json` 里 `go` 作业的步骤当作自检清单逐条跑**\n   （`make fmt-check`、`go vet ./...`、`make staticcheck` 等）。你没有跑过这些，\n   所以\"检查全过\"对你跑过的那些是真的，但不等于 CI 会过 —— 同一个坑 T0210 和 T0305 都栽过。\n4. 更新 `tasks/results/T0209/RESULT.json`：新基线 `0c540e3`、新跑出来的证据、改对的计数。\n\n## 不变的约束\n\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n  红着报告比造假绿好。\n- 生成物只能**重新生成**，不要手工编辑 `internal/persistence/sqlc/*.go` 或\n  `specs/database/postgres.sql`。\n- 不要新增迁移、不要改迁移号、不要动 `allowed_scope` 外的文件。\n- 跑完确认 `ps` 里没有你自己留下的进程（T0307 和 T0502 各留过一个后台 `sleep`，都被 collect 抓到了）。\n",
       "history": [
         {
           "from": "todo",
@@ -1571,6 +1592,34 @@
           "at": "2026-09-14T05:30:32Z",
           "run_id": "run-5341e83fd2aeaab3",
           "reason": "# T0209：停在合格状态，等两个小号迁移先落地（不是你的问题）\n\n你这轮返工做得对：并集核对过、三个生成物在合并后的树上重新生成、`go` 作业的自检清单跑了。\n**代码停在合格状态，这是刻意的顺序安排，不是退回。**\n\n## 为什么必须停在前面\n\n合并顺序被**迁移编号**钉死，而且这次不是洁癖 —— 有硬证据：\n\n本仓库的迁移运行器是 **goose v3.28.0**（`internal/persistence/migrate.go`），它**默认拒绝乱序迁移**。\n库已经应用到 00036 之后，如果出现一个比它小的 00035，`Migrate` 会直接停：\n\n```\nfound 1 missing (out-of-order) migration: [00035_*.sql]\n```\n\n而 CI 用的是**全新库**，按名字排序一次跑完，**永远看不到这个问题** —— 于是它会静默地砸在\n任何**已经升级过**的库上（本地开发库、以后的生产库），表现为\"迁移突然跑不动\"。\n\nmain 现在的最高号是 00033。在 T0305（00034）与 T0206（00035）落地之前合并你（00036），\n就会在 main 上**先出现 36、后出现 35**，正好命中上面那条。\n\n⇒ 顺序：**T0305(34) → T0206(35) → T0209(36)**。\n\n## 接下来会发生什么\n\n1. 我先把 T0305、T0206 依次收掉（它们各自也要返工/前移一轮）。\n2. 然后你的分支会做一次**机械的基线前移**（Supervisor 用 `rddev rebaseline`，生成物照例重新生成），\n   你会被要求在**那个** main 上再证明一次 —— 期望是**一轮很短**的返工：重跑证据、更新 RESULT.json。\n3. 之后立刻收你、合并。\n\n## 现在这一轮的东西都留着\n\n你工作树里的东西一件没删，`RESULT.json` 也在。下一轮不用重做已经做过的事，只需要在新基线上重跑证据。\n\n## 不变的约束\n\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n- 生成物只能重新生成，不要手工编辑。\n- 不要改迁移号（00036 是你的，不变）。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T06:32:25Z",
+          "run_id": "run-3ec9201c1cbf0851",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T06:33:23Z",
+          "run_id": "run-cb5b767e7a813d86",
+          "reason": "# T0209：基线又往前挪了一次（第二次），这一轮很短\n\n**先更正一句**：你刚才读到的那段理由（如果你已经读了）里写的基线是 `0cb36e1`\n—— 那是**上一次**前移。刚刚又发生了一次前移，你现在在 `0c540e3`。\n两个都是\"基线动了\"，不是你做错了什么。以 `git log -1` 看到的为准。\n\n## 这一跳里 main 上多了什么\n\n- `00034`（T0305，Push Webhook 与 Semantic Ingestion）**已合**。\n- 其余是**我自己的 orchestrator 提交**（`cmd/rddev`、`internal/devorchestrator`、`Makefile`、\n  `specs/SPEC_VERSION.json`、`tasks/**`）——**没有和你的文件重叠的产品改动**。\n- `00035`（T0206，RSG Manifest 导出与 hash）**还没合**，它此刻正在返工。\n\n所以这次前移对你的实际影响只有一处：**生成物**要在新树上重新生成一遍\n（`specs/database/postgres.sql`、`internal/persistence/sqlc/`、`specs/SPEC_VERSION.json`）。\n这一步 **Supervisor 已经替你做完了**，不要重做，只需要核对。\n\n## 你的迁移号\n\n**`00036` 不变。** main 现在最高是 `00034`；`00035` 留给 T0206，`00036` 是你的，没有撞号。\n\n## 合并那一步仍要等\n\n迁移必须按号落地（goose 拒绝乱序应用）。所以你这个任务**在验证通过之后，\n仍会在合并那一步等我**：先 `00035`，再 `00036`。\n**那是我这边的事，不是你要处理的**，你不需要为此做任何特殊处理。\n\n## 请你做的（这一轮很短）\n\n1. **核对**前移后的树：你那 19 项改动一项没丢（12 改 + 7 增），\n   `00036_rsg_query_indexes.sql` 还在。上一次那四个文件的**并集合成**（`cmd/api/main.go`、\n   `cmd/api/rsghttp/wiring.go`、`cmd/api/rsghttp/handler_test.go`、\n   `internal/application/rsg/service.go` 各留两边的端口/方法/stub/字段）也原样保留着。\n   **如果并集哪里不对，直接说出来，不要默默改。**\n2. **在新基线上重新跑一遍证据**（`rsg query integration` = `tests/integration/rsg_query_test.go`，\n   真实 PostgreSQL，G3 不接受全 mock 替代），以及你在 RESULT.json 里报过的其它条目。\n   上一轮复核指出一个计数小错：新的 e2e query 检查是 **8** 条，RESULT.json 写的是 7 ——\n   顺手改对，**数出来的数字，不是估的**。\n3. **把 `specs/orchestrator/gates.json` 里 `go` 作业的步骤当作自检清单逐条跑**\n   （`make fmt-check`、`go vet ./...`、`make staticcheck` 等）。你没有跑过这些，\n   所以\"检查全过\"对你跑过的那些是真的，但不等于 CI 会过 —— 同一个坑 T0210 和 T0305 都栽过。\n4. 更新 `tasks/results/T0209/RESULT.json`：新基线 `0c540e3`、新跑出来的证据、改对的计数。\n\n## 不变的约束\n\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n  红着报告比造假绿好。\n- 生成物只能**重新生成**，不要手工编辑 `internal/persistence/sqlc/*.go` 或\n  `specs/database/postgres.sql`。\n- 不要新增迁移、不要改迁移号、不要动 `allowed_scope` 外的文件。\n- 跑完确认 `ps` 里没有你自己留下的进程（T0307 和 T0502 各留过一个后台 `sleep`，都被 collect 抓到了）。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T06:33:30Z",
+          "run_id": "run-33200dcfd88b6eab",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T06:50:16Z",
+          "run_id": "run-196d6aefaf43ab3a",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -2321,8 +2370,9 @@
     },
     "T0306": {
       "status": "running",
-      "started_at": "2026-09-14T06:15:09Z",
-      "worker_run_id": "run-fdfd92949652682a",
+      "started_at": "2026-09-14T06:55:53Z",
+      "worker_run_id": "run-f2937d1d6341d808",
+      "rejection_reason": "collect rejected: residue: 1 process(es) the Worker started are still running: pid 1073048 (sleep 300) session 1073046 group 1073046. The Worker (pid 589103) has already exited — nothing owns these any more and nothing collects them on its own. Collect them with: kill -TERM -- -1073046",
       "history": [
         {
           "from": "todo",
@@ -2336,13 +2386,29 @@
           "at": "2026-09-14T06:15:09Z",
           "run_id": "run-fdfd92949652682a",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T06:53:43Z",
+          "run_id": "run-3dbe8f606bb2d366",
+          "reason": "collect rejected: residue: 1 process(es) the Worker started are still running: pid 1073048 (sleep 300) session 1073046 group 1073046. The Worker (pid 589103) has already exited — nothing owns these any more and nothing collects them on its own. Collect them with: kill -TERM -- -1073046"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T06:55:53Z",
+          "run_id": "run-f2937d1d6341d808",
+          "reason": "worker spawn"
         }
       ]
     },
     "T0307": {
-      "status": "verification",
+      "status": "merged",
       "started_at": "2026-09-14T06:06:52Z",
       "worker_run_id": "run-f573c76df8e00eb3",
+      "accepted_by_supervisor_at": "2026-09-14T06:52:08Z",
+      "merged_at": "2026-09-14T06:56:45Z",
       "rejection_reason": "collect rejected: residue: 1 process(es) the Worker started are still running: pid 382395 (sleep 300) session 382394 group 382394. The Worker (pid 168392) has already exited — nothing owns these any more and nothing collects them on its own. Collect them with: kill -TERM -- -382394; result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (go test ./tests/integration -count=1) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
       "history": [
         {
@@ -2378,17 +2444,32 @@
           "at": "2026-09-14T06:14:25Z",
           "run_id": "run-753e3949d953033b",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T06:52:08Z",
+          "run_id": "run-37619929ed4c3b47"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T06:56:45Z",
+          "run_id": "run-755c8d3fba2bd1ac",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0308": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "ready",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T06:56:51Z",
+          "run_id": "run-278af784ed6ac123"
+        }
+      ]
     },
     "T0309": {
       "status": "todo",
@@ -2563,13 +2644,24 @@
       "merged_at": null
     },
     "T0505": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-14T06:34:55Z",
+      "worker_run_id": "run-8860ddb8ce505f12",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T06:29:43Z",
+          "run_id": "run-644ef285688719d5"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T06:34:55Z",
+          "run_id": "run-8860ddb8ce505f12",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0506": {
       "status": "todo",
@@ -2590,13 +2682,15 @@
       "merged_at": null
     },
     "T0508": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "ready",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T06:50:17Z",
+          "run_id": "run-cc6b34ccfb12d78d"
+        }
+      ]
     },
     "T0509": {
       "status": "todo",
