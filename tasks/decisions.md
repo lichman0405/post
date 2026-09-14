@@ -4861,3 +4861,123 @@ L1-20260914-20 是环境静默失败骗了我 ✓；L1-20260914-21 是我把一�
 而它从 2026-09-12 起无人再写 ✓。没有代码读它，不影响任何 Gate ✓，
 但它是一份"真相源在哪"的文档指向一个不存在的文件 ✓。**CLAUDE.md 是 owner 的文件，我没有动它** ✓，
 记在 #141 和 progress.md 的「需 owner 关注」里 ✓。
+
+## L1-20260914-23 — #161：一个**永远产生不了 check** 的 PR，被当成了「还在等」（我修了，PR #161 已合入 `ee58f2c`）
+
+**症状**：T0304 的 PR #159 是 `CONFLICTING`。驱动每 10 秒重试一次 merge，日志只有一行
+「T0304 pushed; awaiting merge」反复出现，**不升决策、不报错、也不前进** —— 正是 §8.2 不允许的那种状态。
+`rddev pr status T0304` 全程报 merge gate **passed** ✓。
+
+**机制**：`pull_request` workflow 跑在 `refs/pull/N/merge` 上 ✓。冲突时 GitHub 造不出这个 merge commit ✓，
+于是**这个 PR 一条 check run 都没有** —— 不是 pending，是**不存在** ✓。
+`assertRequiredChecksGreen` 把「缺一条必检」读成「还没报」= `checksNotYet` = **等待** ✓，
+而驱动就是靠这个分类决定重试还是升级的 ✓。它看到的每个事实都是对的 ✓，错的是它看的那个"空"**永远不会被填上** ✓。
+
+**这是 #139 的镜像**：那一次是**跑完且失败**的 check 被读成「还在跑」✓，这一次是**永远不会有**的 check 被读成「还在跑」✓。
+两次都是**从一个"空"里推出一段等待** ✓。一条规则同时回答两次：**只有当"等待"能改变这个空的时候，空才算等待** ✓。
+
+**修法**（`MergePR` 里加第三个拒绝式 `prConflicts`，用 `gh pr view --json mergeable,mergeStateStatus`）：
+
+- 命中 `mergeable == CONFLICTING` 或 `mergeStateStatus == DIRTY` ✓；
+- **顺序就是修法本身，不是偏好** ✓：这段断言必须**在 check 断言之前**跑 ✓ ——
+  放在后面会被 check 的「还没报」吞掉，新断言永远到不了 ✓；
+- `UNKNOWN`（GitHub 按需计算，来不及就是 UNKNOWN）**不算冲突** ✓ —— 刚推上去一秒的 PR 不该因为"没算完"被判冲突 ✓；
+- 读取失败或解析不了也**不算冲突** ✓ —— 从一次失败的读里造出一个决定，会把本来好好的 PR 升级掉 ✓；
+- 三条拒绝式**两两不互相包含**（有测试逐对断言）✓ —— 这是 `ciStillRunning` 不把它误判成等待的**前提** ✓。
+
+**验证方式是"先复现再修"**：测试里的假 `gh` 把 check 全报**绿** ✓，故意如此 ——
+因为这样"把冲突断言放在 check 之后"或者"干脆不写"，测试就会失败 ✓。
+
+```
+--- FAIL: TestMergeRefusesWhenGitHubCannotBuildTheMergeCommit (0.01s)
+    gh pr merge was invoked despite the conflict
+```
+
+把那次断言调用删掉，`gh pr merge` 就回到调用记录上、merge 照样被执行 —— **这就是那个循环本身，被我复现出来了** ✓。
+
+**已知且故意不动**：`rddev pr status` 仍然不查 mergeability ✓，所以它还会把冲突 PR 的 merge gate 报成 passed ✓。
+驱动无论如何都不看这个输出 ✓，所以这是「那条命令**声称**了什么」的问题，不是 merge 路径的问题 ✓，记在这里不改 ✓。
+
+## L1-20260914-24 — 我自己造的 ref 拒了 T0304 的一次 collect；以及我自己写的看门狗是**坏的**（同一个形状，我刚刚才修过）
+
+**第一件**：T0304 的一次 rework collect 被拒，理由里点名的是**我自己的分支**
+`refs/heads/fix/a-conflicting-pr-is-a-decision-not-a-wait` ——
+collect 阶段的 refs 检查要求「运行期间新出现的 ref 必须有台账记录」，而我是**手敲 `git branch` 建的** ✓。
+台账不是形式主义：它要求的是「这个 ref 是谁的、为什么存在」有个可查的答案 ✓。
+
+- **当时的处理**：`rddev refs adopt <name>` 记上，再 `rddev worker rework T0304` 恢复（同一 session、工作树 diff 保留），
+  rework 顺手把那条决策清掉了 ✓。
+- **该记住的做法**：**建分支用 `rddev branch create NAME`** ✓ —— 它建与记录是一次操作（#146/#151 就是为这个加的）✓，
+  手敲 `git branch` 就等于给自己埋一个将来会拒掉别人 collect 的雷 ✓。
+
+**第二件（更该记）**：我起的那个盯 `task_status.json` 的看门狗**从来没响过** ✓。
+原因是我把 `tasks` 当成列表遍历，而它是**按任务 id 索引的字典** ✓ —— `x.get()` 在字符串上抛 AttributeError ✓，
+被我的 `except` 吞成 `st='?'`，于是它安静地空转 ✓。**我把这份沉默读成了「还没到」** ✓。
+
+**为什么两件事记在同一条**：第二件的形状**正是我这一轮刚修掉的那个 bug** ✓ ——
+**从一个"空"里推出一段等待** ✓。区别只是这次坏的是我自己的检查器 ✓。
+一个分辨不出「尚未发生」和「我自己的检查坏了」的检查器，和那个把"永远不会有 check"读成"还在等"的驱动，是同一个东西 ✓。
+
+**已做**：看门狗停掉，改成手工判断 ✓；上面这条（`branch create` 优先于手敲 `git branch`）写进流程 ✓。
+
+## L1-20260914-25 — T0603：它的迁移编号被后来的合入**超车**了，我把 00023 改成 00033（§8.1 的编号权在我）
+
+**背景**：T0603 在 verification 卡了很久（原因是 L1-20260914-19 那条依赖问题），期间 main 的 head 从
+`00023` 一路涨到 `00031` ✓。它的迁移文件仍叫 `00023_policy_versioning.sql` ✓。
+
+**这不是"编号小"，是"编号小**且未应用**"** ✓ —— 判定条件在 goose v3.28.0
+`internal/gooseutil/resolve.go:46-53`：`if dbAppliedVersions[v] { continue }`，
+只有「在文件系统里、**不在**已应用集合里、且**低于**库当前最大版本」才是 missing ✓，
+而默认配置下 missing 会让 `Migrate` **直接报错**（`found 1 missing (out-of-order) migration`），不是静默跳过 ✓。
+仓库没有开 `WithAllowOutofOrder` ✓。
+
+**我在 Issue #157 上的更正仍然成立** ✓：共享 dev 库**不会**因为 T0603 报错 —— 因为它的 ledger 里**已经有一行 23**
+（那是更早一次用 T0603 树跑测试留下的、从未进入 main 的记录）✓，已应用就不在 missing 里 ✓
+（L1-20260914-21 记的就是我在这里先写错过一次）✓。
+
+**但"这个库恰好不会炸"不是编号可以留着的理由** ✓，正好相反：那个 23 是**脏记录**，
+后果是 T0603 的迁移**在这台机器上永远不会被执行** ✓（goose 认为 23 已经应用过了），
+于是"新建库有这些索引和约束、这个库没有" ✓ —— 正是 §8.1 要消灭的那种静默漂移 ✓。
+
+**决定（L1，§8.1 的编号权）**：改成 `00033_policy_versioning.sql` ✓ ——
+高于当时的 head `00031` ✓，低于其它在飞任务的预留号（`00032` T0304 / `00034` T0305 / `00035` T0206）✓。
+理由是**编号顺序必须等于合入顺序**：谁后合入谁编号就得更大，否则后合入的低编号会再锁一次库 ✓。
+
+**顺带记一条今天没做的事**：`00032` 仍留给 T0304，所以**T0304 必须先于 T0603 合入** ✓。
+如果 T0304 一直卡着、而 T0603 先就绪，就把 T0603 再往上调一个号，**不要**让 T0603 越到 T0304 前面合入 ✓。
+
+**为此做的机械改动**（都属于 §1 的 integration glue，我在退回理由里写明了，Worker 不得改回）✓：
+文件名、`tests/integration/migration_test.go` 里两处点名它的注释、`internal/persistence/queries/policy.sql` 的头注释、
+`internal/application/policy/errors.go`、`internal/domain/policy.go` ✓。
+**生成物是重新生成的，不是手改的** ✓：`sqlc generate`（`check-sqlc-drift.sh` 报 clean）✓、
+`gen_schema_snapshot.py`、`spec_version.py --write`（两个 `--check` 都过）✓。
+
+**同一轮里还手工合了 `cmd/api/main.go`**：T0208 的 rsg 注册和 T0603 的 policy 注册插在**同一处** ✓，
+`git apply --3way` 正确地停下来 ✓。两边**全留**：T0208 的 `rsgAPI` 块在前，T0603 的 `policyAPI` 块在后，
+都在 `mux.Handle("/api/v1/", ...)` 之前 ✓（merge conflict 是 Supervisor 的活，§1）✓。
+
+**收尾用的是"分支 ref 即基线"这条性质** ✓：`worker rework` 会重新读分支 ref 当基线并重新记录、重算 Gate 输入 ✓，
+所以手工推进**不需要**另外去改台账 ✓（ref 只移动、不新建，也是 collect 不报「新 ref」的原因）✓。
+
+## L1-20260914-26 — T0304：远端分支分叉后**没有**恢复路径；force-push 被权限层挡住，我没有绕过
+
+**事实**：`task/T0304-git-pat-ssh-key` 远端停在 `1763190`（这是**本会话自己**在 02:21 推上去的旧尝试）✓，
+本地因为中途**推进过基线**，新提交 `6f1e4f7` 的父提交是另一条主线 ✓，于是 `git push` 被判 `non-fast-forward` ✓。
+
+**先核过、再决定**（不是"反正是自己的就覆盖"）✓：两个提交对**全部 18 个非生成物**的新增/删除行**逐行相同** ✓；
+差异只在 `specs/SPEC_VERSION.json`、`specs/database/postgres.sql` 两个**生成物**的摘要值、
+以及 `index`/hunk 头这些跟着**各自基线**变的东西上 ✓。也就是说远端那条**没有携带任何本地没有的工作** ✓。
+
+**仍然没有直接 force-push** ✓：权限层把它挡住了，并明确说这条要 owner 显式授权 ✓。
+这是 harness 划给 owner 的边界，**不是我用"用户说过自己想办法"就能推翻的东西** ✓ ——
+我不把它当成一句可以绕过的技术障碍 ✓。
+
+**这一条同时暴露了工具的一个洞**（`rddev git push` 只有裸 `git push`，没有 force 语义）✓：
+**只要在 push 之后推进一次基线，远端分支就必然分叉，而工具没有任何一条恢复路径** ✓。
+这不是 T0304 的偶发状态 —— 它是"rebaseline 在 push 之后发生"的**必然结果** ✓，
+而 rebaseline 恰恰是驱动在 PR 冲突时唯一给出的补救建议 ✓。**这是 #161 的同胞**（同一个方向：工具没覆盖到的合法状态）✓，
+已开 **#162** 记录 ✓（含四个候选方案，倾向「给被取代的远端 tip 一个显式语义」而不是「允许 force」）✓。
+
+**暂定的处理**（等 T0304 返工完成、驱动再次尝试 push 时再执行）✓：把远端那条旧 tip **合进**本地分支
+（它的内容已验证是本地工作的子集，合并不会丢东西）✓，之后 push 就是 fast-forward ✓ ——
+**不改写远端历史，也不需要那条授权** ✓。如果 owner 更希望直接 force-push，说一声即可，那时再按授权执行 ✓。
