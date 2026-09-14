@@ -25,7 +25,12 @@
 > **迁移链现在的队形**（号序钉死，只能一个一个来）：
 > `00034` 已合（T0305）→ **`00035` T0206 ← 队首** → `00036` T0209 → `00038` T0213 → `00040` T0501 → `00041` T0502 → `00042` T0306 → `00043` T0505。
 > 链上每一个都带着自己的迁移和重新生成的 `SPEC_VERSION.json`，所以**每合一个，下一个就得重新搬一次基线**（`rebaseline`）。
-> T0213 / T0501 / T0502 我按顺序压着不动 —— 现在搬它们的基线是白搬。
+> 而**复核结论绑在"代码身份"上**（`base` + 改动文件内容哈希），基线一搬身份就变、复核必然作废 ——
+> 今天 T0206 和 T0209 各白烧了一次复核，T0209 那次还是在它下一分钟就要被冻住的时候又被派了一遍。
+> 所以**没轮到的我全部压住**（停在 `rejected`，工作树一件不删，驱动不会去碰）：
+> **T0209(00036)、T0213(00038)、T0501(00040)、T0502(00041)、T0306(00042)** —— 轮到自己那天才 `rebaseline` + `rework`。
+> `T0505`(00043) 的 Worker 还在做题（做题不用等），它做完我也会照样冻住。
+> 依据记在 `L1-20260914-58`。**风险**：`rejected` 对驱动不可见，冻结集合只有我记得 —— 这一行就是那份名单。
 >
 > **本次提交**：`ece3544`（T0307 合并）、`8aab855`、`84b04dd`（状态与进度）。驱动 pid 1079130 在跑，并行 3。
 
@@ -1053,9 +1058,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-14T07:00:19Z
+生成时间：2026-09-14T07:03:21Z
 
-状态分布：todo 84 · ready 2 · running 1 · worker_failed 0 · verification 4 · rejected 2 · blocked 0 · accepted 0 · merged 40（合计 133/133 个任务）
+状态分布：todo 84 · ready 1 · running 3 · worker_failed 0 · verification 1 · rejected 4 · blocked 0 · accepted 0 · merged 40（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1088,10 +1093,10 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0203 | Typed Relation repository | P2 | merged | 2026-09-13T17:22:20Z |  | 2026-09-13T17:40:44Z | 2026-09-13T17:47:30Z |
 | T0204 | Project State 与 State Commit | P2 | merged | 2026-09-13T22:10:18Z |  | 2026-09-13T22:52:41Z | 2026-09-13T22:56:15Z |
 | T0205 | Research Branch Domain | P2 | merged | 2026-09-13T22:56:16Z |  | 2026-09-13T23:23:26Z | 2026-09-13T23:26:23Z |
-| T0206 | RSG Manifest 导出与 hash | P2 | verification | 2026-09-14T06:47:28Z |  |  |  |
+| T0206 | RSG Manifest 导出与 hash | P2 | running | 2026-09-14T07:01:46Z |  |  |  |
 | T0207 | Progressive Validation Gates | P2 | merged | 2026-09-14T00:39:04Z |  | 2026-09-14T01:13:29Z | 2026-09-14T01:32:13Z |
 | T0208 | V1 Scientific Object Domain Services | P2 | merged | 2026-09-14T01:33:06Z |  | 2026-09-14T02:37:28Z | 2026-09-14T02:41:06Z |
-| T0209 | RSG Query API | P2 | verification | 2026-09-14T06:33:30Z |  |  |  |
+| T0209 | RSG Query API | P2 | rejected | 2026-09-14T06:33:30Z |  |  |  |
 | T0210 | Scientific Object Detail UI | P2 | merged | 2026-09-14T04:52:41Z |  | 2026-09-14T05:08:10Z | 2026-09-14T05:11:18Z |
 | T0211 | Research Outline 与基础 Research 页面 | P2 | todo |  |  |  |  |
 | T0212 | Project Overview Research Summary | P2 | todo |  |  |  |  |
@@ -1103,9 +1108,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0303 | Branch Git ref 同步 | P3 | merged | 2026-09-14T01:56:07Z |  | 2026-09-14T02:15:37Z | 2026-09-14T02:21:07Z |
 | T0304 | Git 用户认证/PAT/SSH key 基础 | P3 | merged | 2026-09-14T03:05:17Z |  | 2026-09-14T03:29:01Z | 2026-09-14T03:33:06Z |
 | T0305 | Push Webhook 与 Semantic Ingestion | P3 | merged | 2026-09-14T05:30:41Z |  | 2026-09-14T05:55:09Z | 2026-09-14T05:58:23Z |
-| T0306 | Unstructured Change 状态 | P3 | verification | 2026-09-14T06:55:53Z |  |  |  |
+| T0306 | Unstructured Change 状态 | P3 | rejected | 2026-09-14T06:55:53Z |  |  |  |
 | T0307 | Files Tree/Preview API | P3 | merged | 2026-09-14T06:06:52Z |  | 2026-09-14T06:52:08Z | 2026-09-14T06:56:45Z |
-| T0308 | 只读 Files Web UI | P3 | ready |  |  |  |  |
+| T0308 | 只读 Files Web UI | P3 | running | 2026-09-14T07:02:46Z |  |  |  |
 | T0309 | Git ↔ RSG reconciliation | P3 | todo |  |  |  |  |
 | T0401 | Research State Diff 引擎 | P4 | todo |  |  |  |  |
 | T0402 | Pull Request Domain | P4 | todo |  |  |  |  |
