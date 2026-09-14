@@ -7278,3 +7278,47 @@ sqlc 生成物没有漂移），**代码一个字的问题都没有**。缺的�
 我在这里记它，是因为下一次有人（包括以后的我）看到 "T0402 accept 被拒" 这行账时，
 最容易做的反应是"那就把它前移了合掉" —— **那是排在 `00047` 之前的号，会被守卫拒**，
 而这个拒绝看起来像另一个缺陷。
+
+## L1-20260914-81
+
+### 一、T0501 的端点守卫只保留"名字说得出的那一端"
+
+T0501（迁移 `00040`）给两条核心知识边加了数据库层的端点类型守卫：`addresses_question`
+只许 hypothesis → research_question，`tests_hypothesis` 只许 experiment/calculation →
+hypothesis（catalog 新加的 `SourceTypes`/`TargetTypes` 声明，迁移 00040 的
+`knowledge_relation_endpoint_types` 镜像它）。
+
+它的 Worker 这一轮做对了：前移之后发现 `TestRSGQueryFiltersAndTraversal`（T0209，已合
+`b15e6e9`）红 —— `tests/integration/rsg_query_test.go:317` 用 **finding** 当
+`addresses_question` 的 source，守卫把它拒了（SQLSTATE P0001）。Worker 没改那条测试、
+没删没 skip，`status` 如实写 `failed` 交回来，写明"这属于科研语义，超过我的 L1"。
+
+### 二、这条守卫没有规格出处，而且和主线自己的模型打架
+
+`docs/44_SCHEMA_RELATION_CATALOG.md` 全文 14 行：Core Relation 一节**只有名字 +
+semantics**，没有任何端点类型声明；全文唯一要求"必须声明 semantics、source/target types"
+的是 **Extension（自定义关系）** 那一段 —— 那是给扩展关系定的规矩。
+
+而主线自己就在用 `finding → addresses_question → research_question`：
+`rsg_query_test.go:317`、`internal/application/rsg/query_test.go:186-219` 的单测 fixtures
+同一形状、T0211 的 Research Outline 也按这条边渲染。**守卫一旦合入，被拒的是主线自己的模型。**
+
+### 三、裁定（round 3 的返工信，18:52 发出，run-7abda6c4e89fbcaa）
+
+一条边只允许声明"**它的名字本身已经说出来的那一端**"：
+
+- `addresses_question`：保留 `TargetTypes: ["research_question"]`，**去掉 source 端限制**；
+- `tests_hypothesis`：保留 `TargetTypes: ["hypothesis"]`，**去掉 source 端限制**。
+
+迁移 00040 与 catalog 保持镜像一致；两条守卫测试改成钉"target 侧不合法会被拒 + source
+不受限"，并**新增**一条 `finding → addresses_question` 必须被接受的回归测试（旧行为红、
+改完绿）。**为什么不把 finding 加进 source 集合**：那等于替规格决定"还有哪些类型不许当
+source"（evidence_assertion？dataset？）——同样没有出处、限制更多；撤掉 source 端是恢复
+主线既有行为的最小改动：不加规则，只去掉一条没有出处的规则。
+
+### 四、边界：核心关系要不要"声明端点类型"，是另一件事（issue #183）
+
+"关系两端应该被声明"这件事规格其实认 —— 认的是**扩展关系**那一段：先有声明、再有约束。
+核心关系要不要也这么做、每条边的合法集合由谁按什么依据定，是产品/科研语义，不是这个任务
+能定的；已记成 issue #183（背景写在里面），不阻断。将来若要收紧，必须同时补 `docs/44`
+的声明 + 迁移守卫，不能反过来由迁移发明约束。
