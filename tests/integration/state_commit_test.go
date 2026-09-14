@@ -13,10 +13,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/lichman0405/post/internal/application/states"
+	"github.com/lichman0405/post/internal/application/validation"
 	"github.com/lichman0405/post/internal/domain"
 	"github.com/lichman0405/post/internal/persistence"
 	"github.com/lichman0405/post/internal/persistence/sqlc"
 	"github.com/lichman0405/post/internal/persistence/testdb"
+	"github.com/lichman0405/post/internal/rsg/schemareg"
+	rsgvalidation "github.com/lichman0405/post/internal/rsg/validation"
 )
 
 // Task T0204: Project State 与 State Commit — the transaction boundary
@@ -81,7 +84,7 @@ func newStateFixture(t *testing.T, ctx context.Context) *stateFixture {
 	if err != nil {
 		t.Fatalf("create fixture project: %v", err)
 	}
-	svc := states.NewService(persistence.NewStateStore(pool))
+	svc := states.NewService(persistence.NewStateStore(pool), newCommitGuard(t))
 	genesis, err := svc.CreateInitialState(ctx, states.CreateInitialStateParams{
 		ProjectID:       project.ID,
 		ManifestVersion: "v1",
@@ -101,6 +104,19 @@ func newStateFixture(t *testing.T, ctx context.Context) *stateFixture {
 	}
 	f.branch = f.newBranch(t, ctx, genesis.ID)
 	return f
+}
+
+// newCommitGuard wires the T0207 commit guard over the real schema registry
+// and the real transaction probe: every Commit below runs its gate
+// server-side inside the commit transaction (the caller's own fixtures
+// commit at the draft gate).
+func newCommitGuard(t *testing.T) *validation.Guard {
+	t.Helper()
+	reg, err := schemareg.New()
+	if err != nil {
+		t.Fatalf("schemareg.New: %v", err)
+	}
+	return validation.NewGuard(rsgvalidation.NewValidator(reg), persistence.NewValidationTxProbe())
 }
 
 // newBranch seeds a branch with the given base state via direct SQL (the
@@ -198,6 +214,7 @@ func TestStateCommitCreatesTraceableTransition(t *testing.T) {
 		},
 		BaseStateID:     &f.genesis.ID,
 		ManifestVersion: "v1",
+		Gate:            rsgvalidation.GateDraft,
 	}, f.writeObjectVersion("First hypothesis", &writtenVersion))
 	if err != nil {
 		t.Fatalf("Commit: %v", err)
@@ -300,6 +317,7 @@ func TestStateCommitCreatesTraceableTransition(t *testing.T) {
 		},
 		BaseStateID:     &state.ID,
 		ManifestVersion: "v1",
+		Gate:            rsgvalidation.GateDraft,
 	}, f.writeObjectVersion("Second hypothesis", nil))
 	if err != nil {
 		t.Fatalf("second Commit: %v", err)
@@ -359,6 +377,7 @@ func TestStateCommitFailedTransactionLeavesNoHalfState(t *testing.T) {
 		},
 		BaseStateID:     &f.genesis.ID,
 		ManifestVersion: "v1",
+		Gate:            rsgvalidation.GateDraft,
 	}, func(ctx context.Context, tx states.Transaction, stateID string) error {
 		// Write a row FIRST — the rollback must take it back too.
 		if err := f.writeObjectVersion("half-written", nil)(ctx, tx, stateID); err != nil {
@@ -403,6 +422,7 @@ func TestStateCommitHeadConflict(t *testing.T) {
 		},
 		BaseStateID:     &f.genesis.ID,
 		ManifestVersion: "v1",
+		Gate:            rsgvalidation.GateDraft,
 	}, f.writeObjectVersion("Winner", nil))
 	if err != nil {
 		t.Fatalf("winning Commit: %v", err)
@@ -420,6 +440,7 @@ func TestStateCommitHeadConflict(t *testing.T) {
 		},
 		BaseStateID:     &f.genesis.ID, // stale: the winner moved the head
 		ManifestVersion: "v1",
+		Gate:            rsgvalidation.GateDraft,
 	}, f.writeObjectVersion("Loser", nil))
 	var conflict *states.StateConflictError
 	if !errors.As(err, &conflict) {
@@ -471,6 +492,7 @@ func TestStateCommitContentAddressCollision(t *testing.T) {
 		Operations:      ops,
 		BaseStateID:     &f.genesis.ID,
 		ManifestVersion: "v1",
+		Gate:            rsgvalidation.GateDraft,
 	}, noop)
 	if err != nil {
 		t.Fatalf("first Commit: %v", err)
@@ -498,6 +520,7 @@ func TestStateCommitContentAddressCollision(t *testing.T) {
 		Operations:      ops,
 		BaseStateID:     &f.genesis.ID,
 		ManifestVersion: "v1",
+		Gate:            rsgvalidation.GateDraft,
 	}, noop)
 	if !errors.Is(err, states.ErrStateExists) {
 		t.Fatalf("identical Commit error = %v, want ErrStateExists", err)
@@ -565,6 +588,7 @@ func TestStateCommitUnknownBranch(t *testing.T) {
 				},
 				BaseStateID:     &f.genesis.ID,
 				ManifestVersion: "v1",
+				Gate:            rsgvalidation.GateDraft,
 			}, func(context.Context, states.Transaction, string) error { return nil })
 			if !errors.Is(err, states.ErrBranchNotFound) {
 				t.Fatalf("Commit error = %v, want ErrBranchNotFound", err)
@@ -623,6 +647,7 @@ func TestCreateInitialState(t *testing.T) {
 			{Kind: domain.OperationObjectVersionCreated, EntityID: "obj-headless", VersionNo: 1},
 		},
 		ManifestVersion: "v1",
+		Gate:            rsgvalidation.GateDraft,
 	}, f.writeObjectVersion("Headless first", nil))
 	if err != nil {
 		t.Fatalf("nil-base Commit: %v", err)
@@ -672,6 +697,7 @@ func TestStateCommitConcurrentWriters(t *testing.T) {
 				},
 				BaseStateID:     &f.genesis.ID,
 				ManifestVersion: "v1",
+				Gate:            rsgvalidation.GateDraft,
 			}, f.writeObjectVersion(fmt.Sprintf("Racer %d", i), nil))
 			results <- outcome{state, commit, err}
 		}(i)

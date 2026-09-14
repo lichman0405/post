@@ -48,14 +48,18 @@ import (
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
+	"github.com/lichman0405/post/cmd/api/validationhttp"
 	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
+	appvalidation "github.com/lichman0405/post/internal/application/validation"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/config"
 	"github.com/lichman0405/post/internal/gitprovider"
 	"github.com/lichman0405/post/internal/health"
 	"github.com/lichman0405/post/internal/observability"
 	"github.com/lichman0405/post/internal/persistence"
+	"github.com/lichman0405/post/internal/rsg/schemareg"
+	rsgvalidation "github.com/lichman0405/post/internal/rsg/validation"
 	"github.com/lichman0405/post/internal/version"
 	"github.com/lichman0405/post/internal/worker"
 )
@@ -239,6 +243,23 @@ func run(args []string) int {
 		Orgs:     orgAPI.Service(),
 	})
 	auditAPI.Register(v1)
+	// Progressive validation gates (T0207): the :validate endpoint runs one
+	// gate over the branch's persisted snapshot and returns the full report.
+	reg, err := schemareg.New()
+	if err != nil {
+		slog.Error("post-api: schema registry failed to load", "error", err)
+		return exitRuntime
+	}
+	validationAPI := validationhttp.New(validationhttp.Deps{
+		Validator: appvalidation.NewService(
+			persistence.NewValidationSnapshotRepository(persistence.NewStateStore(pool)),
+			rsgvalidation.NewValidator(reg),
+		),
+		// The report is as visible as its project: the same project-read
+		// gate every other project read runs (T0106 read matrix).
+		Projects: projectAPI.Service(),
+	})
+	validationAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	srv := &http.Server{

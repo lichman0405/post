@@ -231,6 +231,19 @@ func (r *Registry) List() []Ref {
 	return refs
 }
 
+// TypeConst returns the object type the schema registered at ref governs
+// (the const value of its properties.type), when it declares one — see
+// Schema.TypeConst. Unknown refs report ("", false).
+func (r *Registry) TypeConst(ref Ref) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	s, ok := r.entries[ref]
+	if !ok {
+		return "", false
+	}
+	return s.TypeConst()
+}
+
 // Versions returns the versions registered under id, sorted ascending, or
 // nil when the id is unknown.
 func (r *Registry) Versions(id string) []string {
