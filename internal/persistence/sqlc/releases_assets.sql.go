@@ -143,6 +143,84 @@ func (q *Queries) GetResearchAssetVersion(ctx context.Context, arg GetResearchAs
 	return i, err
 }
 
+const listReleaseReviews = `-- name: ListReleaseReviews :many
+WITH RECURSIVE lineage(id) AS (
+  SELECT project_states.id FROM project_states WHERE project_states.id = $2
+  UNION
+  SELECT ps.parent_state_id FROM project_states ps
+  JOIN lineage l ON ps.id = l.id
+  WHERE ps.parent_state_id IS NOT NULL
+)
+SELECT pr.number AS pull_request_number,
+       pr.proposed_state_id,
+       r.id,
+       r.reviewer_id,
+       r.review_kind,
+       r.decision,
+       r.body,
+       r.created_at
+FROM reviews r
+JOIN pull_requests pr ON pr.id = r.pull_request_id
+WHERE pr.target_branch_id = $1
+  AND pr.proposed_state_id IN (SELECT id FROM lineage)
+ORDER BY pr.number, r.created_at, r.id
+`
+
+type ListReleaseReviewsParams struct {
+	MainBranchID pgtype.UUID `json:"main_branch_id"`
+	StateID      pgtype.UUID `json:"state_id"`
+}
+
+type ListReleaseReviewsRow struct {
+	PullRequestNumber int64              `json:"pull_request_number"`
+	ProposedStateID   pgtype.UUID        `json:"proposed_state_id"`
+	ID                pgtype.UUID        `json:"id"`
+	ReviewerID        pgtype.UUID        `json:"reviewer_id"`
+	ReviewKind        string             `json:"review_kind"`
+	Decision          string             `json:"decision"`
+	Body              string             `json:"body"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+// The review/approval record of one release (T0605): every review row of
+// the research PRs targeting main whose proposed state is the released
+// state or one of its ancestors — the reviews that accepted this lineage
+// into main (docs/09 §4: frozen main updates only through PR merge, so a
+// proposed state inside main's lineage got there through its PR). The
+// target filter names main explicitly: a duplicate proposal of the same
+// state against another branch is not part of main's acceptance record.
+// Ordered by PR number then review time then row id (a total order — the
+// release manifest's canonical sorting is the releases package's rule,
+// not the store's).
+func (q *Queries) ListReleaseReviews(ctx context.Context, arg ListReleaseReviewsParams) ([]ListReleaseReviewsRow, error) {
+	rows, err := q.db.Query(ctx, listReleaseReviews, arg.MainBranchID, arg.StateID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReleaseReviewsRow
+	for rows.Next() {
+		var i ListReleaseReviewsRow
+		if err := rows.Scan(
+			&i.PullRequestNumber,
+			&i.ProposedStateID,
+			&i.ID,
+			&i.ReviewerID,
+			&i.ReviewKind,
+			&i.Decision,
+			&i.Body,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const publishKnowledgePublication = `-- name: PublishKnowledgePublication :one
 INSERT INTO knowledge_publications (object_version_id, public_version, rights_json, published_by)
 VALUES ($1, $2, $3, $4)

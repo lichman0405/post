@@ -270,6 +270,17 @@ type Querier interface {
 	// enforced on the relations container row (the endpoints' own project is
 	// guaranteed equal by the relation write command).
 	ListRelationVersionsForObject(ctx context.Context, arg ListRelationVersionsForObjectParams) ([]ListRelationVersionsForObjectRow, error)
+	// The review/approval record of one release (T0605): every review row of
+	// the research PRs targeting main whose proposed state is the released
+	// state or one of its ancestors — the reviews that accepted this lineage
+	// into main (docs/09 §4: frozen main updates only through PR merge, so a
+	// proposed state inside main's lineage got there through its PR). The
+	// target filter names main explicitly: a duplicate proposal of the same
+	// state against another branch is not part of main's acceptance record.
+	// Ordered by PR number then review time then row id (a total order — the
+	// release manifest's canonical sorting is the releases package's rule,
+	// not the store's).
+	ListReleaseReviews(ctx context.Context, arg ListReleaseReviewsParams) ([]ListReleaseReviewsRow, error)
 	ListScientificObjectVersions(ctx context.Context, objectID pgtype.UUID) ([]ScientificObjectVersion, error)
 	ListStateCommitsByBranch(ctx context.Context, branchID pgtype.UUID) ([]StateCommit, error)
 	// The state snapshot projections (docs/21 §5, docs/07 §7): a state's
