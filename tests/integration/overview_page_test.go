@@ -33,6 +33,7 @@ import (
 	"github.com/lichman0405/post/internal/application/states"
 	"github.com/lichman0405/post/internal/application/validation"
 	"github.com/lichman0405/post/internal/authz"
+	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/persistence"
 	"github.com/lichman0405/post/internal/persistence/memstore"
 	"github.com/lichman0405/post/internal/persistence/testdb"
@@ -172,6 +173,7 @@ func newOverviewPageFixture(t *testing.T, ctx context.Context) *overviewPageFixt
 		Profiles:  persistence.NewProfileStore(pool),
 		Authz:     authz.NewMatrixEngine(),
 		Schemas:   reg,
+		Events:    events.Recorder{},
 	})
 	rsgAPI := rsghttp.New(rsghttp.Deps{Service: rsgSvc})
 	apiMux := http.NewServeMux()

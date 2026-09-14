@@ -18,6 +18,7 @@ import (
 	"github.com/lichman0405/post/internal/application/states"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/domain"
+	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/rsg/schemareg"
 	"github.com/lichman0405/post/internal/rsg/semantics"
 )
@@ -60,6 +61,9 @@ type fakeBranches struct {
 	created bool
 	list    []domain.Branch
 	listErr error
+	// visibility is what Get reports (empty = public); the write paths map
+	// it onto the event visibility.
+	visibility domain.BranchVisibility
 }
 
 func (f *fakeBranches) Create(ctx context.Context, in branches.CreateBranchParams) (domain.Branch, error) {
@@ -78,7 +82,11 @@ func (f *fakeBranches) Get(ctx context.Context, projectID, branchID string) (dom
 	if f.getErr != nil {
 		return domain.Branch{}, f.getErr
 	}
-	return domain.Branch{ID: branchID, ProjectID: projectID, Name: "main"}, nil
+	vis := f.visibility
+	if !domain.ValidBranchVisibility(vis) {
+		vis = domain.BranchVisibilityPublic
+	}
+	return domain.Branch{ID: branchID, ProjectID: projectID, Name: "main", Visibility: vis}, nil
 }
 
 func (f *fakeBranches) List(ctx context.Context, projectID string) ([]domain.Branch, error) {
@@ -279,6 +287,22 @@ func (f *fakeRelations) ListVersionsForObject(ctx context.Context, projectID, ob
 	return nil, nil
 }
 
+// fakeRecorder captures every event the service records inside the commit
+// callback, in order — the unit assertion surface for the outbox wiring
+// (T1001); the real events.Recorder is exercised by the integration suite.
+type fakeRecorder struct {
+	recorded []events.Event
+	err      error
+}
+
+func (f *fakeRecorder) Record(ctx context.Context, db events.DBTX, e events.Event) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.recorded = append(f.recorded, e)
+	return nil
+}
+
 func newTestService(t *testing.T, projects *fakeProjects, objects *fakeObjects) *Service {
 	t.Helper()
 	reg, err := schemareg.New()
@@ -295,6 +319,7 @@ func newTestService(t *testing.T, projects *fakeProjects, objects *fakeObjects) 
 		Relations: &fakeRelations{},
 		Authz:     authz.NewMatrixEngine(),
 		Schemas:   reg,
+		Events:    &fakeRecorder{},
 	})
 }
 
@@ -484,6 +509,7 @@ func TestCreateBranchSeedsGenesisWhenProjectHasNoState(t *testing.T) {
 		Relations: &fakeRelations{},
 		Authz:     authz.NewMatrixEngine(),
 		Schemas:   reg,
+		Events:    &fakeRecorder{},
 	})
 	branch, err := svc.CreateBranch(context.Background(), ownerActor(), "project-1", CreateBranchInput{Name: "main"})
 	if err != nil {
@@ -601,7 +627,7 @@ func TestCreateRelationHappyPath(t *testing.T) {
 		States:  &fakeStates{head: domain.ProjectState{ID: "head-1"}, stateID: "state-1"},
 		Latest:  &fakeLatest{state: domain.ProjectState{ID: "latest-1"}},
 		Objects: objects, Relations: rels,
-		Authz: authz.NewMatrixEngine(), Schemas: reg,
+		Authz: authz.NewMatrixEngine(), Schemas: reg, Events: &fakeRecorder{},
 	})
 	created, err := svc.CreateObject(context.Background(), ownerActor(), "project-1", "branch-1", CreateObjectInput{
 		ObjectType: "material", Payload: json.RawMessage(`{"name":"MOF-5"}`),
@@ -650,7 +676,7 @@ func TestUnwiredEngineFailsClosed(t *testing.T) {
 		States:  &fakeStates{head: domain.ProjectState{ID: "head-1"}, stateID: "state-1"},
 		Latest:  &fakeLatest{state: domain.ProjectState{ID: "latest-1"}},
 		Objects: newFakeObjects(), Relations: &fakeRelations{},
-		Authz: nil, Schemas: reg,
+		Authz: nil, Schemas: reg, Events: &fakeRecorder{},
 	})
 	_, err = svc.CreateObject(context.Background(), ownerActor(), "project-1", "branch-1", CreateObjectInput{
 		ObjectType: "material", Payload: json.RawMessage(`{}`),
@@ -705,5 +731,183 @@ func TestResolveSchemaRefRefusesNotYetLoadedProfile(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), `governs type ""`) {
 		t.Errorf("err carries the bogus empty-type verdict: %v", err)
+	}
+}
+
+// TestWriteRecordsOutboxEvents pins the producer side of the transactional
+// outbox (T1001): every scientific-state write records its domain events in
+// the same commit, with the envelope derived from the commit and the
+// branch's visibility — one state.committed per commit plus one
+// scientific_object.version_created per object version written.
+func TestWriteRecordsOutboxEvents(t *testing.T) {
+	objects := newFakeObjects()
+	rec := &fakeRecorder{}
+	reg, err := schemareg.New()
+	if err != nil {
+		t.Fatalf("schemareg.New: %v", err)
+	}
+	svc := NewService(Deps{
+		Projects: memberProject(), Branches: &fakeBranches{},
+		States:  &fakeStates{head: domain.ProjectState{ID: "head-1"}, stateID: "state-1"},
+		Latest:  &fakeLatest{state: domain.ProjectState{ID: "latest-1"}},
+		Objects: objects, Relations: &fakeRelations{},
+		Authz: authz.NewMatrixEngine(), Schemas: reg, Events: rec,
+	})
+
+	created, err := svc.CreateObject(context.Background(), ownerActor(), "project-1", "branch-1", CreateObjectInput{
+		ObjectType: "material", Payload: json.RawMessage(`{"name":"MOF-5"}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateObject: %v", err)
+	}
+	if len(rec.recorded) != 2 {
+		t.Fatalf("CreateObject recorded %d events, want 2 (state.committed + scientific_object.version_created)", len(rec.recorded))
+	}
+	committed, versioned := rec.recorded[0], rec.recorded[1]
+	if committed.EventType != eventStateCommitted || versioned.EventType != eventScientificObjectVersionCreated {
+		t.Fatalf("event types = %q, %q; want %q then %q", committed.EventType, versioned.EventType, eventStateCommitted, eventScientificObjectVersionCreated)
+	}
+	if committed.Visibility != events.VisibilityPublic || versioned.Visibility != events.VisibilityPublic {
+		t.Fatalf("event visibilities = %q/%q, want public (the branch is public)", committed.Visibility, versioned.Visibility)
+	}
+	if committed.ActorID != "owner-1" || committed.ProjectID != "project-1" {
+		t.Fatalf("state.committed envelope = %q/%q, want the actor and project", committed.ActorID, committed.ProjectID)
+	}
+	var sc map[string]any
+	if err := json.Unmarshal(committed.Payload, &sc); err != nil {
+		t.Fatalf("state.committed payload: %v", err)
+	}
+	if sc["state_id"] != "state-1" || sc["branch_id"] != "branch-1" || sc["gate"] != "draft" {
+		t.Fatalf("state.committed payload = %v, want the commit's state, branch and gate", sc)
+	}
+	ops, _ := sc["operations"].([]any)
+	if len(ops) != 1 || ops[0].(map[string]any)["entity_id"] != created.Object.ID {
+		t.Fatalf("state.committed operations = %v, want the object id", ops)
+	}
+	var vc map[string]any
+	if err := json.Unmarshal(versioned.Payload, &vc); err != nil {
+		t.Fatalf("version_created payload: %v", err)
+	}
+	if vc["object_id"] != created.Object.ID || vc["version_no"] != float64(1) || vc["state_id"] != "state-1" {
+		t.Fatalf("version_created payload = %v, want object id, version 1, the commit state", vc)
+	}
+
+	// A next version records the same pair, with the new log position.
+	_, err = svc.CreateObjectVersion(context.Background(), ownerActor(), "project-1", "branch-1", created.Object.ID,
+		CreateObjectVersionInput{ExpectedVersion: 1, Patch: json.RawMessage(`{"name":"MOF-5b"}`)})
+	if err != nil {
+		t.Fatalf("CreateObjectVersion: %v", err)
+	}
+	if len(rec.recorded) != 4 {
+		t.Fatalf("after version write: %d events, want 4", len(rec.recorded))
+	}
+	var vc2 map[string]any
+	if err := json.Unmarshal(rec.recorded[3].Payload, &vc2); err != nil {
+		t.Fatalf("version 2 payload: %v", err)
+	}
+	if vc2["version_no"] != float64(2) {
+		t.Fatalf("version_created version_no = %v, want 2", vc2["version_no"])
+	}
+
+	// A relation write records exactly one event: the commit's.
+	_, err = svc.CreateRelation(context.Background(), ownerActor(), "project-1", "branch-1", CreateRelationInput{
+		RelationType:          "derived_from",
+		SourceObjectVersionID: created.Version.ID,
+		TargetObjectVersionID: created.Version.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateRelation: %v", err)
+	}
+	if len(rec.recorded) != 5 {
+		t.Fatalf("after relation write: %d events, want 5 (one more)", len(rec.recorded))
+	}
+	if rec.recorded[4].EventType != eventStateCommitted {
+		t.Fatalf("relation event type = %q, want %q", rec.recorded[4].EventType, eventStateCommitted)
+	}
+	var rc map[string]any
+	if err := json.Unmarshal(rec.recorded[4].Payload, &rc); err != nil {
+		t.Fatalf("relation state.committed payload: %v", err)
+	}
+	ops, _ = rc["operations"].([]any)
+	if len(ops) != 1 || ops[0].(map[string]any)["kind"] != "relation_version_created" {
+		t.Fatalf("relation operations = %v, want relation_version_created", ops)
+	}
+}
+
+// TestEventVisibilityFollowsBranch pins docs/12 on the producer side: the
+// event is exactly as visible as the branch the write committed to.
+func TestEventVisibilityFollowsBranch(t *testing.T) {
+	reg, err := schemareg.New()
+	if err != nil {
+		t.Fatalf("schemareg.New: %v", err)
+	}
+	rec := &fakeRecorder{}
+	svc := NewService(Deps{
+		Projects: memberProject(), Branches: &fakeBranches{visibility: domain.BranchVisibilityPrivate},
+		States:  &fakeStates{head: domain.ProjectState{ID: "head-1"}, stateID: "state-1"},
+		Latest:  &fakeLatest{state: domain.ProjectState{ID: "latest-1"}},
+		Objects: newFakeObjects(), Relations: &fakeRelations{},
+		Authz: authz.NewMatrixEngine(), Schemas: reg, Events: rec,
+	})
+	if _, err := svc.CreateObject(context.Background(), ownerActor(), "project-1", "branch-1", CreateObjectInput{
+		ObjectType: "material", Payload: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatalf("CreateObject on a private branch: %v", err)
+	}
+	for i, e := range rec.recorded {
+		if e.Visibility != events.VisibilityPrivate {
+			t.Fatalf("event %d visibility = %q, want private (the branch is private)", i, e.Visibility)
+		}
+	}
+}
+
+// TestUnwiredRecorderFailsClosed: an event write is never silently
+// droppable — a service wired without a recorder fails the commit.
+func TestUnwiredRecorderFailsClosed(t *testing.T) {
+	reg, err := schemareg.New()
+	if err != nil {
+		t.Fatalf("schemareg.New: %v", err)
+	}
+	svc := NewService(Deps{
+		Projects: memberProject(), Branches: &fakeBranches{},
+		States:  &fakeStates{head: domain.ProjectState{ID: "head-1"}, stateID: "state-1"},
+		Latest:  &fakeLatest{state: domain.ProjectState{ID: "latest-1"}},
+		Objects: newFakeObjects(), Relations: &fakeRelations{},
+		Authz: authz.NewMatrixEngine(), Schemas: reg,
+	})
+	_, err = svc.CreateObject(context.Background(), ownerActor(), "project-1", "branch-1", CreateObjectInput{
+		ObjectType: "material", Payload: json.RawMessage(`{}`),
+	})
+	if !errors.Is(err, ErrStore) {
+		t.Fatalf("nil recorder: err = %v, want ErrStore (fail closed)", err)
+	}
+}
+
+// TestRecorderFailureFailsTheCommit: the outbox write shares the commit's
+// atomicity — a recorder failure aborts the whole write, never a silent
+// state-change-without-event (the lost-event case the outbox exists to
+// prevent).
+func TestRecorderFailureFailsTheCommit(t *testing.T) {
+	objects := newFakeObjects()
+	rec := &fakeRecorder{err: errors.New("outbox down")}
+	reg, err := schemareg.New()
+	if err != nil {
+		t.Fatalf("schemareg.New: %v", err)
+	}
+	sts := &fakeStates{head: domain.ProjectState{ID: "head-1"}, stateID: "state-1"}
+	svc := NewService(Deps{
+		Projects: memberProject(), Branches: &fakeBranches{},
+		States: sts, Latest: &fakeLatest{state: domain.ProjectState{ID: "latest-1"}},
+		Objects: objects, Relations: &fakeRelations{},
+		Authz: authz.NewMatrixEngine(), Schemas: reg, Events: rec,
+	})
+	_, err = svc.CreateObject(context.Background(), ownerActor(), "project-1", "branch-1", CreateObjectInput{
+		ObjectType: "material", Payload: json.RawMessage(`{}`),
+	})
+	if err == nil {
+		t.Fatal("CreateObject with a failing recorder succeeded, want the commit to fail")
+	}
+	if sts.committed != 0 {
+		t.Fatalf("commit count = %d, want 0 (the failed event write aborts the commit)", sts.committed)
 	}
 }

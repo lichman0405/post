@@ -17,6 +17,7 @@ import (
 	"github.com/lichman0405/post/internal/application/states"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/domain"
+	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/rsg/relationcatalog"
 	"github.com/lichman0405/post/internal/rsg/schemareg"
 	"github.com/lichman0405/post/internal/rsg/semantics"
@@ -46,6 +47,7 @@ type Service struct {
 	schemaProfiles ProfileResolver
 	authz          authz.Engine
 	schemas        *schemareg.Registry
+	events         Recorder
 }
 
 // Deps wires the service. Schemas (the canonical registry) and Authz (the
@@ -55,6 +57,9 @@ type Service struct {
 // optional: the object detail page degrades to raw creator ids when it is
 // not wired. SchemaProfiles is optional too: nil means no project schema
 // profiles are configured, and any non-canonical schema ref is refused.
+// Events (the outbox recorder, T1001) is checked per commit, like the
+// states guard: an unwired recorder fails the write rather than drop its
+// events.
 type Deps struct {
 	Projects       ProjectGate
 	Branches       BranchPort
@@ -67,6 +72,7 @@ type Deps struct {
 	SchemaProfiles ProfileResolver
 	Authz          authz.Engine
 	Schemas        *schemareg.Registry
+	Events         Recorder
 }
 
 // NewService builds the service on the ports.
@@ -83,6 +89,7 @@ func NewService(deps Deps) *Service {
 		profiles:       deps.Profiles,
 		authz:          deps.Authz,
 		schemas:        deps.Schemas,
+		events:         deps.Events,
 	}
 }
 
@@ -203,9 +210,11 @@ func (s *Service) CreateObject(ctx context.Context, actor domain.User, projectID
 	if err := s.requireWrite(ctx, actor, projectID); err != nil {
 		return ObjectResult{}, err
 	}
-	if _, err := s.branches.Get(ctx, projectID, branchID); err != nil {
+	branch, err := s.branches.Get(ctx, projectID, branchID)
+	if err != nil {
 		return ObjectResult{}, wrapError(err)
 	}
+	visibility := eventVisibility(branch.Visibility)
 	ref, err := s.resolveSchemaRef(ctx, projectID, in.ObjectType, in.SchemaRef)
 	if err != nil {
 		return ObjectResult{}, err
@@ -227,6 +236,17 @@ func (s *Service) CreateObject(ctx context.Context, actor domain.User, projectID
 		return ObjectResult{}, wrapError(err)
 	}
 	title := titleFromPayload(payload, in.ObjectType)
+	params := states.CommitParams{
+		ProjectID:       projectID,
+		BranchID:        branchID,
+		ActorID:         actor.ID,
+		Via:             domain.ViaAPI,
+		Message:         fmt.Sprintf("create %s %s", in.ObjectType, title),
+		Operations:      []domain.StateOperation{objectOperation(objectID, in.ObjectType, 1)},
+		BaseStateID:     &head.ID,
+		ManifestVersion: manifestVersion,
+		Gate:            rsgvalidation.GateDraft,
+	}
 	var obj domain.ScientificObject
 	var v domain.ScientificObjectVersion
 	write := func(ctx context.Context, tx states.Transaction, stateID string) error {
@@ -247,19 +267,16 @@ func (s *Service) CreateObject(ctx context.Context, actor domain.User, projectID
 				CreatedBy:      actor.ID,
 			},
 		})
-		return werr
+		if werr != nil {
+			return werr
+		}
+		// The outbox events share this transaction (T1001): the state
+		// change and its events commit or roll back together.
+		return s.recordCommitEvents(ctx, tx, params, stateID, visibility, func(stateID string) (events.Event, error) {
+			return versionCreatedEvent(projectID, objectID, in.ObjectType, stateID, branchID, actor.ID, title, v.VersionNo, visibility)
+		})
 	}
-	_, _, err = s.states.Commit(ctx, states.CommitParams{
-		ProjectID:       projectID,
-		BranchID:        branchID,
-		ActorID:         actor.ID,
-		Via:             domain.ViaAPI,
-		Message:         fmt.Sprintf("create %s %s", in.ObjectType, title),
-		Operations:      []domain.StateOperation{objectOperation(objectID, in.ObjectType, 1)},
-		BaseStateID:     &head.ID,
-		ManifestVersion: manifestVersion,
-		Gate:            rsgvalidation.GateDraft,
-	}, write)
+	_, _, err = s.states.Commit(ctx, params, write)
 	if err != nil {
 		return ObjectResult{}, wrapError(err)
 	}
@@ -279,9 +296,11 @@ func (s *Service) CreateObjectVersion(ctx context.Context, actor domain.User, pr
 	if err := s.requireWrite(ctx, actor, projectID); err != nil {
 		return ObjectVersionResult{}, err
 	}
-	if _, err := s.branches.Get(ctx, projectID, branchID); err != nil {
+	branch, err := s.branches.Get(ctx, projectID, branchID)
+	if err != nil {
 		return ObjectVersionResult{}, wrapError(err)
 	}
+	visibility := eventVisibility(branch.Visibility)
 	if in.ExpectedVersion < 1 {
 		return ObjectVersionResult{}, fmt.Errorf("%w: expected_version must be >= 1", ErrValidation)
 	}
@@ -320,6 +339,17 @@ func (s *Service) CreateObjectVersion(ctx context.Context, actor domain.User, pr
 		return ObjectVersionResult{}, fmt.Errorf("%w: re-encoding merged payload: %v", ErrStore, err)
 	}
 	versionNo := in.ExpectedVersion + 1
+	params := states.CommitParams{
+		ProjectID:       projectID,
+		BranchID:        branchID,
+		ActorID:         actor.ID,
+		Via:             domain.ViaAPI,
+		Message:         fmt.Sprintf("update %s %s to version %d", obj.ObjectType, title, versionNo),
+		Operations:      []domain.StateOperation{objectOperation(objectID, obj.ObjectType, versionNo)},
+		BaseStateID:     &head.ID,
+		ManifestVersion: manifestVersion,
+		Gate:            rsgvalidation.GateDraft,
+	}
 	var v domain.ScientificObjectVersion
 	write := func(ctx context.Context, tx states.Transaction, stateID string) error {
 		var werr error
@@ -333,19 +363,14 @@ func (s *Service) CreateObjectVersion(ctx context.Context, actor domain.User, pr
 			Payload:        mergedRaw,
 			CreatedBy:      actor.ID,
 		})
-		return werr
+		if werr != nil {
+			return werr
+		}
+		return s.recordCommitEvents(ctx, tx, params, stateID, visibility, func(stateID string) (events.Event, error) {
+			return versionCreatedEvent(projectID, objectID, obj.ObjectType, stateID, branchID, actor.ID, title, versionNo, visibility)
+		})
 	}
-	_, _, err = s.states.Commit(ctx, states.CommitParams{
-		ProjectID:       projectID,
-		BranchID:        branchID,
-		ActorID:         actor.ID,
-		Via:             domain.ViaAPI,
-		Message:         fmt.Sprintf("update %s %s to version %d", obj.ObjectType, title, versionNo),
-		Operations:      []domain.StateOperation{objectOperation(objectID, obj.ObjectType, versionNo)},
-		BaseStateID:     &head.ID,
-		ManifestVersion: manifestVersion,
-		Gate:            rsgvalidation.GateDraft,
-	}, write)
+	_, _, err = s.states.Commit(ctx, params, write)
 	if err != nil {
 		return ObjectVersionResult{}, wrapError(err)
 	}
@@ -365,9 +390,11 @@ func (s *Service) CreateRelation(ctx context.Context, actor domain.User, project
 	if err := s.requireWrite(ctx, actor, projectID); err != nil {
 		return RelationResult{}, err
 	}
-	if _, err := s.branches.Get(ctx, projectID, branchID); err != nil {
+	branch, err := s.branches.Get(ctx, projectID, branchID)
+	if err != nil {
 		return RelationResult{}, wrapError(err)
 	}
+	visibility := eventVisibility(branch.Visibility)
 	if _, ok := relationcatalog.Lookup(in.RelationType); !ok {
 		return RelationResult{}, &relations.UnknownRelationTypeError{Type: in.RelationType}
 	}
@@ -397,6 +424,17 @@ func (s *Service) CreateRelation(ctx context.Context, actor domain.User, project
 	}
 	var rel domain.Relation
 	var v domain.RelationVersion
+	params := states.CommitParams{
+		ProjectID:       projectID,
+		BranchID:        branchID,
+		ActorID:         actor.ID,
+		Via:             domain.ViaAPI,
+		Message:         fmt.Sprintf("create %s relation", in.RelationType),
+		Operations:      []domain.StateOperation{relationOperation(relationID, in.RelationType)},
+		BaseStateID:     &head.ID,
+		ManifestVersion: manifestVersion,
+		Gate:            rsgvalidation.GateDraft,
+	}
 	write := func(ctx context.Context, tx states.Transaction, stateID string) error {
 		var werr error
 		rel, v, werr = s.relations.CreateRelationInTx(ctx, tx, CreateRelationInTxParams{
@@ -411,19 +449,12 @@ func (s *Service) CreateRelation(ctx context.Context, actor domain.User, project
 				CreatedBy:             actor.ID,
 			},
 		})
-		return werr
+		if werr != nil {
+			return werr
+		}
+		return s.recordCommitEvents(ctx, tx, params, stateID, visibility, nil)
 	}
-	_, _, err = s.states.Commit(ctx, states.CommitParams{
-		ProjectID:       projectID,
-		BranchID:        branchID,
-		ActorID:         actor.ID,
-		Via:             domain.ViaAPI,
-		Message:         fmt.Sprintf("create %s relation", in.RelationType),
-		Operations:      []domain.StateOperation{relationOperation(relationID, in.RelationType)},
-		BaseStateID:     &head.ID,
-		ManifestVersion: manifestVersion,
-		Gate:            rsgvalidation.GateDraft,
-	}, write)
+	_, _, err = s.states.Commit(ctx, params, write)
 	if err != nil {
 		return RelationResult{}, wrapError(err)
 	}

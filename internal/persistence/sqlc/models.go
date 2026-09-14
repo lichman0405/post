@@ -112,6 +112,12 @@ type OutboxEvent struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	PublishedAt   pgtype.Timestamptz `json:"published_at"`
 	Attempts      int32              `json:"attempts"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
+	// The event's visibility preset, copied verbatim into the published research_event: public or private (docs/12 — an event is never more visible than its subject). 'private' is the fail-closed default for rows written before this migration; the outbox recorder always sets an explicit value.
+	Visibility string `json:"visibility"`
+	// Why the last publish attempt failed, when it did (T1001): a row whose publish fails is retried forever, and this column is the operator's window onto a stuck row (docs/26 §2 outbox backlog alerting). NULL while never attempted or after a successful publish.
+	LastError *string `json:"last_error"`
 }
 
 type PolicyVersion struct {
@@ -262,6 +268,8 @@ type ResearchEvent struct {
 	Payload       []byte             `json:"payload"`
 	CorrelationID string             `json:"correlation_id"`
 	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	// The outbox row this event was published from (T1001). The partial unique index research_events_outbox_event_uniq makes the publish step idempotent: a retried publish after a crash between the insert and the published-mark is a no-op. NULL for research events written directly, bypassing the outbox.
+	OutboxEventID pgtype.UUID `json:"outbox_event_id"`
 }
 
 type Review struct {

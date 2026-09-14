@@ -10,6 +10,7 @@ import (
 	"github.com/lichman0405/post/internal/application/sciobjects"
 	"github.com/lichman0405/post/internal/application/states"
 	"github.com/lichman0405/post/internal/domain"
+	"github.com/lichman0405/post/internal/events"
 )
 
 // Ports (docs/52: application orchestrates against ports; adapters live in
@@ -113,6 +114,15 @@ type RelationPort interface {
 // implementation is persistence.ProfileStore.
 type ProfilePort interface {
 	GetByUserID(ctx context.Context, userID string) (domain.Profile, error)
+}
+
+// Recorder is the transactional-outbox write surface the RSG service needs
+// (T1001, ADR-013): every scientific-state write also records its domain
+// events inside the commit's open transaction, so the events commit or roll
+// back with the state change they describe. The production implementation
+// is events.Recorder (states.Transaction is assignable to events.DBTX).
+type Recorder interface {
+	Record(ctx context.Context, db events.DBTX, e events.Event) error
 }
 
 // ObjectRelationEndpoint is one relation endpoint's display label,

@@ -440,13 +440,14 @@ var canonicalTables = map[string]tableExp{
 		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("opened_by", "users", "RESTRICT")},
 	},
 	"research_events": {
-		cols: []colExp{c("id", u, false, true), c("event_type", txt, false, false), c("actor_id", u, true, false), c("project_id", u, true, false), c("visibility", txt, false, false), c("payload", jb, false, false), c("correlation_id", txt, false, false), c("occurred_at", ts, false, true)},
+		cols: []colExp{c("id", u, false, true), c("event_type", txt, false, false), c("actor_id", u, true, false), c("project_id", u, true, false), c("visibility", txt, false, false), c("payload", jb, false, false), c("correlation_id", txt, false, false), c("occurred_at", ts, false, true), c("outbox_event_id", u, true, false)},
 		pk:   []string{"id"},
-		fks:  []fkExp{fk("actor_id", "users", "RESTRICT"), fk("project_id", "projects", "RESTRICT")},
+		fks:  []fkExp{fk("actor_id", "users", "RESTRICT"), fk("project_id", "projects", "RESTRICT"), fk("outbox_event_id", "outbox_events", "RESTRICT")},
 	},
 	"outbox_events": {
-		cols: []colExp{c("id", u, false, true), c("event_type", txt, false, false), c("payload", jb, false, false), c("correlation_id", txt, false, false), c("created_at", ts, false, true), c("published_at", ts, true, false), c("attempts", i4, false, true)},
+		cols: []colExp{c("id", u, false, true), c("event_type", txt, false, false), c("payload", jb, false, false), c("correlation_id", txt, false, false), c("created_at", ts, false, true), c("published_at", ts, true, false), c("attempts", i4, false, true), c("actor_id", u, true, false), c("project_id", u, true, false), c("visibility", txt, false, true), c("last_error", txt, true, false)},
 		pk:   []string{"id"},
+		fks:  []fkExp{fk("actor_id", "users", "RESTRICT"), fk("project_id", "projects", "RESTRICT")},
 	},
 	"subscriptions": {
 		cols: []colExp{c("id", u, false, true), c("user_id", u, false, false), c("target_type", txt, false, false), c("target_id", txt, false, false), arr("event_filters", false, true), arr("channels", false, true), c("created_at", ts, false, true)},
@@ -546,6 +547,8 @@ var explicitIndexes = map[string][]string{
 	// whole-project graph scan and the per-endpoint lineage walks.
 	// T0508: the snapshot log is read per identity; 00011 never indexed
 	// the FK (00045).
+	// T1001: the outbox publish dedupe (one research_event per outbox
+	// row, ever) and the dispatcher's pending-backlog scan (00046).
 	"project_schema_profiles_project_idx":  {"project_id", "schema_id", "created_at"},
 	"claims_object_idx":                    {"object_id"},
 	"claims_type_idx":                      {"claim_type"},
@@ -556,6 +559,8 @@ var explicitIndexes = map[string][]string{
 	"provenance_edges_source_version_idx":  {"source_object_version_id"},
 	"provenance_edges_target_version_idx":  {"target_object_version_id"},
 	"external_reference_snapshots_ref_idx": {"external_reference_id"},
+	"research_events_outbox_event_uniq":    {"outbox_event_id", "UNIQUE", "WHERE"},
+	"outbox_events_pending_idx":            {"published_at IS NULL"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded

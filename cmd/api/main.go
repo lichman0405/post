@@ -64,6 +64,7 @@ import (
 	appvalidation "github.com/lichman0405/post/internal/application/validation"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/config"
+	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/gitprovider"
 	"github.com/lichman0405/post/internal/health"
 	"github.com/lichman0405/post/internal/observability"
@@ -396,6 +397,10 @@ func run(args []string) int {
 		SchemaProfiles: profileSvc,
 		Authz:          authz.NewMatrixEngine(),
 		Schemas:        reg,
+		// The transactional outbox (T1001): every scientific-state write
+		// records its domain events in the same transaction; cmd/worker
+		// publishes them into research_events.
+		Events: events.Recorder{},
 	})
 	rsgAPI := rsghttp.New(rsghttp.Deps{Service: rsgSvc})
 	rsgAPI.Register(v1)

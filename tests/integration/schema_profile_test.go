@@ -25,6 +25,7 @@ import (
 	"github.com/lichman0405/post/internal/application/validation"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/domain"
+	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/persistence"
 	"github.com/lichman0405/post/internal/persistence/memstore"
 	"github.com/lichman0405/post/internal/persistence/testdb"
@@ -129,6 +130,7 @@ func newSchemaProfileFixture(t *testing.T, ctx context.Context) *schemaProfileFi
 		SchemaProfiles: profileSvc,
 		Authz:          authz.NewMatrixEngine(),
 		Schemas:        reg,
+		Events:         events.Recorder{},
 	})
 	validate := validation.NewService(
 		persistence.NewValidationSnapshotRepository(stateStore),
