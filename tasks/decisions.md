@@ -5926,3 +5926,68 @@ guard 函数从迁移文件 **原样 sed 提取**、不手抄 ✓）：
 更稳的是**白名单化** ✓ —— 让"允许变的列"成为被列举的那一侧 ✓（如 `to_jsonb(NEW) - 'head_sha' - 'updated_at'`
 与旧值的同式相减比较 ✓），这样**将来给这张表加列时守卫自动收紧** ✓，而不是又漏一个 ✓。
 无论哪种，都要**补一条测试**把本次实证的场景固化 ✓（`branch_id` 与 `created_at` 各自被拒 ✓）。
+
+## L1-20260914-50
+
+**T0305 第四轮：复核 approve 带一条 major，G2 又在 staticcheck 上拒了 —— 两条我都核实成立，返工** ✓
+
+**裁决链** ✓：独立复核（`run-8569e5f29a87c64e` ✓）出 **approve** ✓，但带 **1 条 major + 1 minor + 2 nit** ✓。
+复核自己的话是 "a documented, negotiated corner the migration comment overstates … none fails an
+acceptance criterion, so the work is approved" ✓ —— **它认为那条 major 只是注释措辞问题** ✓。
+**我不同意这个定性** ✓（理由见下）✓。与此同时 `rddev task accept` 被 **G2** 拒 ✓
+（`make staticcheck` ✓），driver 记了决策、停下等我 ✓ —— **它没有自作主张合并** ✓。
+
+**①【major，复核发现，我核实成立】创建路径的 head 推进是无条件的** ✓
+`push_ingestion_store.go:127-133` ✓：`if isZerosSHA(ev.Before)` 分支里的 UPDATE **只有 `branch_id` 条件** ✓。
+作者的假设是"创建时没有先前位置要匹配" ✓ —— 但 **`before` 是 zeros 只说明"这是一次创建 push"** ✓，
+**不说明"这个 ref 现在没有 head"** ✓。五步可达场景（每步我都核过 ✓）：
+ref-sync 失败留下 NULL head ✓ → 创建 push A 的投递 503（无 dedupe 行）✓ →
+更新的 push B 被 ingest（守卫因 NULL 匹配 0 行 ✓，B 记 `stale_before` ✓，**head 仍是 NULL** ✓）→
+syncer sweep 重试该 ref（`refstore.go:182` ✓，pending/failed → synced ✓）**设 head = B** ✓ →
+**A 的重投到达** ✓：无 A 行 ⇒ INSERT 成功 ⇒ 走创建分支 ⇒ **把 head 从 B 退回 A** ✓，**永久** ✓（B 的重投会被 dedupe ✓）。
+**为什么这不是"措辞问题"** ✓：`git_branch_refs.head_sha` 从此**非单调**、指向更旧的 commit ✓，
+而 00034 的注释**明确承诺** "can never rewind the pointer past the newer head" ✓。
+**迁移里的注释是对后续任务的承诺** ✓ —— T0309 的 reconciliation 会照着它设计 ✓（复核自己的 risk #2 也这么说 ✓）。
+**一个假承诺会把下一个任务带偏** ✓，所以它必须变成真的 ✓，或者把边界写清楚 ✓。
+
+**②【major，我独立核实，有实证】fast path 的白名单漏了两列** ✓
+`git_branch_ref_guard` 的 fast path 是"五列不变就放行" ✓，表里还有 `branch_id`（PK —— **SQL 里 PK 可以 UPDATE** ✓）
+和 `created_at` ✓ 不在名单里 ✓。注释写 "changes nothing but the tip pointer" ✓，
+**实际放行的是"这五列没变"** ✓。**我在独立临时库实证** ✓（guard 从迁移文件**原样提取** ✓，
+脚本 `$CLAUDE_JOB_DIR/tmp/probe-guard.sh` ✓）：只改 `synced_at`/`fork_sha` **被拒** ✓（对照组 ✓）、
+只改 `created_at`/`branch_id` **通过** ✓，`branch_id` **真的挪到了另一个同名分支上** ✓。
+**可达性** ✓：这张表的写者全是定向单列 UPDATE ✓（`refstore.go:139/165/182` ✓、`push_ingestion_store.go:130/135` ✓）
+⇒ **不是可利用缺陷** ✓，是**防御深度** ✓。**仍要修** ✓：它是**这一轮新引入**的放宽 ✓
+（原版在 pending/synced/closing 下任何 UPDATE 都拒 ✓）✓。
+
+**③【G2 红】`make staticcheck`：新代码的新告警** ✓
+`internal/gitprovider/push_ingestion_test.go:167` ✓：
+`if GitStateHash(testSHA) != GitStateHash(testSHA)` ✓ ⇒ **SA4000** ✓（`!=` 两边语法相同 ✓）
+⇒ **那条断言永远不会触发** ✓，测不到它想测的"确定性" ✓。
+`scripts/staticcheck.sh` 的立场：**新代码的告警必须修** ✓，**永远不许 baseline 新代码** ✓。
+
+**这里有一个必须说清楚的事实** ✓：**worker 的"G1 全过"是真的** ✓ ——
+但它**不等于"CI 会过"** ✓。`specs/orchestrator/gates.json` 把两者定义**故意**分开 ✓：
+**G1** = "The Worker ran **the task's required tests**" ✓（T0305 的 `required_tests` 就是 `git ingestion integration` ✓）；
+**G2** = "**CI's exact steps** re-run locally" ✓，注释还专门写了
+"**This is the fix for the red-PR merge: G2 is never a similar-looking subset**" ✓。
+⇒ **今天这件事正是那句话在生效** ✓：**G2 抓到了 G1 根本不跑的东西** ✓。
+**机制按设计工作** ✓ —— 不是 worker 撒谎 ✓，也不是制度缺口 ✓。
+（给 worker 的话已写进拒绝理由：想一次过，就照 `gates.json` 的 job 列表自检 ✓。）
+
+**④【minor，复核发现】`git_push_semantic_candidates` 的自定义守卫没有行为测试** ✓
+只有触发器存在性断言 ✓；三条语义（status 可迁移 ✓、内容不可改 ✓、不可删 ✓）
+在套件里**测不到** ✓（复核在 scratch 库手验过都对 ✓，但回归不会被抓 ✓）✓。
+**2 条 nit 不改** ✓：`LimitReader` 静默截断的诊断措辞 ✓、404/401 枚举通道 ✓
+（后者是**上一轮已明确协商过的取舍** ✓，复核自己也标为 "documented, deliberate" ✓）。
+
+**裁决：返工** ✓ —— **同一 session** ✓（`rework` ✓，`--resume` 恢复 context ✓），
+不是新 worker ✓：四条问题**逐条有文件:行号** ✓、改动都小 ✓、worker 熟悉代码 ✓，
+符合 §11"问题明确且 context 仍可靠" ✓。**这是第四轮** ✓（返工→重做基线→本轮）✓。
+**为什么现在修而不是立 issue** ✓：**00034 还没合并** ✓ ——
+**现在改迁移是最便宜的** ✓；一旦合入 main ✓，它就是 canonical history ✓，
+要收紧就得**再写一个迁移** ✓，而 `00035` 已经被 T0206 占了 ✓。
+**实测确认** ✓：`task reject` ✓ → `worker rework` ✓ ⇒ 新 run `run-29f98c486b7328d0` ✓、
+pid 4116429 ✓、基线仍 `747847c` ✓、工作树与 diff 保留 ✓；
+**旧的那条 accept 决策被 `staleDecisions` 自动清掉** ✓（run id 不再匹配 ✓，
+`driver.go:281-283` ✓），未决决策从 2 回到 1 ✓（只剩我故意压着的 T0206 那条 ✓）。
