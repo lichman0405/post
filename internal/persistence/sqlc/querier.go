@@ -163,6 +163,15 @@ type Querier interface {
 	// The organization's current policy (the project lower bound).
 	LatestPolicyVersionByOrg(ctx context.Context, organizationID pgtype.UUID) (PolicyVersion, error)
 	LatestPolicyVersionByProject(ctx context.Context, projectID pgtype.UUID) (PolicyVersion, error)
+	// The traversal hop: every relation version whose source or target is one
+	// of @version_ids, at its as-of version (lineage rule as above), with both
+	// endpoints' object context so the caller can tell which side was the
+	// frontier. NOT project-filtered on purpose: a traversal hop may touch a
+	// relation of another project (lineage edges across projects), and the
+	// service authorizes every hop's projects before the row can enter the
+	// result — the query returns the row so the authorization can see it,
+	// never the other way round.
+	ListAdjacentRelationVersions(ctx context.Context, arg ListAdjacentRelationVersionsParams) ([]ListAdjacentRelationVersionsRow, error)
 	ListBranchesByProject(ctx context.Context, projectID pgtype.UUID) ([]Branch, error)
 	ListEvidenceAssertionsForTarget(ctx context.Context, objectVersionID pgtype.UUID) ([]EvidenceAssertion, error)
 	// One row per attached blob (a blob attached to several object versions
@@ -194,6 +203,26 @@ type Querier interface {
 	// ancestor walk the object-version query uses (a version created on a
 	// forked branch is not part of the ancestor branch's snapshot).
 	ListManifestRelationVersions(ctx context.Context, stateID pgtype.UUID) ([]RelationVersion, error)
+	// RSG query surface (T0209): as-of version selection and the traversal's
+	// adjacency reads. All shapes are rebuildable from the canonical append-only
+	// history; nothing here adds semantic content (CLAUDE.md §7: RSG graph
+	// relations run on the relation tables / recursive CTE).
+	//
+	// The state-lineage walk (ListStateLineage) lives in rsg_query_store.go as a
+	// raw pgx query: the sqlc analyzer (v1.31.1) cannot resolve the recursive
+	// CTE's self-reference and rejects valid PostgreSQL ("column reference id is
+	// ambiguous"), and the walk is one bounded query the adapter owns wholesale.
+	// Each object of the project with its as-of version: the newest version whose
+	// state is in the lineage (nil lineage = no state pinning, the newest version
+	// overall). object_types nil = every type. The version log is append-only and
+	// version_no is monotonically increasing, so the newest version_no in the
+	// lineage is exactly the version the object had reached at the pinned state.
+	ListObjectVersionsAsOf(ctx context.Context, arg ListObjectVersionsAsOfParams) ([]ListObjectVersionsAsOfRow, error)
+	// Batch fetch for the traversal: the pinned object + version rows of the
+	// version ids collected by a BFS level. Unfiltered by project on purpose —
+	// the caller passes only version ids whose projects already passed the
+	// per-hop authorization.
+	ListObjectVersionsByIDs(ctx context.Context, versionIds []pgtype.UUID) ([]ListObjectVersionsByIDsRow, error)
 	// Organization Activity page: the organization's audit rows newest-first,
 	// same keyset shape as the project query.
 	ListOrganizationAuditEntries(ctx context.Context, arg ListOrganizationAuditEntriesParams) ([]ListOrganizationAuditEntriesRow, error)
@@ -224,6 +253,10 @@ type Querier interface {
 	ListPublicProjects(ctx context.Context) ([]Project, error)
 	ListPullRequestsByProject(ctx context.Context, projectID pgtype.UUID) ([]PullRequest, error)
 	ListRelationVersions(ctx context.Context, relationID pgtype.UUID) ([]RelationVersion, error)
+	// Each relation of the project with its as-of version (same lineage rule as
+	// objects) plus the endpoint objects' context (object id, object type,
+	// project) the query selection rules need. relation_types nil = every type.
+	ListRelationVersionsAsOf(ctx context.Context, arg ListRelationVersionsAsOfParams) ([]ListRelationVersionsAsOfRow, error)
 	// All versions of one relation type inside one project (the project
 	// boundary rides on the relations container row).
 	ListRelationVersionsByType(ctx context.Context, arg ListRelationVersionsByTypeParams) ([]RelationVersion, error)

@@ -360,6 +360,7 @@ func run(args []string) int {
 		Latest:    stateStore,
 		Objects:   persistence.NewScientificObjectStore(pool),
 		Relations: persistence.NewRelationStore(pool),
+		Queries:   persistence.NewRSGQueryStore(pool),
 		Profiles:  persistence.NewProfileStore(pool),
 		Authz:     authz.NewMatrixEngine(),
 		Schemas:   reg,

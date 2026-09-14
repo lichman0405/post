@@ -40,6 +40,7 @@ type Service struct {
 	latest    LatestStatePort
 	objects   ObjectPort
 	relations RelationPort
+	queries   QueryPort
 	profiles  ProfilePort
 	authz     authz.Engine
 	schemas   *schemareg.Registry
@@ -47,8 +48,10 @@ type Service struct {
 
 // Deps wires the service. Schemas (the canonical registry) and Authz (the
 // matrix engine) are required: an unwired service refuses at call time
-// rather than guessing (fail closed, docs/12). Profiles is optional: the
-// object detail page degrades to raw creator ids when it is not wired.
+// rather than guessing (fail closed, docs/12). Queries (the query port) is
+// required by Query; the write commands work without it. Profiles is
+// optional: the object detail page degrades to raw creator ids when it is
+// not wired.
 type Deps struct {
 	Projects  ProjectGate
 	Branches  BranchPort
@@ -56,6 +59,7 @@ type Deps struct {
 	Latest    LatestStatePort
 	Objects   ObjectPort
 	Relations RelationPort
+	Queries   QueryPort
 	Profiles  ProfilePort
 	Authz     authz.Engine
 	Schemas   *schemareg.Registry
@@ -70,6 +74,7 @@ func NewService(deps Deps) *Service {
 		latest:    deps.Latest,
 		objects:   deps.Objects,
 		relations: deps.Relations,
+		queries:   deps.Queries,
 		profiles:  deps.Profiles,
 		authz:     deps.Authz,
 		schemas:   deps.Schemas,

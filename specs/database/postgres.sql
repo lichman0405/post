@@ -41,6 +41,7 @@
 --   00033_policy_versioning.sql
 --   00034_push_ingestion.sql
 --   00035_blob_attachment_state.sql
+--   00036_rsg_query_indexes.sql
 
 
 -- ===== 00001_extensions.sql =====
@@ -1625,3 +1626,16 @@ ALTER TABLE blob_attachments
 -- instead of a per-export seq scan (same shape as the version tables'
 -- state indexes from 00026).
 CREATE INDEX blob_attachments_state_idx ON blob_attachments(state_id);
+
+
+-- ===== 00036_rsg_query_indexes.sql =====
+
+-- RSG query surface index (T0209). The query API's candidate scan is
+-- project-scoped with the object-type filter as the index's second
+-- column; the relations-by-project scan already uses the
+-- relations_project_idx created by migration 00025. Performance-only, no
+-- semantic content — every shape remains rebuildable from the canonical
+-- append-only history.
+
+CREATE INDEX scientific_objects_project_type_idx
+  ON scientific_objects (project_id, object_type);

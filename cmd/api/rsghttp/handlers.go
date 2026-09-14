@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -279,6 +280,66 @@ func (h *handlers) handleGetObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	authhttp.WriteJSON(w, http.StatusOK, objectPayloadFromResult(res))
+}
+
+// queryPayload is the client-visible RSG graph slice (T0209): the resolved
+// project + slice state (null = project-wide) plus the node and edge lists.
+type queryPayload struct {
+	ProjectID string            `json:"project_id"`
+	StateID   *string           `json:"state_id"`
+	Objects   []objectPayload   `json:"objects"`
+	Relations []relationPayload `json:"relations"`
+}
+
+// handleQuery: GET /api/v1/projects/{projectId}/query — the RSG graph
+// query (T0209). Query string filters, all optional and repeatable where
+// they are lists:
+//
+//	object_type=material&object_type=finding  seed objects by type
+//	relation_type=derived_from               seed relations by type
+//	state_id=… | branch_id=…                 pin the slice (mutually exclusive)
+//	depth=0..5                               recursive relation traversal depth
+//
+// The read is exactly as visible as its project: an invisible project
+// answers 404 project not found (existence hiding), never 403.
+func (h *handlers) handleQuery(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	input := rsg.QueryInput{
+		ObjectTypes:   q["object_type"],
+		RelationTypes: q["relation_type"],
+		StateID:       q.Get("state_id"),
+		BranchID:      q.Get("branch_id"),
+	}
+	if raw := q.Get("depth"); raw != "" {
+		depth, err := strconv.Atoi(raw)
+		if err != nil {
+			authhttp.WriteError(w, r, http.StatusBadRequest, rsg.CodeValidation,
+				"depth must be an integer between 0 and "+strconv.Itoa(rsg.MaxQueryDepth))
+			return
+		}
+		input.Depth = depth
+	}
+	res, err := h.svc.Query(r.Context(), reader(r), r.PathValue("projectId"), input)
+	if err != nil {
+		rsgError(w, r, err)
+		return
+	}
+	payload := queryPayload{
+		ProjectID: res.ProjectID,
+		Objects:   make([]objectPayload, 0, len(res.Objects)),
+		Relations: make([]relationPayload, 0, len(res.Relations)),
+	}
+	if res.StateID != "" {
+		stateID := res.StateID
+		payload.StateID = &stateID
+	}
+	for _, obj := range res.Objects {
+		payload.Objects = append(payload.Objects, objectPayloadFromResult(obj))
+	}
+	for _, rel := range res.Relations {
+		payload.Relations = append(payload.Relations, relationPayloadFromResult(rel))
+	}
+	authhttp.WriteJSON(w, http.StatusOK, payload)
 }
 
 // objectPayloadFromResult renders a create/read result (the container row

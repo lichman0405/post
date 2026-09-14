@@ -119,6 +119,74 @@ type ObjectRelationVersion struct {
 	Target   ObjectRelationEndpoint
 }
 
+// QueryPort is the persistence slice the RSG query (T0209) reads through.
+// The production implementation is persistence.RSGQueryStore. All list
+// shapes are project-scoped and lineage-pinned ("as-of" semantics, see the
+// Service.Query comment); ListAdjacentRelationVersions is the one
+// deliberately NOT project-scoped read: a traversal hop may touch a
+// relation of another project, and the service authorizes every hop's
+// projects before the row can enter the result.
+type QueryPort interface {
+	// ListStateLineage returns the state ancestry chain (the named state
+	// and every ancestor) project-verified: a missing state and a state of
+	// another project both yield an empty lineage, so the service reports
+	// the same "not found" outcome for them (never leak another project's
+	// state existence, docs/45).
+	ListStateLineage(ctx context.Context, projectID, stateID string) ([]string, error)
+	// ListObjectVersions returns each object of the project with its
+	// as-of version (newest version whose state is in the lineage; nil
+	// lineage = newest overall). objectTypes nil = every type.
+	ListObjectVersions(ctx context.Context, projectID string, objectTypes, lineage []string) ([]ObjectQueryRow, error)
+	// ListRelationVersions returns each relation of the project with its
+	// as-of version and the endpoint objects' context (object id, type,
+	// project) the selection rules need. relationTypes nil = every type.
+	ListRelationVersions(ctx context.Context, projectID string, relationTypes, lineage []string) ([]RelationQueryRow, error)
+	// ListAdjacentRelationVersions returns the as-of relation versions
+	// touching any of versionIDs (either endpoint), with both endpoints'
+	// object context. Not project-filtered: the service runs the per-hop
+	// authorization on the returned rows.
+	ListAdjacentRelationVersions(ctx context.Context, versionIDs, lineage []string) ([]AdjacentRelationRow, error)
+	// ListObjectVersionsByIDs batch-fetches pinned object + version rows
+	// (traversal nodes). Unfiltered by project: the caller passes only
+	// version ids whose projects already passed the per-hop authorization.
+	ListObjectVersionsByIDs(ctx context.Context, versionIDs []string) ([]ObjectQueryRow, error)
+}
+
+// ObjectQueryRow is one object with one version row (its as-of version in
+// the pinned lineage, or the exact pinned version for a traversal node).
+type ObjectQueryRow struct {
+	Object  domain.ScientificObject
+	Version domain.ScientificObjectVersion
+}
+
+// EndpointContext is one relation endpoint's object context: the pinned
+// object version id plus the container object's identity facts.
+type EndpointContext struct {
+	VersionID  string
+	ObjectID   string
+	ObjectType string
+	ProjectID  string
+}
+
+// RelationQueryRow is one relation with its as-of version and the endpoint
+// objects' context (the endpoints are pinned to exact object versions; the
+// context names their container objects).
+type RelationQueryRow struct {
+	Relation domain.Relation
+	Version  domain.RelationVersion
+	Source   EndpointContext
+	Target   EndpointContext
+}
+
+// AdjacentRelationRow is one traversal-hop row: an as-of relation version
+// touching a frontier version, with both endpoints' object context.
+type AdjacentRelationRow struct {
+	Relation domain.Relation
+	Version  domain.RelationVersion
+	Source   EndpointContext
+	Target   EndpointContext
+}
+
 // CreateObjectInTxParams carries an object creation inside a state commit.
 // ObjectID is the pre-generated id: the commit's operation summary names
 // it (commit_linkage), so the caller generates it before committing.
@@ -178,4 +246,47 @@ type CreateRelationInput struct {
 	SourceObjectVersionID string
 	TargetObjectVersionID string
 	Payload               json.RawMessage
+}
+
+// MaxQueryDepth bounds the recursive relation traversal (T0209): a finite
+// cap keeps a query's cost bounded regardless of graph density (L1; the
+// traversal is bidirectional, so each level can fan out in both
+// directions). Depth 0 selects without traversing.
+const MaxQueryDepth = 5
+
+// QueryInput carries one RSG graph query (GET
+// /api/v1/projects/{projectId}/query). All filters are optional; StateID
+// and BranchID are mutually exclusive slice pins (MCP tool rsg.query's
+// "state_or_branch" argument, specs/mcp/tools.json).
+type QueryInput struct {
+	// ObjectTypes filters the seed objects by object type (material,
+	// finding, research_question, ...). Empty = no type filter.
+	ObjectTypes []string
+	// RelationTypes filters the seed relations by relation type. Empty =
+	// no type filter.
+	RelationTypes []string
+	// StateID pins the slice to one state (as-of semantics: each object
+	// and relation renders at its newest version inside the state's
+	// ancestry chain). Empty = no pin.
+	StateID string
+	// BranchID pins the slice to a branch's head state. Empty = no pin.
+	BranchID string
+	// Depth is the traversal depth: 0 = no traversal, 1..MaxQueryDepth =
+	// bidirectional hops from every node of the selected slice.
+	Depth int
+}
+
+// QueryResult is one RSG graph slice: nodes (objects at their slice
+// versions) and edges (relations at their slice versions). StateID is
+// empty when the slice is project-wide (no state/branch pin).
+type QueryResult struct {
+	ProjectID string
+	// StateID is the state the slice was resolved at; empty for the
+	// project-wide (newest-version) slice.
+	StateID string
+	// BranchID echoes the branch the slice was resolved through; empty
+	// when the query pinned a state directly or nothing at all.
+	BranchID  string
+	Objects   []ObjectResult
+	Relations []RelationResult
 }
