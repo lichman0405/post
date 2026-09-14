@@ -1879,10 +1879,11 @@
       ]
     },
     "T0304": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-14T03:05:17Z",
       "worker_run_id": "run-4e0e1c9c07dfc13e",
       "accepted_by_supervisor_at": "2026-09-14T03:29:01Z",
+      "merged_at": "2026-09-14T03:33:06Z",
       "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（ee58f2c0e3af），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
       "history": [
         {
@@ -2020,6 +2021,13 @@
           "to": "accepted",
           "at": "2026-09-14T03:29:01Z",
           "run_id": "run-9f708a53e6289ad2"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T03:33:06Z",
+          "run_id": "run-141fe55885e58665",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -2285,7 +2293,7 @@
       "merged_at": null
     },
     "T0603": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-14T03:20:30Z",
       "worker_run_id": "run-eda031c86761e007",
       "rejection_reason": "Your work passed the contract, and the review approved it: both acceptance criteria were reproduced independently (33.7s integration suite, migration catalog trio, sqlc drift clean, SPEC_VERSION digest matching), scope is clean at 23 allowed paths, and no test was weakened. You are being sent back for ONE defect the review rated major, plus two cheap consistency items. All three are small and inside files you already own.\n\n## 1. (major, must fix) `cmd/api/policyhttp/policy_handlers.go` — `writePolicyError` leaks the raw error and never logs it\n\nThe `default` branch answers `503 SERVICE_UNAVAILABLE` with `err.Error()`: the full wrapped chain, including pgx driver detail (`failed to connect to host=… user=… database=…` during a DB outage, constraint names on unexpected violations). Any authenticated member can harvest internal infrastructure detail by hitting a policy read while the database is unhealthy. The error is also never logged server-side, so the leak has no local counterpart.\n\nThat contradicts `docs/45_ERROR_MODEL.md:24` — \"错误信息告诉用户下一步，不泄漏 private entity existence 或内部 stack\" — and you are the only surface in the repo that does it. Your siblings already get this right; copy their shape rather than inventing one:\n\n- `cmd/api/orgshttp/orgs_handlers.go:355-360` — an explicit `errors.Is(err, orgs.ErrStore)` case answering a generic 503 (`\"organization data is temporarily unavailable\"`), then `default:` calling `observability.LoggerFromContext(r.Context()).Error(...)` and answering `500 INTERNAL_ERROR` with a generic message.\n- `cmd/api/projectshttp/projects_handlers.go:295`, `cmd/api/audithttp/audit_handlers.go:194`, `cmd/api/authhttp/auth_handler.go:245` are the same shape.\n\nYou already define `policy.ErrStore` (`internal/application/policy/errors.go:35-36`) and it is currently unreachable from the wire. So:\n\n- add `case errors.Is(err, policy.ErrStore):` → 503 with a generic message (reuse `policy.CodeServiceUnavailable`),\n- make `default:` log the error and answer 500 `INTERNAL_ERROR` with a generic message.\n\nReuse the codes you already have; do not invent new ones.\n\nIf anything — `tests/integration/policy_test.go` included — currently asserts the old shape, update it to assert the new contract and say so in RESULT.json. Do not delete an assertion to make it pass.\n\nA test pinning the new behaviour (store failure → generic 503; unexpected error → 500 with a generic message and the raw error NOT in the body) is worth having if it fits an existing harness. There is no policyhttp-level harness today, so if it would mean building one from scratch, write that in RESULT.json and leave it rather than expanding scope.\n\n## 2. (minor, fix) `internal/domain/policy.go:479` vs `internal/application/policy/service.go:66,117` — validation and storage disagree\n\n`ValidPolicyVersion` validates the TrimSpace'd string, but the service stores the raw input, so a version `\" v1 \"` is accepted and persisted verbatim and becomes a distinct version from `\"v1\"`.\n\nDecision, so you do not have to guess: **store the validated (trimmed) form.** `ValidPolicyVersion` already treats surrounding whitespace as valid, so storing the trimmed value keeps the accepted set exactly as it is today while removing the duplicate-version trap — `\"v1\"` and `\" v1 \"` collapse onto the same version, which is precisely what the per-scope unique index exists to enforce. Keep validation where it is; make the stored string the one validation saw. Note it in RESULT.json.\n\n## 3. (minor, fix) `tests/integration/policy_test.go:14` — the package header misdescribes the semantics\n\nIt claims every write that relaxes an org rule — \"(weaker value, dropped rule, rewritten unknown rule)\" — is refused with 422. A dropped rule is intentionally allowed: the merge keeps the org value in force, which your own `omitting_an_org_rule_is_not_a_relaxation` subtest proves. Correct the comment to describe what is implemented. This is a comment fix only: change no assertion.\n\n## Not required — do not do these\n\n- **The deactivated-org stance (review minor 4)**: whether project policy writes should require an active owning organization is a governance/permission question. I am taking that as a separate decision rather than having you invent it mid-flight.\n- **The two nits** (trailing JSON silently accepted; `{\"policy\": null}` coerced to `{}`): both match a codebase-wide convention. Recorded, not fixed.\n- **Anything about the migration number, the derived artifacts, or endpoint pagination.**\n\n## Rules that still hold\n\nDo not weaken, skip or delete any test to get through this. Do not rename the migration or touch its number. Do not hand-edit `specs/SPEC_VERSION.json` or `specs/database/postgres.sql` — regenerate them. Do not create or move any git ref.\n\n## Then re-run on this same baseline, and state each result in RESULT.json\n\n- `go build ./...`, `go vet ./...`, `gofmt -l` over what you touched\n- your required policy tests (domain, application, integration)\n- `make test-integration`\n- `make check-schema-snapshot` and `python3 scripts/spec_version.py --check`\n- `tests/integration/check-sqlc-drift.sh`\n\nUpdate RESULT.json to say plainly what changed, why the error-writer shape now matches the siblings, and that the gate set passed on this baseline.\n",
@@ -2400,6 +2408,13 @@
           "at": "2026-09-14T03:20:30Z",
           "run_id": "run-eda031c86761e007",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T03:32:03Z",
+          "run_id": "run-1b9b0c9ef8c8cd4d",
+          "reason": "collect: all checks passed"
         }
       ]
     },
