@@ -41,17 +41,21 @@ import (
 // (test_T0013_<run_id>, docs/66 §3).
 const appendOnlyTaskID = "T0013"
 
-// appendOnlyTables is the set of append-only-BY-DESIGN tables (docs/21 §4,
-// docs/46, ADR-007/008/021, Master Acceptance Gate A). Migration 00014/00015
-// guards the original set; tables added later create their own guard pair in
-// their own migration (00038 adds project_schema_profiles, T0213). The same
-// list drives the catalog assertion and the per-table rejection loop.
+// appendOnlyTables is the set migration 00014 guards: every table that is
+// append-only BY DESIGN (docs/21 §4, docs/46, ADR-007/008/021, Master
+// Acceptance Gate A). Migration 00014/00015 guards the original set; tables
+// added later create their own guard pair in their own migration (00038 adds
+// project_schema_profiles, T0213). Migration 00053 joins release_creations to
+// the set (the T0606 Idempotency-Key ledger — a replay is a read, never a
+// rewrite). The same list drives the catalog assertion and the per-table
+// rejection loop.
 var appendOnlyTables = []string{
 	"scientific_object_versions",
 	"relation_versions",
 	"project_states",
 	"state_commits",
 	"releases",
+	"release_creations",
 	"research_asset_versions",
 	"asset_lineage",
 	"policy_versions",
@@ -338,9 +342,10 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 		update func(id string) error
 		del    func(id string) error
 	}
-	// ingID is captured by the git_push_ingestions case (the loop runs the
-	// cases in order) so the git_push_changes case can reference its FK row.
-	var ingID string
+	// ingID and relID are captured by the git_push_ingestions / releases
+	// cases (the loop runs the cases in order) so the git_push_changes /
+	// release_creations cases can reference their FK rows.
+	var ingID, relID string
 	cases := []rowCase{
 		{
 			table: "relation_versions",
@@ -396,9 +401,10 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 		{
 			table: "releases",
 			insert: func() string {
-				return mustQueryUUID(`INSERT INTO releases
+				relID = mustQueryUUID(`INSERT INTO releases
 					(project_id, version, title, state_id, manifest, manifest_hash, created_by)
-					VALUES ($1, '0.1.0', 'R1', $2, '{}'::jsonb, 'mh', $3) RETURNING id`, p1, s1, u1)
+					VALUES ($1, '0.1.0', 'R1', $2, '{}', 'mh', $3) RETURNING id`, p1, s1, u1)
+				return relID
 			},
 			update: func(id string) error {
 				_, err := pool.Exec(ctx, `UPDATE releases SET title = 'REWRITTEN' WHERE id = $1`, id)
@@ -406,6 +412,23 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 			},
 			del: func(id string) error {
 				_, err := pool.Exec(ctx, `DELETE FROM releases WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			table: "release_creations",
+			insert: func() string {
+				// The releases case ran first: relID carries its row.
+				return mustQueryUUID(`INSERT INTO release_creations
+					(project_id, idempotency_key, release_id)
+					VALUES ($1, 'key-1', $2) RETURNING id`, p1, relID)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE release_creations SET idempotency_key = 'REWRITTEN' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM release_creations WHERE id = $1`, id)
 				return err
 			},
 		},

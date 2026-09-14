@@ -12,20 +12,21 @@ import (
 )
 
 const createRelease = `-- name: CreateRelease :one
-INSERT INTO releases (project_id, version, title, state_id, policy_version_id, manifest, manifest_hash, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, project_id, version, title, state_id, policy_version_id, manifest, manifest_hash, created_by, created_at
+INSERT INTO releases (project_id, version, title, state_id, policy_version_id, org_policy_version_id, manifest, manifest_hash, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, project_id, version, title, state_id, policy_version_id, manifest, manifest_hash, created_by, created_at, org_policy_version_id
 `
 
 type CreateReleaseParams struct {
-	ProjectID       pgtype.UUID `json:"project_id"`
-	Version         string      `json:"version"`
-	Title           string      `json:"title"`
-	StateID         pgtype.UUID `json:"state_id"`
-	PolicyVersionID pgtype.UUID `json:"policy_version_id"`
-	Manifest        []byte      `json:"manifest"`
-	ManifestHash    string      `json:"manifest_hash"`
-	CreatedBy       pgtype.UUID `json:"created_by"`
+	ProjectID          pgtype.UUID `json:"project_id"`
+	Version            string      `json:"version"`
+	Title              string      `json:"title"`
+	StateID            pgtype.UUID `json:"state_id"`
+	PolicyVersionID    pgtype.UUID `json:"policy_version_id"`
+	OrgPolicyVersionID pgtype.UUID `json:"org_policy_version_id"`
+	Manifest           string      `json:"manifest"`
+	ManifestHash       string      `json:"manifest_hash"`
+	CreatedBy          pgtype.UUID `json:"created_by"`
 }
 
 func (q *Queries) CreateRelease(ctx context.Context, arg CreateReleaseParams) (Release, error) {
@@ -35,6 +36,7 @@ func (q *Queries) CreateRelease(ctx context.Context, arg CreateReleaseParams) (R
 		arg.Title,
 		arg.StateID,
 		arg.PolicyVersionID,
+		arg.OrgPolicyVersionID,
 		arg.Manifest,
 		arg.ManifestHash,
 		arg.CreatedBy,
@@ -50,6 +52,32 @@ func (q *Queries) CreateRelease(ctx context.Context, arg CreateReleaseParams) (R
 		&i.Manifest,
 		&i.ManifestHash,
 		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.OrgPolicyVersionID,
+	)
+	return i, err
+}
+
+const createReleaseCreation = `-- name: CreateReleaseCreation :one
+INSERT INTO release_creations (project_id, idempotency_key, release_id)
+VALUES ($1, $2, $3)
+RETURNING id, project_id, idempotency_key, release_id, created_at
+`
+
+type CreateReleaseCreationParams struct {
+	ProjectID      pgtype.UUID `json:"project_id"`
+	IdempotencyKey string      `json:"idempotency_key"`
+	ReleaseID      pgtype.UUID `json:"release_id"`
+}
+
+func (q *Queries) CreateReleaseCreation(ctx context.Context, arg CreateReleaseCreationParams) (ReleaseCreation, error) {
+	row := q.db.QueryRow(ctx, createReleaseCreation, arg.ProjectID, arg.IdempotencyKey, arg.ReleaseID)
+	var i ReleaseCreation
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.IdempotencyKey,
+		&i.ReleaseID,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -87,8 +115,37 @@ func (q *Queries) CreateResearchAsset(ctx context.Context, arg CreateResearchAss
 	return i, err
 }
 
+const getRelease = `-- name: GetRelease :one
+SELECT id, project_id, version, title, state_id, policy_version_id, manifest, manifest_hash, created_by, created_at, org_policy_version_id FROM releases
+WHERE project_id = $1 AND id = $2
+`
+
+type GetReleaseParams struct {
+	ProjectID pgtype.UUID `json:"project_id"`
+	ID        pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) GetRelease(ctx context.Context, arg GetReleaseParams) (Release, error) {
+	row := q.db.QueryRow(ctx, getRelease, arg.ProjectID, arg.ID)
+	var i Release
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Version,
+		&i.Title,
+		&i.StateID,
+		&i.PolicyVersionID,
+		&i.Manifest,
+		&i.ManifestHash,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.OrgPolicyVersionID,
+	)
+	return i, err
+}
+
 const getReleaseByProjectAndVersion = `-- name: GetReleaseByProjectAndVersion :one
-SELECT id, project_id, version, title, state_id, policy_version_id, manifest, manifest_hash, created_by, created_at FROM releases
+SELECT id, project_id, version, title, state_id, policy_version_id, manifest, manifest_hash, created_by, created_at, org_policy_version_id FROM releases
 WHERE project_id = $1 AND version = $2
 `
 
@@ -111,8 +168,26 @@ func (q *Queries) GetReleaseByProjectAndVersion(ctx context.Context, arg GetRele
 		&i.ManifestHash,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.OrgPolicyVersionID,
 	)
 	return i, err
+}
+
+const getReleaseCreation = `-- name: GetReleaseCreation :one
+SELECT release_id FROM release_creations
+WHERE project_id = $1 AND idempotency_key = $2
+`
+
+type GetReleaseCreationParams struct {
+	ProjectID      pgtype.UUID `json:"project_id"`
+	IdempotencyKey string      `json:"idempotency_key"`
+}
+
+func (q *Queries) GetReleaseCreation(ctx context.Context, arg GetReleaseCreationParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getReleaseCreation, arg.ProjectID, arg.IdempotencyKey)
+	var release_id pgtype.UUID
+	err := row.Scan(&release_id)
+	return release_id, err
 }
 
 const getResearchAssetVersion = `-- name: GetResearchAssetVersion :one
@@ -210,6 +285,44 @@ func (q *Queries) ListReleaseReviews(ctx context.Context, arg ListReleaseReviews
 			&i.Decision,
 			&i.Body,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReleases = `-- name: ListReleases :many
+SELECT id, project_id, version, title, state_id, policy_version_id, manifest, manifest_hash, created_by, created_at, org_policy_version_id FROM releases
+WHERE project_id = $1
+ORDER BY created_at DESC, id DESC
+`
+
+func (q *Queries) ListReleases(ctx context.Context, projectID pgtype.UUID) ([]Release, error) {
+	rows, err := q.db.Query(ctx, listReleases, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Release
+	for rows.Next() {
+		var i Release
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Version,
+			&i.Title,
+			&i.StateID,
+			&i.PolicyVersionID,
+			&i.Manifest,
+			&i.ManifestHash,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.OrgPolicyVersionID,
 		); err != nil {
 			return nil, err
 		}

@@ -8,13 +8,31 @@ VALUES (@project_id, @state_id, @gate, @status, @result_json)
 RETURNING *;
 
 -- name: CreateRelease :one
-INSERT INTO releases (project_id, version, title, state_id, policy_version_id, manifest, manifest_hash, created_by)
-VALUES (@project_id, @version, @title, @state_id, @policy_version_id, @manifest, @manifest_hash, @created_by)
+INSERT INTO releases (project_id, version, title, state_id, policy_version_id, org_policy_version_id, manifest, manifest_hash, created_by)
+VALUES (@project_id, @version, @title, @state_id, @policy_version_id, @org_policy_version_id, @manifest, @manifest_hash, @created_by)
 RETURNING *;
 
 -- name: GetReleaseByProjectAndVersion :one
 SELECT * FROM releases
 WHERE project_id = @project_id AND version = @version;
+
+-- name: ListReleases :many
+SELECT * FROM releases
+WHERE project_id = @project_id
+ORDER BY created_at DESC, id DESC;
+
+-- name: GetRelease :one
+SELECT * FROM releases
+WHERE project_id = @project_id AND id = @id;
+
+-- name: GetReleaseCreation :one
+SELECT release_id FROM release_creations
+WHERE project_id = @project_id AND idempotency_key = @idempotency_key;
+
+-- name: CreateReleaseCreation :one
+INSERT INTO release_creations (project_id, idempotency_key, release_id)
+VALUES (@project_id, @idempotency_key, @release_id)
+RETURNING *;
 
 -- name: CreateResearchAsset :one
 INSERT INTO research_assets (asset_type, slug, title, origin_project_id)

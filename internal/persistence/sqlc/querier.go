@@ -93,6 +93,7 @@ type Querier interface {
 	// entity (commit_linkage checks EntityID + version_no against the row).
 	CreateRelationWithID(ctx context.Context, arg CreateRelationWithIDParams) (Relation, error)
 	CreateRelease(ctx context.Context, arg CreateReleaseParams) (Release, error)
+	CreateReleaseCreation(ctx context.Context, arg CreateReleaseCreationParams) (ReleaseCreation, error)
 	CreateResearchAsset(ctx context.Context, arg CreateResearchAssetParams) (ResearchAsset, error)
 	CreateReview(ctx context.Context, arg CreateReviewParams) (Review, error)
 	// Scientific objects and their append-only version log (canonical tables:
@@ -163,7 +164,9 @@ type Querier interface {
 	GetPullRequestByProjectAndNumberForUpdate(ctx context.Context, arg GetPullRequestByProjectAndNumberForUpdateParams) (PullRequest, error)
 	GetRelationByID(ctx context.Context, id pgtype.UUID) (Relation, error)
 	GetRelationVersionByNo(ctx context.Context, arg GetRelationVersionByNoParams) (RelationVersion, error)
+	GetRelease(ctx context.Context, arg GetReleaseParams) (Release, error)
 	GetReleaseByProjectAndVersion(ctx context.Context, arg GetReleaseByProjectAndVersionParams) (Release, error)
+	GetReleaseCreation(ctx context.Context, arg GetReleaseCreationParams) (pgtype.UUID, error)
 	GetResearchAssetVersion(ctx context.Context, arg GetResearchAssetVersionParams) (ResearchAssetVersion, error)
 	// One version by id — any age: old versions stay queryable forever, so a
 	// profile v2 never invalidates history written under v1 (docs/21 §8).
@@ -305,6 +308,7 @@ type Querier interface {
 	// release manifest's canonical sorting is the releases package's rule,
 	// not the store's).
 	ListReleaseReviews(ctx context.Context, arg ListReleaseReviewsParams) ([]ListReleaseReviewsRow, error)
+	ListReleases(ctx context.Context, projectID pgtype.UUID) ([]Release, error)
 	ListScientificObjectVersions(ctx context.Context, objectID pgtype.UUID) ([]ScientificObjectVersion, error)
 	ListStateCommitsByBranch(ctx context.Context, branchID pgtype.UUID) ([]StateCommit, error)
 	// The state snapshot projections (docs/21 §5, docs/07 §7): a state's

@@ -39,6 +39,10 @@ const (
 	// written in the same transaction as the profile version itself
 	// (same one-unit rule as the policy surface).
 	ActionSchemaProfileRegistered = "project.schema_profile_registered"
+
+	// T0606 release governance: one release row per action, written in
+	// the same transaction as the release snapshot itself.
+	ActionReleaseCreated = "release.created"
 )
 
 // Stable via values (the audit_log.via column): how the action arrived.

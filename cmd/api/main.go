@@ -52,12 +52,15 @@ import (
 	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
 	"github.com/lichman0405/post/cmd/api/provenancehttp"
+	"github.com/lichman0405/post/cmd/api/releasehttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/cmd/api/schemaprofileshttp"
 	"github.com/lichman0405/post/cmd/api/validationhttp"
 	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
+	"github.com/lichman0405/post/internal/application/manifests"
+	"github.com/lichman0405/post/internal/application/releases"
 	"github.com/lichman0405/post/internal/application/rsg"
 	"github.com/lichman0405/post/internal/application/schemaprofiles"
 	"github.com/lichman0405/post/internal/application/states"
@@ -439,6 +442,43 @@ func run(args []string) int {
 		Projects: persistence.NewProjectStore(pool),
 	})
 	policyAPI.Register(v1)
+	// Immutable releases (T0606): the release command composes the T0605
+	// manifest builder with its own authorization (ActionCreateRelease),
+	// the policy in force (pinned by id), the server-side release gate
+	// and the append-only release store (row + idempotency ledger + audit
+	// + release.published event, one transaction). The read routes are
+	// exactly as visible as the project (projectAPI.Service()); the
+	// create is the only write — no update/delete route exists.
+	releaseStore := persistence.NewReleaseStore(pool)
+	policyStore := persistence.NewPolicyStore(pool)
+	branchStore := persistence.NewBranchStore(pool)
+	releaseBuilder := releases.NewService(
+		stateStore,
+		manifests.NewService(stateStore, persistence.NewManifestStore(pool)),
+		persistence.NewProjectStore(pool),
+		branchStore,
+		policyStore,
+		releaseStore,
+		reg,
+	)
+	releaseCommand := releases.NewCommand(
+		releaseBuilder,
+		persistence.NewProjectStore(pool),
+		policyStore,
+		branchStore,
+		stateStore,
+		appvalidation.NewService(
+			persistence.NewValidationSnapshotRepository(stateStore),
+			rsgvalidation.NewValidator(reg),
+		),
+		releaseStore,
+		authz.NewMatrixEngine(),
+	)
+	releaseAPI := releasehttp.New(releasehttp.Deps{
+		Command:  releaseCommand,
+		Projects: projectAPI.Service(),
+	})
+	releaseAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	srv := &http.Server{
