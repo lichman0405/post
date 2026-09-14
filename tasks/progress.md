@@ -1608,9 +1608,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-14T13:16:32Z
+生成时间：2026-09-14T13:26:35Z
 
-状态分布：todo 71 · ready 0 · running 1 · worker_failed 0 · verification 8 · rejected 1 · blocked 0 · accepted 0 · merged 52（合计 133/133 个任务）
+状态分布：todo 71 · ready 0 · running 0 · worker_failed 0 · verification 9 · rejected 1 · blocked 0 · accepted 0 · merged 52（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1676,7 +1676,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0502 | Claim 结构与 scope | P5 | merged | 2026-09-14T11:24:17Z |  | 2026-09-14T11:46:32Z | 2026-09-14T11:49:54Z |
 | T0503 | Finding 聚合模型 | P5 | verification | 2026-09-14T11:49:56Z |  |  |  |
 | T0504 | Evidence Assertion Domain | P5 | verification | 2026-09-14T12:06:39Z |  |  |  |
-| T0505 | Provenance Graph Projection | P5 | running | 2026-09-14T13:15:07Z |  |  |  |
+| T0505 | Provenance Graph Projection | P5 | verification | 2026-09-14T13:15:07Z |  |  |  |
 | T0506 | Evidence Graph Projection | P5 | todo |  |  |  |  |
 | T0507 | Evidence/Provenance UI | P5 | todo |  |  |  |  |
 | T0508 | External Reference live identity + snapshot | P5 | verification | 2026-09-14T12:34:51Z |  |  |  |
