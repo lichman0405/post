@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -18,12 +20,23 @@ import (
 // (ADR-003, ADR-019): every call authenticates with the service account
 // token, so all provider-side changes the platform makes are attributable
 // to one machine identity. The adapter never touches Gitea's database —
-// it talks HTTP only; the acceptance criterion "domain 不引用 Gitea DB"
-// holds by construction (and the domain layer never sees this package).
+// it talks HTTP and the git protocol only; the acceptance criterion
+// "domain 不引用 Gitea DB" holds by construction (and the domain layer
+// never sees this package).
+//
+// Branch refs split across two channels, decided by what the deployed
+// instance actually answers (checked against the running instance, not a
+// doc): reads go through the refs API (GET /git/refs/heads/<name> — the
+// /branches API 500s for refs that arrived by push on this deployment),
+// and writes go through the git protocol, because Gitea's refs API is
+// read-only (POST/DELETE answer 405) and the /branches API refuses refs
+// of pushed repositories. The git protocol is the one channel the G3
+// script (tests/acceptance/gitea-real-services-e2e.sh) also uses.
 type GiteaAdapter struct {
 	baseURL string // no trailing slash
 	token   string
 	client  *http.Client
+	runner  GitRunner
 
 	// owner is the service account login, resolved from the token
 	// (GET /user) and cached once it succeeds: repositories are provisioned
@@ -37,13 +50,43 @@ type GiteaAdapter struct {
 	ownerSet bool
 }
 
+// GitRunner executes git CLI commands and returns the combined output —
+// git's failure surface is its stderr text, which the adapter classifies
+// onto the port's sentinels. The unit-test seam: the default runs the real
+// git binary, tests substitute a scripted runner.
+type GitRunner func(ctx context.Context, env []string, args ...string) (string, error)
+
+// defaultGitRunner runs the real git binary with the given environment.
+func defaultGitRunner(ctx context.Context, env []string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Env = env
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	return buf.String(), err
+}
+
+// AdapterOption tunes the adapter (unit-test seam only).
+type AdapterOption func(*GiteaAdapter)
+
+// WithGitRunner substitutes the git CLI executor.
+func WithGitRunner(r GitRunner) AdapterOption {
+	return func(a *GiteaAdapter) { a.runner = r }
+}
+
 // NewGiteaAdapter builds the adapter on the validated configuration.
-func NewGiteaAdapter(cfg Config) *GiteaAdapter {
-	return &GiteaAdapter{
+func NewGiteaAdapter(cfg Config, opts ...AdapterOption) *GiteaAdapter {
+	a := &GiteaAdapter{
 		baseURL: strings.TrimSuffix(cfg.BaseURL, "/"),
 		token:   string(cfg.Token),
 		client:  &http.Client{Timeout: 10 * time.Second},
+		runner:  defaultGitRunner,
 	}
+	for _, o := range opts {
+		o(a)
+	}
+	return a
 }
 
 // Owner resolves the service account login the adapter operates as.
@@ -85,18 +128,20 @@ type repoBody struct {
 	Owner    struct {
 		Login string `json:"login"`
 	} `json:"owner"`
-	CloneURL string `json:"clone_url"`
-	Private  bool   `json:"private"`
+	CloneURL      string `json:"clone_url"`
+	Private       bool   `json:"private"`
+	DefaultBranch string `json:"default_branch"`
 }
 
 // repository maps the provider shape onto the port type.
 func (b repoBody) repository(owner, name string) Repository {
 	return Repository{
-		Owner:    owner,
-		Name:     name,
-		ID:       b.ID,
-		CloneURL: b.CloneURL,
-		Private:  b.Private,
+		Owner:         owner,
+		Name:          name,
+		ID:            b.ID,
+		CloneURL:      b.CloneURL,
+		Private:       b.Private,
+		DefaultBranch: b.DefaultBranch,
 	}
 }
 
@@ -257,6 +302,257 @@ func (a *GiteaAdapter) EnsureWebhook(ctx context.Context, spec WebhookSpec) (Web
 		return Webhook{}, a.mapStatus(code, "create webhook", raw)
 	}
 	return Webhook{ID: created.ID, Active: created.Active}, nil
+}
+
+// gitRefBody is the provider-side ref shape the adapter reads back (a
+// subset of Gitea's Reference API type). GET /git/refs/heads/<name>
+// answers an ARRAY — one element for the exact ref (checked against the
+// running instance).
+type gitRefBody struct {
+	Ref    string `json:"ref"`
+	Object struct {
+		Type string `json:"type"`
+		SHA  string `json:"sha"`
+	} `json:"object"`
+}
+
+// isFullSHA reports whether s is a full 40-hex commit SHA (the shape
+// project_states.git_commit_sha carries): then it names the fork commit
+// directly; anything else is treated as a provider ref name.
+func isFullSHA(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+// pushURL is the git-protocol URL of a provisioned repository (the smart
+// HTTP endpoint the git CLI talks to). The token is NOT embedded here —
+// it rides in the process environment (gitEnv), never in argv.
+func (a *GiteaAdapter) pushURL(owner, name string) string {
+	return a.baseURL + "/" + urlSegment(owner) + "/" + urlSegment(name) + ".git"
+}
+
+// gitEnv builds the environment for one git invocation: hermetic against
+// an ambient git config (no system config; HOME and the entire GIT_*
+// namespace are this adapter's alone — an ambient GIT_DIR, GIT_OBJECT_DIRECTORY,
+// GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_WORK_TREE, GIT_ASKPASS or GIT_SSH
+// would redirect or reconfigure the invocation away from the scratch
+// repository) and authenticated without the token ever reaching argv — it
+// rides in GIT_CONFIG_VALUE_0, process-visible only. Everything else
+// (PATH, proxy settings, TLS roots) flows through.
+func (a *GiteaAdapter) gitEnv(dir string) []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		key := kv
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			key = kv[:i]
+		}
+		if key == "HOME" || strings.HasPrefix(key, "GIT_") {
+			// Overridden below — an ambient git configuration or state
+			// pointer must not reach a provider call.
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env,
+		"HOME="+dir,
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.extraHeader",
+		"GIT_CONFIG_VALUE_0=Authorization: token "+a.token,
+		"GIT_TERMINAL_PROMPT=0")
+}
+
+// gitRun runs one git command inside a per-operation bare scratch
+// repository, created and removed here: no shared state between concurrent
+// syncs, no lock, no growth over the process lifetime. The scratch
+// repository only needs to exist — fetch and push never touch a worktree.
+func (a *GiteaAdapter) gitRun(ctx context.Context, dir string, args ...string) (string, error) {
+	full := append([]string{"-C", dir}, args...)
+	out, err := a.runner(ctx, a.gitEnv(dir), full...)
+	if err != nil {
+		return out, fmt.Errorf("git %s: %w", args[0], err)
+	}
+	return out, nil
+}
+
+// newScratchRepo creates the per-operation bare repository gitRun works in.
+func (a *GiteaAdapter) newScratchRepo(ctx context.Context) (string, error) {
+	dir, err := os.MkdirTemp("", "post-git-*")
+	if err != nil {
+		return "", fmt.Errorf("%w: scratch repository: %v", ErrUnavailable, err)
+	}
+	if _, err := a.gitRun(ctx, dir, "init", "--bare", "-q", dir); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", fmt.Errorf("%w: scratch repository: %v", ErrUnavailable, err)
+	}
+	return dir, nil
+}
+
+// mapGitErr classifies a git CLI failure onto the port's sentinels, on the
+// output text (the messages the real protocol emits, checked against the
+// running instance). The output never contains the token by construction —
+// it is only ever passed through the environment (gitEnv).
+func (a *GiteaAdapter) mapGitErr(action, out string) error {
+	msg := strings.Join(strings.Fields(out), " ")
+	if r := []rune(msg); len(r) > 300 {
+		msg = string(r[:300])
+	}
+	switch {
+	case strings.Contains(out, "not our ref"),
+		strings.Contains(out, "couldn't find remote ref"),
+		strings.Contains(out, "bad object"),
+		strings.Contains(out, "unknown revision"),
+		strings.Contains(out, "does not exist"):
+		return fmt.Errorf("%w: %s: %s", ErrNotFound, action, msg)
+	case strings.Contains(out, "could not read Username"),
+		strings.Contains(out, "terminal prompts disabled"),
+		strings.Contains(out, "Authentication failed"),
+		strings.Contains(out, "Access denied"):
+		return fmt.Errorf("%w: %s: %s", ErrUnauthorized, action, msg)
+	case strings.Contains(out, "protected branch"),
+		strings.Contains(out, "hook declined"):
+		return fmt.Errorf("%w: %s: %s", ErrConflict, action, msg)
+	default:
+		return fmt.Errorf("%w: %s: %s", ErrUnavailable, action, msg)
+	}
+}
+
+// gitUpdateRejected reports whether a failed push was refused because the
+// ref already exists (a concurrent creator won the race between our read
+// and our push): the adoption path, never an error.
+func gitUpdateRejected(out string) bool {
+	for _, marker := range []string{"[rejected]", "non-fast-forward", "already exists", "cannot lock ref", "fetch first"} {
+		if strings.Contains(out, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// EnsureBranch implements GitPort (T0303): the branch ref spec.Name is
+// created forked from spec.ForkRef — a provider ref name or commit SHA. An
+// empty ForkRef resolves to the repository's default branch; an empty
+// default branch means the repository has no refs at all (T0301 provisions
+// with auto_init false), which is ErrNotFound — the syncer keeps the row
+// retryable until the initial commit lands (T0302). An existing ref of the
+// same name is adopted, not an error, including the race where a
+// concurrent sync created it between our read and our push.
+//
+// The write channel is the git protocol: the fork commit is shallow-fetched
+// into a per-operation scratch repository (the git client needs the object
+// locally to push it), then pushed to the new ref. The fetch doubles as the
+// fork-point existence check: a fork sha the provider does not have fails
+// here with ErrNotFound.
+func (a *GiteaAdapter) EnsureBranch(ctx context.Context, spec BranchSpec) (BranchRef, error) {
+	repo := spec.Repository
+
+	// Adopt first: an existing ref is the truth — idempotent sync, a
+	// redelivered job never fails on an already-created ref.
+	if ref, err := a.GetBranch(ctx, repo, spec.Name); err == nil {
+		return ref, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return BranchRef{}, err
+	}
+
+	// Resolve the fork point to one commit SHA.
+	forkSHA := spec.ForkRef
+	if forkSHA == "" {
+		info, err := a.GetRepository(ctx, repo.Owner, repo.Name)
+		if err != nil {
+			return BranchRef{}, err
+		}
+		forkSHA = info.DefaultBranch
+		if forkSHA == "" {
+			return BranchRef{}, fmt.Errorf("%w: repository %s/%s has no refs to fork from (the initial commit arrives with T0302)",
+				ErrNotFound, repo.Owner, repo.Name)
+		}
+	}
+	if !isFullSHA(forkSHA) {
+		ref, err := a.GetBranch(ctx, repo, forkSHA)
+		if err != nil {
+			return BranchRef{}, fmt.Errorf("%w: fork point %q does not exist in %s/%s",
+				ErrNotFound, forkSHA, repo.Owner, repo.Name)
+		}
+		forkSHA = ref.HeadSHA
+	}
+
+	dir, err := a.newScratchRepo(ctx)
+	if err != nil {
+		return BranchRef{}, err
+	}
+	defer os.RemoveAll(dir)
+	pushURL := a.pushURL(repo.Owner, repo.Name)
+	if out, err := a.gitRun(ctx, dir, "fetch", "--depth=1", pushURL, forkSHA); err != nil {
+		return BranchRef{}, a.mapGitErr("fetch the fork point", out)
+	}
+	if out, err := a.gitRun(ctx, dir, "push", pushURL, forkSHA+":refs/heads/"+spec.Name); err != nil {
+		if gitUpdateRejected(out) {
+			// A concurrent creator won: adopt the ref that is actually
+			// there instead of failing.
+			if ref, gerr := a.GetBranch(ctx, repo, spec.Name); gerr == nil {
+				return ref, nil
+			}
+		}
+		return BranchRef{}, a.mapGitErr("create the branch ref", out)
+	}
+
+	// Read the provider-side head back: the pushed sha is the fork point,
+	// but a concurrent push may already have moved the ref — the ref is the
+	// truth, and the record commits what the provider actually carries.
+	return a.GetBranch(ctx, repo, spec.Name)
+}
+
+// GetBranch implements GitPort over the refs API — on this deployment the
+// /branches API cannot answer for refs that arrived by push (checked
+// against the running instance), so the refs API is the one that can.
+func (a *GiteaAdapter) GetBranch(ctx context.Context, repo Repository, name string) (BranchRef, error) {
+	var refs []gitRefBody
+	code, raw, err := a.call(ctx, http.MethodGet,
+		"/api/v1/repos/"+urlSegment(repo.Owner)+"/"+urlSegment(repo.Name)+"/git/refs/heads/"+urlSegment(name), nil, &refs)
+	if err != nil {
+		return BranchRef{}, err
+	}
+	if code == http.StatusNotFound || (code == http.StatusOK && len(refs) == 0) {
+		return BranchRef{}, ErrNotFound
+	}
+	if code != http.StatusOK {
+		return BranchRef{}, a.mapStatus(code, "get branch ref", raw)
+	}
+	if refs[0].Object.SHA == "" {
+		return BranchRef{}, ErrNotFound
+	}
+	return BranchRef{Name: name, HeadSHA: refs[0].Object.SHA}, nil
+}
+
+// DeleteBranch implements GitPort over the git protocol: a push with an
+// empty source deletes the remote ref. A missing ref is the goal already
+// achieved (the port contract): this instance's provider reports the
+// delete of a nonexistent ref as success, but servers exist that refuse it
+// ("unable to delete <name>: remote ref does not exist"), so the adapter
+// maps exactly that refusal to success too — an out-of-band deletion or a
+// redelivered close job must never fail on work that is already done.
+func (a *GiteaAdapter) DeleteBranch(ctx context.Context, repo Repository, name string) error {
+	dir, err := a.newScratchRepo(ctx)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	out, err := a.gitRun(ctx, dir, "push", a.pushURL(repo.Owner, repo.Name), ":refs/heads/"+name)
+	if err != nil {
+		if strings.Contains(out, "remote ref does not exist") {
+			return nil
+		}
+		return a.mapGitErr("delete the branch ref", out)
+	}
+	return nil
 }
 
 // call performs one API request and decodes the JSON response body into

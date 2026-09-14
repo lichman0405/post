@@ -66,8 +66,15 @@ var appendOnlyTables = []string{
 // catalog row must end with. Migration 00028 adds the branch lifecycle
 // guard (BEFORE UPDATE, FOR EACH ROW → tgtype 19): a merged/aborted
 // branch's lifecycle and head pointer are immutable for ANY update path.
+// Migration 00031 adds the branch→git-ref guards (T0303): the derived
+// git_ref and immutable name guard on branches, the per-row mapping and
+// close-direction triggers, and the git_branch_refs sync-state machine.
 var targetedGuardTriggers = map[string]string{
-	"branches:branch_lifecycle_guard_trigger": ":O:19",
+	"branches:branch_lifecycle_guard_trigger":      ":O:19",
+	"branches:branch_git_ref_guard_trigger":        ":O:23",
+	"branches:branch_git_ref_map_trigger":          ":O:5",
+	"branches:branch_git_ref_close_trigger":        ":O:17",
+	"git_branch_refs:git_branch_ref_guard_trigger": ":O:23",
 }
 
 // triggerRows returns every user trigger in the public schema as sorted

@@ -172,6 +172,15 @@ var canonicalTables = map[string]tableExp{
 		checks:  []string{"visibility = ANY", "lifecycle_state = ANY"},
 		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("base_state_id", "project_states", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
 	},
+	"git_branch_refs": {
+		// T0303 (00031): the semantic branch → Git ref mapping and sync
+		// record, maintained by the branches triggers — one row per branch,
+		// born with work to do, closed only through 'closing'.
+		cols:   []colExp{c("branch_id", u, false, false), c("git_ref", txt, false, false), c("fork_sha", txt, true, false), c("head_sha", txt, true, false), c("sync_state", txt, false, true), c("close_requested_at", ts, true, false), c("synced_at", ts, true, false), c("closed_at", ts, true, false), c("created_at", ts, false, true), c("updated_at", ts, false, true)},
+		pk:     []string{"branch_id"},
+		checks: []string{"sync_state = ANY"},
+		fks:    []fkExp{fk("branch_id", "branches", "RESTRICT")},
+	},
 	"project_states": {
 		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("branch_id", u, true, false), c("parent_state_id", u, true, false), c("state_hash", txt, false, false), c("git_commit_sha", txt, true, false), c("manifest_version", txt, false, false), c("created_at", ts, false, true)},
 		pk:      []string{"id"},
@@ -379,6 +388,10 @@ var explicitIndexes = map[string][]string{
 	"state_commits_branch_created_idx":     {"branch_id", "created_at"},
 	// T0205: branch listing scans (migration 00028).
 	"branches_project_created_idx": {"project_id", "created_at"},
+	// T0303: the sync backlog scan (boot sweep + redelivered jobs) —
+	// partial on the non-terminal states, so 'closed' rows stay out of it
+	// (migration 00031).
+	"git_branch_refs_sync_backlog_idx": {"sync_state", "WHERE"},
 	// T0104: personal projects (organization_id NULL) escape the
 	// UNIQUE(organization_id, slug) constraint, so their slug uniqueness is
 	// a partial unique index instead.
@@ -548,7 +561,7 @@ func TestUpgradePath(t *testing.T) {
 		"external_reference_snapshots", "contribution_events",
 		"credit_disputes", "research_events", "outbox_events",
 		"subscriptions", "webhook_deliveries", "audit_log", "search_documents",
-		"profiles",
+		"profiles", "git_repository_provisions", "git_branch_refs",
 	}
 	for _, name := range present {
 		if _, ok := intermediate.Tables[name]; !ok {
@@ -849,6 +862,97 @@ func TestMigrationVersionCounterBackfill(t *testing.T) {
 	})
 }
 
+// ---------------------------------------------------------------------------
+//  5. Branch-ref backfill direction (00031): branches that predate the
+//     mapping table get their row from the backfill — the create direction
+//     ('pending') for live branches, but the close direction ('closing' +
+//     close_requested_at) for branches already merged/aborted at upgrade
+//     time. Mapping a closed branch as 'pending' would make the boot sweep
+//     create (or adopt-and-keep) a provider ref for a semantic path that
+//     must never accept pushes again — the exact state the task's close
+//     strategy forbids, and no close trigger can ever fire for those
+//     terminal rows again (00028). The born-closed insert trigger
+//     (branch_git_ref_map) has always known this; the backfill must mirror
+//     it. Deleting the CASE from the backfill must turn this test red.
+func TestMigrationBranchRefBackfillDirection(t *testing.T) {
+	ctx := testCtx(t)
+
+	// Version 28 is the last migration before 00031 (29-30 are reserved):
+	// branches exist but the mapping table does not, so the seed can only
+	// reach the mapping rows through the backfill.
+	intermediate := int64(28)
+	pool, url := testdb.SetupEmpty(t, ctx, adminURL(t), taskID)
+	toIntermediate, err := persistence.MigrateTo(ctx, url, intermediate)
+	if err != nil {
+		t.Fatalf("00031 backfill: migrate to 28: %v", err)
+	}
+	if toIntermediate != appliedAbove(0)-appliedAbove(intermediate) {
+		t.Errorf("00031 backfill: applied %d to reach version %d, want %d",
+			toIntermediate, intermediate, appliedAbove(0)-appliedAbove(intermediate))
+	}
+	if v := appliedVersion(t, ctx, pool); v != intermediate {
+		t.Fatalf("00031 backfill: version after MigrateTo(28) = %d, want %d", v, intermediate)
+	}
+
+	// Seed the pre-migration world: one branch in every lifecycle state.
+	projectID, stateID, userID := seedCounterGraph(t, ctx, pool, "31")
+	seedBranch := func(name, lifecycle string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO branches
+			(project_id, name, visibility, git_ref, base_state_id, lifecycle_state, created_by)
+			VALUES ($1, $2, 'private', 'refs/heads/' || $2, $3, $4, $5)`,
+			projectID, name, stateID, lifecycle, userID); err != nil {
+			t.Fatalf("00031 backfill: seed branch %s: %v", name, err)
+		}
+	}
+	seedBranch("active-b", "active")
+	seedBranch("merged-b", "merged")
+	seedBranch("aborted-b", "aborted")
+
+	toHead, err := persistence.Migrate(ctx, url)
+	if err != nil {
+		t.Fatalf("00031 backfill: migrate to head: %v", err)
+	}
+	if toHead != appliedAbove(intermediate) {
+		t.Errorf("00031 backfill: applied %d on the way to head, want %d", toHead, appliedAbove(intermediate))
+	}
+	if v := appliedVersion(t, ctx, pool); v != maxVersionNo {
+		t.Fatalf("00031 backfill: version after head = %d, want %d", v, maxVersionNo)
+	}
+
+	// Data-level upgrade check: the backfill must carry each pre-migration
+	// branch's lifecycle into the mapping row — live branches wait for
+	// creation, closed branches wait for deletion.
+	want := map[string]struct {
+		state          string
+		closeRequested bool
+	}{
+		"active-b":  {"pending", false},
+		"merged-b":  {"closing", true},
+		"aborted-b": {"closing", true},
+	}
+	for name, exp := range want {
+		var gitRef, state string
+		var closeRequested bool
+		if err := pool.QueryRow(ctx, `
+			SELECT git_ref, sync_state, close_requested_at IS NOT NULL
+			  FROM git_branch_refs
+			 WHERE branch_id = (SELECT id FROM branches WHERE name = $1)`, name).
+			Scan(&gitRef, &state, &closeRequested); err != nil {
+			t.Fatalf("00031 backfill: probe mapping row for %s: %v", name, err)
+		}
+		if gitRef != "refs/heads/"+name {
+			t.Errorf("00031 backfill: %s git_ref = %q, want derived refs/heads/%s", name, gitRef, name)
+		}
+		if state != exp.state {
+			t.Errorf("00031 backfill: %s sync_state = %q, want %q (the lifecycle-carrying direction)", name, state, exp.state)
+		}
+		if closeRequested != exp.closeRequested {
+			t.Errorf("00031 backfill: %s close_requested = %v, want %v", name, closeRequested, exp.closeRequested)
+		}
+	}
+}
+
 // seedCounterGraph writes the minimal user → organization → project → branch →
 // state graph that version rows reference (the same shape
 // TestConstraintEnforcement uses), through raw SQL so it works against any
@@ -971,6 +1075,73 @@ func TestConstraintEnforcement(t *testing.T) {
 	// CHECK rejects a forbidden UPDATE of a lifecycle state (23514).
 	_, err = pool.Exec(ctx, `UPDATE branches SET lifecycle_state = 'bogus' WHERE id = $1`, b1)
 	wantErr("UPDATE branches SET lifecycle_state = 'bogus'", err, "23514")
+
+	// T0303: the derived-ref guard (00031) — git_ref must always equal
+	// 'refs/heads/' || name on ANY insert path (P0001), and the mapping
+	// row was created by the trigger for the seeded branch.
+	_, err = pool.Exec(ctx, `INSERT INTO branches (project_id, name, visibility, git_ref, created_by)
+		VALUES ($1, 'feature-x', 'private', 'refs/heads/wrong', $2)`, p1, u1)
+	wantErr("INSERT branch with mismatched git_ref", err, "P0001")
+
+	var mapState, mapRef string
+	if err := pool.QueryRow(ctx,
+		`SELECT sync_state, git_ref FROM git_branch_refs WHERE branch_id = $1`, b1).Scan(&mapState, &mapRef); err != nil {
+		t.Fatalf("probe git_branch_refs mapping row: %v", err)
+	}
+	if mapState != "pending" || mapRef != "refs/heads/main" {
+		t.Errorf("mapping row = %s/%s, want pending/refs/heads/main", mapState, mapRef)
+	}
+
+	// T0303: the branch name is immutable — renaming would be a new branch
+	// (the git ref is the branch's address), even when the row is updated
+	// consistently (P0001).
+	_, err = pool.Exec(ctx, `UPDATE branches SET name = 'renamed', git_ref = 'refs/heads/renamed' WHERE id = $1`, b1)
+	wantErr("UPDATE branches SET name (immutable)", err, "P0001")
+
+	// T0303: the mapping row's stored ref is immutable too (P0001).
+	_, err = pool.Exec(ctx, `UPDATE git_branch_refs SET git_ref = 'refs/heads/other' WHERE branch_id = $1`, b1)
+	wantErr("UPDATE git_branch_refs SET git_ref (immutable)", err, "P0001")
+
+	// T0303: a mapping row cannot be born 'closed' — closed is only reached
+	// through 'closing' (P0001, raised by the BEFORE trigger ahead of the
+	// PK conflict with the trigger-created row).
+	b2 := mustQueryUUID(`INSERT INTO branches (project_id, name, visibility, git_ref, created_by)
+		VALUES ($1, 'feature-y', 'private', 'refs/heads/feature-y', $2) RETURNING id`, p1, u1)
+	_, err = pool.Exec(ctx, `INSERT INTO git_branch_refs (branch_id, git_ref, sync_state)
+		VALUES ($1, 'refs/heads/feature-y', 'closed')`, b2)
+	wantErr("INSERT git_branch_refs born closed", err, "P0001")
+
+	// T0303: the sync state machine only moves forward — pending may reach
+	// synced, failed or closing, never 'closed' directly (P0001).
+	_, err = pool.Exec(ctx, `UPDATE git_branch_refs SET sync_state = 'closed' WHERE branch_id = $1`, b2)
+	wantErr("UPDATE git_branch_refs pending→closed (forbidden jump)", err, "P0001")
+
+	// T0303: closing → closed is the one path to terminal, and 'closed' is
+	// frozen — even a timestamps-only update of the closed row is rejected.
+	if _, err := pool.Exec(ctx, `UPDATE git_branch_refs SET sync_state = 'closing' WHERE branch_id = $1`, b2); err != nil {
+		t.Fatalf("pending→closing: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE git_branch_refs SET sync_state = 'closed' WHERE branch_id = $1`, b2); err != nil {
+		t.Fatalf("closing→closed: %v", err)
+	}
+	_, err = pool.Exec(ctx, `UPDATE git_branch_refs SET synced_at = now() WHERE branch_id = $1`, b2)
+	wantErr("UPDATE git_branch_refs after closed (terminal)", err, "P0001")
+
+	// T0303: closing the semantic lifecycle (active → merged) moves the
+	// mapping row to 'closing' with close_requested_at set — the syncer's
+	// delete direction (the merge itself commits; the ref deletion follows
+	// in the job loop).
+	if _, err := pool.Exec(ctx, `UPDATE branches SET lifecycle_state = 'merged' WHERE id = $1`, b1); err != nil {
+		t.Fatalf("merge branch: %v", err)
+	}
+	var closeRequested bool
+	if err := pool.QueryRow(ctx,
+		`SELECT sync_state, close_requested_at IS NOT NULL FROM git_branch_refs WHERE branch_id = $1`, b1).Scan(&mapState, &closeRequested); err != nil {
+		t.Fatalf("probe closing row: %v", err)
+	}
+	if mapState != "closing" || !closeRequested {
+		t.Errorf("mapping row after merge = %s (close_requested %v), want closing with close_requested_at set", mapState, closeRequested)
+	}
 
 	// UNIQUE(object_id, version_no) rejects a duplicate version insert —
 	// versions are append-only, never overwritten (23505).

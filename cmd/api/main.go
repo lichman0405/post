@@ -164,6 +164,14 @@ func run(args []string) int {
 		provisioner := gitprovider.NewProvisioner(giteaAdapter, provisioningStore, gitCfg.WebhookURL)
 		provisioningLoop := worker.NewLoop(provisioningQueue, worker.WithLogger(logger))
 		provisioningLoop.Register(gitprovider.ProvisionJobType, newProvisioningHandler(provisioner))
+		// Branch ref sync (T0303): the second job type on the same loop and
+		// queue, sharing the adapter (and its resolved service account
+		// identity). The mapping rows are maintained by migration 00031's
+		// triggers; this loop keeps the provider refs consistent with them
+		// (create on branch insert, delete once merged/aborted).
+		refStore := gitprovider.NewBranchRefStore(pool)
+		refSyncer := gitprovider.NewBranchRefSyncer(giteaAdapter, refStore)
+		provisioningLoop.Register(gitprovider.BranchRefJobType, newBranchRefSyncHandler(refSyncer))
 		go func() {
 			if err := provisioningLoop.Run(ctx); err != nil {
 				slog.Error("post-api: provisioning loop failed", "error", err)
@@ -185,6 +193,15 @@ func run(args []string) int {
 		// retried on the next pass.
 		go runMainProtectionSweep(ctx,
 			gitprovider.NewProtectionSweeper(giteaAdapter, provisioningStore), logger)
+		// Sweep branch refs left unsynced by an earlier run (a down Redis
+		// at branch-creation time, a provider outage on the last attempt,
+		// or close requests waiting for their deletion). Same policy and
+		// timeout as the provisioning sweep.
+		go func() {
+			sweepCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			enqueuePendingBranchRefs(sweepCtx, refStore, provisioningQueue, logger)
+		}()
 	} else {
 		// Redacted by construction: key names only, never values.
 		slog.Warn("post-api: GitProvider provisioning disabled — missing configuration",

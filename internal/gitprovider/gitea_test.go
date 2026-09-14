@@ -27,6 +27,10 @@ type giteaRoute struct {
 	method, prefix string
 	status         int
 	body           string
+	// serve, when set, decides the response itself (returning true when it
+	// handled the request) — for paths whose answer must change between
+	// calls (e.g. the adopt-first miss and the later read-back hit).
+	serve func(w http.ResponseWriter, r *http.Request) bool
 }
 
 type giteaRequest struct {
@@ -46,6 +50,12 @@ func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.reqs = append(f.reqs, rec)
 	for _, rt := range f.routes {
 		if rt.method == r.Method && strings.HasPrefix(r.URL.Path, rt.prefix) {
+			if rt.serve != nil {
+				if rt.serve(w, r) {
+					return
+				}
+				continue
+			}
 			w.WriteHeader(rt.status)
 			_, _ = w.Write([]byte(rt.body))
 			return
@@ -68,14 +78,56 @@ func (f *fakeGitea) requests(method, prefix string) []giteaRequest {
 }
 
 // newGiteaAdapter wires the adapter onto a live httptest server over f.
-func newGiteaAdapter(t *testing.T, f *fakeGitea) *gitprovider.GiteaAdapter {
+func newGiteaAdapter(t *testing.T, f *fakeGitea, opts ...gitprovider.AdapterOption) *gitprovider.GiteaAdapter {
 	t.Helper()
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	return gitprovider.NewGiteaAdapter(gitprovider.Config{
 		BaseURL: srv.URL,
 		Token:   config.Secret("test-token"),
-	})
+	}, opts...)
+}
+
+// gitCall is one recorded git CLI invocation (the scripted runner's input).
+type gitCall struct {
+	args []string
+	env  []string
+}
+
+// envValue returns the value of one environment entry, or "" when absent.
+func (c gitCall) envValue(key string) string {
+	for _, kv := range c.env {
+		if v, ok := strings.CutPrefix(kv, key+"="); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// scriptedGit builds a GitRunner whose every invocation is answered by the
+// next step (extra invocations fail the test), and recorded for
+// assertions.
+func scriptedGit(t *testing.T, steps ...func(call gitCall) (string, error)) gitprovider.GitRunner {
+	t.Helper()
+	i := 0
+	return func(_ context.Context, env []string, args ...string) (string, error) {
+		if i >= len(steps) {
+			t.Fatalf("unexpected git call #%d: %v", i+1, args)
+		}
+		call := gitCall{args: args, env: env}
+		out, err := steps[i](call)
+		i++
+		return out, err
+	}
+}
+
+// okGit answers one git invocation with success.
+func okGit(gitCall) (string, error) { return "", nil }
+
+// failGit answers one git invocation with a failure carrying the given
+// output text (the surface mapGitErr classifies).
+func failGit(out string) func(gitCall) (string, error) {
+	return func(gitCall) (string, error) { return out, errors.New("git: exit status 128") }
 }
 
 func testCtx(t *testing.T) context.Context {
@@ -509,5 +561,361 @@ func TestGiteaWebhookCreateErrorMapping(t *testing.T) {
 	})
 	if !errors.Is(err, gitprovider.ErrUnauthorized) {
 		t.Errorf("EnsureWebhook error = %v, want ErrUnauthorized", err)
+	}
+}
+
+// --- branch refs (T0303) -----------------------------------------------------
+
+const testBranchHeadSHA = "0123456789abcdef0123456789abcdef01234567"
+const testForkHeadSHA = "fedcba9876543210fedcba9876543210fedcba98"
+
+func testRepo() gitprovider.Repository {
+	return gitprovider.Repository{Owner: "o", Name: "n"}
+}
+
+// refsBody is the refs-API answer shape (an ARRAY — checked against the
+// running instance).
+func refsBody(name, sha string) string {
+	return `[{"ref":"refs/heads/` + name + `","object":{"type":"commit","sha":"` + sha + `"}}]`
+}
+
+// servingRef answers successive GETs of one ref endpoint with the given
+// bodies in order ("" = 404), then repeats the last — e.g. the adopt-first
+// miss and the later read-back hit on the same path.
+func servingRef(name string, bodies ...string) giteaRoute {
+	i := 0
+	return giteaRoute{
+		method: http.MethodGet,
+		prefix: "/api/v1/repos/o/n/git/refs/heads/" + name,
+		serve: func(w http.ResponseWriter, _ *http.Request) bool {
+			body := bodies[i]
+			if i < len(bodies)-1 {
+				i++
+			}
+			if body == "" {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+				return true
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(body))
+			return true
+		},
+	}
+}
+
+// recordGit is a scriptedGit step that records the call and succeeds.
+func recordGit(calls *[]gitCall) func(gitCall) (string, error) {
+	return func(c gitCall) (string, error) { *calls = append(*calls, c); return "", nil }
+}
+
+// TestGiteaEnsureBranchCreated: a create with an explicit fork sha goes
+// over the git protocol — the fork commit is shallow-fetched (the git
+// client needs the object locally) and pushed to the new ref — and the
+// provider-side head is read back through the refs API. The token travels
+// only in the environment, never in argv.
+func TestGiteaEnsureBranchCreated(t *testing.T) {
+	f := &fakeGitea{routes: []giteaRoute{
+		servingRef("feature-x", "", refsBody("feature-x", testBranchHeadSHA)),
+	}}
+	var calls []gitCall
+	a := newGiteaAdapter(t, f, gitprovider.WithGitRunner(scriptedGit(t,
+		recordGit(&calls), recordGit(&calls), recordGit(&calls))))
+
+	ref, err := a.EnsureBranch(testCtx(t), gitprovider.BranchSpec{
+		Repository: testRepo(), Name: "feature-x", ForkRef: testBranchHeadSHA,
+	})
+	if err != nil {
+		t.Fatalf("EnsureBranch: %v", err)
+	}
+	if ref.Name != "feature-x" || ref.HeadSHA != testBranchHeadSHA {
+		t.Errorf("ref = %+v, want feature-x @ %s", ref, testBranchHeadSHA)
+	}
+	if got := len(calls); got != 3 {
+		t.Fatalf("git calls = %d, want 3 (init, fetch, push): %+v", got, calls)
+	}
+	if got := calls[0].args[2:]; !strings.HasPrefix(got[0], "init") {
+		t.Errorf("call 0 = %v, want the scratch bare init", got)
+	}
+	if got := calls[1].args[2:]; len(got) != 4 || got[0] != "fetch" || got[1] != "--depth=1" ||
+		!strings.HasSuffix(got[2], "/o/n.git") || got[3] != testBranchHeadSHA {
+		t.Errorf("fetch call = %v, want [fetch --depth=1 <url>/o/n.git %s]", got, testBranchHeadSHA)
+	}
+	if got := calls[2].args[2:]; len(got) != 3 || got[0] != "push" ||
+		!strings.HasSuffix(got[1], "/o/n.git") || got[2] != testBranchHeadSHA+":refs/heads/feature-x" {
+		t.Errorf("push call = %v, want [push <url>/o/n.git %s:refs/heads/feature-x]", got, testBranchHeadSHA)
+	}
+	for _, c := range calls {
+		if got := c.envValue("GIT_CONFIG_VALUE_0"); got != "Authorization: token test-token" {
+			t.Errorf("git env token = %q, want the Authorization header value", got)
+		}
+		if strings.Contains(strings.Join(c.args, " "), "test-token") {
+			t.Error("the token reached git argv — it must ride in the environment only")
+		}
+	}
+	if got := len(f.requests(http.MethodGet, "/api/v1/repos/o/n/git/refs/heads/feature-x")); got != 2 {
+		t.Errorf("refs GET hits = %d, want 2 (adopt-first miss, read-back)", got)
+	}
+}
+
+// TestGiteaDeleteBranchAbsentRefIsSuccess: the git client refuses the
+// delete of a nonexistent remote ref ("remote ref does not exist"), so
+// exactly that refusal maps to success — the port contract makes a
+// missing ref "the goal already achieved" (a redelivered close job must
+// not fail on work that is already done). Real refusals still map.
+func TestGiteaDeleteBranchAbsentRefIsSuccess(t *testing.T) {
+	f := &fakeGitea{}
+	a := newGiteaAdapter(t, f, gitprovider.WithGitRunner(scriptedGit(t,
+		okGit,
+		failGit("error: unable to delete 'x': remote ref does not exist\nerror: failed to push some refs"))))
+	if err := a.DeleteBranch(testCtx(t), testRepo(), "x"); err != nil {
+		t.Errorf("DeleteBranch on an already-absent ref = %v, want success", err)
+	}
+
+	a2 := newGiteaAdapter(t, f, gitprovider.WithGitRunner(scriptedGit(t,
+		okGit,
+		failGit("remote: Access denied"))))
+	if err := a2.DeleteBranch(testCtx(t), testRepo(), "x"); !errors.Is(err, gitprovider.ErrUnauthorized) {
+		t.Errorf("DeleteBranch on an unauthorized provider = %v, want ErrUnauthorized", err)
+	}
+}
+
+// TestGiteaGitEnvStripsAmbientGitNamespace: an ambient GIT_* variable in
+// the API process (GIT_DIR, GIT_OBJECT_DIRECTORY,
+// GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_WORK_TREE, GIT_ASKPASS, ...) would
+// redirect the adapter's git invocation away from its per-operation
+// scratch repository — the hermeticity promise is that the GIT_*
+// namespace of the subprocess is the adapter's alone.
+func TestGiteaGitEnvStripsAmbientGitNamespace(t *testing.T) {
+	ambient := []string{"GIT_DIR", "GIT_OBJECT_DIRECTORY",
+		"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_WORK_TREE", "GIT_ASKPASS", "GIT_SSH"}
+	for _, k := range ambient {
+		t.Setenv(k, "/ambient/"+strings.ToLower(k))
+	}
+	var calls []gitCall
+	a := newGiteaAdapter(t, &fakeGitea{}, gitprovider.WithGitRunner(scriptedGit(t,
+		recordGit(&calls), recordGit(&calls))))
+	if err := a.DeleteBranch(testCtx(t), testRepo(), "x"); err != nil {
+		t.Fatalf("DeleteBranch: %v", err)
+	}
+	for i, c := range calls {
+		for _, k := range ambient {
+			if got := c.envValue(k); got != "" {
+				t.Errorf("call %d: ambient %s=%q reached the git subprocess", i, k, got)
+			}
+		}
+		if got := c.envValue("GIT_CONFIG_VALUE_0"); got != "Authorization: token test-token" {
+			t.Errorf("call %d: token env = %q, want the adapter's own slot", i, got)
+		}
+	}
+}
+
+// TestGiteaEnsureBranchResolvesDefaultBranch: an empty fork ref resolves
+// the repository's default branch through the refs API first, then forks
+// at its tip.
+func TestGiteaEnsureBranchResolvesDefaultBranch(t *testing.T) {
+	f := &fakeGitea{routes: []giteaRoute{
+		servingRef("feature-x", "", refsBody("feature-x", testForkHeadSHA)),
+		servingRef("main", refsBody("main", testForkHeadSHA)),
+		{method: http.MethodGet, prefix: "/api/v1/repos/o/n", status: http.StatusOK,
+			body: `{"id":1,"full_name":"o/n","default_branch":"main","private":true}`},
+	}}
+	var calls []gitCall
+	a := newGiteaAdapter(t, f, gitprovider.WithGitRunner(scriptedGit(t,
+		recordGit(&calls), recordGit(&calls), recordGit(&calls))))
+
+	ref, err := a.EnsureBranch(testCtx(t), gitprovider.BranchSpec{Repository: testRepo(), Name: "feature-x"})
+	if err != nil {
+		t.Fatalf("EnsureBranch: %v", err)
+	}
+	if ref.HeadSHA != testForkHeadSHA {
+		t.Errorf("ref head = %q, want the default branch's tip %s", ref.HeadSHA, testForkHeadSHA)
+	}
+	if got := len(calls); got != 3 {
+		t.Fatalf("git calls = %d, want 3", got)
+	}
+	if got := calls[1].args[2:]; len(got) != 4 || got[3] != testForkHeadSHA {
+		t.Errorf("fetch call = %v, want the fork at main's tip %s", got, testForkHeadSHA)
+	}
+	if got := calls[2].args[2:]; len(got) != 3 || got[2] != testForkHeadSHA+":refs/heads/feature-x" {
+		t.Errorf("push call = %v, want the fork at main's tip", got)
+	}
+}
+
+// TestGiteaEnsureBranchEmptyRepository: no refs at all (T0301's
+// auto_init=false) — ErrNotFound, and no git call is attempted.
+func TestGiteaEnsureBranchEmptyRepository(t *testing.T) {
+	f := &fakeGitea{routes: []giteaRoute{
+		servingRef("feature-x", ""),
+		{method: http.MethodGet, prefix: "/api/v1/repos/o/n", status: http.StatusOK,
+			body: `{"id":1,"full_name":"o/n","default_branch":"","private":true}`},
+	}}
+	a := newGiteaAdapter(t, f, gitprovider.WithGitRunner(scriptedGit(t)))
+
+	_, err := a.EnsureBranch(testCtx(t), gitprovider.BranchSpec{Repository: testRepo(), Name: "feature-x"})
+	if !errors.Is(err, gitprovider.ErrNotFound) {
+		t.Errorf("EnsureBranch error = %v, want ErrNotFound", err)
+	}
+}
+
+// TestGiteaEnsureBranchMissingForkRef: the fork ref does not exist
+// provider-side — ErrNotFound (the syncer keeps the row retryable).
+func TestGiteaEnsureBranchMissingForkRef(t *testing.T) {
+	f := &fakeGitea{routes: []giteaRoute{
+		servingRef("feature-x", ""),
+		servingRef("ghost", ""),
+	}}
+	a := newGiteaAdapter(t, f, gitprovider.WithGitRunner(scriptedGit(t)))
+
+	_, err := a.EnsureBranch(testCtx(t), gitprovider.BranchSpec{
+		Repository: testRepo(), Name: "feature-x", ForkRef: "ghost",
+	})
+	if !errors.Is(err, gitprovider.ErrNotFound) {
+		t.Errorf("EnsureBranch error = %v, want ErrNotFound", err)
+	}
+}
+
+// TestGiteaEnsureBranchAdoptsExisting: the ref already exists — adopted
+// through the refs API, no git call.
+func TestGiteaEnsureBranchAdoptsExisting(t *testing.T) {
+	f := &fakeGitea{routes: []giteaRoute{
+		servingRef("feature-x", refsBody("feature-x", testBranchHeadSHA)),
+	}}
+	a := newGiteaAdapter(t, f, gitprovider.WithGitRunner(scriptedGit(t)))
+
+	ref, err := a.EnsureBranch(testCtx(t), gitprovider.BranchSpec{
+		Repository: testRepo(), Name: "feature-x", ForkRef: testBranchHeadSHA,
+	})
+	if err != nil {
+		t.Fatalf("EnsureBranch: %v", err)
+	}
+	if ref.HeadSHA != testBranchHeadSHA {
+		t.Errorf("adopted head = %q, want %s", ref.HeadSHA, testBranchHeadSHA)
+	}
+	if got := len(f.requests(http.MethodGet, "/api/v1/repos/o/n/git/refs/heads/feature-x")); got != 1 {
+		t.Errorf("adopt GET hits = %d, want 1", got)
+	}
+}
+
+// TestGiteaEnsureBranchAdoptsConcurrentWinner: a racing creator lands the
+// ref between our read and our push — the rejected push adopts instead of
+// failing (the sync is idempotent, a redelivered job never errors).
+func TestGiteaEnsureBranchAdoptsConcurrentWinner(t *testing.T) {
+	f := &fakeGitea{routes: []giteaRoute{
+		servingRef("feature-x", "", refsBody("feature-x", testForkHeadSHA)),
+	}}
+	var calls []gitCall
+	a := newGiteaAdapter(t, f, gitprovider.WithGitRunner(scriptedGit(t,
+		recordGit(&calls), recordGit(&calls), func(c gitCall) (string, error) {
+			calls = append(calls, c)
+			return "! [rejected]        " + testBranchHeadSHA + " -> feature-x (non-fast-forward)\n" +
+				"error: failed to push some refs", errors.New("git: exit status 1")
+		})))
+
+	ref, err := a.EnsureBranch(testCtx(t), gitprovider.BranchSpec{
+		Repository: testRepo(), Name: "feature-x", ForkRef: testBranchHeadSHA,
+	})
+	if err != nil {
+		t.Fatalf("EnsureBranch: %v", err)
+	}
+	if ref.HeadSHA != testForkHeadSHA {
+		t.Errorf("adopted head = %q, want the raced ref's %s", ref.HeadSHA, testForkHeadSHA)
+	}
+}
+
+// TestGiteaEnsureBranchUnknownForkSHA: the fork sha the canonical store
+// recorded does not exist provider-side — the fetch fails with the
+// provider's "not our ref", mapped onto ErrNotFound.
+func TestGiteaEnsureBranchUnknownForkSHA(t *testing.T) {
+	f := &fakeGitea{routes: []giteaRoute{
+		servingRef("feature-x", ""),
+	}}
+	a := newGiteaAdapter(t, f, gitprovider.WithGitRunner(scriptedGit(t,
+		okGit,
+		failGit("fatal: remote error: upload-pack: not our ref 1111111111111111111111111111111111111111"),
+	)))
+
+	_, err := a.EnsureBranch(testCtx(t), gitprovider.BranchSpec{
+		Repository: testRepo(), Name: "feature-x", ForkRef: "1111111111111111111111111111111111111111",
+	})
+	if !errors.Is(err, gitprovider.ErrNotFound) {
+		t.Errorf("EnsureBranch error = %v, want ErrNotFound", err)
+	}
+}
+
+// TestGiteaGetBranchNotFound: a missing ref is ErrNotFound.
+func TestGiteaGetBranchNotFound(t *testing.T) {
+	f := &fakeGitea{routes: []giteaRoute{
+		servingRef("feature-x", ""),
+	}}
+	a := newGiteaAdapter(t, f)
+
+	_, err := a.GetBranch(testCtx(t), testRepo(), "feature-x")
+	if !errors.Is(err, gitprovider.ErrNotFound) {
+		t.Errorf("GetBranch error = %v, want ErrNotFound", err)
+	}
+}
+
+// TestGiteaGetBranchReadsRefsAPI: the ref is read through the refs API
+// (the /branches API cannot answer for pushed refs on the deployed
+// instance), and its tip sha is the object sha.
+func TestGiteaGetBranchReadsRefsAPI(t *testing.T) {
+	f := &fakeGitea{routes: []giteaRoute{
+		servingRef("feature-x", refsBody("feature-x", testBranchHeadSHA)),
+	}}
+	a := newGiteaAdapter(t, f)
+
+	ref, err := a.GetBranch(testCtx(t), testRepo(), "feature-x")
+	if err != nil {
+		t.Fatalf("GetBranch: %v", err)
+	}
+	if ref.Name != "feature-x" || ref.HeadSHA != testBranchHeadSHA {
+		t.Errorf("ref = %+v, want feature-x @ %s", ref, testBranchHeadSHA)
+	}
+}
+
+// TestGiteaDeleteBranch: the ref is deleted by a push with an empty source
+// — and the protocol itself is idempotent (deleting a missing ref
+// succeeds), so the close strategy "the ref must not exist" holds without
+// any existence check.
+func TestGiteaDeleteBranch(t *testing.T) {
+	var calls []gitCall
+	a := newGiteaAdapter(t, &fakeGitea{}, gitprovider.WithGitRunner(scriptedGit(t,
+		recordGit(&calls), recordGit(&calls))))
+
+	if err := a.DeleteBranch(testCtx(t), testRepo(), "feature-x"); err != nil {
+		t.Fatalf("DeleteBranch: %v", err)
+	}
+	if got := len(calls); got != 2 {
+		t.Fatalf("git calls = %d, want 2 (init, push)", got)
+	}
+	if got := calls[1].args[2:]; len(got) != 3 || got[0] != "push" ||
+		!strings.HasSuffix(got[1], "/o/n.git") || got[2] != ":refs/heads/feature-x" {
+		t.Errorf("push call = %v, want [push <url>/o/n.git :refs/heads/feature-x]", got)
+	}
+}
+
+// TestGiteaDeleteBranchErrorMapping: the git protocol's failure surface
+// maps onto the port's sentinels — a protected-ref refusal is ErrConflict
+// (the request cannot be satisfied as specified), a credential refusal is
+// ErrUnauthorized.
+func TestGiteaDeleteBranchErrorMapping(t *testing.T) {
+	f := &fakeGitea{}
+	a := newGiteaAdapter(t, f, gitprovider.WithGitRunner(scriptedGit(t,
+		okGit,
+		failGit("remote: protected branch hook declined to update refs/heads/feature-x"),
+	)))
+	err := a.DeleteBranch(testCtx(t), testRepo(), "feature-x")
+	if !errors.Is(err, gitprovider.ErrConflict) {
+		t.Errorf("DeleteBranch (protected) error = %v, want ErrConflict", err)
+	}
+
+	a2 := newGiteaAdapter(t, f, gitprovider.WithGitRunner(scriptedGit(t,
+		okGit,
+		failGit("fatal: could not read Username for 'http://127.0.0.1:3000': terminal prompts disabled"),
+	)))
+	err = a2.DeleteBranch(testCtx(t), testRepo(), "feature-x")
+	if !errors.Is(err, gitprovider.ErrUnauthorized) {
+		t.Errorf("DeleteBranch (credentials) error = %v, want ErrUnauthorized", err)
 	}
 }
