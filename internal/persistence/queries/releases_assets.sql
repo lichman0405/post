@@ -36,3 +36,35 @@ WHERE asset_id = @asset_id AND version = @version;
 INSERT INTO knowledge_publications (object_version_id, public_version, rights_json, published_by)
 VALUES (@object_version_id, @public_version, @rights_json, @published_by)
 RETURNING *;
+
+-- name: ListReleaseReviews :many
+-- The review/approval record of one release (T0605): every review row of
+-- the research PRs targeting main whose proposed state is the released
+-- state or one of its ancestors — the reviews that accepted this lineage
+-- into main (docs/09 §4: frozen main updates only through PR merge, so a
+-- proposed state inside main's lineage got there through its PR). The
+-- target filter names main explicitly: a duplicate proposal of the same
+-- state against another branch is not part of main's acceptance record.
+-- Ordered by PR number then review time then row id (a total order — the
+-- release manifest's canonical sorting is the releases package's rule,
+-- not the store's).
+WITH RECURSIVE lineage(id) AS (
+  SELECT project_states.id FROM project_states WHERE project_states.id = @state_id
+  UNION
+  SELECT ps.parent_state_id FROM project_states ps
+  JOIN lineage l ON ps.id = l.id
+  WHERE ps.parent_state_id IS NOT NULL
+)
+SELECT pr.number AS pull_request_number,
+       pr.proposed_state_id,
+       r.id,
+       r.reviewer_id,
+       r.review_kind,
+       r.decision,
+       r.body,
+       r.created_at
+FROM reviews r
+JOIN pull_requests pr ON pr.id = r.pull_request_id
+WHERE pr.target_branch_id = @main_branch_id
+  AND pr.proposed_state_id IN (SELECT id FROM lineage)
+ORDER BY pr.number, r.created_at, r.id;
