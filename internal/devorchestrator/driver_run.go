@@ -310,6 +310,9 @@ func (o *DriveOpts) stepVerification(id string, st *DriverStatus) (bool, error) 
 	}
 	if rec == nil {
 		if out, code := o.run("review", "spawn", id); code != 0 {
+			if o.spawnRefusedForCapacity(id, "the review", out) {
+				return false, nil // a wait, like the reviewer still working above
+			}
 			return true, o.decide(id, "review-spawn", out)
 		}
 		o.logf("%s review dispatched", id)
@@ -335,6 +338,9 @@ func (o *DriveOpts) stepVerification(id string, st *DriverStatus) (bool, error) 
 	} else if stale {
 		o.logf("%s: %s — dispatching a fresh review", id, why)
 		if out, code := o.run("review", "spawn", id); code != 0 {
+			if o.spawnRefusedForCapacity(id, "the review", out) {
+				return false, nil // a wait, like the reviewer still working above
+			}
 			return true, o.decide(id, "review-spawn", out)
 		}
 		return true, nil
@@ -422,6 +428,9 @@ func (o *DriveOpts) dispatch(st *DriverStatus, open []Decision) bool {
 		args = append(args, "--timeout", o.WorkerTimeout.String())
 	}
 	if out, code := o.run(args...); code != 0 {
+		if o.spawnRefusedForCapacity(next, "the Worker", out) {
+			return false // a wait, not an action: ask again next tick
+		}
 		_ = o.decide(next, "spawn", out)
 		return true
 	}
@@ -443,6 +452,23 @@ func (o *DriveOpts) decide(task, action, reason string) error {
 	}
 	o.logf("DECISION NEEDED: %s %s — %s", task, action, firstLine(reason))
 	return RecordDecision(o.RepoRoot, Decision{Task: task, Action: action, Reason: reason, RunID: runID})
+}
+
+// spawnRefusedForCapacity reports whether a spawn refusal is the transient
+// capacity one, and logs the wait when it is.
+//
+// The three spawn call sites — dispatch, and both review-spawn paths in
+// stepVerification — all fail through the same gate, so they must all answer
+// it the same way. parallelismLimitRefused (worker_spawn.go) decides what the
+// refusal MEANS; this decides what the driver DOES about it: hand the
+// Supervisor a judgement, or ask again next tick. Splitting it any other way
+// is how the two halves drift, which is #139's whole lesson.
+func (o *DriveOpts) spawnRefusedForCapacity(task, what, refusal string) bool {
+	if !parallelismLimitRefused(refusal) {
+		return false
+	}
+	o.logf("%s: no free Worker slot for %s — waiting for one to finish (%s)", task, what, firstLine(refusal))
+	return true
 }
 
 func firstLine(s string) string {

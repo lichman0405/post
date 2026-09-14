@@ -338,3 +338,124 @@ func TestEveryDerivedArtifactHasARegenerator(t *testing.T) {
 		}
 	}
 }
+
+// A full Worker pool is a WAIT, not a judgement: a running Worker exits and
+// frees a slot on its own, and there is nothing in that for the Supervisor to
+// decide. Recorded as a decision it does not end the wait — the driver skips
+// any task that has an open decision, and the decision carries the run id of a
+// task that was never spawned (empty), which is exactly the kind the
+// reconciler never clears. A momentary condition would therefore strand the
+// task forever and silently, which is the one outcome §8.2 forbids. That was
+// #163, and it stranded a task twice in one day.
+//
+// This is L1-20260913-17's rule — "a condition only the driver could fix is
+// not a decision" — applied to the capacity gate, with the same division of
+// labour as ciStillRunning (#139): one predicate decides what a refusal MEANS,
+// and the call site decides what the driver DOES about it.
+//
+// All three spawn call sites fail through the same gate, so all three must
+// answer the same way. A fix that only taught `dispatch` would leave both
+// review-spawn paths able to strand a task the moment two Workers finish near
+// enough together for one's review to find the pool full.
+//
+// The stub is rddev itself, so the call sites run in their real order and only
+// the spawn fails.
+func TestACapacityRefusalIsAWaitNotADecision(t *testing.T) {
+	paths := []struct {
+		name    string
+		failing string
+		status  string
+		step    func(*DriveOpts) (bool, error)
+	}{
+		{
+			"a Worker spawn",
+			"worker spawn",
+			"ready",
+			func(o *DriveOpts) (bool, error) { return o.dispatch(&DriverStatus{}, nil), nil },
+		},
+		{
+			"a review spawn",
+			"review spawn",
+			"verification",
+			func(o *DriveOpts) (bool, error) { return o.stepVerification("T0001", &DriverStatus{}) },
+		},
+	}
+	refusals := []struct {
+		name     string
+		text     string
+		decision bool
+	}{
+		{
+			"a full pool",
+			parallelismLimit + ": 3 Worker(s) running, limit 3 (default 3, hard max 4) — retry after one finishes (rddev worker list)",
+			false,
+		},
+		{
+			"any other refusal",
+			"allowed_scope of T0001 does not validate against the real tree: infra/migrations/** matches nothing",
+			true,
+		},
+	}
+	for _, p := range paths {
+		for _, r := range refusals {
+			t.Run(p.name+" refused for "+r.name, func(t *testing.T) {
+				root := t.TempDir()
+				dagPath := writeDAG(t, root)
+				statePath := filepath.Join(root, "task_status.json")
+				state := `{"version":2,"tasks":{"T0001":{"status":"` + p.status + `"}}}`
+				if err := os.WriteFile(statePath, []byte(state), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				bin := writeRefusingRddev(t, p.failing, r.text)
+
+				o := &DriveOpts{RepoRoot: root, DagPath: dagPath, StatePath: statePath, Binary: bin}
+				acted, err := p.step(o)
+				if err != nil {
+					t.Fatal(err)
+				}
+				ds, err := ReadDecisions(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if r.decision {
+					if len(ds) != 1 {
+						t.Fatalf("a real refusal must become exactly one decision for the Supervisor; got %d", len(ds))
+					}
+					if ds[0].Task != "T0001" {
+						t.Errorf("the decision names %s, not T0001", ds[0].Task)
+					}
+					if !strings.Contains(ds[0].Reason, "allowed_scope") {
+						t.Errorf("the decision does not carry the refusal:\n  %s", ds[0].Reason)
+					}
+					return
+				}
+				if acted {
+					t.Error("a full Worker pool was treated as an action: the driver records a decision and stops retrying, so the task waits on the Supervisor for a slot that frees itself")
+				}
+				if len(ds) != 0 {
+					t.Fatalf("a full Worker pool produced %d decision(s); it is a wait to retry next tick, not a judgement:\n  %s", len(ds), ds[0].Reason)
+				}
+			})
+		}
+	}
+}
+
+// writeRefusingRddev writes a fake rddev that answers every call with success
+// except the named two-word subcommand, which fails with the refusal kept
+// beside the stub, so the fixture is not also a shell-quoting exercise.
+func writeRefusingRddev(t *testing.T, failing, refusal string) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "rddev")
+	script := "#!/bin/sh\n" +
+		"case \"$1 $2\" in\n" +
+		"  \"task next\") echo T0001;;\n" +
+		"  \"" + failing + "\") cat \"$0.refusal\" >&2; exit 1;;\n" +
+		"esac\nexit 0\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin+".refusal", []byte(refusal+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return bin
+}

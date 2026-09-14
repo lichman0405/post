@@ -649,6 +649,35 @@ func refsSnapshot(repoRoot string) ([]string, error) {
 	return kept, nil
 }
 
+// parallelismLimit is the text gateParallelism refuses with when the pool is
+// full. `rddev` runs as a CHILD of its caller (o.run execs the binary), so the
+// driver sees only a combined output string and classifies by this text. The
+// literal lives here, beside the refusal that produces it, for the same reason
+// the check sentinels live in git_control.go: two literals in two files is how
+// they drifted, and that drift was #139.
+const parallelismLimit = "parallelism limit reached"
+
+// parallelismLimitRefused reports whether a spawn refusal is the transient
+// capacity one rather than a failure to judge.
+//
+// It is a WAIT and not a decision because waiting ends it: a running Worker
+// exits and frees a slot on its own, with nothing for the Supervisor to
+// decide. Recorded as a decision it does not end the wait — driver_run.go
+// skips any task with an open decision ("retrying it every tick would
+// re-record the same decision forever"), and a decision with no run id is
+// never cleared. A momentary condition would therefore leave the task stuck
+// forever, silently, which is the one outcome §8.2 forbids.
+//
+// This is L1-20260913-17's rule ("a condition only the driver could fix is not
+// a decision") applied to the capacity gate, and the same shape as
+// ciStillRunning (#139): an absence is only a wait when waiting can end it.
+//
+// Three call sites produce a spawn refusal — dispatch and both review-spawn
+// paths in stepVerification — and all three go through the same gate.
+func parallelismLimitRefused(refusal string) bool {
+	return strings.Contains(refusal, parallelismLimit)
+}
+
 // gateParallelism counts live Workers from disk under the workers-dir lock.
 func gateParallelism(repoRoot string, limit int) error {
 	if err := os.MkdirAll(WorkersDir(repoRoot), 0o755); err != nil {
@@ -668,7 +697,7 @@ func gateParallelism(repoRoot string, limit int) error {
 		return err
 	}
 	if len(live) >= limit {
-		return fmt.Errorf("parallelism limit reached: %d Worker(s) running, limit %d (default 3, hard max 4) — retry after one finishes (rddev worker list)", len(live), limit)
+		return fmt.Errorf("%s: %d Worker(s) running, limit %d (default 3, hard max 4) — retry after one finishes (rddev worker list)", parallelismLimit, len(live), limit)
 	}
 	return nil
 }

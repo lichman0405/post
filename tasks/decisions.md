@@ -5826,3 +5826,47 @@ _ = i
 它把"按会话回收"的调用方从**一个**变成**两个** ✓：Worker 自己退出 ✓、有东西主动作废一次在飞的尝试 ✓。
 
 **现状** ✓：T0305 已于 `12:21:40` 在新基线上重做 ✓（pid 4009475 ✓），驱动已接管 ✓（`T0305 still working` ✓）。
+
+---
+
+## L1-20260914-48 — 容量拒绝是**等待**，不是决策：把 #163 修在 rddev 里 ✓
+
+**这是一个我自己造的缺陷在一天内咬了两次** ✓：
+① `12:11` 之前 T0209 的 spawn 被容量闸门拒 ✓ → 记成决策 ✓ → 队首带决策让整条派工链停摆 ✓（我手工清 ✓）；
+② `12:17:28` T0305 的 rebaseline 后半截被同一个闸门拒 ✓ → 任务落进 `rejected` ✓ → **驱动根本看不到它** ✓（我手工补 ✓）。
+
+**机制（两处合起来焊死，已核实）** ✓：
+`driver_run.go:406-410` ✓ 跳过任何有未决决策的任务（"retrying it every tick would re-record the same decision forever" ✓）；
+`driver.go:272-274` ✓ 对 `RunID == ""` 的决策**永不清理** ✓ —— 而"从来没被 spawn 过"的任务，其 `RunID` 正是空的 ✓。
+⇒ **记一次 → 永远跳过 → 永远不清** ✓，而触发条件（别的 Worker 在跑 ✓）是**纯瞬时的** ✓。
+
+**关键：这条规则项目里已经学过一遍** ✓。
+`driver_run.go:321-332` ✓（我读到的原话）："the decision it used to raise was the driver handing the Supervisor
+a condition only the driver could fix. **Ask again instead**" ✓（`L1-20260913-17` ✓）。
+`ciStillRunning`（`git_control.go:352-359` ✓）是同一个形状的另一个先例 ✓（#139 ✓）。
+⇒ **#163 不是新想法** ✓，是**把同一条规则用到容量闸门** ✓。
+
+**修法（照项目自己的分工）** ✓：
+- **谁产生拒绝，谁定义文本** ✓：`worker_spawn.go` 新增 `const parallelismLimit` ✓，`gateParallelism` 用它拼消息 ✓
+  —— 与 `checksNotYet` / `noChecksReported` 同一惯例 ✓（#139 的教训就是"两个字面量两处漂移" ✓）；
+- **分类器紧挨着拒绝** ✓：`parallelismLimitRefused(refusal string) bool` ✓；
+- **调用点决定"驱动该做什么"** ✓：`DriveOpts.spawnRefusedForCapacity` ✓，
+  三个 spawn 调用点**全部**改（`dispatch` ✓、`stepVerification` 的两处 `review-spawn` ✓）
+  —— 只修 `dispatch` 是**不够的** ✓：两个任务前后脚结束时，被拒的正是 `review-spawn` ✓，而它同样会卡死 ✓；
+- 返回 `false`（"等待"）而非 `true` ✓，与同函数里既有的 `rec.ExitStatus == nil → return false, nil` ✓
+  以及 `ciStillRunning` 的 `return false, nil` **同形** ✓。
+
+**为什么不是"放宽 Gate"** ✓：这条闸门拒绝的是**瞬时资源状态** ✓，不是产物质量 ✓；
+任务仍然**必须**等到真的有空位才能真正 spawn ✓ —— 只是不再把这个等待记成"要人判断" ✓。
+**没有任何断言被放松** ✓。
+
+**测试** ✓：`TestACapacityRefusalIsAWaitNotADecision` ✓（2 个调用点 × 2 类拒绝 = 4 个子测试 ✓），
+桩就是 rddev 本身 ✓（照 `TestARedMergeRefusalBecomesADecisionAndAWaitDoesNot` 的写法 ✓）。
+**做了变异检验** ✓：把分类器强制改成"永远不认为是容量拒绝" ✓ ⇒ 两个容量子测试**如期变红** ✓
+（这正是先例测试注释里警告过的"改了等于没改、包内测试全绿" ✓）。
+`go build ./...` ✓、`go vet` ✓、`go test ./internal/devorchestrator/` 11.5s ✓、`go test ./cmd/rddev/` 92s ✓ 全过 ✓。
+
+**尚未生效** ✓ —— 这一点必须记住 ✓：本修复有**两半** ✓，
+分类器在**子进程**（`bin/rddev` ✓）里，而"记不记决策"的判断在**驱动进程的内存**里 ✓
+（`o.run` 是 `exec.Command(o.binary(), ...)` ✓，驱动自己那份代码是启动时载入的 ✓）。
+⇒ **重建二进制不够，必须重启驱动** ✓。
