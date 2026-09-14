@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -86,6 +87,49 @@ func (f *stateFixture) writeHypothesis(t *testing.T, objectID, payload string, t
 			LifecycleState: "active",
 			Payload:        []byte(payload),
 			IntegrityHash:  hash,
+			CreatedBy:      parseUUIDOrDie(f.alice.ID),
+		})
+		if err != nil {
+			return err
+		}
+		if record != nil {
+			*record = pgUUIDTextTest(version.ID)
+		}
+		return nil
+	}
+}
+
+// writeQuestion is the research_question sibling of writeHypothesis: one
+// question object + version 1 with a FIXED object id inside the commit
+// transaction. migration 00040 refuses a hypothesis whose question_id
+// does not name an existing research_question in the same project, so
+// tests that commit hypotheses with a question_id seed their question
+// through this writer first.
+func (f *stateFixture) writeQuestion(t *testing.T, objectID, payload string, record *string) states.WriteFunc {
+	t.Helper()
+	return func(ctx context.Context, tx states.Transaction, stateID string) error {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO scientific_objects (id, project_id, object_type, created_by)
+			VALUES ($1, $2, 'research_question', $3)`,
+			objectID, f.project.ID, f.alice.ID); err != nil {
+			return err
+		}
+		// The validator hashes the stored (jsonb-canonical) payload bytes;
+		// canonicalize through the database so the hash matches exactly.
+		var canonical string
+		if err := tx.QueryRow(ctx, `SELECT $1::jsonb::text`, payload).Scan(&canonical); err != nil {
+			return err
+		}
+		version, err := sqlc.New(tx).CreateScientificObjectVersion(ctx, sqlc.CreateScientificObjectVersionParams{
+			ObjectID:       parseUUIDOrDie(objectID),
+			VersionNo:      1,
+			StateID:        parseUUIDOrDie(stateID),
+			SchemaID:       "https://open-rd.example/schemas/research_question.schema.json",
+			SchemaVersion:  "1",
+			Title:          "Research Question " + objectID[:8],
+			LifecycleState: "active",
+			Payload:        []byte(payload),
+			IntegrityHash:  integrityHashOf(canonical),
 			CreatedBy:      parseUUIDOrDie(f.alice.ID),
 		})
 		if err != nil {
@@ -252,6 +296,38 @@ func TestServerRevalidatesWhatTheCommandValidated(t *testing.T) {
 	f := newStateFixture(t, ctx)
 	validate := newValidationService(t, f.pool)
 
+	// Seed a COMPLETE research question on a sibling branch of the same
+	// project: migration 00040's reference guard refuses a hypothesis
+	// whose question_id does not name an existing research_question in
+	// the same project at commit time. Keeping the question off f.branch
+	// means every gate snapshot below stays exactly as it was — the
+	// question is not a member of this branch's chain (state_linkage /
+	// commit_linkage see only f.branch's states plus its head).
+	var seedBranch string
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO branches (project_id, name, visibility, git_ref, base_state_id, created_by)
+		VALUES ($1, 'seed-questions', 'private', 'refs/heads/seed-questions', $2, $3) RETURNING id`,
+		f.project.ID, f.genesis.ID, f.alice.ID).Scan(&seedBranch); err != nil {
+		t.Fatalf("seed branch: %v", err)
+	}
+	questionID := "55555555-5555-4555-8555-555555555555"
+	opsQ := []domain.StateOperation{
+		{Kind: domain.OperationObjectVersionCreated, EntityID: questionID, VersionNo: 1},
+	}
+	if _, _, err := f.service.Commit(ctx, states.CommitParams{
+		ProjectID:       f.project.ID,
+		BranchID:        seedBranch,
+		ActorID:         f.alice.ID,
+		Via:             domain.ViaWeb,
+		Message:         "seed the research question the hypotheses will name",
+		Operations:      opsQ,
+		BaseStateID:     &f.genesis.ID,
+		ManifestVersion: "v1",
+		Gate:            rsgvalidation.GateDraft,
+	}, f.writeQuestion(t, questionID, `{"statement":"Which MOF maximizes CO2 uptake at 298 K?","purpose":"guide screening","question_state":"open"}`, nil)); err != nil {
+		t.Fatalf("seed question commit: %v", err)
+	}
+
 	// Phase 0: the caller's own precheck over the branch as it stands — the
 	// genesis root, no members — passes. A passing precheck must never be
 	// accepted as the server's verdict: the commit below writes rows the
@@ -265,7 +341,7 @@ func TestServerRevalidatesWhatTheCommandValidated(t *testing.T) {
 	}
 
 	incomplete := `{"statement":"probe"}`
-	complete := `{"statement":"probe","question_id":"q-1","hypothesis_type":"mechanistic","scope":{"detail":"probe"}}`
+	complete := fmt.Sprintf(`{"statement":"probe","question_id":"%s","hypothesis_type":"mechanistic","scope":{"detail":"probe"}}`, questionID)
 	object1 := "22222222-2222-4222-8222-222222222222"
 	ops1 := []domain.StateOperation{
 		{Kind: domain.OperationObjectVersionCreated, EntityID: object1, VersionNo: 1},

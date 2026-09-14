@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -177,7 +178,11 @@ func TestEveryObjectTypeCreatesAndVersions(t *testing.T) {
 		mergeKeys  []string
 	}{
 		{"research_question", `{"statement":"What MOFs maximize CO2 uptake at 298 K?"}`, `{"objective":"screen MOFs"}`, []string{"statement", "objective"}},
-		{"hypothesis", `{"statement":"MOF-5 outperforms ZIF-8 at low pressure","question_id":"44444444-4444-4444-8444-444444444444"}`, `{"confidence":"tentative"}`, []string{"statement", "question_id", "confidence"}},
+		// The hypothesis question_id must name a REAL research question:
+		// migration 00040's reference guard refuses a dangling reference
+		// at commit. The question this test created above supplies the id
+		// (the %s placeholder is filled in the loop below).
+		{"hypothesis", `{"statement":"MOF-5 outperforms ZIF-8 at low pressure","question_id":"%s"}`, `{"confidence":"tentative"}`, []string{"statement", "question_id", "confidence"}},
 		{"material", `{"name":"MOF-5"}`, `{"formula":"Zn4O(BDC)3"}`, []string{"name", "formula"}},
 		{"sample", `{"name":"MOF-5 sample A"}`, `{"batch":"b1"}`, []string{"name", "batch"}},
 		{"experiment", `{"name":"N2 isotherm run 1"}`, `{"temperature_k":298}`, []string{"name", "temperature_k"}},
@@ -194,14 +199,25 @@ func TestEveryObjectTypeCreatesAndVersions(t *testing.T) {
 	}
 
 	compoundClaimHintSeen := false
+	questionID := ""
 	for _, tt := range types {
 		t.Run(tt.objectType, func(t *testing.T) {
+			payload := tt.payload
+			if tt.objectType == "hypothesis" {
+				if questionID == "" {
+					t.Fatal("hypothesis runs before the research question that must supply its question_id")
+				}
+				payload = fmt.Sprintf(tt.payload, questionID)
+			}
 			res, err := f.svc.CreateObject(ctx, f.alice, f.project.ID, f.branch, rsg.CreateObjectInput{
 				ObjectType: tt.objectType,
-				Payload:    json.RawMessage(tt.payload),
+				Payload:    json.RawMessage(payload),
 			})
 			if err != nil {
 				t.Fatalf("CreateObject: %v", err)
+			}
+			if tt.objectType == "research_question" {
+				questionID = res.Object.ID
 			}
 			if res.Object.ObjectType != tt.objectType || res.Object.ProjectID != f.project.ID {
 				t.Errorf("object = %+v", res.Object)

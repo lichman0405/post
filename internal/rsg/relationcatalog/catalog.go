@@ -1,6 +1,10 @@
 package relationcatalog
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
 
 // Category groups relation types by their scientific role (docs/44).
 type Category string
@@ -39,6 +43,19 @@ type Entry struct {
 	// impact analysis: a change upstream must trigger re-analysis
 	// downstream (docs/19 §3).
 	DependencyInference bool
+	// SourceTypes constrains which object types may sit at the source
+	// endpoint of this edge; TargetTypes constrains the target endpoint.
+	// A nil slice means "unconstrained". Only the end the edge's NAME
+	// itself states may be declared — "addresses the target research
+	// question" pins the target to research_question but says nothing
+	// about who may address it, so the source stays unconstrained
+	// (findings address questions too). Most edges declare neither end:
+	// they are typed by convention and by the schemas they pin. The two
+	// knowledge edges declare their name-pinned targets, and migration
+	// 00040 mirrors these declarations in
+	// knowledge_relation_endpoint_types.
+	SourceTypes []string
+	TargetTypes []string
 }
 
 // catalog is the canonical core set (docs/44). related_to comes from
@@ -60,7 +77,7 @@ var catalog = []Entry{
 	{Type: "uses", Category: CategoryProvenanceStructure, Semantics: "uses the target object version as an input or method", ProvenanceInference: true},
 
 	// Knowledge (docs/44).
-	{Type: "addresses_question", Category: CategoryKnowledge, Semantics: "addresses the target research question"},
+	{Type: "addresses_question", Category: CategoryKnowledge, Semantics: "addresses the target research question", TargetTypes: []string{"research_question"}},
 	{Type: "challenges", Category: CategoryKnowledge, Semantics: "challenges the target claim"},
 	{Type: "competes_with", Category: CategoryKnowledge, Semantics: "competes with the target claim or result"},
 	{Type: "consistent_with", Category: CategoryKnowledge, Semantics: "is consistent with the target claim"},
@@ -71,7 +88,7 @@ var catalog = []Entry{
 	{Type: "refines", Category: CategoryKnowledge, Semantics: "refines the target claim or model"},
 	{Type: "reproduces", Category: CategoryKnowledge, Semantics: "reproduces the target result"},
 	{Type: "supports", Category: CategoryKnowledge, Semantics: "supports the target claim"},
-	{Type: "tests_hypothesis", Category: CategoryKnowledge, Semantics: "tests the target hypothesis"},
+	{Type: "tests_hypothesis", Category: CategoryKnowledge, Semantics: "tests the target hypothesis", TargetTypes: []string{"hypothesis"}},
 	{Type: "validates", Category: CategoryKnowledge, Semantics: "validates the target claim or result"},
 
 	// Lineage/network (docs/44).
@@ -109,6 +126,38 @@ func Lookup(typ string) (Entry, bool) {
 func Valid(typ string) bool {
 	_, ok := lookup[typ]
 	return ok
+}
+
+// EndpointsValid reports whether a source endpoint of type sourceType and
+// a target endpoint of type targetType satisfy the endpoint-type
+// declaration of the relation type typ. Only the end an edge's NAME
+// states may be declared (see Entry.SourceTypes/TargetTypes); a nil
+// declaration accepts every type for that end, and an unknown relation
+// type is not valid by definition, so it answers false with an
+// explanation. The database guard (migration 00040,
+// knowledge_relation_endpoint_types) enforces the same rule for the two
+// knowledge edges; this is the Go-side declaration the guard mirrors.
+func EndpointsValid(typ, sourceType, targetType string) (bool, string) {
+	e, ok := lookup[typ]
+	if !ok {
+		return false, fmt.Sprintf("%s is not a canonical relation type", typ)
+	}
+	if len(e.SourceTypes) > 0 && !contains(e.SourceTypes, sourceType) {
+		return false, fmt.Sprintf("%s: source object type %s is not allowed (allowed: %s)", typ, sourceType, strings.Join(e.SourceTypes, ", "))
+	}
+	if len(e.TargetTypes) > 0 && !contains(e.TargetTypes, targetType) {
+		return false, fmt.Sprintf("%s: target object type %s is not allowed (allowed: %s)", typ, targetType, strings.Join(e.TargetTypes, ", "))
+	}
+	return true, ""
+}
+
+func contains(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // Types returns the whole catalog sorted by type name.
