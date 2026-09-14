@@ -1491,13 +1491,22 @@
       ]
     },
     "T0209": {
-      "status": "ready",
+      "status": "running",
+      "started_at": "2026-09-14T04:11:58Z",
+      "worker_run_id": "run-826d3144fbb6b511",
       "history": [
         {
           "from": "todo",
           "to": "ready",
           "at": "2026-09-14T03:12:00Z",
           "run_id": "run-608ac7145d914428"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T04:11:58Z",
+          "run_id": "run-826d3144fbb6b511",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -2315,9 +2324,11 @@
       "merged_at": null
     },
     "T0603": {
-      "status": "verification",
+      "status": "merged",
       "started_at": "2026-09-14T03:42:50Z",
       "worker_run_id": "run-532afa03be14f9d0",
+      "accepted_by_supervisor_at": "2026-09-14T04:09:38Z",
+      "merged_at": "2026-09-14T04:12:31Z",
       "rejection_reason": "# Part 1 — your baseline advanced. This is NOT a defect, and not your fault.\n\nYour task branch has been merged with the current `main` and your change carried over; the derived artifacts (`specs/database/postgres.sql`, `specs/SPEC_VERSION.json`) were **regenerated on the merged tree**, not merged as text.\n\nWhy: `main` moved while you were in review — another task merged, and it touched `cmd/api/main.go` (route wiring) as you did. The acceptance gate builds \"current main + your full change\", and your change no longer composed against it (it failed applying at `cmd/api/main.go:46`). **The gate was working correctly.** Nothing about your implementation was wrong.\n\n## Your rework was accepted, and the major is confirmed fixed\n\nThe fresh independent review of your rework came back **`approve`, with no blocking finding and no major**. The finding that sent you back — `writePolicyError`'s default branch answering with `err.Error()` and never logging — is gone, and the reviewer verified the new shape against the sibling surfaces rather than taking it on trust. The two consistency fixes (stored version is the validated one; the `policy_test.go` header now describes what is implemented) also verified.\n\nSo there is **nothing for you to fix**. The remaining findings are all minor or nit.\n\n## What I need from you on this baseline\n\n1. Re-run your required tests and `make test-integration` on the merged tree, plus `make check-schema-snapshot`, `python3 scripts/spec_version.py --check`, and `tests/integration/check-sqlc-drift.sh`.\n2. Pay attention to **exactly one** place: `cmd/api/main.go`. The merge combined your route wiring with the other task's into the same file. That is the only place this merge could have produced something neither of you wrote. Confirm the policy routes are still registered and reachable as before — if you have a way to assert it cheaply, do.\n3. **Change nothing else.** Do not refactor, do not chase the items below, do not \"improve\" anything while you are in there. Your diff identity is recomputed against the new base and a fresh review will follow; gratuitous edits only enlarge what that review has to read.\n\nIf everything holds, say so plainly in RESULT.json and re-submit. If the merge actually broke something, say exactly what and fix only that.\n\n# Part 2 — findings I am deliberately NOT asking you to fix\n\nListed so you do not spend effort on them and do not wonder whether you missed an instruction. These are recorded for me, not assigned to you.\n\n- `internal/application/policy/service.go:281` — a literal `{\"policy\": null}` body passes the \"policy document is required\" check (which only rejects `len(doc)==0`), `PolicyFromJSON` unmarshals `null` into a nil rule map without error, and the result is silently stored as an empty policy. Reviewers have rated this nit-to-minor across rounds; it changes no stored semantics that matter (an empty project policy merges to the org policy, which is what \"no project policy\" gives too). I am batching it with the policy-surface follow-ups rather than spending a review cycle on it now.\n- `cmd/api/policyhttp/policy_handlers.go:84` — `decodeBody` decodes only the first JSON value and ignores trailing content, so `{\"version\":\"v1\",\"policy\":{}} garbage` is accepted. This is the **codebase-wide** convention (`orgshttp` and `projectshttp` are byte-identical in shape), not a regression you introduced. Changing it belongs in a repo-wide decision, not here.\n- `internal/application/policy/service.go:89` — `SetProjectPolicy` does not check the owning organization's deactivated state, making policy the only governance surface that does not. Whether a deactivated org's project owner may still publish policy versions is a **permission/semantics question the specs do not answer** (`docs/12 §5` says nothing about deactivated orgs). I have taken it to the owner as a decision rather than having anyone invent a rule mid-flight. Do not add a check.\n- `internal/application/policy/service.go:166` — `EffectivePolicy` returns the organization's policy document to any project reader, including one who is not an organization member. Whether that is a disclosure depends on a visibility stance the specs do not state; same treatment as the line above. Do not change the gate.\n- `internal/application/policy/service.go:395` (nit) — `policyAudit` hardcodes `ViaSession` for every write. Correct for every caller that exists today.\n- `internal/domain/policy.go:137` (nit) — `MarshalJSON` sorts rule keys but preserves the raw stored value bytes, so `{\"a\": 1}` and `{\"a\":1}` are not the same serialization.\n\n# Rules\n\nDo not weaken, skip, or delete any test. Do not hand-edit `specs/database/postgres.sql` or `specs/SPEC_VERSION.json` — regenerate them. Do not rename the migration or change its number (`00033` is yours and it must stay below the tasks that follow you). Do not create or move any git ref.\n",
       "history": [
         {
@@ -2458,6 +2469,19 @@
           "at": "2026-09-14T03:47:22Z",
           "run_id": "run-82ed83eddfb947c5",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T04:09:38Z",
+          "run_id": "run-9531c2d983dce716"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T04:12:31Z",
+          "run_id": "run-eb13e3d204cc6b02",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
