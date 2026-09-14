@@ -175,6 +175,26 @@ type BranchRef struct {
 	HeadSHA string
 }
 
+// ChangeKind is the diff side of one changed file in a push.
+type ChangeKind string
+
+// The three change kinds the ingestion pipeline distinguishes (the git
+// diff's own statuses; renames surface as a delete + add pair — the diff
+// runs without rename detection).
+const (
+	ChangeAdded    ChangeKind = "added"
+	ChangeModified ChangeKind = "modified"
+	ChangeRemoved  ChangeKind = "removed"
+)
+
+// FileChange is one changed path in a push: the authoritative set comes
+// from the git diff (the webhook payload's commit list is truncated by
+// the provider — checked against the running instance).
+type FileChange struct {
+	Path string
+	Kind ChangeKind
+}
+
 // GitPort is the port over the internal Git transport: repository
 // provisioning, webhook registration and branch ref lifecycle (T0303).
 // Future Git-layer tasks extend it (branch protection T0302, user tokens
@@ -238,6 +258,18 @@ type GitPort interface {
 	// not an error (the close strategy is "the ref must not exist" — a
 	// concurrent deletion already achieved that).
 	DeleteBranch(ctx context.Context, repo Repository, name string) error
+	// ChangedFiles lists the paths a push changed, from the git diff
+	// between baseSHA and headSHA — the authoritative set the webhook
+	// payload cannot give (the provider truncates its commit list). An
+	// empty baseSHA diffs headSHA against the empty tree (the branch was
+	// born in this push). Fails with ErrNotFound when headSHA cannot be
+	// fetched.
+	ChangedFiles(ctx context.Context, repo Repository, baseSHA, headSHA string) ([]FileChange, error)
+	// ReadFile reads one file's content at a commit. Fails with
+	// ErrNotFound when the blob does not exist at that commit, and with
+	// errFileTooLarge when the content exceeds the read bound — callers
+	// classify oversize files as unstructured.
+	ReadFile(ctx context.Context, repo Repository, sha, path string) ([]byte, error)
 }
 
 // Sentinel errors every GitPort implementation maps provider failures onto.

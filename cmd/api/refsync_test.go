@@ -64,6 +64,16 @@ func (f *fakeRefPort) GetMainProtection(context.Context, gitprovider.Repository)
 	return gitprovider.MainProtection{}, gitprovider.ErrNotFound
 }
 
+// The push-ingestion methods (T0305) are unreachable from the ref-sync
+// tests but the port contract requires them.
+func (f *fakeRefPort) ChangedFiles(context.Context, gitprovider.Repository, string, string) ([]gitprovider.FileChange, error) {
+	return nil, gitprovider.ErrNotFound
+}
+
+func (f *fakeRefPort) ReadFile(context.Context, gitprovider.Repository, string, string) ([]byte, error) {
+	return nil, gitprovider.ErrNotFound
+}
+
 // fakeRefSyncStore is the canonical-store fake: SyncBranchRef invokes the
 // sync function (the store contract) and records its outcome.
 type fakeRefSyncStore struct {

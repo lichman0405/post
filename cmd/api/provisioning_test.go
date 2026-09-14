@@ -67,6 +67,16 @@ func (f *fakeProvisionPort) DeleteBranch(context.Context, gitprovider.Repository
 	return nil
 }
 
+// The push-ingestion methods (T0305) are unreachable from the provisioning
+// tests but the port contract requires them.
+func (f *fakeProvisionPort) ChangedFiles(context.Context, gitprovider.Repository, string, string) ([]gitprovider.FileChange, error) {
+	return nil, gitprovider.ErrNotFound
+}
+
+func (f *fakeProvisionPort) ReadFile(context.Context, gitprovider.Repository, string, string) ([]byte, error) {
+	return nil, gitprovider.ErrNotFound
+}
+
 // fakeProvisionStore is the canonical-store fake: backlog lists are
 // scripted, Provision invokes the provisioning function (the store
 // contract) and records its outcome.

@@ -149,6 +149,17 @@ func run(args []string) int {
 	scaffoldQueue := worker.NewRedisQueue(redisClient, "post")
 	mux.Handle("POST /internal/jobs", newJobHandler(scaffoldQueue, logger))
 
+	// The canonical schema registry is loaded once, up front: both the
+	// validation surface (T0207) and the push-ingestion webhook receiver
+	// (T0305) classify against the same instance — a manifest is a known
+	// scientific manifest under exactly one registry. A failure fails fast,
+	// before any provisioning goroutine starts.
+	reg, err := schemareg.New()
+	if err != nil {
+		slog.Error("post-api: schema registry failed to load", "error", err)
+		return exitRuntime
+	}
+
 	// Repository provisioning (T0301): the GitPort adapter on the service
 	// account token, the canonical-store adapter, and the job loop that
 	// consumes project-provision jobs (enqueued by the project create
@@ -178,6 +189,19 @@ func run(args []string) int {
 		refStore := gitprovider.NewBranchRefStore(pool)
 		refSyncer := gitprovider.NewBranchRefSyncer(giteaAdapter, refStore)
 		provisioningLoop.Register(gitprovider.BranchRefJobType, newBranchRefSyncHandler(refSyncer))
+		// Push webhook receiver (T0305): the delivery target T0301 registers
+		// on every provisioned repository (POST_GITEA_WEBHOOK_URL). It sits
+		// on the ROOT mux — outside the session/CSRF guard below — because
+		// the provider is a machine, not a browser: the HMAC signature over
+		// the raw body, verified against the per-repository secret in
+		// git_repository_provisions, IS the authentication. Registered only
+		// when provisioning is enabled: without a configured provider there
+		// is nothing that could sign a delivery, and an unverified receiver
+		// must not exist.
+		ingestStore := gitprovider.NewPushIngestStore(pool)
+		pushIngester := gitprovider.NewPushIngester(giteaAdapter, ingestStore, reg)
+		mux.Handle("POST /api/v1/git/hooks/gitea",
+			gitprovider.NewPushWebhookHandler(pushIngester, ingestStore))
 		go func() {
 			if err := provisioningLoop.Run(ctx); err != nil {
 				slog.Error("post-api: provisioning loop failed", "error", err)
@@ -295,11 +319,8 @@ func run(args []string) int {
 	auditAPI.Register(v1)
 	// Progressive validation gates (T0207): the :validate endpoint runs one
 	// gate over the branch's persisted snapshot and returns the full report.
-	reg, err := schemareg.New()
-	if err != nil {
-		slog.Error("post-api: schema registry failed to load", "error", err)
-		return exitRuntime
-	}
+	// The registry instance is the one loaded above — shared with the
+	// push-ingestion webhook receiver.
 	validationAPI := validationhttp.New(validationhttp.Deps{
 		Validator: appvalidation.NewService(
 			persistence.NewValidationSnapshotRepository(persistence.NewStateStore(pool)),
