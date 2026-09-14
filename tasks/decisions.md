@@ -5047,3 +5047,56 @@ main 也从来没有删过迁移文件 ✓。（main 的号本来就是跳着的
 **顺带核清的一件事** ✓：**不要**用"重启驱动、把 `--parallel` 调大"来治 ✓ ——
 驱动 spawn 时**根本不传这个 flag** ✓（`driver_run.go:420` 是裸的 `[]string{"worker", "spawn", next}`）✓，
 所以闸门永远用默认的 3 ✓，跟驱动的 `--parallel 2` 无关 ✓。**先核过再动手，省下一次没用的重启** ✓。
+
+## L1-20260914-29 — T0603 复核 approve 但带一条 major：我选择**返工**而不是"记录后合入"
+
+**背景** ✓：T0603 的独立复核结论是 **approve** ✓，contract 全部成立 ✓
+（两条验收标准都被独立复现 ✓、集成套件 33.7s 全绿 ✓、23 条路径全在 scope 内 ✓、没有任何测试被弱化 ✓，
+而且 `migration_test.go` 是**增加**了 assertion ✓）。它同时给了 **1 条 major + 3 条 minor + 2 条 nit** ✓。
+
+**major 说的是什么（我自己核过，不是照抄复核结论）** ✓：
+`cmd/api/policyhttp/policy_handlers.go` 的 `writePolicyError` ✓ ——
+它**没有** `policy.ErrStore` 分支 ✓，于是 store 失败落到 `default` ✓，
+而 `default` 回的是 `503 SERVICE_UNAVAILABLE` + **`err.Error()`** ✓ ——
+**把整条 wrapped error 原文交给客户端** ✓（DB 挂掉时是 pgx 的
+`failed to connect to host=… user=… database=…` ✓，意外约束冲突时是约束名 ✓），
+而且**服务端一个字都不记** ✓。任何已登录成员只要在数据库不健康时打一次 policy 读接口 ✓，
+就能把内部基础设施细节捞走 ✓。
+
+**我逐条核了三个来源，三条都成立** ✓：
+① `docs/45_ERROR_MODEL.md:24` 原文是"错误信息告诉用户下一步，**不泄漏** private entity existence 或**内部 stack**" ✓；
+② 兄弟面 `cmd/api/orgshttp/orgs_handlers.go:355-360` **有** `ErrStore` 分支回通用 503 ✓，
+`default` 分支**先** `observability.LoggerFromContext(...).Error(...)` **再**回 `500 INTERNAL_ERROR` + 通用文案 ✓
+（`projectshttp:295`、`audithttp:194`、`authhttp:245` 同形 ✓）；
+③ `policy.ErrStore` **确实已经定义**（`internal/application/policy/errors.go:35-36`）✓，
+只是**从线上不可达** ✓ —— 定义了一个错误类型却没有任何路径产生它 ✓。
+**所以 policy 面是全仓唯一漏这条的** ✓，不是"约定未定" ✓。
+
+**我的判断：返工，不采纳"记录 major 后合入"** ✓。三条理由 ✓：
+① **修法是把兄弟面已有的写法照搬** ✓，不是发明新语义、不碰产品语义/权限模型 ✓ ——
+属于 §5.1 明说"不得等待人工批准"的 **bug fix** ✓；
+② **T0603 本来就必须排在 T0304 后面才能合** ✓（00032 必须先于 00033 ✓），
+而 T0304 的复核此刻还在跑 ✓ —— **也就是说 T0603 现在无论如何都合不了** ✓，
+在这段空窗里返工**不占用任何关键路径时间** ✓；
+③ 复核自己写的补救预期是"下次 policyhttp 改动时再修" ✓ ——
+**而"下次再说"正是这类泄漏活下来的方式** ✓。两行的修法，没有理由留到"下次" ✓。
+
+**同时明确不做的（写在返工要求里，而不是让 Worker 猜）** ✓：
+- **停用组织能否写 project policy**（review minor 4）✓ —— 我**没有**让 Worker 顺手加上这个检查 ✓。
+  理由：`docs/12 §5` 全文只说"org policy 是最低治理要求、project 可更严格不能放宽、policy 版本化" ✓，
+  **对停用组织一个字没有** ✓。把它改严 = **在规格沉默处发明一条权限规则** ✓（§3、§5.1）✓。
+  影响也低（org 下界仍生效 ✓，写入只是快照 ✓）。**改为开 #164 去问** ✓ ——
+  问，而不是自己定 ✓。（#164 倾向：拦住，与 orgs/projects 三面立场一致 ✓。）
+- **两条 nit**（尾随 JSON 被静默忽略 ✓、`{"policy": null}` 被存成 `{}` ✓）✓ ——
+  与 `orgshttp`/`projectshttp` 同构 ✓，是**全仓约定**不是本次回归 ✓，记录不修 ✓。
+
+**另外两条 minor 一并让它修** ✓：版本串"校验 TrimSpace 后的值、却存原始值" ✓
+（于是 `"v1"` 和 `" v1 "` 是**两个**版本 ✓）—— 我给了明确取舍 ✓：
+**存校验后的值** ✓，理由是 `ValidPolicyVersion` 本来就**接受**首尾空白 ✓，
+存 trim 后的值**接受集合一个字不变** ✓，只是把重复版本的坑填掉 ✓；
+以及 `tests/integration/policy_test.go:14` 包头把"省略 org 规则"误述成会被 422 拒 ✓
+（它自己的子测试就在证明相反的事 ✓）—— **只改注释，不动 assertion** ✓。
+
+**记录在案的一件事** ✓：这轮**没有**为了"让复核闭嘴"而放宽任何东西 ✓ ——
+要求里写死"不得删除/skip/弱化测试" ✓，并且明确说：如果现有测试断言的是**旧行为** ✓，
+要改成断言**新契约**并写进 RESULT.json ✓，**不许删掉 assertion 让它变绿** ✓。
