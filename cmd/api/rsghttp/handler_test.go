@@ -44,6 +44,7 @@ type stubService struct {
 	object   rsg.ObjectResult
 	version  rsg.ObjectVersionResult
 	relation rsg.RelationResult
+	query    rsg.QueryResult
 	detail   rsg.ObjectDetail
 	err      error
 
@@ -53,6 +54,7 @@ type stubService struct {
 	createRelationCalls      int
 	getObjectCalls           int
 	getObjectDetailCalls     int
+	queryCalls               int
 
 	lastProjectID string
 	lastBranchID  string
@@ -96,6 +98,12 @@ func (s *stubService) GetObjectDetail(_ context.Context, _ projects.Reader, proj
 	s.lastProjectID, s.lastBranchID, s.lastObjectID = projectID, branchID, objectID
 	s.lastVersionNo = versionNo
 	return s.detail, s.err
+}
+
+func (s *stubService) Query(_ context.Context, _ projects.Reader, projectID string, in rsg.QueryInput) (rsg.QueryResult, error) {
+	s.queryCalls++
+	s.lastProjectID, s.lastInput = projectID, in
+	return s.query, s.err
 }
 
 func cannedBranch() domain.Branch {
@@ -538,5 +546,151 @@ func TestMalformedBody(t *testing.T) {
 	}
 	if stub.createObjectCalls != 0 {
 		t.Errorf("service called %d times on a malformed body", stub.createObjectCalls)
+	}
+}
+
+// TestQueryHappyPath: the query string filters travel into the service as
+// one QueryInput and the result renders as the graph-slice payload — nodes
+// at their object shape, edges at their relation shape, empty lists never
+// null.
+func TestQueryHappyPath(t *testing.T) {
+	stub := &stubService{query: rsg.QueryResult{
+		ProjectID: rsgTestProjectID,
+		StateID:   "state-2",
+		Objects:   []rsg.ObjectResult{cannedObject()},
+		Relations: []rsg.RelationResult{cannedRelation()},
+	}}
+	ts, authed, _, _ := newRSGTestServer(t, stub)
+
+	url := ts.URL + "/api/v1/projects/" + rsgTestProjectID + "/query" +
+		"?object_type=material&object_type=finding&relation_type=derived_from&state_id=state-2&depth=2"
+	resp, err := authed.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", resp.StatusCode, respBody(resp))
+	}
+	payload := decodePayload(t, resp)
+	if payload["project_id"] != rsgTestProjectID || payload["state_id"] != "state-2" {
+		t.Errorf("payload = %v", payload)
+	}
+	objects, ok := payload["objects"].([]any)
+	if !ok || len(objects) != 1 || objects[0].(map[string]any)["id"] != "obj-1" || objects[0].(map[string]any)["version_id"] != "ver-1" {
+		t.Errorf("objects = %v", payload["objects"])
+	}
+	relations, ok := payload["relations"].([]any)
+	if !ok || len(relations) != 1 || relations[0].(map[string]any)["id"] != "rel-1" || relations[0].(map[string]any)["relation_type"] != "derived_from" {
+		t.Errorf("relations = %v", payload["relations"])
+	}
+	if stub.queryCalls != 1 || stub.lastProjectID != rsgTestProjectID {
+		t.Fatalf("calls = %d, projectID = %q", stub.queryCalls, stub.lastProjectID)
+	}
+	in, ok := stub.lastInput.(rsg.QueryInput)
+	if !ok || len(in.ObjectTypes) != 2 || in.ObjectTypes[0] != "material" || in.ObjectTypes[1] != "finding" ||
+		len(in.RelationTypes) != 1 || in.RelationTypes[0] != "derived_from" ||
+		in.StateID != "state-2" || in.BranchID != "" || in.Depth != 2 {
+		t.Errorf("input = %#v", stub.lastInput)
+	}
+}
+
+// TestQueryPayloadShape: an unpinned empty slice renders state_id as null
+// and the lists as [] (never null) — the wire contract for "no pin".
+func TestQueryPayloadShape(t *testing.T) {
+	stub := &stubService{query: rsg.QueryResult{ProjectID: rsgTestProjectID}}
+	ts, authed, _, _ := newRSGTestServer(t, stub)
+
+	resp, err := authed.Get(ts.URL + "/api/v1/projects/" + rsgTestProjectID + "/query")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", resp.StatusCode, respBody(resp))
+	}
+	payload := decodePayload(t, resp)
+	if stateID, present := payload["state_id"]; !present || stateID != nil {
+		t.Errorf("state_id = %#v, want null", stateID)
+	}
+	if objects, ok := payload["objects"].([]any); !ok || len(objects) != 0 {
+		t.Errorf("objects = %#v, want []", payload["objects"])
+	}
+	if relations, ok := payload["relations"].([]any); !ok || len(relations) != 0 {
+		t.Errorf("relations = %#v, want []", payload["relations"])
+	}
+}
+
+// TestQueryBadDepth: a non-numeric depth is refused at the transport with
+// the stable validation envelope before the service is called.
+func TestQueryBadDepth(t *testing.T) {
+	stub := &stubService{}
+	ts, authed, _, _ := newRSGTestServer(t, stub)
+
+	resp, err := authed.Get(ts.URL + "/api/v1/projects/" + rsgTestProjectID + "/query?depth=abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if envelope := decodeError(t, resp); envelope.Code != rsg.CodeValidation {
+		t.Errorf("code = %q, want %q", envelope.Code, rsg.CodeValidation)
+	}
+	if stub.queryCalls != 0 {
+		t.Errorf("service called %d times on a bad depth", stub.queryCalls)
+	}
+}
+
+// TestQueryProjectNotFound: the existence-hiding 404 envelope — the
+// acceptance outcome for an invisible project, never a 403.
+func TestQueryProjectNotFound(t *testing.T) {
+	stub := &stubService{err: projects.ErrProjectNotFound}
+	ts, authed, _, _ := newRSGTestServer(t, stub)
+
+	resp, err := authed.Get(ts.URL + "/api/v1/projects/" + rsgTestProjectID + "/query")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+	if envelope := decodeError(t, resp); envelope.Code != projects.CodeProjectNotFound {
+		t.Errorf("code = %q, want %q", envelope.Code, projects.CodeProjectNotFound)
+	}
+}
+
+// TestQueryAnonymousAllowed: reads flow through the guard — an anonymous
+// caller reaches the service, which owns the visibility decision.
+func TestQueryAnonymousAllowed(t *testing.T) {
+	stub := &stubService{query: rsg.QueryResult{ProjectID: rsgTestProjectID}}
+	ts, _, _, _ := newRSGTestServer(t, stub)
+
+	anon := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := anon.Get(ts.URL + "/api/v1/projects/" + rsgTestProjectID + "/query")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", resp.StatusCode, respBody(resp))
+	}
+	if stub.queryCalls != 1 {
+		t.Errorf("service called %d times", stub.queryCalls)
+	}
+}
+
+// TestQueryStoreFailure: an unwrapped failure answers the generic 503
+// envelope (fail closed — the query never returns a partial slice).
+func TestQueryStoreFailure(t *testing.T) {
+	stub := &stubService{err: rsg.ErrStore}
+	ts, authed, _, _ := newRSGTestServer(t, stub)
+
+	resp, err := authed.Get(ts.URL + "/api/v1/projects/" + rsgTestProjectID + "/query")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+	if envelope := decodeError(t, resp); envelope.Code != rsg.CodeUnavailable {
+		t.Errorf("code = %q, want %q", envelope.Code, rsg.CodeUnavailable)
 	}
 }

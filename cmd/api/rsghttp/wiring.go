@@ -10,8 +10,8 @@ import (
 )
 
 // Service is the application surface the handlers call: the RSG write
-// commands and the object reads. The production implementation is
-// *rsg.Service.
+// commands, the object reads and the graph query (T0209). The production
+// implementation is *rsg.Service.
 type Service interface {
 	CreateBranch(ctx context.Context, actor domain.User, projectID string, in rsg.CreateBranchInput) (domain.Branch, error)
 	CreateObject(ctx context.Context, actor domain.User, projectID, branchID string, in rsg.CreateObjectInput) (rsg.ObjectResult, error)
@@ -19,6 +19,7 @@ type Service interface {
 	CreateRelation(ctx context.Context, actor domain.User, projectID, branchID string, in rsg.CreateRelationInput) (rsg.RelationResult, error)
 	GetObject(ctx context.Context, r projects.Reader, projectID, branchID, objectID string) (rsg.ObjectResult, error)
 	GetObjectDetail(ctx context.Context, r projects.Reader, projectID, branchID, objectID string, versionNo *int) (rsg.ObjectDetail, error)
+	Query(ctx context.Context, r projects.Reader, projectID string, in rsg.QueryInput) (rsg.QueryResult, error)
 }
 
 // Deps carries the service the surface calls. The production wiring is in
@@ -49,4 +50,5 @@ func (a *API) Register(v1 *http.ServeMux) {
 	v1.HandleFunc("POST /api/v1/projects/{projectId}/branches/{branchId}/objects/{object...}", a.handlers.handleCreateObjectVersion)
 	v1.HandleFunc("POST /api/v1/projects/{projectId}/branches/{branchId}/relations", a.handlers.handleCreateRelation)
 	v1.HandleFunc("GET /api/v1/projects/{projectId}/branches/{branchId}/objects/{objectId}", a.handlers.handleGetObject)
+	v1.HandleFunc("GET /api/v1/projects/{projectId}/query", a.handlers.handleQuery)
 }

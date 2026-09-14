@@ -217,10 +217,12 @@ req POST "/projects/$PROJECT/branches/$BRANCH/objects" '{"object_type":"material
 if served "$STATUS" POST "/projects/{id}/branches/{id}/objects"; then ok "created a scientific object"; else fail "create object -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
 OBJECT="$(jq_get "['id']")"
 V1="$(jq_get "['version_id']")"
+V1_STATE="$(jq_get "['state_id']")"
 
 req POST "/projects/$PROJECT/branches/$BRANCH/objects/$OBJECT:version" '{"expected_version":1,"patch":{"name":"MOF-5","formula":"Zn4O(BDC)3"}}'
 if served "$STATUS" POST "/projects/{id}/branches/{id}/objects/{id}:version"; then ok "created a second version (a state transition, not a mutation)"; else fail "create version -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
 V2="$(jq_get "['version_id']")"
+V2_STATE="$(jq_get "['state_id']")"
 [[ -n "$V1" && -n "$V2" && "$V1" != "$V2" ]] \
   && ok "the two versions have distinct identities" \
   || fail "the second version did not produce a new identity (v1=$V1 v2=$V2) — versions are being mutated in place"
@@ -248,6 +250,110 @@ if [[ "$STATUS" == "200" ]]; then
 else
   fail "re-reading the object after a restart -> $STATUS"
 fi
+
+# --- query: the RSG graph slice (T0209) ---------------------------------------
+# The project-wide slice renders the material at its as-of v2 AND at the
+# v1 the derived_from edge pins, with the edge's version-pinned endpoints.
+req GET "/projects/$PROJECT/query"
+if [[ "$STATUS" != "200" ]]; then
+  fail "query the project-wide slice -> $STATUS: $(head -c 200 "$WORK/resp.json")"
+else
+  python3 - "$WORK/resp.json" "$OBJECT" "$V1" "$V2" <<'PY' && ok "query returns the project-wide graph slice" \
+    || fail "query slice content wrong: $(head -c 300 "$WORK/resp.json")"
+import json, sys
+d = json.load(open(sys.argv[1]))
+obj_id, v1, v2 = sys.argv[2], sys.argv[3], sys.argv[4]
+objs = {(o["id"], o["version_id"]): o["version_no"] for o in d["objects"]}
+rels = [r for r in d["relations"] if r["relation_type"] == "derived_from"]
+assert d["project_id"], "project_id missing"
+assert (obj_id, v2) in objs, f"as-of v2 missing: {sorted(objs)}"
+assert objs.get((obj_id, v1)) == 1, f"pinned endpoint v1 missing: {sorted(objs)}"
+assert any(r["source_object_version_id"] == v2 and r["target_object_version_id"] == v1 for r in rels), \
+    "derived_from v2->v1 missing"
+PY
+fi
+
+# The object-type filter selects the material and its induced edge (both
+# endpoints are the same material).
+req GET "/projects/$PROJECT/query?object_type=material&depth=1"
+if [[ "$STATUS" == "200" ]]; then
+  python3 - "$WORK/resp.json" "$OBJECT" "$V1" "$V2" <<'PY' && ok "query filters by object type with the induced edge" \
+    || fail "object-type query content wrong: $(head -c 300 "$WORK/resp.json")"
+import json, sys
+d = json.load(open(sys.argv[1]))
+obj_id, v1, v2 = sys.argv[2], sys.argv[3], sys.argv[4]
+objs = {(o["id"], o["version_id"]) for o in d["objects"]}
+assert {(obj_id, v1), (obj_id, v2)} <= objs, f"material versions missing: {sorted(objs)}"
+assert all(o["object_type"] == "material" for o in d["objects"]), "non-material node leaked in"
+assert any(r["relation_type"] == "derived_from" for r in d["relations"]), "induced edge missing"
+PY
+else
+  fail "object-type query -> $STATUS: $(head -c 200 "$WORK/resp.json")"
+fi
+
+# State pins return state-specific slices: at v1's state the material is
+# still at v1 and the (later) edge is absent; at v2's state the material is
+# at v2 and the edge is still absent.
+req GET "/projects/$PROJECT/query?state_id=$V1_STATE"
+if [[ "$STATUS" == "200" ]]; then
+  python3 - "$WORK/resp.json" "$OBJECT" "$V1" "$V2" <<'PY' && ok "state pin renders the v1 slice" \
+    || fail "v1 state slice wrong: $(head -c 300 "$WORK/resp.json")"
+import json, sys
+d = json.load(open(sys.argv[1]))
+obj_id, v1, v2 = sys.argv[2], sys.argv[3], sys.argv[4]
+objs = {(o["id"], o["version_id"]) for o in d["objects"]}
+assert objs == {(obj_id, v1)}, f"want only v1: {sorted(objs)}"
+assert d["relations"] == [], "the later edge must not exist at v1"
+PY
+else
+  fail "v1 state query -> $STATUS: $(head -c 200 "$WORK/resp.json")"
+fi
+req GET "/projects/$PROJECT/query?state_id=$V2_STATE"
+if [[ "$STATUS" == "200" ]]; then
+  python3 - "$WORK/resp.json" "$OBJECT" "$V2" <<'PY' && ok "state pin renders the v2 slice" \
+    || fail "v2 state slice wrong: $(head -c 300 "$WORK/resp.json")"
+import json, sys
+d = json.load(open(sys.argv[1]))
+obj_id, v2 = sys.argv[2], sys.argv[3]
+objs = {(o["id"], o["version_id"]) for o in d["objects"]}
+assert objs == {(obj_id, v2)}, f"want only v2: {sorted(objs)}"
+assert d["relations"] == [], "the later edge must not exist at v2"
+PY
+else
+  fail "v2 state query -> $STATUS: $(head -c 200 "$WORK/resp.json")"
+fi
+
+# A non-member of the private project gets not-found, never forbidden (the
+# relation list of the private project never leaks) — the same for an
+# anonymous caller.
+BOB_JAR="$WORK/bob-cookies.txt"
+curl -sS -c "$BOB_JAR" -b "$BOB_JAR" -o "$WORK/bob-signup.json" -X POST \
+  -H "Origin: $WEB_ORIGIN" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"bob-$EMAIL\",\"password\":\"g3-rsg-password\",\"handle\":\"g3rsgbob$$\",\"display_name\":\"G3 Bob\"}" \
+  "http://$API_ADDR/api/v1/auth/signup" >/dev/null
+STATUS_BOB="$(curl -sS -c "$BOB_JAR" -b "$BOB_JAR" -o "$WORK/resp.json" -w '%{http_code}' "http://$API_ADDR/api/v1/projects/$PROJECT/query")"
+STATUS_ANON="$(curl -sS -o "$WORK/resp-anon.json" -w '%{http_code}' "http://$API_ADDR/api/v1/projects/$PROJECT/query")"
+if [[ "$STATUS_BOB" == "404" ]] \
+  && python3 -c "import json;assert json.load(open('$WORK/resp.json'))['code']=='PROJECT_NOT_FOUND'" 2>/dev/null; then
+  ok "a non-member query answers 404 PROJECT_NOT_FOUND (existence hidden, never forbidden)"
+else
+  fail "non-member query -> $STATUS_BOB: $(head -c 200 "$WORK/resp.json")"
+fi
+if [[ "$STATUS_ANON" == "404" ]]; then
+  ok "an anonymous query of the private project answers 404"
+else
+  fail "anonymous query -> $STATUS_ANON: $(head -c 200 "$WORK/resp-anon.json")"
+fi
+
+# Shape refusals stay 400 at the transport; the depth cap is the service's.
+STATUS_BADDEPTH="$(curl -sS -c "$JAR" -b "$JAR" -o "$WORK/resp.json" -w '%{http_code}' "http://$API_ADDR/api/v1/projects/$PROJECT/query?depth=abc")"
+[[ "$STATUS_BADDEPTH" == "400" ]] \
+  && ok "a non-numeric depth is refused with 400" \
+  || fail "bad depth -> $STATUS_BADDEPTH: $(head -c 200 "$WORK/resp.json")"
+STATUS_DEEP="$(curl -sS -c "$JAR" -b "$JAR" -o "$WORK/resp.json" -w '%{http_code}' "http://$API_ADDR/api/v1/projects/$PROJECT/query?depth=6")"
+[[ "$STATUS_DEEP" == "400" ]] \
+  && ok "a depth beyond the cap is refused with 400" \
+  || fail "over-cap depth -> $STATUS_DEEP: $(head -c 200 "$WORK/resp.json")"
 
 printf '\n'
 if (( FAILS )); then

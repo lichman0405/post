@@ -125,6 +125,7 @@ func newRSGFixture(t *testing.T, ctx context.Context) *rsgFixture {
 		Latest:    stateStore,
 		Objects:   persistence.NewScientificObjectStore(pool),
 		Relations: persistence.NewRelationStore(pool),
+		Queries:   persistence.NewRSGQueryStore(pool),
 		Authz:     authz.NewMatrixEngine(),
 		Schemas:   reg,
 	})

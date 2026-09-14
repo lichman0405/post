@@ -452,6 +452,9 @@ var explicitIndexes = map[string][]string{
 	// partial on the non-terminal states, so 'closed' rows stay out of it
 	// (migration 00031).
 	"git_branch_refs_sync_backlog_idx": {"sync_state", "WHERE"},
+	// T0209: the query surface's project-scoped object scan, with the
+	// object-type filter as the second column (migration 00036).
+	"scientific_objects_project_type_idx": {"project_id", "object_type"},
 	// T0104: personal projects (organization_id NULL) escape the
 	// UNIQUE(organization_id, slug) constraint, so their slug uniqueness is
 	// a partial unique index instead.
