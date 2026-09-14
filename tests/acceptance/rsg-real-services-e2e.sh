@@ -29,8 +29,12 @@ WEB_ORIGIN="${POST_G3_WEB_ORIGIN:-http://127.0.0.1:3000}"
 
 WORK="$(mktemp -d)"
 API_PID=""
+SCRATCH_DB=""
 cleanup() {
   [[ -n "$API_PID" ]] && kill "$API_PID" 2>/dev/null
+  # The one database this run may destroy is the one it created itself.
+  [[ -n "$SCRATCH_DB" ]] && psql "$PG_URL" -q -c \
+    "DROP DATABASE IF EXISTS \"$SCRATCH_DB\" WITH (FORCE)" >/dev/null 2>&1
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -66,6 +70,60 @@ fi
 # gate log would show a step that failed with no output at all.
 { exec 3<&-; } 2>/dev/null || true
 
+# --- the schema the API writes to --------------------------------------------
+#
+# This run gets a database of its own, created here and dropped on the way out.
+#
+# It used to migrate the shared dev database in place, which made every gate run
+# a writer of state it does not own: whatever the last tree to run left behind
+# is what the next tree inherits. Goose refuses to apply a migration numbered
+# below the database's own version, so a tree whose migrations are not a
+# superset of someone else's is refused before a single request is made — on
+# 2026-09-14 the shared database sat at version 00040 (applied by some other
+# tree) with 00034/000035 never applied, and every tree on the migration chain
+# failed here in half a second for reasons that had nothing to do with the tree
+# under test. A gate that grades a tree must not be reading another tree's
+# leftovers, and a disposable database is the only form of "run this tree's
+# migrations" that is actually about this tree.
+command -v psql >/dev/null 2>&1 || {
+  echo "G3 rsg-real-services: FAILED — psql is required to give this run its own database" >&2
+  exit 1
+}
+SCRATCH_DB="post_g3rsg_$(date +%s)_$$"
+if ! psql "$PG_URL" -q -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$SCRATCH_DB\"" >/dev/null 2>&1; then
+  echo "G3 rsg-real-services: FAILED — could not create this run's own database ($SCRATCH_DB) on the admin endpoint (make infra-up && make infra-init)" >&2
+  exit 1
+fi
+
+# Every connection part comes out of the same URL, so the API this gate drives
+# can only ever talk to the database this gate migrated. (Read into an array
+# rather than eval'd assignments: a password is not shell source. The URL is
+# passed through the environment, so it does not land on a command line here.)
+mapfile -t DB < <(SCRATCH_DB="$SCRATCH_DB" PG_URL="$PG_URL" python3 -c '
+import os, urllib.parse as u
+p = u.urlparse(os.environ["PG_URL"])
+q = u.parse_qs(p.query)
+print(u.urlunparse(p._replace(path="/" + os.environ["SCRATCH_DB"])))
+print(p.hostname or "127.0.0.1")
+print(p.port or 5432)
+print(u.unquote(p.username or "postgres"))
+print(u.unquote(p.password or ""))
+print((q.get("sslmode") or ["disable"])[0])
+')
+if [[ "${#DB[@]}" -ne 6 ]]; then
+  echo "G3 rsg-real-services: FAILED — could not read the connection parts out of the admin URL" >&2
+  exit 1
+fi
+SCRATCH_URL="${DB[0]}"; DB_HOST="${DB[1]}"; DB_PORT="${DB[2]}"
+DB_USER="${DB[3]}"; DB_PASSWORD="${DB[4]}"; DB_SSLMODE="${DB[5]}"
+
+# The migrations are applied by THIS tree's own code, not by the Supervisor's
+# copy elsewhere: a task's diff may add a migration, and applying someone else's
+# migrations would leave the schema under test missing exactly the thing the
+# task delivers. The helper lives under bin/, which the repository root
+# .gitignore excludes, so it is invisible to `git status` and cannot disturb the
+# planned review's fingerprint. `go run` from this directory resolves the import
+# against this tree's module.
 mkdir -p "$ROOT/bin/g3migrate"
 cat >"$ROOT/bin/g3migrate/main.go" <<'GOMIGRATE'
 package main
@@ -89,7 +147,7 @@ func main() {
 	}
 }
 GOMIGRATE
-(cd "$ROOT" && go run ./bin/g3migrate "$PG_URL") >"$WORK/migrate.log" 2>&1 || {
+(cd "$ROOT" && go run ./bin/g3migrate "$SCRATCH_URL") >"$WORK/migrate.log" 2>&1 || {
   rm -rf "$ROOT/bin/g3migrate"
   # The tail is the whole value of this branch: `go run` folds the program's
   # own error into "exit status 1", and goose's reason (an unapplied migration
@@ -106,7 +164,8 @@ go build -o "$WORK/api" ./cmd/api >"$WORK/build.log" 2>&1 || {
 
 start_api() {
   env POST_ENV=test POST_API_ADDR="$API_ADDR" POST_REDIS_ADDR="$REDIS_ADDR" \
-      POST_DB_HOST=127.0.0.1 POST_DB_PORT=5432 POST_DB_PASSWORD=postgres_dev_pw POST_DB_SSLMODE=disable \
+      POST_DB_HOST="$DB_HOST" POST_DB_PORT="$DB_PORT" POST_DB_USER="$DB_USER" \
+      POST_DB_PASSWORD="$DB_PASSWORD" POST_DB_SSLMODE="$DB_SSLMODE" POST_DB_NAME="$SCRATCH_DB" \
       POST_BLOB_ACCESS_KEY=g3-ak POST_BLOB_SECRET_KEY=g3-sk POST_GITEA_TOKEN=g3-tok \
       POST_WEB_ORIGIN="$WEB_ORIGIN" "$WORK/api" >>"$WORK/api.log" 2>&1 &
   API_PID=$!

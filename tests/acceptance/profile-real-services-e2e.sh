@@ -38,8 +38,12 @@ API_ADDR="127.0.0.1:${API_PORT}"
 
 WORK="$(mktemp -d)"
 API_PID=""
+SCRATCH_DB=""
 cleanup() {
   [[ -n "$API_PID" ]] && kill "$API_PID" 2>/dev/null
+  # The one database this run may destroy is the one it created itself.
+  [[ -n "$SCRATCH_DB" ]] && psql "$PG_URL" -q -c \
+    "DROP DATABASE IF EXISTS \"$SCRATCH_DB\" WITH (FORCE)" >/dev/null 2>&1
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -63,6 +67,53 @@ fi
 # script — every `FAILED … >&2` below would be written to /dev/null, and the
 # gate log would show a step that failed with no output at all.
 { exec 3<&-; } 2>/dev/null || true
+
+# --- this run's own database --------------------------------------------------
+#
+# Created here, dropped on the way out.
+#
+# This script used to migrate the shared dev database in place, which made every
+# gate run a writer of state it does not own: whatever the last tree to run left
+# behind is what the next tree inherits. Goose refuses to apply a migration
+# numbered below the database's own version, so a tree whose migrations are not
+# a superset of someone else's is refused before a single request is made — on
+# 2026-09-14 the shared database sat at version 00040 (applied by some other
+# tree) with 00034/000035 never applied, and every tree on the migration chain
+# failed here in half a second for reasons that had nothing to do with the tree
+# under test. A gate that grades a tree must not be reading another tree's
+# leftovers, and a disposable database is the only form of "run this tree's
+# migrations" that is actually about this tree.
+command -v psql >/dev/null 2>&1 || {
+  echo "G3 profile-real-services: FAILED — psql is required to give this run its own database" >&2
+  exit 1
+}
+SCRATCH_DB="post_g3profile_$(date +%s)_$$"
+if ! psql "$PG_URL" -q -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$SCRATCH_DB\"" >/dev/null 2>&1; then
+  echo "G3 profile-real-services: FAILED — could not create this run's own database ($SCRATCH_DB) on the admin endpoint (make infra-up && make infra-init)" >&2
+  exit 1
+fi
+
+# Every connection part comes out of the same URL, so the API this gate drives
+# can only ever talk to the database this gate migrated. (Read into an array
+# rather than eval'd assignments: a password is not shell source. The URL is
+# passed through the environment, so it does not land on a command line here.)
+mapfile -t DB < <(SCRATCH_DB="$SCRATCH_DB" PG_URL="$PG_URL" python3 -c '
+import os, urllib.parse as u
+p = u.urlparse(os.environ["PG_URL"])
+q = u.parse_qs(p.query)
+print(u.urlunparse(p._replace(path="/" + os.environ["SCRATCH_DB"])))
+print(p.hostname or "127.0.0.1")
+print(p.port or 5432)
+print(u.unquote(p.username or "postgres"))
+print(u.unquote(p.password or ""))
+print((q.get("sslmode") or ["disable"])[0])
+')
+if [[ "${#DB[@]}" -ne 6 ]]; then
+  echo "G3 profile-real-services: FAILED — could not read the connection parts out of the admin URL" >&2
+  exit 1
+fi
+SCRATCH_URL="${DB[0]}"; DB_HOST="${DB[1]}"; DB_PORT="${DB[2]}"
+DB_USER="${DB[3]}"; DB_PASSWORD="${DB[4]}"; DB_SSLMODE="${DB[5]}"
 
 # --- the schema the API writes to --------------------------------------------
 #
@@ -96,14 +147,14 @@ func main() {
 	fmt.Printf("%d migration(s) applied\n", n)
 }
 GOMIGRATE
-if ! (cd "$ROOT" && go run ./bin/g3migrate "$PG_URL") >"$WORK/migrate.log" 2>&1; then
+if ! (cd "$ROOT" && go run ./bin/g3migrate "$SCRATCH_URL") >"$WORK/migrate.log" 2>&1; then
   rm -rf "$ROOT/bin/g3migrate"
-  fail "migration to head against $PG_URL using $ROOT's own migrations: $(tail -3 "$WORK/migrate.log")"
+  fail "migration to head into $SCRATCH_DB using $ROOT's own migrations: $(tail -3 "$WORK/migrate.log")"
   printf '\nG3 profile-real-services: %d failure(s)\n' "$FAILS"
   exit 1
 fi
 rm -rf "$ROOT/bin/g3migrate"
-ok "migrated ($ROOT's own migration set): $(tail -1 "$WORK/migrate.log")"
+ok "migrated $SCRATCH_DB ($ROOT's own migration set): $(tail -1 "$WORK/migrate.log")"
 
 # --- a real API process ------------------------------------------------------
 if ! go build -o "$WORK/api" ./cmd/api >"$WORK/build.log" 2>&1; then
@@ -116,8 +167,8 @@ start_api() {
   env POST_ENV=test \
       POST_API_ADDR="$API_ADDR" \
       POST_REDIS_ADDR="$REDIS_ADDR" \
-      POST_DB_HOST=127.0.0.1 POST_DB_PORT=5432 \
-      POST_DB_PASSWORD=postgres_dev_pw POST_DB_SSLMODE=disable \
+      POST_DB_HOST="$DB_HOST" POST_DB_PORT="$DB_PORT" POST_DB_USER="$DB_USER" \
+      POST_DB_PASSWORD="$DB_PASSWORD" POST_DB_SSLMODE="$DB_SSLMODE" POST_DB_NAME="$SCRATCH_DB" \
       POST_BLOB_ACCESS_KEY=g3-ak POST_BLOB_SECRET_KEY=g3-sk \
       POST_GITEA_TOKEN=g3-tok \
       POST_WEB_ORIGIN="$WEB_ORIGIN" \
