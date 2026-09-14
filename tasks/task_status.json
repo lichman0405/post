@@ -2059,7 +2059,7 @@
       ]
     },
     "T0305": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-14T04:21:41Z",
       "worker_run_id": "run-5883c780a6a31875",
       "rejection_reason": "# 你的基线推进了（这不是你的问题，也不是缺陷）\n\n`main` 上现在有 T0603 合入的 `infra/migrations/00033_policy_versioning.sql`，\n而你的分支是从**它之前**的 main 建的。你的改动**原样保留**；\n派生文件（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`）已经在新树上**重新生成** ——\n不是按文本把两边合并起来的，因为派生文件是输入的函数，按文本合并两边都是错的。\n\n# 要求：只在新基线上重新验证，不要改代码\n\n- 重跑你任务包里的全套 G1（build / vet / gofmt / 单元 / 集成 / `check-schema-snapshot` / `check-sqlc-drift` / `check-openapi`）。\n- 如果新基线上出现真正的失败，在 `RESULT.json` 里写清**是哪一条**、**证据是什么**，\n  以及你的判断：是你改动引起的，还是新基线带进来的。\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n  这条没有例外：红着报告比造假绿好。\n- 如果你的改动在新基线上**确实**需要调整（例如与 00033 有真实冲突），那要单独说明理由，\n  不要顺手改无关的东西。\n\n# 背景（你可以自己核对）\n\n我实测过：拿你当前工作区相对旧基线的整份改动，在含 00033 的 main 上 `git apply --check`，\n失败点是 `specs/database/postgres.sql:38` —— 纯粹因为两边都在文件**末尾追加密集块**、位置相同。\n所以这一步是**机械的**，你不需要为此负责，也不需要\"修\"任何东西。\n",
@@ -2118,6 +2118,13 @@
           "at": "2026-09-14T04:21:41Z",
           "run_id": "run-5883c780a6a31875",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T04:26:22Z",
+          "run_id": "run-e2401a5460a2b95a",
+          "reason": "collect: all checks passed"
         }
       ]
     },

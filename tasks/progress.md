@@ -43,7 +43,23 @@ goose v3.28.0 遇到"编号小于库当前最大版本、却未应用"的迁移�
 > 等到 `T0305` 再合 ✓，乱序就真发生了 ✓。
 > **可执行的形式** ✓：**`T0305` 没进 main 之前，不碰 `T0206` 的基线** ✓。
 > 同理 **T0603 的补丁我已实测能干净落在当前 main 上**（7 个文件全过 ✓），它不会再被基线挡一次 ✓。
-最后更新：2026-09-14 12:25（**三件事**：① **`T0305` 必须重做基线，做了** ✓：
+最后更新：2026-09-14 12:35（**驱动已用修复版重启，流水线重新有人管** ✓）：
+#163 的修复**已在 main 上** ✓（`ab0b57d` ✓，已 push ✓）—— 但要看清它有**两半** ✓：
+分类器 `parallelismLimitRefused` 活在 `rddev` **二进制**里 ✓，而"要不要记决策"的判断
+（`spawnRefusedForCapacity` ✓）活在**驱动进程的内存里** ✓ ⇒ 光重建二进制**不够** ✓，
+**必须重启驱动才生效** ✓。过程：备份旧二进制 ✓ → 重建 ✓ → 冒烟 ✓ →
+**先停旧驱动** ✓（`kill -TERM 3138504` ✓，**2 秒内干净退出** ✓ —— 确认已死 ✓，没有残留接管者 ✓）→ 启新的 ✓。
+**实测接管** ✓：`12:31:21 drive: started (pid 4050212, parallel 2)` ✓、
+`ref ledger: 8 existing dispatch branch(es) recorded` ✓、
+`12:31:22 drive: pending [T0206 T0209 T0210 T0305]` ✓ —— **三个 Worker 一个不少** ✓，
+**T0206 那条决策也照旧在** ✓（`rddev status`：`decisions waiting for the Supervisor: 1` ✓）。
+新进程确实跑的是新代码 ✓：`/proc/4050212/exe -> bin/rddev` ✓，
+`strings bin/rddev` 里两个标志串各命中 1 次 ✓（"no free Worker slot for" ✓、"parallelism limit reached" ✓）。
+**为什么必须重启** ✓：`o.run` 是 `exec.Command` ✓（`driver_run.go:42` ✓），所以**换二进制立刻换掉分类器** ✓ ——
+但驱动**自己的**那半在进程内存里 ✓，不重启就还是旧行为 ✓。这条正是今天连查两遍才没写错的那条事实 ✓。
+**回滚路径**（没用到 ✓）：`cp -f $CLAUDE_JOB_DIR/tmp/rddev-old bin/rddev` ✓ 再启 ✓。
+
+此前更新（12:25）：（**三件事**：① **`T0305` 必须重做基线，做了** ✓：
 `00ac3e23e9e7` → **`747847cdf68c`** ✓（17 个文件 ✓，`specs/database/postgres.sql` 与 `specs/SPEC_VERSION.json`
 **重新生成** ✓，不是按文本合并 ✓）—— **改动没丢** ✓，工作树里 10 个 modified + 7 个 untracked 都在 ✓；
 ② **但 `rddev rebaseline` 半途而废** ✓ —— 它只做成前两步（挪树 ✓、置 `rejected` ✓），
