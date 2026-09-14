@@ -12,6 +12,7 @@ import (
 	"github.com/lichman0405/post/internal/application/branches"
 	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/application/relations"
+	"github.com/lichman0405/post/internal/application/schemaprofiles"
 	"github.com/lichman0405/post/internal/application/sciobjects"
 	"github.com/lichman0405/post/internal/application/states"
 	"github.com/lichman0405/post/internal/authz"
@@ -34,16 +35,17 @@ const manifestVersion = "v1"
 // (T0106) and answer the same existence-hidden outcomes as the project
 // surface.
 type Service struct {
-	projects  ProjectGate
-	branches  BranchPort
-	states    StatePort
-	latest    LatestStatePort
-	objects   ObjectPort
-	relations RelationPort
-	queries   QueryPort
-	profiles  ProfilePort
-	authz     authz.Engine
-	schemas   *schemareg.Registry
+	projects       ProjectGate
+	branches       BranchPort
+	states         StatePort
+	latest         LatestStatePort
+	objects        ObjectPort
+	relations      RelationPort
+	queries        QueryPort
+	profiles       ProfilePort
+	schemaProfiles ProfileResolver
+	authz          authz.Engine
+	schemas        *schemareg.Registry
 }
 
 // Deps wires the service. Schemas (the canonical registry) and Authz (the
@@ -51,33 +53,36 @@ type Service struct {
 // rather than guessing (fail closed, docs/12). Queries (the query port) is
 // required by Query; the write commands work without it. Profiles is
 // optional: the object detail page degrades to raw creator ids when it is
-// not wired.
+// not wired. SchemaProfiles is optional too: nil means no project schema
+// profiles are configured, and any non-canonical schema ref is refused.
 type Deps struct {
-	Projects  ProjectGate
-	Branches  BranchPort
-	States    StatePort
-	Latest    LatestStatePort
-	Objects   ObjectPort
-	Relations RelationPort
-	Queries   QueryPort
-	Profiles  ProfilePort
-	Authz     authz.Engine
-	Schemas   *schemareg.Registry
+	Projects       ProjectGate
+	Branches       BranchPort
+	States         StatePort
+	Latest         LatestStatePort
+	Objects        ObjectPort
+	Relations      RelationPort
+	Queries        QueryPort
+	Profiles       ProfilePort
+	SchemaProfiles ProfileResolver
+	Authz          authz.Engine
+	Schemas        *schemareg.Registry
 }
 
 // NewService builds the service on the ports.
 func NewService(deps Deps) *Service {
 	return &Service{
-		projects:  deps.Projects,
-		branches:  deps.Branches,
-		states:    deps.States,
-		latest:    deps.Latest,
-		objects:   deps.Objects,
-		relations: deps.Relations,
-		queries:   deps.Queries,
-		profiles:  deps.Profiles,
-		authz:     deps.Authz,
-		schemas:   deps.Schemas,
+		projects:       deps.Projects,
+		branches:       deps.Branches,
+		states:         deps.States,
+		latest:         deps.Latest,
+		objects:        deps.Objects,
+		relations:      deps.Relations,
+		queries:        deps.Queries,
+		schemaProfiles: deps.SchemaProfiles,
+		profiles:       deps.Profiles,
+		authz:          deps.Authz,
+		schemas:        deps.Schemas,
 	}
 }
 
@@ -201,12 +206,9 @@ func (s *Service) CreateObject(ctx context.Context, actor domain.User, projectID
 	if _, err := s.branches.Get(ctx, projectID, branchID); err != nil {
 		return ObjectResult{}, wrapError(err)
 	}
-	ref, ok := s.schemaFor(in.ObjectType)
-	if !ok {
-		return ObjectResult{}, fmt.Errorf("%w: object_type %q is not a canonical V1 type", ErrValidation, in.ObjectType)
-	}
-	if in.SchemaRef != "" && in.SchemaRef != ref.ID {
-		return ObjectResult{}, fmt.Errorf("%w: V1 pins the canonical schema per object type (schema_ref %q is not %q)", ErrValidation, in.SchemaRef, ref.ID)
+	ref, err := s.resolveSchemaRef(ctx, projectID, in.ObjectType, in.SchemaRef)
+	if err != nil {
+		return ObjectResult{}, err
 	}
 	payload, err := payloadObject(in.Payload)
 	if err != nil {
@@ -645,6 +647,62 @@ func (s *Service) schemaFor(objectType string) (schemareg.Ref, bool) {
 		return schemareg.Ref{}, false
 	}
 	return ref, true
+}
+
+// resolveSchemaRef resolves the schema an object version will be pinned
+// to (T0213):
+//
+//   - the object type must be a canonical V1 type (unchanged);
+//   - an empty schema_ref, or the canonical id itself, pins the canonical
+//     V1 schema of the type (unchanged);
+//   - any other schema_ref must name a schema profile registered for THIS
+//     project, resolved to its newest registered version, and the
+//     profile's authoritative type (properties.type.const) must equal the
+//     object type — a profile of experiments can never govern a
+//     hypothesis. The object version row then pins the exact profile
+//     id+version: a later profile v2 never invalidates it (docs/21 §8).
+//
+// A foreign project's profile id, an unregistered id, a profile whose
+// schema the runtime registry has not loaded yet (the startup load is a
+// background job — until it completes profile refs fail closed) and a type
+// mismatch all answer ErrValidation — the caller is told the ref is not
+// usable here, never whether some other project owns it (docs/45).
+func (s *Service) resolveSchemaRef(ctx context.Context, projectID, objectType, schemaRef string) (schemareg.Ref, error) {
+	canonical, ok := s.schemaFor(objectType)
+	if !ok {
+		return schemareg.Ref{}, fmt.Errorf("%w: object_type %q is not a canonical V1 type", ErrValidation, objectType)
+	}
+	if schemaRef == "" || schemaRef == canonical.ID {
+		return canonical, nil
+	}
+	if s.schemaProfiles == nil {
+		return schemareg.Ref{}, fmt.Errorf("%w: schema_ref %q is not the canonical schema of %q and no project schema profiles are configured", ErrValidation, schemaRef, objectType)
+	}
+	profile, err := s.schemaProfiles.GetLatestProfile(ctx, projectID, schemaRef)
+	if err != nil {
+		if errors.Is(err, schemaprofiles.ErrProfileNotFound) {
+			return schemareg.Ref{}, fmt.Errorf("%w: schema_ref %q is not a registered schema profile of this project", ErrValidation, schemaRef)
+		}
+		return schemareg.Ref{}, wrapError(err)
+	}
+	ref := schemareg.Ref{ID: profile.SchemaID, Version: profile.Version}
+	// The profile row exists, but the runtime registry of THIS instance
+	// must actually hold the schema: at startup the profile load is a
+	// background job, so a registered profile that is not yet loaded is a
+	// normal early state — refuse it (fail closed) and say exactly that,
+	// rather than answering a bogus "governs type" verdict about a schema
+	// this registry has never seen.
+	if _, err := s.schemas.Lookup(ref); err != nil {
+		if errors.Is(err, schemareg.ErrUnknownSchema) || errors.Is(err, schemareg.ErrUnknownVersion) {
+			return schemareg.Ref{}, fmt.Errorf("%w: schema profile %s v%s is registered for this project, but this profile is not yet loaded in this instance's registry — retry once the startup profile load has completed", ErrValidation, ref.ID, ref.Version)
+		}
+		return schemareg.Ref{}, wrapError(err)
+	}
+	typeConst, ok := s.schemas.TypeConst(ref)
+	if !ok || typeConst != objectType {
+		return schemareg.Ref{}, fmt.Errorf("%w: schema profile %s v%s governs type %q, not %q", ErrValidation, ref.ID, ref.Version, typeConst, objectType)
+	}
+	return ref, nil
 }
 
 // typeTokenRe bounds the object-type token (canonical type names are

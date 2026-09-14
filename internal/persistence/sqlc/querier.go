@@ -128,6 +128,10 @@ type Querier interface {
 	// the tie.
 	GetLatestProjectState(ctx context.Context, projectID pgtype.UUID) (ProjectState, error)
 	GetLatestRelationVersion(ctx context.Context, relationID pgtype.UUID) (RelationVersion, error)
+	// The profile's current version — the newest registration, created_at then
+	// id as a deterministic tie-break (the object-create path resolves a bare
+	// schema id to this row).
+	GetLatestSchemaProfile(ctx context.Context, arg GetLatestSchemaProfileParams) (ProjectSchemaProfile, error)
 	GetLatestScientificObjectVersion(ctx context.Context, objectID pgtype.UUID) (ScientificObjectVersion, error)
 	GetOrganizationByID(ctx context.Context, id pgtype.UUID) (Organization, error)
 	// Row-locks the organization: governance writes serialize on this lock, so
@@ -153,6 +157,9 @@ type Querier interface {
 	GetRelationVersionByNo(ctx context.Context, arg GetRelationVersionByNoParams) (RelationVersion, error)
 	GetReleaseByProjectAndVersion(ctx context.Context, arg GetReleaseByProjectAndVersionParams) (Release, error)
 	GetResearchAssetVersion(ctx context.Context, arg GetResearchAssetVersionParams) (ResearchAssetVersion, error)
+	// One version by id — any age: old versions stay queryable forever, so a
+	// profile v2 never invalidates history written under v1 (docs/21 §8).
+	GetSchemaProfile(ctx context.Context, arg GetSchemaProfileParams) (ProjectSchemaProfile, error)
 	GetScientificObjectByID(ctx context.Context, id pgtype.UUID) (ScientificObject, error)
 	GetScientificObjectVersionByID(ctx context.Context, id pgtype.UUID) (ScientificObjectVersion, error)
 	GetScientificObjectVersionByNo(ctx context.Context, arg GetScientificObjectVersionByNoParams) (ScientificObjectVersion, error)
@@ -160,6 +167,10 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email *string) (User, error)
 	GetUserByHandle(ctx context.Context, handle string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
+	// Project schema profiles (canonical table project_schema_profiles; 00038).
+	// The table is append-only (the 00038 trigger): these queries INSERT and
+	// SELECT only — a profile change is a new version row, never an UPDATE.
+	InsertSchemaProfile(ctx context.Context, arg InsertSchemaProfileParams) (ProjectSchemaProfile, error)
 	// The organization's current policy (the project lower bound).
 	LatestPolicyVersionByOrg(ctx context.Context, organizationID pgtype.UUID) (PolicyVersion, error)
 	LatestPolicyVersionByProject(ctx context.Context, projectID pgtype.UUID) (PolicyVersion, error)
@@ -172,6 +183,9 @@ type Querier interface {
 	// result — the query returns the row so the authorization can see it,
 	// never the other way round.
 	ListAdjacentRelationVersions(ctx context.Context, arg ListAdjacentRelationVersionsParams) ([]ListAdjacentRelationVersionsRow, error)
+	// The startup load: every registered profile row, any project. The API
+	// re-registers each into the in-memory schema registry at boot.
+	ListAllSchemaProfiles(ctx context.Context) ([]ProjectSchemaProfile, error)
 	ListBranchesByProject(ctx context.Context, projectID pgtype.UUID) ([]Branch, error)
 	ListEvidenceAssertionsForTarget(ctx context.Context, objectVersionID pgtype.UUID) ([]EvidenceAssertion, error)
 	// One row per attached blob (a blob attached to several object versions
@@ -241,6 +255,8 @@ type Querier interface {
 	// (occurred_at, id): a nil before pair means "from the top".
 	ListProjectAuditEntries(ctx context.Context, arg ListProjectAuditEntriesParams) ([]ListProjectAuditEntriesRow, error)
 	ListProjectMembers(ctx context.Context, projectID pgtype.UUID) ([]ListProjectMembersRow, error)
+	// Every profile version of the project, newest first.
+	ListProjectSchemaProfiles(ctx context.Context, projectID pgtype.UUID) ([]ProjectSchemaProfile, error)
 	ListProjectStatesByBranch(ctx context.Context, branchID pgtype.UUID) ([]ProjectState, error)
 	ListProjectsByOrganization(ctx context.Context, arg ListProjectsByOrganizationParams) ([]Project, error)
 	// Projects the user belongs to (any project membership), most recently

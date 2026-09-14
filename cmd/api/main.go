@@ -52,11 +52,13 @@ import (
 	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
+	"github.com/lichman0405/post/cmd/api/schemaprofileshttp"
 	"github.com/lichman0405/post/cmd/api/validationhttp"
 	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
 	"github.com/lichman0405/post/internal/application/rsg"
+	"github.com/lichman0405/post/internal/application/schemaprofiles"
 	"github.com/lichman0405/post/internal/application/states"
 	appvalidation "github.com/lichman0405/post/internal/application/validation"
 	"github.com/lichman0405/post/internal/authz"
@@ -353,17 +355,46 @@ func run(args []string) int {
 	// project service, and commits every scientific-state write as one
 	// state commit (gate draft) on the shared validation guard.
 	stateStore := persistence.NewStateStore(pool)
+	// Project schema profiles (T0213): namespaced, versioned JSON Schema
+	// extensions of the official base schemas. The persisted profile rows
+	// are re-registered into the runtime registry at startup (LoadAll) —
+	// the registry each validation run and each object create resolves
+	// against, so profiles survive restarts. The same service instance is
+	// shared with the RSG service below: the object create path resolves
+	// schema refs against exactly the profiles these routes register.
+	profileSvc := schemaprofiles.NewService(schemaprofiles.Deps{
+		Store:    persistence.NewSchemaProfileStore(pool),
+		Projects: projectAPI.Service(),
+		Schemas:  reg,
+	})
+	// The profile load is a background job, not a startup gate: the API
+	// must start (and report "not ready") while PostgreSQL is down. The
+	// loader retries forever while the store is unreachable (ErrStore) and
+	// returns ErrCorruption immediately when a persisted row is broken —
+	// profileFatal turns that into a process exit, never a half-loaded
+	// registry. Until the load completes, profile-dependent validation
+	// fails closed (rsg.resolveSchemaRef refuses refs whose schema the
+	// runtime registry does not hold yet).
+	profileFatal := make(chan error, 1)
+	go func() {
+		if err := runSchemaProfileLoad(ctx, profileSvc, logger); err != nil && !errors.Is(err, context.Canceled) {
+			profileFatal <- err
+		}
+	}()
+	schemaprofilesAPI := schemaprofileshttp.New(schemaprofileshttp.Deps{Service: profileSvc})
+	schemaprofilesAPI.Register(v1)
 	rsgSvc := rsg.NewService(rsg.Deps{
-		Projects:  projectAPI.Service(),
-		Branches:  branches.NewService(persistence.NewBranchStore(pool)),
-		States:    states.NewService(stateStore, appvalidation.NewGuard(rsgvalidation.NewValidator(reg), persistence.NewValidationTxProbe())),
-		Latest:    stateStore,
-		Objects:   persistence.NewScientificObjectStore(pool),
-		Relations: persistence.NewRelationStore(pool),
-		Queries:   persistence.NewRSGQueryStore(pool),
-		Profiles:  persistence.NewProfileStore(pool),
-		Authz:     authz.NewMatrixEngine(),
-		Schemas:   reg,
+		Projects:       projectAPI.Service(),
+		Branches:       branches.NewService(persistence.NewBranchStore(pool)),
+		States:         states.NewService(stateStore, appvalidation.NewGuard(rsgvalidation.NewValidator(reg), persistence.NewValidationTxProbe())),
+		Latest:         stateStore,
+		Objects:        persistence.NewScientificObjectStore(pool),
+		Relations:      persistence.NewRelationStore(pool),
+		Queries:        persistence.NewRSGQueryStore(pool),
+		Profiles:       persistence.NewProfileStore(pool),
+		SchemaProfiles: profileSvc,
+		Authz:          authz.NewMatrixEngine(),
+		Schemas:        reg,
 	})
 	rsgAPI := rsghttp.New(rsghttp.Deps{Service: rsgSvc})
 	rsgAPI.Register(v1)
@@ -405,8 +436,52 @@ func run(args []string) int {
 			slog.Error("post-api exited", "error", err)
 			return exitRuntime
 		}
+	case err := <-profileFatal:
+		slog.Error("post-api: schema profile load failed permanently", "error", err)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if serr := srv.Shutdown(shutdownCtx); serr != nil {
+			slog.Error("post-api: shutdown after schema profile load failure failed", "error", serr)
+		}
+		return exitRuntime
 	}
 	return exitOK
+}
+
+// schemaProfileLoadBackoff is the initial retry delay of the profile load
+// loop (doubling up to a minute); a package variable so main_test can
+// shrink it instead of waiting out real backoffs.
+var schemaProfileLoadBackoff = 5 * time.Second
+
+// runSchemaProfileLoad loads the persisted schema profiles into the
+// runtime registry, retrying while the store is unreachable. Two error
+// classes: ErrStore (database down — retry forever, the API keeps serving
+// and /readyz reports the database truth) and ErrCorruption (a persisted
+// row is broken — returned immediately so the caller fails fast rather
+// than serving a registry that diverges from the database rows). A
+// canceled context ends the loop (the process is shutting down).
+func runSchemaProfileLoad(ctx context.Context, svc *schemaprofiles.Service, logger *slog.Logger) error {
+	backoff := schemaProfileLoadBackoff
+	for {
+		err := svc.LoadAll(ctx)
+		if err == nil {
+			logger.Info("post-api: schema profiles loaded into the runtime registry")
+			return nil
+		}
+		if errors.Is(err, schemaprofiles.ErrCorruption) {
+			return err
+		}
+		logger.Warn("post-api: schema profile load failed — retrying",
+			"error", err, "retry_in", backoff.String())
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+		if backoff < time.Minute {
+			backoff *= 2
+		}
+	}
 }
 
 // newHealthHandler wires the health surface: liveness never touches a

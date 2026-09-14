@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -642,3 +643,49 @@ func TestUnwiredEngineFailsClosed(t *testing.T) {
 }
 
 func rolePtr(r domain.ProjectRole) *domain.ProjectRole { return &r }
+
+// fakeProfileResolver returns one scripted profile row — enough to drive
+// resolveSchemaRef's profile arm without the real store.
+type fakeProfileResolver struct {
+	profile domain.ProjectSchemaProfile
+	err     error
+}
+
+func (f *fakeProfileResolver) GetLatestProfile(ctx context.Context, projectID, schemaID string) (domain.ProjectSchemaProfile, error) {
+	if f.err != nil {
+		return domain.ProjectSchemaProfile{}, f.err
+	}
+	return f.profile, nil
+}
+
+// TestResolveSchemaRefRefusesNotYetLoadedProfile: a profile row can exist
+// for this project while its schema is not yet in the runtime registry —
+// the startup profile load is a background job, so this is a normal early
+// state. Resolution must fail closed NAMING that state, never answer the
+// bogus "governs type \"\"" verdict about a schema this registry has never
+// seen (the old behavior read TypeConst off an unregistered ref).
+func TestResolveSchemaRefRefusesNotYetLoadedProfile(t *testing.T) {
+	svc := newTestService(t, memberProject(), newFakeObjects())
+	svc.schemaProfiles = &fakeProfileResolver{profile: domain.ProjectSchemaProfile{
+		ProjectID: "project-1",
+		SchemaID:  "project:project-1:custom_material",
+		Version:   "1",
+	}}
+	_, err := svc.CreateObject(context.Background(), ownerActor(), "project-1", "branch-1", CreateObjectInput{
+		ObjectType: "material",
+		SchemaRef:  "project:project-1:custom_material",
+		Payload:    json.RawMessage(`{"name":"MOF-5"}`),
+	})
+	if err == nil {
+		t.Fatal("CreateObject with a not-yet-loaded profile: err = nil, want ErrValidation (fail closed)")
+	}
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("err = %v, want ErrValidation", err)
+	}
+	if !strings.Contains(err.Error(), "not yet loaded") {
+		t.Errorf("err does not name the not-yet-loaded state: %v", err)
+	}
+	if strings.Contains(err.Error(), `governs type ""`) {
+		t.Errorf("err carries the bogus empty-type verdict: %v", err)
+	}
+}

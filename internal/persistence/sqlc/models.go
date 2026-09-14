@@ -157,6 +157,19 @@ type ProjectMembership struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type ProjectSchemaProfile struct {
+	ID                pgtype.UUID        `json:"id"`
+	ProjectID         pgtype.UUID        `json:"project_id"`
+	SchemaID          string             `json:"schema_id"`
+	Version           string             `json:"version"`
+	BaseSchemaID      string             `json:"base_schema_id"`
+	BaseSchemaVersion string             `json:"base_schema_version"`
+	Content           string             `json:"content"`
+	ContentHash       string             `json:"content_hash"`
+	CreatedBy         pgtype.UUID        `json:"created_by"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type ProjectState struct {
 	ID              pgtype.UUID        `json:"id"`
 	ProjectID       pgtype.UUID        `json:"project_id"`

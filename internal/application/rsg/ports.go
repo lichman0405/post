@@ -80,6 +80,16 @@ type ObjectPort interface {
 	CreateVersionInTx(ctx context.Context, tx states.Transaction, objectID string, expected int, in sciobjects.VersionParams) (domain.ScientificObjectVersion, error)
 }
 
+// ProfileResolver is the schema-profile slice the RSG service needs for
+// schema-ref resolution (T0213): a client may create an object against a
+// registered project schema profile instead of the canonical type schema.
+// The production implementation is schemaprofiles.Service.
+type ProfileResolver interface {
+	// GetLatestProfile returns the profile's newest registered version
+	// by (project, schema id), or schemaprofiles.ErrProfileNotFound.
+	GetLatestProfile(ctx context.Context, projectID, schemaID string) (domain.ProjectSchemaProfile, error)
+}
+
 // RelationPort is the relation-surface slice the RSG service needs. The
 // production implementation is persistence.RelationStore; CreateRelationInTx
 // runs on the commit transaction.
@@ -222,9 +232,10 @@ type CreateBranchInput struct {
 
 // CreateObjectInput carries a first-version object creation. Payload must
 // be a JSON object (OpenAPI: payload: {type: object}); SchemaRef may name
-// the schema $id explicitly — V1 pins the canonical schema per object
-// type, so any other value is refused (extension schemas are T0201's
-// surface).
+// the schema $id explicitly — "" pins the canonical schema per object
+// type, the canonical id itself is accepted as-is, and any other id must
+// name a schema profile registered for THIS project (T0213) whose
+// authoritative type matches ObjectType; anything else is refused.
 type CreateObjectInput struct {
 	ObjectType string
 	Payload    json.RawMessage
