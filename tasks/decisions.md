@@ -4600,3 +4600,85 @@ driver 看起来在忙 ✓。只在代码路径上读出来的 ✓，没有端�
 **实际**是一次状态转移 ✓ —— 一次"记理由"的操作能把任务从活着的 Worker 底下转走 ✓。
 这是支持 #126 选项 1（`worker rework --reason-file`）而不是选项 3 的具体理由 ✓，
 已连同这次证据一起贴在 #126 上 ✓。
+
+## L1-20260914-19 — T0603 卡在 verification：它的依赖 T0208 还没合入，而依赖只在「变成 ready」那一刻检查过一次
+
+### 症状（我打开队列时看到的）
+
+`rddev status` 里有一条等我决定的：`T0603 accept: REFUSED — G3 is red`。
+G3 的两条 job 都红：`rsg-real-services`（8 条失败）、`gitea-real-services`（POST_GITEA_TOKEN is not set）。
+
+### 根因一：`rsg-real-services` 红是真的，但**不是 T0603 的缺陷** —— 那张 HTTP 面根本还没被造出来
+
+8 条失败全是 307：`POST /projects/{id}/branches/{id}/objects`、`.../objects/{id}:version`、
+`.../relations`。这三条路径 `specs/api/openapi.yaml` 里有，API 还没服务它们 —— 脚本自己
+把它写成了 "not served yet — P2 builds them"。
+
+交叉验证：**没有任何任务通过过 `rsg-real-services`**。全仓库 G3 记录里跑过它的只有 T0603
+（红），而携带它的 T0206/T0208 至今还是 `todo`。
+
+而 #121/#134 的结论已经把归属写死了：**RSG HTTP surface 是 T0209**，T0209 依赖 T0208，
+T0208 依赖 T0205/T0207。T0603 的依赖里**有 T0208** —— 也就是说，按 DAG 的设计，它本来就
+应当等 T0208 合入之后才开始。
+
+### 根因二：`gitea-real-services` 那条红是**过期信息**，今天已经不成立
+
+我一开始以为这是第二个真问题。它不是：
+
+- `.env.dev` 的 mtime 是 2026-09-13 **11:30:34 +0800**，而这次 G3 跑在 **22:10 +0800** ——
+  文件里那时就有这个键，而且非空（只验存在性，不读值）；
+- `post-gitea-1` 至今 healthy；
+- 真正的解释是两个**之后**才落地的修复：
+  `05a7a77`（#120，**2026-09-14 05:34 +0800**）「G3 gets the dev stack's environment」，
+  `a2acf98`（#137，**06:47 +0800**）「a gate must not inherit the shell that started it」。
+  它们都比 22:10 那次运行晚 7~8 小时；
+- 反证：T0301 的 `gitea-real-services` 在 **2026-09-13T23:50:47Z（07:50 +0800）跑过了**。
+
+结论：这条失败是**当时环境没接上**留下的记录，不是 T0603 的问题，也不该被当成它的证据。
+
+### 根因三：它为什么能在依赖没满足时就跑起来 —— 这是真正的洞
+
+- T0603 在 2026-09-13T**05:28:18Z**（13:28 +0800）`todo → ready`。当时它的依赖是
+  `['T0105']`，T0105 已 merged —— 那次转移**完全合法**。
+- `T0208` 这条边是 **`fdd42e5`（#102，2026-09-13 16:26:37 +0800）** 加上去的，
+  **比它变 ready 晚 3 小时**。#102 的原文写着「each phase entry task += T0208」，
+  而且它自己就点着名：*"the first task to reach acceptance (T0603) was refused with eight
+  unserved paths"* —— 它当时看到的，就是今天我还在看的那条拒绝。
+
+  **作者以为加边解决了它。对已经在飞的任务，加边解决不了。**
+- 机制：`depsMet` 只在 `to == StateReady` 时被调用（`store.go:134-146`，同形逻辑在
+  `store.go:354-362` 的转移守卫里）。**一个已经走过 `ready` 的任务，之后再被加依赖，
+  永远不会被重新检查。**
+
+这条和 `depsMet` **自己的注释**对不上：
+
+    // every dependency must be merged (docs/30 §3: dependencies are verified
+    // merged before a task starts)
+
+写的是「任务**开始**之前」，代码接的却是「**变成 ready** 时」。任务可以在此之后才被
+加上依赖，于是那句话就不再为真。
+
+### 决定
+
+1. **不动 T0603 的状态，留在 `verification`。**
+   不改成 `rejected` —— 理由：`rejected` 的任务，下一次自然动作是 `worker rework`，
+   那会拿一个**不可能变绿**的 gate 去烧掉一个完整的 Worker session（这个坑我今天已经在
+   T0207 上踩过形状类似的一次）。留在 `verification`，`rddev status` 会一直把它列成
+   「等 Supervisor」—— 而正确答案恰恰是「**等 T0208 合入**」。
+
+2. **解封条件（写在这里，免得靠记性）**：T0208 合入之后重跑 T0603 的 G2/G3。
+   注意那时它的基线也旧了，大概率要走 rebaseline 那条路（`rebaseline` 会保留它的工作，
+   见 L1-20260914-18）。
+
+3. **要修的洞**：把依赖检查接到**进入 `running` 的转移**上（spawn 与 rework 都经过它），
+   让代码真的做到它注释里承诺的那件事。这属于 L1：它**没有**新增任何规则，
+   只是让一条已经写下的规则在它自己声明的时刻生效。
+
+### 代价与边界（说清楚，不留给以后猜）
+
+- 这个修法**救不了** T0603 这类已经在飞的任务：Worker 已经在跑了，没有任何检查能拦住
+  它的完成。它能做到的只是——**不让它重新开始**。
+- 它**不能**阻止「有人给在飞任务加依赖」这件事本身。它只保证：那条边从此会**生效**，
+  而不是静默失效。
+- `rsg-real-services` 对 T0603 的判定**不是误报**。它是 Gate 在正确工作：DAG 说这个任务
+  要等 T0208，而它没等。今天暴露的是**调度**没守住这条边，不是 Gate 判错了。

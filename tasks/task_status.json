@@ -1283,9 +1283,9 @@
     },
     "T0207": {
       "status": "running",
-      "started_at": "2026-09-13T23:49:56Z",
-      "worker_run_id": "run-d43f114afe24bae6",
-      "rejection_reason": "probe: not a real reason\n",
+      "started_at": "2026-09-14T00:39:04Z",
+      "worker_run_id": "run-106bf9fc80063829",
+      "rejection_reason": "【返工 —— 三处必须修，都在你自己的交付范围内。这次是缺陷，不是基线问题。】\n\n一、required-field 检查对扩展 schema 完全失效（blocking）\n\n`internal/rsg/validation/validator.go:236` 在 default 分支里把\n`objectTypeName(mv.SchemaID)` 传给了 `checkRequiredFields`。而 `objectTypeName`\n(same file, 188-199) 取的是 schema id 的最后一段路径名，它自己的注释就写着\n\"It is only a label — the authoritative type is the schema's const\"。也就是说：\n一个被明确标注为「只是标签」的值，被用来做了一个语义判定。\n\n`RequiredFieldsFor` (`spec.go:186-210`) 只认 11 个 canonical 名字，所以任何注册进来的\n扩展 schema（T0201 的 Register、T0213 的 profile），只要它的 id 不巧正好长成\n`<type>.schema.json`，required-field 检查就静默失效。同一个文件 `validator.go:277`\n已经用对了写法：`v.reg.TypeConst(schemareg.Ref{ID: mv.SchemaID, Version: mv.SchemaVersion})`。\n\n实测复现（overlay，不写 worktree）：注册一个 v1 的\n`https://acme.example/schemas/hypothesis-ext.schema.json`，其\n`properties.type.const = \"hypothesis\"`，然后对 payload 为 `{\"statement\":\"probe\"}` 的版本\n在 `GateMain` 上 validate —— 结果 `verdict=pass blocked=false`，`required_fields: passed=true`。\n一个缺 `hypothesis_type`、缺 `scope` 的 hypothesis 通过了 main 的阻塞检查。\n而 `required_fields` 正是 main/release/asset 上的阻塞项，所以对扩展类型的对象来说，\n整条渐进式阶梯是空的。\n\n要求：required-field 的判定必须用 schema 的权威类型（registry 的 TypeConst），\n不能用 id 里的标签。权威类型取不到时**不得静默通过** —— 按这个检查自己的语义选择\nfail closed 或给出明确失败，但不要退回用标签。加测试钉住：一个注册了扩展 schema\n的对象，缺 required field 时在阻塞 gate 上必须被拦住。\n\n二、`:validate` 端点没有任何可见性判定（blocking）\n\n`cmd/api/validationhttp/handler.go:60` 只把路径参数交给了\n`h.svc.ValidateBranch(...)`。整个 `cmd/api/validationhttp` 和\n`internal/application/validation` 里没有任何 identity / membership / visibility 输入。\n\n后果（已按代码路径确认）：任何已登录用户（匿名是 401；POST 在\n`stateChangingMethods` 里，所以另需 session + CSRF）对**自己并非成员**的 private\nproject 发这个请求，会拿到完整报告：object type 名、object id、version 号、\nstate id、schema ref、以及哪些 required field 缺失。跨 project 的 404 边界是对的\n（不泄漏存在性），但 project 内部内容被无条件披露。\n\n这不是「新语义」，是这个仓库早就定好的规则没被套上：`cmd/api/authhttp/auth_wiring.go:69`\n写明契约是「reads flow (product reads decide their own visibility)」，而\n`stateChangingMethods` 只按动词划分，POST 的 `:validate` 落进了写守卫，写守卫只查\nsession + CSRF，于是没有人做成员判定。同族的读路径已有现成写法：\n`cmd/api/projectshttp/projects_handlers.go:115` 的 `reader(r)` 构造\n`projects.Reader`，配合 `internal/application/projects/service.go:192` 的 `requireRead`；\n`authhttp.PrincipalFrom(ctx)` 也已经在 (`auth_middleware.go:61`)。\n\n要求：套用既有写法，给这个路由加上「调用者能否读这个 project」的判定，private 且\n非成员返回不泄漏式 404，与 T0106 已经定下的语义保持一致。**不要发明新的权限语义**，\n也不要改权限矩阵本身。如果既有写法确实套不上这个路由，**停下来，在 RESULT.json 里\n把原因写清楚**，不要自己造一套。\n\n三、「可解释」这条验收标准没有被任何测试钉住（blocking —— 它是验收标准之一）\n\n把 `internal/rsg/validation/report.go:141` 里的 `(res.Why)` 删掉，\n`./internal/rsg/validation/...`、`./internal/application/validation/...` 和\n`./tests/integration` **全部仍然绿**。`validator_test.go:401` 只断言 explanation 里\n出现了 check id 这个名字，没有任何测试断言 `Spec.Why` 的文本真的进入了 explanation。\n\n验收标准是「不同 gate 严格度不同且可解释」。现在「可解释」可以静默回归成\n每条失败都没有理由。要求：加测试断言 `Spec.Why` 的文本出现在对应 Result 的\nexplanation 里（对至少一个由数据驱动的检查，而不是只看 id）。\n\n【不要做的事】不要为了让 Gate 变绿而删除 / skip / 弱化任何测试、放宽 assertion、\n放大 timeout 或改动无关代码。\n\n四、relation version 被装进 snapshot 之后，绝大部分检查族都不看它（major）\n\n`internal/application/validation/guard.go:107` 明确把 `RelationVersions: relations` 填进了\n`Snapshot` —— 作者显然是想让关系版本也过检查的。但 `internal/rsg/validation/validator.go:144`\n的 per-object fan-out **只**遍历 `snap.ObjectVersions`：\n\n    case CheckSchemaKnown, CheckSchemaCore, CheckSchemaTyped,\n        CheckAuthoritativeFields, CheckIdentityFields, CheckRequiredFields,\n        CheckPayloadIntegrity:\n        for _, mv := range snap.ObjectVersions {\n\n我核对过：`spec.go` 里**一次都没有出现 relation**，所以没有任何 gate 的 spec 覆盖关系版本；\n整个仓库里 `RelationVersions` 的读点只有 `guard.go`（写）和 `checkStateLinkage`\n（`validator.go:377`，只有 state_linkage 这一族真的看了它）。\n\n后果是具体的：`CheckPayloadIntegrity` 在 main/release/asset 上都是 **blocking**\n（`spec.go:121/135/152`），而 `checkPayloadIntegrity`（`validator.go:356`）的签名只收\n`domain.ScientificObjectVersion`。一个 relation version 的 `Payload` 与 `IntegrityHash`\n（`internal/domain/relation.go:54-61`，注释和 object 侧逐字同义）在任何 gate 上都不会被核对。\n\n要求：**把这件事变成「决定过的」，而不是「看起来像忘了」**。二选一，都可以：\n\n(a) 把适用的检查族扩展到关系版本 —— payload_integrity 在 object 侧已经存在，关系版本 row 上\n    有逐字同义的字段和同一个 `docs/23 §3` 出处，把那个函数做成对二者通用的形状即可；\n(b) 如果你判断关系版本**本来就该在这些检查族之外**（比如它的 type 走 `relationcatalog`、\n    不走 schema registry），那么**不要**改行为，而是在代码里把这个判断写清楚 —— 在\n    `Snapshot.RelationVersions` 的注释或 `runCheck` 的 fan-out 处说明哪些族覆盖关系版本、\n    哪些不覆盖、为什么，并在 `RESULT.json` 里给出同一段理由。\n\n**不要发明新的产品语义**，也不要为了让某条 gate 变绿而放宽任何东西。规格里没有写关系版本在\ngate 上要满足什么的地方，就用 (b) 明说，不要猜。无论选哪条，**加一个测试钉住你的选择**：\n选 (a) 就钉住「关系版本 payload 对不上时在 blocking gate 上会被拦」；选 (b) 就钉住\n「这是有意的」——例如断言 `Snapshot` 的文档/行为与你的说明一致，或者断言关系版本确实只被\nstate_linkage 覆盖。**注意：不要用删测试、skip、放宽 assertion 的方式让这条变得\"通过\"。**\n",
       "history": [
         {
           "from": "todo",
@@ -1326,6 +1326,62 @@
           "to": "running",
           "at": "2026-09-13T23:49:56Z",
           "run_id": "run-d43f114afe24bae6",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-13T23:54:18Z",
+          "run_id": "run-1a15854091e2d345",
+          "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/fix/a-gate-must-not-grade-from-a-stale-binary *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-13T23:55:19Z",
+          "run_id": "run-60f0130e703a7d23",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-13T23:59:40Z",
+          "run_id": "run-56ccd43b6eeaff87",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T00:11:59Z",
+          "run_id": "run-7b60ee6bca21a119",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法用 `git apply` 应用到当前 main**。\n\n这仍然不是你的问题，也不是缺陷：`git apply` 不做三方合并。main 上 T0301 在你的 import 区块正中间插入了一行\n（`github.***`），你的四个新增 import 与它相邻，`git apply` 的上下文\n（config 紧跟 health）就对不上了。**同一件事用三方合并做是干净的、零冲突的** —— 所以这次不是要你改代码。\n\n**Supervisor 已完成**：我做了 rebaseline 本该做的事，只是用三方合并代替了 `git apply`：\n\n- 你的任务分支现在是当前 main（94914eb，含 T0301 的合并）加上你原样的完整改动；\n- 改动集合逐字未变：6 个修改文件（249 插入 / 14 删除）+ 19 个未跟踪文件，与推进前 `git status` 完全一致；\n- `cmd/api/main.go` 的 import 区块是两边合并的结果（T0301 的 gitprovider 与你的四个 import 都在，排序正确）；\n- `go build ./cmd/api/` 通过。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因为这次合并而失效\n（T0301 落地了 Gitea adapter 与 branch store，与你的 states/service.go 改动同处一片区域，值得真的跑一遍）；\n确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T00:11:59Z",
+          "run_id": "run-3005e6d8b35374a4",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T00:23:33Z",
+          "run_id": "run-2ff36be82759316c",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T00:26:43Z",
+          "run_id": "run-cf9f0cf455ed7e48",
+          "reason": "【返工 —— 三处必须修，都在你自己的交付范围内。这次是缺陷，不是基线问题。】\n\n一、required-field 检查对扩展 schema 完全失效（blocking）\n\n`internal/rsg/validation/validator.go:236` 在 default 分支里把\n`objectTypeName(mv.SchemaID)` 传给了 `checkRequiredFields`。而 `objectTypeName`\n(same file, 188-199) 取的是 schema id 的最后一段路径名，它自己的注释就写着\n\"It is only a label — the authoritative type is the schema's const\"。也就是说：\n一个被明确标注为「只是标签」的值，被用来做了一个语义判定。\n\n`RequiredFieldsFor` (`spec.go:186-210`) 只认 11 个 canonical 名字，所以任何注册进来的\n扩展 schema（T0201 的 Register、T0213 的 profile），只要它的 id 不巧正好长成\n`<type>.schema.json`，required-field 检查就静默失效。同一个文件 `validator.go:277`\n已经用对了写法：`v.reg.TypeConst(schemareg.Ref{ID: mv.SchemaID, Version: mv.SchemaVersion})`。\n\n实测复现（overlay，不写 worktree）：注册一个 v1 的\n`https://acme.example/schemas/hypothesis-ext.schema.json`，其\n`properties.type.const = \"hypothesis\"`，然后对 payload 为 `{\"statement\":\"probe\"}` 的版本\n在 `GateMain` 上 validate —— 结果 `verdict=pass blocked=false`，`required_fields: passed=true`。\n一个缺 `hypothesis_type`、缺 `scope` 的 hypothesis 通过了 main 的阻塞检查。\n而 `required_fields` 正是 main/release/asset 上的阻塞项，所以对扩展类型的对象来说，\n整条渐进式阶梯是空的。\n\n要求：required-field 的判定必须用 schema 的权威类型（registry 的 TypeConst），\n不能用 id 里的标签。权威类型取不到时**不得静默通过** —— 按这个检查自己的语义选择\nfail closed 或给出明确失败，但不要退回用标签。加测试钉住：一个注册了扩展 schema\n的对象，缺 required field 时在阻塞 gate 上必须被拦住。\n\n二、`:validate` 端点没有任何可见性判定（blocking）\n\n`cmd/api/validationhttp/handler.go:60` 只把路径参数交给了\n`h.svc.ValidateBranch(...)`。整个 `cmd/api/validationhttp` 和\n`internal/application/validation` 里没有任何 identity / membership / visibility 输入。\n\n后果（已按代码路径确认）：任何已登录用户（匿名是 401；POST 在\n`stateChangingMethods` 里，所以另需 session + CSRF）对**自己并非成员**的 private\nproject 发这个请求，会拿到完整报告：object type 名、object id、version 号、\nstate id、schema ref、以及哪些 required field 缺失。跨 project 的 404 边界是对的\n（不泄漏存在性），但 project 内部内容被无条件披露。\n\n这不是「新语义」，是这个仓库早就定好的规则没被套上：`cmd/api/authhttp/auth_wiring.go:69`\n写明契约是「reads flow (product reads decide their own visibility)」，而\n`stateChangingMethods` 只按动词划分，POST 的 `:validate` 落进了写守卫，写守卫只查\nsession + CSRF，于是没有人做成员判定。同族的读路径已有现成写法：\n`cmd/api/projectshttp/projects_handlers.go:115` 的 `reader(r)` 构造\n`projects.Reader`，配合 `internal/application/projects/service.go:192` 的 `requireRead`；\n`authhttp.PrincipalFrom(ctx)` 也已经在 (`auth_middleware.go:61`)。\n\n要求：套用既有写法，给这个路由加上「调用者能否读这个 project」的判定，private 且\n非成员返回不泄漏式 404，与 T0106 已经定下的语义保持一致。**不要发明新的权限语义**，\n也不要改权限矩阵本身。如果既有写法确实套不上这个路由，**停下来，在 RESULT.json 里\n把原因写清楚**，不要自己造一套。\n\n三、「可解释」这条验收标准没有被任何测试钉住（blocking —— 它是验收标准之一）\n\n把 `internal/rsg/validation/report.go:141` 里的 `(res.Why)` 删掉，\n`./internal/rsg/validation/...`、`./internal/application/validation/...` 和\n`./tests/integration` **全部仍然绿**。`validator_test.go:401` 只断言 explanation 里\n出现了 check id 这个名字，没有任何测试断言 `Spec.Why` 的文本真的进入了 explanation。\n\n验收标准是「不同 gate 严格度不同且可解释」。现在「可解释」可以静默回归成\n每条失败都没有理由。要求：加测试断言 `Spec.Why` 的文本出现在对应 Result 的\nexplanation 里（对至少一个由数据驱动的检查，而不是只看 id）。\n\n【不要做的事】不要为了让 Gate 变绿而删除 / skip / 弱化任何测试、放宽 assertion、\n放大 timeout 或改动无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T00:39:04Z",
+          "run_id": "run-106bf9fc80063829",
           "reason": "worker spawn"
         }
       ]
@@ -1451,10 +1507,11 @@
       ]
     },
     "T0301": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-13T23:39:37Z",
       "worker_run_id": "run-73fd7466e06b8c30",
       "accepted_by_supervisor_at": "2026-09-13T23:50:50Z",
+      "merged_at": "2026-09-13T23:53:45Z",
       "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（04fead6582b7），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
       "history": [
         {
@@ -1559,35 +1616,119 @@
           "to": "accepted",
           "at": "2026-09-13T23:50:50Z",
           "run_id": "run-f1928ebe6dac3f2b"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-13T23:53:45Z",
+          "run_id": "run-b2bef561bc30f2b4",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0302": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "merged",
+      "started_at": "2026-09-13T23:53:46Z",
+      "worker_run_id": "run-7585c9fc73d213ee",
+      "accepted_by_supervisor_at": "2026-09-14T00:31:44Z",
+      "merged_at": "2026-09-14T00:34:39Z",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-13T23:53:45Z",
+          "run_id": "run-2ee81cba142a52a7"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-13T23:53:46Z",
+          "run_id": "run-7585c9fc73d213ee",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T00:23:02Z",
+          "run_id": "run-8f2f50191d4a52d1",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T00:31:44Z",
+          "run_id": "run-42b446a93a03ab96"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T00:34:39Z",
+          "run_id": "run-e8def7f608cbbdd1",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T0303": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-14T00:35:23Z",
+      "worker_run_id": "run-22d6a5d12f4a8f68",
+      "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/fix/a-dependency-edge-must-bind-at-the-start *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-13T23:54:18Z",
+          "run_id": "run-229989c147ea7ffd"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-13T23:54:19Z",
+          "run_id": "run-cf8c0f1457ab774b",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T00:33:12Z",
+          "run_id": "run-028492aaa7549d81",
+          "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/fix/a-dependency-edge-must-bind-at-the-start *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T00:35:23Z",
+          "run_id": "run-22d6a5d12f4a8f68",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T00:40:24Z",
+          "run_id": "run-32b25404c9c5f10e",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T0304": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-14T00:23:35Z",
+      "worker_run_id": "run-12e21c5b798162c8",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T00:23:34Z",
+          "run_id": "run-573fc3380f4b3a0e"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T00:23:35Z",
+          "run_id": "run-12e21c5b798162c8",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0305": {
       "status": "todo",
