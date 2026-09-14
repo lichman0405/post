@@ -647,3 +647,112 @@ func TestWorkerGuardFilesGeneratedWithIsolation(t *testing.T) {
 	probe("own worktree read allowed", `{"tool_name":"Read","tool_input":{"file_path":"`+filepath.Join(repo, ".rddev", "worktrees", "T0001", "README.md")+`"}}`, false)
 	probe("credential store read blocked", `{"tool_name":"Read","tool_input":{"file_path":"/root/.git-credentials"}}`, true)
 }
+
+// A rejected task has no way to be told what to do next except the reason on
+// record — and the only writer of that reason is `task reject`, which cannot run
+// on a task that is already rejected (#126). `rework --reason-file` is that
+// door: the file's text becomes what the Worker reads, and it is recorded so the
+// trail stays append-only.
+func TestWorkerReworkCarriesTheSupervisorsReasonFile(t *testing.T) {
+	fakeClaudePath(t, "write")
+	t.Setenv("FAKE_CLAUDE_SECONDS", "2")
+	repo := fakeRepo(t)
+	defer stopAll(t, repo)
+
+	if code, out, errOut := runWorkerCLI(t, repo, "worker", "spawn", "T0001"); code != 0 {
+		t.Fatalf("spawn: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	waitFor(t, "T0001 to exit", func() bool { st, _ := listStatus(repo, "T0001"); return st == "exited" })
+
+	// The machine's reason: what the gate checked, not what to do about it.
+	const recorded = "result-consistency: a completed claim with 1 failing test is a contradiction"
+	if code, out, errOut := runWorkerCLI(t, repo, "task", "reject", "T0001", "--reason", recorded); code != 0 {
+		t.Fatalf("reject: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+
+	reasonPath := filepath.Join(t.TempDir(), "rework-reason.md")
+	const supervisors = "那条集成测试跑错了库：用 make test-integration，不要直接 go test ./tests/integration"
+	if err := os.WriteFile(reasonPath, []byte(supervisors+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// An empty file is a refusal, not a Worker dispatched with nothing to go on.
+	emptyPath := filepath.Join(t.TempDir(), "empty.md")
+	if err := os.WriteFile(emptyPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, _ := runWorkerCLI(t, repo, "worker", "rework", "T0001", "--reason-file", emptyPath); code == 0 {
+		t.Fatal("an empty --reason-file dispatched a rework")
+	}
+	if st, _ := listStatus(repo, "T0001"); st != "exited" {
+		t.Fatalf("the refused rework started something: %s", st)
+	}
+	if state := readTaskStatus(t, repo, "T0001"); state != "rejected" {
+		t.Fatalf("the refused rework moved the task to %s", state)
+	}
+
+	if code, out, errOut := runWorkerCLI(t, repo, "worker", "rework", "T0001", "--reason-file", reasonPath); code != 0 {
+		t.Fatalf("rework: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+
+	// The prompt is the artefact the Worker is started with: assert on it, not
+	// on the flag having been parsed.
+	prompt, err := os.ReadFile(filepath.Join(repo, ".rddev", "workers", "T0001", "prompt.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(prompt), "## Rework") {
+		t.Fatalf("the rework prompt has no Rework section:\n%s", prompt)
+	}
+	if !strings.Contains(string(prompt), supervisors) {
+		t.Errorf("the Worker's prompt does not carry the Supervisor's reason:\n%s", prompt)
+	}
+	if strings.Contains(string(prompt), recorded) {
+		t.Errorf("the prompt still carries the machine's reason instead of the Supervisor's:\n%s", prompt)
+	}
+
+	// Append-only: both rejections are on disk, and the newest one is the
+	// Supervisor's — which is what the NEXT rework will read.
+	entries, err := os.ReadDir(filepath.Join(repo, ".rddev", "runtime", "gates", "T0001"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejects := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "reject-") {
+			rejects++
+		}
+	}
+	if rejects != 2 {
+		t.Errorf("reject records on disk = %d, want 2 (the machine's and the Supervisor's)", rejects)
+	}
+	rec, ok, err := devorchestrator.LatestRecord[devorchestrator.RejectRecord](repo, "T0001", devorchestrator.RecordReject)
+	if err != nil || !ok {
+		t.Fatalf("reading back the reject record: ok=%v err=%v", ok, err)
+	}
+	if len(rec.Reasons) != 1 || !strings.Contains(rec.Reasons[0], supervisors) {
+		t.Errorf("the newest recorded reason is not the Supervisor's: %q", rec.Reasons)
+	}
+	reg := readRegistry(t, repo, "T0001")
+	if rec.RunID != reg["run_id"] {
+		t.Errorf("the reason is recorded against run %v but the rework runs as %v", rec.RunID, reg["run_id"])
+	}
+}
+
+// readTaskStatus reads one task's status out of the fixture's state file.
+func readTaskStatus(t *testing.T, repo, taskID string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repo, "tasks", "task_status.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Tasks map[string]struct {
+			Status string `json:"status"`
+		} `json:"tasks"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc.Tasks[taskID].Status
+}

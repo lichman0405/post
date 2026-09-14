@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/lichman0405/post/internal/devorchestrator"
 )
@@ -426,21 +425,7 @@ func (tr *taskRunner) reject(id, reason string) int {
 			return operationalError(tr.stderr, "rddev task reject", fmt.Errorf("resolving the repo root: %w", err))
 		}
 	}
-	// The evidence paths backing the rejection: the collect report (G1), the
-	// review verdict and the latest G2 record, whatever exists on disk.
-	evidence := []string{}
-	if rec, err := devorchestrator.LoadRegistry(repoRoot, id); err == nil && rec != nil {
-		report := filepath.Join(rec.ResultDir, "collect-report.json")
-		if _, err := os.Stat(report); err == nil {
-			evidence = append(evidence, report)
-		}
-	}
-	if rv, ok, err := devorchestrator.LatestRecord[devorchestrator.ReviewRecord](repoRoot, id, devorchestrator.RecordReview); err == nil && ok && rv.VerdictPath != "" {
-		evidence = append(evidence, rv.VerdictPath)
-	}
-	if g2, ok, err := devorchestrator.LatestGateRunRecord(repoRoot, id, "G2"); err == nil && ok {
-		evidence = append(evidence, filepath.Join(devorchestrator.GatesDir(repoRoot, id), devorchestrator.RecordGateRun+"-"+g2.RunID+".json"))
-	}
+	evidence := devorchestrator.RejectEvidence(repoRoot, id)
 	reasons := []string{reason}
 	if _, err := devorchestrator.WriteRecord(repoRoot, id, devorchestrator.RecordReject, tr.runID, devorchestrator.NewRejectRecord(id, tr.runID, reasons, evidence)); err != nil {
 		return operationalError(tr.stderr, "rddev task reject", err)

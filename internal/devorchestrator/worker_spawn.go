@@ -55,6 +55,17 @@ type SpawnOpts struct {
 	// ReworkReason is appended to the prompt (the rejection evidence the
 	// Worker must address).
 	ReworkReason string
+	// ReasonFile is the Supervisor's own sentence about why this rework was
+	// dispatched, read from a file (rework/respawn only). When set it replaces
+	// the reason that would be rendered from the newest RejectRecord, and is
+	// recorded as a RejectRecord itself so the trail stays append-only.
+	//
+	// It exists because a gate records what it checked, not what to do about
+	// it: after a collect rejection the only instruction the Worker could be
+	// given was the gate's own text, and the command that would have corrected
+	// it — `task reject` — cannot run on a task that is already rejected
+	// (#126).
+	ReasonFile string
 	// ResetWorktree discards the worktree's uncommitted diff before dispatch
 	// (respawn only — the rejected diff's evidence is already recorded).
 	ResetWorktree bool
@@ -917,6 +928,44 @@ func reworkReason(opts *SpawnOpts) string {
 	return "the recorded rejection reasons were not found on disk — inspect the collect report and gate records"
 }
 
+// reworkReasonFrom resolves the reason a rework/respawn prompt carries, and
+// records it when the Supervisor supplied one.
+//
+// Without --reason-file this is exactly reworkReason: the newest RejectRecord,
+// falling back to the state file. With it, the file *is* the reason: the
+// Supervisor has judged that the recorded text is the wrong instruction, and
+// the recorded text is what the Worker would otherwise read (#126 — a collect
+// rejection's message says what the gate checked, and correcting it was only
+// possible by writing a RejectRecord from a throwaway program).
+//
+// The file's content is written back as a RejectRecord before the dispatch, so
+// nothing about this is a side channel: the trail stays append-only, the old
+// record stays readable, and the next rework reads what this Worker read. The
+// run id is assigned here rather than in Spawn so the record and the run it
+// dispatched carry the same one — the sentence is evidence *about* that attempt.
+func reworkReasonFrom(opts *SpawnOpts) (string, error) {
+	if opts.ReasonFile == "" {
+		return reworkReason(opts), nil
+	}
+	data, err := os.ReadFile(opts.ReasonFile)
+	if err != nil {
+		return "", fmt.Errorf("reading --reason-file for %s: %w", opts.TaskID, err)
+	}
+	text := strings.TrimSpace(string(data))
+	if text == "" {
+		return "", fmt.Errorf("--reason-file %s is empty: refusing to re-dispatch %s with no reason at all", opts.ReasonFile, opts.TaskID)
+	}
+	if opts.RunID == "" {
+		opts.RunID = NewRunID()
+	}
+	evidence := RejectEvidence(opts.RepoRoot, opts.TaskID)
+	if _, err := WriteRecord(opts.RepoRoot, opts.TaskID, RecordReject, opts.RunID,
+		NewRejectRecord(opts.TaskID, opts.RunID, []string{text}, evidence)); err != nil {
+		return "", err
+	}
+	return text, nil
+}
+
 // ReworkWorker re-dispatches the SAME Worker on a rejected task (first
 // rejection policy): the session is resumed (context intact), the worktree
 // keeps its accumulated diff, the prompt carries the rejection evidence, and
@@ -929,8 +978,12 @@ func ReworkWorker(opts *SpawnOpts) (*SpawnResult, error) {
 	if err != nil || rec == nil {
 		return nil, fmt.Errorf("loading the previous Worker record for the rework: %w", err)
 	}
+	reason, err := reworkReasonFrom(opts)
+	if err != nil {
+		return nil, err
+	}
 	opts.ResumeSession = rec.SessionID
-	opts.ReworkReason = reworkReason(opts)
+	opts.ReworkReason = reason
 	opts.FromState = StateRejected
 	opts.ResetWorktree = false
 	return Spawn(opts)
@@ -944,8 +997,12 @@ func RespawnWorker(opts *SpawnOpts) (*SpawnResult, error) {
 	if err := requireRejectedAndExited(opts); err != nil {
 		return nil, err
 	}
+	reason, err := reworkReasonFrom(opts)
+	if err != nil {
+		return nil, err
+	}
 	opts.ResumeSession = ""
-	opts.ReworkReason = reworkReason(opts)
+	opts.ReworkReason = reason
 	opts.FromState = StateRejected
 	opts.ResetWorktree = true
 	return Spawn(opts)

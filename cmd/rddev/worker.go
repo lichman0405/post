@@ -26,6 +26,7 @@ Commands:
                worktree reset --hard + clean -fd (the rejected diff's evidence
                is already recorded), then a normal guarded dispatch; requires
                state rejected and the Worker exited
+               (rework and respawn both accept --reason-file, below)
   list         discover every Worker from disk: running / stale / exited, with
                stream-log growth for hang detection
   logs TASK    print the tail of the Worker's stream log
@@ -57,6 +58,15 @@ Flags:
                         e2e tests substitute a fake)
   --parallel N          concurrency limit for the gate (default 3, hard max 4)
   --lines N             logs: number of tail lines (default 50)
+  --reason-file PATH    rework|respawn only: the file's content becomes the
+                        reason the Worker reads, replacing the one rendered from
+                        the newest RejectRecord. Use it when the recorded reason
+                        is the wrong instruction — a gate reports what it
+                        checked, not what to do about it — which "task reject"
+                        cannot fix once the task is already rejected (#126).
+                        The text is recorded as a RejectRecord first, so the
+                        trail stays append-only; the file's own path is not
+                        recorded. An empty file is refused.
 
 Parallelism is default 3, hard max 4 (specs/orchestrator/rddev-cli.yaml).
 Workers are genuine separate claude processes, one per task worktree — never
@@ -83,6 +93,7 @@ func runWorker(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		flagSpec{"--claude-bin", true},
 		flagSpec{"--parallel", true},
 		flagSpec{"--lines", true},
+		flagSpec{"--reason-file", true},
 	)
 	if err != nil {
 		return usageError(stderr, err.Error(), workerUsage)
@@ -158,7 +169,10 @@ func buildSpawnOpts(vals map[string]string, taskID, repoRoot string, stderr io.W
 		Model:     vals["--model"],
 		Effort:    vals["--effort"],
 		RunID:     vals["--run-id"],
-		Docker:    vals["--docker"] != "",
+		// Only rework/respawn read this; a first spawn has no rejection to
+		// explain, and Spawn itself never consults it.
+		ReasonFile: vals["--reason-file"],
+		Docker:     vals["--docker"] != "",
 		Bare:      vals["--bare"] != "",
 		ClaudeBin: vals["--claude-bin"],
 	}

@@ -112,6 +112,32 @@ type RejectRecord struct {
 	Evidence []string `json:"evidence,omitempty"`
 }
 
+// RejectEvidence returns the paths of the gate records that back a rejection of
+// taskID, as far as they exist on disk: the collect report (G1), the newest
+// Review Worker verdict, and the newest G2 gate run. They are recorded next to
+// the reasons so the Worker can read what the sentence refers to — a rejection
+// that says "the export is wrong" is only actionable if the verdict it came
+// from is reachable.
+//
+// Both writers of a RejectRecord use this: `rddev task reject`, and the rework
+// path that carries a Supervisor-supplied reason file (#126).
+func RejectEvidence(repoRoot, taskID string) []string {
+	evidence := []string{}
+	if rec, err := LoadRegistry(repoRoot, taskID); err == nil && rec != nil {
+		report := filepath.Join(rec.ResultDir, "collect-report.json")
+		if _, err := os.Stat(report); err == nil {
+			evidence = append(evidence, report)
+		}
+	}
+	if rv, ok, err := LatestRecord[ReviewRecord](repoRoot, taskID, RecordReview); err == nil && ok && rv.VerdictPath != "" {
+		evidence = append(evidence, rv.VerdictPath)
+	}
+	if g2, ok, err := LatestGateRunRecord(repoRoot, taskID, "G2"); err == nil && ok {
+		evidence = append(evidence, filepath.Join(GatesDir(repoRoot, taskID), RecordGateRun+"-"+g2.RunID+".json"))
+	}
+	return evidence
+}
+
 // NewRejectRecord builds a rejection evidence record from outside the package
 // (rddev task reject): the CLI supplies the content, the engine stamps the
 // common record header.
