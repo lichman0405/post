@@ -8029,3 +8029,29 @@ owner：下次改 `rddev` 的 spawn 时，把这两条分开报（例如"Worker 
 就得连生成物一起重新生成"，而任务包的 `allowed_scope` **可能没给生成物那一格**（T1006 这一轮就是）——
 两句话自相矛盾。T1006 这一次仍按 L1-89/L1-91 的老办法在**渲染后补记录**过关；
 **根治**是把 `internal/persistence/sqlc/**` 写进 `tasks/tasks.json` 的 T1006 条目（下次 DAG 编辑时做）。
+
+## L1-20260915-93 —— 把 persistence 层补进 DAG（P4/T0404、P10/T1006）：根治 L1-89/92 记下的那处自相矛盾
+
+2026-09-15 02:08，main `433fbc0`（与重新生成的 marker 同一次提交）。
+
+**触发**：T0404（Scientific Review）的 collect 拒了 5 条路径、T1006（Signed Webhooks）拒了 2 条，
+**全在 `internal/persistence/**` 下**（T0404：`queries/issues_prs.sql`、`review_store.go`、
+`sqlc/{issues_prs.sql.go,models.go,querier.go}`；T1006：`sqlc/{events_audit.sql.go,models.go}`）。
+两个任务要交付的存储层本来就是它自己的正常组成部分——而 DAG 里 P4/P10 的 phase 级默认上限
+**整层都漏了**。形状与 8b98cb7（T0402/T1001）完全一样，只是那次只补了两个任务、没补机制。
+
+**为什么这次不再手改收件记录**（L1-89/L1-91/L1-92 的老办法）：`allowed_scope` 是从 DAG 渲染进任务包的
+（`worker_render.go:49` 直接取 task spec 的 `AllowedScope`），而 `spawn`/`rework` 每次都会**重新渲染并重写**
+`gate-inputs.json`（`worker_spawn.go` 步骤 4/5b）。手改的记录在返工那一轮就被这次渲染冲掉，
+于是同一个任务**每返工一轮就被同样地拒一次**。根因在 DAG，不在记录——所以这次改 DAG。
+
+**这一行不能单独提交**（L1-74）：`tasks/tasks.json` 是 `scripts/spec_version.py` 的输入，
+提交它必须**同一次**重新生成 `specs/SPEC_VERSION.json`（否则 CI 的 spec-validation 在 main 上变红）；
+而提交它本身会把 marker 挪到新值，**废掉所有"已前移、未验收"任务的补丁**。所以它只在一次
+自己就会移动 marker 的合并之后的那一瞬间提交（这次是 T0606 合并 `659c71a` 之后，此刻链上各节
+本来就要重新前移，代价为零）。工具：`$TMP/commit-scope-window-t0404.sh`，检查按**形状**写
+（只许插入 scope glob、必须附 marker、本地 main 必须与 origin/main 齐平、插入的行必须正是这两条），
+不按"某个具体行"写——8b98cb7 那次的教训是一个只认单行的窗口会在它唯一存在的时刻拒绝第二个真需要它的人。
+
+**没有预先放宽的东西**：P4 其余任务（T0405/T0406）与 P10 其它任务**没有证据**说要写 persistence，
+不预先放宽。下次它们真的被拒，再和下一次 marker 移动一起批量补——同一把工具、同一个窗口。
