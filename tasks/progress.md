@@ -1,5 +1,45 @@
 # 开发进度
 
+> **18:56 当前这一刻**：
+> **链条已经走到第 3 节（T0501），它在返工；T0213、T0405 都已合并。**
+> 进度数字：**P0、P1 全部完成**；P2 12/15、P3 7/9、P4 2/10；合计 **47/133 已合并**。
+>
+> | 链条节 | 迁移号 | 现在 |
+> |---|---|---|
+> | 1. T0209 | 00036 | 已合并（16:42，PR #176） |
+> | 2. T0213 | 00038 | 已合并（18:25，PR #180） |
+> | 3. T0501 | 00040 | **返工中（第 3 轮）** —— 见下 |
+> | 4–6. T0502 / T0306 / T0505 | 00041 / 00042 / 00043 | 排队；上一节一合并，工具自动把下一节的改动挪到最新主线上 |
+> | 7–9. T0508 / T1001 / T0309 | 00045 / 00046 / 00047 | 尾部，链条走完自动轮到 |
+>
+> **T0501 这一节的判断（今天新出的）**：它给两条"知识关系"加了数据库层的限制 ——
+> "哪类对象才可以指向研究问题"。这条限制**把主线自己已经合进去的用法当场拒掉了**
+> （T0209 的测试红了：一种叫 finding 的对象本来就该能指向研究问题）。
+> 我查了规格：核心关系的清单里**只有名字**，这种"谁指向谁"的额外限制**没有出处** ——
+> 规格里"必须逐条声明两端类型"那条规矩是写给**自定义关系**的，不是写给核心关系的。
+> 裁定：**撤掉它自己加的那半边限制**（"谁可以指过来"这半边；"指向什么"这半边名字里写着，保留）。
+> **它这轮的 Worker 做得对**：发现红、没有去偷偷改测试、如实报红交回来 —— 这正是要的。
+> 返工信 18:52 已发出。底下真正的产品问题（核心关系要不要逐条声明两端类型）我**没有**替谁拍板，
+> 记成了 **issue #183** 留给 owner，不挡路。
+>
+> **T0211 的返工刚回来（18:55），复核在跑**：它改的是"对象升过版之后总览页说假话"
+> （说一个其实在本项目里的东西"不在本项目里"）。这轮它选了把解析改对（不是改文案），
+> 顺带把上次那条小毛病也修了；按机器的规矩，代码一变旧复核作废，新的复核刚派出去。
+>
+> **T0405 我当场量过、不碍事**（18:50 合并，PR #182）：它只改了冲突检测那块代码，
+> **没有碰**那两个决定"全仓库摘要"的输入文件，所以**没有**让任何正在排队的改动作废。
+> T0407（冲突解决界面）也开跑了；T0606 在复核中；T0402 排在链尾等 T0309 落地
+> （它带的迁移号更大，插不到前面去 —— 号序是硬规矩，不是排班）。
+>
+> **一件要你知道、我绕不过去的事**：共享开发数据库 `post` 仍然是坏的（被别人升到版本 40、
+> 却缺 34/35，就地升级会被工具拒绝）。我**没有**去动它 —— 删库重建需要你**明确点名**这个库；
+> 它不挡自动测试（那些测试各自建一次性的库，用完就删）。
+>
+> 下一步不用你管：链条自己往前走（T0501 一落地，工具给 T0502 挪基线；碰到真冲突我手工合），
+> 尾部三个号跟在后面，T0402/T0606 排最后。有必须你拍板的事我再喊你。
+
+<details><summary><b>17:41 那一刻</b></summary>
+
 > **17:41 当前这一刻**：
 > **先回答你交代的那件事：P1 已经全部完成** —— P1 的 10 个任务（T0101…T0110）**全部合并**，一个不剩。
 > 现在做的是它后面的阶段：P2（15 个里 11 个已合并）、P3（9 个里 7 个）、P4（10 个里 1 个）。
@@ -51,6 +91,8 @@
 > **一件要你知道、我绕不过去的事**：共享开发数据库 `post` 仍然是坏的（版本 40、缺 34/35），
 > `make migrate` 会拒绝。修它需要**你点名**那个库、允许我删掉重建 —— 没有这一步我不动它。
 > 这件事**不挡**现在的进度（集成测试用各自的一次性库），但迟早要修。
+
+</details>
 
 <details><summary><b>17:26 那一刻</b></summary>
 
@@ -1438,9 +1480,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-14T07:14:40Z
+生成时间：2026-09-14T10:54:55Z
 
-状态分布：todo 83 · ready 1 · running 2 · worker_failed 0 · verification 1 · rejected 6 · blocked 0 · accepted 0 · merged 40（合计 133/133 个任务）
+状态分布：todo 75 · ready 0 · running 3 · worker_failed 0 · verification 4 · rejected 4 · blocked 0 · accepted 0 · merged 47（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1473,14 +1515,14 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0203 | Typed Relation repository | P2 | merged | 2026-09-13T17:22:20Z |  | 2026-09-13T17:40:44Z | 2026-09-13T17:47:30Z |
 | T0204 | Project State 与 State Commit | P2 | merged | 2026-09-13T22:10:18Z |  | 2026-09-13T22:52:41Z | 2026-09-13T22:56:15Z |
 | T0205 | Research Branch Domain | P2 | merged | 2026-09-13T22:56:16Z |  | 2026-09-13T23:23:26Z | 2026-09-13T23:26:23Z |
-| T0206 | RSG Manifest 导出与 hash | P2 | verification | 2026-09-14T07:01:46Z |  |  |  |
+| T0206 | RSG Manifest 导出与 hash | P2 | merged | 2026-09-14T07:01:46Z |  | 2026-09-14T07:47:19Z | 2026-09-14T07:50:40Z |
 | T0207 | Progressive Validation Gates | P2 | merged | 2026-09-14T00:39:04Z |  | 2026-09-14T01:13:29Z | 2026-09-14T01:32:13Z |
 | T0208 | V1 Scientific Object Domain Services | P2 | merged | 2026-09-14T01:33:06Z |  | 2026-09-14T02:37:28Z | 2026-09-14T02:41:06Z |
-| T0209 | RSG Query API | P2 | rejected | 2026-09-14T06:33:30Z |  |  |  |
+| T0209 | RSG Query API | P2 | merged | 2026-09-14T08:22:52Z |  | 2026-09-14T08:39:32Z | 2026-09-14T08:42:52Z |
 | T0210 | Scientific Object Detail UI | P2 | merged | 2026-09-14T04:52:41Z |  | 2026-09-14T05:08:10Z | 2026-09-14T05:11:18Z |
-| T0211 | Research Outline 与基础 Research 页面 | P2 | todo |  |  |  |  |
+| T0211 | Research Outline 与基础 Research 页面 | P2 | running | 2026-09-14T10:46:47Z |  | 2026-09-14T10:42:36Z |  |
 | T0212 | Project Overview Research Summary | P2 | todo |  |  |  |  |
-| T0213 | Project Schema Extension 与 Custom Metadata | P2 | rejected | 2026-09-14T05:00:30Z |  |  |  |
+| T0213 | Project Schema Extension 与 Custom Metadata | P2 | merged | 2026-09-14T09:33:12Z |  | 2026-09-14T10:22:06Z | 2026-09-14T10:25:27Z |
 | T0214 | 官方材料研发 Project Templates | P2 | todo |  |  |  |  |
 | T0215 | 版本计数 backfill 的数据级升级断言（00024 + 00025） | P2 | merged | 2026-09-13T18:06:02Z |  | 2026-09-13T18:55:01Z | 2026-09-13T19:03:58Z |
 | T0301 | Gitea adapter 与 repo provisioning | P3 | merged | 2026-09-13T23:39:37Z |  | 2026-09-13T23:50:50Z | 2026-09-13T23:53:45Z |
@@ -1490,34 +1532,34 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0305 | Push Webhook 与 Semantic Ingestion | P3 | merged | 2026-09-14T05:30:41Z |  | 2026-09-14T05:55:09Z | 2026-09-14T05:58:23Z |
 | T0306 | Unstructured Change 状态 | P3 | rejected | 2026-09-14T06:55:53Z |  |  |  |
 | T0307 | Files Tree/Preview API | P3 | merged | 2026-09-14T06:06:52Z |  | 2026-09-14T06:52:08Z | 2026-09-14T06:56:45Z |
-| T0308 | 只读 Files Web UI | P3 | running | 2026-09-14T07:02:46Z |  |  |  |
-| T0309 | Git ↔ RSG reconciliation | P3 | todo |  |  |  |  |
-| T0401 | Research State Diff 引擎 | P4 | todo |  |  |  |  |
-| T0402 | Pull Request Domain | P4 | todo |  |  |  |  |
+| T0308 | 只读 Files Web UI | P3 | merged | 2026-09-14T07:02:46Z |  | 2026-09-14T07:47:08Z | 2026-09-14T07:50:21Z |
+| T0309 | Git ↔ RSG reconciliation | P3 | rejected | 2026-09-14T07:50:42Z |  |  |  |
+| T0401 | Research State Diff 引擎 | P4 | merged | 2026-09-14T08:24:01Z |  | 2026-09-14T09:05:38Z | 2026-09-14T09:08:52Z |
+| T0402 | Pull Request Domain | P4 | verification | 2026-09-14T10:13:57Z |  |  |  |
 | T0403 | Integrity Review Checks | P4 | todo |  |  |  |  |
 | T0404 | Scientific Review 模型 | P4 | todo |  |  |  |  |
-| T0405 | Semantic Conflict Detector | P4 | todo |  |  |  |  |
+| T0405 | Semantic Conflict Detector | P4 | merged | 2026-09-14T10:19:26Z |  | 2026-09-14T10:46:43Z | 2026-09-14T10:50:01Z |
 | T0406 | Semantic Merge Engine | P4 | todo |  |  |  |  |
-| T0407 | Scientific Conflict Resolution UI | P4 | todo |  |  |  |  |
+| T0407 | Scientific Conflict Resolution UI | P4 | running | 2026-09-14T10:50:03Z |  |  |  |
 | T0408 | PR Research Diff UI | P4 | todo |  |  |  |  |
 | T0409 | Merge Governance 与 frozen main 更新 | P4 | todo |  |  |  |  |
 | T0410 | PR/Branch 完整 E2E | P4 | todo |  |  |  |  |
-| T0501 | Research Question 与 Hypothesis 关系模型 | P5 | rejected | 2026-09-14T05:41:47Z |  |  |  |
+| T0501 | Research Question 与 Hypothesis 关系模型 | P5 | running | 2026-09-14T10:52:04Z |  |  |  |
 | T0502 | Claim 结构与 scope | P5 | rejected | 2026-09-14T05:42:31Z |  |  |  |
 | T0503 | Finding 聚合模型 | P5 | todo |  |  |  |  |
 | T0504 | Evidence Assertion Domain | P5 | todo |  |  |  |  |
 | T0505 | Provenance Graph Projection | P5 | rejected | 2026-09-14T06:34:55Z |  |  |  |
 | T0506 | Evidence Graph Projection | P5 | todo |  |  |  |  |
 | T0507 | Evidence/Provenance UI | P5 | todo |  |  |  |  |
-| T0508 | External Reference live identity + snapshot | P5 | running | 2026-09-14T07:09:08Z |  |  |  |
+| T0508 | External Reference live identity + snapshot | P5 | verification | 2026-09-14T07:09:08Z |  |  |  |
 | T0509 | Literature evidence extraction data model | P5 | todo |  |  |  |  |
 | T0510 | Knowledge workflow E2E | P5 | todo |  |  |  |  |
 | T0601 | Freeze Main Governance | P6 | todo |  |  |  |  |
 | T0602 | Abort/Reopen State Transition | P6 | todo |  |  |  |  |
 | T0603 | Organization/Project Policy Engine | P6 | merged | 2026-09-14T03:42:50Z |  | 2026-09-14T04:09:38Z | 2026-09-14T04:12:31Z |
 | T0604 | Scientific Responsibility / Reviewer Routing | P6 | todo |  |  |  |  |
-| T0605 | Release Manifest Builder | P6 | todo |  |  |  |  |
-| T0606 | Immutable Release API/UI | P6 | todo |  |  |  |  |
+| T0605 | Release Manifest Builder | P6 | merged | 2026-09-14T08:39:33Z |  | 2026-09-14T09:24:39Z | 2026-09-14T09:33:18Z |
+| T0606 | Immutable Release API/UI | P6 | verification | 2026-09-14T09:37:57Z |  |  |  |
 | T0607 | Activity/Audit Timeline 增强 | P6 | todo |  |  |  |  |
 | T0608 | Release/Abort/Policy E2E | P6 | todo |  |  |  |  |
 | T0609 | Project Milestone 基础 | P6 | todo |  |  |  |  |
@@ -1552,7 +1594,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0906 | Evidence-backed Answer Generator/API | P9 | todo |  |  |  |  |
 | T0907 | Search Answer Web UI | P9 | todo |  |  |  |  |
 | T0908 | Search → Draft Research Context | P9 | todo |  |  |  |  |
-| T1001 | Transactional Outbox | P10 | ready |  |  |  |  |
+| T1001 | Transactional Outbox | P10 | verification | 2026-09-14T08:41:35Z |  |  |  |
 | T1002 | Subscription Model / Follow/Watch | P10 | todo |  |  |  |  |
 | T1003 | Web Research Inbox | P10 | todo |  |  |  |  |
 | T1004 | RSS/Atom Feeds | P10 | todo |  |  |  |  |
