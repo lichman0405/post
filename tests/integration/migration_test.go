@@ -308,6 +308,22 @@ var canonicalTables = map[string]tableExp{
 		checks:  []string{"size_bytes >= 0", "integrity_state = ANY"},
 		fks:     []fkExp{fk("created_by", "users", "RESTRICT")},
 	},
+	"claims": {
+		// T0502: the structured claim projection (00041) — one row per
+		// claim version, the schema's claim_type/assessment enums as
+		// CHECKs and the jsonb fields pinned to their jsonb_typeof.
+		cols: []colExp{
+			c("version_id", u, false, false), c("object_id", u, false, false),
+			c("claim_type", txt, false, false), c("subject_ref", txt, true, false),
+			c("property", txt, true, false), c("value", jb, true, false),
+			c("scope", jb, false, true), c("scope_conditions", jb, false, true),
+			c("basis", jb, false, true), c("assessment", txt, true, false),
+			c("created_at", ts, false, true),
+		},
+		pk:     []string{"version_id"},
+		checks: []string{"claim_type = ANY", "assessment = ANY", "jsonb_typeof(scope) = 'object'", "jsonb_typeof(scope_conditions) = 'array'", "jsonb_typeof(basis) = 'array'"},
+		fks:    []fkExp{fk("version_id", "scientific_object_versions", "RESTRICT"), fk("object_id", "scientific_objects", "RESTRICT")},
+	},
 	"blob_attachments": {
 		// state_id is the T0206 addition (00035): the state the attachment
 		// was created in, like every member row (object versions, relation
@@ -488,7 +504,15 @@ var explicitIndexes = map[string][]string{
 	"policy_versions_project_version_idx": {"project_id", "UNIQUE"},
 	// T0213: profile resolution paths (00038) — the newest registered
 	// version of (project, schema id), keyset-ordered.
+	// T0502: claim projection query paths (00041) — by object, by type,
+	// by subject (partial: only rows that name one), and GIN over the
+	// normalized scope conditions and the declared bases.
 	"project_schema_profiles_project_idx": {"project_id", "schema_id", "created_at"},
+	"claims_object_idx":                   {"object_id"},
+	"claims_type_idx":                     {"claim_type"},
+	"claims_subject_idx":                  {"subject_ref", "WHERE"},
+	"claims_scope_conditions_gin":         {"USING gin", "scope_conditions"},
+	"claims_basis_gin":                    {"USING gin", "basis"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded

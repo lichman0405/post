@@ -18,17 +18,24 @@
 //     it (task acceptance criterion). Hints are returned to the caller as
 //     advisory text; they never fail a command.
 //
-// Every check operates on the fields the V1 schemas actually define
-// (specs/schemas/, the registry's truth): the docs/08 field lists are the
-// long-term vocabulary, and where a field has not made it into the V1
+// Every payload-level check operates on the fields the V1 schemas actually
+// define (specs/schemas/, the registry's truth): the docs/08 field lists are
+// the long-term vocabulary, and where a field has not made it into the V1
 // schema (e.g. experiment start/end), there is no semantic check on it —
 // the schema stays the single authority on what a payload may carry.
+// T0502 adds the structured claim checks (CheckClaimStructure): they run
+// on the structured claim model (internal/domain.Claim) whose basis field
+// the schema does not carry yet, and the payload path delegates the fields
+// it has (see checkClaim).
 package semantics
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/lichman0405/post/internal/domain"
 )
 
 // Hint is one advisory semantic observation about a payload. It is rendered
@@ -79,22 +86,64 @@ func Check(objectType, ownObjectID string, payload map[string]any) (errs []error
 // no NLP judgement and NEVER hard-fails: whether the statement is one claim
 // or several is a reviewer's scientific call (task acceptance criterion:
 // "Claim atomicity只做提示不硬 NLP 判断").
+//
+// On top of atomicity it runs the claim structure checks (T0502,
+// CheckClaimStructure) over the payload's own fields. The schema payload
+// has no basis field, so the basis arrives empty here: a causal claim
+// written through the payload-only path is exactly the missing-basis case
+// docs/10 §5 warns about, until a later task gives the write path a basis
+// channel (the structured check is already basis-aware).
 func checkClaim(payload map[string]any) ([]error, []Hint) {
+	var errs []error
+	var hints []Hint
+
 	statement, _ := payload["statement"].(string)
 	statement = strings.TrimSpace(statement)
-	if statement == "" {
-		return nil, nil
+	if statement != "" {
+		clauses := splitSentences(statement)
+		if joinsIndependentClauses(clauses) {
+			hints = append(hints, Hint{
+				Code: HintClaimCompound,
+				Message: "this claim statement reads like several independently judgeable propositions " +
+					"(a reviewer could agree with one part and disagree with another). " +
+					"docs/08: consider splitting it into one claim per proposition, so each claim stays independently supported or contested.",
+			})
+		}
 	}
-	clauses := splitSentences(statement)
-	if !joinsIndependentClauses(clauses) {
-		return nil, nil
+
+	claim := claimFromPayload(payload)
+	structErrs, structHints := CheckClaimStructure(claim)
+	errs = append(errs, structErrs...)
+	hints = append(hints, structHints...)
+	return errs, hints
+}
+
+// claimFromPayload lifts the claim fields the payload carries into a
+// structured claim. Fields the payload cannot carry (the causal basis)
+// stay empty — CheckClaimStructure treats that as "not declared", which
+// is the missing-basis warning case.
+func claimFromPayload(payload map[string]any) domain.Claim {
+	var c domain.Claim
+	if s, ok := payload["claim_type"].(string); ok {
+		c.Type = domain.ClaimType(s)
 	}
-	return nil, []Hint{{
-		Code: HintClaimCompound,
-		Message: "this claim statement reads like several independently judgeable propositions " +
-			"(a reviewer could agree with one part and disagree with another). " +
-			"docs/08: consider splitting it into one claim per proposition, so each claim stays independently supported or contested.",
-	}}
+	c.Scope = payloadRaw(payload, "scope")
+	return c
+}
+
+// payloadRaw re-encodes one payload value as exact JSON bytes (the
+// payload arrived decoded, so a typed round-trip is the way back to the
+// stored form).
+func payloadRaw(payload map[string]any, key string) json.RawMessage {
+	v, ok := payload[key]
+	if !ok || v == nil {
+		return nil
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 // splitSentences splits a statement into its sentence-like clauses on
