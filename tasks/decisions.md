@@ -5219,3 +5219,33 @@ T0603 的 00033 就自动"合法" ✓。**要按合入当时的头号重新判�
 要么把 blocking 贬成 major ✓ —— **两种都是把分级做废** ✓。
 正确的分工是 ✓：**复核判"是否满足契约"** ✓，**"我不接受某个 major"是 Supervisor 的判断** ✓，
 而 Supervisor 手上有**两个可用杠杆**（Gate 期间动手 ✓ / 收下后撤回 ✓）✓ —— 都验过 ✓。
+
+## L1-20260914-33 — T0304 的 push 分叉**已按不改写历史的方式解决**（执行完成，非方案）
+
+**结果** ✓：`./bin/rddev git push T0304` → **`git push ok — pushed (gate status passed)`** ✓。
+**没有 force-push** ✓、**没有改写远端历史** ✓、**没有绕过 `rddev`** ✓（gate 由它自己断言 ✓）。
+全程按 `L1-20260914-30` 里事先验过的路径执行 ✓ —— 那条记的是**方案** ✓，这条记的是**结果** ✓。
+
+**执行序列（每一步都有校验 ✓）** ✓：
+① 确认 `C = 98674ca`（"[T0304] Git 用户认证/PAT/SSH key 基础" ✓，父 `ee58f2c` ✓）、worktree 干净 ✓、远端仍是 `1763190` ✓、
+且 `1763190` **不是** `C` 的祖先 ✓（`git merge-base --is-ancestor` 直说 ✓）；
+② 造 `M = e6e9566` ✓：`git commit-tree <C 的树> -p C -p 1763190` ✓；
+③ **三条校验全过** ✓：`M` 的树 == `C` 的树 ✓、`1763190` 成为祖先 ✓、worktree 仍干净 ✓；
+④ `git update-ref` 移动本地分支 ✓；⑤ `rddev git push` ✓。
+
+**动手前把"覆盖不丢东西"核到了行（不是估的）** ✓：
+`git diff a59cadd 1763190` 与 `git diff ee58f2c 98674ca` **逐文件行数完全一致** ✓
+（同样 20 个文件、3779 增、6 删 ✓）；
+再把两份 patch 的增删行逐行比 —— **实质差异只有 12 行，全部是生成物的摘要值** ✓
+（`SPEC_VERSION.json` 的 `combined_digest` ✓、`postgres.sql` 摘要 ✓、`spec_version` marker ✓）。
+**差异的原因是两者基线不同** ✓（`a59cadd` vs `ee58f2c` ✓，中间 main 前进过 ✓），
+所以重新生成时摘要**必然**不同 ✓ —— 不是内容缺失 ✓。
+**结论：C 是 1763190 的严格超集** ✓。
+
+**一个值得记的细节** ✓：行数一致**不等于**内容一致 ✓ ——
+生成物摘要变了但行数不变 ✓。**我做了第二步（逐行比 patch）才敢下"不丢东西"的结论** ✓。
+只比 `--stat` 就下结论，正是 `L1-20260914-32` 里我犯过的那类错（该看的东西没看到位 ✓）。
+
+**顺手清掉了一条过时决策** ✓：`T0304 push` ✓（`rddev drive --clear-decision T0304` ✓）——
+驱动把 push 失败记成决策后不再重试 ✓，而我用同样的 `rddev git push` 把它做成了一次**成功的推送** ✓，
+**条件已经消失** ✓，正是 `--clear-decision` 的用途 ✓（"the Supervisor says the condition is gone rather than the driver guessing" ✓）。
