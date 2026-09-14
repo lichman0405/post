@@ -7846,3 +7846,47 @@ T0406 的 dependencies 里的引用同时去掉；`tests.json` / `gates.json` �
 并照旧**先证明它们能红**（把两道闸裁掉跑同一套：这两个用例 FAIL，其余 12 个照过，
 `prove-drain-gates-can-fail.py`）。九个任务的信已经逐封核过（迁移号对不对、复核每条意见有没有落处、
 不许弱化测试那条在不在、是不是上一轮那封——`check-letters-ready.py`），确认过的才放闸。
+
+## L1-20260914-89 —— T1006 的任务包少了 `internal/persistence/sqlc/**` 一格（权威记录我补齐了，DAG 留给下次编辑）
+
+### 一、发生了什么
+
+T1006（Signed Webhooks，迁移 `00059`）交付的 diff 是**对的**，collect 却拒了它：`status: completed`
+加一条 `failed` 条目（`go test ./tests/integration -count=1`）。那条红是
+`TestSQLCGenerationDrift`：`00059` 给 `outbox_events` 加的那一列会出现在**既有** outbox 查询的
+`RETURNING` 列表里，所以 `internal/persistence/sqlc` 这个生成物会动。Worker 的处理**完全正确**：
+它写了"`internal/persistence/**` 不在我的 scope 里，我不写；这是合并时重新生成的派生件"，
+并把它记成了 `failed`。**它拒得对——问题在任务包。**
+
+### 二、根因：任务包少了一格（不是 Worker 越界，也不是它偷懒）
+
+`allowed_scope` 里没有 `internal/persistence/sqlc/**`，可这个任务的迁移**就会动它**。
+先例是 **T1001**：同样是 outbox + 一条迁移，它的 scope 里有这一格。
+`specs/orchestrator/derived-artifacts.json` 里给 sqlc 的注释也把这件事写明了：marker 故意不是
+`infra/migrations/**`（"迁移不动它时不该要求每个迁移任务覆盖它"），而**迁移真的动了它**时，
+"`check-sqlc-drift` 就是在合并那一刻抓它的那个检查"。
+
+### 三、我改了什么，以及为什么**没有**现在动 `tasks/tasks.json`
+
+- 改了（都是 Supervisor 侧的**运行时**记录，`git check-ignore` 确认 `.rddev/` 不入库）：
+  `.rddev/runtime/tasks/T1006/gate-inputs.json` 的 `allowed_scope`，以及两份必须逐字节相同的
+  `task-package.json`（`.rddev/runtime/tasks/T1006/` 与 `.rddev/workers/T1006/`）。
+  **两份一起改**是为了让 collect 的 gate-input tamper 判据继续有意义：权威记录与 Worker 可写副本
+  一致，而"Worker 自己改 scope"这件事仍然会被抓住。
+- **没有**动 `tasks/tasks.json`：它是 `specs/SPEC_VERSION.json` 的输入，动它就要重新生成标记，
+  而在飞任务的补丁都带着那个标记 → 合并前的 apply 会在 `specs/SPEC_VERSION.json:1` 冲突
+  （`bin/rddev status` 里那六条 phase-3 的 `accept` 决定就是这个形状），**链子上正在跑的那一环要为此
+  白跑一整轮**。T1006 不在链子上、链子是我的主干，所以：**DAG 那一格记在这里，下次编辑 DAG 时一并补**
+  （`tasks/tasks.json` 里 T1006 的 `allowed_scope` 后面加一项 `internal/persistence/sqlc/**`，
+  照 T1001 的位置摆在 `internal/application/**` 之后）。在补上之前，**权威记录就是生效的 scope**。
+
+### 四、这条规矩，以及一条不许越的线
+
+- **规矩（写进下一轮任务包模板的检查单）**：一个任务的改动**动了**某个派生件时，它的 scope 必须有
+  那一格。派生件由 marker 推出来，而"迁移会不会动 sqlc"恰恰是派生规则**故意**不覆盖的那一种——
+  所以这不是自动能查出来的，是**派任务时要看出来的**：改了迁移、且被改的表/列出现在既有查询里，
+  就把 `internal/persistence/sqlc/**` 加进去。
+- **不许越的线**：把一条红"搬进 evidence"**只在这条红是按设计预期、且机械修复真的被执行了**时才成立。
+  T1006 这一轮两者都成立（红是派生件漂移；`gen_sqlc.sh` 就是那个机械修复），而**修复由有权的一方执行**
+  （scope 补上之后再重新生成），不是把红藏起来就完事。这条与 T0508 那次"探针红"是**不同**的两种情况，
+  别混：探针红是"证明守卫能失败"，这一条是"派生件待机械重生成"。
