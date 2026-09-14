@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -203,8 +204,14 @@ func (s *ScientificObjectStore) GetObject(ctx context.Context, objectID string) 
 	return objectFromRow(row), nil
 }
 
-// GetVersion implements sciobjects.Repository.
+// GetVersion implements sciobjects.Repository. Version numbers are int4 in
+// PostgreSQL: a value outside the int32 range cannot name a row, so it
+// answers ErrVersionNotFound — an int32 truncation here would silently
+// answer the wrong version (2^32+5 would render as version 5).
 func (s *ScientificObjectStore) GetVersion(ctx context.Context, objectID string, versionNo int) (domain.ScientificObjectVersion, error) {
+	if versionNo < 1 || versionNo > math.MaxInt32 {
+		return domain.ScientificObjectVersion{}, sciobjects.ErrVersionNotFound
+	}
 	id, err := textUUID(objectID)
 	if err != nil {
 		return domain.ScientificObjectVersion{}, sciobjects.ErrVersionNotFound

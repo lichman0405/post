@@ -265,8 +265,14 @@ func (h *handlers) handleCreateRelation(w http.ResponseWriter, r *http.Request) 
 // handleGetObject: GET
 // /api/v1/projects/{projectId}/branches/{branchId}/objects/{objectId} —
 // the visibility-aware read (T0106): as visible as its project, existence
-// hidden for everyone who may not see it.
+// hidden for everyone who may not see it. Browser navigations (Accept:
+// text/html) get the read-only detail page (T0210); every other client
+// gets the JSON contract.
 func (h *handlers) handleGetObject(w http.ResponseWriter, r *http.Request) {
+	if wantsHTML(r) {
+		h.handleObjectDetailPage(w, r)
+		return
+	}
 	res, err := h.svc.GetObject(r.Context(), reader(r), r.PathValue("projectId"), r.PathValue("branchId"), r.PathValue("objectId"))
 	if err != nil {
 		rsgError(w, r, err)
@@ -323,67 +329,55 @@ func hintsFromSemantics(hints []semantics.Hint) []hintPayload {
 // dependency detail; a denied write is the same envelope whether the
 // object exists or not). Unknown errors are answered with the generic 503.
 func rsgError(w http.ResponseWriter, r *http.Request, err error) {
+	status, code, message := rsgErrorOutcome(err)
+	authhttp.WriteError(w, r, status, code, message)
+}
+
+// rsgErrorOutcome is rsgError's mapping split off so the HTML page can
+// answer the exact same outcome the JSON envelope answers.
+func rsgErrorOutcome(err error) (status int, code, message string) {
 	switch {
 	case errors.Is(err, projects.ErrProjectNotFound):
-		authhttp.WriteError(w, r, http.StatusNotFound, projects.CodeProjectNotFound,
-			"project not found")
+		return http.StatusNotFound, projects.CodeProjectNotFound, "project not found"
 	case errors.Is(err, rsg.ErrForbidden):
-		authhttp.WriteError(w, r, http.StatusForbidden, rsg.CodeForbidden,
-			"you are not permitted to write scientific state in this project")
+		return http.StatusForbidden, rsg.CodeForbidden, "you are not permitted to write scientific state in this project"
 	case errors.Is(err, branches.ErrBranchNotFound) || errors.Is(err, states.ErrBranchNotFound):
-		authhttp.WriteError(w, r, http.StatusNotFound, states.CodeBranchNotFound,
-			"branch not found")
+		return http.StatusNotFound, states.CodeBranchNotFound, "branch not found"
 	case errors.Is(err, branches.ErrBranchNameTaken):
-		authhttp.WriteError(w, r, http.StatusConflict, branches.CodeBranchNameTaken,
-			"branch name already taken")
+		return http.StatusConflict, branches.CodeBranchNameTaken, "branch name already taken"
 	case errors.Is(err, branches.ErrPublicBranchInPrivateProject):
-		authhttp.WriteError(w, r, http.StatusForbidden, branches.CodePublicBranchInPrivateProject,
-			"a private project cannot host a public branch")
+		return http.StatusForbidden, branches.CodePublicBranchInPrivateProject, "a private project cannot host a public branch"
 	case errors.Is(err, branches.ErrBaseStateNotFound):
-		authhttp.WriteError(w, r, http.StatusNotFound, branches.CodeBaseStateNotFound,
-			"base state not found")
+		return http.StatusNotFound, branches.CodeBaseStateNotFound, "base state not found"
 	case errors.Is(err, states.ErrStateNotFound) || errors.Is(err, branches.ErrStateNotFound):
-		authhttp.WriteError(w, r, http.StatusNotFound, states.CodeStateNotFound,
-			"state not found")
+		return http.StatusNotFound, states.CodeStateNotFound, "state not found"
 	case errors.Is(err, states.ErrStateExists):
-		authhttp.WriteError(w, r, http.StatusConflict, states.CodeStateExists,
-			"state already exists")
+		return http.StatusConflict, states.CodeStateExists, "state already exists"
 	case errors.As(err, new(*states.StateConflictError)):
-		authhttp.WriteError(w, r, http.StatusConflict, states.CodeBranchStateConflict,
-			"branch state conflict — re-read the branch head and retry")
+		return http.StatusConflict, states.CodeBranchStateConflict, "branch state conflict — re-read the branch head and retry"
 	case errors.As(err, new(*states.BranchNotActiveError)) || errors.As(err, new(*branches.NotActiveError)) || errors.Is(err, branches.ErrBranchNotActive):
-		authhttp.WriteError(w, r, http.StatusConflict, states.CodeBranchNotActive,
-			"branch lifecycle is not active")
+		return http.StatusConflict, states.CodeBranchNotActive, "branch lifecycle is not active"
 	case errors.Is(err, sciobjects.ErrObjectNotFound):
-		authhttp.WriteError(w, r, http.StatusNotFound, sciobjects.CodeObjectNotFound,
-			"object not found")
+		return http.StatusNotFound, sciobjects.CodeObjectNotFound, "object not found"
 	case errors.Is(err, sciobjects.ErrVersionNotFound):
-		authhttp.WriteError(w, r, http.StatusNotFound, sciobjects.CodeVersionNotFound,
-			"object version not found")
+		return http.StatusNotFound, sciobjects.CodeVersionNotFound, "object version not found"
 	case errors.As(err, new(*sciobjects.VersionConflictError)):
-		authhttp.WriteError(w, r, http.StatusConflict, sciobjects.CodeVersionConflict,
-			"expected_version mismatch — re-read the object and retry")
+		return http.StatusConflict, sciobjects.CodeVersionConflict, "expected_version mismatch — re-read the object and retry"
 	case errors.Is(err, relations.ErrRelationNotFound):
-		authhttp.WriteError(w, r, http.StatusNotFound, relations.CodeRelationNotFound,
-			"relation not found")
+		return http.StatusNotFound, relations.CodeRelationNotFound, "relation not found"
 	case errors.Is(err, relations.ErrRelationVersionNotFound):
-		authhttp.WriteError(w, r, http.StatusNotFound, relations.CodeRelationVersionNotFound,
-			"relation version not found")
+		return http.StatusNotFound, relations.CodeRelationVersionNotFound, "relation version not found"
 	case errors.As(err, new(*relations.ReferencedVersionNotFoundError)) || errors.Is(err, relations.ErrReferencedVersionNotFound):
-		authhttp.WriteError(w, r, http.StatusNotFound, relations.CodeObjectVersionNotFound,
-			"referenced object version not found")
+		return http.StatusNotFound, relations.CodeObjectVersionNotFound, "referenced object version not found"
 	case errors.As(err, new(*relations.UnknownRelationTypeError)):
-		authhttp.WriteError(w, r, http.StatusBadRequest, relations.CodeRSGValidationFailed,
-			"relation type is not in the V1 catalog")
+		return http.StatusBadRequest, relations.CodeRSGValidationFailed, "relation type is not in the V1 catalog"
 	case errors.As(err, new(*rsgvalidation.GateBlockedError)):
 		var blocked *rsgvalidation.GateBlockedError
 		errors.As(err, &blocked)
-		authhttp.WriteError(w, r, http.StatusUnprocessableEntity, blocked.Code(),
-			"the write was refused: the commit's validation gate is blocked (run :validate for the full report)")
+		return http.StatusUnprocessableEntity, blocked.Code(), "the write was refused: the commit's validation gate is blocked (run :validate for the full report)"
 	case errors.Is(err, rsg.ErrValidation):
-		authhttp.WriteError(w, r, http.StatusBadRequest, rsg.CodeValidation, err.Error())
+		return http.StatusBadRequest, rsg.CodeValidation, err.Error()
 	default:
-		authhttp.WriteError(w, r, http.StatusServiceUnavailable, rsg.CodeUnavailable,
-			"service unavailable")
+		return http.StatusServiceUnavailable, rsg.CodeUnavailable, "service unavailable"
 	}
 }

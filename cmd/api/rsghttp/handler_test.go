@@ -44,6 +44,7 @@ type stubService struct {
 	object   rsg.ObjectResult
 	version  rsg.ObjectVersionResult
 	relation rsg.RelationResult
+	detail   rsg.ObjectDetail
 	err      error
 
 	createBranchCalls        int
@@ -51,10 +52,12 @@ type stubService struct {
 	createObjectVersionCalls int
 	createRelationCalls      int
 	getObjectCalls           int
+	getObjectDetailCalls     int
 
 	lastProjectID string
 	lastBranchID  string
 	lastObjectID  string
+	lastVersionNo *int
 	lastInput     any
 }
 
@@ -86,6 +89,13 @@ func (s *stubService) GetObject(_ context.Context, _ projects.Reader, projectID,
 	s.getObjectCalls++
 	s.lastProjectID, s.lastBranchID, s.lastObjectID = projectID, branchID, objectID
 	return s.object, s.err
+}
+
+func (s *stubService) GetObjectDetail(_ context.Context, _ projects.Reader, projectID, branchID, objectID string, versionNo *int) (rsg.ObjectDetail, error) {
+	s.getObjectDetailCalls++
+	s.lastProjectID, s.lastBranchID, s.lastObjectID = projectID, branchID, objectID
+	s.lastVersionNo = versionNo
+	return s.detail, s.err
 }
 
 func cannedBranch() domain.Branch {
