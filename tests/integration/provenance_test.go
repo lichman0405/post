@@ -625,6 +625,14 @@ func TestProvenanceVisibility(t *testing.T) {
 		}
 	}
 
+	// Membership must not depend on how the caller spells the uuid: the
+	// gate and every other read surface cast path ids through uuid (case-
+	// insensitive), so the same project id in non-canonical uppercase-hex
+	// casing still reaches the object — the store's membership check must
+	// not answer a spurious object 404 for an object that genuinely
+	// belongs to the project.
+	_, _ = f.lineage(t, f.alice, strings.ToUpper(f.privateProjectID), f.datasetID, "", http.StatusOK)
+
 	// The public project answers anonymous readers — and its empty graph
 	// carries one consistent wire shape: "nodes":[] and "edges":[], never
 	// "nodes":null.
@@ -765,6 +773,32 @@ func TestProvenanceCatalogCrossCheck(t *testing.T) {
 		}
 		if !entry.ProvenanceInference && projected[entry.Type] {
 			t.Errorf("%s is not a catalog provenance type but the projection includes it — the migration's SQL list drifted", entry.Type)
+		}
+	}
+
+	// The two type lists are pinned as SETS, both directions. The seeded
+	// rows above prove every catalog provenance type is projected and no
+	// non-provenance catalog type is — but a type added to the SQL list
+	// only would be projected, pass the CHECK (it consults the same list)
+	// and fail no test, because the seed never carries it. This assertion
+	// is inherently red-able: the two sides are independent sources (a
+	// migration edit vs. the Go catalog), so an SQL extra or a Go miss
+	// makes the sets differ and this fails.
+	var sqlTypes []string
+	if err := f.pool.QueryRow(ctx, `SELECT provenance_relation_types()`).Scan(&sqlTypes); err != nil {
+		t.Fatalf("read provenance_relation_types(): %v", err)
+	}
+	goSet := map[string]bool{}
+	for _, typ := range relationcatalog.ProvenanceTypes() {
+		goSet[typ] = true
+	}
+	if len(sqlTypes) != len(goSet) {
+		t.Fatalf("SQL provenance types %v (%d) and Go catalog provenance types %v (%d) differ — the lists drifted",
+			sqlTypes, len(sqlTypes), relationcatalog.ProvenanceTypes(), len(goSet))
+	}
+	for _, typ := range sqlTypes {
+		if !goSet[typ] {
+			t.Fatalf("SQL type %q is not a catalog provenance type — the migration's SQL list drifted", typ)
 		}
 	}
 }

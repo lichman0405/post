@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -98,8 +99,14 @@ func (s *ProjectionStore) ObjectStart(ctx context.Context, objectID, projectID s
 	// The path project scopes the object, and this check runs BEFORE the
 	// version lookup: a foreign object answers the object 404 whether or
 	// not versionNo pins a version — the version-pinned axis cannot leak
-	// existence either (docs/45).
-	if objectProjectID != projectID {
+	// existence either (docs/45). The comparison is casing-insensitive:
+	// the row yields the DB-canonical lowercase uuid while the path value
+	// may spell the hex in any case the uuid grammar allows — the gate and
+	// every other read surface resolve path ids through uuid casts, which
+	// are case-insensitive, so membership must not depend on the caller's
+	// spelling (EqualFold over two same-shape uuids is exactly the uuid
+	// cast's case-insensitive equality).
+	if !strings.EqualFold(objectProjectID, projectID) {
 		return ObjectStart{}, sciobjects.ErrObjectNotFound
 	}
 	if err := s.pool.QueryRow(ctx, `
