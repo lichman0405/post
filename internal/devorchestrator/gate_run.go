@@ -739,10 +739,29 @@ func prepareIntegrationTree(repoRoot, taskID string) (string, func(), error) {
 		// useful) thing to verify.
 		return dir, cleanup, nil
 	}
-	patch := filepath.Join(os.TempDir(), "post-integration-"+taskID+".patch")
-	if err := os.WriteFile(patch, []byte(change), 0o600); err != nil {
+	// The patch path must be unique per invocation. A fixed name in the shared
+	// temp dir is a collision: two gates grading the same task id at once —
+	// a drain and a driver, or two acceptance runs on one host — write and
+	// then `defer os.Remove` the SAME file, and whichever process applies it
+	// second finds it gone ("can't open patch ... No such file or directory",
+	// observed as a flaky e2e). The name keeps the task id so the failure
+	// messages stay legible.
+	patchFile, err := os.CreateTemp(os.TempDir(), "post-integration-"+taskID+"-*.patch")
+	if err != nil {
+		cleanup()
+		return "", noop, fmt.Errorf("creating the integration patch file: %w", err)
+	}
+	patch := patchFile.Name()
+	if _, err := patchFile.WriteString(change); err != nil {
+		patchFile.Close()
+		os.Remove(patch)
 		cleanup()
 		return "", noop, fmt.Errorf("writing the task's change as a patch: %w", err)
+	}
+	if err := patchFile.Close(); err != nil {
+		os.Remove(patch)
+		cleanup()
+		return "", noop, fmt.Errorf("closing the task's patch file %s: %w", patch, err)
 	}
 	defer os.Remove(patch)
 	if _, err := gitOutput(dir, "apply", patch); err != nil {
