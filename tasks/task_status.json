@@ -3261,7 +3261,7 @@
       ]
     },
     "T0505": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-14T13:15:07Z",
       "worker_run_id": "run-df2fe306a7f6fc5d",
       "rejection_reason": "# T0505：把树搬到主线的新 tip —— 复核这次是 `approve`，你不用再改那些已经改好的东西\n\n> 上一封（\"复核要你改两处\"）**已经作废**：那两处已经在你树里，而且新的一轮复核确认它们真的改好了。\n> 这一轮的复核结论是 **`approve`**（3 条 minor/nit、5 条风险，都不是阻断），全文在\n> `.rddev/workers/T0505-review/RESULT.json`。信写的就是**你工作树里正在发生的事**。\n\n## 一、为什么这一轮动你的树（不是你的问题）\n\n复核过了，卡住的是 **accept** —— 原文（节选）：\n\n> `git apply …/post-integration-T0505.patch: exit status 1:`\n> `error: patch failed: specs/SPEC_VERSION.json:1`\n\n原因只有一个：**主线在你之后动了两次**（`a111a00` → `0989ad1` → `3ee89ef`）。\n每个落地的任务都会重新生成同一批派生文件（`specs/SPEC_VERSION.json`、\n`specs/database/postgres.sql`、`internal/persistence/sqlc/*`），\n而**派生文件是它输入的\"函数\"**：留你那份，摘要描述的是旧的 specs；留主线那份，你的改动就丢了。\n两个都不对，所以只能**按你的树重新生成**——这一步是机械的，不是重做。\n\n你上次前移时被机械带过来的 16 个文件，这次会再被带一遍（同一条合成规则，对着更新的主线重放）。\n\n**对着树读一遍被合成过的文件**：任何一处你认为合错了，在 `RESULT.json` 里指明**哪一行、为什么**，\n**别闷声改回去**（合错了是我的问题，不算你返工）。以树为准——若树里看到的与这封信说的不符，\n同样在 `RESULT.json` 里提出来。\n\n## 二、三条复核意见的逐条处置\n\n| # | 级别 | 位置 | 问题 | 本轮做什么 |\n|---|---|---|---|---|\n| 1 | minor | `internal/rsg/provenance/direction.go:40` | 每类型的\"origin 方向\"表把 `references` 当作 lineage 的 origin，于是数据集的溯源会把**背景文献**和真正的输入并列 | **不改**，记录 + 指人（见下） |\n| 2 | nit | `infra/migrations/00043_provenance_graph_projection.sql:44` | `provenance_edges.relation_type` 没有 CHECK 约束（成员资格只由 trigger 过滤 + rebuild 的 WHERE 兜住） | **不改**，记录（理由见下） |\n| 3 | nit | `cmd/api/provenancehttp/store.go:109` | `isUUID` 与 persistence 层的同形工具重复 | **不改**，记录（理由见下） |\n\n写进 `notes_for_supervisor`（**一个字符串**）：\n\n- **#1**：复核自己说了它**跟着既有规格**（docs/44 把 `references` 声明为 provenance 类型，\n  catalog 的 `ProvenanceInference` 也是这么标的），所以它不是错，是**一处需要被看见的语义选择**。\n  它是\"该不该把背景文献算进溯源\"这种**科研语义**问题——我不在这个任务里改它（改它就是我自己发明产品语义）。\n  **记名**：随 docs/44 的\"逐类型方向\"后续一起裁。\n- **#2**：不在这里加 CHECK 的理由是**加了会更糟**：类型清单今天已经被钉了两份\n  （SQL 的 `provenance_relation_types()` 与 `relationcatalog.ProvenanceInference`，\n  `TestProvenanceCatalogCrossCheck` 双向盯着），CHECK 要么再造**第三份**字面清单，\n  要么在 CHECK 里调一个非 IMMUTABLE 的函数。而且这张表没有 API 写路径。\n  将来真出现写路径时，按 trigger 走、或那时再议。**记名**。\n- **#3**：它已经在代码注释里说清了（把 adapter 与 transport 放一起是本任务的 L1 取舍，\n  `internal/persistence` 不在 `allowed_scope` 里）。**记名**：若 adapter 将来搬进 persistence，一起收拢。\n- **复核 risk 4**（新的两条 GET 路由不在 `specs/api/openapi.yaml` 里）：**不怪你**，\n  该文件在你的 `allowed_scope` 之外，归我的仓库范围刷新清单。\n- **复核 risk 5**（逐类型方向应在 docs/44 里被权威钉住）：**记名**，进我的 docs 刷新清单。\n- **risk 1/2/3**（无分页/无深度上限、图跨所有分支、类型清单双钉只在集成测试里被抓）：\n  记名转后续任务（T1007 之类），不是这一轮的事。\n\n## 三、这一轮要交什么\n\n1. **不改代码逻辑**——复核要改的都已在树里，这一轮只有机械前移（+ 若你发现合成合错了，照第一节说）。\n2. 生成物**只重新生成**（`--check` 收尾）：`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、\n   `internal/persistence/sqlc/*`。\n3. **在新基线上重跑你任务要求的测试**（你那 5 条 provenance 集成测试、迁移 catalog/append-only 共存、\n   模块单测、`go vet`、`spec_version.py --check`、schema 快照与 sqlc drift）。\n   `RESULT.json` 的 `tests[]` **只写这一轮真跑过的**；历史进 notes。\n4. `status` 按实情：全绿才 `completed`；红着报告比造假绿好。\n5. `notes_for_supervisor` 是**一个字符串**（T0309 上一轮就死在这个形状上）。\n\n## 四、不要动的\n\n- **迁移号 `00043` 不变**，文件名别动；**空号不回收**（号是分配的）。\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n- **生成物只能重新生成，不要手工编辑。**\n- 不要动 `allowed_scope` 外的文件。\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库，5432）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n",
@@ -3320,6 +3320,13 @@
           "at": "2026-09-14T13:15:07Z",
           "run_id": "run-df2fe306a7f6fc5d",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T13:22:30Z",
+          "run_id": "run-3ed55f6cc7ed9dd9",
+          "reason": "collect: all checks passed"
         }
       ]
     },
