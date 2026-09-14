@@ -1,6 +1,26 @@
 # 开发进度
 
-> **12:57 当前这一刻** ✓（`L1-20260914-51`、`-52` ✓）：
+> **13:47 当前这一刻** ✓（`L1-20260914-53`、`-54` ✓）：
+> **迁移的合并顺序现在由工具把关** ✓（`cf66eb0` ✓，push 后 main 上 CI `34810415289` **全绿** ✓）。
+> `MergePR` 在合并前拒绝"**自己带着迁移 N、而别的工作树还压着更小号**"的合并 ✓，
+> 消息里点名**谁、几号、为什么** ✓（含 goose 拒乱序、CI 看不见两点）。
+> 洞来自驱动的本性 —— **"谁先就绪谁先合"** ✓：今天 T0213（`00038`）会排在 T0305（`00034`）之前 ✓ →
+> main 上**先 38 后 34** ✓ → 已经升级过的库被 goose 直接拒 ✓（`found 1 missing (out-of-order) migration` ✓），
+> 而 **CI 看不见** ✓（每次全新库，1..38 顺序天然正确 ✓）。
+> 这就是 **#157** 的**预防那一半** ✓（已在 #157 评论说明 ✓）；#157 开放的**方案选择**（G3 是否改用一次性库 ✓）**没动** ✓，
+> `WithAllowOutofOrder` **仍然没开** ✓。
+> **实测**（本机真实 worktree 跑一遍 guard ✓）：T0305 `allowed` ✓；T0206/T0209/T0213 **都被拒并点名 T0305 的 `00034`** ✓；
+> T0307、T0103（不带迁移）`allowed` ✓。
+> ⇒ **顺序**：**T0305(00034) → T0206(00035) → T0209(00036) → T0213(00038)** ✓。
+> **在跑** ✓：T0305 新复核（pid 386100 ✓）、T0501、T0502 刚派工 ✓。
+> **故意停住的三个** ✓：T0206（复核 `approve` ✓，`00035` ✓）、T0209（`00036` ✓）、T0213（`00038` ✓）——
+> 都走 `task reject --reason-file` 停在 `rejected` ✓，**工作树一件没删** ✓，轮到谁 `rebaseline` + `rework` 谁 ✓。
+> **T0307 待返工** ✓（等容量）：`collect` 拒两条 —— ① 退出后留了个 `sleep 300`（**已清** ✓）；
+> ② `RESULT.json` 报 `completed` 却自己写着一条测试 `failed` ✓（**自相矛盾** ✓）。
+> 根因是**跑错库** ✓：`go test ./tests/integration` 直接跑的默认 DSN 是 `127.0.0.1:15432` ✓
+>（compose 里"第二套栈"的覆盖端口 ✓），本机主栈在 **5432** ✓；正确跑法是 `make test-integration` ✓。
+
+> **（上一刻）12:57** ✓（`L1-20260914-51`、`-52` ✓）：
 > **#166 已修并部署** ✓（`c0eea86` ✓）—— rddev 建了会话却按 PID 杀 ✓，
 > 现在 **reaper 退出时回收 Worker 的整个进程组** ✓，`worker stop` 与 spawn 失败清理同样发组信号 ✓，
 > 残渣拒绝**区分"主人还在跑"与"主人已退出"** ✓ 并给出可执行的 `kill -TERM -- -<pgid>` ✓。
@@ -1004,9 +1024,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-13T22:18:35Z
+生成时间：2026-09-14T05:45:43Z
 
-状态分布：todo 102 · ready 0 · running 1 · worker_failed 0 · verification 2 · rejected 0 · blocked 0 · accepted 0 · merged 28（合计 133/133 个任务）
+状态分布：todo 88 · ready 0 · running 2 · worker_failed 0 · verification 1 · rejected 4 · blocked 0 · accepted 0 · merged 38（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1037,25 +1057,25 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0201 | Core Scientific Object Schema registry | P2 | merged | 2026-09-13T13:21:01Z |  | 2026-09-13T14:06:20Z | 2026-09-13T15:27:35Z |
 | T0202 | Scientific Object immutable version repository | P2 | merged | 2026-09-13T16:12:13Z |  | 2026-09-13T16:30:50Z | 2026-09-13T16:34:10Z |
 | T0203 | Typed Relation repository | P2 | merged | 2026-09-13T17:22:20Z |  | 2026-09-13T17:40:44Z | 2026-09-13T17:47:30Z |
-| T0204 | Project State 与 State Commit | P2 | verification | 2026-09-13T22:10:18Z |  |  |  |
-| T0205 | Research Branch Domain | P2 | todo |  |  |  |  |
-| T0206 | RSG Manifest 导出与 hash | P2 | todo |  |  |  |  |
-| T0207 | Progressive Validation Gates | P2 | todo |  |  |  |  |
-| T0208 | V1 Scientific Object Domain Services | P2 | todo |  |  |  |  |
-| T0209 | RSG Query API | P2 | todo |  |  |  |  |
-| T0210 | Scientific Object Detail UI | P2 | todo |  |  |  |  |
+| T0204 | Project State 与 State Commit | P2 | merged | 2026-09-13T22:10:18Z |  | 2026-09-13T22:52:41Z | 2026-09-13T22:56:15Z |
+| T0205 | Research Branch Domain | P2 | merged | 2026-09-13T22:56:16Z |  | 2026-09-13T23:23:26Z | 2026-09-13T23:26:23Z |
+| T0206 | RSG Manifest 导出与 hash | P2 | rejected | 2026-09-14T03:27:51Z |  |  |  |
+| T0207 | Progressive Validation Gates | P2 | merged | 2026-09-14T00:39:04Z |  | 2026-09-14T01:13:29Z | 2026-09-14T01:32:13Z |
+| T0208 | V1 Scientific Object Domain Services | P2 | merged | 2026-09-14T01:33:06Z |  | 2026-09-14T02:37:28Z | 2026-09-14T02:41:06Z |
+| T0209 | RSG Query API | P2 | rejected | 2026-09-14T05:22:35Z |  |  |  |
+| T0210 | Scientific Object Detail UI | P2 | merged | 2026-09-14T04:52:41Z |  | 2026-09-14T05:08:10Z | 2026-09-14T05:11:18Z |
 | T0211 | Research Outline 与基础 Research 页面 | P2 | todo |  |  |  |  |
 | T0212 | Project Overview Research Summary | P2 | todo |  |  |  |  |
-| T0213 | Project Schema Extension 与 Custom Metadata | P2 | todo |  |  |  |  |
+| T0213 | Project Schema Extension 与 Custom Metadata | P2 | rejected | 2026-09-14T05:00:30Z |  |  |  |
 | T0214 | 官方材料研发 Project Templates | P2 | todo |  |  |  |  |
 | T0215 | 版本计数 backfill 的数据级升级断言（00024 + 00025） | P2 | merged | 2026-09-13T18:06:02Z |  | 2026-09-13T18:55:01Z | 2026-09-13T19:03:58Z |
-| T0301 | Gitea adapter 与 repo provisioning | P3 | running | 2026-09-13T22:17:03Z |  |  |  |
-| T0302 | Git main 双层保护 | P3 | todo |  |  |  |  |
-| T0303 | Branch Git ref 同步 | P3 | todo |  |  |  |  |
-| T0304 | Git 用户认证/PAT/SSH key 基础 | P3 | todo |  |  |  |  |
-| T0305 | Push Webhook 与 Semantic Ingestion | P3 | todo |  |  |  |  |
+| T0301 | Gitea adapter 与 repo provisioning | P3 | merged | 2026-09-13T23:39:37Z |  | 2026-09-13T23:50:50Z | 2026-09-13T23:53:45Z |
+| T0302 | Git main 双层保护 | P3 | merged | 2026-09-13T23:53:46Z |  | 2026-09-14T00:31:44Z | 2026-09-14T00:34:39Z |
+| T0303 | Branch Git ref 同步 | P3 | merged | 2026-09-14T01:56:07Z |  | 2026-09-14T02:15:37Z | 2026-09-14T02:21:07Z |
+| T0304 | Git 用户认证/PAT/SSH key 基础 | P3 | merged | 2026-09-14T03:05:17Z |  | 2026-09-14T03:29:01Z | 2026-09-14T03:33:06Z |
+| T0305 | Push Webhook 与 Semantic Ingestion | P3 | verification | 2026-09-14T05:30:41Z |  |  |  |
 | T0306 | Unstructured Change 状态 | P3 | todo |  |  |  |  |
-| T0307 | Files Tree/Preview API | P3 | todo |  |  |  |  |
+| T0307 | Files Tree/Preview API | P3 | rejected | 2026-09-14T05:08:12Z |  |  |  |
 | T0308 | 只读 Files Web UI | P3 | todo |  |  |  |  |
 | T0309 | Git ↔ RSG reconciliation | P3 | todo |  |  |  |  |
 | T0401 | Research State Diff 引擎 | P4 | todo |  |  |  |  |
@@ -1068,8 +1088,8 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0408 | PR Research Diff UI | P4 | todo |  |  |  |  |
 | T0409 | Merge Governance 与 frozen main 更新 | P4 | todo |  |  |  |  |
 | T0410 | PR/Branch 完整 E2E | P4 | todo |  |  |  |  |
-| T0501 | Research Question 与 Hypothesis 关系模型 | P5 | todo |  |  |  |  |
-| T0502 | Claim 结构与 scope | P5 | todo |  |  |  |  |
+| T0501 | Research Question 与 Hypothesis 关系模型 | P5 | running | 2026-09-14T05:41:47Z |  |  |  |
+| T0502 | Claim 结构与 scope | P5 | running | 2026-09-14T05:42:31Z |  |  |  |
 | T0503 | Finding 聚合模型 | P5 | todo |  |  |  |  |
 | T0504 | Evidence Assertion Domain | P5 | todo |  |  |  |  |
 | T0505 | Provenance Graph Projection | P5 | todo |  |  |  |  |
@@ -1080,7 +1100,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0510 | Knowledge workflow E2E | P5 | todo |  |  |  |  |
 | T0601 | Freeze Main Governance | P6 | todo |  |  |  |  |
 | T0602 | Abort/Reopen State Transition | P6 | todo |  |  |  |  |
-| T0603 | Organization/Project Policy Engine | P6 | verification | 2026-09-13T13:20:52Z |  |  |  |
+| T0603 | Organization/Project Policy Engine | P6 | merged | 2026-09-14T03:42:50Z |  | 2026-09-14T04:09:38Z | 2026-09-14T04:12:31Z |
 | T0604 | Scientific Responsibility / Reviewer Routing | P6 | todo |  |  |  |  |
 | T0605 | Release Manifest Builder | P6 | todo |  |  |  |  |
 | T0606 | Immutable Release API/UI | P6 | todo |  |  |  |  |
