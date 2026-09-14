@@ -38,11 +38,29 @@ type Config struct {
 	// API from the provider must not register hooks that can never
 	// deliver, and must not refuse to start over it.
 	WebhookURL string
+	// AdminUser / AdminPassword are the instance admin's credentials
+	// (basic auth) for the user-access surface (T0304): creating shadow
+	// accounts and minting/revoking their scoped tokens. Gitea 1.27
+	// rejects API-token auth on the token-management endpoints, so this
+	// pair is the ONLY way the platform can manage user tokens — it
+	// never travels on the provisioning calls, which stay on the service
+	// account token. AdminUser defaults to init-gitea.sh's admin login;
+	// AdminPassword has no default. Both unset → user-token issuance is
+	// DISABLED (UserAccessMissing names what is missing).
+	AdminUser     string
+	AdminPassword config.Secret
 	// Missing lists the environment keys that are unset. Non-empty means
 	// provisioning is DISABLED: the API starts without the GitProvider
 	// features and logs a warning naming these keys (names only — key
 	// names never carry secrets).
 	Missing []string
+	// UserAccessMissing lists the environment keys the user-access
+	// surface needs but that are unset (admin credentials). Non-empty
+	// means user-token issuance is DISABLED while provisioning can stay
+	// enabled: the features have independent configurations on purpose —
+	// a deployment may provision repositories without ever minting user
+	// credentials.
+	UserAccessMissing []string
 }
 
 // ProvisioningEnabled reports whether the full provisioning configuration
@@ -50,16 +68,29 @@ type Config struct {
 // pipeline and say which keys are missing (Config.Missing).
 func (c *Config) ProvisioningEnabled() bool { return len(c.Missing) == 0 }
 
+// UserAccessEnabled reports whether the user-access surface is fully
+// configured (service account token + admin credentials). When false,
+// callers must not wire the user-token pipeline and must say which keys
+// are missing (Config.UserAccessMissing).
+func (c *Config) UserAccessEnabled() bool { return len(c.UserAccessMissing) == 0 }
+
 // EnvNames: every variable this package reads.
 const (
-	EnvBaseURL    = "POST_GITEA_BASE_URL"
-	EnvToken      = "POST_GITEA_TOKEN"
-	EnvWebhookURL = "POST_GITEA_WEBHOOK_URL"
+	EnvBaseURL       = "POST_GITEA_BASE_URL"
+	EnvToken         = "POST_GITEA_TOKEN"
+	EnvWebhookURL    = "POST_GITEA_WEBHOOK_URL"
+	EnvAdminUser     = "POST_GITEA_ADMIN_USER"
+	EnvAdminPassword = "POST_GITEA_ADMIN_PASSWORD"
 )
 
 // DefaultBaseURL matches docker-compose's GITEA_WEB_PORT default (the dev
 // stack; every deployment overrides it).
 const DefaultBaseURL = "http://127.0.0.1:3000"
+
+// DefaultAdminUser matches init-gitea.sh's ADMIN_USER default (the dev
+// stack's instance admin; every deployment overrides it). The username
+// is not a secret — only the password pair is.
+const DefaultAdminUser = "postadmin"
 
 // Loader resolves the environment for Config.Load; the zero value reads
 // the process environment. Mirrors config.Loader/authn.Loader so tests
@@ -142,6 +173,36 @@ func (l Loader) Load() (*Config, error) {
 				"set "+EnvWebhookURL+" to the platform API URL the provider can reach")
 		} else {
 			cfg.WebhookURL = strings.TrimSuffix(v, "/")
+		}
+	}
+
+	// The user-access admin pair (T0304): both keys are optional — an
+	// unset pair disables user-token issuance (the load succeeds and the
+	// missing keys land on UserAccessMissing for the caller's warning) —
+	// while a PRESENT password must pair with a user (and vice versa):
+	// a half-set pair is a disabled feature naming the missing half, not
+	// an error (the API must keep serving projects whose operators never
+	// enable git credentials). The password is secret-shaped and never
+	// echoed, even on the error paths (T0006 validates values; the
+	// validation of a password is only "present").
+	cfg.AdminUser = strings.TrimSpace(l.getenv(EnvAdminUser))
+	if cfg.AdminUser == "" {
+		// The username defaults like BaseURL does (init-gitea.sh's admin
+		// login); it is not a secret, so the default is a legal value.
+		cfg.AdminUser = DefaultAdminUser
+	}
+	if pw := strings.TrimSpace(l.getenv(EnvAdminPassword)); pw == "" {
+		cfg.UserAccessMissing = append(cfg.UserAccessMissing, EnvAdminPassword)
+	} else {
+		cfg.AdminPassword = config.Secret(pw)
+	}
+	// The service account token is shared infrastructure: provisioning
+	// AND user access both need it (collaborator grants are made as the
+	// repository owner). If it is missing, user access is disabled with
+	// it.
+	for _, k := range cfg.Missing {
+		if k == EnvToken {
+			cfg.UserAccessMissing = append(cfg.UserAccessMissing, EnvToken)
 		}
 	}
 
