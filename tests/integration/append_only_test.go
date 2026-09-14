@@ -87,19 +87,32 @@ var appendOnlyTables = []string{
 // born with the branch (AFTER INSERT map, like 00031's), and the two
 // BEFORE-gates refuse a PR from an unstructured branch (INSERT → tgtype 7)
 // and the merge transition into merged (UPDATE → tgtype 19).
+// Migration 00045 adds the external-reference live-identity guards (T0508):
+// the identity validation/normalization on external_references (BEFORE
+// INSERT OR UPDATE), the snapshot shape/hash guard (BEFORE INSERT — the
+// append-only pair above already pins UPDATE/DELETE), the two deferred
+// AFTER INSERT constraint triggers that sync the identity from version
+// payloads and police relation endpoints, and the seal on the admitted
+// relation-type policy table (BEFORE INSERT OR UPDATE OR DELETE — the
+// policy set changes only through a migration that drops the seal first).
 var targetedGuardTriggers = map[string]string{
-	"branches:branch_lifecycle_guard_trigger":                                ":O:19",
-	"branches:branch_git_ref_guard_trigger":                                  ":O:23",
-	"branches:branch_git_ref_map_trigger":                                    ":O:5",
-	"branches:branch_git_ref_close_trigger":                                  ":O:17",
-	"branches:branch_semantic_state_map_trigger":                             ":O:5",
-	"branches:branch_merge_semantic_gate_trigger":                            ":O:19",
-	"pull_requests:pull_request_semantic_gate_trigger":                       ":O:7",
-	"git_branch_refs:git_branch_ref_guard_trigger":                           ":O:23",
-	"git_push_semantic_candidates:git_push_semantic_candidate_guard_trigger": ":O:27",
-	"git_push_semantic_candidates:git_push_semantic_candidates_no_truncate":  ":O:34",
-	"scientific_object_versions:scientific_object_versions_reference_guard":  ":O:5",
-	"relation_versions:relation_versions_knowledge_endpoints":                ":O:5",
+	"branches:branch_lifecycle_guard_trigger":                                           ":O:19",
+	"branches:branch_git_ref_guard_trigger":                                             ":O:23",
+	"branches:branch_git_ref_map_trigger":                                               ":O:5",
+	"branches:branch_git_ref_close_trigger":                                             ":O:17",
+	"branches:branch_semantic_state_map_trigger":                                        ":O:5",
+	"branches:branch_merge_semantic_gate_trigger":                                       ":O:19",
+	"pull_requests:pull_request_semantic_gate_trigger":                                  ":O:7",
+	"git_branch_refs:git_branch_ref_guard_trigger":                                      ":O:23",
+	"git_push_semantic_candidates:git_push_semantic_candidate_guard_trigger":            ":O:27",
+	"git_push_semantic_candidates:git_push_semantic_candidates_no_truncate":             ":O:34",
+	"scientific_object_versions:scientific_object_versions_reference_guard":             ":O:5",
+	"relation_versions:relation_versions_knowledge_endpoints":                           ":O:5",
+	"external_references:external_references_identity_guard":                            ":O:23",
+	"external_reference_snapshots:external_reference_snapshots_guard":                   ":O:7",
+	"scientific_object_versions:scientific_object_versions_external_reference_identity": ":O:5",
+	"relation_versions:relation_versions_external_reference_endpoints":                  ":O:5",
+	"external_reference_relation_types:external_reference_relation_types_seal":          ":O:31",
 }
 
 // triggerRows returns every user trigger in the public schema as sorted
@@ -504,9 +517,12 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 		{
 			table: "external_reference_snapshots",
 			insert: func() string {
+				// snapshot_hash follows the 00045 contract: NULL derives
+				// server-side from the stored metadata bytes (a made-up
+				// hash would be refused by the snapshot guard).
 				return mustQueryUUID(`INSERT INTO external_reference_snapshots
 					(external_reference_id, accessed_at, metadata, snapshot_hash)
-					VALUES ($1, now(), '{}'::jsonb, 'sh-1') RETURNING id`, er1)
+					VALUES ($1, now(), '{}'::jsonb, NULL) RETURNING id`, er1)
 			},
 			update: func(id string) error {
 				_, err := pool.Exec(ctx, `UPDATE external_reference_snapshots SET metadata = '{"tampered":true}'::jsonb WHERE id = $1`, id)
