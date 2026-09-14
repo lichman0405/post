@@ -7172,3 +7172,56 @@ T1001 的 `internal/persistence/sqlc/**`），它们一直在等工作，为的�
 所以这两行的正确处置只有一种：**等一次反正要移动 marker 的合并，和它一起走。**
 `post-t0213-merge.sh` 的第二步就是那个窗口。**不要**顺手提交它们，也**不要**
 `git checkout` 掉它们。
+
+## L1-20260914-79
+
+**两件事：为什么链上每一环都必须重做一次复核（不是我的选择，是工具算出来的）；
+以及把并行 Worker 从 3 提到 4。**
+
+### 一、复核结论是绑在"基线 + 内容"上的，所以前移一次就作废一次
+
+我本来在打算给链上的任务省一次复核：`T0501`、`T0508`、`T1001` 都有过 `approve`
+（T0501 三条意见、零 blocking；T1001 六条、零 blocking），前移只是把同一次改动搬到
+新基线上，看起来复核还用得上。
+
+**读代码以后这条打算作废了。** `internal/devorchestrator/review_worker.go:550`
+`codeIdentity()`：
+
+```
+identity = sha256( merge-base(integration-tip, HEAD)  ⊕  { 每个改动路径的 (路径, 内容哈希) } )
+```
+
+而 `ReviewIsStale`（同文件 `:617`）就是拿它跟复核记录里的 `ReviewDiffSHA` 比，
+不一样就报"the recorded review is about a superseded attempt"，**collect 直接拒**
+（`review-code-unchanged`），而且这个拒绝**永久**——写记录的人不会再回来。
+
+代码里的注释把理由写得很直白：
+
+> The merge-base changes the moment main moves under the branch — a rebase,
+> **a baseline advance**, a merge repair, or main simply advancing while the
+> review runs — and the COMPOSITION is precisely what the verdict has not seen.
+
+**所以**：链上 7 个还没落地的环节，每一个前移之后都要**重新复核一次**。这不是我
+"把门放低"或"把门抬高"，是这台机器本来就不认旧结论。我原先那条"只加不减就复用旧
+结论"的打算，**没有存在的余地**，删掉。
+
+（顺带把成本算清：每环 ≈ 前移 + 返工 10–30 分 + 复核 ~20 分 + accept/PR/CI/合并 ~10 分。
+7 环就是这个量级，**这是结构性的，不是可以优化掉的**。）
+
+### 二、并行 Worker：3 → 4
+
+`CLAUDE.md §2` 写的是"推荐最大 4，默认 3"，`rddev` 自己硬顶就是 4
+（`MaxParallelWorkers = 4`，超了直接拒）。链在排的时候，同一个池子里还挤着链外的
+返工（T0211、T0405、T0402），3 个槽会让"复核"等"不相干的返工"。
+
+改法是把 `--parallel` 收成**一个变量**（`PARALLEL=4`），
+`drain-migration-chain.sh` 和 `rework-when-slot.sh` 里的驱动器参数、槽位判据、
+以及每个 `rddev worker rework` 调用全部引用它——两个脚本各自硬写 3，就会有
+"脚本以为有空位、rddev 认为满了"的分歧，这个分歧的表现是任务悄悄排队。
+
+**顺带记一个今天量到的事实**：`rddev` 的兼容性判据比脚本自己的计数更宽松一点点——
+18:19 那一分钟里出现过一个 **5 个 worker 同时在跑**的瞬间（排链脚本停下驱动器、
+数到 3、派了一个；驱动器同一次 tick 里又派了一个复核）。**硬上限 4 是 `rddev` 的，
+软上限 3/4 是脚本自己的**；脚本停驱动器的窗口里，驱动器已经数过的那一票仍然算数。
+5 个不危险（16 核 46G，worker 基本在等 API），但它说明**脚本的槽位判断只是减少竞争，
+不是配额**——所以脚本里那条"拒绝就当容量拒绝、继续等"的处理是对的。
