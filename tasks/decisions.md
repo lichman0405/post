@@ -7890,3 +7890,38 @@ T1006（Signed Webhooks，迁移 `00059`）交付的 diff 是**对的**，collec
   T1006 这一轮两者都成立（红是派生件漂移；`gen_sqlc.sh` 就是那个机械修复），而**修复由有权的一方执行**
   （scope 补上之后再重新生成），不是把红藏起来就完事。这条与 T0508 那次"探针红"是**不同**的两种情况，
   别混：探针红是"证明守卫能失败"，这一条是"派生件待机械重生成"。
+
+## L1-20260914-90 —— T0309 第五轮复核的三条**新**意见：处置为"记录 + 指人"（这一轮不为此再返工）
+
+### 一、为什么这次不走 L1-88 §〇 那条"就地修"的路
+
+第五轮（基线 `336c19f`，00:27 复核）结论 **`approve`**，带 **1 minor + 2 nit**。按 L1-88 §〇 立的判据：
+"就地多花一轮"**只为这一轮自己重写的那几行**开门。这一轮实际改的只有四处——删掉没人调用的
+`kindOf`、`FinishRun` 把开放数带回来、`git_reconciliation_runs` 的 `mapping_violations` /
+`repositories_checked` 两列一义、`ListBranches` 的符号-ref 注释。**三条新意见没有一条落在这四处**，
+都在更早几轮的代码里；为它们再返工，等于为"已经付过一轮的东西"再付一轮，而且这条判据一旦放宽，
+就会变成"复核永远可以再找一条"的无限循环。所以：**记录 + 指人**，接受照走。
+
+### 二、三条新意见（复核原文的要点，一条不删）
+
+1. **minor** `internal/gitprovider/reconciler.go:314`（checkProvider 的错误出口）：canonical-store 的
+   错误（`ProvisionedRepos`/`BranchNames`/`MustExistRefs`/`MustBeGoneRefs`/`RecordFinding`）与
+   provider 故障走**同一条出口**，于是"store 挂了"被记成 `provider_error`，而这一 pass 还"算完成"；
+   扫掠日志只在 `FindingsOpened>0` 时打高severity。**没有永久丢失**（下一 tick 会重新观测、run 行带着
+   `provider_error`），**label 是误导的**；DB 全挂那条主路径反而安全（canonical 段先失败）。
+2. **nit** `infra/migrations/00047_git_reconciliation.sql:114`（finding guard 触发器）：钉住了
+   id/run_id/project_id/kind/severity/subject_ref/detail/repair_proposal 与 status 方向，但**没有**把
+   `created_at` 钉在 UPDATE 上，且对"已 resolved 的行再 UPDATE"只查了 `open+resolved_at` 与
+   `resolved+NULL` 两种形状，**允许任意 `resolved_at`**。与库内其它 guard 触发器同构，且从 reconciler
+   自己的写路径**不可达**。
+3. **nit** `internal/gitprovider/reconciler.go:420`（`MappingProvisionMissing` 的 detail）：
+   这一类违规没有 branch，于是 `branch_id` / `git_ref` 记成**空串**写进 jsonb——无害，但读运行记录的人
+   会看到两个"不属于这条违规"的空字段。
+
+### 三、指给谁（owner，两条都在"以后再碰这张表/reconciler 的那个任务"里）
+
+- 三件一起挂到 **T0309 后续硬化**（下一次碰 `internal/gitprovider/**` 或 `00047` 这张表的任务；
+  第 2 条要与"新的迁移才能修已合并的 guard"这条一起看——**已合并的迁移不改**，
+  要改就是新迁移追加约束，不能回改 `00047`）。
+- 处置口径与本条链子上其它复核意见**同一套**（L1-88 §一）：**改** / **记录+指人** / **拒绝+理由**；
+  这一次三条都走第二条。
