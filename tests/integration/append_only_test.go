@@ -83,11 +83,18 @@ var appendOnlyTables = []string{
 // themselves: knowledge-relation endpoint types and the
 // question_id/parent_question_id references. They pin presence and event
 // set here even though the tables already carry the append-only pair.
+// Migration 00042 adds the T0306 semantic-state guards: the flag row is
+// born with the branch (AFTER INSERT map, like 00031's), and the two
+// BEFORE-gates refuse a PR from an unstructured branch (INSERT → tgtype 7)
+// and the merge transition into merged (UPDATE → tgtype 19).
 var targetedGuardTriggers = map[string]string{
 	"branches:branch_lifecycle_guard_trigger":                                ":O:19",
 	"branches:branch_git_ref_guard_trigger":                                  ":O:23",
 	"branches:branch_git_ref_map_trigger":                                    ":O:5",
 	"branches:branch_git_ref_close_trigger":                                  ":O:17",
+	"branches:branch_semantic_state_map_trigger":                             ":O:5",
+	"branches:branch_merge_semantic_gate_trigger":                            ":O:19",
+	"pull_requests:pull_request_semantic_gate_trigger":                       ":O:7",
 	"git_branch_refs:git_branch_ref_guard_trigger":                           ":O:23",
 	"git_push_semantic_candidates:git_push_semantic_candidate_guard_trigger": ":O:27",
 	"git_push_semantic_candidates:git_push_semantic_candidates_no_truncate":  ":O:34",

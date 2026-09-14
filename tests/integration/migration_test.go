@@ -243,6 +243,15 @@ var canonicalTables = map[string]tableExp{
 		checks:  []string{"change_kind = ANY", "status = ANY"},
 		fks:     []fkExp{fk("ingestion_id", "git_push_ingestions", "RESTRICT")},
 	},
+	"git_branch_semantic_states": {
+		// T0306 (00042): the branch semantic completeness flag — a projection
+		// of the ingested push evidence, upserted per branch, read by the
+		// PR/merge gates.
+		cols:   []colExp{c("branch_id", u, false, false), c("semantic_state", txt, false, true), c("updated_at", ts, false, true)},
+		pk:     []string{"branch_id"},
+		checks: []string{"semantic_state = ANY"},
+		fks:    []fkExp{fk("branch_id", "branches", "RESTRICT")},
+	},
 	"project_states": {
 		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("branch_id", u, true, false), c("parent_state_id", u, true, false), c("state_hash", txt, false, false), c("git_commit_sha", txt, true, false), c("manifest_version", txt, false, false), c("created_at", ts, false, true)},
 		pk:      []string{"id"},
@@ -675,6 +684,7 @@ func TestUpgradePath(t *testing.T) {
 		"subscriptions", "webhook_deliveries", "audit_log", "search_documents",
 		"profiles", "git_repository_provisions", "git_branch_refs",
 		"project_schema_profiles",
+		"git_branch_semantic_states",
 	}
 	for _, name := range present {
 		if _, ok := intermediate.Tables[name]; !ok {
