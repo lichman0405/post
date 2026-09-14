@@ -209,3 +209,75 @@ func TestConfigBlankValuesAreMissing(t *testing.T) {
 		t.Errorf("Missing = %v, want %s (blank is missing, not present)", cfg.Missing, gitprovider.EnvToken)
 	}
 }
+
+// TestConfigUserAccessDisabledWithoutAdminPassword: user access is its own
+// feature gate — provisioning can be fully configured while the admin
+// password is missing, and the user-access keys land on UserAccessMissing
+// (not Missing, which gates provisioning).
+func TestConfigUserAccessDisabledWithoutAdminPassword(t *testing.T) {
+	cfg, err := env(map[string]string{
+		gitprovider.EnvToken:      "svc-token",
+		gitprovider.EnvWebhookURL: "http://host/x",
+	}).Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.ProvisioningEnabled() {
+		t.Error("provisioning must stay enabled without the admin pair")
+	}
+	if cfg.UserAccessEnabled() {
+		t.Error("missing admin password reported user access enabled")
+	}
+	if !containsAll(cfg.UserAccessMissing, gitprovider.EnvAdminPassword) {
+		t.Errorf("UserAccessMissing = %v, want %s", cfg.UserAccessMissing, gitprovider.EnvAdminPassword)
+	}
+	if cfg.AdminUser != gitprovider.DefaultAdminUser {
+		t.Errorf("AdminUser = %q, want the dev default %q", cfg.AdminUser, gitprovider.DefaultAdminUser)
+	}
+}
+
+// TestConfigUserAccessEnabled: the admin pair enables user access, the
+// username overrides, and the password lands in a Secret. Provisioning's
+// gate is untouched.
+func TestConfigUserAccessEnabled(t *testing.T) {
+	cfg, err := env(map[string]string{
+		gitprovider.EnvToken:         "svc-token",
+		gitprovider.EnvWebhookURL:    "http://host/x",
+		gitprovider.EnvAdminUser:     "siteadmin",
+		gitprovider.EnvAdminPassword: "admin-pw",
+	}).Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.UserAccessEnabled() {
+		t.Error("full configuration reported user access disabled")
+	}
+	if cfg.AdminUser != "siteadmin" {
+		t.Errorf("AdminUser = %q, want the override", cfg.AdminUser)
+	}
+	if string(cfg.AdminPassword) != "admin-pw" {
+		t.Error("admin password not parsed")
+	}
+	if !cfg.ProvisioningEnabled() {
+		t.Error("provisioning must stay enabled")
+	}
+}
+
+// TestConfigUserAccessNeedsServiceToken: user access shares the service
+// account token with provisioning (collaborator grants are made as the
+// repository owner) — a missing token disables BOTH gates.
+func TestConfigUserAccessNeedsServiceToken(t *testing.T) {
+	cfg, err := env(map[string]string{
+		gitprovider.EnvAdminUser:     "siteadmin",
+		gitprovider.EnvAdminPassword: "admin-pw",
+	}).Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.UserAccessEnabled() {
+		t.Error("missing service token reported user access enabled")
+	}
+	if !containsAll(cfg.UserAccessMissing, gitprovider.EnvToken) {
+		t.Errorf("UserAccessMissing = %v, want %s", cfg.UserAccessMissing, gitprovider.EnvToken)
+	}
+}

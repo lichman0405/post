@@ -76,6 +76,11 @@ cleanup() {
   if [[ -n "$TOKEN" && -n "${REPO2:-}" ]]; then
     curl -sS -X DELETE -H "Authorization: token $TOKEN" "$BASE/api/v1/repos/$REPO2" >/dev/null 2>&1
   fi
+  if [[ -n "${SHADOW:-}" ]]; then
+    # Best-effort: the shadow account (and its tokens) dies with the run.
+    curl -sS -o /dev/null -u "${ADMIN_USER:-postadmin}:${ADMIN_PASS:-postadmin_dev_pw}" \
+      -X DELETE "$BASE/api/v1/admin/users/$SHADOW" >/dev/null 2>&1
+  fi
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -550,6 +555,159 @@ if [[ -n "$REPO2" ]]; then
         ok "the first PR merge moves main on the freshly bootstrapped repository"
       fi
     fi
+  fi
+fi
+
+# --- scoped user tokens (T0304: the adapter's premises) -----------------------
+# The platform mints per-user scoped tokens through the ADMIN's basic auth
+# (Gitea 1.27 refuses API-token auth on the token surface) and grants repo
+# reach through collaborator memberships made by the service account (the
+# repo owner). The properties asserted, against the real instance:
+#
+#   * a collaborator's read-scoped token clones the private repository;
+#   * the same token cannot push (the scope is enforced);
+#   * a revoked token dies immediately;
+#   * a valid token WITHOUT a grant cannot clone the private repository at
+#     all — 无权限用户 clone private 失败, T0304's acceptance criterion.
+#
+# The admin pair is re-derived on purpose (ADMIN_USER/ADMIN_PASS were set
+# above from GITEA_ADMIN_* for T0302's probes): this gate must check the
+# pair the PLATFORM actually reads — internal/gitprovider/config.go reads
+# POST_GITEA_ADMIN_* — not the bootstrap pair. The dev stack resolves both
+# keys to the same account (postadmin), but they name different contracts;
+# silently reusing the GITEA_ADMIN_* pair would report green for a system
+# the platform could not actually administer. A wrong pair fails these
+# checks loudly — never a skip (a G3 that skips reports green for a system
+# nobody checked).
+ADMIN_USER="${POST_GITEA_ADMIN_USER:-}"
+ADMIN_PASS="${POST_GITEA_ADMIN_PASSWORD:-}"
+if [[ -z "$ADMIN_USER" || -z "$ADMIN_PASS" ]] && [[ -f "$ROOT/.env.dev" ]]; then
+  # shellcheck disable=SC1091
+  ADMIN_USER="$(set -a; . "$ROOT/.env.dev" >/dev/null 2>&1; printf '%s' "${POST_GITEA_ADMIN_USER:-}")"
+  # shellcheck disable=SC1091
+  ADMIN_PASS="$(set -a; . "$ROOT/.env.dev" >/dev/null 2>&1; printf '%s' "${POST_GITEA_ADMIN_PASSWORD:-}")"
+fi
+[[ -z "$ADMIN_USER" ]] && ADMIN_USER=postadmin
+[[ -z "$ADMIN_PASS" ]] && ADMIN_PASS=postadmin_dev_pw
+
+# The clone/push probes below must FAIL, never hang: on a TTY, git would
+# prompt for credentials after a 401 (the revoked-token clone) — kill the
+# interactive prompt so a refused credential is a non-zero exit, like the
+# integration test's gitRun (GIT_TERMINAL_PROMPT=0, credential.helper=
+# per invocation — a machine credential helper must not substitute a
+# working credential and flip a must-fail assertion).
+export GIT_TERMINAL_PROMPT=0
+
+SHADOW="u-g3-$$-$(date +%s)"
+api_admin() { # api_admin METHOD PATH [BODY] — admin basic auth
+  local method="$1" path="$2" body="${3:-}"
+  if [[ -n "$body" ]]; then
+    curl -sS -u "$ADMIN_USER:$ADMIN_PASS" -X "$method" \
+      -H 'Content-Type: application/json' -d "$body" "$BASE$path"
+  else
+    curl -sS -u "$ADMIN_USER:$ADMIN_PASS" -X "$method" "$BASE$path"
+  fi
+}
+code_admin() { # code_admin METHOD PATH [BODY]
+  local method="$1" path="$2" body="${3:-}"
+  if [[ -n "$body" ]]; then
+    curl -sS -o /dev/null -w '%{http_code}' -u "$ADMIN_USER:$ADMIN_PASS" -X "$method" \
+      -H 'Content-Type: application/json' -d "$body" "$BASE$path"
+  else
+    curl -sS -o /dev/null -w '%{http_code}' -u "$ADMIN_USER:$ADMIN_PASS" -X "$method" "$BASE$path"
+  fi
+}
+
+SHADOW_PW="$(python3 -c 'import secrets;print(secrets.token_hex(24))')"
+CREATE_BODY="{\"username\":\"$SHADOW\",\"email\":\"$SHADOW@users.invalid\",\"password\":\"$SHADOW_PW\",\"must_change_password\":false,\"send_notify\":false}"
+if [[ "$(code_admin POST /api/v1/admin/users "$CREATE_BODY")" == "201" ]]; then
+  ok "created a shadow account through the admin API ($SHADOW)"
+else
+  fail "could not create the shadow account $SHADOW — check POST_GITEA_ADMIN_USER/POST_GITEA_ADMIN_PASSWORD (token management is admin basic-auth-only)"
+fi
+
+# The collaborator grant rides the SERVICE token: only the repository
+# owner may manage collaborators, and the platform's repositories live in
+# the service account's namespace.
+if [[ "$(code PUT "/api/v1/repos/$REPO/collaborators/$SHADOW" '{"permission":"read"}')" == "204" ]]; then
+  ok "granted the shadow account read access on the private repository"
+else
+  fail "could not grant the shadow account collaborator access"
+fi
+
+# The scoped token: minted through the admin's basic auth, read-only.
+MINT="$(api_admin POST "/api/v1/users/$SHADOW/tokens" "{\"name\":\"g3-t0304\",\"scopes\":[\"read:repository\"]}")"
+SHADOW_TOKEN="$(printf '%s' "$MINT" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("sha1",""))' 2>/dev/null)"
+SHADOW_TOKEN_ID="$(printf '%s' "$MINT" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("id",""))' 2>/dev/null)"
+if [[ -n "$SHADOW_TOKEN" && -n "$SHADOW_TOKEN_ID" ]]; then
+  ok "minted a read-scoped token for the shadow account (id $SHADOW_TOKEN_ID)"
+else
+  fail "could not mint the shadow token: $MINT"
+fi
+
+if [[ -n "$SHADOW_TOKEN" ]]; then
+  clone_err=0
+  git -c credential.helper= clone -q "http://$SHADOW:$SHADOW_TOKEN@${BASE#http://}/$REPO.git" \
+    "$WORK/clone-read" 2>"$WORK/clone-read.err" || clone_err=$?
+  if (( clone_err == 0 )); then
+    ok "a collaborator's read token cloned the private repository"
+  else
+    fail "the read-token clone failed: $(tail -2 "$WORK/clone-read.err" | tr '\n' ' ')"
+  fi
+
+  if (( clone_err == 0 )); then
+    echo "read tokens cannot push" > "$WORK/clone-read/proof.txt"
+    git -C "$WORK/clone-read" -c user.name=g3 -c user.email=g3@test add -A
+    git -C "$WORK/clone-read" -c user.name=g3 -c user.email=g3@test \
+      commit -q -m "g3 read-token push must fail"
+    push_rc=0
+    git -C "$WORK/clone-read" -c credential.helper= push -q \
+      "http://$SHADOW:$SHADOW_TOKEN@${BASE#http://}/$REPO.git" \
+      HEAD:refs/heads/g3-read-probe >/dev/null 2>"$WORK/read-push.err" || push_rc=$?
+    if (( push_rc != 0 )); then
+      ok "a read-scoped token cannot push (the scope is enforced)"
+    else
+      fail "a read-scoped token pushed — the scope is NOT enforced"
+    fi
+  fi
+
+  # Revocation: the token dies immediately (the DELETE is the enforcement).
+  REVOKE_CODE="$(code_admin DELETE "/api/v1/users/$SHADOW/tokens/$SHADOW_TOKEN_ID")"
+  if [[ "$REVOKE_CODE" == "204" ]]; then
+    ok "revoked the token"
+  else
+    fail "could not revoke the token (admin DELETE answered $REVOKE_CODE)"
+  fi
+  clone_err=0
+  git -c credential.helper= clone -q "http://$SHADOW:$SHADOW_TOKEN@${BASE#http://}/$REPO.git" \
+    "$WORK/clone-revoked" 2>"$WORK/clone-revoked.err" || clone_err=$?
+  if (( clone_err != 0 )); then
+    ok "the revoked token can no longer clone (revocation is enforced)"
+  else
+    fail "the revoked token still cloned — revocation is NOT enforced"
+  fi
+
+  # 无权限用户 clone private 失败: a FRESH, still-valid token held by a user
+  # WITHOUT a collaborator grant cannot reach the private repository — the
+  # access mapping governs reach, not token existence.
+  MINT2="$(api_admin POST "/api/v1/users/$SHADOW/tokens" "{\"name\":\"g3-t0304-b\",\"scopes\":[\"read:repository\"]}")"
+  SHADOW_TOKEN2="$(printf '%s' "$MINT2" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("sha1",""))' 2>/dev/null)"
+  if [[ "$(code DELETE "/api/v1/repos/$REPO/collaborators/$SHADOW")" == "204" ]]; then
+    ok "removed the collaborator grant (access revocation)"
+  else
+    fail "could not remove the collaborator grant"
+  fi
+  if [[ -n "$SHADOW_TOKEN2" ]]; then
+    clone_err=0
+    git -c credential.helper= clone -q "http://$SHADOW:$SHADOW_TOKEN2@${BASE#http://}/$REPO.git" \
+      "$WORK/clone-nogrant" 2>"$WORK/clone-nogrant.err" || clone_err=$?
+    if (( clone_err != 0 )); then
+      ok "a valid token without a grant cannot clone the private repository (无权限用户 clone 失败)"
+    else
+      fail "a user without access cloned the private repository — the access mapping is NOT enforced"
+    fi
+  else
+    fail "could not mint the second shadow token: $MINT2"
   fi
 fi
 

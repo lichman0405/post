@@ -45,6 +45,7 @@ import (
 
 	"github.com/lichman0405/post/cmd/api/audithttp"
 	"github.com/lichman0405/post/cmd/api/authhttp"
+	"github.com/lichman0405/post/cmd/api/gittokenshttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
@@ -237,6 +238,25 @@ func run(args []string) int {
 	})
 	v1.Handle("/api/v1/projects", projectAPI.Routes())
 	v1.Handle("/api/v1/projects/", projectAPI.Routes())
+	// Scoped git tokens (T0304): the user-credential surface over the
+	// internal Gitea. Like provisioning it needs provider configuration,
+	// but its own gate: the admin credentials may be unset while
+	// provisioning runs, and vice versa. The routes register either way —
+	// disabled, they answer 503 naming the missing keys instead of a
+	// misleading 404.
+	gitTokensAPI := gittokenshttp.New(gittokenshttp.Deps{
+		Projects: projectAPI.Service(),
+		Access:   gitAccessService(gitCfg, pool),
+		Audit:    auditStore,
+		Missing:  gitCfg.UserAccessMissing,
+	})
+	gitTokensAPI.Register(v1)
+	if !gitCfg.UserAccessEnabled() {
+		// Redacted by construction: key names only, never values.
+		slog.Warn("post-api: git user access disabled — missing configuration",
+			"missing", strings.Join(gitCfg.UserAccessMissing, ", "),
+			"effect", "git tokens cannot be issued or revoked; set the named variables and restart to enable")
+	}
 	// Activity feeds (T0110): read-only GET routes on the same guarded v1
 	// mux. Read authorization reuses the owning surfaces' service instances
 	// (projectAPI.Service()/orgAPI.Service()), so a resource's activity is
@@ -323,6 +343,19 @@ var authnLoader = func() authn.Loader { return authn.Loader{} }
 // gitproviderLoader resolves the GitProvider configuration environment
 // (injectable, same reason as authnLoader).
 var gitproviderLoader = func() gitprovider.Loader { return gitprovider.Loader{} }
+
+// gitAccessService wires the T0304 user-credential service when the
+// configuration is complete, nil otherwise (the routes answer 503 naming
+// the missing keys — a disabled feature is a visible one).
+func gitAccessService(cfg *gitprovider.Config, pool *pgxpool.Pool) *gitprovider.UserAccess {
+	if !cfg.UserAccessEnabled() {
+		return nil
+	}
+	return gitprovider.NewUserAccess(
+		gitprovider.NewGiteaUserAccess(*cfg),
+		gitprovider.NewUserAccessStore(pool),
+		cfg.BaseURL)
+}
 
 // newOIDCClientOrNil builds the provider client when OIDC is configured.
 // The redirect URI is always derived from the callback request (the API's

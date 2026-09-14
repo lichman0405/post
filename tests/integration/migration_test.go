@@ -153,6 +153,30 @@ var canonicalTables = map[string]tableExp{
 		uniques: [][]string{{"owner", "name"}},
 		fks:     []fkExp{fk("project_id", "projects", "RESTRICT")},
 	},
+	"git_user_identities": {
+		// T0304 (00032): the platform→GitProvider user identity mapping
+		// (one shadow account "u-<user uuid>" per platform user).
+		cols:    []colExp{c("user_id", u, false, false), c("gitea_username", txt, false, false), c("created_at", ts, false, true)},
+		pk:      []string{"user_id"},
+		uniques: [][]string{{"gitea_username"}},
+		fks:     []fkExp{fk("user_id", "users", "RESTRICT")},
+	},
+	"git_repo_access": {
+		// T0304 (00032): the repo access mapping (permission derived from
+		// the platform role; revocation sets revoked_at, never deletes).
+		cols:   []colExp{c("project_id", u, false, false), c("user_id", u, false, false), c("permission", txt, false, false), c("granted_at", ts, false, true), c("revoked_at", ts, true, false)},
+		pk:     []string{"project_id", "user_id"},
+		checks: []string{"permission = ANY", "revoked_at >= granted_at"},
+		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("user_id", "users", "RESTRICT")},
+	},
+	"git_access_tokens": {
+		// T0304 (00032): minted scoped tokens — the value is never stored,
+		// gitea_token_id is the revocation handle, rows flip to revoked.
+		cols:   []colExp{c("id", u, false, true), c("project_id", u, false, false), c("user_id", u, false, false), c("gitea_username", txt, false, false), c("token_name", txt, false, false), c("gitea_token_id", i8, false, false), c("scope", txt, false, false), c("status", txt, false, true), c("issued_at", ts, false, true), c("revoked_at", ts, true, false)},
+		pk:     []string{"id"},
+		checks: []string{"scope = ANY", "status = ANY", "revoked_at >= issued_at", "status = 'active'"},
+		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("user_id", "users", "RESTRICT"), {col: "gitea_username", refTable: "git_user_identities", refCol: "gitea_username", onDelete: "RESTRICT"}},
+	},
 	"project_memberships": {
 		cols:   []colExp{c("project_id", u, false, false), c("user_id", u, false, false), c("role", txt, false, false), c("created_at", ts, false, true)},
 		pk:     []string{"project_id", "user_id"},
