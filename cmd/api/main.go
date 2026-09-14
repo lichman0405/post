@@ -45,6 +45,7 @@ import (
 
 	"github.com/lichman0405/post/cmd/api/audithttp"
 	"github.com/lichman0405/post/cmd/api/authhttp"
+	"github.com/lichman0405/post/cmd/api/fileshttp"
 	"github.com/lichman0405/post/cmd/api/gittokenshttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/policyhttp"
@@ -212,7 +213,7 @@ func run(args []string) int {
 		// Redacted by construction: key names only, never values.
 		slog.Warn("post-api: GitProvider provisioning disabled — missing configuration",
 			"missing", strings.Join(gitCfg.Missing, ", "),
-			"effect", "no repositories or webhooks are provisioned; set the named variables and restart to enable")
+			"effect", "no repositories or webhooks are provisioned and files reads are disabled; set the named variables and restart to enable")
 	}
 
 	// Authentication (T0101) + organizations (T0103): the /api/v1 subtree
@@ -283,6 +284,18 @@ func run(args []string) int {
 			"missing", strings.Join(gitCfg.UserAccessMissing, ", "),
 			"effect", "git tokens cannot be issued or revoked; set the named variables and restart to enable")
 	}
+	// Read-only Files API (T0307): tree/preview/history/raw over the
+	// provisioned repository, gated by the shared project read surface —
+	// a project's files are exactly as visible as the project itself. The
+	// reader needs the service token (all provider reads authenticate with
+	// it); the routes register either way — disabled, they answer 503
+	// naming the missing keys, like the git-token surface.
+	filesAPI := fileshttp.New(fileshttp.Deps{
+		Projects: projectAPI.Service(),
+		Files:    filesReaderService(gitCfg, pool),
+		Missing:  gitCfg.FilesMissing(),
+	})
+	filesAPI.Register(v1)
 	// Activity feeds (T0110): read-only GET routes on the same guarded v1
 	// mux. Read authorization reuses the owning surfaces' service instances
 	// (projectAPI.Service()/orgAPI.Service()), so a resource's activity is
@@ -428,6 +441,18 @@ func gitAccessService(cfg *gitprovider.Config, pool *pgxpool.Pool) *gitprovider.
 		gitprovider.NewGiteaUserAccess(*cfg),
 		gitprovider.NewUserAccessStore(pool),
 		cfg.BaseURL)
+}
+
+// filesReaderService wires the T0307 read-only files service when the
+// service token is configured, nil otherwise (the routes answer 503
+// naming the missing keys — a disabled feature is a visible one).
+func filesReaderService(cfg *gitprovider.Config, pool *pgxpool.Pool) *gitprovider.FilesReader {
+	if len(cfg.FilesMissing()) > 0 {
+		return nil
+	}
+	return gitprovider.NewFilesReader(
+		gitprovider.NewGiteaAdapter(*cfg),
+		gitprovider.NewUserAccessStore(pool))
 }
 
 // newOIDCClientOrNil builds the provider client when OIDC is configured.

@@ -74,6 +74,21 @@ func (c *Config) ProvisioningEnabled() bool { return len(c.Missing) == 0 }
 // are missing (Config.UserAccessMissing).
 func (c *Config) UserAccessEnabled() bool { return len(c.UserAccessMissing) == 0 }
 
+// FilesMissing lists the environment keys the read-only Files surface
+// (T0307) needs: the service account token only — the provider's read API
+// authenticates with it, like every other platform call (the webhook URL
+// and admin pair belong to provisioning and user access, not to reads).
+// Non-empty means the files routes answer 503 naming the keys instead of
+// reading.
+func (c *Config) FilesMissing() []string {
+	for _, k := range c.Missing {
+		if k == EnvToken {
+			return []string{EnvToken}
+		}
+	}
+	return nil
+}
+
 // EnvNames: every variable this package reads.
 const (
 	EnvBaseURL       = "POST_GITEA_BASE_URL"
