@@ -1,5 +1,33 @@
 # 开发进度
 
+> **15:15 当前这一刻**：
+> **那个反复咬人的 `sleep 300`，源头找到了 —— 是我们自己的测试，不是 Worker 没关好门。**
+> 一天里 T0306、T0502、T0307 各因此丢了一次 collect（其余检查全过），而每次测试都是绿的。
+> 根因在 `TestResidueReportTellsTheSupervisorWhatToDo`：它只读报告文本，从不去信号自己起的进程；
+> 而 `startSetsidChild` 自带的收尾**只杀它启动的那个 pid（组长）**。组长不是漏的那个 ——
+> 杀掉组长只是把后台子进程**过继给 init**，它照样活满 300 秒（现场就是这样：`ppid=1`、`pgid` 指向一个已经不存在的组长）。
+> 而它**继承了启动它的环境**，`POST_WORKER_RUN_ID` 也在里面；collect 正是靠这个标记归属残留进程 ——
+> 于是 Worker 会因为一件**由测试夹具制造出来的**进程被拒收交付。
+> 修法：测试里自己注册一个收尾（cleanup 后进先出，所以它是趁组长还活着跑的，负号 pid 够得到整组），再补一次按 pid 的信号兜底。
+> **反向对照**（同一个包、前后各跑一次全量）：去掉补丁 → **每跑一次漏 1 个**；带上补丁 → **0 个**。`f059c28` 已推。
+>
+> **驱动重启过一次**：`f059c28` 动的正是 `internal/devorchestrator`，判"二进制过期"的那把尺子立刻把驱动按住
+>（"will act on nothing until it is rebuilt and restarted"）—— 这把尺子是对的，不许拿旧工具评新规则。
+> 停 1079130 → `make rddev` → 新 pid **1593913**，四个 Worker 全部**原样接管**（T0206-review、T0308、T0505、T0508）。
+>
+> **T0206（`00035`，链首）15:09 collect 干净通过**，驱动随即判旧复核"说的是被取代的那一次尝试"
+>（`rebaseline` 换了代码身份）并派了新复核 —— 这正是 `L1-58` 描述的那套机制在按设计工作。
+>
+> **T0501（`00040`）已被我压住**（原来停在 `verification`，验收死于 `patch failed: specs/SPEC_VERSION.json:1`，
+> 与 T0206 当初**同一种**失败）。它前面还压着三个号，现在搬基线等于搬三遍，所以按 `L1-58` 停到 `rejected`，
+> 理由写清楚了"这不是质量判断、轮到你才动"。**待办决策清零**（T0501、T0502 两条已清）。
+> 冻结名单不变：**T0209(00036)、T0213(00038)、T0501(00040)、T0502(00041)、T0306(00042)**。
+>
+> **链外两个新名字**：**T0308**（Files Web UI）、**T0508**（external reference live identity snapshot）**都不带迁移**，
+> 所以不进队列，可以照常跑、照常合。
+>
+> **本次提交**：`f059c28`（残留修复）。驱动 pid 1593913 在跑，并行 3。
+
 > **15:00 当前这一刻**：
 > **T0307 已合并**（PR #170 → `ece3544`）。它今天两次 G2 变红，根因不在它身上，而在我们自己的量尺上 ——
 > 门禁在**评测树**里跑 `rddev`，而那棵树是**取回来的** `origin/main`；判"二进制过期"的那把尺子比的却是**本机 main**。
@@ -1058,9 +1086,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-14T07:03:21Z
+生成时间：2026-09-14T07:11:35Z
 
-状态分布：todo 84 · ready 1 · running 3 · worker_failed 0 · verification 1 · rejected 4 · blocked 0 · accepted 0 · merged 40（合计 133/133 个任务）
+状态分布：todo 84 · ready 0 · running 3 · worker_failed 0 · verification 1 · rejected 5 · blocked 0 · accepted 0 · merged 40（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1093,7 +1121,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0203 | Typed Relation repository | P2 | merged | 2026-09-13T17:22:20Z |  | 2026-09-13T17:40:44Z | 2026-09-13T17:47:30Z |
 | T0204 | Project State 与 State Commit | P2 | merged | 2026-09-13T22:10:18Z |  | 2026-09-13T22:52:41Z | 2026-09-13T22:56:15Z |
 | T0205 | Research Branch Domain | P2 | merged | 2026-09-13T22:56:16Z |  | 2026-09-13T23:23:26Z | 2026-09-13T23:26:23Z |
-| T0206 | RSG Manifest 导出与 hash | P2 | running | 2026-09-14T07:01:46Z |  |  |  |
+| T0206 | RSG Manifest 导出与 hash | P2 | verification | 2026-09-14T07:01:46Z |  |  |  |
 | T0207 | Progressive Validation Gates | P2 | merged | 2026-09-14T00:39:04Z |  | 2026-09-14T01:13:29Z | 2026-09-14T01:32:13Z |
 | T0208 | V1 Scientific Object Domain Services | P2 | merged | 2026-09-14T01:33:06Z |  | 2026-09-14T02:37:28Z | 2026-09-14T02:41:06Z |
 | T0209 | RSG Query API | P2 | rejected | 2026-09-14T06:33:30Z |  |  |  |
@@ -1122,14 +1150,14 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0408 | PR Research Diff UI | P4 | todo |  |  |  |  |
 | T0409 | Merge Governance 与 frozen main 更新 | P4 | todo |  |  |  |  |
 | T0410 | PR/Branch 完整 E2E | P4 | todo |  |  |  |  |
-| T0501 | Research Question 与 Hypothesis 关系模型 | P5 | verification | 2026-09-14T05:41:47Z |  |  |  |
+| T0501 | Research Question 与 Hypothesis 关系模型 | P5 | rejected | 2026-09-14T05:41:47Z |  |  |  |
 | T0502 | Claim 结构与 scope | P5 | rejected | 2026-09-14T05:42:31Z |  |  |  |
 | T0503 | Finding 聚合模型 | P5 | todo |  |  |  |  |
 | T0504 | Evidence Assertion Domain | P5 | todo |  |  |  |  |
 | T0505 | Provenance Graph Projection | P5 | running | 2026-09-14T06:34:55Z |  |  |  |
 | T0506 | Evidence Graph Projection | P5 | todo |  |  |  |  |
 | T0507 | Evidence/Provenance UI | P5 | todo |  |  |  |  |
-| T0508 | External Reference live identity + snapshot | P5 | ready |  |  |  |  |
+| T0508 | External Reference live identity + snapshot | P5 | running | 2026-09-14T07:09:08Z |  |  |  |
 | T0509 | Literature evidence extraction data model | P5 | todo |  |  |  |  |
 | T0510 | Knowledge workflow E2E | P5 | todo |  |  |  |  |
 | T0601 | Freeze Main Governance | P6 | todo |  |  |  |  |

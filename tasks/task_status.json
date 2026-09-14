@@ -1274,9 +1274,9 @@
     },
     "T0206": {
       "status": "verification",
-      "started_at": "2026-09-14T06:47:28Z",
-      "worker_run_id": "run-ccf9d24aa45f4307",
-      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (go test ./internal/gitprovider/ -count=1 -run TestIngestUntypedManifest) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
+      "started_at": "2026-09-14T07:01:46Z",
+      "worker_run_id": "run-37f610e7eea914c9",
+      "rejection_reason": "# T0206：基线搬到新 main 上重做一遍 —— 不是你的代码有问题，是主线上多了东西\n\n## 先说结论\n\n**你的代码不用改。** 独立复核的结论是 `approve`：0 blocking、0 major，只有两条 minor 和三条 nit。\n\n但验收 Gate 拒了，原话是：\n\n```\nthe task's change does not apply to current main — bring the branch up to date and re-run:\ngit apply /tmp/post-integration-T0206.patch: exit status 1:\nerror: patch failed: specs/SPEC_VERSION.json:1\n```\n\n## 为什么会这样\n\n你开工以后，主线上合进了 T0305（迁移 `00034`）和 T0307。\n\n`specs/SPEC_VERSION.json` 是**生成物** —— 它是 specs 的一份摘要，主线上任何与 spec 有关的改动都会让它变。\n你树里那份，是按**你开工时的主线**算出来的；跟现在主线上的那份自然对不上，\n补丁的上下文贴不住，于是 `git apply` 失败。\n\n**这道拒绝是对的**：一个已经贴不到主线上的改动，不该被硬合进去。\n\n## 工具会怎么搬\n\n派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`）**不靠合并文本**，而是在新树上**重新生成**。\n\n道理很直白：派生文件是它输入的**函数**。\n留你那份 → 摘要描述的是旧的 specs；留主线那份 → 你在 specs 上的改动就丢了。\n两个都不对，所以只能按合并后的树**重算**。\n\n## 请你做的\n\n1. **逻辑一个字都不要改。** 复核已经确认你的导出机制是正确的，验收标准也都成立。\n2. 在新基线上**重新跑一遍**你在 RESULT.json 里承诺过的测试\n   （单元、集成、`make test-integration`，以及 `gofmt`/`go vet`/`staticcheck` 那一套）。\n   **跑出什么就写什么**：新基线上真有测试红了，就照实报红，我按红的处理。\n   不许为了让 collect 过而删测试、skip、放宽断言或放大超时。\n3. `RESULT.json` 里 `tests[]` 的每一条，都必须是**你这次实际跑出来的结果**。\n   历史写进 `notes_for_supervisor`，**不要写进 `tests[]`** —— 上一次 collect 被拒就是因为这个\n   （顶上写 `completed`、数组里躺着一条 `failed`，两句话互相打架）。\n4. `status` 只有在上面这些**真的都过了**之后才写 `completed`。\n5. 你的迁移号 **`00035` 不变**，在主线上排在 `00034` 之后，位置我留着。\n\n## 一条 minor，可做可不做\n\n复核提到 `examples/rsg-manifest.example.json` 还停在这次改动**之前**的形状，和这个任务交付的\ncanonical schema 对不上。它还在的话，顺手改对是好事；**但它不阻塞，别为了它冒险**。\n",
       "history": [
         {
           "from": "todo",
@@ -1366,6 +1366,27 @@
           "to": "verification",
           "at": "2026-09-14T06:49:21Z",
           "run_id": "run-452903e6c6aef49b",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T07:01:46Z",
+          "run_id": "run-872ee21c84636a63",
+          "reason": "# T0206：基线搬到新 main 上重做一遍 —— 不是你的代码有问题，是主线上多了东西\n\n## 先说结论\n\n**你的代码不用改。** 独立复核的结论是 `approve`：0 blocking、0 major，只有两条 minor 和三条 nit。\n\n但验收 Gate 拒了，原话是：\n\n```\nthe task's change does not apply to current main — bring the branch up to date and re-run:\ngit apply /tmp/post-integration-T0206.patch: exit status 1:\nerror: patch failed: specs/SPEC_VERSION.json:1\n```\n\n## 为什么会这样\n\n你开工以后，主线上合进了 T0305（迁移 `00034`）和 T0307。\n\n`specs/SPEC_VERSION.json` 是**生成物** —— 它是 specs 的一份摘要，主线上任何与 spec 有关的改动都会让它变。\n你树里那份，是按**你开工时的主线**算出来的；跟现在主线上的那份自然对不上，\n补丁的上下文贴不住，于是 `git apply` 失败。\n\n**这道拒绝是对的**：一个已经贴不到主线上的改动，不该被硬合进去。\n\n## 工具会怎么搬\n\n派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`）**不靠合并文本**，而是在新树上**重新生成**。\n\n道理很直白：派生文件是它输入的**函数**。\n留你那份 → 摘要描述的是旧的 specs；留主线那份 → 你在 specs 上的改动就丢了。\n两个都不对，所以只能按合并后的树**重算**。\n\n## 请你做的\n\n1. **逻辑一个字都不要改。** 复核已经确认你的导出机制是正确的，验收标准也都成立。\n2. 在新基线上**重新跑一遍**你在 RESULT.json 里承诺过的测试\n   （单元、集成、`make test-integration`，以及 `gofmt`/`go vet`/`staticcheck` 那一套）。\n   **跑出什么就写什么**：新基线上真有测试红了，就照实报红，我按红的处理。\n   不许为了让 collect 过而删测试、skip、放宽断言或放大超时。\n3. `RESULT.json` 里 `tests[]` 的每一条，都必须是**你这次实际跑出来的结果**。\n   历史写进 `notes_for_supervisor`，**不要写进 `tests[]`** —— 上一次 collect 被拒就是因为这个\n   （顶上写 `completed`、数组里躺着一条 `failed`，两句话互相打架）。\n4. `status` 只有在上面这些**真的都过了**之后才写 `completed`。\n5. 你的迁移号 **`00035` 不变**，在主线上排在 `00034` 之后，位置我留着。\n\n## 一条 minor，可做可不做\n\n复核提到 `examples/rsg-manifest.example.json` 还停在这次改动**之前**的形状，和这个任务交付的\ncanonical schema 对不上。它还在的话，顺手改对是好事；**但它不阻塞，别为了它冒险**。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T07:01:46Z",
+          "run_id": "run-37f610e7eea914c9",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T07:09:07Z",
+          "run_id": "run-d79615c482fc08f2",
           "reason": "collect: all checks passed"
         }
       ]
@@ -1540,10 +1561,10 @@
       ]
     },
     "T0209": {
-      "status": "verification",
+      "status": "rejected",
       "started_at": "2026-09-14T06:33:30Z",
       "worker_run_id": "run-33200dcfd88b6eab",
-      "rejection_reason": "# T0209：基线又往前挪了一次（第二次），这一轮很短\n\n**先更正一句**：你刚才读到的那段理由（如果你已经读了）里写的基线是 `0cb36e1`\n—— 那是**上一次**前移。刚刚又发生了一次前移，你现在在 `0c540e3`。\n两个都是\"基线动了\"，不是你做错了什么。以 `git log -1` 看到的为准。\n\n## 这一跳里 main 上多了什么\n\n- `00034`（T0305，Push Webhook 与 Semantic Ingestion）**已合**。\n- 其余是**我自己的 orchestrator 提交**（`cmd/rddev`、`internal/devorchestrator`、`Makefile`、\n  `specs/SPEC_VERSION.json`、`tasks/**`）——**没有和你的文件重叠的产品改动**。\n- `00035`（T0206，RSG Manifest 导出与 hash）**还没合**，它此刻正在返工。\n\n所以这次前移对你的实际影响只有一处：**生成物**要在新树上重新生成一遍\n（`specs/database/postgres.sql`、`internal/persistence/sqlc/`、`specs/SPEC_VERSION.json`）。\n这一步 **Supervisor 已经替你做完了**，不要重做，只需要核对。\n\n## 你的迁移号\n\n**`00036` 不变。** main 现在最高是 `00034`；`00035` 留给 T0206，`00036` 是你的，没有撞号。\n\n## 合并那一步仍要等\n\n迁移必须按号落地（goose 拒绝乱序应用）。所以你这个任务**在验证通过之后，\n仍会在合并那一步等我**：先 `00035`，再 `00036`。\n**那是我这边的事，不是你要处理的**，你不需要为此做任何特殊处理。\n\n## 请你做的（这一轮很短）\n\n1. **核对**前移后的树：你那 19 项改动一项没丢（12 改 + 7 增），\n   `00036_rsg_query_indexes.sql` 还在。上一次那四个文件的**并集合成**（`cmd/api/main.go`、\n   `cmd/api/rsghttp/wiring.go`、`cmd/api/rsghttp/handler_test.go`、\n   `internal/application/rsg/service.go` 各留两边的端口/方法/stub/字段）也原样保留着。\n   **如果并集哪里不对，直接说出来，不要默默改。**\n2. **在新基线上重新跑一遍证据**（`rsg query integration` = `tests/integration/rsg_query_test.go`，\n   真实 PostgreSQL，G3 不接受全 mock 替代），以及你在 RESULT.json 里报过的其它条目。\n   上一轮复核指出一个计数小错：新的 e2e query 检查是 **8** 条，RESULT.json 写的是 7 ——\n   顺手改对，**数出来的数字，不是估的**。\n3. **把 `specs/orchestrator/gates.json` 里 `go` 作业的步骤当作自检清单逐条跑**\n   （`make fmt-check`、`go vet ./...`、`make staticcheck` 等）。你没有跑过这些，\n   所以\"检查全过\"对你跑过的那些是真的，但不等于 CI 会过 —— 同一个坑 T0210 和 T0305 都栽过。\n4. 更新 `tasks/results/T0209/RESULT.json`：新基线 `0c540e3`、新跑出来的证据、改对的计数。\n\n## 不变的约束\n\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n  红着报告比造假绿好。\n- 生成物只能**重新生成**，不要手工编辑 `internal/persistence/sqlc/*.go` 或\n  `specs/database/postgres.sql`。\n- 不要新增迁移、不要改迁移号、不要动 `allowed_scope` 外的文件。\n- 跑完确认 `ps` 里没有你自己留下的进程（T0307 和 T0502 各留过一个后台 `sleep`，都被 collect 抓到了）。\n",
+      "rejection_reason": "# T0209：按迁移号序停等你自己的轮次 —— 不是你的交付有缺陷\n\n## 这一条不是在做质量判断\n\n你的工作树一件没删，你的迁移号 `00036` 不变。这条记录的作用只有一个：**把你停在这里，等前一个号合进主线。**\n\n## 为什么必须等\n\n主线的迁移必须**严格按号递增**落地。T0209 带着 `00036`，而 `00035`（T0206）还在队列里没合。\n只要 `00035` 还没进主线，你这个任务就**不可能**合并 —— 验收 Gate 会在合并顺序那一步拒绝，\n而那一步是设计成拒绝的：库一旦按乱序升级过，goose 会直接拒绝启动，而 CI 看不见这一点\n（CI 每次都用全新的库，1..N 顺序天然正确）。\n\n**所以现在做什么都是白做**：主线马上就要因为 `00035` 落地而再动一次，\n你的基线会跟着再搬一次。在你前面那位合进去之前先搬基线，等于搬两遍。\n\n## 轮到你的那天会发生什么\n\n1. 我把你的基线搬到当时的主线上；\n2. 派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n   会**在新的树上重新生成**，不靠合并文本 —— 因为它们是输入的函数，合并文本两种结果都是错的；\n3. 你在新基线上重新验证一遍，然后照常走复核 → 验收 → 合并。\n\n## 在此之前\n\n**不要动工作树，不要重跑，不要为了让 collect 过改任何断言。**\n你现在什么都不用做。\n",
       "history": [
         {
           "from": "todo",
@@ -1620,6 +1641,13 @@
           "at": "2026-09-14T06:50:16Z",
           "run_id": "run-196d6aefaf43ab3a",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T07:02:08Z",
+          "run_id": "run-e34a357c3d3e563b",
+          "reason": "# T0209：按迁移号序停等你自己的轮次 —— 不是你的交付有缺陷\n\n## 这一条不是在做质量判断\n\n你的工作树一件没删，你的迁移号 `00036` 不变。这条记录的作用只有一个：**把你停在这里，等前一个号合进主线。**\n\n## 为什么必须等\n\n主线的迁移必须**严格按号递增**落地。T0209 带着 `00036`，而 `00035`（T0206）还在队列里没合。\n只要 `00035` 还没进主线，你这个任务就**不可能**合并 —— 验收 Gate 会在合并顺序那一步拒绝，\n而那一步是设计成拒绝的：库一旦按乱序升级过，goose 会直接拒绝启动，而 CI 看不见这一点\n（CI 每次都用全新的库，1..N 顺序天然正确）。\n\n**所以现在做什么都是白做**：主线马上就要因为 `00035` 落地而再动一次，\n你的基线会跟着再搬一次。在你前面那位合进去之前先搬基线，等于搬两遍。\n\n## 轮到你的那天会发生什么\n\n1. 我把你的基线搬到当时的主线上；\n2. 派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n   会**在新的树上重新生成**，不靠合并文本 —— 因为它们是输入的函数，合并文本两种结果都是错的；\n3. 你在新基线上重新验证一遍，然后照常走复核 → 验收 → 合并。\n\n## 在此之前\n\n**不要动工作树，不要重跑，不要为了让 collect 过改任何断言。**\n你现在什么都不用做。\n"
         }
       ]
     },
@@ -2369,10 +2397,10 @@
       ]
     },
     "T0306": {
-      "status": "running",
+      "status": "rejected",
       "started_at": "2026-09-14T06:55:53Z",
       "worker_run_id": "run-f2937d1d6341d808",
-      "rejection_reason": "collect rejected: residue: 1 process(es) the Worker started are still running: pid 1073048 (sleep 300) session 1073046 group 1073046. The Worker (pid 589103) has already exited — nothing owns these any more and nothing collects them on its own. Collect them with: kill -TERM -- -1073046",
+      "rejection_reason": "# T0306：按迁移号序停等你自己的轮次 —— 不是你的交付有缺陷\n\n## 这一条不是在做质量判断\n\n你的工作树一件没删，你的迁移号 `00042` 不变。这条记录的作用只有一个：**把你停在这里，等前一个号合进主线。**\n\n## 为什么必须等\n\n主线的迁移必须**严格按号递增**落地。T0306 带着 `00042`，而前面 `00035`..`00041` 六个号都还没合。\n只要前面还有一个号没进主线，你这个任务就**不可能**合并 —— 验收 Gate 会在合并顺序那一步拒绝，\n而那一步是设计成拒绝的：库一旦按乱序升级过，goose 会直接拒绝启动，而 CI 看不见这一点\n（CI 每次都用全新的库，1..N 顺序天然正确）。\n\n**所以现在做什么都是白做**：主线马上还要为 `00035`..`00041` 各动一次，\n你的基线会跟着再搬一次。在你前面那位合进去之前先搬基线，等于搬两遍。\n\n## 轮到你的那天会发生什么\n\n1. 我把你的基线搬到当时的主线上；\n2. 派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n   会**在新的树上重新生成**，不靠合并文本 —— 因为它们是输入的函数，合并文本两种结果都是错的；\n3. 你在新基线上重新验证一遍，然后照常走复核 → 验收 → 合并。\n\n## 在此之前\n\n**不要动工作树，不要重跑，不要为了让 collect 过改任何断言。**\n你现在什么都不用做。\n",
       "history": [
         {
           "from": "todo",
@@ -2400,6 +2428,20 @@
           "at": "2026-09-14T06:55:53Z",
           "run_id": "run-f2937d1d6341d808",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T06:59:31Z",
+          "run_id": "run-67ac49cd32a8dca0",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T07:02:37Z",
+          "run_id": "run-365929eee9ba6f0b",
+          "reason": "# T0306：按迁移号序停等你自己的轮次 —— 不是你的交付有缺陷\n\n## 这一条不是在做质量判断\n\n你的工作树一件没删，你的迁移号 `00042` 不变。这条记录的作用只有一个：**把你停在这里，等前一个号合进主线。**\n\n## 为什么必须等\n\n主线的迁移必须**严格按号递增**落地。T0306 带着 `00042`，而前面 `00035`..`00041` 六个号都还没合。\n只要前面还有一个号没进主线，你这个任务就**不可能**合并 —— 验收 Gate 会在合并顺序那一步拒绝，\n而那一步是设计成拒绝的：库一旦按乱序升级过，goose 会直接拒绝启动，而 CI 看不见这一点\n（CI 每次都用全新的库，1..N 顺序天然正确）。\n\n**所以现在做什么都是白做**：主线马上还要为 `00035`..`00041` 各动一次，\n你的基线会跟着再搬一次。在你前面那位合进去之前先搬基线，等于搬两遍。\n\n## 轮到你的那天会发生什么\n\n1. 我把你的基线搬到当时的主线上；\n2. 派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n   会**在新的树上重新生成**，不靠合并文本 —— 因为它们是输入的函数，合并文本两种结果都是错的；\n3. 你在新基线上重新验证一遍，然后照常走复核 → 验收 → 合并。\n\n## 在此之前\n\n**不要动工作树，不要重跑，不要为了让 collect 过改任何断言。**\n你现在什么都不用做。\n"
         }
       ]
     },
@@ -2461,13 +2503,22 @@
       ]
     },
     "T0308": {
-      "status": "ready",
+      "status": "running",
+      "started_at": "2026-09-14T07:02:46Z",
+      "worker_run_id": "run-244edcaeba47a9e4",
       "history": [
         {
           "from": "todo",
           "to": "ready",
           "at": "2026-09-14T06:56:51Z",
           "run_id": "run-278af784ed6ac123"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T07:02:46Z",
+          "run_id": "run-244edcaeba47a9e4",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -2571,9 +2622,10 @@
       "merged_at": null
     },
     "T0501": {
-      "status": "verification",
+      "status": "rejected",
       "started_at": "2026-09-14T05:41:47Z",
       "worker_run_id": "run-60c925ec42ddbe7a",
+      "rejection_reason": "# T0501：按迁移号序停等你自己的轮次 —— 不是你的交付有缺陷\n\n## 这一条不是在做质量判断\n\n你的工作树一件没删，你的迁移号 `00040` 不变。这条记录的作用只有一个：**把你停在这里，等前面几个号合进主线。**\n\n## 为什么必须等\n\n主线的迁移必须**严格按号递增**落地。T0501 带着 `00040`，而 `00035`（T0206）、`00036`（T0209）、\n`00038`（T0213）都还在队列里没合。只要它们还没进主线，你这个任务就**不可能**合并 ——\n验收 Gate 会在合并顺序那一步拒绝，而那一步是设计成拒绝的：库一旦按乱序升级过，goose 会直接\n拒绝启动，而 CI 看不见这一点（CI 每次都用全新的库，1..N 顺序天然正确）。\n\n**所以现在做什么都是白做**：主线马上就要因为 `00035` 落地而再动一次，你的基线会跟着再搬一次。\n在你前面那几位合进去之前先搬基线，等于搬三遍。\n\n## 顺带说明刚才那条拒绝\n\n你上一次验收被拒，原话是：\n\n```\nthe task's change does not apply to current main — bring the branch up to date and re-run:\ngit apply /tmp/post-integration-T0501.patch: exit status 1:\nerror: patch failed: specs/SPEC_VERSION.json:1\n```\n\n**这不是你的代码有问题。** `specs/SPEC_VERSION.json` 是**生成物** —— 它是 specs 的一份摘要，\n主线上任何与 spec 有关的改动都会让它变。你树里那份是按你开工时的主线算出来的，跟现在主线上\n的那份自然对不上。\n\n## 轮到你的那天会发生什么\n\n1. 我把你的基线搬到当时的主线上；\n2. 派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n   会**在新的树上重新生成**，不靠合并文本 —— 因为派生文件是它输入的**函数**：留你那份，\n   摘要描述的旧 specs；留主线那份，你在 specs 上的改动就丢了。两个都不对，只能重算；\n3. 你在新基线上重新验证一遍，然后照常走复核 → 验收 → 合并。\n\n## 在此之前\n\n**不要动工作树，不要重跑，不要为了让 collect 过改任何断言。**\n你现在什么都不用做。\n",
       "history": [
         {
           "from": "todo",
@@ -2594,6 +2646,13 @@
           "at": "2026-09-14T06:23:35Z",
           "run_id": "run-11baff53e71d51a0",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T07:11:18Z",
+          "run_id": "run-97280b05061668a4",
+          "reason": "# T0501：按迁移号序停等你自己的轮次 —— 不是你的交付有缺陷\n\n## 这一条不是在做质量判断\n\n你的工作树一件没删，你的迁移号 `00040` 不变。这条记录的作用只有一个：**把你停在这里，等前面几个号合进主线。**\n\n## 为什么必须等\n\n主线的迁移必须**严格按号递增**落地。T0501 带着 `00040`，而 `00035`（T0206）、`00036`（T0209）、\n`00038`（T0213）都还在队列里没合。只要它们还没进主线，你这个任务就**不可能**合并 ——\n验收 Gate 会在合并顺序那一步拒绝，而那一步是设计成拒绝的：库一旦按乱序升级过，goose 会直接\n拒绝启动，而 CI 看不见这一点（CI 每次都用全新的库，1..N 顺序天然正确）。\n\n**所以现在做什么都是白做**：主线马上就要因为 `00035` 落地而再动一次，你的基线会跟着再搬一次。\n在你前面那几位合进去之前先搬基线，等于搬三遍。\n\n## 顺带说明刚才那条拒绝\n\n你上一次验收被拒，原话是：\n\n```\nthe task's change does not apply to current main — bring the branch up to date and re-run:\ngit apply /tmp/post-integration-T0501.patch: exit status 1:\nerror: patch failed: specs/SPEC_VERSION.json:1\n```\n\n**这不是你的代码有问题。** `specs/SPEC_VERSION.json` 是**生成物** —— 它是 specs 的一份摘要，\n主线上任何与 spec 有关的改动都会让它变。你树里那份是按你开工时的主线算出来的，跟现在主线上\n的那份自然对不上。\n\n## 轮到你的那天会发生什么\n\n1. 我把你的基线搬到当时的主线上；\n2. 派生文件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n   会**在新的树上重新生成**，不靠合并文本 —— 因为派生文件是它输入的**函数**：留你那份，\n   摘要描述的旧 specs；留主线那份，你在 specs 上的改动就丢了。两个都不对，只能重算；\n3. 你在新基线上重新验证一遍，然后照常走复核 → 验收 → 合并。\n\n## 在此之前\n\n**不要动工作树，不要重跑，不要为了让 collect 过改任何断言。**\n你现在什么都不用做。\n"
         }
       ]
     },
@@ -2682,13 +2741,22 @@
       "merged_at": null
     },
     "T0508": {
-      "status": "ready",
+      "status": "running",
+      "started_at": "2026-09-14T07:09:08Z",
+      "worker_run_id": "run-2a6fc6a58ccc30a2",
       "history": [
         {
           "from": "todo",
           "to": "ready",
           "at": "2026-09-14T06:50:17Z",
           "run_id": "run-cc6b34ccfb12d78d"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T07:09:08Z",
+          "run_id": "run-2a6fc6a58ccc30a2",
+          "reason": "worker spawn"
         }
       ]
     },
