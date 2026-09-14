@@ -5589,6 +5589,46 @@ Project policy 可更严格不能静默放宽 ✓、Policy 版本化 ✓" ✓）
 > 因为写具体细节是**顺手**的 ✓，而核实是**额外一步** ✓。今天这两个例子 ✓
 > （编出来的文件路径 ✓、编出来的时间戳 ✓）都便宜到一次命令就能查 ✓。
 
+> **12:20 补记 —— 上面这条更正本身是错的；那条引用从头到尾都是对的** ✓
+> （所以上面举的"编出来的文件路径"这个例子**不成立** ✓；时间戳那个仍然成立 ✓）。
+>
+> **我当时怎么"核实"的** ✓：在**仓库根目录**跑 `sed` 读 `internal/gooseutil/resolve.go` ✓ ⇒ 文件不存在 ✓；
+> 又跑 `git log --all -- internal/gooseutil` ✓ ⇒ 空 ✓ ⇒ 断定"这个目录从没存在过、是我编的" ✓。
+> **两步都问错了地方** ✓：这条是**依赖库内部的相对路径** ✓，
+> 全称是 **`github.com/pressly/goose/v3/internal/gooseutil/resolve.go`** ✓（在 `go env GOMODCACHE` 下 ✓）。
+> 现在读它：**第 46-53 行正好就是我引的那段循环** ✓，**行号也吻合** ✓：
+>
+> ```go
+> 46	var missing []int64
+> 47	for _, v := range fsysVersions {
+> 48		if dbAppliedVersions[v] {
+> 49			continue
+> 50		}
+> 51		if v < dbMaxVersion && v <= target {
+> 52			missing = append(missing, v)
+> 53		}
+> 54	}
+> ```
+>
+> **引用是真的 ✓、行号是真的 ✓、代码是真的 ✓。**
+>
+> **而这条"更正"比原错误更糟** ✓：它顺手把一个**更准的机制**换成了**更不准**的 ✓。
+> goose 有**两条**实现 ✓：旧的 `up.go` 路径 ✓ 和 **Provider 路径** ✓ ——
+> 而我们的 `internal/persistence/migrate.go` 用的是 **`goose.NewProvider`** ✓（`:42` ✓、`:62` ✓），
+> 走的是 **`provider.go:391` → `gooseutil.UpVersions(..., p.cfg.allowMissing)`** ✓，
+> 也就是 **`resolve.go` 那条** ✓。我"换上去"的 `up.go:77-89` ✓ 是**我们根本不执行**的那条 ✓。
+> （两者语义相同 ✓，所以结论没坏 ✓ —— 但证据链被换成了不对应现场的那一份 ✓。）
+>
+> **真正的教训与原文写的相反** ✓：不是"我编了引用" ✓，而是
+> **"我拿一个查错地方的结果，去否决了一条本来正确的引用"** ✓。
+> 后者更坏：它给正确的记录贴上"不可信"的标签 ✓ ——
+> 这次作废之后 ✓，`progress.md` 顶部就写成了"那个文件**从来不存在** ✓，是我编的 ✓" ✓，
+> 而事实是**它存在、而且正是生效的那条代码路径** ✓。
+>
+> **可执行的形式** ✓：引用依赖库的路径时**必须带模块前缀** ✓（`github.com/pressly/...` ✓）；
+> 核实一条路径前先问 **"它是谁的路径"** ✓ —— **`internal/` 开头既可能是我们的、也可能是依赖的** ✓。
+> （`go list -m -f '{{.Dir}}' github.com/pressly/goose/v3` ✓ 能直接给出模块根 ✓。）
+
 ---
 
 ## L1-20260914-41 — 第四条楔子，也是最严重的一条：**队首带决策 ⇒ 整条流水线停止派工**（而且是静默的）
@@ -5751,3 +5791,38 @@ _ = i
 ⇒ 已 `git merge --ff-only origin/main` ✓ 快进到 `268fa5e` ✓（无冲突 ✓：合并内容不含 `tasks/task_status.json` ✓，
 驱动对它的未提交改动保留了 ✓）。
 **记这条的用处** ✓：以后看到"gh 说合了、本地没有" ✓，先 `fetch` 再判断 ✓，**不要当成合并失败** ✓。
+
+---
+
+## L1-20260914-47 — T0305 已 rebaseline 到新 main ✓，但 `rddev rebaseline` **半途而废** ✓，任务静默消失 4 分钟 ✓
+
+**做了什么** ✓：`rddev rebaseline T0305 --reason-file ...` ✓ ——
+基线 `00ac3e23e9e7` ✓ → `747847cdf68c` ✓，携带 **17 个文件** ✓，
+`specs/database/postgres.sql` ✓ 与 `specs/SPEC_VERSION.json` ✓ **重新生成** ✓（不是按文本合并 ✓）。
+改动**没有丢** ✓：工作树里 10 个 modified ✓ + 7 个 untracked ✓ 都在 ✓，HEAD 已在新基线 ✓。
+
+**但它只做成了前两步** ✓。`cmd/rddev/drive.go:300-334` 的 rebaseline 是**三个动作** ✓：
+挪树 ✓（`:300`）→ `task reject` ✓（`:327`）→ `worker rework` ✓（`:330`）。
+**只有第三步受容量闸门管** ✓，而当时三个活 Worker（T0209 / T0210 / T0305-review）占满 ✓ ⇒ **被拒** ✓。
+
+**后果比错误信息严重** ✓：任务变成 `rejected` ✓，而
+`tasksNeedingAction`（`driver_run.go:459-476` ✓）**只收 running / verification / accepted** ✓
+⇒ **驱动从此不看它** ✓；这次**也没有任何决策被记下** ✓（`rddev status` 只有 T0206 那一条 ✓）。
+实测 ✓：`driver.out` 里 T0305 于 `12:17:30` 从 pending 消失 ✓，直到我 `12:21:40` 手工
+`rddev worker rework T0305` ✓ 才于 `12:21:45` 回来 ✓ —— **它不会自己回来** ✓。
+
+**顺带清掉一个** ✓：rebaseline 删掉了 `T0305-review` 的工作树 ✓（`git worktree list` 里已无它 ✓，
+目录成空 ✓），**但没结束那个复核进程** ✓ —— pid 3998836 带着**已删除的 cwd** 空转了 4 分多钟 ✓，
+而它被要求"必要时读工作树" ✓。已 `rddev worker stop T0305-review` ✓。
+
+**我的错** ✓：这个竞态是我造的 ✓ —— 驱动 `12:16:47` 刚派了新复核 ✓，我 `12:17:28` 就跑了 rebaseline ✓。
+**教训** ✓：跑 rebaseline 前先看 `driver.out` 尾部有没有刚落下的 dispatch ✓，
+否则等于对着一个正在飞的复核拉掉它脚下的地板 ✓。
+
+**已上报** ✓：#163 补了 rebaseline 这一例 ✓（<https://github.com/lichman0405/post/issues/163#issuecomment-5658972450> ✓）；
+新立 **#166** ✓（Worker/Reviewer 会话无人回收 ✓，<https://github.com/lichman0405/post/issues/166> ✓），
+并在其下补了"**作废了但没停**"这一形态 ✓
+（<https://github.com/lichman0405/post/issues/166#issuecomment-5658974290> ✓）——
+它把"按会话回收"的调用方从**一个**变成**两个** ✓：Worker 自己退出 ✓、有东西主动作废一次在飞的尝试 ✓。
+
+**现状** ✓：T0305 已于 `12:21:40` 在新基线上重做 ✓（pid 4009475 ✓），驱动已接管 ✓（`T0305 still working` ✓）。

@@ -1511,13 +1511,24 @@
       ]
     },
     "T0210": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-14T04:16:37Z",
+      "worker_run_id": "run-a733822b85542f73",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T04:16:36Z",
+          "run_id": "run-fd80d2a6298c07ea"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T04:16:37Z",
+          "run_id": "run-a733822b85542f73",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0211": {
       "status": "todo",
@@ -2049,9 +2060,9 @@
     },
     "T0305": {
       "status": "running",
-      "started_at": "2026-09-14T03:41:59Z",
-      "worker_run_id": "run-83dacdf42a2df3cc",
-      "rejection_reason": "Two separate things happened. Read part 1 before part 2, because only part 2 is about your work.\n\n# Part 1 — your baseline advanced (this is NOT a defect, and not your fault)\n\nYour task branch has been merged with the current `main` and your change was carried over intact; the derived artifacts (`specs/database/postgres.sql`, `specs/SPEC_VERSION.json`) were **regenerated on the merged tree**, not merged as text — applying your copy would restore a digest describing the old specs, and applying main's would drop your spec edits. That is what \"derived\" means.\n\nWhy: `main` moved while you were in review (another task merged — `infra/migrations/00032_git_user_access.sql` is now on `main`). The acceptance gate builds \"current main + your full change\", and your change no longer composed against it — it failed applying at `specs/SPEC_VERSION.json:1`, purely because that file is a generated artifact of a tree that has since changed. **The gate was working correctly.** Nothing about your implementation was wrong.\n\nSo: re-run your required tests and `make test-integration` on this new baseline, confirm nothing became stale because of the merge, and re-submit. If everything still holds, say so plainly — that alone would have been the whole task.\n\n**It is not the whole task**, because of part 2.\n\n# Part 2 — the independent review's verdict, which I verified myself and agree with\n\nThe verdict is `request_changes`. I reproduced two of these by reading the code myself rather than taking the reviewer's word; I am not asking you to fix anything I have not confirmed.\n\n## Blocking — `internal/gitprovider/push_ingestion_store.go:177`: a stale delivery can rewind `head_sha`\n\n```go\nif branchID != nil && !isZerosSHA(ev.After) {\n    if _, err := tx.Exec(ctx,\n        `UPDATE git_branch_refs SET head_sha = $1 WHERE branch_id = $2`,\n        ev.After, *branchID); err != nil {\n```\n\nThat `UPDATE` is **unconditional**. Your migration comment (`00034_push_ingestion.sql`) states the invariant in these words:\n\n> The ref's head pointer is not rewritten on a duplicate (**a stale redelivery must never move it backward**)\n\nThat sentence is true only for an **exact** duplicate. The dedupe key is `(gitea_repo_id, git_ref, after_sha)`, which collapses a redelivery of *the same push*. It does nothing for a redelivery of an **older** push:\n\n1. push A is delivered, the receiver fails transiently and answers 503 (your own documented path), so the provider will redeliver A;\n2. push B is delivered and ingested — `head_sha` moves to B;\n3. A's redelivery arrives. Its key `(repo, ref, A)` has never been seen, so it inserts a fresh ingestion row and runs the unconditional `UPDATE` — **`head_sha` goes back to A**, plus a new `project_states` row for the older commit (`ON CONFLICT` is on `state_hash`, and A's head was never ingested).\n\nTwo concurrent deliveries through the HTTP server reach the same end state without any retry at all — whichever transaction commits second wins, and that may be the older push. The reviewer reproduced it against real PostgreSQL (ingest B, ingest stale A → head ends at A, 2 ingestion rows).\n\nNote what this does to the acceptance criterion you were given, *重复 webhook 不重复 state*: for the stale-redelivery case the reverse happens — a state row is created for a head that is no longer the head. And the integration test covers only the exact-duplicate replay, so this hole is untested.\n\n**Fix (a), which is what I want you to implement** — condition the head advance on the delivery's own `before`:\n\nthe ref pointer moves only when it is still where this push started, i.e. when `head_sha = before_sha`, or when `before_sha` is the zero SHA (a ref creation, no predecessor to check). Under ordered delivery A-then-B this always holds. Under out-of-order delivery the older push's update is skipped and the head stays at B — which is the whole point.\n\nTwo things I specifically want, because they are where this kind of fix usually goes wrong:\n\n- **Keep recording the older delivery's audit rows.** A push that really happened is history; the ingestion row, its changed-file set and its candidates are legitimate append-only records. What must not happen is the *head pointer* moving backward. Do not \"fix\" this by dropping the rest of the ingestion — that would lose real events to protect one column.\n- **Make the skip visible**, not silent. A head advance that was refused because the ref had already moved is a fact a later reader of this table will want, and a silent `UPDATE ... WHERE` that matches zero rows is invisible.\n\nThen **state the invariant honestly** in the `00034` comment. As written it overclaims; it must say what is actually enforced (the head only moves forward along the delivery's own `before` chain, and a delivery whose `before` no longer matches is recorded but does not move the pointer).\n\nIf you conclude (a) is wrong on the evidence, option (b) — verify ancestry through the git port before advancing — is acceptable. Do **not** take option (c) (rescope this edge to T0309 in a comment). A comment is not a fix, and I am not merging a table whose stated invariant is false.\n\n**Required: a test that would have caught this.** Ingest push B, then ingest an older push A, and assert `head_sha` is still B's commit. Do not adapt the existing duplicate-replay test to stand in for it — that is the test whose coverage hid this. Add to it, do not replace it.\n\n## Major — `internal/gitprovider/push_ingestion.go:336`: `relation.schema.json` is dead code, and relation manifests are silently unclassified\n\nConfirmed by reading it: `classifyManifest` takes the typed branch whenever the document carries a non-empty `type`, loops the registry looking for a schema whose `TypeConst` equals it, and then\n\n```go\n\t\t}\n\t\treturn \"\", false     // <-- returns here\n\t}\n\tfor _, id := range manifestSchemaIDs {   // <-- never reached for a relation doc\n```\n\nA relation document has a **required** top-level `type` whose value is a free string (`\"uses\"`, not a registry const). So no `TypeConst` matches, and the function returns `(\"\", false)` — it never falls through to the untyped list at line 351, the very list that contains `relation.schema.json`. The entry at line 324, commented \"the two untyped domain shapes (relation's properties.type is a free string, not a const — the registry's TypeConst does not see it)\", is therefore unreachable: **the comment states the reason the entry is needed, and the control flow makes it impossible to use.**\n\nEffect: relation manifests never produce semantic candidates, and T0306's completeness flag will count relation files as unstructured.\n\nPick one and be explicit about which:\n- fall through to the untyped list when no registered schema pins the declared type (keeps the \"claims a type it violates is broken\" rule for types that *are* pinned, while letting free-string types reach the untyped shapes), or\n- select the branch from the schema's `TypeConst` rather than from the document's field.\n\nIf you take the second, `relation.schema.json` needs a reason to still be in `manifestSchemaIDs`; if it has none, remove it and correct the comment. **A test** pinning that a valid relation document is classified (not merely that an evidence-assertion doc is) is what makes this stay fixed.\n\n## Three minors I also want fixed — each is a real defect, not polish\n\n1. **`internal/gitprovider/gitea.go:594`** — `ChangedFiles` treats **any** failure of the combined base+head fetch as \"the base is gone\" and degrades to a `--root` diff against the head alone. A transient timeout or a Gitea 500 that clears on retry produces a **wrong changed set — every file at head recorded as `added` — in append-only rows that cannot be rewritten.** Only the \"couldn't find remote ref\" shape (your `mapGitErr` `ErrNotFound` patterns) should trigger the `--root` fallback; every other failure must propagate so the provider redelivers. Silent wrongness that is permanent by construction is worse than a 503.\n\n2. **`internal/gitprovider/gitea.go:639`** — `parseNameStatus` rejects the `T` (typechange) status as `ErrUnavailable`. `T` is a legal `git diff-tree --name-status` status without `-M`/`-C`. A push containing a file→symlink typechange therefore answers 503, the provider redelivers, and it fails identically forever: **the push can never be ingested and there is no escape hatch.** Map it to a change kind (e.g. `modified`) or record it distinctly — but do not fail the whole ingestion.\n\n3. **`internal/gitprovider/gitea.go:665`** — `maxFileRead` is enforced only **after** `git show <sha>:<path>` has buffered the whole blob into memory (`defaultGitRunner` collects stdout+stderr into a `bytes.Buffer`), and after the shallow fetch has downloaded the whole commit. The outcome is correct (oversize → unstructured); the stated bound is not. Anyone authorized to push can balloon the shared API process with one large file. Check the size first (`git cat-file -s`) or stream through a limited reader.\n\n## Nits\n\n- **Do fix** `push_ingestion.go:27` — the header comment points at `cmd/api/pushingestion.go`, which does not exist (the receiver is `internal/gitprovider/push_ingestion_http.go`, wired in `cmd/api/main.go`). A single stale line, but a false pointer costs the next reader real time.\n- **Do not fix, recorded**: `push_ingestion_http.go:81`'s 404-vs-401 lets an unauthenticated caller enumerate provisioned `gitea_repo_id`s. The reviewer flagged it, the code documents it as a deliberate redelivery-policy choice, and changing it trades one signal for another. That trade is mine to make later, not yours to make now.\n\n# Rules\n\nDo not weaken, skip, or delete any test to get through this — including the existing duplicate-replay test and the migration catalog. Do not hand-edit `specs/database/postgres.sql` or `specs/SPEC_VERSION.json`; regenerate them. Do not rename the migration or change its number (`00034` is assigned to you and it must stay below the tasks that follow you). Do not create or move any git ref.\n\n# Then re-run on this baseline and report each in RESULT.json\n\n`go build ./...`, `go vet ./...`, `gofmt -l` over what you touched; the gitprovider and rsg unit tests; the full integration suite against the live PostgreSQL; the required Gitea-backed ingestion integration test; `make check-schema-snapshot`; `python3 scripts/spec_version.py --check`; `tests/integration/check-sqlc-drift.sh`.\n\nIn RESULT.json say plainly: what now guards the head advance and what the pointer does when a delivery's `before` no longer matches; which branch-selection rule `classifyManifest` now uses and that a relation manifest is classified; what the `T` status now maps to; and the new wording of the `00034` invariant.\n",
+      "started_at": "2026-09-14T04:21:41Z",
+      "worker_run_id": "run-5883c780a6a31875",
+      "rejection_reason": "# 你的基线推进了（这不是你的问题，也不是缺陷）\n\n`main` 上现在有 T0603 合入的 `infra/migrations/00033_policy_versioning.sql`，\n而你的分支是从**它之前**的 main 建的。你的改动**原样保留**；\n派生文件（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`）已经在新树上**重新生成** ——\n不是按文本把两边合并起来的，因为派生文件是输入的函数，按文本合并两边都是错的。\n\n# 要求：只在新基线上重新验证，不要改代码\n\n- 重跑你任务包里的全套 G1（build / vet / gofmt / 单元 / 集成 / `check-schema-snapshot` / `check-sqlc-drift` / `check-openapi`）。\n- 如果新基线上出现真正的失败，在 `RESULT.json` 里写清**是哪一条**、**证据是什么**，\n  以及你的判断：是你改动引起的，还是新基线带进来的。\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n  这条没有例外：红着报告比造假绿好。\n- 如果你的改动在新基线上**确实**需要调整（例如与 00033 有真实冲突），那要单独说明理由，\n  不要顺手改无关的东西。\n\n# 背景（你可以自己核对）\n\n我实测过：拿你当前工作区相对旧基线的整份改动，在含 00033 的 main 上 `git apply --check`，\n失败点是 `specs/database/postgres.sql:38` —— 纯粹因为两边都在文件**末尾追加密集块**、位置相同。\n所以这一步是**机械的**，你不需要为此负责，也不需要\"修\"任何东西。\n",
       "history": [
         {
           "from": "todo",
@@ -2085,6 +2096,27 @@
           "to": "running",
           "at": "2026-09-14T03:41:59Z",
           "run_id": "run-83dacdf42a2df3cc",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T04:16:35Z",
+          "run_id": "run-b6dba9fd19918a8d",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T04:17:28Z",
+          "run_id": "run-ae469e5b85440154",
+          "reason": "# 你的基线推进了（这不是你的问题，也不是缺陷）\n\n`main` 上现在有 T0603 合入的 `infra/migrations/00033_policy_versioning.sql`，\n而你的分支是从**它之前**的 main 建的。你的改动**原样保留**；\n派生文件（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`）已经在新树上**重新生成** ——\n不是按文本把两边合并起来的，因为派生文件是输入的函数，按文本合并两边都是错的。\n\n# 要求：只在新基线上重新验证，不要改代码\n\n- 重跑你任务包里的全套 G1（build / vet / gofmt / 单元 / 集成 / `check-schema-snapshot` / `check-sqlc-drift` / `check-openapi`）。\n- 如果新基线上出现真正的失败，在 `RESULT.json` 里写清**是哪一条**、**证据是什么**，\n  以及你的判断：是你改动引起的，还是新基线带进来的。\n- **不要为了让检查变绿而删除、skip 或弱化任何测试、放宽 assertion、放大 timeout。**\n  这条没有例外：红着报告比造假绿好。\n- 如果你的改动在新基线上**确实**需要调整（例如与 00033 有真实冲突），那要单独说明理由，\n  不要顺手改无关的东西。\n\n# 背景（你可以自己核对）\n\n我实测过：拿你当前工作区相对旧基线的整份改动，在含 00033 的 main 上 `git apply --check`，\n失败点是 `specs/database/postgres.sql:38` —— 纯粹因为两边都在文件**末尾追加密集块**、位置相同。\n所以这一步是**机械的**，你不需要为此负责，也不需要\"修\"任何东西。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T04:21:41Z",
+          "run_id": "run-5883c780a6a31875",
           "reason": "worker spawn"
         }
       ]
