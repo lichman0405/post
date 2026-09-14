@@ -34,15 +34,16 @@ type giteaRoute struct {
 }
 
 type giteaRequest struct {
-	method, path, escapedPath, auth string
-	body                            map[string]any
+	method, path, escapedPath, query, auth string
+	body                                   map[string]any
 }
 
 func (f *fakeGitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	rec := giteaRequest{
 		method: r.Method, path: r.URL.Path, escapedPath: r.URL.EscapedPath(),
-		auth: r.Header.Get("Authorization"),
+		query: r.URL.RawQuery,
+		auth:  r.Header.Get("Authorization"),
 	}
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &rec.body)
