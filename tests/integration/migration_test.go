@@ -186,7 +186,7 @@ var canonicalTables = map[string]tableExp{
 	"policy_versions": {
 		cols:   []colExp{c("id", u, false, true), c("organization_id", u, true, false), c("project_id", u, true, false), c("version", txt, false, false), c("policy_json", jb, false, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
 		pk:     []string{"id"},
-		checks: []string{"(organization_id IS NOT NULL) <>"}, // XOR: exactly one scope set
+		checks: []string{"(organization_id IS NOT NULL) <>", "char_length(version)"}, // XOR: exactly one scope set; version is a bounded label (00033)
 		fks:    []fkExp{fk("organization_id", "organizations", "RESTRICT"), fk("project_id", "projects", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
 	},
 	"branches": {
@@ -425,6 +425,10 @@ var explicitIndexes = map[string][]string{
 	"audit_log_project_occurred_idx":      {"project_id", "occurred_at"},
 	"audit_log_organization_occurred_idx": {"organization_id", "occurred_at"},
 	"audit_log_actor_occurred_idx":        {"actor_id", "occurred_at"},
+	// T0603: per-scope policy version uniqueness (00033) — a version
+	// string is never reused within one policy line.
+	"policy_versions_org_version_idx":     {"organization_id", "UNIQUE"},
+	"policy_versions_project_version_idx": {"project_id", "UNIQUE"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded

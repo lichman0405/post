@@ -67,6 +67,11 @@ type Querier interface {
 	// Organizations and memberships (canonical tables: organizations,
 	// organization_memberships; 00017 adds organizations.deactivated_at).
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
+	// Policy versions (canonical table policy_versions; 00033 adds the
+	// per-scope version uniqueness and the version shape check). The table is
+	// append-only (00014/00015): these queries INSERT and SELECT only — a
+	// policy change is a new version row, never an UPDATE.
+	CreatePolicyVersion(ctx context.Context, arg CreatePolicyVersionParams) (PolicyVersion, error)
 	// Projects, programs, memberships (canonical tables: programs, projects,
 	// project_memberships).
 	CreateProgram(ctx context.Context, arg CreateProgramParams) (Program, error)
@@ -126,6 +131,9 @@ type Querier interface {
 	GetOrganizationByIDForUpdate(ctx context.Context, id pgtype.UUID) (Organization, error)
 	GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error)
 	GetOrganizationMembership(ctx context.Context, arg GetOrganizationMembershipParams) (OrganizationMembership, error)
+	// One version by id — any age: old versions stay queryable forever
+	// (T0603 acceptance).
+	GetPolicyVersion(ctx context.Context, id pgtype.UUID) (PolicyVersion, error)
 	GetProgramByID(ctx context.Context, id pgtype.UUID) (Program, error)
 	GetProjectByID(ctx context.Context, id pgtype.UUID) (Project, error)
 	// The project-scoped lock serializing membership writes: role changes run
@@ -148,6 +156,9 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email *string) (User, error)
 	GetUserByHandle(ctx context.Context, handle string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
+	// The organization's current policy (the project lower bound).
+	LatestPolicyVersionByOrg(ctx context.Context, organizationID pgtype.UUID) (PolicyVersion, error)
+	LatestPolicyVersionByProject(ctx context.Context, projectID pgtype.UUID) (PolicyVersion, error)
 	ListBranchesByProject(ctx context.Context, projectID pgtype.UUID) ([]Branch, error)
 	ListEvidenceAssertionsForTarget(ctx context.Context, objectVersionID pgtype.UUID) ([]EvidenceAssertion, error)
 	// Organization Activity page: the organization's audit rows newest-first,
@@ -159,6 +170,10 @@ type Querier interface {
 	// recently created first.
 	ListOrganizationsForUser(ctx context.Context, userID pgtype.UUID) ([]Organization, error)
 	ListPendingOutboxEvents(ctx context.Context, batchSize int32) ([]OutboxEvent, error)
+	// Every version of the organization, newest first (created_at, then id
+	// as a deterministic tie-break).
+	ListPolicyVersionsByOrg(ctx context.Context, organizationID pgtype.UUID) ([]PolicyVersion, error)
+	ListPolicyVersionsByProject(ctx context.Context, projectID pgtype.UUID) ([]PolicyVersion, error)
 	// Project Activity page: the project's audit rows newest-first, with the
 	// actor's handle/display name joined for rendering. Keyset pagination on
 	// (occurred_at, id): a nil before pair means "from the top".
