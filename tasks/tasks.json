@@ -4944,7 +4944,6 @@
         "specs/SPEC_VERSION.json",
         "internal/events/**",
         "internal/application/**",
-        "internal/persistence/sqlc/**",
         "cmd/worker/**",
         "go.mod",
         "go.sum",
