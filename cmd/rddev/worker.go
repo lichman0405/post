@@ -173,8 +173,8 @@ func buildSpawnOpts(vals map[string]string, taskID, repoRoot string, stderr io.W
 		// explain, and Spawn itself never consults it.
 		ReasonFile: vals["--reason-file"],
 		Docker:     vals["--docker"] != "",
-		Bare:      vals["--bare"] != "",
-		ClaudeBin: vals["--claude-bin"],
+		Bare:       vals["--bare"] != "",
+		ClaudeBin:  vals["--claude-bin"],
 	}
 	if v := vals["--max-budget-usd"]; v != "" {
 		f, err := strconv.ParseFloat(v, 64)

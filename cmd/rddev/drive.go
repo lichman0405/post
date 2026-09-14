@@ -324,14 +324,60 @@ func runRebaseline(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		_ = os.WriteFile(reason, []byte(rebaselineReason(res)), 0o600)
 		defer os.Remove(reason)
 	}
-	if out, code := devorchestrator.RunRDDev(repoRoot, dagPath, statePath, "task", "reject", task, "--reason-file", reason); code != 0 {
+	// A task the Supervisor parked as rejected has no rejected -> rejected
+	// transition, so `task reject` cannot record the reason — and the reason
+	// still has to reach the Worker. `worker rework --reason-file` (#126) is the
+	// door for exactly that case: it writes the RejectRecord itself before the
+	// dispatch. Regenerating a reason is the same either way, so ask the state
+	// rather than reading the refusal text.
+	parked, err := taskIsRejected(dagPath, statePath, task)
+	if err != nil {
+		return operationalError(stderr, "rddev rebaseline", err)
+	}
+	rework := rebaselineReworkArgs(task, reason, parked)
+	if parked {
+		// The reason rides the rework — and it is still recorded, because the
+		// rework writes it as a RejectRecord before it dispatches.
+	} else if out, code := devorchestrator.RunRDDev(repoRoot, dagPath, statePath, "task", "reject", task, "--reason-file", reason); code != 0 {
 		return operationalError(stderr, "rddev rebaseline: the tree advanced but the rejection failed", fmt.Errorf("task reject %s: %s", task, strings.TrimSpace(out)))
 	}
-	if out, code := devorchestrator.RunRDDev(repoRoot, dagPath, statePath, "worker", "rework", task, "--timeout", "60m"); code != 0 {
-		return operationalError(stderr, "rddev rebaseline: the tree advanced and the task was rejected, but the rework failed", fmt.Errorf("worker rework %s: %s", task, strings.TrimSpace(out)))
+	if out, code := devorchestrator.RunRDDev(repoRoot, dagPath, statePath, rework...); code != 0 {
+		return operationalError(stderr, "rddev rebaseline: the tree advanced but the rework failed", fmt.Errorf("worker rework %s: %s", task, strings.TrimSpace(out)))
 	}
-	fmt.Fprintf(stdout, "%s: rejected (baseline advanced, not a defect) and reworking on %s\n", task, res.ToSHA[:12])
+	if parked {
+		fmt.Fprintf(stdout, "%s: was already rejected; the reason was re-recorded and it is reworking on %s\n", task, res.ToSHA[:12])
+	} else {
+		fmt.Fprintf(stdout, "%s: rejected (baseline advanced, not a defect) and reworking on %s\n", task, res.ToSHA[:12])
+	}
 	return exitOK
+}
+
+// rebaselineReworkArgs builds the rework command that follows a baseline
+// advance. When the task was already rejected the reason has to ride this
+// command, because the step that would normally record it — `task reject` — has
+// no rejected -> rejected transition (#126).
+func rebaselineReworkArgs(task, reason string, parked bool) []string {
+	args := []string{"worker", "rework", task, "--timeout", "60m"}
+	if parked {
+		args = append(args, "--reason-file", reason)
+	}
+	return args
+}
+
+// taskIsRejected reports whether the task is sitting in `rejected` — the state
+// the Supervisor parks a task in when it must wait for another merge, and the
+// one state `task reject` cannot write to again. Asked of the state file rather
+// than inferred from a refusal's wording.
+func taskIsRejected(dagPath, statePath, task string) (bool, error) {
+	store, err := devorchestrator.OpenStore(dagPath, statePath)
+	if err != nil {
+		return false, fmt.Errorf("reading the state of %s: %w", task, err)
+	}
+	insp, err := store.Inspect(task)
+	if err != nil {
+		return false, fmt.Errorf("inspecting %s: %w", task, err)
+	}
+	return insp.State.Status == devorchestrator.StateRejected, nil
 }
 
 func rebaselineReason(res *devorchestrator.RebaselineResult) string {
