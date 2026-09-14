@@ -1024,9 +1024,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-14T05:45:43Z
+生成时间：2026-09-14T07:00:19Z
 
-状态分布：todo 88 · ready 0 · running 2 · worker_failed 0 · verification 1 · rejected 4 · blocked 0 · accepted 0 · merged 38（合计 133/133 个任务）
+状态分布：todo 84 · ready 2 · running 1 · worker_failed 0 · verification 4 · rejected 2 · blocked 0 · accepted 0 · merged 40（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1059,10 +1059,10 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0203 | Typed Relation repository | P2 | merged | 2026-09-13T17:22:20Z |  | 2026-09-13T17:40:44Z | 2026-09-13T17:47:30Z |
 | T0204 | Project State 与 State Commit | P2 | merged | 2026-09-13T22:10:18Z |  | 2026-09-13T22:52:41Z | 2026-09-13T22:56:15Z |
 | T0205 | Research Branch Domain | P2 | merged | 2026-09-13T22:56:16Z |  | 2026-09-13T23:23:26Z | 2026-09-13T23:26:23Z |
-| T0206 | RSG Manifest 导出与 hash | P2 | rejected | 2026-09-14T03:27:51Z |  |  |  |
+| T0206 | RSG Manifest 导出与 hash | P2 | verification | 2026-09-14T06:47:28Z |  |  |  |
 | T0207 | Progressive Validation Gates | P2 | merged | 2026-09-14T00:39:04Z |  | 2026-09-14T01:13:29Z | 2026-09-14T01:32:13Z |
 | T0208 | V1 Scientific Object Domain Services | P2 | merged | 2026-09-14T01:33:06Z |  | 2026-09-14T02:37:28Z | 2026-09-14T02:41:06Z |
-| T0209 | RSG Query API | P2 | rejected | 2026-09-14T05:22:35Z |  |  |  |
+| T0209 | RSG Query API | P2 | verification | 2026-09-14T06:33:30Z |  |  |  |
 | T0210 | Scientific Object Detail UI | P2 | merged | 2026-09-14T04:52:41Z |  | 2026-09-14T05:08:10Z | 2026-09-14T05:11:18Z |
 | T0211 | Research Outline 与基础 Research 页面 | P2 | todo |  |  |  |  |
 | T0212 | Project Overview Research Summary | P2 | todo |  |  |  |  |
@@ -1073,10 +1073,10 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0302 | Git main 双层保护 | P3 | merged | 2026-09-13T23:53:46Z |  | 2026-09-14T00:31:44Z | 2026-09-14T00:34:39Z |
 | T0303 | Branch Git ref 同步 | P3 | merged | 2026-09-14T01:56:07Z |  | 2026-09-14T02:15:37Z | 2026-09-14T02:21:07Z |
 | T0304 | Git 用户认证/PAT/SSH key 基础 | P3 | merged | 2026-09-14T03:05:17Z |  | 2026-09-14T03:29:01Z | 2026-09-14T03:33:06Z |
-| T0305 | Push Webhook 与 Semantic Ingestion | P3 | verification | 2026-09-14T05:30:41Z |  |  |  |
-| T0306 | Unstructured Change 状态 | P3 | todo |  |  |  |  |
-| T0307 | Files Tree/Preview API | P3 | rejected | 2026-09-14T05:08:12Z |  |  |  |
-| T0308 | 只读 Files Web UI | P3 | todo |  |  |  |  |
+| T0305 | Push Webhook 与 Semantic Ingestion | P3 | merged | 2026-09-14T05:30:41Z |  | 2026-09-14T05:55:09Z | 2026-09-14T05:58:23Z |
+| T0306 | Unstructured Change 状态 | P3 | verification | 2026-09-14T06:55:53Z |  |  |  |
+| T0307 | Files Tree/Preview API | P3 | merged | 2026-09-14T06:06:52Z |  | 2026-09-14T06:52:08Z | 2026-09-14T06:56:45Z |
+| T0308 | 只读 Files Web UI | P3 | ready |  |  |  |  |
 | T0309 | Git ↔ RSG reconciliation | P3 | todo |  |  |  |  |
 | T0401 | Research State Diff 引擎 | P4 | todo |  |  |  |  |
 | T0402 | Pull Request Domain | P4 | todo |  |  |  |  |
@@ -1088,14 +1088,14 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0408 | PR Research Diff UI | P4 | todo |  |  |  |  |
 | T0409 | Merge Governance 与 frozen main 更新 | P4 | todo |  |  |  |  |
 | T0410 | PR/Branch 完整 E2E | P4 | todo |  |  |  |  |
-| T0501 | Research Question 与 Hypothesis 关系模型 | P5 | running | 2026-09-14T05:41:47Z |  |  |  |
-| T0502 | Claim 结构与 scope | P5 | running | 2026-09-14T05:42:31Z |  |  |  |
+| T0501 | Research Question 与 Hypothesis 关系模型 | P5 | verification | 2026-09-14T05:41:47Z |  |  |  |
+| T0502 | Claim 结构与 scope | P5 | rejected | 2026-09-14T05:42:31Z |  |  |  |
 | T0503 | Finding 聚合模型 | P5 | todo |  |  |  |  |
 | T0504 | Evidence Assertion Domain | P5 | todo |  |  |  |  |
-| T0505 | Provenance Graph Projection | P5 | todo |  |  |  |  |
+| T0505 | Provenance Graph Projection | P5 | running | 2026-09-14T06:34:55Z |  |  |  |
 | T0506 | Evidence Graph Projection | P5 | todo |  |  |  |  |
 | T0507 | Evidence/Provenance UI | P5 | todo |  |  |  |  |
-| T0508 | External Reference live identity + snapshot | P5 | todo |  |  |  |  |
+| T0508 | External Reference live identity + snapshot | P5 | ready |  |  |  |  |
 | T0509 | Literature evidence extraction data model | P5 | todo |  |  |  |  |
 | T0510 | Knowledge workflow E2E | P5 | todo |  |  |  |  |
 | T0601 | Freeze Main Governance | P6 | todo |  |  |  |  |
