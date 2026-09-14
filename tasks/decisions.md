@@ -6916,3 +6916,65 @@ git merge-base --is-ancestor b15e6e9 HEAD  -> NO
 **为什么 1 值得改**（而不是也交出去）：它是**关停期的竞态**，不是调参——
 dispatcher 正在查库时 `pool.Close()` 已经关了池子，会打出一条误导性的错误日志。
 5 行能修、修完就是对的，没有"以后按 SLO 再定"的空间。
+
+## L1-20260914-74
+
+**我自己的一行提交把 T0213 的补丁弄失效了 —— 提交「输入文件」会换掉主线上那个 marker，连带废掉所有正在验收窗口里的任务**
+
+### 发生了什么
+
+T0213 复核还在跑的时候，我把 T1001 的一行 scope 补丁提交了（`fd4c813`，`tasks/tasks.json`
+加一条 `internal/persistence/sqlc/**`），并且按规矩**同一次重新生成了 `specs/SPEC_VERSION.json`**。
+规矩本身没错（marker 的输入就是 `tasks/tasks.json`，不一起改 CI 就会在 main 上变红），
+错的**是时机**：这一提交把 main 上的 marker 换了个值。
+
+而 `rddev task accept` 建"验收树"的方式是 **`git apply`** 这个任务的完整补丁
+（`gate_run.go:697 prepareIntegrationTree`：在 `IntegrationTip(origin/main)` 上 `git apply`）。
+任务的补丁里**带着它自己那份重新生成的 marker**，所以 marker 一变，补丁的前像就对不上：
+
+```
+error: patch failed: specs/SPEC_VERSION.json:1
+error: specs/SPEC_VERSION.json: patch does not apply
+```
+
+**这不是 T0213 变旧了，是我动了它的前像。** 从任务那一侧看不出区别——
+工具报的话是 "the task's change does not apply to current main"，听起来像它自己的问题。
+
+### 怎么确认的（不是推理，是逐提交试）
+
+把 T0213 工作树的补丁（`git diff <diffBase> --` 加未跟踪新文件，就是工具自己那两步）
+依次对 main 的历史提交试应用：
+
+| 提交 | 是什么 | 结果 |
+|---|---|---|
+| `b15e6e9` | T0213 的基线（T0209 合并） | 应用得上 |
+| `635e10b` | T0401 合并 | 应用得上 |
+| `63adc80` | 我写的 decisions.md | 应用得上 |
+| `fd4c813` | 我加的那行 scope | **应用不上** |
+
+T0401 那次合并没有碰 marker，所以它没伤到任何人——**关键变量是"提交有没有动
+`tasks/tasks.json` 或 `specs/**`"**，不是"提交是不是合并"。
+
+### 处置
+
+`1c432b2` 回退（revert 而不是 force-push：main 是集成分支，别的 worktree 也在抓它，
+改写历史比多一条提交危险）。回退后逐字节核对过 `specs/SPEC_VERSION.json` 与
+`tasks/tasks.json` 回到了 `63adc80` 的状态，并**重跑了一遍试应用：应用得上**。
+
+T1001 那一行 scope **仍然要补**（它的迁移 `00046` 会移动 `internal/persistence/sqlc/`
+下的生成物；而 `derived-artifacts.json` 里 sqlc 的 marker 是 `internal/persistence/queries/**`，
+它没动 queries，所以那条"派生豁免"盖不到它）。但要等到**T1001 自己前移基线那个窗口**再提交：
+那时候在它后面已经没有还没前移的任务，提交它谁也不伤。
+
+### 一句话规矩
+
+**动 `tasks/tasks.json` 或 `specs/**` 的提交，等价于一次会移动 marker 的合并**——
+它会废掉所有"已前移、未验收"的任务的补丁。做这种提交之前先问：
+现在谁是热的？没有一个热的任务，才提交。
+
+### 记在 Issue 上的部分（不是我该顺手改的）
+
+工具这一侧的耦合值得单独修：`prepareIntegrationTree` 把声明过的生成物**当文本贴**，
+而 `rebaseline` 对同样的文件是**重新生成**。两处对同一类文件的处理不一致，
+于是"任何一次 marker 变动"都要靠前移基线来修，而前移基线要搭一整个返工周期。
+见 Issue #178。
