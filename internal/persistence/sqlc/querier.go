@@ -108,6 +108,11 @@ type Querier interface {
 	// Users (canonical table: users).
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeactivateOrganization(ctx context.Context, id pgtype.UUID) (Organization, error)
+	// The transaction-scoped session flag migration 00051's fixity guard
+	// requires for the explicit head refresh (set_config is_local=true
+	// resets at transaction end): the proposed state moves ONLY through the
+	// flagged path, whatever else runs in the database.
+	EnablePullRequestHeadRefresh(ctx context.Context) error
 	// Stamps affiliation_end and keeps the row (离职不删除历史 — history is
 	// never deleted, docs/04 §6). The store only executes this for
 	// still-open affiliations (it reads the row first under the organization
@@ -153,6 +158,9 @@ type Querier interface {
 	GetProjectStateByHash(ctx context.Context, arg GetProjectStateByHashParams) (ProjectState, error)
 	GetProjectStateByID(ctx context.Context, id pgtype.UUID) (ProjectState, error)
 	GetPullRequestByProjectAndNumber(ctx context.Context, arg GetPullRequestByProjectAndNumberParams) (PullRequest, error)
+	// The refresh/transition row lock (T0402): serializes the head refresh
+	// against concurrent state transitions inside one transaction.
+	GetPullRequestByProjectAndNumberForUpdate(ctx context.Context, arg GetPullRequestByProjectAndNumberForUpdateParams) (PullRequest, error)
 	GetRelationByID(ctx context.Context, id pgtype.UUID) (Relation, error)
 	GetRelationVersionByNo(ctx context.Context, arg GetRelationVersionByNoParams) (RelationVersion, error)
 	GetReleaseByProjectAndVersion(ctx context.Context, arg GetReleaseByProjectAndVersionParams) (Release, error)
@@ -319,6 +327,12 @@ type Querier interface {
 	// validation_results, releases, research_assets, research_asset_versions,
 	// knowledge_publications). Release/asset versions are immutable (invariant 5).
 	RecordValidationResult(ctx context.Context, arg RecordValidationResultParams) (ValidationResult, error)
+	// The explicit head refresh (T0402, acceptance "head update 可显式
+	// refresh"): re-points proposed_state_id to the source branch's current
+	// head. The adapter runs it inside one transaction with the row locked
+	// and the session flag on — the only sanctioned write path for the
+	// proposed state.
+	RefreshPullRequestProposedState(ctx context.Context, arg RefreshPullRequestProposedStateParams) (PullRequest, error)
 	//
 	// Access control is enforced HERE, not delegated to a caller.
 	//
@@ -340,6 +354,13 @@ type Querier interface {
 	// lifecycle is the project's), or it already closed; the adapter
 	// distinguishes by one read.
 	SetBranchLifecycle(ctx context.Context, arg SetBranchLifecycleParams) (Branch, error)
+	// The state transition compare-and-swap (T0402, docs/43): the update
+	// matches only while the row is still in the expected state, so a
+	// concurrent transition fails the CAS instead of overwriting it.
+	// Migration 00051's pull_request_guard enforces the transition map and
+	// merged_at consistency itself; this CAS is the application-side
+	// serialization on top.
+	SetPullRequestState(ctx context.Context, arg SetPullRequestStateParams) (PullRequest, error)
 	// UpdateBranchBaseState is the branch head compare-and-swap behind
 	// CommitState (T0204): the head pointer advances to the new state only
 	// while it still equals the base the commit was built on, so the branch

@@ -99,6 +99,10 @@ var appendOnlyTables = []string{
 // content-immutable with a forward-only status transition, and both
 // reconciliation tables refuse TRUNCATE (runs are bookkeeping, not
 // history, but a pass log is still not truncated away).
+// Migration 00051 adds the pull request guard (T0402, BEFORE INSERT OR
+// UPDATE, FOR EACH ROW → tgtype 23): the docs/43 state machine, the
+// fixed base/proposed states (the head moves only through the explicit
+// flagged refresh) and merged_at consistency, for ANY write path.
 var targetedGuardTriggers = map[string]string{
 	"branches:branch_lifecycle_guard_trigger":                                           ":O:19",
 	"branches:branch_git_ref_guard_trigger":                                             ":O:23",
@@ -120,6 +124,7 @@ var targetedGuardTriggers = map[string]string{
 	"git_reconciliation_findings:git_reconciliation_finding_guard_trigger":              ":O:27",
 	"git_reconciliation_findings:git_reconciliation_findings_no_truncate":               ":O:34",
 	"git_reconciliation_runs:git_reconciliation_runs_no_truncate":                       ":O:34",
+	"pull_requests:pull_request_guard_trigger":                                          ":O:23",
 }
 
 // triggerRows returns every user trigger in the public schema as sorted
