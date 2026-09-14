@@ -1608,9 +1608,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-14T14:28:52Z
+生成时间：2026-09-14T15:21:40Z
 
-状态分布：todo 71 · ready 0 · running 1 · worker_failed 0 · verification 7 · rejected 1 · blocked 0 · accepted 0 · merged 53（合计 133/133 个任务）
+状态分布：todo 71 · ready 0 · running 1 · worker_failed 0 · verification 6 · rejected 1 · blocked 0 · accepted 0 · merged 54（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1679,7 +1679,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0505 | Provenance Graph Projection | P5 | merged | 2026-09-14T14:04:45Z |  | 2026-09-14T14:24:41Z | 2026-09-14T14:27:50Z |
 | T0506 | Evidence Graph Projection | P5 | todo |  |  |  |  |
 | T0507 | Evidence/Provenance UI | P5 | todo |  |  |  |  |
-| T0508 | External Reference live identity + snapshot | P5 | running | 2026-09-14T14:28:06Z |  |  |  |
+| T0508 | External Reference live identity + snapshot | P5 | merged | 2026-09-14T14:51:21Z |  | 2026-09-14T15:13:55Z | 2026-09-14T15:17:22Z |
 | T0509 | Literature evidence extraction data model | P5 | todo |  |  |  |  |
 | T0510 | Knowledge workflow E2E | P5 | todo |  |  |  |  |
 | T0601 | Freeze Main Governance | P6 | todo |  |  |  |  |
@@ -1722,7 +1722,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0906 | Evidence-backed Answer Generator/API | P9 | todo |  |  |  |  |
 | T0907 | Search Answer Web UI | P9 | todo |  |  |  |  |
 | T0908 | Search → Draft Research Context | P9 | todo |  |  |  |  |
-| T1001 | Transactional Outbox | P10 | verification | 2026-09-14T08:41:35Z |  |  |  |
+| T1001 | Transactional Outbox | P10 | running | 2026-09-14T15:17:43Z |  |  |  |
 | T1002 | Subscription Model / Follow/Watch | P10 | todo |  |  |  |  |
 | T1003 | Web Research Inbox | P10 | todo |  |  |  |  |
 | T1004 | RSS/Atom Feeds | P10 | todo |  |  |  |  |
