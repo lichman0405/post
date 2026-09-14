@@ -14,7 +14,7 @@ import (
 
 // The gate executor (T0012 requirement: "G1/G2/G3/G4 as task metadata and an
 // executor, each recording commands, exit status and output"). G2 runs the
-// CI jobs' EXACT steps — every step of the six jobs, one subprocess per step,
+// CI jobs' EXACT steps — every step of every required job, one subprocess per step,
 // exit code and combined output recorded per step; a similar-looking subset
 // (the defect that let a red PR merge) is impossible because the job/step
 // list comes from specs/orchestrator/gates.json, which a unit test keeps in
@@ -444,9 +444,13 @@ func CheckMergeGate(repoRoot, gatesPath, taskID string) (*Gate4Result, error) {
 		res.Reasons = append(res.Reasons, reason)
 	}
 
-	// G4 asserts_jobs: every required CI job, green in the latest G2 record.
+	// G4 asserts every required CI job green in the latest G2 record. The list
+	// it asserts is spec.required_jobs — not G4.asserts_jobs, a separate field
+	// nothing reads — and the check line names the field it actually read, so it
+	// cannot describe a list the gate never consulted. The sync test keeps the
+	// shipped spec's two fields equal, which is what makes the label meaningful.
 	required := spec.RequiredJobs
-	res.Checks = append(res.Checks, fmt.Sprintf("G4 asserts_jobs = %s (the six required CI jobs)", strings.Join(required, ", ")))
+	res.Checks = append(res.Checks, fmt.Sprintf("G4 required_jobs = %s (%d required CI jobs)", strings.Join(required, ", "), len(required)))
 
 	g2, g2ok, err := LatestGateRunRecord(repoRoot, taskID, "G2")
 	if err != nil {
@@ -620,7 +624,7 @@ func AcceptGateStatus(repoRoot, gatesPath, taskID string) (map[string]string, er
 
 // EnsureG2Green returns a green G2 run for the task: a fresh all-green G2
 // record whose evidence is at/after the latest collect is reused (an
-// idempotent accept must not re-run six CI jobs when the evidence is already
+// idempotent accept must not re-run the CI jobs when the evidence is already
 // green and current); otherwise the gate is executed now. Callers use this so
 // `rddev task accept` never accepts on a subset or stale G2.
 func EnsureG2Green(opts *GateRunOpts) (*GateRunResult, error) {

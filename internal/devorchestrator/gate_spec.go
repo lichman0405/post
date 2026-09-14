@@ -12,7 +12,7 @@ import (
 // gate is defined here (specs/orchestrator/gates.json, the same file the
 // executor reads — no embedded copy to drift), every gate run records
 // commands/exit/output to disk, and the merge gate refuses while any
-// required CI job is red or missing. G2 runs CI's EXACT steps: the six jobs
+// required CI job is red or missing. G2 runs CI's EXACT steps: the jobs
 // of .github/workflows/ci.yml with their steps verbatim, and
 // TestGatesSpecSyncsWithCIWorkflow fails the build when the two drift apart.
 // The earlier failures this fixes: a Supervisor merged a red PR because G2
@@ -65,7 +65,7 @@ type GateDef struct {
 
 // TaskGateOverride allows a task to define G3 integration jobs (and opt out
 // of the review requirement for merge). Everything else is global: G2 is
-// always CI's exact six jobs — a per-task narrowing would reintroduce the
+// always CI's exact jobs — a per-task narrowing would reintroduce the
 // subset-G2 defect this task exists to kill.
 type TaskGateOverride struct {
 	G3Jobs              []string `json:"g3_jobs"`

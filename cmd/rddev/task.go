@@ -18,7 +18,7 @@ Commands:
                     (requires all dependencies merged)
   inspect TASK      print the DAG entry and the full recorded state
   verify TASK       running -> verification
-  accept TASK       run the acceptance gate (G2 = CI's exact six jobs, then G3
+  accept TASK       run the acceptance gate (G2 = CI's exact jobs, then G3
                     where the task defines one) and verification -> accepted;
                     REFUSES (exit 1, state unchanged, AcceptRecord evidence
                     written) while any gate is red or missing
@@ -225,7 +225,7 @@ func (tr *taskRunner) transition(id string, to devorchestrator.State, reason str
 	return exitOK
 }
 
-// accept runs the acceptance gate (T0012): G2 = CI's exact six jobs (a fresh
+// accept runs the acceptance gate (T0012): G2 = CI's exact jobs (a fresh
 // all-green G2 record at/after the latest collect is reused; anything else is
 // executed now), then G3 where the task defines one. Any red or missing gate
 // refuses the verification -> accepted transition with the refusal recorded as
@@ -247,7 +247,7 @@ func (tr *taskRunner) accept(id string) int {
 	runID := tr.runID
 	// A wrong-state accept is refused by the transition machinery BEFORE any
 	// gate work: an illegal transition must report the illegal transition,
-	// not a missing gate spec (and must never burn a six-job G2 run first).
+	// not a missing gate spec (and must never burn a full G2 run first).
 	insp, err := tr.store.Inspect(id)
 	if err != nil {
 		return operationalError(tr.stderr, "rddev task accept", err)
@@ -273,7 +273,7 @@ func (tr *taskRunner) accept(id string) int {
 		reasons = append(reasons, "G1 is not green: no ok collect record exists — collect the Worker first (rddev worker collect "+id+")")
 	}
 
-	// G2: CI's exact six jobs, all green.
+	// G2: CI's exact jobs, all green.
 	g2, err := devorchestrator.EnsureG2Green(&devorchestrator.GateRunOpts{
 		RepoRoot: repoRoot, GatesPath: gatesPath, TaskID: id, RunID: runID,
 	})
@@ -285,7 +285,7 @@ func (tr *taskRunner) accept(id string) int {
 	}
 	if g2.Status != "passed" {
 		status["G2"] = "failed"
-		reasons = append(reasons, "G2 (CI's exact six jobs) is red in run "+g2.RunID+" — see "+g2.RecordPath+" and the step logs")
+		reasons = append(reasons, "G2 (CI's exact jobs) is red in run "+g2.RunID+" — see "+g2.RecordPath+" and the step logs")
 		recordRefusal(status, reasons)
 		fmt.Fprintf(tr.stderr, "rddev task accept: REFUSED — G2 is red (state unchanged):\n")
 		for _, r := range reasons {

@@ -144,32 +144,61 @@ func TestRunGateAllGreenPasses(t *testing.T) {
 // collect and an all-green G2 covering every required job, at/after the
 // collect.
 func mergeGateFixture(t *testing.T) (repoRoot, specPath string) {
-	repoRoot, specPath = writeGateSpec(t, `{
+	t.Helper()
+	return mergeGateFixtureWithJobs(t, []string{"job-a", "job-b"})
+}
+
+// mergeGateFixtureWithJobs is mergeGateFixture over a spec whose required jobs
+// are exactly the ones named — so a caller can ask the same gate about a
+// differently sized spec.
+func mergeGateFixtureWithJobs(t *testing.T, jobs []string) (repoRoot, specPath string) {
+	t.Helper()
+	quoted := make([]string, len(jobs))
+	defs := make([]string, len(jobs))
+	for i, j := range jobs {
+		quoted[i] = `"` + j + `"`
+		defs[i] = quoted[i] + `: {"steps": [{"run": "true"}]}`
+	}
+	list := strings.Join(quoted, ", ")
+	// The other three lists in this spec are deliberately NOT equal to
+	// required_jobs. They were, and that made the assertion below weaker than it
+	// reads: a line built from G2's runs_jobs, from G4's asserts_jobs, or from
+	// the sorted keys of the jobs map prints exactly the same text as one built
+	// from required_jobs, so all three pass — including the third, which against
+	// the shipped spec prints ten jobs where required_jobs has seven. A fixture
+	// whose lists are equal by construction cannot tell "reads the field it
+	// names" from "reads something that happens to agree with it", which is the
+	// whole question. Reversed here, plus a job defined and not required, so each
+	// wrong source prints something visibly different.
+	rev := make([]string, len(quoted))
+	for i := range quoted {
+		rev[i] = quoted[len(quoted)-1-i]
+	}
+	revList := strings.Join(rev, ", ")
+	repoRoot, specPath = writeGateSpec(t, fmt.Sprintf(`{
   "version": 1,
-  "required_jobs": ["job-a", "job-b"],
+  "required_jobs": [%s],
   "gates": {
     "G1": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": []},
-    "G2": {"name": "", "description": "", "runs_jobs": ["job-a", "job-b"], "asserts_jobs": []},
+    "G2": {"name": "", "description": "", "runs_jobs": [%s], "asserts_jobs": []},
     "G3": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": []},
-    "G4": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": ["job-a", "job-b"]}
+    "G4": {"name": "", "description": "", "runs_jobs": [], "asserts_jobs": [%s]}
   },
-  "jobs": {
-    "job-a": {"steps": [{"run": "true"}]},
-    "job-b": {"steps": [{"run": "true"}]}
-  },
+  "jobs": {%s},
   "review": {"required_for_merge": false},
   "task_overrides": {}
-}`)
+}`, list, revList, revList, strings.Join(append(defs, `"job-extra": {"steps": [{"run": "true"}]}`), ", ")))
 	taskID := "T0001"
 	writeCollect(t, repoRoot, taskID, "coll-1", "ok", "2026-09-12T10:00:00Z")
+	passed := make([]GateJobResult, len(jobs))
+	for i, j := range jobs {
+		passed[i] = GateJobResult{Job: j, Status: "passed"}
+	}
 	green := &GateRunRecord{
 		recordMeta: recordMeta{RecordType: RecordGateRun, TaskID: taskID, RunID: "g2-1", At: "2026-09-12T11:00:00Z"},
 		Gate:       "G2",
 		Status:     "passed",
-		Jobs: []GateJobResult{
-			{Job: "job-a", Status: "passed"},
-			{Job: "job-b", Status: "passed"},
-		},
+		Jobs:       passed,
 	}
 	if _, err := WriteRecord(repoRoot, taskID, RecordGateRun, "g2-1", green); err != nil {
 		t.Fatal(err)
@@ -179,15 +208,53 @@ func mergeGateFixture(t *testing.T) (repoRoot, specPath string) {
 
 // TestCheckMergeGateGreen: with an ok collect, an all-green G2 covering
 // every required job (at/after the collect) and review not required, the
-// merge gate passes.
+// merge gate passes — and its check line reports the spec it read.
 func TestCheckMergeGateGreen(t *testing.T) {
-	repoRoot, specPath := mergeGateFixture(t)
-	res, err := CheckMergeGate(repoRoot, specPath, "T0001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Status != "passed" {
-		t.Fatalf("merge gate = %s, reasons %v", res.Status, res.Reasons)
+	// The same gate is asked twice, over specs of different sizes, because the
+	// property is the derivation and not the fixture's numbers: one literal
+	// cannot satisfy both cases — a hard-coded count or a hard-coded job name is
+	// contradicted by the other one — while a line that reads the spec passes
+	// both. The shipped defect was the literal "six" against a spec of seven;
+	// asserting only that the line says what this fixture would also have
+	// accepted would leave "hard-code 2" passing here and wrong in production.
+	for _, tc := range []struct {
+		name string
+		jobs []string
+	}{
+		{"two-jobs", []string{"job-a", "job-b"}},
+		{"three-jobs", []string{"job-a", "job-b", "job-c"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repoRoot, specPath := mergeGateFixtureWithJobs(t, tc.jobs)
+			res, err := CheckMergeGate(repoRoot, specPath, "T0001")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Status != "passed" {
+				t.Fatalf("merge gate = %s, reasons %v", res.Status, res.Reasons)
+			}
+			// The line is read back, not searched: the assertion is that it
+			// reports THIS spec's list and nothing else. `Contains` for each
+			// name would pass a line that names the spec's jobs and then adds
+			// one — two jobs reported as three passes both subtests that way.
+			line := ""
+			for _, c := range res.Checks {
+				if strings.HasPrefix(c, "G4 required_jobs = ") {
+					line = c
+					break
+				}
+			}
+			if line == "" {
+				t.Fatalf("the G4 check line is not in the result: %v", res.Checks)
+			}
+			rest := strings.TrimPrefix(line, "G4 required_jobs = ")
+			want := fmt.Sprintf(" (%d required CI jobs)", len(tc.jobs))
+			if !strings.HasSuffix(rest, want) {
+				t.Errorf("the G4 check does not report the spec's own job count (%s):\n%s", want, line)
+			} else if got := strings.Split(strings.TrimSuffix(rest, want), ", "); !equalStrings(got, tc.jobs) {
+				t.Errorf("the G4 check names %v, but the spec requires exactly %v:\n%s", got, tc.jobs, line)
+			}
+		})
 	}
 }
 
