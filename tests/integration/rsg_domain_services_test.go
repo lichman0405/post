@@ -18,6 +18,7 @@ import (
 	"github.com/lichman0405/post/internal/application/validation"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/domain"
+	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/persistence"
 	"github.com/lichman0405/post/internal/persistence/testdb"
 	"github.com/lichman0405/post/internal/rsg/schemareg"
@@ -129,6 +130,7 @@ func newRSGFixture(t *testing.T, ctx context.Context) *rsgFixture {
 		Queries:   persistence.NewRSGQueryStore(pool),
 		Authz:     authz.NewMatrixEngine(),
 		Schemas:   reg,
+		Events:    events.Recorder{},
 	})
 
 	// The first branch bootstraps the genesis root through the real

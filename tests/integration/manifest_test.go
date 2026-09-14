@@ -15,6 +15,7 @@ import (
 	"github.com/lichman0405/post/internal/application/states"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/domain"
+	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/persistence"
 	"github.com/lichman0405/post/internal/persistence/sqlc"
 	"github.com/lichman0405/post/internal/persistence/testdb"
@@ -105,6 +106,7 @@ func newManifestFixture(t *testing.T, ctx context.Context) *manifestFixture {
 		Relations: persistence.NewRelationStore(pool),
 		Authz:     authz.NewMatrixEngine(),
 		Schemas:   reg,
+		Events:    events.Recorder{},
 	})
 	branch, err := svc.CreateBranch(ctx, alice, project.ID, rsg.CreateBranchInput{
 		Name:       "main",
