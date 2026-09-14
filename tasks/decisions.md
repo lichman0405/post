@@ -6782,12 +6782,19 @@ rebaseline 会把 `--reason-file` 交给它内部的 rework，所以把"把这�
 
 ## L1-20260914-71
 
-**T0213 × T0209 撞的不是文本是名词：两个都叫 `profiles` 的 port —— 解法是让它们不同名，而不是选一边**
+**T0213 × T0210 撞的不是文本是名词：两个都叫 `profiles` 的 port —— 解法是让它们不同名，而不是选一边**
 
-**事实**：T0213（项目 schema 扩展）与已并入主线的 T0209（RSG Query API）**都**往
+**事实**：T0213（项目 schema 扩展）与已并入主线的 **T0210（Scientific Object Detail UI，PR #167）** **都**往
 `rsg.Service` 加了一个叫 `profiles` 的字段、往 `rsg.Deps` 加了一个 `Profiles` 键，而它们指两件事：
 
-| | T0209（main） | T0213 |
+> **订正（17:12）**：这一段我最初写的是 **T0209**。**是错的。** `git log -S'profiles  ProfilePort'
+> -- internal/application/rsg/service.go` 指向 `4b61837 [T0210] Scientific Object Detail UI (#167)`，
+> 而且它在 main 上（`--is-ancestor` 回答 YES）。
+> T0209 往**同一个结构体**里加的是另一个字段（`queries QueryPort`）——
+> 它没参与这次"同名"，但它是**基线必须前移**的原因（它落地的正是 `service.go` 这一片）。
+> 两件事都是真的，混成一句话就成了假话：**撞名的是 T0210，逼我前移基线的是 T0209。**
+
+| | T0210（main） | T0213 |
 |---|---|---|
 | 类型 | `ProfilePort` | `ProfileResolver` |
 | 方法 | `GetByUserID` | `GetLatestProfile` |
@@ -6826,3 +6833,56 @@ T0213 的改叫 `schemaProfiles`/`SchemaProfiles`。其余全是"两边都在追
 不是我说它指向哪），source 记为 `adopt`。collect 的豁免是**按名字**查账本的，所以这一笔既是合规也是诚实。
 
 **可逆性**：完全可逆——合成结果就是一份未提交的 diff，且草稿树与工具副本都还在。
+
+**补记（17:01，事后的一个收窄）**：我原以为"这一步只能手做"。**不准确。**
+工具拒绝的是**输入的补丁**（它把工作树相对 `taskDiffBase` 的差异当输入），而 `taskDiffBase` 是
+`merge-base(origin/main, HEAD)` —— 我把合成**写进工作树**之后，这个 diff 的**前像就变成了新的 main**，
+于是它**不再冲突**。17:01 排链脚本照常调 `rddev rebaseline T0213`，它**成功了**：
+`baseline dd0f7d73c026 -> b15e6e91b398 (26 file(s) carried; regenerated ...)`，
+并且我事后逐文件核对：**24/24 与已验证的合成逐字节相同**。
+
+⇒ 正确的分工是：**"合成"是判断（不可自动化），"搬运"是机械（可以）**。
+我手做的部分应该**只到"把合成内容写进工作树"为止**，剩下的前移、记账（ref 账本 source=`rebaseline`）、
+生成物一致性的后置断言，本来就该由工具做 —— 而这一次它确实做了，因为我把判断放在了它之前而不是代替它。
+`rebaseline_one` 里新加的"nothing to advance"分支因此是**安全网**（防止我把搬运也手做完之后脚本再撞一次），
+不是这次实际走的路径。
+
+## L1-20260914-72
+
+**合并发生在 GitHub 上，本地 `main` 原地不动 —— 我有一个小时是在"一棵少了最新合并任务的树"上工作**
+
+**事实**：`16:42:52` PR #176（T0209）合并后，`origin/main` 变成 `b15e6e9`，
+而**本地 `main` 没跟着走**。我随后提交的三篇文档（`040c1d2` / `074598e` / `745eaf3`）父提交是 `979e183`，
+也就是 **T0209 合并之前**那个提交。17:07 两条命令给出互相矛盾的两句话：
+
+```
+git rev-parse HEAD          -> 745eaf3   （本地 main）
+git rev-parse origin/main   -> b15e6e9   （真正的主干）
+git merge-base --is-ancestor b15e6e9 HEAD  -> NO
+```
+
+**为什么它不是洁癖**：在这一个小时里，**这个目录的工作树不包含 T0209 的代码**。
+在这里手工跑 `go build ./...`、`make check-*`、`scripts/spec_version.py --check`，
+评的是**一棵少了最新合并任务的树** —— 而且它们**都会通过**，因为缺的那部分不影响它们各自要检查的东西。
+这是**绿着脸的错**，不是红着脸的失败：只有把两个哈希摆在一起才看得出来。
+
+**机制（不是谁的 bug）**：`rddev` 在 **forge 上**合并，并把 `origin/main` 抓到一个**具名 refspec 目的地**
+（`base_branch.go`：`fetch --no-tags origin main:<dest>`，注释里写明"不给 `remote.origin.fetch` 留机会"），
+它的集成树从**那个** ref 建 —— **它从不碰本地 `main`**。所以每次合并都让本地 `main` 落后一格，
+而我在中间提交的文档就落在一个"少一个合并"的底座上。两件事各自都对，合起来就是**分叉**。
+
+**处置**：
+1. 当场 `git -c rebase.autoStash=true rebase origin/main`，把三篇文档挪到 `b15e6e9` 之上；
+2. 把 `sync_main` 写进排链脚本：两个等待循环各调一次（每 60 秒）——
+   **已经包含**就什么都不做，**本地领先/相同**就快进，**真分叉**才 rebase，
+   rebase 冲突就 `git rebase --abort` **回到原样**（不留半截 rebase 给下一条命令）；
+3. 推上去：`635e10b..70b5270  main -> main`（**快进**，不是强推）。
+
+**为什么"直推 main"在这里是对的**：`main` **没有分支保护**
+（`gh api repos/lichman0405/post/branches/main/protection` → `{"message":"Branch not protected"}`，404），
+而且文档提交本来就是直推 main 的（`979e183`、`6c77e7b`、`0d27d7b` … 都在 `origin/main` 上）。
+它既不会挡住工具的下一次合并（没有"分支必须 up-to-date"这条要求），也不改变任何 Gate。
+
+**一句话教训**：**我说"合并成功"说的是 forge 的状态，不是这个目录的状态。**
+以后报"主线在哪"，报的是 `origin/main`；本地 `main` 是**我的**分支，要自己保持同步 ——
+从现在起这件事由脚本每 60 秒做一次，而不是靠我想起来。
