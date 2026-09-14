@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // Host-process observation for Worker residue detection (T0011). Everything
@@ -88,6 +89,7 @@ func markerResidue(runID string, startTicks uint64, exclude map[int]bool) ([]Pro
 			PID:     pid,
 			Cmdline: procCmdline(pid),
 			Session: sessionOf(fields),
+			PGID:    pgrpOf(fields),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].PID < out[j].PID })
@@ -105,6 +107,107 @@ func sessionOf(fields []string) int {
 		return 0
 	}
 	return sess
+}
+
+// pgrpOf extracts the process group id from parsed /proc/<pid>/stat fields
+// (field 5 of stat, index 2 after the comm field). 0 when unparsable.
+func pgrpOf(fields []string) int {
+	if len(fields) < 3 {
+		return 0
+	}
+	pgrp, err := strconv.Atoi(fields[2])
+	if err != nil {
+		return 0
+	}
+	return pgrp
+}
+
+// processGroupOf returns pid's process group id when pid LEADS that group
+// (pgid == pid), else 0. Only a leader's own pid is safe to use as a negative
+// (group) target: signalling -pid for a mere group member would either miss
+// the group or, after a pid recycle, hit an unrelated one.
+func processGroupOf(pid int) int {
+	if pid <= 0 {
+		return 0
+	}
+	fields, err := procStatFields(pid)
+	if err != nil {
+		return 0
+	}
+	if pgid := pgrpOf(fields); pgid == pid {
+		return pgid
+	}
+	return 0
+}
+
+// signalProcessGroup signals pid's whole process group when pid leads one,
+// and pid alone otherwise.
+//
+// A Worker is spawned with setsid — own session, own group, deliberately the
+// unit rddev collects (worker_spawn.go) — so the group, not the process, is
+// what "stop the Worker" means. Signalling the positive pid leaves everything
+// the Worker started running, which is how a runaway probe survived its owner
+// and blocked a collect for twelve minutes (#166).
+//
+// ESRCH is not an error: the target dying between the liveness check and the
+// signal is exactly what these callers want to happen.
+func signalProcessGroup(pid int, sig syscall.Signal) error {
+	if pid <= 0 {
+		return nil
+	}
+	if pgid := processGroupOf(pid); pgid > 0 {
+		if err := syscall.Kill(-pgid, sig); err != nil && err != syscall.ESRCH {
+			return err
+		}
+		return nil
+	}
+	if err := syscall.Kill(pid, sig); err != nil && err != syscall.ESRCH {
+		return err
+	}
+	return nil
+}
+
+// residueReport renders a residue Gate failure so that the refusal is
+// actionable (#166). The Gate is right that a Worker's leftovers are a leak;
+// what it must not do is leave the next person to re-derive, from a bare list
+// of pids, whether those processes are work in progress or abandoned, and how
+// to collect the abandoned ones. So it answers three questions: which
+// processes (named by pid, with the session and group that identify them to a
+// signal), whether the process that started them is still alive, and — when
+// it is gone — the exact command that collects what it left.
+//
+// rec.PID is the Worker/Reviewer itself; its record is the same registry
+// either way, so the stop command is the same one for both.
+func residueReport(subject string, rec *WorkerRecord, residue []ProcessFinding) string {
+	var b strings.Builder
+	parts := make([]string, 0, len(residue))
+	groups := make([]int, 0, len(residue))
+	seen := map[int]bool{}
+	own := syscall.Getpgrp()
+	for _, p := range residue {
+		parts = append(parts, fmt.Sprintf("pid %d (%s) session %d group %d", p.PID, p.Cmdline, p.Session, p.PGID))
+		// A group that holds this very process must never be handed to the
+		// Supervisor as a kill target: the cleanup command would take out the
+		// shell that is about to run it.
+		if p.PGID > 0 && p.PGID != own && !seen[p.PGID] {
+			seen[p.PGID] = true
+			groups = append(groups, p.PGID)
+		}
+	}
+	fmt.Fprintf(&b, "%d process(es) the %s started are still running: %s.", len(residue), subject, strings.Join(parts, "; "))
+	if pidAlive(rec.PID, rec.StartTime) {
+		fmt.Fprintf(&b, " The %s itself (pid %d) is still running — these are its work in progress, not leftovers: stop it first (`rddev worker stop %s`), then re-collect.", subject, rec.PID, rec.TaskID)
+		return b.String()
+	}
+	fmt.Fprintf(&b, " The %s (pid %d) has already exited — nothing owns these any more and nothing collects them on its own.", subject, rec.PID)
+	if len(groups) > 0 {
+		cmds := make([]string, 0, len(groups))
+		for _, g := range groups {
+			cmds = append(cmds, fmt.Sprintf("kill -TERM -- -%d", g))
+		}
+		fmt.Fprintf(&b, " Collect them with: %s", strings.Join(cmds, "; "))
+	}
+	return b.String()
 }
 
 // procStartTicks returns the process start time in clock ticks (/proc/<pid>/
@@ -195,7 +298,7 @@ func sessionResidue(sessionLeader, workerPID int) ([]ProcessFinding, error) {
 		if pid == sessionLeader && strings.Contains(cmdline, "run-worker.sh") {
 			continue // the reaper wrapping claude, exiting after exit.status
 		}
-		out = append(out, ProcessFinding{PID: pid, Cmdline: cmdline, Session: sess})
+		out = append(out, ProcessFinding{PID: pid, Cmdline: cmdline, Session: sess, PGID: pgrpOf(fields)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].PID < out[j].PID })
 	return out, nil

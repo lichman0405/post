@@ -45,6 +45,9 @@ type ProcessFinding struct {
 	PID     int    `json:"pid"`
 	Cmdline string `json:"cmdline"`
 	Session int    `json:"session"`
+	// PGID is the process group — the unit a signal must target to reach the
+	// survivors and not just the process named here (#166). 0 when unreadable.
+	PGID int `json:"pgid"`
 }
 
 // ListenerFinding is a listening TCP socket that appeared during the run but
@@ -178,11 +181,7 @@ func Collect(opts *CollectOpts) (*CollectReport, error) {
 	report.Residue = residue
 	report.ListenerWarnings = warnings
 	if len(residue) > 0 {
-		parts := make([]string, 0, len(residue))
-		for _, p := range residue {
-			parts = append(parts, fmt.Sprintf("pid %d %s", p.PID, p.Cmdline))
-		}
-		fail("residue", fmt.Sprintf("%d process(es) the Worker started are still running: %s — stop them and re-collect", len(residue), strings.Join(parts, "; ")))
+		fail("residue", residueReport("Worker", rec, residue))
 	} else if rec.SessionLeaderPID <= 0 && rec.RunID == "" {
 		pass("residue", "no attribution anchors recorded (pre-T0011 registry) — residue scan skipped")
 	} else {

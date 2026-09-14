@@ -280,11 +280,13 @@ func SpawnReview(opts *ReviewSpawnOpts) (*SpawnResult, error) {
 	select {
 	case reviewPID = <-pidCh:
 	case <-time.After(10 * time.Second):
-		cmd.Process.Kill()
+		// The whole group, not just the reaper (#166): the reaper leads the
+		// session, so anything it already started must go with it.
+		_ = signalProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 		return nil, fmt.Errorf("the review reaper did not report a pid within 10s — review spawn aborted, nothing was recorded")
 	}
 	if reviewPID <= 0 {
-		cmd.Process.Kill()
+		_ = signalProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 		return nil, fmt.Errorf("the review reaper reported an invalid pid — review spawn aborted, nothing was recorded")
 	}
 	sessionLeaderPID := cmd.Process.Pid
@@ -382,11 +384,7 @@ func CollectReview(opts *CollectOpts) (*ReviewCollectReport, error) {
 		return nil, fmt.Errorf("scanning for Review Worker residue: %w", err)
 	}
 	if len(residue) > 0 {
-		parts := make([]string, 0, len(residue))
-		for _, p := range residue {
-			parts = append(parts, fmt.Sprintf("pid %d %s", p.PID, p.Cmdline))
-		}
-		fail("review-residue", fmt.Sprintf("%d process(es) the Reviewer started are still running: %s", len(residue), strings.Join(parts, "; ")))
+		fail("review-residue", residueReport("Reviewer", rec, residue))
 	} else {
 		pass("review-residue", "no live processes in the Reviewer's session")
 	}

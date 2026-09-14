@@ -35,7 +35,10 @@ func StopWorker(repoRoot string, rec *WorkerRecord) error {
 		return fmt.Errorf("worker %s (pid %d) is not running (stale) — nothing was signalled; see `rddev worker list`", rec.TaskID, rec.PID)
 	}
 
-	if err := syscall.Kill(rec.PID, syscall.SIGTERM); err != nil && err != syscall.ESRCH {
+	// The group, not the process: the Worker leads its own group (the reaper
+	// runs it under job control), and signalling only the leader would leave
+	// everything it started running (#166).
+	if err := signalProcessGroup(rec.PID, syscall.SIGTERM); err != nil {
 		return fmt.Errorf("signalling Worker %s (pid %d): %w", rec.TaskID, rec.PID, err)
 	}
 	// Wait for the reaper to record exit.status; escalate to SIGKILL after
@@ -54,7 +57,7 @@ func StopWorker(repoRoot string, rec *WorkerRecord) error {
 		return recordStop(repoRoot, rec)
 	}
 	if pidAlive(rec.PID, rec.StartTime) {
-		if err := syscall.Kill(rec.PID, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
+		if err := signalProcessGroup(rec.PID, syscall.SIGKILL); err != nil {
 			return fmt.Errorf("SIGKILL to Worker %s (pid %d): %w", rec.TaskID, rec.PID, err)
 		}
 		// give the reaper a moment to write exit.status

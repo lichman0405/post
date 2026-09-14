@@ -358,11 +358,14 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 	select {
 	case workerPID = <-pidCh:
 	case <-time.After(10 * time.Second):
-		cmd.Process.Kill()
+		// The whole group, not just the reaper: the reaper is the session
+		// leader, so a signal it never gets to handle would orphan whatever
+		// it had already started (#166).
+		_ = signalProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 		return nil, fmt.Errorf("the reaper wrapper did not report a pid within 10s — spawn aborted, nothing was recorded")
 	}
 	if workerPID <= 0 {
-		cmd.Process.Kill()
+		_ = signalProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 		return nil, fmt.Errorf("the reaper wrapper reported an invalid pid — spawn aborted, nothing was recorded")
 	}
 	// The reaper is the session leader (setsid): every process the Worker

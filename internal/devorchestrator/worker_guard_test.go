@@ -1,10 +1,15 @@
 package devorchestrator
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -205,4 +210,148 @@ func TestClaudeArgsDoNotMixResumeWithSessionID(t *testing.T) {
 	if strings.Contains(joined, "--session-id") {
 		t.Errorf("a rework passed --session-id alongside --resume; real claude refuses this combination: %v", args)
 	}
+}
+
+// TestReaperCollectsTheWorkerSession is #166's regression: a Worker that
+// leaves a process behind must not leave it RUNNING past its own exit.
+//
+// rddev gives every Worker its own session on purpose (SysProcAttr{Setsid}
+// in spawn) so that "the session" is the unit that can be collected — but
+// nothing ever collected it. `worker stop` signals the recorded Worker pid
+// (a positive pid signals exactly one process, never its group), and a
+// Worker that exits on its own gets no signal at all. So anything it started
+// outlived it, silently: for T0206's review that was a runaway probe pinning
+// a core for twelve minutes, and after T0305's rebaseline it was a reviewer
+// spinning on a cwd that had already been deleted.
+//
+// The reaper is the one process that outlives the Worker on the normal-exit
+// path (it `wait`s for it), so the collection belongs there and not in any
+// caller — a caller that has to remember is a caller that will forget.
+func TestReaperCollectsTheWorkerSession(t *testing.T) {
+	dir := t.TempDir()
+	reaper := filepath.Join(dir, "run-worker.sh")
+	if err := os.WriteFile(reaper, []byte(reaperScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "worker.log")
+	pidFile := filepath.Join(dir, "claude.pid")
+	statusFile := filepath.Join(dir, "exit.status")
+	authStatus := filepath.Join(dir, "authoritative", "exit.status")
+	leftoverFile := filepath.Join(dir, "leftover.pid")
+
+	// The #166 shape: the Worker starts something in the background, records
+	// its pid, and exits immediately. The leftover is an accident of the
+	// Worker's own shell — not a service anyone asked to keep.
+	worker := "sleep 300 & echo $! > " + leftoverFile + "; exit 0"
+
+	r := startSetsidChild(t, reaper, dir, logPath, pidFile, statusFile, authStatus, "bash", "-c", worker)
+	if err := r.Wait(); err != nil {
+		t.Fatalf("the reaper exited non-zero: %v", err)
+	}
+
+	// Both copies of the exit status are written BEFORE the collection, so
+	// they must be there however the collection turns out: the exit code is
+	// the thing collect trusts, and it must never be lost to a cleanup.
+	for _, p := range []string{statusFile, authStatus} {
+		got, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("exit status %s was not written: %v", p, err)
+		}
+		if strings.TrimSpace(string(got)) != "0" {
+			t.Errorf("exit status %s = %q, want 0", p, strings.TrimSpace(string(got)))
+		}
+	}
+
+	raw, err := os.ReadFile(leftoverFile)
+	if err != nil {
+		t.Fatalf("the Worker never recorded its leftover pid: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("leftover pid %q: %v", strings.TrimSpace(string(raw)), err)
+	}
+	if !waitProcessNotRunning(pid, 5*time.Second) {
+		_ = syscall.Kill(pid, syscall.SIGKILL) // do not leak the evidence
+		t.Fatalf("pid %d, started by the Worker, is still running after the reaper exited: the Worker's session was not collected", pid)
+	}
+}
+
+// TestReaperPidIsTheFirstStdoutLine is the contract spawn parses: rddev reads
+// ONE line from the reaper's stdout and Sscanf's it into the Worker pid,
+// aborting the spawn when it is not a number (worker_spawn.go). The reaper now
+// turns job control on (the `set -m` that gives the Worker its own group for
+// the collection above) — and a shell in monitor mode is a shell that talks
+// about its jobs. A single such line ahead of the pid would end every spawn
+// with "the reaper wrapper reported an invalid pid". Observed quiet on this
+// bash; asserted here so it stays that way for the wrong reason to be caught.
+func TestReaperPidIsTheFirstStdoutLine(t *testing.T) {
+	dir := t.TempDir()
+	reaper := filepath.Join(dir, "run-worker.sh")
+	if err := os.WriteFile(reaper, []byte(reaperScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pidFile := filepath.Join(dir, "claude.pid")
+	// The Worker is short-lived and is collected by the reaper's own group
+	// kill, so this test leaves nothing behind.
+	cmd := exec.Command("bash", reaper, dir, filepath.Join(dir, "worker.log"),
+		pidFile, filepath.Join(dir, "exit.status"),
+		filepath.Join(dir, "authoritative", "exit.status"), "bash", "-c", "sleep 2")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = signalProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+
+	sc := bufio.NewScanner(stdout)
+	if !sc.Scan() {
+		t.Fatal("the reaper printed no line on stdout — spawn reads the pid from there and would abort after 10s")
+	}
+	var printed int
+	if _, err := fmt.Sscanf(sc.Text(), "%d", &printed); err != nil {
+		t.Fatalf("the reaper's first stdout line is %q, which spawn cannot read as a pid: %v", sc.Text(), err)
+	}
+	raw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("the reaper never wrote claude.pid: %v", err)
+	}
+	recorded, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("claude.pid holds %q: %v", strings.TrimSpace(string(raw)), err)
+	}
+	if printed != recorded {
+		t.Errorf("the reaper printed pid %d but wrote %d to claude.pid — spawn and collect would disagree about which process is the Worker", printed, recorded)
+	}
+}
+
+// waitProcessNotRunning polls until /proc/<pid> is gone OR the process is a
+// zombie (") Z " in stat, the same test waitZombie uses). Both mean the thing
+// #166 is about: nothing is running any more. Which of the two a caller sees
+// depends only on who the parent is — a leftover reparented to init is reaped
+// and vanishes, one whose parent is the test process itself lingers as a
+// zombie until the test reaps it — and no test should care about that.
+//
+// A zombie is not a weaker result: the production scan applies the same rule
+// (sessionResidue skips Z — "a zombie is already dead — its parent has simply
+// not reaped it ... there is nothing to stop"), and a zombie holds no CPU, no
+// socket and no lock, which is the whole of what the Gate refuses.
+func waitProcessNotRunning(pid int, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+		if os.IsNotExist(err) {
+			return true
+		}
+		if err == nil && strings.Contains(string(data), ") Z ") {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
 }
