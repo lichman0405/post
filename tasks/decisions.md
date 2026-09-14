@@ -5326,3 +5326,140 @@ for _, id := range pending {
 
 **本次没动代码** ✓：`internal/devorchestrator/**` 按 CLAUDE.md §1 属于我自己的活 ✓，
 但改它是**行为变更** ✓，该走 Issue → 单独任务 → 测试 ✓，不该夹在四个业务任务在飞时顺手改 ✓。
+
+---
+
+## L1-20260914-35 — T0305：复核的 blocking 与 major **我都独立核实为真**，返工；顺带把 3 条 minor 一起修
+
+**结论：`request_changes` ✓**（1 blocking ✓ + 1 major ✓ + 3 minor ✓ + 2 nit ✓），**我按 §5.1 自己核过两条关键的 ✓**，
+不是照转 ✓。
+
+**blocking（`internal/gitprovider/push_ingestion_store.go:177`）✓ —— 核实为真** ✓：
+
+```go
+UPDATE git_branch_refs SET head_sha = $1 WHERE branch_id = $2
+```
+
+**无条件** ✓。而 `00034_push_ingestion.sql` 的注释白纸黑字写着 ✓：
+"a stale redelivery must never move it backward" ✓。**那句话只对"完全相同的重复投递"成立** ✓ ——
+dedupe 键是 `(gitea_repo_id, git_ref, after_sha)` ✓，它折叠的是**同一次推送**的重投 ✓；
+对**更旧的**推送重投毫无作用 ✓：A 首次 503（它自己的文档化路径 ✓）→ B 被投递并推进 head ✓ →
+A 的重投带着**从未见过的键**进来 ✓ → 插新行 + 执行无条件 UPDATE ✓ → **head 倒退到 A** ✓，
+并且为那个更旧的提交造一条 `project_states` ✓（`ON CONFLICT` 在 `state_hash` 上 ✓，而 A 从没进过）✓。
+两次并发投递不经过任何重试就能到同一结局 ✓ —— **后提交的那笔赢，而它可能是更旧的那次推送** ✓。
+
+**特别是它反噬了本任务的验收标准** ✓：*重复 webhook 不重复 state* ✓ ——
+在陈旧重投这条路上**恰好相反** ✓：为一个已经不是 head 的 head 造了 state 行 ✓。
+而现有集成测试**只重放完全重复** ✓，所以这个洞**无测试覆盖** ✓ —— 这正是它活下来的原因 ✓。
+
+**major（`internal/gitprovider/push_ingestion.go:336`）✓ —— 核实为真** ✓：
+`classifyManifest` 在文档带非空 `type` 时进 typed 分支 ✓，注册表里找不到 `TypeConst` 匹配后
+**在 `return "", false` 处掉出去** ✓，**永远走不到下面那个含 `relation.schema.json` 的 untyped 列表** ✓。
+而 relation 文档的 `type` 是**必填的自由字符串**（`"uses"` ✓，不是注册表 const ✓）✓ ——
+所以那条 entry 是**死代码** ✓，注释还恰好写着"为什么需要它" ✓（"the registry's TypeConst does not see it" ✓）。
+**效果**：relation 清单**永远**不产生 semantic candidate ✓，T0306 的完整性标记会把它们算作 unstructured ✓。
+
+**我要求 3 条 minor 一起修** ✓，理由是我自己判断的严重性 ✓，不是照抄评级 ✓：
+`gitea.go:594`（**任何**取数失败都被当成"base 没了"→ 退化成 `--root` diff ✓ →
+**每个文件都记成 added ✓，写进 append-only 行、事后改不回来** ✓）✓；
+`gitea.go:639`（`T`（typechange）是合法状态 ✓，被当成 `ErrUnavailable` ✓ →
+503 → provider 重投 → **永远同样失败** ✓，这次推送**永远进不来且无逃生口** ✓）✓；
+`gitea.go:665`（`maxFileRead` 在**整个 blob 已经读进内存之后**才生效 ✓ →
+任何有推送权限的人可以撑爆共享 API 进程 ✓）✓。**三条都是真缺陷 ✓，不是打磨 ✓。**
+
+**明确不让做的** ✓：`push_ingestion_http.go:81` 的 404/401 枚举 ✓ ——
+代码里写着这是**刻意的重投策略选择** ✓，改它是**拿一个信号换另一个信号** ✓，
+**这个取舍该我做、不该 Worker 顺手做** ✓。记录不修 ✓。
+
+**两条我要求必须有的测试** ✓（这是修复能不能站住的关键 ✓）：
+① **按顺序投 B、再投更旧的 A，断言 `head_sha` 仍在 B** ✓ ——
+**不许**拿现有那条"重放完全重复"的测试来顶替 ✓（**那条测试正是把洞盖住的那条** ✓）；
+② 断言**合法的 relation 文档会被分类** ✓（只断言 evidence-assertion 能被分类是不够的 ✓）✓。
+
+**为什么走 `rebaseline` 而不是直接返工** ✓：它的 accept 撞上的是基线问题 ✓
+（`patch failed: specs/SPEC_VERSION.json:1` ✓ —— **生成物** ✓）✓。
+`rebaseline` 会推进基线 ✓、**重新生成**那两个产物 ✓（"Generated files are handled by REGENERATION, never by merging text" ✓）✓、
+以"基线推进、不是缺陷"退回 ✓、然后让 Worker 在新基线上返工 ✓。
+**`--reason-file` 是替换默认理由而不是附加** ✓（`cmd/rddev/drive.go:321-327` ✓）✓ ——
+所以我写了一份**两段式**理由 ✓：Part 1 说基线推进（不是你的错 ✓），Part 2 才是复核结论 ✓。
+**一份，因为 `rejected→rejected` 那条边不存在** ✓（`L1-20260913-18` ✓），我只有一次说话的机会 ✓。
+
+**结果** ✓：`83a2219 → 00ac3e2` ✓，17 个文件带过去 ✓，两个生成物重新生成 ✓，返工已开跑 ✓。
+
+---
+
+## L1-20260914-36 — T0603：新复核 `approve`（无 blocking 无 major）；以及**accept 不查复核、合入 Gate 才查**
+
+**新复核结论：`approve`** ✓ —— **没有 blocking ✓、没有 major ✓** ✓。
+那条让 Worker 返工的错误泄漏（`writePolicyError` 的 default 回 `err.Error()` 且不记日志 ✓）**确认已修** ✓，
+且复核是**对着兄弟面的写法核的** ✓，不是听信 ✓。两条一致性修正也都核实 ✓。
+**本轮 T0603 的返工是有效的 ✓ —— 该修的修了，没有为了让复核闭嘴而放宽任何东西 ✓。**
+
+**一个我必须记准的机制** ✓：驱动在 `request_changes` 之后**仍然去跑了 accept** ✓（T0305 ✓），
+我一开始以为这是 Gate 被绕开 ✓。**核过之后不是** ✓：
+
+- `stepVerification` ✓ 的顺序是：判陈旧 → `review collect` → `task accept` ✓
+  （`driver_run.go:305-353` ✓）；
+- **`review collect` 并不因 `request_changes` 而拒绝** ✓ —— 它只**记录**结论 ✓；
+- 真正拒绝的是**合入 Gate** ✓：`gate_run.go:548` ✓
+  "the latest review verdict is %q with %d blocking finding(s) — **an approving Review Worker verdict is required for merge**" ✓。
+
+**所以 `request_changes` 挡在合入那一步 ✓，不在验收这一步 ✓ —— 工作能通过 accept，但永远合不进去 ✓。**
+**不是绕开 ✓，是挡得晚了一步 ✓**（代价是白走一遍 commit/push/PR 的动作 ✓，不是让坏代码进来 ✓）。
+
+**T0603 的 accept 失败也是基线问题** ✓，但**卡在真源码上** ✓：`patch failed: cmd/api/main.go:46` ✓ ——
+T0304 也改了这个文件（加路由 ✓）。`rebaseline` 用三方合并处理 ✓，不是打补丁 ✓：
+`ee58f2c → 00ac3e2` ✓，26 个文件带过去 ✓。
+
+**为什么返工里我要求"什么都别改"** ✓：复核已经 approve ✓，它**没有东西要修** ✓。
+但**基线一推进，那份 approve 必然作废** ✓ —— `codeIdentity` 是
+"相对 **merge-base** 的每个改动文件的 (路径, 内容) 的哈希" ✓（`review_worker.go:552-568` ✓）✓，
+merge-base 前进 → 改动文件集合变化 → 身份变化 → 陈旧 ✓。**这是对的 ✓**：
+合并后的树是**任何人都没看过的产物** ✓，合并本身可能就是错的 ✓。
+所以我让它**只在新基线上重跑并重交** ✓，并特别点名**唯一可能出问题的地方就是 `cmd/api/main.go`** ✓
+（两边都往同一个文件里加路由 ✓）。**乱改只会让下一轮复核要读的东西变大 ✓。**
+
+**顺带核了一条新出现的 minor，判断它不该在任务里改** ✓：
+`EffectivePolicy`（`service.go:166` ✓）会把**组织的 policy 文档**返回给**任何项目读者** ✓，
+包括**不是组织成员**的人 ✓。`docs/12 §5` 对此**没有规定** ✓ ——
+**"组织策略文档谁能读"是一个可见性立场问题** ✓，与 #164 里"停用组织能否写"同族 ✓。
+**我没有让它顺手加检查 ✓**（那等于在规格沉默处发明一条权限规则 ✓，§3/§5.1 ✓），
+**也没有自己定** ✓ —— 两条一起放在 #164 等判断 ✓。
+
+**§8.2 的一致性** ✓：`request_changes`、accept 被拒、基线冲突 —— **三类都是"回到 Supervisor 判断，而不是回到用户"** ✓，
+本轮全部如此处理 ✓，且**没有一处以放宽 Gate 为代价** ✓。
+
+---
+
+## L1-20260914-37 — 基线推进这条拒绝，是日志里**最常**升起的决策（12 次 / 8 个任务），而驱动已经有治它的命令
+
+**量出来的东西** ✓（只数次数 ✓，不猜 ✓）：
+
+```
+grep -c "does not apply to current main" .rddev/runtime/driver.out   →  12
+```
+
+涉及 **8 个不同任务** ✓：`T0301`×2 ✓、`T0603`×3 ✓、`T0201` ✓、`T0202` ✓、`T0207` ✓、`T0303`×2 ✓、`T0304` ✓、`T0305` ✓。
+**它是这份日志里最常见的决策原因 ✓，没有第二条接近它 ✓。**
+
+**为什么必然频繁** ✓：一个任务在验证期间，别的任务会合入 ✓ —— 这正是并行该有的样子 ✓；
+而验收 Gate 构建的是「当前 main + 本任务的完整改动」✓。
+**所以每一个在别人合入之后才走到 accept 的任务都会撞上它** ✓。**不是低概率竞态，是并行开发的常态** ✓。
+
+**Gate 拒得有理 ✓，缺的是"拒绝之后执行它自己要求的那件事"** ✓。拒绝原文说
+"bring the branch up to date and re-run" ✓ —— 而 `rddev rebaseline TASK` 的自述正是
+"Advance a task's baseline onto main **while keeping its work**" ✓。
+**这条决策在向人类要一件驱动自己就有专门命令、有测试、且对生成物处理正确的事** ✓。
+
+**两个步骤必须都做，缺一个任务就永久静默停住** ✓：
+`rebaseline` 推进基线 ✓，**还要** `--clear-decision` 清掉那条决策 ✓ ——
+第二步之所以存在，**只因为** `driver_run.go:236-239` 那个 `continue` 会把**整个任务**摘出处理队列 ✓（`L1-20260914-34` ✓）。
+
+**提议已写进 #163** ✓（comment `5658672514` ✓）：**当 `task accept` 以这条特定原因失败时，驱动应当自己调 `rebaseline` ✓，
+而不是 `decide`** ✓；判据用拒绝文本里由 `gate_run.go:723` 稳定生成的那一句 ✓，**不靠猜** ✓。
+**且这不降低 Gate** ✓：`rebaseline` 把**同一份改动**原样重放到新基线 ✓，复核结论**必然**作废 ✓
+（`codeIdentity` 随 merge-base 变 ✓），G2/G3 与独立复核全部重跑 ✓；
+**只有当 `rebaseline` 自己也拒**（改动即使排除生成物也无法应用 ✓）✓，**那才是真需要人** ✓。
+
+**可测的判据我也给了** ✓：下一次有任务在别人合入后走到 accept 时 ✓，
+日志里**应该出现 `rebaseline` ✓，而不是 `DECISION NEEDED`** ✓。上面那 12 行就是基线数值 ✓。
