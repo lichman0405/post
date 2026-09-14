@@ -4682,3 +4682,39 @@ T0208 依赖 T0205/T0207。T0603 的依赖里**有 T0208** —— 也就是说�
   而不是静默失效。
 - `rsg-real-services` 对 T0603 的判定**不是误报**。它是 Gate 在正确工作：DAG 说这个任务
   要等 T0208，而它没等。今天暴露的是**调度**没守住这条边，不是 Gate 判错了。
+
+### 补记（2026-09-14 09:50）—— 第 3 条「要修的洞」当时**并没有修好**，现在才修好
+
+上面第 3 条写的是「把依赖检查接到进入 `running` 的转移上」。实现它的是 `#150`（`b977a7d`），
+它把检查从 `to == StateReady` 扩到 `to == StateReady || to == StateRunning`，
+注释里点名了 T0603，测试也写了两个方向 —— 看起来正是这件事。
+
+**它一次都没生效过。** 任务走进 `running` 有两个入口，`#150` 只改了其中一个：
+
+| 入口 | 走的函数 |
+|---|---|
+| `rddev task ready` 及绝大多数命令 | `Store.Transition()` |
+| `rddev worker spawn` / `rework` / `respawn` | `Store.StartWorkerFrom()` |
+
+`StartWorkerFrom` 在**自己的 `mutate` 里**直接设 `running`，**从不调用 `Transition`**。
+`#150` 的测试也是直接调 `Transition` 的，所以它测的是「假如启动走 Transition，这道检查会拦住」——
+而启动不走 Transition。**测试绿、行为不变**，这正是本仓库最当真的那一类缺陷：fail-open，
+读起来像一道 guard，跑起来是零覆盖。
+
+**证据不是推理出来的，是撞上的**：`#150` 合入几分钟后，我在**正是那个 merge 构建出来的二进制**
+（`bin/rddev` 的 `vcs.revision=a59cadd87bbc`，`b977a7d` 是它的祖先）上跑了 `rddev worker rework T0603`，
+当时 T0208 还在 `running` —— **rddev 没有拒绝，Worker 起来了**。
+
+修复见 `#154` / PR `#155`：把检查抽成 `Store.requireDepsMerged`，**两个入口都调用它**
+（写两遍就是这次能藏住的原因），测试改成驱动 `StartWorkerFrom` 本身、覆盖两条启动边、两个方向。
+`DependencyError` 的措辞同时从 "cannot become ready" 改成 "cannot start" —— 它现在也会从
+`worker spawn/rework/respawn` 冒出来，读者不该去找一个命令根本没做的 ready 转移。
+
+**边界照旧**（这三条 `#149` 就写过，仍然成立）：救不了已经在飞的任务；挡不住给在飞任务加边；
+它只拒绝让它**再次开始**。T0603 的当前这一轮就是「已经在飞」的那一类，不在修复范围内。
+
+**教训（与 L1-20260914-16、以及 progress.md 里那两次二进制问题同族）**：
+一道 guard 的覆盖面不是「它写在哪个文件里」，而是「**有没有调用者真的经过它**」。
+`#150` 那一轮我可以直接验证而没验证的一件事是：`grep -rn "StateRunning" --include='*.go'` ——
+谁把任务置成 running。一行命令、一个 grep，就能看出 `Transition` 根本没有这样的调用者。
+**"改了、测了、绿了"和"生效了"是三件不同的事**，中间那步必须落到真实调用路径上。
