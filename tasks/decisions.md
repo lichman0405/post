@@ -6886,3 +6886,33 @@ git merge-base --is-ancestor b15e6e9 HEAD  -> NO
 **一句话教训**：**我说"合并成功"说的是 forge 的状态，不是这个目录的状态。**
 以后报"主线在哪"，报的是 `origin/main`；本地 `main` 是**我的**分支，要自己保持同步 ——
 从现在起这件事由脚本每 60 秒做一次，而不是靠我想起来。
+
+## L1-20260914-73
+
+**T1001 的六条复核意见我判了什么：三条原地改、两条交给 T1109、一条不改并说明理由**
+
+复核结论是 **`approve`**（不阻断），但 §5.1 的条件 4 是"**没有未解决的 review 意见**"——
+"不阻断"和"解决了"是两件事。逐条判如下（复核原文存在 `.rddev/workers/T1001-review/RESULT.json`）：
+
+| # | 级别 | 位置 | 问题 | 判定 |
+|---|---|---|---|---|
+| 1 | minor | `cmd/worker/main.go:112` | dispatcher goroutine 没在 `pool.Close()` 前 join | **原地改**（加 WaitGroup join） |
+| 2 | minor | `internal/events/publish.go:101` | PG 挂掉时每秒一行 Error，没有退避 | **交 T1109** |
+| 3 | minor | `internal/events/event.go:141` | `withPayloadVersion` 走 `map[string]any` 往返，JSON 数字变 `float64`，>2^53 的整数会丢精度 | **原地改**（`Decoder.UseNumber()`，保留字面量） |
+| 4 | nit | `internal/events/publish.go:247` | `last_error` 按字节截断，可能切断 UTF-8 | **原地改**（按 rune 截） |
+| 5 | nit | `internal/events/publish.go:97` | 有 `WithBatchSize` 却没有 `WithPollInterval`，调参面不一致 | **交 T1109** |
+| 6 | nit | `internal/application/rsg/events.go:79` | `state.committed` 的摘要丢了 `Detail`（对象/关系类型） | **不改**，理由见下 |
+
+**为什么 2 和 5 交给 T1109（生产级 Observability/Dashboards，尚未开始）**：这两条都不是"对错"，
+是**运维策略**——重试节奏、日志节奏、可调参数面。它们的正确形态由那个任务的 SLO/告警口径决定，
+在这里拍一个值，到了 T1109 还要改一次；而且复核者自己写的也是 "deferred to the SLO task"。
+**不是不理，是记了名、指了人**：T1001 的复核结论里保留这两条，T1109 的规格必须承接。
+
+**为什么 6 不改**：`docs/52 §17` 规定事件的载荷是**标识性**的（consumer 拿 id 去解析行），
+`Detail` 里的类型信息**在行上就能查到**；把它塞进事件等于在事件里冗余一份会漂移的真相。
+复核者自己也写了 "consistent with docs/52 §17"。**改动它会违反已定的架构约定**，所以不改 ——
+但这一条要在 T1001 的返工信里**明说**，不能让它看起来像被忽略了。
+
+**为什么 1 值得改**（而不是也交出去）：它是**关停期的竞态**，不是调参——
+dispatcher 正在查库时 `pool.Close()` 已经关了池子，会打出一条误导性的错误日志。
+5 行能修、修完就是对的，没有"以后按 SLO 再定"的空间。
