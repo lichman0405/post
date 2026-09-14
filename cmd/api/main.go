@@ -53,6 +53,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
 	"github.com/lichman0405/post/cmd/api/provenancehttp"
+	"github.com/lichman0405/post/cmd/api/pullrequestshttp"
 	"github.com/lichman0405/post/cmd/api/releasehttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/cmd/api/schemaprofileshttp"
@@ -62,6 +63,8 @@ import (
 	"github.com/lichman0405/post/internal/application/branches"
 	"github.com/lichman0405/post/internal/application/diffs"
 	"github.com/lichman0405/post/internal/application/manifests"
+	"github.com/lichman0405/post/internal/application/prchecks"
+	"github.com/lichman0405/post/internal/application/pullrequests"
 	"github.com/lichman0405/post/internal/application/releases"
 	"github.com/lichman0405/post/internal/application/resolutions"
 	"github.com/lichman0405/post/internal/application/rsg"
@@ -75,6 +78,7 @@ import (
 	"github.com/lichman0405/post/internal/health"
 	"github.com/lichman0405/post/internal/observability"
 	"github.com/lichman0405/post/internal/persistence"
+	"github.com/lichman0405/post/internal/rsg/integrity"
 	"github.com/lichman0405/post/internal/rsg/schemareg"
 	rsgvalidation "github.com/lichman0405/post/internal/rsg/validation"
 	"github.com/lichman0405/post/internal/version"
@@ -378,6 +382,32 @@ func run(args []string) int {
 	// project service, and commits every scientific-state write as one
 	// state commit (gate draft) on the shared validation guard.
 	stateStore := persistence.NewStateStore(pool)
+	// Pull requests (T0402/T0403): the per-project PR read surface plus the
+	// machine integrity review (internal/rsg/integrity). The check service
+	// assembles the PR's snapshot through the same stores the validation
+	// gate reads from — reads only, nothing stored; re-running over the
+	// same PR derives the same report (the pins are fixed, the rows
+	// append-only).
+	pullrequestsAPI := pullrequestshttp.New(pullrequestshttp.Deps{
+		PullRequests: pullrequests.NewService(persistence.NewPullRequestStore(pool)),
+		Checks: prchecks.NewService(prchecks.Deps{
+			PRs:      persistence.NewPullRequestStore(pool),
+			Projects: persistence.NewProjectStore(pool),
+			States:   stateStore,
+			// The branch's own head is the boundary of a chain with no
+			// states of its own — read from the branch row, never from the
+			// PR under review.
+			Branches: persistence.NewBranchStore(pool),
+			Manifest: persistence.NewManifestStore(pool),
+			Policies: persistence.NewPolicyStore(pool),
+			Engine:   integrity.New(reg),
+		}),
+		// PRs and their check reports are exactly as visible as their
+		// project: the same project-read gate every other project read
+		// runs (T0106 read matrix).
+		Projects: projectAPI.Service(),
+	})
+	pullrequestsAPI.Register(v1)
 	// Project schema profiles (T0213): namespaced, versioned JSON Schema
 	// extensions of the official base schemas. The persisted profile rows
 	// are re-registered into the runtime registry at startup (LoadAll) —
