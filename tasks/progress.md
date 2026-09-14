@@ -1,5 +1,42 @@
 # 开发进度
 
+> **19:56 当前这一刻**：
+> **链条第 4 节（T0502，迁移 00041）19:49 合并了 —— 链条又往前一节。**
+> 进度数字：**P0、P1 全部完成**；P2 13/15、P3 7/9、P4 2/10、P5 2/10；合计 **50/133 已合并**。
+>
+> | 链条节 | 迁移号 | 现在 |
+> |---|---|---|
+> | 1. T0209 | 00036 | 已合并（16:42，PR #176） |
+> | 2. T0213 | 00038 | 已合并（18:25，PR #180） |
+> | 3. T0501 | 00040 | 已合并（19:21，PR #185） |
+> | 4. T0502 | 00041 | **已合并（19:49，PR #186）** |
+> | 5. T0306 | 00042 | **我已手工合完，在等一个空闲 Worker 交回去** |
+> | 6. T0505 | 00043 | 排队，自动轮到 |
+> | 7–9. T0508 / T1001 / T0309 | 00045 / 00046 / 00047 | 尾部，链条走完自动轮到 |
+>
+> **T0502 落地得干净**：它带进来的检查和前面 T0501 合进来的两条硬失败**共存**，谁都没覆盖谁；
+> 七项自动检查全绿，19:49 合并。
+>
+> **T0306 我刚刚手工合完了，而且这次撞出来的样子和上次不一样** —— 上一次是"同一个清单里两边各加几条"，
+> 这一次是两处新形状：一处**只剩两段说明文字相撞**（两边的条目其实已经自己合好了），
+> 一处是"版本 6 时不该存在的表"那份清单里**两边各加了一行**（一个由 00038 建、一个由 00042 建，
+> 都晚于版本 6，所以两条都该留）。
+> 我把这两条形状的合并规则**先写成脚本、先在这次的真实冲突上试跑通过，才去动那棵树**；
+> 合完我在新树上全仓编译、静态检查、格式检查，确认没有残留冲突标记，
+> 再把"这一轮实际做了什么"如实写进给 Worker 的信里。**没有为了让路变绿而放宽任何检查。**
+>
+> 现在 4 个 Worker 占满槽位（T0503 在跑，T0407 / T0212 / T0214 在复核），
+> T0306 的返工在排队等空位；链条自动推进的那根"发条"等它开跑后我重新挂上。
+>
+> **一件要你知道、我绕不过去的事（同上一条）**：共享开发数据库 `post` 仍然是坏的
+> （被别人升到版本 40、却缺 34/35）。我**没有**去动它 —— 删库重建需要你**明确点名**这个库；
+> 它不挡自动测试（那些测试各自建一次性的库，用完就删）。
+>
+> 下一步不用你管：T0306 一旦开跑，链条会接着往下走 T0505、再往后两个尾部号；
+> 碰到真冲突我继续手工合。有必须你拍板的事我再喊你。
+
+<details><summary><b>19:27 那一刻</b></summary>
+
 > **19:27 当前这一刻**：
 > **链条第 3 节（T0501）19:21 合并了 —— 这一节卡着后面六个号，它一落地，队列就动起来了。**
 > 进度数字：**P0、P1 全部完成**；P2 13/15、P3 7/9、P4 2/10；合计 **49/133 已合并**。
@@ -39,6 +76,8 @@
 >
 > 下一步不用你管：链条自己往前走（T0502 一落地，工具接着挪 T0306），碰到真冲突我手工合。
 > 有必须你拍板的事我再喊你。
+
+</details>
 
 <details><summary><b>18:56 那一刻</b></summary>
 
@@ -1524,9 +1563,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-14T11:25:17Z
+生成时间：2026-09-14T11:54:12Z
 
-状态分布：todo 73 · ready 0 · running 4 · worker_failed 0 · verification 4 · rejected 3 · blocked 0 · accepted 0 · merged 49（合计 133/133 个任务）
+状态分布：todo 71 · ready 1 · running 1 · worker_failed 0 · verification 7 · rejected 3 · blocked 0 · accepted 0 · merged 50（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1565,9 +1604,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0209 | RSG Query API | P2 | merged | 2026-09-14T08:22:52Z |  | 2026-09-14T08:39:32Z | 2026-09-14T08:42:52Z |
 | T0210 | Scientific Object Detail UI | P2 | merged | 2026-09-14T04:52:41Z |  | 2026-09-14T05:08:10Z | 2026-09-14T05:11:18Z |
 | T0211 | Research Outline 与基础 Research 页面 | P2 | merged | 2026-09-14T10:46:47Z |  | 2026-09-14T11:11:59Z | 2026-09-14T11:17:54Z |
-| T0212 | Project Overview Research Summary | P2 | running | 2026-09-14T11:18:06Z |  |  |  |
+| T0212 | Project Overview Research Summary | P2 | verification | 2026-09-14T11:18:06Z |  |  |  |
 | T0213 | Project Schema Extension 与 Custom Metadata | P2 | merged | 2026-09-14T09:33:12Z |  | 2026-09-14T10:22:06Z | 2026-09-14T10:25:27Z |
-| T0214 | 官方材料研发 Project Templates | P2 | running | 2026-09-14T11:18:23Z |  |  |  |
+| T0214 | 官方材料研发 Project Templates | P2 | verification | 2026-09-14T11:18:23Z |  |  |  |
 | T0215 | 版本计数 backfill 的数据级升级断言（00024 + 00025） | P2 | merged | 2026-09-13T18:06:02Z |  | 2026-09-13T18:55:01Z | 2026-09-13T19:03:58Z |
 | T0301 | Gitea adapter 与 repo provisioning | P3 | merged | 2026-09-13T23:39:37Z |  | 2026-09-13T23:50:50Z | 2026-09-13T23:53:45Z |
 | T0302 | Git main 双层保护 | P3 | merged | 2026-09-13T23:53:46Z |  | 2026-09-14T00:31:44Z | 2026-09-14T00:34:39Z |
@@ -1584,14 +1623,14 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0404 | Scientific Review 模型 | P4 | todo |  |  |  |  |
 | T0405 | Semantic Conflict Detector | P4 | merged | 2026-09-14T10:19:26Z |  | 2026-09-14T10:46:43Z | 2026-09-14T10:50:01Z |
 | T0406 | Semantic Merge Engine | P4 | todo |  |  |  |  |
-| T0407 | Scientific Conflict Resolution UI | P4 | running | 2026-09-14T10:50:03Z |  |  |  |
+| T0407 | Scientific Conflict Resolution UI | P4 | verification | 2026-09-14T10:50:03Z |  |  |  |
 | T0408 | PR Research Diff UI | P4 | todo |  |  |  |  |
 | T0409 | Merge Governance 与 frozen main 更新 | P4 | todo |  |  |  |  |
 | T0410 | PR/Branch 完整 E2E | P4 | todo |  |  |  |  |
 | T0501 | Research Question 与 Hypothesis 关系模型 | P5 | merged | 2026-09-14T10:52:04Z |  | 2026-09-14T11:17:35Z | 2026-09-14T11:21:07Z |
-| T0502 | Claim 结构与 scope | P5 | running | 2026-09-14T11:24:17Z |  |  |  |
-| T0503 | Finding 聚合模型 | P5 | todo |  |  |  |  |
-| T0504 | Evidence Assertion Domain | P5 | todo |  |  |  |  |
+| T0502 | Claim 结构与 scope | P5 | merged | 2026-09-14T11:24:17Z |  | 2026-09-14T11:46:32Z | 2026-09-14T11:49:54Z |
+| T0503 | Finding 聚合模型 | P5 | running | 2026-09-14T11:49:56Z |  |  |  |
+| T0504 | Evidence Assertion Domain | P5 | ready |  |  |  |  |
 | T0505 | Provenance Graph Projection | P5 | rejected | 2026-09-14T06:34:55Z |  |  |  |
 | T0506 | Evidence Graph Projection | P5 | todo |  |  |  |  |
 | T0507 | Evidence/Provenance UI | P5 | todo |  |  |  |  |
