@@ -1,6 +1,7 @@
 package devorchestrator
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,6 +67,55 @@ func TestGitControlRefusesRedGateBeforeAnyInvocation(t *testing.T) {
 	if len(data) != 0 {
 		t.Fatalf("git/gh was invoked despite the red gate:\n%s", data)
 	}
+}
+
+// The freshness check's POSITION is the whole point of it: after the four-gate
+// assertion, so a red gate still refuses without git being invoked; before the
+// action, so a stale binary refuses without git or gh being invoked either.
+// Both halves are asserted, because either one alone is satisfied by a design
+// that breaks the other — and the first half is what the acceptance e2e caught
+// when the check sat at process start (#135, PR #147).
+func TestTheFreshnessCheckRunsAfterTheGateAssertionAndBeforeTheAction(t *testing.T) {
+	t.Run("a red gate never reaches the freshness check", func(t *testing.T) {
+		// The check answers its question BY INVOKING GIT. Running it before the
+		// assertion would put a git call in front of the refusal that promises
+		// "git was never invoked" and quietly retire that promise.
+		repoRoot, specPath := writeGateSpec(t, miniGateSpec)
+		_, marker := fakeGitBin(t)
+		ran := false
+		_, err := RunGitControl(&GitControlOpts{
+			RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001",
+			FreshnessCheck: func() error { ran = true; return nil },
+		}, "commit")
+		if _, ok := err.(*GateRefusalError); !ok {
+			t.Fatalf("error = %v, want GateRefusalError", err)
+		}
+		if ran {
+			t.Error("the freshness check ran on a red gate")
+		}
+		if data, _ := os.ReadFile(marker); len(data) != 0 {
+			t.Errorf("git/gh was invoked despite the red gate:\n%s", data)
+		}
+	})
+
+	t.Run("a stale binary refuses without touching the control plane", func(t *testing.T) {
+		// The affirmative half: on a GREEN gate the check is consulted, and what
+		// it refuses costs nothing — the fake git/gh marker proves the action
+		// never ran. A check placed after the dispatch would invoke git first.
+		repoRoot, specPath := mergeGateFixture(t)
+		_, marker := fakeGitBin(t)
+		stale := errors.New("this rddev was built from a commit main has moved past")
+		_, err := RunGitControl(&GitControlOpts{
+			RepoRoot: repoRoot, GatesPath: specPath, TaskID: "T0001",
+			FreshnessCheck: func() error { return stale },
+		}, "commit")
+		if err != stale {
+			t.Fatalf("error = %v, want the freshness check's own error", err)
+		}
+		if data, _ := os.ReadFile(marker); len(data) != 0 {
+			t.Errorf("a refused stale binary still invoked the control plane:\n%s", data)
+		}
+	})
 }
 
 // TestGitControlCommitOnGreenGate: the legitimate neighbour — with green

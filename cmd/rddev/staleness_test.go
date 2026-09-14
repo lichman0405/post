@@ -26,6 +26,35 @@ func TestTheGuardCoversEveryCommandThatGrades(t *testing.T) {
 	}
 }
 
+// Being guarded is not the same as being guarded at startup, and the
+// difference is the whole reason git.go and pr.go pass a FreshnessCheck: those
+// two have an older promise — on a red gate they refuse and say "git was never
+// invoked" — and the staleness question can only be answered by invoking git.
+// Checking them at startup would put a git call in front of that refusal and
+// quietly retire the promise. This test pins the split so neither half can
+// drift: everything graded is checked exactly once, in one of the two places.
+func TestGitAndPRAreCheckedAfterTheirGateAssertionAndEverythingElseBefore(t *testing.T) {
+	deferredToTheAction := map[string]bool{"git": true, "pr": true}
+
+	for cmd := range commandsThatGrade {
+		switch {
+		case deferredToTheAction[cmd] && commandsCheckedAtStartup[cmd]:
+			t.Errorf("%q is checked at startup as well as after its gate assertion; the "+
+				"startup check runs a git subprocess before the red-gate refusal that "+
+				"promises no git was invoked", cmd)
+		case !deferredToTheAction[cmd] && !commandsCheckedAtStartup[cmd]:
+			t.Errorf("%q grades but is checked nowhere — it would run unguarded from a stale binary", cmd)
+		}
+	}
+	// The other direction: the startup set must not invent a command that is
+	// not graded at all, which would refuse something nobody decided to guard.
+	for cmd := range commandsCheckedAtStartup {
+		if !commandsThatGrade[cmd] {
+			t.Errorf("%q is checked at startup but is not a grading command", cmd)
+		}
+	}
+}
+
 // leadingCommand must find the subcommand for both `rddev task …` and
 // `rddev --json task …`, because run() accepts the global flag in that one
 // position and the guard has to agree with it about where the subcommand is.

@@ -78,7 +78,9 @@ A grading command (task, worker, review, gate, git, pr, rebaseline, refs, drive,
 workflow) refuses to run when main has changed the orchestrator's own source since
 this binary was built — a Gate must not grade from a tool older than the rules it
 enforces (#135). Rebuild with "make rddev"; set RDDEV_ALLOW_STALE_BINARY=1 to run
-an older build on purpose.
+an older build on purpose. git and pr are checked one step later, after the
+four-gate assertion rather than before it, so that a red gate still refuses
+without git or gh being invoked at all.
 `
 
 func main() {
