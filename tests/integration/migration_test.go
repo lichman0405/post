@@ -413,9 +413,20 @@ var canonicalTables = map[string]tableExp{
 		uniques: [][]string{{"source_type", "external_identifier"}},
 	},
 	"external_reference_snapshots": {
-		cols: []colExp{c("id", u, false, true), c("external_reference_id", u, false, false), c("accessed_at", ts, false, false), c("upstream_version", txt, true, false), c("metadata", jb, false, false), c("snapshot_hash", txt, false, false), c("blob_id", u, true, false)},
+		// snapshot_hash became derivable in T0508 (00045): NULL means
+		// "derive it server-side from the stored metadata bytes".
+		cols: []colExp{c("id", u, false, true), c("external_reference_id", u, false, false), c("accessed_at", ts, false, false), c("upstream_version", txt, true, false), c("metadata", jb, false, false), c("snapshot_hash", txt, true, false), c("blob_id", u, true, false)},
 		pk:   []string{"id"},
 		fks:  []fkExp{fk("external_reference_id", "external_references", "RESTRICT"), fk("blob_id", "blobs", "RESTRICT")},
+	},
+	"external_reference_relation_types": {
+		// T0508 (00045): the relation types that may point AT an external
+		// reference — the citation/dependency pair of docs/19 §3. The Go
+		// relation catalog declares the same set
+		// (relationcatalog.ExternalRefTargetTypes); the drift test pins
+		// the two copies together.
+		cols: []colExp{c("relation_type", txt, false, false)},
+		pk:   []string{"relation_type"},
 	},
 	"contribution_events": {
 		cols: []colExp{c("id", u, false, true), c("actor_id", u, false, false), c("organization_id_at_time", u, true, false), c("project_id", u, true, false), c("event_type", txt, false, false), arr("role_codes", false, true), c("object_refs", jb, false, true), c("accepted_context", bl, false, true), c("released_context", bl, false, true), c("occurred_at", ts, false, true)},
@@ -533,15 +544,18 @@ var explicitIndexes = map[string][]string{
 	// normalized scope conditions and the declared bases.
 	// T0505: the provenance projection's read paths (00043) — the
 	// whole-project graph scan and the per-endpoint lineage walks.
-	"project_schema_profiles_project_idx": {"project_id", "schema_id", "created_at"},
-	"claims_object_idx":                   {"object_id"},
-	"claims_type_idx":                     {"claim_type"},
-	"claims_subject_idx":                  {"subject_ref", "WHERE"},
-	"claims_scope_conditions_gin":         {"USING gin", "scope_conditions"},
-	"claims_basis_gin":                    {"USING gin", "basis"},
-	"provenance_edges_project_idx":        {"project_id", "relation_type"},
-	"provenance_edges_source_version_idx": {"source_object_version_id"},
-	"provenance_edges_target_version_idx": {"target_object_version_id"},
+	// T0508: the snapshot log is read per identity; 00011 never indexed
+	// the FK (00045).
+	"project_schema_profiles_project_idx":  {"project_id", "schema_id", "created_at"},
+	"claims_object_idx":                    {"object_id"},
+	"claims_type_idx":                      {"claim_type"},
+	"claims_subject_idx":                   {"subject_ref", "WHERE"},
+	"claims_scope_conditions_gin":          {"USING gin", "scope_conditions"},
+	"claims_basis_gin":                     {"USING gin", "basis"},
+	"provenance_edges_project_idx":         {"project_id", "relation_type"},
+	"provenance_edges_source_version_idx":  {"source_object_version_id"},
+	"provenance_edges_target_version_idx":  {"target_object_version_id"},
+	"external_reference_snapshots_ref_idx": {"external_reference_id"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
@@ -699,7 +713,8 @@ func TestUpgradePath(t *testing.T) {
 		"pull_requests", "reviews", "validation_results", "releases",
 		"research_assets", "research_asset_versions", "asset_lineage",
 		"asset_dependencies", "knowledge_publications", "external_references",
-		"external_reference_snapshots", "contribution_events",
+		"external_reference_snapshots", "external_reference_relation_types",
+		"contribution_events",
 		"credit_disputes", "research_events", "outbox_events",
 		"subscriptions", "webhook_deliveries", "audit_log", "search_documents",
 		"profiles", "git_repository_provisions", "git_branch_refs",

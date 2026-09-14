@@ -1,6 +1,7 @@
 package relationcatalog
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -75,6 +76,34 @@ func TestEndpointsValid(t *testing.T) {
 		}
 		if !c.ok && !strings.Contains(msg, c.wantMsg) {
 			t.Errorf("EndpointsValid(%s, %s, %s) message = %q, want it to contain %q", c.typ, c.src, c.tgt, msg, c.wantMsg)
+		}
+	}
+}
+
+// TestExternalRefTargetTypes pins the citation/dependency pair of
+// docs/19 §3: the ONLY relation types that may point AT an external
+// reference are references (background knowledge; upstream changes only
+// notify) and depends_on (actual input; upstream changes trigger impact
+// analysis). The database declares the same set
+// (external_reference_relation_types, migration 00045); the integration
+// drift test keeps the two copies in lockstep — this test makes a
+// catalog change fail loudly HERE first.
+func TestExternalRefTargetTypes(t *testing.T) {
+	got := ExternalRefTargetTypes()
+	want := []string{"depends_on", "references"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ExternalRefTargetTypes() = %v, want %v (docs/19 §3: only the citation/dependency pair may target an external reference)", got, want)
+	}
+	// The pair must be complete in the catalog: each is a core type, each
+	// marked, and no other core type may be marked (the sorted equality
+	// above covers "no other", the entries below cover "each marked").
+	for _, typ := range want {
+		e, ok := Lookup(typ)
+		if !ok {
+			t.Fatalf("catalog lost core type %q", typ)
+		}
+		if !e.ExternalRefTarget {
+			t.Errorf("type %q must be marked ExternalRefTarget", typ)
 		}
 	}
 }

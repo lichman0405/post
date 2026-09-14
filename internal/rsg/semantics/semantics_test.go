@@ -108,8 +108,64 @@ func TestHypothesisQuestionRef(t *testing.T) {
 	}
 }
 
+// TestExternalReferenceIdentityPair is the semantic half of the live
+// identity rule (docs/19 §2: source_type + external_identifier IS the
+// identity): half of the pair is mechanically wrong wherever it appears
+// (hard failure, mirroring the 00045 DB guard's pairing rule); both
+// absent is a valid draft (the pr gate demands the pair); the
+// canonical_url absence is advisory only — a draft may not know the URL
+// yet, the hint says what naming it would buy.
+func TestExternalReferenceIdentityPair(t *testing.T) {
+	// Half a pair: hard failure.
+	errs, hints := Check("external_reference", "", map[string]any{
+		"source_type":         "publication",
+		"external_identifier": "   ",
+	})
+	if len(errs) != 1 || len(hints) != 0 {
+		t.Fatalf("source_type without identifier: errs=%v hints=%v, want exactly one hard failure", errs, hints)
+	}
+	errs, hints = Check("external_reference", "", map[string]any{
+		"external_identifier": "10.1000/xyz",
+	})
+	if len(errs) != 1 || len(hints) != 0 {
+		t.Fatalf("identifier without source_type: errs=%v hints=%v, want exactly one hard failure", errs, hints)
+	}
+	if !strings.Contains(errs[0].Error(), "together") {
+		t.Fatalf("half-pair error = %q, want the pairing explanation", errs[0])
+	}
+
+	// The complete pair: no failure; a missing canonical_url carries the
+	// advisory hint.
+	errs, hints = Check("external_reference", "", map[string]any{
+		"source_type":         "publication",
+		"external_identifier": "10.1000/xyz",
+	})
+	if len(errs) != 0 {
+		t.Fatalf("complete pair produced hard failures %v", errs)
+	}
+	if len(hints) != 1 || hints[0].Code != HintExternalReferenceCanonicalURL {
+		t.Fatalf("complete pair without canonical_url hints = %+v, want exactly %s", hints, HintExternalReferenceCanonicalURL)
+	}
+	// With the URL named: clean.
+	errs, hints = Check("external_reference", "", map[string]any{
+		"source_type":         "publication",
+		"external_identifier": "10.1000/xyz",
+		"canonical_url":       "https://doi.org/10.1000/xyz",
+	})
+	if len(errs) != 0 || len(hints) != 0 {
+		t.Fatalf("fully named reference: errs=%v hints=%v, want none", errs, hints)
+	}
+	// No identity at all: a valid draft — nothing to say, nothing to
+	// refuse (the pr gate is the authority on whether that omission
+	// matters at this point).
+	errs, hints = Check("external_reference", "", map[string]any{"title": "a draft"})
+	if len(errs) != 0 || len(hints) != 0 {
+		t.Fatalf("draft without identity: errs=%v hints=%v, want none", errs, hints)
+	}
+}
+
 func TestUnknownTypesHaveNoChecks(t *testing.T) {
-	for _, typ := range []string{"material", "sample", "calculation", "dataset", "protocol", "finding", "external_reference", "experiment"} {
+	for _, typ := range []string{"material", "sample", "calculation", "dataset", "protocol", "finding", "experiment"} {
 		errs, hints := Check(typ, "", map[string]any{"name": "x", "statement": "a and b and c."})
 		if len(errs) != 0 || len(hints) != 0 {
 			t.Fatalf("type %s: errs=%v hints=%v, want no checks (the V1 schemas define no crisp rule for it)", typ, errs, hints)

@@ -58,6 +58,12 @@ const (
 	// draft gate tolerates the absence, the hint says what completing it
 	// would buy.
 	HintHypothesisQuestionRef = "HYPOTHESIS_MISSING_QUESTION_REF"
+	// HintExternalReferenceCanonicalURL: the external reference does not
+	// carry a canonical_url yet (docs/19 §2: the live identity's URL).
+	// The draft gate tolerates the absence; the hint says what naming it
+	// would buy (a refresh can verify what the URL resolves to, and
+	// readers can reach the source).
+	HintExternalReferenceCanonicalURL = "EXTERNAL_REFERENCE_MISSING_CANONICAL_URL"
 )
 
 // Check runs the domain semantic checks for one object type over a payload.
@@ -75,6 +81,8 @@ func Check(objectType, ownObjectID string, payload map[string]any) (errs []error
 		return checkResearchQuestion(ownObjectID, payload)
 	case "hypothesis":
 		return checkHypothesis(payload)
+	case "external_reference":
+		return checkExternalReference(payload)
 	}
 	return nil, nil
 }
@@ -270,4 +278,45 @@ func checkHypothesis(payload map[string]any) ([]error, []Hint) {
 		return []error{fmt.Errorf("semantics: hypothesis question_id must not be empty when present")}, nil
 	}
 	return nil, nil
+}
+
+// checkExternalReference implements the external reference checks. The
+// identity pair rule (docs/19 §2: source_type + external_identifier is
+// the live identity) is a hard error when half of the pair is given
+// without the other — a half-identity is mechanically wrong, wherever it
+// appears. Both absent is a valid draft (the pr gate demands the pair);
+// both present is validated by the schema enum and normalized by the
+// 00045 identity sync. The canonical_url absence is advisory: a draft
+// may not know the URL yet (mirroring hypothesis's question_id hint).
+func checkExternalReference(payload map[string]any) ([]error, []Hint) {
+	srcType, hasSrc := nonEmptyString(payload["source_type"])
+	extID, hasID := nonEmptyString(payload["external_identifier"])
+	var hints []Hint
+	if hasSrc != hasID {
+		return []error{fmt.Errorf("semantics: external reference source_type and external_identifier must be given together")}, hints
+	}
+	_, hasURL := nonEmptyString(payload["canonical_url"])
+	if hasSrc && !hasURL {
+		hints = append(hints, Hint{
+			Code: HintExternalReferenceCanonicalURL,
+			Message: "the external reference does not name its canonical_url (source_type=" + srcType + ", external_identifier=" + extID + "). " +
+				"docs/19 §2: the live identity carries the URL — naming it lets a refresh verify what it resolves to, and readers reach the source.",
+		})
+	}
+	return nil, hints
+}
+
+// nonEmptyString reports the trimmed string value of v and whether it is
+// present and non-empty. The trim set is domain.ASCIIWhitespace — the
+// same explicit ASCII set the 00045 identity sync trims with, so a
+// tab-only value is blank in both worlds. Unicode-aware TrimSpace must
+// not be used here: the two emptiness judgements are pinned together by
+// the integration drift test and must never diverge.
+func nonEmptyString(v any) (string, bool) {
+	s, ok := v.(string)
+	if !ok {
+		return "", false
+	}
+	s = strings.Trim(s, domain.ASCIIWhitespace)
+	return s, s != ""
 }
