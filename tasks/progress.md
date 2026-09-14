@@ -1,5 +1,44 @@
 # 开发进度
 
+> **21:20 当前这一刻**：
+> **六个号的队列只剩最后一节在返工，前五节全部落地了。**
+> 进度数字：**P0 14/14、P1 10/10 全部完成**；P2 14/15、P3 8/9、P4 2/10、P5 2/10、P6 2/9；合计 **52/133 已合并**。
+>
+> | 链条节 | 迁移号 | 现在 |
+> |---|---|---|
+> | 1. T0209 | 00036 | 已合并（16:42，PR #176） |
+> | 2. T0213 | 00038 | 已合并（18:25，PR #180） |
+> | 3. T0501 | 00040 | 已合并（19:21，PR #185） |
+> | 4. T0502 | 00041 | 已合并（19:49，PR #186） |
+> | 5. T0306 | 00042 | 已合并（20:29） |
+> | 6. T0505 | 00043 | **返工中（21:15 换到新基线，复核已是"通过、无阻断"）** |
+> | 7–9. T0508 / T1001 / T0309 | 00045 / 00046 / 00047 | 尾部；T0508 正在复核 |
+>
+> **这半小时我主要在收拾自己的两个错误，都摊开说**：
+>
+> 1. **主线红过一次，已经修好、又绿了**。我 20:5x 那笔记录把一个"问题"写成了"任务"，
+>    而项目对"任务"有硬性的形状要求（要有登记的测试、要有集成检查项、数量要对得上）——
+>    纯问题满足不了，等于一下弄红三个自动检查。改法：把问题搬回它该在的地方（**issue #189**，
+>    等你定），把约束写进**会真正遇到它的那两个任务**里，"任务"条目撤销。本地把 CI 那几步
+>    全跑过一遍才提交，现在主线 `3ee89ef` 全绿。
+> 2. **按号自动落地的那个脚本今天停过一次**（21:05）：链条最后一节因为我改了主线、补丁对不上
+>    被冻结，而脚本**本该替它换基线**却整个退出了。原因和修法都写进了 `tasks/decisions.md`
+>    （我重写那段时丢掉了一条判断，而测试又恰好把那个函数整个跳过了 —— 现在补了四条用例，
+>    并**先证明它们能红**）。修好后 21:15 它自己动起来：T0505 三秒换到新基线（19 个文件机械搬运）
+>    并重新开跑。
+>
+> **还在等你两件事（都不挡路）**：
+>
+> - **issue #189**：非 push 来源的分支，它的"结构化完整性"从哪来 —— 00042 的默认值写的是
+>   "已完成"，而只有 push 这条路会去更新它。要么明确"这个门只在 push 路径上成立"，要么给出派生规则。
+> - **共享开发数据库 `post` 是坏的**（被升到版本 40、缺 34/35）。我**没有**动它 ——
+>   删库重建需要你**明确点名**这个库；它不挡自动测试（那些测试各自建一次性的库，用完就删）。
+>
+> 下一步不用你管：T0505 返工 → 复核 → 合并，然后自动接着走尾部三个号，再往后六个号；
+> 碰到真冲突我继续手工合。有必须你拍板的事我再喊你。
+
+<details><summary><b>19:56 那一刻</b></summary>
+
 > **19:56 当前这一刻**：
 > **链条第 4 节（T0502，迁移 00041）19:49 合并了 —— 链条又往前一节。**
 > 进度数字：**P0、P1 全部完成**；P2 13/15、P3 7/9、P4 2/10、P5 2/10；合计 **50/133 已合并**。
@@ -34,6 +73,9 @@
 >
 > 下一步不用你管：T0306 一旦开跑，链条会接着往下走 T0505、再往后两个尾部号；
 > 碰到真冲突我继续手工合。有必须你拍板的事我再喊你。
+
+</details>
+
 
 <details><summary><b>19:27 那一刻</b></summary>
 
@@ -1563,9 +1605,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-14T11:54:12Z
+生成时间：2026-09-14T13:16:32Z
 
-状态分布：todo 71 · ready 1 · running 1 · worker_failed 0 · verification 7 · rejected 3 · blocked 0 · accepted 0 · merged 50（合计 133/133 个任务）
+状态分布：todo 71 · ready 0 · running 1 · worker_failed 0 · verification 8 · rejected 1 · blocked 0 · accepted 0 · merged 52（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1604,7 +1646,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0209 | RSG Query API | P2 | merged | 2026-09-14T08:22:52Z |  | 2026-09-14T08:39:32Z | 2026-09-14T08:42:52Z |
 | T0210 | Scientific Object Detail UI | P2 | merged | 2026-09-14T04:52:41Z |  | 2026-09-14T05:08:10Z | 2026-09-14T05:11:18Z |
 | T0211 | Research Outline 与基础 Research 页面 | P2 | merged | 2026-09-14T10:46:47Z |  | 2026-09-14T11:11:59Z | 2026-09-14T11:17:54Z |
-| T0212 | Project Overview Research Summary | P2 | verification | 2026-09-14T11:18:06Z |  |  |  |
+| T0212 | Project Overview Research Summary | P2 | merged | 2026-09-14T11:18:06Z |  | 2026-09-14T12:00:35Z | 2026-09-14T12:03:51Z |
 | T0213 | Project Schema Extension 与 Custom Metadata | P2 | merged | 2026-09-14T09:33:12Z |  | 2026-09-14T10:22:06Z | 2026-09-14T10:25:27Z |
 | T0214 | 官方材料研发 Project Templates | P2 | verification | 2026-09-14T11:18:23Z |  |  |  |
 | T0215 | 版本计数 backfill 的数据级升级断言（00024 + 00025） | P2 | merged | 2026-09-13T18:06:02Z |  | 2026-09-13T18:55:01Z | 2026-09-13T19:03:58Z |
@@ -1613,7 +1655,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0303 | Branch Git ref 同步 | P3 | merged | 2026-09-14T01:56:07Z |  | 2026-09-14T02:15:37Z | 2026-09-14T02:21:07Z |
 | T0304 | Git 用户认证/PAT/SSH key 基础 | P3 | merged | 2026-09-14T03:05:17Z |  | 2026-09-14T03:29:01Z | 2026-09-14T03:33:06Z |
 | T0305 | Push Webhook 与 Semantic Ingestion | P3 | merged | 2026-09-14T05:30:41Z |  | 2026-09-14T05:55:09Z | 2026-09-14T05:58:23Z |
-| T0306 | Unstructured Change 状态 | P3 | rejected | 2026-09-14T06:55:53Z |  |  |  |
+| T0306 | Unstructured Change 状态 | P3 | merged | 2026-09-14T11:54:25Z |  | 2026-09-14T12:25:49Z | 2026-09-14T12:29:12Z |
 | T0307 | Files Tree/Preview API | P3 | merged | 2026-09-14T06:06:52Z |  | 2026-09-14T06:52:08Z | 2026-09-14T06:56:45Z |
 | T0308 | 只读 Files Web UI | P3 | merged | 2026-09-14T07:02:46Z |  | 2026-09-14T07:47:08Z | 2026-09-14T07:50:21Z |
 | T0309 | Git ↔ RSG reconciliation | P3 | rejected | 2026-09-14T07:50:42Z |  |  |  |
@@ -1629,12 +1671,12 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0410 | PR/Branch 完整 E2E | P4 | todo |  |  |  |  |
 | T0501 | Research Question 与 Hypothesis 关系模型 | P5 | merged | 2026-09-14T10:52:04Z |  | 2026-09-14T11:17:35Z | 2026-09-14T11:21:07Z |
 | T0502 | Claim 结构与 scope | P5 | merged | 2026-09-14T11:24:17Z |  | 2026-09-14T11:46:32Z | 2026-09-14T11:49:54Z |
-| T0503 | Finding 聚合模型 | P5 | running | 2026-09-14T11:49:56Z |  |  |  |
-| T0504 | Evidence Assertion Domain | P5 | ready |  |  |  |  |
-| T0505 | Provenance Graph Projection | P5 | rejected | 2026-09-14T06:34:55Z |  |  |  |
+| T0503 | Finding 聚合模型 | P5 | verification | 2026-09-14T11:49:56Z |  |  |  |
+| T0504 | Evidence Assertion Domain | P5 | verification | 2026-09-14T12:06:39Z |  |  |  |
+| T0505 | Provenance Graph Projection | P5 | running | 2026-09-14T13:15:07Z |  |  |  |
 | T0506 | Evidence Graph Projection | P5 | todo |  |  |  |  |
 | T0507 | Evidence/Provenance UI | P5 | todo |  |  |  |  |
-| T0508 | External Reference live identity + snapshot | P5 | verification | 2026-09-14T07:09:08Z |  |  |  |
+| T0508 | External Reference live identity + snapshot | P5 | verification | 2026-09-14T12:34:51Z |  |  |  |
 | T0509 | Literature evidence extraction data model | P5 | todo |  |  |  |  |
 | T0510 | Knowledge workflow E2E | P5 | todo |  |  |  |  |
 | T0601 | Freeze Main Governance | P6 | todo |  |  |  |  |
