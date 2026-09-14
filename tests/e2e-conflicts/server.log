@@ -1,0 +1,8 @@
+[1m[38;2;173;127;168m▲ Next.js 16.3.5[39m[22m
+- Local:         http://localhost:31110
+- Network:       http://192.168.100.195:31110
+[32m[1m✓[22m[39m Ready in 77ms
+[32m[1m✓[22m[39m Running next.config.ts took 20ms
+web config: layer=prod api=http://api.e2e.test adapter=http://127.0.0.1:19100
+web config: layer=prod api=http://api.e2e.test adapter=http://127.0.0.1:19100
+{"msg":"web: status render","correlation_id":"087ac381-9ea2-4136-bb32-6ead1de0cd97","config":"web config: layer=prod api=http://api.e2e.test adapter=http://127.0.0.1:19100"}

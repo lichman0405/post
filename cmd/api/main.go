@@ -45,6 +45,7 @@ import (
 
 	"github.com/lichman0405/post/cmd/api/audithttp"
 	"github.com/lichman0405/post/cmd/api/authhttp"
+	"github.com/lichman0405/post/cmd/api/conflicthttp"
 	"github.com/lichman0405/post/cmd/api/fileshttp"
 	"github.com/lichman0405/post/cmd/api/gittokenshttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
@@ -59,8 +60,10 @@ import (
 	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
+	"github.com/lichman0405/post/internal/application/diffs"
 	"github.com/lichman0405/post/internal/application/manifests"
 	"github.com/lichman0405/post/internal/application/releases"
+	"github.com/lichman0405/post/internal/application/resolutions"
 	"github.com/lichman0405/post/internal/application/rsg"
 	"github.com/lichman0405/post/internal/application/schemaprofiles"
 	"github.com/lichman0405/post/internal/application/states"
@@ -433,6 +436,25 @@ func run(args []string) int {
 		Gate:  projectAPI.Service(),
 	})
 	provenanceAPI.Register(v1)
+	// Scientific Conflict Resolution surface (T0407): the conflict view
+	// read (report + evidence + recorded decisions) and the resolution
+	// plan write over the three-way base/source/target triple. The reads
+	// run the same project read gate every other project read runs; the
+	// writes authorize through the same membership + matrix shape the RSG
+	// write path uses. The resolution store is the task-scoped pgx adapter
+	// (internal/application/resolutions, see its package doc).
+	resolutionSvc := resolutions.NewService(
+		diffs.NewService(stateStore, persistence.NewManifestStore(pool)),
+		resolutions.NewPGStore(pool),
+		projectAPI.Service(),
+		authz.NewMatrixEngine(),
+	)
+	conflictAPI := conflicthttp.New(conflicthttp.Deps{
+		Viewer:   resolutionSvc,
+		Saver:    resolutionSvc,
+		Projects: projectAPI.Service(),
+	})
+	conflictAPI.Register(v1)
 	// Organization/project policy (T0603): read/write routes for the
 	// versioned governance policy, sharing the v1 guard. The production
 	// adapters are the same pgx stores the org/project surfaces use.

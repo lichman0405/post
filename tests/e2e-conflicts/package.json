@@ -1,0 +1,13 @@
+{
+  "name": "@post/e2e-conflicts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Scientific Conflict Resolution UI e2e (T0407 required test): real Chromium drives the built web app through the Conflicts page — three-way base/A/B values, per-side evidence context, the advisory-only detector explanation (仅建议), exactly five explicit decision options, the CSRF-carrying save, and the absence of any averaged/auto-applied value. The API is mocked at the network layer with the exact wire shapes cmd/api/conflicthttp produces/consumes (the Go handler suite locks those shapes against a real guard).",
+  "type": "module",
+  "scripts": {
+    "e2e": "node conflicts-e2e.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}
