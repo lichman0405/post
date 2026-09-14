@@ -51,6 +51,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/policyhttp"
 	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
+	"github.com/lichman0405/post/cmd/api/provenancehttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/cmd/api/schemaprofileshttp"
 	"github.com/lichman0405/post/cmd/api/validationhttp"
@@ -398,6 +399,17 @@ func run(args []string) int {
 	})
 	rsgAPI := rsghttp.New(rsghttp.Deps{Service: rsgSvc})
 	rsgAPI.Register(v1)
+	// Provenance graph projection (T0505): read-only graph + lineage
+	// routes over the rebuildable provenance_edges projection (migration
+	// 00043). Reads run the same project visibility gate as every other
+	// project read; the pgx adapter lives in provenancehttp because
+	// T0505's scope excludes internal/persistence (L1, recorded in the
+	// task result).
+	provenanceAPI := provenancehttp.New(provenancehttp.Deps{
+		Store: provenancehttp.NewProjectionStore(pool),
+		Gate:  projectAPI.Service(),
+	})
+	provenanceAPI.Register(v1)
 	// Organization/project policy (T0603): read/write routes for the
 	// versioned governance policy, sharing the v1 guard. The production
 	// adapters are the same pgx stores the org/project surfaces use.
