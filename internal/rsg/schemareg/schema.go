@@ -38,6 +38,29 @@ func (s *Schema) Validate(doc []byte) error {
 	return nil
 }
 
+// TypeConst returns the object type this schema governs: the const value
+// of its properties.type, when the schema declares one ("" and false
+// otherwise). It is how a version row alone can be assembled into its
+// entity document: the schema that governs the payload is also the
+// authority for the type the payload is of — a payload can never smuggle
+// a different type past its own schema.
+func (s *Schema) TypeConst() (string, bool) {
+	var doc struct {
+		Properties struct {
+			Type struct {
+				Const string `json:"const"`
+			} `json:"type"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(s.raw, &doc); err != nil {
+		return "", false
+	}
+	if doc.Properties.Type.Const == "" {
+		return "", false
+	}
+	return doc.Properties.Type.Const, true
+}
+
 // compileSchema decodes and compiles doc as a JSON Schema registered at ref.
 // resources holds the already-registered schema documents keyed by id; $refs
 // in doc resolve against them locally (never over the network). Format

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lichman0405/post/internal/application/validation"
 	"github.com/lichman0405/post/internal/domain"
+	rsgvalidation "github.com/lichman0405/post/internal/rsg/validation"
 )
 
 // Service orchestrates the project state use cases against the Repository
@@ -18,11 +20,18 @@ import (
 // only resolved identities in.
 type Service struct {
 	repo Repository
+	// guard re-runs the commit's validation gate inside the commit
+	// transaction (docs/22 §7: "command 再次 server validate"): the gate
+	// named by CommitParams.Gate is checked over the rows as written, and
+	// a blocked gate rolls the whole transition back.
+	guard *validation.Guard
 }
 
-// NewService wires the service.
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+// NewService wires the service. The guard is required: a commit whose gate
+// cannot be re-validated server-side is refused at wiring time, never
+// silently unguarded.
+func NewService(repo Repository, guard *validation.Guard) *Service {
+	return &Service{repo: repo, guard: guard}
 }
 
 // CommitParams carries one state transition as requested by a caller (the
@@ -43,17 +52,29 @@ type CommitParams struct {
 	// ManifestVersion is the manifest format version the state is written
 	// under.
 	ManifestVersion string
+	// Gate names the validation gate the commit is held to (T0207). It is
+	// required and must be a commit gate (draft, pr, main): release and
+	// asset are snapshot actions, not commits. The guard re-runs the gate
+	// server-side inside the commit transaction — whatever the caller
+	// validated beforehand is never a reason to skip it.
+	Gate rsgvalidation.Gate
 }
 
 // Commit executes one state transition: validate, derive the content hash,
 // then hand the atomic boundary to the adapter together with the caller's
-// operation callback. It returns the new state and its commit record. The
-// callback's error passes through unchanged (unwrapped from
+// operation callback. The callback is wrapped with the validation guard:
+// after the caller's semantic writes, the commit's gate runs INSIDE the
+// transaction over the rows as written (docs/22 §7) — a blocked gate
+// returns *rsgvalidation.GateBlockedError and the whole transition rolls
+// back. The callback's error passes through unchanged (unwrapped from
 // *CommitWriteError): it is the domain outcome of the semantic write, not
 // a store failure.
 func (s *Service) Commit(ctx context.Context, in CommitParams, write WriteFunc) (domain.ProjectState, domain.StateCommit, error) {
 	if write == nil {
 		return domain.ProjectState{}, domain.StateCommit{}, fmt.Errorf("%w: write callback is required", ErrValidation)
+	}
+	if s.guard == nil {
+		return domain.ProjectState{}, domain.StateCommit{}, fmt.Errorf("%w: the commit guard is not wired", ErrStore)
 	}
 	if err := validateCommitParams(in); err != nil {
 		return domain.ProjectState{}, domain.StateCommit{}, err
@@ -61,6 +82,19 @@ func (s *Service) Commit(ctx context.Context, in CommitParams, write WriteFunc) 
 	hash, err := domain.ComputeStateHash(in.BaseStateID, in.Operations)
 	if err != nil {
 		return domain.ProjectState{}, domain.StateCommit{}, fmt.Errorf("%w: operations are not canonical JSON: %v", ErrValidation, err)
+	}
+	guarded := func(ctx context.Context, tx Transaction, stateID string) error {
+		if err := write(ctx, tx, stateID); err != nil {
+			return err
+		}
+		return s.guard.RequireCommitGate(ctx, tx, in.Gate, validation.CommitFacts{
+			ProjectID:     in.ProjectID,
+			BranchID:      in.BranchID,
+			ActorID:       in.ActorID,
+			BaseStateID:   in.BaseStateID,
+			ResultStateID: stateID,
+			Operations:    in.Operations,
+		})
 	}
 	state, commit, err := s.repo.CommitState(ctx, CommitStateParams{
 		ProjectID:       in.ProjectID,
@@ -73,7 +107,7 @@ func (s *Service) Commit(ctx context.Context, in CommitParams, write WriteFunc) 
 		StateHash:       hash,
 		GitCommitSHA:    in.GitCommitSHA,
 		ManifestVersion: in.ManifestVersion,
-	}, write)
+	}, guarded)
 	if err != nil {
 		return domain.ProjectState{}, domain.StateCommit{}, wrapStoreError(err)
 	}
@@ -257,6 +291,9 @@ func validateCommitParams(in CommitParams) error {
 	}
 	if strings.TrimSpace(in.ManifestVersion) == "" {
 		return fmt.Errorf("%w: manifest_version is required", ErrValidation)
+	}
+	if !rsgvalidation.ValidCommitGate(in.Gate) {
+		return fmt.Errorf("%w: gate is required and must be a commit gate (draft, pr, main); release and asset are snapshot actions, not commits", ErrValidation)
 	}
 	return nil
 }

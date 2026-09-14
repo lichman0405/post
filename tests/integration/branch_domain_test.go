@@ -14,6 +14,7 @@ import (
 	"github.com/lichman0405/post/internal/domain"
 	"github.com/lichman0405/post/internal/persistence"
 	"github.com/lichman0405/post/internal/persistence/testdb"
+	rsgvalidation "github.com/lichman0405/post/internal/rsg/validation"
 )
 
 // Task T0205: Research Branch Domain — over a REAL PostgreSQL. Proves the
@@ -75,7 +76,7 @@ func newBranchFixture(t *testing.T, ctx context.Context, visibility domain.Proje
 	if err != nil {
 		t.Fatalf("create fixture project: %v", err)
 	}
-	stateSvc := states.NewService(persistence.NewStateStore(pool))
+	stateSvc := states.NewService(persistence.NewStateStore(pool), newCommitGuard(t))
 	genesis, err := stateSvc.CreateInitialState(ctx, states.CreateInitialStateParams{
 		ProjectID:       project.ID,
 		ManifestVersion: "v1",
@@ -125,6 +126,10 @@ func (f *branchFixture) commit(t *testing.T, ctx context.Context, branchID strin
 		},
 		BaseStateID:     base,
 		ManifestVersion: "v1",
+		// The T0207 commit guard runs server-side inside the commit
+		// transaction; these branch-semantics commits write no members, so
+		// their intentional incompleteness is warning-only at draft.
+		Gate: rsgvalidation.GateDraft,
 	}, func(context.Context, states.Transaction, string) error { return nil })
 	if err != nil {
 		t.Fatalf("commit %q on branch %s: %v", msg, branchID, err)
@@ -511,6 +516,7 @@ func TestBranchLifecycle(t *testing.T) {
 				},
 				BaseStateID:     tc.branch.BaseStateID,
 				ManifestVersion: "v1",
+				Gate:            rsgvalidation.GateDraft,
 			}, func(context.Context, states.Transaction, string) error { return nil })
 			var na *states.BranchNotActiveError
 			if !errors.As(err, &na) {
