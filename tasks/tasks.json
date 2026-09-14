@@ -1324,6 +1324,7 @@
       "allowed_scope": [
         "cmd/api/**",
         "internal/rsg/**",
+        "internal/gitprovider/push_ingestion_test.go",
         "internal/domain/**",
         "internal/application/**",
         "internal/persistence/**",
