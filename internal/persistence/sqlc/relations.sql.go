@@ -353,3 +353,91 @@ func (q *Queries) ListRelationVersionsByTypes(ctx context.Context, arg ListRelat
 	}
 	return items, nil
 }
+
+const listRelationVersionsForObject = `-- name: ListRelationVersionsForObject :many
+SELECT rv.id, rv.relation_id, rv.version_no, rv.state_id, rv.relation_type, rv.source_object_version_id, rv.target_object_version_id, rv.payload, rv.integrity_hash, rv.created_by, rv.created_at,
+       sv_src.object_id   AS source_object_id,
+       src.object_type AS source_object_type,
+       sv_src.title    AS source_title,
+       sv_tgt.object_id   AS target_object_id,
+       tgt.object_type AS target_object_type,
+       sv_tgt.title    AS target_title
+  FROM relation_versions rv
+  JOIN relations r ON r.id = rv.relation_id
+  JOIN scientific_object_versions sv_src ON sv_src.id = rv.source_object_version_id
+  JOIN scientific_objects src ON src.id = sv_src.object_id
+  JOIN scientific_object_versions sv_tgt ON sv_tgt.id = rv.target_object_version_id
+  JOIN scientific_objects tgt ON tgt.id = sv_tgt.object_id
+ WHERE r.project_id = $1
+   AND (src.id = $2 OR tgt.id = $2)
+ ORDER BY rv.created_at DESC, rv.id DESC
+`
+
+type ListRelationVersionsForObjectParams struct {
+	ProjectID pgtype.UUID `json:"project_id"`
+	ObjectID  pgtype.UUID `json:"object_id"`
+}
+
+type ListRelationVersionsForObjectRow struct {
+	ID                    pgtype.UUID        `json:"id"`
+	RelationID            pgtype.UUID        `json:"relation_id"`
+	VersionNo             int32              `json:"version_no"`
+	StateID               pgtype.UUID        `json:"state_id"`
+	RelationType          string             `json:"relation_type"`
+	SourceObjectVersionID pgtype.UUID        `json:"source_object_version_id"`
+	TargetObjectVersionID pgtype.UUID        `json:"target_object_version_id"`
+	Payload               []byte             `json:"payload"`
+	IntegrityHash         string             `json:"integrity_hash"`
+	CreatedBy             pgtype.UUID        `json:"created_by"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	SourceObjectID        pgtype.UUID        `json:"source_object_id"`
+	SourceObjectType      string             `json:"source_object_type"`
+	SourceTitle           string             `json:"source_title"`
+	TargetObjectID        pgtype.UUID        `json:"target_object_id"`
+	TargetObjectType      string             `json:"target_object_type"`
+	TargetTitle           string             `json:"target_title"`
+}
+
+// The object-detail relations tab (T0210): every relation version whose
+// source or target endpoint pins a version of @object_id, newest first.
+// The endpoint joins resolve the display labels (type + title) in the same
+// round trip, so the page needs no N+1 lookups; the project boundary is
+// enforced on the relations container row (the endpoints' own project is
+// guaranteed equal by the relation write command).
+func (q *Queries) ListRelationVersionsForObject(ctx context.Context, arg ListRelationVersionsForObjectParams) ([]ListRelationVersionsForObjectRow, error) {
+	rows, err := q.db.Query(ctx, listRelationVersionsForObject, arg.ProjectID, arg.ObjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRelationVersionsForObjectRow
+	for rows.Next() {
+		var i ListRelationVersionsForObjectRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RelationID,
+			&i.VersionNo,
+			&i.StateID,
+			&i.RelationType,
+			&i.SourceObjectVersionID,
+			&i.TargetObjectVersionID,
+			&i.Payload,
+			&i.IntegrityHash,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.SourceObjectID,
+			&i.SourceObjectType,
+			&i.SourceTitle,
+			&i.TargetObjectID,
+			&i.TargetObjectType,
+			&i.TargetTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

@@ -10,7 +10,7 @@ import (
 )
 
 // Service is the application surface the handlers call: the RSG write
-// commands and the object read. The production implementation is
+// commands and the object reads. The production implementation is
 // *rsg.Service.
 type Service interface {
 	CreateBranch(ctx context.Context, actor domain.User, projectID string, in rsg.CreateBranchInput) (domain.Branch, error)
@@ -18,6 +18,7 @@ type Service interface {
 	CreateObjectVersion(ctx context.Context, actor domain.User, projectID, branchID, objectID string, in rsg.CreateObjectVersionInput) (rsg.ObjectVersionResult, error)
 	CreateRelation(ctx context.Context, actor domain.User, projectID, branchID string, in rsg.CreateRelationInput) (rsg.RelationResult, error)
 	GetObject(ctx context.Context, r projects.Reader, projectID, branchID, objectID string) (rsg.ObjectResult, error)
+	GetObjectDetail(ctx context.Context, r projects.Reader, projectID, branchID, objectID string, versionNo *int) (rsg.ObjectDetail, error)
 }
 
 // Deps carries the service the surface calls. The production wiring is in

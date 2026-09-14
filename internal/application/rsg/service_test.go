@@ -185,6 +185,22 @@ func (f *fakeObjects) GetVersionByID(ctx context.Context, versionID string) (dom
 	return v, nil
 }
 
+func (f *fakeObjects) GetVersion(ctx context.Context, objectID string, versionNo int) (domain.ScientificObjectVersion, error) {
+	f.readCalls++
+	vs := f.versions[objectID]
+	for _, v := range vs {
+		if v.VersionNo == versionNo {
+			return v, nil
+		}
+	}
+	return domain.ScientificObjectVersion{}, sciobjects.ErrVersionNotFound
+}
+
+func (f *fakeObjects) ListVersions(ctx context.Context, objectID string) ([]domain.ScientificObjectVersion, error) {
+	f.readCalls++
+	return f.versions[objectID], nil
+}
+
 func (f *fakeObjects) CreateObjectInTx(ctx context.Context, tx states.Transaction, in CreateObjectInTxParams) (domain.ScientificObject, domain.ScientificObjectVersion, error) {
 	if f.createErr != nil {
 		return domain.ScientificObject{}, domain.ScientificObjectVersion{}, f.createErr
@@ -238,6 +254,10 @@ func (f *fakeRelations) CreateRelationInTx(ctx context.Context, tx states.Transa
 		TargetObjectVersionID: in.Version.TargetObjectVersionID, Payload: in.Version.Payload, CreatedBy: in.Version.CreatedBy, CreatedAt: time.Now(),
 	}
 	return rel, v, nil
+}
+
+func (f *fakeRelations) ListVersionsForObject(ctx context.Context, projectID, objectID string) ([]ObjectRelationVersion, error) {
+	return nil, nil
 }
 
 func newTestService(t *testing.T, projects *fakeProjects, objects *fakeObjects) *Service {

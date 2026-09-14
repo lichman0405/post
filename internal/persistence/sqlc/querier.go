@@ -197,6 +197,13 @@ type Querier interface {
 	// The category query: callers expand a catalog category (dependency,
 	// provenance, ...) to its type names.
 	ListRelationVersionsByTypes(ctx context.Context, arg ListRelationVersionsByTypesParams) ([]RelationVersion, error)
+	// The object-detail relations tab (T0210): every relation version whose
+	// source or target endpoint pins a version of @object_id, newest first.
+	// The endpoint joins resolve the display labels (type + title) in the same
+	// round trip, so the page needs no N+1 lookups; the project boundary is
+	// enforced on the relations container row (the endpoints' own project is
+	// guaranteed equal by the relation write command).
+	ListRelationVersionsForObject(ctx context.Context, arg ListRelationVersionsForObjectParams) ([]ListRelationVersionsForObjectRow, error)
 	ListScientificObjectVersions(ctx context.Context, objectID pgtype.UUID) ([]ScientificObjectVersion, error)
 	ListStateCommitsByBranch(ctx context.Context, branchID pgtype.UUID) ([]StateCommit, error)
 	// The state snapshot projections (docs/21 §5, docs/07 §7): a state's

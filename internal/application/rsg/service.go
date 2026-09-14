@@ -40,13 +40,15 @@ type Service struct {
 	latest    LatestStatePort
 	objects   ObjectPort
 	relations RelationPort
+	profiles  ProfilePort
 	authz     authz.Engine
 	schemas   *schemareg.Registry
 }
 
 // Deps wires the service. Schemas (the canonical registry) and Authz (the
 // matrix engine) are required: an unwired service refuses at call time
-// rather than guessing (fail closed, docs/12).
+// rather than guessing (fail closed, docs/12). Profiles is optional: the
+// object detail page degrades to raw creator ids when it is not wired.
 type Deps struct {
 	Projects  ProjectGate
 	Branches  BranchPort
@@ -54,6 +56,7 @@ type Deps struct {
 	Latest    LatestStatePort
 	Objects   ObjectPort
 	Relations RelationPort
+	Profiles  ProfilePort
 	Authz     authz.Engine
 	Schemas   *schemareg.Registry
 }
@@ -67,6 +70,7 @@ func NewService(deps Deps) *Service {
 		latest:    deps.Latest,
 		objects:   deps.Objects,
 		relations: deps.Relations,
+		profiles:  deps.Profiles,
 		authz:     deps.Authz,
 		schemas:   deps.Schemas,
 	}
@@ -463,6 +467,104 @@ func (s *Service) GetObject(ctx context.Context, r projects.Reader, projectID, b
 		return ObjectResult{}, wrapError(err)
 	}
 	return ObjectResult{Object: obj, Version: latest}, nil
+}
+
+// ObjectDetail is the complete page model of one scientific object for the
+// detail UI (T0210): the container, the whole version log, the selected
+// version, the relations incident to any version of the object, and the
+// creator handles. Reads run exactly the gate GetObject runs — the page is
+// as visible as the object, and denied readers get the same
+// existence-hidden outcome.
+type ObjectDetail struct {
+	Project   domain.Project
+	Branch    domain.Branch
+	Object    domain.ScientificObject
+	Versions  []domain.ScientificObjectVersion
+	Selected  domain.ScientificObjectVersion
+	Relations []ObjectRelationVersion
+	// Creators maps user id -> handle for every creator named by the page;
+	// unresolved ids stay absent (the page renders the raw id).
+	Creators map[string]string
+}
+
+// GetObjectDetail reads the page model. versionNo nil selects the latest
+// version; a named version that does not exist answers the same
+// ErrVersionNotFound outcome as the write surface.
+func (s *Service) GetObjectDetail(ctx context.Context, r projects.Reader, projectID, branchID, objectID string, versionNo *int) (ObjectDetail, error) {
+	project, err := s.projects.Get(ctx, r, projectID)
+	if err != nil {
+		return ObjectDetail{}, wrapError(err)
+	}
+	branch, err := s.branches.Get(ctx, projectID, branchID)
+	if err != nil {
+		return ObjectDetail{}, wrapError(err)
+	}
+	obj, err := s.objects.GetObject(ctx, objectID)
+	if err != nil {
+		return ObjectDetail{}, wrapError(err)
+	}
+	if obj.ProjectID != projectID {
+		return ObjectDetail{}, sciobjects.ErrObjectNotFound
+	}
+	versions, err := s.objects.ListVersions(ctx, objectID)
+	if err != nil {
+		return ObjectDetail{}, wrapError(err)
+	}
+	if len(versions) == 0 {
+		// Impossible through the write surface (every object is created
+		// with its version 1 in one transaction) — fail closed rather
+		// than render an empty page.
+		return ObjectDetail{}, sciobjects.ErrObjectNotFound
+	}
+	selected := versions[len(versions)-1]
+	if versionNo != nil {
+		v, err := s.objects.GetVersion(ctx, objectID, *versionNo)
+		if err != nil {
+			return ObjectDetail{}, wrapError(err)
+		}
+		selected = v
+	}
+	rels, err := s.relations.ListVersionsForObject(ctx, projectID, objectID)
+	if err != nil {
+		return ObjectDetail{}, wrapError(err)
+	}
+	return ObjectDetail{
+		Project:   project,
+		Branch:    branch,
+		Object:    obj,
+		Versions:  versions,
+		Selected:  selected,
+		Relations: rels,
+		Creators:  s.resolveCreators(ctx, obj, versions, rels),
+	}, nil
+}
+
+// resolveCreators maps every creator id the page shows to its handle.
+// Best effort by design: the page renders raw ids where the profile
+// surface is unwired or a lookup fails (a creator may predate the profile
+// surface), and a failed lookup never fails the read.
+func (s *Service) resolveCreators(ctx context.Context, obj domain.ScientificObject, versions []domain.ScientificObjectVersion, rels []ObjectRelationVersion) map[string]string {
+	if s.profiles == nil {
+		return nil
+	}
+	ids := map[string]struct{}{obj.CreatedBy: {}}
+	for _, v := range versions {
+		ids[v.CreatedBy] = struct{}{}
+	}
+	for _, rv := range rels {
+		ids[rv.Relation.CreatedBy] = struct{}{}
+	}
+	handles := make(map[string]string, len(ids))
+	for id := range ids {
+		if id == "" {
+			continue
+		}
+		p, err := s.profiles.GetByUserID(ctx, id)
+		if err == nil {
+			handles[id] = p.User.Handle
+		}
+	}
+	return handles
 }
 
 // projectRole resolves the actor's membership role in the project — the

@@ -67,6 +67,12 @@ type LatestStatePort interface {
 type ObjectPort interface {
 	GetObject(ctx context.Context, objectID string) (domain.ScientificObject, error)
 	GetLatestVersion(ctx context.Context, objectID string) (domain.ScientificObjectVersion, error)
+	// GetVersion returns one version by its 1-based number (the object
+	// detail page's version switch), or sciobjects.ErrVersionNotFound.
+	GetVersion(ctx context.Context, objectID string, versionNo int) (domain.ScientificObjectVersion, error)
+	// ListVersions returns the whole version log in ascending order (the
+	// version switcher options); empty for an unknown object.
+	ListVersions(ctx context.Context, objectID string) ([]domain.ScientificObjectVersion, error)
 	// GetVersionByID returns one version row by its own id (the relation
 	// endpoint pin), or sciobjects.ErrVersionNotFound.
 	GetVersionByID(ctx context.Context, versionID string) (domain.ScientificObjectVersion, error)
@@ -79,6 +85,38 @@ type ObjectPort interface {
 // runs on the commit transaction.
 type RelationPort interface {
 	CreateRelationInTx(ctx context.Context, tx states.Transaction, in CreateRelationInTxParams) (domain.Relation, domain.RelationVersion, error)
+	// ListVersionsForObject returns the relation versions whose source or
+	// target endpoint pins a version of the object, newest first, with the
+	// endpoint display labels resolved (the object detail page's relations
+	// tab); empty when the object has no relations.
+	ListVersionsForObject(ctx context.Context, projectID, objectID string) ([]ObjectRelationVersion, error)
+}
+
+// ProfilePort resolves display handles for creator ids — the detail page
+// attributes versions to people, not raw uuids. The production
+// implementation is persistence.ProfileStore.
+type ProfilePort interface {
+	GetByUserID(ctx context.Context, userID string) (domain.Profile, error)
+}
+
+// ObjectRelationEndpoint is one relation endpoint's display label,
+// resolved by the store in the same round trip as the row itself.
+type ObjectRelationEndpoint struct {
+	// ObjectID is the endpoint version's container object.
+	ObjectID string
+	// ObjectType is the container object's scientific type.
+	ObjectType string
+	// Title is the endpoint version's title.
+	Title string
+}
+
+// ObjectRelationVersion is one relation version incident to an object,
+// with both endpoint labels resolved (the object detail page's relations
+// tab).
+type ObjectRelationVersion struct {
+	Relation domain.RelationVersion
+	Source   ObjectRelationEndpoint
+	Target   ObjectRelationEndpoint
 }
 
 // CreateObjectInTxParams carries an object creation inside a state commit.

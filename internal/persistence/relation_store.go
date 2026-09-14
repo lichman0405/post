@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/lichman0405/post/internal/application/relations"
+	"github.com/lichman0405/post/internal/application/rsg"
 	"github.com/lichman0405/post/internal/domain"
 	"github.com/lichman0405/post/internal/persistence/sqlc"
 )
@@ -295,6 +296,57 @@ func (s *RelationStore) ListVersionsByTypes(ctx context.Context, projectID strin
 		vs = append(vs, relationVersionFromRow(row))
 	}
 	return vs, nil
+}
+
+// ListVersionsForObject implements the rsg relation port's detail-page
+// read (T0210): every relation version whose source or target endpoint
+// pins a version of the object, newest first, with both endpoint display
+// labels resolved in the same round trip. The project boundary is
+// enforced on the relations container row.
+func (s *RelationStore) ListVersionsForObject(ctx context.Context, projectID, objectID string) ([]rsg.ObjectRelationVersion, error) {
+	projectUUID, err := textUUID(projectID)
+	if err != nil {
+		return nil, nil // cannot name a project; empty, not an error
+	}
+	objectUUID, err := textUUID(objectID)
+	if err != nil {
+		return nil, nil // cannot name an object; empty, not an error
+	}
+	rows, err := sqlc.New(s.pool).ListRelationVersionsForObject(ctx, sqlc.ListRelationVersionsForObjectParams{
+		ProjectID: projectUUID, ObjectID: objectUUID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("persistence: list relation versions for object: %w", err)
+	}
+	out := make([]rsg.ObjectRelationVersion, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, rsg.ObjectRelationVersion{
+			Relation: domain.RelationVersion{
+				ID:                    pgUUIDToText(row.ID),
+				RelationID:            pgUUIDToText(row.RelationID),
+				VersionNo:             int(row.VersionNo),
+				StateID:               pgUUIDToText(row.StateID),
+				RelationType:          row.RelationType,
+				SourceObjectVersionID: pgUUIDToText(row.SourceObjectVersionID),
+				TargetObjectVersionID: pgUUIDToText(row.TargetObjectVersionID),
+				Payload:               row.Payload,
+				IntegrityHash:         row.IntegrityHash,
+				CreatedBy:             pgUUIDToText(row.CreatedBy),
+				CreatedAt:             row.CreatedAt.Time,
+			},
+			Source: rsg.ObjectRelationEndpoint{
+				ObjectID:   pgUUIDToText(row.SourceObjectID),
+				ObjectType: row.SourceObjectType,
+				Title:      row.SourceTitle,
+			},
+			Target: rsg.ObjectRelationEndpoint{
+				ObjectID:   pgUUIDToText(row.TargetObjectID),
+				ObjectType: row.TargetObjectType,
+				Title:      row.TargetTitle,
+			},
+		})
+	}
+	return out, nil
 }
 
 // currentLogHead is the version log's own head — the truth the conflict
