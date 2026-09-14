@@ -6998,3 +6998,78 @@ T0213 的合并（它的 diff 里有 `infra/migrations/00038` 与两个生成物
 （就是 `fd4c813` 干的事）。
 
 ⇒ T1001 那一行的提交时机：**看到 T0213 合并，先把本地 main 对齐 origin，立刻提交**。
+
+## L1-20260914-75
+
+**T0213 的复核判了 `request_changes`，阻断项是「API 启动不该依赖数据库」—— 我按仓库自己的三处话核对，确认成立**
+
+复核（`.rddev/workers/T0213-review/RESULT.json`）对扩展本身是肯定的：命名空间（`project:<project_id>:<name>`，
+服务端派生）、版本化、只能扩展已注册的 canonical 类型基 schema、生成文档快照 base 的属性定义、
+`additionalProperties:false` 与 metadata/conditions 逃生口保留、注册表是文档编译的唯一权威、
+`scientific_object_versions` 钉住创建时解析的 `(schema_id, schema_version)`、pr-gate 阶梯执行
+profile 的自定义必填项、profile v2 是新行（UPDATE/DELETE 被拒 `P0001`、重复插入 `23505`）、
+v1 历史仍按 v1 校验、integration 测试在、scope 干净（24 个文件）。
+
+只挑出一条 blocking：`cmd/api/main.go:370` 的 `profileSvc.LoadAll(ctx)` 挡在**启动路径**上，
+PostgreSQL 连不上就 `exitRuntime`（或卡在取连接、没有超时），进程永远走不到 `ListenAndServe`，
+`/healthz` 也就永远不服务。
+
+我核对的三处**都在仓库里**（不是推理）：
+
+- `cmd/api/main.go:13-14`：*"The database pool is opened lazily on purpose: the API must start
+  (and report "not ready") while PostgreSQL is down, not refuse to start."* —— 就在**它自己改的这个文件**头部。
+- `internal/persistence/db.go:30-33`，`OpenLazy` 的注释：*"… reports database reachability through
+  /readyz instead of refusing to start …"*
+- `cmd/api/main_test.go:66`，T0006 的验收用例：*"Readiness: PostgreSQL down => 503 not_ready, never a
+  crash, never 200."*
+
+⇒ 这不是口味问题：一份**写下来、并且被测过**的契约被反过来了，而任务（L1）没有被授权改启动语义。
+返工信（`t0213-review-rework-reason.md`）写的是：`LoadAll` 挪到后台重试循环；
+**连不上库**→重试并照常服务（`/readyz` 本来就反映 DB 真实状态）、**内容坏了**（hash 不符、注册表冲突）
+→保持 fail-fast 退出；profile 相关校验在加载完成前一律 fail closed；并补一条**落在启动路径上**的测试。
+
+**一条以后会重复用到的教训**：那条既有测试走的是 `newHealthHandler(...)`（**处理函数**），
+不是 `run()`（**进程启动路径**）。新加的致命查询正好落在它没覆盖的那一段里，所以全绿。
+"测试全绿"和"这段路被走过"是两件事。
+
+## L1-20260914-76
+
+**T0211 的复核同样判了 `request_changes`：端点对象升过版之后，`addresses_question` 的边会从 outline 上消失；我逐条核对后确认**
+
+复核给的最小场景：hypothesis 指向 question-v1，question 后来出到 v2 ⇒ 这条边**从 outline 上消失**，
+hypothesis 掉进 "Not linked to a question" 的 remainder，finding 的 addressed questions 悄悄变空。
+而边**仍然存在**（query 接口与详情页都还看得见）—— 所以是 outline 在说假话，不是少显示一行。
+复核在临时 harness 里复现过。
+
+我核对到的四条（每一条都能自己验）：
+
+1. `byVersion` 只装每个对象的**最新**版本：`ResearchOutline` 调的是
+   `ListObjectVersions(ctx, projectID, nil, nil)`，store 注释自己写着 *"each object of the project with
+   its as-of version …（nil lineage = newest overall）"*，底下是 `ListObjectVersionsAsOf` 的 `DISTINCT ON`。
+2. 关系是**钉版本**的、且不会被重新钉：`relation_versions.source_object_version_id` /
+   `target_object_version_id`（`infra/migrations/00006_relations.sql:14-15`）；对象出新版本时
+   **没有任何地方更新这些端点**。
+3. `buildOutline` 的**两个轴**都用 `byVersion[...]` 解析端点（question 侧 `outline.go:272` 附近、
+   finding 侧 `:417` 附近），解不出就 `continue` ⇒ 整条边丢掉。
+4. 工具箱里已经有现成的：`RelationQueryRow.Source/.Target` 是
+   `EndpointContext{VersionID, ObjectID, ObjectType, ProjectID}` —— 容器 id 与类型**在 SQL 里就 join 出来了**。
+   所以修法是"**按容器的 object id 解析端点**、标题/branch 取该对象的当前行"，**不需要新查询、不需要新端口**，
+   而且正好回到它自己那段"按对象去重"的注释口径。
+
+### 一句规矩：复核说的 blocking，我先自己核一遍，再决定返不返工
+
+不照抄复核的话转发给 Worker。两条理由：**(a)** 复核也会错 —— 把错的意见派下去，
+Worker 要么白干一轮，要么得自己判断该不该信 Supervisor 的转发；**(b)** 返工信里
+"我核对过、证据在 `file:line`"这句话本身有用，它把 Worker 从"猜上级的意图"里解放出来。
+两封信里都逐条列了**可自己验证的证据**，并写明「如果你认为我核错了，指出来，不算你返工」。
+
+### 另一条规矩：守链条的脚本，"停下来"的条件必须是**这件事真的挡住了链条**
+
+17:28:51，我给迁移链写的守护脚本因为 **T0211**（不在链上）的一条决策停掉了整条链，
+并且打印的是"**T0213**：有决策在等人" —— 一条链外的决策，把链读成了它自己的问题。
+它当时问的是"这是不是**尾部**任务"；正确的问题是"这是不是**链上**的任务"。
+链上的任务有决策才该停；其余（尾部的、链外的）**打一行日志跨过去**，让日志说清它跨过了什么。
+
+同一个错误的两种表现，今天出现了两次：16:34 是 T1001（尾部）的 collect 被拒，
+17:28 是 T0211（链外）的 accept 被拒。**守护脚本的每一条 bail 条件，都要能回答
+"这件事真的挡住了我正在守的东西吗"。**
