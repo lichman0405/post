@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Research · {{.ProjectSlug}} — POST</title>
+<style>
+  :root {
+    --fg: #1f2328; --muted: #59636e; --border: #d1d9e0; --subtle: #f6f8fa;
+    --accent: #0969da; --accent-subtle: #ddf4ff;
+    --success: #1a7f37; --success-subtle: #dafbe1;
+    --danger: #cf222e; --danger-subtle: #ffebe9;
+    --attention: #9a6700; --attention-subtle: #fff8c5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #ffffff; color: var(--fg);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+      Helvetica, Arial, sans-serif;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre, .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono",
+    Menlo, Consolas, monospace; }
+  .page { max-width: 1280px; margin: 0 auto; padding: 16px 24px 48px; }
+  .breadcrumb { font-size: 12px; color: var(--muted); margin: 0 0 12px; }
+  .breadcrumb .sep { margin: 0 4px; color: var(--border); }
+  .breadcrumb code { color: var(--fg); }
+  .header { border-bottom: 1px solid var(--border); padding-bottom: 16px; }
+  .header h1 { font-size: 24px; font-weight: 600; margin: 0 0 4px; }
+  .header-meta { color: var(--muted); font-size: 12px; }
+  .header-meta code {
+    font-size: 12px; background: var(--subtle); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0 5px; color: var(--fg);
+  }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-top: 16px; overflow-x: auto; }
+  .tab {
+    padding: 8px 12px; color: var(--muted); font-size: 14px;
+    border-bottom: 2px solid transparent; white-space: nowrap;
+  }
+  .tab:hover { color: var(--fg); text-decoration: none; border-bottom-color: var(--border); }
+  .tab.active { color: var(--fg); font-weight: 600; border-bottom-color: #fd8c73; }
+  main { padding-top: 16px; }
+  .section-title { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+
+  /* The outline: nested semantic lists, no canvas — keyboard reachable by
+     construction (docs/06 §10: the graph must have an equivalent list). */
+  ol.outline { list-style: none; margin: 0; padding: 0; }
+  ol.outline ol.outline { margin: 8px 0 0; padding-left: 24px;
+    border-left: 1px solid var(--border); }
+  ol.outline > li { padding: 12px 0; border-bottom: 1px solid var(--border); }
+  ol.outline > li:last-child { border-bottom: none; }
+  .q-title { font-size: 15px; font-weight: 600; }
+  .q-title.plain { color: var(--fg); }
+  .q-statement { margin: 4px 0 0; color: var(--fg); max-width: 900px; }
+  .q-counts { margin-top: 4px; font-size: 12px; color: var(--muted); }
+  .q-counts::before { content: "↳ "; }
+  .state-badge {
+    font-size: 12px; font-weight: 600; border-radius: 9999px; padding: 1px 10px;
+    border: 1px solid transparent; vertical-align: middle;
+  }
+  .state-badge.open { color: var(--success); background: var(--success-subtle); border-color: rgba(26, 127, 55, .35); }
+  .state-badge.partially_answered { color: var(--accent); background: var(--accent-subtle); border-color: rgba(9, 105, 218, .35); }
+  .state-badge.unresolved { color: var(--attention); background: var(--attention-subtle); border-color: rgba(154, 103, 0, .35); }
+  .state-badge.superseded, .state-badge.aborted { color: var(--muted); background: var(--subtle); border-color: var(--border); }
+  .type-badge {
+    font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--accent); background: var(--accent-subtle);
+    border: 1px solid rgba(9, 105, 218, .35); border-radius: 9999px;
+    padding: 0 8px; white-space: nowrap;
+  }
+  ul.addressed { list-style: none; margin: 8px 0 0; padding-left: 24px; }
+  ul.addressed li { padding: 3px 0; }
+  ul.addressed .role { display: inline-block; min-width: 92px; font-size: 12px; color: var(--muted); }
+  ul.addressed .type-badge { margin-right: 6px; }
+
+  /* Findings view */
+  ol.findings { list-style: none; margin: 0; padding: 0; }
+  ol.findings > li { padding: 12px 0; border-bottom: 1px solid var(--border); }
+  ol.findings > li:last-child { border-bottom: none; }
+  .f-title { font-size: 15px; font-weight: 600; }
+  .f-title.plain { color: var(--fg); }
+  .f-statement { margin: 4px 0 0; max-width: 900px; }
+  .f-meta { margin-top: 4px; font-size: 12px; color: var(--muted); }
+  .f-claims { margin: 8px 0 0; padding-left: 24px; }
+  .f-claims li { padding: 2px 0; font-size: 13px; }
+  .f-claims code { font-size: 12px; }
+
+  ul.plain { margin: 8px 0 0; padding-left: 24px; }
+  ul.plain li { padding: 3px 0; }
+  ul.plain .type-badge { margin-right: 6px; }
+  .empty-state {
+    border: 1px dashed var(--border); border-radius: 6px; padding: 24px;
+    color: var(--muted); text-align: center;
+  }
+  .footer-note {
+    margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    <span>Projects</span><span class="sep">/</span><code>{{.ProjectSlug}}</code><span class="sep">/</span><span>Research</span>
+  </nav>
+  <header class="header">
+    <h1>Research</h1>
+    <div class="header-meta">
+      <span>project <code>{{.ProjectSlug}}</code></span>
+      {{if .CountsLine}}<span data-research-counts>{{.CountsLine}}</span>{{else}}<span data-research-counts>empty</span>{{end}}
+    </div>
+  </header>
+  <nav class="tabs" aria-label="Research outline view">
+    {{range .ViewLinks}}<a class="tab{{if .Active}} active{{end}}" href="{{.Href}}" data-view="{{.Key}}"{{if .Active}} aria-current="page"{{end}}>{{.Label}}</a>
+    {{end}}
+  </nav>
+  <main data-research-view="{{.View}}">
+    {{if eq .View "questions"}}
+    {{if .Questions}}
+    <h2 class="section-title">Research questions</h2>
+    <ol class="outline" data-outline="questions" aria-label="Research outline by question">
+      {{range .Questions}}{{template "question" .}}{{end}}
+    </ol>
+    {{else}}
+    <div class="empty-state" data-outline="questions">No research questions yet. Questions appear here once they are created through the agent or the API, and the outline organizes everything that addresses them.</div>
+    {{end}}
+    {{if .Unassigned}}
+    <h2 class="section-title">Not linked to a question</h2>
+    <ul class="plain" data-outline="unassigned" aria-label="Objects not linked to a research question">
+      {{range .Unassigned}}{{template "ref" .}}{{end}}
+    </ul>
+    {{end}}
+    {{else}}
+    {{if .Findings}}
+    <h2 class="section-title">Findings</h2>
+    <ol class="findings" data-outline="findings" aria-label="Research outline by finding">
+      {{range .Findings}}
+      <li data-finding-id="{{.ObjectID}}">
+        <div>
+          <span class="type-badge">finding</span>
+          {{if .Href}}<a class="f-title" href="{{.Href}}">{{.Title}}</a>{{else}}<span class="f-title plain">{{.Title}}</span>{{end}}
+          {{if .Assessment}}<span class="state-badge {{.Assessment}}" data-assessment="{{.Assessment}}">{{.Assessment}}</span>{{end}}
+        </div>
+        {{if .Statement}}<p class="f-statement">{{.Statement}}</p>{{end}}
+        <div class="f-meta">
+          {{if .FindingType}}<span>finding type <code>{{.FindingType}}</code></span>{{end}}
+          {{if .Questions}}<span> · addresses: {{range $i, $q := .Questions}}{{if $i}}, {{end}}{{template "reflink" $q}}{{end}}</span>{{end}}
+        </div>
+        {{if .Claims}}
+        <ul class="f-claims" aria-label="Claims of this finding">
+          {{range .Claims}}
+          <li>{{if .Resolved}}{{if .Href}}<a href="{{.Href}}">{{.Title}}</a>{{else}}{{.Title}}{{end}}<code> (claim)</code>{{else}}<span class="mono">claim version {{.VersionID}}</span> <span class="f-meta">(not in this project)</span>{{end}}</li>
+          {{end}}
+        </ul>
+        {{end}}
+      </li>
+      {{end}}
+    </ol>
+    {{else}}
+    <div class="empty-state" data-outline="findings">No findings yet. Findings are the human-confirmed summaries; they appear here with their claims and the questions they address.</div>
+    {{end}}
+    {{if .Unassigned}}
+    <h2 class="section-title">Not linked to a question</h2>
+    <ul class="plain" data-outline="unassigned" aria-label="Objects not linked to a research question">
+      {{range .Unassigned}}{{template "ref" .}}{{end}}
+    </ul>
+    {{end}}
+    {{end}}
+  </main>
+  <footer class="footer-note">
+    This outline is the accessible list view of the research state (docs/06 §10): semantic HTML, keyboard navigable, nothing expressed by canvas or color alone. The graphical research map arrives with the research map milestone. The page is read-only — scientific state changes happen through the agent (MCP) or the API.
+  </footer>
+</div>
+</body>
+</html>
+
+{{define "question"}}
+<li data-question-id="{{.ObjectID}}">
+  <div>
+    <span class="type-badge">research_question</span>
+    {{if .Href}}<a class="q-title" href="{{.Href}}">{{.Title}}</a>{{else}}<span class="q-title plain">{{.Title}}</span>{{end}}
+    {{if .QuestionState}}<span class="state-badge {{.StateClass}}" data-question-state="{{.QuestionState}}">{{.QuestionState}}</span>{{end}}
+  </div>
+  {{if .Statement}}<p class="q-statement">{{.Statement}}</p>{{end}}
+  {{if .CountsLine}}<div class="q-counts" data-question-counts="{{.ObjectID}}">{{.CountsLine}} address this question</div>{{end}}
+  {{if or .Hypotheses .Findings .OtherObjects}}
+  <ul class="addressed" aria-label="Objects addressing this question">
+    {{range .Hypotheses}}<li><span class="role">hypothesis</span><span class="type-badge">hypothesis</span>{{template "reflink" .}}</li>
+    {{end}}
+    {{range .Findings}}<li><span class="role">finding</span><span class="type-badge">finding</span>{{template "reflink" .}}</li>
+    {{end}}
+    {{range .OtherObjects}}<li><span class="role">addresses</span><span class="type-badge">{{.ObjectType}}</span>{{template "reflink" .}}</li>
+    {{end}}
+  </ul>
+  {{end}}
+  {{if .Children}}<ol class="outline" aria-label="Sub-questions of {{.Title}}">{{range .Children}}{{template "question" .}}{{end}}</ol>{{end}}
+</li>
+{{end}}
+
+{{define "reflink"}}{{if .Href}}<a href="{{.Href}}">{{.Title}}</a>{{else}}<span>{{.Title}}</span>{{end}}{{end}}
+
+{{define "ref"}}
+<li><span class="type-badge">{{.ObjectType}}</span>{{template "reflink" .}}</li>
+{{end}}

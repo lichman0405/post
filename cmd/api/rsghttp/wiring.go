@@ -20,6 +20,7 @@ type Service interface {
 	GetObject(ctx context.Context, r projects.Reader, projectID, branchID, objectID string) (rsg.ObjectResult, error)
 	GetObjectDetail(ctx context.Context, r projects.Reader, projectID, branchID, objectID string, versionNo *int) (rsg.ObjectDetail, error)
 	Query(ctx context.Context, r projects.Reader, projectID string, in rsg.QueryInput) (rsg.QueryResult, error)
+	ResearchOutline(ctx context.Context, r projects.Reader, projectID string) (rsg.ResearchOutline, error)
 }
 
 // Deps carries the service the surface calls. The production wiring is in
@@ -51,4 +52,5 @@ func (a *API) Register(v1 *http.ServeMux) {
 	v1.HandleFunc("POST /api/v1/projects/{projectId}/branches/{branchId}/relations", a.handlers.handleCreateRelation)
 	v1.HandleFunc("GET /api/v1/projects/{projectId}/branches/{branchId}/objects/{objectId}", a.handlers.handleGetObject)
 	v1.HandleFunc("GET /api/v1/projects/{projectId}/query", a.handlers.handleQuery)
+	v1.HandleFunc("GET /api/v1/projects/{projectId}/research", a.handlers.handleResearch)
 }

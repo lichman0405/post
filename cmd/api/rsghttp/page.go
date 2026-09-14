@@ -341,8 +341,14 @@ func objectPageModelFrom(r *http.Request, d rsg.ObjectDetail, versionNo *int) ob
 }
 
 // objectHref builds the canonical object URL for a project/branch/object
-// triple (the relations tab links to the other endpoint's page).
+// triple (the relations tab links to the other endpoint's page). An empty
+// coordinate answers "" — a caller without a full triple must render the
+// title without a link rather than fabricate a URL (the research outline
+// (T0211) links objects whose versions carry no branch this way).
 func objectHref(projectID, branchID, objectID string) string {
+	if projectID == "" || branchID == "" || objectID == "" {
+		return ""
+	}
 	return fmt.Sprintf("/api/v1/projects/%s/branches/%s/objects/%s",
 		url.PathEscape(projectID), url.PathEscape(branchID), url.PathEscape(objectID))
 }
