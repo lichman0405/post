@@ -50,6 +50,12 @@ func (f *fakeRefPort) DeleteBranch(context.Context, gitprovider.Repository, stri
 	return nil
 }
 
+// ListBranches (T0309) is unreachable from the ref-sync tests but the
+// port contract requires it.
+func (f *fakeRefPort) ListBranches(context.Context, gitprovider.Repository) ([]gitprovider.BranchRef, error) {
+	return nil, nil
+}
+
 // The main-protection methods (T0302) are unreachable from the ref-sync
 // tests but the port contract requires them.
 func (f *fakeRefPort) EnsureInitialMain(context.Context, gitprovider.Repository) (string, error) {

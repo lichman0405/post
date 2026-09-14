@@ -252,6 +252,23 @@ var canonicalTables = map[string]tableExp{
 		checks: []string{"semantic_state = ANY"},
 		fks:    []fkExp{fk("branch_id", "branches", "RESTRICT")},
 	},
+	"git_reconciliation_runs": {
+		// T0309 (00047): one row per reconciliation pass — the reconciler's
+		// bookkeeping, opened at pass start, counts filled at pass end; a
+		// crashed pass stays unfinished (visible, never silent).
+		cols: []colExp{c("id", u, false, true), c("started_at", ts, false, true), c("finished_at", ts, true, false), c("refs_checked", i4, false, true), c("states_checked", i4, false, true), c("mapping_violations", i4, false, true), c("repositories_checked", i4, false, true), c("findings_opened", i4, false, true), c("findings_open", i4, false, true), c("findings_resolved", i4, false, true), c("provider_error", txt, true, false)},
+		pk:   []string{"id"},
+	},
+	"git_reconciliation_findings": {
+		// T0309 (00047): one row per drift instance — severity pinned to
+		// 'high' at the storage layer, content immutable with a forward-only
+		// status transition, one open finding per (kind, project, subject)
+		// via the partial unique index below.
+		cols:   []colExp{c("id", u, false, true), c("run_id", u, false, false), c("project_id", u, false, false), c("kind", txt, false, false), c("severity", txt, false, true), c("subject_ref", txt, false, false), c("detail", jb, false, false), c("repair_proposal", jb, false, false), c("status", txt, false, true), c("created_at", ts, false, true), c("resolved_at", ts, true, false)},
+		pk:     []string{"id"},
+		checks: []string{"kind = ANY", "severity = 'high'", "status = ANY"},
+		fks:    []fkExp{fk("run_id", "git_reconciliation_runs", "RESTRICT"), fk("project_id", "projects", "RESTRICT")},
+	},
 	"project_states": {
 		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("branch_id", u, true, false), c("parent_state_id", u, true, false), c("state_hash", txt, false, false), c("git_commit_sha", txt, true, false), c("manifest_version", txt, false, false), c("created_at", ts, false, true)},
 		pk:      []string{"id"},
@@ -524,7 +541,11 @@ var explicitIndexes = map[string][]string{
 	"git_branch_refs_sync_backlog_idx": {"sync_state", "WHERE"},
 	// T0209: the query surface's project-scoped object scan, with the
 	// object-type filter as the second column (migration 00036).
-	"scientific_objects_project_type_idx": {"project_id", "object_type"},
+	// T0309: open-finding dedupe — one open finding per (kind, project,
+	// subject), the key the reconciler's insert conflicts on to avoid alert
+	// spam (migration 00047).
+	"scientific_objects_project_type_idx":         {"project_id", "object_type"},
+	"git_reconciliation_findings_open_dedupe_idx": {"kind", "project_id", "subject_ref", "WHERE"},
 	// T0104: personal projects (organization_id NULL) escape the
 	// UNIQUE(organization_id, slug) constraint, so their slug uniqueness is
 	// a partial unique index instead.

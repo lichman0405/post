@@ -63,6 +63,12 @@ func (f *fakeProvisionPort) GetBranch(context.Context, gitprovider.Repository, s
 	return gitprovider.BranchRef{}, gitprovider.ErrNotFound
 }
 
+// ListBranches (T0309) is unreachable from the provisioning tests but the
+// port contract requires it.
+func (f *fakeProvisionPort) ListBranches(context.Context, gitprovider.Repository) ([]gitprovider.BranchRef, error) {
+	return nil, gitprovider.ErrNotFound
+}
+
 func (f *fakeProvisionPort) DeleteBranch(context.Context, gitprovider.Repository, string) error {
 	return nil
 }

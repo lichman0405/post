@@ -533,6 +533,39 @@ func (a *GiteaAdapter) GetBranch(ctx context.Context, repo Repository, name stri
 	return BranchRef{Name: name, HeadSHA: refs[0].Object.SHA}, nil
 }
 
+// ListBranches implements GitPort over the refs API — like GetBranch, the
+// /branches API cannot answer for refs that arrived by push on this
+// deployment, so the refs API is the one that can (T0309's unmapped-ref
+// check walks the full ref list). An empty repository answers an empty
+// list, not an error.
+func (a *GiteaAdapter) ListBranches(ctx context.Context, repo Repository) ([]BranchRef, error) {
+	var refs []gitRefBody
+	code, raw, err := a.call(ctx, http.MethodGet,
+		"/api/v1/repos/"+urlSegment(repo.Owner)+"/"+urlSegment(repo.Name)+"/git/refs/heads", nil, &refs)
+	if err != nil {
+		return nil, err
+	}
+	if code != http.StatusOK {
+		return nil, a.mapStatus(code, "list branch refs", raw)
+	}
+	out := make([]BranchRef, 0, len(refs))
+	for _, r := range refs {
+		// Symbolic-ref guard: an empty object SHA means a symbolic ref,
+		// and refs/heads/ must never carry one (Gitea's ref model keeps
+		// symbolic refs elsewhere). Should one ever appear here anyway it
+		// has no commit head — it cannot take part in the unmapped-ref
+		// check as a branch head, so skip it rather than fabricate one.
+		if r.Object.SHA == "" {
+			continue
+		}
+		out = append(out, BranchRef{
+			Name:    strings.TrimPrefix(r.Ref, "refs/heads/"),
+			HeadSHA: r.Object.SHA,
+		})
+	}
+	return out, nil
+}
+
 // DeleteBranch implements GitPort over the git protocol: a push with an
 // empty source deletes the remote ref. A missing ref is the goal already
 // achieved (the port contract): this instance's provider reports the

@@ -95,6 +95,10 @@ var appendOnlyTables = []string{
 // payloads and police relation endpoints, and the seal on the admitted
 // relation-type policy table (BEFORE INSERT OR UPDATE OR DELETE — the
 // policy set changes only through a migration that drops the seal first).
+// Migration 00047 adds the reconciliation guard (T0309): a finding is
+// content-immutable with a forward-only status transition, and both
+// reconciliation tables refuse TRUNCATE (runs are bookkeeping, not
+// history, but a pass log is still not truncated away).
 var targetedGuardTriggers = map[string]string{
 	"branches:branch_lifecycle_guard_trigger":                                           ":O:19",
 	"branches:branch_git_ref_guard_trigger":                                             ":O:23",
@@ -113,6 +117,9 @@ var targetedGuardTriggers = map[string]string{
 	"scientific_object_versions:scientific_object_versions_external_reference_identity": ":O:5",
 	"relation_versions:relation_versions_external_reference_endpoints":                  ":O:5",
 	"external_reference_relation_types:external_reference_relation_types_seal":          ":O:31",
+	"git_reconciliation_findings:git_reconciliation_finding_guard_trigger":              ":O:27",
+	"git_reconciliation_findings:git_reconciliation_findings_no_truncate":               ":O:34",
+	"git_reconciliation_runs:git_reconciliation_runs_no_truncate":                       ":O:34",
 }
 
 // triggerRows returns every user trigger in the public schema as sorted
