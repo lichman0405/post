@@ -58,7 +58,11 @@ if ! (exec 3<>"/dev/tcp/${REDIS_ADDR%:*}/${REDIS_ADDR#*:}") 2>/dev/null; then
   echo "G3 profile-real-services: FAILED — no Redis at $REDIS_ADDR (start it: make infra-up)" >&2
   exit 1
 fi
-exec 3<&- 2>/dev/null || true
+# Close the probe fd; the suppression is scoped to a group because a bare
+# `exec 3<&- 2>/dev/null` redirects *this shell's* stderr for the rest of the
+# script — every `FAILED … >&2` below would be written to /dev/null, and the
+# gate log would show a step that failed with no output at all.
+{ exec 3<&-; } 2>/dev/null || true
 
 # --- the schema the API writes to --------------------------------------------
 #
