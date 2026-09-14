@@ -2239,6 +2239,7 @@
         "internal/rsg/**",
         "internal/application/**",
         "internal/domain/**",
+        "internal/persistence/**",
         "go.mod",
         "go.sum",
         ".env.example",
@@ -4944,6 +4945,7 @@
         "specs/SPEC_VERSION.json",
         "internal/events/**",
         "internal/application/**",
+        "internal/persistence/sqlc/**",
         "cmd/worker/**",
         "go.mod",
         "go.sum",
@@ -5877,6 +5879,12 @@
         "contract suite"
       ],
       "allowed_scope": [
+        "specs/api/**",
+        "specs/mcp/**",
+        "specs/schemas/**",
+        "specs/SPEC_VERSION.json",
+        "packages/api-contracts/**",
+        "packages/schemas/**",
         "tests/acceptance/**",
         "tests/e2e/**",
         "ops/**",
