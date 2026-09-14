@@ -212,6 +212,12 @@ var regenerators = map[string]struct {
 }{
 	"specs/SPEC_VERSION.json":     {Write: []string{"python3", "scripts/spec_version.py", "--write"}, Check: []string{"python3", "scripts/spec_version.py", "--check"}},
 	"specs/database/postgres.sql": {Write: []string{"python3", "scripts/gen_schema_snapshot.py"}, Check: []string{"python3", "scripts/gen_schema_snapshot.py", "--check"}},
+	// The one DIRECTORY artifact: sqlc generates internal/persistence/sqlc as a
+	// set of files, so there is no single path whose content is "the artifact"
+	// and derivedTouches matches it by prefix. The checker is the drift script
+	// CI already runs, which regenerates and compares — the same question the
+	// postcondition asks, asked by the thing that owns the answer.
+	"internal/persistence/sqlc": {Write: []string{"bash", "scripts/gen_sqlc.sh"}, Check: []string{"bash", "tests/integration/check-sqlc-drift.sh"}},
 }
 
 // RebaselineTask performs the advance. It does not reject or re-dispatch: the
@@ -285,7 +291,7 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 	wanted := map[string]bool{}
 	var regenerated []string
 	for _, r := range derived.Rules {
-		if !before[r.Derived] || wanted[r.Derived] {
+		if !derivedTouches(before, r.Derived) || wanted[r.Derived] {
 			continue
 		}
 		if _, ok := regenerators[r.Derived]; !ok {
@@ -296,9 +302,20 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 	}
 	sort.Strings(regenerated)
 
+	// Two patterns per artifact, because --exclude is matched with wildmatch
+	// and not by pathspec: a bare directory name matches NOTHING under it, so
+	// `--exclude=internal/persistence/sqlc` alone leaves every file of a
+	// directory artifact in the patch — and the apply then fails on the first
+	// of them with "already exists in working directory", which reads like a
+	// problem with main rather than with this list. The trailing form matches
+	// the files; the bare form is what a FILE artifact needs and is inert for
+	// a directory. Both together cover either shape without having to ask
+	// which one this is, which matters because the artifact may not exist yet
+	// (a task can add it).
 	exclude := map[string]bool{}
 	for _, r := range derived.Rules {
 		exclude[r.Derived] = true
+		exclude[strings.TrimSuffix(r.Derived, "/")+"/**"] = true
 	}
 	applyArgs := []string{"apply"}
 	for d := range exclude {
@@ -467,21 +484,11 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 	fingerprint := func() (string, error) {
 		var b strings.Builder
 		for _, art := range regenerated {
-			data, err := os.ReadFile(filepath.Join(rec.Worktree, art))
-			if os.IsNotExist(err) {
-				// A task may have ADDED the artifact rather than edited it, and
-				// an added artifact is excluded from the patch like any other —
-				// so after the reset it does not exist yet. Absent is a
-				// legitimate first-pass state; the first regeneration is what
-				// creates it. Returning the error here instead made the whole
-				// advance fail with a bare `open …: no such file or directory`,
-				// which is a poor way to report a case the loop is designed for.
-				continue
-			}
+			data, err := artifactFingerprint(rec.Worktree, art)
 			if err != nil {
 				return "", err
 			}
-			b.Write(data)
+			b.WriteString(data)
 		}
 		return b.String(), nil
 	}
@@ -1499,6 +1506,89 @@ func restoreEntry(worktree, keep string, e snapshotEntry) error {
 	return nil
 }
 
+// derivedTouches reports whether a set of changed paths reaches a derived
+// artifact, which is declared as either a FILE (specs/database/postgres.sql,
+// specs/SPEC_VERSION.json) or a DIRECTORY (internal/persistence/sqlc, whose
+// files are generated as a set and never one at a time). The changed-path set
+// holds file paths, so the exact lookup finds the first shape and the second
+// shape not at all: every path the directory declares would read as "the
+// change does not touch this artifact", which is the one answer that is
+// silently wrong — the artifact then travels as text, and the textual apply
+// refuses on a context line main rewrote (T0209's querier.go).
+//
+// The prefix has a trailing separator so that a sibling whose name merely
+// starts with the same characters (internal/persistence/sqlc_notes) is not
+// swept in with it.
+func derivedTouches(changed map[string]bool, derived string) bool {
+	if changed[derived] {
+		return true
+	}
+	prefix := strings.TrimSuffix(derived, "/") + "/"
+	for p := range changed {
+		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// artifactFingerprint is the convergence measure for one regenerated artifact:
+// its content when it is a file, and the concatenation of its files' contents
+// in path order when it is a directory. Absent is the empty string — a task
+// may have ADDED the artifact rather than edited it, and an added artifact is
+// excluded from the patch like any other, so after the reset it does not exist
+// yet. Absent is a legitimate first-pass state; the first regeneration is what
+// creates it. Reporting an error instead made the whole advance fail with a
+// bare `open …: no such file or directory`, which is a poor way to report a
+// case the loop is designed for.
+//
+// A directory matters here for the same reason it matters to derivedTouches:
+// reading one with os.ReadFile is EISDIR, so the fixed-point loop this drives
+// would report the regenerator as broken rather than the artifact as changed.
+func artifactFingerprint(worktree, artifact string) (string, error) {
+	root := filepath.Join(worktree, artifact)
+	fi, err := os.Stat(root)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !fi.IsDir() {
+		data, err := os.ReadFile(root)
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
+	var b strings.Builder
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(worktree, path)
+		if err != nil {
+			return err
+		}
+		b.WriteString(rel)
+		b.WriteByte(0)
+		b.Write(data)
+		b.WriteByte(0)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}
+
 // verifyTheWorkSurvived is the postcondition: after the advance, every path the
 // task changed holds what the advance was supposed to put there — the task's
 // change, merged with whatever main did to the same path — except the artifacts
@@ -1521,6 +1611,22 @@ func verifyTheWorkSurvived(worktree, keep, base, target string, entries []snapsh
 	skip := map[string]bool{}
 	for _, r := range regenerated {
 		skip[r] = true
+	}
+	// The direction is the reverse of derivedTouches: there the artifact is
+	// known and the changed set is searched, here a single path is known and
+	// the artifacts are searched. Asking derivedTouches this way round would
+	// compare every artifact against the path as if the path were the parent,
+	// and answer "no" for every file of a directory artifact.
+	isRegenerated := func(p string) bool {
+		if skip[p] {
+			return true
+		}
+		for r := range skip {
+			if strings.HasPrefix(p, strings.TrimSuffix(r, "/")+"/") {
+				return true
+			}
+		}
+		return false
 	}
 	// Both trees as git records them. One listing each serves everything below:
 	// the exec bit git gives a path in the base, and the object holding each
@@ -1552,7 +1658,7 @@ func verifyTheWorkSurvived(worktree, keep, base, target string, entries []snapsh
 	// main made rather than work the advance lost.
 	var lost []string
 	for _, e := range entries {
-		if e.Path == "" || skip[e.Path] {
+		if e.Path == "" || isRegenerated(e.Path) {
 			continue
 		}
 		state, mode, data, err := describeState(worktree, e.Path)

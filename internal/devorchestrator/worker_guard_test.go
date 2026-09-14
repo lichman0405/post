@@ -335,6 +335,20 @@ func TestReaperPidIsTheFirstStdoutLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		// Both groups, because the Worker now leads its OWN one: that is the
+		// change under test, and it means killing the reaper's group no longer
+		// reaches the Worker at all. A Worker still between fork and exec when
+		// the reaper dies carries on and recreates worker.log inside this
+		// test's TempDir right after RemoveAll has listed its entries — which
+		// surfaces as "TempDir RemoveAll cleanup: directory not empty", a
+		// failure that names the test's own bookkeeping rather than anything
+		// under test. Collected the way the reaper collects it: from the pid it
+		// recorded.
+		if raw, err := os.ReadFile(pidFile); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil {
+				_ = signalProcessGroup(pid, syscall.SIGKILL)
+			}
+		}
 		_ = signalProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 		_ = cmd.Wait()
 	})

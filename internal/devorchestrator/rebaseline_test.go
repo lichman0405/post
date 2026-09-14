@@ -785,6 +785,28 @@ func fakeTheRegenerator(t *testing.T, content string) {
 	t.Cleanup(func() { regenerators["specs/SPEC_VERSION.json"] = real })
 }
 
+// fakeTheDirectoryRegenerator is the same stand-in for a DIRECTORY artifact:
+// sqlc is not installed in a fixture, and the shape under test is how the
+// artifact is excluded and recomputed, not what the generator says. It writes
+// through relative paths on purpose — the harness runs a regenerator with the
+// worktree as its working directory, and a stand-in that used absolute paths
+// would pass while the real one wrote into whatever directory it was started
+// from.
+func fakeTheDirectoryRegenerator(t *testing.T, artifact string) {
+	t.Helper()
+	real := regenerators[artifact]
+	regenerators[artifact] = struct {
+		Write []string
+		Check []string
+	}{
+		Write: []string{"sh", "-c", `mkdir -p ` + artifact + ` && ` +
+			`printf 'regenerated from the merged tree\n' > ` + artifact + `/querier.go && ` +
+			`printf 'the new file, regenerated\n' > ` + artifact + `/rsg_query.sql.go`},
+		Check: []string{"sh", "-c", `test "$(cat ` + artifact + `/querier.go)" = "regenerated from the merged tree"`},
+	}
+	t.Cleanup(func() { regenerators[artifact] = real })
+}
+
 // A failure AFTER the worktree has been rebuilt is the case the first version
 // of this function returned from without putting anything back: `reset --hard`
 // had already moved the task branch, so the tree was left at the new baseline
@@ -1405,6 +1427,73 @@ func TestRebaselineRegeneratesADerivedArtifactItWillNotMergeAsText(t *testing.T)
 	got := readFileOrFail(t, filepath.Join(f.worktree, "specs/SPEC_VERSION.json"))
 	if got != "regenerated from the merged tree\n" {
 		t.Errorf("the artifact in the advanced tree is %q — neither the task's text nor main's, but the regenerated one", got)
+	}
+}
+
+// The same regeneration for the other shape a rule can declare: a DIRECTORY.
+// sqlc writes internal/persistence/sqlc as a set of files, and the changed-path
+// set holds file paths — so nothing in it is ever equal to
+// "internal/persistence/sqlc" all by itself. A rule whose artifact is looked up
+// as an entry of that set therefore reads every one of the directory's files as
+// "the change does not touch this artifact", and the artifact travels as TEXT.
+//
+// That is T0209, and the failure is not a near miss: the task added its rsg
+// query methods to the generated querier.go while main added its policy methods
+// to the same file, sqlc orders the file alphabetically, so the two additions
+// interleave and `git apply` refuses on context alone. `--3way` then reports a
+// conflict in a file neither side wrote by hand — which the tool correctly
+// declines to resolve, and would decline forever, because there is nothing in
+// either copy to reason about. A generated file does not merge; it is
+// recomputed from the tree that contains it.
+func TestRebaselineRegeneratesADirectoryArtifactItWillNotMergeAsText(t *testing.T) {
+	f := newRebaselineFixture(t, "T9023")
+	const artifact = "internal/persistence/sqlc"
+	// The fixture declares one FILE artifact. This test needs the directory rule
+	// too, and RebaselineTask reads the rule file from the repo root, so it is
+	// rewritten here rather than in the fixture — it does not have to be part of
+	// the task's change for the advance to read it.
+	rules := `{"version":1,"rules":[{"marker":"specs/**","derived":"specs/SPEC_VERSION.json"},` +
+		`{"marker":"internal/persistence/queries/**","derived":"` + artifact + `"}]}`
+	if err := os.WriteFile(filepath.Join(f.root, DefaultDerivedArtifactsPath), []byte(rules), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The task regenerated the artifact from its own query edit: one file main
+	// also has, plus one it added because its query added methods.
+	f.write(artifact+"/querier.go", "the task's copy\n", 0o644)
+	f.write(artifact+"/rsg_query.sql.go", "the task's new file\n", 0o644)
+	f.write("internal/persistence/queries/rsg_query.sql", "-- the task's query\n", 0o644)
+	// main regenerated the same directory in the meantime, which is what makes
+	// the textual path refuse.
+	f.mainAddsItsOwnFileAt(artifact + "/querier.go")
+
+	fakeTheDirectoryRegenerator(t, artifact)
+
+	res, err := RebaselineTask(f.root, "T9023", "", "")
+	if err != nil {
+		t.Fatalf("the advance was refused: a conflict inside a generated directory is not a conflict, it is a regeneration: %v", err)
+	}
+	found := false
+	for _, r := range res.Regenerated {
+		if r == artifact {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the advance reports regenerated %v, want it to include %q", res.Regenerated, artifact)
+	}
+	if got := readFileOrFail(t, filepath.Join(f.worktree, artifact, "querier.go")); got != "regenerated from the merged tree\n" {
+		t.Errorf("%s/querier.go in the advanced tree is %q — neither the task's copy nor main's, but the regenerated one", artifact, got)
+	}
+	// A file the task ADDED under the artifact travels the same way: the whole
+	// directory is excluded from the patch, so this one exists in the advanced
+	// tree only because the regenerator wrote it.
+	if got := readFileOrFail(t, filepath.Join(f.worktree, artifact, "rsg_query.sql.go")); got != "the new file, regenerated\n" {
+		t.Errorf("%s/rsg_query.sql.go is %q, want the regenerated copy", artifact, got)
+	}
+	// The regeneration is the exception, not the rule: everything the task
+	// changed OUTSIDE the artifact is still there.
+	if got := readFileOrFail(t, filepath.Join(f.worktree, "tests/acceptance/gate.sh")); !strings.Contains(got, "probe_hmac") {
+		t.Errorf("the advance lost the task's own work outside the artifact:\n%s", got)
 	}
 }
 
