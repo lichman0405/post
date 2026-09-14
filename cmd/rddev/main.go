@@ -53,7 +53,8 @@ Usage:
   rddev git commit|push TASK
   rddev pr open|merge|status TASK
   rddev rebaseline TASK                                (advance a baseline, keep its work)
-  rddev refs list|adopt REF                            (the Supervisor's own refs)
+  rddev refs list|adopt|reconcile                      (the Supervisor's own refs)
+  rddev branch create NAME [--from REV] [--worktree DIR]  (create AND record, #146)
   rddev drive [--parallel N] [--poll DUR] [--once]   (persistent Supervisor loop)
   rddev status [--json]                                (driver, workers, decisions)
   rddev db migrate [--url URL]
@@ -74,8 +75,8 @@ rddev workflow TASK resumes an interrupted Supervisor session from disk alone.
 Exit codes: 0 ok · 1 operational failure · 2 usage error · 3 doctor usage
 error · 4 not implemented (subsystem belongs to a later task).
 
-A grading command (task, worker, review, gate, git, pr, rebaseline, refs, drive,
-workflow) refuses to run when main has changed the orchestrator's own source since
+A grading command (task, worker, review, gate, git, pr, rebaseline, refs, branch,
+drive, workflow) refuses to run when main has changed the orchestrator's own source since
 this binary was built — a Gate must not grade from a tool older than the rules it
 enforces (#135). Rebuild with "make rddev"; set RDDEV_ALLOW_STALE_BINARY=1 to run
 an older build on purpose. git and pr are checked one step later, after the
@@ -141,6 +142,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runRebaseline(cmdArgs, stdout, stderr, jsonOut)
 	case "refs":
 		return runRefs(cmdArgs, stdout, stderr, jsonOut)
+	case "branch":
+		return runBranch(cmdArgs, stdout, stderr, jsonOut)
 	case "drive":
 		return runDrive(cmdArgs, stdout, stderr, jsonOut)
 	case "status":

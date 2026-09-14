@@ -11,7 +11,7 @@ import (
 func TestTheGuardCoversEveryCommandThatGrades(t *testing.T) {
 	// Each of these judges a task, moves its state, or advances a baseline.
 	for _, cmd := range []string{
-		"task", "worker", "review", "gate", "git", "pr", "rebaseline", "refs", "drive", "workflow",
+		"task", "worker", "review", "gate", "git", "pr", "rebaseline", "refs", "branch", "drive", "workflow",
 	} {
 		if !commandsThatGrade[cmd] {
 			t.Errorf("%q grades or mutates and must be guarded", cmd)

@@ -26,6 +26,7 @@ var commandsThatGrade = map[string]bool{
 	"pr":         true,
 	"rebaseline": true,
 	"refs":       true,
+	"branch":     true,
 	"drive":      true,
 	"workflow":   true,
 }
