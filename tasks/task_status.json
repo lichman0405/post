@@ -1702,10 +1702,12 @@
       ]
     },
     "T0303": {
-      "status": "verification",
-      "started_at": "2026-09-14T01:24:45Z",
-      "worker_run_id": "run-96495aeb9c32d3b4",
-      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（a59cadd87bbc），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
+      "status": "merged",
+      "started_at": "2026-09-14T01:56:07Z",
+      "worker_run_id": "run-d9f2038ca795310b",
+      "accepted_by_supervisor_at": "2026-09-14T02:15:37Z",
+      "merged_at": "2026-09-14T02:21:07Z",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（5b523fbc135d），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
       "history": [
         {
           "from": "todo",
@@ -1782,13 +1784,48 @@
           "at": "2026-09-14T01:38:40Z",
           "run_id": "run-7337b70b21ff9976",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T01:56:07Z",
+          "run_id": "run-cbcb46e9f96a25b0",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（5b523fbc135d），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T01:56:07Z",
+          "run_id": "run-d9f2038ca795310b",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T02:01:47Z",
+          "run_id": "run-5d4043dfcc0f410c",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T02:15:37Z",
+          "run_id": "run-c6c889d2f3a5779f"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T02:21:07Z",
+          "run_id": "run-7992504149b7a2eb",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0304": {
-      "status": "running",
+      "status": "accepted",
       "started_at": "2026-09-14T01:51:16Z",
       "worker_run_id": "run-b8c42b3cd5181b61",
+      "accepted_by_supervisor_at": "2026-09-14T02:20:50Z",
       "rejection_reason": "【退回原因：评审结论 request_changes —— 1 条 blocking、1 条 major、2 条 minor、2 条 nit】\n\n先说清楚不是缺陷的部分：你的方案本身、文档、真实 Gitea 上的 G3、集成测试、单测，评审 Worker 都独立复验通过\n（TestGitAuthIntegration 六阶段、完整集成套件、G3 脚本全部检查、schema snapshot 与 spec_version 均绿）。\n退回是因为**真实适配器上有一条生产路径缺陷**，而且它被一层假绿的测试盖住了。\n\n## 必须修（blocking）\n\n`internal/gitprovider/useraccess_store.go:120` `PGUserAccessStore.RepoRef`：\n\n```sql\nSELECT p.id, g.owner, g.name FROM projects p\n  LEFT JOIN git_repository_provisions g ON g.project_id = p.id WHERE p.id = $1\n```\n`Scan(&ref.ProjectID, &ref.Owner, &ref.Name)` —— 项目存在但没有 provision 行时，`g.owner`/`g.name` 是 SQL NULL，\npgx v5 对 `*string` 目标**拒绝扫描 NULL**（`cannot scan NULL into *string`）。于是：\n\n1. `if ref.Owner == \"\" || ref.Name == \"\"` 那条 `ErrRepoNotProvisioned` 分支**永远不会执行**（dead code）；\n2. 未 provision 的项目签发 token 返回的是原始 pgx 错误 → 默认分支 **503 GIT_PROVIDER_UNAVAILABLE**\n   而不是设计和测试断言的 **409 PROJECT_NOT_PROVISIONED**（docs/45 要求错误必须告诉用户下一步）；\n3. `RevokeAccess` 里针对 unprovisioned 的清理分支（`revokeCanonicalOnly`）同样不可达。\n\n**更值得你知道的是它为什么没被抓到**：断言 409 的两个测试\n（`cmd/api/gittokenshttp` 的 `TestIssueUnprovisioned` 与 `internal/gitprovider` 的 `TestIssueTokenRepoNotProvisioned`）\n都是**用 stub/fake 把 `ErrRepoNotProvisioned` 注入进去**的，而真实的 `PGUserAccessStore` 一个数据库级测试都没有\n（没有 `useraccess_store_test.go`）。这条 409 契约在生产里根本不可达，测试却是绿的。\n\n所以修法有两条要求，缺一不可：\n- 修那一行（`COALESCE` 或扫描进 `*string`/`pgtype.Text`，你自己选，写清楚为什么）；\n- **补一个跑真实 PostgreSQL 的适配器级测试**（走真实 `PGUserAccessStore` + 真实 schema：\n  一个存在但无 provision 行的项目 → `ErrRepoNotProvisioned`；project 不存在 → `ErrProjectNotFound`）。\n  这个测试必须是\"先失败、再通过\"的：先确认它在修复前失败，修完再确认它过。\n  只靠注入 fake 的测试通过不算覆盖，这正是这次的教训。\n\n## 必须修（major）\n\n`cmd/api/gittokenshttp/git_tokens.go:*** `handleRevokeAccess`：没有任何\"确实存在过一个 grant\"的前置检查，\nservice 对任意已 provision 项目幂等成功，handler 随后**无条件** `recordAudit` 写入 `git.access_revoked`。\n结果是**任何已认证用户可以往任意项目的审计流里写一条伪造的撤销事件**\n（`AuditStore.ListProjectActivity` 会把这条展示给项目成员）。\n\n修法（这是\"不要写假账\"，不是新增权限规则，属于 L1）：先查一次既有 grant（`GetAccess`/等价物），\n没有 grant 就空操作返回、**不写审计条目**；确有 grant 被撤销才写。\n注意它和上面 blocking 的交互：修好 `RepoRef` 之后，unprovisioned 项目也会走进这条路径，\n所以这两条要一起修。\n\n## 必须修（minor，成本都很低）\n\n1. `internal/gitprovider/useraccess_store.go:190` `InsertToken` 的 `RETURNING` 只回 `id`，\n   `TokenRecord.IssuedAt` 留在零值 → issue 响应里 `issued_at` 序列化成 `0001-01-01T00:00:00Z`。\n   库里的行是对的、list 端点也是对的，只有 show-once 响应带着无意义的时间戳。\n   改成 `RETURNING id, issued_at` 并回填。\n2. `internal/gitprovider/useraccess.go:143` `RevokeToken` 不校验 `tokenId` 形状\n   （同一文件里 `IssueToken`/`ListTokens`/`RevokeAccess` 都用 `projectIDRe` 校验并映射成 400 VALIDATION_FAILED）。\n   畸形 tokenId 直达 PostgreSQL 的 uuid 转换 → 原始错误 → **503**。客户端输入错误不该报成服务故障。\n   合法形状但不存在仍应是现在的 existence-hiding 404（这条别改）。\n\n## 你自己判断（nit）\n\n- `tests/acceptance/gitea-real-services-e2e.sh:610`：你那段 clone/push 探针没关掉 git 的交互式凭据提示\n  （`tests/integration/gitea_auth_test.go` 的 `gitRun` 里有关）。断言的失败方向恰好抵消了它，所以 G3 不受影响；\n  但带 TTY 的环境里 revoked token 的 clone 可能挂住。对齐一下更好。\n- `infra/migrations/00032_git_user_access.sql:19` 的注释声称\n  \"one token can only ever touch repositories the user holds a collaborator grant on\" —— 对 **PUBLIC 仓库不成立**，\n  Gitea token 是实例级能力。平台自己的仓库全是 private，所以现在没有暴露；\n  但**这条注释是个会在将来被当成安全前提的假事实**，本仓库对\"文档声称的前提在真实系统上不成立\"是按缺陷处理的。\n  改掉它，并**重新生成 `specs/database/postgres.sql`**（改的是 canonical 迁移文件，生成物必须跟着重生成，不许手工编辑生成物）。\n\n## 规则\n\n- 不许为了让 Gate 变绿而删除、skip、放宽任何测试或断言。这次的缺陷本身就是\"测试假绿\"，\n  所以唯一的修法是让测试真的覆盖真实适配器。\n- 不要创建或移动任何 git ref；不要手工编辑 `specs/database/postgres.sql` 与 `specs/SPEC_VERSION.json`。\n- 修完在合并后的基线上重跑 G1（含 required test \"git auth integration\"）与完整集成套件，\n  更新 RESULT.json：写清楚每条 finding 怎么处理的、哪个测试是修复前失败修复后通过的、哪些没做以及为什么。\n",
       "history": [
         {
@@ -1845,17 +1882,41 @@
           "at": "2026-09-14T01:51:16Z",
           "run_id": "run-b8c42b3cd5181b61",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T02:02:29Z",
+          "run_id": "run-c6da38dcbafa5342",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T02:20:50Z",
+          "run_id": "run-4fed7c4925a38541"
         }
       ]
     },
     "T0305": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-14T02:21:16Z",
+      "worker_run_id": "run-fbb89e6c39fa64f5",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T02:21:15Z",
+          "run_id": "run-8301e744093cf850"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T02:21:16Z",
+          "run_id": "run-fbb89e6c39fa64f5",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0306": {
       "status": "todo",
