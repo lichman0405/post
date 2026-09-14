@@ -727,10 +727,19 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
   + 应用以非 owner 运行）——owner 在选择机制时未选该方案，故仅记录并上报。属**生产部署**议题。
 - **Branch protection 不可用**：私有仓库在当前 GitHub plan 下无法启用（403）。
   `docs/69` §6 的目标规则只能靠 Supervisor 纪律保证。见 F-20260912-1。
-- **`/readyz` 泄露内部拓扑（待修）**：probe 错误原样返回给未认证调用方（含 DB user/db 名/host/port），
-  且默认绑定 `:8080`。已确认属实，计划单独修复（公开 body 只报 down，细节进结构化日志）。
-- **Worker 会占用宿主资源且不自动清理**：T0007 的 Worker 自建 PostgreSQL 后未停止，
-  会**污染其他任务的验收**（T0008 正要验证"无数据库时 make check 通过"）。见 L1-20260912-24。
+- ~~**`/readyz` 泄露内部拓扑（待修）**~~ —— **已修，本条目过期** ✓（2026-09-14 复核）。
+  修在 `faee9c7`（PR #47，`internal/health/health.go`）✓：现在 `checkState` **只有 `status`** ✓
+  （`up`/`down` ✓），probe 错误原文**只进** `slog.Warn` ✓ 且过 `config.RedactForOutput` ✓ ——
+  **既不再进公开 body ✓，也不会把 DSN 里的凭证带进日志** ✓。
+  我核过三件事再下这个结论：代码 ✓、该提交**在 main 上** ✓、`internal/health/` 无未提交改动 ✓。
+  **教训留档** ✓：这份清单是我写给 owner 看的 ✓，里面躺着一条"待修"而实际早就修好的 ✓ ——
+  **一条过期的风险条目比缺一条更糟** ✓，因为它让 owner 以为还有事没做 ✓。
+  在飞任务一空我就把这清单逐条复查一遍 ✓。
+- **Worker 会占用宿主资源** ✓ —— **不是缺陷，是设计** ✓；此处只保留仍然成立的部分 ✓：
+  每个 Worker 是一个完整的宿主进程 ✓（claude -p 有 1 小时 timeout 兜底 ✓）。
+  原先具体那条（**T0007 的 Worker 自建 PostgreSQL 后未停止** ✓，会污染后续任务的验收 ✓，`L1-20260912-24` ✓）
+  **已不复现** ✓：2026-09-14 复核时，宿主上只有 compose 管的 dev 栈 ✓（postgres/minio/redis/gitea ✓，
+  已跑 1 天 11 小时 ✓），**没有任何 Worker 自建的数据库进程残留** ✓。
 - **`GITHUB_PERSONAL_ACCESS_TOKEN`** 存在于 Supervisor 环境，Worker spawn 时已剥离。
 
 ## Supervisor 自身流程失误（已在 decisions.md 留档，供复核）
