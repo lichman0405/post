@@ -167,6 +167,9 @@
           }
         },
         {
+          "run": "go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1\ntest \"$(sqlc version | tr -d '[:space:]')\" = \"v1.31.1\"\n"
+        },
+        {
           "run": "make test-integration",
           "env": {
             "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post"

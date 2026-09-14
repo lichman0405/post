@@ -8157,3 +8157,57 @@ worker 只能把重新生成的文件还原，于是漂移永远红）。**worke
 `prep-handres.sh`、`compose-link.sh`、union/guard 三件套、新增的 `sqlc-audit.sh`、重启脚本，
 全都住在仓库外（`~/.claude/jobs/<sid>/tmp/`）。链条走完之前不搬（它们正被用着），
 但**必须搬进仓库**——这几条判断的可复现性依赖它们，而 `$TMP` 不是个耐久的地方。
+
+## L1-20260915-95 —— 我把 main 弄红了一次：`ci.yml` 不是自己一个人，`specs/orchestrator/gates.json` 是它的镜像，而它由一条单测看守
+
+2026-09-15 06:05，main `ff02a54` 的 `go` 作业红。
+
+**触发**：`ff02a54` 是那个窗口的第二个提交（给 `migration-integration` 作业装上钉住的 sqlc）。
+提交十三分钟后，CI 报：
+
+```
+--- FAIL: TestGatesSpecSyncsWithCIWorkflow (0.00s)
+    gate_spec_test.go:40: job "migration-integration": gates.json has 2 steps, ci.yml has 3
+    gate_spec_test.go:47: job "migration-integration" step 1: gates.json runs
+        "make test-integration", ci.yml runs "go install …sqlc@v1.31.1…"
+```
+
+### 一、我错在哪
+
+`specs/orchestrator/gates.json` 里的每个作业、每一步、每一步的 `run` 串与 `env`，
+都**必须与 `.github/workflows/ci.yml` 逐字相同**——这是 G2 的"反子集保证"：
+G2 跑的就是 CI 的那几步，不是"看起来差不多"的一批。看守这条的是
+`internal/devorchestrator/gate_spec_test.go`（包在 `go` 作业里跑）。
+
+我改 `ci.yml` 之前**只跑了** `scripts/spec_version.py --check` 与 `gen_schema_snapshot.py --check`
+——那两条管的是 `tasks/**` 与 `specs/**` 的自洽，**管不到"CI 与门规格是否同步"**。
+真正管它的那条命令是 `go test ./internal/devorchestrator`，**我没跑**。
+这不是"运气不好"，是**我在动一个自己写下过规则的面（CI）时，只跑了对得上我这次改动的检查，
+没跑守卫这个面的检查**。
+
+**代价很小，但性质要说清**：main 红了十三分钟，没有别的 PR 在飞（当时只有 T0407 的 #197，
+它已经合了），链条一节都还没前移（T0403 只做到 handres 干跑），所以**没有白费任何一轮 Worker**。
+
+### 二、修法（与 `ff02a54` 同源，`gates.json` 补上那一步）
+
+把同一个 `run` 串按同样的位置（`pg-ready-unit-test.sh` 之后、`make test-integration` 之前）
+补进 `gates.json` 的 `migration-integration`。`env` 键**省略**（CI 那步没有 env，
+YAML 解出来是 nil map，写成 `{}` 会被 `reflect.DeepEqual` 判不等）。
+
+**为什么不做成 `scripts/ensure-sqlc.sh`（我认真考虑过）**：想法是让版本只有一处真源。
+但**已经有一道失败即响的闸**：`scripts/gen_sqlc.sh` 拒绝用非钉住的版本生成
+（"用别的版本生成不会失败，只会把签入的代码改写成它自己的排版"）。所以版本字面量若是
+`ci.yml` 与 `gen_sqlc.sh` 之间漂了，漂移检查会**当场红**，不会静默。既然失败是响的，
+就不必为此新增一个文件去解析另一个脚本的变量。
+
+**顺带确认了一件事**（这次改动的正面收获）：装上 sqlc 之后，CI 上那道漂移检查
+**第一次真的跑了**（此前它一直是 `t.Skip`），跑出来是 clean —— 本地同一份检查
+（`bash tests/integration/check-sqlc-drift.sh`）对 `ff02a54` 也是 clean，两边一致。
+
+### 三、教训（写给我自己，纳入窗口流程）
+
+**凡是碰 `ci.yml` 的改动，收尾前必须跑 `go test ./internal/devorchestrator`（或整个
+`go test $(go list ./... | grep -v '/tests/integration')`）。** 这条与 L1-94 §二.1
+是同一类错误的两面：**"跳过式全绿"**——我修掉了一处"检查没跑"，同时自己制造了另一处
+"该跑的检查我没跑"。窗口脚本的自检清单里从此加一条：**只要 diff 里有 `.github/**`
+或 `specs/orchestrator/gates.json`，就跑门规格同步测试**。
