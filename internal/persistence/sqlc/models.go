@@ -225,16 +225,25 @@ type RelationVersion struct {
 }
 
 type Release struct {
-	ID              pgtype.UUID        `json:"id"`
-	ProjectID       pgtype.UUID        `json:"project_id"`
-	Version         string             `json:"version"`
-	Title           string             `json:"title"`
-	StateID         pgtype.UUID        `json:"state_id"`
-	PolicyVersionID pgtype.UUID        `json:"policy_version_id"`
-	Manifest        []byte             `json:"manifest"`
-	ManifestHash    string             `json:"manifest_hash"`
-	CreatedBy       pgtype.UUID        `json:"created_by"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	ProjectID          pgtype.UUID        `json:"project_id"`
+	Version            string             `json:"version"`
+	Title              string             `json:"title"`
+	StateID            pgtype.UUID        `json:"state_id"`
+	PolicyVersionID    pgtype.UUID        `json:"policy_version_id"`
+	Manifest           string             `json:"manifest"`
+	ManifestHash       string             `json:"manifest_hash"`
+	CreatedBy          pgtype.UUID        `json:"created_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	OrgPolicyVersionID pgtype.UUID        `json:"org_policy_version_id"`
+}
+
+type ReleaseCreation struct {
+	ID             pgtype.UUID        `json:"id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	ReleaseID      pgtype.UUID        `json:"release_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type ResearchAsset struct {

@@ -391,10 +391,22 @@ var canonicalTables = map[string]tableExp{
 		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("state_id", "project_states", "RESTRICT")},
 	},
 	"releases": {
-		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("version", txt, false, false), c("title", txt, false, false), c("state_id", u, false, false), c("policy_version_id", u, true, false), c("manifest", jb, false, false), c("manifest_hash", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
+		// 00053: manifest became text (content-addressed bytes — jsonb's key
+		// normalization breaks manifest_hash verification) and the release
+		// pins the organization policy version beside the project one
+		// (docs/11 §1); both land at the end, ALTER ADD COLUMN appends.
+		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("version", txt, false, false), c("title", txt, false, false), c("state_id", u, false, false), c("policy_version_id", u, true, false), c("manifest", txt, false, false), c("manifest_hash", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true), c("org_policy_version_id", u, true, false)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"project_id", "version"}},
-		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("state_id", "project_states", "RESTRICT"), fk("policy_version_id", "policy_versions", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
+		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("state_id", "project_states", "RESTRICT"), fk("policy_version_id", "policy_versions", "RESTRICT"), fk("org_policy_version_id", "policy_versions", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
+	},
+	// 00053 (T0606): the Idempotency-Key ledger — a key replays the release
+	// it created, forever; append-only (both trigger halves).
+	"release_creations": {
+		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("idempotency_key", txt, false, false), c("release_id", u, false, false), c("created_at", ts, false, true)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"project_id", "idempotency_key"}},
+		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("release_id", "releases", "RESTRICT")},
 	},
 	"research_assets": {
 		cols:   []colExp{c("id", u, false, true), c("asset_type", txt, false, false), c("slug", txt, false, false), c("title", txt, false, false), c("origin_project_id", u, false, false), c("created_at", ts, false, true)},
@@ -585,6 +597,8 @@ var explicitIndexes = map[string][]string{
 	"external_reference_snapshots_ref_idx": {"external_reference_id"},
 	"research_events_outbox_event_uniq":    {"outbox_event_id", "UNIQUE", "WHERE"},
 	"outbox_events_pending_idx":            {"published_at IS NULL"},
+	// T0606: the release list's newest-first scan (00053).
+	"releases_project_created_idx": {"project_id", "created_at"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded

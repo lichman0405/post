@@ -950,3 +950,305 @@
   font-size: 12px;
   color: var(--fgColor-accent, #0969da);
 }
+
+/* Releases tab (T0606): immutable release snapshots. Neutral, dense,
+   Primer-flavored — the same tokens as the rest of the project shell. */
+
+.releases-section {
+  margin-bottom: 24px;
+}
+
+.releases-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.releases-section-desc {
+  margin: 0 0 12px;
+  max-width: 640px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.releases-loading {
+  padding: 16px 0;
+}
+
+.releases-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--borderColor-danger-muted, #ff818266);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--fgColor-danger, #d1242f);
+  background: var(--bgColor-danger-muted, #ffebe9);
+}
+
+.releases-empty {
+  border: 1px dashed var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  padding: 16px;
+  max-width: 640px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.releases-list {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  max-width: 720px;
+}
+
+.releases-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.releases-row:last-child {
+  border-bottom: none;
+}
+
+.releases-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.release-version {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.release-version:hover {
+  text-decoration: underline;
+}
+
+.release-title {
+  font-size: 13px;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.release-hash {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.release-created {
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+  white-space: nowrap;
+}
+
+.release-manifest-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.release-manifest-link:hover {
+  text-decoration: underline;
+}
+
+.releases-create-form {
+  max-width: 560px;
+}
+
+.releases-label {
+  display: block;
+  margin: 12px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.releases-label-note {
+  font-weight: 400;
+}
+
+.releases-input {
+  display: block;
+  width: 100%;
+  max-width: 560px;
+  padding: 6px 8px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--fgColor-default, #1f2328);
+  background: var(--bgColor-default, #ffffff);
+}
+
+.releases-input:disabled {
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+.releases-create-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.releases-create {
+  padding: 5px 16px;
+  border: 1px solid var(--borderColor-accent-emphasis, #0969da);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #ffffff;
+  background: var(--bgColor-accent-emphasis, #0969da);
+  cursor: pointer;
+}
+
+.releases-create:disabled {
+  border-color: var(--borderColor-default, #d0d7de);
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+  cursor: default;
+}
+
+.releases-create-note {
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.releases-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  border-radius: 6px;
+  padding: 8px 12px;
+  max-width: 560px;
+  font-size: 13px;
+}
+
+.releases-notice-success {
+  border: 1px solid var(--borderColor-success-muted, #4ac26b66);
+  color: var(--fgColor-success, #1a7f37);
+  background: var(--bgColor-success-muted, #dafbe1);
+}
+
+.releases-notice-error {
+  border: 1px solid var(--borderColor-danger-muted, #ff818266);
+  color: var(--fgColor-danger, #d1242f);
+  background: var(--bgColor-danger-muted, #ffebe9);
+}
+
+.releases-readonly-note {
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* Release detail: strictly read-only facts + the manifest download. */
+
+.release-detail-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 24px 0;
+}
+
+.release-detail-state-icon {
+  color: var(--fgColor-attention, #9a6700);
+}
+
+.release-detail-state-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.release-detail-state-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.release-detail-breadcrumb {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.release-detail-breadcrumb a {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.release-detail-breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+.release-detail-title-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 4px;
+}
+
+.release-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.release-detail-note {
+  margin: 0 0 16px;
+  max-width: 640px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.release-detail-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+  max-width: 640px;
+  font-size: 13px;
+}
+
+.release-detail-facts dt {
+  font-weight: 600;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.release-detail-facts dd {
+  margin: 0;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.release-detail-facts code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
