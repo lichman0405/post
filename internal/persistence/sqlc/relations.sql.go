@@ -125,6 +125,32 @@ func (q *Queries) CreateRelationVersion(ctx context.Context, arg CreateRelationV
 	return i, err
 }
 
+const createRelationWithID = `-- name: CreateRelationWithID :one
+INSERT INTO relations (id, project_id)
+VALUES ($1, $2)
+RETURNING id, project_id, created_at, current_version_no
+`
+
+type CreateRelationWithIDParams struct {
+	ID        pgtype.UUID `json:"id"`
+	ProjectID pgtype.UUID `json:"project_id"`
+}
+
+// The explicit-id variant (T0208): the consuming API service pre-generates
+// the relation id so the state commit's operation summary can name the real
+// entity (commit_linkage checks EntityID + version_no against the row).
+func (q *Queries) CreateRelationWithID(ctx context.Context, arg CreateRelationWithIDParams) (Relation, error) {
+	row := q.db.QueryRow(ctx, createRelationWithID, arg.ID, arg.ProjectID)
+	var i Relation
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.CreatedAt,
+		&i.CurrentVersionNo,
+	)
+	return i, err
+}
+
 const getLatestRelationVersion = `-- name: GetLatestRelationVersion :one
 SELECT id, relation_id, version_no, state_id, relation_type, source_object_version_id, target_object_version_id, payload, integrity_hash, created_by, created_at FROM relation_versions
 WHERE relation_id = $1

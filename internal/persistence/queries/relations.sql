@@ -8,6 +8,14 @@ INSERT INTO relations (project_id)
 VALUES (@project_id)
 RETURNING *;
 
+-- name: CreateRelationWithID :one
+-- The explicit-id variant (T0208): the consuming API service pre-generates
+-- the relation id so the state commit's operation summary can name the real
+-- entity (commit_linkage checks EntityID + version_no against the row).
+INSERT INTO relations (id, project_id)
+VALUES (@id, @project_id)
+RETURNING *;
+
 -- name: GetRelationByID :one
 SELECT * FROM relations WHERE id = @id;
 

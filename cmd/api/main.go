@@ -48,9 +48,13 @@ import (
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
+	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/cmd/api/validationhttp"
 	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
+	"github.com/lichman0405/post/internal/application/branches"
+	"github.com/lichman0405/post/internal/application/rsg"
+	"github.com/lichman0405/post/internal/application/states"
 	appvalidation "github.com/lichman0405/post/internal/application/validation"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/config"
@@ -268,6 +272,27 @@ func run(args []string) int {
 		Projects: projectAPI.Service(),
 	})
 	validationAPI.Register(v1)
+	// Scientific object domain services (T0208): research branches,
+	// object create/version, typed relations and the object read. The rsg
+	// service is the consuming API task the object/relation write ports
+	// assigned authorization to: it resolves the caller's membership/role
+	// through the project surface, evaluates the matrix (ActionCreateBranch
+	// / ActionWriteScientificState) with the same require shape as the
+	// project service, and commits every scientific-state write as one
+	// state commit (gate draft) on the shared validation guard.
+	stateStore := persistence.NewStateStore(pool)
+	rsgSvc := rsg.NewService(rsg.Deps{
+		Projects:  projectAPI.Service(),
+		Branches:  branches.NewService(persistence.NewBranchStore(pool)),
+		States:    states.NewService(stateStore, appvalidation.NewGuard(rsgvalidation.NewValidator(reg), persistence.NewValidationTxProbe())),
+		Latest:    stateStore,
+		Objects:   persistence.NewScientificObjectStore(pool),
+		Relations: persistence.NewRelationStore(pool),
+		Authz:     authz.NewMatrixEngine(),
+		Schemas:   reg,
+	})
+	rsgAPI := rsghttp.New(rsghttp.Deps{Service: rsgSvc})
+	rsgAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	srv := &http.Server{

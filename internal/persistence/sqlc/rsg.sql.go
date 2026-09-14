@@ -250,6 +250,33 @@ func (q *Queries) GetBranchByProjectAndID(ctx context.Context, arg GetBranchByPr
 	return i, err
 }
 
+const getLatestProjectState = `-- name: GetLatestProjectState :one
+SELECT id, project_id, branch_id, parent_state_id, state_hash, git_commit_sha, manifest_version, created_at FROM project_states
+WHERE project_id = $1
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+// The project's most recent state (T0208): the default fork point for a
+// branch created without an explicit base_ref. Deterministic on (created_at,
+// id): states created in one transaction share a timestamp, the id breaks
+// the tie.
+func (q *Queries) GetLatestProjectState(ctx context.Context, projectID pgtype.UUID) (ProjectState, error) {
+	row := q.db.QueryRow(ctx, getLatestProjectState, projectID)
+	var i ProjectState
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.BranchID,
+		&i.ParentStateID,
+		&i.StateHash,
+		&i.GitCommitSha,
+		&i.ManifestVersion,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getProjectStateByHash = `-- name: GetProjectStateByHash :one
 SELECT id, project_id, branch_id, parent_state_id, state_hash, git_commit_sha, manifest_version, created_at FROM project_states WHERE project_id = $1 AND state_hash = $2
 `

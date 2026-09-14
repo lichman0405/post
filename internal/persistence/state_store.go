@@ -238,6 +238,25 @@ func (s *StateStore) GetStateByHash(ctx context.Context, projectID, stateHash st
 	return projectStateFromRow(row), nil
 }
 
+// GetLatestState implements the rsg LatestStatePort (T0208): the project's
+// most recent state — the default fork point of a branch created without
+// an explicit base_ref. A project with no state yet answers
+// states.ErrStateNotFound.
+func (s *StateStore) GetLatestState(ctx context.Context, projectID string) (domain.ProjectState, error) {
+	pid, err := textUUID(projectID)
+	if err != nil {
+		return domain.ProjectState{}, states.ErrStateNotFound
+	}
+	row, err := sqlc.New(s.pool).GetLatestProjectState(ctx, pid)
+	if errors.Is(err, pgx.ErrNoRows) || isInvalidText(err) {
+		return domain.ProjectState{}, states.ErrStateNotFound
+	}
+	if err != nil {
+		return domain.ProjectState{}, fmt.Errorf("persistence: get latest project state: %w", err)
+	}
+	return projectStateFromRow(row), nil
+}
+
 // GetBranchHead implements states.Repository.
 func (s *StateStore) GetBranchHead(ctx context.Context, branchID string) (domain.ProjectState, error) {
 	id, err := textUUID(branchID)

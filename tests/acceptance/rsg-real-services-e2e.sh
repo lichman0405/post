@@ -137,21 +137,22 @@ jq_get() { python3 -c "import json,sys;d=json.load(open('$WORK/resp.json'));prin
 # --- project -----------------------------------------------------------------
 req POST /projects "{\"name\":\"G3 RSG\",\"slug\":\"g3-rsg-$$\",\"visibility\":\"private\",\"purpose\":\"integration\"}"
 [[ "$STATUS" == "201" || "$STATUS" == "200" ]] || fail "create project -> $STATUS: $(head -c 200 "$WORK/resp.json")"
-PROJECT="$(jq_get "['id']")"
+# The project surface answers {project: {...}, membership: {...}}.
+PROJECT="$(jq_get "['project']['id']")"
 [[ -n "$PROJECT" ]] && ok "created a project" || fail "no project id in the response"
 
 # --- branch ------------------------------------------------------------------
-req POST "/projects/$PROJECT/branches" '{"name":"main"}'
+req POST "/projects/$PROJECT/branches" '{"name":"main","base_ref":"","visibility":"private"}'
 if [[ "$STATUS" == "201" || "$STATUS" == "200" ]]; then ok "created a research branch"; else fail "create branch -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
 BRANCH="$(jq_get "['id']")"
 
 # --- object + immutable version ---------------------------------------------
-req POST "/projects/$PROJECT/branches/$BRANCH/objects" '{"type":"material","data":{"name":"MOF-5"}}'
+req POST "/projects/$PROJECT/branches/$BRANCH/objects" '{"object_type":"material","payload":{"name":"MOF-5"}}'
 if served "$STATUS" POST "/projects/{id}/branches/{id}/objects"; then ok "created a scientific object"; else fail "create object -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
 OBJECT="$(jq_get "['id']")"
 V1="$(jq_get "['version_id']")"
 
-req POST "/projects/$PROJECT/branches/$BRANCH/objects/$OBJECT:version" '{"data":{"name":"MOF-5","surface_area_m2_g":3800}}'
+req POST "/projects/$PROJECT/branches/$BRANCH/objects/$OBJECT:version" '{"expected_version":1,"patch":{"name":"MOF-5","formula":"Zn4O(BDC)3"}}'
 if served "$STATUS" POST "/projects/{id}/branches/{id}/objects/{id}:version"; then ok "created a second version (a state transition, not a mutation)"; else fail "create version -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
 V2="$(jq_get "['version_id']")"
 [[ -n "$V1" && -n "$V2" && "$V1" != "$V2" ]] \
@@ -159,11 +160,11 @@ V2="$(jq_get "['version_id']")"
   || fail "the second version did not produce a new identity (v1=$V1 v2=$V2) — versions are being mutated in place"
 
 # --- relation ----------------------------------------------------------------
-req POST "/projects/$PROJECT/branches/$BRANCH/relations" "{\"source_object_version_id\":\"$V2\",\"target_object_version_id\":\"$V1\",\"type\":\"derived_from\"}"
+req POST "/projects/$PROJECT/branches/$BRANCH/relations" "{\"relation_type\":\"derived_from\",\"source_object_version_id\":\"$V2\",\"target_object_version_id\":\"$V1\"}"
 if served "$STATUS" POST "/projects/{id}/branches/{id}/relations"; then ok "created a typed relation between two versions"; else fail "create relation -> $STATUS: $(head -c 200 "$WORK/resp.json")"; fi
 
 # --- validation gate ---------------------------------------------------------
-req POST "/projects/$PROJECT/branches/$BRANCH:validate" '{}'
+req POST "/projects/$PROJECT/branches/$BRANCH:validate" '{"gate":"pr"}'
 case "$STATUS" in
   200|201|202) ok "the branch validates (:validate) -> $STATUS" ;;
   *) fail ":validate -> $STATUS: $(head -c 200 "$WORK/resp.json")" ;;

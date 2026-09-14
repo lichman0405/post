@@ -139,6 +139,41 @@ func (q *Queries) CreateScientificObjectVersion(ctx context.Context, arg CreateS
 	return i, err
 }
 
+const createScientificObjectWithID = `-- name: CreateScientificObjectWithID :one
+INSERT INTO scientific_objects (id, project_id, object_type, created_by)
+VALUES ($1, $2, $3, $4)
+RETURNING id, project_id, object_type, created_by, created_at, current_version_no
+`
+
+type CreateScientificObjectWithIDParams struct {
+	ID         pgtype.UUID `json:"id"`
+	ProjectID  pgtype.UUID `json:"project_id"`
+	ObjectType string      `json:"object_type"`
+	CreatedBy  pgtype.UUID `json:"created_by"`
+}
+
+// The explicit-id variant (T0208): the consuming API service pre-generates
+// the object id so the state commit's operation summary can name the real
+// entity (commit_linkage checks EntityID + version_no against the row).
+func (q *Queries) CreateScientificObjectWithID(ctx context.Context, arg CreateScientificObjectWithIDParams) (ScientificObject, error) {
+	row := q.db.QueryRow(ctx, createScientificObjectWithID,
+		arg.ID,
+		arg.ProjectID,
+		arg.ObjectType,
+		arg.CreatedBy,
+	)
+	var i ScientificObject
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.ObjectType,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.CurrentVersionNo,
+	)
+	return i, err
+}
+
 const getLatestScientificObjectVersion = `-- name: GetLatestScientificObjectVersion :one
 SELECT id, object_id, version_no, state_id, branch_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by, created_at FROM scientific_object_versions
 WHERE object_id = $1

@@ -7,6 +7,14 @@ INSERT INTO scientific_objects (project_id, object_type, created_by)
 VALUES (@project_id, @object_type, @created_by)
 RETURNING *;
 
+-- name: CreateScientificObjectWithID :one
+-- The explicit-id variant (T0208): the consuming API service pre-generates
+-- the object id so the state commit's operation summary can name the real
+-- entity (commit_linkage checks EntityID + version_no against the row).
+INSERT INTO scientific_objects (id, project_id, object_type, created_by)
+VALUES (@id, @project_id, @object_type, @created_by)
+RETURNING *;
+
 -- name: GetScientificObjectByID :one
 SELECT * FROM scientific_objects WHERE id = @id;
 
