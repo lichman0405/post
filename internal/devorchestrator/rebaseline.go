@@ -378,7 +378,68 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 		return nil, fail(fmt.Errorf("cleaning the worktree: %w", err))
 	}
 	if _, err := gitOutput(rec.Worktree, append(applyArgs, filepath.Join(keep, "change.patch"))...); err != nil {
-		return nil, fail(fmt.Errorf("the task's change does not apply to %s even after excluding generated files — this needs a human: %w", DefaultBaseBranch, err))
+		textual := err
+		// A textual apply asks whether the patch's LINES still fit, and that is
+		// the wrong question when a task and main have touched the same file:
+		// `git apply` refuses on a CONTEXT line that main rewrote even though the
+		// two changes are nowhere near each other, and refusing there is what
+		// sent the Supervisor to the ten-step git sequence by hand — T0302 and
+		// T0303 both added to the provisioning block of cmd/api/main.go, T0302
+		// and T0304 both extended tests/acceptance/gitea-real-services-e2e.sh,
+		// and in both shapes the patch's context was the whole of the problem.
+		//
+		// So the second attempt asks git to COMPOSE the two changes instead:
+		// `--3way` merges the patch's pre-image (the task's baseline) against
+		// what the worktree holds now, which is main. It is the same three
+		// versions, and the same merge, that the postcondition below recomputes
+		// to check the result — so a compose that is not reproducible is refused
+		// there rather than trusted here.
+		_, threeErr := gitOutput(rec.Worktree, append(threeWayApplyArgs(applyArgs), filepath.Join(keep, "change.patch"))...)
+		// Read BEFORE the unstage below: the unmerged stages are index entries,
+		// and the reset that unstages takes them away with everything else.
+		conflicted, cerr := unmergedPaths(rec.Worktree)
+		if cerr != nil {
+			return nil, fail(cerr)
+		}
+		// `--3way` implies `--index`, and unlike `git apply` it is not atomic:
+		// it merges every path it can and STAGES the result, so both outcomes
+		// arrive in a shape the rest of the advance does not expect. On the way
+		// through, a composed change has to be an UNCOMMITTED diff, because a
+		// Worker's deliverable is one and collect reads it with `git diff`,
+		// which does not show what is staged — getting that wrong would report a
+		// task that changed nothing. On the way OUT it is worse than cosmetic:
+		// a refusal is followed by the restore, and the restore reads the tree
+		// to decide what it may delete, while `reset --hard` DELETES a path that
+		// is staged and not in the target commit. So every path this three-way
+		// attempt created would be gone by the time the restore's clean asks
+		// what is there — restored afterwards by the snapshot's write-back, so
+		// nothing is lost, but deleted without the guard the restore exists to
+		// apply (it removes a path only when the snapshot holds a copy to write
+		// back) and never named to the clean that is written to bound exactly
+		// that list, nor to the caller either. Unstaging is what both outcomes
+		// need: the created paths stay on disk as untracked, which is the shape
+		// a refused `git apply` leaves, and the markers this wrote into tracked
+		// files go with the restore's own `reset --hard`, which runs before
+		// anything is read back.
+		if _, err := gitOutput(rec.Worktree, "reset", "-q"); err != nil {
+			return nil, fail(fmt.Errorf("unstaging the three-way apply's result: %w", err))
+		}
+		if threeErr != nil {
+			if len(conflicted) > 0 {
+				// A real conflict: the two changes rewrite the same lines, and
+				// choosing between them needs both halves' reasoning. That is the
+				// Supervisor's call — docs/61 §G2 — and never this tool's, so the
+				// advance is refused with the paths named. The work survives the
+				// refusal: fail() restores the tree, and the kept copy holds every
+				// path by content.
+				return nil, fail(fmt.Errorf(
+					"the task's change does not apply to %s as a patch, and a three-way merge of it conflicts with main's own change to the same lines of %s — composing them needs a human: %w",
+					DefaultBaseBranch, strings.Join(conflicted, ", "), textual))
+			}
+			// No conflict to point at: `--3way` could not compose it either, and
+			// the patch is the thing that is wrong.
+			return nil, fail(fmt.Errorf("the task's change does not apply to %s even after excluding generated files — this needs a human: %w", DefaultBaseBranch, textual))
+		}
 	}
 
 	// Regenerate the excluded artifacts from the MERGED tree, to a fixed point.
@@ -496,6 +557,36 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 	// those directories — a change in what the clean deletes, not in what the task
 	// did (T9005 pins both directions of that).
 	return &RebaselineResult{TaskID: taskID, FromSHA: from, ToSHA: to, Files: len(entries), Regenerated: regenerated}, nil
+}
+
+// threeWayApplyArgs is the same apply, asking git to compose rather than to
+// splice. It is built from applyArgs rather than written out beside it so the
+// two cannot drift: the excluded derived artifacts have to be excluded from
+// both, and a second hand-written list is how one of them stops excluding one.
+func threeWayApplyArgs(applyArgs []string) []string {
+	out := make([]string, 0, len(applyArgs)+1)
+	out = append(out, "apply", "--3way")
+	return append(out, applyArgs[1:]...)
+}
+
+// unmergedPaths names the paths an attempted three-way apply left in conflict.
+//
+// Asked of the diff rather than of `ls-files -u`, which answers with
+// "<mode> <object> <stage>\t<path>" once per stage — three lines per path, none
+// of them a path.
+func unmergedPaths(worktree string) ([]string, error) {
+	raw, err := gitPaths(worktree, "diff", "--name-only", "-z", "--diff-filter=U")
+	if err != nil {
+		return nil, fmt.Errorf("listing the paths a three-way apply left in conflict: %w", err)
+	}
+	out := make([]string, 0, len(raw))
+	for _, p := range raw {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // snapshotEntry is one changed path's exact state in the task worktree, as
