@@ -1,7 +1,10 @@
 // Package diffs is the Research State Diff use case (T0401): the read
 // that renders the three-way semantic diff of docs/07 §8 — base, source
 // and target state — as the change list a Research PR proposes
-// (internal/rsg/diff, docs/06 §6, docs/09 §4).
+// (internal/rsg/diff, docs/06 §6, docs/09 §4). The same read surface also
+// serves the Semantic Conflict Detector (T0405): Service.Conflicts
+// classifies every source-side change of that diff with
+// internal/rsg/conflict and returns diff + verdicts in one report.
 //
 // Diff is a system-facing read, not an API command: there is no HTTP
 // route in this task and the service performs no authorization of its
