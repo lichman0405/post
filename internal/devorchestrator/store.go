@@ -349,7 +349,27 @@ func (s *Store) Transition(id string, to State, runID, reason string) (*Transiti
 		if err := checkTransition(id, from, to); err != nil {
 			return err
 		}
-		if to == StateReady {
+		// Both transitions that mean "this task is about to be worked on" are
+		// checked, not only ready. The rule docs/30 §3 states is about starting
+		// ("dependencies are verified merged before a task starts"), and a task
+		// does not start when it becomes ready — it starts when it is spawned
+		// or reworked.
+		//
+		// The difference is not academic. The DAG is edited while tasks are in
+		// flight, and an edge added to a task already past ready is never
+		// re-examined by a check that only runs on the way in: T0603 was marked
+		// ready against ['T0105'], #102 later added T0208 to its closure, and it
+		// was dispatched anyway, ran a full Worker session, and reached
+		// verification carrying a gate (rsg-real-services) that cannot go green
+		// until the dependency it names is on main. Nothing could catch it
+		// afterwards — the Worker was already running — so the moment worth
+		// guarding is this one (L1-20260914-19).
+		//
+		// What this does not do, stated so it is not read as full coverage: it
+		// cannot stop an edge from being added to a running task, and it cannot
+		// unwind one that has already run. It only refuses to let it start
+		// again.
+		if to == StateReady || to == StateRunning {
 			unmet := map[string]State{}
 			for _, dep := range s.dag.Get(id).Dependencies {
 				if states[dep] != StateMerged {

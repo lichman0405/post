@@ -340,6 +340,156 @@ func TestReadyRequiresDependenciesMerged(t *testing.T) {
 	}
 }
 
+// scratchStore is openScratch with the paths kept, so a test can edit the DAG
+// while a task is already in flight — the thing that actually happens here.
+func scratchStore(t *testing.T) (dagPath, statePath string, s *Store) {
+	t.Helper()
+	dir := t.TempDir()
+	dagPath = writeSyntheticDAG(t, dir)
+	statePath = filepath.Join(dir, "task_status.json")
+	var err error
+	if s, err = OpenStore(dagPath, statePath); err != nil {
+		t.Fatal(err)
+	}
+	return dagPath, statePath, s
+}
+
+// writeDAGWithT1003DependingOn is the fixture DAG after somebody adds an edge
+// to the one task in it that starts with none.
+func writeDAGWithT1003DependingOn(t *testing.T, dagPath, dep string) {
+	t.Helper()
+	deps := []string{}
+	if dep != "" {
+		deps = []string{dep}
+	}
+	writeJSON(t, dagPath, map[string]any{
+		"version":    1,
+		"task_count": 4,
+		"tasks": []map[string]any{
+			{"id": "T1000", "phase": "P1", "title": "task A", "dependencies": []string{}},
+			{"id": "T1001", "phase": "P1", "title": "task B", "dependencies": []string{"T1000"}},
+			{"id": "T1002", "phase": "P1", "title": "task C", "dependencies": []string{"T1001"}},
+			{"id": "T1003", "phase": "P1", "title": "task D", "dependencies": deps},
+		},
+	})
+}
+
+// mergeT1000 walks the fixture's no-dependency task through to merged.
+func mergeT1000(t *testing.T, s *Store) {
+	t.Helper()
+	for _, st := range []State{StateReady, StateRunning, StateVerification, StateAccepted, StateMerged} {
+		if _, err := s.Transition("T1000", st, NewRunID(), ""); err != nil {
+			t.Fatalf("T1000 -> %s: %v", st, err)
+		}
+	}
+}
+
+// A dependency edge added to a task that is already past ready must still bind
+// at the moment the task actually starts.
+//
+// The rule docs/30 §3 states — and depsMet's own comment repeats — is about
+// starting, but the check ran only on the transition into ready. The DAG is
+// edited while tasks are in flight: #102 added T0208 to T0603's closure three
+// hours after T0603 was marked ready, and a task already past that point never
+// met the check again. T0603 was spawned anyway, ran a full Worker session, and
+// reached verification carrying rsg-real-services — a gate that cannot go green
+// until T0208 is on main (L1-20260914-19).
+//
+// Both edges into running are exercised: spawning and reworking are the two
+// ways a task starts, and what this guards against is a Worker burning a whole
+// session on work whose gate is red by construction.
+func TestADependencyEdgeAddedInFlightBindsWhenTheTaskStarts(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edge string
+		set  func(t *testing.T, s *Store, statePath string)
+		from State
+	}{
+		{
+			name: "the spawn edge, ready -> running",
+			edge: "spawn",
+			set: func(t *testing.T, s *Store, _ string) {
+				t.Helper()
+				if _, err := s.Transition("T1003", StateReady, NewRunID(), ""); err != nil {
+					t.Fatal(err)
+				}
+			},
+			from: StateReady,
+		},
+		{
+			name: "the rework edge, rejected -> running",
+			edge: "rework",
+			set: func(t *testing.T, s *Store, statePath string) {
+				t.Helper()
+				for _, st := range []State{StateReady, StateRunning, StateRejected} {
+					if _, err := s.Transition("T1003", st, NewRunID(), ""); err != nil {
+						t.Fatalf("-> %s: %v", st, err)
+					}
+				}
+				if got := statusOf(t, statePath, "T1003"); got != string(StateRejected) {
+					t.Fatalf("setup: status = %q, want rejected", got)
+				}
+			},
+			from: StateRejected,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dagPath, statePath, s := scratchStore(t)
+			tc.set(t, s, statePath)
+
+			// The edge arrives while the task is in flight.
+			writeDAGWithT1003DependingOn(t, dagPath, "T1000")
+			reopened, err := OpenStore(dagPath, statePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			_, err = reopened.Transition("T1003", StateRunning, NewRunID(), "")
+			var de *DependencyError
+			if !asErr[*DependencyError](err, &de) {
+				t.Fatalf("start (%s) with a dependency added in flight: error = %v, want DependencyError", tc.edge, err)
+			}
+			if !strings.Contains(err.Error(), "T1000") {
+				t.Fatalf("error %q does not name the unmet dependency", err)
+			}
+			if got := statusOf(t, statePath, "T1003"); got != string(tc.from) {
+				t.Fatalf("status = %q, want %q — a refused transition must not have moved it", got, tc.from)
+			}
+		})
+	}
+}
+
+// The other direction, so the check cannot pass by refusing everything: with
+// the dependency merged, starting is allowed from both edges.
+func TestStartingIsStillAllowedWhenTheDependenciesAreMerged(t *testing.T) {
+	dagPath, statePath, _ := scratchStore(t)
+	writeDAGWithT1003DependingOn(t, dagPath, "T1000")
+	s, err := OpenStore(dagPath, statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Ready itself already refuses while T1000 is todo, so T1003 cannot reach
+	// the start edge at all until the dependency is merged.
+	if _, err := s.Transition("T1003", StateReady, NewRunID(), ""); err == nil {
+		t.Fatal("ready accepted while T1000 is todo")
+	}
+	mergeT1000(t, s)
+
+	if _, err := s.Transition("T1003", StateReady, NewRunID(), ""); err != nil {
+		t.Fatalf("ready after the dependency merged: %v", err)
+	}
+	if _, err := s.Transition("T1003", StateRunning, NewRunID(), ""); err != nil {
+		t.Fatalf("spawn after the dependency merged: %v", err)
+	}
+	// And the rework edge: rejected -> running, reached through a rejection.
+	if _, err := s.Transition("T1003", StateRejected, NewRunID(), ""); err != nil {
+		t.Fatalf("-> rejected: %v", err)
+	}
+	if _, err := s.Transition("T1003", StateRunning, NewRunID(), ""); err != nil {
+		t.Fatalf("rework after the dependency merged: %v", err)
+	}
+}
+
 func TestTransitionCarriesRunIDInHistory(t *testing.T) {
 	s := openScratch(t)
 	res, err := s.Transition("T1003", StateReady, "run-abc123", "")
