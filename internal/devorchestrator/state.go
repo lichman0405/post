@@ -176,8 +176,14 @@ func (ts TaskState) MarshalJSON() ([]byte, error) {
 	return marshalNoEscape(m)
 }
 
-// DependencyError reports a refused `ready` transition: at least one
-// dependency is not yet merged (docs/30 §3).
+// DependencyError reports a refused transition that would have a task worked
+// on while at least one dependency is not yet merged (docs/30 §3).
+//
+// It is returned by `rddev task ready`, and by `rddev worker spawn`/`rework`/
+// `respawn` through StartWorkerFrom, so the message is phrased about the rule
+// rather than about the transition that happened to be refused: a start
+// refusal that said "cannot become ready" would send the reader looking for a
+// ready transition that is not what the command tried to do.
 type DependencyError struct {
 	ID    string
 	Unmet map[string]State
@@ -189,5 +195,5 @@ func (e *DependencyError) Error() string {
 		deps = append(deps, fmt.Sprintf("%s (%s)", dep, e.Unmet[dep]))
 	}
 	sort.Strings(deps)
-	return fmt.Sprintf("task %s cannot become ready: dependencies not merged: %s", e.ID, strings.Join(deps, ", "))
+	return fmt.Sprintf("task %s cannot start: dependencies not merged: %s", e.ID, strings.Join(deps, ", "))
 }

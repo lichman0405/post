@@ -76,6 +76,39 @@ func statusOf(t *testing.T, path, id string) string {
 	return string(ts.Status)
 }
 
+// workerRunIDOf reads the run a start stamped into the task's own entry. A
+// refused start must leave it empty, which is a different assertion from "the
+// status did not move": the stamp is written on the way to running, so a check
+// placed after it would still refuse the transition while having recorded the
+// run — and the state file the driver reads next would then disagree with the
+// worker registry. An absent file or entry counts as empty.
+func workerRunIDOf(t *testing.T, path, id string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ""
+		}
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	tasks := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw["tasks"], &tasks); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tasks[id]; !ok {
+		return ""
+	}
+	var ts TaskState
+	if err := json.Unmarshal(tasks[id], &ts); err != nil {
+		t.Fatal(err)
+	}
+	return ts.WorkerRunID
+}
+
 func historyLen(t *testing.T, path, id string) int {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -487,6 +520,104 @@ func TestStartingIsStillAllowedWhenTheDependenciesAreMerged(t *testing.T) {
 	}
 	if _, err := s.Transition("T1003", StateRunning, NewRunID(), ""); err != nil {
 		t.Fatalf("rework after the dependency merged: %v", err)
+	}
+}
+
+// A guard is only worth the callers that reach it. Both ways a task actually
+// starts — `rddev worker spawn` and `rddev worker rework`/`respawn` — enter the
+// state machine through StartWorkerFrom, which sets running inside its own
+// mutate and never calls Transition. A check wired to Transition alone is one no
+// start can reach: it reads as a guard, its test is green, and the command it
+// exists to refuse goes through untouched.
+//
+// That is the state of affairs #150 left behind. It moved the dependency check
+// onto the start edges, named T0603 as the case it protects, and tested it
+// through Transition. T0603 was then reworked on a binary built from that merge
+// — with T0208, the dependency whose endpoints its rsg-real-services gate
+// asserts, still running — and rddev accepted it without a refusal.
+func TestStartWorkerFromBindsTheDependencyEdgeItself(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		from State
+		set  func(t *testing.T, s *Store, statePath string)
+	}{
+		{
+			name: "the spawn edge, ready -> running",
+			from: StateReady,
+			set: func(t *testing.T, s *Store, _ string) {
+				t.Helper()
+				if _, err := s.Transition("T1003", StateReady, NewRunID(), ""); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "the rework edge, rejected -> running",
+			from: StateRejected,
+			set: func(t *testing.T, s *Store, statePath string) {
+				t.Helper()
+				for _, st := range []State{StateReady, StateRunning, StateRejected} {
+					if _, err := s.Transition("T1003", st, NewRunID(), ""); err != nil {
+						t.Fatalf("-> %s: %v", st, err)
+					}
+				}
+				if got := statusOf(t, statePath, "T1003"); got != string(StateRejected) {
+					t.Fatalf("setup: status = %q, want rejected", got)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dagPath, statePath, s := scratchStore(t)
+			tc.set(t, s, statePath)
+
+			// The edge arrives while the task is in flight.
+			writeDAGWithT1003DependingOn(t, dagPath, "T1000")
+			reopened, err := OpenStore(dagPath, statePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			_, err = reopened.StartWorkerFrom("T1003", NewRunID(), time.Now().UTC().Format(time.RFC3339), tc.from)
+			var de *DependencyError
+			if !asErr[*DependencyError](err, &de) {
+				t.Fatalf("start (%s) with a dependency added in flight: error = %v, want DependencyError", tc.name, err)
+			}
+			if !strings.Contains(err.Error(), "T1000") {
+				t.Fatalf("error %q does not name the unmet dependency", err)
+			}
+			if got := statusOf(t, statePath, "T1003"); got != string(tc.from) {
+				t.Fatalf("status = %q, want %q — a refused start must not have moved it", got, tc.from)
+			}
+			if runs := workerRunIDOf(t, statePath, "T1003"); runs != "" {
+				t.Fatalf("worker_run_id = %q, want empty — a refused start must not stamp a run", runs)
+			}
+		})
+	}
+}
+
+// The other direction on the same entry point, so the fix cannot pass by
+// refusing every start: with the dependency merged, StartWorkerFrom starts.
+func TestStartWorkerFromStillStartsWhenTheDependencyIsMerged(t *testing.T) {
+	dagPath, statePath, _ := scratchStore(t)
+	writeDAGWithT1003DependingOn(t, dagPath, "T1000")
+	s, err := OpenStore(dagPath, statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mergeT1000(t, s)
+	if _, err := s.Transition("T1003", StateReady, NewRunID(), ""); err != nil {
+		t.Fatalf("ready after the dependency merged: %v", err)
+	}
+	res, err := s.StartWorkerFrom("T1003", "run-abc123", time.Now().UTC().Format(time.RFC3339), StateReady)
+	if err != nil {
+		t.Fatalf("spawn after the dependency merged: %v", err)
+	}
+	if res.From != StateReady || res.To != StateRunning || res.RunID != "run-abc123" {
+		t.Fatalf("result = %+v", res)
+	}
+	if got := statusOf(t, statePath, "T1003"); got != string(StateRunning) {
+		t.Fatalf("status = %q, want running", got)
 	}
 }
 

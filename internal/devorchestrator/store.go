@@ -142,6 +142,34 @@ func (s *Store) depsMet(states map[string]State, id string) (met bool, unmet []s
 	return len(unmet) == 0, unmet
 }
 
+// requireDepsMerged refuses to let id be worked on while a dependency of it is
+// not merged (docs/30 §3), returning *DependencyError naming the unmet ones.
+//
+// This is one function called from both entry points rather than a check
+// written into either, because there are two of them and only one is obvious.
+// `rddev task ready` and the rest of the commands go through Transition;
+// `rddev worker spawn` and `rddev worker rework`/`respawn` go through
+// StartWorkerFrom, which sets running inside its own mutate. A guard added to
+// Transition alone is reached by nothing that starts a task: #150 wired the
+// check to the start edges, tested it through Transition, and T0603 was
+// reworked on the binary built from that merge with T0208 still running
+// (TestStartWorkerFromBindsTheDependencyEdgeItself).
+//
+// It is deliberately not "refuse everything except Transition": the two paths
+// differ in which transition they apply, not in whether a task is about to be
+// worked on, and that is the condition the rule is about.
+func (s *Store) requireDepsMerged(id string, states map[string]State) error {
+	met, unmet := s.depsMet(states, id)
+	if met {
+		return nil
+	}
+	statuses := make(map[string]State, len(unmet))
+	for _, dep := range unmet {
+		statuses[dep] = states[dep]
+	}
+	return &DependencyError{ID: id, Unmet: statuses}
+}
+
 // checkForStateDrift rejects a state file that EXISTS but declares no tasks
 // while the DAG has tasks.
 //
@@ -369,15 +397,13 @@ func (s *Store) Transition(id string, to State, runID, reason string) (*Transiti
 		// cannot stop an edge from being added to a running task, and it cannot
 		// unwind one that has already run. It only refuses to let it start
 		// again.
+		//
+		// It is also, on its own, reached by no start at all: spawning and
+		// reworking both enter through StartWorkerFrom. The same check is
+		// therefore called from there too — see requireDepsMerged.
 		if to == StateReady || to == StateRunning {
-			unmet := map[string]State{}
-			for _, dep := range s.dag.Get(id).Dependencies {
-				if states[dep] != StateMerged {
-					unmet[dep] = states[dep]
-				}
-			}
-			if len(unmet) > 0 {
-				return &DependencyError{ID: id, Unmet: unmet}
+			if err := s.requireDepsMerged(id, states); err != nil {
+				return err
 			}
 		}
 		at := taskStateTime(time.Now())
