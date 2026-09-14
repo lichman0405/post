@@ -12,12 +12,22 @@
 //
 //   - port.go: the GitPort interface (the ADR-003 exit hatch) and the
 //     provider value types. Future Git-layer tasks extend the port
-//     (branch protection T0302, refs T0303, user tokens T0304).
+//     (refs T0303, user tokens T0304).
 //   - gitea.go: the Gitea REST API v1 adapter, authenticating as the
 //     service account (post-git-svc bot user).
 //   - provisioning.go: the application service — one project → one
 //     repository ("p-"+uuid, created private in the service account's
-//     namespace) → one push webhook with a fresh HMAC secret.
+//     namespace) → one push webhook with a fresh HMAC secret → main
+//     protected before the project is recorded provisioned.
+//   - mainprotection.go: the Gitea layer of main's double protection
+//     (T0302) — the canonical branch-protection rule, created and
+//     converged on every provisioned repository.
+//   - refguard.go: the platform layer's ref guard (T0302) — the
+//     platform's own policy over ref updates, applied wherever the
+//     platform observes or performs Git writes.
+//   - sweeper.go: the platform layer's enforcement loop (T0302) — a
+//     scheduled pass that re-applies the rule when an operator removed
+//     or drifted it.
 //   - store.go: the canonical-store side — the only writer of
 //     projects.provision_status / projects.git_repository_external_id and
 //     the only reader/writer of git_repository_provisions (including the

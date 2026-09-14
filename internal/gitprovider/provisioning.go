@@ -99,6 +99,20 @@ func (p *Provisioner) provision(ctx context.Context, proj PendingProject) (*Prov
 	if err != nil {
 		return nil, err
 	}
+	// Main protection is part of provisioning (T0302): a repository that
+	// reaches 'provisioned' must already be frozen. Two steps in order:
+	// first the bootstrap seed — the provider refuses PRs against a main
+	// that does not exist and the rule blocks main's very first push, so
+	// an unseeded main could never receive its first commit (the seed is a
+	// controlled service-identity write, before any research exists);
+	// second the rule itself, applied before the canonical store records
+	// success, so no provisioned repository ever exists without it. The
+	// seed deliberately precedes the webhook registration: the bootstrap
+	// push must not fire a push delivery (the receiver would see a direct
+	// main push with no merge record behind it).
+	if _, err := p.port.EnsureInitialMain(ctx, repo); err != nil {
+		return nil, err
+	}
 	secret, err := NewWebhookSecret()
 	if err != nil {
 		return nil, err
@@ -110,6 +124,9 @@ func (p *Provisioner) provision(ctx context.Context, proj PendingProject) (*Prov
 		Events:     []string{"push"},
 	})
 	if err != nil {
+		return nil, err
+	}
+	if _, err := p.port.EnsureMainProtection(ctx, repo, MainProtectionSpec{}); err != nil {
 		return nil, err
 	}
 	return &ProvisionRecord{

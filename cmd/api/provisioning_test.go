@@ -35,6 +35,24 @@ func (f *fakeProvisionPort) EnsureWebhook(_ context.Context, spec gitprovider.We
 	return gitprovider.Webhook{ID: 9, Active: true}, nil
 }
 
+func (f *fakeProvisionPort) EnsureInitialMain(_ context.Context, repo gitprovider.Repository) (string, error) {
+	return "sha-seed", nil
+}
+
+func (f *fakeProvisionPort) EnsureMainProtection(_ context.Context, repo gitprovider.Repository, _ gitprovider.MainProtectionSpec) (gitprovider.MainProtection, error) {
+	return gitprovider.MainProtection{
+		RuleName:              "main",
+		DirectPushBlocked:     true,
+		ForcePushBlocked:      true,
+		MergeWhitelistEnabled: true,
+		MergeWhitelist:        []string{"svc"},
+	}, nil
+}
+
+func (f *fakeProvisionPort) GetMainProtection(context.Context, gitprovider.Repository) (gitprovider.MainProtection, error) {
+	return gitprovider.MainProtection{}, gitprovider.ErrNotFound
+}
+
 // fakeProvisionStore is the canonical-store fake: backlog lists are
 // scripted, Provision invokes the provisioning function (the store
 // contract) and records its outcome.

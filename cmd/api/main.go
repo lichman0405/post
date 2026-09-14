@@ -156,8 +156,8 @@ func run(args []string) int {
 	provisioningQueue := worker.NewRedisQueue(redisClient, provisioningQueuePrefix)
 	if gitCfg.ProvisioningEnabled() {
 		provisioningStore := gitprovider.NewProvisionStore(pool)
-		provisioner := gitprovider.NewProvisioner(
-			gitprovider.NewGiteaAdapter(*gitCfg), provisioningStore, gitCfg.WebhookURL)
+		giteaAdapter := gitprovider.NewGiteaAdapter(*gitCfg)
+		provisioner := gitprovider.NewProvisioner(giteaAdapter, provisioningStore, gitCfg.WebhookURL)
 		provisioningLoop := worker.NewLoop(provisioningQueue, worker.WithLogger(logger))
 		provisioningLoop.Register(gitprovider.ProvisionJobType, newProvisioningHandler(provisioner))
 		go func() {
@@ -173,6 +173,14 @@ func run(args []string) int {
 			defer cancel()
 			enqueuePendingProvisioning(sweepCtx, provisioningStore, provisioningQueue, logger)
 		}()
+		// Main-protection sweep (T0302): the platform layer of main's
+		// double protection — re-applies the canonical Gitea rule on every
+		// provisioned repository once at startup and then on a schedule, so
+		// a rule an operator removed or drifted is healed without a
+		// restart. Best effort: failures are logged per repository and
+		// retried on the next pass.
+		go runMainProtectionSweep(ctx,
+			gitprovider.NewProtectionSweeper(giteaAdapter, provisioningStore), logger)
 	} else {
 		// Redacted by construction: key names only, never values.
 		slog.Warn("post-api: GitProvider provisioning disabled — missing configuration",
