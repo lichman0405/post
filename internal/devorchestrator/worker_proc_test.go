@@ -85,7 +85,33 @@ func TestSignalProcessGroupFallsBackToTheProcess(t *testing.T) {
 // is right to refuse, but it must say which of the two very different
 // situations it found and, when the owner is gone, what to run.
 func TestResidueReportTellsTheSupervisorWhatToDo(t *testing.T) {
-	_, grandchild := startGroupWithGrandchild(t)
+	leader, grandchild := startGroupWithGrandchild(t)
+	// This test only reads the report text, so it never signals what it
+	// spawned. startSetsidChild's own cleanup kills the leader, but the leader
+	// is not the leak: killing it orphans the background child, which is
+	// reparented to init and lives out its full 300s — observed as a leftover
+	// with ppid 1 whose pgid is the pid of a leader that no longer exists.
+	//
+	// Cleanups run LIFO, so this one runs while the leader is still alive and
+	// the group is still there to signal. That is the whole point: by the time
+	// startSetsidChild's cleanup runs, the group is already gone.
+	//
+	// That leak is not confined to this package. The children inherit the
+	// environment they were started in, POST_WORKER_RUN_ID included, so when a
+	// Worker runs the suite (a plain `go test ./...`, which is an ordinary
+	// thing to do) the leftover carries that Worker's run marker — and
+	// collect, whose job is to attribute leftovers through exactly that
+	// marker, refuses that Worker's delivery for a process this fixture
+	// created. On 2026-09-14 it did: T0306, T0502 and T0307 each lost a
+	// collect to a `sleep 300`. The suite passed every time.
+	//
+	// The group first (the leader is a session leader, so the negative pid
+	// reaches the child too), then the child by pid in case the leader is
+	// already gone and there is no group left to signal.
+	t.Cleanup(func() {
+		_ = signalProcessGroup(leader.Pid, syscall.SIGKILL)
+		_ = syscall.Kill(grandchild, syscall.SIGKILL)
+	})
 	findings := []ProcessFinding{{PID: grandchild, Cmdline: "sleep 300", Session: grandchild, PGID: grandchild}}
 
 	// (1) The owner has already exited: these are leftovers, and the report
