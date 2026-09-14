@@ -7113,3 +7113,62 @@ T1001 的 `patch failed: internal/application/rsg/service.go:43`）。
 补记：这条和 L1-74 的"搭便车"不矛盾——那是说**这些行该在窗口打开时一起提交**，
 这是说**窗口该由谁打开**。两者是同一个约束的两面：**marker 只该在有价值的时候动一次，
 动的时候把该捎的都捎上。**
+
+## L1-20260914-78
+
+**决定：复核说 `approve`，但"判定机自己判错"这一类缺陷按阻断处理；另外记下一件我刚量出来的
+机制——`rddev` 读的是主工作树的 `tasks/tasks.json`，不是 HEAD。**
+
+### 一、T0405 打回，两条阻断项
+
+复核给的是 `approve`，只把它那条 `null` 缺陷列成 major。我按 L1-76 自己读了一遍代码，
+**它是对的**：
+
+```go
+var b, h []json.RawMessage
+if json.Unmarshal(base, &b) != nil || json.Unmarshal(head, &h) != nil { return false }
+if len(h) < len(b) { return false }
+for i := range b { if !bytes.Equal(b[i], h[i]) { return false } }
+return true
+```
+
+`json.Unmarshal([]byte("null"), &b)` **返回 nil（不报错）**，`b` 停在 `nil`、长度 0。
+于是 base 为 `null` 时前缀循环一次都不跑，函数返回 true，`diverged()` 里那条 `continue`
+生效——base `{"evidence_refs": null}`、两边各换成 `["e2"]` / `["e3"]`，被判成
+`auto_mergeable = true`、冲突数 0。**两台判定机里最不该判错的那一台**：按 docs/09 §6
+这是"同字段不同值"，是**人的**科学冲突，不是机器的结构冲突。函数自己的注释
+（"A missing base key is not an append — there is no anchor list to extend"）已经写对了
+一半，漏的是 **`null` 跟"键不存在"一样没有锚点**。
+
+第二条是 G2 的红：`tests/integration/conflict_test.go:33:7: const conflictTaskID is unused
+(U1000)`，`make staticcheck` 退出 1，于是 G2 的 step 3、step 4 **根本没跑**。
+门自己的话是 "never baseline new code"，所以这条不许进 baseline。
+
+**规矩**：一条复核意见是 major 还是 minor，是复核的**判断**；它是**阻断还是记录**，
+是我的判断。判据是"这条缺陷会不会让系统在没有人的时候做一件本该有人做的事"。
+会——就是阻断，哪怕复核放行了。反之，G2 的红是**机器已经判过**的，不由我重新量刑。
+
+### 二、`rddev` 读主工作树的 `tasks.json`（量出来的，不是猜的）
+
+`tasks/tasks.json` 里有**两行未提交的 scope 增补**（T0402 的 `internal/persistence/**`、
+T1001 的 `internal/persistence/sqlc/**`），它们一直在等工作，为的是搭一次
+"反正要动的 marker"的车（L1-74 的补记），因为单独提交它们会移动 marker、烧掉所有
+"已前移、未验收"的补丁（L1-77）。
+
+我一直以为这两行只是"待提交"，直到我拿 T0402 的 spawn 记录去对：
+
+```
+.rddev/workers/T0402/task-package.json → allowed_scope 里已经有 "internal/persistence/**"
+```
+
+而 T0402 是 **18:13:56** 落的 Worker，我改 `tasks.json` 是更早、**且没提交**。
+结论：**`rddev worker spawn` 从主工作树读 `tasks.json`，不看 HEAD。**
+（collect 侧另说——它的证据是 `gate-inputs: … byte-match the authoritative spawn record`，
+比的是 spawn 记录，不是 HEAD。）
+
+**为什么值得记**：这把"未提交的 scope 行"变成了一个**既在场、又未落地**的状态——
+它已经在生效（T0402 的返工 Worker 拿到的就是新 scope，不然它会因为
+`internal/persistence/**` 越界再被打回一次），但它一旦被**单独**提交就会移动 marker。
+所以这两行的正确处置只有一种：**等一次反正要移动 marker 的合并，和它一起走。**
+`post-t0213-merge.sh` 的第二步就是那个窗口。**不要**顺手提交它们，也**不要**
+`git checkout` 掉它们。
