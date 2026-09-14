@@ -373,7 +373,10 @@ var canonicalTables = map[string]tableExp{
 		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("number", i8, false, false), c("source_branch_id", u, false, false), c("target_branch_id", u, false, false), c("base_state_id", u, false, false), c("proposed_state_id", u, false, false), c("title", txt, false, false), c("body", txt, false, true), c("state", txt, false, true), c("created_by", u, false, false), c("created_at", ts, false, true), c("merged_at", ts, true, false)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"project_id", "number"}},
-		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("source_branch_id", "branches", "RESTRICT"), fk("target_branch_id", "branches", "RESTRICT"), fk("base_state_id", "project_states", "RESTRICT"), fk("proposed_state_id", "project_states", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
+		// The state CHECK is the T0402 addition (00051): the canonical
+		// docs/43 vocabulary, enforced for any write path.
+		checks: []string{"state = ANY"},
+		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("source_branch_id", "branches", "RESTRICT"), fk("target_branch_id", "branches", "RESTRICT"), fk("base_state_id", "project_states", "RESTRICT"), fk("proposed_state_id", "project_states", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
 	},
 	"reviews": {
 		cols:   []colExp{c("id", u, false, true), c("pull_request_id", u, false, false), c("reviewer_id", u, false, false), c("review_kind", txt, false, false), c("decision", txt, false, false), c("body", txt, false, true), c("created_at", ts, false, true)},

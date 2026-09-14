@@ -142,6 +142,19 @@ func (q *Queries) CreateReview(ctx context.Context, arg CreateReviewParams) (Rev
 	return i, err
 }
 
+const enablePullRequestHeadRefresh = `-- name: EnablePullRequestHeadRefresh :exec
+SELECT set_config('post.pr_head_refresh', 'on', true)
+`
+
+// The transaction-scoped session flag migration 00051's fixity guard
+// requires for the explicit head refresh (set_config is_local=true
+// resets at transaction end): the proposed state moves ONLY through the
+// flagged path, whatever else runs in the database.
+func (q *Queries) EnablePullRequestHeadRefresh(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, enablePullRequestHeadRefresh)
+	return err
+}
+
 const getIssueByProjectAndNumber = `-- name: GetIssueByProjectAndNumber :one
 SELECT id, project_id, number, issue_type, title, body, state, created_by, created_at FROM issues
 WHERE project_id = $1 AND number = $2
@@ -200,6 +213,40 @@ func (q *Queries) GetPullRequestByProjectAndNumber(ctx context.Context, arg GetP
 	return i, err
 }
 
+const getPullRequestByProjectAndNumberForUpdate = `-- name: GetPullRequestByProjectAndNumberForUpdate :one
+SELECT id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at FROM pull_requests
+WHERE project_id = $1 AND number = $2
+FOR UPDATE
+`
+
+type GetPullRequestByProjectAndNumberForUpdateParams struct {
+	ProjectID pgtype.UUID `json:"project_id"`
+	Number    int64       `json:"number"`
+}
+
+// The refresh/transition row lock (T0402): serializes the head refresh
+// against concurrent state transitions inside one transaction.
+func (q *Queries) GetPullRequestByProjectAndNumberForUpdate(ctx context.Context, arg GetPullRequestByProjectAndNumberForUpdateParams) (PullRequest, error) {
+	row := q.db.QueryRow(ctx, getPullRequestByProjectAndNumberForUpdate, arg.ProjectID, arg.Number)
+	var i PullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Number,
+		&i.SourceBranchID,
+		&i.TargetBranchID,
+		&i.BaseStateID,
+		&i.ProposedStateID,
+		&i.Title,
+		&i.Body,
+		&i.State,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.MergedAt,
+	)
+	return i, err
+}
+
 const listPullRequestsByProject = `-- name: ListPullRequestsByProject :many
 SELECT id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at FROM pull_requests
 WHERE project_id = $1
@@ -238,4 +285,90 @@ func (q *Queries) ListPullRequestsByProject(ctx context.Context, projectID pgtyp
 		return nil, err
 	}
 	return items, nil
+}
+
+const refreshPullRequestProposedState = `-- name: RefreshPullRequestProposedState :one
+UPDATE pull_requests
+SET proposed_state_id = $1
+WHERE project_id = $2 AND number = $3
+RETURNING id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at
+`
+
+type RefreshPullRequestProposedStateParams struct {
+	ProposedStateID pgtype.UUID `json:"proposed_state_id"`
+	ProjectID       pgtype.UUID `json:"project_id"`
+	Number          int64       `json:"number"`
+}
+
+// The explicit head refresh (T0402, acceptance "head update 可显式
+// refresh"): re-points proposed_state_id to the source branch's current
+// head. The adapter runs it inside one transaction with the row locked
+// and the session flag on — the only sanctioned write path for the
+// proposed state.
+func (q *Queries) RefreshPullRequestProposedState(ctx context.Context, arg RefreshPullRequestProposedStateParams) (PullRequest, error) {
+	row := q.db.QueryRow(ctx, refreshPullRequestProposedState, arg.ProposedStateID, arg.ProjectID, arg.Number)
+	var i PullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Number,
+		&i.SourceBranchID,
+		&i.TargetBranchID,
+		&i.BaseStateID,
+		&i.ProposedStateID,
+		&i.Title,
+		&i.Body,
+		&i.State,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.MergedAt,
+	)
+	return i, err
+}
+
+const setPullRequestState = `-- name: SetPullRequestState :one
+UPDATE pull_requests
+SET state = $1,
+    merged_at = CASE WHEN $1 = 'merged' THEN now() ELSE NULL END
+WHERE project_id = $2 AND number = $3 AND state = $4
+RETURNING id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at
+`
+
+type SetPullRequestStateParams struct {
+	NextState string      `json:"next_state"`
+	ProjectID pgtype.UUID `json:"project_id"`
+	Number    int64       `json:"number"`
+	Expected  string      `json:"expected"`
+}
+
+// The state transition compare-and-swap (T0402, docs/43): the update
+// matches only while the row is still in the expected state, so a
+// concurrent transition fails the CAS instead of overwriting it.
+// Migration 00051's pull_request_guard enforces the transition map and
+// merged_at consistency itself; this CAS is the application-side
+// serialization on top.
+func (q *Queries) SetPullRequestState(ctx context.Context, arg SetPullRequestStateParams) (PullRequest, error) {
+	row := q.db.QueryRow(ctx, setPullRequestState,
+		arg.NextState,
+		arg.ProjectID,
+		arg.Number,
+		arg.Expected,
+	)
+	var i PullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Number,
+		&i.SourceBranchID,
+		&i.TargetBranchID,
+		&i.BaseStateID,
+		&i.ProposedStateID,
+		&i.Title,
+		&i.Body,
+		&i.State,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.MergedAt,
+	)
+	return i, err
 }
