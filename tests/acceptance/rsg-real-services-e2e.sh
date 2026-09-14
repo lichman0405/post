@@ -60,7 +60,11 @@ if ! (exec 3<>"/dev/tcp/${REDIS_ADDR%:*}/${REDIS_ADDR#*:}") 2>/dev/null; then
   echo "G3 rsg-real-services: FAILED — no Redis at $REDIS_ADDR (make infra-up)" >&2
   exit 1
 fi
-exec 3<&- 2>/dev/null || true
+# Close the probe fd; the suppression is scoped to a group because a bare
+# `exec 3<&- 2>/dev/null` redirects *this shell's* stderr for the rest of the
+# script — every `FAILED … >&2` below would be written to /dev/null, and the
+# gate log would show a step that failed with no output at all.
+{ exec 3<&-; } 2>/dev/null || true
 
 mkdir -p "$ROOT/bin/g3migrate"
 cat >"$ROOT/bin/g3migrate/main.go" <<'GOMIGRATE'
@@ -85,9 +89,12 @@ func main() {
 	}
 }
 GOMIGRATE
-(cd "$ROOT" && go run ./bin/g3migrate "$PG_URL") >/dev/null 2>&1 || {
+(cd "$ROOT" && go run ./bin/g3migrate "$PG_URL") >"$WORK/migrate.log" 2>&1 || {
   rm -rf "$ROOT/bin/g3migrate"
-  echo "G3 rsg-real-services: FAILED — could not migrate the database with this tree's migrations" >&2
+  # The tail is the whole value of this branch: `go run` folds the program's
+  # own error into "exit status 1", and goose's reason (an unapplied migration
+  # below the database's version, say) is only in the log it wrote.
+  echo "G3 rsg-real-services: FAILED — could not migrate the database with this tree's migrations: $(tail -3 "$WORK/migrate.log" | tr '\n' ' ')" >&2
   exit 1
 }
 rm -rf "$ROOT/bin/g3migrate"
