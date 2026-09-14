@@ -6516,3 +6516,92 @@ schema 快照。而 API 任务的 `allowed_scope` 里没有 `specs/api/openapi.y
 5. 已开 **#174** 记录量化清单与边界问题。
 
 **可逆性**：纯记录；`specs/` 无改动。
+
+## L1-20260914-64
+
+**T0209 的 collect 被拒的是工作树里的外来垃圾，不是代码 —— 19 个 `_tmp_sec_*` 的来历与处置**
+
+**collect 说了什么**（`[FAIL]` 那一条）：19 个 changed path 落在 `allowed_scope` 之外，
+名字是 `_tmp_sec_cmd_api_main.go`、`_tmp_sec_specs_database_postgres.sql` 这一族 ——
+**扁平化的路径**（`/` → `_`）。状态 `running -> rejected`。
+
+**它们是什么（实测，不是推测）**：19 个**逐个** `head -1` 全部以 `diff --git` 开头 ——
+是**每个改动文件的 `git diff` 转储**，不是备份、不是源文件、不是交付物的一部分。
+（我一开始按"备份"的假设去比 `cmp`，结果 503/827/1670 行不同，差点读成"真文件被改坏了"；
+改成读**头一行**才看清是 diff 本身。**读内容比读 diff 统计量可靠。**）
+
+**不是谁写的（都查过，不是猜）**：
+- **不是这个 Worker**：这条 run `16:07:40` 才起来，文件写于 `15:51:37`。
+  它在 `RESULT.json` 的 `risks[3]`/`follow_up_issues[3]` 里**主动点名**了这 19 个文件、
+  说自己没碰（越界），并提了"tooling 不再需要后请清掉"。**这个 Worker 的做法是对的。**
+- **不是 tooling**：`internal/devorchestrator/rebaseline.go` 全读了一遍，写盘只落在
+  keep 目录、快照恢复路径和系统临时目录（`mergeTheSameThreeWays` 用 `os.MkdirTemp`）；
+  全仓库**没有任何代码**生成 `_tmp_sec_` 这个名字。
+- **不是任何 Worker**：扫了 `.rddev/workers/*/worker*.log` 全部 `tool_use`，
+  **没有任何写命令**含这个串（只有本 run 的 `ls`/`stat`/`diff` 查看命令）。
+
+**没查出来的**：**写它的人**。`15:51:37` 这个时刻与 T0209 的一次 rebaseline 重合
+（`.rddev/runtime/rebaseline` 目录 mtime `15:51:38`，那棵树同时有 115 个文件被写），
+但生成这个文件名的**那条命令我没找到**。**这是一个未查清项，不是已解释项。**
+
+**我的处置**：先**逐个拷贝留档 + 记 sha256** 到 `$CLAUDE_JOB_DIR/tmp/t0209-strays/`，
+**再**从工作树移走。移走前后 `git status --porcelain` 除这 19 行外**逐字节相同**，
+`HEAD` 仍为 `11091eb`，剩下**恰好 19 条**真实改动（12 改 + 7 新）。
+
+**为什么这不等于"把 Gate 改绿"**：scope 检查一个字没动，仍然同样严格；被移走的是
+**可由 `git diff` 随时重新生成的转储**，不是任何证据或交付物；而 Worker 自身**受 scope 纪律约束
+不能碰越界路径** —— 所以清它**在制度上只有 Supervisor 能做**，这不是我抢了谁的活。
+
+**残留风险**：写它的人没查出来 ⇒ **它可能再发生**，而且再发生时长得一模一样
+（collect 因 19 个越界路径被拒）。链上还有 8 节要走，所以每次 collect 被拒都要**先看是不是这一族**，
+不要条件反射地当成 Worker 越界。
+
+**可逆性**：留档在 `$CLAUDE_JOB_DIR/tmp/t0209-strays/`（含 sha256），可原样放回。
+
+## L1-20260914-65
+
+**链子是 9 节不是 8 节，而且 T0309 此刻就在链上 —— 顺便记下"决策会冻住任务"这条机制**
+
+**做法**：不再一节一节地问，而是**把守卫自己的输入重算一遍**
+（`$CLAUDE_JOB_DIR/tmp/migration-chain-view.py`）：取 `refs/remotes/origin/main` 的
+`git ls-tree infra/migrations/`，与**每棵工作树的文件系统**做差集 —— 和
+`assertMigrationMergeOrder` 读的是同两样东西（工作树用文件系统而不是 ref，因为
+Worker 的活是**未提交**的 diff）。
+
+**结果（9 节，按号序）**：
+
+| 号 | 任务 | 状态 |
+|---|---|---|
+| 00036 | T0209 | running |
+| 00038 | T0213 | rejected |
+| 00040 | T0501 | rejected |
+| 00041 | T0502 | rejected |
+| 00042 | T0306 | rejected |
+| 00043 | T0505 | rejected |
+| 00045 | T0508 | verification |
+| 00046 | T1001 | running |
+| 00047 | T0309 | running |
+
+⇒ **T0309 不是"可能会入链"，是"已经在链上"**：它的工作树**此刻就压着 `00047`**。
+我在 `progress.md` 里对 T0309 判断错过两次 —— 先说"想什么时候合就什么时候合"（过强），
+改成"要是收工前写了迁移就当场入链"（**仍然错**：它已经写了）。**教训不是"下次谨慎点"，
+而是"别猜，去量"** —— 上面那张表是一次查询的结果，不是推理。
+
+**新机制（这条会咬人）**：带开放 decision 的任务会被驱动**整个跳过**
+（`driver_run.go`："waiting on the Supervisor; retrying would just re-fail"），
+而 decision 只有在**换了 run id**（返工/重派）或**显式 `drive --clear-decision TASK`** 时才消失
+（`driver.go` 的 `staleDecisions`）。所以：
+
+- 尾部的三节（T0508/T1001/T0309）**必然**会在链子还没走完时去尝试合并，
+  被守卫**正确地**拒掉，于是各自留下一个 decision 并**冻在 `accepted`**；
+- 我原来的排链脚本把"有 decision"一律当停机条件 ⇒ **T0508 的复核一落地它就会自杀**。
+  这是**必然事件不是偶发**，所以在跑之前就改掉了。
+
+**改法**：区分**是不是链子自己投下的影子** —— `refusing to merge` + `still holds`
+且任务是尾部那三节 ⇒ **容忍，记一笔，链尾统一 `--clear-decision` 放行**；
+其余任何 decision ⇒ **照旧停机喊人**（那才是判断）。**不是"少检查"，是"分清哪一种是预期的"。**
+
+**还没做的**：尾部三节的**返工理由文件**必须由**它们各自的复核结论**写成，
+而 T1001/T0309 的复核还没跑、T0508 的正在跑 ⇒ 这一段**留给判断，不硬编成脚本**。
+
+**可逆性**：纯记录。
