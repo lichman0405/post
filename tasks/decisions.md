@@ -5171,3 +5171,51 @@ T0603 的 00033 就自动"合法" ✓。**要按合入当时的头号重新判�
 
 **对 T0209 的影响** ✓：它是 `ready` 里唯一的一个 ✓（`rddev task next` ✓），
 被 #163 的容量拒绝卡着 ✓。**它不需要迁移号** ✓，所以不受这张表的约束 ✓。
+
+## L1-20260914-32 — 我在中途**下过一个错判断**（"这是运气"），数据推翻了我；更正并记下真实机制
+
+**我错在哪** ✓：发现驱动在 `11:18:35 → 11:22:02` **停了 3 分半没跳** ✓，
+而我的 `task reject`（`11:20:25` ✓）正好落在那段空档里 ✓。
+我当时的结论是"**这是运气，不是设计**" ✓ —— **错了** ✓。
+扫了一遍驱动日志里的全部空档（>60 秒的共 27 处 ✓）才发现：**这不是偶发，是结构性停顿** ✓，
+而且**每一处都终结于同一个动作** ✓：
+
+```
+09:54:45 → 09:58:06 (201s)  →  T0603 accept
+10:12:15 → 10:15:37 (202s)  →  T0303 accepted
+10:17:32 → 10:20:50 (198s)  →  T0304 accepted
+10:34:06 → 10:37:28 (202s)  →  T0208 accepted
+10:45:43 → 10:49:08 (205s)  →  T0304 accepted
+11:18:35 → 11:22:02 (207s)  →  T0603 accept
+15:09:35 → 15:12:11 (156s)  →  T0603 accept  REFUSED — G3 is red
+21:35:20 → 21:37:56 (156s)  →  T0603 accept  REFUSED — G2 is red
+```
+
+**机制（读源码确认，不是猜）** ✓：`cmd/rddev/task.go:21-22` ✓ ——
+**`rddev task accept` 自己就跑验收 Gate** ✓（"run the acceptance gate (G2 = CI's exact jobs, then G3 where the task defines one)"）✓。
+而 `task.go:248` 的注释写明**状态检查在 Gate 之前** ✓（"A wrong-state accept is refused by the transition machinery BEFORE any [gate run]"）✓。
+所以 11:18:35 那一刻的真实序列是 ✓：
+① 驱动采到 approve 裁决 ✓ → ② 起 `task accept`，**状态检查通过**（此时是 `verification`）✓ →
+③ **跑 Gate 3 分半** ✓ → ④ `11:20:25` 我 reject+返工，状态变 `running` ✓ →
+⑤ `11:22:02` Gate 跑完，做状态转换 → **`running → accepted` 非法** ✓。
+**那条报错原文就是第 ⑤ 步的** ✓。
+
+**于是两件事被我搞反了方向** ✓：
+① **窗口不是 10 秒，也不靠运气** ✓ —— 它**就是一次验收 Gate 的运行时长** ✓（实测 156–207 秒 ✓，
+因为 `task accept` 把 Gate 跑在转换**之前** ✓）；
+② **而且它失败方向是安全的** ✓ —— 状态转换在 Gate 之后**重新校验** ✓，
+所以我在 Gate 期间动手，**我的动作一定赢** ✓，不会出现"两边各改一半" ✓。
+
+**还有一条兜底，比我以为的宽松得多** ✓：`cmd/rddev/task.go:28` ✓ ——
+**`accepted -> rejected`（revokes a pre-merge acceptance）** ✓。
+也就是说**收下不等于定局** ✓：只要还没合入，我仍然能撤回 ✓。
+而"收下"到"合入"之间还隔着 commit → push → PR → CI 全绿 ✓ —— **那是几分钟级的窗口，不是几秒** ✓。
+
+**我核了但决定不改的东西** ✓：裁决契约（`internal/devorchestrator/review_worker.go:730`）原文是 ✓
+"verdict approve（**工作满足契约**）或 request_changes（**不满足**）… **A blocking finding means request_changes**" ✓。
+所以 T0603 的复核**给 approve 同时带一条 major 是照规则做的** ✓，
+**既没有误判也没有越权** ✓ —— 我不该把"我希望它拦"记成"它该拦" ✓。
+**不改这条契约** ✓：若把 major 也算 blocking ✓，复核要么把一切都升格为 blocking ✓、
+要么把 blocking 贬成 major ✓ —— **两种都是把分级做废** ✓。
+正确的分工是 ✓：**复核判"是否满足契约"** ✓，**"我不接受某个 major"是 Supervisor 的判断** ✓，
+而 Supervisor 手上有**两个可用杠杆**（Gate 期间动手 ✓ / 收下后撤回 ✓）✓ —— 都验过 ✓。
