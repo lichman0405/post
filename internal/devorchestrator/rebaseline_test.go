@@ -224,6 +224,33 @@ func (f *rebaselineFixture) mainRewritesTheSameRegion() string {
 	return f.git(f.root, "rev-parse", "HEAD")
 }
 
+// mainMovesALineTheTasksHunkOnlyPassedOver is the other half of T0301's shape,
+// and the half a textual apply cannot tell apart from a real collision: main
+// rewrites a line INSIDE the task's hunk context but nowhere near the lines the
+// task changed. The patch stops applying; the changes compose without a
+// conflict.
+//
+// The line it moves is the one furthest from the task's insertion that the
+// hunk still carries as context. That distance is the whole point: git's merge
+// treats changes to adjacent lines as one region and reports them as a
+// conflict, so a line one or two away would test the refusal instead of the
+// compose — measured, not assumed, in the test that uses this.
+func (f *rebaselineFixture) mainMovesALineTheTasksHunkOnlyPassedOver() string {
+	f.t.Helper()
+	moved := strings.Replace(gateScriptBaseline,
+		`probe_push() { echo "a direct push to protected main is refused"; }`,
+		`probe_push() { echo "v2: a direct push to protected main is refused"; }`, 1)
+	if moved == gateScriptBaseline {
+		f.t.Fatal("the gate script no longer has the line this fixture moves")
+	}
+	if err := os.WriteFile(filepath.Join(f.root, "tests/acceptance/gate.sh"), []byte(moved), 0o755); err != nil {
+		f.t.Fatal(err)
+	}
+	f.git(f.root, "add", "-A")
+	f.git(f.root, "commit", "-q", "-m", "main moved a line the task's hunk only passed over")
+	return f.git(f.root, "rev-parse", "HEAD")
+}
+
 // mainMovesElsewhere advances main without touching anything the task changed.
 func (f *rebaselineFixture) mainMovesElsewhere() string {
 	f.t.Helper()
@@ -442,6 +469,186 @@ func TestRebaselineRefusalDoesNotTakeTheTasksWorkWithIt(t *testing.T) {
 	for _, want := range []string{"tests/acceptance/gate.sh", "docs/task-notes.md", "notes-link", "internal/old.txt"} {
 		if !strings.Contains(manifest, want) {
 			t.Errorf("the restore manifest does not list %q:\n%s", want, manifest)
+		}
+	}
+}
+
+// A textual apply asks whether the patch's LINES still fit, which is the wrong
+// question when a task and main have touched the same FILE: main rewriting a
+// line the task's hunk only passed over as CONTEXT makes `git apply` refuse a
+// change that is nowhere near main's. It is the ordinary case, not the
+// exception — T0302 and T0303 both added to the provisioning block of
+// cmd/api/main.go, T0302 and T0304 both extended
+// tests/acceptance/gitea-real-services-e2e.sh — and refusing there is what sent
+// the Supervisor to the ten-step git sequence by hand, twice in one morning.
+//
+// So the advance composes the two changes instead, and this pins the shape.
+func TestAnAdvanceComposesWhatAPatchCannotSpliceByText(t *testing.T) {
+	f := newRebaselineFixture(t, "T9050")
+	newMain := f.mainMovesALineTheTasksHunkOnlyPassedOver()
+
+	// The premise, measured rather than assumed: the patch really did stop
+	// applying. Without this the test would pass just as well on an advance that
+	// never reached the second attempt, and would then be pinning nothing.
+	rec, err := LoadRegistry(f.root, "T9050")
+	if err != nil || rec == nil {
+		t.Fatalf("reading the Worker record: %v", err)
+	}
+	change, err := taskWorktreeDiff(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchPath := filepath.Join(t.TempDir(), "change.patch")
+	if err := os.WriteFile(patchPath, []byte(change), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitOutput(f.worktree, "apply", "--check", "--exclude=specs/SPEC_VERSION.json", patchPath); err == nil {
+		t.Fatal("the fixture's change applies textually, so this test says nothing about the fallback — " +
+			"the line it moves has to be one the task's hunk only passed over")
+	}
+
+	res, err := RebaselineTask(f.root, "T9050", "", "")
+	if err != nil {
+		t.Fatalf("a change whose context main rewrote was refused instead of composed: %v", err)
+	}
+	if res.ToSHA != newMain {
+		t.Errorf("the advance landed on %s, want %s", res.ToSHA, newMain)
+	}
+	if head := f.git(f.worktree, "rev-parse", "HEAD"); head != newMain {
+		t.Errorf("the worktree is at %s; the baseline is %s", head, newMain)
+	}
+	// Both changes are in the composed file, and nothing was left for a reader
+	// to resolve: a composed advance that arrives with markers is a refusal that
+	// forgot to refuse.
+	gate := readFileOrFail(t, filepath.Join(f.worktree, "tests/acceptance/gate.sh"))
+	if !strings.Contains(gate, "probe_hmac") {
+		t.Errorf("main's line is there and the task's is not — the compose dropped half the change:\n%s", gate)
+	}
+	if !strings.Contains(gate, `probe_push() { echo "v2: a direct push to protected main is refused"; }`) {
+		t.Errorf("the task's line is there and main's is not:\n%s", gate)
+	}
+	if strings.Contains(gate, "<<<<<<<") || strings.Contains(gate, ">>>>>>>") {
+		t.Errorf("the advance composed the two changes into conflict markers:\n%s", gate)
+	}
+	// `--3way` implies `--index`, so the composed change arrives staged unless
+	// it is unstaged again — and the deliverable a collect reads is an
+	// UNCOMMITTED working-tree diff. A staged one makes `git diff` empty, which
+	// reads as a task that changed nothing.
+	if unstaged := f.git(f.worktree, "diff", "--name-only"); !strings.Contains(unstaged, "tests/acceptance/gate.sh") {
+		t.Errorf("the composed change is not in the working-tree diff collect reads:\n%s", unstaged)
+	}
+	if staged := f.git(f.worktree, "diff", "--cached", "--name-only"); staged != "" {
+		t.Errorf("the composed change arrived staged (%q); collect reads the deliverable with `git diff`", staged)
+	}
+	if kept := f.keptDirs(); len(kept) != 0 {
+		t.Errorf("a completed advance left its copies behind: %v", kept)
+	}
+}
+
+// The other outcome of the second attempt, and the one that must NOT be
+// automated away: the two changes really do rewrite the same lines, git leaves
+// conflict markers, and choosing between two versions of a line needs both
+// halves' reasoning. That is the Supervisor's call (docs/61 §G2), so the
+// advance is refused — and the refusal has to say WHICH file the two collide
+// in, because that is what a human needs to do the work the tool will not.
+func TestAConflictIsRefusedAndNamesTheFileItIsIn(t *testing.T) {
+	f := newRebaselineFixture(t, "T9051")
+	f.mainRewritesTheSameRegion()
+
+	before := f.pathsAndContents(f.baseline)
+	beforeHead := f.git(f.worktree, "rev-parse", "HEAD")
+
+	res, err := RebaselineTask(f.root, "T9051", "", "")
+	if err == nil {
+		t.Fatalf("a change whose lines main rewrote was composed silently (result %+v)", res)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "tests/acceptance/gate.sh") {
+		t.Errorf("the refusal does not name the file the two changes collide in, so a human cannot go do it: %s", msg)
+	}
+	if !strings.Contains(msg, "three-way merge") {
+		t.Errorf("the refusal does not say the compose was attempted and conflicted: %s", msg)
+	}
+	// The refusal still leaves the tree and the ref exactly as it found them,
+	// and the work is still there to read.
+	if after := f.pathsAndContents(f.baseline); after != before {
+		t.Errorf("the refused advance changed the tree it refused to advance:\n--- as found ---\n%s\n--- after ---\n%s", before, after)
+	}
+	if head := f.git(f.worktree, "rev-parse", "HEAD"); head != beforeHead {
+		t.Errorf("the worktree HEAD moved to %s despite the refusal; it was %s", head, beforeHead)
+	}
+	gate := readFileOrFail(t, filepath.Join(f.worktree, "tests/acceptance/gate.sh"))
+	if strings.Contains(gate, "<<<<<<<") {
+		t.Errorf("the refused advance left conflict markers in the task's file:\n%s", gate)
+	}
+	if !strings.Contains(gate, "probe_hmac") {
+		t.Errorf("the task's edit of the gate script was lost:\n%s", gate)
+	}
+}
+
+// The tree a REFUSAL hands the restore, which is a different question from the
+// tree it ends with.
+//
+// A refusal is followed by the restore, and the restore reads the tree to
+// decide what it may delete: it removes a path only when the snapshot holds a
+// copy to write back, and everything else goes to the restore's clean, whose
+// reach is bounded by that same list. `git apply --3way` breaks both halves of
+// that at once, because it is not the atomic thing `git apply` is — it merges
+// every path it can and STAGES the result, including the new files the task
+// wrote, and the restore's `reset --hard` then deletes a path that is staged
+// and not in the target commit. Which is a deletion no snapshot was consulted
+// about, and a list the restore's clean never gets to bound.
+//
+// Nothing was lost by it, and that is the point: the snapshot's write-back puts
+// the paths back, so every test of the OUTCOME stays green (T9046 is the one
+// that caught it, and only because it counts the clean's invocations). What the
+// code would have given up is the guard, and it would have given it up silently.
+//
+// So this pins what the restore is HANDED: after a refused compose, nothing is
+// staged, and the paths the three-way attempt recreated are untracked — the
+// shape a refused `git apply` leaves, and the only shape the restore is written
+// to read.
+func TestARefusedComposeHandsTheRestoreAnUnstagedTree(t *testing.T) {
+	f := newRebaselineFixture(t, "T9052")
+	f.mainRewritesTheSameRegion()
+
+	var staged, untracked string
+	var held []string
+	realRestore := restore
+	restore = func(worktree, head, keep string, entries []snapshotEntry) ([]string, error) {
+		// -z, both of them: git C-quotes a path that needs it, and the quoted
+		// string is not a path any filesystem has — this fixture holds one on
+		// purpose (docs/设计.md).
+		staged = f.git(worktree, "diff", "--cached", "--name-only", "-z")
+		untracked = f.git(worktree, "ls-files", "--others", "--exclude-standard", "-z")
+		held = held[:0]
+		for _, e := range entries {
+			held = append(held, e.Path)
+		}
+		return realRestore(worktree, head, keep, entries)
+	}
+	defer func() { restore = realRestore }()
+
+	if _, err := RebaselineTask(f.root, "T9052", "", ""); err == nil {
+		t.Fatal("this fixture's two changes rewrite the same lines, so the advance had to be refused")
+	}
+
+	if staged != "" {
+		t.Errorf("the refused advance handed the restore a STAGED tree (%q): `reset --hard` deletes a staged path without asking the snapshot whether it can be written back, which is the one thing the restore never does", staged)
+	}
+	// The other direction, so that an empty answer cannot pass for a clean one:
+	// a refused `git apply` leaves the task's new files on disk, and a restore
+	// handed a tree with none of them would be being told there is nothing to
+	// put back.
+	if untracked == "" {
+		t.Error("the restore was handed a tree with no untracked path at all, so this test says nothing about what the restore may delete")
+	}
+	for _, p := range strings.Split(untracked, "\x00") {
+		if p == "" {
+			continue
+		}
+		if !slices.Contains(held, p) {
+			t.Errorf("the restore was handed %q as an untracked path, and the snapshot holds no copy of it — the reset above this reads paths like this one as its own to delete", p)
 		}
 	}
 }
