@@ -12,8 +12,8 @@ import (
 )
 
 const attachBlob = `-- name: AttachBlob :exec
-INSERT INTO blob_attachments (blob_id, scientific_object_version_id, attachment_role, access_level)
-VALUES ($1, $2, $3, $4)
+INSERT INTO blob_attachments (blob_id, scientific_object_version_id, attachment_role, access_level, state_id)
+VALUES ($1, $2, $3, $4, $5)
 `
 
 type AttachBlobParams struct {
@@ -21,14 +21,20 @@ type AttachBlobParams struct {
 	ScientificObjectVersionID pgtype.UUID `json:"scientific_object_version_id"`
 	AttachmentRole            string      `json:"attachment_role"`
 	AccessLevel               string      `json:"access_level"`
+	StateID                   pgtype.UUID `json:"state_id"`
 }
 
+// The attachment records the state it was created in (00035): the caller
+// (a state commit's write function) passes the state being committed, so
+// a state's manifest enumerates its blob attachments from the state id
+// alone (internal/domain/state.go).
 func (q *Queries) AttachBlob(ctx context.Context, arg AttachBlobParams) error {
 	_, err := q.db.Exec(ctx, attachBlob,
 		arg.BlobID,
 		arg.ScientificObjectVersionID,
 		arg.AttachmentRole,
 		arg.AccessLevel,
+		arg.StateID,
 	)
 	return err
 }

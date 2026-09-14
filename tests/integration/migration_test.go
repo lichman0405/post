@@ -291,10 +291,16 @@ var canonicalTables = map[string]tableExp{
 		fks:     []fkExp{fk("created_by", "users", "RESTRICT")},
 	},
 	"blob_attachments": {
-		cols:   []colExp{c("blob_id", u, false, false), c("scientific_object_version_id", u, false, false), c("attachment_role", txt, false, false), c("access_level", txt, false, false)},
+		// state_id is the T0206 addition (00035): the state the attachment
+		// was created in, like every member row (object versions, relation
+		// versions, evidence). The manifest filters blob refs on THIS
+		// column — the attachment's own creating state — never on the
+		// owning version's state, so a later attachment cannot leak into
+		// earlier states' manifests.
+		cols:   []colExp{c("blob_id", u, false, false), c("scientific_object_version_id", u, false, false), c("attachment_role", txt, false, false), c("access_level", txt, false, false), c("state_id", u, false, false)},
 		pk:     []string{"blob_id", "scientific_object_version_id", "attachment_role"},
 		checks: []string{"access_level = ANY"},
-		fks:    []fkExp{fk("blob_id", "blobs", "RESTRICT"), fk("scientific_object_version_id", "scientific_object_versions", "RESTRICT")},
+		fks:    []fkExp{fk("blob_id", "blobs", "RESTRICT"), fk("scientific_object_version_id", "scientific_object_versions", "RESTRICT"), fk("state_id", "project_states", "RESTRICT")},
 	},
 	"issues": {
 		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("number", i8, false, false), c("issue_type", txt, false, false), c("title", txt, false, false), c("body", txt, false, true), c("state", txt, false, true), c("created_by", u, false, false), c("created_at", ts, false, true)},
@@ -439,6 +445,9 @@ var explicitIndexes = map[string][]string{
 	"state_commits_branch_created_idx":     {"branch_id", "created_at"},
 	// T0205: branch listing scans (migration 00028).
 	"branches_project_created_idx": {"project_id", "created_at"},
+	// T0206: the manifest export's blob-ref filter walks
+	// blob_attachments.state_id per export (migration 00035).
+	"blob_attachments_state_idx": {"state_id"},
 	// T0303: the sync backlog scan (boot sweep + redelivered jobs) —
 	// partial on the non-terminal states, so 'closed' rows stay out of it
 	// (migration 00031).

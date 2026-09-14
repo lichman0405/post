@@ -13,6 +13,10 @@ import (
 type Querier interface {
 	AddOrganizationMembership(ctx context.Context, arg AddOrganizationMembershipParams) error
 	AddProjectMembership(ctx context.Context, arg AddProjectMembershipParams) (ProjectMembership, error)
+	// The attachment records the state it was created in (00035): the caller
+	// (a state commit's write function) passes the state being committed, so
+	// a state's manifest enumerates its blob attachments from the state id
+	// alone (internal/domain/state.go).
 	AttachBlob(ctx context.Context, arg AttachBlobParams) error
 	// The expected_version compare-and-swap (T0203): advance the head pointer
 	// from @expected_version_no to @expected_version_no + 1, but only while it
@@ -161,6 +165,35 @@ type Querier interface {
 	LatestPolicyVersionByProject(ctx context.Context, projectID pgtype.UUID) (PolicyVersion, error)
 	ListBranchesByProject(ctx context.Context, projectID pgtype.UUID) ([]Branch, error)
 	ListEvidenceAssertionsForTarget(ctx context.Context, objectVersionID pgtype.UUID) ([]EvidenceAssertion, error)
+	// One row per attached blob (a blob attached to several object versions
+	// still appears once: the manifest pins the blob, not the attachment
+	// cardinality — attachment roles live in blob_attachments). The filter is
+	// the ATTACHMENT's own state (its creating state, 00035), never the
+	// owning version's — an attachment created in a later state must not leak
+	// into earlier states' manifests (a state's hash is a pure function of
+	// the state's own recorded content) — AND the owning version's own
+	// lineage membership, so every blob ref names a version present in the
+	// same manifest (an attachment pointing at a version outside the lineage
+	// never renders a dangling ref).
+	ListManifestBlobRefs(ctx context.Context, stateID pgtype.UUID) ([]ListManifestBlobRefsRow, error)
+	// Manifest export snapshot (task T0206). The manifest of a state is the
+	// project's complete research-state graph as of that state (docs/07 §1):
+	// every scientific object version and relation version whose state_id is
+	// the state itself or one of its ancestors on the per-branch state chain
+	// (walked here by recursive CTE over project_states.parent_state_id), plus
+	// the blob attachments whose OWN state_id (00035) AND owning version are
+	// in the lineage. A version created on a forked branch is not part of the
+	// ancestor branch's snapshot, and vice versa.
+	//
+	// No ORDER BY here on purpose: the canonical ordering of the manifest
+	// arrays is the manifest package's rule (internal/rsg/manifest.Build), not
+	// the store's — the export must not depend on which index the planner
+	// walked.
+	ListManifestObjectVersions(ctx context.Context, stateID pgtype.UUID) ([]ListManifestObjectVersionsRow, error)
+	// Relation versions whose state_id is in the lineage — the same recursive
+	// ancestor walk the object-version query uses (a version created on a
+	// forked branch is not part of the ancestor branch's snapshot).
+	ListManifestRelationVersions(ctx context.Context, stateID pgtype.UUID) ([]RelationVersion, error)
 	// Organization Activity page: the organization's audit rows newest-first,
 	// same keyset shape as the project query.
 	ListOrganizationAuditEntries(ctx context.Context, arg ListOrganizationAuditEntriesParams) ([]ListOrganizationAuditEntriesRow, error)
