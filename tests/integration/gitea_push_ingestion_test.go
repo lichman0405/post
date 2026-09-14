@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/lichman0405/post/internal/application/branches"
 	"github.com/lichman0405/post/internal/config"
@@ -355,6 +356,18 @@ func (fx *pushIngestionGiteaFixture) stateBySHA(t *testing.T, ctx context.Contex
 	return id, parentID, true
 }
 
+// semanticFlag returns the branch's semantic completeness flag (T0306's
+// projection — the value migration 00042's gates read).
+func (fx *pushIngestionGiteaFixture) semanticFlag(t *testing.T, ctx context.Context, branchID string) string {
+	t.Helper()
+	var state string
+	if err := fx.pool.QueryRow(ctx, `SELECT semantic_state
+		FROM git_branch_semantic_states WHERE branch_id = $1`, branchID).Scan(&state); err != nil {
+		t.Fatalf("gitea integration: probe semantic state: %v", err)
+	}
+	return state
+}
+
 // TestGiteaPushIngestionEndToEnd is the acceptance evidence: a real branch
 // push is ingested (inspection over the git diff, manifest classified,
 // candidate recorded, head pointer and state advanced), a redelivered
@@ -413,6 +426,11 @@ func TestGiteaPushIngestionEndToEnd(t *testing.T) {
 	}
 	if changes[1].path != "README.md" || changes[1].kind != "modified" || changes[1].fileKind != "unstructured" {
 		t.Errorf("gitea integration: README change = %+v", changes[1])
+	}
+	// T0306: the README is retained AND counted — the branch is marked
+	// unstructured_changes by the same delivery.
+	if got := fx.semanticFlag(t, ctx, branch.ID); got != string(gitprovider.BranchSemanticUnstructured) {
+		t.Errorf("gitea integration: semantic flag after push 1 = %q, want unstructured_changes", got)
 	}
 	cands := fx.candidateRows(t, ctx)
 	if len(cands) != 1 || cands[0].path != "manifests/mat.json" || cands[0].kind != "added" ||
@@ -476,6 +494,11 @@ func TestGiteaPushIngestionEndToEnd(t *testing.T) {
 	}
 	if _, parentC, okC := fx.stateBySHA(t, ctx, shaC); !okC || parentC != stateB {
 		t.Errorf("gitea integration: state C parent = %q, want chained to state B %s", parentC, stateB)
+	}
+	// Removing the manifest resolves only ITS path — README.md (and the
+	// bulk files) are still unstructured, so the flag stays.
+	if got := fx.semanticFlag(t, ctx, branch.ID); got != string(gitprovider.BranchSemanticUnstructured) {
+		t.Errorf("gitea integration: semantic flag after push 3 = %q, want still unstructured_changes", got)
 	}
 
 	// ---- The acceptance criterion 重复 webhook 不重复 state: the SAME
@@ -586,6 +609,111 @@ func TestGiteaPushIngestionEndToEnd(t *testing.T) {
 	}
 	if _, _, _, head, _ := fx.mappingRow(t, ctx, branch.ID); head != shaP {
 		t.Errorf("gitea integration: Q replay moved the head: %q, want still %s", head, shaP)
+	}
+
+	// ---- T0306 negative at the boundary: the branch still carries
+	// unstructured files (README.md, the bulk set, p.txt, q.txt), so its
+	// flag is unstructured_changes and the database refuses the merge —
+	// even the strongest possible path, a raw lifecycle UPDATE. Nothing
+	// about the out-of-order choreography may have cleared it.
+	if got := fx.semanticFlag(t, ctx, branch.ID); got != string(gitprovider.BranchSemanticUnstructured) {
+		t.Errorf("gitea integration: semantic flag at the end = %q, want unstructured_changes", got)
+	}
+	_, err := fx.pool.Exec(ctx, `UPDATE branches SET lifecycle_state = 'merged' WHERE id = $1`, branch.ID)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "P0001" {
+		t.Errorf("gitea integration: merge of an unstructured branch = %v, want the semantic gate's P0001 refusal", err)
+	}
+}
+
+// TestGiteaUnstructuredResolutionEndToEnd closes T0306's loop over the
+// live boundary: files the platform cannot parse are RETAINED and the
+// branch is marked unstructured_changes (its merge refused by the
+// database); the agent's follow-up pushes replace one garbage file with a
+// valid manifest at the SAME path and remove the other — only then is the
+// branch semantic_complete and the merge goes through.
+func TestGiteaUnstructuredResolutionEndToEnd(t *testing.T) {
+	ctx := testCtx(t)
+	fx := newPushIngestionGiteaFixture(t, ctx)
+	owner, name, repoID, secret := fx.provision(t, ctx)
+	mainSHA := fx.seedMain(t, owner, name)
+
+	forkStateID := fx.forkState(t, ctx, mainSHA)
+	branch := fx.createBranch(t, ctx, "semantic", forkStateID)
+	if err := fx.syncer().Sync(ctx, branch.ID); err != nil {
+		t.Fatalf("gitea integration: Sync (create): %v", err)
+	}
+	mergeBranch := func() error {
+		t.Helper()
+		_, err := fx.pool.Exec(ctx, `UPDATE branches SET lifecycle_state = 'merged' WHERE id = $1`, branch.ID)
+		return err
+	}
+	isSemanticGate := func(err error) bool {
+		var pgErr *pgconn.PgError
+		return errors.As(err, &pgErr) && pgErr.Code == "P0001"
+	}
+
+	// ---- Push 1: a junk .json (manifest-shaped but invalid) and a raw
+	// CSV. BOTH are retained as change rows (任意文件 push 不丢失), the
+	// branch is unstructured_changes, and its merge is refused.
+	shaA := fx.pushCommit(t, owner, name, "semantic", mainSHA, map[string]string{
+		"data/junk.json": `{"not":"a manifest"}`,
+		"data/raw.csv":   "x,y\n1,2\n",
+	}, nil, "agent drops raw artifacts")
+	if code := fx.deliver(t, repoID, owner, name, "refs/heads/semantic", mainSHA, shaA, 1, nil, secret, "d-a"); code != http.StatusNoContent {
+		t.Fatalf("gitea integration: delivery A = %d, want 204", code)
+	}
+	if got := len(fx.changeRows(t, ctx)); got != 2 {
+		t.Errorf("gitea integration: changes after push 1 = %d, want 2 (both unparseable files retained)", got)
+	}
+	if got := len(fx.candidateRows(t, ctx)); got != 0 {
+		t.Errorf("gitea integration: candidates after push 1 = %d, want 0 (nothing classified)", got)
+	}
+	if got := fx.semanticFlag(t, ctx, branch.ID); got != string(gitprovider.BranchSemanticUnstructured) {
+		t.Fatalf("gitea integration: flag after push 1 = %q, want unstructured_changes", got)
+	}
+	if err := mergeBranch(); !isSemanticGate(err) {
+		t.Errorf("gitea integration: merge after push 1 = %v, want the semantic gate's P0001 refusal", err)
+	}
+
+	// ---- Push 2: the agent replaces data/junk.json with a VALID material
+	// manifest at the same path. That resolves only junk.json — the CSV is
+	// still outstanding, so the flag stays unstructured_changes and the
+	// merge is still refused.
+	shaB := fx.pushCommit(t, owner, name, "semantic", shaA, map[string]string{
+		"data/junk.json": pushMatDoc(),
+	}, nil, "agent replaces junk with a manifest")
+	if code := fx.deliver(t, repoID, owner, name, "refs/heads/semantic", shaA, shaB, 1, nil, secret, "d-b"); code != http.StatusNoContent {
+		t.Fatalf("gitea integration: delivery B = %d, want 204", code)
+	}
+	if got := len(fx.changeRows(t, ctx)); got != 3 {
+		t.Errorf("gitea integration: changes after push 2 = %d, want 3 (history retained)", got)
+	}
+	cands := fx.candidateRows(t, ctx)
+	if len(cands) != 1 || cands[0].path != "data/junk.json" || cands[0].kind != "modified" {
+		t.Errorf("gitea integration: candidates after push 2 = %+v, want the junk.json manifest replacement", cands)
+	}
+	if got := fx.semanticFlag(t, ctx, branch.ID); got != string(gitprovider.BranchSemanticUnstructured) {
+		t.Errorf("gitea integration: flag after push 2 = %q, want still unstructured_changes (the CSV is still outstanding)", got)
+	}
+	if err := mergeBranch(); !isSemanticGate(err) {
+		t.Errorf("gitea integration: merge after push 2 = %v, want the semantic gate still refusing", err)
+	}
+
+	// ---- Push 3: the agent removes the CSV. The removal resolves the last
+	// outstanding path — the flag clears and the merge completes.
+	shaC := fx.pushCommit(t, owner, name, "semantic", shaB, nil, []string{"data/raw.csv"}, "agent removes the raw csv")
+	if code := fx.deliver(t, repoID, owner, name, "refs/heads/semantic", shaB, shaC, 1, nil, secret, "d-c"); code != http.StatusNoContent {
+		t.Fatalf("gitea integration: delivery C = %d, want 204", code)
+	}
+	if got := len(fx.changeRows(t, ctx)); got != 4 {
+		t.Errorf("gitea integration: changes after push 3 = %d, want 4 (history retained)", got)
+	}
+	if got := fx.semanticFlag(t, ctx, branch.ID); got != string(gitprovider.BranchSemanticComplete) {
+		t.Errorf("gitea integration: flag after push 3 = %q, want semantic_complete (the removal resolved the last path)", got)
+	}
+	if err := mergeBranch(); err != nil {
+		t.Errorf("gitea integration: merge after push 3 = %v, want success", err)
 	}
 }
 

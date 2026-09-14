@@ -78,7 +78,11 @@ func (s *PGPushIngestStore) WebhookSecretByRepoID(ctx context.Context, giteaRepo
 //   - a project_states row for the pushed head (ON CONFLICT on the
 //     content hash — the same commit on another branch reuses the same
 //     state), chained to the parent state when the before commit was
-//     itself ingested.
+//     itself ingested;
+//   - the branch's semantic completeness flag (git_branch_semantic_states,
+//     T0306) — recomputed from the change rows at the head pointer, so the
+//     PR/merge gates of migration 00042 always see the flag that matches
+//     the recorded head.
 func (s *PGPushIngestStore) IngestPush(ctx context.Context, in IngestPushParams) (bool, error) {
 	ev := in.Event
 	tx, err := s.pool.Begin(ctx)
@@ -243,6 +247,18 @@ func (s *PGPushIngestStore) IngestPush(ctx context.Context, in IngestPushParams)
 			 VALUES ($1, $2, $3, $4, $5, 'v1')
 			 ON CONFLICT (project_id, state_hash) DO NOTHING`,
 			*projectID, *branchID, parentID, GitStateHash(ev.After), ev.After); err != nil {
+			return false, err
+		}
+	}
+
+	// T0306: the branch's semantic completeness flag is a projection of the
+	// ingestion evidence at the head pointer — refresh it inside the same
+	// transaction, AFTER the advance, so flag and head can never diverge
+	// observably. When the advance was refused the head is still the
+	// previous commit and the derivation walks that (the refused delivery's
+	// rows are facts, but they are not part of the head's chain).
+	if branchID != nil && !isZerosSHA(ev.After) {
+		if err := s.refreshBranchSemanticState(ctx, tx, ev.RepositoryID, ev.Ref, *branchID); err != nil {
 			return false, err
 		}
 	}
