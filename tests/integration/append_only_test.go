@@ -41,10 +41,11 @@ import (
 // (test_T0013_<run_id>, docs/66 §3).
 const appendOnlyTaskID = "T0013"
 
-// appendOnlyTables is the set migration 00014 guards: every table that is
-// append-only BY DESIGN (docs/21 §4, docs/46, ADR-007/008/021, Master
-// Acceptance Gate A). The same list drives the catalog assertion and the
-// per-table rejection loop.
+// appendOnlyTables is the set of append-only-BY-DESIGN tables (docs/21 §4,
+// docs/46, ADR-007/008/021, Master Acceptance Gate A). Migration 00014/00015
+// guards the original set; tables added later create their own guard pair in
+// their own migration (00038 adds project_schema_profiles, T0213). The same
+// list drives the catalog assertion and the per-table rejection loop.
 var appendOnlyTables = []string{
 	"scientific_object_versions",
 	"relation_versions",
@@ -61,6 +62,7 @@ var appendOnlyTables = []string{
 	"external_reference_snapshots",
 	"git_push_ingestions",
 	"git_push_changes",
+	"project_schema_profiles",
 }
 
 // targetedGuardTriggers are the NON-append-only row guards added after
@@ -536,6 +538,28 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 			del: func(id string) error {
 				_, err := pool.Exec(ctx, `DELETE FROM git_push_changes
 					WHERE ingestion_id = $1 AND path = 'x.json'`, id)
+				return err
+			},
+		},
+		{
+			// T0213 (00038): a registered schema profile version is
+			// immutable by design — schema versions are never overwritten,
+			// new content takes a new version (docs/21 §8).
+			table: "project_schema_profiles",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO project_schema_profiles
+					(project_id, schema_id, version, base_schema_id, base_schema_version,
+					 content, content_hash, created_by)
+					VALUES ($1, 'project:x:experiment_ext', '1',
+					        'https://open-rd.example/schemas/experiment.schema.json', '1',
+					        '{}', repeat('a', 64), $2) RETURNING id`, p1, u1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE project_schema_profiles SET version = 'rewritten' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM project_schema_profiles WHERE id = $1`, id)
 				return err
 			},
 		},

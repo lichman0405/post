@@ -35,6 +35,10 @@ const (
 	// T0603 policy actions: one version row per action, written in the
 	// same transaction as the policy version itself.
 	ActionPolicyVersionSet = "policy.version_set"
+	// T0213 schema profile actions: one version row per registration,
+	// written in the same transaction as the profile version itself
+	// (same one-unit rule as the policy surface).
+	ActionSchemaProfileRegistered = "project.schema_profile_registered"
 )
 
 // Stable via values (the audit_log.via column): how the action arrived.

@@ -183,6 +183,17 @@ var canonicalTables = map[string]tableExp{
 		checks: []string{"role = ANY"},
 		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("user_id", "users", "RESTRICT")},
 	},
+	"project_schema_profiles": {
+		// T0213 (00038): namespaced, versioned JSON Schema profiles that
+		// extend the official base schemas — append-only (the 00014 guard
+		// trigger rejects UPDATE/DELETE), content is the exact generated
+		// document bytes (TEXT so the hash pins byte equality).
+		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("schema_id", txt, false, false), c("version", txt, false, false), c("base_schema_id", txt, false, false), c("base_schema_version", txt, false, false), c("content", txt, false, false), c("content_hash", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"project_id", "schema_id", "version"}},
+		checks:  []string{"schema_id ~~", "version ~", "base_schema_version", "jsonb_typeof", "content_hash"},
+		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
+	},
 	"policy_versions": {
 		cols:   []colExp{c("id", u, false, true), c("organization_id", u, true, false), c("project_id", u, true, false), c("version", txt, false, false), c("policy_json", jb, false, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
 		pk:     []string{"id"},
@@ -468,6 +479,9 @@ var explicitIndexes = map[string][]string{
 	// string is never reused within one policy line.
 	"policy_versions_org_version_idx":     {"organization_id", "UNIQUE"},
 	"policy_versions_project_version_idx": {"project_id", "UNIQUE"},
+	// T0213: profile resolution paths (00038) — the newest registered
+	// version of (project, schema id), keyset-ordered.
+	"project_schema_profiles_project_idx": {"project_id", "schema_id", "created_at"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
@@ -629,6 +643,7 @@ func TestUpgradePath(t *testing.T) {
 		"credit_disputes", "research_events", "outbox_events",
 		"subscriptions", "webhook_deliveries", "audit_log", "search_documents",
 		"profiles", "git_repository_provisions", "git_branch_refs",
+		"project_schema_profiles",
 	}
 	for _, name := range present {
 		if _, ok := intermediate.Tables[name]; !ok {

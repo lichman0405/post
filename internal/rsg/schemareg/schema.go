@@ -38,6 +38,17 @@ func (s *Schema) Validate(doc []byte) error {
 	return nil
 }
 
+// Raw returns a copy of the exact schema document bytes this version was
+// registered with (the bytes ContentHash digests). It is how a consumer can
+// derive an extension from a registered base schema without re-reading the
+// source file — T0213's profile generation reads the base's property
+// definitions from here.
+func (s *Schema) Raw() []byte {
+	out := make([]byte, len(s.raw))
+	copy(out, s.raw)
+	return out
+}
+
 // TypeConst returns the object type this schema governs: the const value
 // of its properties.type, when the schema declares one ("" and false
 // otherwise). It is how a version row alone can be assembled into its
