@@ -117,14 +117,16 @@ type filesRaw struct {
 // plus a record of every provider call, so the permission filter can be
 // pinned — a denied read must reach the provider exactly zero times.
 type filesPort struct {
-	tree    map[string]gitprovider.TreeListing // key: prefix
-	treeErr error
-	files   map[string]gitprovider.FileContent // key: path
-	fileErr error
-	raw     map[string]filesRaw // key: path
-	rawErr  error
-	history []gitprovider.CommitEntry
-	histErr error
+	tree     map[string]gitprovider.TreeListing // key: prefix
+	treeErr  error
+	files    map[string]gitprovider.FileContent // key: path
+	fileErr  error
+	raw      map[string]filesRaw // key: path
+	rawErr   error
+	patch    map[string]filesRaw // key: commit sha
+	patchErr error
+	history  []gitprovider.CommitEntry
+	histErr  error
 
 	calls         int
 	gotTreeRef    string
@@ -137,6 +139,7 @@ func newFilesPort() *filesPort {
 		tree:  map[string]gitprovider.TreeListing{},
 		files: map[string]gitprovider.FileContent{},
 		raw:   map[string]filesRaw{},
+		patch: map[string]filesRaw{},
 	}
 }
 
@@ -163,6 +166,18 @@ func (p *filesPort) GetRaw(_ context.Context, _ gitprovider.Repository, _, path 
 		return 0, nil, p.rawErr
 	}
 	f, ok := p.raw[path]
+	if !ok {
+		return 0, nil, gitprovider.ErrNotFound
+	}
+	return f.size, io.NopCloser(strings.NewReader(f.body)), nil
+}
+
+func (p *filesPort) GetCommitPatch(_ context.Context, _ gitprovider.Repository, sha string) (int64, io.ReadCloser, error) {
+	p.calls++
+	if p.patchErr != nil {
+		return 0, nil, p.patchErr
+	}
+	f, ok := p.patch[sha]
 	if !ok {
 		return 0, nil, gitprovider.ErrNotFound
 	}
@@ -658,6 +673,69 @@ func TestFilesRawAttachmentHeaders(t *testing.T) {
 	}
 }
 
+// TestFilesDiffStreamsPatch: the raw diff channel streams one commit's
+// patch through unparsed — plain text with nosniff so the payload can
+// never render as anything executable.
+func TestFilesDiffStreamsPatch(t *testing.T) {
+	const sha = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"
+	srv := memberFiles(t, func(p *filesPort) {
+		p.patch[sha] = filesRaw{size: 21, body: "--- a/f b/f\n+line\n"}
+	})
+
+	resp := srv.get(t, "/api/v1/projects/"+filesProjectID+"/files/diff?sha="+sha)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("diff = %d (body %s)", resp.StatusCode, filesReadBody(resp))
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/plain; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want text/plain; charset=utf-8", ct)
+	}
+	if resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("missing nosniff on the raw diff")
+	}
+	if cl := resp.Header.Get("Content-Length"); cl != "21" {
+		t.Errorf("Content-Length = %q, want 21", cl)
+	}
+	if body := filesReadBody(resp); body != "--- a/f b/f\n+line\n" {
+		t.Errorf("body = %q, want the provider patch bytes", body)
+	}
+}
+
+// TestFilesDiffSHAValidation: the sha parameter must be a commit SHA —
+// missing or non-hex answers 400 before any provider call.
+func TestFilesDiffSHAValidation(t *testing.T) {
+	srv := memberFiles(t, nil)
+
+	for _, query := range []string{"", "?sha=", "?sha=xyz1234", "?sha=main", "?sha=abcd12"} {
+		resp := srv.get(t, "/api/v1/projects/"+filesProjectID+"/files/diff"+query)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("diff%q = %d, want 400", query, resp.StatusCode)
+			continue
+		}
+		if code := codeOf(t, resp); code != codeInvalidSHA {
+			t.Errorf("diff%q code = %q, want %q", query, code, codeInvalidSHA)
+		}
+	}
+	if srv.port.calls != 0 {
+		t.Errorf("an invalid sha reached the provider %d times", srv.port.calls)
+	}
+}
+
+// TestFilesDiffUnknownCommit: a sha the provider does not know is the
+// files-not-found 404.
+func TestFilesDiffUnknownCommit(t *testing.T) {
+	srv := memberFiles(t, func(p *filesPort) {
+		p.patchErr = gitprovider.ErrNotFound
+	})
+
+	resp := srv.get(t, "/api/v1/projects/"+filesProjectID+"/files/diff?sha=abcdef1234567890")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+	if code := codeOf(t, resp); code != codeNotFound {
+		t.Errorf("code = %q, want %q", code, codeNotFound)
+	}
+}
+
 // TestFilesDisabledAnswers503: without the provider token the surface
 // fails loud — 503 naming the missing key, before any project or provider
 // access (the enabled gate runs first).
@@ -692,7 +770,7 @@ func TestFilesDisabledAnswers503(t *testing.T) {
 // runs, even with a fully valid session and CSRF token.
 func TestMutationMethodsRejected(t *testing.T) {
 	srv := memberFiles(t, nil)
-	routes := []string{"tree", "content", "history", "raw"}
+	routes := []string{"tree", "content", "history", "raw", "diff"}
 	for _, route := range routes {
 		for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 			resp := srv.write(t, method, "/api/v1/projects/"+filesProjectID+"/files/"+route)

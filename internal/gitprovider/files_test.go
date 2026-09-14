@@ -18,17 +18,20 @@ import (
 
 // stubFilesPort scripts the provider half of the FilesPort.
 type stubFilesPort struct {
-	tree    map[string]gitprovider.TreeListing // key: prefix
-	treeErr error
-	files   map[string]gitprovider.FileContent // key: path
-	fileErr error
-	raw     map[string]stubRawFile // key: path
-	rawErr  error
-	history []gitprovider.CommitEntry
-	histErr error
+	tree     map[string]gitprovider.TreeListing // key: prefix
+	treeErr  error
+	files    map[string]gitprovider.FileContent // key: path
+	fileErr  error
+	raw      map[string]stubRawFile // key: path
+	rawErr   error
+	patch    map[string]stubRawFile // key: commit sha
+	patchErr error
+	history  []gitprovider.CommitEntry
+	histErr  error
 
 	treeRefs, fileRefs, rawRefs, histRefs []string
 	treePrefixes, filePaths, rawPaths     []string
+	patchSHAs                             []string
 	histPaths                             []string
 	histLimits                            []int
 	fileCalls                             int
@@ -44,6 +47,7 @@ func newStubFilesPort() *stubFilesPort {
 		tree:  map[string]gitprovider.TreeListing{},
 		files: map[string]gitprovider.FileContent{},
 		raw:   map[string]stubRawFile{},
+		patch: map[string]stubRawFile{},
 	}
 }
 
@@ -99,6 +103,18 @@ func (p *stubFilesPort) GetHistory(_ context.Context, _ gitprovider.Repository, 
 		return nil, p.histErr
 	}
 	return p.history, nil
+}
+
+func (p *stubFilesPort) GetCommitPatch(_ context.Context, _ gitprovider.Repository, sha string) (int64, io.ReadCloser, error) {
+	p.patchSHAs = append(p.patchSHAs, sha)
+	if p.patchErr != nil {
+		return 0, nil, p.patchErr
+	}
+	f, ok := p.patch[sha]
+	if !ok {
+		return 0, nil, gitprovider.ErrNotFound
+	}
+	return f.size, io.NopCloser(strings.NewReader(f.body)), nil
 }
 
 func newReader(port gitprovider.FilesPort, repos gitprovider.RepoResolver) *gitprovider.FilesReader {
@@ -460,14 +476,74 @@ func TestFilesReaderRawStreams(t *testing.T) {
 	}
 }
 
+// TestValidateCommitSHA: 7-40 hex characters pass; branch names, short
+// abbreviations and non-hex shapes are ErrInvalidSHA.
+func TestValidateCommitSHA(t *testing.T) {
+	valid := []string{
+		"abcdef1", "abcdef1234567890",
+		"0123456789abcdef0123456789abcdef01234567",
+	}
+	invalid := []string{
+		"", "main", "abc123", "abcdefg1", "xyz1234", "abc-def1",
+		"0123456789abcdef0123456789abcdef012345678", // 41 chars
+	}
+	for _, sha := range valid {
+		if err := gitprovider.ValidateCommitSHA(sha); err != nil {
+			t.Errorf("ValidateCommitSHA(%q) = %v, want nil", sha, err)
+		}
+	}
+	for _, sha := range invalid {
+		if err := gitprovider.ValidateCommitSHA(sha); !errors.Is(err, gitprovider.ErrInvalidSHA) {
+			t.Errorf("ValidateCommitSHA(%q) = %v, want ErrInvalidSHA", sha, err)
+		}
+	}
+}
+
+// TestFilesReaderCommitPatchStreams: a valid sha streams the provider
+// patch bytes through; uppercase shas normalize before the port call.
+func TestFilesReaderCommitPatchStreams(t *testing.T) {
+	const sha = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"
+	port := newStubFilesPort()
+	port.patch[sha] = stubRawFile{size: 11, body: "patch-bytes"}
+	r := testReader(t, port, gitprovider.RepoRef{ProjectID: "p", Owner: "o", Name: "n"})
+	raw, err := r.CommitPatch(context.Background(), "p", strings.ToUpper(sha))
+	if err != nil {
+		t.Fatalf("CommitPatch: %v", err)
+	}
+	got, _ := io.ReadAll(raw.Body)
+	_ = raw.Body.Close()
+	if string(got) != "patch-bytes" || raw.Size != 11 {
+		t.Errorf("patch = %q size %d, want patch-bytes/11", got, raw.Size)
+	}
+	if port.patchSHAs[0] != sha {
+		t.Errorf("port saw sha %q, want the normalized lowercase %q", port.patchSHAs[0], sha)
+	}
+}
+
+// TestFilesReaderCommitPatchRejectsInvalid: a non-commit sha never
+// reaches the provider.
+func TestFilesReaderCommitPatchRejectsInvalid(t *testing.T) {
+	port := newStubFilesPort()
+	r := testReader(t, port, gitprovider.RepoRef{ProjectID: "p", Owner: "o", Name: "n"})
+	for _, sha := range []string{"", "main", "abc123"} {
+		if _, err := r.CommitPatch(context.Background(), "p", sha); !errors.Is(err, gitprovider.ErrInvalidSHA) {
+			t.Errorf("CommitPatch(%q) = %v, want ErrInvalidSHA", sha, err)
+		}
+	}
+	if len(port.patchSHAs) != 0 {
+		t.Errorf("invalid sha reached the port: %v", port.patchSHAs)
+	}
+}
+
 // TestFilesPortIsReadOnly pins the acceptance criterion "Files API 无
 // mutation method" at the port level: the interface carries exactly the
-// four read methods, so a mutating provider call cannot be added without
+// five read methods, so a mutating provider call cannot be added without
 // this test failing.
 func TestFilesPortIsReadOnly(t *testing.T) {
 	typ := reflect.TypeOf((*gitprovider.FilesPort)(nil)).Elem()
 	allowed := map[string]bool{
 		"GetTree": true, "GetFileContent": true, "GetRaw": true, "GetHistory": true,
+		"GetCommitPatch": true,
 	}
 	if typ.NumMethod() != len(allowed) {
 		t.Fatalf("FilesPort has %d methods, want exactly %d: %v", typ.NumMethod(), len(allowed), methodNames(typ))
@@ -482,7 +558,7 @@ func TestFilesPortIsReadOnly(t *testing.T) {
 // TestFilesReaderIsReadOnly pins the same criterion at the service level.
 func TestFilesReaderIsReadOnly(t *testing.T) {
 	typ := reflect.TypeOf(&gitprovider.FilesReader{})
-	allowed := map[string]bool{"Tree": true, "File": true, "History": true, "Raw": true}
+	allowed := map[string]bool{"Tree": true, "File": true, "History": true, "Raw": true, "CommitPatch": true}
 	for i := 0; i < typ.NumMethod(); i++ {
 		m := typ.Method(i)
 		if m.PkgPath != "" {

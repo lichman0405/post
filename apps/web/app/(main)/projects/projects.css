@@ -527,3 +527,426 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* T0308 Files tab: the read-only Git/Blob view (docs/06 §7, docs/17 §1).
+   Three panes — tree, preview, context sidebar — on the shared Primer
+   token set; high density, neutral background, no decorative effects. */
+
+.files-page {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.files-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 4px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.files-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.files-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 2em;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.files-readonly-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 2em;
+  font-size: 12px;
+  color: var(--fgColor-success, #1a7f37);
+  background: var(--bgColor-success-muted, #dafbe1);
+}
+
+.files-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 280px;
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .files-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- Tree pane ---- */
+
+.files-tree {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.files-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+.files-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fgColor-accent, #0969da);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.files-crumb:hover,
+.files-crumb:focus-visible {
+  background: var(--bgColor-accent-muted, #ddf4ff);
+}
+
+.files-crumb[aria-current="page"] {
+  color: var(--fgColor-default, #1f2328);
+  font-weight: 600;
+  cursor: default;
+}
+
+.files-crumb-sep {
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+
+.files-entry-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.files-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+  background: transparent;
+  color: var(--fgColor-default, #1f2328);
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.files-entry:last-child {
+  border-bottom: 0;
+}
+
+.files-entry:hover,
+.files-entry:focus-visible {
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+.files-entry-icon {
+  display: inline-flex;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.files-entry[data-entry-type="tree"] .files-entry-icon {
+  color: var(--fgColor-accent, #0969da);
+}
+
+.files-entry-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-entry-size {
+  font-size: 11px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.files-empty {
+  margin: 0;
+  padding: 12px 10px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* ---- Preview pane ---- */
+
+.files-preview {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  overflow: hidden;
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+.files-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+.files-preview-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-preview-size {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.files-kind-badge {
+  padding: 1px 8px;
+  border-radius: 2em;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  font-size: 11px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.files-text-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.files-content {
+  margin: 0;
+  padding: 12px;
+  flex: 1;
+  overflow: auto;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  line-height: 1.5;
+  color: var(--fgColor-default, #1f2328);
+  background: var(--bgColor-default, #ffffff);
+}
+
+.files-truncated-note {
+  margin: 0;
+  padding: 6px 12px;
+  border-top: 1px solid var(--borderColor-attention-muted, #d4a72c66);
+  font-size: 12px;
+  color: var(--fgColor-attention, #9a6700);
+  background: var(--bgColor-attention-muted, #fff8c5);
+}
+
+.files-kind-note {
+  margin: 0;
+  padding: 16px 12px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.files-pointer {
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+.files-pointer dt {
+  font-weight: 600;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.files-pointer dd {
+  margin: 2px 0 0;
+}
+
+.files-hint {
+  margin: 0;
+  padding: 16px 12px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.files-state {
+  display: flex;
+  justify-content: center;
+  padding: 16px;
+}
+
+.files-error {
+  padding: 12px;
+  font-size: 13px;
+}
+
+.files-error p {
+  margin: 0 0 8px;
+  color: var(--fgColor-danger, #d1242f);
+}
+
+.files-retry {
+  padding: 4px 12px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background: var(--bgColor-muted, #f6f8fa);
+  color: var(--fgColor-accent, #0969da);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* ---- Context sidebar ---- */
+
+.files-context {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.files-context-section {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.files-context-section:last-child {
+  border-bottom: 0;
+}
+
+.files-context-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.files-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 10px;
+  margin: 0;
+}
+
+.files-facts dt {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.files-facts dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-fact-path {
+  direction: rtl;
+  text-align: left;
+}
+
+.files-sha {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.files-actions {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.files-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.files-action:hover,
+.files-action:focus-visible {
+  text-decoration: underline;
+}
+
+.files-context-note {
+  margin: 0;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.files-history {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+}
+
+.files-history-entry {
+  border-left: 2px solid var(--borderColor-muted, #d8dee4);
+  padding-left: 8px;
+}
+
+.files-history-message {
+  margin: 0;
+  font-weight: 600;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.files-history-meta {
+  margin: 2px 0 0;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.files-history-author {
+  color: var(--fgColor-default, #1f2328);
+}
+
+.files-history-sha {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.files-diff-link {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fgColor-accent, #0969da);
+}

@@ -54,6 +54,11 @@ type FilesPort interface {
 	// repository) at ref, newest first, at most limit entries.
 	// ErrNotFound when the ref (or the repository) does not exist.
 	GetHistory(ctx context.Context, repo Repository, ref, path string, limit int) ([]CommitEntry, error)
+	// GetCommitPatch opens one commit's raw patch at sha (the raw diff
+	// channel — the provider's patch bytes straight through, never parsed).
+	// The caller closes Body. ErrNotFound when the commit (or the
+	// repository) does not exist.
+	GetCommitPatch(ctx context.Context, repo Repository, sha string) (size int64, body io.ReadCloser, err error)
 }
 
 // TreeEntry is one entry of a tree listing.
@@ -173,6 +178,9 @@ var (
 	// ErrInvalidRef: the ref parameter is neither a branch name nor a
 	// full commit SHA.
 	ErrInvalidRef = errors.New("gitprovider: invalid ref")
+	// ErrInvalidSHA: the sha parameter is not a commit SHA (7-40 hex
+	// characters).
+	ErrInvalidSHA = errors.New("gitprovider: invalid commit sha")
 	// ErrInvalidPath: the path parameter cannot name a repository file.
 	ErrInvalidPath = errors.New("gitprovider: invalid path")
 	// ErrIsDirectory: the path names a tree, not a blob (the content
@@ -374,6 +382,27 @@ func (r *FilesReader) Raw(ctx context.Context, projectID, ref, path string) (Raw
 	return RawFile{Size: size, Body: body}, nil
 }
 
+// CommitPatch opens one commit's raw patch (the raw diff channel, docs/06
+// §7: the Files page offers tree, preview, history, raw diff and download —
+// this is the raw diff). The sha is validated as a commit SHA only: a
+// branch name never reaches the provider here, and the patch itself is
+// never parsed — provider bytes stream straight through.
+func (r *FilesReader) CommitPatch(ctx context.Context, projectID, sha string) (RawFile, error) {
+	sha = strings.ToLower(sha)
+	if err := ValidateCommitSHA(sha); err != nil {
+		return RawFile{}, err
+	}
+	repo, err := r.resolveRepo(ctx, projectID)
+	if err != nil {
+		return RawFile{}, err
+	}
+	size, body, err := r.port.GetCommitPatch(ctx, repo, sha)
+	if err != nil {
+		return RawFile{}, err
+	}
+	return RawFile{Size: size, Body: body}, nil
+}
+
 // parentDir returns the parent directory of a repository path ("" for
 // root-level files).
 func parentDir(path string) string {
@@ -414,6 +443,23 @@ func ValidateRef(ref string) error {
 				c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-') {
 				return fmt.Errorf("%w: %q", ErrInvalidRef, ref)
 			}
+		}
+	}
+	return nil
+}
+
+// ValidateCommitSHA accepts a commit SHA of 7-40 hex characters (the
+// range Gitea's commit routes answer — the history channel hands the UI
+// full 40-hex SHAs, while abbreviated ones stay valid for hand-built
+// links). Anything else is ErrInvalidSHA.
+func ValidateCommitSHA(sha string) error {
+	if len(sha) < 7 || len(sha) > 40 {
+		return fmt.Errorf("%w: %q", ErrInvalidSHA, sha)
+	}
+	for i := 0; i < len(sha); i++ {
+		c := sha[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return fmt.Errorf("%w: %q", ErrInvalidSHA, sha)
 		}
 	}
 	return nil

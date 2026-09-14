@@ -187,6 +187,24 @@ function installApiMock(page) {
     if (method === "GET" && pathname === `/api/v1/projects/${ALLOY.id}/members`) {
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ members: ALLOY_MEMBERS }) });
     }
+    // The Files tab (T0308) is the real read-only page now: it mounts one
+    // tree read at the root of main — served here so the tab renders its
+    // actual content, not an error state.
+    if (method === "GET" && pathname === `/api/v1/projects/${ALLOY.id}/files/tree`) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ref: "main",
+          path: "",
+          sha: "tree-e2e-1",
+          entries: [
+            { name: "README.md", path: "README.md", type: "blob", mode: "100644", size: 12, sha: "s1" },
+            { name: "docs", path: "docs", type: "tree", mode: "040000", size: 0, sha: "s2" },
+          ],
+        }),
+      });
+    }
     // The private project (and its membership) answers the existence-
     // hiding 404 for everyone, like the API's read policy for a private
     // project the caller is not authorized for.
@@ -305,7 +323,8 @@ const TAB_ROUTES = [
   ["pulls", "/pulls", "Pull requests"],
   ["releases", "/releases", "Releases"],
   ["assets", "/assets", "Assets"],
-  ["files", "/files", "Files"],
+  // T0308 replaced the Files placeholder with the real read-only page.
+  ["files", "/files", null, "[data-files-page]"],
   ["activity", "/activity", "Activity"],
   // T0109 replaced the Settings placeholder with the real settings page.
   ["settings", "/settings", null, "[data-settings]"],
