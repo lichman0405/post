@@ -1,0 +1,60 @@
+-- +goose Up
+-- Asset manifest document (T0702): the manifest column of a published
+-- asset version holds a manifest — a JSON object — and nothing else.
+--
+-- One published asset version is described by two documents in adjacent
+-- columns of research_asset_versions (00010): the rights declaration in
+-- rights_json (00066) and the version manifest in manifest. The manifest
+-- carries the two publish-checklist items that belong to the version
+-- document rather than to a column of the row (docs/11 §3) — the required
+-- metadata of the asset's type, and the exact dependency pins the version
+-- was built against (docs/11 §5). Its model is internal/assets.Manifest,
+-- whose JSON tags make that struct the stored format; the four asset
+-- types' required metadata is internal/assets.RequiredMetadata, held to
+-- the object schemas' own field names for dataset and protocol.
+--
+-- What the database guarantees is deliberately narrow, and narrower than
+-- it looks: the column holds a JSON OBJECT. A scalar or an array in a
+-- column named manifest is not a small manifest, it is a value of the
+-- wrong kind — no reader can take it as a manifest, so every reader would
+-- have to special-case it. The rule is the storage boundary's own.
+--
+-- The vocabulary is NOT enforced here, for the two reasons 00066 gives
+-- about rights_json, which apply unchanged. First, the vocabulary has
+-- exactly one definition, internal/assets, and a CHECK spelling its
+-- values again is a second definition that drifts silently the first time
+-- one side changes. Second, expressiveness: "the asset type is one of
+-- four", "these five metadata keys are present, each with a value of a
+-- shape its requirement allows", "every dependency pin is pid@version and
+-- no version is pinned twice" are one-line predicates in Go and
+-- multi-line JSON-path expressions in SQL, in a column whose only reader
+-- is Go. The hash shape is left out for the same reason: integrity_hash
+-- is text, its shape (64 lowercase hex characters) and its meaning (the
+-- digest of the canonical manifest bytes) are internal/assets'
+-- isSHA256Hex and Manifest.Hash.
+--
+-- {} is accepted, deliberately — again as in 00066. It is what the
+-- existing fixtures store (tests/integration/asset_core_test.go) and what
+-- any row written before this model holds. It is NOT a manifest:
+-- internal/assets.ParseManifest refuses it (no format version, no asset
+-- type, no required metadata), and this migration does not repair it. No
+-- application path has ever written this column (the publish command is
+-- T0705), so there is no data to repair, and inventing required metadata
+-- for a version that declared none is exactly the upgrade 00064 warns
+-- against: a migration may fill in what the old schema could not express,
+-- never decide what a publisher meant. A row carrying a scalar or an
+-- array would make this migration fail rather than pass silently — the
+-- intended outcome, because such a row is a corrupt document, not a
+-- legacy shape.
+--
+-- Only research_asset_versions.manifest is constrained. The same column
+-- name on releases (00010) holds a RELEASE manifest — the RSG snapshot
+-- hash, the git commit, the blob hashes and the schema/policy/rights
+-- versions fixed at release time (CLAUDE.md §8) — which is a different
+-- document with a different model and no builder yet. Constraining it
+-- here would be asserting a shape nothing has decided; 00066 constrained
+-- both of its columns because they hold the one rights document.
+
+ALTER TABLE research_asset_versions
+  ADD CONSTRAINT research_asset_versions_manifest_document
+    CHECK (jsonb_typeof(manifest) = 'object');
