@@ -1668,9 +1668,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-15T12:00:34Z
+生成时间：2026-09-15T13:12:50Z
 
-状态分布：todo 65 · ready 0 · running 1 · worker_failed 0 · verification 2 · rejected 0 · blocked 0 · accepted 0 · merged 65（合计 133/133 个任务）
+状态分布：todo 64 · ready 0 · running 1 · worker_failed 0 · verification 2 · rejected 0 · blocked 0 · accepted 0 · merged 66（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1729,7 +1729,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0405 | Semantic Conflict Detector | P4 | merged | 2026-09-14T10:19:26Z |  | 2026-09-14T10:46:43Z | 2026-09-14T10:50:01Z |
 | T0406 | Semantic Merge Engine | P4 | todo |  |  |  |  |
 | T0407 | Scientific Conflict Resolution UI | P4 | merged | 2026-09-14T18:21:29Z |  | 2026-09-14T21:49:46Z | 2026-09-14T21:53:00Z |
-| T0408 | PR Research Diff UI | P4 | todo |  |  |  |  |
+| T0408 | PR Research Diff UI | P4 | merged | 2026-09-15T12:44:40Z |  | 2026-09-15T13:06:20Z | 2026-09-15T13:12:44Z |
 | T0409 | Merge Governance 与 frozen main 更新 | P4 | todo |  |  |  |  |
 | T0410 | PR/Branch 完整 E2E | P4 | todo |  |  |  |  |
 | T0501 | Research Question 与 Hypothesis 关系模型 | P5 | merged | 2026-09-14T10:52:04Z |  | 2026-09-14T11:17:35Z | 2026-09-14T11:21:07Z |
@@ -1764,7 +1764,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0711 | Asset Governance 与 Rights Holder Transfer | P7 | todo |  |  |  |  |
 | T0801 | Public Entity Anonymous Pages | P8 | todo |  |  |  |  |
 | T0802 | Explore 聚合 | P8 | todo |  |  |  |  |
-| T0803 | Open Contribution Opportunity | P8 | verification | 2026-09-14T17:38:04Z |  |  |  |
+| T0803 | Open Contribution Opportunity | P8 | verification | 2026-09-15T12:54:08Z |  |  |  |
 | T0804 | External Fork/Contribution flow | P8 | todo |  |  |  |  |
 | T0805 | Published Knowledge Object | P8 | todo |  |  |  |  |
 | T0806 | External Evidence Network Aggregation | P8 | todo |  |  |  |  |

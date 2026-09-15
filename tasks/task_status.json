@@ -3453,9 +3453,12 @@
       ]
     },
     "T0408": {
-      "status": "running",
-      "started_at": "2026-09-15T12:05:27Z",
-      "worker_run_id": "run-54bb9c552b782487",
+      "status": "merged",
+      "started_at": "2026-09-15T12:44:40Z",
+      "worker_run_id": "run-172ae40665967a52",
+      "accepted_by_supervisor_at": "2026-09-15T13:06:20Z",
+      "merged_at": "2026-09-15T13:12:44Z",
+      "rejection_reason": "## 【这是一次缺陷返工，不是基线推进】\n\n你的交付过了门禁，独立复核给了 `approve`（0 条阻塞、0 条重大）。复核报了 8 条，\n**我逐条自己验过，其中 2 条是真的会出错，必须修。** 这两条我都亲手复现了，证据在下面。\n\n**只修这 2 条。** 另外 6 条不要求你改（列在最后一节），**请不要顺手修它们**——\n那会让这次的改动面失控，也会让复核重新变得难以判断。\n\n---\n\n### 一、「最新一次评审」是按**字符串**比出来\n\n`apps/web/lib/pulls.ts` 的 `latestHeadReview`：\n\n```ts\nif (found === null || review.created_at >= found.created_at) found = review;\n```\n\n`created_at` 是字符串，这里就是**字典序比较**，不是时间比较。实测：\n\n```\na = \"2026-09-15T12:00:00Z\"      (整秒)\nb = \"2026-09-15T12:00:00.5Z\"    (同一秒的 .5，实际更晚)\na >= b            -> true       ← 于是「整秒那条」被当成更新的\nDate.parse(a) > Date.parse(b) -> false   ← 实际它更早\n```\n\n后端的 `time.Time` 序列化时，小数部分为 0 就整个省略；有小数时又会把末尾的 0 去掉，\n所以「同一秒里一条 `.5`、一条 `.55`」这种长度不同的写法，**字典序同样会判错**\n（`.5Z` 会被判成比 `.55Z` 更晚）。页面顶部那行会显示**错的那条评审的结论**。\n\n**修法**：接口返回的列表**已经是排好序的**——`internal/persistence/queries/issues_prs.sql`\n的 `ListReviewsByPullRequest` 结尾是 `ORDER BY r.created_at, r.id`（注释里写明是 total order）。\n所以**取匹配到的最后一条**即可，比现在简单；若要自己比，请比较**解析后的时刻**，不要比字符串。\n\n### 二、新建的对象，`changed_fields` 永远是空的，于是「可见性风险」漏报\n\n`apps/web/lib/pulls.ts` 用这个条件挑可见性风险：\n\n```ts\nconst visibilityChanged = diff.object_changes.filter((c) =>\n  c.changed_fields.includes(\"visibility_policy_id\"),\n);\n```\n\n而 `internal/rsg/diff/diff.go:423` 的 `classifyObject`，对**新建**对象是这么返回的：\n\n```go\nif base == nil {\n    return ChangeCreated, nil      // ← 字段差异列表是 nil\n}\n```\n\n也就是说：**一个由本 PR 新建、且一出生就带着受限（或公开）可见性策略的对象，\n不会触发任何可见性风险提示。** 这正是 `docs/06` §6 要求首屏必须展示的\n「visibility changes」，也是你这段代码自己引用的标准「重要风险必须明显」。\n\n`docs/06` §6 原文把首屏内容列成：新增/修改/Abort 的科研对象、知识变化、Evidence 变化、\nProtocol/Schema changes、visibility changes、dependency impact。可见性不是可选项。\n\n**修法**：对 `ChangeCreated` 的对象，从它的 `source_version.visibility_policy_id` 取值来判断\n（是受限/公开就说出来），而不是只看 `changed_fields`。**不要**为了省事对所有新建对象都发一条\n风险——那会变成噪音、反而让真正的风险不显眼；要发的是「新建 + 可见性值得注意」这一类。\n如果你认为还有别的类别也该走同一条路（比如 schema），一并说明理由即可。\n\n**另外**：改完请让 e2e 里真的盖上这两种情况——新建受限对象、以及同一秒两条评审。\n用来当证据的东西必须**能红**：改之前先确认新加的用例在旧代码上失败，改完再确认通过。\n\n---\n\n### 【边界：不要越过去】\n\n- **不要为了让用例变绿而放宽断言**、不要删用例、不要 `skip`、不要把「断言具体值」改成「断言没抛异常」。\n- **不要只是补注释**说「这里有个已知限制」——你要修的是行为，不是措辞。\n- **不要顺手修复核报的另外 6 条**，也不要做无关重构（见下）。\n- 若你验证后认为我上面哪一条是错的（例如 `changed_fields` 对新建对象其实非空、\n  或列表顺序并非 `(created_at, id)`），**拿证据反驳我，不要照着我说的改**。我不希望你把正确的代码改坏。\n\n### 复核报的另外 6 条：已记录，本次不要求改\n\n1. `specs/api/openapi.yaml` 里那个路径只有 `post`，你新加的 `GET` 没写进契约；\n   `specs/**` 在本任务允许范围之外，而且同一份契约早就漏了 T0403 的详情与 checks 路由。\n   这是契约记账，属\"记录\"不属\"返工\"。\n2. `GET .../reviews` 对一个不存在的 PR 号回 200 `[]`，而兄弟路由对同一个号回 404。\n   没有泄露（项目门在前、存储层按项目隔离），且页面永远走不到（PR 详情先 404），\n   但两个面口径不一致，会记进跟进 issue。\n3. 首屏用「计数 + 风险条」代替 §6 列举的那些类目本身（知识/证据只以角标出现）。\n   任务自己的验收标准（首屏非 raw diff、重要风险明显）是成立的，六 tab 也是任务写明的契约，\n   所以按\"记录\"处理，但我会把「§6 首屏清单 vs 任务契约」这个口径差异记进跟进 issue。\n4. e2e 在首屏断言失败时会以未捕获的 Playwright 超时中断，而不是打印自己的结论行\n   （风险条那里你特意避免了这种写法）。失败仍然被记录、退出码仍然非 0，属\"记录\"。\n5. 评审控件只在 Summary tab 显示，与上方注释说的\"离任何 tab 都只差一屏\"不符；\n   提交成功后本地追加了评审却没有刷新 PR 状态，页头可能短暂显示旧状态。\n6. `rawPatchUrl` 与 `lib/files.ts` 的 `diffUrl` 重复构造了同一个 URL，\n   但这是 `pulls.ts` 那条\"不引任何东西、要能在 Node 下直接跑\"的规则逼出来的，单测也钉住了 URL。\n\n### 【你要做的】\n\n1. 按上面两条修 `apps/web/lib/pulls.ts`（以及必要的页面代码）；\n2. 为这两条各补上**能红的**测试——先确认它们在旧行为上会失败，再确认修完通过；\n3. 重跑 `bash tests/e2e-pulls/run.sh` 与你任务要求的全部 required tests；\n4. 确认 `RESULT.json` 自洽（`completed` 要求 `tests[]` 全部 `passed`），\n   并把 `summary` 里与此相关的描述改准。\n",
       "history": [
         {
           "from": "todo",
@@ -3469,6 +3472,45 @@
           "at": "2026-09-15T12:05:27Z",
           "run_id": "run-54bb9c552b782487",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T12:37:57Z",
+          "run_id": "run-1c89b7808ee8751d",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T12:44:39Z",
+          "run_id": "run-13a3f9accf604831",
+          "reason": "## 【这是一次缺陷返工，不是基线推进】\n\n你的交付过了门禁，独立复核给了 `approve`（0 条阻塞、0 条重大）。复核报了 8 条，\n**我逐条自己验过，其中 2 条是真的会出错，必须修。** 这两条我都亲手复现了，证据在下面。\n\n**只修这 2 条。** 另外 6 条不要求你改（列在最后一节），**请不要顺手修它们**——\n那会让这次的改动面失控，也会让复核重新变得难以判断。\n\n---\n\n### 一、「最新一次评审」是按**字符串**比出来\n\n`apps/web/lib/pulls.ts` 的 `latestHeadReview`：\n\n```ts\nif (found === null || review.created_at >= found.created_at) found = review;\n```\n\n`created_at` 是字符串，这里就是**字典序比较**，不是时间比较。实测：\n\n```\na = \"2026-09-15T12:00:00Z\"      (整秒)\nb = \"2026-09-15T12:00:00.5Z\"    (同一秒的 .5，实际更晚)\na >= b            -> true       ← 于是「整秒那条」被当成更新的\nDate.parse(a) > Date.parse(b) -> false   ← 实际它更早\n```\n\n后端的 `time.Time` 序列化时，小数部分为 0 就整个省略；有小数时又会把末尾的 0 去掉，\n所以「同一秒里一条 `.5`、一条 `.55`」这种长度不同的写法，**字典序同样会判错**\n（`.5Z` 会被判成比 `.55Z` 更晚）。页面顶部那行会显示**错的那条评审的结论**。\n\n**修法**：接口返回的列表**已经是排好序的**——`internal/persistence/queries/issues_prs.sql`\n的 `ListReviewsByPullRequest` 结尾是 `ORDER BY r.created_at, r.id`（注释里写明是 total order）。\n所以**取匹配到的最后一条**即可，比现在简单；若要自己比，请比较**解析后的时刻**，不要比字符串。\n\n### 二、新建的对象，`changed_fields` 永远是空的，于是「可见性风险」漏报\n\n`apps/web/lib/pulls.ts` 用这个条件挑可见性风险：\n\n```ts\nconst visibilityChanged = diff.object_changes.filter((c) =>\n  c.changed_fields.includes(\"visibility_policy_id\"),\n);\n```\n\n而 `internal/rsg/diff/diff.go:423` 的 `classifyObject`，对**新建**对象是这么返回的：\n\n```go\nif base == nil {\n    return ChangeCreated, nil      // ← 字段差异列表是 nil\n}\n```\n\n也就是说：**一个由本 PR 新建、且一出生就带着受限（或公开）可见性策略的对象，\n不会触发任何可见性风险提示。** 这正是 `docs/06` §6 要求首屏必须展示的\n「visibility changes」，也是你这段代码自己引用的标准「重要风险必须明显」。\n\n`docs/06` §6 原文把首屏内容列成：新增/修改/Abort 的科研对象、知识变化、Evidence 变化、\nProtocol/Schema changes、visibility changes、dependency impact。可见性不是可选项。\n\n**修法**：对 `ChangeCreated` 的对象，从它的 `source_version.visibility_policy_id` 取值来判断\n（是受限/公开就说出来），而不是只看 `changed_fields`。**不要**为了省事对所有新建对象都发一条\n风险——那会变成噪音、反而让真正的风险不显眼；要发的是「新建 + 可见性值得注意」这一类。\n如果你认为还有别的类别也该走同一条路（比如 schema），一并说明理由即可。\n\n**另外**：改完请让 e2e 里真的盖上这两种情况——新建受限对象、以及同一秒两条评审。\n用来当证据的东西必须**能红**：改之前先确认新加的用例在旧代码上失败，改完再确认通过。\n\n---\n\n### 【边界：不要越过去】\n\n- **不要为了让用例变绿而放宽断言**、不要删用例、不要 `skip`、不要把「断言具体值」改成「断言没抛异常」。\n- **不要只是补注释**说「这里有个已知限制」——你要修的是行为，不是措辞。\n- **不要顺手修复核报的另外 6 条**，也不要做无关重构（见下）。\n- 若你验证后认为我上面哪一条是错的（例如 `changed_fields` 对新建对象其实非空、\n  或列表顺序并非 `(created_at, id)`），**拿证据反驳我，不要照着我说的改**。我不希望你把正确的代码改坏。\n\n### 复核报的另外 6 条：已记录，本次不要求改\n\n1. `specs/api/openapi.yaml` 里那个路径只有 `post`，你新加的 `GET` 没写进契约；\n   `specs/**` 在本任务允许范围之外，而且同一份契约早就漏了 T0403 的详情与 checks 路由。\n   这是契约记账，属\"记录\"不属\"返工\"。\n2. `GET .../reviews` 对一个不存在的 PR 号回 200 `[]`，而兄弟路由对同一个号回 404。\n   没有泄露（项目门在前、存储层按项目隔离），且页面永远走不到（PR 详情先 404），\n   但两个面口径不一致，会记进跟进 issue。\n3. 首屏用「计数 + 风险条」代替 §6 列举的那些类目本身（知识/证据只以角标出现）。\n   任务自己的验收标准（首屏非 raw diff、重要风险明显）是成立的，六 tab 也是任务写明的契约，\n   所以按\"记录\"处理，但我会把「§6 首屏清单 vs 任务契约」这个口径差异记进跟进 issue。\n4. e2e 在首屏断言失败时会以未捕获的 Playwright 超时中断，而不是打印自己的结论行\n   （风险条那里你特意避免了这种写法）。失败仍然被记录、退出码仍然非 0，属\"记录\"。\n5. 评审控件只在 Summary tab 显示，与上方注释说的\"离任何 tab 都只差一屏\"不符；\n   提交成功后本地追加了评审却没有刷新 PR 状态，页头可能短暂显示旧状态。\n6. `rawPatchUrl` 与 `lib/files.ts` 的 `diffUrl` 重复构造了同一个 URL，\n   但这是 `pulls.ts` 那条\"不引任何东西、要能在 Node 下直接跑\"的规则逼出来的，单测也钉住了 URL。\n\n### 【你要做的】\n\n1. 按上面两条修 `apps/web/lib/pulls.ts`（以及必要的页面代码）；\n2. 为这两条各补上**能红的**测试——先确认它们在旧行为上会失败，再确认修完通过；\n3. 重跑 `bash tests/e2e-pulls/run.sh` 与你任务要求的全部 required tests；\n4. 确认 `RESULT.json` 自洽（`completed` 要求 `tests[]` 全部 `passed`），\n   并把 `summary` 里与此相关的描述改准。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T12:44:40Z",
+          "run_id": "run-172ae40665967a52",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T12:54:22Z",
+          "run_id": "run-551adad75632b5ab"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-15T13:06:20Z",
+          "run_id": "run-582fae9047a18d59"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-15T13:12:44Z",
+          "run_id": "run-d3a5990d0ed938c2"
         }
       ]
     },
@@ -4546,10 +4588,10 @@
       "merged_at": null
     },
     "T0803": {
-      "status": "running",
-      "started_at": "2026-09-15T12:02:11Z",
-      "worker_run_id": "run-d7648cc63ebd8686",
-      "rejection_reason": "## 【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（`568951e`），你的完整改动**重新组合**（不是文本三方合并）\n到新基线上，改动集合逐个文件比对一致；两个生成物（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`）\n被带回来由工具重新生成；迁移编号不变，仍是 **00062**。\n\n### 有一件事需要你专门看一眼：两个测试文件是「合并」出来的，不是你的原样\n\n你的改动里有**两个文件当前 main 也动过**，它们不是被原样应用，而是与你之外的改动合在了一起：\n\n- `tests/integration/append_only_test.go` —— 两处冲突，都按并集解开：一处只有注释；\n  一处是 `targetedGuardTriggers` 那张受保护触发器表，**从 5 条并成 7 条**——\n  你自己加的 2 条（`contribution_opportunities:contribution_opportunity_guard_trigger` 与\n  `..._target_trigger`）加上别的任务在这条基线之后陆续加进来的 5 条。\n- `tests/integration/migration_test.go` —— 一处冲突，唯一那条期望目录从 1 条并成 2 条。\n\n所以：**不要假设这两个文件还是你离开时的样子**。请打开它们确认合并结果符合你的预期——\n尤其是 `migration_test.go` 的期望表目录，它是「schema 与快照不一致就报错」的那份夹具，\n并错了会让 Gate 以错误的方式变绿或变红。\n\n（背景，免得你误判：`append_only_test.go` 里那 5 条来自你这条基线之后、`main` 上先你合入的\nT0606 / T0214 / T0503；`migration_test.go` 的另一侧里有刚合入的 **T0404**——它加的是 **00061**、\n改的是 `reviews` 表。你加的是 00062，编号不冲突。**T0404 没有动 `append_only_test.go`。**）\n\n### 【你要做的】\n\n在合并后的基线上重跑：\n\n1. 你任务要求的 required tests，以及 `make test-integration`，确认没有因合并而失效；\n2. `bash tests/integration/check-sqlc-drift.sh` 与 `make check-schema-snapshot` —— 你的任务含迁移，\n   这两个生成物必须与迁移一致；\n3. 确认 `RESULT.json` 自洽（`completed` 要求 `tests[]` 全部 `passed`，覆盖任务要求的条目带 label）；\n4. 若一切照旧，原样重新提交 `RESULT.json`。\n\n### 【不要做的事】\n\n不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
+      "status": "verification",
+      "started_at": "2026-09-15T12:54:08Z",
+      "worker_run_id": "run-b4897c3b315509e5",
+      "rejection_reason": "## 【这不是缺陷 —— 基线推进，请在新基线上重新验证】\n\n**你的代码和测试一个字都不用改。** 这次返工的唯一原因是：main 往前走了两次提交，\n而其中一次让**你那份生成物**对不上新的输入了。\n\n### 发生了什么（用大白话说）\n\n你的改动里有一个文件是**算出来的**，不是写的：`specs/SPEC_VERSION.json`。它的内容\n是一串指纹，用来回答「这份规格有没有被改过」。它把一堆文件的内容揉在一起算，**其中\n包括 `tasks/tasks.json`**（任务清单本身也是规格的一部分）。\n\n问题出在这里：我在你开工之后提交了一次记账，改的就是 `tasks/tasks.json`\n（给另一个并行任务收窄了允许改动的范围）。**我改了它的输入，却没有把这个指纹重算一遍。**\n于是：\n\n- main 上的这份指纹对不上了（CI 从那条提交起一直红）；\n- 而 G2 验收门验的是「**当前 main + 你的完整改动**」拼起来的树——拼出来的树里，\n  任务清单是 main 的新版，指纹却是你那份按旧版算的，**所以你的验收门红在了同一格**。\n\n一次记账让另一个正在验收的任务失败，这是我的疏漏，不是你的。main 那份我已经补上并推了；\n你这份需要重新组合到新基线上，由工具**重新算**这个指纹（不是把文本合起来——\n生成物按定义就是重新算出来的）。\n\n### 你的改动是怎么过来的\n\n不是文本三方合并，而是**逐个文件的完整改动重新组合**到新基线上；两个生成物\n（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`）被排除在组合之外，\n由工具从合并后的树重新生成。main 这两次提交**没有碰** `tests/integration/append_only_test.go`\n或 `migration_test.go`，所以这次没有冲突、没有手工合并的文件，**你上次确认过的那两个文件的\n样子不会变**。\n\n### 【你要做的】\n\n1. **重跑你任务要求的全部 required tests**（`make test-integration`、\n   `bash tests/integration/check-sqlc-drift.sh`、`make check-schema-snapshot`，\n   以及你任务包列出的其余项），在新基线上确认它们仍然全绿；\n2. 确认 `RESULT.json` 自洽（`completed` 要求 `tests[]` 全部 `passed`），\n   并把 `summary` 里与新基线相关的部分说准；\n3. 如果你发现**任何**因为这次推进而产生的真实问题（例如某个断言现在红了），\n   **照实报告，不要为了让门变绿而放宽断言**——那种情况下我要知道。\n\n### 【边界】\n\n- 不要改动与本次推进无关的任何东西；不要顺手修复核报里记录在案的那些条目（见 #218）。\n- 不要碰 `tasks/**` 与 `specs/**` 的手工编辑：`specs/database/postgres.sql` 与\n  `specs/SPEC_VERSION.json` 只能由工具重新生成。\n",
       "history": [
         {
           "from": "todo",
@@ -4584,6 +4626,55 @@
           "at": "2026-09-15T12:02:11Z",
           "run_id": "run-d7648cc63ebd8686",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T12:15:01Z",
+          "run_id": "run-1ba17af42a129a59",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T12:23:11Z",
+          "run_id": "run-4ffdd4eaf09b8a95",
+          "reason": "## 【这是一次缺陷返工，不是基线推进】\n\n你的改动在新基线上跑完了门禁，独立复核也给了 `approve`（0 条阻塞、0 条重大）。\n**但复核里有 1 条我亲自复现了，它属于「测试声称覆盖了、实际并没有覆盖」这一类，必须返工。**\n这类东西不许记录放过——因为它会让下一个接手的人以为这里有防护，而实际上没有。\n\n**只需要修这一件事。** 复核另外报的 8 条我已经逐条看过，都不要求你改动（见最后一节），\n**请不要顺手修它们**，那会让这次的改动面失控。\n\n### 要修的东西：那条「别的项目的目标」根本没有被验证\n\n`tests/integration/contribution_opportunity_test.go` 里有两处写着「别的项目」的用例：\n\n- 约 671 行注释「A target of ANOTHER project is refused the same way — no foreign target borrows」，\n  随后 `other := newOppFixture(t, ctx)`，再拿 `f.projectID` + `other.issueID` 去插入；\n- 约 752 行注释「A foreign project never leaks the row's existence」，\n  随后拿 `other.projectID` 去 `Get` / `Close` / `List`。\n\n问题在于 **`newOppFixture` 每次调用都会建一个全新的数据库**\n（`internal/persistence/testdb/testdb.go:76` 的 `DatabaseName` 带时间戳和随机后缀，\n每次 `Setup` 都是 `createDatabase` + 迁移一套新库）。所以：\n\n- `other.issueID` 是**另一个数据库**里的 id，在你这个库里根本不存在。\n  那次插入被拒，拒它的是「目标不存在」那条分支，**和它正上方那个 ghost 用例是同一条路**。\n- `other.projectID` 同理，在你这个库里不存在。`Get`/`Close`/`List` 返回「没有」，\n  是因为**项目不存在**，不是因为**项目存在但不拥有这一行**。\n\n**我做了破坏性验证，不是靠推理：** 把迁移里 `contribution_opportunity_target_guard()` 的\n项目作用域那半句删掉（issue 分支的 `AND i.project_id = NEW.project_id`、\nresearch_question 分支的 `AND o.project_id = NEW.project_id`），\n再跑 `go test ./tests/integration/ -run 'TestTargetExistence'` —— **照样 `ok`**。\n也就是说：**这条安全相关的子句（防「借别人的项目的目标」）现在处于无人验证的状态，\n把它整句删掉都不会有人发现。**\n\n我要的修法是**让测试真的走到那条路径**：在**同一个夹具数据库里**再建一个组织/项目，\n并在那个项目里放一个真实存在的目标（issue、research_question 各一遍），然后：\n\n1. **目标借用**：用 `f.projectID` + 「另一个项目里真实存在的目标 id」去插入 —— 断言被拒。\n   修好之后，把迁移里那句项目作用域删掉，这个用例**必须变红**。请你自己也这样验一遍。\n2. **读隔离**：让那个第二个项目**自己持有一条机会**，然后断言\n   `Get` / `Close`(第二个项目, 第一个项目的行) 返回 `ErrOpportunityNotFound`，\n   且第二个项目的 `List` **只看到它自己那一条**（不是「看到 0 条」——0 条在项目不存在时也是 0 条，\n   区分不了任何东西）。\n\n### 【边界：不要越过去】\n\n- **不要为了让用例变绿而放宽断言**，不要删用例，不要改成 `t.Skip`，不要把「被拒」改成「没报错」。\n- **不要改 `00062` 的守卫语义**去迁就测试。要改的是**测试**，不是守卫。\n- **不要只是把注释改软**（比如把「别的项目」改成「不存在的目标」）——那是把假覆盖擦干净、\n  不是把它补上。注释可以顺带改准，但前提是测试真的测到了。\n- **不要顺手修复核报的另外 8 条**（下面列了），也不要做无关重构。改动面请保持在这一条上。\n- 若你发现我上面的判断有错（比如 `newOppFixture` 其实复用同一个库），**拿证据反驳我**，\n  不要照着我说的改。我不希望你把一个正确的测试改坏。\n\n### 复核报的另外 8 条：已记录，本次不要求改\n\n这些我逐条看过，都不影响已实现的行为或防护，我会记进 PR 正文和跟进 issue：\n\n1. `errors.go` 的 `ErrValidation` 没有和 `contribution.ErrValidation` 打通，\n   畸形 id 会以「内部错误」而不是「输入不合法」的形式冒到将来的 HTTP 层（一行即可修）。\n2. 守卫只在 INSERT 时禁止公开印章，UPDATE 时没禁止：内部行可以被直接 UPDATE 盖上\n   `publicized_by/at`（不改变可见性，改不了公开与否）。\n3. `suggested → open` 没有**强制要求**盖上 `approved_by`（守卫只限制了它「何时可变」，没要求「必须有」）。\n4. INSERT 没禁止直接创建 `closed` 行。\n5. 冻结只对 `public` 行生效，`closed` 且仍 `internal` 的行其内容在数据库层没被冻。\n6. 存储层不看 `IsAgent`，所以「三层防护」实际是「服务层看身份 + 两层看路径」。\n7. `Reject`/`Close` 不拒绝 Agent 身份（授权归属下一层的 API 任务，本层不决定）。\n8. `service_test.go` 里有一处断言实际测的是假实现自己（真印章由集成测试证明）。\n\n### 【你要做的】\n\n1. 按上面把两处「别的项目」的用例改成真正跨项目（同库、项目与目标都真实存在）；\n2. **自己验证这些用例现在能红**：把迁移里项目作用域那句删掉，确认用例失败；再把迁移改回来；\n3. 重跑你任务要求的 required tests 与 `make test-integration`；\n4. 确认 `bash tests/integration/check-sqlc-drift.sh` 与 `make check-schema-snapshot` 仍然一致；\n5. 确认 `RESULT.json` 自洽（`completed` 要求 `tests[]` 全部 `passed`），\n   并且**把里面「foreign-project targets refused」那句描述改准**——要么改到与实际一致，\n   要么在你补齐之后它才是真的。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T12:23:17Z",
+          "run_id": "run-65944dcdc0b85295",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T12:36:16Z",
+          "run_id": "run-7a55e74d49700444",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T12:54:08Z",
+          "run_id": "run-73cd906651505b4a",
+          "reason": "## 【这不是缺陷 —— 基线推进，请在新基线上重新验证】\n\n**你的代码和测试一个字都不用改。** 这次返工的唯一原因是：main 往前走了两次提交，\n而其中一次让**你那份生成物**对不上新的输入了。\n\n### 发生了什么（用大白话说）\n\n你的改动里有一个文件是**算出来的**，不是写的：`specs/SPEC_VERSION.json`。它的内容\n是一串指纹，用来回答「这份规格有没有被改过」。它把一堆文件的内容揉在一起算，**其中\n包括 `tasks/tasks.json`**（任务清单本身也是规格的一部分）。\n\n问题出在这里：我在你开工之后提交了一次记账，改的就是 `tasks/tasks.json`\n（给另一个并行任务收窄了允许改动的范围）。**我改了它的输入，却没有把这个指纹重算一遍。**\n于是：\n\n- main 上的这份指纹对不上了（CI 从那条提交起一直红）；\n- 而 G2 验收门验的是「**当前 main + 你的完整改动**」拼起来的树——拼出来的树里，\n  任务清单是 main 的新版，指纹却是你那份按旧版算的，**所以你的验收门红在了同一格**。\n\n一次记账让另一个正在验收的任务失败，这是我的疏漏，不是你的。main 那份我已经补上并推了；\n你这份需要重新组合到新基线上，由工具**重新算**这个指纹（不是把文本合起来——\n生成物按定义就是重新算出来的）。\n\n### 你的改动是怎么过来的\n\n不是文本三方合并，而是**逐个文件的完整改动重新组合**到新基线上；两个生成物\n（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`）被排除在组合之外，\n由工具从合并后的树重新生成。main 这两次提交**没有碰** `tests/integration/append_only_test.go`\n或 `migration_test.go`，所以这次没有冲突、没有手工合并的文件，**你上次确认过的那两个文件的\n样子不会变**。\n\n### 【你要做的】\n\n1. **重跑你任务要求的全部 required tests**（`make test-integration`、\n   `bash tests/integration/check-sqlc-drift.sh`、`make check-schema-snapshot`，\n   以及你任务包列出的其余项），在新基线上确认它们仍然全绿；\n2. 确认 `RESULT.json` 自洽（`completed` 要求 `tests[]` 全部 `passed`），\n   并把 `summary` 里与新基线相关的部分说准；\n3. 如果你发现**任何**因为这次推进而产生的真实问题（例如某个断言现在红了），\n   **照实报告，不要为了让门变绿而放宽断言**——那种情况下我要知道。\n\n### 【边界】\n\n- 不要改动与本次推进无关的任何东西；不要顺手修复核报里记录在案的那些条目（见 #218）。\n- 不要碰 `tasks/**` 与 `specs/**` 的手工编辑：`specs/database/postgres.sql` 与\n  `specs/SPEC_VERSION.json` 只能由工具重新生成。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T12:54:08Z",
+          "run_id": "run-b4897c3b315509e5",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T13:06:27Z",
+          "run_id": "run-b3742b02b23e058f",
+          "reason": "collect: all checks passed"
         }
       ]
     },
