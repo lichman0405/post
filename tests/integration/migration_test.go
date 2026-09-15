@@ -531,10 +531,16 @@ var canonicalTables = map[string]tableExp{
 		// vocabulary inside it is deliberately NOT a storage rule — its
 		// one definition is internal/rights (see the migration's
 		// comment).
+		//
+		// manifest's jsonb_typeof check is the T0702 addition (00067):
+		// the version manifest is a JSON object and nothing else — the
+		// same boundary, for the other document of the row. Its
+		// vocabulary (the four asset types' required metadata, the
+		// dependency pins) has one definition too, internal/assets.
 		cols:    []colExp{c("id", u, false, true), c("asset_id", u, false, false), c("version", txt, false, false), c("source_release_id", u, true, false), c("manifest", jb, false, false), c("rights_json", jb, false, false), c("visibility", txt, false, false), c("integrity_hash", txt, false, false), c("published_by", u, false, false), c("published_at", ts, false, true), arr("origin_refs", false, false)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"asset_id", "version"}},
-		checks:  []string{"visibility = ANY", "cardinality", "array_position", "jsonb_typeof(rights_json) = 'object'"},
+		checks:  []string{"visibility = ANY", "cardinality", "array_position", "jsonb_typeof(rights_json) = 'object'", "jsonb_typeof(manifest) = 'object'"},
 		fks:     []fkExp{fk("asset_id", "research_assets", "RESTRICT"), fk("source_release_id", "releases", "RESTRICT"), fk("published_by", "users", "RESTRICT")},
 	},
 	"asset_lineage": {
