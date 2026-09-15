@@ -36,7 +36,8 @@ import (
 //
 //	objects  — the object versions the publication would carry, with the
 //	           visibility each has today (docs/11 §2: an object published as
-//	           an asset becomes a network-reusable object);
+//	           an asset becomes a network-reusable object) — whenever the
+//	           project it lives in may be rendered at all, see below;
 //	metadata — the manifest's metadata block, key by key: what a public asset
 //	           page renders (docs/11 §4);
 //	blobs    — the blobs the manifest names, and the access each has today
@@ -49,8 +50,42 @@ import (
 //	           hidden private dependency leak);
 //
 // plus the candidate's own refusals (the gate's, plus the resolutions that
-// failed) and the rights declaration's refusals, which are the fifth item
+// failed) and the rights declaration's refusals, which is the fifth item
 // of the task's own list.
+//
+// One rule governs what any of those entries may SAY about a third project
+// (T0712, issue #238). The route's gate asks only whether the caller may
+// read the PUBLISHING project, so an entry that rendered the project id, the
+// title or the visibility of an entity of some OTHER private project — or a
+// further identity of that entity, such as the scientific_objects row behind
+// the version the caller named — would answer a question the caller has no
+// right to ask: does this identity exist, whose is it, is that project
+// public, what is it called. That is a leak of
+// the same private state docs/23 §5 keeps out of the public API — "私有对象
+// 计数也不能通过 public API 泄漏" is about the existence of private objects,
+// and an identity disclosed one lookup at a time is that leak with a
+// smaller batch size.
+//
+// So every entry renders a project's id, an entity's title and a project's
+// visibility for exactly two owners: the publishing project itself (whose
+// state the publication carries, and which the gate has already established
+// the caller may read) and a PUBLIC project (which any authenticated reader
+// can read anyway, docs/12 §2). For anything else those fields are withheld,
+// and so is any other identity of the entity — mayRenderProject states the
+// rule, and it is membership-independent on purpose: the caller's own
+// memberships take no part in it, so a caller who belongs to both projects
+// is told no more than one who belongs to neither.
+//
+// What is NOT withheld is the entry itself, nor the identity the caller
+// itself put in: the ref stays listed, Resolved stays true, the version id
+// the caller sent is echoed back, and a private dependency stays named and
+// blocking, because
+// "you named something that exists and that this publication must not
+// expose" is precisely what docs/23 §4 sends this preview to say — the
+// caller supplied the identity, so its existence is not news to it, and the
+// blocking answer is the protection this route exists to provide. Blanking
+// Resolved, or reporting a blocking ref as "no such entity", would buy the
+// caller nothing but would disarm the leak check (CLAUDE.md §5.1).
 //
 // Why "named one by one" is the point: docs/11 §5 separates a Dependency —
 // what a project needs to reproduce or run, which takes part in impact
@@ -120,6 +155,17 @@ type StoredAsset struct {
 	// (research_assets.origin_project_id, NOT NULL): the project whose
 	// versions may be published under it.
 	OriginProjectID string
+	// OriginProjectVisibility is the visibility of THAT project
+	// (projects.visibility, the public/private preset of docs/12 §2).
+	//
+	// It is read for the same reason StoredRef carries a ref's project
+	// visibility: it is what decides whether the preview may name the asset's
+	// project and show its title, or is looking at another project's private
+	// state (mayRenderProject, T0712). An EMPTY value means the reader did
+	// not determine it, and empty is not public — the identity is withheld,
+	// which is the fail-closed reading a reader that could not look must
+	// produce.
+	OriginProjectVisibility Visibility
 }
 
 // StoredPin is one dependency pin that resolves to a stored version, with
@@ -242,12 +288,24 @@ type PreviewAsset struct {
 	PID PID `json:"pid"`
 	// AssetType is the type the candidate declared.
 	AssetType Type `json:"asset_type"`
-	// Resolved is true when the pid names a stored asset.
+	// Resolved is true when the pid names a stored asset. It stays true
+	// whenever the pid names one, including one in another private project:
+	// the caller supplied the pid, so its existence is not news to it, and
+	// saying "the asset does not exist" about an asset that does would be a
+	// false finding (see the package comment).
 	Resolved bool `json:"resolved"`
-	// Title is the stored asset's title ("" while unresolvable).
+	// Title is the stored asset's title, "" while unresolvable AND ""
+	// whenever the asset's project may not be rendered (mayRenderProject):
+	// the title of another project's private asset is that project's
+	// information, not the caller's.
 	Title string `json:"title"`
-	// OriginProjectID is the project the stored asset belongs to ("" while
-	// unresolvable).
+	// OriginProjectID is the project the stored asset belongs to, "" while
+	// unresolvable and "" whenever that project may not be rendered
+	// (mayRenderProject).
+	//
+	// The two are empty together on purpose: they are the same disclosure
+	// decision about the same project, and a reader of this struct must not
+	// have to guess which one the rule applied to.
 	OriginProjectID string `json:"origin_project_id"`
 }
 
@@ -271,15 +329,32 @@ type PreviewFacts struct {
 // PreviewObject is one object version the publication would carry, and the
 // visibility it has today.
 type PreviewObject struct {
-	// ObjectVersionID is the scientific object version's row id.
+	// ObjectVersionID is the scientific object version's row id. It is the
+	// identity the caller itself named (object_version:<id>), so it is
+	// rendered for every entry, withheld project or not.
 	ObjectVersionID string `json:"object_version_id"`
-	// ObjectID is the object the version belongs to.
+	// ObjectID is the object the version belongs to, "" whenever that
+	// object's project may not be rendered (mayRenderProject).
+	//
+	// It is withheld for the reason the three fields below are, and the
+	// reason is worth stating because ObjectVersionID next to it is NOT:
+	// the caller sent object_version:<id> and knows that id, but the
+	// scientific_objects row behind it is a SECOND identity the caller
+	// never held and cannot guess, so rendering it would confirm more about
+	// another project's private state than "the identity you sent exists"
+	// (T0712, issue #238).
 	ObjectID string `json:"object_id"`
-	// ProjectID is the project the object lives in.
+	// ProjectID is the project the object lives in, "" whenever that project
+	// may not be rendered (mayRenderProject): a version carried from another
+	// project's private state is listed, and which project it belongs to is
+	// not the caller's to learn (T0712, issue #238).
 	ProjectID string `json:"project_id"`
-	// Title is the version's title: what a public page would show.
+	// Title is the version's title — what a public page would show — and ""
+	// whenever the version's project may not be rendered: a title is the
+	// private project's content, not a fact about the caller's own candidate.
 	Title string `json:"title"`
-	// CurrentVisibility is the visibility of the object's project today.
+	// CurrentVisibility is the visibility of the object's project today, ""
+	// whenever that project may not be rendered.
 	CurrentVisibility Visibility `json:"current_visibility"`
 }
 
@@ -348,12 +423,22 @@ type PreviewRef struct {
 	Ref string `json:"ref"`
 	// Kind is the ref's origin kind, "" when the ref is not canonical.
 	Kind string `json:"kind"`
-	// Resolved is true when the ref names a stored row.
+	// Resolved is true when the ref names a stored row — including a row in
+	// another project's private state, whose existence the caller already
+	// knows: it is the identity the caller itself supplied.
 	Resolved bool `json:"resolved"`
-	// ProjectID is the project the referenced entity lives in ("" while
-	// unresolved).
+	// ProjectID is the project the referenced entity lives in, "" while
+	// unresolved and "" whenever that project may not be rendered
+	// (mayRenderProject): a ref into another project's private state is
+	// reported as resolved, and not as pointing into a project the caller
+	// may name.
 	ProjectID string `json:"project_id,omitempty"`
-	// CurrentVisibility is that project's visibility ("" while unresolved).
+	// CurrentVisibility is that project's visibility, "" while unresolved and
+	// "" whenever that project may not be rendered (mayRenderProject). An
+	// empty value is therefore NOT the answer "this ref is private": a
+	// private dependency is still named as one, in the list that carries the
+	// facts about it. Empty says "this preview will not say whose project
+	// this is".
 	CurrentVisibility string `json:"current_visibility,omitempty"`
 }
 
@@ -400,7 +485,11 @@ type PrivateDependency struct {
 	Kind string `json:"kind"`
 	// Ref is the name the publication would carry: the canonical
 	// pid@version of a pin, the canonical ref of an origin ref, the blob id
-	// of a blob.
+	// of a blob. It is the caller's OWN declaration, echoed back — which is
+	// what makes naming the entry compatible with withholding the other
+	// project's identity (T0712): "the fourth thing in your list is somebody
+	// else's private entity" is the finding docs/23 §4 asks for, and it needs
+	// the caller's own string, not the other project's name.
 	Ref string `json:"ref"`
 	// Blocking is true when this publication must not execute while this
 	// dependency is in the state it is in.
@@ -480,7 +569,7 @@ func Preview(req PreviewRequest, state CurrentState) (ImpactPreview, error) {
 		ProjectID:           req.ProjectID,
 		Version:             c.Version,
 		TargetVisibility:    c.Visibility,
-		Asset:               previewAsset(req.Candidate, state),
+		Asset:               previewAsset(req, state),
 		Objects:             []PreviewObject{},
 		Metadata:            []PreviewMetadata{},
 		Blobs:               []PreviewBlob{},
@@ -527,7 +616,7 @@ func Preview(req PreviewRequest, state CurrentState) (ImpactPreview, error) {
 			out.Refs = append(out.Refs, PreviewRef{Ref: raw})
 			continue
 		}
-		out.Refs = append(out.Refs, previewRef(raw, st))
+		out.Refs = append(out.Refs, previewRef(raw, st, req.ProjectID))
 		if !st.Resolved {
 			out.PublishBlockers = append(out.PublishBlockers, Blocker{
 				Code:  CodePreviewRefUnresolved,
@@ -536,7 +625,7 @@ func Preview(req PreviewRequest, state CurrentState) (ImpactPreview, error) {
 					"must resolve (docs/11 §3: source accepted state/release)",
 			})
 		} else if st.Object != nil {
-			out.Objects = appendObject(out.Objects, *st.Object, st.ProjectID, st.ProjectVisibility)
+			out.Objects = appendObject(out.Objects, *st.Object, st, req.ProjectID)
 		}
 		if dep, named := refDependency(raw, st, req.ProjectID, blockingTarget); named {
 			out.PrivateDependencies = append(out.PrivateDependencies, dep)
@@ -551,6 +640,16 @@ func Preview(req PreviewRequest, state CurrentState) (ImpactPreview, error) {
 		st, resolved := pins[pin]
 		entry := PreviewDependency{Pin: string(pin), Resolved: resolved}
 		if resolved {
+			// RULED, not overlooked (T0712 review): the pinned VERSION's own
+			// visibility is rendered even when the pin points into another
+			// private project. The rule above governs the identity of the
+			// OWNING PROJECT — id, title, that project's visibility — and
+			// this is a different axis: research_asset_versions.visibility,
+			// the state of the version the caller itself named. StoredPin
+			// carries no project at all, so applying the rule here would
+			// need a join (and this task may not touch SQL), and when the
+			// value is "private" the blocking private_dependencies entry
+			// below already says exactly that, so nothing private is added.
 			entry.CurrentVisibility = string(st.Visibility)
 		}
 		out.Dependencies = append(out.Dependencies, entry)
@@ -635,15 +734,78 @@ func Preview(req PreviewRequest, state CurrentState) (ImpactPreview, error) {
 // previewAsset renders the asset half of the preview. It reports what the
 // candidate named and what the state resolved it to; whether that is a
 // refusal is previewAssetBlockers' business.
-func previewAsset(c PublishCandidate, state CurrentState) PreviewAsset {
-	out := PreviewAsset{PID: c.AssetPID, AssetType: c.AssetType}
+//
+// It takes the whole request rather than the candidate because what it may
+// SAY about the resolved asset needs both halves: the asset's own project
+// (from the state) and the project the publish is previewed in (from the
+// request, T0712). A caller can name any pid it likes, so an asset of another
+// project resolves — and its title and its project are then withheld unless
+// that project is public (mayRenderProject).
+func previewAsset(req PreviewRequest, state CurrentState) PreviewAsset {
+	out := PreviewAsset{PID: req.Candidate.AssetPID, AssetType: req.Candidate.AssetType}
 	if state.Asset == nil {
 		return out
 	}
 	out.Resolved = true
-	out.Title = state.Asset.Title
-	out.OriginProjectID = state.Asset.OriginProjectID
+	if mayRenderProject(req.ProjectID, state.Asset.OriginProjectID, state.Asset.OriginProjectVisibility) {
+		out.Title = state.Asset.Title
+		out.OriginProjectID = state.Asset.OriginProjectID
+	}
 	return out
+}
+
+// mayRenderProject reports whether the preview may render the identity of an
+// entity that belongs to ownerProjectID: its project's id and visibility, and
+// the entity's own title. See the package comment for why the rule exists.
+//
+// Exactly two owners qualify:
+//
+//   - the publishing project itself. A publication carries its own project's
+//     state (docs/11 §2: assets are published out of projects), and the
+//     caller has already passed the project read gate for it, so its id, its
+//     visibility and its objects' titles are the caller's own business.
+//   - a public project. docs/12 §2's default is that a public project is
+//     readable; an id, a title and a visibility there are facts any
+//     authenticated caller can read from the project's own routes, so
+//     withholding them here would hide something already visible while
+//     making the preview harder to act on.
+//
+// Everything else is another project's private state, and all three are
+// withheld. The test is membership-INDEPENDENT: nothing about who the caller
+// is takes part in it, so a caller who is a member of BOTH projects is told
+// no more about B than one who belongs to neither. That is deliberate and it
+// is the fail-closed choice — the alternative (asking whether this caller may
+// read that project) needs a read of the caller's memberships per resolved
+// entity, which this route does not do, and it would make the same request
+// answer differently for two callers while turning one disclosure question
+// into N authorization questions.
+//
+// An empty visibility is NOT public: a reader that could not determine a
+// project's visibility leaves it empty (StoredAsset.OriginProjectVisibility),
+// and a reader that resolved nothing leaves the project empty too. Withheld
+// is the answer for both, which is what makes the rule fail-closed.
+func mayRenderProject(publishingProject, ownerProjectID string, visibility Visibility) bool {
+	if ownerProjectID == "" {
+		// Nothing resolved a project, so there is nothing the preview may
+		// disclose about one.
+		return false
+	}
+	return ownerProjectID == publishingProject || visibility == VisibilityPublic
+}
+
+// projectNamed is the phrase a sentence uses for the project a resolved
+// entity belongs to: "project <id>" when the preview may render that
+// identity, and a description that does not name it otherwise.
+//
+// "another private project" is what the unnamed case says, and calling it
+// private is the fail-closed reading of an empty visibility (see
+// mayRenderProject): the preview will not describe a project it may not name
+// as anything more public than it can prove it is.
+func projectNamed(publishingProject, ownerProjectID string, visibility Visibility) string {
+	if mayRenderProject(publishingProject, ownerProjectID, visibility) {
+		return "project " + quote(ownerProjectID)
+	}
+	return "another private project"
 }
 
 // previewAssetBlockers reports the three refusals that need the stored asset
@@ -668,6 +830,13 @@ func previewAssetBlockers(req PreviewRequest, state CurrentState) []Blocker {
 	}
 	var out []Blocker
 	if state.Asset.Type != c.AssetType {
+		// RULED, not overlooked (T0712 review): this detail names the stored
+		// asset's TYPE even when that asset belongs to another private
+		// project. The type is the whole content of the finding — drop it
+		// and the refusal says nothing — and it is a coarse enum, not an
+		// identity: knowing "dataset" does not name the project, the title
+		// or the object the rule withholds. The project-mismatch blocker
+		// below does obey mayRenderProject; this one has no project in it.
 		out = append(out, Blocker{
 			Code:  CodePreviewAssetTypeMismatch,
 			Field: "asset_type",
@@ -676,22 +845,31 @@ func previewAssetBlockers(req PreviewRequest, state CurrentState) []Blocker {
 		})
 	}
 	if state.Asset.OriginProjectID != req.ProjectID {
+		// The refusal is reported either way — a pid of another project's
+		// asset is not a publish this route may execute — and only the
+		// project's NAME obeys mayRenderProject: naming it here would be the
+		// same disclosure the asset half above withholds, reached through the
+		// refusal instead of through the field (T0712, issue #238).
 		out = append(out, Blocker{
 			Code:  CodePreviewAssetProjectMismatch,
 			Field: "project_id",
-			Detail: "the stored asset belongs to project " + quote(state.Asset.OriginProjectID) + " while this " +
-				"publish is previewed in " + quote(req.ProjectID) + "; an asset's versions are published in the " +
-				"asset's own project (docs/11 §2)",
+			Detail: "the stored asset belongs to " +
+				projectNamed(req.ProjectID, state.Asset.OriginProjectID, state.Asset.OriginProjectVisibility) +
+				" while this publish is previewed in " + quote(req.ProjectID) + "; an asset's versions are " +
+				"published in the asset's own project (docs/11 §2)",
 		})
 	}
 	return out
 }
 
-// previewRef renders one resolved ref.
-func previewRef(raw string, st StoredRef) PreviewRef {
+// previewRef renders one resolved ref. The ref itself, its kind and whether
+// it resolved are always rendered — that is the caller's own declaration and
+// the answer it needs about it; the project it points into is rendered only
+// when the preview may (mayRenderProject).
+func previewRef(raw string, st StoredRef, publishingProject string) PreviewRef {
 	kind, _, _ := ParseOriginRef(raw)
 	out := PreviewRef{Ref: raw, Kind: string(kind), Resolved: st.Resolved}
-	if st.Resolved {
+	if st.Resolved && mayRenderProject(publishingProject, st.ProjectID, st.ProjectVisibility) {
 		out.ProjectID = st.ProjectID
 		out.CurrentVisibility = string(st.ProjectVisibility)
 	}
@@ -702,19 +880,29 @@ func previewRef(raw string, st StoredRef) PreviewRef {
 // The same object version referenced twice is one object — a repeated ref
 // says nothing new about who sees what — and the first occurrence keeps the
 // position, so the list follows the candidate's own order.
-func appendObject(seen []PreviewObject, obj StoredObject, projectID string, visibility Visibility) []PreviewObject {
+//
+// The entry always carries the identity the CALLER named — the object
+// version id — and the rest — the object it belongs to, the project it lives
+// in and that project's visibility, and the version's title — only when that
+// project may be rendered (mayRenderProject, T0712): every one of those is a
+// fact the caller did not send, whether it names another project or another
+// identity inside it. It takes the whole ref resolution rather than loose
+// fields so that every object of the list is rendered by the one rule, from
+// the one answer it came from.
+func appendObject(seen []PreviewObject, obj StoredObject, st StoredRef, publishingProject string) []PreviewObject {
 	for _, o := range seen {
 		if o.ObjectVersionID == obj.ObjectVersionID {
 			return seen
 		}
 	}
-	return append(seen, PreviewObject{
-		ObjectVersionID:   obj.ObjectVersionID,
-		ObjectID:          obj.ObjectID,
-		ProjectID:         projectID,
-		Title:             obj.Title,
-		CurrentVisibility: visibility,
-	})
+	entry := PreviewObject{ObjectVersionID: obj.ObjectVersionID}
+	if mayRenderProject(publishingProject, st.ProjectID, st.ProjectVisibility) {
+		entry.ObjectID = obj.ObjectID
+		entry.ProjectID = st.ProjectID
+		entry.Title = obj.Title
+		entry.CurrentVisibility = st.ProjectVisibility
+	}
+	return append(seen, entry)
 }
 
 // refDependency reports whether one origin ref is something the publication
@@ -726,6 +914,15 @@ func appendObject(seen []PreviewObject, obj StoredObject, projectID string, visi
 // provenance pin that names nothing is a broken immutable document rather
 // than a disclosure, and the fail-closed answer to "can this execute?" is
 // no either way.
+//
+// Every sentence below obeys mayRenderProject about the project the ref
+// points into, and the two decisions are independent: WHETHER the ref is
+// named (always, when it reaches here), WHY it does or does not block
+// (unchanged), and WHICH project the detail may name (only the publishing
+// project's own, or a public one's). Withholding the name costs the reader
+// nothing it cannot already see — the ref it is reading is its own
+// declaration — and it is what keeps this list from being the disclosure the
+// task closed (T0712, issue #238).
 func refDependency(raw string, st StoredRef, publishingProject string, blockingTarget bool) (PrivateDependency, bool) {
 	kind, _, _ := ParseOriginRef(raw)
 	dep := PrivateDependency{Kind: string(kind), Ref: raw}
@@ -740,7 +937,8 @@ func refDependency(raw string, st StoredRef, publishingProject string, blockingT
 	}
 	switch {
 	case !blockingTarget:
-		dep.Detail = "the ref points into the private project " + quote(st.ProjectID) +
+		dep.Detail = "the ref points into " +
+			projectNamed(publishingProject, st.ProjectID, st.ProjectVisibility) +
 			"; this publication would not widen it"
 	case st.ProjectID == publishingProject:
 		dep.Detail = "the ref points into the private publishing project itself; a project may explicitly " +
@@ -748,8 +946,9 @@ func refDependency(raw string, st StoredRef, publishingProject string, blockingT
 			"not a dependency on somebody else's private work"
 	default:
 		dep.Blocking = true
-		dep.Detail = "the ref points into the private project " + quote(st.ProjectID) +
-			", which is not the publishing project, so a public publication would disclose another project's " +
+		dep.Detail = "the ref points into " +
+			projectNamed(publishingProject, st.ProjectID, st.ProjectVisibility) +
+			", which is not the publishing project, so a public publication would disclose that project's " +
 			"private entity (docs/23 §4: no hidden private dependency leak)"
 	}
 	return dep, true
