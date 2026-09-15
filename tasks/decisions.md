@@ -8527,3 +8527,50 @@ Worker 的任务包；T0704 最终不需要迁移（纯读路径），68 就此�
 **全部**带 `infra/migrations/**`，判据见 L1-98。
 
 - **可逆性**：编号一旦写进 Worker 任务包即不可改（改号等于让已生成的迁移文件名与记录对不上）。
+
+## L1-20260916-101 —— T0705 派工前的授权缺口：矩阵里只有一行发布，而它不够用；一条立档等裁定，一条按代码库自己的规则办
+
+给 T0705（资产发布）备包时发现"谁能发布"规格只写了半句。逐条查过 `docs/`、`specs/`、
+`internal/authz/`、现有执行点后，分成**不需要裁定**与**需要裁定**两部分。
+
+### 不需要裁定的部分（规格或代码库已经回答）
+
+| 问题 | 答案 | 出处 |
+| --- | --- | --- |
+| 发布该问哪一行矩阵 | `publish_private_to_public` | `internal/application/contribution/doc.go` 的既定约定："map Publicize onto authz.ActionPublishPrivateToPublic (agent column: deny)" |
+| 那一行各列是什么 | `deny,deny,deny,deny,**conditional**,allow,deny` | `specs/policies/permissions-matrix.csv:12` |
+| 执行点写成什么形状 | `Authorize` → err 即拒 → `!Permits()` 即拒 | `internal/application/releases/command.go:287-296`（既有执法点） |
+| 代理能不能发布 | 不能，且要有域层兜底 | `docs/12` §3、`docs/23` §4、`specs/mcp/tools.json`（禁用清单 + 只给 `asset.publish_preview` mode=proposal）、`internal/application/contribution/service.go:166` 的 `if by.IsAgent` 形状 |
+| 是不是"人的动作" | 是 | `specs/api/openapi.yaml` 的 `assets:publish` summary："Publish approved research asset; **human governance action**" |
+| 命令要不要自己重跑校验 | 要 | `docs/22` §7："Command 必须再次 server-side run validation，不能信任前端预检" |
+| 幂等是不是必须 | 是，且位置固定 | `docs/22` §3 把 `Idempotency-Key` 列为 publish 的必备 header；台账形状抄 `release_creations` + `CreateRelease(..., key *string)` + `LookupCreation` |
+
+### 需要裁定的部分 → issue #237
+
+1. **维护者那一格是 `conditional`，而"per-resource condition"没有任何规格定义。** 唯一可能沾边的
+   是 `docs/23` §4 的 "optional org policy approvals"，但它没说"可选"是"查不到就放行"还是
+   "查不到就不放行"。
+2. **不扩大可见性的发布没有矩阵行。** `research_asset_versions.visibility` 允许
+   `public|private`，`docs/12` §2 又写着私有项目"可显式 Publish Asset/Knowledge/Attestation"，
+   于是"在私有项目里发布一个仍是私有的版本"是一种无行可依的发布。
+
+**我这一轮的做法（已写进 #237 请 owner 确认或推翻）**：
+
+- 缺口 1：**不实现 resolver**。按 `internal/authz/verdict.go` 自己写的规则办——原文
+  "Only VerdictAllow permits: … the safe default for an unresolved condition is refusal
+  (default deny)"。因此 `conditional` 落到拒。这不是我发明的语义，是代码库自己的 default deny，
+  而且与既有执行点的 `!Permits()` 写法一致。
+- 缺口 2：选最保守的 (a)——**任何发布都走那一行**。理由是那行是矩阵里唯一与发布有关的一行；
+  另一条读法（只有真扩大才走那行）会让"私有项目里发布"无行可依、只能默认拒绝，从而使
+  `docs/12` §2 那句话落不了地。代价是非拥有者在私有项目里也发不了，fail-closed。
+
+**必须让 owner 看见的后果**：照这个做法，**V1 里只有项目拥有者能发布资产，维护者不能**。
+这是"往严里收"、不会漏放，但它是看得见的限制；若 owner 的本意是"维护者也能发布"，就得先给出
+那个"条件"是什么。
+
+**明确禁止 Worker 做的事**（写进任务包）：不得自行发明 resolver 规则，不得修改
+`specs/policies/permissions-matrix.csv`（那是 Supervisor-only 的规格文件，且由
+`TestPermissionMatrixMatchesCSV` 与 `internal/authz/matrix.go` 锁成一致）。
+
+- **可逆性**：#237 裁定后若结论是"维护者可以发布"，只需在执行点加 resolver 并补测试，
+  不动数据库、不动迁移。
