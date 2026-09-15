@@ -108,6 +108,21 @@ var appendOnlyTables = []string{
 // UPDATE, FOR EACH ROW → tgtype 23): the docs/43 state machine, the
 // fixed base/proposed states (the head moves only through the explicit
 // flagged refresh) and merged_at consistency, for ANY write path.
+// Migration 00057 (T0503) adds five deferred constraint triggers on the
+// findings projection family — refs must pin claim versions of the
+// finding's own project (INSERT OR UPDATE → tgtype 21), a findings row
+// must have refs (INSERT OR UPDATE → 21), a findings row's object_id must
+// be the object its own version belongs to (INSERT OR UPDATE → 21), and a
+// finding may not be stripped of its refs by any route: deleting the last
+// ref, deleting the findings row while refs remain, or RE-POINTING either
+// identity column away from rows that still exist (the last two are
+// DELETE OR UPDATE OF <identity column> → 25). Column-scoped events, not
+// a bare UPDATE: the invariant depends on the identity column alone, and
+// a bare UPDATE would re-run the guard on a legal rewrite that keeps it.
+// The findings tables are NOT in
+// appendOnlyTables: like the claims projection (00041) they are
+// rebuildable (docs/21 §5), so they carry targeted guards instead of the
+// append-only pair, and truncate stays open as their rebuild path.
 var targetedGuardTriggers = map[string]string{
 	"branches:branch_lifecycle_guard_trigger":                                           ":O:19",
 	"branches:branch_git_ref_guard_trigger":                                             ":O:23",
@@ -130,6 +145,11 @@ var targetedGuardTriggers = map[string]string{
 	"git_reconciliation_findings:git_reconciliation_findings_no_truncate":               ":O:34",
 	"git_reconciliation_runs:git_reconciliation_runs_no_truncate":                       ":O:34",
 	"pull_requests:pull_request_guard_trigger":                                          ":O:23",
+	"findings:findings_refs_present":                                                    ":O:21",
+	"findings:findings_version_object_pairing":                                          ":O:21",
+	"findings:findings_no_orphan_refs":                                                  ":O:25",
+	"finding_claim_versions:finding_claim_versions_ref_guard":                           ":O:21",
+	"finding_claim_versions:finding_claim_versions_refs_remain":                         ":O:25",
 }
 
 // triggerRows returns every user trigger in the public schema as sorted

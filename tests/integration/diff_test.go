@@ -277,7 +277,10 @@ func TestDiffListsStableChanges(t *testing.T) {
 	// abort H last — the abort commit records the git ref, so the source
 	// head carries it (the git_compat push shape).
 	f.updateObject(t, ctx, f.feature, cObject, 1, `{"statement":"beta"}`)
-	fObject, fV1 := f.createObject(t, ctx, f.feature, "finding", `{"summary":"found"}`)
+	// The finding pins the claim's FIRST version (cV1): a finding must
+	// reference claim versions (T0503), and pinning the pre-update
+	// version is exactly the fixed-reference shape the model wants.
+	fObject, fV1 := f.createObject(t, ctx, f.feature, "finding", `{"summary":"found","claim_version_refs":["`+cV1+`"]}`)
 	f.createRelation(t, ctx, f.feature, "supports", fV1, fV1)
 	f.abortObject(t, ctx, f.feature, hObject, 1)
 

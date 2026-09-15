@@ -131,11 +131,14 @@ func TestAppendEvidenceNotTextConflict(t *testing.T) {
 	base := *feature.BaseStateID
 
 	// feature appends a new claim version ref; main appends a different
-	// one. Both are pure appends of the same base list.
+	// one. Both are pure appends of the same base list. The appended refs
+	// are well-formed version ids: the T0503 semantics check requires
+	// every pinned ref to be a canonical uuid (existence is not checked
+	// on this path).
 	f.updateObject(t, ctx, feature.ID, fObject, 1,
-		`{"claim_version_refs":["`+cV1+`","cv-ref-feature"]}`)
+		`{"claim_version_refs":["`+cV1+`","aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]}`)
 	f.updateObject(t, ctx, f.main, fObject, 2,
-		`{"claim_version_refs":["`+cV1+`","cv-ref-main"]}`)
+		`{"claim_version_refs":["`+cV1+`","bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]}`)
 
 	sourceHead := *f.head(t, ctx, feature.ID)
 	targetHead := *f.head(t, ctx, f.main)

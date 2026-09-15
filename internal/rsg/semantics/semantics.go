@@ -9,14 +9,20 @@
 //   - a HARD failure is a rule whose violation can be decided mechanically
 //     from the payload alone (a research question that names itself as its
 //     parent, a present-but-empty question reference on either a
-//     hypothesis or a research question);
-//   - a HINT is a judgement a machine cannot make — most importantly Claim
-//     atomicity (docs/08: "一个可独立判断的命题...如果一句话可被 reviewer
-//     部分同意部分反对，应拆 Claim"). Atomicity is only ever hinted at,
-//     never refused: deciding whether a statement is one claim or several is
-//     a scientific judgement, and no NLP heuristic may hard-block a write on
-//     it (task acceptance criterion). Hints are returned to the caller as
-//     advisory text; they never fail a command.
+//     hypothesis or a research question, a present-but-empty or malformed
+//     claim version refs value on a finding);
+//   - a HINT is a judgement a machine cannot make, or a field the draft
+//     allowance covers — most importantly Claim atomicity (docs/08: "一个
+//     可独立判断的命题...如果一句话可被 reviewer 部分同意部分反对，应拆
+//     Claim"). Atomicity is only ever hinted at, never refused: deciding
+//     whether a statement is one claim or several is a scientific
+//     judgement, and no NLP heuristic may hard-block a write on it (task
+//     acceptance criterion). A domain field that is REQUIRED by the
+//     schema but ABSENT from the payload is the other hint case: docs/08
+//     lets a draft lack some domain fields, so the gate ladder — not this
+//     package — decides when the absence starts to matter (the draft gate
+//     reports it, the PR gate blocks it). Hints are returned to the
+//     caller as advisory text; they never fail a command.
 //
 // Every payload-level check operates on the fields the V1 schemas actually
 // define (specs/schemas/, the registry's truth): the docs/08 field lists are
@@ -26,7 +32,11 @@
 // T0502 adds the structured claim checks (CheckClaimStructure): they run
 // on the structured claim model (internal/domain.Claim) whose basis field
 // the schema does not carry yet, and the payload path delegates the fields
-// it has (see checkClaim).
+// it has (see checkClaim). T0503 adds the finding checks (checkFinding):
+// the finding schema's claim_version_refs (required, minItems 1) is judged
+// by what the payload actually says — ABSENT is a draft and yields a hint,
+// PRESENT is held to the field's rule (empty or malformed refs are hard
+// failures).
 package semantics
 
 import (
@@ -64,6 +74,15 @@ const (
 	// would buy (a refresh can verify what the URL resolves to, and
 	// readers can reach the source).
 	HintExternalReferenceCanonicalURL = "EXTERNAL_REFERENCE_MISSING_CANONICAL_URL"
+	// HintFindingClaimVersionRefs: the finding does not pin any claim
+	// version yet (claim_version_refs). A draft may lack it (docs/08:
+	// Draft 可缺部分 domain field) — the draft gate reports a
+	// schema-incomplete payload instead of refusing it — while entering
+	// PR demands it; the hint says what pinning would buy (the finding
+	// states which claim versions it is built on, and the projection row
+	// cannot be materialized without refs). A refs value that IS present
+	// is never excused this way: empty or malformed stays a hard failure.
+	HintFindingClaimVersionRefs = "FINDING_MISSING_CLAIM_VERSION_REFS"
 )
 
 // Check runs the domain semantic checks for one object type over a payload.
@@ -83,6 +102,8 @@ func Check(objectType, ownObjectID string, payload map[string]any) (errs []error
 		return checkHypothesis(payload)
 	case "external_reference":
 		return checkExternalReference(payload)
+	case "finding":
+		return checkFinding(payload)
 	}
 	return nil, nil
 }
