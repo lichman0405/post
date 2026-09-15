@@ -4623,13 +4623,15 @@
       "merged_at": null
     },
     "T0703": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "ready",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-15T15:57:55Z",
+          "run_id": "run-424529a6ba98194a"
+        }
+      ]
     },
     "T0704": {
       "status": "todo",
