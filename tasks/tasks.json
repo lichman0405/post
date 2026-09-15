@@ -2420,7 +2420,9 @@
       "deliverables": [],
       "acceptance_criteria": [
         "safe merge 结果 deterministic",
-        "科学冲突不自动 winner"
+        "科学冲突不自动 winner",
+        "科学冲突的七种解决动作都能表达（docs/09 §8），且 contested/unresolved 允许在 main 里**保留**——不许为了“合并成功”把它消解成一个 winner",
+        "merge 只改变 accepted state；source 含 private state 而 target 是 public 时**不公开**（那是独立 Publication Gate 的事，docs/09 §9 / docs/23 §4）"
       ],
       "tests": [
         "merge integration"
@@ -2437,7 +2439,6 @@
         "go.sum",
         ".env.example",
         "cmd/api/**",
-        "apps/web/**",
         "tests/**"
       ],
       "forbidden_scope": [
@@ -2455,7 +2456,7 @@
         "internal/rsg/ 与 internal/application/（T0306 semantic validation merge、T0402 Pull Request、T0405 冲突检测）"
       ],
       "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。",
-      "supervisor_scope_narrowing": "2026-09-16：补 internal/persistence/**（原 phase 级上限里没有，是缺口）——合并事务的 saga 状态要落库，而同级已合并的 T0402/T0404 都带着这一格。它与 internal/persistence/queries/** + internal/persistence/sqlc/** 是成对的派生产物，整目录一起覆盖才满足派生产物规则。本任务**是迁移链条当前在飞的一环**（分配编号时与其他迁移任务串行），所以它开工前 T0704（无迁移的读路径）必须先合并——两个任务都会重新生成 sqlc，而 G2 是把整个 diff 打到当时的 main 上，第二份生成物必然打不上。迁移编号由 Supervisor 在 spawn 时分配，Worker 不得自选号。本任务**不做** apps/web 之外的界面工作以外的东西——apps/web 保留，因为冲突解决方案的输入可能需要界面；若实际不需要，Worker 不必使用它（范围是许可，不是义务）。"
+      "supervisor_scope_narrowing": "2026-09-16 派发时定稿。三段：\n（1）补 internal/persistence/**：phase 级上限里没有它，而同级的 T0402/T0404 都有 —— 合并事务的 saga 状态要落库，这是范围里的一个缺口。它与 internal/persistence/queries/** + internal/persistence/sqlc/** 是成对的派生产物，整目录一起覆盖才满足派生产物规则。\n（2）删 apps/web/**：原 scope_note 里写的保留理由是“冲突解决方案的输入可能需要界面”。派发前查过 ——**那个界面已经由 T0407「Scientific Conflict Resolution UI」交付并合并**，本任务 10 条 requirement 没有一条提到界面。留着这格只会扩大 Worker 可以顺路走进去的面。范围是许可不是义务，但没人用的许可就只剩风险，所以删掉。\n（3）本任务**是迁移链条当前在飞的一环**：当前 7 个可开工任务全部带 infra/migrations/**，判据见 tasks/decisions.md L1-20260916-98（共用的生成物决定能不能并行），所以一次只有一个在飞。\n**迁移编号由 Supervisor 分配：本次 00069**（68 已在 T0704 的包内分配过、T0704 未用，按 L1-20260916-100 不复用）。Worker 不得自选号。\n**不做**：不发明非 push 来源 head 的 semantic completeness 规则（00042 的默认值与全仓库只有 push ingestion 写那张表之间对不上，是 issue #189，等 owner 裁定）；本任务只实现与这条裁定无关的部分，并在交付记录里点名这个缺口。"
     },
     {
       "id": "T0407",
