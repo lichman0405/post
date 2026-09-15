@@ -203,6 +203,9 @@
         },
         {
           "run": "bash scripts/tests/gitea-e2e-guard-unit-test.sh"
+        },
+        {
+          "run": "POST_INSIDE_ACCEPTANCE_STAGE=1 bash tests/acceptance/phase-boundary-checkpoint.sh"
         }
       ]
     },
