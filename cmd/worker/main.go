@@ -17,6 +17,14 @@
 // carries the correlation id of whatever triggered the job (the loop
 // attaches it per job; the enqueueing request's id is embedded in the job
 // payload by the API).
+//
+// T1006: the signed-webhook pipeline has arrived — after the outbox
+// dispatcher publishes research events, a fan-out goroutine turns
+// published events into per-endpoint delivery rows (public events only,
+// fail closed) and a deliverer goroutine POSTs them signed (HMAC +
+// timestamp) with exponential-backoff retries and the disable policy.
+// Both loop forever on transient failures like the dispatcher and stop
+// only on shutdown.
 package main
 
 import (
@@ -115,13 +123,29 @@ func run(args []string) int {
 		defer dispatcherWG.Done()
 		_ = dispatcher.Run(ctx)
 	}()
+	// The signed-webhook pipeline (T1006), two more consumers of the same
+	// pool: FanOut turns published events into delivery rows, Deliverer
+	// posts them. Both poll with their own cadence and stop on ctx
+	// cancellation.
+	fanout := events.NewFanOut(pool, events.WithFanOutLogger(logger))
+	deliverer := events.NewDeliverer(pool, events.WithDelivererLogger(logger))
+	var webhookWG sync.WaitGroup
+	webhookWG.Add(2)
+	go func() {
+		defer webhookWG.Done()
+		_ = fanout.Run(ctx)
+	}()
+	go func() {
+		defer webhookWG.Done()
+		_ = deliverer.Run(ctx)
+	}()
 	// Shutdown ordering (T1001 review): cancel the root context first —
 	// the deferred stop() above would run too late for this join (defers
 	// run LIFO, so it fires only after the cleanup below) — then join the
-	// dispatcher goroutine, then close the pool. Closing under a live
-	// dispatcher would let its next pass fail against a closed pool and
-	// log a misleading error.
-	defer shutdown(stop, dispatcherWG.Wait, pool.Close)
+	// dispatcher and webhook goroutines, then close the pool. Closing
+	// under a live consumer would let its next pass fail against a closed
+	// pool and log a misleading error.
+	defer shutdown(stop, dispatcherWG.Wait, webhookWG.Wait, pool.Close)
 
 	slog.Info("post-worker running",
 		"version", version.Version, "queue", "post:queue:jobs", "cfg", cfg)
@@ -133,16 +157,18 @@ func run(args []string) int {
 	return exitOK
 }
 
-// shutdown cancels the root context, joins the outbox dispatcher
-// goroutine, and only then closes the database pool — in that order
-// (T1001 review: closing the pool under a live dispatcher makes its next
-// pass fail against a closed pool and log a misleading error). stop is
-// called here rather than via a top-level defer because defers run LIFO:
-// a deferred stop would fire after the join and deadlock it.
-func shutdown(stop context.CancelFunc, join, closePool func()) {
+// shutdown cancels the root context, joins the outbox dispatcher and
+// webhook pipeline goroutines, and only then closes the database pool —
+// in that order (T1001 review: closing the pool under a live consumer
+// makes its next pass fail against a closed pool and log a misleading
+// error). stop is called here rather than via a top-level defer because
+// defers run LIFO: a deferred stop would fire after the join and deadlock
+// it.
+func shutdown(stop context.CancelFunc, joins ...func()) {
 	stop()
-	join()
-	closePool()
+	for _, join := range joins {
+		join()
+	}
 }
 
 // databaseDSN builds the PostgreSQL connection URL the outbox dispatcher

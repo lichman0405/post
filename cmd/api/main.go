@@ -59,6 +59,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/schemaprofileshttp"
 	"github.com/lichman0405/post/cmd/api/templateshttp"
 	"github.com/lichman0405/post/cmd/api/validationhttp"
+	"github.com/lichman0405/post/cmd/api/webhookshttp"
 	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
@@ -320,6 +321,12 @@ func run(args []string) int {
 	})
 	v1.Handle("/api/v1/projects", projectAPI.Routes())
 	v1.Handle("/api/v1/projects/", projectAPI.Routes())
+	// Signed webhooks (T1006): the endpoint registry + delivery log. The
+	// worker owns delivery itself (events.FanOut / events.Deliverer over
+	// the same database); the API only manages what the owner controls.
+	webhooksAPI := webhookshttp.New(webhookshttp.Deps{Store: events.NewWebhookStore(pool)})
+	v1.Handle("/api/v1/webhooks", webhooksAPI.Routes())
+	v1.Handle("/api/v1/webhooks/", webhooksAPI.Routes())
 	// Scoped git tokens (T0304): the user-credential surface over the
 	// internal Gitea. Like provisioning it needs provider configuration,
 	// but its own gate: the admin credentials may be unset while
