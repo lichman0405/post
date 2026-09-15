@@ -4623,13 +4623,66 @@
       "merged_at": null
     },
     "T0703": {
-      "status": "ready",
+      "status": "merged",
+      "started_at": "2026-09-15T16:37:35Z",
+      "worker_run_id": "run-2de148bb4019e694",
+      "accepted_by_supervisor_at": "2026-09-15T17:09:14Z",
+      "merged_at": "2026-09-15T17:14:12Z",
+      "rejection_reason": "# T0703 返工（第 1 轮）\n\n交付整体是好的：四项要求都落地了，两条验收标准都成立，复核结论 `approve`（0 blocking、0 major），\n而且复核**独立重跑了整套**（含 97.7 秒的完整集成套件）才给的结论。下面的 5 条是复核的次要意见，\n**每一条我都自己动手核实过**，不是转抄。\n\n返工**只改这 5 条**，不要顺手改别的。\n\n**先说清楚底线**：这 5 条都不许用\"把断言改松\"的方式糊过去。改了之后，\n原来会红的变异必须**照样红**（我会重跑）。下面每条我都写了\"改完必须能证明什么\"。\n\n---\n\n## 第 1 条（必须修，这是真缺陷）\n\n**`apps/web/lib/rights.ts` 第 51 行的哨兵值 `NOT_STATED = \"not_stated\"` 住在取值空间里，\n会和发布者真正声明的值撞车。**\n\n这条复核报的是 minor，我**自己跑了一遍它的模块**才写这一行。我构造了四种情况：\n\n| 情形 | 存进去的 | 界面渲染成 | 对不对 |\n| --- | --- | --- | --- |\n| A. 这个字段**真的没写** | （没有这个键） | `Not stated` | ✅ 对 |\n| B. 写了**普通的未知值** | `commercial_use: \"share_alike\"` | `share_alike (a value this view does not know)` | ✅ 对 |\n| C. 写的**正好等于哨兵值** | `commercial_use: \"not_stated\"` | `Not stated` | ❌ **错** |\n| D. 同上，换成元数据轴 | `visibility.metadata: \"not_stated\"` | `Not stated` | ❌ **错** |\n\n**A 和 C 在界面上完全分不出来。** 发布者明确写了一个值（不管我们认不认识它），\n界面却告诉读者\"发布者什么都没声明\"。\n\n这不是理论问题，**是能真发生的**：\n\n- `visibility.metadata` 是**开放取值**（这是模板自己的不对称设计，本任务刻意保留的），\n  `internal/rights.ValidMetadataVisibility` 允许 `[A-Za-z0-9_.:-]`，**下划线合法**，\n  所以 `not_stated` 是一个 **Go 侧认为完全合法**的元数据 token；\n- 库里的列只被要求\"是个 JSON 对象\"，**不限制里面的词汇表**（这是本任务有意的决定），\n  所以它能一路存进数据库。\n\n**这违反的是这个模块自己写下的规则。** `rights.ts` 顶部的说明写着读取端\n\"invents no value（不发明取值）：缺失 → NOT_STATED，不认识 → 原样显示\"。\nC 和 D 两种情况**既不是缺失、又不原样显示**，等于凭空发明了一个\"未声明\"。\n\n**要改的是**：让\"这个字段有没有被声明\"这件事**独立于取值本身**——\n例如每个轴带一个布尔量，或者换一个不可能成为合法声明值的哨兵。\n具体怎么做由你定，但必须满足：\n\n- C、D 两种情况**原样显示**（和 B 一样的待遇），并且**不再显示成 \"Not stated\"**；\n- A 情况**照旧**显示 `Not stated`，并**照旧**出现在 `unstated` 列表里；\n- 现有 `apps/web/lib/rights.test.mjs` 的 **15 条**测试**一条都不许删或改松**\n  （`rights-copy.test.mjs` 那 6 条见第 4 条）。\n\n**改完必须能证明：** 加一个测试，把 A 和 C **并排**放进去，断言两边的渲染结果**不同**。\n（也就是说：改之前这个测试必须是红的。你可以先把测试写好、自己确认它红，再改实现。）\n\n**顺带核一下**：面板第 65 行是 `<span className=\"rights-usage-value\" data-declared={row.declared}>`，\n它把**原始值**直接写进了 DOM 属性。所以 A 情况（字段真的没写）现在长这样：\n属性是 `data-declared=\"not_stated\"`，而同一个节点显示的文字是 `Not stated` ——\n**同一个 DOM 节点自己跟自己不一致**，而且属性里那个\"值\"是读取端自己发明出来的。\n一并处理掉。\n\n---\n\n## 第 2 条（必须修）\n\n**长度上限按\"字节\"比，但文档和报错信息写的是\"字符\"。**\n\n`internal/rights/document.go` 第 258 行用 `len(*notes)` 和 `MaxNotesLen` 比——\nGo 的 `len()` 数的是**字节**。但：\n\n- 第 264 行的报错信息写的是 `expected at most 2000 characters, got N`，这个 N 是**字节数**；\n- `MaxAgreementRefLen`（512）、`MaxMetadataVisibilityLen`（64）的文档注释同样写的是 characters。\n\n**这个仓库的主要语言是中文，所以这不是理论误差。** 一条约 700 个汉字的说明\n是 2100 字节，会被拒绝，而且**报错说\"有 2100 个字符\"**——这句话本身就是错的。\n\n**要改的是**：让**文档、报错信息、实际比较三者说的是同一个单位**。\n\n选哪个单位由你定（按字符数应该用 `utf8.RuneCountInString`；按字节就把文档和报错都改成字节），\n但三个地方必须一致。我倾向于按字符——因为这个上限的用途是\"这是一段说明还是一本书\"，\n而\"字符\"才是人写字时的单位——**但这是你的实现决定，不强求**。\n\n**改完必须能证明：** 在这三个字段各自的上限两侧**各有一个用例**，\n而且其中至少一个用例**含多字节字符**（中文或 emoji），这样才能真的区分字节和字符。\n注意别把上限本身改小或改大——**只修单位，不改界限值**。\n\n---\n\n## 第 3 条（必须修，很小）\n\n**一处引用了不存在的测试。**\n\n`internal/rights/document.go` 第 93 行，`New()` 的注释写着\n\"The returned document validates (TestNewValidates pins it)\"。\n\n**`TestNewValidates` 这个名字在整个仓库里不存在。** 真正钉住这件事的是\n`TestNewMatchesRightsTemplate` 末尾那句 `New().Validate()`（`internal/rights/document_test.go:42`）。\n\n**要改的是**：把引用改成真实存在的那个测试名。**照着仓库里的实际名字改，别照着这封信抄**\n（这封信也可能写错，自己去 `grep` 一下确认）。\n\n这条单独拎出来说一句：**这个仓库已经有过同一类毛病**——\n注释断言\"另一个文件说了某句话\"，而那句话在不在、说的是不是这个，没人核过。\n前一任务因此立了档（#227）。所以这一类**哪怕只是名字写错**也要改掉：\n跟着引用去找的人会**什么都找不到**。\n\n---\n\n## 第 4 条（必须修）\n\n**禁令文件里那句关于自己的说明是假的。**\n\n`apps/web/lib/rights-copy.test.mjs` 第 55 行附近写着：13 条规则里\n\"none of them is a word a disclaimer needs, so an honest sentence cannot trip one by accident\"\n（没有一条是免责声明需要的词，所以一句诚实的话不可能不小心撞上）。\n\n**这句话是假的。我拿那 13 条正则实测了两句完全诚实的免责声明：**\n\n```\n被拒  \"POST does not guarantee that any declared license is valid.\"   命中第 1 条 /\\bguarantee(s|d)?\\b/i\n被拒  \"No warranty is provided about the declaration.\"                命中第 2 条 /\\bwarrant(y|ies)\\b/i\n放过  \"POST does not interpret it, and does not give legal advice.\"   （这条确实放过）\n```\n\n`guarantee` 和 `warranty` **恰恰是免责声明最常用的两个词**。现在这份文件里的文案\n避开了它们所以没出事，但**下一句诚实的免责声明如果用了这两个词就会被自己的守卫拦下**，\n而那时最省事的做法就是**把规则改松**——**这正是这个守卫存在的意义所在，也是最坏的结果**。\n\n**要改的是**（两条路选一条，**但必须让注释和实际行为一致**）：\n\n1. **收窄那两条规则**，让它们只命中\"声称有保证\"的用法、放过\"声明没有保证\"的用法；或者\n2. **把注释改成实话**，直接写清楚\"这两个词在文案里不能用，遇到时必须换一种说法，\n   不许改松规则列表\"。\n\n**选路线 1 的话，有一条硬要求**：收窄之后，**原来 13 条规则各自拒绝的那些\"声称有保证\"的句子\n必须照样被拒**。不许为了放过诚实的否定句，把真正该拒的句子也一起放过去。\n（也就是：那 13 条各自的样例句型，改完仍然全部为红。）\n\n---\n\n## 第 5 条（必须修，很小）\n\n**一条断言比它自己声称的要弱。**\n\n`tests/integration/migration_test.go` 第 537 行和第 559 行，新加的目录期望用的是**裸子串**\n`\"jsonb_typeof\"`。但这个文件别处的写法是**完整谓词**，例如\n`jsonb_typeof(scope) = 'object'`。\n\n按现在这么写，**一条要求 `jsonb_typeof(...) = 'array'` 的约束也会让这条断言通过**。\n\n说句公道话：对象语义本身**确实被别处钉住了**（`TestRightsJSONMustBeADocument`，\n而且我自己拿变异打过，两张表都会红），所以**没有\"未验证\"的东西**。但这条目录断言\n**声称的是\"形状是对象\"，实际只验证了\"提到了 jsonb_typeof\"**。\n\n**要改的是**：改成完整谓词 `jsonb_typeof(rights_json) = 'object'`（照这个文件里已有的写法）。\n改完确认 `TestFreshInstallCatalog` **照样过**。\n\n---\n\n## 交回来的时候\n\n**按 CLAUDE.md §6，我在验收时会做 G2，重点是\"你声称的门是不是真的会亮红灯\"。**\n所以每一条都请照上面各条的\"改完必须能证明\"给出**能变红的证据**，\n而不是只给一句\"已经改好了\"。\n\n另外照旧：\n\n- 只改上面这 5 条，**不要顺手改别的**。如果你认为某处也该动，写在 `notes_for_supervisor` 里告诉我就行；\n- `RESULT.json` 里把这一轮变动的文件、跑过的测试**如实**写清；没跑的就写没跑；\n- 不许删测试、不许改松断言、不许放大超时。\n\n我会在收检时确认：原来那 11 个变异**照样红**，工作区没有残留，\n以及这 5 条各自都有对应的红→绿证据。\n",
       "history": [
         {
           "from": "todo",
           "to": "ready",
           "at": "2026-09-15T15:57:55Z",
           "run_id": "run-424529a6ba98194a"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-15T15:59:33Z",
+          "run_id": "run-06fdc100ad7daff8",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T16:21:03Z",
+          "run_id": "run-8d1dc6b347ac2654",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T16:37:27Z",
+          "run_id": "run-7c91ddff79cf5d58",
+          "reason": "# T0703 返工（第 1 轮）\n\n交付整体是好的：四项要求都落地了，两条验收标准都成立，复核结论 `approve`（0 blocking、0 major），\n而且复核**独立重跑了整套**（含 97.7 秒的完整集成套件）才给的结论。下面的 5 条是复核的次要意见，\n**每一条我都自己动手核实过**，不是转抄。\n\n返工**只改这 5 条**，不要顺手改别的。\n\n**先说清楚底线**：这 5 条都不许用\"把断言改松\"的方式糊过去。改了之后，\n原来会红的变异必须**照样红**（我会重跑）。下面每条我都写了\"改完必须能证明什么\"。\n\n---\n\n## 第 1 条（必须修，这是真缺陷）\n\n**`apps/web/lib/rights.ts` 第 51 行的哨兵值 `NOT_STATED = \"not_stated\"` 住在取值空间里，\n会和发布者真正声明的值撞车。**\n\n这条复核报的是 minor，我**自己跑了一遍它的模块**才写这一行。我构造了四种情况：\n\n| 情形 | 存进去的 | 界面渲染成 | 对不对 |\n| --- | --- | --- | --- |\n| A. 这个字段**真的没写** | （没有这个键） | `Not stated` | ✅ 对 |\n| B. 写了**普通的未知值** | `commercial_use: \"share_alike\"` | `share_alike (a value this view does not know)` | ✅ 对 |\n| C. 写的**正好等于哨兵值** | `commercial_use: \"not_stated\"` | `Not stated` | ❌ **错** |\n| D. 同上，换成元数据轴 | `visibility.metadata: \"not_stated\"` | `Not stated` | ❌ **错** |\n\n**A 和 C 在界面上完全分不出来。** 发布者明确写了一个值（不管我们认不认识它），\n界面却告诉读者\"发布者什么都没声明\"。\n\n这不是理论问题，**是能真发生的**：\n\n- `visibility.metadata` 是**开放取值**（这是模板自己的不对称设计，本任务刻意保留的），\n  `internal/rights.ValidMetadataVisibility` 允许 `[A-Za-z0-9_.:-]`，**下划线合法**，\n  所以 `not_stated` 是一个 **Go 侧认为完全合法**的元数据 token；\n- 库里的列只被要求\"是个 JSON 对象\"，**不限制里面的词汇表**（这是本任务有意的决定），\n  所以它能一路存进数据库。\n\n**这违反的是这个模块自己写下的规则。** `rights.ts` 顶部的说明写着读取端\n\"invents no value（不发明取值）：缺失 → NOT_STATED，不认识 → 原样显示\"。\nC 和 D 两种情况**既不是缺失、又不原样显示**，等于凭空发明了一个\"未声明\"。\n\n**要改的是**：让\"这个字段有没有被声明\"这件事**独立于取值本身**——\n例如每个轴带一个布尔量，或者换一个不可能成为合法声明值的哨兵。\n具体怎么做由你定，但必须满足：\n\n- C、D 两种情况**原样显示**（和 B 一样的待遇），并且**不再显示成 \"Not stated\"**；\n- A 情况**照旧**显示 `Not stated`，并**照旧**出现在 `unstated` 列表里；\n- 现有 `apps/web/lib/rights.test.mjs` 的 **15 条**测试**一条都不许删或改松**\n  （`rights-copy.test.mjs` 那 6 条见第 4 条）。\n\n**改完必须能证明：** 加一个测试，把 A 和 C **并排**放进去，断言两边的渲染结果**不同**。\n（也就是说：改之前这个测试必须是红的。你可以先把测试写好、自己确认它红，再改实现。）\n\n**顺带核一下**：面板第 65 行是 `<span className=\"rights-usage-value\" data-declared={row.declared}>`，\n它把**原始值**直接写进了 DOM 属性。所以 A 情况（字段真的没写）现在长这样：\n属性是 `data-declared=\"not_stated\"`，而同一个节点显示的文字是 `Not stated` ——\n**同一个 DOM 节点自己跟自己不一致**，而且属性里那个\"值\"是读取端自己发明出来的。\n一并处理掉。\n\n---\n\n## 第 2 条（必须修）\n\n**长度上限按\"字节\"比，但文档和报错信息写的是\"字符\"。**\n\n`internal/rights/document.go` 第 258 行用 `len(*notes)` 和 `MaxNotesLen` 比——\nGo 的 `len()` 数的是**字节**。但：\n\n- 第 264 行的报错信息写的是 `expected at most 2000 characters, got N`，这个 N 是**字节数**；\n- `MaxAgreementRefLen`（512）、`MaxMetadataVisibilityLen`（64）的文档注释同样写的是 characters。\n\n**这个仓库的主要语言是中文，所以这不是理论误差。** 一条约 700 个汉字的说明\n是 2100 字节，会被拒绝，而且**报错说\"有 2100 个字符\"**——这句话本身就是错的。\n\n**要改的是**：让**文档、报错信息、实际比较三者说的是同一个单位**。\n\n选哪个单位由你定（按字符数应该用 `utf8.RuneCountInString`；按字节就把文档和报错都改成字节），\n但三个地方必须一致。我倾向于按字符——因为这个上限的用途是\"这是一段说明还是一本书\"，\n而\"字符\"才是人写字时的单位——**但这是你的实现决定，不强求**。\n\n**改完必须能证明：** 在这三个字段各自的上限两侧**各有一个用例**，\n而且其中至少一个用例**含多字节字符**（中文或 emoji），这样才能真的区分字节和字符。\n注意别把上限本身改小或改大——**只修单位，不改界限值**。\n\n---\n\n## 第 3 条（必须修，很小）\n\n**一处引用了不存在的测试。**\n\n`internal/rights/document.go` 第 93 行，`New()` 的注释写着\n\"The returned document validates (TestNewValidates pins it)\"。\n\n**`TestNewValidates` 这个名字在整个仓库里不存在。** 真正钉住这件事的是\n`TestNewMatchesRightsTemplate` 末尾那句 `New().Validate()`（`internal/rights/document_test.go:42`）。\n\n**要改的是**：把引用改成真实存在的那个测试名。**照着仓库里的实际名字改，别照着这封信抄**\n（这封信也可能写错，自己去 `grep` 一下确认）。\n\n这条单独拎出来说一句：**这个仓库已经有过同一类毛病**——\n注释断言\"另一个文件说了某句话\"，而那句话在不在、说的是不是这个，没人核过。\n前一任务因此立了档（#227）。所以这一类**哪怕只是名字写错**也要改掉：\n跟着引用去找的人会**什么都找不到**。\n\n---\n\n## 第 4 条（必须修）\n\n**禁令文件里那句关于自己的说明是假的。**\n\n`apps/web/lib/rights-copy.test.mjs` 第 55 行附近写着：13 条规则里\n\"none of them is a word a disclaimer needs, so an honest sentence cannot trip one by accident\"\n（没有一条是免责声明需要的词，所以一句诚实的话不可能不小心撞上）。\n\n**这句话是假的。我拿那 13 条正则实测了两句完全诚实的免责声明：**\n\n```\n被拒  \"POST does not guarantee that any declared license is valid.\"   命中第 1 条 /\\bguarantee(s|d)?\\b/i\n被拒  \"No warranty is provided about the declaration.\"                命中第 2 条 /\\bwarrant(y|ies)\\b/i\n放过  \"POST does not interpret it, and does not give legal advice.\"   （这条确实放过）\n```\n\n`guarantee` 和 `warranty` **恰恰是免责声明最常用的两个词**。现在这份文件里的文案\n避开了它们所以没出事，但**下一句诚实的免责声明如果用了这两个词就会被自己的守卫拦下**，\n而那时最省事的做法就是**把规则改松**——**这正是这个守卫存在的意义所在，也是最坏的结果**。\n\n**要改的是**（两条路选一条，**但必须让注释和实际行为一致**）：\n\n1. **收窄那两条规则**，让它们只命中\"声称有保证\"的用法、放过\"声明没有保证\"的用法；或者\n2. **把注释改成实话**，直接写清楚\"这两个词在文案里不能用，遇到时必须换一种说法，\n   不许改松规则列表\"。\n\n**选路线 1 的话，有一条硬要求**：收窄之后，**原来 13 条规则各自拒绝的那些\"声称有保证\"的句子\n必须照样被拒**。不许为了放过诚实的否定句，把真正该拒的句子也一起放过去。\n（也就是：那 13 条各自的样例句型，改完仍然全部为红。）\n\n---\n\n## 第 5 条（必须修，很小）\n\n**一条断言比它自己声称的要弱。**\n\n`tests/integration/migration_test.go` 第 537 行和第 559 行，新加的目录期望用的是**裸子串**\n`\"jsonb_typeof\"`。但这个文件别处的写法是**完整谓词**，例如\n`jsonb_typeof(scope) = 'object'`。\n\n按现在这么写，**一条要求 `jsonb_typeof(...) = 'array'` 的约束也会让这条断言通过**。\n\n说句公道话：对象语义本身**确实被别处钉住了**（`TestRightsJSONMustBeADocument`，\n而且我自己拿变异打过，两张表都会红），所以**没有\"未验证\"的东西**。但这条目录断言\n**声称的是\"形状是对象\"，实际只验证了\"提到了 jsonb_typeof\"**。\n\n**要改的是**：改成完整谓词 `jsonb_typeof(rights_json) = 'object'`（照这个文件里已有的写法）。\n改完确认 `TestFreshInstallCatalog` **照样过**。\n\n---\n\n## 交回来的时候\n\n**按 CLAUDE.md §6，我在验收时会做 G2，重点是\"你声称的门是不是真的会亮红灯\"。**\n所以每一条都请照上面各条的\"改完必须能证明\"给出**能变红的证据**，\n而不是只给一句\"已经改好了\"。\n\n另外照旧：\n\n- 只改上面这 5 条，**不要顺手改别的**。如果你认为某处也该动，写在 `notes_for_supervisor` 里告诉我就行；\n- `RESULT.json` 里把这一轮变动的文件、跑过的测试**如实**写清；没跑的就写没跑；\n- 不许删测试、不许改松断言、不许放大超时。\n\n我会在收检时确认：原来那 11 个变异**照样红**，工作区没有残留，\n以及这 5 条各自都有对应的红→绿证据。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T16:37:35Z",
+          "run_id": "run-2de148bb4019e694",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T16:50:05Z",
+          "run_id": "run-04caf98fdabae361",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-15T17:09:14Z",
+          "run_id": "run-1e50f0b3f7157fa9"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-15T17:14:12Z",
+          "run_id": "run-42dfee786cca9aaf",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
