@@ -3571,6 +3571,7 @@
       "phase_name": "Research Asset Hub、Rights 与 Publish",
       "title": "四类 Asset Manifest validator",
       "v1_required": true,
+      "supervisor_scope_narrowing": "2026-09-16：补 internal/persistence/sqlc/**。本任务带着 infra/migrations/**，若新增的迁移 ALTER 了已有查询读到的表（research_assets / research_asset_versions，见 internal/persistence/queries/releases_assets.sql），sqlc 生成物会变；派生产物规则要求改迁移者必须能重新生成它，否则 collect 会按越界拒掉 diff。其余一格未删：本任务是迁移链条当前唯一在飞的一环，没有并行任务要躲。迁移编号由 Supervisor 在 spawn 时分配（本次 00067），Worker 不得自选号。",
       "dependencies": [
         "T0701",
         "T0207"
@@ -3592,6 +3593,7 @@
         "specs/SPEC_VERSION.json",
         "internal/assets/**",
         "internal/rights/**",
+        "internal/persistence/sqlc/**",
         "go.mod",
         "go.sum",
         ".env.example",
