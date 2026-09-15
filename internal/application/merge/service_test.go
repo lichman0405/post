@@ -10,13 +10,16 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/lichman0405/post/internal/application/diffs"
+	"github.com/lichman0405/post/internal/application/policy"
 	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/application/relations"
 	"github.com/lichman0405/post/internal/application/sciobjects"
 	"github.com/lichman0405/post/internal/application/states"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/domain"
+	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/rsg/diff"
+	"github.com/lichman0405/post/internal/rsg/integrity"
 	"github.com/lichman0405/post/internal/rsg/manifest"
 	rsgmerge "github.com/lichman0405/post/internal/rsg/merge"
 	rsgvalidation "github.com/lichman0405/post/internal/rsg/validation"
@@ -199,8 +202,13 @@ type fakeStore struct {
 	writeMergeCalls int
 	markPRCalls     int
 	markBranchCalls int
-	gitSteps        []GitStepParams
-	mergeRow        domain.SemanticMerge
+	ledgerReads     int
+	ledgerKeys      []string
+	// ledger is the merge a previous call with the same Idempotency-Key
+	// stored; nil means the key is unused.
+	ledger   *domain.SemanticMerge
+	gitSteps []GitStepParams
+	mergeRow domain.SemanticMerge
 	// mergeParams records what the merge asked the store to write, which is
 	// where the carried conflicts and the plan digest live (the stored row
 	// itself has no carried-conflict column: they are their own table).
@@ -288,6 +296,7 @@ func (f *fakeStore) WriteMerge(_ context.Context, _ states.Transaction, in Write
 	row.Carried, row.Aborted, row.Withheld = in.Carried, in.Aborted, in.Withheld
 	row.Plan, row.PlanDigest, row.PlanVersion = in.PlanJSON, in.PlanDigest, in.PlanVersion
 	row.GitRef, row.GitState = in.GitRef, in.GitState
+	row.SourceBranchID = in.SourceBranchID
 	f.mergeRow = row
 	return row, nil
 }
@@ -324,6 +333,107 @@ func (f *fakeStore) GetMergeByPullRequest(context.Context, string, string) (doma
 
 func (f *fakeStore) ListCarriedConflicts(context.Context, string) ([]domain.SemanticMergeConflict, error) {
 	return nil, nil
+}
+
+// LookupMergeCreation answers the Idempotency-Key ledger read. ledger is what
+// a previous call with the same key stored — nil means the key is unused, which
+// is what every test that does not stage a replay sees.
+func (f *fakeStore) LookupMergeCreation(_ context.Context, _, key string) (*domain.SemanticMerge, error) {
+	f.ledgerReads++
+	f.ledgerKeys = append(f.ledgerKeys, key)
+	if f.ledger == nil {
+		return nil, nil
+	}
+	row := *f.ledger
+	return &row, nil
+}
+
+// fakeChecks stands for prchecks.Service: the integrity review the command
+// re-runs server-side. The report is staged, so a test can hand the merge a
+// blocking failure without building one.
+type fakeChecks struct {
+	report integrity.Report
+	err    error
+	calls  int
+}
+
+func (f *fakeChecks) CheckPullRequest(context.Context, string, int64) (integrity.Report, error) {
+	f.calls++
+	if f.err != nil {
+		return integrity.Report{}, f.err
+	}
+	return f.report, nil
+}
+
+// blockingReport is one BLOCKING failure — the shape the merge must refuse.
+// The result is a FAILURE (Passed=false at blocking severity), which is what
+// Report.Failures reports and what the command refuses on.
+func blockingReport() integrity.Report {
+	return integrity.Report{Kind: "integrity", Verdict: integrity.VerdictBlocked,
+		Explanation: "1 check blocked the proposal: schema_registered",
+		Results: []integrity.Result{{
+			Dimension: integrity.DimensionSchema, Check: integrity.CheckSchemaRegistered,
+			Severity: integrity.SeverityBlocking, Passed: false,
+			Subject: "claim v1 (obj-fixture)", Detail: "the claim carries no evidence",
+			Why: "a claim without evidence is not reviewable",
+		}}}
+}
+
+// warningReport is the same shape at WARNING severity: reported by the review
+// page, never a reason to refuse the merge.
+func warningReport() integrity.Report {
+	report := blockingReport()
+	report.Verdict = integrity.VerdictPassWithWarn
+	report.Results[0].Severity = integrity.SeverityWarning
+	return report
+}
+
+// fakePolicies stands for policy.Service.EffectivePolicy.
+type fakePolicies struct {
+	effective domain.EffectivePolicy
+	err       error
+	calls     int
+}
+
+func (f *fakePolicies) EffectivePolicy(context.Context, domain.User, string) (domain.EffectivePolicy, error) {
+	f.calls++
+	if f.err != nil {
+		return domain.EffectivePolicy{}, f.err
+	}
+	return f.effective, nil
+}
+
+// fakeRules stands for policy.NewRuleEvaluator(): one typed question answered
+// against the policy document. found/value stage the two fail-closed cases
+// (an absent rule and a rule set to false).
+type fakeRules struct {
+	found bool
+	value bool
+	err   error
+	calls int
+}
+
+func (f *fakeRules) Evaluate(context.Context, domain.Policy, policy.Query) (policy.Decision, error) {
+	f.calls++
+	if f.err != nil {
+		return policy.Decision{}, f.err
+	}
+	return policy.Decision{Found: f.found, Bool: f.value}, nil
+}
+
+// fakeEvents is the outbox recorder: it records what the merge emitted inside
+// its transaction, which is where the domain event has to be written.
+type fakeEvents struct {
+	events []events.Event
+	err    error
+}
+
+func (f *fakeEvents) Record(_ context.Context, _ events.DBTX, e events.Event) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.events = append(f.events, e)
+	return nil
 }
 
 // fakeObjects and fakeRelations are the append-only writers; they count the
@@ -386,10 +496,14 @@ type fakeGit struct {
 	actor string
 	err   error
 	calls int
+	// requests records what the saga asked the provider-side adapter to
+	// merge, which is the only place the ref PAIR is observable.
+	requests []GitMergeRequest
 }
 
-func (f *fakeGit) MergePullRequest(context.Context, GitMergeRequest) (GitMergeResult, error) {
+func (f *fakeGit) MergePullRequest(_ context.Context, in GitMergeRequest) (GitMergeResult, error) {
 	f.calls++
+	f.requests = append(f.requests, in)
 	if f.err != nil {
 		return GitMergeResult{}, f.err
 	}
@@ -407,6 +521,10 @@ type harness struct {
 	relations *fakeRelations
 	projects  *fakeProjects
 	authz     *fakeAuthz
+	checks    *fakeChecks
+	policies  *fakePolicies
+	rules     *fakeRules
+	events    *fakeEvents
 	git       *fakeGit
 }
 
@@ -423,6 +541,15 @@ func newHarness(t *testing.T, opts ...func(*harness)) *harness {
 			ProjectID: projID, UserID: actorID, Role: domain.ProjectRoleMaintainer,
 		}},
 		authz: &fakeAuthz{decision: authz.Decision{Verdict: authz.VerdictAllow}},
+		// The governance half of the command, staged to PERMIT: an empty
+		// integrity report, a readable policy and the explicit
+		// main_protected=true rule the merge requires. Every test that
+		// asserts a refusal stages the failing half itself; leaving these
+		// unwired would only prove the fail-closed path.
+		checks:   &fakeChecks{},
+		policies: &fakePolicies{},
+		rules:    &fakeRules{found: true, value: true},
+		events:   &fakeEvents{},
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -432,13 +559,14 @@ func newHarness(t *testing.T, opts ...func(*harness)) *harness {
 }
 
 // service wires the harness's fakes into one service; attempts > 0 overrides
-// the retry bound. The Git port is left UNSET when the harness has no adapter —
-// assigning a typed-nil *fakeGit to the interface would make s.git non-nil, and
-// the "no adapter wired" path (the pending step) would never be exercised.
+// the retry bound. The Git port is left untyped-nil absent when the harness has
+// no adapter — the "no adapter wired" path (the pending step) is what is being
+// exercised, and NewService normalizes a typed nil to a nil interface.
 func (h *harness) service(attempts int) *Service {
 	d := Deps{
 		Store: h.store, Diffs: h.diffs, Plans: h.plans, Commits: h.commits,
 		Objects: h.objects, Relations: h.relations, Projects: h.projects, Authz: h.authz,
+		Checks: h.checks, Policies: h.policies, Rules: h.rules, Events: h.events,
 		RefGuard: RefGuard{MergeService: mergeService}, MaxAttempts: attempts,
 	}
 	if h.git != nil {
@@ -500,6 +628,302 @@ func TestUnwiredServiceRefuses(t *testing.T) {
 	svc := NewService(Deps{})
 	if _, err := svc.Merge(context.Background(), domain.User{ID: actorID}, Input{ProjectID: projID, Number: 7}); err == nil {
 		t.Fatalf("an unwired merge service merged a PR")
+	}
+}
+
+// TestTypedNilGitMergerIsUnwiredNotPanicking pins the composition-root trap
+// T0409 was warned about: Deps.Git is an interface, and the nil *fakeGit a
+// deployment hands it is NOT a nil interface — it is a non-nil interface
+// holding a nil pointer. Without NewService's normalization that value passes
+// the "no adapter wired" check, and the first merge panics inside runGitStep,
+// AFTER PostgreSQL has accepted the state. The merge must instead complete its
+// database half and record the Git step as pending, exactly as it does with an
+// untyped nil.
+func TestTypedNilGitMergerIsUnwiredNotPanicking(t *testing.T) {
+	h := newHarness(t)
+	var typedNil *fakeGit // nil pointer, non-nil interface once assigned
+	h.svc = NewService(Deps{
+		Store: h.store, Diffs: h.diffs, Plans: h.plans, Commits: h.commits,
+		Objects: h.objects, Relations: h.relations, Projects: h.projects, Authz: h.authz,
+		Checks: h.checks, Policies: h.policies, Rules: h.rules, Events: h.events,
+		Git:      typedNil,
+		RefGuard: RefGuard{MergeService: mergeService},
+	})
+	if h.svc.git != nil {
+		t.Fatalf("a typed-nil adapter was accepted as a wired GitMerger")
+	}
+
+	res, err := h.merge(t)
+	if err != nil {
+		t.Fatalf("merge with a typed-nil Git adapter = %v", err)
+	}
+	if res.Merge.GitState != domain.GitStatePending {
+		t.Fatalf("merge row state = %q, want pending (the Git half did not happen)", res.Merge.GitState)
+	}
+	// The nil adapter is not counted on purpose: calling it would dereference
+	// the nil receiver and panic, so this test finishing IS the proof it was
+	// never reached.
+	if len(h.store.gitSteps) != 1 || h.store.gitSteps[0].Error == "" {
+		t.Fatalf("recorded git steps = %+v, want one pending step with a reason", h.store.gitSteps)
+	}
+}
+
+// TestMergeRefusesWhenTheIntegrityReviewBlocks: the command re-runs the
+// review server-side (docs/22 §7) and refuses on a BLOCKING failure, carrying
+// the complete report — the same shape releases.GateRefused uses. Nothing is
+// written: no state, no merge row, no audit row, no event.
+func TestMergeRefusesWhenTheIntegrityReviewBlocks(t *testing.T) {
+	h := newHarness(t, func(h *harness) { h.checks.report = blockingReport() })
+	_, err := h.merge(t)
+
+	var refused *GateRefused
+	if !errors.As(err, &refused) {
+		t.Fatalf("merge of a blocking PR = %v, want *GateRefused", err)
+	}
+	if !errors.Is(err, ErrGateRefused) {
+		t.Fatalf("err = %v, want it to wrap ErrGateRefused", err)
+	}
+	if got := refused.Code(); got != CodeIntegrityBlocked {
+		t.Fatalf("code = %q, want %q", got, CodeIntegrityBlocked)
+	}
+	if len(refused.Report.Results) != 1 || refused.Report.Results[0].Check != integrity.CheckSchemaRegistered {
+		t.Fatalf("the refusal carries report %+v, want the COMPLETE report (every result)", refused.Report)
+	}
+	if refused.Report.Explanation == "" {
+		t.Fatalf("the refusal carries no explanation to show the caller")
+	}
+	if h.store.writeMergeCalls != 0 || h.commits.attempts != 0 {
+		t.Fatalf("a refused merge wrote: merge=%d commits=%d", h.store.writeMergeCalls, h.commits.attempts)
+	}
+	if len(h.events.events) != 0 {
+		t.Fatalf("a refused merge emitted %d event(s)", len(h.events.events))
+	}
+}
+
+// TestMergeRunsDespiteAWarningSeverityFailure: the severity belongs to the
+// check declaration, not to this command. A warning is reported by the review
+// page and does not stop main from advancing.
+func TestMergeRunsDespiteAWarningSeverityFailure(t *testing.T) {
+	h := newHarness(t, func(h *harness) { h.checks.report = warningReport() })
+	res, err := h.merge(t)
+	if err != nil {
+		t.Fatalf("merge with a warning-severity failure = %v", err)
+	}
+	if res.Merge.GitState != domain.GitStatePending {
+		t.Fatalf("merge row = %q, want the merge to have run", res.Merge.GitState)
+	}
+	if h.checks.calls != 1 {
+		t.Fatalf("integrity runs = %d, want exactly one", h.checks.calls)
+	}
+}
+
+// TestMergeRefusesWhenTheIntegrityReviewCannotRun: an unreviewable PR is not a
+// reviewed one. A check that fails to run refuses the merge, and the failure is
+// not dressed up as a gate refusal (the report does not exist).
+func TestMergeRefusesWhenTheIntegrityReviewCannotRun(t *testing.T) {
+	h := newHarness(t, func(h *harness) { h.checks.err = errors.New("checks: store unavailable") })
+	_, err := h.merge(t)
+	if err == nil || errors.Is(err, ErrGateRefused) {
+		t.Fatalf("merge whose review could not run = %v, want the check's own failure", err)
+	}
+	if h.store.writeMergeCalls != 0 {
+		t.Fatalf("an unreviewable merge wrote %d merge row(s)", h.store.writeMergeCalls)
+	}
+}
+
+// TestMainProtectedPolicyFailsClosed: every way the governance policy can
+// decline to permit the merge refuses it — an unreadable policy, an
+// unevaluable rule, an ABSENT rule (silence is not a permission) and a rule
+// set to false (no policy in this build waives the frozen-main guarantee).
+// Nothing is written in any of the four cases.
+func TestMainProtectedPolicyFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		apply func(*harness)
+		found bool
+		value bool
+	}{
+		{"unreadable policy", func(h *harness) { h.policies.err = errors.New("policy: unavailable") }, false, false},
+		{"unevaluable rule", func(h *harness) { h.rules.err = errors.New("policy: unknown rule kind") }, false, false},
+		{"absent rule", func(h *harness) { h.rules.found = false }, false, false},
+		{"rule set to false", func(h *harness) { h.rules.value = false }, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hp := newHarness(t)
+			tc.apply(hp)
+			_, err := hp.merge(t)
+
+			var refused *PolicyRefusedError
+			if !errors.As(err, &refused) {
+				t.Fatalf("merge under %s = %v, want *PolicyRefusedError", tc.name, err)
+			}
+			if !errors.Is(err, ErrPolicyRefused) {
+				t.Fatalf("err = %v, want it to wrap ErrPolicyRefused", err)
+			}
+			if refused.Code() != CodePolicyRefused {
+				t.Fatalf("code = %q, want %q", refused.Code(), CodePolicyRefused)
+			}
+			if refused.Rule != domain.RuleMainProtected {
+				t.Fatalf("refused on rule %q, want %q", refused.Rule, domain.RuleMainProtected)
+			}
+			if refused.Found != tc.found || refused.Bool != tc.value {
+				t.Fatalf("refusal reports found=%v bool=%v, want found=%v bool=%v",
+					refused.Found, refused.Bool, tc.found, tc.value)
+			}
+			if refused.Reason == "" {
+				t.Fatalf("the refusal carries no reason for the caller")
+			}
+			if hp.store.writeMergeCalls != 0 || hp.commits.attempts != 0 {
+				t.Fatalf("a policy-refused merge wrote: merge=%d commits=%d", hp.store.writeMergeCalls, hp.commits.attempts)
+			}
+		})
+	}
+}
+
+// TestPolicyPrecedesTheWriteButFollowsThePlan: the plan is computed before the
+// policy is read (a plan is a pure function of states a human already pinned),
+// and the policy is read before anything is written. The ordering matters
+// because the plan is what the audit row and the event describe.
+func TestPolicyPrecedesTheWriteButFollowsThePlan(t *testing.T) {
+	h := newHarness(t, func(h *harness) { h.rules.value = false })
+	_, err := h.merge(t)
+	if !errors.Is(err, ErrPolicyRefused) {
+		t.Fatalf("merge = %v, want ErrPolicyRefused", err)
+	}
+	if h.plans.calls != 1 || h.diffs.calls != 1 {
+		t.Fatalf("the plan was not computed before the policy read: plans=%d diffs=%d", h.plans.calls, h.diffs.calls)
+	}
+	if h.store.writeMergeCalls != 0 {
+		t.Fatalf("the policy refusal came after the merge row was written")
+	}
+}
+
+// TestMergeReplaysAnIdempotencyKey: the same key returns the merge the first
+// call produced, writes nothing, and does not re-run a single gate — a replay
+// is a read. The merge the key names is what comes back, not a re-decision of
+// it against today's policy.
+func TestMergeReplaysAnIdempotencyKey(t *testing.T) {
+	h := newHarness(t)
+	key := "merge-key-0001"
+	h.store.ledger = &domain.SemanticMerge{
+		ID: mergeID, ProjectID: projID, PullRequestID: prID, ResultStateID: resultState,
+		ActorID: actorID, GitRef: strptr("refs/heads/main"), GitState: domain.GitStateUpdated,
+		GitSHA: strptr(mergeSHA),
+	}
+	res, err := h.svc.Merge(context.Background(), domain.User{ID: actorID},
+		Input{ProjectID: projID, Number: 7, IdempotencyKey: &key})
+	if err != nil {
+		t.Fatalf("replay = %v", err)
+	}
+	if !res.Replayed || res.Merge.ID != mergeID {
+		t.Fatalf("replay result = %+v, want the stored merge %s marked replayed", res, mergeID)
+	}
+	if h.store.writeMergeCalls != 0 || h.commits.attempts != 0 {
+		t.Fatalf("a replay wrote: merge=%d commits=%d", h.store.writeMergeCalls, h.commits.attempts)
+	}
+	if h.diffs.calls != 0 || h.plans.calls != 0 || h.checks.calls != 0 || h.policies.calls != 0 {
+		t.Fatalf("a replay re-ran the gates: diffs=%d plans=%d checks=%d policies=%d",
+			h.diffs.calls, h.plans.calls, h.checks.calls, h.policies.calls)
+	}
+	if h.store.ledgerReads != 1 || h.store.ledgerKeys[0] != key {
+		t.Fatalf("ledger reads = %d keys=%v, want exactly one read of %q", h.store.ledgerReads, h.store.ledgerKeys, key)
+	}
+	if len(h.store.gitSteps) != 0 {
+		t.Fatalf("a replay whose Git step already finished re-drove it: %+v", h.store.gitSteps)
+	}
+}
+
+// TestMergeKeyAbsentSkipsTheLedger: without an Idempotency-Key there is
+// nothing to replay, so the ledger is never read and the merge runs normally.
+// The key is optional at this layer — the transport is what makes it required
+// on the route the contract marks it so.
+func TestMergeKeyAbsentSkipsTheLedger(t *testing.T) {
+	h := newHarness(t)
+	res, err := h.merge(t)
+	if err != nil {
+		t.Fatalf("merge without a key = %v", err)
+	}
+	if res.Replayed {
+		t.Fatalf("a keyless merge was reported as a replay")
+	}
+	if h.store.ledgerReads != 0 {
+		t.Fatalf("ledger reads = %d, want 0 without a key", h.store.ledgerReads)
+	}
+	if h.store.mergeParams[0].IdempotencyKey != nil {
+		t.Fatalf("the keyless merge wrote a ledger key: %q", *h.store.mergeParams[0].IdempotencyKey)
+	}
+}
+
+// TestMergeRecordsItsAuditRowAndDomainEvent: the merge, its audit row and its
+// domain event are one unit — the audit row is handed to the same transaction
+// that writes the merge, and the event goes through the outbox recorder in that
+// transaction. The two vocabularies are the point: the audit action
+// (domain.ActionPullRequestMerged) and the event type
+// (specs/events/event-types.yaml's pull_request.merged) name the same act in the
+// two registries the platform keeps, and neither registry derives from the
+// other.
+func TestMergeRecordsItsAuditRowAndDomainEvent(t *testing.T) {
+	h := newHarness(t)
+	res, err := h.merge(t)
+	if err != nil {
+		t.Fatalf("merge = %v", err)
+	}
+	if len(h.store.mergeParams) != 1 {
+		t.Fatalf("merge writes = %d, want 1", len(h.store.mergeParams))
+	}
+	audit := h.store.mergeParams[0].Audit
+	if audit.Action != domain.ActionPullRequestMerged {
+		t.Fatalf("audit action = %q, want %q", audit.Action, domain.ActionPullRequestMerged)
+	}
+	if audit.ActorID != actorID || audit.ProjectID != projID {
+		t.Fatalf("audit row = %+v, want the actor and the project", audit)
+	}
+	if len(h.events.events) != 1 {
+		t.Fatalf("domain events = %d, want exactly 1", len(h.events.events))
+	}
+	e := h.events.events[0]
+	// specs/events/event-types.yaml spells the event pull_request.merged.
+	// docs/18 §2 names the same event in prose as "pr.merged" — the
+	// machine-readable vocabulary wins, because it is what every consumer
+	// switches on (pull_request.opened / pull_request.reviewed are the same
+	// pair of spellings one line above it in the same list).
+	if e.EventType != eventPullRequestMerged {
+		t.Fatalf("event type = %q, want %q", e.EventType, eventPullRequestMerged)
+	}
+	if e.Visibility != events.VisibilityPublic {
+		t.Fatalf("event visibility = %q, want the public target branch's own visibility", e.Visibility)
+	}
+	if e.ProjectID != projID || e.ActorID != actorID {
+		t.Fatalf("event = %+v, want the project and the actor", e)
+	}
+	var payload struct {
+		MergeID           string `json:"merge_id"`
+		PullRequestID     string `json:"pull_request_id"`
+		PullRequestNumber int64  `json:"pull_request_number"`
+		StateID           string `json:"state_id"`
+		TargetBranchID    string `json:"target_branch_id"`
+	}
+	if err := json.Unmarshal(e.Payload, &payload); err != nil {
+		t.Fatalf("event payload %s is not JSON: %v", e.Payload, err)
+	}
+	if payload.MergeID != res.Merge.ID {
+		t.Fatalf("payload merge_id = %q, want %q", payload.MergeID, res.Merge.ID)
+	}
+	if payload.PullRequestNumber != 7 || payload.PullRequestID != prID {
+		t.Fatalf("payload = %+v, want the PR it merged", payload)
+	}
+	if payload.StateID != resultState || payload.TargetBranchID != mainBranchID {
+		t.Fatalf("payload = %+v, want the accepted state and the target branch", payload)
+	}
+}
+
+// TestMergeFailsWhenTheEventCannotBeRecorded: the outbox write is part of the
+// merge's transaction (docs/53) — an event that cannot be recorded fails the
+// merge rather than being dropped.
+func TestMergeFailsWhenTheEventCannotBeRecorded(t *testing.T) {
+	h := newHarness(t, func(h *harness) { h.events.err = errors.New("outbox: insert refused") })
+	if _, err := h.merge(t); err == nil {
+		t.Fatalf("a merge whose domain event could not be recorded reported success")
 	}
 }
 
@@ -1010,6 +1434,7 @@ func TestMergeRefusesToAdvanceMainWithNoMergeIdentity(t *testing.T) {
 	h.svc = NewService(Deps{
 		Store: h.store, Diffs: h.diffs, Plans: h.plans, Commits: h.commits,
 		Objects: h.objects, Relations: h.relations, Projects: h.projects, Authz: h.authz,
+		Checks: h.checks, Policies: h.policies, Rules: h.rules, Events: h.events,
 		Git: h.git, // no RefGuard merge identity configured
 	})
 	res, err := h.merge(t)
@@ -1019,6 +1444,88 @@ func TestMergeRefusesToAdvanceMainWithNoMergeIdentity(t *testing.T) {
 	if res.Merge.GitState != domain.GitStateFailed || res.Merge.GitSHA != nil {
 		t.Fatalf("merge row = state %q sha %v, want failed: an empty guard must fail closed",
 			res.Merge.GitState, res.Merge.GitSHA)
+	}
+}
+
+// TestMergeNamesTheProviderRefPair: the provider-side merge needs BOTH refs —
+// the target it advances and the branch it merges from — and the saga hands
+// the adapter the pair the plan was computed over, pinned to the two states'
+// commits. A merge that named only the target could not open, let alone
+// merge, the provider's pull request.
+func TestMergeNamesTheProviderRefPair(t *testing.T) {
+	h := newHarness(t, func(h *harness) {
+		h.git = &fakeGit{sha: mergeSHA, actor: mergeService}
+	})
+	if _, err := h.merge(t); err != nil {
+		t.Fatalf("merge = %v", err)
+	}
+	if len(h.git.requests) != 1 {
+		t.Fatalf("provider merge calls = %d, want 1", len(h.git.requests))
+	}
+	got := h.git.requests[0]
+	if got.TargetRef != "refs/heads/main" {
+		t.Errorf("target ref = %q, want main's ref (the ref the merge advances)", got.TargetRef)
+	}
+	if got.SourceRef != "refs/heads/feature" {
+		t.Errorf("source ref = %q, want the source branch's ref (the PR's head)", got.SourceRef)
+	}
+	// Both sides of the harness triple sit on the same recorded commit, so
+	// the pins are that commit on both sides — the point is that the pins come
+	// from the PLAN's states, not from the branch rows' current heads.
+	if got.SourceSHA != mainSHA || got.TargetSHA != mainSHA {
+		t.Errorf("pins = source %q target %q, want the planned states' commits (%q)",
+			got.SourceSHA, got.TargetSHA, mainSHA)
+	}
+}
+
+// TestMergeRetryNamesTheSameRefPair: the retry path (a client repeating its
+// Idempotency-Key after a failed Git step) rebuilds the request from the merge
+// ROW alone — there are no branch rows in hand at that point. It must name the
+// same pair the first attempt did, or a retry would advance a different ref
+// than the one the humans decided.
+func TestMergeRetryNamesTheSameRefPair(t *testing.T) {
+	h := newHarness(t, func(h *harness) {
+		h.git = &fakeGit{err: errors.New("gitea: 502 bad gateway")}
+	})
+	key := "merge-key-retry-0001"
+	first, err := h.svc.Merge(context.Background(), domain.User{ID: actorID},
+		Input{ProjectID: projID, Number: 7, IdempotencyKey: &key})
+	if err != nil {
+		t.Fatalf("first merge = %v", err)
+	}
+	if first.Merge.GitState != domain.GitStateFailed {
+		t.Fatalf("first merge git state = %q, want failed so the retry has work to do", first.Merge.GitState)
+	}
+	// The ledger now holds the merge the first call created, Git step and all
+	// (the real store's LookupMergeCreation returns exactly this row).
+	stored := h.store.mergeRow
+	h.store.ledger = &stored
+	// The provider is reachable again on the retry — the same adapter
+	// instance the service was wired with, since that is what a real
+	// redeployment-free retry uses.
+	h.git.err, h.git.sha, h.git.actor = nil, mergeSHA, mergeService
+
+	res, err := h.svc.Merge(context.Background(), domain.User{ID: actorID},
+		Input{ProjectID: projID, Number: 7, IdempotencyKey: &key})
+	if err != nil {
+		t.Fatalf("retry = %v", err)
+	}
+	if !res.Replayed {
+		t.Fatalf("the retry was not reported as a replay of %s", key)
+	}
+	if len(h.git.requests) != 2 {
+		t.Fatalf("provider calls = %d, want the first attempt plus the retry", len(h.git.requests))
+	}
+	got := h.git.requests[1]
+	if got.TargetRef != "refs/heads/main" || got.SourceRef != "refs/heads/feature" {
+		t.Fatalf("retry ref pair = %q -> %q, want the pair the first attempt named (refs/heads/feature -> refs/heads/main)",
+			got.SourceRef, got.TargetRef)
+	}
+	if res.Merge.GitState != domain.GitStateUpdated || res.Merge.GitSHA == nil || *res.Merge.GitSHA != mergeSHA {
+		t.Fatalf("merge row after the retry = state %q sha %v, want the completed step", res.Merge.GitState, res.Merge.GitSHA)
+	}
+	if h.store.writeMergeCalls != 1 {
+		t.Fatalf("write merge calls = %d, want the retry to have written nothing new", h.store.writeMergeCalls)
 	}
 }
 

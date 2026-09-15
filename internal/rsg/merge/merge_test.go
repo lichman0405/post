@@ -642,7 +642,7 @@ func TestRelationEndpointHeldByPublicationReportsTheGate(t *testing.T) {
 // TestPlanIsDeterministic: the same inputs produce the same bytes, and the
 // plan does not depend on the order the decisions were submitted in.
 func TestPlanIsDeterministic(t *testing.T) {
-	build := func(decisions ...Decision) []byte {
+	build := func(decisions ...Decision) (*Plan, []byte) {
 		base := objRow("pv-00000001", "obj-p-0000001", "protocol", 1, "state-base-0001", "active",
 			"P1", `{"purpose":"p","steps":[{"id":"s1","temperature":300}]}`, nil)
 		src := objRow("pv-00000002", "obj-p-0000001", "protocol", 2, "state-src-000001", "active",
@@ -653,24 +653,65 @@ func TestPlanIsDeterministic(t *testing.T) {
 			"C1", `{"statement":"c"}`, nil)
 		otherSrc := objRow("cv-00000002", "obj-c-0000001", "claim", 2, "state-src-000001", "active",
 			"C1", `{"statement":"c2"}`, nil)
-		f := newFixture().base(base, other).source(base, src, other, otherSrc).target(base, tgt, other)
+		// A SECOND object both sides moved differently: with only one
+		// conflicted object there is nothing to swap the decisions over,
+		// and an order-independence check that feeds one decision twice
+		// passes for any implementation, including one that reads the
+		// decision list as an ordered log.
+		qBase := objRow("qv-00000001", "obj-q-0000001", "protocol", 1, "state-base-0001", "active",
+			"Q1", `{"purpose":"q","steps":[{"id":"s1","temperature":300}]}`, nil)
+		qSrc := objRow("qv-00000002", "obj-q-0000001", "protocol", 2, "state-src-000001", "active",
+			"Q1", `{"purpose":"q","steps":[{"id":"s1","temperature":350}]}`, nil)
+		qTgt := objRow("qv-00000003", "obj-q-0000001", "protocol", 2, "state-tgt-000001", "active",
+			"Q1", `{"purpose":"q","steps":[{"id":"s1","temperature":400}]}`, nil)
+		f := newFixture().base(base, other, qBase).
+			source(base, src, other, otherSrc, qSrc).
+			target(base, tgt, other, qTgt)
 		p := f.merge(t, decisions...)
 		b, err := p.CanonicalJSON()
 		if err != nil {
 			t.Fatalf("CanonicalJSON: %v", err)
 		}
-		return b
+		return p, b
 	}
-	first := build()
-	if !bytes.Equal(first, build()) {
+	_, first := build()
+	if _, again := build(); !bytes.Equal(first, again) {
 		t.Fatalf("two runs over the same inputs differ")
 	}
 	// The decisions are looked up by classifier key, so their order cannot
 	// matter: build the same plan twice with the two decisions swapped.
-	probe := scientificFixture().merge(t)
-	d1 := decide(t, probe, domain.ConflictResolutionTargetObject, "obj-p-0000001", "SCIENTIFIC_FIELD_DIVERGES", domain.ResolutionKeepBoth)
-	if !bytes.Equal(build(d1), build(d1)) {
-		t.Fatalf("plan bytes depend on the run")
+	// The two decisions address two DIFFERENT targets, so the swap is a
+	// real one — and the plan each build produces is checked to have
+	// actually applied them, so the byte comparison is not two identical
+	// refusals.
+	probeP := scientificFixture().merge(t)
+	d1 := decide(t, probeP, domain.ConflictResolutionTargetObject, "obj-p-0000001", "SCIENTIFIC_FIELD_DIVERGES", domain.ResolutionKeepBoth)
+	qProbe := newFixture().
+		base(objRow("qv-00000001", "obj-q-0000001", "protocol", 1, "state-base-0001", "active",
+			"Q1", `{"purpose":"q","steps":[{"id":"s1","temperature":300}]}`, nil)).
+		source(objRow("qv-00000002", "obj-q-0000001", "protocol", 2, "state-src-000001", "active",
+			"Q1", `{"purpose":"q","steps":[{"id":"s1","temperature":350}]}`, nil)).
+		target(objRow("qv-00000003", "obj-q-0000001", "protocol", 2, "state-tgt-000001", "active",
+			"Q1", `{"purpose":"q","steps":[{"id":"s1","temperature":400}]}`, nil)).
+		merge(t)
+	d2 := decide(t, qProbe, domain.ConflictResolutionTargetObject, "obj-q-0000001", "SCIENTIFIC_FIELD_DIVERGES", domain.ResolutionAcceptTarget)
+	forward, forwardBytes := build(d1, d2)
+	_, swappedBytes := build(d2, d1)
+	if !bytes.Equal(forwardBytes, swappedBytes) {
+		t.Fatalf("plan bytes depend on the order the decisions were submitted in:\nforward: %s\nswapped: %s",
+			forwardBytes, swappedBytes)
+	}
+	// Prove the compared plans are the DECIDED ones: both decisions took
+	// effect, one as a carried conflict and one as keep-target, and the
+	// third (auto-mergeable) change still lands, so the plan is executable.
+	if !forward.Executable {
+		t.Fatalf("plan not executable: blockers %+v", forward.Blockers)
+	}
+	if got := change(t, forward, "obj-p-0000001"); got.Effect != EffectCarryBoth {
+		t.Fatalf("obj-p change = %+v, want the keep-both decision to have taken effect", got)
+	}
+	if got := change(t, forward, "obj-q-0000001"); got.Effect != EffectKeepTarget {
+		t.Fatalf("obj-q change = %+v, want the accept-target decision to have taken effect", got)
 	}
 	// A decision the report contains but the plan does not need is still
 	// an error; the same decision set must therefore produce identical
@@ -735,5 +776,58 @@ func TestContradictingDecisionsBlock(t *testing.T) {
 	}
 	if !blocked(p, CodeDecisionsDiverge) {
 		t.Fatalf("blockers = %+v, want %s", p.Blockers, CodeDecisionsDiverge)
+	}
+}
+
+// TestEveryBlockingDecisionIsReported: a change whose conflicts carry two
+// DIFFERENT blocking decisions (one sent to a validation branch, one held
+// for more evidence) stops the plan for both reasons. Reporting only the
+// first would tell an operator to lift one decision when two have to be
+// lifted, and every blocker entry carries the line explaining it — a code
+// repeated as its own detail explains nothing.
+func TestEveryBlockingDecisionIsReported(t *testing.T) {
+	base := objRow("cv-00000001", "obj-c-0000001", "claim", 1, "state-base-0001", "active",
+		"C1", `{"statement":"c","confidence":"low"}`, nil)
+	src := objRow("cv-00000002", "obj-c-0000001", "claim", 2, "state-src-000001", "active",
+		"C2", `{"statement":"c2","confidence":"high"}`, nil)
+	src.VisibilityPolicyID = strptr("policy-src")
+	tgt := objRow("cv-00000003", "obj-c-0000001", "claim", 2, "state-tgt-000001", "active",
+		"C3", `{"statement":"c3","confidence":"low"}`, nil)
+	tgt.VisibilityPolicyID = strptr("policy-tgt")
+	f := newFixture().base(base).source(base, src).target(base, tgt)
+	probe := f.merge(t)
+	conflicts := probe.Report.ObjectVerdicts[0].Conflicts
+	if len(conflicts) < 2 {
+		t.Fatalf("fixture does not produce several conflicts on one object: %+v", probe.Report.ObjectVerdicts)
+	}
+	// Alternate the two blocking kinds over the conflicts: whichever way the
+	// detector orders them, both kinds are decided on this one change.
+	kinds := []domain.ResolutionKind{domain.ResolutionValidationBranch, domain.ResolutionRequestEvidence}
+	decisions := make([]Decision, 0, len(conflicts))
+	for i, c := range conflicts {
+		decisions = append(decisions, decide(t, probe, domain.ConflictResolutionTargetObject,
+			"obj-c-0000001", c.Code, kinds[i%len(kinds)]))
+	}
+	p := f.merge(t, decisions...)
+
+	c := change(t, p, "obj-c-0000001")
+	if c.Effect != EffectBlocked || !c.Blocked {
+		t.Fatalf("change = %+v, want a blocked change", c)
+	}
+	got := map[string]string{}
+	for _, b := range p.Blockers {
+		got[b.Code] = b.Detail
+	}
+	for _, want := range []string{CodeValidationBranch, CodeMoreEvidence} {
+		detail, ok := got[want]
+		if !ok {
+			t.Fatalf("blockers = %+v, want %s among them (every blocking decision is reported)", p.Blockers, want)
+		}
+		if detail == want || detail == "" {
+			t.Fatalf("blocker %s detail = %q, want the line explaining the decision, not the code", want, detail)
+		}
+	}
+	if len(p.Blockers) != 2 {
+		t.Fatalf("blockers = %+v, want exactly the two distinct blocking decisions", p.Blockers)
 	}
 }

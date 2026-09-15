@@ -6,12 +6,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/lichman0405/post/internal/application/diffs"
 	"github.com/lichman0405/post/internal/application/merge"
+	"github.com/lichman0405/post/internal/application/policy"
+	"github.com/lichman0405/post/internal/application/prchecks"
 	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/application/pullrequests"
 	"github.com/lichman0405/post/internal/application/relations"
@@ -19,9 +22,12 @@ import (
 	"github.com/lichman0405/post/internal/application/rsg"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/domain"
+	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/persistence"
 	rsgconflict "github.com/lichman0405/post/internal/rsg/conflict"
+	"github.com/lichman0405/post/internal/rsg/integrity"
 	rsgmerge "github.com/lichman0405/post/internal/rsg/merge"
+	"github.com/lichman0405/post/internal/rsg/schemareg"
 )
 
 // Task T0406: Semantic Merge Engine — over a REAL PostgreSQL, with the same
@@ -91,6 +97,16 @@ type mergeFixture struct {
 // newMergeFixture builds the stack over a private project. projectVisibility
 // and targetVisibility pick the pair the docs/09 §9 publication rule reads
 // (a public branch only exists inside a public project, docs/12 §3).
+//
+// The governance half is wired the way cmd/api wires it (a real integrity
+// re-run through prchecks, the real policy service and rule evaluator, the
+// real outbox recorder) and the project carries a policy that says
+// main_protected: true — the value the merge's fail-closed policy check
+// requires to exist. The policy is written through the real store, on the
+// project's own scope, so EffectivePolicy resolves it the way production
+// does. Git stays nil on purpose: the provider-side adapter is T0409's, and
+// its own integration coverage lives in the e2e test, so here the saga must
+// record the step as not-done instead of claiming the ref moved.
 func newMergeFixture(t *testing.T, ctx context.Context, projectVisibility domain.ProjectVisibility, targetVisibility domain.BranchVisibility) *mergeFixture {
 	t.Helper()
 	d := newDiffFixtureWithVisibility(t, ctx, projectVisibility, targetVisibility)
@@ -100,6 +116,12 @@ func newMergeFixture(t *testing.T, ctx context.Context, projectVisibility domain
 	projectSvc := projects.NewService(projectStore, orgStore, authz.NewMatrixEngine())
 	resolutionSvc := resolutions.NewService(d.diffs, resolutions.NewPGStore(d.pool), projectSvc, authz.NewMatrixEngine())
 	store := persistence.NewSemanticMergeStore(d.pool)
+	reg, err := schemareg.New()
+	if err != nil {
+		t.Fatalf("schemareg.New: %v", err)
+	}
+	policyStore := persistence.NewPolicyStore(d.pool)
+	seedMainProtectedPolicy(t, ctx, policyStore, d)
 	return &mergeFixture{
 		diffFixture: d,
 		prs:         pullrequests.NewService(persistence.NewPullRequestStore(d.pool)),
@@ -115,10 +137,49 @@ func newMergeFixture(t *testing.T, ctx context.Context, projectVisibility domain
 			Relations: persistence.NewRelationStore(d.pool),
 			Projects:  projectSvc,
 			Authz:     authz.NewMatrixEngine(),
-			// Git is nil on purpose: the provider-side merge adapter is
-			// T0409's, so the saga must record the step as not-done instead
-			// of claiming the ref moved.
+			Checks: prchecks.NewService(prchecks.Deps{
+				PRs:      persistence.NewPullRequestStore(d.pool),
+				Projects: projectStore,
+				States:   persistence.NewStateStore(d.pool),
+				Branches: persistence.NewBranchStore(d.pool),
+				Manifest: persistence.NewManifestStore(d.pool),
+				Policies: policyStore,
+				Engine:   integrity.New(reg),
+			}),
+			Policies: policy.NewService(policyStore, orgStore, projectStore, nil),
+			Rules:    policy.NewRuleEvaluator(),
+			Events:   events.Recorder{},
 		}),
+	}
+}
+
+// seedMainProtectedPolicy writes the project-scoped policy document the
+// merge's governance check reads. docs/12 §5's main_protected is the one
+// rule the merge consumes; the fixture sets it because a policy that does
+// not mention main is refused (fail closed, see the merge package's
+// requirePolicy) rather than read as unprotected.
+func seedMainProtectedPolicy(t *testing.T, ctx context.Context, store *persistence.PolicyStore, d *diffFixture) {
+	t.Helper()
+	seedProjectPolicy(t, ctx, store, d.project, d.alice.ID)
+}
+
+// seedProjectPolicy is seedMainProtectedPolicy by explicit project and actor,
+// so a test that builds its own project (the merge governance e2e, which
+// provisions a real repository) seeds the same document the fixture does
+// instead of growing a second spelling of it.
+func seedProjectPolicy(t *testing.T, ctx context.Context, store *persistence.PolicyStore, project domain.Project, actorID string) {
+	t.Helper()
+	if _, err := store.CreateProjectVersion(ctx, domain.PolicyVersion{
+		Scope:     domain.PolicyScope{ProjectID: project.ID},
+		Version:   "v1",
+		Policy:    domain.Policy{Rules: map[string]json.RawMessage{domain.RuleMainProtected: json.RawMessage("true")}},
+		CreatedBy: actorID,
+	}, project.OrganizationID, func(*domain.Policy) error { return nil },
+		domain.AuditEntry{
+			ActorID: actorID, Via: domain.ViaSession, Action: "policy.project_version_created",
+			ProjectID: project.ID,
+		}); err != nil {
+		t.Fatalf("seed the project's main_protected policy: %v", err)
 	}
 }
 
@@ -1356,4 +1417,98 @@ func (f *mergeFixture) mergeCountRow(t *testing.T, ctx context.Context, mergeID 
 		t.Fatalf("read the merge record: %v", err)
 	}
 	return row
+}
+
+// TestListPendingGitMergesScansTheUnfinishedSagas covers the scan a retry
+// needs: the merges whose Git step has not finished, oldest first, bounded by
+// the caller's limit. The store method exists so a background sweeper can
+// re-drive an interrupted saga without a client in the loop; this build wires
+// no such worker (the product's retry is the idempotent replay — see the merge
+// service's replay and T0409's RESULT), so the scan is pinned here rather than
+// left as untested, unreferenced code.
+//
+// Three real merges are created in order, then the saga columns are set to the
+// three states the platform can leave behind: updated (terminal, must NOT come
+// back), failed (retryable), and untouched/pending (retryable). The scan must
+// return the second and third and never the first.
+func TestListPendingGitMergesScansTheUnfinishedSagas(t *testing.T) {
+	ctx := testCtx(t)
+	f := newMergeFixture(t, ctx, domain.VisibilityPrivate, domain.BranchVisibilityPrivate)
+
+	// Each merge needs its own object and branch: a branch merges once, and a
+	// merged PR is terminal.
+	ids := make([]string, 0, 3)
+	for i, statement := range []string{"alpha", "beta", "gamma"} {
+		claim, _ := f.createObject(t, ctx, f.main, "claim", mergeMainGateClaim(statement))
+		feature := f.fork(t, ctx, "scan-feature-"+statement, domain.BranchVisibilityPrivate)
+		pr := f.openPR(t, ctx, feature.ID, "scan "+statement)
+		f.updateObject(t, ctx, feature.ID, claim, 1, mergeMainGateClaim(statement+"-v2"))
+		pr = f.refresh(t, ctx, pr.Number)
+		res, err := f.merges.Merge(ctx, f.alice, merge.Input{ProjectID: f.project.ID, Number: pr.Number})
+		if err != nil {
+			t.Fatalf("merge %d: %v", i, err)
+		}
+		if res.Merge.GitState != domain.GitStatePending {
+			t.Fatalf("merge %d git state = %q, want pending (no adapter is wired in this fixture)",
+				i, res.Merge.GitState)
+		}
+		ids = append(ids, res.Merge.ID)
+	}
+
+	// The saga columns the platform moves: the first merge's step finished,
+	// the second's failed.
+	if _, err := f.mergeStore.CompleteGitStep(ctx, merge.GitStepParams{
+		MergeID: ids[0], SHA: strings.Repeat("a", 40), State: domain.GitStateUpdated,
+	}); err != nil {
+		t.Fatalf("complete the first merge's Git step: %v", err)
+	}
+	if _, err := f.mergeStore.RecordGitAttempt(ctx, merge.GitStepParams{
+		MergeID: ids[1], State: domain.GitStateFailed, Error: "provider unreachable",
+	}); err != nil {
+		t.Fatalf("fail the second merge's Git step: %v", err)
+	}
+
+	pending, err := f.mergeStore.ListPendingGitMerges(ctx, 50)
+	if err != nil {
+		t.Fatalf("list pending merges: %v", err)
+	}
+	got := make(map[string]domain.SemanticMergeGitState, len(pending))
+	order := make([]string, 0, len(pending))
+	for _, m := range pending {
+		got[m.ID] = m.GitState
+		order = append(order, m.ID)
+	}
+	if _, present := got[ids[0]]; present {
+		t.Errorf("the scan returned the merge whose Git step FINISHED (%s): a retry would re-drive a terminal saga", ids[0])
+	}
+	if state, ok := got[ids[1]]; !ok || state != domain.GitStateFailed {
+		t.Errorf("the failed merge %s is missing from the scan (got %v): a provider outage would never be retried", ids[1], got)
+	}
+	if state, ok := got[ids[2]]; !ok || state != domain.GitStatePending {
+		t.Errorf("the pending merge %s is missing from the scan (got %v)", ids[2], got)
+	}
+	// Oldest first, by the recorded creation order. The fixture creates each
+	// merge in its own transaction, so created_at strictly increases; the id
+	// tiebreak keeps the order total even when the clock is coarse.
+	if len(order) >= 2 && order[0] == ids[2] {
+		t.Errorf("scan order = %v, want oldest first (the fixture created %v in order)", order, ids)
+	}
+
+	// The limit bounds the scan, so a sweeper can work in batches without
+	// holding the whole backlog.
+	limited, err := f.mergeStore.ListPendingGitMerges(ctx, 1)
+	if err != nil {
+		t.Fatalf("list pending merges with limit 1: %v", err)
+	}
+	if len(limited) != 1 {
+		t.Fatalf("scan with limit 1 returned %d rows, want 1", len(limited))
+	}
+	if limited[0].ID != order[0] {
+		t.Errorf("limited scan returned %s, want the oldest unfinished merge %s", limited[0].ID, order[0])
+	}
+	// A non-positive limit is the documented default, never "everything" and
+	// never "nothing".
+	if defaulted, err := f.mergeStore.ListPendingGitMerges(ctx, 0); err != nil || len(defaulted) == 0 {
+		t.Fatalf("scan with limit 0 = %d rows, err %v, want the default batch", len(defaulted), err)
+	}
 }

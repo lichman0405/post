@@ -50,6 +50,21 @@ const (
 	// the record that a human, not an agent, decided).
 	ActionConflictResolutionSaved = "conflict.resolution_saved"
 
+	// T0409 merge governance: one row per Research PR merge, in the same
+	// transaction as the accepted state it produced. docs/09 §3 freezes
+	// main, so this row is the audit trail of every change main ever
+	// accepted — who merged which proposal into which state, under which
+	// plan. Its name follows the dotted `<subject>.<verb-past>` convention
+	// the other actions use.
+	//
+	// It spells the same dotted name as the research EVENT the merge emits
+	// (pull_request.merged, specs/events/event-types.yaml) and that is a
+	// coincidence of two separate registries, not a shared identity: the
+	// audit vocabulary is this file, the event vocabulary is the event
+	// spec, subscribers route on events, the Activity page reads audit
+	// actions, and neither list is derived from the other.
+	ActionPullRequestMerged = "pull_request.merged"
+
 	// T0609 project milestones: one milestone row per action, written in
 	// the same transaction as the milestone row itself.
 	ActionMilestoneCreated = "milestone.created"

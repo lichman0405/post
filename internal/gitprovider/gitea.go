@@ -49,6 +49,12 @@ type GiteaAdapter struct {
 	ownerMu  sync.Mutex
 	owner    string
 	ownerSet bool
+
+	// mergeRetryWait is the first wait between two PR-merge attempts; it
+	// doubles per attempt. The provider decides mergeability asynchronously,
+	// so a merge asked for too early is refused for a moment — see
+	// mergeProviderPullRequest for why that is retried and how it is bounded.
+	mergeRetryWait time.Duration
 }
 
 // GitRunner executes git CLI commands and returns the combined output —
@@ -76,13 +82,23 @@ func WithGitRunner(r GitRunner) AdapterOption {
 	return func(a *GiteaAdapter) { a.runner = r }
 }
 
+// WithMergeRetryWait substitutes the first wait between two pull-request
+// merge attempts. Unit-test seam only: against a real provider the default
+// (mergeFirstRetryWait) is the one that fits the provider's own mergeability
+// check, and shortening it in production would only make a transient refusal
+// harder to survive.
+func WithMergeRetryWait(d time.Duration) AdapterOption {
+	return func(a *GiteaAdapter) { a.mergeRetryWait = d }
+}
+
 // NewGiteaAdapter builds the adapter on the validated configuration.
 func NewGiteaAdapter(cfg Config, opts ...AdapterOption) *GiteaAdapter {
 	a := &GiteaAdapter{
-		baseURL: strings.TrimSuffix(cfg.BaseURL, "/"),
-		token:   string(cfg.Token),
-		client:  &http.Client{Timeout: 10 * time.Second},
-		runner:  defaultGitRunner,
+		baseURL:        strings.TrimSuffix(cfg.BaseURL, "/"),
+		token:          string(cfg.Token),
+		client:         &http.Client{Timeout: 10 * time.Second},
+		runner:         defaultGitRunner,
+		mergeRetryWait: mergeFirstRetryWait,
 	}
 	for _, o := range opts {
 		o(a)

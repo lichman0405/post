@@ -49,6 +49,8 @@ import (
 	"github.com/lichman0405/post/cmd/api/conflicthttp"
 	"github.com/lichman0405/post/cmd/api/fileshttp"
 	"github.com/lichman0405/post/cmd/api/gittokenshttp"
+	"github.com/lichman0405/post/cmd/api/mergegit"
+	"github.com/lichman0405/post/cmd/api/mergehttp"
 	"github.com/lichman0405/post/cmd/api/milestonehttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/policyhttp"
@@ -68,7 +70,9 @@ import (
 	"github.com/lichman0405/post/internal/application/branches"
 	"github.com/lichman0405/post/internal/application/diffs"
 	"github.com/lichman0405/post/internal/application/manifests"
+	"github.com/lichman0405/post/internal/application/merge"
 	"github.com/lichman0405/post/internal/application/milestones"
+	"github.com/lichman0405/post/internal/application/policy"
 	"github.com/lichman0405/post/internal/application/prchecks"
 	"github.com/lichman0405/post/internal/application/prdiff"
 	"github.com/lichman0405/post/internal/application/pullrequests"
@@ -199,9 +203,43 @@ func run(args []string) int {
 	// stays up, like it does while the database is down): provisioning is
 	// simply off, and the warning names exactly which keys are missing.
 	provisioningQueue := worker.NewRedisQueue(redisClient, provisioningQueuePrefix)
+	// The two provider-side pieces the merge command needs (T0409): the
+	// adapter whose pull-request merge is the ONLY way main advances, and the
+	// service login the ref guard accepts for that update. They are resolved
+	// in this block (and carried out of it) because they come from the
+	// provisioning configuration; the merge service itself is assembled later,
+	// with the other governance commands.
+	var (
+		mergeAdapter *gitprovider.GiteaAdapter
+		mergeLogin   string
+	)
 	if gitCfg.ProvisioningEnabled() {
 		provisioningStore := gitprovider.NewProvisionStore(pool)
 		giteaAdapter := gitprovider.NewGiteaAdapter(*gitCfg)
+		mergeAdapter = giteaAdapter
+		// The controlled service identity (docs/16 §3): the account the
+		// adapter authenticates as, and the login EnsureMainProtection
+		// prepends to main's merge whitelist — so the guard's accepted actor
+		// and the branch rule's only permitted merger are the same identity by
+		// construction, not by two configuration keys agreeing.
+		//
+		// Resolved once, with a bounded timeout: a provider that is slow to
+		// answer must not hold startup open (the same lazy-dependency policy
+		// PostgreSQL's pool and the profile load follow). If it cannot be
+		// resolved the login stays empty and the ref guard fails closed — the
+		// command commits the platform truth and records the Git step as
+		// unfinished rather than accepting an update it cannot attribute.
+		ownerCtx, cancelOwner := context.WithTimeout(ctx, gitIdentityTimeout)
+		owner, ownerErr := giteaAdapter.Owner(ownerCtx)
+		cancelOwner()
+		if ownerErr != nil {
+			// Redacted by construction: the error names the provider, never
+			// the token.
+			slog.Warn("post-api: could not resolve the Git service identity — merges record an unfinished Git step until it resolves",
+				"error", ownerErr)
+		} else {
+			mergeLogin = owner
+		}
 		provisioner := gitprovider.NewProvisioner(giteaAdapter, provisioningStore, gitCfg.WebhookURL)
 		provisioningLoop := worker.NewLoop(provisioningQueue, worker.WithLogger(logger))
 		provisioningLoop.Register(gitprovider.ProvisionJobType, newProvisioningHandler(provisioner))
@@ -408,20 +446,25 @@ func run(args []string) int {
 	// conflict resolution surface (T0407) — the engine is stateless and the
 	// ports are the same two read stores.
 	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool))
+	// One check service, two consumers: the PR page's review read and the
+	// merge command's server-side re-run (docs/22 §7). The merge must run the
+	// SAME review the human read — a second instance would be a second
+	// assembly of the snapshot.
+	checksSvc := prchecks.NewService(prchecks.Deps{
+		PRs:      persistence.NewPullRequestStore(pool),
+		Projects: persistence.NewProjectStore(pool),
+		States:   stateStore,
+		// The branch's own head is the boundary of a chain with no
+		// states of its own — read from the branch row, never from the
+		// PR under review.
+		Branches: persistence.NewBranchStore(pool),
+		Manifest: persistence.NewManifestStore(pool),
+		Policies: persistence.NewPolicyStore(pool),
+		Engine:   integrity.New(reg),
+	})
 	pullrequestsAPI := pullrequestshttp.New(pullrequestshttp.Deps{
 		PullRequests: pullrequests.NewService(persistence.NewPullRequestStore(pool)),
-		Checks: prchecks.NewService(prchecks.Deps{
-			PRs:      persistence.NewPullRequestStore(pool),
-			Projects: persistence.NewProjectStore(pool),
-			States:   stateStore,
-			// The branch's own head is the boundary of a chain with no
-			// states of its own — read from the branch row, never from the
-			// PR under review.
-			Branches: persistence.NewBranchStore(pool),
-			Manifest: persistence.NewManifestStore(pool),
-			Policies: persistence.NewPolicyStore(pool),
-			Engine:   integrity.New(reg),
-		}),
+		Checks:       checksSvc,
 		// The PR's Research State Diff (T0408): the PR's own fixed base,
 		// its proposed head and the target branch's current head, computed
 		// by the T0401 engine. The base is never re-derived from the target
@@ -465,10 +508,15 @@ func run(args []string) int {
 	}()
 	schemaprofilesAPI := schemaprofileshttp.New(schemaprofileshttp.Deps{Service: profileSvc})
 	schemaprofilesAPI.Register(v1)
+	// One state-commit service, shared by every path that lands a state
+	// transition (the RSG writes and the merge): the gate is the same
+	// instance, so a transition cannot be validated one way here and another
+	// way there.
+	stateSvc := states.NewService(stateStore, appvalidation.NewGuard(rsgvalidation.NewValidator(reg), persistence.NewValidationTxProbe()))
 	rsgSvc := rsg.NewService(rsg.Deps{
 		Projects:       projectAPI.Service(),
 		Branches:       branches.NewService(persistence.NewBranchStore(pool)),
-		States:         states.NewService(stateStore, appvalidation.NewGuard(rsgvalidation.NewValidator(reg), persistence.NewValidationTxProbe())),
+		States:         stateSvc,
 		Latest:         stateStore,
 		Objects:        persistence.NewScientificObjectStore(pool),
 		Relations:      persistence.NewRelationStore(pool),
@@ -632,6 +680,53 @@ func run(args []string) int {
 		Projects: projectAPI.Service(),
 	})
 	milestoneAPI.Register(v1)
+	// Research PR merge (T0406/T0409): the governance command that advances a
+	// project's frozen main, and the only write path that ever does. The
+	// service plans the merge (the pure engine), re-runs the PR's integrity
+	// review and evaluates the governance policy server-side before it
+	// commits, writes the accepted state through the shared state-commit
+	// service, and records the merge, its idempotency ledger entry, its audit
+	// row and its domain event in one transaction. The Git half then runs
+	// through the provider merge bridge below — never a push: main advances
+	// by a provider-side pull request merge, which is what T0302's branch
+	// protection and the ref guard accept.
+	//
+	// Git and RefGuard are wired together and only when a provider is
+	// configured. Without one, mergeAdapter is nil: the command still commits
+	// the platform's own truth and records the Git step as unfinished
+	// (retryable) instead of pretending the ref moved — and the guard's zero
+	// value fails closed, so no identity would be accepted for main anyway.
+	var mergeGit merge.GitMerger
+	refGuard := gitprovider.RefGuard{MergeService: mergeLogin}
+	if mergeAdapter != nil {
+		mergeGit = mergegit.New(mergeAdapter, gitprovider.NewUserAccessStore(pool))
+	}
+	mergeSvc := merge.NewService(merge.Deps{
+		Store:     persistence.NewSemanticMergeStore(pool),
+		Diffs:     diffSvc,
+		Plans:     resolutionSvc,
+		Commits:   stateSvc,
+		Objects:   persistence.NewScientificObjectStore(pool),
+		Relations: persistence.NewRelationStore(pool),
+		Projects:  projectAPI.Service(),
+		Authz:     authz.NewMatrixEngine(),
+		Checks:    checksSvc,
+		// The policy in force is read through the owning service (T0603) and
+		// evaluated through the typed rule surface: the merge asks a question
+		// (main_protected?) and never reads policy_json itself.
+		Policies: policyAPI.Service(),
+		Rules:    policy.NewRuleEvaluator(),
+		// The transactional outbox (T1001), the same recorder the RSG writes
+		// use: pull_request.merged commits with the merge or not at all.
+		Events:   events.Recorder{},
+		Git:      mergeGit,
+		RefGuard: refGuard,
+	})
+	mergeAPI := mergehttp.New(mergehttp.Deps{
+		Command:  mergeSvc,
+		Projects: projectAPI.Service(),
+	})
+	mergeAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	srv := &http.Server{

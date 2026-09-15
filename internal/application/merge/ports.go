@@ -4,13 +4,16 @@ import (
 	"context"
 
 	"github.com/lichman0405/post/internal/application/diffs"
+	"github.com/lichman0405/post/internal/application/policy"
 	"github.com/lichman0405/post/internal/application/relations"
 	"github.com/lichman0405/post/internal/application/sciobjects"
 	"github.com/lichman0405/post/internal/application/states"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/domain"
+	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/gitprovider"
 	"github.com/lichman0405/post/internal/rsg/diff"
+	"github.com/lichman0405/post/internal/rsg/integrity"
 	"github.com/lichman0405/post/internal/rsg/manifest"
 )
 
@@ -62,6 +65,11 @@ type StorePort interface {
 	// ListCarriedConflicts returns the conflicts a merge carried into the
 	// accepted state, in insertion order.
 	ListCarriedConflicts(ctx context.Context, mergeID string) ([]domain.SemanticMergeConflict, error)
+	// LookupMergeCreation reads the Idempotency-Key ledger (migration
+	// 00070): the merge the key already created, or nil when the key is
+	// unused. The write side is WriteMergeParams.IdempotencyKey — the
+	// ledger row lands in the merge's own transaction.
+	LookupMergeCreation(ctx context.Context, projectID, idempotencyKey string) (*domain.SemanticMerge, error)
 }
 
 // LockScopeParams names the rows LockMergeScope locks.
@@ -148,6 +156,16 @@ type WriteMergeParams struct {
 	GitRef *string
 	// GitState is the state the saga starts in ('pending').
 	GitState domain.SemanticMergeGitState
+	// IdempotencyKey is the request's Idempotency-Key when it carried one.
+	// The ledger row (migration 00070) is written on this same transaction,
+	// so an entry and the merge it points at cannot come apart — which is
+	// what makes a replay a read.
+	IdempotencyKey *string
+	// Audit is the audit row this merge appends, written on this same
+	// transaction (docs/22 §3: the merge, its ledger entry, its audit row
+	// and its domain event are one unit). The store fills in the target ref
+	// once the insert has assigned the merge id.
+	Audit domain.AuditEntry
 }
 
 // CarriedConflict is one conflict the merge carries rather than resolves:
@@ -278,6 +296,41 @@ type GitMergeResult struct {
 	// against gitprovider.RefGuard, which decides whether the platform
 	// accepts the update as a merge rather than a bypass.
 	Actor string
+}
+
+// IntegrityChecker re-runs one PR's integrity review server-side. The
+// production implementation is prchecks.Service (T0408).
+//
+// The merge runs it because docs/22 §7 makes a command re-run its
+// validation instead of trusting a precheck: the review a human read on
+// the PR page is exactly the review that must hold at the moment main
+// moves, and a client cannot hand the command a pre-computed verdict.
+type IntegrityChecker interface {
+	CheckPullRequest(ctx context.Context, projectID string, number int64) (integrity.Report, error)
+}
+
+// PolicyReader reads the policy in force for one project: the organization
+// lower bound, the project overlay and their merge. The production
+// implementation is policy.Service.EffectivePolicy.
+type PolicyReader interface {
+	EffectivePolicy(ctx context.Context, actor domain.User, projectID string) (domain.EffectivePolicy, error)
+}
+
+// RuleEvaluator answers one typed governance question about a policy
+// document (the production implementation is policy.RuleEvaluator). Asking
+// through the typed surface — rather than reading policy_json here — is
+// what keeps one evaluation contract behind every enforcement site.
+type RuleEvaluator interface {
+	Evaluate(ctx context.Context, p domain.Policy, q policy.Query) (policy.Decision, error)
+}
+
+// EventRecorder is the outbox write surface, the same port the RSG service
+// composes (internal/application/rsg/ports.go). The production
+// implementation is events.Recorder. Recording happens INSIDE the merge's
+// transaction: the event commits with the accepted state or not at all
+// (docs/53).
+type EventRecorder interface {
+	Record(ctx context.Context, db events.DBTX, e events.Event) error
 }
 
 // RefGuard is the platform policy over the target ref update

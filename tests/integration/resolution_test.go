@@ -116,17 +116,27 @@ func resolutionDecision(objectID, kind string) resolutions.Decision {
 	}
 }
 
-// TestResolutionSavesAllFiveKinds pins the five human decisions through
-// the real store: each kind is accepted, a re-save overwrites the row in
-// place (never appends), and every save appends its own audit row naming
+// TestResolutionSavesEveryKind pins the human decisions through the real
+// store: every docs/09 §8 action is accepted, a re-save overwrites the row
+// in place (never appends), and every save appends its own audit row naming
 // the human who decided.
-func TestResolutionSavesAllFiveKinds(t *testing.T) {
+//
+// The vocabulary is EIGHT kinds, not the five T0407's page first offered:
+// accept_source, accept_target, keep_both, explicit_coexistence,
+// validation_branch, request_evidence, abort_change and unresolved. T0406
+// widened the store's CHECK to the full set (the merge engine has to
+// express every action), so this test now walks the whole list — a name
+// that says "all five" would have kept the widening untested.
+func TestResolutionSavesEveryKind(t *testing.T) {
 	ctx := testCtx(t)
 	r := newResolutionFixture(t, ctx)
 	base, source, target, objectID := r.seedProtocolConflict(t, ctx)
 
 	kinds := []string{
-		"accept_source", "accept_target", "keep_both", "validation_branch", "unresolved",
+		"accept_source", "accept_target", "keep_both", "explicit_coexistence",
+		"validation_branch", "request_evidence", "abort_change",
+		// unresolved last: the view assertion below reads the latest one.
+		"unresolved",
 	}
 	for _, kind := range kinds {
 		plan, err := r.svc.Save(ctx, r.f.alice, resolutions.SaveInput{
@@ -147,7 +157,7 @@ func TestResolutionSavesAllFiveKinds(t *testing.T) {
 		}
 	}
 
-	// Five saves, one row: the overwrite replaces in place.
+	// Eight saves, one row: the overwrite replaces in place.
 	var rows int
 	if err := r.f.pool.QueryRow(ctx,
 		"SELECT count(*) FROM conflict_resolutions WHERE project_id = $1", r.f.project.ID).Scan(&rows); err != nil {
@@ -163,8 +173,8 @@ func TestResolutionSavesAllFiveKinds(t *testing.T) {
 		r.f.project.ID, r.f.alice.ID).Scan(&audits); err != nil {
 		t.Fatalf("count audit rows: %v", err)
 	}
-	if audits != 5 {
-		t.Fatalf("audit rows = %d, want 5 (one per save)", audits)
+	if audits != len(kinds) {
+		t.Fatalf("audit rows = %d, want %d (one per save)", audits, len(kinds))
 	}
 
 	// The view carries the latest decision.

@@ -155,6 +155,12 @@ type Change struct {
 	// names the blocker code.
 	Blocked bool   `json:"blocked"`
 	Block   string `json:"block,omitempty"`
+	// blocks is the blocking decisions behind Blocked, one per distinct
+	// decision kind, in the order the conflicts were classified. Not
+	// serialized: finish() renders them as the plan's blockers, each with
+	// the line that explains it (a code alone tells an operator which rule
+	// stopped the merge, never what to lift).
+	blocks []planBlock
 	// SourceVersionID and TargetVersionID name the exact version rows on
 	// each side ("" when a side has none) — the evidence a carried conflict
 	// pins.
@@ -388,14 +394,14 @@ func (pl *planner) decideChange(out Change, autoMergeable bool) Change {
 		// The detector refused to vouch for the change but named no
 		// conflict. Fail closed: an unexplained change is not merged.
 		out.Resolution = ResolutionUndecided
-		return pl.block(out, CodeUnclassified,
-			"the conflict detector did not mark this change auto-mergeable and classified no conflict for it")
+		return pl.block(out, []planBlock{{Code: CodeUnclassified,
+			Detail: "the conflict detector did not mark this change auto-mergeable and classified no conflict for it"}})
 	}
-	effect, blockerCode, why := pl.resolve(out.TargetKind, out.TargetID, out.Conflicts)
+	effect, blocks := pl.resolve(out.TargetKind, out.TargetID, out.Conflicts)
 	out.Resolution = Resolution(pl.decisionKind(out.TargetKind, out.TargetID, out.Conflicts))
-	if blockerCode != "" {
+	if len(blocks) > 0 {
 		out.Resolution = ResolutionUndecided
-		return pl.block(out, blockerCode, why)
+		return pl.block(out, blocks)
 	}
 	out.Effect = effect
 	switch effect {
@@ -424,9 +430,20 @@ func (pl *planner) decisionKind(kind domain.ConflictResolutionTargetKind, id str
 	return ""
 }
 
+// planBlock pairs one blocker code with the line explaining it. A change
+// carries one per blocking decision that applies to it, because a target
+// whose conflicts were sent to a validation branch AND held for more
+// evidence stops the plan for BOTH reasons: naming only the first would
+// hide a decision the human made, and the blockers are what an operator
+// reads to find out what to undo.
+type planBlock struct {
+	Code   string
+	Detail string
+}
+
 // resolve computes one change's effect from the decisions covering its
-// conflicts. It returns either a single effect, or a blocker code plus the
-// line explaining it.
+// conflicts. It returns either a single effect, or the blocking decisions
+// that stop it (never empty in that case).
 //
 // A change is one version row: it lands whole or not at all. So every
 // conflict of the change must be decided (an undecided one would be merged
@@ -435,11 +452,18 @@ func (pl *planner) decisionKind(kind domain.ConflictResolutionTargetKind, id str
 // other, and synthesizing a half-source/half-target row is exactly the
 // content invention docs/09 §7 forbids. The plan refuses instead of picking
 // a precedence.
-func (pl *planner) resolve(kind domain.ConflictResolutionTargetKind, id string, conflicts []conflict.Conflict) (Effect, string, string) {
+func (pl *planner) resolve(kind domain.ConflictResolutionTargetKind, id string, conflicts []conflict.Conflict) (Effect, []planBlock) {
 	effect := Effect("")
 	var firstKind domain.ResolutionKind
 	var missing *conflict.Conflict
 	var diverged []string
+	// blocking collects one entry per DISTINCT blocking decision kind, in
+	// the order the detector reported the conflicts — so a change carrying
+	// two different blocking decisions is refused for both, and two
+	// conflicts decided the same way produce one blocker rather than a
+	// duplicate.
+	var blocking []planBlock
+	seen := make(map[string]bool, len(conflicts))
 	for i := range conflicts {
 		c := &conflicts[i]
 		d, ok := pl.applied[keyOf(kind, id, *c)]
@@ -451,8 +475,16 @@ func (pl *planner) resolve(kind domain.ConflictResolutionTargetKind, id string, 
 		}
 		e, valid := effectOf(d.Kind)
 		if !valid {
-			return EffectBlocked, CodeConflictUndecided,
-				"conflict " + c.Code + " on " + string(kind) + " " + id + " carries an unusable decision kind " + string(d.Kind)
+			return EffectBlocked, []planBlock{{Code: CodeConflictUndecided,
+				Detail: "conflict " + c.Code + " on " + string(kind) + " " + id +
+					" carries an unusable decision kind " + string(d.Kind)}}
+		}
+		if e == EffectBlocked {
+			code := blockerOf(d.Kind)
+			if !seen[code] {
+				seen[code] = true
+				blocking = append(blocking, planBlock{Code: code, Detail: blockerDetail(d.Kind, kind, id)})
+			}
 		}
 		if effect == "" {
 			effect, firstKind = e, d.Kind
@@ -463,20 +495,23 @@ func (pl *planner) resolve(kind domain.ConflictResolutionTargetKind, id string, 
 		}
 	}
 	if missing != nil {
-		return EffectBlocked, CodeConflictUndecided,
-			"conflict " + missing.Code + " on " + string(kind) + " " + id +
-				" has no human resolution decision (docs/09 §8); the merge never resolves a conflict itself"
+		return EffectBlocked, []planBlock{{Code: CodeConflictUndecided,
+			Detail: "conflict " + missing.Code + " on " + string(kind) + " " + id +
+				" has no human resolution decision (docs/09 §8); the merge never resolves a conflict itself"}}
 	}
 	if len(diverged) > 0 {
-		return EffectBlocked, CodeDecisionsDiverge,
-			"the conflicts of " + string(kind) + " " + id + " carry decisions that contradict each other (" +
+		return EffectBlocked, []planBlock{{Code: CodeDecisionsDiverge,
+			Detail: "the conflicts of " + string(kind) + " " + id + " carry decisions that contradict each other (" +
 				string(firstKind) + " vs " + joinSorted(diverged) +
-				"); one version row cannot be written half-way, and the merge does not choose a precedence"
+				"); one version row cannot be written half-way, and the merge does not choose a precedence"}}
 	}
 	if effect == EffectBlocked {
-		return EffectBlocked, blockerOf(firstKind), blockerDetail(firstKind, kind, id)
+		// Every decision blocks the change: name each one, not just the
+		// first (a plan reporting one of two blocking decisions would read
+		// as if lifting that one were enough).
+		return EffectBlocked, blocking
 	}
-	return effect, "", ""
+	return effect, nil
 }
 
 // guardPublication applies the docs/09 §9 rule to a change that would
@@ -493,11 +528,17 @@ func (pl *planner) guardPublication(out Change) Change {
 	return out
 }
 
-// block marks a change as blocking the plan.
-func (pl *planner) block(out Change, code, why string) Change {
+// block marks a change as blocking the plan, carrying the blocking
+// decisions that stopped it (one per distinct decision kind, never empty).
+// Block is the serialized single code — the canonical first of the list —
+// while the whole list is what finish() renders as blockers.
+func (pl *planner) block(out Change, blocks []planBlock) Change {
 	out.Effect = EffectBlocked
 	out.Blocked = true
-	out.Block = code
+	if len(blocks) > 0 {
+		out.Block = blocks[0].Code
+	}
+	out.blocks = blocks
 	out.Materialize = false
 	return out
 }
@@ -560,7 +601,14 @@ func (p *Plan) finish() {
 			})
 		}
 		if c.Blocked {
-			p.Blockers = append(p.Blockers, Blocker{Code: c.Block, TargetID: c.TargetID, Detail: c.Block})
+			// Every blocking decision this change carries gets its own
+			// blocker entry, with the line that explains it. One entry per
+			// decision, never one per change: a change held by a validation
+			// branch AND by an evidence request stops the merge for two
+			// reasons, and an operator has to lift both.
+			for _, b := range c.blockers() {
+				p.Blockers = append(p.Blockers, Blocker{Code: b.Code, TargetID: c.TargetID, Detail: b.Detail})
+			}
 		}
 	}
 	if p.Carried == nil {
@@ -606,6 +654,20 @@ func (p *Plan) finish() {
 		return p.Blockers[i].Code < p.Blockers[j].Code
 	})
 	p.Executable = len(p.Blockers) == 0
+}
+
+// blockers returns the blocking decisions recorded for one change. A change
+// marked blocked always carries them (block() sets both); the fallback
+// covers a Change built by hand with only the serialized code, so the
+// plan's blocker list is never silently empty for a blocked change.
+func (c Change) blockers() []planBlock {
+	if len(c.blocks) > 0 {
+		return c.blocks
+	}
+	if c.Block == "" {
+		return []planBlock{{Code: CodeConflictUndecided, Detail: "the change is blocked"}}
+	}
+	return []planBlock{{Code: c.Block, Detail: c.Block}}
 }
 
 // carriedOf renders the carried-conflict records of one change: one entry

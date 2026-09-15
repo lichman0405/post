@@ -7,15 +7,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/lichman0405/post/internal/application/diffs"
+	"github.com/lichman0405/post/internal/application/policy"
 	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/application/relations"
 	"github.com/lichman0405/post/internal/application/sciobjects"
 	"github.com/lichman0405/post/internal/application/states"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/domain"
+	"github.com/lichman0405/post/internal/rsg/integrity"
 	"github.com/lichman0405/post/internal/rsg/manifest"
 	rsgmerge "github.com/lichman0405/post/internal/rsg/merge"
 	rsgvalidation "github.com/lichman0405/post/internal/rsg/validation"
@@ -41,6 +44,17 @@ type Deps struct {
 	Relations RelationWriter
 	Projects  ProjectGate
 	Authz     Authz
+	// Checks re-runs the PR's integrity review server-side (docs/22 §7).
+	// Nil is NOT a legitimate wiring for the command: a merge that cannot
+	// re-run its validation must refuse, not skip it (see requireIntegrity).
+	Checks IntegrityChecker
+	// Policies reads the policy in force and Rules evaluates one typed
+	// question against it. Both are required for the same reason.
+	Policies PolicyReader
+	Rules    RuleEvaluator
+	// Events is the outbox recorder. Required: the merge's domain event is
+	// part of the merge, not an afterthought.
+	Events EventRecorder
 	// Git performs the provider-side PR merge (T0409's adapter). Nil is a
 	// legitimate wiring: the saga then leaves the step pending and
 	// retryable.
@@ -70,30 +84,83 @@ type Service struct {
 	relations   RelationWriter
 	projects    ProjectGate
 	authz       Authz
+	checks      IntegrityChecker
+	policies    PolicyReader
+	rules       RuleEvaluator
+	events      EventRecorder
 	git         GitMerger
 	guard       RefGuard
 	maxAttempts int
 }
 
 // NewService wires the service.
+//
+// Every optional port is normalized first (see absentToNil): a port that was not
+// wired is nil here, whichever of the two spellings of "nothing" the
+// composition root used. The distinction matters for exactly one field — Git,
+// the one port a deployment may legitimately leave out — and a typed nil
+// pointer there is a boot-time panic inside the merge transaction rather than
+// a recorded unfinished step.
 func NewService(d Deps) *Service {
 	attempts := d.MaxAttempts
 	if attempts <= 0 {
 		attempts = defaultAttempts
 	}
 	return &Service{
-		store:       d.Store,
-		diffs:       d.Diffs,
-		plans:       d.Plans,
-		commits:     d.Commits,
-		objects:     d.Objects,
-		relations:   d.Relations,
-		projects:    d.Projects,
-		authz:       d.Authz,
-		git:         d.Git,
+		store:       absentToNil(d.Store),
+		diffs:       absentToNil(d.Diffs),
+		plans:       absentToNil(d.Plans),
+		commits:     absentToNil(d.Commits),
+		objects:     absentToNil(d.Objects),
+		relations:   absentToNil(d.Relations),
+		projects:    absentToNil(d.Projects),
+		authz:       absentToNil(d.Authz),
+		checks:      absentToNil(d.Checks),
+		policies:    absentToNil(d.Policies),
+		rules:       absentToNil(d.Rules),
+		events:      absentToNil(d.Events),
+		git:         absentToNil(d.Git),
 		guard:       d.RefGuard,
 		maxAttempts: attempts,
 	}
+}
+
+// absentToNil turns a port that carries no implementation into a nil
+// interface.
+//
+// The case it exists for is the TYPED nil. `Deps.Git` is an interface, and a
+// nil pointer assigned to it is NOT a nil interface — it holds a type with a
+// nil value:
+//
+//	var bridge *mergeGitBridge       // nil
+//	merge.Deps{Git: bridge}          // Git != nil; calling it panics
+//
+// The service decides what to do from a nil check (an unwired Git adapter
+// makes the saga record its step as not-done instead of claiming the ref
+// moved), so a typed nil used to slip past the check and panic on the first
+// merge — after PostgreSQL had already accepted the state. Normalizing here
+// makes "not wired" one thing, however the composition root spells it.
+func absentToNil[T any](port T) T {
+	if portIsNil(port) {
+		var zero T
+		return zero
+	}
+	return port
+}
+
+// portIsNil reports whether a port value holds no implementation. The
+// reflect kinds are the ones a nil pointer can be hidden in; a non-pointer
+// port (the RefGuard value type) is never "absent".
+func portIsNil(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Func, reflect.Slice, reflect.Chan, reflect.Interface, reflect.UnsafePointer:
+		return rv.IsNil()
+	}
+	return false
 }
 
 // Input names one merge request.
@@ -104,6 +171,12 @@ type Input struct {
 	// Message is the state commit's message. Empty falls back to a
 	// generated one naming the PR and the branch pair.
 	Message string
+	// IdempotencyKey is the request's Idempotency-Key (docs/22 §3, which
+	// lists merge among the governed commands), nil when the request
+	// carried none. A key that already created a merge replays it: the
+	// same call returns the merge the first one produced, forever, without
+	// re-planning, re-gating or writing anything.
+	IdempotencyKey *string
 }
 
 // WrittenVersion is one version row the merge created in the accepted state:
@@ -134,16 +207,35 @@ type Result struct {
 	// branch (docs/43: active → merged). It is false when the source branch
 	// had moved past the state this merge accepted — see closeSourceBranch.
 	SourceBranchClosed bool
+	// Replayed reports that this result is a replay: the Idempotency-Key
+	// already created this merge, so nothing was planned, gated or written
+	// on this call and State/Commit/Plan/Written are empty. Merge is the
+	// stored record, and its ResultStateID/PlanDigest/GitState answer what
+	// the first call produced.
+	Replayed bool
 }
 
-// Merge executes one Research PR merge: plan, commit, then the Git saga.
+// Merge executes one Research PR merge: plan, gate, commit, then the Git
+// saga.
 //
 // The database truth is one transaction — the accepted state, the merge
-// record, the conflicts it carries, the PR's transition to merged and the
-// source branch's close either all land or none do. The Git half follows the
+// record, the conflicts it carries, its Idempotency-Key ledger entry, its
+// audit row, its domain event, the PR's transition to merged and the source
+// branch's close either all land or none do. The Git half follows the
 // commit (docs/08: Git is the repository/file truth beside PostgreSQL's
 // semantic truth) and is recorded on the merge row, so a failed Git step is
 // visible and retryable instead of silently divergent.
+//
+// The order of the refusals is the contract's:
+//
+//  1. authorization (ActionMergeMain) before anything is read;
+//  2. the Idempotency-Key replay — a replay is a read, and running the
+//     gates again would make the answer depend on state the first call
+//     never decided;
+//  3. the PR's own readiness and the plan (T0406: only a merge_ready PR
+//     with an executable plan merges);
+//  4. the policy in force (fail-closed, see requirePolicy);
+//  5. the integrity review, re-run server-side (docs/22 §7).
 func (s *Service) Merge(ctx context.Context, actor domain.User, in Input) (*Result, error) {
 	if err := validateInput(in, actor); err != nil {
 		return nil, err
@@ -151,8 +243,17 @@ func (s *Service) Merge(ctx context.Context, actor domain.User, in Input) (*Resu
 	if err := s.requireMerge(ctx, actor, in.ProjectID); err != nil {
 		return nil, err
 	}
+	if replayed, err := s.replay(ctx, in); err != nil || replayed != nil {
+		return replayed, err
+	}
 	prepared, err := s.prepare(ctx, in)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.requirePolicy(ctx, actor, in.ProjectID); err != nil {
+		return nil, err
+	}
+	if err := s.requireIntegrity(ctx, in); err != nil {
 		return nil, err
 	}
 	var lastErr error
@@ -174,6 +275,118 @@ func (s *Service) Merge(ctx context.Context, actor domain.User, in Input) (*Resu
 	}
 	return nil, fmt.Errorf("%w: the merge's version heads kept moving (%v); nothing was written, retry the merge",
 		ErrStore, lastErr)
+}
+
+// replay answers a repeated Idempotency-Key from the ledger. It returns nil
+// when the key is unused (or absent) — the caller then proceeds with a
+// fresh merge.
+//
+// A replay runs BEFORE the gates on purpose: the merge the key produced is
+// committed history, and re-deciding it against today's policy, today's
+// integrity review or today's branch heads would make the same call answer
+// differently over time. That is exactly what docs/22 §3 forbids.
+//
+// The one thing a replay does do is finish the Git half when the first
+// attempt could not: the merge row records the provider step's outcome, and
+// a client retrying a request whose provider step failed is the retry the
+// saga was built for. Nothing is written when the step already finished
+// (`updated` is terminal, migration 00069).
+func (s *Service) replay(ctx context.Context, in Input) (*Result, error) {
+	if in.IdempotencyKey == nil {
+		return nil, nil
+	}
+	stored, err := s.store.LookupMergeCreation(ctx, in.ProjectID, *in.IdempotencyKey)
+	if err != nil {
+		return nil, fmt.Errorf("%w: read the merge ledger: %v", ErrStore, err)
+	}
+	if stored == nil {
+		return nil, nil
+	}
+	res := &Result{Number: in.Number, Merge: *stored, Replayed: true}
+	if stored.GitState != domain.GitStateUpdated {
+		s.retryGitStep(ctx, res)
+	}
+	return res, nil
+}
+
+// retryGitStep re-drives the Git half of a stored merge from the plan the
+// merge itself recorded. The plan's source/target refs are the triple the
+// human decided, so the retry advances exactly the refs the first attempt
+// planned and never a newer pair. A plan that cannot be decoded leaves the
+// row as it is: the saga stays visibly unfinished, which is better than
+// re-driving a step whose inputs are unknown.
+func (s *Service) retryGitStep(ctx context.Context, res *Result) {
+	var plan rsgmerge.Plan
+	if len(res.Merge.Plan) == 0 {
+		return
+	}
+	if err := json.Unmarshal(res.Merge.Plan, &plan); err != nil {
+		return
+	}
+	res.Plan = &plan
+	s.runGitStep(ctx, res)
+}
+
+// requirePolicy evaluates the governance policy in force for the project.
+// It is fail-closed on every input (see PolicyRefusedError): an unreadable
+// policy refuses, an absent `main_protected` rule refuses (silence is not a
+// permission — docs/09 §3 protects main structurally, so a document that
+// does not mention it cannot waive that), and a rule set to false refuses
+// too. Only an explicit true proceeds.
+func (s *Service) requirePolicy(ctx context.Context, actor domain.User, projectID string) error {
+	if s.policies == nil || s.rules == nil {
+		return fmt.Errorf("%w: merge service not fully wired", ErrStore)
+	}
+	refuse := func(found, value bool, reason string, cause error) error {
+		return &PolicyRefusedError{
+			Rule: domain.RuleMainProtected, Found: found, Bool: value,
+			Reason: reason, Err: cause,
+		}
+	}
+	effective, err := s.policies.EffectivePolicy(ctx, actor, projectID)
+	if err != nil {
+		return refuse(false, false, "the policy in force could not be read, and an unreadable policy is not a permissive one", err)
+	}
+	decision, err := s.rules.Evaluate(ctx, effective.Effective, policy.Query{Rule: domain.RuleMainProtected})
+	if err != nil {
+		return refuse(false, false, "the policy in force cannot be evaluated, and an unevaluable policy is not a permissive one", err)
+	}
+	if !decision.Found {
+		return refuse(false, false,
+			"the policy in force does not set "+domain.RuleMainProtected+
+				"; an absent rule is not a permission — main is protected by the platform (docs/09 §3), and a policy that is silent about it cannot unprotect it", nil)
+	}
+	if !decision.Bool {
+		return refuse(true, false,
+			"the policy in force sets "+domain.RuleMainProtected+
+				" to false; no policy in this build may waive the frozen-main guarantee, so the merge refuses rather than obeying", nil)
+	}
+	return nil
+}
+
+// requireIntegrity re-runs the PR's integrity review server-side and
+// refuses on any BLOCKING failure (docs/22 §7: a command never trusts a
+// client-supplied precheck; internal/rsg/integrity assigns the refusal to
+// the merge governance). Warnings are reported by the review page and do
+// not stop the merge — the severity is the check declaration's, not this
+// function's.
+//
+// A check that cannot run is a refusal, not a pass: an unreviewable PR is
+// not a reviewed one.
+func (s *Service) requireIntegrity(ctx context.Context, in Input) error {
+	if s.checks == nil {
+		return fmt.Errorf("%w: merge service not fully wired", ErrStore)
+	}
+	report, err := s.checks.CheckPullRequest(ctx, in.ProjectID, in.Number)
+	if err != nil {
+		return err
+	}
+	for _, failure := range report.Failures() {
+		if failure.Severity == integrity.SeverityBlocking {
+			return &GateRefused{Report: report}
+		}
+	}
+	return nil
 }
 
 // prepared carries everything the plan is, plus the facts the write
@@ -328,6 +541,12 @@ func (s *Service) commit(ctx context.Context, actor domain.User, p *prepared) (*
 		}
 		mergeRow, err = s.store.WriteMerge(ctx, tx, s.mergeParams(p, stateID, actor.ID, written))
 		if err != nil {
+			return err
+		}
+		// The event is recorded on this transaction, after the merge row
+		// exists: nothing is committed unless the event is written with it
+		// (docs/53).
+		if err := s.recordMergeEvent(ctx, tx, p, actor.ID, mergeRow.ID, stateID); err != nil {
 			return err
 		}
 		if err := s.store.MarkPullRequestMerged(ctx, tx, p.input.ProjectID, p.pr.ID); err != nil {
@@ -518,6 +737,46 @@ func (s *Service) mergeParams(p *prepared, resultStateID, actorID string, writte
 		CarriedConflicts: carriedOf(p.plan),
 		GitRef:           gitRef,
 		GitState:         domain.GitStatePending,
+		IdempotencyKey:   p.input.IdempotencyKey,
+		Audit:            s.auditEntry(p, actorID, resultStateID),
+	}
+}
+
+// auditEntry renders the merge's audit row (docs/22, docs/26: governance
+// actions are audited). The store appends it on the commit transaction and
+// fills in the target ref, which it can only name once the insert has
+// assigned the merge id.
+//
+// Note what the summary names and what it deliberately does not: the merge
+// record id, the PR, the accepted state and the plan digest. The
+// research-event vocabulary (specs/events/event-types.yaml, what subscribers
+// route on) and the audit-action vocabulary (the Activity page's actions)
+// are different namespaces on purpose — a governance action can exist
+// without a research event and vice versa, so one is never derived from the
+// other's spellings.
+func (s *Service) auditEntry(p *prepared, actorID, resultStateID string) domain.AuditEntry {
+	return domain.AuditEntry{
+		ActorID:   actorID,
+		Via:       domain.ViaSession,
+		Action:    domain.ActionPullRequestMerged,
+		ProjectID: p.input.ProjectID,
+		AfterSummary: map[string]any{
+			"pull_request_id":     p.pr.ID,
+			"pull_request_number": p.pr.Number,
+			"source_branch_id":    p.sourceBranch.ID,
+			"target_branch_id":    p.targetBranch.ID,
+			"base_state_id":       p.baseStateID,
+			"source_state_id":     p.sourceStateID,
+			"target_state_id":     p.targetStateID,
+			"state_id":            resultStateID,
+			"plan_version":        p.plan.FormatVersion,
+			"plan_digest":         p.digest,
+			"applied":             p.plan.Summary.Applied,
+			"kept_target":         p.plan.Summary.KeptTarget,
+			"carried":             p.plan.Summary.Carried,
+			"aborted":             p.plan.Summary.Aborted,
+			"withheld":            p.plan.Summary.Withheld,
+		},
 	}
 }
 
@@ -799,13 +1058,29 @@ func optional(s string) *string {
 // never records a legitimate update it cannot justify.
 func (s *Service) runGitStep(ctx context.Context, res *Result) {
 	step := GitStepParams{MergeID: res.Merge.ID, Ref: res.Merge.GitRef, State: domain.GitStatePending}
-	if s.git == nil {
+	// The provider-side merge names TWO refs: the target it advances and the
+	// source branch it merges from. The target ref is recorded on the merge
+	// row (resolved from the locked branch row when the merge was planned);
+	// the source ref is resolved here, by the branch id the merge recorded.
+	// Resolving it here rather than at plan time is what makes the RETRY path
+	// (replay → retryGitStep) name the same pair: a stored merge whose Git
+	// step failed has no branch rows in hand, and the id is stable while the
+	// ref name it maps to is the one T0303 maintains.
+	sourceRef, sourceErr := s.sourceRefOf(ctx, res.Merge)
+	switch {
+	case s.git == nil:
 		step.Error = "no provider merge adapter is wired (T0409 owns it): the platform database truth is committed, the Git ref update has not happened"
-	} else {
+	case sourceErr != nil:
+		// Without the source ref the saga cannot name the PR it must merge:
+		// fail the step rather than merging an unnamed pair.
+		step.State = domain.GitStateFailed
+		step.Error = "resolve the merge's source ref: " + sourceErr.Error()
+	default:
 		result, err := s.git.MergePullRequest(ctx, GitMergeRequest{
 			ProjectID: res.Merge.ProjectID,
 			Number:    res.Number,
 			TargetRef: deref(res.Merge.GitRef),
+			SourceRef: deref(sourceRef),
 			TargetSHA: deref(res.Plan.Target.GitRef),
 			SourceSHA: deref(res.Plan.Source.GitRef),
 		})
@@ -844,6 +1119,25 @@ func (s *Service) runGitStep(ctx context.Context, res *Result) {
 	if updated, err := s.store.RecordGitAttempt(ctx, step); err == nil {
 		res.Merge = updated
 	}
+}
+
+// sourceRefOf resolves the provider ref of the branch a merge came FROM — the
+// head the provider-side pull request names. It is read from the branch row
+// by id, so a re-driven Git step (a client retrying its Idempotency-Key)
+// resolves exactly the ref the first attempt would have.
+//
+// An empty id (a merge row written by hand, or a schema that predates the
+// column) resolves to nil, and a branch that is gone is an error: the caller
+// records a failed step rather than merging some other branch's pair.
+func (s *Service) sourceRefOf(ctx context.Context, m domain.SemanticMerge) (*string, error) {
+	if m.SourceBranchID == "" {
+		return nil, nil
+	}
+	b, err := s.store.GetBranch(ctx, m.ProjectID, m.SourceBranchID)
+	if err != nil {
+		return nil, err
+	}
+	return gitRefOf(b), nil
 }
 
 // deref reads an optional string, "" when nil.
