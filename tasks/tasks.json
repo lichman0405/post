@@ -3671,29 +3671,32 @@
         "T0703"
       ],
       "requirements": [
-        "列将公开对象/metadata/blobs/refs/private dependencies/rights blockers",
-        "不修改 state"
+        "只读预览：给一次**拟议的发布**（资产、类型、版本文档、目标可见性），回答\"真执行了会让谁看见什么\"，**不得修改任何 state**。出处 docs/23_SECURITY_PRIVACY.md §4：private→public 是最高风险 operation，必须 human explicit action + **impact preview** + rights validation + **no hidden private dependency leak** + audit event",
+        "预览必须列全五类：将公开的**对象**、**metadata**、**blobs**、**refs**，以及**私有依赖**与 **rights 阻断项**",
+        "**私有依赖泄漏是这一关的要害**：一个版本若钉了仍是私有的资产版本、或引用了私有对象/blob，预览必须点名列出来，不能让它随发布悄悄变公开（docs/23 §4 的 no hidden private dependency leak）。对照 docs/11 §5：Dependency 参与 impact analysis，Reference/Use 只是引用",
+        "**契约已经写好，按它实现**：specs/api/openapi.yaml 里的 POST /projects/{projectId}/assets:publish-preview（summary: Build publication impact/rights preview）。路径与方法不得自创。specs/** 是 Supervisor-only —— 不要修改它，也不要在 diff 里带上它",
+        "**可重复**：相同输入 + 相同当前 state 必须给出同一份结果，且顺序稳定（docs/31 Gate C：\"private→public 有影响预览和显式确认\"）",
+        "**复用既有判断，不要另立一套**：internal/assets（T0702 的 Manifest / DependencyPin / OriginRef / Gate 及其 facts 与拒绝项）就是阻断项的来源，internal/rights（T0703）的 Document 是 rights 阻断项的来源，specs/schemas/research-asset-version.schema.json 是资产版本文档的形状",
+        "**本任务不做**：不新增迁移、不写状态、不发 audit event（发布动作与状态写入是 T0705）、不做 UI（资产 Hub 页面是 T0709）"
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "private→public preview 完整且可重复"
+        "private→public preview 完整且可重复",
+        "预览跑前跑后不改变任何 state（同一 state 下两次预览逐字一致）",
+        "私有依赖（钉到私有版本 / 引用私有对象或 blob）在预览里被点名，而不是被漏掉"
       ],
       "tests": [
         "publish preview tests"
       ],
       "allowed_scope": [
-        "infra/migrations/**",
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
         "internal/assets/**",
         "internal/rights/**",
-        "go.mod",
-        "go.sum",
-        ".env.example",
+        "internal/persistence/queries/**",
+        "internal/persistence/sqlc/**",
         "cmd/api/**",
-        "apps/web/**",
-        "packages/schemas/**",
-        "tests/**"
+        "tests/**",
+        "go.mod",
+        "go.sum"
       ],
       "forbidden_scope": [
         ".git/**",
@@ -3702,8 +3705,17 @@
         "tasks/progress.md"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/11_RELEASE_ASSET_HUB.md §3 发布门槛、§5 Reference/Dependency/Fork",
+        "docs/23_SECURITY_PRIVACY.md §4 Private→Public、§6 Blob",
+        "docs/31_MASTER_ACCEPTANCE.md Gate C（Release/Asset）",
+        "specs/api/openapi.yaml —— POST /projects/{projectId}/assets:publish-preview",
+        "specs/schemas/research-asset-version.schema.json",
+        "internal/assets/（T0702 落地的模型与发布闸）",
+        "internal/rights/（T0703 落地的 rights 模型）"
+      ],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。",
+      "supervisor_scope_narrowing": "2026-09-16：按任务收窄。从 phase 级默认上限里删掉五格——infra/migrations/** 与 specs/database/postgres.sql（预览是**读路径**，不新增迁移，也就不该占迁移链条的位置）；specs/SPEC_VERSION.json（不覆盖 specs/** 的任何输入，标记不会动，所以没有派生义务）；apps/web/**（资产 Hub 页面是 T0709，本任务只到接口）；packages/schemas/**（它是 specs/schemas 的镜像，规格没动就不需要动）、.env.example（本任务不引入新配置）。新增两格：internal/persistence/queries/** 与 internal/persistence/sqlc/** ——预览要读当前 state 才能判断\"引用的东西是不是私有的\"，很可能要加查询；二者是声明过的派生产物对，必须成对覆盖，否则 collect 会按越界拒掉生成物。本任务**不占**迁移编号：它是链条外的一条读路径，与在飞的迁移没有冲突面。"
     },
     {
       "id": "T0705",

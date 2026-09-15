@@ -4735,13 +4735,15 @@
       ]
     },
     "T0704": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "ready",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-15T18:10:36Z",
+          "run_id": "run-c64f3eca082437c8"
+        }
+      ]
     },
     "T0705": {
       "status": "todo",
