@@ -606,3 +606,92 @@ func TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt(t *testing.T) {
 		t.Errorf("tasks carrying a gate they cannot satisfy = %v, pinned as %v. A name in the first list that is not in the second is a wiring defect: give the task the edge to the work its job asserts. A name in the second that is not in the first means the knot was resolved — remove it from carriersTheChainTraps and record why (L1-20260913-19)", got, want)
 	}
 }
+
+// TestEveryRealServicesGateScriptIsWiredAsAJob guards the defect T0102 shipped.
+// tests/acceptance/profile-real-services-e2e.sh was written for that task's two
+// acceptance criteria — "未登录可读公开 profile" and "用户只能改自己可编辑字段" —
+// 370 lines driving the real API process against real PostgreSQL and real Redis.
+// Nothing ever ran it, and nothing ever had: the file arrived with T0102's own
+// merge (#69, e5c67ca), while the task's task_overrides entry predating it (#65)
+// still named auth-real-services, which is T0101's gate. T0102's G3 record is
+// green and always was; it certifies a login journey, not a profile one.
+//
+// The script passes when run by hand (verified 2026-09-15 against the dev stack:
+// 12/12 checks, exit 0), so nothing was broken. What was missing is that no test
+// asked the question, which makes it a recurring shape rather than one mistake:
+// any Worker can add a *-real-services-e2e.sh inside its own allowed_scope
+// (tests/**) and have it sit there while the G3 record stays green.
+//
+// The naming convention is exact and every other instance already follows it —
+// tests/acceptance/<name>-e2e.sh is the job <name> — so the assertions are:
+//
+//  1. every *-real-services-e2e.sh has a job of the matching name in the spec;
+//  2. that job's steps actually run that script (a job that runs a different
+//     file, or runs nothing, is the same absence wearing the right name);
+//  3. at least one task lists that job in its g3_jobs.
+//
+// The third is the one that matters and the one that was missing. A job declared
+// in the spec but wired to no task never executes, whatever its steps say —
+// "a gate nothing runs is not a gate", the same sentence the phase-boundary
+// checkpoint asserts for rsg-real-services.
+func TestEveryRealServicesGateScriptIsWiredAsAJob(t *testing.T) {
+	root := repoRootOf(t)
+	spec, err := LoadGateSpec(filepath.Join(root, DefaultGatesPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	scripts, err := filepath.Glob(filepath.Join(root, "tests", "acceptance", "*-real-services-e2e.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Without this the test passes vacuously the moment the directory is renamed
+	// or the glob is mistyped — the failure mode every other item in this package
+	// was taught to refuse.
+	if len(scripts) == 0 {
+		t.Fatal("no tests/acceptance/*-real-services-e2e.sh found — the glob is wrong, not the tree")
+	}
+
+	// job -> the tasks whose G3 runs it.
+	wiredTo := map[string][]string{}
+	for task, ov := range spec.TaskOverrides {
+		for _, job := range ov.G3Jobs {
+			wiredTo[job] = append(wiredTo[job], task)
+		}
+	}
+	for job := range wiredTo {
+		sort.Strings(wiredTo[job])
+	}
+
+	for _, path := range scripts {
+		base := filepath.Base(path)
+		job := strings.TrimSuffix(base, "-e2e.sh")
+
+		jobSpec, ok := spec.Jobs[job]
+		if !ok {
+			t.Errorf("tests/acceptance/%s has no job %q in %s — a gate script nothing runs is not a gate",
+				base, job, DefaultGatesPath)
+			continue
+		}
+
+		want := "bash tests/acceptance/" + base
+		var runs []string
+		for _, s := range jobSpec.Steps {
+			runs = append(runs, s.Run)
+		}
+		found := false
+		for _, r := range runs {
+			if strings.Contains(r, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("job %q does not run %s; its steps are %q", job, want, runs)
+		}
+
+		if len(wiredTo[job]) == 0 {
+			t.Errorf("job %q is declared but no task lists it in g3_jobs — nothing runs it", job)
+		}
+	}
+}

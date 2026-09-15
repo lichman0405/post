@@ -180,7 +180,13 @@ start_api() {
       "$WORK/api" >>"$WORK/api.log" 2>&1 &
   API_PID=$!
   for _ in $(seq 1 60); do
-    curl -fsS "http://$API_ADDR/healthz" >/dev/null 2>&1 && return 0
+    # --max-time: curl has no default one, so against a socket that accepts the
+    # connection and then says nothing this line waits forever, and the kill -0
+    # on the next line — the one that notices the API died — never gets a turn.
+    # The gate then hangs instead of failing, and a hang reports nothing at all
+    # (#212). Two seconds is not a latency allowance for /healthz; it is the
+    # bound that turns a silence into a failure.
+    curl -fsS --max-time 2 "http://$API_ADDR/healthz" >/dev/null 2>&1 && return 0
     kill -0 "$API_PID" 2>/dev/null || return 1
     sleep 0.5
   done

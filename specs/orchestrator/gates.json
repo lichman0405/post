@@ -187,6 +187,16 @@
         }
       ]
     },
+    "profile-real-services": {
+      "requires_tasks": [
+        "T0102"
+      ],
+      "steps": [
+        {
+          "run": "bash tests/acceptance/profile-real-services-e2e.sh"
+        }
+      ]
+    },
     "acceptance": {
       "steps": [
         {
@@ -273,7 +283,7 @@
     },
     "T0102": {
       "g3_jobs": [
-        "auth-real-services"
+        "profile-real-services"
       ]
     },
     "T0103": {
