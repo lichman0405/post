@@ -3592,8 +3592,9 @@
     },
     "T0409": {
       "status": "running",
-      "started_at": "2026-09-15T21:25:13Z",
-      "worker_run_id": "run-1cc31415aef1d6b9",
+      "started_at": "2026-09-15T22:47:47Z",
+      "worker_run_id": "run-3b9722b68da09d44",
+      "rejection_reason": "# 返工：验收标准第 1 条的「经新端点合并成功」没有交付，且 wiring.go 的注释在为不存在的覆盖作证\n\n这一轮**只改一件事**：让那个 e2e 真的**经过新端点**合并。判定语义、闸门、台账一个字都不许动。\n\n## 1. 具体是什么没交\n\n验收标准第 1 条（原文，含义已被钉死）：\n\n> 新的合并路径**只**走提供方 PR merge（`ViaMerge` 判定通过），不引入任何 push/force/delete 分支；\n> 既有的 `tests/integration/gitea_protection_test.go` 仍绿，且新增断言**「经新端点合并成功」**与\n> **「直接 push main 仍被拒」**在**同一个 e2e** 里同时成立\n\n「直接 push main 仍被拒」那半做到了。「**经新端点合并成功**」那半没有：\n`tests/integration/merge_governance_e2e_test.go:343`（以及 replay 的 `:487`）调的是\n`mergeSvc.Merge(...)`，**端点根本没参与**。全树 grep：`mergehttp` 只被 `cmd/api/main.go:53`（import）\n与 `cmd/api/main.go:725`（`mergehttp.New`）引用，**没有任何测试包引用它**。也就是说\nhandler → command 这道缝、线上去的错误码映射、以及 replay 的响应形状，**从来没有在真合并上跑过一次**。\n\n## 2. 为什么这不是「字面较真」\n\n本任务的全部主张是「**端点是 main 前进的唯一一条路**」。而今天这条主张的证据只有：\nhandler 对着**假 command** 的单测、加上你独立写的一个 ServeMux 探针。`cmd/api/main.go:725`\n那两行装配（`Command:` 传的是谁、`Projects:` 传的是谁、`Register(v1)` 挂没挂上去）\n**今天没有任何测试会因为它写错而变红**。\n\n## 3. 要求：照同族的先例走，让请求真的进端点\n\n**先例就在树里，照它写**：`tests/integration/release_e2e_test.go`（同族的\"幂等创建 + 台账\"面）。\n它的 `newReleaseServer`（`:149`）就是干这个的：真 migration、真 pgx store、**真 guard（session + CSRF）**、\n`releasehttp.New(...)` + `<api>.Register(apiMux)` + `httptest.NewServer(authAPI.Guard(apiMux))`（`:225`），\n只有 session store 用 `memstore.NewSessions()`（`:152`，文件头 `:42-44` 把这条例外写明了）。\n\n具体到你这儿：\n\n- 用**生产的构造函数**把图搭起来，与 `cmd/api/main.go:725-729` 同形：\n  `mergehttp.New(mergehttp.Deps{Command: <你已经建好的那个真 merge.NewService>, Projects: <真 projects 服务>})`\n  → `Register(apiMux)` → `httptest.NewServer(authAPI.Guard(apiMux))`。\n  **不要**在测试里手写一份等价但独立的 mux 注册（那样只证明你写的和 main.go 写的一样，不证明 main.go 是对的）。\n- 合并请求走 `POST /api/v1/projects/{projectId}/pull-requests/{number}:merge`，带 `Idempotency-Key` 头，\n  身份经**真 guard**（照 release e2e 造真 session）。**不许**用假的中间件往 context 里塞 principal ——\n  `withPrincipal` 是**未导出**的（`cmd/api/authhttp/auth_middleware.go:56`），塞不进去；真要绕开 guard\n  才能过，说明这条要求本身做不到，**停下来在 RESULT 里说清楚，不要发明**。\n- `:487` 那次 replay 同样走端点（幂等的证据因此也变成线上的证据）。\n- 断言照旧落在同一份事实上，只是换成读线上响应：`mergePayload`（`cmd/api/mergehttp/handler.go:68`）\n  带着 `git_state` / `git_sha` / `git_error` / `plan_digest` / `state_id` / `replayed`，\n  足以把现有那几条（`res.Merge.GitState == updated`、`res.State.ID`、`res.Merge.PlanDigest`、`res.Replayed`）\n  平移到响应上；而事件行、audit 行、main head、provider 侧 main ref 这些**仍然直接读库/读 provider**，不要改。\n- 测试名与 label 不变（`TestMergeGovernanceEndToEnd`，label `merge governance e2e`），仍然真 PostgreSQL + 真 Gitea。\n- 如果端点这条路**跑出真实缺陷**（例如 guard 拒绝、项目闸门放行/拒绝与预期不符、响应字段映射错），\n  **那是这次返工最有价值的产出**：写进 RESULT，不要为了让它绿而改判定或绕过端点。\n\n## 4. 同时要修的：`cmd/api/mergehttp/wiring.go` 的包注释\n\n`:6-11` 现在写着：\n\n> cmd/api builds the production graph; the integration and E2E suites build the same graph over the same\n> real PostgreSQL and the same real Gitea.\n\n**今天这是假的**（没有任何 integration/E2E 包引用 `mergehttp`）。这正是我在 T0406 遗留项\n（第 3、6、7 条）里点名要罚的那一类「注释替不存在的覆盖作证」，而且它作证的恰好就是验收标准第 1 条\n要的那个端点覆盖。\n\n你按第 3 节做完之后这句话**应该**成真（图经生产构造函数搭、真库、真 Gitea）。**要么让它成真\n（并且核对它真成真了：用的是 `mergehttp.New` + `Register`，不是手写注册），要么把话说准**——\n比如只差 session store 是内存的时候，就照 `release_e2e_test.go:42-44` 的做法把这条例外写出来。\n不许留一句比事实强的话。\n\n## 5. 这一轮不许动的\n\n- 合并的**判定语义**：确定性、冲突不自动选赢家、八种决定各自生效、私有源并入公开目标整体扣留 ——\n  一个字都不许改（复核的那份证据挂在这四条上）。\n- policy 闸（fail-closed）、integrity 闸（blocking 即拒）、台账 `merge_creations`、\n  幂等语义、事件与 audit 的落法。\n- 这一轮**只加一条请求路径**：不改行为，只让已有的行为经过端点被证明一次。\n\n## 6. 我这边要说明的一件事（你的做法没有错，是我的任务包自相矛盾）\n\n任务包的 requirement 段写 e2e 时只说「(a)(b)(d) 必须经由真实路径」，**没有点名端点**；\n而验收标准第 1 条点名了「经新端点」。两句是我写得不一样，你按 requirement 那段做了。\n**判定标准是验收标准那一条**，所以这轮按第 3 节补齐。下次我写包会把这两处对齐。\n\n## 7. 交回来时要写清楚的\n\n1. 端点那条路真的跑通了：哪个测试、哪次请求、响应断言了什么（贴关键断言）。\n2. `wiring.go` 的注释现在说的是什么，以及它**为什么**成真（或哪里仍然不是真的）。\n3. 有没有跑出真实缺陷；没有就明说没有。\n4. 原先那四条断言 (a)(b)(c)(d) 与幂等，在改完之后仍然同时成立。\n",
       "history": [
         {
           "from": "todo",
@@ -3606,6 +3607,41 @@
           "to": "running",
           "at": "2026-09-15T21:25:13Z",
           "run_id": "run-1cc31415aef1d6b9",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-15T22:26:54Z",
+          "run_id": "run-1e5b8d83ed9c3f93",
+          "reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (go test $(go list ./... | grep -v '/tests/integration')) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T22:27:13Z",
+          "run_id": "run-e2cceddfe94a0525",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T22:38:56Z",
+          "run_id": "run-2c4c38110a1eb642",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T22:47:43Z",
+          "run_id": "run-ec7a8350ff06e989",
+          "reason": "# 返工：验收标准第 1 条的「经新端点合并成功」没有交付，且 wiring.go 的注释在为不存在的覆盖作证\n\n这一轮**只改一件事**：让那个 e2e 真的**经过新端点**合并。判定语义、闸门、台账一个字都不许动。\n\n## 1. 具体是什么没交\n\n验收标准第 1 条（原文，含义已被钉死）：\n\n> 新的合并路径**只**走提供方 PR merge（`ViaMerge` 判定通过），不引入任何 push/force/delete 分支；\n> 既有的 `tests/integration/gitea_protection_test.go` 仍绿，且新增断言**「经新端点合并成功」**与\n> **「直接 push main 仍被拒」**在**同一个 e2e** 里同时成立\n\n「直接 push main 仍被拒」那半做到了。「**经新端点合并成功**」那半没有：\n`tests/integration/merge_governance_e2e_test.go:343`（以及 replay 的 `:487`）调的是\n`mergeSvc.Merge(...)`，**端点根本没参与**。全树 grep：`mergehttp` 只被 `cmd/api/main.go:53`（import）\n与 `cmd/api/main.go:725`（`mergehttp.New`）引用，**没有任何测试包引用它**。也就是说\nhandler → command 这道缝、线上去的错误码映射、以及 replay 的响应形状，**从来没有在真合并上跑过一次**。\n\n## 2. 为什么这不是「字面较真」\n\n本任务的全部主张是「**端点是 main 前进的唯一一条路**」。而今天这条主张的证据只有：\nhandler 对着**假 command** 的单测、加上你独立写的一个 ServeMux 探针。`cmd/api/main.go:725`\n那两行装配（`Command:` 传的是谁、`Projects:` 传的是谁、`Register(v1)` 挂没挂上去）\n**今天没有任何测试会因为它写错而变红**。\n\n## 3. 要求：照同族的先例走，让请求真的进端点\n\n**先例就在树里，照它写**：`tests/integration/release_e2e_test.go`（同族的\"幂等创建 + 台账\"面）。\n它的 `newReleaseServer`（`:149`）就是干这个的：真 migration、真 pgx store、**真 guard（session + CSRF）**、\n`releasehttp.New(...)` + `<api>.Register(apiMux)` + `httptest.NewServer(authAPI.Guard(apiMux))`（`:225`），\n只有 session store 用 `memstore.NewSessions()`（`:152`，文件头 `:42-44` 把这条例外写明了）。\n\n具体到你这儿：\n\n- 用**生产的构造函数**把图搭起来，与 `cmd/api/main.go:725-729` 同形：\n  `mergehttp.New(mergehttp.Deps{Command: <你已经建好的那个真 merge.NewService>, Projects: <真 projects 服务>})`\n  → `Register(apiMux)` → `httptest.NewServer(authAPI.Guard(apiMux))`。\n  **不要**在测试里手写一份等价但独立的 mux 注册（那样只证明你写的和 main.go 写的一样，不证明 main.go 是对的）。\n- 合并请求走 `POST /api/v1/projects/{projectId}/pull-requests/{number}:merge`，带 `Idempotency-Key` 头，\n  身份经**真 guard**（照 release e2e 造真 session）。**不许**用假的中间件往 context 里塞 principal ——\n  `withPrincipal` 是**未导出**的（`cmd/api/authhttp/auth_middleware.go:56`），塞不进去；真要绕开 guard\n  才能过，说明这条要求本身做不到，**停下来在 RESULT 里说清楚，不要发明**。\n- `:487` 那次 replay 同样走端点（幂等的证据因此也变成线上的证据）。\n- 断言照旧落在同一份事实上，只是换成读线上响应：`mergePayload`（`cmd/api/mergehttp/handler.go:68`）\n  带着 `git_state` / `git_sha` / `git_error` / `plan_digest` / `state_id` / `replayed`，\n  足以把现有那几条（`res.Merge.GitState == updated`、`res.State.ID`、`res.Merge.PlanDigest`、`res.Replayed`）\n  平移到响应上；而事件行、audit 行、main head、provider 侧 main ref 这些**仍然直接读库/读 provider**，不要改。\n- 测试名与 label 不变（`TestMergeGovernanceEndToEnd`，label `merge governance e2e`），仍然真 PostgreSQL + 真 Gitea。\n- 如果端点这条路**跑出真实缺陷**（例如 guard 拒绝、项目闸门放行/拒绝与预期不符、响应字段映射错），\n  **那是这次返工最有价值的产出**：写进 RESULT，不要为了让它绿而改判定或绕过端点。\n\n## 4. 同时要修的：`cmd/api/mergehttp/wiring.go` 的包注释\n\n`:6-11` 现在写着：\n\n> cmd/api builds the production graph; the integration and E2E suites build the same graph over the same\n> real PostgreSQL and the same real Gitea.\n\n**今天这是假的**（没有任何 integration/E2E 包引用 `mergehttp`）。这正是我在 T0406 遗留项\n（第 3、6、7 条）里点名要罚的那一类「注释替不存在的覆盖作证」，而且它作证的恰好就是验收标准第 1 条\n要的那个端点覆盖。\n\n你按第 3 节做完之后这句话**应该**成真（图经生产构造函数搭、真库、真 Gitea）。**要么让它成真\n（并且核对它真成真了：用的是 `mergehttp.New` + `Register`，不是手写注册），要么把话说准**——\n比如只差 session store 是内存的时候，就照 `release_e2e_test.go:42-44` 的做法把这条例外写出来。\n不许留一句比事实强的话。\n\n## 5. 这一轮不许动的\n\n- 合并的**判定语义**：确定性、冲突不自动选赢家、八种决定各自生效、私有源并入公开目标整体扣留 ——\n  一个字都不许改（复核的那份证据挂在这四条上）。\n- policy 闸（fail-closed）、integrity 闸（blocking 即拒）、台账 `merge_creations`、\n  幂等语义、事件与 audit 的落法。\n- 这一轮**只加一条请求路径**：不改行为，只让已有的行为经过端点被证明一次。\n\n## 6. 我这边要说明的一件事（你的做法没有错，是我的任务包自相矛盾）\n\n任务包的 requirement 段写 e2e 时只说「(a)(b)(d) 必须经由真实路径」，**没有点名端点**；\n而验收标准第 1 条点名了「经新端点」。两句是我写得不一样，你按 requirement 那段做了。\n**判定标准是验收标准那一条**，所以这轮按第 3 节补齐。下次我写包会把这两处对齐。\n\n## 7. 交回来时要写清楚的\n\n1. 端点那条路真的跑通了：哪个测试、哪次请求、响应断言了什么（贴关键断言）。\n2. `wiring.go` 的注释现在说的是什么，以及它**为什么**成真（或哪里仍然不是真的）。\n3. 有没有跑出真实缺陷；没有就明说没有。\n4. 原先那四条断言 (a)(b)(c)(d) 与幂等，在改完之后仍然同时成立。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T22:47:47Z",
+          "run_id": "run-3b9722b68da09d44",
           "reason": "worker spawn"
         }
       ]
@@ -4949,10 +4985,12 @@
       "merged_at": null
     },
     "T0712": {
-      "status": "rejected",
-      "started_at": "2026-09-15T21:25:24Z",
-      "worker_run_id": "run-fb1cf63adff3ee38",
-      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (go test $(go list ./... | grep -v '/tests/integration') -count=1) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
+      "status": "merged",
+      "started_at": "2026-09-15T22:11:05Z",
+      "worker_run_id": "run-7a9ad3ef7d9f9477",
+      "accepted_by_supervisor_at": "2026-09-15T22:35:34Z",
+      "merged_at": "2026-09-15T22:42:04Z",
+      "rejection_reason": "## 先说清楚：你上一轮**没看到这封信**，不是你的问题\n\n我上一轮的做法是：先用 `rebaseline` 记了一次驳回（那封信就在那次记录里），紧接着又用\n`worker rework --reason-file` 补了一段\"偶发红\"的说明。这个工具的语义是——**rework 的\n`--reason-file` 会替换掉最新那条驳回记录里的理由**（`rddev worker rework --help` 原话：\n\"replacing the one rendered from the newest RejectRecord\"）。于是那封信被顶掉了，你从来没读到过。\n\n**你这一轮做的事，正是我要的**：在新基线上重跑、把那一次红**如实留下**（没有删、没有跳过、\n没有把范围缩小到只跑你那几个包）、并把第二次的真实结果一起记上。那份 RESULT 我认可。\n**偶发红的处理方式继续照那份说明**：照实记，不要为了凑一个自洽的 RESULT 而隐瞒任何一次真实结果。\n\n下面这份是**原本就该送到你手上的信**，正文一字未改。它要你在**现有那六个文件**上做三处改动\n（文件数不变，没有新文件）。\n\n---\n\n## 复核结论：approve（0 blocking / 0 major），但有三处要你改完再交\n\n复核人是**独立**做的：自己复跑了单测与真库集成（105.7s），并且**没有碰你的工作树**——他用 Go 的\n`-overlay` 注入三个探针，分别证明（A）旧行为回来→红、（B）\"把条目丢掉\"式的假修法→红、\n（C）规则收得过紧→红。三个方向都量到了。你的实现本身**一个字不用改**。\n\n下面是我对你**如实披露的那几项**的裁定，以及三处必须改的地方。**先看裁定，别去动它们**。\n\n### 一、裁定：这两处**保持原样**，已定，不要再改\n\n1. **`PreviewDependency.CurrentVisibility`（钉住版本的可见性）** —— **不改**。理由与你说的一致，\n   这次是裁定：那条规则管的是**所属项目**的身份（项目编号/可见性/标题），而这个字段承载的是\n   **被钉版本自己**的 `research_asset_versions.visibility`，是另一根轴；`StoredPin` 里根本没有项目，\n   要套规则只能加 join——而第 11 条禁止动 SQL。而且当它是 `private` 时，同一份回答里**必需的**\n   blocking 条目已经这么说了，字段没有多给出任何私有状态。你说的\"会破坏既有\n   `TestPreviewNamesPinnedPrivateVersion`\"也成立。\n2. **`CodePreviewAssetTypeMismatch` 点到资产类型** —— **不改**。类型是这个拒绝的**全部内容**，\n   去掉它这条 finding 就没有信息了；它只是一个粗粒度枚举（dataset/model/…），不是身份。\n   再收紧就是在发明产品语义。\n\n**但这两条要在代码里留下裁定的痕迹**（见下）。\n\n### 二、必须改的三处（都在你现有范围内）\n\n**(1) `PreviewObject.ObjectID`：按同一条规则一并扣留。**\n\n你的原话是\"那是调用方自己的 ref，原样回显，没有多披露任何它没送来的东西\"。**这句话对\n`ObjectVersionID` 成立，对 `ObjectID` 不成立**——复核人抓住了这一点，我核对后同意：调用方送来的是\n`object_version:<uuid>`，而 `ObjectID` 是**它所属的那个 scientific_object 的行编号**，调用方**没有**\n送来，也猜不到。\n\n这为什么必须扣：第 4 条把可接受的残余**界定为\"你手里本来就有的那个编号，于是你确认它存在\"**。\n`ObjectID` 越过了这条界——它是你**没**持有的**第二个**身份。\"实例必须仍然被列出、`Resolved`\n必须仍然为真\"这条不变（条目继续产出、`ObjectVersionID` 继续渲染，那是调用方自己的字符串）。\n\n已核实没有下游依赖它：全仓库只有 `internal/assets/preview.go` 里**构造 `PreviewObject` 的那一处**\n给它赋值（本轮改动后大约在 `:865`——这个行号会随你改动漂移，以\"构造 PreviewObject 的那一处\"为准），\n`apps/web` 里的 `object_id` 属于另一条路由（pulls），与本接口无关。\n\n**(2) `cmd/api/assetshttp/doc.go`：那两句话要说得与代码**逐字**相符。**\n\n复核人指出（我核对了，成立）：\n\n- \"the fields that would say whose private state it is are served as **empty strings**\" ——\n  对 `PreviewObject` / `PreviewAsset` 成立（没有 `omitempty`），**对 `PreviewRef` 不成立**：\n  它的 `project_id` / `current_visibility` 带着**改动之前就有**的 `omitempty`，所以扣留时是\n  **整个字段不出现**，不是\"字段在、值为空串\"。**不要为了对齐这句话去动那两个 tag**——那是契约变动，\n  第 11 条禁止。**把话改准，别改 tag。**\n- \"What remains disclosed about another project's private entity is its existence\"（约 153-157 行）\n  **说少了**：那条必需的 dependency detail 还会说这条依赖指向\"另一个**私有**项目、且不是发布项目\"\n  ——这正是第 4 条授权的、`docs/23 §4` 要求的那句话。\n\n第 10 条要求的是\"文档必须与改后的行为一致\"，所以这两处是**没做完**，不是可选。\n\n**(3) 在上面两处代码里，把裁定写下来。**\n\n在 `PreviewDependency.CurrentVisibility` 与 `CodePreviewAssetTypeMismatch` 附近各加一小段注释，\n说明**为什么它们不套那条规则**（把裁定一的两个理由写进去，一两句即可）。目的：让下一个人读到的是\n**做过并留下的决定**，而不是**没人看过的沉默**。注释要短，别写成论文。\n\n### 三、边界\n\n- **实现语义、判定规则、所有断言一律不动**（除 `ObjectID` 那一处按(1)改，以及随之而来的测试补充）。\n- `ObjectID` 改了以后，**加一条会红的断言**证明它确实被扣留了（往你已有的那几个测试里补，别新开一批）：\n  外方私有对象那条 `objects[0].object_id` 必须为空，同时 `object_version_id` **仍在**、条目**仍在**、\n  `Resolved` **仍为真**、那条依赖**仍然 blocking**。**顺带证明它会红**（把 `ObjectID` 的扣留去掉跑一次，\n  看到红，再放回来）。\n- 不许动 `infra/migrations/**`、`specs/**`、`internal/persistence/**`、`apps/web/**`；\n  不新增、不修改任何 SQL。\n- 其余 6 个文件里已完成的部分**保留原样**。\n\n改完照旧跑你那套（单测 + 真库集成 + 你自己的探针），并更新 RESULT。\n",
       "history": [
         {
           "from": "todo",
@@ -4973,6 +5011,75 @@
           "at": "2026-09-15T21:41:38Z",
           "run_id": "run-2c37abff89d2744e",
           "reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (go test $(go list ./... | grep -v '/tests/integration') -count=1) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T21:44:25Z",
+          "run_id": "run-5221524687346674",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T21:49:07Z",
+          "run_id": "run-c8d33cc6c8261ed9",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T22:04:53Z",
+          "run_id": "run-0c69425d74e598d0",
+          "reason": "## 复核结论：approve（0 blocking / 0 major），但有三处要你改完再交\n\n复核人是**独立**做的：自己复跑了单测与真库集成（105.7s），并且**没有碰你的工作树**——他用 Go 的 `-overlay` 注入三个探针，分别证明（A）旧行为回来→红、（B）\"把条目丢掉\"式的假修法→红、（C）规则收得过紧→红。三个方向都量到了。你的实现本身**一个字不用改**。\n\n下面是我对你**如实披露的那几项**的裁定，以及三处必须改的地方。**先看裁定，别去动它们**。\n\n### 一、裁定：这两处**保持原样**，已定，不要再改\n\n1. **`PreviewDependency.CurrentVisibility`（钉住版本的可见性）** —— **不改**。理由与你说的一致，这次是裁定：那条规则管的是**所属项目**的身份（项目编号/可见性/标题），而这个字段承载的是**被钉版本自己**的 `research_asset_versions.visibility`，是另一根轴；`StoredPin` 里根本没有项目，要套规则只能加 join——而第 11 条禁止动 SQL。而且当它是 `private` 时，同一份回答里**必需的** blocking 条目已经这么说了，字段没有多给出任何私有状态。你说的\"会破坏既有 `TestPreviewNamesPinnedPrivateVersion`\"也成立。\n2. **`CodePreviewAssetTypeMismatch` 点到资产类型** —— **不改**。类型是这个拒绝的**全部内容**，去掉它这条 finding 就没有信息了；它只是一个粗粒度枚举（dataset/model/…），不是身份。再收紧就是在发明产品语义。\n\n**但这两条要在代码里留下裁定的痕迹**（见下）。\n\n### 二、必须改的三处（都在你现有范围内）\n\n**(1) `PreviewObject.ObjectID`：按同一条规则一并扣留。**\n\n你的原话是\"那是调用方自己的 ref，原样回显，没有多披露任何它没送来的东西\"。**这句话对 `ObjectVersionID` 成立，对 `ObjectID` 不成立**——复核人抓住了这一点，我核对后同意：调用方送来的是 `object_version:<uuid>`，而 `ObjectID` 是**它所属的那个 scientific_object 的行编号**，调用方**没有**送来，也猜不到。\n\n这为什么必须扣：第 4 条把可接受的残余**界定为\"你手里本来就有的那个编号，于是你确认它存在\"**。`ObjectID` 越过了这条界——它是你**没**持有的**第二个**身份。\"实例必须仍然被列出、`Resolved` 必须仍然为真\"这条不变（条目继续产出、`ObjectVersionID` 继续渲染，那是调用方自己的字符串）。\n\n已核实没有下游依赖它：全仓库只有 `internal/assets/preview.go:713` 给它赋值，`apps/web` 里的 `object_id` 属于另一条路由（pulls），与本接口无关。\n\n**(2) `cmd/api/assetshttp/doc.go`：那两句话要说得与代码**逐字**相符。**\n\n复核人指出（我核对了，成立）：\n\n- \"the fields that would say whose private state it is are served as **empty strings**\" —— 对 `PreviewObject` / `PreviewAsset` 成立（没有 `omitempty`），**对 `PreviewRef` 不成立**：它的 `project_id` / `current_visibility` 带着**改动之前就有**的 `omitempty`，所以扣留时是**整个字段不出现**，不是\"字段在、值为空串\"。**不要为了对齐这句话去动那两个 tag**——那是契约变动，第 11 条禁止。**把话改准，别改 tag。**\n- \"What remains disclosed about another project's private entity is its existence\"（约 153-157 行）**说少了**：那条必需的 dependency detail 还会说这条依赖指向\"另一个**私有**项目、且不是发布项目\"——这正是第 4 条授权的、`docs/23 §4` 要求的那句话。\n\n第 10 条要求的是\"文档必须与改后的行为一致\"，所以这两处是**没做完**，不是可选。\n\n**(3) 在上面两处代码里，把裁定写下来。**\n\n在 `PreviewDependency.CurrentVisibility` 与 `CodePreviewAssetTypeMismatch` 附近各加一小段注释，说明**为什么它们不套那条规则**（把裁定一的两个理由写进去，一两句即可）。目的：让下一个人读到的是**做过并留下的决定**，而不是**没人看过的沉默**。注释要短，别写成论文。\n\n### 三、边界\n\n- **实现语义、判定规则、所有断言一律不动**（除 `ObjectID` 那一处按(1)改，以及随之而来的测试补充）。\n- `ObjectID` 改了以后，**加一条会红的断言**证明它确实被扣留了（往你已有的那几个测试里补，别新开一批）：外方私有对象那条 `objects[0].object_id` 必须为空，同时 `object_version_id` **仍在**、条目**仍在**、`Resolved` **仍为真**、那条依赖**仍然 blocking**。**顺带证明它会红**（把 `ObjectID` 的扣留去掉跑一次，看到红，再放回来）。\n- 不许动 `infra/migrations/**`、`specs/**`、`internal/persistence/**`、`apps/web/**`；不新增、不修改任何 SQL。\n- 其余 6 个文件里已完成的部分**保留原样**。\n\n改完照旧跑你那套（单测 + 真库集成 + 你自己的探针），并更新 RESULT。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T22:05:03Z",
+          "run_id": "run-998e774f19a2d3be",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T22:09:44Z",
+          "run_id": "run-cee2a90d4817f9f2",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T22:10:59Z",
+          "run_id": "run-d9bbab063f24b800",
+          "reason": "## 先说清楚：你上一轮**没看到这封信**，不是你的问题\n\n我上一轮的做法是：先用 `rebaseline` 记了一次驳回（那封信就在那次记录里），紧接着又用\n`worker rework --reason-file` 补了一段\"偶发红\"的说明。这个工具的语义是——**rework 的\n`--reason-file` 会替换掉最新那条驳回记录里的理由**（`rddev worker rework --help` 原话：\n\"replacing the one rendered from the newest RejectRecord\"）。于是那封信被顶掉了，你从来没读到过。\n\n**你这一轮做的事，正是我要的**：在新基线上重跑、把那一次红**如实留下**（没有删、没有跳过、\n没有把范围缩小到只跑你那几个包）、并把第二次的真实结果一起记上。那份 RESULT 我认可。\n**偶发红的处理方式继续照那份说明**：照实记，不要为了凑一个自洽的 RESULT 而隐瞒任何一次真实结果。\n\n下面这份是**原本就该送到你手上的信**，正文一字未改。它要你在**现有那六个文件**上做三处改动\n（文件数不变，没有新文件）。\n\n---\n\n## 复核结论：approve（0 blocking / 0 major），但有三处要你改完再交\n\n复核人是**独立**做的：自己复跑了单测与真库集成（105.7s），并且**没有碰你的工作树**——他用 Go 的\n`-overlay` 注入三个探针，分别证明（A）旧行为回来→红、（B）\"把条目丢掉\"式的假修法→红、\n（C）规则收得过紧→红。三个方向都量到了。你的实现本身**一个字不用改**。\n\n下面是我对你**如实披露的那几项**的裁定，以及三处必须改的地方。**先看裁定，别去动它们**。\n\n### 一、裁定：这两处**保持原样**，已定，不要再改\n\n1. **`PreviewDependency.CurrentVisibility`（钉住版本的可见性）** —— **不改**。理由与你说的一致，\n   这次是裁定：那条规则管的是**所属项目**的身份（项目编号/可见性/标题），而这个字段承载的是\n   **被钉版本自己**的 `research_asset_versions.visibility`，是另一根轴；`StoredPin` 里根本没有项目，\n   要套规则只能加 join——而第 11 条禁止动 SQL。而且当它是 `private` 时，同一份回答里**必需的**\n   blocking 条目已经这么说了，字段没有多给出任何私有状态。你说的\"会破坏既有\n   `TestPreviewNamesPinnedPrivateVersion`\"也成立。\n2. **`CodePreviewAssetTypeMismatch` 点到资产类型** —— **不改**。类型是这个拒绝的**全部内容**，\n   去掉它这条 finding 就没有信息了；它只是一个粗粒度枚举（dataset/model/…），不是身份。\n   再收紧就是在发明产品语义。\n\n**但这两条要在代码里留下裁定的痕迹**（见下）。\n\n### 二、必须改的三处（都在你现有范围内）\n\n**(1) `PreviewObject.ObjectID`：按同一条规则一并扣留。**\n\n你的原话是\"那是调用方自己的 ref，原样回显，没有多披露任何它没送来的东西\"。**这句话对\n`ObjectVersionID` 成立，对 `ObjectID` 不成立**——复核人抓住了这一点，我核对后同意：调用方送来的是\n`object_version:<uuid>`，而 `ObjectID` 是**它所属的那个 scientific_object 的行编号**，调用方**没有**\n送来，也猜不到。\n\n这为什么必须扣：第 4 条把可接受的残余**界定为\"你手里本来就有的那个编号，于是你确认它存在\"**。\n`ObjectID` 越过了这条界——它是你**没**持有的**第二个**身份。\"实例必须仍然被列出、`Resolved`\n必须仍然为真\"这条不变（条目继续产出、`ObjectVersionID` 继续渲染，那是调用方自己的字符串）。\n\n已核实没有下游依赖它：全仓库只有 `internal/assets/preview.go` 里**构造 `PreviewObject` 的那一处**\n给它赋值（本轮改动后大约在 `:865`——这个行号会随你改动漂移，以\"构造 PreviewObject 的那一处\"为准），\n`apps/web` 里的 `object_id` 属于另一条路由（pulls），与本接口无关。\n\n**(2) `cmd/api/assetshttp/doc.go`：那两句话要说得与代码**逐字**相符。**\n\n复核人指出（我核对了，成立）：\n\n- \"the fields that would say whose private state it is are served as **empty strings**\" ——\n  对 `PreviewObject` / `PreviewAsset` 成立（没有 `omitempty`），**对 `PreviewRef` 不成立**：\n  它的 `project_id` / `current_visibility` 带着**改动之前就有**的 `omitempty`，所以扣留时是\n  **整个字段不出现**，不是\"字段在、值为空串\"。**不要为了对齐这句话去动那两个 tag**——那是契约变动，\n  第 11 条禁止。**把话改准，别改 tag。**\n- \"What remains disclosed about another project's private entity is its existence\"（约 153-157 行）\n  **说少了**：那条必需的 dependency detail 还会说这条依赖指向\"另一个**私有**项目、且不是发布项目\"\n  ——这正是第 4 条授权的、`docs/23 §4` 要求的那句话。\n\n第 10 条要求的是\"文档必须与改后的行为一致\"，所以这两处是**没做完**，不是可选。\n\n**(3) 在上面两处代码里，把裁定写下来。**\n\n在 `PreviewDependency.CurrentVisibility` 与 `CodePreviewAssetTypeMismatch` 附近各加一小段注释，\n说明**为什么它们不套那条规则**（把裁定一的两个理由写进去，一两句即可）。目的：让下一个人读到的是\n**做过并留下的决定**，而不是**没人看过的沉默**。注释要短，别写成论文。\n\n### 三、边界\n\n- **实现语义、判定规则、所有断言一律不动**（除 `ObjectID` 那一处按(1)改，以及随之而来的测试补充）。\n- `ObjectID` 改了以后，**加一条会红的断言**证明它确实被扣留了（往你已有的那几个测试里补，别新开一批）：\n  外方私有对象那条 `objects[0].object_id` 必须为空，同时 `object_version_id` **仍在**、条目**仍在**、\n  `Resolved` **仍为真**、那条依赖**仍然 blocking**。**顺带证明它会红**（把 `ObjectID` 的扣留去掉跑一次，\n  看到红，再放回来）。\n- 不许动 `infra/migrations/**`、`specs/**`、`internal/persistence/**`、`apps/web/**`；\n  不新增、不修改任何 SQL。\n- 其余 6 个文件里已完成的部分**保留原样**。\n\n改完照旧跑你那套（单测 + 真库集成 + 你自己的探针），并更新 RESULT。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T22:11:05Z",
+          "run_id": "run-7a9ad3ef7d9f9477",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T22:19:07Z",
+          "run_id": "run-425353742a80ba1c",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-15T22:35:34Z",
+          "run_id": "run-283c56a0fed71b7e"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-15T22:42:04Z",
+          "run_id": "run-d7c525ceb001496f",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },

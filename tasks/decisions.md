@@ -8821,3 +8821,214 @@ Worker 的诊断是对的，处置不对：它把 `internal/devorchestrator/Test
 - **两次独立复跑**：`internal/assets` + `cmd/api/assetshttp` 单测绿；`tests/integration -run TestAssetPreview` 在真 PostgreSQL 上绿。
 - **我自己做的定向突变**：把 `mayRenderProject` 的末行改成 `return true`（恢复 T0712 之前的渲染行为），`TestPreviewWithholdsAForeignPrivateIdentity` **立刻变红**，逐字打印出泄漏（外方项目编号、"Private record"、"Private dependency" 三处都出现在整份回答里）。还原后逐字节一致（md5 `be512355f7928df93de46a54c1e0eb3f`，PROBE 残留 0），再跑全绿。
 - **过程中我自己犯的一个错，一并记下**：第一次写校验时我把 md5 记录写成了只有哈希、没有文件名，`md5sum -c` 报 "no properly formatted checksum lines found" 并**中断了 `&&` 链**——于是那句"还原后重跑"根本没执行，我差点把"看起来还原了"当成"验证过还原了"。第二次显式对比哈希才确认。**这正是"仪器能说不"用在检查自己身上的那一面。**
+
+## L1-20260916-106 —— 返工信被"替换"掉的那一次、那条偶发红的调查结论（issue #243），以及我给自己改的一条规矩
+
+### 一、返工信被"替换"掉的那一次：工具语义 + 我自己的排序错误
+
+我先把**三条要求的信**用 `rebaseline --reason-file` 记成驳回理由，**紧接着**又用
+`worker rework --reason-file <补充说明>` 起返工。`cmd/rddev/worker.go:61` 写得很清楚：rework 的
+`--reason-file` 是 "the file's content becomes the reason the Worker reads, **replacing the one
+rendered from the newest RejectRecord**"。于是 Worker 读到的只有那份补充说明——**那三条要求它从没
+见过**。它回"无需改动"，是照命令做的，**错在我**。
+
+差一点就错怪它：我先读到的 RESULT 看起来像无视了我的裁定，直到回去读 `prompt.md` 与
+`.rddev/runtime/gates/T0712/reject-run-*.json`（注意键是 `reasons`，是个列表，不是 `reason`），才确认它
+实际读到的是什么。**判一个 Worker 之前，先确认它被交付了什么。**
+
+修正：重新 reject，把**完整那封信**放进 rework 自己的 `--reason-file`，再用
+`grep -c '<易碎词>' .rddev/workers/T0712/prompt.md` 验证送达（本次"裁定"×6）。这一轮三项全改。
+教训已存记忆：`rework-reason-file-replaces-the-recorded-reason`。
+
+### 二、那条把 G2 拦下来的偶发红：量到的事实、排除掉的假设、写的人仍未找到（issue #243）
+
+- **现象**：`cmd/rddev` 的 `TestWorkerStop` 在 `t.TempDir()` 清理时报 `directory not empty`，
+  挡的是 required job `go`，也就是**任何任务**的 `accept` 都可能被它拦下。
+- **量到的**：`StopWorker`（`internal/devorchestrator/worker_stop.go`）在 `exit.status` 一出现就返回；
+  而 reaper（`run-worker.sh`，`worker_guard.go:144`）写完 `exit.status` 之后还要
+  `kill -TERM`、**`sleep 1`**、`kill -KILL`。实测存活**恰好约 1.00s**，并且**活过了测试进程本身**，
+  其 cwd 就在被删的那个临时仓库里。⇒ **"停掉"不等于"机器走干净了"。**
+- **`internal/devorchestrator/worker_proc.go:262` 的注释是错的**（它说 reaper 把写 `exit.status`
+  当作最后一件事），而这条注释是**承重的**——`sessionResidue` 用它作理由把"正在退出的 reaper"
+  排除在残留之外。
+- **不是 git 自动维护**：仓库里确有针对那一类的修复（`git_maintenance_test.go:56` 的 `TestMain`
+  注入 `gc.auto=0` + `maintenance.auto=false`），我也验证过该机制真实存在（`GIT_TRACE=1 git commit`
+  确实会拉 `git maintenance run --auto`，加上开关后一次都不再拉）。**但它解释不了这一次**：受控实验
+  证明，深处 `.git` 的迟到写入报的是 `.git/objects` 路径，**而这次报的是仓库根**——reaper 的 cwd
+  （`002/.rddev/worktrees/T0001`）独立证明 `002` 就是那个临时仓库的根。**位置对不上。**
+- **不是 reaper 写的**：逐行读 `run-worker.sh`，写完 `exit.status` 之后只有 `kill` 与 `sleep`，
+  **没有任何文件写入**，更没有一个字写在仓库根。
+- **结论：写的人还没找到。** 不把上面任何一条当成"已修复"。
+- **附一条我自己造出来的假红**：为隔离现场我把 `TMPDIR` 指到更长的目录，结果
+  `internal/devorchestrator/TestTheSnapshotRefusesASocketInAPlainUntrackedDirectory` **4/4 全红**——
+  该测试在 `t.TempDir()` 下 bind unix socket，而 `sockaddr_un.sun_path` 只有约 108 字节，多出来的
+  16 个字符刚好把它顶过上限。默认 `TMPDIR` 下它是绿的。**假红比漏掉一个 flake 更贵**：它会让我驳回
+  一个没问题的 Worker。已存记忆 `never-lengthen-tmpdir-when-running-the-suite`。
+
+### 三、我给自己改的一条规矩（不改，就等于嘴上有规矩、手上没有）
+
+原来的规矩只有半条："Worker 的结果与我的要求不符 → 返工"。这一轮暴露出它对**不在合同里的发现**
+没有定义，而我在这一轮里两次遇到后者。改成两条：
+
+- **要求没做到**（我写明的条目没落实）→ **返工**。合同被违反，返工是它该付的成本。
+- **发现不在合同里**（我事后才看见、当初根本没要求的东西）→ **不返工**：记档（issue / 本文件），
+  按价值决定是否另开任务。
+
+理由：返工要花掉一个 Worker 的整整一轮，而"我当初没想到"是**我自己的**成本，不该记在 Worker 头上；
+把不在合同里的东西塞进返工信，本质上是在**事后扩大范围**——那正是 scope 校验要防的事。
+
+### 四、T0712 第三轮返工的独立 G2（不采信 Worker 自己的探针报告）
+
+- **三项要求逐条核到代码**，不是核到它的叙述：`entry.ObjectID = obj.ObjectID` 现在在
+  `mayRenderProject` 闸内；`doc.go` 的 wire 形状描述与实现逐字对齐，且**没有动**改动前就有的
+  `omitempty`（因此"对象字段空串带键、ref 字段省键"这个不统一的形状是**如实记录**，不是新引入的）；
+  两处 "RULED, not overlooked (T0712 review)" 注释在位（`PreviewDependency.CurrentVisibility` 与
+  `CodePreviewAssetTypeMismatch`）。
+- **我自己做的定向突变，且不往工作副本里写一个字**：用 `go test -overlay` 把旧行为（无条件渲染
+  `ObjectID`）塞回去，`TestPreviewCarriesTheObjectVersions` 与
+  `TestPreviewWithholdsAForeignPrivateIdentity` 立刻变红，并逐字打印出泄漏的那个第二身份；
+  去掉 overlay 同一条命令全绿；工作副本 md5 前后一致（`c59f7a31adc059a30bf3e6b4aa86bc9c`），
+  脏文件恰好是 Worker 的 6 个。**"它会红"是被证明的，不是被声称的。**
+- **一处集成风险我专门去关掉**：`OriginProjectVisibility` 若在生产 reader 里没被填上，asset 的
+  `title` 会在生产里**静默变空**——而单测喂的是假 reader，**看不见这个错**。核对结果：`state.go`
+  用既有 canonical 查询 `ListPreviewProjectRefs`（`SELECT id, visibility FROM projects WHERE id = ANY($1)`，
+  **不按可见性过滤**，因此任何项目——包括调用者读不到的私有项目——都答得出来）把它填上；
+  `research_assets.origin_project_id` 是 `NOT NULL`，所以"空 ⇒ 收回"这条兜底对真实资产**不可达**。
+  **不新增、不修改任何 SQL，不重生成 sqlc。**
+
+## L1-20260916-107 —— T0712 收尾（复核→验收→PR #244）、复核抓出的那条"误伤自己人"、以及 T0409 换基线
+
+### 一、T0712：机器先拦了我一次，拦得对
+
+我第一次跑 `accept` 被 **REFUSED**："the review verdict (run-d460ff38b921eff6, 2026-09-15T21:58) is older
+than the latest collect (run-425353742a80ba1c, 22:19) — **it judged a different tree**"。
+那份复核是在 Worker 第三轮**改之前**做的。**闸门比我先想到这一层**：我自己核完代码、探针也做了，
+就想直接收尾，而机器坚持"你手上这棵树没有人独立看过"。重开复核（`review spawn` → 9 分钟 →
+`approve`，0 blocking / 0 major），第二次 `accept` 才过（G1/G2/G3/G4 全绿）。
+
+**记一笔**：复核报告里 `review-code-unchanged: the reviewed worktree matches the spawn-time fingerprint` ——
+我用 `go test -overlay` 做突变探针**没有往工作副本里写一个字**，所以"复核过的树"和"我要提交的树"
+是同一棵。**探针方式选对了，这一条就是免费的证明。**
+
+### 二、复核抓出一条**可达的**误伤（issue #245），我判"记档 + 合并"，理由如下
+
+复核在真库上发现：归属判定用的是**字符串相等**——一边是调用者写在 URL 里的项目编号，另一边是
+数据库的 `id::text`（永远小写）。UUID 十六进制大小写不敏感，所以**把路径里的编号写成大写是符合
+契约的合法输入**，而这时回答会把**发布项目自己**的字段扣掉（`asset.title`/`origin_project_id`
+变空、`objects[]`/`refs[]` 被清空）——**误伤自己人**，与验收标准 3（"收紧不误伤"）直接冲突。
+
+**为什么不是我返工，而是记档 + 合并**（这是判断，写下来供复查）：
+
+1. **失效方向是安全的**：多扣留，不是多泄漏。本任务要防的那件事（泄漏外方私有身份）没有漏。
+2. **这个输入在改动之前就是坏的**：基线源码在同一次比较上已经给出 `publishable=false` 加上一条
+   **针对调用者自己资产的假阻断项**（复核人用基线源码复现过）。这次改动是在**旧症状之上新增了一个
+   症状**，不是**引入**了坏掉这件事。
+3. **复核人给的修法是根治的，但它越界**：正解是"不用路径字符串，改用闸门已经读到的那个项目行里的
+   规范编号"。可这会**同时改掉既有那条 `PREVIEW_ASSET_PROJECT_MISMATCH` 的行为**——那是**改动之前
+   就存在**的另一条缺陷，而 T0712 的任务契约**明令禁止**改动既有判定语义。**在 T0712 里修它，
+   才是真的违约。** 正确的家是一个单独任务 → **issue #245**，带复现和根治修法。
+4. 复核裁定是 `approve`（0 blocking / 0 major）。两条 minor 都有落处：一条是本节这条（→#245），
+   另一条（pin 可见性）是我在上一轮**明确裁定不改**并在代码里留了决定注释的。**所以"没有未解决的
+   review 意见"这一条成立，但我要把它成立的理由写清楚，而不是拿"复核说 approve"当免罪符。**
+
+### 三、T0409：被 collect 拒收，拒得对，但根因是**基线过期**——我先自己复跑再动手
+
+`collect` 按 `result-consistency` 拒收：`status=completed` 却挂着一条 `failed`。**判据没错**
+（"我列出的测试全绿"才配叫 completed）。但我没有直接采信 Worker 的诊断，自己跑了两遍：
+
+- 在它的工作副本里跑那条测试 → **FAIL**，失败信息逐字打印的是 `task T0712 (P7, ...) has no G3 jobs`；
+- 在当前 main 上跑同一条 → **ok**。
+
+**它抱怨的是 T0712，不是 T0409。** T0409 的工作副本停在 `3dce601`，而补 T0712 那条 G3 的提交
+（`30abc76`）晚于它。`rebaseline` 把它推到 `dbcc3a5`，**34 个文件全带过去**，派生文件
+（`internal/persistence/sqlc`、`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`）由机制
+**重新生成**而不是手工合并。给它的信里明说：**预期不用改代码，只需重跑**；若发现真问题就照实报，
+**别为了好看写成 completed**——它上一轮正是栽在"一边说完成、一边留着红"这个组合上。
+送达已验（在 `.rddev/workers/T0409/prompt.md` 里搜到原话）。
+
+### 四、我查过、确认**不需要**担心的一件事（省得下次再查）
+
+台账里 **T0712 也被预留了编号 71**（尽管它一个迁移文件都没加），我一度担心"那它是不是要排在
+握着 70 的 T0409 后面"。去读把关代码 `internal/devorchestrator/migration_order.go`：判据是
+**工作副本里有没有真的新增迁移文件**（`migrationFilesInWorktree`），**预留的号不算**——
+"A task that carries no migration cannot create a gap"。所以 T0712 可以自由先落地。
+反过来，T0409 握着的 00070 会**挡住**任何号码更高的迁移任务——**这就是我不在 T0409 落地前
+开下一个迁移任务的原因**，不是保守，是那条规则要求的。
+
+---
+
+## L1-20260916-108 —— T0409 复核是 approve + 1 major，我仍判返工；T0712 收尾关闭 #238；进度叙事换代
+
+### 一、判据是"验收标准那一条有没有被交付"，不是 verdict 的字面
+
+复核（`verdict-run-bd9f1d671f4f3870`）结论 `approve`：**0 blocking / 1 major / 2 minor / 2 nit**。
+那条 major 落在 `tests/integration/merge_governance_e2e_test.go:317`：验收标准第 1 条要求
+**「经新端点合并成功」与「直接 push main 仍被拒」在同一个 e2e 里同时成立**，而 e2e 的 `:343`
+（首次合并）与 `:487`（replay）调的都是 `mergeSvc.Merge` 本身，**端点根本没参与**。
+
+**我自己核过，复核说得对**：`mergehttp` 全树只被 `cmd/api/main.go:53`（import）与 `:725`
+（`mergehttp.New`）引用，**没有任何测试包引用它**。于是 `main.go:725-729` 那几行装配
+（`Command:` 传谁、`Projects:` 传谁、`Register(v1)` 挂没挂）**今天没有任何测试会因为它写错而变红**——
+而"端点是 main 前进的唯一一条路"正是本任务存在的全部理由。
+
+**我不拿"复核说 approve"当免罪符。** 判据有二：一是验收标准第 1 条**点名了端点**，且我在任务包里
+把含义钉死过（"含义按下面这句钉死"）；二是它的另一半本来就要罚——`cmd/api/mergehttp/wiring.go:6-11`
+的包注释写着 *"the integration and E2E suites build the same graph over the same real PostgreSQL and
+the same real Gitea"*，**这是假的，而且正是同一个缺陷类**（注释替不存在的覆盖作证），
+即 T0406 遗留项第 3/6/7 条被我点名要罚的东西。→ **返工**。
+
+### 二、这次返工我自己要认一半：任务包自相矛盾（requirement 段 vs acceptance 段）
+
+requirement 段写 e2e 时只说"(a)(b)(d) 必须经由真实路径"，**没点名端点**；acceptance 段第 1 条
+点名了"经新端点"。**两句是我自己写得不一样，Worker 按 requirement 那段做了**——这不是它的疏忽。
+判定标准是 acceptance 那一条，所以返工；但我在信里**明说这是我的矛盾**（信第 6 节），
+避免它把一次沟通缺陷当成自己的失误。**下次写包：两处对齐。**
+
+### 三、返工信写了什么（全文在 reject record `run-3b9722b68da09d44`）
+
+- 照**同族先例**：`tests/integration/release_e2e_test.go` 的 `newReleaseServer`（`:149`）已经是
+  "真 migration + 真 pgx store + 真 guard（session+CSRF）+ `<api>.Register(apiMux)`
+  + `httptest.NewServer(authAPI.Guard(apiMux))`"，只有 session store 是内存（`:42-44` 写明这条例外）。
+- 必须用**生产构造函数**搭图（`mergehttp.New` + `Register`）；**不许**在测试里手写一份等价注册——
+  那样只证明"你写的和 main.go 写的一样"，不证明 main.go 是对的。
+- principal 只能经**真 guard**：`withPrincipal` 未导出（`cmd/api/authhttp/auth_middleware.go:56`），
+  塞不进去；若必须绕开 guard 才过得去 → **停下来如实报，不要发明**。
+- `:487` 的 replay 也走端点（幂等证据因此变成线上证据）；事件行/audit 行/main head/provider ref
+  仍**直读库与 provider**，不许改成读响应。
+- 跑出真缺陷是这轮**最有价值的产出**，不许为变绿改判定或绕开端点。
+- 判定语义（确定性、冲突不选赢家、八种决定各自生效、整体扣留）、policy/integrity 闸、台账
+  `merge_creations`、幂等语义**一个字不许动**；这轮只加一条请求路径。
+
+送达已验：`.rddev/workers/T0409/prompt.md` 内搜到信中原话（4 处），两条 reject record 都带着它。
+
+### 四、同一轮里**记档但不要求修**的三条（判据：保护在不在，不是字数）
+
+- **minor（replay 回的是"请求里的那个号"）**：ledger 按 `(project_id, idempotency_key)` 键控，
+  没有校验所存 merge 的 PR 号与本次请求的号是否同一个；客户端**越出契约**（同一个 key 指向同项目
+  另一条 PR）时会拿到 200——号是它问的那个，`merge_id`/`state_id`/`plan_digest` 却属于上一次那次合并，
+  而 payload 里没有 `pull_request_id` 可供察觉。**不改的理由**：`internal/application/releases/command.go:115-121`
+  是**同一个形状**；只改 merge 会让两条同契约路径的行为不一致，要改就得一起改（那是另一个任务），
+  且越界在先、**没有发生第二次合并**。记在此处备查。
+- **nit（`tests/integration/resolution_test.go` 的种类表 5→8）**：T0406 复核第 7 条原话是
+  "只需把名字与注释改准，不要新增测试"。Worker **没有新增测试**，是把既有表从 5 扩到 8；
+  若只改名（`TestResolutionSavesEveryKind`）而不扩，新名字反而会为表里没有的覆盖作证。
+  §5.1 允许**加强**。**判：可接受的偏离**，记档。
+- **nit（并发同 key 的输家拿到包装后的 `ErrStore`，线上是 500 而不是 replay/conflict）**：
+  行为安全（什么都没写两遍，重试收敛到赢家那次），与 `release_creations` 同姿态。**记档不修。**
+
+**唯一要求修的非 major 项**是 `wiring.go` 的包注释——因为它作证的恰好是验收标准要的那条覆盖。
+
+### 五、T0712 收尾：关闭 #238，残留指向 #245
+
+#238（T0704 预览跨项目泄漏）随 T0712（PR #244，main `0276dbd`）关闭；**残留一处**
+（路径里写**大写** UUID 时"对象属于哪个项目"的字符串比较认不出来）留在 #245，理由见 L1-20260916-107 第二节。
+关闭评论里**写明了这条残留**——不许让它随"已关闭"一起消失。
+
+### 六、进度叙事换代与状态提交（这是提交窗口）
+
+`tasks/progress.md` 的手写叙事换代：新块记 T0406（PR #241）+ T0712（PR #244）落地、
+复核/mutation 的验收方式、#245 的与合并同时存在的例外，旧块按本文件惯例包进
+`<details><summary><b>（上一刻）03:10 —— …</b></summary>`（时间取该块**最后为真**的时刻）。
+自动段由 `scripts/update_progress.py` 只重写 `AUTO-PROGRESS` 之间，**手写段未被覆盖**（已核对 diff：4 行改动全在自动段）。
+本轮提交：`tasks/decisions.md`、`tasks/progress.md`、`tasks/task_status.json` 一起提交——
+**提交窗口的定义是"刚合并完、还没换基线"，现在正是**。
