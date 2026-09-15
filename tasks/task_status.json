@@ -3218,10 +3218,12 @@
       ]
     },
     "T0404": {
-      "status": "verification",
-      "started_at": "2026-09-14T18:12:18Z",
-      "worker_run_id": "run-81d83af143e1314b",
-      "rejection_reason": "collect rejected: scope: 5 changed path(s) outside allowed_scope [infra/migrations/** specs/database/postgres.sql specs/SPEC_VERSION.json internal/rsg/** internal/application/** internal/domain/** go.mod go.sum .env.example cmd/api/** apps/web/** tests/**]: internal/persistence/queries/issues_prs.sql, internal/persistence/review_store.go, internal/persistence/sqlc/issues_prs.sql.go, internal/persistence/sqlc/models.go, internal/persistence/sqlc/querier.go",
+      "status": "merged",
+      "started_at": "2026-09-15T11:22:27Z",
+      "worker_run_id": "run-b467aaf557e5d209",
+      "accepted_by_supervisor_at": "2026-09-15T11:50:59Z",
+      "merged_at": "2026-09-15T11:58:36Z",
+      "rejection_reason": "## 这不是你的问题：主线动了，你的基线被推到新的 main 上\n\n你的交付没有被判为有缺陷。它进了验收，但在我验收期间 main 往前走了两笔（T1006 的签名 webhook、以及 #211/#212 两处门自身的维修），**你的分支基线是旧 main，那份改动在新 main 上已经不能原样合入**——这是流程的正常现象，不是你的错。\n\n已经做的处理：把你的改动**重新组合**到新 base `e901a26` 上（不是文本三方合并——那样会在真正冲突的地方猜），生成物由工具按新树重新生成。**你的每一个文件都在，内容除下面提到的一处之外逐字未变。**\n\n## 唯一一处需要你知道的：`cmd/api/main.go`\n\n你的这一笔在 `cmd/api/main.go` 上改的是 **import 块加两行 + 一处接线块**。main 在你之后又加了自己的 import（`pullrequestshttp`、`releasehttp`、`templateshttp`、`webhookshttp` 等），所以两边落在同一个 import 块上，工具的组合器认不出这个形状（它只并 `Key: value,` 那种字面量条目），**正确地拒绝了**——我手工合的。\n\n手工合的规则只有一条：main 的这份文件 + 你的两行 import 放进**排序后的位置** + 你那段接线块插在 `policyAPI.Register(v1)` 之后。验证过的性质：\n\n- `gofmt` 干净；\n- 两边所有顶层名字与 import 路径**都还在**（`covers-both-sides`，70 个来自 main、59 个来自你，合起来 72 个，无一丢失）；\n- 原始三方合并结果里的每一行，要么在合出来的文件里，要么被显式声明为被替换（743 行逐行核对）。\n\n**你要做的**：在新基线上重新跑一遍你任务自己规定的检查（G1），确认这段接线在**新 main 的上下文里**仍然成立——比如你调用 `reviews.NewService` / `reviewhttp.New` 时传进去的那几个依赖，在新 main 上仍然是那个名字、那个类型、那个构造方式。如果合出来的 `main.go` 里有什么只有你知道该改的地方（顺序、初始化时机、被新 main 影响的接口），**改它，并在交付说明里讲清楚为什么**；不要为了\"看起来没动过\"而绕开。\n\n## 生成物\n\n`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc/` 下的文件按合并后的树重新生成，不采用你那份也不采用 main 那份——它们是函数值，两边单独取都是错的。其余文件逐字保留。\n\n## 再交付时\n\n按原来的方式返回即可。特别注意你上一轮**第一遍**被拒的原因仍然成立：`internal/persistence/**` 现在在 allowed_scope 里（我已放宽），但**越出 allowed_scope 的改动一律不收**——先看 scope 再动手。\n",
       "history": [
         {
           "from": "todo",
@@ -3256,6 +3258,39 @@
           "at": "2026-09-14T18:17:36Z",
           "run_id": "run-b40938acd443d2a8",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T11:22:26Z",
+          "run_id": "run-17fd335a333fc25c",
+          "reason": "## 这不是你的问题：主线动了，你的基线被推到新的 main 上\n\n你的交付没有被判为有缺陷。它进了验收，但在我验收期间 main 往前走了两笔（T1006 的签名 webhook、以及 #211/#212 两处门自身的维修），**你的分支基线是旧 main，那份改动在新 main 上已经不能原样合入**——这是流程的正常现象，不是你的错。\n\n已经做的处理：把你的改动**重新组合**到新 base `e901a26` 上（不是文本三方合并——那样会在真正冲突的地方猜），生成物由工具按新树重新生成。**你的每一个文件都在，内容除下面提到的一处之外逐字未变。**\n\n## 唯一一处需要你知道的：`cmd/api/main.go`\n\n你的这一笔在 `cmd/api/main.go` 上改的是 **import 块加两行 + 一处接线块**。main 在你之后又加了自己的 import（`pullrequestshttp`、`releasehttp`、`templateshttp`、`webhookshttp` 等），所以两边落在同一个 import 块上，工具的组合器认不出这个形状（它只并 `Key: value,` 那种字面量条目），**正确地拒绝了**——我手工合的。\n\n手工合的规则只有一条：main 的这份文件 + 你的两行 import 放进**排序后的位置** + 你那段接线块插在 `policyAPI.Register(v1)` 之后。验证过的性质：\n\n- `gofmt` 干净；\n- 两边所有顶层名字与 import 路径**都还在**（`covers-both-sides`，70 个来自 main、59 个来自你，合起来 72 个，无一丢失）；\n- 原始三方合并结果里的每一行，要么在合出来的文件里，要么被显式声明为被替换（743 行逐行核对）。\n\n**你要做的**：在新基线上重新跑一遍你任务自己规定的检查（G1），确认这段接线在**新 main 的上下文里**仍然成立——比如你调用 `reviews.NewService` / `reviewhttp.New` 时传进去的那几个依赖，在新 main 上仍然是那个名字、那个类型、那个构造方式。如果合出来的 `main.go` 里有什么只有你知道该改的地方（顺序、初始化时机、被新 main 影响的接口），**改它，并在交付说明里讲清楚为什么**；不要为了\"看起来没动过\"而绕开。\n\n## 生成物\n\n`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc/` 下的文件按合并后的树重新生成，不采用你那份也不采用 main 那份——它们是函数值，两边单独取都是错的。其余文件逐字保留。\n\n## 再交付时\n\n按原来的方式返回即可。特别注意你上一轮**第一遍**被拒的原因仍然成立：`internal/persistence/**` 现在在 allowed_scope 里（我已放宽），但**越出 allowed_scope 的改动一律不收**——先看 scope 再动手。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T11:22:27Z",
+          "run_id": "run-b467aaf557e5d209",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T11:35:59Z",
+          "run_id": "run-b7fd37b0bd23212d",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-15T11:50:59Z",
+          "run_id": "run-53e83a341d8679c4"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-15T11:58:36Z",
+          "run_id": "run-1c2d141722210340"
         }
       ]
     },
@@ -4357,9 +4392,9 @@
       ]
     },
     "T0701": {
-      "status": "rejected",
-      "started_at": "2026-09-14T18:27:28Z",
-      "worker_run_id": "run-b286a199aa96d5a6",
+      "status": "running",
+      "started_at": "2026-09-15T11:32:15Z",
+      "worker_run_id": "run-4e0eab29f2d70f70",
       "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (bash tests/integration/check-sqlc-drift.sh (from a clean tree)) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
       "history": [
         {
@@ -4381,6 +4416,13 @@
           "at": "2026-09-14T18:52:49Z",
           "run_id": "run-001832ad1ffbc288",
           "reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (bash tests/integration/check-sqlc-drift.sh (from a clean tree)) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T11:32:15Z",
+          "run_id": "run-4e0eab29f2d70f70",
+          "reason": "worker spawn"
         }
       ]
     },

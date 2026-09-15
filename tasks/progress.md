@@ -1668,9 +1668,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-15T10:33:40Z
+生成时间：2026-09-15T12:00:34Z
 
-状态分布：todo 65 · ready 0 · running 0 · worker_failed 0 · verification 3 · rejected 1 · blocked 0 · accepted 0 · merged 64（合计 133/133 个任务）
+状态分布：todo 65 · ready 0 · running 1 · worker_failed 0 · verification 2 · rejected 0 · blocked 0 · accepted 0 · merged 65（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1725,7 +1725,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0401 | Research State Diff 引擎 | P4 | merged | 2026-09-14T08:24:01Z |  | 2026-09-14T09:05:38Z | 2026-09-14T09:08:52Z |
 | T0402 | Pull Request Domain | P4 | merged | 2026-09-14T16:43:46Z |  | 2026-09-14T17:06:02Z | 2026-09-14T17:09:30Z |
 | T0403 | Integrity Review Checks | P4 | merged | 2026-09-14T22:26:40Z |  | 2026-09-14T22:49:24Z | 2026-09-14T22:52:37Z |
-| T0404 | Scientific Review 模型 | P4 | verification | 2026-09-14T18:12:18Z |  |  |  |
+| T0404 | Scientific Review 模型 | P4 | merged | 2026-09-15T11:22:27Z |  | 2026-09-15T11:50:59Z | 2026-09-15T11:58:36Z |
 | T0405 | Semantic Conflict Detector | P4 | merged | 2026-09-14T10:19:26Z |  | 2026-09-14T10:46:43Z | 2026-09-14T10:50:01Z |
 | T0406 | Semantic Merge Engine | P4 | todo |  |  |  |  |
 | T0407 | Scientific Conflict Resolution UI | P4 | merged | 2026-09-14T18:21:29Z |  | 2026-09-14T21:49:46Z | 2026-09-14T21:53:00Z |
@@ -1751,7 +1751,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0607 | Activity/Audit Timeline 增强 | P6 | todo |  |  |  |  |
 | T0608 | Release/Abort/Policy E2E | P6 | todo |  |  |  |  |
 | T0609 | Project Milestone 基础 | P6 | verification | 2026-09-14T17:59:55Z |  |  |  |
-| T0701 | Research Asset Core/PID | P7 | rejected | 2026-09-14T18:27:28Z |  |  |  |
+| T0701 | Research Asset Core/PID | P7 | running | 2026-09-15T11:32:15Z |  |  |  |
 | T0702 | 四类 Asset Manifest validator | P7 | todo |  |  |  |  |
 | T0703 | Rights Model | P7 | todo |  |  |  |  |
 | T0704 | Publication Impact Preview | P7 | todo |  |  |  |  |
