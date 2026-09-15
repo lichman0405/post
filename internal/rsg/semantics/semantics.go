@@ -37,6 +37,13 @@
 // by what the payload actually says — ABSENT is a draft and yields a hint,
 // PRESENT is held to the field's rule (empty or malformed refs are hard
 // failures).
+// T0504 adds the evidence assertion checks (CheckEvidenceAssertion):
+// they run on the structured assertion model
+// (internal/domain.EvidenceAssertion), which is not a scientific object,
+// so they are not part of the object-write-path Check dispatch — the
+// future evidence write path calls them directly, and must keep them
+// advisory-only (docs/10 §5, §6) with no numeric output anywhere
+// (docs/10 §4: V1 不自动赋数值权重).
 package semantics
 
 import (
