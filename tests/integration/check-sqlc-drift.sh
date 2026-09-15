@@ -34,7 +34,17 @@ if [[ -z "$SQLC_BIN" ]]; then
 fi
 
 SNAPSHOT="$(mktemp -d)"
-trap 'rm -rf "$SNAPSHOT"' EXIT
+# The verify path regenerates IN PLACE to compare, so it has to put the
+# checked-in files back. Without this restore a failing run silently repairs the
+# drift it just reported: a second run says "clean", and the working tree is left
+# carrying regenerated code nobody reviewed. (The demo path below replaces this
+# trap with one that undoes its own probe instead.)
+restore_generated() {
+  [[ -d "$SNAPSHOT/sqlc" ]] || return 0
+  rm -rf "$GEN_DIR"
+  cp -r "$SNAPSHOT/sqlc" "$GEN_DIR"
+}
+trap 'restore_generated; rm -rf "$SNAPSHOT"' EXIT
 cp -r "$GEN_DIR" "$SNAPSHOT/sqlc"
 
 check_drift() {
