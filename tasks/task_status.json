@@ -3591,13 +3591,24 @@
       ]
     },
     "T0409": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-15T21:25:13Z",
+      "worker_run_id": "run-1cc31415aef1d6b9",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-15T21:25:06Z",
+          "run_id": "run-858a442457483615"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-15T21:25:13Z",
+          "run_id": "run-1cc31415aef1d6b9",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0410": {
       "status": "todo",
@@ -4936,6 +4947,34 @@
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null
+    },
+    "T0712": {
+      "status": "rejected",
+      "started_at": "2026-09-15T21:25:24Z",
+      "worker_run_id": "run-fb1cf63adff3ee38",
+      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (go test $(go list ./... | grep -v '/tests/integration') -count=1) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-15T21:25:06Z",
+          "run_id": "run-516f36518aae8484"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-15T21:25:24Z",
+          "run_id": "run-fb1cf63adff3ee38",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-15T21:41:38Z",
+          "run_id": "run-2c37abff89d2744e",
+          "reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (go test $(go list ./... | grep -v '/tests/integration') -count=1) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        }
+      ]
     },
     "T0801": {
       "status": "todo",
