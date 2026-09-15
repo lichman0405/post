@@ -284,6 +284,7 @@ type ResearchAsset struct {
 	Title           string             `json:"title"`
 	OriginProjectID pgtype.UUID        `json:"origin_project_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	Pid             string             `json:"pid"`
 }
 
 type ResearchAssetVersion struct {
@@ -297,6 +298,7 @@ type ResearchAssetVersion struct {
 	IntegrityHash   string             `json:"integrity_hash"`
 	PublishedBy     pgtype.UUID        `json:"published_by"`
 	PublishedAt     pgtype.Timestamptz `json:"published_at"`
+	OriginRefs      []string           `json:"origin_refs"`
 }
 
 type ResearchEvent struct {
