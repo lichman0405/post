@@ -1,6 +1,6 @@
 {
   "algorithm": "sha256",
-  "combined_digest": "2e5be20c9e8b940539fcc65539e7f2005b5b7e5c52d540d798cc42f9c3a41b7f",
+  "combined_digest": "c0c22178c1986f7f096c51ce202d2c4e847104158028aa5dfc74eaba2041ce77",
   "files": {
     "specs/README.md": "2a0398dfb3ead0586034364d7411d845b84fd33b7c43d1ce9199d6a14ef4cf1a",
     "specs/api/openapi.yaml": "8f2e4cb78ae6c66991d8ad1a4ca15a67248b2cbeee4ebe259323af4a8f08aad1",
@@ -39,9 +39,9 @@
     "specs/schemas/sample.schema.json": "fed5737f271de54c07ebcb429740b224023ce0ffee84e173ff48b7fa7639732a",
     "specs/ui/page-inventory.csv": "c89311bf12526e5d5762a351d71a447caa1c9a79912a172449dd3639141387fb",
     "specs/ui/routes.yaml": "88ae6cb829eae37dd8ae5f8815ce2b4eabc9ec82c51c95cf43223be91922f570",
-    "tasks/tasks.json": "a054e3d4bb5d0c82292767769542ffb9e7c96a8afb5a8649dc0f8fb025f44d4d"
+    "tasks/tasks.json": "b0cde955e8fb7aa2eb77a06b8b0c2cde5c9711ba900e89fd0a6966be7e9f913f"
   },
   "input_count": 38,
   "marker_format": 1,
-  "spec_version": "sha256:2e5be20c9e8b9405"
+  "spec_version": "sha256:c0c22178c1986f7f"
 }
