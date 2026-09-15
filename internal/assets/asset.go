@@ -174,8 +174,11 @@ type AssetVersion struct {
 	SourceReleaseID *string
 	// Manifest is the stored version manifest document (jsonb).
 	Manifest json.RawMessage
-	// RightsJSON is the stored rights document (jsonb); its model is
-	// T0703's, this package only carries it.
+	// RightsJSON is the stored rights document (jsonb). Its model is
+	// internal/rights (T0703: license id, usage declarations, agreement
+	// ref, metadata vs data access) and its stored shape is pinned by
+	// migration 00066; this package carries the bytes and does not read
+	// them, so a caller holding a version parses it with rights.Parse.
 	RightsJSON json.RawMessage
 	// Visibility is the coarse public/private axis.
 	Visibility Visibility
