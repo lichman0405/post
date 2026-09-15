@@ -446,6 +446,28 @@ var canonicalTables = map[string]tableExp{
 		checks:  []string{"review_kind = ANY", "decision = ANY"},
 		fks:     []fkExp{fk("pull_request_id", "pull_requests", "RESTRICT"), fk("reviewer_id", "users", "RESTRICT"), fk("reviewed_state_id", "project_states", "RESTRICT")},
 	},
+	"contribution_opportunities": {
+		// T0803 (00062): the open-contribution opportunity row — target
+		// (issue | research_question) with difficulty/capability
+		// metadata, the suggested → open → closed machine, and the
+		// internal → public visibility machine (publicize-only, flagged
+		// path; publicized rows frozen). target_id has no FK (the target
+		// is polymorphic — the deferred constraint trigger pins it).
+		cols: []colExp{
+			c("id", u, false, true), c("project_id", u, false, false),
+			c("target_type", txt, false, false), c("target_id", u, false, false),
+			c("title", txt, false, false), c("description", txt, false, true),
+			c("difficulty", txt, false, false), arr("required_capabilities", false, true),
+			c("state", txt, false, true), c("visibility", txt, false, true),
+			c("created_by", u, false, false), c("suggested_by", u, true, false),
+			c("approved_by", u, true, false), c("publicized_by", u, true, false),
+			c("publicized_at", ts, true, false),
+			c("created_at", ts, false, true), c("updated_at", ts, false, true),
+		},
+		pk:     []string{"id"},
+		checks: []string{"target_type = ANY", "difficulty = ANY", "cardinality(required_capabilities) <= 10", "state = ANY", "visibility = ANY"},
+		fks:    []fkExp{fk("approved_by", "users", "RESTRICT"), fk("created_by", "users", "RESTRICT"), fk("project_id", "projects", "RESTRICT"), fk("publicized_by", "users", "RESTRICT"), fk("suggested_by", "users", "RESTRICT")},
+	},
 	"validation_results": {
 		cols:   []colExp{c("id", u, false, true), c("project_id", u, false, false), c("state_id", u, false, false), c("gate", txt, false, false), c("status", txt, false, false), c("result_json", jb, false, false), c("created_at", ts, false, true)},
 		pk:     []string{"id"},
@@ -678,6 +700,10 @@ var explicitIndexes = map[string][]string{
 	// UNIQUE(organization_id, slug) constraint, so their slug uniqueness is
 	// a partial unique index instead.
 	"projects_personal_slug_idx": {"organization_id IS NULL", "UNIQUE"},
+	// T0803: one active (suggested/open) opportunity per target — the key
+	// the creation insert conflicts on (migration 00062); closed rows stay
+	// as history.
+	"contribution_opportunities_target_active_idx": {"target_type", "target_id", "WHERE"},
 	// T0110: Activity page scan paths (newest-first, keyset on
 	// (occurred_at, id)) per scope and per actor.
 	"audit_log_project_occurred_idx":      {"project_id", "occurred_at"},
@@ -903,6 +929,7 @@ func TestUpgradePath(t *testing.T) {
 		"project_schema_profiles",
 		"git_branch_semantic_states",
 		"project_template_instantiations",
+		"contribution_opportunities",
 	}
 	for _, name := range present {
 		if _, ok := intermediate.Tables[name]; !ok {
