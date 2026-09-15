@@ -55,6 +55,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/provenancehttp"
 	"github.com/lichman0405/post/cmd/api/pullrequestshttp"
 	"github.com/lichman0405/post/cmd/api/releasehttp"
+	"github.com/lichman0405/post/cmd/api/reviewhttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/cmd/api/schemaprofileshttp"
 	"github.com/lichman0405/post/cmd/api/templateshttp"
@@ -69,6 +70,7 @@ import (
 	"github.com/lichman0405/post/internal/application/pullrequests"
 	"github.com/lichman0405/post/internal/application/releases"
 	"github.com/lichman0405/post/internal/application/resolutions"
+	"github.com/lichman0405/post/internal/application/reviews"
 	"github.com/lichman0405/post/internal/application/rsg"
 	"github.com/lichman0405/post/internal/application/schemaprofiles"
 	"github.com/lichman0405/post/internal/application/states"
@@ -503,6 +505,18 @@ func run(args []string) int {
 		Projects: persistence.NewProjectStore(pool),
 	})
 	policyAPI.Register(v1)
+	// PR reviews (T0404): per-dimension scientific/integrity review
+	// submissions. Authorization runs the submit_scientific_review matrix
+	// row over the projects membership gate; the reviewer-responsibility
+	// hook stays nil until T0604 lands the resolver, so the conditional
+	// verdict fails closed in production.
+	reviewSvc := reviews.NewService(reviews.Deps{
+		Repo:     persistence.NewReviewStore(pool),
+		Projects: projectAPI.Service(),
+		Authz:    authz.NewMatrixEngine(),
+	})
+	reviewAPI := reviewhttp.New(reviewhttp.Deps{Service: reviewSvc})
+	reviewAPI.Register(v1)
 	// Immutable releases (T0606): the release command composes the T0605
 	// manifest builder with its own authorization (ActionCreateRelease),
 	// the policy in force (pinned by id), the server-side release gate

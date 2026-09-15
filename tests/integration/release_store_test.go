@@ -44,6 +44,10 @@ type releaseStoreFixture struct {
 	pool  *pgxpool.Pool
 	store *persistence.ReleaseStore
 	alice domain.User
+	// bob is the second reviewer: migration 00061's unique key allows
+	// one decision per reviewer per kind per head, so a second
+	// same-kind decision needs a second reviewer.
+	bob domain.User
 	// project is the seeded project the PRs belong to.
 	project domain.Project
 	// mainBranch is the project's main branch id.
@@ -66,6 +70,11 @@ func newReleaseStoreFixture(t *testing.T, ctx context.Context) *releaseStoreFixt
 		ctx, "release-alice@example.com", "hash", "release-alice", "Alice")
 	if err != nil {
 		t.Fatalf("seed alice: %v", err)
+	}
+	bob, err := persistence.NewCredentialStore(pool).CreateWithPassword(
+		ctx, "release-bob@example.com", "hash", "release-bob", "Bob")
+	if err != nil {
+		t.Fatalf("seed bob: %v", err)
 	}
 	orgStore := persistence.NewOrgStore(pool)
 	org, _, err := orgStore.CreateOrganization(ctx, domain.Organization{
@@ -146,6 +155,7 @@ func newReleaseStoreFixture(t *testing.T, ctx context.Context) *releaseStoreFixt
 		pool:           pool,
 		store:          persistence.NewReleaseStore(pool),
 		alice:          alice,
+		bob:            bob,
 		project:        project,
 		mainBranch:     mainBranch.ID,
 		genesis:        genesis,
@@ -177,16 +187,20 @@ func (f *releaseStoreFixture) createPR(t *testing.T, ctx context.Context, number
 	return pgUUIDTextTest(row.ID)
 }
 
-// addReview seeds one review row on a PR.
-func (f *releaseStoreFixture) addReview(t *testing.T, ctx context.Context, prID, kind, decision string) {
+// addReview seeds one review row on a PR. reviewedState is the head the
+// review evaluates (migration 00061: reviews pin reviewed_state_id to
+// the PR's proposed head; the fixture passes it explicitly).
+func (f *releaseStoreFixture) addReview(t *testing.T, ctx context.Context, prID, reviewerID, reviewedState, kind, decision string) {
 	t.Helper()
 	q := sqlc.New(f.pool)
 	if _, err := q.CreateReview(ctx, sqlc.CreateReviewParams{
-		PullRequestID: parseUUIDOrDie(prID),
-		ReviewerID:    parseUUIDOrDie(f.alice.ID),
-		ReviewKind:    kind,
-		Decision:      decision,
-		Body:          "",
+		PullRequestID:   parseUUIDOrDie(prID),
+		ReviewerID:      parseUUIDOrDie(reviewerID),
+		ReviewKind:      kind,
+		Decision:        decision,
+		ReviewedStateID: parseUUIDOrDie(reviewedState),
+		Responsibility:  "",
+		Body:            "",
 	}); err != nil {
 		t.Fatalf("CreateReview: %v", err)
 	}
@@ -202,26 +216,28 @@ func TestListReleaseReviewsLineageAndTargetFilter(t *testing.T) {
 	// PR 1: research-path → main, proposing head — head IS its own
 	// lineage member, so its reviews are the release's review record.
 	pr1 := f.createPR(t, ctx, 1, f.researchBranch, f.mainBranch, f.genesis, f.head)
-	f.addReview(t, ctx, pr1, "scientific", "approved")
-	f.addReview(t, ctx, pr1, "integrity", "approved")
-	f.addReview(t, ctx, pr1, "scientific", "changes_requested")
+	f.addReview(t, ctx, pr1, f.alice.ID, f.head, "scientific", "approved")
+	f.addReview(t, ctx, pr1, f.alice.ID, f.head, "integrity", "approved")
+	// The second scientific decision needs a second reviewer: migration
+	// 00061 refuses two same-kind decisions by one person on one head.
+	f.addReview(t, ctx, pr1, f.bob.ID, f.head, "scientific", "changes_requested")
 
 	// PR 2: research-path → main, proposing researchHead — outside the
 	// released head's lineage (it is a state of a forked branch): its
 	// review must NOT appear.
 	pr2 := f.createPR(t, ctx, 2, f.researchBranch, f.mainBranch, f.head, f.researchHead)
-	f.addReview(t, ctx, pr2, "scientific", "approved")
+	f.addReview(t, ctx, pr2, f.alice.ID, f.researchHead, "scientific", "approved")
 
 	// PR 3: research-path → research-path, proposing head — head is in
 	// the lineage but the PR did not target main: its review must NOT
 	// appear.
 	pr3 := f.createPR(t, ctx, 3, f.researchBranch, f.researchBranch, f.genesis, f.head)
-	f.addReview(t, ctx, pr3, "scientific", "approved")
+	f.addReview(t, ctx, pr3, f.alice.ID, f.head, "scientific", "approved")
 
 	// PR 4: research-path → main, proposing genesis — the root of the
 	// lineage: it appears too, and groups separately.
 	pr4 := f.createPR(t, ctx, 4, f.researchBranch, f.mainBranch, f.genesis, f.genesis)
-	f.addReview(t, ctx, pr4, "integrity", "commented")
+	f.addReview(t, ctx, pr4, f.alice.ID, f.genesis, "integrity", "comment")
 
 	records, err := f.store.ListReleaseReviews(ctx, f.head, f.mainBranch)
 	if err != nil {
