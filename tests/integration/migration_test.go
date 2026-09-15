@@ -275,6 +275,18 @@ var canonicalTables = map[string]tableExp{
 		uniques: [][]string{{"project_id", "state_hash"}},
 		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("branch_id", "branches", "RESTRICT"), fk("parent_state_id", "project_states", "RESTRICT")},
 	},
+	"project_template_instantiations": {
+		// T0214 (00056): the append-only provenance record of a project's
+		// template origin — one row per project (UNIQUE project_id), the
+		// template id/version/name are labels (the catalog is platform code,
+		// not a table), and both FK targets RESTRICT so neither the project
+		// nor the creator can vanish under the record.
+		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("template_id", txt, false, false), c("template_version", txt, false, false), c("template_name", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"project_id"}},
+		checks:  []string{"template_id ~", "template_version ~", "char_length(template_name)"},
+		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
+	},
 	"state_commits": {
 		cols:   []colExp{c("id", u, false, true), c("project_id", u, false, false), c("branch_id", u, false, false), c("base_state_id", u, true, false), c("result_state_id", u, false, false), c("actor_id", u, false, false), c("via", txt, false, false), c("message", txt, false, false), c("operation_summary", jb, false, false), c("created_at", ts, false, true)},
 		pk:     []string{"id"},
@@ -623,21 +635,24 @@ var explicitIndexes = map[string][]string{
 	// T0407: one decision per conflict identity per triple (00054) — the
 	// NULLS NOT DISTINCT unique index the upsert's ON CONFLICT targets, and
 	// the plan read's scan path.
-	"project_schema_profiles_project_idx":  {"project_id", "schema_id", "created_at"},
-	"claims_object_idx":                    {"object_id"},
-	"claims_type_idx":                      {"claim_type"},
-	"claims_subject_idx":                   {"subject_ref", "WHERE"},
-	"claims_scope_conditions_gin":          {"USING gin", "scope_conditions"},
-	"claims_basis_gin":                     {"USING gin", "basis"},
-	"provenance_edges_project_idx":         {"project_id", "relation_type"},
-	"provenance_edges_source_version_idx":  {"source_object_version_id"},
-	"provenance_edges_target_version_idx":  {"target_object_version_id"},
-	"external_reference_snapshots_ref_idx": {"external_reference_id"},
-	"research_events_outbox_event_uniq":    {"outbox_event_id", "UNIQUE", "WHERE"},
-	"outbox_events_pending_idx":            {"published_at IS NULL"},
-	"releases_project_created_idx":         {"project_id", "created_at"},
-	"conflict_resolutions_identity_idx":    {"UNIQUE", "NULLS NOT DISTINCT", "project_id"},
-	"conflict_resolutions_plan_idx":        {"project_id", "base_state_id", "target_kind"},
+	// T0214: template provenance lookups (00056) — which projects were
+	// created from a template version (catalog page / audit questions).
+	"project_schema_profiles_project_idx":          {"project_id", "schema_id", "created_at"},
+	"claims_object_idx":                            {"object_id"},
+	"claims_type_idx":                              {"claim_type"},
+	"claims_subject_idx":                           {"subject_ref", "WHERE"},
+	"claims_scope_conditions_gin":                  {"USING gin", "scope_conditions"},
+	"claims_basis_gin":                             {"USING gin", "basis"},
+	"provenance_edges_project_idx":                 {"project_id", "relation_type"},
+	"provenance_edges_source_version_idx":          {"source_object_version_id"},
+	"provenance_edges_target_version_idx":          {"target_object_version_id"},
+	"external_reference_snapshots_ref_idx":         {"external_reference_id"},
+	"research_events_outbox_event_uniq":            {"outbox_event_id", "UNIQUE", "WHERE"},
+	"outbox_events_pending_idx":                    {"published_at IS NULL"},
+	"releases_project_created_idx":                 {"project_id", "created_at"},
+	"conflict_resolutions_identity_idx":            {"UNIQUE", "NULLS NOT DISTINCT", "project_id"},
+	"conflict_resolutions_plan_idx":                {"project_id", "base_state_id", "target_kind"},
+	"project_template_instantiations_template_idx": {"template_id", "template_version"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
@@ -802,6 +817,7 @@ func TestUpgradePath(t *testing.T) {
 		"profiles", "git_repository_provisions", "git_branch_refs",
 		"project_schema_profiles",
 		"git_branch_semantic_states",
+		"project_template_instantiations",
 	}
 	for _, name := range present {
 		if _, ok := intermediate.Tables[name]; !ok {

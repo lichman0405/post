@@ -57,6 +57,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/releasehttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/cmd/api/schemaprofileshttp"
+	"github.com/lichman0405/post/cmd/api/templateshttp"
 	"github.com/lichman0405/post/cmd/api/validationhttp"
 	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
@@ -70,6 +71,7 @@ import (
 	"github.com/lichman0405/post/internal/application/rsg"
 	"github.com/lichman0405/post/internal/application/schemaprofiles"
 	"github.com/lichman0405/post/internal/application/states"
+	"github.com/lichman0405/post/internal/application/templates"
 	appvalidation "github.com/lichman0405/post/internal/application/validation"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/config"
@@ -531,6 +533,27 @@ func run(args []string) int {
 		Projects: projectAPI.Service(),
 	})
 	releaseAPI.Register(v1)
+	// Official project templates (T0214): the catalog and the
+	// create-from-template path. The templates service orchestrates the
+	// SAME owning-service instances the direct routes use (projectAPI /
+	// profileSvc / policyAPI / rsgSvc), so a project created from a
+	// template behaves identically to one assembled by hand — the template
+	// applies its defaults once and never controls the project afterwards.
+	templatesAPI := templateshttp.New(templateshttp.Deps{
+		Service: templates.NewService(templates.Deps{
+			Catalog:       templates.Official(),
+			Store:         persistence.NewTemplateStore(pool),
+			Projects:      projectAPI.Service(),
+			ProjectReader: projectAPI.Service(),
+			Profiles:      profileSvc,
+			Policy:        policyAPI.Service(),
+			MapSeeds:      rsgSvc,
+			// A default that fails reports a stable sentence to the caller
+			// and logs its cause here (docs/45).
+			Logger: logger,
+		}),
+	})
+	templatesAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	srv := &http.Server{

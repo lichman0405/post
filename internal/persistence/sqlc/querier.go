@@ -175,6 +175,10 @@ type Querier interface {
 	GetScientificObjectVersionByID(ctx context.Context, id pgtype.UUID) (ScientificObjectVersion, error)
 	GetScientificObjectVersionByNo(ctx context.Context, arg GetScientificObjectVersionByNoParams) (ScientificObjectVersion, error)
 	GetStateCommitByID(ctx context.Context, id pgtype.UUID) (StateCommit, error)
+	// The project's template origin — at most one row exists (UNIQUE
+	// (project_id)); the query answers no-row when the project was created
+	// without a template.
+	GetTemplateInstantiationByProject(ctx context.Context, projectID pgtype.UUID) (ProjectTemplateInstantiation, error)
 	GetUserByEmail(ctx context.Context, email *string) (User, error)
 	GetUserByHandle(ctx context.Context, handle string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
@@ -182,6 +186,12 @@ type Querier interface {
 	// The table is append-only (the 00038 trigger): these queries INSERT and
 	// SELECT only — a profile change is a new version row, never an UPDATE.
 	InsertSchemaProfile(ctx context.Context, arg InsertSchemaProfileParams) (ProjectSchemaProfile, error)
+	// Project template instantiations (canonical table
+	// project_template_instantiations; 00056). The table is append-only (the
+	// 00056 trigger): the provenance fact "project X was created from template
+	// Y version Z" never changes and never disappears. These queries INSERT
+	// and SELECT only.
+	InsertTemplateInstantiation(ctx context.Context, arg InsertTemplateInstantiationParams) (ProjectTemplateInstantiation, error)
 	// The organization's current policy (the project lower bound).
 	LatestPolicyVersionByOrg(ctx context.Context, organizationID pgtype.UUID) (PolicyVersion, error)
 	LatestPolicyVersionByProject(ctx context.Context, projectID pgtype.UUID) (PolicyVersion, error)

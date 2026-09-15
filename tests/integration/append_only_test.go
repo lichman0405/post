@@ -45,10 +45,10 @@ const appendOnlyTaskID = "T0013"
 // append-only BY DESIGN (docs/21 §4, docs/46, ADR-007/008/021, Master
 // Acceptance Gate A). Migration 00014/00015 guards the original set; tables
 // added later create their own guard pair in their own migration (00038 adds
-// project_schema_profiles, T0213). Migration 00053 joins release_creations to
-// the set (the T0606 Idempotency-Key ledger — a replay is a read, never a
-// rewrite). The same list drives the catalog assertion and the per-table
-// rejection loop.
+// project_schema_profiles, T0213; 00056 adds project_template_instantiations,
+// T0214). Migration 00053 joins release_creations to the set (the T0606
+// Idempotency-Key ledger — a replay is a read, never a rewrite). The same list
+// drives the catalog assertion and the per-table rejection loop.
 var appendOnlyTables = []string{
 	"scientific_object_versions",
 	"relation_versions",
@@ -67,6 +67,7 @@ var appendOnlyTables = []string{
 	"git_push_ingestions",
 	"git_push_changes",
 	"project_schema_profiles",
+	"project_template_instantiations",
 }
 
 // targetedGuardTriggers are the NON-append-only row guards added after
@@ -626,6 +627,27 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 			},
 			del: func(id string) error {
 				_, err := pool.Exec(ctx, `DELETE FROM project_schema_profiles WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			// T0214 (00056): the template provenance fact is immutable by
+			// design — "project X was created from template Y vZ" never
+			// changes and never disappears, even if the catalog retires
+			// that version.
+			table: "project_template_instantiations",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO project_template_instantiations
+					(project_id, template_id, template_version, template_name, created_by)
+					VALUES ($1, 'materials-discovery', 'v1', 'Materials Discovery', $2)
+					RETURNING id`, p1, u1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE project_template_instantiations SET template_version = 'rewritten' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM project_template_instantiations WHERE id = $1`, id)
 				return err
 			},
 		},

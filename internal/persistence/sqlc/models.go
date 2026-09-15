@@ -187,6 +187,16 @@ type ProjectState struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
+type ProjectTemplateInstantiation struct {
+	ID              pgtype.UUID        `json:"id"`
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	TemplateID      string             `json:"template_id"`
+	TemplateVersion string             `json:"template_version"`
+	TemplateName    string             `json:"template_name"`
+	CreatedBy       pgtype.UUID        `json:"created_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
 type PullRequest struct {
 	ID              pgtype.UUID        `json:"id"`
 	ProjectID       pgtype.UUID        `json:"project_id"`
