@@ -1668,9 +1668,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-15T14:12:50Z
+生成时间：2026-09-15T15:57:24Z
 
-状态分布：todo 64 · ready 0 · running 0 · worker_failed 0 · verification 0 · rejected 1 · blocked 0 · accepted 0 · merged 68（合计 133/133 个任务）
+状态分布：todo 64 · ready 0 · running 0 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 69（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1751,7 +1751,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0607 | Activity/Audit Timeline 增强 | P6 | todo |  |  |  |  |
 | T0608 | Release/Abort/Policy E2E | P6 | todo |  |  |  |  |
 | T0609 | Project Milestone 基础 | P6 | merged | 2026-09-15T13:30:51Z |  | 2026-09-15T14:00:41Z | 2026-09-15T14:12:50Z |
-| T0701 | Research Asset Core/PID | P7 | rejected | 2026-09-15T11:32:15Z |  |  |  |
+| T0701 | Research Asset Core/PID | P7 | merged | 2026-09-15T15:21:35Z |  | 2026-09-15T15:51:33Z | 2026-09-15T15:57:18Z |
 | T0702 | 四类 Asset Manifest validator | P7 | todo |  |  |  |  |
 | T0703 | Rights Model | P7 | todo |  |  |  |  |
 | T0704 | Publication Impact Preview | P7 | todo |  |  |  |  |

@@ -4481,10 +4481,12 @@
       ]
     },
     "T0701": {
-      "status": "rejected",
-      "started_at": "2026-09-15T11:32:15Z",
-      "worker_run_id": "run-4e0eab29f2d70f70",
-      "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/stash *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
+      "status": "merged",
+      "started_at": "2026-09-15T15:21:35Z",
+      "worker_run_id": "run-ae3b6ff305783dbc",
+      "accepted_by_supervisor_at": "2026-09-15T15:51:33Z",
+      "merged_at": "2026-09-15T15:57:18Z",
+      "rejection_reason": "# 【返工（第四轮）——只改一处假话，其余全部收货】\n\n**先把\"不要你做什么\"说在前面**：这一轮**只有一件事**要改，就是下面第一节那处\n\"断言别的文件说了什么、而那个文件没说\"的话。\n\n**代码、迁移、测试、以及你那张清单，我全部收货，一个字都不要动。** 具体说：\n\n- `00064` 迁移、`internal/assets` 全部代码、`internal/persistence/sqlc/**`：**收货**；\n- 你那张 35 行覆盖清单：**收货**。我按承诺把它标\"红\"的行**自己重跑了十八条**\n  （pid 长度、字母表两层、只切上界 / 只切下界 / 只切长度、唯一索引、非空 CHECK、无 NULL CHECK、\n  忘了重新武装触发器、两个 `Valid` 改成恒真、URL 前缀、解析器去掉校验、uuid 校验、回填前缀、\n  回填不解守卫、类型白名单加一项），**十八条全红，且红的行号和你清单里写的逐字对上**。\n  跑完工作区 17 个文件指纹没变。这张清单是可信的，格式不要改。\n- 你主动交代的那三件事（自己的样例是错的被自己的断言抓住、新 CHECK 让套件变红后**去修清单\n  而不是删 CHECK**、两行标红的机制与字面不一致照实写）：**这正是我要的态度**，不改。\n\n所以：**不要重新设计，不要重构，不要顺手改别的地方，不要动测试。**\n\n---\n\n## 一、唯一要改的：一句\"规格已经这么定了\"，规格里没有\n\n`internal/assets/url.go` 里**三处**断言 `specs/api/openapi.yaml` 已经把 assetId 定成 pid：\n\n- 第 17–18 行：`(specs/api/openapi.yaml: /assets/{assetId}, assetId IS the pid)`\n- 第 44 行：`(the openapi /assets/{assetId} endpoint; assetId is the pid)`\n- 第 54–55 行：`(the assetId path parameter is a pid, never a slug, ...)`\n\n我在工作区里跑了：\n\n```\n$ grep -c -i 'pid' specs/api/openapi.yaml\n0\n$ grep -n -A4 'assetId' specs/api/openapi.yaml\n273:        - name: assetId\n274-          in: path\n275-          required: true\n276-          schema: {type: string}\n```\n\n**那个文件里 \"pid\" 出现 0 次**，assetId 被声明成 `schema: {type: string}`——\n无约束、无描述、什么都没说。\n\n`specs/ui/page-inventory.csv:14` 我也查了，写的是 `/assets/{id}`，参数名是 `id`，同样不是 pid。\n\n**这不是\"注释写得不够准确\"，是断言另一个文件说了某句话，而那句话不在。**\n我在这个仓库里追了一整晚的就是这一类：**一句话让人以为某处已经被保证着，\n于是后来的人就不再去看那个地方。** T0705/T0709 要接的正是这个参数——\n如果它们读到\"规格已经把 assetId 定成 pid 了\"，它们就不会去定这件事，\n结果就是公开链接里同时存在两种\"资产身份\"。\n\n## 二、还有一处同样的假话，在 RESULT.json 里\n\n`RESULT.json` 风险第 3 条写着：\n\n> OpenAPI 已把 assetId 建模为 pid（**check-openapi 通过**）\n\n`scripts/validate_openapi.py` 第 179–197 行只检查参数**有没有名字、`in:` 合不合法**，\n它**从不读 schema**，更不可能判断\"这个参数代表哪种身份\"。\n拿一个通过的检查当这句话的证据，和上面是同一个病。\n\n**要做的**：把这句话改成事实——规格今天把该参数声明为**无约束字符串**，\n\"把 assetId 绑定为 pid\"是 **T0705/T0709 的动作，尚未发生**。\n\n## 三、验收条件（可机器判定）\n\n改完给我两条 grep 的**真实输出**（贴在 RESULT.json 里）：\n\n1. `grep -rni 'pid' specs/api/openapi.yaml` —— 必须是**空**。\n   （**你不要去改规格**：`specs/**` 是 Supervisor 的地盘，不在你的范围，我也不会因此放宽要求。）\n2. `grep -rn 'assetId' internal/assets/*.go` —— 每一行的意思都只能是\n   \"**我们这一层**构造/解析的路径形状\"，**不得再出现\"规格已经把它定成 pid\"的意思**。\n\n以及清单要**多一类行**（这是这次漏掉它的原因）：凡是你的注释/文档断言\n\"仓库里**另一个文件**说了什么、保证了什么\"（不管那个文件在不在你范围内），\n都要单列一行，四列改成：\n\n| 断言\"另一个文件说了什么\" | 在哪（file:line） | 那个文件的实际原文（贴 grep 输出） | 对 / 不对 |\n\n**\"不对\"的行，按上面第一、二节改掉。** 这一轮之后我就收了——\n只要这一处改成事实、清单补上这一类行。\n\n## 四、不要做的\n\n- **不要**改 `specs/**` 下的任何文件（改不了，也不该改）。\n- **不要**改迁移 `00064`、不要改任何测试、不要动 `internal/persistence/queries/**`。\n- **不要**顺手\"改进\"别的注释——这个仓库有过连续三轮\"改注释又改出新错误\"的教训，\n  所以这一轮我只要这一处，改完就收。\n- **不要**为了让清单好看而把\"不对\"写成\"对\"。\n\n## 五、记账不返工的（这些我自己记，不是你的活）\n\n- 生成代码里 `PublishResearchAssetVersion` 少新加的必填列 → 已立档 **#225**，且其源文件不在你范围内。\n- `DISABLE/ENABLE TRIGGER` 会把触发器恢复成默认模式而非它原来的模式 → 对 00014 这个守卫而言\n  恢复是精确的，且有变异钉住（删掉 ENABLE 会让两处 P0001 断言变红）。**记录。**\n- `ValidVersionLabel` 只返回 bool、校验的是 trim 过的形式 → 与仓库既有约定\n  （`domain.ValidPolicyVersion` 同样处理）一致。**记录。**\n",
       "history": [
         {
           "from": "todo",
@@ -4519,6 +4521,95 @@
           "at": "2026-09-15T14:03:59Z",
           "run_id": "run-1ab6b2a99f0fcbde",
           "reason": "collect rejected: refs: new ref(s) created during the run: refs/stash *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T14:14:03Z",
+          "run_id": "run-2a8eac81dcfd69f3",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T14:18:38Z",
+          "run_id": "run-14d16fbe44336572",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T14:25:21Z",
+          "run_id": "run-953d23ddad44897e",
+          "reason": "# 【返工 —— 交付内容我认可，问题出在\"证据\"上】\n\n先说清楚，免得你改错地方：**你的实现不需要改。**\n\n我独立核过：pid 的格式与熵源、迁移 `00064`、回填、`internal/assets` 的包结构、\n以及那条被写成验收标准的性质（asset ID 不随 slug/org 变化）——都是真的，而且我是用\n\"把规则弄坏看它红不红\"的办法核的（下面会给你命令）。收检 14/14 通过，独立复核 `approve`。\n\n返工只为**一件事**：你有两条守卫，测试注释**声称**证明了它们，\n但我把守卫**整条删掉**，测试**全绿**。\n\n---\n\n## 一、Go 侧：`ValidPID` 的逐字符规则可以被整条删掉\n\n`internal/assets/pid.go` 里 `ValidPID` 的字符判断（`i l o u` 不在字母表那一段）。\n我把它换成\"只剩长度检查\"，跑整个 `internal/assets` 套件：\n\n```bash\ncd <worktree>\n# 把 ValidPID 的函数体换成:  return len(s) == pidLen\ngo test -overlay=<overlay.json> ./internal/assets/ -count=1\n```\n\n结果：**`ok`**。\n\n为了让你信这个办法本身有效，我跑了两个对照：\n\n| 跑法 | 结果 |\n| --- | --- |\n| 中性对照：外挂文件与原文件**逐字节相同** | 绿 —— 证明外挂本身不改变行为 |\n| 阳性对照：`ValidPID` 改成**恒返回 false** | **红 5 个测试** —— 证明外挂确实生效了 |\n| 变异：`ValidPID` 改成**只剩长度检查** | **绿** |\n\n所以结论是确凿的：**逐字符规则删掉，没有任何测试会红。**\n\n原因在 `internal/assets/pid_test.go` 的 `rejects` 列表：**14 条用例，没有一条是 26 个字符。**\n\n| 用例 | 实际长度 | 注释怎么写的 |\n| --- | --- | --- |\n| `\"0123456789abcdefghjkmnpqrstv\"` | **28** | `// 25 chars` |\n| `\"0123456789abcdefghjkmnpqrstvw\"` | **29** | `// 27 chars` |\n| `\"0123456789abcdefgilkmnpqrst\"` | **27** | `// 'i' is not in the alphabet` |\n| `\"0123456789abcdefghlkmnpqrst\"` | **27** | `// 'l' is not in the alphabet` |\n| `\"0123456789abcdefghjkmnpqorst\"` | **27** | `// 'o' is not in the alphabet` |\n| `\"0123456789abcdefghjkmnpqurst\"` | **27** | `// 'u' is not in the alphabet` |\n| 空格 / `-` / `_` 三条 | 28 / 29 / 29 | （无长度标注） |\n| `\"asset_0123456789abcdefghjkm\"` | **27** | |\n| `\"my-dataset-version-1-2026-09\"` | **27** | |\n\n它们**全部**在 `len(s) != pidLen` 那一行就被挡掉了，`switch` 一次都没进过。\n注释里那两个长度还标反了（写 25 的实际 28，写 27 的实际 29）。\n\n## 二、数据库侧：迁移 `00064` 的 CHECK 字符类同样可以被删掉\n\n把 `CHECK (pid ~ '^[0-9a-hjkmnp-tv-z]{26}$')` 换成 `CHECK (length(pid) = 26)`，\n跑 `TestAssetCore` 那组：**`ok`**（这条变异之前也验过外挂有效：把 CHECK 换成恒真时，\n`:143` 是会红的）。\n\n原因同上：`tests/integration/asset_core_test.go:141` 的三个坏值\n`\"my-dataset-slug\"`(15) / `\"ABCDEFGHIJKLMNOPQRSTUVWXYZ01\"`(28) / `\"short\"`(5)\n**也都不是 26 个字符**，同样只碰到长度那条路。\n\n---\n\n## 三、要你做的（就这些）\n\n### 1. 把那 14 + 3 条拒绝用例改成\"长度正好 26、但含有不该出现的字符\"\n\n让**字符规则**成为唯一能拒绝它的理由。下面这些是我算准的（都正好 26 个字符，\n且都含有至少一个非法字符），你可以直接用或自己造等价的：\n\n| 想证明的规则 | 可用的 26 字符串 |\n| --- | --- |\n| `i` 不在字母表 | `0123456789abcdefghjkmnpqri` |\n| `l` 不在字母表 | `0123456789abcdefghjkmnpqrl` |\n| `o` 不在字母表 | `0123456789abcdefghjkmnpqro` |\n| `u` 不在字母表 | `0123456789abcdefghjkmnpqru` |\n| 大写不出现 | `0123456789abcdefghjkmnpqrS` |\n| 空格 | `0123456789abcdefghjkmnpqr ` |\n| `-` | `0123456789abcdefghjkmnpqr-` |\n| `_` | `0123456789abcdefghjkmnpqr_` |\n| slug 样的串不是 pid | `my-dataset-version-1-2026-` |\n| 带前缀的串不是 pid | `asset_0123456789abcdefghjk` |\n\n**长度不全的用例保留**（它们证明长度规则），但请把注释里标错的长度改对。\n两个规则各管各的，两条都要有人看着。\n\n### 2. 修 `internal/assets/asset.go` 里两处不准确的说法\n\n- 第 13–14 行：`the three copies are pinned together by the T0701 tests and the schema\n  drift checks`。Go ↔ 数据库那条链确实是钉住的（`TestAssetCoreTypeEnum` 插了全部四种、\n  拒了五个外来值）；但**没有任何东西**把 Go 的类型列表和 JSON schema 的 `enum` 互相对照\n  （`check-schema-drift` 只比 `specs/schemas` 的三份副本）。今天是\"看着一致\"，不是\"被钉住\"。\n  按事实改写，或补上真正的对照——你选，但别留下不成立的说法。\n- 第 73 行：`MaxVersionLen` 注释说它 `mirrors the release version bound\n  (domain.ValidPolicyVersion)`。`ValidPolicyVersion` 是**策略版本**的校验器\n  （`internal/domain/policy.go:474`），不是任何发布版本的上界。\n\n### 3. 修迁移 `00064` 第 17–18 行的注释\n\n它说 `new product rows carry an application-generated pid and the DEFAULT is the\nbackfill, never the product path`。本提交里**没有这条 product path**：唯一写\n`research_assets` 的 `CreateResearchAsset` 只传四列、走 DEFAULT（uuid 十六进制那支），\n`assets.NewPID()` 目前**没有生产者**。\n\n**只改注释，说成事实**。\"补上真正的创建路径\"不是你的活（见下面第四条）。\n\n### 4. `RESULT.json` 要自洽\n\n- 第 4 条风险说 `check-sqlc-drift.sh` 的 verify 模式**不会复位**工作树——现在会了：\n  `tests/integration/check-sqlc-drift.sh:47` 有 `trap 'restore_generated; ...' EXIT`。\n  那条风险对这个基线已经过时，别再照抄。\n- 生成物的数：仓库实际声明的是**三个**（`specs/SPEC_VERSION.json`、\n  `specs/database/postgres.sql`、`internal/persistence/sqlc/`），不是四个。\n\n---\n\n## 四、不要做的\n\n- **不要改 pid 的格式、字母表、熵源、`NewPID` 的实现，也不要改迁移的任何行为。**\n- **不要**为了让门变绿而放宽断言、删用例、放超时。拒绝用例必须变成\n  \"**因为字符不对**才被拒\"，不是\"换个理由被拒\"。\n- **不要动 `internal/persistence/queries/**`**（不在你的 `allowed_scope` 里）。\n  `PublishResearchAssetVersion` 少了 `origin_refs` 这件事我另行记账——**不是你的活**，\n  不改它不算你的问题。\n- 不要动 `tasks/**`。\n\n---\n\n## 五、我改完怎么验\n\n我会把上面那两个变异**原样重跑**：\n\n1. `ValidPID` 只剩长度检查 → **必须红**；\n2. 迁移 CHECK 的字符类换成只查长度 → **必须红**。\n\n这两条能红，就说明这两条规则从此**有人看着**了。红了我就收。\n\n（这两条变异我用 `go test -overlay` 做，**不碰你的工作区**——上一轮我做完之后\n工作区仍是那 17 个路径，逐条没变。）\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T14:25:24Z",
+          "run_id": "run-8f006e6942136a04",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T14:34:39Z",
+          "run_id": "run-fb5f170fd5065792",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T14:43:20Z",
+          "run_id": "run-6ee2d535881f7821",
+          "reason": "# 【返工（第二轮）—— 同一个毛病在别处复发，外加两处\"注释比实现强\"】\n\n先说你上一轮做对的：pid 那两处修得**比我要求的好**——你把\"每个坏例子只能被它声称的那条规则拒绝\"\n变成了测试自己的断言，我原样重跑两个变异，都红了；独立复核也自己复现了一遍。这是对的。\n\n问题是：**那条规矩你只应用在了 pid 上。** 同一个交付里还有别的地方犯同样的毛病，\n另外还有两处\"注释声称的保证，实现给不出来\"。这三处我都**自己动手验证过**（不是转抄复核的话）。\n\n---\n\n## 一、`MaxVersionLen` 的上界，没有任何测试看着它\n\n`internal/assets/asset.go` 里 `ValidVersionLabel` 的长度上界。我把\n`|| len(v) > MaxVersionLen` **整条删掉**，跑 `TestValidVersionLabel`：\n\n**`ok`** —— 绿。\n\n这和上一轮 pid 那件事是**一模一样**的毛病：那个被注释标成\n`// 65 chars: over the bound` 的用例是 `\"v\" + string(make([]byte, 64))`，\n它是 **64 个 NUL 字节**，被**字符集规则**挡掉的，长度上界那一行从来没执行过。\n其余拒绝用例同样全被字符集挡掉。\n\n一个具名的常量、一段写明的契约，**删掉它没有任何测试会响**。\n\n## 二、`.` 和 `..` 能当版本标签，而注释说它们不能\n\n`internal/assets/asset.go:93` 的注释写着：\n\n> The character set is **exactly what makes the label safe as a bare path segment**\n> in the persistent version URL (`/assets/{pid}/{version}`) without encoding\n\n实测（我挂了个探针进去跑的）：\n\n```\nValidVersionLabel(\".\")    = true\nValidVersionLabel(\"..\")   = true\nValidVersionLabel(\"...\")  = true\nValidVersionLabel(\"a..b\") = true\nAssetVersionURL(pid, \"..\") = \"/assets/0123456789abcdefghjkmnpqrs/..\"\n```\n\n按 RFC 3986 §5.2.4，路径里的 `.` 与 `..` 整段是要被**规范化掉**的：\n`/assets/{pid}/..` 会变成 `/assets/`。而版本标签是**永不可变的**——\n一旦用一个点段标签发布了版本，那条永久链接就**永远坏了**。\n\n**我的判断（L1，你照做）**：拒绝**整段就是 `.` 或 `..`** 的标签。\n注意只需要拒绝\"整段\"这两种：`a..b` 是合法的路径段，不必动。\n然后把注释改成事实。\n\n## 三、`origin_refs` 的数据库兜底比规格松，而注释说\"没有来源表达不出来\"\n\n迁移 `00064` 第 76 行附近写着：\n\n> The NOT NULL + non-empty CHECK make **\"no origin\" unrepresentable**\n\n我在真库上把探针挂进去试了（**两条对照先证明探针走到了守卫**：空数组被 23514 挡、\nNULL 数组被 23502 挡）：\n\n| 写进去的内容 | 结果 |\n| --- | --- |\n| `ARRAY[NULL]` | **被接受** |\n| `ARRAY['project:<uuid>', NULL]` | **被接受** |\n| `ARRAY['bogus']` | **被接受** |\n| `ARRAY['nonsense:<uuid>']` | **被接受** |\n| `ARRAY['']` | **被接受** |\n| 空数组（对照） | 拒绝 23514 ✔ |\n| NULL 数组（对照） | 拒绝 23502 ✔ |\n\n也就是说：**\"没有来源\"只要打扮成一个 NULL 元素，照样存得进去。**\n\n规格 `specs/schemas/research-asset-version.schema.json` 写的是\n`{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1}` ——\n一个 NULL 元素**不是字符串**，所以数据库这一层确实**比规格松一格**。\n\n**要做的**：加一条 CHECK 补上这一格，例如\n`CHECK (array_position(origin_refs, NULL) IS NULL)`。\n\n另外把注释里 \"canonical kind:value provenance pins\" 的措辞改准：\n存储层保证的是**非空、且没有 NULL 元素**；`kind:value` 的形状是\n`internal/assets.OriginRef` 那一层的事，规格并没有要求数据库管。\n（`bogus` / 认不出的种类能存进去，这是**符合规格**的，不用改——只需要别在注释里\n把它说成是数据库保证。）\n\n---\n\n## 四、两条小的\n\n- `internal/assets/url_test.go:37` 的 `***`\n  是**同义反复**：它循环 slug，却用**同一个 pid** 调 `AssetURL` 两次再比较两次结果。\n  任何\"输入相同就输出相同\"的实现都不可能让它红。要么让它比\"某个状态变化前后的两个 URL\"，\n  要么删掉它（真正的钉子是同名的存储层测试）。\n- `pid_test.go` 里那个合法样例 `0123456789abchjkmpqrtvwxyz`，注释说它覆盖了字母表\n  每个区间的两端，实际少了 `m-n` 的 `n`。**小事，但既然你自己立了\"注释要说事实\"的规矩，\n  就一起说准。**\n\n---\n\n## 五、我要的交付方式（这一轮的重点）\n\n不要再一条一条改了。**给我一张清单**，把你这套交付里**每一处\"注释/测试声称某条规则被保证\"**\n的地方都列出来，每行四列：\n\n| 声称保证的规则 | 在哪（file:line） | 我拿什么变异去弄坏它 | 弄坏后测试红不红 |\n| --- | --- | --- | --- |\n\n**方法就是你上一轮对 pid 用的那个**（`go test -overlay` 外挂，**不碰工作区**）：\n先把规则弄坏，看测试红不红。红的，说明这条规则有人看着；不红的，就是这次的返工项。\n\n清单里至少要覆盖：pid 的长度、pid 的字母表、资产类型的封闭集合、`Visibility` 的取值、\n版本标签的长度、版本标签的字符集、版本标签的点段、`origin_refs` 的非空、\n`origin_refs` 的无 NULL、`OriginRef` 的形状、URL 构造器。\n**凡是你列进\"红\"的，我都会自己重跑一遍那个变异。**\n\n## 六、不要做的\n\n- 不要改 pid 的格式/字母表/熵源，不要改迁移的既有行为（除了第三条那条 CHECK）。\n- 不要放宽任何断言、不要删测试、不要放超时。\n- **不要动 `internal/persistence/queries/**`**（不在你范围内）—— `PublishResearchAssetVersion`\n  少了 `origin_refs` 那件事我已立档 **#225**，**不是你的活，不算你的问题**。\n- 不要动 `tasks/**`。\n- 不要为了让清单好看而把\"不红\"写成\"红\"——**不红就照实写**，我要的是真实覆盖情况。\n\n## 七、边界\n\n生产代码除了上面第二、三条那两处，**我认可，不要重构**。这一轮之后我就收了——\n只要清单是诚实的、且上面三处修好了。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T14:43:21Z",
+          "run_id": "run-1968afe04db1fbfe",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T15:05:48Z",
+          "run_id": "run-2c93dddfa1c4a6c5",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T15:21:28Z",
+          "run_id": "run-1c20042aa6c09c56",
+          "reason": "# 【返工（第四轮）——只改一处假话，其余全部收货】\n\n**先把\"不要你做什么\"说在前面**：这一轮**只有一件事**要改，就是下面第一节那处\n\"断言别的文件说了什么、而那个文件没说\"的话。\n\n**代码、迁移、测试、以及你那张清单，我全部收货，一个字都不要动。** 具体说：\n\n- `00064` 迁移、`internal/assets` 全部代码、`internal/persistence/sqlc/**`：**收货**；\n- 你那张 35 行覆盖清单：**收货**。我按承诺把它标\"红\"的行**自己重跑了十八条**\n  （pid 长度、字母表两层、只切上界 / 只切下界 / 只切长度、唯一索引、非空 CHECK、无 NULL CHECK、\n  忘了重新武装触发器、两个 `Valid` 改成恒真、URL 前缀、解析器去掉校验、uuid 校验、回填前缀、\n  回填不解守卫、类型白名单加一项），**十八条全红，且红的行号和你清单里写的逐字对上**。\n  跑完工作区 17 个文件指纹没变。这张清单是可信的，格式不要改。\n- 你主动交代的那三件事（自己的样例是错的被自己的断言抓住、新 CHECK 让套件变红后**去修清单\n  而不是删 CHECK**、两行标红的机制与字面不一致照实写）：**这正是我要的态度**，不改。\n\n所以：**不要重新设计，不要重构，不要顺手改别的地方，不要动测试。**\n\n---\n\n## 一、唯一要改的：一句\"规格已经这么定了\"，规格里没有\n\n`internal/assets/url.go` 里**三处**断言 `specs/api/openapi.yaml` 已经把 assetId 定成 pid：\n\n- 第 17–18 行：`(specs/api/openapi.yaml: /assets/{assetId}, assetId IS the pid)`\n- 第 44 行：`(the openapi /assets/{assetId} endpoint; assetId is the pid)`\n- 第 54–55 行：`(the assetId path parameter is a pid, never a slug, ...)`\n\n我在工作区里跑了：\n\n```\n$ grep -c -i 'pid' specs/api/openapi.yaml\n0\n$ grep -n -A4 'assetId' specs/api/openapi.yaml\n273:        - name: assetId\n274-          in: path\n275-          required: true\n276-          schema: {type: string}\n```\n\n**那个文件里 \"pid\" 出现 0 次**，assetId 被声明成 `schema: {type: string}`——\n无约束、无描述、什么都没说。\n\n`specs/ui/page-inventory.csv:14` 我也查了，写的是 `/assets/{id}`，参数名是 `id`，同样不是 pid。\n\n**这不是\"注释写得不够准确\"，是断言另一个文件说了某句话，而那句话不在。**\n我在这个仓库里追了一整晚的就是这一类：**一句话让人以为某处已经被保证着，\n于是后来的人就不再去看那个地方。** T0705/T0709 要接的正是这个参数——\n如果它们读到\"规格已经把 assetId 定成 pid 了\"，它们就不会去定这件事，\n结果就是公开链接里同时存在两种\"资产身份\"。\n\n## 二、还有一处同样的假话，在 RESULT.json 里\n\n`RESULT.json` 风险第 3 条写着：\n\n> OpenAPI 已把 assetId 建模为 pid（**check-openapi 通过**）\n\n`scripts/validate_openapi.py` 第 179–197 行只检查参数**有没有名字、`in:` 合不合法**，\n它**从不读 schema**，更不可能判断\"这个参数代表哪种身份\"。\n拿一个通过的检查当这句话的证据，和上面是同一个病。\n\n**要做的**：把这句话改成事实——规格今天把该参数声明为**无约束字符串**，\n\"把 assetId 绑定为 pid\"是 **T0705/T0709 的动作，尚未发生**。\n\n## 三、验收条件（可机器判定）\n\n改完给我两条 grep 的**真实输出**（贴在 RESULT.json 里）：\n\n1. `grep -rni 'pid' specs/api/openapi.yaml` —— 必须是**空**。\n   （**你不要去改规格**：`specs/**` 是 Supervisor 的地盘，不在你的范围，我也不会因此放宽要求。）\n2. `grep -rn 'assetId' internal/assets/*.go` —— 每一行的意思都只能是\n   \"**我们这一层**构造/解析的路径形状\"，**不得再出现\"规格已经把它定成 pid\"的意思**。\n\n以及清单要**多一类行**（这是这次漏掉它的原因）：凡是你的注释/文档断言\n\"仓库里**另一个文件**说了什么、保证了什么\"（不管那个文件在不在你范围内），\n都要单列一行，四列改成：\n\n| 断言\"另一个文件说了什么\" | 在哪（file:line） | 那个文件的实际原文（贴 grep 输出） | 对 / 不对 |\n\n**\"不对\"的行，按上面第一、二节改掉。** 这一轮之后我就收了——\n只要这一处改成事实、清单补上这一类行。\n\n## 四、不要做的\n\n- **不要**改 `specs/**` 下的任何文件（改不了，也不该改）。\n- **不要**改迁移 `00064`、不要改任何测试、不要动 `internal/persistence/queries/**`。\n- **不要**顺手\"改进\"别的注释——这个仓库有过连续三轮\"改注释又改出新错误\"的教训，\n  所以这一轮我只要这一处，改完就收。\n- **不要**为了让清单好看而把\"不对\"写成\"对\"。\n\n## 五、记账不返工的（这些我自己记，不是你的活）\n\n- 生成代码里 `PublishResearchAssetVersion` 少新加的必填列 → 已立档 **#225**，且其源文件不在你范围内。\n- `DISABLE/ENABLE TRIGGER` 会把触发器恢复成默认模式而非它原来的模式 → 对 00014 这个守卫而言\n  恢复是精确的，且有变异钉住（删掉 ENABLE 会让两处 P0001 断言变红）。**记录。**\n- `ValidVersionLabel` 只返回 bool、校验的是 trim 过的形式 → 与仓库既有约定\n  （`domain.ValidPolicyVersion` 同样处理）一致。**记录。**\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T15:21:35Z",
+          "run_id": "run-ae3b6ff305783dbc",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T15:31:06Z",
+          "run_id": "run-b42faf83536c7292",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-15T15:51:33Z",
+          "run_id": "run-9f8baae27bccb9c5"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-15T15:57:18Z",
+          "run_id": "run-acf1b1c6d75a8a0c"
         }
       ]
     },
