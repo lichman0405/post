@@ -334,9 +334,16 @@ var canonicalTables = map[string]tableExp{
 		pk:   []string{"relation_type"},
 	},
 	"evidence_assertions": {
-		cols:   []colExp{c("id", u, false, true), c("project_id", u, false, false), c("state_id", u, false, false), c("target_object_version_id", u, false, false), c("evidence_object_version_id", u, false, false), c("relation_type", txt, false, false), c("evidence_type", txt, false, false), c("scope", jb, false, true), c("directness", txt, false, true), c("inference_nature", txt, false, true), c("reasoning_note", txt, true, false), c("review_state", txt, false, true), c("created_by", u, false, false), c("created_at", ts, false, true)},
-		pk:     []string{"id"},
-		checks: []string{"relation_type = ANY", "review_state = ANY"},
+		cols: []colExp{c("id", u, false, true), c("project_id", u, false, false), c("state_id", u, false, false), c("target_object_version_id", u, false, false), c("evidence_object_version_id", u, false, false), c("relation_type", txt, false, false), c("evidence_type", txt, false, false), c("scope", jb, false, true), c("directness", txt, false, true), c("inference_nature", txt, false, true), c("reasoning_note", txt, true, false), c("review_state", txt, false, true), c("created_by", u, false, false), c("created_at", ts, false, true)},
+		pk:   []string{"id"},
+		// T0504 (00058): the full evidence-assertion schema enum surface as
+		// CHECKs — evidence_type, directness, inference_nature and the
+		// scope object on top of 00007's relation/review-state enums —
+		// plus the directed-edge rule (the two version pins must differ),
+		// which mirrors domain.EvidenceAssertion.Validate.
+		// Deliberately NO unique on the (target, evidence) pair: supports
+		// and contradicts coexist on the same pair (task acceptance).
+		checks: []string{"relation_type = ANY", "review_state = ANY", "evidence_type = ANY", "directness = ANY", "inference_nature = ANY", "jsonb_typeof(scope) = 'object'", "target_object_version_id <> evidence_object_version_id"},
 		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("state_id", "project_states", "RESTRICT"), fk("target_object_version_id", "scientific_object_versions", "RESTRICT"), fk("evidence_object_version_id", "scientific_object_versions", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
 	},
 	"blobs": {
@@ -674,6 +681,9 @@ var explicitIndexes = map[string][]string{
 	// T0503: finding projection query paths (00057) — by object, by type,
 	// and the reverse lookup from a pinned claim version to the findings
 	// that pin it (the impact analysis input, docs/19 §3).
+	// T0504: evidence assertion query paths (00058) — the target listing
+	// (keyset order) and the reverse lookups of what an evidence version
+	// backs.
 	"project_schema_profiles_project_idx":          {"project_id", "schema_id", "created_at"},
 	"claims_object_idx":                            {"object_id"},
 	"claims_type_idx":                              {"claim_type"},
@@ -693,6 +703,8 @@ var explicitIndexes = map[string][]string{
 	"findings_object_idx":                          {"object_id"},
 	"findings_type_idx":                            {"finding_type"},
 	"finding_claim_versions_claim_idx":             {"claim_version_id"},
+	"evidence_assertions_target_idx":               {"target_object_version_id", "created_at", "id"},
+	"evidence_assertions_evidence_idx":             {"evidence_object_version_id"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
