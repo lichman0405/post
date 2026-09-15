@@ -4787,10 +4787,12 @@
       "merged_at": null
     },
     "T1006": {
-      "status": "verification",
-      "started_at": "2026-09-14T17:51:14Z",
-      "worker_run_id": "run-2d2cf64bc4d16c61",
-      "rejection_reason": "collect rejected: scope: 2 changed path(s) outside allowed_scope [infra/migrations/** specs/database/postgres.sql specs/SPEC_VERSION.json internal/events/** internal/application/** cmd/worker/** go.mod go.sum .env.example cmd/api/** apps/web/** tests/**]: internal/persistence/sqlc/events_audit.sql.go, internal/persistence/sqlc/models.go",
+      "status": "merged",
+      "started_at": "2026-09-15T03:32:24Z",
+      "worker_run_id": "run-474b9424d42ea711",
+      "accepted_by_supervisor_at": "2026-09-15T04:54:21Z",
+      "merged_at": "2026-09-15T05:00:53Z",
+      "rejection_reason": "# T1006（00059）：复核是 approve，但里面有一条 major —— 我核过了，属实，而且它踩在任务书 `retry` 那条要求上\n\n## 一、这一轮为什么来\n\n你这一轮交的东西**本身是干净的**：24 个改动路径全在授权内、collect 全过、复核确认你的\n`diff.txt` 打到干净基线上能逐字节复原你审查过的那棵树、你列的证据它逐条复算过\n（单测 59 个包、集成 `ok 84.380s`、漂移检查干净、快照 `current (46 migrations)`、\n契约校验 12/12 与 7/7），四条要求也都被它认定为满足。\n\n挡住的是**一条 major**。复核者自己把它标成\"必办跟进\"，我去读了代码——**属实**，\n而且它落的正是任务书四条要求里的 `retry` 那一条（\"retry/delivery log\"），\n不是可有可无的加分项。所以这一轮不是\"再来一遍\"，是**改一处真的行为缺陷**，范围很窄。\n\n## 二、主要那件：投递客户端会跟着跳转走，把\"没送到\"记成\"送到了\"\n\n`internal/events/deliver.go:106` 建投递用的 `http.Client` 时**没有设 `CheckRedirect`**。\nGo 的默认行为是**跟着 3xx 走**（最多 10 跳）。\n\n而同一个文件第 32–35 行，你自己写的表是这样的：\n\n```\n//   - other statuses (1xx/3xx, anything outside 2xx/4xx/5xx) retry with\n//     the same backoff but do NOT burn the consecutive-failure streak:\n//     an informational status or a redirect is not evidence the endpoint\n//     is failing\n```\n\n第 259–261 行的判定函数也确实是照这个写的。**但这条对\"带 Location 的 3xx\"根本走不到**：\n客户端先把跳转跟完了，`try()` 拿到的是**最后一跳的响应**。后果是连锁的：\n\n- 对方回 `302 + Location`，跳转目标回 `200` → 这一行被记成 `delivered`、\n  `response_code=200`、`delivered_at` 写上、该端点的连续失败计数**清零**；\n- 而**签过名的正文从来没送到注册的那个 URL**；\n- 跳转目标（另一个主机）还会收到 `X-POST-Signature` / `X-POST-Timestamp` /\n  `X-POST-Event` / `X-POST-Event-Id` / `X-POST-Delivery` 这一组头\n  （这一条是复核者用探针实测的，我没自己复现——但它不影响结论，因为第 1 点已经够了）。\n\n这同时破了你自己在第 40–41 行写的那句 \"the delivery log always names where the request\nactually went\"，也破了 `docs/22_API_DESIGN.md:40` 的 \"at-least-once delivery\"。\n现实里这很常见：`http → https` 配错、路径搬过家，都会回 3xx。\n\n**要做的（两件，不要多做）：**\n\n1. 让投递客户端**不跟跳转**，让 3xx 原样回到你已经写好的判定函数里，走\n   `outcomeRetryNoStreak`。一行的事：\n\n   ```go\n   d.client = &http.Client{\n       Timeout: deliveryTimeout,\n       CheckRedirect: func(*http.Request, []*http.Request) error {\n           return http.ErrUseLastResponse\n       },\n       Transport: &http.Transport{ /* 原样 */ },\n   }\n   ```\n\n   注释按你自己的话写，我不要求照抄；要的是那段话**是真的**。\n\n2. **补回归测试**——这条是硬要求。现在两处覆盖都不够：\n\n   - `internal/events/deliver_test.go:182` 那条用例叫 `\"3xx retry without streak\"`，\n     但它喂进去的是 `statusServer(http.StatusFound)`——**一个不带 Location 的 302**。\n     名字读起来像覆盖了 3xx，实际只覆盖了\"不跳\"的那一种。\n   - `tests/integration/webhook_test.go:834` 的注释是**老实的**\n     （\"answers 302 with no Location (the client returns the response as-is)\"），\n     说明你当时就知道这个边界在哪。知道归知道，**代码里的承诺还没兑现**。\n\n   请**补一条带 Location 的**：接收端回 `3xx + Location`，然后断言\n\n   - 这一行走的是 `outcomeRetryNoStreak`（**不是** `delivered`），行里记的是那个 3xx 码；\n   - 该端点的连续失败计数**没动**、仍然 enabled；\n   - **跳转目标一次都没被访问过**（另起一个接收端，它一旦收到请求就让测试失败）。\n\n   单测和集成测试**至少各补一处**。补完之后，单测里那条用例原来的名字就不虚了。\n\n## 三、顺带一件小的（第二件，也是最后一件）\n\n`cmd/api/webhookshttp/webhooks_handlers.go:311` 的 `stringsCut`，它上面那句理由**两句都不成立**：\n\n```\n// stringsCut splits on the first comma (kept local: the stdlib\n// strings.Cut splits on the first match of the WHOLE separator; the\n// keyset pair needs a literal comma and no general helper exists).\n```\n\n- `strings.Cut(s, \",\")` 就是\"按第一次出现的**整个分隔符**切\"；分隔符是 `,` 的时候，\n  它切的就是那个字面逗号——正是你要的行为。\n- \"no general helper exists\" 也不对：`strings.Cut` 就是那个 helper，而且**这个仓库里\n  已经在用它**（`internal/devorchestrator/worker_env.go:76`、`worker_proc.go:373` 等）。\n\n把 `stringsCut` 删掉，第 269 行改用 `strings.Cut`。**这件到此为止。**\n\n## 四、这一轮不要碰的\n\n复核另外留了九条 minor/nit，我**另外记了跟进**，这一轮一条都不要动：\n\n`DeleteEndpoint` 里\"取消 pending 交期\"与归属检查的先后次序；`RunOnce` 严格串行、没有按端点隔离\n（一个慢端点能拖住一整批）；`GuardedDialContext` 只拨 `ips[0]`（丢了 Happy Eyeballs），\n且没拒 `2002::/16` 与 `64:ff9b::/96`；端点表缺支撑索引；注册表的增删改没有审计留痕；\n`204` 处用了 `WriteJSON` 而不是裸 `WriteHeader`；`internal/events/sign.go:74` 注释里那个\n不存在的 `BadSignature`；迁移里 `status` 的取值集合没有 CHECK；签名材料没含 delivery id。\n\n**返工要窄**：混在一起就说不清哪行改动对应哪条理由了。\n\n## 五、重跑并如实登记（和上一轮同一个形状）\n\n- `bash tests/integration/check-sqlc-drift.sh`\n- `make test-integration`\n- `go test $(go list ./... | grep -v '/tests/integration')`\n- `python3 scripts/gen_schema_snapshot.py --check && python3 scripts/spec_version.py --check`\n\n`tests[]` 只留这一轮真跑过且绿的；故意跑红的整段搬进对应**绿条目**的 `evidence`，\n或者写进 `notes_for_supervisor`。**不要在 `tests[]` 里留 `status: \"failed\"` 的条目**——\ncollect 的 `result-consistency` 是机械判据（`completed` + 任何 `failed`/`not_run` = 自相矛盾），\n它读不出\"这条红是故意的\"，整轮会被**拒收**。证据一个字都别删，只是**换个格子放**。\n\n**不要**为了让检查变绿而删测试、skip、放宽断言、放大 timeout（硬规矩）。\n**不要**动迁移号 `00059` 与文件名；**不要**手工编辑那三样生成物\n（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`internal/persistence/sqlc`）——\n它们是 `infra/migrations/` 里所有迁移的函数，上一轮基线前进时由工具重新生成过了。\n`allowed_scope` 外的文件一律不碰。记命令时把库口令掩码成 `***`。\n\n改完就停。我这边重新 collect → 复核 → G2 → 合并。\n",
       "history": [
         {
           "from": "todo",
@@ -4963,6 +4965,61 @@
           "at": "2026-09-14T18:00:06Z",
           "run_id": "run-96b671204fdb4fb8",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T03:16:46Z",
+          "run_id": "run-3566b2cdae25e111",
+          "reason": "# T1006（00059）：主线往前走了一大截，你的树要搬到主线最新位置上**再验一遍**——这不是你的活儿出了问题\n\n## 一、这一轮为什么来\n\n你上一轮交的东西 **collect 全过了**（24 个改动路径全在授权范围内），复核也过了\n（`approve`，0 阻断、0 重大）。\n挡下的是**接受那道门**：主线在这期间又落进了别的任务，你的改动**叠不上去**了\n——原话是 `specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、\n`tests/integration/migration_test.go` 这三个文件打不上补丁。\n\n说人话：`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`\n这三样是**生成物**——它们的内容是 `infra/migrations/` 里**所有**迁移的函数。你在自己的树上\n加 00059 时生成了一份，主线在别的树上加 00057/00058 时各自生成了一份。两个分支不可能同时\n拿着一份\"正确\"的快照，只有**在对方之上重新生成的**那一份才对。这叫**基线前进**，是机械工序，\n**不是判定你的代码有问题**。\n\n我这边正把你的树**搬到主线最新位置上**（rebaseline）。搬运时那三样生成物**由工具重新生成**，\n你**不要手工编辑**它们。\n\n## 二、这一轮要做的（换了地基，重跑一遍）\n\n1. 在**搬完之后的树**上重跑并如实登记：\n\n   - `bash tests/integration/check-sqlc-drift.sh` —— 你的 00059 改了既有查询读的表，\n     所以 `internal/persistence/sqlc` 会跟着动；这条必须绿。\n   - `make test-integration`\n   - `go test $(go list ./... | grep -v '/tests/integration')`\n   - `python3 scripts/gen_schema_snapshot.py --check && python3 scripts/spec_version.py --check`\n\n   > **这条只认一个方向**：绿 = 干净。**红就是脏**，别去猜\"是不是我看错了\"。\n   > 真发现漂移，用 `bash scripts/gen_sqlc.sh` 正经重新生成，并确认生成物\n   > **出现在你的改动集里**；然后再跑一次，绿了才算数。\n   > （这条检查以前有个毛病：它报红的同时会顺手把生成物按新样子重写好，于是**第二次跑\n   > 就是绿的**——一条真红会自己消失。这个毛病我今天修了，**修好的那版就在你这次拿到的\n   > 新地基里**。所以：这一次你看到红，它**不会**自己变成绿。要么它是真的干净，要么你把\n   > 生成物正经重生成并纳进改动集。**别把\"再跑一次\"当解决办法。**）\n\n2. **如果新地基让它变红，而红的根因是你与主线新代码的咬合**（不是环境、不是历史端口问题）：\n   **停下来报我**，不要顺手去改不属于你这条线的文件；**也不要**为了让检查变绿而删测试、\n   skip、放宽断言、放大 timeout（这条是硬规矩）。\n\n3. **交付记录照上一轮的形状**：`status` 全绿才写 `completed`；`tests[]` 只留这一轮真跑过且绿的；\n   故意跑红的整段搬进对应**绿条目**的 `evidence`，或者写进 `notes_for_supervisor`。\n   **不要在 `tests[]` 里留 `status: \"failed\"` 的条目**——collect 的 `result-consistency` 是机械判据\n   （`completed` + 任何 `failed`/`not_run` = 自相矛盾），它读不出\"这条红是故意的\"，整轮会被**拒收**\n   （T0508、T0701 都这么白跑过）。证据一个字都别删，只是**换个格子放**。\n\n4. **不改**迁移号 `00059` 与文件名；`allowed_scope` 外的文件一律不碰。\n\n5. 记命令时把库口令掩码成 `***`。\n\n## 三、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本对不上、缺迁移）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（它自建一次性库）；**不要**用裸 `go test ./...` 下结论\n  （那条路上几个测试会去连 `127.0.0.1:15432`，是 Makefile 注释里记着的历史端口问题）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2 → 合并。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T03:16:46Z",
+          "run_id": "run-6b12622547e6fad4",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T03:24:13Z",
+          "run_id": "run-8d59dabf54bb678c",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T03:32:24Z",
+          "run_id": "run-98f0491d3cb8a8b6",
+          "reason": "# T1006（00059）：复核是 approve，但里面有一条 major —— 我核过了，属实，而且它踩在任务书 `retry` 那条要求上\n\n## 一、这一轮为什么来\n\n你这一轮交的东西**本身是干净的**：24 个改动路径全在授权内、collect 全过、复核确认你的\n`diff.txt` 打到干净基线上能逐字节复原你审查过的那棵树、你列的证据它逐条复算过\n（单测 59 个包、集成 `ok 84.380s`、漂移检查干净、快照 `current (46 migrations)`、\n契约校验 12/12 与 7/7），四条要求也都被它认定为满足。\n\n挡住的是**一条 major**。复核者自己把它标成\"必办跟进\"，我去读了代码——**属实**，\n而且它落的正是任务书四条要求里的 `retry` 那一条（\"retry/delivery log\"），\n不是可有可无的加分项。所以这一轮不是\"再来一遍\"，是**改一处真的行为缺陷**，范围很窄。\n\n## 二、主要那件：投递客户端会跟着跳转走，把\"没送到\"记成\"送到了\"\n\n`internal/events/deliver.go:106` 建投递用的 `http.Client` 时**没有设 `CheckRedirect`**。\nGo 的默认行为是**跟着 3xx 走**（最多 10 跳）。\n\n而同一个文件第 32–35 行，你自己写的表是这样的：\n\n```\n//   - other statuses (1xx/3xx, anything outside 2xx/4xx/5xx) retry with\n//     the same backoff but do NOT burn the consecutive-failure streak:\n//     an informational status or a redirect is not evidence the endpoint\n//     is failing\n```\n\n第 259–261 行的判定函数也确实是照这个写的。**但这条对\"带 Location 的 3xx\"根本走不到**：\n客户端先把跳转跟完了，`try()` 拿到的是**最后一跳的响应**。后果是连锁的：\n\n- 对方回 `302 + Location`，跳转目标回 `200` → 这一行被记成 `delivered`、\n  `response_code=200`、`delivered_at` 写上、该端点的连续失败计数**清零**；\n- 而**签过名的正文从来没送到注册的那个 URL**；\n- 跳转目标（另一个主机）还会收到 `X-POST-Signature` / `X-POST-Timestamp` /\n  `X-POST-Event` / `X-POST-Event-Id` / `X-POST-Delivery` 这一组头\n  （这一条是复核者用探针实测的，我没自己复现——但它不影响结论，因为第 1 点已经够了）。\n\n这同时破了你自己在第 40–41 行写的那句 \"the delivery log always names where the request\nactually went\"，也破了 `docs/22_API_DESIGN.md:40` 的 \"at-least-once delivery\"。\n现实里这很常见：`http → https` 配错、路径搬过家，都会回 3xx。\n\n**要做的（两件，不要多做）：**\n\n1. 让投递客户端**不跟跳转**，让 3xx 原样回到你已经写好的判定函数里，走\n   `outcomeRetryNoStreak`。一行的事：\n\n   ```go\n   d.client = &http.Client{\n       Timeout: deliveryTimeout,\n       CheckRedirect: func(*http.Request, []*http.Request) error {\n           return http.ErrUseLastResponse\n       },\n       Transport: &http.Transport{ /* 原样 */ },\n   }\n   ```\n\n   注释按你自己的话写，我不要求照抄；要的是那段话**是真的**。\n\n2. **补回归测试**——这条是硬要求。现在两处覆盖都不够：\n\n   - `internal/events/deliver_test.go:182` 那条用例叫 `\"3xx retry without streak\"`，\n     但它喂进去的是 `statusServer(http.StatusFound)`——**一个不带 Location 的 302**。\n     名字读起来像覆盖了 3xx，实际只覆盖了\"不跳\"的那一种。\n   - `tests/integration/webhook_test.go:834` 的注释是**老实的**\n     （\"answers 302 with no Location (the client returns the response as-is)\"），\n     说明你当时就知道这个边界在哪。知道归知道，**代码里的承诺还没兑现**。\n\n   请**补一条带 Location 的**：接收端回 `3xx + Location`，然后断言\n\n   - 这一行走的是 `outcomeRetryNoStreak`（**不是** `delivered`），行里记的是那个 3xx 码；\n   - 该端点的连续失败计数**没动**、仍然 enabled；\n   - **跳转目标一次都没被访问过**（另起一个接收端，它一旦收到请求就让测试失败）。\n\n   单测和集成测试**至少各补一处**。补完之后，单测里那条用例原来的名字就不虚了。\n\n## 三、顺带一件小的（第二件，也是最后一件）\n\n`cmd/api/webhookshttp/webhooks_handlers.go:311` 的 `stringsCut`，它上面那句理由**两句都不成立**：\n\n```\n// stringsCut splits on the first comma (kept local: the stdlib\n// strings.Cut splits on the first match of the WHOLE separator; the\n// keyset pair needs a literal comma and no general helper exists).\n```\n\n- `strings.Cut(s, \",\")` 就是\"按第一次出现的**整个分隔符**切\"；分隔符是 `,` 的时候，\n  它切的就是那个字面逗号——正是你要的行为。\n- \"no general helper exists\" 也不对：`strings.Cut` 就是那个 helper，而且**这个仓库里\n  已经在用它**（`internal/devorchestrator/worker_env.go:76`、`worker_proc.go:373` 等）。\n\n把 `stringsCut` 删掉，第 269 行改用 `strings.Cut`。**这件到此为止。**\n\n## 四、这一轮不要碰的\n\n复核另外留了九条 minor/nit，我**另外记了跟进**，这一轮一条都不要动：\n\n`DeleteEndpoint` 里\"取消 pending 交期\"与归属检查的先后次序；`RunOnce` 严格串行、没有按端点隔离\n（一个慢端点能拖住一整批）；`GuardedDialContext` 只拨 `ips[0]`（丢了 Happy Eyeballs），\n且没拒 `2002::/16` 与 `64:ff9b::/96`；端点表缺支撑索引；注册表的增删改没有审计留痕；\n`204` 处用了 `WriteJSON` 而不是裸 `WriteHeader`；`internal/events/sign.go:74` 注释里那个\n不存在的 `BadSignature`；迁移里 `status` 的取值集合没有 CHECK；签名材料没含 delivery id。\n\n**返工要窄**：混在一起就说不清哪行改动对应哪条理由了。\n\n## 五、重跑并如实登记（和上一轮同一个形状）\n\n- `bash tests/integration/check-sqlc-drift.sh`\n- `make test-integration`\n- `go test $(go list ./... | grep -v '/tests/integration')`\n- `python3 scripts/gen_schema_snapshot.py --check && python3 scripts/spec_version.py --check`\n\n`tests[]` 只留这一轮真跑过且绿的；故意跑红的整段搬进对应**绿条目**的 `evidence`，\n或者写进 `notes_for_supervisor`。**不要在 `tests[]` 里留 `status: \"failed\"` 的条目**——\ncollect 的 `result-consistency` 是机械判据（`completed` + 任何 `failed`/`not_run` = 自相矛盾），\n它读不出\"这条红是故意的\"，整轮会被**拒收**。证据一个字都别删，只是**换个格子放**。\n\n**不要**为了让检查变绿而删测试、skip、放宽断言、放大 timeout（硬规矩）。\n**不要**动迁移号 `00059` 与文件名；**不要**手工编辑那三样生成物\n（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`internal/persistence/sqlc`）——\n它们是 `infra/migrations/` 里所有迁移的函数，上一轮基线前进时由工具重新生成过了。\n`allowed_scope` 外的文件一律不碰。记命令时把库口令掩码成 `***`。\n\n改完就停。我这边重新 collect → 复核 → G2 → 合并。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T03:32:24Z",
+          "run_id": "run-474b9424d42ea711",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T04:38:35Z",
+          "run_id": "run-c32769bfaa62d685",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-15T04:54:21Z",
+          "run_id": "run-131161325124493c"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-15T05:00:53Z",
+          "run_id": "run-5a2b8be766a90f81",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },

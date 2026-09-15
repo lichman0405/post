@@ -1668,9 +1668,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-15T03:07:22Z
+生成时间：2026-09-15T10:33:40Z
 
-状态分布：todo 65 · ready 0 · running 0 · worker_failed 0 · verification 4 · rejected 1 · blocked 0 · accepted 0 · merged 63（合计 133/133 个任务）
+状态分布：todo 65 · ready 0 · running 0 · worker_failed 0 · verification 3 · rejected 1 · blocked 0 · accepted 0 · merged 64（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1787,7 +1787,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1003 | Web Research Inbox | P10 | todo |  |  |  |  |
 | T1004 | RSS/Atom Feeds | P10 | todo |  |  |  |  |
 | T1005 | Email Digest abstraction | P10 | todo |  |  |  |  |
-| T1006 | Signed Webhooks | P10 | verification | 2026-09-14T17:51:14Z |  |  |  |
+| T1006 | Signed Webhooks | P10 | merged | 2026-09-15T03:32:24Z |  | 2026-09-15T04:54:21Z | 2026-09-15T05:00:53Z |
 | T1007 | Dependency Impact Analysis | P10 | todo |  |  |  |  |
 | T1101 | 统一 Primer-style Design System | P11 | todo |  |  |  |  |
 | T1102 | Research Map 高质量交互 | P11 | todo |  |  |  |  |
