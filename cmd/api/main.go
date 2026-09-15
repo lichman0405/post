@@ -43,6 +43,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/lichman0405/post/cmd/api/assetshttp"
 	"github.com/lichman0405/post/cmd/api/audithttp"
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/conflicthttp"
@@ -577,6 +578,22 @@ func run(args []string) int {
 		Projects: projectAPI.Service(),
 	})
 	releaseAPI.Register(v1)
+	// Publication impact preview (T0704): the read-only half of docs/23
+	// §4's highest-risk operation — one route, POST
+	// .../assets:publish-preview, that says who would see what if the
+	// proposed publish were executed. The pure model lives in
+	// internal/assets (the same gate the publish command runs); the state
+	// reader is the task-scoped adapter in assetshttp (T0704's scope
+	// excludes internal/persistence's root package files, L1, recorded in
+	// the task result), over the canonical queries of
+	// internal/persistence/queries/asset_preview.sql. It writes nothing:
+	// the publish itself — its explicit human action, its authorization
+	// and its audit event — is T0705.
+	assetsAPI := assetshttp.New(assetshttp.Deps{
+		State:    assetshttp.NewPostgresStateStore(pool),
+		Projects: projectAPI.Service(),
+	})
+	assetsAPI.Register(v1)
 	// Official project templates (T0214): the catalog and the
 	// create-from-template path. The templates service orchestrates the
 	// SAME owning-service instances the direct routes use (projectAPI /
