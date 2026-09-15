@@ -3665,9 +3665,12 @@
       ]
     },
     "T0504": {
-      "status": "verification",
-      "started_at": "2026-09-14T12:06:39Z",
-      "worker_run_id": "run-efcc48155b887fb0",
+      "status": "merged",
+      "started_at": "2026-09-15T02:39:08Z",
+      "worker_run_id": "run-e2a5807b8f6d205c",
+      "accepted_by_supervisor_at": "2026-09-15T03:01:00Z",
+      "merged_at": "2026-09-15T03:06:01Z",
+      "rejection_reason": "# T0504 第三轮：一条注释声称\"两边不可能漂开\"，测试只做了一半\n\n> 复核结论是 **`approve`**（0 阻断、0 重大），三条意见我**逐条自己核过**：两条**记档、不要动**，\n> 一条**成立、这一轮改它**。原文在 `.rddev/workers/T0504-review/RESULT.json`。\n\n## 一、要改的（只有这一条）\n\n**位置**：`tests/integration/evidence_assertion_test.go:274`（`TestEvidenceAssertionEnumsMatchSchema`\n上方注释的最后一行）。\n\n**注释原文（结尾）**：\n\n> … must validate, and non-canonical values must never — **the domain and the schema cannot drift apart**.\n\n**测试实际做的两半**：\n\n| 方向 | 代码 | 钉住了什么 |\n|---|---|---|\n| 正 | `:317`–`:350`，遍历 `domain.CanonicalEvidence*()` | **域 ⊆ 模式**：域里的每个值，schema 必须接受 |\n| 反 | `:351` 起，一张**手写清单**（causes / disproves / anecdote / doi / semi-direct / correlational / accepted） | 只有这 7 个**具体值**必须被拒 |\n\n**缺口**：schema 里**新增**一个枚举值（比如 relation 加第 10 个）时，正方向只走域自己的值、\n反方向只走那 7 个写死的值——这条测试**照样绿**。而 `ValidEvidenceRelation` 和 00007 的 SQL CHECK\n会拒它。于是两边**漂开了**，没有任何测试说一句话，而那句\"cannot drift apart\"正好会让后来人不去查。\n\n**要求的终态：让那句话变成真的。二选一，你自己判断哪个对：**\n\n**选 1 —— 把注释改准（最小，仓库里同类测试就是这么写的）。**\n现成先例：`tests/integration/knowledge_relations_test.go:548`–`:551` 的 `TestSchemaEnumsMatchDomainTypes`，\n它的注释写的是\"每个 canonical 值必须通过，**issue state 这些值**必须永不通过\"——只声称它真正做到的\n那一半。照这个写法改，一句话的事。**但不要再保留任何\"不可能漂开\"这类覆盖性的话。**\n\n**选 2 —— 把测试补成双向。** 从 schema 自己读出各枚举的取值集合（relation 9 / evidence_type 6 /\ndirectness 3 / inference_nature 7 / review_state 3），逐个断言域认识它；域不认识就红。这样注释就是真的，\n而且真的多钉住一个方向。\n\n选 2 的话，**必须给出能失败的证明**：用 `go test -overlay=…` 在**编译期**给某一边塞一个只有它认识的值，\n让新断言**红一次**，再把修复后的绿跑一遍。那段命令与输出写进它对应那条**绿条目**的 `evidence` 字符串，\n或者写进 `notes_for_supervisor`。**不要在 `tests[]` 里留 `status: \"failed\"` 的条目**——collect 的\n`result-consistency` 是机械判据（`completed` + 任何 `failed`/`not_run` = 自相矛盾），它读不出\"这条红是故意的\"，\n整轮会被**拒收**（T0508、T0701 都这么白跑过）。证据一个字都别删，只是**换个格子放**。\n\n## 二、明确不要动的（记档项，不是你的问题）\n\n- **`EvidenceStance` / `RelationStance`**（`internal/domain/evidence_assertion.go:85`–`:115`，\n  supporting / contesting / neutral 及其映射）：复核说这是任务没要求的产品词表，docs/10 §8 点的是另一套词\n  （limited evidence / mixed evidence / actively contested / independently reproduced）。但**它只有标签、\n  没有数值面、今天没有调用方**，不触碰 §9.13，已在你的 `RESULT.json` 里记名。**不要删、不要改、不要重命名。**\n  它会在标签体系正式化时回看——那是我这一侧的事。\n- **全库扫 `%score%/%weight%/%truth%` 那条**（`tests/integration/evidence_assertion_test.go:235`–`:257`）：\n  复核说它比 §9.13 严（将来一个合法的 `relevance_score` 列会撞上它）。但它的注释**如实写了**自己扫的是\n  整个 catalog，**不是假话**；\"宁可严\"也是正确方向。**不要放宽它**——放宽测试正是 §6 禁止的方向。\n  将来真出现一个合法 score 列，那时是把它改**精确**，不是删掉。这条我记在案。\n\n**这一轮除了第一条，别的什么都不用改。** 你上一轮做的五条守卫与它们的探针、`accepted` 的引用改到\ndocs/08、结构体注释、21 这个计数——我**都独立核过，全部成立**（五条守卫我逐个用 overlay 单独证明过\n\"能失败\"，每条的修复都只点亮它自己那一行）。**不要回头动它们。**\n\n## 三、这一轮要交什么\n\n1. 只改第一条。\n2. 生成物这轮不会动（没碰 `infra/migrations/**`、没碰 `specs/**`），但收尾仍跑一遍\n   `python3 scripts/gen_schema_snapshot.py --check` 与 `python3 scripts/spec_version.py --check`，绿就行。\n3. 重跑你任务要求的测试（evidence domain/semantics 单测、`TestEvidenceAssertionContract`、\n   `TestEvidenceAssertionEnumsMatchSchema`、`make test-integration`）。\n   `RESULT.json` 的 `tests[]` **只写这一轮真跑过的**。\n4. `status` 按实情：全绿才 `completed`；红着报告比造假绿好。\n5. `notes_for_supervisor` 是**一个字符串**。\n\n## 四、老规矩（没变）\n\n- **迁移号 `00058` 不变**，文件名别动；**空号不回收**。\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n- **生成物只能重新生成，不要手工编辑。**\n- 不要动 `allowed_scope` 外的文件（尤其 `specs/schemas/**`——枚举词表是 Supervisor 的面）。\n- 新基线带来的 T0503 产物（`00057_findings.sql`、`internal/domain/finding.go`、\n  `internal/rsg/semantics/finding.go` 及其测试）**不是你的活**。\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库，5432）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n",
       "history": [
         {
           "from": "todo",
@@ -3688,6 +3691,60 @@
           "at": "2026-09-14T12:27:32Z",
           "run_id": "run-a8e3286f8c39d16d",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T02:14:05Z",
+          "run_id": "run-ccf82f7352b84501",
+          "reason": "# T0504（Evidence Assertion Domain）：搬基线 + 一处注释的人工合并 + 四条复核意见的处置\n\n> 这封信写的就是**你工作树里已经发生的事**。复核结论是 **`approve`**（不阻断），但 §5.1 的条件 4 是\n> \"**没有未解决的复核意见**\"，所以这一轮 = 搬基线 + 下表标\"改\"的几条。\n> 复核原文在 `.rddev/workers/T0504-review/RESULT.json`。\n\n## 一、这一轮为什么动你的树\n\n不是你的代码有问题。基线从 `00f6251`（T0502 合并）前移到 `ab75bda`（main 现在的 tip）——\n中间 main 落了三个合并：**T0403**（Integrity Review Checks）、**T0214**（Project Templates）、\n**T0503**（Finding 聚合模型）。你之后落地的任务每一个都会重写同一批生成物，所以这次前移是机械的，\n不是让你重做。你的改动原样带过来了（10 个文件存于\n`…/tmp/keep-T0504-20260915T101144Z/change.patch`），树现在站在新基线上。\n\n### 1.1 一处必须人工合的地方：`internal/rsg/semantics/semantics.go`\n\n你和 T0503 改的是**同一句话**。T0502 在包注释里留了半句锚 `// it has (see checkClaim).`，\nT0503 和 T0504 各自把这**同一行**续写成了不同的下一句——机器合不了，这一段由我人合并。\n\n**合出来的结果：main 那一半逐字保留，你的尾段重新折行接在它后面，整段只出现一次。**\n\n```\n  // it has (see checkClaim). T0503 adds the finding checks (checkFinding):\n  …\n  // failures).\n- // it has (see checkClaim). T0504 adds the evidence assertion checks\n- // (CheckEvidenceAssertion): they run on the structured assertion model\n+ // T0504 adds the evidence assertion checks (CheckEvidenceAssertion):\n+ // they run on the structured assertion model\n  // (internal/domain.EvidenceAssertion), which is not a scientific object,\n  // so they are not part of the object-write-path Check dispatch — the\n```\n\n只有上面那两行是重排的（其余你的 5 行逐字未动），重排清单完整记在\n`…***.go.drop`。\n\n**对着树读一遍这一段**：如果你认为合错了，在 `RESULT.json` 里指明**哪一行、为什么**，\n**别闷声改回去**（合错了是我的问题，不算你返工）。\n\n### 1.2 另一处冲突是机器合的\n\n`tests/integration/migration_test.go` 由工具并成了 union：main 的 T0503 索引注释与你的 T0504\n索引注释**各留一次**，你给 `evidence_assertions` 写的 6 条 CHECK 期望、两条新索引\n（`evidence_assertions_target_idx`、`evidence_assertions_evidence_idx`）都在。你照着新基线自己核对一遍。\n\n## 二、四条复核意见的逐条处置\n\n行号我按新基线**重新核过**（下面给的是新基线里的位置）。\n\n| # | 级别 | 位置（新基线） | 问题 | 本轮做什么 |\n|---|---|---|---|---|\n| 1 | minor | `infra/migrations/00058_evidence_assertion_guards.sql` | 迁移给自己定的分层守卫纪律是\"数据库让不变量**无条件**成立\"——但**自指规则**没进这一层：`domain.EvidenceAssertion.Validate` 硬拒 `target_version_ref == evidence_version_ref`（`internal/domain/evidence_assertion.go:320`），表上却**没有**对应的 CHECK，裸 SQL 可以插进领域层禁止的自断言 | **改**：在 00058 里加 `CHECK (target_object_version_id <> evidence_object_version_id)`（加它安全：今天没有 writer，不可能有自指行）。**补一条能失败的测试**：裸 SQL 插自指行被拒。生成物按规矩重新生成 |\n| 2 | nit | 结构体 `internal/domain/evidence_assertion.go:272`；那句话在 `internal/domain/evidence_assertion_test.go:269` | 结构体没有 json tag，`encoding/json` 会输出 Go 字段名（`TargetVersionRef`…）；而测试注释说 \"The wire shape keeps the schema's field names\"——对 marshal 出来的形状**不成立** | **改**：把注释改准（模型是内部的、不在任何 wire path 上；**将来若它成为 DTO，再加显式 json tag**）。**不要**为了这句话去加 tag |\n| 3 | nit | `internal/domain/evidence_assertion_test.go:154` | 注释引 docs/43 说 `accepted` 是 finding assessment 词表。docs/43 那张表是 ***。`accepted` 在 **`docs/08_SCIENTIFIC_OBJECTS.md` §Finding 的 status** 里，也在 `specs/schemas/finding.schema.json` 的 `/properties/assessment` enum 里 | **改**：引用改成 docs/08 §Finding（可一并点出 finding schema）。一行注释；测试实质没错 |\n| 4 | nit | `RESULT.json` | evidence 写\"17 domain/semantics unit tests pass\"，该过滤下实际是 **21**（13 domain + 8 semantics）——不是假绿，是过期计数 | **改**：这一轮 `RESULT.json` 反正要重写，写实数 |\n\n写进 `notes_for_supervisor`（**一个字符串**）：\n\n- **复核 risk 2**：00058 加的是 VALID CHECK——若某个库里有 00058 之前写入的非规范 `evidence_type`/`directness`/`inference_nature` 行，迁移会失败。今天没有 writer、默认值即规范值，真实行不应存在；且升级路径测试只迁空库，覆盖不到这一类。**记名**（这是我接受的已知风险，不是你的问题）。\n- **复核 risk 1**：`semantics.CheckEvidenceAssertion` 还没接到任何写路径——将来的 writer 必须调它，并保持 hints 只作建议。**记名转 writer**。\n- **复核 risk 3**：立场桶（supporting/contesting/neutral）是标签、没有数值面；没有任何机制阻止将来的 UI/查询把桶计数加成\"净立场分\"。将来的聚合任务要按\"不生成 Truth Score\"复核。**记名**。\n- **复核 risk 5**：`RelationStance` 的映射（consistent_with→supporting、contextualizes→neutral）是 L1 透明规则，docs/10 §8 没规定映射；标签体系正式化时要回看。**记名**。\n\n## 三、这一轮要交什么\n\n1. 做完上表标\"改\"的三条；#1 必须带**能失败的测试**（裸 SQL 自指被拒）。\n2. 生成物**只重新生成**（`--check` 收尾）：`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`internal/persistence/sqlc/*`；\n   catalog fixture 按仓库规矩同步更新（**别手工编辑生成物**）。\n3. **在新基线上重跑**你任务要求的测试（evidence domain/semantics 单测、`TestEvidenceAssertionContract`、\n   `TestEvidenceAssertionEnumsMatchSchema`、`make test-integration`、`gen_schema_snapshot.py --check`、`spec_version.py --check`）。\n   `RESULT.json` 的 `tests[]` **只写这一轮真跑过的**。\n4. `status` 按实情：全绿才 `completed`；红着报告比造假绿好。\n5. `notes_for_supervisor` 是**一个字符串**（T0309 上一轮就死在这个形状上）。\n\n## 四、不要动的\n\n- **迁移号 `00058` 不变**，文件名别动；**空号不回收**（号是分配的）。\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n- **生成物只能重新生成，不要手工编辑。**\n- 不要动 `allowed_scope` 外的文件（尤其 `specs/schemas/**`——枚举词表是 Supervisor 的面）。\n- 新基线带来的 T0503 产物（`infra/migrations/00057_findings.sql`、`internal/domain/finding.go`、\n  `internal/rsg/semantics/finding.go` 及其测试）**不是你的活**，别去动它们。\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库，5432）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n\n---\n\n## 附：关于\"故意跑红\"的记录位置\n\n如果这一轮你**故意跑一条会红的命令**（回退某处修复、或写一条\"证明当前形状会红\"的探针）来证明某个\n守卫**确实能失败**：那段命令与输出写进它对应那条**绿条目**的 `evidence` 字符串，或者写进\n`notes_for_supervisor`。**不要在 `tests[]` 里留 `status: \"failed\"` 的条目**——collect 的\n`result-consistency` 是机械判据（`status: completed` 加任何 `failed`/`not_run` 条目 = 自相矛盾），\n它读不出\"这条红是故意的\"，整轮会被**拒收**（T0508 与 T0701 都这么白跑过一轮）。\n**证据一个字都别删**，只是**换个格子放**：`tests[]` 只装\"这一轮真跑过、且是绿的\"条目。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T02:14:05Z",
+          "run_id": "run-3c129712847f621c",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T02:22:48Z",
+          "run_id": "run-28c0f3d0390604f5",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T02:39:01Z",
+          "run_id": "run-04fd6a48dcdfaf74",
+          "reason": "# T0504 第三轮：一条注释声称\"两边不可能漂开\"，测试只做了一半\n\n> 复核结论是 **`approve`**（0 阻断、0 重大），三条意见我**逐条自己核过**：两条**记档、不要动**，\n> 一条**成立、这一轮改它**。原文在 `.rddev/workers/T0504-review/RESULT.json`。\n\n## 一、要改的（只有这一条）\n\n**位置**：`tests/integration/evidence_assertion_test.go:274`（`TestEvidenceAssertionEnumsMatchSchema`\n上方注释的最后一行）。\n\n**注释原文（结尾）**：\n\n> … must validate, and non-canonical values must never — **the domain and the schema cannot drift apart**.\n\n**测试实际做的两半**：\n\n| 方向 | 代码 | 钉住了什么 |\n|---|---|---|\n| 正 | `:317`–`:350`，遍历 `domain.CanonicalEvidence*()` | **域 ⊆ 模式**：域里的每个值，schema 必须接受 |\n| 反 | `:351` 起，一张**手写清单**（causes / disproves / anecdote / doi / semi-direct / correlational / accepted） | 只有这 7 个**具体值**必须被拒 |\n\n**缺口**：schema 里**新增**一个枚举值（比如 relation 加第 10 个）时，正方向只走域自己的值、\n反方向只走那 7 个写死的值——这条测试**照样绿**。而 `ValidEvidenceRelation` 和 00007 的 SQL CHECK\n会拒它。于是两边**漂开了**，没有任何测试说一句话，而那句\"cannot drift apart\"正好会让后来人不去查。\n\n**要求的终态：让那句话变成真的。二选一，你自己判断哪个对：**\n\n**选 1 —— 把注释改准（最小，仓库里同类测试就是这么写的）。**\n现成先例：`tests/integration/knowledge_relations_test.go:548`–`:551` 的 `TestSchemaEnumsMatchDomainTypes`，\n它的注释写的是\"每个 canonical 值必须通过，**issue state 这些值**必须永不通过\"——只声称它真正做到的\n那一半。照这个写法改，一句话的事。**但不要再保留任何\"不可能漂开\"这类覆盖性的话。**\n\n**选 2 —— 把测试补成双向。** 从 schema 自己读出各枚举的取值集合（relation 9 / evidence_type 6 /\ndirectness 3 / inference_nature 7 / review_state 3），逐个断言域认识它；域不认识就红。这样注释就是真的，\n而且真的多钉住一个方向。\n\n选 2 的话，**必须给出能失败的证明**：用 `go test -overlay=…` 在**编译期**给某一边塞一个只有它认识的值，\n让新断言**红一次**，再把修复后的绿跑一遍。那段命令与输出写进它对应那条**绿条目**的 `evidence` 字符串，\n或者写进 `notes_for_supervisor`。**不要在 `tests[]` 里留 `status: \"failed\"` 的条目**——collect 的\n`result-consistency` 是机械判据（`completed` + 任何 `failed`/`not_run` = 自相矛盾），它读不出\"这条红是故意的\"，\n整轮会被**拒收**（T0508、T0701 都这么白跑过）。证据一个字都别删，只是**换个格子放**。\n\n## 二、明确不要动的（记档项，不是你的问题）\n\n- **`EvidenceStance` / `RelationStance`**（`internal/domain/evidence_assertion.go:85`–`:115`，\n  supporting / contesting / neutral 及其映射）：复核说这是任务没要求的产品词表，docs/10 §8 点的是另一套词\n  （limited evidence / mixed evidence / actively contested / independently reproduced）。但**它只有标签、\n  没有数值面、今天没有调用方**，不触碰 §9.13，已在你的 `RESULT.json` 里记名。**不要删、不要改、不要重命名。**\n  它会在标签体系正式化时回看——那是我这一侧的事。\n- **全库扫 `%score%/%weight%/%truth%` 那条**（`tests/integration/evidence_assertion_test.go:235`–`:257`）：\n  复核说它比 §9.13 严（将来一个合法的 `relevance_score` 列会撞上它）。但它的注释**如实写了**自己扫的是\n  整个 catalog，**不是假话**；\"宁可严\"也是正确方向。**不要放宽它**——放宽测试正是 §6 禁止的方向。\n  将来真出现一个合法 score 列，那时是把它改**精确**，不是删掉。这条我记在案。\n\n**这一轮除了第一条，别的什么都不用改。** 你上一轮做的五条守卫与它们的探针、`accepted` 的引用改到\ndocs/08、结构体注释、21 这个计数——我**都独立核过，全部成立**（五条守卫我逐个用 overlay 单独证明过\n\"能失败\"，每条的修复都只点亮它自己那一行）。**不要回头动它们。**\n\n## 三、这一轮要交什么\n\n1. 只改第一条。\n2. 生成物这轮不会动（没碰 `infra/migrations/**`、没碰 `specs/**`），但收尾仍跑一遍\n   `python3 scripts/gen_schema_snapshot.py --check` 与 `python3 scripts/spec_version.py --check`，绿就行。\n3. 重跑你任务要求的测试（evidence domain/semantics 单测、`TestEvidenceAssertionContract`、\n   `TestEvidenceAssertionEnumsMatchSchema`、`make test-integration`）。\n   `RESULT.json` 的 `tests[]` **只写这一轮真跑过的**。\n4. `status` 按实情：全绿才 `completed`；红着报告比造假绿好。\n5. `notes_for_supervisor` 是**一个字符串**。\n\n## 四、老规矩（没变）\n\n- **迁移号 `00058` 不变**，文件名别动；**空号不回收**。\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n- **生成物只能重新生成，不要手工编辑。**\n- 不要动 `allowed_scope` 外的文件（尤其 `specs/schemas/**`——枚举词表是 Supervisor 的面）。\n- 新基线带来的 T0503 产物（`00057_findings.sql`、`internal/domain/finding.go`、\n  `internal/rsg/semantics/finding.go` 及其测试）**不是你的活**。\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库，5432）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T02:39:08Z",
+          "run_id": "run-e2a5807b8f6d205c",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T02:43:01Z",
+          "run_id": "run-1eb33f4212f9327b",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-15T03:01:00Z",
+          "run_id": "run-243a41706331655c"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-15T03:06:01Z",
+          "run_id": "run-e76dc62f2420cbbf"
         }
       ]
     },
