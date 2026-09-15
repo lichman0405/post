@@ -8604,3 +8604,54 @@ Worker 的任务包；T0704 最终不需要迁移（纯读路径），68 就此�
 collect 被拒加一次换基线，而省下的只有约半小时。**不划算，不做。**
 
 - **可逆性**：完全可逆（纯任务包字段）。
+
+## L1-20260916-103 —— T0409 定稿：补两格范围（其中一格是致命洞）、删一格、按"不发明治理规则"重划验收
+
+T0409 是 P4 的收尾，也是 T0406 的自然下一环（它依赖 T0406 与 T0302，两者已合）。
+
+### 一、范围：一补一删一补，逐条有据
+
+派工前核包查出**三个**问题，其中第一个是致命洞：
+
+| 问题 | 依据 | 处置 |
+| --- | --- | --- |
+| 缺 `internal/gitprovider/**`——**致命** | 要求之一是"platform service Git merge/ref"，而 `internal/gitprovider` 今天**没有任何 PR 合并操作**（全目录 grep `PullRequest` 零命中；`port.go:212-276` 只有仓库/分支/webhook/保护规则/文件读取）。T0406 已在应用层定义端口 `merge.GitMerger`（`internal/application/merge/ports.go:252-254`），注释逐字写着 "**The production adapter is T0409's**" | **加**。没有这一格，Worker 无法实现自己的第二条要求 |
+| 缺 `internal/persistence/**` | 与 T0506/T0509/T0604/T0705/T0804/T0805 同一个成片缺口，见 L1-102 | **加** |
+| 带 `apps/web/**` | 三条要求里没有一条提界面，T0409 不做 UI | **删**（与 T0406 同样处置） |
+
+迁移号分配 **00070**（L1-100 的规则：编号由 Supervisor 在 dispatch 时分配，Worker 不得自行选号）。
+
+### 二、验收标准重划：把"contribution 产生"换成"产生它的输入"
+
+原验收第 2 条写"merge event/audit/contribution 产生"。核查后：
+
+- `contribution_events` 表存在（`infra/migrations/00011`），但**全仓库没有任何 Go writer**；
+- `tasks/tasks.json` 里 **T0807 的标题就是"Contribution Ledger projection：从 domain events 生成 contribution events"**；
+- docs/13:5 把"approved merge"列为客观事件——即 T0807 的投影**输入**。
+
+所以正确分工是：**T0409 负责让投影有输入**（领域事件 `pr.merged` + audit 行，且事件信息足够定位这次合并），**T0807 负责投影**。
+
+**这不是降低标准**，是把它交给拥有它的那个任务：让 T0409 直接写 `contribution_events` 会与 T0807 撞车，且必须发明 `event_type`/`role_codes`/`accepted_context` 的语义（规格没给）。验收里仍然要求事件与审计行**真实落库**，并写了理由："没有这两样，T0807 的 ledger 投影就没有输入"。
+
+### 三、把三块"属于别人"的东西写成明令禁止
+
+T0409 的包里有三条**禁止发明**清单，每条都指明了真正的归属与依据：
+
+1. **required-review 计算**（T0604）——`internal/application/reviews/service.go:25-27` 与 `internal/persistence/review_store.go:96-103` 两处都逐字写着"deliberately not invented here"，指名 T0604。T0409 的前置是**状态** `merge_ready`（T0406 已强制）。
+2. **冻结强制**（T0601）——`projects.main_frozen` 今天只被上报、从不强制；`ActionFreezeMain` 零调用者；`internal/application/merge/doc.go:48-52` 把强制指名归 T0601；且 `docs/09` §3 说"Emergency unfreeze 不在 V1 提供"，即冻结/解冻语义规格没给。
+3. **`contribution_events` 的写入**（T0807）——见上。
+
+### 四、policy 那一半有现成判定面，不发明
+
+`internal/application/policy` 已交付 T0603 的**类型化判定面**（`Query{Rule}` → `Decision{Found,Bool,Int,List,Raw}`），契约 fail-closed（`evaluate.go:11-17`：未知 key 是错误、调用方按默认拒绝；**规则缺失不是错误**，由调用方定安全默认）。
+
+T0409 用 `EffectivePolicy` + `Query{RuleMainProtected}` 判一次，且写死了两件事：**main 只能经 PR 合并前进是 `docs/09` §3 的结构性要求，不是策略给的**，所以 `Found=false` 不得成为放行理由；任何错误一律拒绝，并要求 Worker 用一个"取策略失败/类型不符"的探针证明这条判定**真的会说不**。
+
+### 五、两笔按惯例定的名（已记入 issue #239 供 owner 复核）
+
+- **审计动作** `pull_request.merged`——`internal/domain/audit.go` 今天没有 merge/PR 常量，按该文件自身惯例（完整名词+点分，对照 `conflict.resolution_saved`、`release.created`）定。
+- **领域事件** `pr.merged`——`docs/18:9` 已列出，不发明。两边不同名是刻意的：审计动作与事件在此仓库本是两套词表。
+- **契约占位符** `{prId}` vs 已实现路由的 `{number}`：占位符名不改变线上 URL，且此不一致在整个 PR 面上是全局的。**不为它改规格**（改了要重生成指纹、会打断在飞任务），记为已知项。
+
+- **可逆性**：完全可逆（纯任务包字段与命名）。若 owner 对各条命名另有偏好，改字段即可，无迁移。
+- **立档**：issue #239 记录了 T0409 派工前查出的那块空档（PR 到不了 `merge_ready`）与需要裁定的两块治理语义。
