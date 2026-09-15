@@ -123,6 +123,13 @@ var appendOnlyTables = []string{
 // appendOnlyTables: like the claims projection (00041) they are
 // rebuildable (docs/21 §5), so they carry targeted guards instead of the
 // append-only pair, and truncate stays open as their rebuild path.
+// Migration 00062 adds the contribution opportunity guards (T0803): the
+// row guard (BEFORE INSERT OR UPDATE, FOR EACH ROW → tgtype 23) pins the
+// creation discipline, identity, the suggested → open → closed map, the
+// flagged-only internal → public publicize and the publicized-row freeze
+// for ANY write path, and the deferred constraint trigger (AFTER INSERT
+// OR UPDATE, FOR EACH ROW → tgtype 21) pins target existence
+// project-scoped at COMMIT.
 var targetedGuardTriggers = map[string]string{
 	"branches:branch_lifecycle_guard_trigger":                                           ":O:19",
 	"branches:branch_git_ref_guard_trigger":                                             ":O:23",
@@ -150,6 +157,8 @@ var targetedGuardTriggers = map[string]string{
 	"findings:findings_no_orphan_refs":                                                  ":O:25",
 	"finding_claim_versions:finding_claim_versions_ref_guard":                           ":O:21",
 	"finding_claim_versions:finding_claim_versions_refs_remain":                         ":O:25",
+	"contribution_opportunities:contribution_opportunity_guard_trigger":                 ":O:23",
+	"contribution_opportunities:contribution_opportunity_target_trigger":                ":O:21",
 }
 
 // triggerRows returns every user trigger in the public schema as sorted
