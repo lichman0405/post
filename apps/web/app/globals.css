@@ -239,3 +239,131 @@
 .coming-soon-button:hover {
   background-color: var(--button-primary-bgColor-hover, #1a7f37);
 }
+
+/* ------------------------------------------------------------------
+   Rights panel (T0703). Neutral surface, thin border, high density —
+   the declaration reads as a record, not as a badge or a call to
+   action. Nothing here styles a value as safe/unsafe: the classes
+   carry the declaration's own tokens, and the notices at the foot are
+   muted body text.
+   ------------------------------------------------------------------ */
+.rights-panel {
+  max-width: 720px;
+  padding: 16px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--bgColor-default, #ffffff);
+}
+
+.rights-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.rights-panel-icon {
+  display: inline-flex;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.rights-panel-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.rights-panel-byline {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.rights-panel-empty {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.rights-panel-unstated {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--borderColor-attention-muted, #d4a72c66);
+  border-radius: 6px;
+  background-color: var(--bgColor-attention-muted, #fff8c5);
+  font-size: 13px;
+}
+
+.rights-section-title {
+  margin: 16px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.rights-references,
+.rights-access {
+  display: grid;
+  grid-template-columns: minmax(140px, max-content) 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.rights-references dt,
+.rights-access dt {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.rights-references dd,
+.rights-access dd {
+  margin: 0;
+}
+
+.rights-reference-value {
+  overflow-wrap: anywhere;
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+  font-size: 13px;
+}
+
+.rights-usage {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.rights-usage-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+  font-size: 14px;
+}
+
+.rights-usage-axis {
+  color: var(--fgColor-default, #1f2328);
+}
+
+.rights-usage-value {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.rights-notes-text {
+  margin: 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--borderColor-muted, #d8dee4);
+  font-size: 14px;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.rights-notice {
+  margin: 16px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fgColor-muted, #59636e);
+}

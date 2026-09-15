@@ -525,10 +525,16 @@ var canonicalTables = map[string]tableExp{
 		// provenance pins (kind:value) of a published version — NOT NULL,
 		// at least one element, and no NULL element (the version schema's
 		// array of strings with origin_refs minItems 1).
+		//
+		// rights_json's jsonb_typeof check is the T0703 addition (00066):
+		// the rights document is a JSON object and nothing else. The
+		// vocabulary inside it is deliberately NOT a storage rule — its
+		// one definition is internal/rights (see the migration's
+		// comment).
 		cols:    []colExp{c("id", u, false, true), c("asset_id", u, false, false), c("version", txt, false, false), c("source_release_id", u, true, false), c("manifest", jb, false, false), c("rights_json", jb, false, false), c("visibility", txt, false, false), c("integrity_hash", txt, false, false), c("published_by", u, false, false), c("published_at", ts, false, true), arr("origin_refs", false, false)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"asset_id", "version"}},
-		checks:  []string{"visibility = ANY", "cardinality", "array_position"},
+		checks:  []string{"visibility = ANY", "cardinality", "array_position", "jsonb_typeof(rights_json) = 'object'"},
 		fks:     []fkExp{fk("asset_id", "research_assets", "RESTRICT"), fk("source_release_id", "releases", "RESTRICT"), fk("published_by", "users", "RESTRICT")},
 	},
 	"asset_lineage": {
@@ -544,9 +550,13 @@ var canonicalTables = map[string]tableExp{
 		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("asset_version_id", "research_asset_versions", "RESTRICT")},
 	},
 	"knowledge_publications": {
+		// rights_json carries the same rights document as an asset
+		// version's, so 00066 (T0703) constrains it the same way: a JSON
+		// object, with the vocabulary left to internal/rights.
 		cols:    []colExp{c("id", u, false, true), c("object_version_id", u, false, false), c("public_version", txt, false, false), c("rights_json", jb, false, false), c("published_by", u, false, false), c("published_at", ts, false, true)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"object_version_id", "public_version"}},
+		checks:  []string{"jsonb_typeof(rights_json) = 'object'"},
 		fks:     []fkExp{fk("object_version_id", "scientific_object_versions", "RESTRICT"), fk("published_by", "users", "RESTRICT")},
 	},
 	"external_references": {
