@@ -2515,9 +2515,6 @@
         "pr ui e2e"
       ],
       "allowed_scope": [
-        "infra/migrations/**",
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
         "internal/rsg/**",
         "internal/application/**",
         "internal/domain/**",
@@ -2536,7 +2533,8 @@
       ],
       "decision_level_max": "L1",
       "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。",
+      "supervisor_scope_narrowing": "2026-09-15：本任务与迁移链条（T0803/T0609/T0701）并行开工，为消除并行冲突面，已从 allowed_scope 移除 infra/migrations/**、specs/database/postgres.sql、specs/SPEC_VERSION.json —— 三者是所有迁移共用的生成物，两个任务同时改必然互相踩。本任务是读路径 + UI，预期不需要改 schema。若确实需要新增迁移：停下来报告，不要自选编号、也不要把迁移写进 diff；由 Supervisor 排进链条并分配编号（CLAUDE.md §8.1）。"
     },
     {
       "id": "T0409",

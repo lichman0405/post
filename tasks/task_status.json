@@ -3453,13 +3453,24 @@
       ]
     },
     "T0408": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-15T12:05:27Z",
+      "worker_run_id": "run-54bb9c552b782487",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-15T12:05:27Z",
+          "run_id": "run-4d3ce8ac2edf7b0a"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-15T12:05:27Z",
+          "run_id": "run-54bb9c552b782487",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0409": {
       "status": "todo",
@@ -4535,9 +4546,10 @@
       "merged_at": null
     },
     "T0803": {
-      "status": "verification",
-      "started_at": "2026-09-14T17:38:04Z",
-      "worker_run_id": "run-25059ba42f9e6ba7",
+      "status": "running",
+      "started_at": "2026-09-15T12:02:11Z",
+      "worker_run_id": "run-d7648cc63ebd8686",
+      "rejection_reason": "## 【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（`568951e`），你的完整改动**重新组合**（不是文本三方合并）\n到新基线上，改动集合逐个文件比对一致；两个生成物（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`）\n被带回来由工具重新生成；迁移编号不变，仍是 **00062**。\n\n### 有一件事需要你专门看一眼：两个测试文件是「合并」出来的，不是你的原样\n\n你的改动里有**两个文件当前 main 也动过**，它们不是被原样应用，而是与你之外的改动合在了一起：\n\n- `tests/integration/append_only_test.go` —— 两处冲突，都按并集解开：一处只有注释；\n  一处是 `targetedGuardTriggers` 那张受保护触发器表，**从 5 条并成 7 条**——\n  你自己加的 2 条（`contribution_opportunities:contribution_opportunity_guard_trigger` 与\n  `..._target_trigger`）加上别的任务在这条基线之后陆续加进来的 5 条。\n- `tests/integration/migration_test.go` —— 一处冲突，唯一那条期望目录从 1 条并成 2 条。\n\n所以：**不要假设这两个文件还是你离开时的样子**。请打开它们确认合并结果符合你的预期——\n尤其是 `migration_test.go` 的期望表目录，它是「schema 与快照不一致就报错」的那份夹具，\n并错了会让 Gate 以错误的方式变绿或变红。\n\n（背景，免得你误判：`append_only_test.go` 里那 5 条来自你这条基线之后、`main` 上先你合入的\nT0606 / T0214 / T0503；`migration_test.go` 的另一侧里有刚合入的 **T0404**——它加的是 **00061**、\n改的是 `reviews` 表。你加的是 00062，编号不冲突。**T0404 没有动 `append_only_test.go`。**）\n\n### 【你要做的】\n\n在合并后的基线上重跑：\n\n1. 你任务要求的 required tests，以及 `make test-integration`，确认没有因合并而失效；\n2. `bash tests/integration/check-sqlc-drift.sh` 与 `make check-schema-snapshot` —— 你的任务含迁移，\n   这两个生成物必须与迁移一致；\n3. 确认 `RESULT.json` 自洽（`completed` 要求 `tests[]` 全部 `passed`，覆盖任务要求的条目带 label）；\n4. 若一切照旧，原样重新提交 `RESULT.json`。\n\n### 【不要做的事】\n\n不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
       "history": [
         {
           "from": "todo",
@@ -4558,6 +4570,20 @@
           "at": "2026-09-14T18:12:10Z",
           "run_id": "run-22e0ca558a7664b1",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T12:02:11Z",
+          "run_id": "run-bbba19df3f2140c0",
+          "reason": "## 【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（`568951e`），你的完整改动**重新组合**（不是文本三方合并）\n到新基线上，改动集合逐个文件比对一致；两个生成物（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`）\n被带回来由工具重新生成；迁移编号不变，仍是 **00062**。\n\n### 有一件事需要你专门看一眼：两个测试文件是「合并」出来的，不是你的原样\n\n你的改动里有**两个文件当前 main 也动过**，它们不是被原样应用，而是与你之外的改动合在了一起：\n\n- `tests/integration/append_only_test.go` —— 两处冲突，都按并集解开：一处只有注释；\n  一处是 `targetedGuardTriggers` 那张受保护触发器表，**从 5 条并成 7 条**——\n  你自己加的 2 条（`contribution_opportunities:contribution_opportunity_guard_trigger` 与\n  `..._target_trigger`）加上别的任务在这条基线之后陆续加进来的 5 条。\n- `tests/integration/migration_test.go` —— 一处冲突，唯一那条期望目录从 1 条并成 2 条。\n\n所以：**不要假设这两个文件还是你离开时的样子**。请打开它们确认合并结果符合你的预期——\n尤其是 `migration_test.go` 的期望表目录，它是「schema 与快照不一致就报错」的那份夹具，\n并错了会让 Gate 以错误的方式变绿或变红。\n\n（背景，免得你误判：`append_only_test.go` 里那 5 条来自你这条基线之后、`main` 上先你合入的\nT0606 / T0214 / T0503；`migration_test.go` 的另一侧里有刚合入的 **T0404**——它加的是 **00061**、\n改的是 `reviews` 表。你加的是 00062，编号不冲突。**T0404 没有动 `append_only_test.go`。**）\n\n### 【你要做的】\n\n在合并后的基线上重跑：\n\n1. 你任务要求的 required tests，以及 `make test-integration`，确认没有因合并而失效；\n2. `bash tests/integration/check-sqlc-drift.sh` 与 `make check-schema-snapshot` —— 你的任务含迁移，\n   这两个生成物必须与迁移一致；\n3. 确认 `RESULT.json` 自洽（`completed` 要求 `tests[]` 全部 `passed`，覆盖任务要求的条目带 label）；\n4. 若一切照旧，原样重新提交 `RESULT.json`。\n\n### 【不要做的事】\n\n不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T12:02:11Z",
+          "run_id": "run-d7648cc63ebd8686",
+          "reason": "worker spawn"
         }
       ]
     },
