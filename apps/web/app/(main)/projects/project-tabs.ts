@@ -7,6 +7,7 @@ import {
   GearIcon,
   GitPullRequestIcon,
   IssueOpenedIcon,
+  MilestoneIcon,
   PulseIcon,
   TagIcon,
 } from "@primer/octicons-react";
@@ -37,6 +38,7 @@ export const PROJECT_TABS: ProjectTab[] = [
   { key: "issues", label: "Issues", path: "issues", icon: IssueOpenedIcon },
   { key: "pulls", label: "Pull requests", path: "pulls", icon: GitPullRequestIcon },
   { key: "releases", label: "Releases", path: "releases", icon: TagIcon },
+  { key: "milestones", label: "Milestones", path: "milestones", icon: MilestoneIcon },
   { key: "assets", label: "Assets", path: "assets", icon: ArchiveIcon },
   { key: "files", label: "Files", path: "files", icon: FileDirectoryIcon },
   { key: "activity", label: "Activity", path: "activity", icon: PulseIcon },

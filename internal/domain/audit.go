@@ -49,6 +49,10 @@ const (
 	// conflict final resolution must be human-governed — the audit row is
 	// the record that a human, not an agent, decided).
 	ActionConflictResolutionSaved = "conflict.resolution_saved"
+
+	// T0609 project milestones: one milestone row per action, written in
+	// the same transaction as the milestone row itself.
+	ActionMilestoneCreated = "milestone.created"
 )
 
 // Stable via values (the audit_log.via column): how the action arrived.

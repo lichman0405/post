@@ -165,6 +165,25 @@ type ProjectMembership struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type ProjectMilestone struct {
+	ID         pgtype.UUID        `json:"id"`
+	ProjectID  pgtype.UUID        `json:"project_id"`
+	Kind       string             `json:"kind"`
+	Label      *string            `json:"label"`
+	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
+	ReleaseID  pgtype.UUID        `json:"release_id"`
+	CreatedBy  pgtype.UUID        `json:"created_by"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type ProjectMilestoneCreation struct {
+	ID             pgtype.UUID        `json:"id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	MilestoneID    pgtype.UUID        `json:"milestone_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type ProjectSchemaProfile struct {
 	ID                pgtype.UUID        `json:"id"`
 	ProjectID         pgtype.UUID        `json:"project_id"`

@@ -492,6 +492,25 @@ var canonicalTables = map[string]tableExp{
 		uniques: [][]string{{"project_id", "idempotency_key"}},
 		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("release_id", "releases", "RESTRICT")},
 	},
+	// 00063 (T0609): project milestones — research-timeline markers,
+	// separate from releases; the release link is optional (nullable, not
+	// required). kind carries the canonical vocabulary plus custom, with
+	// the custom-label rule as a database CHECK (the "btrim" substring
+	// distinguishes it from the kind CHECK, which also mentions custom).
+	"project_milestones": {
+		cols:   []colExp{c("id", u, false, true), c("project_id", u, false, false), c("kind", txt, false, false), c("label", txt, true, false), c("occurred_at", ts, false, false), c("release_id", u, true, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
+		pk:     []string{"id"},
+		checks: []string{"kind = ANY", "btrim"},
+		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("release_id", "releases", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
+	},
+	// 00063 (T0609): the milestone Idempotency-Key ledger — a key replays
+	// the milestone it created, forever.
+	"project_milestone_creations": {
+		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("idempotency_key", txt, false, false), c("milestone_id", u, false, false), c("created_at", ts, false, true)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"project_id", "idempotency_key"}},
+		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("milestone_id", "project_milestones", "RESTRICT")},
+	},
 	"research_assets": {
 		cols:   []colExp{c("id", u, false, true), c("asset_type", txt, false, false), c("slug", txt, false, false), c("title", txt, false, false), c("origin_project_id", u, false, false), c("created_at", ts, false, true)},
 		pk:     []string{"id"},
@@ -739,6 +758,8 @@ var explicitIndexes = map[string][]string{
 	// T1006 (00059): the fan-out idempotency guarantee (one delivery row
 	// per endpoint per event, ever), the deliverer's due-work scan, and the
 	// fan-out backlog scan over published-but-unfanned outbox rows.
+	// T0609: the milestone timeline scan — occurred_at, creation order
+	// and id (00063).
 	"project_schema_profiles_project_idx":          {"project_id", "schema_id", "created_at"},
 	"claims_object_idx":                            {"object_id"},
 	"claims_type_idx":                              {"claim_type"},
@@ -763,6 +784,7 @@ var explicitIndexes = map[string][]string{
 	"webhook_deliveries_endpoint_event_uniq":       {"endpoint_id", "UNIQUE", "WHERE"},
 	"webhook_deliveries_due_idx":                   {"status", "next_retry_at"},
 	"outbox_events_fanout_pending_idx":             {"webhook_fanned_out_at IS NULL"},
+	"project_milestones_timeline_idx":              {"project_id", "occurred_at", "created_at", "id"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
@@ -930,6 +952,7 @@ func TestUpgradePath(t *testing.T) {
 		"git_branch_semantic_states",
 		"project_template_instantiations",
 		"contribution_opportunities",
+		"project_milestones", "project_milestone_creations",
 	}
 	for _, name := range present {
 		if _, ok := intermediate.Tables[name]; !ok {

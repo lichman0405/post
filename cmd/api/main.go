@@ -48,6 +48,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/conflicthttp"
 	"github.com/lichman0405/post/cmd/api/fileshttp"
 	"github.com/lichman0405/post/cmd/api/gittokenshttp"
+	"github.com/lichman0405/post/cmd/api/milestonehttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/policyhttp"
 	"github.com/lichman0405/post/cmd/api/profilehttp"
@@ -66,6 +67,7 @@ import (
 	"github.com/lichman0405/post/internal/application/branches"
 	"github.com/lichman0405/post/internal/application/diffs"
 	"github.com/lichman0405/post/internal/application/manifests"
+	"github.com/lichman0405/post/internal/application/milestones"
 	"github.com/lichman0405/post/internal/application/prchecks"
 	"github.com/lichman0405/post/internal/application/prdiff"
 	"github.com/lichman0405/post/internal/application/pullrequests"
@@ -596,6 +598,23 @@ func run(args []string) int {
 		}),
 	})
 	templatesAPI.Register(v1)
+	// Project milestones (T0609): the research-timeline surface —
+	// separate from releases (no release is required to record one, and
+	// recording one never touches the project lifecycle — no forced
+	// "completed" terminal state). The create reuses ActionCreateRelease
+	// (the milestones package doc records why); the read routes are
+	// exactly as visible as the project (projectAPI.Service()).
+	milestoneCommand := milestones.NewCommand(
+		persistence.NewProjectStore(pool),
+		releaseStore,
+		persistence.NewMilestoneStore(pool),
+		authz.NewMatrixEngine(),
+	)
+	milestoneAPI := milestonehttp.New(milestonehttp.Deps{
+		Command:  milestoneCommand,
+		Projects: projectAPI.Service(),
+	})
+	milestoneAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	srv := &http.Server{

@@ -1474,6 +1474,215 @@
   color: var(--fgColor-muted, #59636e);
 }
 
+/* Milestones tab (T0609): the research timeline — the same
+   Primer-flavored tokens as the releases list above. */
+
+.milestones-section {
+  margin-bottom: 24px;
+}
+
+.milestones-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.milestones-section-desc {
+  margin: 0 0 12px;
+  max-width: 640px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.milestones-loading {
+  padding: 16px 0;
+}
+
+.milestones-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--borderColor-danger-muted, #ff818266);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--fgColor-danger, #d1242f);
+  background: var(--bgColor-danger-muted, #ffebe9);
+}
+
+.milestones-empty {
+  border: 1px dashed var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  padding: 16px;
+  max-width: 640px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.milestones-list {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  max-width: 720px;
+}
+
+.milestones-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.milestones-row:last-child {
+  border-bottom: none;
+}
+
+.milestones-row-icon {
+  display: flex;
+  align-items: center;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.milestones-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.milestone-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.milestone-kind {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 9999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.milestone-date {
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+  white-space: nowrap;
+}
+
+.milestone-release {
+  font-size: 12px;
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.milestone-release:hover {
+  text-decoration: underline;
+}
+
+.milestones-create-form {
+  max-width: 560px;
+}
+
+.milestones-label {
+  display: block;
+  margin: 12px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.milestones-label-note {
+  font-weight: 400;
+}
+
+.milestones-input {
+  display: block;
+  width: 100%;
+  max-width: 560px;
+  padding: 6px 8px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--fgColor-default, #1f2328);
+  background: var(--bgColor-default, #ffffff);
+}
+
+.milestones-input:disabled {
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+.milestones-create-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.milestones-create {
+  padding: 5px 16px;
+  border: 1px solid var(--borderColor-accent-emphasis, #0969da);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #ffffff;
+  background: var(--bgColor-accent-emphasis, #0969da);
+  cursor: pointer;
+}
+
+.milestones-create:disabled {
+  border-color: var(--borderColor-default, #d0d7de);
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+  cursor: default;
+}
+
+.milestones-create-note {
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.milestones-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  border-radius: 6px;
+  padding: 8px 12px;
+  max-width: 560px;
+  font-size: 13px;
+}
+
+.milestones-notice-success {
+  border: 1px solid var(--borderColor-success-muted, #4ac26b66);
+  color: var(--fgColor-success, #1a7f37);
+  background: var(--bgColor-success-muted, #dafbe1);
+}
+
+.milestones-notice-error {
+  border: 1px solid var(--borderColor-danger-muted, #ff818266);
+  color: var(--fgColor-danger, #d1242f);
+  background: var(--bgColor-danger-muted, #ffebe9);
+}
+
+.milestones-readonly-note {
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.milestones-order-note {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
 /* Release detail: strictly read-only facts + the manifest download. */
 
 .release-detail-state {
