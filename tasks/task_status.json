@@ -4418,9 +4418,12 @@
       "merged_at": null
     },
     "T0609": {
-      "status": "verification",
-      "started_at": "2026-09-14T17:59:55Z",
-      "worker_run_id": "run-4b45730356d089a5",
+      "status": "merged",
+      "started_at": "2026-09-15T13:30:51Z",
+      "worker_run_id": "run-d76a0fb2ca2bc415",
+      "accepted_by_supervisor_at": "2026-09-15T14:00:41Z",
+      "merged_at": "2026-09-15T14:12:50Z",
+      "rejection_reason": "## 【这不是缺陷 —— 基线推进，请在新基线上重新验证】\n\n**你的设计一个都不用改。** 这次返工的唯一原因是：你开工之后 main 往前走了 **25 个提交**，\n其中 **6 个动了和你同一批文件**（迁移目录、以及那两个测试目录清单文件）。\n你的分支还停在 `659c71a`，前面的链路已经一节一节落到 main 上了。\n\n### 为什么必须一节一节来（机械原因，不是流程洁癖）\n\n你和前面几个任务都要重新生成**同一批生成物**（schema 快照、指纹）。生成物是**所有迁移的函数**——\n两个分支各自带一份合法快照在数学上就不可能，只有「在后一个之上重新生成」的那份才成立。\n所以每落一节，后面所有节的补丁就贴不上去了，必须重新组合。\n\n### 你的改动是怎么过来的\n\n**逐个文件的完整改动重新组合**到新基线上（不是文本三方合并），两个生成物\n（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`）以及 `internal/persistence/sqlc/**`\n被排除在组合之外，由工具从合并后的树**重新生成**。\n\n组合中共有 **3 处冲突**，处理如下——**每一处都已验证「双方的东西一个没丢」**：\n\n1. **`cmd/api/main.go`**（2 处）—— 两边都往 `releaseAPI.Register(v1)` 后面加接线：\n   - main 加了**模板**接口（T0214），以及三个 import（`reviewhttp`、`prdiff`、`reviews`）；\n   - 你加了**里程碑**接口，以及两个 import（`milestonehttp`、`internal/application/milestones`）。\n   **两块接线都保留**（模板在前、里程碑在后，依赖声明顺序都满足），import 按字典序取并集。\n   这一处由我手工解，而且**是从当前这次合并的结果重新解出来的**，不是拿旧快照去补——\n   旧快照是整文件替换，它漏掉 main 正文改动的风险是**静默的**。解完过了三道护栏：\n   能解析且格式正确、双方的名字一个不缺（main 侧 73 个 / 你这边 62 个）、\n   raw 合并里的 780 行一行没丢。\n2. **`internal/domain/audit.go`** —— 两边都往同一个常量块里加一个常量，\n   按**名字**取并集：main 的 `ActionConflictResolutionSaved` 与你的 `ActionMilestoneCreated` 并存。\n   常量块本身没有顺序含义（除了 `iota`，解析器碰到会直接拒绝，这里没有）。\n3. **`tests/integration/migration_test.go`** —— 两边都往同一张目录清单里加条目，取并集：\n   表清单 24+2 → 25 条，另一张 2+1 → 3 条（并集会把完全重复的行去掉一行）。\n\n### 【你要做的】\n\n1. 在新基线上**重跑你任务要求的全部测试**：`milestone tests`\n   （`tests/integration/milestone_e2e_test.go` 那组）、`make test-integration`、\n   `bash tests/integration/check-sqlc-drift.sh`、`make check-schema-snapshot`、\n   `make check-spec-version`，以及 `make check`（含 gofmt/vet/build/静态检查/前端/Python）。\n   确认它们在新基线上仍然全绿。\n2. 确认迁移编号仍是 **`00063`**（编号由调度器分配，你不要自行选号），\n   并确认 `00062`（上一个任务）已经在你下面。\n3. 确认 `RESULT.json` 自洽：`completed` 要求 `tests[]` 全部 `passed`，\n   `acceptance` 各条也都是 `passed`，`files_changed` 与实际改动一致。\n4. 顺带确认一下上面第 1 处冲突的结果：你新加的 import 与接线都在，**main 新加的那些也都在**\n   （尤其 `reviewhttp` 与 `prdiff` 那两处接线不能丢——丢了接口会静默消失，编译却不会报错）。\n\n### 【边界】\n\n- 不要改动与本次推进无关的任何东西。\n- `specs/database/postgres.sql`、`specs/SPEC_VERSION.json` 与 `internal/persistence/sqlc/**`\n  **只能由工具重新生成**，不要手工编辑或合并。\n- 不要碰 `tasks/**`。\n- 如果发现**任何**因为这次推进而产生的真实问题（例如某个断言现在红了），\n  **照实报告，不要为了让门变绿而放宽断言、删测试或放大超时**——那种情况下我要知道。\n",
       "history": [
         {
           "from": "todo",
@@ -4441,14 +4444,47 @@
           "at": "2026-09-14T18:24:19Z",
           "run_id": "run-a596dd042b1d6509",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T13:30:51Z",
+          "run_id": "run-26127c102017c7d2",
+          "reason": "## 【这不是缺陷 —— 基线推进，请在新基线上重新验证】\n\n**你的设计一个都不用改。** 这次返工的唯一原因是：你开工之后 main 往前走了 **25 个提交**，\n其中 **6 个动了和你同一批文件**（迁移目录、以及那两个测试目录清单文件）。\n你的分支还停在 `659c71a`，前面的链路已经一节一节落到 main 上了。\n\n### 为什么必须一节一节来（机械原因，不是流程洁癖）\n\n你和前面几个任务都要重新生成**同一批生成物**（schema 快照、指纹）。生成物是**所有迁移的函数**——\n两个分支各自带一份合法快照在数学上就不可能，只有「在后一个之上重新生成」的那份才成立。\n所以每落一节，后面所有节的补丁就贴不上去了，必须重新组合。\n\n### 你的改动是怎么过来的\n\n**逐个文件的完整改动重新组合**到新基线上（不是文本三方合并），两个生成物\n（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`）以及 `internal/persistence/sqlc/**`\n被排除在组合之外，由工具从合并后的树**重新生成**。\n\n组合中共有 **3 处冲突**，处理如下——**每一处都已验证「双方的东西一个没丢」**：\n\n1. **`cmd/api/main.go`**（2 处）—— 两边都往 `releaseAPI.Register(v1)` 后面加接线：\n   - main 加了**模板**接口（T0214），以及三个 import（`reviewhttp`、`prdiff`、`reviews`）；\n   - 你加了**里程碑**接口，以及两个 import（`milestonehttp`、`internal/application/milestones`）。\n   **两块接线都保留**（模板在前、里程碑在后，依赖声明顺序都满足），import 按字典序取并集。\n   这一处由我手工解，而且**是从当前这次合并的结果重新解出来的**，不是拿旧快照去补——\n   旧快照是整文件替换，它漏掉 main 正文改动的风险是**静默的**。解完过了三道护栏：\n   能解析且格式正确、双方的名字一个不缺（main 侧 73 个 / 你这边 62 个）、\n   raw 合并里的 780 行一行没丢。\n2. **`internal/domain/audit.go`** —— 两边都往同一个常量块里加一个常量，\n   按**名字**取并集：main 的 `ActionConflictResolutionSaved` 与你的 `ActionMilestoneCreated` 并存。\n   常量块本身没有顺序含义（除了 `iota`，解析器碰到会直接拒绝，这里没有）。\n3. **`tests/integration/migration_test.go`** —— 两边都往同一张目录清单里加条目，取并集：\n   表清单 24+2 → 25 条，另一张 2+1 → 3 条（并集会把完全重复的行去掉一行）。\n\n### 【你要做的】\n\n1. 在新基线上**重跑你任务要求的全部测试**：`milestone tests`\n   （`tests/integration/milestone_e2e_test.go` 那组）、`make test-integration`、\n   `bash tests/integration/check-sqlc-drift.sh`、`make check-schema-snapshot`、\n   `make check-spec-version`，以及 `make check`（含 gofmt/vet/build/静态检查/前端/Python）。\n   确认它们在新基线上仍然全绿。\n2. 确认迁移编号仍是 **`00063`**（编号由调度器分配，你不要自行选号），\n   并确认 `00062`（上一个任务）已经在你下面。\n3. 确认 `RESULT.json` 自洽：`completed` 要求 `tests[]` 全部 `passed`，\n   `acceptance` 各条也都是 `passed`，`files_changed` 与实际改动一致。\n4. 顺带确认一下上面第 1 处冲突的结果：你新加的 import 与接线都在，**main 新加的那些也都在**\n   （尤其 `reviewhttp` 与 `prdiff` 那两处接线不能丢——丢了接口会静默消失，编译却不会报错）。\n\n### 【边界】\n\n- 不要改动与本次推进无关的任何东西。\n- `specs/database/postgres.sql`、`specs/SPEC_VERSION.json` 与 `internal/persistence/sqlc/**`\n  **只能由工具重新生成**，不要手工编辑或合并。\n- 不要碰 `tasks/**`。\n- 如果发现**任何**因为这次推进而产生的真实问题（例如某个断言现在红了），\n  **照实报告，不要为了让门变绿而放宽断言、删测试或放大超时**——那种情况下我要知道。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T13:30:51Z",
+          "run_id": "run-d76a0fb2ca2bc415",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T13:36:19Z",
+          "run_id": "run-13c05c082b94e3f5",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-15T14:00:41Z",
+          "run_id": "run-0f7138d6b0ecd263"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-15T14:12:50Z",
+          "run_id": "run-44baa5e65c4b2501"
         }
       ]
     },
     "T0701": {
-      "status": "running",
+      "status": "rejected",
       "started_at": "2026-09-15T11:32:15Z",
       "worker_run_id": "run-4e0eab29f2d70f70",
-      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (bash tests/integration/check-sqlc-drift.sh (from a clean tree)) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
+      "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/stash *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
       "history": [
         {
           "from": "todo",
@@ -4476,6 +4512,13 @@
           "at": "2026-09-15T11:32:15Z",
           "run_id": "run-4e0eab29f2d70f70",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-15T14:03:59Z",
+          "run_id": "run-1ab6b2a99f0fcbde",
+          "reason": "collect rejected: refs: new ref(s) created during the run: refs/stash *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check"
         }
       ]
     },
