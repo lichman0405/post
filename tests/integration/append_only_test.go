@@ -47,7 +47,10 @@ const appendOnlyTaskID = "T0013"
 // added later create their own guard pair in their own migration (00038 adds
 // project_schema_profiles, T0213; 00056 adds project_template_instantiations,
 // T0214). Migration 00053 joins release_creations to the set (the T0606
-// Idempotency-Key ledger — a replay is a read, never a rewrite). The same list
+// Idempotency-Key ledger — a replay is a read, never a rewrite). Migration
+// 00069 adds semantic_merge_conflicts (T0406): the record that the accepted
+// state carries an open scientific disagreement is history, not state — a
+// later decision is a new merge, never an edit of that row. The same list
 // drives the catalog assertion and the per-table rejection loop.
 var appendOnlyTables = []string{
 	"scientific_object_versions",
@@ -68,6 +71,7 @@ var appendOnlyTables = []string{
 	"git_push_changes",
 	"project_schema_profiles",
 	"project_template_instantiations",
+	"semantic_merge_conflicts",
 }
 
 // targetedGuardTriggers are the NON-append-only row guards added after
@@ -130,6 +134,13 @@ var appendOnlyTables = []string{
 // for ANY write path, and the deferred constraint trigger (AFTER INSERT
 // OR UPDATE, FOR EACH ROW → tgtype 21) pins target existence
 // project-scoped at COMMIT.
+// Migration 00069 adds the semantic merge guard (T0406, BEFORE UPDATE, FOR
+// EACH ROW → tgtype 19): a merge record is immutable except for the Git saga
+// columns — the database truth it pins (the three states, the result state,
+// the plan, the counts, the actor) is fixed once written, and a finished Git
+// step is terminal. semantic_merges is NOT in appendOnlyTables for exactly
+// that reason: the saga moves git_state/git_sha/git_error/git_attempts on the
+// row, so the guard is targeted rather than the append-only pair.
 var targetedGuardTriggers = map[string]string{
 	"branches:branch_lifecycle_guard_trigger":                                           ":O:19",
 	"branches:branch_git_ref_guard_trigger":                                             ":O:23",
@@ -159,6 +170,7 @@ var targetedGuardTriggers = map[string]string{
 	"finding_claim_versions:finding_claim_versions_refs_remain":                         ":O:25",
 	"contribution_opportunities:contribution_opportunity_guard_trigger":                 ":O:23",
 	"contribution_opportunities:contribution_opportunity_target_trigger":                ":O:21",
+	"semantic_merges:semantic_merge_guard_trigger":                                      ":O:19",
 }
 
 // triggerRows returns every user trigger in the public schema as sorted
@@ -677,6 +689,42 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 			},
 			del: func(id string) error {
 				_, err := pool.Exec(ctx, `DELETE FROM project_template_instantiations WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			table: "semantic_merge_conflicts",
+			insert: func() string {
+				// The carried conflict's parents: a research branch, the PR
+				// that proposed it and the merge record that carries the
+				// conflict into the accepted state (T0406).
+				sfb := mustQueryUUID(`INSERT INTO branches (project_id, name, visibility, git_ref, created_by)
+					VALUES ($1, 'conflict-source', 'private', 'refs/heads/conflict-source', $2) RETURNING id`, p1, u1)
+				pr := mustQueryUUID(`INSERT INTO pull_requests
+					(project_id, number, source_branch_id, target_branch_id,
+					 base_state_id, proposed_state_id, title, state, created_by)
+					VALUES ($1, 1, $2, $3, $4, $5, 'contested claim', 'open', $6) RETURNING id`,
+					p1, sfb, b1, s1, s2, u1)
+				sm := mustQueryUUID(`INSERT INTO semantic_merges
+					(project_id, pull_request_id, source_branch_id, target_branch_id,
+					 base_state_id, source_state_id, target_state_id, result_state_id, actor_id,
+					 plan_version, plan, plan_digest, carried_count)
+					VALUES ($1, $2, $3, $4, $5, $6, $5, $5, $7, 'v1', '{}'::jsonb, 'digest-1', 1) RETURNING id`,
+					p1, pr, sfb, b1, s1, s2, u1)
+				return mustQueryUUID(`INSERT INTO semantic_merge_conflicts
+					(merge_id, project_id, result_state_id, target_kind, target_id,
+					 conflict_code, conflict_category, decision, decided_by,
+					 source_version_id)
+					VALUES ($1, $2, $3, 'object', $4, 'KNOWLEDGE_FIELD_DIVERGES', 'knowledge',
+					        'keep_both', $5, $6) RETURNING id`,
+					sm, p1, s2, so1, u1, sov1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE semantic_merge_conflicts SET decision = 'accept_source' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM semantic_merge_conflicts WHERE id = $1`, id)
 				return err
 			},
 		},

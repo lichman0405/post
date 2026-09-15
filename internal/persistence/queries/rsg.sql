@@ -36,6 +36,17 @@ SELECT * FROM branches WHERE id = @id;
 -- entity existence, docs/45).
 SELECT * FROM branches WHERE id = @id AND project_id = @project_id;
 
+-- name: GetBranchByProjectAndIDForUpdate :one
+-- The locked branch read (T0406, from the T0402 review): the merge reads
+-- both branches' lifecycle and head inside one transaction and must not
+-- have a concurrent merge commit between that read and its own write.
+-- Locking the rows here makes the pair of readers serialize on the
+-- branches themselves; the states commit's head CAS (UpdateBranchBaseState)
+-- is the second layer, and both fail closed.
+SELECT * FROM branches
+WHERE id = @id AND project_id = @project_id
+FOR UPDATE;
+
 -- name: ListBranchesByProject :many
 SELECT * FROM branches
 WHERE project_id = @project_id

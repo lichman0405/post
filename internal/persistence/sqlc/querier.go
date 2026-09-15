@@ -141,6 +141,13 @@ type Querier interface {
 	// reports the same "not found" outcome (never leak another project's
 	// entity existence, docs/45).
 	GetBranchByProjectAndID(ctx context.Context, arg GetBranchByProjectAndIDParams) (Branch, error)
+	// The locked branch read (T0406, from the T0402 review): the merge reads
+	// both branches' lifecycle and head inside one transaction and must not
+	// have a concurrent merge commit between that read and its own write.
+	// Locking the rows here makes the pair of readers serialize on the
+	// branches themselves; the states commit's head CAS (UpdateBranchBaseState)
+	// is the second layer, and both fail closed.
+	GetBranchByProjectAndIDForUpdate(ctx context.Context, arg GetBranchByProjectAndIDForUpdateParams) (Branch, error)
 	GetIssueByProjectAndNumber(ctx context.Context, arg GetIssueByProjectAndNumberParams) (Issue, error)
 	// The project's most recent state (T0208): the default fork point for a
 	// branch created without an explicit base_ref. Deterministic on (created_at,

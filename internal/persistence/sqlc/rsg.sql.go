@@ -250,6 +250,41 @@ func (q *Queries) GetBranchByProjectAndID(ctx context.Context, arg GetBranchByPr
 	return i, err
 }
 
+const getBranchByProjectAndIDForUpdate = `-- name: GetBranchByProjectAndIDForUpdate :one
+SELECT id, project_id, name, visibility, purpose, git_ref, base_state_id, lifecycle_state, created_by, created_at FROM branches
+WHERE id = $1 AND project_id = $2
+FOR UPDATE
+`
+
+type GetBranchByProjectAndIDForUpdateParams struct {
+	ID        pgtype.UUID `json:"id"`
+	ProjectID pgtype.UUID `json:"project_id"`
+}
+
+// The locked branch read (T0406, from the T0402 review): the merge reads
+// both branches' lifecycle and head inside one transaction and must not
+// have a concurrent merge commit between that read and its own write.
+// Locking the rows here makes the pair of readers serialize on the
+// branches themselves; the states commit's head CAS (UpdateBranchBaseState)
+// is the second layer, and both fail closed.
+func (q *Queries) GetBranchByProjectAndIDForUpdate(ctx context.Context, arg GetBranchByProjectAndIDForUpdateParams) (Branch, error) {
+	row := q.db.QueryRow(ctx, getBranchByProjectAndIDForUpdate, arg.ID, arg.ProjectID)
+	var i Branch
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Visibility,
+		&i.Purpose,
+		&i.GitRef,
+		&i.BaseStateID,
+		&i.LifecycleState,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getLatestProjectState = `-- name: GetLatestProjectState :one
 SELECT id, project_id, branch_id, parent_state_id, state_hash, git_commit_sha, manifest_version, created_at FROM project_states
 WHERE project_id = $1

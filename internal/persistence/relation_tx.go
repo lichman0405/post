@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/lichman0405/post/internal/application/relations"
@@ -69,6 +70,67 @@ func (s *RelationStore) CreateRelationInTx(ctx context.Context, tx states.Transa
 	rel := relationFromRow(row)
 	rel.CurrentVersionNo = 1
 	return rel, relationVersionFromRow(vRow), nil
+}
+
+// AppendRelationVersionInTx appends one relation version on the commit
+// transaction (T0406): a relation already exists for every relation a
+// three-way diff can report — the diff reads its versions — so the merge
+// never creates the container, it appends the version the accepted state
+// carries. The body mirrors CreateVersionInTx (and the pool-bound
+// CreateVersion): the counter CAS first, then the version row, so a lost
+// expectation reports the same *relations.VersionConflictError the rest of
+// the platform raises, and the merge's optimistic retry can recognize it.
+func (s *RelationStore) AppendRelationVersionInTx(ctx context.Context, tx states.Transaction, relationID string, expected int, in relations.VersionParams) (domain.RelationVersion, error) {
+	relationUUID, err := textUUID(relationID)
+	if err != nil {
+		return domain.RelationVersion{}, relations.ErrRelationNotFound
+	}
+	insert, err := relationInsertParams(relationID, 0, in)
+	if err != nil {
+		return domain.RelationVersion{}, relations.ErrValidation
+	}
+	q := sqlc.New(tx)
+	bumped, err := q.BumpRelationVersionNo(ctx, sqlc.BumpRelationVersionNoParams{
+		RelationID:        relationUUID,
+		ExpectedVersionNo: int32(expected),
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return domain.RelationVersion{}, mapRelationTxWriteError(err, in.SourceObjectVersionID, in.TargetObjectVersionID)
+		}
+		// Zero rows: the relation is missing, or the expectation lost. One
+		// read distinguishes the two.
+		row, gerr := q.GetRelationByID(ctx, relationUUID)
+		if errors.Is(gerr, pgx.ErrNoRows) {
+			return domain.RelationVersion{}, relations.ErrRelationNotFound
+		}
+		if gerr != nil {
+			return domain.RelationVersion{}, mapRelationTxWriteError(gerr, in.SourceObjectVersionID, in.TargetObjectVersionID)
+		}
+		return domain.RelationVersion{}, &relations.VersionConflictError{
+			RelationID: relationID, Expected: expected, Actual: int(row.CurrentVersionNo),
+		}
+	}
+	insert.VersionNo = bumped
+	if err := canonicalizeRelationAndHash(ctx, q, &insert); err != nil {
+		return domain.RelationVersion{}, mapRelationTxWriteError(err, in.SourceObjectVersionID, in.TargetObjectVersionID)
+	}
+	vRow, err := q.CreateRelationVersion(ctx, insert)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			// Defense in depth, same as CreateVersionInTx: the CAS makes a
+			// duplicate version_no unreachable — only a manually drifted
+			// counter could raise 23505 here, and the transaction is aborted
+			// so the log head cannot be read back. Report the same stable
+			// conflict with the expectation-based fallback.
+			return domain.RelationVersion{}, &relations.VersionConflictError{
+				RelationID: relationID, Expected: expected, Actual: expected + 1,
+			}
+		}
+		return domain.RelationVersion{}, mapRelationTxWriteError(err, in.SourceObjectVersionID, in.TargetObjectVersionID)
+	}
+	return relationVersionFromRow(vRow), nil
 }
 
 // mapRelationTxWriteError translates a storage-boundary failure inside the

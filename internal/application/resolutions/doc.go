@@ -5,10 +5,12 @@
 // Accept A, Accept B, Keep both versions, Create validation branch, and
 // contested/unresolved — and docs/09 §7 names what no machine may decide:
 // no winner is ever picked, no protocol value is ever averaged or
-// folded. This package enforces exactly that: the five kinds are the only
-// outcomes a decision can carry, and a decision is only accepted when it
-// names a conflict the detector actually classified for the same
-// base/source/target triple.
+// folded. This package enforces exactly that: the decision kinds are the
+// ones docs/09 §8 names — Accept A, Accept B, Keep both versions,
+// Explicit coexistence, Create validation branch, Request more evidence,
+// Abort proposed change, plus the contested/unresolved state — and a
+// decision is only accepted when it names a conflict the detector
+// actually classified for the same base/source/target triple.
 //
 // Save is the write command. It authorizes the actor through the project
 // surface + policy engine with the same require shape the RSG write path

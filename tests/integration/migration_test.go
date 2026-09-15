@@ -696,6 +696,85 @@ var canonicalTables = map[string]tableExp{
 		checks: []string{"relation_type = ANY"},
 		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("relation_id", "relations", "RESTRICT"), fk("relation_version_id", "relation_versions", "RESTRICT"), fk("source_object_id", "scientific_objects", "RESTRICT"), fk("source_object_version_id", "scientific_object_versions", "RESTRICT"), fk("target_object_id", "scientific_objects", "RESTRICT"), fk("target_object_version_id", "scientific_object_versions", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
 	},
+	// T0406 (00069): one Research PR merge — the record of the transition
+	// that advanced an accepted state, and the plan it executed. The Git
+	// saga columns are the only mutable ones (see semantic_merge_guard).
+	"semantic_merges": {
+		cols: []colExp{
+			c("id", u, false, true),
+			c("project_id", u, false, false),
+			c("pull_request_id", u, false, false),
+			c("source_branch_id", u, false, false),
+			c("target_branch_id", u, false, false),
+			c("base_state_id", u, false, false),
+			c("source_state_id", u, false, false),
+			c("target_state_id", u, false, false),
+			c("result_state_id", u, false, false),
+			c("actor_id", u, false, false),
+			c("plan_version", txt, false, false),
+			c("plan", jb, false, false),
+			c("plan_digest", txt, false, false),
+			c("applied_count", i4, false, true),
+			c("kept_target_count", i4, false, true),
+			c("carried_count", i4, false, true),
+			c("aborted_count", i4, false, true),
+			c("withheld_count", i4, false, true),
+			c("git_ref", txt, true, false),
+			c("git_sha", txt, true, false),
+			c("git_state", txt, false, true),
+			c("git_error", txt, false, true),
+			c("git_attempts", i4, false, true),
+			c("created_at", ts, false, true),
+			c("updated_at", ts, false, true),
+		},
+		pk:      []string{"id"},
+		uniques: [][]string{{"pull_request_id"}},
+		checks:  []string{"git_state"},
+		fks: []fkExp{
+			fk("project_id", "projects", "RESTRICT"),
+			fk("pull_request_id", "pull_requests", "RESTRICT"),
+			fk("source_branch_id", "branches", "RESTRICT"),
+			fk("target_branch_id", "branches", "RESTRICT"),
+			fk("base_state_id", "project_states", "RESTRICT"),
+			fk("source_state_id", "project_states", "RESTRICT"),
+			fk("target_state_id", "project_states", "RESTRICT"),
+			fk("result_state_id", "project_states", "RESTRICT"),
+			fk("actor_id", "users", "RESTRICT"),
+		},
+	},
+	// T0406 (00069): the conflicts a merge CARRIES instead of resolving —
+	// append-only (00069's guard pair, in appendOnlyTables): a later
+	// decision is a new merge, never an edit of a carried row.
+	"semantic_merge_conflicts": {
+		cols: []colExp{
+			c("id", u, false, true),
+			c("merge_id", u, false, false),
+			c("project_id", u, false, false),
+			c("result_state_id", u, false, false),
+			c("target_kind", txt, false, false),
+			c("target_id", u, false, false),
+			c("conflict_code", txt, false, false),
+			c("conflict_category", txt, false, false),
+			c("conflict_fields", jb, false, true),
+			c("conflict_payload_keys", jb, false, true),
+			c("other_object_id", u, true, false),
+			c("detail", txt, false, true),
+			c("decision", txt, false, false),
+			c("decided_by", u, false, false),
+			c("note", txt, false, true),
+			c("source_version_id", u, false, false),
+			c("target_version_id", u, true, false),
+			c("created_at", ts, false, true),
+		},
+		pk:     []string{"id"},
+		checks: []string{"target_kind", "decision"},
+		fks: []fkExp{
+			fk("merge_id", "semantic_merges", "RESTRICT"),
+			fk("project_id", "projects", "RESTRICT"),
+			fk("result_state_id", "project_states", "RESTRICT"),
+			fk("decided_by", "users", "RESTRICT"),
+		},
+	},
 }
 
 // gooseTable is the only non-canonical table the runner may create.
@@ -812,6 +891,17 @@ var explicitIndexes = map[string][]string{
 	"outbox_events_fanout_pending_idx":             {"webhook_fanned_out_at IS NULL"},
 	"project_milestones_timeline_idx":              {"project_id", "occurred_at", "created_at", "id"},
 	"research_assets_pid_uniq":                     {"pid", "UNIQUE"},
+	// T0406: the merge record's read paths (00069) — a project's merges
+	// newest-first, and the saga's retry scan over merges whose Git step has
+	// not happened yet (partial: an updated merge never needs the step
+	// again).
+	"semantic_merges_project_created_idx": {"project_id", "created_at", "id"},
+	"semantic_merges_git_pending_idx":     {"git_state", "WHERE"},
+	// T0406: the carried conflicts (00069) — read per merge (the merge
+	// page) and per target ("is this object still contested in the accepted
+	// state?").
+	"semantic_merge_conflicts_merge_idx":  {"merge_id", "target_kind", "target_id"},
+	"semantic_merge_conflicts_target_idx": {"project_id", "target_kind", "target_id", "created_at"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
