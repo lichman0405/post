@@ -1726,9 +1726,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-15T19:05:14Z
+生成时间：2026-09-15T21:21:52Z
 
-状态分布：todo 61 · ready 0 · running 0 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 72（合计 133/133 个任务）
+状态分布：todo 60 · ready 0 · running 0 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 73（合计 133/134 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1785,7 +1785,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0403 | Integrity Review Checks | P4 | merged | 2026-09-14T22:26:40Z |  | 2026-09-14T22:49:24Z | 2026-09-14T22:52:37Z |
 | T0404 | Scientific Review 模型 | P4 | merged | 2026-09-15T11:22:27Z |  | 2026-09-15T11:50:59Z | 2026-09-15T11:58:36Z |
 | T0405 | Semantic Conflict Detector | P4 | merged | 2026-09-14T10:19:26Z |  | 2026-09-14T10:46:43Z | 2026-09-14T10:50:01Z |
-| T0406 | Semantic Merge Engine | P4 | todo |  |  |  |  |
+| T0406 | Semantic Merge Engine | P4 | merged | 2026-09-15T20:39:41Z |  | 2026-09-15T21:15:40Z | 2026-09-15T21:21:36Z |
 | T0407 | Scientific Conflict Resolution UI | P4 | merged | 2026-09-14T18:21:29Z |  | 2026-09-14T21:49:46Z | 2026-09-14T21:53:00Z |
 | T0408 | PR Research Diff UI | P4 | merged | 2026-09-15T12:44:40Z |  | 2026-09-15T13:06:20Z | 2026-09-15T13:12:44Z |
 | T0409 | Merge Governance 与 frozen main 更新 | P4 | todo |  |  |  |  |
@@ -1820,6 +1820,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0709 | Asset Hub Pages/Explore | P7 | todo |  |  |  |  |
 | T0710 | Asset 完整 E2E | P7 | todo |  |  |  |  |
 | T0711 | Asset Governance 与 Rights Holder Transfer | P7 | todo |  |  |  |  |
+| T0712 | 预览响应不得泄漏外部私有实体的身份（T0704 跨项目泄漏修复） | P7 | MISSING |  |  |  |  |
 | T0801 | Public Entity Anonymous Pages | P8 | todo |  |  |  |  |
 | T0802 | Explore 聚合 | P8 | todo |  |  |  |  |
 | T0803 | Open Contribution Opportunity | P8 | merged | 2026-09-15T12:54:08Z |  | 2026-09-15T13:23:30Z | 2026-09-15T13:28:59Z |

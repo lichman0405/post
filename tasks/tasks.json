@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 133,
+  "task_count": 134,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -2556,19 +2556,37 @@
       "phase_name": "PR、Review 与 Semantic Merge",
       "title": "Merge Governance 与 frozen main 更新",
       "v1_required": true,
+      "supervisor_scope_narrowing": "2026-09-16 定稿，三处改动，逐条有据：\n（一）**加入 `internal/gitprovider/**`——这是本包原来的致命洞**。你的要求之一是「platform service Git merge/ref」，而 `internal/gitprovider` 今天**没有任何 PR 合并操作**（全目录 grep `PullRequest` 零命中；`port.go:212-276` 只有 Ensure/Get Repository、Webhook、InitialMain、MainProtection、Branch 增删查、ChangedFiles、ReadFile）。T0406 已经在应用层定义了端口 `merge.GitMerger`（`internal/application/merge/ports.go:252-254`），其注释逐字写着「**The production adapter is T0409's**」。没有这一格，你无法实现自己的第二条要求。\n（二）加入 `internal/persistence/**`：与 T0506/T0509/T0604/T0705/T0804/T0805 同一个成片缺口（见 tasks/decisions.md L1-20260916-102），根因是 phase 级默认上限本身缺这一格。事件落库、审计行、幂等台账都要用它。\n（三）**删掉 `apps/web/**`**：你的三条要求里没有一条提到界面，T0409 也不做 UI（PR 页在 apps/web 里已存在，合并按钮属后续）。与 T0406 同样的处置。\n迁移号本任务分配 **00070**：如果你确实需要建表就用这个号，不需要就在 RESULT 里明说不需要——**不得自行选号**（CLAUDE.md §8.1）。",
       "dependencies": [
         "T0406",
         "T0302"
       ],
       "requirements": [
-        "仅 maintainer/owner + reviews/policy pass",
-        "platform service Git merge/ref",
-        "new accepted RSG state"
+        "**定位与边界（先读这条，它决定你不做什么）**：本任务把「已批准的研究 PR 合并进 frozen main」这条治理路径接通：平台用自己的 Git 服务身份去提供方合并、产生事件与审计、让 main 的 accepted state 前进。**但「reviews/policy pass」这条前置判定不在本任务里发明**——它在代码里是被**刻意留空**的：`internal/application/reviews/service.go:25-27` 明写「It does NOT decide when the PR is approved: that needs the required-review calculation (**T0604**: which responsibilities/kinds are required for which changes), which is deliberately not invented here」；`internal/persistence/review_store.go:96-103` 同样明写它只落 `review_required → changes_requested`，`approved` 那一半留给 T0604。T0409 的前置是**状态** `merge_ready`，而 T0406 已经强制它（`internal/application/merge/service.go:215-217`，非 merge_ready 即 `PR_NOT_MERGEABLE`）。**你不得新增第二套「几个 review 算够」的规则**——那是 T0604 的 required review calculation，自行发明它就是创造治理规则（CLAUDE.md 决策分级 L3）",
+        "**HTTP 端点**：按 `specs/api/openapi.yaml:200-208` 的契约实现 `POST /api/v1/projects/{projectId}/pull-requests/{number}:merge`（契约里的占位名写的是 `{prId}`，那只是占位符名字、不改线上去的 URL；同族路由一律用 `{number}`，见 `cmd/api/pullrequestshttp/wiring.go:44-48`——**照同族的写法走**）。summary 原文是「Merge approved PR into frozen main; **governance action**」，参数是 ProjectId + IdempotencyKey，响应 200。端点要接上 T0406 的 `internal/application/merge` 服务；**不得**在 handler 里重写合并逻辑。注意 `cmd/api/main.go` 今天**没有**装配 `merge.NewService`（全 `cmd/` grep 零命中），装配是你的事",
+        "**幂等**：`Idempotency-Key` 是本接口的契约要求（`specs/api/openapi.yaml` 必填、minLength 8），也是 `docs/22_API_DESIGN.md` §3 明文列的（\"Idempotency-Key 对 create/command/publish/merge/release\"）。取法与既有实现一致：`r.Header.Get(\"Idempotency-Key\")`，空则不带。**但台账表必须你自己立一张，这是迁移 00070 的主要内容。**我把现成的两张逐张读过，**没有一张装得下 merge**：`release_creations`（`infra/migrations/00053_release_governance.sql:40-46`）的 `release_id uuid NOT NULL REFERENCES releases(id)`、`project_milestone_creations`（`00063:50-56`）的 `milestone_id` 都是 NOT NULL 外键；T0406 新建的 `semantic_merges`（`infra/migrations/00069_semantic_merge.sql:50`）我也逐列看过，**没有 idempotency_key 列**。所以**照抄 `release_creations` 的形状另立一张**：`id` / `project_id` / `idempotency_key` / `merge_id` / `created_at` + `UNIQUE(project_id, idempotency_key)` + 两条 append_only 触发器（`00053` 里有完整写法，照写）。**取法与流程照抄既有的，不要另创**：HTTP 侧\"键来自 `r.Header.Get(\"Idempotency-Key\")`、空则传 nil\"（`cmd/api/releasehttp/release_handlers.go:195-206`）→ 命令里先查台账、命中即回放（`internal/application/releases/command.go:116`）→ 端口形状 `LookupCreation(ctx, projectID, key) (*T, error)`（`internal/application/releases/ports.go:131-137`）→ sqlc 查询对（`internal/persistence/queries/releases_assets.sql:28-35` 的 `GetReleaseCreation` / `CreateReleaseCreation`）。同一个键重复请求返回同一结果，不产生第二次合并。",
+        "**命令必须自己在服务端重跑校验，不信任任何预检**：`docs/22_API_DESIGN.md` §7 原文——「Command 必须再次 server-side run validation，不能信任前端预检」。T0406 已经在自己的事务里重跑了 RSG 闸（target 是 main 时走 `rsgvalidation.GateMain`，`internal/application/merge/service.go:375-380`），**不要去重复实现它**。你要补的是另一半：`internal/rsg/integrity/check.go:79-81` 逐字把这件事指名交给了你——「a blocking failure blocks the proposal — the integrity review reports \"blocked\" and **the merge governance (T0409) refuses to proceed on it**」。所以合并路径必须自己跑 `prchecks.CheckPullRequest`（`internal/application/prchecks/service.go:61`），遇到任何 `SeverityBlocking` 的失败即**拒合并**，并把**完整报告**交回调用方（形状照 `internal/application/releases/errors.go` 的 `GateRefused{Report}`）。今天 `prchecks` 只被只读的 checks 端点调用（`cmd/api/main.go:413`），merge 路径完全没接——这就是你要补的",
+        "**policy 那一半（\"reviews/policy pass\" 的 policy）——有现成的判定面，不要自己读 policy_json**：`internal/application/policy` 已经交付了 T0603 的**类型化判定面**：`Query{Rule}` → `Decision{Found, Bool, Int, List, Raw}`，契约是 fail-closed，原文写在 `internal/application/policy/evaluate.go:11-17`——「an unknown rule key, or a stored value that does not match its registered kind, is an error, and callers treat errors as default deny (**an absent rule is not an error** — the caller decides the safe default and finds it reported as Found=false)」。你要做的：\n  （a）用 `Service.EffectivePolicy`（`internal/application/policy/service.go:166`）取**有效**策略——org 是下界、project 只能更严（`domain.MergeEffective`，docs/12 §5「Project policy 可更严格，不能静默放宽」）。若它在 `cmd/api/main.go` 里还没装配，装配是你的事。\n  （b）判 `RuleMainProtected`（`internal/domain/policy.go:34-36`，原文「requires every change to frozen main to pass **review-and-merge gates**」）。**这条规则只能让路更严、不能让它变成绕过路径**：main 只能经 PR 合并前进是 `docs/09` §3 的**结构性**要求（原文「禁止所有直接 push/semantic write；即便 Owner 也只能经 PR merge」），不是策略给的，所以 `Found=false`（策略里没这一条）**不得**被当成放行理由。`Bool=false` 时怎么办是个真空档——按 fail-closed 处理并在 RESULT 里把你的选择写清楚（我倾向仍不许它松开，但这是判断点，要说明）。\n  （c）任何错误（未知 rule key、类型不符、取策略失败）一律按**拒绝**。\n  **不要**去消费 `RuleReleaseMinReviewers`（它说的是 release merge 的最小批准数，属 release 那条线，不是本任务）；**也不要新增 rule key**——扩词表是 T0604 的事，`internal/domain/policy.go:22-25` 明写「later tasks (**T0604** reviewer routing) can extend the vocabulary without a migration」。",
+        "**提供方侧的 Git 合并适配器**：给 `internal/gitprovider` 加 PR 合并操作并实现 Gitea 一侧，使 T0406 的 `merge.GitMerger`（`internal/application/merge/ports.go:252-254`，契约就是 `MergePullRequest(ctx, GitMergeRequest) (GitMergeResult, error)`）第一次有真实实现。**关键：不许走 push。** 那段注释逐字写着「Note what this port does NOT have: **a push**. main is advanced by a provider-side PR merge and by nothing else, which is why the platform layer (gitprovider.RefGuard) can decide legitimacy from the actor alone.」——走 Gitea 的 PR merge 接口，不是 ref update。T0406 的 saga 在没有适配器时记 `pending` 并保持可重试（`service.go:800-803`），并且有个 `ListPendingGitMerges(ctx, limit)`（`internal/persistence/merge_store.go:526`）等着重试用；**重试循环要不要在本任务里起一个 worker，按你的判断定，但要在 RESULT 里说明你的选择和理由**（规格没有 saga 规范，这是实现细节）\n  **复核点名的一个坑（照做）**：`GitMerger` 是可选接口字段，它的文档说\"nil 适配器是合法的\"；但**塞一个带类型的 nil 指针进去会让接口本身不为 nil**，于是第一次合并不是走 pending 路径而是直接 panic（T0406 写单测时正好踩到）。你在 `cmd/api` 的装配处**要么传无类型的 nil、要么在端口上加显式的 IsNil 判定**，并写一个测试把这条钉住——这条不钉，T0409 上线第一天就是个崩溃点。",
+        "**main 的双层保护必须原样保住**：T0302 交付的是「Gitea protected branch + 平台 ref guard」（`internal/gitprovider/refguard.go`：`ErrMainDirectPush` / `ErrMainDelete`，空 MergeService 时 fail closed；`internal/gitprovider/mainprotection.go` 的 canonical 规则比对）。T0406 已经在合并时用 `RefGuard.Check(..., ViaMerge: true)` 自检（`internal/application/merge/service.go:823-829`）。你的新适配器**不得**开出任何 RefGuard 会拒的路径：不加 push、不加 force、不加 delete、不绕过 `ViaMerge` 判定。既有的 `tests/integration/gitea_protection_test.go` 必须仍然绿",
+        "**领域事件**：合并成功必须发出领域事件，事件名用 `docs/18_EVENTS_SUBSCRIPTIONS.md:9` 已经列出的那个 `pr.merged`（规格给了名字，你不需要发明）。走既有的 outbox 通道，形状照 `internal/application/rsg/events.go:20-21`（`state.committed` / `scientific_object.version_created`）这个先例。payload 至少要能定位到：项目、PR 号、被接受的 state id、合并记录 id。**不要**为此另造事件基础设施",
+        "**审计行**：合并成功必须留 audit 行，规则与既有各面一致——「一行一动作、与它记录的那件事同一个事务」（见 `internal/domain/audit.go:40-56` 各条注释的同一句话）。`internal/domain/audit.go:20-56` 今天**没有**任何 merge/PR 常量，你按该文件自己的命名惯例加（那套惯例是完整名词 + 点分：`project.member_role_changed`、`conflict.resolution_saved`、`release.created`），建议 `ActionPullRequestMerged = \"pull_request.merged\"`。注意 audit action 与领域事件**分属两套词表**（audit 的惯例是完整名词，事件名由 docs/18 规定用缩写 `pr.`），所以两边名字不一样是**刻意的**，在 RESULT 里说明你的选择即可",
+        "**contribution 不归你写（这条是对验收标准的重新划分，理由见下）**：`contribution_events` 表存在（`infra/migrations/00011_external_contribution.sql:21-32`）但**全仓库没有任何 Go writer**，而 `tasks/tasks.json` 里 **T0807 的标题就是「Contribution Ledger projection：从 domain events 生成 contribution events」**。所以正确的分工是：**你负责让那个投影有输入**（上面第 7 条的事件必须带够信息），**T0807 负责把它投影成 ledger 行**。你**不要**直接写 `contribution_events`、也不要发明它的 `event_type` / `role_codes` / `accepted_context` 语义——那会与 T0807 撞车并需要发明规格里没有的字段语义。在 RESULT 里把这条分工写清楚",
+        "**frozen main 的语义——读清楚，别顺手发明**：`projects.main_frozen`（`infra/migrations/00003_projects.sql:22`）今天**只被上报，从不被强制**——没有任何 Go 代码在任何写入路径上读它；`ActionFreezeMain`（`internal/authz/action.go:29-30`）**零调用者**；`internal/application/merge/doc.go:48-52` 把强制这件事**指名归 T0601**（原话：\"no code refuses a direct semantic write to main today (projects.main_frozen is reported, not enforced). Closing that is T0601's\"）。而且 `docs/09_VERSION_CONTROL.md` §3 说「Emergency unfreeze 不在 V1 提供」——所以「何时冻结、谁能解冻」这套语义**规格没给**。**本任务不得实现冻结强制**（那是 T0601），也不得自行定义冻结/解冻语义。你在「frozen main 更新」这件事上要保证的是：**main 只能经合并路径前进**——没有 push、没有绕过，合并后 main 的 branch head 等于被接受的那个 state",
+        "**new accepted RSG state 不由你重造**：T0406 已经在合并事务里用 `states.Commit` 提交新状态（target 是 main 时 `Gate: GateMain`），并推进分支 head。你的任务是**端到端把它验实**：合并后 main 的 head state 确实等于被接受的那个 state，且经既有读路径读得到（`internal/application/rsg/overview.go` 的 `current_main`、`cmd/api/rsghttp/overview.go`）。不要另写一条「写 main」的路径——那正是 T0406 doc.go 点名的缺口所忌讳的\n  **读回 plan 时的一个坑（复核点名）**：`plan_digest` 是规范字节的 sha256，而 plan 存在 **jsonb 列**里，jsonb 会重排键序、规整空白，所以**永远不要拿列里的字节去跟 `CanonicalJSON` 逐字节比**——那会产生假的\"对不上\"。要校验就从被记下的那个三元组重新推导再比摘要。你的审计/读回路径若碰到它，按这条走。",
+        "**端到端测试（本任务的 Gate 测试，名字就是 tasks/tests.json 里的 `merge governance e2e`）**：用**真** PostgreSQL + **真** Gitea（先例：T0302 的 `tests/integration/gitea_protection_test.go` 与 `tests/acceptance/gitea-real-services-e2e.sh` 已经在真 Gitea 上跑）。必须断言四件事同时成立：(a) PR 变成 `merged`；(b) main 的 head state 是被接受的那个 state；(c) 领域事件与 audit 行都在；(d) **直接 push main 仍然被拒**。(a)(b)(d) 必须经由真实路径，不许用 mock 替代——这正是 G3 的意思（CLAUDE.md §6：跨边界任务用真实 PostgreSQL/Gitea，不以全 mock 替代关键链路）",
+        "**关于「PR 怎么变成 merge_ready」——这是本任务最硬的前置空洞，处理方式由你决定但必须如实报告**：今天的写路径里，唯一会改 PR 状态的是 `internal/persistence/review_store.go:104-114`，而它**只做** `review_required → changes_requested`；`approved` / `merge_ready` 没有任何生产者（那是 T0604）。所以端到端测试里，(a)(b)(c)(d) 的前置 PR 状态，要么经由**构造**（照既有集成测试构造状态的同一手法），要么你发现有一条我漏掉的真实路径。**两种都接受，但必须在 RESULT 里明说用了哪种、以及「今天产品路径上没有任何办法把 PR 变成可合并态」这句话是否属实。** 绝对不许为了让 e2e 好看而去发明 review 判定规则",
+        "**复核遗留的 7 条（T0406 的独立复核给的，全部非阻塞，但都落在你这次要碰的文件里，所以顺手改准，不另立任务）**：T0406 的复核结论是 approve、0 blocking、0 major、3 minor + 4 nit。**约束是\"不许动被复核过的判定语义\"，不是\"只许改注释\"**：复核人在 `/tmp` 临时副本上做的五次定向突变，钉住的是**判定本身**——同一输入必得同一 plan（确定性）、冲突不自动选赢家、八种人类决定动作各自生效、私有源并入公开目标时整体扣留。这四条语义一个字都不许改，改了那份证据就作废。而下面七条改的是**报告面、死代码与测试的真实性**：该接进响应的字段要接（1）、该列的 blocking 要列全（2）、该删的死参数与该跑起来的死 SQL 要处理（4）（5）、注释与测试名要说真话（3）（6）（7）。**这些是必做，不是可选。**每一条在 RESULT 里单独写明你怎么处理的：\n  （1）`internal/rsg/merge/merge.go:563` —— `finish()` 里 `Blocker{Code: c.Block, Detail: c.Block}` 让 `Detail` 永远等于 `Code`，而 `planner.block(out, code, why)` 把 `why` 整个丢掉，于是 `blockerDetail()` 里写好的说明（如 \"the human sent ... to a validation branch (docs/09 §8)\"）根本到不了调用方。你正好要把这个 plan 渲成 HTTP 响应，**把 `why` 接进 `Blocker.Detail`**（或删掉该字段，二选一，在 RESULT 里说明理由），别让调用方只看到一个光秃秃的码。\n  （2）`internal/rsg/merge/merge.go:477` —— 同一个 target 上有**多条** blocking 决定时只报第一条（`resolve()` 取 `firstKind`），读码的人可能以为撤掉被点名的那条就解锁了，其实还有第二条站着。plan 仍然是拒的，所以不改也不会合错；既然第（1）条正在修报告面，**把每个 target 上所有 blocking 决定都列出来**。\n  （3）`internal/persistence/merge_store.go:113` —— `readVersionHeads` 的注释说\"跑在 commit 事务里时 `FOR UPDATE`、跑在 pool 上时不加\"，但 `:135` 与 `:152` 两条语句**都**加了 `FOR UPDATE`，pool 那条路径是活的（`internal/application/merge/service.go:287` 的预检读）。复核的判断是行为无害（没有跨语句持锁、id 有序走，不可能死锁），**错的是注释**。**改注释，不要动 `FOR UPDATE`** —— 去掉它才是改行为，那要重新验证。\n  （4）`internal/persistence/merge_store.go:489` —— `rereadMerge` 的 `affected int64` 参数从不使用（函数体第一行就是 `_ = affected`）。去掉参数，把\"零行受影响有两种可能\"的解释挪进 doc 注释。\n  （5）`internal/persistence/merge_store.go:526` —— `ListPendingGitMerges` 全仓库**零调用者**，那段 SQL 没有任何测试跑过。它正是你的 Git saga 重试要用的面。**要么在你这儿真正调用它、要么补一个 store 测试**，别让一段没跑过的 SQL 留在树里当作\"以后会用\"。\n  （6）`internal/rsg/merge/merge_test.go:669-672`（**行号是返工后重定位的：T0406 返工删掉了该文件前面两个没用的方法，原编号 678 已作废**） —— 第二条确定性断言的注释写着「把两条决定对调后重建」，但代码是 `build(d1)` 与 `build(d1)` 比两次，决定顺序无关性其实**没被测到**，注释在替一条不存在的覆盖作证。**这条要真的把决定对调**（`build(d1)` 比 `build(d2)` 之类的正确写法），不许只把注释改软了事——增强测试不违反 §5.1，把注释改成符合现状才是把假覆盖洗白。**如果对调之后测试真的红了，那是 merge 的真实缺陷：把它写进 RESULT 交给 Supervisor，不得删断言、skip 或放宽来换取变绿。**。\n  （7）`tests/integration/resolution_test.go:119` —— `TestResolutionSavesAllFiveKinds` 的名字与注释说\"钉住五种人类决定\"，而迁移 00069 与 `domain.ValidResolutionKind` 已把它扩到八种。这条本身是 T0404 的遗产、不是你的改动，八种的覆盖已经在 `internal/domain/conflict_resolution_test.go` 与 `tests/integration/merge_test.go` 里，所以**只需把名字与注释改准，不要新增测试**。\n  （8）**第三轮复核新提的一条（不是那七条之一）——只记档、不改语义**：`internal/rsg/merge/merge.go:598` —— 计划里**一条都没应用**时 `CodeNothingToMerge` 会被追加，于是一个\"唯一的源侧变更正被争用（carried）或被扣留（发布闸/受限基础）\"的 PR，会被以 `MERGE_NOTHING_TO_MERGE` 拒绝，而不是把那条争用**照原样**提交进 accepted state。复核人自己写明这是 \"**a defensible L1 product decision**\"、且**符合**验收标准（争用可以留在 main 里），所以**不得改这个行为**。要做的是：**在你的命令面/错误面里把它说清楚**，让操作者不会在一个有冲突的 PR 上被一句\"无内容可合\"弄懵——即让拒绝本身**可读**（说明\"这条变更被争用/扣留，因此没有可应用的内容\"），而不是换一种判定。",
+        "**禁止项（越界即被 collect 拒）**：不发明 required-review 计算（T0604 的）；不写 `contribution_events`（T0807 的）；不实现冻结强制（T0601 的）；不编辑 `specs/**`（Supervisor-only；只有 `specs/database/postgres.sql` 与 `specs/SPEC_VERSION.json` 两个派生物在你这儿，且只能靠 `scripts/gen_schema_snapshot.py` 与 `scripts/spec_version.py --write` 重新生成，不得手工编辑）；**不碰 `internal/assets/**`、`cmd/api/assetshttp/**`、`tests/integration/asset_preview_test.go`**——T0712 正在并行改这几处，碰了就是冲突；不新增任何直写 main 的路径"
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "main direct write 仍禁止",
-        "merge event/audit/contribution 产生"
+        "**main direct write 仍禁止（原有，含义按下面这句钉死）**：新的合并路径**只**走提供方 PR merge（`ViaMerge` 判定通过），不引入任何 push/force/delete 分支；既有的 `tests/integration/gitea_protection_test.go` 仍绿，且新增断言「经新端点合并成功」与「直接 push main 仍被拒」在同一个 e2e 里同时成立",
+        "**合并真的推进了 accepted state**：合并后 main 的分支 head state 等于被接受的那个 state，并经既有 main-head 读路径读得到（不是只有数据库里对、读不出来）",
+        "**merge 产生领域事件 `pr.merged` 与 audit 行**（原有「merge event/audit/contribution 产生」的重新划分：event 与 audit 由你落，`contribution_events` 投影归 T0807——理由见 requirement 9，依据是 T0807 自己的标题就是「从 domain events 生成 contribution events」）。这条**不放松**：没有这两样，T0807 的 ledger 投影就没有输入",
+        "**服务端校验在命令内重跑且 blocking 失败即拒**：`internal/rsg/integrity/check.go:79-81` 把这件事指名交给你，`docs/22` §7 明文要求命令自己重跑。可执行的证据：种一个 blocking 的 integrity 失败，断言合并被拒且调用方拿到**完整报告**（不是一句笼统的 forbidden）",
+        "**幂等**：同一个 `Idempotency-Key` 重复请求返回同一结果，不产生第二次合并、不产生第二条 audit 行",
+        "**policy 判定走既有判定面且 fail-closed**：合并前用 `internal/application/policy` 的 `EffectivePolicy` + `Query{Rule: domain.RuleMainProtected}` 判一次；策略缺失（`Found=false`）、类型不符、或取策略失败**都不得成为放行理由**。可执行的证据：种一个「取策略失败」或「rule 值类型不符」的状态，断言合并在这种情况下被拒——证明这条判定真的会说不，而不是摆设"
       ],
       "tests": [
         "merge governance e2e"
@@ -2580,21 +2598,41 @@
         "internal/rsg/**",
         "internal/application/**",
         "internal/domain/**",
+        "internal/persistence/**",
+        "internal/gitprovider/**",
         "go.mod",
         "go.sum",
         ".env.example",
         "cmd/api/**",
-        "apps/web/**",
         "tests/**"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
+        "tasks/tasks.json",
         "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/tests.json",
+        "tasks/progress.md",
+        "tasks/decisions.md",
+        "apps/web/**",
+        "internal/assets/**",
+        "cmd/api/assetshttp/**",
+        "tests/integration/asset_preview_test.go"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
+      "relevant_specs": [
+        "docs/09_VERSION_CONTROL.md §3（Frozen main：正式研发开始后 main 为 protected/frozen，禁止所有直接 push/semantic write，即便 Owner 也只能经 PR merge；Emergency unfreeze 不在 V1 提供）、§4（PR 包含 source/target branch、base state、RSG diff、file diff、validation results、review requirements、discussion、visibility impact、dependency impact、merge strategy）、§5（Scientific Review 与 Integrity Review 分维度记录，不用单一 approve 抹平差异）、§9（Merge 只改变 accepted state）",
+        "docs/43_STATE_MACHINES.md:13（PR：open → review_required → changes_requested/approved → merge_ready → merged；Scientific/Integrity review 各自状态）与 :7（Branch：active → merged | aborted；merged/aborted history immutable）",
+        "docs/22_API_DESIGN.md §3（Idempotency-Key 对 create/command/publish/merge/release）、§6（命令清单含 merge；高风险 command 必须 server-side authorization + policy validation）、§7（Command 必须再次 server-side run validation，不能信任前端预检）",
+        "docs/45_ERROR_MODEL.md（既有码表：AUTH_FORBIDDEN、MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN、SCIENTIFIC_CONFLICT_REQUIRES_HUMAN、RSG_VALIDATION_FAILED、IDEMPOTENCY_CONFLICT；末句「错误信息告诉用户下一步，不泄漏 private entity existence 或内部 stack」）",
+        "docs/18_EVENTS_SUBSCRIPTIONS.md:9（事件名清单含 pr.merged、main.frozen）",
+        "docs/13_CONTRIBUTION_REPUTATION.md:5（客观事件 append-only，含 approved merge）——这是 T0807 投影的输入定义",
+        "docs/60_AGENT_SAFETY_BOUNDARIES.md:5（必须 human-governed：merge accepted main）与 docs/12_PERMISSIONS_RIGHTS_POLICY.md §3（Agent/MCP 不得自动执行扩大可见性操作）",
+        "docs/31_MASTER_ACCEPTANCE.md（Gate A：frozen main 无 direct semantic/Git write；Gate B：Branch/PR/RSG diff/Scientific Review/Integrity Review/merge 完整；Gate G：main direct push 拒绝、Agent 无 merge 权限）",
+        "specs/api/openapi.yaml:200-208（POST /projects/{projectId}/pull-requests/{prId}:merge 的契约）",
+        "specs/policies/permissions-matrix.csv:9（merge_main,deny,deny,deny,deny,allow,allow,deny）与 specs/mcp/tools.json（merge_main 在 forbidden_default_agent_actions 里）",
+        "internal/application/merge/doc.go（T0406 的边界声明与它自己点名的缺口）与 internal/rsg/integrity/check.go:79-81（把 blocking 拒绝指名交给 T0409）"
+      ],
       "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
     },
     {
@@ -2604,7 +2642,8 @@
       "title": "PR/Branch 完整 E2E",
       "v1_required": true,
       "dependencies": [
-        "T0409"
+        "T0409",
+        "T0604"
       ],
       "requirements": [
         "seed branch create→objects→PR→review→merge",
@@ -3737,6 +3776,7 @@
       "phase_name": "Research Asset Hub、Rights 与 Publish",
       "title": "Asset Publish Governance",
       "v1_required": true,
+      "supervisor_scope_narrowing": "2026-09-16 定稿，三处改动：\n（一）**加入 `internal/persistence/**` 与 `internal/application/**`**。原范围装不下它自己的验收标准：要求 12（把 `origin_refs` 落库，issue #225）落在 `internal/persistence/queries/releases_assets.sql`，幂等台账与发布编排落在 `internal/application/**`。缺 `internal/persistence/**` 是与 T0506/T0509/T0604/T0804/T0805 成片的同一个缺口（tasks/decisions.md L1-20260916-102）。\n（二）**删掉 `apps/web/**` 与 `packages/schemas/**`**：发布界面属 T0709「Asset Hub Pages」，本任务八条要求里没有一条提界面；T0704 的范围里也没有这两条，加了只会放大冲突面（T0704 全程没碰过 web）。\n（三）派工前**必须先读 issue #237**：权限矩阵里与发布有关的只有 `publish_private_to_public` 一行，有两个缺口（维护者那格是 conditional 而“per-resource condition”没有规格定义；以及“发布一个仍是私有的版本”没有对应行）。**按 fail-closed 实现并在 follow-up 里点名**，不得自行发明 resolver 规则，不得修改 `specs/policies/permissions-matrix.csv`。\n迁移号分配 **00071**（69 给了 T0406、70 给了 T0409；编号由 Supervisor 在 dispatch 时分配，Worker 不得自行选号，CLAUDE.md §8.1）。",
       "dependencies": [
         "T0704"
       ],
@@ -3748,15 +3788,29 @@
         "GateResult.Facts.Document 与 .Ref 是调用方填的：必须用即将写入的那一行渲染出的科研资产版本文档填上，否则校验阶梯的 asset_schema 检查会把发布挡下来（这两个 fact 缺省为空 = 失败关闭，但不显眼，T0702 的 RESULT 风险 3）",
         "依赖钉一律经 assets.NewDependencyPin 构造：带空白的拼法（'<pid>@ 1.0'）今天能绕开\"同一版本不许列两次\"（#233 minor 1），发布路径不得把这种拼法写进清单",
         "不得把协议对象文档里的 step 对象直接搬进 metadata.steps —— 清单 metadata 的形状是从对象 schema 压缩过的（对象 schema 里 steps 是对象数组，清单里是非空字符串数组，#233 minor 2）",
-        "assets.REQUIRED_METADATA 是下界不是闭集（多声明的键一律只查形状），且 material_collection / benchmark 两行尚未成为已裁定的产品规则（#232）：可以按现状接线，但不得据以扩写产品语义"
+        "assets.REQUIRED_METADATA 是下界不是闭集（多声明的键一律只查形状），且 material_collection / benchmark 两行尚未成为已裁定的产品规则（#232）：可以按现状接线，但不得据以扩写产品语义",
+        "**显式确认走权限矩阵（这条不是本任务要决定的，既定约定已经回答）**：发布必须判定 `publish_private_to_public` —— `internal/application/contribution/doc.go` 逐字写着「The consuming API task must also map Publicize onto authz.ActionPublishPrivateToPublic (agent column: deny)」，即\"把可见性放大的操作映射到这一行\"是**项目已有约定**，不是本任务发明的。docs/12 §3 要求任何 private→public、restricted→open、named access→public 都要求有权限的人**显式确认**并产生 audit/event。**形状照抄 `internal/application/releases/command.go:287-296`**：`Authorize(...)` 出错即拒，`!decision.Permits()` 即拒。**不要实现 resolver**：`conditional` 那个\"条件\"没有任何规格定义（issue #237），按 `internal/authz/verdict.go` 自己写的 default deny（\"Only VerdictAllow permits: every conditional form still requires the enforcement site to resolve its condition, and the safe default for an unresolved condition is refusal\"）落到拒即可。**不得修改 `specs/policies/permissions-matrix.csv`。** 可见后果：V1 只有 owner 能发布（维护者那格是 conditional ⇒ 未解 ⇒ 拒），这是**有意的 fail-closed**，在 RESULT 里写明",
+        "**Agent 默认拒绝，两道防线**：矩阵里 `agent_default` 对 `publish_private_to_public` 是 deny（docs/23 §4 原文\"Agent token 默认无 `visibility:publish` scope\"），实现必须走 `internal/authz` 的判定；**另加一道域层兜底**，照抄 `internal/application/contribution/service.go:173-175` 的形状（`if by.IsAgent { return contribution.ContributionOpportunity{}, &AgentNotPermittedError{Action: \"publicize\"} }`，错误类型在同包 `errors.go:49-53`，线上码是 `errors.go:39` 的 `CodeAgentPublicizeDenied = \"OPPORTUNITY_AGENT_PUBLICIZE_DENIED\"`）。三处一致：契约自己写着这是 \"**human governance action**\"（`specs/api/openapi.yaml` 的 assets:publish summary）、`specs/mcp/tools.json` 只给代理预览不给执行、`forbidden_default_agent_actions` 含 `publish_private_to_public`",
+        "**发布必须自己在服务端重跑影响预览，不信任任何预检**：docs/23 §4 要求 private→public 有 impact preview 且 \"no hidden private dependency leak\"；`docs/22_API_DESIGN.md` §7 原文——\"Command 必须再次 server-side run validation，**不能信任前端预检**\"。发布路径必须在自己的事务里以**真实当前状态**重跑 `assets.Preview`（或等价的闸判定），存在 blocking 的私有依赖即拒。**不得**把 T0704 的只读预览接口当成授权凭据，也不得信任请求里带回来的任何\"预览已通过\"标记。既有先例：`internal/application/releases/errors.go` 的 `ErrReleaseGate`（注释原文 \"the command re-runs the gate server-side, never trusts a precheck\"）与 `GateRefused{Report}` —— 拒绝时把**完整报告**交给调用方",
+        "**origin_refs 必须落库（issue #225）**：`research_asset_versions.origin_refs` 在迁移 `00064_asset_pid_origin.sql` 里是 NOT NULL、`CHECK (cardinality(origin_refs) >= 1)`、且禁止 NULL 元素（文件里有专门一段解释为什么 `ARRAY[NULL]` 也拦）；但现有 `PublishResearchAssetVersion`（`internal/persistence/queries/releases_assets.sql:42-47`）的 INSERT 列里**没有这一列**。发布路径必须写入候选声明的那组 refs（经 `assets.NewOriginRef` 的规范形式，它返回 `(OriginRef, bool)`），并让发布出去的版本带上它",
+        "**pid 由发布路径生成**：`00064` 的注释明说应用生成 pid 的那条路径 \"arrives with T0705 (publish)\"，现在靠列 DEFAULT 兜着。新建资产时用 `assets.NewPID()`（26 位小写 Crockford base32，DB CHECK `^[0-9a-hjkmnp-tv-z]{26}$`），不要依赖列 DEFAULT",
+        "**幂等**：同一个 `Idempotency-Key` 的重复请求返回同一 asset version，不产生第二个版本；键被复用到不同目标时报 `IDEMPOTENCY_CONFLICT`（`docs/45_ERROR_MODEL.md:22` 列有此码）。这是**规格要求不只是契约要求**（docs/22 §3：\"`Idempotency-Key` 对 create/command/publish/merge/release\"；`specs/api/openapi.yaml` 里该头必填、minLength 8）。**本任务必须新增一张台账表，这是迁移 00071 的主要内容。**我把现有的两张逐张读过，**没有一张能复用**：`release_creations`（`infra/migrations/00053_release_governance.sql:40-46`）的 `release_id uuid NOT NULL REFERENCES releases(id)`、`project_milestone_creations`（`infra/migrations/00063_project_milestones.sql:50-56`）的 `milestone_id` 都是 NOT NULL 外键，装不下 asset version；`research_asset_versions`（`00010`）也没有 idempotency 列。所以**照抄它的形状另立一张**：`id` / `project_id` / `idempotency_key` / `asset_version_id` / `created_at` + `UNIQUE(project_id, idempotency_key)` + 两条 append_only 触发器（`00053` 与 `00063` 两处都有完整写法，照写）。**流程与取法照抄既有的，不要另创**：先查台账命中即回放（`internal/application/releases/command.go:116`）→ 端口形状 `LookupCreation(ctx, projectID, idempotencyKey) (*T, error)`（`internal/application/releases/ports.go:121-137`）→ sqlc 查询 `GetReleaseCreation` / `CreateReleaseCreation`（`internal/persistence/queries/releases_assets.sql:28-35`）→ HTTP 侧\"键来自 `r.Header.Get(\"Idempotency-Key\")`、空则传 nil\"（`cmd/api/releasehttp/release_handlers.go:195-206`）。",
+        "**审计与领域事件**：成功的发布必须留下 audit event 与 domain event（docs/23 §4、docs/12 §3），写在**与发布同一个事务**里（这是本项目各面的统一规矩，见 `internal/domain/audit.go` 各条注释）。org policy 是最低治理要求，project policy 可更严、**不得静默放宽**（docs/12 §5）",
+        "**服务端授权要先于目标查询**：授权拒绝必须在读项目/资产之前发生，否则拒绝本身就泄漏了\"这个项目存不存在\"。既有先例逐字写在 `internal/application/releases/errors.go` 的 `ErrForbidden` 注释里（\"resolved before any target lookup, so the denial never discloses whether the project exists\"）。发布路径必须同一顺序",
+        "**不得跳过发布闸**：`docs/11` §3 的发布门槛（source accepted state/release、version fixed、provenance、creators/contributors、rights/license、visibility、dependency pin、hash、required metadata、schema validation）必须由发布路径**自己**在服务端判一遍。已发布的 asset version 不可变（`research_asset_versions` 的行触发器 append-only，迁移 00014），发布路径不得试图去改已有版本行",
+        "**不做**：不动接口路径与响应字段名（契约在 `specs/api/openapi.yaml`）；不改 `specs/**`（除两个派生物：`specs/database/postgres.sql` 与 `specs/SPEC_VERSION.json`，且只能靠 `scripts/gen_schema_snapshot.py` 与 `scripts/spec_version.py --write` 重新生成）；不做发布界面（T0709）；不实现权限矩阵里没有的规则"
       ],
       "deliverables": [],
       "acceptance_criteria": [
         "Agent token 直接 publish 被拒",
-        "重复请求幂等"
+        "重复请求幂等",
+        "**private→public 发布在存在私有依赖时被拒**（docs/23 §4 的 \"no hidden private dependency leak\" + docs/31 Gate C 的\"有影响预览和显式确认\"）：用真库上种好的泄露形态各自验一遍，并断言拒绝时调用方拿到的是**完整报告**而不是一句笼统的 forbidden",
+        "**已发布的 asset version 不可变**：重复发布同一 `(asset, version)` 被拒且错误码是 `ASSET_VERSION_IMMUTABLE`；已写入的版本行不可改（append-only 触发器在真库上验）",
+        "**发布拒绝要在目标查询之前**：用一个不存在的项目 id 触发授权拒绝，断言返回的是权限类错误而**不是**\"项目不存在\"——证明拒绝没有泄漏存在性",
+        "**幂等键真的挡住了第二次发布**：同一个键重复请求返回同一 asset version id，库里只有一行；并断言**没有**产生第二条 audit 行"
       ],
       "tests": [
-        "publish security e2e"
+        "asset publish tests"
       ],
       "allowed_scope": [
         "infra/migrations/**",
@@ -3764,22 +3818,40 @@
         "specs/SPEC_VERSION.json",
         "internal/assets/**",
         "internal/rights/**",
+        "internal/application/**",
+        "internal/persistence/**",
         "go.mod",
         "go.sum",
         ".env.example",
         "cmd/api/**",
-        "apps/web/**",
-        "packages/schemas/**",
         "tests/**"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
+        "tasks/tasks.json",
         "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/tests.json",
+        "tasks/progress.md",
+        "tasks/decisions.md",
+        "apps/web/**",
+        "packages/schemas/**",
+        "specs/policies/permissions-matrix.csv"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
+      "relevant_specs": [
+        "docs/23_SECURITY_PRIVACY.md §4（private→public 是最高风险 operation：human explicit action、impact preview、rights validation、no hidden private dependency leak、audit event、optional org policy approvals；Agent token 默认无 visibility:publish scope）、§5（所有 query/search/export/download 按 tenant/project/object policy 过滤）",
+        "docs/12_PERMISSIONS_RIGHTS_POLICY.md §2（Private Project 默认不可见；可显式 Publish Asset/Knowledge/Attestation）、§3（不扩大可见性原则：private→public、restricted→open、named access→public 都要求有权限的人显式确认并产生 audit/event；Agent/MCP 不得自动执行）、§5（org policy 是最低治理要求，project policy 可更严格不能静默放宽）",
+        "docs/11_RESEARCH_OBJECT_MODEL.md §3（发布门槛：source accepted state/release、version fixed、provenance、creators/contributors、rights/license、visibility、dependency pin、hash、required metadata、schema validation）、§5（依赖钉与 Asset/Object identity）",
+        "docs/22_API_DESIGN.md §3（Idempotency-Key 对 create/command/publish/merge/release）、§6（高风险 command 必须 server-side authorization + policy validation）、§7（Command 必须再次 server-side run validation，不能信任前端预检）",
+        "docs/31_MASTER_ACCEPTANCE.md Gate C（private→public 有影响预览和显式确认）",
+        "docs/45_ERROR_MODEL.md（PRIVATE_TO_PUBLIC_REQUIRES_APPROVAL、ASSET_VERSION_IMMUTABLE、IDEMPOTENCY_CONFLICT、RIGHTS_POLICY_BLOCKS_ACTION、DEPENDENCY_UNRESOLVED、BLOB_NOT_ATTACHED —— 用这些既有码，不要发明）",
+        "specs/api/openapi.yaml（POST /projects/{projectId}/assets:publish 的契约：summary 是 \"Publish approved research asset; human governance action\"，参数 ProjectId + IdempotencyKey，响应 201）与 specs/policies/permissions-matrix.csv（publish_private_to_public 行：owner=allow、maintainer=conditional、agent_default=deny）、specs/mcp/tools.json（只有 asset.publish_preview，mode=proposal；forbidden_default_agent_actions 含 publish_private_to_public）",
+        "specs/schemas/research-asset-version.schema.json（asset version 的 schema，含 origin_refs minItems 1）",
+        "internal/assets/gate.go（GateResult.ManifestJSON 是规范字节、Facts.Document/.Ref 由调用方填）与 internal/assets/preview.go（影响预览）",
+        "infra/migrations/00064_asset_pid_origin.sql（origin_refs 的三重约束与 pid 归属）与 infra/migrations/00014（版本行 append-only 触发器）",
+        "issue #237（发布授权在权限矩阵里的两个缺口——派工前必读，按 fail-closed 实现）与 issue #225（PublishResearchAssetVersion 漏写 origin_refs）"
+      ],
       "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
     },
     {
@@ -6159,6 +6231,62 @@
       ],
       "scope_note": "只补测试覆盖，不改迁移。infra/migrations/** 明确禁止：本条任务的目的是让既有迁移被验证，不是让它被修改。",
       "origin": "T0203 的独立 review 提出的 minor 覆盖缺口；同一缺口也存在于已合并的 T0202(00024)。"
+    },
+    {
+      "id": "T0712",
+      "phase": "P7",
+      "phase_name": "Research Asset Hub、Rights 与 Publish",
+      "title": "预览响应不得泄漏外部私有实体的身份（T0704 跨项目泄漏修复）",
+      "v1_required": true,
+      "supervisor_scope_narrowing": "2026-09-16 立档（issue #238）。这是对**已合并**的 T0704 的缺陷修复，按项目惯例（对照 #225）单独立档、独立复核，不塞进 T0705 那个大功能任务里顺手带过。范围刻意压到最小：**不含 infra/migrations/**、不含 internal/persistence/**、不含 specs/**、不含 apps/web/**。之所以能压这么小，是因为修法不需要任何新查询——判定所需的事实（实体所属项目、该项目的可见性）已经由 state reader 提供（StoredRef.ProjectID / .ProjectVisibility），只需改渲染层。**后果是它与迁移链条并行：本任务不重新生成 postgres.sql 或 sqlc，因此不必排队等迁移。** 明确禁止：不得为此新增查询、不得碰迁移、不得改 specs/**（含 permissions-matrix.csv）。",
+      "dependencies": [
+        "T0704"
+      ],
+      "requirements": [
+        "**缺陷（已核实，issue #238）**：POST /projects/{projectId}/assets:publish-preview 的门只查**发布项目**（cmd/api/assetshttp/handlers.go:183 的 h.projects.Get）；而响应体对**每一个解析到的实体**都渲染它所属的项目编号、标题与可见性。于是一个只属于 A 项目的人，拿一个属于 B 项目私有对象的编号，就能问出：该编号是否存在、它属于哪个项目、那个项目公不公开、以及该对象的标题。路由响应是 assets.ImpactPreview 直接 marshal（handlers.go:205），所以判定点全在 internal/assets/preview.go 的渲染函数里",
+        "**规格依据（不必再查，直接照做）**：docs/23 §5 —— \"所有 query/search/export/download 进行 tenant/project/object policy 过滤。**私有对象计数也不能通过 public API 泄漏**\"；docs/12 §2 —— \"Private Project：project/RSG/private blobs 默认不可见\"；specs/policies/permissions-matrix.csv 的 read_private_project 对 authenticated_nonmember 是 deny。三处一致：私有项目的信息不得经此接口外流",
+        "**判定规则（照实现，不要自行放宽）**：只有当被解析实体的所属项目**就是发布项目本身**、**或者那个项目是公开的**时，才渲染它的项目编号 / 标题 / 可见性。否则把这几项**置空**，并在需要的文字说明里说\"另一处私有项目\"而**不点名**。公开项目的信息本来任何登录用户都读得到，照常显示。**不要**实现\"按调用方对该项目的成员身份逐个体判断\"——那需要新查询，且会把判定变成非确定的；本任务是**成员身份无关**的收紧（代价：同时属于 A 和 B 的人也不再看到 B 的编号与标题，这是有意的 fail-closed）",
+        "**不要改过头的边界（同样重要）**：改完之后，调用方仍然能从 `Resolved` 看出\"这个 ref 存在\"——**这是有意的、必须保留的**，因为拦住私有依赖这件事本身就要求告诉他\"你清单里这一条指向一个真实存在、但你不能公开的实体\"（docs/23 §4）。把 `Resolved` 也一并抹掉、或者把 blocking 的 ref 伪装成\"查无此物\"，**等于拆掉本任务要保护的那个功能**，属于把 Gate 弄绿的假修法（CLAUDE.md §5.1）。剩余的信息量是\"你手里已经有一个 26 位随机编号，于是你确认它存在\"——编号是 128 位随机生成的，猜不到，这个残量是可接受的",
+        "**置空的具体做法**：`PreviewObject` 的 `ProjectID` / `Title` / `CurrentVisibility` 与 `PreviewAsset` 的 `Title` / `OriginProjectID` 这几个 json tag **都没有 omitempty**（`internal/assets/preview.go:275-283` 与 `:242-251`），所以置空后线上仍然是 `\"project_id\":\"\"` 这种**字段还在、值为空串**的形状。**就这么做，不要顺手加 omitempty**：加 omitempty 会让别的正常答复也少掉字段，是另一种契约变动。预览响应在 `specs/api/openapi.yaml` 里只有 `{\"200\": {\"description\": \"Preview\"}}`，没有 schema，所以空串不违反契约；字段名一个都不动",
+        "**必须同时保留拦住的效果**：这条依赖**仍然要出现在 PrivateDependencies 里、仍然 blocking=true**。docs/23 §4 的 \"no hidden private dependency leak\" 要求在预览里拦住它并让发布者知道**是他清单里的哪一条**。这一条不冲突：PrivateDependency 是按 `Ref` 索引的（Kind/Ref/Detail/Blocking），而 `Ref` 是调用方自己写在清单里的字符串——所以\"告诉他你清单里第几条是别人家的私有东西\"够用，\"告诉他它属于谁、标题叫什么\"是白送的",
+        "**要改的渲染点（全在 internal/assets/preview.go，我刚才逐处读过，行号以此为准）**：`:691` 的 `previewRef`，泄漏在 `:694-697`（`out.ProjectID` / `out.CurrentVisibility`）；`:705` 的 `appendObject`，泄漏在 `:711-717`（`ProjectID` / `Title` / `CurrentVisibility`）；`:638` 的 `previewAsset`，泄漏在 `:644-645`（`out.Title` / `out.OriginProjectID`——注意它对**外部项目的 pid 也照渲染**，只是同时在 `previewAssetBlockers` 里给出 `CodePreviewAssetProjectMismatch` 的 blocker，两件事互不抵消，你问一句它就答一句）；`:729` 的 `refDependency` 的 `Detail` 里**有两处**点了外部项目编号，`:743-744`（不扩大可见性那条分支）和 `:751-753`（blocking 那条分支）；`:554` 给 `PreviewDependency.CurrentVisibility` 赋了被钉版本所属资产的可见性。`PrivateDependency` **没有** CurrentVisibility 字段（它的结构是 Kind/Ref/Blocking/Detail），别去改一个不存在的字段。`PreviewBlob` 没有项目/标题字段，不动",
+        "**要改的测试——注意它现在是断言泄漏的**：tests/integration/asset_preview_test.go:667-668 与 :677-678 断言响应里**必须**出现外部项目编号与标题 `\"Private record\"`（失败信息原文：want the foreign private object version with its title）。这两处必须**反过来**断言\"不再出现\"，同时**保留**\"这条依赖仍被点名且 blocking\"。**不许**为了让测试变绿而删掉、跳过或弱化\"私有依赖必须被点名\"那一条（CLAUDE.md §5.1）",
+        "**新测试必须先证明会红**：交付前用一个探针（把旧渲染行为放回去，或在临时工作树上改）证明新断言确实会失败；在 RESULT 的 tests 里写清用的是哪种探针、以及它失败时的原话。参考 T0704 交付时的探针形状与 T0702 的教训——\"看着绿\"和\"能变红\"是两件事",
+        "**文档要跟着改**：cmd/api/assetshttp/doc.go 现在对\"这个接口会披露什么\"的描述必须与改后的行为一致；若它已经不准确就改准（T0704 返工时踩过一次：注释写着只读、而生产接线下并不成立）。同一句若抄在 internal/assets/preview.go 的包注释或 preview.go 的类型注释里，一并改齐",
+        "**不做**：不动接口路径与响应字段名（契约在 specs/api/openapi.yaml，一字不动——置空字段即可，不新增也不删除字段）；不新增迁移；不动 specs/**；不动 apps/web/**；不做发布动作本身（那是 T0705）"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "只属于 A 项目的人，用 B 项目私有对象的编号问预览：响应里**不出现** B 的项目编号、也**不出现**该对象的标题（集成测试在真库上验，两边都断言）",
+        "同一次答复里，那条外部私有依赖**仍然被点名且 blocking=true**（拦住的效果一点不减）",
+        "属于发布项目自己的私有实体、以及**公开**项目里的实体，照常显示编号/标题/可见性（收紧不误伤）"
+      ],
+      "tests": [
+        "asset preview disclosure tests"
+      ],
+      "allowed_scope": [
+        "internal/assets/**",
+        "cmd/api/assetshttp/**",
+        "tests/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md",
+        "infra/migrations/**",
+        "specs/**",
+        "internal/persistence/**"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/23_SECURITY_PRIVACY.md §4（no hidden private dependency leak）、§5（所有 query/search/export/download 按 tenant/project/object policy 过滤；私有对象计数也不得经 public API 泄漏）",
+        "docs/12_PERMISSIONS_RIGHTS_POLICY.md §2（Private Project 默认不可见；可显式 Publish）",
+        "specs/policies/permissions-matrix.csv（read_private_project 对 authenticated_nonmember = deny）",
+        "issue #238 —— 本缺陷的完整立档（5 处泄漏位置、为什么\"点名\"与\"不泄漏\"不冲突、修法不需要新查询）",
+        "internal/assets/preview.go（T0704 的渲染层，本次的改动面）"
+      ],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
     }
   ]
 }

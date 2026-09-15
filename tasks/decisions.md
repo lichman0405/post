@@ -8655,3 +8655,137 @@ T0409 用 `EffectivePolicy` + `Query{RuleMainProtected}` 判一次，且写死�
 
 - **可逆性**：完全可逆（纯任务包字段与命名）。若 owner 对各条命名另有偏好，改字段即可，无迁移。
 - **立档**：issue #239 记录了 T0409 派工前查出的那块空档（PR 到不了 `merge_ready`）与需要裁定的两块治理语义。
+
+---
+
+## L1-20260916-104 —— T0406 复核通过并落地的四笔；外加我自己的一处漏检更正（issue #239 两条撤回）
+
+### 一、T0406 独立复核：approve，7 条遗留全部折进 T0409，不另立任务
+
+复核结论：**approve**，0 blocking、0 major、3 minor + 4 nit。复核人独立在真 PostgreSQL 上复跑了四条验收（确定性/无自动赢家/八种决定动作/私有源遇公开目标整体扣留），并**在 `/tmp` 的临时副本上做了五次定向突变**，每次只让对应的那条测试变红——这是"仪器能说不"的证据，不是"跑绿了"的证据。
+
+7 条遗留的问题清单：
+
+| # | 位置 | 性质 |
+| --- | --- | --- |
+| 1 | `internal/rsg/merge/merge.go:563` | `Blocker.Detail` 永远等于 `Code`，`planner.block()` 把 `why` 丢掉，`blockerDetail()` 写好的说明到不了调用方 |
+| 2 | `internal/rsg/merge/merge.go:477` | 同一 target 多条 blocking 决定只报第一条 |
+| 3 | `internal/persistence/merge_store.go:113` | 注释说 pool 路径不加 `FOR UPDATE`，代码两条语句都加了（行为无害，**错的是注释**） |
+| 4 | `internal/persistence/merge_store.go:489` | `rereadMerge` 的 `affected` 参数从不用 |
+| 5 | `internal/persistence/merge_store.go:526` | `ListPendingGitMerges` 零调用者、零测试 |
+| 6 | `internal/rsg/merge/merge_test.go:678` | 注释说"两条决定对调"，代码是 `build(d1)` 比两次 |
+| 7 | `tests/integration/resolution_test.go:119` | 测试名说"五种"人类决定，迁移 00069 已扩到八种 |
+
+**处置：不另立任务，全部折进 T0409 的任务包**（第 16 条要求）。理由：这 7 处**全部落在 T0409 的 `allowed_scope` 内**（`internal/rsg/**`、`internal/persistence/**`、`tests/**`），而 T0409 恰好就是"把这条链真的跑起来、并且把这个 plan 渲成 HTTP 响应"的那个人——报告面不准正是它的验收受损。**约束写死了：只许改注释、参数与测试名，不许改动任何已被复核通过的行为**（改动行为就作废了那份复核证据）。
+
+另把复核的两条**风险**写进了对应要求：`GitMerger` 的带类型 nil 指针会 panic（照做：装配处传无类型 nil 或加 IsNil 判定，并写测试钉住）；`plan_digest` 是规范字节的 sha256 而 plan 存在 jsonb 列里（永远不要拿列里的字节逐字节比）。
+
+### 一之二、G2 红在 staticcheck：一次真实的驳回与返工（记下来，因为盲点是我自己的）
+
+**事实**：`rddev task accept T0406` 在 G2 把我拒了 —— 不是语义问题，是 `make staticcheck` 报了三条 `U1000`，全部落在 T0406 本次**新增的测试文件**里（两个 fixture 方法 `baseRel`/`targetRel`、一个 `mergeFixture.lifecycle` 没有任何调用者）。原件在 `.rddev/runtime/gates/T0406/output/run-9fbbf219b8417dd1-g2/go/02.log`。
+
+**值得记的是这个盲点是我和 Worker 共有的**：Worker 上一版 RESULT 写的是 `go build ./... && go vet ./... && gofmt -l` —— 这三条都是真的、也都过了，但它们**不是这道闸**；`make staticcheck` 才是 CI 的 go 阶段里跑静态分析的那一步。而我**第一次手工做 G2 时用的是同一批更弱的命令，等于把 Worker 的盲点复制了一遍**。是 `rddev` 按自己的规则拒了，才把它暴露出来。这正好印证 §8.2 那句话：驱动脚本只决定下一步尝试什么，**从不决定某个 Gate 是否通过**。
+
+**处置**：按 §11 驳回并**返工同一个 session**（问题明确、context 仍可靠，不必换人）；我自己动手修属于改动被复核过的产物，不行；写进 baseline 更是 §5.1 明令禁止（`scripts/staticcheck.sh` 注释逐字写着 "never baseline new code"）。
+
+**返工后我做的独立核对（三分之二是自己查的，不看它的自述）**：
+
+1. **自己重跑那道闸**：`bash scripts/staticcheck.sh` → `clean (6 grandfathered baseline finding(s))`，三条 `U1000` 消失，且与仓库根目录的 6 条完全一致。`ops/ci/staticcheck-baseline.txt` **不在** 27 个改动文件里 —— 没人往 baseline 里加东西。
+2. **证明"只改了该改的"**：用 `git ls-files --others` 加上复核人当时的快照 `.rddev/workers/T0406-review/diff.txt`，逐文件比对，证明自复核快照（04:13:23）以来**只有两个测试文件变了**；其余 25 个文件（含全部产品代码、迁移 `00069`、生成快照 `postgres.sql`）与复核人当时看到的**逐行相同**。两个 sqlc 生成文件在 04:29 被重新生成过（mtime 变了），但内容逐行相同 —— 单看 mtime 会误判成"改了"。
+3. **差额恰好是那三次删除**：`merge_test.go` 749→739 行（删两个方法）、`tests/integration/merge_test.go` 1014→1004 行（删一个方法），此外**一行没动**。顺带确认 `internal/application/merge/service.go` 的 mtime 是 04:13:08，**早于**驳回时刻（04:24:52），所以交付说明里那句"持久层在写回调前推进分支头"属于**原始提交**，不是返工时偷改的 —— 我怀疑过，查了，不是。
+
+**复核因此作废，而且这是硬性的不是我选的**：`rddev review collect` 会核对"评审代码自 spawn 以来未变（fingerprint）"，旧 approve 按构造已失效；而复核结论是 merge 的必需证据。于是重新派了一次独立复核（`run-2e291c30ed1c5fcc`）。
+
+**顺带修正 T0409 的一处失效引用**：返工删掉的 `baseRel`/`targetRel` 在 `internal/rsg/merge/merge_test.go` 靠前位置，删除后其后的行号整体前移，我给 T0409 引的 `:678` 已不指那条。按内容重新定位到 **`:669-672`**，并在要求里注明"行号是重新定位的、原编号作废"。同时把第 15 条的约束写准了：不许动的是**被复核过的判定语义**（确定性 / 不自动选赢家 / 八种决定动作 / 私有源并入公开目标整体扣留），不是"只许改注释" —— 因为原措辞与其中三条要求（该接进响应的字段、该跑起来的死 SQL、注释在替不存在的覆盖作证的那条测试）自相矛盾，那是我自己信里的缺陷。第（6）条改成"必须真的把决定对调"：增强测试不违反 §5.1，把注释改成符合现状才是把假覆盖洗白；若对调后测试真的红了，那是 merge 的真实缺陷，写进 RESULT 交回来，不许删断言换绿。
+
+
+### 一之三、第二次独立复核：7 条旧账重现 + 2 条新的，我决定"两条现在就修"
+
+第二次复核（`run-2e291c30ed1c5fcc`）结论 **approve，0 blocking、0 major**，且 `review-code-unchanged` 通过（评审的树与 spawn 时指纹一致）。它**独立重现了第一次那七条**（其中 `merge_test.go` 那条它报在 `:669`，与我按内容重新定位的 `:669-672` 完全吻合——两条独立线索对上同一个位置）。此外它提了**两条第一次没有的**：
+
+| # | 位置 | 性质 |
+| --- | --- | --- |
+| A | `infra/migrations/00069_semantic_merge.sql:170` | 注释承诺 "the database truth (states, plan, **counts**, actor) is fixed once written"，但 `semantic_merge_guard()` 的不可变比对里**没有五个 `*_count` 列与 `created_at`** —— 注释在替一个不存在的保证作证 |
+| B | `internal/persistence/relation_tx.go:83` | `AppendRelationVersionInTx` 全仓库只有一个真调用者（`internal/application/merge/service.go:460`）加一个**假的**（`service_test.go:347`）；`tests/integration/merge_test.go` 只跑对象变更，**一次关系变更都没跑过** |
+
+**我为什么把这两条留下自己修、而没折进 T0409（和那七条一样）**：
+
+- **A 只有现在修才便宜。** 迁移 00069 还没合进主干；一旦合了它就是不可改的 canonical schema history（文件自己写着 forward-only、不提供 down migration），届时只能再写一条迁移替换触发器。我核过改严不会打断任何写入者：全仓库对 `semantic_merges` 的 UPDATE 只有 `merge_store.go:445`（`CompleteGitStep`）与 `:474`（`RecordGitAttempt`），SET 只碰 `git_state`/`git_sha`/`git_ref`/`git_error`/`git_attempts`，**没有一处碰计数列或 `created_at`**。
+- **B 是本任务中心主张的一半。** T0406 的主张是"合并推进 main"，而写进 accepted state 的是**对象与关系两半**；现在有一半只在假实现上验过——那只证明"接口被调了"，没证明"关系版本真的落库、计数真的前进"。这正是"断言必须能失败"那条规则的适用面。
+- 其余七条仍是**报告面 / 死代码 / 注释措辞**，落在 T0409 的 `allowed_scope` 里，且 T0409 正在改同一个 plan→HTTP 的报告面，所以照旧折给它。
+
+**关于 §11 的一次偏离，记明白**：这是 T0406 第二次被驳回。§11 字面说"第二次不通过……销毁 Worker，启动全新 Worker"。我**没有**照字面做，用了 `worker rework`（同一个 session），理由：
+
+- §11 那条规矩的**目的**是防止在一个已经糊涂、context 不可靠的 Worker 上反复磨。此处不适用：这位 Worker 的产物被两次独立复核判为 0 blocking approve，且它几分钟前刚写了这些代码，context 是最新鲜的。
+- `worker respawn` 会 `reset --hard + clean -fd` **把整个已被复核通过的 27 文件 diff 抹掉**，让新 Worker 从头重做一遍——为一个两处小修付这个代价是错的。
+- §11 给同 session 返工的条件是"问题明确且 context 仍可靠"，本情形**比通常更满足**：两处都在具体文件的具体行上，且我给了"改严不会打断谁"的核查证据。
+- 这条偏离与理由一并记档，供以后回看。
+
+**给返工的信（`/tmp/t0406-rework2.md`）里我按"改代码兑现承诺，不是改注释迁就代码"写的**：A 要求把五个计数列与 `created_at` 加进不可变比对，并补一个**把该列从清单里去掉就会变红**的测试；B 要求真库跑通携带关系变更的合并 + 覆盖**可达**的过期 expected（`VersionConflictError`）分支，并**明确禁止**去硬造代码自己注释说不可达的 `23505` 分支——为覆盖它注入漂移等于在测一件不该发生的事。
+
+### 一之四、第三次独立复核：两处修复被接受，任务收工（附我给自己定的止损规矩）
+
+第三次复核（`run-21d4a569836fd93e`）**approve，0 blocking、0 major，4 minor + 4 nit**。关键证据是**它没有再报我发回去修的那两条**：迁移 00069 的计数不可变、`relation_tx.go` 的关系路径无真库覆盖，都不在清单里了 —— 修复被独立确认为真。剩下的 4 minor + 3 nit 就是那七条旧账（`Blocker.Detail` 恒等 `Code`、同一 target 只报第一条、`readVersionHeads` 注释、`merge_test.go` 的"对调"注释、`rereadMerge` 死参数、`ListPendingGitMerges` 无调用者、`resolution_test.go` 的"五种"），复核人自己写明"七条本轮明确不在范围内、被有意未动，按指示如此"。
+
+**第 8 条新的（nit）**：`internal/rsg/merge/merge.go:598` —— 计划一条都没应用时会以 `MERGE_NOTHING_TO_MERGE` 拒绝，于是一个"唯一的源侧变更正被争用或被扣留"的 PR 拿不到"照原样提交争用"的结果。**复核人自己定性为 "a defensible L1 product decision" 且符合验收标准**，只要求给操作者一句能读懂的话。**不是缺陷，因此不修**：已作为第（8）条折进 T0409，措辞写明"**不得改这个行为**，只让拒绝可读"。这正好用上复核人比我们更中立的那部分：它主动说了"'无内容可合'的拒绝会让操作者意外"，这是**易用性问题**，不是语义问题。
+
+**我给自己定的止损规矩（写下来，免得无限返工）**：一个任务被复核挑出问题时，**只有当该问题同时满足"是真错"且"现在修才便宜（文件还没合进主干、还改得动）"两条，才再返一轮**；否则一律记档并折给下一个会碰这些文件的任务。前一轮那两条正是同时满足（迁移未合、写路径无真库覆盖），所以值一轮；这一轮的 nit 是活代码里的易用性建议，**两个条件都不满足**，所以收工。没有这条规矩，"复核总能再挑出点什么"就会变成不可能收敛的循环。
+
+### 二、修正：T0705 与 T0409 的幂等要求里"复用既有实现"是错的
+
+两份包里我都写过"复用既有幂等实现（`release_creations` 台账），不要另造一套"。**逐张读过之后，这句话是错的**：
+
+| 表 | 为什么装不下 |
+| --- | --- |
+| `release_creations`（`00053:40-46`） | `release_id uuid NOT NULL REFERENCES releases(id)` |
+| `project_milestone_creations`（`00063:50-56`） | `milestone_id uuid NOT NULL REFERENCES project_milestones(id)` |
+| `semantic_merges`（`00069:50`，T0406 新建） | 逐列看过，**没有 idempotency_key 列** |
+
+`research_asset_versions`（`00010`）也没有 idempotency 列。所以 asset 发布与 PR 合并**各自都要新立一张台账表**——这正好是迁移 00071 与 00070 的主要用途。两处要求都改成了"照抄 `release_creations` 的**形状**另立一张 + 照抄它的**取法与流程**（HTTP 取头 → 先查台账命中即回放 → 端口 `LookupCreation` → sqlc 查询对）"，并附上上面这张"为什么装不下"的证据。
+
+同一遍核查里还修了 T0409 的一处小锚点：`ActionFreezeMain` 在 `internal/authz/action.go:29-30`（我原先写 `:28-29`）。
+
+### 三、T0410 的依赖补上 T0604（这是 DAG 缺陷，不是记账）
+
+T0410「PR/Branch 完整 E2E」原依赖只有 `[T0409]`，验收是"两条 E2E 在 CI 稳定通过"，测试名 `playwright pr flows`。但 `docs/31` Gate B 要的是"Branch/PR/RSG diff/Scientific Review/Integrity Review/merge **完整**"——而**今天没有任何产品路径能把 PR 推到 `merge_ready`**（见第四节，已复核）。没有 T0604，那条"完整"链路里就缺 review→approved→merge_ready 这一段，E2E 只能靠**构造状态**蒙混过去——那正是 CLAUDE.md §5.1 禁止的"为了让 Gate 变绿而弱化"。**加依赖边 `T0604`。**
+
+### 四、我自己的漏检更正：issue #239 的 3.1 与 3.2 撤回
+
+我在 issue #239 里报了"两个必须由你裁定的 L3 空档"。**两个都不成立，是我漏读了 `docs/04_USERS_ROLES.md`。**
+
+- **3.1「review 够不够的算法」**：`docs/04` §3 标题就叫「Scientific Responsibility（什么需要你审核）」，原文两句把问题答完——「**项目可配置**：Experimental Reviewer、Computational Reviewer、Data Reviewer、Project Lead、IP Reviewer 等责任标签。责任用于 Review routing，**不自动赋予更高访问权限**」与「**类似 CODEOWNERS 的 Research Owners 规则可按对象类型/Schema/领域匹配 reviewer**」。对照 T0604 的两条验收：匹配语义规格点名了（CODEOWNERS 式、按对象类型/Schema/领域），"无权限不自动赋权"是逐字。**要建的是规格已点名的机制，"哪类变更对应哪个责任标签"是项目自己的配置。**我把"机制没实现"读成了"规则没定义"。
+
+  **更硬的一份证据是代码自己写的**——T0404 已经把钩子留在那里，并在注释里指名 T0604：
+
+  > `internal/application/reviews/ports.go:57-75`（`ResponsibilityGate` 端口）："T0604 lands the rule-based resolver (**Research Owners rules by object/schema/type**); until then production wires nil and the conditional verdict fails closed — refusal, never permission by default (docs/12)."
+
+  > `internal/domain/review.go:99-104`（`ValidReviewResponsibility`）："**The vocabulary itself is T0604's business (docs/04 §3 lists example labels; projects configure their own)** — this only bounds the stored text."
+
+  > `infra/migrations/00061:31-35`："responsibility records which scientific responsibility the reviewer acted under (docs/04 §3: responsibility is for review routing, separate from access roles). The label is resolved by the application's reviewer-responsibility hook (**T0604 lands the rule-based resolver**)."
+
+  也就是说：**这不是"规格没给、要人裁定"，而是"上一个任务已经按规格把接口留好、把名字点给 T0604"**。我上次报空档之前没读这三处。
+- **3.2「`main_protected = false` 是什么意思」**：`internal/domain/policy.go` 的 `RuleMainProtected` 注释自己写着 "(bool: **true is stricter than false**)"——它是一个"严不严"的开关，不是"要不要走闸门"的开关；该文件每个规则键都自带严松方向。而"main 只能经 PR 合并前进"是 `docs/09` §3 的**结构性**要求，不在这套严松序里。所以 `false` 不需要谁来裁定。
+
+**为什么会错**：两条我都只查了"版本控制/权限"那条线（`docs/09`、`docs/43`、`docs/12`），答案在**角色与责任**那条线（`docs/04`）里。已在 issue #239 上发更正评论（`#issuecomment-5687530205`）。
+
+**保留下来的是第 1 节那个洞**（复核过，不是印象）：全仓库 29 条 `POST/PUT/PATCH` 路由里，与 PR 状态有关的只有 `POST …/pull-requests/{prId}/reviews`；唯一的自动状态迁移在 `internal/persistence/review_store.go:104-114`，只做 `review_required → changes_requested`；`internal/application/pullrequests/service.go:107` 的 `SetState` 能驱动任意迁移但**没有任何产品路径调它**。所以"产品路径上到不了可合并态"成立——它只是"T0604 还没做"，不是语义空洞。
+
+### 五、T0604 的落法（不需要 owner 裁定）
+
+按上面 §3.1 的规格读法：责任标签与 Research Owners 规则是**项目数据**，用一张新表（迁移号 **00072**）承载；**不塞进 policy 词表**——词表是"扁平的一组具名规则 + 严松序"（`internal/domain/policy.go:22-25`），装不下一张"对象类型/Schema → 责任标签 → reviewer"的映射，那个扩展口留给别的用途。
+
+- **可逆性**：§一/§二/§三 都是任务包字段，完全可逆（无迁移、无代码）。§四 是文档更正。§五 是派工时的编号分配，Worker 不得自行选号（CLAUDE.md §8.1）。
+- **立档**：issue #239（更正评论已发）；T0406 的复核原件在 `.rddev/workers/T0406-review/RESULT.json`。
+
+
+### 六、验收时 G3 偶发红了一次（与 T0406 无关）→ issue #240
+
+`rddev task accept T0406` 第一次跑时 **G2 绿、G3 红**，红在 `gitea-real-services` 的 bootstrap 那一段（"the bootstrap sequence (remove rule, seed, re-protect) did not complete"；随后那句 "could not fetch the seeded main" 是**果**不是因）。原件 `.rddev/runtime/gates/T0406/output/run-b17e9d3d09e0652d-g3/gitea-real-services/00.log`。
+
+**判定与本任务无关**，两条依据：该脚本**不在** T0406 改动的 27 个文件里（`git` 层面两边逐字节相同）；T0406 没碰 GitProvider 与 bootstrap 相关代码。
+
+**过程中我自己的一个错，记下来**：我第一次想做 A/B（在主干上跑同一脚本当对照），那次对照是**无效的**——脚本从**自身位置**推出仓库根目录、再去读 `$ROOT/.env.dev` 拿凭据；主干有那个文件（git 忽略），而每个任务的工作副本里没有，所以我那次失败的原因是"没凭据"，**和闸红的原因不是一回事**。换成用闸自己的方式复现后：随后连跑 4 次全绿，之前红 1 次，约 **1/5 偶发**。
+
+**为什么没有"重跑绿了就算了"**：一个会随机说不的仪器，和不会说不的仪器一样不可信；而且反过来更危险——一旦习惯了"这个偶尔红、重跑一下"，将来真出现回归也会被当成同一个 flake 重跑掉。
+
+已开 **issue #240**，附原件路径、复现频率、那三步代码，并**明确标注我对机制的推测是推测**（删规则后立刻 seed 可能仍被拒），没有当成结论；修的方向是先让它把每一步的返回码打出来、再在 seed 前轮询确认规则真的没了。

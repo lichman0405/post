@@ -3359,9 +3359,12 @@
       ]
     },
     "T0406": {
-      "status": "running",
-      "started_at": "2026-09-15T19:07:36Z",
-      "worker_run_id": "run-9cc0a74da2417481",
+      "status": "merged",
+      "started_at": "2026-09-15T20:39:41Z",
+      "worker_run_id": "run-a47f4f9c9f62669c",
+      "accepted_by_supervisor_at": "2026-09-15T21:15:40Z",
+      "merged_at": "2026-09-15T21:21:36Z",
+      "rejection_reason": "# T0406 第二次返工：两处小修\n\n先说清性质：**独立复核第二次的结论仍然是 approve（0 blocking、0 major）。**下面两条不是说你做错了，是复核提出来、我判断**必须现在做**的。\n\n理由只有一句：**迁移 00069 还没合进主干。** 一旦合了它就是不可改的 canonical schema history（文件自己写着 forward-only、不提供 down migration），到那时只能再写一条迁移去替换触发器。**现在是改它的唯一便宜时机。**\n\n## 一、`semantic_merge_guard()` 没有兑现它自己注释里的承诺\n\n`infra/migrations/00069_semantic_merge.sql:170` 的注释原文：\n\n> semantic_merges is mutable in exactly one dimension: the Git saga. The database truth (states, plan, **counts**, actor) is fixed once written — anything else would let a merge record drift away from the state it claims to have produced.\n\n但 `semantic_merge_guard()` 的不可变比对里只有 id / project_id / pull_request_id / source_branch_id / target_branch_id / base_state_id / source_state_id / target_state_id / result_state_id / actor_id / plan_version / plan / plan_digest —— **五个 `*_count` 列与 `created_at` 不在里面**。也就是说：一条 UPDATE 可以把 `applied_count`、`carried_count` 这些\"这次合并到底做了什么\"的计数悄悄改掉，而注释说这不可能。**注释在替一个不存在的保证作证。**\n\n我替你核过\"改严了会不会打断谁\"，结论是不会：\n\n- 全仓库对 `semantic_merges` 的 UPDATE 只有两条：`internal/persistence/merge_store.go:445`（`CompleteGitStep`）与 `:474`（`RecordGitAttempt`）。\n- 两条的 SET 只碰 `git_state` / `git_sha` / `git_ref` / `git_error` / `git_attempts`，**没有任何写入碰计数列或 `created_at`**。\n\n**要你做的**：把那五个计数列与 `created_at` 加进不可变比对，让 schema 真的兑现那句注释。并**补一个会红的测试**：写一条试图改 `applied_count` 的 UPDATE，断言被触发器拒（`ERRCODE = 'P0001'`）。这个测试要能在你**把该列从清单里去掉时变红** —— 不然后它证明不了任何事。\n\n**不要**为了省事去把注释改软、改成符合现状。计数是\"这次合并做了什么\"的记录，这个项目的规矩是记录不留改动余地（总规约 §8：Nothing disappears; state only evolves）。**改代码兑现承诺，不是改注释迁就代码。**\n\n## 二、合并的\"关系\"那一半，没有任何真库覆盖\n\n复核指出：`AppendRelationVersionInTx`（`internal/persistence/relation_tx.go:83`）在整个仓库里**只有一个真实调用者**（`internal/application/merge/service.go:460`），外加一个**假的**（`internal/application/merge/service_test.go:347`）；而 `tests/integration/merge_test.go` 只跑了对象变更，**一次关系变更都没跑过**。\n\n我核过了，属实。这条要紧是因为：合并写进 accepted state 的是**对象和关系两半**，现在有一半只在假实现上验过 —— 那只证明了\"接口被调用了\"，没有证明\"关系版本真的落库了\"。\n\n**要你做的**：\n\n1. 让 `tests/integration/merge_test.go` 里至少有一条合并**真的携带关系变更**，在真 PostgreSQL 上从 plan 一路走到 accepted state，断言关系版本行真的被追加、`current_version_no` 真的前进。\n2. 覆盖**可达**的冲突分支：拿一个**过期的 expected** 调它（并发合并会造成的情形），断言走到 `relations.VersionConflictError`（CAS 零行 → 再读一次，区分\"关系不存在\"与\"版本对不上\"）。\n3. **不要**去硬造 `23505` 那条分支。代码自己的注释写着 CAS 让重复 `version_no` 不可达、只有手工把计数改歪才可能出现，它只是 defense in depth。为了覆盖它去注入漂移，等于在测一件不该发生的事。\n\n## 不要动的\n\n- 复核给的**另外七条**（`Blocker.Detail` 恒等 `Code`、同一 target 只报第一条 blocking、`readVersionHeads` 注释与 `FOR UPDATE` 不符、`rereadMerge` 的死参数、`ListPendingGitMerges` 没调用者、`merge_test.go` 那条\"对调\"注释、`resolution_test.go` 的\"五种\"）**已全部转给 T0409**，这次一行都不要碰。\n- 你上次删掉三个方法之后的样子是对的，别再改。\n- **不许**为了让任何东西变绿而删/skip/弱化测试、放宽断言、放大 timeout（总规约 §5.1）。这条对第二条尤其适用：如果那条关系用例写出来是红的，那是**真发现**，写进 RESULT 交回来，不许把断言调松。\n- 迁移号不变（00069），allowed_scope 不变。\n\n## 回报前\n\n把 **G1 整套**重跑一遍，尤其：\n\n```\nmake fmt-check && go vet ./... && make staticcheck\nPOSTGRES_TEST_ADMIN_URL=\"postgres://***@127.0.0.1:5432/post\" bash scripts/ci.sh\n```\n\n上次就是漏了 `make staticcheck`。这次两条改动分别落在迁移与真库测试上，`make test-integration` 必须真跑过再回报。\n",
       "history": [
         {
           "from": "todo",
@@ -3375,6 +3378,68 @@
           "at": "2026-09-15T19:07:36Z",
           "run_id": "run-9cc0a74da2417481",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T19:56:33Z",
+          "run_id": "run-2aa140b5c602a779",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T20:24:52Z",
+          "run_id": "run-5c58740aaae5beb4",
+          "reason": "# T0406 返工：G2 红在 staticcheck —— 三处新代码的 U1000，全部在你这次新增的测试文件里\n\n独立复核的结论是 **approve**（0 blocking、0 major，7 条 minor/nit 不影响验收），你的 diff 语义部分没有需要返工的。**返工只为一件事：`make staticcheck` 没过。**\n\n## 事实\n\n`rddev task accept` 跑 G2（= CI 的同一批 job）时，go 阶段的 `make staticcheck` 失败，原件在\n`.rddev/runtime/gates/T0406/output/run-9fbbf219b8417dd1-g2/go/02.log`：\n\n```\n$ make staticcheck\nbash scripts/staticcheck.sh\ninternal/rsg/merge/merge_test.go:86:19: func (*fixture).baseRel is unused (U1000)\ninternal/rsg/merge/merge_test.go:96:19: func (*fixture).targetRel is unused (U1000)\ntests/integration/merge_test.go:137:24: func (*mergeFixture).lifecycle is unused (U1000)\n\nstaticcheck: NEW findings above are not in ops/ci/staticcheck-baseline.txt.\nFix them; only pre-existing findings may be baselined, with a\nfollow-up issue to fix them — never baseline new code.\nmake: *** [Makefile:125: staticcheck] Error 1\n```\n\n（这条我复核过：用 gate 钉的版本 `go run honnef.co/go/tools/cmd/staticcheck@2026.2.1 ./...` 在 `T0406` 的工作树上重跑，同样只报这三条，都是这三个文件里的未使用方法。仓库根目录我会另外确认。）\n\n## 要你做的\n\n1. **删掉这三个没用的方法**，或者让它们真的被用上——两条都可以，你自己判断哪个更对：\n   - `internal/rsg/merge/merge_test.go:86` `func (*fixture).baseRel`\n   - `internal/rsg/merge/merge_test.go:96` `func (*fixture).targetRel`\n   - `tests/integration/merge_test.go:137` `func (*mergeFixture).lifecycle`\n2. **绝对不要**把它们加进 `ops/ci/staticcheck-baseline.txt`。那个文件只收\"早于这道闸就存在的\"老账，`scripts/staticcheck.sh` 的注释逐字写着 \"never baseline new code\"；把新代码记进 baseline 就是\"为了让 Gate 变绿而弱化它\"，总规约 §5.1 明令禁止。\n3. 改完把 **G1 整套**重跑一遍再回报，尤其是你上次**漏跑的那一步**：\n   ```\n   make fmt-check && go vet ./... && make staticcheck\n   ```\n   你上一版 RESULT 里写的 `go build ./... && go vet ./... && gofmt -l` 都是真的、也都过了，但那**不是**这道闸：`make staticcheck` 才是 CI 的 go 阶段里跑静态分析的那一步。以后 G1 请照 CI 的阶段跑（`make staticcheck`、`make fmt-check`），不要用等价但更弱的命令替代。\n\n## 不要动的部分\n\n- **不要**因为这次返工去改任何已被复核通过的行为。复核人在 `/tmp` 的临时副本上做了五次定向突变，每次只让对应测试变红，证据成立；你改了行为那份证据就作废了。\n- 复核给出的 7 条 minor/nit（`Blocker.Detail` 恒等于 `Code`、同一 target 多条 blocking 只报第一条、`readVersionHeads` 注释与 `FOR UPDATE` 不符、`rereadMerge` 没用的 `affected` 参数、`ListPendingGitMerges` 零调用者、`merge_test.go:678` 注释与实际断言不符、`resolution_test.go:119` 测试名说\"五种\"而词汇表已八种）**已经全部转给 T0409 处理**，这次不用你碰。\n- 迁移号、范围、验收标准都不变。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T20:24:55Z",
+          "run_id": "run-2b1f448bcf4920ad",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T20:31:43Z",
+          "run_id": "run-de36bffcf136ccac",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T20:39:40Z",
+          "run_id": "run-7d88cfd42811bd4f",
+          "reason": "# T0406 第二次返工：两处小修\n\n先说清性质：**独立复核第二次的结论仍然是 approve（0 blocking、0 major）。**下面两条不是说你做错了，是复核提出来、我判断**必须现在做**的。\n\n理由只有一句：**迁移 00069 还没合进主干。** 一旦合了它就是不可改的 canonical schema history（文件自己写着 forward-only、不提供 down migration），到那时只能再写一条迁移去替换触发器。**现在是改它的唯一便宜时机。**\n\n## 一、`semantic_merge_guard()` 没有兑现它自己注释里的承诺\n\n`infra/migrations/00069_semantic_merge.sql:170` 的注释原文：\n\n> semantic_merges is mutable in exactly one dimension: the Git saga. The database truth (states, plan, **counts**, actor) is fixed once written — anything else would let a merge record drift away from the state it claims to have produced.\n\n但 `semantic_merge_guard()` 的不可变比对里只有 id / project_id / pull_request_id / source_branch_id / target_branch_id / base_state_id / source_state_id / target_state_id / result_state_id / actor_id / plan_version / plan / plan_digest —— **五个 `*_count` 列与 `created_at` 不在里面**。也就是说：一条 UPDATE 可以把 `applied_count`、`carried_count` 这些\"这次合并到底做了什么\"的计数悄悄改掉，而注释说这不可能。**注释在替一个不存在的保证作证。**\n\n我替你核过\"改严了会不会打断谁\"，结论是不会：\n\n- 全仓库对 `semantic_merges` 的 UPDATE 只有两条：`internal/persistence/merge_store.go:445`（`CompleteGitStep`）与 `:474`（`RecordGitAttempt`）。\n- 两条的 SET 只碰 `git_state` / `git_sha` / `git_ref` / `git_error` / `git_attempts`，**没有任何写入碰计数列或 `created_at`**。\n\n**要你做的**：把那五个计数列与 `created_at` 加进不可变比对，让 schema 真的兑现那句注释。并**补一个会红的测试**：写一条试图改 `applied_count` 的 UPDATE，断言被触发器拒（`ERRCODE = 'P0001'`）。这个测试要能在你**把该列从清单里去掉时变红** —— 不然后它证明不了任何事。\n\n**不要**为了省事去把注释改软、改成符合现状。计数是\"这次合并做了什么\"的记录，这个项目的规矩是记录不留改动余地（总规约 §8：Nothing disappears; state only evolves）。**改代码兑现承诺，不是改注释迁就代码。**\n\n## 二、合并的\"关系\"那一半，没有任何真库覆盖\n\n复核指出：`AppendRelationVersionInTx`（`internal/persistence/relation_tx.go:83`）在整个仓库里**只有一个真实调用者**（`internal/application/merge/service.go:460`），外加一个**假的**（`internal/application/merge/service_test.go:347`）；而 `tests/integration/merge_test.go` 只跑了对象变更，**一次关系变更都没跑过**。\n\n我核过了，属实。这条要紧是因为：合并写进 accepted state 的是**对象和关系两半**，现在有一半只在假实现上验过 —— 那只证明了\"接口被调用了\"，没有证明\"关系版本真的落库了\"。\n\n**要你做的**：\n\n1. 让 `tests/integration/merge_test.go` 里至少有一条合并**真的携带关系变更**，在真 PostgreSQL 上从 plan 一路走到 accepted state，断言关系版本行真的被追加、`current_version_no` 真的前进。\n2. 覆盖**可达**的冲突分支：拿一个**过期的 expected** 调它（并发合并会造成的情形），断言走到 `relations.VersionConflictError`（CAS 零行 → 再读一次，区分\"关系不存在\"与\"版本对不上\"）。\n3. **不要**去硬造 `23505` 那条分支。代码自己的注释写着 CAS 让重复 `version_no` 不可达、只有手工把计数改歪才可能出现，它只是 defense in depth。为了覆盖它去注入漂移，等于在测一件不该发生的事。\n\n## 不要动的\n\n- 复核给的**另外七条**（`Blocker.Detail` 恒等 `Code`、同一 target 只报第一条 blocking、`readVersionHeads` 注释与 `FOR UPDATE` 不符、`rereadMerge` 的死参数、`ListPendingGitMerges` 没调用者、`merge_test.go` 那条\"对调\"注释、`resolution_test.go` 的\"五种\"）**已全部转给 T0409**，这次一行都不要碰。\n- 你上次删掉三个方法之后的样子是对的，别再改。\n- **不许**为了让任何东西变绿而删/skip/弱化测试、放宽断言、放大 timeout（总规约 §5.1）。这条对第二条尤其适用：如果那条关系用例写出来是红的，那是**真发现**，写进 RESULT 交回来，不许把断言调松。\n- 迁移号不变（00069），allowed_scope 不变。\n\n## 回报前\n\n把 **G1 整套**重跑一遍，尤其：\n\n```\nmake fmt-check && go vet ./... && make staticcheck\nPOSTGRES_TEST_ADMIN_URL=\"postgres://***@127.0.0.1:5432/post\" bash scripts/ci.sh\n```\n\n上次就是漏了 `make staticcheck`。这次两条改动分别落在迁移与真库测试上，`make test-integration` 必须真跑过再回报。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T20:39:41Z",
+          "run_id": "run-a47f4f9c9f62669c",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T21:03:08Z",
+          "run_id": "run-2127238170d771e4",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-15T21:15:40Z",
+          "run_id": "run-53b95d12df716f39"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-15T21:21:36Z",
+          "run_id": "run-a84a05a009e85887",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },

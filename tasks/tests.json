@@ -1550,6 +1550,16 @@
       "status": "not_run",
       "last_run": null,
       "evidence": "Contract for the T0207 task package: deliver TestGatesDifferInStrictnessAndSayWhy (不同 gate 严格度不同且可解释) and TestServerRevalidatesWhatTheCommandValidated (command 再次 server validate) in tests/integration, against real PostgreSQL. bash tests/acceptance/validation-gates-real-services-e2e.sh fails loudly by name until they exist, and fails if either does not actually run."
+    },
+    {
+      "id": "T0712-TEST-01",
+      "task_id": "T0712",
+      "name": "asset preview disclosure tests",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
     }
   ]
 }
