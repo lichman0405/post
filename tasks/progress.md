@@ -1668,9 +1668,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-15T13:12:50Z
+生成时间：2026-09-15T13:29:00Z
 
-状态分布：todo 64 · ready 0 · running 1 · worker_failed 0 · verification 2 · rejected 0 · blocked 0 · accepted 0 · merged 66（合计 133/133 个任务）
+状态分布：todo 64 · ready 0 · running 1 · worker_failed 0 · verification 1 · rejected 0 · blocked 0 · accepted 0 · merged 67（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1764,7 +1764,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0711 | Asset Governance 与 Rights Holder Transfer | P7 | todo |  |  |  |  |
 | T0801 | Public Entity Anonymous Pages | P8 | todo |  |  |  |  |
 | T0802 | Explore 聚合 | P8 | todo |  |  |  |  |
-| T0803 | Open Contribution Opportunity | P8 | verification | 2026-09-15T12:54:08Z |  |  |  |
+| T0803 | Open Contribution Opportunity | P8 | merged | 2026-09-15T12:54:08Z |  | 2026-09-15T13:23:30Z | 2026-09-15T13:28:59Z |
 | T0804 | External Fork/Contribution flow | P8 | todo |  |  |  |  |
 | T0805 | Published Knowledge Object | P8 | todo |  |  |  |  |
 | T0806 | External Evidence Network Aggregation | P8 | todo |  |  |  |  |

@@ -4588,9 +4588,11 @@
       "merged_at": null
     },
     "T0803": {
-      "status": "verification",
+      "status": "merged",
       "started_at": "2026-09-15T12:54:08Z",
       "worker_run_id": "run-b4897c3b315509e5",
+      "accepted_by_supervisor_at": "2026-09-15T13:23:30Z",
+      "merged_at": "2026-09-15T13:28:59Z",
       "rejection_reason": "## 【这不是缺陷 —— 基线推进，请在新基线上重新验证】\n\n**你的代码和测试一个字都不用改。** 这次返工的唯一原因是：main 往前走了两次提交，\n而其中一次让**你那份生成物**对不上新的输入了。\n\n### 发生了什么（用大白话说）\n\n你的改动里有一个文件是**算出来的**，不是写的：`specs/SPEC_VERSION.json`。它的内容\n是一串指纹，用来回答「这份规格有没有被改过」。它把一堆文件的内容揉在一起算，**其中\n包括 `tasks/tasks.json`**（任务清单本身也是规格的一部分）。\n\n问题出在这里：我在你开工之后提交了一次记账，改的就是 `tasks/tasks.json`\n（给另一个并行任务收窄了允许改动的范围）。**我改了它的输入，却没有把这个指纹重算一遍。**\n于是：\n\n- main 上的这份指纹对不上了（CI 从那条提交起一直红）；\n- 而 G2 验收门验的是「**当前 main + 你的完整改动**」拼起来的树——拼出来的树里，\n  任务清单是 main 的新版，指纹却是你那份按旧版算的，**所以你的验收门红在了同一格**。\n\n一次记账让另一个正在验收的任务失败，这是我的疏漏，不是你的。main 那份我已经补上并推了；\n你这份需要重新组合到新基线上，由工具**重新算**这个指纹（不是把文本合起来——\n生成物按定义就是重新算出来的）。\n\n### 你的改动是怎么过来的\n\n不是文本三方合并，而是**逐个文件的完整改动重新组合**到新基线上；两个生成物\n（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`）被排除在组合之外，\n由工具从合并后的树重新生成。main 这两次提交**没有碰** `tests/integration/append_only_test.go`\n或 `migration_test.go`，所以这次没有冲突、没有手工合并的文件，**你上次确认过的那两个文件的\n样子不会变**。\n\n### 【你要做的】\n\n1. **重跑你任务要求的全部 required tests**（`make test-integration`、\n   `bash tests/integration/check-sqlc-drift.sh`、`make check-schema-snapshot`，\n   以及你任务包列出的其余项），在新基线上确认它们仍然全绿；\n2. 确认 `RESULT.json` 自洽（`completed` 要求 `tests[]` 全部 `passed`），\n   并把 `summary` 里与新基线相关的部分说准；\n3. 如果你发现**任何**因为这次推进而产生的真实问题（例如某个断言现在红了），\n   **照实报告，不要为了让门变绿而放宽断言**——那种情况下我要知道。\n\n### 【边界】\n\n- 不要改动与本次推进无关的任何东西；不要顺手修复核报里记录在案的那些条目（见 #218）。\n- 不要碰 `tasks/**` 与 `specs/**` 的手工编辑：`specs/database/postgres.sql` 与\n  `specs/SPEC_VERSION.json` 只能由工具重新生成。\n",
       "history": [
         {
@@ -4675,6 +4677,18 @@
           "at": "2026-09-15T13:06:27Z",
           "run_id": "run-b3742b02b23e058f",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-15T13:23:30Z",
+          "run_id": "run-8d1b2472eabc69b6"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-15T13:28:59Z",
+          "run_id": "run-6d5d42dff6e5d040"
         }
       ]
     },
