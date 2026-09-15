@@ -68,6 +68,12 @@ type Querier interface {
 	// reviews). A research PR is a proposed RSG diff; merge controls acceptance
 	// (invariant 6).
 	CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue, error)
+	// Project milestones (T0609): research-timeline markers, separate from
+	// releases (canonical tables project_milestones,
+	// project_milestone_creations, migration 00063). A milestone may name a
+	// release; it never requires one.
+	CreateMilestone(ctx context.Context, arg CreateMilestoneParams) (ProjectMilestone, error)
+	CreateMilestoneCreation(ctx context.Context, arg CreateMilestoneCreationParams) (ProjectMilestoneCreation, error)
 	// Organizations and memberships (canonical tables: organizations,
 	// organization_memberships; 00017 adds organizations.deactivated_at).
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
@@ -147,6 +153,8 @@ type Querier interface {
 	// schema id to this row).
 	GetLatestSchemaProfile(ctx context.Context, arg GetLatestSchemaProfileParams) (ProjectSchemaProfile, error)
 	GetLatestScientificObjectVersion(ctx context.Context, objectID pgtype.UUID) (ScientificObjectVersion, error)
+	GetMilestone(ctx context.Context, arg GetMilestoneParams) (ProjectMilestone, error)
+	GetMilestoneCreation(ctx context.Context, arg GetMilestoneCreationParams) (pgtype.UUID, error)
 	GetOrganizationByID(ctx context.Context, id pgtype.UUID) (Organization, error)
 	// Row-locks the organization: governance writes serialize on this lock, so
 	// the last-owner check and the change that depends on it are atomic.
@@ -246,6 +254,11 @@ type Querier interface {
 	// ancestor walk the object-version query uses (a version created on a
 	// forked branch is not part of the ancestor branch's snapshot).
 	ListManifestRelationVersions(ctx context.Context, stateID pgtype.UUID) ([]RelationVersion, error)
+	// The timeline: one project's milestones in research order — occurred_at
+	// first (the event's date, the canonical kinds' natural progression),
+	// then creation order (created_at, id) so same-date ties are a total,
+	// deterministic order no matter which order the rows were inserted.
+	ListMilestones(ctx context.Context, projectID pgtype.UUID) ([]ProjectMilestone, error)
 	// RSG query surface (T0209): as-of version selection and the traversal's
 	// adjacency reads. All shapes are rebuildable from the canonical append-only
 	// history; nothing here adds semantic content (CLAUDE.md §7: RSG graph
