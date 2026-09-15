@@ -73,6 +73,16 @@ func (s *Service) Conflicts(ctx context.Context, in Params) (*conflict.Report, e
 	return r, nil
 }
 
+// Inputs composes the engine inputs of the named triple without computing
+// anything: the three states' refs and their lineage snapshots. Callers
+// that run an engine of their own over the same triple (the merge engine,
+// which recomputes the conflict report rather than trusting a copy) get
+// exactly the inputs Diff and Conflicts use, with the same validation and
+// the same project-membership check.
+func (s *Service) Inputs(ctx context.Context, in Params) (diff.Inputs, error) {
+	return s.readInputs(ctx, in)
+}
+
 // readInputs performs the shared front half of Diff and Conflicts: the
 // shape validation, the three state reads, the project-membership check
 // and the three snapshot reads, composed into the engine's inputs.

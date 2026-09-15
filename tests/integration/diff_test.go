@@ -61,6 +61,15 @@ type diffFixture struct {
 
 func newDiffFixture(t *testing.T, ctx context.Context) *diffFixture {
 	t.Helper()
+	return newDiffFixtureWithVisibility(t, ctx, domain.VisibilityPrivate, domain.BranchVisibilityPrivate)
+}
+
+// newDiffFixtureWithVisibility is newDiffFixture with the project's preset and
+// the main branch's visibility chosen by the caller: the merge tests need a
+// public target beside a private source (docs/09 §9's publication pair), and a
+// public branch is only allowed inside a public project (docs/12 §3).
+func newDiffFixtureWithVisibility(t *testing.T, ctx context.Context, projectVisibility domain.ProjectVisibility, mainVisibility domain.BranchVisibility) *diffFixture {
+	t.Helper()
 	pool, _ := testdb.Setup(t, ctx, adminURL(t), diffTaskID)
 	alice, err := persistence.NewCredentialStore(pool).CreateWithPassword(
 		ctx, "diff-alice@example.com", "hash", "diff-alice", "Alice")
@@ -80,7 +89,7 @@ func newDiffFixture(t *testing.T, ctx context.Context) *diffFixture {
 		Slug:            "diff-project",
 		Name:            "Diff Project",
 		Purpose:         "fixture purpose",
-		Visibility:      domain.VisibilityPrivate,
+		Visibility:      projectVisibility,
 		ProvisionStatus: domain.ProvisionPending,
 	}, alice.ID)
 	if err != nil {
@@ -107,7 +116,7 @@ func newDiffFixture(t *testing.T, ctx context.Context) *diffFixture {
 	main, err := svc.CreateBranch(ctx, alice, project.ID, rsg.CreateBranchInput{
 		Name:       "main",
 		BaseRef:    "",
-		Visibility: domain.BranchVisibilityPrivate,
+		Visibility: mainVisibility,
 	})
 	if err != nil {
 		t.Fatalf("create branch: %v", err)
