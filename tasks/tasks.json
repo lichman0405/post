@@ -2410,7 +2410,12 @@
         "human resolution plan input",
         "transaction + Git update saga",
         "合并流程要么对『读分支生命周期』加锁、要么在规格里明确接受该窗口（T0402 复核 minor #2 转移而来：并发 Merge 可能在读与 PR 插入之间提交）",
-        "非 push 来源 head 的 semantic completeness 不由本任务自行发明：00042 的默认值是 semantic_complete、而全仓库只有 push ingestion 写那张表（issue #189）；本任务只实现与这条裁定无关的部分，并在交付记录里点名这个缺口，等 owner 裁定后另行实现"
+        "非 push 来源 head 的 semantic completeness 不由本任务自行发明：00042 的默认值是 semantic_complete、而全仓库只有 push ingestion 写那张表（issue #189）；本任务只实现与这条裁定无关的部分，并在交付记录里点名这个缺口，等 owner 裁定后另行实现",
+        "自动合并的边界是规格逐条列出的（docs/09 §7）：**允许自动**——不同对象、同对象不同非冲突字段、可合并的关系集合、append-only evidence；**禁止自动**——科学结论 winner、Protocol 冲突数值折中、因果判断、private→public、rights conflict。越过这条线就必须落到人（CLAUDE.md 不变量 11：Agent 只解决结构冲突，人解决科学冲突）",
+        "冲突解决动作按 docs/09 §8 的七种表达：Accept A / Accept B / Keep both versions / Explicit coexistence / Create validation branch / Request more evidence / Abort proposed change。科学冲突允许在 main 里保持 contested/unresolved —— 不要为了\"合并成功\"把它消解掉",
+        "docs/09 §9：merge 只改变 accepted state；source 含 private state 而 target 是 public 时**不由本任务自行公开** —— 那要过独立的 Publication Gate（T0704/T0705 那条线）。Private branch history 不自动公开",
+        "main 是 frozen 的（docs/09 §3）：本任务是推进 main 的唯一路径，但只能经 Research PR merge，不得留任何直接写 main 的旁路",
+        "复用 T0405（已合并）的语义冲突检测结果，冲突分类用 docs/09 §6 的七类，不要另立一套判定"
       ],
       "deliverables": [],
       "acceptance_criteria": [
@@ -2427,6 +2432,7 @@
         "internal/rsg/**",
         "internal/application/**",
         "internal/domain/**",
+        "internal/persistence/**",
         "go.mod",
         "go.sum",
         ".env.example",
@@ -2441,8 +2447,15 @@
         "tasks/progress.md"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/09_VERSION_CONTROL.md §3 Frozen main、§6 语义冲突分类、§7 自动合并边界、§8 冲突解决动作、§9 Merge 与 Publish",
+        "docs/43_STATE_MACHINES.md（branch / PR 状态机）",
+        "docs/23_SECURITY_PRIVACY.md §4（private→public 由独立闸把守）",
+        "issue #189 —— 非 push 来源 head 的 semantic completeness（本任务按其约束只做无关部分）",
+        "internal/rsg/ 与 internal/application/（T0306 semantic validation merge、T0402 Pull Request、T0405 冲突检测）"
+      ],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。",
+      "supervisor_scope_narrowing": "2026-09-16：补 internal/persistence/**（原 phase 级上限里没有，是缺口）——合并事务的 saga 状态要落库，而同级已合并的 T0402/T0404 都带着这一格。它与 internal/persistence/queries/** + internal/persistence/sqlc/** 是成对的派生产物，整目录一起覆盖才满足派生产物规则。本任务**是迁移链条当前在飞的一环**（分配编号时与其他迁移任务串行），所以它开工前 T0704（无迁移的读路径）必须先合并——两个任务都会重新生成 sqlc，而 G2 是把整个 diff 打到当时的 main 上，第二份生成物必然打不上。迁移编号由 Supervisor 在 spawn 时分配，Worker 不得自选号。本任务**不做** apps/web 之外的界面工作以外的东西——apps/web 保留，因为冲突解决方案的输入可能需要界面；若实际不需要，Worker 不必使用它（范围是许可，不是义务）。"
     },
     {
       "id": "T0407",

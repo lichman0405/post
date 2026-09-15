@@ -4735,13 +4735,22 @@
       ]
     },
     "T0704": {
-      "status": "ready",
+      "status": "running",
+      "started_at": "2026-09-15T18:12:24Z",
+      "worker_run_id": "run-296c8d2ac7560e6d",
       "history": [
         {
           "from": "todo",
           "to": "ready",
           "at": "2026-09-15T18:10:36Z",
           "run_id": "run-c64f3eca082437c8"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-15T18:12:24Z",
+          "run_id": "run-296c8d2ac7560e6d",
+          "reason": "worker spawn"
         }
       ]
     },

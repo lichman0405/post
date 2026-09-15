@@ -8411,3 +8411,50 @@ CI 七个必跑作业全绿（`migration-integration` 6m0s、`go` 2m57s、`accep
 所以**改它必须同时重算标记**（这就是 L1-95 那次把 main 弄红的教训）。
 
 **下一环是 T0704**（Publication Impact Preview）：依赖的 T0702/T0703 都已合并，现在是 ready 的。
+
+---
+
+## L1-20260916-98 —— 并行调度的判据：**共用的生成物**决定两个任务能不能同时开工
+
+T0702 合并后迁移链条空了出来，我评估要不要按默认并行度（3）再开一个 Worker。
+候选里 T0406（Semantic Merge Engine）解锁 19 个下游，是剩下最大的杠杆，且 #189 写明"不阻断"。
+**结论：不并行，T0406 排在 T0704 合并之后。**
+
+### 判据
+
+现有规则只说了"迁移任务一次一个在飞"，理由是各任务的 diff 都带着**重新生成**的
+`specs/database/postgres.sql` / `specs/SPEC_VERSION.json`，而 G2 是把整个 diff 用
+`git apply` 打到**当时的 main** 上，第二份必然打不上。
+
+这条规则的**本质**不是"迁移"这个动作，而是"**两个任务会各自重新生成同一个共用文件**"。
+把它套到这一对任务上，同一个冲突面换个文件又出现了一次：
+
+- T0704 的 scope 里有 `internal/persistence/queries/**` + `internal/persistence/sqlc/**`（预览要读当前 state）；
+- T0406 要落合并事务的 saga 状态，必然也要加查询 → 也要重新生成 sqlc。
+
+而派生产物规则自己就写明了这类文件的合不上程度：
+
+> "a task and main both regenerate it, and their two copies differ on every line the other one
+> added, so a textual apply refuses **on context alone even when the changes are nowhere near
+> each other** — T0209's querier.go"
+
+所以判据写成：
+
+> **两个任务若会各自重新生成同一个共用生成物（迁移快照、sqlc 输出），就不能同时开工** ——
+> 与它们是否都叫"迁移任务"无关，也与它们在 DAG 上是否互相依赖无关。
+
+### 为什么不为省这点时间而并行
+
+并行的收益是**墙上钟表约半小时**；代价是概率不低的**一次返工周期**（collect 被拒或 G2 打不上补丁，
+要 rebaseline + 让 Worker 在新基线上重新生成生成物，约 40 分钟外加一次 Worker 预算），
+外加合并状态的复杂度。期望代价大于期望收益，所以串行。
+
+**这是判据的应用，不是判据的放宽**：将来若两个任务不共用任何生成物，并行仍然是该做的。
+
+### 顺带：T0406 的任务定义已就绪（等 T0704 合并即派发）
+
+- **补了一格 `internal/persistence/**`**：phase 级上限里没有它，而同级的 T0402/T0404 都有 ——
+  合并事务要落库，这是范围里的一个缺口。
+- requirements 从 5 条补到 10 条，全部指到 `docs/09` 的具体小节（§3 frozen main、§6 冲突分类、
+  §7 自动合并边界、§8 七种解决动作、§9 Merge 与 Publish）。
+- `relevant_specs` 从空填到 5 个指针。
