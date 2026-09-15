@@ -3717,7 +3717,12 @@
       "requirements": [
         "human maintainer/owner explicit approval",
         "policy checks",
-        "immutable version + audit/event"
+        "immutable version + audit/event",
+        "清单的完整性哈希：必须存 GateResult.ManifestJSON（规范字节）并以其 sha256 作为 integrity_hash —— assets.Gate 是严格比对的（integrity_hash 必须等于规范字节的摘要，不是形状对就行），所以发布路径只要存了别的字节，之后任何人重算都对不上。读回时用 assets.ManifestHash(存下来的字节) 验（T0702 的 RESULT 风险 2）",
+        "GateResult.Facts.Document 与 .Ref 是调用方填的：必须用即将写入的那一行渲染出的科研资产版本文档填上，否则校验阶梯的 asset_schema 检查会把发布挡下来（这两个 fact 缺省为空 = 失败关闭，但不显眼，T0702 的 RESULT 风险 3）",
+        "依赖钉一律经 assets.NewDependencyPin 构造：带空白的拼法（'<pid>@ 1.0'）今天能绕开\"同一版本不许列两次\"（#233 minor 1），发布路径不得把这种拼法写进清单",
+        "不得把协议对象文档里的 step 对象直接搬进 metadata.steps —— 清单 metadata 的形状是从对象 schema 压缩过的（对象 schema 里 steps 是对象数组，清单里是非空字符串数组，#233 minor 2）",
+        "assets.REQUIRED_METADATA 是下界不是闭集（多声明的键一律只查形状），且 material_collection / benchmark 两行尚未成为已裁定的产品规则（#232）：可以按现状接线，但不得据以扩写产品语义"
       ],
       "deliverables": [],
       "acceptance_criteria": [

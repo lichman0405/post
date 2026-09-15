@@ -8225,3 +8225,189 @@ YAML 解出来是 nil map，写成 `{}` 会被 `reflect.DeepEqual` 判不等）�
 是同一类错误的两面：**"跳过式全绿"**——我修掉了一处"检查没跑"，同时自己制造了另一处
 "该跑的检查我没跑"。窗口脚本的自检清单里从此加一条：**只要 diff 里有 `.github/**`
 或 `specs/orchestrator/gates.json`，就跑门规格同步测试**。
+
+## L1-20260915-96 —— T0702 交回来一个"这算不算 L3"的问题：material_collection / benchmark 的必填字段；我判 L1，收货，并把残余立档
+
+T0702 的 Worker 在 `notes_for_supervisor` 里把一件事交还给我，而不是自己拍板：
+
+> material_collection 与 benchmark 两行的必填字段**不来自任何规格**……
+> 如果你认为"一个材料集必须声明哪些字段"是产品/科研语义决策而不是实现决策，那这块是 L3。
+
+这是**正确的做法**（CLAUDE.md §5：不得自行创造产品规则；发现问题要报告）。所以我自己核了一遍再判。
+
+### 一、我核出来的事实（不是转抄它的话）
+
+**机制与类型是规格定的，四类都跑不掉**：
+
+- `docs/11` §2：*"V1 类型：Dataset、Protocol、Material Collection、Benchmark。"*
+- `docs/11` §3（发布门槛）：*"至少校验：source accepted state/release、version fixed、provenance、
+  creators/contributors、rights/license、visibility、dependency pin、hash、**required metadata**、
+  schema validation。"* —— "必填元数据"本来就是被规格点名的**发布闸**项。
+- 另外 `docs/31` Gate C *"Dataset/Protocol/Material Collection/Benchmark 可发布"*、
+  `docs/34` *"四类各至少 1 个"*、`docs/03` §5、`docs/02`:40 都只给这四个名字。
+
+**dataset / protocol 这两行有出处，而且是双重的**：
+
+| 行 | 键 | 出处 |
+| --- | --- | --- |
+| dataset | `purpose` | `specs/schemas/dataset.schema.json` 的 `required` 数组里有它 |
+| dataset | `data_type`、`blob_ids`、`access_level`、`quality_notes` | `internal/rsg/validation/spec.go:193` 的 `typeRequiredFields["dataset"]`（T0207 落地、已合并） |
+| protocol | `purpose` | `specs/schemas/protocol.schema.json` 的 `required` |
+| protocol | `domain`、`steps`、`parameters`、`requirements` | 同文件 `:194` 的 `typeRequiredFields["protocol"]` |
+
+我逐字比过：`RequiredMetadata(dataset)` 恰好 = schema 的 required 里的 `purpose` ∪
+`typeRequiredFields["dataset"]`，protocol 同理。**一个键都不是它自己想的。**
+而且有一条漂移看守：`manifest_test.go` 的 `TestDatasetAndProtocolMetadataMatchesTheObjectSchemas`
+去**真读** `specs/schemas/*.schema.json`，要求每个键都是该 schema 的 property，
+`access_level` 的词表与该 schema 的 enum **同集合同顺序**；它还有一句反空转的守卫
+（`len(doc.Properties) == 0` 就 `Fatal`，注释写着"schema 搬走了这条测试就会空转过关"）。
+这符合我要的"探针必须能说不"。
+
+**material_collection / benchmark 确实没有字段表**：`docs/08` 的对象类型只有
+CoreScientificObject、ResearchQuestion、Hypothesis、**Material**、Sample、Experiment、Calculation、
+Dataset、Protocol、Claim、Finding、ExternalReference —— **没有 "Material Collection"，也没有 "Benchmark"**。
+`docs/03` §5 对 Research Asset 只给四个名字。这两行是包里的取舍，Worker 说得对。
+
+**但这两个"没出处"的行并非全是凭空**：`custodian` 在 `docs/11` §6
+（*"分离 Rights Holder、Custodian、Maintainer、Creator、Contributor、Originating Project"*）
+与 `docs/38`（*"rights holder/custodian/maintainer"*）里都是**写明的**治理角色；
+`member_refs` 是"材料的集合"这个类型自身的定义；`dataset_refs`、`metrics`、`task` 同理。
+真正**规格里一个词都没有的**只有一个：`selection_criteria`。
+
+### 二、判据：为什么不是 L3
+
+判据说到底就一句，也是这个仓库自己已经写下的那句（L1-62）：
+
+> 改正的**依据是既有规格** → L1；**必须问、不能猜的语义** → L3。
+
+拿它对一下：
+
+- **真 L3 长什么样**（L1-88 §三，T0310）：问题是"不经 push 造出来的 branch head 算不算
+  semantic complete"——它决定的是 **T0306 那道'不可绕过语义校验就合并'的闸在非 push 路径上
+  是不是开了口子**，即安全/科研语义的**边界**能否被绕过，而且**仓库里没有任何依据**可查。
+- **这里是什么**：机制（§3 把 required metadata 列为发布闸项）是规格强制的；
+  四行里两行逐字来自既有声明，另两行的键除 `selection_criteria` 外都能指到规格句子或类型自身的定义；
+  **今天没有任何发布路径**（发布命令是 T0705，还没建），所以这四行**现在谁也拦不住**；
+  它还是**下界**不是闭集（额外的键一律接受，只查形状），改它是一处 map 加几条测试。
+- **反过来不做更糟**：`docs/11` §3 对四类里两类的"required metadata"会直接没有实现——
+  那也是"自行决定"，而且是最不透明的一种（决定是"什么都不要求"）。
+
+⇒ **L1，收货**。Worker 交上来的四个答案里，三个我能指到规格句子或既有声明，
+一个（`selection_criteria`）是要求它必须填一段规格没写的东西时能给出的最保守答案。
+
+### 三、残余怎么写下来（不藏着）
+
+1. **`selection_criteria` 是这一版自己选的**，规格里没有这个词。
+2. 这张表是**平台强制的下界**，`material_collection` / `benchmark` 两行的**确切键表**是包的取舍，可改；
+   改法是一处 `requiredMetadata` 加几条测试，不是重构。
+3. 立 **issue** 给 owner 一个裁定口（连同"四类资产各自该声明什么"这个更大的问题）。
+4. **约束要写进 T0705 的 requirements**（发布命令是让它变成用户可见规则的那一环）——
+   但**这一轮不碰 `tasks/tasks.json`**：一编辑就换 marker，而正在飞的 T0702 的 diff 里**正带着 marker**，
+   两边都动必打架。按 L1-74 的规矩，**搭 T0702 这次合并的便车**，在它落地之后的那一下一起提交。
+
+### 四、顺带记下 Worker 主动交代的另外两件（都成立，都不阻断）
+
+- **`integrity_hash` 必须是 manifest 的规范字节的 sha256**，不是"看起来像摘要"、也不是客户端发来的
+  请求字节的摘要。这是它自己判的 L1，理由是"只查形状的检查在哈希算错时不会红"——我同意，
+  而且这正是 T0703 那条 nit 3 的正面版本（那条是注释把没钉住的东西说成钉住了，这条是**真钉住了**）。
+  它把后果写进了 risks：T0705 必须用 `Manifest.Hash()` 并把 `GateResult.ManifestJSON` 存进列，
+  否则每一次发布都会被拒。**这条要带进 T0705 的任务包**。
+- **`GateResult.Facts.Document` / `.Ref` 留空是有意的**：research-asset-version 实体文档只能从
+  "即将写入的那一行"渲染（id/created_at/created_by 是服务端派生的），T0702 手里没有。
+  所以阶梯的 `asset_schema` 检查在 T0705 补齐这两个字段之前会报"资产文档没给"。
+  这是**失败朝关闭的方向**（fail-closed），但 T0705 忘了就会表现为"发布被拦住"而看不出原因。**同样带进 T0705。**
+
+### 五、这一轮为什么返了一次工
+
+`collect` 打回，理由是机械的、只有一条：Worker 在 `tests[]` 里列了一条**没跑**的 web
+typecheck/lint，同时又声称 `completed`。规则（`result_consistency.go`）是
+**`completed` 时 `tests[]` 每一条都必须是 `passed`**，不管那条是不是任务要求的。
+
+这条我**没有替它圆**，也不该圆：`tests[]` 的含义是"我跑了什么、结果是什么"，
+不是"我考虑过什么"。返工信只说了一件事——**把那条从 `tests[]` 删掉，把"没跑、原因是 diff 里
+没有任何 web 文件"这句话挪进 `notes_for_supervisor`**；并且明写了**两条不许走的捷径**：
+不许改成 `passed`（那是假证据）、不许把整个 `status` 改成 `blocked`（活儿做完了，那是谎）。
+代码、迁移、测试一个字都没让它动。第二次 collect 全绿。
+
+**级别判定**：这条够不着 L3，也够不着 L2——它是**报告纪律**，不是产品规则。
+
+**可逆性**：纯记录 + 一个 issue；`tasks/decisions.md` 不是规格标记的输入（标记只吃
+`tasks/tasks.json` 与 `specs/**`），所以这篇随时可写，不会推动 marker。
+
+---
+
+## L1-20260916-97 —— T0702 的 5 条复核意见：为什么是"记账后合并"而不是打回返工
+
+T0702 的独立复核结论是 **approve：0 blocking、0 major、2 minor + 3 nit**。5 条我逐条自己核过
+（不是转抄复核者的话），判**记账后合并**，5 条归档 **#233**，其中两条落成 T0705 任务包里的约束。
+这条记的是**判据**：为什么这 5 条够不着返工。
+
+### 一、判据：`reject-vs-record-rule`
+
+仓库里已经用过的判据是：
+
+> **假的覆盖/证据声明**（测试说它证了一件事、其实证不了；证据说跑了、其实没跑）→ **打回**；
+> **机制说法不精确但防护还在**（代码/注释把某规则说得比实际严，而该防的东西仍然防住了）→ **记账后合并**。
+
+按这条逐条过：
+
+| # | 意见 | 我核出来的事实 | 判 |
+| --- | --- | --- | --- |
+| minor 1 | 依赖钉"同一版本不许列两次"可被空白拼法绕开 | **属实**：`ParseDependencyPin` trim 右半边，`validateDependencyPins` 的 `seen` 键在**原字符串**上 | 记账 |
+| minor 2 | `steps` 表里是字符串数组、对象 schema 里是对象数组 | **属实**：`protocol.schema.json` 的 `steps` 是 `items:{"type":"object"}` | 记账 |
+| nit 1 | pid 不合法时 `Facts.DependencyPins` 仍为真 | 属实，但**按代码自己的语义不算错**（该 fact 断言的是"依赖钉这项检查"） | 记账 |
+| nit 2 | 空 metadata 键被接受（`{"": "x"}` 通过） | **属实**（探针复现） | 记账 |
+| nit 3 | `RESULT.json` 把新增测试数写成 24 | **属实**，我自己数的：14 + 7 + 19 = **40**，是**少报**不是夸大 | 记账 |
+
+**5 条里没有一条**能让已发布的东西出错、能绕过安全边界、能让哈希失效，
+也没有一条让某条测试的断言变成假的。minor 2 那条，代码注释**只声称键名**
+（测试也只钉键名 + `access_level` 词表），所以**没有任何假声明**——
+复核者自己也这么写："nothing false is asserted"。
+
+### 二、minor 2 多半是有意的收窄，不是漏洞
+
+我把两边的原文都读了：`requirements` 在 schema 里是字符串数组（**对得上**）；
+`parameters` 的 schema 是 `additionalProperties: true`（表里更严，是**收窄**不是矛盾）；
+只有 `steps` 是真分叉（对象数组 vs 字符串数组）。
+
+而 `manifest.go` 自己的注释把 dataset/protocol 两行说成"从 docs/08 字段表**压缩**而来、
+用对象 schema 的属性名命名"——**压缩本来就含形状压缩**。更关键的是
+`classifyMetadataValue` 的注释写明：值只收字符串/字符串数组/一层字符串对象，
+因为 JSON 数字过不了 jsonb 往返、会破坏"哈希可验证"。真让 step 对象进来，
+第一个塞进去的数字就会把哈希搞坏。**所以这个收窄是哈希可验证性的直接后果，不是随手写的。**
+
+### 三、minor 1 是真的能绕开，但绕开它需要故意
+
+`validateSelfPin` 走的是**解析后的 (pid, 版本) 对**，所以带空格的**自我钉**照样被抓住；
+被绕开的只有"同一版本列两次"这一条，且需要发布方**故意**写一个带空格的拼法。
+今天发布路径（T0705）还不存在，没有任何用户能碰到它。
+
+### 四、为什么不返工
+
+打回的代价是作废**已通过的复核指纹与 G2 记录**（要重新 collect → 重新复核 → 重新 G2，
+约 40 分钟），换回来的是一行级的措辞与防呆改动。**不成比例**——何况 §5.1 的六项条件
+（含"没有未解决的 review 意见"）用"每条给出处置 + 归档"就满足了，处置本身就是解决。
+
+对照：上一轮 T0703 的 4 条 nit 也是这样处理的（归档 **#230**，合并）。
+
+### 五、落到哪去了
+
+- **#233**：5 条意见的完整归档（含我的核实与"改法/归处"）。
+- **T0705 任务包的 5 条约束**（本次随合并的标记重算一起写入 `tasks/tasks.json`）：
+  ① 完整性哈希必须存 `GateResult.ManifestJSON` 并以其摘要为准；
+  ② `Facts.Document`/`.Ref` 必须按即将写入的行渲染填上；
+  ③ 依赖钉一律经 `NewDependencyPin` 构造；
+  ④ 不得把 step 对象直接搬进 `metadata.steps`；
+  ⑤ `REQUIRED_METADATA` 是下界不是闭集、两行未裁定（#232），不得据以扩写产品语义。
+  ①②来自 Worker 自己在 `risks` 里报的义务，③④来自这次的复核意见。
+- **`RESULT.json` 里的"24"我没改**：那是 Worker 的证词，留在原处，错在 #233 里说明了。
+
+### 六、这一轮的状态
+
+T0702 已合并（`daeb450`，PR **#234**，13 个文件 +3537/-10）。四层 Gate 全绿，
+CI 七个必跑作业全绿（`migration-integration` 6m0s、`go` 2m57s、`acceptance` 1m21s）。
+规格标记由 `864a57983b7b06f2` 走到 **`62487d6b3015e1cf`**（38 个输入）——
+它这次动是因为 T0705 的 requirements 进了 `tasks/tasks.json`，而该文件是标记的输入之一，
+所以**改它必须同时重算标记**（这就是 L1-95 那次把 main 弄红的教训）。
+
+**下一环是 T0704**（Publication Impact Preview）：依赖的 T0702/T0703 都已合并，现在是 ready 的。

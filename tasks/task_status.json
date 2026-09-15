@@ -4614,13 +4614,59 @@
       ]
     },
     "T0702": {
-      "status": "ready",
+      "status": "merged",
+      "started_at": "2026-09-15T17:36:13Z",
+      "worker_run_id": "run-1b4a4a853d809c4a",
+      "accepted_by_supervisor_at": "2026-09-15T18:02:29Z",
+      "merged_at": "2026-09-15T18:09:43Z",
+      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 1 test(s) not_run (pnpm --filter @post/web typecheck; pnpm --filter @post/web lint) and 0 test(s) failed () — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
       "history": [
         {
           "from": "todo",
           "to": "ready",
           "at": "2026-09-15T17:17:39Z",
           "run_id": "run-ecd5a43bec6bc0ad"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-15T17:18:33Z",
+          "run_id": "run-89c60f2e59a6eef1",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-15T17:35:28Z",
+          "run_id": "run-80530e993a9bea28",
+          "reason": "collect rejected: result-consistency: result-tests: status completed but 1 test(s) not_run (pnpm --filter @post/web typecheck; pnpm --filter @post/web lint) and 0 test(s) failed () — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T17:36:13Z",
+          "run_id": "run-1b4a4a853d809c4a",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T17:37:24Z",
+          "run_id": "run-ec1dde9e8aa8768e",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-15T18:02:29Z",
+          "run_id": "run-84bab5f6b168ed8c"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-15T18:09:43Z",
+          "run_id": "run-4ff129340d65d831",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
