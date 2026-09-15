@@ -1,0 +1,13 @@
+{
+  "name": "@post/e2e-pulls",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PR Research State Diff UI e2e (T0408 required test \"pr ui e2e\"): real Chromium drives the built web app through the pull request detail page — the six tabs of docs/06 §6 with the semantic diff as the first screen and the raw Git refs on a secondary tab, the risk banner that never softens a blocking integrity failure, the two review dimensions kept apart, and the review submission that carries exactly the human's decision with the session's CSRF token. The API is mocked at the network layer with the exact wire shapes cmd/api/pullrequestshttp, cmd/api/reviewhttp and internal/rsg/diff produce (the Go handler suites lock those shapes against a real guard).",
+  "type": "module",
+  "scripts": {
+    "e2e": "node pulls-e2e.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}

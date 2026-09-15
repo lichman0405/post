@@ -1,0 +1,475 @@
+/* T0408 PR Research State Diff UI — GitHub/Primer design tokens (ADR-012,
+   docs/06), the same neutral/dense/bordered language as projects.css and
+   conflicts.css: no gradients, no glass, no marketing cards. The page is
+   the semantic diff of one proposal (docs/06 §6): the first screen is the
+   Research State Diff, the raw Git diff is a secondary tab, and the risks
+   a reviewer must not miss sit above the tabs. */
+
+.pull-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+  margin-bottom: 16px;
+}
+
+.pull-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--fgColor-default, #1f2328);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.pull-tab:hover {
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+.pull-tab-active {
+  border-color: var(--borderColor-default, #d0d7de);
+  border-bottom: 1px solid var(--bgColor-default, #ffffff);
+  background: var(--bgColor-default, #ffffff);
+  font-weight: 600;
+}
+
+.pull-tab-count {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 10px;
+  background: var(--bgColor-muted, #f6f8fa);
+  color: var(--fgColor-muted, #59636e);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.pull-panel {
+  padding: 4px 0 8px;
+  outline-offset: 2px;
+}
+
+.pull-panel-hint {
+  margin: 0 0 12px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+
+/* ---------- The risk banner ---------- */
+
+.pull-risks {
+  padding: 12px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-left: 4px solid var(--borderColor-attention-emphasis, #bf8700);
+  border-radius: 6px;
+  margin-bottom: 16px;
+  background: var(--bgColor-attention-muted, #fff8c5);
+}
+
+.pull-risks-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pull-risk-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pull-risk {
+  padding: 8px 0;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.pull-risk:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.pull-risk-blocking {
+  color: var(--fgColor-default, #1f2328);
+}
+
+.pull-risk-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pull-risk-icon {
+  flex: none;
+}
+
+.pull-risk-blocking .pull-risk-icon {
+  color: var(--fgColor-danger, #d1242f);
+}
+
+.pull-risk-warning .pull-risk-icon {
+  color: var(--fgColor-attention, #9a6700);
+}
+
+.pull-risk-severity {
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.pull-risk-blocking .pull-risk-severity {
+  color: var(--fgColor-danger, #d1242f);
+}
+
+.pull-risk-warning .pull-risk-severity {
+  color: var(--fgColor-attention, #9a6700);
+}
+
+.pull-risk-detail {
+  padding-left: 20px;
+  font-size: 12px;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.pull-risk-link {
+  margin: 4px 0 0 20px;
+  padding: 2px 8px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background: var(--bgColor-default, #ffffff);
+  color: var(--fgColor-accent, #0969da);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pull-risk-link:hover {
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+/* ---------- Summary ---------- */
+
+.pull-summary-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.pull-count {
+  display: flex;
+  flex-direction: column;
+  min-width: 96px;
+  padding: 8px 12px;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 6px;
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+.pull-count-value {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.pull-count-label {
+  color: var(--fgColor-muted, #59636e);
+  font-size: 11px;
+}
+
+.pull-summary-states {
+  margin-bottom: 16px;
+}
+
+.pull-summary-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.pull-summary-state-role {
+  min-width: 150px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.pull-summary-state-git {
+  color: var(--fgColor-muted, #59636e);
+  font-family: var(--fontStack-monospace, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.pull-subtitle {
+  margin: 16px 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pull-review-state {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pull-review-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.pull-review-kind {
+  min-width: 90px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.pull-review-none {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.pull-review-recorded strong {
+  text-transform: none;
+}
+
+.pull-earlier-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.pull-summary-line {
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+
+/* ---------- Change lists ---------- */
+
+.pull-changes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 6px;
+}
+
+.pull-change {
+  padding: 8px 12px;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.pull-change:first-child {
+  border-top: none;
+}
+
+.pull-change-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.pull-change-kind {
+  padding: 0 6px;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 10px;
+  background: var(--bgColor-muted, #f6f8fa);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.pull-change-created {
+  color: var(--fgColor-success, #1a7f37);
+  border-color: var(--borderColor-success-muted, #aceebb);
+  background: var(--bgColor-success-muted, #dafbe1);
+}
+
+.pull-change-aborted {
+  color: var(--fgColor-danger, #d1242f);
+  border-color: var(--borderColor-danger-muted, #ffcecb);
+  background: var(--bgColor-danger-muted, #ffebe9);
+}
+
+.pull-change-type {
+  color: var(--fgColor-muted, #59636e);
+  font-family: var(--fontStack-monospace, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.pull-change-title {
+  font-weight: 600;
+}
+
+.pull-change-moved {
+  padding: 0 6px;
+  border: 1px solid var(--borderColor-attention-muted, #f5e0a3);
+  border-radius: 10px;
+  background: var(--bgColor-attention-muted, #fff8c5);
+  color: var(--fgColor-attention, #9a6700);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.pull-change-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-left: 2px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+
+.pull-change-id {
+  font-family: var(--fontStack-monospace, ui-monospace, monospace);
+}
+
+.pull-empty {
+  padding: 12px;
+  border: 1px dashed var(--borderColor-muted, #d8dee4);
+  border-radius: 6px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 13px;
+}
+
+/* ---------- Raw files (secondary tab) ---------- */
+
+.pull-raw-side {
+  padding: 12px;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.pull-raw-refs {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.pull-raw-refs dt {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.pull-raw-refs dd {
+  margin: 0;
+}
+
+.pull-raw-empty-ref {
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+
+.pull-raw-link {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.pull-raw-link:hover {
+  text-decoration: underline;
+}
+
+/* ---------- Review controls ---------- */
+
+.pull-review {
+  padding-top: 16px;
+  border-top: 1px solid var(--borderColor-default, #d0d7de);
+}
+
+.pull-review-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.pull-review-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.pull-review-field-wide {
+  flex: 1 1 320px;
+}
+
+.pull-review-field select,
+.pull-review-field textarea {
+  padding: 5px 8px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background: var(--bgColor-default, #ffffff);
+  color: var(--fgColor-default, #1f2328);
+  font: inherit;
+  font-size: 13px;
+}
+
+.pull-review-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 100%;
+}
+
+.pull-review-submit {
+  padding: 5px 12px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background: var(--bgColor-success-emphasis, #1f883d);
+  color: var(--fgColor-onEmphasis, #ffffff);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pull-review-submit:disabled {
+  background: var(--bgColor-disabled, #eff2f5);
+  border-color: var(--borderColor-default, #d0d7de);
+  color: var(--fgColor-disabled, #8c959f);
+  cursor: not-allowed;
+}
+
+.pull-review-saved {
+  padding: 2px 8px;
+  border: 1px solid var(--borderColor-success-muted, #aceebb);
+  border-radius: 10px;
+  background: var(--bgColor-success-muted, #dafbe1);
+  color: var(--fgColor-success, #1a7f37);
+  font-size: 12px;
+}
+
+.pull-review-error {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--borderColor-danger-muted, #ffcecb);
+  border-radius: 6px;
+  background: var(--bgColor-danger-muted, #ffebe9);
+  color: var(--fgColor-danger, #d1242f);
+  font-size: 13px;
+}

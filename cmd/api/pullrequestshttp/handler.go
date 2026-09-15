@@ -9,9 +9,11 @@ import (
 
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/internal/application/prchecks"
+	"github.com/lichman0405/post/internal/application/prdiff"
 	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/application/pullrequests"
 	"github.com/lichman0405/post/internal/domain"
+	"github.com/lichman0405/post/internal/rsg/diff"
 	"github.com/lichman0405/post/internal/rsg/integrity"
 )
 
@@ -19,6 +21,7 @@ import (
 type handlers struct {
 	prs      PullRequests
 	checks   CheckRunner
+	diff     DiffRunner
 	projects ProjectReader
 }
 
@@ -33,6 +36,13 @@ type PullRequests interface {
 // internal/application/prchecks.Service.
 type CheckRunner interface {
 	CheckPullRequest(ctx context.Context, projectID string, number int64) (integrity.Report, error)
+}
+
+// DiffRunner computes the PR's Research State Diff (the three pinned
+// states of the PR plus the target branch's current head). The production
+// implementation is internal/application/prdiff.Service.
+type DiffRunner interface {
+	PullRequestDiff(ctx context.Context, projectID string, number int64) (*diff.Diff, error)
 }
 
 // ProjectReader is the visibility gate the handler runs before anything
@@ -209,4 +219,55 @@ func (h *handlers) handleChecks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	authhttp.WriteJSON(w, http.StatusOK, report)
+}
+
+// handleDiff: GET /api/v1/projects/{projectId}/pull-requests/{number}/diff
+//
+// The PR's Research State Diff — the canonical document of
+// internal/rsg/diff (objects created/updated/aborted/reopened, relation
+// changes, the categorized summary, and the recorded file-level git refs
+// the raw-file view links from). It is the API contract's own shape
+// (specs/api/openapi.yaml: "Get Research State Diff and raw file diff
+// references"), written verbatim: the engine's fixed field order is the
+// wire order, so two renders of the same PR are byte-identical.
+func (h *handlers) handleDiff(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectId")
+	number, ok := prNumber(w, r, r.PathValue("number"))
+	if !ok {
+		return
+	}
+	if !h.gateProject(w, r, projectID) {
+		return
+	}
+	if h.diff == nil {
+		authhttp.WriteError(w, r, http.StatusServiceUnavailable, pullrequests.CodeUnavailable,
+			"pull requests unavailable")
+		return
+	}
+	document, err := h.diff.PullRequestDiff(r.Context(), projectID, number)
+	if err != nil {
+		switch {
+		case errors.Is(err, prdiff.ErrPullRequestNotFound):
+			authhttp.WriteError(w, r, http.StatusNotFound, pullrequests.CodePullRequestNotFound,
+				"pull request not found")
+		case errors.Is(err, prdiff.ErrStateNotFound):
+			// One of the three states the diff compares no longer
+			// resolves. The code is the shared missing-state vocabulary
+			// (branches and states speak the same string); the message
+			// names no identifier beyond the outcome (docs/45).
+			authhttp.WriteError(w, r, http.StatusNotFound, prdiff.CodeStateNotFound,
+				"one of the compared states does not exist")
+		case errors.Is(err, prdiff.ErrValidation):
+			// A fixed user-facing line, never err.Error(): the service's
+			// validation errors carry the package prefix, which belongs in
+			// the log, not on the wire (docs/45).
+			authhttp.WriteError(w, r, http.StatusBadRequest, pullrequests.CodeValidation,
+				"invalid project or pull request number")
+		default:
+			authhttp.WriteError(w, r, http.StatusServiceUnavailable, pullrequests.CodeUnavailable,
+				"pull requests unavailable")
+		}
+		return
+	}
+	authhttp.WriteJSON(w, http.StatusOK, document)
 }

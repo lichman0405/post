@@ -67,6 +67,7 @@ import (
 	"github.com/lichman0405/post/internal/application/diffs"
 	"github.com/lichman0405/post/internal/application/manifests"
 	"github.com/lichman0405/post/internal/application/prchecks"
+	"github.com/lichman0405/post/internal/application/prdiff"
 	"github.com/lichman0405/post/internal/application/pullrequests"
 	"github.com/lichman0405/post/internal/application/releases"
 	"github.com/lichman0405/post/internal/application/resolutions"
@@ -399,6 +400,11 @@ func run(args []string) int {
 	// gate reads from — reads only, nothing stored; re-running over the
 	// same PR derives the same report (the pins are fixed, the rows
 	// append-only).
+	// The three-way diff use case (T0401): one instance serves both the PR
+	// page's diff read (T0408, through the prdiff resolution below) and the
+	// conflict resolution surface (T0407) — the engine is stateless and the
+	// ports are the same two read stores.
+	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool))
 	pullrequestsAPI := pullrequestshttp.New(pullrequestshttp.Deps{
 		PullRequests: pullrequests.NewService(persistence.NewPullRequestStore(pool)),
 		Checks: prchecks.NewService(prchecks.Deps{
@@ -413,6 +419,15 @@ func run(args []string) int {
 			Policies: persistence.NewPolicyStore(pool),
 			Engine:   integrity.New(reg),
 		}),
+		// The PR's Research State Diff (T0408): the PR's own fixed base,
+		// its proposed head and the target branch's current head, computed
+		// by the T0401 engine. The base is never re-derived from the target
+		// — it does not drift as main advances.
+		Diff: prdiff.NewService(
+			persistence.NewPullRequestStore(pool),
+			persistence.NewBranchStore(pool),
+			diffSvc,
+		),
 		// PRs and their check reports are exactly as visible as their
 		// project: the same project-read gate every other project read
 		// runs (T0106 read matrix).
@@ -485,7 +500,7 @@ func run(args []string) int {
 	// write path uses. The resolution store is the task-scoped pgx adapter
 	// (internal/application/resolutions, see its package doc).
 	resolutionSvc := resolutions.NewService(
-		diffs.NewService(stateStore, persistence.NewManifestStore(pool)),
+		diffSvc,
 		resolutions.NewPGStore(pool),
 		projectAPI.Service(),
 		authz.NewMatrixEngine(),
@@ -506,16 +521,22 @@ func run(args []string) int {
 	})
 	policyAPI.Register(v1)
 	// PR reviews (T0404): per-dimension scientific/integrity review
-	// submissions. Authorization runs the submit_scientific_review matrix
-	// row over the projects membership gate; the reviewer-responsibility
-	// hook stays nil until T0604 lands the resolver, so the conditional
-	// verdict fails closed in production.
+	// submissions, plus the list read the PR page's review section renders
+	// (T0408). Authorization of the submission runs the
+	// submit_scientific_review matrix row over the projects membership
+	// gate; the reviewer-responsibility hook stays nil until T0604 lands
+	// the resolver, so the conditional verdict fails closed in production.
+	// The list read runs the same project read gate every other project
+	// read runs.
 	reviewSvc := reviews.NewService(reviews.Deps{
 		Repo:     persistence.NewReviewStore(pool),
 		Projects: projectAPI.Service(),
 		Authz:    authz.NewMatrixEngine(),
 	})
-	reviewAPI := reviewhttp.New(reviewhttp.Deps{Service: reviewSvc})
+	reviewAPI := reviewhttp.New(reviewhttp.Deps{
+		Service:  reviewSvc,
+		Projects: projectAPI.Service(),
+	})
 	reviewAPI.Register(v1)
 	// Immutable releases (T0606): the release command composes the T0605
 	// manifest builder with its own authorization (ActionCreateRelease),
