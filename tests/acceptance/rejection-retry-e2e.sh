@@ -227,7 +227,15 @@ chmod +x "$FG_SCRATCH/review-approve.sh"
 fg_fake_claude "$FG_SCRATCH/bin/claude-approve" "$FG_SCRATCH/review-approve.sh"
 
 # A Reviewer that completes the session and writes no verdict at all.
-printf '#!/usr/bin/env bash\nset -u\nprintf "no verdict written\\n"\n' > "$FG_SCRATCH/review-silent.sh"
+#
+# The stall is load-bearing, not padding. The check below asserts that a
+# RE-spawned review has no exit.status of its own yet, and that is only
+# observable while this attempt cannot have written one: with a stub that
+# finishes in milliseconds the window is unobservable and the assertion would
+# pass for the wrong reason. (Real claude is a seconds-long process; the fake
+# has to outlive the thing it stands in for — the same reasoning as the
+# gate-inputs wait in fg_fake_claude.)
+printf '#!/usr/bin/env bash\nset -u\nsleep 3\nprintf "no verdict written\\n"\n' > "$FG_SCRATCH/review-silent.sh"
 chmod +x "$FG_SCRATCH/review-silent.sh"
 fg_fake_claude "$FG_SCRATCH/bin/claude-silent" "$FG_SCRATCH/review-silent.sh"
 
@@ -269,6 +277,21 @@ echo "more" >> "$REPO/.rddev/worktrees/T0003/internal/config/deliverable.txt"
 
 fg_run "$REPO" review spawn T0003 --claude-bin "$FG_SCRATCH/bin/claude-silent"
 fg_assert_eq 0 "$FG_RC" "review spawn T0003 (attempt 2, writing no verdict)"
+# A re-dispatched review must not start on top of the previous attempt's
+# exit.status. That file is what an observer waits on (fg_wait_exit, and any
+# Supervisor watching the directory), so leaving it behind makes the wait
+# return before this attempt has done anything — and collect then judges a
+# review that is still running. Which way that lands is which process happened
+# to be alive at that instant: the acceptance job failed on exactly that
+# (issue #207), while the same step passed locally and on a re-run.
+#
+# This attempt is stalled for seconds (see claude-silent above), so the file
+# cannot be here for any other reason: it is the previous attempt's.
+if [ -e "$REVIEW_DIR/exit.status" ]; then
+  fg_fail "the previous attempt's exit.status survived the re-spawn — a wait on it is satisfied before this review has exited"
+else
+  fg_ok "a re-spawned review starts with no exit.status of its own"
+fi
 fg_wait_exit "$REPO" T0003-review 30 || fg_fail "review T0003 attempt 2 did not exit"
 if ls "$REVIEW_DIR"/RESULT.superseded-*.json >/dev/null 2>&1; then
   fg_ok "the previous verdict was archived under the attempt it belongs to"
