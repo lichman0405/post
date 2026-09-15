@@ -110,11 +110,24 @@ type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// readVersionHeads reads the containers' current version counters — with
-// FOR UPDATE when the runner is the commit transaction, without it when it is
-// the pool. Raw SQL rather than a generated query because the lock is the
-// point: the generated reads carry none by design (the in-transaction appends
-// take theirs through the counter compare-and-swap, T0208).
+// readVersionHeads reads the containers' current version counters. Both
+// statements carry FOR UPDATE, and that is deliberate: one function serves
+// both callers, so the locked read can never drift from the prediction read
+// it is compared against.
+//
+// What the clause buys differs by runner. Called with the commit
+// transaction (LockVersionHeads) it is the point: the row locks are held
+// for the rest of the transaction and serialize the appends this merge's
+// version-counter compare-and-swap then lands. Called with the pool
+// (VersionHeads) there is no explicit transaction around the statement, so
+// the lock lasts only for the statement itself — the prediction read gets
+// no protection from it, and it does not need any: it is optimistic by
+// design, and the write transaction's own locked read plus the CAS are what
+// actually keep the heads honest.
+//
+// Raw SQL rather than a generated query because of that clause: the
+// generated reads carry no lock by design (the in-transaction appends take
+// theirs through the counter compare-and-swap, T0208).
 //
 // Both lists are walked in ascending id order, so two concurrent merges over
 // overlapping containers take their locks in the same order and cannot
@@ -304,6 +317,31 @@ func (s *SemanticMergeStore) WriteMerge(ctx context.Context, tx states.Transacti
 			return domain.SemanticMerge{}, err
 		}
 	}
+	if in.IdempotencyKey != nil {
+		// The Idempotency-Key ledger entry (migration 00070), on the same
+		// transaction as the merge row it points at: a replay can never
+		// find an entry whose merge rolled back. UNIQUE(project_id,
+		// idempotency_key) makes two concurrent retries with one key a
+		// database conflict — the loser's whole transaction (state commit
+		// included) rolls back, and the retry then replays the winner.
+		if _, err := sqlc.New(tx).CreateMergeCreation(ctx, sqlc.CreateMergeCreationParams{
+			ProjectID:      projectUUID,
+			IdempotencyKey: *in.IdempotencyKey,
+			MergeID:        mergeID,
+		}); err != nil {
+			return domain.SemanticMerge{}, fmt.Errorf("persistence: record merge creation: %w", err)
+		}
+	}
+	// The audit row (docs/26: governance actions are audited) is part of
+	// the same unit. It names the merge id the insert just assigned, which
+	// is why the service leaves TargetRef to this adapter.
+	if in.Audit.Action != "" {
+		audit := in.Audit
+		audit.TargetRef = "merge:" + pgUUIDToText(mergeID)
+		if err := appendAudit(ctx, sqlc.New(tx), audit); err != nil {
+			return domain.SemanticMerge{}, err
+		}
+	}
 	return domain.SemanticMerge{
 		ID:             pgUUIDToText(mergeID),
 		ProjectID:      in.ProjectID,
@@ -441,16 +479,15 @@ func (s *SemanticMergeStore) CompleteGitStep(ctx context.Context, in merge.GitSt
 	if in.SHA == "" {
 		return domain.SemanticMerge{}, fmt.Errorf("%w: a completed Git step names the merge commit it produced", merge.ErrValidation)
 	}
-	tag, err := s.pool.Exec(ctx, `
+	if _, err := s.pool.Exec(ctx, `
 		UPDATE semantic_merges
 		SET git_state = 'updated', git_sha = $2, git_ref = coalesce($3, git_ref),
 		    git_error = '', git_attempts = git_attempts + 1
 		WHERE id = $1 AND git_state <> 'updated'`,
-		mergeUUID, pgtype.Text{String: in.SHA, Valid: true}, nullText(in.Ref))
-	if err != nil {
+		mergeUUID, pgtype.Text{String: in.SHA, Valid: true}, nullText(in.Ref)); err != nil {
 		return domain.SemanticMerge{}, fmt.Errorf("persistence: complete merge git step: %w", err)
 	}
-	return s.rereadMerge(ctx, mergeUUID, tag.RowsAffected())
+	return s.rereadMerge(ctx, mergeUUID)
 }
 
 // RecordGitAttempt implements merge.StorePort: the Git step did not finish (a
@@ -470,26 +507,26 @@ func (s *SemanticMergeStore) RecordGitAttempt(ctx context.Context, in merge.GitS
 		// what the caller got wrong).
 		return domain.SemanticMerge{}, fmt.Errorf("%w: %q is not a Git saga retry state", merge.ErrValidation, in.State)
 	}
-	tag, err := s.pool.Exec(ctx, `
+	if _, err := s.pool.Exec(ctx, `
 		UPDATE semantic_merges
 		SET git_state = $2, git_error = $3, git_ref = coalesce($4, git_ref),
 		    git_attempts = git_attempts + 1
 		WHERE id = $1 AND git_state <> 'updated'`,
-		mergeUUID, string(in.State), in.Error, nullText(in.Ref))
-	if err != nil {
+		mergeUUID, string(in.State), in.Error, nullText(in.Ref)); err != nil {
 		return domain.SemanticMerge{}, fmt.Errorf("persistence: record merge git attempt: %w", err)
 	}
-	return s.rereadMerge(ctx, mergeUUID, tag.RowsAffected())
+	return s.rereadMerge(ctx, mergeUUID)
 }
 
-// rereadMerge returns the saga row as stored. Zero affected rows means either
-// the row does not exist or the saga had already finished (`updated` is
-// terminal); the read tells the two apart, and a finished saga is not a
-// failure — the step is simply idempotent.
-func (s *SemanticMergeStore) rereadMerge(ctx context.Context, mergeUUID pgtype.UUID, affected int64) (domain.SemanticMerge, error) {
+// rereadMerge returns the saga row as stored. It is the tail of both saga
+// writes, and it is a read because those writes report no rows in two very
+// different cases: the row does not exist, or the saga had already finished
+// — `updated` is terminal (migration 00069), so a second completion (and a
+// retry after it) updates nothing. A finished saga is not a failure, the
+// step is idempotent; the read is what tells the two apart.
+func (s *SemanticMergeStore) rereadMerge(ctx context.Context, mergeUUID pgtype.UUID) (domain.SemanticMerge, error) {
 	row, err := scanMerge(s.pool.QueryRow(ctx, mergeSelectSQL+` WHERE id = $1`, mergeUUID))
 	if errors.Is(err, pgx.ErrNoRows) {
-		_ = affected
 		return domain.SemanticMerge{}, domain.ErrSemanticMergeNotFound
 	}
 	if err != nil {
@@ -523,6 +560,13 @@ func (s *SemanticMergeStore) GetMergeByPullRequest(ctx context.Context, projectI
 // ListPendingGitMerges returns the merges whose Git step has not finished,
 // oldest first — the scan a retry needs when the provider was unreachable
 // (indexed by migration 00069's partial index).
+//
+// The product's retry path is the idempotent one (see the merge service's
+// replay): a client that repeats the merge request with the same
+// Idempotency-Key re-drives the unfinished step. This scan is what a
+// background sweeper would use to retry without a client in the loop; it
+// is called by this package's integration test rather than by a worker,
+// and no worker is wired in this build (justified in T0409's RESULT).
 func (s *SemanticMergeStore) ListPendingGitMerges(ctx context.Context, limit int) ([]domain.SemanticMerge, error) {
 	if limit <= 0 {
 		limit = 50
@@ -542,6 +586,43 @@ func (s *SemanticMergeStore) ListPendingGitMerges(ctx context.Context, limit int
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// LookupMergeCreation implements merge.StorePort: the ledger read behind the
+// Idempotency-Key replay. It returns nil for an unused key (including a
+// project id the ledger cannot hold an entry for), and the stored merge row
+// for a used one — the same shape release_store.LookupCreation uses, so a
+// replay hands the caller the first call's answer instead of a second
+// merge's.
+func (s *SemanticMergeStore) LookupMergeCreation(ctx context.Context, projectID, idempotencyKey string) (*domain.SemanticMerge, error) {
+	if idempotencyKey == "" {
+		return nil, nil
+	}
+	projectUUID, err := textUUID(projectID)
+	if err != nil {
+		return nil, nil
+	}
+	mergeID, err := sqlc.New(s.pool).GetMergeCreation(ctx, sqlc.GetMergeCreationParams{
+		ProjectID:      projectUUID,
+		IdempotencyKey: idempotencyKey,
+	})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("persistence: read merge creation: %w", err)
+	}
+	row, err := scanMerge(s.pool.QueryRow(ctx, mergeSelectSQL+` WHERE id = $1`, mergeID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The ledger and the merge are written on one transaction, so an
+		// entry without its row is a store inconsistency — report it as a
+		// not-found rather than inventing a merge.
+		return nil, domain.ErrSemanticMergeNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("persistence: read merge for creation: %w", err)
+	}
+	return &row, nil
 }
 
 // ListCarriedConflicts implements merge.StorePort: the conflicts one merge

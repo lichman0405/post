@@ -68,6 +68,7 @@ type Querier interface {
 	// reviews). A research PR is a proposed RSG diff; merge controls acceptance
 	// (invariant 6).
 	CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue, error)
+	CreateMergeCreation(ctx context.Context, arg CreateMergeCreationParams) (MergeCreation, error)
 	// Project milestones (T0609): research-timeline markers, separate from
 	// releases (canonical tables project_milestones,
 	// project_milestone_creations, migration 00063). A milestone may name a
@@ -160,6 +161,10 @@ type Querier interface {
 	// schema id to this row).
 	GetLatestSchemaProfile(ctx context.Context, arg GetLatestSchemaProfileParams) (ProjectSchemaProfile, error)
 	GetLatestScientificObjectVersion(ctx context.Context, objectID pgtype.UUID) (ScientificObjectVersion, error)
+	// Research PR merge governance (canonical table: merge_creations). The
+	// Idempotency-Key ledger of the merge endpoint (docs/22 §3): the same key
+	// replays the merge it created, forever.
+	GetMergeCreation(ctx context.Context, arg GetMergeCreationParams) (pgtype.UUID, error)
 	GetMilestone(ctx context.Context, arg GetMilestoneParams) (ProjectMilestone, error)
 	GetMilestoneCreation(ctx context.Context, arg GetMilestoneCreationParams) (pgtype.UUID, error)
 	GetOrganizationByID(ctx context.Context, id pgtype.UUID) (Organization, error)

@@ -50,8 +50,11 @@ const appendOnlyTaskID = "T0013"
 // Idempotency-Key ledger — a replay is a read, never a rewrite). Migration
 // 00069 adds semantic_merge_conflicts (T0406): the record that the accepted
 // state carries an open scientific disagreement is history, not state — a
-// later decision is a new merge, never an edit of that row. The same list
-// drives the catalog assertion and the per-table rejection loop.
+// later decision is a new merge, never an edit of that row. Migration 00070
+// joins merge_creations (the T0409 Idempotency-Key ledger): a replay is a
+// read, never a rewrite, so the ledger entry is part of the merge's history
+// exactly as release_creations is part of a release's. The same list drives
+// the catalog assertion and the per-table rejection loop.
 var appendOnlyTables = []string{
 	"scientific_object_versions",
 	"relation_versions",
@@ -72,6 +75,7 @@ var appendOnlyTables = []string{
 	"project_schema_profiles",
 	"project_template_instantiations",
 	"semantic_merge_conflicts",
+	"merge_creations",
 }
 
 // targetedGuardTriggers are the NON-append-only row guards added after

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/lichman0405/post/internal/config"
 	"github.com/lichman0405/post/internal/gitprovider"
@@ -26,6 +27,14 @@ import (
 // provisioningQueuePrefix namespaces the API-owned job queue, separate
 // from cmd/worker's "post" scaffold queue (docs/66 §3 run isolation).
 const provisioningQueuePrefix = "post-api"
+
+// gitIdentityTimeout bounds the one provider call the API makes while
+// starting up (T0409): resolving the service identity the merge's ref guard
+// accepts for main. A provider that is slow or down must delay startup by at
+// most this, never hold it open — the merge command fails that half closed
+// and records an unfinished Git step until an operator restarts with the
+// provider reachable.
+const gitIdentityTimeout = 5 * time.Second
 
 // newProvisioningHandler builds the worker.Handler for ProvisionJobType:
 // the payload carries the project id (identity only, docs/52 §17), the

@@ -85,6 +85,14 @@ type KnowledgePublication struct {
 	PublishedAt     pgtype.Timestamptz `json:"published_at"`
 }
 
+type MergeCreation struct {
+	ID             pgtype.UUID        `json:"id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	MergeID        pgtype.UUID        `json:"merge_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type Organization struct {
 	ID          pgtype.UUID        `json:"id"`
 	Slug        string             `json:"slug"`

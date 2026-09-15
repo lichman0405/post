@@ -775,6 +775,16 @@ var canonicalTables = map[string]tableExp{
 			fk("decided_by", "users", "RESTRICT"),
 		},
 	},
+	// T0409 (00070): the merge Idempotency-Key ledger — a key replays the
+	// merge it created, forever; append-only (both trigger halves), the
+	// same contract release_creations implements. merge_id is RESTRICT:
+	// a ledger entry without its merge would turn a replay into a miss.
+	"merge_creations": {
+		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("idempotency_key", txt, false, false), c("merge_id", u, false, false), c("created_at", ts, false, true)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"project_id", "idempotency_key"}},
+		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("merge_id", "semantic_merges", "RESTRICT")},
+	},
 }
 
 // gooseTable is the only non-canonical table the runner may create.
