@@ -118,6 +118,8 @@ type OutboxEvent struct {
 	Visibility string `json:"visibility"`
 	// Why the last publish attempt failed, when it did (T1001): a row whose publish fails is retried forever, and this column is the operator's window onto a stuck row (docs/26 §2 outbox backlog alerting). NULL while never attempted or after a successful publish.
 	LastError *string `json:"last_error"`
+	// The webhook fan-out cursor (T1006): set in the same transaction that inserts the delivery rows, so the fan-out is exactly-once per published row — a crash between insert and mark re-runs it as a no-op under webhook_deliveries_endpoint_event_uniq.
+	WebhookFannedOutAt pgtype.Timestamptz `json:"webhook_fanned_out_at"`
 }
 
 type PolicyVersion struct {

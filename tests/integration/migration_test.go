@@ -530,7 +530,8 @@ var canonicalTables = map[string]tableExp{
 		fks:  []fkExp{fk("actor_id", "users", "RESTRICT"), fk("project_id", "projects", "RESTRICT"), fk("outbox_event_id", "outbox_events", "RESTRICT")},
 	},
 	"outbox_events": {
-		cols: []colExp{c("id", u, false, true), c("event_type", txt, false, false), c("payload", jb, false, false), c("correlation_id", txt, false, false), c("created_at", ts, false, true), c("published_at", ts, true, false), c("attempts", i4, false, true), c("actor_id", u, true, false), c("project_id", u, true, false), c("visibility", txt, false, true), c("last_error", txt, true, false)},
+		// T1006 (00059) appended webhook_fanned_out_at: the fan-out cursor.
+		cols: []colExp{c("id", u, false, true), c("event_type", txt, false, false), c("payload", jb, false, false), c("correlation_id", txt, false, false), c("created_at", ts, false, true), c("published_at", ts, true, false), c("attempts", i4, false, true), c("actor_id", u, true, false), c("project_id", u, true, false), c("visibility", txt, false, true), c("last_error", txt, true, false), c("webhook_fanned_out_at", ts, true, false)},
 		pk:   []string{"id"},
 		fks:  []fkExp{fk("actor_id", "users", "RESTRICT"), fk("project_id", "projects", "RESTRICT")},
 	},
@@ -540,9 +541,25 @@ var canonicalTables = map[string]tableExp{
 		fks:  []fkExp{fk("user_id", "users", "RESTRICT")},
 	},
 	"webhook_deliveries": {
-		cols: []colExp{c("id", u, false, true), c("event_id", u, false, false), c("endpoint", txt, false, false), c("status", txt, false, false), c("response_code", i4, true, false), c("attempts", i4, false, true), c("last_attempt_at", ts, true, false)},
+		// T1006 (00059): the delivery log grew endpoint_id (SET NULL, so an
+		// endpoint delete keeps the log rows — the endpoint column preserves
+		// the fan-out-time URL snapshot), event_type, retry/delivery
+		// timestamps and last_error; status gained a 'pending' default (a
+		// fanned-out delivery is pending by definition).
+		cols: []colExp{c("id", u, false, true), c("event_id", u, false, false), c("endpoint", txt, false, false), c("status", txt, false, true), c("response_code", i4, true, false), c("attempts", i4, false, true), c("last_attempt_at", ts, true, false), c("endpoint_id", u, true, false), c("event_type", txt, false, true), c("created_at", ts, false, true), c("next_retry_at", ts, true, false), c("last_error", txt, true, false), c("delivered_at", ts, true, false)},
 		pk:   []string{"id"},
-		fks:  []fkExp{fk("event_id", "research_events", "RESTRICT")},
+		fks:  []fkExp{fk("event_id", "research_events", "RESTRICT"), fk("endpoint_id", "webhook_endpoints", "SET NULL")},
+	},
+	"webhook_endpoints": {
+		// T1006 (00059): the endpoint registry. The secret is the HMAC
+		// signing key (plaintext by necessity) and is only ever returned at
+		// create/rotation — the CHECKs keep degenerate rows out. Deletion
+		// is soft (deleted_at): the endpoint row survives so its
+		// delivery-log rows keep their endpoint_id and stay readable.
+		cols:   []colExp{c("id", u, false, true), c("user_id", u, false, false), c("url", txt, false, false), c("secret", txt, false, false), arr("event_filters", false, true), c("enabled", bl, false, true), c("consecutive_failures", i4, false, true), c("disabled_at", ts, true, false), c("deleted_at", ts, true, false), c("created_at", ts, false, true)},
+		pk:     []string{"id"},
+		checks: []string{"url <> ''", "secret <> ''"},
+		fks:    []fkExp{fk("user_id", "users", "RESTRICT")},
 	},
 	// T0407: the conflict resolution decisions (migration 00054). The
 	// per-conflict identity uniqueness is an explicit NULLS NOT DISTINCT
@@ -684,6 +701,9 @@ var explicitIndexes = map[string][]string{
 	// T0504: evidence assertion query paths (00058) — the target listing
 	// (keyset order) and the reverse lookups of what an evidence version
 	// backs.
+	// T1006 (00059): the fan-out idempotency guarantee (one delivery row
+	// per endpoint per event, ever), the deliverer's due-work scan, and the
+	// fan-out backlog scan over published-but-unfanned outbox rows.
 	"project_schema_profiles_project_idx":          {"project_id", "schema_id", "created_at"},
 	"claims_object_idx":                            {"object_id"},
 	"claims_type_idx":                              {"claim_type"},
@@ -705,6 +725,9 @@ var explicitIndexes = map[string][]string{
 	"finding_claim_versions_claim_idx":             {"claim_version_id"},
 	"evidence_assertions_target_idx":               {"target_object_version_id", "created_at", "id"},
 	"evidence_assertions_evidence_idx":             {"evidence_object_version_id"},
+	"webhook_deliveries_endpoint_event_uniq":       {"endpoint_id", "UNIQUE", "WHERE"},
+	"webhook_deliveries_due_idx":                   {"status", "next_retry_at"},
+	"outbox_events_fanout_pending_idx":             {"webhook_fanned_out_at IS NULL"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
@@ -865,7 +888,8 @@ func TestUpgradePath(t *testing.T) {
 		"external_reference_snapshots", "external_reference_relation_types",
 		"contribution_events",
 		"credit_disputes", "research_events", "outbox_events",
-		"subscriptions", "webhook_deliveries", "audit_log", "search_documents",
+		"subscriptions", "webhook_deliveries", "webhook_endpoints",
+		"audit_log", "search_documents",
 		"profiles", "git_repository_provisions", "git_branch_refs",
 		"project_schema_profiles",
 		"git_branch_semantic_states",
