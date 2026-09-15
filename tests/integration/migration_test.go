@@ -432,10 +432,19 @@ var canonicalTables = map[string]tableExp{
 		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("source_branch_id", "branches", "RESTRICT"), fk("target_branch_id", "branches", "RESTRICT"), fk("base_state_id", "project_states", "RESTRICT"), fk("proposed_state_id", "project_states", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
 	},
 	"reviews": {
-		cols:   []colExp{c("id", u, false, true), c("pull_request_id", u, false, false), c("reviewer_id", u, false, false), c("review_kind", txt, false, false), c("decision", txt, false, false), c("body", txt, false, true), c("created_at", ts, false, true)},
-		pk:     []string{"id"},
-		checks: []string{"review_kind = ANY", "decision = ANY"},
-		fks:    []fkExp{fk("pull_request_id", "pull_requests", "RESTRICT"), fk("reviewer_id", "users", "RESTRICT")},
+		// T0404 (00061): per-dimension review records — reviewed_state_id
+		// pins the exact head the reviewer evaluated, responsibility
+		// carries the reviewer-responsibility label, and the unique
+		// constraint scopes one decision per person per kind per head
+		// (the acceptance "一人不同 review kind 可记录" as a database
+		// fact). The kind CHECK is narrowed to the two documented
+		// dimensions and the decision vocabulary to the task's three
+		// tokens; both had zero rows to migrate.
+		cols:    []colExp{c("id", u, false, true), c("pull_request_id", u, false, false), c("reviewer_id", u, false, false), c("review_kind", txt, false, false), c("decision", txt, false, false), c("body", txt, false, true), c("created_at", ts, false, true), c("reviewed_state_id", u, false, false), c("responsibility", txt, false, true)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"pull_request_id", "reviewer_id", "review_kind", "reviewed_state_id"}},
+		checks:  []string{"review_kind = ANY", "decision = ANY"},
+		fks:     []fkExp{fk("pull_request_id", "pull_requests", "RESTRICT"), fk("reviewer_id", "users", "RESTRICT"), fk("reviewed_state_id", "project_states", "RESTRICT")},
 	},
 	"validation_results": {
 		cols:   []colExp{c("id", u, false, true), c("project_id", u, false, false), c("state_id", u, false, false), c("gate", txt, false, false), c("status", txt, false, false), c("result_json", jb, false, false), c("created_at", ts, false, true)},

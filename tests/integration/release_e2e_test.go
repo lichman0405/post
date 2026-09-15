@@ -302,15 +302,20 @@ func (f *releaseFixture) seedPR(t *testing.T, ctx context.Context, number int64,
 
 // addReview seeds one review row on a PR (reviewer = bob, the project's
 // contributor — the gate requires scientific AND integrity approval).
-func (f *releaseFixture) addReview(t *testing.T, ctx context.Context, prID, reviewerID, kind, decision string) {
+// reviewedState is the head the review evaluates (migration 00061:
+// reviews pin reviewed_state_id to the PR's proposed head; the fixture
+// passes it explicitly).
+func (f *releaseFixture) addReview(t *testing.T, ctx context.Context, prID, reviewerID, reviewedState, kind, decision string) {
 	t.Helper()
 	q := sqlc.New(f.pool)
 	if _, err := q.CreateReview(ctx, sqlc.CreateReviewParams{
-		PullRequestID: parseUUIDOrDie(prID),
-		ReviewerID:    parseUUIDOrDie(reviewerID),
-		ReviewKind:    kind,
-		Decision:      decision,
-		Body:          "",
+		PullRequestID:   parseUUIDOrDie(prID),
+		ReviewerID:      parseUUIDOrDie(reviewerID),
+		ReviewKind:      kind,
+		Decision:        decision,
+		ReviewedStateID: parseUUIDOrDie(reviewedState),
+		Responsibility:  "",
+		Body:            "",
 	}); err != nil {
 		t.Fatalf("CreateReview: %v", err)
 	}
@@ -442,8 +447,8 @@ func TestReleaseE2E(t *testing.T) {
 	// --- the review record: one PR proposing head1 against main with
 	// approved scientific + integrity reviews (bob reviews) ---
 	pr1 := f.seedPR(t, ctx, 1, f.genesis, head1)
-	f.addReview(t, ctx, pr1, bobID, "scientific", "approved")
-	f.addReview(t, ctx, pr1, bobID, "integrity", "approved")
+	f.addReview(t, ctx, pr1, bobID, head1, "scientific", "approved")
+	f.addReview(t, ctx, pr1, bobID, head1, "integrity", "approved")
 
 	var first releaseE2EPayload
 	var manifestBytes1 []byte
@@ -579,8 +584,8 @@ func TestReleaseE2E(t *testing.T) {
 		// The previous subtest advanced main's head; the fixture tracked it.
 		head2 := f.head
 		pr2 := f.seedPR(t, ctx, 2, head1, head2)
-		f.addReview(t, ctx, pr2, bobID, "scientific", "approved")
-		f.addReview(t, ctx, pr2, bobID, "integrity", "approved")
+		f.addReview(t, ctx, pr2, bobID, head2, "scientific", "approved")
+		f.addReview(t, ctx, pr2, bobID, head2, "integrity", "approved")
 		resp := createRelease(t, alice, projectID, "v2.0.0", "", "release-key-3")
 		mustStatus(t, resp, http.StatusCreated)
 		second := decodeRelease(t, resp)

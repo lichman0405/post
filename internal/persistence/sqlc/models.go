@@ -294,13 +294,15 @@ type ResearchEvent struct {
 }
 
 type Review struct {
-	ID            pgtype.UUID        `json:"id"`
-	PullRequestID pgtype.UUID        `json:"pull_request_id"`
-	ReviewerID    pgtype.UUID        `json:"reviewer_id"`
-	ReviewKind    string             `json:"review_kind"`
-	Decision      string             `json:"decision"`
-	Body          string             `json:"body"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	ID              pgtype.UUID        `json:"id"`
+	PullRequestID   pgtype.UUID        `json:"pull_request_id"`
+	ReviewerID      pgtype.UUID        `json:"reviewer_id"`
+	ReviewKind      string             `json:"review_kind"`
+	Decision        string             `json:"decision"`
+	Body            string             `json:"body"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	ReviewedStateID pgtype.UUID        `json:"reviewed_state_id"`
+	Responsibility  string             `json:"responsibility"`
 }
 
 type ScientificObject struct {

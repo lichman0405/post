@@ -95,6 +95,14 @@ type Querier interface {
 	CreateRelease(ctx context.Context, arg CreateReleaseParams) (Release, error)
 	CreateReleaseCreation(ctx context.Context, arg CreateReleaseCreationParams) (ReleaseCreation, error)
 	CreateResearchAsset(ctx context.Context, arg CreateResearchAssetParams) (ResearchAsset, error)
+	// One per-dimension review decision about one proposed head (T0404,
+	// migration 00061): reviewed_state_id is the exact head the reviewer
+	// evaluated (derived from the PR's proposed_state_id inside the
+	// submission transaction, never caller-supplied) and responsibility is
+	// the reviewer-responsibility label the service resolved (docs/04 §3;
+	// empty when none). The unique constraint scopes one decision per
+	// (PR, reviewer, kind, head) — a duplicate decision about the same head
+	// is refused, while different kinds and later heads record freely.
 	CreateReview(ctx context.Context, arg CreateReviewParams) (Review, error)
 	// Scientific objects and their append-only version log (canonical tables:
 	// scientific_objects, scientific_object_versions). Historical content is never
@@ -319,6 +327,10 @@ type Querier interface {
 	// not the store's).
 	ListReleaseReviews(ctx context.Context, arg ListReleaseReviewsParams) ([]ListReleaseReviewsRow, error)
 	ListReleases(ctx context.Context, projectID pgtype.UUID) ([]Release, error)
+	// Every review of one PR (project-scoped through the PR row), oldest
+	// first (created_at, id — a total order; the release record reads
+	// reviews in the same order).
+	ListReviewsByPullRequest(ctx context.Context, arg ListReviewsByPullRequestParams) ([]Review, error)
 	ListScientificObjectVersions(ctx context.Context, objectID pgtype.UUID) ([]ScientificObjectVersion, error)
 	ListStateCommitsByBranch(ctx context.Context, branchID pgtype.UUID) ([]StateCommit, error)
 	// The state snapshot projections (docs/21 §5, docs/07 §7): a state's

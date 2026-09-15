@@ -68,6 +68,26 @@ WHERE project_id = @project_id
 ORDER BY number;
 
 -- name: CreateReview :one
-INSERT INTO reviews (pull_request_id, reviewer_id, review_kind, decision, body)
-VALUES (@pull_request_id, @reviewer_id, @review_kind, @decision, @body)
+-- One per-dimension review decision about one proposed head (T0404,
+-- migration 00061): reviewed_state_id is the exact head the reviewer
+-- evaluated (derived from the PR's proposed_state_id inside the
+-- submission transaction, never caller-supplied) and responsibility is
+-- the reviewer-responsibility label the service resolved (docs/04 §3;
+-- empty when none). The unique constraint scopes one decision per
+-- (PR, reviewer, kind, head) — a duplicate decision about the same head
+-- is refused, while different kinds and later heads record freely.
+INSERT INTO reviews
+    (pull_request_id, reviewer_id, review_kind, decision, reviewed_state_id, responsibility, body)
+VALUES
+    (@pull_request_id, @reviewer_id, @review_kind, @decision, @reviewed_state_id, @responsibility, @body)
 RETURNING *;
+
+-- name: ListReviewsByPullRequest :many
+-- Every review of one PR (project-scoped through the PR row), oldest
+-- first (created_at, id — a total order; the release record reads
+-- reviews in the same order).
+SELECT r.*
+FROM reviews r
+JOIN pull_requests pr ON pr.id = r.pull_request_id
+WHERE pr.project_id = @project_id AND pr.number = @number
+ORDER BY r.created_at, r.id;

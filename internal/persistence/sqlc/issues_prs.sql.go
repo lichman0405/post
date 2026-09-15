@@ -108,25 +108,39 @@ func (q *Queries) CreatePullRequest(ctx context.Context, arg CreatePullRequestPa
 }
 
 const createReview = `-- name: CreateReview :one
-INSERT INTO reviews (pull_request_id, reviewer_id, review_kind, decision, body)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, pull_request_id, reviewer_id, review_kind, decision, body, created_at
+INSERT INTO reviews
+    (pull_request_id, reviewer_id, review_kind, decision, reviewed_state_id, responsibility, body)
+VALUES
+    ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, pull_request_id, reviewer_id, review_kind, decision, body, created_at, reviewed_state_id, responsibility
 `
 
 type CreateReviewParams struct {
-	PullRequestID pgtype.UUID `json:"pull_request_id"`
-	ReviewerID    pgtype.UUID `json:"reviewer_id"`
-	ReviewKind    string      `json:"review_kind"`
-	Decision      string      `json:"decision"`
-	Body          string      `json:"body"`
+	PullRequestID   pgtype.UUID `json:"pull_request_id"`
+	ReviewerID      pgtype.UUID `json:"reviewer_id"`
+	ReviewKind      string      `json:"review_kind"`
+	Decision        string      `json:"decision"`
+	ReviewedStateID pgtype.UUID `json:"reviewed_state_id"`
+	Responsibility  string      `json:"responsibility"`
+	Body            string      `json:"body"`
 }
 
+// One per-dimension review decision about one proposed head (T0404,
+// migration 00061): reviewed_state_id is the exact head the reviewer
+// evaluated (derived from the PR's proposed_state_id inside the
+// submission transaction, never caller-supplied) and responsibility is
+// the reviewer-responsibility label the service resolved (docs/04 §3;
+// empty when none). The unique constraint scopes one decision per
+// (PR, reviewer, kind, head) — a duplicate decision about the same head
+// is refused, while different kinds and later heads record freely.
 func (q *Queries) CreateReview(ctx context.Context, arg CreateReviewParams) (Review, error) {
 	row := q.db.QueryRow(ctx, createReview,
 		arg.PullRequestID,
 		arg.ReviewerID,
 		arg.ReviewKind,
 		arg.Decision,
+		arg.ReviewedStateID,
+		arg.Responsibility,
 		arg.Body,
 	)
 	var i Review
@@ -138,6 +152,8 @@ func (q *Queries) CreateReview(ctx context.Context, arg CreateReviewParams) (Rev
 		&i.Decision,
 		&i.Body,
 		&i.CreatedAt,
+		&i.ReviewedStateID,
+		&i.Responsibility,
 	)
 	return i, err
 }
@@ -276,6 +292,52 @@ func (q *Queries) ListPullRequestsByProject(ctx context.Context, projectID pgtyp
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.MergedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReviewsByPullRequest = `-- name: ListReviewsByPullRequest :many
+SELECT r.id, r.pull_request_id, r.reviewer_id, r.review_kind, r.decision, r.body, r.created_at, r.reviewed_state_id, r.responsibility
+FROM reviews r
+JOIN pull_requests pr ON pr.id = r.pull_request_id
+WHERE pr.project_id = $1 AND pr.number = $2
+ORDER BY r.created_at, r.id
+`
+
+type ListReviewsByPullRequestParams struct {
+	ProjectID pgtype.UUID `json:"project_id"`
+	Number    int64       `json:"number"`
+}
+
+// Every review of one PR (project-scoped through the PR row), oldest
+// first (created_at, id — a total order; the release record reads
+// reviews in the same order).
+func (q *Queries) ListReviewsByPullRequest(ctx context.Context, arg ListReviewsByPullRequestParams) ([]Review, error) {
+	rows, err := q.db.Query(ctx, listReviewsByPullRequest, arg.ProjectID, arg.Number)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Review
+	for rows.Next() {
+		var i Review
+		if err := rows.Scan(
+			&i.ID,
+			&i.PullRequestID,
+			&i.ReviewerID,
+			&i.ReviewKind,
+			&i.Decision,
+			&i.Body,
+			&i.CreatedAt,
+			&i.ReviewedStateID,
+			&i.Responsibility,
 		); err != nil {
 			return nil, err
 		}
