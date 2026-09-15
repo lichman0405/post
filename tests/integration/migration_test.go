@@ -512,16 +512,23 @@ var canonicalTables = map[string]tableExp{
 		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("milestone_id", "project_milestones", "RESTRICT")},
 	},
 	"research_assets": {
-		cols:   []colExp{c("id", u, false, true), c("asset_type", txt, false, false), c("slug", txt, false, false), c("title", txt, false, false), c("origin_project_id", u, false, false), c("created_at", ts, false, true)},
+		// pid is the T0701 addition (00064): the persistent identifier
+		// the public URLs are built from — random, fixed-shape (CHECK),
+		// unique, never derived from the slug or the owning organization.
+		cols:   []colExp{c("id", u, false, true), c("asset_type", txt, false, false), c("slug", txt, false, false), c("title", txt, false, false), c("origin_project_id", u, false, false), c("created_at", ts, false, true), c("pid", txt, false, true)},
 		pk:     []string{"id"},
-		checks: []string{"asset_type = ANY"},
+		checks: []string{"asset_type = ANY", "pid ~"},
 		fks:    []fkExp{fk("origin_project_id", "projects", "RESTRICT")},
 	},
 	"research_asset_versions": {
-		cols:    []colExp{c("id", u, false, true), c("asset_id", u, false, false), c("version", txt, false, false), c("source_release_id", u, true, false), c("manifest", jb, false, false), c("rights_json", jb, false, false), c("visibility", txt, false, false), c("integrity_hash", txt, false, false), c("published_by", u, false, false), c("published_at", ts, false, true)},
+		// origin_refs is the T0701 addition (00064): the mandatory
+		// provenance pins (kind:value) of a published version — NOT NULL,
+		// at least one element, and no NULL element (the version schema's
+		// array of strings with origin_refs minItems 1).
+		cols:    []colExp{c("id", u, false, true), c("asset_id", u, false, false), c("version", txt, false, false), c("source_release_id", u, true, false), c("manifest", jb, false, false), c("rights_json", jb, false, false), c("visibility", txt, false, false), c("integrity_hash", txt, false, false), c("published_by", u, false, false), c("published_at", ts, false, true), arr("origin_refs", false, false)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"asset_id", "version"}},
-		checks:  []string{"visibility = ANY"},
+		checks:  []string{"visibility = ANY", "cardinality", "array_position"},
 		fks:     []fkExp{fk("asset_id", "research_assets", "RESTRICT"), fk("source_release_id", "releases", "RESTRICT"), fk("published_by", "users", "RESTRICT")},
 	},
 	"asset_lineage": {
@@ -760,6 +767,9 @@ var explicitIndexes = map[string][]string{
 	// fan-out backlog scan over published-but-unfanned outbox rows.
 	// T0609: the milestone timeline scan — occurred_at, creation order
 	// and id (00063).
+	// T0701: pid is the asset's public identity and the lookup key of the
+	// persistent URLs — the unique index is the uniqueness half of that
+	// identity (the shape CHECK is the other).
 	"project_schema_profiles_project_idx":          {"project_id", "schema_id", "created_at"},
 	"claims_object_idx":                            {"object_id"},
 	"claims_type_idx":                              {"claim_type"},
@@ -785,6 +795,7 @@ var explicitIndexes = map[string][]string{
 	"webhook_deliveries_due_idx":                   {"status", "next_retry_at"},
 	"outbox_events_fanout_pending_idx":             {"webhook_fanned_out_at IS NULL"},
 	"project_milestones_timeline_idx":              {"project_id", "occurred_at", "created_at", "id"},
+	"research_assets_pid_uniq":                     {"pid", "UNIQUE"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded

@@ -86,7 +86,7 @@ func (q *Queries) CreateReleaseCreation(ctx context.Context, arg CreateReleaseCr
 const createResearchAsset = `-- name: CreateResearchAsset :one
 INSERT INTO research_assets (asset_type, slug, title, origin_project_id)
 VALUES ($1, $2, $3, $4)
-RETURNING id, asset_type, slug, title, origin_project_id, created_at
+RETURNING id, asset_type, slug, title, origin_project_id, created_at, pid
 `
 
 type CreateResearchAssetParams struct {
@@ -111,6 +111,7 @@ func (q *Queries) CreateResearchAsset(ctx context.Context, arg CreateResearchAss
 		&i.Title,
 		&i.OriginProjectID,
 		&i.CreatedAt,
+		&i.Pid,
 	)
 	return i, err
 }
@@ -191,7 +192,7 @@ func (q *Queries) GetReleaseCreation(ctx context.Context, arg GetReleaseCreation
 }
 
 const getResearchAssetVersion = `-- name: GetResearchAssetVersion :one
-SELECT id, asset_id, version, source_release_id, manifest, rights_json, visibility, integrity_hash, published_by, published_at FROM research_asset_versions
+SELECT id, asset_id, version, source_release_id, manifest, rights_json, visibility, integrity_hash, published_by, published_at, origin_refs FROM research_asset_versions
 WHERE asset_id = $1 AND version = $2
 `
 
@@ -214,6 +215,7 @@ func (q *Queries) GetResearchAssetVersion(ctx context.Context, arg GetResearchAs
 		&i.IntegrityHash,
 		&i.PublishedBy,
 		&i.PublishedAt,
+		&i.OriginRefs,
 	)
 	return i, err
 }
@@ -371,7 +373,7 @@ INSERT INTO research_asset_versions
     (asset_id, version, source_release_id, manifest, rights_json, visibility, integrity_hash, published_by)
 VALUES
     ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, asset_id, version, source_release_id, manifest, rights_json, visibility, integrity_hash, published_by, published_at
+RETURNING id, asset_id, version, source_release_id, manifest, rights_json, visibility, integrity_hash, published_by, published_at, origin_refs
 `
 
 type PublishResearchAssetVersionParams struct {
@@ -408,6 +410,7 @@ func (q *Queries) PublishResearchAssetVersion(ctx context.Context, arg PublishRe
 		&i.IntegrityHash,
 		&i.PublishedBy,
 		&i.PublishedAt,
+		&i.OriginRefs,
 	)
 	return i, err
 }

@@ -358,11 +358,11 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 	ra1 := mustQueryUUID(`INSERT INTO research_assets (asset_type, slug, title, origin_project_id)
 		VALUES ('dataset', 'ds-1', 'DS1', $1) RETURNING id`, p1)
 	av1 := mustQueryUUID(`INSERT INTO research_asset_versions
-		(asset_id, version, manifest, rights_json, visibility, integrity_hash, published_by)
-		VALUES ($1, '1.0', '{}'::jsonb, '{}'::jsonb, 'private', 'h', $2) RETURNING id`, ra1, u1)
+		(asset_id, version, manifest, rights_json, visibility, integrity_hash, published_by, origin_refs)
+		VALUES ($1, '1.0', '{}'::jsonb, '{}'::jsonb, 'private', 'h', $2, ARRAY['project:' || $3::text]) RETURNING id`, ra1, u1, p1)
 	av2 := mustQueryUUID(`INSERT INTO research_asset_versions
-		(asset_id, version, manifest, rights_json, visibility, integrity_hash, published_by)
-		VALUES ($1, '2.0', '{}'::jsonb, '{}'::jsonb, 'private', 'h', $2) RETURNING id`, ra1, u1)
+		(asset_id, version, manifest, rights_json, visibility, integrity_hash, published_by, origin_refs)
+		VALUES ($1, '2.0', '{}'::jsonb, '{}'::jsonb, 'private', 'h', $2, ARRAY['project:' || $3::text]) RETURNING id`, ra1, u1, p1)
 	er1 := mustQueryUUID(`INSERT INTO external_references (source_type, external_identifier)
 		VALUES ('Publication/DOI', '10.1000/1') RETURNING id`)
 
@@ -466,8 +466,8 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 			table: "research_asset_versions",
 			insert: func() string {
 				return mustQueryUUID(`INSERT INTO research_asset_versions
-					(asset_id, version, manifest, rights_json, visibility, integrity_hash, published_by)
-					VALUES ($1, '3.0', '{}'::jsonb, '{}'::jsonb, 'private', 'h', $2) RETURNING id`, ra1, u1)
+					(asset_id, version, manifest, rights_json, visibility, integrity_hash, published_by, origin_refs)
+					VALUES ($1, '3.0', '{}'::jsonb, '{}'::jsonb, 'private', 'h', $2, ARRAY['project:' || $3::text]) RETURNING id`, ra1, u1, p1)
 			},
 			update: func(id string) error {
 				_, err := pool.Exec(ctx, `UPDATE research_asset_versions SET version = 'REWRITTEN' WHERE id = $1`, id)
