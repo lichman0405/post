@@ -108,6 +108,13 @@ func (s *PostgresStateStore) ResolvePreviewState(ctx context.Context, candidate 
 // a state the preview reports (PREVIEW_ASSET_UNKNOWN), and the preview
 // still computes the impact of the version that would have been published
 // under it.
+//
+// The row is answered WITH the visibility of the project it belongs to
+// (projectVisibility), because the preview may not render an asset's title
+// or its project for every caller who can name its pid: the pid is an
+// identity a caller can hold from anywhere, and T0712 closed exactly that
+// disclosure. The visibility is what decides it, and it is read here rather
+// than in the model, because the model has no connection to read it with.
 func (s *PostgresStateStore) assetByPID(ctx context.Context, pid assets.PID) (*assets.StoredAsset, error) {
 	row, err := s.queries.GetPreviewAssetByPID(ctx, string(pid))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -116,13 +123,51 @@ func (s *PostgresStateStore) assetByPID(ctx context.Context, pid assets.PID) (*a
 	if err != nil {
 		return nil, fmt.Errorf("assetshttp: resolve asset %q: %w", pid, err)
 	}
+	visibility, err := s.projectVisibility(ctx, row.OriginProjectID)
+	if err != nil {
+		return nil, err
+	}
 	return &assets.StoredAsset{
-		ID:              row.ID,
-		PID:             assets.PID(row.Pid),
-		Type:            assets.Type(row.AssetType),
-		Title:           row.Title,
-		OriginProjectID: row.OriginProjectID,
+		ID:                      row.ID,
+		PID:                     assets.PID(row.Pid),
+		Type:                    assets.Type(row.AssetType),
+		Title:                   row.Title,
+		OriginProjectID:         row.OriginProjectID,
+		OriginProjectVisibility: visibility,
 	}, nil
+}
+
+// projectVisibility asks the projects table for one project's visibility
+// (docs/12 §2's preset), through the SAME canonical query the project: origin
+// refs are resolved with — ListPreviewProjectRefs, an id lookup on projects.
+// No new query: what is asked is the identical question about the identical
+// row, and a second query for it would be a second answer to one question.
+//
+// Two absences are answers rather than failures, and both are the fail-closed
+// one ("" = not public, so the preview withholds the project's identity):
+//
+//   - an id that is not uuid text names no row, so there is nothing to look
+//     up. research_assets.origin_project_id is a uuid column, so this cannot
+//     happen for a stored asset; the branch exists so that a hypothetical
+//     one is answered rather than sent to the database.
+//   - no row for a uuid. The column is NOT NULL and a foreign key, so the
+//     project exists and this cannot happen either — and it is still not an
+//     error here: the asset row is a fact about the asset, and a preview that
+//     failed over it would report a repository it could not read. Answering
+//     "no visibility" withholds the identity, which is the safe direction.
+func (s *PostgresStateStore) projectVisibility(ctx context.Context, projectID string) (assets.Visibility, error) {
+	ids := textUUIDs([]string{projectID})
+	if len(ids) == 0 {
+		return "", nil
+	}
+	rows, err := s.queries.ListPreviewProjectRefs(ctx, ids)
+	if err != nil {
+		return "", fmt.Errorf("assetshttp: resolve the visibility of project %q: %w", projectID, err)
+	}
+	if len(rows) == 0 {
+		return "", nil
+	}
+	return assets.Visibility(rows[0].Visibility), nil
 }
 
 // pins resolves the dependency pins that name a stored version, with the

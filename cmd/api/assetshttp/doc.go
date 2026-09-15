@@ -53,7 +53,10 @@
 //
 //   - pid → research_assets.pid (the unique public identity, migration
 //     00064): the row's type and origin project are what the preview
-//     checks the candidate against;
+//     checks the candidate against, and the visibility of that project
+//     (projects.visibility, the same read a project:<uuid> ref makes) is
+//     what decides whether the asset's project and title may be rendered at
+//     all — see "whose identity may be rendered" below;
 //   - pid@version → research_asset_versions.visibility, the state of the
 //     pinned version. A pin that resolves to a private version is the
 //     leak docs/23 §4 is about;
@@ -88,6 +91,35 @@
 // "would publishing this ref disclose something the network cannot see
 // today?" has one shape of answer.
 //
+// # Whose identity may be rendered (T0712, issue #238)
+//
+// The route's gate asks ONE question about the caller — whether it may
+// read the project in the path — so a response that rendered the project
+// id, the visibility and the title of every entity it resolved would
+// answer, for anyone who can read the publishing project, questions about
+// any other project the caller can name an identity of: does this uuid
+// exist, whose is it, is that project public, what is it called. A caller
+// who belongs to A alone could ask all four about a private entity of B by
+// putting B's pid or uuid in its own candidate.
+//
+// assets.Preview therefore renders those fields for exactly two
+// owners: the publishing project itself, and a PUBLIC project. Every other
+// entry is still produced — the ref is listed, resolved, and a private
+// dependency is still named and still blocking, which is what docs/23 §4
+// sends this route to say and what a publish refusing on a hidden
+// dependency needs — and the fields that would say whose private state it
+// is are withheld, as is the second identity of the entity behind a version
+// the caller named (the scientific_objects row id, which the caller never
+// held). How a withheld field looks on the wire differs by field and is not
+// uniform: an object's project_id, title, current_visibility and object_id,
+// and an asset's title and origin_project_id, have no omitempty, so they are
+// served as an EMPTY STRING with the key still present; a ref's project_id
+// and current_visibility carry omitempty (they did before this change too),
+// so they are served by OMITTING the key. The rule is membership-independent:
+// it consults no membership of the caller's, so a caller who belongs to both
+// projects learns no more about B here than one who belongs to neither,
+// and the same request answers the same way for everyone.
+//
 // The reader's contract is assets.CurrentState: it must answer for EVERY
 // canonical ref the candidate declares, including the ones that do not
 // exist (Resolved=false). One it simply omits is an error
@@ -119,10 +151,22 @@
 // and a CSRF token (cmd/api); on top of that the handler resolves the
 // principal and then runs the same project read gate every other project
 // read runs (projects.Service.Get, T0106) — a project the caller cannot
-// see is answered with the existence-hiding 404. The preview discloses the
-// names and visibilities of entities the CALLER named in its own request
-// body (it is not an enumeration oracle: nothing in the response can be
-// reached without putting the identity in the request first).
+// see is answered with the existence-hiding 404. The preview answers for
+// the identities the CALLER named in its own request body (it is not an
+// enumeration oracle: nothing in the response can be reached without
+// putting the identity in the request first), and WHOSE project an identity
+// turned out to be — a project id, a visibility, an entity's title — is
+// disclosed only for the publishing project and for public ones (see
+// "whose identity may be rendered"). What remains disclosed about another
+// project's private entity is its existence, and that the entry the caller
+// sent is a private dependency this publication must not carry — the
+// private_dependencies list says so of the caller's own ref, and reports
+// which project it points into as "another private project" without naming
+// it. Both of those are the finding docs/23 §4 asks this route to deliver,
+// and both stay reachable only to a caller that
+// already held its identity: a 128-bit random token the caller could not
+// have guessed, which is the price of telling it "the entry you sent names
+// something real that this publication must not expose" (docs/23 §4).
 //
 // What this route deliberately does NOT decide is whether the caller may
 // publish: the publish authorization (membership + the matrix row for the

@@ -32,6 +32,19 @@
 //     refusal and the refs — which are the candidate's own field — still
 //     resolved and still named.
 //
+//  5. (T0712, issue #238) The preview does NOT disclose another project's
+//     private identity. The route's gate asks only whether the caller may
+//     read the PUBLISHING project, so before this task an entry that
+//     resolved into a third project rendered that project's id, its
+//     visibility and the entity's title to anyone who could read the
+//     publishing one. TestAssetPreviewDoesNotDiscloseAForeignPrivateEntity
+//     asserts the absence on the raw response — the foreign project's id and
+//     the object's title appear nowhere in it — while the private dependency
+//     stays named and blocking, and TestAssetPreviewRendersPublicProjectIdentities
+//     asserts the other direction, that a public project's ids and titles are
+//     still rendered (the tightening must not swallow what the preview exists
+//     to show).
+//
 // The composition is cmd/api/main.go's: the real auth guard, the real
 // project read gate, the real state reader over the canonical queries.
 // Only the session store is in-memory, exactly as the release e2e suite
@@ -658,14 +671,25 @@ func TestAssetPreviewNamesPrivateDependencies(t *testing.T) {
 	if len(got.Refs) != 3 {
 		t.Fatalf("refs = %v, want one entry per origin ref", got.Refs)
 	}
-	for ref, projectID := range map[string]string{
-		"release:" + f.releaseA:              f.projectA,
-		"release:" + f.releaseB:              f.projectB,
-		"object_version:" + f.objectVersionB: f.projectB,
-	} {
+	// The publishing project's OWN private ref is rendered as it is: the
+	// publication carries this project's state, and the caller passed the
+	// project read gate for it (docs/12 §2).
+	ownRef := refs["release:"+f.releaseA]
+	if !ownRef.Resolved || ownRef.ProjectID != f.projectA || ownRef.CurrentVisibility != "private" {
+		t.Errorf("ref release:%s = %+v, want the publishing project's own ref rendered", f.releaseA, ownRef)
+	}
+	// The two refs into the FOREIGN private project resolve — the caller
+	// declared them, so their existence is not news to it — and name neither
+	// the project they point into nor that project's visibility (T0712,
+	// issue #238). Asserted on both sides below and again on the raw body
+	// (TestAssetPreviewDoesNotDiscloseAForeignPrivateEntity).
+	for _, ref := range []string{"release:" + f.releaseB, "object_version:" + f.objectVersionB} {
 		r := refs[ref]
-		if !r.Resolved || r.ProjectID != projectID || r.CurrentVisibility != "private" {
-			t.Errorf("ref %s resolved to %+v, want resolved into %s (private)", ref, r, projectID)
+		if !r.Resolved {
+			t.Errorf("ref %s = %+v, want it reported as resolved", ref, r)
+		}
+		if r.ProjectID != "" || r.CurrentVisibility != "" {
+			t.Errorf("ref %s = %+v, want the foreign private project's id and visibility withheld", ref, r)
 		}
 	}
 
@@ -674,9 +698,14 @@ func TestAssetPreviewNamesPrivateDependencies(t *testing.T) {
 		t.Fatalf("objects = %v, want the object version the ref carries", got.Objects)
 	}
 	obj := got.Objects[0]
-	if obj.ObjectVersionID != f.objectVersionB || obj.ObjectID != f.objectB || obj.ProjectID != f.projectB ||
-		obj.Title != "Private record" || obj.CurrentVisibility != "private" {
-		t.Errorf("objects[0] = %+v, want the foreign private object version with its title", obj)
+	if obj.ObjectVersionID != f.objectVersionB {
+		t.Errorf("objects[0] = %+v, want the version id the caller's own ref named", obj)
+	}
+	// Carried, and not attributed: the version is what the ref resolved to,
+	// while the object behind it, the project it lives in and its title are
+	// that project's information, not this caller's.
+	if obj.ObjectID != "" || obj.ProjectID != "" || obj.Title != "" || obj.CurrentVisibility != "" {
+		t.Errorf("objects[0] = %+v, want the foreign object, project, title and visibility withheld", obj)
 	}
 
 	// --- the blobs, both of them, with today's access and the declared one ---
@@ -775,6 +804,199 @@ func TestAssetPreviewDoesNotNameAPublicDependency(t *testing.T) {
 	if len(got.Dependencies) != 1 || !got.Dependencies[0].Resolved ||
 		got.Dependencies[0].CurrentVisibility != "public" {
 		t.Errorf("dependencies = %+v, want the public pin resolved and public", got.Dependencies)
+	}
+}
+
+// --------------------------------------------------------------------------
+// 1c. Another project's private identity is not disclosed (T0712, issue #238)
+
+// TestAssetPreviewDoesNotDiscloseAForeignPrivateEntity is T0712's acceptance
+// criterion, over the composed route and a real PostgreSQL.
+//
+// The caller is alice: owner and member of the PUBLISHING project A, and a
+// member of nothing else — the fixture seeds no membership for her in B, and
+// she cannot read B at all (docs/12 §2, specs/policies/permissions-matrix.csv:
+// read_private_project is a deny for a non-member). The project gate on this
+// route asks only about A, so everything below is what the route used to say
+// to her about B, given identities she holds from somewhere else:
+//
+//	before T0712                          after T0712
+//	B's project id, in refs and objects   withheld
+//	B's visibility, in refs and objects   withheld
+//	"Private record", B's version title   withheld
+//	B's project id, in the blocker detail withheld
+//	B's ASSET TITLE, for a pid of B's     withheld
+//	the pin/ref named, blocking            unchanged — the finding survives
+//
+// The last line is the one that must not move: the route exists to refuse on
+// this dependency and to tell the caller which entry of its own list it is
+// (docs/23 §4), and a "fix" that hid the entry would trade the protection for
+// the silence.
+func TestAssetPreviewDoesNotDiscloseAForeignPrivateEntity(t *testing.T) {
+	ctx := testCtx(t)
+	ts, pool, _ := newAssetPreviewServer(t, ctx)
+	alice, aliceID := signup(t, ts.URL, "preview-disclose@example.com", "preview-disclose")
+	_, bobID := signup(t, ts.URL, "preview-disclose-bob@example.com", "preview-disclose-bob")
+	f := seedAssetPreviewFixture(t, ctx, pool, aliceID, bobID)
+
+	// --- (1) the refs, the object and the pin ---
+	raw, got := runPreview(t, alice, f.projectA, previewCandidateJSON(t, defaultCandidate(f)))
+
+	// The whole answer at once: neither B's identity, nor the title of its
+	// object version, nor the object row behind the version the caller named
+	// appears anywhere in it. Asserting on the raw bytes is
+	// deliberate — it is the check that catches a leak in a field no
+	// field-by-field case thought to look at, and it is what a reviewer of the
+	// wire response can reproduce.
+	for _, secret := range []string{f.projectB, "Private record", f.objectB} {
+		if strings.Contains(raw, secret) {
+			t.Errorf("the preview answer contains %q, which belongs to another private project:\n%s", secret, raw)
+		}
+	}
+	// The caller's own project is rendered as usual, so the absences above are
+	// about the other project and not about a preview that stopped saying
+	// anything.
+	if got.Asset.OriginProjectID != f.projectA {
+		t.Errorf("asset = %+v, want the caller's own project rendered", got.Asset)
+	}
+	// The object version is carried — it is what the ref resolved to — and is
+	// not attributed to a project, a title or a visibility.
+	if len(got.Objects) != 1 {
+		t.Fatalf("objects = %v, want the object version the ref carries", got.Objects)
+	}
+	obj := got.Objects[0]
+	if obj.ObjectVersionID != f.objectVersionB {
+		t.Errorf("objects[0] = %+v, want the version id the caller's own ref named", obj)
+	}
+	if obj.ObjectID != "" || obj.ProjectID != "" || obj.Title != "" || obj.CurrentVisibility != "" {
+		t.Errorf("objects[0] = %+v, want the foreign object, project, title and visibility withheld", obj)
+	}
+	// The refs into B resolved (the caller declared them) and withheld its
+	// identity.
+	refs := map[string]previewRefWire{}
+	for _, r := range got.Refs {
+		refs[r.Ref] = r
+	}
+	for _, ref := range []string{"release:" + f.releaseB, "object_version:" + f.objectVersionB} {
+		r := refs[ref]
+		if !r.Resolved {
+			t.Errorf("ref %s = %+v, want it reported as resolved", ref, r)
+		}
+		if r.ProjectID != "" || r.CurrentVisibility != "" {
+			t.Errorf("ref %s = %+v, want the foreign private project's id and visibility withheld", ref, r)
+		}
+	}
+	// AND THE FINDING SURVIVES, entry by entry: every dependency into B is
+	// still named and still blocking, so the publication is still refused for
+	// the reason docs/23 §4 gives.
+	for _, ref := range []string{
+		f.privatePin, // a pin resolving to B's still-private version
+		"release:" + f.releaseB,
+		"object_version:" + f.objectVersionB,
+	} {
+		dep := privateDep(t, got.PrivateDeps, ref)
+		if !dep.Blocking {
+			t.Errorf("the foreign private dependency %s = %+v, want blocking: withholding the project's name "+
+				"must not stop the preview from refusing on it", ref, dep)
+		}
+	}
+	if got.Publishable {
+		t.Error("publishable = true over a foreign private dependency")
+	}
+
+	// --- (2) the asset half: a pid of B's private asset ---
+	// A pid is an identity the caller can hold without being able to read the
+	// project it names, and the asset half of the defect answered with that
+	// project's id and the asset's title.
+	c := defaultCandidate(f)
+	c.assetPID = f.privateAssetPID
+	rawAsset, gotAsset := runPreview(t, alice, f.projectA, previewCandidateJSON(t, c))
+
+	for _, secret := range []string{f.projectB, "Private dependency"} {
+		if strings.Contains(rawAsset, secret) {
+			t.Errorf("the preview of a foreign asset's pid contains %q, which belongs to another private "+
+				"project:\n%s", secret, rawAsset)
+		}
+	}
+	if !gotAsset.Asset.Resolved {
+		t.Error("asset.resolved = false for a pid that names a stored asset: the caller sent the pid, so its " +
+			"existence is not news, and reporting an existing asset as nonexistent would be a false finding")
+	}
+	if gotAsset.Asset.Title != "" || gotAsset.Asset.OriginProjectID != "" {
+		t.Errorf("asset = %+v, want the foreign private asset's title and project withheld", gotAsset.Asset)
+	}
+	// The refusal the asset half produces is still produced, and it no longer
+	// names the project it refuses about.
+	mismatch := blockerWithCode(t, gotAsset.PublishBlockers, "PREVIEW_ASSET_PROJECT_MISMATCH")
+	if strings.Contains(mismatch.Detail, f.projectB) {
+		t.Errorf("the asset-mismatch blocker names the foreign project: %q", mismatch.Detail)
+	}
+	if !strings.Contains(mismatch.Detail, "another private project") {
+		t.Errorf("the asset-mismatch blocker neither names nor describes the asset's project: %q", mismatch.Detail)
+	}
+}
+
+// TestAssetPreviewRendersPublicProjectIdentities is the other half of the rule
+// T0712 adds, over the same rows with the foreign project made public: the
+// tightening must not withhold what is not private. A public project's id, its
+// visibility and its entities' titles are what any authenticated caller can
+// read from the project's own routes (docs/12 §2), so they are rendered here
+// as they were before — for the refs, for the carried object version, and for
+// the asset half, whose refusal names the project it refuses about.
+//
+// The title assertions on the RAW response in both directions are the point:
+// "Private record" is proven absent in one state and present in the other, so
+// the absence in TestAssetPreviewDoesNotDiscloseAForeignPrivateEntity is a
+// fact about the visibility rule rather than about a string that never appears
+// in this response at all.
+func TestAssetPreviewRendersPublicProjectIdentities(t *testing.T) {
+	ctx := testCtx(t)
+	ts, pool, _ := newAssetPreviewServer(t, ctx)
+	alice, aliceID := signup(t, ts.URL, "preview-public-render@example.com", "preview-public-render")
+	_, bobID := signup(t, ts.URL, "preview-public-render-bob@example.com", "preview-public-render-bob")
+	f := seedAssetPreviewFixture(t, ctx, pool, aliceID, bobID)
+	f.makeForeignProjectPublic(t, ctx, pool)
+
+	raw, got := runPreview(t, alice, f.projectA, previewCandidateJSON(t, defaultCandidate(f)))
+
+	if !strings.Contains(raw, "Private record") {
+		t.Errorf("the preview of a PUBLIC project's object version does not render its title:\n%s", raw)
+	}
+	if len(got.Objects) != 1 {
+		t.Fatalf("objects = %v, want the object version the ref carries", got.Objects)
+	}
+	if obj := got.Objects[0]; obj.ProjectID != f.projectB || obj.Title != "Private record" ||
+		obj.CurrentVisibility != "public" || obj.ObjectID != f.objectB {
+		t.Errorf("objects[0] = %+v, want the public project's object version rendered with its project, title "+
+			"and visibility", obj)
+	}
+	refs := map[string]previewRefWire{}
+	for _, r := range got.Refs {
+		refs[r.Ref] = r
+	}
+	for _, ref := range []string{"release:" + f.releaseB, "object_version:" + f.objectVersionB} {
+		r := refs[ref]
+		if !r.Resolved || r.ProjectID != f.projectB || r.CurrentVisibility != "public" {
+			t.Errorf("ref %s = %+v, want a public project's ref rendered with its project and visibility", ref, r)
+		}
+	}
+
+	// The asset half, same state: a pid of the now-public project's asset
+	// renders its title and its project, and the mismatch refusal names the
+	// project it refuses about.
+	c := defaultCandidate(f)
+	c.assetPID = f.privateAssetPID
+	rawAsset, gotAsset := runPreview(t, alice, f.projectA, previewCandidateJSON(t, c))
+
+	if !strings.Contains(rawAsset, "Private dependency") {
+		t.Errorf("the preview of a PUBLIC project's asset does not render its title:\n%s", rawAsset)
+	}
+	if gotAsset.Asset.Title != "Private dependency" || gotAsset.Asset.OriginProjectID != f.projectB {
+		t.Errorf("asset = %+v, want the public project's asset rendered with its title and project", gotAsset.Asset)
+	}
+	mismatch := blockerWithCode(t, gotAsset.PublishBlockers, "PREVIEW_ASSET_PROJECT_MISMATCH")
+	if !strings.Contains(mismatch.Detail, f.projectB) {
+		t.Errorf("the asset-mismatch blocker does not name the public project it refuses about: %q", mismatch.Detail)
 	}
 }
 
@@ -883,22 +1105,31 @@ func TestAssetPreviewAnswersAnUnreadableManifest(t *testing.T) {
 	}
 
 	// The refs are the candidate's own field, and they survive: all three
-	// are resolved, with the project each belongs to.
+	// are resolved. The one into the publishing project renders where it
+	// points, and the two into the foreign private project do not (T0712,
+	// issue #238) — the same rule as everywhere else on this route, which an
+	// unreadable manifest does not suspend: a document the platform cannot
+	// read is not a reason to disclose another project.
 	byRef := map[string]previewRefWire{}
 	for _, ref := range got.Refs {
 		byRef[ref.Ref] = ref
 	}
-	for _, want := range []struct{ ref, project, visibility string }{
-		{"release:" + f.releaseA, f.projectA, "private"},
-		{"release:" + f.releaseB, f.projectB, "private"},
-		{"object_version:" + f.objectVersionB, f.projectB, "private"},
-	} {
-		ref, ok := byRef[want.ref]
-		if !ok {
-			t.Fatalf("refs = %+v, want %s among them", got.Refs, want.ref)
+	for _, ref := range []string{"release:" + f.releaseA, "release:" + f.releaseB, "object_version:" + f.objectVersionB} {
+		if _, ok := byRef[ref]; !ok {
+			t.Fatalf("refs = %+v, want %s among them", got.Refs, ref)
 		}
-		if !ref.Resolved || ref.ProjectID != want.project || ref.CurrentVisibility != want.visibility {
-			t.Errorf("%s = %+v, want resolved into %s (%s)", want.ref, ref, want.project, want.visibility)
+	}
+	if own := byRef["release:"+f.releaseA]; !own.Resolved || own.ProjectID != f.projectA ||
+		own.CurrentVisibility != "private" {
+		t.Errorf("release:%s = %+v, want the publishing project's own ref rendered", f.releaseA, own)
+	}
+	for _, ref := range []string{"release:" + f.releaseB, "object_version:" + f.objectVersionB} {
+		r := byRef[ref]
+		if !r.Resolved {
+			t.Errorf("%s = %+v, want it reported as resolved", ref, r)
+		}
+		if r.ProjectID != "" || r.CurrentVisibility != "" {
+			t.Errorf("%s = %+v, want the foreign private project's id and visibility withheld", ref, r)
 		}
 	}
 

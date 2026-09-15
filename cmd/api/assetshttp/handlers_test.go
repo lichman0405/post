@@ -341,6 +341,126 @@ func TestPreviewServesTheImpact(t *testing.T) {
 	}
 }
 
+// TestPreviewServesWithheldIdentitiesAsEmptyFields is T0712's (issue #238)
+// wire half: an entity of another private project is served with the fields
+// that would say whose it is PRESENT AND EMPTY, not absent.
+//
+// The distinction is a contract decision with a reason, and it is worth a test
+// because "tidy up the empty fields with omitempty" is exactly the change a
+// later reader would make without noticing what it costs:
+//
+//   - empty fields keep the response the same SHAPE for every caller. A field
+//     that disappeared for some callers and not others would make the client
+//     infer the withheld case from an absence, which is the disclosure this
+//     task closes, reached through the schema instead of through the value.
+//   - the preview response has no schema in the contract (specs/api/openapi.yaml:
+//     '200': {description: Preview}), so an empty string violates nothing,
+//     while a changed field set is a contract change nobody asked for.
+//
+// The rule itself (when those fields are withheld) is internal/assets'
+// business and is pinned there; what is pinned here is that the route serves
+// what the model rendered, field by field.
+func TestPreviewServesWithheldIdentitiesAsEmptyFields(t *testing.T) {
+	const foreignProjectID = "99999999-9999-4999-8999-999999999999"
+	objectRef := "object_version:0f4d2c1b-9a87-4653-8b21-7e6f5d4c3b2b"
+	state := &fakeState{state: stateFor(
+		&assets.StoredAsset{
+			PID:                     "01j9z6k3m4n5p6q7r8s9t0v1w2",
+			Type:                    assets.TypeDataset,
+			Title:                   "Another project's dataset",
+			OriginProjectID:         foreignProjectID,
+			OriginProjectVisibility: assets.VisibilityPrivate,
+		},
+		[]assets.StoredRef{{
+			Ref:               assets.OriginRef(objectRef),
+			Resolved:          true,
+			ProjectID:         foreignProjectID,
+			ProjectVisibility: assets.VisibilityPrivate,
+			Object: &assets.StoredObject{
+				ObjectVersionID: "0f4d2c1b-9a87-4653-8b21-7e6f5d4c3b2b",
+				ObjectID:        "0f4d2c1b-9a87-4653-8b21-7e6f5d4c3b2c",
+				Title:           "A foreign title",
+			},
+		}},
+		nil,
+		nil,
+	)}
+	srv := newPreviewServer(t, state, &fakeGate{})
+
+	// The candidate is addressed to the route's project and declares the
+	// foreign object version as one of its origin refs.
+	body := previewBody(t, func(b map[string]any) {
+		b["origin_refs"] = []any{objectRef}
+	})
+	resp := srv.post(t, previewURL(testProjectID), body)
+	// Read the body once: the field-by-field assertions below decode it, and
+	// the containment assertions at the end search the same bytes the client
+	// received rather than a re-rendering of them.
+	raw := readBody(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", resp.StatusCode, raw)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		t.Fatalf("decode the preview response: %v: %s", err, raw)
+	}
+
+	// The objects entry: the four fields are present, and empty.
+	objects, ok := decoded["objects"].([]any)
+	if !ok || len(objects) != 1 {
+		t.Fatalf("objects = %v, want the object version the ref carries", decoded["objects"])
+	}
+	obj, ok := objects[0].(map[string]any)
+	if !ok {
+		t.Fatalf("objects[0] = %v, want an object", objects[0])
+	}
+	for _, key := range []string{"object_id", "project_id", "title", "current_visibility"} {
+		value, present := obj[key]
+		if !present {
+			t.Errorf("objects[0] has no %q field: the withheld case must be an empty value, not a missing "+
+				"field — a client must not have to read an absence as a disclosure (%v)", key, obj)
+			continue
+		}
+		if value != "" {
+			t.Errorf("objects[0][%q] = %v, want the foreign private project's identity withheld", key, value)
+		}
+	}
+	// It is still carried, under the identity the CALLER sent: withholding
+	// the identity is not withholding the entry, and the version id is the
+	// caller's own string rather than something it learned here.
+	if obj["object_version_id"] != "0f4d2c1b-9a87-4653-8b21-7e6f5d4c3b2b" {
+		t.Errorf("objects[0] = %v, want the version id the caller's ref named", obj)
+	}
+	// The asset half: present and empty too.
+	asset, ok := decoded["asset"].(map[string]any)
+	if !ok {
+		t.Fatalf("asset = %v, want an object", decoded["asset"])
+	}
+	for _, key := range []string{"title", "origin_project_id"} {
+		value, present := asset[key]
+		if !present {
+			t.Errorf("asset has no %q field: the withheld case must be an empty value, not a missing field (%v)",
+				key, asset)
+			continue
+		}
+		if value != "" {
+			t.Errorf("asset[%q] = %v, want the foreign private asset's identity withheld", key, value)
+		}
+	}
+	if asset["resolved"] != true {
+		t.Errorf("asset = %v, want resolved true: the pid names a stored asset, and the caller sent the pid", asset)
+	}
+	// The whole body: the foreign project's id, the foreign titles, and the
+	// object row behind the version the caller named appear nowhere in it.
+	for _, secret := range []string{
+		foreignProjectID, "A foreign title", "Another project's dataset", "0f4d2c1b-9a87-4653-8b21-7e6f5d4c3b2c",
+	} {
+		if strings.Contains(raw, secret) {
+			t.Errorf("the response contains %q, which belongs to another private project:\n%s", secret, raw)
+		}
+	}
+}
+
 // TestPreviewRequiresASession: this is a write method on the shared v1
 // subtree, so the guard refuses it before routing, and the handler refuses
 // it again as a backstop. Either way the state is never read.
