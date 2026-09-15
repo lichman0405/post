@@ -193,7 +193,12 @@ func TestEveryObjectTypeCreatesAndVersions(t *testing.T) {
 		{"protocol", `{"name":"synthesis protocol"}`, `{"version_note":"v1.1"}`, []string{"name", "version_note"}},
 		// A compound-looking statement: atomicity is a HINT, never a refusal.
 		{"claim", `{"statement":"MOF-5 has high CO2 uptake and ZIF-8 has low uptake.","claim_type":"quantitative"}`, `{"scope":"298 K"}`, []string{"statement", "claim_type", "scope"}},
-		{"finding", `{"name":"uptake finding"}`, `{"summary":"screened 50 MOFs"}`, []string{"name", "summary"}},
+		// The finding pins the claim this test created above (T0503): a
+		// PRESENT claim_version_refs is held to its rule (empty or
+		// malformed hard-fails; an ABSENT field is a draft and only earns
+		// a hint), and the projection guard (00057) refuses a ref-less
+		// findings row. The %s placeholder is filled in the loop below.
+		{"finding", `{"name":"uptake finding","claim_version_refs":["%s"]}`, `{"summary":"screened 50 MOFs"}`, []string{"name", "summary", "claim_version_refs"}},
 		{"external_reference", `{"canonical_url":"https://doi.org/10.5555/example"}`, `{"title":"a reference paper"}`, []string{"canonical_url", "title"}},
 	}
 	if len(types) != 11 {
@@ -202,6 +207,7 @@ func TestEveryObjectTypeCreatesAndVersions(t *testing.T) {
 
 	compoundClaimHintSeen := false
 	questionID := ""
+	claimVersionID := ""
 	for _, tt := range types {
 		t.Run(tt.objectType, func(t *testing.T) {
 			payload := tt.payload
@@ -210,6 +216,12 @@ func TestEveryObjectTypeCreatesAndVersions(t *testing.T) {
 					t.Fatal("hypothesis runs before the research question that must supply its question_id")
 				}
 				payload = fmt.Sprintf(tt.payload, questionID)
+			}
+			if tt.objectType == "finding" {
+				if claimVersionID == "" {
+					t.Fatal("finding runs before the claim that must supply its claim_version_refs")
+				}
+				payload = fmt.Sprintf(tt.payload, claimVersionID)
 			}
 			res, err := f.svc.CreateObject(ctx, f.alice, f.project.ID, f.branch, rsg.CreateObjectInput{
 				ObjectType: tt.objectType,
@@ -220,6 +232,9 @@ func TestEveryObjectTypeCreatesAndVersions(t *testing.T) {
 			}
 			if tt.objectType == "research_question" {
 				questionID = res.Object.ID
+			}
+			if tt.objectType == "claim" {
+				claimVersionID = res.Version.ID
 			}
 			if res.Object.ObjectType != tt.objectType || res.Object.ProjectID != f.project.ID {
 				t.Errorf("object = %+v", res.Object)

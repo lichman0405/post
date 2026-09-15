@@ -188,8 +188,12 @@ func TestRSGQueryStateSpecificSlice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("version material: %v", err)
 	}
+	// A finding must pin at least one claim version (T0503 semantics):
+	// the check is format-level here — this query fixture never writes
+	// the finding_claim_versions projection, so a well-formed id is the
+	// rule satisfied, existence is not tested on this path.
 	finding, err := f.svc.CreateObject(ctx, f.alice, f.project.ID, f.branch, rsg.CreateObjectInput{
-		ObjectType: "finding", Payload: json.RawMessage(`{"name":"uptake finding"}`),
+		ObjectType: "finding", Payload: json.RawMessage(`{"name":"uptake finding","claim_version_refs":["11111111-1111-4111-8111-111111111111"]}`),
 	})
 	if err != nil {
 		t.Fatalf("create finding: %v", err)
@@ -302,7 +306,7 @@ func TestRSGQueryFiltersAndTraversal(t *testing.T) {
 		t.Fatalf("create question: %v", err)
 	}
 	fnd, err := f.svc.CreateObject(ctx, f.alice, f.project.ID, f.branch, rsg.CreateObjectInput{
-		ObjectType: "finding", Payload: json.RawMessage(`{"name":"uptake finding"}`),
+		ObjectType: "finding", Payload: json.RawMessage(`{"name":"uptake finding","claim_version_refs":["11111111-1111-4111-8111-111111111111"]}`),
 	})
 	if err != nil {
 		t.Fatalf("create finding: %v", err)
@@ -422,7 +426,7 @@ func TestRSGQueryAuthorizationAndNoLeak(t *testing.T) {
 		t.Fatalf("create private material: %v", err)
 	}
 	fnd, err := f.svc.CreateObject(ctx, f.alice, f.project.ID, f.branch, rsg.CreateObjectInput{
-		ObjectType: "finding", Payload: json.RawMessage(`{"name":"private finding"}`),
+		ObjectType: "finding", Payload: json.RawMessage(`{"name":"private finding","claim_version_refs":["11111111-1111-4111-8111-111111111111"]}`),
 	})
 	if err != nil {
 		t.Fatalf("create private finding: %v", err)

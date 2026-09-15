@@ -259,7 +259,11 @@ func TestPullRequestHeadRefreshExplicit(t *testing.T) {
 	pr := f.openPR(t, ctx, feature.ID, "Propose the hypothesis")
 
 	// The feature branch advances; the PR's proposed state stays pinned.
-	featureHead2 := f.commit(t, ctx, feature.ID, "finding", `{"summary":"found"}`)
+	// The finding payload carries a well-formed pinned claim version: the
+	// T0503 semantics check requires every finding to pin at least one
+	// (existence is not checked on this path, only the version-id shape).
+	featureHead2 := f.commit(t, ctx, feature.ID, "finding",
+		`{"summary":"found","claim_version_refs":["cccccccc-cccc-4ccc-8ccc-cccccccccccc"]}`)
 	got, err := f.prsvc.Get(ctx, f.project.ID, pr.Number)
 	if err != nil {
 		t.Fatalf("Get: %v", err)

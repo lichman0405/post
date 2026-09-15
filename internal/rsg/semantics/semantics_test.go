@@ -165,7 +165,16 @@ func TestExternalReferenceIdentityPair(t *testing.T) {
 }
 
 func TestUnknownTypesHaveNoChecks(t *testing.T) {
-	for _, typ := range []string{"material", "sample", "calculation", "dataset", "protocol", "finding", "experiment"} {
+	// Two names have left this list since it was written, and the list
+	// only means anything with both gone — it is "the types the semantics
+	// layer has no crisp rule for":
+	//
+	//   - "external_reference": mainline gave it checkExternalReference
+	//     (T0508 — the source_type/external_identifier identity pair,
+	//     hard-failing on a half identity);
+	//   - "finding": T0503 gave it checkFinding (the pinned claim version
+	//     refs), covered by finding_test.go.
+	for _, typ := range []string{"material", "sample", "calculation", "dataset", "protocol", "experiment"} {
 		errs, hints := Check(typ, "", map[string]any{"name": "x", "statement": "a and b and c."})
 		if len(errs) != 0 || len(hints) != 0 {
 			t.Fatalf("type %s: errs=%v hints=%v, want no checks (the V1 schemas define no crisp rule for it)", typ, errs, hints)

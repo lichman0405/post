@@ -362,6 +362,40 @@ var canonicalTables = map[string]tableExp{
 		checks: []string{"claim_type = ANY", "assessment = ANY", "jsonb_typeof(scope) = 'object'", "jsonb_typeof(scope_conditions) = 'array'", "jsonb_typeof(basis) = 'array'"},
 		fks:    []fkExp{fk("version_id", "scientific_object_versions", "RESTRICT"), fk("object_id", "scientific_objects", "RESTRICT")},
 	},
+	"findings": {
+		// T0503: the structured finding projection (00057) — one row per
+		// finding version, the schema's finding_type/assessment enums as
+		// CHECKs. The pinned claim version refs live in the
+		// finding_claim_versions child table, guarded at commit.
+		// finding_type is nullable because the finding schema leaves it
+		// optional (unlike claim_type, which claim.schema.json requires
+		// and 00041 therefore holds NOT NULL).
+		cols: []colExp{
+			c("version_id", u, false, false), c("object_id", u, false, false),
+			c("finding_type", txt, true, false), c("assessment", txt, true, false),
+			c("created_at", ts, false, true),
+		},
+		pk:     []string{"version_id"},
+		checks: []string{"finding_type = ANY", "assessment = ANY"},
+		fks:    []fkExp{fk("version_id", "scientific_object_versions", "RESTRICT"), fk("object_id", "scientific_objects", "RESTRICT")},
+	},
+	"finding_claim_versions": {
+		// T0503: the projection's materialized claim_version_refs — one
+		// row per pinned claim VERSION (both FKs point at version rows,
+		// never objects: a later claim version is a different row and can
+		// never silently rewrite the pin). position carries the array
+		// order.
+		cols: []colExp{
+			c("finding_version_id", u, false, false), c("claim_version_id", u, false, false),
+			c("position", i4, false, true),
+		},
+		pk:      []string{"finding_version_id", "claim_version_id"},
+		uniques: [][]string{{"finding_version_id", "position"}},
+		// "position" is a PostgreSQL keyword, so the catalog renders the
+		// column quoted in the CHECK def.
+		checks: []string{">= 0"},
+		fks:    []fkExp{fk("finding_version_id", "scientific_object_versions", "RESTRICT"), fk("claim_version_id", "scientific_object_versions", "RESTRICT")},
+	},
 	"blob_attachments": {
 		// state_id is the T0206 addition (00035): the state the attachment
 		// was created in, like every member row (object versions, relation
@@ -637,6 +671,9 @@ var explicitIndexes = map[string][]string{
 	// the plan read's scan path.
 	// T0214: template provenance lookups (00056) — which projects were
 	// created from a template version (catalog page / audit questions).
+	// T0503: finding projection query paths (00057) — by object, by type,
+	// and the reverse lookup from a pinned claim version to the findings
+	// that pin it (the impact analysis input, docs/19 §3).
 	"project_schema_profiles_project_idx":          {"project_id", "schema_id", "created_at"},
 	"claims_object_idx":                            {"object_id"},
 	"claims_type_idx":                              {"claim_type"},
@@ -653,6 +690,9 @@ var explicitIndexes = map[string][]string{
 	"conflict_resolutions_identity_idx":            {"UNIQUE", "NULLS NOT DISTINCT", "project_id"},
 	"conflict_resolutions_plan_idx":                {"project_id", "base_state_id", "target_kind"},
 	"project_template_instantiations_template_idx": {"template_id", "template_version"},
+	"findings_object_idx":                          {"object_id"},
+	"findings_type_idx":                            {"finding_type"},
+	"finding_claim_versions_claim_idx":             {"claim_version_id"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded

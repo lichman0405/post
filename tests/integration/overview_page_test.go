@@ -222,7 +222,7 @@ func newOverviewPageFixture(t *testing.T, ctx context.Context) *overviewPageFixt
 		`{"statement":"Uptake peaks at 30 bar","finding_type":"trend","assessment":"accepted","claim_version_refs":["`+claim.VersionID+`"]}`)
 	f.findingID = finding.ID
 	contested := f.createObject(t, f.privateProjectID, f.privateBranchID, "finding",
-		`{"statement":"Degrades in humid air","finding_type":"trend","assessment":"contested"}`)
+		`{"statement":"Degrades in humid air","finding_type":"trend","assessment":"contested","claim_version_refs":["`+claim.VersionID+`"]}`)
 	f.contestedID = contested.ID
 	mat := f.createObject(t, f.privateProjectID, f.privateBranchID, "material",
 		`{"name":"MOF-5"}`)
