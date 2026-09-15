@@ -1992,9 +1992,12 @@
       ]
     },
     "T0214": {
-      "status": "verification",
-      "started_at": "2026-09-14T11:18:23Z",
-      "worker_run_id": "run-59e7ac1dc44fd6fa",
+      "status": "merged",
+      "started_at": "2026-09-15T00:04:24Z",
+      "worker_run_id": "run-b616e8717ccbb44a",
+      "accepted_by_supervisor_at": "2026-09-15T00:54:01Z",
+      "merged_at": "2026-09-15T01:00:23Z",
+      "rejection_reason": "# T0214 —— 复核说 `approve`，我仍退回：**这一轮你新写的两句话，比代码做的事更大**\n\n## 一、先说清楚\n\n复核这轮 **`approve`**（0 阻断、0 重大），而且它是**自己造探针**把你四处都弄红了一遍才说的——\n四种改法我都**另外自己造了 mutant 独立复核过**（加字段 / 换类型 / 把失败类换回原始错误 / 把升级后的事实改一个字符），\n四处都当场红。**这一轮的主体我全认了，不用重做。**\n\n退回**只为一处**：`tests/integration/append_only_truncate_test.go` 里你**这一轮新写的那两句话**。\n而且退回的理由和上两轮**是同一个**——我不能在自己的签名下面留一句我已知是假的话。\n\n---\n\n## 二、这一处：注释把覆盖范围说大了（**新写的，不是老问题**）\n\n我对着 `git diff` 读了改动前后：\n\n- **旧注释是对的**，因为它把范围限死了：「Every table guarded in **00014** must also refuse TRUNCATE.\n  The list is the same set」——清单当时正好就是 00014 那 13 张，句句属实。\n- **你把它换成了**：「**Every** append-only table must also refuse TRUNCATE — the trigger catalog in\n  append_only_test.go proves the guard's SHAPE, this loop proves the behavior.」\n\n**这句话是假的。** 我数过：\n\n| 清单 | 张数 |\n|---|---|\n| `append_only_test.go` 的 `appendOnlyTables`（形状） | **18** |\n| 这个循环的 `guarded`（行为） | **14** |\n\n差的四张：`project_schema_profiles`(00038)、`release_creations`(00053)、\n`git_push_ingestions`、`git_push_changes`(00034)。它们的 `_no_truncate` 触发器**存在**\n（`assertTriggers` 对 `appendOnlyTables` 每一张都断言过 `:O:34`），只是**没进这个循环**。\n\n**为什么这不是小事**：这个文件的两句话是后来人**唯一**能知道\"哪些表验过\"的地方。\n写着\"每一张\"，读的人就会得出\"没有欠账\"——而欠账正是在这里。这个洞（新表只进形状、不进行为）\n就是这么留下来的，你上一轮刚刚才补了一张。\n\n**同一处还有第二句**：文件末尾 `if n < 26` 的注释你改成了\n「an update/delete + truncate guard pair **per append-only table**, plus the targeted row guards」——\n18 张表各一对就是 **36**，阈值却还是 26。这两件事对不上。\n\n### 要交什么\n\n**让这两句话变成真的**（机制你选，但选得彻底）：\n\n- **(a) 补齐清单**：把那四张加进 `guarded`。它们已经有触发器，加进去应当直接通过。\n- **(b) 让它不再是手维护的**（更强，我倾向这条）：循环改成**从系统目录里查出**所有带\n  `_no_truncate` 触发器的表，逐张 TRUNCATE。这样\"每一张\"这句话**永远**是真的，也不会再漂。\n  **形状清单保持硬编码不动**——它是\"哪些表**应该**是 append-only\"的设计声明，硬编码是对的，\n  两者职责不同。\n\n无论走哪条，`n < 26` 那句注释与阈值都要改成**它实际在数的东西**。\n\n**如果你动手时发现某张表加进去就红**：那是**真发现**，不是你要绕开的麻烦——\n写进 `notes_for_supervisor` 与一条**绿条目**的 `evidence`，并让注释**如实**说明哪些覆盖、哪些没有。\n**不许**为了让它绿而把它悄悄挪回清单外。\n\n---\n\n## 三、顺带记名（**不要**在这一轮动）\n\n复核另外查到三张也挂着 `append_only_guard()` 的 TRUNCATE 触发器、**连形状清单都不在**：\n`git_push_semantic_candidates`、`git_reconciliation_findings`、`git_reconciliation_runs`(00034/00047)。\n**这一轮不要动它们**（属于别的迁移的边界）——记进 `notes_for_supervisor` **和 `risks[]`**，作为后续事项。\n（如果你选了 (b)，它们会自动被行为循环覆盖到，那更好，注释里点一句就行。）\n\n复核提的「§4 三条只记在 notes、没进 `risks[]`」——**不用改**，那是**我**在派单里要求的形状，\n我按 notes 收。这是我作为验收方的判断，不是你要补的作业。\n\n---\n\n## 四、上一轮那五处**已经通过**，不要重做\n\n- 反射钉字段集合（我自己加了字段、换了类型，两次都红）✓\n- `InstantiateInput` 的注释与行为一致 ✓\n- 应用报告不带依赖细节、原始 cause 进日志（我自己把类别换回原文，测试当场红）✓\n- 事实集补 `projects.name`（我把升级后的事实改一个字符，守卫当场红）✓\n- 新表进 TRUNCATE 清单 + 断言收紧为\"必须点名这张表\" ✓\n\n**我自己跑过**：整套集成测试 71.9s 绿、`make staticcheck` clean、关键验收测试绿。\n\n---\n\n## 五、规矩（没变）\n\n1. 这一轮**只动** `tests/integration/append_only_truncate_test.go` 与 `RESULT.json`。\n   **产品代码一行都不要碰**；生成物只在必要时重新生成（`--check` 收尾）。\n2. **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n   这一轮要做的恰恰相反：让注释与覆盖面对上。\n3. `tests[]` **只装这一轮真跑过、且是绿的**条目；**故意的红放进绿条目的 `evidence`**——\n   collect 的 `result-consistency` 是机械判据，留 `status:\"failed\"` 会让整轮被拒收。\n4. `notes_for_supervisor` 是**一个字符串**；全绿才写 `completed`。\n5. 记命令时把库口令掩码成 `***`；输出与结论一字不改。\n6. 跑完确认 `ps` 里没有你留下的进程。\n\n## 六、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库）。\n- 静态检查用 **`make staticcheck`**。\n\n改完就停。我这边重新 collect → 复核 → G2。\n",
       "history": [
         {
           "from": "todo",
@@ -2015,6 +2018,103 @@
           "at": "2026-09-14T11:50:08Z",
           "run_id": "run-c353605c422753bf",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T22:56:19Z",
+          "run_id": "run-590e2ea20b079725",
+          "reason": "# T0214（官方材料研发 Project Templates）：把树搬到 main 的新 tip + 六条复核意见的处置\n\n> 这封信写的就是**你工作树里正在发生的事**。复核结论是 **`approve`**（不阻断），\n> 但 §5.1 的条件 4 是\"**没有未解决的复核意见**\"（L1-73 已记）。这一轮 = 搬基线 + 下表标\"改\"的几条。\n> 复核原文在 `.rddev/workers/T0214-review/RESULT.json`。\n\n## 一、为什么这一轮要动你的树\n\n不是你的代码有问题。collect 与复核都过了（复核独立重跑了 `TestTemplateCreationE2E`、\nHTTP 面、整套集成，并用 SQL 读回了库里的六条事实），卡住你的是 **accept** —— 原文：\n\n> `git apply …/post-integration-T0214.patch: exit status 1:`\n> `error: patch failed: specs/database/postgres.sql:43`\n> `error: patch failed: tests/integration/migration_test.go:482`\n\n前者是**生成物**（按你的树重新生成，不靠文本合）；后者是**迁移清单**（两边各加一条，按名字取并集）。\n你停在 `59d2d8f`；你之后落地的任务会赶在你前面，前移是机械的，不是重做。\n\n**前移是怎么做的**：两边改到同一行的地方，只有合成工具里**写明了规则**的形状才会被自动解开；\n任何没有写明规则的形状，工具会**拒绝**，并且在我处理之前不会派发你。\n**对着树读一遍被合成过的文件**：任何一处你认为合错了，在 `RESULT.json` 里指明**哪一行、为什么**，**别闷声改回去**。\n\n## 二、六条复核意见的逐条处置\n\n| # | 级别 | 位置 | 问题 | 本轮做什么 |\n|---|---|---|---|---|\n| 1 | minor | `internal/application/templates/service.go:203` | Profiles 门**未接线**（nil）且模板定义了多个 schema profile 时，只有 `Profiles[0]` 带上\"no schema profile registrar configured\"的错；`Profiles[1:]` 的 Error 为空、SchemaID/Version 齐全，**wire 上渲染成\"已应用\"**——而 `Deps` 的文档注释承诺未接线时会**明确拒绝**而不是猜。现有单测只断言了 `Profiles[0]`，所以这个缺口没被测到 | **改**：门为 nil 时**每个** profile 都带错（或直接拒绝调用）。**扩展现有的未接线单测到\"每一个 profile\"**——让旧代码在它下面红，不是换一个断言 |\n| 2 | minor | `internal/persistence/template_store.go:33` | `RecordInstantiation` 的注释说未知项目/创建者（FK 违例）会答 `templates.ErrValidation`，但代码只把 pg `23505`（UNIQUE）映射成 `ErrInstantiationExists`；`23503` 原样返回、最终成 `ErrStore` | **改**：把**注释改成实际行为**（23505 才映射；23503 走 store 错，且失败照样在 `Applied.Recorded` 里可见）。**不改行为**——为一个今天不可达的 FK 违例发明映射，比说真话更糟 |\n| 3 | nit | `cmd/api/templateshttp/handlers.go:328` | `handleInstantiate` 的文档注释写 `…/{templateId}:instantiate`，真实注册的是 `…/{templateId}/instantiate` | **改**：一个词（注释），代码不动 |\n| 4 | nit | `cmd/api/templateshttp/handlers.go:419` | `templateError` 里 `ErrInstantiationExists` → 409 的映射在当前服务下**不可达** | **不改**，记录（保留：类型系统里存在这个 store 错误，将来直接记录的面会用到；删掉对本任务无收益） |\n| 5 | nit | `internal/persistence/queries/templates.sql:19` | 文件结尾没有换行符（`\\ No newline at end of file`） | **改**：补上（一行），并确认 sqlc 漂移检查仍绿 |\n| 6 | nit | — | 四条新路由没进 `packages/schemas/specs` 下的 OpenAPI 种子 yaml | **不改**，记录（它是过期的种子文件；T0213/T0211/T0501 的路由同样缺——Supervisor 的仓库范围刷新事项） |\n\n写进 `notes_for_supervisor`（**一个字符串**）：\n\n- **#4**、**#6** 的不改理由（各一句，见上）。\n- **#2** 里补一句：`23503` 若真出现，会以 store 失败出现在 applied report 里——不会静默。\n- 复核 risk 3（`project_template_instantiations` 的两个 label 列不是 FK，目录改名会在库里留下对不上的标签）与\n  risk 4（规则收紧后，老 pinned 模板的默认值可能被拒——会出现在 applied report，不会静默）：**记名即可**，不是这一轮的事。\n\n## 二·五、前移时我替你解的两处（这是我解的，**对着树读一遍**）\n\n前移要合的是**两块都往同一个位置插了一整块**的形状，合成工具只认它写明了规则的形状，这两处它拒收，\n所以下面两处是**我**解的，不是你的代码有问题：\n\n1. **`cmd/api/main.go`** —— 同一个插入点上，主线插的是 T0606 的发布装配（`releaseStore` / `releaseBuilder` /\n   `releaseCommand` / `releaseAPI`），你插的是模板装配（`templatesAPI`）。两块**互不引用对方的局部变量**，\n   所以解是**两块都留**：主线的块在前，你的块在后。守卫验过：主线侧 67 个名字、你侧 57 个名字，解里 69 个都在。\n2. **`tests/integration/append_only_test.go`** —— 冲突**只是那一段说明注释**，两边各自重写了它\n   （主线写 00053 `release_creations`，你写 00056 `project_template_instantiations`）。\n   **表项本身（代码行）git 合得好好的，两边都在**——我核过：合出来的文件里两个表名分别出现 7 处 / 6 处。\n   解 = 一段把两件事都讲到的注释，**被顶掉的 10 行全是注释行**（逐行列在并集材料里，工具拒绝任何代码行进那份清单）。\n   这一处**不是**\"谁对谁错\"，是两条各自成立的事实要挤进同一段。\n\n`tests/integration/migration_test.go` 是你和主线各加一条清单项，按名字取并集，工具自己解的（不必看）。\n\n**任何一处你认为合错了：在 `RESULT.json` 里指明哪一行、为什么，别闷声改回去。**\n\n## 三、这一轮要交什么\n\n1. 做完上表标\"改\"的四条；#1 必须带**能失败的测试**（扩展到每个 profile）。\n2. 生成物**只重新生成**（`--check` 收尾）：`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`internal/persistence/sqlc/*`。\n3. **在新基线上重跑**你任务要求的测试（`TestTemplateCreationE2E`、`TestTemplateCreationHTTPSurface`、`make test-integration`、新包 unit `-race`）。\n   `RESULT.json` 的 `tests[]` **只写这一轮真跑过的**。\n4. `status` 按实情：全绿才 `completed`；红着报告比造假绿好。\n5. `notes_for_supervisor` 是**一个字符串**（T0309 上一轮就死在这个形状上）。\n\n## 四、不要动的\n\n- **迁移号 `00056` 不变**，文件名别动；**空号不回收**（号是分配的）。\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n- **生成物只能重新生成，不要手工编辑。**\n- 不要动 `allowed_scope` 外的文件（尤其 `specs/schemas/**` 与 OpenAPI 种子——那是 Supervisor 的面）。\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库，5432）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n\n---\n\n## 附：关于\"故意跑红\"的记录位置（22:52 追加，其余内容一字未改）\n\n如果这一轮你**故意跑一条会红的命令**（回退某处修复、或写一条\"证明当前形状会红\"的探针）来证明某个\n守卫**确实能失败**：那段命令与输出写进它对应那条**绿条目**的 `evidence` 字符串，或者写进\n`notes_for_supervisor`。**不要在 `tests[]` 里留 `status: \"failed\"` 的条目**——collect 的\n`result-consistency` 是机械判据（`status: completed` 加任何 `failed`/`not_run` 条目 = 自相矛盾），\n它读不出\"这条红是故意的\"，整轮会被**拒收**（T0508 在 22:47 就这么白跑了一轮）。\n**证据一个字都别删**，只是**换个格子放**：`tests[]` 只装\"这一轮真跑过、且是绿的\"条目。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T22:56:19Z",
+          "run_id": "run-e1a1434432567cb9",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T23:03:37Z",
+          "run_id": "run-b75df84aec60d9b5",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T23:11:01Z",
+          "run_id": "run-3fdba02dd50db237",
+          "reason": "# T0214 —— 复核这一轮是 `request_changes`：**两条 blocking，都是真的，同源，一处修复**\n\n## 一、先说清楚这一轮回来是为了什么\n\n复核结论 **`request_changes`**，两条 blocking。**第一条我独立核过**（核法写在 §二）。两条**同一处代码**，\n改一次同时解决。你上一轮做的其余部分——四条 minor 的处置、三份生成物重新生成、在新基线上重跑——\n**我都认了**。这一轮**只动一个文件**：`tests/integration/template_creation_test.go`（外加把 `RESULT.json`\n里那条证据改写）。\n\n（轮次说明：你上一次\"回来\"是**机械**的——基线前移、补丁打不上，记录里写的是 baseline advanced。\n**这一次是真的退回给你，原因是交付里有一个断言不成立。**）\n\n---\n\n## 二、第一条 blocking：那个\"升级不会改已有项目\"的守卫是**空的**，它不可能失败\n\n位置：断言在 `tests/integration/template_creation_test.go:453`，被调用的 `fmtFacts` 在 `:492`，\n结构体 `instantiationFacts` 在 `:171-182`。\n\n**事实链（我逐条自己核过）**：\n\n1. `instantiationFacts` 的**十个字段全是小写**（未导出）；\n2. `fmtFacts` 干的是 `json.Marshal(f)`；\n3. Go 的 `encoding/json` **跳过未导出字段**——它对**任何**取值都输出 `{}`；\n4. 于是 `fmtFacts(beforeUpgrade) != fmtFacts(afterUpgrade)` 比的是 `{}` 与 `{}`，\n   **恒不成立**，`t.Fatalf` 那一支**永远走不到**。\n\n**这不是\"少了一条测试\"，是这一轮的验收标准 3（模板升级不会自动改已有项目）没有证据**：\nPhase 4 里其余断言看的都是**新**建的项目（pinned / latest），没有一条看 p1。\n复核员另外用一个同形状的独立小程序证明了\"两组完全不同的事实都打印 `{}`\"。\n\n而 `RESULT.json` 的 acceptance-3 证据里写的**正是这个对比**。\n\n**要改**：让这个对比**真的比事实**——十个字段导出（或者显式拼一份有序的渲染）；**断言保留**。\n**必须配一个\"它能红\"的证明**（硬要求，不是走形式）：用你那套 `-overlay` 办法，\n让 after 读过的事实与 before **故意差一个字符**（例如读回之后改一个字段），\n**这条断言必须当场红**；把那条命令与输出放进**绿条目**的 `evidence`。\n（如果你还能用 overlay 让\"升级真的碰到 p1\"——那更强，欢迎；但至少要有前者。）\n顺带把 `RESULT.json` 里 acceptance-3 的证据改写成\"改完之后到底在比什么\"。\n\n---\n\n## 三、第二条 blocking：新代码过不了仓库自己的静态检查（与上一条同源）\n\n复核员用**仓库钉住的** staticcheck 跑你这棵树，恰好报**一条新发现**：\n\n```\ntests/integration/template_creation_test.go:493:23: struct type\n'…integration.instantiationFacts' doesn't have any exported fields,\nnor custom marshaling (SA9005)\n```\n\n- `ops/ci/staticcheck-baseline.txt` 里**没有**这条；\n- 规矩（`scripts/staticcheck.sh` 与 `tasks/decisions.md` 里 T0305 那次退回立的）是：\n  **新代码的发现必须改，永远不许加进 baseline**；\n- `specs/orchestrator/gates.json` 的 `go` 作业里有 `make staticcheck`，所以它是门的一部分。\n\n**把字段导出之后，这一条会一起消失**——**不要**为它单独写一个自定义 `MarshalJSON` 绕过：\n那会把\"空对比\"原样留下，等于用一个技巧盖住上一条。\n\n你上一轮的证据清单里有九条命令，**没有 staticcheck**，所以 G1 抓不到它。\n这一轮**证据里必须有 `make staticcheck`**（钉住的工具）及其输出。\n\n---\n\n## 四、规矩（没变）\n\n1. 这一轮**只改** `tests/integration/template_creation_test.go` 与 `RESULT.json` 的证据。\n   产品代码、生成物、其它测试、页面**都不要动**。\n2. **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n   这一轮要做的恰恰相反：把一个\"永远为真\"的断言**改成真的会失败**。\n3. 生成物（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`internal/persistence/sqlc/*`）\n   **只重新生成**（`--check` 收尾），**不要手工编辑**。\n4. 在新基线上重跑你 `tests[]` 里记过的门；`tests[]` **只装\"这一轮真跑过、且是绿的\"**条目。\n   **故意的红放进绿条目的 `evidence`**——collect 的 `result-consistency` 是机械判据，\n   它读不出\"这条红是故意的\"，留 `status:\"failed\"` 会让整轮被拒收（T0701 昨天就这么白跑了一轮）。\n5. `notes_for_supervisor` 是**一个字符串**；**全绿才写 `completed`**。\n6. 记命令时把库口令掩码成 `***`；输出与结论一字不改。\n7. 跑完确认 `ps` 里没有你留下的进程。\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库）。\n- 静态检查用 **`make staticcheck`**（仓库钉住的版本，不要用全局装的那个）。\n- 前端单测按你上一轮记的那条命令跑。\n\n改完就停。我这边重新 collect → 复核 → G2。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T23:11:07Z",
+          "run_id": "run-4ea55a5f183d531c",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T23:29:32Z",
+          "run_id": "run-432ffe99cdca324c",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T23:41:14Z",
+          "run_id": "run-ec56d20579f50fb3",
+          "reason": "# T0214 —— 复核说 `approve`，我仍然退回：**这个交付里有一句我已经知道是假的话**\n\n## 一、先说清楚：为什么复核通过了我还退\n\n复核这一轮给的是 **`approve`**（不阻断），它的结论我认同一大半——你上一轮那两处修得对，\n字段导出、非空守卫、三条 overlay 证明我都自己复核过了（我用自己造的 mutant 把这棵树上的守卫**又弄红了一次**，\n两串渲染逐字相同、只差我注入的那个字符；`make staticcheck` 我自己跑也是 clean）。\n\n但 §5.1 的条件 4 是\"**没有未解决的复核意见**\"，而且复核自己在其中一条里写明：\n**`RESULT.json` 的验收-2 证据把那条测试的作用说大了**。\n那句话一旦随 `tasks/results/T0214/RESULT.json` 进档，就是**我签字确认过的一句假话**。\n上一轮我退回你的**正是同一个毛病**（\"永远为真的断言被当成证据\"），这一轮不能因为整体质量好就放它过去。\n\n**这一轮只动下面点名的文件，外加 `RESULT.json` 的证据文字。**\n\n---\n\n## 二、blocking：`TestTemplateInstantiationIsRecordOnly` **不可能失败**\n\n位置：`internal/domain/project_template_test.go:66`。\n\n它现在做的是：**自己造一个 `TemplateInstantiation` 字面量，然后断言自己刚写进去的两个字段非空、等于刚写进去的值**。\n这是恒真的——它**没有检查这个类型的形状**。\n\n事实链（我逐条自己核过）：\n\n1. 函数体只做两件事：构造 `rec := TemplateInstantiation{ID: …, ProjectID: …, TemplateID: \"materials-discovery\", TemplateVersion: \"v1\", …}`，\n   然后断言 `rec.TemplateID != \"\"`、`rec.TemplateVersion != \"\"`、以及两者等于刚写的字面量。\n2. 这三条断言**与类型的定义无关**：只要结构体还能编译，它们就成立。\n3. 于是**给这个类型加一个控制字段**（比如 `Defaults TemplateProjectDefaults`，让后来的任务可以读回来重新应用模板默认值），\n   这条测试**照样全绿**——而它注释里写的恰恰是\"carrying NO control fields\"。\n4. 而 `RESULT.json` 的**验收-2 证据**引用它说：\"记录表里没有任何可回放模板的控制字段——\n   `internal/domain/project_template_test.go` 的 `TestTemplateInstantiationIsRecordOnly` **把这条形状钉住**。\"\n   它没有钉住。\n\n**要改**：让这条测试**真的检查形状**——把 `TemplateInstantiation` 的**字段集合**显式断言出来\n（用反射取字段名集合，与预期的那个集合逐字比较；将来谁加一个控制字段，这条测试当红）。\n注释与 `RESULT.json` 里那句证据也随之改成\"**到底验的是什么**\"。\n\n**必须配一个\"它能红\"的证明**（硬要求，和上一轮同一条规矩）：用你那套 `-overlay` 办法，\n**临时给这个类型加一个控制字段**（比如 `WantsReapply bool`），这条测试**必须当场红**；\n把命令与输出放进**绿条目**的 `evidence`。\n\n**注意**：不要把这条测试改成\"检查表结构\"就完事——这个类型是 Go 的领域类型，**先钉住类型本身的字段集合**；\n表列由 `00056` 的 schema 快照与迁移测试管，那是另一条线。\n\n---\n\n## 三、另外四条（同一次改完）\n\n### 3.1 `internal/application/templates/service.go:74` —— 注释承诺了代码没做的事\n\n`InstantiateInput` 的文档说 `OrganizationID / ProgramID / Slug / Name / Purpose / Visibility`\n\"都是普通建项目字段，**在这里都是可选的**（调用方不填时模板默认值会补上）\"。\n但 **没有任何模板带 slug 默认值**（`TemplateProjectDefaults` 只有 Name/Purpose/Visibility），\n而 `projects.Create` 要求合法 slug——**只报模板名的请求会拿到 400**。\n\n**要改**：**只改注释**，把它说的和做的一致（slug 是必填的，或者说明它是调用方必须给的那一个）。\n**不要**为了圆这句话去发明一个默认 slug——那是产品面的决定，不是这一轮的事。\n\n### 3.2 应用报告把**依赖层的原始错误文本**放到了线上\n\n`service.go` 的 `wrapStoreError` / `wrapProfileError` / `wrapPolicyError` 都被调用方取 `.Error()`\n**存进 `Applied.*.Error`**，而 `appliedPayloadFromDomain`（`handlers.go:239/247`）**原样**把它放进 201 的响应体。\n于是 pgx 的连接错误（含**主机名/用户名/库名**）、store 的内部包装文字，会**发给客户端**。\n\n而：\n- `wrapStoreError` **自己的注释**写着\"with the cause **kept for the log**\"——注释描述的意图，代码没做；\n- 这个面**自己的契约**在 `handlers.go:409` 写着 \"docs/45: **stable codes, no dependency detail**\"。\n\n**要改**：应用报告里的每一步错误**不带依赖细节**（不得出现驱动/主机/用户/库名等内部文字）。\n落地的形态你定（一个稳定码，或每个步骤固定的一句人话）——**但细节不能丢**：\n把它记到**服务端日志**去（这个服务当前没有 logger，加一个是这一轮允许的），\n否则排障会一起丢掉，那是另一个方向的坏。\n\n### 3.3 `tests/integration/template_creation_test.go` —— 验收-3 的守卫少采了一维\n\n`readInstantiationFacts` 采了记录行、purpose/visibility、profiles、policy 版本、branches、research questions，\n**但没采 `projects.name`**——而 name 也是模板默认值（`mergeCreateInput` 会把它合进去）。\n也就是说：**一个把模板的 name 重新应用到已有项目上的升级，会从这条守卫下面溜过去**。\n\n**要改**：把 `projects.name` 加进事实集（复核员确认这条守卫本身是活的：\n在两次读之间真写一行，它会红）。\n\n### 3.4 `tests/integration/append_only_test.go` —— 新表的 TRUNCATE **只被形状证明了，没被行为证明**\n\n`project_template_instantiations` 进了 `appendOnlyTables`，`assertTriggers` 钉住了它的\nBEFORE UPDATE/DELETE 与 BEFORE TRUNCATE 触发器**形状**；但 `TestAppendOnlyTruncateIsRejected` 里那份\n**硬编码的受保护表清单**（`append_only_truncate_test.go:30`）**没有加上它**——原本那 13 张表是**行为**证明的。\n\n**要改**：把新表加进那份清单，让它的 TRUNCATE 拒绝**和行为证据一致**\n（复核员手工验过：`TRUNCATE project_template_instantiations CASCADE` 确实以 P0001 失败）。\n\n---\n\n## 四、**不要**改的（记进 `notes_for_supervisor`，各一句）\n\n- `handlers.go:416-417`：没有模板来源的项目答 404 但消息写 \"template not found\"（调用方问的是项目，\n  文案指的是另一个资源）——**记名**，同一状态码下换文案不泄露任何东西，但这一轮不摊开。\n- `internal/application/templates/catalog.go:412-414`：官方模板 name 只查了\"非空\"，\n  而 `00056` 有 `char_length … BETWEEN 1 AND 200`——超长名字会一路走到 INSERT 才以 store 失败出现。**记名**。\n- `handlers.go:419`：`ErrInstantiationExists → 409` 在当前服务下不可达——**记名**（保留，将来直接记录的面会用到）。\n- 复核的四条 risk（目录排序是约定不是校验、组织内实例化未测、部分应用非事务、模板 id 是标签非外键）：\n  **记名即可**，不是这一轮的事。\n\n## 五、规矩（没变）\n\n1. 这一轮**只改**上面点名的文件 + `RESULT.json` 的证据文字。产品语义、权限模型、迁移号、生成物**都不要动**。\n2. **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n   这一轮要做的恰恰相反：把一个恒真的断言改成真的会失败。\n3. 生成物（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`internal/persistence/sqlc/*`）\n   **只重新生成**（`--check` 收尾）。\n4. 在新基线上重跑你 `tests[]` 里记过的门；`tests[]` **只装\"这一轮真跑过、且是绿的\"**条目。\n   **故意的红放进绿条目的 `evidence`**——`collect` 的 `result-consistency` 是机械判据，\n   留 `status:\"failed\"` 会让整轮被拒收（T0701 就这么白跑过一轮）。\n5. `notes_for_supervisor` 是**一个字符串**；**全绿才写 `completed`**。\n6. 记命令时把库口令掩码成 `***`；输出与结论一字不改。\n7. 跑完确认 `ps` 里没有你留下的进程。\n\n## 六、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库）。\n- 静态检查用 **`make staticcheck`**（仓库钉住的版本）。\n\n改完就停。我这边重新 collect → 复核 → G2。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T23:41:17Z",
+          "run_id": "run-38dc86e35c8ff210",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T23:56:41Z",
+          "run_id": "run-0b1615693a8ac9bd",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T00:04:24Z",
+          "run_id": "run-c905f0809de5c5ea",
+          "reason": "# T0214 —— 复核说 `approve`，我仍退回：**这一轮你新写的两句话，比代码做的事更大**\n\n## 一、先说清楚\n\n复核这轮 **`approve`**（0 阻断、0 重大），而且它是**自己造探针**把你四处都弄红了一遍才说的——\n四种改法我都**另外自己造了 mutant 独立复核过**（加字段 / 换类型 / 把失败类换回原始错误 / 把升级后的事实改一个字符），\n四处都当场红。**这一轮的主体我全认了，不用重做。**\n\n退回**只为一处**：`tests/integration/append_only_truncate_test.go` 里你**这一轮新写的那两句话**。\n而且退回的理由和上两轮**是同一个**——我不能在自己的签名下面留一句我已知是假的话。\n\n---\n\n## 二、这一处：注释把覆盖范围说大了（**新写的，不是老问题**）\n\n我对着 `git diff` 读了改动前后：\n\n- **旧注释是对的**，因为它把范围限死了：「Every table guarded in **00014** must also refuse TRUNCATE.\n  The list is the same set」——清单当时正好就是 00014 那 13 张，句句属实。\n- **你把它换成了**：「**Every** append-only table must also refuse TRUNCATE — the trigger catalog in\n  append_only_test.go proves the guard's SHAPE, this loop proves the behavior.」\n\n**这句话是假的。** 我数过：\n\n| 清单 | 张数 |\n|---|---|\n| `append_only_test.go` 的 `appendOnlyTables`（形状） | **18** |\n| 这个循环的 `guarded`（行为） | **14** |\n\n差的四张：`project_schema_profiles`(00038)、`release_creations`(00053)、\n`git_push_ingestions`、`git_push_changes`(00034)。它们的 `_no_truncate` 触发器**存在**\n（`assertTriggers` 对 `appendOnlyTables` 每一张都断言过 `:O:34`），只是**没进这个循环**。\n\n**为什么这不是小事**：这个文件的两句话是后来人**唯一**能知道\"哪些表验过\"的地方。\n写着\"每一张\"，读的人就会得出\"没有欠账\"——而欠账正是在这里。这个洞（新表只进形状、不进行为）\n就是这么留下来的，你上一轮刚刚才补了一张。\n\n**同一处还有第二句**：文件末尾 `if n < 26` 的注释你改成了\n「an update/delete + truncate guard pair **per append-only table**, plus the targeted row guards」——\n18 张表各一对就是 **36**，阈值却还是 26。这两件事对不上。\n\n### 要交什么\n\n**让这两句话变成真的**（机制你选，但选得彻底）：\n\n- **(a) 补齐清单**：把那四张加进 `guarded`。它们已经有触发器，加进去应当直接通过。\n- **(b) 让它不再是手维护的**（更强，我倾向这条）：循环改成**从系统目录里查出**所有带\n  `_no_truncate` 触发器的表，逐张 TRUNCATE。这样\"每一张\"这句话**永远**是真的，也不会再漂。\n  **形状清单保持硬编码不动**——它是\"哪些表**应该**是 append-only\"的设计声明，硬编码是对的，\n  两者职责不同。\n\n无论走哪条，`n < 26` 那句注释与阈值都要改成**它实际在数的东西**。\n\n**如果你动手时发现某张表加进去就红**：那是**真发现**，不是你要绕开的麻烦——\n写进 `notes_for_supervisor` 与一条**绿条目**的 `evidence`，并让注释**如实**说明哪些覆盖、哪些没有。\n**不许**为了让它绿而把它悄悄挪回清单外。\n\n---\n\n## 三、顺带记名（**不要**在这一轮动）\n\n复核另外查到三张也挂着 `append_only_guard()` 的 TRUNCATE 触发器、**连形状清单都不在**：\n`git_push_semantic_candidates`、`git_reconciliation_findings`、`git_reconciliation_runs`(00034/00047)。\n**这一轮不要动它们**（属于别的迁移的边界）——记进 `notes_for_supervisor` **和 `risks[]`**，作为后续事项。\n（如果你选了 (b)，它们会自动被行为循环覆盖到，那更好，注释里点一句就行。）\n\n复核提的「§4 三条只记在 notes、没进 `risks[]`」——**不用改**，那是**我**在派单里要求的形状，\n我按 notes 收。这是我作为验收方的判断，不是你要补的作业。\n\n---\n\n## 四、上一轮那五处**已经通过**，不要重做\n\n- 反射钉字段集合（我自己加了字段、换了类型，两次都红）✓\n- `InstantiateInput` 的注释与行为一致 ✓\n- 应用报告不带依赖细节、原始 cause 进日志（我自己把类别换回原文，测试当场红）✓\n- 事实集补 `projects.name`（我把升级后的事实改一个字符，守卫当场红）✓\n- 新表进 TRUNCATE 清单 + 断言收紧为\"必须点名这张表\" ✓\n\n**我自己跑过**：整套集成测试 71.9s 绿、`make staticcheck` clean、关键验收测试绿。\n\n---\n\n## 五、规矩（没变）\n\n1. 这一轮**只动** `tests/integration/append_only_truncate_test.go` 与 `RESULT.json`。\n   **产品代码一行都不要碰**；生成物只在必要时重新生成（`--check` 收尾）。\n2. **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n   这一轮要做的恰恰相反：让注释与覆盖面对上。\n3. `tests[]` **只装这一轮真跑过、且是绿的**条目；**故意的红放进绿条目的 `evidence`**——\n   collect 的 `result-consistency` 是机械判据，留 `status:\"failed\"` 会让整轮被拒收。\n4. `notes_for_supervisor` 是**一个字符串**；全绿才写 `completed`。\n5. 记命令时把库口令掩码成 `***`；输出与结论一字不改。\n6. 跑完确认 `ps` 里没有你留下的进程。\n\n## 六、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库）。\n- 静态检查用 **`make staticcheck`**。\n\n改完就停。我这边重新 collect → 复核 → G2。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T00:04:24Z",
+          "run_id": "run-b616e8717ccbb44a",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T00:41:20Z",
+          "run_id": "run-33bba9d2e60d831b",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-15T00:54:01Z",
+          "run_id": "run-ae104f49e27f818a"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-15T01:00:23Z",
+          "run_id": "run-228f2735f27b310d",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -2815,10 +2915,12 @@
       ]
     },
     "T0309": {
-      "status": "rejected",
-      "started_at": "2026-09-14T07:50:42Z",
-      "worker_run_id": "run-195b9d46d8f8696d",
-      "rejection_reason": "collect rejected: result-schema: RESULT.json does not validate against ***-result.schema.json: RESULT.json.notes_for_supervisor: value [Design decision (L1, documented in code comments): refs/heads/main is platform-managed (T0302 MainRef) and no branch row names it — the unmapped-ref check skips it explicitly, otherwise every provisioned repository would flag on every pass. Provider outage != findings: a failed provider section is recorded as provider_error on the run row; provider-kind findings are neither created (no false 'everything missing') nor resolved (not re-verified) on such a pass — covered by unit + integration tests. Resolution semantics: an open finding is resolved only by a pass that re-verified its dimension and no longer observes the drift; resolved rows never reopen (guard) and recurring drift is a new row — enforced at the storage layer (migration 00047). The canonical fixture updates in tests/integration/migration_test.go (canonicalTables, explicitIndexes) and tests/integration/append_only_test.go (targetedGuardTriggers) are required catalog maintenance for the new tables/index/triggers — the tests pin the full schema inventory by design, and they still pass. No test was weakened, skipped or deleted. specs/database/postgres.sql and specs/SPEC_VERSION.json are regenerated derived artifacts (gen_schema_snapshot.py / spec_version.py), not hand edits; check targets confirm them current. Baseline commit ***: no git control-plane operations performed; all changes are uncommitted working-tree diffs confined to the allowed scope. The cmd/api wiring runs the sweep unconditionally (nil port when provisioning is disabled → canonical-store checks only), matching the provisioning gate's shape in main.go.] is not of type string",
+      "status": "merged",
+      "started_at": "2026-09-14T16:17:01Z",
+      "worker_run_id": "run-8d73bb1e40f7e70c",
+      "accepted_by_supervisor_at": "2026-09-14T16:39:39Z",
+      "merged_at": "2026-09-14T16:43:01Z",
+      "rejection_reason": "# T0309（00047）：复核给的是 **approve**，但**接受被 G2 挡下**——这一轮修四件，全都落在你这一轮新写的行里\n\n先把这一轮怎么来的说清楚，免得你按\"又被打回\"理解：\n\n- **00:03:31** collect 通过（`collect: all checks passed`）——上一轮那个 `notes_for_supervisor`\n  的形状问题你已经改对了。\n- **00:10** 复核结论 **`approve`**（0 blocking、1 minor、2 nit）。它独立验过的东西我抄一句给你：\n  从复核后的 `postgres.sql` 重新推出 SPEC_VERSION marker（`sha256:9e2d81ba2190430c`，current）、\n  迁移号 `00047`、append-only 的 tgtype 码（`:O:27` 守卫、`:O:34` truncate）、审计行形状、\n  `MainRef` 的 skip、provider 错误的按构造脱敏、`docs/53` 的前向-only 迁移政策、17 个路径全在\n  scope 内、**没有删改任何既有测试**。全文在 `.rddev/workers/T0309-review/RESULT.json`。\n- **00:13:00** **接受被拒**：G2 是红的（`accept` 记录原文：\n  `G2 (CI's exact jobs) is red in run run-95836b5d24b5d28a-g2`；四层记的是\n  `G1 passed / G2 failed / G3 failed(根本没跑，G2 一红就短路了) / G4 not_required`）。\n\n**所以不是复核推翻了这一轮。** 是 G2 那道门跑的是 **CI 一模一样的那几道作业**，其中\n`make staticcheck` 红了。§5.1 的条件 2 是\"G1/G2/G3/G4 全过\"，我不能带着一道红的 CI 作业去合并。\n\n**为什么这一轮把复核的 minor/nit 也一起要你改**：它们**全都落在你这一轮新写的行里**（新包、新表、\n新函数）。G2 已经要你再跑一轮了，这一轮的边际成本是零；等它合并以后再修，就得另开任务——\n或者动 `tasks/tasks.json` 换掉 spec digest，**把在飞的另外几个任务的补丁全部作废**。\n这条规矩和 T0505 那次一样。**复核的 approve 不作废**：它已经验过的东西我不再要你复述。\n\n---\n\n## 一、这一轮就修这四件\n\n### 1（G2 红，最硬的一条）：`kindOf` 没人用\n\nCI 的 `go` 作业里 `make staticcheck` 的输出（原文）：\n\n> `internal/gitprovider/reconciler_test.go:140:6: func kindOf is unused (U1000)`\n> `staticcheck: NEW findings above are not in ops/ci/staticcheck-baseline.txt.`\n> `Fix them; only pre-existing findings may be baselined, with a follow-up issue to fix them — never baseline new code.`\n\n说人话：`reconciler_test.go:139-140` 那个 `kindOf` 辅助函数**整个包里只有定义、没有调用**\n（我 grep 过 `internal/gitprovider/` 全包）。它是**这一轮新写出来的**，所以 staticcheck 把它算成\n\"新增发现\"，而新增发现**不许进 baseline**——baseline 只装历史遗留，且要有 follow-up issue。\n\n**为什么你的本地门没拦住它**（这条值得你知道）：`make check` **不含** `make staticcheck`。\n你 `tests[]` 里那条 `make check` 是绿的，CI 却红，差的就是这一道。**这一轮把 `make staticcheck`\n补进你的门里**（见 §四）。\n\n做法：**删掉它**（如果它只是重写测试时留下的死代码）；或者**接上**（那就得说清它在哪条测试里被调用）。\n**不许**把它写进 `ops/ci/staticcheck-baseline.txt`——那不是这条路，那是往一个只装历史遗留的清单里\n塞新代码。\n\n### 2（复核 minor，原文一字未改）\n\n> RunSummary.FindingsOpen returned by Reconciler.Reconcile is always 0: ReconcilerStore.FinishRun takes\n> the summary BY VALUE and scans the open-finding count into its local copy (reconciler_store.go, inside\n> FinishRun), so the caller's copy is never updated. The sweep log line in cmd/api/reconciliation.go\n> ('findings_open', sum.FindingsOpen) therefore always prints 0 even when findings are open — a\n> misleading operational signal. The run row in git_reconciliation_runs is correct (the integration tests\n> assert it via SQL), and FindingsOpened (the actual alert trigger) is set on the caller side, so\n> detection and alerting are unaffected. Fix: return the count from FinishRun (or pass the summary by\n> pointer) and log the real value.\n\n说人话：`FinishRun(ctx, sum RunSummary)` 是**按值**收参数的，它在函数体里\n`SELECT count(*) … INTO sum.FindingsOpen`（`reconciler_store.go:73`）改的是**它自己那份副本**；\n调用方 `Reconcile`（`reconciler.go:316`）手里那份**永远是 0**。于是\n`cmd/api/reconciliation.go:54` 那行扫掠日志里的 `findings_open` **永远印 0**，哪怕真有未关闭的发现。\n库里的行是对的（集成测试直接查 SQL 验的），告警也不受影响（用的是 `FindingsOpened`）——**但它是个\n会骗人的运维信号**：运维照这行日志读，会以为\"没有未关闭的发现\"。\n\n做法：让 `FinishRun` **把数带回来**（例如 `FinishRun(ctx, sum) (int, error)`，或把 `sum` 改成指针；\n两种都行，在 `RESULT.json` 里**写明你选了哪种、为什么**），`Reconcile` 拿到后写进 `sum.FindingsOpen`\n再返回；接口 `ReconcilerStore`（`reconciler.go:230`）与测试里的 `fakeReconcilerStore.FinishRun`\n（`reconciler_test.go:48`）跟着改。\n\n**要有一条\"改之前会红\"的证据**：让假 store 返回一个**非零**的开放数（例如 3），断言\n`Reconcile` 返回的 summary 里就是 3。**改之前这条必然红**（拿到的是 0）。红的那次输出按 §三 的方式\n放进**绿条目的 `evidence`**。\n\n### 3（复核 nit，原文一字未改）\n\n> git_reconciliation_runs.mappings_checked conflates two different dimensions: checkMappings counts\n> mapping-violation rows, while checkProvider increments it for each PRESENT repository (existence check).\n> The run row's 'mappings_checked' therefore mixes 'broken mapping invariants found' with 'repositories\n> verified'. Cosmetic, but the column name misleads operators reading a run row.\n\n说人话：`mappings_checked` 这一列被**两个意思**共用——`reconciler.go:377`（`checkMappings`）里它数的是\n**查出来的违规行数**（\"发现了几个问题\"），`reconciler.go:473`（`checkProvider`）里它数的是\n**验过存在性的仓库数**（\"检查了几个点\"）。一列两义，读 run 行的人会被它骗。\n\n这张表是**你这一轮新立的、还没合并**——**现在是它一生中最便宜的一刻**（合并之后再改名就是一次迁移\n加兼容）。所以这一轮把它改对。**我定的口径是一列一义**：\n\n- `mapping_violations`（由 `mappings_checked` **改名**）：mapping 不变量**查出的违规行数**；\n- `repositories_checked`（**新增**）：**验过存在性的 provisioned 仓库数**。\n\n两列的**列注释**都要写死各数什么（照 `00047` 里其它列的行文）。\n牵连但**都在你 scope 内**：`RunSummary` 加字段（`reconciler.go:212` 附近）、\n`FinishRun` 的 `UPDATE`（`reconciler_store.go:65,68,77`）、\n`cmd/api/reconciliation.go:51` 的日志字段名、\n`tests/integration/git_reconciliation_test.go:202` 的 `SELECT` 与 `reconRunRow`（:190-196）、\n`tests/integration/migration_test.go:259` 的列期望。\n\n**顺手把\"两个维度各自独立\"钉进集成测试**（这条断言在天生的两义写法下也是红的——那时连列都不存在）：\n例如一趟**没有 mapping 违规、有 2 个 provisioned 仓库**的 pass，run 行必须是\n`mapping_violations == 0` 且 `repositories_checked == 2`。\n\n如果你有更干净的口径，可以提，但**必须写成一句话的理由**，并且保持\"一列一义\"。\n**不要**留一列两义。\n\n### 4（复核 nit，原文一字未改）\n\n> GiteaAdapter.ListBranches silently skips refs whose object SHA is empty (a symbolic-ref guard). If a\n> symbolic ref ever appeared under refs/heads, the unmapped-ref check could not see it. Defensive and\n> extremely unlikely in Gitea's ref model, but the skip deserves a comment naming the reason rather than\n> silent filtering.\n\n说人话：`ListBranches`（**这一轮你新加的函数**，`gitea.go:541` 起）在 ref 的 `Object.SHA` 为空时\n**悄悄 `continue`**（`gitea.go:553`）。Gitea 的 ref 模型里几乎不可能出现符号 ref 挂在 `refs/heads/` 下，所以**行为可以\n保留**，但\"为什么跳过\"得写在代码里，不能让读者猜。\n\n做法：在 `continue` 上方补一句注释，点名这是**符号 ref 守卫**（空 object SHA = 符号 ref，\n`refs/heads/` 下不该有；真出现时不可当作 branch 头参与 unmapped-ref 检查，跳过而不是造一个假头）。\n**只加注释，不改行为。**\n\n---\n\n## 二、这一轮**不要**动的\n\n- **不改迁移号**（`00047`）、文件名别动；**37/39/44 永远空着**。除了 §一.3 点名的那张表，\n  不动 `00047` 里任何别的东西。\n- **生成物只能重新生成，不许手工编辑**：这一轮你**改了迁移**，所以\n  `specs/database/postgres.sql`（`python3 scripts/gen_schema_snapshot.py`）与\n  `specs/SPEC_VERSION.json`（`python3 scripts/spec_version.py --write`）**应当变**——\n  复核记的那个 marker `sha256:9e2d81ba2190430c` 是**这一轮之前**的，会换。\n  **如果某个 `--check` 说 current 而你明明改了迁移，那是另一件事：停下来报我。**\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout**；尤其\n  **不许把 `kindOf` 加进 staticcheck baseline**（§一.1）。\n- `allowed_scope` 外的文件一律不碰：`docs/**`、以及 `specs/` 里除那两个派生件以外的文件，\n  都不是你能写的。\n- 复核的 **6 条 risk** 与上一轮的所有处置**原样保留**在 `notes_for_supervisor` 里，**一条不缩水**。\n  那三条复核意见也**不要**在 `notes_for_supervisor` 里再复述一遍当\"已修\"——证据按 §三 的格子放。\n\n---\n\n## 三、交付记录的**形状**（每次都要说，因为 T0309 自己就死在这上面过）\n\n- `notes_for_supervisor` 必须是**一个字符串**（不是数组、不是对象）。\n- `tests[]` 里**只留这一轮真跑过、且是绿的**条目。\n- 你**故意跑红**的那几条（§一.2 要的\"改之前会红\"的探针、以及 §一.3 那条新断言的\"改之前\"形状）：\n  整段命令与输出**搬进它对应那条绿条目的 `evidence`**（或 `notes_for_supervisor`）里。\n  **一个字都不许删**，只是换个格子放——collect 的 `result-consistency` 是机械判据\n  （`status: completed` 加任何 `failed`/`not_run` 条目 = 自相矛盾），它读不出\"这条红是故意的\"，\n  整轮会被**拒收**。\n- 记命令时**不要把库口令原样贴进 `tests[].command`**（例如写成 `POSTGRES_TEST_ADMIN_URL=postgres://postgres:***@…`\n  或直接用 `make test-integration` 代指），输出与结论一字不改。\n- `status` **按实情写**：全绿才写 `completed`。\n\n---\n\n## 四、这一轮要重跑的门\n\n1. `make fmt-check && go vet ./... && make staticcheck` ← **§一.1 的红就在这**（`make check` 不含它，别漏）\n2. `go test ./internal/gitprovider/... ./cmd/api/...`（含 §一.2 那条新断言）\n3. `make test-integration`（含 `00047` 从零建库、run 行两列的新断言、迁移列期望）\n4. 三个 `--check`：`make check-schema-snapshot`、`make check-spec-version`\n   （这一轮改了迁移 → 先**重新生成**再 check）、以及 sqlc 生成物漂移\n\n---\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库，起在 5432）。**不要**用裸\n  `go test ./...` 下结论：那条路上几个测试会去连 `127.0.0.1:15432` 然后 connection refused，\n  那是 Makefile 注释里记着的历史端口 bug，不是你的代码问题。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n- 你不必去核实的事实：**接受被拒不是复核推翻了这一轮**；G2 一红，G3 根本没跑（短路了）。\n\n改完就停。我这边重新 collect → 复核 → G2 → 合并。\n",
       "history": [
         {
           "from": "todo",
@@ -2839,6 +2941,54 @@
           "at": "2026-09-14T08:39:53Z",
           "run_id": "run-39a0c641ddc4f4d3",
           "reason": "collect rejected: result-schema: RESULT.json does not validate against ***-result.schema.json: RESULT.json.notes_for_supervisor: value [Design decision (L1, documented in code comments): refs/heads/main is platform-managed (T0302 MainRef) and no branch row names it — the unmapped-ref check skips it explicitly, otherwise every provisioned repository would flag on every pass. Provider outage != findings: a failed provider section is recorded as provider_error on the run row; provider-kind findings are neither created (no false 'everything missing') nor resolved (not re-verified) on such a pass — covered by unit + integration tests. Resolution semantics: an open finding is resolved only by a pass that re-verified its dimension and no longer observes the drift; resolved rows never reopen (guard) and recurring drift is a new row — enforced at the storage layer (migration 00047). The canonical fixture updates in tests/integration/migration_test.go (canonicalTables, explicitIndexes) and tests/integration/append_only_test.go (targetedGuardTriggers) are required catalog maintenance for the new tables/index/triggers — the tests pin the full schema inventory by design, and they still pass. No test was weakened, skipped or deleted. specs/database/postgres.sql and specs/SPEC_VERSION.json are regenerated derived artifacts (gen_schema_snapshot.py / spec_version.py), not hand edits; check targets confirm them current. Baseline commit ***: no git control-plane operations performed; all changes are uncommitted working-tree diffs confined to the allowed scope. The cmd/api wiring runs the sweep unconditionally (nil port when provisioning is disabled → canonical-store checks only), matching the provisioning gate's shape in main.go.] is not of type string"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T15:55:11Z",
+          "run_id": "run-04a908c6dc295a90",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T16:03:31Z",
+          "run_id": "run-bc8d04c241eadb0d",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T16:16:47Z",
+          "run_id": "run-ef88e6c48be2865e",
+          "reason": "# T0309（00047）：复核给的是 **approve**，但**接受被 G2 挡下**——这一轮修四件，全都落在你这一轮新写的行里\n\n先把这一轮怎么来的说清楚，免得你按\"又被打回\"理解：\n\n- **00:03:31** collect 通过（`collect: all checks passed`）——上一轮那个 `notes_for_supervisor`\n  的形状问题你已经改对了。\n- **00:10** 复核结论 **`approve`**（0 blocking、1 minor、2 nit）。它独立验过的东西我抄一句给你：\n  从复核后的 `postgres.sql` 重新推出 SPEC_VERSION marker（`sha256:9e2d81ba2190430c`，current）、\n  迁移号 `00047`、append-only 的 tgtype 码（`:O:27` 守卫、`:O:34` truncate）、审计行形状、\n  `MainRef` 的 skip、provider 错误的按构造脱敏、`docs/53` 的前向-only 迁移政策、17 个路径全在\n  scope 内、**没有删改任何既有测试**。全文在 `.rddev/workers/T0309-review/RESULT.json`。\n- **00:13:00** **接受被拒**：G2 是红的（`accept` 记录原文：\n  `G2 (CI's exact jobs) is red in run run-95836b5d24b5d28a-g2`；四层记的是\n  `G1 passed / G2 failed / G3 failed(根本没跑，G2 一红就短路了) / G4 not_required`）。\n\n**所以不是复核推翻了这一轮。** 是 G2 那道门跑的是 **CI 一模一样的那几道作业**，其中\n`make staticcheck` 红了。§5.1 的条件 2 是\"G1/G2/G3/G4 全过\"，我不能带着一道红的 CI 作业去合并。\n\n**为什么这一轮把复核的 minor/nit 也一起要你改**：它们**全都落在你这一轮新写的行里**（新包、新表、\n新函数）。G2 已经要你再跑一轮了，这一轮的边际成本是零；等它合并以后再修，就得另开任务——\n或者动 `tasks/tasks.json` 换掉 spec digest，**把在飞的另外几个任务的补丁全部作废**。\n这条规矩和 T0505 那次一样。**复核的 approve 不作废**：它已经验过的东西我不再要你复述。\n\n---\n\n## 一、这一轮就修这四件\n\n### 1（G2 红，最硬的一条）：`kindOf` 没人用\n\nCI 的 `go` 作业里 `make staticcheck` 的输出（原文）：\n\n> `internal/gitprovider/reconciler_test.go:140:6: func kindOf is unused (U1000)`\n> `staticcheck: NEW findings above are not in ops/ci/staticcheck-baseline.txt.`\n> `Fix them; only pre-existing findings may be baselined, with a follow-up issue to fix them — never baseline new code.`\n\n说人话：`reconciler_test.go:139-140` 那个 `kindOf` 辅助函数**整个包里只有定义、没有调用**\n（我 grep 过 `internal/gitprovider/` 全包）。它是**这一轮新写出来的**，所以 staticcheck 把它算成\n\"新增发现\"，而新增发现**不许进 baseline**——baseline 只装历史遗留，且要有 follow-up issue。\n\n**为什么你的本地门没拦住它**（这条值得你知道）：`make check` **不含** `make staticcheck`。\n你 `tests[]` 里那条 `make check` 是绿的，CI 却红，差的就是这一道。**这一轮把 `make staticcheck`\n补进你的门里**（见 §四）。\n\n做法：**删掉它**（如果它只是重写测试时留下的死代码）；或者**接上**（那就得说清它在哪条测试里被调用）。\n**不许**把它写进 `ops/ci/staticcheck-baseline.txt`——那不是这条路，那是往一个只装历史遗留的清单里\n塞新代码。\n\n### 2（复核 minor，原文一字未改）\n\n> RunSummary.FindingsOpen returned by Reconciler.Reconcile is always 0: ReconcilerStore.FinishRun takes\n> the summary BY VALUE and scans the open-finding count into its local copy (reconciler_store.go, inside\n> FinishRun), so the caller's copy is never updated. The sweep log line in cmd/api/reconciliation.go\n> ('findings_open', sum.FindingsOpen) therefore always prints 0 even when findings are open — a\n> misleading operational signal. The run row in git_reconciliation_runs is correct (the integration tests\n> assert it via SQL), and FindingsOpened (the actual alert trigger) is set on the caller side, so\n> detection and alerting are unaffected. Fix: return the count from FinishRun (or pass the summary by\n> pointer) and log the real value.\n\n说人话：`FinishRun(ctx, sum RunSummary)` 是**按值**收参数的，它在函数体里\n`SELECT count(*) … INTO sum.FindingsOpen`（`reconciler_store.go:73`）改的是**它自己那份副本**；\n调用方 `Reconcile`（`reconciler.go:316`）手里那份**永远是 0**。于是\n`cmd/api/reconciliation.go:54` 那行扫掠日志里的 `findings_open` **永远印 0**，哪怕真有未关闭的发现。\n库里的行是对的（集成测试直接查 SQL 验的），告警也不受影响（用的是 `FindingsOpened`）——**但它是个\n会骗人的运维信号**：运维照这行日志读，会以为\"没有未关闭的发现\"。\n\n做法：让 `FinishRun` **把数带回来**（例如 `FinishRun(ctx, sum) (int, error)`，或把 `sum` 改成指针；\n两种都行，在 `RESULT.json` 里**写明你选了哪种、为什么**），`Reconcile` 拿到后写进 `sum.FindingsOpen`\n再返回；接口 `ReconcilerStore`（`reconciler.go:230`）与测试里的 `fakeReconcilerStore.FinishRun`\n（`reconciler_test.go:48`）跟着改。\n\n**要有一条\"改之前会红\"的证据**：让假 store 返回一个**非零**的开放数（例如 3），断言\n`Reconcile` 返回的 summary 里就是 3。**改之前这条必然红**（拿到的是 0）。红的那次输出按 §三 的方式\n放进**绿条目的 `evidence`**。\n\n### 3（复核 nit，原文一字未改）\n\n> git_reconciliation_runs.mappings_checked conflates two different dimensions: checkMappings counts\n> mapping-violation rows, while checkProvider increments it for each PRESENT repository (existence check).\n> The run row's 'mappings_checked' therefore mixes 'broken mapping invariants found' with 'repositories\n> verified'. Cosmetic, but the column name misleads operators reading a run row.\n\n说人话：`mappings_checked` 这一列被**两个意思**共用——`reconciler.go:377`（`checkMappings`）里它数的是\n**查出来的违规行数**（\"发现了几个问题\"），`reconciler.go:473`（`checkProvider`）里它数的是\n**验过存在性的仓库数**（\"检查了几个点\"）。一列两义，读 run 行的人会被它骗。\n\n这张表是**你这一轮新立的、还没合并**——**现在是它一生中最便宜的一刻**（合并之后再改名就是一次迁移\n加兼容）。所以这一轮把它改对。**我定的口径是一列一义**：\n\n- `mapping_violations`（由 `mappings_checked` **改名**）：mapping 不变量**查出的违规行数**；\n- `repositories_checked`（**新增**）：**验过存在性的 provisioned 仓库数**。\n\n两列的**列注释**都要写死各数什么（照 `00047` 里其它列的行文）。\n牵连但**都在你 scope 内**：`RunSummary` 加字段（`reconciler.go:212` 附近）、\n`FinishRun` 的 `UPDATE`（`reconciler_store.go:65,68,77`）、\n`cmd/api/reconciliation.go:51` 的日志字段名、\n`tests/integration/git_reconciliation_test.go:202` 的 `SELECT` 与 `reconRunRow`（:190-196）、\n`tests/integration/migration_test.go:259` 的列期望。\n\n**顺手把\"两个维度各自独立\"钉进集成测试**（这条断言在天生的两义写法下也是红的——那时连列都不存在）：\n例如一趟**没有 mapping 违规、有 2 个 provisioned 仓库**的 pass，run 行必须是\n`mapping_violations == 0` 且 `repositories_checked == 2`。\n\n如果你有更干净的口径，可以提，但**必须写成一句话的理由**，并且保持\"一列一义\"。\n**不要**留一列两义。\n\n### 4（复核 nit，原文一字未改）\n\n> GiteaAdapter.ListBranches silently skips refs whose object SHA is empty (a symbolic-ref guard). If a\n> symbolic ref ever appeared under refs/heads, the unmapped-ref check could not see it. Defensive and\n> extremely unlikely in Gitea's ref model, but the skip deserves a comment naming the reason rather than\n> silent filtering.\n\n说人话：`ListBranches`（**这一轮你新加的函数**，`gitea.go:541` 起）在 ref 的 `Object.SHA` 为空时\n**悄悄 `continue`**（`gitea.go:553`）。Gitea 的 ref 模型里几乎不可能出现符号 ref 挂在 `refs/heads/` 下，所以**行为可以\n保留**，但\"为什么跳过\"得写在代码里，不能让读者猜。\n\n做法：在 `continue` 上方补一句注释，点名这是**符号 ref 守卫**（空 object SHA = 符号 ref，\n`refs/heads/` 下不该有；真出现时不可当作 branch 头参与 unmapped-ref 检查，跳过而不是造一个假头）。\n**只加注释，不改行为。**\n\n---\n\n## 二、这一轮**不要**动的\n\n- **不改迁移号**（`00047`）、文件名别动；**37/39/44 永远空着**。除了 §一.3 点名的那张表，\n  不动 `00047` 里任何别的东西。\n- **生成物只能重新生成，不许手工编辑**：这一轮你**改了迁移**，所以\n  `specs/database/postgres.sql`（`python3 scripts/gen_schema_snapshot.py`）与\n  `specs/SPEC_VERSION.json`（`python3 scripts/spec_version.py --write`）**应当变**——\n  复核记的那个 marker `sha256:9e2d81ba2190430c` 是**这一轮之前**的，会换。\n  **如果某个 `--check` 说 current 而你明明改了迁移，那是另一件事：停下来报我。**\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout**；尤其\n  **不许把 `kindOf` 加进 staticcheck baseline**（§一.1）。\n- `allowed_scope` 外的文件一律不碰：`docs/**`、以及 `specs/` 里除那两个派生件以外的文件，\n  都不是你能写的。\n- 复核的 **6 条 risk** 与上一轮的所有处置**原样保留**在 `notes_for_supervisor` 里，**一条不缩水**。\n  那三条复核意见也**不要**在 `notes_for_supervisor` 里再复述一遍当\"已修\"——证据按 §三 的格子放。\n\n---\n\n## 三、交付记录的**形状**（每次都要说，因为 T0309 自己就死在这上面过）\n\n- `notes_for_supervisor` 必须是**一个字符串**（不是数组、不是对象）。\n- `tests[]` 里**只留这一轮真跑过、且是绿的**条目。\n- 你**故意跑红**的那几条（§一.2 要的\"改之前会红\"的探针、以及 §一.3 那条新断言的\"改之前\"形状）：\n  整段命令与输出**搬进它对应那条绿条目的 `evidence`**（或 `notes_for_supervisor`）里。\n  **一个字都不许删**，只是换个格子放——collect 的 `result-consistency` 是机械判据\n  （`status: completed` 加任何 `failed`/`not_run` 条目 = 自相矛盾），它读不出\"这条红是故意的\"，\n  整轮会被**拒收**。\n- 记命令时**不要把库口令原样贴进 `tests[].command`**（例如写成 `POSTGRES_TEST_ADMIN_URL=postgres://postgres:***@…`\n  或直接用 `make test-integration` 代指），输出与结论一字不改。\n- `status` **按实情写**：全绿才写 `completed`。\n\n---\n\n## 四、这一轮要重跑的门\n\n1. `make fmt-check && go vet ./... && make staticcheck` ← **§一.1 的红就在这**（`make check` 不含它，别漏）\n2. `go test ./internal/gitprovider/... ./cmd/api/...`（含 §一.2 那条新断言）\n3. `make test-integration`（含 `00047` 从零建库、run 行两列的新断言、迁移列期望）\n4. 三个 `--check`：`make check-schema-snapshot`、`make check-spec-version`\n   （这一轮改了迁移 → 先**重新生成**再 check）、以及 sqlc 生成物漂移\n\n---\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库，起在 5432）。**不要**用裸\n  `go test ./...` 下结论：那条路上几个测试会去连 `127.0.0.1:15432` 然后 connection refused，\n  那是 Makefile 注释里记着的历史端口 bug，不是你的代码问题。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n- 你不必去核实的事实：**接受被拒不是复核推翻了这一轮**；G2 一红，G3 根本没跑（短路了）。\n\n改完就停。我这边重新 collect → 复核 → G2 → 合并。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T16:17:01Z",
+          "run_id": "run-8d73bb1e40f7e70c",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T16:26:50Z",
+          "run_id": "run-8ca8e9040d34afd0",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T16:39:39Z",
+          "run_id": "run-eb23218fcea784ac"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T16:43:01Z",
+          "run_id": "run-40aba988b3883dcf",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -2885,10 +3035,12 @@
       ]
     },
     "T0402": {
-      "status": "verification",
-      "started_at": "2026-09-14T10:13:57Z",
-      "worker_run_id": "run-770ba478ad70e1e4",
-      "rejection_reason": "collect rejected: scope: 4 changed path(s) outside allowed_scope [infra/migrations/** specs/database/postgres.sql specs/SPEC_VERSION.json internal/rsg/** internal/application/** internal/domain/** go.mod go.sum .env.example cmd/api/** apps/web/** tests/**]: internal/persistence/pullrequest_store.go, internal/persistence/queries/issues_prs.sql, internal/persistence/sqlc/issues_prs.sql.go, internal/persistence/sqlc/querier.go",
+      "status": "merged",
+      "started_at": "2026-09-14T16:43:46Z",
+      "worker_run_id": "run-d333939add0c812e",
+      "accepted_by_supervisor_at": "2026-09-14T17:06:02Z",
+      "merged_at": "2026-09-14T17:09:30Z",
+      "rejection_reason": "# T0402（Pull Request Domain）：把树搬到 main 的新 tip + 四条复核意见的处置\n\n> 这封信写的就是**你工作树里正在发生的事**。复核结论是 **`approve`**（不阻断），\n> 但 §5.1 的条件 4 是\"**没有未解决的复核意见**\"——\"不阻断\"和\"解决了\"不是一回事（L1-73 已记）。\n> 所以这一轮 = 搬基线 + 下表里标了\"改\"的那一条。复核原文在 `.rddev/workers/T0402-review/RESULT.json`。\n\n## 一、为什么这一轮要动你的树\n\n不是你的代码有问题。你的 collect 与复核都过了（复核还独立重跑了整套集成测试），\n卡住你的是 **accept** —— 原文：\n\n> `rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run:`\n> `git apply …/post-integration-T0402.patch: exit status 1:`\n> `error: patch failed: specs/SPEC_VERSION.json:1`\n> `error: patch failed: specs/database/postgres.sql:42`\n\n**两个都是生成物**。你之后落地的任务（`00043` T0505、`00045` T0508、`00046` T1001 …）每一个都会重写同一批生成物，\n所以这一轮的前移是机械的，不是让你重做。你的树现在站在 main 当时的 tip 上。\n\n**前移是怎么做的**：两边改到同一行的地方，只有合成工具里**写明了规则**的形状会被自动解开\n（迁移清单、接线表、常量块这类\"两边各加一条\"按名字取并集）；任何没有写明规则的形状，工具会**拒绝**，\n并且在我处理之前不会派发你。生成物不参与文本合并——按你的树重新生成，不靠文本合。\n\n**你要做的第一件事**：对着树把被合成过的文件读一遍。任何一处你认为合错了，\n在 `RESULT.json` 里指明**哪一行、为什么**，**别闷声改回去**（合错了是我的问题，不算你返工）。\n\n## 二、四条复核意见的逐条处置\n\n| # | 级别 | 位置 | 问题 | 本轮做什么 |\n|---|---|---|---|---|\n| 1 | minor | `infra/migrations/00051_pull_request_state_and_fixity.sql:9` | header 声称这些不变量对\"**任何**写路径——应用代码、psql、泄漏的凭据\"都成立。state CHECK、转换表、identity/base 固定、`merged_at` 一致性确实无条件；但 **proposed_state 的固定不是**：任何有 UPDATE 权限的会话可以自己 `set_config('post.pr_head_refresh','on',true)` 再动 `proposed_state_id`（你们的集成测试演示的就是这条裸路径）。GUC 门挡的是**应用代码的无意/隐式写入**，不是敌意或泄漏的 SQL 凭据。 | **改**：把注释收敛到它真正保证的范围——说清 GUC 门挡什么、不挡什么。**只改注释，行为一个字不动** |\n| 2 | minor | `internal/persistence/pullrequest_store.go:104` | `CreatePullRequest` 读分支生命周期时没加行锁：并发的 `branches.Merge` 可以在读与插之间提交，造出\"从刚合并的分支开 PR\"。00051 的 trigger 只守 PR 行自己的列。 | **不改**，记录 + **转给 T0406（合并引擎）**——复核自己也是这么指路的。我会把它带进 T0406 的规格 |\n| 3 | nit | `internal/domain/pullrequest.go:117` | docs/43 的转换表在三个地方各有一份（domain、00051 的 trigger、测试表） | **不改**，记录（理由见下） |\n| 4 | nit | `***.go:42` | 四个新 wire code（`PULL_REQUEST_NOT_FOUND` / `PR_INVALID_TRANSITION` / `PR_STATE_CONFLICT` / `PR_TERMINAL`）没进 docs/45 的示例清单 | **不改**，记录（docs/45 是示例清单，刷新是 Supervisor 的仓库范围事项） |\n\n写进 `notes_for_supervisor`（**一个字符串**，不是列表）：\n\n- **#2 转 T0406**：要么合并流程加锁、要么它明确接受这个窗口——那是它那一层的决定，不是把一把锁塞进这个 store 能了结的。**不是你这一轮的事。**\n- **#3 不改的理由**：三份副本今天被测试钉住且彼此一致；真正的成本是\"将来加一条转换要同时改 Go 和一次迁移\"——那是状态机演进任务的事，而 DB trigger 是**设计上的 backstop，必须留一份**，合并三份解决不了它。\n- **#4 不改的理由**：docs/45 自己写着\"核心 error code 示例\"，新码遵循它的命名与不泄漏模式。文档/OpenAPI 刷新是 Supervisor 已记名的仓库范围事项。\n\n## 三、这一轮要交什么\n\n1. 做完上表标\"改\"的那一条（只有它要动文件）。\n2. 生成物（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`internal/persistence/sqlc/*`）：**只重新生成**，用 `--check` 收尾——任何停在旧基线的工作树在这里都对不上，这不是你的问题。\n3. **在新基线上重跑该任务要求的测试**（G1 那一套：unit + `make test-integration` + 任务要求的 pr e2e）。`RESULT.json` 的 `tests[]` **只写这一轮真跑过的**；历史进 notes。\n4. `status` 按实情写：全绿才 `completed`；还有红就 `blocked`/`failed` 并如实登记。**红着报告比造假绿好。**\n5. `notes_for_supervisor` 是**一个字符串**（T0309 上一轮就死在这个形状上）。\n\n## 四、不要动的\n\n- **迁移号 `00051` 不变**，文件名别动。**空号不回收**：号是**分配**的，不是从索引里挑的。\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n- **生成物只能重新生成，不要手工编辑。** 手工改出来的\"一致\"不算一致。\n- 不要动 `allowed_scope` 外的文件。\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（它自己建一次性库，起在 5432）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n\n---\n\n## 附：关于\"故意跑红\"的记录位置（22:52 追加，其余内容一字未改）\n\n如果这一轮你**故意跑一条会红的命令**（回退某处修复、或写一条\"证明当前形状会红\"的探针）来证明某个\n守卫**确实能失败**：那段命令与输出写进它对应那条**绿条目**的 `evidence` 字符串，或者写进\n`notes_for_supervisor`。**不要在 `tests[]` 里留 `status: \"failed\"` 的条目**——collect 的\n`result-consistency` 是机械判据（`status: completed` 加任何 `failed`/`not_run` 条目 = 自相矛盾），\n它读不出\"这条红是故意的\"，整轮会被**拒收**（T0508 在 22:47 就这么白跑了一轮）。\n**证据一个字都别删**，只是**换个格子放**：`tests[]` 只装\"这一轮真跑过、且是绿的\"条目。\n",
       "history": [
         {
           "from": "todo",
@@ -2923,26 +3075,189 @@
           "at": "2026-09-14T10:19:27Z",
           "run_id": "run-1d27460654dfb7d2",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T16:43:45Z",
+          "run_id": "run-ff8f9b72c887caac",
+          "reason": "# T0402（Pull Request Domain）：把树搬到 main 的新 tip + 四条复核意见的处置\n\n> 这封信写的就是**你工作树里正在发生的事**。复核结论是 **`approve`**（不阻断），\n> 但 §5.1 的条件 4 是\"**没有未解决的复核意见**\"——\"不阻断\"和\"解决了\"不是一回事（L1-73 已记）。\n> 所以这一轮 = 搬基线 + 下表里标了\"改\"的那一条。复核原文在 `.rddev/workers/T0402-review/RESULT.json`。\n\n## 一、为什么这一轮要动你的树\n\n不是你的代码有问题。你的 collect 与复核都过了（复核还独立重跑了整套集成测试），\n卡住你的是 **accept** —— 原文：\n\n> `rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run:`\n> `git apply …/post-integration-T0402.patch: exit status 1:`\n> `error: patch failed: specs/SPEC_VERSION.json:1`\n> `error: patch failed: specs/database/postgres.sql:42`\n\n**两个都是生成物**。你之后落地的任务（`00043` T0505、`00045` T0508、`00046` T1001 …）每一个都会重写同一批生成物，\n所以这一轮的前移是机械的，不是让你重做。你的树现在站在 main 当时的 tip 上。\n\n**前移是怎么做的**：两边改到同一行的地方，只有合成工具里**写明了规则**的形状会被自动解开\n（迁移清单、接线表、常量块这类\"两边各加一条\"按名字取并集）；任何没有写明规则的形状，工具会**拒绝**，\n并且在我处理之前不会派发你。生成物不参与文本合并——按你的树重新生成，不靠文本合。\n\n**你要做的第一件事**：对着树把被合成过的文件读一遍。任何一处你认为合错了，\n在 `RESULT.json` 里指明**哪一行、为什么**，**别闷声改回去**（合错了是我的问题，不算你返工）。\n\n## 二、四条复核意见的逐条处置\n\n| # | 级别 | 位置 | 问题 | 本轮做什么 |\n|---|---|---|---|---|\n| 1 | minor | `infra/migrations/00051_pull_request_state_and_fixity.sql:9` | header 声称这些不变量对\"**任何**写路径——应用代码、psql、泄漏的凭据\"都成立。state CHECK、转换表、identity/base 固定、`merged_at` 一致性确实无条件；但 **proposed_state 的固定不是**：任何有 UPDATE 权限的会话可以自己 `set_config('post.pr_head_refresh','on',true)` 再动 `proposed_state_id`（你们的集成测试演示的就是这条裸路径）。GUC 门挡的是**应用代码的无意/隐式写入**，不是敌意或泄漏的 SQL 凭据。 | **改**：把注释收敛到它真正保证的范围——说清 GUC 门挡什么、不挡什么。**只改注释，行为一个字不动** |\n| 2 | minor | `internal/persistence/pullrequest_store.go:104` | `CreatePullRequest` 读分支生命周期时没加行锁：并发的 `branches.Merge` 可以在读与插之间提交，造出\"从刚合并的分支开 PR\"。00051 的 trigger 只守 PR 行自己的列。 | **不改**，记录 + **转给 T0406（合并引擎）**——复核自己也是这么指路的。我会把它带进 T0406 的规格 |\n| 3 | nit | `internal/domain/pullrequest.go:117` | docs/43 的转换表在三个地方各有一份（domain、00051 的 trigger、测试表） | **不改**，记录（理由见下） |\n| 4 | nit | `***.go:42` | 四个新 wire code（`PULL_REQUEST_NOT_FOUND` / `PR_INVALID_TRANSITION` / `PR_STATE_CONFLICT` / `PR_TERMINAL`）没进 docs/45 的示例清单 | **不改**，记录（docs/45 是示例清单，刷新是 Supervisor 的仓库范围事项） |\n\n写进 `notes_for_supervisor`（**一个字符串**，不是列表）：\n\n- **#2 转 T0406**：要么合并流程加锁、要么它明确接受这个窗口——那是它那一层的决定，不是把一把锁塞进这个 store 能了结的。**不是你这一轮的事。**\n- **#3 不改的理由**：三份副本今天被测试钉住且彼此一致；真正的成本是\"将来加一条转换要同时改 Go 和一次迁移\"——那是状态机演进任务的事，而 DB trigger 是**设计上的 backstop，必须留一份**，合并三份解决不了它。\n- **#4 不改的理由**：docs/45 自己写着\"核心 error code 示例\"，新码遵循它的命名与不泄漏模式。文档/OpenAPI 刷新是 Supervisor 已记名的仓库范围事项。\n\n## 三、这一轮要交什么\n\n1. 做完上表标\"改\"的那一条（只有它要动文件）。\n2. 生成物（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`internal/persistence/sqlc/*`）：**只重新生成**，用 `--check` 收尾——任何停在旧基线的工作树在这里都对不上，这不是你的问题。\n3. **在新基线上重跑该任务要求的测试**（G1 那一套：unit + `make test-integration` + 任务要求的 pr e2e）。`RESULT.json` 的 `tests[]` **只写这一轮真跑过的**；历史进 notes。\n4. `status` 按实情写：全绿才 `completed`；还有红就 `blocked`/`failed` 并如实登记。**红着报告比造假绿好。**\n5. `notes_for_supervisor` 是**一个字符串**（T0309 上一轮就死在这个形状上）。\n\n## 四、不要动的\n\n- **迁移号 `00051` 不变**，文件名别动。**空号不回收**：号是**分配**的，不是从索引里挑的。\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n- **生成物只能重新生成，不要手工编辑。** 手工改出来的\"一致\"不算一致。\n- 不要动 `allowed_scope` 外的文件。\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（它自己建一次性库，起在 5432）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n\n---\n\n## 附：关于\"故意跑红\"的记录位置（22:52 追加，其余内容一字未改）\n\n如果这一轮你**故意跑一条会红的命令**（回退某处修复、或写一条\"证明当前形状会红\"的探针）来证明某个\n守卫**确实能失败**：那段命令与输出写进它对应那条**绿条目**的 `evidence` 字符串，或者写进\n`notes_for_supervisor`。**不要在 `tests[]` 里留 `status: \"failed\"` 的条目**——collect 的\n`result-consistency` 是机械判据（`status: completed` 加任何 `failed`/`not_run` 条目 = 自相矛盾），\n它读不出\"这条红是故意的\"，整轮会被**拒收**（T0508 在 22:47 就这么白跑了一轮）。\n**证据一个字都别删**，只是**换个格子放**：`tests[]` 只装\"这一轮真跑过、且是绿的\"条目。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T16:43:46Z",
+          "run_id": "run-d333939add0c812e",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T16:53:04Z",
+          "run_id": "run-835758c2055be9c7",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T17:06:02Z",
+          "run_id": "run-e86088b6078ddd9b"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T17:09:30Z",
+          "run_id": "run-bc23178d39f2113d",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0403": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "merged",
+      "started_at": "2026-09-14T22:26:40Z",
+      "worker_run_id": "run-89358d618593c12d",
+      "accepted_by_supervisor_at": "2026-09-14T22:49:24Z",
+      "merged_at": "2026-09-14T22:52:37Z",
+      "rejection_reason": "# T0403 —— 这一轮我认了绝大部分；**两件事**要补（都在同一块地方，一次做完）\n\n**先说结论**：拆成两侧边界、三处都改到、详情页三态、两条 nit、60 号迁移刻意留空并记录——\n**这些我都认了**，也逐处验过。下面两件要补，**一件是复核这轮新报的**（我独立核过，成立），\n**一件是我自己的探针发现的**（代码是对的，缺护栏）。两件都在 `prchecks` / `integrity` 这一块，\n`engine.go` 那三处**已经对了，不要动**。\n\n（轮次说明：你上一轮那次\"被拒\"是**机械**的——基线前移，补丁打不上，记录里写的是\n\"baseline advanced, not a defect\"。所以**这是第一次真的退回给你**。）\n\n---\n\n## 一、复核这轮新报的 major（我独立核过三条支撑事实，成立）\n\n**空链时，边界取自\"正在被检查的那一行 PR 自己\"，于是两条 pin 检查对这类 PR 变成恒真。**\n\n`internal/application/prchecks/service.go` 的 `resolveBoundaries` 里：\n\n```go\nif len(targetStates) == 0 { targetCandidates[pr.BaseStateID] = true }      // 目标链空 → 用 PR 自己的 base 钉\nif len(sourceStates) == 0 { sourceCandidates[pr.ProposedStateID] = true }  // 源链空  → 用 PR 自己的 proposed 钉\n```\n\n而 `validBoundary` 只问两件事：**这个状态存在吗、它属于本项目吗**。于是 PR 自己钉的那个 state\n**必然**进了边界集合 → `base_on_target_chain` / `proposed_on_source_chain` **必然通过**。\n这两条检查检查的是\"**你钉的就是你钉的**\"。\n\n支撑它的三条事实我都自己核过：\n\n- `internal/domain/branch.go`：`Branch.BaseStateID` 的注释写明它**就是分支的当前头状态**\n  （`branches.base_state_id` 的投影），只有\"分支还没有自己的状态\"时才可能是 nil；\n  而\"经领域服务创建的分支必须有 base state\"。\n- `internal/persistence/pullrequest_store.go:113-115`：任一分支头缺失就直接拒\n  （`ErrBranchHeadMissing`）——所以**经正规路径建出来的 PR，两个分支都有头**。\n- 空链**不是异常，是代码明确支持的正常形状**（引擎自己的注释：*\"a source branch with no\n  states of its own proposes its fork point\"*）。正常时钉对了，看不出问题；\n  **行被弄坏时（裸 INSERT 把一个别的分支的状态钉进去）它照样报 `pass`。**\n\n复核员在临时副本上探针复现过：空源链 + `proposed_state_id` 指向同一项目里**第三个分支**的状态 →\n`verdict: pass`、0 条 blocking，`proposed_on_source_chain` 通过；镜像的那一条（空目标链 + base 同样）\n也是一样。\n\n**为什么这条要修，而不是记下来了事**：上一轮那两条假 PASS，复核给的说法也是\"**裸 INSERT 才能造**\"，\n我当时要求修的理由是——**这个引擎存在的全部意义就是\"存储行被弄坏时当场报出来\"**。\n同一条尺子，这次一样。\n\n**要改**（三条都对，选你顺手的那种写法）：\n\n1. **空链时不要去问\"被检查的那一行\"，去问分支自己的头。**\n   `prchecks` 现在只有 `StateReader`（按 branch_id 列状态），**没有读分支的端口**。\n   现成的适配器已经有了：`persistence.BranchStore.GetBranchHead(ctx, branchID) (domain.ProjectState, error)`\n   （`internal/persistence/branch_store.go:210`）——它连\"头指针指向一个不存在的状态\"这种坏数据都想到了。\n   加一个端口，装到 `cmd/api/main.go:393` 的 `prchecks.NewService(prchecks.Deps{...})` 那里。\n2. **语义**：空链时把**该分支的头状态**当作边界；PR 的钉**只有等于它**才通过。\n3. **读不到头 → 判失败（不可核验），不要放行。**\n\n**引擎不要动**：`internal/rsg/integrity/**` 是纯的、确定性的，边界一律由应用层给进来——\n这是你上一轮选对了的形状，保持。\n\n**必须配一条能红的测试**：把复核说的那两种行（空源链 + proposed 钉在第三个分支的状态上；\n空目标链 + base 同样）造出来，断言**判为阻塞**，且报的正是那两条检查。\n**先证明它在改之前是红的**（你那个 overlay 办法就很好，继续用），红命令的输出放进**绿条目**的 `evidence`。\n\n---\n\n## 二、我自己的探针发现的：一处代码是对的、但**没有任何测试钉住它**\n\n我把你这次的三处改动**逐处**用 overlay 改回旧的\"共用一份边界\"语义（**交付的文件一个字节没动**），\n看每处各自被哪条测试抓住：\n\n| 改回哪一处 | 单元三包 | 集成（真 PostgreSQL） |\n|---|---|---|\n| `checkBaseOnTargetChain`（只看 TargetBoundaries） | **红**：`TestBoundariesArePerSide/a_base_pin_on_the_source_chain's_fork_point_is_not_on_the_target_chain` | **红** |\n| `checkProposedOnSourceChain`（只看 SourceBoundaries） | **红**：`TestBoundariesArePerSide/a_proposed_pin_on_the_target_chain's_boundary_is_not_on_the_source_chain` | **红** |\n| `checkSourceChainUnbroken` 的父链走查（`engine.go:349`） | **全绿** | **全绿（16/16 子测试）** |\n\n第三行是问题。命令与输出原样：\n\n```\n############ 探针 site3-source-chain-walk —— 期望：有测试变红 ############\nok  \tgithub.***\t0.071s\nok  \tgithub.***\t0.066s\nok  \tgithub.***\t0.087s\n\nsite3 变异下的子测试通过数: 16      <- 子测试**真的跑了**，不是 skip\n交付原样下的子测试通过数: 16\nsite1 变异下的集成结果: FAIL\tgithub.com/lichman0405/post/tests/integration\t0.503s\nsite2 变异下的集成结果: FAIL\tgithub.com/lichman0405/post/tests/integration\t0.532s\n```\n\n（最后两行是对照：同一个 overlay 手法在集成层**确实能**把前两处抓住，所以\"第三处全绿\"是\n**真阴性**，不是手法没生效、也不是子测试被跳过。）\n\n第三处的**代码是对的**——我读过，那边只查 `SourceBoundaries`。缺的是**护栏**。\n\n**要写的那条测试（形状说清楚，怎么写你定）**：在 `internal/rsg/integrity/engine_test.go` 里造一个快照\n\n> 源链的根，其父节点记作 **P**：**P 不在源链状态集里**、**P 不在 `SourceBoundaries` 里**、\n> **P 在 `TargetBoundaries` 里**。\n\n断言 `source_chain_unbroken` **判失败**，失败信息点到 P（走\"broken parent link\"那条路）。\n再配一条**对照**：同样形状但 **P 在 `SourceBoundaries` 里**（合法的分叉点）→ **必须仍然通过**。\n没有对照，一条\"永远判失败\"的假测试也能满足前半句。\n\n同样：**先证明它在改之前是红的**（overlay 把 `engine.go:349` 换回\n`SourceBoundaries[...] || TargetBoundaries[...]`），红输出放进绿条目的 `evidence`。\n\n---\n\n## 三、规矩（这次也一样，没变）\n\n1. **除了上面两件，不要改任何别的东西**：`engine.go` 那三处**已经对了，不要动**；\n   详情页三态、`handler.go` 的固定报文、`pulls.ts` 的形状守卫——**都不要动**。\n2. **不要动生成物**（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`）、不要 `rebase`。\n3. 把你 `tests[]` 里记过的门**原样重跑一遍**；`tests[]` 只装\"这一轮真跑过、且是绿的\"。\n   不要留 `status:\"failed\"` 的条目（collect 的 `result-consistency` 读不出\"这是故意的\"，整轮会被机械拒收）——\n   故意的红放进**绿条目**的 `evidence` 或 `notes_for_supervisor`。\n4. `notes_for_supervisor` 是一个字符串；**全绿才写 `completed`**。\n5. **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n6. 记命令时把库口令掩码成 `***`；输出与结论一字不改。\n7. 跑完确认 `ps` 里没有你自己留下的进程。\n\n## 四、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库）；不要用裸 `go test ./...` 下结论。\n- 前端单测按你上一轮记的那条命令跑。\n\n改完就停。我这边重新 collect → 复核 → G2。\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T17:09:31Z",
+          "run_id": "run-d9315910627e5715"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T17:09:32Z",
+          "run_id": "run-8c7f636a40140eff",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T17:55:51Z",
+          "run_id": "run-31aad4112a4f8004",
+          "reason": "collect rejected: refs: new ref(s) created during the run: refs/tmp/pr196merge *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T17:57:00Z",
+          "run_id": "run-096348be480a18e7",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T18:03:36Z",
+          "run_id": "run-167939a3328f0eb8",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T22:02:39Z",
+          "run_id": "run-c308fe8c23237359",
+          "reason": "# T0403（Integrity Review Checks）：搬基线 + 一条 major 复核意见 + 两条 nit，这一轮一起做完\n\n**先说结论**：复核给的是 **`approve`**——功能契约全过（六个维度 14 条检查、blocking/warning 分级、\n`GET .../pull-requests/{n}/checks` 的三层鉴权与 404 隐藏、前端列表页与详情页的 verdict 横幅与逐行徽章，\n都在），复核员自己在临时树里独立复跑过 `go build`/`go vet`/`gofmt`/`staticcheck`、\nintegrity/prchecks/pullrequestshttp 的单测、77 条前端单测、以及 `TestIntegrityChecksIntegration`\n的 14 个 subtest（真 PostgreSQL）。\n\n**你上一轮为什么停在原地**：你的 accept 打不上——不是你的代码有问题，是 main 在你交付之后又往前走了\n（T0606、T0407 两个任务，加上我补的几行 scope、改正的一条派生件规则、装上 sqlc 的那步 CI、\n把那次 CI 改动补进门规格的一次修复，以及随之重新生成的 marker）。这次前移**只有两个文件**真的冲突，\n其余（含你新增的 19 个文件）都是干净的。下面逐条说清**它们各自是怎么合的**。\n\n---\n\n## 一、这次前移合了什么，怎么合的\n\n你的树停在 `e673f8f`，现在落在 `49ed887` 上。\n\n| 文件 | 冲突形状 | 这次怎么合 |\n|---|---|---|\n| `cmd/api/main.go` | 2 处，**都是 import 表的追加**：main 加 `releasehttp`、`application/releases`+`manifests`+`resolutions`；你加 `pullrequestshttp`、`application/prchecks`+`pullrequests` | **并集**：两边 import 原样保留，gofmt 重排。名字级守卫：main 侧 **63** 个顶层名字、你侧 **61** 个，合成件里 **67** 个，**两边都全在**；原始冲突 **692** 行**一行没丢** |\n| `apps/web/app/(main)/projects/projects.css` | 8 处。两边都在同一批锚点上**各追加自己的规则块**（main 追加 `.releases-*`，你追加 `.pulls-*`），git 的冲突区间因此**切在规则边界上** | **结构级（按规则）并集**：main 180 条规则 + 你 188 条 → 合成件 232 条，**一条不缺**（有专门的 CSS 规则级守卫逐条比对），花括号配平（234 对） |\n| `specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc/**` | 生成物 | **按合成后的树重新生成**，不做文本合（这是工具自己做的） |\n\n**注意 `projects.css` 那一条的教训**：按行拼接是**错的**——两边各自的追加被 git 切碎后，\n逐行并集能拼出**花括号不配平**的 CSS（实测 234 个 `{` 对 226 个 `}`），而\"一行没丢\"的检查**看不出来**。\n所以那次不是用并集工具，是按规则边界重拼的。你这一轮**不用管它**，只需要知道它是这么合的。\n\n**对着树读一遍这两个文件**：任何一处你认为合错了，在 `RESULT.json` 里指明**哪一行、为什么**，\n**别闷声改回去**（合错了是我的问题，不算你返工）。\n\n---\n\n## 二、这一轮要做的四件事\n\n### 1. 复核的 major：`internal/rsg/integrity/engine.go:282` —— 边界集被两边共用，会给出**假 PASS**\n\n**问题**：`Snapshot.Boundaries` 是**两个分支共用的一份**集合（`snapshot.go:42`；\n`service.go` 的 `resolveBoundaries` 把**目标链**的合法出口和**源链**的合法出口塞进了同一个 map），\n而 `checkBaseOnTargetChain` / `checkProposedOnSourceChain` **接受这个并集里的任何成员**。\n于是复核员在应用后的树上探针验证出两条**假 PASS**：\n\n1. 某行的 `proposed_state_id` 等于**目标链**的边界（比如 main 分叉出来的那个 genesis root）→ 竟然通过 `proposed_on_source_chain`；\n2. 某行的 `base_state_id` 等于**源链**在第三个分支上的分叉点（根本不在目标链上）→ 竟然通过 `base_on_target_chain`。\n\n这两条都满足 `pull_requests` 的外键（迁移 00009），所以**一条裸 `INSERT` 就能造出一个\"机器判定不阻塞\"的\n坏提案**——而\"存储行被弄坏\"恰恰是这个引擎存在的理由。你的集成测试确实是靠裸 `INSERT` 造坏数据的，\n但从没用过\"钉在**另一个**分支的边界上\"这种造法，所以这条路没被覆盖。\n\n**要改**：让边界**按分支分开**（例如 `TargetBoundaries` / `SourceBoundaries` 两份），\n或者让每条边界**从它自己那条链的根父节点解析**，检查时**只对属于自己那一侧的边界**比对。\n两种都行，选你认为更贴合现有结构的那种，在 notes 里说一句为什么。\n\n**必须配一条能红的测试**：造出上面两种假 PASS 的行，断言它们**被判为阻塞**（且报的正是\n`base_on_target_chain` / `proposed_on_source_chain`）。**先证明它在改之前是红的**，\n把那条红命令的输出**放进这条绿条目的 evidence 字符串里**（见 §四）。\n\n### 2. 复核的 minor：详情页首帧闪一下\"编号无法处理\"的错误\n\n`apps/web/app/(main)/projects/[id]/pulls/[number]/page.tsx:101`：初始状态 `number === null`，\n在 `params` 这个 Promise 解析出来之前，**第一次渲染就走进了 `VALIDATION_FAILED` 的错误 UI**。\n每次正常打开都会先闪（可能还真的画出一帧）\"编号无法处理\"，再换成 loading。\n**改成三态**（未解析 / 非法 / 已解析），首帧显示 loading。\n\n### 3. 复核的两条 nit，都改掉\n\n- `cmd/api/pullrequestshttp/handler.go:199`：checks 端点的 400 分支把 `err.Error()` 当报文写出去了，\n  于是校验失败会把 Go 包前缀（`prchecks: validation failed: ...`）摊到线上。**换成固定的用户可读报文**\n  （像同一文件里其它错误分支那样）；`code` 本来就是稳定词汇表。\n- `apps/web/lib/pulls.ts:144`：`asPR` 的形状守卫**没检查** `body`、`created_by`、`source_branch_id`、\n  `target_branch_id`，而详情页**直接渲染** `body` 和 `created_by`——线上真缺了字段就会渲染出 `undefined`\n  而不是被守卫拦下。**按它自己声明的用途（形状安全）补齐这几个字段的检查。**\n\n### 4. 复核的第 4 条 nit：**记录，不改**\n\n任务包给你分了迁移号 60，但你没加迁移、也不需要（报告是**按需算**的，从不落库，这一点已在\n`RESULT.json` 里记为 L1 决策）。**这条不动**：我会在决策记录里注明\"60 号被这个任务刻意留空\"。\n\n---\n\n## 三、规矩（和上一轮一样，没变）\n\n1. **不要自己前移基线**：前移是我的活，已经做完了。不要 `rebase`、不要动 `specs/database/postgres.sql`\n   和 `specs/SPEC_VERSION.json`（生成物，工具按合成后的树重新生成）。\n2. **把你 `tests[]` 里记过的那些门原样重跑一遍**（前移换了基线，绿要重新挣），如实记录这一轮结果。\n   `tests[]` **只装\"这一轮真跑过、且是绿的\"条目**。\n3. `notes_for_supervisor` 必须是**一个字符串**。\n4. `status` **全绿才写 `completed`**。\n5. **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n6. 记命令时把库口令掩码成 `***`（或直接用 `make test-integration` 代指）；输出与结论一字不改。\n7. 跑完确认 `ps` 里没有你自己留下的进程。\n\n## 四、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库）。不要用裸 `go test ./...` 下结论：\n  那条路上几个测试会去连 `127.0.0.1:15432` 然后 connection refused，那是 Makefile 注释里记着的\n  历史端口 bug，不是你的代码问题。\n- 前端单测按你上一轮记的那条命令跑。\n\n## 附：关于\"故意跑红\"的记录位置\n\n§二.1 要求你**先跑出一条红的**（证明新测试确实能失败），但 **不要在 `tests[]` 里留\n`status: \"failed\"` 的条目**——collect 的 `result-consistency` 是机械判据（`status: completed`\n加任何 `failed`/`not_run` 条目 = 自相矛盾），它读不出\"这条红是故意的\"，整轮会被**拒收**。\n**证据一个字都别删，只是换个格子放**：写进对应那条**绿条目**的 `evidence` 字符串，\n或者写进 `notes_for_supervisor`。\n\n改完就停。我这边重新 collect → 复核 → G2。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T22:02:40Z",
+          "run_id": "run-c07f32063b433622",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T22:13:32Z",
+          "run_id": "run-f2a2134725533acc",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T22:26:30Z",
+          "run_id": "run-66d2539f4a44960a"
+        },
+        {
+          "from": "accepted",
+          "to": "rejected",
+          "at": "2026-09-14T22:26:40Z",
+          "run_id": "run-88dd08f6b605027f",
+          "reason": "# T0403 —— 这一轮我认了绝大部分；**两件事**要补（都在同一块地方，一次做完）\n\n**先说结论**：拆成两侧边界、三处都改到、详情页三态、两条 nit、60 号迁移刻意留空并记录——\n**这些我都认了**，也逐处验过。下面两件要补，**一件是复核这轮新报的**（我独立核过，成立），\n**一件是我自己的探针发现的**（代码是对的，缺护栏）。两件都在 `prchecks` / `integrity` 这一块，\n`engine.go` 那三处**已经对了，不要动**。\n\n（轮次说明：你上一轮那次\"被拒\"是**机械**的——基线前移，补丁打不上，记录里写的是\n\"baseline advanced, not a defect\"。所以**这是第一次真的退回给你**。）\n\n---\n\n## 一、复核这轮新报的 major（我独立核过三条支撑事实，成立）\n\n**空链时，边界取自\"正在被检查的那一行 PR 自己\"，于是两条 pin 检查对这类 PR 变成恒真。**\n\n`internal/application/prchecks/service.go` 的 `resolveBoundaries` 里：\n\n```go\nif len(targetStates) == 0 { targetCandidates[pr.BaseStateID] = true }      // 目标链空 → 用 PR 自己的 base 钉\nif len(sourceStates) == 0 { sourceCandidates[pr.ProposedStateID] = true }  // 源链空  → 用 PR 自己的 proposed 钉\n```\n\n而 `validBoundary` 只问两件事：**这个状态存在吗、它属于本项目吗**。于是 PR 自己钉的那个 state\n**必然**进了边界集合 → `base_on_target_chain` / `proposed_on_source_chain` **必然通过**。\n这两条检查检查的是\"**你钉的就是你钉的**\"。\n\n支撑它的三条事实我都自己核过：\n\n- `internal/domain/branch.go`：`Branch.BaseStateID` 的注释写明它**就是分支的当前头状态**\n  （`branches.base_state_id` 的投影），只有\"分支还没有自己的状态\"时才可能是 nil；\n  而\"经领域服务创建的分支必须有 base state\"。\n- `internal/persistence/pullrequest_store.go:113-115`：任一分支头缺失就直接拒\n  （`ErrBranchHeadMissing`）——所以**经正规路径建出来的 PR，两个分支都有头**。\n- 空链**不是异常，是代码明确支持的正常形状**（引擎自己的注释：*\"a source branch with no\n  states of its own proposes its fork point\"*）。正常时钉对了，看不出问题；\n  **行被弄坏时（裸 INSERT 把一个别的分支的状态钉进去）它照样报 `pass`。**\n\n复核员在临时副本上探针复现过：空源链 + `proposed_state_id` 指向同一项目里**第三个分支**的状态 →\n`verdict: pass`、0 条 blocking，`proposed_on_source_chain` 通过；镜像的那一条（空目标链 + base 同样）\n也是一样。\n\n**为什么这条要修，而不是记下来了事**：上一轮那两条假 PASS，复核给的说法也是\"**裸 INSERT 才能造**\"，\n我当时要求修的理由是——**这个引擎存在的全部意义就是\"存储行被弄坏时当场报出来\"**。\n同一条尺子，这次一样。\n\n**要改**（三条都对，选你顺手的那种写法）：\n\n1. **空链时不要去问\"被检查的那一行\"，去问分支自己的头。**\n   `prchecks` 现在只有 `StateReader`（按 branch_id 列状态），**没有读分支的端口**。\n   现成的适配器已经有了：`persistence.BranchStore.GetBranchHead(ctx, branchID) (domain.ProjectState, error)`\n   （`internal/persistence/branch_store.go:210`）——它连\"头指针指向一个不存在的状态\"这种坏数据都想到了。\n   加一个端口，装到 `cmd/api/main.go:393` 的 `prchecks.NewService(prchecks.Deps{...})` 那里。\n2. **语义**：空链时把**该分支的头状态**当作边界；PR 的钉**只有等于它**才通过。\n3. **读不到头 → 判失败（不可核验），不要放行。**\n\n**引擎不要动**：`internal/rsg/integrity/**` 是纯的、确定性的，边界一律由应用层给进来——\n这是你上一轮选对了的形状，保持。\n\n**必须配一条能红的测试**：把复核说的那两种行（空源链 + proposed 钉在第三个分支的状态上；\n空目标链 + base 同样）造出来，断言**判为阻塞**，且报的正是那两条检查。\n**先证明它在改之前是红的**（你那个 overlay 办法就很好，继续用），红命令的输出放进**绿条目**的 `evidence`。\n\n---\n\n## 二、我自己的探针发现的：一处代码是对的、但**没有任何测试钉住它**\n\n我把你这次的三处改动**逐处**用 overlay 改回旧的\"共用一份边界\"语义（**交付的文件一个字节没动**），\n看每处各自被哪条测试抓住：\n\n| 改回哪一处 | 单元三包 | 集成（真 PostgreSQL） |\n|---|---|---|\n| `checkBaseOnTargetChain`（只看 TargetBoundaries） | **红**：`TestBoundariesArePerSide/a_base_pin_on_the_source_chain's_fork_point_is_not_on_the_target_chain` | **红** |\n| `checkProposedOnSourceChain`（只看 SourceBoundaries） | **红**：`TestBoundariesArePerSide/a_proposed_pin_on_the_target_chain's_boundary_is_not_on_the_source_chain` | **红** |\n| `checkSourceChainUnbroken` 的父链走查（`engine.go:349`） | **全绿** | **全绿（16/16 子测试）** |\n\n第三行是问题。命令与输出原样：\n\n```\n############ 探针 site3-source-chain-walk —— 期望：有测试变红 ############\nok  \tgithub.***\t0.071s\nok  \tgithub.***\t0.066s\nok  \tgithub.***\t0.087s\n\nsite3 变异下的子测试通过数: 16      <- 子测试**真的跑了**，不是 skip\n交付原样下的子测试通过数: 16\nsite1 变异下的集成结果: FAIL\tgithub.com/lichman0405/post/tests/integration\t0.503s\nsite2 变异下的集成结果: FAIL\tgithub.com/lichman0405/post/tests/integration\t0.532s\n```\n\n（最后两行是对照：同一个 overlay 手法在集成层**确实能**把前两处抓住，所以\"第三处全绿\"是\n**真阴性**，不是手法没生效、也不是子测试被跳过。）\n\n第三处的**代码是对的**——我读过，那边只查 `SourceBoundaries`。缺的是**护栏**。\n\n**要写的那条测试（形状说清楚，怎么写你定）**：在 `internal/rsg/integrity/engine_test.go` 里造一个快照\n\n> 源链的根，其父节点记作 **P**：**P 不在源链状态集里**、**P 不在 `SourceBoundaries` 里**、\n> **P 在 `TargetBoundaries` 里**。\n\n断言 `source_chain_unbroken` **判失败**，失败信息点到 P（走\"broken parent link\"那条路）。\n再配一条**对照**：同样形状但 **P 在 `SourceBoundaries` 里**（合法的分叉点）→ **必须仍然通过**。\n没有对照，一条\"永远判失败\"的假测试也能满足前半句。\n\n同样：**先证明它在改之前是红的**（overlay 把 `engine.go:349` 换回\n`SourceBoundaries[...] || TargetBoundaries[...]`），红输出放进绿条目的 `evidence`。\n\n---\n\n## 三、规矩（这次也一样，没变）\n\n1. **除了上面两件，不要改任何别的东西**：`engine.go` 那三处**已经对了，不要动**；\n   详情页三态、`handler.go` 的固定报文、`pulls.ts` 的形状守卫——**都不要动**。\n2. **不要动生成物**（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`）、不要 `rebase`。\n3. 把你 `tests[]` 里记过的门**原样重跑一遍**；`tests[]` 只装\"这一轮真跑过、且是绿的\"。\n   不要留 `status:\"failed\"` 的条目（collect 的 `result-consistency` 读不出\"这是故意的\"，整轮会被机械拒收）——\n   故意的红放进**绿条目**的 `evidence` 或 `notes_for_supervisor`。\n4. `notes_for_supervisor` 是一个字符串；**全绿才写 `completed`**。\n5. **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n6. 记命令时把库口令掩码成 `***`；输出与结论一字不改。\n7. 跑完确认 `ps` 里没有你自己留下的进程。\n\n## 四、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库）；不要用裸 `go test ./...` 下结论。\n- 前端单测按你上一轮记的那条命令跑。\n\n改完就停。我这边重新 collect → 复核 → G2。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T22:26:40Z",
+          "run_id": "run-89358d618593c12d",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T22:35:07Z",
+          "run_id": "run-d2852b92dbf6d148",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T22:49:24Z",
+          "run_id": "run-56643e973e3ef8cb"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T22:52:37Z",
+          "run_id": "run-c4596c6e8b159822",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T0404": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-14T18:12:18Z",
+      "worker_run_id": "run-81d83af143e1314b",
+      "rejection_reason": "collect rejected: scope: 5 changed path(s) outside allowed_scope [infra/migrations/** specs/database/postgres.sql specs/SPEC_VERSION.json internal/rsg/** internal/application/** internal/domain/** go.mod go.sum .env.example cmd/api/** apps/web/** tests/**]: internal/persistence/queries/issues_prs.sql, internal/persistence/review_store.go, internal/persistence/sqlc/issues_prs.sql.go, internal/persistence/sqlc/models.go, internal/persistence/sqlc/querier.go",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T17:09:44Z",
+          "run_id": "run-4f3c993ec237585e"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T17:09:45Z",
+          "run_id": "run-f0aba4668bc577a3",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T17:38:03Z",
+          "run_id": "run-d7904a9286c88854",
+          "reason": "collect rejected: scope: 5 changed path(s) outside allowed_scope [infra/migrations/** specs/database/postgres.sql specs/SPEC_VERSION.json internal/rsg/** internal/application/** internal/domain/** go.mod go.sum .env.example cmd/api/** apps/web/** tests/**]: internal/persistence/queries/issues_prs.sql, internal/persistence/review_store.go, internal/persistence/sqlc/issues_prs.sql.go, internal/persistence/sqlc/models.go, internal/persistence/sqlc/querier.go"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T18:12:18Z",
+          "run_id": "run-81d83af143e1314b",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T18:17:36Z",
+          "run_id": "run-b40938acd443d2a8",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T0405": {
       "status": "merged",
@@ -3018,9 +3333,12 @@
       "merged_at": null
     },
     "T0407": {
-      "status": "verification",
-      "started_at": "2026-09-14T10:50:03Z",
-      "worker_run_id": "run-bbc8de76657c2789",
+      "status": "merged",
+      "started_at": "2026-09-14T18:21:29Z",
+      "worker_run_id": "run-686718156846507b",
+      "accepted_by_supervisor_at": "2026-09-14T21:49:46Z",
+      "merged_at": "2026-09-14T21:53:00Z",
+      "rejection_reason": "# T0407：再前移一次（**不是你的问题**），只重跑门，不改代码\n\n## 这一轮为什么还要前移\n\n你这一轮的工作本身是好的——我读了你写进 `RESULT.json` 的 9 条，全绿，\n最后一轮 `bash tests/e2e-files/run.sh` 也过了。**问题出在我这边的时间差**：\n\n你在 `659c71a` 上前移之后、我这边收下你之前，我又往 main 上落了一次**修任务范围清单**的提交\n（`433fbc0`：给两个任务补 `internal/persistence/**` 的写权限）——那次提交**动了 `tasks/tasks.json`**，\n而 `specs/SPEC_VERSION.json` 的摘要**是把 `tasks/tasks.json` 当输入算出来的**。\n于是 main 上的 `specs/SPEC_VERSION.json` 和「你这棵树重新生成出来的那一份」对不上，\naccept 的 `git apply` 在**这个生成物**上打不上（我实测过：其余 4 个文件都能打上，只有它打不上）。\n\n**说人话**：你自己一行代码都没错，是**我**在两次集成之间动了一个会挪动\"规格指纹\"的文件，\n把你已经合好的那棵树\"指纹\"对不上了。\n\n## 这一轮做什么\n\n**什么都不用改代码。** `specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、\n`internal/persistence/sqlc/**` 这一类**生成物**由前移流程**按合并后的树重新生成**（不是我手改文本）。\n\n1. **重跑你 `RESULT.json` 里记过的那 9 条命令**（前移换了基线，绿要重新挣），如实记录这一轮结果。\n   `tests[]` **只装\"这一轮真跑过、且是绿的\"条目**；历史进 notes。\n2. `notes_for_supervisor` 必须是**一个字符串**。\n3. `status` **全绿才写 `completed`**。\n4. **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n5. 记命令时把库口令掩码成 `***`；输出与结论一字不改。\n6. 跑完确认 `ps` 里没有你自己留下的进程。\n\n## 不要动的\n\n- **迁移号 `00054` 不变**，文件名别动。\n- **生成物只能重新生成**，不要手工编辑。\n- 不要动 `allowed_scope` 外的文件。\n\n## 环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n",
       "history": [
         {
           "from": "todo",
@@ -3041,6 +3359,61 @@
           "at": "2026-09-14T11:46:43Z",
           "run_id": "run-3935726e18f0ce7e",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T18:01:30Z",
+          "run_id": "run-8aeb08d972ff5bf6",
+          "reason": "# T0407（Scientific Conflict Resolution UI）：搬基线到 main + 一条 blocking 的修复 + 三条复核意见的处置\n\n> 复核结论是 **`request_changes`**：功能契约全过（三层都有五种决策、负例测试、三层鉴权、审计），\n> 但有一条 **blocking**——源码里躺着一个**真的 NUL 字节**。这一轮 = 搬基线 + 修掉它 + 下表处置。\n> 复核原文在 `.rddev/workers/T0407-review/RESULT.json`。\n\n## 一、这条 blocking 是什么，为什么必须改\n\n`apps/web/app/(main)/projects/[id]/conflicts/page.tsx` 第 685 行，\n排序后的 `join(...)` 用了一个**真的 NUL 字节**做分隔符（整个文件只有这一处，在 24102 字节偏移）。\n\n**改法**：把那个裸字节改写成转义写法（反斜杠 + u + 四个 0）。**行为一个比特都不变**，\n它仍然是那个分隔符；变的只是源码里不再躺着一个控制字符。\n\n**为什么必须改**（这三条我自己验过，不是复核原话照抄）：\n\n1. 复核拿到的那份 diff 产物里，这个文件**整条**被替换成了 `Binary files … differ`；\n   accept 的 `git apply` 也因此报了 `cannot apply binary patch … without full index line`。\n   结果是**这一轮的复核看不到你最主要的那个 UI 文件**。根因在这行代码。\n2. 它还算不算文本 diff，取决于 NUL 落在**第几个字节**：现在在 24102，恰好在 git 的探测窗口（前 8000 字节）之外，\n   所以 `git diff` 仍当它是文本；**哪天有人删掉前面一些行把它挤进窗口，它就真的变二进制**。\n   一个文件的\"能不能被看懂\"挂在一个字节偏移上，太脆。\n3. 源码里的控制字符按惯例写转义。\n\n**复核这条里的三处机制说法不要照抄**（我实测过，是错的，理由错很容易改错地方）：\n\"git 因此把整个文件当二进制\"——**错**（git 只看前 8000 字节，实测 `691 0` 是文本；\n把它整条替换成 `Binary files` 的是我们自己的收集器，不是 git）；\n\"密钥扫描跳过了它的内容\"——**错**（你的 NUL 在窗口之外，没被跳过）；\n\"以后改它都会得到不透明 diff\"——**半对**，见上面第 2 条。\n\n## 二、另外三条复核意见的逐条处置\n\n| # | 级别 | 位置 | 问题 | 本轮做什么 |\n|---|---|---|---|---|\n| 2 | minor | `***.go:76` | 内存里的冲突身份键**排序归一化**（`joinStrings` 排 fields 与 payload_keys），但**落库的行保留原样顺序**，而 DB 唯一索引按 jsonb 数组**顺序敏感**比较：同一冲突换个字段顺序提交，能过身份校验却插出第二行，`ListPlan` 就会对同一冲突返回两行 | **改**：让**落库的身份**用同一个归一化函数（复用现有的那个，别写第二份），使\"一个冲突 = 一行\"由 DB 索引本身保证。**加一条能失败的测试**：同一冲突用打乱的字段顺序提交两次 → 仍只有一行 |\n| 3 | nit | `cmd/api/conflicthttp/handlers.go:202` | 未鉴权兜底写的是字面量 `\"UNAUTHENTICATED\"`，而 v1 guard 发的是 `AUTH_UNAUTHENTICATED`（客户端 `messageForConflictCode` 映射的是后者）。在受保护组合里不可达 | **改**：换成规范常量（一行）。**若你能让它可测就加测试；做不到就在 notes 里写清为什么没有测试**——不要写一个永远绿的测试凑数 |\n| 4 | nit | `cmd/api/conflicthttp/handlers.go:211` | `Decode` 只读第一个 JSON 值，尾随非空白垃圾被接受；复核建议第二次 `Decode` 期望 `io.EOF` | **不改**，记录（理由见下） |\n\n**#2 的理由说全**：身份键之所以要排序，是因为报告里字段的**顺序本身没有稳定保证**——\n所以落库身份必须**规范化**，否则同一冲突在不同次重算下可能得到不同的行；这一步是让 DB 索引真正兜住身份。\n如果你发现**任何消费方**依赖存储数组的提交顺序（比如页面按它渲染），在 notes 里点名它、说清你怎么取舍的。\n\n写进 `notes_for_supervisor`（**一个字符串**）：\n\n- **#4 不改的理由**：全仓库约二十个 handler 都只读第一个 JSON 值；唯一一处严格 EOF 检查在\n  `internal/rsg/manifest/manifest.go`——那是 canonical JSON 的地方，字节精确性是那里的契约。\n  在冲突这一个 handler 上单方面收紧，会把一处 1/N 的约定分叉；记名：将来若做仓库范围的 body 严格化，一起改。\n\n## 三、这一轮前移做了什么\n\n你的 accept 打不上的是：`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`（生成物，按你的树重新生成，不靠文本合）、\n`tests/integration/migration_test.go`（迁移清单，两边各加一条 → 按名字取并集），\n以及上面那个 page.tsx（被收集器判成二进制，补丁缺 index 行——正是 blocking 的另一个后果）。\n\n你停在 `b05ba20`；前移是机械的。\n\n**2026-09-15 补一句（这段时间 main 又往前走了）**：你被挡下之后，main 上又落了 T0309（Git ↔ RSG 对账）、\nT0402（Pull Request 域）、T0606（不可变 Release）三个任务。所以这次前移**可能不止上面那四个文件**——\n凡是这几轮里两边都改过的文件（迁移清单、`cmd/api/main.go` 的装配、生成物、以及页面上共用的小文件），\n都会按记录好的解法合。这次实际合了三个文件，逐条说清**它们各自是怎么合的**：\n\n1. `internal/domain/audit.go`、`tests/integration/migration_test.go`——两边各自**往同一个块里加东西**\n   （main 加 `ActionReleaseCreated`、加一行迁移清单；你加 `ActionConflictResolutionSaved`、加你自己的迁移行）。\n   按**名字取并集**，一条不丢（有机械守卫逐行比对过，输出在合成日志里）。\n2. `cmd/api/main.go`——**由我手写合成**（两个冲突都是\"两边各加一段、谁也不改对方\"的形状：\n   一处是两个 import，一处是两段装配块）。原则就是并集：**你的 import 与装配块原样保留，\n   main 的也原样保留**。守卫检查过：main 侧 60 个顶层名字、你侧 58 个，合成件里 63 个，**两边都全在**；\n   原始冲突的 666 行**一行都没丢**。\n3. `specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc/**`——**生成物，按合成后的树重新生成**，不做文本合。\n\n**对着树读一遍这三个文件**（尤其 `cmd/api/main.go`）：任何一处你认为合错了，\n在 `RESULT.json` 里指明**哪一行、为什么**，**别闷声改回去**（合错了是我的问题，不算你返工）。\n\n## 四、这一轮要交什么\n\n1. 第一节的 NUL 修复（**别的逻辑一个字都不要动**）+ 第二节标\"改\"的两条。\n2. 重跑你 `RESULT.json` 里承诺过的命令（尤其 `node --test apps/web/lib/conflicts.test.mjs`、\n   `pnpm --filter @post/web typecheck` 与 lint、以及你自己那条浏览器 e2e），**在新基线上**。\n3. **自证这个字节真的没了**：写一条**能红**的字节级检查（把整个文件读成字节、断言里面没有 `0x00`），\n   把命令与输出写进 `RESULT.json` 的 `tests[]`（`evidence` 字段）。**那份给复核看的 diff 由我这边的收集步骤\n   重新生成，不需要你造、也不该由你造**——你要做的是让字节干净，剩下的我来。\n4. 生成物**只重新生成**（`--check` 收尾）：`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`internal/persistence/sqlc/*`。\n5. `RESULT.json` 的 `tests[]` **只写这一轮真跑过的**；历史进 notes。\n   `notes_for_supervisor` 是**一个字符串**（T0309 就栽在这上面）。\n6. `status` 按实情：全绿才 `completed`；红着报告比造假绿好。\n\n## 五、不要动的\n\n- **迁移号 `00054` 不变**，文件名别动；**空号不回收**（号是分配的）。\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n- **生成物只能重新生成，不要手工编辑。**\n- 不要动 `allowed_scope` 外的文件。\n\n## 六、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库，5432）；web 侧用任务包里的命令。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n\n---\n\n## 附：关于\"故意跑红\"的记录位置（22:52 追加，其余内容一字未改）\n\n如果这一轮你**故意跑一条会红的命令**（回退某处修复、或写一条\"证明当前形状会红\"的探针）来证明某个\n守卫**确实能失败**：那段命令与输出写进它对应那条**绿条目**的 `evidence` 字符串，或者写进\n`notes_for_supervisor`。**不要在 `tests[]` 里留 `status: \"failed\"` 的条目**——collect 的\n`result-consistency` 是机械判据（`status: completed` 加任何 `failed`/`not_run` 条目 = 自相矛盾），\n它读不出\"这条红是故意的\"，整轮会被**拒收**（T0508 在 22:47 就这么白跑了一轮）。\n**证据一个字都别删**，只是**换个格子放**：`tests[]` 只装\"这一轮真跑过、且是绿的\"条目。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T18:03:33Z",
+          "run_id": "run-74f49ef57220da95",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T18:20:55Z",
+          "run_id": "run-d8c5dbb28ada0825",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T18:21:00Z",
+          "run_id": "run-098545be9b919f75",
+          "reason": "# T0407：再前移一次（**不是你的问题**），只重跑门，不改代码\n\n## 这一轮为什么还要前移\n\n你这一轮的工作本身是好的——我读了你写进 `RESULT.json` 的 9 条，全绿，\n最后一轮 `bash tests/e2e-files/run.sh` 也过了。**问题出在我这边的时间差**：\n\n你在 `659c71a` 上前移之后、我这边收下你之前，我又往 main 上落了一次**修任务范围清单**的提交\n（`433fbc0`：给两个任务补 `internal/persistence/**` 的写权限）——那次提交**动了 `tasks/tasks.json`**，\n而 `specs/SPEC_VERSION.json` 的摘要**是把 `tasks/tasks.json` 当输入算出来的**。\n于是 main 上的 `specs/SPEC_VERSION.json` 和「你这棵树重新生成出来的那一份」对不上，\naccept 的 `git apply` 在**这个生成物**上打不上（我实测过：其余 4 个文件都能打上，只有它打不上）。\n\n**说人话**：你自己一行代码都没错，是**我**在两次集成之间动了一个会挪动\"规格指纹\"的文件，\n把你已经合好的那棵树\"指纹\"对不上了。\n\n## 这一轮做什么\n\n**什么都不用改代码。** `specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、\n`internal/persistence/sqlc/**` 这一类**生成物**由前移流程**按合并后的树重新生成**（不是我手改文本）。\n\n1. **重跑你 `RESULT.json` 里记过的那 9 条命令**（前移换了基线，绿要重新挣），如实记录这一轮结果。\n   `tests[]` **只装\"这一轮真跑过、且是绿的\"条目**；历史进 notes。\n2. `notes_for_supervisor` 必须是**一个字符串**。\n3. `status` **全绿才写 `completed`**。\n4. **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n5. 记命令时把库口令掩码成 `***`；输出与结论一字不改。\n6. 跑完确认 `ps` 里没有你自己留下的进程。\n\n## 不要动的\n\n- **迁移号 `00054` 不变**，文件名别动。\n- **生成物只能重新生成**，不要手工编辑。\n- 不要动 `allowed_scope` 外的文件。\n\n## 环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T18:21:29Z",
+          "run_id": "run-686718156846507b",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T18:27:27Z",
+          "run_id": "run-f125a96e075c6510",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T21:49:46Z",
+          "run_id": "run-1f0cffde604b7146"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T21:53:00Z",
+          "run_id": "run-0602c5a6f3370781",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -3207,9 +3580,12 @@
       ]
     },
     "T0503": {
-      "status": "verification",
-      "started_at": "2026-09-14T11:49:56Z",
-      "worker_run_id": "run-5c657a38e80e4fab",
+      "status": "merged",
+      "started_at": "2026-09-15T01:21:57Z",
+      "worker_run_id": "run-37661f3862efbf31",
+      "accepted_by_supervisor_at": "2026-09-15T02:01:26Z",
+      "merged_at": "2026-09-15T02:07:38Z",
+      "rejection_reason": "# T0503 —— 复核说 `approve`，我仍退回：这一段代码**对自己说的话不成立**\n\n> 复核结论 `approve`（0 阻断、0 重大）。上一轮那四条处置我全认，不用重做——\n> 表改真了、`finding_type` 的解释、TRUNCATE 进\"刻意不管\"清单、配对守卫与探针，我都逐字核过。\n>\n> 退回是为**两条我自己复核出来的**：一条是**注释宣称的覆盖面它没有**（上一轮我请你改的就是这里，\n> 你把它从\"ANY\"改成了\"ROW-LEVEL INSERT/UPDATE/DELETE\"，但它**仍然**不是真的）；\n> 另一条更根本——**这段代码在草稿阶段拒绝了一种平台明说\"草稿可以没有\"的东西**。\n> 两条都不是格式问题，都是\"读的人会因此少查一遍\"的那种。\n\n---\n\n## 一、第一条：`00057` 的头注释，宣称的覆盖面它没有\n\n### 事实\n\n头注释现在写（`infra/migrations/00057_findings.sql:24-27`）：\n\n> The guards enforce the mechanically decidable half of the model for **every ROW-LEVEL write path —\n> INSERT, UPDATE and DELETE**, whether from application code, psql or a leaked credential…\n\n它下面列的第四条不变量里，第二条是：\n\n> every findings row must pin at least one claim version…, and a ref row may only exist together with\n> its findings row — **no ref-less findings rows, no orphan refs**;\n\n**这半条在两条 UPDATE 路径上不成立。** 我把这个文件里全部的触发器事件都读了一遍，只有五个：\n\n| 触发器 | 事件 | 它看的是 |\n|---|---|---|\n| `finding_claim_versions_ref_guard` | `AFTER INSERT OR UPDATE` ON `finding_claim_versions` | 只看 `NEW` |\n| `findings_refs_present` | `AFTER INSERT OR UPDATE` ON `findings` | 只看 `NEW.version_id` |\n| `findings_version_object_pairing` | `AFTER INSERT OR UPDATE` ON `findings` | 只看 `NEW` |\n| `findings_no_orphan_refs` | **`AFTER DELETE`** ON `findings` | `OLD` |\n| `finding_claim_versions_refs_remain` | **`AFTER DELETE`** ON `finding_claim_versions` | `OLD` |\n\n于是：\n\n- **(a) 把一条引用挪走**：`UPDATE finding_claim_versions SET finding_version_id = <另一个 finding> WHERE …`\n  第一个触发器只看 `NEW`（新家合法），最后一个只在 `DELETE` 上触发。结果：**原来那个 finding\n  一条引用都不剩，没人吭声**——正是第二条不变量要防的状态。\n- **(b) 把投影行的身份挪走**：`UPDATE findings SET version_id = <同一个对象的另一个版本> WHERE …`\n  `findings_no_orphan_refs` 只在 `DELETE` 上触发。结果：**老版本的那些引用行成了孤儿，没人吭声**。\n\n（这两条不是我推的：复核员在从 `specs/database/postgres.sql` 迁起来的一次性库上**实测**过，两次都干净提交。\n我另按上面的触发器事件表逐个核过，与它一致。）\n\n**为什么这不是\"注释写得糙一点\"**：这个头注释是后来人**唯一**能知道\"哪些写路径被守卫看着\"的地方。\n写的人是要**接线投影写入方**的那个人。他会读到\"every ROW-LEVEL write path — INSERT, UPDATE and DELETE\"，\n得出\"UPDATE 这条不用我再操心\"，然后**停止检查**。欠账就在这里。\n\n### 要交什么\n\n**让这句话变成真的。** 我倾向**补守卫**，理由是这**有原则可依**，不是加码：\n\n- 这个文件自己的纪律（`00014/00015/00028/00040`）就是\"**行级写路径一律交给数据库**\"；\n- `TRUNCATE` 被排除，是因为**行级触发器根本看不见它**——这是能力边界，所以那次是**改注释**；\n- 而\"挪身份\"的 UPDATE **触发器看得见**。看不见才排除，看得见就没有排除的理由。\n\n**具体**（这是建议，机制你定，但要求是头注释必须为真）：\n\n- `finding_claim_versions_refs_remain` 的事件加上 `UPDATE OF finding_version_id`\n  （函数体不用动：它已经在查 `OLD.finding_version_id` 还有没有引用——正是路径 (a) 需要的判断）；\n- `findings_no_orphan_refs` 的事件加上 `UPDATE OF version_id`（同理，函数体已经在查 `OLD.version_id`）；\n- 两条各配一个**探针**，证明**去掉新增的事件就红、加上就绿**。别只写\"现在不报错\"——\n  我要看到它**会失败**。\n\n**如果你判断补守卫行不通**（比如延迟约束触发器在 `UPDATE OF` 上有什么实际限制），\n那就**改注释**：把 UPDATE-搬身份这一条**明确**写进 \"Deliberately NOT enforced here\"，\n并说清代价。**二选一，但结论必须是\"这段注释是真的\"。**\n\n---\n\n## 二、第二条（更要紧）：草稿阶段就把没有引用的 finding 拒了，**这跟平台自己写下的规矩相反**\n\n### 事实\n\n`internal/rsg/semantics/finding.go` 的 `checkFinding`：`claim_version_refs` **缺失**时直接返回 `error`。\n调用链是 `Service.CreateObject` → `semantics.Check` → `len(errs) > 0` → **拒绝**\n（`internal/application/rsg/service.go:230-232`，这次提交的 `Gate` 是 `GateDraft`）。\n也就是说：**一条草稿 finding，在它还说不清自己聚合了哪些 claim 版本时，根本建不出来。**\n\n而平台自己的规矩是反过来的，三处白纸黑字：\n\n1. **`docs/08_SCIENTIFIC_OBJECTS.md:9`**：\n   > Draft 可缺部分 domain field；进入 PR/main/release 时按 validation gate 逐步增强。\n2. **`internal/rsg/validation/spec.go:90`**（草稿门）：\n   > `schema_typed` = **`SeverityWarning`**：a draft **may lack domain fields**（docs/08: Draft 可缺部分\n   > domain field）, so a payload that does not yet satisfy the object type's full schema is\n   > **reported, not refused**.\n   同文件 `:100`（PR 门）才升为 `SeverityBlocking`：**\"entering PR closes the draft allowance\"**。\n3. **同一个 package 里的两个兄弟检查**，字段在各自 schema 里**同样是 required**，它们都只出 **hint**：\n   - `checkHypothesis`（`semantics.go:272-286`）：`question_id` 缺失 → **hint**，\n     注释原话 \"a draft may not know the question yet — **the draft gate remains the authority**\"；\n   - `checkExternalReference`（`semantics.go:295-315`）：身份对**两个都不给 → \"a valid draft\"**\n     （\"Both absent is a valid draft (the pr gate demands the pair)\"）。\n\n（核过：`hypothesis.schema.json` 的 `required` 里**有** `question_id`；\n`external_reference.schema.json` 的 `required` 里**有** `source_type` 与 `external_identifier`。\n所以这不是\"那两个字段本来就不必填\"，是**明明白白的同一条规矩**。）\n\n**还有一处自相矛盾**：同一个 `checkFinding` 里，`statement` 也是 `finding.schema.json` 的 required\ndomain field，缺了它**不管**；只有 `claim_version_refs` 缺了要拒。**同一个函数的两个同类字段，两种待遇。**\n\n而且这个\"严\"其实**买不到什么**：这里只查形状（任何合法 uuid 都算数），\n所以它挡不住\"随便填个 uuid 占位\"，只挡住了\"我先建草稿、稍后再挂引用\"这条**正常写法**。\n\n### 要交什么\n\n**跟平台现有的规矩对齐**（这条是**照着已经写下的规矩做**，不是我在发明产品规则）：\n\n| 输入 | 现在 | 要变成 |\n|---|---|---|\n| `claim_version_refs` **缺失** | `error`（拒绝） | **hint**（草稿放行，说明\"钉了哪些版本\"才是 finding 的内容） |\n| 存在但不是数组 / 元素不是字符串 / 不是规范 uuid | `error` | **`error` 不变** |\n| 存在但是 `[]` | `error` | **你定，但要在 `notes_for_supervisor` 写明选择与理由**（我的读法：`[]` 与缺失同为\"什么都没钉\"，都属 minItems 1 那条 schema 规则，草稿该是 warning；但 `checkResearchQuestion` 对 `parent_question_id: \"\"` 是按 error 处理的——你说清你按哪条先例、为什么） |\n\n**三条不许动**（这不是\"放宽检查\"，谁都不许借这轮削弱保护）：\n\n- **数据库守卫不许动**：`findings_refs_present` 继续让\"一条引用都没有的 findings 投影行\"进不来；\n- **PR 门不许动**：进 PR 时 `schema_typed` 仍是 blocking，没有引用的 finding **到不了 PR**；\n- **不许**把这条 hint 顺手做成\"任何情况都不报\"。\n\n**另外要在 `notes_for_supervisor` 里回答一句**（这是这条唯一的反面理由，你得正面处理）：\n既然投影写入方还没接线，**将来它遇到一条\"没有引用\"的草稿 finding 该怎么办**？\n（跳过？不投影草稿？还是别的？）**想清楚再答**——如果你能证明\"平台**必须**在草稿就拒\"，\n那就拿证据说，我改主意；否则按上表改。\n\n`internal/rsg/semantics/finding_test.go` 里现在钉着旧行为的断言，一并改成新行为，\n并在注释里写清依据（引 `spec.go:90/100` 与两个兄弟检查）。\n\n---\n\n## 三、两处小的（顺手，别扩大）\n\n1. `internal/domain/finding.go:84` 的注释引了 **`CLAUDE.md §9.13`**——**这个出处不存在**。\n   仓库的 `CLAUDE.md` 里 `§9` 是「Domain 不变量」，是 **14 条编号条目**，第 13 条才是\"不生成\n   Truth Score / Research Score\"。`claim.go` 里的既有写法是什么，就照那个写。\n2. `tests/integration/finding_projection_test.go:315` 的灵敏度断言只查 `Contains(…, \"3500\")`，\n   而 **3500 同时是另一条 claim（`cv2`，:132）的值**，所以它分不清\"pin 挪到了 `cv1b`\"和\"join 读错了行\"。\n   **改法只加一行、不许改任何夹具的值**：把 join 出来的 `claim_version_id` 一起 `SELECT` 出来，\n   断言它等于 `cv1b`。（前一条断言已经钉了引用行，所以这不是错，只是不够紧。）\n\n---\n\n## 四、这一轮交什么\n\n1. §一 的 00057（补守卫**或**如实改注释），带**能红的探针**。\n2. §二 的 `checkFinding` + 它的测试。\n3. §三 的两处。\n4. 生成物**只重新生成**（`--check` 收尾）：`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、\n   `internal/persistence/sqlc/*`（`00057` 改了触发器就必须重新生成）。\n5. **在新基线上重跑**：`make test-integration`、`internal/domain` 与 `internal/rsg/...` 的 unit、\n   `make staticcheck`、`make check`。`RESULT.json` 的 `tests[]` **只写这一轮真跑过的、且是绿的**。\n6. `notes_for_supervisor` 是**一个字符串**，§二 末尾那两句回答**必须**在里面。\n\n## 五、规矩（没变）\n\n- **迁移号 `00057` 与文件名不变**；空号不回收。\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n  这一轮**恰恰相反**：两条都是把\"这段代码对自己说的话\"改真。\n- **生成物只能重新生成，不要手工编辑。**\n- **不要动 `allowed_scope` 外的文件**（尤其 `specs/schemas/**` 与 OpenAPI 种子——那是我的面）。\n- **不要顺手重写别的地方。**\n- 记命令时把库口令掩码成 `***`；输出与结论一字不改。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n## 六、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库）。\n- 静态检查用 **`make staticcheck`**（仓库钉住的版本）。\n- 故意跑一条会红的命令（比如证明某个守卫**确实能失败**）时，\n  那段命令与输出写进它对应那条**绿条目**的 `evidence`，或写进 `notes_for_supervisor`。\n  **不要在 `tests[]` 里留 `status: \"failed\"` 的条目**——collect 的机械判据读不出\"这条红是故意的\"，\n  整轮会被拒收。\n\n改完就停。我这边重新 collect → 复核 → G2。\n",
       "history": [
         {
           "from": "todo",
@@ -3230,6 +3606,61 @@
           "at": "2026-09-14T12:27:47Z",
           "run_id": "run-2aad035d81d9ef6e",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T01:02:17Z",
+          "run_id": "run-e0a8ae171eca034a",
+          "reason": "# T0503（Finding 聚合模型）：树往前挪了一次 + 三条复核意见是**第一次**到你手里\n\n> 先说清两件事，别被绕进去：\n>\n> 1. **这一轮回来有一半是机械的**——主线往前走了，你的改动对不上现在的版本了：\n>    `git apply …/post-integration-T0503.patch: exit status 1: error: patch failed: specs/SPEC_VERSION.json:1`\n>    这条迁移链一环一环落地（`00055` → `00056`(T0214) → **`00057`(你)** → …），每一环都会重新生成\n>    `specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc/*`，\n>    于是**排在后面的人的树一定会对不上**。前移是机械搬家，不是重做：你的改动一行没丢，只是换了立足点。\n> 2. **另一半不是机械的**：你的交付**复核过**（结论 `approve`），但它的三条意见**从没送到你手里**\n>    （任务记录里没有返工那一轮）。所以它们**现在**跟这封信一起来，请当成首次收到。\n\n---\n\n## 一、前移时我替你解的两处（这是我解的，**对着树读一遍**）\n\n两边改到同一行的地方，只有合成工具里**写明了规则**的形状才会被自动解开；没写明规则的它会**拒绝**。\n下面两处是它拒收、**由我**解的。\n\n### 1. `internal/rsg/semantics/semantics.go` —— 两边各加了一个分支，**都留**\n\n`Check` 的 `switch objectType`：主线加了\n`case \"external_reference\": return checkExternalReference(payload)`，你加了 `case \"finding\": return checkFinding(payload)`。\n分叉点两个都没有，是\"同一个位置各插一块\"，两块互不引用对方的东西，**两块都留**（主线的在前）。\n守卫验过：主线侧 19 个名字、你侧 17 个，解里 19 个都在；329 行原样合入、无一丢失。\n\n### 2. `internal/rsg/semantics/semantics_test.go` —— **这一处我只解了一半，剩下的一半归你**\n\n`TestUnknownTypesHaveNoChecks` 里那张表（\"语义层还没有明文规则的类型\"）：\n\n| 版本 | 表里有什么 |\n|---|---|\n| 分叉点 | `…, protocol, finding, external_reference, experiment`（两个都在） |\n| 主线（现在） | `…, protocol, finding, experiment` —— **主线删掉了 `external_reference`**（它给了这个类型 `checkExternalReference`） |\n| 你的树 | `…, protocol, external_reference, experiment` —— **你删掉了 `finding`**（你给了它 `checkFinding`），还留了注释说明 |\n\n**两个删除都是对的，所以合成之后两个名字都不该在**：\n`{material, sample, calculation, dataset, protocol, experiment}`。\n\n**可这一行两边都没有。** 并集会把你删掉的名字放回去——等于在一张写着\"这些类型没有检查规则\"的表里\n放进一个已经有规则的类型；而我的合成工具**不能**替我写出那一行（它只允许在冲突已有的行里选，\n这道门是防止\"合成\"变成 Supervisor 往别人文件里塞代码的通道，不该拆，我也不拆）。所以：\n\n- 我**立起了你那一侧**（你的注释 + 你的那一行），把主线那一行声明为**被取代**（记录在合成材料里）；\n- **把这张表改完归你**：`external_reference` 也要去掉，注释改成**两个理由都讲**\n  （它在主线那边为什么走、`finding` 在你这边为什么走）。\n\n**为什么非要改、不能就这么放着过 —— 这一处会照绿。**\n`Check(\"external_reference\", \"\", {\"name\":\"x\",\"statement\":\"…\"})` 在合成后的树上返回\"无话可说\"\n（没有 `source_type`/`external_identifier`，按 `checkExternalReference` 那是一条合法草稿），断言过得去。\n**绿不证明它对**：这张表的**前提**是假的——它列的\"没有规则的类型\"里有一个已经有规则了。\n**这一处没改完，不要说 `completed`。**\n\n---\n\n## 二、复核的三条（**首次送达**，都是 minor，都不阻断，但都要处置）\n\n复核结论是 **`approve`**，0 条阻断。三条 minor 我都**自己核过原文**，属实：\n\n### 2.1 `infra/migrations/00057_findings.sql:58` —— `finding_type` 两边不一致\n\n表里是 `finding_type text NOT NULL`，但 **`specs/schemas/finding.schema.json` 并不要求它**\n（`required` 只有 statement 与 claim_version_refs 那批）。而那条注释拿 `00041` 的 claim 形状当先例——\n**这个先例不成立**：`claim.schema.json` **是**要求 `claim_type` 的。\n结果：一条 schema 合法、但没有 `finding_type` 的 finding 今天就能通过 API 建出来，\n将来的投影写入方会撞上 NOT NULL。\n\n**要处置**：让两边一致——**在你的范围里**做（`specs/schemas/**` 是**我的面**，你不能动）：\n要么在语义检查/领域模型里把 `finding_type` 变成必填，要么让那一列允许缺省。\n**顺带把那条注释里不成立的先例改掉。**\n如果你判断正确的改法在我这边（schema 该要求它），**在 `RESULT.json` 里写明**，我来做。\n\n### 2.2 `infra/migrations/00057_findings.sql:30` —— 注释说\"ANY write path\"，TRUNCATE 是例外的例外\n\n那句注释声称守卫对\"**ANY** write path\"都成立；但行级触发器**只在 DELETE 上触发，TRUNCATE 绕过它**。\n复核员**实测**过：`TRUNCATE findings` 之后 `finding_claim_versions` 的孤儿行留着，没有守卫吭声。\n\n**要处置**：**改注释**，让它说的是守卫**实际**管的事。\n**不要**给投影表加 TRUNCATE 守卫——投影是可以重建的，owner 级 TRUNCATE 正是设计的重建手段\n（`claims` 投影同样没有，`append_only_test` 也故意只要求 append-only 日志表带截断守卫）。\n\n### 2.3 `infra/migrations/00057_findings.sql:57` —— `object_id` 与 `version_id` 各自独立\n\n两列各自有 FK，没有复合约束，所以一行可能把**对象 A 的版本**和**对象 B 的 object_id** 配在一起\n（复核员实测：跨对象改 `object_id` 可以）。类型与项目的锚定是对的，风险只在下游按 `findings_object_idx` 归因时错配。\n\n**要处置**：要么补一条复合约束把它钉住，要么**明确记进 `risks[]` 与 `notes_for_supervisor`**，\n说明留给将来的写入方（`00041` 的 claims 形状是一样的，T0502 复核也提过同一条）。\n**二选一，但要写清楚你选了哪条、为什么。**\n\n---\n\n## 三、这一轮要交什么\n\n1. **上面一·2 那张表改完**（两个名字都不在，注释写清两个理由）。\n2. **上面 §二 三条逐条处置**（每条在 `notes_for_supervisor` 里一句话交代你选了什么）。\n3. 生成物**只重新生成**（`--check` 收尾）：`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`internal/persistence/sqlc/*`。\n4. **在新基线上重跑**你任务要求的测试（`make test-integration`、`internal/domain` 与 `internal/rsg/...` 的 unit、你自己的 `finding_*`），\n   `RESULT.json` 的 `tests[]` **只写这一轮真跑过的、且是绿的**。\n5. `status` 按实情：全绿才 `completed`；**红着报告比造假绿好**。\n6. `notes_for_supervisor` 是**一个字符串**。\n\n## 四、不要动的\n\n- **迁移号 `00057` 与文件名不变**；**空号不回收**（号是分配的）。\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n  这一轮**恰恰相反**：那张表的前提要改真。\n- **生成物只能重新生成，不要手工编辑。**\n- **不要动 `allowed_scope` 外的文件**（尤其 `specs/schemas/**` 与 OpenAPI 种子——那是我的面）。\n- **前移之外的地方不要顺手重写。** 搬家不是重做。\n\n## 五、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库）。\n- 静态检查用 **`make staticcheck`**（仓库钉住的版本）。\n- 记命令时把库口令掩码成 `***`；输出与结论一字不改。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n## 六、如果你要故意跑一条会红的命令\n\n（比如证明某个守卫**确实能失败**）那段命令与输出写进它对应那条**绿条目**的 `evidence`，\n或写进 `notes_for_supervisor`。**不要在 `tests[]` 里留 `status: \"failed\"` 的条目**——\ncollect 的机械判据读不出\"这条红是故意的\"，整轮会被拒收。\n\n改完就停。我这边重新 collect → 复核 → G2。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T01:02:18Z",
+          "run_id": "run-c2dc2c5cdbf06e79",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T01:12:53Z",
+          "run_id": "run-a2fe6ca9a972ea61",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-15T01:21:54Z",
+          "run_id": "run-952c28110d66c579",
+          "reason": "# T0503 —— 复核说 `approve`，我仍退回：这一段代码**对自己说的话不成立**\n\n> 复核结论 `approve`（0 阻断、0 重大）。上一轮那四条处置我全认，不用重做——\n> 表改真了、`finding_type` 的解释、TRUNCATE 进\"刻意不管\"清单、配对守卫与探针，我都逐字核过。\n>\n> 退回是为**两条我自己复核出来的**：一条是**注释宣称的覆盖面它没有**（上一轮我请你改的就是这里，\n> 你把它从\"ANY\"改成了\"ROW-LEVEL INSERT/UPDATE/DELETE\"，但它**仍然**不是真的）；\n> 另一条更根本——**这段代码在草稿阶段拒绝了一种平台明说\"草稿可以没有\"的东西**。\n> 两条都不是格式问题，都是\"读的人会因此少查一遍\"的那种。\n\n---\n\n## 一、第一条：`00057` 的头注释，宣称的覆盖面它没有\n\n### 事实\n\n头注释现在写（`infra/migrations/00057_findings.sql:24-27`）：\n\n> The guards enforce the mechanically decidable half of the model for **every ROW-LEVEL write path —\n> INSERT, UPDATE and DELETE**, whether from application code, psql or a leaked credential…\n\n它下面列的第四条不变量里，第二条是：\n\n> every findings row must pin at least one claim version…, and a ref row may only exist together with\n> its findings row — **no ref-less findings rows, no orphan refs**;\n\n**这半条在两条 UPDATE 路径上不成立。** 我把这个文件里全部的触发器事件都读了一遍，只有五个：\n\n| 触发器 | 事件 | 它看的是 |\n|---|---|---|\n| `finding_claim_versions_ref_guard` | `AFTER INSERT OR UPDATE` ON `finding_claim_versions` | 只看 `NEW` |\n| `findings_refs_present` | `AFTER INSERT OR UPDATE` ON `findings` | 只看 `NEW.version_id` |\n| `findings_version_object_pairing` | `AFTER INSERT OR UPDATE` ON `findings` | 只看 `NEW` |\n| `findings_no_orphan_refs` | **`AFTER DELETE`** ON `findings` | `OLD` |\n| `finding_claim_versions_refs_remain` | **`AFTER DELETE`** ON `finding_claim_versions` | `OLD` |\n\n于是：\n\n- **(a) 把一条引用挪走**：`UPDATE finding_claim_versions SET finding_version_id = <另一个 finding> WHERE …`\n  第一个触发器只看 `NEW`（新家合法），最后一个只在 `DELETE` 上触发。结果：**原来那个 finding\n  一条引用都不剩，没人吭声**——正是第二条不变量要防的状态。\n- **(b) 把投影行的身份挪走**：`UPDATE findings SET version_id = <同一个对象的另一个版本> WHERE …`\n  `findings_no_orphan_refs` 只在 `DELETE` 上触发。结果：**老版本的那些引用行成了孤儿，没人吭声**。\n\n（这两条不是我推的：复核员在从 `specs/database/postgres.sql` 迁起来的一次性库上**实测**过，两次都干净提交。\n我另按上面的触发器事件表逐个核过，与它一致。）\n\n**为什么这不是\"注释写得糙一点\"**：这个头注释是后来人**唯一**能知道\"哪些写路径被守卫看着\"的地方。\n写的人是要**接线投影写入方**的那个人。他会读到\"every ROW-LEVEL write path — INSERT, UPDATE and DELETE\"，\n得出\"UPDATE 这条不用我再操心\"，然后**停止检查**。欠账就在这里。\n\n### 要交什么\n\n**让这句话变成真的。** 我倾向**补守卫**，理由是这**有原则可依**，不是加码：\n\n- 这个文件自己的纪律（`00014/00015/00028/00040`）就是\"**行级写路径一律交给数据库**\"；\n- `TRUNCATE` 被排除，是因为**行级触发器根本看不见它**——这是能力边界，所以那次是**改注释**；\n- 而\"挪身份\"的 UPDATE **触发器看得见**。看不见才排除，看得见就没有排除的理由。\n\n**具体**（这是建议，机制你定，但要求是头注释必须为真）：\n\n- `finding_claim_versions_refs_remain` 的事件加上 `UPDATE OF finding_version_id`\n  （函数体不用动：它已经在查 `OLD.finding_version_id` 还有没有引用——正是路径 (a) 需要的判断）；\n- `findings_no_orphan_refs` 的事件加上 `UPDATE OF version_id`（同理，函数体已经在查 `OLD.version_id`）；\n- 两条各配一个**探针**，证明**去掉新增的事件就红、加上就绿**。别只写\"现在不报错\"——\n  我要看到它**会失败**。\n\n**如果你判断补守卫行不通**（比如延迟约束触发器在 `UPDATE OF` 上有什么实际限制），\n那就**改注释**：把 UPDATE-搬身份这一条**明确**写进 \"Deliberately NOT enforced here\"，\n并说清代价。**二选一，但结论必须是\"这段注释是真的\"。**\n\n---\n\n## 二、第二条（更要紧）：草稿阶段就把没有引用的 finding 拒了，**这跟平台自己写下的规矩相反**\n\n### 事实\n\n`internal/rsg/semantics/finding.go` 的 `checkFinding`：`claim_version_refs` **缺失**时直接返回 `error`。\n调用链是 `Service.CreateObject` → `semantics.Check` → `len(errs) > 0` → **拒绝**\n（`internal/application/rsg/service.go:230-232`，这次提交的 `Gate` 是 `GateDraft`）。\n也就是说：**一条草稿 finding，在它还说不清自己聚合了哪些 claim 版本时，根本建不出来。**\n\n而平台自己的规矩是反过来的，三处白纸黑字：\n\n1. **`docs/08_SCIENTIFIC_OBJECTS.md:9`**：\n   > Draft 可缺部分 domain field；进入 PR/main/release 时按 validation gate 逐步增强。\n2. **`internal/rsg/validation/spec.go:90`**（草稿门）：\n   > `schema_typed` = **`SeverityWarning`**：a draft **may lack domain fields**（docs/08: Draft 可缺部分\n   > domain field）, so a payload that does not yet satisfy the object type's full schema is\n   > **reported, not refused**.\n   同文件 `:100`（PR 门）才升为 `SeverityBlocking`：**\"entering PR closes the draft allowance\"**。\n3. **同一个 package 里的两个兄弟检查**，字段在各自 schema 里**同样是 required**，它们都只出 **hint**：\n   - `checkHypothesis`（`semantics.go:272-286`）：`question_id` 缺失 → **hint**，\n     注释原话 \"a draft may not know the question yet — **the draft gate remains the authority**\"；\n   - `checkExternalReference`（`semantics.go:295-315`）：身份对**两个都不给 → \"a valid draft\"**\n     （\"Both absent is a valid draft (the pr gate demands the pair)\"）。\n\n（核过：`hypothesis.schema.json` 的 `required` 里**有** `question_id`；\n`external_reference.schema.json` 的 `required` 里**有** `source_type` 与 `external_identifier`。\n所以这不是\"那两个字段本来就不必填\"，是**明明白白的同一条规矩**。）\n\n**还有一处自相矛盾**：同一个 `checkFinding` 里，`statement` 也是 `finding.schema.json` 的 required\ndomain field，缺了它**不管**；只有 `claim_version_refs` 缺了要拒。**同一个函数的两个同类字段，两种待遇。**\n\n而且这个\"严\"其实**买不到什么**：这里只查形状（任何合法 uuid 都算数），\n所以它挡不住\"随便填个 uuid 占位\"，只挡住了\"我先建草稿、稍后再挂引用\"这条**正常写法**。\n\n### 要交什么\n\n**跟平台现有的规矩对齐**（这条是**照着已经写下的规矩做**，不是我在发明产品规则）：\n\n| 输入 | 现在 | 要变成 |\n|---|---|---|\n| `claim_version_refs` **缺失** | `error`（拒绝） | **hint**（草稿放行，说明\"钉了哪些版本\"才是 finding 的内容） |\n| 存在但不是数组 / 元素不是字符串 / 不是规范 uuid | `error` | **`error` 不变** |\n| 存在但是 `[]` | `error` | **你定，但要在 `notes_for_supervisor` 写明选择与理由**（我的读法：`[]` 与缺失同为\"什么都没钉\"，都属 minItems 1 那条 schema 规则，草稿该是 warning；但 `checkResearchQuestion` 对 `parent_question_id: \"\"` 是按 error 处理的——你说清你按哪条先例、为什么） |\n\n**三条不许动**（这不是\"放宽检查\"，谁都不许借这轮削弱保护）：\n\n- **数据库守卫不许动**：`findings_refs_present` 继续让\"一条引用都没有的 findings 投影行\"进不来；\n- **PR 门不许动**：进 PR 时 `schema_typed` 仍是 blocking，没有引用的 finding **到不了 PR**；\n- **不许**把这条 hint 顺手做成\"任何情况都不报\"。\n\n**另外要在 `notes_for_supervisor` 里回答一句**（这是这条唯一的反面理由，你得正面处理）：\n既然投影写入方还没接线，**将来它遇到一条\"没有引用\"的草稿 finding 该怎么办**？\n（跳过？不投影草稿？还是别的？）**想清楚再答**——如果你能证明\"平台**必须**在草稿就拒\"，\n那就拿证据说，我改主意；否则按上表改。\n\n`internal/rsg/semantics/finding_test.go` 里现在钉着旧行为的断言，一并改成新行为，\n并在注释里写清依据（引 `spec.go:90/100` 与两个兄弟检查）。\n\n---\n\n## 三、两处小的（顺手，别扩大）\n\n1. `internal/domain/finding.go:84` 的注释引了 **`CLAUDE.md §9.13`**——**这个出处不存在**。\n   仓库的 `CLAUDE.md` 里 `§9` 是「Domain 不变量」，是 **14 条编号条目**，第 13 条才是\"不生成\n   Truth Score / Research Score\"。`claim.go` 里的既有写法是什么，就照那个写。\n2. `tests/integration/finding_projection_test.go:315` 的灵敏度断言只查 `Contains(…, \"3500\")`，\n   而 **3500 同时是另一条 claim（`cv2`，:132）的值**，所以它分不清\"pin 挪到了 `cv1b`\"和\"join 读错了行\"。\n   **改法只加一行、不许改任何夹具的值**：把 join 出来的 `claim_version_id` 一起 `SELECT` 出来，\n   断言它等于 `cv1b`。（前一条断言已经钉了引用行，所以这不是错，只是不够紧。）\n\n---\n\n## 四、这一轮交什么\n\n1. §一 的 00057（补守卫**或**如实改注释），带**能红的探针**。\n2. §二 的 `checkFinding` + 它的测试。\n3. §三 的两处。\n4. 生成物**只重新生成**（`--check` 收尾）：`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、\n   `internal/persistence/sqlc/*`（`00057` 改了触发器就必须重新生成）。\n5. **在新基线上重跑**：`make test-integration`、`internal/domain` 与 `internal/rsg/...` 的 unit、\n   `make staticcheck`、`make check`。`RESULT.json` 的 `tests[]` **只写这一轮真跑过的、且是绿的**。\n6. `notes_for_supervisor` 是**一个字符串**，§二 末尾那两句回答**必须**在里面。\n\n## 五、规矩（没变）\n\n- **迁移号 `00057` 与文件名不变**；空号不回收。\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n  这一轮**恰恰相反**：两条都是把\"这段代码对自己说的话\"改真。\n- **生成物只能重新生成，不要手工编辑。**\n- **不要动 `allowed_scope` 外的文件**（尤其 `specs/schemas/**` 与 OpenAPI 种子——那是我的面）。\n- **不要顺手重写别的地方。**\n- 记命令时把库口令掩码成 `***`；输出与结论一字不改。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n## 六、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库）。\n- 静态检查用 **`make staticcheck`**（仓库钉住的版本）。\n- 故意跑一条会红的命令（比如证明某个守卫**确实能失败**）时，\n  那段命令与输出写进它对应那条**绿条目**的 `evidence`，或写进 `notes_for_supervisor`。\n  **不要在 `tests[]` 里留 `status: \"failed\"` 的条目**——collect 的机械判据读不出\"这条红是故意的\"，\n  整轮会被拒收。\n\n改完就停。我这边重新 collect → 复核 → G2。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-15T01:21:57Z",
+          "run_id": "run-37661f3862efbf31",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T01:45:06Z",
+          "run_id": "run-a1e73f98cfc6d6de",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-15T02:01:26Z",
+          "run_id": "run-25fd76eb549df73a"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-15T02:07:38Z",
+          "run_id": "run-d820c87176c22693",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -3760,9 +4191,12 @@
       ]
     },
     "T0606": {
-      "status": "verification",
-      "started_at": "2026-09-14T09:37:57Z",
-      "worker_run_id": "run-f9b0a49d3f75b34c",
+      "status": "merged",
+      "started_at": "2026-09-14T17:12:24Z",
+      "worker_run_id": "run-2e43d0529ddfe926",
+      "accepted_by_supervisor_at": "2026-09-14T17:34:41Z",
+      "merged_at": "2026-09-14T17:58:08Z",
+      "rejection_reason": "# T0606（00053）：主线往前走了，你的树被我搬到最新位置上——**四处撞行由我手写解**，你这一轮只做\"重验 + 如实登记\"\n\n## 一、这一轮为什么来\n\n你上一轮交的东西 collect 是过的；挡下的是**接受那道门**：\n\n> `the task's change does not apply to current main — bring the branch up to date and re-run:`\n> `git apply …: error: patch failed: cmd/api/main.go:51`\n\n说人话：这段时间主线合并了别的任务（T0309、T0402、T0213 等），四处文件**两边改到了同一块地方**，\n机械搬运合不拢，所以由**我**（Supervisor）手写解，把两边的改动**都留下**。**这不是判定你的代码有问题。**\n\n四处手写解，逐条列清楚（你可以复核，若认为哪条解得不对，**停下来报我**）：\n\n1. `cmd/api/main.go`：import 块 —— 主线加了 `cmd/api/provenancehttp`，你加了 `cmd/api/releasehttp`，**两个都留**。\n2. `internal/domain/audit.go`：常量块 —— 主线加了 `ActionSchemaProfileRegistered`（T0213），\n   你加了 `ActionReleaseCreated`，**两个都留**（各带自己的注释，中间空一行，与本文件既有分组一致）。\n3. `tests/integration/append_only_test.go`：`appendOnlyTables` 的**说明注释**两边都重写了——\n   我把两边的说法**合成一段**（00014/00015 管原始集合、00038 加 project_schema_profiles、\n   00053 加 release_creations 即你这条 Idempotency-Key 账本），表清单本身两边一致，没动。\n4. `tests/integration/migration_test.go`：索引映射表 —— 主线那批（T0213/T0502/T0505/T0508/T1001）原样保留，\n   你那条 `releases_project_created_idx`（注释 + 一行）**追加在末尾**。\n\n**派生件**（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n由工具的搬运步骤**重新生成**，**不要手工编辑**。\n\n## 二、这一轮要做的\n\n1. 在**搬完的树**上重跑并如实登记：\n   - `make test-integration`（含 `00053` 从零建库、append-only 集合、索引表）\n   - `go test $(go list ./... | grep -v '/tests/integration')`\n   - `python3 scripts/gen_schema_snapshot.py --check && python3 scripts/spec_version.py --check && make fmt-check && make staticcheck`\n     ← **注意 `make staticcheck`**：`make check` 里没有它，而 CI 的 `go` 作业有（T0309 就栽在这上面）\n   - `bash tests/integration/check-sqlc-drift.sh`（生成物要跟得上 `00053`）\n2. **如果新地基让它变红、且根因是你与主线新代码的咬合**：**停下来报我**，不要顺手改不属于你这条线的文件。\n   **不许**为了让检查变绿而删除/skip/弱化测试、放宽 assertion、放大 timeout。\n3. **交付记录的形状**：`status` 全绿才写 `completed`；`tests[]` 只留这一轮真跑过且绿的；\n   故意跑红的整段搬进对应**绿条目**的 `evidence`；`notes_for_supervisor` 是**一个字符串**，\n   把\"基线前进 + 四处手写解\"这件事按实情记一句（谁解的、解成什么）。\n4. **不改**迁移号 `00053` 与文件名；scope 外的文件一律不碰。\n5. 记命令时把库口令掩码成 `***`。\n\n## 三、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的：**不要**跑 `make migrate`。\n- 判断集成测试用 **`make test-integration`**；**不要**用裸 `go test ./...` 下结论（历史端口 15432）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2 → 合并。\n",
       "history": [
         {
           "from": "todo",
@@ -3783,6 +4217,40 @@
           "at": "2026-09-14T10:48:54Z",
           "run_id": "run-83d3951071c81979",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T17:11:50Z",
+          "run_id": "run-d0f0961eb77852e3",
+          "reason": "# T0606（00053）：主线往前走了，你的树被我搬到最新位置上——**四处撞行由我手写解**，你这一轮只做\"重验 + 如实登记\"\n\n## 一、这一轮为什么来\n\n你上一轮交的东西 collect 是过的；挡下的是**接受那道门**：\n\n> `the task's change does not apply to current main — bring the branch up to date and re-run:`\n> `git apply …: error: patch failed: cmd/api/main.go:51`\n\n说人话：这段时间主线合并了别的任务（T0309、T0402、T0213 等），四处文件**两边改到了同一块地方**，\n机械搬运合不拢，所以由**我**（Supervisor）手写解，把两边的改动**都留下**。**这不是判定你的代码有问题。**\n\n四处手写解，逐条列清楚（你可以复核，若认为哪条解得不对，**停下来报我**）：\n\n1. `cmd/api/main.go`：import 块 —— 主线加了 `cmd/api/provenancehttp`，你加了 `cmd/api/releasehttp`，**两个都留**。\n2. `internal/domain/audit.go`：常量块 —— 主线加了 `ActionSchemaProfileRegistered`（T0213），\n   你加了 `ActionReleaseCreated`，**两个都留**（各带自己的注释，中间空一行，与本文件既有分组一致）。\n3. `tests/integration/append_only_test.go`：`appendOnlyTables` 的**说明注释**两边都重写了——\n   我把两边的说法**合成一段**（00014/00015 管原始集合、00038 加 project_schema_profiles、\n   00053 加 release_creations 即你这条 Idempotency-Key 账本），表清单本身两边一致，没动。\n4. `tests/integration/migration_test.go`：索引映射表 —— 主线那批（T0213/T0502/T0505/T0508/T1001）原样保留，\n   你那条 `releases_project_created_idx`（注释 + 一行）**追加在末尾**。\n\n**派生件**（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`）\n由工具的搬运步骤**重新生成**，**不要手工编辑**。\n\n## 二、这一轮要做的\n\n1. 在**搬完的树**上重跑并如实登记：\n   - `make test-integration`（含 `00053` 从零建库、append-only 集合、索引表）\n   - `go test $(go list ./... | grep -v '/tests/integration')`\n   - `python3 scripts/gen_schema_snapshot.py --check && python3 scripts/spec_version.py --check && make fmt-check && make staticcheck`\n     ← **注意 `make staticcheck`**：`make check` 里没有它，而 CI 的 `go` 作业有（T0309 就栽在这上面）\n   - `bash tests/integration/check-sqlc-drift.sh`（生成物要跟得上 `00053`）\n2. **如果新地基让它变红、且根因是你与主线新代码的咬合**：**停下来报我**，不要顺手改不属于你这条线的文件。\n   **不许**为了让检查变绿而删除/skip/弱化测试、放宽 assertion、放大 timeout。\n3. **交付记录的形状**：`status` 全绿才写 `completed`；`tests[]` 只留这一轮真跑过且绿的；\n   故意跑红的整段搬进对应**绿条目**的 `evidence`；`notes_for_supervisor` 是**一个字符串**，\n   把\"基线前进 + 四处手写解\"这件事按实情记一句（谁解的、解成什么）。\n4. **不改**迁移号 `00053` 与文件名；scope 外的文件一律不碰。\n5. 记命令时把库口令掩码成 `***`。\n\n## 三、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的：**不要**跑 `make migrate`。\n- 判断集成测试用 **`make test-integration`**；**不要**用裸 `go test ./...` 下结论（历史端口 15432）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2 → 合并。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T17:12:24Z",
+          "run_id": "run-2e43d0529ddfe926",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T17:21:31Z",
+          "run_id": "run-1d25f54f7b42d8c2",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T17:34:41Z",
+          "run_id": "run-f94e3a94b8c0ebc4"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T17:58:08Z",
+          "run_id": "run-a49c96b290dae30b",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -3805,22 +4273,59 @@
       "merged_at": null
     },
     "T0609": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-14T17:59:55Z",
+      "worker_run_id": "run-4b45730356d089a5",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T17:58:13Z",
+          "run_id": "run-10afd35b6444e9d5"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T17:59:55Z",
+          "run_id": "run-4b45730356d089a5",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T18:24:19Z",
+          "run_id": "run-a596dd042b1d6509",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T0701": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "rejected",
+      "started_at": "2026-09-14T18:27:28Z",
+      "worker_run_id": "run-b286a199aa96d5a6",
+      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (bash tests/integration/check-sqlc-drift.sh (from a clean tree)) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T18:00:06Z",
+          "run_id": "run-79c7c0da0391cde7"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T18:27:28Z",
+          "run_id": "run-b286a199aa96d5a6",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T18:52:49Z",
+          "run_id": "run-001832ad1ffbc288",
+          "reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (bash tests/integration/check-sqlc-drift.sh (from a clean tree)) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        }
+      ]
     },
     "T0702": {
       "status": "todo",
@@ -3931,13 +4436,31 @@
       "merged_at": null
     },
     "T0803": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-14T17:38:04Z",
+      "worker_run_id": "run-25059ba42f9e6ba7",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T17:09:56Z",
+          "run_id": "run-68b31d253a4f3024"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T17:38:04Z",
+          "run_id": "run-25059ba42f9e6ba7",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T18:12:10Z",
+          "run_id": "run-22e0ca558a7664b1",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T0804": {
       "status": "todo",
@@ -4093,9 +4616,11 @@
       "merged_at": null
     },
     "T1001": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-14T15:17:43Z",
       "worker_run_id": "run-d53226d1afc08655",
+      "accepted_by_supervisor_at": "2026-09-14T15:51:18Z",
+      "merged_at": "2026-09-14T15:54:45Z",
       "rejection_reason": "# T1001（Transactional Outbox）：基线前移到 main + 六条复核意见的处置\n\n> 这封信写的就是**你工作树里正在发生的事**。第三节的六条判定我逐条查过\n> （`.rddev/workers/T1001-review/RESULT.json`），第四节要交什么是硬要求。\n\n## 一、为什么这一轮要你返工\n\n不是你的代码有问题。你的 collect 与复核都过了（复核结论 **`approve`**），\n卡住你的是 **accept** —— 原文：\n\n> `rddev task accept: the task's change does not apply to current main — bring the branch up to date\n> and re-run: git apply …/post-integration-T1001.patch: exit status 1:`\n> `error: patch failed: internal/application/rsg/service.go:43`\n> `error: patch failed: specs/SPEC_VERSION.json:1`\n> `error: patch failed: specs/database/postgres.sql:40`\n> `error: patch failed: tests/integration/rsg_domain_services_test.go:127`\n\n你停在 `8db06b0`。你之后落地的任务有一整串（`00036` T0209、`00038` T0213、\n`00040` T0501、`00041` T0502、`00042` T0306 已经进主线，`00043` T0505、`00045` T0508\n还在飞，会赶在你前面落地），所以这一轮的前移是机械的，不是让你重做一遍。\n下面第二节写的**合成规则**，最早是对着 `a111a00` 那版主线做的；**你打开工作树时，它已经被机械地\n重放到更新的一版主线上了**（主线在我写完这封信之后又动了两次，那两次都不改 specs 输入，\n所以这一段的前移可能只是几个文件。以你工作树里的 `git log --oneline -1` 为准）。\n合成规则本身没有变，变的是它落下来的那版基底；派生文件一律按**你现在的树**重新生成，不靠文本合并。\n**合并前它还会被机械地再前移一次**，那一层不用你处理。\n\n## 二、这一轮的前移是**手工合成**的（三层合并解不开）—— 请对照你的工作树读这一节\n\n有几处，主线和你改的是**同一个文件的同一段**，纯文本合并解不开，所以这棵树是我按\n**并集 / 取舍**手工合成的。你的测试现在就跑在这棵树上，所以每一处你都要知道**它合成成了什么**：\n\n1. **`internal/application/rsg/service.go` —— 重点看这个**。四处冲突，三处并集，一处真取舍：\n   - `Service` / `Deps` 的**字段追加**：主线的 `queries QueryPort`（T0209）、\n     `schemaProfiles ProfileResolver`（T0213）与你的 `events Recorder`，按**名字**取并集；\n     初始化器里三个都赋了值。都在。\n   - `Deps` 上面那段**文档注释**：主线那一版的整段原样保留，你写的 `Events` / outbox 那句附在最后。\n     两边说的不是一回事，不矛盾，都要在。\n   - **一处真取舍（`CreateObject` 的 schema 解析）**：主线（T0213，已在主线里）是\n     `ref, err := s.resolveSchemaRef(ctx, projectID, in.ObjectType, in.SchemaRef)`；\n     你的版本写在 T0213 **之前**，是 `schemaFor` + `\"V1 pins the canonical schema per object type\"` 的拒绝。\n     **保留了主线的。** 理由：`resolveSchemaRef` 内部本来就走 `schemaFor`，并且照样拒绝\n     \"非规范、未登记的 schema_ref\" —— 你那条拒绝是它行为的**真子集**，而 T0213 新增的\n     \"项目 schema profile\" 正是它多出来的那一块。留着你那条，等于把主线现在支持的 schema profile\n     重新拒掉。**你那句 `visibility := eventVisibility(branch.Visibility)` 留下了** ——\n     你的 outbox 调用要它。这次替换是**逐行申报**的（合成记录里的 `.override`，四行被替换、\n     三行主线的替换进了文件），不是\"悄悄删掉\"。\n   - ⇒ 如果你认为这个取舍**错了**（比如你确实需要那条 pin 拦住什么），在 `RESULT.json` 里\n     指明**哪一行、为什么**，**别闷声改回去**。合错了是我的问题，不算你返工。\n2. **`internal/application/rsg/service_test.go`**：两处。`fakeBranches` 的**字段并集**\n   （主线的 `list` / `listErr` 与你的 `visibility`）；文件末尾**两边各自追加的测试**\n   （主线的 `fakeProfileResolver` + `***`，\n   与你的四个 outbox 测试）。**你的四个测试都在**，而且是顶层函数 —— 不在主线那个测试体里面\n   （两边各缺同一个 `}` + `}` 收尾，git 把这两行对成了公共上下文，合成时按\"主线先、你的后\"放好）。\n3. **`cmd/api/main.go`**：两边都往**同一个复合字面量**里加**带键的条目**（主线的 `SchemaProfiles`\n   与你的 `Events`），按键取并集 —— 两边都有 `Profiles:` 但缩进不同，按行并会得到重复键\n   （gofmt 看不出来的类型错误）。\n4. **`tests/integration/migration_test.go`**：迁移清单/注释的**并集**（两边各自加条目）。\n5. **`tests/integration/object_detail_test.go`、`tests/integration/rsg_domain_services_test.go`**：\n   三方合并**自动合上了**（两边是不同段落），不需要你处理。\n6. **生成物**（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、\n   `internal/persistence/sqlc/*`）：已按**你现在的树**重新生成（36 个迁移），并用 `--check` 断言过。\n   你这一轮改完代码后**必须再生成一次**，同样用 `--check` 收尾 —— 它们对不上是**预期内**的：\n   任何停在旧基线的工作树都会在这里对不上，这不是你的问题。\n   （顺带说明：我把你的 `allowed_scope` 补上了 `internal/persistence/sqlc/**` ——\n   你的迁移 `00046` 会移动那里的生成物，而它原来的 scope 里没有这一条，\n   所以上一轮 collect 拒的是**我的 scope 划窄了**，不是你的 diff 越界。这一轮它在里面了。）\n\n**你要做的第一件事**：把这一节和你的工作树对照。上面任何一处如果你认为合错了，\n在 `RESULT.json` 里指明**哪一行、为什么**，**不要闷声改回去**。\n\n## 三、六条复核意见的处置（这是这一轮第二件正事）\n\n复核结论是 `approve`（不阻断），但 §5.1 的条件 4 是\"**没有未解决的复核意见**\"——\n\"不阻断\"和\"解决了\"不是一回事（`L1-73` 已记）。逐条判如下，其中**三条要你在这一轮原地改**：\n\n| # | 级别 | 位置 | 问题 | 本轮做什么 |\n|---|---|---|---|---|\n| 1 | minor | `cmd/worker/main.go:112` | dispatcher goroutine 没在 `pool.Close()` 之前 join，关停时可能对着已关闭的池子查库并打出一条误导日志 | **改**：用 `WaitGroup`（或等价手段）在 `Close()` 前等它退出 |\n| 3 | minor | `internal/events/event.go:141` | `withPayloadVersion` 走 `map[string]any` 往返，JSON 数字被重新编码成 `float64`，>2^53 的整数会**静默丢精度** | **改**：用 `json.Decoder.UseNumber()`（或保留生产者原字节）让数字**按字面量**过一遍 |\n| 4 | nit | `internal/events/publish.go:247` | `last_error` 按**字节**截断 `msg[:maxErrorLen]`，可能切断一个 UTF-8 字符 | **改**：按 rune 截 |\n\n另外两条**不在你这一轮做**，理由要写进 `RESULT.json` 的 notes（**不是忽略，是记了名、指了人**）：\n\n- `publish.go:101`（PG 挂掉时每秒一行 Error、没有退避）与 `publish.go:97`（有 `WithBatchSize` 却没有\n  `WithPollInterval`）—— 这两条是**运维策略**（重试节奏、日志节奏、可调参数面），\n  它们的正确形态由 **T1109（生产级 Observability/Dashboards，尚未开始）** 的 SLO/告警口径决定；\n  在这里先拍一个值，到 T1109 还要改一次。**这两条作为未解决项转给 T1109**，我会让它的规格承接。\n\n还有一条**明确不改**，但它连带一个小的\"把引用写对\"的活，同样要写进 notes：\n\n- `internal/application/rsg/events.go:79`：`state.committed` 的摘要带 `kind/entity_id/version_no` 而不带\n  `Detail`（对象/关系类型）。**这个做法保留**：事件载荷是**标识性**的，consumer 拿 id 去解析行，\n  类型信息在行上就有。塞进事件等于在事件里冗余一份**会漂移**的真相。**所以不改** ——\n  但**你（或更早一轮）代码注释里写的 `docs/52 §17` 这个出处是错的**：`docs/52_BACKEND_STANDARD.md`\n  根本没有编号小节（只有 `层次 / API / DB / Workers / External adapters` 五节），没有\"§17\"。\n  这条口径真正落在 **`docs/52` 的「Workers」那一节**（第 19 行）：\"Job payload 只传\n  identity/version/reference，不放大块敏感数据\" —— 那是**后台 job 载荷**的规定，\n  `research_events` 沿用同一口径是**类推**，还没有被逐字写进哪份文档（我已记进自己的文档欠账）。\n  所以这一轮请你把 `internal/application/rsg/events.go:16` 与 `internal/events/event.go:60`\n  这两处注释的**出处改成正确的那个**（写\"docs/52「Workers」关于 job payload 的口径，事件沿用同一原则\"\n  即可），别留一个查不到的 §17。注释是 scope 内的文件，这属于你这一轮的活。\n  然后在 notes 里写明：\"事件载荷只带标识是按 docs/52「Workers」的口径类推的有意选择；\n  将来若要按类型过滤事件，需重新审这个决定\" —— 别让它看起来像被漏掉。\n\n## 四、这一轮要交什么\n\n1. **读一遍合成过的那几个文件**（第二节逐条列了它们合成了什么），判断对不对。\n2. **做完上表里那三条改动**，并为它们加**能失败的测试**：\n   - #3 的测试要能在\"整数被折成 float64\"时**红**（例如一个大于 2^53 的整数经过 `withPayloadVersion` 后仍逐位相等）；\n   - #4 的测试要能在\"切断多字节字符\"时**红**；\n   - #1 是关停顺序，能做就做一个可复现的检查，做不了就在 notes 里说明**为什么没有测试**——\n     **不要**用\"测不了\"当理由跳过它，也不要写一个永远绿的测试来凑数。\n3. **在新基线上重跑受影响的测试**，`RESULT.json` 的 `tests[]` **只写这次真跑过的**。\n4. `status` 按实情写：全绿才 `completed`；还有红就 `blocked`/`failed` 并如实登记。\n   **红着报告比造假绿好** —— 那道门拦的是\"跑了、红了、还写 completed\"这种自相矛盾，不是 bug。\n5. 格式：`RESULT.json` 的 `notes_for_supervisor` 是**一个字符串**，不是列表\n   （T0309 上一轮就是死在这个形状上）。\n\n## 五、不要动的\n\n- **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout。**\n- **生成物只能重新生成，不要手工编辑**（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、\n  `internal/persistence/sqlc/*`）。手工改出来的\"一致\"不算一致。\n- **迁移号 `00046` 不变**，文件名别动。**37/39/44 永远空着**，`00045` 是 T0508 的（在你前面落地）——\n  号是**分配**的，不是从仓库索引里挑的（链子的约束：goose 默认拒绝乱序迁移，\n  CI 用全新库看不到这个问题，但任何已经升级过的库都会中招）。\n- 不要动 `allowed_scope` 外的文件。\n\n## 六、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（它自己建一次性库，起在 5432）。\n  **不要**用裸 `go test ./...` 下结论：那条路上几个测试会去连 `127.0.0.1:15432` 然后 connection refused，\n  那是 Makefile 注释里记着的历史端口 bug，不是你的代码问题。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2。\n\n---\n\n## 附：关于\"故意跑红\"的记录位置（22:52 追加，其余内容一字未改）\n\n如果这一轮你**故意跑一条会红的命令**（回退某处修复、或写一条\"证明当前形状会红\"的探针）来证明某个\n守卫**确实能失败**：那段命令与输出写进它对应那条**绿条目**的 `evidence` 字符串，或者写进\n`notes_for_supervisor`。**不要在 `tests[]` 里留 `status: \"failed\"` 的条目**——collect 的\n`result-consistency` 是机械判据（`status: completed` 加任何 `failed`/`not_run` 条目 = 自相矛盾），\n它读不出\"这条红是故意的\"，整轮会被**拒收**（T0508 在 22:47 就这么白跑了一轮）。\n**证据一个字都别删**，只是**换个格子放**：`tests[]` 只装\"这一轮真跑过、且是绿的\"条目。\n",
       "history": [
         {
@@ -4145,6 +4670,26 @@
           "at": "2026-09-14T15:17:43Z",
           "run_id": "run-d53226d1afc08655",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T15:37:45Z",
+          "run_id": "run-8e5d77feaea59c67",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-14T15:51:18Z",
+          "run_id": "run-a751fd2a3caec9f7"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-14T15:54:45Z",
+          "run_id": "run-3df9e03e3ea99306",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -4185,13 +4730,184 @@
       "merged_at": null
     },
     "T1006": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-14T17:51:14Z",
+      "worker_run_id": "run-2d2cf64bc4d16c61",
+      "rejection_reason": "collect rejected: scope: 2 changed path(s) outside allowed_scope [infra/migrations/** specs/database/postgres.sql specs/SPEC_VERSION.json internal/events/** internal/application/** cmd/worker/** go.mod go.sum .env.example cmd/api/** apps/web/** tests/**]: internal/persistence/sqlc/events_audit.sql.go, internal/persistence/sqlc/models.go",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-14T15:54:45Z",
+          "run_id": "run-59655012c5f628d3"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T15:54:47Z",
+          "run_id": "run-f55303eaecf945ab",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T16:28:33Z",
+          "run_id": "run-7a6417ef2d2a740e",
+          "reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (POSTGRES_TEST_ADMIN_URL=postgres://postgres:***@127.0.0.1:5432/post go test ./tests/integration -count=1) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T16:35:40Z",
+          "run_id": "run-cb81a6cdd64bf0d5",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T16:35:58Z",
+          "run_id": "run-7c1789431095eb6c",
+          "reason": "# T1006（00059）：你的**代码没错**——collect 拒了两件：记录形状，和一件你**本来就不该做**的事；后者的权我已经补上了\n\n## 一、collect 为什么拒（原文，库口令已掩码）\n\n> `collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed`\n> `(POSTGRES_TEST_ADMIN_URL=postgres://postgres:***@127.0.0.1:5432/post go test ./tests/integration -count=1)`\n> `— a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed`\n\n说人话，是**两件**事，别混成一件：\n\n**第一件（记录形状）**：你写了 `status: completed`，`tests[]` 里却有一条 `failed`。那道门是**机械判据**，\n它读不出\"这条红是别的原因\"——它只认\"有 failed 就不许说 completed\"。**你没有造假**：那条红你写得\n非常清楚，我读过了，**你的判断是对的**（见第二件）。\n\n**第二件（实质）**：那条红的根源是 `internal/persistence/sqlc` 这个**生成物**没跟上 `00059`——\n这条迁移会把 `webhook_fanned_out_at` 带进既有 outbox 查询的 `RETURNING` 列表，所以 sqlc 的输出会动。\n而它**不在你当时的 scope 里**，于是你写了\"不在 scope 内，我不写，留给合并时重新生成\"。\n**那句话在那一刻完全正确**，就该这么办——**这是任务包少了一格，不是你的错。**\n\n**那一格本来就该在**：先例是 `T1001`（同样是 outbox + 一条迁移），它的 scope 里有\n`internal/persistence/sqlc/**`。`specs/orchestrator/derived-artifacts.json` 里给 sqlc 的注释也写着：\n迁移**动了**这个输出时，正是 `check-sqlc-drift` 会抓——而抓它的地方就是这一轮。\n\n## 二、我已经做完的（你不必替我解释，也不必替我改）\n\n- 把 `internal/persistence/sqlc/**` 加进了**你这个任务的任务包与权威门输入记录**：\n  `.rddev/runtime/tasks/T1006/gate-inputs.json`、`.rddev/runtime/tasks/T1006/task-package.json`、\n  `.rddev/workers/T1006/task-package.json`。**你可以自己 grep 确认**那三份文件里现在都列着它。\n  所以你**现在有权**重新生成这个生成物——collect 的 scope 判据读的就是那份权威记录。\n- `tasks/tasks.json`（DAG 真相源）里那一格会在**下一次 DAG 编辑**时同步：现在动它会把主线上的\n  spec 标记（`specs/SPEC_VERSION.json`，它以 `tasks/tasks.json` 为输入）换掉，让链子上在飞的几个任务\n  白跑一轮。这条已经记进 `tasks/decisions.md`。\n\n## 三、这一轮要做的（一件 + 一次如实登记）\n\n1. **重新生成 sqlc，并证明它现在绿**：\n   `bash scripts/gen_sqlc.sh`，然后 `bash tests/integration/check-sqlc-drift.sh` 必须是绿的。\n   **生成物只能重新生成，不许手工编辑。**\n2. **重跑受影响的门**（如实登记在 `tests[]`）：\n   - `make test-integration`（上一轮唯一那条红 `TestSQLCGenerationDrift` 现在应当是绿的。\n     **如果还有别的红，那是另一件事：停下来报我**，不要顺手改）\n   - `go test $(go list ./... | grep -v '/tests/integration')`\n   - `python3 scripts/gen_schema_snapshot.py --check && python3 scripts/spec_version.py --check && make fmt-check && make check-openapi`\n   - 上一轮你手工做的 down-migration 验证**不必重复**（除非生成物的改动影响了它——那你自己判断并写明）。\n3. **交付记录的格子**（这一条是这次被拒的直接原因，务必按它写）：\n   - `tests[]` 里**只留这一轮真跑过、且是绿的**条目。上一轮那条失败条目的**原文一个字都不许删**：\n     把它的命令与输出**整段搬进它对应那条绿条目**（同一条 `make test-integration`）的 `evidence` 字符串里。\n   - `notes_for_supervisor` 必须是**一个字符串**。你上一轮写的那段判断（\"红是因为生成物、不在 scope 内\"）\n     **原样保留**，并在后面**补一句**：这一轮 Supervisor 已补齐 scope、生成物已重新生成、同一条命令转绿。\n   - `status` **全绿才写 `completed`**。\n4. **不要动的**：迁移号 `00059` 与文件名不变；除这次点名的 sqlc 生成物外，不碰 scope 外的任何东西；\n   **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout**。\n5. 记命令时把库口令掩码成 `***`（例如 `POSTGRES_TEST_ADMIN_URL=postgres://postgres:***@…`），\n   或者直接写 `make test-integration`；**输出与结论一字不改**。\n\n## 四、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库，起在 5432）；**不要**用裸 `go test ./...`\n  下结论——那条路上几个测试会去连 `127.0.0.1:15432`，那是 Makefile 注释里记着的历史端口问题。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2 → 合并。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T16:36:16Z",
+          "run_id": "run-51f103323951c409",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "worker_failed",
+          "at": "2026-09-14T16:40:26Z",
+          "run_id": "run-dd4947f2aeb747fe",
+          "reason": "worker exited 143"
+        },
+        {
+          "from": "worker_failed",
+          "to": "ready",
+          "at": "2026-09-14T16:42:29Z",
+          "run_id": "run-390974025c25f825"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T16:42:39Z",
+          "run_id": "run-22c13c3060ce8153",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T16:42:39Z",
+          "run_id": "run-9e155ba4adfe532d",
+          "reason": "# T1006（00059）：你的**代码没错**——collect 拒了两件：记录形状，和一件你**本来就不该做**的事；后者的权我已经补上了\n\n## 一、collect 为什么拒（原文，库口令已掩码）\n\n> `collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed`\n> `(POSTGRES_TEST_ADMIN_URL=postgres://postgres:***@127.0.0.1:5432/post go test ./tests/integration -count=1)`\n> `— a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed`\n\n说人话，是**两件**事，别混成一件：\n\n**第一件（记录形状）**：你写了 `status: completed`，`tests[]` 里却有一条 `failed`。那道门是**机械判据**，\n它读不出\"这条红是别的原因\"——它只认\"有 failed 就不许说 completed\"。**你没有造假**：那条红你写得\n非常清楚，我读过了，**你的判断是对的**（见第二件）。\n\n**第二件（实质）**：那条红的根源是 `internal/persistence/sqlc` 这个**生成物**没跟上 `00059`——\n这条迁移会把 `webhook_fanned_out_at` 带进既有 outbox 查询的 `RETURNING` 列表，所以 sqlc 的输出会动。\n而它**不在你当时的 scope 里**，于是你写了\"不在 scope 内，我不写，留给合并时重新生成\"。\n**那句话在那一刻完全正确**，就该这么办——**这是任务包少了一格，不是你的错。**\n\n**那一格本来就该在**：先例是 `T1001`（同样是 outbox + 一条迁移），它的 scope 里有\n`internal/persistence/sqlc/**`。`specs/orchestrator/derived-artifacts.json` 里给 sqlc 的注释也写着：\n迁移**动了**这个输出时，正是 `check-sqlc-drift` 会抓——而抓它的地方就是这一轮。\n\n## 二、我已经做完的（你不必替我解释，也不必替我改）\n\n- 把 `internal/persistence/sqlc/**` 加进了**你这个任务的任务包与权威门输入记录**：\n  `.rddev/runtime/tasks/T1006/gate-inputs.json`、`.rddev/runtime/tasks/T1006/task-package.json`、\n  `.rddev/workers/T1006/task-package.json`。**你可以自己 grep 确认**那三份文件里现在都列着它。\n  所以你**现在有权**重新生成这个生成物——collect 的 scope 判据读的就是那份权威记录。\n- `tasks/tasks.json`（DAG 真相源）里那一格会在**下一次 DAG 编辑**时同步：现在动它会把主线上的\n  spec 标记（`specs/SPEC_VERSION.json`，它以 `tasks/tasks.json` 为输入）换掉，让链子上在飞的几个任务\n  白跑一轮。这条已经记进 `tasks/decisions.md`。\n\n## 三、这一轮要做的（一件 + 一次如实登记）\n\n1. **重新生成 sqlc，并证明它现在绿**：\n   `bash scripts/gen_sqlc.sh`，然后 `bash tests/integration/check-sqlc-drift.sh` 必须是绿的。\n   **生成物只能重新生成，不许手工编辑。**\n2. **重跑受影响的门**（如实登记在 `tests[]`）：\n   - `make test-integration`（上一轮唯一那条红 `TestSQLCGenerationDrift` 现在应当是绿的。\n     **如果还有别的红，那是另一件事：停下来报我**，不要顺手改）\n   - `go test $(go list ./... | grep -v '/tests/integration')`\n   - `python3 scripts/gen_schema_snapshot.py --check && python3 scripts/spec_version.py --check && make fmt-check && make check-openapi`\n   - 上一轮你手工做的 down-migration 验证**不必重复**（除非生成物的改动影响了它——那你自己判断并写明）。\n3. **交付记录的格子**（这一条是这次被拒的直接原因，务必按它写）：\n   - `tests[]` 里**只留这一轮真跑过、且是绿的**条目。上一轮那条失败条目的**原文一个字都不许删**：\n     把它的命令与输出**整段搬进它对应那条绿条目**（同一条 `make test-integration`）的 `evidence` 字符串里。\n   - `notes_for_supervisor` 必须是**一个字符串**。你上一轮写的那段判断（\"红是因为生成物、不在 scope 内\"）\n     **原样保留**，并在后面**补一句**：这一轮 Supervisor 已补齐 scope、生成物已重新生成、同一条命令转绿。\n   - `status` **全绿才写 `completed`**。\n4. **不要动的**：迁移号 `00059` 与文件名不变；除这次点名的 sqlc 生成物外，不碰 scope 外的任何东西；\n   **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout**。\n5. 记命令时把库口令掩码成 `***`（例如 `POSTGRES_TEST_ADMIN_URL=postgres://postgres:***@…`），\n   或者直接写 `make test-integration`；**输出与结论一字不改**。\n\n## 四、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库，起在 5432）；**不要**用裸 `go test ./...`\n  下结论——那条路上几个测试会去连 `127.0.0.1:15432`，那是 Makefile 注释里记着的历史端口问题。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2 → 合并。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T16:42:40Z",
+          "run_id": "run-c555d37e0658f4a0",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "worker_failed",
+          "at": "2026-09-14T16:43:01Z",
+          "run_id": "run-86fe3e5b01947588",
+          "reason": "worker exited 1"
+        },
+        {
+          "from": "worker_failed",
+          "to": "ready",
+          "at": "2026-09-14T16:45:13Z",
+          "run_id": "run-042b6641088c23c6"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-14T16:45:14Z",
+          "run_id": "run-9998351606ac25d5",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T16:45:14Z",
+          "run_id": "run-22915e668c247a6a",
+          "reason": "# T1006（00059）：你的**代码没错**——collect 拒了两件：记录形状，和一件你**本来就不该做**的事；后者的权我已经补上了\n\n## 一、collect 为什么拒（原文，库口令已掩码）\n\n> `collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed`\n> `(POSTGRES_TEST_ADMIN_URL=postgres://postgres:***@127.0.0.1:5432/post go test ./tests/integration -count=1)`\n> `— a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed`\n\n说人话，是**两件**事，别混成一件：\n\n**第一件（记录形状）**：你写了 `status: completed`，`tests[]` 里却有一条 `failed`。那道门是**机械判据**，\n它读不出\"这条红是别的原因\"——它只认\"有 failed 就不许说 completed\"。**你没有造假**：那条红你写得\n非常清楚，我读过了，**你的判断是对的**（见第二件）。\n\n**第二件（实质）**：那条红的根源是 `internal/persistence/sqlc` 这个**生成物**没跟上 `00059`——\n这条迁移会把 `webhook_fanned_out_at` 带进既有 outbox 查询的 `RETURNING` 列表，所以 sqlc 的输出会动。\n而它**不在你当时的 scope 里**，于是你写了\"不在 scope 内，我不写，留给合并时重新生成\"。\n**那句话在那一刻完全正确**，就该这么办——**这是任务包少了一格，不是你的错。**\n\n**那一格本来就该在**：先例是 `T1001`（同样是 outbox + 一条迁移），它的 scope 里有\n`internal/persistence/sqlc/**`。`specs/orchestrator/derived-artifacts.json` 里给 sqlc 的注释也写着：\n迁移**动了**这个输出时，正是 `check-sqlc-drift` 会抓——而抓它的地方就是这一轮。\n\n## 二、我已经做完的（你不必替我解释，也不必替我改）\n\n- 把 `internal/persistence/sqlc/**` 加进了**你这个任务的任务包与权威门输入记录**：\n  `.rddev/runtime/tasks/T1006/gate-inputs.json`、`.rddev/runtime/tasks/T1006/task-package.json`、\n  `.rddev/workers/T1006/task-package.json`。**你可以自己 grep 确认**那三份文件里现在都列着它。\n  所以你**现在有权**重新生成这个生成物——collect 的 scope 判据读的就是那份权威记录。\n- `tasks/tasks.json`（DAG 真相源）里那一格会在**下一次 DAG 编辑**时同步：现在动它会把主线上的\n  spec 标记（`specs/SPEC_VERSION.json`，它以 `tasks/tasks.json` 为输入）换掉，让链子上在飞的几个任务\n  白跑一轮。这条已经记进 `tasks/decisions.md`。\n\n## 三、这一轮要做的（一件 + 一次如实登记）\n\n1. **重新生成 sqlc，并证明它现在绿**：\n   `bash scripts/gen_sqlc.sh`，然后 `bash tests/integration/check-sqlc-drift.sh` 必须是绿的。\n   **生成物只能重新生成，不许手工编辑。**\n2. **重跑受影响的门**（如实登记在 `tests[]`）：\n   - `make test-integration`（上一轮唯一那条红 `TestSQLCGenerationDrift` 现在应当是绿的。\n     **如果还有别的红，那是另一件事：停下来报我**，不要顺手改）\n   - `go test $(go list ./... | grep -v '/tests/integration')`\n   - `python3 scripts/gen_schema_snapshot.py --check && python3 scripts/spec_version.py --check && make fmt-check && make check-openapi`\n   - 上一轮你手工做的 down-migration 验证**不必重复**（除非生成物的改动影响了它——那你自己判断并写明）。\n3. **交付记录的格子**（这一条是这次被拒的直接原因，务必按它写）：\n   - `tests[]` 里**只留这一轮真跑过、且是绿的**条目。上一轮那条失败条目的**原文一个字都不许删**：\n     把它的命令与输出**整段搬进它对应那条绿条目**（同一条 `make test-integration`）的 `evidence` 字符串里。\n   - `notes_for_supervisor` 必须是**一个字符串**。你上一轮写的那段判断（\"红是因为生成物、不在 scope 内\"）\n     **原样保留**，并在后面**补一句**：这一轮 Supervisor 已补齐 scope、生成物已重新生成、同一条命令转绿。\n   - `status` **全绿才写 `completed`**。\n4. **不要动的**：迁移号 `00059` 与文件名不变；除这次点名的 sqlc 生成物外，不碰 scope 外的任何东西；\n   **不许为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout**。\n5. 记命令时把库口令掩码成 `***`（例如 `POSTGRES_TEST_ADMIN_URL=postgres://postgres:***@…`），\n   或者直接写 `make test-integration`；**输出与结论一字不改**。\n\n## 四、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的（版本 40、缺 34/35）：**不要**跑 `make migrate` / `rddev db migrate`。\n- 判断集成测试用 **`make test-integration`**（自建一次性库，起在 5432）；**不要**用裸 `go test ./...`\n  下结论——那条路上几个测试会去连 `127.0.0.1:15432`，那是 Makefile 注释里记着的历史端口问题。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2 → 合并。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T16:45:15Z",
+          "run_id": "run-d1fc69537b1cec1f",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T16:49:48Z",
+          "run_id": "run-42641abe660ce4a9",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T16:57:47Z",
+          "run_id": "run-8179a184e46b5c8a",
+          "reason": "# T1006（00059）：主线往前走了一大截，你的树要搬到主线最新位置上**再验一遍**——这不是你的活儿出了问题\n\n## 一、这一轮为什么来\n\n你上一轮交的东西 **collect 全过了**、复核也已派出；挡下的是**接受那道门**，原话是：\n\n> `the task's change does not apply to current main — bring the branch up to date and re-run:`\n> `git apply …: error: patch failed: specs/SPEC_VERSION.json:1`\n\n说人话：这期间主线合并了别的任务，`specs/SPEC_VERSION.json`（那份\"规格指纹\"）**两边都动过**，\n直接把你的改动叠到新主线上会撞在同一行。**这不是判定你的代码有问题**——T0402 今天早些时候\n也是同一类，这叫**基线前进**，是机械工序，不是缺陷。\n\n我这边正把你的树**搬到主线最新位置上**（rebaseline）。搬运时三个**派生件**——\n`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc`——\n**由工具重新生成**，你**不要手工编辑**它们。\n\n## 二、这一轮要做的（换了地基，重跑一遍）\n\n1. 在**搬完之后的树**上重跑并如实登记：\n   - `bash tests/integration/check-sqlc-drift.sh`（生成物要跟得上 `00059`，必须绿）\n   - `make test-integration`\n   - `go test $(go list ./... | grep -v '/tests/integration')`\n   - `python3 scripts/gen_schema_snapshot.py --check && python3 scripts/spec_version.py --check && make fmt-check && make check-openapi`\n2. **如果新地基让它变红，而红的根因是你与主线新代码的咬合**（不是环境、不是历史端口问题）：\n   **停下来报我**，不要顺手去改不属于你这条线的文件；**也不要**为了让检查变绿而删测试、\n   skip、放宽断言、放大 timeout（这条是硬规矩）。\n3. **交付记录照上一轮的形状**：`status` 全绿才写 `completed`；`tests[]` 只留这一轮真跑过且绿的；\n   故意跑红的整段搬进对应**绿条目**的 `evidence`；`notes_for_supervisor` 是**一个字符串**，\n   你上一轮写的判断**一个字不缩水**地保留，末尾补一句\"本轮因基线前进重跑，结论同上/有变化\"。\n4. **不改**迁移号 `00059` 与文件名；scope 外的文件一律不碰。\n5. 记命令时把库口令掩码成 `***`。\n\n## 三、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的：**不要**跑 `make migrate`。\n- 判断集成测试用 **`make test-integration`**；**不要**用裸 `go test ./...` 下结论\n  （那条路上几个测试会去连 `127.0.0.1:15432`，是 Makefile 注释里记着的历史端口问题）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2 → 合并。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T16:57:48Z",
+          "run_id": "run-8f8f410c99e18d0a",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T17:06:22Z",
+          "run_id": "run-716bfa155e63b288",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-14T17:18:46Z",
+          "run_id": "run-80c529caa72fc777",
+          "reason": "# T1006（00059）：复核 **approve**（0 阻断、3 minor、4 nit）——这一轮**两件事一起做**：把树搬到主线新 tip + 修掉其中 6 条\n\n## 一、这一轮为什么来（两件，都不是\"你的代码被判死\"）\n\n1. **重心：复核意见**。独立复核的结论是 **`approve`**（不阻断）。§5.1 的条件 4 是\"**没有未解决的复核意见**\"，\n   正文在 `.rddev/workers/T1006-review/RESULT.json`。**7 条我都读过**：6 条落在你这一轮新写的代码里，\n   而这一轮**本来就要重跑一次**（见第 2 点），所以按老规矩——**这几条边际成本为零，这一轮修掉**；\n   剩下 1 条（第 3 条）不在你 scope 内，**不许碰**，由我记录并指定接手人。\n2. **机械：基线前进**。接受那道门在把你的改动叠到**当前主线**时被挡下（`patch failed: specs/SPEC_VERSION.json:1`）——\n   这段期间主线合并了 T0309/T0402 等。工具会把你的树**搬到主线最新位置**，并把\n   `specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc` 三个**派生件重新生成**。\n   **派生件只许重新生成，不许手工编辑。**\n\n## 二、这一轮要修的 6 条（原文见复核文件，我按条给口径）\n\n1. **`internal/events/fanout.go:116`（minor）**：`RunOnce` 的注释承诺\"单行失败不拖累整批\"，\n   但所有写入共用**一个事务**、没有 savepoint——任何语句出错都会把整批回滚，于是**坏行会被反复认领**，\n   卡住它后面的一切。**口径：让代码兑现那句话**（逐行 savepoint，失败的那行按你的判断跳过并留下可观测的痕迹，\n   而不是静默丢弃）；若你判断有更干净的做法，**必须写明一句话的理由**，并且\"不静默\"。**不要**只是把注释改小\n   来迁就代码——注释里的意图是对的。**要有一条\"改之前会红\"的证据**（构造一行必然失败的写入，断言其余行仍然完成）。\n2. **`cmd/api/webhookshttp`（minor）**：新的 HTTP 面**没有网络层测试**。补上，至少覆盖：\n   路由模式、鉴权守卫（未授权/越权）、**201 与\"密钥只出现一次\"的响应形状**、\n   错误码映射（400 校验 / 403 / 404 / 503 的边界）、以及**读接口永不返回密钥**。\n3. **（不许改，见 §三）`webhookshttp` 不写审计行（minor）**：复核自己也写明\"任务合同不要求、也没有文档规定\"，\n   属**产品一致性**问题；且改它要动 `internal/domain/**`，**不在你 scope 内**。由我记录 + 指定接手人。\n4. **`internal/events/deliver.go:337`（nit）**：`blockedIP` 漏了保留网段——补上\n   `100.64.0.0/10`（CGNAT）、`192.0.0.0/24`、`198.18.0.0/15`、`240.0.0.0/4`，\n   **每条都要有正反例测试**（这些地址被拒、相邻的公网地址不被拒），保留现有的拨号期解析校验。\n5. **`internal/events/deliver.go:239`（nit）**：2xx/4xx/5xx 之外的状态码不该烧掉\"连续失败\"计数；\n   传输层错误记为 `response_code=0` 会让\"没有响应\"和\"真的 HTTP 0\"分不开——**记成 NULL**。\n6. **`internal/events/webhook_store.go:195`（nit）**：`before` 不是合法 UUID 时现在是**503**（把客户端输入错误\n   报成了依赖故障），应当是 **400 VALIDATION_FAILED**（在边界上校验）。\n7. **`internal/events/webhook_store.go:193`（nit）**：端点删除后，它的投递历史在接口上**再也不可见**\n   （`JOIN` 把 `endpoint_id IS NULL` 的行全丢了）。按项目不变量\"没有东西会消失\"，\n   这些行**必须还能读**（改成 LEFT JOIN，端点已删的行如实标注）。**要有一条测试**：删端点 → 历史仍在。\n\n## 三、这一轮**不要**动的\n\n- **不动**第 3 条（审计行）：不碰 `internal/domain/**`，不新增审计动作常量——那是另一件事，我会记下来。\n- **不改**迁移号 `00059` 与文件名；scope 外的文件一律不碰。\n- **不许**为了让检查变绿而删除/skip/弱化测试、放宽 assertion、放大 timeout。\n- 复核里**没被点名的行为**不要顺手重构；这一轮是\"6 条 + 重验\"。\n\n## 四、这一轮要重跑的门（换了地基，全跑）\n\n1. `go test $(go list ./... | grep -v '/tests/integration')`（含你新写的 handler 测试与 SSRF 正反例）\n2. `make test-integration`\n3. `python3 scripts/gen_schema_snapshot.py --check && python3 scripts/spec_version.py --check && make fmt-check && go vet ./... && make staticcheck`\n   ← **`make staticcheck` 不能漏**：`make check` 里没有它，而 CI 的 `go` 作业有（T0309 就栽在这上面）\n4. `bash tests/integration/check-sqlc-drift.sh`（生成物要跟得上 `00059`）\n\n## 五、交付记录的形状（这条你上上轮栽过，务必按它写）\n\n- `notes_for_supervisor` 必须是**一个字符串**；`tests[]` 只留**这一轮真跑过且绿**的条目。\n- 故意跑红的（§二.1 的探针）：整段命令与输出**搬进对应绿条目的 `evidence`**，一个字不删——\n  那道门是机械判据，\"有 failed 就不许说 completed\"，它读不出\"这条红是故意的\"。\n- 复核 7 条**逐条**在 `notes_for_supervisor` 里给一句处置（改了/为什么没改），**不要**复述整段原文。\n- 记命令时把库口令掩码成 `***`；`status` 全绿才写 `completed`。\n\n## 六、环境事实（没变）\n\n- 共享 dev 库 `post` 是坏的：**不要**跑 `make migrate`。\n- 判断集成测试用 **`make test-integration`**；**不要**用裸 `go test ./...` 下结论（历史端口 15432）。\n- 跑完确认 `ps` 里没有你自己留下的进程。\n\n改完就停。我这边重新 collect → 复核 → G2 → 合并。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T17:19:08Z",
+          "run_id": "run-398e8ec825d97cbe",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-14T17:41:25Z",
+          "run_id": "run-9b2b5aca6221ec0f",
+          "reason": "collect rejected: scope: 2 changed path(s) outside allowed_scope [infra/migrations/** specs/database/postgres.sql specs/SPEC_VERSION.json internal/events/** internal/application/** cmd/worker/** go.mod go.sum .env.example cmd/api/** apps/web/** tests/**]: internal/persistence/sqlc/events_audit.sql.go, internal/persistence/sqlc/models.go"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-14T17:51:14Z",
+          "run_id": "run-2d2cf64bc4d16c61",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-14T18:00:06Z",
+          "run_id": "run-96b671204fdb4fb8",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T1007": {
       "status": "todo",

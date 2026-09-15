@@ -1608,9 +1608,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-14T15:21:40Z
+生成时间：2026-09-15T02:08:03Z
 
-状态分布：todo 71 · ready 0 · running 1 · worker_failed 0 · verification 6 · rejected 1 · blocked 0 · accepted 0 · merged 54（合计 133/133 个任务）
+状态分布：todo 65 · ready 0 · running 0 · worker_failed 0 · verification 5 · rejected 1 · blocked 0 · accepted 0 · merged 62（合计 133/133 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1651,7 +1651,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0211 | Research Outline 与基础 Research 页面 | P2 | merged | 2026-09-14T10:46:47Z |  | 2026-09-14T11:11:59Z | 2026-09-14T11:17:54Z |
 | T0212 | Project Overview Research Summary | P2 | merged | 2026-09-14T11:18:06Z |  | 2026-09-14T12:00:35Z | 2026-09-14T12:03:51Z |
 | T0213 | Project Schema Extension 与 Custom Metadata | P2 | merged | 2026-09-14T09:33:12Z |  | 2026-09-14T10:22:06Z | 2026-09-14T10:25:27Z |
-| T0214 | 官方材料研发 Project Templates | P2 | verification | 2026-09-14T11:18:23Z |  |  |  |
+| T0214 | 官方材料研发 Project Templates | P2 | merged | 2026-09-15T00:04:24Z |  | 2026-09-15T00:54:01Z | 2026-09-15T01:00:23Z |
 | T0215 | 版本计数 backfill 的数据级升级断言（00024 + 00025） | P2 | merged | 2026-09-13T18:06:02Z |  | 2026-09-13T18:55:01Z | 2026-09-13T19:03:58Z |
 | T0301 | Gitea adapter 与 repo provisioning | P3 | merged | 2026-09-13T23:39:37Z |  | 2026-09-13T23:50:50Z | 2026-09-13T23:53:45Z |
 | T0302 | Git main 双层保护 | P3 | merged | 2026-09-13T23:53:46Z |  | 2026-09-14T00:31:44Z | 2026-09-14T00:34:39Z |
@@ -1661,20 +1661,20 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0306 | Unstructured Change 状态 | P3 | merged | 2026-09-14T11:54:25Z |  | 2026-09-14T12:25:49Z | 2026-09-14T12:29:12Z |
 | T0307 | Files Tree/Preview API | P3 | merged | 2026-09-14T06:06:52Z |  | 2026-09-14T06:52:08Z | 2026-09-14T06:56:45Z |
 | T0308 | 只读 Files Web UI | P3 | merged | 2026-09-14T07:02:46Z |  | 2026-09-14T07:47:08Z | 2026-09-14T07:50:21Z |
-| T0309 | Git ↔ RSG reconciliation | P3 | rejected | 2026-09-14T07:50:42Z |  |  |  |
+| T0309 | Git ↔ RSG reconciliation | P3 | merged | 2026-09-14T16:17:01Z |  | 2026-09-14T16:39:39Z | 2026-09-14T16:43:01Z |
 | T0401 | Research State Diff 引擎 | P4 | merged | 2026-09-14T08:24:01Z |  | 2026-09-14T09:05:38Z | 2026-09-14T09:08:52Z |
-| T0402 | Pull Request Domain | P4 | verification | 2026-09-14T10:13:57Z |  |  |  |
-| T0403 | Integrity Review Checks | P4 | todo |  |  |  |  |
-| T0404 | Scientific Review 模型 | P4 | todo |  |  |  |  |
+| T0402 | Pull Request Domain | P4 | merged | 2026-09-14T16:43:46Z |  | 2026-09-14T17:06:02Z | 2026-09-14T17:09:30Z |
+| T0403 | Integrity Review Checks | P4 | merged | 2026-09-14T22:26:40Z |  | 2026-09-14T22:49:24Z | 2026-09-14T22:52:37Z |
+| T0404 | Scientific Review 模型 | P4 | verification | 2026-09-14T18:12:18Z |  |  |  |
 | T0405 | Semantic Conflict Detector | P4 | merged | 2026-09-14T10:19:26Z |  | 2026-09-14T10:46:43Z | 2026-09-14T10:50:01Z |
 | T0406 | Semantic Merge Engine | P4 | todo |  |  |  |  |
-| T0407 | Scientific Conflict Resolution UI | P4 | verification | 2026-09-14T10:50:03Z |  |  |  |
+| T0407 | Scientific Conflict Resolution UI | P4 | merged | 2026-09-14T18:21:29Z |  | 2026-09-14T21:49:46Z | 2026-09-14T21:53:00Z |
 | T0408 | PR Research Diff UI | P4 | todo |  |  |  |  |
 | T0409 | Merge Governance 与 frozen main 更新 | P4 | todo |  |  |  |  |
 | T0410 | PR/Branch 完整 E2E | P4 | todo |  |  |  |  |
 | T0501 | Research Question 与 Hypothesis 关系模型 | P5 | merged | 2026-09-14T10:52:04Z |  | 2026-09-14T11:17:35Z | 2026-09-14T11:21:07Z |
 | T0502 | Claim 结构与 scope | P5 | merged | 2026-09-14T11:24:17Z |  | 2026-09-14T11:46:32Z | 2026-09-14T11:49:54Z |
-| T0503 | Finding 聚合模型 | P5 | verification | 2026-09-14T11:49:56Z |  |  |  |
+| T0503 | Finding 聚合模型 | P5 | merged | 2026-09-15T01:21:57Z |  | 2026-09-15T02:01:26Z | 2026-09-15T02:07:38Z |
 | T0504 | Evidence Assertion Domain | P5 | verification | 2026-09-14T12:06:39Z |  |  |  |
 | T0505 | Provenance Graph Projection | P5 | merged | 2026-09-14T14:04:45Z |  | 2026-09-14T14:24:41Z | 2026-09-14T14:27:50Z |
 | T0506 | Evidence Graph Projection | P5 | todo |  |  |  |  |
@@ -1687,11 +1687,11 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0603 | Organization/Project Policy Engine | P6 | merged | 2026-09-14T03:42:50Z |  | 2026-09-14T04:09:38Z | 2026-09-14T04:12:31Z |
 | T0604 | Scientific Responsibility / Reviewer Routing | P6 | todo |  |  |  |  |
 | T0605 | Release Manifest Builder | P6 | merged | 2026-09-14T08:39:33Z |  | 2026-09-14T09:24:39Z | 2026-09-14T09:33:18Z |
-| T0606 | Immutable Release API/UI | P6 | verification | 2026-09-14T09:37:57Z |  |  |  |
+| T0606 | Immutable Release API/UI | P6 | merged | 2026-09-14T17:12:24Z |  | 2026-09-14T17:34:41Z | 2026-09-14T17:58:08Z |
 | T0607 | Activity/Audit Timeline 增强 | P6 | todo |  |  |  |  |
 | T0608 | Release/Abort/Policy E2E | P6 | todo |  |  |  |  |
-| T0609 | Project Milestone 基础 | P6 | todo |  |  |  |  |
-| T0701 | Research Asset Core/PID | P7 | todo |  |  |  |  |
+| T0609 | Project Milestone 基础 | P6 | verification | 2026-09-14T17:59:55Z |  |  |  |
+| T0701 | Research Asset Core/PID | P7 | rejected | 2026-09-14T18:27:28Z |  |  |  |
 | T0702 | 四类 Asset Manifest validator | P7 | todo |  |  |  |  |
 | T0703 | Rights Model | P7 | todo |  |  |  |  |
 | T0704 | Publication Impact Preview | P7 | todo |  |  |  |  |
@@ -1704,7 +1704,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0711 | Asset Governance 与 Rights Holder Transfer | P7 | todo |  |  |  |  |
 | T0801 | Public Entity Anonymous Pages | P8 | todo |  |  |  |  |
 | T0802 | Explore 聚合 | P8 | todo |  |  |  |  |
-| T0803 | Open Contribution Opportunity | P8 | todo |  |  |  |  |
+| T0803 | Open Contribution Opportunity | P8 | verification | 2026-09-14T17:38:04Z |  |  |  |
 | T0804 | External Fork/Contribution flow | P8 | todo |  |  |  |  |
 | T0805 | Published Knowledge Object | P8 | todo |  |  |  |  |
 | T0806 | External Evidence Network Aggregation | P8 | todo |  |  |  |  |
@@ -1722,12 +1722,12 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0906 | Evidence-backed Answer Generator/API | P9 | todo |  |  |  |  |
 | T0907 | Search Answer Web UI | P9 | todo |  |  |  |  |
 | T0908 | Search → Draft Research Context | P9 | todo |  |  |  |  |
-| T1001 | Transactional Outbox | P10 | running | 2026-09-14T15:17:43Z |  |  |  |
+| T1001 | Transactional Outbox | P10 | merged | 2026-09-14T15:17:43Z |  | 2026-09-14T15:51:18Z | 2026-09-14T15:54:45Z |
 | T1002 | Subscription Model / Follow/Watch | P10 | todo |  |  |  |  |
 | T1003 | Web Research Inbox | P10 | todo |  |  |  |  |
 | T1004 | RSS/Atom Feeds | P10 | todo |  |  |  |  |
 | T1005 | Email Digest abstraction | P10 | todo |  |  |  |  |
-| T1006 | Signed Webhooks | P10 | todo |  |  |  |  |
+| T1006 | Signed Webhooks | P10 | verification | 2026-09-14T17:51:14Z |  |  |  |
 | T1007 | Dependency Impact Analysis | P10 | todo |  |  |  |  |
 | T1101 | 统一 Primer-style Design System | P11 | todo |  |  |  |  |
 | T1102 | Research Map 高质量交互 | P11 | todo |  |  |  |  |
