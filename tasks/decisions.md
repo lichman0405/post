@@ -9032,3 +9032,93 @@ requirement 段写 e2e 时只说"(a)(b)(d) 必须经由真实路径"，**没点�
 自动段由 `scripts/update_progress.py` 只重写 `AUTO-PROGRESS` 之间，**手写段未被覆盖**（已核对 diff：4 行改动全在自动段）。
 本轮提交：`tasks/decisions.md`、`tasks/progress.md`、`tasks/task_status.json` 一起提交——
 **提交窗口的定义是"刚合并完、还没换基线"，现在正是**。
+
+## L1-20260916-109 —— T0409 合并落地（PR #247）；同一把尺子下的"收"；三处我自己的文字修正
+
+### 一、判据与上一轮同一把尺子，结论相反
+
+上一轮（L1-108）复核是 `approve` 但挂着 **1 major**，我判返工。这一轮复核
+（`verdict-run-183bc50974216e4d`）**approve、0 blocking、0 major**（3 minor、2 nit、7 risks），我**收**。
+
+判据不是"复核说了 approve"，而是**验收标准第 1 条被交付了**——端点那条路真的跑通了。差异是实的：
+
+- 全树再也搜不到 `mergeSvc.Merge(...)`；`mergeThroughTheEndpoint` 发的是契约请求，断言读的是
+  handler 自己那份 JSON（`mergeE2EPayload` 的字段就是线上字段名）。
+- 图用**生产构造函数**搭：`mergehttp.New(Deps{Command: mergeSvc, Projects: projectSvc})` →
+  `Register(apiMux)` → `httptest.NewServer(authAPI.Guard(apiMux))`，**不是**测试里手搓一份等价注册
+  （那样只证明"测试写的和 main.go 写的一样"，不证明 main.go 是对的）。
+- 身份走**真**注册/会话/CSRF；`wiring.go` 的包注释改成"只差两个适配器是内存实现"并把该例外写明——
+  **它现在说的每一句都能在它点名的那个文件里查到。**
+
+### 二、我自己的独立核对（不是听它自述）
+
+1. **范围**：32 个文件全部落在 `allowed_scope` 内，`forbidden_scope` 一处未碰；PR #247 的文件列表
+   与核过的 32 个**逐一对应**，没有夹带。
+2. **端点**：见上。`.rddev/workers/T0409-review/diff.txt` 生成于返工**之后**（含新装配、无旧直接调用），
+   所以复核看的是**这一版**，不是上一版。
+3. **断言没有被削弱**（§5.1 的硬约束，我专门查了"diff 里被删掉的断言"）：全 diff 只删了 **2 行**断言，
+   **两行都是改强**——
+   - `plan bytes depend on the run`（`tests/integration/merge_test.go`）→ 换成**两个不同目标上的
+     两个决定互换顺序仍得同样字节**，且每次 build 都被检查"它的决定确实生效了"。旧写法喂同一个决定两遍，
+     按新注释的说法，连"把决定当有序日志读"的实现都能蒙混过去。
+   - `audits == 5`（`tests/integration/resolution_test.go`）→ `audits != len(kinds)`，种类表 5→8
+     （即 T0406 复核 nit 3 那一条，判据见 L1-108 §四）。
+4. **时点**：`rddev` 的 collect/G2/G3/G4 全绿；CI 七个必过项全绿（`go` 3m6s、`migration-integration` 3m40s）。
+
+### 三、记档不修的三条（判据仍是"保护在不在"，不是字数）
+
+这一轮的 3 minor / 2 nit 里，两条 minor 是**上一轮同一条**被再次提出。我按同一把尺子处置：
+
+- **replay 回的是请求里的那个号**（`internal/application/merge/service.go:305`）：客户端**越出契约**
+  才有后果，`releases` 同形状（`internal/application/releases/command.go:115-121`），payload 的
+  `Replayed` 是诚实的。**记档不修**——要改得两条同契约路径一起改，那是另一个任务。
+- **写路径 store 错误未归类 → 线上 500 且 `retryable=false`**（`service.go:580`）：行为安全（什么都没被写
+  两遍，重试收敛到赢家那一次），但它与**同一条服务的读路径**（`:300`、`:423` 包成 `ErrStore` → 503 可重试）
+  **不一致**。**立 #248**，不在这一节里改。
+- **`TestListPendingGitMergesScansTheUnfinishedSagas` 的顺序断言是弱式**（`tests/integration/merge_test.go:1493`）：
+  该测试的强项在别处（`ids[0]` 必须缺席、`ids[1]` failed、`ids[2]` pending、limit-1 返回同一首行）。
+  **记档**——加强它是"可以更好"，不是"现在不对"。
+
+### 四、落处：#246 与 #248
+
+- **#246**（本轮之前立）：`ListPendingGitMerges` 零产品调用者 + 服务身份只在启动时解析一次。
+  **这一轮复核的 `risks[0]` 与 `risks[5]` 正是这两条**，等于独立确认了它值得存在。恢复代码是**有的**
+  （`replay → retryGitStep`，从合并自己记下的 plan 重驱），缺的是**自动的驱动者**。
+- **#248**（本轮立）：这条端点的**错误面/请求面与同族不一致**——(a) 写路径 store 错误未归类
+  （500 不可重试）vs 读路径（503 可重试）；(b) **同一个幂等头，merge 严（缺则 400）、release 宽（空则传 nil）**，
+  而契约对两条操作挂的是同一个"必填 + minLength 8"参数。**(b) 里严的那条是对的**，是 release 松了；
+  收紧 release 会改变既有路由的接受面，属别的任务 scope，所以只记不改。
+
+### 五、我自己的三处文字修正（同一轮内改掉，不留给下一轮）
+
+复核 nit 3 指出：验收标准第 3 条写 `pr.merged`，交付用 `pull_request.merged`。**交付是对的**
+（`specs/events/event-types.yaml:20` 的机器可读口径，全树其余事件同此；docs/18 §2 是散文拼法）
+——**是我的文字不准**。连同 T0705 那两处写死的迁移号，一共三处，在派 T0705 **之前**一并改掉
+（提交 `8d1e7a5`；`specs/SPEC_VERSION.json` 随之重新生成，`make check-spec-version` 绿，
+`sha256:ffd5748cac6e79dd`）。
+
+T0705 那两处的由来：`requirements` 与 `supervisor_scope_narrowing` **都**写死了 `00071`，而 71 是 T0712
+派工时预留、**至今未使用**的号；70 已随 T0409 落进 main，所以分配器会给 T0705 **00072**。不改就会出现
+"任务书说 71、派工 prompt 说 72"的**自相矛盾**——正是上一轮我判 T0409 返工的那一类毛病。
+改法是**不再点名任何号**（编号由 prompt 权威给出，`internal/devorchestrator/worker_render.go:461`
+逐字写着 "reserved for you at dispatch" 并禁止自行选号），同时把"69 给了 T0406、70 给了 T0409、
+71 是 T0712 预留未用"写清楚，免得下一个人再去猜。**派工后已核**：prompt 里 `00072` 出现 2 次、
+`00071` 出现 **0** 次。
+
+### 六、结论与下一步
+
+T0409 合并为 **PR #247**（squash `926f292`），`infra/migrations/00070_merge_governance.sql` 随它进 main
+——**迁移链的那一环通了**，后面所有要新迁移号的任务不再被它挡着。
+
+下一步 **T0705「资产发布治理」**（P7，依赖 T0704，G3 = `rsg-real-services`），**已派工**
+（`run-543bc2fa8158bb7c`，基线 `8d1e7a5`，迁移号 **00072**）。选它的理由：它后面排着 **42 个**传递依赖，
+是当前可派任务里杠杆最高的；任务包本身已是详尽的（18 条带出处的 requirement、6 条验收标准）。
+**它的关键引用我这轮逐条核过树**：`00064_asset_pid_origin.sql:22` 的 "arrives with T0705 (publish)"、
+`PublishResearchAssetVersion` 的 INSERT 列里**确实没有** `origin_refs`（而 00064 把它设成 NOT NULL）、
+`internal/application/releases/command.go:287-296` 的 `Authorize`/`Permits` 形状、
+`internal/application/contribution/service.go:173-175` 的 `IsAgent` 兜底、openapi 的
+"human governance action" —— **引用属实**。
+
+其余可派任务的包**还是骨架**（T0506/T0509/T0804/T0805 的 `requirements` 只有两三行、`relevant_specs` 为空），
+**不具备派工条件**——派出去等于让 Worker 自己发明产品语义，CLAUDE.md §5 明令禁止。
+补包是我的活，排在 T0705 跑起来之后。

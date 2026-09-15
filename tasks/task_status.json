@@ -3591,9 +3591,11 @@
       ]
     },
     "T0409": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-15T22:47:47Z",
       "worker_run_id": "run-3b9722b68da09d44",
+      "accepted_by_supervisor_at": "2026-09-15T23:34:48Z",
+      "merged_at": "2026-09-15T23:41:45Z",
       "rejection_reason": "# 返工：验收标准第 1 条的「经新端点合并成功」没有交付，且 wiring.go 的注释在为不存在的覆盖作证\n\n这一轮**只改一件事**：让那个 e2e 真的**经过新端点**合并。判定语义、闸门、台账一个字都不许动。\n\n## 1. 具体是什么没交\n\n验收标准第 1 条（原文，含义已被钉死）：\n\n> 新的合并路径**只**走提供方 PR merge（`ViaMerge` 判定通过），不引入任何 push/force/delete 分支；\n> 既有的 `tests/integration/gitea_protection_test.go` 仍绿，且新增断言**「经新端点合并成功」**与\n> **「直接 push main 仍被拒」**在**同一个 e2e** 里同时成立\n\n「直接 push main 仍被拒」那半做到了。「**经新端点合并成功**」那半没有：\n`tests/integration/merge_governance_e2e_test.go:343`（以及 replay 的 `:487`）调的是\n`mergeSvc.Merge(...)`，**端点根本没参与**。全树 grep：`mergehttp` 只被 `cmd/api/main.go:53`（import）\n与 `cmd/api/main.go:725`（`mergehttp.New`）引用，**没有任何测试包引用它**。也就是说\nhandler → command 这道缝、线上去的错误码映射、以及 replay 的响应形状，**从来没有在真合并上跑过一次**。\n\n## 2. 为什么这不是「字面较真」\n\n本任务的全部主张是「**端点是 main 前进的唯一一条路**」。而今天这条主张的证据只有：\nhandler 对着**假 command** 的单测、加上你独立写的一个 ServeMux 探针。`cmd/api/main.go:725`\n那两行装配（`Command:` 传的是谁、`Projects:` 传的是谁、`Register(v1)` 挂没挂上去）\n**今天没有任何测试会因为它写错而变红**。\n\n## 3. 要求：照同族的先例走，让请求真的进端点\n\n**先例就在树里，照它写**：`tests/integration/release_e2e_test.go`（同族的\"幂等创建 + 台账\"面）。\n它的 `newReleaseServer`（`:149`）就是干这个的：真 migration、真 pgx store、**真 guard（session + CSRF）**、\n`releasehttp.New(...)` + `<api>.Register(apiMux)` + `httptest.NewServer(authAPI.Guard(apiMux))`（`:225`），\n只有 session store 用 `memstore.NewSessions()`（`:152`，文件头 `:42-44` 把这条例外写明了）。\n\n具体到你这儿：\n\n- 用**生产的构造函数**把图搭起来，与 `cmd/api/main.go:725-729` 同形：\n  `mergehttp.New(mergehttp.Deps{Command: <你已经建好的那个真 merge.NewService>, Projects: <真 projects 服务>})`\n  → `Register(apiMux)` → `httptest.NewServer(authAPI.Guard(apiMux))`。\n  **不要**在测试里手写一份等价但独立的 mux 注册（那样只证明你写的和 main.go 写的一样，不证明 main.go 是对的）。\n- 合并请求走 `POST /api/v1/projects/{projectId}/pull-requests/{number}:merge`，带 `Idempotency-Key` 头，\n  身份经**真 guard**（照 release e2e 造真 session）。**不许**用假的中间件往 context 里塞 principal ——\n  `withPrincipal` 是**未导出**的（`cmd/api/authhttp/auth_middleware.go:56`），塞不进去；真要绕开 guard\n  才能过，说明这条要求本身做不到，**停下来在 RESULT 里说清楚，不要发明**。\n- `:487` 那次 replay 同样走端点（幂等的证据因此也变成线上的证据）。\n- 断言照旧落在同一份事实上，只是换成读线上响应：`mergePayload`（`cmd/api/mergehttp/handler.go:68`）\n  带着 `git_state` / `git_sha` / `git_error` / `plan_digest` / `state_id` / `replayed`，\n  足以把现有那几条（`res.Merge.GitState == updated`、`res.State.ID`、`res.Merge.PlanDigest`、`res.Replayed`）\n  平移到响应上；而事件行、audit 行、main head、provider 侧 main ref 这些**仍然直接读库/读 provider**，不要改。\n- 测试名与 label 不变（`TestMergeGovernanceEndToEnd`，label `merge governance e2e`），仍然真 PostgreSQL + 真 Gitea。\n- 如果端点这条路**跑出真实缺陷**（例如 guard 拒绝、项目闸门放行/拒绝与预期不符、响应字段映射错），\n  **那是这次返工最有价值的产出**：写进 RESULT，不要为了让它绿而改判定或绕过端点。\n\n## 4. 同时要修的：`cmd/api/mergehttp/wiring.go` 的包注释\n\n`:6-11` 现在写着：\n\n> cmd/api builds the production graph; the integration and E2E suites build the same graph over the same\n> real PostgreSQL and the same real Gitea.\n\n**今天这是假的**（没有任何 integration/E2E 包引用 `mergehttp`）。这正是我在 T0406 遗留项\n（第 3、6、7 条）里点名要罚的那一类「注释替不存在的覆盖作证」，而且它作证的恰好就是验收标准第 1 条\n要的那个端点覆盖。\n\n你按第 3 节做完之后这句话**应该**成真（图经生产构造函数搭、真库、真 Gitea）。**要么让它成真\n（并且核对它真成真了：用的是 `mergehttp.New` + `Register`，不是手写注册），要么把话说准**——\n比如只差 session store 是内存的时候，就照 `release_e2e_test.go:42-44` 的做法把这条例外写出来。\n不许留一句比事实强的话。\n\n## 5. 这一轮不许动的\n\n- 合并的**判定语义**：确定性、冲突不自动选赢家、八种决定各自生效、私有源并入公开目标整体扣留 ——\n  一个字都不许改（复核的那份证据挂在这四条上）。\n- policy 闸（fail-closed）、integrity 闸（blocking 即拒）、台账 `merge_creations`、\n  幂等语义、事件与 audit 的落法。\n- 这一轮**只加一条请求路径**：不改行为，只让已有的行为经过端点被证明一次。\n\n## 6. 我这边要说明的一件事（你的做法没有错，是我的任务包自相矛盾）\n\n任务包的 requirement 段写 e2e 时只说「(a)(b)(d) 必须经由真实路径」，**没有点名端点**；\n而验收标准第 1 条点名了「经新端点」。两句是我写得不一样，你按 requirement 那段做了。\n**判定标准是验收标准那一条**，所以这轮按第 3 节补齐。下次我写包会把这两处对齐。\n\n## 7. 交回来时要写清楚的\n\n1. 端点那条路真的跑通了：哪个测试、哪次请求、响应断言了什么（贴关键断言）。\n2. `wiring.go` 的注释现在说的是什么，以及它**为什么**成真（或哪里仍然不是真的）。\n3. 有没有跑出真实缺陷；没有就明说没有。\n4. 原先那四条断言 (a)(b)(c)(d) 与幂等，在改完之后仍然同时成立。\n",
       "history": [
         {
@@ -3643,6 +3645,26 @@
           "at": "2026-09-15T22:47:47Z",
           "run_id": "run-3b9722b68da09d44",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-15T23:20:22Z",
+          "run_id": "run-6899c31f90fd3603",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-15T23:34:48Z",
+          "run_id": "run-f21d275cf20e13f1"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-15T23:41:45Z",
+          "run_id": "run-be9a29a7a342315c",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -4922,13 +4944,24 @@
       ]
     },
     "T0705": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-15T23:43:26Z",
+      "worker_run_id": "run-543bc2fa8158bb7c",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-15T23:43:21Z",
+          "run_id": "run-3511977d0c613083"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-15T23:43:26Z",
+          "run_id": "run-543bc2fa8158bb7c",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0706": {
       "status": "todo",
