@@ -1,6 +1,7 @@
 package devorchestrator
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -211,6 +212,62 @@ func TestTheLoopRevisitsVerificationAndAccepted(t *testing.T) {
 	}
 	if seen["T0003"] {
 		t.Error("a todo task was treated as needing action — that is what the DAG's dependencies are for")
+	}
+}
+
+// The driver's other exit. A loop that only ever acts cannot tell "the phase is
+// done" from "I have not looked yet", and getting that wrong produces the exact
+// failure this driver exists to remove: a process that stays alive holding the
+// slot and the lock, looking healthy, doing nothing, forever.
+//
+// It had no test until the phase-boundary checkpoint went looking for one. That
+// checkpoint's rule is that a property living in Go is checked by running the Go
+// test, and there was none — so the property was being asserted by grepping for
+// the message string. The grep proves the sentence exists; it does not prove the
+// driver reaches it, and it says nothing about the state left behind.
+func TestAnExhaustedDriverReportsCompletionInsteadOfWaiting(t *testing.T) {
+	root := t.TempDir()
+	dagPath := writeDAG(t, root)
+	statePath := filepath.Join(root, "task_status.json")
+	// Both tasks merged: nothing dispatchable, nothing running, no open
+	// decision. The DAG agrees with the stub, so the stub's empty answer is the
+	// real one and not a lie told to reach the branch.
+	if err := os.WriteFile(statePath, []byte(`{"version":2,"tasks":{
+		"T0001":{"status":"merged"},"T0002":{"status":"merged"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	calls := filepath.Join(root, "calls.log")
+	var log strings.Builder
+
+	o := &DriveOpts{
+		RepoRoot: root, DagPath: dagPath, StatePath: statePath,
+		Binary: writeIdleRddev(t, calls), Out: &log,
+		StaleCheck: func() (string, bool) { return "", false },
+		Poll:       10 * time.Millisecond,
+		Parallel:   1,
+	}
+	// A deadline rather than a goroutine: an exhausted driver returns on its
+	// first pass, so a correct build finishes in milliseconds while a broken one
+	// fails here deterministically instead of hanging the suite or racing the
+	// log buffer.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := o.Drive(ctx); err != nil {
+		t.Fatalf("an exhausted driver kept waiting instead of reporting completion: %v", err)
+	}
+
+	st, err := ReadDriverStatus(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The state is the half that matters operationally: it is what `rddev
+	// status` reads, and "idle" is the difference between a finished phase and
+	// a driver that is merely quiet.
+	if st == nil || st.State != "idle" {
+		t.Errorf("completion is not on the record `rddev status` reads: %+v", st)
+	}
+	if !strings.Contains(log.String(), "nothing to do") {
+		t.Errorf("the driver stopped without saying why:\n%s", log.String())
 	}
 }
 
@@ -598,6 +655,21 @@ func writeRecordingRddev(t *testing.T, calls string) string {
 		"case \"$1 $2\" in\n" +
 		"  \"task next\") echo T0001;;\n" +
 		"esac\nexit 0\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin
+}
+
+// writeIdleRddev writes a fake rddev that reports no dispatchable task. The
+// difference from writeRecordingRddev is the whole point of the test above:
+// "T0001" is work to do, and empty is the end of the phase.
+func writeIdleRddev(t *testing.T, calls string) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "rddev")
+	script := "#!/bin/sh\n" +
+		"echo \"$1 $2\" >> \"" + calls + "\"\n" +
+		"exit 0\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

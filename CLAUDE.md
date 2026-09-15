@@ -142,7 +142,7 @@ Supervisor 必须独立检查 diff、scope、acceptance criteria，并重新运�
 
 Supervisor **不因"一个任务/一个阶段/一轮对话结束了"而停止等待人工输入**。
 机械段（dispatch → 等待 → collect → review → accept → commit → push → PR → 等 CI → merge → 再 dispatch）
-由 `scripts/supervise.sh` 驱动；**只有四类情形才停下来**：
+由 `rddev drive` 驱动；**只有四类情形才停下来**：
 
 1. **L3**：产品、科研语义、安全、权限、隐私、法律或公开性决策；
 2. **重大 L2**：会改变既定核心架构原则；
