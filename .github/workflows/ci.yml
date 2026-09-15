@@ -126,6 +126,25 @@ jobs:
         run: bash tests/acceptance/driver-persistence-e2e.sh
       - name: "acceptance: a gate cannot grade a tree it changed or failed to measure"
         run: bash scripts/tests/gitea-e2e-guard-unit-test.sh
+      # The phase-boundary checkpoint had the defect this job was created to fix,
+      # one step further along: it was written for the 2026-09-13 hardening and
+      # then invoked by nothing, which is how its step 7 came to name a script
+      # the tree had long since replaced. Nothing noticed, because a file nobody
+      # runs does not fail.
+      #
+      # The marker is what its step 6 reads: that step asks that the acceptance
+      # e2e be exercised, and this job is already running every one of them just
+      # above. Without the marker the checkpoint would run `scripts/ci.sh
+      # acceptance` and with it this whole stage again.
+      #
+      # One of its items needs PostgreSQL and Redis, and says so rather than
+      # inventing an answer (this job is a bare runner by design — see the header
+      # above). The RSG gate is a G3 job that rddev runs with the dev stack; the
+      # checkpoint asserts the wiring, which is checkable anywhere, and reports
+      # the behavioural half as NOT ASKED. Read its output, not only its exit
+      # code: a green here means every other item ran.
+      - name: "acceptance: the phase-boundary checkpoint (the five structural defects, re-checked)"
+        run: POST_INSIDE_ACCEPTANCE_STAGE=1 bash tests/acceptance/phase-boundary-checkpoint.sh
 
   # Stage 5 — Python: lint / type / pytest (configs: ops/ci/ruff.toml,
   # ops/ci/mypy.ini).

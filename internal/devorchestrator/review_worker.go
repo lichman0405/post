@@ -242,6 +242,20 @@ func SpawnReview(opts *ReviewSpawnOpts) (*SpawnResult, error) {
 	logPath := filepath.Join(reviewDir, "worker.log")
 	pidFile := filepath.Join(reviewDir, "claude.pid")
 	statusFile := filepath.Join(reviewDir, "exit.status")
+	// A re-dispatch must not leave the previous attempt's exit.status behind,
+	// for the same reason worker_spawn removes both copies (T0012): exit.status
+	// is the file an observer waits on, so while the old one is in place a wait
+	// returns before this Review Worker has done anything, and collect then
+	// judges a run that is still in flight. The outcome turns on which process
+	// happened to be alive at that instant — a gate that flakes (issue #207:
+	// green on a re-run, green locally, red on the acceptance job) is a gate
+	// nobody can read. Both copies are removed; the reaper rewrites them when
+	// THIS attempt ends.
+	for _, f := range []string{statusFile, authoritativeExitStatusPath(opts.RepoRoot, reviewID)} {
+		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("removing the previous attempt's exit status %s: %w", f, err)
+		}
+	}
 	var workerCmd []string
 	if opts.Timeout > 0 {
 		workerCmd = wrapTimeout(opts.Timeout, claudeBin, args)

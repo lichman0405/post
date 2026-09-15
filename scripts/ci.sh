@@ -122,6 +122,13 @@ stage_acceptance() {
   # run in a tree it had already committed to (L1-20260913-16), and a gate that
   # mutates what it grades cannot be believed about anything else it reports.
   bash scripts/tests/gitea-e2e-guard-unit-test.sh
+  # The phase-boundary checkpoint (2026-09-13) closes the loop on the five
+  # structural defects that hardening was about. It was written for that work
+  # and then invoked by nothing, which is exactly how its step 7 came to name a
+  # script that had since been deleted — the rot the comment above warns about.
+  # The marker tells the checkpoint's step 6 that this stage is already running
+  # the e2e it would otherwise ask for again, which without it recurses.
+  POST_INSIDE_ACCEPTANCE_STAGE=1 bash tests/acceptance/phase-boundary-checkpoint.sh
 }
 
 stage_integration() {
