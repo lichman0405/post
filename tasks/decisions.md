@@ -8789,3 +8789,35 @@ T0410「PR/Branch 完整 E2E」原依赖只有 `[T0409]`，验收是"两条 E2E 
 **为什么没有"重跑绿了就算了"**：一个会随机说不的仪器，和不会说不的仪器一样不可信；而且反过来更危险——一旦习惯了"这个偶尔红、重跑一下"，将来真出现回归也会被当成同一个 flake 重跑掉。
 
 已开 **issue #240**，附原件路径、复现频率、那三步代码，并**明确标注我对机制的推测是推测**（删规则后立刻 seed 可能仍被拒），没有当成结论；修的方向是先让它把每一步的返回码打出来、再在 seed 前轮询确认规则真的没了。
+
+---
+
+## L1-20260916-105 —— T0712 派工前我自己写错的前提、派工后被 collect 拒收的那一版、以及"补上的闸看不见这个任务"（issue #242）
+
+### 一、派工前：窄范围的**理由**是错的（范围结论没错）
+
+T0712 的窄范围建立在一句"修法不需要任何新查询——判定所需的事实已经由 state reader 提供（`StoredRef.ProjectID` / `.ProjectVisibility`）"上。逐处核对之后：**对 ref 那条路径成立，对 asset 那半不成立**——`StoredAsset` 只有 `OriginProjectID`、没有它所属项目的可见性，`GetPreviewAssetByPID`（`internal/persistence/queries/asset_preview.sql`）也没有 join `projects`。按判定规则给 asset 渲染，缺的正是这个事实；照原包派下去，Worker 会在范围边界上撞墙。
+
+**补法不扩范围**：既有查询 `ListPreviewProjectRefs(ctx, ids)` 返回的就是 project uuid → visibility，从 `cmd/api/assetshttp/state.go`（**已在 allowed_scope 内**）调它即可。所以 **不新增、不修改任何 SQL，不重生成 sqlc**，`internal/persistence/**` 一寸不碰，T0712 仍然是唯一能与迁移链并行的一条。落 `3dce601`。
+
+同一轮还核出原清单**漏了一处**：`previewAssetBlockers` 的 `CodePreviewAssetProjectMismatch` 那条 `Detail` 直接点了外方项目编号；`previewAsset` 只吃 `(c, state)`，拿不到发布项目，签名要动。并写明**清单不是穷举**，要按同一条规则通读两个包。
+
+### 二、派工后：第一版被 collect 拒收，拒得对
+
+Worker 的诊断是对的，处置不对：它把 `internal/devorchestrator/TestEveryTaskOfThePhasesUnderDevelopmentHasG3` 那条红**如实记成 `failed`**，同时把整体 `status` 写成 `completed`。这正是 collect 的判据要拦的——"a completed claim with unrun or failing tests is a contradiction"。**`completed` 的含义是"我列出的测试全绿"**，不是"我认为问题不大"。
+
+### 三、那条红是真的，而且是我的错
+
+那条不变量说：还在做的阶段里，每个任务都必须挂着 G3；没有的话 `rddev task accept` 会把它记成 `not_required`——**一个隐私修复就这样在没有集成闸的情况下被接受**。T0712 没有，因为我昨天把它加进 DAG 时只写了 `tasks/tasks.json` 与 `tasks/tests.json`，**漏了 `specs/orchestrator/gates.json` 的 `task_overrides`**。已按 P7 其余 11 条（含其父任务 T0704）补 `rsg-real-services`，落 `30abc76`。
+
+**但要说清楚这个闸看不到本任务改的东西**：`rsg-real-services-e2e.sh` 通篇没有 asset / preview 字样，只驱动三条 RSG 路径；`grep -rln "asset" tests/acceptance/` **无输出**——整个接受测试目录里没有一个脚本碰过资产面。所以 P7 全段的 G3 是**名义上的**，脚本自己的头注释就写着 "a G3 that passes vacuously certifies nothing"。**已开 issue #242** 记档，不假装解决。真实覆盖在必需的位置：CI 的 required job `migration-integration` 用真 PostgreSQL 跑 `make test-integration`，本任务的验收证据就在那个套件里。给 Worker 的返工信里也明说了"别把这个绿当作集成验证过的证据"。
+
+### 四、为什么用 `rebaseline` 而不是 rework / respawn
+
+`rework` 保留工作副本的 diff，但**工作副本停在旧基线上**——主干上的元数据修复合不进去，Worker 重跑还是看到同一条红，只会再被拒一次（死循环）。`respawn` 会 `reset --hard + clean -fd`，**销毁一份已经过两轮探针、6 文件的好产物**。`rebaseline` 正是为这个情形存在的：把基线推进到 main、**保留手上的活**、重新记录驳回理由、在新基线上返工。实测：`baseline 3dce60131ba8 -> 30abc76e8241 (6 file(s) carried)`，且工作副本里的 `gates.json` 确实带上了新条目。
+
+### 五、我自己的独立 G2（不采信 Worker 的探针报告）
+
+- **两次独立复跑**：`internal/assets` + `cmd/api/assetshttp` 单测绿；`tests/integration -run TestAssetPreview` 在真 PostgreSQL 上绿。
+- **我自己做的定向突变**：把 `mayRenderProject` 的末行改成 `return true`（恢复 T0712 之前的渲染行为），`TestPreviewWithholdsAForeignPrivateIdentity` **立刻变红**，逐字打印出泄漏（外方项目编号、"Private record"、"Private dependency" 三处都出现在整份回答里）。还原后逐字节一致（md5 `be512355f7928df93de46a54c1e0eb3f`，PROBE 残留 0），再跑全绿。
+- **过程中我自己犯的一个错，一并记下**：第一次写校验时我把 md5 记录写成了只有哈希、没有文件名，`md5sum -c` 报 "no properly formatted checksum lines found" 并**中断了 `&&` 链**——于是那句"还原后重跑"根本没执行，我差点把"看起来还原了"当成"验证过还原了"。第二次显式对比哈希才确认。**这正是"仪器能说不"用在检查自己身上的那一面。**
