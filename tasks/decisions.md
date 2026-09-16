@@ -9122,3 +9122,98 @@ T0409 合并为 **PR #247**（squash `926f292`），`infra/migrations/00070_merg
 其余可派任务的包**还是骨架**（T0506/T0509/T0804/T0805 的 `requirements` 只有两三行、`relevant_specs` 为空），
 **不具备派工条件**——派出去等于让 Worker 自己发明产品语义，CLAUDE.md §5 明令禁止。
 补包是我的活，排在 T0705 跑起来之后。
+
+## L1-20260916-110 —— 可派工任务全核了一遍：7 个里 6 个是"规格没写完"，只剩 T0601 一个；以及为什么现在派不出第二个
+
+### 一、问题本来只是"下一个派谁"，答案是"只剩一个能派"
+
+`./bin/rddev task next` 列出 7 个可开工任务（T0506、T0509、T0601、T0602、T0604、T0804、T0805）。
+我把**任务包本身**逐个量了一遍（不是看标题猜）：**七个的 `relevant_specs` 全是空的**，
+`requirements` 只有 2–4 行——与 L1-108 记的"还是骨架"完全对上。
+
+骨架不等于不能派。能派的判据是：**这个任务需要决定的每一件事，规格里都已经写下来了**。
+按这把尺子量，七个里的**六个过不去**——派出去就是让 Worker 自己发明产品语义（CLAUDE.md §5 明令禁止）：
+
+| 任务 | 卡在哪 | 落处 |
+|---|---|---|
+| T0506 | 一个假设（Hypothesis）的证据集合怎么算，全树没有一句话 | **#251**（本轮新开） |
+| T0509 | 文献里"具体位置"（图/表/小节）用什么标识，全树没有这个模型 | **#252**（本轮新开） |
+| T0602 | abort 要记的字段（reason code、replacement ref）无处可存；reopen 三处全空 | #250 |
+| T0604 | required-review 判定规格全无（几个 review、哪几个维度、谁签、什么变更对应什么要求） | #239 |
+| T0804 | 其 requirements 第 4 条**逐字**要求"按 #189 的裁定执行……不得自行发明" | #189（仍 OPEN） |
+| T0805 | 发布命令的接口在契约里不存在；四处语义全空 | #249 |
+
+**同一类病有六处，这不是巧合。**这些任务的"形状"（表、路径、事件名、权限格子）早就摆好了，
+缺的是"意思"。写规格的人把形状写全了，把语义留给了未来。六处合起来压着 **30 个**尚未合并的下游任务
+（并集，无重复计数）——也就是说，**现在挡住这条链的不是工程难度，是六个没人回答的产品问题**。
+
+### 二、六个都记成 `blocked`，这一步有实际的保护作用，不是记账
+
+- **没有 `rddev task block` 这个命令**（只有 next/ready/inspect/verify/accept/reject/merged）。
+  `specs/orchestrator/task-state-machine.yaml:81` **逐字**写着：`` `blocked` is written by the Supervisor
+  (no dedicated subcommand in T0009) ``，合法边是 `todo -> blocked`（同文件 `:44`）。所以这是**手工改状态文件**，
+  是规格预期的做法，不是我绕过工具。
+- **`run_id` 用哨兵值 `supervisor-manual`**：这个文件里其余每一次状态变化都带 `run_id`
+  （含 accept/merge 这类 Supervisor 动作，它们各自有 rddev 的 run），而这一次没有 rddev 参与。
+  与其编一个像 `run-xxxxxxxx` 的假号，不如写一个一眼看出是手工的值。
+- **改之前先证明过写入是安全的**：`json.loads` + `json.dumps(ensure_ascii=False, indent=2)` + 换行
+  **逐字节复现原文件**（先验证、后写入），所以 diff 里就只有这六个条目。
+- **改完用会说不的工具核过**：`scripts/validate_task_state.py` **9/9 全过**（`blocked` 在规范状态枚举内）。
+- **规格指纹没动**：`sha256:ffd5748cac6e79dd`（38 个输入）不变。已从 `specs/SPEC_VERSION.json` 的
+  `files` 表核实：`tasks/tasks.json` **是**输入，`tasks/task_status.json` **不是**——这也是我能在 T0705 跑着的时候
+  改状态的原因。
+- **保护作用的证明**：改之前 `task next` 列 **7** 个，改之后列 **1** 个（只剩 T0601）。
+  也就是说，**任何自动驱动都不再可能把一份骨架任务书塞给 Worker** 去替产品发明规则。
+
+### 三、T0601 是唯一一个能派的，任务书已经补全并**存进仓库**
+
+`tasks/packages/T0601.json`（17 条带出处的 requirement、9 条验收标准）。选它的理由不是它杠杆最高
+（它下游只有 1 个），而是**它是唯一一个每一处都能在已写下的规格里落地的**：
+
+- 要关的洞，原文就写在交付代码里：`internal/application/merge/doc.go:47-51` 逐字说 `main_frozen`
+  「is reported, not enforced」，且 closing that is **T0601's**。
+- 要用那一列早就有（`infra/migrations/00003_projects.sql:22`），**所以本任务不新增迁移**——
+  我因此把 `infra/migrations/**`、`specs/database/postgres.sql`、`specs/SPEC_VERSION.json` **移出**它的
+  `allowed_scope`：不新增迁移就不该重新生成那份"所有建表语句的总和"，也不该动指纹。
+- **"不做解冻"不是我拍的，是规格定的**：`docs/09_VERSION_CONTROL.md:9-10` 逐字写着
+  「Emergency unfreeze 不在 V1 提供，避免形成绕过路径」，契约里也确实只有 `:freeze` 没有 `:unfreeze`。
+- 授权那一格在矩阵里**没有 `conditional`**（`internal/authz/matrix.go:85-93`），所以不像发布那样需要
+  fail-closed 的自定义判断（那一条是 #237）。
+
+**存进仓库而不是留在 `/tmp`**：`tasks/packages/` 是新目录，已核实它**不是**指纹输入、也没有任何 CI 扫描它
+（`grep` 过 Makefile、`.github/workflows/`、`scripts/spec_version.py`）。理由是实际的：这台机器被猫踩重启过一次，
+`/tmp` 里的东西说没就没，而这份任务书要等 T0705 合并后才用得上。
+
+### 四、一个结构性事实：现在**派不出第二个**，而且不是因为没有任务
+
+派工要把任务包写进 `tasks/tasks.json`，而**那是规格指纹的输入**（见上）。写它 → 指纹变 →
+必须重新生成 `specs/SPEC_VERSION.json` → 而**正在跑的 T0705 分支也要重新生成同一个文件**（它新增了迁移 00072）。
+两边必然撞车，且只有站在对方成果上重新生成的那一份才是对的。
+
+**结论：T0705 在飞的时候，第二个 Worker 在结构上就开不出来。**总规约 §2 说"推荐最大并行 3–4"，
+但那是**能力**，不是**当下可行**；这一段时间的流水线实际是**串行**的。这不是效率问题，是这几个任务
+都要动"所有建表语句的总和"这件事本身的性质（L1-108 已记过一次，本轮再次确认）。
+
+### 五、引用我自己核过；复核给的行号有两处不准
+
+派出去做评估的两个独立调查，结论我采纳，但**引用逐条对回了原树**，抓到两处错：
+
+- 说文献快照的规矩在 `docs/19_EXTERNAL_REFERENCES.md:11` —— **实际在 `:9`**（`:11` 是下一节的标题）。
+- 说 `evidence_assertions` 表"没有记录形状" —— **不准确**：那张表其实**有** `review_state`
+  （`unreviewed/reviewed/rejected`，`postgres.sql:282`）。真正的缺口更精确：`docs/10_EVIDENCE_PROVENANCE.md:13`
+  要求的「外部/自己人」与「可见性」**这两列不存在**，而且 `docs/21_DATA_MODEL.md:24` 点名的
+  `external_evidence_links` 表**全仓库只有那一行提到，哪都没建**。这条更准的说法已经写进 #251。
+
+另外两处是我自己发现、比复核更硬的证据：`grep -rn locator` 的命中**全是 "al·locator" 这个单词里带的**（零真命中），
+以及 `specs/api/openapi.yaml:128-134` 的证据路径**只有 POST、全契约没有任何一条读证据断言的路**。
+
+### 六、下一步
+
+1. **T0705 跑完 → 复核 → 合并**（waiter 已挂，collect 会自动跑）。
+2. **合并落地的那一刻**，把 `tasks/packages/T0601.json` 应用进 `tasks/tasks.json`、重新生成指纹、
+   `./bin/rddev task ready T0601` 然后派工——**它是当前唯一一个不需要任何人拍板就能开工的任务**。
+3. 同时把 **T0706–T0711**（随 T0705 解锁的 P7 那一波）逐个做同样的包体量评估。**不再假设它们能派**——
+   今天这一轮说明，这棵树上"能派"是少数情况。
+4. 六个 blocked 的落处已各有 issue。**这些是产品/科研语义决策（CLAUDE.md §5.1 的 L3），我不能替它们拍板**；
+   但它们**不挡** T0601 与 T0705 这条线（§5：不影响其他无依赖任务继续执行）。owner 什么时候回都行，
+   回的每一条都能立刻解锁 1–24 个下游任务。

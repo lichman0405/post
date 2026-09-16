@@ -4115,13 +4115,22 @@
       ]
     },
     "T0506": {
-      "status": "todo",
+      "status": "blocked",
       "started_at": null,
       "completed_at": null,
-      "notes": "",
+      "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：一个假设的证据集合怎么算——是它下面各主张证据的并集，还是直接挂在假设上的那些——规格没写（docs/08_SCIENTIFIC_OBJECTS.md:17 只说主张与假设有历史关系，无汇总规则）。另：docs/21_DATA_MODEL.md:24 点名的 external_evidence_links 表全仓库不存在；docs/10_EVIDENCE_PROVENANCE.md:13 要求的 external/internal 与 visibility 两列在 evidence_assertions 表里也没有。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "merged_at": null,
+      "history": [
+        {
+          "from": "todo",
+          "to": "blocked",
+          "at": "2026-09-16T00:08:07Z",
+          "run_id": "supervisor-manual",
+          "reason": "SPEC_BLOCKED：见 issue #251"
+        }
+      ]
     },
     "T0507": {
       "status": "todo",
@@ -4232,13 +4241,22 @@
       ]
     },
     "T0509": {
-      "status": "todo",
+      "status": "blocked",
       "started_at": null,
       "completed_at": null,
-      "notes": "",
+      "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：文献里「具体位置」（图/表/小节）用什么标识——规格要求定位到具体 evidence unit（docs/10:37、docs/19:19），但位置标识模型全仓库不存在。两个前置 T0508/T0504 均已合并。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "merged_at": null,
+      "history": [
+        {
+          "from": "todo",
+          "to": "blocked",
+          "at": "2026-09-16T00:08:07Z",
+          "run_id": "supervisor-manual",
+          "reason": "SPEC_BLOCKED：见 issue #252"
+        }
+      ]
     },
     "T0510": {
       "status": "todo",
@@ -4259,13 +4277,22 @@
       "merged_at": null
     },
     "T0602": {
-      "status": "todo",
+      "status": "blocked",
       "started_at": null,
       "completed_at": null,
-      "notes": "",
+      "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：abort 要记的字段（reason code、human explanation、replacement ref）在库里无处可存；reopen 这条在契约、权限矩阵、审批规则三处全空。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "merged_at": null,
+      "history": [
+        {
+          "from": "todo",
+          "to": "blocked",
+          "at": "2026-09-16T00:08:07Z",
+          "run_id": "supervisor-manual",
+          "reason": "SPEC_BLOCKED：见 issue #250"
+        }
+      ]
     },
     "T0603": {
       "status": "merged",
@@ -4430,13 +4457,22 @@
       ]
     },
     "T0604": {
-      "status": "todo",
+      "status": "blocked",
       "started_at": null,
       "completed_at": null,
-      "notes": "",
+      "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：required-review 判定（几个 review、哪几个维度、哪个 responsibility 签、什么变更对应什么要求）规格全无。T0409 的交付代码逐字把这一步指名交给 T0604（internal/application/reviews/service.go:25-27），前置 T0404/T0603 均已合并。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "merged_at": null,
+      "history": [
+        {
+          "from": "todo",
+          "to": "blocked",
+          "at": "2026-09-16T00:08:07Z",
+          "run_id": "supervisor-manual",
+          "reason": "SPEC_BLOCKED：见 issue #239"
+        }
+      ]
     },
     "T0605": {
       "status": "merged",
@@ -5240,22 +5276,40 @@
       ]
     },
     "T0804": {
-      "status": "todo",
+      "status": "blocked",
       "started_at": null,
       "completed_at": null,
-      "notes": "",
+      "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：requirements 第 4 条逐字写着 fork 导入的 state 的 semantic completeness 派生「按 issue #189 的裁定执行……不得自行发明」，而 #189 仍 OPEN。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "merged_at": null,
+      "history": [
+        {
+          "from": "todo",
+          "to": "blocked",
+          "at": "2026-09-16T00:08:07Z",
+          "run_id": "supervisor-manual",
+          "reason": "SPEC_BLOCKED：见 issue #189"
+        }
+      ]
     },
     "T0805": {
-      "status": "todo",
+      "status": "blocked",
       "started_at": null,
       "completed_at": null,
-      "notes": "",
+      "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：发布命令的接口在契约里不存在；public_version 含义、能否重复发布、公开状态存哪、对外稳定编号四处全空（knowledge_publications 表缺 visibility 与 public id 两列）。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "merged_at": null,
+      "history": [
+        {
+          "from": "todo",
+          "to": "blocked",
+          "at": "2026-09-16T00:08:07Z",
+          "run_id": "supervisor-manual",
+          "reason": "SPEC_BLOCKED：见 issue #249"
+        }
+      ]
     },
     "T0806": {
       "status": "todo",

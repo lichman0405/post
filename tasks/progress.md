@@ -1875,9 +1875,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-15T23:44:33Z
+生成时间：2026-09-16T00:08:46Z
 
-状态分布：todo 58 · ready 0 · running 1 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 75（合计 134/134 个任务）
+状态分布：todo 52 · ready 0 · running 1 · worker_failed 0 · verification 0 · rejected 0 · blocked 6 · accepted 0 · merged 75（合计 134/134 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1944,15 +1944,15 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0503 | Finding 聚合模型 | P5 | merged | 2026-09-15T01:21:57Z |  | 2026-09-15T02:01:26Z | 2026-09-15T02:07:38Z |
 | T0504 | Evidence Assertion Domain | P5 | merged | 2026-09-15T02:39:08Z |  | 2026-09-15T03:01:00Z | 2026-09-15T03:06:01Z |
 | T0505 | Provenance Graph Projection | P5 | merged | 2026-09-14T14:04:45Z |  | 2026-09-14T14:24:41Z | 2026-09-14T14:27:50Z |
-| T0506 | Evidence Graph Projection | P5 | todo |  |  |  |  |
+| T0506 | Evidence Graph Projection | P5 | blocked |  |  |  |  |
 | T0507 | Evidence/Provenance UI | P5 | todo |  |  |  |  |
 | T0508 | External Reference live identity + snapshot | P5 | merged | 2026-09-14T14:51:21Z |  | 2026-09-14T15:13:55Z | 2026-09-14T15:17:22Z |
-| T0509 | Literature evidence extraction data model | P5 | todo |  |  |  |  |
+| T0509 | Literature evidence extraction data model | P5 | blocked |  |  |  |  |
 | T0510 | Knowledge workflow E2E | P5 | todo |  |  |  |  |
 | T0601 | Freeze Main Governance | P6 | todo |  |  |  |  |
-| T0602 | Abort/Reopen State Transition | P6 | todo |  |  |  |  |
+| T0602 | Abort/Reopen State Transition | P6 | blocked |  |  |  |  |
 | T0603 | Organization/Project Policy Engine | P6 | merged | 2026-09-14T03:42:50Z |  | 2026-09-14T04:09:38Z | 2026-09-14T04:12:31Z |
-| T0604 | Scientific Responsibility / Reviewer Routing | P6 | todo |  |  |  |  |
+| T0604 | Scientific Responsibility / Reviewer Routing | P6 | blocked |  |  |  |  |
 | T0605 | Release Manifest Builder | P6 | merged | 2026-09-14T08:39:33Z |  | 2026-09-14T09:24:39Z | 2026-09-14T09:33:18Z |
 | T0606 | Immutable Release API/UI | P6 | merged | 2026-09-14T17:12:24Z |  | 2026-09-14T17:34:41Z | 2026-09-14T17:58:08Z |
 | T0607 | Activity/Audit Timeline 增强 | P6 | todo |  |  |  |  |
@@ -1973,8 +1973,8 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0801 | Public Entity Anonymous Pages | P8 | todo |  |  |  |  |
 | T0802 | Explore 聚合 | P8 | todo |  |  |  |  |
 | T0803 | Open Contribution Opportunity | P8 | merged | 2026-09-15T12:54:08Z |  | 2026-09-15T13:23:30Z | 2026-09-15T13:28:59Z |
-| T0804 | External Fork/Contribution flow | P8 | todo |  |  |  |  |
-| T0805 | Published Knowledge Object | P8 | todo |  |  |  |  |
+| T0804 | External Fork/Contribution flow | P8 | blocked |  |  |  |  |
+| T0805 | Published Knowledge Object | P8 | blocked |  |  |  |  |
 | T0806 | External Evidence Network Aggregation | P8 | todo |  |  |  |  |
 | T0807 | Contribution Ledger projection | P8 | todo |  |  |  |  |
 | T0808 | Research Profile / Organization Profile | P8 | todo |  |  |  |  |
