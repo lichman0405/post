@@ -9694,3 +9694,84 @@ driver 的 `dispatch` 只取 `task next` 的**第一行**；那一行有未决�
 **两个都是"我说过的话和我机器里的事实不一致"，而且两个都是我自己发现的、都发生在等待窗口里。**
 值得记的是：**复核的价值不在"多看一遍"，而在"拿两份独立的记录对撞"** —— T1110 是 glob 对散文，
 T0604 是状态文件对 issue 评论。只读其中任何一份，两次都看不出来。
+
+## L1-20260916-117 —— 我自己把主线弄红了 15 分钟没发现；T0601 的收工被误伤（返工）
+
+### 一、事情是怎么露出来的
+
+T0601 的 Worker 退出（exit 0）后，driver 收工时**拒绝**了它：
+
+```
+[FAIL] result-consistency: result-tests: status completed but 1 test(s) failed
+       (go test ./internal/... ./cmd/... -count=1)
+```
+
+而失败的那一条，Worker 自己写得很清楚：
+
+> the ONLY failure is `internal/devorchestrator TestEveryTaskScopeSatisfiesTheDerivedArtifactRule`:
+> 'task T1110: allowed_scope covers "infra/migrations/**" but not its derived artifact
+> "specs/database/postgres.sql"'. That test reads tasks/tasks.json, which this diff does not touch,
+> so it is pre-existing and cannot be caused by T0601. **Reported as failed rather than omitted.**
+
+**它是对的，而且它比我先发现。** 那个测试红的原因**就是我**：`b784e9b` 把三份任务书入库时，
+T1110 那份的范围里还留着自相矛盾的 `infra/**`（我在 `ea0ec69` 才修好，但修的是**暂存区的包**，
+DAG 里那份坏的还在）。
+
+### 二、更该记的是：主线已经红了 15 分钟，而我没看
+
+T1110 的范围校验不只是"派工时被拦"——仓库里**本来就有一个测试**专门遍历所有任务、断言每一条
+`allowed_scope` 都满足派生物规则（`internal/devorchestrator/gate_spec_test.go:398`），而 CI 的
+unit 那一步**包含这个包**（`.github/workflows/ci.yml:80`：`go test $(go list ./... | grep -v '/tests/integration')`）。
+
+于是查了一下 main 的 CI 运行记录：
+
+```
+failure  01:01:20Z  c5f548d  fix(task): T0604 不该被标成"等定"
+failure  00:50:52Z  ea0ec69  fix(package): T1110 的范围自相矛盾
+failure  00:49:30Z  53e1f8a  chore(state): 记账 L1-114 + 进度文
+failure  00:48:01Z  b784e9b  chore(dag): 三份任务书入库
+success  00:47:28Z  f87e971  [T0705] Asset Publish Governance (#255)
+```
+
+**从 `b784e9b` 起，连续四次全红。** 我提交了三次都没回头看 CI —— §5.1 把"CI 全绿"写成合并的前提，
+§8.2 把"CI 红"写成**要回到我这里判断的点**，而我把这四十分钟当成"等 Worker 跑完"白等了。
+
+**教训不是"要记得看 CI"，是"改了指纹输入就等于改了整个仓库的共享事实"**：我修 T1110 时只想着
+"这是暂存区的包，随便改"，却忘了它**已经在 DAG 里了**——`b784e9b` 那次入库不是"准备好再派"，
+而是**已经生效的状态变更**，只是我当时把它当成了一次文书提交。
+
+### 三、修复
+
+一次性把两份包落地（T1110 的范围修正 + T0604 的任务书）：
+
+```
+python3 /tmp/apply-packages.py --write     # T1110 换 3 字段，T0604 换 7 字段
+python3 scripts/spec_version.py --write    # 115a4d23bcccbf20 → c995f8eef02f22e1
+python3 scripts/validate_task_state.py     # 9 项全过
+go test ./internal/devorchestrator/ -run TestEveryTaskScopeSatisfiesTheDerivedArtifactRule
+                                           # 由 FAIL 变 ok
+```
+
+**为什么这次可以不等"没有任务在飞"**（T0709 还在跑）：那条规矩的实质是"合成树里的
+`tasks/tasks.json` 取自 main、而指纹取自任务自己的 diff，于是两边对不上"。所以关键不是
+"有没有任务在跑"，而是**在飞任务的 diff 有没有碰 `tasks/**` 或 `specs/**`**。逐个查过：
+
+- T0709 工作区：改动 20 个文件，`git status --short | grep -E 'tasks/|specs/'` **空**；
+- T0601 工作区：改动 24 个文件，同样**空**。
+
+两边都不带指纹，合成树与 main 一致，落地安全。**规矩记成"没有任务在跑"是我自己记粗了**，
+它的准确形式是"没有在飞任务的 diff 携带指纹输入"。
+
+### 四、T0601 的处置：返工，不是重做
+
+Worker 被拒**不是它的错**：它做的活是干净的（collect 的其余九项全 `[ok]`：范围 31 个文件全在
+允许内、HEAD 未动、无残留进程、RESULT 合规、9 个破坏性自检 9 个变红），它只是**如实报告了一条
+和自己无关的红测试**——而"如实报告"正是我要的（对比之下，把那条 entry 删掉才是该罚的行为）。
+
+按 §11「第一次不通过可返工同一 session（问题明确、context 可靠）」，选**返工**，不重做：
+问题是一句话（那条测试红了），而 session 的上下文完好。
+
+**但返工前必须先做一步**：它的工作区还停在 `b784e9b`（= 带着坏 T1110 的那棵），不清掉的话
+返工回去看到的还是红的。所以顺序是 `rebaseline`（把工作区搬到新 main、保住它的 diff）→
+`worker rework --reason-file`（把理由**写进这次返工自己的文件里**——按既有判例，只有写在这里
+的理由才会真的送达 Worker）。
