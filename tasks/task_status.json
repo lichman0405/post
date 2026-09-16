@@ -4980,10 +4980,11 @@
       ]
     },
     "T0705": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-15T23:43:26Z",
       "worker_run_id": "run-543bc2fa8158bb7c",
       "accepted_by_supervisor_at": "2026-09-16T00:40:34Z",
+      "merged_at": "2026-09-16T00:47:27Z",
       "history": [
         {
           "from": "todo",
@@ -5010,6 +5011,13 @@
           "to": "accepted",
           "at": "2026-09-16T00:40:34Z",
           "run_id": "run-872a21207941fb27"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-16T00:47:27Z",
+          "run_id": "run-a26569c9d5f518b1",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },

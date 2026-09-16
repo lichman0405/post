@@ -3166,40 +3166,81 @@
         "T0409"
       ],
       "requirements": [
-        "project main freeze action",
-        "audit/event",
-        "新项目可 setup 后 freeze"
+        "**本任务要关的洞，原文已经写在交付代码里，照它做即可**：`internal/application/merge/doc.go:47-51` 逐字写着「What the platform does NOT yet have is enforcement of the freeze itself: no code refuses a direct semantic write to main today (projects.main_frozen is reported, not enforced). Closing that is T0601's (Freeze Main Governance)」。本任务就是关它：当项目处于冻结态时，**必须有一处代码真的拒绝直接写入 main 的语义变更**。",
+        "**同一个洞的另一半：今天这个开关根本没人写过**。全仓库搜 `internal/persistence/queries/**` 找不到任何写 `main_frozen` 的语句，列默认 `false`（`infra/migrations/00003_projects.sql:22`），所以它现在恒为假——既没被写、也没被强制。本任务**两半都要交**：freeze 这个动作（第一个写入方）**与**它的强制（拒绝方）。只交一半就等于把「报着不管」换成「写着不管」。",
+        "**freeze 走契约里已有的那条路，路径逐字照抄**：`POST /projects/{projectId}/main:freeze`（`specs/api/openapi.yaml:43-50`，summary 原文 \"Freeze main; governance action\"），参数是 `ProjectId` 与 `IdempotencyKey`（该头必填、minLength 8，`specs/api/openapi.yaml:412-417`）。不得改写路径，不得新增契约里没有的接口。",
+        "**授权走权限矩阵里已经存在的两行资产，不得发明新规则**：action 是 `freeze_main`，常量已存在（`internal/authz/action.go:29`，注释原文写着 \"freezes main (T0601)\"），矩阵行也已存在（`internal/authz/matrix.go:85-93`：public/anonymous deny、non-member deny、viewer deny、contributor deny、**maintainer allow、owner allow**、agent deny）；CSV 同此（`specs/policies/permissions-matrix.csv:10`）。这一行**没有任何 `conditional` 格子**，所以照它判即可——不需要 resolver，也不需要 fail-closed 兜底判断（这与发布那条行动不同，那里 maintainer 是 conditional，见 issue #237）。**不得修改 `specs/policies/permissions-matrix.csv`。**",
+        "**授权拒绝必须发生在目标查询之前**：照抄既有先例，`internal/application/releases/errors.go` 里 `ErrForbidden` 的注释逐字写着「resolved before any target lookup, so the denial never discloses whether the project exists」。拒绝本身不得泄漏「这个项目存不存在」。",
+        "**Agent 默认拒绝，两道防线**：矩阵里 agent 那格是 deny，实现必须走 `internal/authz` 的判定；**另加一道域层兜底**，照抄 `internal/application/contribution/service.go:173-175` 的形状（`if by.IsAgent { return ..., &AgentNotPermittedError{...} }`，错误类型在同包 `errors.go`）。注意分寸：`docs/60_AGENT_SAFETY_BOUNDARIES.md:5` 列举「必须 human-governed」的操作时**没有逐字点名 freeze**，`specs/mcp/tools.json` 的 `forbidden_default_agent_actions` 里也没有 `freeze_main`——**矩阵才是这一条的规格权威**，不要在 RESULT 或注释里把 MCP 清单说成包含它。",
+        "**审计与领域事件写在与状态变更同一个事务里**（本项目各面的统一规矩，见 `internal/domain/audit.go` 各条注释）。事件名是 `project.main_frozen`（`specs/events/event-types.yaml:14` 的机器可读口径），**不得另拼**：`docs/18_EVENTS_SUBSCRIPTIONS.md:9` 的散文写法 `main.frozen` 是同一族的另一种拼法，契约以 yaml 为准（判例：T0409 的 `pr.merged` → `pull_request.merged`，同一把尺子）。事件的 visibility 必须 fail-closed，照 `internal/application/merge/events.go` 的做法。",
+        "**拒绝时用既有的错误码，不得发明**：`MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN`（`docs/45_ERROR_MODEL.md:7`），以及 `AUTH_FORBIDDEN` 一类既有的授权码。被拒的调用方要能看出**是「冻结」挡的**，而不是一句笼统的 forbidden——照 `internal/application/merge` 的 `GateRefused` 形状（拒绝时把完整原因/报告交给调用方）。",
+        "**冻结拦什么、不拦什么，边界必须精确**：拦的是「绕过 PR 直接改 main 上的科研状态」这条路（就是 `merge/doc.go` 说的 direct semantic write）**以及 Git 侧的直推 main**——两侧都要拒，且拒绝要发生在提供方动作之前，不得先推后报错。**不拦的是经 Research PR 合并推进 main**：`docs/09_VERSION_CONTROL.md:9-10` 原文「即便 Owner 也只能经 PR merge」，T0409 交付的正是那条唯一合法路径，本任务**不得把它挡上**。冻结不等于禁止演进。",
+        "**「即便 Owner 也只能经 PR merge」意味着强制与角色无关**：一旦项目处于冻结态，直接写入对**所有人**都拒，包括 owner。不要写成「owner 可绕过」——那正是 `docs/09_VERSION_CONTROL.md:9-10` 要避免的绕过路径。",
+        "**freeze 是项目级的、只对 main 生效**：`projects.main_frozen` 是项目上的开关，不是分支上的；research branch 上的写入不受它影响。",
+        "**幂等用状态本身，不要新建台账表**：同一个 `Idempotency-Key` 重复请求返回同一结果、不产生第二条 audit 或第二个事件。取法与流程照抄既有先例的形状（HTTP 侧键来自 `r.Header.Get(\"Idempotency-Key\")`；命令侧先判状态再动作）。**并发安全用条件更新**：写入必须是 `WHERE id = @id AND main_frozen = false` 这样的比较交换，只有一个能赢，**只有赢家写 audit 与事件**——不许用「先读后写」的写法，那会在并发下写出两条审计。这与本项目既有的 CAS 纪律同源（见 `scientific_objects.current_version_no` 的用法）。",
+        "**「新项目可 setup 后 freeze」照字面实现**：新项目默认不冻结（列默认已经是 `false`），freeze 是项目把初始内容直接写进 main **之后**由有权限的人显式执行的动作。**不得**在项目创建/setup 流程里自动 freeze，也不得把 setup 期间的直接写入挡掉。",
+        "**freeze 只能有一个方向，且不得留后门**：契约里只有 `:freeze`，没有 `:unfreeze`；规格明令 V1 不提供解冻（见 `supervisor_scope_narrowing`）。不得顺手实现解冻接口、解冻参数、或任何等价的旁路（例如把开关直接置回 false 的管理入口）。必要维护按 `docs/09_VERSION_CONTROL.md:9-10` 说的 admin break-glass runbook 走，那是运维流程，不是本任务要写的代码。",
+        "**不得跳过策略校验**：`docs/22_API_DESIGN.md:28` 把 freeze main 列为重要命令，并原文要求「高风险 command 必须 server-side authorization + policy validation」。授权走矩阵，策略校验走既有的 policy 求值（org policy 是最低治理要求，project policy 可更严、**不得静默放宽**，`docs/12_PERMISSIONS_RIGHTS_POLICY.md` §5）。",
+        "**不抹掉任何历史**：freeze 是追加一个状态与一条审计，不是删除。照 `docs/46_ABORT_RETENTION.md` 的规矩（不物理删除）与 `docs/03_GLOSSARY_DOMAIN_MODEL.md` 对 \"deleted\" 的回避。",
+        "**不做**：不改 `specs/**`（本任务不改规格，也不该动规格指纹）；不做界面（前端不在本任务）；不新增迁移；不实现矩阵里没有的规则；不动 `specs/policies/permissions-matrix.csv`；不碰 `apps/web/**`。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "freeze 后 semantic/Git direct write 全拒绝"
+        "**冻结后直接往 main 写科研状态被拒**，且错误码是 `MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN`（`docs/45_ERROR_MODEL.md:7`），调用方能看出是「冻结」挡的而不是笼统的 forbidden",
+        "**同一个测试里，冻结后经 Research PR 合并推进 main 仍然成功**——这两条必须同时成立，才能证明冻结拦的是「绕过 PR」而不是「禁止演进」（`docs/09_VERSION_CONTROL.md:9-10`：即便 Owner 也只能经 PR merge）",
+        "Git 侧直推 main 同样被拒，且被拒发生在提供方动作之前（不得先推后报错）",
+        "**未冻结的项目，直接写 main 不会被这条规则挡**——证明规则是跟着开关走的，不是无条件拦（一个永远说不的检查和一个永远说行的检查一样没用）",
+        "只有 owner/maintainer 能 freeze；viewer/contributor/非成员/匿名被拒；**agent token 被拒**（矩阵 `internal/authz/matrix.go:85-93` 与域层兜底两道都要验）",
+        "freeze 成功留下恰好一行 audit 与恰好一个 `project.main_frozen` 事件，且与状态写入**同事务**：用一个会让后续步骤失败的用例验证回滚后状态没变、审计也没有",
+        "不存在的项目 id 触发授权拒绝时，返回的是**权限类**错误而**不是**「项目不存在」——证明拒绝没有泄漏存在性",
+        "重复 freeze（同键与不同键各一次）不产生第二条审计、第二个事件；并发两个 freeze 只有一个生效（条件更新只有一个赢家）",
+        "契约里没有 `:unfreeze`，本任务也不得新增任何解冻路径；RESULT 里要写明「只有一个方向」是有意的并指出规格依据"
       ],
       "tests": [
         "freeze e2e"
       ],
       "allowed_scope": [
         "internal/domain/**",
+        "internal/authz/**",
         "internal/application/**",
         "internal/persistence/**",
-        "go.mod",
-        "go.sum",
-        ".env.example",
-        "infra/migrations/**",
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
+        "internal/gitprovider/**",
         "cmd/api/**",
-        "apps/web/**",
-        "tests/**"
+        "tests/**",
+        "go.mod",
+        "go.sum"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
+        "tasks/tasks.json",
         "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/tests.json",
+        "tasks/progress.md",
+        "tasks/decisions.md",
+        "apps/web/**",
+        "packages/schemas/**",
+        "infra/migrations/**",
+        "specs/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "**`internal/application/merge/doc.go:47-51`（先读这一条）**：本任务要关的洞的原文出处，逐字写着 main_frozen 「is reported, not enforced」且 closing that is T0601's",
+        "`docs/09_VERSION_CONTROL.md:9-10` §3 Frozen main：正式研发开始后 main 为 protected/frozen；禁止所有直接 push/semantic write；即便 Owner 也只能经 PR merge；Emergency unfreeze 不在 V1 提供；必要维护走 admin break-glass runbook 并记录审计",
+        "`docs/22_API_DESIGN.md:28` §6 Commands：freeze main 属重要命令；高风险 command 必须 server-side authorization + policy validation；`:14` §3 Idempotency-Key 对 create/command/publish/merge/release",
+        "`specs/api/openapi.yaml:43-50`：`POST /projects/{projectId}/main:freeze` 的契约（summary \"Freeze main; governance action\"，参数 ProjectId + IdempotencyKey）；并注意全契约里**没有** `:unfreeze`",
+        "`specs/policies/permissions-matrix.csv:10`：`freeze_main,deny,deny,deny,deny,allow,allow,deny`（maintainer/owner allow、agent deny、无 conditional）",
+        "`internal/authz/matrix.go:85-93` 与 `internal/authz/action.go:29`：矩阵行与动作常量的既有实现（常量注释已写着 \"freezes main (T0601)\"）",
+        "`specs/events/event-types.yaml:14`：`project.main_frozen`（机器可读口径）；`docs/18_EVENTS_SUBSCRIPTIONS.md:9` 的 `main.frozen` 是同族另一种拼法",
+        "`docs/45_ERROR_MODEL.md:7`：`MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN` —— 用这个码，不要发明",
+        "`docs/46_ABORT_RETENTION.md`：不物理删除、状态只演进的规矩（freeze 是追加状态与审计，不是删除）",
+        "`docs/12_PERMISSIONS_RIGHTS_POLICY.md` §5：org policy 是最低治理要求，project policy 可更严、不得静默放宽",
+        "`internal/application/releases/errors.go`（`ErrForbidden` 注释：授权先于目标查询，拒绝不泄漏存在性）与 `internal/application/merge/`（`GateRefused` 形状、事件 visibility fail-closed 的做法、单事务写台账/审计/事件）",
+        "`internal/application/contribution/service.go:173-175` 与同包 `errors.go`：域层 agent 兜底的既成形状",
+        "`infra/migrations/00003_projects.sql:22`：`main_frozen boolean NOT NULL DEFAULT false` —— 列已存在，本任务不新增迁移"
+      ],
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。已按本任务缩小：移出 infra/migrations/**、specs/database/postgres.sql、specs/SPEC_VERSION.json（不新增迁移，故不动生成物与规格指纹）、apps/web/**、.env.example。",
+      "supervisor_scope_narrowing": "2026-09-16 定稿。三点说明：\n（一）**刻意把 `infra/migrations/**`、`specs/database/postgres.sql`、`specs/SPEC_VERSION.json` 移出 allowed_scope**。本任务要用的那一列 `projects.main_frozen` **早就存在**（`infra/migrations/00003_projects.sql:22`，`boolean NOT NULL DEFAULT false`），本任务不需要新增任何迁移；不新增迁移就不该重新生成那份「所有建表语句的总和」，也不该动规格指纹。少动这两样，也就同时避开了和并行迁移任务的必然冲撞。\n（二）**「不做解冻」不是我定的，是规格定的**。`docs/09_VERSION_CONTROL.md:9-10` 逐字写着：「Emergency unfreeze 不在 V1 提供，避免形成绕过路径；必要维护用 admin break-glass runbook，并记录审计。」契约里也确实只有 `:freeze`、没有 `:unfreeze`（`specs/api/openapi.yaml:43-50`）。所以只有一个方向是有意的，RESULT 里要写明。\n（三）**幂等不用新建台账表**。freeze 是把一个开关置为真，它天然幂等：重复请求就是同一个状态。用「条件更新 + 已经是冻结态就直接返回」实现，而不是另立一张台账表——立表就要迁移，而迁移正是（一）要避开的东西。同键重复请求返回同一结果且不产生第二条审计。"
     },
     {
       "id": "T0602",
@@ -4000,40 +4041,69 @@
         "T0107"
       ],
       "requirements": [
-        "asset page versions/origin/rights/lineage/dependencies/public usage",
-        "4 types filters"
+        "**资产页要显示什么，规格逐字写全了，照抄**：`docs/42_PAGE_SPECS.md:19` 原文「PID/version、type、origin、rights、creators、metadata、dependencies、lineage、used/derived public links、versions、network events」——**十一项**。少一项要在 RESULT 里说明理由，不得默默省略。",
+        "**四种资产类型是封闭集合，不要自造**：`internal/assets/asset.go` 的类型常量（`protocol`、`material_collection`、`benchmark` 等）与建表时的 CHECK（`specs/database/postgres.sql:387`）一致，`docs/11_RELEASE_ASSET_HUB.md:11` 同此。浏览页的四种筛选**就按这个集合**。",
+        "**匿名可见性按既有规矩**：资产页数据走契约里已有的 `GET /assets/{assetId}`（`specs/api/openapi.yaml:268`，注意它写着 `security: []`），路径形状见 `internal/assets/url.go:61`。可见性本身不是本任务新发明的规则——**按 `internal/rights/visibility.go` 与 `docs/11_RELEASE_ASSET_HUB.md` 已有的判定办**；页面在「公开」与「已授权」两种情况下各自能显示什么，照既有判定，不新增一档。",
+        "**受限制的 blob 必须下不下来，且是「没有这条路」而不是「界面藏起来」**：`docs/17_FILES_STORAGE.md:23` 定了规矩，`internal/rights/visibility.go:20-35` 是实现。**关键**：今天根本**没有 blob 下载路由**（`cmd/api/fileshttp/files.go:88-92`）；本任务**不得新增**一条下载路由，也不得用前端隐藏来冒充「不可下载」。",
+        "**「私有项目里的用法会不会泄漏」这一条已经有答案，照它办**：`docs/23_SECURITY_PRIVACY.md:21` 定了这一面的规矩；`used/derived public links` 这一项**只显示公开使用**。最近 T0712 因为跨项目泄漏返工过一次（issue #238），**别重犯同一类错**：任何聚合计数、任何「被使用次数」都不得让一个私有实体的存在被推断出来。",
+        "**浏览页要能按四种类型筛选**；列表读路径契约里没有，照 T0505 的先例**直接挂在 v1 mux 上**（`cmd/api/provenancehttp/wiring.go:68`，注意「provenance」在契约里出现 0 次），不新增契约声明。",
+        "**前端照既有标准与既有组件，不要另起一套**：`docs/51_FRONTEND_STANDARD.md:1-12` 是标准；数据获取照 `apps/web/lib/projects.ts:1-13` 的形状；权利面板已有实现（`apps/web/app/components/rights-panel.tsx:20-27`），**复用而不是重写**。界面语言、组件与视觉约束见 CLAUDE.md §10（中性背景、细边框、蓝色交互等）。",
+        "**必须端到端验**：既有 e2e 挂具在 `tests/e2e/`。资产页要有一条真的走页面的测试，**不是**只调内部函数——这一条是 T0409 返工的教训（端点接错了线而没有测试会红）。",
+        "**不做**：不做 `/explore`（归 T0802，见 scope 说明）；不新增迁移；不改 `specs/**`；不新增契约声明；不新增 blob 下载路由；不改 `internal/rights/**` 的判定规则（只读它）；不碰 P8 的网络页面。",
+        "**不许为了让页面好看而弱化规矩**（CLAUDE.md §5.1）：不得为了让页面显示更多而放宽可见性判定，不得把「匿名不可见」的测试改软或跳过，不得用前端隐藏替代后端拒绝。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "未登录可浏览 public asset",
-        "restricted blobs 不可下载"
+        "资产页对公开资产**匿名可看**，且 `docs/42_PAGE_SPECS.md:19` 的**十一项内容都在**（逐项点名核对，不是「大致都有」）",
+        "对**已授权但非公开**的资产，页面按既有可见性判定显示；**匿名访问时不可见的部分真的不可见**——由后端决定，不是前端藏起来",
+        "**受限制的 blob 不可下载**，且证明方式是「这条路由不存在」而不是「按钮被禁用」；本任务**没有新增**任何 blob 下载路由",
+        "浏览页按 `protocol`/`material_collection`/`benchmark` 等既有封闭集合筛选，结果正确",
+        "**不泄漏私有实体**：构造一个私有项目里使用某公开资产的情形，公开页面上**看不出**那个私有项目的存在（名称、编号、计数都不得泄漏）——与 issue #238 同一类，必须有一条测试钉住",
+        "内容 hash 与版本显示正确：同一资产的多个版本在页面上可区分，且 version 与 pid 不被混淆",
+        "e2e 测试**真的经过页面/端点**（不是直接调内部函数），且该测试能失败——在 RESULT 里说明它被故意改坏时会不会红",
+        "RESULT 里明确写出：`/explore` 按范围裁给了 T0802（附 `apps/web/app/(main)/explore/page.tsx:9` 的依据），本任务未实现它"
       ],
       "tests": [
         "asset ui e2e"
       ],
       "allowed_scope": [
-        "infra/migrations/**",
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
         "internal/assets/**",
         "internal/rights/**",
-        "go.mod",
-        "go.sum",
-        ".env.example",
+        "internal/persistence/**",
         "cmd/api/**",
         "apps/web/**",
         "packages/schemas/**",
-        "tests/**"
+        "tests/**",
+        ".env.example"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
+        "tasks/tasks.json",
         "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/tests.json",
+        "tasks/progress.md",
+        "tasks/decisions.md",
+        "specs/**",
+        "infra/migrations/**",
+        "go.mod",
+        "go.sum"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "**`docs/42_PAGE_SPECS.md:19`（先读这一条）**：资产页要显示的十一项内容，逐字",
+        "`docs/11_RELEASE_ASSET_HUB.md`：资产类型（`:11`）与资产页语义",
+        "`internal/assets/asset.go`（类型常量）与 `specs/database/postgres.sql:387`（对应的 CHECK）：四种类型是封闭集合",
+        "`specs/api/openapi.yaml:268`：`GET /assets/{assetId}`（`security: []`）；`internal/assets/url.go:61` 路径形状",
+        "`docs/17_FILES_STORAGE.md:23` 与 `internal/rights/visibility.go:20-35`：受限制 blob 的规矩与实现；`cmd/api/fileshttp/files.go:88-92`：**今天没有 blob 下载路由**",
+        "`docs/23_SECURITY_PRIVACY.md:21`：私有用法不得泄漏的既有裁决（与 issue #238 / T0712 同一类）",
+        "`cmd/api/provenancehttp/wiring.go:68`：读路径不进契约的先例（「provenance」在契约里出现 0 次）",
+        "`docs/51_FRONTEND_STANDARD.md:1-12`：前端标准；`apps/web/lib/projects.ts:1-13` 数据获取形状；`apps/web/app/components/rights-panel.tsx:20-27` 既有权利面板；`tests/e2e/` 挂具",
+        "`apps/web/app/(main)/explore/page.tsx:9`：`/explore` 归 T0802 的逐字依据（本任务据此裁掉 Explore）",
+        "`specs/ui/page-inventory.csv:15`：资产页匿名可见性的既有登记"
+      ],
+      "scope_note": "这是 phase 级默认上限；Supervisor 已按本任务调整：**加入 internal/persistence/**（读资产页数据所必需）**，移出 infra/migrations/**、specs/**、go.mod/go.sum（本任务不新增迁移、不改规格）。Explore 依据 apps/web/app/(main)/explore/page.tsx:9 裁给 T0802。",
+      "supervisor_scope_narrowing": "2026-09-16 定稿。四点说明：\n（一）**Explore 不在本任务里**。本任务标题写着 Explore，但 `/explore` 那个页面**已经在代码里指名归 T0802**——`apps/web/app/(main)/explore/page.tsx:9` 逐字写着「Explore 聚合 lands in T0802; the nav destination is stubbed for now.」，它现在是一个 ComingSoon 占位。这是范围重叠，不是语义缺口，我在这里裁掉：**T0709 做 `/assets/{id}` 资产页 + 资产浏览，`/explore` 留给 T0802**。\n（二）**加入 `internal/persistence/**`**。本任务要读资产页数据（版本、来源、权利、依赖、血统、公开使用），必须能写查询；既有 `internal/persistence/queries/` 里只有 `releases_assets.sql` 与 `asset_preview.sql`，没有资产页的查询。T0704 当时也是这么加的范围（见它任务包里的 supervisor_scope_narrowing）。\n（三）**`infra/migrations/**`、`specs/database/postgres.sql`、`specs/SPEC_VERSION.json` 移出 scope**：本任务要用的表**已经存在**（`specs/database/postgres.sql:384-419`），不需要新增迁移，所以也不该重新生成那份「所有建表语句的总和」、不该动规格指纹。\n（四）**列表/浏览路由契约里没有**，照 T0505 的先例处理（见 requirements），不新增契约声明。"
     },
     {
       "id": "T0710",
@@ -5777,39 +5847,74 @@
         "T0705"
       ],
       "requirements": [
-        "Postgres/S3/Gitea backup scripts",
-        "空环境 restore",
-        "reconciliation"
+        "**备份覆盖这四类，逐字照 `docs/37_BACKUP_DR.md:4`**：Postgres、S3 blobs/manifests、Gitea repositories、critical secrets/config **metadata**。第四类只备 metadata；secret 的值按 secret manager 的策略走，不进本任务的产物（不要写进备份文件、不要打印进日志）。",
+        "**每份备份必须记下 snapshot timestamp**（`docs/37_BACKUP_DR.md:7` 逐字要求），且该时间戳要能被恢复后的对账读到——否则「恢复到哪个时刻」这件事无法证明。",
+        "**恢复后必须跑对账，对的是这四条轴**：DB ↔ Git refs ↔ blob hashes ↔ release manifests（`docs/37_BACKUP_DR.md:7`）。",
+        "**对账只报不改**：这是本项目既定的对账语义，先例逐字写在 `cmd/api/reconciliation.go:11-19`——drift 一律记为 high-severity finding 加一行 audit，**the reconciler NEVER repairs**（原文），修不修由人决定。本任务的对账照同一形状办，**不得自动修复**。",
+        "**空环境恢复是 V1 的硬验收**：`docs/37_BACKUP_DR.md:10` 逐字要求「必须至少做一次空环境 restore test，并成功打开 Seed Project、Release、Asset、Files、Evidence Graph」——**五样都要能打开**，缺一样不算过。",
+        "**空环境的建法照现有工具**：`make infra-up`（`Makefile:237`）起基础设施、`make infra-init`（`Makefile:241`）做一次性初始化、再跑迁移。**不要发明一套新的起环境方式**，也不要假设环境里有残留数据。",
+        "**「hash/refs 正确」要有确切口径**：文件身份用内容的 sha256（先例：`internal/assets/manifest.go:417`、`internal/assets/gate.go:298`），blob 身份按 `docs/17_FILES_STORAGE.md:15`。**光比行数或比条数不算**——要比的是内容本身。",
+        "**RPO/RTO 不要自行加码**：`docs/37_BACKUP_DR.md:12-13` 写的是「V1 staging 先验证流程；生产初始目标可设 RPO 24h/RTO 4h，后续按实际客户要求收紧」。也就是说 **V1 这一轮的验收是「流程能跑通」，不是「达到 24h/4h」**。不要为了好看去构造一个 RPO 断言，也不要声称达到了某个 RPO。",
+        "**CI 里怎么跑要点明**：这套演练要跨 Postgres/MinIO/Gitea 三个真服务，属于重测试。既有先例是**明确跳过而不是静默通过**（`tests/integration/git_reconciliation_test.go:18-24` 的 required-test 形状：真 PostgreSQL、provider 那半边脚本化）。缺依赖时**必须响**（skip 且有可见理由），不得安静地绿。",
+        "**不得触碰生产凭证**：`docs/25_CICD_DEVOPS.md:32` 逐字写着禁止 Worker 直接触达生产部署 credentials。演练用本地 dev 栈，凭证从既有的 dev 环境读取，**不得新增外部凭证或付费服务**。",
+        "**备份产物不得进仓库**：恢复演练会造出大文件与 dump。产物写进被 `.gitignore` 覆盖的临时目录，**不要把 dump、blob 副本或任何备份产物提交进仓库**。",
+        "**不做**：不新增迁移；不改 `specs/**`（尤其不要动规格指纹）；不新增契约路由；不改 `apps/web/**`（本任务没有界面）；不改 `scripts/**` 与 `Makefile`（见 scope 说明）；不新增外部凭证；不动 `tasks/**`。",
+        "**不许为了让演练变绿而弱化它**（CLAUDE.md §5.1）：不得把「五样都打开」缩成「进程起得来」，不得把内容比对降成条数比对，不得放宽 hash 口径，不得给重测试加无理由的静默跳过。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "Seed Project/Release/Asset restore 后 hash/refs 正确"
+        "在**空环境**（`make infra-up` + `make infra-init` + 迁移，无残留数据）里从备份恢复出 Seed Project、Release、Asset、Files、Evidence Graph，**五样都能打开**（`docs/37_BACKUP_DR.md:10`）",
+        "恢复后对账四条轴（DB ↔ Git refs ↔ blob hashes ↔ release manifests）**跑得出结论**，且结论与实际相符：故意改坏一处（例如替换一个 blob 的内容）时对账**必须报出来**——一个永远说「一致」的对账等于没有对账",
+        "对账**只报不改**：drift 记为 finding + audit 行，**没有任何自动修复路径**（照 `cmd/api/reconciliation.go:11-19` 的原文语义），且这一点在测试里被钉住",
+        "备份产物里**记有 snapshot timestamp**，且恢复后的对账能读到它——「恢复到哪个时刻」可证明",
+        "恢复后的**内容**（不是条数）与备份时一致：文件按 sha256 比对、blob 按 `docs/17_FILES_STORAGE.md:15` 的身份比对",
+        "**DB 里没有任何凭证值**：备份产物、日志、dump 里都不出现 secret 的值（第四类只备 metadata）",
+        "缺依赖时重测试**响**（skip 且有可见理由），不是静默通过",
+        "`restore drill` 这个已登记的 blocking 测试（`tasks/tests.json` T1110-TEST-01）真的跑过、真的有证据",
+        "RESULT 里写明：这轮验收是「流程能跑通」，**不是**达到 RPO 24h/RTO 4h（`docs/37_BACKUP_DR.md:12-13`），且不得声称达到某个 RPO"
       ],
       "tests": [
         "restore drill"
       ],
       "allowed_scope": [
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
-        "apps/web/**",
-        "internal/**",
-        "go.mod",
-        "go.sum",
-        ".env.example",
-        "cmd/**",
-        "infra/**",
+        "ops/**",
         "tests/**",
-        "ops/**"
+        "infra/**",
+        "internal/persistence/testdb/**",
+        "cmd/api/**",
+        ".gitignore"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
+        "tasks/tasks.json",
         "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/tests.json",
+        "tasks/progress.md",
+        "tasks/decisions.md",
+        "apps/web/**",
+        "specs/**",
+        "infra/migrations/**",
+        "scripts/**",
+        "Makefile",
+        "packages/schemas/**",
+        "go.mod",
+        "go.sum"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "**`docs/37_BACKUP_DR.md`（先读，全文只有 14 行）**：`:4` 备份哪四类；`:7` snapshot timestamp 与恢复后对账的四条轴；`:10` V1 硬验收（空环境恢复 + 打开五样）；`:12-13` RPO/RTO 的定位（V1 只验证流程）",
+        "`cmd/api/reconciliation.go:11-19`：本项目对账的既成语义——drift 记 finding + audit，**NEVER repairs**（原文），本任务照同一形状",
+        "`docs/25_CICD_DEVOPS.md:32`：production deploy 先 staging smoke + migration check + **backup checkpoint**；禁止触达生产 credentials",
+        "`docs/31_MASTER_ACCEPTANCE.md:54`：Master Acceptance 的 `backup/restore tested` 一项",
+        "`Makefile:237` / `:241`：`infra-up` / `infra-init` —— 空环境的既有建法（本任务只调用，不修改）",
+        "`internal/assets/manifest.go:417`、`internal/assets/gate.go:298`：内容 sha256 的既有口径；`docs/17_FILES_STORAGE.md:15`：blob 身份",
+        "`ops/DEV_COMMANDS.md:99-100` 与 `ops/bootstrap-ubuntu.sh`、`ops/tests/doctor-*.sh`：脚本放在 `ops/` 的既有先例",
+        "`tests/integration/git_reconciliation_test.go:18-24`：跨真服务的 required test 形状（真 PostgreSQL、对端脚本化、缺依赖要响）",
+        "`docs/66_LOCAL_DEV_ENVIRONMENT.md:33` 与 `docs/68_TECH_STACK_DECISIONS.md:16`：Redis 是 cache/job 且键带 run 前缀——**不纳入备份范围**"
+      ],
+      "scope_note": "这是 phase 级默认上限；Supervisor 已按本任务缩小：移出 specs/**、infra/migrations/**、apps/web/**、scripts/**、Makefile、packages/schemas/**、go.mod/go.sum，并把 internal/** 收窄到 internal/persistence/testdb/**。理由见 supervisor_scope_narrowing。",
+      "supervisor_scope_narrowing": "2026-09-16 定稿。四点说明：\n（一）**本任务不新增迁移、不需要契约路由**。它写的是运维脚本与一次真演练，不是新的数据模型或新接口；因此 `specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`infra/migrations/**` 移出 scope。\n（二）**`scripts/**` 与 `Makefile` 仍然移出 scope**。脚本的既有落点是 `ops/`（先例：`ops/bootstrap-ubuntu.sh`、`ops/tests/doctor-*.sh`，见 `ops/DEV_COMMANDS.md:99-100`），本任务的演练独立放在 `ops/` 即可；把它接进 `Makefile` 是 Supervisor 的极小集成动作，不占 Worker 的 scope。若你确实需要改 `Makefile` 才能交付，在 RESULT 里说明，我来接。\n（三）**Redis 不在备份范围**：`docs/37_BACKUP_DR.md:4` 点名的是 Postgres、S3 blobs/manifests、Gitea repositories、critical secrets/config metadata 四类。Redis 是 cache/job（`docs/68_TECH_STACK_DECISIONS.md:16`）且键带 run-specific 前缀（`docs/66_LOCAL_DEV_ENVIRONMENT.md:33`），**不要自行把它加进备份范围**。\n（四）**「备份 secrets」指的是 metadata，不是 secret 的值**：`docs/37_BACKUP_DR.md:4` 括号里逐字写着 secret 本身按 secret manager backup policy。不要把任何真凭证写进备份产物或日志。"
     },
     {
       "id": "T1201",
