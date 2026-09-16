@@ -4980,9 +4980,10 @@
       ]
     },
     "T0705": {
-      "status": "running",
+      "status": "accepted",
       "started_at": "2026-09-15T23:43:26Z",
       "worker_run_id": "run-543bc2fa8158bb7c",
+      "accepted_by_supervisor_at": "2026-09-16T00:40:34Z",
       "history": [
         {
           "from": "todo",
@@ -4996,6 +4997,19 @@
           "at": "2026-09-15T23:43:26Z",
           "run_id": "run-543bc2fa8158bb7c",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-16T00:24:33Z",
+          "run_id": "run-dc2c96204db2509c",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-16T00:40:34Z",
+          "run_id": "run-872a21207941fb27"
         }
       ]
     },
