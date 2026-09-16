@@ -9476,3 +9476,77 @@ T0705 正属 P7，所以**它 G3 的绿不能当验收依据** —— 那脚本�
 4. 顺手把停掉的 driver 重新拉起来（它 09-15 07:39 停在 "DECISION NEEDED: T0214 accept"，
    `rddev status` 显示 `waiting_decisions: []` 已经清空；锁是 flock，进程死了锁自动没了，
    不需要手工清 `driver.lock` 里那个残留的 pid）。
+
+## L1-20260916-114 —— T0705 合并落地；三份任务书入库（指纹移位）；driver 重启；首次真并行派工
+
+### 一、T0705 落地
+
+- 独立复核 verdict `approve`（0 blocking / 0 major）→ `rddev task accept T0705`：
+  `G1=passed G2=passed G3=passed G4=passed` → `git commit` `f9bc247` → `push` →
+  **PR #255** → CI 七个 required job 全绿（`go` 2m48s、`migration-integration` 3m33s、
+  `acceptance` 1m18s，其余秒级）→ `rddev pr merge T0705` →
+  合并提交 **`f87e971`**（2026-09-16T00:47:26Z）。
+- 状态分布：**merged 76 · todo 47 · blocked 11 · running 0**（合并那一刻没有在飞的任务）。
+- **口径**：这次签字**没有**用 P7 那条"整体验收闸"的绿当数（#242：`rsg-real-services`
+  通篇不认识 asset）。用的是它自己的集成测试加我的复跑。
+
+### 二、三份任务书入库（这一步只能在"没有任务在飞"时做）
+
+`tasks/tasks.json` 是**规格指纹的输入**，在还有任务在飞时改它，会让 main 变红
+并挂掉所有在飞任务的 G2 —— 这就是 T0601/T0709/T1110 的任务书写好之后一直躺在
+`tasks/packages/` 里没进 DAG 的原因。趁 T0705 已合并、`running 0` 的窗口一次性落地：
+
+```
+python3 /tmp/apply-packages.py --write     # 三份各替换 7 个字段
+python3 scripts/spec_version.py --write    # ffd5748cac6e79dd → 115a4d23bcccbf20
+python3 scripts/validate_task_state.py     # 9 项全过
+```
+
+**apply-packages.py 的两道守卫这次是干跑通过后才写的**：JSON 往返字节一致
+（不一致就把整个 DAG 重排、把真正的改动埋掉）、以及**不丢掉 `tasks/tests.json`
+里已登记的测试**（这条守卫生效过一次：T0709 的包原来是 `tests: []`，被它拦下）。
+
+### 三、派工前我做的两项预检（都不是走流程，是各查出一件事）
+
+**（1）新加的 `supervisor_scope_narrowing` 字段会不会让 spawn 失败。**
+`specs/orchestrator/task-package.schema.json` 是 `additionalProperties: false`，
+而它的字段名和 DAG 完全不同（`id`→`task_id`、`tests`→`required_tests`）。
+去读 `internal/devorchestrator/worker_render.go:44` 才确认：包是**从 DAG 挑字段渲染**的
+（`RenderTaskPackage` 逐个赋值），多余字段被忽略，不会透传。**结论：安全。**
+
+**（2）三个任务的活动范围有重叠 —— 这是从 DAG 里读出来的，不是猜的。**
+两两之间都重叠在 `tests/**`、`cmd/api/**`；T0601 与 T0709 还都覆盖整个
+`internal/persistence/**`。
+**但这一类的冲突是可以机械重建的**：`specs/orchestrator/derived-artifacts.json` 已经把
+`internal/persistence/queries/**` → `internal/persistence/sqlc` 声明为派生物，
+规则里明写"覆盖了输入的任务可以重新生成它而不被范围检查拒绝"，而且
+`sqlc` v1.31.1 在本机可用（`scripts/gen_sqlc.sh`）。
+所以真撞上时按老办法：**先合查询文件，再重新生成一次**，不手工改生成物。
+
+### 四、重启 driver（它已经停了大约 17 小时）
+
+`rddev status` 报 `driver: dead (heartbeat stale) (pid 19577)`。
+查清了原因才动它，不是盲重启：
+
+- `.rddev/runtime/driver.json` 记着 `state: stopping`，`driver.out` 最后一行是
+  **`07:39:45 drive: DECISION NEEDED: T0214 accept —`** —— 它是**按设计停在一个需要
+  Supervisor 判断的点上**（§8.2：这是判断点，不是故障），而我当时是在会话里手工接着走的，
+  没有把它拉回来。**这是我的漏，不是它崩了。**
+- `driver.lock` 里那个残留的 pid **不需要手工清**：锁是 `flock`
+  （`internal/devorchestrator/driver.go:123`），进程一死锁自动释放，文件里那串数字只是遗文。
+- `rddev status --json` 的 `waiting_decisions` 已经是 `[]`，所以也不用 `--clear-decision`。
+
+重启：`setsid ./bin/rddev drive --parallel 3 > .rddev/runtime/driver.out 2>&1 &`
+（调用方式照 `ops/DEV_COMMANDS.md:110`）。日志轮转：旧的挪成 `driver.out.20260915`。
+
+### 五、首次真并行
+
+driver 自己按 DAG 顺序派工（`driver_run.go:432` 会先 `task ready` 再 spawn）：
+**T0601**（P6 冻结主线治理）→ **T0709**（P7 资产中心页面）→ 然后是 **T1110**（P11 备份恢复演练）。
+
+前面一直只能一节一节走，是因为能开工的每个任务都要动**数据库结构文件**
+（所有建表语句的总和，谁都得重新生成一份，两份必然打架）。
+**这三个都不需要新增迁移** —— 所以这是第一个可以真并行的窗口。
+
+**三路并行的冲突面我不打算假装没有**：见第三节（2）。撞上了按机械重建处理；
+真出现需要判断的语义冲突，那是我的活（CLAUDE.md §1 把 merge conflict 列为 Supervisor 的份内事）。
