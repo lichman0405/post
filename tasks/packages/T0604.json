@@ -1,0 +1,73 @@
+{
+  "id": "T0604",
+  "phase": "P6",
+  "phase_name": "Frozen Main、Abort、Policy 与 Release",
+  "title": "Scientific Responsibility / Reviewer Routing",
+  "v1_required": true,
+  "dependencies": ["T0404", "T0603"],
+  "decision_level_max": "L1",
+  "tests": ["review routing"],
+  "supervisor_scope_narrowing": "2026-09-16 定稿。四点：\n（一）**先更正我自己的一个错误：这个任务被误标成「等定」，现在撤回。** 2026-09-16 00:08 我把它标成 SPEC_BLOCKED，理由是「required-review 判定（几个 review、哪几个维度、哪个 responsibility 签、什么变更对应什么要求）规格全无」。**这个判断是错的**，而且我在 2026-09-15 20:20 就已经在 issue #239 里**撤回过完全相同的说法**——答案在 `docs/04_USERS_ROLES.md` §3，那一节的标题就叫「Scientific Responsibility（什么需要你审核）」，两句话把机制说全了：责任标签是**项目可配置**的、用于 **Review routing**、**不自动赋予更高访问权限**，并且点名要「**类似 CODEOWNERS 的 Research Owners 规则可按对象类型/Schema/领域匹配 reviewer**」。DAG 自己写着 `decision_level_max: L1`，两条验收标准逐字来自这一节。我上次把「机制没实现」读成了「规则没定义」，然后又在撤回之后把它标回了 blocked——同一个错误犯了两次。经过与证据记在 `tasks/decisions.md`。\n（二）**删掉 `apps/web/**`**：本任务没有界面交付，与 T0601、T0409 同样的处置。\n（三）**刻意不包含 `internal/rsg/**`**：你要判断「这次改动动了哪些对象类型」，而**读** RSG 的 diff 不需要范围——Worker 本来就可以读整个 worktree，范围限制的是**改**。如果你确实需要**修改** `internal/rsg/**`，在 RESULT 里写明理由，我来接（和 `Makefile`、`infra/**` 同一个处理方式），不要自己扩范围。\n（四）迁移号分配 **00073**（按既有的分配账：69 给了 T0406、70 给了 T0409、71 是 T0712 预留未用、72 给了 T0705）。**不得自行选号，也不得从仓库里已有的编号往上猜**（CLAUDE.md §8.1）。若你确实不需要建表，在 RESULT 里明说不需要。",
+  "requirements": [
+    "**本任务的第一件事是把一个今天接的是 `nil` 的钩子接上生产。** `internal/application/reviews/ports.go:70-73` 逐字写着：「T0604 lands the rule-based resolver (Research Owners rules by object/schema/type); until then production wires nil and the conditional verdict fails closed」。也就是说：**今天生产上这个 resolver 是 nil，持 conditional 判定的人永远被拒**——这不是保守，是功能缺失。你要把它落地并接上生产。",
+    "**责任标签与 Research Owners 规则是「项目数据」，不是写死在代码里的规则**（`docs/04_USERS_ROLES.md` §3 原文「项目可配置」）。迁移 00073 建表承载「对象类型 / Schema / 领域 → 责任标签」，以及「谁在哪个项目持哪些责任标签」。**不要塞进 `internal/domain/policy.go` 的词表**：那份词表是「扁平的一组具名规则 + 严松序」（`internal/domain/policy.go:22-25`），装不下一张映射。词表留给别的用途。",
+    "**required-review 判定：`approved` 那一半被两处代码逐字指名交给你。** `internal/application/reviews/service.go:25-27`：「It does NOT decide when the PR is approved: that needs the required-review calculation (T0604: which responsibilities/kinds are required for which changes), which is deliberately not invented here.」`internal/persistence/review_store.go:95-101`：「The approved half is deliberately absent: deciding WHEN the dimensions add up to an approval is T0604's required-review calculation」。**今天产品路径上没有任何办法把一个 PR 变成可合并态**（T0406 的合并服务只接受 `merge_ready`，`internal/application/merge/service.go:215-217`）。本任务把它接上。",
+    "**责任不赋权，一个字都不许松。** `docs/04_USERS_ROLES.md` §3 原文：「责任用于 Review routing，**不自动赋予更高访问权限**」。责任标签**不得**进入 `internal/authz` 的任何判定；一个持「Data Reviewer」标签的 viewer 仍然不能 merge main。这条要有一个测试证明它不松。",
+    "**一律 fail-closed。** 缺规则、缺标签、解析失败、配置里没有对应项——**全部当作不满足**，拒绝，不得放行（`docs/12_AUTHORIZATION.md` §5：「Organization policy 是最低治理要求。Project policy 可更严格，**不能静默放宽**」；`internal/authz/engine.go` 对未登记动作也是默认拒绝）。这与 T0601 的处置同一条原则：**缺失不得成为放行理由**。",
+    "**词表里已有的两条规则要真的被消费，不再是死字。** `internal/domain/policy.go:36-45` 定义了 `main_protected` / `release_min_reviewers` / `raw_data_retention_days` / `public_asset_ip_review` / `required_schema_profiles`，`docs/12` §5 逐条点了名（「例：main protected、release min reviewers、raw data retention、public asset IP review、required schema profile」），但今天**没有任何代码消费它们做判定**（只在项目模板里被写入）。本任务至少要消费与 review 直接相关的两条：`release_min_reviewers`（release 合并至少要有几个 approve）与 `public_asset_ip_review`（公开资产需要 IP review）。**取值来自项目配置，不是你编的默认值。**",
+    "**`reviews.responsibility` 这一列已经在等你了**：`infra/migrations/00061_scientific_review_dimensions.sql:31-35` 的注释逐字写着「responsibility records which scientific responsibility the reviewer acted under (docs/04 §3: responsibility is for review …) … the application's reviewer-responsibility hook (T0604 lands the rule-based resolver)」，`:71` 加了 `responsibility text NOT NULL DEFAULT ''`。今天它**只被写空串**。本任务要让它在生产路径上真的被填上。",
+    "**状态推进走既有的面，不要另开一条路**：`internal/application/pullrequests` 的 `SetState` 是既有的状态迁移面（T0402 留下、T0406 的合并 saga 在用）。`docs/43` 第 13 行的状态机是 `open → review_required → changes_requested/approved → merge_ready → merged`，你只能沿这条线推进。**不得绕过 `merge_ready`**——T0406 的合并服务只接受它，那是既定的安全边界。",
+    "**要产生领域事件与审计行**，命名照既有的两套词表各自的惯例（领域事件用 `specs/events/event-types.yaml` 里已有的名字，审计动作用 `internal/domain/audit.go` 既有的「完整名词 + 点分」惯例）。同事务写入，不要先改状态后补事件。",
+    "**不要为了让测试好过而构造状态**：如果你发现某条路径在真实产品流程里走不通，**如实写进 RESULT**，不要用测试夹具把 PR 直接摆成 `merge_ready` 蒙混过去——那正是 CLAUDE.md §5.1 禁止的「为了让 Gate 变绿而弱化」（issue #239 已就此记过一次）。"
+  ],
+  "acceptance_criteria": [
+    "**Protocol change 自动要求对应 reviewer**（DAG 原文）：一次改动了 `protocol` 类型对象的 PR，必须自动要求持有对应责任标签的人来 review——「对应」由 Research Owners 规则解析，不是由代码里的 if 硬编码对象类型。",
+    "**无权限不自动赋权**（DAG 原文）：持责任标签**不等于**获得访问权限。要有一个测试证明：一个持责任标签、但访问角色不变的账号，其 authz 判定与不持标签时**逐条相同**。",
+    "**生产接线不再是 nil**：同一个 conditional 判定（viewer / contributor / 非成员），**持有**对应责任标签时被允许、**不持有**时被拒——两条都要有测试。现在生产接 nil，等于后一条永远成立、前一条永远不成立，这正是要关掉的洞。",
+    "**`reviews.responsibility` 在生产路径上被填上真实标签**（不再是空串），并且这个标签与解析出的规则一致。",
+    "**一个 PR 能经真实产品路径到达 `merge_ready`**：端到端用例必须从 open 一路走到 merge_ready，**不得在测试里构造该状态**。这是 T0410「PR/Branch 完整 E2E」能诚实成立的唯一前提（issue #239 决定）。",
+    "**缺配置一律拒**：项目没有配任何 Research Owners 规则时，一个需要 review 的 PR **不得**因此自动被批准（fail-closed）。要有一个测试专门证明它在缺配置时拒。",
+    "**`release_min_reviewers` 真的被消费**：release 合并时，approve 数少于项目配置值时不得进入 merge_ready。同样要有一个「配置为 2 时只有 1 个 approve 被拒」的测试。",
+    "**重复与并发**：同一维度重复 approve 不重复计数；两个 approve 并发到达时状态只推进一次，不产生第二条事件与第二条审计。",
+    "RESULT 里要写明：哪些推进是**真实产品路径**、哪些地方规格没写清楚而你按 fail-closed 处理了（后者要逐条点名，不要埋在细节里）。"
+  ],
+  "allowed_scope": [
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "internal/domain/**",
+    "internal/application/**",
+    "internal/persistence/**",
+    "internal/authz/**",
+    "cmd/api/**",
+    "tests/**",
+    "go.mod",
+    "go.sum",
+    ".env.example"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/tasks.json",
+    "tasks/task_status.json",
+    "tasks/tests.json",
+    "tasks/progress.md",
+    "tasks/decisions.md",
+    "apps/web/**",
+    "packages/schemas/**"
+  ],
+  "relevant_specs": [
+    "**`docs/04_USERS_ROLES.md` §3「Scientific Responsibility（什么需要你审核）」（先读这一节）**：整节只有两句，但两句都是本任务的规格依据——「不与 Access Role 混合。项目可配置：Experimental Reviewer、Computational Reviewer、Data Reviewer、Project Lead、IP Reviewer 等责任标签。责任用于 Review routing，不自动赋予更高访问权限。」「类似 CODEOWNERS 的 Research Owners 规则可按对象类型/Schema/领域匹配 reviewer。」注意「等」字与「项目可配置」：标签集合与映射都是项目数据。",
+    "`docs/12_AUTHORIZATION.md` §5 Organization Policy：「Organization policy 是最低治理要求。Project policy 可更严格，不能静默放宽。Policy 版本化；Release 绑定当时 policy version。」并逐条点名了 main protected / release min reviewers / raw data retention / public asset IP review / required schema profile —— 这五条就是 `internal/domain/policy.go:36-45` 的五个规则键。",
+    "`docs/43_STATE_MACHINES.md` 第 13 行 PR 状态机：`open → review_required → changes_requested/approved → merge_ready → merged；也可 closed/aborted。Scientific/Integrity review 各自状态。`",
+    "`internal/application/reviews/ports.go:57-81`（`ResponsibilityGate` 的完整定义与注释）与 `:93`：钩子在 Service 上的接线点。注释逐字写着你的任务范围与「until then production wires nil」。",
+    "`internal/application/reviews/service.go:18-27`：T0404 留下的交接说明——它不做 approval 判定，那需要 required-review calculation，**指名 T0604**。",
+    "`internal/persistence/review_store.go:90-118`：`review_required → changes_requested` 是今天唯一存在的自动迁移；`approved` 那一半的缺席是**写下来的决定**，不是疏漏。",
+    "`infra/migrations/00061_scientific_review_dimensions.sql:31-35` 与 `:71`：`reviews.responsibility` 列已存在、注释点名 T0604、今天只被写空串。同文件还给出 `reviews.review_kind IN ('scientific','integrity','rights','ip')` 的取值（`infra/migrations/00009_issues_pull_requests.sql:37`）。",
+    "`internal/domain/policy.go:22-65`：规则词表与 `RuleKind`（bool「true 更严」、int「更大更严」、list「超集更严」）。注释明说「later tasks (T0604) can extend the vocabulary without a migration」——**但那张「对象类型/Schema → 责任标签」的映射不要塞进词表**，见 requirements 第 2 条。",
+    "`specs/policies/permissions-matrix.csv:7`：`submit_scientific_review,deny,conditional,conditional,conditional,allow,allow,proposal_or_scoped` —— conditional 的那一格正是由你的 resolver 解析的；`internal/authz/matrix.go` 里对应的代码是它的既成实现，照它的形状接线。",
+    "`internal/application/merge/service.go:215-217`：合并服务只接受 `merge_ready`（`PR_NOT_MERGEABLE`）。这是你产出的状态的下游消费者，也是「不得绕过 merge_ready」这条边界的出处。",
+    "`specs/events/event-types.yaml`：领域事件名的**机器可读**清单（全树事件以此为准；#239 的判例：审计动作名与事件名是两套词表，刻意不同）。"
+  ],
+  "scope_note": "范围是**按本任务的实际交付面**收窄的，不是 phase 级默认上限。逐条说明：\n- 保留 `infra/migrations/**` + `specs/database/postgres.sql`：要建「责任标签 / Research Owners 规则」的表，并按 `specs/orchestrator/derived-artifacts.json` 的规则**重新生成**那份建表语句总和（`python3 scripts/gen_schema_snapshot.py`，不要手改）。\n- 保留 `internal/authz/**`：**不是为了改权限**，而是因为 conditional 那一格的解析实现就在这个包旁边（`internal/authz/matrix.go`），你要照它的形状接线，并且要写「责任不赋权」的测试。**不得放宽任何一行矩阵。**\n- 保留 `internal/persistence/**`：`approved` 那一半的落点在这里（`review_store.go`），查询与 sqlc 生成物同属此目录。若你的迁移改动了**已被既有查询读到的表**，记得重新生成 sqlc（`scripts/gen_sqlc.sh`，v1.31.1）——只新增表通常不会移动生成物。\n- **`specs/**` 的其余部分不可写**（CLAUDE.md §8.1）：你在这份快照里唯一能动的是那两个派生物，且只能靠重新生成。规格文件本身若与实现冲突，写进 RESULT，不要改规格。\n- 三个明确移出的目录各有理由：`apps/web/**`（无界面交付）、`internal/rsg/**`（只读够用，见 supervisor_scope_narrowing 第三点）、`Makefile` 与 `infra/**` 的其余部分（本任务不需要改环境搭法）。真需要就说，我来接。"
+}

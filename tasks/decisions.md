@@ -9615,3 +9615,82 @@ worktree 里跑，而是把「**当前 main + 该任务的完整改动**」合�
 
 它没有"因为一条派不出去就整个停摆"，也没有硬派，而是**把这条写成待决事项、继续跑另外两个**。
 这正是 §8.2 要的形状：**判断点，不是等待点。**
+
+## L1-20260916-116 —— T0604 被误标成「等定」，撤回；同一个错误我今天犯了两次
+
+### 一、发生了什么
+
+清点"还有多少活能自己往前走"时发现：**44 个待办里有 36 个卡在 11 个"等定"任务后面**（这批见
+issue #239 / #249 / #250 / #251 / #252 / #253 / #189），只有 8 个能自行推进、约三轮就见底。
+顺着这 11 个逐个复核，**第一个就发现问题**：
+
+**T0604（Scientific Responsibility / Reviewer Routing）根本不该被标成"等定"。**
+
+### 二、证据（四条，都不是印象）
+
+1. **DAG 自己写着 `decision_level_max: L1`** —— 即"实现决策"，按 §5 属于我可以自行决定的层级，
+   不是 L3。
+2. **它的两条验收标准逐字来自规格**：`docs/04_USERS_ROLES.md` §3，那节标题就叫
+   「Scientific Responsibility（什么需要你审核）」，正文只有两句：
+   > 「不与 Access Role 混合。**项目可配置**：Experimental Reviewer、Computational Reviewer、
+   > Data Reviewer、Project Lead、IP Reviewer 等责任标签。责任用于 Review routing，
+   > **不自动赋予更高访问权限**。」
+   > 「**类似 CODEOWNERS 的 Research Owners 规则可按对象类型/Schema/领域匹配 reviewer。**」
+   机制（责任标签 + CODEOWNERS 式匹配）、边界（不赋权）、来源（项目配置）三样全写了。
+3. **两处交付代码逐字把这个判定指名交给 T0604**：
+   `internal/application/reviews/service.go:25-27`「It does NOT decide when the PR is approved:
+   that needs the required-review calculation (**T0604** …)」；
+   `internal/persistence/review_store.go:95-101`「The approved half is deliberately absent …
+   is **T0604**'s required-review calculation」。
+4. **连列都给它留好了**：`infra/migrations/00061_scientific_review_dimensions.sql:31-35` 的注释
+   写着这一列记录 review 用的责任标签，并点名「T0604 lands the rule-based resolver」；`:71`
+   就是那列 `responsibility text NOT NULL DEFAULT ''`。
+
+**结论：要建的不是一条产品规则，是一个规格已经点名的机制。**"哪类变更要哪个责任标签"是
+**项目配置**（原文"项目可配置"），不是我要发明的默认值。
+
+### 三、比错误本身更值得记的：我在**撤回之后**又标了一次
+
+`docs/04` §3 这个答案，我**早就查出来过**：2026-09-15 20:20 我在 issue #239 里发过一条更正，
+逐字写着"我把这条 issue 的 3.1 和 3.2 撤回来……**我没查 `docs/04_USERS_ROLES.md`**……我上次把
+'机制没实现'读成了'规则没定义'"，结论是"**T0604 我也照常派**"。
+
+**然后在 2026-09-16 00:08，我把它标成了 blocked**，理由与那条被我撤回的说法**是同一句话**。
+
+**所以这不是"一时看漏"，是两次独立的同向错误**：第一次是漏检，第二次是**没有回头查自己的
+更正记录**，把一个已经作废的判断重新写进状态文件。状态文件里那条 note 也没留任何指向 #239
+更正评论的线索，于是它看起来像一条新鲜的判断。
+
+### 四、处置
+
+- **任务书包写入 `tasks/packages/T0604.json`**（暂存区，不是指纹输入）：
+  - 补全 7 个字段：验收标准扩到 9 条（原文两条 + 生产接线不再为 nil、责任列真的被填、PR 能走真实
+    路径到 `merge_ready`、缺配置一律拒、重复/并发、词表两条规则真被消费 等，逐条带文件行号）；
+    `requirements` 10 条；`relevant_specs` 11 条。
+  - **范围收窄**：删 `apps/web/**`（无界面交付，与 T0601/T0409 同处置）；**刻意不给
+    `internal/rsg/**`**（判断"动了哪些对象类型"只需**读**，读不受范围限制；要改就在 RESULT 里说，
+    我来接——同 `Makefile`/`infra/**` 的处理方式）；保留 `internal/authz/**` 但写明**只为照它接线
+    和写"责任不赋权"的测试，不得放宽任何一行矩阵**。
+  - **迁移号分配 00073**（账：69→T0406、70→T0409、71→T0712 预留未用、72→T0705）。
+- **不改 DAG**：现在 T0601、T0709 正在跑，改 `tasks/tasks.json` 会移动规格指纹，红掉它们的 G2。
+  落地顺序与 T1110 完全一样：等 `running 0` → 一次落地两份包 → `spec_version.py --write` →
+  `validate_task_state.py` → 提交推送 → `rddev task ready T0604` → `drive --clear-decision T1110`。
+- **`blocked` 是唯一的闸**：driver 的 `dispatch`（`driver_run.go:409`）取 `task next`（= todo/ready
+  且依赖全合并），**它会自己把 todo promotion 成 ready**。所以**不能提前** `task ready`——那会让
+  driver 拿 phase 级默认范围（整个仓库）去派它。必须"包先落地、范围先收窄"，再解闸。
+
+### 五、顺带查清的一件事：第三个工位是空的
+
+driver 的 `dispatch` 只取 `task next` 的**第一行**；那一行有未决事项时**直接返回 false**，不会跳过
+去试下一个。今天 `task next` 只有 T1110 一行，而它挂在待决事项上 —— **所以 3 个工位里第 3 个一直
+空着**，直到 T0601/T0709 跑完、T1110 的包落地为止。这是我那个范围错误的**实际代价**：不止"少一个
+并行槽"，而是"空转一个槽"。
+
+### 六、这一整天里同一个形状的错误
+
+- 早上：**T1110** —— 散文写"移出 `infra/migrations/**`"，glob 却留着 `infra/**`；文字与机器可读的那半不一致。
+- 现在：**T0604** —— 状态文件写"规格全无"，而我的更正评论写"规格写全了"；两个地方对同一件事说法相反。
+
+**两个都是"我说过的话和我机器里的事实不一致"，而且两个都是我自己发现的、都发生在等待窗口里。**
+值得记的是：**复核的价值不在"多看一遍"，而在"拿两份独立的记录对撞"** —— T1110 是 glob 对散文，
+T0604 是状态文件对 issue 评论。只读其中任何一份，两次都看不出来。
