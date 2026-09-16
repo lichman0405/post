@@ -4,8 +4,11 @@
   "phase_name": "UI、安全、可访问性、性能与运维加固",
   "title": "Backup/Restore 自动化演练",
   "v1_required": true,
-  "dependencies": ["T0606", "T0705"],
-  "supervisor_scope_narrowing": "2026-09-16 定稿。四点说明：\n（一）**本任务不新增迁移、不需要契约路由**。它写的是运维脚本与一次真演练，不是新的数据模型或新接口；因此 `specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`infra/migrations/**` 移出 scope。\n（二）**`scripts/**` 与 `Makefile` 仍然移出 scope**。脚本的既有落点是 `ops/`（先例：`ops/bootstrap-ubuntu.sh`、`ops/tests/doctor-*.sh`，见 `ops/DEV_COMMANDS.md:99-100`），本任务的演练独立放在 `ops/` 即可；把它接进 `Makefile` 是 Supervisor 的极小集成动作，不占 Worker 的 scope。若你确实需要改 `Makefile` 才能交付，在 RESULT 里说明，我来接。\n（三）**Redis 不在备份范围**：`docs/37_BACKUP_DR.md:4` 点名的是 Postgres、S3 blobs/manifests、Gitea repositories、critical secrets/config metadata 四类。Redis 是 cache/job（`docs/68_TECH_STACK_DECISIONS.md:16`）且键带 run-specific 前缀（`docs/66_LOCAL_DEV_ENVIRONMENT.md:33`），**不要自行把它加进备份范围**。\n（四）**「备份 secrets」指的是 metadata，不是 secret 的值**：`docs/37_BACKUP_DR.md:4` 括号里逐字写着 secret 本身按 secret manager backup policy。不要把任何真凭证写进备份产物或日志。",
+  "dependencies": [
+    "T0606",
+    "T0705"
+  ],
+  "supervisor_scope_narrowing": "2026-09-16 定稿。四点说明：\n（一）**本任务不新增迁移、不需要契约路由**。它写的是运维脚本与一次真演练，不是新的数据模型或新接口；因此 `specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`infra/migrations/**` 移出 scope。\n（二）**`scripts/**` 与 `Makefile` 仍然移出 scope**。脚本的既有落点是 `ops/`（先例：`ops/bootstrap-ubuntu.sh`、`ops/tests/doctor-*.sh`，见 `ops/DEV_COMMANDS.md:99-100`），本任务的演练独立放在 `ops/` 即可；把它接进 `Makefile` 是 Supervisor 的极小集成动作，不占 Worker 的 scope。若你确实需要改 `Makefile` 才能交付，在 RESULT 里说明，我来接。\n（三）**Redis 不在备份范围**：`docs/37_BACKUP_DR.md:4` 点名的是 Postgres、S3 blobs/manifests、Gitea repositories、critical secrets/config metadata 四类。Redis 是 cache/job（`docs/68_TECH_STACK_DECISIONS.md:16`）且键带 run-specific 前缀（`docs/66_LOCAL_DEV_ENVIRONMENT.md:33`），**不要自行把它加进备份范围**。\n（四）**「备份 secrets」指的是 metadata，不是 secret 的值**：`docs/37_BACKUP_DR.md:4` 括号里逐字写着 secret 本身按 secret manager backup policy。不要把任何真凭证写进备份产物或日志。\n（五）**`infra/**` 整个移出 scope（2026-09-16 派工时修正）。** 原先写的是 `infra/**` 加一条「移出 `infra/migrations/**`」，但**这个范围模型只能相加、不能相减** —— `infra/**` 照样盖住 `infra/migrations/**`，于是命中派生规则：`specs/orchestrator/derived-artifacts.json` 规定「覆盖了 marker 输入 `infra/migrations/**` 的任务，必须同时覆盖它的派生物 `specs/database/postgres.sql`」，而本任务不许碰 `specs/**`。派工当场被 `worker_spawn.go:178` 的范围校验拒掉，**是我的任务书自相矛盾，不是你的问题**。\n改成整个移出而不是缩成 `infra/docker/**`，理由是任务书自己要求的：空环境照 `make infra-up` / `make infra-init` 用**现有工具**建，**不要发明一套新的起环境方式** —— 既然是「用」而不是「改」，就不需要 infra 的写权限。演练脚本的落点是 `ops/`（已授权），演练本身落在 `tests/`（已授权）。\n**如果你确实需要改 `infra/**` 下的某个文件才能交付**，在 RESULT 里说明，我来接 —— 和上面 `Makefile` 那条同一个处理方式。",
   "requirements": [
     "**备份覆盖这四类，逐字照 `docs/37_BACKUP_DR.md:4`**：Postgres、S3 blobs/manifests、Gitea repositories、critical secrets/config **metadata**。第四类只备 metadata；secret 的值按 secret manager 的策略走，不进本任务的产物（不要写进备份文件、不要打印进日志）。",
     "**每份备份必须记下 snapshot timestamp**（`docs/37_BACKUP_DR.md:7` 逐字要求），且该时间戳要能被恢复后的对账读到——否则「恢复到哪个时刻」这件事无法证明。",
@@ -33,11 +36,12 @@
     "`restore drill` 这个已登记的 blocking 测试（`tasks/tests.json` T1110-TEST-01）真的跑过、真的有证据",
     "RESULT 里写明：这轮验收是「流程能跑通」，**不是**达到 RPO 24h/RTO 4h（`docs/37_BACKUP_DR.md:12-13`），且不得声称达到某个 RPO"
   ],
-  "tests": ["restore drill"],
+  "tests": [
+    "restore drill"
+  ],
   "allowed_scope": [
     "ops/**",
     "tests/**",
-    "infra/**",
     "internal/persistence/testdb/**",
     "cmd/api/**",
     ".gitignore"
@@ -71,5 +75,5 @@
     "`tests/integration/git_reconciliation_test.go:18-24`：跨真服务的 required test 形状（真 PostgreSQL、对端脚本化、缺依赖要响）",
     "`docs/66_LOCAL_DEV_ENVIRONMENT.md:33` 与 `docs/68_TECH_STACK_DECISIONS.md:16`：Redis 是 cache/job 且键带 run 前缀——**不纳入备份范围**"
   ],
-  "scope_note": "这是 phase 级默认上限；Supervisor 已按本任务缩小：移出 specs/**、infra/migrations/**、apps/web/**、scripts/**、Makefile、packages/schemas/**、go.mod/go.sum，并把 internal/** 收窄到 internal/persistence/testdb/**。理由见 supervisor_scope_narrowing。"
+  "scope_note": "这是 phase 级默认上限；Supervisor 已按本任务缩小：**整个 `infra/**` 移出**（连同它下面的 `infra/migrations/**`）、并移出 specs/**、apps/web/**、scripts/**、Makefile、packages/schemas/**、go.mod/go.sum，另把 internal/** 收窄到 internal/persistence/testdb/**。理由见 supervisor_scope_narrowing（第五点是这次补的）。"
 }

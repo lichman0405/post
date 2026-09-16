@@ -9550,3 +9550,68 @@ driver 自己按 DAG 顺序派工（`driver_run.go:432` 会先 `task ready` 再 
 
 **三路并行的冲突面我不打算假装没有**：见第三节（2）。撞上了按机械重建处理；
 真出现需要判断的语义冲突，那是我的活（CLAUDE.md §1 把 merge conflict 列为 Supervisor 的份内事）。
+
+## L1-20260916-115 —— 派工当场被拦：我给 T1110 写的范围自相矛盾（散文说"移出迁移"，glob 却盖住了它）
+
+### 一、发生了什么
+
+driver 派 T0601、T0709 之后，轮到 T1110 时**当场停下并要求判断**：
+
+```
+08:49:00 drive: DECISION NEEDED: T1110 spawn — rddev worker spawn:
+  allowed_scope of T1110 does not validate against the real tree:
+  allowed_scope covers marker input "infra/migrations/**" but not its derived artifact "specs/database/postgres.sql"
+```
+
+这是 `internal/devorchestrator/worker_spawn.go:178` 的**派工前范围校验**，规则在
+`scope_validate.go:118-124`：**一个能改 marker 输入的任务，必须也能重新生成它的派生物**
+（`specs/orchestrator/derived-artifacts.json`：`infra/migrations/**` → `specs/database/postgres.sql`）。
+
+### 二、这是我的错，而且是一种特定形状的错
+
+T1110 的任务书里，`scope_note` 用散文写着「**移出** `specs/**`、**`infra/migrations/**`**、…」，
+可 `allowed_scope` 里留的是 `infra/**` —— **`infra/**` 照样盖住 `infra/migrations/**`**。
+
+**这个范围模型只能相加，不能相减。** 我在散文里做了一次减法，glob 里做不出来，
+于是同一份任务书的两半互相打架。校验器不读散文，只读 glob，所以它是对的、我是错的。
+
+**同类错误这不是第一次**：T0709 的任务书原来写 `tests: []`，而 DAG 与
+`tasks/tests.json` 都登记了 `asset ui e2e`；那次是我自己的干跑脚本
+`/tmp/apply-packages.py` 的守卫拦下的。**两次都是"文字与机器可读的那半不一致"。**
+
+### 三、怎么改的（以及为什么不是缩成 `infra/docker/**`）
+
+`infra/**` **整个移出**，不是缩小。理由是任务书自己已经写死了：
+空环境照 `make infra-up` / `make infra-init` 用**现有工具**建，**不要发明一套新的起环境方式** ——
+**既然是"用"而不是"改"，就不需要 infra 的写权限。**
+演练脚本的落点是 `ops/`（已授权），演练本身落在 `tests/`（已授权）。
+
+顺带也**顺手关掉了一个我不想开的门**：留着 `infra/docker/**` 就等于允许 Worker 去改
+每个开发者都在用的起环境脚本（`infra/docker/init.sh`、`postgres/initdb.d/01-init.sh`）——
+那是一条"为了让演练变绿而去改环境搭法"的路。**改成整个移出，这条路不存在。**
+
+改动落在 `tasks/packages/T1110.json`（**暂存区，不是指纹输入**，随时可改），
+并在 `supervisor_scope_narrowing` 里补了第五点，把上面的理由**原样写给 Worker 看** ——
+包括"这是我的任务书自相矛盾，不是你的问题"，以及"确实需要改 `infra/**` 就在 RESULT 里说，我来接"
+（和 `Makefile` 那条同一个处理方式）。
+
+### 四、为什么现在**不能**把它写进 DAG —— 以及我没有靠记忆下这个判断
+
+`tasks/tasks.json` 是**规格指纹的输入**。今天**不能**动它，因为 **T0601 与 T0709 正在跑**。
+
+我没有凭印象下这个结论，而是回去看了自己 2026-09-15 那次踩坑的记录：G2 **不是**在任务自己的
+worktree 里跑，而是把「**当前 main + 该任务的完整改动**」合成到
+`.rddev/runtime/integration/<TASK>/` 之后跑。合成树里的 `tasks/tasks.json` 取自 main、
+而指纹取自**任务自己的 diff** —— 于是**一次 main 上的记账提交，会让每一个在飞任务的 G2 红掉**。
+那次 T0803 就是这么被挂掉的：**一个任务的文书，毁掉另一个任务的验收。**
+
+**所以顺序是**：等 T0601 与 T0709 都落地（`running 0`）→ 再改 DAG → 重新生成指纹 →
+`validate_task_state.py` → 提交推送 → `rddev drive --clear-decision T1110` → 让它自己派。
+
+代价要说清楚：**T1110 因此拿不到并行**（它会单独跑）。这是"范围模型只能相加"这条规则的
+真实成本，不是我选错了时机 —— 换任何时机，只要那两个在飞，就一样要等。
+
+### 五、这个 driver 的行为值得记一笔
+
+它没有"因为一条派不出去就整个停摆"，也没有硬派，而是**把这条写成待决事项、继续跑另外两个**。
+这正是 §8.2 要的形状：**判断点，不是等待点。**
