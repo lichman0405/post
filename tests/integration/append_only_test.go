@@ -53,8 +53,13 @@ const appendOnlyTaskID = "T0013"
 // later decision is a new merge, never an edit of that row. Migration 00070
 // joins merge_creations (the T0409 Idempotency-Key ledger): a replay is a
 // read, never a rewrite, so the ledger entry is part of the merge's history
-// exactly as release_creations is part of a release's. The same list drives
-// the catalog assertion and the per-table rejection loop.
+// exactly as release_creations is part of a release's. Migration 00072
+// joins asset_publish_creations (the T0705 Idempotency-Key ledger of a
+// research asset version's PUBLICATION): the version it points at is
+// immutable (invariant 5), so the ledger that replays a publish is history
+// for the same reason, and a rewrite of it would rewrite which version a
+// key already published. The same list drives the catalog assertion and the
+// per-table rejection loop.
 var appendOnlyTables = []string{
 	"scientific_object_versions",
 	"relation_versions",
@@ -76,6 +81,7 @@ var appendOnlyTables = []string{
 	"project_template_instantiations",
 	"semantic_merge_conflicts",
 	"merge_creations",
+	"asset_publish_creations",
 }
 
 // targetedGuardTriggers are the NON-append-only row guards added after
@@ -491,6 +497,29 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 			},
 			del: func(id string) error {
 				_, err := pool.Exec(ctx, `DELETE FROM research_asset_versions WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			// The T0705 Idempotency-Key ledger of a publish. It carries the
+			// append-only pair for the same reason the version it points at
+			// does: rewriting a ledger row would rewrite which version an
+			// Idempotency-Key already published, and deleting one would let
+			// a replayed publish write a second, different version.
+			table: "asset_publish_creations",
+			insert: func() string {
+				// av1 (the shared fixture above) is the published version
+				// the key points at.
+				return mustQueryUUID(`INSERT INTO asset_publish_creations
+					(project_id, idempotency_key, asset_version_id)
+					VALUES ($1, 'pub-key-1', $2) RETURNING id`, p1, av1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE asset_publish_creations SET idempotency_key = 'REWRITTEN' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM asset_publish_creations WHERE id = $1`, id)
 				return err
 			},
 		},

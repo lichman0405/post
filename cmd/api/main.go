@@ -65,6 +65,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/templateshttp"
 	"github.com/lichman0405/post/cmd/api/validationhttp"
 	"github.com/lichman0405/post/cmd/api/webhookshttp"
+	"github.com/lichman0405/post/internal/application/assetpublish"
 	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
@@ -631,15 +632,35 @@ func run(args []string) int {
 	// .../assets:publish-preview, that says who would see what if the
 	// proposed publish were executed. The pure model lives in
 	// internal/assets (the same gate the publish command runs); the state
-	// reader is the task-scoped adapter in assetshttp (T0704's scope
-	// excludes internal/persistence's root package files, L1, recorded in
-	// the task result), over the canonical queries of
-	// internal/persistence/queries/asset_preview.sql. It writes nothing:
-	// the publish itself — its explicit human action, its authorization
-	// and its audit event — is T0705.
+	// reader is internal/persistence.AssetStateStore (moved there by T0705,
+	// which is the second caller), over the canonical queries of
+	// internal/persistence/queries/asset_preview.sql. The preview writes
+	// nothing; the publish itself is the route beside it.
+	//
+	// Publication governance (T0705): POST .../assets:publish, the write
+	// docs/23 §4 calls the platform's highest-risk operation. The command
+	// owns every decision it needs — the actor's membership class against
+	// the permission matrix (publish_private_to_public: only the project
+	// owner's cell is `allow` in V1; a maintainer's is `conditional`, and
+	// an unresolved condition is a refusal, internal/authz default deny,
+	// issue #237), the policy in force (read through the owning service and
+	// evaluated through the typed rule surface, exactly as the merge does),
+	// the server-side re-run of the impact preview, and the gate itself —
+	// and the store runs them over ONE transaction, so the version row, its
+	// create (when the publish makes the asset), the idempotency ledger
+	// entry, the audit row and the research event commit together or not at
+	// all.
+	publishCommand := assetpublish.NewCommand(assetpublish.Deps{
+		Members:  persistence.NewProjectStore(pool),
+		Policies: policyAPI.Service(),
+		Rules:    policy.NewRuleEvaluator(),
+		Store:    persistence.NewAssetPublishStore(pool, rsgvalidation.NewValidator(reg)),
+		Authz:    authz.NewMatrixEngine(),
+	})
 	assetsAPI := assetshttp.New(assetshttp.Deps{
 		State:    assetshttp.NewPostgresStateStore(pool),
 		Projects: projectAPI.Service(),
+		Publish:  publishCommand,
 	})
 	assetsAPI.Register(v1)
 	// Official project templates (T0214): the catalog and the

@@ -370,9 +370,9 @@ func (q *Queries) PublishKnowledgePublication(ctx context.Context, arg PublishKn
 
 const publishResearchAssetVersion = `-- name: PublishResearchAssetVersion :one
 INSERT INTO research_asset_versions
-    (asset_id, version, source_release_id, manifest, rights_json, visibility, integrity_hash, published_by)
+    (asset_id, version, source_release_id, manifest, rights_json, visibility, integrity_hash, published_by, origin_refs)
 VALUES
-    ($1, $2, $3, $4, $5, $6, $7, $8)
+    ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING id, asset_id, version, source_release_id, manifest, rights_json, visibility, integrity_hash, published_by, published_at, origin_refs
 `
 
@@ -385,8 +385,16 @@ type PublishResearchAssetVersionParams struct {
 	Visibility      string      `json:"visibility"`
 	IntegrityHash   string      `json:"integrity_hash"`
 	PublishedBy     pgtype.UUID `json:"published_by"`
+	OriginRefs      []string    `json:"origin_refs"`
 }
 
+// The publish command's version insert (T0705). origin_refs is written
+// here because it is NOT NULL with two CHECKs since 00064 (at least one
+// element, no NULL element) and the version's provenance is exactly what
+// that column is: a publish that left it to a default could not store a
+// row at all. This query had no producer before T0705 — the preview
+// (T0704) only reads — so extending it is not a change to a shipped
+// writer; issue #225 recorded the gap when the column was added.
 func (q *Queries) PublishResearchAssetVersion(ctx context.Context, arg PublishResearchAssetVersionParams) (ResearchAssetVersion, error) {
 	row := q.db.QueryRow(ctx, publishResearchAssetVersion,
 		arg.AssetID,
@@ -397,6 +405,7 @@ func (q *Queries) PublishResearchAssetVersion(ctx context.Context, arg PublishRe
 		arg.Visibility,
 		arg.IntegrityHash,
 		arg.PublishedBy,
+		arg.OriginRefs,
 	)
 	var i ResearchAssetVersion
 	err := row.Scan(

@@ -40,6 +40,10 @@ type Querier interface {
 	CanonicalizeScientificObjectPayload(ctx context.Context, payload []byte) ([]byte, error)
 	CountActiveOrganizationOwners(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	CountProjectOwners(ctx context.Context, projectID pgtype.UUID) (int32, error)
+	// The ledger row, written in the same transaction as the version it
+	// names: a publish that rolled back leaves no key behind, and a key that
+	// committed names a version that exists.
+	CreateAssetPublishCreation(ctx context.Context, arg CreateAssetPublishCreationParams) (AssetPublishCreation, error)
 	// Blobs and their attachments (canonical tables: blobs, blob_attachments).
 	// Blob rows are metadata only; bytes live in S3/MinIO (invariant 7: knowledge
 	// visibility != blob accessibility).
@@ -102,6 +106,29 @@ type Querier interface {
 	CreateRelease(ctx context.Context, arg CreateReleaseParams) (Release, error)
 	CreateReleaseCreation(ctx context.Context, arg CreateReleaseCreationParams) (ReleaseCreation, error)
 	CreateResearchAsset(ctx context.Context, arg CreateResearchAssetParams) (ResearchAsset, error)
+	// Research asset publish governance (T0705): the writes and the ledger
+	// reads of the publish command, plus the one read a replay needs.
+	//
+	// The publish is the platform's highest-risk operation (docs/23 §4): it
+	// widens a private artifact into the network's view and its result is an
+	// immutable version row. Every write below happens inside ONE transaction
+	// (persistence.AssetPublishStore.Publish) together with the impact
+	// re-check that authorized it, the audit row and the domain event, so a
+	// refused publish writes nothing and an accepted one is one unit.
+	//
+	// The reads the impact preview is re-run over are NOT here: they are the
+	// preview's own canonical queries (asset_preview.sql), reused verbatim so
+	// that the preview a human saw and the preview the publish re-runs are
+	// answered by one SQL definition. What this file adds is the ledger
+	// (asset_publish_creations, migration 00072) and the two rows a publish
+	// writes.
+	// A publish that names no existing asset creates one, and the pid it is
+	// created with comes from the application (assets.NewPID, migration
+	// 00064's note: "the application-generated path ... arrives with T0705
+	// (publish)"): the column DEFAULT exists for rows written before the
+	// publish command could generate one, and a persistent identifier that
+	// two writers derive differently is not a persistent identity.
+	CreateResearchAssetWithPID(ctx context.Context, arg CreateResearchAssetWithPIDParams) (ResearchAsset, error)
 	// One per-dimension review decision about one proposed head (T0404,
 	// migration 00061): reviewed_state_id is the exact head the reviewer
 	// evaluated (derived from the PR's proposed_state_id inside the
@@ -136,6 +163,10 @@ type Querier interface {
 	// end date is never re-stamped.
 	EndOrganizationAffiliation(ctx context.Context, arg EndOrganizationAffiliationParams) (OrganizationMembership, error)
 	EnqueueOutboxEvent(ctx context.Context, arg EnqueueOutboxEventParams) (OutboxEvent, error)
+	// The publish ledger lookup: the version an Idempotency-Key already
+	// created, or no row (pgx.ErrNoRows) when the key is new. UNIQUE(project
+	// _id, idempotency_key) makes this at most one row by construction.
+	GetAssetPublishCreation(ctx context.Context, arg GetAssetPublishCreationParams) (pgtype.UUID, error)
 	GetBlobByContentHash(ctx context.Context, arg GetBlobByContentHashParams) (Blob, error)
 	GetBranchByID(ctx context.Context, id pgtype.UUID) (Branch, error)
 	// Project-scoped read: a branch id of another project matches nothing and
@@ -212,6 +243,14 @@ type Querier interface {
 	GetProjectMembership(ctx context.Context, arg GetProjectMembershipParams) (ProjectMembership, error)
 	GetProjectStateByHash(ctx context.Context, arg GetProjectStateByHashParams) (ProjectState, error)
 	GetProjectStateByID(ctx context.Context, id pgtype.UUID) (ProjectState, error)
+	// One stored version WITH the persistent identity of its asset. A replay
+	// answers the version the key created, and the caller of a publish needs
+	// the asset's pid to say which asset was published — it is not derivable
+	// from the version row, whose asset_id is the internal uuid.
+	//
+	// The join is an inner one on a NOT NULL foreign key: every version row
+	// has exactly one asset row.
+	GetPublishedAssetVersion(ctx context.Context, id pgtype.UUID) (GetPublishedAssetVersionRow, error)
 	GetPullRequestByProjectAndNumber(ctx context.Context, arg GetPullRequestByProjectAndNumberParams) (PullRequest, error)
 	// The refresh/transition row lock (T0402): serializes the head refresh
 	// against concurrent state transitions inside one transaction.
@@ -221,6 +260,11 @@ type Querier interface {
 	GetRelease(ctx context.Context, arg GetReleaseParams) (Release, error)
 	GetReleaseByProjectAndVersion(ctx context.Context, arg GetReleaseByProjectAndVersionParams) (Release, error)
 	GetReleaseCreation(ctx context.Context, arg GetReleaseCreationParams) (pgtype.UUID, error)
+	// The asset row behind a pid, in full. GetPreviewAssetByPID (the
+	// preview's own read) answers the three fields the preview checks; the
+	// publish also needs the row's id to write the version's foreign key and
+	// its slug to tell a create from a continuation.
+	GetResearchAssetByPIDRow(ctx context.Context, pid string) (ResearchAsset, error)
 	GetResearchAssetVersion(ctx context.Context, arg GetResearchAssetVersionParams) (ResearchAssetVersion, error)
 	// One version by id — any age: old versions stay queryable forever, so a
 	// profile v2 never invalidates history written under v1 (docs/21 §8).
@@ -456,6 +500,13 @@ type Querier interface {
 	MarkBlobIntegrity(ctx context.Context, arg MarkBlobIntegrityParams) error
 	MarkOutboxEventPublished(ctx context.Context, id pgtype.UUID) error
 	PublishKnowledgePublication(ctx context.Context, arg PublishKnowledgePublicationParams) (KnowledgePublication, error)
+	// The publish command's version insert (T0705). origin_refs is written
+	// here because it is NOT NULL with two CHECKs since 00064 (at least one
+	// element, no NULL element) and the version's provenance is exactly what
+	// that column is: a publish that left it to a default could not store a
+	// row at all. This query had no producer before T0705 — the preview
+	// (T0704) only reads — so extending it is not a change to a shipped
+	// writer; issue #225 recorded the gap when the column was added.
 	PublishResearchAssetVersion(ctx context.Context, arg PublishResearchAssetVersionParams) (ResearchAssetVersion, error)
 	RecordAuditLogEntry(ctx context.Context, arg RecordAuditLogEntryParams) (AuditLog, error)
 	// Domain events, transactional outbox, audit log (canonical tables:

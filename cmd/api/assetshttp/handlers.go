@@ -25,10 +25,11 @@ const (
 	CodePreviewUnavailable = "ASSET_PREVIEW_UNAVAILABLE"
 )
 
-// handlers owns the preview route.
+// handlers owns the preview route and the publish route (T0705).
 type handlers struct {
 	state    StateReader
 	projects Gate
+	publish  PublishCommand
 }
 
 // previewRequest is the request body: the proposed publish, in the shape

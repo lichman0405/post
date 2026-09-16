@@ -40,10 +40,17 @@ VALUES (@asset_type, @slug, @title, @origin_project_id)
 RETURNING *;
 
 -- name: PublishResearchAssetVersion :one
+-- The publish command's version insert (T0705). origin_refs is written
+-- here because it is NOT NULL with two CHECKs since 00064 (at least one
+-- element, no NULL element) and the version's provenance is exactly what
+-- that column is: a publish that left it to a default could not store a
+-- row at all. This query had no producer before T0705 — the preview
+-- (T0704) only reads — so extending it is not a change to a shipped
+-- writer; issue #225 recorded the gap when the column was added.
 INSERT INTO research_asset_versions
-    (asset_id, version, source_release_id, manifest, rights_json, visibility, integrity_hash, published_by)
+    (asset_id, version, source_release_id, manifest, rights_json, visibility, integrity_hash, published_by, origin_refs)
 VALUES
-    (@asset_id, @version, @source_release_id, @manifest, @rights_json, @visibility, @integrity_hash, @published_by)
+    (@asset_id, @version, @source_release_id, @manifest, @rights_json, @visibility, @integrity_hash, @published_by, @origin_refs)
 RETURNING *;
 
 -- name: GetResearchAssetVersion :one

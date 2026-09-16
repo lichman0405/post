@@ -41,11 +41,17 @@ type Deps struct {
 	State StateReader
 	// Projects is the project read gate.
 	Projects Gate
+	// Publish is the publish use case (T0705). The production value is
+	// *assetpublish.Command, over the store that owns the publish
+	// transaction. Like State and Projects above it is required: a surface
+	// wired without one of its three ports is a wiring bug, not a
+	// degradation to answer around.
+	Publish PublishCommand
 }
 
 // New wires the handlers.
 func New(deps Deps) *API {
-	return &API{handlers: &handlers{state: deps.State, projects: deps.Projects}}
+	return &API{handlers: &handlers{state: deps.State, projects: deps.Projects, publish: deps.Publish}}
 }
 
 // API is the mounted preview surface.
@@ -61,13 +67,16 @@ type API struct {
 // one segment — is the contract's (specs/api/openapi.yaml), copied
 // verbatim; a client cannot be asked to spell it differently.
 //
-// There is exactly one route, and it is the only one this package
-// registers. The preview has no GET form: its input is a candidate
-// document, which does not fit in a query string, and a GET carrying the
-// caller's proposed-manifest bytes in a URL would put a version document
-// in access logs. It has no sibling for the publish itself: that is
-// POST .../assets:publish, T0705's route, which this package does not
-// implement.
+// Two routes are registered, and they are the pair docs/23 §4 describes:
+// the preview that says who would see what, and the publish that does it.
+// The preview has no GET form: its input is a candidate document, which
+// does not fit in a query string, and a GET carrying the caller's
+// proposed-manifest bytes in a URL would put a version document in access
+// logs. The publish is a POST for the same reason plus its own — it is a
+// governed write, so it needs the session and CSRF guard the v1 subtree
+// applies to every write, and its Idempotency-Key is a header, which is
+// where docs/22 puts it.
 func (a *API) Register(v1 *http.ServeMux) {
 	v1.HandleFunc("POST /api/v1/projects/{projectId}/assets:publish-preview", a.handlers.handlePublishPreview)
+	v1.HandleFunc("POST /api/v1/projects/{projectId}/assets:publish", a.handlers.handlePublish)
 }
