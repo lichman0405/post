@@ -609,9 +609,56 @@ var canonicalTables = map[string]tableExp{
 		fks:  []fkExp{fk("actor_id", "users", "RESTRICT"), fk("project_id", "projects", "RESTRICT")},
 	},
 	"subscriptions": {
-		cols: []colExp{c("id", u, false, true), c("user_id", u, false, false), c("target_type", txt, false, false), c("target_id", txt, false, false), arr("event_filters", false, true), arr("channels", false, true), c("created_at", ts, false, true)},
+		// T1002 (00078): the follow/watch row grew updated_at (the PATCH
+		// path stamps it) and deleted_at — unsubscribing is SOFT, so the
+		// deliveries the subscription produced keep naming it and the row
+		// survives as history (CLAUDE.md §9). The four CHECKs close the
+		// vocabulary the pre-00078 table left open: target_type is one of
+		// the five followable kinds, target_id is non-empty and shaped for
+		// its type (a uuid for everything addressed by a canonical id, the
+		// 26-character asset pid for an asset — the same rule 00064's
+		// research_assets_pid_format carries), and channels is a non-empty
+		// subset of the V1 channel set. The target_id shape is what makes
+		// the audience queries' ::uuid casts safe rather than a query error
+		// waiting on a hand-written row.
+		cols: []colExp{c("id", u, false, true), c("user_id", u, false, false), c("target_type", txt, false, false), c("target_id", txt, false, false), arr("event_filters", false, true), arr("channels", false, true), c("created_at", ts, false, true), c("updated_at", ts, false, true), c("deleted_at", ts, true, false)},
 		pk:   []string{"id"},
-		fks:  []fkExp{fk("user_id", "users", "RESTRICT")},
+		checks: []string{
+			"cardinality(channels) > 0", "'organization'",
+			"target_id <> ''", "[0-9a-hjkmnp-tv-z]{26}",
+		},
+		fks: []fkExp{fk("user_id", "users", "RESTRICT")},
+	},
+	"subscription_deliveries": {
+		// T1002 (00078): one row per (subscription, event, channel) that
+		// was fanned out — the research inbox's read model (web rows are
+		// born delivered; email rows are born pending for the digest
+		// sender). The three CHECKs: closed channel and status
+		// vocabularies, and the status/timestamp agreement that makes
+		// "delivered at" and "cancelled at" mean exactly what they say.
+		// subscription_id is RESTRICT, not CASCADE: an unsubscribe is a
+		// soft delete, so nothing may depend on the row ever going away.
+		cols: []colExp{c("id", u, false, true), c("subscription_id", u, false, false), c("user_id", u, false, false), c("event_id", u, false, false), c("channel", txt, false, false), c("event_type", txt, false, false), c("target_type", txt, false, false), c("target_id", txt, false, false), c("status", txt, false, true), c("created_at", ts, false, true), c("delivered_at", ts, true, false), c("cancelled_at", ts, true, false)},
+		pk:   []string{"id"},
+		checks: []string{
+			"ARRAY['web'", "ARRAY['pending'",
+			"status = 'delivered'", "status = 'cancelled'",
+		},
+		fks: []fkExp{
+			fk("event_id", "research_events", "RESTRICT"),
+			fk("subscription_id", "subscriptions", "RESTRICT"),
+			fk("user_id", "users", "RESTRICT"),
+		},
+	},
+	"subscription_fanned_events": {
+		// T1002 (00078): the subscription fan-out's per-consumer cursor,
+		// the shape T1006's webhook_fanned_out_at gave the webhook
+		// pipeline — one row per consumed outbox event, keyed by it, so
+		// two consumers of the same outbox cannot see each other's
+		// progress and a re-run is a no-op.
+		cols: []colExp{c("outbox_event_id", u, false, false), c("fanned_at", ts, false, true)},
+		pk:   []string{"outbox_event_id"},
+		fks:  []fkExp{fk("outbox_event_id", "outbox_events", "RESTRICT")},
 	},
 	"webhook_deliveries": {
 		// T1006 (00059): the delivery log grew endpoint_id (SET NULL, so an
@@ -924,6 +971,18 @@ var explicitIndexes = map[string][]string{
 	// state?").
 	"semantic_merge_conflicts_merge_idx":  {"merge_id", "target_kind", "target_id"},
 	"semantic_merge_conflicts_target_idx": {"project_id", "target_kind", "target_id", "created_at"},
+	// T1002 (00078): one LIVE subscription per (user, target) — the partial
+	// unique index the create insert conflicts on, so unsubscribing and
+	// following again is a new row rather than a resurrection; the fan-out's
+	// candidate scan by target; the fan-out's idempotency guarantee (one
+	// delivery row per subscription per event per channel, ever); the
+	// inbox's newest-first read per (owner, status); and the withdraw
+	// scan over one subscription's undelivered rows.
+	"subscriptions_live_uniq":             {"user_id", "target_type", "target_id", "UNIQUE", "WHERE"},
+	"subscriptions_live_target_idx":       {"target_type", "target_id", "WHERE"},
+	"subscription_deliveries_uniq":        {"subscription_id", "event_id", "channel", "UNIQUE"},
+	"subscription_deliveries_inbox_idx":   {"user_id", "status", "created_at DESC", "id DESC"},
+	"subscription_deliveries_pending_idx": {"subscription_id", "WHERE"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
