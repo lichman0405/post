@@ -1,141 +1,56 @@
-"use client";
+import type { Metadata } from "next";
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { useParams } from "next/navigation";
-import { AlertIcon, DownloadIcon, TagIcon } from "@primer/octicons-react";
-import { Spinner } from "@primer/react";
-
+import { getWebConfig } from "../../../../../../lib/server-config";
+import { webOrigin } from "../../../../../../lib/origin";
 import {
-  ApiError,
-  createReleasesClient,
-  messageForReleaseCode,
-  releaseManifestHref,
-  type Release,
-} from "../../../../../../lib/releases";
-import { useProjectShell } from "../../shell-context";
+  fetchPublicReleaseMeta,
+  hiddenPageMetadata,
+  publicEntityPath,
+  publicPageMetadata,
+} from "../../../../../../lib/entity-meta";
+import ReleaseDetail from "./release-detail";
 
 /**
- * Release detail (T0606): one immutable snapshot's fixed facts and the
- * manifest export. The manifest link is a plain anchor download — the
- * browser carries the session cookie, and the API answers the canonical
- * document bytes (verified against the stored hash server-side).
+ * One release (T0606) — the server half of the route. It renders the
+ * client component that fetches and draws the snapshot for the reader,
+ * and it builds the <head> a crawler sees.
  *
- * Strictly read-only: an immutable release has no edit and no delete,
- * so the page offers neither (and the API registers no such routes).
+ * T0801: the release route is one of the public entity routes (docs/05
+ * §3 "Releases：immutable snapshots"), so it gets its own indexable head —
+ * the release's title and version, over the project it belongs to. The
+ * head comes from an ANONYMOUS read of both, which is the same answer a
+ * crawler gets: a release of a project the anonymous caller may not read
+ * answers the existence-hiding 404, and the page then carries the
+ * unindexable, name-free head instead (lib/entity-meta.ts).
+ *
+ * Why the split: a client component cannot export metadata, and the
+ * release body must keep fetching with the reader's own session. The head
+ * and the body therefore come from two different asks, by design — the
+ * head from the public answer, the body from the reader's.
+ *
+ * One consequence of where this head comes from, worth knowing before
+ * changing anything here: Next merges the metadata of every segment along
+ * the route, so the PROJECT layout's canonical survives on this page
+ * whenever this segment hides itself (a release id the project does not
+ * have). Title, description and `noindex, nofollow` are this segment's own
+ * and DO win; the canonical that remains names the public project the
+ * crawler is already under, which discloses nothing. The private case is
+ * unaffected: there the layout hides itself too, and the whole head is
+ * generic. tests/e2e-anonymous pins both.
  */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string; releaseId: string }>;
+}): Promise<Metadata> {
+  const cfg = getWebConfig();
+  const { id, releaseId } = await params;
+  const entity = await fetchPublicReleaseMeta(cfg.apiBaseUrl, id, releaseId);
+  if (entity === null) return hiddenPageMetadata();
+  const origin = await webOrigin();
+  return publicPageMetadata(entity, `${origin}${publicEntityPath("release", id, releaseId)}`);
+}
+
 export default function ReleaseDetailPage() {
-  const shell = useProjectShell();
-  const params = useParams<{ id: string; releaseId: string }>();
-  const releaseId = params.releaseId;
-
-  const [release, setRelease] = useState<Release | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const releasesClient = useMemo(
-    () => (shell === null ? null : createReleasesClient(shell.apiBaseUrl)),
-    [shell],
-  );
-
-  useEffect(() => {
-    if (shell === null || releasesClient === null) return;
-    let cancelled = false;
-    releasesClient
-      .get(shell.project.id, releaseId)
-      .then((loaded) => {
-        if (!cancelled) setRelease(loaded);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setError(
-          err instanceof ApiError
-            ? messageForReleaseCode(err.code)
-            : "Could not load this release.",
-        );
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [shell, releasesClient, releaseId]);
-
-  if (shell === null) {
-    // The shell only mounts tab content in its ready state; null means a
-    // wiring error, not a user-visible page.
-    return null;
-  }
-  const { project } = shell;
-
-  if (error !== null) {
-    return (
-      <div className="release-detail-state" data-release-notfound>
-        <div className="release-detail-state-icon" aria-hidden="true">
-          <AlertIcon size={24} />
-        </div>
-        <h2 className="release-detail-state-title">Release unavailable</h2>
-        <p className="release-detail-state-desc">{error}</p>
-        <Link className="project-state-button" href={`/projects/${project.id}/releases`}>
-          Back to Releases
-        </Link>
-      </div>
-    );
-  }
-
-  if (release === null) {
-    return (
-      <div className="release-detail-state">
-        <Spinner aria-label="Loading release" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="release-detail" data-release-detail={release.version}>
-      <p className="release-detail-breadcrumb">
-        <Link href={`/projects/${project.id}/releases`}>Releases</Link> / {release.version}
-      </p>
-      <div className="release-detail-title-row">
-        <h2 className="release-detail-title">
-          <TagIcon size={16} aria-hidden="true" /> {release.title}
-        </h2>
-        <a
-          className="release-manifest-link"
-          href={releaseManifestHref(shell.apiBaseUrl, project.id, release.id)}
-          data-release-manifest={release.version}
-        >
-          <DownloadIcon size={14} aria-hidden="true" /> Download manifest
-        </a>
-      </div>
-      <p className="release-detail-note">
-        Immutable snapshot — the state, policy and review record fixed
-        here never change, and later project work does not affect this
-        release. There is no edit or delete.
-      </p>
-      <dl className="release-detail-facts">
-        <dt>Version</dt>
-        <dd>{release.version}</dd>
-        <dt>State</dt>
-        <dd>
-          <code>{release.state_id}</code>
-        </dd>
-        <dt>Project policy</dt>
-        <dd>{release.policy_version_id !== null ? <code>{release.policy_version_id}</code> : "none"}</dd>
-        <dt>Organization policy</dt>
-        <dd>
-          {release.org_policy_version_id !== null ? (
-            <code>{release.org_policy_version_id}</code>
-          ) : (
-            "none"
-          )}
-        </dd>
-        <dt>Manifest hash</dt>
-        <dd>
-          <code data-release-manifest-hash>{release.manifest_hash}</code>
-        </dd>
-        <dt>Created</dt>
-        <dd>{release.created_at.slice(0, 10)}</dd>
-        <dt>Created by</dt>
-        <dd>{release.created_by}</dd>
-      </dl>
-    </div>
-  );
+  return <ReleaseDetail />;
 }

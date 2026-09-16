@@ -1,0 +1,4 @@
+# Harness runtime state, never part of the diff.
+server.log
+mock-api.log
+node_modules/

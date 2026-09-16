@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { getWebConfig } from "../../../../lib/server-config";
+import { webOrigin } from "../../../../lib/origin";
+import {
+  fetchPublicProfileMeta,
+  hiddenPageMetadata,
+  publicEntityPath,
+  publicPageMetadata,
+} from "../../../../lib/entity-meta";
 import { ProfileCard } from "./profile-card";
-
-export const metadata: Metadata = {
-  title: "Profile — POST",
-};
 
 /**
  * The public profile page: server component that resolves the validated
@@ -17,7 +20,25 @@ export const metadata: Metadata = {
  *
  * The URL is id-keyed by design: it never changes when the owner renames
  * the handle (docs/21 §2 — stable ids are the reference identity).
+ *
+ * T0801: the <head> comes from the same public read, anonymously — a
+ * profile is public (docs/02 §3 "公开 Research Profile"; GET
+ * /api/v1/users/{id}/profile answers without a session), so it is
+ * indexable; an unknown id gets the unindexable head instead.
  */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const cfg = getWebConfig();
+  const { id } = await params;
+  const entity = await fetchPublicProfileMeta(cfg.apiBaseUrl, id);
+  if (entity === null) return hiddenPageMetadata();
+  const origin = await webOrigin();
+  return publicPageMetadata(entity, `${origin}${publicEntityPath("profile", id)}`);
+}
+
 export default async function ProfilePage({
   params,
 }: {
