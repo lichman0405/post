@@ -1,16 +1,23 @@
 import type { Metadata } from "next";
-import { ComingSoon } from "../../components/coming-soon";
+
+import { getWebConfig } from "../../../lib/server-config";
+import { AssetsBrowse } from "./assets-browse";
 
 export const metadata: Metadata = {
   title: "Assets — POST",
 };
 
-/** The asset hub lands in T0709; the destination is stubbed for now. */
+/**
+ * The asset hub (T0709, docs/11 §2): server component that resolves the
+ * validated API origin and hands it to the client-side browse list. The
+ * list itself reads over the wire — the web app has no backend of its own,
+ * and no copy of the visibility rules.
+ *
+ * /explore — the aggregated discovery surface — is NOT this page; it is
+ * T0802's, and its destination stays stubbed there
+ * (app/(main)/explore/page.tsx).
+ */
 export default function AssetsPage() {
-  return (
-    <ComingSoon title="Assets" milestone="T0709 Asset Hub Pages/Explore">
-      Immutable research assets with persistent identity, rights, lineage and
-      current network state.
-    </ComingSoon>
-  );
+  const cfg = getWebConfig();
+  return <AssetsBrowse apiBaseUrl={cfg.apiBaseUrl} />;
 }

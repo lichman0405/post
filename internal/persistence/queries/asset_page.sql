@@ -1,0 +1,293 @@
+-- Research asset page reads (T0709).
+--
+-- The public/authorized read of docs/42 §Asset Page and of the asset hub's
+-- browse list (docs/11 §2). Every query here is a READ: nothing in this
+-- file writes a row or takes a lock, and the asset page's integration suite
+-- runs the whole route over a session whose connections carry
+-- default_transaction_read_only=on, where the server refuses a write with
+-- SQLSTATE 25006.
+--
+-- # These queries do NOT filter by visibility, deliberately
+--
+-- Every list below returns the rows as STORED, private rows included, and
+-- the decision about what may be rendered is internal/assets'
+-- (BuildPage, BuildBrowse), where the rules are pure functions with unit
+-- tests that name the docs they come from (docs/23 §5 private objects stay
+-- out of public answers; docs/12 §2 the public/private project preset).
+--
+-- The split is the one internal/assets already draws for the publish
+-- preview: the adapter answers questions about rows, the model owns every
+-- rule about disclosure. A query that pre-filtered would move the rule into
+-- SQL, where the unit test that tries to break it cannot reach it — and
+-- would leave the model untested against the exact state it must refuse.
+-- The transport serializes ONLY the model's output, so a row this reader
+-- loaded and the model withheld is never on the wire; the integration suite
+-- proves that over real PostgreSQL with real private rows (the raw response
+-- body is searched for every withheld name and id).
+--
+-- # What the reader must answer for
+--
+-- The page renders the newest version the reader may see, so the state it
+-- needs spans every version of the asset: the version rows themselves, the
+-- users behind their published_by, the lineage edges that touch them, the
+-- usages recorded against them, and the events about the asset. Each list
+-- is a function of the asset's pid alone, which is why the reader takes the
+-- pid once and answers with one state (internal/persistence.
+-- AssetPageStore.LoadAssetPage).
+
+-- name: GetAssetPageAsset :one
+-- The asset the page is about: research_assets.pid is the unique persistent
+-- identity (migration 00064), so this is an index lookup. The row carries
+-- what the page renders — the pid, the type, the title, the slug — plus
+-- origin_project_id, which is the project whose read gate decides whether
+-- this caller may see the page at all.
+--
+-- The originating project's identity comes back with it (name, slug,
+-- visibility), because the answer the reader gives must be complete: the
+-- model decides whether that identity may be rendered (internal/assets.
+-- mayRenderOwnProject — a public project, or the caller's own), and it
+-- cannot decide it from an id. The join is INNER on a NOT NULL foreign key,
+-- so a row exists here exactly when the asset exists.
+SELECT ra.id::text AS id,
+       ra.pid,
+       ra.asset_type,
+       ra.title,
+       ra.slug,
+       ra.created_at,
+       ra.origin_project_id::text AS origin_project_id,
+       p.name AS project_name,
+       p.slug AS project_slug,
+       p.visibility AS project_visibility
+FROM research_assets ra
+JOIN projects p ON p.id = ra.origin_project_id
+WHERE ra.pid = @pid;
+
+-- name: ListAssetPagePins :many
+-- The stored versions a page's dependency pins name (docs/11 §5: a
+-- dependency is an exact published version, the canonical pid@version of
+-- internal/assets.DependencyPin), each with what the model needs to decide
+-- whether that version may be LINKED from the page: the version's own
+-- visibility, its asset's type and title, and the visibility of the project
+-- that asset belongs to.
+--
+-- The pinned asset's PROJECT visibility is read for the same reason the
+-- page reads its own asset's: the page of the pinned version is served
+-- through that project's read gate, so a public version of an asset in a
+-- private project is not a page an anonymous reader can open. A block that
+-- linked it would print a URL that answers 404 for the reader it was
+-- printed for.
+--
+-- All of this comes back for EVERY resolved pin, private ones included,
+-- because the model is what decides what may be rendered (internal/assets.
+-- PageDependency: a pin that does not name a version the network may open
+-- is not rendered at all). A query that withheld these columns here would
+-- leave the model unable to tell "this pin resolves to a private version"
+-- from "this pin resolves to nothing", and the two are different states to
+-- report on. The join to projects is INNER on a NOT NULL foreign key
+-- (research_assets.origin_project_id), so it drops no version row.
+SELECT (ra.pid || '@' || rav.version)::text AS pin,
+       rav.visibility,
+       ra.asset_type,
+       ra.title,
+       p.visibility AS project_visibility
+FROM research_asset_versions rav
+JOIN research_assets ra ON ra.id = rav.asset_id
+JOIN projects p ON p.id = ra.origin_project_id
+WHERE (ra.pid || '@' || rav.version) = ANY(@pins::text[]);
+
+-- name: ListAssetPageVersions :many
+-- Every version of the asset, newest first. Rows are append-only and
+-- immutable (migration 00014, CLAUDE.md invariant 5), so this list is the
+-- asset's permanent version history; the ordering is the page's own
+-- (published_at descending, then the label ascending, so versions published
+-- in one statement still have a total order) and it is applied here as well
+-- as in the model so that a reader of the query log sees what the page
+-- shows.
+--
+-- visibility comes back with every row because it is the axis the model
+-- filters on; manifest and rights_json come back whole because each is read
+-- by its own parser (internal/assets.ParseManifest, internal/rights.Parse)
+-- rather than by this query.
+SELECT rav.id::text AS id,
+       rav.version,
+       rav.visibility,
+       rav.integrity_hash,
+       rav.published_by::text AS published_by,
+       rav.published_at,
+       rav.manifest,
+       rav.rights_json,
+       rav.origin_refs
+FROM research_asset_versions rav
+JOIN research_assets ra ON ra.id = rav.asset_id
+WHERE ra.pid = @pid
+ORDER BY rav.published_at DESC, rav.version ASC;
+
+-- name: ListAssetPageUsers :many
+-- The identities behind the user ids an asset page renders (a version's
+-- published_by, an event's actor_id). LEFT JOIN users is not available here
+-- because the page resolves a set of ids it discovered while reading the
+-- other lists, so this is an id lookup: an id with no row is absent from the
+-- result, and the model renders nil rather than an id-only identity.
+--
+-- The comparison is on text: the ids the page discovered are the uuid text
+-- form it will render, and users.id is a uuid column.
+SELECT u.id::text AS id,
+       u.handle,
+       u.display_name
+FROM users u
+WHERE u.id = ANY(@ids::uuid[]);
+
+-- name: ListAssetPageLineage :many
+-- The fork/derive edges that touch any version of the asset — that is, with
+-- this asset's versions at EITHER end (migration 00010: parent/child plus
+-- relation_type forked_from | derived_from | supersedes; docs/11 §5 keeps
+-- fork and derive apart from reference).
+--
+-- Both ends come back resolved — the counterpart version's pid, label,
+-- visibility, its asset's title and the visibility of that asset's project
+-- — because the model renders an edge only when the OTHER end is a version
+-- the network can open, and it cannot decide that from a uuid. "Can open"
+-- is both axes: the version must be public AND its asset's project must be
+-- public, since the page of that version is served through the project's
+-- read gate (internal/assets.mayLinkVersion).
+--
+-- The rows are returned whoever they belong to: an edge into another
+-- private project is the case the model refuses to render (internal/assets.
+-- PageLineage), and a query that dropped such an edge here would make
+-- "there is no edge" and "there is an edge you may not see" the same answer
+-- in a place the model cannot tell apart. Both project joins are INNER on
+-- NOT NULL foreign keys, so neither drops a row.
+SELECT al.relation_type,
+       pa.pid AS parent_pid,
+       parv.version AS parent_version,
+       parv.id::text AS parent_version_id,
+       parv.visibility AS parent_visibility,
+       pa.title AS parent_title,
+       pp.visibility AS parent_project_visibility,
+       ca.pid AS child_pid,
+       cav.version AS child_version,
+       cav.id::text AS child_version_id,
+       cav.visibility AS child_visibility,
+       ca.title AS child_title,
+       cp.visibility AS child_project_visibility
+FROM asset_lineage al
+JOIN research_asset_versions parv ON parv.id = al.parent_asset_version_id
+JOIN research_assets pa ON pa.id = parv.asset_id
+JOIN projects pp ON pp.id = pa.origin_project_id
+JOIN research_asset_versions cav ON cav.id = al.child_asset_version_id
+JOIN research_assets ca ON ca.id = cav.asset_id
+JOIN projects cp ON cp.id = ca.origin_project_id
+WHERE pa.pid = @pid OR ca.pid = @pid
+ORDER BY al.relation_type, pa.pid, parv.version, ca.pid, cav.version;
+
+-- name: ListAssetPageUsages :many
+-- The recorded usages of any version of the asset (asset_dependencies,
+-- migration 00010): which project depends on it, how, and whether the USING
+-- project declared that usage public (visibility_of_usage).
+--
+-- The using project's own identity and visibility come back because the
+-- model needs both: a usage row is rendered only when the row says the usage
+-- is public AND the project that made it is public (internal/assets.
+-- PageUsage — the row's declaration is about the usage, not about the
+-- project's identity, and docs/23 §5 keeps a private project's existence out
+-- of a public answer). asset_dependencies is not append-only, so this is the
+-- current state of a usage rather than a history of it.
+SELECT ad.asset_version_id::text AS asset_version_id,
+       ad.project_id::text AS project_id,
+       p.name AS project_name,
+       p.slug AS project_slug,
+       p.visibility AS project_visibility,
+       ad.visibility_of_usage,
+       ad.dependency_type,
+       ad.created_at
+FROM asset_dependencies ad
+JOIN projects p ON p.id = ad.project_id
+JOIN research_asset_versions rav ON rav.id = ad.asset_version_id
+JOIN research_assets ra ON ra.id = rav.asset_id
+WHERE ra.pid = @pid
+ORDER BY ad.created_at, ad.project_id, ad.dependency_type;
+
+-- name: ListAssetPageEvents :many
+-- The research events recorded about the asset, newest first (docs/42's
+-- "network events").
+--
+-- The join key is the event payload's asset_id, which IS the asset's pid:
+-- research_events has no column for the asset, and the publish event's
+-- payload is where the identity lives (internal/persistence.
+-- AssetPublishStore.assetVersionPublishedPayload, event type
+-- research_asset.version_published). No event_type predicate is applied on
+-- purpose: the block is "the network events about this asset", and a future
+-- event type about assets belongs in it without this query being edited.
+--
+-- Every row comes back, private-visibility ones included: the event's own
+-- visibility is the publishing project's at publish time, and the model
+-- renders an event to a non-member only when that stored value is public
+-- (internal/assets.PageEvent).
+--
+-- Both payload reads are cast to text: a jsonb ->> returns text, and the
+-- cast is what tells sqlc the Go type instead of leaving it interface{}. A
+-- payload without the version key is coalesced to the empty string rather
+-- than left NULL — the column is read as a plain string, and "" is what the
+-- model renders as "this event names no version" (an event that names one
+-- always names a valid label, which is never empty).
+SELECT re.event_type,
+       re.visibility,
+       re.actor_id::text AS actor_id,
+       COALESCE(re.payload ->> 'version', '')::text AS version,
+       re.occurred_at
+FROM research_events re
+WHERE (re.payload ->> 'asset_id')::text = @pid::text
+ORDER BY re.occurred_at DESC, re.id DESC;
+
+-- name: ListAssetBrowse :many
+-- The asset hub's browse list (docs/11 §2): one row per asset that has at
+-- least one PUBLIC version, carrying that asset's newest public version and
+-- how many public versions it has.
+--
+-- The public-version window is computed first and the asset rows are joined
+-- to it, so an asset whose every version is private produces NO row here —
+-- it is not listed and not counted, which is docs/23 §5's rule about private
+-- objects and the counts that would reveal them. The count that IS returned
+-- is the number of versions a reader of this list can go and open through
+-- the asset's own page; the total version count is deliberately not
+-- computed, because the difference between the two is the private count the
+-- rule forbids.
+--
+-- The filter is an optional array (the shape rsg_query.sql's filters use):
+-- nil means "every type", one element means "this type". Values outside the
+-- four-type set (the CHECK on research_assets.asset_type, mirroring
+-- internal/assets.AllTypes) match no row — the transport refuses them before
+-- this query runs, so "no such type" is never answered with an empty list.
+--
+-- p.* comes back for every row, withheld project or not: the model renders a
+-- private project's identity for nobody (internal/assets.BuildBrowse), and a
+-- query that returned nothing for those rows would leave the model unable to
+-- tell a withheld project from an absent one.
+SELECT ra.pid,
+       ra.asset_type,
+       ra.title,
+       ra.slug,
+       ra.origin_project_id::text AS origin_project_id,
+       p.name AS project_name,
+       p.slug AS project_slug,
+       p.visibility AS project_visibility,
+       pub.public_versions::int AS public_versions,
+       pub.version AS latest_version,
+       pub.published_at AS latest_published_at
+FROM (
+  SELECT rav.asset_id,
+         rav.version,
+         rav.published_at,
+         count(*) OVER (PARTITION BY rav.asset_id) AS public_versions,
+         row_number() OVER (
+           PARTITION BY rav.asset_id
+           ORDER BY rav.published_at DESC, rav.version ASC
+         ) AS recency
+  FROM research_asset_versions rav
+  WHERE rav.visibility = 'public'
+) pub
+JOIN research_assets ra ON ra.id = pub.asset_id
+JOIN projects p ON p.id = ra.origin_project_id
+WHERE pub.recency = 1
+  AND (@asset_types::text[] IS NULL OR ra.asset_type = ANY(@asset_types))
+ORDER BY pub.published_at DESC, ra.pid;

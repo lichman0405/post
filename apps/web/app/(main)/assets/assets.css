@@ -1,0 +1,472 @@
+/* T0709 asset hub surfaces — GitHub/Primer design tokens (ADR-012,
+   docs/06, CLAUDE.md §10). Neutral background, thin borders, dense rows,
+   blue for interaction and nothing else. No gradients, no glass, no
+   shadow, no rounded card language: a published asset reads like a
+   repository page, because that is what it is.
+
+   The palette is entirely Primer's tokens (with the same literal fallbacks
+   globals.css and projects.css use), so these surfaces follow the app's
+   theme switch instead of pinning their own colours. Nothing here styles a
+   value as safe, trusted or verified — visibility chips are neutral text in
+   a bordered pill, and the "public"/"private" wording is the API's own
+   token rendered verbatim. */
+
+/* ---------- the hub: browse list ---------- */
+
+.assets-browse {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.assets-title {
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.assets-sub {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* The type filter. Buttons rather than links: the filter is client state,
+   and a link that re-rendered the list from the server would put the
+   list's correctness in a second place. */
+.assets-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.assets-filter-button {
+  padding: 4px 12px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--bgColor-default, #ffffff);
+  color: var(--fgColor-default, #1f2328);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.assets-filter-button:hover {
+  background-color: var(--bgColor-muted, #f6f8fa);
+}
+
+.assets-filter-button[aria-pressed="true"] {
+  border-color: var(--fgColor-accent, #0969da);
+  background-color: var(--bgColor-accent-muted, #ddf4ff);
+  color: var(--fgColor-accent, #0969da);
+  font-weight: 600;
+}
+
+.assets-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.assets-row {
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.assets-row:last-child {
+  border-bottom: none;
+}
+
+.assets-row:hover {
+  background-color: var(--bgColor-muted, #f6f8fa);
+}
+
+.assets-row-icon {
+  display: inline-flex;
+  padding-top: 2px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.assets-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.assets-row-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.assets-row-title:hover {
+  text-decoration: underline;
+}
+
+.assets-row-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.assets-project,
+.assets-version-link {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.assets-project:hover,
+.assets-version-link:hover {
+  text-decoration: underline;
+}
+
+.assets-date,
+.assets-counts {
+  white-space: nowrap;
+}
+
+.assets-empty {
+  padding: 24px 16px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* ---------- the asset page ---------- */
+
+.asset-page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.asset-notice {
+  margin: 16px 0 0;
+  padding: 12px 16px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.asset-notice-sub {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+.asset-notice-sub a {
+  color: var(--fgColor-accent, #0969da);
+}
+
+.asset-breadcrumb {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.asset-breadcrumb a {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.asset-breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+.asset-header {
+  display: flex;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+}
+
+.asset-header-icon {
+  display: inline-flex;
+  padding-top: 4px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.asset-header-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.asset-title {
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.asset-ident {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+/* The pid is the asset's persistent identity (docs/11 §2): monospace, so
+   it reads as an identifier a reader may cite, and wraps rather than
+   overflowing when a title is long. */
+.assets-pid {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: var(--bgColor-muted, #f6f8fa);
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+  overflow-wrap: anywhere;
+}
+
+.assets-type {
+  padding: 1px 8px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+  white-space: nowrap;
+}
+
+.asset-version-chip {
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* The visibility token the API sent, rendered verbatim. Deliberately not
+   colour-coded: "private" is not a danger state and "public" is not a
+   success state — the platform's own rule decides who sees what, and a
+   colour here would editorialise it. */
+.asset-visibility {
+  padding: 1px 8px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+  white-space: nowrap;
+}
+
+.asset-published {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.asset-published a {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.asset-published a:hover {
+  text-decoration: underline;
+}
+
+.asset-actor {
+  font-weight: 600;
+}
+
+.asset-handle {
+  margin-left: 4px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.asset-hash {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.asset-hash code {
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+  overflow-wrap: anywhere;
+}
+
+/* Main column + side column. The side column holds the versions and the
+   event log, which are the two blocks a reader scans rather than reads. */
+.asset-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+  align-items: start;
+  padding-top: 16px;
+}
+
+@media (max-width: 900px) {
+  .asset-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.asset-column-main,
+.asset-column-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* One block, bordered and dense — the same surface as a Primer box. */
+.asset-block {
+  padding: 16px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--bgColor-default, #ffffff);
+}
+
+.asset-block-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* An empty block says so, in the API's own terms: the reader learns that
+   the record has none, which is a different fact from a block that is
+   absent. */
+.asset-block-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.asset-rows,
+.asset-versions,
+.asset-events {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.asset-row,
+.asset-version-row,
+.asset-event {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+  font-size: 13px;
+}
+
+.asset-row:last-child,
+.asset-version-row:last-child,
+.asset-event:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.asset-row-name,
+.asset-version-label {
+  font-weight: 600;
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.asset-row-name:hover,
+.asset-version-label:hover {
+  text-decoration: underline;
+}
+
+.asset-row-ref,
+.asset-version-hash {
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+  overflow-wrap: anywhere;
+}
+
+.asset-row-kind,
+.asset-role,
+.asset-event-type {
+  padding: 1px 8px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+  white-space: nowrap;
+}
+
+/* A note explains a row; it never states, or implies, that anything was
+   withheld. */
+.asset-row-note {
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.asset-row-arrow {
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* The rendered version is marked by weight and a rule, not by colour: the
+   list is a set of immutable versions, and "current" is which one this
+   page happens to render. */
+.asset-version-row[aria-current="true"] {
+  box-shadow: inset 2px 0 0 var(--fgColor-accent, #0969da);
+  padding-left: 8px;
+}
+
+.asset-version-row[aria-current="true"] .asset-version-label {
+  font-weight: 700;
+}
+
+.asset-metadata {
+  margin: 0;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.asset-metadata-row {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 4px 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+  font-size: 13px;
+}
+
+.asset-metadata-row:last-child {
+  border-bottom: none;
+}
+
+.asset-metadata-row dt {
+  color: var(--fgColor-muted, #59636e);
+  overflow-wrap: anywhere;
+}
+
+.asset-metadata-row dd {
+  margin: 0;
+}
+
+.asset-metadata-row dd code {
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* The rights panel is shared (T0703) and keeps its own styling; inside the
+   asset page it simply takes the column's width instead of the 720px cap
+   the standalone surface carries. */
+.asset-column-main .rights-panel {
+  max-width: none;
+}
