@@ -8,6 +8,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AssetPublishCreation struct {
+	ID             pgtype.UUID        `json:"id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	AssetVersionID pgtype.UUID        `json:"asset_version_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type AuditLog struct {
 	ID             pgtype.UUID        `json:"id"`
 	ActorID        pgtype.UUID        `json:"actor_id"`

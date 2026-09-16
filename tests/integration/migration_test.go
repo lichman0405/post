@@ -785,6 +785,18 @@ var canonicalTables = map[string]tableExp{
 		uniques: [][]string{{"project_id", "idempotency_key"}},
 		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("merge_id", "semantic_merges", "RESTRICT")},
 	},
+	// 00072 (T0705): the Idempotency-Key ledger of a research asset
+	// version's PUBLICATION (docs/22, docs/23 §4). It is the third ledger
+	// of this shape and the third target: the version row it points at is
+	// append-only and immutable, so a retried publish must answer with the
+	// version the first request wrote rather than write a second one — the
+	// UNIQUE(project_id, idempotency_key) below is that guarantee.
+	"asset_publish_creations": {
+		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("idempotency_key", txt, false, false), c("asset_version_id", u, false, false), c("created_at", ts, false, true)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"project_id", "idempotency_key"}},
+		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("asset_version_id", "research_asset_versions", "RESTRICT")},
+	},
 }
 
 // gooseTable is the only non-canonical table the runner may create.
@@ -1080,6 +1092,7 @@ func TestUpgradePath(t *testing.T) {
 		"project_template_instantiations",
 		"contribution_opportunities",
 		"project_milestones", "project_milestone_creations",
+		"asset_publish_creations",
 	}
 	for _, name := range present {
 		if _, ok := intermediate.Tables[name]; !ok {

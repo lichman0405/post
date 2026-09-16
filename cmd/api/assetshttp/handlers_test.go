@@ -74,16 +74,26 @@ const testProjectID = "11111111-1111-4111-8111-111111111111"
 
 // previewServer is the composed surface: the real auth guard (so the
 // session/CSRF rule is the production one, not a stub) over a mux carrying
-// only this package's route.
+// this package's routes. The publish route (T0705) is mounted with it —
+// both are registered by one Register call — so the fake publish command
+// rides along here even when a preview case never exercises it.
 type previewServer struct {
-	ts     *httptest.Server
-	client *http.Client
-	csrf   string
-	state  *fakeState
-	gate   *fakeGate
+	ts      *httptest.Server
+	client  *http.Client
+	csrf    string
+	state   *fakeState
+	gate    *fakeGate
+	publish *fakePublish
 }
 
+// newPreviewServer composes the preview surface alone. It delegates, so
+// there is one construction of the auth harness for both route suites.
 func newPreviewServer(t *testing.T, state *fakeState, gate *fakeGate) *previewServer {
+	t.Helper()
+	return newAssetsServer(t, Deps{State: state, Projects: gate})
+}
+
+func newAssetsServer(t *testing.T, deps Deps) *previewServer {
 	t.Helper()
 	authAPI := authhttp.New(authhttp.Deps{
 		Users:    memstore.NewUsers(),
@@ -103,7 +113,7 @@ func newPreviewServer(t *testing.T, state *fakeState, gate *fakeGate) *previewSe
 	})
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/auth/", authAPI.Routes())
-	New(Deps{State: state, Projects: gate}).Register(mux)
+	New(deps).Register(mux)
 	ts := httptest.NewServer(authAPI.Guard(mux))
 	t.Cleanup(ts.Close)
 
@@ -127,7 +137,11 @@ func newPreviewServer(t *testing.T, state *fakeState, gate *fakeGate) *previewSe
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode signup: %v", err)
 	}
-	return &previewServer{ts: ts, client: client, csrf: payload.CSRFToken, state: state, gate: gate}
+	return &previewServer{
+		ts: ts, client: client, csrf: payload.CSRFToken,
+		state: deps.State.(*fakeState), gate: deps.Projects.(*fakeGate),
+		publish: publishFake(deps.Publish),
+	}
 }
 
 // previewURL is the route under test, spelled exactly as the contract
@@ -635,10 +649,15 @@ func TestPreviewRouteIsTheContractPath(t *testing.T) {
 	state := &fakeState{}
 	srv := newPreviewServer(t, state, &fakeGate{})
 
+	// Both registered routes are exact: a path that is not spelled the way
+	// the contract spells it is not a route at all. (The publish route now
+	// exists, so it is no longer one of the "wrong" paths — the preview
+	// suite asserts the spelling of ITS route, and publish_test.go asserts
+	// its own.)
 	for _, path := range []string{
 		"/api/v1/projects/" + testProjectID + "/assets/publish-preview",
 		"/api/v1/projects/" + testProjectID + "/assets:publish-preview/",
-		"/api/v1/projects/" + testProjectID + "/assets:publish",
+		"/api/v1/projects/" + testProjectID + "/asset:publish-preview",
 	} {
 		req, err := http.NewRequest(http.MethodPost, srv.ts.URL+path, strings.NewReader(`{}`))
 		if err != nil {
