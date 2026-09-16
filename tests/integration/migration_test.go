@@ -39,12 +39,22 @@ const taskID = "T0005"
 
 // adminURL returns the PostgreSQL admin connection URL for tests. Default is
 // the local dev stack (infra/docker); override with POSTGRES_TEST_ADMIN_URL.
+//
+// The default port is 5432, the port `make infra-up` actually publishes:
+// docker-compose.yml defaults POSTGRES_PORT to it and CI's service container
+// uses it. This line used to say 15432 — the port the compose file documents
+// as the override for a *second* stack — so `go test ./...` with no
+// environment and the documented stack up failed every test in this package
+// at testdb.Setup with "connection refused" while `make test-integration`,
+// which passes 5432 on the command line, was green. It is the same stale
+// default the test-integration target fixed for itself; a test that cannot
+// reach the stack it names is not a stricter test, only a louder one.
 func adminURL(t *testing.T) string {
 	t.Helper()
 	if u := os.Getenv("POSTGRES_TEST_ADMIN_URL"); u != "" {
 		return u
 	}
-	return "postgres://postgres:postgres_dev_pw@127.0.0.1:15432/post"
+	return "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post"
 }
 
 func testCtx(t *testing.T) context.Context {

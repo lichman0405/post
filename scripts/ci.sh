@@ -12,8 +12,8 @@
 #   bash scripts/ci.sh spec go        # only the named stages, in this order
 #
 # The integration stage needs a reachable PostgreSQL admin endpoint:
-# POSTGRES_TEST_ADMIN_URL (default postgres://postgres:postgres_dev_pw@
-# 127.0.0.1:15432/post). All other stages are infrastructure-free.
+# POSTGRES_TEST_ADMIN_URL (the DSN default lives in the test-integration target
+# in the Makefile). All other stages are infrastructure-free.
 #
 # Implementation note: each stage runs as a re-exec'ed child process
 # (CI_STAGE_SINGLE) because bash suppresses errexit inside every

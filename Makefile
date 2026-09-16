@@ -14,8 +14,8 @@
 SHELL := /bin/bash
 
 # Unit-test packages only: tests/integration connects to real PostgreSQL
-# (default postgres://postgres:postgres_dev_pw@127.0.0.1:15432/post, docs/66)
-# and belongs to test-integration, not check/test.
+# (the DSN default lives in the test-integration target below) and belongs to
+# test-integration, not check/test.
 GO_UNIT_PKGS := $(shell go list ./... | grep -v '/tests/integration')
 STATICCHECK_VER := 2026.2.1
 
