@@ -1,0 +1,13 @@
+{
+  "name": "@post/e2e-anonymous",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Anonymous pages e2e (T0801 required test \"anonymous e2e\"): a plain-HTTP crawler (no JavaScript, no cookie) reads the built web app's served HTML for every public entity page — title, description, canonical, robots, OpenGraph, robots.txt, sitemap.xml — and a real Chromium visitor with a fresh context reads the same pages as a signed-out human; a private project, and every id that names nothing, must produce one identical, unindexable, name-free page. The Go API is a real HTTP mock served by this directory's mock-api.mjs so that the SERVER-side metadata reads are exercised too (a browser-level intercept cannot see them).",
+  "type": "module",
+  "scripts": {
+    "e2e": "node anonymous-e2e.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}
