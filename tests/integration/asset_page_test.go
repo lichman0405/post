@@ -720,9 +720,94 @@ func forbidInBody(t *testing.T, what, raw string, forbidden ...string) {
 		if s == "" {
 			t.Fatalf("%s: a forbidden string is empty, so this check would pass on any answer", what)
 		}
-		if i := strings.Index(raw, s); i >= 0 {
+		if i := indexToken(raw, s); i >= 0 {
 			t.Errorf("%s leaks %q: ...%s...", what, s, leakWindow(raw, i))
 		}
+	}
+}
+
+// indexToken finds s in raw, except that a needle made only of digits and
+// dots must not match INSIDE a longer numeric run.
+//
+// A version label is a token, and several needles here are labels like "2.1".
+// Searched as a bare substring, "2.1" also matches the microseconds of an ISO
+// timestamp — "2026-09-16T04:03:42.127948Z" contains "42.127", and "2.1"
+// starts at its second character — so on roughly one run in ten this check
+// fired on a body that had leaked nothing at all. That is the shape the
+// doctrine above rejects from the other direction: a check whose failure does
+// not mean the thing it names. A page that really names version 2.1 writes it
+// after a quote, a slash or a space, never in the middle of a longer number,
+// so requiring a non-numeric neighbour keeps every real leak and drops the
+// timestamp.
+func indexToken(raw, s string) int {
+	if !numericLabel(s) {
+		return strings.Index(raw, s)
+	}
+	for from := 0; from < len(raw); {
+		i := strings.Index(raw[from:], s)
+		if i < 0 {
+			return -1
+		}
+		i += from
+		if !insideNumber(raw, i, len(s)) {
+			return i
+		}
+		from = i + 1
+	}
+	return -1
+}
+
+// numericLabel reports whether s is made only of digits and dots, i.e. the
+// shape of a version label rather than of an identifier or a phrase.
+func numericLabel(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if (s[i] < '0' || s[i] > '9') && s[i] != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+// insideNumber reports whether raw[i:i+n] has a digit or a dot on either side,
+// which makes it part of a longer number rather than a token of its own.
+func insideNumber(raw string, i, n int) bool {
+	digitOrDot := func(b byte) bool { return (b >= '0' && b <= '9') || b == '.' }
+	if i > 0 && digitOrDot(raw[i-1]) {
+		return true
+	}
+	if j := i + n; j < len(raw) && digitOrDot(raw[j]) {
+		return true
+	}
+	return false
+}
+
+// The check above is only worth having if it still says no to a real leak AND
+// stops saying yes to a clock. Both directions are asserted here: the failure
+// it guards against was silent one way and wrong the other, and a fix that
+// traded one for the other would be worse than the bug.
+func TestForbidInBodyMatchesLabelsNotTimestamps(t *testing.T) {
+	// The body that produced the false positive: it names version 2.0 and a
+	// timestamp whose microseconds happen to contain "2.1".
+	const clean = `{"version":{"version":"2.0","url":"/assets/v3dczzg54m6qxzzscd2gmm0xm0",` +
+		`"created_at":"2026-09-16T04:03:42.127948Z"}}`
+	if i := indexToken(clean, "2.1"); i >= 0 {
+		t.Errorf("indexToken matched %q inside a timestamp at %d: %q", "2.1", i, leakWindow(clean, i))
+	}
+	// Every position a real leak can take: a JSON value, a path segment, and
+	// running prose on a server-rendered page.
+	for _, leaked := range []string{
+		`{"version":{"version":"2.1","url":"/assets/x"}}`,
+		`{"url":"/assets/x/2.1"}`,
+		`<span>Version 2.1</span>`,
+		`{"label":"2.1"}`,
+	} {
+		if indexToken(leaked, "2.1") < 0 {
+			t.Errorf("indexToken missed a real leak of %q in %q", "2.1", leaked)
+		}
+	}
+	// A needle that is not a version label keeps the plain substring rule.
+	if indexToken(`{"handle":"bob"}`, "bob") < 0 {
+		t.Error("indexToken missed a non-numeric needle")
 	}
 }
 
