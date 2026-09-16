@@ -23,6 +23,28 @@ SELECT * FROM projects WHERE id = @id FOR UPDATE;
 -- name: GetProjectBySlug :one
 SELECT * FROM projects WHERE organization_id = @organization_id AND slug = @slug;
 
+-- FreezeProjectMain is the freeze governance action's write (T0601). It is
+-- a compare-and-swap, not a read-then-write: the flag moves from false to
+-- true only while it is still false, so of two concurrent freezes of one
+-- project exactly ONE finds a row here and the loser finds zero — and only
+-- the winner's audit row and domain event are written (the task's
+-- concurrency criterion; the same CAS discipline
+-- scientific_objects.current_version_no follows).
+--
+-- Zero rows mean either the project does not exist or main is already
+-- frozen; the adapter distinguishes them with one read, exactly the way
+-- UpdateBranchBaseState's zero-row outcome is resolved (state_store.go).
+--
+-- There is deliberately no statement in this file that CLEARS the flag:
+-- V1 provides no unfreeze (docs/09 §3: "Emergency unfreeze 不在 V1 提供，
+-- 避免形成绕过路径"; specs/api/openapi.yaml carries no :unfreeze). Adding
+-- one here would be the bypass the specification forbids.
+-- name: FreezeProjectMain :one
+UPDATE projects
+SET main_frozen = true
+WHERE id = @id AND main_frozen = false
+RETURNING *;
+
 -- name: ListProjectsByOrganization :many
 SELECT * FROM projects
 WHERE organization_id = @organization_id

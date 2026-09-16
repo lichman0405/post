@@ -127,6 +127,50 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 	return i, err
 }
 
+const freezeProjectMain = `-- name: FreezeProjectMain :one
+UPDATE projects
+SET main_frozen = true
+WHERE id = $1 AND main_frozen = false
+RETURNING id, organization_id, program_id, slug, name, purpose, activity_status, visibility, main_frozen, git_repository_external_id, created_by, created_at, provision_status
+`
+
+// FreezeProjectMain is the freeze governance action's write (T0601). It is
+// a compare-and-swap, not a read-then-write: the flag moves from false to
+// true only while it is still false, so of two concurrent freezes of one
+// project exactly ONE finds a row here and the loser finds zero — and only
+// the winner's audit row and domain event are written (the task's
+// concurrency criterion; the same CAS discipline
+// scientific_objects.current_version_no follows).
+//
+// Zero rows mean either the project does not exist or main is already
+// frozen; the adapter distinguishes them with one read, exactly the way
+// UpdateBranchBaseState's zero-row outcome is resolved (state_store.go).
+//
+// There is deliberately no statement in this file that CLEARS the flag:
+// V1 provides no unfreeze (docs/09 §3: "Emergency unfreeze 不在 V1 提供，
+// 避免形成绕过路径"; specs/api/openapi.yaml carries no :unfreeze). Adding
+// one here would be the bypass the specification forbids.
+func (q *Queries) FreezeProjectMain(ctx context.Context, id pgtype.UUID) (Project, error) {
+	row := q.db.QueryRow(ctx, freezeProjectMain, id)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.ProgramID,
+		&i.Slug,
+		&i.Name,
+		&i.Purpose,
+		&i.ActivityStatus,
+		&i.Visibility,
+		&i.MainFrozen,
+		&i.GitRepositoryExternalID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.ProvisionStatus,
+	)
+	return i, err
+}
+
 const getProgramByID = `-- name: GetProgramByID :one
 SELECT id, organization_id, slug, name, description, created_at FROM programs WHERE id = $1
 `

@@ -575,6 +575,12 @@ func (s *Service) commit(ctx context.Context, actor domain.User, p *prepared) (*
 		// research branch is held to the PR gate, which is the standard a
 		// reviewed proposal has met.
 		Gate: gateFor(p.targetBranch),
+		// This transition IS the Research PR merge — the one path docs/09
+		// §3 leaves open onto a frozen main (T0601). The declaration is
+		// what keeps the freeze from forbidding evolution: the same commit
+		// would be refused with MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN if it
+		// arrived through any other path, and only this package sets it.
+		ResearchPRMerge: true,
 	}, write)
 	if err != nil {
 		return nil, unwrapWriteError(err)

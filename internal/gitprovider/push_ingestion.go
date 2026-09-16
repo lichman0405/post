@@ -206,6 +206,24 @@ type SemanticCandidate struct {
 	Content json.RawMessage
 }
 
+// MainPushVerdict is the store's answer for one delivery that moves
+// refs/heads/main: the two canonical facts the Git side of the frozen-main
+// rule (T0601) is decided on.
+type MainPushVerdict struct {
+	// Frozen is projects.main_frozen for the project the provider
+	// repository is provisioned for.
+	Frozen bool
+	// PlatformMerge reports whether the delivery's after commit is the
+	// merge commit the platform recorded for that project's main — the
+	// newest semantic merge whose Git step completed on refs/heads/main
+	// (T0406's record, written by CompleteGitStep). It is the ONLY main
+	// delivery a frozen project still accepts, and it is false for
+	// everything else — an unrecorded merge, an older recorded one, a
+	// repository mapping to no project, a commit the platform never
+	// merged.
+	PlatformMerge bool
+}
+
 // IngestStore is the canonical-store port push ingestion writes through.
 // The concrete adapter is *PGPushIngestStore in this package.
 type IngestStore interface {
@@ -214,6 +232,18 @@ type IngestStore interface {
 	// provider never returns it). ErrNotFound when no provision row
 	// carries the repository id.
 	WebhookSecretByRepoID(ctx context.Context, giteaRepoID int64) (string, error)
+	// MainPushVerdict answers the frozen-main rule for one delivery that
+	// moves refs/heads/main (T0601): whether the project's main is frozen,
+	// and whether afterSHA is the merge commit the platform itself
+	// recorded for that main. The ingestion asks both questions in ONE
+	// read, before it looks at the delivery at all, and refuses when the
+	// answer is frozen and not the platform's own merge.
+	//
+	// A repository id that maps to no provision row answers the zero
+	// verdict: an unprovisioned delivery has no project whose main could
+	// be frozen, and T0305's existing handling of it (recorded, mapped to
+	// no branch) is unchanged by this rule.
+	MainPushVerdict(ctx context.Context, giteaRepoID int64, afterSHA string) (MainPushVerdict, error)
 	// IngestPush records one delivery and its inspection result in one
 	// transaction: the ingestion row (dedupe on repository + ref +
 	// after — a duplicate is a complete no-op and reports inserted
@@ -258,7 +288,50 @@ func NewPushIngester(port GitPort, store IngestStore, reg *schemareg.Registry) *
 // delivery) is recorded without inspection — there is no pushed head to
 // inspect and the provider deletes refs through its own delete event on
 // this instance, so this path is defensive.
+//
+// A delivery that moves refs/heads/main into a FROZEN project is refused
+// before anything else happens (T0601, MainFrozenRefusalError): before the
+// provider is asked for the changed files, before any file is read, and
+// before the store writes a row. The Git-side rule docs/09 §3 states —
+// main advances only through a Research PR merge — is enforced on both
+// sides of the platform: the semantic write side refuses in the states
+// adapter's transaction (MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN), and this is
+// the Git side. The refusal is the delivery's whole outcome: nothing is
+// recorded for it, not even as a violation, because the platform has no
+// legitimate reading of a direct write to a frozen main to record.
+//
+// EXCEPT the platform's own merge, which reaches this endpoint as a plain
+// push. The provider delivers the merge it just performed as a push of
+// refs/heads/main whose after is the merge commit and whose payload carries
+// no merge marker at all (T0409's MergePullRequest is an ordinary provider
+// merge — checked against the running instance), so a rule that refuses
+// every main delivery while frozen refuses the governed path too: main's
+// recorded head, the pushed-head state and the branch's semantic marks
+// would never be written, and T0309's reconciler would report the ref
+// having moved with no ingestion behind it — `ref_head_moved` drift the
+// platform caused itself, on every merge, for good. The seam is exactly one
+// delivery wide and it is pinned to a RECORD, never to a shape: a main
+// delivery is admitted while frozen only when its after is the merge commit
+// this project's main has recorded (MainPushVerdict.PlatformMerge). A
+// foreign direct push, a merge performed outside the platform (the
+// provider's own UI/API writes no record here), a push back onto an older
+// recorded merge commit, and a delivery whose after is anything else are
+// all refused — no record, no seam, and the store answers false whenever it
+// cannot prove the match.
+//
+// The check covers a main deletion too (a zeros after), which is why it
+// sits above that branch: deleting main is not a smaller write than
+// pushing to it, and zeros is no commit any merge recorded.
 func (i *PushIngester) Ingest(ctx context.Context, ev PushEvent) (bool, error) {
+	if ev.Ref == MainRef {
+		verdict, err := i.store.MainPushVerdict(ctx, ev.RepositoryID, ev.After)
+		if err != nil {
+			return false, err
+		}
+		if verdict.Frozen && !verdict.PlatformMerge {
+			return false, &MainFrozenRefusalError{Ref: ev.Ref, RepositoryID: ev.RepositoryID}
+		}
+	}
 	params := IngestPushParams{Event: ev}
 	if isZerosSHA(ev.After) {
 		return i.store.IngestPush(ctx, params)

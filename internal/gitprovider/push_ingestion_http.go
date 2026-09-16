@@ -20,9 +20,11 @@ import (
 // and redelivers non-2xx (with a fresh delivery id — the ingestion's
 // dedupe key is the pushed head, so a redelivery that reached us twice is
 // a no-op either way). 404 means "this platform does not own the
-// repository" — retrying cannot fix it; 5xx means "not recorded, retry"
-// (database down, provider fetch failure) — the provider's redelivery is
-// the bounded retry policy.
+// repository" — retrying cannot fix it; 403 means "refused by a rule" (a
+// direct write to a frozen main, T0601) — retrying cannot fix that either,
+// and nothing was written; 5xx means "not recorded, retry" (database down,
+// provider fetch failure) — the provider's redelivery is the bounded retry
+// policy.
 
 // maxDeliveryBody bounds one delivery body (4 MiB — the payload carries
 // paths and a truncated commit list, never file content).
@@ -107,6 +109,22 @@ func NewPushWebhookHandler(ingester *PushIngester, store IngestStore) http.Handl
 
 		inserted, err := ingester.Ingest(r.Context(), ev)
 		if err != nil {
+			// A delivery the frozen-main rule refuses (T0601) is answered
+			// 403, distinct from the 5xx that means "not recorded, retry":
+			// the refusal is decided from the project's flag and the ref
+			// alone, so a redelivery of the same push will be refused in
+			// exactly the same way, and the status is how an operator sees
+			// that a direct write to a frozen main was attempted. The body
+			// stays empty like every other answer here (the provider reads
+			// status codes); the code travels in the log line.
+			var frozen *MainFrozenRefusalError
+			if errors.As(err, &frozen) {
+				reqLog.Warn("api: webhook delivery refused (main is frozen)",
+					"delivery_id", deliveryID, "ref", ev.Ref, "after", ev.After,
+					"code", frozen.Code(), "gitea_repo_id", frozen.RepositoryID)
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
 			// Not recorded — the provider's redelivery is the retry
 			// (the dedupe key makes an already-recorded delivery a
 			// no-op when it arrives again).

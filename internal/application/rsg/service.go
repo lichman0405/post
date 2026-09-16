@@ -867,6 +867,12 @@ func wrapError(err error) error {
 		errors.As(err, new(*relations.ReferencedVersionNotFoundError)) ||
 		errors.As(err, new(*states.StateConflictError)) ||
 		errors.As(err, new(*states.BranchNotActiveError)) ||
+		// T0601: a semantic write onto a frozen main that does not come from
+		// the Research PR merge is a refusal of the caller's request, not a
+		// store failure — it must reach the handler with its own code
+		// (MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN) instead of being folded into
+		// ErrStore and answered SERVICE_UNAVAILABLE.
+		errors.As(err, new(*states.MainFrozenDirectWriteError)) ||
 		errors.As(err, new(*branches.NotActiveError)) ||
 		errors.As(err, new(*rsgvalidation.GateBlockedError)) {
 		return err

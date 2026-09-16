@@ -68,6 +68,21 @@ const (
 	// T0609 project milestones: one milestone row per action, written in
 	// the same transaction as the milestone row itself.
 	ActionMilestoneCreated = "milestone.created"
+
+	// T0601 freeze governance: one row per project whose main was frozen,
+	// written in the same transaction as the flag itself. docs/26 lists
+	// "main freeze" among the high-risk actions that must be audited, and
+	// docs/09 §3 makes the frozen state the precondition of every later
+	// advance of main — so this row is the record of when the guarantee
+	// began for a project, and who turned it on.
+	//
+	// It spells the same dotted name as the research EVENT the freeze
+	// emits (project.main_frozen, specs/events/event-types.yaml). That is
+	// the same coincidence of two registries ActionPullRequestMerged
+	// records above: the audit vocabulary is this file, the event
+	// vocabulary is the event spec, and neither list is derived from the
+	// other.
+	ActionProjectMainFrozen = "project.main_frozen"
 )
 
 // Stable via values (the audit_log.via column): how the action arrived.

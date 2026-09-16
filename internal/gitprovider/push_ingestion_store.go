@@ -12,7 +12,9 @@ import (
 )
 
 // The canonical-store side of push ingestion (T0305): the only reader of
-// git_repository_provisions.webhook_secret and the only writer of the
+// git_repository_provisions.webhook_secret — plus, for the frozen-main rule
+// (T0601), the delivery's verdict read (projects.main_frozen and the merge
+// commit the project's main has recorded) — and the only writer of the
 // git_push_* tables (plus the two pointers ingestion maintains:
 // git_branch_refs.head_sha — T0303 assigned the freshness to this task —
 // and the pushed-head project_states rows the branch fork-point
@@ -47,6 +49,70 @@ func (s *PGPushIngestStore) WebhookSecretByRepoID(ctx context.Context, giteaRepo
 		return "", err
 	}
 	return secret, nil
+}
+
+// MainPushVerdict implements IngestStore (T0601): the project's main_frozen
+// flag and whether afterSHA is the merge commit the platform itself
+// recorded for that project's main — both read through the provision row
+// the repository id is keyed by, in one statement. A repository id no
+// provision row carries answers the zero verdict: the ingestion's handling
+// of an unprovisioned delivery is T0305's and this rule does not change it.
+//
+// The merge side is the seam T0601 turned out to need. The platform merges
+// through the provider's API (T0409), and the provider delivers that merge
+// as a push of refs/heads/main with no merge marker, onto the very
+// endpoint this store feeds — so "frozen main accepts nothing" would refuse
+// the platform's own governed merge and leave main's recorded head behind
+// for ever. The record that tells its own merge apart from a foreign push
+// is the saga's: semantic_merges.git_sha, written by CompleteGitStep when
+// the provider merge landed, on the ref the merge targeted (`git_ref` is
+// the same refs/heads/<name> projection branches carry, and the merge's
+// target branch is pinned by target_branch_id).
+//
+// The row read is the NEWEST merge whose Git step completed on main, so the
+// seam names the commit main is at, not every commit the platform ever
+// merged: a push whose after rewinds main onto an older recorded merge
+// commit does not match and is refused (fail-closed — anything the store
+// cannot prove is the current merged head answers false). Ordered by
+// created_at, id — the (project_id, created_at DESC, id) index of migration
+// 00069 — with the `updated` filter applied before the ordering, so a merge
+// still in flight never hides the last completed one.
+//
+// A note on ordering, because the seam's value depends on it: the provider
+// call (and therefore the delivery) precedes CompleteGitStep, so a delivery
+// that wins that race finds no record yet and IS refused. That is the
+// designed fail-closed answer — no record, no seam — and it is not silent:
+// main's recorded head then trails the ref, which is exactly the drift
+// T0309's reconciler reports (`ref_head_moved`) and holds a repair proposal
+// for, the same recovery it offers a push whose webhook was lost. The
+// alternative — admitting a main push because a merge LOOKS in flight —
+// would admit any foreign push made during a merge window, which is a hole
+// in the freeze rather than a race in it.
+func (s *PGPushIngestStore) MainPushVerdict(ctx context.Context, giteaRepoID int64, afterSHA string) (MainPushVerdict, error) {
+	var verdict MainPushVerdict
+	err := s.pool.QueryRow(ctx,
+		`SELECT p.main_frozen,
+		        (m.git_sha IS NOT NULL AND m.git_sha = $2)
+		   FROM git_repository_provisions r
+		   JOIN projects p ON p.id = r.project_id
+		   LEFT JOIN LATERAL (
+		        SELECT git_sha
+		          FROM semantic_merges
+		         WHERE project_id = r.project_id
+		           AND git_ref = $3
+		           AND git_state = 'updated'
+		         ORDER BY created_at DESC, id DESC
+		         LIMIT 1
+		   ) m ON TRUE
+		  WHERE r.gitea_repo_id = $1`, giteaRepoID, afterSHA, MainRef).
+		Scan(&verdict.Frozen, &verdict.PlatformMerge)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return MainPushVerdict{}, nil
+	}
+	if err != nil {
+		return MainPushVerdict{}, err
+	}
+	return verdict, nil
 }
 
 // IngestPush implements IngestStore: one delivery and its inspection

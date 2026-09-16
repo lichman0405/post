@@ -25,6 +25,11 @@ import (
 type Repository interface {
 	// CommitState executes one state transition atomically:
 	//
+	//  0. a commit that targets the project's main while its main_frozen
+	//     flag is set is refused with *MainFrozenDirectWriteError
+	//     (MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN) before anything is written —
+	//     unless in.ResearchPRMerge declares the transition to be the
+	//     Research PR merge docs/09 §3 leaves open (T0601);
 	//  1. the result state row is inserted (its content hash colliding
 	//     with an existing state fails with ErrStateExists);
 	//  2. the branch's head pointer advances from in.BaseStateID to the
@@ -117,6 +122,13 @@ type CommitStateParams struct {
 	// ManifestVersion is the manifest format version the state is written
 	// under.
 	ManifestVersion string
+	// ResearchPRMerge mirrors CommitParams.ResearchPRMerge: the adapter
+	// consults the project's main_frozen flag for commits onto main unless
+	// this transition IS the Research PR merge docs/09 §3 permits, and
+	// refuses the rest (T0601). The decision belongs to the transaction,
+	// not to a pre-flight read, so it cannot go stale between the check and
+	// the write.
+	ResearchPRMerge bool
 }
 
 // InitialStateParams carries a genesis state creation.

@@ -58,6 +58,28 @@ type CommitParams struct {
 	// server-side inside the commit transaction — whatever the caller
 	// validated beforehand is never a reason to skip it.
 	Gate rsgvalidation.Gate
+
+	// ResearchPRMerge declares that this commit IS the governed advance of
+	// main that docs/09 §3 allows: the Research PR merge (T0409,
+	// internal/application/merge). It exists for exactly one rule — T0601's
+	// frozen-main gate — and it is the ONLY way a commit can reach the main
+	// branch of a project whose main_frozen flag is set.
+	//
+	// A caller sets it when, and only when, it is running the merge of a
+	// review-machine-approved Research PR into that PR's target branch. The
+	// merge service is the only such caller in this build, and its package
+	// doc states the same invariant from the other side ("the only thing
+	// that may advance it is a Research PR merge"). Every other commit —
+	// the RSG write commands, and any future writer — leaves it false, and
+	// a direct semantic write onto frozen main is refused with
+	// *MainFrozenDirectWriteError whatever actor asked for it, owner
+	// included (docs/09 §3: even the Owner may only advance main through a
+	// PR merge).
+	//
+	// It is a declaration about WHICH PATH the commit came from, not a
+	// permission: it grants nothing on its own, and a project that is not
+	// frozen is committed to exactly as before whichever way it is set.
+	ResearchPRMerge bool
 }
 
 // Commit executes one state transition: validate, derive the content hash,
@@ -107,6 +129,10 @@ func (s *Service) Commit(ctx context.Context, in CommitParams, write WriteFunc) 
 		StateHash:       hash,
 		GitCommitSHA:    in.GitCommitSHA,
 		ManifestVersion: in.ManifestVersion,
+		// The frozen-main gate (T0601) is decided by the adapter inside the
+		// transaction, so it sees the flag and the write atomically; the
+		// caller only declares which path the commit came from.
+		ResearchPRMerge: in.ResearchPRMerge,
 	}, guarded)
 	if err != nil {
 		return domain.ProjectState{}, domain.StateCommit{}, wrapStoreError(err)
@@ -299,12 +325,12 @@ func validateCommitParams(in CommitParams) error {
 }
 
 // wrapStoreError keeps the expected domain outcomes (missing state/commit/
-// branch, head conflict, content-address collision, validation) and turns
-// everything else — including an adapter that cannot run (e.g. a migration
-// not yet applied) — into ErrStore for the handler, with the cause kept
-// for the log. A *CommitWriteError is unwrapped: the callback's error is
-// the domain outcome of the semantic write and must reach the caller
-// unchanged.
+// branch, head conflict, content-address collision, validation, frozen
+// main) and turns everything else — including an adapter that cannot run
+// (e.g. a migration not yet applied) — into ErrStore for the handler, with
+// the cause kept for the log. A *CommitWriteError is unwrapped: the
+// callback's error is the domain outcome of the semantic write and must
+// reach the caller unchanged.
 func wrapStoreError(err error) error {
 	if err == nil ||
 		errors.Is(err, ErrStateNotFound) ||
@@ -313,7 +339,12 @@ func wrapStoreError(err error) error {
 		errors.Is(err, ErrStateExists) ||
 		errors.Is(err, ErrValidation) ||
 		errors.As(err, new(*StateConflictError)) ||
-		errors.As(err, new(*BranchNotActiveError)) {
+		errors.As(err, new(*BranchNotActiveError)) ||
+		// The frozen-main refusal (T0601) is a policy outcome, not a store
+		// failure: it must reach the caller with its own wire code
+		// (MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN) instead of collapsing into
+		// SERVICE_UNAVAILABLE.
+		errors.As(err, new(*MainFrozenDirectWriteError)) {
 		return err
 	}
 	var we *CommitWriteError

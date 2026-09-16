@@ -418,6 +418,13 @@ func rsgErrorOutcome(err error) (status int, code, message string) {
 		return http.StatusConflict, states.CodeBranchStateConflict, "branch state conflict — re-read the branch head and retry"
 	case errors.As(err, new(*states.BranchNotActiveError)) || errors.As(err, new(*branches.NotActiveError)) || errors.Is(err, branches.ErrBranchNotActive):
 		return http.StatusConflict, states.CodeBranchNotActive, "branch lifecycle is not active"
+	case errors.As(err, new(*states.MainFrozenDirectWriteError)):
+		// T0601: main is frozen, so the ONLY way to move it is the Research
+		// PR merge docs/09 §3 leaves open. A direct semantic write is
+		// refused here with the one code docs/45 gives this outcome, and
+		// the caller can tell that it was the freeze that blocked it (not a
+		// permission, a conflict or a store failure) from the code alone.
+		return http.StatusForbidden, states.CodeMainFrozenDirectWrite, err.Error()
 	case errors.Is(err, sciobjects.ErrObjectNotFound):
 		return http.StatusNotFound, sciobjects.CodeObjectNotFound, "object not found"
 	case errors.Is(err, sciobjects.ErrVersionNotFound):
