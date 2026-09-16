@@ -425,12 +425,21 @@ func TestReadFileOversize(t *testing.T) {
 // fakeIngestStore records the store handoff of the ingester (the
 // transaction behavior runs against PostgreSQL in the integration suite).
 type fakeIngestStore struct {
-	secret    string
-	secretErr error
-	calls     []string
-	params    []gitprovider.IngestPushParams
-	inserted  bool
-	ingestErr error
+	secret     string
+	secretErr  error
+	calls      []string
+	params     []gitprovider.IngestPushParams
+	inserted   bool
+	ingestErr  error
+	mainFrozen bool
+	// platformMergeAfter is the commit this project's main has recorded as
+	// its own merge: the fake pledges the seam ONLY for a verdict asked
+	// about exactly this after SHA. A fake that answered true for every
+	// delivery would model a bypass, not the rule.
+	platformMergeAfter string
+	// verdictAfters records the after SHA each verdict was asked about.
+	verdictAfters []string
+	frozenErr     error
 }
 
 func (f *fakeIngestStore) WebhookSecretByRepoID(context.Context, int64) (string, error) {
@@ -441,6 +450,20 @@ func (f *fakeIngestStore) WebhookSecretByRepoID(context.Context, int64) (string,
 		return f.secret, nil
 	}
 	return "secret", nil
+}
+
+// MainPushVerdict answers the T0601 rule's Git-side question. It is
+// recorded in calls like every other store handoff, so a test can show the
+// refusal happened before the provider was asked anything — and it records
+// the after SHA it was asked about, so a test can show the seam is keyed on
+// the delivery's own commit and not on something the ingester invented.
+func (f *fakeIngestStore) MainPushVerdict(_ context.Context, _ int64, afterSHA string) (gitprovider.MainPushVerdict, error) {
+	f.calls = append(f.calls, "main_frozen")
+	f.verdictAfters = append(f.verdictAfters, afterSHA)
+	return gitprovider.MainPushVerdict{
+		Frozen:        f.mainFrozen,
+		PlatformMerge: f.platformMergeAfter != "" && afterSHA == f.platformMergeAfter,
+	}, f.frozenErr
 }
 
 func (f *fakeIngestStore) IngestPush(_ context.Context, in gitprovider.IngestPushParams) (bool, error) {
@@ -816,5 +839,187 @@ func TestIngestZerosAfterSkipsInspection(t *testing.T) {
 	}
 	if len(store.params) != 1 || len(store.params[0].Changes) != 0 {
 		t.Errorf("handoff = %+v, want a bare event", store.params)
+	}
+}
+
+// The Git-side half of the frozen-main rule (T0601): a delivery that moves
+// refs/heads/main into a frozen project is refused, and the refusal is the
+// delivery's whole outcome — no provider call, no canonical row. The
+// control below is the same delivery into an UNFROZEN project, which runs
+// the ordinary pipeline: without it, a bug that refused every main push
+// would look identical to a working rule.
+
+func mainPushEvent(after string) gitprovider.PushEvent {
+	ev := pushEvent(after)
+	ev.Ref = gitprovider.MainRef
+	return ev
+}
+
+func TestIngestRefusesMainPushToFrozenProject(t *testing.T) {
+	port := &fakePort{
+		changedFiles: []gitprovider.FileChange{{Path: "manifests/mat.json", Kind: gitprovider.ChangeAdded}},
+		files:        map[string][]byte{testSHA2 + ":manifests/mat.json": []byte(validMaterialDoc())},
+	}
+	store := &fakeIngestStore{inserted: true, mainFrozen: true}
+	ingester := testIngester(t, port, store)
+
+	inserted, err := ingester.Ingest(context.Background(), mainPushEvent(testSHA2))
+	if err == nil {
+		t.Fatal("a direct push to a frozen main was ingested")
+	}
+	var refusal *gitprovider.MainFrozenRefusalError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("err = %v, want *MainFrozenRefusalError", err)
+	}
+	if refusal.Code() != gitprovider.CodeMainFrozenDirectWrite {
+		t.Errorf("code = %q, want %q", refusal.Code(), gitprovider.CodeMainFrozenDirectWrite)
+	}
+	if inserted {
+		t.Error("inserted = true on a refused delivery")
+	}
+	// The provider is asked NOTHING: the refusal precedes the diff and the
+	// file reads (the task's "the refusal happens before the provider
+	// action" requirement, which is why the check sits at the top of Ingest
+	// rather than beside the store call).
+	if len(port.calls) != 0 {
+		t.Errorf("provider calls = %v, want none (the refusal precedes the provider action)", port.calls)
+	}
+	// And nothing is written: the store was consulted for the flag and
+	// never for an ingestion.
+	for _, c := range store.calls {
+		if c == "ingest" {
+			t.Fatalf("store calls = %v, want no ingestion", store.calls)
+		}
+	}
+}
+
+// The seam the frozen rule needs (T0601): the platform's own merge reaches
+// the ingester as an ordinary main push, so the refusal above would refuse
+// the governed path too. The store pledges exactly one delivery — the one
+// whose after is the merge commit the project's main recorded — and the two
+// tests below are the two sides of that pledge on ONE instrument: the same
+// frozen project accepts its own merge and refuses a foreign push.
+
+// foreignSHA is a commit the frozen project's main never recorded as its
+// merge: a real full SHA, so nothing but the rule can explain a refusal.
+const foreignSHA = "3333333333333333333333333333333333333333"
+
+func TestIngestAcceptsThePlatformsOwnMergeIntoFrozenMain(t *testing.T) {
+	port := &fakePort{
+		changedFiles: []gitprovider.FileChange{{Path: "manifests/mat.json", Kind: gitprovider.ChangeAdded}},
+		files:        map[string][]byte{testSHA2 + ":manifests/mat.json": []byte(validMaterialDoc())},
+	}
+	store := &fakeIngestStore{inserted: true, mainFrozen: true, platformMergeAfter: testSHA2}
+	ingester := testIngester(t, port, store)
+
+	inserted, err := ingester.Ingest(context.Background(), mainPushEvent(testSHA2))
+	if err != nil {
+		t.Fatalf("the platform's own merge into frozen main was refused: %v", err)
+	}
+	if !inserted {
+		t.Fatal("inserted = false, want true")
+	}
+	// The seam reads the RECORD: the verdict was asked about this
+	// delivery's own after SHA, not about the repository or the pusher.
+	if len(store.verdictAfters) != 1 || store.verdictAfters[0] != testSHA2 {
+		t.Fatalf("verdicts asked about %v, want the delivery's after %s", store.verdictAfters, testSHA2)
+	}
+	if len(port.calls) == 0 {
+		t.Error("provider was never asked for the diff of the accepted merge")
+	}
+	if len(store.params) != 1 {
+		t.Fatalf("store handoffs = %d, want 1", len(store.params))
+	}
+}
+
+func TestIngestRefusesForeignPushToFrozenMainWithARecordedMerge(t *testing.T) {
+	// Same frozen project, same recorded merge, different delivery: the
+	// seam is one merge wide. A store that pledged any main push (or an
+	// ingester that skipped the verdict) lets this through.
+	port := &fakePort{changedFilesErr: errors.New("must not be called")}
+	store := &fakeIngestStore{inserted: true, mainFrozen: true, platformMergeAfter: testSHA2}
+	ingester := testIngester(t, port, store)
+
+	_, err := ingester.Ingest(context.Background(), mainPushEvent(foreignSHA))
+	var refusal *gitprovider.MainFrozenRefusalError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("err = %v, want *MainFrozenRefusalError", err)
+	}
+	if refusal.Code() != gitprovider.CodeMainFrozenDirectWrite {
+		t.Errorf("code = %q, want %q", refusal.Code(), gitprovider.CodeMainFrozenDirectWrite)
+	}
+	if len(port.calls) != 0 {
+		t.Errorf("provider calls = %v, want none (the refusal precedes the provider action)", port.calls)
+	}
+	for _, c := range store.calls {
+		if c == "ingest" {
+			t.Fatalf("store calls = %v, want no ingestion", store.calls)
+		}
+	}
+}
+
+func TestIngestAllowsMainPushToUnfrozenProject(t *testing.T) {
+	// The instrument can say no AND yes: the same delivery, in a project
+	// whose main is not frozen, runs the ordinary pipeline end to end.
+	port := &fakePort{
+		changedFiles: []gitprovider.FileChange{{Path: "manifests/mat.json", Kind: gitprovider.ChangeAdded}},
+		files:        map[string][]byte{testSHA2 + ":manifests/mat.json": []byte(validMaterialDoc())},
+	}
+	store := &fakeIngestStore{inserted: true}
+	ingester := testIngester(t, port, store)
+
+	inserted, err := ingester.Ingest(context.Background(), mainPushEvent(testSHA2))
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if !inserted {
+		t.Fatal("inserted = false, want true")
+	}
+	if len(port.calls) == 0 {
+		t.Error("provider was never asked for the diff")
+	}
+	if len(store.params) != 1 {
+		t.Fatalf("store handoffs = %d, want 1", len(store.params))
+	}
+}
+
+func TestIngestRefusesMainDeletionInFrozenProject(t *testing.T) {
+	// Deleting main is not a smaller write than pushing to it, and the
+	// check sits above the zeros-after branch for exactly that reason.
+	port := &fakePort{changedFilesErr: errors.New("must not be called")}
+	store := &fakeIngestStore{inserted: true, mainFrozen: true}
+	ingester := testIngester(t, port, store)
+
+	_, err := ingester.Ingest(context.Background(), mainPushEvent(gitprovider.ZerosSHA))
+	var refusal *gitprovider.MainFrozenRefusalError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("err = %v, want *MainFrozenRefusalError", err)
+	}
+	for _, c := range store.calls {
+		if c == "ingest" {
+			t.Fatalf("store calls = %v, want no ingestion", store.calls)
+		}
+	}
+}
+
+func TestIngestResearchBranchUnaffectedByFreeze(t *testing.T) {
+	// projects.main_frozen is a project-level switch about MAIN: a research
+	// branch push into the same frozen project ingests exactly as before.
+	port := &fakePort{
+		changedFiles: []gitprovider.FileChange{{Path: "manifests/mat.json", Kind: gitprovider.ChangeAdded}},
+		files:        map[string][]byte{testSHA2 + ":manifests/mat.json": []byte(validMaterialDoc())},
+	}
+	store := &fakeIngestStore{inserted: true, mainFrozen: true}
+	ingester := testIngester(t, port, store)
+
+	inserted, err := ingester.Ingest(context.Background(), pushEvent(testSHA2))
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if !inserted {
+		t.Fatal("inserted = false, want true")
+	}
+	if len(store.params) != 1 {
+		t.Fatalf("store handoffs = %d, want 1", len(store.params))
 	}
 }

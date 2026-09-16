@@ -163,6 +163,23 @@ type Querier interface {
 	// end date is never re-stamped.
 	EndOrganizationAffiliation(ctx context.Context, arg EndOrganizationAffiliationParams) (OrganizationMembership, error)
 	EnqueueOutboxEvent(ctx context.Context, arg EnqueueOutboxEventParams) (OutboxEvent, error)
+	// FreezeProjectMain is the freeze governance action's write (T0601). It is
+	// a compare-and-swap, not a read-then-write: the flag moves from false to
+	// true only while it is still false, so of two concurrent freezes of one
+	// project exactly ONE finds a row here and the loser finds zero — and only
+	// the winner's audit row and domain event are written (the task's
+	// concurrency criterion; the same CAS discipline
+	// scientific_objects.current_version_no follows).
+	//
+	// Zero rows mean either the project does not exist or main is already
+	// frozen; the adapter distinguishes them with one read, exactly the way
+	// UpdateBranchBaseState's zero-row outcome is resolved (state_store.go).
+	//
+	// There is deliberately no statement in this file that CLEARS the flag:
+	// V1 provides no unfreeze (docs/09 §3: "Emergency unfreeze 不在 V1 提供，
+	// 避免形成绕过路径"; specs/api/openapi.yaml carries no :unfreeze). Adding
+	// one here would be the bypass the specification forbids.
+	FreezeProjectMain(ctx context.Context, id pgtype.UUID) (Project, error)
 	// Research asset page reads (T0709).
 	//
 	// The public/authorized read of docs/42 §Asset Page and of the asset hub's
@@ -241,6 +258,27 @@ type Querier interface {
 	// schema id to this row).
 	GetLatestSchemaProfile(ctx context.Context, arg GetLatestSchemaProfileParams) (ProjectSchemaProfile, error)
 	GetLatestScientificObjectVersion(ctx context.Context, objectID pgtype.UUID) (ScientificObjectVersion, error)
+	// GetMainFrozenForBranch is the read behind the frozen-main refusal
+	// (T0601): is the branch the commit targets the project's main, and is
+	// that project's main frozen? It answers one row only when BOTH hold —
+	// the branch belongs to the project (a foreign or missing branch matches
+	// nothing and the commit reports its own outcome), its name is 'main'
+	// (b.name = the canonical name domain.MainBranchName carries), and the
+	// project row is the one that owns it.
+	//
+	// The adapter runs it INSIDE the commit transaction, before the state row
+	// is written, so the flag it consults is the flag as of the same
+	// transaction that would break it — there is no window between the check
+	// and the write for a freeze to slip through, and no pre-flight read that
+	// could go stale. Zero rows (not main, or no such branch here) mean "this
+	// rule does not apply", never "not frozen": the commit then proceeds and
+	// reports whatever is actually wrong with it.
+	//
+	// Only the refuser reads it. The Research PR merge — the one path docs/09
+	// §3 leaves open onto frozen main — consults nothing: its declaration
+	// (states.CommitParams.ResearchPRMerge) says the path is the governed one,
+	// and the refusal lives in the adapter's commit path.
+	GetMainFrozenForBranch(ctx context.Context, arg GetMainFrozenForBranchParams) (bool, error)
 	// Research PR merge governance (canonical table: merge_creations). The
 	// Idempotency-Key ledger of the merge endpoint (docs/22 §3): the same key
 	// replays the merge it created, forever.

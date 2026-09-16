@@ -45,11 +45,15 @@
 // — it opens no new write surface on main, and the state transition it commits
 // goes through the same states.Service + validation gate ladder every other
 // state write uses (main's commits are held to GateMain inside the
-// transaction). What the platform does NOT yet have is enforcement of the
-// freeze itself: no code refuses a direct semantic write to main today
-// (projects.main_frozen is reported, not enforced). Closing that is T0601's
-// (Freeze Main Governance), and naming it here is the honest form of the
-// claim: this task leaves the rule as it found it and adds no bypass.
+// transaction). The transition ALSO declares itself
+// (states.CommitParams.ResearchPRMerge): since T0601 (Freeze Main
+// Governance) the states adapter refuses any commit onto a frozen main
+// that does not carry that declaration, with
+// MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN — so the rule this package states in
+// prose is now the rule the store enforces, this package is the only
+// caller that sets the flag, and the freeze forbids the bypass without
+// forbidding evolution. This package still leaves the rule as it found it
+// (it adds no bypass) and now names the one place the rule is applied.
 //
 // # The transaction, and the window the T0402 review asked about
 //

@@ -124,6 +124,34 @@ WHERE id = @id
   AND base_state_id IS NOT DISTINCT FROM @expected_base_state_id
 RETURNING *;
 
+-- GetMainFrozenForBranch is the read behind the frozen-main refusal
+-- (T0601): is the branch the commit targets the project's main, and is
+-- that project's main frozen? It answers one row only when BOTH hold —
+-- the branch belongs to the project (a foreign or missing branch matches
+-- nothing and the commit reports its own outcome), its name is 'main'
+-- (b.name = the canonical name domain.MainBranchName carries), and the
+-- project row is the one that owns it.
+--
+-- The adapter runs it INSIDE the commit transaction, before the state row
+-- is written, so the flag it consults is the flag as of the same
+-- transaction that would break it — there is no window between the check
+-- and the write for a freeze to slip through, and no pre-flight read that
+-- could go stale. Zero rows (not main, or no such branch here) mean "this
+-- rule does not apply", never "not frozen": the commit then proceeds and
+-- reports whatever is actually wrong with it.
+--
+-- Only the refuser reads it. The Research PR merge — the one path docs/09
+-- §3 leaves open onto frozen main — consults nothing: its declaration
+-- (states.CommitParams.ResearchPRMerge) says the path is the governed one,
+-- and the refusal lives in the adapter's commit path.
+-- name: GetMainFrozenForBranch :one
+SELECT p.main_frozen
+FROM branches b
+JOIN projects p ON p.id = b.project_id
+WHERE b.id = @branch_id
+  AND b.project_id = @project_id
+  AND b.name = 'main';
+
 -- name: ListProjectStatesByBranch :many
 SELECT * FROM project_states
 WHERE branch_id = @branch_id

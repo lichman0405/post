@@ -312,6 +312,47 @@ func (q *Queries) GetLatestProjectState(ctx context.Context, projectID pgtype.UU
 	return i, err
 }
 
+const getMainFrozenForBranch = `-- name: GetMainFrozenForBranch :one
+SELECT p.main_frozen
+FROM branches b
+JOIN projects p ON p.id = b.project_id
+WHERE b.id = $1
+  AND b.project_id = $2
+  AND b.name = 'main'
+`
+
+type GetMainFrozenForBranchParams struct {
+	BranchID  pgtype.UUID `json:"branch_id"`
+	ProjectID pgtype.UUID `json:"project_id"`
+}
+
+// GetMainFrozenForBranch is the read behind the frozen-main refusal
+// (T0601): is the branch the commit targets the project's main, and is
+// that project's main frozen? It answers one row only when BOTH hold —
+// the branch belongs to the project (a foreign or missing branch matches
+// nothing and the commit reports its own outcome), its name is 'main'
+// (b.name = the canonical name domain.MainBranchName carries), and the
+// project row is the one that owns it.
+//
+// The adapter runs it INSIDE the commit transaction, before the state row
+// is written, so the flag it consults is the flag as of the same
+// transaction that would break it — there is no window between the check
+// and the write for a freeze to slip through, and no pre-flight read that
+// could go stale. Zero rows (not main, or no such branch here) mean "this
+// rule does not apply", never "not frozen": the commit then proceeds and
+// reports whatever is actually wrong with it.
+//
+// Only the refuser reads it. The Research PR merge — the one path docs/09
+// §3 leaves open onto frozen main — consults nothing: its declaration
+// (states.CommitParams.ResearchPRMerge) says the path is the governed one,
+// and the refusal lives in the adapter's commit path.
+func (q *Queries) GetMainFrozenForBranch(ctx context.Context, arg GetMainFrozenForBranchParams) (bool, error) {
+	row := q.db.QueryRow(ctx, getMainFrozenForBranch, arg.BranchID, arg.ProjectID)
+	var main_frozen bool
+	err := row.Scan(&main_frozen)
+	return main_frozen, err
+}
+
 const getProjectStateByHash = `-- name: GetProjectStateByHash :one
 SELECT id, project_id, branch_id, parent_state_id, state_hash, git_commit_sha, manifest_version, created_at FROM project_states WHERE project_id = $1 AND state_hash = $2
 `

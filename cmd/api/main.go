@@ -49,6 +49,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/conflicthttp"
 	"github.com/lichman0405/post/cmd/api/explorehttp"
 	"github.com/lichman0405/post/cmd/api/fileshttp"
+	"github.com/lichman0405/post/cmd/api/freezehttp"
 	"github.com/lichman0405/post/cmd/api/gittokenshttp"
 	"github.com/lichman0405/post/cmd/api/mergegit"
 	"github.com/lichman0405/post/cmd/api/mergehttp"
@@ -73,6 +74,7 @@ import (
 	"github.com/lichman0405/post/internal/application/branches"
 	appcontribution "github.com/lichman0405/post/internal/application/contribution"
 	"github.com/lichman0405/post/internal/application/diffs"
+	"github.com/lichman0405/post/internal/application/mainfreeze"
 	"github.com/lichman0405/post/internal/application/manifests"
 	"github.com/lichman0405/post/internal/application/merge"
 	"github.com/lichman0405/post/internal/application/milestones"
@@ -792,6 +794,30 @@ func run(args []string) int {
 		Projects: projectAPI.Service(),
 	})
 	mergeAPI.Register(v1)
+	// Freeze main governance (T0601). The two halves of one rule live in
+	// different layers on purpose: the freeze COMMAND (internal/application/
+	// mainfreeze) is the only writer of projects.main_frozen, and the
+	// REFUSALS are where main is written — the state store declines any
+	// semantic commit onto a frozen main that does not carry the Research PR
+	// merge declaration it alone can set, and the push ingestion declines a
+	// delivery that carries a direct refs/heads/main push. Wiring the
+	// command without those two would leave the flag reported and not
+	// enforced, which is exactly the hole this task closes.
+	//
+	// The membership port is the raw project store (as the publish command
+	// is wired) rather than the projects service: it reports "no membership"
+	// for a stranger AND for a project that does not exist, which is what
+	// lets the command answer a permission-class refusal to both without
+	// disclosing which one it was.
+	freezeCommand := mainfreeze.NewCommand(mainfreeze.Deps{
+		Members:  persistence.NewProjectStore(pool),
+		Policies: policyAPI.Service(),
+		Rules:    policy.NewRuleEvaluator(),
+		Store:    persistence.NewMainFreezeStore(pool),
+		Authz:    authz.NewMatrixEngine(),
+	})
+	freezeAPI := freezehttp.New(freezehttp.Deps{Command: freezeCommand})
+	freezeAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	srv := &http.Server{

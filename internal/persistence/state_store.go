@@ -44,6 +44,14 @@ func NewStateStore(pool *pgxpool.Pool) *StateStore {
 // compare-and-swap, a rejected operation callback, a failing commit
 // insert — rolls the state row, the head advance and every row the
 // callback wrote back, so no half state can ever be observed.
+//
+// The transaction opens with the frozen-main refusal (T0601): a commit
+// onto a frozen project's main is refused with
+// *states.MainFrozenDirectWriteError unless it declares itself the
+// Research PR merge (in.ResearchPRMerge). The check belongs here rather
+// than in the callers because this method is the single door every state
+// transition in the platform goes through, and because a rule enforced
+// inside the write's own transaction has no check-then-write gap.
 func (s *StateStore) CommitState(ctx context.Context, in states.CommitStateParams, write states.WriteFunc) (domain.ProjectState, domain.StateCommit, error) {
 	projectID, err := textUUID(in.ProjectID)
 	if err != nil {
@@ -75,6 +83,41 @@ func (s *StateStore) CommitState(ctx context.Context, in states.CommitStateParam
 	var commit domain.StateCommit
 	err = WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
+		// 0. The frozen-main refusal (T0601), before the transaction writes
+		// anything. docs/09 §3 freezes main once research has begun: no
+		// semantic write lands on it directly — whoever asks, owner
+		// included — and the ONLY path that may advance it is a Research PR
+		// merge, which declares itself through in.ResearchPRMerge. This is
+		// the one place the rule is enforced, and it is enforced for every
+		// writer: every state transition in this build — the RSG write
+		// commands, the Git-compatibility import, any future caller —
+		// reaches the database through here.
+		//
+		// The read shares the transaction, so there is no window between the
+		// check and the write: a freeze that commits later simply had not
+		// taken effect when this commit read the flag, which is the only
+		// ordering a database can promise. It takes no lock, so it cannot
+		// deadlock against the merge's branch-row locks either.
+		//
+		// A branch that is not main, or is not this project's, matches
+		// nothing and is not refused here: the rule is about main, and every
+		// other commit outcome (branch not found, head conflict, closed
+		// branch) is reported by the steps below exactly as before.
+		if !in.ResearchPRMerge {
+			frozen, err := q.GetMainFrozenForBranch(ctx, sqlc.GetMainFrozenForBranchParams{
+				BranchID:  branchID,
+				ProjectID: projectID,
+			})
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if err == nil && frozen {
+				return &states.MainFrozenDirectWriteError{
+					ProjectID: pgUUIDToText(projectID),
+					BranchID:  pgUUIDToText(branchID),
+				}
+			}
+		}
 		// 1. The result state row first: the callback's writes reference
 		// it by foreign key, and its UNIQUE(project_id, state_hash)
 		// content address rejects an identical transition up front.
@@ -373,7 +416,12 @@ func mapStateWriteError(err error) error {
 		errors.Is(err, states.ErrBranchNotFound) ||
 		errors.Is(err, states.ErrValidation) ||
 		errors.As(err, new(*states.StateConflictError)) ||
-		errors.As(err, new(*states.CommitWriteError)) {
+		errors.As(err, new(*states.CommitWriteError)) ||
+		// The frozen-main refusal (T0601) is a policy outcome of the commit,
+		// not an adapter failure: it keeps its own wire code
+		// (MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN) instead of collapsing into
+		// SERVICE_UNAVAILABLE.
+		errors.As(err, new(*states.MainFrozenDirectWriteError)) {
 		return err
 	}
 	var pgErr *pgconn.PgError

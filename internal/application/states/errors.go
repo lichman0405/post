@@ -77,6 +77,39 @@ func (e *BranchNotActiveError) Error() string {
 // Code is the stable wire code of this outcome (docs/45).
 func (e *BranchNotActiveError) Code() string { return CodeBranchNotActive }
 
+// MainFrozenDirectWriteError reports a semantic write that would have moved
+// a FROZEN project's main branch outside the one path docs/09 §3 allows.
+// Once main_frozen is set, main advances only through a Research PR merge:
+// every other transition that targets main — creating or updating an object
+// or a relation through the RSG surfaces, whoever the actor is, owner
+// included — is refused with this error, before anything is written.
+// docs/45 names the outcome MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN, and the
+// caller must be able to tell that it was the freeze, not the request, that
+// blocked it (T0601).
+//
+// It carries no verdict about the request's validity and no advice to
+// retry: the same request will be refused for as long as the project stays
+// frozen. The way forward is the one the freeze leaves open — propose the
+// change on a research branch and merge it through a Research PR.
+type MainFrozenDirectWriteError struct {
+	// ProjectID is the project whose main is frozen. It is known (the
+	// commit reached the transaction), so naming it leaks nothing the
+	// caller did not already address.
+	ProjectID string
+	// BranchID is the branch the refused commit targeted.
+	BranchID string
+}
+
+// Error implements error. The message tells the user the next step (docs/45)
+// without disclosing anything about the project beyond the refusal itself.
+func (e *MainFrozenDirectWriteError) Error() string {
+	return fmt.Sprintf("states: main of project %s is frozen — direct semantic writes to main are refused; propose the change on a research branch and merge it through a Research PR (docs/09 §3)",
+		e.ProjectID)
+}
+
+// Code is the stable wire code of this outcome (docs/45).
+func (e *MainFrozenDirectWriteError) Code() string { return CodeMainFrozenDirectWrite }
+
 // CommitWriteError wraps a failure raised by the commit's operation
 // callback — the semantic writes that ran inside the commit transaction.
 // The adapter wraps callback errors in it so the service can tell them
@@ -107,6 +140,11 @@ const (
 	CodeBranchNotFound      = "BRANCH_NOT_FOUND"
 	CodeBranchNotActive     = "BRANCH_NOT_ACTIVE"
 	CodeStateExists         = "STATE_ALREADY_EXISTS"
-	CodeValidation          = "VALIDATION_FAILED"
-	CodeUnavailable         = "SERVICE_UNAVAILABLE"
+	// CodeMainFrozenDirectWrite is docs/45's name for the frozen-main
+	// refusal: the project's main is frozen, so this semantic write may not
+	// land on it (T0601). It is a policy outcome about the action's path,
+	// not about who asked.
+	CodeMainFrozenDirectWrite = "MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN"
+	CodeValidation            = "VALIDATION_FAILED"
+	CodeUnavailable           = "SERVICE_UNAVAILABLE"
 )
