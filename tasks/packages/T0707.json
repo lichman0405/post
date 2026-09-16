@@ -1,0 +1,80 @@
+{
+  "id": "T0707",
+  "phase": "P7",
+  "phase_name": "Asset Hub",
+  "title": "Asset Reference/Dependency",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "requirements": [
+    "**「引用 vs 依赖」这条区分不是你要发明的——它已经写死并实现了**：`internal/rsg/relationcatalog/catalog.go:78` 的 `depends_on` 带 `DependencyInference: true`，语义逐字写着「uses the target as an actual input/method/reproducibility dependency; upstream changes trigger impact analysis (docs/19 §3)」；`:86` 的 `references` 语义写着「as background knowledge, **not as an input dependency**」并且**没有**这个标记。`:42-45` 定义了这个标记的用途。**`asset_dependencies.dependency_type` 就用这两个值**，不要另造词。",
+    "**词表留在 Go 侧，不要在数据库里加 CHECK——这是仓库已经声明过四次的约定**：`infra/migrations/00064_asset_pid_origin.sql:41-45` 逐字（duplicating that shape as a CHECK here would mean two definitions of the origin vocabulary drifting apart），`00066:21-30`、`00067:22-34`、`00045:74-79` 同此。`00010_releases_assets.sql:58` 的 `dependency_type text NOT NULL` **本来就没有 CHECK**，保持原样。",
+    "**「用了某个资产」这件事今天没有记录路径，要建；而且 `visibility_of_usage` 已经在那里了**：`00010:55-62` 的 `asset_dependencies` 已经有 `visibility_of_usage text NOT NULL DEFAULT 'private' CHECK(... IN ('public','private'))`。**公开资产页只显示 `visibility_of_usage = 'public'` 的那些用法；私有用法既不显示也不能被计数推断出来。**",
+    "**这一条不许重犯（issue #238 的同一类）**：任何聚合计数、任何「被使用了多少次」都不得让一个私有实体的存在被推断出来。规矩在 `docs/23_SECURITY_PRIVACY.md:21`——私有对象计数不能通过公开 API 泄漏，「8 private projects use this」只有在产品策略明确允许的匿名聚合阈值下才显示，**V1 可以直接不显示 private count**。本任务照 V1 的这条办。",
+    "**pin 必须是精确版本，浮动的引用不算 pin**：`internal/assets/dependency.go:9-18` 逐字（The pin is an exact version or it is not a pin: docs/11 §5 separates Reference/Use — 引用固定 Asset Version — from a floating reference）。**上游 current 升级不得改变已 pin 的依赖**，这是本任务的验收标准。",
+    "**外部引用的边只有两种，这条已经写死在迁移文件头里**：`infra/migrations/00045_external_reference_live_identity_and_snapshot.sql:47-58` 逐字（CITATION/DEPENDENCY IS THE ONLY ADMITTED EDGE: a relation pointing AT an external reference is either 'references' (citation) or 'depends_on' (dependency)）。",
+    "**页面上那两栏是 `docs/42_PAGE_SPECS.md:19` 点名的**：资产页十一项里有「dependencies」与「used/derived public links」——**两个方向都要有**，一个是本资产依赖谁，一个是谁公开用了本资产。",
+    "**不得为了让页面好看而放宽可见性**（CLAUDE.md §5.1）：不得把 `visibility_of_usage` 的判断挪到前端、不得用「界面不显示」冒充「后端不给」、不得为了让计数好看而把私有用法算进去。",
+    "**不做**：不改 `specs/**`；不新增契约声明（照 `cmd/api/provenancehttp/wiring.go:68` 的读路径先例挂在 v1 mux 上）；不改 `internal/rights/**` 的判定；不碰 blob 通道；不做公开资产页之外的其他页面。"
+  ],
+  "acceptance_criteria": [
+    "`asset_dependencies.dependency_type` 只取 `references` / `depends_on` 两个值，且词表定义在 Go 侧、数据库里**没有**为它新增 CHECK（照 `00064:41-45` 等四处已声明的约定）",
+    "上游 current 版本升级**不改变**已 pin 的依赖——有一条测试真的做一次上游升级再比对（`dependency.go:9-18`、`docs/11 §5`）",
+    "公开资产页的「used/derived public links」**只渲染 `visibility_of_usage = 'public'` 的用法**",
+    "**不泄漏私有实体**：构造一个私有项目使用某公开资产的情形，公开页面上**看不出**那个私有项目的存在（名称、编号、计数都不得泄漏）——与 issue #238 同一类，必须有一条测试钉住，且该断言里的字符串是**真实存在的行**（空串算失败）",
+    "「本资产依赖谁」与「谁用了本资产」**两个方向都在**（`docs/42:19` 的 dependencies 与 used/derived public links）",
+    "读路径照 `cmd/api/provenancehttp/wiring.go:68` 的先例挂在 v1 mux 上，**不进契约**（「provenance」在契约里出现 0 次）",
+    "RESULT 里写明 `references` 与 `depends_on` 各自的语义出处（`catalog.go:78/86` + `docs/19_EXTERNAL_REFERENCES.md:13-15`），并说明它们与 `DependencyInference` 标记的关系"
+  ],
+  "allowed_scope": [
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "internal/persistence/**",
+    "internal/assets/**",
+    "internal/application/**",
+    "internal/rsg/**",
+    "cmd/api/**",
+    "apps/web/**",
+    "packages/schemas/**",
+    "tests/**",
+    "go.mod",
+    "go.sum",
+    ".env.example"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "specs/policies/**",
+    "specs/api/openapi.yaml",
+    "internal/rights/**",
+    "internal/storage/**",
+    "Makefile",
+    "scripts/**"
+  ],
+  "relevant_specs": [
+    "**`docs/11_RELEASE_ASSET_HUB.md` §5「Reference / Dependency / Fork」（先读这一节）**：引用固定 Asset Version、浮动引用不算 pin——本任务的验收依据",
+    "**`docs/19_EXTERNAL_REFERENCES.md:13-15`**：`cites`（背景/知识引用；上游变化只提示）与 `depends_on`（实际输入/方法/复现依赖；上游变更触发 impact analysis）的逐字定义",
+    "**`internal/rsg/relationcatalog/catalog.go:42-45`、`:78`、`:86`**：`DependencyInference` 标记的定义，以及两类各自的语义——**这是词表的唯一真相源**",
+    "**`docs/23_SECURITY_PRIVACY.md:21`**：私有用法/计数不得泄漏的既有裁决（与 issue #238 / T0712 同一类）",
+    "**`docs/42_PAGE_SPECS.md:19`**：资产页十一项里的 dependencies 与 used/derived public links",
+    "`infra/migrations/00010_releases_assets.sql:55-62`：`asset_dependencies` 的实际列与 `visibility_of_usage` 的既有 CHECK",
+    "`infra/migrations/00045_...sql:47-58`：CITATION/DEPENDENCY IS THE ONLY ADMITTED EDGE（逐字）",
+    "`infra/migrations/00064_asset_pid_origin.sql:41-45`（及 `00066:21-30`、`00067:22-34`、`00045:74-79`）：**词表定义在 Go 侧、不加 DB CHECK** 的既有约定，四处",
+    "`internal/assets/dependency.go:9-18`：pin 的精确版本要求",
+    "`cmd/api/provenancehttp/wiring.go:57-70`：读路径挂在 v1 mux 上、不进契约的先例",
+    "`specs/ui/page-inventory.csv:15`：资产页的既有登记"
+  ],
+  "scope_note": "这是**按本任务的实际交付面**收窄后的范围，不是 phase 级默认上限。逐条说明：保留 `infra/migrations/**` + `specs/database/postgres.sql` + `specs/SPEC_VERSION.json`（要记录用法关系，并按 derived-artifacts 规则重新生成快照与指纹）；加 `internal/persistence/**`（sqlc 产物派生自迁移目录，见 decisions.md L1-119）；加 `internal/application/**`（用法记录走应用层）与 `internal/rsg/**`（**只读**词表；若确实需要*修改*它，在 RESULT 里写明理由交给我，不要自己扩范围）；移出 `specs/policies/**` 与 `specs/api/openapi.yaml`（Supervisor-only）、`internal/rights/**`（只读不改）、`internal/storage/**`、`scripts/**`、`Makefile`。",
+  "supervisor_scope_narrowing": "2026-09-16 定稿（T0707 原本标「等定」，本任务书撤回该标记）。四点说明：\n（一）**为什么撤**：原判断是「依赖类型词表没接上」与「公开用法显示什么没写」。复核发现**两条都有答案**——前者不只是词表存在，`catalog.go:42-45/78/86` 的 `DependencyInference` 标记**已经编码了这张 issue 想要的那个区分**；后者的答案是我自己写的：`tasks/packages/T0709.json:14` 逐字「`used/derived public links` 这一项**只显示公开使用**」。**我判它没写，然后我在同一天的另一个包里写了它。**\n（二）**词表不要加 DB CHECK**：这是本仓库声明过四次的约定（`00064`/`00066`/`00067`/`00045`），理由是「同一个词表有两份定义就会漂移」。照办。\n（三）**`internal/rsg/**` 我加进范围了，但只给你读**。如果你判断**必须改**它（例如 `catalog.go` 要调整语义），在 RESULT 里点名说清楚，我来接——不要自己扩范围。\n（四）**迁移号不在这份任务书里定死**——派工时由 `rddev` 从分配账上取号并写进任务包，**以任务包里那行「its number is **NNNNN**」为准**。**不得自行选号。** 若你判断既有列已够用、不需要迁移，那就不建，在 RESULT 里说明理由。",
+  "tests": [
+    "asset dependency tests"
+  ],
+  "dependencies": [
+    "T0705"
+  ],
+  "baseline_sha": "",
+  "max_turns": 0,
+  "max_budget_usd": 0,
+  "migration_number": 0
+}

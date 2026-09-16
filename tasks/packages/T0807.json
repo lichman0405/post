@@ -1,0 +1,87 @@
+{
+  "id": "T0807",
+  "phase": "P8",
+  "phase_name": "开放网络、Fork、贡献与 Research Profile",
+  "title": "Contribution Ledger projection",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "requirements": [
+    "**账本本身早就建好了，你建的是「投影」——把领域事件变成账本行**。`infra/migrations/00011_external_contribution.sql:21-32` 的 `contribution_events` 已经有 `actor_id`、`organization_id_at_time`、`project_id`、`event_type`、`role_codes text[]`、`object_refs jsonb`、`accepted_context`、`released_context`、`occurred_at`。**`docs/13_CONTRIBUTION_REPUTATION.md:7` 列的七项里，六项已经躺在表里了**，缺的只有 `via`（见第 4 条）。不要重新设计这张表。",
+    "**角色词表已经写着，十三个，照抄，不要另造**：`docs/04_USERS_ROLES.md:26-44` §4「Contribution Role（实际上做了什么）」，`:30-42` 逐条列出十三个取值（Research Question Proposal / Hypothesis Proposal / Research Design / Method Development / Experimental Investigation / Computational Investigation / Data Curation / Analysis / Validation / Reproduction / Scientific Review / Asset Stewardship / Project Maintenance）。`:44` 还写死了它的性质：**「这些不是身份，不赋权，不计固定分值。」** 所以 `role_codes` **不得**被任何权限判断读取——它是记录，不是门槛。**词表定义在 Go 侧，不要给 `role_codes` 加数据库 CHECK**（照 `infra/migrations/00064_asset_pid_origin.sql:41-45` 逐字声明的约定：duplicating that shape as a CHECK here would mean two definitions of the origin vocabulary drifting apart；`00066:21-30`、`00067:22-34`、`00045:74-79` 同此，共四处）。",
+    "**事件词表有机器可读的唯一真相源，而且它是开放表，不是封闭枚举**：`specs/events/event-types.yaml` 列了 25 个事件名（`contribution.accepted`、`credit.dispute_opened`、`credit.dispute_resolved`、`pull_request.merged`、`release.published`、`research_asset.version_published`、`knowledge.version_published`、`scientific_object.version_created` 等）。而 `docs/13:5` 的列表以「**等**」结尾——所以**不要把它当成一个封闭的 switch**：映射要做成一份**可读的、集中的**表（Go 侧一个文件里的显式映射），并且**一个事件若映射不到任何账本行，这件事必须看得见，不能静默丢掉**（记一条计数/日志，并在 RESULT 里给出你处理过的完整事件清单）。`docs/13:5` 那九个是：created object、proposed hypothesis、performed experiment、ran/recorded calculation、curated dataset、reviewed PR、approved merge、published asset、maintained project。",
+    "**`via` 这一列 `docs/13:7` 点名要求，表里没有，要补**。`docs/13:7` 逐字：「每个 event：actor person id、affiliation at time、project/object refs、role tags、**via agent/client**、timestamp、accepted/released context。」仓库里有**两套**叫 `via` 的词表，**别选错**：\n  - `audit_log.via`（`00012:47`，无 CHECK，Go 侧四个值 `session`/`password`/`oidc`/`internal`，定义在 `internal/domain/audit.go:73-79`）——那是**「这个动作是怎么认证进来的」**。\n  - `state_commits.via`（`00004_rsg_state.sql:46`，六个值 `web`/`api`/`mcp`/`claude_code`/`git_compat`/`system`，Go 侧在 `internal/domain/state.go:63`，校验在 `internal/application/states/service.go:270`）——那是**「这个改动是从哪个通道来的」**。\n  `docs/13:7` 说的是 **agent/client**，所以取**后者**这套。**但关键在「值从哪来」**：`research_events`（`00012:4-13`）**没有 `via` 列**，`outbox_events` 的信封也没有（`00046:36-40` 只补了 `actor_id`/`project_id`/`visibility`/`last_error`）。**不许填一个读起来像事实的默认值。** 照 `00046` 自己的规矩办——逐字：the publisher must copy them from the outbox row, **never re-derive them from the payload**；也就是说信封列要一路带过来（outbox → research_event → 账本）。如果你判断通道在投影那一刻确实不可知，在 RESULT 里点名说明，不要编。",
+    "**`accepted_context` / `released_context` 是什么，依据在 `docs/13:4`**：它把 **Accepted Contribution** 与 **Release inclusion** 列为 Reputation Profile 里**两个不同的维度**（逐字：accepted contributions、assets reused、protocols derived、independent reproductions、reviews、cross-org collaboration、confidential verified contributions）。这两个布尔列就是那两件事的记录位。**你要把触发条件写清楚并在 RESULT 里逐条说明**（什么事件让哪个变 true；`contribution.accepted` 已在 `specs/events/event-types.yaml` 里），并且**必须在同一行上、按事件当时的事实判定**——不许事后回填。",
+    "**「affiliation at time」是「事件发生当时」，不是「投影当时」**：`organization_id_at_time` 这一列（`00011:23`）的名字就是这条要求。**投影必须取 `occurred_at` 那一刻的归属。** 这是可测的：让某人换组织，再重跑投影，**已经记下的那几行不得改变**。",
+    "**「同一 event 不重复 credit」的机器形状仓库里已经有先例，照它做**：`infra/migrations/00046_transactional_outbox_publish.sql:16-25` 与它下面的偏索引——逐字：`research_events.outbox_event_id` pins the outbox row each event came from, and **the partial unique index below makes the retried insert a no-op**（`research_events_outbox_event_uniq`，`WHERE outbox_event_id IS NOT NULL`）。**账本行同样要钉住它的来源事件，并用「来源非空 + 偏唯一索引」让重放成为 no-op**（`INSERT ... ON CONFLICT DO NOTHING`）。这样投影可以**反复重跑**而不会把同一次贡献记两遍。",
+    "**投影只记事件，不产生任何分数——这条是硬约束**：`docs/13:19` 逐字「禁止单一分数」；`docs/13:25-27` 的 Anti-gaming 逐字「不使用 Like 数做信誉。raw commit count/experiment count 不作为质量代理。重复自建项目互相引用不得直接等价为独立 external impact」；CLAUDE.md §9 不变量 13「不生成 Truth Score / Research Score」。**所以：不得在账本行上放任何聚合值、计数器、权重、排名**，也不得为了让 Profile 好渲染而先算一个总分。账本记事实，Profile 怎么展示是后面的事。",
+    "**append-only 已经由数据库强制，你不必再加，但必须证明它对你的新写入路径同样生效**：触发器在 `00014_append_only_enforcement.sql:75-76`（BEFORE UPDATE OR DELETE）与 `00015_append_only_truncate.sql:22-23`（BEFORE TRUNCATE），既有测试在 `tests/integration/append_only_test.go:74` 与 `:582-592`。**纠错只能追加新事件，不得改旧行**（`docs/13:11`、`:15`，CLAUDE.md §9 不变量 14「Contribution Ledger append-only；Credit 可纠错但留痕」）。",
+    "**加列会碰一个既有测试，改它是「补上」而不是「放宽」**：`tests/integration/migration_test.go:589-590` 逐列断言了 `contribution_events` 的列集合。加 `via` 之后这个期望清单**要补上新列**——**只许往严里补（新列的 类型/非空/默认值 都要断言），不许改成子集或弱断言**（CLAUDE.md §5.1）。",
+    "**不做**：不改 `specs/**`（`specs/events/event-types.yaml` 是 Supervisor-only 的规格，**你只读它**）；不给 `role_codes` 或 `dependency_type` 这类词表加 DB CHECK；不做 Reputation Profile 的展示面；不做 Credit Dispute 的流程（只在被要求的地方记事件）；不实现权限判定；不碰 blob、不碰 Git 通道。"
+  ],
+  "acceptance_criteria": [
+    "投影**可反复重跑**：同一次领域事件无论跑几遍，账本里**只有一行**，且重跑不报错（来源钉住 + 偏唯一索引 + ON CONFLICT DO NOTHING，照 `00046:16-25`）——**有一条测试真的把投影跑两遍再数行数**",
+    "**append-only 对你的路径也生效**：对投影写出的行做 UPDATE / DELETE / TRUNCATE 都失败——有一条测试真的去撞它（照 `tests/integration/append_only_test.go:582-592`）",
+    "`role_codes` 只取 `docs/04:30-42` 那**十三个**值，词表在 Go 侧、数据库里**没有**为它加 CHECK；且**没有任何权限判断读 `role_codes`**（`docs/04:44`「不赋权」）——在 RESULT 里给出你搜索证明这一点",
+    "**affiliation 是事件当时的**：换组织后重跑投影，**已记下的行一字不变**——有测试钉住",
+    "`accepted_context` / `released_context` 的触发条件**逐条写在 RESULT 里**，且与 `docs/13:4` 的两个维度对应；两者都必须由事件当时的事实决定，不许事后回填",
+    "`via` 列已补，取值来自 `state_commits.via` 那一套**通道**词表（`00004:46` / `internal/domain/state.go:63`），**不是** `audit_log.via` 的认证词表；且**它的值有真实来源**（信封列一路带过来），不是默认值凑的——如果确实不可知，RESULT 里点名说明",
+    "**映射不到账本行的事件看得见，不是静默丢掉**：RESULT 里给出你处理过的完整事件清单，以及未映射事件的可见处理方式",
+    "**账本上没有任何聚合值/计数器/权重/排名**（`docs/13:19`、`docs/13:25-27`、CLAUDE.md §9 不变量 13）——在 RESULT 里说明你如何保证这一点",
+    "`tests/integration/migration_test.go:589-590` 的列期望清单**已补上新列且往严里补**（类型/非空/默认值都断言），**不是**改成子集或弱断言",
+    "RESULT 里逐项说明 `docs/13:7` 那七项（actor person id / affiliation at time / project-object refs / role tags / via agent-client / timestamp / accepted-released context）各自的落点：**已经在表里的说「本来就是它」，补的说「补成了什么」，做不了的说明为什么**"
+  ],
+  "allowed_scope": [
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "internal/persistence/**",
+    "internal/contribution/**",
+    "internal/application/**",
+    "internal/domain/**",
+    "cmd/api/**",
+    "apps/web/**",
+    "tests/**",
+    "go.mod",
+    "go.sum",
+    ".env.example"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "specs/events/event-types.yaml",
+    "specs/policies/**",
+    "specs/api/openapi.yaml",
+    "internal/rights/**",
+    "internal/storage/**",
+    "Makefile",
+    "scripts/**"
+  ],
+  "relevant_specs": [
+    "**`docs/13_CONTRIBUTION_REPUTATION.md`（整篇很短，全读）**：`:5` 事件清单、`:7` 每条事件必须带的七项（**`via` 就在这一行**）、`:11` 纠错作为新事件、`:15` 不得直接改原事件、`:19` 禁止单一分数、`:25-27` Anti-gaming——本任务的验收依据",
+    "**`docs/04_USERS_ROLES.md:26-44`**：十三个 Contribution Role 取值（`:30-42`）与它的性质「不是身份、不赋权、不计固定分值」（`:44`）",
+    "**`specs/events/event-types.yaml`（只读）**：25 个事件名的唯一真相源，含 `contribution.accepted` / `credit.dispute_opened` / `credit.dispute_resolved`",
+    "**`infra/migrations/00046_transactional_outbox_publish.sql:1-60`**：来源钉住 + 偏唯一索引做幂等、以及「信封列必须从 outbox 行复制、不许从 payload 重推」的逐字规矩——**本任务去重要照抄的形状**",
+    "`infra/migrations/00011_external_contribution.sql:21-32`：`contribution_events` 的实际列（**注意没有 `via`**）",
+    "`infra/migrations/00012_events_audit.sql:4-13`（`research_events` 的实际列，**同样没有 `via`**）与 `:47`（`audit_log.via` 的写法，无 CHECK）",
+    "`infra/migrations/00004_rsg_state.sql:46`＋`internal/domain/state.go:63`＋`internal/application/states/service.go:270`：**通道**词表的六个取值与它的校验收口",
+    "`internal/domain/audit.go:8-15,73-79`：`via` 的另一种含义（认证方式）与它的四取值——**别选错这一套**",
+    "`infra/migrations/00014_append_only_enforcement.sql:75-76`、`00015_append_only_truncate.sql:22-23`：append-only 的两个触发器（已存在，只读）",
+    "`tests/integration/append_only_test.go:74,582-592` 与 `tests/integration/migration_test.go:589-590`：既有测试的形状——前者是你要照办的撞法，后者是加列后必须补严的期望清单",
+    "`infra/migrations/00064_asset_pid_origin.sql:38-46`（及 `00066:21-30`、`00067:22-34`、`00045:74-79`）：**词表定义在 Go 侧、不加 DB CHECK** 的既有约定，四处",
+    "`specs/orchestrator/derived-artifacts.json`：`specs/database/postgres.sql` 由 `infra/migrations/**` 生成——改 schema 必须重新生成快照与指纹"
+  ],
+  "scope_note": "这是**按本任务的实际交付面**收窄后的范围。相对 DAG 里的 phase 级默认值，**加了两个、收紧了 forbidden**：加 `internal/persistence/**`（sqlc 产物派生自迁移目录，见 decisions.md L1-119——改 schema 却够不到查询层会被收工拒绝）与 `internal/domain/**`（角色词表、通道词表、事件名常量都住在那里）；`forbidden_scope` 补齐了 `specs/events/event-types.yaml`（**事件名是 Supervisor-only 的规格，你只读**）、`specs/policies/**`、`specs/api/openapi.yaml`、`internal/rights/**`、`internal/storage/**`、`scripts/**`、`Makefile`。保留 `specs/database/postgres.sql` + `specs/SPEC_VERSION.json` 是因为改迁移就要按 derived-artifacts 规则重新生成快照与指纹，**这是 Worker 写入 `specs/` 的唯一入口**。",
+  "supervisor_scope_narrowing": "2026-09-16 定稿（T0807 原本标「等定」，本任务书撤回该标记）。五点说明：\n（一）**为什么撤**：原判断是「角色词表没接上、事件类型没接上、投影规则没写」。复核发现词表**本来就写着**（`docs/04:30-42` 十三个）、事件类型**有机器可读的唯一真相源**（`specs/events/event-types.yaml`）、去重的机器形状**有先例**（`00046:16-25` 偏唯一索引）。三条都不是「规格没写」，是我没读到。\n（二）**我按先例定死的两条（L1）**：一是 `via` 取**通道**词表那一套（`00004:46` 六值）而不是认证那一套（`audit_log.via` 四值）——`docs/13:7` 写的是 agent/client；二是 `accepted_context`/`released_context` 对应 `docs/13:4` 里**两个不同的** Reputation 维度（Accepted Contribution 与 Release inclusion）。\n（三）**`via` 的「值从哪来」我没有替你拍**：`research_events` 与 `outbox_events` 都没有 `via` 列，所以这必然要动信封。照 `00046` 自己的规矩（信封列从 outbox 行复制，不许从 payload 重推）一路带过来，是我认为对的做法——**但你若判断通道在投影那一刻确实不可知，就在 RESULT 里说清楚，不要填一个默认值冒充事实**。这一条我宁可你老实说不知道。\n（四）**`specs/events/event-types.yaml` 我没放进你的范围**：它是规格。如果你判断实现**必须**新增一个事件名（例如缺一个「贡献被接受」以外的事件），在 RESULT 里点名说要加哪个、为什么，**我来改规格**——不要自己动 `specs/` 里除快照与指纹之外的东西。\n（五）**迁移号不在这份任务书里定死**——派工时由 `rddev` 从分配账上取号并写进任务包，**以任务包里那行「its number is **NNNNN**」为准**。**不得自行选号。** 若你判断既有列已够用、不需要迁移，那就不建，在 RESULT 里说明理由。",
+  "tests": [
+    "contribution projection"
+  ],
+  "dependencies": [
+    "T0409",
+    "T0705"
+  ],
+  "baseline_sha": "",
+  "max_turns": 0,
+  "max_budget_usd": 0,
+  "migration_number": 0
+}

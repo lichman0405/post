@@ -4268,13 +4268,46 @@
       "merged_at": null
     },
     "T0601": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-16T01:20:08Z",
+      "worker_run_id": "run-f3c0ff13e2f53eb0",
+      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (go test ./internal/... ./cmd/... -count=1) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-16T00:48:12Z",
+          "run_id": "run-9b1bf6f4a79f30fb"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-16T00:48:13Z",
+          "run_id": "run-b22ce1972a1367d5",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-16T01:18:00Z",
+          "run_id": "run-c63f2c8c2cc26ec2",
+          "reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (go test ./internal/... ./cmd/... -count=1) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-16T01:20:08Z",
+          "run_id": "run-f3c0ff13e2f53eb0",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-16T01:27:06Z",
+          "run_id": "run-221ff9743188fb5e",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T0602": {
       "status": "blocked",
@@ -5067,13 +5100,82 @@
       "merged_at": null
     },
     "T0709": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "merged",
+      "started_at": "2026-09-16T01:57:45Z",
+      "worker_run_id": "run-3170ea835542f48a",
+      "accepted_by_supervisor_at": "2026-09-16T02:36:27Z",
+      "merged_at": "2026-09-16T02:41:11Z",
+      "rejection_reason": "# T0709 返工：事件那一栏把私有版本的编号说了出去\n\n独立 review 判了 `request_changes`（一条 blocking、一条 major、三条 minor、两条 nit），而 `rddev task accept` 的 G2 又**红在 staticcheck**上。我把 review 的 blocking 逐行回到源码核过——**成立，而且是这个模块自己写下的规则被自己的一个栏目绕过了**。下面按「要改」和「不用改」分开写。\n\n---\n\n## 一、blocking：`internal/assets/page.go:938` 的 `eventsOf` 是唯一一个「报版本号却不判版本」的栏目\n\n模块自己在 `page.go:71` 写死了规则，逐字：\n\n> For a version — the thing lineage edges and dependency pins name — \"may be rendered\" is **both axes**, and `mayLinkVersion` is **the one predicate that decides it**.\n\n三个会报出版本号的栏目里，两个照办了（`:825` 依赖、`:847`/`:852` 血缘），**`eventsOf` 没有**：\n\n```go\nfunc eventsOf(state PageState, viewer PageViewer) []PageEvent {\n\tfor _, e := range state.Events {\n\t\tif !viewer.Member && e.Visibility != VisibilityPublic {\n\t\t\tcontinue\n\t\t}\n\t\tout = append(out, PageEvent{ ..., Version: e.AssetVersion, ... })\n\t}\n```\n\n它判的是**事件自己的可见性**——那根轴它判得对，不是这里的问题。**问题是它报出的那个版本号，从来没有过过 `mayLinkVersion`。**\n\n### 这个洞在真实链路上是通的\n\n事件自己的可见性 = **发布当时的项目可见性**。而一个**公开项目可以发布一个私有版本**：\n\n- `***.go:283-286` 接受 `visibility: private`；\n- 同文件 `:441-444` 的 `requirePolicy` 逐字写着「A private publication widens nothing; the rule is about public assets and is not read」——**私有发布是允许的，它只是不扩大可见性**。\n\n两者一叠：**项目公开 → 事件公开 → 事件报出的却是一个私有版本的编号**，连发布时间和发布人一起报出去。\n\n而 `versionSummaries`（`:909-931`）对同一个版本是**藏**的，同一个页面上「私有版本按编号问」的回答是那个**不可区分**的 404（`asset_page_test.go:1030-1039`：`forbidInBody(..., \"3.0\", \"private\", f.privateProject)`）。\n\n也就是说：**同一个页面上，一栏说「没有 3.0 这个版本」，另一栏把「3.0」写在脸上，还附带发布时间和发布人。**\n\n依据：`docs/12:17`（不扩大可见性原则——任何 private→public 都要求显式确认并留痕）与 `docs/23:17`（private→public 是最高风险操作，必须做到 **no hidden private dependency leak**）。**一个私有的东西不能借旁边一个公开的产物变可见。**\n\n### 你的测试声称覆盖了这件事，其实被夹具绕开了\n\n`tests/integration/asset_page_test.go:571-586` 的夹具：先把项目改成 private、发布私有的 3.0、再把项目改回 public。你自己在 `:571-576` 写了为什么：\n\n> Without the flip the event would be public and would name a version the versions block withholds, **which is the disclosure the fixture exists to check on**.\n\n**这个 flip 的作用正是让那件事不发生。** 于是 `:956` 那句\n\n```go\n// the private version of the rendered asset: its label, its row id\n// and its publish event.\n\"3.0\", f.subjectVersions[\"3.0\"],\n```\n\n**是因为 flip 才绿的，不是因为 `eventsOf` 判了什么。** 把 flip 去掉，这句立刻红——而那才是它本该测的东西。\n\n「一个测不出问题的检查等于没有检查」在这个仓库里是明写过的要求（`tests/integration/asset_page_test.go:682-692` 的 `forbidInBody` 注释：a check that forbade nothing is the shape that reads green while measuring nothing）。**这一条正是那个形状。**\n\n### 要求\n\n**非成员不得看到 `versionSummaries` 会藏起来的任何版本**——包括事件栏里的版本号、时间、发布人。\n\n修在哪一侧由你判断并在 RESULT 里说明，但请注意本模块自己的分工：`internal/persistence/asset_page_store.go:15-28` 逐字写着「It answers ONE question … and it answers it RAW … **the decision about what may be rendered belongs to `internal/assets`**」。读者侧守卫能覆盖**已经写好的行**、也能覆盖**将来任何别的写入方**；写入侧改法要让旧行也安全，否则请说明旧行怎么办。\n\n**判断方向必须 fail-closed**：认不出来的版本 → 不报。\n\n### 测试\n\n夹具**不许再绕开那个情形**。要有一个公开项目持有私有版本、且它的发布事件是公开的用例，断言匿名页面把它藏住。**并且要证明这条断言在改动之前是红的**（把守卫去掉应该红）——一个改不改都绿的测试在这个仓库里不算证据。\n\n---\n\n## 二、G2 红：`make staticcheck` 因为一个没人用的测试函数挂了\n\n`internal/assets/page_test.go:101:6: func pageManifestParses is unused (U1000)`\n\n这个函数没人调用（`pageManifestParses`，`:98-105`）。静态检查的基线机制拒绝新发现：`staticcheck: NEW findings above are not in ops/ci/staticcheck-baseline.txt. Fix them; only pre-existing findings may be baselined, with a follow-up issue to fix them — **never baseline new code**.`\n\n**不要把它加进基线**（那正是上面那句禁止的）。让它被用起来，或者删掉——你自己选，说明理由即可。`make staticcheck` 必须真的绿。\n\n（提一句：这条是**独立于 review 的**第二处问题——G2 自己抓出来的。我保留它作为独立证据。）\n\n---\n\n## 三、minor：单个资产页面上用了列表页的错误码\n\n`cmd/api/assetshttp/page.go:68` 附近的 `CodeAssetListValidationFailed = \"ASSET_LIST_VALIDATION_FAILED\"`，被用在了**单资产页面路由**上——版本标签格式不对时。\n\n`tests/integration/asset_page_test.go:1042-1044` 的测试把这个码**钉住了**（`GET /api/v1/assets/{pid}/not a label` → 断言 `CodeAssetListValidationFailed`），所以现在是「测试在钉一个错的码」。请修**代码**（页面路由要有自己的校验码，和列表那个分开），测试跟着改。**不要为了让测试绿而把测试改成不检查这个码。**\n\n---\n\n## 四、nit：RESULT 里的「逐字引用」不是逐字\n\nRESULT 引 `apps/web/app/(main)/explore/page.tsx:9` 作 `/** Explore lands in T0802; the nav destination is stubbed for now. */` 作为第 8 条验收标准的依据，而那一行**实际写的是**「Explore 聚合 lands in T0802」。\n\n**「逐字」就是逐字**——这条本身很小，但它是**证据**，证据里错一个字，我核别的东西时就得多核一遍。改对，或者把「逐字」两个字去掉。\n\n---\n\n## 五、**不用改**的两件事（我把判据写清楚，免得你顺手动了它们）\n\n### （一）browse 列表收录「来源项目为私有」的资产 —— **正确，保留**\n\nreview 把这条列为 major，说这比平台允许的单条读取披露得更多。**我不接受这个判断**，依据是规格自己的明文：\n\n- `docs/12:13` 逐字：「Private Project：project/RSG/private blobs 默认不可见；**可显式 Publish Asset/Knowledge/Attestation**。」——**私有项目里明确发布出去的资产是允许发布的**；\n- `docs/11:13` 逐字：「Project 中对象通过 `Publish as Asset` 成为 **network reusable object**。每个 Asset 有 persistent ID」\n\n所以「显式发布出去的资产是网络对象」是规格写死的，**列表收录它是对的**。`internal/persistence/queries/asset_page.sql` 里你写的理由（只数公开版本、不计算总版本数，以免泄出私有计数）也照 `docs/23:21` 办对了。**保留。**\n\n### （二）`mayLinkVersion` 的项目那一根轴 —— **这次不要动，但请在 RESULT 里回我一句实话**\n\n`page.go:670-675` 给项目那根轴的理由逐字是：\n\n> a public version of an asset in a private project **answers the existence-hiding 404** to everybody outside that project\n\n**我核了，这个前提看起来是不成立的**：`BuildPage` 从头到尾**没有**对项目可见性设卡（`:556-594`），而按上面（一）的两条规格，显式发布出去的资产本来就该渲染。**但两个方向都是往严里收**（多藏一个能打开的链接），所以这次**不要动它**。\n\n请在 RESULT 里回答两点：**这个前提成立吗？** 如果它不成立，**项目那根轴实际守住的是什么？** 我会按你的回答裁定——**别在这次返工里顺手拆掉它。**\n\n---\n\n## 六、边界\n\n- 范围照原任务包，**不变**。\n- 不许为了让 Gate 变绿而删/跳/弱化测试、放宽断言（`CLAUDE.md` §5.1）。上面每一条都是「把该测的测出来」，不是「把红的弄绿」。\n- `make check` 不跑 `check-sqlc-drift` / `tests/integration` / `tests/e2e-assets` 这件事，review 也提了。**这事我记下来当后续，不在这次返工里**——你已经把那几个套件作为独立条目跑过了（`make test-integration`、`bash tests/e2e-assets/run.sh`），证据是够的。\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-16T00:48:35Z",
+          "run_id": "run-3cc2d2b97dec53df"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-16T00:48:36Z",
+          "run_id": "run-61cab4eb9460ba8c",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-16T01:35:24Z",
+          "run_id": "run-569863e141664f52",
+          "reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 2 test(s) failed (bash tests/e2e-assets/run.sh   # with apps/web/app/(main)/assets/asset-page.tsx deliberately changed: the header hash {rendered.integrity_hash} -> {rendered.version}; reverted immediately after; make check) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-16T01:39:47Z",
+          "run_id": "run-5e942cf77ca117ec",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-16T01:45:42Z",
+          "run_id": "run-3fd66762f04d2807",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-16T01:57:26Z",
+          "run_id": "run-87f6d79d66e59b19",
+          "reason": "# T0709 返工：事件那一栏把私有版本的编号说了出去\n\n独立 review 判了 `request_changes`（一条 blocking、一条 major、三条 minor、两条 nit），而 `rddev task accept` 的 G2 又**红在 staticcheck**上。我把 review 的 blocking 逐行回到源码核过——**成立，而且是这个模块自己写下的规则被自己的一个栏目绕过了**。下面按「要改」和「不用改」分开写。\n\n---\n\n## 一、blocking：`internal/assets/page.go:938` 的 `eventsOf` 是唯一一个「报版本号却不判版本」的栏目\n\n模块自己在 `page.go:71` 写死了规则，逐字：\n\n> For a version — the thing lineage edges and dependency pins name — \"may be rendered\" is **both axes**, and `mayLinkVersion` is **the one predicate that decides it**.\n\n三个会报出版本号的栏目里，两个照办了（`:825` 依赖、`:847`/`:852` 血缘），**`eventsOf` 没有**：\n\n```go\nfunc eventsOf(state PageState, viewer PageViewer) []PageEvent {\n\tfor _, e := range state.Events {\n\t\tif !viewer.Member && e.Visibility != VisibilityPublic {\n\t\t\tcontinue\n\t\t}\n\t\tout = append(out, PageEvent{ ..., Version: e.AssetVersion, ... })\n\t}\n```\n\n它判的是**事件自己的可见性**——那根轴它判得对，不是这里的问题。**问题是它报出的那个版本号，从来没有过过 `mayLinkVersion`。**\n\n### 这个洞在真实链路上是通的\n\n事件自己的可见性 = **发布当时的项目可见性**。而一个**公开项目可以发布一个私有版本**：\n\n- `***.go:283-286` 接受 `visibility: private`；\n- 同文件 `:441-444` 的 `requirePolicy` 逐字写着「A private publication widens nothing; the rule is about public assets and is not read」——**私有发布是允许的，它只是不扩大可见性**。\n\n两者一叠：**项目公开 → 事件公开 → 事件报出的却是一个私有版本的编号**，连发布时间和发布人一起报出去。\n\n而 `versionSummaries`（`:909-931`）对同一个版本是**藏**的，同一个页面上「私有版本按编号问」的回答是那个**不可区分**的 404（`asset_page_test.go:1030-1039`：`forbidInBody(..., \"3.0\", \"private\", f.privateProject)`）。\n\n也就是说：**同一个页面上，一栏说「没有 3.0 这个版本」，另一栏把「3.0」写在脸上，还附带发布时间和发布人。**\n\n依据：`docs/12:17`（不扩大可见性原则——任何 private→public 都要求显式确认并留痕）与 `docs/23:17`（private→public 是最高风险操作，必须做到 **no hidden private dependency leak**）。**一个私有的东西不能借旁边一个公开的产物变可见。**\n\n### 你的测试声称覆盖了这件事，其实被夹具绕开了\n\n`tests/integration/asset_page_test.go:571-586` 的夹具：先把项目改成 private、发布私有的 3.0、再把项目改回 public。你自己在 `:571-576` 写了为什么：\n\n> Without the flip the event would be public and would name a version the versions block withholds, **which is the disclosure the fixture exists to check on**.\n\n**这个 flip 的作用正是让那件事不发生。** 于是 `:956` 那句\n\n```go\n// the private version of the rendered asset: its label, its row id\n// and its publish event.\n\"3.0\", f.subjectVersions[\"3.0\"],\n```\n\n**是因为 flip 才绿的，不是因为 `eventsOf` 判了什么。** 把 flip 去掉，这句立刻红——而那才是它本该测的东西。\n\n「一个测不出问题的检查等于没有检查」在这个仓库里是明写过的要求（`tests/integration/asset_page_test.go:682-692` 的 `forbidInBody` 注释：a check that forbade nothing is the shape that reads green while measuring nothing）。**这一条正是那个形状。**\n\n### 要求\n\n**非成员不得看到 `versionSummaries` 会藏起来的任何版本**——包括事件栏里的版本号、时间、发布人。\n\n修在哪一侧由你判断并在 RESULT 里说明，但请注意本模块自己的分工：`internal/persistence/asset_page_store.go:15-28` 逐字写着「It answers ONE question … and it answers it RAW … **the decision about what may be rendered belongs to `internal/assets`**」。读者侧守卫能覆盖**已经写好的行**、也能覆盖**将来任何别的写入方**；写入侧改法要让旧行也安全，否则请说明旧行怎么办。\n\n**判断方向必须 fail-closed**：认不出来的版本 → 不报。\n\n### 测试\n\n夹具**不许再绕开那个情形**。要有一个公开项目持有私有版本、且它的发布事件是公开的用例，断言匿名页面把它藏住。**并且要证明这条断言在改动之前是红的**（把守卫去掉应该红）——一个改不改都绿的测试在这个仓库里不算证据。\n\n---\n\n## 二、G2 红：`make staticcheck` 因为一个没人用的测试函数挂了\n\n`internal/assets/page_test.go:101:6: func pageManifestParses is unused (U1000)`\n\n这个函数没人调用（`pageManifestParses`，`:98-105`）。静态检查的基线机制拒绝新发现：`staticcheck: NEW findings above are not in ops/ci/staticcheck-baseline.txt. Fix them; only pre-existing findings may be baselined, with a follow-up issue to fix them — **never baseline new code**.`\n\n**不要把它加进基线**（那正是上面那句禁止的）。让它被用起来，或者删掉——你自己选，说明理由即可。`make staticcheck` 必须真的绿。\n\n（提一句：这条是**独立于 review 的**第二处问题——G2 自己抓出来的。我保留它作为独立证据。）\n\n---\n\n## 三、minor：单个资产页面上用了列表页的错误码\n\n`cmd/api/assetshttp/page.go:68` 附近的 `CodeAssetListValidationFailed = \"ASSET_LIST_VALIDATION_FAILED\"`，被用在了**单资产页面路由**上——版本标签格式不对时。\n\n`tests/integration/asset_page_test.go:1042-1044` 的测试把这个码**钉住了**（`GET /api/v1/assets/{pid}/not a label` → 断言 `CodeAssetListValidationFailed`），所以现在是「测试在钉一个错的码」。请修**代码**（页面路由要有自己的校验码，和列表那个分开），测试跟着改。**不要为了让测试绿而把测试改成不检查这个码。**\n\n---\n\n## 四、nit：RESULT 里的「逐字引用」不是逐字\n\nRESULT 引 `apps/web/app/(main)/explore/page.tsx:9` 作 `/** Explore lands in T0802; the nav destination is stubbed for now. */` 作为第 8 条验收标准的依据，而那一行**实际写的是**「Explore 聚合 lands in T0802」。\n\n**「逐字」就是逐字**——这条本身很小，但它是**证据**，证据里错一个字，我核别的东西时就得多核一遍。改对，或者把「逐字」两个字去掉。\n\n---\n\n## 五、**不用改**的两件事（我把判据写清楚，免得你顺手动了它们）\n\n### （一）browse 列表收录「来源项目为私有」的资产 —— **正确，保留**\n\nreview 把这条列为 major，说这比平台允许的单条读取披露得更多。**我不接受这个判断**，依据是规格自己的明文：\n\n- `docs/12:13` 逐字：「Private Project：project/RSG/private blobs 默认不可见；**可显式 Publish Asset/Knowledge/Attestation**。」——**私有项目里明确发布出去的资产是允许发布的**；\n- `docs/11:13` 逐字：「Project 中对象通过 `Publish as Asset` 成为 **network reusable object**。每个 Asset 有 persistent ID」\n\n所以「显式发布出去的资产是网络对象」是规格写死的，**列表收录它是对的**。`internal/persistence/queries/asset_page.sql` 里你写的理由（只数公开版本、不计算总版本数，以免泄出私有计数）也照 `docs/23:21` 办对了。**保留。**\n\n### （二）`mayLinkVersion` 的项目那一根轴 —— **这次不要动，但请在 RESULT 里回我一句实话**\n\n`page.go:670-675` 给项目那根轴的理由逐字是：\n\n> a public version of an asset in a private project **answers the existence-hiding 404** to everybody outside that project\n\n**我核了，这个前提看起来是不成立的**：`BuildPage` 从头到尾**没有**对项目可见性设卡（`:556-594`），而按上面（一）的两条规格，显式发布出去的资产本来就该渲染。**但两个方向都是往严里收**（多藏一个能打开的链接），所以这次**不要动它**。\n\n请在 RESULT 里回答两点：**这个前提成立吗？** 如果它不成立，**项目那根轴实际守住的是什么？** 我会按你的回答裁定——**别在这次返工里顺手拆掉它。**\n\n---\n\n## 六、边界\n\n- 范围照原任务包，**不变**。\n- 不许为了让 Gate 变绿而删/跳/弱化测试、放宽断言（`CLAUDE.md` §5.1）。上面每一条都是「把该测的测出来」，不是「把红的弄绿」。\n- `make check` 不跑 `check-sqlc-drift` / `tests/integration` / `tests/e2e-assets` 这件事，review 也提了。**这事我记下来当后续，不在这次返工里**——你已经把那几个套件作为独立条目跑过了（`make test-integration`、`bash tests/e2e-assets/run.sh`），证据是够的。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-16T01:57:45Z",
+          "run_id": "run-3170ea835542f48a",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-16T02:25:34Z",
+          "run_id": "run-029c905062eccbe9",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-16T02:36:27Z",
+          "run_id": "run-5eb89c8048a04464"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-16T02:41:11Z",
+          "run_id": "run-2036e929ea35afbe",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T0710": {
       "status": "todo",
@@ -5202,22 +5304,88 @@
       ]
     },
     "T0801": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "merged",
+      "started_at": "2026-09-16T02:41:13Z",
+      "worker_run_id": "run-ed47dce8c1655411",
+      "accepted_by_supervisor_at": "2026-09-16T03:20:27Z",
+      "merged_at": "2026-09-16T03:25:11Z",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-16T02:41:12Z",
+          "run_id": "run-e26f337f94476e2e"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-16T02:41:13Z",
+          "run_id": "run-ed47dce8c1655411",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-16T03:05:49Z",
+          "run_id": "run-421568e40ba2f2d9",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-16T03:20:27Z",
+          "run_id": "run-420f352295c82f9d"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-16T03:25:11Z",
+          "run_id": "run-9553262944ad0259",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T0802": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "merged",
+      "started_at": "2026-09-16T03:25:13Z",
+      "worker_run_id": "run-5d017e8e44faf393",
+      "accepted_by_supervisor_at": "2026-09-16T04:12:18Z",
+      "merged_at": "2026-09-16T04:17:01Z",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-16T03:25:12Z",
+          "run_id": "run-19c6fd80030897c7"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-16T03:25:13Z",
+          "run_id": "run-5d017e8e44faf393",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-16T03:58:56Z",
+          "run_id": "run-4e7dd8a3bccb9bdb",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-16T04:12:18Z",
+          "run_id": "run-a63bb5e0b943d94e"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-16T04:17:01Z",
+          "run_id": "run-f9f0eeaf17e756c5",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T0803": {
       "status": "merged",
@@ -5583,13 +5751,31 @@
       ]
     },
     "T1002": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-16T03:25:37Z",
+      "worker_run_id": "run-1adbd9fed578a5eb",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-16T03:25:35Z",
+          "run_id": "run-3d82bd3fe76c66a9"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-16T03:25:37Z",
+          "run_id": "run-1adbd9fed578a5eb",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-16T03:54:25Z",
+          "run_id": "run-650c81933cc56505",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T1003": {
       "status": "todo",
@@ -5955,13 +6141,32 @@
       "merged_at": null
     },
     "T1110": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "rejected",
+      "started_at": "2026-09-16T01:20:43Z",
+      "worker_run_id": "run-428a4b00304369e9",
+      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 1 test(s) not_run (make infra-up && make infra-init && make migrate   (the no-flag path of ops/backup-restore-drill.sh)) and 2 test(s) failed (make check; go test ./... -count=1   (with POSTGRES_TEST_ADMIN_URL unset)) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-16T00:48:59Z",
+          "run_id": "run-478264622b1ab644"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-16T01:20:43Z",
+          "run_id": "run-428a4b00304369e9",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-16T02:07:47Z",
+          "run_id": "run-c4332c4f089f3ab0",
+          "reason": "collect rejected: result-consistency: result-tests: status completed but 1 test(s) not_run (make infra-up && make infra-init && make migrate   (the no-flag path of ops/backup-restore-drill.sh)) and 2 test(s) failed (make check; go test ./... -count=1   (with POSTGRES_TEST_ADMIN_URL unset)) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        }
+      ]
     },
     "T1201": {
       "status": "todo",

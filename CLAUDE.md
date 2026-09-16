@@ -52,7 +52,8 @@ Supervisor 才能：创建 Issue → 创建 Branch/Worktree → 验收 → Commi
 - `tasks/tests.json`：验收测试状态。
 - `tasks/progress.md`：阶段进度、阻塞、下一步。
 - `tasks/decisions.md`：L0/L1 工程决策。
-- `tasks/results/<TASK_ID>/RESULT.json`：Worker 交付记录。
+- `.rddev/workers/<TASK_ID>/RESULT.json`：Worker 交付记录（**不在 `tasks/` 下**；Worker 的
+  RESULT 写在 worktree 之外的可写目录里，`tasks/**` 对 Worker 是只读的禁止范围）。
 - `docs/adr/`：L2 架构决策。
 
 状态至少包含：`todo | ready | running | worker_failed | verification | rejected | blocked | accepted | merged`。
