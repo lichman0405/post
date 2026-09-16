@@ -5000,22 +5000,40 @@
       ]
     },
     "T0706": {
-      "status": "todo",
+      "status": "blocked",
       "started_at": null,
       "completed_at": null,
-      "notes": "",
+      "notes": "SPEC_BLOCKED（2026-09-16T00:14:44Z 判定，记于 T0705 合并之前）：一次「修订」在库里长什么样没有先例（追加修订行 vs 改列+写审计行）；谁有权改没有定义（权限矩阵无对应行，未登记的动作默认拒绝，internal/authz/engine.go:44）；字段是开放集合（docs/11_RELEASE_ASSET_HUB.md:21 的「等」，specs/schemas 与 packages/schemas 里都没有 schema）。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "merged_at": null,
+      "history": [
+        {
+          "from": "todo",
+          "to": "blocked",
+          "at": "2026-09-16T00:14:44Z",
+          "run_id": "supervisor-manual",
+          "reason": "SPEC_BLOCKED：见 issue #253"
+        }
+      ]
     },
     "T0707": {
-      "status": "todo",
+      "status": "blocked",
       "started_at": null,
       "completed_at": null,
-      "notes": "",
+      "notes": "SPEC_BLOCKED（2026-09-16T00:14:44Z 判定，记于 T0705 合并之前）：只缺两件：依赖类型那一列是自由文本、没跟既有关系目录（depends_on/references）挂钩；visibility_of_usage 声明为公开之后对外显示什么没有写过（页面确有「依赖/被用到的公开链接」一项，所以这是对外可见的产品语义）。其余（版本钉法、引用与依赖的分野、存储形状）都在树里。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "merged_at": null,
+      "history": [
+        {
+          "from": "todo",
+          "to": "blocked",
+          "at": "2026-09-16T00:14:44Z",
+          "run_id": "supervisor-manual",
+          "reason": "SPEC_BLOCKED：见 issue #253"
+        }
+      ]
     },
     "T0708": {
       "status": "todo",
@@ -5045,13 +5063,22 @@
       "merged_at": null
     },
     "T0711": {
-      "status": "todo",
+      "status": "blocked",
       "started_at": null,
       "completed_at": null,
-      "notes": "",
+      "notes": "SPEC_BLOCKED（2026-09-16T00:14:44Z 判定，记于 T0705 合并之前）：缺的是「人」这一半：保管人/维护者/权利持有人三者的区别无定义（docs/04_USERS_ROLES.md 只定义四种访问角色）；权利可以挂在谁身上无定义（research_assets 无持有人列，全库任何表都没有）。授权那一半已写好（矩阵第 13 行 owner=allow、其余 deny、无 conditional；代码在 internal/authz/matrix.go:112）。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "merged_at": null,
+      "history": [
+        {
+          "from": "todo",
+          "to": "blocked",
+          "at": "2026-09-16T00:14:44Z",
+          "run_id": "supervisor-manual",
+          "reason": "SPEC_BLOCKED：见 issue #253"
+        }
+      ]
     },
     "T0712": {
       "status": "merged",
@@ -5321,13 +5348,22 @@
       "merged_at": null
     },
     "T0807": {
-      "status": "todo",
+      "status": "blocked",
       "started_at": null,
       "completed_at": null,
-      "notes": "",
+      "notes": "SPEC_BLOCKED（2026-09-16T00:14:44Z 判定，记于 T0705 合并之前）：四个词表全无：event_type、role_codes（两列都是裸 text，无 CHECK、无目录）、accepted_context 的判定规则、以及「同一事件不重复计」的判重键（contribution_events 无源事件列、无 UNIQUE）。tasks/decisions.md:8634 早前已就同一张表记过这个缺口。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "merged_at": null,
+      "history": [
+        {
+          "from": "todo",
+          "to": "blocked",
+          "at": "2026-09-16T00:14:44Z",
+          "run_id": "supervisor-manual",
+          "reason": "SPEC_BLOCKED：见 issue #253"
+        }
+      ]
     },
     "T0808": {
       "status": "todo",
@@ -5852,13 +5888,22 @@
       "merged_at": null
     },
     "T1106": {
-      "status": "todo",
+      "status": "blocked",
       "started_at": null,
       "completed_at": null,
-      "notes": "",
+      "notes": "SPEC_BLOCKED（2026-09-16T00:14:44Z 判定，记于 T0705 合并之前）：五条各自的标准全无（限流阈值、CSP 策略、地址名单、多长算短 TTL）；其中 SSRF 与 CSRF 两条已由 T0508 与登录中间件交付，开工前须先划清本轮还差什么；上传签名那条接口本身是未实现的占位（specs/api/openapi.yaml:137/:145）。另：本任务从未被收窄过范围（无 supervisor_scope_narrowing）。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "merged_at": null,
+      "history": [
+        {
+          "from": "todo",
+          "to": "blocked",
+          "at": "2026-09-16T00:14:44Z",
+          "run_id": "supervisor-manual",
+          "reason": "SPEC_BLOCKED：见 issue #253"
+        }
+      ]
     },
     "T1107": {
       "status": "todo",

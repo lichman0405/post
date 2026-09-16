@@ -1875,9 +1875,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-16T00:08:46Z
+生成时间：2026-09-16T00:14:44Z
 
-状态分布：todo 52 · ready 0 · running 1 · worker_failed 0 · verification 0 · rejected 0 · blocked 6 · accepted 0 · merged 75（合计 134/134 个任务）
+状态分布：todo 47 · ready 0 · running 1 · worker_failed 0 · verification 0 · rejected 0 · blocked 11 · accepted 0 · merged 75（合计 134/134 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -1963,12 +1963,12 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0703 | Rights Model | P7 | merged | 2026-09-15T16:37:35Z |  | 2026-09-15T17:09:14Z | 2026-09-15T17:14:12Z |
 | T0704 | Publication Impact Preview | P7 | merged | 2026-09-15T18:46:44Z |  | 2026-09-15T19:00:22Z | 2026-09-15T19:04:57Z |
 | T0705 | Asset Publish Governance | P7 | running | 2026-09-15T23:43:26Z |  |  |  |
-| T0706 | Asset Metadata Revision | P7 | todo |  |  |  |  |
-| T0707 | Asset Reference/Dependency | P7 | todo |  |  |  |  |
+| T0706 | Asset Metadata Revision | P7 | blocked |  |  |  |  |
+| T0707 | Asset Reference/Dependency | P7 | blocked |  |  |  |  |
 | T0708 | Asset Fork/Derive + Lineage | P7 | todo |  |  |  |  |
 | T0709 | Asset Hub Pages/Explore | P7 | todo |  |  |  |  |
 | T0710 | Asset 完整 E2E | P7 | todo |  |  |  |  |
-| T0711 | Asset Governance 与 Rights Holder Transfer | P7 | todo |  |  |  |  |
+| T0711 | Asset Governance 与 Rights Holder Transfer | P7 | blocked |  |  |  |  |
 | T0712 | 预览响应不得泄漏外部私有实体的身份（T0704 跨项目泄漏修复） | P7 | merged | 2026-09-15T22:11:05Z |  | 2026-09-15T22:35:34Z | 2026-09-15T22:42:04Z |
 | T0801 | Public Entity Anonymous Pages | P8 | todo |  |  |  |  |
 | T0802 | Explore 聚合 | P8 | todo |  |  |  |  |
@@ -1976,7 +1976,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0804 | External Fork/Contribution flow | P8 | blocked |  |  |  |  |
 | T0805 | Published Knowledge Object | P8 | blocked |  |  |  |  |
 | T0806 | External Evidence Network Aggregation | P8 | todo |  |  |  |  |
-| T0807 | Contribution Ledger projection | P8 | todo |  |  |  |  |
+| T0807 | Contribution Ledger projection | P8 | blocked |  |  |  |  |
 | T0808 | Research Profile / Organization Profile | P8 | todo |  |  |  |  |
 | T0809 | Credit Attribution/Dispute 基础 | P8 | todo |  |  |  |  |
 | T0810 | 最小 Open Network 闭环 E2E | P8 | todo |  |  |  |  |
@@ -2002,7 +2002,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1103 | Publication/Visibility Security UX | P11 | todo |  |  |  |  |
 | T1104 | 全站 Accessibility AA | P11 | todo |  |  |  |  |
 | T1105 | I18N 基线 | P11 | todo |  |  |  |  |
-| T1106 | API/Upload 安全加固 | P11 | todo |  |  |  |  |
+| T1106 | API/Upload 安全加固 | P11 | blocked |  |  |  |  |
 | T1107 | 权限与 Search Side-channel 安全回归 | P11 | todo |  |  |  |  |
 | T1108 | 性能基线与索引调优 | P11 | todo |  |  |  |  |
 | T1109 | 生产级 Observability/Dashboards | P11 | todo |  |  |  |  |
