@@ -1,7 +1,7 @@
 {
   "id": "T0709",
   "phase": "P7",
-  "phase_name": "资产、发布与权利",
+  "phase_name": "Research Asset Hub、Rights 与 Publish",
   "title": "Asset Hub Pages/Explore",
   "v1_required": true,
   "dependencies": ["T0705", "T0107"],
@@ -29,7 +29,7 @@
     "e2e 测试**真的经过页面/端点**（不是直接调内部函数），且该测试能失败——在 RESULT 里说明它被故意改坏时会不会红",
     "RESULT 里明确写出：`/explore` 按范围裁给了 T0802（附 `apps/web/app/(main)/explore/page.tsx:9` 的依据），本任务未实现它"
   ],
-  "tests": [],
+  "tests": ["asset ui e2e"],
   "allowed_scope": [
     "internal/assets/**",
     "internal/rights/**",
