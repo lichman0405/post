@@ -126,26 +126,41 @@ func run(args []string) int {
 	// The signed-webhook pipeline (T1006), two more consumers of the same
 	// pool: FanOut turns published events into delivery rows, Deliverer
 	// posts them. Both poll with their own cadence and stop on ctx
-	// cancellation.
+	// cancellation. Its fan-out cursor lives in outbox_events
+	// (webhook_fanned_out_at), so it and the subscription fan-out below
+	// consume the same published rows without seeing each other's progress.
 	fanout := events.NewFanOut(pool, events.WithFanOutLogger(logger))
 	deliverer := events.NewDeliverer(pool, events.WithDelivererLogger(logger))
-	var webhookWG sync.WaitGroup
-	webhookWG.Add(2)
+	var pipelineWG sync.WaitGroup
+	pipelineWG.Add(2)
 	go func() {
-		defer webhookWG.Done()
+		defer pipelineWG.Done()
 		_ = fanout.Run(ctx)
 	}()
 	go func() {
-		defer webhookWG.Done()
+		defer pipelineWG.Done()
 		_ = deliverer.Run(ctx)
+	}()
+	// The subscription fan-out (T1002), a third consumer of the same pool:
+	// it turns published events into per-subscriber delivery rows, resolving
+	// each subscriber's access to the event's target against live state as
+	// it goes (events.SubscriptionFanOut). It joins the same wait group as
+	// the webhook pair — same pool, same shutdown contract — and its own
+	// cursor table (subscription_fanned_events) keeps it independent of the
+	// webhook pipeline's.
+	subscriptionFanout := events.NewSubscriptionFanOut(pool, events.WithSubscriptionFanOutLogger(logger))
+	pipelineWG.Add(1)
+	go func() {
+		defer pipelineWG.Done()
+		_ = subscriptionFanout.Run(ctx)
 	}()
 	// Shutdown ordering (T1001 review): cancel the root context first —
 	// the deferred stop() above would run too late for this join (defers
 	// run LIFO, so it fires only after the cleanup below) — then join the
-	// dispatcher and webhook goroutines, then close the pool. Closing
+	// dispatcher and pipeline goroutines, then close the pool. Closing
 	// under a live consumer would let its next pass fail against a closed
 	// pool and log a misleading error.
-	defer shutdown(stop, dispatcherWG.Wait, webhookWG.Wait, pool.Close)
+	defer shutdown(stop, dispatcherWG.Wait, pipelineWG.Wait, pool.Close)
 
 	slog.Info("post-worker running",
 		"version", version.Version, "queue", "post:queue:jobs", "cfg", cfg)
@@ -157,8 +172,9 @@ func run(args []string) int {
 	return exitOK
 }
 
-// shutdown cancels the root context, joins the outbox dispatcher and
-// webhook pipeline goroutines, and only then closes the database pool —
+// shutdown cancels the root context, joins the outbox dispatcher, webhook
+// pipeline and subscription fan-out goroutines, and only then closes the
+// database pool —
 // in that order (T1001 review: closing the pool under a live consumer
 // makes its next pass fail against a closed pool and log a misleading
 // error). stop is called here rather than via a top-level defer because

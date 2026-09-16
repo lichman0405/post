@@ -63,6 +63,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/reviewhttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/cmd/api/schemaprofileshttp"
+	"github.com/lichman0405/post/cmd/api/subscriptionshttp"
 	"github.com/lichman0405/post/cmd/api/templateshttp"
 	"github.com/lichman0405/post/cmd/api/validationhttp"
 	"github.com/lichman0405/post/cmd/api/webhookshttp"
@@ -375,6 +376,16 @@ func run(args []string) int {
 	webhooksAPI := webhookshttp.New(webhookshttp.Deps{Store: events.NewWebhookStore(pool)})
 	v1.Handle("/api/v1/webhooks", webhooksAPI.Routes())
 	v1.Handle("/api/v1/webhooks/", webhooksAPI.Routes())
+	// Follow/watch (T1002): a user's subscriptions to a project, asset,
+	// knowledge object, person or organization, with their event filters and
+	// channels. The API only manages the subscription; the worker's
+	// events.SubscriptionFanOut decides delivery, re-resolving the
+	// subscriber's access to the target against live state for every event —
+	// so a permission change stops the flow without anyone touching the
+	// subscription.
+	subscriptionsAPI := subscriptionshttp.New(subscriptionshttp.Deps{Store: events.NewSubscriptionStore(pool)})
+	v1.Handle("/api/v1/subscriptions", subscriptionsAPI.Routes())
+	v1.Handle("/api/v1/subscriptions/", subscriptionsAPI.Routes())
 	// Scoped git tokens (T0304): the user-credential surface over the
 	// internal Gitea. Like provisioning it needs provider configuration,
 	// but its own gate: the admin credentials may be unset while
