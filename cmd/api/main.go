@@ -661,6 +661,14 @@ func run(args []string) int {
 		State:    assetshttp.NewPostgresStateStore(pool),
 		Projects: projectAPI.Service(),
 		Publish:  publishCommand,
+		// The asset hub's reads (T0709). Pages is the read-only page reader;
+		// Members is the SAME project service the gate above is — the
+		// membership question is one the project surface already answers
+		// (GetMembership re-runs its own read gate first), and a second
+		// implementation of "is this caller a member" would be a second
+		// answer to it.
+		Pages:   persistence.NewAssetPageStore(pool),
+		Members: projectAPI.Service(),
 	})
 	assetsAPI.Register(v1)
 	// Official project templates (T0214): the catalog and the

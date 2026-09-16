@@ -47,11 +47,24 @@ type Deps struct {
 	// wired without one of its three ports is a wiring bug, not a
 	// degradation to answer around.
 	Publish PublishCommand
+	// Pages is the read-only asset page reader (T0709). The production value
+	// is *persistence.AssetPageStore.
+	Pages PageReader
+	// Members is the membership read the asset page needs to tell a member's
+	// view of an asset from the network's (T0709). The production value is
+	// the same *projects.Service the Projects gate is.
+	Members Membership
 }
 
 // New wires the handlers.
 func New(deps Deps) *API {
-	return &API{handlers: &handlers{state: deps.State, projects: deps.Projects, publish: deps.Publish}}
+	return &API{handlers: &handlers{
+		state:    deps.State,
+		projects: deps.Projects,
+		publish:  deps.Publish,
+		pages:    deps.Pages,
+		members:  deps.Members,
+	}}
 }
 
 // API is the mounted preview surface.
@@ -79,4 +92,12 @@ type API struct {
 func (a *API) Register(v1 *http.ServeMux) {
 	v1.HandleFunc("POST /api/v1/projects/{projectId}/assets:publish-preview", a.handlers.handlePublishPreview)
 	v1.HandleFunc("POST /api/v1/projects/{projectId}/assets:publish", a.handlers.handlePublish)
+	// The asset hub's reads (T0709). The page data path is the contract's
+	// (specs/api/openapi.yaml: /assets/{assetId}, `security: []`), including
+	// the fact that it is not nested under a project: the scope that decides
+	// visibility is the ASSET, and the pid is the identity a client holds.
+	// The browse list is not in the contract; see page.go for why it is
+	// mounted here anyway.
+	v1.HandleFunc("GET /api/v1/assets/{assetId}", a.handlers.handleAssetPage)
+	v1.HandleFunc("GET /api/v1/assets", a.handlers.handleAssetBrowse)
 }

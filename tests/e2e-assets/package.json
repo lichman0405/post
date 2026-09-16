@@ -1,0 +1,13 @@
+{
+  "name": "@post/e2e-assets",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Asset hub e2e (T0709 required test \"asset ui e2e\"): real Chromium drives the built web app through /assets and one asset's page — the eleven items of docs/42 §Asset Page, the four-type filter, the one not-found state, and the absence of any blob download control — while the API is mocked at the network layer with the exact wire shapes cmd/api/assetshttp + internal/assets.BuildPage produce (the Go handler suite and the integration suite lock those shapes against a real guard and real PostgreSQL).",
+  "type": "module",
+  "scripts": {
+    "e2e": "node assets-e2e.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}

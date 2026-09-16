@@ -219,86 +219,13 @@ func (s *AssetStateStore) pins(ctx context.Context, pins []assets.DependencyPin)
 	return out, nil
 }
 
-// refs resolves every canonical origin ref the candidate declares.
-//
-// The result has one entry per canonical ref, in the candidate's own
-// order, whether or not the ref resolved — CurrentState's contract. A ref
-// that is NOT canonical gets no entry at all: there is no entity it could
-// name, and the preview reports its shape refusal from the gate instead.
-//
-// The four kinds are looked up in a fixed order rather than by iterating a
-// map, so the reads this method issues (and therefore what a reader sees
-// in a query log) are the same for the same candidate.
+// refs resolves every canonical origin ref the candidate declares, in the
+// candidate's own order, with one entry per canonical ref whether or not the
+// ref resolved — CurrentState's contract. The resolution itself lives in
+// asset_refs.go, where the asset page (T0709) reads the same question
+// through the same queries; this method is the preview's shape of it.
 func (s *AssetStateStore) refs(ctx context.Context, refs []string) ([]assets.StoredRef, error) {
-	byRef := map[assets.OriginRef]assets.StoredRef{}
-	for _, kind := range []assets.OriginKind{assets.KindProject, assets.KindRelease, assets.KindState, assets.KindObjectVersion} {
-		refs := canonicalRefsOfKind(refs, kind)
-		if len(refs) == 0 {
-			continue
-		}
-		ids := textUUIDs(refs)
-		switch kind {
-		case assets.KindProject:
-			rows, err := s.queries.ListPreviewProjectRefs(ctx, ids)
-			if err != nil {
-				return nil, fmt.Errorf("persistence: resolve project refs: %w", err)
-			}
-			for _, row := range rows {
-				ref, _ := assets.NewOriginRef(kind, row.EntityID)
-				byRef[ref] = assets.StoredRef{
-					Ref:               ref,
-					Resolved:          true,
-					ProjectID:         row.EntityID,
-					ProjectVisibility: assets.Visibility(row.Visibility),
-				}
-			}
-		case assets.KindRelease:
-			rows, err := s.queries.ListPreviewReleaseRefs(ctx, ids)
-			if err != nil {
-				return nil, fmt.Errorf("persistence: resolve release refs: %w", err)
-			}
-			for _, row := range rows {
-				byRef[refOf(kind, row.EntityID)] = projectRef(kind, row.EntityID, row.ProjectID, row.ProjectVisibility)
-			}
-		case assets.KindState:
-			rows, err := s.queries.ListPreviewStateRefs(ctx, ids)
-			if err != nil {
-				return nil, fmt.Errorf("persistence: resolve state refs: %w", err)
-			}
-			for _, row := range rows {
-				byRef[refOf(kind, row.EntityID)] = projectRef(kind, row.EntityID, row.ProjectID, row.ProjectVisibility)
-			}
-		case assets.KindObjectVersion:
-			rows, err := s.queries.ListPreviewObjectVersionRefs(ctx, ids)
-			if err != nil {
-				return nil, fmt.Errorf("persistence: resolve object version refs: %w", err)
-			}
-			for _, row := range rows {
-				ref := refOf(kind, row.EntityID)
-				st := projectRef(kind, row.EntityID, row.ProjectID, row.ProjectVisibility)
-				st.Object = &assets.StoredObject{
-					ObjectVersionID: row.EntityID,
-					ObjectID:        row.ObjectID,
-					Title:           row.Title,
-				}
-				byRef[ref] = st
-			}
-		}
-	}
-
-	out := make([]assets.StoredRef, 0, len(refs))
-	for _, raw := range refs {
-		ref := assets.OriginRef(raw)
-		if !ref.Valid() {
-			continue
-		}
-		st, ok := byRef[ref]
-		if !ok {
-			st = assets.StoredRef{Ref: ref}
-		}
-		out = append(out, st)
-	}
-	return out, nil
+	return resolveRefsInOrder(ctx, s.queries, refs)
 }
 
 // blobs resolves the blob ids a manifest declares. Absent ids are not rows
@@ -325,45 +252,4 @@ func (s *AssetStateStore) blobs(ctx context.Context, ids []string) ([]assets.Sto
 		out = append(out, assets.StoredBlob{BlobID: row.BlobID, Access: access})
 	}
 	return out, nil
-}
-
-// canonicalRefsOfKind returns the VALUES of every canonical ref of one
-// kind, without repeats — the input a uuid[] lookup wants. A ref that is
-// not canonical, or is of another kind, is skipped: this method is called
-// once per kind, over the whole list.
-func canonicalRefsOfKind(refs []string, kind assets.OriginKind) []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, raw := range refs {
-		gotKind, value, ok := assets.ParseOriginRef(raw)
-		if !ok || gotKind != kind || seen[value] {
-			continue
-		}
-		seen[value] = true
-		out = append(out, value)
-	}
-	return out
-}
-
-// refOf rebuilds the canonical ref of one resolved entity. Every value the
-// queries return came from a ref the caller already validated, so the
-// rebuild cannot fail (a value that did not parse would not have been
-// looked up); the empty ref on a hypothetical failure keeps a lookup from
-// aliasing another entry rather than silently resolving something.
-func refOf(kind assets.OriginKind, value string) assets.OriginRef {
-	ref, _ := assets.NewOriginRef(kind, value)
-	return ref
-}
-
-// projectRef renders one entity of a project as the state's answer for its
-// ref: it resolved, and its visibility is the visibility of the project it
-// belongs to (docs/09 §1: every V1 origin entity belongs to exactly one
-// project).
-func projectRef(kind assets.OriginKind, entityID, projectID, visibility string) assets.StoredRef {
-	return assets.StoredRef{
-		Ref:               refOf(kind, entityID),
-		Resolved:          true,
-		ProjectID:         projectID,
-		ProjectVisibility: assets.Visibility(visibility),
-	}
 }
