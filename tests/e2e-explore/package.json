@@ -1,0 +1,13 @@
+{
+  "name": "@post/e2e-explore",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Explore e2e (T0802): real Chromium drives the built web app through /explore — the six tabs of docs/05 §6, the panel switching and keyboard navigation, the freshness-ordered rows with no popularity anywhere, the withheld private project, and the failure state rendered as an alert rather than an empty index — against mock-api.mjs, a real HTTP origin serving the exact wire shape cmd/api/explorehttp + internal/application/explore produce (the page reads the index server-side, so Playwright cannot route it; the Go e2e and the integration suite lock that shape against a real guard and real PostgreSQL).",
+  "type": "module",
+  "scripts": {
+    "e2e": "node explore-e2e.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}

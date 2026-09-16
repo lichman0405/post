@@ -1,0 +1,206 @@
+/* T0802 Explore surface — GitHub/Primer design tokens (ADR-012, docs/06,
+   CLAUDE.md §10). Neutral background, thin borders, dense rows, blue for
+   interaction and nothing else. No gradients, no glass, no shadow, no
+   rounded card language: the network's index reads like a repository
+   listing, because that is what it is.
+
+   The palette is entirely Primer's tokens (with the same literal fallbacks
+   globals.css, projects.css and assets.css use), so this surface follows the
+   app's theme switch instead of pinning its own colours. Nothing here styles
+   a value as popular, trusted or verified: every chip is neutral text in a
+   bordered pill, and the "public"/"private" wording of a lifecycle state is
+   the API's own token rendered verbatim. */
+
+.explore {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.explore-title {
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.explore-sub {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* ---------- the tablist ---------- */
+
+/* A tab strip, not a card row: a hairline base rule with the selected tab
+   sitting on it. The strip wraps rather than scrolling — six short labels
+   fit on one line at desktop width, and a hidden second row is worse than a
+   visible one. */
+.explore-tablist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+}
+
+.explore-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: -1px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  color: var(--fgColor-default, #1f2328);
+  font-size: 14px;
+  line-height: 20px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.explore-tab:hover {
+  background-color: var(--bgColor-muted, #f6f8fa);
+}
+
+.explore-tab[aria-selected="true"] {
+  border-color: var(--borderColor-default, #d0d7de);
+  border-bottom-color: var(--bgColor-default, #ffffff);
+  background-color: var(--bgColor-default, #ffffff);
+  font-weight: 600;
+}
+
+.explore-tab:focus-visible {
+  outline: 2px solid var(--fgColor-accent, #0969da);
+  outline-offset: -2px;
+}
+
+.explore-tab-icon {
+  display: inline-flex;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.explore-tab[aria-selected="true"] .explore-tab-icon {
+  color: var(--fgColor-accent, #0969da);
+}
+
+/* ---------- a panel ---------- */
+
+.explore-panel {
+  margin: 0 0 24px;
+}
+
+.explore-panel-heading {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.explore-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.explore-row {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.explore-row:last-child {
+  border-bottom: none;
+}
+
+.explore-row-title {
+  display: block;
+  color: var(--fgColor-default, #1f2328);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+a.explore-row-title:hover {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: underline;
+}
+
+.explore-row-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* Chips are neutral: a lifecycle state or a difficulty is a value, not a
+   verdict. Nothing here is coloured by meaning — a colour that meant "safe"
+   or "trusted" would be a claim the platform does not make. */
+.explore-chip {
+  padding: 0 6px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 999px;
+  color: var(--fgColor-muted, #59636e);
+  line-height: 18px;
+}
+
+.explore-row-id,
+.explore-row-version,
+.explore-row-capability {
+  padding: 0 4px;
+  border-radius: 4px;
+  background-color: var(--bgColor-muted, #f6f8fa);
+  color: var(--fgColor-muted, #59636e);
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+}
+
+.explore-row-link,
+.explore-row-project {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.explore-row-link:hover,
+.explore-row-project:hover {
+  text-decoration: underline;
+}
+
+.explore-row-date {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.explore-row-note {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* ---------- the two states that are not a list ---------- */
+
+.explore-empty {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* The failure state: a bordered panel in the danger colour, distinguishable
+   from the empty state above at a glance and by role="alert" for a screen
+   reader. A failed read is never drawn as an empty list. */
+.explore-error {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--borderColor-danger-muted, #ff818266);
+  border-radius: 6px;
+  background-color: var(--bgColor-danger-muted, #fff0ee);
+  color: var(--fgColor-danger, #d1242f);
+  font-size: 13px;
+}

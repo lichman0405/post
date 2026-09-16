@@ -47,6 +47,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/audithttp"
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/conflicthttp"
+	"github.com/lichman0405/post/cmd/api/explorehttp"
 	"github.com/lichman0405/post/cmd/api/fileshttp"
 	"github.com/lichman0405/post/cmd/api/gittokenshttp"
 	"github.com/lichman0405/post/cmd/api/mergegit"
@@ -69,6 +70,7 @@ import (
 	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
+	appcontribution "github.com/lichman0405/post/internal/application/contribution"
 	"github.com/lichman0405/post/internal/application/diffs"
 	"github.com/lichman0405/post/internal/application/manifests"
 	"github.com/lichman0405/post/internal/application/merge"
@@ -87,6 +89,7 @@ import (
 	appvalidation "github.com/lichman0405/post/internal/application/validation"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/config"
+	"github.com/lichman0405/post/internal/contribution"
 	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/gitprovider"
 	"github.com/lichman0405/post/internal/health"
@@ -671,6 +674,28 @@ func run(args []string) int {
 		Members: projectAPI.Service(),
 	})
 	assetsAPI.Register(v1)
+	// The Explore index (T0802): the six dimensions of docs/05 §6 in one
+	// anonymous read. Three of its six sections are the platform's EXISTING
+	// public reads, not new ones — the public project list, the asset hub's
+	// browse list (the same BuildBrowse that renders /assets) and the
+	// open-network contribution view — so this surface adds no disclosure
+	// rule of its own: it aggregates answers other surfaces already give and
+	// keeps the newest rows of each (internal/application/explore).
+	//
+	// The remaining three (published knowledge, people, organizations) get
+	// their reads from explorehttp's own store; the contribution service is
+	// constructed here because the open-network view of an opportunity is
+	// the contribution application service's answer, and nothing else on
+	// this process wires it yet.
+	exploreAPI := explorehttp.New(explorehttp.Deps{
+		Reader: explorehttp.Sources{
+			ProjectSource:      explorehttp.ProjectSource{Service: projectAPI.Service()},
+			AssetSource:        explorehttp.AssetSource{Pages: persistence.NewAssetPageStore(pool)},
+			ContributionSource: explorehttp.ContributionSource{Service: appcontribution.NewService(contribution.NewOpportunityStore(pool))},
+			Store:              explorehttp.NewStore(pool),
+		},
+	})
+	exploreAPI.Register(v1)
 	// Official project templates (T0214): the catalog and the
 	// create-from-template path. The templates service orchestrates the
 	// SAME owning-service instances the direct routes use (projectAPI /
