@@ -282,6 +282,14 @@ func TestRenderSystemPromptContainsContract(t *testing.T) {
 		"No Git control-plane", "allowed_scope", "Never weaken",
 		"/repo/.rddev/workers/T0001/RESULT.json",
 		"EARLY", "not accepted",
+		// The two recording conventions a RESULT gets rejected for getting
+		// wrong, and that nothing else in the package states: a deliberate
+		// break-and-revert is a `passed` entry (T0709 lost an attempt to
+		// recording one as `failed`, which contradicts a completed status),
+		// and a pre-existing failure is `blocked`, never hidden or worked
+		// around (T0601 recorded one honestly as `failed` and was rejected
+		// for the contradiction rather than for the report).
+		"MUTATION CHECK", "predates your change", "blocked",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("system prompt missing %q", want)
