@@ -1,0 +1,80 @@
+{
+  "id": "T0804",
+  "phase": "P8",
+  "phase_name": "开放网络、Fork、贡献与 Research Profile",
+  "title": "External Fork/Contribution flow",
+  "v1_required": true,
+  "dependencies": [
+    "T0803",
+    "T0303"
+  ],
+  "decision_level_max": "L1",
+  "tests": [
+    "external fork e2e"
+  ],
+  "supervisor_scope_narrowing": "2026-09-16 定稿。三点：\n（一）**这个任务原先被我标成「等定」（SPEC_BLOCKED：见 issue #189），现在撤回。** 它和 T0604 是**同一次误标**——两条状态记录都是 2026-09-16T00:08:07Z 同一秒写下的。它的依赖 T0803、T0303 早已合并，**所以它本来可以一直在跑**。今天把 issue #189 重查了一遍，答案是：这条 issue 的正确结局是「按现状确认 + 补一句规格 + 让本任务去做检查」，不是「换默认值」（理由见那条 issue 的评论）。**你不再需要等任何裁定。**\n（二）**删掉 `apps/web/**`**：本任务没有界面交付，与 T0601、T0409、T0604 同样的处置。V1 对「外部用户可 fork/contribute」的验收走 API/E2E 路径（`docs/31_MASTER_ACCEPTANCE.md:17` 与 `docs/24_TEST_STRATEGY.md:28` 说的都是能力覆盖，不是页面）。要做界面是另一个任务。\n（三）**刻意不包含 `internal/rsg/**` 与 `internal/authz/**`**：本任务**要读**它们（要照既有的权限判定接线、要看分叉点的 RSG 语义），而**读不受范围限制**。`internal/authz/**` 尤其重要：**权限矩阵的格子已经写好了，你的工作是把它们接上，不是改它们**（见 requirements 第二条）。如果你确实需要动其中任何一个，在 RESULT 里点名说清楚，我来接。\n（四）**迁移号不在这份任务书里定死**——派工时由 `rddev` 从分配账上取号并写进任务包，**以任务包里那行「its number is **NNNNN**」为准**。我先前在这里手写过 00074，**那是错的**（我把它当成了「下一个空号」，但账上 73/74/75 分别是 T0601/T0709/T1110 的）。**不得自行选号。** 若你判断本任务根本不需要迁移，那就不建——在 RESULT 里说明理由即可，不要为了用掉这个号而造表。",
+  "requirements": [
+    "**这个任务的权限模型不是你要发明的，它已经作为三格矩阵写好了，照它接线。** `specs/policies/permissions-matrix.csv` 第 5-7 行逐字写着：\n  `create_branch,deny,external_fork_only,deny,allow,allow,allow,allow`\n  `write_scientific_state,deny,own_fork_only,deny,allow,allow,allow,allow`\n  `open_pr,deny,allow_from_fork,deny,allow,allow,allow,allow`\n  三列的含义是（列头同文件第 1 行 `action,public_anonymous,authenticated_nonmember,viewer,contributor,maintainer,owner,agent_default`）：**匿名用户三件事全拒**；**非成员的已登录用户**：只能**以外部 fork 的形式**建分支、只能**在自己的 fork 里**写科研状态、只能**从 fork 发起** PR。这三个判定值在 `internal/authz/verdict.go:20-22` 已经有常量，而 `Permits()`（同文件 `:35`）**只对 `allow` 放行，其余一律按拒绝**——所以今天非成员这三件事**全部被拒**。**本任务就是把这三个条件解析出来**（与 T0604 把 `conditional` 判定接上生产是同一个形状）。**不要新增 action、不要新增 verdict、不要放宽任何一格。**",
+    "**fork 导入的 state 是非 push 来源的 head：它的 semantic completeness 必须【派生自真实证据】，不得吃默认值、也不得一律标成「不可解析」。** 背景与结论（issue #189，`tasks/decisions.md`）：`git_branch_semantic_states` 的唯一写入方是 push ingestion（`internal/gitprovider/semantic_state.go:41`，由 `internal/gitprovider/push_ingestion_store.go:261` 在投递事务里调用），默认值是 `semantic_complete`，而且那张表的走查函数**点名**了「syncer 从外部采纳的 ref、或者 fork 的分叉点」这类没有 ingest 记录的情形，处理规则是「**缺少证据不是存在无法解析内容的证据**」（`semantic_state.go:76-79`，同一句也写在 `infra/migrations/00042_unstructured_change_state.sql:95-102`）。\n  **所以两条错路你都不能走**：（a）**不能让导入的分支吃默认值**——那等于「没看过就报无异常」，而 fork 是**往平台里搬别人能改的内容**，它和 syncer 那种「只建/删 ref、不搬内容」的路径不是一回事（`internal/gitprovider/refsync.go` 全文没有任何检查逻辑，它本来也没有东西要检查）；（b）**不能一律标成 `unstructured_changes`**——这个标记**只有一个东西能清掉**，就是一次真正的 push（`semantic_state.go:41` 是唯一写入方，而 `00042:40-47` 明确记着「API 的状态提交不会动这面旗子」）。一律标死会把合法的 fork 流程**永久锁死**，那不是更安全。\n  **你要做的是第三条路：让 fork 导入走和 push 一样的检查，把证据造出来，让旗子按既有规则自己派生。** 这不需要发明任何新语义——`docs/16_GIT_COMPATIBILITY.md` §4 已经写死了：「无法理解的文件可保留，但 **branch 不能发起可 merge 的正式 PR**，直到 Agent/API 补足 required scientific semantics。」\n  **如果导入时确实无法做检查**（例如内容不在本地、要等异步同步），那么**在 RESULT 里说明**，并把「谁在什么时候补这次检查」写清楚——**不要默默让它吃默认值**，那正是这个任务被建出来要关掉的洞。",
+    "**fork 不包含 restricted blobs，且必须是「拿不到」而不是「界面藏起来」。** `docs/57_DEMO_UAT.md:7` 把「restricted blob download」列进了必须失败的负向场景；`docs/23_SECURITY_PRIVACY.md:21` 与 `CLAUDE.md` §9 第 7 条「Knowledge visibility != Blob accessibility」是这个判定的规矩。判定本身用既有的 `internal/rights/visibility.go`，**不要新增一档可见性**。注意：今天根本**没有 blob 下载路由**（`cmd/api/fileshttp/files.go:88-92`），所以「不可下载」在这条路上本来就是成立的——**本任务不得新增一条下载路由**，也不得用前端隐藏来冒充权限隔离。",
+    "**fork 的谱系要记下来，用既有的关系词表，不要另起一套。** `specs/database/postgres.sql:409` 的领域关系类型里已经有 `forked_from`（同一词也出现在外部引用词表 `:2273` 的 `'derived_asset_from', 'forked_from', 'originates_from'` 里）。`docs/31_MASTER_ACCEPTANCE.md:23` 要求「Asset PID/version/lineage/rights/reference/dependency/**fork** 工作」。用既有词表，不要自造关系名。",
+    "**建分支时的分叉点解析已经有实现，别重写。** `internal/gitprovider/refsync.go` 的 Create 方向就是「从语义分叉点 fork」，`specs/database/postgres.sql:1040-1045` 的 `fork_sha` 就是「ref 创建时的 provider 侧提交」。先读这两处，再决定外部 fork 要不要走同一条路。",
+    "**外部 PR 到上游：走既有的 PR 与 review 路径，不要为 fork 单独开一条。** PR 的语义（`docs/` 里的 Research PR = proposed RSG diff，`CLAUDE.md` §9 第 4 条）对内外一致。注意 `infra/migrations/00042` 里那道 `pull_request_semantic_gate` 挂在 `pull_requests` 的 INSERT 上，检查的是**源分支**的 semantic state——所以你上面第 2 条做对了，这道门对 fork 来的 PR 才是真的在起作用。",
+    "**幂等与并发按既有做法**：这个仓库里凡是「同一个请求到达两次」的地方都用状态本身做幂等（见 `internal/persistence/main_freeze_store.go` 的比较并交换写法：先做原子更新，零行再读一次解释结果，**全程没有先读后写**）。照这个形状办，不要引入一张 key 台账。",
+    "**审计与事件**：写状态和记审计要在**同一个事务**里（`docs/53`）。事件名用 `specs/events/event-types.yaml` 里的机器可读词表——**不要用散文里的叫法**（这个仓库里已有先例：`project.main_frozen` 与 `pull_request.merged` 都比散文更权威）。可见性一律 **fail closed**（不是公开就是私有，认不出的一律私有），照 `internal/persistence/main_freeze_store.go:211-216` 的写法。",
+    "**范围纪律**：只改 `allowed_scope` 里的东西。`tasks/**`、`specs/**`（除 `specs/database/postgres.sql` 与 `specs/SPEC_VERSION.json`）、`docs/**` 都不在你的范围内。**不许为了让测试变绿而删测试、跳过测试、放宽断言或放大超时**（`CLAUDE.md` §5.1、§6）。"
+  ],
+  "acceptance_criteria": [
+    "**非成员的已登录用户可以 fork 一个 public project**：`create_branch` 对 `authenticated_nonmember` 的 `external_fork_only` 判定被解析，操作成功；且**同一个账号对一个 private project 做同样的事被拒**（`read_public_project` 与 `read_private_project` 是分开的两格，`internal/authz/action.go:11-14`）。",
+    "**非成员只能在自己的 fork 里写科研状态**：`write_scientific_state` 的 `own_fork_only` 判定被解析——在自己的 fork 里成功，**对上游分支或别人的 fork 写被拒**。两条都要有测试。",
+    "**非成员只能从 fork 发起 PR**：`open_pr` 的 `allow_from_fork` 被解析——从自己的 fork 发起成功，**不从 fork 直接对上游发起被拒**。",
+    "**匿名用户这三件事全部被拒**（矩阵第一列三格都是 `deny`），且三条都要有测试——这是同一张表里已经写好的边界，不是本任务新定的。",
+    "**fork 拿不到 restricted blob，且这是「没有这条路」而不是「界面藏起来」**：要有一条负向测试证明受限制内容不可获得，并证明**没有新增任何 blob 下载路由**（与 `docs/57_DEMO_UAT.md:7` 的 UAT 负向场景一致）。",
+    "**导入进来的分支，其 `git_branch_semantic_states.semantic_state` 是一个从真实证据派生的值**：要有一条端到端测试，用一个**内容无法解析**的 fork 导入，断言该分支**不能发起可 merge 的正式 PR**（`pull_request_semantic_gate` 真的拦住它，`docs/16` §4 原文）；另有一条，用**内容可解析**的 fork 导入，断言它**能**正常走到 PR。**两条缺一不可**——只测前者的话，「一律标死」也能通过。",
+    "**导入之后旗子不会卡死**：证明第 6 条里那条「不可解析」的分支在证据补齐之后能被解开（`docs/16` §4「直到 Agent/API 补足 required scientific semantics」），而不是永久停在 `unstructured_changes`。若本任务判断这条路径要留给后来的任务，**在 RESULT 里点名说明并给出理由**，不要默默略过。",
+    "**fork 谱系被记录**，用既有关系词表里的 `forked_from`（`specs/database/postgres.sql:409`），且能被读出来（`docs/31_MASTER_ACCEPTANCE.md:23` 的 lineage 要求）。",
+    "**重复请求与并发不产生第二条记录**：同一个 fork 请求到达两次，只留下一条谱系记录、一条审计、一个事件；两个并发请求只有一个赢（照 `internal/persistence/main_freeze_store.go` 的比较并交换形状，**不要先读后写**）。",
+    "**审计与事件在同一个事务内**：要有一条测试证明状态写入失败时审计/事件不会留下孤行（可以用一个后置步骤故意失败的用例，形状见 `tests/integration/freeze_main_e2e_test.go:579-594`），且事件名取自 `specs/events/event-types.yaml`、可见性 fail closed。",
+    "**`docs/31_MASTER_ACCEPTANCE.md:17`「Public Project 外部用户可 fork/contribute」这条主线验收项，在端到端用例里真的跑通了**：用例必须走真实产品路径（真实的 PostgreSQL + 真实的 Gitea + 真实的权限引擎），**不得在测试里构造中间状态**。"
+  ],
+  "allowed_scope": [
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "internal/contribution/**",
+    "internal/application/**",
+    "internal/gitprovider/**",
+    "internal/persistence/**",
+    "internal/rights/**",
+    "cmd/api/**",
+    "go.mod",
+    "go.sum",
+    ".env.example",
+    "tests/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/tasks.json",
+    "tasks/task_status.json",
+    "tasks/tests.json",
+    "tasks/progress.md",
+    "tasks/decisions.md",
+    "apps/web/**",
+    "packages/schemas/**"
+  ],
+  "relevant_specs": [
+    "**`specs/policies/permissions-matrix.csv` 第 5-7 行（先读这个）**：`create_branch` / `write_scientific_state` / `open_pr` 三行，非成员列分别是 `external_fork_only` / `own_fork_only` / `allow_from_fork`，匿名列三格全是 `deny`。**这就是本任务的权限规格，逐字照它接线。** 判定值常量在 `internal/authz/verdict.go:20-22`。",
+    "**`docs/04_USERS_ROLES.md:18`**：「Public Project 的非成员用户不是 Contributor role，但可 Fork 并从自己的空间发起外部 PR。」——这句话是本任务存在的原因，注意它同时说了「可以 fork」和「不是 Contributor」两件事（后者是权限隔离的依据）。",
+    "**`docs/16_GIT_COMPATIBILITY.md` §4「Push ingestion」**：「无法理解的文件可保留，但 branch 不能发起可 merge 的正式 PR，直到 Agent/API 补足 required scientific semantics。」——注意这一节的标题就叫 Push ingestion，规格的作用域是清楚的；本任务要做的是让 fork 导入这条非 push 路径也走同一套检查，而不是去改那套规则。",
+    "`docs/31_MASTER_ACCEPTANCE.md:17`：「Public Project 外部用户可 fork/contribute。」以及 `:23` 的 lineage/fork 要求。这是主线验收项，你的端到端用例要对得上。",
+    "`docs/24_TEST_STRATEGY.md:28`：测试覆盖清单里逐字点名「外部 fork/contribute」——本任务的注册测试（`external fork e2e`）就是它。",
+    "`infra/migrations/00042_unstructured_change_state.sql` 全文件，**尤其是** `:40-47`（记录的信任边界，含「API 状态提交不动这面旗子」这条 L1 决定）、`:53-70`（表定义与它的注释）、`:95-102`（缺行按 complete 计及其理由）、`:104-160`（两道门：merge 门与 PR 门）。",
+    "`internal/gitprovider/semantic_state.go` 全文件：`:41` 是唯一写入方，`:76-79` 是那条「缺少证据不是存在无法解析内容的证据」的规则，并**点名**了 syncer 采纳的 ref 与 fork 分叉点。",
+    "`internal/gitprovider/refsync.go`（T0303）：分叉点解析与「按分支行创建/删除 provider side ref」的既有实现；注意它**不搬内容**，所以它不写 semantic state 是有理由的——fork 导入**搬内容**，所以不能照抄它的处理。",
+    "`internal/persistence/main_freeze_store.go`（T0601，我刚验收过）：**幂等、并发、事务边界、fail-closed 可见性**四件事在本仓库的标准写法都在这个文件里，`Freeze` 的比较并交换写法值得先读一遍再动手。",
+    "`docs/23_SECURITY_PRIVACY.md:21` 与 `docs/57_DEMO_UAT.md:7`：可见性与「restricted blob download 必须失败」的负向场景。",
+    "`docs/12_AUTHORIZATION.md` §5：Organization policy 是最低要求、Project policy 可更严**不能更松**——fork 的判定不得比矩阵更松。"
+  ],
+  "scope_note": "这是 Supervisor 收窄后的范围（已从 phase 级默认上限删掉 `apps/web/**`，另按本任务实际需要加入 `internal/gitprovider/**`、`internal/persistence/**`、`internal/rights/**`）。`internal/rsg/**` 与 `internal/authz/**` 刻意不在其中：读不受限，要改就在 RESULT 里点名，由 Supervisor 接手。"
+}
