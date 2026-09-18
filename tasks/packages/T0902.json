@@ -1,0 +1,72 @@
+{
+  "id": "T0902",
+  "phase": "P9",
+  "phase_name": "Search 与 Evidence-backed Research Answer",
+  "title": "Embedding Provider 与 pgvector",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "dependencies": ["T0901"],
+  "requirements": [
+    "**provider interface**：按仓库既有的 port 形状定义一个 embedding 端口，**照抄 authn/externalref 那套三件套**（port 接口 + 真实客户端 + 可注入的假件）。出处是 `docs/20_TECH_ARCHITECTURE.md:77` 逐字「LLM 只做 query planning/answer interpretation，不做 source of truth。**Embedding/LLM provider 通过 port abstraction。**」与 `docs/52_BACKEND_STANDARD.md:21-23`（逐字「Gitea、S3、Redis、email、**LLM**、scientific adapter 都通过 port。**不得让外部 provider ID 变成 domain primary identity。**」）。",
+    "**batch embedding worker**：按仓库既有的 worker 挂法把 embedding 做成一个 job type。出处是 `docs/20_TECH_ARCHITECTURE.md:71`（逐字列出 Go worker 处理的事项，其中含「**embedding**」，并逐字排除 Python 承载：「Python 不是核心产品后端」）与 `docs/52_BACKEND_STANDARD.md:19`（逐字「Job payload 只传 identity/version/reference，不放大块敏感数据。每类 job 有 timeout/retry/backoff/dead-letter/**idempotency key**。」）。**「batch」这个词规格没写**——批量大小与并发是你的事，见裁定二。",
+    "**deterministic fake in tests**：端口必须有一个确定性的假实现，让全部测试不联网、可复现。**这一条是 requirement 自己写的**，不是我加的。仓库里的现成模板是 `internal/application/authn/oidctest/provider.go:1-20`——它逐字自陈「builds an in-process fake … tests drive the REAL authn.OIDCClient against it … **This is test infrastructure shipped as a normal package**」。参照它，不要另创形态。",
+    "**version metadata**：向量必须能回答「这是哪家、哪一版模型算出来的」。理由是「可重建」这条验收离开它就证明不了——换模型就得全量重算，而当天算的东西必须能与前一天算的区分开。**规格没有规定这个元数据长什么样**（我搜过 `docs/**` 与 `specs/**`，最接近的只有 `internal/rsg/externalref` 的 `UpstreamVersion` 与 `internal/rsg/schemareg/registry.go:26-29` 的 `Ref{ID, Version}`），所以形状由我拍板，见裁定三。"
+  ],
+  "acceptance_criteria": [
+    "**`embedding 失败不阻塞 structured search`——这条必须有一条真的能失败的测试。**构造一个**恒定报错**的 provider，断言：结构化搜索（`SearchDocuments`，`internal/persistence/queries/search.sql:17-38`）**照常返回结果**，且**没有任何请求被这次失败挂住**。**注意这个验收的天然陷阱**：那条读查询**根本不碰 `embedding` 列**（`:5-15` 的写查询只写 7 列，`:17-38` 的读查询不选它），所以「不阻塞」在结构上**天然成立**——于是很容易写出一条**永远不会红**的测试。仓库自己点名过这个坏形状：`tests/integration/asset_page_test.go:714-727` 逐字「**An empty string is a failure rather than a pass: a check that forbade nothing is the shape that reads green while measuring nothing**」。**在 RESULT 里说明你怎么证明这条测试能失败**（例如临时把保护去掉看它红）。",
+    "**`可重建`**：有一条命令或 job 能把 embedding 重算出来，**幂等**（连跑两次结果一致），且**换一个 provider 版本重算后，元数据跟着变、向量跟着变**——后半句是这条验收的要害，没有它「可重建」就只是一句口号。出处侧证：`internal/persistence/queries/search.sql:1-3` 逐字「Rebuildable by construction」，以及 `search_documents` 被**有意排除在 append-only 之外**（`infra/migrations/00014_append_only_enforcement.sql:16` 的注释块、`00015_append_only_truncate.sql`，正面证据 `tests/integration/append_only_truncate_test.go:119` 断言 `TRUNCATE search_documents` **必须成功**）。",
+    "**端口不许有第二个实现，也不许有任何联网路径。**见裁定一——这一条是硬约束，不是建议。验收方式：有一条检查证明产品代码里没有任何出站调用（在 RESULT 里给出你的验证命令）。",
+    "**既有测试一条都不许变红**，尤其 `tests/integration/search_access_test.go:23` `TestSearchDocumentsEnforcesAccessControl`（fail-closed 断言在 `:81-105`）与 `tests/integration/append_only_truncate_test.go:119`。**前者是本任务的安全地基：无论 embedding 怎么加，`search_documents` 的可见性过滤（`queries/search.sql:36`）一个字都不许松动。**",
+    "**若你动了 schema，三处夹具必须同步**：`tests/integration/migration_test.go:736-739`（`search_documents` 列清单，含 `embedding` 的 `colExp`）、`:874-875`（索引）、`:1157`（表清单）。那里是**全等比较**，漏一处就红。同时 `specs/database/postgres.sql` **只能由 `python3 scripts/gen_schema_snapshot.py` 重新生成**，改完跑 `make check-schema-snapshot` 与 `make check-spec-version`。",
+    "RESULT 里逐条说明：端口形状与它为什么长这样、批次与重试的选择及理由、元数据落在哪、**你怎么证明「失败不阻塞」那条测试不是空的**、以及**你在 sqlc 上遇到了什么**（见 relevant_specs 里那条未核实项）。"
+  ],
+  "allowed_scope": [
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "internal/persistence/**",
+    "internal/search/**",
+    "internal/application/**",
+    "internal/events/**",
+    "internal/worker/**",
+    "internal/observability/**",
+    "cmd/api/**",
+    "cmd/worker/**",
+    "go.mod",
+    "go.sum",
+    ".env.example",
+    "sqlc.yaml",
+    "Makefile",
+    "tests/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "specs/api/openapi.yaml",
+    "specs/events/**",
+    "specs/policies/**",
+    "specs/orchestrator/**",
+    "internal/authz/**",
+    "internal/rsg/**",
+    "packages/schemas/**",
+    "apps/web/**"
+  ],
+  "relevant_specs": [
+    "**裁定一（最要紧的一条）：本轮不许有任何联网的 embedding 实现。**这一条不是「省事」，是规格停在这里。「平台内容能不能送出到第三方 embedding 服务」**规格一处都没写**——我搜过 `docs/**` 全 69 篇与 `specs/**`，三条擦边的都只擦到边上：`docs/55_DATA_CLASSIFICATION.md:11` 只禁 SECRET 进 embedding（`docs/55_DATA_CLASSIFICATION.md:11` 逐字「SECRET 永远不进入普通 logs/search/vector embedding」）；`docs/59_PRODUCT_ANALYTICS.md:5` 只禁第三方 analytics SaaS；`docs/23_SECURITY_PRIVACY.md:21` 禁的是「未授权可见」，不是「送出平台外」。**而它同时命中 CLAUDE.md §5.1 的停止条件「需要新的外部凭证、付费服务或账号授权」。**所以：**端口 + 确定性假件 + 不联网，本轮就交付这些**；真实 provider 的接线是一条独立任务，等 owner 裁定。**这也正是 requirement 自己写的**——四条 requirement 里有一条就叫「deterministic fake in tests」。若你觉得某个真实适配器「顺手就能写」，**写进 RESULT 告诉我，不要实现它**；更不要往 `.env.example` 里加任何 API key 变量。",
+    "**把 embedding 那一列的现状看清楚：它从来没被任何代码碰过。**逐点穷举：DDL 在 `infra/migrations/00013_search_projection.sql:11`（`embedding vector(1536),`），快照在 `specs/database/postgres.sql:550`，夹具在 `tests/integration/migration_test.go:737`；扩展早已就绪（`infra/migrations/00001_extensions.sql:3` 逐字 `CREATE EXTENSION IF NOT EXISTS vector;`）。**其余全树零命中**：`internal/persistence/queries/search.sql:5-15` 的 `UpsertSearchDocument` 只写 7 列、`:17-38` 的 `SearchDocuments` 不选它；`internal/persistence/sqlc/models.go` 里**没有 `SearchDocument` 结构体**。**本任务是从零接上这一列。**",
+    "**一条我没能核实的坑，你动手前先验：sqlc 对 `vector` 类型的处理。**`sqlc.yaml` **没有 `overrides:` 段**（已核实），而 `models.go` 里没有 `SearchDocument` 结构体是因为 `sqlc.yaml` 设了 `omit_unused_structs: true`。**一旦你写一条选中或写入 `embedding` 的查询，sqlc 很可能需要一条类型 override——而 `sqlc.yaml` 在绝大多数任务的范围之外，我这次特意把它加进了你的 `allowed_scope`。**本机有 sqlc（v1.31.1）。**请先用一条最小查询实测**，把结论写进 RESULT；不要猜。",
+    "**写路径必须与 T0901 的契约对齐，这是两任务之间唯一的界面。**`UpsertSearchDocument`（`queries/search.sql:5-15`，`ON CONFLICT (entity_ref) DO UPDATE`）是 T0901 建的**幂等点**，也是投影的唯一写入面。**两条路你选一条，并在 RESULT 里说明为什么**：(a) 扩 `UpsertSearchDocument` 让它一并写 embedding——简单，但会改 T0901 的写入契约；(b) **新增一条只更新 embedding 的查询**——不动 T0901 的契约。**我倾向 (b)**（两条写路径职责单一，投影重跑不会把 embedding 抹掉、embedding 重算也不会碰投影内容），但这是实现判断，你论证得清楚就可以选 (a)。**不论选哪条，幂等性必须成立。**",
+    "**端口形状照抄这两套，不要自创：**（甲）**OIDC 那套是最完整的模板**——port 在 `internal/application/authn/ports.go:101-112`（`:101-112` 的注释逐字「the fake provider in oidctest implements the same port」），真实客户端在 `internal/application/authn/oidc.go:11-25`（逐字自陈「implemented on the standard library only (T0101 L1: no third-party OIDC dependency in the V1 core)」），HTTP 注入口 `oidc.go:27-30` 的 `type HTTPClient interface { Do(*http.Request) (*http.Response, error) }`，假件在 `internal/application/authn/oidctest/provider.go`。（乙）**External Reference 那套给了超时的先例**：port 在 `internal/rsg/externalref/fetch.go` 的 `type Fetcher interface`，超时常量 `ssrf.go:39` 的 `DefaultFetchTimeout = 10 * time.Second`，选项注入 `doi.go:43-53`（`WithDoiBaseURL`/`WithDoiClient`/`WithDoiMaxBytes`，注释逐字说「tests point it at a local server」）。**注意 `internal/rsg/**` 在你范围外，读可以、改不行。**",
+    "**worker 的挂法与重试策略已经写好了，照抄不要另造**：`cmd/worker/main.go:7` 逐字「The only registered job type is `\"smoke\"`」，注册在 `:97`，四个既有消费者挂点分别在 `:119`（dispatcher）、`:132-133`（webhook fanout + deliverer）、`:151`（subscription fanout）——**你的 embedding job 按同一形状挂在这里**。队列 API：`internal/worker/queue.go:51 Enqueue`、`internal/worker/worker.go:105 Register`、`:113 Run`；**重试/退避/死信的常量已经在**：`worker.go:60-63` 的 `DefaultMaxAttempts=3 / DefaultBackoff=1s / DefaultBackoffCap=30s`，`Job.ID` 即幂等键（`:25-34`）。**出站调用的重试形状若要更细的参照（分类表 + 指数退避），看 `internal/events/deliver.go:19-35`**——那是仓库里唯一带完整重试策略的出站调用，但**你本轮没有出站调用**，它的价值只在于「仓库的退避口径长什么样」。",
+    "**密钥与配置的形状（本轮大概用不上，但先说清楚免得你自创）**：`internal/config/config.go:28-35` 的 `type Secret string`（String/MarshalJSON 全部打码）；包级 config 先例是 `internal/gitprovider/config.go` 与 `internal/application/authn/config.go`（各自 fail-closed 校验，复用 `config.Secret`），环境变量名先例 `internal/application/authn/config.go:71` 的 `EnvOIDCClientSec = \"POST_OIDC_CLIENT_SECRET\"`。**一个坑**：`internal/config/secretscan.go:29-31` 的 key 正则覆盖 `api[_-]?key|secret|token|_key$`，所以任何新密钥变量一旦落进 `.env.example`，值**只能是** `secretscan.go:34-42` 的占位符，否则 Go 侧测试会红。**本轮你不该新增任何密钥变量。**",
+    "**「可重建」这条验收的可执行形状，抄 T0901 已经定好的那套**：T0901 的任务书（`tasks/packages/T0901.json`，落地后在 `tasks/tasks.json` 的 T0901 条目里）已经裁定 rebuild 命令做成「`Makefile` 一个目标 + 实现体放在 `cmd/worker/**` 里的一个 job type」（理由是 `Makefile:65-71` 的 `migrate` 就是这个形状，而 `cmd/rddev` 不在任何任务范围内）。**你的 embedding 重算按同一形状做**，不要另创。**`Makefile` 在你的范围内。**",
+    "**向量索引：本轮不建。**理由是 ADR 不给口径、而索引是可测的性能决策不是语义决策：`docs/adr/ADR-005-postgres-first-graph-search.md:3` 的 Decision 全文只有一句（逐字「结构化、FTS、vector、relation traversal 都先在 Postgres 实现；达到明确规模/性能阈值后再增加 projection engine」），对索引类型零指导；`docs/68_TECH_STACK_DECISIONS.md:12,17` 也只锁到「PostgreSQL + pgvector」。今天全树 `ivfflat|hnsw|<=>|<->|vector_cosine` 在 `*.sql`/`*.go` 里**零命中**，`00013` 只建了 `:14` 的 GIN FTS 与 `:15` 的 structured GIN。**没有索引的 pgvector 走精确扫描——在测试规模上它更准，不是更差。**若你有测量证据说明必须建，**在 RESULT 里给出数据**，并且别忘了 `tests/integration/migration_test.go:874-875` 的 `explicitIndexes` 是全等比较、`:1157` 是表清单。",
+    "**目录：你住在 `internal/search/embedding/`。**`internal/search/` 目前只有一个 `doc.go`（逐字「Package evidence owns…」不，逐字是 search 包的说明；全仓库**零 import**）。**T0903 同时在改这个目录**，两者并行——**所以目录必须先钉死**：embedding 的一切归 `internal/search/embedding/`，planner 的一切归 `internal/search/planner/`，**共享的端口/通用类型若确实需要，放在 `internal/search/` 根下并只在 RESULT 里点名**（不要各自建一份同名文件）。",
+    "**本任务不碰的东西**：`POST /search` 路由与 answer 生成（T0906）、检索与图扩展（T0904）、排名（T0905）、query planner（T0903）、前端（T0907）。**`SearchDocuments` 那条读查询的可见性语义（`queries/search.sql:21-31` 的注释 + `:36` 的过滤）一个字都不许改**——那是 T0901 的地基，也是 `tests/integration/search_access_test.go` 钉住的东西。",
+    "**迁移号由我在派工时分配并写进任务包**（账本 `.rddev/runtime/migration-numbers.json`，分配器幂等；现已用到 83）。**不要自己选号、也不要拿「main 最大号 + 1」去猜**（CLAUDE.md §8.1）。本任务**很可能需要一条**迁移（见裁定三的元数据落点），但**如果一条列都不加就交付得了，那就别建**，在 RESULT 里说明理由。"
+  ],
+  "scope_note": "这是**按本任务的实际交付面调整过的范围**。相对 DAG 里的 phase 级默认值（`[infra/migrations/**, specs/database/postgres.sql, specs/SPEC_VERSION.json, internal/persistence/**, internal/search/**, go.mod, go.sum, .env.example, cmd/api/**, apps/web/**, tests/**]`）：**加** `cmd/worker/**` 与 `internal/worker/**` 与 `internal/events/**`（requirement 第 2 条「batch embedding worker」在结构上要求一个 job type，而按仓库既有的四个消费者挂法它**只能住在 `cmd/worker`**——DAG 默认范围里没有它，**这与 T0901 当初的缺口完全同型**，不改就落不了地）、**加** `internal/application/**`（端口与服务层的惯例落点）、**加** `sqlc.yaml`（见 relevant_specs 里那条未核实项——很可能必须动它）、**加** `internal/observability/**` 与 `Makefile`（重算入口；照 T0901 定好的形状）。**明确不加**（写进 forbidden_scope）：`specs/api/openapi.yaml`（本任务不新增路由）、`specs/events/**`、`specs/policies/**` 与 `internal/authz/**`（权限矩阵是安全边界）、`specs/orchestrator/**`、`internal/rsg/**`（可读不可改——里面那套 port/超时的先例是给你照抄的，不是给你改的）、`packages/schemas/**`、`apps/web/**`（搜索界面是 T0907）。",
+  "supervisor_scope_narrowing": "2026-09-18 定稿。三条裁定，一条提醒。\n\n**裁定一（最要紧）：本轮零联网。**端口 + 确定性假件 + 不联网，就交付这些。真实 provider 的接线等 owner 裁定——因为「平台内容能不能送出到第三方 embedding 服务」规格一处都没写，而它同时是隐私边界（`docs/54` 把「Search LLM 引用未授权 entity id」列为最高等级场景之一）与 §5.1 的停止条件（新凭证/付费服务）。**这不是把验收打折**：requirement 四条里有一条本来就叫「deterministic fake in tests」，而验收两条（失败不阻塞 / 可重建）在假件上**可以完整证明**——没有任何一条验收需要真的调用外部服务。**把这一点写清楚，是因为「顺手接一个真 provider」是本任务最自然的越界方式。**\n\n**裁定二：批次与并发是你的实现判断，但有两个下限。**(1) 幂等——`Job.ID` 就是幂等键（`worker.go:25-34`），重跑同一个 job 不许产生第二份结果；(2) 失败必须走完仓库既有的重试/退避/死信口径（`worker.go:60-63`），**不许为了让测试好写就吞掉错误**。批量大小、并发度、是否分批入队，你自己定并说明理由。\n\n**裁定三：版本元数据加在 `search_documents` 上，加列，不加表。**理由：(1) `search_documents` 是**可重建投影**、被有意排除在 append-only 之外（`00014:16`、`00015`，正面证据 `append_only_truncate_test.go:119`），所以在它上面加列**没有回填语义问题**——重建即一致；(2) 另开一张 row-per-version 的表会引入一个「哪些行配哪个版本」的一致性问题，而这张表的价值恰恰在于**不需要**一致性推理；(3) 列必须**可空**——没算过的行就是没有版本，那是一个真实状态（照 `internal/rights/usage.go:9-14` 对「unspecified 是真实答案不是缺失」的同一种态度）。**具体列名与列数你定**（至少要能回答「哪家 + 哪一版」），但**不接受**「把模型名塞进 `structured` jsonb」——那是把一个要用来判断「要不要重算」的字段藏进一个为别的目的存在的开放结构里。\n\n**一条提醒（不是要求）：这个任务有一个天然的空转风险。**验收第 1 条「embedding 失败不阻塞 structured search」在今天的代码上是**天然成立**的——因为那条读查询根本不碰 embedding 列。**一条天然成立的验收会轻松通过，但它什么都没证明。**所以我在验收里点名要你构造「恒定报错的 provider」并证明那条测试**能红**。这不是刁难：`tests/integration/asset_page_test.go:714-727` 那段注释是仓库自己写下的，它说的就是这个失败模式。\n\n**一条边界**：`internal/search/` 这个目录 T0903 同时在改。**你只建 `internal/search/embedding/` 下的东西**；要在根目录加共享文件，先在 RESULT 里点名，别和 planner 撞同一批文件名。"
+}

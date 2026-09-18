@@ -1,0 +1,71 @@
+{
+  "id": "T0903",
+  "phase": "P9",
+  "phase_name": "Search 与 Evidence-backed Research Answer",
+  "title": "Scientific Query Planner",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "dependencies": ["T0901"],
+  "requirements": [
+    "**自然语言 → 结构化 plan。字段词表照抄规格，不要自己归纳。**`docs/14_SEARCH_DISCOVERY.md:9` 逐字「自然语言问题先解析为：intent、target object、property、condition/scope、evidence preference、network scope、visibility、ranking constraints。」——**规格列了八项**，而任务名只写了五项（intent/target/property/scope/evidence preference）。**八项都要有落点**；哪一项你判断 V1 还填不出值，就在 RESULT 里点名说明，**不要默默略过**。",
+    "**provider-agnostic LLM**：按仓库既有的 port 形状定义一个 planner 端口。出处 `docs/20_TECH_ARCHITECTURE.md:77` 逐字「LLM 只做 query planning/answer interpretation，不做 source of truth。**Embedding/LLM provider 通过 port abstraction。**」与 `docs/52_BACKEND_STANDARD.md:21-23`（LLM 列在必须走 port 的适配器里）。**没有任何文档指定供应商或模型**，所以「provider-agnostic」就是字面意思：端口不许出现任何具体厂商的痕迹。",
+    "**schema-constrained output**：plan 必须是**先校验通过再被使用**的结构化对象，校验不过的一律走 fallback（见验收第 1 条）。仓库里**已经有 JSON Schema 校验器**，不要另造：`github.com/santhosh-tekuri/jsonschema/v6 v6.0.3` 是 `go.mod:12` 的**直接依赖、已在 main**，唯一使用点是 `internal/rsg/schemareg/schema.go:9`（编译器配置 `:88-90`：`DefaultDraft(jsonschema.Draft2020)` + `AssertFormat()`；`$ref` 只在本地解析，`:76-79` 逐字「never over the network」），校验入口 `schema.go:30` 的 `func (s *Schema) Validate(doc []byte) error`。**`internal/rsg/**` 只读**（见 forbidden_scope）——调用它没问题，要改它就在 RESULT 里说，不要动。",
+    "**planner 的输出里不许出现候选 entity id。**这是本任务最容易被做坏的一条。`docs/54_SECURITY_THREAT_MODEL.md:16` 把「**Search LLM 引用未授权 entity id**」列为第七号威胁场景；`:19` 逐字要求「每个场景必须有对应 automated negative test」。所以：**planner 只输出「过滤器 + 偏好」，不输出任何实体标识符**——候选实体由检索层（T0904）从库里按可见性取，`docs/22_API_DESIGN.md:36` 逐字写着「Answer Generator 只可引用 planner/retrieval 返回的 entity ids/version」。**让模型吐出 id、再由服务层过滤掉，是错的**——`docs/21_DATA_MODEL.md:52` 逐字「Authorization 不通过『查询后在前端隐藏』实现。所有 repository/service query 必须接受 principal/context，并在 DB/service 层过滤。」"
+  ],
+  "acceptance_criteria": [
+    "**`invalid plan fallback`——要有两个方向的测试。**方向一：喂给 planner 一个**恒定产出非法 plan** 的假 provider，断言系统**不崩、不空转**，而是走一条明确的 fallback（结构化结果仍可返回）。方向二：**一个合法的 plan 必须被正常接受**——否则一个「永远走 fallback」的实现也能让方向一变绿。**这条验收的规格出处是方向性的，不是逐字的**：`docs/27_PERFORMANCE_SLO.md:13` 逐字「Evidence-backed Answer 若调用 LLM，首个 loading state < 200ms；完整答案目标 < 10s，**超时提供 structured results fallback**。」；`docs/32_RISK_REGISTER.md:9` 的缓解列逐字含「**fallback structured results**」。**在 RESULT 里说明你怎么证明方向一那条测试能失败。**",
+    "**`planner 不访问 private unauthorized entities`——这条是本任务最硬的安全验收，规格给出了四处独立出处。**`docs/54_SECURITY_THREAT_MODEL.md:16`（第七号威胁）+ `:19`（「每个场景必须有对应 automated negative test」）；`docs/23_SECURITY_PRIVACY.md:21` 逐字「所有 query/search/export/download 进行 tenant/project/object policy 过滤。」；`docs/24_TEST_STRATEGY.md:20` 逐字「search 不泄漏 private objects。」；`docs/31_MASTER_ACCEPTANCE.md:35` 逐字「- [ ] Search 无 private leakage。」。**测试仪器已经现成**：`tests/integration/search_access_test.go:23` `TestSearchDocumentsEnforcesAccessControl` 已经在用 `mine-1` / `theirs-1` 两个私有行做正反两向断言（断言在 `:81-105`）。**照它的形状做**：构造「一条私有行与一条公开行同名可检索」，断言**只**返回公开那条。**两个方向都要**——只断言「私有的没出现」的实现，在一个永远返回空集的实现上也是绿的。",
+    "**匿名访问：本轮的答案是「要登录」，且这不是我新定的规则。**`specs/api/openapi.yaml:10-11` 的全局 `security: [{bearerAuth: []}]` 与 `:306-311` 的注释逐字「Everything under /api/v1 that is neither an /auth/* route nor marked `security: []` is **default-deny** — an unauthenticated write is 401 before routing, so a new product route **inherits the guard by being mounted in the subtree rather than by opting in**.」——`POST /search`（`:257-271`）**没有** `security: []`，所以它**按现状就是登录后可用**。**照契约做，不要给它开匿名口子。**（记录在案的冲突见裁定三——`docs/05_INFORMATION_ARCHITECTURE.md:9` 逐字说「登录前保留 Explore/Search/Public entity 浏览」，那是**另一份规格**的说法，而扩大对外可见性是 L3，不由你我定。）",
+    "**actor → allowed_project_ids 的组装函数必须存在，且**必须**是 T0904/T0906 能复用的那一份。**这是本任务真正的技术交付：`SearchDocuments` 的 `@allowed_project_ids` 参数（`internal/persistence/queries/search.sql:36`）今天**零调用者**；原料在 `internal/persistence/queries/projects.sql:96` 的 `ListProjectsForUser`（逐字「Projects the user belongs to (any project membership)」）与 `:105` 的 `ListPublicProjects`。**把这两块拼起来的那一层不存在**，而 T0904 与 T0906 都要用。**放 `internal/search/scope.go`**（见裁定二：这个文件名归你，T0902 不许建）。",
+    "**金标准夹具（golden fixtures）**：`docs/24_TEST_STRATEGY.md:36` 逐字要求「RSG manifest serialization/hash、Research State Diff、**Search query plan**/answer citation、Publication Impact Preview 使用 golden fixtures；更新需显式 review。」——**query plan 被点名了**。所以测试不能只断言「字段存在」，要有一份**具体的 plan 输入 → 具体的结构化输出**的对照夹具。夹具放 `tests/**` 下（那个目录在你的范围内）。",
+    "**既有测试一条都不许变红**，尤其 `tests/integration/search_access_test.go`（本任务的安全地基）。",
+    "RESULT 里逐条说明：`docs/14:9` 的**八项**各自落在哪个字段、哪一项 V1 填不出值以及为什么；端口形状；fallback 的触发条件与出口；**你怎么证明两条安全验收都能失败**；以及 plan 的 schema 放在哪里、为什么。"
+  ],
+  "allowed_scope": [
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "internal/persistence/**",
+    "internal/search/**",
+    "internal/application/**",
+    "internal/events/**",
+    "internal/worker/**",
+    "internal/observability/**",
+    "cmd/api/**",
+    "cmd/worker/**",
+    "go.mod",
+    "go.sum",
+    ".env.example",
+    "Makefile",
+    "tests/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "specs/api/openapi.yaml",
+    "specs/events/**",
+    "specs/policies/**",
+    "specs/orchestrator/**",
+    "specs/mcp/**",
+    "internal/authz/**",
+    "internal/rsg/**",
+    "packages/schemas/**",
+    "apps/web/**"
+  ],
+  "relevant_specs": [
+    "**裁定一：本轮零联网，与 T0902 同一条。**「用户的查询文本能不能送出到第三方 LLM」规格一处都没写——我搜过 `docs/**` 全 69 篇与 `specs/**`，没有任何一篇划定这条边界。而它同时是隐私边界（`docs/54` 第七号威胁）与 CLAUDE.md §5.1 的停止条件（**需要新的外部凭证、付费服务或账号授权**）。**所以本轮只交付端口 + 确定性假件**：所有测试走假件，不联网、不需要任何密钥。**这一条正是 requirement 自己写的**——「provider-agnostic LLM」要的就是那层抽象，而抽象的证明方式是「换一个假件它照样工作」。**不要顺手接一个真 provider，也不要往 `.env.example` 里加任何 API key 变量。**若你认为某个真实适配器顺手就能写，**写进 RESULT 告诉我，不要实现它**。",
+    "**裁定三记在这里：匿名搜索这件事有一处真实的规格与契约冲突，我不替你选，但本轮按契约走。**规格侧：`docs/05_INFORMATION_ARCHITECTURE.md:9` 逐字「登录前保留 Explore/Search/Public entity 浏览；需要写操作时引导登录。」，`:15` 逐字「未登录：公开项目、Research Assets、近期 Findings、可贡献项目、**搜索入口**；禁止营销页压过产品内容。」。契约侧：`specs/api/openapi.yaml:10-11` 全局 bearerAuth，`:306-311` 的 default-deny 注释，而 `POST /search`（`:257-271`）没有 `security: []`。**两种读法**：(a) 契约疏漏，Search 该匿名可读；(b) 规格说的「Search」指首页入口/Explore，真正的 `/search` 是登录功能。**我选按契约走（要登录）**，理由：它是 fail-closed 的那一边、是现存的书面契约、而且扩大对外可见性属于 §5.1 的停止条件，不能由我或你顺手决定。**已记入 `tasks/decisions.md` 等 owner 裁定。**这一条直接决定 planner 的授权上下文从哪来：**本轮恒为已登录用户，你必须组装 scope（见裁定二），不能假设「没有 actor 就是 public」。**",
+    "**接口面：契约已经有了，实现一分没有。**`specs/api/openapi.yaml:257-271` 是 `POST /search`（requestBody `required: [query]`，`properties: {query: {type: string}, filters: {type: object}}`，响应 `'200': {description: Search answer with cited entity versions}`），`:272-280` 是 `/search/{searchId}:start-project`。**但 `cmd/api/*.go` grep `search` 只命中注释**——`cmd/api/main.go` 里**没有 `/search`**。web 侧有个占位页 `apps/web/app/(main)/search/page.tsx`，注释逐字「The evidence-backed answer UI lands in **T0907**」。**注意：落 `POST /search` 路由不是本任务的活**——回答生成是 T0906，界面是 T0907。**你需要落的是 planner 本身与它的端口**；要不要给它一个内部入口，你自己判断并在 RESULT 里说明（提前落公开路由会与 T0906 撞面）。",
+    "**port 的形状照抄 authn 那套三件套（这是仓库里最完整的模板）**：port 在 `internal/application/authn/ports.go:101-112`，`:101-112` 的注释逐字「the fake provider in oidctest implements the same port」；真实客户端在 `internal/application/authn/oidc.go:11-25`（逐字自陈「implemented on the standard library only (T0101 L1: no third-party OIDC dependency in the V1 core)」，HTTP 注入口是 `:27-30` 的 `type HTTPClient interface { Do(*http.Request) (*http.Response, error) }`，`:44-51` 注释逐字「discovery lazily on first use, so startup never blocks on the provider being reachable」）；**假件在 `internal/application/authn/oidctest/provider.go:1-20`，它逐字自陈「builds an in-process fake … tests drive the REAL authn.OIDCClient against it … This is test infrastructure shipped as a normal package」**——照它的形态做你的 planner 假件。超时口径的另一份先例在 `internal/rsg/externalref/ssrf.go:39` 的 `DefaultFetchTimeout = 10 * time.Second` 与 `doi.go:43-53` 的选项注入（注释逐字说「tests point it at a local server」）。",
+    "**JSON Schema 校验器已经有了，直接用，不要另造**：见 requirement 第 3 条的引用。补充一条对你有用的形状：应用层已经有一处「按 profile 校验」的先例——`internal/application/schemaprofiles/service.go` 与它的 `ports.go:36-43`（逐字「a map of field name to its JSON Schema fragment」）。**`internal/rsg/schemareg/**` 与 `internal/rsg/**` 在 forbidden_scope 里：调用它们可以，改它们不行。**若你判断必须改，写进 RESULT，我来接。",
+    "**plan 的 schema 文件放哪：放 Go 代码里，不放 `specs/`。**`specs/**` 除 `specs/database/postgres.sql` 那个生成物快照外是 Supervisor-only（CLAUDE.md §8.1），而且 planner 的输出 plan 是**planner 与检索层之间的内部契约**，不是对外发布的规格物。**把 schema 作为 Go 字面量放在 planner 包内**（例如 `internal/search/planner/plan_schema.go`），并在 RESULT 里说明。**`specs/schemas/**` 里今天没有 search plan 的 schema**（我核实过），这不是缺口，是归属。",
+    "**「不访问未授权实体」的实际依赖比你想象的位置低——别把它绑到 T0901 的交付物上。**真正提供保证的是两样东西：(1) `internal/persistence/queries/search.sql:36` 那条既有过滤 `AND (visibility = 'public' OR project_id = ANY(@allowed_project_ids::uuid[]))`——它的 fail-closed 语义写在同一文件 `:21-31` 的注释里（**传空数组只会得到 public 行，永远不会得到整张表**），回归测试 `tests/integration/search_access_test.go:23`；(2) 你要新建的 scope 组装层。**T0901 交付的是投影内容，不是权限保证。**所以这条依赖更像**顺序依赖**：T0901 先落地，你的 plan 才有东西可查——但不要把验收第 2 条写成「依赖 T0901 的某个实现细节」。",
+    "**目录：你住在 `internal/search/planner/`，另外拥有 `internal/search/scope.go`。**`internal/search/` 目前只有一个 `doc.go`，**全仓库零 import**。**T0902 同时在改这个目录**（它住 `internal/search/embedding/`），两者并行——**所以目录先钉死**：planner 的一切归 `internal/search/planner/`；**`internal/search/scope.go` 归你**（actor → allowed_project_ids，见裁定二），**T0902 已被明确告知不许建它**。**若你还需要根目录下的共享文件，先在 RESULT 里点名，不要和 embedding 那边撞同一批文件名。**",
+    "**本任务不碰的东西**：检索与图扩展（T0904）、排名（T0905）、answer 生成与 `POST /search`（T0906）、前端（T0907）、embedding（T0902）。**`SearchDocuments` 的可见性语义一个字都不许改**——那是 T0901 的地基。",
+    "**迁移号由我在派工时分配并写进任务包**（账本 `.rddev/runtime/migration-numbers.json`，分配器幂等；现已用到 83）。**不要自己选号**（CLAUDE.md §8.1）。**本任务很可能根本不需要迁移**——planner 的输出可以不落库（`docs/22_API_DESIGN.md:36` 要求「服务端保存 query plan、selected entity ids、answer citations」，但**保存 query plan 的归属更像 T0906**，因为要保存的是「一次搜索」，而搜索的公开入口在那一环）。**判断不需要就别建**，在 RESULT 里说明理由；**若你认为非建不可，先标 `blocked` 告诉我**，因为那可能意味着这项工作该挪到 T0906。"
+  ],
+  "scope_note": "这是**按本任务的实际交付面调整过的范围**。相对 DAG 里的 phase 级默认值：**加** `internal/application/**`（服务层的惯例落点——DAG 默认里没有它，而 T0901 的任务书也补了同一处）、**加** `internal/worker/**` + `internal/events/**`（若 planner 走后台 job 或要发事件；DAG 默认里没有，**不给你就等于把「planner 是同步还是异步」这个实现选择替你堵死**）、**加** `Makefile` 与 `internal/observability/**`（`docs/26_OBSERVABILITY.md:17` 点名要观测「search latency / LLM planner failures」）。**明确不加**（写进 forbidden_scope）：`specs/api/openapi.yaml`（`POST /search` 的契约已经存在，本任务不新增、不修改路由）、**`specs/mcp/**`**（`specs/mcp/tools.json:24` 已登记 `search.query` 工具、`docs/47_MCP_TOOL_CATALOG.md:6` 有归属，那一面由我维护）、`specs/events/**`、`specs/policies/**` 与 `internal/authz/**`（权限矩阵是安全边界）、`specs/orchestrator/**`、`internal/rsg/**`（只读——schema 校验器与超时先例都在里面，那是给你照抄的）、`packages/schemas/**`、`apps/web/**`（搜索界面是 T0907）。",
+  "supervisor_scope_narrowing": "2026-09-18 定稿。三条裁定。\n\n**裁定一：本轮零联网。**与 T0902 同一条、同一个理由：把用户查询文本送出平台外这件事规格一处都没写，而它同时是隐私边界（`docs/54` 第七号威胁点名了「Search LLM 引用未授权 entity id」）与 §5.1 的停止条件（新凭证/付费服务）。**端口 + 确定性假件，本轮就这些。**验收两条（invalid plan fallback / 不访问未授权实体）在假件上**可以完整证明**——「不访问未授权实体」这条的保证根本不在 LLM 那一层，而在 `queries/search.sql:36` 的 SQL 过滤与你要新建的 scope 组装层上，**所以它不因为不联网而变弱**。\n\n**裁定二：actor → allowed_project_ids 的组装是本任务真正的技术交付，放 `internal/search/scope.go`。**今天 `SearchDocuments` 的 `@allowed_project_ids` 参数**零调用者**，原料（`queries/projects.sql:96` 的 `ListProjectsForUser`、`:105` 的 `ListPublicProjects`）都在但没有一层把它们拼成检索层的入参。**T0904 与 T0906 都要用这一份**，所以你把它做成可复用的形状，别写成 planner 的私有辅助函数。文件名归你（T0902 已被告知不许建它）。\n\n**裁定三：匿名搜索按契约走（要登录），冲突记录在案。**理由见 relevant_specs 第二条——规格（`docs/05:9,15`）与契约（`openapi.yaml:10-11,306-311` + `POST /search` 没有 `security: []`）说的是两件事，而扩大对外可见性是 §5.1 的停止条件，**不由我或你顺手决定**。已记入 `tasks/decisions.md` 等 owner 裁定。**注意这条对你有一个具体的后果**：本轮 planner **恒有一个已登录 actor**，**不许把「没有 actor」当成「那就看 public 的」**——那正好是 fail-open 的形状。没有 actor 就是没有 scope，就是拒绝，照 `queries/search.sql:21-31` 那条注释的态度办。\n\n**一条提醒：本任务最自然的越界方式是「先让模型吐候选 id，再过滤」。**那是错的，`docs/21_DATA_MODEL.md:52` 逐字禁止（「不通过『查询后在前端隐藏』实现」），`docs/54:16` 把它列为第七号威胁。**planner 的输出里不许有实体标识符**——这是验收第 2 条真正的意思。\n\n**一条边界**：`internal/search/` 这个目录 T0902 同时在改（它住 `internal/search/embedding/`）。你只碰 `internal/search/planner/` 与 `internal/search/scope.go`；根目录若还要加别的共享文件，先在 RESULT 里点名。"
+}

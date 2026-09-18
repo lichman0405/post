@@ -10279,8 +10279,20 @@ later status warning」。侦察在 `apps/web/lib/releases.ts`、`assets.ts`、`
 `internal/application/manifests/**` 里 grep `abort|supersede|lifecycle` **零命中**，`releases` 与
 `research_assets` 两张表也**没有 status 列**（`infra/migrations/00010_releases_assets.sql:14-26,36-48`）。
 全树没有任何任务持有它——T0711 的「不做」清单里没有，T0710 也不是。
-**裁定：这一条归 T0602**（它是「Nothing disappears; state only evolves」在资产面的落地，与对象 abort 同一套状态语义），
-**不另立任务**。T0602 放行时把这条写进它的 requirements。
+**裁定：不另立任务，拆成两半归两个既有任务**——
+
+- **写路径归 T0602**：它是 abort 的状态迁移任务，requirements 里已经有「reason/replacement」，
+  而 `docs/46:7` 要的 `replacement/superseding ref` 与这里是同一组字段。**注意这会让 T0602 多一个实体面**：
+  它的 requirements 写的是「main **对象**需 PR」，而 `docs/43_STATE_MACHINES.md:19` 把
+  「Asset Version：published → active；后来可 status notice aborted/superseded」放在**资产**状态机里，
+  是另一条状态机。放行 T0602 时要在任务书里把这件事说清楚，别让工人以为对象和资产版本是同一套。
+- **显示面归 T0709**（Agent Hub Pages）：`docs/42_PAGE_SPECS.md:16`（Release 页清单）与 `:19`（Asset 页清单）
+  **都没有** status warning 这一项——**所以这条还附带一个 `docs/42` 的缺口，而 `docs/**` 是 Supervisor-only，
+  由我补**，不能记在工人头上。T0709 放行时一并处理。
+
+（另一条备选是归 T0710「Asset 完整 E2E」，我没选它——它的 requirements 是一条 E2E 链路
+「Release→Dataset Asset publish→另一 Project reference/depend→fork derived」，让 E2E 任务去**造**一个功能
+会把「验证」和「实现」混在一起。记在这里，免得以后重新推一遍。）
 
 ## 2026-09-18 一个没人认领的 CI 洞（这是 Supervisor 自己的活）
 
@@ -10345,3 +10357,36 @@ T0409 那处是历史记录，随它去。
 
 连同原有的两条（T0602 的 reopen 权限格子 / issue #250；T1106 是否允许页面加载外部第三方资源 / issue #253 残余），
 **现在共五条待 owner 裁定**，全部不在关键路径上。
+
+## 2026-09-18 CI 接线的机制约束（动手前必须知道，已逐条核实）
+
+上一节说「这件事归我」，这里记清楚**它到底要动几处**——因为这个机制有几个写死的地方，
+不先看清就会一头撞上去。
+
+**同步测试写死了两处**（`internal/devorchestrator/gate_spec_test.go`）：
+- `:30-32` 逐字 `if len(ci) != 7 { t.Fatalf("ci.yml declares %d jobs, want 7", len(ci)) }`——**job 数写死 7**。
+- `:57` 把 `required_jobs` 逐字写死成那七个名字，`:69` 还要求 `G4.asserts_jobs` 与它逐字相同。
+
+**所以加一个浏览器 job 要同时动四处**：`.github/workflows/ci.yml`、
+`specs/orchestrator/gates.json`（`required_jobs` + `G2.runs_jobs` + `G4.asserts_jobs` + `jobs` 里的步骤定义）、
+以及上面这个测试文件的两处字面量。四处必须一字不差（`:39-52` 连每一步的 `run` 字符串和 `env` 都比对）。
+
+**一处必须提前想清楚的副作用**：按这个设计，**ci.yml 里的 job 就是 `required_jobs`，就是每个任务 G2 要跑的、
+G4 要断言的**。所以浏览器 job 一接上，**每个任务（包括纯后端任务）的验收都要跑一遍浏览器测试**。
+这不是我能绕开的——`gates.json` 头部逐字说 G2 重跑的是「CI's EXACT steps」，而 `:19-21` 的注释说
+这个同步测试存在的理由正是「防止合并门禁悄悄跑一个**看起来差不多的子集**（那个让红 PR 合进去的缺陷）」。
+**反过来更糟**：如果让它只在 ci.yml 跑、不进 `required_jobs`，那就是同一个缺陷的镜像。
+
+**两条规格给的落点不一样，都要满足**：
+- `docs/25_CICD_DEVOPS.md:12-13` 是「## CI Gate / 至少：」，后面那十条是 **CI 门禁**的内容，
+  第 8 项逐字「**Playwright E2E；**」——这是**全局**的。
+- `docs/67_TEST_GATES.md:20` 把 browser navigation 划给 **G3**（`specs/orchestrator/gates.json` 的
+  `task_overrides`，按任务配，缺省记为 `not_required`）；`:28-30` 的额外规则还逐字要求
+  「browser E2E 验证 **console/network errors、keyboard、loading/empty/error state**」——**这条比「能跑通」严得多**，
+  接线时要一起满足，别只让它绿。
+
+**执行顺序（风险控制）**：现有的 8 套 Playwright 套件（`tests/e2e-{anonymous,explore,files,assets,pulls,conflicts,settings,shell}`）
+是**自足的**（各自的 npm 项目 + 自己的 lockfile，`next start` + 真 Chromium，API 在网络层 mock 或不需要），
+所以它们能在 CI 上跑；但它们**从来没在 CI 里跑过**，第一次接上去之前**必须先在本机认真跑几遍确认稳定**——
+`docs/67:28` 逐字「flake 不是『rerun until green』；先定位再修」。
+**一个会抖的必过关卡会把整条流水线卡死，这比没有关卡更坏。**
