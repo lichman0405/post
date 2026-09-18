@@ -10355,8 +10355,22 @@ T0409 那处是历史记录，随它去。
    谁可以 resolve（哪一级 maintainer）、未 resolution 的 dispute 在公开 Profile 上是否显示
    （`docs/13:15` 只说「不参与排名」，不等于「不显示」）。
 
+4. **T0804（外部 fork）—— 非成员能不能 fork 一个「公开项目里被标成私有的分支」？**
+   规格零处规定。分支**确实有自己的可见性**（`infra/migrations/00004_rsg_state.sql:16`，
+   `public`/`private`，与项目可见性是两回事），但它**不是读的门槛**：权限矩阵 15 个 action 里
+   没有「读分支」这一条（`specs/policies/permissions-matrix.csv`）；生产代码里分支可见性
+   只在**三处**被读——建分支时的收窄规则（`internal/persistence/branch_store.go:81`，
+   私有项目不能挂公开分支）、合并/发布的守卫（`internal/rsg/merge/merge.go:303-304`，
+   private→public 必须走发布流程）、以及事件载荷的标签
+   （`internal/application/rsg/events.go:30`、`merge/events.go:88`、`review_store.go:357`）。
+   **没有任何读路径拿它当门槛**——所以今天「公开项目里的私有分支」在读上是跟着**项目**走的。
+   结论有两半：① T0804 的取分支路径与全仓其它读路径**同等把关**，它没有引入新洞（这也是我判
+   评审 F4「记录、不返工」的依据）；② 但「一个被有意标成私有的分支，能不能被非成员 fork 走内容」
+   是**产品/隐私语义**，不由我替 owner 决定（§5 L3）。
+   同批：这条若要收紧，动的是**全仓的读模型**，不只是 fork 那一条路径。
+
 连同原有的两条（T0602 的 reopen 权限格子 / issue #250；T1106 是否允许页面加载外部第三方资源 / issue #253 残余），
-**现在共五条待 owner 裁定**，全部不在关键路径上。
+**现在共六条待 owner 裁定**，全部不在关键路径上。
 
 ## 2026-09-18 CI 接线的机制约束（动手前必须知道，已逐条核实）
 
@@ -11796,3 +11810,97 @@ T0807（Contribution Ledger projection）已 collect 通过（12 个改动文件
 **T0804 的处置**：它的改动本身没问题，只是被我的红挡住。用 `rddev rebaseline T0804` 把它前移到修好的
 main（29 个文件带过、生成物重算），驳回理由写成第三封返工信——**明说不是它的错**，
 只要在新基线上重跑、照实更新 RESULT。
+
+## 2026-09-19 CI 的 `migration-integration` 偶发超时（老毛病，非本轮引入）
+
+**证据**（近 14 次 main 运行，`gh api .../jobs` 逐条取时长）：
+平时 **256–354 秒**，Go 测试自带的时限是 **600 秒**；超时过三次——
+`301ce5e`（15:05，699 秒）、`6ba4741`（18:07，711 秒）、以及 `fb4e323`（18:29）。
+三次的日志形状一样：`panic: test timed out after 10m0s`，且协程转储里大量
+`net/http.(*persistConn).readLoop/writeLoop` ——**在等 HTTP 响应/连接超时**。
+被点名"正在跑"的测试每次不同（`TestMergeAppendsRelationVersionOnTheRealStack`、
+`TestGatesDifferInStrictnessAndSayWhy`），说明不是某一条测试的 bug，
+而是**整套在 CI 上贴着时限跑，某次慢下来就撞线**（先前的测试把时间吃掉，最后一条刚起跑就被切断）。
+
+**与 T0604 无关**：`301ce5e` 早于 T0604 合并，`deb7f53`/`e75ec39` 等 T0604 之后的运行都在 311 秒正常。
+**与我的改动无关**：`fb4e323` 只改了三份文书/状态档，没有任何 Go 代码。
+
+**处置**：本轮先 `gh run rerun --failed` 让它过（G4 要求 CI 全绿）。
+**待办（等安静窗口立任务，现在不能动 tasks.json —— T0804 的补丁带着指纹）**：
+立一个查因任务，方向是把"什么时候开始等 HTTP、等的是谁"量出来（超时值、重试次数、连接目标），
+**不许用"把测试超时调大"来掩盖**（CLAUDE.md §5.1 明确禁止"任意放大 timeout 掩盖"）。
+若查实是某条真服务重试吃掉几百秒，就修那一处；若纯粹是 runner 慢，再按证据决定时限。
+
+## 2026-09-19 T0804 我自己复核时挑出的一条（非阻断）：注释里的迁移号错了
+
+`infra/migrations/00086_external_fork.sql` 有两处注释把 `asset_lineage` 的迁移写成 **`00011`**：
+「…a member of asset_lineage's CHECK (**00011**)」与「The asset-level half stays asset_lineage's (**00011**)」。
+**我自己查实：`asset_lineage` 是 `00010_releases_assets.sql` 建的**（`grep -rln "CREATE TABLE asset_lineage" infra/migrations/`
+只回这一个文件；`00011_external_contribution.sql` 里一次都没提过 `asset_lineage`）。
+`00011` 那个文件名恰好叫 "external_contribution"，与本任务同名——多半是这里串了。
+
+**性质是文档缺陷，不是机制缺陷**：那条 CHECK（`relation_type IN ('forked_from','derived_from','supersedes')`）
+本身没问题，表的读写路径没受影响，测试也没依赖这个注释。按既有口径（T0604 那 6 条的先例）：
+**记录、不返工、不为它再烧一轮验收**。**待办**：下次动这个文件时顺手改成 `00010`。
+
+（另：我全量扫过这份改动里所有形如 `0\d{4}` 的引用——除这一处外，其余指向的迁移文件都存在，
+`00021/00023` 是无迁移文件的占位说明（`migration_test.go:1236` 解释了编号为何跳号），不是错。）
+
+## 2026-09-19 T0804 复核裁定：评审 7 条 → **2 条必改**、1 条升格 L3、其余记录
+
+**背景**：独立评审（真 PostgreSQL + 真 Gitea）判 **approve（0 blocking、2 major）**，G1/G2/G3 全过、
+11 条 AC 全过。但我自己逐条复核那 7 条时，把其中两条**用真代码验实了**，判**必改**——
+不是风格问题，是「合法输入走不通」和「测试说了它没测的事」。这是 T0804 第一次因**缺陷**被驳回。
+
+**必改之一：slug 被别人占了 = 永久死局，而且报的错是假的。**
+个人项目 slug 是**全局**命名空间（`infra/migrations/00019_project_provisioning.sql:16`，
+`UNIQUE (slug) WHERE organization_id IS NULL`），别人能占用派生值。而
+`internal/application/forks/service.go:346-365` 把**任何** `ErrSlugTaken` 都当成
+「这个 actor 自己的 fork 正在建」，`FindFork` 无行时在 `:364` 返回
+`ErrForkPending`＋「project X already exists for Y」。三条同时成立才判必改：
+① 消息是假的（那是**别人**的项目）；② 每次重试派生同一个 slug、撞同一个索引，
+而 `projects` 行不可删（§9.8）→ **重试永远不会成功**；③ **第三方可触发**——
+任何人建一个 slug 恰为 `<父slug>-<你的句柄>` 的项目，就能让这个 actor 永久 fork 不了那个项目。
+**要求的三条不变量**：I1 同一 `(parent, actor)` 仍然只有一个项目 + 一行 lineage（CAS 不破）；
+I2 别人占用 slug 不能让合法 fork 永久失败；I3 错误不许骗人。
+实现方式留给 Worker，但 `:338-344` 那条「slug 为什么必须派生而非调用方给」的理由**不许推翻**。
+
+**必改之二：`forkSlug` 一遇长句柄就突破 64 上限，而守它的测试**没有**测长句柄。**
+把 `forkSlug`/`slugToken`（`service.go:560-585`）与 `domain.ValidProjectSlug`
+（`internal/domain/project.go:186-202`，上限 `:188`）**原样抽出来跑过**（不是读代码算的）：
+
+| 父 slug 长度 | 句柄 54 | 55 | 56 | 57 | 60 | 61 | 64 |
+|---|---|---|---|---|---|---|---|
+| 3 | 58 ✓ | 59 ✓ | 60 ✓ | 61 ✓ | 64 ✓ | **72 ✗** | **75 ✗** |
+| 7 | 62 ✓ | 63 ✓ | 64 ✓ | **68 ✗** | **71 ✗** | **72 ✗** | **75 ✗** |
+| 20 / 80 | **65 ✗** | **66 ✗** | **67 ✗** | **68 ✗** | **71 ✗** | **72 ✗** | **75 ✗** |
+
+而句柄到 64 是合法的（`internal/domain/user.go:98-113`，1..64），**这些人 fork 任何项目都铁定失败**。
+根因在 `:571-576`：溢出分支里 `tail = "-"+handle+"-"+8位摘要` 长度是 `len(handle)+10`，
+`keep` 为负被 clamp 成 1，**但 `tail` 本身没截断**，所以 `len(handle) ≥ 54` 必然越界。
+`TestForkSlugStaysWithinTheBound`（`service_test.go:781-785`）的注释写着
+「a long parent slug **and a long handle**」，fixture `actor()`（`:48`）的句柄却是 **5 字符的 `curie`**
+——**长句柄那一半从来没跑过，测试声称了一个它没有测的性质**（这一条本身就是判必改的理由）。
+
+**顺带改措辞（不是代码缺陷）**：AC-11 的 evidence 写成
+「a mux the production wiring populated in cmd/api/main.go's own order」——**说过头了**。
+我核过：`cmd/api` **不** import `internal/application/forks`，全仓**没有** fork 路由，
+真实情况是**测试自己**按 main.go 的顺序装配图。改成这个口径。另：变异证据 MB2 标签贴错了路径
+（`external_fork_e2e_test.go:984` 是 **push** 路径，import 路径的见证是 MB1 约 `:1020`）。
+
+**记录、不要求改**：F4（见上，升格为第 6 条 L3）、F6（`ActionProjectForked` 包内常量）、
+F7（重复 fork 返回值的语义，correct-by-design）。
+
+**为什么走「同一 session 返工」而不是换人（§11）**：T0804 在此之前的**三次**驳回全是行政性的
+——一次是 collect 抓到我**自己**建的分支（`refs/heads/infra/deliver-supervisor-narrowing`，已 `refs adopt`）、
+两次是基线前移。**因代码缺陷被驳回，这是第一次**，且问题定位精确（一个函数 + 一条测试 + 一句消息）、
+Worker 的上下文仍然可靠 → §11 的第一档，返工同一 session。
+驳回信：`/tmp/T0804-rework-4.md`（已核在 `.rddev/workers/T0804/prompt.md` 里，27.5 KB）；
+返工 run：`run-410fcd50c0756752`，基线 `85871753e9dd`。
+
+**本轮顺带查出的两处计划缺口（都等安静窗口，现在不能动 `tasks/tasks.json`——T0804 的补丁带着指纹）**：
+1. **生产里根本没有 fork 的 HTTP 面**：`cmd/api` 不 import `internal/application/forks`，全仓无 fork 路由。
+   即 `docs/31_MASTER_ACCEPTANCE.md:17`「Public Project 外部用户可 fork/contribute」在**真实产品路径上
+   还走不通**（T0804 的 allowed_scope 里就没有 `specs/http` 与 `cmd/api`，所以这不是它的越界）。
+   **要另立一个接线任务**，否则主验收那条永远勾不上。
+2. CI `migration-integration` 偶发超时（见上一节）。
