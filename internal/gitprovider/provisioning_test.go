@@ -47,11 +47,26 @@ type fakePort struct {
 	branchesList    []gitprovider.BranchRef
 	listBranchesErr error
 
+	// Fork-import side (T0804): the copy's outcome and the per-name branch
+	// answers the import reads (a source head and a target pre-head are two
+	// different reads of the same method). A name absent from the maps falls
+	// back to the canned f.branch, so the earlier tests are unaffected.
+	importBranchErr error
+	importSpecs     []gitprovider.ImportBranchSpec
+	importRef       gitprovider.BranchRef
+	branchByName    map[string]gitprovider.BranchRef
+	branchByNameErr map[string]error
+
 	// Push-ingestion side (T0305): canned diff and file reads.
 	changedFiles    []gitprovider.FileChange
 	changedFilesErr error
 	files           map[string][]byte
 	readFileErr     error
+	// The repository and the (base, head) pair each diff was taken over —
+	// the fork import's inspection must run against the repository the
+	// content LIVES in, not the one it is recorded against.
+	changedRepos  []gitprovider.Repository
+	changedRanges []string
 }
 
 func (f *fakePort) EnsureRepository(_ context.Context, spec gitprovider.RepositorySpec) (gitprovider.Repository, error) {
@@ -115,8 +130,28 @@ func (f *fakePort) EnsureBranch(_ context.Context, spec gitprovider.BranchSpec) 
 
 func (f *fakePort) GetBranch(_ context.Context, _ gitprovider.Repository, name string) (gitprovider.BranchRef, error) {
 	f.branchGot = append(f.branchGot, name)
+	if err, ok := f.branchByNameErr[name]; ok {
+		return gitprovider.BranchRef{}, err
+	}
+	if ref, ok := f.branchByName[name]; ok {
+		return ref, nil
+	}
 	if f.getBranchErr != nil {
 		return gitprovider.BranchRef{}, f.getBranchErr
+	}
+	return f.branch, nil
+}
+
+// ImportBranch records the copy's spec; importRef overrides the canned
+// result (T0804's fork import is exercised in its own test).
+func (f *fakePort) ImportBranch(_ context.Context, spec gitprovider.ImportBranchSpec) (gitprovider.BranchRef, error) {
+	f.calls = append(f.calls, "import-branch")
+	f.importSpecs = append(f.importSpecs, spec)
+	if f.importBranchErr != nil {
+		return gitprovider.BranchRef{}, f.importBranchErr
+	}
+	if f.importRef.Name != "" || f.importRef.HeadSHA != "" {
+		return f.importRef, nil
 	}
 	return f.branch, nil
 }
@@ -139,8 +174,10 @@ func (f *fakePort) DeleteBranch(_ context.Context, _ gitprovider.Repository, nam
 // Push-ingestion side (T0305): scripted diff and file reads.
 
 // ChangedFiles returns the canned diff; ChangedFilesErr overrides it.
-func (f *fakePort) ChangedFiles(_ context.Context, _ gitprovider.Repository, _, _ string) ([]gitprovider.FileChange, error) {
+func (f *fakePort) ChangedFiles(_ context.Context, repo gitprovider.Repository, base, head string) ([]gitprovider.FileChange, error) {
 	f.calls = append(f.calls, "changed-files")
+	f.changedRepos = append(f.changedRepos, repo)
+	f.changedRanges = append(f.changedRanges, base+":"+head)
 	if f.changedFilesErr != nil {
 		return nil, f.changedFilesErr
 	}

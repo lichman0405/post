@@ -17,7 +17,11 @@ var (
 	ErrPullRequestNotFound = errors.New("pullrequests: pull request not found")
 	// ErrBranchNotFound: a branch of the PR's pair does not exist in the
 	// project — unknown, or a branch of another project (same outcome,
-	// no foreign existence leak).
+	// no foreign existence leak). The external-contribution path does not
+	// split this outcome: a source branch in a project that is not the
+	// PR's project is only ever usable when it is the creator's own fork
+	// of it (00086), and every other foreign source answers exactly this
+	// (docs/45).
 	ErrBranchNotFound = errors.New("pullrequests: branch not found in the project")
 	// ErrBranchNotActive: the source or target branch lifecycle is
 	// merged/aborted (docs/43: closed research paths are immutable) — a

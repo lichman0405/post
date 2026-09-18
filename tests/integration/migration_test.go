@@ -984,6 +984,25 @@ var canonicalTables = map[string]tableExp{
 		uniques: [][]string{{"project_id", "idempotency_key"}},
 		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("asset_version_id", "research_asset_versions", "RESTRICT")},
 	},
+	// 00086 (T0804): the external fork lineage. The fork project is the
+	// PRIMARY KEY (a fork has one origin and can never claim a second);
+	// UNIQUE (parent_project_id, forked_by) is the idempotency key the
+	// store maps a repeated fork onto. relation_type's CHECK pins the
+	// canonical vocabulary's single fork relation name; the two
+	// inequality CHECKs keep a self-fork and a self-branch fork out.
+	"project_forks": {
+		cols:    []colExp{c("fork_project_id", u, false, false), c("parent_project_id", u, false, false), c("forked_by", u, false, false), c("relation_type", txt, false, true), c("source_branch_id", u, false, false), c("fork_branch_id", u, false, false), c("forked_sha", txt, true, false), c("created_at", ts, false, true)},
+		pk:      []string{"fork_project_id"},
+		uniques: [][]string{{"parent_project_id", "forked_by"}},
+		checks:  []string{"relation_type = 'forked_from'", "fork_project_id <> parent_project_id", "source_branch_id <> fork_branch_id"},
+		fks: []fkExp{
+			fk("fork_project_id", "projects", "RESTRICT"),
+			fk("parent_project_id", "projects", "RESTRICT"),
+			fk("forked_by", "users", "RESTRICT"),
+			fk("source_branch_id", "branches", "RESTRICT"),
+			fk("fork_branch_id", "branches", "RESTRICT"),
+		},
+	},
 }
 
 // gooseTable is the only non-canonical table the runner may create.
@@ -1166,6 +1185,9 @@ var explicitIndexes = map[string][]string{
 	// assignment list.
 	"research_owner_rules_project_idx":       {"project_id"},
 	"responsibility_assignments_project_idx": {"project_id", "responsibility"},
+	// T0804 (00086): the parent side of the fork lineage read — a parent
+	// project's forks, newest first.
+	"project_forks_parent_idx": {"parent_project_id", "created_at DESC"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded

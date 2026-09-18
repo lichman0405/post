@@ -569,6 +569,14 @@ func run(args []string) int {
 		// records its domain events in the same transaction; cmd/worker
 		// publishes them into research_events.
 		Events: events.Recorder{},
+		// The external fork lineage (T0804): write_scientific_state is
+		// own_fork_only for an authenticated non-member, and this is the
+		// read that resolves it — a write is permitted exactly when the
+		// project is the actor's own fork (project_forks, 00086). Wired
+		// unconditionally: without it the conditional path fails closed,
+		// which would refuse a non-member's fork write even in their own
+		// fork.
+		ForkGate: persistence.NewForkStore(pool),
 	})
 	rsgAPI := rsghttp.New(rsghttp.Deps{Service: rsgSvc})
 	rsgAPI.Register(v1)

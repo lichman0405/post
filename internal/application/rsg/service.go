@@ -48,6 +48,7 @@ type Service struct {
 	authz          authz.Engine
 	schemas        *schemareg.Registry
 	events         Recorder
+	forks          ForkGate
 }
 
 // Deps wires the service. Schemas (the canonical registry) and Authz (the
@@ -73,6 +74,12 @@ type Deps struct {
 	Authz          authz.Engine
 	Schemas        *schemareg.Registry
 	Events         Recorder
+	// ForkGate resolves the own_fork_only cell of
+	// write_scientific_state. Optional to CONSTRUCT (the member paths
+	// never consult it) and refused when needed: an actor whose cell is
+	// the conditional form is denied unless the gate says the project is
+	// their own fork (fail closed).
+	ForkGate ForkGate
 }
 
 // NewService builds the service on the ports.
@@ -90,6 +97,7 @@ func NewService(deps Deps) *Service {
 		authz:          deps.Authz,
 		schemas:        deps.Schemas,
 		events:         deps.Events,
+		forks:          deps.ForkGate,
 	}
 }
 
@@ -633,15 +641,54 @@ func (s *Service) projectRole(ctx context.Context, actor domain.User, projectID 
 // same require shape as internal/application/projects). The denial happens
 // before any object or relation lookup, so it never discloses whether the
 // target exists.
+//
+// The cell for an authenticated non-member is own_fork_only, which
+// authz.Verdict.Permits refuses like every other unresolved condition. It
+// is resolved HERE — the site that performs the write — against the
+// lineage row 00086 records: the write is permitted exactly when the
+// project it happens in is the actor's OWN fork (ForkGate.OwnedFork), and
+// refused everywhere else — in the project being forked, in somebody
+// else's fork, and in any project that is not a fork at all. An actor
+// who is a member of the project never reaches this branch: their cell is
+// a plain allow. A service wired without a gate refuses the conditional
+// path (fail closed) instead of assuming the condition holds.
 func (s *Service) requireWrite(ctx context.Context, actor domain.User, projectID string) error {
 	role, err := s.projectRole(ctx, actor, projectID)
 	if err != nil {
 		return err
 	}
-	return s.require(ctx, authz.Request{
+	if s.authz == nil {
+		return fmt.Errorf("%w: no policy engine configured", ErrStore)
+	}
+	decision, err := s.authz.Authorize(ctx, authz.Request{
 		Action: authz.ActionWriteScientificState,
 		Class:  authz.ClassOf(true, role, false),
 	})
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrStore, err)
+	}
+	switch {
+	case decision.Permits():
+		return nil
+	case decision.Verdict == authz.VerdictOwnForkOnly:
+		if s.forks == nil {
+			// Unresolved is not permitted: the conditional cell refuses,
+			// and the refusal is the ordinary denial — same outcome, same
+			// existence-hiding shape as every other denial here (docs/45).
+			// The message names the wiring gap for the operator.
+			return fmt.Errorf("%w: write_scientific_state is own_fork_only for a non-member and no fork gate is wired to resolve it", ErrForbidden)
+		}
+		owned, err := s.forks.OwnedFork(ctx, projectID, actor.ID)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrStore, err)
+		}
+		if !owned {
+			return fmt.Errorf("%w: write_scientific_state is own_fork_only for a non-member, and project %s is not this actor's own fork", ErrForbidden, projectID)
+		}
+		return nil
+	default:
+		return fmt.Errorf("%w: write_scientific_state on project %s is %s for this actor", ErrForbidden, projectID, decision.Verdict)
+	}
 }
 
 // require evaluates one authorization request and fails closed. A

@@ -50,6 +50,11 @@ func (f *fakeRefPort) DeleteBranch(context.Context, gitprovider.Repository, stri
 	return nil
 }
 
+// ImportBranch (T0804) is unreachable from the ref-sync tests.
+func (f *fakeRefPort) ImportBranch(context.Context, gitprovider.ImportBranchSpec) (gitprovider.BranchRef, error) {
+	return gitprovider.BranchRef{}, gitprovider.ErrNotFound
+}
+
 // ListBranches (T0309) is unreachable from the ref-sync tests but the
 // port contract requires it.
 func (f *fakeRefPort) ListBranches(context.Context, gitprovider.Repository) ([]gitprovider.BranchRef, error) {

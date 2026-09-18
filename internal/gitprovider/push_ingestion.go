@@ -254,6 +254,21 @@ type IngestStore interface {
 	// head_skip_reason = 'stale_before' or 'stale_creation'), and the
 	// pushed head as a project state.
 	IngestPush(ctx context.Context, in IngestPushParams) (inserted bool, err error)
+	// SourceLineEvidence returns the source ref's own change evidence at
+	// headSHA (T0804): per path, the nearest-to-head record of the pushes
+	// ingested on that ref, walked back from headSHA exactly as that
+	// ref's own semantic flag is derived — plus the candidate content
+	// those records proposed. The fork import records it as the copy's
+	// evidence when the source ref has no recorded fork point to diff
+	// against, so the copied branch's flag can never be cleaner than the
+	// line it copies.
+	//
+	// A ref whose head carries no ingested delivery answers no records —
+	// the same missing evidence the derivation itself reports, never a
+	// search for another head to walk from. A failed read is an error:
+	// the answer is a claim about the canonical record, and a failed
+	// read makes no claim.
+	SourceLineEvidence(ctx context.Context, giteaRepoID int64, gitRef, headSHA string) ([]ClassifiedChange, []SemanticCandidate, error)
 }
 
 // IngestPushParams carries one delivery's inspection result into the
@@ -323,14 +338,8 @@ func NewPushIngester(port GitPort, store IngestStore, reg *schemareg.Registry) *
 // sits above that branch: deleting main is not a smaller write than
 // pushing to it, and zeros is no commit any merge recorded.
 func (i *PushIngester) Ingest(ctx context.Context, ev PushEvent) (bool, error) {
-	if ev.Ref == MainRef {
-		verdict, err := i.store.MainPushVerdict(ctx, ev.RepositoryID, ev.After)
-		if err != nil {
-			return false, err
-		}
-		if verdict.Frozen && !verdict.PlatformMerge {
-			return false, &MainFrozenRefusalError{Ref: ev.Ref, RepositoryID: ev.RepositoryID}
-		}
+	if err := i.refuseFrozenMain(ctx, ev); err != nil {
+		return false, err
 	}
 	params := IngestPushParams{Event: ev}
 	if isZerosSHA(ev.After) {
@@ -340,25 +349,155 @@ func (i *PushIngester) Ingest(ctx context.Context, ev PushEvent) (bool, error) {
 	if isZerosSHA(base) {
 		base = ""
 	}
-	changes, err := i.port.ChangedFiles(ctx,
-		Repository{Owner: ev.Owner, Name: ev.Name, ID: ev.RepositoryID}, base, ev.After)
+	repo := Repository{Owner: ev.Owner, Name: ev.Name, ID: ev.RepositoryID}
+	changes, candidates, err := i.Inspect(ctx, repo, base, ev.After)
 	if err != nil {
 		return false, err
 	}
-	repo := Repository{Owner: ev.Owner, Name: ev.Name, ID: ev.RepositoryID}
+	params.Changes, params.Candidates = changes, candidates
+	return i.store.IngestPush(ctx, params)
+}
+
+// refuseFrozenMain applies the T0601 rule to a delivery: a delivery that
+// moves refs/heads/main into a frozen project is refused before anything
+// else happens (see Ingest's documentation for the whole rule and the
+// one-delivery seam for the platform's own merges). It is shared with
+// IngestCopy so the copy path cannot classify a main delivery differently
+// from the push path.
+func (i *PushIngester) refuseFrozenMain(ctx context.Context, ev PushEvent) error {
+	if ev.Ref != MainRef {
+		return nil
+	}
+	verdict, err := i.store.MainPushVerdict(ctx, ev.RepositoryID, ev.After)
+	if err != nil {
+		return err
+	}
+	if verdict.Frozen && !verdict.PlatformMerge {
+		return &MainFrozenRefusalError{Ref: ev.Ref, RepositoryID: ev.RepositoryID}
+	}
+	return nil
+}
+
+// Inspect is the content half of an ingestion: the changed set of
+// base..head in repo (the whole tree when base is empty — a ref's first
+// push), every path classified against the canonical registry by
+// classify. It is the ONE implementation of "look at the content that
+// arrived" in this package; the push path (Ingest) and the fork import
+// (IngestCopy) both call it, so the two cannot drift into two checks.
+func (i *PushIngester) Inspect(ctx context.Context, repo Repository, base, head string) ([]ClassifiedChange, []SemanticCandidate, error) {
+	changes, err := i.port.ChangedFiles(ctx, repo, base, head)
+	if err != nil {
+		return nil, nil, err
+	}
+	classified := make([]ClassifiedChange, 0, len(changes))
+	var candidates []SemanticCandidate
 	for _, c := range changes {
-		classified, content := i.classify(ctx, repo, base, ev.After, c)
-		params.Changes = append(params.Changes, classified)
-		if classified.File == FileKindManifest {
-			params.Candidates = append(params.Candidates, SemanticCandidate{
-				Path:     classified.Path,
-				Kind:     classified.Kind,
-				SchemaID: classified.SchemaID,
+		change, content := i.classify(ctx, repo, base, head, c)
+		classified = append(classified, change)
+		if change.File == FileKindManifest {
+			candidates = append(candidates, SemanticCandidate{
+				Path:     change.Path,
+				Kind:     change.Kind,
+				SchemaID: change.SchemaID,
 				Content:  json.RawMessage(content),
 			})
 		}
 	}
+	return classified, candidates, nil
+}
+
+// CopySource names the content a fork's copy came from (T0804): the
+// repository the source commit lives in, the ref it is on, and the fork
+// point the platform has recorded for that ref. The copied commit itself is
+// the delivery's after — one fact, spelled once.
+type CopySource struct {
+	// Repository is the source repository: where the inspection runs, and
+	// where the evidence of a copy with no recorded fork point is read.
+	// A fork's commit is one object reachable through two repositories.
+	Repository Repository
+	// Ref is the source line's ref, refs/heads/<name>, inside that
+	// repository.
+	Ref string
+	// ForkPoint is the source ref's recorded fork point
+	// (git_branch_refs.fork_sha): the state the source line itself
+	// diverged from, and therefore the baseline the copy's divergence is
+	// diffed against. Empty when the platform has none recorded.
+	ForkPoint string
+}
+
+// IngestCopy records a delivery whose content was inspected in ANOTHER
+// repository (T0804's fork import).
+//
+// A fork's branch is a copy of a commit that lives in the repository it
+// was copied from: the same object, reachable through two repositories.
+// Diffing the copy against the fork's own empty history would say every
+// path in the tree is new — including the platform's own project
+// bootstrap file, which no ingestion ever wrote and which no later push
+// can ever remove, so the branch's semantic flag would stick at
+// unstructured_changes forever (docs/16 §4.1 forbids exactly that). What
+// the copy CONTRIBUTES is its divergence from the line it copies.
+//
+// Where that divergence is measured from is the whole of this function,
+// and the invariant is: at the moment of the import the copied branch's
+// flag is never CLEANER than the source line's.
+//
+//   - src.ForkPoint recorded: the source line diverged from a state the
+//     platform knows, so the copy's divergence is that state's content
+//     diffed against ev.After — computed in content (the source
+//     repository) by the same Inspect the push path uses, and recorded
+//     against ev's repository and ref (the fork's).
+//   - src.ForkPoint empty: there is no recorded baseline, and a copy
+//     measured against nothing comes out CLEANER than the line it copies
+//     — a line whose own flag is unstructured_changes (an unparseable
+//     file pushed to it) would fork into a branch marked
+//     semantic_complete, open a PR with that content and merge it. What
+//     the copy carries instead is the source line's OWN evidence at the
+//     copied commit: the per-path records its flag is derived from, read
+//     by the same walk that derives it (IngestStore.SourceLineEvidence).
+//     The copied branch's flag is then the source line's own judgement of
+//     the same content — equal to it, never cleaner — and it is ordinary
+//     evidence, so the rule every push obeys clears it: a later push
+//     whose record for the same path is nearer to the head.
+//
+// What the no-fork-point route does NOT carry is content the platform
+// never ingested: a source head no delivery recorded (a webhook that has
+// not arrived, a ref adopted outside the platform) yields no records, and
+// the copy derives as every branch with missing evidence does
+// (docs/16 §4.1: missing evidence is not evidence of unstructured
+// content). See forkimport.go's header for the route and its residual.
+//
+// Ordering is the caller's contract (ForkImporter.Import): the row must
+// be written before the copy lands. The dedupe key is (repository, ref,
+// after) and all three are known before the copy, so the provider's own
+// webhook for the copy — production's normal case — collapses onto this
+// row instead of inspecting the copy's whole tree and poisoning the flag
+// with the bootstrap file. Nothing about the recorded facts changes: the
+// row names the same commit the copy puts on the ref.
+func (i *PushIngester) IngestCopy(ctx context.Context, ev PushEvent, src CopySource) (bool, error) {
+	if err := i.refuseFrozenMain(ctx, ev); err != nil {
+		return false, err
+	}
+	params := IngestPushParams{Event: ev}
+	if isZerosSHA(ev.After) {
+		return i.store.IngestPush(ctx, params)
+	}
+	changes, candidates, err := i.copyEvidence(ctx, ev, src)
+	if err != nil {
+		return false, err
+	}
+	params.Changes, params.Candidates = changes, candidates
 	return i.store.IngestPush(ctx, params)
+}
+
+// copyEvidence is what one copy contributes, as the change and candidate
+// rows the delivery records. The recorded fork point (when the platform has
+// one) is a content diff; without one it is the source line's own recorded
+// evidence, so the copy cannot come out cleaner than its source.
+func (i *PushIngester) copyEvidence(ctx context.Context, ev PushEvent, src CopySource) ([]ClassifiedChange, []SemanticCandidate, error) {
+	if src.ForkPoint != "" {
+		return i.Inspect(ctx, src.Repository, src.ForkPoint, ev.After)
+	}
+	return i.store.SourceLineEvidence(ctx, src.Repository.ID, src.Ref, ev.After)
 }
 
 // classify inspects one changed path: only files whose path ends in .json

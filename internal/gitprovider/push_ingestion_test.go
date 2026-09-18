@@ -440,6 +440,13 @@ type fakeIngestStore struct {
 	// verdictAfters records the after SHA each verdict was asked about.
 	verdictAfters []string
 	frozenErr     error
+	// sourceEvidence is what the source line's evidence read answers
+	// (T0804's no-fork-point route): the records the source line's own
+	// completeness flag is derived from, as the copy carries them.
+	sourceEvidence     []gitprovider.ClassifiedChange
+	sourceCandidates   []gitprovider.SemanticCandidate
+	sourceEvidenceErr  error
+	evidenceAskedAbout []string
 }
 
 func (f *fakeIngestStore) WebhookSecretByRepoID(context.Context, int64) (string, error) {
@@ -470,6 +477,19 @@ func (f *fakeIngestStore) IngestPush(_ context.Context, in gitprovider.IngestPus
 	f.calls = append(f.calls, "ingest")
 	f.params = append(f.params, in)
 	return f.inserted, f.ingestErr
+}
+
+// SourceLineEvidence answers the source line's evidence (T0804). It records
+// the ref and commit it was asked about, so a test can show the read is
+// keyed on the copied line and the copied commit rather than on whatever
+// head the store happened to find.
+func (f *fakeIngestStore) SourceLineEvidence(_ context.Context, _ int64, gitRef, headSHA string) ([]gitprovider.ClassifiedChange, []gitprovider.SemanticCandidate, error) {
+	f.calls = append(f.calls, "source_evidence")
+	f.evidenceAskedAbout = append(f.evidenceAskedAbout, gitRef+"@"+headSHA)
+	if f.sourceEvidenceErr != nil {
+		return nil, nil, f.sourceEvidenceErr
+	}
+	return f.sourceEvidence, f.sourceCandidates, nil
 }
 
 // validMaterialDoc is a minimal document the material schema accepts.

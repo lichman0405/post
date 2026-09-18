@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/lichman0405/post/internal/application/projects"
@@ -81,15 +82,48 @@ func (s *PullRequestStore) CreatePullRequest(ctx context.Context, in pullrequest
 			}
 			return err
 		}
-		source, err := q.GetBranchByProjectAndID(ctx, sqlc.GetBranchByProjectAndIDParams{
-			ID:        sourceBranchID,
-			ProjectID: projectID,
-		})
+		// The source branch is read WITHOUT the project scope: an external
+		// proposal's source branch lives in the contributor's own fork
+		// project (docs/04 §2), which is a different project from the one
+		// the PR proposes to. What keeps that honest is the check right
+		// after the read — and 00086's pull_request_fork_gate, which
+		// enforces the same rule for ANY insert path, so a store that
+		// forgot the check could not open the PR either.
+		var sourceID, sourceProject, sourceBase pgtype.UUID
+		var sourceLifecycle string
+		err = tx.QueryRow(ctx,
+			`SELECT id, project_id, base_state_id, lifecycle_state FROM branches WHERE id = $1`,
+			sourceBranchID).Scan(&sourceID, &sourceProject, &sourceBase, &sourceLifecycle)
 		if errors.Is(err, pgx.ErrNoRows) || isInvalidText(err) {
 			return pullrequests.ErrBranchNotFound
 		}
 		if err != nil {
 			return err
+		}
+		if sourceProject != projectID {
+			// A cross-project source is the external fork's shape: it is
+			// allowed exactly when the source branch's project is a fork
+			// of THIS project forked by THIS PR's creator
+			// (open_pr = allow_from_fork for a non-member). Any other
+			// foreign source — an unrelated project, or somebody else's
+			// fork — reports the very same not-found outcome as a branch
+			// that does not exist (docs/45: a foreign entity's existence
+			// is never confirmed to a caller who may not use it). Naming
+			// the refusal differently here would say "that branch exists,
+			// in another project", which is the leak this read is
+			// unscoped to avoid, so the identity of the answer must not
+			// change with the reason. 00086's pull_request_fork_gate
+			// backstops the rule for any other insert path.
+			var ownFork bool
+			if err := tx.QueryRow(ctx,
+				`SELECT EXISTS (SELECT 1 FROM project_forks
+				   WHERE fork_project_id = $1 AND parent_project_id = $2 AND forked_by = $3)`,
+				sourceProject, projectID, createdBy).Scan(&ownFork); err != nil {
+				return err
+			}
+			if !ownFork {
+				return pullrequests.ErrBranchNotFound
+			}
 		}
 		target, err := q.GetBranchByProjectAndID(ctx, sqlc.GetBranchByProjectAndIDParams{
 			ID:        targetBranchID,
@@ -103,15 +137,19 @@ func (s *PullRequestStore) CreatePullRequest(ctx context.Context, in pullrequest
 		}
 		// A proposal never starts from or targets a closed research path
 		// (docs/43: merged/aborted history immutable).
-		for _, branch := range []sqlc.Branch{source, target} {
-			if branch.LifecycleState != string(domain.BranchLifecycleActive) {
-				return &pullrequests.BranchNotActiveError{
-					BranchID:  pgUUIDToText(branch.ID),
-					Lifecycle: branch.LifecycleState,
-				}
+		if sourceLifecycle != string(domain.BranchLifecycleActive) {
+			return &pullrequests.BranchNotActiveError{
+				BranchID:  pgUUIDToText(sourceID),
+				Lifecycle: sourceLifecycle,
 			}
 		}
-		if !source.BaseStateID.Valid || !target.BaseStateID.Valid {
+		if target.LifecycleState != string(domain.BranchLifecycleActive) {
+			return &pullrequests.BranchNotActiveError{
+				BranchID:  pgUUIDToText(target.ID),
+				Lifecycle: target.LifecycleState,
+			}
+		}
+		if !sourceBase.Valid || !target.BaseStateID.Valid {
 			return pullrequests.ErrBranchHeadMissing
 		}
 		// Number allocation: project row locked above, so MAX+1 is
@@ -130,7 +168,7 @@ func (s *PullRequestStore) CreatePullRequest(ctx context.Context, in pullrequest
 			SourceBranchID:  sourceBranchID,
 			TargetBranchID:  targetBranchID,
 			BaseStateID:     target.BaseStateID,
-			ProposedStateID: source.BaseStateID,
+			ProposedStateID: sourceBase,
 			Title:           in.Title,
 			Body:            in.Body,
 			CreatedBy:       createdBy,

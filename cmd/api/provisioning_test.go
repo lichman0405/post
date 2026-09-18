@@ -73,6 +73,11 @@ func (f *fakeProvisionPort) DeleteBranch(context.Context, gitprovider.Repository
 	return nil
 }
 
+// ImportBranch (T0804) is unreachable from the provisioning tests.
+func (f *fakeProvisionPort) ImportBranch(context.Context, gitprovider.ImportBranchSpec) (gitprovider.BranchRef, error) {
+	return gitprovider.BranchRef{}, gitprovider.ErrNotFound
+}
+
 // The push-ingestion methods (T0305) are unreachable from the provisioning
 // tests but the port contract requires them.
 func (f *fakeProvisionPort) ChangedFiles(context.Context, gitprovider.Repository, string, string) ([]gitprovider.FileChange, error) {
