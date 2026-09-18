@@ -56,6 +56,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/mergegit"
 	"github.com/lichman0405/post/cmd/api/mergehttp"
 	"github.com/lichman0405/post/cmd/api/milestonehttp"
+	"github.com/lichman0405/post/cmd/api/notificationshttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/policyhttp"
 	"github.com/lichman0405/post/cmd/api/profilehttp"
@@ -400,6 +401,13 @@ func run(args []string) int {
 	inboxAPI := inboxhttp.New(inboxhttp.Deps{Store: events.NewSubscriptionStore(pool)})
 	v1.Handle("/api/v1/inbox", inboxAPI.Routes())
 	v1.Handle("/api/v1/inbox/", inboxAPI.Routes())
+	// Email notification settings (T1005): how often the account's email
+	// notifications arrive (immediate/daily/weekly). The setting is the
+	// account's own — the routes take no user id — and the worker's digest
+	// sender reads the same row through the same store.
+	notificationsAPI := notificationshttp.New(notificationshttp.Deps{Store: events.NewNotificationStore(pool)})
+	v1.Handle("/api/v1/notifications/preferences", notificationsAPI.Routes())
+	v1.Handle("/api/v1/notifications/", notificationsAPI.Routes())
 	// Scoped git tokens (T0304): the user-credential surface over the
 	// internal Gitea. Like provisioning it needs provider configuration,
 	// but its own gate: the admin credentials may be unset while

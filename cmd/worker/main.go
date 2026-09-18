@@ -25,6 +25,14 @@
 // timestamp) with exponential-backoff retries and the disable policy.
 // Both loop forever on transient failures like the dispatcher and stop
 // only on shutdown.
+//
+// T1005: the email digest sender has arrived — a fifth goroutine over the
+// same pool turns the pending email rows the subscription fan-out writes
+// into digests, honouring each subscriber's cadence
+// (immediate/daily/weekly) and re-authorizing every delivery at send time.
+// Its transport is configuration: POST_MAIL_SINK_DIR enables the
+// development mail sink (messages are written to a directory, not sent);
+// unset, email delivery is off and the worker says so at startup.
 package main
 
 import (
@@ -42,6 +50,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/lichman0405/post/internal/application/notifications"
 	"github.com/lichman0405/post/internal/config"
 	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/observability"
@@ -154,6 +163,55 @@ func run(args []string) int {
 		defer pipelineWG.Done()
 		_ = subscriptionFanout.Run(ctx)
 	}()
+	// The email digest sender (T1005), the last consumer of the same pool:
+	// it claims the pending email rows the subscription fan-out writes, when
+	// the subscriber's cadence says a digest is due, re-authorizes every
+	// claimed delivery against live state (the send-time gate — the fan-out
+	// cannot revisit a target until the next event on it arrives), renders
+	// one digest per subscriber and hands it to the transport.
+	//
+	// The transport is configuration, not code: POST_MAIL_SINK_DIR names the
+	// dev mail sink's directory. Unset means email delivery is OFF — the
+	// sender is not started at all and the pending rows stay pending (they
+	// are not lost: a worker configured with a sink later sends them). The
+	// switch is stated in the startup log either way, because "no email
+	// arrived" and "email was never configured" must not look the same.
+	mailCfg, err := notifications.Loader{}.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "post-worker: configuration error:\n%v\n", err)
+		return exitConfig
+	}
+	if mailCfg.Enabled {
+		sink, err := notifications.NewDevSink(mailCfg.SinkDir, notifications.WithDevSinkLogger(logger))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "post-worker: mail sink error:\n%v\n", err)
+			return exitConfig
+		}
+		sender := notifications.NewSender(
+			events.NewNotificationStore(pool), sink,
+			notifications.WithSenderLogger(logger),
+			notifications.WithSenderBaseURL(mailCfg.WebOrigin),
+		)
+		if cfg.Layer == config.LayerProd {
+			// The dev sink writes messages to a local directory instead of
+			// sending them: in a production layer that is a silent no-op for
+			// every subscriber, so it is said out loud.
+			slog.Warn("post-worker: email delivery uses the DEVELOPMENT mail sink — messages are written to disk, not sent",
+				"dir", mailCfg.SinkDir, "layer", cfg.Layer,
+				"effect", "subscribers receive nothing until a real transport is configured")
+		}
+		pipelineWG.Add(1)
+		go func() {
+			defer pipelineWG.Done()
+			_ = sender.Run(ctx)
+		}()
+		slog.Info("post-worker: email digest sender started",
+			"dir", mailCfg.SinkDir, "web_origin", mailCfg.WebOrigin)
+	} else {
+		slog.Info("post-worker: email delivery disabled — no mail transport configured",
+			"missing", notifications.EnvMailSinkDir,
+			"effect", "pending email deliveries stay pending until a transport is configured")
+	}
 	// Shutdown ordering (T1001 review): cancel the root context first —
 	// the deferred stop() above would run too late for this join (defers
 	// run LIFO, so it fires only after the cleanup below) — then join the
