@@ -11966,3 +11966,70 @@ fork 的**发起**接口根本还不存在（`cmd/api` 不 import forks、OpenAP
 **五、我另外核过的**：F3 的 AC-11 措辞已改成"服务层成立、生产接线无 HTTP 面"并**自己验证**了
 `grep -rn "application/forks" cmd/api/` 为空；MB2 的标签改到 push 路径（`:1001`），
 import 路径的见证是 `:1037`（行号漂移是这轮改动造成的，它逐条对过了）。
+
+## 2026-09-19 T0804 第二次独立评审：一条阻断成立 → 第二次缺陷性返工（rework，不是 respawn）
+
+**评审结果**：`request_changes`，1 blocking + 1 major + 2 minor。三条我逐条自己复现过，没有照抄。
+
+### 一、阻断意见成立：导入的基线判定让不可解析的内容洗白了
+
+四段证据链，我一段段走完：
+
+1. **这是本任务新写的代码**：`git show 8587175:internal/gitprovider/push_ingestion.go` 里没有
+   `IngestCopy`（无命中）；`internal/gitprovider/forkimport.go` 与 `forkimport_test.go` 在
+   `git status` 里是 `??`。所以基线策略是这一轮的判断，不是继承来的包袱。
+2. **没有记录分叉点时检查根本没发生**：`push_ingestion.go:436-439`
+   （`base := baselineSHA; if base == "" || base == ev.After { base = ev.After }`）
+   → `Inspect` 拿提交和它自己比 → 零 change；基线来自 `forkimport.go:239` 的 `SourceForkPoint`，
+   在 `:281` 传给 `IngestCopy`。
+3. **"没有分叉点"≠只有 main**：`refsync.go:154` 回落默认分支（注释自称
+   "every branch forks the accepted head"），`refstore.go:183` 的
+   `CASE WHEN $2 <> '' THEN $2 ELSE fork_sha END` 让回落路径**保持 NULL** ——
+   于是**任何从"没有 `git_commit_sha` 的状态"建出的研究线**，`fork_sha` 都是 NULL
+   （只有 push ingestion 填那一列：`push_ingestion_store.go:312`）。**工人自己的 fixture 就是这个形状**：
+   `external_fork_e2e_test.go:997` 的 `line-r1` 以 `""` 建分支。代码注释把这一类写成
+   "the parent's main: the line that IS the baseline" —— **前提是错的**。
+4. **旗子变 complete、两道门放行**：`semantic_state.go:41`/`:86` 在缺证据时判 complete；
+   `00042:137`（PR 开单查**源分支**）与 `00042:103`（merge 再查一次）只看那一行。
+
+**后果**：`data/raw.csv` 推到 `line-r1` 后它自己是 `unstructured_changes`、自己发不出正式 PR，
+**它的 fork 却带着同一份内容以 `semantic_complete` 开出了 PR 并 merge**。
+这逐字命中 requirements 第二条禁的 (a) 路（"没看过就报无异常"），也和 AC-6 的
+"从真实证据派生的值"冲突。**成立，返工。**
+
+**我给工人的是一条不变式，不是实现**：**导入那一刻，拷贝分支的旗子不得比源分支更干净**；
+同时三条底线不许破（不吃默认值 / 不一律标死 / 证据要落进 change 行让既有规则能解开它）。
+平台自己的 `README.md`（`mainprotection.go:50`）确实能永久锁死 —— 那是"基线要精确"的理由，
+不是"可以不看"的理由。路线（L1）由工人选并在 RESULT 写明。
+
+### 二、major 成立：AC-6 的那对只覆盖了有分叉点的形状
+
+第 (6) 组 fork 的 r2/r3 都从 `c1` 建（分叉点在 `:1021` 被断言），而 fixture 里**没有分叉点的
+`line-r1`（`:997`）从头到尾没被 fork 过**。所以这条洞在套件里是隐形的——
+"只差一个场景"是准确的描述。已要求补正负两条（负：push raw.csv 到 `line-r1` 再 fork 它，
+断言导入分支 = `unstructured_changes` 且开 PR 被 00042 拒；正：fork 一条干净的无分叉点线，
+断言不被锁死）。
+
+### 三、两条 minor 成立：RESULT 没披露；以及 F1 残留
+
+我查了 RESULT：`baselineSHA` 只出现 1 次，`empty baseline` / `no recorded fork point` /
+`fork_sha` 各 **0** 次 —— requirements 第二条的出口是"**披露**"，这一轮没用。
+F1 那条残留是我上一轮已经裁定"记录 + 延后"的，评审也只是"记录下来备案"，不额外处置。
+
+### 四、§11 的处置：**rework**，并把界线画死
+
+按 §11 字面，第二次缺陷性不通过就该 `respawn`。**我沿用 L1-20260912-41 先例的判据不用它**：
+那条规则针对的是"**同一个 Worker 在同一处反复失败**、context 已污染"。这一次的缺陷出在
+**此前任何一次评审都没碰过的文件**（第一轮独立评审在这两个文件上判的是 approve，
+且明确把第四封点名要修的两处判为"站得住"），而工人已经通过了它被衡量的**每一个** Gate
+（collect / G2 / G3 / 我的独立复验）。`respawn` 会 `reset --hard + clean -fd` 丢掉 28 个路径、
+四轮返工的全部成果（`.rddev/` 是 gitignore 的，那份 diff 不留任何副本）。
+
+**硬边界（写下来以便被追责）：下一次再因真缺陷被拒 → `rddev worker respawn`，不再讨论。**
+这一封已经把界线告诉工人本人（信里第零节），并要求它这一轮一次做对、附变异证据。
+
+### 五、这一轮我要的东西（写进信里的）
+
+不变式 + 三条底线 + 精确基线（不许用"不看"来回避 `README.md` 的锁死问题）+ 两类 e2e 场景
++ **变异证据**（证明补的测试能失败）+ RESULT 必须披露（路线、覆盖了什么、剩什么、谁补）。
+纪律照旧：不许删/跳过/弱化测试、不许自行选号、范围不变。
