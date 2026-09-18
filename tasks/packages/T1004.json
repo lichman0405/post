@@ -1,0 +1,62 @@
+{
+  "id": "T1004",
+  "phase": "P10",
+  "phase_name": "Research Events、订阅与 Impact Analysis",
+  "title": "RSS/Atom Feeds",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "dependencies": ["T1002"],
+  "requirements": [
+    "public Project/Asset/Knowledge feeds",
+    "stable ids/version links"
+  ],
+  "acceptance_criteria": [
+    "未登录可订阅 public feed",
+    "private 无 feed"
+  ],
+  "tests": ["feed tests"],
+  "allowed_scope": [
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "internal/persistence/**",
+    "internal/events/**",
+    "internal/application/**",
+    "cmd/api/**",
+    "go.mod",
+    "go.sum",
+    ".env.example",
+    "tests/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "specs/api/openapi.yaml",
+    "specs/events/**",
+    "internal/authz/**",
+    "specs/policies/**",
+    "apps/web/**",
+    "cmd/worker/**"
+  ],
+  "relevant_specs": [
+    "**你接手的是上一轮的半成品，它就在你的 worktree 里。** `.rddev/worktrees/T1004/` 是一个**脏工作树**（基线 `c42a77c`），里面有上一轮 worker 写完但没来得及提交的东西：`cmd/api/feedshttp/`、`internal/application/feeds/`（含 `feed.go`/`render.go`/`service.go` 和三个 `_test.go`，共约 1000 行）、`tests/integration/feed_test.go`（797 行）、`internal/persistence/feed_store.go` + `queries/feeds.sql` + `sqlc/feeds.sql.go`、`infra/migrations/00080_public_feed_indexes.sql`。**先完整读一遍再动手**，它做对了很多事（见下），也有一处必须改的设计（见决定一）。你的任务是**修好那一处、把范围理正、在新基线上重跑**，不是从零重写。在本轮 RESULT 里写清楚：你保留了哪些、改了哪些、为什么。",
+    "**那份半成品做对、你必须保留的部分**（我读过，以下是逐项认可）：`cmd/api/feedshttp/wiring.go` 的三条匿名 GET（`/api/v1/feeds/projects/{projectId}`、`/assets/{assetId}`、`/knowledge/{knowledgeId}`）；`?format=atom|rss` 优先、`Accept` 只认 `application/atom+xml` 与 `application/rss+xml`、其余默认 Atom、非法 format 回 400；`internal/application/feeds/render.go` 用 `encoding/xml` 手写 Atom 1.0 / RSS 2.0；urn 形状的稳定 id（`urn:post:feed:<kind>:<id>`、`urn:post:asset-version:<uuid>`、`urn:post:knowledge-publication:<uuid>`）；链接一律用配置的 `POST_WEB_ORIGIN` 拼、**绝不读请求的 `Host`**；RSS `<guid isPermaLink=\"false\">` 用 urn、`<link>` 用 URL；ETag 取渲染字节的 sha256、`Cache-Control: public, max-age=60`、支持 304；**未知目标 / 私有目标 / 存在但无公开版本，三种情况回同一个 404**（`feedshttp/handlers.go` 的 `writeNotFound`，注释写明「It names nothing — not the target, not the kind, not the reason」）——这是本项目「低权限与不存在必须同答」的既有口径（`tests/e2e/anonymous_e2e_test.go:371-385`）。这些都不要退回去改。",
+    "**唯一必须改的设计，而且它不是风格问题。** 半成品把可见性过滤放在了 Go 里，SQL 只把行**原样取出来**——它自己在 `internal/persistence/queries/feeds.sql:8-13` 写着「These queries do NOT decide what may be rendered / The entry lists return the rows as STORED, private ones included」。这违反本项目**已记录在案的硬性裁决**，原文在 `tasks/decisions.md:438`：**「任何返回集合的读查询都必须显式接受并应用 scope；只按主键返回单实体的查询不在此列。」** 这条不是建议，是当年 search 查询被安全评审判 `broken-access-control` 之后定下的强制要求（同一份 `decisions.md` 里记着那次处置的全文）。",
+    "**而且「选集后再过滤」在这里立刻产生一个可证的 bug，不只是原则问题。** `feeds.sql` 的条目查询带 `LIMIT @row_limit`，常量是 `DefaultMaxEntries = 50`（`internal/application/feeds/feed.go`）。LIMIT **作用在未过滤的行上**，于是：若某个 public 项目最新的 50 个 asset version 恰好都是 private，那 50 个槽位会被占满，**更早的 public 条目被静默挤掉**，feed 看起来是空的；更糟的是半成品规定 asset/knowledge 目标过滤后为空要回 404，于是一个**确实有 public 版本**的资产会答 404——直接违反本任务第二条验收「未登录可订阅 public feed」。这正是仓库里已经写下的同型陷阱，`cmd/api/explorehttp/store.go:51-55`：「a deactivated row consuming one of the twenty slots would silently shrink the section」。",
+    "**不许照抄 `asset_page.sql` 的「查询不过滤可见性」写法——那是另一回事。** `internal/persistence/queries/asset_page.sql:10` 确实写着「These queries do NOT filter by visibility, deliberately」，那是 T0709 已合入 main 的房屋风格。但那个场景与本任务有两点根本不同：(1) 那个查询**没有 LIMIT**，不存在截断；(2) 它服务的是**成员视角**，读者本来就必须拿到全集再由模型按权限裁剪。**匿名 feed 没有成员变体——全集从来不是答案。** 照抄先例在这里恰恰抄错了场景，这一点由我裁定，不要再自行判断。",
+    "**匿名可访问是现成机制，不需要你发明。** `cmd/api/main.go` 里所有产品面挂在同一个 `v1` 子树下，由 `authAPI.Guard(v1)` 统一包住；而 `cmd/api/authhttp/auth_middleware.go` 的守卫**按 HTTP 方法判定**，只覆盖 POST/PUT/PATCH/DELETE——**GET 一律放行**，无论有无 session。所以 feed 路由只要 `Register(v1)` 且只声明 GET，就天然匿名可读。同型先例：`cmd/api/explorehttp/wiring.go` 的 `v1.HandleFunc(\"GET /api/v1/explore\", ...)`。",
+    "**路由不是 chi，是标准库。** `cmd/api/main.go` 用 `http.NewServeMux()` + Go 1.22 的方法化 pattern（`mux.HandleFunc(\"GET /path\", h)`），`go.mod` 声明 `go 1.27`，**没有 chi/gorilla/httprouter**。照 `explorehttp/wiring.go` 的 `func (a *API) Register(v1 *http.ServeMux)` 形状写。",
+    "**「private 根本不进结果集」的正统写法，逐字读一遍再动手**：`cmd/api/explorehttp/store.go:27-33`——「A private project's name, slug and visibility therefore never leave the database on this path: not \"read and withheld\", **never selected**.」这是本任务要复刻的形状。公开集的唯一真源分别是 `ListPublicProjects`（`internal/persistence/queries/projects.sql`，`WHERE visibility = 'public'`）与资产 browse 的 `asset_page.sql`（`WHERE rav.visibility = 'public'`）——**把过滤写进 WHERE，让 LIMIT 落在过滤之后**。",
+    "**可见性在各表怎么表示（喂给 WHERE 用）**：`projects.visibility`（`infra/migrations/00003_projects.sql:21`，两态 `public|private`）；`research_asset_versions.visibility`（`infra/migrations/00010_releases_assets.sql:43`，同两态），**且 `internal/assets/page.go:94` 逐字写着「An EMPTY visibility is not public.」——空值不是 public，别把它当公开**；**Knowledge 的 publication 没有 visibility 列**（`knowledge_publications`，`00010_releases_assets.sql:64-72`：`object_version_id`/`public_version`/`rights_json`/`published_by`/`published_at`/`UNIQUE(object_version_id,public_version)`）——**发布本身即公开动作，私有只由所属 project 决定**，这条读法在 `internal/application/explore/index.go:103-105` 有原文：「a private project may publish, and then the publication travels without it」。",
+    "**契约：`specs/api/openapi.yaml` 里没有任何 feed 路径，这是真的。** 但「契约里没有」在本仓库有既有先例且被明确记账：`cmd/api/explorehttp/doc.go:21-30` 开头就是「The path is not in the API contract」并援引 T0505。契约由我维护，**不在你的范围内**——按上面的决定四办。",
+    "**稳定 id 的材料**：Asset 的对外身份是 `pid`（26 个 Crockford base32，`infra/migrations/00064_asset_pid_origin.sql:8-11` 写明它「deliberately independent of every mutable attribute」）；Asset 版本的永久 URL 形状见 `internal/assets/url.go:47-57`（`/assets/{pid}/{version}`，注释写明「the version label is immutable … the URL is stable forever」）；Knowledge 的稳定身份用 `knowledge_publications.id`（uuid，append-only，`UNIQUE(object_version_id, public_version)` 锁死）。",
+    "**迁移编号我已经分配好了：`00080`。** 账本 `.rddev/runtime/migration-numbers.json` 里 `T1004 -> 80`，分配器（`internal/devorchestrator/migration_numbers.go`）是幂等的，rework 保留原号。**不要自己选号，也不要用 main 上最大号 + 1**（main 现在最大是 `00078`，但 79/80/81/82/83 都已分别留给 T1003/T1004/T1005/T0711/T0805）。编号稀疏是本仓库常态，`tests/integration/migration_test.go` 里有一条注释专门解释这一点。",
+    "**迁移的规矩**：`infra/migrations/README.md`——已发布的迁移**永不修改**；改了数据库必须写**新的更高编号**；`specs/database/postgres.sql` 是**生成物**，只能由 `python3 scripts/gen_schema_snapshot.py` 重新生成，然后跑 `make check-schema-snapshot` 与 `make check-spec-version`；**不写 down migration**。新增/修改表、列、CHECK、显式索引后，必须同步扩 `tests/integration/migration_test.go` 的目录夹具，否则 `TestFreshInstallCatalog` 会红（`catalog_test.go` 对表集合与列集合做**全等**比较）。",
+    "**半成品的索引与它自己的查询对不上，你要么改索引要么改查询，让两者一致。** `infra/migrations/00080_public_feed_indexes.sql` 里建了一条 `research_asset_versions_public_published_idx … WHERE visibility = 'public'` 的**部分索引**；但半成品的条目查询 WHERE 里没有 `visibility` 谓词，而部分索引只在查询谓词能推出索引谓词时才可用。按决定一把过滤写进 WHERE 之后，这条索引才真正成立——**这正是那条决定的一个附带收益，不是额外工作**。",
+    "**本任务不必然要动前端。** 「未登录可订阅」是 HTTP 层属性（匿名 GET 返回 XML + 正确的 `Content-Type`），curl 或任意 feed reader 即可验收；`apps/web/**` 里目前没有任何 RSS 相关痕迹，页面 `<head>` 里的 `<link rel=\"alternate\">` 是可选项。**我把 `apps/web/**` 从你的范围里拿掉了**——这一轮不做前端。"
+  ],
+  "scope_note": "这是**按本任务的实际交付面重新划过**的范围，因为 DAG 里的 phase 级默认值**根本装不下**这个交付面：它的 allowed_scope 只有 `internal/events/**`、`internal/application/**`、`cmd/worker/**`、`cmd/api/**`、`apps/web/**`、`tests/**`——**连 `infra/migrations/**` 和 `internal/persistence/**` 都没有**，而一个 feed 既要读 SQL 又（按决定一）必须改 SQL。照原范围派工，本任务在结构上落不了地。**加**：`infra/migrations/**`（已分配 00080）、`internal/persistence/**`（查询与 store——决定一要求过滤下沉到 SQL，没有这条就无处分流）、`specs/database/postgres.sql` + `specs/SPEC_VERSION.json`（§8.1 的派生物纪律要求覆盖迁移目录者必须一并覆盖它，写入方式只有重新生成）、`go.mod`/`go.sum`/`.env.example`（`POST_WEB_ORIGIN` 已由 authn 提供，见 `internal/application/authn/config.go`）。**明确不加**（并写进 forbidden_scope）：`apps/web/**`（本轮不做前端）、`cmd/worker/**`（feed 是同步只读，不需要后台任务，DAG 默认给了但本任务用不上）、`specs/api/openapi.yaml`（契约由我维护）、`specs/events/**`、`internal/authz/**` + `specs/policies/**`（权限是安全边界）、`docs/**`。",
+  "supervisor_scope_narrowing": "2026-09-18 定稿。四点决定。\n\n**决定一（本轮最要紧的一条）：可见性过滤必须下沉到 SQL，`LIMIT` 必须落在过滤之后。** 半成品的「全取出来再在 Go 里筛」写法被否，理由有两条，任一条都够：(a) 它违反 `tasks/decisions.md:438` 已经记录在案的**强制要求**——「任何返回集合的读查询都必须显式接受并应用 scope」；(b) 它产生一个可证的 bug：LIMIT 在过滤前生效，于是「最新 50 个版本都是 private」会把更早的 public 条目挤掉，甚至让一个有 public 版本的资产回 404。**这不是让你重写 feed——渲染层、urn id、ETag、404 合并全都保留**，改的是查询的过滤位置与 `LIMIT` 的相对次序。\n\n**决定二：不照抄 `asset_page.sql` 的「查询故意不过滤」先例。** 那条先例在它的场景里是对的（无 LIMIT、有成员视角）；匿名 feed 两者都不成立。**这条由我裁定，你在实现里不必再权衡**——如果你认为我的判断有误，记 `blocked` 并引用 `asset_page.sql:10` 原文说明，我会重新裁定，但不要默默照抄。\n\n**决定三：Knowledge 的对外链接，宁可不给也不给假的。** 知识对象的公开路由由 T0805（正在飞）建立，目前仓库里**确实没有这个路由**（`apps/web/app/sitemap.ts` 里自陈 knowledge 路由尚不存在）。规则：**feed 条目必须始终带稳定的 urn id**（用 `knowledge_publications.id`）；**链接只有在路由真的存在时才输出**，否则不输出 `<link>`，**绝不指向一个 404**——这是仓库自己的既有教条，`internal/application/explore/index.go:47-52` 逐字写着「a link to a route that does not exist is a lie in the shape of an href」。不要为了「stable version links」这条需求去造一个路由。\n\n**决定四：契约由我补，你不改契约文件。** 本任务需要的新路由（三条 feed 路径）**不在** `specs/api/openapi.yaml` 里，而那个文件不在你的范围内。处理办法：**按仓库既有风格把路由注册好**（`Register(v1)`，只声明 GET，天然匿名）；**不要自己改契约文件**。我验收时会把契约补上——我在 T0805 上做过同一件事（派工时把 `knowledge:publish` 两条补进了契约）。仓库里已有「路由不在契约内且被明确记账」的先例（`cmd/api/explorehttp/doc.go:21-30`），所以这不是违规。若你拿不准某条路由的形状，记 `blocked` 问我。\n\n**另有两条边界**：\n（1）**不要试图去改订阅/投递管线**（`internal/events/**` 在范围内，但本任务用不到它）——feed 是直接读公开实体的只读视图，不经过 outbox，也不产生投递行。\n（2）**不要让任何一条 feed 路径因为「拿不准可见性」而回落到返回数据**。拿不准就是不给：`internal/assets/page.go:94` 已经立过这条规矩（「An EMPTY visibility is not public.」）。"
+}

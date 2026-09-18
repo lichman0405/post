@@ -1,0 +1,64 @@
+{
+  "id": "T1005",
+  "phase": "P10",
+  "phase_name": "Research Events、订阅与 Impact Analysis",
+  "title": "Email Digest abstraction",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "dependencies": ["T1002"],
+  "requirements": [
+    "immediate/daily/weekly preference",
+    "dev mail sink",
+    "templates concise"
+  ],
+  "acceptance_criteria": [
+    "测试邮件不含 unauthorized private content"
+  ],
+  "tests": ["email tests"],
+  "allowed_scope": [
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "internal/persistence/**",
+    "internal/events/**",
+    "internal/application/**",
+    "cmd/worker/**",
+    "cmd/api/**",
+    "go.mod",
+    "go.sum",
+    ".env.example",
+    ".gitignore",
+    "Makefile",
+    "tests/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "specs/api/openapi.yaml",
+    "specs/events/**",
+    "internal/authz/**",
+    "specs/policies/**",
+    "internal/rsg/**",
+    "apps/web/**",
+    "ops/**"
+  ],
+  "relevant_specs": [
+    "**你接手的是上一轮的半成品，它就在你的 worktree 里。** `.rddev/worktrees/T1005/` 是一个脏工作树（基线 `c42a77c`），里面有上一轮 worker 写完未提交的东西：`infra/migrations/00081_email_digest.sql`、`internal/application/notifications/`（`sink.go`/`template.go`/`config.go`/`sender.go`/`ports.go` 等）、`internal/events/notification.go` + `notification_store.go` + `notification_test.go`、`cmd/api/notificationshttp/`、`tests/integration/email_digest_test.go`，并改了 `cmd/worker/main.go`、`.env.example`、`tests/integration/migration_test.go`。**先完整读一遍再动手。** 它在**发送时再授权**这件事上做对了（见下），你要保留；但有两个地方要按我的裁定改（见决定一、决定二）。RESULT 里写清楚保留了什么、改了什么、为什么。",
+    "**投递行已经是给你准备好的队列，不要另建。** `infra/migrations/00078_subscriptions.sql` 的 `subscription_deliveries`：`channel` 列 `CHECK (channel IN ('web','email'))`；注释逐字写着 email 行「are born 'pending' for the [digest sender]」，而 web 行「are born 'delivered' — the research inbox IS the delivery」。Go 侧 `internal/events/subscription.go:73-75` 逐字：「the pointer the inbox (T1003) and the digest sender (T1005) read. **It carries no event content** — EventID names the append-only research event and the target names the subject」。**投递行里没有内容**，这是它作为「指针」的设计，不是缺陷——你要展示什么，得自己按 event_id 去取。",
+    "**渠道偏好已经存在，而且它就是「关掉邮件」的开关。** `subscriptions.channels` 受 `CHECK (cardinality(channels) > 0 AND channels <@ ARRAY['web','email']::text[])` 约束，用户可以 PATCH 掉 email——`cmd/api/subscriptionshttp/subscriptions_handlers.go` 的 `Channels []string`。**见决定三：不要再造一个独立的开关。**",
+    "**「邮件必须在发送时重新鉴权」不是我的发明，是订阅管线自己的既有教条。** `internal/events/subscription_store.go` 逐字：「a channel that delivers later (email) must not send a notification the future fan-out would [refuse]… Rows already [delivered are not recalled]」——这正是 fan-out 撤权时只动 `status='pending'` 行的理由（`subscription_fanout.go` 的 `cancelUndeliverableDeliveries`）。授权是**每次现算**的（`TargetAudience`），不是订阅时刻的记忆。**所以一个排队中的 email 在真正离开发送进程之前，必须再问一次「现在还能给他看吗」。** 半成品已经这么做了（`internal/application/notifications/sender.go` 的 `gate`，调 `events.Delivers(level, state.EventVisibility)`），**保留它**，并在测试里钉住「撤权后不再发出」而不只是「没报错」。",
+    "**模板的泄漏面在结构上很小，但你要把它钉住。** 半成品的形状是：邮件只带「发生时间 + 事件类型 + target 的标签 + 链接」，**不带事件 payload**（`internal/application/notifications/template.go` 的注释逐字：「Nothing else — no event payload, no ids beyond the target's own link」）；标题刻意只带条数不带内容；标签只在 `gate` 通过**之后**才去读。这两条都要保留。**它们的弱点是「没有标签时回退成原始 id」——那仍在「他有权看的对象」范围内，可以接受，但要在测试里说明。**",
+    "**本任务不需要任何新的外部凭证，也不许引入。** `.env.example` 里现在**没有任何 SMTP/邮件变量**；`.github`/CI 里也没有。V1 承诺的只有「abstraction」：`docs/02_V1_SCOPE.md:57` 逐字「Web notification、Email abstraction、RSS/Atom、Webhook API 基础」；`docs/25_CICD_DEVOPS.md:9` 只说 dev 栈要能起一个 «mail sink»，没说应用要连它。**见决定一：本轮只做端口 + 开发用实现，不接真 SMTP，不接 Mailpit。**",
+    "**「immediate/daily/weekly」在规格文档里一个字都没有——它只出现在任务元数据里。** 我 grep 过 `docs/`、`specs/`：`docs/18_EVENTS_SUBSCRIPTIONS.md:18` 只有一句抽象表述「- Email immediate/digest abstraction」，`:13` 是「用户可 follow … 并选择 event categories。默认避免通知每个低级 commit。」。**没有更细的规格可抄，别去找。**",
+    "**「用户能不能关掉某类通知」在规格里同样零命中**（`unsubscribe`/退订/通知设置 在 `docs/`、`specs/`、`apps/` 全空；`docs/42_PAGE_SPECS.md` 里连 notifications 页都没描述）。**见决定三：V1 不加开关。**",
+    "**后台任务怎么挂：照抄既有形状，不要注册 job type。** `cmd/worker/main.go` 的注释逐字写着「The only registered job type is \"smoke\"」；已有的三个 outbox 消费者（dispatcher、webhook fanout、subscription fanout）**全都是常驻 goroutine**，各自暴露 `Run(ctx)` 与 `RunOnce(ctx)`（后者既是测试入口），轮询用 `time.NewTicker(DefaultPollInterval)`（`internal/events/publish.go` 的 `DefaultPollInterval = time.Second`；`subscription_fanout.go` 的 `Run`/`RunOnce` 是同型范例），并在 `cmd/worker/main.go` 里手工起、由 `shutdown(...)` 先 cancel 再 join。**仓库里没有 cron，也没有周期 job 机制——不要发明一个。**",
+    "**测试怎么写才算数，仓库里有三条要抄的前例**：(1) `tests/integration/asset_page_test.go` 的 `forbidInBody` 辅助函数，它的注释逐字写着「**An empty string is a failure rather than a pass: a check that forbade nothing is the shape that reads green while measuring nothing**」；(2) `tests/integration/privacy_test.go` 的原始 body 泄漏循环（拿私有对象的 id 逐个 `strings.Contains` 扫原始响应）；(3) `tests/e2e/anonymous_e2e_test.go` 的 canary 写法——它同时断言「低权限与不存在必须给出**同一个**答复」，否则差异本身就在泄漏。**见决定四：本任务的测试必须同时有正面控制。**",
+    "**迁移编号我已经分配好了：`00081`。** 账本 `.rddev/runtime/migration-numbers.json` 里 `T1005 -> 81`，分配器幂等。**不要自己选号**（main 最大是 `00078`，79–83 已分别留给 T1003/T1004/T1005/T0711/T0805）。",
+    "**`tests/integration/migration_test.go` 为什么必须动，说清楚免得你以为是惯例**：它是 **pg_catalog 快照夹具**，注释逐字「Expected catalog, derived 1:1 from specs/database/postgres.sql … If the canonical schema changes without a migration, this fixture makes the drift fail loudly here.」；`compareCatalog` 对表集合（`catalog_test.go` 的 `reflect.DeepEqual(gotNames, wantNames)`）与列集合做**全等**比较。所以**任何新表、新列、新 CHECK、新显式索引都必须同步登记进 `canonicalTables` / `explicitIndexes`**，否则 `TestFreshInstallCatalog` 与 `TestUpgradePath` 直接红。半成品已经按规矩改了，保留它的做法。",
+    "**迁移的规矩**：`infra/migrations/README.md`——已发布的迁移**永不修改**；`specs/database/postgres.sql` 是生成物（只能 `python3 scripts/gen_schema_snapshot.py` 重新生成），改完跑 `make check-schema-snapshot` 与 `make check-spec-version`；**不写 down migration**。"
+  ],
+  "scope_note": "这是**按本任务的实际交付面调整过的范围**。相对 DAG 里的 phase 级默认值：**加** `.gitignore`（sink 产物必须被 git 忽略，见决定二——DAG 默认范围里没有它，不加就落不了地）、`Makefile`（若你要加一个查看 sink 的目标）、`cmd/api/**`（偏好接口）、`cmd/worker/**`（发送者在既有形状里挂在这里）。**明确不加**（并写进 forbidden_scope）：`apps/web/**`（本轮不做前端，偏好走 API；而且 `/notifications` 页归 **T1003**，两个任务同时改它必然冲突）、`ops/**`（`ops/` 归 T1110）、`specs/api/openapi.yaml`（契约由我维护）、`specs/events/**`（事件词表由我维护）、`internal/authz/**` + `specs/policies/**`（权限矩阵是安全边界）、`internal/rsg/**`、`docs/**`。",
+  "supervisor_scope_narrowing": "2026-09-18 定稿。四点决定，都是为了把「规格没写的」和「我该拍板的」分开——**这两处空白都是工程选型，不是产品语义，所以是我的层，不该拿它去阻塞任务**。\n\n**决定一：dev mail sink 做成「写文件」，本轮不接 Mailpit，也不接真 SMTP。** 栈里确实有 Mailpit（`docker-compose.yml` 的 `mailpit` 服务，`infra/docker/README.md` 称它「dev mail catch-all」，凭证列是 `none`），所以接它**不算**引入新凭证。我仍然否掉它，理由是本任务唯一的验收标准是**「测试邮件不含 unauthorized private content」——这条要求测试能读到邮件的字节并逐字断言**。让这条断言依赖一个活着的 SMTP 容器，等于让隐私验收在 CI 里变得不可测；而 V1 承诺的本来就只是 abstraction（`docs/02_V1_SCOPE.md:57`）。所以：**做端口（`Mailer` 形状的接口，照 `ports.go` 里已有的写法），V1 只提供开发用实现，它把每条消息写成一个文件到 `POST_MAIL_SINK_DIR` 指向的目录**。半成品已经这么做了，保留它。将来接生产 SMTP 时，换的是这个端口的实现，不动领域代码——这正是端口的用途。**未设 `POST_MAIL_SINK_DIR` 时必须是关闭而不是报错**（半成品如此，保留）。\n\n**决定二：sink 产物必须被 git 忽略，而且这件事要有测试。** 半成品的 `.env.example` 自己承认「the repo's .gitignore does not cover a dev-mail path yet (see T1005 RESULT follow-ups)」，而那份 follow-ups 清单并不存在——**这是个真实的隐患：明文 `.eml` 和备份产物一样，一旦被 `git add -A` 扫进去就进了历史。** 你的活儿：(a) 给 sink 目录加 `.gitignore` 条目（或让默认目录落在已忽略的路径下）；(b) **写一条测试断言 sink 产物对 git 不可见**（`git status --porcelain` 里不出现），让这条保护会失败而不是只写在注释里。目录权限沿用半成品的做法（目录 0700、文件 0600）。\n\n**决定三：V1 不加「关掉某类通知」的开关——已存在的渠道列表就是开关。** 我在 `docs/`、`specs/`、`apps/` 里搜遍了 `unsubscribe`/退订/通知设置，**零命中**，也就是说「能不能关」根本没有产品语义可依。而「把 email 从 `subscriptions.channels` 里去掉」这件事 T1002 已经建好了、也有测试。**再造一个独立开关就是我在发明产品规则**，那越过了我的层。所以：**不加开关，也不加「退订链接」**。如果将来 owner 要求，那是一条独立的 L3 裁定。\n\n**决定四：验收的隐私测试必须有正面控制，否则不准算过。** 「测试邮件不含 unauthorized private content」这条断言有个典型的假绿形状：**什么都不发，也满足「不含」**。所以你的测试必须同时钉住三件事：(1) **正面控制**——一个**应该**收到邮件的订阅者，确实收到了一封，且内容里出现了他有权看到的目标标签；(2) **反面断言**——一个**无权**看到某私有目标的用户，其邮件正文与原始字节里**不出现**该目标的任何标识（照 `privacy_test.go` 的 canary 循环写，照 `asset_page_test.go` 的 `forbidInBody` 写，注意它把空串当失败）；(3) **判别控制**——撤权之后**不再发出**（不是「报错」，是那封信根本不产生）。仓库里现成的前例都在这三条上，照它们写。\n\n**另有两条边界**：\n（1）**`immediate/daily/weekly` 的归属我拍板：记在「用户」上，不记在「订阅」上**（一行一个账号，缺行 = 默认值——半成品选的是 `daily`，照它）。按订阅各设一个频率更「灵活」，但需求没说，做了就是我替产品加语义；V1 用最简形状，将来要细化是另一个任务。\n（2）**偏好接口的形状你自己定**（挂在 `/api/v1/subscriptions` 下还是新开一条都可以），但必须满足：未认证不可读不可写（`/api/v1` 子树的统一 guard 已经**按方法**覆盖了写方法，照它的形状挂上去即可）、只能读改自己的偏好、非法 cadence 值被拒而不是被静默取默认。"
+}

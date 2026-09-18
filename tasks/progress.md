@@ -2046,9 +2046,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-18T07:02:39Z
+生成时间：2026-09-18T08:06:39Z
 
-状态分布：todo 38 · ready 0 · running 1 · worker_failed 2 · verification 0 · rejected 1 · blocked 11 · accepted 0 · merged 81（合计 134/134 个任务）
+状态分布：todo 38 · ready 3 · running 3 · worker_failed 3 · verification 0 · rejected 0 · blocked 6 · accepted 0 · merged 81（合计 134/134 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -2135,19 +2135,19 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0704 | Publication Impact Preview | P7 | merged | 2026-09-15T18:46:44Z |  | 2026-09-15T19:00:22Z | 2026-09-15T19:04:57Z |
 | T0705 | Asset Publish Governance | P7 | merged | 2026-09-15T23:43:26Z |  | 2026-09-16T00:40:34Z | 2026-09-16T00:47:27Z |
 | T0706 | Asset Metadata Revision | P7 | blocked |  |  |  |  |
-| T0707 | Asset Reference/Dependency | P7 | blocked |  |  |  |  |
+| T0707 | Asset Reference/Dependency | P7 | ready |  |  |  |  |
 | T0708 | Asset Fork/Derive + Lineage | P7 | todo |  |  |  |  |
 | T0709 | Asset Hub Pages/Explore | P7 | merged | 2026-09-16T01:57:45Z |  | 2026-09-16T02:36:27Z | 2026-09-16T02:41:11Z |
 | T0710 | Asset 完整 E2E | P7 | todo |  |  |  |  |
-| T0711 | Asset Governance 与 Rights Holder Transfer | P7 | blocked |  |  |  |  |
+| T0711 | Asset Governance 与 Rights Holder Transfer | P7 | running | 2026-09-18T07:33:41Z |  |  |  |
 | T0712 | 预览响应不得泄漏外部私有实体的身份（T0704 跨项目泄漏修复） | P7 | merged | 2026-09-15T22:11:05Z |  | 2026-09-15T22:35:34Z | 2026-09-15T22:42:04Z |
 | T0801 | Public Entity Anonymous Pages | P8 | merged | 2026-09-16T02:41:13Z |  | 2026-09-16T03:20:27Z | 2026-09-16T03:25:11Z |
 | T0802 | Explore 聚合 | P8 | merged | 2026-09-16T03:25:13Z |  | 2026-09-16T04:12:18Z | 2026-09-16T04:17:01Z |
 | T0803 | Open Contribution Opportunity | P8 | merged | 2026-09-15T12:54:08Z |  | 2026-09-15T13:23:30Z | 2026-09-15T13:28:59Z |
-| T0804 | External Fork/Contribution flow | P8 | blocked |  |  |  |  |
-| T0805 | Published Knowledge Object | P8 | blocked |  |  |  |  |
+| T0804 | External Fork/Contribution flow | P8 | ready |  |  |  |  |
+| T0805 | Published Knowledge Object | P8 | running | 2026-09-18T07:34:05Z |  |  |  |
 | T0806 | External Evidence Network Aggregation | P8 | todo |  |  |  |  |
-| T0807 | Contribution Ledger projection | P8 | blocked |  |  |  |  |
+| T0807 | Contribution Ledger projection | P8 | ready |  |  |  |  |
 | T0808 | Research Profile / Organization Profile | P8 | todo |  |  |  |  |
 | T0809 | Credit Attribution/Dispute 基础 | P8 | todo |  |  |  |  |
 | T0810 | 最小 Open Network 闭环 E2E | P8 | todo |  |  |  |  |
@@ -2165,7 +2165,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1002 | Subscription Model / Follow/Watch | P10 | merged | 2026-09-16T10:57:20Z |  | 2026-09-16T11:31:28Z | 2026-09-16T11:36:18Z |
 | T1003 | Web Research Inbox | P10 | worker_failed | 2026-09-16T11:36:20Z |  |  |  |
 | T1004 | RSS/Atom Feeds | P10 | worker_failed | 2026-09-16T11:36:44Z |  |  |  |
-| T1005 | Email Digest abstraction | P10 | running | 2026-09-16T11:40:41Z |  |  |  |
+| T1005 | Email Digest abstraction | P10 | worker_failed | 2026-09-16T11:40:41Z |  |  |  |
 | T1006 | Signed Webhooks | P10 | merged | 2026-09-15T03:32:24Z |  | 2026-09-15T04:54:21Z | 2026-09-15T05:00:53Z |
 | T1007 | Dependency Impact Analysis | P10 | todo |  |  |  |  |
 | T1101 | 统一 Primer-style Design System | P11 | todo |  |  |  |  |
@@ -2177,7 +2177,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1107 | 权限与 Search Side-channel 安全回归 | P11 | todo |  |  |  |  |
 | T1108 | 性能基线与索引调优 | P11 | todo |  |  |  |  |
 | T1109 | 生产级 Observability/Dashboards | P11 | todo |  |  |  |  |
-| T1110 | Backup/Restore 自动化演练 | P11 | rejected | 2026-09-16T10:58:47Z |  |  |  |
+| T1110 | Backup/Restore 自动化演练 | P11 | running | 2026-09-18T08:00:57Z |  |  |  |
 | T1201 | 完整 Seed Demo Data Builder | P12 | todo |  |  |  |  |
 | T1202 | Canonical MOF Workflow E2E | P12 | todo |  |  |  |  |
 | T1203 | Staging 部署模板 | P12 | todo |  |  |  |  |

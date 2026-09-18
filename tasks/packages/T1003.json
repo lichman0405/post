@@ -1,0 +1,62 @@
+{
+  "id": "T1003",
+  "phase": "P10",
+  "phase_name": "Research Events、订阅与 Impact Analysis",
+  "title": "Web Research Inbox",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "dependencies": ["T1002"],
+  "requirements": [
+    "聚合 meaningful events",
+    "read/unread",
+    "deep links"
+  ],
+  "acceptance_criteria": [
+    "低级每 commit 不默认轰炸用户"
+  ],
+  "tests": ["inbox e2e"],
+  "allowed_scope": [
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "internal/persistence/**",
+    "internal/events/**",
+    "internal/application/**",
+    "go.mod",
+    "go.sum",
+    ".env.example",
+    "cmd/api/**",
+    "apps/web/**",
+    "tests/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "specs/api/openapi.yaml",
+    "specs/events/**",
+    "internal/authz/**",
+    "specs/policies/**",
+    "internal/rsg/**",
+    "cmd/worker/**"
+  ],
+  "relevant_specs": [
+    "**通知表已经存在了，而且它的注释明确把 read/unread 划给了你这个任务。别再建第二张表。** `infra/migrations/00078_subscriptions.sql` 建了 `subscription_deliveries`（T1002 的交付），其中逐字写着：「Status: 'web' rows are born 'delivered' — **the research inbox IS the delivery**, so there is nothing left to do (**T1003 owns read/unread on top of them**) — while 'email' rows are born 'pending' for the [digest sender]」。同表注释：「One notification per (subscription, event, channel): the pointer the research inbox (T1003) and the digest sender (T1005) read.」Go 侧同义重复在 `internal/events/subscription.go:73-75`（`SubscriptionDelivery`）与 `subscription_store.go:361-363`。**先读这三处，再动手。**",
+    "**投递行里没有事件内容，这是有意的。** `subscription.go:73-75` 逐字：「It carries no event content — EventID names the append-only research event and the target names the subject」。也就是说 inbox 要展示的「谁做了什么」**根本不在投递行里**——你要么去读 `research_events`，要么只展示 target。这个结构事实决定了「聚合」怎么做，先想清楚再写查询。",
+    "**`read_at` 在 main 上不存在，全仓库零命中**（`unread` 的命中全在编排器里，意思是「文件不可读」；`apps/web/app/nav/nav-bell.tsx` 的铃铛只是个静态 `Link`，没有计数、不读 API）。read/unread 这一半完全是新增。",
+    "**`/notifications` 页面现在是个占位页**：`apps/web/app/(main)/notifications/page.tsx` 原文只有 16 行，注释写着「The research inbox lands in T1003; the destination is stubbed for now.」，正文是 `<ComingSoon title=\"Notifications\" milestone=\"T1003 Web Research Inbox\">`。页面规格只有一行：`specs/ui/page-inventory.csv` 的 `/notifications,Notifications,required,research inbox,subscription actions`。**你要把这个占位页换成真页面。**",
+    "**需求原文与验收原文就在这里，别去别处找**：`docs/18_EVENTS_SUBSCRIPTIONS.md:13` 逐字「用户可 follow Project/Asset/Knowledge/Person/Organization，并选择 event categories。**默认避免通知每个低级 commit。**」；`:17` 的「- Web Inbox」。**注意 `docs/42_PAGE_SPECS.md` 里对 notifications 页一个字都没有，`docs/31_MASTER_ACCEPTANCE.md` 里也没有 inbox 条目**——别去假设有更细的规格，没有。",
+    "**每个 commit 会产生一条事件、每个订阅者会多一行投递——这是现状，而且它属于 T1002，不属于你。** `internal/application/rsg/events.go` 逐字：「one state.committed per scientific-state write」；`internal/events/subscription_fanout.go` 调 `InsertDeliveries`，后者对订阅的每个 channel 各插一行，幂等键是 `(subscription_id, event_id, channel)`，**没有任何聚合、节流或 rollup**。T1002 已合入 main 并有测试钉住这个行数行为（`tests/integration/subscription_test.go` 断言「2 事件 × 2 频道 = 4 行」）。**见决定一：这不是你要改的东西。**",
+    "**受众是怎么算出来的（决定了聚合里能展示什么）**：`internal/events/subscription_store.go` 的 `TargetAudience(ctx, db, target, userID)` **每次事件都按当前库状态重算**，不缓存订阅时刻的结果——注释逐字：「which is what makes a permission change take effect at the next event (T1002 acceptance: private target 权限变化后不继续泄漏)」。fail-closed 方向也写在那里：「an unresolvable target (unknown id, a row that cannot be read) is AudienceNone, never a guess」。判决函数是 `internal/events/subscription.go` 的 `Delivers(level, eventVisibility)`。",
+    "**撤权时 fan-out 只撤回「在途」的行，已投递的 web 行不动**：`subscription_fanout.go` 的 `cancelUndeliverableDeliveries` 只动 `status = 'pending'` 的行。T1002 的测试已经把这件事钉住了（断言撤权后 `web/delivered` 仍是 1 条、只有 `email/cancelled` 被撤回）。**这条现状直接决定了决定三。**",
+    "**前端做法照抄这两个范例**：页面是 server component 只解析 config、把 `apiBaseUrl` 交给 client component——`apps/web/app/(main)/projects/page.tsx` + `project-directory.tsx`；更完整的一例是同目录还带 `.css` 的 `assets/page.tsx` + `assets-browse.tsx` + `assets.css`。客户端库放 `apps/web/lib/*.ts`，**约定是零 import、可由 Node 的类型擦除直接跑**（`apps/web/lib/activity.ts:15-18` 逐字解释了这个约定）；单测用 `node --test` 跑 `apps/web/lib/*.test.mjs`（`scripts/web-unit-tests.sh`，它带「零匹配即失败」守卫，且在 CI 里）。**WebUI 风格约束在 CLAUDE.md 第 10 节**：GitHub/Primer 风格、中性背景、细边框、高信息密度、蓝色交互；禁止渐变紫、霓虹、glassmorphism、大圆角。",
+    "**后端挂载照抄 `subscriptionshttp`**：`cmd/api/main.go` 里 `subscriptionsAPI := subscriptionshttp.New(...)` 然后 `v1.Handle(\"/api/v1/subscriptions\", subscriptionsAPI.Routes())`。session + CSRF 由 `/api/v1` 子树的统一 guard 提供（它**按方法判定**，GET 放行、写方法要 session+CSRF），所以你只要照同形状挂上去。路由用标准库 `http.NewServeMux()` + Go 1.22 方法化 pattern，**不是 chi**。",
+    "**契约：`specs/api/openapi.yaml` 里没有订阅相关路径，`/api/v1/inbox` 也不该由你去加。** 这不是不一致——`subscriptions`、`webhooks` 同样都不在契约里，T1002/T1006 也没写。契约由我维护，不在你的范围内。",
+    "**迁移编号我已经分配好了：`00079`。** 账本 `.rddev/runtime/migration-numbers.json` 里 `T1003 -> 79`，分配器是幂等的。**不要自己选号**，也不要用「main 最大号 + 1」（main 最大是 `00078`，但 79–83 已分别留给 T1003/T1004/T1005/T0711/T0805）。",
+    "**迁移的规矩**：`infra/migrations/README.md`——已发布的迁移**永不修改**；`specs/database/postgres.sql` 是**生成物**（只能由 `python3 scripts/gen_schema_snapshot.py` 重新生成），改完跑 `make check-schema-snapshot` 与 `make check-spec-version`；**不写 down migration**。加列/加索引后必须同步扩 `tests/integration/migration_test.go` 的目录夹具（`canonicalTables` 与 `explicitIndexes`），否则 `TestFreshInstallCatalog` 会红——那里对表集合、列集合做**全等**比较。",
+    "**既有测试必须继续绿，它们是你的地基**：`tests/integration/subscription_test.go`（12 个测试，钉住「发给谁」与撤权后的行数）、`tests/integration/outbox_test.go`（5 个）。**你加一列 `read_at` 不应当改变其中任何一条的行为**——如果它变了，是你的改动有问题，不是测试有问题。"
+  ],
+  "scope_note": "这是**按本任务的实际交付面调整过的范围**。相对 DAG 里的 phase 级默认值：**加** `infra/migrations/**` 的明确使用权（默认里已有，此处确认：你**要**加一列，见决定二）与 `apps/web/**`（占位页要换成真页面）。**明确不加**（并写进 forbidden_scope）：`cmd/worker/**`（inbox 是同步只读视图，不需要后台任务——半成品也没动它，这是对的）、`specs/api/openapi.yaml`（契约由我维护，且订阅/收件箱本来就不在契约里）、`specs/events/**`（事件词表由我维护，见决定一）、`internal/authz/**` + `specs/policies/**`（权限矩阵是安全边界）、`internal/rsg/**`（本任务不碰 RSG）、`docs/**`。",
+  "supervisor_scope_narrowing": "2026-09-18 定稿。**你接手的是上一轮的半成品，它就在你的 worktree 里**：`.rddev/worktrees/T1003/` 是一个脏工作树（基线 `c42a77c`），里面有上一轮 worker 写完未提交的东西——`infra/migrations/00079_research_inbox.sql`、`internal/events/inbox.go` + `inbox_store.go` + `inbox_test.go`、`internal/application/inbox/`、`cmd/api/inboxhttp/`、`apps/web/lib/inbox.ts` + `inbox.test.mjs`、`apps/web/app/(main)/notifications/` 下的真页面、`tests/integration/inbox_test.go`。**先完整读一遍再动手**，它在读侧聚合这件事上做对了，但也有几处要修（见下面）。你的任务是**修好、理正、在新基线上重跑**，不是从零重写。在本轮 RESULT 里写清楚：保留了什么、改了什么、为什么。\n\n**决定一（本轮最要紧的一条，因为需求原文在这里有两种读法）：「低级每 commit 不默认轰炸用户」由读侧的聚合来满足，不是由写侧的节流。** 这句话可以读成「别产生 40 条投递」，也可以读成「别显示 40 行」。我裁定为**后者**，理由三条：(a) 需求第一句就是「**聚合** meaningful events」，聚合是读侧动作；(b) 验收句里有「**默认**」二字，这是在说默认视图的呈现，不是说不许产生记录；(c) 写侧的粒度是 **T1002 已合入 main 的交付**，它有测试逐条钉住投递行数（2 事件 × 2 频道 = 4 行），改它等于改动另一个已验收任务的契约——那不在本任务的授权范围内。**这个裁定必须在你的测试里被显式钉住**：不能只是「没有报错」，要让测试同时断言两件事——(1) 40 次 commit 之后投递行确实是 40 行（现状，不许你去改），(2) inbox 默认视图里它们是**一条**聚合条目且 `count=40`。把这两句写进测试的注释里，让人一眼看见这是个**有意的选择**而不是疏漏。半成品的 `tests/integration/inbox_test.go` 已经接近这个写法，保留它、把它写得更显式。\n\n**决定二：`read_at` 加在 `subscription_deliveries` 上，不建第二张表。** T1002 的迁移注释已经把「the research inbox IS the delivery」和「T1003 owns read/unread on top of them」写死了，照做即可。加列 + 一个 CHECK 约束 + 你需要的部分索引，迁移用 `00079`。**不要引入第二张「已读」表**——那会立刻产生两张表之间的漂移，而且违反上面那条已经写进迁移的归属。\n\n**决定三：权限被收回之后，那条聚合条目必须整条从 inbox 里消失。** 现状是：投递行不含内容，但它的 target id、`event_type`、`count` 和一条链接仍在，只有名字会被抹空。半成品的注释声称「a revoked subscriber's entry shrinks rather than staying as a stale reminder」——**对已投递的 web 行而言这句话是过头的**（`cancelUndeliverableDeliveries` 只动 pending 行，T1002 的测试已经证实）。我的裁定是 fail-closed：**读时按当前权限解析，解析结果是 `AudienceNone` 的条目直接丢弃，不渲染。** 这样那句注释才真的成立。注意这**不是**要你去改投递行——行还在，只是不渲染；也**不是**要你改 `TargetAudience` 或 `Delivers`（那是 T1002 的已验收行为）。\n\n**决定四：深链接宁可没有，也不给假的。** 需求里的「deep links」指的是条目能跳回它说的那个东西。规则：**只有当目标路由真的存在时才输出链接**；project / asset / user 有现成路由（半成品已经接好了）；**knowledge 与 organization 目前没有可跳的公开路由**，那就**不输出链接**，不要拼一个会 404 的 URL——这是仓库自己的既有教条，`internal/application/explore/index.go:47-52` 逐字写着「a link to a route that does not exist is a lie in the shape of an href」。不要为了「deep links」这条需求去造路由。\n\n**另有四处半成品的毛病要你一并处理（都不是大改）**：\n（1）**索引注释过度宣称**：`00079_research_inbox.sql` 里那条 partial index 声称服务 unread 视图的 index-only scan，但聚合查询**从不在投递层过滤 `read_at IS NULL`**（它必须读到已读行才能让两个视图的 `count` 一致），所以那条索引服务不了它声称服务的扫描。**要么把理由改对、要么把索引改成它真正服务的形状**——注释里写着一个不成立的理由，比没有注释更糟。\n（2）**`unread_count` 语义歧义**：`cmd/api/inboxhttp/` 返回的 `unread_count` 是**未读条目数**，不是未读投递数。语义本身自洽，但字段名会被误读。改名或在上层文档里写清楚。\n（3）**没有分页游标**：条目上限 `DefaultInboxLimit = 50` / `MaxInboxLimit = 200` 之外没有下一页，更早的条目在 UI 上读不到，而 `unread_count` 仍是全量真值。**分页不是本任务的需求，我不要求你做**；但上限必须被钳制（不接受客户端传入的超大 limit），且「总数」和「本页条数」的差别要在响应里说得清，别让 UI 误读。\n（4）**撤销权限后的处理**要按决定三改，改完把那条注释也改对。\n\n**一条边界**：`internal/events/**` 在你的范围内，但**只用来读投递行与解析受众**。不要改 `InsertDeliveries`、`Delivers`、`TargetAudience` 的语义，也不要往 `specs/events/**` 加事件类型——那是 T1002 的已验收交付与我的契约面。若你判定非改不可，记 `blocked` 说明，由我拍板。"
+}
