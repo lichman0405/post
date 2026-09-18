@@ -301,6 +301,101 @@ paths:
           schema: {type: string}
       responses:
         '200': {description: OK}
+  # --- Public syndication feeds (T1004) -----------------------------------
+  # Read-only documents for feed readers rather than for the app: Atom 1.0
+  # by default, RSS 2.0 when ?format=rss names it. All three carry
+  # `security: []`, and an anonymous caller reaches them for the same reason
+  # it reaches /assets/{assetId} — the /api/v1 guard challenges
+  # state-changing methods only — so the handler, not the guard, decides
+  # what that caller may see. Nothing in a document is derived from the
+  # request: no rel="self" URL built from the Host header, and every URL is
+  # built from the configured public origin.
+  #
+  # A target that does not exist, a private project, and a target with
+  # nothing published are ONE answer: the same byte-identical 404. The
+  # surface never confirms that a private target exists.
+  #
+  # Known deviation (recorded, not hidden): a knowledge feed omits the RSS
+  # channel's required <link>, because no page renders a knowledge object
+  # yet (T0805 owns that route) and the platform's rule is that a link to a
+  # route that does not exist is a lie in the shape of an href. The item
+  # identity is the <guid>, which is the publication's urn. The deviation
+  # ends when the knowledge page exists.
+  /feeds/projects/{projectId}:
+    get:
+      security: []
+      summary: Atom/RSS feed of a public project's published versions
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: {type: string}
+        - $ref: '#/components/parameters/FeedFormat'
+      responses:
+        '200':
+          description: The feed document; Atom unless ?format=rss
+          content:
+            application/atom+xml:
+              schema: {type: string}
+            application/rss+xml:
+              schema: {type: string}
+        '304':
+          description: >-
+            The caller's copy is current; carries ETag and Cache-Control and
+            nothing else (If-None-Match).
+        '400': {description: "The target id is malformed, or ?format names a format this API does not speak"}
+        '404': {description: No such public feed}
+  /feeds/assets/{assetId}:
+    get:
+      security: []
+      summary: Atom/RSS feed of one public asset's published versions
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema: {type: string}
+        - $ref: '#/components/parameters/FeedFormat'
+      responses:
+        '200':
+          description: The feed document; Atom unless ?format=rss
+          content:
+            application/atom+xml:
+              schema: {type: string}
+            application/rss+xml:
+              schema: {type: string}
+        '304':
+          description: >-
+            The caller's copy is current; carries ETag and Cache-Control and
+            nothing else (If-None-Match).
+        '400': {description: "The target id is malformed, or ?format names a format this API does not speak"}
+        '404': {description: No such public feed}
+  /feeds/knowledge/{objectId}:
+    get:
+      security: []
+      summary: Atom/RSS feed of one knowledge object's public publications
+      parameters:
+        - name: objectId
+          in: path
+          required: true
+          schema: {type: string}
+        - $ref: '#/components/parameters/FeedFormat'
+      responses:
+        '200':
+          description: >-
+            The feed document; Atom unless ?format=rss. Entries carry no
+            <link> (no page renders a knowledge object yet) — their identity
+            is the urn in the entry id / RSS guid.
+          content:
+            application/atom+xml:
+              schema: {type: string}
+            application/rss+xml:
+              schema: {type: string}
+        '304':
+          description: >-
+            The caller's copy is current; carries ETag and Cache-Control and
+            nothing else (If-None-Match).
+        '400': {description: "The target id is malformed, or ?format names a format this API does not speak"}
+        '404': {description: No such public feed}
   # --- Authentication (T0101) ---------------------------------------------
   # Session-cookie auth, not bearer: /auth/* establishes an opaque server-side
   # session (Redis) and returns a CSRF token bound to it. Everything under
@@ -444,3 +539,15 @@ components:
       in: path
       required: true
       schema: {type: string}
+    FeedFormat:
+      # Atom 1.0 is the default; `rss` selects RSS 2.0. A value naming
+      # neither is refused (400) rather than silently served as Atom: a
+      # reader that asked for RSS must be told it cannot have it, not handed
+      # a document in a format it did not parse. This parameter is the only
+      # way to choose — the Accept header is honored when it names exactly
+      # one of the two media types, and quality-value negotiation is not
+      # implemented.
+      name: format
+      in: query
+      required: false
+      schema: {type: string, enum: [atom, rss]}
