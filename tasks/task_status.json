@@ -4561,11 +4561,13 @@
       ]
     },
     "T0604": {
-      "status": "rejected",
-      "started_at": "2026-09-18T08:20:45Z",
+      "status": "merged",
+      "started_at": "2026-09-18T17:16:45Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：required-review 判定（几个 review、哪几个维度、哪个 responsibility 签、什么变更对应什么要求）规格全无。T0409 的交付代码逐字把这一步指名交给 T0604（internal/application/reviews/service.go:25-27），前置 T0404/T0603 均已合并。",
-      "worker_run_id": "run-2dcabe960f21dcec",
-      "rejection_reason": "# T0604 第一轮返工：一处，一条 staticcheck\n\n## 一、这一轮的规模\n\n我逐 job 看了你的 G2。**只有 `go` job 红，而且只有一条**：\n\n```\ntests/integration/review_routing_test.go:60:7: const reviewRoutingTaskID is unused (U1000)\n```\n\n同一个 job 的前两步（`make fmt-check`、`go vet ./...`）都是 exit 0；后两步因为 staticcheck 先红而**没跑到**。\n\n其余 job 我全部核过：\n\n| job | 结果 |\n|---|---|\n| spec-validation | 通过（快照、指纹、openapi、单元+冒烟） |\n| task-state | 通过 |\n| go | **红在第 3 步 `make staticcheck`** |\n| web | 通过 |\n| python | 通过 |\n| migration-integration | 通过——**集成套件全绿，含你新增的 6 个路由测试** |\n| acceptance | 通过 |\n\n**所以这一轮只改这一条。别动别的。**\n\n## 二、为什么你没抓到这个（不是你的错，但你要知道）\n\n`make check` 在提交 `049eeff` **之前**不含 `make fmt-check`、`make staticcheck`、`bash scripts/tests/staticcheck-unit-test.sh` 这三步，而 CI 的 `go` job 正是这三步 + vet + 单测。今天已经有**五个**任务栽在这上面（T0711 栽在 `fmt-check`，T1110、T0805、T0604 栽在 `staticcheck`，另一个栽在同一处），所以我把它补进 `make check` 了。\n\n**你 worktree 里的 Makefile 是旧的**，别指望 `make check`——直接逐条跑 CI 的 `go` job：\n\n```\nmake fmt-check\ngo vet ./...\nmake staticcheck\nbash scripts/tests/staticcheck-unit-test.sh\ngo test $(go list ./... | grep -v '/tests/integration')\n```\n\n**后两步这次根本没跑到**，这一轮必须跑完再交。\n\n## 三、怎么修\n\n`reviewRoutingTaskID` 这个常量**你自己判断**：真的没人用就删掉；本来打算用（比如想按任务号给夹具命名）就把该用的地方用上，并在 RESULT 里说明它钉的是什么。\n\n**不许用 `_ = reviewRoutingTaskID` 这种写法把它按下去**——那是把死代码藏得更深，不是修。两条路我都能接受，我要的是你说清楚选了哪条、为什么。\n\n## 四、我已经独立核过的部分：这些不要动，也不要「顺手改进」\n\n我读了你新增的代码与测试，逐条对过任务书的验收标准。以下是我**已经认定为合格**的部分，返工不要碰：\n\n- **路由是数据不是代码**：我自己 grep 过 `internal/domain/review_routing.go` 与 `***.go`，`\"protocol\"` 只出现在一句注释里；规则改一行数据就换人（测试里 RemoveRule + AddRule 那段是硬证据）。\n- **责任不松动权限**：`TestResponsibilityNeverWidensAuthz` 是整张 action×class 表**前后逐格**比对，加上点名格（持全部标签的 viewer 仍不能 merge_main）、非成员的**存在性隐藏**（ErrProjectNotFound 而非 Forbidden），并且补了正半边（持标签确实能提交 review）。`internal/authz/**` 与 `specs/policies/**` 一个字节没动——我核过。\n- **真路径到 merge_ready**：`open → review_required → approved → merge_ready` 在提交 review 的同一事务里推进，且有数据库守卫的反证（裸 `UPDATE ... merge_ready` 被 SQLSTATE `P0001` 拒）。这是 T0410 能诚实成立的前提。\n- **缺配置一律拒**（`***`：review 照记、`advanced=false`、审计零行）、**`release_min_reviewers` 真的约束人数**（配置为 2 时 1 个 approve 停在 review_required）、**重复与并发只推进一次**（唯一键拒重复、PR 行锁串行、一条审计一行推进事件）。\n- **既有测试的改动我看了**：`repo.submitIn != (SubmitReviewParams{})` 改成 `repo.submitCalls != 0`，是**等价或更强**（它断言 store 压根没被调用），不是放宽；接口从单标签变多标签是需求本身要的。**这些都保留。**\n\n## 五、下一次唤醒时环境会变\n\n前面还有几个带迁移的任务要先合并，等轮到你时，你的树会被 `rddev rebaseline` **推进到更新的 main**、生成物按新基线重新生成。届时（如果那时你才收到这封信）：\n\n- 生成物是**生成物**，不许手改：`python3 scripts/gen_schema_snapshot.py`、`python3 scripts/spec_version.py --write`，再 `make check-schema-snapshot`、`make check-spec-version`。\n- 然后逐条跑上面 CI `go` job 的五步 + 集成套件，再交。\n\n## 六、边界\n\n- **只改这一条**，加上必要时重新生成的生成物。\n- 不许为了让东西变绿而删测试、skip、放宽容差或加大 timeout（CLAUDE.md §5.1）。\n- RESULT 里写明：那一条怎么处置、以及 CI `go` job 五步的实际输出。\n",
+      "worker_run_id": "run-606d608b51627f77",
+      "accepted_by_supervisor_at": "2026-09-18T17:58:47Z",
+      "merged_at": "2026-09-18T18:07:33Z",
+      "rejection_reason": "# T0604 第三轮返工：这次提交的事件**丢了一条**，且 before/after **报错了状态**\n\n## 一、这一轮怎么来的\n\n不是 CI 红，是**独立审查**判的 `request_changes`：1 blocking + 1 major，都指向\n`internal/persistence/review_store.go` 的 `projectApproval`。我逐行读过代码，**两条都成立**。\n\n审查同时把其余部分**逐条复跑并确认成立**（真库集成套件、整套单测、迁移链、生成物、vet/staticcheck、\n六条验收标准）——所以这一轮**只改下面这一处根因**，别动别的。\n\n## 二、blocking：某条可达路径上，这次提交的 `pull_request.reviewed` 事件**根本没写**\n\n机制，逐行：\n\n- `SubmitReview` 开头读/锁 PR 行，此时 `pr.State` 是**变更前**的状态（`:95-105` 一带）。\n- 同一事务里，changes_requested 的投影把行从 `review_required` 推到 `changes_requested`（`:124-131`）\n  ——**但 `pr` 这份快照没有更新**。\n- 随后 `projectApproval(...)`：`stateBefore := domain.PullRequestState(pr.State)`（`:187`）→ 仍读到 `review_required`。\n- 于是 `progress.Satisfied && stateBefore == review_required`（`:203`）为真 → 进入推进 CAS，\n  而 CAS 的 `Expected` 是 `review_required`，行**已经是** `changes_requested` → `pgx.ErrNoRows`\n  → `:211-218` **`return nil` 提前返回**，跳过了函数最后那行 `recordReviewedEvent`。\n- 结果：**review 记了，事件没写**。审查的真库复现：**4 条 review 行，3 条事件**。\n\n这与你**自己写的契约**（`:182-185` 逐字「The event is written for EVERY submission ... not only for\nthe advance」）和需求第 9 条都矛盾。\n\n**怎么修**：`ErrNoRows` 分支**不许提前返回**——报 `advanced=false` 然后**落到最后那次写事件**\n（一个分支吞掉整条事件流是不可接受的默认值）。**并加一条测试**，就照审查给的那条序列：\n`changes_requested` 决定 → 在 changes_requested 状态下把维度记满 → `RequestReview`（回到 review_required）\n→ 再来一次 `changes_requested` 决定 → 断言**每一次被接受的提交都有且只有一条事件**\n（事件数 == 被接受的 review 数）。\n\n## 三、major：changes_requested 的提交，事件里报的 before/after **都不是真的**\n\n同一个根：`stateBefore` / `stateAfter` 取自那次 CAS **之前**的快照（`:187-188`），\nchanges_requested 的 CAS 从不更新它们。所以每一次 changes_requested 提交都发出\n`before=\"review_required\" after=\"review_required\" advanced=false`，而事务结束时行是 `changes_requested`。\n\n注释 `:184` 明写 payload「carries the state the submission left behind」——**它没有**；而 `state_after`\n正是你自己给消费者用来区分「推进」与「仅记录」的字段。订阅者按 `state_after` 取数就会拿到错的事实。\n\n**怎么修**：让 changes_requested 那次 CAS 的结果进入被报告的 `stateAfter`（或者在有锁的行上重读一次），\n**再**构建 payload；并**在测试里断言 payload 本身**，不是只断言事件存在。\n\n## 四、minor（要改，但只是「说法」）：`Satisfiable()` 不是生产路径\n\n审查指出：AC-6 的证据写「规则住在 `Satisfiable()`」并拿它的变异当证明，但**生产代码从不调用它**\n（`grep -rn '\\.Satisfiable()'` 只命中测试）。真正决定的是 `EvaluateRequiredReviews` 的\n`ReviewProgress.Satisfied`（守卫在 `review_store.go:203`）。\n\n**要你做**：改 `internal/domain/review_routing.go:176-182` 的注释，并在 RESULT 的 AC-6 里**点名真正的执行点**\n（`EvaluateRequiredReviews`）。两种改法都行：(a) 只改注释与证据措辞；(b) 让那处守卫真的调用 `Satisfiable()`。\n选哪个都行，说明理由。**不许删 `Satisfiable()`**——测试在用。\n\n**这条我认**：我自己的变异检验也栽在同一处——我改了 `Satisfiable()` 看到测试变红，就以为证明了生产行为，\n其实只证明了那个测试对它敏感。审查说的是对的，所以裁决与证据措辞都要跟着改。\n\n## 五、我不要求你改的（记账，别动）\n\n审查还留了一条 nit：`research_owner_rules_project_idx` 与 `UNIQUE (project_id, match_kind, match_value,\nresponsibility)` 的前缀重复，是个冗余索引。**本轮不改**——它无害，而改动会碰到迁移与生成物、扩大返工面。\n**记录在案**，以后有任务碰这张表时再清。\n\n## 六、不许动的（照旧）\n\n- **路由是数据不是代码**、**责任不松动权限**（`TestResponsibilityNeverWidensAuthz`）、**缺配置一律拒**、\n  **`release_min_reviewers` 真的约束人数**、**重复与并发只推进一次**——这些审查逐条复跑过，**都对，别碰**。\n- 不许为了让哪条变绿而删测试、skip、放宽断言或放大 timeout（CLAUDE.md §5.1）。\n- 生成物不许手改。本轮**不该**动迁移；若你确实动了，必须重跑\n  `python3 scripts/gen_schema_snapshot.py` 与 `python3 scripts/spec_version.py --write`。\n- 你树的内容变了，**上一轮的审查结论就此作废**，验收会再跑一遍完整审查——RESULT 必须自洽：\n  每一句「代码做了某事」都要能被 `grep` 到；`tests[]` 只登记你**真的跑过并看到结果**的东西。\n\n## 七、交之前跑完\n\nCI `go` job 的五步（`make fmt-check`、`go vet ./...`、`make staticcheck`、\n`bash scripts/tests/staticcheck-unit-test.sh`、`go test $(go list ./... | grep -v '/tests/integration')`）\n＋真 PostgreSQL 集成套件 ＋ 上面第二条那条新序列的测试。\n",
       "history": [
         {
           "from": "todo",
@@ -4599,6 +4601,54 @@
           "at": "2026-09-18T09:17:17Z",
           "run_id": "run-fd78defa7ca287d2",
           "reason": "# T0604 第一轮返工：一处，一条 staticcheck\n\n## 一、这一轮的规模\n\n我逐 job 看了你的 G2。**只有 `go` job 红，而且只有一条**：\n\n```\ntests/integration/review_routing_test.go:60:7: const reviewRoutingTaskID is unused (U1000)\n```\n\n同一个 job 的前两步（`make fmt-check`、`go vet ./...`）都是 exit 0；后两步因为 staticcheck 先红而**没跑到**。\n\n其余 job 我全部核过：\n\n| job | 结果 |\n|---|---|\n| spec-validation | 通过（快照、指纹、openapi、单元+冒烟） |\n| task-state | 通过 |\n| go | **红在第 3 步 `make staticcheck`** |\n| web | 通过 |\n| python | 通过 |\n| migration-integration | 通过——**集成套件全绿，含你新增的 6 个路由测试** |\n| acceptance | 通过 |\n\n**所以这一轮只改这一条。别动别的。**\n\n## 二、为什么你没抓到这个（不是你的错，但你要知道）\n\n`make check` 在提交 `049eeff` **之前**不含 `make fmt-check`、`make staticcheck`、`bash scripts/tests/staticcheck-unit-test.sh` 这三步，而 CI 的 `go` job 正是这三步 + vet + 单测。今天已经有**五个**任务栽在这上面（T0711 栽在 `fmt-check`，T1110、T0805、T0604 栽在 `staticcheck`，另一个栽在同一处），所以我把它补进 `make check` 了。\n\n**你 worktree 里的 Makefile 是旧的**，别指望 `make check`——直接逐条跑 CI 的 `go` job：\n\n```\nmake fmt-check\ngo vet ./...\nmake staticcheck\nbash scripts/tests/staticcheck-unit-test.sh\ngo test $(go list ./... | grep -v '/tests/integration')\n```\n\n**后两步这次根本没跑到**，这一轮必须跑完再交。\n\n## 三、怎么修\n\n`reviewRoutingTaskID` 这个常量**你自己判断**：真的没人用就删掉；本来打算用（比如想按任务号给夹具命名）就把该用的地方用上，并在 RESULT 里说明它钉的是什么。\n\n**不许用 `_ = reviewRoutingTaskID` 这种写法把它按下去**——那是把死代码藏得更深，不是修。两条路我都能接受，我要的是你说清楚选了哪条、为什么。\n\n## 四、我已经独立核过的部分：这些不要动，也不要「顺手改进」\n\n我读了你新增的代码与测试，逐条对过任务书的验收标准。以下是我**已经认定为合格**的部分，返工不要碰：\n\n- **路由是数据不是代码**：我自己 grep 过 `internal/domain/review_routing.go` 与 `***.go`，`\"protocol\"` 只出现在一句注释里；规则改一行数据就换人（测试里 RemoveRule + AddRule 那段是硬证据）。\n- **责任不松动权限**：`TestResponsibilityNeverWidensAuthz` 是整张 action×class 表**前后逐格**比对，加上点名格（持全部标签的 viewer 仍不能 merge_main）、非成员的**存在性隐藏**（ErrProjectNotFound 而非 Forbidden），并且补了正半边（持标签确实能提交 review）。`internal/authz/**` 与 `specs/policies/**` 一个字节没动——我核过。\n- **真路径到 merge_ready**：`open → review_required → approved → merge_ready` 在提交 review 的同一事务里推进，且有数据库守卫的反证（裸 `UPDATE ... merge_ready` 被 SQLSTATE `P0001` 拒）。这是 T0410 能诚实成立的前提。\n- **缺配置一律拒**（`***`：review 照记、`advanced=false`、审计零行）、**`release_min_reviewers` 真的约束人数**（配置为 2 时 1 个 approve 停在 review_required）、**重复与并发只推进一次**（唯一键拒重复、PR 行锁串行、一条审计一行推进事件）。\n- **既有测试的改动我看了**：`repo.submitIn != (SubmitReviewParams{})` 改成 `repo.submitCalls != 0`，是**等价或更强**（它断言 store 压根没被调用），不是放宽；接口从单标签变多标签是需求本身要的。**这些都保留。**\n\n## 五、下一次唤醒时环境会变\n\n前面还有几个带迁移的任务要先合并，等轮到你时，你的树会被 `rddev rebaseline` **推进到更新的 main**、生成物按新基线重新生成。届时（如果那时你才收到这封信）：\n\n- 生成物是**生成物**，不许手改：`python3 scripts/gen_schema_snapshot.py`、`python3 scripts/spec_version.py --write`，再 `make check-schema-snapshot`、`make check-spec-version`。\n- 然后逐条跑上面 CI `go` job 的五步 + 集成套件，再交。\n\n## 六、边界\n\n- **只改这一条**，加上必要时重新生成的生成物。\n- 不许为了让东西变绿而删测试、skip、放宽容差或加大 timeout（CLAUDE.md §5.1）。\n- RESULT 里写明：那一条怎么处置、以及 CI `go` job 五步的实际输出。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-18T16:51:11Z",
+          "run_id": "run-845f812c094f4c3f",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T17:05:58Z",
+          "run_id": "run-e6f8a39f56656f7d",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-18T17:16:44Z",
+          "run_id": "run-9b6f692966a56015",
+          "reason": "# T0604 第三轮返工：这次提交的事件**丢了一条**，且 before/after **报错了状态**\n\n## 一、这一轮怎么来的\n\n不是 CI 红，是**独立审查**判的 `request_changes`：1 blocking + 1 major，都指向\n`internal/persistence/review_store.go` 的 `projectApproval`。我逐行读过代码，**两条都成立**。\n\n审查同时把其余部分**逐条复跑并确认成立**（真库集成套件、整套单测、迁移链、生成物、vet/staticcheck、\n六条验收标准）——所以这一轮**只改下面这一处根因**，别动别的。\n\n## 二、blocking：某条可达路径上，这次提交的 `pull_request.reviewed` 事件**根本没写**\n\n机制，逐行：\n\n- `SubmitReview` 开头读/锁 PR 行，此时 `pr.State` 是**变更前**的状态（`:95-105` 一带）。\n- 同一事务里，changes_requested 的投影把行从 `review_required` 推到 `changes_requested`（`:124-131`）\n  ——**但 `pr` 这份快照没有更新**。\n- 随后 `projectApproval(...)`：`stateBefore := domain.PullRequestState(pr.State)`（`:187`）→ 仍读到 `review_required`。\n- 于是 `progress.Satisfied && stateBefore == review_required`（`:203`）为真 → 进入推进 CAS，\n  而 CAS 的 `Expected` 是 `review_required`，行**已经是** `changes_requested` → `pgx.ErrNoRows`\n  → `:211-218` **`return nil` 提前返回**，跳过了函数最后那行 `recordReviewedEvent`。\n- 结果：**review 记了，事件没写**。审查的真库复现：**4 条 review 行，3 条事件**。\n\n这与你**自己写的契约**（`:182-185` 逐字「The event is written for EVERY submission ... not only for\nthe advance」）和需求第 9 条都矛盾。\n\n**怎么修**：`ErrNoRows` 分支**不许提前返回**——报 `advanced=false` 然后**落到最后那次写事件**\n（一个分支吞掉整条事件流是不可接受的默认值）。**并加一条测试**，就照审查给的那条序列：\n`changes_requested` 决定 → 在 changes_requested 状态下把维度记满 → `RequestReview`（回到 review_required）\n→ 再来一次 `changes_requested` 决定 → 断言**每一次被接受的提交都有且只有一条事件**\n（事件数 == 被接受的 review 数）。\n\n## 三、major：changes_requested 的提交，事件里报的 before/after **都不是真的**\n\n同一个根：`stateBefore` / `stateAfter` 取自那次 CAS **之前**的快照（`:187-188`），\nchanges_requested 的 CAS 从不更新它们。所以每一次 changes_requested 提交都发出\n`before=\"review_required\" after=\"review_required\" advanced=false`，而事务结束时行是 `changes_requested`。\n\n注释 `:184` 明写 payload「carries the state the submission left behind」——**它没有**；而 `state_after`\n正是你自己给消费者用来区分「推进」与「仅记录」的字段。订阅者按 `state_after` 取数就会拿到错的事实。\n\n**怎么修**：让 changes_requested 那次 CAS 的结果进入被报告的 `stateAfter`（或者在有锁的行上重读一次），\n**再**构建 payload；并**在测试里断言 payload 本身**，不是只断言事件存在。\n\n## 四、minor（要改，但只是「说法」）：`Satisfiable()` 不是生产路径\n\n审查指出：AC-6 的证据写「规则住在 `Satisfiable()`」并拿它的变异当证明，但**生产代码从不调用它**\n（`grep -rn '\\.Satisfiable()'` 只命中测试）。真正决定的是 `EvaluateRequiredReviews` 的\n`ReviewProgress.Satisfied`（守卫在 `review_store.go:203`）。\n\n**要你做**：改 `internal/domain/review_routing.go:176-182` 的注释，并在 RESULT 的 AC-6 里**点名真正的执行点**\n（`EvaluateRequiredReviews`）。两种改法都行：(a) 只改注释与证据措辞；(b) 让那处守卫真的调用 `Satisfiable()`。\n选哪个都行，说明理由。**不许删 `Satisfiable()`**——测试在用。\n\n**这条我认**：我自己的变异检验也栽在同一处——我改了 `Satisfiable()` 看到测试变红，就以为证明了生产行为，\n其实只证明了那个测试对它敏感。审查说的是对的，所以裁决与证据措辞都要跟着改。\n\n## 五、我不要求你改的（记账，别动）\n\n审查还留了一条 nit：`research_owner_rules_project_idx` 与 `UNIQUE (project_id, match_kind, match_value,\nresponsibility)` 的前缀重复，是个冗余索引。**本轮不改**——它无害，而改动会碰到迁移与生成物、扩大返工面。\n**记录在案**，以后有任务碰这张表时再清。\n\n## 六、不许动的（照旧）\n\n- **路由是数据不是代码**、**责任不松动权限**（`TestResponsibilityNeverWidensAuthz`）、**缺配置一律拒**、\n  **`release_min_reviewers` 真的约束人数**、**重复与并发只推进一次**——这些审查逐条复跑过，**都对，别碰**。\n- 不许为了让哪条变绿而删测试、skip、放宽断言或放大 timeout（CLAUDE.md §5.1）。\n- 生成物不许手改。本轮**不该**动迁移；若你确实动了，必须重跑\n  `python3 scripts/gen_schema_snapshot.py` 与 `python3 scripts/spec_version.py --write`。\n- 你树的内容变了，**上一轮的审查结论就此作废**，验收会再跑一遍完整审查——RESULT 必须自洽：\n  每一句「代码做了某事」都要能被 `grep` 到；`tests[]` 只登记你**真的跑过并看到结果**的东西。\n\n## 七、交之前跑完\n\nCI `go` job 的五步（`make fmt-check`、`go vet ./...`、`make staticcheck`、\n`bash scripts/tests/staticcheck-unit-test.sh`、`go test $(go list ./... | grep -v '/tests/integration')`）\n＋真 PostgreSQL 集成套件 ＋ 上面第二条那条新序列的测试。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-18T17:16:45Z",
+          "run_id": "run-606d608b51627f77",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T17:30:01Z",
+          "run_id": "run-29bf7c0975cadfc3",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-18T17:58:47Z",
+          "run_id": "run-17b9a94519db4a18"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-18T18:07:33Z",
+          "run_id": "run-db06ce4c796a8b53",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -5953,8 +6003,10 @@
       "merged_at": null
     },
     "T0807": {
-      "status": "ready",
+      "status": "verification",
+      "started_at": "2026-09-18T16:54:43Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:14:44Z 判定，记于 T0705 合并之前）：四个词表全无：event_type、role_codes（两列都是裸 text，无 CHECK、无目录）、accepted_context 的判定规则、以及「同一事件不重复计」的判重键（contribution_events 无源事件列、无 UNIQUE）。tasks/decisions.md:8634 早前已就同一张表记过这个缺口。",
+      "worker_run_id": "run-e4a5309a7243d7cc",
       "history": [
         {
           "from": "todo",
@@ -5968,6 +6020,20 @@
           "to": "ready",
           "at": "2026-09-18T08:06:22Z",
           "run_id": "run-ea3c11ebf8557281"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-18T16:54:43Z",
+          "run_id": "run-e4a5309a7243d7cc",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T17:17:58Z",
+          "run_id": "run-c285b400faeff9d8",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -7078,6 +7144,15 @@
       "merged_at": null
     },
     "T1208": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0813": {
       "status": "todo",
       "started_at": null,
       "completed_at": null,

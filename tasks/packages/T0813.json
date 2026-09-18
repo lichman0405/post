@@ -1,0 +1,75 @@
+{
+  "id": "T0813",
+  "phase": "P8",
+  "phase_name": "开放网络、Fork、贡献与 Research Profile",
+  "title": "Contribution Ledger 接上生产（worker 挂载 + via 真实来源）",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "dependencies": [
+    "T0807"
+  ],
+  "tests": [
+    "contribution ledger wiring",
+    "via envelope chain"
+  ],
+  "requirements": [
+    "**先读现状，不要重做投影逻辑。** T0807 已经交付了贡献账本投影：决策面 `internal/contribution/ledger.go`（事件→账本行的映射表，10 个类型；`LedgerRefKind`）、store `internal/contribution/ledger_store.go:76` `NewLedgerStore(pool)` 与 `:128` `ProjectBatch`、服务 `internal/application/contribution/ledger.go:41` `LedgerProjector`（`:116` `RunOnce`、`:129` `Run` 自带间隔循环、`:80` `WithLedgerLogger`）、三个新列在 `infra/migrations/00087_contribution_ledger_projection.sql`。它自己在 RESULT 里点了两个**范围外**的洞，本任务补的就是这两个：**投影器没挂进 worker（所以线上不会跑）**、**`via` 全是 NULL（因为设置它的那条腿写在 `internal/events/**`）**。",
+    "**一、把投影器挂上生产。** 照 `cmd/worker/main.go` 里既有的三个消费者挂法（dispatcher `:119` 一带、signed-webhook 的 fanout+deliverer `:132` 一带、subscription fanout `:151` 一带）：同一个 `persistence.OpenLazy` 池、`go <loop>.Run(ctx)`、随 ctx 取消退出、并进既有的关闭等待。投影器构造：`contribution.NewLedgerProjector(store, contribution.WithLedgerLogger(logger))`，store 用 `contribution.NewLedgerStore(pool)`。**要求**：(a) 真的起在 worker 进程里、随关闭退出；(b) 数据库暂时不可用时像其他消费者一样**重试**而不是退出进程；(c) 未映射事件在**运行期**可见——复用 T0807 已经做好的 `LedgerBatch.Unmapped` 与 `firstTime(\"unmapped:...\")` 日志，**不要另造一套**。",
+    "**二、给 `via` 补上第一条腿（`internal/events/**`，T0807 范围外的那处）。** `outbox_events.via` 与 `research_events.via` 两列 `00087` 已经加好、今天没有人写。做法**照仓库里现成的通道先例**，不要发明新词表：词表是 `internal/domain/state.go:60-64` 的 `StateVia`（web/api/mcp/claude_code/git_compat/system），校验用现成的 `domain.ValidStateVia`（用法见 `internal/application/states/service.go:285-296`：未知通道一律拒）。落点三处：`internal/events/event.go` 的 `Event` 加字段、`insertOutboxEvent` 的 INSERT 加一列（进库前按 `ValidStateVia` 校验，未知即拒）；`internal/events/publish.go:164` 的 SELECT 与 `:199` 的 INSERT 各加一列，**逐字从 outbox 行抄进 research_events，绝不从 payload 重新推导**（`00046` 的规矩逐字：the publisher must copy them from the outbox row, never re-derive them from the payload）。",
+    "**三、哪些调用点填值、哪些留空——这条我替你定了（L1 裁定）。** 先例是「**写路径自己声明通道**」，不是「传输层逐请求透传」：`internal/application/rsg/service.go:243,346,431` 与 `internal/application/merge/service.go:567` 都直接写 `Via: domain.ViaAPI`。所以：(a) **知道通道的路径填**（API 服务层 = `ViaAPI`；确实由系统/后台发起的路径 = `ViaSystem`）；(b) **不知道的留空 = NULL**——`00087` 的注释已经定义 NULL 的含义是「这条写入路径没有记录通道」，**不得**用默认值凑（`ViaSystem` 只能用在真的由系统发起的路径上，不许拿它当兜底）；(c) 如果你发现某个调用点**必须**改跨包签名才能知道通道，**在 RESULT 里点名，不要顺手扩范围**。RESULT 里必须逐条列出「哪个文件哪一行填了什么值」，每一条都要能被 grep 到。",
+    "**四、端到端证据（硬要求）**：一条**真 PostgreSQL** 集成测试，从 `events.Record(ctx, tx, events.Event{Via: domain.ViaAPI, ...})` 出发，断言**三跳同值**：`outbox_events.via` →（发布那一步真的跑过，`internal/events/publish.go:124` 的 `Dispatcher.RunOnce`）`research_events.via` →（投影跑一遍后）`contribution_events.via`；**并加一条控制用例**：不填 `via` 时三跳全为 NULL（证明这条链不是靠默认值撑起来的，也证明这条测试能报出相反的结果）。",
+    "**五、挂载的运行期证据**：不是「函数存在」，而是**被驱动的循环真的落了行**——一条测试走 worker 的注册面（`internal/worker/worker.go:105` 的 `Register`，照既有消费者的测试形状），断言账本**真的新增了行**或未映射计数真的被报出，而不是只调用一次 `RunOnce` 就算数。",
+    "**六、不许动的**：不新增/删除事件映射（那 10 个类型是 T0807 的决策面）；不加任何聚合值/计数器/权重/排名（`docs/13:19`、`docs/13:25-27`、CLAUDE.md §9 不变量 13）；不碰 append-only 触发器（`00014`/`00015`）；不给 `role_codes` 或 `via` 加数据库 CHECK（`00064`/`00066`/`00067`/`00045` 四处逐字声明的约定：词表在 Go 侧，加 CHECK 就是第二份定义、会漂移）；不碰 webhook/subscription 既有消费者（只加第四个）。",
+    "**七、不做**：不改 `specs/**`（`specs/events/event-types.yaml` 是 Supervisor-only，你只读）；不做 Reputation Profile 展示；不做 Credit Dispute；**本任务不该新建迁移**——`00087` 已把三列加好，`infra/**` 在禁止范围内；若你判断确实需要新迁移，记 `blocked` 说明，不要自行选号（CLAUDE.md §8.1）。"
+  ],
+  "acceptance_criteria": [
+    "**worker 里真的挂上了**：`cmd/worker/main.go` 构造投影器并 `go projector.Run(ctx)`，随关闭退出；且有一条测试证明**循环被驱动后账本真的落行**，不是只测函数存在。",
+    "**`via` 三跳同值（真 PostgreSQL）**：`events.Record(via=...)` → `outbox_events.via` → `research_events.via` → `contribution_events.via` 逐跳断言相等；**控制用例**：不填 via 时三跳全 NULL。",
+    "**填值点逐条可查**：RESULT 里列出「文件:行 → 值」，每一条都能被 grep 到；留空的路径逐条说明理由（不许含糊带过）。",
+    "**未知 via 被拒（fail-closed）**：一条测试证明 recorder 对词表外的值报错并且**不写行**。",
+    "**未映射事件在运行期可见**：真跑过循环之后，未映射类型的计数/日志真的出现（不是只在 RESULT 里列清单）。",
+    "**没有为通过而弱化**：不删/skip 既有测试、不放宽断言、不放大 timeout（CLAUDE.md §5.1）；T0807 的 9 条集成测试继续全绿。",
+    "RESULT 里说明：今天哪些路径填了值、哪些留空（各自的理由），以及挂载之后生产上第一次真跑会写什么。"
+  ],
+  "allowed_scope": [
+    "internal/events/**",
+    "internal/domain/**",
+    "internal/contribution/**",
+    "internal/application/**",
+    "internal/persistence/**",
+    "internal/worker/**",
+    "cmd/worker/**",
+    "tests/**",
+    "go.mod",
+    "go.sum",
+    ".env.example"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "specs/**",
+    "infra/**",
+    "apps/web/**",
+    "cmd/api/**",
+    "internal/authz/**",
+    "packages/schemas/**",
+    "Makefile"
+  ],
+  "relevant_specs": [
+    "`docs/13_CONTRIBUTION_REPUTATION.md:7`：每个贡献事件要带七项，其中第七项「via agent/client」就是 `via` 列（`00087` 已加，本任务给它真实来源）。",
+    "`infra/migrations/00087_contribution_ledger_projection.sql`：三列（`contribution_events.via`、`outbox_events.via`、`research_events.via`）、偏唯一索引 `contribution_events_research_event_uniq`，以及 `:76` 起 \"HONEST STATE OF THE CHAIN\" 那段——它逐字写明了今天为什么全是 NULL、以及上游那条腿一落地这张表就自己填上。**这就是本任务要落地的那条腿。**",
+    "`infra/migrations/00046_outbox_idempotent_publish.sql:16-40`：信封列逐字抄、绝不从 payload 重新推导的出处；`:38-39` 还有「事件不得比它的主体更可见」。",
+    "`internal/domain/state.go:60-64`（`StateVia` 六个值）与 `internal/application/states/service.go:285-296`（`validateCommitParams` 用 `domain.ValidStateVia` 校验、未知即拒）——通道词表与它既有的 fail-closed 用法。",
+    "`internal/application/rsg/service.go:243,346,431`、`internal/application/merge/service.go:567`：`Via: domain.ViaAPI` 的现成写法（「写路径自己声明通道」的先例，照它做）。",
+    "`internal/events/event.go`：`Event` 结构（actor/project/visibility/correlation 四个信封字段的注释说明了「信封列随 outbox 走、publisher 逐字抄」）与 `Record`、`insertOutboxEvent`。",
+    "`internal/events/publish.go:67,97,124`：`NewDispatcher` / `Run` / `RunOnce`（端到端测试里发布那一步的入口）。",
+    "`cmd/worker/main.go:119,132,151` 一带：三个既有消费者的挂法（池、goroutine、关闭等待、重试语义），照抄。",
+    "`internal/worker/worker.go:105`：`Register(jobType, handler)`——如果挂载走注册面，这是接口。",
+    "`internal/contribution/ledger_store.go:76,128` 与 `internal/application/contribution/ledger.go:41,80,116,129`：你要挂的那个投影器的构造与运行面。",
+    "`specs/events/event-types.yaml`（只读）：事件名的机器可读清单；本任务不新增事件类型。"
+  ],
+  "scope_note": "这是**按本任务的实际交付面**调整过的范围：相对 DAG 里的 phase 级默认值，**加** `internal/events/**`（`via` 的信封链第一条腿在那里——T0807 就是因为没有这个范围才留下缺口）与 `cmd/worker/**` + `internal/worker/**`（挂载点）；**去掉** `infra/migrations/**`、`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`（本任务不该建迁移、也不该动生成物，列在 forbidden 里是**故意**的：`00087` 已经把三列加好）与 `apps/web/**`（无界面交付）、`cmd/api/**`（通道值在应用服务层就定，不需要动 HTTP 面）。",
+  "supervisor_scope_narrowing": "2026-09-19 定稿。四点：\n（一）**为什么和 T0807 分开、又为什么合成一个任务。** T0807 的书里没有「挂载」这条要求、范围也不含 `cmd/worker/**` 与 `internal/events/**`——它在 RESULT 里点名这两个洞是**诚实**，不是违约（第 3 条 `via` 我本来就留了口子：「确实不可知就点名说明，不要编」，它一个默认值都没填，还把诚实状态写进了迁移注释）。所以不返工它，缺口另立本任务：挂载与 `via` 合在一起，因为「让账本真的跑起来、且记的是真事实」是一件事；`via` 的设计裁定（第三条）与挂载的落点都在下面写清了。\n（二）**与 T0901 有文件重叠，不得并行。** T0901（Search Document Projection，已暂存未派工）的允许范围同样含 `internal/events/**` 与 `cmd/worker/**`（它也要挂一个消费者）。两者串行派工，先后由 Supervisor 定；**这不是依赖关系，所以没写进 `dependencies`**（`dependencies` 只表达真实前置）。\n（三）**`via` 的 L1 裁定：照「写路径自己声明通道」的先例，不知道就留 NULL。** 现成先例是 `Via: domain.ViaAPI` 直接写在应用服务里（rsg/merge 四处）。**不许**为了「让列非空」而给所有事件塞一个默认通道——那正是 `00087` 注释里点名的「读起来像事实的默认值」。词表与校验都用现成的（`StateVia` / `ValidStateVia`），不要另造。\n（四）**本任务不该有新迁移。** 三列 `00087` 已加好；`infra/**` 因此进 forbidden。若工人判断确实需要新迁移，它必须记 `blocked` 说明——迁移号由派工时分配（CLAUDE.md §8.1），不许自选。"
+}

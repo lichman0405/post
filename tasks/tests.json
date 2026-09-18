@@ -1580,6 +1580,26 @@
       "status": "not_run",
       "last_run": null,
       "evidence": "尚未执行——任务 2026-09-18 立档，未派工。"
+    },
+    {
+      "id": "T0813-TEST-01",
+      "task_id": "T0813",
+      "name": "contribution ledger wiring",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0813-TEST-02",
+      "task_id": "T0813",
+      "name": "via envelope chain",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
     }
   ]
 }

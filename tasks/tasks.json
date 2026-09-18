@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 135,
+  "task_count": 136,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -4660,7 +4660,7 @@
         "`internal/gitprovider/refsync.go`（T0303）：分叉点解析与「按分支行创建/删除 provider side ref」的既有实现；注意它**不搬内容**，所以它不写 semantic state 是有理由的——fork 导入**搬内容**，所以不能照抄它的处理。",
         "`internal/persistence/main_freeze_store.go`（T0601，我刚验收过）：**幂等、并发、事务边界、fail-closed 可见性**四件事在本仓库的标准写法都在这个文件里，`Freeze` 的比较并交换写法值得先读一遍再动手。",
         "`docs/23_SECURITY_PRIVACY.md:21` 与 `docs/57_DEMO_UAT.md:7`：可见性与「restricted blob download 必须失败」的负向场景。",
-        "`docs/12_AUTHORIZATION.md` §5：Organization policy 是最低要求、Project policy 可更严**不能更松**——fork 的判定不得比矩阵更松。"
+        "`docs/12_PERMISSIONS_RIGHTS_POLICY.md` §5：Organization policy 是最低要求、Project policy 可更严**不能更松**——fork 的判定不得比矩阵更松。"
       ],
       "scope_note": "这是 Supervisor 收窄后的范围（已从 phase 级默认上限删掉 `apps/web/**`，另按本任务实际需要加入 `internal/gitprovider/**`、`internal/persistence/**`、`internal/rights/**`）。`internal/rsg/**` 与 `internal/authz/**` 刻意不在其中：读不受限，要改就在 RESULT 里点名，由 Supervisor 接手。",
       "supervisor_scope_narrowing": "2026-09-16 定稿。三点：\n（一）**这个任务原先被我标成「等定」（SPEC_BLOCKED：见 issue #189），现在撤回。** 它和 T0604 是**同一次误标**——两条状态记录都是 2026-09-16T00:08:07Z 同一秒写下的。它的依赖 T0803、T0303 早已合并，**所以它本来可以一直在跑**。今天把 issue #189 重查了一遍，答案是：这条 issue 的正确结局是「按现状确认 + 补一句规格 + 让本任务去做检查」，不是「换默认值」（理由见那条 issue 的评论）。**你不再需要等任何裁定。**\n（二）**删掉 `apps/web/**`**：本任务没有界面交付，与 T0601、T0409、T0604 同样的处置。V1 对「外部用户可 fork/contribute」的验收走 API/E2E 路径（`docs/31_MASTER_ACCEPTANCE.md:17` 与 `docs/24_TEST_STRATEGY.md:28` 说的都是能力覆盖，不是页面）。要做界面是另一个任务。\n（三）**刻意不包含 `internal/rsg/**` 与 `internal/authz/**`**：本任务**要读**它们（要照既有的权限判定接线、要看分叉点的 RSG 语义），而**读不受范围限制**。`internal/authz/**` 尤其重要：**权限矩阵的格子已经写好了，你的工作是把它们接上，不是改它们**（见 requirements 第二条）。如果你确实需要动其中任何一个，在 RESULT 里点名说清楚，我来接。\n（四）**迁移号不在这份任务书里定死**——派工时由 `rddev` 从分配账上取号并写进任务包，**以任务包里那行「its number is **NNNNN**」为准**。我先前在这里手写过 00074，**那是错的**（我把它当成了「下一个空号」，但账上 73/74/75 分别是 T0601/T0709/T1110 的）。**不得自行选号。** 若你判断本任务根本不需要迁移，那就不建——在 RESULT 里说明理由即可，不要为了用掉这个号而造表。"
@@ -4776,7 +4776,7 @@
         "**不要为文档提到的表而造表。** `docs/21_DATA_MODEL.md:24` 点名了 `external_evidence_links`，但**全仓库不存在**，也只有那一行提到它。**不要为了「补齐文档」而建它**；若你判断 §7 确实需要一张独立的表（而不是补 `evidence_assertions` 的列），在 RESULT 里说明理由并建（编号我分配）。",
         "**事件要真的发出来。** `specs/events/event-types.yaml:28` 已声明 `knowledge.external_evidence_added`，**目前没有生产者**（`internal/events/subscription.go:290` 记着「no producer addresses a published knowledge object yet」）。在生产路径上发它，`Event.Visibility` 必填且显式（`internal/events/event.go:45-65`，不许猜）。**注意一处文档不一致**：`docs/18:9` 把它拼成 `external_evidence.added`——按 YAML 的拼法写，`docs/**` 不在你范围内，别去改文档。",
         "**读出口就是契约里那条没人实现的 GET。** `specs/api/openapi.yaml:292-296` 的 `GET /knowledge/{knowledgeId}`（summary 逐字 `Published knowledge object plus origin/network evidence state`）今天**没有实现**，它正是这三分类的天然读出口。**契约（`specs/api/**`）由我维护**：你按既有契约实现；若契约缺字段或响应形状不够，**在 RESULT 里点名**，不要自己改契约文件。该接口 `security: []`（匿名可读）——所以 **private／未发布的对象绝不能从这里泄漏**（与 T0805 匿名检索收紧同一条原则；owner 裁定 `L3-20260916-1`：发布 ≠ 公开）。",
-        "**一律 fail-closed。** 读不到、解析失败、权限不明、归属链断——**全部视为不可见/拒绝**（`docs/12_AUTHORIZATION.md` §5：不能静默放宽；`internal/authz/engine.go` 对未登记动作默认拒绝）。缺失不得成为放行理由。"
+        "**一律 fail-closed。** 读不到、解析失败、权限不明、归属链断——**全部视为不可见/拒绝**（`docs/12_PERMISSIONS_RIGHTS_POLICY.md` §5：不能静默放宽；`internal/authz/engine.go` 对未登记动作默认拒绝）。缺失不得成为放行理由。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
@@ -5192,6 +5192,81 @@
       "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
     },
     {
+      "id": "T0813",
+      "phase": "P8",
+      "phase_name": "开放网络、Fork、贡献与 Research Profile",
+      "title": "Contribution Ledger 接上生产（worker 挂载 + via 真实来源）",
+      "v1_required": true,
+      "dependencies": [
+        "T0807"
+      ],
+      "requirements": [
+        "**先读现状，不要重做投影逻辑。** T0807 已经交付了贡献账本投影：决策面 `internal/contribution/ledger.go`（事件→账本行的映射表，10 个类型；`LedgerRefKind`）、store `internal/contribution/ledger_store.go:76` `NewLedgerStore(pool)` 与 `:128` `ProjectBatch`、服务 `internal/application/contribution/ledger.go:41` `LedgerProjector`（`:116` `RunOnce`、`:129` `Run` 自带间隔循环、`:80` `WithLedgerLogger`）、三个新列在 `infra/migrations/00087_contribution_ledger_projection.sql`。它自己在 RESULT 里点了两个**范围外**的洞，本任务补的就是这两个：**投影器没挂进 worker（所以线上不会跑）**、**`via` 全是 NULL（因为设置它的那条腿写在 `internal/events/**`）**。",
+        "**一、把投影器挂上生产。** 照 `cmd/worker/main.go` 里既有的三个消费者挂法（dispatcher `:119` 一带、signed-webhook 的 fanout+deliverer `:132` 一带、subscription fanout `:151` 一带）：同一个 `persistence.OpenLazy` 池、`go <loop>.Run(ctx)`、随 ctx 取消退出、并进既有的关闭等待。投影器构造：`contribution.NewLedgerProjector(store, contribution.WithLedgerLogger(logger))`，store 用 `contribution.NewLedgerStore(pool)`。**要求**：(a) 真的起在 worker 进程里、随关闭退出；(b) 数据库暂时不可用时像其他消费者一样**重试**而不是退出进程；(c) 未映射事件在**运行期**可见——复用 T0807 已经做好的 `LedgerBatch.Unmapped` 与 `firstTime(\"unmapped:...\")` 日志，**不要另造一套**。",
+        "**二、给 `via` 补上第一条腿（`internal/events/**`，T0807 范围外的那处）。** `outbox_events.via` 与 `research_events.via` 两列 `00087` 已经加好、今天没有人写。做法**照仓库里现成的通道先例**，不要发明新词表：词表是 `internal/domain/state.go:60-64` 的 `StateVia`（web/api/mcp/claude_code/git_compat/system），校验用现成的 `domain.ValidStateVia`（用法见 `internal/application/states/service.go:285-296`：未知通道一律拒）。落点三处：`internal/events/event.go` 的 `Event` 加字段、`insertOutboxEvent` 的 INSERT 加一列（进库前按 `ValidStateVia` 校验，未知即拒）；`internal/events/publish.go:164` 的 SELECT 与 `:199` 的 INSERT 各加一列，**逐字从 outbox 行抄进 research_events，绝不从 payload 重新推导**（`00046` 的规矩逐字：the publisher must copy them from the outbox row, never re-derive them from the payload）。",
+        "**三、哪些调用点填值、哪些留空——这条我替你定了（L1 裁定）。** 先例是「**写路径自己声明通道**」，不是「传输层逐请求透传」：`internal/application/rsg/service.go:243,346,431` 与 `internal/application/merge/service.go:567` 都直接写 `Via: domain.ViaAPI`。所以：(a) **知道通道的路径填**（API 服务层 = `ViaAPI`；确实由系统/后台发起的路径 = `ViaSystem`）；(b) **不知道的留空 = NULL**——`00087` 的注释已经定义 NULL 的含义是「这条写入路径没有记录通道」，**不得**用默认值凑（`ViaSystem` 只能用在真的由系统发起的路径上，不许拿它当兜底）；(c) 如果你发现某个调用点**必须**改跨包签名才能知道通道，**在 RESULT 里点名，不要顺手扩范围**。RESULT 里必须逐条列出「哪个文件哪一行填了什么值」，每一条都要能被 grep 到。",
+        "**四、端到端证据（硬要求）**：一条**真 PostgreSQL** 集成测试，从 `events.Record(ctx, tx, events.Event{Via: domain.ViaAPI, ...})` 出发，断言**三跳同值**：`outbox_events.via` →（发布那一步真的跑过，`internal/events/publish.go:124` 的 `Dispatcher.RunOnce`）`research_events.via` →（投影跑一遍后）`contribution_events.via`；**并加一条控制用例**：不填 `via` 时三跳全为 NULL（证明这条链不是靠默认值撑起来的，也证明这条测试能报出相反的结果）。",
+        "**五、挂载的运行期证据**：不是「函数存在」，而是**被驱动的循环真的落了行**——一条测试走 worker 的注册面（`internal/worker/worker.go:105` 的 `Register`，照既有消费者的测试形状），断言账本**真的新增了行**或未映射计数真的被报出，而不是只调用一次 `RunOnce` 就算数。",
+        "**六、不许动的**：不新增/删除事件映射（那 10 个类型是 T0807 的决策面）；不加任何聚合值/计数器/权重/排名（`docs/13:19`、`docs/13:25-27`、CLAUDE.md §9 不变量 13）；不碰 append-only 触发器（`00014`/`00015`）；不给 `role_codes` 或 `via` 加数据库 CHECK（`00064`/`00066`/`00067`/`00045` 四处逐字声明的约定：词表在 Go 侧，加 CHECK 就是第二份定义、会漂移）；不碰 webhook/subscription 既有消费者（只加第四个）。",
+        "**七、不做**：不改 `specs/**`（`specs/events/event-types.yaml` 是 Supervisor-only，你只读）；不做 Reputation Profile 展示；不做 Credit Dispute；**本任务不该新建迁移**——`00087` 已把三列加好，`infra/**` 在禁止范围内；若你判断确实需要新迁移，记 `blocked` 说明，不要自行选号（CLAUDE.md §8.1）。"
+      ],
+      "acceptance_criteria": [
+        "**worker 里真的挂上了**：`cmd/worker/main.go` 构造投影器并 `go projector.Run(ctx)`，随关闭退出；且有一条测试证明**循环被驱动后账本真的落行**，不是只测函数存在。",
+        "**`via` 三跳同值（真 PostgreSQL）**：`events.Record(via=...)` → `outbox_events.via` → `research_events.via` → `contribution_events.via` 逐跳断言相等；**控制用例**：不填 via 时三跳全 NULL。",
+        "**填值点逐条可查**：RESULT 里列出「文件:行 → 值」，每一条都能被 grep 到；留空的路径逐条说明理由（不许含糊带过）。",
+        "**未知 via 被拒（fail-closed）**：一条测试证明 recorder 对词表外的值报错并且**不写行**。",
+        "**未映射事件在运行期可见**：真跑过循环之后，未映射类型的计数/日志真的出现（不是只在 RESULT 里列清单）。",
+        "**没有为通过而弱化**：不删/skip 既有测试、不放宽断言、不放大 timeout（CLAUDE.md §5.1）；T0807 的 9 条集成测试继续全绿。",
+        "RESULT 里说明：今天哪些路径填了值、哪些留空（各自的理由），以及挂载之后生产上第一次真跑会写什么。"
+      ],
+      "tests": [
+        "contribution ledger wiring",
+        "via envelope chain"
+      ],
+      "allowed_scope": [
+        "internal/events/**",
+        "internal/domain/**",
+        "internal/contribution/**",
+        "internal/application/**",
+        "internal/persistence/**",
+        "internal/worker/**",
+        "cmd/worker/**",
+        "tests/**",
+        "go.mod",
+        "go.sum",
+        ".env.example"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "docs/**",
+        "specs/**",
+        "infra/**",
+        "apps/web/**",
+        "cmd/api/**",
+        "internal/authz/**",
+        "packages/schemas/**",
+        "Makefile"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "`docs/13_CONTRIBUTION_REPUTATION.md:7`：每个贡献事件要带七项，其中第七项「via agent/client」就是 `via` 列（`00087` 已加，本任务给它真实来源）。",
+        "`infra/migrations/00087_contribution_ledger_projection.sql`：三列（`contribution_events.via`、`outbox_events.via`、`research_events.via`）、偏唯一索引 `contribution_events_research_event_uniq`，以及 `:76` 起 \"HONEST STATE OF THE CHAIN\" 那段——它逐字写明了今天为什么全是 NULL、以及上游那条腿一落地这张表就自己填上。**这就是本任务要落地的那条腿。**",
+        "`infra/migrations/00046_outbox_idempotent_publish.sql:16-40`：信封列逐字抄、绝不从 payload 重新推导的出处；`:38-39` 还有「事件不得比它的主体更可见」。",
+        "`internal/domain/state.go:60-64`（`StateVia` 六个值）与 `internal/application/states/service.go:285-296`（`validateCommitParams` 用 `domain.ValidStateVia` 校验、未知即拒）——通道词表与它既有的 fail-closed 用法。",
+        "`internal/application/rsg/service.go:243,346,431`、`internal/application/merge/service.go:567`：`Via: domain.ViaAPI` 的现成写法（「写路径自己声明通道」的先例，照它做）。",
+        "`internal/events/event.go`：`Event` 结构（actor/project/visibility/correlation 四个信封字段的注释说明了「信封列随 outbox 走、publisher 逐字抄」）与 `Record`、`insertOutboxEvent`。",
+        "`internal/events/publish.go:67,97,124`：`NewDispatcher` / `Run` / `RunOnce`（端到端测试里发布那一步的入口）。",
+        "`cmd/worker/main.go:119,132,151` 一带：三个既有消费者的挂法（池、goroutine、关闭等待、重试语义），照抄。",
+        "`internal/worker/worker.go:105`：`Register(jobType, handler)`——如果挂载走注册面，这是接口。",
+        "`internal/contribution/ledger_store.go:76,128` 与 `internal/application/contribution/ledger.go:41,80,116,129`：你要挂的那个投影器的构造与运行面。",
+        "`specs/events/event-types.yaml`（只读）：事件名的机器可读清单；本任务不新增事件类型。"
+      ],
+      "scope_note": "这是**按本任务的实际交付面**调整过的范围：相对 DAG 里的 phase 级默认值，**加** `internal/events/**`（`via` 的信封链第一条腿在那里——T0807 就是因为没有这个范围才留下缺口）与 `cmd/worker/**` + `internal/worker/**`（挂载点）；**去掉** `infra/migrations/**`、`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`（本任务不该建迁移、也不该动生成物，列在 forbidden 里是**故意**的：`00087` 已经把三列加好）与 `apps/web/**`（无界面交付）、`cmd/api/**`（通道值在应用服务层就定，不需要动 HTTP 面）。",
+      "supervisor_scope_narrowing": "2026-09-19 定稿。四点：\n（一）**为什么和 T0807 分开、又为什么合成一个任务。** T0807 的书里没有「挂载」这条要求、范围也不含 `cmd/worker/**` 与 `internal/events/**`——它在 RESULT 里点名这两个洞是**诚实**，不是违约（第 3 条 `via` 我本来就留了口子：「确实不可知就点名说明，不要编」，它一个默认值都没填，还把诚实状态写进了迁移注释）。所以不返工它，缺口另立本任务：挂载与 `via` 合在一起，因为「让账本真的跑起来、且记的是真事实」是一件事；`via` 的设计裁定（第三条）与挂载的落点都在下面写清了。\n（二）**与 T0901 有文件重叠，不得并行。** T0901（Search Document Projection，已暂存未派工）的允许范围同样含 `internal/events/**` 与 `cmd/worker/**`（它也要挂一个消费者）。两者串行派工，先后由 Supervisor 定；**这不是依赖关系，所以没写进 `dependencies`**（`dependencies` 只表达真实前置）。\n（三）**`via` 的 L1 裁定：照「写路径自己声明通道」的先例，不知道就留 NULL。** 现成先例是 `Via: domain.ViaAPI` 直接写在应用服务里（rsg/merge 四处）。**不许**为了「让列非空」而给所有事件塞一个默认通道——那正是 `00087` 注释里点名的「读起来像事实的默认值」。词表与校验都用现成的（`StateVia` / `ValidStateVia`），不要另造。\n（四）**本任务不该有新迁移。** 三列 `00087` 已加好；`infra/**` 因此进 forbidden。若工人判断确实需要新迁移，它必须记 `blocked` 说明——迁移号由派工时分配（CLAUDE.md §8.1），不许自选。"
+    },
+    {
       "id": "T0901",
       "phase": "P9",
       "phase_name": "Search 与 Evidence-backed Research Answer",
@@ -5206,7 +5281,8 @@
         "**`visibility` 只许「从源头照抄」，不许「算出来」；拿不准一律落 `private`。** 这一列的值必须来自被投影实体自己的可见性轴，**绝不允许出现「拿不准就先写 public」**。而且 `search_documents.visibility`（`00013:6`）上**没有 CHECK 约束**——数据库不会替你挡这个错，你得自己挡。既有的访问控制测试必须继续绿：`tests/integration/search_access_test.go:23` `TestSearchDocumentsEnforcesAccessControl`。泄漏在本项目是最高等级的安全场景而非一般验收项：`docs/31_MASTER_ACCEPTANCE.md:32,35`（Gate E「Search 无 private leakage」）与 `docs/54_SECURITY_THREAT_MODEL.md:10`。**「public 路径上不读私有数据」的既有先例照它做**：`cmd/api/explorehttp/store.go:25-33` 逐字——私有项目的 name/slug/visibility「never leave the database on this path: not read and withheld, never selected」。**选中再过滤是错的；根本不要选中。**",
         "**增量：新增一个 outbox 消费者，挂在 `cmd/worker`。** 机制已经有了，照抄既有消费者的挂法：写入方 `internal/events/event.go:82` `func Record(ctx, db DBTX, e Event) error`（`Event.Visibility` 在 `:45-65`，**必填且显式，不许猜**；校验在 `:121-126`，只允许 public|private）；`outbox_events` 在 `infra/migrations/00012_events_audit.sql:14-22`，`00046_outbox_idempotent_publish.sql:32-36` 补了 `visibility text NOT NULL DEFAULT 'private'`（`:38-39` 注释逐字：an event is never more visible than its subject）。**每个消费者自带一个游标列**——两例：`00059_webhook_endpoints.sql:76-79`、`00078_subscriptions.sql:159`。挂载点在 `cmd/worker/main.go`（dispatcher `:119`、webhook fanout `:132-133`、subscription fanout `:151`；注册 API 是 `internal/worker/worker.go:105`）。**幂等是硬要求**（`docs/adr/ADR-013-domain-events-outbox.md:4`：同事务写 outbox，异步投递，Consumer 幂等）。**该投影哪些事件**：`specs/events/event-types.yaml:17`（`state.committed`）、`:25-28`（`release.published`、`research_asset.version_published`、`knowledge.version_published`、`knowledge.external_evidence_added`）、`:35`（`policy.version_published`）——**`specs/events/**` 在你的 forbidden_scope 里，按已有拼法投影，不要加新事件类型；需要新的就记 `blocked`。**",
         "**rebuild 命令：形状你定，但三条硬要求。** 先例形状是 `Makefile:65-71` 的 `migrate` 目标（make 委托给 Go CLI），而 `cmd/rddev` 不在你范围内——所以允许你动 `Makefile` 加一个目标，实现体放 `cmd/worker/**`。**必须**：(1) 能从一台干净的开发机上真的跑起来；(2) **幂等**，连跑两次结果一致；(3) 有测试覆盖，而不是只有一条命令。`search_documents` 被**有意**排除在 append-only 之外——它是可重建投影不是历史：`infra/migrations/00014_append_only_enforcement.sql:16` 的注释块、`00015_append_only_truncate.sql`，正面证据 `tests/integration/append_only_truncate_test.go:119`（`TRUNCATE search_documents` **必须成功**）。所以 rebuild 合法；但反过来说，**别拿它当「投影里丢东西无所谓」的借口**。",
-        "**不做**：排名的科学规则（T0905）、embedding 的 provider 与 pgvector 索引（T0902）、Answer 生成（T0906）、搜索 Web UI（T0907）。`embedding` 那一列**先留空是对的**，它是 T0902 的交付面。`docs/14_SEARCH_DISCOVERY.md:5` 定死范围（只搜 network 内 public/accessible content，不做全互联网 crawler），`:11` 说明检索是 structured filters + FTS + semantic + graph traversal + scientific ranking 的组合——**本任务只做「投影」这一步**；`docs/adr/ADR-005-postgres-first-graph-search.md:5`：V1 不引入 OpenSearch。**若你发现某条需求的完成依赖上面任何一个，记 `blocked` 说明，不要顺手实现**（详见 `supervisor_scope_narrowing`）。"
+        "**不做**：排名的科学规则（T0905）、embedding 的 provider 与 pgvector 索引（T0902）、Answer 生成（T0906）、搜索 Web UI（T0907）。`embedding` 那一列**先留空是对的**，它是 T0902 的交付面。`docs/14_SEARCH_DISCOVERY.md:5` 定死范围（只搜 network 内 public/accessible content，不做全互联网 crawler），`:11` 说明检索是 structured filters + FTS + semantic + graph traversal + scientific ranking 的组合——**本任务只做「投影」这一步**；`docs/adr/ADR-005-postgres-first-graph-search.md:5`：V1 不引入 OpenSearch。**若你发现某条需求的完成依赖上面任何一个，记 `blocked` 说明，不要顺手实现**（详见 `supervisor_scope_narrowing`）。",
+        "**顺手把知识订阅那条线接通——这是本轮唯一一件不住在 `internal/search/**` 里的活；三处改动必须一起落，缺一处就等于没做。**\n\n我逐处核过，行号是今天 main 上的：\n- **没有任何知识订阅能收到知识事件**：`internal/events/subscription.go:337-339` 的 `eventTargetPayloadKeys` 里只有 `research_asset.version_published` 一条，知识事件一条都没有，所以 `EventTargets`（`:312`）不会给知识订阅解析出任何目标。\n- **但只补 key 也没用**：知识事件的 payload 里带的是 `publication_id`＝**PID**（`internal/persistence/knowledge_publish_store.go:487-493` 逐字：`publication_id carries the publication's PID`），而 `EventTargets` 在解析前先过 `ValidateTargetID`（`subscription.go:154-168`），知识类型**要求 uuid**——PID 会被当成形状不符**静默跳过**。数据库侧有第二道同样的线：`infra/migrations/00078_subscriptions.sql:83-86` 的 `subscriptions_target_id_shape`，除 asset 外一律要求 uuid。而用户**唯一握得住的标识就是 PID**（公开读路由 `cmd/api/knowledgehttp/wiring.go:28` 逐字「Read resolves one published knowledge object by its pid」；`handlers_test.go:262` 拼的是 `/api/v1/knowledge/<pid>`），出版物的行 uuid **从不离开进程**（同一条注释逐字）——所以今天这条订阅**连订都订不上**。\n- **就算前两处都改了，受众仍然是错的**：`internal/events/subscription_store.go:263-274` 的知识受众**只看项目可见性**（`p.visibility = 'public'`），而发布侧的裁定是 `internal/application/knowledgepublish/preview.go:169-180` 的 `AudienceFor` **三根轴**（版本自带 `visibility_policy_id` → members；项目非 public → members；rights 文档的 metadata 轴不是 project policy → members；否则 network）。\n\n**裁定（L1，我定）**：\n1. **知识目标按 PID 寻址**——与 **asset 目标同一个先例**：同一张表的形状 CHECK 已经为 asset 开了「按公开标识寻址」的口子（`00078:75-86` 的注释说明形状与解析查询的 cast 是配套的），而知识 PID 的形状**与资产 PID 逐字相同**（`infra/migrations/00083_knowledge_publication_identity.sql:88-89` 的 `knowledge_publications_pid_format` 与 `00078:85` 的 asset 正则一模一样）。落法必须三处同一次：Go `ValidateTargetID` 的 knowledge 分支、一条新迁移把 `subscriptions_target_id_shape` 的 knowledge 分支改成同一形状、以及 `TargetAudience` 的知识查询按 `kp.pid = $1` 解析。少任何一处都会留下「能订上但解析不到」或反过来。**迁移号由派工时分配，不得自选。**\n2. **知识受众与发布侧同一份规则**：知识分支要走 `AudienceFor` 的**三根轴**，不得只看项目可见性。`Delivers`（`subscription.go:244-253`）的既有判定不动：members 一律投、public 只投 public 事件、其余不投。\n3. **不许为了让投递「看起来通了」而放宽任何一条 fail-closed 路径**：未知目标、形状不符、解析不到行，一律 `AudienceNone`。\n\n**为什么归你**：你是事件的下游消费者（`research_events.visibility` 的读法在你这里会被继承），这条洞是 T0805 审查里记账、由我在 `tasks/decisions.md` 裁定归属的。**若你判断它要么做不完、要么必须动上面三处之外的接口（例如 `specs/**` 或既有 API 形状），记 `blocked` 说明，不要自己扩边。**"
       ],
       "deliverables": [],
       "acceptance_criteria": [
@@ -5215,7 +5291,8 @@
         "**投影幂等**：同一个领域事件投两次，表里仍然只有一行、且第二次不报错。**有一条测试真的投两次**（第二次走同一条 `UpsertSearchDocument` 路径），而不是只断言第一次成功。",
         "**rebuild 幂等**：重建跑两遍结果一致；**有测试覆盖这个命令本身**，而不是只有一条命令存在。",
         "**消费者真的挂上了**：该 job type 经由**真实的 worker 循环**被消费（照 `cmd/worker/main.go` 已有的三个挂载点），不是测试直接调用函数冒充。",
-        "**越界自证**：RESULT 里点名说明 `specs/**`（除快照与指纹）、`specs/events/**`、`internal/authz/**`、`specs/policies/**`、`apps/web/**`、`cmd/rddev/**` 一行未改，并说明 `embedding` 列保持为空、没有替 T0902/T0905/T0906/T0907 干活。"
+        "**越界自证**：RESULT 里点名说明 `specs/**`（除快照与指纹）、`specs/events/**`、`internal/authz/**`、`specs/policies/**`、`apps/web/**`、`cmd/rddev/**` 一行未改，并说明 `embedding` 列保持为空、没有替 T0902/T0905/T0906/T0907 干活。",
+        "**知识订阅真的能收到、且收不到不该收的**（这是上面那条需求的验收，端到端、真 PostgreSQL、真 worker 循环）：给一个**公开项目**里的**成员专属**出版物（`visibility_policy_id` 非空）建一个 knowledge 订阅并发布一次——**成员订阅者收到、非成员订阅者零行**；再把订阅指向一个 public 且 metadata 轴为 project policy 的出版物——**同一条订阅收到**。反证一条：把 payload 里的 `publication_id` 换成解析不到的 PID，投递数必须为 0。**光有正面例不算过。**"
       ],
       "tests": [
         "search projection"
@@ -5266,7 +5343,7 @@
         "`docs/14_SEARCH_DISCOVERY.md:5`：只搜索平台 network 内 public/accessible content + 已正式纳入项目的 External Reference snapshots，**不做全互联网 scholar crawler**。`:11` 检索是 structured filters + FTS + semantic + graph traversal + scientific ranking 的组合，本任务只做**投影**这一步（ranking 是 T0905，向量是 T0902，**不要把它们的活儿干了**）。`docs/adr/ADR-005-postgres-first-graph-search.md:5`：结构化/FTS/vector/traversal 都先在 Postgres 实现，达到明确规模阈值后再加 projection engine——**V1 不引入 OpenSearch**。"
       ],
       "scope_note": "这是**按本任务的实际交付面**调整过的范围。相对 DAG 里的 phase 级默认值：**加** `internal/events/**` + `cmd/worker/**` + `Makefile`——需求第 3 条「增量 outbox 更新」在结构上要求一个 outbox 消费者，而消费者按仓库既有形状必须挂在 `cmd/worker`（两例都挂在那里），rebuild 命令也需要一个可执行的入口；DAG 默认范围里这三条**都没有**，不改就落不了地。**加** `internal/application/**`（投影服务放这里）。**明确不加**（并写进 forbidden_scope）：`specs/api/openapi.yaml`（契约由我维护；本任务不需要新路由）、`specs/events/**`（事件词表由我维护）、`internal/authz/**` + `specs/policies/**`（权限矩阵是安全边界）、`apps/web/**`（本任务是投影，不是搜索界面——那是 T0907）、`internal/rsg/**` + `internal/domain/**`。",
-      "supervisor_scope_narrowing": "2026-09-18 定稿。四点说明：\n（一）**范围缺口是这次最主要的修正**。DAG 里 T0901 的 allowed_scope 有 `internal/persistence/**` 和 `internal/search/**`，但**没有** `cmd/worker/**` 和 `internal/events/**`——而「incremental outbox updates」这条需求，按仓库里已有的两个消费者（webhook fanout、subscription fanout）的挂法，消费者只能住在 `cmd/worker`。照原范围派工，需求第 3 条在结构上就完不成。这是补范围，不是放宽验收。\n（二）**rebuild 命令的落点我拍板**：允许你动 `Makefile` 加一个目标，实现体放在 `cmd/worker/**` 里（一个 job type，加一个可执行的入口）。理由是 `Makefile:65-71` 的 `migrate` 就是这个形状（make 目标委托给 Go CLI），而 `cmd/rddev` 不在你的范围内。**形状你自己定（job type + flag、还是独立子命令），但必须满足三条**：(1) 能从一台干净的开发机上真的跑起来；(2) 幂等——连跑两次结果一致；(3) 有测试覆盖，而不是只有一条命令。\n（三）**投影的可见性必须是「从源头照抄」，不是「算出来」**：`search_documents.visibility` 的值要来自被投影实体自己的可见性轴，并且**默认落到 private**（fail-closed）。绝不允许出现「拿不准就先写 public」。特别提醒：`search_documents.visibility` 上**没有 CHECK 约束**（`00013:6`），所以数据库不会替你挡这个错——你得自己挡。\n（四）**这一轮只做投影，不做检索质量**：排名的科学规则（T0905）、embedding 的 provider 与 pgvector 索引（T0902）、Search Answer 生成（T0906）、搜索 Web UI（T0907）都不是你的事。`embedding` 那一列先留空是对的——它是 T0902 的交付面。**若你发现某条需求的完成依赖上面任何一个，记 blocked 说明，不要顺手实现。**"
+      "supervisor_scope_narrowing": "2026-09-18 定稿。四点说明：\n（一）**范围缺口是这次最主要的修正**。DAG 里 T0901 的 allowed_scope 有 `internal/persistence/**` 和 `internal/search/**`，但**没有** `cmd/worker/**` 和 `internal/events/**`——而「incremental outbox updates」这条需求，按仓库里已有的两个消费者（webhook fanout、subscription fanout）的挂法，消费者只能住在 `cmd/worker`。照原范围派工，需求第 3 条在结构上就完不成。这是补范围，不是放宽验收。\n（二）**rebuild 命令的落点我拍板**：允许你动 `Makefile` 加一个目标，实现体放在 `cmd/worker/**` 里（一个 job type，加一个可执行的入口）。理由是 `Makefile:65-71` 的 `migrate` 就是这个形状（make 目标委托给 Go CLI），而 `cmd/rddev` 不在你的范围内。**形状你自己定（job type + flag、还是独立子命令），但必须满足三条**：(1) 能从一台干净的开发机上真的跑起来；(2) 幂等——连跑两次结果一致；(3) 有测试覆盖，而不是只有一条命令。\n（三）**投影的可见性必须是「从源头照抄」，不是「算出来」**：`search_documents.visibility` 的值要来自被投影实体自己的可见性轴，并且**默认落到 private**（fail-closed）。绝不允许出现「拿不准就先写 public」。特别提醒：`search_documents.visibility` 上**没有 CHECK 约束**（`00013:6`），所以数据库不会替你挡这个错——你得自己挡。\n（四）**这一轮只做投影，不做检索质量**：排名的科学规则（T0905）、embedding 的 provider 与 pgvector 索引（T0902）、Search Answer 生成（T0906）、搜索 Web UI（T0907）都不是你的事。`embedding` 那一列先留空是对的——它是 T0902 的交付面。**若你发现某条需求的完成依赖上面任何一个，记 blocked 说明，不要顺手实现。**\n（五）**本轮加了一条需求（上面最后一条），归属是我裁定的**，来源是 T0805 审查记账的那条洞（`tasks/decisions.md`）。它把三件事绑在一起：知识事件的 payload-key、知识目标的 PID 形状（Go + 一条新迁移的 CHECK + 受众查询）、以及知识受众改走 `AudienceFor` 的三根轴。**只做其中任一件都不算完成**——只加 key 会被形状校验静默跳过，只改形状则事件根本不投出去，只改受众则没有目标可解析。若你觉得这条与前面的投影需求冲突，或它需要的改动超出你的范围，记 `blocked` 说明，**不要自行决定扩大范围**。"
     },
     {
       "id": "T0902",

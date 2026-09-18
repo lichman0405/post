@@ -11594,3 +11594,183 @@ T1007（Dependency Impact Analysis）、T0806、T0811。
 (a) 去掉「用它的项目必须 public」、(b) 去掉「用法自己必须 public」——泄漏测试**各自变红**，
 红的时候响应体里真的出现了 `Hidden Lab` / `Downstream Lab` 的名字、slug 与 id。
 这条测试是承重的，不是装饰。
+
+## 裁定：知识订阅那条线归 T0901，并且是**三处**不是两处（2026-09-19）
+
+记账时我写的是「两件事必须一起做」（payload-key + 受众轴）。今天把三处代码逐一读过，**是三处**——
+少了第三处，前两处都落不了地：
+
+1. **没有目标**：`internal/events/subscription.go:337-339` 的 `eventTargetPayloadKeys` 只有
+   `research_asset.version_published`，知识事件一条没有。
+2. **有目标也解析不出来（这是新发现的一处）**：payload 带的 `publication_id` 是 **PID**
+   （`internal/persistence/knowledge_publish_store.go:487-493` 逐字写明），而 `EventTargets`
+   解析前先过 `ValidateTargetID`（`subscription.go:154-168`），knowledge 要求 **uuid** → 静默跳过；
+   数据库侧还有第二道线 `infra/migrations/00078_subscriptions.sql:83-86` 的形状 CHECK
+   （除 asset 外一律 uuid）。**而用户在界面上唯一握得住的就是那个 PID**（读路由是
+   `/api/v1/knowledge/<pid>`，行 uuid 从不离开进程）——**所以今天知识订阅连订都订不上**。
+3. **受众轴**：`internal/events/subscription_store.go:263-274` 只看项目可见性，而发布侧裁定是
+   `knowledgepublish.AudienceFor`（`preview.go:169-180`）的**三根轴**。
+
+**裁定（L1）**：知识目标**按 PID 寻址**，与 asset 目标同一个先例（同一张表已经为 asset 开过
+「按公开标识寻址」的口子，且 `00083:88-89` 的 `knowledge_publications_pid_format` 与 `00078:85`
+的 asset 正则**逐字相同**）。落法三处同一次：Go 校验 / 一条新迁移改 CHECK / 受众查询按 pid 解析；
+受众改走 `AudienceFor` 三根轴；`Delivers` 的判定不动。**迁移号派工时分配。**
+
+**为什么不是 L2**：这不是新语义——asset 目标已经把「按公开标识寻址」这条口子开在同一张表上，
+本条只是把 knowledge 对齐到同一个既成形状；受众那半边更是 T0805 那一轮已经裁定过的
+「发布不等于公开」在订阅侧的落地。
+
+**落地方式**：并进 **T0901**（它是 `research_events.visibility` 的下游消费者，范围里已有
+`internal/events/**` 与 `infra/migrations/**`）。已写进 `tasks/packages/T0901.json` 的**暂存区**
+（dry-run 已过：只动 requirements / acceptance_criteria / narrowing，不需要 `--allow-structural`），
+**等没有 Worker 在跑的窗口再落**——改 `tasks/tasks.json` 会移动 spec 指纹，会红掉在飞任务的 G2。
+
+## 裁定：T0604 独立审查的 request_changes（2026-09-19）——**返工同一 session**，不换人
+
+审查判 `request_changes`：**1 blocking + 1 major + 1 minor + 1 nit**。两条重的都指向
+`internal/persistence/review_store.go` 的 `projectApproval`，**同一个根**：状态快照取自
+changes_requested 那次 CAS **之前**的 PR 行，之后从不更新。
+
+1. **[blocking] 某条可达路径上事件根本没写**：快照让 `stateBefore` 停在 `review_required`，
+   推进 CAS 期望 `review_required` 而行已是 `changes_requested` → `pgx.ErrNoRows` →
+   `:211-218` **`return nil` 提前返回**，跳过函数最后那次 `recordReviewedEvent`。
+   审查的真库复现：**4 条 review 行、3 条事件**。与函数自己的契约（`:182-185`
+   「written for EVERY submission」）矛盾。
+2. **[major] 事件的 before/after 报错状态**：changes_requested 的提交一律发出
+   `before=review_required after=review_required advanced=false`，而事务结束时行是 `changes_requested`；
+   `state_after` 正是给消费者区分「推进 vs 仅记录」的字段。
+3. **[minor] 我说错了执行点**：`Satisfiable()` **生产路径从不调用**（`grep '\.Satisfiable()'` 只命中测试），
+   真正决定的是 `EvaluateRequiredReviews` 的 `ReviewProgress.Satisfied`。**这条打的是我**——
+   我自己的变异检验也改了 `Satisfiable()`、看到测试红就当成生产行为证据。要求返工把注释与
+   AC-6 证据改成点名真正的执行点。
+4. **[nit] `research_owner_rules_project_idx` 冗余**（与 UNIQUE 前缀重复）：**记录，不要求改**——
+   无害，且改它会碰迁移与生成物、扩大返工面。
+
+**我逐行读过代码，两条重的都成立**（`pr` 是 CAS 前的快照；`ErrNoRows` 分支确有 `return nil` 早退；
+`stateBefore`/`stateAfter` 确取自该快照）。
+
+**裁定：返工同一 session，不按「第二次不通过就销毁 Worker」处理。** 理由：
+- 两条缺陷**精确、局部、非架构性**（同一个函数、同一处根因，审查给了复现与修法），
+  正是 §11 那句「仅限问题明确且 context 仍可靠」；
+- 前一次返工的原因是**环境造成的 lint**（`make check` 当时不含 staticcheck），不是理解错误；
+- 审查已复跑并确认**其余全部成立**（六条验收标准、真库集成套件、迁移链、生成物、vet/staticcheck）——
+  而 `respawn` 会 `reset --hard + clean -fd` **把这整片已验证的实现扔掉重做**，那是更大的正确性风险。
+
+**若本轮再不过，就换人（respawn）。**
+
+## 我自己的变异检验：两次都记下来，「第一次活下来」才是信息（2026-09-19）
+
+对 T0604 的 fail-closed 规则（「没人负责的变更绝不能算通过」）我做了三次独立变异，结果不同：
+
+1. `RequiredReviews.Satisfiable()` 去掉 `len(r.Unrouted) == 0` → 单测**红**。
+   **但这是弱证据**：该函数生产路径不调用（见上面 minor），只证明那个测试对它敏感。
+2. `EvaluateRequiredReviews` 删掉 `case len(required.Unrouted) > 0:` 整支 → **真库集成测试照过**。
+   **这条留在记录里**：原因是那里有**两道独立防线**——删掉一条，`case len(required.Requirements) == 0:`
+   仍然拒绝。也就是说这个变异**没能改变行为**，不是测试没抓住。
+3. 决定性变异：让 `Unrouted > 0` 时直接 `progress.Satisfied = true` → 真 PostgreSQL 上
+   `TestReviewRoutingWithoutRulesNeverApproves` **红**，而无关的那条路由测试**仍然绿**（说明不是整片炸掉）。
+   **这条才是承重证据。**
+
+教训：变异检验要挑**真的能改变行为**的那一处，并且要看它落在生产路径还是只落在测试里。
+
+**候选跟进（不现在造任务）**：T0604 那个缺陷的形状是「**事件 payload 用 CAS 之前的行快照**」。
+我顺手看了最像的两处：`internal/persistence/pullrequest_store.go:203-232` 的 `SetPullRequestState`
+返回的是 **CAS 回来的行**（`RETURNING`），不构建事件、无此形状；`internal/persistence/state_store.go:213`
+一带同理待查。**全仓同名形状的系统性排查**是任务量级的活，记在这里：
+若以后要查，判据是「读行 → CAS → 用**旧快照**拼事件/审计 payload」这三步同时出现在一个事务里。
+
+## T0807 的两个「缺口」：不是违约，是我写的任务书缺了一条（2026-09-19）
+
+T0807（Contribution Ledger projection）已 collect 通过（12 个改动文件、14 条测试、10 条验收标准），
+但它自己在 RESULT 里点了两个洞：**`via` 全是 NULL**、**投影器没有挂进 `cmd/worker`**。
+我没有照抄它的说法，逐处核实过：
+
+- **两条都不是违约。** T0807 的任务书**没有**「挂在 worker 上用真实循环消费」这一条——那是 T0901 的第 2 条；
+  它的 `allowed_scope` 也确实不含 `cmd/worker/**` 与 `internal/events/**`。第 3 条 `via` 我本来就留了口子：
+  「如果你判断通道在投影那一刻确实不可知，在 RESULT 里点名说明，不要编」——它照口子办的，
+  而且**没有填任何默认值**：`internal/contribution/ledger_store.go:188` 读 `r.via`，`:256-270` 只在非 NULL 时赋值，
+  `:311` 用 `nullableText(row.Via)` 原样写回；未映射事件也真的计数可见
+  （`LedgerBatch.Unmapped` + `firstTime("unmapped:...")` 日志），不是静默丢掉。
+- **链条的诚实状态写进了迁移注释本身。** `infra/migrations/00087_contribution_ledger_projection.sql:76` 起
+  "HONEST STATE OF THE CHAIN" 一段逐字说明「这一列今晚是 NULL，因为设置它的那条腿（`internal/events`）不在本任务范围内；
+  投影只照抄、不发明，那条腿一落地这张表就自己填上」。这比只写在 RESULT 里强。
+
+**裁决：T0807 按原任务书验收（口径不降、Gate 不降），缺的两个能力另立任务补。**
+不为补缺口而返工 T0807：它按书做完了，返工等于让一个已验证的 12 文件交付面为一个「书里没写的需求」重做；
+而 `via` 那条腿是跨包的（recorder + publisher + 各生产方），塞进 T0807 会把返工面成倍扩大。
+
+**待办：安静窗口写入 `tasks/tasks.json`**（`apply-packages.py` 只能改已存在的任务，**建新任务要直接改 DAG 并重生成 marker**）。
+两条草案，**都不需要新迁移**（`00087` 已把三列加好）：
+
+1. **投影器接上生产**：在 `cmd/worker` 按既有消费者挂法挂载（dispatcher / webhook fanout / subscription fanout 三例）；
+   未映射事件的运行期可见性（计数 + 日志真的从 worker 循环里出来）。
+   scope 草案：`cmd/worker/**`、`internal/worker/**`、`internal/application/**`、`internal/persistence/**`、`tests/**`、`Makefile`。
+2. **`via` 信封链第一条腿**：recorder 写 `outbox_events.via`、publisher 抄进 `research_events.via`，
+   以及「通道值从哪个调用方来」这一步设计（词表是 `state_commits.via` 那六个：web/api/mcp/claude_code/git_compat/system）。
+   scope 草案：`internal/events/**`、`internal/domain/**`、`internal/application/**`、`internal/persistence/**`、`tests/**`。
+
+两条都与 T0901 在 `internal/events/**` / `cmd/worker/**` 上重叠，**不得与 T0901 并行**（T0901 已暂存、尚未派工）。
+
+**2026-09-19 更新：两条已合成一条，书稿落在 `tasks/packages/T0813.json`**（挂载 + `via` 第一条腿合成一个任务；
+理由：这是「让账本真的跑起来、且记的是真事实」同一件事，一次派工一次评审）。`apply-packages.py` **建不了新任务**
+（它按 id 找已存在的条目），所以落地要用 Supervisor 自己的脚本插入 + 重生成指纹。
+
+**安静窗口待办清单（T0604 落地之后、给 T0804 重拼基线之前，一次做完）：**
+
+1. `apply-packages.py T0901`（已暂存：requirements / acceptance_criteria / supervisor_scope_narrowing）。
+2. 插入 **T0813**（`tasks/packages/T0813.json`）到 `tasks/tasks.json`，并在 `tasks/tests.json` 登记它的两条必测
+   （`contribution ledger wiring` / `via envelope chain`）。
+3. **修两处我自己写的引用错误**（不是工人的问题）：活条目里 `docs/12_AUTHORIZATION.md` **这个文件不存在**
+   （真名 `docs/12_PERMISSIONS_RIGHTS_POLICY.md`），出现在 T0604（2 处）、T0804（1 处）、T0806（1 处）；
+   另有 T0604 书里 `merge/service.go:215-217` 已过时——真正的 `merge_ready` 闸门在 `:428`
+   （`PR_NOT_MERGEABLE` 在 `errors.go:53`）。**T0604 的活条目不改**（那是「工人当时被交代了什么」的记录，
+   事后改会篡改记录；修正版在它的暂存包里）。T0804、T0806 两条在派工前改掉。
+4. `python3 scripts/spec_version.py --write` + `make check-spec-version` + `python3 scripts/validate_task_state.py`。
+
+**`via` 那条腿的设计答案已经查清（2026-09-19），任务书照抄这个先例即可**：
+
+- 通道词表在 `internal/domain/state.go:60-64`（`StateVia`：web/api/mcp/claude_code/git_compat/system），
+  校验函数在 `internal/application/states/service.go` 的 `validateCommitParams`（未知通道一律拒）。
+- **先例是「写路径自己声明通道」，不是「传输层逐请求透传」**：`internal/application/rsg/service.go:243,346,431`
+  与 `internal/application/merge/service.go:567` 都是**直接写 `Via: domain.ViaAPI`**。
+  （`domain.ViaWeb` 今天在生产代码里没有使用者——web/mcp 的区分还没被透传，这是现状，不是我要在这次修的。）
+- 所以补链的办法很小：`internal/events.Event` 加 `Via` 字段（`event.go` 的 `insertOutboxEvent` 加一列，
+  按 `StateVia` 词表校验、未知即拒），`publish.go` 的信封拷贝两处各加一列（`:164` 的 SELECT 与
+  `:199` 的 INSERT——00046 的规矩：信封列逐字抄，绝不从 payload 重新推导），然后在**知道通道的调用点**
+  填值（rsg/merge 那几处、以及 system 类后台路径），其余**留空 = NULL**（迁移注释已定义 NULL 的含义：
+  「这条写入路径没有记录通道」，不是默认值）。
+- 端到端证据要求：一条测试从 `Record(via=...)` 出发，断言 `outbox_events.via → research_events.via →
+  contribution_events.via` 三跳都带同一个值；再加一条「不填 via 时三跳都是 NULL」的控制用例
+  （照我自己的判据：检查项要能说出另一个答案）。
+
+## T0604 独立审查的 6 条发现：逐条裁决（2026-09-19）
+
+审查判 **approve（0 blocking / 0 major）**，2 minor + 4 nit。§5.1 第 4 条要求「没有未解决的 review 意见」——
+**未解决 ≠ 存在**：每条都要么修、要么明确裁决留痕。**本轮不返工**：审查原文就写着
+"Approval follows; the findings below are non-blocking."，且两条 minor 都不动已验的合同面。
+
+1. **[minor] 一次变更命中多条规则时，`reviews.responsibility` 只记字母序第一个标签**
+   （`internal/application/reviews/service.go:192` 的 `pickResponsibility` 忽略提交的维度要求）。
+   审查已复现：`object_type=protocol→"Alpha Reviewer"`、`domain=materials→"Beta Reviewer"`、
+   同一人持两个标签时，每条评审都记成 "Alpha Reviewer"，另一条要求永远悬着
+   （报「1 required review(s) still missing」）。**方向是 fail-closed——没有任何东西被错误推进**，
+   是能力限制不是破坏；且路由配置今天还没有 HTTP 面（本任务 RESULT 已点），没有生产用户被挡。
+   **裁决：记录 + 排队跟进**。任务书没规定「多条规则同时命中」的归属，
+   修法是「每个被路由的要求由持有**该**标签的人满足」——那是既有原则的细化，L1 级。
+2. **[minor] `internal/application/responsibilities` 没有单测文件**（覆盖率/惯例缺口，非合同失败）。
+   **裁决：记录 + 并入上面那条跟进。**
+3. **[nit] RESULT 的 AC-4 证据句描述了一条不存在的代码路径**（写「按提交的维度匹配」，实际按字母序取第一个路由标签）。
+   审查同时核过：**被引的两条断言本身正确且可复现**（`:388`/`:403` 记的值、`:653` 空串、`:664` 单标签）。
+   **裁决：记录、不返工**——这是证据里「怎么做到」的措辞错，被引证据成立、防线完好，
+   属我既定规则里「机制描述错、保护面在 → 记录并合并」那一类；更正写进跟进任务书。
+   （**对照上一轮**：那条 minor 打的是**证据本身不成立**——被点名的变异检验改的函数生产路径根本不调用，
+   断言不可能因它变红，所以那一轮必须返工。分界线是「证据能不能失败」，不是「措辞准不准」。）
+4. **[nit] `tests/integration/review_routing_test.go:654` 无标签维护者记空串**，
+   AC-4 措辞里的「(不再是空串)」不是所有情形都成立。空串在这里是**诚实的归属事实**（人确实没标签），
+   不是缺省填充。记录。
+5. **[nit] `00084:82` 冗余索引**——那是我上一轮信里**明确要求不改**的（不是漏改；已钉进 `explicitIndexes`）。记录。
+6. **[nit] `internal/persistence/responsibility_store.go:273` 把所有外键违规映射成 `ErrUserNotFound`**——
+   今天不可达（调用方都先查存在性）。记录。
+
+**落地**：按以上裁决，6 条全部**记录在案、非阻断**，T0604 继续 accept → commit → push → PR → CI → merge。
+跟进（多规则归属 + `responsibilities` 单测）**不在安静窗口造书**：先让迁移链跑完，书稿排在 T0813 之后。
