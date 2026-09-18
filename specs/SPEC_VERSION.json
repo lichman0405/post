@@ -1,6 +1,6 @@
 {
   "algorithm": "sha256",
-  "combined_digest": "d0df0ea0d5defd4920f2efce10f8b1b0bc92e93f30599d55790fcbe34415ffd0",
+  "combined_digest": "d0a19129a7b21a726936595f893ead8ac48e8daeca834fb050aa7ed43a284e77",
   "files": {
     "specs/README.md": "2a0398dfb3ead0586034364d7411d845b84fd33b7c43d1ce9199d6a14ef4cf1a",
     "specs/api/openapi.yaml": "30915274796bedaea5cd6c895fb69ad670326b2765e4b8b2f6714736a469889a",
@@ -33,7 +33,7 @@
     "specs/schemas/material.schema.json": "72430e9d9f03ac39cd6f5445cdea3e09eaa2a81ebc213d451c7820425917db88",
     "specs/schemas/protocol.schema.json": "f87ac30de2d4264a427fb851ca19e7cca37a80ac3523d3fb85a46b92554b5dfb",
     "specs/schemas/relation.schema.json": "6ab11709b0f9a67bc974a54d29d2b9e4896088a0bcc06f9bf0ac601fe005cb49",
-    "specs/schemas/research-asset-version.schema.json": "e7272daba5c2617dfce17c57e47bb7d820faadd5fa85f55a433c27f65eacd88d",
+    "specs/schemas/research-asset-version.schema.json": "7bf9c2383d5b64f025a9e0e0aaf238c0bcc9f604ebfbd7c649025e202f75daf6",
     "specs/schemas/research_question.schema.json": "9584284e1c820e9fa5dda85254daaedfc7a398ea11e2282b511cd164416da279",
     "specs/schemas/rsg-manifest.schema.json": "2855af7c82afcc59dd061a5b9080f2087eb1bbfdc892f031e05ba5da9ad07696",
     "specs/schemas/sample.schema.json": "fed5737f271de54c07ebcb429740b224023ce0ffee84e173ff48b7fa7639732a",
@@ -43,5 +43,5 @@
   },
   "input_count": 38,
   "marker_format": 1,
-  "spec_version": "sha256:d0df0ea0d5defd49"
+  "spec_version": "sha256:d0a19129a7b21a72"
 }

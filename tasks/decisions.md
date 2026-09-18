@@ -11270,3 +11270,33 @@ T0805 的三处 hunk（`canonicalTables` / `explicitIndexes` / `TestUpgradePath`
 不重叠——我在「main + T0711 的 7 行」的模拟文件上跑过
 `patch -p1 --dry-run --fuzz=0`，三处全部命中（hunk#2 offset 42、hunk#3 offset 73）。
 所以 T0805 之后的重基线只需要一封「基线推进」的信，不需要再动它的树。
+
+## T0711 的后续一笔：schema 收紧已落地（2026-09-18）
+
+上一节 (2) 里挂着的「等合并后再做」的尾巴，现在做完了。**改动只有一行**：
+`specs/schemas/research-asset-version.schema.json` 的 `creator_ids.items` 加上
+`"format": "uuid"`（`packages/schemas/schemas/` 与 `internal/rsg/schemareg/schemas/`
+两份派生副本由 `make sync-schemas` 同源同步；三份 sha256 逐字节相同
+`7bf9c238…`）。指纹 `specs/SPEC_VERSION.json` 重新生成（38 个输入，
+`sha256:d0a19129a7b21a72`）。
+
+**为什么是现在**：`specs/**` 是指纹输入，在有任务在飞时动它，会让在飞任务的 G2
+（= 当前 main + 本任务改动，而任务树里带着自己的指纹）变红。T0711 合并、且**没有
+worker 正在跑**的窗口里落这一笔，然后才推进 T0805 的重基线——顺序反了就要多做一轮。
+
+**证据（先证明这把尺子量得到东西，再信它的绿）**：临时探针直接调验证器，把同一份
+文档的 `creator_ids` 换成 `["alice"]`：
+
+| schema | `["<uuid>"]` | `["alice"]` |
+|---|---|---|
+| 加 `format: uuid` | 0 条 blocking | **1 条 blocking**（`asset_schema: SCHEMA_VALIDATION_FAILED` → `'alice' is not valid uuid: must have 5 elements`） |
+| 去掉 `format: uuid` | 0 条 | **0 条**（探针因此 FAIL） |
+
+尺子是 `santhosh-tekuri/jsonschema/v6` + `internal/rsg/schemareg/schema.go:90` 的
+`c.AssertFormat()`——没有这一行，`format` 在 draft 2020-12 下**默认不生效**，
+这次的收紧会变成一次什么也没量到的改动。探针跑完即删（`-count=1` 复跑过，
+不是缓存里的绿）。
+
+**没动 `MANIFEST.json`**：它是初始规格导入时的一份快照，早已过期（159 条里 41 条
+哈希对不上、1 条文件不存在），仓库里**没有任何脚本或 CI 步骤读它**；单独为这一行
+刷新它，只会造出一份「看起来很新、其实其余 40 条仍旧陈旧」的清单。
