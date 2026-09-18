@@ -22,9 +22,14 @@ const (
 // tests prove the service validates, authorizes and maps — not the
 // adapter.
 type fakeRepo struct {
-	submitIn  SubmitReviewParams
-	submitOut domain.Review
-	submitErr error
+	// submitCalls counts submissions that actually reached the adapter, so
+	// a refusal can be asserted as "the store was never called" (the
+	// params are no longer comparable — they carry the required-review
+	// calculation).
+	submitCalls int
+	submitIn    SubmitReviewParams
+	submitOut   domain.Review
+	submitErr   error
 
 	listProjectID string
 	listNumber    int64
@@ -33,6 +38,7 @@ type fakeRepo struct {
 }
 
 func (f *fakeRepo) SubmitReview(_ context.Context, in SubmitReviewParams) (domain.Review, error) {
+	f.submitCalls++
 	f.submitIn = in
 	return f.submitOut, f.submitErr
 }
@@ -60,16 +66,22 @@ func (g *fakeGate) GetMembership(_ context.Context, _ domain.User, _ string) (do
 }
 
 // fakeResponsibility implements ResponsibilityGate: a configured label
-// or error.
+// (zero or one) or error.
 type fakeResponsibility struct {
 	label string
 	err   error
 	seen  []string
 }
 
-func (f *fakeResponsibility) ReviewResponsibility(_ context.Context, projectID, userID string) (string, error) {
-	f.seen = append(f.seen, projectID+"|"+userID)
-	return f.label, f.err
+func (f *fakeResponsibility) Responsibilities(_ context.Context, actor domain.User, projectID string) ([]string, error) {
+	f.seen = append(f.seen, projectID+"|"+actor.ID)
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.label == "" {
+		return nil, nil
+	}
+	return []string{f.label}, nil
 }
 
 // failingEngine is an authz.Engine that always errors: the service must
@@ -130,7 +142,7 @@ func TestSubmitReviewValidatesShape(t *testing.T) {
 			if _, err := svc.SubmitReview(ctx, actor(), projID, prNo, in); !errors.Is(err, ErrValidation) {
 				t.Fatalf("err = %v, want ErrValidation", err)
 			}
-			if repo.submitIn != (SubmitReviewParams{}) {
+			if repo.submitCalls != 0 {
 				t.Fatalf("repo called on invalid input: %+v", repo.submitIn)
 			}
 		})
@@ -190,7 +202,7 @@ func TestSubmitReviewPermissionMatrix(t *testing.T) {
 				if !errors.Is(err, tc.want) {
 					t.Fatalf("err = %v, want %v", err, tc.want)
 				}
-				if repo.submitIn != (SubmitReviewParams{}) {
+				if repo.submitCalls != 0 {
 					t.Fatalf("repo called on refused submission: %+v", repo.submitIn)
 				}
 			}

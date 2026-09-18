@@ -36,27 +36,36 @@ import (
 //     CHECKs (23514), the uniqueness (23505), the reviewed_state_id FK
 //     (23503), and terminal PRs refuse further review records.
 
-// labelGate is the fake reviewer-responsibility hook for these tests —
-// the production rule-based resolver lands with T0604; until then
-// production wires nil and the conditional verdict fails closed.
+// labelGate is a fake reviewer-responsibility resolver for these tests:
+// one configured label, or none. The production resolver (T0604) reads
+// the project's Research Owners assignments; these tests exercise the
+// review service's own contract with the answer fixed.
 type labelGate struct {
 	label string
 	err   error
 }
 
-func (g *labelGate) ReviewResponsibility(_ context.Context, _, _ string) (string, error) {
-	return g.label, g.err
+func (g *labelGate) Responsibilities(_ context.Context, _ domain.User, _ string) ([]string, error) {
+	if g.err != nil {
+		return nil, g.err
+	}
+	if g.label == "" {
+		return nil, nil
+	}
+	return []string{g.label}, nil
 }
 
 // reviewSvc builds the production-shaped service over the fixture's
-// stores. hook may be nil (the production composition until T0604).
+// stores. hook is a fake here on purpose — the nil case it must keep
+// handling is the contract test below; the production composition
+// (responsibilities.Service) landed with T0604 and is exercised in
+// review_routing_test.go.
 func reviewSvc(f *prFixture, hook reviews.ResponsibilityGate) *reviews.Service {
 	return reviews.NewService(reviews.Deps{
 		Repo:     persistence.NewReviewStore(f.pool),
 		Projects: projects.NewService(persistence.NewProjectStore(f.pool), persistence.NewOrgStore(f.pool), authz.NewMatrixEngine()),
 		Authz:    authz.NewMatrixEngine(),
-		// Responsibility: the reviewer-responsibility hook (task
-		// requirement) — the production resolver lands with T0604.
+		// Responsibility: the reviewer-responsibility hook, faked here.
 		Responsibility: hook,
 	})
 }

@@ -90,6 +90,7 @@ import (
 	"github.com/lichman0405/post/internal/application/pullrequests"
 	"github.com/lichman0405/post/internal/application/releases"
 	"github.com/lichman0405/post/internal/application/resolutions"
+	"github.com/lichman0405/post/internal/application/responsibilities"
 	"github.com/lichman0405/post/internal/application/reviews"
 	"github.com/lichman0405/post/internal/application/rsg"
 	"github.com/lichman0405/post/internal/application/schemaprofiles"
@@ -610,18 +611,47 @@ func run(args []string) int {
 		Projects: persistence.NewProjectStore(pool),
 	})
 	policyAPI.Register(v1)
-	// PR reviews (T0404): per-dimension scientific/integrity review
+	// Scientific responsibility and Research Owners routing (T0604,
+	// docs/04 §3): the project's routing rules and responsibility
+	// assignments (migration 00084), the resolver the conditional
+	// submit_scientific_review verdict hangs on, and the required-review
+	// calculation the review projection evaluates. The labels and the
+	// rules are project data; holding one grants no access — internal/authz
+	// never reads them.
+	responsibilitySvc := responsibilities.NewService(responsibilities.Deps{
+		Rules:    persistence.NewResponsibilityStore(pool),
+		Projects: persistence.NewProjectStore(pool),
+		Members:  projectAPI.Service(),
+		PRs:      persistence.NewPullRequestStore(pool),
+		Branches: persistence.NewBranchStore(pool),
+		// The same diff use case the PR page reads: what a proposal
+		// changes is what the routing applies to.
+		Diffs: prdiff.NewService(
+			persistence.NewPullRequestStore(pool),
+			persistence.NewBranchStore(pool),
+			diffSvc,
+		),
+		Policies:  persistence.NewPolicyStore(pool),
+		Evaluator: policy.NewRuleEvaluator(),
+	})
+	// PR reviews (T0404/T0604): per-dimension scientific/integrity review
 	// submissions, plus the list read the PR page's review section renders
 	// (T0408). Authorization of the submission runs the
 	// submit_scientific_review matrix row over the projects membership
-	// gate; the reviewer-responsibility hook stays nil until T0604 lands
-	// the resolver, so the conditional verdict fails closed in production.
-	// The list read runs the same project read gate every other project
-	// read runs.
+	// gate, and the conditional verdict is resolved by the Research Owners
+	// resolver above (allowed for a member holding a responsibility in the
+	// project, refused otherwise — never permission by default). The
+	// submission carries the required-review calculation into the store,
+	// which advances the PR review_required -> approved -> merge_ready when
+	// the recorded reviews satisfy it (docs/43; T0409's merge accepts only
+	// merge_ready). The list read runs the same project read gate every
+	// other project read runs.
 	reviewSvc := reviews.NewService(reviews.Deps{
-		Repo:     persistence.NewReviewStore(pool),
-		Projects: projectAPI.Service(),
-		Authz:    authz.NewMatrixEngine(),
+		Repo:           persistence.NewReviewStore(pool),
+		Projects:       projectAPI.Service(),
+		Authz:          authz.NewMatrixEngine(),
+		Responsibility: responsibilitySvc,
+		Routing:        responsibilitySvc,
 	})
 	reviewAPI := reviewhttp.New(reviewhttp.Deps{
 		Service:  reviewSvc,

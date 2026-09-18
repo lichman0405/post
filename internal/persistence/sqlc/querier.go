@@ -141,6 +141,18 @@ type Querier interface {
 	// publish command could generate one, and a persistent identifier that
 	// two writers derive differently is not a persistent identity.
 	CreateResearchAssetWithPID(ctx context.Context, arg CreateResearchAssetWithPIDParams) (ResearchAsset, error)
+	// The UNIQUE(project_id, match_kind, match_value, responsibility) refuses
+	// the same mapping written twice (23505); a different LABEL for the same
+	// match is a different row on purpose — that is how one change acquires
+	// two responsible reviewers.
+	CreateResearchOwnerRule(ctx context.Context, arg CreateResearchOwnerRuleParams) (ResearchOwnerRule, error)
+	// Holding a label is ONE fact: the primary key (project_id, user_id,
+	// responsibility) makes a repeated assignment a no-op rather than a
+	// second row, so the resolver's answer cannot depend on how many times
+	// the assignment was written. ON CONFLICT DO NOTHING answers no row on a
+	// repeat, and the store reads the existing row back (assign is
+	// idempotent, never an error).
+	CreateResponsibilityAssignment(ctx context.Context, arg CreateResponsibilityAssignmentParams) (ResponsibilityAssignment, error)
 	// One per-dimension review decision about one proposed head (T0404,
 	// migration 00061): reviewed_state_id is the exact head the reviewer
 	// evaluated (derived from the PR's proposed_state_id inside the
@@ -163,6 +175,10 @@ type Querier interface {
 	// Users (canonical table: users).
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeactivateOrganization(ctx context.Context, id pgtype.UUID) (Organization, error)
+	// Project-scoped by construction: a rule id of another project deletes
+	// nothing (the caller reports not-found, never touching a foreign row).
+	DeleteResearchOwnerRule(ctx context.Context, arg DeleteResearchOwnerRuleParams) (int64, error)
+	DeleteResponsibilityAssignment(ctx context.Context, arg DeleteResponsibilityAssignmentParams) (int64, error)
 	// The transaction-scoped session flag migration 00051's fixity guard
 	// requires for the explicit head refresh (set_config is_local=true
 	// resets at transaction end): the proposed state moves ONLY through the
@@ -546,6 +562,7 @@ type Querier interface {
 	// its slug to tell a create from a continuation.
 	GetResearchAssetByPIDRow(ctx context.Context, pid string) (ResearchAsset, error)
 	GetResearchAssetVersion(ctx context.Context, arg GetResearchAssetVersionParams) (ResearchAssetVersion, error)
+	GetResponsibilityAssignment(ctx context.Context, arg GetResponsibilityAssignmentParams) (ResponsibilityAssignment, error)
 	// One version by id — any age: old versions stay queryable forever, so a
 	// profile v2 never invalidates history written under v1 (docs/21 §8).
 	GetSchemaProfile(ctx context.Context, arg GetSchemaProfileParams) (ProjectSchemaProfile, error)
@@ -1030,6 +1047,26 @@ type Querier interface {
 	// not the store's).
 	ListReleaseReviews(ctx context.Context, arg ListReleaseReviewsParams) ([]ListReleaseReviewsRow, error)
 	ListReleases(ctx context.Context, projectID pgtype.UUID) ([]Release, error)
+	// Scientific responsibility and Research Owners routing (task T0604,
+	// canonical tables research_owner_rules and responsibility_assignments,
+	// migration 00084; docs/04 §3).
+	//
+	// These are project configuration rows, not permission rows: nothing here
+	// is read by internal/authz, and holding a label buys exactly one thing —
+	// the conditional submit_scientific_review verdict resolves, and the
+	// review is attributed to the responsibility it was signed under
+	// (docs/04 §3「责任用于 Review routing，不自动赋予更高访问权限」).
+	// Every routing rule of one project, in a deterministic order (the same
+	// order the resolver and the required-review calculation see, so a
+	// project's requirements never depend on which index the planner walked).
+	ListResearchOwnerRules(ctx context.Context, projectID pgtype.UUID) ([]ResearchOwnerRule, error)
+	// The reviewer-responsibility resolver's read: the labels one user holds
+	// in one project, sorted (the resolver returns them in this order, and
+	// the review service records the first one that matches a requirement).
+	ListResponsibilitiesForUser(ctx context.Context, arg ListResponsibilitiesForUserParams) ([]string, error)
+	// Who holds which label in the project (the assignment list a project
+	// owner reads), in a deterministic order.
+	ListResponsibilityAssignments(ctx context.Context, projectID pgtype.UUID) ([]ResponsibilityAssignment, error)
 	// Every review of one PR (project-scoped through the PR row), oldest
 	// first (created_at, id — a total order; the release record reads
 	// reviews in the same order).

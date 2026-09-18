@@ -364,6 +364,24 @@ type ResearchEvent struct {
 	OutboxEventID pgtype.UUID `json:"outbox_event_id"`
 }
 
+type ResearchOwnerRule struct {
+	ID             pgtype.UUID        `json:"id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	MatchKind      string             `json:"match_kind"`
+	MatchValue     string             `json:"match_value"`
+	Responsibility string             `json:"responsibility"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type ResponsibilityAssignment struct {
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	Responsibility string             `json:"responsibility"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type Review struct {
 	ID              pgtype.UUID        `json:"id"`
 	PullRequestID   pgtype.UUID        `json:"pull_request_id"`
