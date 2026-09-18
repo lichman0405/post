@@ -10440,3 +10440,73 @@ worker 被要求「跑任务要求的测试」，自然会跑 `make check`，然
 **风险核过**：没有任何 workflow 跑 `make check`（`grep -rn "make check" .github/workflows/` 零命中），
 所以 CI 行为不变；两步在 main 上实跑通过（`gofmt: clean` / `staticcheck: clean (6 grandfathered)`）；
 Makefile **不是** `specs/SPEC_VERSION.json` 的摘要输入，因此不移动规格指纹，也不影响任何在飞任务的 G2。
+
+## 落地窗口的准确条件（2026-09-18，L1，把一条推断验成了事实）
+
+**背景**：`tasks/tasks.json` 是 `specs/SPEC_VERSION.json` 的摘要输入，所以「把暂存的任务书落地」
+必然移动规格指纹。此前的规则是粗的——「没有 running worker 才落地」（源自 2026-09-15 T0803 那次）。
+
+**今天读代码 + 做演练，把规则收窄并证实了机制**：
+
+组合树是**当前 main + 任务自己的改动**，两步都在 `gate_run.go:697 prepareIntegrationTree` 里：
+
+1. `git worktree add --detach <dir> <IntegrationTip>`——树从 **main 的远端尖端**切；
+2. 把这个任务的改动当补丁打上去。补丁的基线是 `git_control.go:769 taskDiffBase`：
+   `merge-base(integrationBase(worktree), HEAD)`——**任务自己的改动**，不是「相对 main 的回退」。
+
+所以：**改动里没带 `specs/SPEC_VERSION.json` 的任务**，其组合树的标记取自 main；落地时 main 的
+`tasks.json` 与标记是**同一次提交里一起重新生成的**，两者自洽，组合树照样自洽——**落地不影响它**。
+
+**带标记的任务就不同了**：它的补丁里含「旧标记 → 自己的标记」那段 hunk，而落地后 main 的标记已经变了。
+
+**演练（2026-09-18，`/tmp/compose-test`，现已清除）**：以 T0805（`merge-base c9786baf`）为例，
+把它的补丁打到当前 main 上——
+
+- 落地前：`git apply --check` **干净可打**；
+- 模拟落地（改 `tasks/tasks.json` + `spec_version.py --write`）：`git apply --check` →
+  **`error: patch failed: specs/SPEC_VERSION.json:1` / `patch does not apply`**。
+
+补丁打不上，G2 的组合树就建不起来（`gate_run.go:694` 明说这种情况报成 error 而不是步骤失败），
+任务于是**不可能被接受**。这不是「标记看起来过期」，是**组合这一步直接失败**。
+
+**操作规则（取代旧的那条）**：
+
+> 落地的条件是——**没有任何「改动里带 `specs/SPEC_VERSION.json`」的任务处于 `running` 或 `verification`**。
+
+逐任务核（`verification` 里的也要核，它的 G2 还没跑）：
+
+```
+base=$(git -C .rddev/worktrees/<T> merge-base origin/main HEAD)
+git -C .rddev/worktrees/<T> diff "$base" --name-only -- specs/SPEC_VERSION.json
+```
+
+**2026-09-18 实测**：T0604 / T0805 / T0711 带标记；T0707 / T0804 / T1110 不带。
+
+**被这条规则挡住时的修法**是 `rddev rebaseline`（在新 main 上重切工作树、重新生成派生物、把任务
+打回返工），不是手工改标记——**派生物只能由生成器写**（CLAUDE.md §8.1）。
+
+## T0805 的匿名 Explore 索引收紧：保留（2026-09-18，L1）
+
+T0805 在 RESULT 里主动点名：它改了**别的任务的文件**——`cmd/api/explorehttp/store.go` 的匿名查询
+此前**没有任何可见性谓词**，会把「仅成员可见」的发布物的 `pid` / `public_version` / 标题列给未登录的
+调用方；它改成按 `AudienceFor` 过滤，并相应改了 T0802 的 fixture 与两处测试。它把这个改动标成
+「本节最大的一处判断」，并说如果我判错就整组回退。
+
+**我的裁定：保留，因为这不是新规则，是执行既有规则并修掉一处泄漏。**
+
+- `docs/14_SEARCH_DISCOVERY.md:1` 逐字：「只搜索平台 network 内 **public/accessible** content」
+  ——检索面**只覆盖可公开访问的内容**，这是规格正文。
+- 同文 `:6`：Explore「**面向开放网络**」。
+- owner 裁定 `L3-20260916-1` 第一条：**发布 ≠ 公开**。
+
+被换掉的 fixture（`'{"version":1}'::jsonb` 当 rights 文档）本身不可解析，那是在踩 fail-closed 的
+支路，不是在测规则的正路；换成 `rights.New().Marshal()`（真实发布写进去的规范字节）是**把 fixture
+改诚实**，不是把测试改松。测试断言净增：删掉 1 处 `t.Fatalf`，换成了「顺序断言 + 一条对原始响应体
+的否定断言（`assertExploreLacks`）」，实际更严。
+
+**界线（写给以后的自己）**：「执行一条既有裁定去堵一处泄漏」不属于 CLAUDE.md §5 的 L3
+（那是我自己造产品语义）；但**改别的任务已合入的行为必须留痕**，所以记在这里，并在 T0805 的
+返工信里明确告诉 Worker：**不要回退**。
+
+**并记**：`make check` 缺口今天的**第三个**受害任务就是 T0805（`staticcheck` 报两个未使用的测试
+辅助函数），见上文那条 L1。三次都在同一天。
