@@ -11774,3 +11774,25 @@ T0807（Contribution Ledger projection）已 collect 通过（12 个改动文件
 
 **落地**：按以上裁决，6 条全部**记录在案、非阻断**，T0604 继续 accept → commit → push → PR → CI → merge。
 跟进（多规则归属 + `responsibilities` 单测）**不在安静窗口造书**：先让迁移链跑完，书稿排在 T0813 之后。
+
+## 2026-09-19 主库红了：是我立账 T0813 时漏了它的 G3 定义
+
+**发生了什么**：安静窗口里把 T0813 插进 DAG 时，只改了 `tasks/tasks.json` / `tests.json` / `task_status.json`，
+**没给 `specs/orchestrator/gates.json` 的 `task_overrides` 补它的 G3 定义**。
+`TestEveryTaskOfThePhasesUnderDevelopmentHasG3` 点着它的名字失败 → main 的 `go` 与 `acceptance` 双红
+（fceeac3、5da5280、259e542 三笔都红）。**同一守卫还红在跑任务的验收上**：G2 是"当前 main + 任务补丁"
+合成出来的，所以 T0804 的工人自己跑 `go test` 与 `make check` 也撞这条——它报的 `blocked` 是**对的**，
+而且它在 RESULT 里独立查出"这不是我的改动造成的"，证据齐全。
+
+**修法**：按同阶段 T0801–T0812 的一贯口径补 `["rsg-real-services","gitea-real-services"]`；
+改前先本机跑一次那条守卫看到它**怎么失败**（点了 T0813 的名字），改完整包转绿才推。
+同笔落地了暂存已久的 T0806/T0811 八处引用修正（本来就要重算指纹，一笔提交省一轮 CI）。
+**落地**：`8587175` 推上 main；指纹由 `cd6bb89f` → `c1db5ade`（38 个输入，变化的是 gates.json 与 tasks.json 两项）。
+
+**这是一类会复发的错，定一条规矩**（L0/流程，非产品语义）：
+**立账新任务 = 同一笔里 DAG + tests.json + task_status.json + gates.json 的 G3 定义四处齐全**；
+推送前本机跑 `go test ./internal/devorchestrator`（13 秒，就是 CI 那条），别等 CI 告诉我。
+
+**T0804 的处置**：它的改动本身没问题，只是被我的红挡住。用 `rddev rebaseline T0804` 把它前移到修好的
+main（29 个文件带过、生成物重算），驳回理由写成第三封返工信——**明说不是它的错**，
+只要在新基线上重跑、照实更新 RESULT。

@@ -5824,10 +5824,10 @@
     },
     "T0804": {
       "status": "running",
-      "started_at": "2026-09-18T18:11:22Z",
+      "started_at": "2026-09-18T18:23:33Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：requirements 第 4 条逐字写着 fork 导入的 state 的 semantic completeness 派生「按 issue #189 的裁定执行……不得自行发明」，而 #189 仍 OPEN。",
-      "worker_run_id": "run-5e9dd76f1542caaf",
-      "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/infra/deliver-supervisor-narrowing *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
+      "worker_run_id": "run-be72f82712f0227c",
+      "rejection_reason": "# T0804 返工（第三封）：你上一轮卡住的那条红是**我的**，已经修好\n\n## 一、你的判断是对的，那条红出在我身上\n\n你上一轮报 `blocked`，两条红的证据都指向 `***`\n点着 **T0813** 的名字说「has no G3 jobs」。**我在库里复现了同一条**：\n\n```\n--- FAIL: *** (0.01s)\n    gate_spec_test.go:259: task T0813 (P8, Contribution Ledger 接上生产（worker 挂载 + via 真实来源）) has no G3 jobs\n```\n\n原因是我自己：**T0813 是我上一笔立账时加进去的，我漏了给它写 G3 定义**\n（`specs/orchestrator/gates.json` 里每个任务都要有一条，我没有）。**与你无关，你不需要为它改任何东西。**\n修法照同阶段 T0801–T0812 的一贯口径补上 `rsg-real-services` + `gitea-real-services`。\n修完同一条命令整包转绿：`go test ./internal/devorchestrator` → `ok … 12.9s`。\n已完成并推送：**main = `8587175`**。\n\n## 二、这一轮：基线前移，把绿的重跑一遍\n\n我已用 `rddev rebaseline` 把你的改动原样重新应用到新 main 上（生成物\n`specs/database/postgres.sql`、`specs/SPEC_VERSION.json` **在合并后的树上重新生成**，不按文本合并——\n不要手改，也不要把旧值合进来）。新 main 相对你上一轮基线多了这些：\n`gates.json`（给 T0813 补 G3）、T0806/T0811 两份任务书的引用修正（**与你无关**）、\n状态档与指纹（生成物）。\n\n**这一轮要做的只有一件事：在新基线上，把你上一轮跑过的那些命令重跑一遍。** 特别是：\n\n- `go test $(go list ./... | grep -v '/tests/integration')` ← 上一轮红在这条，现在应当**全绿**；\n- `make check` ← 上一轮也红在这条（它内部就是这条单测），现在应当**全绿**；\n- 你上一轮已经跑绿的 schema/spec 一致性那几项（`check-schema-snapshot`、`check-spec-version`、\n  `check-openapi`、`fmt-check`、`go vet`）——基线动了，一并复确认。\n\n然后更新 `RESULT.json`：`tests[]` 里那两条 `failed` 记录，**按你重跑后真实看到的结果**记\n（如果还是红的，就照实说红在哪里，不要美化）。若某条现在**做不到**，点名说明「谁在什么时候补」。\n\n## 三、其它一切照旧（第二封的正文仍然有效）\n\n- **寄存的那一行**：你已放回，我在 `tests/integration/migration_test.go:1190` 看到它了，做得好；\n- **「## Supervisor rulings for this task」**那一节仍然决定需求原文里有歧义的读法——照它读；\n- 逐条自检、给出**证据的位置**（`grep` 得到的行、命令的真实输出），照旧；\n- **不许**为了让哪一条变绿而删测试、skip、放宽断言或加大 timeout；不许自选迁移号；生成物不许手改；\n  `apps/web/**` 与 `internal/authz/**` 仍然不碰（裁定二、三）。\n\n## 四、一句话\n\n**你上一轮没做错什么**，是我漏了一笔把主库判红了。基线已前移、红已消：重跑 → 照实记 → 交回来。\n",
       "history": [
         {
           "from": "todo",
@@ -5861,6 +5861,20 @@
           "to": "running",
           "at": "2026-09-18T18:11:22Z",
           "run_id": "run-5e9dd76f1542caaf",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-18T18:23:32Z",
+          "run_id": "run-6d692c6bc3601a43",
+          "reason": "# T0804 返工（第三封）：你上一轮卡住的那条红是**我的**，已经修好\n\n## 一、你的判断是对的，那条红出在我身上\n\n你上一轮报 `blocked`，两条红的证据都指向 `***`\n点着 **T0813** 的名字说「has no G3 jobs」。**我在库里复现了同一条**：\n\n```\n--- FAIL: *** (0.01s)\n    gate_spec_test.go:259: task T0813 (P8, Contribution Ledger 接上生产（worker 挂载 + via 真实来源）) has no G3 jobs\n```\n\n原因是我自己：**T0813 是我上一笔立账时加进去的，我漏了给它写 G3 定义**\n（`specs/orchestrator/gates.json` 里每个任务都要有一条，我没有）。**与你无关，你不需要为它改任何东西。**\n修法照同阶段 T0801–T0812 的一贯口径补上 `rsg-real-services` + `gitea-real-services`。\n修完同一条命令整包转绿：`go test ./internal/devorchestrator` → `ok … 12.9s`。\n已完成并推送：**main = `8587175`**。\n\n## 二、这一轮：基线前移，把绿的重跑一遍\n\n我已用 `rddev rebaseline` 把你的改动原样重新应用到新 main 上（生成物\n`specs/database/postgres.sql`、`specs/SPEC_VERSION.json` **在合并后的树上重新生成**，不按文本合并——\n不要手改，也不要把旧值合进来）。新 main 相对你上一轮基线多了这些：\n`gates.json`（给 T0813 补 G3）、T0806/T0811 两份任务书的引用修正（**与你无关**）、\n状态档与指纹（生成物）。\n\n**这一轮要做的只有一件事：在新基线上，把你上一轮跑过的那些命令重跑一遍。** 特别是：\n\n- `go test $(go list ./... | grep -v '/tests/integration')` ← 上一轮红在这条，现在应当**全绿**；\n- `make check` ← 上一轮也红在这条（它内部就是这条单测），现在应当**全绿**；\n- 你上一轮已经跑绿的 schema/spec 一致性那几项（`check-schema-snapshot`、`check-spec-version`、\n  `check-openapi`、`fmt-check`、`go vet`）——基线动了，一并复确认。\n\n然后更新 `RESULT.json`：`tests[]` 里那两条 `failed` 记录，**按你重跑后真实看到的结果**记\n（如果还是红的，就照实说红在哪里，不要美化）。若某条现在**做不到**，点名说明「谁在什么时候补」。\n\n## 三、其它一切照旧（第二封的正文仍然有效）\n\n- **寄存的那一行**：你已放回，我在 `tests/integration/migration_test.go:1190` 看到它了，做得好；\n- **「## Supervisor rulings for this task」**那一节仍然决定需求原文里有歧义的读法——照它读；\n- 逐条自检、给出**证据的位置**（`grep` 得到的行、命令的真实输出），照旧；\n- **不许**为了让哪一条变绿而删测试、skip、放宽断言或加大 timeout；不许自选迁移号；生成物不许手改；\n  `apps/web/**` 与 `internal/authz/**` 仍然不碰（裁定二、三）。\n\n## 四、一句话\n\n**你上一轮没做错什么**，是我漏了一笔把主库判红了。基线已前移、红已消：重跑 → 照实记 → 交回来。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-18T18:23:33Z",
+          "run_id": "run-be72f82712f0227c",
           "reason": "worker spawn"
         }
       ]
