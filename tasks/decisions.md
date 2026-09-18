@@ -10684,3 +10684,82 @@ PR #272 八项全绿后 `rddev pr merge T1110` 通过，main 到 `7a01e03`。**�
 登记测试，所以 `tests/tests.json` 里要**同时**加 T1111 的条目（`TASKSTATE-TESTS-REF` 又要求登记项
 必须指向真实 DAG 任务，两件事必须原子地一起做）。校验器**不读** `tasks/packages/`，所以现在提交
 暂存文件是安全的（已实跑 9 项校验全过）。
+
+## 渲染器缺陷 #274 查实并修好，等窗口落地（2026-09-18，orchestrator 自修）
+
+**问题**：`supervisor_scope_narrowing`（我在派工前写给每个任务的「特别交代」）**从来没送到任何 Worker 手上**。
+
+**根因在渲染器，不在账本**（我先猜过错一次——以为 `tasks/packages/` 暂存区是死的，其实不是）：
+
+- `internal/devorchestrator/dag.go` 的 `TaskSpec` **没有这个字段**，`json.Unmarshal` 直接把它丢掉；
+  于是 `tasks/tasks.json` 里写着多少字，进了 rddev 就是 0。
+- `internal/devorchestrator/worker_render.go` 的 `TaskPackage` 同样没有，
+  `RenderPrompt` 也就无从渲染。
+- 结果：**账本里有、任务包里没有、prompt.md 里没有**。实测 T0711 的任务包 13 个键、0 字符。
+
+**影响面比原先估计的大**：全库共 **17 个任务**带着未送达的裁定（我先前只数出 5 个链上任务）。
+其中 **4 个还在飞**（T0711/T0805/T0604/T0707）、**3 个更晚**（T1003/T1004/T1005 连账本里都还没写）。
+已查实的三处违反：T1003（阻塞级，见其返工信）、T1004（发 `/knowledge/<uuid>` 死链，违反决定三）、
+T1005（`.dev/mail` 未 gitignore，违反决定二）。
+
+**修法**（在临时工作区 `/tmp/post-narrowing`，分支 `infra/deliver-supervisor-narrowing`，**不碰主线**）：
+`TaskSpec` + `TaskPackage` 加字段、`RenderTaskPackage` 接上、`RenderPrompt` 在 `## Requirements`
+**之前**渲染一节 `## Supervisor rulings for this task`（放在前面是有理由的：裁定决定的是要求怎么读，
+读完之后才看到它的人，读法已经选定了）、`task-package.schema.json` 加同名属性。
+
+**两条测试，都验过能红**：
+- 合成 spec：把实现改回去，`task-package.json 丢了裁定` 与 `prompt.md 丢了裁定` 两行分别亮红——
+  **两条断言各自承重**，不是一条撑着两条。
+- **真实账本**：走 `tasks/tasks.json` 里所有带裁定的任务，要求它们逐一活着进包、进 prompt。
+  这条才是 #274 的回归测试——合成 spec 抓不到「字段在 unmarshal 时被丢」这个真实失效点。
+  去掉 prompt 那半，它一次抓住 **17 个**。另加一条自检：账本里一个带裁定的都没有时它自己报错，
+  免得哪天在空集合上「通过」。
+
+**为什么不在主线上改**：`specs/orchestrator/task-package.schema.json` 是指纹输入，
+改它会移动 `specs/SPEC_VERSION.json`，把在飞任务的 G2 补丁打红。
+**所以它进 T1003 合并的窗口**——那时主线本来就要动，把暂存书、T1111、渲染器修复、指纹重生成一起落。
+
+**一个副产品**：这条修复本身也得靠 `supervisor_scope_narrowing` 才能干成——
+我在临时工作区里写给自己的说明，和送给 Worker 的是同一个字段。
+
+## 已合并的十个任务：裁定没送达，但实际没违反（2026-09-18，审计）
+
+带着未送达裁定的 17 个任务里，**10 个已经合并**（T0406/T0408/T0409/T0601/T0702/T0704/T0705/
+T0709/T0712/T1110）。逐个核对裁定与真实合并 diff：
+
+- **范围那半全部已合规**——因为范围是**机械执行**的：收窄后的 `allowed_scope` 本来就在任务包里，
+  collect 的 scope 检查逐条比对过。六项可机械检查的（T0408 不得加迁移、T0704 不占迁移号、
+  T0712 不得动 SQL/sqlc、T0601 不建台账表、T0705 不碰权限矩阵、T1110 不碰 infra/scripts）
+  **六项全过**。这套检查先自检过——拿已知会命中的模式喂进去，它确实报命中。
+- **语义那半靠 requirements 里本来就重复写过**，所以也落地了：T0406 逐字点名 #189 缺口并明说
+  「不发明值」（`internal/application/merge/doc.go:130-137`）；T0705 按 fail-closed 实现且在代码里
+  引 #237；T0709 没做 `/explore`；T0601 没有 `:unfreeze`。
+- **一处边缘但不算违反**：T1110 把 `POST_REDIS_ADDR` 放进了配置元数据表
+  （`cmd/api/backupdr/secrets.go:62`，标 `Critical: false`）。裁定说的是「Redis 不进备份范围」。
+  查过：全仓库该名字只此一处，`Critical` 字段从未被读，`Scope` 也从不参与分支判断，
+  **不备份任何 Redis 状态**。所以它的分量只是元数据表里一个名字，裁定实质未破。记下，不返工。
+
+**结论**：#274 的实际损害集中在**还在飞的那几个任务**上，不在已合并的里。
+这也是为什么修复赶得上：链条还没走到它们。
+
+## T0804 的「驳回」是我造成的，不是它的（2026-09-18）
+
+`collect T0804` 第一次被 `refs` 检查拒掉，理由是「运行时新建了 ref：
+`refs/heads/infra/deliver-supervisor-narrowing`」。**那是我的分支**——我为渲染器修复
+在主线仓库里 `git worktree add -b` 建的，落进了 T0804 的运行窗口。
+
+- 核实过：记录里**只有这一个** ref，T0804 的 Worker 自己一个都没建。
+- 按驳回信息自带的解法 `rddev refs adopt infra/deliver-supervisor-narrowing` 认领，
+  之后重跑 collect，**十二项检查全过**（`/status = ok`、28 个文件全在 scope 内、11 条测试全过、
+  HEAD == baseline、scope/schema/coverage 全绿）。报告留在
+  `.rddev/workers/T0804/collect-report.json`。
+- 但状态机只给了 `rejected → running | ready`，`collect` 只能 `running → verification`——
+  于是它卡在 `rejected`。**不硬改状态文件**：§8.2 说每个动作都走 rddev。
+- 查过 `rddev rebaseline --help`：它自己就做「rejected → 带理由重新返工」，
+  所以 `rejected` **正是链条等待位的设计落点**，不是死胡同。T0804 与 T0604/T0707 同样停在这里。
+- **唯一要防的**：那条被记下的驳回理由（指控它建 ref）是假的，**绝不能原样送进它的返工信**。
+  返工时用 `--reason-file` 传我写的信，会替换掉记录里的理由（见
+  `.rddev/workers/<TASK>/prompt.md` 可复核送达）。
+
+**教训**：我在主线仓库里建分支，工具会把它记在**当时正在跑的那个 Worker** 头上。
+自建 ref 要顺手 `rddev refs adopt`，别等 collect 被拒。

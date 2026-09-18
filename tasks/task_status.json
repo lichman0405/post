@@ -5300,7 +5300,7 @@
       "merged_at": null
     },
     "T0711": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-18T09:52:31Z",
       "notes": "SPEC_BLOCKED resolved: T0805 package landed and knowledge publish OpenAPI contract added per L3-20260916-1",
       "worker_run_id": "run-42c97aeb1d1aa5e1",
@@ -5353,6 +5353,13 @@
           "at": "2026-09-18T09:52:31Z",
           "run_id": "run-42c97aeb1d1aa5e1",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T10:14:46Z",
+          "run_id": "run-1d81f37053ce4673",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -5645,10 +5652,11 @@
       ]
     },
     "T0804": {
-      "status": "running",
+      "status": "rejected",
       "started_at": "2026-09-18T08:44:21Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：requirements 第 4 条逐字写着 fork 导入的 state 的 semantic completeness 派生「按 issue #189 的裁定执行……不得自行发明」，而 #189 仍 OPEN。",
       "worker_run_id": "run-1d37fc09c0c0d324",
+      "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/infra/deliver-supervisor-narrowing *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
       "history": [
         {
           "from": "todo",
@@ -5669,11 +5677,18 @@
           "at": "2026-09-18T08:44:21Z",
           "run_id": "run-1d37fc09c0c0d324",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-18T10:19:01Z",
+          "run_id": "run-e57bcae52466344f",
+          "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/infra/deliver-supervisor-narrowing *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check"
         }
       ]
     },
     "T0805": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-18T09:55:51Z",
       "notes": "SPEC_BLOCKED resolved: T0805 package landed and knowledge publish OpenAPI contract added per L3-20260916-1",
       "worker_run_id": "run-125a18caf4ae2d18",
@@ -5726,6 +5741,13 @@
           "at": "2026-09-18T09:55:51Z",
           "run_id": "run-125a18caf4ae2d18",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T10:12:05Z",
+          "run_id": "run-20cb062a43ea63b9",
+          "reason": "collect: all checks passed"
         }
       ]
     },
