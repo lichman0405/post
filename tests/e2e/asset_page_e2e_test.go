@@ -250,6 +250,14 @@ func assetE2EFixture(openProject, privateProject, publicUserProject domain.Proje
 		},
 		Versions: []assets.PageVersionState{v10, v20, v30},
 		Users:    assetE2EUsers(),
+		// The credits the publishes declared, as 00082 stores them: version
+		// 2.0 (the one a non-member renders) declares Alice as its creator,
+		// and the other two versions carry no credit row at all — the shape
+		// of a version published before the table existed.
+		Parties: map[string][]assets.PagePartyState{
+			ver20: {{Role: "creator", Kind: "user", PartyID: assetE2EAlice.ID}},
+		},
+		Organizations: map[string]assets.PageOrganization{},
 		Pins: map[assets.DependencyPin]assets.PagePinState{
 			// A PUBLIC version in a PRIVATE project: the version axis says
 			// linkable and the project axis says no. This pin separates the
@@ -592,7 +600,8 @@ func TestE2EAssetPageAnonymous(t *testing.T) {
 		} `json:"origin"`
 		Rights   map[string]any `json:"rights"`
 		Creators []struct {
-			UserID      string `json:"user_id"`
+			Kind        string `json:"kind"`
+			PartyID     string `json:"party_id"`
 			Handle      string `json:"handle"`
 			DisplayName string `json:"display_name"`
 			Role        string `json:"role"`
@@ -672,12 +681,15 @@ func TestE2EAssetPageAnonymous(t *testing.T) {
 	if page.Rights["standard_license_id"] != "CC-BY-4.0" {
 		t.Errorf("rights = %+v, want the stored document", page.Rights)
 	}
-	// 5. Creators — the publishing actor, with the role named.
-	if len(page.Creators) != 1 || page.Creators[0].Role != assets.CreatorRolePublisher ||
+	// 5. Creators — the credited party the version declares, with its kind
+	// and its role named. The credit is the creator, not the publisher: the
+	// publisher is rendered as itself in the version block above.
+	if len(page.Creators) != 1 || page.Creators[0].Role != "creator" ||
+		page.Creators[0].Kind != "user" ||
 		page.Creators[0].Handle != assetE2EAlice.Handle ||
-		page.Creators[0].UserID != assetE2EAlice.ID ||
+		page.Creators[0].PartyID != assetE2EAlice.ID ||
 		page.Creators[0].DisplayName != assetE2EAlice.DisplayName {
-		t.Errorf("creators = %+v, want the publisher with its role named", page.Creators)
+		t.Errorf("creators = %+v, want the declared creator with its kind and role named", page.Creators)
 	}
 	// 6. Metadata — the manifest's keys, with their declared values.
 	if len(page.Metadata) != 5 {

@@ -551,9 +551,12 @@ func TestGateRefusesAHashThatDoesNotCoverWhatIsPublished(t *testing.T) {
 }
 
 // TestGateRefusesAVersionWithNoContributors pins the credit rule
-// (docs/11 §3, CLAUDE.md invariant 14).
+// (docs/11 §3, CLAUDE.md invariant 14), the SHAPE half: at least one
+// entry, none blank, and each one a user id — {"alice"} is the case that
+// separates "not blank" from "storable", the rule T0711 added when the
+// declaration got a uuid column to land in.
 func TestGateRefusesAVersionWithNoContributors(t *testing.T) {
-	for _, ids := range [][]string{nil, {}, {""}, {"  "}, {sampleUUID, ""}} {
+	for _, ids := range [][]string{nil, {}, {""}, {"  "}, {sampleUUID, ""}, {"alice"}, {sampleUUID, "not-a-uuid"}} {
 		c := validCandidate(t)
 		c.CreatorIDs = ids
 		res, err := Gate(c)
@@ -564,6 +567,120 @@ func TestGateRefusesAVersionWithNoContributors(t *testing.T) {
 		if len(codes) != 1 || codes[0] != CodeNoContributors {
 			t.Errorf("creator ids %v = %v, want exactly [%s]", ids, codes, CodeNoContributors)
 		}
+	}
+}
+
+// secondCreatorUUID is a second real user id for the control case — a
+// duplicate rule whose control list repeated one user could not tell
+// "refused the repeat" from "refused two creators".
+const secondCreatorUUID = "8f14e45f-ceea-4a1b-8d5c-1b0f9a2e6d31"
+
+// TestGateRefusesADuplicateCreator pins the rule that keeps the credit
+// table's own UNIQUE (asset_version_id, role, party_id) from being the
+// first thing to notice a repeated entry: a publish that credits the same
+// user twice is refused by the GATE, with a code of its own, so the
+// preview blocks what the store could not have written.
+//
+// The case-differing pair is the one a text comparison misses: a uuid is
+// one value whatever case its text is written in, so "A1B2…" and "a1b2…"
+// are the same row, and the two different uuids after it are the control —
+// the rule must not refuse a list of distinct users. The pair that is
+// case-differing AND padded is the one the T0711 review caught: the gate
+// admitted it as two entries after trimming and lowercasing both, and the
+// store's conversion saw the padding it does not accept.
+//
+// A list that is BOTH blank and repetitive is not in the table: the shape
+// rule answers first (`{sampleUUID, "", sampleUUID}` is refused as
+// ASSET_NO_CONTRIBUTORS), because a list with a blank entry is not a
+// declarable creator list at all — there is no pair of positions to name
+// in a list the caller has to rewrite anyway.
+func TestGateRefusesADuplicateCreator(t *testing.T) {
+	upper := strings.ToUpper(sampleUUID)
+	if upper == sampleUUID {
+		t.Fatal("fixture: the sample uuid must have a case to change")
+	}
+	// The control first: two distinct creators pass, so a rule that
+	// refused everything would not be read as a rule that refused the
+	// repeat.
+	control := validCandidate(t)
+	control.CreatorIDs = []string{sampleUUID, secondCreatorUUID}
+	res, err := Gate(control)
+	if err != nil {
+		t.Fatalf("two distinct creators were refused: %v", err)
+	}
+	if !res.Facts.Contributors {
+		t.Error("two distinct creators: Contributors = false, want true")
+	}
+
+	for _, c := range []struct {
+		name string
+		ids  []string
+	}{
+		{"the same id twice", []string{sampleUUID, sampleUUID}},
+		{"the same id in another case", []string{sampleUUID, upper}},
+		{"the same id in another case, padded", []string{sampleUUID, " " + upper + " "}},
+		{"the repeat in the middle", []string{sampleUUID, secondCreatorUUID, sampleUUID}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cand := validCandidate(t)
+			cand.CreatorIDs = c.ids
+			res, err := Gate(cand)
+			if res.Facts.Contributors {
+				t.Errorf("%s: Contributors = true, want false", c.name)
+			}
+			codes := refusalCodes(t, err)
+			if len(codes) != 1 || codes[0] != CodeDuplicateCreatorID {
+				t.Fatalf("creator ids %v = %v, want exactly [%s]", c.ids, codes, CodeDuplicateCreatorID)
+			}
+			// The refusal says WHICH entry repeats which, not only that
+			// something is wrong: a publisher fixing the list needs the two
+			// positions.
+			ves := validationErrors(err)
+			if len(ves) != 1 {
+				t.Fatalf("the refusal = %v, want one rule", err)
+			}
+			if !strings.HasPrefix(ves[0].Field, "creator_ids[") {
+				t.Errorf("%s: the refusal field = %q, want the repeated position creator_ids[i]", c.name, ves[0].Field)
+			}
+			if !strings.Contains(ves[0].Detail, "again as entry") {
+				t.Errorf("%s: the refusal detail = %q, want it to name the entry the repeat credits again", c.name, ves[0].Detail)
+			}
+		})
+	}
+}
+
+// TestGateAcceptsAPaddedCreatorID pins the half of the credit rule that is
+// not a refusal: "  <uuid>  " is a user id, and the gate admits it. The
+// padding is trimmed to decide — validCreatorIDs validates
+// CanonicalCreatorID(id), and duplicateCreatorID compares the same form —
+// and the writing path trims it to store
+// (internal/persistence.insertVersionCredits calls the same function, so
+// the gate's decision and the row's key are about one string).
+//
+// Refusing the padded spelling HERE instead was the alternative the T0711
+// review named and ruled against: the request succeeded before 00082
+// existed, duplicateCreatorID already folds case and trims, and the store
+// can hold the id as well as the gate can judge it.
+func TestGateAcceptsAPaddedCreatorID(t *testing.T) {
+	padded := []string{"  " + sampleUUID + "  ", "\t" + secondCreatorUUID + "\n"}
+	cand := validCandidate(t)
+	cand.CreatorIDs = padded
+	res, err := Gate(cand)
+	if err != nil {
+		t.Fatalf("a creator list with whitespace around the ids was refused: %v", err)
+	}
+	if !res.Facts.Contributors {
+		t.Error("a padded creator list: Contributors = false, want true")
+	}
+	// And the canonical form both layers use is the id itself, not the
+	// caller's spelling of it.
+	for i, want := range []string{sampleUUID, secondCreatorUUID} {
+		if got := CanonicalCreatorID(padded[i]); got != want {
+			t.Errorf("CanonicalCreatorID(%q) = %q, want the id %q", padded[i], got, want)
+		}
+	}
+	if got := CanonicalCreatorID("  " + strings.ToUpper(sampleUUID) + " "); got != sampleUUID {
+		t.Errorf("CanonicalCreatorID of the padded uppercase spelling = %q, want %q", got, sampleUUID)
 	}
 }
 

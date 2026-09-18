@@ -43,6 +43,7 @@ import (
 //	                  →  refuse (writing nothing), or
 //	                     insert the asset row (a create only)
 //	                     insert the immutable version row
+//	                     insert the version's declared credits
 //	                     insert the ledger row
 //	                     append the audit row
 //	                     record the research event and its outbox row
@@ -264,6 +265,15 @@ func (s *AssetPublishStore) Publish(ctx context.Context, req assetpublish.Publis
 				strings.Contains(pgErr.ConstraintName, "research_asset_versions_asset_id_version") {
 				return assetpublish.ErrVersionImmutable
 			}
+			return err
+		}
+		// The version's declared credits, in this same transaction: a
+		// version row that committed carries exactly the creators its
+		// publish declared, and a publish that rolls back leaves none
+		// behind (T0711 — 00082's asset_version_parties; the gap
+		// internal/assets/page.go named was that the gate validated these
+		// ids and no table stored them).
+		if err := insertVersionCredits(ctx, q, version.ID, publishedBy, req.Candidate.CreatorIDs); err != nil {
 			return err
 		}
 		out = assetpublish.PublishedVersion{

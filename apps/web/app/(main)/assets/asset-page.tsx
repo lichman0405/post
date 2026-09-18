@@ -19,6 +19,7 @@ import {
   ApiError,
   assetTypeLabel,
   createAssetsClient,
+  creatorHandleLabel,
   messageForAssetCode,
   type AssetPage as AssetPageData,
 } from "../../../lib/assets";
@@ -248,18 +249,35 @@ export function AssetPage({
               <BeakerIcon size={16} aria-hidden="true" /> Creators
             </h2>
             {page.creators.length === 0 ? (
+              /* No stored credit row for this version — the honest state of
+                 a version published before the credit table existed, said
+                 in words rather than filled in with the publisher. */
               <p className="asset-block-empty">No credited party recorded for this version.</p>
             ) : (
               <ul className="asset-rows">
                 {page.creators.map((creator) => (
-                  <li className="asset-row" key={`${creator.user_id}-${creator.role}`}>
-                    <Link href={`/users/${creator.user_id}`} className="asset-row-name">
-                      {creator.display_name}
-                    </Link>
-                    <span className="asset-handle">@{creator.handle}</span>
-                    {/* The role is rendered, not implied: this platform
-                        stores no creator list yet, so the party it can name
-                        is the publisher, and the block says so. */}
+                  <li className="asset-row" key={`${creator.kind}-${creator.party_id}-${creator.role}`}>
+                    {/* A user has a profile page and links to it; an
+                        organization has no /users page (it is not a user)
+                        and is named without a link rather than linked to
+                        somebody else's. */}
+                    {creator.kind === "user" ? (
+                      <Link href={`/users/${creator.party_id}`} className="asset-row-name">
+                        {creator.display_name}
+                      </Link>
+                    ) : (
+                      <span className="asset-row-name" data-asset-party-kind={creator.kind}>
+                        {creator.display_name}
+                      </span>
+                    )}
+                    {/* The handle is a mention only when the party is a
+                        user; an organization's is a slug, rendered bare
+                        (creatorHandleLabel). */}
+                    <span className="asset-handle">{creatorHandleLabel(creator)}</span>
+                    {/* The role and the kind are rendered, not implied: the
+                        credit is the relationship the version declares
+                        (creator, contributor, …), and the party is a user
+                        or an organization. */}
                     <span className="asset-role" data-asset-role={creator.role}>
                       {creator.role}
                     </span>

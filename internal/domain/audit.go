@@ -69,6 +69,24 @@ const (
 	// the same transaction as the milestone row itself.
 	ActionMilestoneCreated = "milestone.created"
 
+	// T0711 asset governance: one row per rights-holder change, written in
+	// the same transaction as the append-only event it records. docs/26 §5
+	// lists ownership transfer among the HIGHEST-risk audited actions
+	// (beside visibility, rights, policy, merge, publish and abort/reopen)
+	// and requires the audit itself to be append-only, which audit_log
+	// already is by trigger (00014/00015) — so this row is the audit half
+	// of docs/11 §6's "Ownership transfer 是 append-only governance event",
+	// and asset_rights_holder_events is the state half.
+	//
+	// The name follows the dotted `<subject>.<verb-past>` convention of the
+	// constants above and spells the permission-matrix action it implements
+	// (change_rights_holder, specs/policies/permissions-matrix.csv:13) in
+	// past tense. It deliberately does NOT reuse a research event's name:
+	// the audit vocabulary is this file, the event vocabulary is
+	// specs/events/event-types.yaml, and neither list is derived from the
+	// other (the note beside ActionPullRequestMerged).
+	ActionAssetRightsHolderChanged = "asset.rights_holder_changed"
+
 	// T0601 freeze governance: one row per project whose main was frozen,
 	// written in the same transaction as the flag itself. docs/26 lists
 	// "main freeze" among the high-risk actions that must be audited, and

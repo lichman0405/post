@@ -565,6 +565,43 @@ var canonicalTables = map[string]tableExp{
 		checks: []string{"visibility_of_usage = ANY"},
 		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("asset_version_id", "research_asset_versions", "RESTRICT")},
 	},
+	"asset_version_parties": {
+		// 00082 (T0711). The six roles of docs/11 §6 are three shapes, and
+		// this is the version-scoped one: the credited parties. The two
+		// UNIQUEs are the shape's meaning — a party appears once per role,
+		// and each position is one party — and party_id carries NO foreign
+		// key, because a (kind, id) reference points into users for one kind
+		// and organizations for the other (00082's note).
+		cols:    []colExp{c("id", u, false, true), c("asset_version_id", u, false, false), c("role", txt, false, false), c("party_kind", txt, false, false), c("party_id", u, false, false), c("position", i4, false, false), c("recorded_by", u, false, false), c("recorded_at", ts, false, true)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"asset_version_id", "role", "party_id"}, {"asset_version_id", "role", "position"}},
+		// `"position"` is quoted in the definition because position is a
+		// reserved word in that context; the substring has to match the
+		// constraint as PostgreSQL renders it.
+		checks: []string{"role = ANY", "party_kind = ANY", `"position" >= 0`},
+		fks:    []fkExp{fk("asset_version_id", "research_asset_versions", "RESTRICT"), fk("recorded_by", "users", "RESTRICT")},
+	},
+	"asset_rights_holder_events": {
+		// 00082 (T0711). The asset-scoped shape: the append-only chain of
+		// designations and transfers. The previous holder is NULLABLE — the
+		// first designation of an unheld asset has no predecessor — and the
+		// two CHECKs are what make "no previous holder" an all-or-nothing
+		// pair and refuse an event that moves nothing.
+		cols:    []colExp{c("id", u, false, true), c("asset_id", u, false, false), c("ordinal", i4, false, false), c("holder_kind", txt, false, false), c("holder_id", u, false, false), c("previous_holder_kind", txt, true, false), c("previous_holder_id", u, true, false), c("recorded_by", u, false, false), c("recorded_at", ts, false, true)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"asset_id", "ordinal"}},
+		// Each substring below matches exactly ONE of the five definitions
+		// (the harness counts matches), so the leading parenthesis is what
+		// tells holder_kind's constraint from previous_holder_kind's.
+		checks: []string{
+			"ordinal >= 1",
+			"(holder_kind = ANY",
+			"(previous_holder_kind = ANY",
+			"(previous_holder_kind IS NULL) = (previous_holder_id IS NULL)",
+			"IS DISTINCT FROM holder_kind",
+		},
+		fks: []fkExp{fk("asset_id", "research_assets", "RESTRICT"), fk("recorded_by", "users", "RESTRICT")},
+	},
 	"knowledge_publications": {
 		// rights_json carries the same rights document as an asset
 		// version's, so 00066 (T0703) constrains it the same way: a JSON
@@ -1059,6 +1096,13 @@ var explicitIndexes = map[string][]string{
 	// oldest first. Partial, so the scan never has to look at the web rows
 	// (born delivered) or at rows already sent.
 	"subscription_deliveries_email_pending_idx": {"created_at", "WHERE"},
+	// T0711 (00082): the two governance indexes. The credits are read per
+	// version and role in declaration order (the asset page's creators
+	// block, item by item), and the holder chain is read per asset from the
+	// newest end — the current holder is the greatest ordinal, which is the
+	// one read that must not scan a chain that grows.
+	"asset_version_parties_version_role":       {"asset_version_id", "role", "position"},
+	"asset_rights_holder_events_asset_ordinal": {"asset_id", "ordinal DESC"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
@@ -1228,6 +1272,7 @@ func TestUpgradePath(t *testing.T) {
 		"contribution_opportunities",
 		"project_milestones", "project_milestone_creations",
 		"asset_publish_creations",
+		"asset_version_parties", "asset_rights_holder_events",
 	}
 	for _, name := range present {
 		if _, ok := intermediate.Tables[name]; !ok {

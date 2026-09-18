@@ -72,6 +72,12 @@ const (
 	CodeIntegrityHashMismatch = "ASSET_INTEGRITY_HASH_MISMATCH"
 	// CodeNoContributors: the version records no creator or contributor.
 	CodeNoContributors = "ASSET_NO_CONTRIBUTORS"
+	// CodeDuplicateCreatorID: the same user is credited twice in one
+	// creator list. Refused by name rather than de-duplicated: the rows
+	// 00082 stores are the declaration as it was made, and collapsing two
+	// entries into one would store something other than what was declared
+	// (the same shape CodeDuplicateDependencyPin has).
+	CodeDuplicateCreatorID = "ASSET_CREATOR_ID_DUPLICATE"
 	// CodeMalformedManifest: the bytes are not one JSON object of the
 	// manifest format — bad syntax, a value that is not an object, an
 	// unknown top-level field, or trailing content.

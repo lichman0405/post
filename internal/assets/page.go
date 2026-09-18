@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"sort"
 	"time"
+
+	"github.com/lichman0405/post/internal/domain"
 )
 
 // The research asset page (T0709): the public/authorized read model of
@@ -16,7 +18,7 @@ import (
 //	Version      the rendered version's label and its published facts (version)
 //	Origin       the version's origin refs, resolved                (origin)
 //	Rights       the stored rights document, verbatim               (rights)
-//	Creators     the credited publisher identity                    (creators)
+//	Creators     the credited parties of the version, kind and role  (creators)
 //	Metadata     the manifest's metadata block                      (metadata)
 //	Dependencies the manifest's dependency pins, resolved           (dependencies)
 //	Lineage      the fork/derive edges of the rendered version      (lineage)
@@ -191,17 +193,49 @@ type PageVersionFacts struct {
 // Maintainer, Rights Holder and Originating Project and keeps creator
 // history forever).
 //
-// Role is what this platform can actually answer for today, and it is
-// "publisher": the publish gate validates the creator ids a publish
-// declares (internal/assets.PublishCandidate.CreatorIDs) but no table
-// stores them — the version row's only actor is published_by. Rendering
-// the publisher under a "Creator" heading without saying so would credit
-// the wrong party; rendering it as what it is, with the role named, is
-// the honest half of an item whose other half needs a schema change
-// (reported in the task result, not silently dropped).
+// The rows are the version's stored credits
+// (asset_version_parties, migration 00082): the ids a publish declared,
+// which the gate has always validated and the repository now STORES. A
+// party is an identity — a kind and an id TOGETHER, never an id alone
+// (domain.Party, and 00082's party_kind beside party_id) — so Kind says
+// which table PartyID is a row of, and the two display fields are read
+// from that table: a user's handle and display name, or an organization's
+// slug and name. There is no entry here, and no field here, that carries
+// an id without the kind that says what the id is.
+//
+// Role is rendered rather than implied. The credit a version declares is
+// a creator (or a contributor, custodian or maintainer — the four roles
+// 00082 stores), and the party that PUBLISHED the version is a different
+// party with a different relationship, rendered as published_by in the
+// version block above. This block named the publisher under the role
+// "publisher" while no table stored a creator list, and said so in so many
+// words; now that the credits are stored it renders them, and a version
+// published before 00082 has no credits to render at all (see
+// creatorsOf).
 type PageCreator struct {
-	PageUser
+	// Kind is the party's identity kind: a user or an organization. It is
+	// never empty, and PartyID is meaningless without it.
+	Kind string `json:"kind"`
+	// PartyID is the party's row id in the table Kind names.
+	PartyID string `json:"party_id"`
+	// Handle is a user's handle or an organization's slug.
+	Handle string `json:"handle"`
+	// DisplayName is a user's display name or an organization's name.
+	DisplayName string `json:"display_name"`
+	// Role is the credited relationship this row states (domain.Role):
+	// "creator" for the credits the publish path writes today.
 	Role string `json:"role"`
+}
+
+// PageOrganization is one organization identity, resolved for a credited
+// party of kind organization (00002's second identity table). It is
+// deliberately NOT a PageUser: an organization has no user id, no handle
+// and no display name, and rendering one in the user field — or under
+// /users/{id} — is the merge those two tables exist to prevent.
+type PageOrganization struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	Name string `json:"name"`
 }
 
 // PageMetadata is one metadata key of the manifest, with its declared
@@ -437,6 +471,18 @@ type PageVersionState struct {
 	OriginRefs    []string
 }
 
+// PagePartyState is one credited party of ONE version, as stored in
+// asset_version_parties: the role the version credits it in, and the
+// (kind, id) pair that names it. The pair is kept whole — the kind is why
+// the column exists beside the id (00082) — and the version it belongs to
+// is the key it is filed under, so a reader cannot apply one version's
+// credits to another.
+type PagePartyState struct {
+	Role    string
+	Kind    string
+	PartyID string
+}
+
 // PagePinState is one dependency pin, resolved against the stored
 // versions. Resolved is false when the pin names no stored version — the
 // document may pin anything, and a pin that resolves to nothing is a fact
@@ -518,6 +564,18 @@ type PageState struct {
 	// as an id-only entry: an unresolved user is a row this reader could not
 	// answer for, not an identity to print.
 	Users map[string]PageUser
+	// Parties are the credited parties of EVERY version of the asset, as
+	// stored (asset_version_parties), keyed by the version ROW id. Every
+	// version's rows are carried, not just the rendered one's, for the same
+	// reason every version's pins are: the model picks the version it
+	// renders, and a reader that resolved only the version it guessed would
+	// starve the model of the state it needs for any other choice.
+	Parties map[string][]PagePartyState
+	// Organizations resolves the identities of the organization-kind
+	// credited parties, by organization id — the second table a party id can
+	// name (00002). A missing entry renders no identity, which is the rule
+	// Users follows too.
+	Organizations map[string]PageOrganization
 	// Pins are the dependency pins of the rendered version's manifest,
 	// resolved, by canonical pin.
 	Pins map[DependencyPin]PagePinState
@@ -577,7 +635,7 @@ func BuildPage(state PageState, viewer PageViewer, want string) (AssetPage, bool
 		},
 		Origin:       []PageOrigin{},
 		Rights:       rightsOf(current),
-		Creators:     creatorsOf(current, state.Users),
+		Creators:     creatorsOf(state, current),
 		Metadata:     metadataOf(current),
 		Dependencies: []PageDependency{},
 		Lineage:      []PageLineage{},
@@ -709,22 +767,56 @@ func rightsOf(v PageVersionState) json.RawMessage {
 	return v.RightsJSON
 }
 
-// creatorsOf renders the credited parties of the version. See PageCreator
-// for why the role is named and why the publisher is the only party this
-// platform can answer for today.
-func creatorsOf(v PageVersionState, users map[string]PageUser) []PageCreator {
-	user, ok := users[v.PublishedBy]
-	if v.PublishedBy == "" || !ok {
-		return []PageCreator{}
+// creatorsOf renders the credited parties of the version, in the order the
+// reader returned them: grouped by role, and within a role in the order the
+// publish declared them (asset_version_parties.position). The order is
+// total, so two reads of one state render the same block.
+//
+// A party whose identity the reader did not resolve renders NO entry. That
+// is the rule the whole file follows — an id is not an identity, and an
+// entry carrying one would be a half-answer a client renders as a name —
+// and it is also what happens to a version published before 00082: it has
+// no credit rows, so it renders no credited party, and nothing stands in
+// for one. The publisher is NOT substituted here: published_by is a
+// different relationship on a different party, and it is rendered as
+// itself in the version block (PageVersionFacts.PublishedBy). See
+// PageCreator.
+func creatorsOf(state PageState, v PageVersionState) []PageCreator {
+	parties := state.Parties[v.ID]
+	out := make([]PageCreator, 0, len(parties))
+	for _, p := range parties {
+		switch p.Kind {
+		case string(domain.PartyUser):
+			user, ok := state.Users[p.PartyID]
+			if !ok {
+				continue
+			}
+			out = append(out, PageCreator{
+				Kind:        p.Kind,
+				PartyID:     user.UserID,
+				Handle:      user.Handle,
+				DisplayName: user.DisplayName,
+				Role:        p.Role,
+			})
+		case string(domain.PartyOrganization):
+			org, ok := state.Organizations[p.PartyID]
+			if !ok {
+				continue
+			}
+			out = append(out, PageCreator{
+				Kind:        p.Kind,
+				PartyID:     org.ID,
+				Handle:      org.Slug,
+				DisplayName: org.Name,
+				Role:        p.Role,
+			})
+		}
+		// A kind with no identity table resolves to nothing and renders
+		// nothing: the page has no name to put beside it, and inventing one
+		// from the other kind's shape is what the kind column prevents.
 	}
-	return []PageCreator{{PageUser: user, Role: CreatorRolePublisher}}
+	return out
 }
-
-// CreatorRolePublisher is the credited relationship the asset page can
-// answer for: the actor who published this version (published_by). The
-// gate's creator list (PublishCandidate.CreatorIDs) is validated but not
-// stored, so no other role is renderable today.
-const CreatorRolePublisher = "publisher"
 
 // metadataOf renders the manifest's metadata block, ascending by key —
 // the order the canonical manifest bytes sort it in (Manifest.
