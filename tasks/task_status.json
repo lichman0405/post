@@ -6765,6 +6765,15 @@
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null
+    },
+    "T1111": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "2026-09-18 立档，来源：T1110 合并后自动化安全审查报出的 CWE-214 发现（issue #273）",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
     }
   },
   "version": 2

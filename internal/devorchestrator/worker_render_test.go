@@ -19,6 +19,23 @@ func taskPackageSchemaPath(t *testing.T) string {
 	return p
 }
 
+// roundTripRulings marshals a package the way it is written to disk and decodes
+// the field back, so the assertion measures what the Worker will actually read
+// rather than what the struct held in memory.
+func roundTripRulings(t *testing.T, pkg *TaskPackage) string {
+	t.Helper()
+	encoded, err := json.Marshal(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back map[string]any
+	if err := json.Unmarshal(encoded, &back); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := back["supervisor_scope_narrowing"].(string)
+	return got
+}
+
 func testTaskSpec() *TaskSpec {
 	return &TaskSpec{
 		ID: "T0001", Phase: "P0", PhaseName: "phase", Title: "Source repo preflight",
@@ -273,6 +290,106 @@ func TestRenderPromptContainsContract(t *testing.T) {
 			t.Errorf("prompt missing %q", want)
 		}
 	}
+}
+
+// TestSupervisorRulingsReachTheWorker: the DAG's supervisor_scope_narrowing is
+// prose addressed to the Worker, and it decides what the requirements leave
+// open — so it must reach both the package and the prompt. It reaching neither
+// is #274: T1003 shipped the opposite of 决定三, T1004 a link to a route that
+// does not exist, T1005 an unignored mail sink, all three following a ruling
+// no Worker had been shown.
+func TestSupervisorRulingsReachTheWorker(t *testing.T) {
+	const ruling = "RULE-MARKER: where the requirement reads two ways, this decides which."
+	spec := testTaskSpec()
+	spec.SupervisorScopeNarrowing = ruling
+	pkg, err := RenderTaskPackage(spec, "0123456789abcdef", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The package is the authoritative record and is what gate-inputs pins;
+	// a field that only lands in the prompt is not collected anywhere. The
+	// assertion decodes the marshalled JSON rather than searching it: Go
+	// escapes <, > and & on the way out, and a substring search for rulings
+	// that mention `<token>` would report a loss that is not there.
+	if got := roundTripRulings(t, pkg); got != ruling {
+		t.Errorf("task-package.json dropped the ruling (got %q)", got)
+	}
+	if err := ValidateTaskPackage(pkg, taskPackageSchemaPath(t)); err != nil {
+		t.Fatalf("a package carrying rulings failed the repo schema: %v", err)
+	}
+	prompt := RenderPrompt(pkg, "/repo/.rddev/worktrees/T0001", "/repo/.rddev/workers/T0001", "/repo/.rddev/worktrees", "/repo/.rddev/workers")
+	if !strings.Contains(prompt, ruling) {
+		t.Error("prompt.md dropped the ruling — the Worker would never see it")
+	}
+	// Before the requirements: the ruling decides how they are read, so a
+	// Worker that meets it afterwards has already chosen a reading.
+	if ri, pi := strings.Index(prompt, ruling), strings.Index(prompt, "## Requirements"); ri > pi {
+		t.Errorf("the ruling is rendered after the requirements (ruling@%d, requirements@%d)", ri, pi)
+	}
+
+	// A task without rulings renders exactly as it did before the field
+	// existed — no empty section, no null key.
+	bare, err := RenderTaskPackage(testTaskSpec(), "0123456789abcdef", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bareJSON, err := json.Marshal(bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(bareJSON), "supervisor_scope_narrowing") {
+		t.Errorf("a task with no rulings still emitted the key: %s", bareJSON)
+	}
+	barePrompt := RenderPrompt(bare, "/repo/.rddev/worktrees/T0001", "/repo/.rddev/workers/T0001", "/repo/.rddev/worktrees", "/repo/.rddev/workers")
+	if strings.Contains(barePrompt, "Supervisor rulings for this task") {
+		t.Error("a task with no rulings rendered an empty rulings section")
+	}
+}
+
+// TestNoTaskInTheLedgerLosesItsRulings is #274 stated as a property of the
+// repository rather than of one synthetic spec: it walks the real tasks.json and
+// requires that every task carrying supervisor_scope_narrowing carries it into
+// the rendered package. On 18 Sep 2026 eight tasks — the whole serial migration
+// chain — held rulings in the ledger and none of them reached its Worker, which
+// is how T1003 shipped the opposite of 决定三.
+//
+// It tests the real file because the synthetic test above cannot catch the
+// actual failure mode: the field was dropped by json.Unmarshal into a TaskSpec
+// that had no such field, so the loss happened between the file and the code,
+// not inside the renderer.
+func TestNoTaskInTheLedgerLosesItsRulings(t *testing.T) {
+	path, err := filepath.Abs(filepath.Join("..", "..", "tasks", "tasks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dag, err := LoadDAG(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	carried := 0
+	for _, spec := range dag.Tasks {
+		if strings.TrimSpace(spec.SupervisorScopeNarrowing) == "" {
+			continue
+		}
+		carried++
+		pkg, err := RenderTaskPackage(&spec, "0123456789abcdef", nil, nil)
+		if err != nil {
+			t.Fatalf("%s carries rulings but would not render: %v", spec.ID, err)
+		}
+		if got := roundTripRulings(t, pkg); got != spec.SupervisorScopeNarrowing {
+			t.Errorf("%s: the ledger's rulings did not survive into the task package (%d chars in, %d out)", spec.ID, len(spec.SupervisorScopeNarrowing), len(got))
+		}
+		prompt := RenderPrompt(pkg, "/repo/.rddev/worktrees/"+spec.ID, "/repo/.rddev/workers/"+spec.ID, "/repo/.rddev/worktrees", "/repo/.rddev/workers")
+		if !strings.Contains(prompt, spec.SupervisorScopeNarrowing) {
+			t.Errorf("%s: the ledger's rulings did not survive into the prompt", spec.ID)
+		}
+	}
+	// A test that would pass on an empty ledger measures nothing; the ledger in
+	// this repo carries rulings, so if none were found the walk is broken.
+	if carried == 0 {
+		t.Error("no task in tasks.json carries supervisor_scope_narrowing — either the field is being dropped on load or the ledger query is wrong")
+	}
+	t.Logf("rulings carried to the Worker for %d task(s)", carried)
 }
 
 // TestRenderSystemPromptContainsContract: the hard rules and paths.
