@@ -11300,3 +11300,32 @@ worker 正在跑**的窗口里落这一笔，然后才推进 T0805 的重基线�
 **没动 `MANIFEST.json`**：它是初始规格导入时的一份快照，早已过期（159 条里 41 条
 哈希对不上、1 条文件不存在），仓库里**没有任何脚本或 CI 步骤读它**；单独为这一行
 刷新它，只会造出一份「看起来很新、其实其余 40 条仍旧陈旧」的清单。
+
+## 更正：上一节末尾「链上只有 T0711 需要寄存」这句是错的（2026-09-18）
+
+那条预判**基于一次不完整的探测**：我当时只把 T0805 的**三处 hunk**（`canonicalTables` /
+`explicitIndexes` / `TestUpgradePath`）拿去跑 `patch --dry-run --fuzz=0`，三处确实全中——
+但它在那些锚点之外**还有第四处**：`absent := []string{...}` 列表的末尾，而 T0711 正好
+插在**同一个锚点**上。**探针没覆盖到的地方，「验证过」等于没验证。**
+
+对四个 worktree 做完整的三方合并探测（`git merge-file`，base = 各自基线，
+ours = 任务树，theirs = `origin/main`），**冲突是结构性的，不是意外**：
+
+| 任务 | 冲突文件 | 形状 |
+|---|---|---|
+| T0805 | `cmd/api/main.go` | 双方各加两条 import，就近插入（`knowledgehttp` vs `inboxhttp`） |
+| T0805 | `tests/integration/append_only_test.go` | 同一段注释 + 同一行表名列表（`knowledge_publication_creations`） |
+| T0805 | `tests/integration/migration_test.go` | `absent := []string{…}` 末尾同一锚点 |
+| T0604 | `internal/domain/audit.go` | action 常量块同一区域 |
+| T0604 | `tests/integration/migration_test.go` | `explicitIndexes` 同一锚点 |
+| T0804 | `tests/integration/migration_test.go` | `explicitIndexes` 同一锚点 |
+| T0707 | （无） | 它不带迁移，不登记索引 |
+
+**为什么必然如此**：`explicitIndexes`、`absent`、append-only 表清单、`main.go` 的 import 块、
+`audit.go` 的常量块——**都是「每个迁移任务往同一处追加一行」的登记文件**，而三方合并把
+「同一行锚点上的两次插入」判为冲突。**所以从 T0805 起，链上每一环都要寄存**。
+
+**处置**（走 T0711 那一环已经走通的路）：合并前把**本任务**要追加的那几行从树里**寄存**出去
+（内容与位置逐条留在 `/tmp/`，并写进信里）→ `rddev rebaseline` → 在信里让它把寄存的行
+**放回 main 那几行之后**。**不要**为了让合并过去而改写 main 的登记顺序，也**不要**把别人的行
+搬进本任务的 diff——那是把合并顺序塞进产物里。
