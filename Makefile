@@ -37,7 +37,17 @@ check: ## one-command basic check: Go + Web + Python (+ schema/OpenAPI drift); n
 	$(MAKE) check-schema-snapshot
 	$(MAKE) check-openapi
 	$(MAKE) check-spec-version
+	@# The three Go steps below mirror CI's `go` job (.github/workflows/ci.yml)
+	@# on purpose. They were missing, and "make check is green" therefore did
+	@# NOT mean "CI's Go job is green": on 2026-09-18 two tasks lost a round to
+	@# exactly that gap — T0711 shipped an unformatted file (fmt-check) and
+	@# T1110 a staticcheck finding, both with a green `make check`. A local
+	@# command that is a similar-looking subset of the gate is worse than a
+	@# smaller command that says what it covers.
+	$(MAKE) fmt-check
 	go vet ./...
+	$(MAKE) staticcheck
+	bash scripts/tests/staticcheck-unit-test.sh
 	go build ./...
 	go test $(GO_UNIT_PKGS)
 	pnpm --filter @post/ui typecheck

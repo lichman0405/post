@@ -10390,3 +10390,53 @@ G4 要断言的**。所以浏览器 job 一接上，**每个任务（包括纯�
 所以它们能在 CI 上跑；但它们**从来没在 CI 里跑过**，第一次接上去之前**必须先在本机认真跑几遍确认稳定**——
 `docs/67:28` 逐字「flake 不是『rerun until green』；先定位再修」。
 **一个会抖的必过关卡会把整条流水线卡死，这比没有关卡更坏。**
+
+---
+
+## 落地工具 `apply-packages.py` 静默空转（2026-09-18，L1，已修）
+
+**症状**：`python3 .rddev/tools/apply-packages.py T0410 T0506 …` 逐条打印了它「改了哪些字段」
+（`T0410: requirements, acceptance_criteria, allowed_scope, … supervisor_scope_narrowing`），
+最后打印 `wrote /home/shibo/code/post/tasks/tasks.json`，**退出码 0**——而 `git status` 显示
+`tasks/tasks.json` 没有任何改动。13 份任务书一份都没落地，工具却报告全部成功。
+
+**根因**（`.rddev/tools/apply-packages.py`）：`entries = doc["tasks"]` 取的是列表，
+`by_id = {e["id"]: e for e in entries}` 映射到**列表里的那些对象**。
+应用循环里写的是 `by_id[task] = ordered`——**这只改了映射表这一格，没有改列表里的元素**；
+而落盘走的是 `out = dump_doc(doc)`，序列化的是 `doc["tasks"]` 那个列表，也就是**原内容**。
+于是「写回」是一次原样重写：mtime 变了、内容没变、报告说成功。
+
+**修法**：`by_id[task] = ordered` 之后，再按 id 在 `entries` 里定位并把元素替换掉；
+找不到就 `die`（映射表与列表不一致本身是该报错的异常）。
+已备份原文件到 `/tmp/apply-packages.py.bak`（该目录被 `.gitignore:10` 忽略，不在版本控制里）。
+
+**怎么发现的**：不是靠读代码，是靠**落地后去看 git**。工具自己的输出在这件事上是不可信的——
+它打印的是「我打算改什么」，不是「盘上变成了什么」。
+
+**教训（与既有规则同一条）**：**任何「成功」的自我报告都要有一个外部证据来对账。**
+`--dry-run` 只证明 guard 通过，不证明内容落地；`wrote …` 只证明它执行到了那一行。
+落地之后必须独立看一次 `git status --short` 与目标文件的真实内容。
+
+**待查（同族风险）**：`scripts/spec_version.py --write` 与 `scripts/gen_schema_snapshot.py`
+是仓库自带、经过 `make check-*` 对账的，暂不怀疑；但**任何我自己的 `.rddev/tools/**`
+脚本都应按同一标准对待**——它们的输出不能单独作为证据。
+
+## `make check` 补齐 CI 的 Go 三步（2026-09-18，L1）
+
+**问题**：`make check`（`Makefile:35`）此前不含 `make fmt-check`、`make staticcheck`、
+`bash scripts/tests/staticcheck-unit-test.sh` 这三步，而 CI 的 `go` job（`.github/workflows/ci.yml`）
+**正是这三步 + vet + unit**。于是「`make check` 全绿」不等于「CI 的 Go job 全绿」。
+
+**代价（同一天两次）**：
+- **T0711**：`make check` 绿，但 `internal/application/assetrights/command.go` 没格式化 →
+  G2 红在 `make fmt-check`，整轮返工。
+- **T1110**：`make check` 绿，但 `cmd/api/backupdr/reconcile.go:646` 有个 SA4006 →
+  G2 红在 `make staticcheck`，整轮返工。
+
+**决定**：把这三步按 CI 的顺序补进 `make check`。理由不是「更严」，而是
+**一个看起来像门禁子集的本地命令，比一个明确说自己覆盖什么的更小的命令更坏**——
+worker 被要求「跑任务要求的测试」，自然会跑 `make check`，然后合理地以为 CI 会绿。
+
+**风险核过**：没有任何 workflow 跑 `make check`（`grep -rn "make check" .github/workflows/` 零命中），
+所以 CI 行为不变；两步在 main 上实跑通过（`gofmt: clean` / `staticcheck: clean (6 grandfathered)`）；
+Makefile **不是** `specs/SPEC_VERSION.json` 的摘要输入，因此不移动规格指纹，也不影响任何在飞任务的 G2。
