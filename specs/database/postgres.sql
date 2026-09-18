@@ -5590,7 +5590,7 @@ CREATE INDEX responsibility_assignments_project_idx
 --   1. project_forks: the lineage record. One row per fork project. The
 --      relation name is the canonical vocabulary's — 'forked_from', the
 --      lineage/network type of internal/rsg/relationcatalog (docs/44) and a
---      member of asset_lineage's CHECK (00011); the CHECK here pins it so a
+--      member of asset_lineage's CHECK (00010); the CHECK here pins it so a
 --      second, invented relation name cannot appear in the column, and the
 --      column exists at all so the lineage's vocabulary is a stored fact
 --      rather than an implication of the table's name.
@@ -5599,7 +5599,7 @@ CREATE INDEX responsibility_assignments_project_idx
 --      fork project (child) and the project it was forked from (parent).
 --      docs/31 Gate C requires "Asset PID/version/lineage/…/fork 工作"; the
 --      project-level half of that lineage is what this table carries. The
---      asset-level half stays asset_lineage's (00011) — the two are
+--      asset-level half stays asset_lineage's (00010) — the two are
 --      different subjects and this table does not touch that one.
 --
 --      The row is append-only except for ONE cell: forked_sha, the parent

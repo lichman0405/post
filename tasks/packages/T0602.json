@@ -1,0 +1,92 @@
+{
+  "id": "T0602",
+  "phase": "P6",
+  "phase_name": "Frozen Main、Abort、Policy 与 Release",
+  "title": "主线对象 Abort 状态迁移（abort 半；reopen 已拆出为 T0610）",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "dependencies": ["T0208", "T0409"],
+  "requirements": [
+    "**先说清楚这份任务书为什么和原来那条不一样。** 本任务原先的台账文字是「branch 中 abort/reopen／main 对象需 PR／reason/replacement」，并在 2026-09-16 被整条判为 `SPEC_BLOCKED`。**2026-09-19 复核后撤回该判定**（理由与逐条证据见 `tasks/decisions.md`：「更正：T0602 的 SPEC_BLOCKED 判重了」）：那份判定漏翻了 `docs/46_ABORT_RETENTION.md`（该文件 **2026-09-12** 随初始提交进仓库，比判定早四天），也误判了权限矩阵为空。**本任务现在只交 abort 这一半**；reopen 那一半拆到 T0610，它只差一行权限决定（属 L3，不在你范围）。",
+
+    "**规格已经写死了三件事，逐字照办，不要重新设计。**（一）记什么：`docs/46_ABORT_RETENTION.md:7` 逐字「Abort 必须记录 actor、time、reason code、human explanation、replacement/superseding ref(optional)、review/approval if main object。」（二）怎么走：`:9` 逐字「main 中对象 Abort 必须 branch → PR → merge；不能在详情页直接一键修改 current main。」（三）不删除：`:5` 逐字「正式 Scientific Object、relation、state commit、release、asset version、contribution/audit event 不能普通物理删除」，`:11` 逐字「Reopen 创建新 transition，保留历史 abort。」",
+
+    "**权限不要发明，那一行已经存在而且与规格 CSV 一致。** `internal/authz/matrix.go:121-129` 有 `ActionAbortMainObject`：匿名/非成员/viewer/contributor 全 `Deny`、**maintainer `VerdictViaPR`、owner `VerdictViaPR`、agent `VerdictProposalOnly`**；常量定义在 `internal/authz/action.go:37-38`，注释逐字写着「aborts a main-branch object (**T0602**)」。规格侧同一条在 `specs/policies/permissions-matrix.csv:14`：`abort_main_object,deny,deny,deny,deny,via_pr,via_pr,proposal_only`。**两者一字不差，所以你既不需要改代码里的矩阵，也不需要改 CSV —— 两者都不许动。** 注意它是 `ViaPR` 而不是 `Allow`：这正是「必须经 PR」在权限层的表达，与 `docs/46:9` 是同一句话的两种写法。**这一行今天是个死行**：全仓库除了定义与 `internal/authz/engine_test.go:63` 的单测，没有任何调用者。把它接上生产是本任务的一部分。",
+
+    "**契约也已经声明好了，路由没实现——按已声明的形状实现，不许改契约。** `specs/api/openapi.yaml:210-218` 是 `POST /projects/{projectId}/objects/{objectId}:abort-proposal`，摘要逐字「Propose abort for object; main objects require PR flow」，参数 `ProjectId` + path 的 `objectId`，响应 `201` 描述逐字「Proposal or branch change created」。**注意这个摘要本身就是规格**：main 对象收到的是 proposal，真正生效靠 PR 合并。`specs/mcp/tools.json:23` 是同一件事的 MCP 面：`object.abort_proposal(project_id, object_version_ref, reason_code, explanation)`。**`specs/api/**` 与 `specs/mcp/**` 都不在你范围内。**",
+
+    "**`reason_code` 按开放字符串落，不要自造词表。** 全仓库没有任何 reason code 取值清单（`docs/46:7` 与 `tools.json:23` 都要求这个字段，两处都没有列举取值）。**这是刻意的裁定，不是遗漏**：`tools.json` 把它列为**调用方传入的参数**，而 `docs/46` 要求的是「必须记录」、不是「必须取自闭集」。所以：校验非空与形状（建议 `[a-z0-9_]{1,64}` 这类），把取值原样记录，**不在代码里写死一张表**。**必须把这个决定写进代码注释与 RESULT**，并写明代价：V1 无法按原因分类统计，日后要闭集是一次正常收窄。**若你判断没有闭集就无法满足某条验收，标 `blocked` 说明，不要自己编一张表**——那正是 §5 禁止的「猜产品语义」。",
+
+    "**存储形状是 L1，你自己定，但有三条硬约束。** `infra/migrations/00005_scientific_objects.sql:20` 的 `scientific_object_versions.lifecycle_state` **CHECK 里已经有 `'aborted'`**，而这张表是**追加式版本表**（每版带 `version_no`/`state_id`/`created_by`/`created_at`/`payload jsonb`）；`infra/migrations/00014_append_only_enforcement.sql:9` 逐字「Corrections never mutate a row: they append a new one (abort/reopen, ...)」。三条硬约束：(1) **abort 是追加一个新版本，不是改旧行**——历史版本必须逐字节不变；(2) `docs/46:7` 要的三位（reason code / human explanation / replacement ref）要有明确归属，**你想把 abort 元数据塞进 `payload jsonb` 也可以，但要在 RESULT 里说明为什么它不与科研内容混淆**；(3) **`lifecycle_state` 的 CHECK 里已有 `'reopened'` 但本任务不许产生它**——那是 T0610 的。",
+
+    "**Agent 是 `ProposalOnly`，两道防线都要有。** 矩阵那一格是 `proposal_only`，实现必须走 `internal/authz` 的判定；**另加一道域层兜底**，形状照抄 `internal/application/contribution/service.go:173-175`（`if by.IsAgent { return ..., &AgentNotPermittedError{...} }`，错误类型在同包 `errors.go`）。分寸：`docs/60_AGENT_SAFETY_BOUNDARIES.md` 与 `specs/mcp/tools.json` 的 `forbidden_default_agent_actions` **未必**逐字点名 abort，**矩阵才是这一条的规格权威**，不要把它说成 MCP 清单里也有。",
+
+    "**拒绝必须发生在目标查询之前。** 照 `internal/application/releases/errors.go` 里 `ErrForbidden` 的既有注释：授权在**任何目标查询之前**解析，所以拒绝本身不泄漏「这个对象/项目存不存在」。被拒的调用方要能看出**是被授权挡的**，而不是一句笼统的 forbidden。",
+
+    "**审计与领域事件写在与状态变更同一个事务里。** 事件名**已经登记**，不许另拼：`specs/events/event-types.yaml:22` 是 `scientific_object.aborted`（同族的 `:23` 是 `scientific_object.reopened`，归 T0610）。审计动作照 `internal/domain/audit.go` 既有的「完整名词 + 点分」惯例。事件的 visibility 必须 fail-closed，照既有各面的做法。**同事务**：不许先改状态后补事件。",
+
+    "**幂等用状态本身，不要新建台账表。** 同一个 `Idempotency-Key` 重复请求返回同一结果、不产生第二条 audit 或第二个事件（契约里 `POST /projects/{projectId}/releases` 一带的 `IdempotencyKey` 是同一套规矩，见 `specs/api/openapi.yaml` 的 `IdempotencyKey` 参数定义：必填、minLength 8）。并发安全用条件更新（比较交换），只有一个能赢，**只有赢家写 audit 与事件**——不许「先读后写」。",
+
+    "**「历史不可变」要有能失败的证明。** `docs/43:7` 逐字「active → merged | aborted；merged/aborted history immutable」。请构造：对象在 main 上有一个已合并版本 V1，abort 之后产生 V2；**从存储里把 V1 逐列读回并与 abort 前逐字节比对**，必须完全相同。**断言读的是存储，不是函数的返回值或内存里的对象。**",
+
+    "**不做 / 边界**：**不实现 reopen**（T0610，它缺一行权限，属 L3）；不改 `specs/**`（契约、MCP 工具表、权限 CSV、事件名全都已经声明好了，本任务一个都不改）；不改 `docs/**`、`tasks/**`；不做界面（`apps/web/**` 不在范围内）；**不新增权限矩阵行**。"
+  ],
+  "acceptance_criteria": [
+    "**abort 经真实产品路径生效**：从「对象在 main 上处于 active」到「存储里出现 lifecycle_state='aborted' 的新版本」，**全程走产品路径**——abort-proposal 路由 → PR → merge。**不许在测试里直接把状态摆出来**（既有的反面教材是 `tests/integration/merge_governance_e2e_test.go:439-442` 直接调 `SetState` 跳过产品路径）。断言读的是**存储里的版本行**。",
+
+    "**`docs/46:7` 的五位 + actor/time 都被记录且可读回**：actor、time、reason code、human explanation、replacement ref（可选）——逐项断言存在且取值正确，**不是只断言「有记录」**。replacement ref 为空时断言它确实是 NULL 而不是空串（区分「没给」与「给了空」）。",
+
+    "**权限逐格成立且拒绝不泄漏存在性**：viewer/contributor/非成员/匿名**全部被拒**；maintainer 与 owner 得到的是**必须经 PR**（不是直接放行）；agent 得到 **proposal_only**——它发出的东西是提议，**不是已生效的 abort**（断言存储里没有它产生的 aborted 版本）。另有一条：对一个**不存在**的对象发起 abort，无权调用者的错误与「对象存在但无权」**不可区分**。",
+
+    "**历史逐字节不变**：abort 前已合并的版本 V1，在 abort 之后从存储逐列读回，与 abort 前逐字节相同；abort 产生的是**新版本行**，不是对 V1 的修改。这条要能失败——RESULT 里附上「若改成原地更新则本断言转红」的实测。",
+
+    "**幂等**：同一 `Idempotency-Key` 重放同一请求，返回同一结果，**audit 与事件各只有一条**（不是「有事件」而已，是**计数等于 1**）。并发两次只有一次生效。",
+
+    "**事件与审计同事务**：`scientific_object.aborted` 在事务里发出，载荷能被读到；断言该事件**不在**被拒的调用上产生。",
+
+    "**reason_code 是开放字符串的裁定被落实且有痕迹**：代码注释里写明「V1 未闭集，取值来自调用方」，并且**代码里不存在任何 reason code 的硬编码清单**（这条可在 RESULT 里用 grep 输出证明）。",
+
+    "**RESULT 里写明**：你把 abort 元数据放在哪一列/哪张表、为什么；五位的实际字段名；以及任何你判断规格没写清楚而按 fail-closed 处理的地方——**逐条点名，不要埋在细节里**。"
+  ],
+  "deliverables": [],
+  "allowed_scope": [
+    "internal/application/**",
+    "internal/domain/**",
+    "internal/persistence/**",
+    "internal/events/**",
+    "cmd/api/**",
+    "cmd/worker/**",
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "tests/**",
+    "go.mod",
+    "go.sum",
+    ".env.example"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "specs/api/**",
+    "specs/mcp/**",
+    "specs/policies/**",
+    "specs/events/**",
+    "specs/schemas/**",
+    "packages/**",
+    "apps/web/**",
+    "Makefile"
+  ],
+  "relevant_specs": [
+    "docs/46_ABORT_RETENTION.md",
+    "docs/43_VERSION_MATRIX.md",
+    "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
+    "docs/45_ERROR_MODEL.md",
+    "docs/18_EVENTS_SUBSCRIPTIONS.md",
+    "docs/09_VERSION_CONTROL.md",
+    "docs/31_MASTER_ACCEPTANCE.md"
+  ],
+  "scope_note": "范围按实际交付面收窄。**保留** `internal/authz/**` 之外的一切授权能力是**只读使用**：本任务**不许改** `internal/authz/matrix.go`、`internal/authz/action.go` 或 `specs/policies/permissions-matrix.csv`——那一行已经存在且与规格 CSV 一致，你只需要**调用**它（所以 `internal/authz/**` 干脆不在 allowed_scope 里，避免误改）。**保留** `infra/migrations/**` + 两个派生文件，因为要新增存储三位元数据的形状；这可能是本任务唯一的新迁移。**保留** `cmd/api/**` 因为要注册那条已声明的路由；**保留** `cmd/worker/**` 是因为 PR 合并后的状态推进可能落在 worker 侧（若你判断不需要，不动即可）。**不给** `specs/**` 的任何子目录：契约、MCP 工具表、权限 CSV、事件名**全都已经声明好了**，这是本任务与前身判定的最大差别。**不给** `apps/web/**`（不做界面）、`docs/**` 与 `tasks/**`（Supervisor 专属）。",
+  "supervisor_scope_narrowing": "2026-09-19 重写。**这份任务书是「撤回过重判定」的产物**，所以它把复核用到的证据全部写进需求，而不是让工人重新发现一遍：(1) `docs/46_ABORT_RETENTION.md` **存在且自 2026-09-12 就在仓库里**（`git log -- docs/46_ABORT_RETENTION.md` → `fecf24d 2026-09-12`），它把字段与流程都写死了；原判定漏翻这份文档。(2) 权限那一行**在代码与规格 CSV 里都有且一字不差**（`internal/authz/matrix.go:121` 与 `specs/policies/permissions-matrix.csv:14`），原判定写的「权限矩阵全空」是错的。(3) 契约路由与 MCP 工具**都已声明、都未实现**——所以本任务是接线，不是设计。(4) 事件名 `scientific_object.aborted` **已登记**，不需要新增。(5) 存储的**状态位已经在 `CHECK` 里**（`00005:20` 有 `'aborted'`），且这张表本来就是追加式版本表。**唯一真正开放的是 reason code 的取值词表**，我把裁定写死在需求里（开放字符串、不自造、留下代价说明），因为这既符合 §5「不猜产品语义」，也不至于为一个字段停掉整条主验收路径。**reopen 拆出去了**（T0610）：它只差一行权限（`specs/policies/permissions-matrix.csv` 里没有 reopen 行、`internal/authz/action.go` 的动作总表里也没有），而权限是 §5 明文列出的 L3，我不代裁定。"
+}

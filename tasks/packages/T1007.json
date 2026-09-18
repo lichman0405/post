@@ -1,0 +1,87 @@
+{
+  "id": "T1007",
+  "phase": "P10",
+  "phase_name": "Research Events、订阅与 Impact Analysis",
+  "title": "Dependency Impact Analysis",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "dependencies": ["T0707", "T1001"],
+  "requirements": [
+    "**本任务的出处是一句话，逐字引用**：`docs/19_EXTERNAL_REFERENCES.md:15` —— 「`depends_on`：实际输入/方法/复现依赖；上游变更触发 impact analysis。」**「上游变更触发」这五个字就是本任务**：触发者不是用户点一个按钮，而是上游状态**真的变了**（abort / supersede / visibility 变化等既有领域事件）。所以本任务是一条**由事件驱动的分析链**，不是一个人工调用的接口。",
+
+    "**哪条边算数已经写死在关系目录里，不要自己再判一遍**：`internal/rsg/relationcatalog/catalog.go:78` 的 `depends_on` 带 `DependencyInference: true`，语义逐字是「uses the target as an actual input/method/reproducibility dependency; upstream changes trigger impact analysis (docs/19 §3)」；`:86` 的 `references` 语义逐字是「as background knowledge, **not as an input dependency**」，而且**没有**这个标记；`:42-45` 说明了这个标记的用途。**沿标记走，不要沿「名字里带 depend 的边」走，也不要沿所有 provenance 边一锅端。** 资产侧是同一个概念的第二个落点：`asset_dependencies`（`infra/migrations/00010_releases_assets.sql:55-62`），两处都要照顾到，但判定依据始终是那个标记。",
+
+    "**direct / indirect 必须落在数据里，不能只在渲染时现算**（存根第 2 条要求这个区分）。落法是 L1，你自己定并说明，但必须满足：返回的数据里「直接影响」与「间接影响」**可分**——至少要有 hop 数或等价的直接标志。**不许只返回一个总深度，也不许用一个布尔把两者压平。** 理由：两者在产品上是不同强度的提示，压平之后下游页面无法再区分，而页面无法区分就意味着这个区分事实上不存在。",
+
+    "**不自动 invalidate（存根第 4 条）**：impact 是**提示**，不是状态迁移。`docs/11_RELEASE_ASSET_HUB.md` §7 逐字：「Published Asset Version 不删除。若出现问题，追加 abort/supersede state/event 并指向 replacement；过去引用仍解析到原 version，同时显示 later status warning。」**不许**因为检测到影响就去改任何对象的状态、visibility、release 成员或评审状态。本任务**只读 + 只发事件**。",
+
+    "**跑在后台 worker 里，不在请求路径上**：`docs/20_TECH_ARCHITECTURE.md:71` 逐字点名（Go worker 处理：git ingestion、blob hash/preview、embedding、event delivery、**impact analysis**、notification digest、reconciliation）。触发源用已合并的 outbox / 事件流（T1001），**不要新开一个让人手动触发的 HTTP 端点**——那会把「上游变更触发」变成「有人记得去点」。",
+
+    "**两个事件名已经登记，载荷由你定义**：`specs/events/event-types.yaml:29-30` 里已经有 `dependency.status_changed` 与 `dependency.impact_detected`（`docs/18_EVENTS_SUBSCRIPTIONS.md:17` 点名）。**注意：本仓库不为事件载荷建模**——`specs/events/` 下只有 `event-types.yaml` 这一个文件，里面只有名字清单与必填信封字段（`event_id`/`event_type`/`occurred_at`/`actor_id`/`correlation_id`/`visibility`/`payload_version`），**没有载荷 schema**，载荷是 Go 侧发射时构造的。所以载荷由你设计，但必须携带：**被影响对象的身份**、**direct/indirect 的区分**、**触发它的上游对象**。每个字段在 RESULT 里说明为什么在那里。",
+
+    "**读取面在 PR 首屏，但本任务不做 Web UI**：`docs/06_UI_UX_SPEC.md:38` 逐字（PR 首屏展示 Research State Diff：新增/修改/Abort 的科研对象、知识变化、Evidence 变化、Protocol/Schema changes、visibility changes、**dependency impact**）与 `docs/09_VERSION_CONTROL.md:17`（PR 包含：…review requirements、discussion、visibility impact、**dependency impact**、merge strategy）。落点是已存在的 `internal/application/prchecks/`。**把服务层的答案交出来就够了**，页面渲染归页面任务。",
+
+    "**隐私这条不许重犯（issue #238 的同一类，T0707 已立过先例）**：`docs/23_SECURITY_PRIVACY.md:17` 把「no hidden private dependency leak」列为 publish 的必带项之一。**一次 impact 结果不得让调用者看出一个他无权读的实体的存在**——名称、编号、**计数**都不得泄漏。先例逐字在 T0707 的 `internal/assets/usage.go`：「公开资产页只显示 `visibility_of_usage = 'public'` 的那些用法；私有用法既不显示也不能被计数推断出来。」规矩在 `docs/23_SECURITY_PRIVACY.md:21`：「8 private projects use this」只有在产品策略明确允许的匿名聚合阈值下才显示，**V1 可以直接不显示 private 数量**。本任务照 V1 这条办。",
+
+    "**遍历照本仓库已有的先例写，不要另起一套图算法**：`internal/persistence/queries/rsg_query.sql` 的头部逐字说明 sqlc 解析不了递归，所以那里用的是**裸 pgx 递归查询**（同一个目录下 `manifest.sql:16/32/53`、`releases_assets.sql:88` 是同一写法的其他实例）；相邻读取已经有 `ListAdjacentRelationVersions`（`rsg_query.sql:59`）。沿这个先例写递归 CTE。**注意 `depends_on` 的方向**：被影响的是下游（dependent），不是上游（dependency）。",
+
+    "**不做 / 边界**：不改 `specs/**`（事件名已登记，载荷在 Go 侧）；`infra/migrations/**` 在范围内，但**只允许为索引或约束新增迁移**（例如递归遍历需要的索引），**不许为新表新增**——若你判断必须新开表，标 `blocked` 说明理由，不要自己开。不改 `docs/**`。不碰 `apps/web/**` 的页面实现。"
+  ],
+  "acceptance_criteria": [
+    "**金场景（存根的验收）**：seed 一个 Protocol 被若干 Experiment/Dataset/Claim/Asset 通过 `depends_on` 依赖（有直接也有间接，构成一棵已知的闭包），abort 它，分析结果**恰好等于**手工算出的可达集合——断言是**集合相等**，不是计数相等（计数相等会放过「少一个多一个」）。",
+
+    "**`references`（引用）这条边不被跟随——而且这条断言必须能失败**：构造一条只有 `references` 串联的链，确认结果**不包含**它。这条是证明「判定依据是 `DependencyInference` 标记」而不是「名字里带 depend」的唯一证据；RESULT 里附上把标记改掉后这条测试转红的实测输出。",
+
+    "**direct / indirect 在返回数据里可分**：一条既有直接影响又有间接影响的用例，断言两者被分到不同的类别（不是同一个值、也不是只差一个计数）。",
+
+    "**不自动 invalidate，用读回证明**：分析跑完之后，把所有被影响对象的状态、visibility、release 成员、评审状态**从表里读回**并与分析前逐字节比对，必须完全相同。断言读的是**存储**，不是分析函数的返回值。",
+
+    "**不泄漏私有实体（issue #238 同类）**：构造一个**私有**项目依赖某公开资产的情形，由一个无权读该私有项目的调用者取 impact 结果——**看不出**那个项目的存在：名称、id、**计数**都不得出现。断言里的字符串必须是**真实存在的行**（空串算失败，那会让断言永远为真）。",
+
+    "**`dependency.impact_detected` 幂等**：同一笔上游变更**重放**时不得发出第二条事件（与 T1001 的 outbox 幂等一脉相承）；载荷携带被影响对象身份、direct/indirect 区分、以及触发的上游对象——逐项断言字段存在且取值正确，不是只断言「有事件」。",
+
+    "**跑在 worker 里**：分析由后台 worker 消费事件触发，**没有**新增的「手动触发」HTTP 端点（在契约里断言没有这样的路径被加上）。PR 首屏的读取面从服务层取答案（`internal/application/prchecks/`），页面渲染不在本任务内。"
+  ],
+  "deliverables": [],
+  "allowed_scope": [
+    "internal/persistence/**",
+    "internal/events/**",
+    "internal/application/**",
+    "internal/domain/**",
+    "internal/rsg/**",
+    "cmd/worker/**",
+    "cmd/api/**",
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "go.mod",
+    "go.sum",
+    ".env.example",
+    "tests/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "specs/api/**",
+    "specs/events/**",
+    "specs/schemas/**",
+    "packages/**",
+    "apps/web/**",
+    "Makefile"
+  ],
+  "relevant_specs": [
+    "docs/19_EXTERNAL_REFERENCES.md",
+    "docs/18_EVENTS_SUBSCRIPTIONS.md",
+    "docs/20_TECH_ARCHITECTURE.md",
+    "docs/23_SECURITY_PRIVACY.md",
+    "docs/11_RELEASE_ASSET_HUB.md",
+    "docs/06_UI_UX_SPEC.md",
+    "docs/09_VERSION_CONTROL.md",
+    "docs/02_V1_SCOPE.md"
+  ],
+  "scope_note": "这是**按本任务的实际交付面**收窄后的范围，不是 phase 级默认上限。逐条说明：**保留** `infra/migrations/**` + `specs/database/postgres.sql` + `specs/SPEC_VERSION.json` —— 递归遍历很可能需要索引，允许为此新增迁移（但**不许新开表**，见需求最后一条）；**保留** `internal/persistence/**` 是因为递归查询住在那里（照 `rsg_query.sql` 先例）；**保留** `internal/events/**` 是因为两个事件名与 outbox 发射在那里；**保留** `internal/application/**` + `internal/application/prchecks/**`（在 `internal/application/**` 之下）是读取面的落点；**保留** `cmd/worker/**` 是因为它必须跑在后台 worker 里（`docs/20:71`），而 `cmd/api/**` 只允许接线读取面。**明确不给**：`specs/api/**`（本任务不加端点）、`specs/events/**`（事件名已登记，载荷在 Go 侧）、`specs/schemas/**` 与 `packages/**`（不改任何 schema）、`apps/web/**`（页面渲染不归本任务）、`docs/**` 与 `tasks/**`（Supervisor 专属）。",
+  "supervisor_scope_narrowing": "2026-09-19 撰写。这份任务书是从一个 148 字的空壳补出来的，补写时逐条回树核过引用，并将下列**核过的事实**写进需求而不是让工人去猜：(1) 判定依据是 `catalog.go:78` 的 `DependencyInference` 标记，`references` 明确不带它——这条把「沿哪些边走」从设计问题降成了读代码问题；(2) 两个事件名**已经登记**在 `specs/events/event-types.yaml:29-30`，不需要新登记；(3) **事件载荷在本仓库不建模**（`specs/events/` 下只有那一个文件，只有名字清单，没有载荷 schema），所以载荷由本任务定义——我把这一点明写出来，是因为「载荷没规定」很容易被工人读成「我随便定」，而实际约束是「字段必须能支撑 direct/indirect 与身份，且逐字段说明理由」；(4) 递归遍历的**写法先例在 `rsg_query.sql` 的裸 pgx 递归**（那里逐字写了 sqlc 解析不了递归），不写清这条，工人很可能另造一套图算法；(5) 读取面的出处是 `docs/06:38` 与 `docs/09:17` 的「PR 首屏显示 dependency impact」，落点 `internal/application/prchecks/` 已存在。**存根里那条「review required alerts」我没有照抄进来**：`review_required` 在本仓库是 **PR 的一个状态**（`internal/domain/pullrequest.go:87`），不是提醒机制；规格里与 impact 相关的唯一表述是「PR 首屏展示 dependency impact」，所以我按**读取面在 PR 页面 + 发 `dependency.impact_detected` 事件**来落，而不是自造一套「提醒谁、要不要重新评审」的产品规则——后者规格没有，属于 L3，工人不许发明，我也不替它发明。",
+  "tests": ["impact golden/e2e"]
+}

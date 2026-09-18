@@ -12033,3 +12033,528 @@ F1 那条残留是我上一轮已经裁定"记录 + 延后"的，评审也只是
 不变式 + 三条底线 + 精确基线（不许用"不看"来回避 `README.md` 的锁死问题）+ 两类 e2e 场景
 + **变异证据**（证明补的测试能失败）+ RESULT 必须披露（路线、覆盖了什么、剩什么、谁补）。
 纪律照旧：不许删/跳过/弱化测试、不许自行选号、范围不变。
+
+## 2026-09-19 更正我自己的第三处措辞错误：T0804 的 allowed_scope **包含** `cmd/api/**`
+
+**错在哪**：上面那节（T0804 复核裁定）里我写「T0804 的 allowed_scope 里就没有 `specs/http` 与
+`cmd/api`，所以这不是它的越界」，第五封返工信第五节又照抄了这个理由。**"没有 `cmd/api`"是错的。**
+今天查实 T0804 的 allowed_scope 原文是：
+`infra/migrations/**`、`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、
+`internal/contribution/**`、`internal/application/**`、`internal/gitprovider/**`、`internal/persistence/**`、
+`internal/rights/**`、**`cmd/api/**`**、`go.mod`、`go.sum`、`.env.example`、`tests/**`。
+**它不许写的是 `specs/api/openapi.yaml`**（`specs/**` 里只有那两个生成物给它），`cmd/api/**` 是给它的。
+
+**为什么结论不变**（这一点很重要，否则会误伤工人）：
+fork 没有生产 HTTP 面**仍然不是 T0804 的缺陷**，但正确的理由是**我自己的裁定**，不是范围：
+① 第四轮我对评审 F3 的裁定就是"服务层成立、生产接线无 HTTP 面"，并把 AC-11 的措辞按这个口径改过
+（工人照我的裁定办，是对的）；② §7 是 OpenAPI-first，而契约文件**在它的范围之外**——
+先有契约再有实现，顺序上也不该由它先写 handler。
+
+**更正后的准确说法**（以后引用这一条）：**契约（`specs/api/openapi.yaml` 的 fork 端点）是我的活；
+接线任务的范围必须同时包含 `cmd/api/**`（实现路由与 handler）。** 不是"整件事都在范围外"。
+
+**这是同一个类别的第三次**（前两次：把"执行侧已接上"说成"一个接口都没有"、以及漏了 ForkGate 的位置）。
+共同点都是**凭印象描述范围/接线状态，而没有去数**。规矩再收紧一次：**凡是我在信里、决策档里
+写"某文件不在某任务范围"或"某处没有接线"，必须先 `grep`/读一眼原文再写。**
+
+## 2026-09-19 定 fork 的命名规则（T0804 的 F1 残留）：fork 的 slug 一律带一对 (父, 人) 的摘要
+
+**这是 L1，我定，不推给 owner**（不涉及权利/可见性/科研语义，只涉及一个生成出来的 URL 片段）。
+
+**先把我先前对这条残留的描述纠正准确。** 我之前写的是"自己名下的老项目占了派生名 → 永久
+`ErrForkSlugTaken`"，那是对的但不完整。今天读了原文：
+
+- `forkSlug`（`internal/application/forks/service.go:686`）主名是 **`<父 slug>-<人的 handle>`**
+  （能塞进 64 字符就用它），**只有超长才**换成带摘要的形状 `forkSlugDigest`。
+- `forkProjectOverTakenName`（`:508-527`）：派生名被别人**或**被自己名下的项目占住时——
+  别人占 → 退到保留名（`forkSlugReserve`，即 digest 形状加 `-2`）再试一次；
+  **自己名下的项目占、而这一对又没有 fork 记录 → 直接 `ErrForkSlugTaken`，连保留名都不试**。
+  代码注释给的理由是成立的：fork 项目行**先于**谱系行创建，所以"自己名下、不属于这一对的
+  项目"和"自己一次**还在飞**的 fork 请求"在记录里长得一模一样；在这里升级去抢保留名，
+  正是"一对两个 fork 项目"的唯一制造方式（第二个抢到保留名，第一个的谱系声明随后被拒，
+  留下一个**删不掉**的项目行——§9.8 什么都不会消失）。
+- **所以那条拒绝是永久的，而且用户没有出路**：slug 不可改——`UpdateSettingsInput`
+  （`internal/application/projects/settings.go:47-55`）只有 `Purpose`/`ActivityStatus`/`Visibility`，
+  `PATCH /projects/{projectId}` 改不了 slug，项目也不能删。**撞上就永远 fork 不了那一对。**
+
+**这条路有两个真实的入口**（这才是我今天决定改它的原因）：
+
+1. **同名父项目在两个组织里**：`projects_personal_slug_idx` 是
+   `ON projects (slug) WHERE organization_id IS NULL`（`00019:16`），**组织项目的 slug 只在组织内唯一**。
+   两个组织各有一个 `mof-curie` 是完全正常的；某个人先 fork 了 A 组织的、再 fork B 组织的，
+   第二个派生名同样是 `mof-curie-<他>` → 被**自己刚建的那个 fork** 挡住 → 永久拒。**这是正当用法。**
+2. **自己的项目恰好占了那个名字**：某人把自己一个项目取名成 `mof-curie-<自己的 handle>`，
+   再想 fork `mof-curie` → 永久拒。
+
+**决定：`forkSlug` 的主名**从 `<父 slug>-<handle>` **改成今天那个超长兜底的形状**
+——`forkSlugDigest(head, handle, forkPairDigest(parentID, actorID), "")`，
+即 fork 的 slug 一律由**这一对 (父, 人)** 派生并带它的 8 位摘要。保留名（`-2`）与那条拒绝**原样保留**，
+作为最后一道兜底。
+
+**为什么不是"撞了才升级到保留名"**（那个改法看起来更小）：它把上面那段注释里的
+**孤儿行**危险原样请回来了——"自己名下占着"和"自己在飞"在记录里分不开，分不开就不能升级。
+
+**为什么不是"保持现状、只把错误信息写清楚"**：入口 1 是正当用法，拒绝**永久且无补救**；
+把一条合法路径永久锁死，换来的是一个更好看的 URL，不值。
+
+**代价（记下来，这是有意的取舍）**：fork 项目的 **URL slug 里多一段 8 位十六进制摘要**
+（`mof-curie-alice-4f9a2b1c` 这种形状）。**显示名不变**（`forkName` 照旧用父项目名或调用方给的名字），
+所以用户在界面上看到的名字不受影响，变的是地址。
+
+**落在哪**：不单独返工 T0804（它的服务层已经过我独立复验，这是一条我自己的命名规则，不是它的缺陷），
+**并进 T0814**（fork 的 HTTP 面，同一个文件、同一个窗口），并给 T0814 加一条验收：
+**两个同名的父项目（分属两个组织）被同一个人分别 fork 时都要成功、且两个 fork 的 slug 不同**。
+**注意**：这条改的是 `forkSlug` 的主名，所以 T0804 自己那几条断言可读 slug 的测试
+（`internal/application/forks/service_test.go:333-334`、`:782`、`:792`）要一起改——
+测试跟着它断言的规则走，不是"改测试迁就实现"，规则本身变了这一条我会写在任务书里。
+
+## 剩余工作面的实况：短需求是常态，**不是**「没写任务书」（2026-09-19，当日已更正）
+
+**决定：撤回本节原先的结论。** 我原先写的是「瓶颈已从派工变成没人写任务书，空壳任务书不能派工」——
+**那个推论是错的**，当天就自查出来并改正。事实部分成立，推论部分作废。原文保留在下面（划掉的部分），
+以便以后能看到我是怎么错的。
+
+**事实（仍然成立，逐条回树核过）**：全部 136 个任务里已合并 90 个；剩下 46 个中
+**34 个在 `tasks/tasks.json` 里的需求文字不足 400 字**，且**没有** `tasks/packages/<TASK>.json` 暂存包。
+例如 T1203 的四条需求全文是「Docker production compose 或 k8s manifests」「secrets placeholders」
+「TLS/reverse proxy notes」「healthchecks」。T0608（1 条 92 字）、T0708（3 条各 19 字）同形。
+
+**~~这 34 个全部是 `v1_required`。所以「P5–P12 还没做完」的真实含义是「那些任务的规格还没写」，
+不是「工人还没跑」。按 §5「宁可停止也不能猜产品语义」，空壳任务书不能派工——派出去只会让工人替我发明产品规则。~~**
+
+**为什么错了（这是本节真正该记的东西）**：我拿「需求文字短」当成了「没写规格」的证据，
+但**从没拿它去比过已经成功的那些**。补比之后，两组的分布没有区别：
+
+| 门槛 | 已合并任务中文字短的 | 未合并任务中文字短的 |
+|---|---|---|
+| < 400 字 | **75 / 90** | 34 / 46 |
+| < 300 字 | **73 / 90** | 34 / 46 |
+
+**九十个已合并的任务里，七十五个的需求文字也是这么短。** 短句是**这个仓库的常态做法**，不是残缺。
+
+**决定性证据是下发物本身，不是统计**：T1003（「Web Research Inbox」，已合并）下发给工人的
+`prompt.md` 里 Requirements 一节全文是三行——「聚合 meaningful events」「read/unread」「deep links」；
+T0504（已合并）是「9种 relation」「scope/directness/inference/review」「version pin」。
+而且 `prompt.md` 的这节与 `tasks/tasks.json` **逐字一致**，说明这不是合并之后被缩写过的，
+**工人当时收到的就是这三行**，并且交付被验收合并。所以工人从来不是靠任务书把规格写全的——
+他靠的是 `docs/**`（规格、UI/UX、授权、测试策略全套都在仓库里）加上自查。
+**我把「任务书不够厚」当成了「规格不存在」，混淆了「指针」与「所指」。**
+
+**更正后的规则（以后照这条办）**：
+1. **短需求文字本身不构成拒绝派工的理由。** 只要工人能凭 `docs/**` 把这条需求解出来，就可以派。
+2. **该写详细任务书的判据是「规格里解不出来的陷阱」，不是「字数不够」。** 我写过的那些长任务书
+   （T0816 的三处口径互相抵消、T0901 的 visibility 只许照抄、T0807 返工信的时区抵消）都满足这条：
+   它们写的是**仓库里查不到、且猜错代价很大**的东西。
+3. **写了详细任务书也不等于可以省掉验收**：T0807 那份我写得够细，它的集成测试仍然只在 UTC 下红。
+   任务书能把工人引到正确的地方，**不能替代在真环境里跑一遍**。
+
+**仍未就绪的，是另一种情况（与字数无关）**：T0708 需要先有一次 L2 裁定（见本节后面第三段），
+T0608 的场景要走到「abort 一个对象」这一步（见下），这两个是**具体的、可指名的缺口**，
+不是「29 份任务书待写」。把它们数成「34 份待写」既夸大了工作量，也掩盖了真正缺的那两样东西。
+
+**另一件事：五个 `SPEC_BLOCKED` 到今天仍然成立，我逐条复核过**（三天前判的，期间合了不少东西，
+所以值得复核）。T0506 的两条事实断言今天仍然为真：`external_evidence_links` 全仓库 0 命中；
+`evidence_assertions`（`00007`）确实没有 external/internal 与 visibility 两列。
+它们需要的是**产品/科研语义**决定，不是工程决定——我不能自造。
+
+**第三个发现：T0708 不是「补写任务书」那么简单，它先要一次 L2 裁定。**
+`docs/11_RELEASE_ASSET_HUB.md:27` 把语义写死了（「Fork/Derive：创建新的 Asset/Object identity，保留 lineage」），
+但**没写从哪里发起**：`specs/api/openapi.yaml` 里没有资产级 fork/derive 端点（全文只有 0 处），
+`docs/42_PAGE_SPECS.md:19` 只把 lineage 列为**展示项**、不是动作（只有对象页 `:22` 有 fork 动作），
+而 `specs/schemas/research-asset-version.schema.json` 的字段是
+`asset_id / version / asset_type / origin_refs / rights / dependency_refs / creator_ids / integrity_hash`
+——**没有「派生自」这一位**。所以「扩展发布清单声明」与「新开端点」是两条真实的分岔，
+属 §5 的 L2（跨模块接口），必须由我先裁定并落 ADR，之后任务书才写得出来。
+
+**落地缺口的具体形状（T0708 真正要补的那一环，已核实）**：`asset_lineage`（`infra/migrations/00010_releases_assets.sql:49-54`）
+**表在、读路径在、测试在，但没有产品写入者** —— `tests/integration/asset_page_test.go:16` 与 `:635`
+逐字写着「asset_lineage has no writer」「asset_lineage and asset_dependencies have no product writer in V1」
+（后者半句已由 T0707 用 `internal/assets/usage.go` 补上，前者还没有）。这是 T0707 那件事的姊妹件。
+
+## 更正：T0602 的 SPEC_BLOCKED 判重了，真缺的只有两样（2026-09-19）
+
+**决定：撤回 2026-09-16 对 T0602 的 T0602 整条阻断判定，改为「拆分 + 只阻断一半」。**
+abort 那一半按已写死的规格派工（拆成 T0602a），reopen 那一半保持阻断并收窄成**一个** L3 问题（T0602b）。
+
+**起因**：我在核 T0608（"policy → reviewers → merge → release → 之后 abort 对象 → 旧 release 仍不可变"）
+为什么写不出任务书时，去查 abort 到底存不存在。查的过程中发现阻断理由站不住。
+
+**原判定逐字是**：「abort 要记的字段（reason code、human explanation、replacement ref）在库里无处可存；
+reopen 这条在契约、权限矩阵、审批规则三处全空。」**两句话各有一半是错的**，逐条对树核过：
+
+**（一）字段不该记在哪，不是没人规定——`docs/46_ABORT_RETENTION.md` 写得很清楚，而这份文档是
+2026-09-12 随初始提交进仓库的**（`git log -- docs/46_ABORT_RETENTION.md` → `fecf24d 2026-09-12`），
+**比我 9-16 的判定早四天**。它第 7 行逐字：「Abort 必须记录 actor、time、reason code、
+human explanation、replacement/superseding ref(optional)、review/approval if main object。」
+第 9 行还逐字写了流程：「main 中对象 Abort 必须 branch → PR → merge；不能在详情页直接一键修改 current main。」
+第 11 行：「Reopen 创建新 transition，保留历史 abort。」**判定当时漏翻了这份文档，这是我的失误。**
+
+**（二）「权限矩阵全空」也是错的——`internal/authz/matrix.go:121-129` 有 `ActionAbortMainObject` 整行**：
+维护者 `VerdictViaPR`、所有者 `VerdictViaPR`、匿名/非成员/viewer/contributor 全 `Deny`、
+Agent `VerdictProposalOnly`。`internal/authz/action.go:37-38` 的注释还逐字写着「aborts a
+main-branch object (**T0602**)」——**这一行就是为 T0602 留的**。它与 `docs/46:9` 的「必须走 PR」
+严格一致（ViaPR 而不是 Allow）。**但它是死行**：全仓库除了 `action.go`/`matrix.go` 的定义与
+`engine_test.go:63` 的单测，**没有任何调用者**——和 T0410 之前「建 PR 的路由」同一种形状：
+契约与权限都声明好了，接线没做。
+
+**（三）存储也不是从零**：`infra/migrations/00005_scientific_objects.sql:20` 的
+`scientific_object_versions.lifecycle_state` **已经带 `'aborted'` 与 `'reopened'`**（`CHECK` 里就有），
+而这张表是**追加式版本表**（每版带 `created_by`/`created_at`/`version_no`/`state_id`），
+`00014_append_only_enforcement.sql:9` 逐字写着「Corrections never mutate a row: they append a new
+one (abort/reopen, ...)」。所以 abort 的**动作、时刻、actor 三个字段存储现成**，
+缺的是 reason code / explanation / replacement 这三位放哪（`payload jsonb` 还是别的形状）——
+**这是 L1 工程决定，不是产品语义，归我定，不归 owner。**
+
+**（四）契约与工具表都已经声明好了**：`specs/api/openapi.yaml:210` 的
+`POST /projects/{projectId}/objects/{objectId}:abort-proposal`（摘要逐字「Propose abort for object;
+main objects require PR flow」）、`specs/mcp/tools.json:23` 的
+`object.abort_proposal(project_id, object_version_ref, reason_code, explanation)`。
+**路由没有实现**——`cmd/api/**` 里除了 `knowledgehttp/publish.go:33` 的一句注释提到这个工具名，零命中。
+
+**真正缺的只有两样，各自归属不同**：
+
+1. **reason code 的取值词表：全仓库不存在。** `docs/46:7` 与 `tools.json:23` 都要求这个字段，
+   但都没有列举取值。**我的读法（记录在此，可被推翻）**：`tools.json` 把它列为**调用方传入的参数**，
+   `docs/46` 要求的是「必须记录」而不是「必须取自闭集」——所以**按开放字符串落（校验非空与形状），
+   不自造词表**，并在代码注释里写明「V1 未闭集，取值来自调用方」。**这正是 §5「宁可停止也不能猜」。**
+   代价如实记下：没有闭集就无法按原因分类统计。若日后产品要闭集，是一次正常的收窄。
+2. **reopen 的权限：这是真的 L3，我不裁定。** `docs/43:10` 给了状态迁移
+   （「active → aborted → reopened → active」）、`docs/46:11` 给了语义，但**谁可以做这件事没有任何出处**：
+   `internal/authz/action.go` 的动作总表里**没有** reopen（`ActionAbortMainObject` 有、reopen 没有），
+   契约里也没有 reopen 路由（`openapi.yaml` 全文 0 命中）。**权限是 §5 明文列出的 L3。**
+   这是今天要交给 owner 的问题，**但我把它与 abort 切开，不让它拖住 abort。**
+
+**为什么按「拆分」而不是「整条解禁」**：`docs/31_MASTER_ACCEPTANCE.md:9` 有一条逐字
+「**Abort/Reopen 保留完整历史。**」——**T0602 压在主验收的必经路上**：它被 T0607
+（活动时间线要显示 abort/reopen）正式依赖着。**T0608 不在其列——它的 DAG 依赖只有 T0606 与 T0604**，
+但它的场景里有「之后 abort 对象」这一步，所以它**用得到**这条能力（不是被 DAG 挡住）。
+让它整条停在 L3 上，等于主验收的这条勾永远打不了；拆开之后，**abort 那一半今天就能派工**，
+reopen 那一半等一个问题。
+
+**落地方式**：新建 T0602a/T0602b 需要改 `tasks/tasks.json`，而那会移动规格指纹
+（`tasks/tasks.json` 是指纹输入之一），**会红掉 main 与所有在飞任务的 G2**。
+所以按既有规矩**先写进 `tasks/packages/` 暂存，等安静窗口（无在飞任务）再落地**，不在 T0410 在飞时改台账。
+
+## 复核：五个 SPEC_BLOCKED 里，两个判宽了、三个成立（2026-09-19）
+
+**决定：用查 T0602 时的同一把尺子，把剩下四个 SPEC_BLOCKED 全部重核一遍，并按结果分别处理。**
+
+**为什么要重核**：T0602 那次判定漏掉了 `docs/46_ABORT_RETENTION.md`（它自 2026-09-12 就在仓库里），
+而我 9-16 之后的所谓"复核"只在**判定当时点名的那份文档**里找答案。**今天证明了那个做法不够**——
+要查的是**整个仓库**，不是判定时想到的那个文件。于是对四个逐一重查。
+
+**尺子是这一条**：判定一个阻断是 L3，看的不是"库里有没有现成的表/列"，而是
+**「规格有没有点名该记什么、该由谁决定」**。点了名 → 存储形状是 L1（我的事）；没点名 →
+才是 L3。这条尺子是从 T0602 的错里量出来的。
+
+| 任务 | 记录的理由 | 重核结果 | 处置 |
+|---|---|---|---|
+| T0602 abort | 字段无处可存 + 权限矩阵全空 | **两半都错**：`docs/46:7` 点名了字段、`matrix.go:121` 与 CSV:14 都有权限行 | **解禁**，拆出 T0602 派工 |
+| T0602 reopen | 「契约、权限矩阵、审批规则三处全空」 | **对了一半**：语义/事件名/存储位都有，**只有权限行真的没有** | 拆成 T0610，缩到一行权限的 L3 |
+| T0509 文献位置标识 | 「位置标识模型全仓库不存在」 | **判宽了**：`docs/10:37` 与 `docs/19:19` **点名了种类**（figure/table/results assertion/supplementary dataset/method）**与要保留的三样**（source pointer、snapshot/excerpt metadata、human confirmation）。缺的是**标识的存储形状** | **降级为「要写任务书」**，不再是 L3 |
+| T0506 证据图投影 | 假设的证据集合怎么算（并集 vs 直挂）规格没写 | **成立**：全仓库找不到汇总规则（`docs/03:63` 只描述关系，不定汇总）。这是**改变投影科学含义**的语义规则 | L3 保持 |
+| T0706 资产元数据修订 | 修订长什么样没先例 + 谁有权改没定义 + 字段是开放集合 | **成立**：`specs/policies/permissions-matrix.csv` 与 `internal/authz/action.go` 里**都没有**修订相关的行（asset 相关的动作一个都没有），未登记动作默认拒绝——所以今天没人能改 | L3 保持（权限那一条即可定案） |
+| T1106 API/Upload 加固 | 限流阈值、CSP 策略、地址名单、短 TTL 全无 | **成立**：这些是安全策略取值，规格里没有数字 | L3 保持 |
+
+**T0509 的更正要有分寸**：我把它从 L3 降下来，**不是**说它今天就能派。它的前提是先有一份任务书
+把 `docs/10:37` 的三样与 `docs/19:19` 的种类钉住，并明确「标识形状是 L1」。**同时它和 T0806
+都动 `evidence_assertions` 这张表**（T0806 加删除防护与 review_state 那条轴），所以两者**不能并行**。
+排期上 T0509 在 T0806 之后，避免两条迁移改同一张表。
+
+**这一轮的净收益**：主验收的「Abort/Reopen 保留完整历史」（`docs/31:9`）从**整条停住**变成
+**abort 可派工 + reopen 等一行权限**；T0509 从"等产品决策"变成"等任务书"。
+**没有降低任何 Gate 标准**——重核只改了「这条是工程问题还是产品问题」的分类，没有放宽任何验收。
+
+## T0807 独立评审的裁定与逐条处置（2026-09-19）
+
+**裁定：`approve`**（0 条 blocking、1 条 major、3 条 minor、3 条 nit、8 条 risks）。
+评审由独立 Review Worker 做（无写权限、无 Git 控制权），它**复现**了证据而不是采信 RESULT：
+三个时区各 `-count=2` 跑账本测试、`TZ=UTC` 与 `TZ=Asia/Shanghai` 各跑整套集成测试（199s / 208s）、
+gofmt/go vet 干净、sqlc 漂移检查干净、**六项变异检验**（重新弄坏夹具、日期取 now、via 默认成 'api'、
+删掉部分唯一索引、丢弃未映射计数、删掉 RoleReproduction）——每一项都让**声称盯住它的那条测试**转红。
+
+**注意这次评审为什么必须重做**：我先前的验收被 `rddev` 拒了一次，理由逐字是
+「the review verdict is older than the latest collect — it judged a different tree」。
+返工改了 diff，旧裁定就不再覆盖它。**这不是麻烦，是闸门在做它该做的事**，
+我没有绕过它（绕过就等于拿旧结论给新代码背书）。重发的评审基线是 `21f1c37`，
+即**只审返工这一轮**（+72/−32、一个测试文件），因为前一部分已在基线里、由那次的 collect 验过。
+
+**逐条处置（按我立的规矩：假覆盖/假证据→驳回；机制说错但防护还在→记录后合并）**：
+
+1. **major｜日期口径横跨两个子系统**（`ledger_store.go:307` 按事件时刻的 UTC 日历日解析组织，
+   而 `internal/application/orgs` 用**本地**日历日给成员关系打戳；UTC+8 主机上每天有 8 小时不一致）。
+   **处置：不动 T0807**——评审自己就写明「Supervisor 2026-09-16 的裁定记录这不是 T0807 的违约，
+   对账已另立 T0816」。T0816 的任务书在暂存区里等着落地。**这正是那件工作的用途**。
+2. **minor｜`00087` 的注释里有一句失实**（说三个 store「with no outbox row at all」）。
+   **我自己核过才记**：`release_store.go:363-376`、`asset_publish_store.go:733`、
+   `knowledge_publish_store.go:534` 三处都在 `RecordResearchEvent` 之后**同事务**调了
+   `EnqueueOutboxEvent`——**评审说得对，那句话是错的**。FK 的选择本身是对的，
+   挡住重复行的是投影里 `actor_id IS NOT NULL` 那个谓词（outbox 那条没有 actor）。
+   **处置：记录并合并**，注释的更正并入下一次 L0 批次（我已经核过迁移工具**不校验校验和**、
+   只按版本号记录，所以改注释对已迁移的库无副作用，对新库才是正确的）。
+3. **minor｜`ledger.go:223` 有一行永远打不中的映射**（`evidence_assertion` 用的是下划线，
+   而对象类型 token 必须是 `^[a-z][a-z0-9_]*$` 且要能解析到注册表里带**连字符**的
+   `evidence-assertion.schema.json`）。评审的判断是「死行读起来像有一层覆盖，而实际没有」。
+   **处置：并入 T0813**（它本来就是"把账本接上生产"、要动同一个包），我会把这条加进它的任务书。
+4. **minor｜RESULT.json 举例用了不存在的事件名**（`state.branch_created`、`fork.created`、`issue.*`）。
+   **处置：记录，不改代码**——它装饰的那条主张（未映射的类型逐个计数并记日志、从不丢弃）是**准确且有测试的**，
+   失实的只是举例清单。属于工人自己的记录文档，不值得为它再走一轮。
+5. **minor｜RESULT.json 没有交代 `docs/13 §1` 的第九类「maintained project」**。
+   **处置：并入 T0813 的任务书**要求补上（`internal/contribution/roles.go:77-79` 里
+   `RoleProjectMaintenance` 是个没人用的常量，读者一定会问）。
+6、7、8. **三条 nit**（`ProjectEvent` 把两种不同的 `ok=false` 混成一句话；
+   `RoleVocabularyError` 导出了却没有调用者；`ProjectBatch` 的 `withTx` 在调用方 ctx 上回滚，
+   而同仓库既有约定是用 `context.WithoutCancel`）。**处置：并入 T0813**——
+   评审自己也说了其中一条「should adopt the events package's convention when the projector is wired up (T0813)」。
+
+**评审的 8 条 risks 里，有一条我要单独拎出来交给 owner（它可能是 L3）**：
+第 7 条——**映射表里那些判断（protocol → Method Development；material/sample → Experimental Investigation；
+claim/finding → Analysis 等）是「科研语义」判断，而没有任何高于 L1 的人裁定过它们**，
+评审逐字写着「changing them changes what the ledger says about people」。
+**我不自行裁定**：按 §5，科研语义属 L3。**同时如实记下它的紧迫性很低**：
+投影器**还没接上生产**（`cmd/worker` 的接线是 T0813），所以今天没有任何用户可见的结论依赖它，
+**在 T0813 落地之前改这张表是零代价的**。这是要问 owner 的那些问题里最不急的一个。
+
+**没有为了变绿动过任何东西**：返工那一轮只改测试夹具，断言行逐字节未动，
+评审逐字确认「the assertion lines are byte-identical, and no production/schema/CI file is in this round's diff」。
+
+## 更正：9-19 那次「五个 SPEC_BLOCKED 复核」自己犯了同一类错（2026-09-19 当日更正）
+
+**结论先写**：那张表里 **T0506 与 T0509 两行是错的**。它们不是「等定」，也**不是「要写任务书」**——
+**任务书 2026-09-18 就写完并落地了**，裁定一~五都在 `tasks/tasks.json` 的
+`supervisor_scope_narrowing` 里，包文件也还在（`tasks/packages/T0506.json`、`T0509.json`，
+各 15KB，mtime 2026-09-18 16:15 / 16:09）。**它们卡住的唯一原因是 `tasks/task_status.json`
+里那行 `blocked` 没人翻过来。**
+
+**我怎么又犯的**：9-19 复核时我的取数动作是「读 `task_status.json` 的 `notes`（原始阻塞理由）→
+回树找证据」。**这个动作从一开始就查不到「我自己后来已经做过裁定」这件事**——
+裁定写在 `tasks.json` 的 `supervisor_scope_narrowing` 里，不在 `notes` 里。
+于是我把两句本来已经作废的旧理由（「位置标识模型不存在」「假设的证据集合怎么算」）当成了未决问题，
+又推了一遍，还推出一个**更保守**的结论（T0509「要写任务书」、T0506「L3 保持」）。
+**这跟 T0602 那次是同一个毛病**：只看判定当时点名的那一处，不看仓库当前的样子。
+上次我把它归因成「漏翻了 docs/46」，**归错了**——真正的原因是**取数动作只覆盖了一个字段**。
+这一次的教训更硬：**判定一个任务是「等什么」之前，先读它自己的 `tasks.json` 条目**。
+
+**逐条更正**：
+
+| 任务 | 9-19 我写的 | 事实（2026-09-18 的记录） | 现在该做什么 |
+|---|---|---|---|
+| T0509 | 「降级为『要写任务书』」 | 书 9-18 已落地，裁定一~五俱全 | **翻 `ready`，进派工池** |
+| T0506 | 「L3 保持」 | 9-18 已撤销阻塞并裁定：假设页分两段、**不合并、不计分**；不合并的依据是 requirement 用的词是 **grouping 不是 union**，所以「没有汇总规则」不是缺口 | **翻 `ready`，进派工池** |
+
+**T0506 那条「L3 保持」为什么是错的**：L3 的定义是「规格没写、要 owner 定产品/科研语义」。
+而这里的 resolved 方式是**把 requirement 读对**（grouping ≠ union），并**拒绝**发明一个假设级合并视图——
+拒绝发明不等于需要 owner 裁决。裁定里也写死了将来真要做合并视图该走什么路（独立任务、独立裁定）。
+
+**这一轮的净收益（比上一轮多两个可派工任务）**：T0506、T0509 从「静止」变成「可派工」。
+**没有降低任何 Gate 标准**：两本书都是 9-18 写的，这次只是把状态翻过来，**一个字都没改**。
+
+**派工次序上仍守 9-18 记的那条**：T0506/T0509 与 T0806 **都动 `evidence_assertions`**，
+**不并行**；T0806 在前。
+
+## 2026-09-19 落 fork 的对外契约：两条端点由 Supervisor 亲手写，实现照契约接线
+
+**为什么是我写。** `CLAUDE.md` §7 是 OpenAPI-first，§8.1 规定 `specs/**` 是 Supervisor-only；
+而 fork 这条产品路径在契约里此前**一个端点都没有**（`grep -rln fork specs/` 只命中
+page-inventory.csv / permissions-matrix.csv / postgres.sql，契约文件零命中）。
+T0804 已经把服务层做完、把执行侧接上（`cmd/api/main.go` 的 `ForkGate`、00086 的两个触发器），
+缺的是「发起」这一步和它的接口。契约我先落地，T0814 照它接线——两边各写一套是契约与实现
+分家的开始。主线要求来自 `docs/31_MASTER_ACCEPTANCE.md:17`「Public Project 外部用户可 fork/contribute」。
+
+**新增**：`POST /projects/{projectId}/forks`（发起 fork；201 新建 / 200 已存在 /
+400 / 401 / 403 / 404 / 409 / 503）。
+**扩写**：`POST /projects/{projectId}/pull-requests`——此前只有一行 summary、连请求体都没有；
+现在补上请求体与 400/401/403/404/409/503。外部贡献走的就是这条路，不是新开一条。
+
+**写之前我逐条核过实现，不是凭记忆**：
+
+- 请求字段来自 `internal/application/forks/service.go` 的 `ForkRequest`（`name` / `purpose` /
+  `visibility` / `source_branch_id` / `branch_name`）与 `OpenPRRequest`；
+- 403 是**可达的**、不是凑数：`authorizeCreateBranch`（`:578`）对非成员的
+  `external_fork_only` 只在父项目是 public 时放行，能读但不是 public 的项目答 403；
+  读不到的私有项目在更早的读门答 404（存在性隐藏），两条不重不漏；
+- `authorizeOpenPR`（`:612`）对非成员只认「本人 fork 的、属于本项目的」源分支，
+  父项目自己的线 / 别人的 fork / 无关项目**同一个答案**（`forks.ErrForbidden`），
+  所以 403 那句话不泄露任何一个项目的存在；
+- **两道数据库门都报 P0001，文本可分辨**：`00042` 的 `pull_request_semantic_gate` 是
+  `pull request cannot be opened from branch …`，`00086` 的 `pull_request_fork_gate` 是
+  `pull request on project … cannot take its source branch from project …`。
+
+**L1 决策（我定并记档）：为 00042 在开 PR 处的拒绝起一个线码 `BRANCH_UNSTRUCTURED_CHANGES`（409）。**
+其余状态码都**沿用仓库里已存在的名字**（`VALIDATION_FAILED`、`AUTH_FORBIDDEN`、
+`BRANCH_NOT_FOUND`、`BRANCH_NOT_ACTIVE`、`BRANCH_HEAD_MISSING`、`SERVICE_UNAVAILABLE`），
+只有 409 那一条是新名字。**为什么不复用 `BRANCH_STATE_CONFLICT`**：那是
+`internal/application/states/errors.go:132` 给 CAS 败者起的名字，借它来报语义门会让
+「一个结果一个稳定线码」这条原则失效——以后没人分得清 409 说的是"并发抢输了"还是
+"你的分支里有解析不了的内容"。`docs/45` 的错误码清单开头写明是**示例**，起名的边界是
+「一致、不重叠」，不是「不许新增」。
+
+**代价与落地**：判准这条要求 T0814 能分辨同一个 SQLSTATE 的两道门，且
+`infra/migrations/**` 不在它范围内（不许改触发器加标记）——所以契约里写明靠 RAISE 文本分辨、
+**判不准一律按 503 fail closed，不许猜成 409**。今天 `pullrequests.Service.Create` 把整条链
+包成 `ErrStore`，HTTP 只会答 503，对用户就是「服务不可用」而不是「你的分支里有解析不了的内容」，
+这条要修成契约里的答案（T0814 requirement 已写）。
+
+
+## T0410 收尾时查清的四件事（2026-09-19）
+
+### 一、T0410 必须先 rebaseline 再验收——它的分支基底早于 T0807
+
+**这是查出来的，不是推断的。** T0410 的 worktree HEAD 停在 `6445c7f`（T0804 的合并点，
+05:02），而 T0807 在 **06:57** 合并为 `66c5879`——`git merge-base --is-ancestor 66c5879 HEAD`
+返回否，**T0410 不含 T0807**。两份改动都要写 `specs/SPEC_VERSION.json` 与
+`specs/database/postgres.sql`，撞在一起。
+
+**我做了试算而不是推理**：
+
+- **非生成文件的重叠只有一处**：`tests/integration/migration_test.go`（T0807 改
+  `contribution_events` / `research_events` 两张表的期望列与索引，T0410 改 `pull_requests`
+  的期望列与索引表）。用 `git merge-file` 做三方合并，**退出码 0，零冲突块**——
+  两侧改的是同一文件的不同位置。**所以这一处不需要人插手**。
+- **生成物那几份不能靠文本合并**：`specs/orchestrator/derived-artifacts.json` 自己逐字写了理由
+  ——「a task and main both regenerate it, and their two copies differ on every line the other one
+  added, so a textual apply refuses on context alone even when the changes are nowhere near each
+  other」。事实吻合：T0807 改了 `internal/persistence/sqlc/models.go` 与 `events_audit.sql.go`，
+  T0410 改了 `sqlc/models.go`、`issues_prs.sql.go`、`querier.go`。
+
+**结论**：验收之前跑 `rddev rebaseline T0410`——它按**重新生成**处理生成物，不按文本合并，
+并在新基底上让工人返工、重跑 G1。**这是「迁移链一次只走一环」在这次的具体形态**：
+T0807 一合并，T0410 的在飞组合就作废了。不是 T0410 的错，也不是 T0807 的错，是链的规矩。
+
+**次序上的一条新账**：安静窗口（落地任务书）**必须排在 rebaseline 之前**。落地会改
+`tasks/tasks.json`（规格指纹的输入），任何在它之前做的 rebaseline 都会被它**再作废一次**。
+**rebaseline 只做一次，落在最终的 main 上。** 这一条是这次才显形的——上一轮我以为
+「不碰 `specs/` 与迁移的任务可以随便先合」，那只对**合并**成立；对**在飞的其他任务**
+而言，任何一次落地都会推开指纹，所以窗口的位置只能有一个：**在所有在飞任务都 rebaseline 之前**。
+
+### 二、T0410 的浏览器套件**不做** `g3_jobs`，两条路我查了都不通
+
+T0410 的 RESULT `follow_up_issues` #3 把「CI 接线」交回给我。查完之后我**不接**，理由可查：
+
+1. **不能做 CI job**：CI 只有 7 条，`internal/devorchestrator/gate_spec_test.go:30` 硬写死
+   `if len(ci) != 7 { t.Fatalf(...) }`；而且 CI 里没有 Gitea（`gitea-real-services` 从来不是
+   CI job），套件跑不起来。
+2. **不能做 `g3_jobs`**：`rddev gate run G3` 在**只含 Git 跟踪文件的全新 main worktree** 里跑
+   ——`internal/devorchestrator/gate_run.go:199` 逐字「A gate step runs in the integration tree
+   — `git worktree add <dir> main` plus the task's change — so it holds exactly what Git tracks」。
+   而 `tests/e2e-pr-flows/run.sh` 与它的三个同类（`tests/web-smoke/`、`tests/e2e-pulls/`、
+   `tests/e2e-anonymous/`）都直接 `pnpm run build`，**假定这台机器上 `apps/web/node_modules`
+   已经装好**——它们自己谁都不装。在干净树里跑必然红：**把它挂上去等于我自己制造一个假红。**
+3. **同类套件一条都没接过线**：`grep -rn web-smoke` 在 CI、`gates.json`、`Makefile`、`scripts/`
+   里命中 **0**。现存 96 条 `rsg-real-services`、50 条 `gitea-real-services`、30 条
+   `auth-real-services` **全是 Go 套件，没有一条是浏览器套件**。这是仓库既有的分工。
+
+**所以 T0410 的浏览器证据由我**在它的 worktree 里亲手跑并记录（那里 `node_modules` 与
+Chromium 缓存都在），`g3_jobs` 保持 `["rsg-real-services","gitea-real-services"]`——
+它们覆盖这条路径的 Go/HTTP 面。**把这条写下来而不是默默不接**，是因为在台账上
+「没接线」与「接错了线」长得一模一样。
+
+### 三、更正：T0410 的 RESULT 里有一句是错的（记录，不打回）
+
+T0410 的 `follow_up_issues` #1 把 `RequestReview` 描述成「它只把一个『未开始』的 PR 置为
+『需要 review』，**不写任何状态列**」。**这是错的**：`internal/application/pullrequests/service.go:76`
+的 `RequestReview` 直接 `return s.setState(ctx, projectID, number, domain.PullRequestStateReviewRequired)`，
+而 `setState` 末尾就是 `s.repo.SetPullRequestState(...)`——**它就是写状态列的**。
+
+**为什么记录而不打回**（沿用「reject vs record」那条界线）：这是一个**机制描述措辞**，
+而它要保护的东西**完好无损**——真正要删的是主树
+`tests/integration/merge_governance_e2e_test.go:439` 与 `:442` 那两处直调 `SetState`
+（`review_required → approved → merge_ready`）抄近路，T0410 确实删了，而且有 MUTATION CHECK
+证明删得对（删掉之后断言转红）。**错的是措辞，不是行为。** 但措辞会流传，所以 T0411 的任务书里
+我特意写了一句「既有材料里有一处把它描述成『不写任何状态列』，那是错的——以代码为准」，
+让后来者不会照着错话往下推。
+
+### 四、新立 T0411：「把提案送进评审」这一步没有门（等一行 L3 裁定）
+
+**这是 T0410 照出来的真缺口，我逐条复核后确认成立。** PR 的对外面只有五条路由
+（列表 / 建 / diff / 提交评审 / `:merge`），**中间「送进评审」没有门**。而：
+
+- 状态机**写在规格里**：`docs/43_STATE_MACHINES.md:13` 逐字「open → review_required →
+  changes_requested/approved → merge_ready → merged；也可 closed/aborted。」
+- 数据库守卫**放行了两条边**：`infra/migrations/00051_pull_request_state_and_fixity.sql:88`
+  的 `open → review_required`、`:90` 的 `changes_requested → review_required`
+  （后者是「评审人提了意见、作者改完再送一次」）。
+- 服务层**已实现**：`internal/application/pullrequests/service.go:76` 的 `RequestReview`。
+- **但它没有任何生产调用者**：`grep -rn RequestReview internal/ cmd/` 去掉测试后只命中它自己的
+  定义；`specs/api/openapi.yaml` 里 `request-review` **零命中**。
+
+**后果**：经产品建出的 PR 停在 `'open'`（`infra/migrations/00009_issues_pull_requests.sql:26`
+的 `DEFAULT 'open'`），而守卫只允许 `'open'` 去 `review_required|closed|aborted`，
+只有 `review_required` 才允许去 `approved|merge_ready`——**一条经产品建的 PR 永远无法被评审，
+因而永远无法合并**。
+
+**为什么停而不是自己裁**：这一步要一行权限（`specs/policies/permissions-matrix.csv` 15 行里
+没有 `request_review`，`internal/authz/action.go` 没有对应动作，`internal/authz/engine.go`
+对未登记动作**默认拒绝**），而「权限」是 §5 明文的 L3。**其中非成员那一格直接决定 T0804
+外部贡献流程能不能走通**（`open_pr` 那一行是 `allow_from_fork`，非成员经 fork 开的 PR 也必须
+能被送审），这不是我能替 owner 定的产品后果。三个形状与代价已写进任务书，**我倾向形状 A
+（复用 `open_pr`：能开这个提案的人本来就能把它交出去评审，且不授予任何新权力），但不下结论。**
+
+## 2026-09-19 安全扫描照出一处：fork 的 `visibility` 参数是一条绕过发布权的路（等一行 L3 裁定）
+
+**扫描器指的文件是我今天刚写进 `specs/api/openapi.yaml` 的那一段**（fork 建单的请求体，
+`:86-92`）。它说 `enum: [public, private]` 让一次 fork 就能把内容送成公开，
+建议要么删掉 `public`、要么规定「父项目非公开时 fork 必须 private」。
+**我没有照它改，先回仓库查证。查证之后它成立，但它的处置属 L3，所以我只做故障关闭、不下规矩。**
+
+### 一、查证：怎么走通，谁走不通
+
+- fork 的可见性**原样放行**：`internal/application/forks/service.go:821` 的 `forkVisibility`
+  只做一件事——`v == VisibilityPublic` 就返回 public，其余一律 private。全仓
+  `grep -rn VisibilityPublic internal/application/forks/` **没有第二处**与父项目可见性有关的判断。
+- 谁能 fork 一个**非公开**项目？`authorizeCreateBranch`（`service.go:578`）走的
+  `create_branch` 单元格：**非成员是 `external_fork_only`，并且 `service.go:593` 要求父项目必须
+  public**，所以非成员根本够不到私有父项目（不可读的父项目更早被返回 404）。
+  **能对私有父项目发起 fork 的，只有该项目的成员。**
+- 成员里的谁？矩阵 `create_branch` 那一行是 `deny,external_fork_only,deny,allow,allow,allow`——
+  **viewer 是 deny，contributor 起是 allow**。
+- 而 `publish_private_to_public` 那一行是 `deny,deny,deny,deny,conditional,allow,deny`——
+  **viewer deny、contributor deny、maintainer conditional、owner allow**。
+
+**于是**：一个私有项目的 **contributor**，在 `publish_private_to_public` 上被明确拒绝，
+却可以在 fork 请求里填 `visibility: "public"`，把一份**带着父项目内容拷贝**的新项目
+（openapi 那条 201 逐字：`the fork project, its branch, the content copy, and one lineage row`）
+直接开成公开。**同一件事，一个门拒绝、另一个门放行。**
+
+### 二、但另一读也站得住——所以它不是我能定的
+
+反过来说：那个 fork 项目**是调用者自己的项目**（openapi 那条描述逐字：「the fork project is
+the caller's personal project, so it grants no access to the parent and needs none」），
+而 `create_project` 那一行对任何已认证用户都是 allow——**任何人都可以新建一个公开项目、
+把内容贴进去**。按这一读，`publish_private_to_public` 管的是**改变那个私有项目自身的可见性**，
+不是「不得把读到的东西复制到自己名下的公开项目」，那么 fork 填 public 只是同一件本就允许的事
+少走几步。
+
+**两读的后果天差地别**：前一读下这是个越权（贡献者绕过了 owner 的发布权），后一读下这是
+既有的开放面。而「谁能把私有科研内容变成公开」正是 CLAUDE.md §5 明文的 **L3（安全/权限/隐私）**，
+§9 不变量 6「Publish controls visibility」也只说发布管可见性、没说 fork 算不算发布。
+**所以我停在这里：不删 `public`、不改服务层、不发明规则。**
+
+### 三、我今天做的（故障关闭，不是裁断）
+
+**契约窄于实现，并且把理由写在契约里**：`specs/api/openapi.yaml` 的 `visibility` 字段现在明写
+「父项目非 public 时不得建为 public」，并点名这是**待裁的开放问题**、以及一旦裁定要改哪里。
+配套在 403 里也补了一句。
+
+**为什么是「窄」而不是「照实描述」**：照实描述等于用沉默把问题定了——T0814 正是照这份契约
+接线，契约不说，工人就会把 `public` 一路接出去，问题在没人注意的时候变成既成事实
+（「没接线」与「接错了线」在台账上长得一样，这条我记过不只一次）。**窄是默认拒绝，
+不是新规矩**：仓库自己就是这么做的——`internal/authz/engine.go` 对未登记动作一律拒绝，
+`forkVisibility` 的注释也自称 fail closed。**待裁期间不新增能力**，是既有的默认，
+不是替 owner 做的决定。
+
+**为什么不顺手改服务层**：那是已合并的产品代码（T0804，`6445c7f`），
+改它就是**用代码替 owner 把 L3 定了**，而且没有任务包、没有 Gate、没有评审。
+更重要的是**今天这条路根本走不到**：`forks.Service` 没有生产入口，HTTP 面正是 T0814
+要建的东西，而 T0814 还是 `todo`。**先记在案、把门留在关的位置，等一行裁定，
+比抢着改代码对**——改早了要么白改，要么把错的规矩固化进契约。
+
+### 四、要 owner 裁的那一行
+
+**一个私有项目的 contributor，能不能通过 fork 把它内容的拷贝开成公开？**
+- 答「不能」→ 服务层补一条与父项目可见性挂钩的判断（`forkVisibility` 之外的第二处判断），
+  契约里那句「窄」就变成正式规则，`visibility: public` 只在父项目 public 时受理；
+- 答「能」→ 契约恢复照实描述，并把它写成一条记录在案的开放面（谁都能复制到自己名下的公开项目），
+  同时 `publish_private_to_public` 的 contributor=deny 需要一句解释，免得后来者以为那是漏洞。
+
+**在这行字给出之前，T0814 按现在的契约接线（父项目非 public 时拒 public），不接 `public` 那条路。**

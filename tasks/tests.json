@@ -1600,6 +1600,86 @@
       "status": "not_run",
       "last_run": null,
       "evidence": null
+    },
+    {
+      "id": "T0814-TEST-01",
+      "task_id": "T0814",
+      "name": "external fork http e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0814-TEST-02",
+      "task_id": "T0814",
+      "name": "fork propose authorization e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0815-TEST-01",
+      "task_id": "T0815",
+      "name": "ci migration integration timing",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0816-TEST-01",
+      "task_id": "T0816",
+      "name": "affiliation date convention agreement (projection / stamping / judging read one definition)",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0816-TEST-02",
+      "task_id": "T0816",
+      "name": "utc-vs-local calendar day boundary resolves to the joined organization",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0816-TEST-03",
+      "task_id": "T0816",
+      "name": "the whole integration suite is green under both TZ=UTC and TZ=Asia/Shanghai",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0610-TEST-01",
+      "task_id": "T0610",
+      "name": "reopen transition",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0411-TEST-01",
+      "task_id": "T0411",
+      "name": "request review route",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
     }
   ]
 }

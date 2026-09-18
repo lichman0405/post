@@ -944,6 +944,34 @@
         "rsg-real-services",
         "gitea-real-services"
       ]
+    },
+    "T0814": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0815": {
+      "g3_jobs": [
+        "migration-integration"
+      ]
+    },
+    "T0816": {
+      "g3_jobs": [
+        "rsg-real-services"
+      ]
+    },
+    "T0610": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
+    "T0411": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
     }
   }
 }

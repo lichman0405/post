@@ -3669,13 +3669,31 @@
       ]
     },
     "T0410": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-18T22:05:43Z",
+      "worker_run_id": "run-1ee271260132aaeb",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-18T22:05:36Z",
+          "run_id": "run-55f5679656979ae6"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-18T22:05:43Z",
+          "run_id": "run-1ee271260132aaeb",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T23:01:28Z",
+          "run_id": "run-95673aab0b45111a",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T0501": {
       "status": "merged",
@@ -4115,13 +4133,8 @@
       ]
     },
     "T0506": {
-      "status": "blocked",
-      "started_at": null,
-      "completed_at": null,
+      "status": "ready",
       "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：一个假设的证据集合怎么算——是它下面各主张证据的并集，还是直接挂在假设上的那些——规格没写（docs/08_SCIENTIFIC_OBJECTS.md:17 只说主张与假设有历史关系，无汇总规则）。另：docs/21_DATA_MODEL.md:24 点名的 external_evidence_links 表全仓库不存在；docs/10_EVIDENCE_PROVENANCE.md:13 要求的 external/internal 与 visibility 两列在 evidence_assertions 表里也没有。",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null,
       "history": [
         {
           "from": "todo",
@@ -4129,6 +4142,12 @@
           "at": "2026-09-16T00:08:07Z",
           "run_id": "supervisor-manual",
           "reason": "SPEC_BLOCKED：见 issue #251"
+        },
+        {
+          "from": "blocked",
+          "to": "ready",
+          "at": "2026-09-18T23:03:49Z",
+          "run_id": "run-b472f870ce8d6594"
         }
       ]
     },
@@ -4241,13 +4260,8 @@
       ]
     },
     "T0509": {
-      "status": "blocked",
-      "started_at": null,
-      "completed_at": null,
+      "status": "ready",
       "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：文献里「具体位置」（图/表/小节）用什么标识——规格要求定位到具体 evidence unit（docs/10:37、docs/19:19），但位置标识模型全仓库不存在。两个前置 T0508/T0504 均已合并。",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null,
       "history": [
         {
           "from": "todo",
@@ -4255,6 +4269,12 @@
           "at": "2026-09-16T00:08:07Z",
           "run_id": "supervisor-manual",
           "reason": "SPEC_BLOCKED：见 issue #252"
+        },
+        {
+          "from": "blocked",
+          "to": "ready",
+          "at": "2026-09-18T23:03:49Z",
+          "run_id": "run-b6d1d9dbfe945320"
         }
       ]
     },
@@ -5823,10 +5843,12 @@
       ]
     },
     "T0804": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-18T19:41:46Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：requirements 第 4 条逐字写着 fork 导入的 state 的 semantic completeness 派生「按 issue #189 的裁定执行……不得自行发明」，而 #189 仍 OPEN。",
       "worker_run_id": "run-8e917f5598f31d0c",
+      "accepted_by_supervisor_at": "2026-09-18T20:35:11Z",
+      "merged_at": "2026-09-18T21:02:29Z",
       "rejection_reason": "# T0804 返工（第五封）：独立评审挑出一条真缺陷——导入的基线判定让不可解析的内容洗白了\n\n## 零、先说清楚这一轮的定性，以及你的处境\n\n这一封和第四封**不是同一回事**，但性质一样：都是\"交付里有真缺陷被独立评审挑出来，我自己复现过\"。\n\n- **第四封**（F1/F2）：缺陷在 `internal/application/forks/service.go` 的命名/幂等路径。你修好了，\n  **我用自己写的探针跑了 896 组组合，0 违规**（修之前是 68/72/75），G2/G3 全过。\n- **这一封**：缺陷在 `internal/gitprovider/forkimport.go` + `internal/gitprovider/push_ingestion.go`\n  的 `IngestCopy`。**这两个文件此前没有任何一次评审碰过**——第一轮独立评审在那两个文件上\n  判的是 approve，点名要求修的两处，这次评审明确写\"站得住\"。\n\n按 §11 的字面，第二次缺陷性不通过就该 `respawn`（销毁、重置 worktree、从头重做）。**我这次不用它**，\n理由和上次用同一条先例（`tasks/decisions.md` 的 L1-20260912-41）一致：§11 那条规则针对的是\n**同一个 Worker 在同一处反复失败**、context 已经污染的情形。你这次是**在一个从没被要求改过的文件里、\n被一个此前没看过它的评审第一次看出问题**，而你已经通过了你被衡量的每一个 Gate\n（collect / G2 / G3 / 我的独立复验）。用一个可能更差的重写去替换一个已被验证、只有一个坏点的实现，\n不是更安全，是更大的风险。\n\n**但界线就画在这里，我写下来以便被追责：** 下一次再因为**真缺陷**被拒，我执行\n`rddev worker respawn` —— 那时\"同一 Worker 反复失败\"才是真的，§11 就适用，我不会再讲价钱。\n所以这一轮请一次做对，包括下面要求的**变异证据**（证明你补的测试真的能失败）。\n\n---\n\n## 一、这条缺陷是真的，我自己复现过（不是照抄评审）\n\n证据链我从头到尾走了一遍，四段：\n\n**（1）这条路径是你这次新写的，不是继承来的。**\n`git show <baseline>:internal/gitprovider/push_ingestion.go | grep IngestCopy` → **无命中**；\n`internal/gitprovider/forkimport.go`、`forkimport_test.go` 在 `git status` 里是 `??`\n（工作树里的新文件）。所以 `IngestCopy` 的基线策略是你的判断，不是既有代码的包袱。\n\n**（2）没有记录分叉点时，检查根本没发生。**\n- `push_ingestion.go:436-439`：\n  ```go\n  base := baselineSHA\n  if base == \"\" || base == ev.After {\n      base = ev.After\n  }\n  ```\n  `base == ev.After` → `Inspect` 拿同一个提交和它自己比 → **零个 change**。\n- `forkimport.go:239` 从 `SourceForkPoint` 取基线，`:281` 把它传给 `IngestCopy`。\n\n**（3）\"没有记录分叉点\"≠\"只有 main\"。`fork_sha` 为 NULL 有一整类来源。**\n- `refsync.go:154`：分叉点为空时回落到**仓库默认分支**，注释自己写着\n  \"the pre-T0305 fallback, **where every branch forks the accepted head**\"；\n- `refstore.go:183`：`fork_sha = CASE WHEN $2 <> '' THEN $2 ELSE fork_sha END` ——\n  回落路径**不写** `fork_sha`，所以它**保持 NULL**；\n- 也就是说：**任何从\"没有 `git_commit_sha` 的状态\"建出来的研究线**（典型是 API 建的状态，\n  只有 push ingestion 会填 `git_commit_sha`：`push_ingestion_store.go:312`），`fork_sha` 都是 NULL。\n- **你自己的 e2e fixture 就是这个形状**：`external_fork_e2e_test.go:997`\n  `r1 := fx.createBranch(t, fx.alice, parent.ID, \"line-r1\", \"\")` —— `line-r1` 没有分叉点，\n  而它是一条**研究线**，不是 main。你的代码注释把这一类写成了\"the parent's main: the line that IS\n  the baseline\"，**这个前提是错的**。\n\n**（4）旗子因此变成 complete，两道门都放行。**\n- `semantic_state.go:41`（`refreshBranchSemanticState`）→ 没有 outstanding 证据就是\n  `semantic_complete`；`semantic_state.go:86` 的走查在缺证据时结束、不报异常；\n- `00042:137`（`pull_request_semantic_gate`，挂在 `pull_requests` INSERT 上，查**源分支**）与\n  `00042:103`（`branch_merge_semantic_gate`，合并时再查一次）**都只看这一行**。\n\n**后果（一句话）**：把 `data/raw.csv` push 到 `line-r1`，`line-r1` 自己就是 `unstructured_changes`、\n自己发不出正式 PR（这正是你在 `:1011` 的 r2 上断言的行为）；**可它的 fork 却带着同一份内容、\n以 `semantic_complete` 开出了 PR 并 merge**。\n\n这**逐字命中** requirements 第二条点名的错路 (a)：**\"不能让导入的分支吃默认值——那等于「没看过就报无异常」\"**。\n也直接和 AC-6 的\"`semantic_state` 是一个**从真实证据派生**的值\"冲突。这不是口味问题，\n是这个任务被建出来要关掉的那个洞。\n\n---\n\n## 二、要你修的是**一条不变式**，不是我给你指定实现\n\n**不变式：导入那一刻，拷贝分支的旗子不得比源分支更干净。**\n\n道理很直白：拷贝的内容**就是**源分支那个提交的树。源分支在它自己的证据下是 `unstructured_changes`，\n拷贝不可能\"更干净\"——除非有人**没看**。\n\n同时这三条底线一条都不许破（破任何一条我都不收）：\n\n1. **不得吃默认值**（requirements 第二条禁的 (a) 路）；\n2. **不得一律标死 `unstructured_changes`**（第二条禁的 (b) 路：这个标记只有一次真正的 push 能清掉，\n   一律标死会把合法的 fork 永久锁死，`docs/16 §4.1` 也明确不许）；\n3. **证据必须落进 change 行**，让既有规则能把它解开（\"更近的记录解除\"那条规则，见\n   `semantic_state.go:86` 的注释）。**只写一个旗子、不落证据**，等于把 (b) 换个方式犯一遍：\n   下一次 push 会重新派生出一个\"干净\"的旗子，洞又回来了。\n\n**关于\"基线取整棵树会不会锁死\"这个真问题**：平台的 bootstrap 文件是主分支根目录的 `README.md`\n（`mainprotection.go:50` `mainBootstrapPath`），没有任何 ingestion 写过它、也没有哪次 push 会去删它。\n**这是\"基线要取得精确\"的理由，不是\"可以不看\"的理由。** 这条约束怎么满足由你决定。\n\n**实现路线由你选（L1），但要在 RESULT 里写清楚：你选了哪条、为什么、剩下什么残留。**\n两条我看到的路（不限于这两条）：\n- 让\"没有记录分叉点\"这一类也**真的去看**（在内容仓库里按某个精确基线查），或\n- 从**平台已经握着的**真实证据派生（源分支自己在那个提交上的派生状态/它的 ingestion 链）。\n  这条对\"基线里的东西不该由一次 copy 重新造一遍\"这个隐患更安全——**如果基线取整棵树，\n  树里的 manifest 会全部变成 candidate（科学对象），基准里本来就有的东西不该因为一次 copy 被重造。**\n\n---\n\n## 三、e2e 必须补的场景（AC-6 的正负两条，要盖住\"没有记录分叉点\"这一类）\n\n你现在的第 (6) 组**只覆盖了有分叉点的 r2/r3**（`external_fork_e2e_test.go:1008`/`:1011`，\n分叉点在 `:1021` 被断言成 `c1`），而文件自己的 fixture 里那条**没有分叉点**的 `line-r1`（`:997`）\n**从头到尾没被 fork 过**——所以这条洞在套件里是隐形的。评审的第 2 条意见说的就是这个：\n**\"能抓到这条阻断的，只差一个场景。\"**\n\n要补的：\n\n- **负向**：把不可解析的内容（`data/raw.csv`）push 到 `line-r1`（它没有分叉点），\n  先断言 `line-r1` 自己 = `unstructured_changes`；再 fork 它，断言**导入分支 = `unstructured_changes`**，\n  且**从它开 PR 被 00042 拒**（`P0001`）。\n- **正向**：fork 一条**没有分叉点、内容干净**的线，断言它**不被永久锁死**、能正常走到 PR。\n  只测负向的话，\"一律标死\"也能通过——**两条缺一不可**，这是 AC-6 的原话。\n- **变异证据**：把修复回滚/变异之后，**观察这两条测试 FAIL**，把输出贴进 RESULT。\n  你上一轮已经在做这件事，这次同样要做——我要看到这套测试**能失败**，而不是只会变绿。\n\n---\n\n## 四、RESULT 必须披露（评审第 3 条，也是 requirements 第二条自己写的出口）\n\nrequirements 第二条原文的出口是**披露**：\"如果导入时确实无法做检查……**在 RESULT 里说明**，\n并把「谁在什么时候补这次检查」写清楚——**不要默默让它吃默认值**。\"\n\n这一轮 RESULT 的 `risks` / `follow_up_issues` 里**一个字都没提**这件事（我查过：\n`baselineSHA` 只出现 1 次、`empty baseline` / `no recorded fork point` / `fork_sha` 各 0 次），\n而代码注释和单元测试（`forkimport_test.go:243`\n`***`）把\"空 diff\"当成契约写死了。\n**无论你最后怎么修，RESULT 里都要有这一段**：你选了哪条路、覆盖了什么、剩下什么没覆盖、谁补。\n\n---\n\n## 五、不用你动的（已经裁定，别在这里花时间）\n\n- **F1 的命名残留**（自己名下的老项目占了派生名 → 永久 `ErrForkSlugTaken`）：**我裁定不单独返工**，\n  留到 fork 的 HTTP 面落地时一起定命名规则。你把 `blocked` 报上来是对的，但这条我自己接。\n- **fork 没有生产 HTTP 端点**（`cmd/api` 不 import `internal/application/forks`、\n  `specs/api/openapi.yaml` 没有 fork 路由）：**那是我的任务**（`specs/**` 是 Supervisor-only），\n  不是你的越界。RESULT 里已经写清楚了，很好。\n- **F4**（分支级可见性是不是读门）：已升级成 owner 的 L3 问题，不在你这轮范围里。\n\n---\n\n## 六、纪律（照旧）\n\n- 不许为了让测试变绿而删测试、跳过测试、放宽断言、放大超时（`CLAUDE.md` §5.1、§6）。\n- **不许自行选迁移号**：`00086` 仍归你，已经写好了就不要再动号。\n- `allowed_scope` 不变；`tasks/**`、`specs/**`、`docs/**` 仍不在你的范围内。\n- 收尾照旧：G1 全绿 + `RESULT.json`，diff 留在工作树里（不要提交任何东西）。\n",
       "history": [
         {
@@ -5918,6 +5940,26 @@
           "at": "2026-09-18T19:41:46Z",
           "run_id": "run-8e917f5598f31d0c",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T20:16:37Z",
+          "run_id": "run-dd021caf6e056601",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-18T20:35:11Z",
+          "run_id": "run-590aa89b29b13201"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-18T21:02:29Z",
+          "run_id": "run-2a23ed01ce38b864",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -6066,10 +6108,13 @@
       "merged_at": null
     },
     "T0807": {
-      "status": "verification",
-      "started_at": "2026-09-18T16:54:43Z",
+      "status": "merged",
+      "started_at": "2026-09-18T21:59:48Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:14:44Z 判定，记于 T0705 合并之前）：四个词表全无：event_type、role_codes（两列都是裸 text，无 CHECK、无目录）、accepted_context 的判定规则、以及「同一事件不重复计」的判重键（contribution_events 无源事件列、无 UNIQUE）。tasks/decisions.md:8634 早前已就同一张表记过这个缺口。",
-      "worker_run_id": "run-e4a5309a7243d7cc",
+      "worker_run_id": "run-c11485bfd5068171",
+      "accepted_by_supervisor_at": "2026-09-18T22:48:50Z",
+      "merged_at": "2026-09-18T22:57:22Z",
+      "rejection_reason": "# T0807 返工：CI 在 UTC 主机上**确定性**红 —— 这不是偶发，是你的夹具造出来的\n\n你的交付走到了 PR #284，7 项 CI 检查全绿，`migration-integration` 红。**我先按已知的偶发超时（T0815）想了一次，被实测推翻。** 下面是逐条核过的证据，请按它来修，不要按印象修。\n\n## 一、结论先说\n\n**同一份代码、同一台机器，只改时区，结果就反过来：**\n\n| 时区 | 结果 |\n|---|---|\n| `TZ=Asia/Shanghai`（本机） | **6/6 通过** |\n| `TZ=UTC`（CI 跑的就是 UTC） | **3/3 失败**，报错与 CI 一字不差 |\n\n复现命令（在工作树里跑，两条都要跑）：\n\n```\nTZ=UTC            go test ./tests/integration -run *** -count=3\nTZ=Asia/Shanghai  go test ./tests/integration -run *** -count=3\n```\n\nCI 上的报错：\n\n```\n--- FAIL: *** (0.83s)\n    contribution_ledger_test.go:442: organization_id_at_time = 0x6811be00f20,\n        want org A b9f33ee2-… (alice's membership at the event instant)\n```\n\n**我还把这个 CI 作业重跑过一次**（按\"先确认是不是偶发\"的规矩，只跑一次）：第二次**同一条断言、同一个报错**，整套 154 秒跑完、**没有超时**，全库**只有这一条**失败。\n\n> 顺带把另一件事分清楚：第一次那 600 秒超时是另一码事（T0815 记录在案的偶发超时，被点名的是既有的 `TestRevokedAccessStopsDelivery`）。**你只需要修下面这一条。**\n\n## 二、机制（每一步都在 main/你的分支上核过行号）\n\n1. **`tests/integration/contribution_ledger_test.go:145-147`** —— 夹具用 **alice** 当 creator 建 orgB，日期传 `todayUTC()`。\n2. **`tests/integration/org_permission_test.go:44-47`** ——\n\n   ```go\n   func todayUTC() time.Time {\n       now := time.Now()\n       return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)\n   }\n   ```\n\n   它取**本地**年月日、却贴上 UTC 标签。这跟后端 `internal/application/orgs/service.go:261-267` 的 `dateOnly`/`today()` 是**同一个毛病**（评审的 major finding，已另立 T0816）。**这个助手是既有的、不在你的 diff 里——但你在第 145 行用了它。**\n\n3. **`internal/persistence/org_store.go:39,57-61`** —— `CreateOrganization` **总是**给 creator 插一条 owner 成员关系，日期用调用方传进来的那个值。所以 alice 因为\"当了 orgB 的创建者\"而**多了一条 orgB 成员关系**。\n\n   > 这一条我做过实验，不是读代码猜的：把第 147 行的 creator 改成 `bob.ID`，第 156-158 行那条显式的 bob INSERT 立刻撞 `23505 duplicate key \"organization_memberships_pkey\"`。**主键冲突就是\"它总会插一条\"的证明。**\n\n4. **`internal/contribution/ledger_store.go:233,237`**（你新增的文件）—— 投影解析\"事件当时的组织\"是这样的：\n\n   ```sql\n   FROM organization_memberships m\n   WHERE m.user_id = $1\n     AND (m.affiliation_start IS NULL OR m.affiliation_start <= $2::date)\n     AND (m.affiliation_end   IS NULL OR m.affiliation_end   >= $2::date)\n   ORDER BY m.affiliation_start DESC NULLS LAST, m.organization_id\n   LIMIT 1\n   ```\n\n5. **于是**：事件发生在 UTC 的\"今天\"，而 alice 同时有**两条**有效成员关系——orgA（2025-01-01 起，无终止）与 orgB（起于 `todayUTC()`）。谁赢由上面那条 `ORDER BY` 决定：\n\n   - `TZ=UTC`：`todayUTC()` = 真实 UTC 日 = 事件日 → orgB 匹配，且起始日更晚 → **排最前 → 取到 orgB** → 断言 `== orgA` 失败。\n   - `TZ=Asia/Shanghai`：`todayUTC()` = 本地日 = UTC 的**明天** → 晚于事件日 → orgB 不匹配 → 落回 orgA → 通过。\n\n   **你本地一直过，只是因为你本地比 UTC 早八小时。**\n\n## 三、一个陷阱，先说清楚（否则你会把它修得更糟）\n\n**只把 `todayUTC()` 换成\"正确的 UTC 日期\"，会让情况变坏。** 那样在 UTC+8 上 orgB 也会匹配上，于是**两个时区都红**。\n\n问题的本质**不是\"日期算错了\"，是\"夹具让 actor 多了一条它自己没打算给的成员关系\"**。夹具第 132-134 行的注释和它写下的意图是\"alice 一直属于 orgA，她是端到端那半的 actor\"；orgB 只是给 bob 用的容器，alice 当 creator 纯属 `CreateOrganization` 需要一个调用者。**修的是夹具，不是断言。**\n\n## 四、我验证过的一种修法形状（不是让你照抄，是让你知道\"什么算修好\"）\n\n在 `/tmp` 的一次性工作树上，我在第 150 行之后把 alice 因创建 orgB 而自动产生的那条成员关系结束掉：\n\n```sql\nUPDATE organization_memberships SET affiliation_end = '2025-12-31'\n WHERE organization_id = $1 AND user_id = $2   -- (orgB, alice)\n```\n\n结果：`TZ=UTC` 与 `TZ=Asia/Shanghai` 各跑 `-count=2`，**全过**。\n\n你可以选别的形状（例如让 bob 当 orgB 的 creator 并相应调整 bob 的播种），但**必须自己解释为什么它保住了原意**。\n\n## 五、验收条件（缺一条就不算完成）\n\n1. `TZ=UTC go test ./tests/integration -count=1` **和** `TZ=Asia/Shanghai go test ./tests/integration -count=1` **都全绿**（跑整套，不是只跑你改的那条）。两条命令的实测输出写进 RESULT。\n2. 第 441-443 行那条断言**不许放宽、不许跳过、不许加 `t.Skip`、不许改成\"任一组织皆可\"**。\n3. **不许通过固定 CI 时区来\"解决\"**（那是把问题藏起来，不是修好）。\n4. **不许改生产代码。** `internal/application/orgs/service.go` 的 `today()`、以及 `tests/integration/org_permission_test.go` 的 `todayUTC()`，它们的日期口径毛病属于 **T0816**，不在你的 `allowed_scope` 里。你只改自己交付的文件。\n5. 顺手（次要）：第 442-443 行用 `%v` 打的是 `*string`，打出来是**指针地址**（`0x6811be00f20`），CI 日志里根本看不出取到了哪个组织。解引用后再打，让下一个人一眼能看懂。\n\n## 六、范围与状态\n\n- 你的工作树停在你自己的提交 `21f1c37` 上，**新改动直接叠在它上面**（不要回退、不要改写历史）。\n- `allowed_scope` 不变，仍只许改你原来范围内的文件。\n- 其余部分（四层 Gate 已过的那些结论、评审的 approve、PR 的描述）不受影响，**这一轮只解决上面这一件事**。\n- 不要动 `tasks/**`、`specs/**`、`docs/**`——那些不归你。\n",
       "history": [
         {
           "from": "todo",
@@ -6097,6 +6142,67 @@
           "at": "2026-09-18T17:17:58Z",
           "run_id": "run-c285b400faeff9d8",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-18T21:04:14Z",
+          "run_id": "run-691b272ddad10102",
+          "reason": "# T0807 重基线：主库往前走了两步，你的改动原样挪到新基线上重跑\n\n**不是说你做错了什么。** 你交回来的东西通过了收集检查；问题是**主库在你之后又合并了两个任务**，\n你的分支基线（`deb7f53`）已经不是现在的主干了。规则是：主库动了、你的改动不再\"天然合得上\"，\n就得**在新基线上重跑一遍**再验，不能拿旧基线下的测试结果当证据。\n\n## 一、你之后主库多了什么\n\n| 任务 | 内容 | 迁移 |\n|---|---|---|\n| T0604 | 科学责任与评审路由（`research_owner_rules` / `responsibility_assignments`） | `00084` |\n| T0804 | 外部 fork 与外部贡献（`project_forks` + 两个触发器 + fork 导入路径） | `00086` |\n\n你要挪到的新基线是 **`6445c7f`**（=`main` 当前 HEAD）。\n\n## 二、必须知道的三件事\n\n1. **生成物重新生成，不要合并文本。** `specs/database/postgres.sql` 与 `specs/SPEC_VERSION.json`\n   是**派生文件**（迁移目录的函数）。工具会按合并后的树**重算**它们。**不要手工编辑、不要试图\n   去\"调和\"两边的文本**——那样得到的要么是描述旧规格的摘要，要么丢了你自己的规格改动。\n2. **迁移号 `00087` 仍然归你**，不要动号，也不要新建第二个迁移。\n3. **`tests/integration/migration_test.go` 两边都改过**（T0804 在那里加了两处登记：一个索引行、\n   一处三行块）。预期是**干净的三方合并**。如果工具报\"需要人处理\"或留下冲突标记，\n   **停下来在 RESULT 里报上来**，不要自己手工解——那正是要我看的地方。\n\n## 三、新基线上要特别看一眼的\n\nT0804 给 `pull_requests` 加了一道**插入触发器** `pull_request_fork_gate`（`00086`）：\n跨项目的源分支必须来自\"开 PR 那个人的、属于本项目的 fork\"，否则插入被拒（`P0001`）。\n你的投影负责的是 `contribution_events`，正常不碰 PR 行；**但如果你的测试用直接 INSERT 造过\nPR 行**（比如为了 `pull_request.reviewed` 那条映射），新触发器现在会拦它。\n这是**新基线带来的真实约束**，不是你的实现有问题——按它调整夹具即可，但**不许因此放宽断言**。\n\n## 四、这轮要交什么\n\n- 在**新基线**上重跑你任务要求的所有测试（真 PostgreSQL，`make test-integration` 那一档），\n  全绿才叫完成；**不许删测试、跳测试、放宽断言、放大超时**。\n- 写一份**新的** `RESULT.json`：说明这次是重基线后的重跑，测试结果按新基线给，\n  原有那些已披露的风险与后续事项照旧保留。\n- 范围纪律不变：`allowed_scope` 没变；`tasks/**`、`specs/**`（除那两个生成物）、`docs/**` 不在你范围内。\n- 收尾照旧：改动留在工作树里，不要提交任何东西。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-18T21:04:15Z",
+          "run_id": "run-75e48577d215d392",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T21:17:31Z",
+          "run_id": "run-85fb36cece6427e3",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-18T21:36:06Z",
+          "run_id": "run-49cc66c37a794223"
+        },
+        {
+          "from": "accepted",
+          "to": "rejected",
+          "at": "2026-09-18T21:58:45Z",
+          "run_id": "run-de544277e4e65f08",
+          "reason": "# T0807 返工：CI 在 UTC 主机上**确定性**红 —— 这不是偶发，是你的夹具造出来的\n\n你的交付走到了 PR #284，7 项 CI 检查全绿，`migration-integration` 红。**我先按已知的偶发超时（T0815）想了一次，被实测推翻。** 下面是逐条核过的证据，请按它来修，不要按印象修。\n\n## 一、结论先说\n\n**同一份代码、同一台机器，只改时区，结果就反过来：**\n\n| 时区 | 结果 |\n|---|---|\n| `TZ=Asia/Shanghai`（本机） | **6/6 通过** |\n| `TZ=UTC`（CI 跑的就是 UTC） | **3/3 失败**，报错与 CI 一字不差 |\n\n复现命令（在工作树里跑，两条都要跑）：\n\n```\nTZ=UTC            go test ./tests/integration -run *** -count=3\nTZ=Asia/Shanghai  go test ./tests/integration -run *** -count=3\n```\n\nCI 上的报错：\n\n```\n--- FAIL: *** (0.83s)\n    contribution_ledger_test.go:442: organization_id_at_time = 0x6811be00f20,\n        want org A b9f33ee2-… (alice's membership at the event instant)\n```\n\n**我还把这个 CI 作业重跑过一次**（按\"先确认是不是偶发\"的规矩，只跑一次）：第二次**同一条断言、同一个报错**，整套 154 秒跑完、**没有超时**，全库**只有这一条**失败。\n\n> 顺带把另一件事分清楚：第一次那 600 秒超时是另一码事（T0815 记录在案的偶发超时，被点名的是既有的 `TestRevokedAccessStopsDelivery`）。**你只需要修下面这一条。**\n\n## 二、机制（每一步都在 main/你的分支上核过行号）\n\n1. **`tests/integration/contribution_ledger_test.go:145-147`** —— 夹具用 **alice** 当 creator 建 orgB，日期传 `todayUTC()`。\n2. **`tests/integration/org_permission_test.go:44-47`** ——\n\n   ```go\n   func todayUTC() time.Time {\n       now := time.Now()\n       return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)\n   }\n   ```\n\n   它取**本地**年月日、却贴上 UTC 标签。这跟后端 `internal/application/orgs/service.go:261-267` 的 `dateOnly`/`today()` 是**同一个毛病**（评审的 major finding，已另立 T0816）。**这个助手是既有的、不在你的 diff 里——但你在第 145 行用了它。**\n\n3. **`internal/persistence/org_store.go:39,57-61`** —— `CreateOrganization` **总是**给 creator 插一条 owner 成员关系，日期用调用方传进来的那个值。所以 alice 因为\"当了 orgB 的创建者\"而**多了一条 orgB 成员关系**。\n\n   > 这一条我做过实验，不是读代码猜的：把第 147 行的 creator 改成 `bob.ID`，第 156-158 行那条显式的 bob INSERT 立刻撞 `23505 duplicate key \"organization_memberships_pkey\"`。**主键冲突就是\"它总会插一条\"的证明。**\n\n4. **`internal/contribution/ledger_store.go:233,237`**（你新增的文件）—— 投影解析\"事件当时的组织\"是这样的：\n\n   ```sql\n   FROM organization_memberships m\n   WHERE m.user_id = $1\n     AND (m.affiliation_start IS NULL OR m.affiliation_start <= $2::date)\n     AND (m.affiliation_end   IS NULL OR m.affiliation_end   >= $2::date)\n   ORDER BY m.affiliation_start DESC NULLS LAST, m.organization_id\n   LIMIT 1\n   ```\n\n5. **于是**：事件发生在 UTC 的\"今天\"，而 alice 同时有**两条**有效成员关系——orgA（2025-01-01 起，无终止）与 orgB（起于 `todayUTC()`）。谁赢由上面那条 `ORDER BY` 决定：\n\n   - `TZ=UTC`：`todayUTC()` = 真实 UTC 日 = 事件日 → orgB 匹配，且起始日更晚 → **排最前 → 取到 orgB** → 断言 `== orgA` 失败。\n   - `TZ=Asia/Shanghai`：`todayUTC()` = 本地日 = UTC 的**明天** → 晚于事件日 → orgB 不匹配 → 落回 orgA → 通过。\n\n   **你本地一直过，只是因为你本地比 UTC 早八小时。**\n\n## 三、一个陷阱，先说清楚（否则你会把它修得更糟）\n\n**只把 `todayUTC()` 换成\"正确的 UTC 日期\"，会让情况变坏。** 那样在 UTC+8 上 orgB 也会匹配上，于是**两个时区都红**。\n\n问题的本质**不是\"日期算错了\"，是\"夹具让 actor 多了一条它自己没打算给的成员关系\"**。夹具第 132-134 行的注释和它写下的意图是\"alice 一直属于 orgA，她是端到端那半的 actor\"；orgB 只是给 bob 用的容器，alice 当 creator 纯属 `CreateOrganization` 需要一个调用者。**修的是夹具，不是断言。**\n\n## 四、我验证过的一种修法形状（不是让你照抄，是让你知道\"什么算修好\"）\n\n在 `/tmp` 的一次性工作树上，我在第 150 行之后把 alice 因创建 orgB 而自动产生的那条成员关系结束掉：\n\n```sql\nUPDATE organization_memberships SET affiliation_end = '2025-12-31'\n WHERE organization_id = $1 AND user_id = $2   -- (orgB, alice)\n```\n\n结果：`TZ=UTC` 与 `TZ=Asia/Shanghai` 各跑 `-count=2`，**全过**。\n\n你可以选别的形状（例如让 bob 当 orgB 的 creator 并相应调整 bob 的播种），但**必须自己解释为什么它保住了原意**。\n\n## 五、验收条件（缺一条就不算完成）\n\n1. `TZ=UTC go test ./tests/integration -count=1` **和** `TZ=Asia/Shanghai go test ./tests/integration -count=1` **都全绿**（跑整套，不是只跑你改的那条）。两条命令的实测输出写进 RESULT。\n2. 第 441-443 行那条断言**不许放宽、不许跳过、不许加 `t.Skip`、不许改成\"任一组织皆可\"**。\n3. **不许通过固定 CI 时区来\"解决\"**（那是把问题藏起来，不是修好）。\n4. **不许改生产代码。** `internal/application/orgs/service.go` 的 `today()`、以及 `tests/integration/org_permission_test.go` 的 `todayUTC()`，它们的日期口径毛病属于 **T0816**，不在你的 `allowed_scope` 里。你只改自己交付的文件。\n5. 顺手（次要）：第 442-443 行用 `%v` 打的是 `*string`，打出来是**指针地址**（`0x6811be00f20`），CI 日志里根本看不出取到了哪个组织。解引用后再打，让下一个人一眼能看懂。\n\n## 六、范围与状态\n\n- 你的工作树停在你自己的提交 `21f1c37` 上，**新改动直接叠在它上面**（不要回退、不要改写历史）。\n- `allowed_scope` 不变，仍只许改你原来范围内的文件。\n- 其余部分（四层 Gate 已过的那些结论、评审的 approve、PR 的描述）不受影响，**这一轮只解决上面这一件事**。\n- 不要动 `tasks/**`、`specs/**`、`docs/**`——那些不归你。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-18T21:59:48Z",
+          "run_id": "run-c11485bfd5068171",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T22:14:52Z",
+          "run_id": "run-55054efb05e35aee",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-18T22:48:50Z",
+          "run_id": "run-c36b01679b480442"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-18T22:57:22Z",
+          "run_id": "run-28672749a3eb1398",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -7144,13 +7250,39 @@
       ]
     },
     "T1111": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
+      "status": "accepted",
+      "started_at": "2026-09-18T21:07:27Z",
       "notes": "2026-09-18 立档，来源：T1110 合并后自动化安全审查报出的 CWE-214 发现（issue #273）",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "worker_run_id": "run-60eca88e4b82397a",
+      "accepted_by_supervisor_at": "2026-09-18T23:13:06Z",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-18T21:07:26Z",
+          "run_id": "run-853bb290ede6f6d1"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-18T21:07:27Z",
+          "run_id": "run-60eca88e4b82397a",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T23:00:29Z",
+          "run_id": "run-93c0048b80d8dcd8",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-18T23:13:06Z",
+          "run_id": "run-8a8b73c8033b9356"
+        }
+      ]
     },
     "T1201": {
       "status": "todo",
@@ -7220,6 +7352,51 @@
       "started_at": null,
       "completed_at": null,
       "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0814": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "2026-09-19 立账：T0804 把 fork 的服务层做完了（并把它接到执行侧：ForkGate 与 00086 的触发器），但产品路径上缺「发起 fork」这步；契约由 Supervisor 先落地，本任务照契约接线。来源：docs/31_MASTER_ACCEPTANCE.md:17，T0804 复核时发现。",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0815": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "2026-09-19 立账：CI 的 migration-integration 偶发超时（3/14），证据见 tasks/decisions.md。不许用放大 timeout 掩盖——先量再修。",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0816": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "2026-09-19 立账：T0807 独立评审的 major finding 1（orgs 用本地日历日打戳却标 UTC，投影按事件时刻 UTC 日解析）+ 我裁定时数出的第三处（internal/events/subscription_store.go:296 把 date 转 timestamptz 判定成员）。三处口径不一致会让「事件当时的组织」在 UTC+8 这类主机上每天有 8 小时记错或记成 NULL。口径由 Supervisor 裁定为 UTC 日历日、区间含两端，对齐到已合并且被测试钉住的投影一侧。依赖 T0807（它交付了被对齐的那一侧）。",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0610": {
+      "status": "blocked",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "SPEC_BLOCKED（2026-09-19 从 T0602 拆出时判定）：reopen 的语义、事件名、存储状态位全都现成（docs/43:10 的状态机、docs/46:11、specs/events/event-types.yaml:23 的 scientific_object.reopened、infra/migrations/00005:20 的 CHECK 里已有 'reopened'），**只差一行权限**：specs/policies/permissions-matrix.csv 里没有 reopen 行，internal/authz/action.go 的动作总表里也没有 reopen 动作，而未登记动作在 internal/authz/engine.go 里默认拒绝。两个候选形状已写进任务书（A：与 abort_main_object 对称；B：复用 write_scientific_state，代价是 contributor 也能撤销 maintainer 的 abort）。Supervisor 倾向 A。权限属 §5 的 L3，等 owner 一句话裁定后把那一行填进 permissions-matrix.csv 再开工。",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0411": {
+      "status": "blocked",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "L3 待裁定（2026-09-19 立档）：缺口是 T0410 交付时照出的——PR 的对外面有五条路由（列表/建/diff/提交评审/:merge），**中间「送进评审」这一步没有门**。状态机已写在 docs/43:13，守卫已放行两条边（00051:88 open→review_required、00051:90 changes_requested→review_required），服务层 RequestReview 已实现且确实写状态列，**但它没有任何生产调用者**，specs/api/openapi.yaml 里 request-review 零命中。后果：经产品建出的 PR 永远无法被评审、因而永远无法合并。缺的是一行权限：specs/policies/permissions-matrix.csv 15 行里没有 request_review，internal/authz/action.go 没有对应动作，engine.go 对未登记动作默认拒绝。三个候选形状已写进任务书（A 复用 open_pr，Supervisor 倾向此；B 新增一行 request_review；C 让建 PR 直接落在 review_required）。**非成员那一格决定 T0804 外部贡献流程能否走通**（open_pr 是 allow_from_fork），这是 L3，等 owner 一句话裁定后再开工。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null

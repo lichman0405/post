@@ -1,5 +1,55 @@
 # 开发进度
 
+> **当前这一刻**：**91/136 已合并。T0807（账本投影）已入账；另两个已经在验收台上——
+> T1111（把凭据从命令行挪进环境变量）和 T0410（提案全流程端到端）。主库是绿的。**
+> 进度数字：**P0 14/14、P1 10/10、P2 15/15、P3 9/9 全部完成**；
+> P4 9/10、P5 6/10、P6 6/9、P7 9/12、P8 6/13、P9 0/8、P10 6/7、P11 1/11、P12 0/8；
+> 合计 **91/136 已合并**。
+>
+> **一、今天最要紧的一件事：我查出自己把三个任务误判成了"等你拍板"。**
+> T0602（终止一条主线对象）、T0506（证据图投影）、T0509（文献证据的位置）——在我之前的记录里
+> 这三个都写着"等定"，理由是"规格没写、要你定"。**我一个个回仓库重查，发现两个根本不是等**：
+> 它们的**任务书早就写好了**（9-18 写的，白纸黑字就在台账里），只是**状态那一格没人翻过来**。
+> 第三个（终止）也只剩一半是真等——**"撤销终止"那一半真的只差一行权限**：谁能撤销一次终止。
+> 结果：**T0602、T0506、T0509 现在都能派工了**；真正卡住的缩到一条。
+>
+> **二、我为什么会误判，以及我改了什么。** 我的查法是"读任务状态里那条阻塞理由，再回仓库找证据"。
+> **这个查法从第一步起就查不到一件事：我自己后来已经做过的裁定**——那些裁定写在任务书里，
+> 不写在阻塞理由里。于是我把两句**早就作废的旧理由**当成未决问题，又推了一遍，还推出一个更保守的
+> 结论。这跟我更早那次漏看一份文档是**同一个毛病**：只看"当初点名的那一处"，不看仓库现在的样子。
+> 更正已写进 `tasks/decisions.md`，并写明**新的查法：判定一个任务在等什么之前，先读它自己的任务书**。
+>
+> **三、顺带说清楚 T0807 那件事。** 它合并了，但**独立评审挑出的一条真问题我没有压下去**，
+> 而是记成了一件新任务：账本里"谁算作者"的那张映射表是**科研语义判断**，
+> 而没有任何高于我这一层的人裁定过它。**急不急？不急**——那个账本还没接到生产上（接线是下一件事），
+> 在接线之前改那张表是**零代价的**。所以它是要问你的问题里最不着急的一个。
+>
+> **四、今天新查出一个真缺口**（T0410 顺手照出来的，不是它造成的）：
+> **产品里没有"把提案送进评审"这一步。** 提案建出来停在"未开始"，而要走到"需要评审"，
+> 今天只有程序内部能调，**对外没有接口**。主验收要求"提案全流程走得通"，所以这条得补。
+> 补法有两种，其中一种要动权限——我会把两个选项连后果写清楚再问你。
+>
+> **五、等你拍板的事**（都不挡路，链条照走）：
+>
+> - **四个 issue 需要你关闭**：#189 / #239 / #251 / #252 —— 里面的决定我**早已做出并记录**，
+>   但**我无权关闭别人开的 issue**（GitHub 接口今天仍在报错，我连评论都发不出去）。
+>   挂着的 issue 会再次把任务卡住——#189 之前就干过这件事。
+> - **共享开发数据库 `post` 是坏的**（被人升到版本 40、却缺 34/35）。我**没有**动它——
+>   删库重建需要你**明确点名**这个库。它不挡自动测试。
+> - **要你定的语义问题**（都记在 `tasks/decisions.md`）：
+>   ① **撤销一次"终止"需要什么权限**——我给了两个选项，倾向跟"终止"对称（终止需要维护者，撤销不该更容易）；
+>   ② **谁能改资产的元数据**——今天**谁都不能改**，因为权限表里根本没有这一格；
+>   ③ **接口限流 / 内容安全策略这类安全阈值取什么数**——规格里没有数字；
+>   ④ 上面第三条那张"作者映射表"（**最不急**）；
+>   ⑤ "把提案送进评审"用哪种补法（**可能不用动权限**，我会先想清楚再问）。
+>
+> **下一步不用你管**：T1111 与 T0410 收完就入账（第 92、93 个）；然后开一次空档，
+> 把攒着的几份任务书一次落地；接着按**最长的那条链**派工——
+> **下一段最长的是"搜索"那条 8 步链，它的终点正是主验收的"完整科研流程演练"。**
+
+<details><summary><b>（上一刻）</b></summary>
+
+
 > **当前这一刻**：
 > **T0804 的第二次独立评审判了"不通过"，挑出一条真毛病：fork 复制进来的内容，平台对某一类
 > 研究线根本没看就放行了。我自己复现过，已第二次打回返工。主库是绿的。**
@@ -48,6 +98,8 @@
 >
 > 下一步不用你管：**工人改完 → 我自己复验 → 再送一次独立评审 → 通过就入账（第 90 个）；
 > 然后落 T0807，再按序派 T0806 / T0811 / T0813。**
+
+</details>
 
 <details><summary><b>（上一刻）T0804 打回的两处已经改好，我复验通过，正送独立评审</b></summary>
 
@@ -2403,9 +2455,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-18T14:29:26Z
+生成时间：2026-09-18T23:16:04Z
 
-状态分布：todo 39 · ready 1 · running 0 · worker_failed 0 · verification 1 · rejected 3 · blocked 5 · accepted 0 · merged 86（合计 135/135 个任务）
+状态分布：todo 41 · ready 2 · running 0 · worker_failed 0 · verification 1 · rejected 0 · blocked 5 · accepted 1 · merged 91（合计 141/141 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -2466,33 +2518,35 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0407 | Scientific Conflict Resolution UI | P4 | merged | 2026-09-14T18:21:29Z |  | 2026-09-14T21:49:46Z | 2026-09-14T21:53:00Z |
 | T0408 | PR Research Diff UI | P4 | merged | 2026-09-15T12:44:40Z |  | 2026-09-15T13:06:20Z | 2026-09-15T13:12:44Z |
 | T0409 | Merge Governance 与 frozen main 更新 | P4 | merged | 2026-09-15T22:47:47Z |  | 2026-09-15T23:34:48Z | 2026-09-15T23:41:45Z |
-| T0410 | PR/Branch 完整 E2E | P4 | todo |  |  |  |  |
+| T0410 | PR/Branch 完整 E2E | P4 | verification | 2026-09-18T22:05:43Z |  |  |  |
+| T0411 | 把提案送进评审：产品路径与权限（等一行 L3 裁定） | P4 | blocked |  |  |  |  |
 | T0501 | Research Question 与 Hypothesis 关系模型 | P5 | merged | 2026-09-14T10:52:04Z |  | 2026-09-14T11:17:35Z | 2026-09-14T11:21:07Z |
 | T0502 | Claim 结构与 scope | P5 | merged | 2026-09-14T11:24:17Z |  | 2026-09-14T11:46:32Z | 2026-09-14T11:49:54Z |
 | T0503 | Finding 聚合模型 | P5 | merged | 2026-09-15T01:21:57Z |  | 2026-09-15T02:01:26Z | 2026-09-15T02:07:38Z |
 | T0504 | Evidence Assertion Domain | P5 | merged | 2026-09-15T02:39:08Z |  | 2026-09-15T03:01:00Z | 2026-09-15T03:06:01Z |
 | T0505 | Provenance Graph Projection | P5 | merged | 2026-09-14T14:04:45Z |  | 2026-09-14T14:24:41Z | 2026-09-14T14:27:50Z |
-| T0506 | Evidence Graph Projection | P5 | blocked |  |  |  |  |
+| T0506 | Evidence Graph Projection | P5 | ready |  |  |  |  |
 | T0507 | Evidence/Provenance UI | P5 | todo |  |  |  |  |
 | T0508 | External Reference live identity + snapshot | P5 | merged | 2026-09-14T14:51:21Z |  | 2026-09-14T15:13:55Z | 2026-09-14T15:17:22Z |
-| T0509 | Literature evidence extraction data model | P5 | blocked |  |  |  |  |
+| T0509 | Literature evidence extraction data model | P5 | ready |  |  |  |  |
 | T0510 | Knowledge workflow E2E | P5 | todo |  |  |  |  |
 | T0601 | Freeze Main Governance | P6 | merged | 2026-09-16T11:27:32Z |  | 2026-09-16T11:46:40Z | 2026-09-16T11:52:51Z |
-| T0602 | Abort/Reopen State Transition | P6 | blocked |  |  |  |  |
+| T0602 | 主线对象 Abort 状态迁移（abort 半；reopen 已拆出为 T0610） | P6 | blocked |  |  |  |  |
 | T0603 | Organization/Project Policy Engine | P6 | merged | 2026-09-14T03:42:50Z |  | 2026-09-14T04:09:38Z | 2026-09-14T04:12:31Z |
-| T0604 | Scientific Responsibility / Reviewer Routing | P6 | rejected | 2026-09-18T08:20:45Z |  |  |  |
+| T0604 | Scientific Responsibility / Reviewer Routing | P6 | merged | 2026-09-18T17:16:45Z |  | 2026-09-18T17:58:47Z | 2026-09-18T18:07:33Z |
 | T0605 | Release Manifest Builder | P6 | merged | 2026-09-14T08:39:33Z |  | 2026-09-14T09:24:39Z | 2026-09-14T09:33:18Z |
 | T0606 | Immutable Release API/UI | P6 | merged | 2026-09-14T17:12:24Z |  | 2026-09-14T17:34:41Z | 2026-09-14T17:58:08Z |
 | T0607 | Activity/Audit Timeline 增强 | P6 | todo |  |  |  |  |
 | T0608 | Release/Abort/Policy E2E | P6 | todo |  |  |  |  |
 | T0609 | Project Milestone 基础 | P6 | merged | 2026-09-15T13:30:51Z |  | 2026-09-15T14:00:41Z | 2026-09-15T14:12:50Z |
+| T0610 | 主线对象 Reopen 状态迁移（等一行权限的 L3 裁定） | P6 | blocked |  |  |  |  |
 | T0701 | Research Asset Core/PID | P7 | merged | 2026-09-15T15:21:35Z |  | 2026-09-15T15:51:33Z | 2026-09-15T15:57:18Z |
 | T0702 | 四类 Asset Manifest validator | P7 | merged | 2026-09-15T17:36:13Z |  | 2026-09-15T18:02:29Z | 2026-09-15T18:09:43Z |
 | T0703 | Rights Model | P7 | merged | 2026-09-15T16:37:35Z |  | 2026-09-15T17:09:14Z | 2026-09-15T17:14:12Z |
 | T0704 | Publication Impact Preview | P7 | merged | 2026-09-15T18:46:44Z |  | 2026-09-15T19:00:22Z | 2026-09-15T19:04:57Z |
 | T0705 | Asset Publish Governance | P7 | merged | 2026-09-15T23:43:26Z |  | 2026-09-16T00:40:34Z | 2026-09-16T00:47:27Z |
 | T0706 | Asset Metadata Revision | P7 | blocked |  |  |  |  |
-| T0707 | Asset Reference/Dependency | P7 | rejected | 2026-09-18T08:33:48Z |  |  |  |
+| T0707 | Asset Reference/Dependency | P7 | merged | 2026-09-18T16:10:13Z |  | 2026-09-18T16:43:56Z | 2026-09-18T16:50:28Z |
 | T0708 | Asset Fork/Derive + Lineage | P7 | todo |  |  |  |  |
 | T0709 | Asset Hub Pages/Explore | P7 | merged | 2026-09-16T01:57:45Z |  | 2026-09-16T02:36:27Z | 2026-09-16T02:41:11Z |
 | T0710 | Asset 完整 E2E | P7 | todo |  |  |  |  |
@@ -2501,15 +2555,19 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0801 | Public Entity Anonymous Pages | P8 | merged | 2026-09-16T02:41:13Z |  | 2026-09-16T03:20:27Z | 2026-09-16T03:25:11Z |
 | T0802 | Explore 聚合 | P8 | merged | 2026-09-16T03:25:13Z |  | 2026-09-16T04:12:18Z | 2026-09-16T04:17:01Z |
 | T0803 | Open Contribution Opportunity | P8 | merged | 2026-09-15T12:54:08Z |  | 2026-09-15T13:23:30Z | 2026-09-15T13:28:59Z |
-| T0804 | External Fork/Contribution flow | P8 | rejected | 2026-09-18T08:44:21Z |  |  |  |
-| T0805 | Published Knowledge Object | P8 | verification | 2026-09-18T09:55:51Z |  |  |  |
+| T0804 | External Fork/Contribution flow | P8 | merged | 2026-09-18T19:41:46Z |  | 2026-09-18T20:35:11Z | 2026-09-18T21:02:29Z |
+| T0805 | Published Knowledge Object | P8 | merged | 2026-09-18T15:04:09Z |  | 2026-09-18T16:00:06Z | 2026-09-18T16:08:04Z |
 | T0806 | External Evidence Network Aggregation | P8 | todo |  |  |  |  |
-| T0807 | Contribution Ledger projection | P8 | ready |  |  |  |  |
+| T0807 | Contribution Ledger projection | P8 | merged | 2026-09-18T21:59:48Z |  | 2026-09-18T22:48:50Z | 2026-09-18T22:57:22Z |
 | T0808 | Research Profile / Organization Profile | P8 | todo |  |  |  |  |
 | T0809 | Credit Attribution/Dispute 基础 | P8 | todo |  |  |  |  |
 | T0810 | 最小 Open Network 闭环 E2E | P8 | todo |  |  |  |  |
 | T0811 | Discussion 与 Promote to Research Object | P8 | todo |  |  |  |  |
 | T0812 | Private Evidence / Public Attestation 基础 | P8 | todo |  |  |  |  |
+| T0813 | Contribution Ledger 接上生产（worker 挂载 + via 真实来源） | P8 | todo |  |  |  |  |
+| T0814 | Fork 发起与外部提案的生产接口（契约由 Supervisor 落地，本任务照契约接线，并改 fork 的命名规则） | P8 | todo |  |  |  |  |
+| T0815 | CI 的 migration-integration 偶发超时：量出时间去哪了，按证据修 | P11 | todo |  |  |  |  |
+| T0816 | affiliation 日期口径统一（打戳 / 解析 / 判定 三处生产口径一处定义；夹具助手同批改） | P8 | todo |  |  |  |  |
 | T0901 | Search Document Projection | P9 | todo |  |  |  |  |
 | T0902 | Embedding Provider 与 pgvector | P9 | todo |  |  |  |  |
 | T0903 | Scientific Query Planner | P9 | todo |  |  |  |  |
@@ -2535,7 +2593,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1108 | 性能基线与索引调优 | P11 | todo |  |  |  |  |
 | T1109 | 生产级 Observability/Dashboards | P11 | todo |  |  |  |  |
 | T1110 | Backup/Restore 自动化演练 | P11 | merged | 2026-09-18T09:13:47Z |  | 2026-09-18T09:49:45Z | 2026-09-18T09:56:37Z |
-| T1111 | 凭据不进进程参数表：git 调用统一走环境变量传 header | P11 | todo |  |  |  |  |
+| T1111 | 凭据不进进程参数表：git 调用统一走环境变量传 header | P11 | accepted | 2026-09-18T21:07:27Z |  | 2026-09-18T23:13:06Z |  |
 | T1201 | 完整 Seed Demo Data Builder | P12 | todo |  |  |  |  |
 | T1202 | Canonical MOF Workflow E2E | P12 | todo |  |  |  |  |
 | T1203 | Staging 部署模板 | P12 | todo |  |  |  |  |

@@ -48,6 +48,103 @@ paths:
         - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200': {description: Frozen}
+  /projects/{projectId}/forks:
+    post:
+      summary: Fork a research line into the caller's own space; the external contribution entry
+      description: >-
+        Resolves the create_branch cell for the caller's class
+        (specs/policies/permissions-matrix.csv): the public_anonymous column denies it, a
+        member's column allows it, and a non-member's cell is external_fork_only — the fork
+        may be taken only of a PUBLIC project and only into the caller's own space (the fork
+        project is the caller's personal project, so it grants no access to the parent and
+        needs none). A non-member forking a private project is answered with the
+        existence-hiding 404, never 403. The copy lands on a branch of the fork's own
+        project, never on the fork's own main. Idempotent against canonical state, not
+        against a remembered request key: a repeated request finds the existing fork and
+        copies nothing twice. The fork project's SLUG is derived from the pair (parent,
+        caller) and carries a digest of that pair, so no project a caller can name can deny
+        them a fork of a readable one; its DISPLAY name is the parent's name or the
+        caller's, unchanged.
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source_branch_id:
+                  type: [string, 'null']
+                  description: >-
+                    The parent line to fork; null or absent means the parent's canonical
+                    line (main). A branch that is not in this project answers 404 — the
+                    same answer for unknown and for foreign, so no existence leaks.
+                name: {type: [string, 'null']}
+                purpose: {type: [string, 'null']}
+                visibility:
+                  type: [string, 'null']
+                  description: >-
+                    The fork project's visibility; null or absent means private, fail
+                    closed — the fork's content is the forker's until they publish it, and
+                    publishing is a governance action, not a side effect of forking. A fork
+                    of a project that is not PUBLIC MUST NOT be created public: the copy
+                    carries the parent's content, and a contributor of a private project
+                    holds allow on create_branch but deny on publish_private_to_public
+                    (specs/policies/permissions-matrix.csv), so granting public here would hand
+                    that class through a second door the capability the first one refuses.
+                    This contract is deliberately narrower than the service, which today
+                    honours public verbatim (internal/application/forks/service.go:821);
+                    the route refuses public for a non-public parent rather than exposing
+                    an undecided capability. Whether a fork may raise a copy of non-public
+                    content into the open is an open permission-semantics decision
+                    (tasks/decisions.md, 2026-09-19, the fork visibility section) — this
+                    narrowing creates no rule, it applies the repository's own default-deny
+                    (internal/authz/engine.go) pending that answer.
+                  enum: [public, private]
+                branch_name:
+                  type: [string, 'null']
+                  description: >-
+                    The branch the copy lands on in the fork's project; null or absent
+                    means fork/<source branch name>. Never the fork's own main: that line
+                    is seeded at provisioning and the contribution is a distinct research
+                    path (docs/09 §3).
+      responses:
+        '201':
+          description: >-
+            Fork created: the fork project, its branch, the content copy, and one lineage
+            row (relation_type forked_from) with its audit row and its event, in one
+            transaction.
+        '200':
+          description: >-
+            Already forked: the caller's existing fork of this parent is returned; no
+            project, branch or lineage row was created and no audit row or event written.
+        '400': {description: "The request's shape is wrong (an unusable name or purpose), code VALIDATION_FAILED"}
+        '401': {description: Authentication required — docs/04 §2 forks are for authenticated users}
+        '403':
+          description: >-
+            Forbidden for this actor's class: create_branch is external_fork_only for a
+            non-member, so a project the caller can read that is not PUBLIC is refused
+            here. A non-member who cannot read the project answers 404 instead — the
+            existence-hiding answer, resolved before any condition. A fork of a non-public
+            parent that asks for visibility public is refused here as well — see the
+            visibility field for why that one is fail-closed pending a decision.
+        '404': {description: Unknown or unreadable project, or a source branch that is not in it}
+        '409':
+          description: >-
+            The name the fork's project must have is held by a project that is not this
+            (parent, caller) pair's recorded fork. Two situations collapse into this one
+            answer and neither is claimed over the other, because the record cannot tell
+            them apart: the holder is one of the caller's OWN projects (a fork request of
+            theirs still in flight, or one of their projects that merely holds the name),
+            or both the derived name and the pair's reserved name are held by others. The
+            fork is refused rather than given a third, open-ended name: a project row
+            cannot be deleted, so guessing here is how one pair ends up with two fork
+            projects. A caller whose own in-flight request settles finds the fork on a
+            retry.
+        '503': {description: The store could not be reached; nothing is claimed about the outcome}
+
   /projects/{projectId}/branches:
     get:
       summary: List branches
@@ -177,11 +274,49 @@ paths:
         '200': {description: OK}
     post:
       summary: Open pull request with RSG diff
+      description: >-
+        One path for both classes. A member's open_pr cell is a plain allow; a non-member's
+        is allow_from_fork, and the condition is the lineage — the source branch must
+        belong to a fork of THIS project that THIS actor forked. The parent's own line,
+        an unrelated project's, and somebody else's fork are refused with one answer, so
+        none of the three leaks the others' existence. The database re-checks the same
+        fact on any insert path (pull_request_fork_gate, infra/migrations/00086), and
+        re-checks the semantic state too. A source branch whose recorded semantic state is
+        unstructured_changes cannot open a formal PR (pull_request_semantic_gate,
+        infra/migrations/00042, wire code BRANCH_UNSTRUCTURED_CHANGES): its content carries
+        changes the platform cannot parse, and docs/16 §4 forbids proposing them until the
+        required scientific semantics are filled — the file stays, the branch stays, and
+        the proposal waits.
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_branch_id, target_branch_id, title]
+              properties:
+                source_branch_id: {type: string}
+                target_branch_id: {type: string}
+                title: {type: string}
+                body: {type: [string, 'null']}
       responses:
         '201': {description: PR opened}
+        '400': {description: "The request's shape is wrong (an empty identity, an invalid title, an oversized body), code VALIDATION_FAILED"}
+        '401': {description: Authentication required}
+        '403': {description: "Forbidden for this actor's class (the open_pr cell): for a non-member, a source branch that is not a branch of their own fork of this project, code AUTH_FORBIDDEN"}
+        '404': {description: Unknown or unreadable project, or a source or target branch that does not exist (code BRANCH_NOT_FOUND)}
+        '409':
+          description: >-
+            The source branch cannot carry a formal proposal: its semantic state is
+            unstructured_changes (00042, code BRANCH_UNSTRUCTURED_CHANGES), its lifecycle
+            is merged or aborted (code BRANCH_NOT_ACTIVE), or it has no head state
+            (code BRANCH_HEAD_MISSING).
+        '503': {description: The store could not be reached; nothing is claimed about the outcome}
+
   /projects/{projectId}/pull-requests/{prId}/diff:
     get:
       summary: Get Research State Diff and raw file diff references
