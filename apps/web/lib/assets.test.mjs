@@ -31,6 +31,7 @@ import {
   assetVersionHref,
   browseUrl,
   createAssetsClient,
+  creatorHandleLabel,
   messageForAssetCode,
 } from "./assets.ts";
 
@@ -179,4 +180,16 @@ test("an unknown type renders verbatim rather than as a known one", () => {
   assert.equal(assetTypeLabel("benchmark"), "Benchmark");
   assert.equal(assetTypeLabel("model"), "model");
   assert.equal(assetTypeLabel(""), "");
+});
+
+test("a credited user is a mention and a credited organization is not", () => {
+  // internal/assets.PageCreator documents `handle` as "a user's handle OR
+  // an organization's slug". A mention prefix is the shape this platform
+  // uses for PEOPLE, so an organization rendered with one would be rendered
+  // as a user — the merge the two identity tables exist to prevent. The
+  // user case is asserted first so a helper that never prefixed anything
+  // could not pass by rendering both bare.
+  assert.equal(creatorHandleLabel({ kind: "user", handle: "carol" }), "@carol");
+  assert.equal(creatorHandleLabel({ kind: "organization", handle: "open-mof-lab" }), "open-mof-lab");
+  assert.doesNotMatch(creatorHandleLabel({ kind: "organization", handle: "open-mof-lab" }), /@/);
 });

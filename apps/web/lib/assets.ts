@@ -164,8 +164,40 @@ export interface AssetEvent {
 }
 
 /** One credited party (internal/assets.PageCreator — the role is named). */
-export interface AssetCreator extends AssetUser {
+/**
+ * One credited party of the rendered version (internal/assets.PageCreator).
+ *
+ * The party is an identity — a kind and an id TOGETHER, never an id alone:
+ * `kind` says which of the two identity tables `party_id` is a row of (00002
+ * keeps users and organizations separate), and `handle`/`display_name` are
+ * read from that table — a user's handle and display name, or an
+ * organization's slug and name. It deliberately does NOT extend AssetUser: an
+ * organization has no user id, and rendering one in a user field is the
+ * merge those two tables exist to prevent.
+ */
+export interface AssetCreator {
+  /** Which identity table `party_id` names: "user" or "organization". */
+  kind: string;
+  party_id: string;
+  /** A user's handle, or an organization's slug. */
+  handle: string;
+  /** A user's display name, or an organization's name. */
+  display_name: string;
+  /** The credited relationship: "creator" for the credits published today. */
   role: string;
+}
+
+/**
+ * The handle a credited party is shown under.
+ *
+ * A user's handle is a mention and is rendered as one (`@carol`). An
+ * organization has no handle: `handle` carries its SLUG, and `@open-mof-lab`
+ * would render a lab in the user-mention shape the platform uses to link to
+ * people — the merge internal/assets.PageCreator's split of the two identity
+ * tables exists to prevent. The organization therefore shows its slug bare.
+ */
+export function creatorHandleLabel(creator: Pick<AssetCreator, "kind" | "handle">): string {
+  return creator.kind === "user" ? `@${creator.handle}` : creator.handle;
 }
 
 /** One asset page's data, in the eleven-block order of docs/42 §Asset Page. */

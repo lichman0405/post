@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/lichman0405/post/internal/assets"
+	"github.com/lichman0405/post/internal/domain"
 	"github.com/lichman0405/post/internal/persistence/sqlc"
 )
 
@@ -45,15 +46,15 @@ func NewAssetPageStore(db sqlc.DBTX) *AssetPageStore {
 // unknown pid gets (docs/45), so a client cannot use the page as an oracle
 // for which pids exist.
 //
-// The reads run in a fixed order (asset, pins, versions, lineage, usages,
-// events, users) for two reasons. The pins are resolved BEFORE the versions
-// because they come from the versions' manifests and the union of every
-// version's pins is what has to be resolved: the page renders ONE version —
-// the newest the caller may see — and which one that is is the model's
-// decision, so a reader that resolved only the newest version's pins would
-// silently starve the model of the state it needs for any other choice. The
-// users come LAST because the set of ids to resolve is discovered while
-// reading the versions and the events.
+// The reads run in a fixed order (asset, versions, pins, refs, lineage,
+// usages, events, parties, users, organizations) for two reasons. The
+// version-aware reads cover EVERY version rather than one: the page renders
+// ONE version — the newest the caller may see — and which one that is is
+// the model's decision, so a reader that resolved only the newest version's
+// pins, refs or credits would silently starve the model of the state it
+// needs for any other choice. The identities come LAST, both of them,
+// because the sets of ids to resolve are discovered while reading the
+// versions, the events and the credits.
 //
 // A read failure fails the whole page. There is no partial answer to give:
 // a page missing the usages would report "nobody uses this" for a repository
@@ -86,9 +87,11 @@ func (s *AssetPageStore) LoadAssetPage(ctx context.Context, pid assets.PID) (ass
 			Slug:       row.ProjectSlug,
 			Visibility: assets.Visibility(row.ProjectVisibility),
 		},
-		Users: map[string]assets.PageUser{},
-		Pins:  map[assets.DependencyPin]assets.PagePinState{},
-		Refs:  map[assets.OriginRef]assets.StoredRef{},
+		Users:         map[string]assets.PageUser{},
+		Parties:       map[string][]assets.PagePartyState{},
+		Organizations: map[string]assets.PageOrganization{},
+		Pins:          map[assets.DependencyPin]assets.PagePinState{},
+		Refs:          map[assets.OriginRef]assets.StoredRef{},
 	}
 
 	versions, err := s.queries.ListAssetPageVersions(ctx, string(pid))
@@ -129,7 +132,17 @@ func (s *AssetPageStore) LoadAssetPage(ctx context.Context, pid assets.PID) (ass
 	if page.Events, err = s.events(ctx, string(pid)); err != nil {
 		return assets.PageState{}, false, err
 	}
-	if page.Users, err = s.users(ctx, page.Versions, page.Events); err != nil {
+	// The credited parties come before the identities for the same reason
+	// the pins do: the set of user ids to resolve is discovered while
+	// reading them, and the credits' users are resolved through the same
+	// lookup as the publishers'.
+	if page.Parties, err = s.parties(ctx, string(pid)); err != nil {
+		return assets.PageState{}, false, err
+	}
+	if page.Users, err = s.users(ctx, page.Versions, page.Events, page.Parties); err != nil {
+		return assets.PageState{}, false, err
+	}
+	if page.Organizations, err = s.organizations(ctx, page.Parties); err != nil {
 		return assets.PageState{}, false, err
 	}
 	return page, true, nil
@@ -320,10 +333,71 @@ func (s *AssetPageStore) events(ctx context.Context, pid string) ([]assets.PageE
 	return out, nil
 }
 
-// users resolves the identities the page renders: every version's publisher
-// and every event's actor, in one lookup. An id with no row is simply absent,
-// and the model renders nil rather than an id-only identity.
-func (s *AssetPageStore) users(ctx context.Context, versions []assets.PageVersionState, events []assets.PageEventState) (map[string]assets.PageUser, error) {
+// parties resolves the credited parties of every version of the asset
+// (asset_version_parties), filed under the version ROW id they belong to.
+//
+// The rows come back exactly as stored — role, kind and id — and the kind
+// is not interpreted here: which table an id names is the model's question,
+// and it is answered there by resolving the id against the map the kind
+// selects (assets.creatorsOf). A reader that resolved the kind itself would
+// put a second copy of the identity vocabulary in the adapter.
+func (s *AssetPageStore) parties(ctx context.Context, pid string) (map[string][]assets.PagePartyState, error) {
+	rows, err := s.queries.ListAssetPageParties(ctx, pid)
+	if err != nil {
+		return nil, fmt.Errorf("persistence: read asset page parties %q: %w", pid, err)
+	}
+	out := make(map[string][]assets.PagePartyState, len(rows))
+	for _, row := range rows {
+		out[row.AssetVersionID] = append(out[row.AssetVersionID], assets.PagePartyState{
+			Role:    row.Role,
+			Kind:    row.PartyKind,
+			PartyID: row.PartyID,
+		})
+	}
+	return out, nil
+}
+
+// organizations resolves the identities behind the ORGANIZATION-kind
+// credited parties, in one lookup — the sibling of users() for the second
+// identity table (00002). An id with no row is simply absent, and the model
+// renders no entry for that party rather than an id-only identity.
+//
+// The ids of user-kind parties are not sent here and the ids of
+// organization-kind parties are not sent to users(): an id is only an id
+// against the table its kind names, which is why the two lookups are two
+// lookups.
+func (s *AssetPageStore) organizations(ctx context.Context, parties map[string][]assets.PagePartyState) (map[string]assets.PageOrganization, error) {
+	seen := map[string]bool{}
+	var ids []string
+	for _, list := range parties {
+		for _, p := range list {
+			if p.Kind != string(domain.PartyOrganization) || p.PartyID == "" || seen[p.PartyID] {
+				continue
+			}
+			seen[p.PartyID] = true
+			ids = append(ids, p.PartyID)
+		}
+	}
+	out := make(map[string]assets.PageOrganization, len(ids))
+	uuids := textUUIDs(ids)
+	if len(uuids) == 0 {
+		return out, nil
+	}
+	rows, err := s.queries.ListAssetPageOrganizations(ctx, uuids)
+	if err != nil {
+		return nil, fmt.Errorf("persistence: resolve asset page organizations: %w", err)
+	}
+	for _, row := range rows {
+		out[row.ID] = assets.PageOrganization{ID: row.ID, Slug: row.Slug, Name: row.Name}
+	}
+	return out, nil
+}
+
+// users resolves the identities the page renders: every version's publisher,
+// every event's actor and every USER-kind credited party, in one lookup. An
+// id with no row is simply absent, and the model renders nil rather than an
+// id-only identity.
+func (s *AssetPageStore) users(ctx context.Context, versions []assets.PageVersionState, events []assets.PageEventState, parties map[string][]assets.PagePartyState) (map[string]assets.PageUser, error) {
 	seen := map[string]bool{}
 	var ids []string
 	for _, v := range versions {
@@ -336,6 +410,15 @@ func (s *AssetPageStore) users(ctx context.Context, versions []assets.PageVersio
 		if e.ActorID != "" && !seen[e.ActorID] {
 			seen[e.ActorID] = true
 			ids = append(ids, e.ActorID)
+		}
+	}
+	for _, list := range parties {
+		for _, p := range list {
+			if p.Kind != string(domain.PartyUser) || p.PartyID == "" || seen[p.PartyID] {
+				continue
+			}
+			seen[p.PartyID] = true
+			ids = append(ids, p.PartyID)
 		}
 	}
 	out := make(map[string]assets.PageUser, len(ids))

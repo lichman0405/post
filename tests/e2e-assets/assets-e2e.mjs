@@ -95,6 +95,17 @@ const ALICE = {
   display_name: "Alice Guo",
 };
 
+/**
+ * The party version 2.0 DECLARES as its creator — deliberately someone other
+ * than the publisher (ALICE), so the check below proves the block renders the
+ * stored credit rather than the publisher standing in for it.
+ */
+const CAROL = {
+  user_id: "00000000-0000-4000-8000-000000000003",
+  handle: "carol",
+  display_name: "Carol Ndiaye",
+};
+
 /** The version a non-member must not learn exists. */
 const HIDDEN_VERSION = "3.0";
 
@@ -229,7 +240,9 @@ function pagePayload(viewer, want) {
     },
     origin: ORIGIN,
     rights: RIGHTS,
-    creators: [{ ...ALICE, role: "publisher" }],
+    creators: [
+      { kind: "user", party_id: CAROL.user_id, handle: CAROL.handle, display_name: CAROL.display_name, role: "creator" },
+    ],
     metadata: MANIFEST_METADATA,
     dependencies: DEPENDENCIES,
     lineage: LINEAGE,
@@ -491,7 +504,13 @@ check(
     pageText.includes("Restricted"),
   pageText.slice(pageText.indexOf("Rights"), pageText.indexOf("Rights") + 400),
 );
-check("asset page: creators names the credited party and its role", pageText.includes(ALICE.display_name) && pageText.includes("publisher"));
+check(
+  "asset page: creators names the credited party and its role",
+  pageText.includes(CAROL.display_name) &&
+    pageText.includes("@carol") &&
+    pageText.includes("creator"),
+  pageText.slice(pageText.indexOf("Creators"), pageText.indexOf("Creators") + 200),
+);
 check("asset page: metadata renders each declared key", pageText.includes("cell_chemistry") && pageText.includes("Zn4O(BDC)3"));
 check(
   "asset page: dependencies render the resolved pin with its title",

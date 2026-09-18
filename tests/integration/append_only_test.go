@@ -58,8 +58,14 @@ const appendOnlyTaskID = "T0013"
 // research asset version's PUBLICATION): the version it points at is
 // immutable (invariant 5), so the ledger that replays a publish is history
 // for the same reason, and a rewrite of it would rewrite which version a
-// key already published. The same list drives the catalog assertion and the
-// per-table rejection loop.
+// key already published. Migration 00082 (T0711) joins the asset governance
+// pair: the credited parties of a version are part of that version's
+// permanent record ("Creator/history 永久保留", docs/11 §6), and the
+// rights-holder chain is the append-only governance event the same sentence
+// names — a transfer supersedes a holding by APPENDING, so "转移之后，转移
+// 之前的持有关系仍要读得出来" is exactly what the guard enforces: the
+// previous holder is a row no write path can rewrite or remove. The same
+// list drives the catalog assertion and the per-table rejection loop.
 var appendOnlyTables = []string{
 	"scientific_object_versions",
 	"relation_versions",
@@ -82,6 +88,8 @@ var appendOnlyTables = []string{
 	"semantic_merge_conflicts",
 	"merge_creations",
 	"asset_publish_creations",
+	"asset_version_parties",
+	"asset_rights_holder_events",
 }
 
 // targetedGuardTriggers are the NON-append-only row guards added after
@@ -520,6 +528,44 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 			},
 			del: func(id string) error {
 				_, err := pool.Exec(ctx, `DELETE FROM asset_publish_creations WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			// T0711 (00082): the parties a version credits. A credit is a
+			// fact about an immutable version, so rewriting or deleting one
+			// would rewrite the record of who authored it.
+			table: "asset_version_parties",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO asset_version_parties
+					(asset_version_id, role, party_kind, party_id, position, recorded_by)
+					VALUES ($1, 'creator', 'user', $2, 0, $2) RETURNING id`, av1, u1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE asset_version_parties SET role = 'contributor' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM asset_version_parties WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			// T0711 (00082): the rights-holder chain. The second event is
+			// the case the acceptance is about — it APPENDS, and the first
+			// event it supersedes stays exactly as it was written.
+			table: "asset_rights_holder_events",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO asset_rights_holder_events
+					(asset_id, ordinal, holder_kind, holder_id, previous_holder_kind, previous_holder_id, recorded_by)
+					VALUES ($1, 1, 'user', $2, NULL, NULL, $2) RETURNING id`, ra1, u1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE asset_rights_holder_events SET holder_kind = 'organization' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM asset_rights_holder_events WHERE id = $1`, id)
 				return err
 			},
 		},

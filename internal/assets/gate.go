@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/lichman0405/post/internal/domain"
 	"github.com/lichman0405/post/internal/rights"
 	"github.com/lichman0405/post/internal/rsg/validation"
 )
@@ -47,7 +48,11 @@ type PublishCandidate struct {
 	// cover the manifest document (GateResult.ManifestJSON / Manifest.Hash).
 	IntegrityHash string
 	// CreatorIDs are the users the version credits (docs/11 §3:
-	// creators/contributors; CLAUDE.md invariant 14).
+	// creators/contributors; CLAUDE.md invariant 14). Since T0711 they are
+	// STORED, not only validated: the publish writes one
+	// asset_version_parties row per entry, in this order (migration 00082).
+	// The list is the version's CREATORS — the separate contributor role
+	// docs/11 §6 keeps apart from it is not what this field declares.
 	CreatorIDs []string
 }
 
@@ -130,7 +135,10 @@ type GateResult struct {
 //     edited without the hash moving. When the manifest does not parse
 //     there is nothing to verify against, and the manifest's own refusal
 //     is the reported reason (the fact stays false).
-//   - contributors: at least one creator id, none of them blank.
+//   - contributors: at least one creator id, none of them blank or
+//     unstorable (each must be a user id — see validCreatorIDs), and no
+//     user credited twice (creatorIDsRefusal; the list is what 00082's
+//     asset_version_parties stores, one row per entry).
 //
 // The identity rules — the pid is a real pid, the version label is
 // storable, the manifest declares a type — are preconditions rather than
@@ -218,14 +226,10 @@ func Gate(c PublishCandidate) (GateResult, error) {
 		res.Facts.IntegrityHash = true
 	}
 
-	if validCreatorIDs(c.CreatorIDs) {
-		res.Facts.Contributors = true
+	if cErr := creatorIDsRefusal(c.CreatorIDs); cErr != nil {
+		errs = append(errs, cErr)
 	} else {
-		errs = append(errs, &ValidationError{
-			Code:   CodeNoContributors,
-			Field:  "creator_ids",
-			Detail: "expected at least one creator id, none blank; got " + describeCreatorIDs(c.CreatorIDs),
-		})
+		res.Facts.Contributors = true
 	}
 
 	return res, joinErrors(errs...)
@@ -341,34 +345,147 @@ func parseManifestBytes(raw json.RawMessage) (Manifest, []byte, error) {
 	return m, canonical, nil
 }
 
-// validCreatorIDs reports whether the version credits at least one user,
-// with no blank entry. An id's SHAPE is deliberately not checked here: the
-// column is a uuid, so the database refuses a non-uuid, and the id's
-// existence is the caller's read to make (a gate that cannot look anything
-// up cannot decide it).
+// validCreatorIDs reports whether every entry of the list is one the
+// credit table can store and there is at least one of them: no blank
+// entry, no entry that is not a user id. It is a SHAPE rule — that a party
+// exists, and that no user is credited twice, are answered elsewhere
+// (creatorIDsRefusal and the writing path's reads).
+//
+// The shape rule is the one T0711 added, and the reason is that the
+// declaration now HAS a column. Until 00082 the list was validated and
+// dropped (the comment PageCreator carries), and this function said so:
+// "An id's SHAPE is deliberately not checked here: the column is a uuid,
+// so the database refuses a non-uuid". The column is asset_version_parties
+// .party_id, so the database still refuses it — but a refusal the caller
+// meets as a store failure, AFTER a preview that passed and after the
+// transaction opened, is not the same thing as a refusal the gate names.
+// It is checked here because the preview runs this gate: a candidate the
+// preview blesses must be one the publish can store.
+//
+// Existence is still NOT checked: the gate cannot look anything up, and
+// whether the named user has a row is the writing path's read to make
+// (internal/application/assetrights does exactly that for a holder).
 func validCreatorIDs(ids []string) bool {
 	if len(ids) == 0 {
 		return false
 	}
 	for _, id := range ids {
-		if strings.TrimSpace(id) == "" {
+		if !domain.ValidUUID(CanonicalCreatorID(id)) {
 			return false
 		}
 	}
 	return true
 }
 
+// CanonicalCreatorID is the one spelling of one creator id: the padding a
+// caller may have typed around it, trimmed, and the letters folded to
+// lower case. A uuid is one value whatever case its text is in, so
+// "A1B2…" and "a1b2…" name the same user and the same credit row.
+//
+// It is exported because the layer that STORES a credit applies it too.
+// The gate is a predicate over the candidate: it trims and folds a copy
+// to decide, and hands the candidate back untouched (Gate returns a
+// refusal, never a tidied list), so what reaches
+// internal/persistence.insertVersionCredits is the caller's own text —
+// and "  <uuid>  " is a string pgtype.UUID.Scan refuses. The store
+// normalizes with THIS function rather than a second spelling of the
+// rule, so the gate's comparison and the store's conversion cannot drift
+// into disagreeing about who a creator is: that disagreement is what let
+// a preview-blessed candidate fail its publish (T0711 review, round 8).
+//
+// Only the padding and the case are canonical here. The dashes stay (the
+// column's own text form), the shape is domain.ValidUUID's business, and
+// whether the id names a row is nobody's business at this layer.
+func CanonicalCreatorID(id string) string {
+	return strings.ToLower(strings.TrimSpace(id))
+}
+
+// creatorIDsRefusal reports why the declared creator list is not one a
+// publish may store, or nil when it is. The two rules have two codes,
+// because they ask the caller for different things:
+//
+//   - the list must name at least one user, with no blank entry and no
+//     entry the credit column could not store (CodeNoContributors);
+//   - no user may be credited twice (CodeDuplicateCreatorID). A repeat is
+//     refused, never collapsed: the credit rows are the declaration as
+//     made, and one entry where the caller wrote two would be a silent
+//     rewrite at the boundary of an immutable write. 00082's UNIQUE
+//     (asset_version_id, role, party_id) refuses the second row anyway —
+//     as a store failure after the transaction opened, which is the shape
+//     this rule exists to keep out of the caller's way.
+func creatorIDsRefusal(ids []string) *ValidationError {
+	if !validCreatorIDs(ids) {
+		return &ValidationError{
+			Code:  CodeNoContributors,
+			Field: "creator_ids",
+			Detail: "expected at least one creator id, none of them blank or unstorable " +
+				"(each must be a user id — see validCreatorIDs); got " + describeCreatorIDs(ids),
+		}
+	}
+	if _, again, dup := duplicateCreatorID(ids); dup {
+		return &ValidationError{
+			Code:  CodeDuplicateCreatorID,
+			Field: creatorIDPath(again),
+			// describeCreatorIDs names the pair (entry i repeats entry j),
+			// so the detail and the field agree about which entry is the
+			// repeat.
+			Detail: describeCreatorIDs(ids),
+		}
+	}
+	return nil
+}
+
+// duplicateCreatorID reports the first pair of positions that credit the
+// same user, comparing the entries through CanonicalCreatorID — the same
+// form the writing path stores, so two spellings of one id are one user
+// here and one key there. A blank entry is skipped — two blanks are the
+// shape rule's refusal, not a repeat.
+//
+// Only the creator list is scanned, and it declares one role, so "the same
+// party under two roles" is not touched by this rule: the credit table's
+// uniqueness is per role, and a party that is both a creator and a
+// contributor is two rows by design (docs/11 §6).
+func duplicateCreatorID(ids []string) (first, again int, dup bool) {
+	seen := make(map[string]int, len(ids))
+	for i, id := range ids {
+		key := CanonicalCreatorID(id)
+		if key == "" {
+			continue
+		}
+		if at, ok := seen[key]; ok {
+			return at, i, true
+		}
+		seen[key] = i
+	}
+	return 0, 0, false
+}
+
+// creatorIDPath names one entry of the declared list, the way
+// dependencyPinPath names one pin.
+func creatorIDPath(i int) string { return "creator_ids[" + itoa(i) + "]" }
+
 // describeCreatorIDs renders the creator list for a refusal without
-// echoing unbounded content.
+// echoing unbounded content — the position and the first offending bytes,
+// never the whole list.
 func describeCreatorIDs(ids []string) string {
 	switch {
 	case len(ids) == 0:
 		return "none"
-	case strings.TrimSpace(ids[0]) == "":
-		return "a blank first entry"
-	default:
-		return itoa(len(ids)) + " entries, one of them blank"
 	}
+	for i, id := range ids {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			return itoa(len(ids)) + " entries, entry " + itoa(i) + " is blank"
+		}
+		if !domain.ValidUUID(trimmed) {
+			return itoa(len(ids)) + " entries, entry " + itoa(i) + " is not a user id (a uuid): " + quote(trimmed)
+		}
+	}
+	if first, again, dup := duplicateCreatorID(ids); dup {
+		return itoa(len(ids)) + " entries, entry " + itoa(again) + " credits the same user again as entry " +
+			itoa(first) + ": " + quote(strings.TrimSpace(ids[again]))
+	}
+	return itoa(len(ids)) + " entries"
 }
 
 // describeOriginKinds names the kinds the refs do use, so the refusal says

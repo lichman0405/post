@@ -173,6 +173,16 @@ func pageState(t *testing.T, projectVisibility Visibility) PageState {
 		Users: map[string]PageUser{
 			pageUserID: {UserID: pageUserID, Handle: "privacy-alice", DisplayName: "Alice"},
 		},
+		// The credits the publishes declared, as 00082 stores them: version 2
+		// (the version a non-member renders) credits Alice as its creator, and
+		// the other versions carry no credit row — the shape of a version
+		// published before the table existed. The values are the stored wire
+		// strings, not the Go constants, so the tests below assert the bytes a
+		// reader would actually receive.
+		Parties: map[string][]PagePartyState{
+			pageV2: {{Role: "creator", Kind: "user", PartyID: pageUserID}},
+		},
+		Organizations: map[string]PageOrganization{},
 		Pins: map[DependencyPin]PagePinState{
 			publicPin: {
 				Pin: publicPin, Resolved: true,
@@ -749,32 +759,95 @@ func TestPageRendersNoBlobURL(t *testing.T) {
 	}
 }
 
-// TestPageCreatorNamesItsRole: the creators block names what the credit is.
-// The platform stores no creator list, so the party it can answer for is the
-// publisher — and rendering that under a "creator" heading without saying so
-// would credit the wrong party.
-func TestPageCreatorNamesItsRole(t *testing.T) {
+// TestPageCreatorsAreTheStoredCredits: the creators block renders the
+// version's stored credit rows (asset_version_parties, 00082) — the ids a
+// publish declared, which the gate validated and the repository now keeps —
+// in declaration order, each with the role it is credited in and the KIND
+// that says which identity table its id names.
+func TestPageCreatorsAreTheStoredCredits(t *testing.T) {
+	const (
+		secondUser = "66666666-6666-4666-8666-666666666666"
+		labOrg     = "77777777-7777-4777-8777-777777777777"
+	)
 	state := pageState(t, VisibilityPublic)
+	state.Users[secondUser] = PageUser{UserID: secondUser, Handle: "bob", DisplayName: "Bob"}
+	state.Parties[pageV2] = []PagePartyState{
+		{Role: "creator", Kind: "user", PartyID: pageUserID},
+		{Role: "creator", Kind: "organization", PartyID: labOrg},
+		{Role: "creator", Kind: "user", PartyID: secondUser},
+	}
+	state.Organizations[labOrg] = PageOrganization{ID: labOrg, Slug: "open-mof-lab", Name: "Open MOF Lab"}
+
 	page, ok := BuildPage(state, PageViewer{}, "")
 	if !ok {
 		t.Fatal("BuildPage refused an asset with a public version")
 	}
-	if len(page.Creators) != 1 {
-		t.Fatalf("creators = %+v, want the one publisher", page.Creators)
+	want := []PageCreator{
+		{Kind: "user", PartyID: pageUserID, Handle: "privacy-alice", DisplayName: "Alice", Role: "creator"},
+		{Kind: "organization", PartyID: labOrg, Handle: "open-mof-lab", DisplayName: "Open MOF Lab", Role: "creator"},
+		{Kind: "user", PartyID: secondUser, Handle: "bob", DisplayName: "Bob", Role: "creator"},
 	}
-	got := page.Creators[0]
-	if got.Role != CreatorRolePublisher {
-		t.Errorf("creator role = %q, want %q", got.Role, CreatorRolePublisher)
+	if len(page.Creators) != len(want) {
+		t.Fatalf("creators = %+v, want the %d stored credits in declaration order", page.Creators, len(want))
 	}
-	if got.Handle != "privacy-alice" {
-		t.Errorf("creator handle = %q, want the resolved user", got.Handle)
+	for i, w := range want {
+		if got := page.Creators[i]; got != w {
+			t.Errorf("creators[%d] = %+v, want %+v", i, got, w)
+		}
+	}
+
+	// Every entry on the wire carries the kind beside its id. An entry with
+	// an id and no kind is the shape this block exists not to produce: a
+	// client would have to guess which identity table the id belongs to, and
+	// the two tables are what keeps a person and an organization apart.
+	raw, err := json.Marshal(page.Creators)
+	if err != nil {
+		t.Fatalf("marshal creators: %v", err)
+	}
+	body := string(raw)
+	for _, secret := range []string{`"kind":""`, `"party_id":""`} {
+		if strings.Contains(body, secret) {
+			t.Errorf("creators contains %s, so an entry carries an id without the kind that names it: %s", secret, body)
+		}
+	}
+	if !strings.Contains(body, `"kind":"organization"`) || !strings.Contains(body, `"kind":"user"`) {
+		t.Errorf("creators does not spell both identity kinds: %s", body)
 	}
 }
 
-// TestPageUnresolvableUserRendersNoIdentity: a version whose publisher could
-// not be resolved renders no creators entry — an id is not an identity, and
-// printing one would be a half-answer a client would render as a name.
-func TestPageUnresolvableUserRendersNoIdentity(t *testing.T) {
+// TestPageCreatorsOfAVersionWithoutCreditsAreEmpty: a version whose publish
+// declared no credit row — every version published before 00082 — renders an
+// EMPTY creators block, and nothing is substituted for the credit that was
+// never stored. The publisher is not promoted into the gap: it publishes the
+// version (published_by, rendered as itself in the version block) and it is
+// not evidence of who created the content.
+func TestPageCreatorsOfAVersionWithoutCreditsAreEmpty(t *testing.T) {
+	state := pageState(t, VisibilityPublic)
+	delete(state.Parties, pageV2)
+	page, ok := BuildPage(state, PageViewer{}, "")
+	if !ok {
+		t.Fatal("BuildPage refused an asset with a public version")
+	}
+	if len(page.Creators) != 0 {
+		t.Errorf("creators = %+v, want none for a version with no stored credit row", page.Creators)
+	}
+	if page.Version.PublishedBy == nil || page.Version.PublishedBy.Handle != "privacy-alice" {
+		t.Errorf("published_by = %+v, want the publisher still rendered in the version block", page.Version.PublishedBy)
+	}
+	raw, err := json.Marshal(page)
+	if err != nil {
+		t.Fatalf("marshal page: %v", err)
+	}
+	if !strings.Contains(string(raw), `"creators":[]`) {
+		t.Errorf("the page does not render the empty creators block as an empty list: %s", raw)
+	}
+}
+
+// TestPageUnresolvablePartyRendersNoIdentity: a credited party whose identity
+// the reader could not resolve renders no entry — an id is not an identity,
+// and printing one would be a half-answer a client would render as a name.
+// The same holds for a party of a kind the reader answered nothing for.
+func TestPageUnresolvablePartyRendersNoIdentity(t *testing.T) {
 	state := pageState(t, VisibilityPublic)
 	state.Users = map[string]PageUser{}
 	page, ok := BuildPage(state, PageViewer{}, "")
@@ -790,6 +863,25 @@ func TestPageUnresolvableUserRendersNoIdentity(t *testing.T) {
 	raw, _ := json.Marshal(page)
 	if strings.Contains(string(raw), pageUserID) {
 		t.Errorf("the page leaks the unresolved user id: %s", raw)
+	}
+}
+
+// TestPageUnresolvablePartyOfEitherKindRendersNoIdentity: the same rule for
+// the other identity table and for a kind no table backs — a credit row whose
+// row the reader did not answer for renders no entry, and a party of a kind
+// with no identity table has no name to render at all.
+func TestPageUnresolvablePartyOfEitherKindRendersNoIdentity(t *testing.T) {
+	state := pageState(t, VisibilityPublic)
+	state.Parties[pageV2] = []PagePartyState{
+		{Role: "creator", Kind: "organization", PartyID: "77777777-7777-4777-8777-777777777777"},
+		{Role: "contributor", Kind: "project", PartyID: pageProject},
+	}
+	page, ok := BuildPage(state, PageViewer{}, "")
+	if !ok {
+		t.Fatal("BuildPage refused an asset with a public version")
+	}
+	if len(page.Creators) != 0 {
+		t.Errorf("creators = %+v, want none for parties with no resolved identity", page.Creators)
 	}
 }
 

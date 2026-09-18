@@ -16,6 +16,31 @@ type AssetPublishCreation struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
+// The append-only chain of rights-holder designations and transfers for one research asset (docs/11 §6: "Ownership transfer 是 append-only governance event"; docs/26 §5 lists ownership transfer among the highest-risk audited actions). Each row is one event: the holder it names, the holder it supersedes (NULL for the first), who asked and when. The current holder is the row with the greatest ordinal; every earlier holder remains readable, which is the acceptance "转移之后，转移之前的持有关系仍要读得出来". Nothing here is updated or deleted — a later transfer appends.
+type AssetRightsHolderEvent struct {
+	ID                 pgtype.UUID        `json:"id"`
+	AssetID            pgtype.UUID        `json:"asset_id"`
+	Ordinal            int32              `json:"ordinal"`
+	HolderKind         string             `json:"holder_kind"`
+	HolderID           pgtype.UUID        `json:"holder_id"`
+	PreviousHolderKind *string            `json:"previous_holder_kind"`
+	PreviousHolderID   pgtype.UUID        `json:"previous_holder_id"`
+	RecordedBy         pgtype.UUID        `json:"recorded_by"`
+	RecordedAt         pgtype.Timestamptz `json:"recorded_at"`
+}
+
+// The parties one published asset version credits, per docs/11 §6 roles (creator, contributor, custodian, maintainer). Append-only: a credit is part of the immutable version record and is never revised — "Creator/history 永久保留". Written by the publish path (T0711) inside the publish transaction, so a version either carries its declared credits or does not exist.
+type AssetVersionParty struct {
+	ID             pgtype.UUID        `json:"id"`
+	AssetVersionID pgtype.UUID        `json:"asset_version_id"`
+	Role           string             `json:"role"`
+	PartyKind      string             `json:"party_kind"`
+	PartyID        pgtype.UUID        `json:"party_id"`
+	Position       int32              `json:"position"`
+	RecordedBy     pgtype.UUID        `json:"recorded_by"`
+	RecordedAt     pgtype.Timestamptz `json:"recorded_at"`
+}
+
 type AuditLog struct {
 	ID             pgtype.UUID        `json:"id"`
 	ActorID        pgtype.UUID        `json:"actor_id"`

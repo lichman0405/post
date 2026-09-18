@@ -145,7 +145,22 @@ function assetPage(version) {
       visibility: { metadata: "project_policy", data_access: "restricted" },
       notes: "Synthesis parameters are published; precursor batches are not.",
     },
-    creators: [{ ...ALICE, role: "publisher" }],
+    // The credited parties of the version, in the shape internal/assets
+    // .PageCreator renders since T0711: the row is a STORED credit, so the
+    // party is a kind AND an id (never an id alone) and the role is the one
+    // the credit table records. This fixture used to send the publisher's
+    // user id under the role "publisher" — the placeholder the creators
+    // block carried while no table stored the declaration, which is
+    // exactly the half T0711 closed.
+    creators: [
+      {
+        kind: "user",
+        party_id: ALICE.user_id,
+        handle: ALICE.handle,
+        display_name: ALICE.display_name,
+        role: "creator",
+      },
+    ],
     metadata: [{ key: "cell_chemistry", value: "Zn4O(BDC)3" }],
     dependencies: [],
     lineage: [],

@@ -222,7 +222,8 @@ type assetPageUserWire struct {
 }
 
 type assetPageCreatorWire struct {
-	UserID      string `json:"user_id"`
+	Kind        string `json:"kind"`
+	PartyID     string `json:"party_id"`
 	Handle      string `json:"handle"`
 	DisplayName string `json:"display_name"`
 	Role        string `json:"role"`
@@ -966,11 +967,16 @@ func TestAssetPageRendersTheElevenItemsOverRealRows(t *testing.T) {
 	}
 
 	// --- 5. creators ---
+	// The credit the publish DECLARED (`creators: []string{aliceID}` on
+	// version 2.0), read back through the page: the creator, with its kind
+	// and its role named — not the publisher under a creator heading, and
+	// not an id without the kind that says which identity table it names.
 	if len(page.Creators) != 1 {
-		t.Fatalf("creators = %+v, want the publishing actor as the one credited party", page.Creators)
+		t.Fatalf("creators = %+v, want the one creator version 2.0 declared", page.Creators)
 	}
-	if got := page.Creators[0]; got.UserID != aliceID || got.Handle != "page-alice" || got.Role != assets.CreatorRolePublisher {
-		t.Errorf("the creator entry = %+v, want the publishing user under the role %q", got, assets.CreatorRolePublisher)
+	if got := page.Creators[0]; got.Kind != "user" || got.PartyID != aliceID ||
+		got.Handle != "page-alice" || got.Role != "creator" {
+		t.Errorf("the creator entry = %+v, want the declared creator (kind user, id %s, role creator)", got, aliceID)
 	}
 
 	// --- 6. metadata ---
