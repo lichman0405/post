@@ -48,6 +48,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/conflicthttp"
 	"github.com/lichman0405/post/cmd/api/explorehttp"
+	"github.com/lichman0405/post/cmd/api/feedshttp"
 	"github.com/lichman0405/post/cmd/api/fileshttp"
 	"github.com/lichman0405/post/cmd/api/freezehttp"
 	"github.com/lichman0405/post/cmd/api/gittokenshttp"
@@ -75,6 +76,7 @@ import (
 	"github.com/lichman0405/post/internal/application/branches"
 	appcontribution "github.com/lichman0405/post/internal/application/contribution"
 	"github.com/lichman0405/post/internal/application/diffs"
+	"github.com/lichman0405/post/internal/application/feeds"
 	"github.com/lichman0405/post/internal/application/mainfreeze"
 	"github.com/lichman0405/post/internal/application/manifests"
 	"github.com/lichman0405/post/internal/application/merge"
@@ -719,6 +721,25 @@ func run(args []string) int {
 		},
 	})
 	exploreAPI.Register(v1)
+	// Public syndication feeds (T1004, docs/18 §4): the three anonymous
+	// RSS/Atom routes — a project's, an asset's and a knowledge object's
+	// published output — on the same guarded v1 mux, where a read flows
+	// unauthenticated (未登录可订阅) and the model
+	// (internal/application/feeds) decides what may be rendered. A private
+	// project's feed does not exist at all: BuildFeed answers the same 404
+	// for "not public", "unknown" and "nothing published".
+	//
+	// The base for every absolute link in a document is the configured web
+	// origin (POST_WEB_ORIGIN) — the pages a feed entry points at are the
+	// web app's — and never the request's Host, which a client controls. A
+	// deployment whose origin is unusable disables the surface rather than
+	// serving documents with broken links: the routes register either way
+	// and answer 503 naming the deployment problem (a disabled feature is a
+	// visible one, like the git-token and files surfaces above).
+	feedsAPI := feedshttp.New(feedshttp.Deps{
+		Service: feedService(persistence.NewFeedStore(pool), authCfg.WebOrigin, logger),
+	})
+	feedsAPI.Register(v1)
 	// Official project templates (T0214): the catalog and the
 	// create-from-template path. The templates service orchestrates the
 	// SAME owning-service instances the direct routes use (projectAPI /
@@ -972,6 +993,27 @@ func filesReaderService(cfg *gitprovider.Config, pool *pgxpool.Pool) *gitprovide
 	return gitprovider.NewFilesReader(
 		gitprovider.NewGiteaAdapter(*cfg),
 		gitprovider.NewUserAccessStore(pool))
+}
+
+// feedService wires the T1004 public feeds when the configured web origin is
+// a usable base for the absolute links every feed document is built from
+// (scheme://host[:port], no path), nil otherwise — the same "disabled is
+// visible" shape as the two helpers above, because a feed whose links cannot
+// be built must not be served at all: a subscriber that stores
+// http:///assets/... learns nothing, and a 404 there would tell every reader
+// the feed does not exist.
+//
+// The nil it returns is a NIL INTERFACE (not a typed nil pointer), which is
+// what feedshttp.Deps.Service's nil check requires.
+func feedService(reader feeds.Reader, webOrigin string, logger *slog.Logger) feedshttp.Service {
+	svc, err := feeds.NewService(reader, feeds.Config{BaseURL: webOrigin})
+	if err != nil {
+		logger.Warn("post-api: public feeds disabled",
+			"error", err,
+			"effect", "the feed routes answer 503; set POST_WEB_ORIGIN to the deployment's public web origin and restart")
+		return nil
+	}
+	return svc
 }
 
 // newOIDCClientOrNil builds the provider client when OIDC is configured.
