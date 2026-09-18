@@ -11014,3 +11014,80 @@ distinct target 列表「bounded by MaxSubscriptionsPerUser」，但 `DeleteSubs
    「new ref」。**错在我不该在那时建它，不在它。** 它的返工信**第一段就是撤回**，免得工人以为自己做错了什么。
    （`rejected` 没有直通 `verification` 的边，所以必须重派一次才能让它的成果重新进入验收——这不是它的成本，
    是我的。）
+## T1003 收件箱：放行、裁定五落地、我自己做的一次突变验证（2026-09-18）
+
+### 独立评审：approve，0 阻断、0 重大
+
+评审在新树上自己重跑了该跑的：`TestInbox*` 六个函数、完整集成套件、三个 Go 单测包、
+`pnpm --filter @post/web typecheck`+`lint`、`scripts/web-unit-tests.sh` 221/221、
+schema snapshot 与 spec version 校验；并用 mtime 取证确认第三轮只动了八个预期文件、
+验证前后工作树逐字节一致。
+
+它同时在**自己的临时副本**里复现了突变（M9 去掉受众谓词、M10 放宽红点过滤），
+指明失败的精确行号——这是我要的「证明这把尺子会说「不」」，而不是听工人自述。
+
+### 裁定五落地
+
+`MarkInboxAllRead`（`internal/events/inbox_store.go:444`）先跑 `inboxVisibleTargets`，
+错误直接返回、写 0 行；UPDATE（`:374`、`:379-382`）带同一个受众谓词。读与写由**同一次解析**
+定界，这正是裁定五要的：红点、页面、按钮不许各算各的。
+
+### 我自己做的突变验证（不是转述评审的话）
+
+评审的临时副本 `/tmp/T1003-mut` 在 collect 之后被清掉了，**它的证据无法追溯**，
+所以我按自己的规矩（引用的测试必须被证明会失败）重做了一遍：
+
+- 把 UPDATE 的受众谓词换成 `($2::text[] IS NOT NULL AND $3::text[] IS NOT NULL)`
+  —— 参数仍然绑定，**语句照常执行**（第二轮 M4 的教训：让语句报参数错不算「抓到泄漏」）。
+- `TestInboxReadAllMarksOnlyWhatItServes` 在 `:1243`（read-all marked **5** rows, want 2）、
+  `:1247`、`:1277`、`:1289` 变红。报出 5 而不是报错，说明真的标了不该标的行。
+- 还原后 sha256 = `371a4501…`，与评审记录的被审指纹逐字节一致。
+
+### 评审的 4 条发现：记档，不驳回
+
+两条 minor 都是**只在注释里**的假话，且**结论仍然成立**：
+
+1. `infra/migrations/00079_research_inbox.sql:53-58` 的索引理由仍把 `markInboxAllRead` 的
+   WHERE 逐元素枚举成 "matched element for element"，而裁定五给它加了一个元素。
+   索引本身仍然是对的（部分索引的谓词与前导列仍是新 WHERE 的子集），**只有那句枚举不再是真话**。
+   生成物 `specs/database/postgres.sql:4973-4974` 带着同一句。
+2. `apps/web/app/(main)/notifications/inbox.css:260` 是「调用者可能已读不到的目标」这个
+   已退休故事**第七处**载体——三(一) 让工人删了六处，这一处漏了；决定三之后这种条目根本不再渲染。
+
+两条 nit：`inbox.ts:200` 的 `asEntry` 只校验 13 个字段里的 7 个（现有 Go handler 永远发全，
+属健壮性）；`inbox-surface.tsx:171` 的 ARIA tablist 不完整（我上轮明确说不动）。
+
+**按既有规矩（假机制声称 + 保护完好 → 记档合并；假覆盖/假证据 → 驳回）判为记档合并。**
+两处注释的修正另起小跟办，不为此再烧一整轮返工。
+
+### 我这一轮自己的错，记一笔
+
+还原文件后我用 `grep -c "unnest(\$2::text\[\], \$3::text\[\])"` 复查，得到 **0 命中**，
+差点以为还原坏了。**是探针坏了**：BRE 里 `[]` 是畸形的括号表达式。
+换 `grep -F` 后 1 命中、原文逐字在场。
+教训与那条「先证明尺子会说「不」」是同一条，只是这次坏的是我手里的尺子——
+**本仓库大量 SQL 含 `[]`，用正则 grep 这些串会静默返回 0。**
+
+## 串行链上的裁定送达：哪些能靠机制、哪些只能靠信（2026-09-18）
+
+查清了 T1004 prompt 里**没有** `## Supervisor rulings for this task` 一节的原因，**不是二进制陈旧**：
+
+- 渲染器在树里是好的（`internal/devorchestrator/worker_render.go:451-460`）。
+- 渲染的**数据源是台账** `tasks/tasks.json`——`worker_render_test.go:390` 明写「no task in tasks.json
+  carries supervisor_scope_narrowing」是错误条件。
+- **全仓库没有任何 Go 源码引用 `tasks/packages`**。暂存任务包是死的（T1110 那一轮已查出，
+  八个任务的裁定都因此没送达）。
+
+逐条核了串行链剩下的一环不漏：
+
+| 任务 | 台账里的裁定 | 任务包里的裁定 | 结论 |
+|---|---|---|---|
+| T1003 / T1004 / **T1005** | 无 | 有 | **搁浅**，只有返工信能送达 |
+| T0711 / T0805 / T0604 / T0707 / T0804 | 有 | 有 | 会渲染进 prompt，机制有效 |
+
+**因此链的推进方式不必改，但有一条必须记住：T1005 只能靠信，不能发通用 rebaseline。**
+（T1003 已经合并——它的裁定也是靠信送达的，且奏效。）
+
+**根因修复**（把搁浅的裁定从 `tasks/packages/**` 搬进 `tasks/tasks.json`）**必须等空窗**：
+`tasks/tasks.json` 是 spec digest 的输入，改它就要重新生成标记，而标记一动，main 与每个在飞任务的
+G2 都会变红。剩下唯一受影响的任务是 T1005，它的信已经写好，所以这个修复不阻塞链。
