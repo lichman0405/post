@@ -11329,3 +11329,52 @@ ours = 任务树，theirs = `origin/main`），**冲突是结构性的，不是�
 （内容与位置逐条留在 `/tmp/`，并写进信里）→ `rddev rebaseline` → 在信里让它把寄存的行
 **放回 main 那几行之后**。**不要**为了让合并过去而改写 main 的登记顺序，也**不要**把别人的行
 搬进本任务的 diff——那是把合并顺序塞进产物里。
+
+## 撤回：`creator_ids` 的 `format: uuid` 撤掉了，main 因它变红（2026-09-18）
+
+**事实**：`a37f4be` 推上去之后，main 的 CI（run `35356733899`，`a37f4beb`）在
+**`migration-integration` 这一个 job 上红了**，其余 6 个 job 全绿：
+
+```
+--- FAIL: TestAssetGovernancePaddedCreatorIDsStoreTheCanonicalUUID (0.47s)
+    asset_governance_test.go:370: publish 1.2 with creator_ids ["  03B5B880-…  "]:
+    assetpublish: the publication was refused: asset_schema: SCHEMA_VALIDATION_FAILED:
+    - at '/creator_ids/0': '  03B5B880-…  ' is not valid uuid: element 1 must be 8 characters long
+```
+
+**这不是测试过时，是我的改动错了。** T0711 的这条集成测试（`tests/integration/asset_governance_test.go:307`）
+写明了既定口径，而且它本身是第 8 轮审查的产物：
+
+> 「the gate admits the padded spelling（`validCreatorIDs` 先 trim 再校验），
+> 而 store 用同一个函数归一化 `assets.CanonicalCreatorID`，所以落进 uuid 列的是 id 本身。
+> 没有 store 的归一化，preview 会放行、发布却在事务里失败——一个 00082 之前能成功的请求
+> 变成 503（T0711 review, round 8）。」
+
+**我错在哪**：schema 校验跑的是**调用方原样交上来的文本**，而「带空白/大小写」的拼写是
+**门禁这一侧刻意接受、由存储归一化**的。`format: uuid` 插在归一化**之前**，于是它把一件
+被明确定义为「合法且归一化」的输入判成了非法——**收紧的位置错了，收紧了不该收的一层**。
+
+**更根本的是我上一次探针的偏差**：那张 `["alice"]` 表量的是**schema 单独一份**的行为，
+我却把它当成了**整条发布契约**的行为，于是写下「契约松的一侧是 schema，不是门禁」。
+而实际上门禁层（`validCreatorIDs` → `CanonicalCreatorID` 后必须 `domain.ValidUUID`）
+**早就在管这件事**：`["alice"]` 今天是 422 `ASSET_NO_CONTRIBUTORS`，不是被放行。
+**探针没覆盖到的地方，「验证过」等于没验证**——这一条今天第二次咬到我（上一次是「寄存」）。
+
+**动作（已做）**：
+
+1. 三份 schema 副本按 `9da4357` 的内容还原（`specs/schemas/`、`packages/schemas/schemas/`、
+   `internal/rsg/schemareg/schemas/`，三份 sha256 逐字节相同 `e7272dab…`）；
+2. `python3 scripts/spec_version.py --write` 重新生成指纹，
+   **结果与收紧前逐字节相同**（`sha256:d0df0ea0d5defd49`，38 个输入）——
+   这同时证明了「只有这一行改动动过指纹」；
+3. T0805 与 T0707 两个 worker 在飞、它们的树带着这份坏掉的 schema（基线 `d9992ea`），
+   `rddev worker stop` 停止并记录（exit 143），随后重基线到撤回后的 main 再返工。
+   **停而不是等**：它们的集成套件必然红在同一条测试上，等下去只是烧一轮。
+
+**裁定（L1）：schema 保持宽松，门禁是唯一执法点。** 理由：schema 校验的输入是**原始文本**，
+而契约是「先归一化、再判形状」；要把「trim 之后是 uuid」写进 JSON Schema，就得把传输层的
+容错（`\s*` 之类）刻进**文档 schema**——那比「执法点只有一处」更糟。
+**记档的残留问题**（不在本轮做）：若将来仍想让 schema 声明形状，正确做法是
+**校验前先对副本做归一化**，而那会连带决定「非 uuid 的 id 得到哪个错误码」
+（今天是命名的 `ASSET_NO_CONTRIBUTORS`，改后会变成 `SCHEMA_VALIDATION_FAILED`）——
+**这是客户端可见的契约变化，不是 Supervisor 顺手一笔。**
