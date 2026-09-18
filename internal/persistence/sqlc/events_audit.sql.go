@@ -14,7 +14,7 @@ import (
 const enqueueOutboxEvent = `-- name: EnqueueOutboxEvent :one
 INSERT INTO outbox_events (event_type, payload, correlation_id)
 VALUES ($1, $2, $3)
-RETURNING id, event_type, payload, correlation_id, created_at, published_at, attempts, actor_id, project_id, visibility, last_error, webhook_fanned_out_at
+RETURNING id, event_type, payload, correlation_id, created_at, published_at, attempts, actor_id, project_id, visibility, last_error, webhook_fanned_out_at, via
 `
 
 type EnqueueOutboxEventParams struct {
@@ -39,6 +39,7 @@ func (q *Queries) EnqueueOutboxEvent(ctx context.Context, arg EnqueueOutboxEvent
 		&i.Visibility,
 		&i.LastError,
 		&i.WebhookFannedOutAt,
+		&i.Via,
 	)
 	return i, err
 }
@@ -124,7 +125,7 @@ func (q *Queries) ListOrganizationAuditEntries(ctx context.Context, arg ListOrga
 }
 
 const listPendingOutboxEvents = `-- name: ListPendingOutboxEvents :many
-SELECT id, event_type, payload, correlation_id, created_at, published_at, attempts, actor_id, project_id, visibility, last_error, webhook_fanned_out_at FROM outbox_events
+SELECT id, event_type, payload, correlation_id, created_at, published_at, attempts, actor_id, project_id, visibility, last_error, webhook_fanned_out_at, via FROM outbox_events
 WHERE published_at IS NULL
 ORDER BY created_at, id
 LIMIT $1
@@ -152,6 +153,7 @@ func (q *Queries) ListPendingOutboxEvents(ctx context.Context, batchSize int32) 
 			&i.Visibility,
 			&i.LastError,
 			&i.WebhookFannedOutAt,
+			&i.Via,
 		); err != nil {
 			return nil, err
 		}
@@ -313,7 +315,7 @@ const recordResearchEvent = `-- name: RecordResearchEvent :one
 
 INSERT INTO research_events (event_type, actor_id, project_id, visibility, payload, correlation_id)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, event_type, actor_id, project_id, visibility, payload, correlation_id, occurred_at, outbox_event_id
+RETURNING id, event_type, actor_id, project_id, visibility, payload, correlation_id, occurred_at, outbox_event_id, via
 `
 
 type RecordResearchEventParams struct {
@@ -348,6 +350,7 @@ func (q *Queries) RecordResearchEvent(ctx context.Context, arg RecordResearchEve
 		&i.CorrelationID,
 		&i.OccurredAt,
 		&i.OutboxEventID,
+		&i.Via,
 	)
 	return i, err
 }

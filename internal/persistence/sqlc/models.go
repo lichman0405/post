@@ -170,6 +170,8 @@ type OutboxEvent struct {
 	LastError *string `json:"last_error"`
 	// The webhook fan-out cursor (T1006): set in the same transaction that inserts the delivery rows, so the fan-out is exactly-once per published row — a crash between insert and mark re-runs it as a no-op under webhook_deliveries_endpoint_event_uniq.
 	WebhookFannedOutAt pgtype.Timestamptz `json:"webhook_fanned_out_at"`
+	// The channel the write that produced this event arrived through, in the state_commits.via vocabulary (00004) — the envelope column the publisher copies verbatim into research_events.via (00046: envelope columns are copied from the outbox row, never re-derived from the payload). NULL means the writing path did not record a channel; the outbox recorder (internal/events) is the path that sets it.
+	Via *string `json:"via"`
 }
 
 type PolicyVersion struct {
@@ -362,6 +364,8 @@ type ResearchEvent struct {
 	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
 	// The outbox row this event was published from (T1001). The partial unique index research_events_outbox_event_uniq makes the publish step idempotent: a retried publish after a crash between the insert and the published-mark is a no-op. NULL for research events written directly, bypassing the outbox.
 	OutboxEventID pgtype.UUID `json:"outbox_event_id"`
+	// The channel the write that produced this event arrived through, in the state_commits.via vocabulary (00004), copied verbatim from the outbox row it was published from (00046). Read by the Contribution Ledger projection (T0807) into contribution_events.via — the ledger never re-derives a channel from an event payload. NULL means no channel was carried.
+	Via *string `json:"via"`
 }
 
 type ResearchOwnerRule struct {

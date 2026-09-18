@@ -685,9 +685,20 @@ var canonicalTables = map[string]tableExp{
 		pk:   []string{"relation_type"},
 	},
 	"contribution_events": {
-		cols: []colExp{c("id", u, false, true), c("actor_id", u, false, false), c("organization_id_at_time", u, true, false), c("project_id", u, true, false), c("event_type", txt, false, false), arr("role_codes", false, true), c("object_refs", jb, false, true), c("accepted_context", bl, false, true), c("released_context", bl, false, true), c("occurred_at", ts, false, true)},
+		// T0807 (00087): the Contribution Ledger projection. research_event_id
+		// pins the domain event a row was projected from (the partial unique
+		// index below is the dedupe key the projection's INSERT ... ON
+		// CONFLICT DO NOTHING targets) and via carries the CHANNEL the
+		// contribution arrived through — the state_commits.via vocabulary
+		// (00004), never the audit_log.via authentication one (00012).
+		// Both are nullable with no default: NULL is a fact ("written by a
+		// path that is not the projection" / "the source event carried no
+		// channel"), and a default would be a value nobody recorded. No
+		// CHECK on via: the vocabulary is Go-side (the 00064/00066/00067/
+		// 00045 convention), exactly as role_codes has none.
+		cols: []colExp{c("id", u, false, true), c("actor_id", u, false, false), c("organization_id_at_time", u, true, false), c("project_id", u, true, false), c("event_type", txt, false, false), arr("role_codes", false, true), c("object_refs", jb, false, true), c("accepted_context", bl, false, true), c("released_context", bl, false, true), c("occurred_at", ts, false, true), c("research_event_id", u, true, false), c("via", txt, true, false)},
 		pk:   []string{"id"},
-		fks:  []fkExp{fk("actor_id", "users", "RESTRICT"), fk("organization_id_at_time", "organizations", "RESTRICT"), fk("project_id", "projects", "RESTRICT")},
+		fks:  []fkExp{fk("actor_id", "users", "RESTRICT"), fk("organization_id_at_time", "organizations", "RESTRICT"), fk("project_id", "projects", "RESTRICT"), fk("research_event_id", "research_events", "RESTRICT")},
 	},
 	"credit_disputes": {
 		cols:   []colExp{c("id", u, false, true), c("project_id", u, true, false), c("opened_by", u, false, false), c("target_ref", txt, false, false), c("claim", txt, false, false), c("state", txt, false, true), c("resolution", txt, true, false), c("opened_at", ts, false, true), c("resolved_at", ts, true, false)},
@@ -696,13 +707,24 @@ var canonicalTables = map[string]tableExp{
 		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("opened_by", "users", "RESTRICT")},
 	},
 	"research_events": {
-		cols: []colExp{c("id", u, false, true), c("event_type", txt, false, false), c("actor_id", u, true, false), c("project_id", u, true, false), c("visibility", txt, false, false), c("payload", jb, false, false), c("correlation_id", txt, false, false), c("occurred_at", ts, false, true), c("outbox_event_id", u, true, false)},
+		// T0807 (00087) appended via: the channel the write arrived
+		// through, in the state_commits.via vocabulary (00004) — the
+		// envelope column the publisher copies from the outbox row and the
+		// Contribution Ledger projection copies into contribution_events.
+		// Nullable with no default: NULL means no channel was carried, and
+		// a default would read like a recorded fact.
+		cols: []colExp{c("id", u, false, true), c("event_type", txt, false, false), c("actor_id", u, true, false), c("project_id", u, true, false), c("visibility", txt, false, false), c("payload", jb, false, false), c("correlation_id", txt, false, false), c("occurred_at", ts, false, true), c("outbox_event_id", u, true, false), c("via", txt, true, false)},
 		pk:   []string{"id"},
 		fks:  []fkExp{fk("actor_id", "users", "RESTRICT"), fk("project_id", "projects", "RESTRICT"), fk("outbox_event_id", "outbox_events", "RESTRICT")},
 	},
 	"outbox_events": {
 		// T1006 (00059) appended webhook_fanned_out_at: the fan-out cursor.
-		cols: []colExp{c("id", u, false, true), c("event_type", txt, false, false), c("payload", jb, false, false), c("correlation_id", txt, false, false), c("created_at", ts, false, true), c("published_at", ts, true, false), c("attempts", i4, false, true), c("actor_id", u, true, false), c("project_id", u, true, false), c("visibility", txt, false, true), c("last_error", txt, true, false), c("webhook_fanned_out_at", ts, true, false)},
+		// T0807 (00087) appended via: the channel itself, which is what the
+		// publisher copies (00046: envelope columns travel as outbox
+		// columns, never re-derived from the payload) — nullable, because
+		// NULL says "the writing path recorded no channel" and a default
+		// would say something nobody observed.
+		cols: []colExp{c("id", u, false, true), c("event_type", txt, false, false), c("payload", jb, false, false), c("correlation_id", txt, false, false), c("created_at", ts, false, true), c("published_at", ts, true, false), c("attempts", i4, false, true), c("actor_id", u, true, false), c("project_id", u, true, false), c("visibility", txt, false, true), c("last_error", txt, true, false), c("webhook_fanned_out_at", ts, true, false), c("via", txt, true, false)},
 		pk:   []string{"id"},
 		fks:  []fkExp{fk("actor_id", "users", "RESTRICT"), fk("project_id", "projects", "RESTRICT")},
 	},
@@ -1125,6 +1147,12 @@ var explicitIndexes = map[string][]string{
 	// addressed by, so two rows answering to one pid is the identity
 	// failing.
 	"knowledge_publications_pid_uniq": {"pid", "UNIQUE"},
+	// T0807 (00087): the Contribution Ledger projection's dedupe key — one
+	// ledger row per source domain event, ever. Partial for the reason
+	// research_events_outbox_event_uniq is: NULL is never a conflict, so a
+	// ledger row written without a source event stays legal while every
+	// projection-written row (always non-NULL) is unique.
+	"contribution_events_research_event_uniq": {"research_event_id", "UNIQUE", "WHERE"},
 	// T0406: the merge record's read paths (00069) — a project's merges
 	// newest-first, and the saga's retry scan over merges whose Git step has
 	// not happened yet (partial: an updated merge never needs the step

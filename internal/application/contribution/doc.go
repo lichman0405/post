@@ -38,4 +38,12 @@
 // authz.ActionPublishPrivateToPublic (agent column: deny) when the
 // opportunity HTTP/MCP surface lands — the agent refusal here is the
 // domain-level backstop, not a replacement for the permission matrix.
+//
+// The package also drives the Contribution Ledger projection (T0807,
+// docs/13 §1): LedgerProjector reads the append-only domain event log and
+// writes the ledger rows the mapping table in internal/contribution
+// describes. It is a background consumer, not an API surface — nothing in
+// the ledger's write path is callable by a request — and it decides nothing
+// about a row's content beyond coverage visibility: an event whose type has
+// no mapping is counted and logged (LedgerBatch.Unmapped), never dropped.
 package contribution
