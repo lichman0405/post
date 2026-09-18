@@ -5823,7 +5823,7 @@
       ]
     },
     "T0804": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-18T18:51:56Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：requirements 第 4 条逐字写着 fork 导入的 state 的 semantic completeness 派生「按 issue #189 的裁定执行……不得自行发明」，而 #189 仍 OPEN。",
       "worker_run_id": "run-410fcd50c0756752",
@@ -5897,6 +5897,13 @@
           "at": "2026-09-18T18:51:56Z",
           "run_id": "run-410fcd50c0756752",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T19:20:46Z",
+          "run_id": "run-0d0cbd518260849c",
+          "reason": "collect: all checks passed"
         }
       ]
     },
