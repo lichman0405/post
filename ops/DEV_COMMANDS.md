@@ -104,6 +104,29 @@ bash ops/tests/doctor-smoke-test.sh # 宿主端到端自洽性冒烟测试（bas
 
 检查契约（id、severity、baseline、remediation）见 `ops/doctor-checks.md` —— 这是 T0009 实现 `rddev doctor` 的规范，不可在实现时重新发明检查语义。
 
+## 备份/恢复演练（T1110 起可用，docs/37_BACKUP_DR.md）
+
+```bash
+./ops/backup-restore-drill.sh                   # make infra-up + infra-init + migrate，然后跑演练
+./ops/backup-restore-drill.sh --no-infra        # 栈已经起好并迁到 head 时用这个
+./ops/backup-restore-drill.sh --artifacts DIR   # 指定产物目录（默认 <repo>/.backup-dr/drill-<run id>）
+```
+
+演练（`cmd/api/backupdr`，由 blocking 测试 `restore drill` = `tests/integration/restore_drill_test.go` 跑完）做四件事：
+
+1. **备份四类**，逐字照 `docs/37_BACKUP_DR.md:4`：Postgres、S3 blobs/manifests、Gitea repositories、critical secrets/config **metadata**（secret 的**值**按 secret manager 策略走，不进产物）；
+2. **恢复进空环境**——空是**证明**出来的，不是假设的：`report.json` 的 `restore.emptiness_checks` 逐类给出证据（0 tables / 0 rows、bucket 不存在、organization 不存在）；空环境本身照既有工具建（`make infra-up` + `make infra-init` + `make migrate`），不另起一套；
+3. **对账四条轴** DB ↔ Git refs ↔ blob hashes ↔ release manifests，且**只报不改**：drift 记 high-severity finding 加一行 audit（`audit_log`，append-only），`repairs_applied` 恒为 0，报告里带 `repair_proposal` 但不执行；
+4. **打开五样**：Seed Project、Release、Asset、Files、Evidence Graph（`docs/37:10`，五样都要能打开）。
+
+产物落在 `.backup-dr/`（`.gitignore` 覆盖）。脚本在**创建目录之前**先拒绝工作树里任何没被 gitignore 的产物目录——dump 与 git mirror 不能有一次 `git add -A` 就能进仓库的机会。产物里不含凭证值：dump 的凭证列被替换成占位符，运行结束前再扫一遍整个产物目录，扫到就**拒绝**这次运行。
+
+退出码：`0` 跑通；`1` 失败；`2` **skip，同样是 Gate 失败**；`3` 用法错误；`4` 栈起不来；`5` 产物目录没被 gitignore。
+
+`2` 值得单独说：`go test` 在测试 skip 时**退出 0**，只看退出码的 Gate 会在没有 Docker daemon 的机器上变绿。所以这个脚本要求看到运行自己的 PASS 行，并把 skip 的理由原样打出来。重测试缺依赖时的形状照 `tests/integration/git_reconciliation_test.go:18-24`：**显式 skip 并打印理由**，绝不静默变绿。
+
+**这轮验收是「流程能跑通」，不是「达到 RPO 24h / RTO 4h」**（`docs/37_BACKUP_DR.md:12-13`）：脚本与报告都不测量 RPO/RTO，也都不断言、不声称任何 RPO/RTO。
+
 ## Supervisor 无人值守驱动（2026-09-13）
 
 ```bash
