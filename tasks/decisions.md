@@ -11182,3 +11182,91 @@ worker 起不来。**不返工**，最小修法是只在启用时校验。判 mi
 **含义**：任何「树里有、`diff.txt` 里没有」的改动，对审查这一层是**隐形的**。这与
 「review scratch dir 是空的、空的是健康的」不矛盾——健康的空目录，代价是审查必须自己
 重建树，而重建的输入只有 `diff.txt`。
+
+## T0711 的审查轨迹与四条处置（2026-09-18）
+
+第一轮审查 `request_changes`（1 blocking / 1 minor / 2 nit），返工后第二轮 `approve`
+（0 blocking / **1 major** / 3 minor / 3 nit）。逐条：
+
+**(1) [blocking，已修] 预览放行、发布以 503 收场。** `validCreatorIDs`（`internal/assets/gate.go:373`）
+按 `TrimSpace` 校验、`duplicateCreatorID` 按 `ToLower(TrimSpace(x))` 去重，而
+`insertVersionCredits`（`internal/persistence/asset_rights_store.go:440`）把 **raw 原样**
+交给 `textUUID`：`creator_ids: ["  <uuid>  "]` 于是过了 preview、在事务里转换失败，
+被 `cmd/api/assetshttp/publish.go:306-310` 映射成 **503「稍后重试」**——而重试永远不会成功，
+且是回归（改动前这条请求成功，因为校验完即丢弃）。
+**我的裁定（L1）**：归一化归**门禁**这一侧、存储消费同一个值——依据是他们自己的代码早已定过口径
+（去重就是按 trim+小写比的），**存储是唯一没照口径走的地方**，不是门禁太宽。
+**修法比我要求的下限更干净**：新增 `assets.CanonicalCreatorID`，**三处（校验 `:373`、去重 `:451`、
+存储 `:471`）都调它**，规则只有一处定义。**我自己复核过**：函数体是
+`ToLower(TrimSpace(id))`；并在工作树里实跑 `TestAssetGovernancePaddedCreatorIDsStoreTheCanonicalUUID`
+与 `internal/assets` 单元包，用 `-v` 确认是 `RUN → PASS` 而非 skip（0.41s 的绿先证明它量到了东西）。
+
+**(2) [major，保留并记档] 门禁被收紧，而 `specs/schemas/research-asset-version.schema.json`
+把 `creator_ids` 写成 `{type: array, items: {type: string}}`（无 `format`）。**
+审查提醒：按 schema 发 `["alice"]` 的客户端现在会得到 422 `ASSET_NO_CONTRIBUTORS`
+（重复则 `ASSET_CREATOR_ID_DUPLICATE`），而本任务之前它是被接受的。
+**裁定：保留收紧。** 理由：这个字段从「校验完即丢弃」变成「必须落库」，而库里的列是 uuid；
+放行一个存不下的值，失败只能落在事务里（正是 (1) 的形状）。**契约松的一侧是 schema，不是门禁。**
+**后续（等 T0711 合并后再做，不能现在做）**：给该 schema 的 `creator_ids` 加 `format: uuid`
+并重新生成指纹。**为什么不能现在做**：`specs/**` 是指纹输入，
+main 一动指纹就会红掉在飞任务的 G2（G2 = 当前 main + 本任务改动，而本任务树里带着自己的指纹）。
+这正是「在飞期间不要动指纹输入」这条规矩的又一个实例。
+
+**(3) [minor ×3，记档] 三处诚实的覆盖缺口**（不是假声称，所以按「记档」而不是「返工」处理）：
+`asset_page_store.go:369` 的机构署名读路径**没有任何已提交测试对着真 PostgreSQL 跑过**
+（审查自己建一次性库手跑了两条原样 SQL，结果正确）；验收 2 的「creator 与 contributor 各自独立」
+一臂是用 raw SQL 直接 INSERT 证明的；验收 7 的「匿名被拒」只在权限矩阵层证明（命令的 actor
+硬编码 `ClassOf(true, …)`，表达不了匿名调用者，缺的是表达位不是测试）。
+
+**(4) [nit ×3，记档] `assetrights` 的 `ProjectID` 未做形状校验**（非 uuid 的 project_id 走
+`ErrMemberNotFound` → 403，而同一份请求里 holder 形状错是 422；**fail-closed，不泄漏任何东西**，
+留给接传输层时统一）；RESULT 里「门禁没有被收紧」半句**在语境里为真**（指「带空白的 id 依旧被接受」）
+但脱离语境可被误读——**在 PR 正文里写清实际口径**；`asset-page.tsx:249` 的区块标题仍写死
+"Creators"，而模型渲染的是任意存储角色（今天只有 creator 有写入者，等第一个 contributor
+写路径落地时会矛盾）。
+
+## 迁移链里缺了一环：T0707 预定的 00085 不在它的树里（2026-09-18）
+
+**事实**（把 64 个 worktree 逐个扫过一遍：对每个 `.rddev/worktrees/*/infra/migrations/`
+取文件名，减去 main 上已有的那些）：
+
+| worktree | 持有的、main 上还没有的迁移 |
+|---|---|
+| T0711 | `00082` |
+| T0805 | `00083` |
+| T0604 | `00084` |
+| T0804 | `00086` |
+| **T0707** | **一个都没有**（账上给它留的是 `85`） |
+
+T0707 的树改了 `asset_preview.sql`、新增 `internal/assets/usage.go`、
+`project_dependency.go` 等，**没有建迁移文件**——它可能判断既有 `asset_dependencies`
+表已够用。**这是允许的**（它的任务书写明「不需要迁移就不建，在 RESULT 里说明理由」），
+但它把一条只在「下一个人」那里才会显形的危险留给了合并顺序。
+
+**规则**：`internal/devorchestrator/migration_order.go:136` 的 `assertMigrationMergeOrder`
+在每次 merge 时拒绝「本任务的迁移要上 main、而另一个 worktree 还压着**更小号**的未合并
+迁移」。它问的是 **worktree 而不是任务状态**（`:131-135` 逐字：状态是记账，worktree 才是
+会合并的东西）。运行器是 goose v3，默认**拒绝乱序迁移**：已应用到 00086 的库会在
+`found 1 missing (out-of-order) migration: [00085_...]` 处停下（`:20-21`），而 **CI 永远
+看不见**——CI 每个 job 都迁一个全新的库，那里文件是按字典序整体应用的（`:30-35`）。
+
+**为什么 T0707 缺这一环是危险的**：如果 `00086`（T0804）先合并，之后 T0707 的返工**又**
+建了 `00085`，那时**没有任何检查会拒绝它**——因为「更小号被压着」这个条件在 86 已经上
+main 之后就不成立了（守门函数自己写明它只问「会不会造成第一道缺口」，`:126-129`）。
+结果就是一道永久的缺口：任何已经迁到 86 的开发库/部署库从此停在 85 上。
+
+**裁定（L1）**：**`00086` 不得在 `00085` 的命运确定之前合并。** 两种合法路径，二选一：
+
+1. T0707 的返工**建出 `00085`** 并先于 `00086` 合并；
+2. T0707 明确给出「本任务不需要迁移」的结论（写进 RESULT，由我核过），
+   此时 `85` 这个号**退回未使用**，后续任务从 `87` 起继续领号，`00086` 可以合并。
+
+**执行**：每次 merge 前重跑一次上面那张表（号是外部的，工作树是活的），
+比只信记忆可靠。**不要**用「反正 CI 绿」来推断迁移顺序没问题——那条判断在 CI 里不存在。
+
+**顺带一条已做过验证的预判（省下一轮返工）**：链上**只有 T0711 需要「寄存」**。
+T0805 的三处 hunk（`canonicalTables` / `explicitIndexes` / `TestUpgradePath`）锚在
+`research_assets_pid_uniq` 那一带，与 T1005/T0711 插的 `subscription_deliveries_pending_idx`
+不重叠——我在「main + T0711 的 7 行」的模拟文件上跑过
+`patch -p1 --dry-run --fuzz=0`，三处全部命中（hunk#2 offset 42、hunk#3 offset 73）。
+所以 T0805 之后的重基线只需要一封「基线推进」的信，不需要再动它的树。

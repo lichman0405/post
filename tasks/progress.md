@@ -2142,9 +2142,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-18T13:27:48Z
+生成时间：2026-09-18T14:29:26Z
 
-状态分布：todo 39 · ready 1 · running 0 · worker_failed 0 · verification 2 · rejected 3 · blocked 5 · accepted 0 · merged 85（合计 135/135 个任务）
+状态分布：todo 39 · ready 1 · running 0 · worker_failed 0 · verification 1 · rejected 3 · blocked 5 · accepted 0 · merged 86（合计 135/135 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -2235,7 +2235,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0708 | Asset Fork/Derive + Lineage | P7 | todo |  |  |  |  |
 | T0709 | Asset Hub Pages/Explore | P7 | merged | 2026-09-16T01:57:45Z |  | 2026-09-16T02:36:27Z | 2026-09-16T02:41:11Z |
 | T0710 | Asset 完整 E2E | P7 | todo |  |  |  |  |
-| T0711 | Asset Governance 与 Rights Holder Transfer | P7 | verification | 2026-09-18T09:52:31Z |  |  |  |
+| T0711 | Asset Governance 与 Rights Holder Transfer | P7 | merged | 2026-09-18T13:53:19Z |  | 2026-09-18T14:22:43Z | 2026-09-18T14:29:04Z |
 | T0712 | 预览响应不得泄漏外部私有实体的身份（T0704 跨项目泄漏修复） | P7 | merged | 2026-09-15T22:11:05Z |  | 2026-09-15T22:35:34Z | 2026-09-15T22:42:04Z |
 | T0801 | Public Entity Anonymous Pages | P8 | merged | 2026-09-16T02:41:13Z |  | 2026-09-16T03:20:27Z | 2026-09-16T03:25:11Z |
 | T0802 | Explore 聚合 | P8 | merged | 2026-09-16T03:25:13Z |  | 2026-09-16T04:12:18Z | 2026-09-16T04:17:01Z |
