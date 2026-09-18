@@ -10763,3 +10763,196 @@ T0709/T0712/T1110）。逐个核对裁定与真实合并 diff：
 
 **教训**：我在主线仓库里建分支，工具会把它记在**当时正在跑的那个 Worker** 头上。
 自建 ref 要顺手 `rddev refs adopt`，别等 collect 被拒。
+
+## 窗口操作的完整演练，以及演练抓出的一个真错（2026-09-18，L1）
+
+**为什么要演练**：空窗一开，落地是一串不能中断的原子动作（十几份任务书 + 新任务 + 渲染器修复 +
+指纹重生成 + 九项校验），**在错误的时间点失败，代价是把在飞任务全打红**。
+所以先在临时工作区 `/tmp/post-window`（`git worktree add --detach`，**不建 ref**）把它整条走了一遍。
+
+**工具**：`tasks/packages/README.md` 里写的 `.rddev/tools/apply-packages.py` 仍在（重启没清掉）。
+它按自身路径推算仓库根，所以复制进演练工作区就能在那儿操作，不碰主线。
+
+**可落地的是 10 份，不是 7 份**：T0410、T0506、T0509、T0706、T0806、T0807、T0811、T0901、T0902、T0903。
+干跑一次全过。另外 12 份被工具**正确地**拒绝——它们的任务已在飞或已结算
+（合并/在查/被拒/运行中），工具的原话是「任务书落在一个**等待派工**的任务上，不是落在在飞的或已定的任务上」。
+这不是障碍，是保护：在飞任务的 collect 要核对 `gate-inputs` 与 spawn 记录逐字节一致。
+
+**T1111 是全新的任务，工具不认**（没有状态可依托），得手工加三处：`tasks.json` 追加条目 +
+`task_count` 134→135、`task_status.json` 落 `todo`、`tasks/tests.json` 登记两条（否则
+`TASKSTATE-TESTS-COVERAGE` 红）。任务书的键集与 DAG 条目**完全一致**，追加是机械的。
+
+**演练抓出真错**：`go test ./internal/devorchestrator/` 在落地后**变红**——
+`TestEveryTaskOfThePhasesUnderDevelopmentHasG3`：每个开发中阶段的任务都必须在
+`specs/orchestrator/gates.json` 有 G3 作业，而**我写的 T1111 任务书没给它 G3**，
+后果是「它会被接受，而 G3 记为 not_required」——正是「一个阶段悄悄没有集成闸」的样子。
+**这是我写任务书时的疏漏，仓库自己的测试抓住了它。**
+补法：`task_overrides.T1111.g3_jobs = ["rsg-real-services", "gitea-real-services"]`——
+前者是 T1110 那条验收标准点名的，后者跑的正是 T1111 必须改的那个脚本
+（`tests/acceptance/gitea-real-services-e2e.sh`）。
+
+**顺序上有一个坑**：`gates.json` 也是指纹输入，所以**必须先生成书、再重生成指纹**。
+我先重生成、后改 gates.json，于是得再跑一次 `spec_version.py --write`。
+
+**演练后的完整绿**：指纹 current、九项任务状态校验全过、`validate_specs` 12/12、
+schema 快照 current、`validate_openapi` 7/7、fmt clean、vet clean、staticcheck clean、
+**单元测试 80 个包全过**。
+
+**教训记一条**：写新任务书时，`gates.json` 的 G3 登记和 `tests.json` 的登记一样，
+都是「不加就红」的必填项，别只想着 requirements 和 scope。
+
+## 窗口步骤漏了一个会**让整条链停摆**的动作：落地后必须 `make rddev`（2026-09-18，L0）
+
+演练只跑了 git 与 python 侧的检查，**没跑 rddev 本身**，于是漏掉这条：
+
+`cmd/rddev/staleness.go` + `internal/devorchestrator/binary_staleness.go` 有一个**拒绝式**守卫——
+不是警告，是 `REFUSED`，退出码 1。它拿**编译进二进制的提交号**与 main 比：
+
+```
+git log --format="%h %s" <二进制印章>..main -- cmd/rddev internal/devorchestrator
+```
+
+只要非空，就拒绝，原话是「a gate must not grade from a tool older than the rules it enforces.
+stop the driver, run `make rddev`, then start it again.」（绕过要显式说出口：`RDDEV_ALLOW_STALE_BINARY=1`）
+
+**受管的是这些子命令**：`task worker review gate git pr rebaseline refs branch drive workflow`——
+**整条链的每一个动作都在里面**。只读命令（`status` 等）故意不管，免得工具连「现在什么情况」都答不了。
+
+**为什么这条对我们致命**：渲染器修复改的正是 `internal/devorchestrator/dag.go` 与 `worker_render.go`，
+两个都在 `OrchestratorSourcePaths = ["cmd/rddev", "internal/devorchestrator"]` 里面。
+所以**修复一提交进 main，`bin/rddev` 立刻变陈旧，之后 `collect`/`gate`/`rebaseline` 全部拒绝**，
+链条当场停摆——而报错信息只会说「重建」,不会说「你刚才是故意改的」。
+
+**已实测**：现在守卫是**静止**的（`bin/rddev task next` 正常，且 `cmd/rddev`/`internal/devorchestrator`
+自二进制那次构建以来在 main 上没有新提交）。所以 `bin/rddev`（09-16 09:38 构建）目前仍然合规。
+
+**这条也解释了仓库里那个分支名**：`fix/a-gate-must-not-grade-from-a-stale-binary`——issue #135
+就是「陈旧二进制删掉了 Worker 未提交的交付物」，守卫是这个事故的产物。
+
+### 修正后的窗口顺序（顺序不能乱）
+
+1. `apply-packages.py --dry-run` 全部 → 再真落地那 10 份
+2. 手工加 T1111 三处（`tasks.json` + `task_count`、`task_status.json`、`tests.json`）
+3. `gates.json` 加 `task_overrides.T1111.g3_jobs`（**漏了仓库自己的测试会红**）
+4. 应用渲染器修复 4 个文件
+5. **`make rddev`** ← 漏这步，后面每个命令都拒
+6. `python3 scripts/spec_version.py --write`（**必须在 gates.json 之后**，它也是指纹输入）
+7. `validate_task_state.py` + `spec_version.py --check` + CI 各 job 步骤
+8. commit + push
+
+**上面第 5 步的位置要挪**：`make rddev` **必须在 commit 之后**，不能在图里那个位置。
+理由是印章的来源——Go 把构建时的 HEAD 提交号编进二进制，工作区脏时额外标 dirty。
+所以「改完先重建、再提交」得到的二进制**带着旧提交号**，一旦提交上去，那个新提交就落在
+`旧提交号..main` 里（它确实改了 `internal/devorchestrator`），**守卫立刻判定陈旧**——白忙。
+正确顺序：**apply → 重生成指纹 → 校验 → commit → `make rddev` → push**。
+重建放在 commit 之后，印记就是新提交本身，`新提交..main` 为空，守卫静止。
+
+---
+
+## 2026-09-18 串行链预审：T0711 与 T0805 不用写信，只走基线上移
+
+窗口还没开（T1003 的复审正在跑），我先把链上后面两环**对着各自的裁定**核了一遍。
+结论：**这两环交付得干净，不需要返工信，只要一次 `rddev rebaseline`（通用理由）即可。**
+
+**判据**：`rddev rebaseline` 在不带 `--reason-file` 时生成的理由是「基线前移，不是缺陷」——
+**这封信只有在真的有缺陷时才需要**。裁定会由渲染器修复自动送达（`worker_spawn.go` 的
+`ReworkWorker` → `Spawn` → `RenderTaskPackage` 从当前 `tasks/tasks.json` 重渲染），
+所以「裁定没送达」这个理由**在窗口之后不再成立**，我不该再拿它当默认写信的借口。
+链上每一环都要先核、再决定要不要写信——**核过但没缺陷的，也要记下来**（就是这一条）。
+
+### T0711（迁移 00082，资产治理 / 权利人）
+
+五条裁定逐条核过，**全部满足**：
+
+- **（一）kind 与 id 一起记，不新造当事人表** ✅ `infra/migrations/00082` 头部逐字写着
+  「no polymorphic actor_id column, and no new "party" table that would hold users and
+  organizations in one place again」，并且**点名引用了裁定自己的编号** `L3-20260916-1`
+  与它的原文（「权利人可以是组织；人和组织分开记」）。`internal/domain/party.go` 是类型不是表。
+- **（三）append-only、不做撤销** ✅ 两张表都上了 `00014` 的行触发器 + `00015` 的
+  TRUNCATE 语句触发器；`grep -i "revoke|delete from asset_rights|delete from asset_version_parties"`
+  **零命中**。
+- **（四）迁移号不自己选** ✅ 任务包写 82，仓库里就是 `00082_asset_governance_rights_holder.sql`。
+- **（五）不给存量数据发明声明** ✅ `00082` 里 **`INSERT` 零命中**（唯一命中 `UPDATE` 的三行
+  都在触发器定义里）——发布之前就存在的资产行**没有被回填一份假名单**。
+- 三个形状（版本级 credit / 资产级 holder event / 不重复存 originating project）分得清，
+  理由写进了迁移头。
+
+### T0805（迁移 00083，知识发布）
+
+六条裁定逐条核过，**全部满足**：
+
+- **（二）契约由我补、Worker 不许改契约** ✅ 契约里 `knowledge:publish-preview`
+  （`specs/api/openapi.yaml:243`）与 `knowledge:publish`（`:249`）都在；T0805 的
+  `git status` 里**没有任何 `specs/api` 路径**。
+- **（三）「没经过 review 就直接 published 必须不可能」** ✅ `TestKnowledgePublishRequiresReview`
+  （`tests/integration/knowledge_publish_test.go:1110`），而且**带判别控制**——测试头第 7 条逐字
+  写着「the same version publishes once the record exists — which is what makes "the review is
+  what gated it" a fact rather than an intention」。这正是我在别处一直要求的形状：
+  **光断言「被拒」不够，还要证明拒的原因是 review，而不是它本来就发布不了。**
+- **（四）不得扩大可见范围、不新加可见性列** ✅ `00083` 里 `visibility` **零命中**；
+  `TestKnowledgePublishDoesNotWidenVisibility`（`:1000`）钉住。
+- **（五）V1 不做撤回** ✅ `internal/application/knowledgepublish/` 里
+  `retract|withdraw|unpublish` 零命中（命中的是别处的词：「unpublished」是状态词、
+  PR 的 close、订阅的撤回）。
+- **（六）迁移号** ✅ 任务包写 83，仓库里就是 `00083_knowledge_publication_identity.sql`。
+- 附带发现（已记，不必改）：**`scientific_object_versions.visibility_policy_id` 有读者、
+  没有写者**——V1 没有任何表面对它写入。这不是本任务的缺陷（裁定（四）明确说「那根轴早就有」），
+  是**产品表面的一个缺口**，T0805 的 RESULT 已把它记为 follow-up。
+
+**留给我的待办**：这两条「核过、无缺陷」的结论要在它们各自 rebaseline 时复核一次——
+链上每次合并都会让更后面的基线上移，若某一环在返工里改了别的，这个结论就不自动成立。
+
+## 2026-09-18 链尾三环的已知拦路石（T0604 / T0707 / T0804）
+
+这三环现在是 `rejected`（我自己parked 的），重派之前各有一块石头。**记在这里以免走到那一步才发现。**
+
+- **T0604**：石头是**规格缺口**——「required-review 判定」（几个 review、哪几个维度、
+  哪个 responsibility 签、什么变更对应什么要求）在 `specs/` 里**完全没有**。它当前的
+  `rejection_reason` 只是上一轮的一条 staticcheck（`review_routing_test.go:60` 的 U1000），
+  **那条已经解决**；真正没解的是规格缺口。要么我补规格（L1：从 T0409 的代码与既有 review
+  形状里抽出来），要么它构成新的 `SPEC_BLOCKED`。**走到它时先判这一条。**
+- **T0707**：两块。① 依赖类型那一列是自由文本，没跟既有关系目录（`depends_on`/`references`）
+  挂钩——这是工程选型，我该拍板。② `visibility_of_usage` 声明为公开之后**对外显示什么**
+  没有写过，而页面确有「依赖/被用到的公开链接」一项——**这一条是产品语义，可能是 L3**。
+  走到它时要单独判：能从我已有的裁定推出就我定，推不出就停。
+- **T0804**：石头是 **issue #189 仍 OPEN**，而 requirements 第 4 条**逐字**写着「按 issue #189
+  的裁定执行……不得自行发明」。**这一条我不能自己发明**——要么 #189 有裁定可依，要么
+  T0804 停在 `SPEC_BLOCKED`。这是本链**最可能触到「停下问人」的一环**。
+  （另：它当前 `rejection_reason` 里那条「new ref」是**我自己创建的分支触发的假控诉**，
+  重派时**绝不能让那句话送到 Worker 手上**——`worker rework --reason-file` 会替换掉它。）
+
+### 更正：上面那条「链尾三环的已知拦路石」写错了，三块石头都早已搬开
+
+我写完上一条之后去核了一遍 `tasks/decisions.md` 的前文，发现**那三块石头都是我自己在更早的
+今天就已经处理掉的**，只是 `task_status.json` 的 `notes` 里还留着 `SPEC_BLOCKED` 的旧字
+（T0604 与 T0804 那两条的判定时间戳是**同一秒** `2026-09-16T00:08:07Z`，是一次误标的产物）。
+**旧笔记没翻新，我就照它写了一块不存在的石头——这正是我要别人避免的那种事，自己也犯了。**
+
+更正后的事实（每一条都有前文可查）：
+
+- **T0604：已解封。** 规格缺口的答案是：**机制规格点名了，词表是项目配置**。
+  `docs/04` §3 标题就是「Scientific Responsibility（什么需要你审核）」，原文两条——
+  「项目可配置：Experimental Reviewer、Computational Reviewer、Data Reviewer、Project Lead、
+  IP Reviewer 等责任标签。责任用于 Review routing，**不自动赋予更高访问权限**」与
+  「**类似 CODEOWNERS 的 Research Owners 规则可按对象类型/Schema/领域匹配 reviewer**」。
+  代码自己也在两处指名 T0604 去落地：`internal/application/reviews/ports.go:57-75`
+  （`ResponsibilityGate`：「T0604 lands the rule-based resolver (**Research Owners rules by
+  object/schema/type**)」）与 `internal/domain/review.go:99-104`（「**The vocabulary itself is
+  T0604's business**」）。**我当初把「机制没实现」读成了「规则没定义」。**
+  （另见前文 10223 行「5 个任务的**任务书早已补齐**」与 10227 行「已放回队列：T0807、T0707、T0804、T0604」。）
+- **T0707：已解封。** 两块都有裁定：① 依赖类型词表**用 Go 侧那一对**
+  （`depends_on` 有 `DependencyInference`、`references` 没有，`catalog.go:42-45/78/86`），
+  并且照 `00064:41-45` 等四处已声明的约定**不加 DB CHECK**；② 公开用法**只渲染
+  `visibility_of_usage = 'public'`**。它的 collect 被拒那一条（自己加进来的 web 测试组标了
+  `not_run`）我也判过了：**web 门不属于本任务**，返工信要求把它从 `tests` 数组删掉，
+  **但"排除了什么、为什么"必须如实写进 risks/notes，不许默默删**。
+- **T0804：已解封。** 见上一条：`docs/16_GIT_COMPATIBILITY.md:23-33` 已写下替代规则，
+  **不是发明新语义**，是执行 §4 第一段已有的那条。它现在只需在自己的返工信里拿到这段。
+  （另：它当前 `rejection_reason` 那条「new ref」是**我的分支触发的假控诉**，
+  重派时必须被 `--reason-file` 替换掉，**绝不能让那句话到 Worker 手上**。）
+
+**结论：链尾没有石头，只有旧笔记。** 这三环各自只要一次 rebaseline + 它们已有的信。
+
+**教训（写给以后的自己）**：`task_status.json` 的 `notes` **不是真相源**，它只是当时的记录；
+链条上真正会拦住我的是**我照旧笔记做出的判断**。走到某一环之前，先核**它自己的 requirement 与
+裁定**，**不要核它的 `notes`**。
