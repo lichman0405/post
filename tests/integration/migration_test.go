@@ -654,7 +654,12 @@ var canonicalTables = map[string]tableExp{
 		// email the digest has not sent and a cancelled row is one the
 		// revocation path withdrew, so neither was ever SHOWN to anyone
 		// and neither can be read.
-		cols: []colExp{c("id", u, false, true), c("subscription_id", u, false, false), c("user_id", u, false, false), c("event_id", u, false, false), c("channel", txt, false, false), c("event_type", txt, false, false), c("target_type", txt, false, false), c("target_id", txt, false, false), c("status", txt, false, true), c("created_at", ts, false, true), c("delivered_at", ts, true, false), c("cancelled_at", ts, true, false), c("read_at", ts, true, false)},
+		// T1005 (00081): the row grew the digest sender's claim state —
+		// attempts (how often it has been claimed, the number the
+		// withdrawal rule counts) and leased_until (the claim lease, so a
+		// send outside a transaction cannot be started twice) — plus the
+		// CHECK that keeps attempts non-negative.
+		cols: []colExp{c("id", u, false, true), c("subscription_id", u, false, false), c("user_id", u, false, false), c("event_id", u, false, false), c("channel", txt, false, false), c("event_type", txt, false, false), c("target_type", txt, false, false), c("target_id", txt, false, false), c("status", txt, false, true), c("created_at", ts, false, true), c("delivered_at", ts, true, false), c("cancelled_at", ts, true, false), c("read_at", ts, true, false), c("attempts", i4, false, true), c("leased_until", ts, true, false)},
 		pk:   []string{"id"},
 		checks: []string{
 			"ARRAY['web'", "ARRAY['pending'",
@@ -667,12 +672,35 @@ var canonicalTables = map[string]tableExp{
 			// identify ONE definition).
 			"= (delivered_at IS NOT NULL)", "status = 'cancelled'",
 			"read_at IS NULL",
+			"attempts >= 0",
 		},
 		fks: []fkExp{
 			fk("event_id", "research_events", "RESTRICT"),
 			fk("subscription_id", "subscriptions", "RESTRICT"),
 			fk("user_id", "users", "RESTRICT"),
 		},
+	},
+	"notification_preferences": {
+		// T1005 (00081): how often ONE account receives its email
+		// notifications. Absence of a row is the default cadence, not "no
+		// email" (events.DefaultCadence) — the sender reads the default,
+		// so no account is ever left without a defined behaviour. The
+		// CHECK is the cadence vocabulary; events.ValidateCadence checks
+		// the same three values on the application path. last_digest_at is
+		// the interval anchor a digest cadence is due against, NULL until
+		// the first digest goes out (which is due immediately).
+		cols: []colExp{c("user_id", u, false, false), c("cadence", txt, false, true), c("last_digest_at", ts, true, false), c("created_at", ts, false, true), c("updated_at", ts, false, true)},
+		pk:   []string{"user_id"},
+		checks: []string{
+			// The IN-list folds into ONE check constraint, so this is one
+			// entry, not three (the catalog compares the count). The values
+			// themselves are the product decision and are pinned where they
+			// are decided (internal/events' ValidateCadence suite); what the
+			// catalog adds is that the column cannot hold anything else —
+			// including through a hand-written INSERT.
+			"ARRAY['immediate'",
+		},
+		fks: []fkExp{fk("user_id", "users", "RESTRICT")},
 	},
 	"subscription_fanned_events": {
 		// T1002 (00078): the subscription fan-out's per-consumer cursor,
@@ -1027,6 +1055,10 @@ var explicitIndexes = map[string][]string{
 	// visibility filter is pushed into SQL, so LIMIT falls after it).
 	"research_assets_origin_project_idx":           {"origin_project_id"},
 	"research_asset_versions_public_published_idx": {"asset_id", "published_at DESC", "id DESC", "WHERE"},
+	// T1005 (00081): the digest sender's claim scan — pending email rows,
+	// oldest first. Partial, so the scan never has to look at the web rows
+	// (born delivered) or at rows already sent.
+	"subscription_deliveries_email_pending_idx": {"created_at", "WHERE"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
