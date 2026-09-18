@@ -742,6 +742,12 @@
         "gitea-real-services"
       ]
     },
+    "T0813": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
+    },
     "T0901": {
       "g3_jobs": [
         "rsg-real-services"

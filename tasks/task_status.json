@@ -5823,10 +5823,10 @@
       ]
     },
     "T0804": {
-      "status": "rejected",
-      "started_at": "2026-09-18T08:44:21Z",
+      "status": "running",
+      "started_at": "2026-09-18T18:11:22Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：requirements 第 4 条逐字写着 fork 导入的 state 的 semantic completeness 派生「按 issue #189 的裁定执行……不得自行发明」，而 #189 仍 OPEN。",
-      "worker_run_id": "run-1d37fc09c0c0d324",
+      "worker_run_id": "run-5e9dd76f1542caaf",
       "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/infra/deliver-supervisor-narrowing *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
       "history": [
         {
@@ -5855,6 +5855,13 @@
           "at": "2026-09-18T10:19:01Z",
           "run_id": "run-e57bcae52466344f",
           "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/infra/deliver-supervisor-narrowing *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-18T18:11:22Z",
+          "run_id": "run-5e9dd76f1542caaf",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -6074,6 +6081,15 @@
       "merged_at": null
     },
     "T0812": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0813": {
       "status": "todo",
       "started_at": null,
       "completed_at": null,
@@ -7144,15 +7160,6 @@
       "merged_at": null
     },
     "T1208": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
-    },
-    "T0813": {
       "status": "todo",
       "started_at": null,
       "completed_at": null,
