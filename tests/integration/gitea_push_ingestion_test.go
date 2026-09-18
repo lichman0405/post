@@ -169,12 +169,13 @@ func (fx *pushIngestionGiteaFixture) pushCommit(t *testing.T, owner, name, branc
 	t.Helper()
 	dir := t.TempDir()
 	remoteURL := fx.base + "/" + url.PathEscape(owner) + "/" + url.PathEscape(name) + ".git"
-	authHeader := "http.extraHeader=Authorization: token " + fx.token
+	env := append(os.Environ(), "HOME="+dir)
+	env = append(env, gitAuthEnv("Authorization: token "+fx.token)...)
 	run := func(args ...string) string {
 		t.Helper()
-		full := append([]string{"-C", dir, "-c", authHeader}, args...)
+		full := append([]string{"-C", dir}, args...)
 		cmd := exec.Command("git", full...)
-		cmd.Env = append(os.Environ(), "HOME="+dir)
+		cmd.Env = env
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("gitea integration: git %s: %v\n%s", strings.Join(args, " "), err, out)

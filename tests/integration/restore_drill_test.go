@@ -683,7 +683,7 @@ func TestRestoreDrill(t *testing.T) {
 
 		// The Git half, by commit identity rather than by ref count: the
 		// source commit must be an object of the restored repository.
-		out := gitOut(t, "", "-c", "http.extraHeader=Authorization: token "+token,
+		out := gitOutAuth(t, "", token,
 			"ls-remote", strings.TrimSuffix(giteaBase, "/")+"/"+f.tgtOwner+"/"+f.repoName+".git", "refs/heads/main")
 		if !strings.Contains(out, f.commitSHA) {
 			t.Fatalf("the restored repository's main is not at %s:\n%s", f.commitSHA, out)
@@ -1045,11 +1045,27 @@ func passwordOf(t *testing.T, raw string) string {
 
 func gitOut(t *testing.T, dir string, args ...string) string {
 	t.Helper()
+	return gitOutEnv(t, dir, append(os.Environ(), "GIT_TERMINAL_PROMPT=0"), args...)
+}
+
+// gitOutAuth is gitOut for a command that talks to the provider: the
+// service token rides the environment as an extra header (gitAuthEnv) — the
+// shape internal/gitprovider/gitea.go uses — so it is in neither argv nor
+// the remote URL.
+func gitOutAuth(t *testing.T, dir, token string, args ...string) string {
+	t.Helper()
+	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	return gitOutEnv(t, dir, append(env, gitAuthEnv("Authorization: token "+token)...), args...)
+}
+
+// gitOutEnv is gitOut with an explicit environment.
+func gitOutEnv(t *testing.T, dir string, env []string, args ...string) string {
+	t.Helper()
 	cmd := exec.Command("git", args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = env
 	var out, errb strings.Builder
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
@@ -1146,8 +1162,7 @@ func giteaPushCommit(t *testing.T, base, token, org, repo, runID string) string 
 		"commit", "-q", "-m", "drill seed "+runID)
 	remote := strings.TrimSuffix(base, "/") + "/" + org + "/" + repo + ".git"
 	gitOut(t, work, "remote", "add", "origin", remote)
-	gitOut(t, work, "-c", "http.extraHeader=Authorization: token "+token,
-		"push", "-q", "origin", "main")
+	gitOutAuth(t, work, token, "push", "-q", "origin", "main")
 	sha := strings.TrimSpace(gitOut(t, work, "rev-parse", "HEAD"))
 	if len(sha) != 40 {
 		t.Fatalf("restore drill: rev-parse returned %q", sha)

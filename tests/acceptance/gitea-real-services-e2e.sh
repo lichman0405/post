@@ -89,6 +89,18 @@ FAILS=0
 fail() { printf 'FAIL %s\n' "$*"; FAILS=$((FAILS+1)); }
 ok()   { printf 'ok   %s\n' "$*"; }
 
+# git_authed runs git with the service token supplied as a config override in
+# the ENVIRONMENT, never argv. `-c http.extraHeader=...` put the credential in
+# the argument list, which `ps aux` and /proc/<pid>/cmdline show to every
+# account on the machine; GIT_CONFIG_VALUE_0 is in neither of them. Same shape
+# as internal/gitprovider/gitea.go's gitEnv.
+git_authed() {
+  GIT_CONFIG_COUNT=1 \
+  GIT_CONFIG_KEY_0=http.extraHeader \
+  GIT_CONFIG_VALUE_0="Authorization: token $TOKEN" \
+    git "$@"
+}
+
 api() { # api METHOD PATH [BODY]
   local method="$1" path="$2" body="${3:-}"
   if [[ -n "$body" ]]; then
@@ -476,7 +488,7 @@ if [[ -n "$REPO2" ]]; then
       fail "could not build the bootstrap probe commit in $WORK/work2"
     else
       push_rc=0
-      git -C "$WORK/work2" -c "http.extraHeader=Authorization: token $TOKEN" push -q \
+      git_authed -C "$WORK/work2" push -q \
         "http://${BASE#http://}/$REPO2.git" HEAD:main \
         >/dev/null 2>"$WORK/boot-refuse.err" || push_rc=$?
       BOOT_MAIN="$(api GET "/api/v1/repos/$REPO2/git/refs/heads/main" 2>/dev/null \
@@ -495,7 +507,7 @@ if [[ -n "$REPO2" ]]; then
 
   # Research branches stay pushable, and the deadlock shows: no PR can
   # target the absent main, and even the contents API write is refused.
-  if git -C "$WORK/work2" -c "http.extraHeader=Authorization: token $TOKEN" push -q \
+  if git_authed -C "$WORK/work2" push -q \
        "http://${BASE#http://}/$REPO2.git" HEAD:refs/heads/g3-boot-r >/dev/null 2>&1; then
     ok "a research branch push is accepted on the protected-but-empty repository"
   else
@@ -524,7 +536,7 @@ if [[ -n "$REPO2" ]]; then
 
   # The first PR merge brings the first research commit onto main.
   push_rc=0
-  git -C "$WORK/work2" -c "http.extraHeader=Authorization: token $TOKEN" fetch -q \
+  git_authed -C "$WORK/work2" fetch -q \
     "http://${BASE#http://}/$REPO2.git" main 2>/dev/null || push_rc=$?
   if (( push_rc != 0 )); then
     fail "could not fetch the seeded main into the bootstrap scratch repository"
@@ -535,7 +547,7 @@ if [[ -n "$REPO2" ]]; then
     fail "could not build the first research branch off the seeded main"
   else
     push_rc=0
-    git -C "$WORK/work2" -c "http.extraHeader=Authorization: token $TOKEN" push -q \
+    git_authed -C "$WORK/work2" push -q \
       "http://${BASE#http://}/$REPO2.git" HEAD:refs/heads/g3-boot-r2 \
       >/dev/null 2>"$WORK/boot-branch.err" || push_rc=$?
     if (( push_rc != 0 )); then
