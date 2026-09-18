@@ -88,6 +88,10 @@ type SubscriptionDelivery struct {
 	CreatedAt      time.Time
 	DeliveredAt    *time.Time
 	CancelledAt    *time.Time
+	// ReadAt is when the subscriber read this notification in the web
+	// inbox (T1003); nil = unread. The column's CHECK pairs it with the
+	// delivered status, so a pending or withdrawn row can never carry one.
+	ReadAt *time.Time
 }
 
 // Subscription delivery statuses (subscription_deliveries.status).

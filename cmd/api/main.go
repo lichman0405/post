@@ -51,6 +51,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/fileshttp"
 	"github.com/lichman0405/post/cmd/api/freezehttp"
 	"github.com/lichman0405/post/cmd/api/gittokenshttp"
+	"github.com/lichman0405/post/cmd/api/inboxhttp"
 	"github.com/lichman0405/post/cmd/api/mergegit"
 	"github.com/lichman0405/post/cmd/api/mergehttp"
 	"github.com/lichman0405/post/cmd/api/milestonehttp"
@@ -388,6 +389,15 @@ func run(args []string) int {
 	subscriptionsAPI := subscriptionshttp.New(subscriptionshttp.Deps{Store: events.NewSubscriptionStore(pool)})
 	v1.Handle("/api/v1/subscriptions", subscriptionsAPI.Routes())
 	v1.Handle("/api/v1/subscriptions/", subscriptionsAPI.Routes())
+	// Research inbox (T1003): the web channel's read surface over the
+	// deliveries the fan-out above writes — aggregated into entries, with
+	// read/unread and a deep link to each entry's target. It reads the
+	// same store as the subscription API (one owner of
+	// subscription_deliveries), so the rows it lists and the rows the
+	// fan-out withdraws can never disagree.
+	inboxAPI := inboxhttp.New(inboxhttp.Deps{Store: events.NewSubscriptionStore(pool)})
+	v1.Handle("/api/v1/inbox", inboxAPI.Routes())
+	v1.Handle("/api/v1/inbox/", inboxAPI.Routes())
 	// Scoped git tokens (T0304): the user-credential surface over the
 	// internal Gitea. Like provisioning it needs provider configuration,
 	// but its own gate: the admin credentials may be unset while
