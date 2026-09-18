@@ -11442,3 +11442,79 @@ T0707 的返工回来了（collect 14 项全 PASS，24 个改动路径全在 sco
 
 **这张表要重跑**（「号是外部的、工作树是活的」）：T0805 持 `00083`、T0604 持 `00084`、T0804 持 `00086`、
 T0707 持**无**。合并顺序：**T0805 → T0707（无迁移，不参与排序）→ T0604 → T0804。**
+
+## 裁定：T0805 审查 `request_changes` 的处置（2026-09-18）
+
+审查 Worker（独立进程、无写权限、spawn 时给工作树打了指纹）给出 **request_changes：2 blocking / 1 major / 3 minor**，
+两条 blocking 都是**它在真库上跑起系统探出来的**，不是读代码推断的。**命令本体合格**（行 + 事件 + outbox +
+审计 + 幂等账一个事务、`public_version` 原样存、门禁事务内重跑、权限 fail-closed、路由与未改动契约一致，
+集成套件 8 条全过）——**驳回的是公开读取路径上的两处漏洞**。
+
+### 一、`发布 ≠ 公开` 这根轴：所有公开读取路径必须给同一个答案（L1）
+
+审查实测：**公开项目里的 members-only 发布**——匿名 `GET /api/v1/knowledge/<pid>` 正确 404，
+**但两个匿名 feed（`knowledge/…`、`project/…`）都把它渲染出来了**（标题、版本名、发布者、urn）。
+机制：`internal/persistence/queries/feeds.sql` 的 `ListFeedKnowledgeEntries`（`:178-201`，`:191` 报的是
+`p.visibility`）与 `ListFeedProjectEntries` 的 knowledge 半边（`:139-154`）**把所属项目的可见性当成条目的可见性**，
+`internal/application/feeds/feed.go:302` 据此放行。**同一个漏洞 T0805 自己在 Explore 上已经修对了**
+（`cmd/api/explorehttp/store.go`、`internal/application/explore/ports.go:123-135`），feeds 漏了。
+
+**裁定**：feed 是公开读取路径，必须用**同一份** `knowledgepublish.AudienceFor`。
+准确语义 SQL 表达不出来（`rights.Parse` 拒绝不认识的字段，`internal/rights/document.go:180-203`），
+所以照 Explore 的既有做法：SQL 只放廉价条件，rights 文档原样带回 Go 判定；
+**读不出来的文档一律判非公开**（fail-closed，同 `explore/ports.go:131`），
+**不许**写「metadata 缺失就当 `project_policy`」的宽松 SQL。
+
+**夹具的裁定**：`tests/integration/feed_test.go:362-367` 写的 `'{"license":"CC-BY-4.0"}'::jsonb`
+**不是本 build 读得懂的文档**（没有 `version`，`license` 不是字段名），按同一规则它是 members-only，
+于是 `:460` 的「恰好 2 条」会红。**改夹具数据（换成 `rights.New().Marshal()`，同
+`tests/integration/explore_test.go:411`），不改断言**；并**新增** fail-closed 一侧的断言（members-only、
+以及 rights 读不出来的行，两个匿名 feed 都不许出现）。`explore_test.go` 的夹具本来就是合法文档，**不受影响**。
+被牵连的每个测试文件都要在 RESULT 里说明改的是**夹具数据**还是**断言**——改断言的一律驳回。
+
+### 二、读路由的存在性 oracle（L1，安全向 fail-closed）
+
+已登录的**非成员**要「members-only + private 项目」的 pid 得 **503**（`retryable:true`），
+未知 pid 得 404，而同一调用者要「members-only + public 项目」的 pid 得 404——
+**「存在但我看不见」被区分开了**。机制：`cmd/api/knowledgehttp/read.go:183-197` 只把
+`ErrMemberNotFound` 当「不是成员」，其余一律 503，而 `projects.Service.GetMembership`
+在项目读门禁不过时返回的正是 `ErrProjectNotFound`（`internal/application/projects/service.go:177-180`→`:158-160`）。
+**裁定**：`ErrProjectNotFound` 与 `ErrMemberNotFound` 一样判「不是成员」→ **404**，与未知 pid 同一响应体；
+真的存储故障仍 503。这既符合该路由自己的注释（`read.go:156-160`），也符合 docs/45 的存在性隐藏。
+
+### 三、验收第 8 条的口径是 **reviewed**，不是 **merged**（记录更正，代码不动）
+
+RESULT 的 criterion-8 证据写「reviewed, **MERGED** state」，**代码只约束 reviewed 那一半**：
+`ListReleaseReviews`（`internal/persistence/queries/releases_assets.sql:77-107`）按
+`pr.target_branch_id = main` + `pr.proposed_state_id IN lineage(version)` 过滤（`:105-106`），
+**不看 PR 自己是否已合并**；夹具 `seedPR`（`tests/integration/knowledge_publish_test.go:324-341`）
+只建 PR、套件里没有任何合并调用，而两次批准之后发布就成功了。
+**裁定**：RESULT 改成代码真正在做的，并点名「PR 未合并也可发布」这一事实。
+**「发布是否应当要求 PR 已合并」是科研语义问题**（落在 docs/43:22 与 §9.6「Merge controls acceptance；
+Publish controls visibility」之间）——**我不自行发明**，记在这里，等 owner 裁定。
+不因此扣 Gate：契约的硬要求（无 review 不得 published）是满足的，错的是记录。
+
+### 四、`aborted` 的版本不许发布（L1）
+
+`Facts.LifecycleState` 已在（`internal/application/knowledgepublish/ports.go:322-323`），
+`Judge`（`preview.go:221-238`）不读它。**裁定：`lifecycle_state = 'aborted'` 时拒绝发布**。
+措辞注意：`aborted` **不是终态**（docs/43 Object lifecycle 是 `active → aborted → reopened → active`，
+版本表 CHECK 为 `active|aborted|reopened|superseded`），所以这是
+「**正处在撤回状态的版本，不能同时被当作已发布知识呈现**」，reopened 之后自然解除；
+`superseded` 不受影响（T1004 就渲染 superseded 的发布）。
+
+### 五、本轮不新增任务书（记账）
+
+审查点到的两件**无人拥有**的事，记在这里，等**没有 Worker 在跑**的窗口再动 `tasks/tasks.json`
+（改它会移动 spec 指纹，会红掉所有在飞任务的 G2）：
+
+1. **知识事件发不出去**：`internal/events/subscription.go:337-339` 的 `eventTargetPayloadKeys`
+   里只有 `research_asset.version_published`；知识事件的 payload 带的是 `publication_id`（PID），
+   **没有任何知识订阅能解析或投递它**——今天的暴露是零，但接订阅时要先做 payload-key 与受众轴两件事。
+2. **订阅侧按项目轴、发布侧按版本轴**（`internal/events/subscription_store.go:206`/`:259-270`）
+   与本次 feed 修完之后的「一条规则」还要再对一次表。
+
+### 六、迁移账
+
+不变：T0805 持 `00083`、T0604 持 `00084`、T0804 持 `00086`、T0707 无迁移。合并顺序
+**T0805 → T0707 → T0604 → T0804**，一次只推一环。
