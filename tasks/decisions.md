@@ -10659,3 +10659,28 @@ T1004/T1005 待在 verification 不动**——现在返工也要在 T1003 合并
 PR #272 八项全绿后 `rddev pr merge T1110` 通过，main 到 `7a01e03`。**已核：该提交不碰
 `specs/SPEC_VERSION.json`、`tasks/**`、`infra/migrations/**`**——指纹未动，在飞的三棵树（T1003/T1004/T1005）
 仍可直接组合，不需要窗口。它的文件与 T1003 的零重叠。
+
+## T1111 立起来：令牌不进进程参数表（2026-09-18，L1 安全加固）
+
+**来源**：T1110 合并后，后台自动化安全审查报出 MEDIUM 发现（CWE-214，凭据进 `argv`）。已核实为
+**真缺陷**，且是**偏离本仓库既有写法**——不是新问题，也不是风格分歧：
+
+- `cmd/api/backupdr/git.go:84` 用 `git -c http.extraHeader=Authorization: Bearer <token>`，`-c` 的值
+  落在 `argv` 里，`ps aux` / `/proc/<pid>/cmdline` 对同机所有账号可见。
+- 该文件**自己的注释**（`:41-45`、`:75-78`）两处都声称凭据不进 process listing / not in the argument
+  list——**代码与它自己写下的目标相反**。
+- 本仓库早有正确形状：`internal/gitprovider/gitea.go:381-387` 走
+  `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_0`/`GIT_CONFIG_VALUE_0` 环境变量，注释 `:364-365` 逐字写明
+  「without the token ever reaching argv」。
+
+**这是缺陷修复，不是安全政策变更**：既定写法（环境变量）已在仓库里，本任务只是把偏离者对齐。
+所以**不需要 L3 停等**。
+
+**处置**：立 GitHub issue #273（含同类清单：测试辅助里还有 17 处同一模式），并写任务书
+`tasks/packages/T1111.json` 暂存。**现在不能直接进正式账本**——改 `tasks/tasks.json` 会移动指纹，
+把在飞任务的 G2 补丁打红。**在 T1003 合并的窗口里与那七份暂存书一起落地。**
+
+**落地时别忘**：`scripts/validate_task_state.py` 的 `TASKSTATE-TESTS-COVERAGE` 要求每个 DAG 任务都有
+登记测试，所以 `tests/tests.json` 里要**同时**加 T1111 的条目（`TASKSTATE-TESTS-REF` 又要求登记项
+必须指向真实 DAG 任务，两件事必须原子地一起做）。校验器**不读** `tasks/packages/`，所以现在提交
+暂存文件是安全的（已实跑 9 项校验全过）。

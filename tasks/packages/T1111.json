@@ -1,0 +1,59 @@
+{
+  "id": "T1111",
+  "phase": "P11",
+  "phase_name": "UI、安全、可访问性、性能与运维加固",
+  "title": "凭据不进进程参数表：git 调用统一走环境变量传 header",
+  "v1_required": true,
+  "dependencies": ["T1110"],
+  "requirements": [
+    "**把 git 的认证 header 从命令行参数挪进环境变量。** 现在 `cmd/api/backupdr/git.go:84` 构造的是 `git -c http.extraHeader=Authorization: Bearer <token> -c credential.helper= <args...>`——`-c key=value` 的值**是 `argv`**，于是令牌出现在 `ps aux` 与 `/proc/<pid>/cmdline` 里，同机任何账号都能读到。改成环境变量（见下条的既有写法）即可消除这条路径。",
+    "**照抄本仓库已有的写法，不要发明新形状。** `internal/gitprovider/gitea.go:381-387` 已经用 `GIT_CONFIG_COUNT=1` / `GIT_CONFIG_KEY_0=http.extraHeader` / `GIT_CONFIG_VALUE_0=Authorization: token <token>` 走环境变量传同一个 header，并且那里的注释（`:364-365`，逐字：「authenticated without the token ever reaching argv — it rides in GIT_CONFIG_VALUE_0, process-visible only」）解释了为什么。本任务就是把 `cmd/api/backupdr` 对齐到它。",
+    "**`redactSecrets` 一个字都不许动。** 它防的是**另一条**泄漏路径：git 自己的报错会把收到的 header 回显出来（`cmd/api/backupdr/git.go:93-95` 的注释写明了）。两条路径要各自挡住——挪进环境变量**不是**删脱敏的理由。",
+    "**两处注释都要改成与代码一致。** ① `cmd/api/backupdr/git.go:41-45` 写着凭据不能出现在 `git` 的报错里、不能进 remote 的 stored config、**也不能出现在「any process listing」**，却紧接着说「Credentials are injected per invocation through `-c http.extraHeader=...` instead」——而 `-c` 的值正是 argv，恰恰就是 process listing。② `:75-78` 又写着「Credentials arrive as a config override, **never in the argument list**」，同样与 `:84` 的写法相反。改完之后，注释描述的行为必须真的是代码做的事（仓库的既有教条：写着不成立的理由比没有注释更糟）。",
+    "**测试辅助里的同类写法一并清理。** 同一模式还散在：`tests/integration/git_reconciliation_test.go:737`、`tests/integration/restore_drill_test.go:686` 与 `:1149`、`tests/integration/gitea_provisioning_test.go:691` 与 `:727`、`tests/integration/gitea_protection_test.go:133`/`:165`/`:206`、`tests/integration/gitea_push_ingestion_test.go:172`、`tests/integration/gitea_branch_ref_test.go:160`/`:215`/`:238`、`tests/acceptance/gitea-real-services-e2e.sh:479`/`:498`/`:527`/`:538`。这些用的是本地 dev 令牌，量级低一档，但类别相同，**按同一形状改**；改完测试必须照常通过。",
+    "**必须有一条能失败的测试来钉住这件事。** 「令牌不在参数表里」不能只靠读代码断言。照 `internal/gitprovider` 已有的可注入 runner 形状，给 `gitClient` 做一个可捕获 `argv` 与 `env` 的接缝，写一条单元测试断言：**令牌出现在环境变量里、且不出现在参数表的任何一项里**。这条测试必须**可证伪**——把实现改回 `-c` 写法时它要变红（在你的 RESULT 里附上这次 mutation 检验的实际输出）。",
+    "**行为不许变。** 这是安全加固，不是重构：git 命令的参数顺序（除两个 `-c` 之外）、工作目录、`GIT_TERMINAL_PROMPT=0`、超时、错误文本与脱敏结果，全部保持原样。"
+  ],
+  "deliverables": [],
+  "acceptance_criteria": [
+    "`cmd/api/backupdr/git.go` 不再把令牌放进 `argv`；令牌经环境变量传递，功能与错误文本不变。",
+    "存在一条可证伪的单元测试：断言令牌在 `env` 里、不在 `argv` 里；把实现改回 `-c` 时该测试变红（附 mutation 检验输出）。",
+    "`cmd/api/backupdr/git.go:41-45` 的注释与代码实际行为一致。",
+    "`tests/integration/**` 与 `tests/acceptance/**` 里的同类写法已按同一形状清理，且这些测试照常通过。",
+    "`redactSecrets` 及其调用点未被改动。",
+    "T1110 的 G3（`rsg-real-services` 与 `gitea-real-services`）在新树上仍然通过。"
+  ],
+  "tests": ["restore drill e2e", "gitea real services e2e"],
+  "allowed_scope": [
+    "cmd/api/backupdr/**",
+    "internal/gitprovider/**",
+    "tests/**",
+    "specs/SPEC_VERSION.json",
+    "go.mod",
+    "go.sum"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "specs/api/openapi.yaml",
+    "specs/events/**",
+    "internal/authz/**",
+    "specs/policies/**",
+    "internal/rsg/**",
+    "infra/migrations/**",
+    "apps/web/**",
+    "ops/**"
+  ],
+  "decision_level_max": "L1",
+  "relevant_specs": [
+    "**`internal/gitprovider/gitea.go:381-387` + 注释 `:364-365`（先读）**：本仓库传 git 凭据的**既有正确形状**——`GIT_CONFIG_COUNT=1`/`GIT_CONFIG_KEY_0=http.extraHeader`/`GIT_CONFIG_VALUE_0=Authorization: token <token>` 环境变量；注释逐字写着「without the token ever reaching argv — it rides in GIT_CONFIG_VALUE_0, process-visible only」。本任务是把偏离者对齐到它。",
+    "`cmd/api/backupdr/git.go:41-45` 与 `:75-78`（两处待改的注释）、`:71-73`（header 构造）、`:84`（命令行拼装，本任务的要害）。",
+    "`cmd/api/backupdr/git.go:93-95`：`redactSecrets` 调用的现场——它防的是另一条路径（git 报错回显 header），**保留**。",
+    "`docs/37_BACKUP_DR.md`：本代码服务的演练文档，行为不许变。",
+    "GitHub issue #273：本次发现的完整证据与同类清单。"
+  ],
+  "scope_note": "范围按「把这一类改完」定，不按「改一个文件」定：生产代码（`cmd/api/backupdr/**`）加测试辅助（`tests/**`）一次清干净，否则同一类问题会在测试里继续留着。`internal/gitprovider/**` 在范围内是给你读范例用的——**默认不要改它**（那边已经是正确写法）；只有在你证明它也有同样缺陷时才动，并在 RESULT 里说明。**明确不加**：迁移目录、web、契约文件——本任务不碰数据形状与对外接口。",
+  "supervisor_scope_narrowing": "2026-09-18 定稿。任务来自一次自动化安全审查（背景扫描）在 T1110 合并后报出的 MEDIUM 发现，我已核实为**真缺陷**，并且是**偏离本仓库既有写法**造成的——不是新问题、也不是风格分歧。\n\n**要害**：`git -c key=value` 的 value 落在 `argv` 里，`ps aux` 与 `/proc/<pid>/cmdline` 对同机所有账号可见。而这个文件自己的注释（`:41-45`）把「凭据不能出现在任何 process listing 里」列为要避免的三件事之一——**它选的手段违反了它自己写下的目标**。仓库同类的 `internal/gitprovider/gitea.go:376-387` 早就走环境变量，所以这里不是要你设计新方案。\n\n**三条边界**：\n（1）**不碰 `redactSecrets`**。那是另一条独立的泄漏路径（git 报错回显），两条都要挡；挪 header 不等于可以删脱敏。\n（2）**行为必须逐字不变**：命令参数顺序、`cmd.Dir`、`GIT_TERMINAL_PROMPT=0`、超时、错误文本、脱敏结果。这是加固，不是重写。\n（3）**测试辅助要一起清**，但用的是 dev 令牌——**不要为了改测试去改测试的意图**（断言、覆盖、超时一律不动）。\n\n**验收的形状**：「令牌不在 argv 里」必须有一条**能失败**的单元测试钉住，且附上你把实现改回 `-c` 时它变红的实测输出。只读代码、只写注释声明不算过——这一条的判据是它会不会红。"
+}
