@@ -1,0 +1,68 @@
+{
+  "id": "T0410",
+  "phase": "P4",
+  "phase_name": "PR、Review 与 Semantic Merge",
+  "title": "PR/Branch 完整 E2E",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "dependencies": ["T0409", "T0604"],
+  "requirements": [
+    "**流程一：种子项目的 `batch create → objects → PR → review → merge` 全程走产品路径。**每一步都是真实的 HTTP 路由打到真实的 PostgreSQL 与真实的 Gitea，**中间任何一步都不许直接调用 Go 服务层、不许用夹具把状态摆出来**。这条的来源是 `docs/31_MASTER_ACCEPTANCE.md:15`（Gate B 第 1 条，逐字「Branch/PR/RSG diff/Scientific Review/Integrity Review/merge 完整」）与 `docs/24_TEST_STRATEGY.md:28`（逐字列出必须覆盖「**PR review merge**、release、publish asset」）。",
+    "**先把缺的那条写路径补上：`POST /api/v1/projects/{projectId}/pull-requests`。**契约已经在 `specs/api/openapi.yaml:172-184`（`:178-184` 是 `post:`，summary 逐字「Open pull request with RSG diff」，带 `IdempotencyKey` 参数与 `201` 响应），但**没有实现**——`cmd/api/pullrequestshttp/wiring.go:44-47` 目前只注册了四条 GET（list / checks / diff / get）。没有这条路由，流程一的第一步（建 PR）就不可能走产品路径。**按契约已有的形状实现，不要改契约**（`specs/api/openapi.yaml` 不在你范围内）。",
+    "**流程二：一条 scientific conflict 流**，同样全程走产品路径。冲突的分类与「不许自动裁决」的出处是 `docs/09_VERSION_CONTROL.md:26-40`（七类 conflict 分类 + 逐字「禁止自动：科学结论 winner、Protocol 冲突数值折中、因果判断、private→public、rights conflict」）与 `:44`（逐字列出七个允许的人类动作「Accept A / Accept B / Keep both versions / Explicit coexistence / Create validation branch / Request more evidence / Abort proposed change」，并逐字写明「Scientific conflict 可在 main 中保持 `contested/unresolved`」）。同义禁令在 `docs/07_RSG_SPEC.md:39`（「科学冲突不得自动选 winner」）与 `docs/31_MASTER_ACCEPTANCE.md:16`（「Semantic conflict 不被 Agent 自动科学裁决」）。**你要在任务书允许的形态里选一条冲突场景与它的收尾动作**（收尾可以停在「保持 contested」，也可以是七个动作之一），并证明它没有自动选 winner。",
+    "**必须证明「到 merge_ready 这一段是真的被走过了」，而不是被摆出来的。**这正是本任务存在的理由，也是 T0604 的验收第 5 条逐字要求的东西（`tasks/packages/T0604.json`：「一个 PR 能经真实产品路径到达 `merge_ready`：端到端用例必须从 open 一路走到 merge_ready，**不得在测试里构造该状态**」）。树里现成的反面教材是 `tests/integration/merge_governance_e2e_test.go:439-442`——它在 `RequestReview` 之后直接调 `prSvc.SetState(ctx, …, domain.PullRequestStateApproved)` 与 `SetState(… MergeReady)`，跳过产品路径，自己的注释 `:421-424` 也承认「docs/43's later transitions have no HTTP route in this build」。**T0604 补齐那一半之后，这段捷径的理由就不成立了，你要把它改掉**（见 acceptance 第 3 条）。",
+    "**上一轮留下的那条捷径也要一起处理**：`tests/integration/release_e2e_test.go:283-322` 用 `sqlc.CreatePullRequest` / `sqlc.CreateReview` 直接把「scientific + integrity 双 approved」摆好（调用点 `:449-451`、`:586-588`），完全不经过产品路径。它属于另一个任务的测试，**你只需在 RESULT 里说明它是同类捷径、以及你为什么不改它**（或改它，二选一，但要说清楚）。不要为了让它「看起来干净」而删掉它的断言。"
+  ],
+  "acceptance_criteria": [
+    "**两条流程都在真实栈上通过**：真 PostgreSQL、真 Gitea、真 HTTP 路由。有一条 E2E 真的建分支、建对象、建 PR、提 review、走到合并，全程没有一次 `SetState` 之类的直接状态构造。**判据**：在测试代码里对 `SetState`、`sqlc.CreatePullRequest`、`sqlc.CreateReview` 的调用做一次检查，证明流程一的路径上零出现（在 RESULT 里给出你的验证方式与命令）。",
+    "**PR 是在产品路径上建出来的**：有一条测试通过 `POST /api/v1/projects/{projectId}/pull-requests` 建出 PR 并断言 `201` 与返回的编号，而不是调用 `pullrequests.NewService(...).Create(...)`。",
+    "**`tests/integration/merge_governance_e2e_test.go:439-442` 的那段捷径被真的走通了**：`RequestReview` 之后必须经真实产品路径到达 `approved` 与 `merge_ready`，`SetState` 直调被移除。**如果走不通，那是真实缺陷**——把它写进 RESULT 交给 Supervisor，**不得删断言、skip 或把测试改回捷径来换取变绿**（CLAUDE.md §5.1）。",
+    "**冲突那条不许有自动 winner**：有一条断言证明冲突发生后**没有任何一方被自动选为结论**（可以停在 `contested/unresolved`，也可以由测试扮演人类动作之一）。**反方向也要钉**：要有一条测试证明「人类选了一个动作之后流程确实前进」，否则一个「什么都不做」的实现也能让单向断言变绿——仓库自己点名过这个坏形状（`tests/integration/asset_page_test.go:714-727` 逐字「**An empty string is a failure rather than a pass: a check that forbade nothing is the shape that reads green while measuring nothing**」）。",
+    "**稳定性不许靠重试掩盖**：`docs/67_TEST_GATES.md:28` 逐字「**flake 不是\"rerun until green\"；先定位再修。**」若你在本地看到间歇性失败，**定位并修掉**，不要加重试、不要放大 timeout（CLAUDE.md §5.1 明令禁止）。在 RESULT 里说明你跑了几次、是否见过 flake。",
+    "**既有测试一条都不许变红**，尤其 `tests/integration/merge_governance_e2e_test.go`（你要改的那条）、`tests/e2e/conflict_e2e_test.go`、`tests/e2e-pulls/`、`tests/e2e-conflicts/` 两套浏览器套件（它们目前都是绿的，别碰坏）。",
+    "RESULT 里逐条说明：**每一步是浏览器驱动的还是 HTTP 驱动的**（见 scope_note 的裁定三）、流程一与流程二各自经过的**真实路由清单**、以及你为「冲突收尾」选了什么动作、为什么。"
+  ],
+  "allowed_scope": [
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "internal/persistence/**",
+    "internal/rsg/**",
+    "internal/application/**",
+    "internal/domain/**",
+    "go.mod",
+    "go.sum",
+    ".env.example",
+    "cmd/api/**",
+    "apps/web/**",
+    "tests/**",
+    "Makefile"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "specs/api/openapi.yaml",
+    "specs/events/**",
+    "specs/policies/**",
+    "specs/orchestrator/**",
+    ".github/**",
+    "internal/authz/**",
+    "packages/schemas/**"
+  ],
+  "relevant_specs": [
+    "**先读这条，它决定你不做什么：CI 接线不是你的事。** `docs/25_CICD_DEVOPS.md:14-25` 的 CI 清单第 8 项逐字是「**Playwright E2E；**」，而今天 `.github/workflows/ci.yml` 的 7 个 job 里**一个浏览器测试都没有**（spec-validation / task-state / go / web / acceptance / python / migration-integration），`specs/orchestrator/gates.json` 的 `required_jobs` 与之一致。**补这个洞是我的活**，理由是 `gates.json` 头部逐字写着「G2 re-runs CI's EXACT steps — the jobs of `.github/workflows/ci.yml`, steps verbatim (**a sync unit test fails when this file drifts from ci.yml**)」——两者是镜像、由单元测试强制，而 `specs/orchestrator/**` 按 CLAUDE.md §8.1 是 Supervisor-only。**所以：你写测试套件，我接线。**你只要保证**套件能被一条命令从仓库根目录跑起来**（并且能跑在 CI 的 ubuntu-24.04 上），把你的入口命令写进 RESULT，剩下的是我的事。**不要动 `.github/**`，不要动 `specs/orchestrator/**`（两者都在你的 forbidden_scope 里）。**",
+    "**验收标准只有一句，先看它出自哪**：`docs/24_TEST_STRATEGY.md:5` 逐字列出测试层级「Domain unit → repository/integration → API contract → multi-service integration → **Playwright E2E** → security/permission → canonical workflow」；`:28` 逐字列出必须覆盖的场景，含「**PR review merge**」。`docs/67_TEST_GATES.md:20` 逐字「跨系统链路使用真实容器服务。特别是：PostgreSQL transaction、Gitea branch protection/webhook、S3/MinIO hash、Redis retry、**browser navigation**、auth/visibility。」`docs/31_MASTER_ACCEPTANCE.md:60`（Gate I）逐字「完整 MOF workflow……全程真实 DB/Git/blob/browser，**非 mock 演示**」。**这四句合起来就是「真实栈 + 浏览器」这个形态的出处。**",
+    "**流程一的每一步今天长什么样（我已经逐条核过）**：branch create ✅ `POST /api/v1/projects/{projectId}/branches`（`cmd/api/rsghttp/wiring.go:50`）；objects ✅ `POST …/branches/{branchId}/objects`（`:51`）；**PR create ❌ 不存在**（`cmd/api/pullrequestshttp/wiring.go:44-47` 只有四条 GET，契约在 `specs/api/openapi.yaml:172-184`）；review submit ✅ `POST …/pull-requests/{prId}/reviews`（`cmd/api/reviewhttp/wiring.go:60`）；merge ✅ `POST …/pull-requests/{number}:merge`（`cmd/api/mergehttp/wiring.go:56` 注册的是 `{number...}` 通配、实际路径靠后缀判定，理由在该文件 `:48-54` 的注释里）。**只有第二个环节缺，补它。**",
+    "**「到 merge_ready 这一段是断的」四处证据，先读再动手**：`internal/persistence/review_store.go:104-114` 唯一的自动迁移是 `review_required → changes_requested`，注释逐字「The approved half is deliberately absent: deciding WHEN the dimensions add up to an approval is **T0604's** required-review calculation, not invented here」；`internal/application/reviews/service.go:25-27` 同义；`internal/application/reviews/ports.go:70-73` 逐字「T0604 lands the rule-based resolver (Research Owners rules by object/schema/type); until then **production wires nil** and the conditional verdict fails closed」；`internal/application/pullrequests/service.go:107` 的 `SetState` **能**驱动 `approved`/`merge_ready`，但全非测试代码里它唯一的调用者是同文件 `:147` 的内部包装（只被 `Abort`/`MarkMerged` 用），**没有任何 HTTP 路由暴露它**。**T0604 就是来补这一段的；你的活是把它接上之后，从外面走一遍。**",
+    "**合并侧的边界**：`internal/application/merge/service.go:428-430` 逐字 `if pr.State != domain.PullRequestStateMergeReady { return nil, &NotMergeableError{Number: pr.Number, State: pr.State} }`，`internal/application/merge/errors.go:66-67` 注释逐字「The review machine has to be walked, it cannot be skipped by asking the merge engine directly.」**这两句是「不得构造 merge_ready」这条边界的直接出处。**",
+    "**现有浏览器套件的形态（照它做，别另立一套）**：`tests/e2e-pulls/run.sh:2-6` 逐字「drives the pull request detail page in real Chromium **against a network-layer mock of the Go API**」（T0408 的 `pr ui e2e`），`tests/e2e-conflicts/run.sh:2-6` 同形。两套都用 `playwright 1.55.0`（各目录的 `package.json:11`）。`tests/e2e-pulls/pulls-e2e.mjs:11-32` 覆盖六个 tab、风险条、两个 review 维度与提交/403 拒绝——**注意它没有 merge 动作，`apps/web` 里也没有 merge 按钮**（全树 `apps/web/lib/pulls.ts` grep `merge` 只有文案，没有 `:merge` 客户端调用）。仓库里还有 7 套同形的 Playwright 套件：`tests/e2e-anonymous`、`-explore`、`-files`、`-assets`、`-settings`、`-shell`、`tests/web-smoke`。",
+    "**没有任何 Go 测试起过浏览器**（全树 `chromedp`/`chromium` 在 `tests/**.go` 里零命中；`exec.Command` 命中的全是 `git`）。**所以「真浏览器 + 真栈」这个形态在仓库里没有先例，你是在开这个头**——形状上的自由度在你手里（见 scope_note 裁定三），但真实性的下限由上面第 2 条那四句规格钉死。",
+    "**冲突侧已有的覆盖（别重复造）**：`tests/e2e/conflict_e2e_test.go`（T0407，真 PostgreSQL + 真 HTTP handler + 真 store）、`tests/integration/conflict_test.go`（T0405）、`tests/integration/resolution_test.go`（T0407 的 store 契约）。冲突的分类与动作清单见 `docs/09_VERSION_CONTROL.md:26-44`。**你的流程二应该复用这些既有能力，而不是再写一套冲突检测。**",
+    "**种子项目长什么样**：`docs/34_SEED_DEMO_PROJECT.md:23-27` —— Branches 有四个（`humidity-40rh`、`humidity-70rh`、`mechanism-water-binding`、`protocol-activation-180c`）；PR 逐字要求「至少一个无冲突 merge、一个 **Protocol scientific conflict**、一个 private branch selective publication」。**注意全树没有任何可执行的 seed 脚本**（`find -iname '*seed*'` 只命中 `docs/34` 这一篇文档）。**第三个场景（private branch selective publication）碰 private→public 可见性语义，本任务的 requirements 只点名了前两条，不要顺手做它**——见裁定四。",
+    "**迁移号由我在派工时分配并写进任务包**（账本 `.rddev/runtime/migration-numbers.json`，分配器幂等）。**不要自己选号**（CLAUDE.md §8.1）。**本任务很可能不需要迁移**——它补的是一条路由与测试，不是表。不需要就别建，在 RESULT 里说明理由。"
+  ],
+  "scope_note": "这是**按本任务的实际交付面调整过的范围**。相对 DAG 里的 phase 级默认值：**加** `Makefile`（测试套件的入口命令要能从仓库根目录一条命令跑起来，而这个任务**不该**去动 `.github/**` 或 `specs/orchestrator/**`——那两处由我做，见 relevant_specs 第一条）。**明确不加**（写进 forbidden_scope）：`.github/**` 与 `specs/orchestrator/**`（**这是本任务最容易越界的一处**：它的验收是「在 CI 稳定通过」，而 CI 接线在同一批文件里；我把它拿走了，你只管套件本身）、`specs/api/openapi.yaml`（PR create 的契约**已经存在**，照它实现即可，不需要改）、`specs/events/**`、`specs/policies/**` 与 `internal/authz/**`（权限矩阵是安全边界）、`packages/schemas/**`、`docs/**`。`apps/web/**` **保留**在范围内——浏览器流程要驱动的页面在这里，而且如果某个环节今天在 UI 上不存在（例如 merge 按钮），你可以补。",
+  "supervisor_scope_narrowing": "2026-09-18 定稿。这个任务是**关键路径之外的收尾环**，但它的验收标准一直被字面照抄、没人查过它够不够得着——我查了，**够不着**，所以有几条裁定必须先说清楚。\n\n**裁定一（本任务存在的理由）：`approved → merge_ready` 这段在产品路径上是断的，T0604 来补，你来验。**2026-09-16 的 decisions 逐字记过（`tasks/decisions.md:8748-8750`）：「今天没有任何产品路径能把 PR 推到 `merge_ready`……没有 T0604，那条『完整』链路里就缺 review→approved→merge_ready 这一段，E2E 只能靠**构造状态**蒙混过去」。**所以本任务与 T0604 的依赖边是真的，不是记账**——T0604 没合之前不要派我，派了也只能照抄那段 `SetState`。\n\n**裁定二：PR create 那条路由你来补，不另立任务。**契约（`specs/api/openapi.yaml:172-184`）已经写好，缺的只是实现，属 L1；而 T0402「Pull Request Domain」已经合并且没交这条路由。**新立一个任务会让一条本任务必需的路由跑到另一条串行链上去，白白多一环。**但**契约本身不许动**——它是我的。\n\n**裁定三（最要紧的一条）：真实性的下限是「真实产品路径」，不是「鼠标点击」。**「不得在测试里构造该状态」这个禁令针对的是**直接调用服务层把状态摆出来**（`SetState`），**不是**针对「用 HTTP 而不是用点击」。具体到本任务：**流程的每一个状态迁移都必须由一个真实的 HTTP 请求驱动**（打到真实路由、真实 handler、真实 store、真实 PostgreSQL），但**那一个请求是由浏览器发出的、还是由测试代码直接发的，你可以自己定**——理由是 UI 上今天根本没有 merge 按钮（`apps/web` 全树没有 `:merge` 调用），要求「全程点击」等于要求本任务先把 merge 的界面做出来，那是 T0408 的界面工作、会把这个任务撑大。**你自己定这个分界，但必须在 RESULT 里逐步骤写明哪些是浏览器驱动的、哪些是 HTTP 驱动的**，不许含糊。**下限不可让**：任何一步直接调用 Go 服务层、或往库里插行把状态摆好，都是不行的。\n\n**裁定四：`private branch selective publication` 不做。**`docs/34:27` 要求种子项目有那个场景，但本任务的 requirements 只点名了「无冲突 merge」与「Protocol scientific conflict」两条。第三个场景碰 private→public 可见性语义，而那是 L3（`specs/policies/permissions-matrix.csv` 的 `publish_private_to_public` 行）。**看到它不要顺手做。**owner 若要它，那是一条独立任务。\n\n**裁定五：CI 接线是我的活，而且它会改变所有在跑任务的 G2。**`gates.json` 是 `ci.yml` 的镜像（由单元测试强制），且在 `specs/` 下——**一改就动规格指纹**，所以它必须和任务书落地挤同一个空窗。这就是为什么它没被写进你的范围。**你的交付在「套件能从仓库根目录一条命令跑绿」这一步就算完成**；接线在我说完成之前，本任务在交付面上不算完成——**这句话是对我自己说的，不是对你的要求**。\n\n**一条提示，不是要求**：`tests/integration/release_e2e_test.go` 与 `tests/integration/merge_governance_e2e_test.go` 是同类捷径的两个样本。前者属于别的任务的测试（T0605/T0606 那一带），**你只需在 RESULT 里说明你为什么（不）动它**；后者是你验收第 3 条点名要改的那条。"
+}
