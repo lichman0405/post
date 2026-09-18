@@ -1,0 +1,326 @@
+/* T1003 Research inbox — GitHub/Primer design tokens (ADR-012, docs/06,
+   CLAUDE.md §10). Neutral background, thin borders, dense rows, blue for
+   interaction and nothing else. No gradients, no glass, no shadow, no
+   rounded card language: the inbox reads like a repository's notification
+   list, because that is what it is.
+
+   The palette is entirely Primer's tokens (with the same literal fallbacks
+   globals.css, projects.css, assets.css and explore.css use), so the
+   surface follows the app's theme switch instead of pinning its colours.
+
+   The one thing this sheet must not do is style a COUNT as importance: the
+   badge is neutral text in a bordered pill at the same weight as the event
+   name beside it. "40 events" means forty things happened, not forty
+   reasons to look — the inbox has no ranking, and a colour ramp here would
+   invent one. */
+
+.inbox-page {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.inbox-head {
+  margin-bottom: 16px;
+}
+
+.inbox-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.inbox-sub {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* ---------- toolbar: the two views and the one bulk action ---------- */
+
+.inbox-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+}
+
+.inbox-filters {
+  display: flex;
+  gap: 4px;
+}
+
+.inbox-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--fgColor-default, #1f2328);
+  font-size: 14px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.inbox-filter:hover {
+  background-color: var(--bgColor-muted, #f6f8fa);
+}
+
+.inbox-filter[aria-selected="true"] {
+  border-color: var(--borderColor-default, #d0d7de);
+  background-color: var(--bgColor-muted, #f6f8fa);
+  font-weight: 600;
+}
+
+.inbox-filter:focus-visible,
+.inbox-mark-all:focus-visible,
+.inbox-row-action:focus-visible,
+.inbox-retry:focus-visible {
+  outline: 2px solid var(--fgColor-accent, #0969da);
+  outline-offset: -2px;
+}
+
+/* The unread count on the tab is the same neutral pill as a row's count:
+   a number the reader can trust, not a red alert. */
+.inbox-filter-count {
+  padding: 0 6px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 2em;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.inbox-mark-all {
+  padding: 5px 12px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--bgColor-default, #ffffff);
+  color: var(--fgColor-default, #1f2328);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.inbox-mark-all:hover:not(:disabled) {
+  background-color: var(--bgColor-muted, #f6f8fa);
+}
+
+.inbox-mark-all:disabled {
+  color: var(--fgColor-disabled, #8c959f);
+  cursor: default;
+}
+
+.inbox-notice {
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--bgColor-muted, #f6f8fa);
+  font-size: 13px;
+  color: var(--fgColor-default, #1f2328);
+}
+
+/* ---------- states ---------- */
+
+.inbox-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 16px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--bgColor-muted, #f6f8fa);
+  font-size: 14px;
+  color: var(--fgColor-muted, #59636e);
+  text-align: center;
+}
+
+.inbox-state-error {
+  border-color: var(--borderColor-danger-emphasis, #cf222e);
+  color: var(--fgColor-danger, #d1242f);
+}
+
+.inbox-retry {
+  padding: 4px 10px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--bgColor-default, #ffffff);
+  color: var(--fgColor-default, #1f2328);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inbox-state a {
+  color: var(--fgColor-accent, #0969da);
+}
+
+/* ---------- the list ---------- */
+
+.inbox-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.inbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+  background-color: var(--bgColor-default, #ffffff);
+}
+
+.inbox-row:last-child {
+  border-bottom: none;
+}
+
+.inbox-row:hover {
+  background-color: var(--bgColor-muted, #f6f8fa);
+}
+
+/* The unread dot: the only colour a row's read state uses, and the only
+   accent in the list. An unread row is not bolded, enlarged or tinted —
+   read state is one mark, and the row reads the same either way. */
+.inbox-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background-color: var(--fgColor-accent, #0969da);
+}
+
+.inbox-dot-read {
+  background-color: transparent;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+}
+
+.inbox-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.inbox-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.inbox-event {
+  font-weight: 600;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.inbox-count {
+  padding: 0 6px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 2em;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.inbox-target-sep {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.inbox-target {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.inbox-target:hover {
+  text-decoration: underline;
+}
+
+/* A target the caller may no longer read: the id and the count stay (they
+   were delivered) but there is nothing to link to and no name to show. */
+.inbox-target[data-inbox-target-nolink] {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.inbox-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* The window is a UTC hour; the label says so. tabular-nums keeps the two
+   clock times aligned down the column instead of jittering per row. */
+.inbox-window,
+.inbox-readstate {
+  font-variant-numeric: tabular-nums;
+}
+
+.inbox-row-action {
+  flex: none;
+  align-self: center;
+  padding: 4px 10px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--bgColor-default, #ffffff);
+  color: var(--fgColor-default, #1f2328);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.inbox-row-action:hover:not(:disabled) {
+  background-color: var(--bgColor-muted, #f6f8fa);
+}
+
+.inbox-row-action:disabled {
+  color: var(--fgColor-disabled, #8c959f);
+  cursor: default;
+}
+
+/* An already-read row shows a state, not a button: nothing to click. */
+.inbox-row-action-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-color: transparent;
+  background: none;
+  color: var(--fgColor-muted, #59636e);
+  font-weight: 400;
+  cursor: default;
+}
+
+@media (max-width: 600px) {
+  .inbox-row {
+    flex-wrap: wrap;
+  }
+
+  .inbox-row-action {
+    align-self: flex-start;
+    margin-left: 18px;
+  }
+}

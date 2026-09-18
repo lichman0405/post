@@ -648,11 +648,25 @@ var canonicalTables = map[string]tableExp{
 		// "delivered at" and "cancelled at" mean exactly what they say.
 		// subscription_id is RESTRICT, not CASCADE: an unsubscribe is a
 		// soft delete, so nothing may depend on the row ever going away.
-		cols: []colExp{c("id", u, false, true), c("subscription_id", u, false, false), c("user_id", u, false, false), c("event_id", u, false, false), c("channel", txt, false, false), c("event_type", txt, false, false), c("target_type", txt, false, false), c("target_id", txt, false, false), c("status", txt, false, true), c("created_at", ts, false, true), c("delivered_at", ts, true, false), c("cancelled_at", ts, true, false)},
+		//
+		// T1003 (00079) adds read_at, plus a fourth agreement CHECK: it is
+		// NULL (unread) or the row is 'delivered'. A pending row is an
+		// email the digest has not sent and a cancelled row is one the
+		// revocation path withdrew, so neither was ever SHOWN to anyone
+		// and neither can be read.
+		cols: []colExp{c("id", u, false, true), c("subscription_id", u, false, false), c("user_id", u, false, false), c("event_id", u, false, false), c("channel", txt, false, false), c("event_type", txt, false, false), c("target_type", txt, false, false), c("target_id", txt, false, false), c("status", txt, false, true), c("created_at", ts, false, true), c("delivered_at", ts, true, false), c("cancelled_at", ts, true, false), c("read_at", ts, true, false)},
 		pk:   []string{"id"},
 		checks: []string{
 			"ARRAY['web'", "ARRAY['pending'",
-			"status = 'delivered'", "status = 'cancelled'",
+			// The delivered pairing is spelled "= (delivered_at IS NOT
+			// NULL)": the whole pairing, not the bare "delivered_at IS NOT
+			// NULL" (which would match the same one definition but drop the
+			// "delivered <=> delivered_at" agreement this entry is about,
+			// while "status = 'delivered'" alone would match two — the
+			// T1003 read_at CHECK also contains it, and a matcher has to
+			// identify ONE definition).
+			"= (delivered_at IS NOT NULL)", "status = 'cancelled'",
+			"read_at IS NULL",
 		},
 		fks: []fkExp{
 			fk("event_id", "research_events", "RESTRICT"),
@@ -993,6 +1007,13 @@ var explicitIndexes = map[string][]string{
 	"subscription_deliveries_uniq":        {"subscription_id", "event_id", "channel", "UNIQUE"},
 	"subscription_deliveries_inbox_idx":   {"user_id", "status", "created_at DESC", "id DESC"},
 	"subscription_deliveries_pending_idx": {"subscription_id", "WHERE"},
+	// T1003 (00079): the mass "mark my inbox read" update — one
+	// subscriber's unread delivered web rows. Partial, because the whole
+	// statement it answers (markInboxAllRead in internal/events/inbox_store.go)
+	// is defined by read_at IS NULL. It is NOT the entries read or the
+	// badge: those need the read rows too, so they cannot use a partial
+	// index that excludes them.
+	"subscription_deliveries_unread_idx": {"user_id", "created_at DESC", "id DESC", "WHERE"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded

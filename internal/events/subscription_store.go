@@ -38,7 +38,7 @@ func NewSubscriptionStore(pool *pgxpool.Pool) *SubscriptionStore {
 const subscriptionCols = `id, user_id, target_type, target_id, event_filters, channels, created_at, updated_at, deleted_at`
 
 // deliveryCols is the delivery row as every read returns it.
-const deliveryCols = `id, subscription_id, user_id, event_id, channel, event_type, target_type, target_id, status, created_at, delivered_at, cancelled_at`
+const deliveryCols = `id, subscription_id, user_id, event_id, channel, event_type, target_type, target_id, status, created_at, delivered_at, cancelled_at, read_at`
 
 // CreateSubscription registers one live subscription for userID.
 //
@@ -430,7 +430,7 @@ func scanSubscriptionDelivery(row rowScanner) (SubscriptionDelivery, error) {
 	var d SubscriptionDelivery
 	if err := row.Scan(&d.ID, &d.SubscriptionID, &d.UserID, &d.EventID, &d.Channel,
 		&d.EventType, &d.TargetType, &d.TargetID, &d.Status, &d.CreatedAt,
-		&d.DeliveredAt, &d.CancelledAt); err != nil {
+		&d.DeliveredAt, &d.CancelledAt, &d.ReadAt); err != nil {
 		return SubscriptionDelivery{}, err
 	}
 	return d, nil
