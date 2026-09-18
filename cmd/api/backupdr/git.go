@@ -36,13 +36,18 @@ import (
 // repository the drill is pointed at is named by the caller, not
 // discovered.
 //
-// # Why basic auth is not put in a git remote URL
+// # Why basic auth is put in neither a remote URL nor an argument
 //
-// A URL carrying a password ends up in `git`'s error output, in the
-// remote's stored config inside the mirror, and in any process listing.
-// Credentials are injected per invocation through `-c
-// http.extraHeader=...` instead, and every error this file returns has been
-// passed through redactSecrets first.
+// A URL carrying a password ends up in `git`'s error output and in the
+// remote's stored config inside the mirror. `-c http.extraHeader=...` is no
+// better: a `-c` value IS an argument, and an argument is readable by every
+// account on the machine through `ps aux` and /proc/<pid>/cmdline. Credentials
+// are injected per invocation into the process ENVIRONMENT instead (gitEnv),
+// the shape internal/gitprovider/gitea.go uses — the header rides in
+// GIT_CONFIG_VALUE_0, which unlike argv no other account can read. Every error
+// this file returns has also been passed through redactSecrets: that is a
+// separate path (git's own messages can quote the header it was given), and
+// closing one is no reason to open the other.
 
 // gitClient drives Gitea's REST API and git's own plumbing for the Git half
 // of the drill.
@@ -54,15 +59,43 @@ type gitClient struct {
 	// never collides with this one and cleanup can only ever delete the
 	// drill's own.
 	runID string
+	// runner executes git. newGitClient installs the real binary; the field
+	// is the unit-test seam (the shape internal/gitprovider's GitRunner
+	// uses), and it exists because where a credential does and does not go
+	// is a property of the invocation — argv and environment — which cannot
+	// be asserted by reading this function's source.
+	runner gitRunner
 }
 
 func newGitClient(base, token, runID string) *gitClient {
 	return &gitClient{
-		base:  strings.TrimSuffix(base, "/"),
-		token: token,
-		http:  &http.Client{Timeout: 60 * time.Second},
-		runID: runID,
+		base:   strings.TrimSuffix(base, "/"),
+		token:  token,
+		http:   &http.Client{Timeout: 60 * time.Second},
+		runID:  runID,
+		runner: defaultGitRunner,
 	}
+}
+
+// gitRunner executes one already-resolved git binary in the given working
+// directory and environment, and returns its stdout and stderr separately.
+// Everything a caller observes around the invocation — the LookPath
+// message, the wrapping, the redaction — stays in git below, so
+// substituting a runner changes nothing but the execution.
+type gitRunner func(ctx context.Context, bin, dir string, env []string, args ...string) (stdout, stderr []byte, err error)
+
+// defaultGitRunner runs the real git binary.
+func defaultGitRunner(ctx context.Context, bin, dir string, env []string, args ...string) ([]byte, []byte, error) {
+	cmd := exec.CommandContext(ctx, bin, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	cmd.Env = env
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	return stdout.Bytes(), stderr.Bytes(), err
 }
 
 // gitAuthHeader is the extra header every git invocation carries. Gitea
@@ -72,29 +105,43 @@ func (g *gitClient) gitAuthHeader() string {
 	return "Authorization: Bearer " + g.token
 }
 
-// git runs one git command. Credentials arrive as a config override, never
-// in the argument list and never in a remote URL, and the error text is
-// redacted before it is returned — git's own messages can quote the header
-// it was given.
+// gitEnv is the environment of one git invocation. The two config entries
+// are the two `-c` flags this used to pass — the auth header and an empty
+// credential.helper, so no ambient helper can answer a prompt this drill
+// cannot see — expressed the way internal/gitprovider/gitea.go expresses
+// them, because a `-c` value is an ARGUMENT and argv is readable by every
+// account on the machine (/proc/<pid>/cmdline, `ps aux`), while a
+// GIT_CONFIG_VALUE_n is in neither of those.
+//
+// The entries are appended to the inherited environment rather than
+// replacing it: PATH and the proxy/TLS settings git needs flow through, and
+// exec's last-one-wins de-duplication is what makes these values the ones a
+// subprocess sees.
+func (g *gitClient) gitEnv() []string {
+	return append(os.Environ(),
+		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=http.extraHeader",
+		"GIT_CONFIG_VALUE_0="+g.gitAuthHeader(),
+		"GIT_CONFIG_KEY_1=credential.helper",
+		"GIT_CONFIG_VALUE_1=",
+		"GIT_TERMINAL_PROMPT=0")
+}
+
+// git runs one git command. Credentials arrive in the process environment
+// (gitEnv), never in the argument list and never in a remote URL, and the
+// error text is redacted before it is returned — git's own messages can
+// quote the header it was given.
 func (g *gitClient) git(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	bin, err := exec.LookPath("git")
 	if err != nil {
 		return nil, fmt.Errorf("git: not on PATH: %w", err)
 	}
-	full := append([]string{"-c", "http.extraHeader=" + g.gitAuthHeader(), "-c", "credential.helper="}, args...)
-	cmd := exec.CommandContext(ctx, bin, full...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	stdout, stderr, err := g.runner(ctx, bin, dir, g.gitEnv(), args...)
+	if err != nil {
 		return nil, fmt.Errorf("git %s: %w: %s", args[0], err,
-			redactSecrets(stderr.String(), g.token))
+			redactSecrets(string(stderr), g.token))
 	}
-	return stdout.Bytes(), nil
+	return stdout, nil
 }
 
 // giteaAPIError carries Gitea's own status code.
@@ -237,7 +284,8 @@ func (g *gitClient) deleteOrg(ctx context.Context, org string) error {
 }
 
 // cloneURL is the URL git fetches from. It carries no credential: the
-// token travels in the per-invocation header (gitAuthHeader).
+// token travels in the per-invocation header (gitAuthHeader), handed to git
+// through the process environment (gitEnv), not through this string.
 func (g *gitClient) cloneURL(owner, repo string) string {
 	return g.base + "/" + owner + "/" + repo + ".git"
 }

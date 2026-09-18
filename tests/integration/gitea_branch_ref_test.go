@@ -157,12 +157,13 @@ func (fx *branchRefGiteaFixture) pushMain(t *testing.T, owner, name string) stri
 		t.Fatalf("gitea integration: write push file: %v", err)
 	}
 	remoteURL := fx.base + "/" + url.PathEscape(owner) + "/" + url.PathEscape(name) + ".git"
-	authHeader := "http.extraHeader=Authorization: token " + fx.token
+	env := append(os.Environ(), "HOME="+dir)
+	env = append(env, gitAuthEnv("Authorization: token "+fx.token)...)
 	run := func(args ...string) {
 		t.Helper()
-		full := append([]string{"-C", dir, "-c", authHeader}, args...)
+		full := append([]string{"-C", dir}, args...)
 		cmd := exec.Command("git", full...)
-		cmd.Env = append(os.Environ(), "HOME="+dir)
+		cmd.Env = env
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("gitea integration: git %s: %v\n%s", strings.Join(args, " "), err, out)
@@ -212,12 +213,13 @@ func (fx *branchRefGiteaFixture) createRefAt(t *testing.T, owner, name, ref, sha
 	t.Helper()
 	dir := t.TempDir()
 	remoteURL := fx.base + "/" + url.PathEscape(owner) + "/" + url.PathEscape(name) + ".git"
-	authHeader := "http.extraHeader=Authorization: token " + fx.token
+	env := append(os.Environ(), "HOME="+dir)
+	env = append(env, gitAuthEnv("Authorization: token "+fx.token)...)
 	run := func(args ...string) {
 		t.Helper()
-		full := append([]string{"-C", dir, "-c", authHeader}, args...)
+		full := append([]string{"-C", dir}, args...)
 		cmd := exec.Command("git", full...)
-		cmd.Env = append(os.Environ(), "HOME="+dir)
+		cmd.Env = env
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("gitea integration: git %s: %v\n%s", strings.Join(args, " "), err, out)
@@ -235,12 +237,13 @@ func (fx *branchRefGiteaFixture) deleteRef(t *testing.T, owner, name, ref string
 	t.Helper()
 	dir := t.TempDir()
 	remoteURL := fx.base + "/" + url.PathEscape(owner) + "/" + url.PathEscape(name) + ".git"
-	authHeader := "http.extraHeader=Authorization: token " + fx.token
+	env := append(os.Environ(), "HOME="+dir)
+	env = append(env, gitAuthEnv("Authorization: token "+fx.token)...)
 	run := func(args ...string) {
 		t.Helper()
-		full := append([]string{"-C", dir, "-c", authHeader}, args...)
+		full := append([]string{"-C", dir}, args...)
 		cmd := exec.Command("git", full...)
-		cmd.Env = append(os.Environ(), "HOME="+dir)
+		cmd.Env = env
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("gitea integration: git %s: %v\n%s", strings.Join(args, " "), err, out)

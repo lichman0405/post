@@ -133,6 +133,21 @@ func giteaServiceToken(t *testing.T, base string) string {
 	return minted.SHA1
 }
 
+// gitAuthEnv is the environment that hands one git invocation its
+// Authorization header. The header rides GIT_CONFIG_VALUE_0 — the shape
+// internal/gitprovider/gitea.go uses — and NOT a `-c http.extraHeader=...`
+// argument: a `-c` value is an argument, and argv is readable by every
+// account on the machine (`ps aux`, /proc/<pid>/cmdline). The parameter is
+// the header value itself ("Authorization: token <token>"), so a caller's
+// intent reads the same as before the move.
+func gitAuthEnv(header string) []string {
+	return []string{
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.extraHeader",
+		"GIT_CONFIG_VALUE_0=" + header,
+	}
+}
+
 // giteaCall performs one authenticated provider call (the token attaches as
 // the Authorization header; never in a URL).
 func giteaCall(t *testing.T, method, base, token, path string) (int, []byte) {
@@ -688,7 +703,8 @@ func TestGiteaWebhookDeliverySignature(t *testing.T) {
 	}
 
 	// A real push fires the delivery (the token rides the Authorization
-	// header via http.extraHeader, never a URL).
+	// header via http.extraHeader, handed to git in the environment —
+	// gitAuthEnv — never a URL and never argv).
 	pushToRepo(t, base, token, owner, name)
 
 	delivered := recorder.waitPush(t, 10*time.Second)
@@ -712,8 +728,9 @@ func TestGiteaWebhookDeliverySignature(t *testing.T) {
 
 // pushToRepo pushes one commit through the provider's own Git transport
 // (the exact path future product pushes take), authenticating with the
-// service account token via an extra header so the credential never lands
-// in a URL or process argument list. The commit goes to a NON-main branch:
+// service account token via an extra header carried in the process
+// environment (gitAuthEnv), so the credential lands in neither a URL nor
+// the argument list. The commit goes to a NON-main branch:
 // T0302 protects main from direct pushes (the delivery trigger is the
 // push event, not the branch).
 func pushToRepo(t *testing.T, base, token, owner, name string) {
@@ -724,12 +741,13 @@ func pushToRepo(t *testing.T, base, token, owner, name string) {
 		t.Fatalf("gitea integration: write push file: %v", err)
 	}
 	remoteURL := base + "/" + url.PathEscape(owner) + "/" + url.PathEscape(name) + ".git"
-	authHeader := "http.extraHeader=Authorization: token " + token
+	env := append(os.Environ(), gitAuthEnv("Authorization: token "+token)...)
 
 	run := func(args ...string) {
 		t.Helper()
-		full := append([]string{"-C", dir, "-c", authHeader}, args...)
+		full := append([]string{"-C", dir}, args...)
 		cmd := exec.Command("git", full...)
+		cmd.Env = env
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("gitea integration: git %s: %v\n%s", strings.Join(args, " "), err, out)

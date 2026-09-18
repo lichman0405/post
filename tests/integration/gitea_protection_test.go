@@ -128,10 +128,14 @@ func researchDir(t *testing.T, base, token, owner, name, branch, line string) st
 	dir := t.TempDir()
 	authHeader := "Authorization: token " + token
 	remoteURL := base + "/" + url.PathEscape(owner) + "/" + url.PathEscape(name) + ".git"
+	// The credential rides the environment (gitAuthEnv), never argv.
+	env := append(os.Environ(), gitAuthEnv(authHeader)...)
 	run := func(args ...string) {
 		t.Helper()
-		full := append([]string{"-C", dir, "-c", "http.extraHeader=" + authHeader}, args...)
-		out, err := exec.Command("git", full...).CombinedOutput()
+		full := append([]string{"-C", dir}, args...)
+		cmd := exec.Command("git", full...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("gitea integration: git %s: %v\n%s", strings.Join(args, " "), err, out)
 		}
@@ -162,8 +166,10 @@ func researchDir(t *testing.T, base, token, owner, name, branch, line string) st
 func pushAttempt(t *testing.T, dir, base, owner, name, authHeader string, args ...string) (int, string) {
 	t.Helper()
 	remoteURL := base + "/" + url.PathEscape(owner) + "/" + url.PathEscape(name) + ".git"
-	full := append([]string{"-C", dir, "-c", "http.extraHeader=" + authHeader, "push", remoteURL}, args...)
-	out, err := exec.Command("git", full...).CombinedOutput()
+	full := append([]string{"-C", dir, "push", remoteURL}, args...)
+	cmd := exec.Command("git", full...)
+	cmd.Env = append(os.Environ(), gitAuthEnv(authHeader)...)
+	out, err := cmd.CombinedOutput()
 	rc := 0
 	if err != nil {
 		var ee *exec.ExitError
@@ -203,8 +209,8 @@ func pushResearchBranch(t *testing.T, base, token, owner, name, branch, line str
 	dir := researchDir(t, base, token, owner, name, branch, line)
 	authHeader := "Authorization: token " + token
 	remoteURL := base + "/" + url.PathEscape(owner) + "/" + url.PathEscape(name) + ".git"
-	cmd := exec.Command("git", "-C", dir, "-c", "http.extraHeader="+authHeader,
-		"push", remoteURL, "HEAD:refs/heads/"+branch)
+	cmd := exec.Command("git", "-C", dir, "push", remoteURL, "HEAD:refs/heads/"+branch)
+	cmd.Env = append(os.Environ(), gitAuthEnv(authHeader)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gitea integration: git push %s: %v\n%s", branch, err, out)
