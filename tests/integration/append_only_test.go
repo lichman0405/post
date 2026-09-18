@@ -196,6 +196,17 @@ var targetedGuardTriggers = map[string]string{
 	"contribution_opportunities:contribution_opportunity_guard_trigger":                 ":O:23",
 	"contribution_opportunities:contribution_opportunity_target_trigger":                ":O:21",
 	"semantic_merges:semantic_merge_guard_trigger":                                      ":O:19",
+	// T0804 (00086) adds three: the fork lineage's own guard pair — the
+	// row guard (BEFORE UPDATE OR DELETE, FOR EACH ROW → 27) is targeted
+	// rather than the append-only pair because forked_sha is written once,
+	// from NULL, under the import's compare-and-swap; the statement guard
+	// (BEFORE TRUNCATE → 34) closes the wholesale path. project_forks is
+	// therefore NOT in appendOnlyTables, exactly like semantic_merges. The
+	// third is the cross-project pull request gate (BEFORE INSERT on
+	// pull_requests → 7), beside 00042's semantic gate on the same table.
+	"project_forks:project_forks_guard":            ":O:27",
+	"project_forks:project_forks_no_truncate":      ":O:34",
+	"pull_requests:pull_request_fork_gate_trigger": ":O:7",
 }
 
 // triggerRows returns every user trigger in the public schema as sorted

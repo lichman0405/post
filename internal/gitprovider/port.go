@@ -175,6 +175,36 @@ type BranchRef struct {
 	HeadSHA string
 }
 
+// ImportBranchSpec describes the external fork's content copy (T0804): one
+// commit of a SOURCE repository becomes a branch ref of the TARGET
+// repository. It is a copy across repositories, which is why it is not
+// EnsureBranch with two repositories: EnsureBranch forks a ref from a
+// commit the TARGET already carries, while the fork's content lives in the
+// PARENT's repository and has to be brought over first.
+//
+// The copy is forced. The target branch belongs to the fork — its content
+// IS the imported content — and the ref syncer may legitimately have
+// created it at the fork repository's default branch before the import
+// ran (a fork repository is provisioned like any other and carries a
+// seeded main). Without the force the two orders would produce two
+// different outcomes for the same request, and the import would fail
+// whenever the syncer happened to win.
+type ImportBranchSpec struct {
+	// Source is the repository the commit is copied FROM (the parent
+	// project's provisioned repository).
+	Source Repository
+	// SourceSHA is the full commit sha in Source to import. It must be a
+	// commit the source repository carries; the fetch fails with
+	// ErrNotFound otherwise.
+	SourceSHA string
+	// Target is the repository the commit is copied INTO (the fork
+	// project's provisioned repository).
+	Target Repository
+	// Name is the target branch name (the ref without refs/heads/). A ref
+	// of that name that already exists is replaced.
+	Name string
+}
+
 // ChangeKind is the diff side of one changed file in a push.
 type ChangeKind string
 
@@ -254,6 +284,15 @@ type GitPort interface {
 	EnsureBranch(ctx context.Context, spec BranchSpec) (BranchRef, error)
 	// GetBranch reads one branch ref. ErrNotFound when it does not exist.
 	GetBranch(ctx context.Context, repo Repository, name string) (BranchRef, error)
+	// ImportBranch copies one commit from one repository into a branch ref
+	// of another (T0804's external fork): the source sha is fetched into a
+	// scratch repository and pushed to spec.Name in the target, replacing
+	// an existing ref of that name (see ImportBranchSpec). It returns the
+	// target ref as the provider carries it after the push. Fails with
+	// ErrNotFound when the source commit or repository does not exist,
+	// ErrConflict when the target refuses the write (a protected ref), and
+	// ErrUnauthorized/ErrUnavailable like every other call.
+	ImportBranch(ctx context.Context, spec ImportBranchSpec) (BranchRef, error)
 	// ListBranches lists every branch ref of the repository. The
 	// reconciliation (T0309) uses it to find refs the canonical store
 	// does not name — a ref created outside the semantic model.

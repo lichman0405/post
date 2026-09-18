@@ -2,6 +2,7 @@ package gitprovider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -67,72 +68,198 @@ func (s *PGPushIngestStore) refreshBranchSemanticState(ctx context.Context, tx p
 	return nil
 }
 
-// outstandingUnstructured reports whether the pushed-head chain of the ref,
-// walked from headSHA backwards over the ingestion rows' (before, after)
-// links, carries any path whose nearest-to-head change record is an
-// unstructured add or modify. A path is resolved by a nearer record of any
-// other shape: a semantic manifest at the same path (the content was
-// replaced by something the platform understands) or a removal (the file
-// is gone). A chain link without an ingestion row — a head set by the ref
-// syncer without a delivery, or the fork point — contributes no evidence
-// and ends the walk: the flag reports only what the recorded evidence
-// shows, and missing evidence is not evidence of unstructured content.
+// querier is the read surface the line walk needs. The flag derivation
+// walks inside the delivery's transaction and the fork import's evidence
+// carry-over (sourceLineEvidence) walks on the pool; both are the SAME
+// walk, so it takes the shape they share rather than a concrete handle.
+type querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// lineChange is one path's nearest-to-head change record on a line: the
+// unit the completeness flag is decided on, and — for the fork import —
+// the unit a copy of that line carries.
+type lineChange struct {
+	// ingestionID is the delivery the record belongs to. The flag
+	// derivation never looks at it; the fork import reads the delivery's
+	// candidate content through it.
+	ingestionID string
+	path        string
+	changeKind  ChangeKind
+	fileKind    FileKind
+	schemaID    string
+	contentSHA  string
+}
+
+// lineChangesFromHead walks the pushed-head chain of the ref, from headSHA
+// backwards over the ingestion rows' (before, after) links, and returns the
+// record that decided each path: the one NEAREST to the head. A nearer
+// record of any shape supersedes an older one — a semantic manifest at the
+// same path (the content was replaced by something the platform
+// understands) or a removal (the file is gone) resolves what an
+// unstructured add or modify left behind. A chain link without an ingestion
+// row — a head set by the ref syncer without a delivery, or the fork point
+// — contributes no evidence and ends the walk: the derivation reports only
+// what the recorded evidence shows, and missing evidence is not evidence of
+// unstructured content.
 //
 // The walk terminates: each hop consumes one distinct after value (the
 // dedupe key makes rows unique per after) and the visited set breaks
 // before-links that form a cycle (a crafted payload pair can claim each
 // other as parent — the payload's SHAs are delivery claims, not provider
 // facts).
-func (s *PGPushIngestStore) outstandingUnstructured(ctx context.Context, tx pgx.Tx, giteaRepoID int64, gitRef, headSHA string) (bool, error) {
+//
+// It is ONE implementation on purpose. The flag (outstandingUnstructured)
+// and the evidence a fork import carries (sourceLineEvidence) are two uses
+// of the same rule, and a second spelling of the walk is how the two would
+// come to disagree.
+func (s *PGPushIngestStore) lineChangesFromHead(ctx context.Context, q querier, giteaRepoID int64, gitRef, headSHA string) ([]lineChange, error) {
 	cur := headSHA
 	visited := map[string]bool{}
 	seen := map[string]bool{}
+	var records []lineChange
 	for cur != "" && !isZerosSHA(cur) && !visited[cur] {
 		visited[cur] = true
 		var ingID, before string
-		err := tx.QueryRow(ctx,
+		err := q.QueryRow(ctx,
 			`SELECT id::text, before_sha FROM git_push_ingestions
 			  WHERE gitea_repo_id = $1 AND git_ref = $2 AND after_sha = $3`,
 			giteaRepoID, gitRef, cur).Scan(&ingID, &before)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil
+			return records, nil
 		}
 		if err != nil {
-			return false, fmt.Errorf("gitprovider: walk ingested push chain: %w", err)
+			return nil, fmt.Errorf("gitprovider: walk ingested push chain: %w", err)
 		}
-		rows, err := tx.Query(ctx,
-			`SELECT path, change_kind, file_kind FROM git_push_changes
+		rows, err := q.Query(ctx,
+			`SELECT path, change_kind, file_kind,
+			        COALESCE(schema_id, ''), COALESCE(content_sha256, '')
+			   FROM git_push_changes
 			  WHERE ingestion_id = $1 ORDER BY path`, ingID)
 		if err != nil {
-			return false, fmt.Errorf("gitprovider: read pushed changes for semantic state: %w", err)
+			return nil, fmt.Errorf("gitprovider: read pushed changes for semantic state: %w", err)
 		}
-		var outstanding bool
 		for rows.Next() {
-			var path, kind, fileKind string
-			if err := rows.Scan(&path, &kind, &fileKind); err != nil {
+			rec := lineChange{ingestionID: ingID}
+			var kind, fileKind string
+			if err := rows.Scan(&rec.path, &kind, &fileKind, &rec.schemaID, &rec.contentSHA); err != nil {
 				rows.Close()
-				return false, fmt.Errorf("gitprovider: scan pushed change for semantic state: %w", err)
+				return nil, fmt.Errorf("gitprovider: scan pushed change for semantic state: %w", err)
 			}
-			if seen[path] {
+			if seen[rec.path] {
 				continue // a nearer-to-head record already decided this path
 			}
-			seen[path] = true
-			if fileKind == string(FileKindUnstructured) && kind != string(ChangeRemoved) {
-				outstanding = true
-				break
-			}
+			seen[rec.path] = true
+			rec.changeKind = ChangeKind(kind)
+			rec.fileKind = FileKind(fileKind)
+			records = append(records, rec)
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
-			return false, fmt.Errorf("gitprovider: iterate pushed changes for semantic state: %w", err)
-		}
-		if outstanding {
-			return true, nil
+			return nil, fmt.Errorf("gitprovider: iterate pushed changes for semantic state: %w", err)
 		}
 		if before == cur {
 			break // a delivery claiming itself as parent — the chain ends here
 		}
 		cur = before
 	}
+	return records, nil
+}
+
+// outstandingUnstructured reports whether the walked chain carries any path
+// whose nearest-to-head record is an unstructured add or modify — the rule
+// the branch semantic completeness flag is the projection of. The walk
+// itself is lineChangesFromHead's.
+func (s *PGPushIngestStore) outstandingUnstructured(ctx context.Context, tx pgx.Tx, giteaRepoID int64, gitRef, headSHA string) (bool, error) {
+	records, err := s.lineChangesFromHead(ctx, tx, giteaRepoID, gitRef, headSHA)
+	if err != nil {
+		return false, err
+	}
+	for _, rec := range records {
+		if rec.fileKind == FileKindUnstructured && rec.changeKind != ChangeRemoved {
+			return true, nil
+		}
+	}
 	return false, nil
+}
+
+// SourceLineEvidence implements IngestStore (T0804): the source ref's own
+// change evidence at headSHA, in the shape an ingestion records — the same
+// walk the ref's own completeness flag is derived from, returned as rows
+// instead of reduced to a boolean.
+//
+// A fork import whose source ref has NO recorded fork point has no baseline
+// to diff the copy against (ForkImporter.Import), and a copy judged against
+// nothing comes out cleaner than the line it copies: the hole this read
+// closes. Recording these records as the copy's change rows makes the
+// copied branch's flag the SOURCE LINE's own judgement of the same content
+// — equal to it, never cleaner — and it is ordinary evidence: a later push
+// whose record for the same path is nearer to the head resolves it, exactly
+// as it resolves one the push path recorded.
+//
+// What it cannot carry is content the platform never ingested: a source
+// head no delivery recorded yields no records, and the copy then derives
+// like every other branch whose evidence is missing (docs/16 §4.1: missing
+// evidence is not evidence of unstructured content). See forkimport.go's
+// header for the whole route.
+//
+// The candidate rows travel with the records because a delivery of a
+// manifest records one (the proposal the push implies). Their content is
+// the source delivery's own — the copy brings the same commit, so the
+// content is the same document — and it is read from the candidate row
+// rather than re-inspected: the platform already holds it.
+func (s *PGPushIngestStore) SourceLineEvidence(ctx context.Context, giteaRepoID int64, gitRef, headSHA string) ([]ClassifiedChange, []SemanticCandidate, error) {
+	records, err := s.lineChangesFromHead(ctx, s.pool, giteaRepoID, gitRef, headSHA)
+	if err != nil {
+		return nil, nil, err
+	}
+	changes := make([]ClassifiedChange, 0, len(records))
+	var candidates []SemanticCandidate
+	for _, rec := range records {
+		changes = append(changes, ClassifiedChange{
+			Path:          rec.path,
+			Kind:          rec.changeKind,
+			File:          rec.fileKind,
+			SchemaID:      rec.schemaID,
+			ContentSHA256: rec.contentSHA,
+		})
+		if rec.fileKind != FileKindManifest {
+			continue
+		}
+		content, err := s.candidateContent(ctx, rec.ingestionID, rec.path)
+		if err != nil {
+			return nil, nil, err
+		}
+		if content == nil {
+			continue
+		}
+		candidates = append(candidates, SemanticCandidate{
+			Path:     rec.path,
+			Kind:     rec.changeKind,
+			SchemaID: rec.schemaID,
+			Content:  content,
+		})
+	}
+	return changes, candidates, nil
+}
+
+// candidateContent reads the proposed content one source delivery recorded
+// for a manifest path. A record with no candidate row answers nil: the
+// change row is the evidence and the candidate is the proposal, and a
+// proposal the source line never recorded is not invented here — the copy
+// carries what exists and nothing else.
+func (s *PGPushIngestStore) candidateContent(ctx context.Context, ingestionID, path string) (json.RawMessage, error) {
+	var content []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT candidate FROM git_push_semantic_candidates
+		  WHERE ingestion_id = $1 AND path = $2`,
+		ingestionID, path).Scan(&content)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("gitprovider: read the source line's candidate content: %w", err)
+	}
+	return json.RawMessage(content), nil
 }

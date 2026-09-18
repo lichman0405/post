@@ -34,6 +34,18 @@ type ProjectGate interface {
 	Get(ctx context.Context, r projects.Reader, projectID string) (domain.Project, error)
 }
 
+// ForkGate resolves the fork condition of write_scientific_state
+// (own_fork_only): whether a project is a fork OWNED by an actor — the
+// condition specs/policies/permissions-matrix.csv names for an
+// authenticated non-member. It is decision-shaped on purpose: the
+// enforcement site asks the question the cell names and needs no
+// knowledge of the lineage's shape. The production implementation is
+// *persistence.ForkStore; a service wired without one refuses the
+// conditional path (fail closed), never assumes the condition holds.
+type ForkGate interface {
+	OwnedFork(ctx context.Context, projectID, actorID string) (bool, error)
+}
+
 // BranchPort is the branch-surface slice the RSG service needs. The
 // production implementation is branches.Service.
 type BranchPort interface {

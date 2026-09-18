@@ -549,6 +549,50 @@ func (a *GiteaAdapter) GetBranch(ctx context.Context, repo Repository, name stri
 	return BranchRef{Name: name, HeadSHA: refs[0].Object.SHA}, nil
 }
 
+// ImportBranch implements GitPort (T0804): spec.SourceSHA is fetched out of
+// the SOURCE repository into a scratch repository and pushed onto
+// refs/heads/spec.Name of the TARGET one. The fetch is what makes the copy
+// possible at all — the commit's objects live in the parent's repository
+// and the target has never seen them — and it doubles as the existence
+// check: a sha the source does not carry fails here with ErrNotFound,
+// before anything is written to the fork.
+//
+// The push is a forced refspec (`+<sha>:refs/heads/<name>`). The branch
+// belongs to the fork and its content is the imported content, so the
+// import must land whatever the ref currently points at: the ref syncer
+// may have created it at the fork repository's default branch in the
+// meantime (a fork repository is provisioned like every other project's and
+// carries the seeded main), and a non-fast-forward push would then fail on
+// a state the platform itself produced. A protected target ref is still
+// refused by the provider — the force is not a bypass — and maps to
+// ErrConflict like every other refused write.
+//
+// The fetch is NOT shallow, unlike every other fetch in this adapter. Those
+// fetch a commit the target repository already holds (a branch ref created
+// inside one repository, a file read), so the pack is empty and no
+// shallow-boundary line ever reaches the server; here the objects have to
+// actually cross, and a client whose repository is shallow declares its
+// boundary — which the provider refuses outright ("shallow update not
+// allowed": a fork is not allowed to arrive as a history nobody can walk).
+// The copy also has to be a real one: the fork's later pushes are diffed
+// inside the fork's own repository, which a truncated history cannot answer.
+func (a *GiteaAdapter) ImportBranch(ctx context.Context, spec ImportBranchSpec) (BranchRef, error) {
+	dir, err := a.newScratchRepo(ctx)
+	if err != nil {
+		return BranchRef{}, err
+	}
+	defer os.RemoveAll(dir)
+	sourceURL := a.pushURL(spec.Source.Owner, spec.Source.Name)
+	targetURL := a.pushURL(spec.Target.Owner, spec.Target.Name)
+	if out, err := a.gitRun(ctx, dir, "fetch", sourceURL, spec.SourceSHA); err != nil {
+		return BranchRef{}, a.mapGitErr("fetch the fork source commit", out)
+	}
+	if out, err := a.gitRun(ctx, dir, "push", targetURL, "+"+spec.SourceSHA+":refs/heads/"+spec.Name); err != nil {
+		return BranchRef{}, a.mapGitErr("import the fork branch ref", out)
+	}
+	return a.GetBranch(ctx, spec.Target, spec.Name)
+}
+
 // ListBranches implements GitPort over the refs API — like GetBranch, the
 // /branches API cannot answer for refs that arrived by push on this
 // deployment, so the refs API is the one that can (T0309's unmapped-ref

@@ -204,5 +204,10 @@ func wrapStoreError(err error) error {
 		errors.As(err, new(*BranchNotActiveError)) {
 		return err
 	}
-	return fmt.Errorf("%w: %v", ErrStore, err)
+	// Both verbs are %w: the sentence is unchanged, but the database's own
+	// error stays in the chain. The insert this wraps is the one 00042's
+	// pull_request_semantic_gate and 00086's pull_request_fork_gate refuse
+	// with P0001, and a caller given only "store failure" cannot tell a
+	// rule refusal from an outage.
+	return fmt.Errorf("%w: %w", ErrStore, err)
 }
