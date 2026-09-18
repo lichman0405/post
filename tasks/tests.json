@@ -1560,6 +1560,26 @@
       "status": "not_run",
       "last_run": null,
       "evidence": null
+    },
+    {
+      "id": "T1111-TEST-01",
+      "task_id": "T1111",
+      "name": "restore drill e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": "尚未执行——任务 2026-09-18 立档，未派工。"
+    },
+    {
+      "id": "T1111-TEST-02",
+      "task_id": "T1111",
+      "name": "gitea real services e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": "尚未执行——任务 2026-09-18 立档，未派工。"
     }
   ]
 }

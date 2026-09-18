@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 134,
+  "task_count": 135,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -2659,12 +2659,21 @@
         "T0604"
       ],
       "requirements": [
-        "seed branch create→objects→PR→review→merge",
-        "另一条 scientific conflict flow"
+        "**流程一：种子项目的 `batch create → objects → PR → review → merge` 全程走产品路径。**每一步都是真实的 HTTP 路由打到真实的 PostgreSQL 与真实的 Gitea，**中间任何一步都不许直接调用 Go 服务层、不许用夹具把状态摆出来**。这条的来源是 `docs/31_MASTER_ACCEPTANCE.md:15`（Gate B 第 1 条，逐字「Branch/PR/RSG diff/Scientific Review/Integrity Review/merge 完整」）与 `docs/24_TEST_STRATEGY.md:28`（逐字列出必须覆盖「**PR review merge**、release、publish asset」）。",
+        "**先把缺的那条写路径补上：`POST /api/v1/projects/{projectId}/pull-requests`。**契约已经在 `specs/api/openapi.yaml:172-184`（`:178-184` 是 `post:`，summary 逐字「Open pull request with RSG diff」，带 `IdempotencyKey` 参数与 `201` 响应），但**没有实现**——`cmd/api/pullrequestshttp/wiring.go:44-47` 目前只注册了四条 GET（list / checks / diff / get）。没有这条路由，流程一的第一步（建 PR）就不可能走产品路径。**按契约已有的形状实现，不要改契约**（`specs/api/openapi.yaml` 不在你范围内）。",
+        "**流程二：一条 scientific conflict 流**，同样全程走产品路径。冲突的分类与「不许自动裁决」的出处是 `docs/09_VERSION_CONTROL.md:26-40`（七类 conflict 分类 + 逐字「禁止自动：科学结论 winner、Protocol 冲突数值折中、因果判断、private→public、rights conflict」）与 `:44`（逐字列出七个允许的人类动作「Accept A / Accept B / Keep both versions / Explicit coexistence / Create validation branch / Request more evidence / Abort proposed change」，并逐字写明「Scientific conflict 可在 main 中保持 `contested/unresolved`」）。同义禁令在 `docs/07_RSG_SPEC.md:39`（「科学冲突不得自动选 winner」）与 `docs/31_MASTER_ACCEPTANCE.md:16`（「Semantic conflict 不被 Agent 自动科学裁决」）。**你要在任务书允许的形态里选一条冲突场景与它的收尾动作**（收尾可以停在「保持 contested」，也可以是七个动作之一），并证明它没有自动选 winner。",
+        "**必须证明「到 merge_ready 这一段是真的被走过了」，而不是被摆出来的。**这正是本任务存在的理由，也是 T0604 的验收第 5 条逐字要求的东西（`tasks/packages/T0604.json`：「一个 PR 能经真实产品路径到达 `merge_ready`：端到端用例必须从 open 一路走到 merge_ready，**不得在测试里构造该状态**」）。树里现成的反面教材是 `tests/integration/merge_governance_e2e_test.go:439-442`——它在 `RequestReview` 之后直接调 `prSvc.SetState(ctx, …, domain.PullRequestStateApproved)` 与 `SetState(… MergeReady)`，跳过产品路径，自己的注释 `:421-424` 也承认「docs/43's later transitions have no HTTP route in this build」。**T0604 补齐那一半之后，这段捷径的理由就不成立了，你要把它改掉**（见 acceptance 第 3 条）。",
+        "**上一轮留下的那条捷径也要一起处理**：`tests/integration/release_e2e_test.go:283-322` 用 `sqlc.CreatePullRequest` / `sqlc.CreateReview` 直接把「scientific + integrity 双 approved」摆好（调用点 `:449-451`、`:586-588`），完全不经过产品路径。它属于另一个任务的测试，**你只需在 RESULT 里说明它是同类捷径、以及你为什么不改它**（或改它，二选一，但要说清楚）。不要为了让它「看起来干净」而删掉它的断言。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "两条 E2E 在 CI 稳定通过"
+        "**两条流程都在真实栈上通过**：真 PostgreSQL、真 Gitea、真 HTTP 路由。有一条 E2E 真的建分支、建对象、建 PR、提 review、走到合并，全程没有一次 `SetState` 之类的直接状态构造。**判据**：在测试代码里对 `SetState`、`sqlc.CreatePullRequest`、`sqlc.CreateReview` 的调用做一次检查，证明流程一的路径上零出现（在 RESULT 里给出你的验证方式与命令）。",
+        "**PR 是在产品路径上建出来的**：有一条测试通过 `POST /api/v1/projects/{projectId}/pull-requests` 建出 PR 并断言 `201` 与返回的编号，而不是调用 `pullrequests.NewService(...).Create(...)`。",
+        "**`tests/integration/merge_governance_e2e_test.go:439-442` 的那段捷径被真的走通了**：`RequestReview` 之后必须经真实产品路径到达 `approved` 与 `merge_ready`，`SetState` 直调被移除。**如果走不通，那是真实缺陷**——把它写进 RESULT 交给 Supervisor，**不得删断言、skip 或把测试改回捷径来换取变绿**（CLAUDE.md §5.1）。",
+        "**冲突那条不许有自动 winner**：有一条断言证明冲突发生后**没有任何一方被自动选为结论**（可以停在 `contested/unresolved`，也可以由测试扮演人类动作之一）。**反方向也要钉**：要有一条测试证明「人类选了一个动作之后流程确实前进」，否则一个「什么都不做」的实现也能让单向断言变绿——仓库自己点名过这个坏形状（`tests/integration/asset_page_test.go:714-727` 逐字「**An empty string is a failure rather than a pass: a check that forbade nothing is the shape that reads green while measuring nothing**」）。",
+        "**稳定性不许靠重试掩盖**：`docs/67_TEST_GATES.md:28` 逐字「**flake 不是\"rerun until green\"；先定位再修。**」若你在本地看到间歇性失败，**定位并修掉**，不要加重试、不要放大 timeout（CLAUDE.md §5.1 明令禁止）。在 RESULT 里说明你跑了几次、是否见过 flake。",
+        "**既有测试一条都不许变红**，尤其 `tests/integration/merge_governance_e2e_test.go`（你要改的那条）、`tests/e2e/conflict_e2e_test.go`、`tests/e2e-pulls/`、`tests/e2e-conflicts/` 两套浏览器套件（它们目前都是绿的，别碰坏）。",
+        "RESULT 里逐条说明：**每一步是浏览器驱动的还是 HTTP 驱动的**（见 scope_note 的裁定三）、流程一与流程二各自经过的**真实路由清单**、以及你为「冲突收尾」选了什么动作、为什么。"
       ],
       "tests": [
         "playwright pr flows"
@@ -2682,17 +2691,37 @@
         ".env.example",
         "cmd/api/**",
         "apps/web/**",
-        "tests/**"
+        "tests/**",
+        "Makefile"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "docs/**",
+        "specs/api/openapi.yaml",
+        "specs/events/**",
+        "specs/policies/**",
+        "specs/orchestrator/**",
+        ".github/**",
+        "internal/authz/**",
+        "packages/schemas/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "**先读这条，它决定你不做什么：CI 接线不是你的事。** `docs/25_CICD_DEVOPS.md:14-25` 的 CI 清单第 8 项逐字是「**Playwright E2E；**」，而今天 `.github/workflows/ci.yml` 的 7 个 job 里**一个浏览器测试都没有**（spec-validation / task-state / go / web / acceptance / python / migration-integration），`specs/orchestrator/gates.json` 的 `required_jobs` 与之一致。**补这个洞是我的活**，理由是 `gates.json` 头部逐字写着「G2 re-runs CI's EXACT steps — the jobs of `.github/workflows/ci.yml`, steps verbatim (**a sync unit test fails when this file drifts from ci.yml**)」——两者是镜像、由单元测试强制，而 `specs/orchestrator/**` 按 CLAUDE.md §8.1 是 Supervisor-only。**所以：你写测试套件，我接线。**你只要保证**套件能被一条命令从仓库根目录跑起来**（并且能跑在 CI 的 ubuntu-24.04 上），把你的入口命令写进 RESULT，剩下的是我的事。**不要动 `.github/**`，不要动 `specs/orchestrator/**`（两者都在你的 forbidden_scope 里）。**",
+        "**验收标准只有一句，先看它出自哪**：`docs/24_TEST_STRATEGY.md:5` 逐字列出测试层级「Domain unit → repository/integration → API contract → multi-service integration → **Playwright E2E** → security/permission → canonical workflow」；`:28` 逐字列出必须覆盖的场景，含「**PR review merge**」。`docs/67_TEST_GATES.md:20` 逐字「跨系统链路使用真实容器服务。特别是：PostgreSQL transaction、Gitea branch protection/webhook、S3/MinIO hash、Redis retry、**browser navigation**、auth/visibility。」`docs/31_MASTER_ACCEPTANCE.md:60`（Gate I）逐字「完整 MOF workflow……全程真实 DB/Git/blob/browser，**非 mock 演示**」。**这四句合起来就是「真实栈 + 浏览器」这个形态的出处。**",
+        "**流程一的每一步今天长什么样（我已经逐条核过）**：branch create ✅ `POST /api/v1/projects/{projectId}/branches`（`cmd/api/rsghttp/wiring.go:50`）；objects ✅ `POST …/branches/{branchId}/objects`（`:51`）；**PR create ❌ 不存在**（`cmd/api/pullrequestshttp/wiring.go:44-47` 只有四条 GET，契约在 `specs/api/openapi.yaml:172-184`）；review submit ✅ `POST …/pull-requests/{prId}/reviews`（`cmd/api/reviewhttp/wiring.go:60`）；merge ✅ `POST …/pull-requests/{number}:merge`（`cmd/api/mergehttp/wiring.go:56` 注册的是 `{number...}` 通配、实际路径靠后缀判定，理由在该文件 `:48-54` 的注释里）。**只有第二个环节缺，补它。**",
+        "**「到 merge_ready 这一段是断的」四处证据，先读再动手**：`internal/persistence/review_store.go:104-114` 唯一的自动迁移是 `review_required → changes_requested`，注释逐字「The approved half is deliberately absent: deciding WHEN the dimensions add up to an approval is **T0604's** required-review calculation, not invented here」；`internal/application/reviews/service.go:25-27` 同义；`internal/application/reviews/ports.go:70-73` 逐字「T0604 lands the rule-based resolver (Research Owners rules by object/schema/type); until then **production wires nil** and the conditional verdict fails closed」；`internal/application/pullrequests/service.go:107` 的 `SetState` **能**驱动 `approved`/`merge_ready`，但全非测试代码里它唯一的调用者是同文件 `:147` 的内部包装（只被 `Abort`/`MarkMerged` 用），**没有任何 HTTP 路由暴露它**。**T0604 就是来补这一段的；你的活是把它接上之后，从外面走一遍。**",
+        "**合并侧的边界**：`internal/application/merge/service.go:428-430` 逐字 `if pr.State != domain.PullRequestStateMergeReady { return nil, &NotMergeableError{Number: pr.Number, State: pr.State} }`，`internal/application/merge/errors.go:66-67` 注释逐字「The review machine has to be walked, it cannot be skipped by asking the merge engine directly.」**这两句是「不得构造 merge_ready」这条边界的直接出处。**",
+        "**现有浏览器套件的形态（照它做，别另立一套）**：`tests/e2e-pulls/run.sh:2-6` 逐字「drives the pull request detail page in real Chromium **against a network-layer mock of the Go API**」（T0408 的 `pr ui e2e`），`tests/e2e-conflicts/run.sh:2-6` 同形。两套都用 `playwright 1.55.0`（各目录的 `package.json:11`）。`tests/e2e-pulls/pulls-e2e.mjs:11-32` 覆盖六个 tab、风险条、两个 review 维度与提交/403 拒绝——**注意它没有 merge 动作，`apps/web` 里也没有 merge 按钮**（全树 `apps/web/lib/pulls.ts` grep `merge` 只有文案，没有 `:merge` 客户端调用）。仓库里还有 7 套同形的 Playwright 套件：`tests/e2e-anonymous`、`-explore`、`-files`、`-assets`、`-settings`、`-shell`、`tests/web-smoke`。",
+        "**没有任何 Go 测试起过浏览器**（全树 `chromedp`/`chromium` 在 `tests/**.go` 里零命中；`exec.Command` 命中的全是 `git`）。**所以「真浏览器 + 真栈」这个形态在仓库里没有先例，你是在开这个头**——形状上的自由度在你手里（见 scope_note 裁定三），但真实性的下限由上面第 2 条那四句规格钉死。",
+        "**冲突侧已有的覆盖（别重复造）**：`tests/e2e/conflict_e2e_test.go`（T0407，真 PostgreSQL + 真 HTTP handler + 真 store）、`tests/integration/conflict_test.go`（T0405）、`tests/integration/resolution_test.go`（T0407 的 store 契约）。冲突的分类与动作清单见 `docs/09_VERSION_CONTROL.md:26-44`。**你的流程二应该复用这些既有能力，而不是再写一套冲突检测。**",
+        "**种子项目长什么样**：`docs/34_SEED_DEMO_PROJECT.md:23-27` —— Branches 有四个（`humidity-40rh`、`humidity-70rh`、`mechanism-water-binding`、`protocol-activation-180c`）；PR 逐字要求「至少一个无冲突 merge、一个 **Protocol scientific conflict**、一个 private branch selective publication」。**注意全树没有任何可执行的 seed 脚本**（`find -iname '*seed*'` 只命中 `docs/34` 这一篇文档）。**第三个场景（private branch selective publication）碰 private→public 可见性语义，本任务的 requirements 只点名了前两条，不要顺手做它**——见裁定四。",
+        "**迁移号由我在派工时分配并写进任务包**（账本 `.rddev/runtime/migration-numbers.json`，分配器幂等）。**不要自己选号**（CLAUDE.md §8.1）。**本任务很可能不需要迁移**——它补的是一条路由与测试，不是表。不需要就别建，在 RESULT 里说明理由。"
+      ],
+      "scope_note": "这是**按本任务的实际交付面调整过的范围**。相对 DAG 里的 phase 级默认值：**加** `Makefile`（测试套件的入口命令要能从仓库根目录一条命令跑起来，而这个任务**不该**去动 `.github/**` 或 `specs/orchestrator/**`——那两处由我做，见 relevant_specs 第一条）。**明确不加**（写进 forbidden_scope）：`.github/**` 与 `specs/orchestrator/**`（**这是本任务最容易越界的一处**：它的验收是「在 CI 稳定通过」，而 CI 接线在同一批文件里；我把它拿走了，你只管套件本身）、`specs/api/openapi.yaml`（PR create 的契约**已经存在**，照它实现即可，不需要改）、`specs/events/**`、`specs/policies/**` 与 `internal/authz/**`（权限矩阵是安全边界）、`packages/schemas/**`、`docs/**`。`apps/web/**` **保留**在范围内——浏览器流程要驱动的页面在这里，而且如果某个环节今天在 UI 上不存在（例如 merge 按钮），你可以补。",
+      "supervisor_scope_narrowing": "2026-09-18 定稿。这个任务是**关键路径之外的收尾环**，但它的验收标准一直被字面照抄、没人查过它够不够得着——我查了，**够不着**，所以有几条裁定必须先说清楚。\n\n**裁定一（本任务存在的理由）：`approved → merge_ready` 这段在产品路径上是断的，T0604 来补，你来验。**2026-09-16 的 decisions 逐字记过（`tasks/decisions.md:8748-8750`）：「今天没有任何产品路径能把 PR 推到 `merge_ready`……没有 T0604，那条『完整』链路里就缺 review→approved→merge_ready 这一段，E2E 只能靠**构造状态**蒙混过去」。**所以本任务与 T0604 的依赖边是真的，不是记账**——T0604 没合之前不要派我，派了也只能照抄那段 `SetState`。\n\n**裁定二：PR create 那条路由你来补，不另立任务。**契约（`specs/api/openapi.yaml:172-184`）已经写好，缺的只是实现，属 L1；而 T0402「Pull Request Domain」已经合并且没交这条路由。**新立一个任务会让一条本任务必需的路由跑到另一条串行链上去，白白多一环。**但**契约本身不许动**——它是我的。\n\n**裁定三（最要紧的一条）：真实性的下限是「真实产品路径」，不是「鼠标点击」。**「不得在测试里构造该状态」这个禁令针对的是**直接调用服务层把状态摆出来**（`SetState`），**不是**针对「用 HTTP 而不是用点击」。具体到本任务：**流程的每一个状态迁移都必须由一个真实的 HTTP 请求驱动**（打到真实路由、真实 handler、真实 store、真实 PostgreSQL），但**那一个请求是由浏览器发出的、还是由测试代码直接发的，你可以自己定**——理由是 UI 上今天根本没有 merge 按钮（`apps/web` 全树没有 `:merge` 调用），要求「全程点击」等于要求本任务先把 merge 的界面做出来，那是 T0408 的界面工作、会把这个任务撑大。**你自己定这个分界，但必须在 RESULT 里逐步骤写明哪些是浏览器驱动的、哪些是 HTTP 驱动的**，不许含糊。**下限不可让**：任何一步直接调用 Go 服务层、或往库里插行把状态摆好，都是不行的。\n\n**裁定四：`private branch selective publication` 不做。**`docs/34:27` 要求种子项目有那个场景，但本任务的 requirements 只点名了「无冲突 merge」与「Protocol scientific conflict」两条。第三个场景碰 private→public 可见性语义，而那是 L3（`specs/policies/permissions-matrix.csv` 的 `publish_private_to_public` 行）。**看到它不要顺手做。**owner 若要它，那是一条独立任务。\n\n**裁定五：CI 接线是我的活，而且它会改变所有在跑任务的 G2。**`gates.json` 是 `ci.yml` 的镜像（由单元测试强制），且在 `specs/` 下——**一改就动规格指纹**，所以它必须和任务书落地挤同一个空窗。这就是为什么它没被写进你的范围。**你的交付在「套件能从仓库根目录一条命令跑绿」这一步就算完成**；接线在我说完成之前，本任务在交付面上不算完成——**这句话是对我自己说的，不是对你的要求**。\n\n**一条提示，不是要求**：`tests/integration/release_e2e_test.go` 与 `tests/integration/merge_governance_e2e_test.go` 是同类捷径的两个样本。前者属于别的任务的测试（T0605/T0606 那一带），**你只需在 RESULT 里说明你为什么（不）动它**；后者是你验收第 3 条点名要改的那条。"
     },
     {
       "id": "T0501",
@@ -2945,43 +2974,70 @@
         "T0504"
       ],
       "requirements": [
-        "Claim/Hypothesis→evidence grouping",
-        "origin/external placeholder",
-        "conflicting evidence"
+        "Claim/Hypothesis→evidence grouping：**按「断言钉住的那个对象版本」分组**，一组一个目标。这是字面照做——requirement 用的词是 grouping（分组），不是 union（合并）。",
+        "**假设（Hypothesis）页面的形状我拍板：分成两段，不合并。** 一段是**直接挂在假设上**的断言，另一段是**它下属的主张**（每条主张带着自己的断言）。**不得把两段并成一张清单，不得给出条数/比例/分数**（CLAUDE.md §9.13、`docs/10 §4`「V1 不自动赋数值权重」）。见裁定一。",
+        "origin/external placeholder：**requirement 自己写的就是 placeholder**，所以它就是个占位。有真实来源就填（`evidence_type` 是现成的来源轴），**没有来源就空着，绝不许编一个值**。`docs/10_EVIDENCE_PROVENANCE.md:13` 点名的那两列（external/internal、visibility）**归 T0806**，不是你的。见裁定四。",
+        "conflicting evidence：**支持与反驳必须并排显示，永远不许合并、不许选一个赢家。** 这不是我定的，是 `00058` 的注释逐字定死的（见 relevant_specs）——一个唯一约束就会被读成「净立场」，而领域禁止净立场算术。",
+        "**立场标签用既有规则算，不要自己再写一套**：`internal/domain/evidence_assertion.go:115` 的 `RelationStance` 已经把九个关系映射成 supporting / contesting / neutral 三桶，映射不到的关系返回 `(\\\"\\\", false)`——**那是 fail-closed，照它做：算不出立场就不要显示立场**，不要猜、不要归到 neutral。",
+        "**读路径与 provenance API 分开**（这是验收第二条）：`cmd/api/provenancehttp/` 服务的是 `GET /api/v1/projects/{projectId}/provenance/graph` 与 `.../objects/{objectId}/lineage`，数据来自可重建的 `provenance_edges` 投影。**不要把证据塞进那两条路径**，也不要复用它的 store——证据是另一张表、另一套语义（CLAUDE.md §9.10：Provenance Graph != Evidence Graph）。见裁定三。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "可回答为什么相信/质疑",
-        "与 provenance API 分开"
+        "**可回答为什么相信/质疑**：给定一个对象版本，读路径要能同时给出**支持它的**与**反驳它的**断言，各自成组。有一条集成测试真的构造「同一目标上同时有 support 与 contradict」，并断言**两条都出现**。",
+        "**那条测试必须同时钉住反方向**：不能是「把两条合并成一条再显示」也算过——测试要断言响应里 support 与 contradict **各自还在**，且没有出现任何条数/比例/净值的字段。仓库自己点过这个坏形状：`tests/integration/asset_page_test.go:714-727` 逐字「**An empty string is a failure rather than a pass: a check that forbade nothing is the shape that reads green while measuring nothing**」。",
+        "**与 provenance API 分开**：新的读路径**不得挂在** `provenancehttp` 的路由前缀下、**不得**读写 `provenance_edges`。有一条测试或一次代码检查证明两者互不引用（在 RESULT 里给出你的验证方式）。",
+        "**假设页面两段分开**：有一条测试构造「假设 H 直接有一条断言、H 下属的主张 C 也有一条断言」，断言响应里**两段各归各的**，且 H 那一段里**不出现** C 的断言（不合并），同时**不出现**任何聚合数字。",
+        "**算不出立场就不显示立场**：有一条测试用一个 `RelationStance` 映射不到的关系（返回 false 的那些），断言它**不带立场标签**地出现，而不是被硬塞进 supporting/contesting/neutral。",
+        "**既有测试一条都不许变红**，尤其 `internal/domain/evidence_assertion_test.go` 的 `TestRelationStance`（`:40`）与 `TestRelationStanceIsALabelNotAScore`（`:74`）——**这两条钉住的正是本任务最容易踩坏的东西**。",
+        "**不要新建与证据无关的表**。你要用的查询已经存在（`ListEvidenceAssertionsForTarget`，目前零调用者）；不够用就在它旁边扩，**不要另起一套查询文件**。若判断需要新列或新表，停下来标 `blocked` 说明理由，由我拍板。",
+        "RESULT 里逐条说明三个 requirement 各自的落点，以及「origin/external」这一条你**填了什么、没填什么、为什么**。"
       ],
       "tests": [
         "evidence graph integration"
       ],
       "allowed_scope": [
-        "infra/migrations/**",
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
-        "internal/persistence/**",
         "internal/evidence/**",
-        "internal/rsg/**",
+        "internal/application/**",
+        "internal/persistence/**",
         "internal/domain/**",
+        "internal/rsg/**",
+        "cmd/api/**",
+        "apps/web/**",
         "go.mod",
         "go.sum",
         ".env.example",
-        "cmd/api/**",
-        "apps/web/**",
-        "packages/schemas/**",
+        "specs/database/postgres.sql",
+        "specs/SPEC_VERSION.json",
+        "infra/migrations/**",
         "tests/**"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "docs/**",
+        "specs/api/openapi.yaml",
+        "specs/events/**",
+        "specs/policies/**",
+        "internal/authz/**",
+        "packages/schemas/**",
+        "cmd/api/provenancehttp/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "**「支持与反驳并排」是仓库里写死的设计，先读这段再动手。** `infra/migrations/00058_evidence_assertion_guards.sql:38-46` 逐字：「Deliberately NOT constrained here: `(target_object_version_id, evidence_object_version_id)` uniqueness. The pair is **NOT unique BY DESIGN** (task acceptance criterion: 支持与反驳可同时存在): one evidence version may carry a supports AND a contradicts assertion on the same target version, side by side, each reviewed on its own. A unique constraint on the pair would collapse the two stances into one row and **force a winner — exactly the net-position arithmetic the domain forbids**.」**你的投影必须让这个设计在界面上成立，而不是把它抹平。**",
+        "**同一条注释还点名了立场规则在哪**：`... Stance labels (supporting/contesting/neutral) are computed by a transparent rule in the domain layer`。那条规则就是 `internal/domain/evidence_assertion.go:115-127` 的 `RelationStance`：supports/validates/reproduces/consistent_with → `supporting`；contradicts/challenges/inconsistent_with/fails_to_reproduce → `contesting`；contextualizes → `neutral`；**其余返回 `(\\\"\\\", false)`**。常量在 `:98`/`:103`/`:105`。**九个关系的清单在 `:108` 的注释里，照抄，不要自己归纳。**",
+        "**「不赋数值权重」是两条独立出处的硬禁令**：`docs/10_EVIDENCE_PROVENANCE.md:29` 逐字「V1 不自动赋数值权重。」；CLAUDE.md §9 不变量 13「不生成 Truth Score / Research Score」。`tests/integration/asset_page_test.go:714-727` 那条注释是同一个精神在测试层的写法。**所以「支持 5 条、反驳 2 条」这种计数也不要——它离净值只有一步。**",
+        "**`docs/10_EVIDENCE_PROVENANCE.md` 是本任务的主规格，整篇不长，全读。** 特别是 `:13`（external/internal 与 visibility 两列，**归 T0806**）与 `:37`（文献断言必须指出具体 evidence unit）。",
+        "**读路径的落点已经留好，而且是空的**：`internal/persistence/queries/evidence.sql` 的 `ListEvidenceAssertionsForTarget`（按 `target_object_version_id` 取该目标的全部断言，`ORDER BY created_at, id`），生成物 `internal/persistence/sqlc/evidence.sql.go:78`。**它目前全仓库零调用者**（`querier.go:520` 只是接口声明）。`internal/evidence/` 也只有一个 `doc.go`。**本任务是把这两处接起来。**",
+        "**验收说的「与 provenance API 分开」，指的是一条真实存在的路由**：`cmd/api/provenancehttp/handlers.go:51`「handleGraph: `GET /api/v1/projects/{projectId}/provenance/graph` — the …」与 `:83` 的 `.../objects/{objectId}/lineage`，数据来自 `provenance_edges`（`cmd/api/main.go:553-559` 逐字「routes over the rebuildable provenance_edges projection (migration …)」）。**证据不是那个图的一部分**——CLAUDE.md §9 不变量 10 逐字「Provenance Graph != Evidence Graph」。你的新读路径**另起一处**，挂法照 `v1` 子 mux 上已有的读路径（GET 由 `authAPI.Guard` 放行，但仍要按项目成员关系做可见性判定——**读路径的可见性见下一条**）。",
+        "**可见性 fail-closed 是既有教条，照抄**：`cmd/api/provenancehttp/store.go:76` 逐字「membership in the path project is checked second, and only then is the …」；`:45`「first in the handlers, so this is a backstop, not the normal path」。**证据的可见性不许比它所依据的断言更松**：读不到某个目标版本的人，也不该看到钉在它上面的断言。**如果你判断需要新的可见性规则，那是 L3，停下来问我，不要自己定。**",
+        "**「假设（Hypothesis）的证据怎么算」——规格里确实没有汇总规则，这是本任务唯一的空白，我按下面裁定一处理，你不要再去 `docs/` 里找答案**：`docs/08_SCIENTIFIC_OBJECTS.md:17` 的 Hypothesis 字段表逐字「字段：statement、question_ref、scope、proposer、hypothesis_type、current assessment、competing/refines/derived relations。Hypothesis 不『转化覆盖』为 Claim；后续 Claim 与其建立 tested_by/supports 等历史关系。」——**有历史关系，没有汇总规则，这就是全部**。`docs/08:51` 的 Finding 字段表里有「contained claim versions」与「summary scope」，说明「包含哪些主张版本」这件事在 Finding 上有先例，Hypothesis 上照这个思路走即可。",
+        "**`internal/evidence/` 只有一个 `doc.go`**，逐字：「Package evidence owns evidence assertions and their provenance chains per docs/10_EVIDENCE_PROVENANCE.md」。**这个包是为本任务与 T0509 准备的落点。**",
+        "**迁移号由我在派工时分配并写进任务包**（账本 `.rddev/runtime/migration-numbers.json`，分配器幂等）。**不要自己选号**（CLAUDE.md §8.1）。**本任务很可能不需要迁移**——`evidence_assertions` 表与两条查询都已存在。不需要就别建，在 RESULT 里说明理由。若确实要建，规矩见 `infra/migrations/README.md`：已发布迁移永不修改、`specs/database/postgres.sql` 只能由 `python3 scripts/gen_schema_snapshot.py` 重新生成、不写 down migration，改完跑 `make check-schema-snapshot` 与 `make check-spec-version`，并同步扩 `tests/integration/migration_test.go` 的 `canonicalTables` / `explicitIndexes`（那里是全等比较）。"
+      ],
+      "scope_note": "这是**按本任务的实际交付面调整过的范围**。相对 DAG 里的 phase 级默认值：**加** `internal/application/**`（读侧服务层的落点；DAG 默认里没有它）与 `infra/migrations/**`（只在确需迁移时才用）。**明确不加**（写进 forbidden_scope）：`cmd/api/provenancehttp/**`（**这是验收第二条的实体**——不许你把证据塞进那个 API 里，也不许你改它的 store）、`specs/api/openapi.yaml`（契约由我维护）、`specs/events/**`、`specs/policies/**` 与 `internal/authz/**`（权限矩阵是安全边界）、`docs/**`。`apps/web/**` **保留**在范围内但**不是本任务的重点**：验收两条都是读侧数据形状，前端页面（Evidence/Provenance UI）是 **T0507**。**如果你只做完 API 侧，那是可以接受的**；若顺手做了前端，必须在 RESULT 里说明与 T0507 的分界，避免两个任务重复做同一页。",
+      "supervisor_scope_narrowing": "2026-09-18 定稿。**这个任务当初被标成「等定」，我现在撤回，只保留一条我自己的裁定。** 2026-09-16 的阻塞理由逐字是「一个假设的证据集合怎么算——是它下面各主张证据的并集，还是直接挂在假设上的那些——规格没写」。**前半句是对的（规格确实没写汇总规则），后半句的推论是错的**：requirement 用的词是 **grouping**，不是 union——要求本身就是「按目标把证据分好组」，没有要任何人造一个假设级的证据集合。所以「没有汇总规则」不是缺口，是**没有人要求过汇总**。\n\n**裁定一（唯一需要拍板的一条）：假设页面 = 两段分开列，不合并、不计分。** 具体是：第一段「直接挂在假设上的断言」；第二段「它下属的主张」，每条主张带着它自己的断言。**不做并集，不给任何条数/比例/净值。** 理由三条：(a) 字面照 requirement 的 grouping；(b) `docs/10:29` 与 CLAUDE.md §9.13 是**禁令**——一旦把多来源证据折成一个数或一个合并清单，就滑向 Truth Score 那一类东西，而 `00058` 的注释把这套推理写得比我能写的更清楚；(c) 这个选择**不发明任何科研语义**，它只是拒绝把两类东西混在一起，而且**可逆**——将来 owner 若要「假设级合并视图」，那是一条独立任务、一次独立的科研语义决定，不是今天在这里顺手做掉。\n\n**裁定二（本轮最容易被做坏的一条）：立场标签只能用 `domain.RelationStance`，算不出来就不显示。** 那段代码对映射不到的关系返回 `(\\\"\\\", false)`——这不是遗漏，是 fail-closed。**不要为了让界面好看而把未知关系归到 neutral**；`neutral` 只属于 `contextualizes` 一个关系。`TestRelationStanceIsALabelNotAScore` 就是钉这件事的。\n\n**裁定三：读路径另起一处，不碰 `provenancehttp`。** 验收原文「与 provenance API 分开」是硬要求，而 `cmd/api/provenancehttp/**` 已经进 forbidden_scope——**动它就是改动另一个已验收任务的交付物，并且把两个领域图混在一起**（§9.10）。\n\n**裁定四：origin/external 保持是 placeholder。** requirement 用的词就是 placeholder；有真实来源（`evidence_type`）就填，没有就空着。`docs/10:13` 的两列归 T0806。**我看到的最坏做法是「为了不空着而填一个看起来合理的外部标记」**——那是在证据上伪造来源，比空着坏得多。\n\n**一条边界**：`internal/rsg/**` 在范围内但**只读**。证据断言是 RSG 之外的另一种关系（§9.10），如果你判断必须改 RSG 侧的 `catalog` 或语义，在 RESULT 里点名说清楚，我来接，**不要自己扩范围**。\n\n**关于 T0806 的一个已知缺口（记录在案，不是给你的活）**：T0506 的 origin/external 那一轴要用到的两列由 T0806 负责，而 T0506 的 DAG 依赖里**没有** T0806。我**故意不加**这条依赖：加上会让 T0506 与它下游的 5 个任务一起等 T0806，而 origin/external 在 requirement 里本来就是个 placeholder。**代价是 T0506 交付时那一轴是空的——那是预期，不是缺陷**，T0806 落地后由一条后续小任务接上。"
     },
     {
       "id": "T0507",
@@ -3093,43 +3149,69 @@
         "T0504"
       ],
       "requirements": [
-        "specific figure/table/section/location metadata",
-        "human confirmed flag",
-        "snapshot source"
+        "specific figure/table/section/location metadata：一条文献断言的「具体位置」**记在既有的 `reasoning_note` 里**，是一个人类可读的定位串（例如 `figure 3b, 298 K isotherm`）。**不新建定位表、不加定位列**——见裁定一，这不是省事，是仓库已经做过的决定。",
+        "human confirmed flag：**复用既有的 `evidence_assertions.review_state`**（三值 CHECK），不新增布尔列。见裁定三。",
+        "snapshot source：**复用既有的 `external_reference_snapshots` 表**，不建第二套快照机制。见裁定四。",
+        "**把缺掉的中间那层补起来**：`internal/persistence/queries/evidence.sql` 的 `CreateEvidenceAssertion` 已经由 sqlc 生成，但 `cmd/` 与 `internal/application/` 里**零调用者**；契约里 `POST /projects/{projectId}/branches/{branchId}/evidence-assertions` 也已经存在（`specs/api/openapi.yaml:128`）却没有任何实现。本任务就是补这一层：应用服务 + HTTP handler，挂在**既有那条路径**上。",
+        "**写路径必须在插入之前调用 `CheckEvidenceAssertion`**，这不是我的要求，是那段代码自己写下的契约：`internal/rsg/semantics/evidence_assertion.go:55-58` 逐字「The checks stay payload-pure: they never read storage, and **the future evidence write path is expected to call this before inserting** (the same contract the object write path has with `Check`)。」",
+        "**返回的 hints 不得被静默丢弃**。`CheckEvidenceAssertion` 返回 `(errs, hints)` 两个值；hints 是**给作者的提示**，不是错误。你要决定它们在响应里怎么出现（照既有写路径对 hints 的处置方式），但**不能收下就扔**——那样等于把「只警告」悄悄变成「什么都不说」。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "禁止只有 DOI 就标 supports",
-        "API validation"
+        "**「禁止只有 DOI 就标 supports」= 拒绝「一个位置都没写」，不是拒绝「位置写得不够充分」。** 对 `evidence_type = 'literature'` 且 `reasoning_note` 去空白后为空 的断言，写路径必须**拒绝**（不是警告）。有一条测试真的构造这个请求并看到它被拒。",
+        "**反方向必须同时钉住，否则这条验收是坏的**：对**写了位置**的断言——哪怕那个位置在科学上很弱——必须**接受**（至多给出 hint）。要有一条测试证明它被接受。理由逐字在 `internal/rsg/semantics/evidence_assertion.go:26-28`：「**Both rules warn only**: whether the evidence genuinely establishes causation and **whether a note names a sufficient unit are scientific calls the check must not make for the author**.」**判「够不够」是不许做的**（CLAUDE.md §9.12）。**只测前一方向的实现，会把这条禁令一起做掉。**",
+        "**API validation**：走契约里已有的 `POST /projects/{projectId}/branches/{branchId}/evidence-assertions`，**不得新造路径、不得改契约**（`specs/api/openapi.yaml` 由我维护）。契约里这条带 `IdempotencyKey` 参数——照仓库既有的幂等形状处理。",
+        "**既有测试一条都不许变红，尤其这些**：`internal/rsg/semantics/evidence_assertion_test.go`（它逐条钉住两个 hint 的产生条件，含 `:130` 的 `HintLiteratureEvidenceUnitUnnamed` 用例）、`internal/domain/evidence_assertion_test.go`、`tests/integration/` 下与 evidence 相关的用例。**你的新写路径是给它们加一个调用者，不是改它们的语义。**",
+        "**不新增列、不新增表**：如果你判断非加不可，停下来在 RESULT 里说明理由并标 `blocked`，由我拍板——`docs/10_EVIDENCE_PROVENANCE.md:13` 点名缺的那两列（external/internal、visibility）**归 T0806**，不是你的。",
+        "RESULT 里逐条说明：三个 requirement 各自落在了哪个**既有**结构上（note / review_state / external_reference_snapshots），以及你为「hints 去哪了」做的选择与理由。"
       ],
       "tests": [
         "literature evidence negative"
       ],
       "allowed_scope": [
-        "infra/migrations/**",
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
-        "internal/persistence/**",
         "internal/evidence/**",
+        "internal/application/**",
+        "internal/persistence/**",
         "internal/rsg/**",
         "internal/domain/**",
+        "cmd/api/**",
         "go.mod",
         "go.sum",
         ".env.example",
-        "cmd/api/**",
-        "apps/web/**",
-        "packages/schemas/**",
+        "specs/database/postgres.sql",
+        "specs/SPEC_VERSION.json",
+        "infra/migrations/**",
         "tests/**"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "docs/**",
+        "specs/api/openapi.yaml",
+        "specs/events/**",
+        "specs/policies/**",
+        "internal/authz/**",
+        "apps/web/**",
+        "packages/schemas/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "**先读这三段代码，它们把「具体位置记在哪」已经决定完了。** `internal/rsg/semantics/evidence_assertion.go:19-24` 逐字：「a literature assertion without a reasoning note earns a warning — docs/10 §6: a DOI may not support a claim directly; the assertion must name the specific evidence unit (figure, table, results assertion, supplementary dataset, method). **The V1 schema has no excerpt field, so the reasoning note is the only place the unit can be named**; the check can only see whether that place is empty.」同一句在 `internal/domain/evidence_assertion.go:301-305` 复述。**这就是「位置标识模型」的答案：V1 没有定位模型，位置就是 note 里的一句话。**",
+        "**`docs/10_EVIDENCE_PROVENANCE.md:37`（要求原文）**：「不能 `DOI -> supports Claim`。必须定位文献中的具体 evidence unit：figure/table/results assertion/supplementary dataset/method。保留 source pointer、snapshot/excerpt metadata、human confirmation。」——注意最后三项：**source pointer 与 snapshot metadata 已有承载体**（`external_reference_snapshots`，见下），human confirmation 就是 `review_state`。",
+        "**`docs/19_EXTERNAL_REFERENCES.md:19`（同一要求的另一种写法）**：「External Reference 不是自动 Evidence。需要 Evidence Assertion 指向具体 location/excerpt/figure/table/dataset/method，记录 human confirmation 和 relation。」",
+        "**既有的 hint 机制就是这条验收的现成仪器，别另造一套。** `CheckEvidenceAssertion`（`internal/rsg/semantics/evidence_assertion.go:60`）返回 `(errs []error, hints []Hint)`；`:75-83` 是文献那条 hint 的产生条件（`EvidenceType == domain.EvidenceTypeLiterature && strings.TrimSpace(a.ReasoningNote) == \"\"`），提示码 `HintLiteratureEvidenceUnitUnnamed = \"LITERATURE_EVIDENCE_UNIT_UNNAMED\"`（`:45`）。测试在 `internal/rsg/semantics/evidence_assertion_test.go:130`。**看清楚：它现在只 warn。**",
+        "**`domain.EvidenceType` 是判「是不是文献断言」的地方**（`internal/domain/evidence_assertion.go`）——你的校验要按它分流，**不要按 `relation_type` 或字符串猜**。",
+        "**「快照来源」的承载体已经建好，不要建第二个**：`specs/database/postgres.sql:444` 的 `external_reference_snapshots` 表已有，且 `:644` 有一条 **append-only 触发器**。`docs/19_EXTERNAL_REFERENCES.md:9` 是它的出处。",
+        "**「人工确认」的承载体也已经建好**：`evidence_assertions.review_state text NOT NULL DEFAULT 'unreviewed' CHECK(review_state IN ('unreviewed','reviewed','rejected'))`（`infra/migrations/00007_evidence.sql`，快照见 `specs/database/postgres.sql`）。**不要为「human confirmed」加一个布尔列**——那会与这一列漂移。",
+        "**存储层已经写好了，你要用的是它**：`internal/persistence/queries/evidence.sql` 的 `CreateEvidenceAssertion`（INSERT ... RETURNING *）与 `ListEvidenceAssertionsForTarget`；生成物在 `internal/persistence/sqlc/evidence.sql.go`。**这两个查询目前全仓库零调用者**（`grep -rn \"CreateEvidenceAssertion\" --include='*.go' internal/ cmd/ tests/` 只命中生成文件自己）——这就是本任务的空白所在。",
+        "**契约里那条路径长什么样**：`specs/api/openapi.yaml:128-136` 是 `POST /projects/{projectId}/branches/{branchId}/evidence-assertions`，summary「Create evidence assertion」，带 `ProjectId` / `BranchId` / `IdempotencyKey` 三个参数，响应 `201`。**它没有 requestBody schema**——请求体形状由你定，但路径与幂等参数照用。",
+        "**写路径挂哪儿：照既有形状。** 路由用标准库 `http.NewServeMux()` + Go 1.22 方法化 pattern（**不是 chi**）；所有产品路由挂在 `cmd/api/main.go` 的 `v1` 子 mux 上，由 `authAPI.Guard(v1)` 包住，而那个 guard **按方法判定**——GET 放行，POST/PUT/PATCH/DELETE 要 session + CSRF。handler 包照 `cmd/api/` 下已有的 26 个 `*http` 包的写法（例如 `cmd/api/rsghttp/`、`cmd/api/reviewhttp/`）。**找一个「在分支上创建对象」的既有写路径整条读一遍**（`internal/application/sciobjects/`、`internal/application/states/`、`internal/application/branches/` 是候选），把你的新路径做成同型，而不是自创一层。",
+        "**`internal/evidence/` 现在是空的**——只有 `doc.go`，逐字写着「Package evidence owns evidence assertions and their provenance chains per docs/10_EVIDENCE_PROVENANCE.md」。**这个包是为本任务准备的落点**，把你的服务层放进去（或按上面那条既有形状放进 `internal/application/`，二选一，在 RESULT 里说明选择）。",
+        "**迁移号由我在派工时分配，写进任务包。** 账本 `.rddev/runtime/migration-numbers.json`，分配器幂等。**不要自己选号，也不要拿「main 最大号 + 1」去猜**（CLAUDE.md §8.1）。**而且本任务很可能根本不需要迁移**——三个 requirement 全部落在既有结构上。判断不需要就别建，在 RESULT 里说明理由；不要为了用掉一个号而造表。若你确实要建，规矩是 `infra/migrations/README.md`：已发布的迁移永不修改、`specs/database/postgres.sql` 只能由 `python3 scripts/gen_schema_snapshot.py` 重新生成、不写 down migration，改完跑 `make check-schema-snapshot` 与 `make check-spec-version`，并同步扩 `tests/integration/migration_test.go` 的目录夹具（`canonicalTables` / `explicitIndexes`，那里是全等比较）。"
+      ],
+      "scope_note": "这是**按本任务的实际交付面调整过的范围**。相对 DAG 里的 phase 级默认值：**加** `internal/application/**` 与 `cmd/api/**`（本任务的真实工作量是补写路径那一层，而 DAG 默认范围里两者都没有——不加就落不了地）。**明确不加**（并写进 forbidden_scope）：`specs/api/openapi.yaml`（契约由我维护，而且路径本来就存在，你不需要改它）、`specs/events/**`、`specs/policies/**` 与 `internal/authz/**`（权限矩阵是安全边界；本任务的鉴权由 `/api/v1` 的统一 guard 与既有分支权限提供，**不要自己发明新权限判定**）、`apps/web/**`（本轮不做前端——DAG 默认里有它，但验收两条都是 API 侧的，加进来只会扩大冲突面）、`packages/schemas/**`、`docs/**`。",
+      "supervisor_scope_narrowing": "2026-09-18 定稿。**这个任务被误标成「等定」两个月，现在撤回。** 2026-09-16 的阻塞理由逐字是「文献里『具体位置』（图/表/小节）用什么标识——规格要求定位到具体 evidence unit（docs/10:37、docs/19:19），但位置标识模型全仓库不存在」——**「模型不存在」是事实，但它不是缺口，是决定**：那两段代码（`evidence_assertion.go:19-24`）明写着 V1 schema 没有 excerpt 字段，所以 note 就是唯一能写位置的地方。**规格要的是「断言必须指出具体位置」，没要求位置有机器可解析的结构**；把「没有 locator 表」读成「规格缺失」，是把实现选型当成了产品语义。所以这是我的层，我拍板。\n\n**裁定一：位置记在既有的 `reasoning_note` 里，人类可读字符串，不新建表、不加列。** 既有代码与既有测试里已经有字面量先例（`figure 3b`）。**将来**若要做结构化定位（图/表编号可查询），那是一条独立任务、一次独立的 schema 决定；V1 不做。\n\n**裁定二（本轮最要紧的一条）：验收「禁止只有 DOI 就标 supports」的作用域是「什么都没写」，不是「写得不够好」。** 这两者在文档里离得很近，容易混：`evidence_assertion.go:26-28` 逐字写着两条规则**只警告**，理由是「whether a note names a sufficient unit are scientific calls the check must not make for the author」。**所以你的校验只能问一个问题：note 是不是空的。** 一旦你开始判断「这个位置够不够具体」，你就越过了 CLAUDE.md §9.12 与 `docs/10 §4`「V1 不自动赋数值权重」划的那条线——那是替科学家做科学判断。**测试必须两个方向都有**（空的被拒、写了但弱的被接受），否则一个只会拒绝的实现也能让单向测试变绿，而那条禁令就被静默做掉了。\n\n**裁定三：`human confirmed` 复用 `evidence_assertions.review_state`，不加布尔列。** 那一列已经是三值 CHECK、已经有默认值 `unreviewed`，语义与「人工确认过没有」逐字对应。加一个 `human_confirmed boolean` 会产生两个真相源。\n\n**裁定四：`snapshot source` 复用 `external_reference_snapshots`。** 该表已存在且带 append-only 触发器（`postgres.sql:644`），`docs/19:9` 是它的出处。**这条 requirement 的工作量是「把断言与快照接起来」，不是「造一个快照机制」。**\n\n**裁定五：hints 不得静默丢弃。** `CheckEvidenceAssertion` 返回的 `hints` 是给作者的提示（「你的证据只支持相关性」「你没写具体位置」）。仓库里其它写路径怎么处置 hints 就怎么做——**先看一遍再决定**；如果确实没有任何先例，那就在响应体里带出来，并在 RESULT 里点名说明这是你定的。**把 hints 收下就扔，等于把「只警告」变成「不告诉作者」**，那与本任务验收的精神相反。\n\n**另外两条边界**：（1）**不要动 `CheckEvidenceAssertion` 的语义**——它返回 errs 与 hints 的分工是两个既有测试钉住的。你可以在**调用侧**把「note 为空」升级为拒绝（那是写路径的策略），但**不要**去改那个函数让它返回 error。（2）`docs/10_EVIDENCE_PROVENANCE.md:13` 点名缺的 external/internal 与 visibility 两列**归 T0806**，`docs/21_DATA_MODEL.md:24` 点名的 `external_evidence_links` 表全仓库只有那一行提到、已被判为早期设计残留（`tasks/decisions.md:9205`，issue #251）——**这两件都不是你的**，看到它们不要顺手去建。"
     },
     {
       "id": "T0510",
@@ -4685,14 +4767,26 @@
         "T0504"
       ],
       "requirements": [
-        "其他 Project evidence 指向 published version",
-        "origin/reviewed/unreviewed 分类",
-        "origin maintainer 无删除权"
+        "**本条需求的出处是 `docs/10_EVIDENCE_PROVENANCE.md:39`（§7 Network external evidence）与 `docs/31_MASTER_ACCEPTANCE.md:29`（Gate D）**，原文：「Published Knowledge Object 页面区分 Origin Evidence、Reviewed External Evidence、Unreviewed External Evidence」。**这三类是读侧分类，不是三张表**——它由「来源是 origin 还是外部」与「评审状态」两根轴导出。`docs/24_TEST_STRATEGY.md:16` 补上第三件事：「external evidence 不可被 origin maintainer 静默删除」。",
+        "**不要新造第二根轴。** `evidence_assertions.review_state`（`infra/migrations/00007_evidence.sql:15`，`unreviewed|reviewed|rejected`）已经是 reviewed/unreviewed 那根轴，Go 侧在 `internal/domain/evidence_assertion.go:229-245`。**外部/内部这根轴规格也点了名**：`docs/10_EVIDENCE_PROVENANCE.md:14` 的字段清单里有 `external/internal` 与 `visibility`，而 `evidence_assertions`（`00007:3-18`）**两列都没有**。按 docs/10 把这两列补齐（迁移编号我分配，见任务包），**不许另造一张「外部证据表」来代替它**。取值语义要么在规格里有出处，要么在 RESULT 里写明你的读法与理由。",
+        "**删除防护必须是结构性的，这是本任务的硬核。** `evidence_assertions` 上**现在没有任何删除防护**：`grep -n evidence infra/migrations/00014_append_only_enforcement.sql infra/migrations/00015_append_only_truncate.sql` 零命中，裸 `DELETE` 今天合法。参考 `00014`/`00015` 既有的两道防线。**但别做成全表禁删**：`00058_evidence_assertion_guards.sql:52-55` 明确写着 `unreviewed → reviewed → rejected` 是**合法的就地状态变更**（触发器守的是版本日志，不是这种成员行）——防护要挡住的是**删除**，不是评审。",
+        "**目标必须是已发布版本，且要能跨项目。** 外部证据挂的是 published version；`knowledge_publications`（`infra/migrations/00010_releases_assets.sql:64-72`）**没有 project 列**，它的归属要靠 `object_version_id → scientific_object_versions.object_id → scientific_objects.project_id` 这条链推出来（`00005_scientific_objects.sql:4-9`、`:11-28`）。「其他 Project 的证据指向 published version」这条必须走真实产品路径，不许用测试夹具把两个项目的关系摆出来。",
+        "**冲突证据必须能并存，且不得被净立场算术。** `infra/migrations/00058_evidence_assertion_guards.sql:40-46` 逐字写明 `(target_object_version_id, evidence_object_version_id)` 这一对**故意不唯一**——同一条证据可以在同一目标版本上同时挂 supports 与 contradicts，各自独立评审；加唯一约束会把两种立场压成一行、逼出一个赢家，那正是领域禁止的。**不得引入任何把冲突证据合并、裁决或打分的东西**，也不得把它「修」成唯一。",
+        "**§8 的标签本轮不做——我已经把它划出范围。** `docs/10_EVIDENCE_PROVENANCE.md:43-45`（§8 Network Evidence State）允许平台产生描述性标签（limited evidence、mixed evidence、actively contested、independently reproduced），但**这四个标签的判定规则规格里没有**：那是科研语义，属 L3，须由 owner 裁定，本轮不实现。你只须保证**不产生任何 Truth Score／净立场**（CLAUDE.md §9.13）。",
+        "**不要为文档提到的表而造表。** `docs/21_DATA_MODEL.md:24` 点名了 `external_evidence_links`，但**全仓库不存在**，也只有那一行提到它。**不要为了「补齐文档」而建它**；若你判断 §7 确实需要一张独立的表（而不是补 `evidence_assertions` 的列），在 RESULT 里说明理由并建（编号我分配）。",
+        "**事件要真的发出来。** `specs/events/event-types.yaml:28` 已声明 `knowledge.external_evidence_added`，**目前没有生产者**（`internal/events/subscription.go:290` 记着「no producer addresses a published knowledge object yet」）。在生产路径上发它，`Event.Visibility` 必填且显式（`internal/events/event.go:45-65`，不许猜）。**注意一处文档不一致**：`docs/18:9` 把它拼成 `external_evidence.added`——按 YAML 的拼法写，`docs/**` 不在你范围内，别去改文档。",
+        "**读出口就是契约里那条没人实现的 GET。** `specs/api/openapi.yaml:292-296` 的 `GET /knowledge/{knowledgeId}`（summary 逐字 `Published knowledge object plus origin/network evidence state`）今天**没有实现**，它正是这三分类的天然读出口。**契约（`specs/api/**`）由我维护**：你按既有契约实现；若契约缺字段或响应形状不够，**在 RESULT 里点名**，不要自己改契约文件。该接口 `security: []`（匿名可读）——所以 **private／未发布的对象绝不能从这里泄漏**（与 T0805 匿名检索收紧同一条原则；owner 裁定 `L3-20260916-1`：发布 ≠ 公开）。",
+        "**一律 fail-closed。** 读不到、解析失败、权限不明、归属链断——**全部视为不可见/拒绝**（`docs/12_AUTHORIZATION.md` §5：不能静默放宽；`internal/authz/engine.go` 对未登记动作默认拒绝）。缺失不得成为放行理由。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "反对证据可见",
-        "private evidence 不泄漏"
+        "**跨项目证据落库并按三类分开呈现**：一条来自**另一个项目**的 evidence assertion 能挂到本项目的 **published version** 上，并且在读出口上按 origin/reviewed/unreviewed **三类分开呈现**（不是合成一个清单）。要有一个用**真实产品路径**（建两个项目 → 发布 → 挂证据）的集成测试，不许手工构造状态。",
+        "**删除防护可证**：origin maintainer（以及项目 owner）对外部反证的删除请求被拒；**并且**有一条**绕过应用层**的反证——直接 SQL `DELETE` 被数据库拒绝——否则说明为什么数据库层做不到，并给出等价的结构性证据。**光有 handler 里的一个 if 不算数**。",
+        "**冲突并存且独立评审**：同一条 evidence_object_version 在同一 target_object_version 上可以同时存在 `supports` 与 `contradicts` 两行，两行的 `review_state` 各自独立变更，**没有任何东西把它们合并成一个结论**；有测试钉住（并顺手确认你没有引入唯一约束）。",
+        "**没有 Truth Score**：读出口的响应里不出现任何分数、净立场或可信度数值——要有断言钉住（例如响应结构里不存在这类字段）。",
+        "**事件真的发出**：`knowledge.external_evidence_added` 在生产路径上被发出，`Visibility` 显式且与对象可见性一致；有测试断言事件行与 visibility 值。",
+        "**不泄漏**：private／未发布对象的证据不通过 `GET /knowledge/{knowledgeId}` 或任何新查询泄漏给未授权者；要有否定断言（不是「没报错」就算过）。",
+        "RESULT 里写明：哪些推进走的是真实产品路径；哪些规格没写清而按 fail-closed 处理；以及**你为什么不实现 §8 的四个标签**（一句话即可）。"
       ],
       "tests": [
         "external evidence tests"
@@ -4701,25 +4795,48 @@
         "infra/migrations/**",
         "specs/database/postgres.sql",
         "specs/SPEC_VERSION.json",
+        "specs/events/**",
         "internal/persistence/**",
+        "internal/domain/**",
         "internal/contribution/**",
+        "internal/events/**",
         "internal/application/**",
         "go.mod",
         "go.sum",
         ".env.example",
         "cmd/api/**",
+        "cmd/worker/**",
         "apps/web/**",
         "tests/**"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "docs/**",
+        "specs/api/openapi.yaml",
+        "internal/authz/**",
+        "specs/policies/**",
+        "internal/rsg/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "**三条需求的真正出处是 `docs/10_EVIDENCE_PROVENANCE.md:39-41`（§7 Network external evidence），不是 `docs/19_EXTERNAL_REFERENCES.md`**。原文：「Published Knowledge Object 页面区分 Origin Evidence、Reviewed External Evidence、Unreviewed External Evidence。原发布者不能删除外部反证；只能对其本项目 assessment 负责。」`docs/19` 讲的是 DOI/专利这类**外部引用**，跟本任务无关，别照它写。",
+        "`docs/31_MASTER_ACCEPTANCE.md:29`（Gate D — Network）：「Published knowledge 可收到 external evidence，区分 origin/reviewed/unreviewed。」——这是验收口径。",
+        "`docs/24_TEST_STRATEGY.md:16`：「external evidence 不可被 origin maintainer 静默删除。」",
+        "`docs/10_EVIDENCE_PROVENANCE.md:43-45`（§8 Network Evidence State）：平台可产生描述性标签（limited evidence、mixed evidence、actively contested、independently reproduced），**不得产生隐式 Truth Score**（CLAUDE.md §9.13）。标签要按透明规则算，不许存成数值。",
+        "**`evidence_assertions` 表：`infra/migrations/00007_evidence.sql:3-18`**（快照 `specs/database/postgres.sql:272-287`）。全部列：`project_id`(:5)、`state_id`(:6)、`target_object_version_id`(:7)、`evidence_object_version_id`(:8)、`relation_type`(:9，九值 CHECK)、`evidence_type`(:10)、`scope`(:11)、`review_state`(:15)、`created_by`(:16)。**先读它，再动手。**",
+        "**reviewed/unreviewed 这根轴已经存在，不要新造**：`review_state text NOT NULL DEFAULT 'unreviewed' CHECK(review_state IN ('unreviewed','reviewed','rejected'))`（`00007_evidence.sql:15`），Go 侧 `internal/domain/evidence_assertion.go:229-245`（`EvidenceReviewUnreviewed/Reviewed/Rejected`）。",
+        "**「反对证据可见」已经是结构性的，不要去「解决」它**：`infra/migrations/00058_evidence_assertion_guards.sql:40-46` 逐字写明 (target_object_version_id, evidence_object_version_id) 这一对**故意不唯一**——同一条证据版本可以在同一个目标版本上同时挂 supports 与 contradicts，各自独立评审；加唯一约束会把两种立场压成一行、逼出一个赢家，那正是领域禁止的净立场算术。**T0806 不得引入任何把冲突证据合并/裁决/打分的东西。**",
+        "**`00058:52-55` 是「评审是就地状态变更」的依据**：append-only 触发器（00014/00015）守的是**版本日志**，不是这种无版本的成员行；所以 unreviewed → reviewed → rejected 是合法的就地更新。",
+        "**真正缺的东西，逐条列清（这些是你要面对的空白）**：(1) `evidence_assertions` **没有** `external`/`internal` 列，也**没有** `visibility` 列，而 `docs/10_EVIDENCE_PROVENANCE.md:13` 把这两样列为必备字段；(2) `docs/21_DATA_MODEL.md:24` 点名的 `external_evidence_links` 表**全仓库不存在**（只有那一行提到）；(3) **`evidence_assertions` 上现在没有任何删除防护**——`grep evidence infra/migrations/00014_append_only_enforcement.sql infra/migrations/00015_append_only_truncate.sql` 零命中，裸 DELETE 目前是合法的；(4) `specs/api/openapi.yaml:292-296` 的 `GET /knowledge/{knowledgeId}`（summary 逐字写着 `Published knowledge object plus origin/network evidence state`）**没有任何实现**，而它正是这三分类的天然读出口。",
+        "`infra/migrations/00010_releases_assets.sql:64-72`：`knowledge_publications` 的列与 `UNIQUE(object_version_id,public_version)`。**注意它没有 project 列**——publication 的归属要靠 `object_version_id → scientific_object_versions.object_id → scientific_objects.project_id` 这条链（`00005_scientific_objects.sql:4-9`、`:11-28`）推出来。",
+        "`internal/evidence/` **是个只有 doc.go 的空壳**（`internal/evidence/doc.go:1-6`，标着 T0002 scaffold）。证据断言现有的 Go 面：`internal/domain/evidence_assertion.go:279`（`type EvidenceAssertion`，字段在 :279-316，**没有** external/origin/visibility）、`:317` `Validate()`；查询只有两条 (`internal/persistence/queries/evidence.sql:5` `CreateEvidenceAssertion`、`:16` `ListEvidenceAssertionsForTarget`)，**两条都没有任何非 sqlc 的生产调用方**（没有 service、没有 handler、没有 `evidencehttp` 包）。也就是说证据这条链的写入面基本是从零开始。",
+        "`specs/events/event-types.yaml:28` 已声明 `knowledge.external_evidence_added`；`internal/events/subscription.go:290` 记着「no producer addresses a published knowledge object yet」——**这个事件目前没有生产者**，需要你来发。另记一处不一致：`docs/18_EVENTS_SUBSCRIPTIONS.md:9` 把它拼成 `external_evidence.added`（`docs/**` 不在你的范围内，别去改文档，按 YAML 的拼法写）。",
+        "`internal/events/event.go:82` `func Record(ctx, db DBTX, e Event) error`——事件写入的口子；`Event.Visibility`（`:45-65`）是**必填且显式**的，不许猜。已有消费方的例子（抄它的挂法）：`internal/events/fanout.go:14-17` + 游标列 `infra/migrations/00059_webhook_endpoints.sql:76-79`；worker 注册在 `cmd/worker/main.go:119,132-133,151`。"
+      ],
+      "scope_note": "这是**按本任务的实际交付面**调整过的范围。相对 DAG 里的 phase 级默认值：**加** `specs/events/**` + `internal/events/**` + `cmd/worker/**`（本任务要发 `knowledge.external_evidence_added`，那需要一个生产者；没有这几条，需求第 1 条在结构上就落不了地）；**加** `internal/domain/**`（`EvidenceAssertion` 域类型在这里）。**明确不加**（并写进 forbidden_scope）：`internal/authz/**` + `specs/policies/**`（权限矩阵是安全边界，改动归 Supervisor，见下）、`internal/rsg/**`（本任务不动 RSG 关系目录）、`specs/api/openapi.yaml`（契约由 Supervisor 维护；本任务要用的两条路由已经存在，见下）、`docs/**`。",
+      "supervisor_scope_narrowing": "2026-09-18 定稿。四点说明：\n（一）**本任务不被 SPEC_BLOCKED 卡住，可以开工**。三条需求有明确的规格出处（docs/10 §7），分类轴与「反证可见」的机制都已在树里，缺的是连接与读出口，不是产品语义。\n（二）**两个正交的轴，不要把它们合成一个枚举**：\n  - 「origin 还是 external」＝这条证据断言的属主项目，和它所指的 published 版本**所属项目**是不是同一个。两边都读得到：`evidence_assertions.project_id`，以及 publication 那条链推出来的项目。\n  - 「reviewed 还是 unreviewed」＝`evidence_assertions.review_state`，**已经存在**。\n  三分类（Origin / Reviewed External / Unreviewed External）是这两个轴**算出来的**，不要新增一个存三值的列——存了就必然和 review_state 漂移，而且 `00058:40-46` 已经把「同一目标上并存相反立场」定成不可合并的性质。\n（三）**权限模型归我，不归这次改动**。「origin maintainer 无删除权」请实现成**两道**：(a) 根本没有删除这条路（不注册 DELETE 路由、不写 Delete 查询）；(b) 数据库层一道守卫，让绕过应用层的裸 DELETE 也失败——注意 `evidence_assertions` 现在**完全没有**删除防护，这正是缺口所在。**不要**往 `internal/authz/**` 或 `specs/policies/**` 加权限动作：那两处在你的 forbidden_scope 里，而且矩阵由 CSV 锁死（`internal/authz/matrix.go:5-11`，`TestPermissionMatrixMatchesCSV` 会漂移即红）。若你判定不加一个矩阵动作就实现不了，记 `blocked` 并说明，由我拍板。\n（四）**契约不需要你改**：`GET /knowledge/{knowledgeId}`（`specs/api/openapi.yaml:292-296`）已经声明成 `Published knowledge object plus origin/network evidence state`，照它的 summary 实现即可；`knowledge.external_evidence_added`（`specs/events/event-types.yaml:28`）也已经声明。**契约里已有的东西你去实现它，契约里没有的东西别自己加**——要加先记 blocked 告诉我。"
     },
     {
       "id": "T0807",
@@ -4738,7 +4855,7 @@
         "**`via` 这一列 `docs/13:7` 点名要求，表里没有，要补**。`docs/13:7` 逐字：「每个 event：actor person id、affiliation at time、project/object refs、role tags、**via agent/client**、timestamp、accepted/released context。」仓库里有**两套**叫 `via` 的词表，**别选错**：\n  - `audit_log.via`（`00012:47`，无 CHECK，Go 侧四个值 `session`/`password`/`oidc`/`internal`，定义在 `internal/domain/audit.go:73-79`）——那是**「这个动作是怎么认证进来的」**。\n  - `state_commits.via`（`00004_rsg_state.sql:46`，六个值 `web`/`api`/`mcp`/`claude_code`/`git_compat`/`system`，Go 侧在 `internal/domain/state.go:63`，校验在 `internal/application/states/service.go:270`）——那是**「这个改动是从哪个通道来的」**。\n  `docs/13:7` 说的是 **agent/client**，所以取**后者**这套。**但关键在「值从哪来」**：`research_events`（`00012:4-13`）**没有 `via` 列**，`outbox_events` 的信封也没有（`00046:36-40` 只补了 `actor_id`/`project_id`/`visibility`/`last_error`）。**不许填一个读起来像事实的默认值。** 照 `00046` 自己的规矩办——逐字：the publisher must copy them from the outbox row, **never re-derive them from the payload**；也就是说信封列要一路带过来（outbox → research_event → 账本）。如果你判断通道在投影那一刻确实不可知，在 RESULT 里点名说明，不要编。",
         "**`accepted_context` / `released_context` 是什么，依据在 `docs/13:4`**：它把 **Accepted Contribution** 与 **Release inclusion** 列为 Reputation Profile 里**两个不同的维度**（逐字：accepted contributions、assets reused、protocols derived、independent reproductions、reviews、cross-org collaboration、confidential verified contributions）。这两个布尔列就是那两件事的记录位。**你要把触发条件写清楚并在 RESULT 里逐条说明**（什么事件让哪个变 true；`contribution.accepted` 已在 `specs/events/event-types.yaml` 里），并且**必须在同一行上、按事件当时的事实判定**——不许事后回填。",
         "**「affiliation at time」是「事件发生当时」，不是「投影当时」**：`organization_id_at_time` 这一列（`00011:23`）的名字就是这条要求。**投影必须取 `occurred_at` 那一刻的归属。** 这是可测的：让某人换组织，再重跑投影，**已经记下的那几行不得改变**。",
-        "**「同一 event 不重复 credit」的机器形状仓库里已经有先例，照它做**：`infra/migrations/00046_transactional_outbox_publish.sql:16-25` 与它下面的偏索引——逐字：`research_events.outbox_event_id` pins the outbox row each event came from, and **the partial unique index below makes the retried insert a no-op**（`research_events_outbox_event_uniq`，`WHERE outbox_event_id IS NOT NULL`）。**账本行同样要钉住它的来源事件，并用「来源非空 + 偏唯一索引」让重放成为 no-op**（`INSERT ... ON CONFLICT DO NOTHING`）。这样投影可以**反复重跑**而不会把同一次贡献记两遍。",
+        "**「同一 event 不重复 credit」的机器形状仓库里已经有先例，照它做**：`infra/migrations/00046_outbox_idempotent_publish.sql:16-25` 与它下面的偏索引——逐字：`research_events.outbox_event_id` pins the outbox row each event came from, and **the partial unique index below makes the retried insert a no-op**（`research_events_outbox_event_uniq`，`WHERE outbox_event_id IS NOT NULL`）。**账本行同样要钉住它的来源事件，并用「来源非空 + 偏唯一索引」让重放成为 no-op**（`INSERT ... ON CONFLICT DO NOTHING`）。这样投影可以**反复重跑**而不会把同一次贡献记两遍。",
         "**投影只记事件，不产生任何分数——这条是硬约束**：`docs/13:19` 逐字「禁止单一分数」；`docs/13:25-27` 的 Anti-gaming 逐字「不使用 Like 数做信誉。raw commit count/experiment count 不作为质量代理。重复自建项目互相引用不得直接等价为独立 external impact」；CLAUDE.md §9 不变量 13「不生成 Truth Score / Research Score」。**所以：不得在账本行上放任何聚合值、计数器、权重、排名**，也不得为了让 Profile 好渲染而先算一个总分。账本记事实，Profile 怎么展示是后面的事。",
         "**append-only 已经由数据库强制，你不必再加，但必须证明它对你的新写入路径同样生效**：触发器在 `00014_append_only_enforcement.sql:75-76`（BEFORE UPDATE OR DELETE）与 `00015_append_only_truncate.sql:22-23`（BEFORE TRUNCATE），既有测试在 `tests/integration/append_only_test.go:74` 与 `:582-592`。**纠错只能追加新事件，不得改旧行**（`docs/13:11`、`:15`，CLAUDE.md §9 不变量 14「Contribution Ledger append-only；Credit 可纠错但留痕」）。",
         "**加列会碰一个既有测试，改它是「补上」而不是「放宽」**：`tests/integration/migration_test.go:589-590` 逐列断言了 `contribution_events` 的列集合。加 `via` 之后这个期望清单**要补上新列**——**只许往严里补（新列的 类型/非空/默认值 都要断言），不许改成子集或弱断言**（CLAUDE.md §5.1）。",
@@ -4792,7 +4909,7 @@
         "**`docs/13_CONTRIBUTION_REPUTATION.md`（整篇很短，全读）**：`:5` 事件清单、`:7` 每条事件必须带的七项（**`via` 就在这一行**）、`:11` 纠错作为新事件、`:15` 不得直接改原事件、`:19` 禁止单一分数、`:25-27` Anti-gaming——本任务的验收依据",
         "**`docs/04_USERS_ROLES.md:26-44`**：十三个 Contribution Role 取值（`:30-42`）与它的性质「不是身份、不赋权、不计固定分值」（`:44`）",
         "**`specs/events/event-types.yaml`（只读）**：25 个事件名的唯一真相源，含 `contribution.accepted` / `credit.dispute_opened` / `credit.dispute_resolved`",
-        "**`infra/migrations/00046_transactional_outbox_publish.sql:1-60`**：来源钉住 + 偏唯一索引做幂等、以及「信封列必须从 outbox 行复制、不许从 payload 重推」的逐字规矩——**本任务去重要照抄的形状**",
+        "**`infra/migrations/00046_outbox_idempotent_publish.sql:1-60`**：来源钉住 + 偏唯一索引做幂等、以及「信封列必须从 outbox 行复制、不许从 payload 重推」的逐字规矩——**本任务去重要照抄的形状**",
         "`infra/migrations/00011_external_contribution.sql:21-32`：`contribution_events` 的实际列（**注意没有 `via`**）",
         "`infra/migrations/00012_events_audit.sql:4-13`（`research_events` 的实际列，**同样没有 `via`**）与 `:47`（`audit_log.via` 的写法，无 CHECK）",
         "`infra/migrations/00004_rsg_state.sql:46`＋`internal/domain/state.go:63`＋`internal/application/states/service.go:270`：**通道**词表的六个取值与它的校验收口",
@@ -4959,14 +5076,26 @@
         "T0803"
       ],
       "requirements": [
-        "Project/Knowledge/PR 支持 discussion thread",
-        "Discussion 不进入 Evidence/Reputation",
-        "有权限用户可将讨论提案转 Issue/Hypothesis/External Evidence proposal，并保留原作者 provenance"
+        "**先说清楚：这个功能在树里是从零开始的。** `infra/migrations/**` 里 `comment|discussion|thread` 只命中 DDL 的 `COMMENT ON` 与 `00009_issues_pull_requests.sql:38` 的 PR 评审裁决值；Go 侧只有 3 处常量/错误串；`cmd/**` 零条评论路由；**`specs/api/openapi.yaml` 里 `comment|discussion` 的命中数是 0（我核过）**；`apps/web/` 零个评论组件。**没有表、没有 store、没有 service、没有路由、没有 UI——都要你建。**",
+        "**「不改变科学状态」必须是结构性的，不是约定。** 写评论这条路径**不得**触碰这三处：(1) `internal/application/states/service.go:94` 的 `Commit`（`:46-48` 逐字：「at least one is required — … a transition without operations is a no-op, not a state change」）；(2) 不得插入 `scientific_object_versions`（`infra/migrations/00005_scientific_objects.sql:11-27`）或 `relation_versions`（`00004_rsg_state.sql:8-24`）；(3) 不得写 `contribution_events`（`00011_external_contribution.sql:21-32`，append-only 由 `00014:21,75-76` 与 `00015:22-23` 锁死）。**验收不能只断言「没有报错」**——那三张表今天在这条路径上本来就是空的，「没报错」平凡成立。必须钉住**没有任何账本行被写**。",
+        "**规格里没有「discussion」的定义**，全仓库只有两处页面列举：`docs/09_VERSION_CONTROL.md:17`（PR 包含 discussion）、`docs/42_PAGE_SPECS.md:13`（PR 页有 Discussion 区块）。所以「普通评论不改变科学状态」这条**不是我抄来的，是需求本身给的**——把它实现成结构性的，而不是靠约定。**并且记住一个结构事实：讨论不是 scientific object，所以它不能作为关系的一端**（`relation_versions` 的端点是指向对象版本的 FK）。",
+        "**promote 的三个目标，各自的现状先看清：** ① **Issue**：表在 `infra/migrations/00009_issues_pull_requests.sql`，查询 `internal/persistence/queries/issues_prs.sql:5-8` 的 `CreateIssue` **存在但没有任何非 sqlc 调用方——你是第一个用它的人**；`docs/03_GLOSSARY_DOMAIN_MODEL.md:25` 只有一句「项目希望回答的科研问题，可包含子问题，不等同 Issue」，**Issue 没有正式定义**，别给它编语义。② **Hypothesis**：有定义（`docs/03:27-28`），是 scientific object type，创建走 `internal/application/rsg/service.go:206` 的 `CreateObject`（`:292` `CreateObjectVersion`、`:386` `CreateRelation`，各自构造 `states.CommitParams`）。③ **External Evidence proposal**：`docs/15_AGENT_MCP_API.md:9,:13` 说「创建 evidence assertion proposal」「由 Web governance action 完成」，但**「proposal」在全仓库没有术语定义**——它的形状是可推的：`evidence_assertions.review_state`（`00007:15`）默认就是 `unreviewed`，而 `00058:52-55` 明确 `unreviewed → reviewed → rejected` 是合法的就地状态变更。**一条 unreviewed 的证据断言就是一条待办提案，用这个读法，不要另造「proposal」表。**",
+        "**provenance 必须复用既有机制，不许另造第二套。** 仓库里 provenance 的正统表示是**关系版本**（`docs/44_SCHEMA_RELATION_CATALOG.md:5`、`:12`；`internal/rsg/relationcatalog/catalog.go:75-113`，`ProvenanceInference` 在 `:39-41`，`ProvenanceTypes()` 在 `:194-205`；读侧 `internal/rsg/provenance/graph.go:51` + `walk.go:61`，HTTP 在 `cmd/api/provenancehttp/wiring.go:68-69`）。**但讨论不是对象，不能作为关系的一端**——所以这一条的 provenance 走「作者列 + 审计/事件」这条既有路径：`scientific_objects.created_by`（`00005:7`）、`scientific_object_versions.created_by`（`:24`）、审计 `RecordAuditLogEntry`（`internal/persistence/queries/events_audit.sql:26-33`）。**注意：`contribution_events` 目前没有任何 Go 写入方，且 T0807（Contribution Ledger projection）处于 blocked——不要把验收挂在它上面。**",
+        "**权限：不许新增动作。** `internal/authz/action.go` 一共 15 个动作（我核过计数），没有一个是评论或提升；`specs/policies/permissions-matrix.csv` 是权威，由 `TestPermissionMatrixMatchesCSV`（`internal/authz/matrix.go:5-11`）钉住与 Go 表逐格一致。**复用 `ActionWriteScientificState`（`action.go:19-20`），不要新造权限动作**——新动作等于改权限模型，那是 L3，不许。`ActionMutateFilesWeb`（`action.go:41-43`）是个先例：它存在**只是为了对所有人拒绝**。",
+        "**契约由我维护，不在你的范围里。** `specs/api/openapi.yaml` 里零条评论/提升路径（我核过）。你需要的路径与响应形状，**在 RESULT 里点名并给出建议**（按既有风格），**不要自己改 `specs/api/**`**。",
+        "**不得碰 reputation 这条线。** CLAUDE.md 不变量 14：Contribution Ledger append-only；`docs/13_CONTRIBUTION_REPUTATION.md:5` 的事件词表里**根本没有 comment/discussion**（列的是 created object、proposed hypothesis、performed experiment 这些客观事件），`:27` 逐字写着不用 Like 数做信誉。**仓库里目前没有任何 reputation 表或代码**——所以「讨论不进 reputation」今天平凡成立，**正因如此你的测试必须钉住「没有任何账本行被写」**，否则这条验收是空的。",
+        "**e2e 的落点与登记测试。** 任务登记的 blocking 测试是 `tasks/tests.json` 的 `T0811-TEST-01`「discussion promotion e2e」。Go e2e 的家是 `tests/e2e/*.go`（例：`tests/e2e/privacy_e2e_test.go`、`tests/e2e/asset_page_e2e_test.go`），验收脚本的家是 `tests/acceptance/*.sh`。",
+        "**迁移的规矩**（编号我分配）：`infra/migrations/README.md:114-128`——用 `python3 scripts/gen_schema_snapshot.py` 重新生成 `specs/database/postgres.sql`，跑 `make check-schema-snapshot` 与 `make check-spec-version`；**绝不改已有的编号文件，绝不写 down migration**。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "普通评论不会改变 scientific state",
-        "Promote 后 origin discussion/author 可追溯"
+        "**三个层面都能挂讨论**：Project／Knowledge／PR 各自能挂 discussion thread，且走**真实产品路径**（不是夹具摆出来的）；有集成测试。",
+        "**普通评论不改变科学状态，且可证**：写一条评论之后，`scientific_object_versions`、`relation_versions`、`contribution_events` 三张表**逐行不变**（断言零新增，而不是「没报错」）；同时**证明这条路径根本没有调用 `states.Commit`**（例如评论 service 的依赖里不含 `states.Service`，或有一条会在被调用时报错的替身）。",
+        "**promote 三条路径各自走通**：从一条讨论提案能提升为 (a) Issue、(b) Hypothesis（scientific object，经 `rsg.CreateObject` 的真实状态提交）、(c) External Evidence proposal（一条 `review_state='unreviewed'` 的 evidence assertion，**不另造表**）；三条都要有测试。",
+        "**provenance 可追溯**：提升之后能回答「它来自哪条讨论、原作者是谁」——落在既有机制上（作者列 + 审计）。要有两条断言：可追溯链完整；**`relation_versions` 里没有为讨论新增任何行**。",
+        "**权限不新增动作**：`internal/authz/action.go` 的动作数与 `specs/policies/permissions-matrix.csv` 的行数**不变**，`TestPermissionMatrixMatchesCSV` 仍绿；提升复用 `ActionWriteScientificState`，并有测试证明「无权限者提升被拒」（fail-closed）。",
+        "**登记的测试真的跑**：`T0811-TEST-01`「discussion promotion e2e」在 `tests/e2e/` 里有对应实现，且**真的从讨论一路走到提升**（只测 service 层不算）。",
+        "RESULT 里写明：哪些推进是真实产品路径；哪些规格没写清（Issue 无正式定义、「proposal」无术语定义、契约缺路由）而按 fail-closed 处理；**以及你建议的契约形状**（契约由我定，你给建议）。"
       ],
       "tests": [
         "discussion promotion e2e"
@@ -4976,8 +5105,10 @@
         "specs/database/postgres.sql",
         "specs/SPEC_VERSION.json",
         "internal/persistence/**",
+        "internal/domain/**",
         "internal/contribution/**",
         "internal/application/**",
+        "internal/events/**",
         "go.mod",
         "go.sum",
         ".env.example",
@@ -4988,12 +5119,30 @@
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "docs/**",
+        "specs/api/openapi.yaml",
+        "specs/events/**",
+        "internal/authz/**",
+        "specs/policies/**",
+        "internal/rsg/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "**先说清楚：这个功能在树里是从零开始的。** `grep -rn comment|discussion|thread` 在 `infra/migrations/**` 只命中 SQL 的 `COMMENT ON` 这类 DDL，加一个 token：`00009_issues_pull_requests.sql:38` 的 `CHECK(decision IN ('approved','changes_requested','commented'))`——那是 **PR 评审的裁决值，不是评论区**（`00061_scientific_review_dimensions.sql:57` 把它改成 `comment`）。Go 侧 grep 只有 3 处命中，全是常量或错误串（`internal/domain/review.go:80`、`internal/application/reviews/service.go:197`、`internal/config/envfile.go:53`）。`cmd/**` 零条评论路由，`specs/api/openapi.yaml` 零条评论路径，`apps/web/` 零个评论组件。**没有表、没有 store、没有 service、没有路由、没有 UI——都要你建。**",
+        "**规格里没有「discussion」的定义，也没有一句话说它不影响 reputation。** 全仓库只有两处提到 discussion，都是列举页面组件：`docs/09_VERSION_CONTROL.md:17`（PR 包含 discussion）、`docs/42_PAGE_SPECS.md:13`（PR 页有 Discussion 区块）。**所以「普通评论不改变科学状态」这条不是我抄来的，是需求本身给的**，你要把它实现成结构性的，而不是靠约定（见下面的决定）。",
+        "**「不进入 Evidence/Reputation」在代码里的确切含义，三条各自有明确位置**——写评论这条路径**不得**触碰其中任何一条：(1) 不得进入 `internal/application/states/service.go:94` `func (s *Service) Commit(ctx, in CommitParams, write WriteFunc)`（`:43-47` 逐字写着 operations 至少一条，「a transition without operations is a no-op, not a state change」）；(2) 不得插入 `scientific_object_versions`（`infra/migrations/00005_scientific_objects.sql:11-27`，被 `00014_append_only_enforcement.sql:21,37-39` 当版本日志守着）或 `relation_versions`（`00004_rsg_state.sql:8-24`）；(3) 不得写 `contribution_events`（`infra/migrations/00011_external_contribution.sql:21-32`，append-only 由 `00014:21,75-76` 与 `00015:22-23` 锁死）。**账本的事件词表里根本没有 comment/discussion**——`docs/13_CONTRIBUTION_REPUTATION.md:5` 列的是 created object、proposed hypothesis、performed experiment 这些客观事件。`docs/13:27` 还逐字写着不用 Like 数做信誉。CLAUDE.md 不变量 14：Contribution Ledger append-only。",
+        "**仓库里目前没有任何 reputation 表或代码**（grep `reputation` 只命中文档与 doc.go）。所以「讨论不进 reputation」今天是可以被平凡满足的——**正因如此，你的测试不能只断言「没有报错」，必须钉住「没有任何账本行被写」**，否则这条验收是空的。",
+        "**promote 的三个目标各自的家底**：\n  · **Issue**：表在 `infra/migrations/00009_issues_pull_requests.sql`，查询 `internal/persistence/queries/issues_prs.sql:5-8` `CreateIssue` **存在但没有任何非 sqlc 调用方**——你是第一个写它的人。`docs/03_GLOSSARY_DOMAIN_MODEL.md:25` 只有一句「项目希望回答的科研问题，可包含子问题，不等同 Issue」，**Issue 没有正式定义**。\n  · **Hypothesis**：`docs/03_GLOSSARY_DOMAIN_MODEL.md:27-28` 有定义（「尚待检验的科学命题，保留其提出历史，即使以后被证伪也不消失」）。它是一个 scientific object type，创建走 `internal/application/rsg/service.go:206` `CreateObject`（`:292` `CreateObjectVersion`、`:386` `CreateRelation`；每个都构造 `states.CommitParams`，`:239-245`/`:342-348`/`:427-433`）。\n  · **External Evidence proposal**：`docs/15_AGENT_MCP_API.md:9`（「创建 evidence assertion proposal」）、`:13`（「可创建 proposal，由 Web governance action 完成」）——**「proposal」在全仓库没有术语定义**，但它的形状是可推的：`evidence_assertions` 表在 `infra/migrations/00007_evidence.sql:3-18`，`review_state`（`:15`）默认就是 `unreviewed`，而 `00058_evidence_assertion_guards.sql:52-55` 明确「unreviewed → reviewed → rejected 是合法的就地状态变更」。**一条 unreviewed 的证据断言就是一条待办提案**——用这个读法，不要另造「proposal」表。",
+        "**provenance 必须复用既有机制，不许另造第二套**：仓库的 provenance 正统表示是**关系版本**（provenance 类别的关系类型）——`docs/44_SCHEMA_RELATION_CATALOG.md:5`（列表含 `derived_from`、`originates_from`、`published_from`）、`:12`（自定义类型要声明语义/源类型/目标类型）；Go 目录 `internal/rsg/relationcatalog/catalog.go:75-113`，`ProvenanceInference` 标志在 `:39-41`，`ProvenanceTypes()` 在 `:194-205`；读侧 `internal/rsg/provenance/graph.go:51` `Build` + `walk.go:61` `Walk`，HTTP 在 `cmd/api/provenancehttp/wiring.go:68-69`。**但注意一个结构事实（见下面的决定）：讨论不是 scientific object，所以它不能作为关系的一端**——`relation_versions` 的端点是指向对象版本的 FK。",
+        "**每个对象版本上已有作者列**：`scientific_objects.created_by`（`00005_scientific_objects.sql:7`）与 `scientific_object_versions.created_by`（`:24`）。可追溯性还能落在 `contribution_events.actor_id` + `object_refs`（`00011_external_contribution.sql:23,28`）与审计日志（`internal/persistence/queries/events_audit.sql:26-33` `RecordAuditLogEntry`）——**但 `contribution_events` 目前没有任何 Go 写入方，且 T0807（Contribution Ledger projection）处于 blocked**，所以不要把你的验收挂在它上面。",
+        "**权限：矩阵里没有、也不会有 comment/promote 动作。** `internal/authz/action.go:10-44` 一共 15 个动作，没有一个是评论或提升；`specs/policies/permissions-matrix.csv:1` 是权威、由 `TestPermissionMatrixMatchesCSV`（`internal/authz/matrix.go:5-11`）钉住与 Go 表逐格一致。可复用的现成动作是 `ActionWriteScientificState`（`action.go:19-20`，矩阵行 `matrix.go:61-69`）。另外 `action.go:41-43` 的 `ActionMutateFilesWeb` 是个先例——它存在**只是为了对所有人拒绝**。",
+        "**契约：没有评论路由，也没有 promote 路由。** `specs/api/openapi.yaml` 里零条 comment/discussion 路径。**契约由我维护，不在你的范围里**——按下面的决定办。",
+        "**e2e 测试的落点**：`tests/e2e/*.go` 是 Go e2e 的家（例：`tests/e2e/privacy_e2e_test.go`、`tests/e2e/asset_page_e2e_test.go`），`tests/acceptance/*.sh` 是验收脚本的家。任务登记的 blocking 测试是 `tasks/tests.json:1145-1151` 的 `T0811-TEST-01`「discussion promotion e2e」。",
+        "**迁移的规矩**：`infra/migrations/README.md:114-128`——用 `python3 scripts/gen_schema_snapshot.py` 重新生成 `specs/database/postgres.sql`，跑 `make check-schema-snapshot` 与 `make check-spec-version`；**绝不改已有的编号文件，绝不写 down migration**。**迁移编号由我在派工时分配，你不许自己选号。**"
+      ],
+      "scope_note": "这是**按本任务的实际交付面**调整过的范围。相对 DAG 里的 phase 级默认值：**加** `internal/domain/**`（讨论与提升的域类型放这里）与 `internal/events/**`（若提升要发事件）。**明确不加**（并写进 forbidden_scope）：`internal/authz/**` + `specs/policies/**`（权限矩阵是安全边界，见决定二）、`specs/api/openapi.yaml`（契约由我维护，见决定四）、`specs/events/**`、`internal/rsg/**`（见决定三：本任务的 provenance **不**走 RSG 关系，原因写在下面）。",
+      "supervisor_scope_narrowing": "2026-09-18 定稿。四点决定，都是为了把「需求没写」和「我该拍板」分开——**产品语义由需求本身回答（讨论不影响证据/信誉；可提升为 Issue/Hypothesis/External Evidence proposal），剩下的空白是工程选型，那是我这一层的事，不该拿它去阻塞任务**。\n\n**决定一：讨论是「无版本的成员行」，不是科学状态。** 建表由你设计，但必须满足：target 可以是 Project / Knowledge / PR 三类；有作者与时间；**没有版本号、不进 `states.Service.Commit`、不写任何 append-only 账本**。这条决定了验收第一句「普通评论不会改变 scientific state」怎么被证明——不是「没报错」，而是**在提交一条评论之后，`scientific_object_versions`、`relation_versions`、`contribution_events` 三张表的行数一行都没变**。测试要这么写。\n\n**决定二：权限模型不归这次改动，复用 `write_scientific_state`。** 提升动作要过 `ActionWriteScientificState`（`internal/authz/action.go:19-20`，矩阵 `matrix.go:61-69`）；评论本身只需「已认证 + 对目标有读权限」。**不要**往 `internal/authz/**` 或 `specs/policies/**` 加动作——那两处在你的 forbidden_scope 里，而且矩阵与 CSV 有漂移门禁，加一格就要动三处。若你判定非加不可，记 `blocked` 说清楚，由我拍板。\n\n**决定三：promote 的 provenance 不走 RSG 关系——因为它在结构上走不通。** 理由要写清楚，免得你以为是省事：`relation_versions` 的两端是指向 `scientific_object_versions` 的 FK，而**讨论不是 scientific object**，没有版本号，因此它不可能成为关系的一端。所以「保留原作者 provenance」落成一条**显式的来源链**：建一张提升记录表（讨论 → 被提升对象，含`promoted_by`/`promoted_at`），被提升的对象要能从它反查到原讨论与原讨论的作者。**这是 L2 级的存储边界选择，由我拍板并会记进 ADR；如果你的实现里出现第二条平行机制（比如又往对象版本表上挂一列 origin_discussion_id），那就是错的。**\n\n**决定四：契约由我补，你先按需求实现。** 本任务需要的新路由（评论增删查、promote）与事件类型**不在** `specs/api/openapi.yaml` / `specs/events/event-types.yaml` 里，而这两个文件不在你的范围内。处理办法：**在实现里把路由按仓库既有风格注册好、把事件按 `specs/events/event-types.yaml` 已有拼法发**；**不要自己改契约文件**。等你交付、我验收时，我会把对应条目补进契约——这是我在 `T0805` 上做过的同一件事（我在派工那一步把 `knowledge:publish` 两条补进了 `specs/api/openapi.yaml`）。若你发现某条路由的形状拿不准，记 blocked 问我。"
     },
     {
       "id": "T0812",
@@ -5053,14 +5202,20 @@
         "T0705"
       ],
       "requirements": [
-        "public/authorized searchable entity projection",
-        "structured fields + text",
-        "incremental outbox updates"
+        "**投影器本身：把领域事件变成 `search_documents` 的行。** 表已经建好——`infra/migrations/00013_search_projection.sql:3-15`（`entity_ref` 主键、`entity_type`、`visibility`、`project_id`、`title`、`content`、`structured`、`embedding vector(1536)`、`updated_at`，加 GIN FTS 与 structured 两条索引）。**读的那条查询已经写好，复用它，不要另写一条**：`internal/persistence/queries/search.sql:17-38` 的 `SearchDocuments :many`，可见性过滤在 `:36` —— `AND (visibility = 'public' OR project_id = ANY(@allowed_project_ids::uuid[]))`；`:20-31` 的注释是这条查询的要害，逐字读（传空数组只得到 public 行，**永不得到整张表**），这是 fail-closed 的根，别改掉。**写的那条也已经有**：`:5-15` 的 `UpsertSearchDocument :exec`（`ON CONFLICT (entity_ref) DO UPDATE`）——**这就是幂等点，增量更新靠它**。`internal/search/` 今天整个目录只有一个 `doc.go`，Go 侧基本是从零开始。",
+        "**`visibility` 只许「从源头照抄」，不许「算出来」；拿不准一律落 `private`。** 这一列的值必须来自被投影实体自己的可见性轴，**绝不允许出现「拿不准就先写 public」**。而且 `search_documents.visibility`（`00013:6`）上**没有 CHECK 约束**——数据库不会替你挡这个错，你得自己挡。既有的访问控制测试必须继续绿：`tests/integration/search_access_test.go:23` `TestSearchDocumentsEnforcesAccessControl`。泄漏在本项目是最高等级的安全场景而非一般验收项：`docs/31_MASTER_ACCEPTANCE.md:32,35`（Gate E「Search 无 private leakage」）与 `docs/54_SECURITY_THREAT_MODEL.md:10`。**「public 路径上不读私有数据」的既有先例照它做**：`cmd/api/explorehttp/store.go:25-33` 逐字——私有项目的 name/slug/visibility「never leave the database on this path: not read and withheld, never selected」。**选中再过滤是错的；根本不要选中。**",
+        "**增量：新增一个 outbox 消费者，挂在 `cmd/worker`。** 机制已经有了，照抄既有消费者的挂法：写入方 `internal/events/event.go:82` `func Record(ctx, db DBTX, e Event) error`（`Event.Visibility` 在 `:45-65`，**必填且显式，不许猜**；校验在 `:121-126`，只允许 public|private）；`outbox_events` 在 `infra/migrations/00012_events_audit.sql:14-22`，`00046_outbox_idempotent_publish.sql:32-36` 补了 `visibility text NOT NULL DEFAULT 'private'`（`:38-39` 注释逐字：an event is never more visible than its subject）。**每个消费者自带一个游标列**——两例：`00059_webhook_endpoints.sql:76-79`、`00078_subscriptions.sql:159`。挂载点在 `cmd/worker/main.go`（dispatcher `:119`、webhook fanout `:132-133`、subscription fanout `:151`；注册 API 是 `internal/worker/worker.go:105`）。**幂等是硬要求**（`docs/adr/ADR-013-domain-events-outbox.md:4`：同事务写 outbox，异步投递，Consumer 幂等）。**该投影哪些事件**：`specs/events/event-types.yaml:17`（`state.committed`）、`:25-28`（`release.published`、`research_asset.version_published`、`knowledge.version_published`、`knowledge.external_evidence_added`）、`:35`（`policy.version_published`）——**`specs/events/**` 在你的 forbidden_scope 里，按已有拼法投影，不要加新事件类型；需要新的就记 `blocked`。**",
+        "**rebuild 命令：形状你定，但三条硬要求。** 先例形状是 `Makefile:65-71` 的 `migrate` 目标（make 委托给 Go CLI），而 `cmd/rddev` 不在你范围内——所以允许你动 `Makefile` 加一个目标，实现体放 `cmd/worker/**`。**必须**：(1) 能从一台干净的开发机上真的跑起来；(2) **幂等**，连跑两次结果一致；(3) 有测试覆盖，而不是只有一条命令。`search_documents` 被**有意**排除在 append-only 之外——它是可重建投影不是历史：`infra/migrations/00014_append_only_enforcement.sql:16` 的注释块、`00015_append_only_truncate.sql`，正面证据 `tests/integration/append_only_truncate_test.go:119`（`TRUNCATE search_documents` **必须成功**）。所以 rebuild 合法；但反过来说，**别拿它当「投影里丢东西无所谓」的借口**。",
+        "**不做**：排名的科学规则（T0905）、embedding 的 provider 与 pgvector 索引（T0902）、Answer 生成（T0906）、搜索 Web UI（T0907）。`embedding` 那一列**先留空是对的**，它是 T0902 的交付面。`docs/14_SEARCH_DISCOVERY.md:5` 定死范围（只搜 network 内 public/accessible content，不做全互联网 crawler），`:11` 说明检索是 structured filters + FTS + semantic + graph traversal + scientific ranking 的组合——**本任务只做「投影」这一步**；`docs/adr/ADR-005-postgres-first-graph-search.md:5`：V1 不引入 OpenSearch。**若你发现某条需求的完成依赖上面任何一个，记 `blocked` 说明，不要顺手实现**（详见 `supervisor_scope_narrowing`）。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "private 默认不进 public projection",
-        "rebuild command"
+        "**投影真的落了行**：在真实 PostgreSQL 上投影一次之后，能按 `entity_ref` 从 `search_documents` **读回**该实体，且 `title` / `content` / `structured` 与源一致——**断言读的是表，不是写入函数的返回值**。",
+        "**private 默认不进 public 投影**：一个 private 项目下的实体被投影后，那一行的 `visibility` 是 `private`（不是 public），并且既有的 `TestSearchDocumentsEnforcesAccessControl`（`tests/integration/search_access_test.go:23`）继续绿。**两条一起才构成「不泄漏」**——只断言其中一条不算。",
+        "**投影幂等**：同一个领域事件投两次，表里仍然只有一行、且第二次不报错。**有一条测试真的投两次**（第二次走同一条 `UpsertSearchDocument` 路径），而不是只断言第一次成功。",
+        "**rebuild 幂等**：重建跑两遍结果一致；**有测试覆盖这个命令本身**，而不是只有一条命令存在。",
+        "**消费者真的挂上了**：该 job type 经由**真实的 worker 循环**被消费（照 `cmd/worker/main.go` 已有的三个挂载点），不是测试直接调用函数冒充。",
+        "**越界自证**：RESULT 里点名说明 `specs/**`（除快照与指纹）、`specs/events/**`、`internal/authz/**`、`specs/policies/**`、`apps/web/**`、`cmd/rddev/**` 一行未改，并说明 `embedding` 列保持为空、没有替 T0902/T0905/T0906/T0907 干活。"
       ],
       "tests": [
         "search projection"
@@ -5071,22 +5226,47 @@
         "specs/SPEC_VERSION.json",
         "internal/persistence/**",
         "internal/search/**",
+        "internal/events/**",
+        "internal/application/**",
         "go.mod",
         "go.sum",
         ".env.example",
         "cmd/api/**",
-        "apps/web/**",
+        "cmd/worker/**",
+        "Makefile",
         "tests/**"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "docs/**",
+        "specs/api/openapi.yaml",
+        "specs/events/**",
+        "internal/authz/**",
+        "specs/policies/**",
+        "apps/web/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "**投影表已经建好了，缺的是投影器。** `infra/migrations/00013_search_projection.sql:2-15`（快照 `specs/database/postgres.sql:542-554`）：`search_documents(entity_ref text PRIMARY KEY, entity_type text NOT NULL, visibility text NOT NULL, project_id uuid REFERENCES projects(id) ON DELETE RESTRICT, title text NOT NULL, content text NOT NULL, structured jsonb NOT NULL DEFAULT '{}'::jsonb, embedding vector(1536), updated_at timestamptz NOT NULL DEFAULT now())`，加两条索引 `:14` GIN FTS（`to_tsvector('simple', title || ' ' || content)`）与 `:15` structured GIN。**先读这张表，再动手。** `vector` 扩展在 `00001_extensions.sql:3` 就已创建。",
+        "**`internal/search/` 是个空壳**：整个目录只有 `internal/search/doc.go` 五一行，`grep -rn \"internal/search\"` 全仓库**零个 import**。本任务的 Go 代码基本是从零开始。",
+        "**读的那条查询已经写好了，复用它，不要另写一条**：`internal/persistence/queries/search.sql:17-38` `-- name: SearchDocuments :many`，可见性过滤在 `:36` —— `AND (visibility = 'public' OR project_id = ANY(@allowed_project_ids::uuid[]))`。`:21-31` 的注释是这条查询的要害，逐字读它：**传空数组只会得到 public 行，永远不会得到整张表**。这条语义是 fail-closed 的根，别改掉。",
+        "**写的那条也已经有了**：`internal/persistence/queries/search.sql:5-15` `-- name: UpsertSearchDocument :exec`（`ON CONFLICT (entity_ref) DO UPDATE`）——**这就是幂等点**，增量更新靠它，不要另建一套写入。",
+        "**这张表被有意排除在 append-only 之外**——它是可重建投影，不是历史：`infra/migrations/00014_append_only_enforcement.sql:16` 的注释块、`00015_append_only_truncate.sql`，正面证据在 `tests/integration/append_only_truncate_test.go:119`（`TRUNCATE search_documents` **必须成功**）。**所以 rebuild 是合法的**；但反过来说，投影里丢掉任何东西都不是「历史丢失」，别用它当借口。",
+        "**表结构有钉子，改它就要一起挪**：`tests/integration/migration_test.go:736-739`（列清单，含 `embedding` vector）、`:874-875`（索引）、`:1157`（表清单）。",
+        "**已有的那条访问控制测试必须继续绿**：`tests/integration/search_access_test.go:23` `TestSearchDocumentsEnforcesAccessControl`（直接插行在 `:51-59`，fail-closed 断言在 `:81-105`）。它是本任务「private 不泄漏」这条的地基。",
+        "**泄漏是本项目最高等级的安全场景，不是一般验收项**：`docs/31_MASTER_ACCEPTANCE.md:32,35`（`## Gate E — Search` / `- [ ] Search 无 private leakage。`）；`docs/54_SECURITY_THREAT_MODEL.md:10` 把「Private Project/Branch 内容出现在 Search/Explore/API error」列为最高等级场景。",
+        "**「public 路径上不读私有数据」的既有先例，照它做**：`cmd/api/explorehttp/store.go:25-33` —— 注释逐字写着私有项目的 name/slug/visibility「never leave the database on this path: not read and withheld, never selected」。**选中再过滤是错的；根本不要选中。**",
+        "**受众解析的模板**：`internal/events/subscription_store.go:263-274`（`TargetTypeKnowledge`：membership → `public` → `none`），`:248-257`（`TargetTypeAsset`）。`docs/12_PERMISSIONS_RIGHTS_POLICY.md:7-11`（V1 UI 两个 preset，底层用 policy id/scope）、`:15`（**不扩大可见性原则**：private→public 必须显式人工确认 + 审计/事件）。`docs/23_SECURITY_PRIVACY.md:19-21`（所有 query/search/export/download 都要按 tenant/project/object policy 过滤）。",
+        "**「增量 outbox 更新」的机制已经有了，照抄它的挂法**：`outbox_events`（`infra/migrations/00012_events_audit.sql:14-22`），`00046_outbox_idempotent_publish.sql:32-36` 补了 `actor_id`/`project_id`/`visibility text NOT NULL DEFAULT 'private'`/`last_error`，`:38-39` 的注释说明 `'private'` 是 **fail-closed 默认**（「an event is never more visible than its subject」）。写入方：`internal/events/event.go:82` `func Record(ctx, db DBTX, e Event) error`；`Event.Visibility`（`:45-65`）**必填且显式，不许猜**；校验在 `:121-126`（只允许 public|private）。**每个消费者自带一个游标列**——已有两例：`infra/migrations/00059_webhook_endpoints.sql:76-79`（`outbox_events.webhook_fanned_out_at` + 索引 `:83-84`）、`infra/migrations/00078_subscriptions.sql:159`（订阅自己的游标表）。**目前没有任何 search 消费者**，你是第一个。`docs/adr/ADR-013-domain-events-outbox.md:4`：所有 Research Event 与 DB state 同事务写 outbox，由 worker 异步投递，**Consumer 幂等**。",
+        "**该投影哪些事件**：`specs/events/event-types.yaml:17`（`state.committed`）、`:25-28`（`release.published`、`research_asset.version_published`、`knowledge.version_published`、`knowledge.external_evidence_added`）、`:35`（`policy.version_published`）。**注意 `specs/events/**` 在你的 forbidden_scope 里——事件词表由我维护，你按已有的拼法投影，不要加新事件类型；需要新的就记 blocked 告诉我。**",
+        "**worker / 后台任务的地基**：`cmd/worker/main.go:7` 逐字写着「The only registered job type is `\"smoke\"`」，注册在 `:97`；注册 API 是 `internal/worker/worker.go:105` `func (l *Loop) Register(jobType string, h Handler)`（`Job` 在 `:31`、`Handler` 在 `:42`、`NewLoop` 在 `:68`），入队 `internal/worker/queue.go:51`。已有消费者都在 `cmd/worker`：dispatcher（`internal/events/publish.go:64,92,112`，挂载在 `cmd/worker/main.go:119`）、webhook fanout（`internal/events/fanout.go:14-17`，挂载 `:132-133`）、订阅 fanout（`internal/events/subscription_fanout.go`，挂载 `:151`）。",
+        "**rebuild 命令没有任何先例**：`grep -rn reindex` 在 `cmd/`、`internal/`、`infra/` 里只有注释命中。可抄的形状是 `cmd/rddev db.go`（`rddev db migrate`，`cmd/rddev/main.go:60`）+ `Makefile:65-71`（`migrate:` 目标，`go run ./cmd/rddev db migrate`）。**`cmd/rddev` 不在你的范围内**，见下面的决定。",
+        "`docs/14_SEARCH_DISCOVERY.md:5`：只搜索平台 network 内 public/accessible content + 已正式纳入项目的 External Reference snapshots，**不做全互联网 scholar crawler**。`:11` 检索是 structured filters + FTS + semantic + graph traversal + scientific ranking 的组合，本任务只做**投影**这一步（ranking 是 T0905，向量是 T0902，**不要把它们的活儿干了**）。`docs/adr/ADR-005-postgres-first-graph-search.md:5`：结构化/FTS/vector/traversal 都先在 Postgres 实现，达到明确规模阈值后再加 projection engine——**V1 不引入 OpenSearch**。"
+      ],
+      "scope_note": "这是**按本任务的实际交付面**调整过的范围。相对 DAG 里的 phase 级默认值：**加** `internal/events/**` + `cmd/worker/**` + `Makefile`——需求第 3 条「增量 outbox 更新」在结构上要求一个 outbox 消费者，而消费者按仓库既有形状必须挂在 `cmd/worker`（两例都挂在那里），rebuild 命令也需要一个可执行的入口；DAG 默认范围里这三条**都没有**，不改就落不了地。**加** `internal/application/**`（投影服务放这里）。**明确不加**（并写进 forbidden_scope）：`specs/api/openapi.yaml`（契约由我维护；本任务不需要新路由）、`specs/events/**`（事件词表由我维护）、`internal/authz/**` + `specs/policies/**`（权限矩阵是安全边界）、`apps/web/**`（本任务是投影，不是搜索界面——那是 T0907）、`internal/rsg/**` + `internal/domain/**`。",
+      "supervisor_scope_narrowing": "2026-09-18 定稿。四点说明：\n（一）**范围缺口是这次最主要的修正**。DAG 里 T0901 的 allowed_scope 有 `internal/persistence/**` 和 `internal/search/**`，但**没有** `cmd/worker/**` 和 `internal/events/**`——而「incremental outbox updates」这条需求，按仓库里已有的两个消费者（webhook fanout、subscription fanout）的挂法，消费者只能住在 `cmd/worker`。照原范围派工，需求第 3 条在结构上就完不成。这是补范围，不是放宽验收。\n（二）**rebuild 命令的落点我拍板**：允许你动 `Makefile` 加一个目标，实现体放在 `cmd/worker/**` 里（一个 job type，加一个可执行的入口）。理由是 `Makefile:65-71` 的 `migrate` 就是这个形状（make 目标委托给 Go CLI），而 `cmd/rddev` 不在你的范围内。**形状你自己定（job type + flag、还是独立子命令），但必须满足三条**：(1) 能从一台干净的开发机上真的跑起来；(2) 幂等——连跑两次结果一致；(3) 有测试覆盖，而不是只有一条命令。\n（三）**投影的可见性必须是「从源头照抄」，不是「算出来」**：`search_documents.visibility` 的值要来自被投影实体自己的可见性轴，并且**默认落到 private**（fail-closed）。绝不允许出现「拿不准就先写 public」。特别提醒：`search_documents.visibility` 上**没有 CHECK 约束**（`00013:6`），所以数据库不会替你挡这个错——你得自己挡。\n（四）**这一轮只做投影，不做检索质量**：排名的科学规则（T0905）、embedding 的 provider 与 pgvector 索引（T0902）、Search Answer 生成（T0906）、搜索 Web UI（T0907）都不是你的事。`embedding` 那一列先留空是对的——它是 T0902 的交付面。**若你发现某条需求的完成依赖上面任何一个，记 blocked 说明，不要顺手实现。**"
     },
     {
       "id": "T0902",
@@ -5098,15 +5278,19 @@
         "T0901"
       ],
       "requirements": [
-        "provider interface",
-        "batch embedding worker",
-        "deterministic fake in tests",
-        "version metadata"
+        "**provider interface**：按仓库既有的 port 形状定义一个 embedding 端口，**照抄 authn/externalref 那套三件套**（port 接口 + 真实客户端 + 可注入的假件）。出处是 `docs/20_TECH_ARCHITECTURE.md:77` 逐字「LLM 只做 query planning/answer interpretation，不做 source of truth。**Embedding/LLM provider 通过 port abstraction。**」与 `docs/52_BACKEND_STANDARD.md:21-23`（逐字「Gitea、S3、Redis、email、**LLM**、scientific adapter 都通过 port。**不得让外部 provider ID 变成 domain primary identity。**」）。",
+        "**batch embedding worker**：按仓库既有的 worker 挂法把 embedding 做成一个 job type。出处是 `docs/20_TECH_ARCHITECTURE.md:71`（逐字列出 Go worker 处理的事项，其中含「**embedding**」，并逐字排除 Python 承载：「Python 不是核心产品后端」）与 `docs/52_BACKEND_STANDARD.md:19`（逐字「Job payload 只传 identity/version/reference，不放大块敏感数据。每类 job 有 timeout/retry/backoff/dead-letter/**idempotency key**。」）。**「batch」这个词规格没写**——批量大小与并发是你的事，见裁定二。",
+        "**deterministic fake in tests**：端口必须有一个确定性的假实现，让全部测试不联网、可复现。**这一条是 requirement 自己写的**，不是我加的。仓库里的现成模板是 `internal/application/authn/oidctest/provider.go:1-20`——它逐字自陈「builds an in-process fake … tests drive the REAL authn.OIDCClient against it … **This is test infrastructure shipped as a normal package**」。参照它，不要另创形态。",
+        "**version metadata**：向量必须能回答「这是哪家、哪一版模型算出来的」。理由是「可重建」这条验收离开它就证明不了——换模型就得全量重算，而当天算的东西必须能与前一天算的区分开。**规格没有规定这个元数据长什么样**（我搜过 `docs/**` 与 `specs/**`，最接近的只有 `internal/rsg/externalref` 的 `UpstreamVersion` 与 `internal/rsg/schemareg/registry.go:26-29` 的 `Ref{ID, Version}`），所以形状由我拍板，见裁定三。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "embedding 失败不阻塞 structured search",
-        "可重建"
+        "**`embedding 失败不阻塞 structured search`——这条必须有一条真的能失败的测试。**构造一个**恒定报错**的 provider，断言：结构化搜索（`SearchDocuments`，`internal/persistence/queries/search.sql:17-38`）**照常返回结果**，且**没有任何请求被这次失败挂住**。**注意这个验收的天然陷阱**：那条读查询**根本不碰 `embedding` 列**（`:5-15` 的写查询只写 7 列，`:17-38` 的读查询不选它），所以「不阻塞」在结构上**天然成立**——于是很容易写出一条**永远不会红**的测试。仓库自己点名过这个坏形状：`tests/integration/asset_page_test.go:714-727` 逐字「**An empty string is a failure rather than a pass: a check that forbade nothing is the shape that reads green while measuring nothing**」。**在 RESULT 里说明你怎么证明这条测试能失败**（例如临时把保护去掉看它红）。",
+        "**`可重建`**：有一条命令或 job 能把 embedding 重算出来，**幂等**（连跑两次结果一致），且**换一个 provider 版本重算后，元数据跟着变、向量跟着变**——后半句是这条验收的要害，没有它「可重建」就只是一句口号。出处侧证：`internal/persistence/queries/search.sql:1-3` 逐字「Rebuildable by construction」，以及 `search_documents` 被**有意排除在 append-only 之外**（`infra/migrations/00014_append_only_enforcement.sql:16` 的注释块、`00015_append_only_truncate.sql`，正面证据 `tests/integration/append_only_truncate_test.go:119` 断言 `TRUNCATE search_documents` **必须成功**）。",
+        "**端口不许有第二个实现，也不许有任何联网路径。**见裁定一——这一条是硬约束，不是建议。验收方式：有一条检查证明产品代码里没有任何出站调用（在 RESULT 里给出你的验证命令）。",
+        "**既有测试一条都不许变红**，尤其 `tests/integration/search_access_test.go:23` `TestSearchDocumentsEnforcesAccessControl`（fail-closed 断言在 `:81-105`）与 `tests/integration/append_only_truncate_test.go:119`。**前者是本任务的安全地基：无论 embedding 怎么加，`search_documents` 的可见性过滤（`queries/search.sql:36`）一个字都不许松动。**",
+        "**若你动了 schema，三处夹具必须同步**：`tests/integration/migration_test.go:736-739`（`search_documents` 列清单，含 `embedding` 的 `colExp`）、`:874-875`（索引）、`:1157`（表清单）。那里是**全等比较**，漏一处就红。同时 `specs/database/postgres.sql` **只能由 `python3 scripts/gen_schema_snapshot.py` 重新生成**，改完跑 `make check-schema-snapshot` 与 `make check-spec-version`。",
+        "RESULT 里逐条说明：端口形状与它为什么长这样、批次与重试的选择及理由、元数据落在哪、**你怎么证明「失败不阻塞」那条测试不是空的**、以及**你在 sqlc 上遇到了什么**（见 relevant_specs 里那条未核实项）。"
       ],
       "tests": [
         "embedding tests"
@@ -5117,22 +5301,50 @@
         "specs/SPEC_VERSION.json",
         "internal/persistence/**",
         "internal/search/**",
+        "internal/application/**",
+        "internal/events/**",
+        "internal/worker/**",
+        "internal/observability/**",
+        "cmd/api/**",
+        "cmd/worker/**",
         "go.mod",
         "go.sum",
         ".env.example",
-        "cmd/api/**",
-        "apps/web/**",
+        "sqlc.yaml",
+        "Makefile",
         "tests/**"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "docs/**",
+        "specs/api/openapi.yaml",
+        "specs/events/**",
+        "specs/policies/**",
+        "specs/orchestrator/**",
+        "internal/authz/**",
+        "internal/rsg/**",
+        "packages/schemas/**",
+        "apps/web/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "**裁定一（最要紧的一条）：本轮不许有任何联网的 embedding 实现。**这一条不是「省事」，是规格停在这里。「平台内容能不能送出到第三方 embedding 服务」**规格一处都没写**——我搜过 `docs/**` 全 69 篇与 `specs/**`，三条擦边的都只擦到边上：`docs/55_DATA_CLASSIFICATION.md:11` 只禁 SECRET 进 embedding（`docs/55_DATA_CLASSIFICATION.md:11` 逐字「SECRET 永远不进入普通 logs/search/vector embedding」）；`docs/59_PRODUCT_ANALYTICS.md:5` 只禁第三方 analytics SaaS；`docs/23_SECURITY_PRIVACY.md:21` 禁的是「未授权可见」，不是「送出平台外」。**而它同时命中 CLAUDE.md §5.1 的停止条件「需要新的外部凭证、付费服务或账号授权」。**所以：**端口 + 确定性假件 + 不联网，本轮就交付这些**；真实 provider 的接线是一条独立任务，等 owner 裁定。**这也正是 requirement 自己写的**——四条 requirement 里有一条就叫「deterministic fake in tests」。若你觉得某个真实适配器「顺手就能写」，**写进 RESULT 告诉我，不要实现它**；更不要往 `.env.example` 里加任何 API key 变量。",
+        "**把 embedding 那一列的现状看清楚：它从来没被任何代码碰过。**逐点穷举：DDL 在 `infra/migrations/00013_search_projection.sql:11`（`embedding vector(1536),`），快照在 `specs/database/postgres.sql:550`，夹具在 `tests/integration/migration_test.go:737`；扩展早已就绪（`infra/migrations/00001_extensions.sql:3` 逐字 `CREATE EXTENSION IF NOT EXISTS vector;`）。**其余全树零命中**：`internal/persistence/queries/search.sql:5-15` 的 `UpsertSearchDocument` 只写 7 列、`:17-38` 的 `SearchDocuments` 不选它；`internal/persistence/sqlc/models.go` 里**没有 `SearchDocument` 结构体**。**本任务是从零接上这一列。**",
+        "**一条我没能核实的坑，你动手前先验：sqlc 对 `vector` 类型的处理。**`sqlc.yaml` **没有 `overrides:` 段**（已核实），而 `models.go` 里没有 `SearchDocument` 结构体是因为 `sqlc.yaml` 设了 `omit_unused_structs: true`。**一旦你写一条选中或写入 `embedding` 的查询，sqlc 很可能需要一条类型 override——而 `sqlc.yaml` 在绝大多数任务的范围之外，我这次特意把它加进了你的 `allowed_scope`。**本机有 sqlc（v1.31.1）。**请先用一条最小查询实测**，把结论写进 RESULT；不要猜。",
+        "**写路径必须与 T0901 的契约对齐，这是两任务之间唯一的界面。**`UpsertSearchDocument`（`queries/search.sql:5-15`，`ON CONFLICT (entity_ref) DO UPDATE`）是 T0901 建的**幂等点**，也是投影的唯一写入面。**两条路你选一条，并在 RESULT 里说明为什么**：(a) 扩 `UpsertSearchDocument` 让它一并写 embedding——简单，但会改 T0901 的写入契约；(b) **新增一条只更新 embedding 的查询**——不动 T0901 的契约。**我倾向 (b)**（两条写路径职责单一，投影重跑不会把 embedding 抹掉、embedding 重算也不会碰投影内容），但这是实现判断，你论证得清楚就可以选 (a)。**不论选哪条，幂等性必须成立。**",
+        "**端口形状照抄这两套，不要自创：**（甲）**OIDC 那套是最完整的模板**——port 在 `internal/application/authn/ports.go:101-112`（`:101-112` 的注释逐字「the fake provider in oidctest implements the same port」），真实客户端在 `internal/application/authn/oidc.go:11-25`（逐字自陈「implemented on the standard library only (T0101 L1: no third-party OIDC dependency in the V1 core)」），HTTP 注入口 `oidc.go:27-30` 的 `type HTTPClient interface { Do(*http.Request) (*http.Response, error) }`，假件在 `internal/application/authn/oidctest/provider.go`。（乙）**External Reference 那套给了超时的先例**：port 在 `internal/rsg/externalref/fetch.go` 的 `type Fetcher interface`，超时常量 `ssrf.go:39` 的 `DefaultFetchTimeout = 10 * time.Second`，选项注入 `doi.go:43-53`（`WithDoiBaseURL`/`WithDoiClient`/`WithDoiMaxBytes`，注释逐字说「tests point it at a local server」）。**注意 `internal/rsg/**` 在你范围外，读可以、改不行。**",
+        "**worker 的挂法与重试策略已经写好了，照抄不要另造**：`cmd/worker/main.go:7` 逐字「The only registered job type is `\"smoke\"`」，注册在 `:97`，四个既有消费者挂点分别在 `:119`（dispatcher）、`:132-133`（webhook fanout + deliverer）、`:151`（subscription fanout）——**你的 embedding job 按同一形状挂在这里**。队列 API：`internal/worker/queue.go:51 Enqueue`、`internal/worker/worker.go:105 Register`、`:113 Run`；**重试/退避/死信的常量已经在**：`worker.go:60-63` 的 `DefaultMaxAttempts=3 / DefaultBackoff=1s / DefaultBackoffCap=30s`，`Job.ID` 即幂等键（`:25-34`）。**出站调用的重试形状若要更细的参照（分类表 + 指数退避），看 `internal/events/deliver.go:19-35`**——那是仓库里唯一带完整重试策略的出站调用，但**你本轮没有出站调用**，它的价值只在于「仓库的退避口径长什么样」。",
+        "**密钥与配置的形状（本轮大概用不上，但先说清楚免得你自创）**：`internal/config/config.go:28-35` 的 `type Secret string`（String/MarshalJSON 全部打码）；包级 config 先例是 `internal/gitprovider/config.go` 与 `internal/application/authn/config.go`（各自 fail-closed 校验，复用 `config.Secret`），环境变量名先例 `internal/application/authn/config.go:71` 的 `EnvOIDCClientSec = \"POST_OIDC_CLIENT_SECRET\"`。**一个坑**：`internal/config/secretscan.go:29-31` 的 key 正则覆盖 `api[_-]?key|secret|token|_key$`，所以任何新密钥变量一旦落进 `.env.example`，值**只能是** `secretscan.go:34-42` 的占位符，否则 Go 侧测试会红。**本轮你不该新增任何密钥变量。**",
+        "**「可重建」这条验收的可执行形状，抄 T0901 已经定好的那套**：T0901 的任务书（`tasks/packages/T0901.json`，落地后在 `tasks/tasks.json` 的 T0901 条目里）已经裁定 rebuild 命令做成「`Makefile` 一个目标 + 实现体放在 `cmd/worker/**` 里的一个 job type」（理由是 `Makefile:65-71` 的 `migrate` 就是这个形状，而 `cmd/rddev` 不在任何任务范围内）。**你的 embedding 重算按同一形状做**，不要另创。**`Makefile` 在你的范围内。**",
+        "**向量索引：本轮不建。**理由是 ADR 不给口径、而索引是可测的性能决策不是语义决策：`docs/adr/ADR-005-postgres-first-graph-search.md:3` 的 Decision 全文只有一句（逐字「结构化、FTS、vector、relation traversal 都先在 Postgres 实现；达到明确规模/性能阈值后再增加 projection engine」），对索引类型零指导；`docs/68_TECH_STACK_DECISIONS.md:12,17` 也只锁到「PostgreSQL + pgvector」。今天全树 `ivfflat|hnsw|<=>|<->|vector_cosine` 在 `*.sql`/`*.go` 里**零命中**，`00013` 只建了 `:14` 的 GIN FTS 与 `:15` 的 structured GIN。**没有索引的 pgvector 走精确扫描——在测试规模上它更准，不是更差。**若你有测量证据说明必须建，**在 RESULT 里给出数据**，并且别忘了 `tests/integration/migration_test.go:874-875` 的 `explicitIndexes` 是全等比较、`:1157` 是表清单。",
+        "**目录：你住在 `internal/search/embedding/`。**`internal/search/` 目前只有一个 `doc.go`（逐字「Package evidence owns…」不，逐字是 search 包的说明；全仓库**零 import**）。**T0903 同时在改这个目录**，两者并行——**所以目录必须先钉死**：embedding 的一切归 `internal/search/embedding/`，planner 的一切归 `internal/search/planner/`，**共享的端口/通用类型若确实需要，放在 `internal/search/` 根下并只在 RESULT 里点名**（不要各自建一份同名文件）。",
+        "**本任务不碰的东西**：`POST /search` 路由与 answer 生成（T0906）、检索与图扩展（T0904）、排名（T0905）、query planner（T0903）、前端（T0907）。**`SearchDocuments` 那条读查询的可见性语义（`queries/search.sql:21-31` 的注释 + `:36` 的过滤）一个字都不许改**——那是 T0901 的地基，也是 `tests/integration/search_access_test.go` 钉住的东西。",
+        "**迁移号由我在派工时分配并写进任务包**（账本 `.rddev/runtime/migration-numbers.json`，分配器幂等；现已用到 83）。**不要自己选号、也不要拿「main 最大号 + 1」去猜**（CLAUDE.md §8.1）。本任务**很可能需要一条**迁移（见裁定三的元数据落点），但**如果一条列都不加就交付得了，那就别建**，在 RESULT 里说明理由。"
+      ],
+      "scope_note": "这是**按本任务的实际交付面调整过的范围**。相对 DAG 里的 phase 级默认值（`[infra/migrations/**, specs/database/postgres.sql, specs/SPEC_VERSION.json, internal/persistence/**, internal/search/**, go.mod, go.sum, .env.example, cmd/api/**, apps/web/**, tests/**]`）：**加** `cmd/worker/**` 与 `internal/worker/**` 与 `internal/events/**`（requirement 第 2 条「batch embedding worker」在结构上要求一个 job type，而按仓库既有的四个消费者挂法它**只能住在 `cmd/worker`**——DAG 默认范围里没有它，**这与 T0901 当初的缺口完全同型**，不改就落不了地）、**加** `internal/application/**`（端口与服务层的惯例落点）、**加** `sqlc.yaml`（见 relevant_specs 里那条未核实项——很可能必须动它）、**加** `internal/observability/**` 与 `Makefile`（重算入口；照 T0901 定好的形状）。**明确不加**（写进 forbidden_scope）：`specs/api/openapi.yaml`（本任务不新增路由）、`specs/events/**`、`specs/policies/**` 与 `internal/authz/**`（权限矩阵是安全边界）、`specs/orchestrator/**`、`internal/rsg/**`（可读不可改——里面那套 port/超时的先例是给你照抄的，不是给你改的）、`packages/schemas/**`、`apps/web/**`（搜索界面是 T0907）。",
+      "supervisor_scope_narrowing": "2026-09-18 定稿。三条裁定，一条提醒。\n\n**裁定一（最要紧）：本轮零联网。**端口 + 确定性假件 + 不联网，就交付这些。真实 provider 的接线等 owner 裁定——因为「平台内容能不能送出到第三方 embedding 服务」规格一处都没写，而它同时是隐私边界（`docs/54` 把「Search LLM 引用未授权 entity id」列为最高等级场景之一）与 §5.1 的停止条件（新凭证/付费服务）。**这不是把验收打折**：requirement 四条里有一条本来就叫「deterministic fake in tests」，而验收两条（失败不阻塞 / 可重建）在假件上**可以完整证明**——没有任何一条验收需要真的调用外部服务。**把这一点写清楚，是因为「顺手接一个真 provider」是本任务最自然的越界方式。**\n\n**裁定二：批次与并发是你的实现判断，但有两个下限。**(1) 幂等——`Job.ID` 就是幂等键（`worker.go:25-34`），重跑同一个 job 不许产生第二份结果；(2) 失败必须走完仓库既有的重试/退避/死信口径（`worker.go:60-63`），**不许为了让测试好写就吞掉错误**。批量大小、并发度、是否分批入队，你自己定并说明理由。\n\n**裁定三：版本元数据加在 `search_documents` 上，加列，不加表。**理由：(1) `search_documents` 是**可重建投影**、被有意排除在 append-only 之外（`00014:16`、`00015`，正面证据 `append_only_truncate_test.go:119`），所以在它上面加列**没有回填语义问题**——重建即一致；(2) 另开一张 row-per-version 的表会引入一个「哪些行配哪个版本」的一致性问题，而这张表的价值恰恰在于**不需要**一致性推理；(3) 列必须**可空**——没算过的行就是没有版本，那是一个真实状态（照 `internal/rights/usage.go:9-14` 对「unspecified 是真实答案不是缺失」的同一种态度）。**具体列名与列数你定**（至少要能回答「哪家 + 哪一版」），但**不接受**「把模型名塞进 `structured` jsonb」——那是把一个要用来判断「要不要重算」的字段藏进一个为别的目的存在的开放结构里。\n\n**一条提醒（不是要求）：这个任务有一个天然的空转风险。**验收第 1 条「embedding 失败不阻塞 structured search」在今天的代码上是**天然成立**的——因为那条读查询根本不碰 embedding 列。**一条天然成立的验收会轻松通过，但它什么都没证明。**所以我在验收里点名要你构造「恒定报错的 provider」并证明那条测试**能红**。这不是刁难：`tests/integration/asset_page_test.go:714-727` 那段注释是仓库自己写下的，它说的就是这个失败模式。\n\n**一条边界**：`internal/search/` 这个目录 T0903 同时在改。**你只建 `internal/search/embedding/` 下的东西**；要在根目录加共享文件，先在 RESULT 里点名，别和 planner 撞同一批文件名。"
     },
     {
       "id": "T0903",
@@ -5144,14 +5356,20 @@
         "T0901"
       ],
       "requirements": [
-        "自然语言→structured intent/target/property/scope/evidence preference",
-        "provider-agnostic LLM",
-        "schema-constrained output"
+        "**自然语言 → 结构化 plan。字段词表照抄规格，不要自己归纳。**`docs/14_SEARCH_DISCOVERY.md:9` 逐字「自然语言问题先解析为：intent、target object、property、condition/scope、evidence preference、network scope、visibility、ranking constraints。」——**规格列了八项**，而任务名只写了五项（intent/target/property/scope/evidence preference）。**八项都要有落点**；哪一项你判断 V1 还填不出值，就在 RESULT 里点名说明，**不要默默略过**。",
+        "**provider-agnostic LLM**：按仓库既有的 port 形状定义一个 planner 端口。出处 `docs/20_TECH_ARCHITECTURE.md:77` 逐字「LLM 只做 query planning/answer interpretation，不做 source of truth。**Embedding/LLM provider 通过 port abstraction。**」与 `docs/52_BACKEND_STANDARD.md:21-23`（LLM 列在必须走 port 的适配器里）。**没有任何文档指定供应商或模型**，所以「provider-agnostic」就是字面意思：端口不许出现任何具体厂商的痕迹。",
+        "**schema-constrained output**：plan 必须是**先校验通过再被使用**的结构化对象，校验不过的一律走 fallback（见验收第 1 条）。仓库里**已经有 JSON Schema 校验器**，不要另造：`github.com/santhosh-tekuri/jsonschema/v6 v6.0.3` 是 `go.mod:12` 的**直接依赖、已在 main**，唯一使用点是 `internal/rsg/schemareg/schema.go:9`（编译器配置 `:88-90`：`DefaultDraft(jsonschema.Draft2020)` + `AssertFormat()`；`$ref` 只在本地解析，`:76-79` 逐字「never over the network」），校验入口 `schema.go:30` 的 `func (s *Schema) Validate(doc []byte) error`。**`internal/rsg/**` 只读**（见 forbidden_scope）——调用它没问题，要改它就在 RESULT 里说，不要动。",
+        "**planner 的输出里不许出现候选 entity id。**这是本任务最容易被做坏的一条。`docs/54_SECURITY_THREAT_MODEL.md:16` 把「**Search LLM 引用未授权 entity id**」列为第七号威胁场景；`:19` 逐字要求「每个场景必须有对应 automated negative test」。所以：**planner 只输出「过滤器 + 偏好」，不输出任何实体标识符**——候选实体由检索层（T0904）从库里按可见性取，`docs/22_API_DESIGN.md:36` 逐字写着「Answer Generator 只可引用 planner/retrieval 返回的 entity ids/version」。**让模型吐出 id、再由服务层过滤掉，是错的**——`docs/21_DATA_MODEL.md:52` 逐字「Authorization 不通过『查询后在前端隐藏』实现。所有 repository/service query 必须接受 principal/context，并在 DB/service 层过滤。」"
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "invalid plan fallback",
-        "planner 不访问 private unauthorized entities"
+        "**`invalid plan fallback`——要有两个方向的测试。**方向一：喂给 planner 一个**恒定产出非法 plan** 的假 provider，断言系统**不崩、不空转**，而是走一条明确的 fallback（结构化结果仍可返回）。方向二：**一个合法的 plan 必须被正常接受**——否则一个「永远走 fallback」的实现也能让方向一变绿。**这条验收的规格出处是方向性的，不是逐字的**：`docs/27_PERFORMANCE_SLO.md:13` 逐字「Evidence-backed Answer 若调用 LLM，首个 loading state < 200ms；完整答案目标 < 10s，**超时提供 structured results fallback**。」；`docs/32_RISK_REGISTER.md:9` 的缓解列逐字含「**fallback structured results**」。**在 RESULT 里说明你怎么证明方向一那条测试能失败。**",
+        "**`planner 不访问 private unauthorized entities`——这条是本任务最硬的安全验收，规格给出了四处独立出处。**`docs/54_SECURITY_THREAT_MODEL.md:16`（第七号威胁）+ `:19`（「每个场景必须有对应 automated negative test」）；`docs/23_SECURITY_PRIVACY.md:21` 逐字「所有 query/search/export/download 进行 tenant/project/object policy 过滤。」；`docs/24_TEST_STRATEGY.md:20` 逐字「search 不泄漏 private objects。」；`docs/31_MASTER_ACCEPTANCE.md:35` 逐字「- [ ] Search 无 private leakage。」。**测试仪器已经现成**：`tests/integration/search_access_test.go:23` `TestSearchDocumentsEnforcesAccessControl` 已经在用 `mine-1` / `theirs-1` 两个私有行做正反两向断言（断言在 `:81-105`）。**照它的形状做**：构造「一条私有行与一条公开行同名可检索」，断言**只**返回公开那条。**两个方向都要**——只断言「私有的没出现」的实现，在一个永远返回空集的实现上也是绿的。",
+        "**匿名访问：本轮的答案是「要登录」，且这不是我新定的规则。**`specs/api/openapi.yaml:10-11` 的全局 `security: [{bearerAuth: []}]` 与 `:306-311` 的注释逐字「Everything under /api/v1 that is neither an /auth/* route nor marked `security: []` is **default-deny** — an unauthenticated write is 401 before routing, so a new product route **inherits the guard by being mounted in the subtree rather than by opting in**.」——`POST /search`（`:257-271`）**没有** `security: []`，所以它**按现状就是登录后可用**。**照契约做，不要给它开匿名口子。**（记录在案的冲突见裁定三——`docs/05_INFORMATION_ARCHITECTURE.md:9` 逐字说「登录前保留 Explore/Search/Public entity 浏览」，那是**另一份规格**的说法，而扩大对外可见性是 L3，不由你我定。）",
+        "**actor → allowed_project_ids 的组装函数必须存在，且**必须**是 T0904/T0906 能复用的那一份。**这是本任务真正的技术交付：`SearchDocuments` 的 `@allowed_project_ids` 参数（`internal/persistence/queries/search.sql:36`）今天**零调用者**；原料在 `internal/persistence/queries/projects.sql:96` 的 `ListProjectsForUser`（逐字「Projects the user belongs to (any project membership)」）与 `:105` 的 `ListPublicProjects`。**把这两块拼起来的那一层不存在**，而 T0904 与 T0906 都要用。**放 `internal/search/scope.go`**（见裁定二：这个文件名归你，T0902 不许建）。",
+        "**金标准夹具（golden fixtures）**：`docs/24_TEST_STRATEGY.md:36` 逐字要求「RSG manifest serialization/hash、Research State Diff、**Search query plan**/answer citation、Publication Impact Preview 使用 golden fixtures；更新需显式 review。」——**query plan 被点名了**。所以测试不能只断言「字段存在」，要有一份**具体的 plan 输入 → 具体的结构化输出**的对照夹具。夹具放 `tests/**` 下（那个目录在你的范围内）。",
+        "**既有测试一条都不许变红**，尤其 `tests/integration/search_access_test.go`（本任务的安全地基）。",
+        "RESULT 里逐条说明：`docs/14:9` 的**八项**各自落在哪个字段、哪一项 V1 填不出值以及为什么；端口形状；fallback 的触发条件与出口；**你怎么证明两条安全验收都能失败**；以及 plan 的 schema 放在哪里、为什么。"
       ],
       "tests": [
         "planner contract"
@@ -5162,22 +5380,48 @@
         "specs/SPEC_VERSION.json",
         "internal/persistence/**",
         "internal/search/**",
+        "internal/application/**",
+        "internal/events/**",
+        "internal/worker/**",
+        "internal/observability/**",
+        "cmd/api/**",
+        "cmd/worker/**",
         "go.mod",
         "go.sum",
         ".env.example",
-        "cmd/api/**",
-        "apps/web/**",
+        "Makefile",
         "tests/**"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "docs/**",
+        "specs/api/openapi.yaml",
+        "specs/events/**",
+        "specs/policies/**",
+        "specs/orchestrator/**",
+        "specs/mcp/**",
+        "internal/authz/**",
+        "internal/rsg/**",
+        "packages/schemas/**",
+        "apps/web/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "**裁定一：本轮零联网，与 T0902 同一条。**「用户的查询文本能不能送出到第三方 LLM」规格一处都没写——我搜过 `docs/**` 全 69 篇与 `specs/**`，没有任何一篇划定这条边界。而它同时是隐私边界（`docs/54` 第七号威胁）与 CLAUDE.md §5.1 的停止条件（**需要新的外部凭证、付费服务或账号授权**）。**所以本轮只交付端口 + 确定性假件**：所有测试走假件，不联网、不需要任何密钥。**这一条正是 requirement 自己写的**——「provider-agnostic LLM」要的就是那层抽象，而抽象的证明方式是「换一个假件它照样工作」。**不要顺手接一个真 provider，也不要往 `.env.example` 里加任何 API key 变量。**若你认为某个真实适配器顺手就能写，**写进 RESULT 告诉我，不要实现它**。",
+        "**裁定三记在这里：匿名搜索这件事有一处真实的规格与契约冲突，我不替你选，但本轮按契约走。**规格侧：`docs/05_INFORMATION_ARCHITECTURE.md:9` 逐字「登录前保留 Explore/Search/Public entity 浏览；需要写操作时引导登录。」，`:15` 逐字「未登录：公开项目、Research Assets、近期 Findings、可贡献项目、**搜索入口**；禁止营销页压过产品内容。」。契约侧：`specs/api/openapi.yaml:10-11` 全局 bearerAuth，`:306-311` 的 default-deny 注释，而 `POST /search`（`:257-271`）没有 `security: []`。**两种读法**：(a) 契约疏漏，Search 该匿名可读；(b) 规格说的「Search」指首页入口/Explore，真正的 `/search` 是登录功能。**我选按契约走（要登录）**，理由：它是 fail-closed 的那一边、是现存的书面契约、而且扩大对外可见性属于 §5.1 的停止条件，不能由我或你顺手决定。**已记入 `tasks/decisions.md` 等 owner 裁定。**这一条直接决定 planner 的授权上下文从哪来：**本轮恒为已登录用户，你必须组装 scope（见裁定二），不能假设「没有 actor 就是 public」。**",
+        "**接口面：契约已经有了，实现一分没有。**`specs/api/openapi.yaml:257-271` 是 `POST /search`（requestBody `required: [query]`，`properties: {query: {type: string}, filters: {type: object}}`，响应 `'200': {description: Search answer with cited entity versions}`），`:272-280` 是 `/search/{searchId}:start-project`。**但 `cmd/api/*.go` grep `search` 只命中注释**——`cmd/api/main.go` 里**没有 `/search`**。web 侧有个占位页 `apps/web/app/(main)/search/page.tsx`，注释逐字「The evidence-backed answer UI lands in **T0907**」。**注意：落 `POST /search` 路由不是本任务的活**——回答生成是 T0906，界面是 T0907。**你需要落的是 planner 本身与它的端口**；要不要给它一个内部入口，你自己判断并在 RESULT 里说明（提前落公开路由会与 T0906 撞面）。",
+        "**port 的形状照抄 authn 那套三件套（这是仓库里最完整的模板）**：port 在 `internal/application/authn/ports.go:101-112`，`:101-112` 的注释逐字「the fake provider in oidctest implements the same port」；真实客户端在 `internal/application/authn/oidc.go:11-25`（逐字自陈「implemented on the standard library only (T0101 L1: no third-party OIDC dependency in the V1 core)」，HTTP 注入口是 `:27-30` 的 `type HTTPClient interface { Do(*http.Request) (*http.Response, error) }`，`:44-51` 注释逐字「discovery lazily on first use, so startup never blocks on the provider being reachable」）；**假件在 `internal/application/authn/oidctest/provider.go:1-20`，它逐字自陈「builds an in-process fake … tests drive the REAL authn.OIDCClient against it … This is test infrastructure shipped as a normal package」**——照它的形态做你的 planner 假件。超时口径的另一份先例在 `internal/rsg/externalref/ssrf.go:39` 的 `DefaultFetchTimeout = 10 * time.Second` 与 `doi.go:43-53` 的选项注入（注释逐字说「tests point it at a local server」）。",
+        "**JSON Schema 校验器已经有了，直接用，不要另造**：见 requirement 第 3 条的引用。补充一条对你有用的形状：应用层已经有一处「按 profile 校验」的先例——`internal/application/schemaprofiles/service.go` 与它的 `ports.go:36-43`（逐字「a map of field name to its JSON Schema fragment」）。**`internal/rsg/schemareg/**` 与 `internal/rsg/**` 在 forbidden_scope 里：调用它们可以，改它们不行。**若你判断必须改，写进 RESULT，我来接。",
+        "**plan 的 schema 文件放哪：放 Go 代码里，不放 `specs/`。**`specs/**` 除 `specs/database/postgres.sql` 那个生成物快照外是 Supervisor-only（CLAUDE.md §8.1），而且 planner 的输出 plan 是**planner 与检索层之间的内部契约**，不是对外发布的规格物。**把 schema 作为 Go 字面量放在 planner 包内**（例如 `internal/search/planner/plan_schema.go`），并在 RESULT 里说明。**`specs/schemas/**` 里今天没有 search plan 的 schema**（我核实过），这不是缺口，是归属。",
+        "**「不访问未授权实体」的实际依赖比你想象的位置低——别把它绑到 T0901 的交付物上。**真正提供保证的是两样东西：(1) `internal/persistence/queries/search.sql:36` 那条既有过滤 `AND (visibility = 'public' OR project_id = ANY(@allowed_project_ids::uuid[]))`——它的 fail-closed 语义写在同一文件 `:21-31` 的注释里（**传空数组只会得到 public 行，永远不会得到整张表**），回归测试 `tests/integration/search_access_test.go:23`；(2) 你要新建的 scope 组装层。**T0901 交付的是投影内容，不是权限保证。**所以这条依赖更像**顺序依赖**：T0901 先落地，你的 plan 才有东西可查——但不要把验收第 2 条写成「依赖 T0901 的某个实现细节」。",
+        "**目录：你住在 `internal/search/planner/`，另外拥有 `internal/search/scope.go`。**`internal/search/` 目前只有一个 `doc.go`，**全仓库零 import**。**T0902 同时在改这个目录**（它住 `internal/search/embedding/`），两者并行——**所以目录先钉死**：planner 的一切归 `internal/search/planner/`；**`internal/search/scope.go` 归你**（actor → allowed_project_ids，见裁定二），**T0902 已被明确告知不许建它**。**若你还需要根目录下的共享文件，先在 RESULT 里点名，不要和 embedding 那边撞同一批文件名。**",
+        "**本任务不碰的东西**：检索与图扩展（T0904）、排名（T0905）、answer 生成与 `POST /search`（T0906）、前端（T0907）、embedding（T0902）。**`SearchDocuments` 的可见性语义一个字都不许改**——那是 T0901 的地基。",
+        "**迁移号由我在派工时分配并写进任务包**（账本 `.rddev/runtime/migration-numbers.json`，分配器幂等；现已用到 83）。**不要自己选号**（CLAUDE.md §8.1）。**本任务很可能根本不需要迁移**——planner 的输出可以不落库（`docs/22_API_DESIGN.md:36` 要求「服务端保存 query plan、selected entity ids、answer citations」，但**保存 query plan 的归属更像 T0906**，因为要保存的是「一次搜索」，而搜索的公开入口在那一环）。**判断不需要就别建**，在 RESULT 里说明理由；**若你认为非建不可，先标 `blocked` 告诉我**，因为那可能意味着这项工作该挪到 T0906。"
+      ],
+      "scope_note": "这是**按本任务的实际交付面调整过的范围**。相对 DAG 里的 phase 级默认值：**加** `internal/application/**`（服务层的惯例落点——DAG 默认里没有它，而 T0901 的任务书也补了同一处）、**加** `internal/worker/**` + `internal/events/**`（若 planner 走后台 job 或要发事件；DAG 默认里没有，**不给你就等于把「planner 是同步还是异步」这个实现选择替你堵死**）、**加** `Makefile` 与 `internal/observability/**`（`docs/26_OBSERVABILITY.md:17` 点名要观测「search latency / LLM planner failures」）。**明确不加**（写进 forbidden_scope）：`specs/api/openapi.yaml`（`POST /search` 的契约已经存在，本任务不新增、不修改路由）、**`specs/mcp/**`**（`specs/mcp/tools.json:24` 已登记 `search.query` 工具、`docs/47_MCP_TOOL_CATALOG.md:6` 有归属，那一面由我维护）、`specs/events/**`、`specs/policies/**` 与 `internal/authz/**`（权限矩阵是安全边界）、`specs/orchestrator/**`、`internal/rsg/**`（只读——schema 校验器与超时先例都在里面，那是给你照抄的）、`packages/schemas/**`、`apps/web/**`（搜索界面是 T0907）。",
+      "supervisor_scope_narrowing": "2026-09-18 定稿。三条裁定。\n\n**裁定一：本轮零联网。**与 T0902 同一条、同一个理由：把用户查询文本送出平台外这件事规格一处都没写，而它同时是隐私边界（`docs/54` 第七号威胁点名了「Search LLM 引用未授权 entity id」）与 §5.1 的停止条件（新凭证/付费服务）。**端口 + 确定性假件，本轮就这些。**验收两条（invalid plan fallback / 不访问未授权实体）在假件上**可以完整证明**——「不访问未授权实体」这条的保证根本不在 LLM 那一层，而在 `queries/search.sql:36` 的 SQL 过滤与你要新建的 scope 组装层上，**所以它不因为不联网而变弱**。\n\n**裁定二：actor → allowed_project_ids 的组装是本任务真正的技术交付，放 `internal/search/scope.go`。**今天 `SearchDocuments` 的 `@allowed_project_ids` 参数**零调用者**，原料（`queries/projects.sql:96` 的 `ListProjectsForUser`、`:105` 的 `ListPublicProjects`）都在但没有一层把它们拼成检索层的入参。**T0904 与 T0906 都要用这一份**，所以你把它做成可复用的形状，别写成 planner 的私有辅助函数。文件名归你（T0902 已被告知不许建它）。\n\n**裁定三：匿名搜索按契约走（要登录），冲突记录在案。**理由见 relevant_specs 第二条——规格（`docs/05:9,15`）与契约（`openapi.yaml:10-11,306-311` + `POST /search` 没有 `security: []`）说的是两件事，而扩大对外可见性是 §5.1 的停止条件，**不由我或你顺手决定**。已记入 `tasks/decisions.md` 等 owner 裁定。**注意这条对你有一个具体的后果**：本轮 planner **恒有一个已登录 actor**，**不许把「没有 actor」当成「那就看 public 的」**——那正好是 fail-open 的形状。没有 actor 就是没有 scope，就是拒绝，照 `queries/search.sql:21-31` 那条注释的态度办。\n\n**一条提醒：本任务最自然的越界方式是「先让模型吐候选 id，再过滤」。**那是错的，`docs/21_DATA_MODEL.md:52` 逐字禁止（「不通过『查询后在前端隐藏』实现」），`docs/54:16` 把它列为第七号威胁。**planner 的输出里不许有实体标识符**——这是验收第 2 条真正的意思。\n\n**一条边界**：`internal/search/` 这个目录 T0902 同时在改（它住 `internal/search/embedding/`）。你只碰 `internal/search/planner/` 与 `internal/search/scope.go`；根目录若还要加别的共享文件，先在 RESULT 里点名。"
     },
     {
       "id": "T0904",
@@ -6703,6 +6947,70 @@
         "internal/assets/preview.go（T0704 的渲染层，本次的改动面）"
       ],
       "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T1111",
+      "phase": "P11",
+      "phase_name": "UI、安全、可访问性、性能与运维加固",
+      "title": "凭据不进进程参数表：git 调用统一走环境变量传 header",
+      "v1_required": true,
+      "dependencies": [
+        "T1110"
+      ],
+      "requirements": [
+        "**把 git 的认证 header 从命令行参数挪进环境变量。** 现在 `cmd/api/backupdr/git.go:84` 构造的是 `git -c http.extraHeader=Authorization: Bearer <token> -c credential.helper= <args...>`——`-c key=value` 的值**是 `argv`**，于是令牌出现在 `ps aux` 与 `/proc/<pid>/cmdline` 里，同机任何账号都能读到。改成环境变量（见下条的既有写法）即可消除这条路径。",
+        "**照抄本仓库已有的写法，不要发明新形状。** `internal/gitprovider/gitea.go:381-387` 已经用 `GIT_CONFIG_COUNT=1` / `GIT_CONFIG_KEY_0=http.extraHeader` / `GIT_CONFIG_VALUE_0=Authorization: token <token>` 走环境变量传同一个 header，并且那里的注释（`:364-365`，逐字：「authenticated without the token ever reaching argv — it rides in GIT_CONFIG_VALUE_0, process-visible only」）解释了为什么。本任务就是把 `cmd/api/backupdr` 对齐到它。",
+        "**`redactSecrets` 一个字都不许动。** 它防的是**另一条**泄漏路径：git 自己的报错会把收到的 header 回显出来（`cmd/api/backupdr/git.go:93-95` 的注释写明了）。两条路径要各自挡住——挪进环境变量**不是**删脱敏的理由。",
+        "**两处注释都要改成与代码一致。** ① `cmd/api/backupdr/git.go:41-45` 写着凭据不能出现在 `git` 的报错里、不能进 remote 的 stored config、**也不能出现在「any process listing」**，却紧接着说「Credentials are injected per invocation through `-c http.extraHeader=...` instead」——而 `-c` 的值正是 argv，恰恰就是 process listing。② `:75-78` 又写着「Credentials arrive as a config override, **never in the argument list**」，同样与 `:84` 的写法相反。改完之后，注释描述的行为必须真的是代码做的事（仓库的既有教条：写着不成立的理由比没有注释更糟）。",
+        "**测试辅助里的同类写法一并清理。** 同一模式还散在：`tests/integration/git_reconciliation_test.go:737`、`tests/integration/restore_drill_test.go:686` 与 `:1149`、`tests/integration/gitea_provisioning_test.go:691` 与 `:727`、`tests/integration/gitea_protection_test.go:133`/`:165`/`:206`、`tests/integration/gitea_push_ingestion_test.go:172`、`tests/integration/gitea_branch_ref_test.go:160`/`:215`/`:238`、`tests/acceptance/gitea-real-services-e2e.sh:479`/`:498`/`:527`/`:538`。这些用的是本地 dev 令牌，量级低一档，但类别相同，**按同一形状改**；改完测试必须照常通过。",
+        "**必须有一条能失败的测试来钉住这件事。** 「令牌不在参数表里」不能只靠读代码断言。照 `internal/gitprovider` 已有的可注入 runner 形状，给 `gitClient` 做一个可捕获 `argv` 与 `env` 的接缝，写一条单元测试断言：**令牌出现在环境变量里、且不出现在参数表的任何一项里**。这条测试必须**可证伪**——把实现改回 `-c` 写法时它要变红（在你的 RESULT 里附上这次 mutation 检验的实际输出）。",
+        "**行为不许变。** 这是安全加固，不是重构：git 命令的参数顺序（除两个 `-c` 之外）、工作目录、`GIT_TERMINAL_PROMPT=0`、超时、错误文本与脱敏结果，全部保持原样。"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "`cmd/api/backupdr/git.go` 不再把令牌放进 `argv`；令牌经环境变量传递，功能与错误文本不变。",
+        "存在一条可证伪的单元测试：断言令牌在 `env` 里、不在 `argv` 里；把实现改回 `-c` 时该测试变红（附 mutation 检验输出）。",
+        "`cmd/api/backupdr/git.go:41-45` 的注释与代码实际行为一致。",
+        "`tests/integration/**` 与 `tests/acceptance/**` 里的同类写法已按同一形状清理，且这些测试照常通过。",
+        "`redactSecrets` 及其调用点未被改动。",
+        "T1110 的 G3（`rsg-real-services` 与 `gitea-real-services`）在新树上仍然通过。"
+      ],
+      "tests": [
+        "restore drill e2e",
+        "gitea real services e2e"
+      ],
+      "allowed_scope": [
+        "cmd/api/backupdr/**",
+        "internal/gitprovider/**",
+        "tests/**",
+        "specs/SPEC_VERSION.json",
+        "go.mod",
+        "go.sum"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "docs/**",
+        "specs/api/openapi.yaml",
+        "specs/events/**",
+        "internal/authz/**",
+        "specs/policies/**",
+        "internal/rsg/**",
+        "infra/migrations/**",
+        "apps/web/**",
+        "ops/**"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "**`internal/gitprovider/gitea.go:381-387` + 注释 `:364-365`（先读）**：本仓库传 git 凭据的**既有正确形状**——`GIT_CONFIG_COUNT=1`/`GIT_CONFIG_KEY_0=http.extraHeader`/`GIT_CONFIG_VALUE_0=Authorization: token <token>` 环境变量；注释逐字写着「without the token ever reaching argv — it rides in GIT_CONFIG_VALUE_0, process-visible only」。本任务是把偏离者对齐到它。",
+        "`cmd/api/backupdr/git.go:41-45` 与 `:75-78`（两处待改的注释）、`:71-73`（header 构造）、`:84`（命令行拼装，本任务的要害）。",
+        "`cmd/api/backupdr/git.go:93-95`：`redactSecrets` 调用的现场——它防的是另一条路径（git 报错回显 header），**保留**。",
+        "`docs/37_BACKUP_DR.md`：本代码服务的演练文档，行为不许变。",
+        "GitHub issue #273：本次发现的完整证据与同类清单。"
+      ],
+      "scope_note": "范围按「把这一类改完」定，不按「改一个文件」定：生产代码（`cmd/api/backupdr/**`）加测试辅助（`tests/**`）一次清干净，否则同一类问题会在测试里继续留着。`internal/gitprovider/**` 在范围内是给你读范例用的——**默认不要改它**（那边已经是正确写法）；只有在你证明它也有同样缺陷时才动，并在 RESULT 里说明。**明确不加**：迁移目录、web、契约文件——本任务不碰数据形状与对外接口。",
+      "supervisor_scope_narrowing": "2026-09-18 定稿。任务来自一次自动化安全审查（背景扫描）在 T1110 合并后报出的 MEDIUM 发现，我已核实为**真缺陷**，并且是**偏离本仓库既有写法**造成的——不是新问题、也不是风格分歧。\n\n**要害**：`git -c key=value` 的 value 落在 `argv` 里，`ps aux` 与 `/proc/<pid>/cmdline` 对同机所有账号可见。而这个文件自己的注释（`:41-45`）把「凭据不能出现在任何 process listing 里」列为要避免的三件事之一——**它选的手段违反了它自己写下的目标**。仓库同类的 `internal/gitprovider/gitea.go:376-387` 早就走环境变量，所以这里不是要你设计新方案。\n\n**三条边界**：\n（1）**不碰 `redactSecrets`**。那是另一条独立的泄漏路径（git 报错回显），两条都要挡；挪 header 不等于可以删脱敏。\n（2）**行为必须逐字不变**：命令参数顺序、`cmd.Dir`、`GIT_TERMINAL_PROMPT=0`、超时、错误文本、脱敏结果。这是加固，不是重写。\n（3）**测试辅助要一起清**，但用的是 dev 令牌——**不要为了改测试去改测试的意图**（断言、覆盖、超时一律不动）。\n\n**验收的形状**：「令牌不在 argv 里」必须有一条**能失败**的单元测试钉住，且附上你把实现改回 `-c` 时它变红的实测输出。只读代码、只写注释声明不算过——这一条的判据是它会不会红。"
     }
   ]
 }

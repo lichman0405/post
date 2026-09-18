@@ -90,6 +90,10 @@
         "null"
       ],
       "minimum": 0
+    },
+    "supervisor_scope_narrowing": {
+      "type": "string",
+      "description": "The Supervisor's task-specific narrowing and rulings, addressed to the Worker. It decides what the requirements leave open (which reading of an ambiguous sentence is the intended one, where the boundary is), so it is part of the contract; it must reach the Worker, not stop at the ledger (#274)."
     }
   }
 }

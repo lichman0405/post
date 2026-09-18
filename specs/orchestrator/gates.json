@@ -932,6 +932,12 @@
         "rsg-real-services",
         "gitea-real-services"
       ]
+    },
+    "T1111": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
     }
   }
 }

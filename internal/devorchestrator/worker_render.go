@@ -35,6 +35,10 @@ type TaskPackage struct {
 	MigrationNumber int      `json:"migration_number"`
 	MaxTurns        *int     `json:"max_turns,omitempty"`
 	MaxBudgetUSD    *float64 `json:"max_budget_usd,omitempty"`
+	// SupervisorScopeNarrowing is the Supervisor's ruling text for this task
+	// (see TaskSpec). Omitted when empty so a task without one renders the
+	// same package it always did.
+	SupervisorScopeNarrowing string `json:"supervisor_scope_narrowing,omitempty"`
 }
 
 // RenderTaskPackage builds the package from the DAG entry and the spawn
@@ -58,6 +62,11 @@ func RenderTaskPackage(t *TaskSpec, baselineSHA string, maxTurns *int, maxBudget
 		DecisionLevelMax:   t.DecisionLevelMax,
 		MaxTurns:           maxTurns,
 		MaxBudgetUSD:       maxBudgetUSD,
+		// Carried verbatim. It is prose addressed to the Worker, and the DAG
+		// entry is the only place it exists — a package that dropped it would
+		// dispatch a Worker whose contract is missing the part that decides
+		// what the requirements leave open (#274).
+		SupervisorScopeNarrowing: t.SupervisorScopeNarrowing,
 	}
 	if pkg.DecisionLevelMax == "" {
 		pkg.DecisionLevelMax = "L1"
@@ -439,6 +448,18 @@ func RenderPrompt(pkg *TaskPackage, worktree, resultDir string, worktreesDir, wo
 	b.WriteString("Your worktree (a Supervisor-owned git worktree, never shared with another Worker):\n\n")
 	fmt.Fprintf(&b, "  %s\n\n", worktree)
 	fmt.Fprintf(&b, "Your RESULT.json (writable by you, outside the worktree):\n\n  %s\n\n", filepath.Join(resultDir, "RESULT.json"))
+	if strings.TrimSpace(pkg.SupervisorScopeNarrowing) != "" {
+		// Before the requirements, because that is what it is for: it decides
+		// the questions the requirements leave open. A Worker that reads it
+		// afterwards has already chosen a reading.
+		b.WriteString("## Supervisor rulings for this task\n\n")
+		b.WriteString("The Supervisor has ruled on the points below — the task-specific reading,\n" +
+			"the boundary, and what was explicitly left out. **Where a requirement below\n" +
+			"reads more than one way, these rulings decide which way is meant.** They are\n" +
+			"part of the contract, not commentary.\n\n")
+		b.WriteString(strings.TrimSpace(pkg.SupervisorScopeNarrowing))
+		b.WriteString("\n\n---\n\n")
+	}
 	b.WriteString("## Requirements\n\n")
 	for _, r := range pkg.Requirements {
 		fmt.Fprintf(&b, "- %s\n", r)

@@ -24,6 +24,13 @@ type TaskSpec struct {
 	ForbiddenScope     []string `json:"forbidden_scope"`
 	DecisionLevelMax   string   `json:"decision_level_max"`
 	RelevantSpecs      []string `json:"relevant_specs"`
+	// SupervisorScopeNarrowing is the Supervisor's task-specific narrowing and
+	// rulings, addressed to the Worker in prose. It decides the questions the
+	// requirements leave open — which reading of an ambiguous sentence is the
+	// intended one, where the boundary is — so it has to reach the Worker
+	// rather than stop at the ledger. It not reaching anyone is #274: three
+	// tasks shipped the opposite of a ruling they were never given.
+	SupervisorScopeNarrowing string `json:"supervisor_scope_narrowing"`
 }
 
 // DAG is the task dependency graph.
