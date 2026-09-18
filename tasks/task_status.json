@@ -5168,11 +5168,13 @@
       ]
     },
     "T0707": {
-      "status": "verification",
-      "started_at": "2026-09-18T14:43:19Z",
+      "status": "merged",
+      "started_at": "2026-09-18T16:10:13Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:14:44Z 判定，记于 T0705 合并之前）：只缺两件：依赖类型那一列是自由文本、没跟既有关系目录（depends_on/references）挂钩；visibility_of_usage 声明为公开之后对外显示什么没有写过（页面确有「依赖/被用到的公开链接」一项，所以这是对外可见的产品语义）。其余（版本钉法、引用与依赖的分野、存储形状）都在树里。",
-      "worker_run_id": "run-3da38d158f583d06",
-      "rejection_reason": "# T0707 第二轮返工：基线又推进了一次（**我的错，已撤回**）+ 上一封那两件事照做\n\n## 一、这次为什么又被叫回来（**不是你的问题，是我的**）\n\n我在 `22:31` 推了一笔 schema 收紧（`creator_ids` 加 `format: \"uuid\"`），**它红掉了 main 的 CI**\n（`migration-integration` job，红在 `***`）：\n它收紧了**不该收紧的一层**——schema 校验跑的是调用方原样的文本，而带空白/大小写的拼写是门禁\n**刻意接受、由存储归一化**的（T0711 review round 8 的既定口径）。`22:4x` 我把它**撤回了**\n（`4c6f889` + `230cc92`）。\n\n**我上一轮把你重基线到的那个 main（`d9992ea`）正好带着这份坏掉的 schema**，你的树里也就有它：\n- 集成套件那条 padded 测试在你的树上**必然红**——**那不是你的改动引起的**；\n- 我用 `rddev worker stop` 停了 worker（exit 143），把你**重新基线到撤回后的 main（`230cc92`）**，\n  那份 schema 会自动变回正确的。\n\n**因此上一封里「不需要重跑任何测试」这句以这一次为准**：基线变了，**G1 要在新基线上重跑一遍**\n（集成套件 + 你登记的那条 `asset dependency tests`），RESULT 里的 `tests[]` 按**新跑出来的实际结果**重写。\n\n## 二、上一封的判词与两件事（照旧，抄在这里免得你只看到这一封）\n\n你的实质工作我核过了，**是合格的**：24 个改动文件全在 allowed_scope 里、14 条测试全过、\n7 条验收标准逐条对上、变更文件里没有一个 `apps/web` 文件。collect 只拒了一条，**而且不是代码问题**：\n\n### (1) RESULT.json 里那条 `not_run` 必须处理\n\n你列了：\n\n```\nbash scripts/web-unit-tests.sh; pnpm --dir apps/web run typecheck; pnpm --dir apps/web run lint; bash tests/e2e-assets/run.sh\n```\n\n状态是 `not_run`，而总体 status 是 `completed`。collect 的规则是死的：**completed 不允许带着\nnot_run 的条目**。三条已核过的事实：任务书要求的测试只有一条（`asset dependency tests`，你跑了也过了）；\n你没改任何 `apps/web` 文件（前三条命令属于 CI 的 `web` job，PR 上会真跑）；`tests/e2e-assets/run.sh`\n是 **T0709 的登记测试**（脚本第一行就写着），拿 mock API 测前端渲染，覆盖不到你的 Go 侧改动。\n\n**怎么改**：把它从 `tests` 数组里**删掉**（schema 的测试状态只有 `passed | failed | not_run` 三值，\n没有「不适用」——表达「本任务不需要跑它」的唯一正确方式是不列为测试条目）；\n并把你「排除了哪些、为什么」**如实写进 `risks` 或 `notes_for_supervisor`**，不要默默删掉。\n**不需要改任何代码。** 若你有证据反驳我，就在 RESULT 里说明理由并把那条测试真的跑掉。\n\n### (2) `00085` 到底用不用（**这是我要的答案**）\n\n你的任务书**允许两条路**——收窄说明第四条逐字：\n\n> 迁移号不在这份任务书里定死……**若你判断既有列已够用、不需要迁移，那就不建，在 RESULT 里说明理由。**\n\n而你的 RESULT 里**没有**这句理由（24 个改动路径里 `infra/migrations/**` 一个都没有）。\n在 `notes_for_supervisor` 里补一两句，回答：\n\n1. 本任务**是否需要**新迁移？不需要就写「不需要」，并给出**落点**——用法关系写进了哪张**已存在的**\n   表、哪几列（`asset_dependencies` 在 `00010` 就有了）；\n2. 若需要而没做，写清楚**剩下的是什么**。\n\n**我要用它决定 85 号退不退休**——`00086`（T0804）在它定下来之前不能合并，链子卡在这里。\n这一条仍然**不改你这一轮的交付面**（代码一个字都不动）。\n\n## 三、边界\n\n- 只准改 `RESULT.json`（外加按新基线重跑 Gate）。不许为了让 collect 过而碰生产代码、测试代码或生成物。\n- 不许为了让 Gate 变绿而删测试、skip、放宽断言或放大 timeout（CLAUDE.md §5.1）。\n- `tests[]` 只登记你**真的跑过并看到结果**的东西；声称「代码做了某事」的句子要能被 `grep` 到。\n",
+      "worker_run_id": "run-70bb5e7bd6ae9dd7",
+      "accepted_by_supervisor_at": "2026-09-18T16:43:56Z",
+      "merged_at": "2026-09-18T16:50:28Z",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（8ad035c0eca8），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 internal/persistence/sqlc（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
       "history": [
         {
           "from": "todo",
@@ -5228,6 +5230,40 @@
           "at": "2026-09-18T14:52:18Z",
           "run_id": "run-fa3feffe565d26a9",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-18T16:10:12Z",
+          "run_id": "run-57fa9d808880f858",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（8ad035c0eca8），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 internal/persistence/sqlc（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-18T16:10:13Z",
+          "run_id": "run-70bb5e7bd6ae9dd7",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T16:18:20Z",
+          "run_id": "run-1dd6bc7da7efca5e",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-18T16:43:56Z",
+          "run_id": "run-ad90ecec7d67358c"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-18T16:50:28Z",
+          "run_id": "run-79faae90a8ab6155",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
