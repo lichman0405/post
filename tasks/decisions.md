@@ -11899,10 +11899,18 @@ Worker 的上下文仍然可靠 → §11 的第一档，返工同一 session。
 返工 run：`run-410fcd50c0756752`，基线 `85871753e9dd`。
 
 **本轮顺带查出的两处计划缺口（都等安静窗口，现在不能动 `tasks/tasks.json`——T0804 的补丁带着指纹）**：
-1. **生产里根本没有 fork 的 HTTP 面**：`cmd/api` 不 import `internal/application/forks`，全仓无 fork 路由。
+1. **生产里没有"怎么发起一个 fork"这一步**（2026-09-19 当天修正过一次措辞，见下）：
+   `cmd/api` 不 import `internal/application/forks`，`specs/api/openapi.yaml` 里也没有 fork 端点。
    即 `docs/31_MASTER_ACCEPTANCE.md:17`「Public Project 外部用户可 fork/contribute」在**真实产品路径上
    还走不通**（T0804 的 allowed_scope 里就没有 `specs/http` 与 `cmd/api`，所以这不是它的越界）。
    **要另立一个接线任务**，否则主验收那条永远勾不上。
+   **修正**：我起初写成"对外接口一个都没有"，**不准确**。查证后：**执行侧是接上的**——
+   `cmd/api/main.go:579` 把 `ForkGate: persistence.NewForkStore(pool)` 接进了 rsg 服务
+   （`write_scientific_state` 的 `own_fork_only` 在真实路径上生效），跨项目 PR 由 00086 的
+   数据库触发器 `pull_request_fork_gate` 对**任何插入路径**把关（PR 服务本来就在
+   `cmd/api/main.go:506` 接着）。缺的是**发起 fork 这一步**（`forks.Service` 没在 cmd/api 里构造），
+   不是整套接线。评审 F3 说的 "no production wiring for the fork use case" 同样过宽，
+   但它可执行的那半（"adds no route"）是对的。
 2. CI `migration-integration` 偶发超时（见上一节）。
 
 ## 2026-09-19 T0804 第四轮：两处必修已修，我独立复验；一条残留记录并按计划延后
@@ -11941,7 +11949,8 @@ Worker 的上下文仍然可靠 → §11 的第一档，返工同一 session。
 并把修法明确上交**（"always deriving the digest form … beyond L1 … left to the Supervisor"）——
 它没有自作主张改用户可见的命名规则，做得对。
 **不返工的理由**：① 报的错是**准确的**，不是骗人的；② 今天**没有用户能碰到它**——
-fork 的对外接口根本还不存在（`cmd/api` 不 import forks、OpenAPI 里无 fork 端点），
+fork 的**发起**接口根本还不存在（`cmd/api` 不 import forks、OpenAPI 里无 fork 端点；
+但执行侧是接上的：`cmd/api/main.go:579` 的 ForkGate + 00086 的触发器，见上一节修正），
 一个真用户连第一个 fork 都做不了；③ 修法是**用户可见的命名规则变更**（名字会变成
 `mof-curie-97c04289` 这种），属于"接口落地时一起定"的事，不是本任务的缺陷。
 **处置**：记入 `/tmp` 的接线任务草稿（接口落地时连命名规则一起决定），
