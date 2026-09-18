@@ -80,6 +80,10 @@ type Querier interface {
 	// reviews). A research PR is a proposed RSG diff; merge controls acceptance
 	// (invariant 6).
 	CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue, error)
+	// The ledger row, written in the same transaction as the publication it
+	// names: a publish that rolled back leaves no key behind, and a key that
+	// committed names a publication that exists.
+	CreateKnowledgePublicationCreation(ctx context.Context, arg CreateKnowledgePublicationCreationParams) (KnowledgePublicationCreation, error)
 	CreateMergeCreation(ctx context.Context, arg CreateMergeCreationParams) (MergeCreation, error)
 	// Project milestones (T0609): research-timeline markers, separate from
 	// releases (canonical tables project_milestones,
@@ -279,15 +283,18 @@ type Querier interface {
 	GetFeedAsset(ctx context.Context, pid string) (GetFeedAssetRow, error)
 	// The scientific object a knowledge feed is about, addressed by its uuid.
 	//
-	// A knowledge object has no title of its own — the title lives on each
-	// version (scientific_object_versions.title) — so the feed's title is the
-	// one the object is published under: the newest publication's version
-	// title, coerced to '' when the object has never been published. That empty
-	// string is a state the model renders as "no feed" (a knowledge feed needs
-	// at least one publication to exist at all), never as a nameless feed.
+	// The feed's TITLE is deliberately not read here. A knowledge object has no
+	// title of its own — the title lives on each version — and the title the
+	// feed may carry is the one of the newest publication the feed RENDERS,
+	// which is the audience rule's decision, not this query's: naming the feed
+	// from "the newest publication" would let a members-only revision published
+	// above an open one supply the <title> of a public document.
+	// internal/application/feeds.BuildFeed names a knowledge feed from the
+	// newest row that survived the rule (see the file header).
 	//
-	// The owning project travels with the row for the same reason it does on
-	// the asset: its visibility is what the feed's existence is decided from.
+	// The owning project travels with the row because its visibility is both one
+	// of the three inputs the audience rule decides with and what the feed's
+	// existence is decided from.
 	GetFeedKnowledgeObject(ctx context.Context, objectID pgtype.UUID) (GetFeedKnowledgeObjectRow, error)
 	// Public feed reads (T1004, docs/18 §4 "RSS/Atom（公开对象/项目）").
 	//
@@ -318,13 +325,52 @@ type Querier interface {
 	// internal/assets' arrangement too (see the header of asset_page.sql).
 	//
 	// What IS decided here is what a row MEANS: `visibility` comes from the row
-	// that has one (research_asset_versions) or from the project that owns the
-	// row for publications, which have no visibility column of their own —
-	// publishing IS the public act (docs/12 §2) and the owning project is what
-	// decides whether anyone outside it may reach the publication. The knowledge
-	// halves need no predicate of their own: a publication's visibility IS its
-	// project's, so within one target every knowledge row shares one value, and
-	// the model's project gate settles all of them at once.
+	// that has one (research_asset_versions) or from the PROJECT that owns the
+	// row for publications, which have no visibility column of their own.
+	//
+	// # The knowledge halves read the audience rule's inputs and apply the two cheap ones
+	//
+	// A publication's visibility is NOT its project's alone, and assuming it was
+	// is a leak this file used to carry: owner ruling L3-20260916-1 #1 has
+	// knowledgepublish.AudienceFor decide over THREE inputs — the version's own
+	// visibility axis (scientific_object_versions.visibility_policy_id), the
+	// owning project's preset, and the published rights declaration's metadata
+	// token — and a members-only publication inside a PUBLIC project is legal and
+	// common (docs/12 §2: a private project may publish; 发布不等于公开).
+	//
+	// Two of the three are predicates SQL can spell exactly, and the knowledge
+	// halves apply them:
+	//
+	//   p.visibility = 'public'                   -- axis 2
+	//   sov.visibility_policy_id IS NULL          -- axis 1: a version that pins
+	//                                             -- a policy of its own is
+	//                                             -- governed by that policy,
+	//                                             -- and this build resolves no
+	//                                             -- policy into a public grant
+	//
+	// The third is not spellable here, and a SQL approximation of it would be
+	// the defect in another form. The rule is "the rights document's metadata
+	// token is exactly rights.MetadataProjectPolicy, and a document this build
+	// cannot READ states no token at all" — a Go parse (internal/rights.Parse
+	// refuses unknown fields, so the same bytes can mean different things to a
+	// different build), not a JSON predicate. The declaration therefore travels
+	// back RAW (`rights_json`), and internal/application/feeds decides over it
+	// (renderableRows), fail-closed: a document that does not parse, or whose
+	// token is anything else, is not public. Both halves report `visibility` as
+	// the owning project's preset — for a publication that is one of the rule's
+	// three INPUTS, not the answer.
+	//
+	// The consequence for the window is named rather than hidden, because the
+	// LIMIT is what this file's whole arrangement is about: it is EXACT for the
+	// asset half (research_asset_versions.visibility IS that half's rule) and a
+	// window over CANDIDATES for the knowledge half — a row that survives the two
+	// predicates above may still be dropped by the model's rights axis, so a
+	// project whose newest knowledge rows are all members-only can spend part of
+	// the window on rows the feed does not render, and the feed may be SHORTER
+	// than @row_limit. It can never be longer and never wrong: the model renders
+	// exactly the rows it decides are public. Widening the predicates to win the
+	// window back is not an option — that would be a second, weaker copy of the
+	// rule, which is what this split exists to prevent.
 	// The project a project feed is about. An index lookup on the primary key:
 	// a feed's target id is the project's uuid, not its slug (a slug is
 	// revisable; a feed's identity must not be — internal/application/feeds.
@@ -335,6 +381,46 @@ type Querier interface {
 	// whenever the project is: the public project read renders it).
 	GetFeedProject(ctx context.Context, projectID pgtype.UUID) (GetFeedProjectRow, error)
 	GetIssueByProjectAndNumber(ctx context.Context, arg GetIssueByProjectAndNumberParams) (Issue, error)
+	// One stored publication by its row id — the read a replay answers with.
+	GetKnowledgePublication(ctx context.Context, id pgtype.UUID) (KnowledgePublication, error)
+	// Knowledge publication governance (T0805): the writes and the ledger
+	// reads of the knowledge publish command, plus the reads a replay and the
+	// public read route need.
+	//
+	// knowledge_publications (migration 00010) has existed since the schema
+	// was created with NO writer: PublishKnowledgePublication sat in
+	// releases_assets.sql with zero callers. Everything below is that missing
+	// path.
+	//
+	// Every write here happens inside ONE transaction
+	// (persistence.KnowledgePublishStore.Publish) together with the
+	// publication re-check that authorized it, the audit row and the
+	// knowledge.version_published domain event, so a refused publish writes
+	// nothing and an accepted one is one unit.
+	//
+	// The review record the decision reads is NOT here either: it is
+	// ListReleaseReviews (releases_assets.sql), reused verbatim inside the
+	// publish transaction so that "this version passed review" is one SQL
+	// definition shared with the release gate.
+	// The version's existing publication, or no row (pgx.ErrNoRows) when it
+	// has never been published.
+	//
+	// It is deliberately NOT a UNIQUE lookup in the schema sense: 00010
+	// carries UNIQUE(object_version_id, public_version), which permits a
+	// second row under a different name. Owner ruling L3-20260916-1 #3
+	// forbids a second publication of one version, and that rule is enforced
+	// by the application (knowledgepublish.Judge), not by an index — the
+	// ruling is what forbids it, and a migration is not where a product rule
+	// is changed. This read therefore takes the OLDEST row (a version that
+	// somehow carries two rows is answered with the first one) and answers
+	// "is it published" without depending on the schema having been
+	// tightened.
+	GetKnowledgePublicationByObjectVersion(ctx context.Context, objectVersionID pgtype.UUID) (KnowledgePublication, error)
+	// The publish ledger lookup: the publication an Idempotency-Key already
+	// wrote, or no row (pgx.ErrNoRows) when the key is new. UNIQUE(project_id,
+	// idempotency_key) (migration 00083) makes this at most one row by
+	// construction.
+	GetKnowledgePublicationCreation(ctx context.Context, arg GetKnowledgePublicationCreationParams) (pgtype.UUID, error)
 	// The project's most recent state (T0208): the default fork point for a
 	// branch created without an explicit base_ref. Deterministic on (created_at,
 	// id): states created in one transaction share a timestamp, the id breaks
@@ -699,20 +785,32 @@ type Querier interface {
 	// which is why the predicate above and migration 00080's partial index have
 	// the same shape. Indexed by (asset_id, published_at DESC, id DESC).
 	ListFeedAssetEntries(ctx context.Context, arg ListFeedAssetEntriesParams) ([]ListFeedAssetEntriesRow, error)
-	// One knowledge object's publications, newest first.
+	// One knowledge object's publications that a public feed may render, newest
+	// first: the project half above, one target narrower.
 	//
-	// A publication has no visibility column: publishing a version onto the
-	// network IS the public act (docs/12 §2), and the owning project's
-	// visibility is what decides whether anyone outside it may reach it — so
-	// that is the value this query reports as the entry's visibility, exactly
-	// as the subscription audience resolution does for the same target type
-	// (internal/events/subscription_store.go).
+	// The two predicates are the audience rule's first two axes and nothing
+	// else (see the file header): a version that pins a visibility policy of its
+	// own is governed by that policy, and this build resolves no policy into a
+	// public grant; a private project's content is invisible outside it (docs/12
+	// §2 — a private project may publish, and publishing does not widen). The
+	// rights axis is NOT spelled here: the declaration travels back raw and
+	// internal/application/feeds decides over it, fail-closed on a document this
+	// build cannot read.
+	//
+	// `visibility` is the owning project's preset — one of the rule's three
+	// INPUTS, never the answer — and it is the same value for every row of one
+	// target, because every row belongs to the same project.
+	//
+	// visibility_policy_id comes back with it even though the predicate above
+	// has already excluded every row that pins one: the model re-checks the axis
+	// it is given (feeds.EntryState), so a query edit that dropped the predicate
+	// would render a shorter feed rather than a wider one.
 	ListFeedKnowledgeEntries(ctx context.Context, arg ListFeedKnowledgeEntriesParams) ([]ListFeedKnowledgeEntriesRow, error)
 	// The newest versions of one project that a public feed may render — its
 	// assets' public versions and its objects' knowledge publications — newest
 	// first. Private asset versions are filtered out by the read strategy above;
-	// the knowledge half needs no predicate because a publication's visibility
-	// IS its owning project's.
+	// the knowledge half applies the two cheap predicates and hands the rights
+	// document back raw for the model to decide over (see the file header).
 	//
 	// The two halves are UNION ALL'd rather than merged in Go so that ONE
 	// ordering and ONE limit apply to the union: taking the newest N of each
@@ -728,6 +826,11 @@ type Querier interface {
 	// public identity (a live profile is a public read, T0102); a missing user
 	// row renders as no author rather than as an error, because the feed's
 	// subject is the version, not the account.
+	// The last two columns are the audience rule's remaining inputs, and they
+	// are NULL on the asset half rather than defaulted: an asset version has no
+	// visibility policy of its own and no rights declaration, and inventing a
+	// value there would be a value a reader could mistake for a fact. The model
+	// reads them for knowledge rows only (feeds.EntryState).
 	ListFeedProjectEntries(ctx context.Context, arg ListFeedProjectEntriesParams) ([]ListFeedProjectEntriesRow, error)
 	// One row per attached blob (a blob attached to several object versions
 	// still appears once: the manifest pins the blob, not the attachment
@@ -921,6 +1024,18 @@ type Querier interface {
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
 	MarkBlobIntegrity(ctx context.Context, arg MarkBlobIntegrityParams) error
 	MarkOutboxEventPublished(ctx context.Context, id pgtype.UUID) error
+	// The publish command's insert (T0805). This query had no producer before
+	// it — knowledge_publications has had no writer since migration 00010 —
+	// so extending it with the pid column (migration 00083) is not a change
+	// to a shipped writer, the way PublishResearchAssetVersion's origin_refs
+	// was not one for T0705.
+	//
+	// The pid is passed in and never left to the column DEFAULT: migration
+	// 00064 records the same decision for assets ("the application-generated
+	// path ... arrives with T0705 (publish)"), and a persistent identifier
+	// that two writers derive differently is not a persistent identity. The
+	// DEFAULT stays for rows written before the publish command could
+	// generate one.
 	PublishKnowledgePublication(ctx context.Context, arg PublishKnowledgePublicationParams) (KnowledgePublication, error)
 	// The publish command's version insert (T0705). origin_refs is written
 	// here because it is NOT NULL with two CHECKs since 00064 (at least one
@@ -945,6 +1060,44 @@ type Querier interface {
 	// and the session flag on — the only sanctioned write path for the
 	// proposed state.
 	RefreshPullRequestProposedState(ctx context.Context, arg RefreshPullRequestProposedStateParams) (PullRequest, error)
+	// Everything the publication decision reads about the version being
+	// published, in ONE row: the version, the object it belongs to, the
+	// project that owns the object, and the main branch of that project.
+	//
+	// It is ONE query because the decision is about one version and must see
+	// one consistent state; resolved as four reads it could see a version
+	// from before a project moved and a project from after.
+	//
+	// project_id is an INPUT rather than an output: a publish never resolves
+	// a version across the project boundary, so a version id that belongs to
+	// another project (or to none) matches nothing and is reported exactly as
+	// an unknown one (docs/45: no foreign entity existence leaks). The join
+	// to scientific_objects is what makes that true for the version's object
+	// too.
+	//
+	// The main branch is an OUTER join because a project may have no branch
+	// named main (none is created with the project); the decision then has no
+	// review record to read, and knowledgepublish.Judge refuses the
+	// publication rather than assuming it was reviewed. LEFT JOIN LATERAL
+	// with LIMIT 1 keeps this to one row whatever the branches table holds.
+	ResolvePublicationFactRows(ctx context.Context, arg ResolvePublicationFactRowsParams) (ResolvePublicationFactRowsRow, error)
+	// The public read model of GET /knowledge/{knowledgeId} (T0805): the
+	// publication the pid names, the version it published, the object that
+	// version belongs to, and the project that owns the object — everything
+	// the audience rule (knowledgepublish.AudienceFor) decides with.
+	//
+	// The read is BY PID, which is why migration 00083 puts the pid on the
+	// publication: the identity a reader addresses is the publication's, and
+	// a version that is published once has exactly one.
+	//
+	// The query applies NO visibility predicate. Who may read the result is
+	// knowledgepublish.AudienceFor, in Go, over the columns below — a second,
+	// SQL-shaped copy of that rule is how two answers to "who may read this"
+	// start to disagree, and the one in Go is the one the publish decision
+	// and the preview already use. The publication row is fetched whatever
+	// the audience turns out to be; the transport answers not-found when the
+	// audience refuses.
+	ResolvePublishedKnowledge(ctx context.Context, pid string) (ResolvePublishedKnowledgeRow, error)
 	//
 	// Access control is enforced HERE, not delegated to a caller.
 	//

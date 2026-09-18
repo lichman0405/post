@@ -337,9 +337,9 @@ func (q *Queries) ListReleases(ctx context.Context, projectID pgtype.UUID) ([]Re
 }
 
 const publishKnowledgePublication = `-- name: PublishKnowledgePublication :one
-INSERT INTO knowledge_publications (object_version_id, public_version, rights_json, published_by)
-VALUES ($1, $2, $3, $4)
-RETURNING id, object_version_id, public_version, rights_json, published_by, published_at
+INSERT INTO knowledge_publications (object_version_id, public_version, rights_json, published_by, pid)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, object_version_id, public_version, rights_json, published_by, published_at, pid
 `
 
 type PublishKnowledgePublicationParams struct {
@@ -347,14 +347,28 @@ type PublishKnowledgePublicationParams struct {
 	PublicVersion   string      `json:"public_version"`
 	RightsJson      []byte      `json:"rights_json"`
 	PublishedBy     pgtype.UUID `json:"published_by"`
+	Pid             string      `json:"pid"`
 }
 
+// The publish command's insert (T0805). This query had no producer before
+// it — knowledge_publications has had no writer since migration 00010 —
+// so extending it with the pid column (migration 00083) is not a change
+// to a shipped writer, the way PublishResearchAssetVersion's origin_refs
+// was not one for T0705.
+//
+// The pid is passed in and never left to the column DEFAULT: migration
+// 00064 records the same decision for assets ("the application-generated
+// path ... arrives with T0705 (publish)"), and a persistent identifier
+// that two writers derive differently is not a persistent identity. The
+// DEFAULT stays for rows written before the publish command could
+// generate one.
 func (q *Queries) PublishKnowledgePublication(ctx context.Context, arg PublishKnowledgePublicationParams) (KnowledgePublication, error) {
 	row := q.db.QueryRow(ctx, publishKnowledgePublication,
 		arg.ObjectVersionID,
 		arg.PublicVersion,
 		arg.RightsJson,
 		arg.PublishedBy,
+		arg.Pid,
 	)
 	var i KnowledgePublication
 	err := row.Scan(
@@ -364,6 +378,7 @@ func (q *Queries) PublishKnowledgePublication(ctx context.Context, arg PublishKn
 		&i.RightsJson,
 		&i.PublishedBy,
 		&i.PublishedAt,
+		&i.Pid,
 	)
 	return i, err
 }

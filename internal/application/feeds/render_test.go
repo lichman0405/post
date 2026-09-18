@@ -204,9 +204,8 @@ func TestRSSDocumentShape(t *testing.T) {
 // every link, or a model that cleared every link, would pass this test.
 func TestRenderedKnowledgeFeedHasNoURL(t *testing.T) {
 	knowledge, ok := BuildFeed(knowledgeTarget(), State{
-		Found: true, Title: "A claim", ProjectVisibility: VisibilityPublic, CreatedAt: testInstant,
-		Entries: []EntryState{{Kind: EntryKnowledgePublication, ID: testPubID, Version: "v2.0",
-			Title: "A claim", Visibility: VisibilityPublic, PublishedAt: testInstant}},
+		Found: true, ProjectVisibility: VisibilityPublic, CreatedAt: testInstant,
+		Entries: []EntryState{knowledgePublication(testPubID, "v2.0", "A claim")},
 	}, testBase)
 	if !ok {
 		t.Fatal("a public knowledge object with a publication must have a feed")

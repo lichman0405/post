@@ -25,6 +25,7 @@ import (
 	"github.com/lichman0405/post/internal/domain"
 	"github.com/lichman0405/post/internal/persistence"
 	"github.com/lichman0405/post/internal/persistence/memstore"
+	"github.com/lichman0405/post/internal/rights"
 )
 
 // The Explore e2e (T0802 required test "explore e2e"): GET /api/v1/explore
@@ -127,6 +128,48 @@ func (r *exploreE2EReader) ListPublicOrganizations(context.Context) ([]explore.O
 		return nil, fmt.Errorf("fixture: the organizations reader is unavailable")
 	}
 	return r.organizations, nil
+}
+
+// exploreE2EPublishedKnowledge builds a knowledge row the NETWORK may see:
+// the version inherits the owning project's visibility, that project is
+// public, and the publication's rights declaration defers to the project's
+// policy.
+//
+// The audience inputs are not decoration (T0805). A publication exists the
+// moment someone writes it, and whether the network may read it is a SEPARATE
+// question the version's own visibility axis answers —
+// knowledgepublish.AudienceFor, the same function the publish command decides
+// with and the public read route applies. A fixture that left them zero would
+// describe a publication that is real and not the network's, which is what
+// exploreE2EWithheldKnowledge builds on purpose.
+func exploreE2EPublishedKnowledge(publicationID, objectID, title, projectID, publicVersion string, when time.Time, lifecycle string) explore.KnowledgeRow {
+	row := exploreE2EWithheldKnowledge(publicationID, objectID, title, projectID, publicVersion, when, lifecycle)
+	row.ProjectVisibility = "public"
+	row.Rights = exploreE2EProjectPolicyRights()
+	row.RightsValid = true
+	return row
+}
+
+// exploreE2EWithheldKnowledge builds a publication the NETWORK may not see:
+// the row exists and the version IS published, and the visibility axis does
+// not admit the network. Everything the two share lives here, so a change to
+// the row's shape cannot leave the two fixtures disagreeing about anything but
+// the audience.
+func exploreE2EWithheldKnowledge(publicationID, objectID, title, projectID, publicVersion string, when time.Time, lifecycle string) explore.KnowledgeRow {
+	return explore.KnowledgeRow{
+		PublicationID: publicationID, ObjectID: objectID,
+		ObjectType: "research_question", PublicVersion: publicVersion,
+		Title: title, ProjectID: projectID,
+		PublishedAt: when, LifecycleState: lifecycle,
+	}
+}
+
+// exploreE2EProjectPolicyRights is the rights declaration whose metadata axis
+// is the fail-closed default ("whatever the owning project's policy says").
+func exploreE2EProjectPolicyRights() rights.Document {
+	var doc rights.Document
+	doc.Visibility.Metadata = rights.MetadataProjectPolicy
+	return doc
 }
 
 // exploreE2EAssetPageReader is the asset hub's browse port, in-memory: the
@@ -428,23 +471,21 @@ func TestE2EExploreIndexIsTheOpenNetworksSixDimensions(t *testing.T) {
 	open, private := exploreE2EPopulate(t, env, composite)
 
 	reader.knowledge = []explore.KnowledgeRow{
-		{
-			PublicationID: "kp-open", ObjectID: exploreE2EKnowledgeOpenObjectID,
-			ObjectType: "research_question", PublicVersion: "v1",
-			Title: exploreE2EKnowledgeOpenTitle, ProjectID: open.ID,
-			PublishedAt:    time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC),
-			LifecycleState: "active",
-		},
-		{
-			// A PRIVATE project's publication: it is public knowledge
-			// (docs/12 §2 lets a private project publish) and the project
-			// behind it must not be named.
-			PublicationID: "kp-hidden", ObjectID: exploreE2EKnowledgeHidObjectID,
-			ObjectType: "research_question", PublicVersion: "v2",
-			Title: exploreE2EKnowledgeHiddenTitle, ProjectID: private.ID,
-			PublishedAt:    time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
-			LifecycleState: "superseded",
-		},
+		exploreE2EPublishedKnowledge("kp-open", exploreE2EKnowledgeOpenObjectID,
+			exploreE2EKnowledgeOpenTitle, open.ID, "v1",
+			time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC), "active"),
+		// A PRIVATE project's publication: the row exists, it is newer than
+		// the open one, and the network may NOT see it (T0805 — the
+		// publication is not a licence to hand out a private project's
+		// content, which is the rule the asset audience already ships at
+		// internal/events/subscription_store.go).
+		//
+		// It is in the fixture precisely so the assertion below can prove it
+		// was dropped: a pipeline that never saw it would pass an "is it
+		// absent" check without measuring anything.
+		exploreE2EWithheldKnowledge("kp-hidden", exploreE2EKnowledgeHidObjectID,
+			exploreE2EKnowledgeHiddenTitle, private.ID, "v2",
+			time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC), "superseded"),
 	}
 	reader.people = []explore.PersonRow{
 		{ID: "00000000-0000-4000-8000-00000000000b", Handle: "explore-bob",
@@ -506,26 +547,25 @@ func TestE2EExploreIndexIsTheOpenNetworksSixDimensions(t *testing.T) {
 		t.Fatalf("projects = %+v, want only the public project", index.Projects.Items)
 	}
 
-	// The knowledge row of the private project IS listed (it was published),
-	// with no project named.
-	var hidden *struct {
-		ID      string `json:"id"`
-		Title   string `json:"title"`
-		Project *struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		} `json:"project"`
-	}
+	// The knowledge row of the private project is NOT listed (T0805): the
+	// publication exists and the project's content is not the network's.
+	// The row was handed to the reader by the fixture above, so its absence
+	// is a decision the model made rather than a row nobody produced.
 	for i := range index.Knowledge.Items {
 		if index.Knowledge.Items[i].Title == exploreE2EKnowledgeHiddenTitle {
-			hidden = &index.Knowledge.Items[i]
+			t.Fatalf("a private project's publication was listed: %+v", index.Knowledge.Items[i])
 		}
 	}
-	if hidden == nil {
-		t.Fatalf("the published row of a private project is missing: %+v", index.Knowledge.Items)
+	// The open publication IS listed, so a section that rendered nothing
+	// cannot pass this test.
+	var listedOpen bool
+	for i := range index.Knowledge.Items {
+		if index.Knowledge.Items[i].Title == exploreE2EKnowledgeOpenTitle {
+			listedOpen = true
+		}
 	}
-	if hidden.Project != nil {
-		t.Errorf("the private project was named: %+v", hidden.Project)
+	if !listedOpen {
+		t.Fatalf("the public project's publication is missing: %+v", index.Knowledge.Items)
 	}
 
 	// The contribution is listed, and it DOES name its public project.
@@ -550,16 +590,15 @@ func TestE2EExploreNeverNamesAPrivateProject(t *testing.T) {
 	_, private := exploreE2EPopulate(t, env, composite)
 
 	reader.knowledge = []explore.KnowledgeRow{
-		{PublicationID: "kp-hidden", ObjectID: exploreE2EKnowledgeHidObjectID,
-			ObjectType: "research_question", PublicVersion: "v2",
-			Title: exploreE2EKnowledgeHiddenTitle, ProjectID: private.ID,
-			PublishedAt:    time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
-			LifecycleState: "active"},
-		{PublicationID: "kp-originless", ObjectID: exploreE2EKnowledgeOpenObjectID,
-			ObjectType: "research_question", PublicVersion: "v1",
-			Title: exploreE2EKnowledgeOriginlessTitle, ProjectID: exploreE2EPrivateFixtureProjectID,
-			PublishedAt:    time.Date(2026, 9, 8, 10, 0, 0, 0, time.UTC),
-			LifecycleState: "active"},
+		exploreE2EWithheldKnowledge("kp-hidden", exploreE2EKnowledgeHidObjectID,
+			exploreE2EKnowledgeHiddenTitle, private.ID, "v2",
+			time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC), "active"),
+		// A publication whose owning project this index never saw at all: the
+		// reader handed over the row, and the project's preset is unknown —
+		// which is not public, and is refused (T0805).
+		exploreE2EWithheldKnowledge("kp-originless", exploreE2EKnowledgeOpenObjectID,
+			exploreE2EKnowledgeOriginlessTitle, exploreE2EPrivateFixtureProjectID, "v1",
+			time.Date(2026, 9, 8, 10, 0, 0, 0, time.UTC), "active"),
 	}
 	reader.organizations = []explore.OrganizationRow{
 		// An organization whose description mentions nothing private: the
@@ -598,16 +637,25 @@ func TestE2EExploreNeverNamesAPrivateProject(t *testing.T) {
 		exploreE2EPrivateFixtureProjectID,
 	)
 
-	// The withheld rows are still LISTED — the publication and the
-	// opportunity are public (docs/12 §2/§3), and hiding them would be a
-	// second, stricter rule invented by this surface.
-	for _, want := range []string{
+	// The withheld rows are NOT listed, and the reason is T0805's rule rather
+	// than this surface's: a publication is not the network's until the
+	// visibility axis says so (owner ruling L3-20260916-1 #1, 发布不等于公开).
+	// Hiding them would NOT be the "second, stricter rule" this test once
+	// guarded against — the rule is knowledgepublish.AudienceFor, the same
+	// one the publish command decides with.
+	//
+	// The opportunity below IS listed: a contribution opportunity carries its
+	// own publicized_at state rather than inheriting a project's, which is
+	// the distinction between the two rows.
+	for _, gone := range []string{
 		exploreE2EKnowledgeHiddenTitle, exploreE2EKnowledgeOriginlessTitle,
-		"Withheld project's opportunity",
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("the public row %q is missing: the surface withheld something that is public", want)
+		if strings.Contains(body, gone) {
+			t.Errorf("the surface listed %q, whose owning project is not public", gone)
 		}
+	}
+	if !strings.Contains(body, "Withheld project's opportunity") {
+		t.Errorf("the publicized opportunity is missing: the surface withheld something that is public")
 	}
 }
 
@@ -624,18 +672,15 @@ func TestE2EExploreRanksByFreshnessAndNeverByPopularity(t *testing.T) {
 	// dates: a surface that rendered the reader's order, or that sorted by
 	// id, would produce a different list.
 	reader.knowledge = []explore.KnowledgeRow{
-		{PublicationID: "kp-old", ObjectID: "11111111-1111-4111-8111-1111111111c1",
-			ObjectType: "research_question", PublicVersion: "v1", Title: "Oldest",
-			ProjectID: open.ID, PublishedAt: time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC),
-			LifecycleState: "active"},
-		{PublicationID: "kp-new", ObjectID: "11111111-1111-4111-8111-1111111111c3",
-			ObjectType: "research_question", PublicVersion: "v1", Title: "Newest",
-			ProjectID: open.ID, PublishedAt: time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC),
-			LifecycleState: "active"},
-		{PublicationID: "kp-mid", ObjectID: "11111111-1111-4111-8111-1111111111c2",
-			ObjectType: "research_question", PublicVersion: "v1", Title: "Middle",
-			ProjectID: open.ID, PublishedAt: time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC),
-			LifecycleState: "active"},
+		exploreE2EPublishedKnowledge("kp-old", "11111111-1111-4111-8111-1111111111c1",
+			"Oldest", open.ID, "v1",
+			time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC), "active"),
+		exploreE2EPublishedKnowledge("kp-new", "11111111-1111-4111-8111-1111111111c3",
+			"Newest", open.ID, "v1",
+			time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC), "active"),
+		exploreE2EPublishedKnowledge("kp-mid", "11111111-1111-4111-8111-1111111111c2",
+			"Middle", open.ID, "v1",
+			time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC), "active"),
 	}
 	reader.people = []explore.PersonRow{
 		{ID: "u-old", Handle: "old", DisplayName: "Old", CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
@@ -703,14 +748,12 @@ func TestE2EExploreIsOneAnswerForEveryCaller(t *testing.T) {
 	env, composite := exploreE2EStack(t, reader)
 	open, private := exploreE2EPopulate(t, env, composite)
 	reader.knowledge = []explore.KnowledgeRow{
-		{PublicationID: "kp-open", ObjectID: exploreE2EKnowledgeOpenObjectID,
-			ObjectType: "research_question", PublicVersion: "v1",
-			Title: exploreE2EKnowledgeOpenTitle, ProjectID: open.ID,
-			PublishedAt: time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC), LifecycleState: "active"},
-		{PublicationID: "kp-hidden", ObjectID: exploreE2EKnowledgeHidObjectID,
-			ObjectType: "research_question", PublicVersion: "v2",
-			Title: exploreE2EKnowledgeHiddenTitle, ProjectID: private.ID,
-			PublishedAt: time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC), LifecycleState: "active"},
+		exploreE2EPublishedKnowledge("kp-open", exploreE2EKnowledgeOpenObjectID,
+			exploreE2EKnowledgeOpenTitle, open.ID, "v1",
+			time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC), "active"),
+		exploreE2EWithheldKnowledge("kp-hidden", exploreE2EKnowledgeHidObjectID,
+			exploreE2EKnowledgeHiddenTitle, private.ID, "v2",
+			time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC), "active"),
 	}
 
 	anonymous, anonResp := exploreE2EGetIndex(t, env)
@@ -746,10 +789,9 @@ func TestE2EExploreFailsWholeRatherThanShort(t *testing.T) {
 	env, composite := exploreE2EStack(t, reader)
 	open, _ := exploreE2EPopulate(t, env, composite)
 	reader.knowledge = []explore.KnowledgeRow{
-		{PublicationID: "kp-open", ObjectID: exploreE2EKnowledgeOpenObjectID,
-			ObjectType: "research_question", PublicVersion: "v1",
-			Title: exploreE2EKnowledgeOpenTitle, ProjectID: open.ID,
-			PublishedAt: time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC), LifecycleState: "active"},
+		exploreE2EPublishedKnowledge("kp-open", exploreE2EKnowledgeOpenObjectID,
+			exploreE2EKnowledgeOpenTitle, open.ID, "v1",
+			time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC), "active"),
 	}
 
 	// The healthy read first, so the failure below is a change of one

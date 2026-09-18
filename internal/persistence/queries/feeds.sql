@@ -27,13 +27,52 @@
 -- internal/assets' arrangement too (see the header of asset_page.sql).
 --
 -- What IS decided here is what a row MEANS: `visibility` comes from the row
--- that has one (research_asset_versions) or from the project that owns the
--- row for publications, which have no visibility column of their own —
--- publishing IS the public act (docs/12 §2) and the owning project is what
--- decides whether anyone outside it may reach the publication. The knowledge
--- halves need no predicate of their own: a publication's visibility IS its
--- project's, so within one target every knowledge row shares one value, and
--- the model's project gate settles all of them at once.
+-- that has one (research_asset_versions) or from the PROJECT that owns the
+-- row for publications, which have no visibility column of their own.
+--
+-- # The knowledge halves read the audience rule's inputs and apply the two cheap ones
+--
+-- A publication's visibility is NOT its project's alone, and assuming it was
+-- is a leak this file used to carry: owner ruling L3-20260916-1 #1 has
+-- knowledgepublish.AudienceFor decide over THREE inputs — the version's own
+-- visibility axis (scientific_object_versions.visibility_policy_id), the
+-- owning project's preset, and the published rights declaration's metadata
+-- token — and a members-only publication inside a PUBLIC project is legal and
+-- common (docs/12 §2: a private project may publish; 发布不等于公开).
+--
+-- Two of the three are predicates SQL can spell exactly, and the knowledge
+-- halves apply them:
+--
+--   p.visibility = 'public'                   -- axis 2
+--   sov.visibility_policy_id IS NULL          -- axis 1: a version that pins
+--                                             -- a policy of its own is
+--                                             -- governed by that policy,
+--                                             -- and this build resolves no
+--                                             -- policy into a public grant
+--
+-- The third is not spellable here, and a SQL approximation of it would be
+-- the defect in another form. The rule is "the rights document's metadata
+-- token is exactly rights.MetadataProjectPolicy, and a document this build
+-- cannot READ states no token at all" — a Go parse (internal/rights.Parse
+-- refuses unknown fields, so the same bytes can mean different things to a
+-- different build), not a JSON predicate. The declaration therefore travels
+-- back RAW (`rights_json`), and internal/application/feeds decides over it
+-- (renderableRows), fail-closed: a document that does not parse, or whose
+-- token is anything else, is not public. Both halves report `visibility` as
+-- the owning project's preset — for a publication that is one of the rule's
+-- three INPUTS, not the answer.
+--
+-- The consequence for the window is named rather than hidden, because the
+-- LIMIT is what this file's whole arrangement is about: it is EXACT for the
+-- asset half (research_asset_versions.visibility IS that half's rule) and a
+-- window over CANDIDATES for the knowledge half — a row that survives the two
+-- predicates above may still be dropped by the model's rights axis, so a
+-- project whose newest knowledge rows are all members-only can spend part of
+-- the window on rows the feed does not render, and the feed may be SHORTER
+-- than @row_limit. It can never be longer and never wrong: the model renders
+-- exactly the rows it decides are public. Widening the predicates to win the
+-- window back is not an option — that would be a second, weaker copy of the
+-- rule, which is what this split exists to prevent.
 
 -- name: GetFeedProject :one
 -- The project a project feed is about. An index lookup on the primary key:
@@ -75,28 +114,23 @@ WHERE ra.pid = @pid;
 -- name: GetFeedKnowledgeObject :one
 -- The scientific object a knowledge feed is about, addressed by its uuid.
 --
--- A knowledge object has no title of its own — the title lives on each
--- version (scientific_object_versions.title) — so the feed's title is the
--- one the object is published under: the newest publication's version
--- title, coerced to '' when the object has never been published. That empty
--- string is a state the model renders as "no feed" (a knowledge feed needs
--- at least one publication to exist at all), never as a nameless feed.
+-- The feed's TITLE is deliberately not read here. A knowledge object has no
+-- title of its own — the title lives on each version — and the title the
+-- feed may carry is the one of the newest publication the feed RENDERS,
+-- which is the audience rule's decision, not this query's: naming the feed
+-- from "the newest publication" would let a members-only revision published
+-- above an open one supply the <title> of a public document.
+-- internal/application/feeds.BuildFeed names a knowledge feed from the
+-- newest row that survived the rule (see the file header).
 --
--- The owning project travels with the row for the same reason it does on
--- the asset: its visibility is what the feed's existence is decided from.
+-- The owning project travels with the row because its visibility is both one
+-- of the three inputs the audience rule decides with and what the feed's
+-- existence is decided from.
 SELECT so.id::text AS id,
        so.object_type,
        so.created_at,
        p.visibility AS project_visibility,
-       p.name AS project_name,
-       COALESCE((
-         SELECT sov.title
-         FROM knowledge_publications kp
-         JOIN scientific_object_versions sov ON sov.id = kp.object_version_id
-         WHERE sov.object_id = so.id
-         ORDER BY kp.published_at DESC, kp.id DESC
-         LIMIT 1
-       ), '')::text AS title
+       p.name AS project_name
 FROM scientific_objects so
 JOIN projects p ON p.id = so.project_id
 WHERE so.id = @object_id::uuid;
@@ -105,8 +139,8 @@ WHERE so.id = @object_id::uuid;
 -- The newest versions of one project that a public feed may render — its
 -- assets' public versions and its objects' knowledge publications — newest
 -- first. Private asset versions are filtered out by the read strategy above;
--- the knowledge half needs no predicate because a publication's visibility
--- IS its owning project's.
+-- the knowledge half applies the two cheap predicates and hands the rights
+-- document back raw for the model to decide over (see the file header).
 --
 -- The two halves are UNION ALL'd rather than merged in Go so that ONE
 -- ordering and ONE limit apply to the union: taking the newest N of each
@@ -122,6 +156,11 @@ WHERE so.id = @object_id::uuid;
 -- public identity (a live profile is a public read, T0102); a missing user
 -- row renders as no author rather than as an error, because the feed's
 -- subject is the version, not the account.
+-- The last two columns are the audience rule's remaining inputs, and they
+-- are NULL on the asset half rather than defaulted: an asset version has no
+-- visibility policy of its own and no rights declaration, and inventing a
+-- value there would be a value a reader could mistake for a fact. The model
+-- reads them for knowledge rows only (feeds.EntryState).
 SELECT 'asset_version'::text AS entry_kind,
        av.id::text AS entry_id,
        av.version,
@@ -130,7 +169,9 @@ SELECT 'asset_version'::text AS entry_kind,
        ra.title,
        av.visibility,
        av.published_at,
-       COALESCE(u.handle, '')::text AS publisher
+       COALESCE(u.handle, '')::text AS publisher,
+       NULL::uuid AS visibility_policy_id,
+       NULL::jsonb AS rights_json
 FROM research_asset_versions av
 JOIN research_assets ra ON ra.id = av.asset_id
 LEFT JOIN users u ON u.id = av.published_by
@@ -143,15 +184,19 @@ SELECT 'knowledge_publication'::text,
        ''::text,
        so.object_type,
        sov.title,
-       p.visibility,
+       p.visibility,                        -- the audience rule's project axis
        kp.published_at,
-       COALESCE(u.handle, '')::text
+       COALESCE(u.handle, '')::text,
+       sov.visibility_policy_id,            -- the audience rule's version axis
+       kp.rights_json                       -- read RAW: internal/rights decides
 FROM knowledge_publications kp
 JOIN scientific_object_versions sov ON sov.id = kp.object_version_id
 JOIN scientific_objects so ON so.id = sov.object_id
 JOIN projects p ON p.id = so.project_id
 LEFT JOIN users u ON u.id = kp.published_by
 WHERE so.project_id = @project_id::uuid
+  AND p.visibility = 'public'
+  AND sov.visibility_policy_id IS NULL
 ORDER BY published_at DESC, entry_id DESC
 LIMIT @row_limit;
 
@@ -176,26 +221,42 @@ ORDER BY av.published_at DESC, av.id DESC
 LIMIT @row_limit;
 
 -- name: ListFeedKnowledgeEntries :many
--- One knowledge object's publications, newest first.
+-- One knowledge object's publications that a public feed may render, newest
+-- first: the project half above, one target narrower.
 --
--- A publication has no visibility column: publishing a version onto the
--- network IS the public act (docs/12 §2), and the owning project's
--- visibility is what decides whether anyone outside it may reach it — so
--- that is the value this query reports as the entry's visibility, exactly
--- as the subscription audience resolution does for the same target type
--- (internal/events/subscription_store.go).
+-- The two predicates are the audience rule's first two axes and nothing
+-- else (see the file header): a version that pins a visibility policy of its
+-- own is governed by that policy, and this build resolves no policy into a
+-- public grant; a private project's content is invisible outside it (docs/12
+-- §2 — a private project may publish, and publishing does not widen). The
+-- rights axis is NOT spelled here: the declaration travels back raw and
+-- internal/application/feeds decides over it, fail-closed on a document this
+-- build cannot read.
+--
+-- `visibility` is the owning project's preset — one of the rule's three
+-- INPUTS, never the answer — and it is the same value for every row of one
+-- target, because every row belongs to the same project.
+--
+-- visibility_policy_id comes back with it even though the predicate above
+-- has already excluded every row that pins one: the model re-checks the axis
+-- it is given (feeds.EntryState), so a query edit that dropped the predicate
+-- would render a shorter feed rather than a wider one.
 SELECT kp.id::text AS entry_id,
        kp.public_version AS version,
        sov.title,
        so.object_type AS subject_type,
        p.visibility,
        kp.published_at,
-       COALESCE(u.handle, '')::text AS publisher
+       COALESCE(u.handle, '')::text AS publisher,
+       sov.visibility_policy_id AS visibility_policy_id,
+       kp.rights_json
 FROM knowledge_publications kp
 JOIN scientific_object_versions sov ON sov.id = kp.object_version_id
 JOIN scientific_objects so ON so.id = sov.object_id
 JOIN projects p ON p.id = so.project_id
 LEFT JOIN users u ON u.id = kp.published_by
 WHERE so.id = @object_id::uuid
+  AND p.visibility = 'public'
+  AND sov.visibility_policy_id IS NULL
 ORDER BY kp.published_at DESC, kp.id DESC
 LIMIT @row_limit;

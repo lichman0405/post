@@ -5,9 +5,11 @@ import (
 	"errors"
 	"time"
 
+	"github.com/lichman0405/post/internal/application/knowledgepublish"
 	"github.com/lichman0405/post/internal/assets"
 	"github.com/lichman0405/post/internal/contribution"
 	"github.com/lichman0405/post/internal/domain"
+	"github.com/lichman0405/post/internal/rights"
 )
 
 // ErrStore reports a reader that failed. The transport answers 503 (docs/45:
@@ -84,10 +86,54 @@ type KnowledgeRow struct {
 	PublishedAt time.Time
 	// LifecycleState is the published version's own state (docs/43).
 	LifecycleState string
+	// AudienceFor's three inputs, carried RAW so Published can apply the
+	// rule itself rather than trust a reader's filter.
+	//
+	// This section is the one that made them necessary (T0805): before the
+	// publish path existed this query had no writer and read nothing, and
+	// the moment it does, an unfiltered read here is an anonymous read of
+	// every publication — including one whose version is visibility
+	// restricted in a PUBLIC project, which the publication decision
+	// deliberately admits (发布不等于公开). The audience rule is
+	// knowledgepublish.AudienceFor and it lives in Go; the adapter reads
+	// these three columns and applies IT, and Published re-applies it, so
+	// there is one definition of "may the network see this" and a reader
+	// regression renders a shorter index rather than a leak.
+	//
+	// VisibilityPolicyID is the version's OWN axis
+	// (scientific_object_versions.visibility_policy_id): nil means it
+	// inherits the project's visibility.
+	VisibilityPolicyID *string
+	// ProjectVisibility is projects.visibility ('public' or 'private').
+	ProjectVisibility string
+	// Rights is the publication's stored rights declaration, parsed.
+	// RightsValid is false when the stored bytes are not a document this
+	// build can read; AudienceFor refuses an unreadable declaration rather
+	// than treating it as a licence to print.
+	Rights      rights.Document
+	RightsValid bool
 }
 
-// Published reports whether this row is a publication.
-func (r KnowledgeRow) Published() bool { return r.PublicationID != "" }
+// Published reports whether this row is a publication the NETWORK may see —
+// two questions, and the second is not a formality: a publication exists
+// (PublicationID is set) as soon as someone published it, and a version can
+// be published and still not be the network's (owner ruling L3-20260916-1
+// #1: publishing records a state; visibility is the version's own axis).
+//
+// The audience decision is knowledgepublish.AudienceFor — the same function
+// the publish command decides with and the public read route applies — so
+// this anonymous surface cannot become a wider reader than the publication's
+// own page.
+func (r KnowledgeRow) Published() bool {
+	if r.PublicationID == "" {
+		return false
+	}
+	if !r.RightsValid {
+		return false
+	}
+	return knowledgepublish.AudienceFor(r.ProjectVisibility, r.VisibilityPolicyID, r.Rights) ==
+		knowledgepublish.AudienceNetwork
+}
 
 // PersonRow is one account with a research profile as the reader resolved
 // it. It carries identity and profile fields only: users.email is never

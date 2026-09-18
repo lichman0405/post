@@ -53,6 +53,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/freezehttp"
 	"github.com/lichman0405/post/cmd/api/gittokenshttp"
 	"github.com/lichman0405/post/cmd/api/inboxhttp"
+	"github.com/lichman0405/post/cmd/api/knowledgehttp"
 	"github.com/lichman0405/post/cmd/api/mergegit"
 	"github.com/lichman0405/post/cmd/api/mergehttp"
 	"github.com/lichman0405/post/cmd/api/milestonehttp"
@@ -78,6 +79,7 @@ import (
 	appcontribution "github.com/lichman0405/post/internal/application/contribution"
 	"github.com/lichman0405/post/internal/application/diffs"
 	"github.com/lichman0405/post/internal/application/feeds"
+	"github.com/lichman0405/post/internal/application/knowledgepublish"
 	"github.com/lichman0405/post/internal/application/mainfreeze"
 	"github.com/lichman0405/post/internal/application/manifests"
 	"github.com/lichman0405/post/internal/application/merge"
@@ -707,6 +709,47 @@ func run(args []string) int {
 		Members: projectAPI.Service(),
 	})
 	assetsAPI.Register(v1)
+	// Knowledge publication (T0805): the missing publish path for
+	// knowledge_publications — the table has existed since migration 00010
+	// with no writer, while the event name
+	// (knowledge.version_published, specs/events/event-types.yaml) and the
+	// public read route (GET /knowledge/{knowledgeId}) were already in
+	// place. The pair mirrors the asset publish step for step: the preview
+	// is a PROPOSAL (specs/mcp/tools.json: knowledge.publish_preview, args
+	// knowledge_version_ref + rights) and the publish is the human
+	// governance action (publish_private_to_public in the permission
+	// matrix: only the owner's cell is `allow` in V1, a maintainer's is
+	// `conditional` and an unresolved condition is a refusal — issue #237).
+	//
+	// 发布不等于公开: publishing records a STATE and widens nothing. The
+	// visibility axis is the one that already existed,
+	// scientific_object_versions.visibility_policy_id (migration 00005),
+	// and it is the version's OWN axis that the public read judges by —
+	// not the owning project's preset (knowledgepublish.AudienceFor).
+	//
+	// The review middle cell of docs/43's publication state machine
+	// (private candidate → publication_review → published) is the EXISTING
+	// research-PR review record: the same ListReleaseReviews lineage read
+	// the release gate makes, re-run inside the publish transaction, so
+	// there is no path to `published` that did not go through review.
+	knowledgePublishStore := persistence.NewKnowledgePublishStore(pool)
+	knowledgePublishCommand := knowledgepublish.NewCommand(knowledgepublish.Deps{
+		Members: persistence.NewProjectStore(pool),
+
+		Store: knowledgePublishStore,
+		Authz: authz.NewMatrixEngine(),
+	})
+	knowledgeAPI := knowledgehttp.New(knowledgehttp.Deps{
+		Publish: knowledgePublishCommand,
+		Read:    knowledgePublishStore,
+		// The read gate and the membership read are the SAME project
+		// service the asset page uses: GetMembership re-runs the project
+		// read gate first, and a second implementation of "is this caller
+		// a member" would be a second answer to it.
+		Projects: projectAPI.Service(),
+		Members:  projectAPI.Service(),
+	})
+	knowledgeAPI.Register(v1)
 	// The Explore index (T0802): the six dimensions of docs/05 §6 in one
 	// anonymous read. Three of its six sections are the platform's EXISTING
 	// public reads, not new ones — the public project list, the asset hub's

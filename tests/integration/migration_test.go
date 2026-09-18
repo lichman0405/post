@@ -606,11 +606,34 @@ var canonicalTables = map[string]tableExp{
 		// rights_json carries the same rights document as an asset
 		// version's, so 00066 (T0703) constrains it the same way: a JSON
 		// object, with the vocabulary left to internal/rights.
-		cols:    []colExp{c("id", u, false, true), c("object_version_id", u, false, false), c("public_version", txt, false, false), c("rights_json", jb, false, false), c("published_by", u, false, false), c("published_at", ts, false, true)},
+		//
+		// pid is the T0805 (00083) addition: the publication's persistent
+		// identity, minted at publication like a research asset's (00064)
+		// and checked against the same 26-character Crockford base32 shape
+		// the Go predicate (assets.ValidPID) and the asset column's own
+		// CHECK use. It carries the column DEFAULT — the fallback for a row
+		// inserted by something that is not the publish command — and its
+		// uniqueness is the explicit index below, deliberately NOT a
+		// constraint: the publish path mints the pid in Go.
+		cols:    []colExp{c("id", u, false, true), c("object_version_id", u, false, false), c("public_version", txt, false, false), c("rights_json", jb, false, false), c("published_by", u, false, false), c("published_at", ts, false, true), c("pid", txt, false, true)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"object_version_id", "public_version"}},
-		checks:  []string{"jsonb_typeof(rights_json) = 'object'"},
+		checks:  []string{"jsonb_typeof(rights_json) = 'object'", "pid ~"},
 		fks:     []fkExp{fk("object_version_id", "scientific_object_versions", "RESTRICT"), fk("published_by", "users", "RESTRICT")},
+	},
+	// 00083 (T0805): the Idempotency-Key ledger of a knowledge object
+	// version's PUBLICATION — the fourth ledger of this shape, and the
+	// second one scoped to a PUBLISH (asset_publish_creations is the other).
+	// The publication it points at is immutable, so a retried publish must
+	// answer with the row the first request wrote rather than write a second
+	// one: UNIQUE(project_id, idempotency_key) below is that guarantee, and
+	// publication_id is RESTRICT because a ledger entry without its
+	// publication would turn a replay into a miss.
+	"knowledge_publication_creations": {
+		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("idempotency_key", txt, false, false), c("publication_id", u, false, false), c("created_at", ts, false, true)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"project_id", "idempotency_key"}},
+		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("publication_id", "knowledge_publications", "RESTRICT")},
 	},
 	"external_references": {
 		cols:    []colExp{c("id", u, false, true), c("source_type", txt, false, false), c("external_identifier", txt, false, false), c("canonical_url", txt, true, false)},
@@ -1049,6 +1072,12 @@ var explicitIndexes = map[string][]string{
 	"outbox_events_fanout_pending_idx":             {"webhook_fanned_out_at IS NULL"},
 	"project_milestones_timeline_idx":              {"project_id", "occurred_at", "created_at", "id"},
 	"research_assets_pid_uniq":                     {"pid", "UNIQUE"},
+	// T0805 (00083): the published knowledge object's persistent identity is
+	// unique across the table for the same reason an asset's is — a pid is
+	// what a citation resolves and what GET /knowledge/{knowledgeId} is
+	// addressed by, so two rows answering to one pid is the identity
+	// failing.
+	"knowledge_publications_pid_uniq": {"pid", "UNIQUE"},
 	// T0406: the merge record's read paths (00069) — a project's merges
 	// newest-first, and the saga's retry scan over merges whose Git step has
 	// not happened yet (partial: an updated merge never needs the step
@@ -1272,6 +1301,7 @@ func TestUpgradePath(t *testing.T) {
 		"contribution_opportunities",
 		"project_milestones", "project_milestone_creations",
 		"asset_publish_creations",
+		"knowledge_publication_creations",
 		"asset_version_parties", "asset_rights_holder_events",
 	}
 	for _, name := range present {
