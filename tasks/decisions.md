@@ -11378,3 +11378,42 @@ ours = 任务树，theirs = `origin/main`），**冲突是结构性的，不是�
 **校验前先对副本做归一化**，而那会连带决定「非 uuid 的 id 得到哪个错误码」
 （今天是命名的 `ASSET_NO_CONTRIBUTORS`，改后会变成 `SCHEMA_VALIDATION_FAILED`）——
 **这是客户端可见的契约变化，不是 Supervisor 顺手一笔。**
+
+## 核账：`tasks/packages/**` 里「搁浅」的东西到底是什么（2026-09-18）
+
+`tasks/packages/` 是 Supervisor 的暂存区（`README.md` 自己写明：**没有任何程序读它**，
+任务规格的唯一真相源是 `tasks/tasks.json`）。今天把 23 份任务书与 `tasks/tasks.json`
+逐字段比了一遍，结论分三类：
+
+**(1) T1003/T1004/T1005（都已合并）：它们的裁定确实没进 `tasks.json`——但裁定送到了人手上。**
+这三条任务书带 `supervisor_scope_narrowing`（T1003 2900 字、T1004 1512 字、T1005 2033 字），
+而 `tasks/tasks.json` 里对应条目**没有这个字段**（`#274` 修好之前渲染器会整段丢掉它，
+所以当时我是**用返工信把裁定原文送达的**）。证据逐字在 `.rddev/workers/T1005/prompt.md:97`：
+「**这一轮不会出现 `## Supervisor rulings for this task` 一节。这封信就是裁定的送达方式**」，
+下面四条原文俱全。**所以这不是「裁定丢失」，是「送达渠道不同」**——补进 `tasks.json` 是记账，
+不是纠错。
+
+**顺手核了 T1005 三条最可证伪的裁定在 main 上的合规**（合并后抽查，不是重审）：
+dev mail sink 未设 `POST_MAIL_SINK_DIR` 时是关闭而非报错（`internal/application/notifications/config_test.go:23`）、
+sink 产物进 `.gitignore`（`.gitignore:11`）、**没有**造出独立的退订开关
+（`unsubscribe` 在树里只出现在既有的软删订阅机制与注释里）。三条都对得上。
+
+**(2) T0604/T0707/T0804（未合并）：只有过时的规格引用，裁定本身在 `tasks.json` 里。**
+三份任务书的 `relevant_specs` 比 `tasks.json` 新，差的不是裁定而是**路径**：
+
+| 任务 | `tasks.json` 里写的 | 实际存在的是 |
+|---|---|---|
+| T0604 | `docs/12_AUTHORIZATION.md` §5 | `docs/12_PERMISSIONS_RIGHTS_POLICY.md` |
+| T0804 | `docs/12_AUTHORIZATION.md` §5 | `docs/12_PERMISSIONS_RIGHTS_POLICY.md` |
+| T0707 | `infra/migrations/00045_...sql:47-58`（缩写的文件名） | 全名 `00045_external_reference_live_identity_and_snapshot.sql` |
+| T0604 | `internal/application/merge/service.go:215-217` | 任务书写的是 `:428-430`（行号已漂移） |
+
+**为什么现在不动**：`tasks/tasks.json` 是指纹输入，**有 worker 在飞时改它会让 main 与在飞任务的
+G2 同时变红**（见「State commits move the spec digest」那一节的同一条规矩）。落地的窗口是
+**下一次没有 worker 在跑的间隙**，顺序照 `tasks/packages/README.md`：
+`apply-packages.py --dry-run` → 落地 → `spec_version.py --write` → `validate_task_state.py`。
+**代价**：主仓库里有两份文档都叫 `docs/12_*` 的时代风险就此消掉——写任务书时核对过文件名，
+写进 `tasks.json` 时写串了，而**没有任何检查会读 `relevant_specs` 的路径是否存在**
+（`validate_task_state.py` 不查），所以它一直没被发现。
+
+**(3) T0806/T0807/T0811/T090x 等未来任务：任务书已在 `tasks.json` 里，不需要落地。**
