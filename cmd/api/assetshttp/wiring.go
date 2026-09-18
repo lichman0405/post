@@ -54,16 +54,20 @@ type Deps struct {
 	// view of an asset from the network's (T0709). The production value is
 	// the same *projects.Service the Projects gate is.
 	Members Membership
+	// Dependencies is the project-side dependency read (T0707). The
+	// production value is *persistence.ProjectDependencyStore.
+	Dependencies DependencyReader
 }
 
 // New wires the handlers.
 func New(deps Deps) *API {
 	return &API{handlers: &handlers{
-		state:    deps.State,
-		projects: deps.Projects,
-		publish:  deps.Publish,
-		pages:    deps.Pages,
-		members:  deps.Members,
+		state:        deps.State,
+		projects:     deps.Projects,
+		publish:      deps.Publish,
+		pages:        deps.Pages,
+		members:      deps.Members,
+		dependencies: deps.Dependencies,
 	}}
 }
 
@@ -100,4 +104,9 @@ func (a *API) Register(v1 *http.ServeMux) {
 	// mounted here anyway.
 	v1.HandleFunc("GET /api/v1/assets/{assetId}", a.handlers.handleAssetPage)
 	v1.HandleFunc("GET /api/v1/assets", a.handlers.handleAssetBrowse)
+	// The project-side dependency read (T0707). Not a contract path: see
+	// dependencies.go for why it is mounted here anyway. The pattern is
+	// under the projects subtree the project surface owns, and it is more
+	// specific than that subtree's routes, so the two coexist.
+	v1.HandleFunc("GET /api/v1/projects/{projectId}/dependencies", a.handlers.handleProjectDependencies)
 }

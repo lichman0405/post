@@ -101,6 +101,16 @@ type PublishRequest struct {
 	// TargetRef is left empty by the command: the store fills it with
 	// "asset_version:<id>" once the insert has assigned the id.
 	Audit domain.AuditEntry
+	// Usages are the asset_dependencies rows this publish declares: the
+	// project's use of each exact version its manifest pins
+	// (assets.PublishedUsages — a pin is a dependency, and the usage's own
+	// visibility is the published version's). The command computes them,
+	// the way it computes the audit row above; the store records exactly
+	// what it is handed, and it drops the ones whose pin resolves to no
+	// stored version — there is no row id to key a usage by, and an
+	// unresolved pin is a fact about the publisher's document rather than a
+	// version anybody uses.
+	Usages []assets.UsageDeclaration
 	// IdempotencyKey is the caller's key, or nil when the request
 	// carried none.
 	IdempotencyKey *string

@@ -43,7 +43,16 @@ WHERE pid = @pid;
 -- A pin with no row here does not exist; the caller reports that as an
 -- unresolved dependency, which is why the query returns what it finds
 -- rather than a row per requested pin.
+--
+-- The version row's own id comes back beside its visibility because the
+-- resolution is shared: the publish's transaction runs this same read to
+-- decide the preview's private-dependency blockers, and what it has to WRITE
+-- afterwards — the asset_dependencies row recording the project's use of the
+-- pinned version (T0707) — is keyed by that id. Carrying it here is what
+-- keeps "does this pin resolve, and to which row" one answer instead of two
+-- joins that could drift apart; the read-only preview surfaces ignore it.
 SELECT (ra.pid || '@' || rav.version)::text AS pin,
+       rav.id::text AS version_id,
        rav.visibility
 FROM research_asset_versions rav
 JOIN research_assets ra ON ra.id = rav.asset_id

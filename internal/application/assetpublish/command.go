@@ -240,6 +240,7 @@ func (c *Command) Publish(ctx context.Context, actor Actor, in PublishParams) (P
 		Title:          title,
 		Actor:          actor,
 		Audit:          auditEntry(actor.User, in.ProjectID, candidate),
+		Usages:         declaredUsages(candidate),
 		IdempotencyKey: in.IdempotencyKey,
 	})
 	if err != nil {
@@ -514,6 +515,34 @@ func mapPublishError(err error) error {
 		return err
 	}
 	return fmt.Errorf("%w: %v", ErrStore, err)
+}
+
+// declaredUsages renders the asset_dependencies rows the publish declares:
+// one depends_on usage of the project for every exact version the version's
+// manifest pins, at the version's own visibility (assets.PublishedUsages —
+// the rule and its citations live there, in internal/assets, where it has
+// unit tests; this function only hands it the document).
+//
+// The manifest is read here rather than pulled out of the gate's result
+// because the command runs BEFORE the store's transaction and has no gate
+// result: the store re-parses the same bytes inside the transaction (it runs
+// the gate), and the two readings are of one immutable byte string, so they
+// cannot disagree. A manifest the parser refuses yields no declarations —
+// the store's gate refuses the publish outright, and a publish that is not
+// going to happen declares nothing.
+//
+// Note what is deliberately NOT here: no usage is recorded for the publish's
+// own asset version, and no visibility is taken from the request. The first
+// is a versioning question (a version's dependence on itself is refused by
+// the gate, and an asset's versions are not "used" by the project that
+// publishes them — they are published by it); the second would need a field
+// the contract does not have (assets.UsageDeclaration's file comment).
+func declaredUsages(candidate assets.PublishCandidate) []assets.UsageDeclaration {
+	manifest, err := assets.ParseManifest(candidate.Manifest)
+	if err != nil {
+		return assets.PublishedUsages(nil, candidate.Visibility)
+	}
+	return assets.PublishedUsages(manifest.DependencyPins, candidate.Visibility)
 }
 
 // auditEntry renders the audit row the store appends inside the publish

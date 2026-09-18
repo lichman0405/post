@@ -213,6 +213,7 @@ func (s *AssetStateStore) pins(ctx context.Context, pins []assets.DependencyPin)
 	for _, row := range rows {
 		out = append(out, assets.StoredPin{
 			Pin:        assets.DependencyPin(row.Pin),
+			VersionID:  row.VersionID,
 			Visibility: assets.Visibility(row.Visibility),
 		})
 	}
