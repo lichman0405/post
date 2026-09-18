@@ -257,8 +257,11 @@
   text-decoration: underline;
 }
 
-/* A target the caller may no longer read: the id and the count stay (they
-   were delivered) but there is nothing to link to and no name to show. */
+/* A target with no page to point at (knowledge, organizations — EntryURL
+   answers ""): the row shows its identity instead of a link that would
+   404. A target the caller may no longer read does NOT reach this rule —
+   the audience resolution is fail-closed, so such an entry is not rendered
+   at all. */
 .inbox-target[data-inbox-target-nolink] {
   color: var(--fgColor-muted, #59636e);
 }

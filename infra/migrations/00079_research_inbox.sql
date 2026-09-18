@@ -53,9 +53,16 @@ COMMENT ON COLUMN subscription_deliveries.read_at IS
 -- The mass "mark my inbox read" update: one subscriber's unread delivered
 -- web rows. The predicate and the leading column are the WHERE clause of
 -- markInboxAllRead (internal/events/inbox_store.go) — user_id,
--- channel = 'web', status = 'delivered', read_at IS NULL — matched
--- element for element, so the statement has an index of its own shape to
--- find its rows through.
+-- channel = 'web', status = 'delivered', read_at IS NULL — so the
+-- statement has an index of its own shape to find its rows through.
+--
+-- The statement also carries an audience test (a (target_type, target_id)
+-- IN (…) list built from the caller's visible targets, ruling 5 of T1003),
+-- and this index does NOT cover it: the list is per call and not a column
+-- of this table, so no index can. It is applied to the rows this index
+-- finds, which is the cheap order — the index narrows to one subscriber's
+-- unread rows first, and the audience test then removes the few the caller
+-- may no longer read.
 --
 -- It does NOT answer the badge or the "unread" view, and no index of that
 -- shape can: the entries read needs the READ rows too (an entry's count is

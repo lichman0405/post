@@ -11091,3 +11091,16 @@ schema snapshot 与 spec version 校验；并用 mtime 取证确认第三轮只�
 **根因修复**（把搁浅的裁定从 `tasks/packages/**` 搬进 `tasks/tasks.json`）**必须等空窗**：
 `tasks/tasks.json` 是 spec digest 的输入，改它就要重新生成标记，而标记一动，main 与每个在飞任务的
 G2 都会变红。剩下唯一受影响的任务是 T1005，它的信已经写好，所以这个修复不阻塞链。
+
+## 暂存任务包与台账的第二个分歧面：范围也会不一致（2026-09-18）
+
+裁定送达的根因（同一文件上一节）是：**运行时不读 `tasks/packages/**`，只读 `tasks/tasks.json`**。今天在 T1005 上发现同一分歧的**第二个面**——不只是裁定，**写入范围也会两边不一致**。
+
+- `tasks/packages/T1005.json` 的 `scope_note` 逐字写着：「相对 DAG 里的 phase 级默认值：**加** `.gitignore`（sink 产物必须被 git 忽略，见决定二——DAG 默认范围里没有它，不加就落不了地）」。
+- 而**渲染进 T1005 任务书的 `tasks/tasks.json` 条目里没有 `.gitignore`**，`allowed_scope` 13 条逐条比对确认。工人手上的 prompt「Allowed scope」一节也没有它。
+
+结论：**scope 的真相源是 `tasks/tasks.json`**（scope 校验、G2 都按它判）。包里的 `scope_note` 自述「加过」是一句无法兑现的话——因为**没有任何代码读它**。
+
+处置：`.gitignore` 那一行由 **Supervisor** 加（`.gitignore` 不在工人范围内，越界会被 scope 检查拒），已在 `cea32b0` 落进 main；T1005 的返工信里已把这处不一致点名给工人，并写明「以你手上这份任务书为准」。
+
+**给后续派工的规则**（补进上面那条根因的处置）：派工前若改了范围，**改的是 `tasks/tasks.json`**；`tasks/packages/**` 里的任何字段都不具有运行时效力，**不要在那里写只有运行时才能兑现的承诺**。
