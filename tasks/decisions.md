@@ -10956,3 +10956,61 @@ stop the driver, run `make rddev`, then start it again.」（绕过要显式说�
 **教训（写给以后的自己）**：`task_status.json` 的 `notes` **不是真相源**，它只是当时的记录；
 链条上真正会拦住我的是**我照旧笔记做出的判断**。走到某一环之前，先核**它自己的 requirement 与
 裁定**，**不要核它的 `notes`**。
+
+### 裁定五：整箱已读只许标「调用者当前会被服务到的东西」（T1003 第三轮）
+
+**背景**：T1003 第二轮独立评审判 **approve（0 阻断）**，但它同时指出一件**我没有裁定过**的事，并把话挑明：
+「today it is an undecided product-semantics change under a green test」。那句话是冲我来的——
+**裁定该我出，不能留一条「绿灯下的未定语义」在 main 上。**
+
+**事实（我逐行核过，代码是 merge-base `91c7e24` 里没有的新代码）**：`markInboxAllRead` 的 `WHERE`
+子句里**没有受众**：
+
+    WHERE user_id = $1::uuid AND channel = 'web' AND status = 'delivered' AND read_at IS NULL
+
+而决定三把读侧做成了 fail-closed：`AudienceNone` 的目标**整条从两个视图和红点里剔除**。
+于是同一个交付物里出现两个互相矛盾的模型：**读侧说「你看不到它」，写侧却照样把它标成已读**。
+评审在真实链路上复现：红点 1、页面服务 1 条（所以 UI 的「全部已读」此刻**可点**），
+`read-all` 却标了 5 行；**权限恢复后，那条从未被展示过的条目带着已读状态回来**。
+
+**裁定：收窄。** 整箱已读必须与读侧走**同一套**受众解析（复用 `inboxVisibleTargets`），
+`AudienceNone` 的目标下面的行**不许被标记**；解析失败仍然返回错误，不许当成 `AudienceNone`。
+理由三条：
+
+1. **同一个文件里的两条规则必须一致。** 这个交付物自己写着规则 2（`internal/events/inbox.go:36-40`）：
+   「**Marking read is scoped to what was SHOWN** … so a notification that arrives a second later is
+   **not swept into a read it never had**」——理由句正是「不许把从未被展示过的东西扫进一次已读」。
+   规则 3（同文件 `:42-51`）说「能展示什么由当前受众 fail-closed 解析」。那么「能标记什么」只能由
+   同一套解析决定。`MarkInboxRead`（标单条）的锚点来自读侧返回的 id，天然被读侧限定；
+   **`markInboxAllRead` 是全包唯一一条不经过受众解析的写路径。**
+2. **不可逆 + 看不见 = 默认收紧。** `read_at` 单向、无反向操作。对一个调用者**自己看不到**的行做不可逆的
+   状态迁移，是用户点这个按钮时**既无法预测、也无法验证**的动作。
+3. **失效的理由不能当理由用。** `markInboxAllRead` 上方那句注释为「广」给出的唯一理由是
+   「a partial mark that left rows **the badge still counts** would make the button a lie」——
+   决定三之后红点**不再数**那些行，前提不成立。这正是任务书毛病(1)那一类
+   （「注释里写着一个不成立的理由，比没有注释更糟」），我按同一把尺子处理。
+
+**这不是新造产品语义，是让实现回到它自己写下的规则。** 也**不是**要动投递行：
+`inbox.go:49-51` 明写受众规则是**渲染规则**（「the rule is about what may still be rendered from it」），
+所以标记与渲染用同一套解析即可，数据不动。
+
+同轮一并要求（都不涉及语义，纯属把话说对/把测试补齐）：客户端三处注释还在教决定三**已作废**的旧语义
+（`target_label === ""` 现在只表示「该类型还没有命名查询」，不表示「读不到」——照旧注释写客户端的人会为
+knowledge/organization 行渲染一个**「无权访问」的假状态**）；`inbox_store.go:25-26` 与 `:164-165` 声称
+distinct target 列表「bounded by MaxSubscriptionsPerUser」，但 `DeleteSubscription` 是软删
+（`subscription_store.go:145`），投递行按设计保留，**这个界 schema 并不提供**；
+外加补一条保护 owner 谓词的测试（评审证明该突变能活过全部五个 `TestInbox*`）。
+
+**留给以后的自己**：评审的这条是「不阻断」，而**我仍然返工**——因为「不阻断」说的是**合并不会出错**，
+不是「这语义已经定了」。**绿灯 + 未定语义 ≠ 可以收**。反过来说，我也没有把它当缺陷去罚工人：
+它的第二轮没有违反任何既有裁定，**是规则没写完，不是它没照做**——信里我写清了这一点。
+
+### 顺带记录：这一轮我犯的两个错，都记在这里
+
+1. **「链尾三环的已知拦路石」是假的**（详见上面那条更正）——我照着一份没翻新的旧笔记，又造了一块
+   不存在的石头。**教训：判断某一环之前，核它自己的要求与裁定，不要核 `task_status.json` 的 `notes`。**
+2. **T0804 的驳回是我发错的**：它的 collect **14 项检查全部通过**（28 个改动路径全在范围内、11 条测试全过），
+   被挡只是因为**我在它运行期间建了一条分支**（`infra/deliver-supervisor-narrowing`），收集阶段照规矩报了
+   「new ref」。**错在我不该在那时建它，不在它。** 它的返工信**第一段就是撤回**，免得工人以为自己做错了什么。
+   （`rejected` 没有直通 `verification` 的边，所以必须重派一次才能让它的成果重新进入验收——这不是它的成本，
+   是我的。）
