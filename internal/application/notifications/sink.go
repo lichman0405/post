@@ -75,10 +75,17 @@ func NewDevSink(dir string, opts ...DevSinkOption) (*DevSink, error) {
 	return s, nil
 }
 
-// Send implements Mailer by writing the message to a new file and returning
-// the path it wrote. The file is written whole (O_CREATE|O_EXCL via a
-// generated name), so a retried send leaves two messages rather than one
-// half-written one, and nothing already in the directory is ever touched.
+// Send implements Mailer by writing the message to a new file. The path is
+// logged rather than returned: a Mailer answers with whether the message was
+// handed over and nothing else. The bytes go out in one os.WriteFile call, so
+// a retried send leaves two whole messages rather than one half-written one.
+//
+// What keeps an existing message from being touched is the generated name,
+// not the open flags: os.WriteFile opens with O_TRUNC, so a name that
+// collided would truncate the message already sitting there. The name carries
+// the send's timestamp to the nanosecond plus 8 random hex characters, and
+// that — not O_EXCL, which this call does not pass — is what the property
+// rests on.
 func (s *DevSink) Send(ctx context.Context, m Mail) error {
 	if err := ctx.Err(); err != nil {
 		return err
