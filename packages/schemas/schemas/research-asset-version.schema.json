@@ -47,8 +47,7 @@
     "creator_ids": {
       "type": "array",
       "items": {
-        "type": "string",
-        "format": "uuid"
+        "type": "string"
       }
     },
     "integrity_hash": {
