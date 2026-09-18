@@ -11104,3 +11104,81 @@ G2 都会变红。剩下唯一受影响的任务是 T1005，它的信已经写�
 处置：`.gitignore` 那一行由 **Supervisor** 加（`.gitignore` 不在工人范围内，越界会被 scope 检查拒），已在 `cea32b0` 落进 main；T1005 的返工信里已把这处不一致点名给工人，并写明「以你手上这份任务书为准」。
 
 **给后续派工的规则**（补进上面那条根因的处置）：派工前若改了范围，**改的是 `tasks/tasks.json`**；`tasks/packages/**` 里的任何字段都不具有运行时效力，**不要在那里写只有运行时才能兑现的承诺**。
+
+## 契约里有一条「声明了但没人实现」的路径（2026-09-18）
+
+补 T1004 的 feed 契约（裁定四）时对着 `specs/api/openapi.yaml` 核了一遍路由与实现，发现：
+
+- `specs/api/openapi.yaml:293` 声明了 `GET /knowledge/{knowledgeId}`（即 `/api/v1/knowledge/{knowledgeId}`），
+  标注 `security: []`（公开读）。
+- **`cmd/` 下没有任何路由注册它**：全仓库 `api/v1/knowledge` 的唯一命中是 T1004 新加的
+  `cmd/api/feedshttp/wiring.go:54`（`GET /api/v1/feeds/knowledge/{objectId}`，另一条路径）。
+  也没有 `knowledgehttp` 包。
+- 对照：紧邻的 `specs/api/openapi.yaml:282` `GET /assets/{assetId}` **是**实现的，
+  `cmd/api/assetshttp/wiring.go:101` 挂着它，且 `page.go:20` 逐字写着「这是契约的路径」。
+
+**判定**：这是**契约领先于实现**的既有落差，不是 T1004 引入的，也**不阻塞 T1004**——
+feed 是另一条路径，不依赖它。处置：**记档，交给 T0805**（knowledge 公开面归它）。
+
+**为什么要写下来**：这条路径的存在会让后来读契约的人以为 knowledge 的公开读已经有了。
+T1004 的知识条目之所以不带 `<link>`，依据是「**没有页面**渲染知识对象」（web 路由，见
+`apps/web/app/sitemap.ts:27`）——那是**另一件事**，两者不要混：契约里这条是 API 读，
+缺的是 HTML 页面与它的后端。**补契约时不得把这条误当成已实现**，也不得因为它的存在
+就认为知识条目可以带链接。
+
+## T1005 的交付记录里有一句不成立的话（2026-09-18，已更正，不返工）
+
+`T1005/RESULT.json` 的 `risks` 与 `follow_up_issues` **两处**都写着：摘要页脚链到的
+`/notifications` 是「T1003 的 ComingSoon 占位页」。**这句不成立**——
+`apps/web/app/(main)/notifications/page.tsx` 是 T1003 交付的**真实科研收件箱**
+（`ComingSoon` 只用在 people / organizations / search 三处）。
+
+**仍然成立的那一半**：那个页面**没有 cadence 控件**（T1005 没有 Web UI），而
+`internal/application/notifications/sender.go:370` 的 `manageURL()` 把它拼成
+`<origin>/notifications`，所以页脚那句「Manage what reaches you」指向的页面
+**暂时做不了这件事**。
+
+**判定：记档 + 合并，不返工。** 这是对**另一个模块**的描述错误，而本任务的保护
+（发送时的鉴权门 + 那条五件套的验收测试）完好，不构成 coverage/evidence 的虚假声明。
+PR 正文里已按实际情况更正，免得这句话随 main 的历史传下去。
+
+## T1005 独立审查的四条意见：处置（2026-09-18，PR #278）
+
+独立审查（另一个 Worker，无写权限）结论 **approve**，0 blocking / 0 major，提了 3 minor + 1 nit。
+逐条裁定如下，**三条全部不返工**，理由各自写明：
+
+**(1) `internal/application/notifications/sink.go:79` 注释声称 `O_CREATE|O_EXCL`，代码是
+`os.WriteFile`（O_TRUNC）。—— 合并后由 Supervisor 以 L0 提交更正。**
+同一句里还有第二处不实：`Send` 只返回 `error`，注释却说 "returning the path it wrote"
+（路径是日志出来的）。**为什么不改完再合**：`rddev task accept` 第一次正是以
+「verdict 属于 identity `073fb689…`，树已是 `b3e10b0…`」拒绝的——审查结论不得比它判断过的
+代码活得久。所以**被合并的产物逐字等于被审查的产物**，更正是其后单独一笔。
+
+**(2) `internal/events/notification_store.go:81`：`RecordDigestSent` 用
+`INSERT … ON CONFLICT` 会给从未设置过 cadence 的账号插一行**，列默认值 `daily` 于是变成
+一个账号没做过的选择：第一次发信后 `GET /api/v1/notifications/preferences` 的 `stored`
+就报 `true`（处理器注释写明它表示 "the account has ever changed the setting"），且那行的
+`daily` 会在 `COALESCE(p.cadence, $4)` 里遮住 `events.DefaultCadence`。
+**今天无行为差别**（默认本来就是 daily），**不返工**：正确地修它要先决定「有锚点但没做过
+选择」怎么表示（加一列 / cadence 可空 / 锚点分表），是 L1 形状决策，值得单独一轮带自己的
+测试；不该卡在串行迁移链的关键路径上（本任务后面还排着 T0711/T0805/T0604/T0707/T0804）。
+
+**(3) `internal/application/notifications/config.go:77`：`POST_WEB_ORIGIN` 在邮件关闭时也被
+校验，且 `cmd/worker` 把它当致命错误。** 即：邮件是关的、这个值不会被读到，worker 仍可能
+拒绝启动；而且它比 authn 对**同一个变量**的规则严（authn 不查 query/fragment，`parseOrigin`
+查，见 `internal/application/authn/config.go:142-151`），于是存在一种部署：API 起得来、
+worker 起不来。**不返工**，最小修法是只在启用时校验。判 minor 不判 blocking 的依据：
+触发条件是配置写错，失败是**响亮的**（消息点名变量与规则），不是静默故障；真正的修法
+（把校验挪进 `if cfg.Enabled`）是行为改动，不该由 Supervisor 顺手做。
+
+**(4) [nit] 迁移 `00081` 的 `attempts` 列注释说撤回带「a recorded reason」，实际记下的是
+事实**（`status='cancelled'` + `cancelled_at`），理由只在 `sender.go:224` 的日志行里。
+随 (2)(3) 一起在后续项里改。
+
+**另外记一条 orchestrator 缺陷（审查环境本身）**：审查 Worker 拿到的
+`.rddev/worktrees/T1005-review` 是**空的**（这是设计——它是 scratch 目录），结果目录里也
+没有 `RESULT.json`；该轮审查是靠 `git archive` 还原基线 + 应用 `diff.txt` 才完成的
+（26 个文件零 fuzz，文件清单与 collect 报告 1:1，结论因此仍然可信）。
+**含义**：任何「树里有、`diff.txt` 里没有」的改动，对审查这一层是**隐形的**。这与
+「review scratch dir 是空的、空的是健康的」不矛盾——健康的空目录，代价是审查必须自己
+重建树，而重建的输入只有 `diff.txt`。
