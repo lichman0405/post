@@ -5154,8 +5154,10 @@
       ]
     },
     "T0707": {
-      "status": "ready",
+      "status": "running",
+      "started_at": "2026-09-18T08:33:48Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:14:44Z 判定，记于 T0705 合并之前）：只缺两件：依赖类型那一列是自由文本、没跟既有关系目录（depends_on/references）挂钩；visibility_of_usage 声明为公开之后对外显示什么没有写过（页面确有「依赖/被用到的公开链接」一项，所以这是对外可见的产品语义）。其余（版本钉法、引用与依赖的分野、存储形状）都在树里。",
+      "worker_run_id": "run-3abe6ed63b7f3f0f",
       "history": [
         {
           "from": "todo",
@@ -5169,6 +5171,13 @@
           "to": "ready",
           "at": "2026-09-18T08:06:22Z",
           "run_id": "run-c58adf7f4c3a4e93"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-18T08:33:48Z",
+          "run_id": "run-3abe6ed63b7f3f0f",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -5269,10 +5278,11 @@
       "merged_at": null
     },
     "T0711": {
-      "status": "verification",
+      "status": "rejected",
       "started_at": "2026-09-18T07:33:41Z",
       "notes": "SPEC_BLOCKED resolved: T0805 package landed and knowledge publish OpenAPI contract added per L3-20260916-1",
       "worker_run_id": "run-a0826dd7c4416cd1",
+      "rejection_reason": "# T0711 第一轮返工\n\n## 先说的话：好东西我一条都没动，别重写\n\n我把你这一轮读完了，也自己回树核过。**认可、并且不许改**的：迁移 00082 的两张表；署名行写在 publish 自己的事务里（「要么带着声明的署名存在，要么根本不存在」——这个形状是对的，你的变异检查也证明它是活的）；空就是空、不拿发布者顶替、不回填（凭空生成署名等于伪造作者身份，这句我同意）；转移是 append-only 且被数据库守卫直接拒绝；owner-only fail-closed 那一组；每次变异都真的回滚重跑了。\n\n**这一轮不是推翻重做，是四处收口。**下面每条我都给了行号，你可以直接跳过去看。\n\n---\n\n## 一、G2 红：格式（机械，但要知道它为什么漏了）\n\n`rddev task accept T0711` 被拒，逐字：`G2 (CI's exact jobs) is red in run run-9931fe9761167096-g2`。红在 `go` job 的第 3 步（index 2）`make fmt-check`。日志 `.rddev/runtime/gates/T0711/output/run-9931fe9761167096-g2/go/00.log` 逐字：\n\n```\ngofmt: these files are not formatted:\n***.go\n```\n\n**为什么你的检查没抓到，值得记住**：`make check`（`Makefile:35-43`）跑的是 check-schema-drift / check-schema-snapshot / check-openapi / check-spec-version / go vet / go build / go test / pnpm typecheck——**不含 `fmt-check`**（它在 `Makefile:110-116`）。而 CI 的 `go` job（`.github/workflows/ci.yml`）**第一步就是** `make fmt-check`。\n\n另外，**G1 绿也不代表这个**：`specs/orchestrator/gates.json` 里 `gates.G1.runs_jobs` 是**空数组**——G1 只查记录一致性，一个 job 都不跑。所以你写的「make check exit 0」是真话，只是它不覆盖格式。**这一轮跑完必须单独跑一遍 `make fmt-check`。**\n\n---\n\n## 二、重复的 creator id 会打到 500 —— 这是真缺陷（blocking）\n\n链条我逐段核过：\n\n- `infra/migrations/00082_asset_governance_rights_holder.sql:126` 有 `UNIQUE (asset_version_id, role, party_id)`，其上注释 `:121-126` 逐字「no party twice in one role」。\n- `internal/persistence/asset_rights_store.go:438-456` 的 `insertVersionCredits` 逐条插入、`Position: i`，**不去重也不查重**。\n- `internal/assets/gate.go:368-378` 的 `validCreatorIDs` 只查「非空 + 是 uuid」，**不查重复**。\n- 整个 package 里唯一的 `seen[...]` 去重在 `dependency.go:81`（重复的依赖 pin），以及 `preview.go:1079-1088`——后者在 `DeclaredBlobIDs` 内部，去的是 manifest 里的 **blob id**，与 creator 无关。\n\n于是 `creator_ids: [\"<uuid>\", \"<同一个 uuid>\"]` 今天会：preview 放行 → publish 开事务 → 第二行撞 UNIQUE → store 错误 → **HTTP 500**。这在 T0711 之前不会发生（那时声明校验完就被丢弃，什么都不写）。\n\n**最刺眼的地方是，它正好是你新写的那段注释声称已经关掉的东西**——`gate.go:361-362` 逐字：「It is checked here because the preview runs this gate: **a candidate the preview blesses must be one the publish can store.**」uuid 那一半关掉了，重复这一半没有。\n\n**我的裁定：在门禁里拒绝，不要静默去重。** 理由：版本记录不可变，而你这个任务的形状是「校验它的人从此也存储它」。静默去重意味着**存下来的东西与声明的不是同一件事**——在一次不可变写入的边界上做无声改写，比拒绝坏得多。\n\n所以：拒绝同一 role 下重复出现的同一个 id，给一个**有名有姓的拒绝码**（照 `internal/assets/errors.go:100` 的 `CodeDuplicateDependencyPin` 的现成样子），并让 `describeCreatorIDs`（`gate.go:383-397`）能说出「第 i 项与第 j 项重复」。\n\n**跨角色的重复必须继续允许**——你的验收第 2 条本来就断言「同一 party 兼两角色是可表达的」，别把它一起关掉。\n\n必须带测试，并做变异检查证明它抓得住（第三节的要求同样适用）。\n\n---\n\n## 三、新加的形状规则一个测试都没有（blocking）\n\n`internal/assets/gate_test.go:553-568` 的 `***`，用例逐字是 `nil, {}, {\"\"}, {\"  \"}, {sampleUUID, \"\"}`——最后那个是**空串**，不是「非空但非 uuid」。\n\n所以你今天新加的那条规则（`gate.go:373` 的 `!domain.ValidUUID(...)`）**没有任何测试**：把它改回旧的空白检查，这个测试照样全绿。\n\n加一个非空非 uuid 的用例（例如 `{\"alice\"}`），并且**证明它会红**：把那行临时改回旧的空白检查，跑一次，确认新用例失败，再改回来。只加用例不做这一步等于没加——这正是这个仓库自己点名过的坏形状（`tests/integration/asset_page_test.go:714-727` 逐字：「a check that forbade nothing is the shape that reads green while measuring nothing」）。\n\n---\n\n## 四、RESULT 里那句与你自己的代码矛盾（blocking）\n\n`RESULT.json` 的 `notes_for_supervisor` 逐字：\n\n> T0705 的 publish 流程除『在它既有事务里插入署名行』外未改：**任何 publish 的决策、权限、preview、拒绝都没有变化。**\n\n**这句话是假的，推翻它的是你自己写的两处代码：**\n\n- `internal/assets/gate.go:351-366` 逐字：「**The shape rule is the one T0711 added**…… It is checked here because the preview runs this gate: a candidate the preview blesses must be one the publish can store.」\n- `internal/assets/gate.go:139-141` 逐字：「at least one creator id, none of them blank or **unstorable** (each must be a user id — see validCreatorIDs…)」。\n\n**收紧本身我不反对，反而认为是必须的**：不收紧的话，`[\"alice\"]` 会过了 preview、再在 publish 事务里以 store 错误炸成 500——正是你那段注释要关掉的那种「preview 祝福了 publish 存不下的东西」。**保留这条规则，不要回滚。**\n\n要改的是**交付记录**：把「拒绝没有变化」改成实情——门禁现在多拒绝一类输入（非空但非 uuid 的 id），并说明这是本任务新增的。这份 RESULT 是给总验收读的，里面每句话都会被当成「已经验过」；一句话与自己的代码相反，会污染整份证据。\n\n---\n\n## 五、拒绝文案半陈旧（minor）\n\n`gate.go:234` 的 `Detail` 仍然逐字以 `expected at least one creator id, none blank; got ` 开头，而它隔壁的 `describeCreatorIDs`（`:383-397`）已经会说「is not a user id (a uuid)」。**文案与它要说明的规则对不上了。** 改成与 `:139-141` 一致的说法。\n\n---\n\n## 六、验收第 7 条的第三条臂（blocking——那一条要求「三条都有测试」）\n\n任务书那条逐字：「权限 **fail-closed**：owner 能转移；**maintainer 被拒**；匿名被拒——**三条都有测试**」。\n\n我核了 `tests/integration/asset_governance_test.go`：`grep -n \"anonymous\"` **零命中**。前两条有（`***`），第三条没有。\n\n匿名的位置确实微妙，我先把事实摆出来，你再选怎么证：\n\n- `***.go:215` 逐字 `Class: authz.ClassOf(true, role, isAgent)`——`authenticated` 写死为 `true`。\n- 同文件 `Actor` 的文档（`:25-32`）逐字：「An agent acts AS a user (the token's owner), so this is **never empty**」。\n- 这条命令**今天没有 HTTP 路由**（`cmd/` 下 grep `assetrights` 零命中），所以「匿名」这个分类是在别处决定的。\n\n**所以：去矩阵那一层证。** 在 `tests/**` 里写一个测试（**不用动 `internal/authz/**`，那是禁止范围**），断言 `ActionChangeRightsHolder` 对**匿名分类**是拒绝的——即 `authz.ClassOf(false, …)` 配上 `specs/policies/permissions-matrix.csv:13` 得到 deny。它证明的是「即使哪天接线把 `authenticated` 传成了 `false`，这条动作仍然进不去」，也就是 fail-closed 的兜底。\n\n**如果你判断这不可证或无意义，不要默默跳过**——把理由和行号写进 RESULT、提出你的替代方案，我来裁。\n\n---\n\n## 七、一条 nit（你判断是否顺手）\n\n`apps/web/app/(main)/assets/asset-page.tsx:272` 逐字 `<span className=\"asset-handle\">@{creator.handle}</span>`——`@` 是无条件加的。而 `internal/assets/page.go:221` 逐字写着「Handle is a user's handle **or an organization's slug**」。所以组织的署名会渲染成 `@open-mof-lab` 这种「用户提及」的形状。这一行你本来就在改（creators 区块），顺手处理掉；不方便就在 RESULT 里说明为什么不改。\n\n---\n\n## 八、边界（不要越界）\n\n- **不要回滚** uuid 形状规则；**不要**把重复 id 改成静默去重。\n- `internal/authz/**`、`specs/**`、`docs/**`、`.github/**`、`specs/orchestrator/**` 都不在你的范围里。第六节需要的东西写在 `tests/**`。\n- 不许为了让任何东西变绿而删测试、skip、放宽容差或加大 timeout（CLAUDE.md §5.1）。\n- **只做增量**：保留已经通过的东西与它已有的变异检查，改动尽量小。\n\n跑完把这些写进 RESULT：`make fmt-check` 的结果；重复 id 的新拒绝码与它的变异检查；形状规则新用例的变异检查；第六节你选了哪条路。然后重新走一遍你原来的测试清单。\n",
       "history": [
         {
           "from": "todo",
@@ -5307,6 +5317,13 @@
           "at": "2026-09-18T08:20:43Z",
           "run_id": "run-a2d280aebbf17fe5",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-18T08:35:39Z",
+          "run_id": "run-1f89686eb8ddb3bf",
+          "reason": "# T0711 第一轮返工\n\n## 先说的话：好东西我一条都没动，别重写\n\n我把你这一轮读完了，也自己回树核过。**认可、并且不许改**的：迁移 00082 的两张表；署名行写在 publish 自己的事务里（「要么带着声明的署名存在，要么根本不存在」——这个形状是对的，你的变异检查也证明它是活的）；空就是空、不拿发布者顶替、不回填（凭空生成署名等于伪造作者身份，这句我同意）；转移是 append-only 且被数据库守卫直接拒绝；owner-only fail-closed 那一组；每次变异都真的回滚重跑了。\n\n**这一轮不是推翻重做，是四处收口。**下面每条我都给了行号，你可以直接跳过去看。\n\n---\n\n## 一、G2 红：格式（机械，但要知道它为什么漏了）\n\n`rddev task accept T0711` 被拒，逐字：`G2 (CI's exact jobs) is red in run run-9931fe9761167096-g2`。红在 `go` job 的第 3 步（index 2）`make fmt-check`。日志 `.rddev/runtime/gates/T0711/output/run-9931fe9761167096-g2/go/00.log` 逐字：\n\n```\ngofmt: these files are not formatted:\n***.go\n```\n\n**为什么你的检查没抓到，值得记住**：`make check`（`Makefile:35-43`）跑的是 check-schema-drift / check-schema-snapshot / check-openapi / check-spec-version / go vet / go build / go test / pnpm typecheck——**不含 `fmt-check`**（它在 `Makefile:110-116`）。而 CI 的 `go` job（`.github/workflows/ci.yml`）**第一步就是** `make fmt-check`。\n\n另外，**G1 绿也不代表这个**：`specs/orchestrator/gates.json` 里 `gates.G1.runs_jobs` 是**空数组**——G1 只查记录一致性，一个 job 都不跑。所以你写的「make check exit 0」是真话，只是它不覆盖格式。**这一轮跑完必须单独跑一遍 `make fmt-check`。**\n\n---\n\n## 二、重复的 creator id 会打到 500 —— 这是真缺陷（blocking）\n\n链条我逐段核过：\n\n- `infra/migrations/00082_asset_governance_rights_holder.sql:126` 有 `UNIQUE (asset_version_id, role, party_id)`，其上注释 `:121-126` 逐字「no party twice in one role」。\n- `internal/persistence/asset_rights_store.go:438-456` 的 `insertVersionCredits` 逐条插入、`Position: i`，**不去重也不查重**。\n- `internal/assets/gate.go:368-378` 的 `validCreatorIDs` 只查「非空 + 是 uuid」，**不查重复**。\n- 整个 package 里唯一的 `seen[...]` 去重在 `dependency.go:81`（重复的依赖 pin），以及 `preview.go:1079-1088`——后者在 `DeclaredBlobIDs` 内部，去的是 manifest 里的 **blob id**，与 creator 无关。\n\n于是 `creator_ids: [\"<uuid>\", \"<同一个 uuid>\"]` 今天会：preview 放行 → publish 开事务 → 第二行撞 UNIQUE → store 错误 → **HTTP 500**。这在 T0711 之前不会发生（那时声明校验完就被丢弃，什么都不写）。\n\n**最刺眼的地方是，它正好是你新写的那段注释声称已经关掉的东西**——`gate.go:361-362` 逐字：「It is checked here because the preview runs this gate: **a candidate the preview blesses must be one the publish can store.**」uuid 那一半关掉了，重复这一半没有。\n\n**我的裁定：在门禁里拒绝，不要静默去重。** 理由：版本记录不可变，而你这个任务的形状是「校验它的人从此也存储它」。静默去重意味着**存下来的东西与声明的不是同一件事**——在一次不可变写入的边界上做无声改写，比拒绝坏得多。\n\n所以：拒绝同一 role 下重复出现的同一个 id，给一个**有名有姓的拒绝码**（照 `internal/assets/errors.go:100` 的 `CodeDuplicateDependencyPin` 的现成样子），并让 `describeCreatorIDs`（`gate.go:383-397`）能说出「第 i 项与第 j 项重复」。\n\n**跨角色的重复必须继续允许**——你的验收第 2 条本来就断言「同一 party 兼两角色是可表达的」，别把它一起关掉。\n\n必须带测试，并做变异检查证明它抓得住（第三节的要求同样适用）。\n\n---\n\n## 三、新加的形状规则一个测试都没有（blocking）\n\n`internal/assets/gate_test.go:553-568` 的 `***`，用例逐字是 `nil, {}, {\"\"}, {\"  \"}, {sampleUUID, \"\"}`——最后那个是**空串**，不是「非空但非 uuid」。\n\n所以你今天新加的那条规则（`gate.go:373` 的 `!domain.ValidUUID(...)`）**没有任何测试**：把它改回旧的空白检查，这个测试照样全绿。\n\n加一个非空非 uuid 的用例（例如 `{\"alice\"}`），并且**证明它会红**：把那行临时改回旧的空白检查，跑一次，确认新用例失败，再改回来。只加用例不做这一步等于没加——这正是这个仓库自己点名过的坏形状（`tests/integration/asset_page_test.go:714-727` 逐字：「a check that forbade nothing is the shape that reads green while measuring nothing」）。\n\n---\n\n## 四、RESULT 里那句与你自己的代码矛盾（blocking）\n\n`RESULT.json` 的 `notes_for_supervisor` 逐字：\n\n> T0705 的 publish 流程除『在它既有事务里插入署名行』外未改：**任何 publish 的决策、权限、preview、拒绝都没有变化。**\n\n**这句话是假的，推翻它的是你自己写的两处代码：**\n\n- `internal/assets/gate.go:351-366` 逐字：「**The shape rule is the one T0711 added**…… It is checked here because the preview runs this gate: a candidate the preview blesses must be one the publish can store.」\n- `internal/assets/gate.go:139-141` 逐字：「at least one creator id, none of them blank or **unstorable** (each must be a user id — see validCreatorIDs…)」。\n\n**收紧本身我不反对，反而认为是必须的**：不收紧的话，`[\"alice\"]` 会过了 preview、再在 publish 事务里以 store 错误炸成 500——正是你那段注释要关掉的那种「preview 祝福了 publish 存不下的东西」。**保留这条规则，不要回滚。**\n\n要改的是**交付记录**：把「拒绝没有变化」改成实情——门禁现在多拒绝一类输入（非空但非 uuid 的 id），并说明这是本任务新增的。这份 RESULT 是给总验收读的，里面每句话都会被当成「已经验过」；一句话与自己的代码相反，会污染整份证据。\n\n---\n\n## 五、拒绝文案半陈旧（minor）\n\n`gate.go:234` 的 `Detail` 仍然逐字以 `expected at least one creator id, none blank; got ` 开头，而它隔壁的 `describeCreatorIDs`（`:383-397`）已经会说「is not a user id (a uuid)」。**文案与它要说明的规则对不上了。** 改成与 `:139-141` 一致的说法。\n\n---\n\n## 六、验收第 7 条的第三条臂（blocking——那一条要求「三条都有测试」）\n\n任务书那条逐字：「权限 **fail-closed**：owner 能转移；**maintainer 被拒**；匿名被拒——**三条都有测试**」。\n\n我核了 `tests/integration/asset_governance_test.go`：`grep -n \"anonymous\"` **零命中**。前两条有（`***`），第三条没有。\n\n匿名的位置确实微妙，我先把事实摆出来，你再选怎么证：\n\n- `***.go:215` 逐字 `Class: authz.ClassOf(true, role, isAgent)`——`authenticated` 写死为 `true`。\n- 同文件 `Actor` 的文档（`:25-32`）逐字：「An agent acts AS a user (the token's owner), so this is **never empty**」。\n- 这条命令**今天没有 HTTP 路由**（`cmd/` 下 grep `assetrights` 零命中），所以「匿名」这个分类是在别处决定的。\n\n**所以：去矩阵那一层证。** 在 `tests/**` 里写一个测试（**不用动 `internal/authz/**`，那是禁止范围**），断言 `ActionChangeRightsHolder` 对**匿名分类**是拒绝的——即 `authz.ClassOf(false, …)` 配上 `specs/policies/permissions-matrix.csv:13` 得到 deny。它证明的是「即使哪天接线把 `authenticated` 传成了 `false`，这条动作仍然进不去」，也就是 fail-closed 的兜底。\n\n**如果你判断这不可证或无意义，不要默默跳过**——把理由和行号写进 RESULT、提出你的替代方案，我来裁。\n\n---\n\n## 七、一条 nit（你判断是否顺手）\n\n`apps/web/app/(main)/assets/asset-page.tsx:272` 逐字 `<span className=\"asset-handle\">@{creator.handle}</span>`——`@` 是无条件加的。而 `internal/assets/page.go:221` 逐字写着「Handle is a user's handle **or an organization's slug**」。所以组织的署名会渲染成 `@open-mof-lab` 这种「用户提及」的形状。这一行你本来就在改（creators 区块），顺手处理掉；不方便就在 RESULT 里说明为什么不改。\n\n---\n\n## 八、边界（不要越界）\n\n- **不要回滚** uuid 形状规则；**不要**把重复 id 改成静默去重。\n- `internal/authz/**`、`specs/**`、`docs/**`、`.github/**`、`specs/orchestrator/**` 都不在你的范围里。第六节需要的东西写在 `tests/**`。\n- 不许为了让任何东西变绿而删测试、skip、放宽容差或加大 timeout（CLAUDE.md §5.1）。\n- **只做增量**：保留已经通过的东西与它已有的变异检查，改动尽量小。\n\n跑完把这些写进 RESULT：`make fmt-check` 的结果；重复 id 的新拒绝码与它的变异检查；形状规则新用例的变异检查；第六节你选了哪条路。然后重新走一遍你原来的测试清单。\n"
         }
       ]
     },
@@ -5599,8 +5616,10 @@
       ]
     },
     "T0804": {
-      "status": "ready",
+      "status": "running",
+      "started_at": "2026-09-18T08:44:21Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：requirements 第 4 条逐字写着 fork 导入的 state 的 semantic completeness 派生「按 issue #189 的裁定执行……不得自行发明」，而 #189 仍 OPEN。",
+      "worker_run_id": "run-1d37fc09c0c0d324",
       "history": [
         {
           "from": "todo",
@@ -5614,11 +5633,18 @@
           "to": "ready",
           "at": "2026-09-18T08:06:22Z",
           "run_id": "run-7d7dc3828a074209"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-18T08:44:21Z",
+          "run_id": "run-1d37fc09c0c0d324",
+          "reason": "worker spawn"
         }
       ]
     },
     "T0805": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-18T07:34:05Z",
       "notes": "SPEC_BLOCKED resolved: T0805 package landed and knowledge publish OpenAPI contract added per L3-20260916-1",
       "worker_run_id": "run-fd172462660949fa",
@@ -5649,6 +5675,13 @@
           "at": "2026-09-18T07:34:05Z",
           "run_id": "run-fd172462660949fa",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T08:36:03Z",
+          "run_id": "run-0c81a57ae11f7c3e",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -6357,7 +6390,7 @@
       "merged_at": null
     },
     "T1110": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-18T08:00:57Z",
       "worker_run_id": "run-ea52ccda69348330",
       "rejection_reason": "第四轮：**交付物本身不错，但你的交付记录里写了三件代码没做的事。这一轮只改记录和几处小账，不要动主干。**\n\n先说清楚性质，免得你以为我在找茬。我把你这一轮的东西读完了，也确实跑了：\n`rddev gate run G2 T1110` 全绿（`run-159ec293f5c80d7f-g2`），独立审查也确认空白证明、四轴对账、五样打开、只报不改这些核心东西都成立。\n**问题不在功能，在诚实性**：记录里有一句声称，回树一查是空的。而这份记录是给总验收读的——\n里面的每句话都会被当成\"已经验过\"，所以一句站不住的话会污染整份证据。这是我必须挡下的。\n\n---\n\n## 一、必须删掉的声称（blocking）\n\n`RESULT.json` 的 `acceptance[4]` 里逐字写着：\n\n> per table, the restored COPY block is re-read from the target and its sha256 compared against the digest the backup manifest recorded for that table (`TableRecord.SHA256`) - a row-count comparison would pass on a table whose every value changed.\n\n**这个比对不存在。** 我核过：`TableRecord.SHA256` 在 `cmd/api/backupdr/postgres.go:221` 被赋值（`sha256Hex(b.render())`），\n此后**全仓库没有任何一处读它**。`restoreData`（`postgres.go:382`）确实收下了 `records`，但它只用 `os.ReadDir(dataDir)`\n拿 `.copy` 文件名来拼 COPY 脚本，**从不比对内容**。测试（`tests/integration/restore_drill_test.go:648-683`）做的是：\n读恢复后的 blobs 行、重新取回 S3 对象并比 sha256 与字节、断言 `git ls-remote refs/heads/main` 含源 commit——\n**没有一条碰恢复后的数据库内容。**\n\n而且这句话**照字面也实现不了**：恢复流程会在数据装载之后 UPDATE `git_repository_provisions.owner`（`cmd/api/backupdr/drill.go:642-655`），\n所以那张表的内容**本来就应当**与备份时的摘要不同。一个会在一张表上必然失败的比对，写进记录里是更大的问题。\n\n**这一轮不要去做那个按表比对。** 任务的要求（criterion 5）要的是**文件按 sha256、blob 按身份**——\nblob 轴你已经做对了（重新取回的字节 sha256 对 `blobs.content_hash`，正是 `docs/17_FILES_STORAGE.md:15` 的身份）。\n按表摘要**不在要求里**，而且上面那个 owner 重绑定让它变成一个需要小心特判的东西——\n一个\"为了让它绿而排除几张表\"的比对，比没有比对更坏。**把那句话删掉**，按下面第三节改写成实情。\n\n## 二、第二条要改的声称（major）：Files 那一\"打开\"不是 sha256 校验\n\n`acceptance[0]` 与 `acceptance[4]` 都让人读成\"文件按 sha256 校验过了\"，drill 测试自己的头部第 5 条也这么写。实情是：\n`openFiles`（`cmd/api/backupdr/open.go:426-450`）只要求 `view.SHA != \"\" && view.Size > 0`，\n并在 Detail 里报**提供方的 blob SHA（sha1）**——**没有任何一处对文件字节算 sha256 并与谁比**；\nGit 那半边的检查（`restore_drill_test.go:675-682`）比的是分支 ref 与源 commit SHA。\n\nGit 的 commit 身份**是**一个可靠的内容寻址证明（恢复出来的树等于备份的树），这一点我认可，别改。\n但它**不是**你写的那个 sha256 口径。**二选一，你自己定，但选了就要写实：**\n要么真的把文件从 Files 路径读回来、对字节算 sha256、与源文件的字节比；\n要么**明说 Git 这一类是靠 commit 身份验的、Files 的\"打开\"是存在性检查而不是内容比对**。\n我倾向后者（够用且不会引入一个半吊子比对），但这是你的实现判断，你写清楚理由即可。\n\n## 三、`restore.json` 里的表数/行数是**备份的数**，不是恢复出来的数\n\n`drill.go:568-569`：`m.Tables = backup.Postgres.TableCount` ——**直接把备份清单里的数抄进了\"恢复结果\"**；\n`m.Rows` 也来自清单里记录的行数之和，而**不是**去目标库数一遍。更糟的是测试里拿这两个值断言\"非零\"——\n**这是一个不可能因为\"恢复了空库\"而失败的断言**：备份有 80 行，它就永远非零。\n\n这正是仓库自己点名过的坏形状，`tests/integration/asset_page_test.go:714-727` 的注释逐字写着：\n**\"An empty string is a failure rather than a pass: a check that forbade nothing is the shape that reads green while measuring nothing.\"**\n\n**怎么办**：要么**去目标库真的数一遍**再写进报告，要么**把字段改名/改注释**，让它不可能被读成\"恢复出来的数\"。\n然后**把那条非零断言换成一条真的能失败的断言**（比如目标库里至少要有你实际写入的那些行，且数出来的值要与写入路径对得上）。\n\n## 四、几处小的，一并改掉\n\n1. **`acceptance[2]` 引用了一个不存在的审计动作名**：你写的是 `action='backup_drill.drift_reported'`，\n   而代码里的值是 `driftAuditAction = 'backup.restore.drift_detected'`。**引文必须逐字，改对。**\n2. **`SecretScanResult.Searched` 在夸大覆盖面**（`cmd/api/backupdr/run.go:153`）：它记的是\n   `len(secretValueList(cfg.SecretValues))`（**所有**声明值），而 `ScanArtifactsForSecrets`（`secrets.go:***\n   **会跳过短于 8 字符的值**。于是报告说\"扫了 5 个\"，实际扫的可能更少——**这是一个安全相关的数字在虚报**。\n   让它反映**真正被扫的值**，或者把被跳过的和原因一并报出来。\n3. **一条死的对账分支**：`KindReleaseBlobMismatch`（`cmd/api/backupdr/reconcile.go:89-90`）声明了却**从不产生**，\n   而 pin 循环的 blob 分支以 `_ = row`（`:647`）收尾——那是一个没写完的分支。\n   **要么让它真的产出 finding，要么把声明删掉**；一个声明了却永远不会出现的类别会让人以为它被覆盖了。\n4. **产物落点的守卫可以被绕过**（`ops/backup-restore-drill.sh:133`）：mkdir 前的守卫只匹配**以 `$ROOT` 开头的绝对路径**，\n   一个**相对路径**（比如在仓库根下 `--artifacts ./cmd/api/artifacts`）会穿过这道守卫——\n   那就把演练产物写进了仓库里，而这个任务有一条硬要求就是产物不得进仓库。**把相对路径也挡住。**\n5. `cmd/api/backupdr/drill.go:302` 有一条**孤立的文档注释**（`// writeFindings appends one immutable audit row per finding.`），\n   它描述的函数不存在，真正的 sink 是下面的 `auditSink`。**删掉或改对。**\n\n## 五、不要动的部分\n\n- **不要动主干**：四类备份、空环境证明、四轴对账、只报不改、五样打开、退出码与 skip 拒绝——\n  这些都对，**一行都不要为了这一轮去改**。\n- **不要为了让哪一条变绿而放宽任何断言**（CLAUDE.md §5.1）。这一轮的方向是**把记录改成实情**，\n  不是**把代码改成配得上记录**。第 3 条那个非零断言是例外——那条要**换成一条更强的**，不是换一条更弱的。\n- **不要动那个默认端口**（你上一轮指出的 `15432`，我已经在主线修好了）。\n- **\"起环境\"那半边的说明继续留在 `notes_for_supervisor` 里**，别删。\n- 这一轮**不需要**你去接 G3 或别的门禁——验收那步是我的事。\n\n## 六、完成后\n\n改完在新基线上重跑，`tests[]` 里**只登记你真的跑过并看到结果的东西**。\n`RESULT.json` 里凡是声称\"代码做了某事\"的句子，**每一句都要能被 `grep` 到**——\n这一轮被挡下的根因就是这个：写字的人比读字的人乐观。宁可写得少一点、写得平一点，也不要写一句站不住的漂亮话。\n",
@@ -6423,6 +6456,13 @@
           "at": "2026-09-18T08:00:57Z",
           "run_id": "run-ea52ccda69348330",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T08:33:46Z",
+          "run_id": "run-4cf2d6cf54be9bed",
+          "reason": "collect: all checks passed"
         }
       ]
     },
