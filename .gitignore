@@ -49,3 +49,11 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Backup/restore drill artifacts (T1110, docs/37). A drill writes a database
+# dump, blob copies and git mirrors — tens of megabytes of data that is a
+# copy of an environment, never a source change. This is the drill's default
+# output directory (backupdr.DefaultArtifactsRelPath); the drill also
+# REFUSES any other location inside the working tree, so this entry and the
+# Go constant are the two halves of one rule and must be changed together.
+.backup-dr/
