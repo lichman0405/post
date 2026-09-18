@@ -4561,13 +4561,8 @@
       ]
     },
     "T0604": {
-      "status": "blocked",
-      "started_at": null,
-      "completed_at": null,
+      "status": "ready",
       "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：required-review 判定（几个 review、哪几个维度、哪个 responsibility 签、什么变更对应什么要求）规格全无。T0409 的交付代码逐字把这一步指名交给 T0604（internal/application/reviews/service.go:25-27），前置 T0404/T0603 均已合并。",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null,
       "history": [
         {
           "from": "todo",
@@ -4575,6 +4570,12 @@
           "at": "2026-09-16T00:08:07Z",
           "run_id": "supervisor-manual",
           "reason": "SPEC_BLOCKED：见 issue #239"
+        },
+        {
+          "from": "blocked",
+          "to": "ready",
+          "at": "2026-09-18T08:07:26Z",
+          "run_id": "run-0887ecf66032ceb9"
         }
       ]
     },
