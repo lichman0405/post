@@ -4268,10 +4268,12 @@
       "merged_at": null
     },
     "T0601": {
-      "status": "verification",
-      "started_at": "2026-09-16T01:20:08Z",
-      "worker_run_id": "run-f3c0ff13e2f53eb0",
-      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 0 test(s) not_run () and 1 test(s) failed (go test ./internal/... ./cmd/... -count=1) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
+      "status": "merged",
+      "started_at": "2026-09-16T11:27:32Z",
+      "worker_run_id": "run-dbd699497e6508ca",
+      "accepted_by_supervisor_at": "2026-09-16T11:46:40Z",
+      "merged_at": "2026-09-16T11:52:51Z",
+      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 1 test(s) not_run (make check / make ci（完整四层 Gate）) and 0 test(s) failed () — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
       "history": [
         {
           "from": "todo",
@@ -4306,6 +4308,75 @@
           "at": "2026-09-16T01:27:06Z",
           "run_id": "run-221ff9743188fb5e",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-16T10:57:37Z",
+          "run_id": "run-121983cf01d4f425",
+          "reason": "# T0601 返工：Git 那一侧的冻结检查把平台自己的合并也拒了\n\n独立 review 判了 `request_changes`，一条 blocking、一条 minor、一条 nit；验收的 G2 又**红在 gofmt** 上。**我把那条 blocking 逐行回到源码核过，成立，而且比 review 写的更硬。** 下面按「要改」和「不用改」分开写。\n\n另外说明一件事：我今天落进了 8 份任务书和一条范围修复，`main` 往前走了，**你的基线已经推到了当前 `main`**（派生文件是按新树重新算的）。所以下面第一条仍然是你要做的事，但你是从新基线出发做它。\n\n---\n\n## 一、blocking：`internal/gitprovider/push_ingestion.go:288` 拒掉了平台自己的 Research PR merge\n\n代码现在是这样：\n\n```go\nfunc (i *PushIngester) Ingest(ctx context.Context, ev PushEvent) (bool, error) {\n\tif ev.Ref == MainRef {\n\t\tfrozen, err := i.store.MainFrozenByRepoID(ctx, ev.RepositoryID)\n\t\t...\n\t\tif frozen {\n\t\t\treturn false, &MainFrozenRefusalError{Ref: ev.Ref, RepositoryID: ev.RepositoryID}\n\t\t}\n\t}\n```\n\n只要有推送落在 `refs/heads/main` 上、而项目已冻结，一律拒——**没有区分这条推送是谁产生的**。\n\n而你在这段上面的注释（`:276-281`）逐字写的是：\n\n> The Git-side rule docs/09 §3 states — **main advances only through a Research PR merge** — is enforced on both sides of the platform\n\n**注释说的是「main 只能通过 Research PR merge 前进」，代码实现的是「main 永远不前进」。这两句话不一样。**\n\n### 为什么这是缺陷、而不是我在提新要求\n\n`CLAUDE.md` §9 不变量 3 逐字：「frozen main **只能通过** Research PR merge 更新。」`docs/09 §3` 同此。**目标行为规格里早就写死了**，缺的是 Git 这一侧没有把「平台自己那次合并」认出来。\n\n而且**语义那一侧已经有缝了，Git 那一侧没有**：\n\n- `internal/persistence/state_store.go:106`：`if !in.ResearchPRMerge { ... 拒绝 ... }`\n- `internal/application/merge/service.go:583`：`ResearchPRMerge: true`，注释逐字写着「only this package sets it」\n\n**同一个规则，两半边，一边有缝一边没有——这就是那条不对称。**\n\n### 会出什么事\n\nreview 实测过（本地 dev Gitea 1.27.3，建了个临时仓库再删掉）：走 `POST /api/v1/repos/{o}/{r}/pulls/{n}/merge`（正是 T0409 适配器 `internal/gitprovider/pullrequest_merge.go:299-322` 发的那一个调用）合并一个 PR，Gitea **投递了两条 push webhook**——`refs/heads/research` 和 `refs/heads/main`，payload 里没有 merge 标记。而 `internal/gitprovider/provisioning.go:120-127` 注册的钩子是 `Events: [\"push\"]`、**没有分支过滤**，所以它必然落到这个端点上。\n\n于是对一个冻结项目（`docs/09 §3` 让冻结成为产品的常态，且 V1 没有解冻）：\n\n1. `git_branch_refs.head_sha` 里 main 那一行**永不再前进**（provisioning 之后，只有 push ingestion 会写它）；\n2. 同一次事务里本该产生的 pushed-head `project_states` 行、以及该分支的语义完备标记，都不再产生；\n3. T0309 的 reconciler 按 ticker 跑，它会拿每一个已同步映射行（**包括 main**）去比对 provider 的头，然后**永远**把平台自己的受治理合并记成 `ref_head_moved` 漂移——而修复提案是刻意不自动施加的。\n\n**结果是平台把自己合法的合并当成了入侵，而且是永久的。**\n\n### 词表你已经有了，不用新造\n\n- `internal/gitprovider/provisioning.go:112` 你自己的措辞：「the receiver would see a direct main push **with no merge record behind it**」——**「有没有合并记录」就是那个判别子**。\n- merge saga 通过 `CompleteGitStep` 记下了合并提交的 SHA；\n- `RefGuard.Check` 的 `ViaMerge: true` 是同一套词汇。\n\n### 要求\n\n**给 Git 这一侧的判别留一个缝**：`after_sha` 等于平台为该项目的 main 记下的那次合并提交的推送，**要照常收下**；**外来的直推仍然拒**。\n\n**必须 fail-closed**：认不出来的一律拒。具体说，在 Gitea 界面/API 上绕过 POST 直接做的合并、以及同一次合并的重复投递，都必须留在「拒 / 漂移」那一侧——缝是钉在「平台记过的那次合并」上的，没有记录就没有缝，这一点天然成立，请用测试把它钉住。\n\n**不要选另一条路**：review 给了个替代方案——「在命令文档里写明冻结也阻止平台自己记录 main，并接受永久的 `ref_head_moved`」。**这个我不接受**：那等于让平台永久把自己的合法合并报成漂移，与不变量 3 直接冲突。\n\n### 测试（这一条是重点）\n\n现有的 `freeze_main_e2e_test.go:798-806` **只投递 ghost-SHA 推送并断言 403**，所以它证明的是「main 的投递会被拒」，**不是**契约的那条边界。条款要求的那一半它看不见。\n\n要补：投递一条 main 推送、其 `after_sha` 是平台记下的合并提交，断言**它被收下**（用真实链路走一遍，别只测判别函数）；同时在**同一个冻结项目**上，一条外来的直推仍然被拒。\n\n**并且要证明这条新测试在改动之前是红的**（把缝去掉应该红）。一个改不改都绿的测试，在这个仓库里不算证据。这条按合约记成 `passed` 并在证据开头写 `MUTATION CHECK`，附上观察到的 FAIL 输出。\n\n---\n\n## 二、G2 红：往常量块里加了一个名字，另外两个没跟着对齐\n\n`make fmt-check` 报：\n\n```\ngofmt: these files are not formatted:\ninternal/application/states/errors.go\n```\n\n原因是机械的：你在那个常量块里加了 `CodeMainFrozenDirectWrite = \"MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN\"`，它比同块里原有的两个名字长，于是 gofmt 要求另外两个补空格对齐：\n\n```diff\n \tCodeMainFrozenDirectWrite = \"MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN\"\n-\tCodeValidation          = \"VALIDATION_FAILED\"\n-\tCodeUnavailable         = \"SERVICE_UNAVAILABLE\"\n+\tCodeValidation            = \"VALIDATION_FAILED\"\n+\tCodeUnavailable           = \"SERVICE_UNAVAILABLE\"\n```\n\n`gofmt -w internal/application/states/errors.go` 即可，然后 `make fmt-check` 必须真的绿。\n\n**不要把它加进 `ops/ci/gofmt-baseline.txt`**——那是给既有文件的宽限名单，新代码不许进去。\n\n（提一句：这条是**独立于 review 的**第二处问题，G2 自己抓出来的。我保留它作为独立证据。）\n\n---\n\n## 三、minor：拒掉的投递不留平台侧记录 —— **照原样保留，不用改**\n\nreview 提了 `internal/gitprovider/push_ingestion_http.go:120`：被拒的投递不留任何平台侧记录（没有 ingestion 行、没有 audit、没有 violation 行）。\n\n代码给的理由是「the platform has no legitimate reading of a direct write to a frozen main to record」。**我接受这个理由**（`docs/09 §3` 让冻结成为平台自身的保证，拒本身就是那件事的记录）。这条**记下来，不动**。\n\n## 四、风险：`main_protected` 缺席时 freeze 与 merge 读法不同 —— **照原样保留，不用改**\n\nreview 把这条列为要裁定的风险。我读了你自己写的判据 `internal/application/mainfreeze/service.go:196-213`，**理由成立，保持不动**：\n\n> 两条命令**方向相反**：merge 是**让 main 前进**，所以规则缺席不能被读成允许前进；freeze 是**保护 main**，因为没人把规则写出来就拒绝去保护，是把 fail-closed 关到了错误的一边——那会让 main 比 `docs/09 §3` 要求的更不受保护。\n\n这段写到点子上：不是「两个地方读法不一致」，是**两个动作方向相反**。保留。\n\n---\n\n## 五、nit：sqlc 把上一条查询的注释吞进了新查询 —— 顺手修\n\n`internal/persistence/queries/rsg.sql:118`：新查询被插在 `UpdateBranchBaseState` 的文档注释和它自己的 `-- name:` 指令**之间**，于是 sqlc 把上一条的注释折进了新查询的生成文档（`internal/persistence/sqlc/rsg.sql.go:329-361` 里 `GetMainFrozenForBranch` 的头部带着别人的说明）。\n\n把新查询挪到 `UpdateBranchBaseState` 那一整块之后，重跑 `bash scripts/gen_sqlc.sh`，确认生成文件的注释各归各位。\n\n---\n\n## 六、边界\n\n- 范围照原任务包，**不变**。\n- 不许为了让 Gate 变绿而删/跳/弱化测试、放宽断言（`CLAUDE.md` §5.1）。上面每一条都是「把该测的测出来」，不是「把红的弄绿」。\n- 这条 blocking 是**你的实现与规格不符**，不是规格需要改：`docs/09 §3` 与不变量 3 已经写死了目标行为，**按它做就是**。若你在实现中发现规格本身有歧义、必须由人裁定，标 `blocked` 并在 RESULT 里点名说清楚——**不要自己放宽规格**。\n- `specs/SPEC_VERSION.json` 这类派生文件由基线推进重新生成，**不要手工合并文本**；若你的工作树里它显示为改动，那是重算的结果。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-16T10:57:38Z",
+          "run_id": "run-3ba047ec611805fe",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-16T11:03:25Z",
+          "run_id": "run-f0218c2c78c2e949",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-16T11:14:43Z",
+          "run_id": "run-547ceff704322f07",
+          "reason": "# T0601 第三轮：把最后三件事做完\n\n先说清楚**这一轮不算你失败**。你自己的收尾消息是诚实的原话：\n\n> \"round 2 is INCOMPLETE — the session was cut off mid-implementation and the halt requires me to report now, so I am not claiming completion.\" … \"the remaining work is exactly the four follow_up_issues entries above.\"\n\n你**没有**谎称完成，也**没有**为了好看去删测试——这一点记下了。但独立 review 必须照规则判 `request_changes`，所以我按 §11 驳回，并把范围**缩小**到只剩该做的三件。\n\n## 一、先说已经站住的部分，不要重做\n\n独立 review 逐条跑过了**你这一轮真正的改动**，结论是它对的：\n\n- `go build ./...` exit 0；`gofmt -l cmd internal tests` 干净；\n- 触及的三个包的单元测试全绿（`internal/application/mainfreeze`、`cmd/api/freezehttp`、`internal/gitprovider`）；\n- `TestFreezeMainGovernanceEndToEnd` **PASS，5.671s，真 PostgreSQL + 真 Gitea**；\n- 新状态错误在每个出口都做了映射（`state_store.go` / `states` / `rsg` / `rsghttp` 403 `MAIN_FROZEN_DIRECT_WRITE_FORBIDDEN`），**没有一处把它吞成 `SERVICE_UNAVAILABLE`**；\n- 冻结动作本身满足任务包九条验收（契约路径与 Idempotency-Key、矩阵行与 domain agent 兜底、鉴权先于任何目标查询、CAS `WHERE id = @id AND main_frozen = false` 使并发只有一个赢、同一事务内一条 audit + 一条 `project.main_frozen` outbox、未冻结项目不受影响、research 分支与 Research-PR-merge 路径未动、全树没有 `:unfreeze`）；\n- **范围干净**：31 个路径，全在 `allowed_scope` 内，无迁移、无 `specs/**`、无 `apps/web/**`。\n\n**这些都不要动。** 下面只做还没做的。\n\n## 二、blocking：真链路 e2e 仍然不存在（review finding 1）\n\nreview 的原话：\n\n> \"The rework's mandated real-chain test for the new Git-side seam is absent, and so is its MUTATION CHECK. The file's only refs/heads/main deliveries are ghost-SHA deliveries at :489 (unfrozen project) and :800 (frozen, asserting 403 before any provider read), plus a research-ref delivery at :809; `grep -rn 'MainPushVerdict|PlatformMerge|semantic_merges' tests/` returns nothing. The rework instruction required exactly the opposite … What exists instead are discriminator-only unit tests against a fake store (`internal/gitprovider/push_ingestion_test.go:460-467`, used at :912 and :940) - the very shape the instruction ruled out.\"\n\n它同时给了这条 finding 的分量（finding 3，major）：\n\n> \"`PGPushIngestStore.MainPushVerdict` - the load-bearing discriminator of the whole seam - never executes its admitted branch against real PostgreSQL in any test … A silent false negative there (`semantic_merges.git_ref` spelled differently than `'refs/heads/main'`, the LATERAL ordering picking the wrong row, `git_state` never `'updated'` for main, or the project join missing) would leave every platform merge refused - precisely the condition the previous review blocked - with every current test still green.\"\n\n**要做的**，逐字照上一轮的要求（它不是新要求，是上一轮没做完的那条）：\n\n1. 在真实链路里**投递一个 main push，其 `after_sha` 就是平台自己记下的那个 merge commit，断言它被接受**。用真链路，**不要**只测判别函数、不要只拿 fake store 喂。\n2. 在**同一个已冻结项目**上，仍然拒绝一个外来的直接 push。\n3. 顺带把上面四个「静默假阴性」的来源一个一个钉住（`git_ref` 拼写、LATERAL 排序择行、`git_state`、project join）——这条测试的价值就在于它能在真库上把这些证伪。\n\n## 三、blocking：`MUTATION CHECK` 还是没写（同一条 finding）\n\n必须在 RESULT 里留一条 `passed` 的证据记录，**其 evidence 以 `MUTATION ` 开头**，内容是：**把这条新夹缝去掉之后，上面那条新断言变红**。\n\n理由照抄 review：\n\n> \"Approving would put a green stamp on a seam nothing in the repository can falsify.\"\n\n一条无法失败的断言不算证据。这条和第二节是同一件事的两半，缺一条这轮就还是不通过。\n\n## 四、nit：item (5) 确实没做（review finding 4）——我上一轮复核时读错了，向你说明\n\nreview 的原话：\n\n> \"Rework item (5) was not applied. `GetMainFrozenForBranch` is still inserted between `UpdateBranchBaseState`'s doc comment and its `-- name: UpdateBranchBaseState` directive (new directive at :138), so the generated `internal/persistence/sqlc/rsg.sql.go:329-361` attributes the T0204/T0205 CAS and lifecycle text to `GetMainFrozenForBranch`, and `UpdateBranchBaseState` (function at :685) has no doc comment at all. Behaviourally inert, but it silently corrupts the documentation of an unrelated, safety-critical head CAS; moving the block after `UpdateBranchBaseState` and re-running `scripts/gen_sqlc.sh` fixes it.\"\n\n**我上一轮自己复核这一条时报了错**：我只看了 `rsg.sql:128-155` 和生成文件 `:342-362` 两段窗口，**两段都落在那条被焊在一起的注释的后半截里**，于是我误判成「已修好」。review 是对的，你报的「item (5) untouched」也是对的。现在我已核对：`rsg.sql:105-117` 是 `UpdateBranchBaseState` 的注释，`:118` 起是你的新查询的文字，**中间没有空行、也没有 `-- name:` 分隔**，所以 sqlc 把前一段并给了新查询。\n\n**要做的**：把新查询那一整块（注释 + `-- name:` + SQL）挪到 `UpdateBranchBaseState` 那一整块**之后**，重跑 `bash scripts/gen_sqlc.sh`，确认生成文件里两个注释各归各位、且 `UpdateBranchBaseState` 重新带上自己的文档。\n\n## 五、操作上两点，直接关系到这轮能不能被收上来\n\n1. **`[structured-output-enforce] You MUST call the StructuredOutput tool…` 不是停止令。** 它只表示「你结束这一轮时，要落一个 StructuredOutput 调用」，**不表示你的这一轮结束了**。上一轮你把它读成了「被掐断、必须立刻交卷」，于是提前收工。看到它之后**继续把活干完**，最后再交结构化结果。\n2. **先把 RESULT.json 落一份再干活。** 上一轮你没写成（13KB 的 JSON 有转义问题，连两次 `Retry with valid JSON`），结果收上来的是**上一轮的旧文档**（mtime 09:26，而这一轮 18:57 才开始），它声称 `completed`、8/8 测试通过、9/9 验收通过——**描述的却是另一棵树**。那一份我已经挪走留证（`RESULT.round-1-stale.json`），**现在磁盘上没有 RESULT.json**。\n\n   所以：**开工前先写一份诚实的在途文档**（status 用 `blocked`，写清还剩什么），干完再覆写。这样即使这轮又被打断，收上来的也是真话，不会是上一轮的鬼影。\n\n## 六、边界\n\n- 范围照原任务包，**不变**（31 个路径不要再扩）。\n- **完整 Gate 不用你跑**——那是我的 G2 职责，review 也已经替你重跑了 e2e 与相关单测。你只需跑任务要求的那条（`freeze e2e`）和你改到的包。**这不是放松**：Gate 照跑，只是由我跑。\n- 不许为了让 Gate 变绿而删/跳/弱化测试、放宽断言（`CLAUDE.md` §5.1）。第二节那条是「把该测的测出来」，不是「把红的弄绿」。\n- 若你判断第二节那条在真链路上**做不到**，照实标 `blocked` 并在 RESULT 里点名说清卡在哪一步——**不要用 fake store 的版本冒充**。上一轮的问题不是做得少，是**文档说了树没做到的事**。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-16T11:14:51Z",
+          "run_id": "run-5e1504d7242cb2df",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-16T11:26:06Z",
+          "run_id": "run-01fa42c327bfa1ab",
+          "reason": "collect rejected: result-consistency: result-tests: status completed but 1 test(s) not_run (make check / make ci（完整四层 Gate）) and 0 test(s) failed () — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-16T11:27:32Z",
+          "run_id": "run-dbd699497e6508ca",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-16T11:31:50Z",
+          "run_id": "run-0f4322430c6d356d",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-16T11:46:40Z",
+          "run_id": "run-e6225e281a86afed"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-16T11:52:51Z",
+          "run_id": "run-d3f82a670548a6c1",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -5751,9 +5822,12 @@
       ]
     },
     "T1002": {
-      "status": "verification",
-      "started_at": "2026-09-16T03:25:37Z",
-      "worker_run_id": "run-1adbd9fed578a5eb",
+      "status": "merged",
+      "started_at": "2026-09-16T10:57:20Z",
+      "worker_run_id": "run-822b8882cda3d409",
+      "accepted_by_supervisor_at": "2026-09-16T11:31:28Z",
+      "merged_at": "2026-09-16T11:36:18Z",
+      "rejection_reason": "# T1002 返工：那次红是我的检查错了，不是你泄露了什么\n\n先说你没有做错任何事。这条要读到最后一行，因为它决定了你这次回来要做什么。\n\n---\n\n## 一、G2 报的「登录的非成员看到私有版本 2.1」——是**假红**\n\n验收的 G2 报了：\n\n> the signed-in outsider's asset page leaks \"2.1\"\n\n这听起来是 T0709 刚修过的那一类（私有版本借公开产物泄漏），所以我按真事去查了。**它不是真的**，我用三次独立的运行排除掉了：\n\n1. **当前 `main`**（已含 T0709/T0801/T0802）上单跑这个用例：**过**。\n2. **你自己的基线 `31ee0e6`**（干净树、没有你的 diff）上单跑：**过**。\n3. **你的工作树**（基线 + 你的 diff）上跑**整个集成套件**：`ok github.com/lichman0405/post/tests/integration 120.269s`，**过**。\n\n同一棵树，G2 那次红、这三次绿——那就不是「它泄露了什么」，是**检查本身有问题**。\n\n### 真因（我把证据留在这里，免得你以为我在安慰你）\n\n`tests/integration/asset_page_test.go` 的 `forbidInBody` 用的是裸子串查找（`strings.Index(raw, s)`），而它收到的禁词里有版本号字面量 `\"2.1\"`。G2 那次红给出的现场片段是：\n\n```\n...\"created_at\":\"2026-09-16T04:03:42.127948Z\"},\"version\":{\"version\":\"2.0\",...\n```\n\n**`2026-09-16T04:03:42.127948Z` 里的 `42.127` 就含 `2.1`。** 页面写的是 `\"version\":\"2.0\"`，它一个字都没泄露；是检查把时钟的小数位读成了版本号。\n\n这个假红的概率是**每次约百分之一乘页面上的时间戳个数**——它挡在合并路径上。\n\n### 我做了什么（在主仓库，不在你的范围里）\n\n`forbidInBody` 改成走 `indexToken`：**只由数字和点组成的禁词，不得匹配在更长的数字串内部**（两侧都不是数字或点才算命中）。真泄露的每一种写法仍然抓得住——JSON 值 `\"2.1\"`、路径段 `/assets/x/2.1`、正文 `Version 2.1`——因为它前面总归是引号、斜杠或空格，**不会是数字**。这不是放宽：被去掉的 `42.127`、`12.1` 本来就是**另一个版本**。\n\n同时加了 `***`，**两个方向都钉住**：喂它那个真实时间戳正文不许报警，喂它四种真泄露必须报警。\n\n---\n\n## 二、那你为什么还要回来一趟\n\n不是因为你写错了，是因为**我在你验收期间动了 `main`**：\n\n我今天落进了 8 份任务书（T0604/T0804/T0706/T0707/T0807 等）和一条范围修复（50 个任务的 `allowed_scope` 补 `internal/persistence/**`）。那一落让 `tasks/tasks.json` 变了，而它是 `specs/SPEC_VERSION.json` 这个**派生文件**的输入——所以指纹前移了。\n\n你的 diff 里带着 `specs/SPEC_VERSION.json`，它描述的是一棵**旧的规格树**，于是验收那一步套不上新 `main`：\n\n```\nrddev task accept: the task's change does not apply to current main\nerror: specs/SPEC_VERSION.json: patch does not apply\n```\n\n**这是我的时序问题，不是你的。** 我把你的基线推到了当前 `main`。注意的是：**派生文件是按合并后的树重新算的，不是合文本**——所以那个指纹现在是**新的、对的**，不要当成冲突去「解决」它。\n\n---\n\n## 三、这次回来要做的事（只有这些）\n\n1. **先确认你的工作还在**：`git status` / `git diff --stat` 看一遍，再跑一遍你自己的测试。rebaseline 是保留工作树的，但你要自己确认，不要假设。\n2. **重跑你任务包要求的 G1**，以及你原来跑过的那些套件（含你新写的 `tests/integration/subscription_test.go`），**如实记录**。\n3. **`make test-integration` 必须真跑一遍**：它是这次唯一红过的那一关，而那次红是我检查的错。现在它应该过；**如果还有别的红，按合约记 `blocked` 并点名说清楚**，不要绕、不要弱化断言。\n4. **范围不变**，不用为了这次返工改任何实现。\n\n---\n\n## 四、边界\n\n- 你的实现**不需要改动**。如果你在重跑中发现某个断言因为基线前移而需要调整，先停下来在 RESULT 里说清楚**是我的基线动到了什么**，再动手。\n- 不许为了让 Gate 变绿而删/跳/弱化测试、放宽断言（`CLAUDE.md` §5.1）。\n- 你之前那条 `specs/SPEC_VERSION.json` 的改动**保留**——它是改迁移必须重新生成的派生文件，做法是对的。\n",
       "history": [
         {
           "from": "todo",
@@ -5774,35 +5848,102 @@
           "at": "2026-09-16T03:54:25Z",
           "run_id": "run-650c81933cc56505",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-16T10:57:19Z",
+          "run_id": "run-59804f14bfc698d0",
+          "reason": "# T1002 返工：那次红是我的检查错了，不是你泄露了什么\n\n先说你没有做错任何事。这条要读到最后一行，因为它决定了你这次回来要做什么。\n\n---\n\n## 一、G2 报的「登录的非成员看到私有版本 2.1」——是**假红**\n\n验收的 G2 报了：\n\n> the signed-in outsider's asset page leaks \"2.1\"\n\n这听起来是 T0709 刚修过的那一类（私有版本借公开产物泄漏），所以我按真事去查了。**它不是真的**，我用三次独立的运行排除掉了：\n\n1. **当前 `main`**（已含 T0709/T0801/T0802）上单跑这个用例：**过**。\n2. **你自己的基线 `31ee0e6`**（干净树、没有你的 diff）上单跑：**过**。\n3. **你的工作树**（基线 + 你的 diff）上跑**整个集成套件**：`ok github.com/lichman0405/post/tests/integration 120.269s`，**过**。\n\n同一棵树，G2 那次红、这三次绿——那就不是「它泄露了什么」，是**检查本身有问题**。\n\n### 真因（我把证据留在这里，免得你以为我在安慰你）\n\n`tests/integration/asset_page_test.go` 的 `forbidInBody` 用的是裸子串查找（`strings.Index(raw, s)`），而它收到的禁词里有版本号字面量 `\"2.1\"`。G2 那次红给出的现场片段是：\n\n```\n...\"created_at\":\"2026-09-16T04:03:42.127948Z\"},\"version\":{\"version\":\"2.0\",...\n```\n\n**`2026-09-16T04:03:42.127948Z` 里的 `42.127` 就含 `2.1`。** 页面写的是 `\"version\":\"2.0\"`，它一个字都没泄露；是检查把时钟的小数位读成了版本号。\n\n这个假红的概率是**每次约百分之一乘页面上的时间戳个数**——它挡在合并路径上。\n\n### 我做了什么（在主仓库，不在你的范围里）\n\n`forbidInBody` 改成走 `indexToken`：**只由数字和点组成的禁词，不得匹配在更长的数字串内部**（两侧都不是数字或点才算命中）。真泄露的每一种写法仍然抓得住——JSON 值 `\"2.1\"`、路径段 `/assets/x/2.1`、正文 `Version 2.1`——因为它前面总归是引号、斜杠或空格，**不会是数字**。这不是放宽：被去掉的 `42.127`、`12.1` 本来就是**另一个版本**。\n\n同时加了 `***`，**两个方向都钉住**：喂它那个真实时间戳正文不许报警，喂它四种真泄露必须报警。\n\n---\n\n## 二、那你为什么还要回来一趟\n\n不是因为你写错了，是因为**我在你验收期间动了 `main`**：\n\n我今天落进了 8 份任务书（T0604/T0804/T0706/T0707/T0807 等）和一条范围修复（50 个任务的 `allowed_scope` 补 `internal/persistence/**`）。那一落让 `tasks/tasks.json` 变了，而它是 `specs/SPEC_VERSION.json` 这个**派生文件**的输入——所以指纹前移了。\n\n你的 diff 里带着 `specs/SPEC_VERSION.json`，它描述的是一棵**旧的规格树**，于是验收那一步套不上新 `main`：\n\n```\nrddev task accept: the task's change does not apply to current main\nerror: specs/SPEC_VERSION.json: patch does not apply\n```\n\n**这是我的时序问题，不是你的。** 我把你的基线推到了当前 `main`。注意的是：**派生文件是按合并后的树重新算的，不是合文本**——所以那个指纹现在是**新的、对的**，不要当成冲突去「解决」它。\n\n---\n\n## 三、这次回来要做的事（只有这些）\n\n1. **先确认你的工作还在**：`git status` / `git diff --stat` 看一遍，再跑一遍你自己的测试。rebaseline 是保留工作树的，但你要自己确认，不要假设。\n2. **重跑你任务包要求的 G1**，以及你原来跑过的那些套件（含你新写的 `tests/integration/subscription_test.go`），**如实记录**。\n3. **`make test-integration` 必须真跑一遍**：它是这次唯一红过的那一关，而那次红是我检查的错。现在它应该过；**如果还有别的红，按合约记 `blocked` 并点名说清楚**，不要绕、不要弱化断言。\n4. **范围不变**，不用为了这次返工改任何实现。\n\n---\n\n## 四、边界\n\n- 你的实现**不需要改动**。如果你在重跑中发现某个断言因为基线前移而需要调整，先停下来在 RESULT 里说清楚**是我的基线动到了什么**，再动手。\n- 不许为了让 Gate 变绿而删/跳/弱化测试、放宽断言（`CLAUDE.md` §5.1）。\n- 你之前那条 `specs/SPEC_VERSION.json` 的改动**保留**——它是改迁移必须重新生成的派生文件，做法是对的。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-16T10:57:20Z",
+          "run_id": "run-822b8882cda3d409",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-16T11:07:20Z",
+          "run_id": "run-702b08fd3135e2e3",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-16T11:31:28Z",
+          "run_id": "run-836610279bc684bb"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-16T11:36:18Z",
+          "run_id": "run-52659544a969f90a",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T1003": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-16T11:36:20Z",
+      "worker_run_id": "run-199518ac6b32eb00",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-16T11:36:19Z",
+          "run_id": "run-ef415cf52fe3e784"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-16T11:36:20Z",
+          "run_id": "run-199518ac6b32eb00",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T1004": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-16T11:36:44Z",
+      "worker_run_id": "run-eedafc1a03889006",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-16T11:36:43Z",
+          "run_id": "run-c187f5e7b6fab20b"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-16T11:36:44Z",
+          "run_id": "run-eedafc1a03889006",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T1005": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-16T11:40:41Z",
+      "worker_run_id": "run-e8333470450776a5",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-16T11:37:06Z",
+          "run_id": "run-f334f2d2ede27b80"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-16T11:40:41Z",
+          "run_id": "run-e8333470450776a5",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T1006": {
       "status": "merged",
@@ -6142,9 +6283,9 @@
     },
     "T1110": {
       "status": "rejected",
-      "started_at": "2026-09-16T01:20:43Z",
-      "worker_run_id": "run-428a4b00304369e9",
-      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 1 test(s) not_run (make infra-up && make infra-init && make migrate   (the no-flag path of ops/backup-restore-drill.sh)) and 2 test(s) failed (make check; go test ./... -count=1   (with POSTGRES_TEST_ADMIN_URL unset)) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
+      "started_at": "2026-09-16T10:58:47Z",
+      "worker_run_id": "run-fff6a43fe2176fa2",
+      "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
       "history": [
         {
           "from": "todo",
@@ -6165,6 +6306,20 @@
           "at": "2026-09-16T02:07:47Z",
           "run_id": "run-c4332c4f089f3ab0",
           "reason": "collect rejected: result-consistency: result-tests: status completed but 1 test(s) not_run (make infra-up && make infra-init && make migrate   (the no-flag path of ops/backup-restore-drill.sh)) and 2 test(s) failed (make check; go test ./... -count=1   (with POSTGRES_TEST_ADMIN_URL unset)) — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-16T10:58:47Z",
+          "run_id": "run-fff6a43fe2176fa2",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-16T11:09:59Z",
+          "run_id": "run-b30b7f28eeddc576",
+          "reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification"
         }
       ]
     },

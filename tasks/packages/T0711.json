@@ -1,0 +1,85 @@
+{
+  "id": "T0711",
+  "phase": "P7",
+  "phase_name": "Research Asset Hub、Rights 与 Publish",
+  "title": "Asset Governance 与 Rights Holder Transfer",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "requirements": [
+    "**缺口不是我发明的，代码自己写在那儿了**。`internal/assets/page.go:190-201` 逐字：the publish gate **validates** the creator ids a publish declares (`internal/assets.PublishCandidate.CreatorIDs`) but **no table stores them** — the version row's only actor is `published_by`；同一段还写着「rendering it as what it is, with the role named, is the honest half of an item whose other half **needs a schema change**（reported in the task result, not silently dropped）」。**那一半就是本任务。** 而被丢掉的那份名单今天是真的被收上来了：`internal/assets/gate.go:221-227` 让发布**必须**至少有一个 creator（`validation.CheckAssetContributors`；判定在 `:344-349`）。**平台在发布时索要一份署名名单，校验完就扔了**——本任务把它存下来。（`internal/assets/page.go:725` 是同一件事的第二处注释。）",
+    "**六种角色要分开，不是合成一个「owner」**。`docs/11_RELEASE_ASSET_HUB.md:31` 逐字：「分离 Rights Holder、Custodian、Maintainer、Creator、Contributor、Originating Project。」注意其中两处不能塌陷：**Creator ≠ Contributor**（`internal/assets/gate.go:49-51` 也把两者并称 creators/contributors，指向 docs/11 §3 与 CLAUDE.md 不变量 14），以及 **Originating Project 是一个项目，既不是人也不是组织**——把这三样塞进同一个「party」列，正是这条规格要防的事。",
+    "**所有权转移是 append-only 的**。`docs/11:31` 逐字：「Ownership transfer 是 append-only governance event；Creator/history 永久保留。」`docs/26_OBSERVABILITY.md:25` 把 ownership transfer 列在**最高风险那一档**（与 visibility、rights、policy、merge、publish、abort/reopen 并列），并要求 audit append-only。所以：**转移只能追加，不得改写任何既有行**；转移之后，转移**之前**的持有关系仍要读得出来。这也对上 CLAUDE.md §9 不变量 8：Nothing disappears; state only evolves。",
+    "**转移不得改变 asset id / version / origin / creator**——这是本任务自己的验收条款，四条都要有断言。判例：`infra/migrations/00064_asset_pid_origin.sql` 已经立下同一形状的规矩（pid 不随 slug/org 变化，那是它自己的验收）；这里 pid 同样不得随 holder 变化。**creator 与 contributor 是署名，不是所有权**——换持有者不是换作者。",
+    "**权利人可以是组织，人和组织要分开记**（owner 今天的裁定，原文记在 `tasks/decisions.md` 的 L3-20260916-1）。**这条不需要你发明形状——schema 本来就是分开的**：`infra/migrations/00002_identity.sql:3` 是 `users`，`:12` 是 `organizations`，两张独立的表。所以：**把「哪一种」和「哪一个」一起记下来**（kind 与 id 并存），**不要**造一个多态的 `actor_id`——那样读的人就再也分不清这个持有者是人还是组织；**也不要**为了装持有者新造一张「当事人」表，那会把已经分开的两张表又糊回去。",
+    "**权限只有 owner——这一行没有歧义**。`specs/policies/permissions-matrix.csv:13` 是 `change_rights_holder,deny,deny,deny,deny,deny,allow,deny`，表头在同文件 `:1`（`public_anonymous,authenticated_nonmember,viewer,contributor,maintainer,owner,agent_default`）。**注意它与发布那一行的区别**：发布那行 maintainer 是 `conditional`（于是我去查了它未定义、按 fail-closed 收成拒绝），而**这一行 maintainer 直接是 `deny`**——照它做，**只有 owner**。`specs/mcp/tools.json:26-31` 把 `change_rights_holder` 列在 `forbidden_default_agent_actions` 里（与 `merge_main`、`publish_private_to_public` 同档）。动作名**已经注册好了**：`internal/authz/action.go:36` 的 `ActionChangeRightsHolder`。**`internal/authz/**` 在你范围之外**——权限模型不许你动，它已经就位，你按它用即可。",
+    "**不做**：不做 credit dispute（`docs/26_OBSERVABILITY.md:25` 里它是与 ownership transfer 并列的**另一条**高风险动作，不是本任务）；不做 scientific review 维度；不删除、不覆盖任何历史；不碰发布流程本身（那是 T0705，已完工）。"
+  ],
+  "acceptance_criteria": [
+    "**发布时收上来的 creator/contributor 名单真的落库了**——照 `internal/assets/page.go:190-201` 点名的那个缺口（validated but no table stores them）。有测试：发布一个声明了 creator 列表的资产，事后**从库里读回**该列表，与请求里给的逐项一致",
+    "**六种角色分开存**（`docs/11_RELEASE_ASSET_HUB.md:31`）。有测试证明它们不是同一格：Creator 与 Contributor 可各自独立，Rights Holder 与 Creator 可指向不同方，Originating Project 与这三者都不是一回事",
+    "**转移后旧历史可见**：做一次所有权转移之后，转移**前**的持有关系仍然读得出来（append-only，不是 UPDATE 覆盖）——有测试",
+    "**Creator 不被新 owner 替换**：转移前后，Creator 那一格**逐字不变**——有测试（这是本任务的验收条款之二，逐字：Creator 不被新 owner 替换）",
+    "转移**不改变** asset id、version、origin、creator——四条各有独立断言（可参照 `00064` 对 pid 稳定性的验收写法）",
+    "**权利人可以是组织，且人与组织分开记**：两条测试——一个用户持有者、一个组织持有者；**读出来的结果能分辨是哪一种**（kind 与 id 并存）。反例要有：不得出现「只知道 id、不知道是人还是组织」的读取路径",
+    "权限 **fail-closed**：owner 能转移；**maintainer 被拒**；匿名被拒——三条都有测试（`specs/policies/permissions-matrix.csv:13`，这一行 maintainer 是 `deny`，照它做，不要照发布那行的 `conditional`）",
+    "转移记 **append-only 审计/事件**（`docs/26_OBSERVABILITY.md:25` 把 ownership transfer 列在最高风险一档）——有测试读得到那次转移的记录，且再转移一次时上一条仍在",
+    "RESULT 里点名回答：`internal/assets/page.go:190-201` 说「另一半需要一次 schema 变更」——**你做的是不是那一半**？若你判断不是、或还缺别的东西，照实说。另外点名回答：`publish` 门里那份 creator 名单在**没有经过发布**的资产上（例如既有存量数据）是空的，你的读路径怎么处理这种行——照实说，不要编一个默认值填上去"
+  ],
+  "allowed_scope": [
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "internal/persistence/**",
+    "internal/assets/**",
+    "internal/rights/**",
+    "internal/domain/**",
+    "internal/application/**",
+    "internal/observability/**",
+    "cmd/api/**",
+    "apps/web/**",
+    "packages/schemas/**",
+    "tests/**",
+    "go.mod",
+    "go.sum",
+    ".env.example"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "specs/api/openapi.yaml",
+    "specs/events/event-types.yaml",
+    "specs/mcp/tools.json",
+    "specs/policies/**",
+    "internal/authz/**",
+    "Makefile",
+    "scripts/**"
+  ],
+  "relevant_specs": [
+    "**`internal/assets/page.go:190-201`**：本任务的缺口定义处，逐字写着 creator 名单 validated but no table stores them、另一半 needs a schema change——**先读它**。`:725` 是同一件事的第二处注释",
+    "**`docs/11_RELEASE_ASSET_HUB.md:31`**：六种角色分离、ownership transfer 是 append-only governance event、Creator/history 永久保留——本任务的总依据",
+    "**`specs/policies/permissions-matrix.csv:1,13`**：表头与 `change_rights_holder` 那一行（只有 owner 是 allow）——权限依据",
+    "**`specs/mcp/tools.json:26-31`**：`change_rights_holder` 在 `forbidden_default_agent_actions` 里——agent 默认不许",
+    "**`internal/authz/action.go:36`**：`ActionChangeRightsHolder` 已注册，动作名以它为准（**该目录你不要改**）",
+    "**`internal/assets/gate.go:44-51, 221-227, 344-349`**：`CreatorIDs` 的定义、发布时「至少要有一个 creator」的强制、以及它的校验——那份名单今天从哪来、又被丢在哪一步",
+    "**`infra/migrations/00002_identity.sql:3,12,20`**：`users` 与 `organizations` 是两张独立的表（外加 `organization_memberships`）——「人和组织分开记」已经有的形状",
+    "**`infra/migrations/00064_asset_pid_origin.sql`**：pid 不随可变更属性变化的先例与它的验收写法——照它写「转移不改变 id」",
+    "**`docs/26_OBSERVABILITY.md:25`**：ownership transfer 属最高风险动作、audit append-only；同页还有一条 credit dispute，那是**别的**任务",
+    "**`infra/migrations/00066_rights_document.sql`**：`rights_json` 是**权利声明文档**（许可、用途、可见性），**不是**「谁是权利人」——两者不是一回事，别把本任务的需求塞进那个文档",
+    "**`infra/migrations/00010_releases_assets.sql:64-71`**：`knowledge_publications.rights_json`——同一份文档模型的知识侧",
+    "`tasks/decisions.md` 的 **L3-20260916-1**：「权利人可以是组织吗 → 可以，人和组织分开记」的裁定原文",
+    "`CLAUDE.md` §9 不变量 8（Nothing disappears; state only evolves）与不变量 14（Contribution Ledger append-only；Credit 可纠错但留痕）"
+  ],
+  "scope_note": "这是**按本任务的实际交付面**收窄后的范围。相对 DAG 里的 phase 级默认值：保留 `infra/migrations/**` + `specs/database/postgres.sql` + `specs/SPEC_VERSION.json`（本任务要落新表并重新生成快照与指纹）；保留 `internal/persistence/**`、`internal/assets/**`、`internal/rights/**`、`packages/schemas/**`、`tests/**`、`cmd/api/**`、`apps/web/**`；**加** `internal/domain/**`（审计与组织相关的领域类型在那里：`internal/domain/audit.go`、`internal/domain/organization.go`）、`internal/application/**`（转移命令要有个家，`internal/application/assetpublish` 就是同一层级的先例）、`internal/observability/**`（高风险动作的审计落点）；**移出** `internal/authz/**`（**权限模型不许你动**——`ActionChangeRightsHolder` 已经注册好了，你按它用；要改权限矩阵得先回到我）、`specs/api/openapi.yaml`、`specs/events/event-types.yaml`、`specs/mcp/tools.json`、`specs/policies/**`（四份都是 Supervisor-only 的规格，你只读）、`scripts/**`、`Makefile`。",
+  "supervisor_scope_narrowing": "2026-09-16 定稿。五点说明：\n（一）**它的 L3 已经问过 owner 了**：本任务卡在「权利人能不能是组织」这一条上（issue #240 一类），我今天问了 owner，答：**可以，而且人和组织分开记**。原文记在 `tasks/decisions.md` L3-20260916-1。**裁定落进 schema 的形状是现成的**——`users` 与 `organizations` 本来就是两张表（`00002_identity.sql:3,12`），所以要求是「kind 与 id 一起记」，不是「新造一张当事人表」。\n（二）**我把缺口的出处钉在代码上，没有自己去发明需求**。`internal/assets/page.go:190-201` 那段注释是别人（T0709 那条线）留下的诚实之言：门收了 creator 名单，没有表存它，于是页面只好把 publisher 标成 `Role: \"publisher\"` 而不是冒称 Creator。它自己写明「the other half needs a schema change」。**本任务就是那另一半。** 这样写有个好处：如果 Worker 判断我读错了那段注释，它有一个可以指着反驳的具体句子，而不是只能跟我争抽象需求。\n（三）**「转移之后能不能撤回」我没有问 owner**，按保守默认办：**append-only，不做撤销**（要撤销就再追加一次转移）。依据是 `docs/11:31` 与 `docs/26:25` 都只管「append-only」，没有任何一处写过撤销。若你判断不做撤销会让某条既有规格无法满足，在 RESULT 里说。\n（四）**迁移号不在这份任务书里定死**——派工时由 `rddev` 从分配账上取号并写进任务包，**以任务包里那行「its number is **NNNNN**」为准**。**不得自行选号。**\n（五）**存量数据我没有给指令**，这是有意的：`internal/assets/page.go` 的注释与 `00066` 的迁移注释都立过同一条规矩——**不要替没有声明过的人发明一份声明**（`00066` 逐字：inventing a declaration for a row that stated none is precisely the upgrade 00064 warns against）。所以对发布之前就存在的资产行，**不要回填一份假名单**；怎么读这种行，写进 RESULT 让我看。",
+  "tests": [
+    "asset governance tests"
+  ],
+  "dependencies": [
+    "T0705"
+  ],
+  "baseline_sha": "",
+  "max_turns": 0,
+  "max_budget_usd": 0,
+  "migration_number": 0
+}

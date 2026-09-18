@@ -10154,3 +10154,66 @@ G2 那次红给出的现场片段是：
 我记过一条：**先证明检查能失败，再去信它绿**。这一次是同一件事的另一半——
 **一个对着自己的时钟喊狼来了的检查，会把人训练成无视红色**。它比没有检查更坏：
 今天它冤枉了 T1002，明天它红了别人也只会当成噪声。**检查的失败必须意味着它名字里的那件事。**
+
+## L3-20260916-1 —— owner 裁定四条（知识对象发布 ×3、权利人 ×1）
+
+这四条都是**公开性 / 权利语义**，属于 CLAUDE.md §5 里我不许自己创造的那一类，所以标了「等定」。
+我问了 owner 一次（每条都给了一个建议并说明理由），**四条都按建议裁定**。记在这里，因为 L3 必须落在纸面上。
+
+### 裁定一：知识对象的「发布」**不等于**「公开」
+
+**owner 原话：跟资产一样——发布 ≠ 公开。**
+
+发布记录的是一个**状态**；可见性是**另一根轴**。
+
+**更正我自己写这句时的一个错**：我原先顺手写成「所以要给 `knowledge_publications` 补一根可见性列」。
+复核发现**那根轴已经存在**——`scientific_object_versions.visibility_policy_id`（`infra/migrations/00005_scientific_objects.sql:22`），
+而且它不是随手加的：它是 RSG manifest 的一部分（`internal/rsg/schemareg/schemas/rsg-manifest.schema.json:66,124`），
+**服务端权威**（各 entity schema 头部逐字：「The fields … and `visibility_policy_id` are server-authoritative (docs/23 §3, docs/12 §3)」），
+并且 RSG 冲突判定把它当**权利**字段处理（`internal/rsg/conflict/doc.go:36`：rights: visibility_policy_id diverged on both sides）。
+
+所以裁定一的正确读法是：**这条裁定确认的是既有的两根轴，不是要新造一根。** 知识对象那边可见性是一根指针（指向策略），
+资产那边是一个内联枚举（`research_asset_versions.visibility`）——**形状不同，但「发布不等于公开」这件事两边都成立**。
+落到 T0805 上的要求因此是：**发布不得扩大可见范围**，并且公开读取要尊重那根既有轴；
+**不要因为这条裁定就去新加一个 `public`/`private` 列**。
+
+与资产的既有判例一致：`docs/12_PERMISSIONS_RIGHTS_POLICY.md:13` 逐字允许「Private Project：…**可显式 Publish Asset/Knowledge/Attestation**」——
+**私有项目里明确发布出去的东西是允许发布的**，发布本身不扩大可见范围。
+
+**由此定死的实现后果**：`POST /knowledge/{id}/versions/{v}/publish` 必须像 `assetpublish` 那样**收一个 visibility 参数**，
+并且「发布一个私有版本」是**合法**的（`internal/application/assetpublish/command.go:283-286` 与 `:441-444` 的 `requirePolicy` 是先例：
+「A private publication widens nothing; the rule is about public assets and is not read」）。
+
+### 裁定二：`public_version` = **对外显示的版本名**，发布时由发布者自己填
+
+服务端**原样存**，不做推导、不做格式化。同一知识对象内唯一（表上已有 `UNIQUE(object_version_id, public_version)`，`00010:70`）。
+
+**不要在服务端生成这个名字**——它不是 pid，是给人看的标签。
+
+### 裁定三：同一个知识对象版本**只能对外发布一次**；要改就发新版本
+
+第二次发布**拒绝**（不是覆盖、不是新增一行）。
+
+这同时消掉了对外读取的歧义：`GET /knowledge/{knowledgeId}`（`specs/api/openapi.yaml:279`）面对同一版本**不存在**多行，
+所以不需要为「返回哪一行」发明规则。**这条要写成测试**——表上那个唯一约束**允许**一个版本多行，
+所以「拒绝第二次」是**应用层的规则**，不是数据库约束，必须有测试钉住。
+
+### 裁定四：**权利人可以是组织**；人和组织**分开记**
+
+不合并成「一个主体」的抽象。这对 T0711（Rights Holder Transfer）是定性的：
+记录必须能区分**自然人**与**组织**两种身份，而不是把两者塞进同一个 id 列。
+
+### 影响（哪些任务因此解开）
+
+- **T0805（已发布的知识对象）**：三条裁定到齐，可以写任务书了。它后面排着 **24 个下游任务**（P9–P12 大半），
+  所以这一处是今天最有价值的一次解锁。仍按我先前定下的三条 L1：稳定编号沿用 26 位 Crockford（`00064_asset_pid_origin.sql`）、
+  预览面照 `specs/mcp/tools.json:22`、生命周期照 `docs/43_STATE_MACHINES.md:21-22`
+  （`private candidate → publication_review → published`，**失败回到 private candidate，不存在自动 published**）。
+- **T0711（Rights Holder Transfer）**：裁定的第四条直接适用。
+
+### 没有被问到、仍按最保守办的一条
+
+「发布之后能不能撤回/缩小可见范围」我**没有**问（它不像前三条那样会改变对外形态的初衷），
+按我在 issue #249 里写明的保守默认办：**V1 不做撤回**；要撤只能按「Nothing disappears; state only evolves」
+追加一个状态并指向替代者（照资产 abort/supersede 的先例，`CLAUDE.md` §9 不变量 8）。
+owner 若不同意，这一条可以单独翻——它被单独记出来就是为了好翻。
