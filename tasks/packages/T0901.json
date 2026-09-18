@@ -7,13 +7,21 @@
   "decision_level_max": "L1",
   "dependencies": ["T0805", "T0705"],
   "requirements": [
-    "public/authorized searchable entity projection",
-    "structured fields + text",
-    "incremental outbox updates"
+    "**投影器本身：把领域事件变成 `search_documents` 的行。** 表已经建好——`infra/migrations/00013_search_projection.sql:3-15`（`entity_ref` 主键、`entity_type`、`visibility`、`project_id`、`title`、`content`、`structured`、`embedding vector(1536)`、`updated_at`，加 GIN FTS 与 structured 两条索引）。**读的那条查询已经写好，复用它，不要另写一条**：`internal/persistence/queries/search.sql:17-38` 的 `SearchDocuments :many`，可见性过滤在 `:36` —— `AND (visibility = 'public' OR project_id = ANY(@allowed_project_ids::uuid[]))`；`:20-31` 的注释是这条查询的要害，逐字读（传空数组只得到 public 行，**永不得到整张表**），这是 fail-closed 的根，别改掉。**写的那条也已经有**：`:5-15` 的 `UpsertSearchDocument :exec`（`ON CONFLICT (entity_ref) DO UPDATE`）——**这就是幂等点，增量更新靠它**。`internal/search/` 今天整个目录只有一个 `doc.go`，Go 侧基本是从零开始。",
+    "**`visibility` 只许「从源头照抄」，不许「算出来」；拿不准一律落 `private`。** 这一列的值必须来自被投影实体自己的可见性轴，**绝不允许出现「拿不准就先写 public」**。而且 `search_documents.visibility`（`00013:6`）上**没有 CHECK 约束**——数据库不会替你挡这个错，你得自己挡。既有的访问控制测试必须继续绿：`tests/integration/search_access_test.go:23` `TestSearchDocumentsEnforcesAccessControl`。泄漏在本项目是最高等级的安全场景而非一般验收项：`docs/31_MASTER_ACCEPTANCE.md:32,35`（Gate E「Search 无 private leakage」）与 `docs/54_SECURITY_THREAT_MODEL.md:10`。**「public 路径上不读私有数据」的既有先例照它做**：`cmd/api/explorehttp/store.go:25-33` 逐字——私有项目的 name/slug/visibility「never leave the database on this path: not read and withheld, never selected」。**选中再过滤是错的；根本不要选中。**",
+    "**增量：新增一个 outbox 消费者，挂在 `cmd/worker`。** 机制已经有了，照抄既有消费者的挂法：写入方 `internal/events/event.go:82` `func Record(ctx, db DBTX, e Event) error`（`Event.Visibility` 在 `:45-65`，**必填且显式，不许猜**；校验在 `:121-126`，只允许 public|private）；`outbox_events` 在 `infra/migrations/00012_events_audit.sql:14-22`，`00046_outbox_idempotent_publish.sql:32-36` 补了 `visibility text NOT NULL DEFAULT 'private'`（`:38-39` 注释逐字：an event is never more visible than its subject）。**每个消费者自带一个游标列**——两例：`00059_webhook_endpoints.sql:76-79`、`00078_subscriptions.sql:159`。挂载点在 `cmd/worker/main.go`（dispatcher `:119`、webhook fanout `:132-133`、subscription fanout `:151`；注册 API 是 `internal/worker/worker.go:105`）。**幂等是硬要求**（`docs/adr/ADR-013-domain-events-outbox.md:4`：同事务写 outbox，异步投递，Consumer 幂等）。**该投影哪些事件**：`specs/events/event-types.yaml:17`（`state.committed`）、`:25-28`（`release.published`、`research_asset.version_published`、`knowledge.version_published`、`knowledge.external_evidence_added`）、`:35`（`policy.version_published`）——**`specs/events/**` 在你的 forbidden_scope 里，按已有拼法投影，不要加新事件类型；需要新的就记 `blocked`。**",
+    "**rebuild 命令：形状你定，但三条硬要求。** 先例形状是 `Makefile:65-71` 的 `migrate` 目标（make 委托给 Go CLI），而 `cmd/rddev` 不在你范围内——所以允许你动 `Makefile` 加一个目标，实现体放 `cmd/worker/**`。**必须**：(1) 能从一台干净的开发机上真的跑起来；(2) **幂等**，连跑两次结果一致；(3) 有测试覆盖，而不是只有一条命令。`search_documents` 被**有意**排除在 append-only 之外——它是可重建投影不是历史：`infra/migrations/00014_append_only_enforcement.sql:16` 的注释块、`00015_append_only_truncate.sql`，正面证据 `tests/integration/append_only_truncate_test.go:119`（`TRUNCATE search_documents` **必须成功**）。所以 rebuild 合法；但反过来说，**别拿它当「投影里丢东西无所谓」的借口**。",
+    "**不做**：排名的科学规则（T0905）、embedding 的 provider 与 pgvector 索引（T0902）、Answer 生成（T0906）、搜索 Web UI（T0907）。`embedding` 那一列**先留空是对的**，它是 T0902 的交付面。`docs/14_SEARCH_DISCOVERY.md:5` 定死范围（只搜 network 内 public/accessible content，不做全互联网 crawler），`:11` 说明检索是 structured filters + FTS + semantic + graph traversal + scientific ranking 的组合——**本任务只做「投影」这一步**；`docs/adr/ADR-005-postgres-first-graph-search.md:5`：V1 不引入 OpenSearch。**若你发现某条需求的完成依赖上面任何一个，记 `blocked` 说明，不要顺手实现**（详见 `supervisor_scope_narrowing`）。"
+
   ],
   "acceptance_criteria": [
-    "private 默认不进 public projection",
-    "rebuild command"
+    "**投影真的落了行**：在真实 PostgreSQL 上投影一次之后，能按 `entity_ref` 从 `search_documents` **读回**该实体，且 `title` / `content` / `structured` 与源一致——**断言读的是表，不是写入函数的返回值**。",
+    "**private 默认不进 public 投影**：一个 private 项目下的实体被投影后，那一行的 `visibility` 是 `private`（不是 public），并且既有的 `TestSearchDocumentsEnforcesAccessControl`（`tests/integration/search_access_test.go:23`）继续绿。**两条一起才构成「不泄漏」**——只断言其中一条不算。",
+    "**投影幂等**：同一个领域事件投两次，表里仍然只有一行、且第二次不报错。**有一条测试真的投两次**（第二次走同一条 `UpsertSearchDocument` 路径），而不是只断言第一次成功。",
+    "**rebuild 幂等**：重建跑两遍结果一致；**有测试覆盖这个命令本身**，而不是只有一条命令存在。",
+    "**消费者真的挂上了**：该 job type 经由**真实的 worker 循环**被消费（照 `cmd/worker/main.go` 已有的三个挂载点），不是测试直接调用函数冒充。",
+    "**越界自证**：RESULT 里点名说明 `specs/**`（除快照与指纹）、`specs/events/**`、`internal/authz/**`、`specs/policies/**`、`apps/web/**`、`cmd/rddev/**` 一行未改，并说明 `embedding` 列保持为空、没有替 T0902/T0905/T0906/T0907 干活。"
+
   ],
   "tests": ["search projection"],
   "allowed_scope": [

@@ -10510,3 +10510,57 @@ T0805 在 RESULT 里主动点名：它改了**别的任务的文件**——`cmd/
 
 **并记**：`make check` 缺口今天的**第三个**受害任务就是 T0805（`staticcheck` 报两个未使用的测试
 辅助函数），见上文那条 L1。三次都在同一天。
+
+## 合并顺序的真相：79→86 是一条串行链（2026-09-18，L1，把推断验成了代码）
+
+今天在准备合 T0604 时发现真正的通道不是"谁先做完谁先合"，而是**迁移编号顺序**。查清了机制：
+
+- **执行点在合并动作本身**：`internal/devorchestrator/migration_order.go` 的
+  `assertMigrationMergeOrder`。它读**别的 worktree 的文件系统**（`.rddev/worktrees/*/infra/migrations/`），
+  与任务状态无关——所以**一个停在 `rejected` 或被机器重启打断的 `worker_failed` 任务，只要
+  worktree 里还攥着一个更小的编号，就仍然挡着所有更大的编号**。拒绝文本会点名挡路者。
+- **main 上最高的迁移是 00078**。待合的链是：**00079 T1003 → 00080 T1004 → 00081 T1005 →
+  00082 T0711 → 00083 T0805 → 00084 T0604 → 00085 T0707 → 00086 T0804**。
+  也就是说 **T0805（P9/P10 的拱心石）排在第五环，T0604 排在第六环**——它们做得再好也越不过前面。
+- **每个环都会重写同一批生成物**（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、
+  `internal/persistence/sqlc/**`），而 G2 组合的是"当前 main + 本任务的补丁"，所以**一环合并、
+  后面每一环的指纹 hunk 立刻失效**。因此每一环都必须：**先在最新 main 上重组 → 再评级 → 再合并**，
+  一次一环。这不是保守，是唯一能通的走法（`migration_order.go` 的注释把这条写成了明文）。
+
+**被打断的三个任务（T1003/T1004/T1005）的续作办法**（L1，今天验过一遍）：
+
+`worker_failed` 在状态机里**只有一条出边**（`worker_failed → ready`），而 `rebaseline` 的 CLI 走
+`task reject`（只接受 `running|verification|accepted`），所以从 `worker_failed` 到不了 `rejected`。
+可行的路是"**先收养、再重放**"：`task ready` → `worker spawn`（普通 spawn **保留**树里未提交的成果，
+只有 `respawn` 才 reset）→ `worker stop` → `rddev rebaseline TASK --reason-file <信>`。
+之所以要多这一步，是因为 **`--reason-file` 对首次 spawn 无效**，信只能经 `rework --resume` 进到
+同一个会话。T1003 今天按这条走通了：树推进到 91c7e24（25 个文件带过去，生成物按新基线重新生成），
+同一 session 被唤醒，信在 `prompt.md` 第 86 行。
+
+**并记两处工具行为**：`rddev rebaseline` 末尾调的是 `worker rework TASK --timeout 60m`，**不带
+`--parallel`**，所以有 3 个工人活着时它必然在最后一步失败（树已经推进成功，只是重放没发生）——
+用 `rddev worker rework TASK --reason-file <信> --parallel 4` 补上（硬上限 4）。
+
+## T0604 的实质验收：通过；返工只因一条 staticcheck（2026-09-18，L1）
+
+我自己读了它的全部新增代码与测试，逐条对过 9 条验收标准，**实质部分全部认定合格**，返工只因
+`tests/integration/review_routing_test.go:60` 一个未使用的常量（U1000）。
+
+核过并**明确要求不要回退**的部分：
+- 路由是数据不是代码（`"protocol"` 在实现文件里只出现在一句注释，我 grep 过）。
+- `TestResponsibilityNeverWidensAuthz` 是**整张 action×class 表前后逐格比对**，加点名格
+  （持全部责任标签的 viewer 仍不能 merge_main）、非成员的**存在性隐藏**（`ErrProjectNotFound`
+  而非 `Forbidden`），并补了正半边（持标签确实能提交 review）。`internal/authz/**` 与
+  `specs/policies/**` 一个字节没动。
+- `open → review_required → approved → merge_ready` 走真实产品路径、在同一事务里推进，并有
+  数据库守卫反证（裸 `UPDATE ... merge_ready` 被 SQLSTATE `P0001` 拒）。
+- 缺配置不批、`release_min_reviewers` 真的约束**人数**、重复与并发只推进一次（一条审计一行事件）。
+- **既有测试的改动不是放宽**：`repo.submitIn != (SubmitReviewParams{})` → `repo.submitCalls != 0`
+  是等价或更强（断言 store 压根没被调用）；`ResponsibilityGate` 从单标签变多标签是需求本身要的。
+
+## `make check` 缺口的账：一天五个（2026-09-18，L1，已修）
+
+`make check` 在 `049eeff` 之前不含 CI `go` job 的三步。今天栽在这上面的：**T0711（fmt-check）、
+T1110、T0805、T0604（staticcheck U1000）、以及 T0805 的第二条同类**。修已进 main（`049eeff`），
+但**在飞的树都早于那一提交**，所以每一封返工信都必须写出 CI `go` job 的**五步原文**，
+不能只说"跑 make check"。

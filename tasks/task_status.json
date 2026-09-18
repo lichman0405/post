@@ -4561,10 +4561,11 @@
       ]
     },
     "T0604": {
-      "status": "running",
+      "status": "rejected",
       "started_at": "2026-09-18T08:20:45Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：required-review 判定（几个 review、哪几个维度、哪个 responsibility 签、什么变更对应什么要求）规格全无。T0409 的交付代码逐字把这一步指名交给 T0604（internal/application/reviews/service.go:25-27），前置 T0404/T0603 均已合并。",
       "worker_run_id": "run-2dcabe960f21dcec",
+      "rejection_reason": "# T0604 第一轮返工：一处，一条 staticcheck\n\n## 一、这一轮的规模\n\n我逐 job 看了你的 G2。**只有 `go` job 红，而且只有一条**：\n\n```\ntests/integration/review_routing_test.go:60:7: const reviewRoutingTaskID is unused (U1000)\n```\n\n同一个 job 的前两步（`make fmt-check`、`go vet ./...`）都是 exit 0；后两步因为 staticcheck 先红而**没跑到**。\n\n其余 job 我全部核过：\n\n| job | 结果 |\n|---|---|\n| spec-validation | 通过（快照、指纹、openapi、单元+冒烟） |\n| task-state | 通过 |\n| go | **红在第 3 步 `make staticcheck`** |\n| web | 通过 |\n| python | 通过 |\n| migration-integration | 通过——**集成套件全绿，含你新增的 6 个路由测试** |\n| acceptance | 通过 |\n\n**所以这一轮只改这一条。别动别的。**\n\n## 二、为什么你没抓到这个（不是你的错，但你要知道）\n\n`make check` 在提交 `049eeff` **之前**不含 `make fmt-check`、`make staticcheck`、`bash scripts/tests/staticcheck-unit-test.sh` 这三步，而 CI 的 `go` job 正是这三步 + vet + 单测。今天已经有**五个**任务栽在这上面（T0711 栽在 `fmt-check`，T1110、T0805、T0604 栽在 `staticcheck`，另一个栽在同一处），所以我把它补进 `make check` 了。\n\n**你 worktree 里的 Makefile 是旧的**，别指望 `make check`——直接逐条跑 CI 的 `go` job：\n\n```\nmake fmt-check\ngo vet ./...\nmake staticcheck\nbash scripts/tests/staticcheck-unit-test.sh\ngo test $(go list ./... | grep -v '/tests/integration')\n```\n\n**后两步这次根本没跑到**，这一轮必须跑完再交。\n\n## 三、怎么修\n\n`reviewRoutingTaskID` 这个常量**你自己判断**：真的没人用就删掉；本来打算用（比如想按任务号给夹具命名）就把该用的地方用上，并在 RESULT 里说明它钉的是什么。\n\n**不许用 `_ = reviewRoutingTaskID` 这种写法把它按下去**——那是把死代码藏得更深，不是修。两条路我都能接受，我要的是你说清楚选了哪条、为什么。\n\n## 四、我已经独立核过的部分：这些不要动，也不要「顺手改进」\n\n我读了你新增的代码与测试，逐条对过任务书的验收标准。以下是我**已经认定为合格**的部分，返工不要碰：\n\n- **路由是数据不是代码**：我自己 grep 过 `internal/domain/review_routing.go` 与 `***.go`，`\"protocol\"` 只出现在一句注释里；规则改一行数据就换人（测试里 RemoveRule + AddRule 那段是硬证据）。\n- **责任不松动权限**：`TestResponsibilityNeverWidensAuthz` 是整张 action×class 表**前后逐格**比对，加上点名格（持全部标签的 viewer 仍不能 merge_main）、非成员的**存在性隐藏**（ErrProjectNotFound 而非 Forbidden），并且补了正半边（持标签确实能提交 review）。`internal/authz/**` 与 `specs/policies/**` 一个字节没动——我核过。\n- **真路径到 merge_ready**：`open → review_required → approved → merge_ready` 在提交 review 的同一事务里推进，且有数据库守卫的反证（裸 `UPDATE ... merge_ready` 被 SQLSTATE `P0001` 拒）。这是 T0410 能诚实成立的前提。\n- **缺配置一律拒**（`***`：review 照记、`advanced=false`、审计零行）、**`release_min_reviewers` 真的约束人数**（配置为 2 时 1 个 approve 停在 review_required）、**重复与并发只推进一次**（唯一键拒重复、PR 行锁串行、一条审计一行推进事件）。\n- **既有测试的改动我看了**：`repo.submitIn != (SubmitReviewParams{})` 改成 `repo.submitCalls != 0`，是**等价或更强**（它断言 store 压根没被调用），不是放宽；接口从单标签变多标签是需求本身要的。**这些都保留。**\n\n## 五、下一次唤醒时环境会变\n\n前面还有几个带迁移的任务要先合并，等轮到你时，你的树会被 `rddev rebaseline` **推进到更新的 main**、生成物按新基线重新生成。届时（如果那时你才收到这封信）：\n\n- 生成物是**生成物**，不许手改：`python3 scripts/gen_schema_snapshot.py`、`python3 scripts/spec_version.py --write`，再 `make check-schema-snapshot`、`make check-spec-version`。\n- 然后逐条跑上面 CI `go` job 的五步 + 集成套件，再交。\n\n## 六、边界\n\n- **只改这一条**，加上必要时重新生成的生成物。\n- 不许为了让东西变绿而删测试、skip、放宽容差或加大 timeout（CLAUDE.md §5.1）。\n- RESULT 里写明：那一条怎么处置、以及 CI `go` job 五步的实际输出。\n",
       "history": [
         {
           "from": "todo",
@@ -4585,6 +4586,19 @@
           "at": "2026-09-18T08:20:45Z",
           "run_id": "run-2dcabe960f21dcec",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T09:09:18Z",
+          "run_id": "run-dddd9bfe3d4f0666"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-18T09:17:17Z",
+          "run_id": "run-fd78defa7ca287d2",
+          "reason": "# T0604 第一轮返工：一处，一条 staticcheck\n\n## 一、这一轮的规模\n\n我逐 job 看了你的 G2。**只有 `go` job 红，而且只有一条**：\n\n```\ntests/integration/review_routing_test.go:60:7: const reviewRoutingTaskID is unused (U1000)\n```\n\n同一个 job 的前两步（`make fmt-check`、`go vet ./...`）都是 exit 0；后两步因为 staticcheck 先红而**没跑到**。\n\n其余 job 我全部核过：\n\n| job | 结果 |\n|---|---|\n| spec-validation | 通过（快照、指纹、openapi、单元+冒烟） |\n| task-state | 通过 |\n| go | **红在第 3 步 `make staticcheck`** |\n| web | 通过 |\n| python | 通过 |\n| migration-integration | 通过——**集成套件全绿，含你新增的 6 个路由测试** |\n| acceptance | 通过 |\n\n**所以这一轮只改这一条。别动别的。**\n\n## 二、为什么你没抓到这个（不是你的错，但你要知道）\n\n`make check` 在提交 `049eeff` **之前**不含 `make fmt-check`、`make staticcheck`、`bash scripts/tests/staticcheck-unit-test.sh` 这三步，而 CI 的 `go` job 正是这三步 + vet + 单测。今天已经有**五个**任务栽在这上面（T0711 栽在 `fmt-check`，T1110、T0805、T0604 栽在 `staticcheck`，另一个栽在同一处），所以我把它补进 `make check` 了。\n\n**你 worktree 里的 Makefile 是旧的**，别指望 `make check`——直接逐条跑 CI 的 `go` job：\n\n```\nmake fmt-check\ngo vet ./...\nmake staticcheck\nbash scripts/tests/staticcheck-unit-test.sh\ngo test $(go list ./... | grep -v '/tests/integration')\n```\n\n**后两步这次根本没跑到**，这一轮必须跑完再交。\n\n## 三、怎么修\n\n`reviewRoutingTaskID` 这个常量**你自己判断**：真的没人用就删掉；本来打算用（比如想按任务号给夹具命名）就把该用的地方用上，并在 RESULT 里说明它钉的是什么。\n\n**不许用 `_ = reviewRoutingTaskID` 这种写法把它按下去**——那是把死代码藏得更深，不是修。两条路我都能接受，我要的是你说清楚选了哪条、为什么。\n\n## 四、我已经独立核过的部分：这些不要动，也不要「顺手改进」\n\n我读了你新增的代码与测试，逐条对过任务书的验收标准。以下是我**已经认定为合格**的部分，返工不要碰：\n\n- **路由是数据不是代码**：我自己 grep 过 `internal/domain/review_routing.go` 与 `***.go`，`\"protocol\"` 只出现在一句注释里；规则改一行数据就换人（测试里 RemoveRule + AddRule 那段是硬证据）。\n- **责任不松动权限**：`TestResponsibilityNeverWidensAuthz` 是整张 action×class 表**前后逐格**比对，加上点名格（持全部标签的 viewer 仍不能 merge_main）、非成员的**存在性隐藏**（ErrProjectNotFound 而非 Forbidden），并且补了正半边（持标签确实能提交 review）。`internal/authz/**` 与 `specs/policies/**` 一个字节没动——我核过。\n- **真路径到 merge_ready**：`open → review_required → approved → merge_ready` 在提交 review 的同一事务里推进，且有数据库守卫的反证（裸 `UPDATE ... merge_ready` 被 SQLSTATE `P0001` 拒）。这是 T0410 能诚实成立的前提。\n- **缺配置一律拒**（`***`：review 照记、`advanced=false`、审计零行）、**`release_min_reviewers` 真的约束人数**（配置为 2 时 1 个 approve 停在 review_required）、**重复与并发只推进一次**（唯一键拒重复、PR 行锁串行、一条审计一行推进事件）。\n- **既有测试的改动我看了**：`repo.submitIn != (SubmitReviewParams{})` 改成 `repo.submitCalls != 0`，是**等价或更强**（它断言 store 压根没被调用），不是放宽；接口从单标签变多标签是需求本身要的。**这些都保留。**\n\n## 五、下一次唤醒时环境会变\n\n前面还有几个带迁移的任务要先合并，等轮到你时，你的树会被 `rddev rebaseline` **推进到更新的 main**、生成物按新基线重新生成。届时（如果那时你才收到这封信）：\n\n- 生成物是**生成物**，不许手改：`python3 scripts/gen_schema_snapshot.py`、`python3 scripts/spec_version.py --write`，再 `make check-schema-snapshot`、`make check-spec-version`。\n- 然后逐条跑上面 CI `go` job 的五步 + 集成套件，再交。\n\n## 六、边界\n\n- **只改这一条**，加上必要时重新生成的生成物。\n- 不许为了让东西变绿而删测试、skip、放宽容差或加大 timeout（CLAUDE.md §5.1）。\n- RESULT 里写明：那一条怎么处置、以及 CI `go` job 五步的实际输出。\n"
         }
       ]
     },
@@ -5981,9 +5995,10 @@
       ]
     },
     "T1003": {
-      "status": "worker_failed",
-      "started_at": "2026-09-16T11:36:20Z",
-      "worker_run_id": "run-199518ac6b32eb00",
+      "status": "running",
+      "started_at": "2026-09-18T09:16:53Z",
+      "worker_run_id": "run-dc797f0090d9cd24",
+      "rejection_reason": "# T1003：你接手的是一棵已经有成果的树\n\n## 一、先看这条，它决定你怎么干\n\n**上一轮 Worker 的会话被一次机器重启打断了**——不是缺陷，也不是它做错了什么。它把活基本干完了，只是没能跑完最后一道 Gate，也没能写下 RESULT。你现在这棵树里就有它的成果：\n\n- `infra/migrations/00079_research_inbox.sql`（迁移编号 79 是**我分配的**，不要改号）\n- `internal/application/inbox/`、`internal/events/inbox.go`、`internal/events/inbox_store.go`、`cmd/api/inboxhttp/`\n- `apps/web/app/(main)/notifications/`（页面、样式、`inbox-surface.tsx`）、`apps/web/lib/inbox.ts`、`apps/web/lib/inbox.test.mjs`\n- `tests/integration/inbox_test.go`\n\n**所以你的任务不是从零实现，而是：读懂它、核实它是否真的满足任务书、补上缺口、跑完 Gate、如实写 RESULT。** 如果已有实现有错、或者不合规格，**改掉它**——树里的这些代码现在是你的责任。不要因为「不是我写的」就绕着走，也不要因为它在那儿就默认它是对的。\n\n## 二、我为什么把你停了一下再重放\n\n刚才我把你停下，用 `rddev rebaseline` 把这棵树**推进到最新 main**。两个原因，都不是针对你：\n\n1. **你原来的基线在提交 `049eeff` 之前**，那份 `make check` **不含** CI 真正跑的三步（`make fmt-check`、`make staticcheck`、`bash scripts/tests/staticcheck-unit-test.sh`）。今天已经有**四个**任务栽在这个缺口上（T0711、T1110、T0805、T0604），其中三个都是 staticcheck 的一条 U1000「某个函数/常量没人用」。现在你的树里有修好的 Makefile 了，`make check` 与 CI 的 Go 部分一致。\n2. **生成物已按新基线重新生成**：`specs/SPEC_VERSION.json` 与 `specs/database/postgres.sql` 是**生成物**，规矩是不手改。你若后来改了迁移，必须重跑生成器：`python3 scripts/gen_schema_snapshot.py` 与 `python3 scripts/spec_version.py --write`，再跑 `make check-schema-snapshot` 与 `make check-spec-version` 确认。\n\n## 三、交之前必须逐条跑完（不要只看 `make check` 的绿灯就交）\n\n```\nmake fmt-check\ngo vet ./...\nmake staticcheck\nbash scripts/tests/staticcheck-unit-test.sh\ngo test $(go list ./... | grep -v '/tests/integration')\n```\n\n外加集成套件（需要真 PostgreSQL）：`make test-integration`。\n\n## 四、RESULT 要如实\n\n- 哪些是上一轮写的、你**核实过**（核实方式写出来）；哪些是你补的、为什么补。\n- 每条验收标准对应哪个测试，把**测试名**写出来。\n- 哪些推进走的是**真实产品路径**，哪些地方规格没写清而你按 fail-closed 处理了——后者逐条点名，不要埋在细节里。\n- 如果你判断已有实现有实质问题而重写了某部分，明说。\n\n## 五、边界\n\n- 只改这个任务范围内的东西。\n- 不许为了让东西变绿而删测试、skip、放宽容差或加大 timeout（CLAUDE.md §5.1）。\n",
       "history": [
         {
           "from": "todo",
@@ -6004,6 +6019,33 @@
           "at": "2026-09-18T07:00:03.411489Z",
           "run_id": "run-199518ac6b32eb00",
           "reason": "Worker process died during host shutdown; RESULT.json is an IN PROGRESS placeholder with no completed evidence"
+        },
+        {
+          "from": "worker_failed",
+          "to": "ready",
+          "at": "2026-09-18T09:13:27Z",
+          "run_id": "run-b94b0b217c2b76ba"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-18T09:13:28Z",
+          "run_id": "run-498ab2881c7555a5",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-18T09:16:40Z",
+          "run_id": "run-23f8ebb1d5e0d8c4",
+          "reason": "# T1003：你接手的是一棵已经有成果的树\n\n## 一、先看这条，它决定你怎么干\n\n**上一轮 Worker 的会话被一次机器重启打断了**——不是缺陷，也不是它做错了什么。它把活基本干完了，只是没能跑完最后一道 Gate，也没能写下 RESULT。你现在这棵树里就有它的成果：\n\n- `infra/migrations/00079_research_inbox.sql`（迁移编号 79 是**我分配的**，不要改号）\n- `internal/application/inbox/`、`internal/events/inbox.go`、`internal/events/inbox_store.go`、`cmd/api/inboxhttp/`\n- `apps/web/app/(main)/notifications/`（页面、样式、`inbox-surface.tsx`）、`apps/web/lib/inbox.ts`、`apps/web/lib/inbox.test.mjs`\n- `tests/integration/inbox_test.go`\n\n**所以你的任务不是从零实现，而是：读懂它、核实它是否真的满足任务书、补上缺口、跑完 Gate、如实写 RESULT。** 如果已有实现有错、或者不合规格，**改掉它**——树里的这些代码现在是你的责任。不要因为「不是我写的」就绕着走，也不要因为它在那儿就默认它是对的。\n\n## 二、我为什么把你停了一下再重放\n\n刚才我把你停下，用 `rddev rebaseline` 把这棵树**推进到最新 main**。两个原因，都不是针对你：\n\n1. **你原来的基线在提交 `049eeff` 之前**，那份 `make check` **不含** CI 真正跑的三步（`make fmt-check`、`make staticcheck`、`bash scripts/tests/staticcheck-unit-test.sh`）。今天已经有**四个**任务栽在这个缺口上（T0711、T1110、T0805、T0604），其中三个都是 staticcheck 的一条 U1000「某个函数/常量没人用」。现在你的树里有修好的 Makefile 了，`make check` 与 CI 的 Go 部分一致。\n2. **生成物已按新基线重新生成**：`specs/SPEC_VERSION.json` 与 `specs/database/postgres.sql` 是**生成物**，规矩是不手改。你若后来改了迁移，必须重跑生成器：`python3 scripts/gen_schema_snapshot.py` 与 `python3 scripts/spec_version.py --write`，再跑 `make check-schema-snapshot` 与 `make check-spec-version` 确认。\n\n## 三、交之前必须逐条跑完（不要只看 `make check` 的绿灯就交）\n\n```\nmake fmt-check\ngo vet ./...\nmake staticcheck\nbash scripts/tests/staticcheck-unit-test.sh\ngo test $(go list ./... | grep -v '/tests/integration')\n```\n\n外加集成套件（需要真 PostgreSQL）：`make test-integration`。\n\n## 四、RESULT 要如实\n\n- 哪些是上一轮写的、你**核实过**（核实方式写出来）；哪些是你补的、为什么补。\n- 每条验收标准对应哪个测试，把**测试名**写出来。\n- 哪些推进走的是**真实产品路径**，哪些地方规格没写清而你按 fail-closed 处理了——后者逐条点名，不要埋在细节里。\n- 如果你判断已有实现有实质问题而重写了某部分，明说。\n\n## 五、边界\n\n- 只改这个任务范围内的东西。\n- 不许为了让东西变绿而删测试、skip、放宽容差或加大 timeout（CLAUDE.md §5.1）。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-18T09:16:53Z",
+          "run_id": "run-dc797f0090d9cd24",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -6398,9 +6440,9 @@
       "merged_at": null
     },
     "T1110": {
-      "status": "rejected",
-      "started_at": "2026-09-18T08:00:57Z",
-      "worker_run_id": "run-ea52ccda69348330",
+      "status": "running",
+      "started_at": "2026-09-18T09:13:47Z",
+      "worker_run_id": "run-bc178209868d00d5",
       "rejection_reason": "# T1110 第五轮：只差一处死代码\n\n## 先说清楚这一轮的规模\n\n你的 G2 我逐 job 看过：`spec-validation`、`task-state`、`web`、`python`、`migration-integration`、`acceptance` **全部通过**，G3 的两个 job（`auth-real-services`、`rsg-real-services`）也通过。**唯一的红是 `go` job 的第 3 步 `make staticcheck`，而且只有一条**：\n\n```\ncmd/api/backupdr/reconcile.go:646:7: this value of usable is never used (SA4006)\n```\n\n同一个 job 的前两步（`make fmt-check`、`go vet ./...`）都是 exit 0。\n\n**所以这一轮只改一处。别动别的。**\n\n---\n\n## 一、那条守卫是死代码（blocking）\n\n`cmd/api/backupdr/reconcile.go:634-652` 的循环逐字是：\n\n```go\nfor _, bp := range pin.BlobRefs {\n    if _, has := blobByHash[bp.Hash]; !has {\n        findings = append(findings, Finding{ ... })\n        continue\n    }\n    if usable, seen := blobUsable[bp.Hash]; seen && !usable {\n        // Already reported on the blob_hashes axis: the pin's\n        // failure IS that finding, and a second row describing the\n        // same broken byte range would inflate the count.\n        continue\n    }\n}\n```\n\n**第二个 `if` 是循环体的最后一条语句，而它唯一做的事就是 `continue`。** 在循环体末尾，`continue` 与「什么都不做、自然走到末尾」**完全等价**——所以这个守卫**什么都没拦**。它不是「别再报一次」的保护，它是一段看起来像保护的空语句。\n\n**我核过它是不是「本该拦什么」**：`blobUsable` 在这个文件里只出现在三处——`:558` 的函数参数、`:630` 的注释、`:646` 的这个守卫。循环体里**没有第二个地方会重复报同一件事**：只有「缺行」那一支会 `append`，而它已经 `continue` 了。**所以删掉这个守卫，行为逐字不变。**\n\n**裁定：把 `:646-651` 整段删掉，连它那三行注释一起。** 那段注释声称的行为（「a second row describing the same broken byte range would inflate the count」）**正是这段代码没有做的**；留着它，下一个人会以为这里有保护。上面 `:625-633` 那段循环注释**保留**——它描述的是「这个循环自己只报缺行」这个事实，那句话是准的。\n\n**`blobUsable` 这个参数你自己定**：删掉守卫之后它在函数体里就没有使用者了（Go 允许未使用的参数，不会编译失败）。要么把参数和调用点一起收掉，要么留着并写明为什么还留。**在 RESULT 里写明你选了哪个、为什么**，但**行为必须可证不变**——不许出现「顺手多报一条或少报一条」。\n\n---\n\n## 二、为什么你没抓到这个（这条对以后有用）\n\n`make check` 今天**不含** `make fmt-check`、`make staticcheck`、`bash scripts/tests/staticcheck-unit-test.sh` 这三步，而 CI 的 `go` job 正是这三步 + vet + 单测。今天已经有**两个**任务栽在这上面（T0711 栽在 `fmt-check`，你栽在 `staticcheck`），所以**我在 main 上把这三步补进 `make check` 了**（提交 `049eeff`）。\n\n**但你 worktree 里的 Makefile 是旧的**（你的基线在那一提交之前），所以别指望 `make check`——直接逐条跑 CI 的 `go` job：\n\n```\nmake fmt-check\ngo vet ./...\nmake staticcheck\nbash scripts/tests/staticcheck-unit-test.sh\ngo test $(go list ./... | grep -v '/tests/integration')\n```\n\n**后两步这次根本没跑到**（日志里是 `-1`，因为 staticcheck 先红了），所以这一轮必须把它们跑完再交。\n\n---\n\n## 三、边界\n\n- **只改这一处。** G2 的其他 job 和 G3 都已经是绿的，别去动它们。\n- 不许为了让东西变绿而删测试、skip、放宽容差或加大 timeout（CLAUDE.md §5.1）。\n- RESULT 里写明三件事：你删了什么、`blobUsable` 怎么处置、以及上面 CI `go` job 五步的实际结果。\n",
       "history": [
         {
@@ -6478,6 +6520,13 @@
           "at": "2026-09-18T08:50:58Z",
           "run_id": "run-a9eb222dd2c85428",
           "reason": "# T1110 第五轮：只差一处死代码\n\n## 先说清楚这一轮的规模\n\n你的 G2 我逐 job 看过：`spec-validation`、`task-state`、`web`、`python`、`migration-integration`、`acceptance` **全部通过**，G3 的两个 job（`auth-real-services`、`rsg-real-services`）也通过。**唯一的红是 `go` job 的第 3 步 `make staticcheck`，而且只有一条**：\n\n```\ncmd/api/backupdr/reconcile.go:646:7: this value of usable is never used (SA4006)\n```\n\n同一个 job 的前两步（`make fmt-check`、`go vet ./...`）都是 exit 0。\n\n**所以这一轮只改一处。别动别的。**\n\n---\n\n## 一、那条守卫是死代码（blocking）\n\n`cmd/api/backupdr/reconcile.go:634-652` 的循环逐字是：\n\n```go\nfor _, bp := range pin.BlobRefs {\n    if _, has := blobByHash[bp.Hash]; !has {\n        findings = append(findings, Finding{ ... })\n        continue\n    }\n    if usable, seen := blobUsable[bp.Hash]; seen && !usable {\n        // Already reported on the blob_hashes axis: the pin's\n        // failure IS that finding, and a second row describing the\n        // same broken byte range would inflate the count.\n        continue\n    }\n}\n```\n\n**第二个 `if` 是循环体的最后一条语句，而它唯一做的事就是 `continue`。** 在循环体末尾，`continue` 与「什么都不做、自然走到末尾」**完全等价**——所以这个守卫**什么都没拦**。它不是「别再报一次」的保护，它是一段看起来像保护的空语句。\n\n**我核过它是不是「本该拦什么」**：`blobUsable` 在这个文件里只出现在三处——`:558` 的函数参数、`:630` 的注释、`:646` 的这个守卫。循环体里**没有第二个地方会重复报同一件事**：只有「缺行」那一支会 `append`，而它已经 `continue` 了。**所以删掉这个守卫，行为逐字不变。**\n\n**裁定：把 `:646-651` 整段删掉，连它那三行注释一起。** 那段注释声称的行为（「a second row describing the same broken byte range would inflate the count」）**正是这段代码没有做的**；留着它，下一个人会以为这里有保护。上面 `:625-633` 那段循环注释**保留**——它描述的是「这个循环自己只报缺行」这个事实，那句话是准的。\n\n**`blobUsable` 这个参数你自己定**：删掉守卫之后它在函数体里就没有使用者了（Go 允许未使用的参数，不会编译失败）。要么把参数和调用点一起收掉，要么留着并写明为什么还留。**在 RESULT 里写明你选了哪个、为什么**，但**行为必须可证不变**——不许出现「顺手多报一条或少报一条」。\n\n---\n\n## 二、为什么你没抓到这个（这条对以后有用）\n\n`make check` 今天**不含** `make fmt-check`、`make staticcheck`、`bash scripts/tests/staticcheck-unit-test.sh` 这三步，而 CI 的 `go` job 正是这三步 + vet + 单测。今天已经有**两个**任务栽在这上面（T0711 栽在 `fmt-check`，你栽在 `staticcheck`），所以**我在 main 上把这三步补进 `make check` 了**（提交 `049eeff`）。\n\n**但你 worktree 里的 Makefile 是旧的**（你的基线在那一提交之前），所以别指望 `make check`——直接逐条跑 CI 的 `go` job：\n\n```\nmake fmt-check\ngo vet ./...\nmake staticcheck\nbash scripts/tests/staticcheck-unit-test.sh\ngo test $(go list ./... | grep -v '/tests/integration')\n```\n\n**后两步这次根本没跑到**（日志里是 `-1`，因为 staticcheck 先红了），所以这一轮必须把它们跑完再交。\n\n---\n\n## 三、边界\n\n- **只改这一处。** G2 的其他 job 和 G3 都已经是绿的，别去动它们。\n- 不许为了让东西变绿而删测试、skip、放宽容差或加大 timeout（CLAUDE.md §5.1）。\n- RESULT 里写明三件事：你删了什么、`blobUsable` 怎么处置、以及上面 CI `go` job 五步的实际结果。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-18T09:13:47Z",
+          "run_id": "run-bc178209868d00d5",
+          "reason": "worker spawn"
         }
       ]
     },
