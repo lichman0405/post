@@ -5168,10 +5168,11 @@
       ]
     },
     "T0707": {
-      "status": "running",
+      "status": "rejected",
       "started_at": "2026-09-18T08:33:48Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:14:44Z 判定，记于 T0705 合并之前）：只缺两件：依赖类型那一列是自由文本、没跟既有关系目录（depends_on/references）挂钩；visibility_of_usage 声明为公开之后对外显示什么没有写过（页面确有「依赖/被用到的公开链接」一项，所以这是对外可见的产品语义）。其余（版本钉法、引用与依赖的分野、存储形状）都在树里。",
       "worker_run_id": "run-3abe6ed63b7f3f0f",
+      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 1 test(s) not_run (bash scripts/web-unit-tests.sh; pnpm --dir apps/web run typecheck; pnpm --dir apps/web run lint; bash tests/e2e-assets/run.sh) and 0 test(s) failed () — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
       "history": [
         {
           "from": "todo",
@@ -5192,6 +5193,13 @@
           "at": "2026-09-18T08:33:48Z",
           "run_id": "run-3abe6ed63b7f3f0f",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-18T09:22:16Z",
+          "run_id": "run-f9707282b3a7c150",
+          "reason": "collect rejected: result-consistency: result-tests: status completed but 1 test(s) not_run (bash scripts/web-unit-tests.sh; pnpm --dir apps/web run typecheck; pnpm --dir apps/web run lint; bash tests/e2e-assets/run.sh) and 0 test(s) failed () — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed"
         }
       ]
     },
@@ -6050,9 +6058,10 @@
       ]
     },
     "T1004": {
-      "status": "worker_failed",
-      "started_at": "2026-09-16T11:36:44Z",
-      "worker_run_id": "run-eedafc1a03889006",
+      "status": "running",
+      "started_at": "2026-09-18T09:30:03Z",
+      "worker_run_id": "run-d86af35959c6fe8a",
+      "rejection_reason": "# T1004：你接手的是一棵已经有成果的树\n\n## 一、先看这条，它决定你怎么干\n\n**上一轮 Worker 的会话被一次机器重启打断了**——不是缺陷，也不是它做错了什么。它把活基本干完了，只是没能跑完最后一道 Gate，也没能写下 RESULT。你现在这棵树里就有它的成果：\n\n- `infra/migrations/00080_public_feed_indexes.sql`（迁移编号 80 是**我分配的**，不要改号）\n- `internal/application/feeds/`、`internal/persistence/feed_store.go`、`internal/persistence/queries/feeds.sql`\n- `internal/persistence/sqlc/feeds.sql.go`、`internal/persistence/sqlc/querier.go`（sqlc 生成物）\n- `cmd/api/feedshttp/`\n- `tests/integration/feed_test.go`\n\n**所以你的任务不是从零实现，而是：读懂它、核实它是否真的满足任务书、补上缺口、跑完 Gate、如实写 RESULT。** 如果已有实现有错、或者不合规格，**改掉它**——树里的这些代码现在是你的责任。不要因为「不是我写的」就绕着走，也不要因为它在那儿就默认它是对的。\n\n## 二、我为什么把你停了一下再重放\n\n我把你这棵树**推进到最新 main**（`rddev rebaseline`）。两个原因，都不是针对你：\n\n1. **你原来的基线在提交 `049eeff` 之前**，那份 `make check` **不含** CI 真正跑的三步（`make fmt-check`、`make staticcheck`、`bash scripts/tests/staticcheck-unit-test.sh`）。今天已经有**五个**任务栽在这个缺口上，其中四个是 staticcheck 的一条 U1000「某个函数/常量没人用」。现在你的树里有修好的 Makefile 了。\n2. **生成物已按新基线重新生成**：`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc/**` 都是**生成物**，规矩是不手改。你若改了迁移或查询，必须重跑生成器：\n\n```\npython3 scripts/gen_schema_snapshot.py\npython3 scripts/spec_version.py --write\nbash scripts/gen_sqlc.sh\n```\n\n再跑 `make check-schema-snapshot`、`make check-spec-version`、`bash tests/integration/check-sqlc-drift.sh` 确认三者都没有漂移。\n\n## 三、交之前必须逐条跑完（不要只看 `make check` 的绿灯就交）\n\n```\nmake fmt-check\ngo vet ./...\nmake staticcheck\nbash scripts/tests/staticcheck-unit-test.sh\ngo test $(go list ./... | grep -v '/tests/integration')\n```\n\n外加集成套件（需要真 PostgreSQL）：`make test-integration`。\n\n## 四、RESULT 要如实\n\n- 哪些是上一轮写的、你**核实过**（核实方式写出来）；哪些是你补的、为什么补。\n- 每条验收标准对应哪个测试，把**测试名**写出来。\n- 哪些推进走的是**真实产品路径**，哪些地方规格没写清而你按 fail-closed 处理了——后者逐条点名，不要埋在细节里。\n- 如果你判断已有实现有实质问题而重写了某部分，明说。\n\n## 五、边界\n\n- 只改这个任务范围内的东西。\n- 不许为了让东西变绿而删测试、skip、放宽容差或加大 timeout（CLAUDE.md §5.1）。\n",
       "history": [
         {
           "from": "todo",
@@ -6073,13 +6082,41 @@
           "at": "2026-09-18T07:00:03.411489Z",
           "run_id": "run-eedafc1a03889006",
           "reason": "Worker process died during host shutdown; RESULT.json is an IN PROGRESS placeholder with no completed evidence"
+        },
+        {
+          "from": "worker_failed",
+          "to": "ready",
+          "at": "2026-09-18T09:24:10Z",
+          "run_id": "run-8648220f7277a6f1"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-18T09:24:10Z",
+          "run_id": "run-b80f57a112ca1976",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-18T09:30:02Z",
+          "run_id": "run-109949cb3b1302c6",
+          "reason": "# T1004：你接手的是一棵已经有成果的树\n\n## 一、先看这条，它决定你怎么干\n\n**上一轮 Worker 的会话被一次机器重启打断了**——不是缺陷，也不是它做错了什么。它把活基本干完了，只是没能跑完最后一道 Gate，也没能写下 RESULT。你现在这棵树里就有它的成果：\n\n- `infra/migrations/00080_public_feed_indexes.sql`（迁移编号 80 是**我分配的**，不要改号）\n- `internal/application/feeds/`、`internal/persistence/feed_store.go`、`internal/persistence/queries/feeds.sql`\n- `internal/persistence/sqlc/feeds.sql.go`、`internal/persistence/sqlc/querier.go`（sqlc 生成物）\n- `cmd/api/feedshttp/`\n- `tests/integration/feed_test.go`\n\n**所以你的任务不是从零实现，而是：读懂它、核实它是否真的满足任务书、补上缺口、跑完 Gate、如实写 RESULT。** 如果已有实现有错、或者不合规格，**改掉它**——树里的这些代码现在是你的责任。不要因为「不是我写的」就绕着走，也不要因为它在那儿就默认它是对的。\n\n## 二、我为什么把你停了一下再重放\n\n我把你这棵树**推进到最新 main**（`rddev rebaseline`）。两个原因，都不是针对你：\n\n1. **你原来的基线在提交 `049eeff` 之前**，那份 `make check` **不含** CI 真正跑的三步（`make fmt-check`、`make staticcheck`、`bash scripts/tests/staticcheck-unit-test.sh`）。今天已经有**五个**任务栽在这个缺口上，其中四个是 staticcheck 的一条 U1000「某个函数/常量没人用」。现在你的树里有修好的 Makefile 了。\n2. **生成物已按新基线重新生成**：`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、`internal/persistence/sqlc/**` 都是**生成物**，规矩是不手改。你若改了迁移或查询，必须重跑生成器：\n\n```\npython3 scripts/gen_schema_snapshot.py\npython3 scripts/spec_version.py --write\nbash scripts/gen_sqlc.sh\n```\n\n再跑 `make check-schema-snapshot`、`make check-spec-version`、`bash tests/integration/check-sqlc-drift.sh` 确认三者都没有漂移。\n\n## 三、交之前必须逐条跑完（不要只看 `make check` 的绿灯就交）\n\n```\nmake fmt-check\ngo vet ./...\nmake staticcheck\nbash scripts/tests/staticcheck-unit-test.sh\ngo test $(go list ./... | grep -v '/tests/integration')\n```\n\n外加集成套件（需要真 PostgreSQL）：`make test-integration`。\n\n## 四、RESULT 要如实\n\n- 哪些是上一轮写的、你**核实过**（核实方式写出来）；哪些是你补的、为什么补。\n- 每条验收标准对应哪个测试，把**测试名**写出来。\n- 哪些推进走的是**真实产品路径**，哪些地方规格没写清而你按 fail-closed 处理了——后者逐条点名，不要埋在细节里。\n- 如果你判断已有实现有实质问题而重写了某部分，明说。\n\n## 五、边界\n\n- 只改这个任务范围内的东西。\n- 不许为了让东西变绿而删测试、skip、放宽容差或加大 timeout（CLAUDE.md §5.1）。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-18T09:30:03Z",
+          "run_id": "run-d86af35959c6fe8a",
+          "reason": "worker spawn"
         }
       ]
     },
     "T1005": {
-      "status": "worker_failed",
-      "started_at": "2026-09-16T11:40:41Z",
-      "worker_run_id": "run-e8333470450776a5",
+      "status": "running",
+      "started_at": "2026-09-18T09:32:24Z",
+      "worker_run_id": "run-c03a26edfebf6a16",
+      "rejection_reason": "# T1005：你接手的是一棵已经有成果的树\n\n## 一、先看这条，它决定你怎么干\n\n**上一轮 Worker 的会话被一次机器重启打断了**——不是缺陷，也不是它做错了什么。它把活基本干完了（最后一次动作是跑集成套件），只是没能跑完最后一道 Gate，也没能写下 RESULT。你现在这棵树里就有它的成果：\n\n- `infra/migrations/00081_email_digest.sql`（迁移编号 81 是**我分配的**，不要改号）\n- `internal/application/notifications/`、`internal/events/notification.go`、`internal/events/notification_store.go`、`internal/events/notification_test.go`\n- `cmd/api/notificationshttp/`、`cmd/worker/main.go`、`cmd/api/main.go`、`.env.example`\n- `tests/integration/email_digest_test.go`、`tests/integration/migration_test.go`\n\n**所以你的任务不是从零实现，而是：读懂它、核实它是否真的满足任务书、补上缺口、跑完 Gate、如实写 RESULT。** 如果已有实现有错、或者不合规格，**改掉它**——树里的这些代码现在是你的责任。不要因为「不是我写的」就绕着走，也不要因为它在那儿就默认它是对的。\n\n## 二、我为什么把你停了一下再重放\n\n我把你这棵树**推进到最新 main**（`rddev rebaseline`）。两个原因，都不是针对你：\n\n1. **你原来的基线在提交 `049eeff` 之前**，那份 `make check` **不含** CI 真正跑的三步（`make fmt-check`、`make staticcheck`、`bash scripts/tests/staticcheck-unit-test.sh`）。今天已经有**五个**任务栽在这个缺口上，其中四个是 staticcheck 的一条 U1000「某个函数/常量没人用」。现在你的树里有修好的 Makefile 了。\n2. **生成物已按新基线重新生成**：`specs/SPEC_VERSION.json` 与 `specs/database/postgres.sql` 是**生成物**，规矩是不手改。你若改了迁移，必须重跑：\n\n```\npython3 scripts/gen_schema_snapshot.py\npython3 scripts/spec_version.py --write\n```\n\n再跑 `make check-schema-snapshot`、`make check-spec-version` 确认。\n\n**特别提醒这一条**：你的迁移 81 与迁移动了 `tests/integration/migration_test.go`（那张「迁移清单」断言）。如果别的迁移先落地，那份清单会变——**以 main 上最新的清单为准**，只追加你自己的那一行，不要回退别人的。\n\n## 三、交之前必须逐条跑完（不要只看 `make check` 的绿灯就交）\n\n```\nmake fmt-check\ngo vet ./...\nmake staticcheck\nbash scripts/tests/staticcheck-unit-test.sh\ngo test $(go list ./... | grep -v '/tests/integration')\n```\n\n外加集成套件（需要真 PostgreSQL）：`make test-integration`。后台 worker 那条链（`cmd/worker`）也要有真跑过的证据，不要只写「已接线」。\n\n## 四、RESULT 要如实\n\n- 哪些是上一轮写的、你**核实过**（核实方式写出来）；哪些是你补的、为什么补。\n- 每条验收标准对应哪个测试，把**测试名**写出来。\n- 哪些推进走的是**真实产品路径**，哪些地方规格没写清而你按 fail-closed 处理了——后者逐条点名，不要埋在细节里。\n- 邮件摘要这类「定时/后台」功能，如果产品路径上跑不通，**如实写进 RESULT**，不要用测试夹具假装它跑通了。\n\n## 五、边界\n\n- 只改这个任务范围内的东西。\n- 不许为了让东西变绿而删测试、skip、放宽容差或加大 timeout（CLAUDE.md §5.1）。\n",
       "history": [
         {
           "from": "todo",
@@ -6100,6 +6137,33 @@
           "at": "2026-09-18T07:40:52Z",
           "run_id": "run-7edd2bef96af6508",
           "reason": "worker exited -1"
+        },
+        {
+          "from": "worker_failed",
+          "to": "ready",
+          "at": "2026-09-18T09:32:09Z",
+          "run_id": "run-5bc1c1d39921556a"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-18T09:32:10Z",
+          "run_id": "run-14587fadf757193c",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-18T09:32:16Z",
+          "run_id": "run-a2e52ae58772d29b",
+          "reason": "# T1005：你接手的是一棵已经有成果的树\n\n## 一、先看这条，它决定你怎么干\n\n**上一轮 Worker 的会话被一次机器重启打断了**——不是缺陷，也不是它做错了什么。它把活基本干完了（最后一次动作是跑集成套件），只是没能跑完最后一道 Gate，也没能写下 RESULT。你现在这棵树里就有它的成果：\n\n- `infra/migrations/00081_email_digest.sql`（迁移编号 81 是**我分配的**，不要改号）\n- `internal/application/notifications/`、`internal/events/notification.go`、`internal/events/notification_store.go`、`internal/events/notification_test.go`\n- `cmd/api/notificationshttp/`、`cmd/worker/main.go`、`cmd/api/main.go`、`.env.example`\n- `tests/integration/email_digest_test.go`、`tests/integration/migration_test.go`\n\n**所以你的任务不是从零实现，而是：读懂它、核实它是否真的满足任务书、补上缺口、跑完 Gate、如实写 RESULT。** 如果已有实现有错、或者不合规格，**改掉它**——树里的这些代码现在是你的责任。不要因为「不是我写的」就绕着走，也不要因为它在那儿就默认它是对的。\n\n## 二、我为什么把你停了一下再重放\n\n我把你这棵树**推进到最新 main**（`rddev rebaseline`）。两个原因，都不是针对你：\n\n1. **你原来的基线在提交 `049eeff` 之前**，那份 `make check` **不含** CI 真正跑的三步（`make fmt-check`、`make staticcheck`、`bash scripts/tests/staticcheck-unit-test.sh`）。今天已经有**五个**任务栽在这个缺口上，其中四个是 staticcheck 的一条 U1000「某个函数/常量没人用」。现在你的树里有修好的 Makefile 了。\n2. **生成物已按新基线重新生成**：`specs/SPEC_VERSION.json` 与 `specs/database/postgres.sql` 是**生成物**，规矩是不手改。你若改了迁移，必须重跑：\n\n```\npython3 scripts/gen_schema_snapshot.py\npython3 scripts/spec_version.py --write\n```\n\n再跑 `make check-schema-snapshot`、`make check-spec-version` 确认。\n\n**特别提醒这一条**：你的迁移 81 与迁移动了 `tests/integration/migration_test.go`（那张「迁移清单」断言）。如果别的迁移先落地，那份清单会变——**以 main 上最新的清单为准**，只追加你自己的那一行，不要回退别人的。\n\n## 三、交之前必须逐条跑完（不要只看 `make check` 的绿灯就交）\n\n```\nmake fmt-check\ngo vet ./...\nmake staticcheck\nbash scripts/tests/staticcheck-unit-test.sh\ngo test $(go list ./... | grep -v '/tests/integration')\n```\n\n外加集成套件（需要真 PostgreSQL）：`make test-integration`。后台 worker 那条链（`cmd/worker`）也要有真跑过的证据，不要只写「已接线」。\n\n## 四、RESULT 要如实\n\n- 哪些是上一轮写的、你**核实过**（核实方式写出来）；哪些是你补的、为什么补。\n- 每条验收标准对应哪个测试，把**测试名**写出来。\n- 哪些推进走的是**真实产品路径**，哪些地方规格没写清而你按 fail-closed 处理了——后者逐条点名，不要埋在细节里。\n- 邮件摘要这类「定时/后台」功能，如果产品路径上跑不通，**如实写进 RESULT**，不要用测试夹具假装它跑通了。\n\n## 五、边界\n\n- 只改这个任务范围内的东西。\n- 不许为了让东西变绿而删测试、skip、放宽容差或加大 timeout（CLAUDE.md §5.1）。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-18T09:32:24Z",
+          "run_id": "run-c03a26edfebf6a16",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -6440,7 +6504,7 @@
       "merged_at": null
     },
     "T1110": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-18T09:13:47Z",
       "worker_run_id": "run-bc178209868d00d5",
       "rejection_reason": "# T1110 第五轮：只差一处死代码\n\n## 先说清楚这一轮的规模\n\n你的 G2 我逐 job 看过：`spec-validation`、`task-state`、`web`、`python`、`migration-integration`、`acceptance` **全部通过**，G3 的两个 job（`auth-real-services`、`rsg-real-services`）也通过。**唯一的红是 `go` job 的第 3 步 `make staticcheck`，而且只有一条**：\n\n```\ncmd/api/backupdr/reconcile.go:646:7: this value of usable is never used (SA4006)\n```\n\n同一个 job 的前两步（`make fmt-check`、`go vet ./...`）都是 exit 0。\n\n**所以这一轮只改一处。别动别的。**\n\n---\n\n## 一、那条守卫是死代码（blocking）\n\n`cmd/api/backupdr/reconcile.go:634-652` 的循环逐字是：\n\n```go\nfor _, bp := range pin.BlobRefs {\n    if _, has := blobByHash[bp.Hash]; !has {\n        findings = append(findings, Finding{ ... })\n        continue\n    }\n    if usable, seen := blobUsable[bp.Hash]; seen && !usable {\n        // Already reported on the blob_hashes axis: the pin's\n        // failure IS that finding, and a second row describing the\n        // same broken byte range would inflate the count.\n        continue\n    }\n}\n```\n\n**第二个 `if` 是循环体的最后一条语句，而它唯一做的事就是 `continue`。** 在循环体末尾，`continue` 与「什么都不做、自然走到末尾」**完全等价**——所以这个守卫**什么都没拦**。它不是「别再报一次」的保护，它是一段看起来像保护的空语句。\n\n**我核过它是不是「本该拦什么」**：`blobUsable` 在这个文件里只出现在三处——`:558` 的函数参数、`:630` 的注释、`:646` 的这个守卫。循环体里**没有第二个地方会重复报同一件事**：只有「缺行」那一支会 `append`，而它已经 `continue` 了。**所以删掉这个守卫，行为逐字不变。**\n\n**裁定：把 `:646-651` 整段删掉，连它那三行注释一起。** 那段注释声称的行为（「a second row describing the same broken byte range would inflate the count」）**正是这段代码没有做的**；留着它，下一个人会以为这里有保护。上面 `:625-633` 那段循环注释**保留**——它描述的是「这个循环自己只报缺行」这个事实，那句话是准的。\n\n**`blobUsable` 这个参数你自己定**：删掉守卫之后它在函数体里就没有使用者了（Go 允许未使用的参数，不会编译失败）。要么把参数和调用点一起收掉，要么留着并写明为什么还留。**在 RESULT 里写明你选了哪个、为什么**，但**行为必须可证不变**——不许出现「顺手多报一条或少报一条」。\n\n---\n\n## 二、为什么你没抓到这个（这条对以后有用）\n\n`make check` 今天**不含** `make fmt-check`、`make staticcheck`、`bash scripts/tests/staticcheck-unit-test.sh` 这三步，而 CI 的 `go` job 正是这三步 + vet + 单测。今天已经有**两个**任务栽在这上面（T0711 栽在 `fmt-check`，你栽在 `staticcheck`），所以**我在 main 上把这三步补进 `make check` 了**（提交 `049eeff`）。\n\n**但你 worktree 里的 Makefile 是旧的**（你的基线在那一提交之前），所以别指望 `make check`——直接逐条跑 CI 的 `go` job：\n\n```\nmake fmt-check\ngo vet ./...\nmake staticcheck\nbash scripts/tests/staticcheck-unit-test.sh\ngo test $(go list ./... | grep -v '/tests/integration')\n```\n\n**后两步这次根本没跑到**（日志里是 `-1`，因为 staticcheck 先红了），所以这一轮必须把它们跑完再交。\n\n---\n\n## 三、边界\n\n- **只改这一处。** G2 的其他 job 和 G3 都已经是绿的，别去动它们。\n- 不许为了让东西变绿而删测试、skip、放宽容差或加大 timeout（CLAUDE.md §5.1）。\n- RESULT 里写明三件事：你删了什么、`blobUsable` 怎么处置、以及上面 CI `go` job 五步的实际结果。\n",
@@ -6527,6 +6591,13 @@
           "at": "2026-09-18T09:13:47Z",
           "run_id": "run-bc178209868d00d5",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T09:31:36Z",
+          "run_id": "run-c8338f6a12132736",
+          "reason": "collect: all checks passed"
         }
       ]
     },

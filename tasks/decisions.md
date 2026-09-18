@@ -10564,3 +10564,57 @@ T0805 在 RESULT 里主动点名：它改了**别的任务的文件**——`cmd/
 T1110、T0805、T0604（staticcheck U1000）、以及 T0805 的第二条同类**。修已进 main（`049eeff`），
 但**在飞的树都早于那一提交**，所以每一封返工信都必须写出 CI `go` job 的**五步原文**，
 不能只说"跑 make check"。
+
+## rebaseline 也会撞上"两边往同一行后插东西"——T1004 的手工组合（2026-09-18，L1）
+
+`rddev rebaseline T1004` 连续两次被拒，报 "a three-way merge of it conflicts with main's own change
+to the same lines of cmd/api/main.go — composing them needs a human"。查清了三件事：
+
+- **它只发生在 `cmd/api/main.go`**：任务的补丁与 main 各自往 import 块（或路由注册块）的**同一
+  锚点后插行**——T1004 要插 `feeds`，main 插了 `mainfreeze`。git 的三方合并把它判成冲突，**即使
+  一方的插入是另一方的超集**，所以不是子集包含就能过。
+- **复现与判定在 worktree 外做**：`git merge-file <ours> <base> <theirs>`（base=任务基线，ours=main，
+  theirs=工作区文件）在 `/tmp` 里跑，冲突标记一目了然；**绝不在 `.rddev/worktrees/<TASK>` 里做实验**。
+- **解法（已验）：先把要插的行挪到 main 没碰过的锚点（至少隔一行），推进，再挪回字母序原位。**
+  挪回是纯文件编辑，不需要动 git、不需要重生成任何生成物（import 顺序对指纹与四道门都不可见）。
+  T1004 用这招一次推进成功（c42a77c → 9d48eaf，24 个文件带过去）。
+
+这条属于 CLAUDE.md §1 允许 Supervisor 亲手处理的 merge conflict 例外；工具自己也在拒绝文本里
+写明 "composing them needs a human"。**下次任何一环 rebaseline 撞同样的报错，先看是不是 main.go
+的 import/路由锚点撞位，别急着重推。**
+
+**两个当天踩到的坑一并记下**：这台机器上 `cp` 是交互别名（`cp -i`），在非交互命令里会**挂住**，
+要用 `/bin/cp -f`；`pkill -f '<模式>'` 会匹配到它自己的命令行，把模式写成 `patt[ern]`。
+
+## landing 的窗口条件再收紧一格：不带指纹的任务随时可合（2026-09-18，L1）
+
+`git show --stat c42a77c`（上一个 merge 提交）证实：**merge 提交里没有 `tasks/**`**，而指纹的输入
+只是 `tasks/tasks.json` + `specs/**` 除指纹自身。推论（对 T1110 的合并决策直接有用）：
+
+- **合并一个 diff 不含 `specs/SPEC_VERSION.json` 的任务（如 T1110），指纹逐字节不变**——所以在跑的
+  三个携带指纹的任务（T1003/T1004/T1005）的补丁 hunk 仍然适用，**不需要等窗口**。
+- 同理，我的 `state:` / packages / decisions 提交也不动指纹。
+- 真正需要窗口的只有：**携带指纹的 landing**（即每一个带迁移的任务）与**改 `tasks/tasks.json` 的落地**。
+
+## T0707 的 collect 判断：web 门不属于本任务（2026-09-18，L1）
+
+T0707（资产引用/依赖）collect 被拒，唯一一条是它**自己加进 RESULT 的** web 测试组
+（`web-unit-tests.sh` / `typecheck` / `lint` / `tests/e2e-assets/run.sh`）标了 `not_run`，与
+`status: completed` 自相矛盾（collect 的规则：completed 不允许带 not_run 条目）。
+
+三条事实认定它**不适用**：① 任务书只要求一条测试 `asset dependency tests`，已跑且过；
+② 该任务没改任何 `apps/web` 文件，前三条命令是 CI `web` job 的活（`.github/workflows/ci.yml:82-105`）；
+③ **`tests/e2e-assets/run.sh` 是 T0709 的登记测试**（其第一行注释写着 "T0709 required test
+\"asset ui e2e\""），且它拿 mock API 测前端渲染，覆盖不到 Go 侧改动。
+
+返工信要求：从 `tests` 数组删掉该条（schema 的测试状态只有 `passed|failed|not_run`，**没有"不适用"
+这个表达**，"不需要跑"的正确写法是不列为条目），并把"排除了什么、为什么"如实写进 `risks`/`notes`
+——**不许默默删**。代码一个字不动，不重跑任何测试。
+
+## 今日流水（2026-09-18 晚段）
+
+- T1004、T1005 的"收养重放"先后走通（T1004 撞了上面的 main.go 冲突、手工组合后一次推进；
+  T1005 顺推，28 个文件带到 b649c43），两封信都已通过 `rework --resume` 送进原会话。
+- 四个工人位全满：T1003（链头）、T1004、T1005、T0804。
+- T1110 通过 collect（13 条测试、10 条验收、20 个文件全在范围内），G2 在跑。
+- 待返工队列（等位子）：T0711、T0805、T0604（三封返工信均已就绪）、T0707（信今天写好）。
