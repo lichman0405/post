@@ -11514,7 +11514,25 @@ Publish controls visibility」之间）——**我不自行发明**，记在这�
 2. **订阅侧按项目轴、发布侧按版本轴**（`internal/events/subscription_store.go:206`/`:259-270`）
    与本次 feed 修完之后的「一条规则」还要再对一次表。
 
-### 六、迁移账
+### 六、审查列出的其余风险（记账，不阻塞本轮）
+
+审查还留了四条**不在 T0805 范围内、也不阻塞**的风险，我逐条核过后记账：
+
+1. **`scientific_object_versions.visibility_policy_id` 在 V1 里没有任何写路径**（RESULT 自己交代了）：
+   今天可达的「members 受众」只有 rights 元数据那一个 token。等版本 manifest 的写路径落地时，
+   读路由 / Explore / feeds / 订阅解析器**必须由同一个判定驱动**，否则又会漂成今天这样。
+2. **读路由的 members 分支依赖 `projects` 的错误词汇表**：那条路上将来多一个 sentinel，
+   503-vs-404 就会重新出现——本轮要求「共用一份判定」正是为了拆掉这一类（见第二节）。
+3. **共享 dev 库 `post` 的迁移历史乱序**（T0707 那轮也报过）：只影响本地可复现性；
+   往后跑集成套件的**更强证据是全新 clone**。
+4. **`docs/18_EVENTS_SUBSCRIPTIONS.md:9` 那串事件名整体是漂的**，不只是 knowledge 一个：
+   句子里的 `pr.opened/reviewed/merged`、`main.frozen`、`asset.version.published`、
+   `claim.assessment.changed`、`finding.contested`、`object.aborted/reopened` 与
+   `specs/events/event-types.yaml`（规范源）都对不上，其中两个在词汇表里**根本不存在**。
+   **所以这不是改一个词的事**：要么整句按词汇表重写、要么明确它就是概念性列表——
+   属于 docs 任务的活，**我不在这里半改**。
+
+### 七、迁移账
 
 不变：T0805 持 `00083`、T0604 持 `00084`、T0804 持 `00086`、T0707 无迁移。合并顺序
 **T0805 → T0707 → T0604 → T0804**，一次只推一环。
