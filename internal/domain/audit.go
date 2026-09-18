@@ -87,6 +87,31 @@ const (
 	// other (the note beside ActionPullRequestMerged).
 	ActionAssetRightsHolderChanged = "asset.rights_holder_changed"
 
+	// T0604 scientific responsibility: one row per Research Owners rule
+	// written or deleted, and one per responsibility assignment written or
+	// removed, each in the same transaction as the row itself. docs/04 §3
+	// makes the routing project data, so the mapping's history is the
+	// audit log — the rows themselves are ordinary configuration and are
+	// deleted when a rule stops applying (migration 00084). The dotted
+	// names follow the `<scope>.<verb-past>` convention of
+	// project.settings_updated / project.member_role_changed: the
+	// responsibility surface is project configuration, and the actor who
+	// changed it is the record that matters.
+	ActionResearchOwnerRuleCreated = "project.research_owner_rule_created"
+	ActionResearchOwnerRuleDeleted = "project.research_owner_rule_deleted"
+	ActionResponsibilityAssigned   = "project.responsibility_assigned"
+	ActionResponsibilityUnassigned = "project.responsibility_unassigned"
+	// T0604 required-review projection: one row per PR whose required
+	// reviews were met and whose state the projection advanced
+	// (review_required -> approved -> merge_ready, docs/43). It is the
+	// governance record that a proposal became MERGEABLE, and under which
+	// reviews: the row is written in the same transaction as the state
+	// move, so a PR that is merge_ready always has the audit row saying
+	// when and by whose review the calculation was satisfied. The
+	// remaining advances (approved -> merged, T0409) carry their own
+	// records.
+	ActionPullRequestReviewCompleted = "pull_request.review_completed"
+
 	// T0601 freeze governance: one row per project whose main was frozen,
 	// written in the same transaction as the flag itself. docs/26 lists
 	// "main freeze" among the high-risk actions that must be audited, and

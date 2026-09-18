@@ -456,6 +456,34 @@ var canonicalTables = map[string]tableExp{
 		checks:  []string{"review_kind = ANY", "decision = ANY"},
 		fks:     []fkExp{fk("pull_request_id", "pull_requests", "RESTRICT"), fk("reviewer_id", "users", "RESTRICT"), fk("reviewed_state_id", "project_states", "RESTRICT")},
 	},
+	"research_owner_rules": {
+		// T0604 (00084): the CODEOWNERS-like routing rules (docs/04 §3) —
+		// a change matched by object_type / schema / domain is routed to a
+		// responsibility LABEL. The label set is open, so it is data, not a
+		// CHECK against a code vocabulary; what is constrained is the match
+		// KIND (the three resolvable keys) and the shape of the two text
+		// fields (1..200, non-blank, already-trimmed — an untrimmed match
+		// value would silently route nothing). The unique key makes the same
+		// mapping one requirement rather than two.
+		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("match_kind", txt, false, false), c("match_value", txt, false, false), c("responsibility", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"project_id", "match_kind", "match_value", "responsibility"}},
+		checks:  []string{"match_kind = ANY", "char_length(match_value)", "char_length(responsibility)"},
+		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
+	},
+	"responsibility_assignments": {
+		// T0604 (00084): who holds which responsibility label in which
+		// project. Holding a label is ONE fact per (project, user, label) —
+		// the composite primary key is that fact's identity, and it makes
+		// re-assigning idempotent instead of a second row. The label itself
+		// carries the one shape CHECK (the set of labels is open project
+		// data). It grants no access: nothing in internal/authz reads this
+		// table.
+		cols:   []colExp{c("project_id", u, false, false), c("user_id", u, false, false), c("responsibility", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
+		pk:     []string{"project_id", "user_id", "responsibility"},
+		checks: []string{"char_length(responsibility)"},
+		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("user_id", "users", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
+	},
 	"contribution_opportunities": {
 		// T0803 (00062): the open-contribution opportunity row — target
 		// (issue | research_question) with difficulty/capability
@@ -1132,6 +1160,12 @@ var explicitIndexes = map[string][]string{
 	// one read that must not scan a chain that grows.
 	"asset_version_parties_version_role":       {"asset_version_id", "role", "position"},
 	"asset_rights_holder_events_asset_ordinal": {"asset_id", "ordinal DESC"},
+	// T0604 (00084): the routing rule scan per project (the required-review
+	// calculation reads every rule of the project), and the assignment read
+	// behind the reviewer-responsibility resolver and the owner's
+	// assignment list.
+	"research_owner_rules_project_idx":       {"project_id"},
+	"responsibility_assignments_project_idx": {"project_id", "responsibility"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
