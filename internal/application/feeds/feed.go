@@ -6,8 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lichman0405/post/internal/application/knowledgepublish"
 	"github.com/lichman0405/post/internal/assets"
 	"github.com/lichman0405/post/internal/domain"
+	"github.com/lichman0405/post/internal/rights"
 )
 
 // Visibility is the stored project-visibility vocabulary (the projects
@@ -120,12 +122,29 @@ type EntryState struct {
 	// object version's title).
 	Title string
 	// Visibility is the row's OWN stored visibility. An asset version
-	// carries its own (research_asset_versions.visibility); a knowledge
-	// publication carries the visibility of the project that owns the
-	// object, because a publication has no visibility column of its own —
-	// publishing IS the public act (docs/12 §2) and the project is what
-	// decides whether anyone outside may reach it.
+	// carries its own (research_asset_versions.visibility). A knowledge
+	// publication has no visibility column of its own, so what it carries
+	// here is the visibility of the PROJECT that owns the object — one of
+	// the three inputs knowledgepublish.AudienceFor decides with, and never
+	// the answer on its own (a members-only publication inside a public
+	// project is legal; docs/12 §2, 发布不等于公开).
 	Visibility string
+	// VisibilityPolicyID is the version's own visibility axis
+	// (scientific_object_versions.visibility_policy_id), nil when the
+	// version inherits the project's preset. It is set for knowledge rows
+	// and is one of the audience rule's three inputs; the reader reports it
+	// so the model re-checks the axis rather than trusting a predicate.
+	VisibilityPolicyID *string
+	// Rights is the rights declaration the publication stores, and
+	// RightsValid whether this build could READ it. An unreadable document
+	// states no metadata token, so the audience rule refuses it — the
+	// fail-closed direction, and the reason "we could not read this" is a
+	// fact the struct carries instead of an accident of zero values.
+	//
+	// Both are meaningful for knowledge rows only: an asset version has no
+	// rights declaration of its own.
+	Rights      rights.Document
+	RightsValid bool
 	// PublishedAt is the publication's timestamp (the feed's clock).
 	PublishedAt time.Time
 	// Publisher is the publishing account's handle, empty when the reader
@@ -144,8 +163,11 @@ type State struct {
 	// gets.
 	Found bool
 	// Title is the entity's own name: the project name, the asset title, or
-	// — for a knowledge object, which has no title of its own — the title of
-	// its newest published version.
+	// — for a knowledge object, which has no title of its own — whatever the
+	// reader resolved. BuildFeed names a knowledge feed from its own rows
+	// instead (see there): the title a knowledge feed may carry belongs to
+	// the newest publication it RENDERS, and which rows those are is this
+	// package's decision, not the reader's.
 	Title string
 	// Subtitle is the entity's own one-line description, when it has one
 	// (a project's purpose). Empty renders no subtitle.
@@ -255,28 +277,45 @@ func BuildFeed(target Target, state State, opts Options) (Feed, bool) {
 		return Feed{}, false
 	}
 
-	entries := renderableEntries(state, opts)
-	if len(entries) == 0 && target.Kind != KindProject {
+	rows := renderableRows(state)
+	if len(rows) == 0 && target.Kind != KindProject {
 		// Nothing published: an asset whose every version is private, a
 		// knowledge object that was never published. No feed.
 		return Feed{}, false
 	}
 
-	sort.SliceStable(entries, func(i, j int) bool {
-		a, b := entries[i], entries[j]
-		if !a.Updated.Equal(b.Updated) {
-			return a.Updated.After(b.Updated)
+	sort.SliceStable(rows, func(i, j int) bool {
+		a, b := rows[i], rows[j]
+		if !a.PublishedAt.Equal(b.PublishedAt) {
+			return a.PublishedAt.After(b.PublishedAt)
 		}
-		return a.ID < b.ID
+		return entryID(a) < entryID(b)
 	})
-	if max := opts.maxEntries(); len(entries) > max {
-		entries = entries[:max]
+	if max := opts.maxEntries(); len(rows) > max {
+		rows = rows[:max]
+	}
+
+	entries := make([]Entry, 0, len(rows))
+	for _, e := range rows {
+		entries = append(entries, renderEntry(e, opts))
+	}
+
+	title := state.Title
+	if target.Kind == KindKnowledge && len(rows) > 0 {
+		// A knowledge object has no title of its own — the title lives on
+		// each version — so the feed is named by the newest publication the
+		// feed actually CARRIES, which is the newest row the rule above just
+		// admitted. Naming it from the newest publication instead would let a
+		// members-only revision published above an open one supply the
+		// <title> of a public document: the same disclosure the entry filter
+		// makes, one field over.
+		title = rows[0].Title
 	}
 
 	feed := Feed{
 		ID:       feedID(target),
 		Kind:     target.Kind,
-		Title:    state.Title,
+		Title:    title,
 		Subtitle: state.Subtitle,
 		Link:     feedLink(target, opts.BaseURL),
 		Updated:  state.CreatedAt.UTC(),
@@ -288,36 +327,66 @@ func BuildFeed(target Target, state State, opts Options) (Feed, bool) {
 	return feed, true
 }
 
-// renderableEntries keeps the entries a public feed may carry: the rows
-// whose own visibility is public, rendered in the order they arrived (the
-// caller sorts). A row with no visibility at all is dropped — the fail-closed
-// direction a reader that could not answer must produce.
+// renderableRows keeps the rows a public feed may carry, in the order they
+// arrived (the caller sorts). A row that cannot name itself is dropped: it
+// has no stable id to publish and no version page to link to.
 //
-// The reader already filters, so in production this drops nothing; it is the
-// rule, and it is what makes a query change unable to publish a private row
-// on its own.
-func renderableEntries(state State, opts Options) []Entry {
-	out := make([]Entry, 0, len(state.Entries))
+// The reader already filters, so in production this drops nothing the
+// reader's SQL could decide; it is the rule, and it is what makes a query
+// change unable to publish a non-public row on its own.
+func renderableRows(state State) []EntryState {
+	out := make([]EntryState, 0, len(state.Entries))
 	for _, e := range state.Entries {
-		if e.Visibility != VisibilityPublic {
+		if !rowRenderable(e) {
 			continue
 		}
 		if e.ID == "" || e.Version == "" {
-			// A row that cannot name itself cannot be given a stable id or a
-			// version link; it is not renderable as an entry.
 			continue
 		}
-		out = append(out, Entry{
-			ID:      entryID(e),
-			Title:   entryTitle(e),
-			Link:    entryLink(e, opts.BaseURL),
-			Version: e.Version,
-			Updated: e.PublishedAt.UTC(),
-			Summary: entrySummary(e),
-			Author:  e.Publisher,
-		})
+		out = append(out, e)
 	}
 	return out
+}
+
+// rowRenderable reports whether ONE row may appear in a public feed: the
+// disclosure rule, applied to whatever the reader returned.
+//
+// An asset version answers with its own stored visibility, and no visibility
+// at all is dropped — the fail-closed direction a reader that could not
+// answer must produce.
+//
+// A knowledge publication answers with knowledgepublish.AudienceFor over the
+// three inputs the row carries: the version's visibility axis, the owning
+// project's preset and the published rights document. It is the SAME rule the
+// publication's own page decides with (cmd/api/knowledgehttp), so a feed and
+// a page cannot come to different conclusions about one publication — which
+// is what the feeds used to do, by taking "a publication's visibility IS its
+// project's" for the rule and serving a members-only publication of a public
+// project to the network. A declaration this build cannot read is not public
+// either: RightsValid false is the model's own statement that the document
+// states no token we resolve, and AudienceFor would refuse it anyway.
+func rowRenderable(e EntryState) bool {
+	if e.Kind == EntryKnowledgePublication {
+		if !e.RightsValid {
+			return false
+		}
+		return knowledgepublish.AudienceFor(e.Visibility, e.VisibilityPolicyID, e.Rights) ==
+			knowledgepublish.AudienceNetwork
+	}
+	return e.Visibility == VisibilityPublic
+}
+
+// renderEntry renders one admitted row as the entry a feed carries.
+func renderEntry(e EntryState, opts Options) Entry {
+	return Entry{
+		ID:      entryID(e),
+		Title:   entryTitle(e),
+		Link:    entryLink(e, opts.BaseURL),
+		Version: e.Version,
+		Updated: e.PublishedAt.UTC(),
+		Summary: entrySummary(e),
+		Author:  e.Publisher,
+	}
 }
 
 // entryID is the stable IRI of one published version. It names the row's

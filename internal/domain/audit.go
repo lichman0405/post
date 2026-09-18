@@ -101,6 +101,26 @@ const (
 	// vocabulary is the event spec, and neither list is derived from the
 	// other.
 	ActionProjectMainFrozen = "project.main_frozen"
+
+	// T0805 knowledge publication: one row per knowledge object version
+	// published to the network, written in the same transaction as the
+	// publication row itself. docs/12 §3 makes every widening of
+	// visibility an explicit, audited human action, and a publication is
+	// the knowledge surface's version of one — so this row is the record
+	// of who put which version out, under which public name and which
+	// rights declaration.
+	//
+	// It spells the same dotted name as the research EVENT the publish
+	// emits (knowledge.version_published,
+	// specs/events/event-types.yaml) — the coincidence of two registries
+	// the two constants above already record. The published asset
+	// command's action (internal/application/assetpublish
+	// .ActionAssetVersionPublished) could not spell its event's name the
+	// same way and had to pick a different one, because that event is
+	// namespaced `research_asset.` and this vocabulary has no such
+	// prefix; the knowledge event's name already has the shape this
+	// vocabulary uses.
+	ActionKnowledgeVersionPublished = "knowledge.version_published"
 )
 
 // Stable via values (the audit_log.via column): how the action arrived.

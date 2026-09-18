@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lichman0405/post/internal/rights"
 )
 
 // The disclosure rules of a public feed, tested as pure functions: these are
@@ -53,6 +55,34 @@ func assetVersion(id, version, visibility string) EntryState {
 		SubjectType: "dataset",
 		Title:       "Diffraction Data",
 		Visibility:  visibility,
+		PublishedAt: testInstant,
+		Publisher:   "ada",
+	}
+}
+
+// knowledgePublication is one publication row as a reader returns it, in the
+// OPEN configuration: a public project whose version pins nothing, published
+// under the rights model's own fail-closed default.
+//
+// The three audience inputs are part of the row, not scenery: the disclosure
+// rule reads them, so a fixture that left them zero would be a row no reader
+// can produce — and, since the rule is fail-closed, one the model must
+// refuse. Tests that mean a row to be members-only change the input they are
+// about (a pinned policy, a rights token, an unreadable document) rather than
+// dropping the inputs.
+func knowledgePublication(id, version, title string) EntryState {
+	return EntryState{
+		Kind:        EntryKnowledgePublication,
+		ID:          id,
+		Version:     version,
+		Title:       title,
+		SubjectType: "claim",
+		Visibility:  VisibilityPublic,
+		// rights.New() is metadata=project_policy, data_access=restricted —
+		// the document this build's publish writes when the caller declares
+		// nothing narrower (rights.New().Marshal() is its canonical bytes).
+		Rights:      rights.New(),
+		RightsValid: true,
 		PublishedAt: testInstant,
 		Publisher:   "ada",
 	}
@@ -110,8 +140,13 @@ func TestPrivateEntriesAreNeverRendered(t *testing.T) {
 	state := publicProjectState(
 		assetVersion(testVersionID, "v2.0-private", VisibilityPrivate),
 		assetVersion(testPubID, "v1.0", VisibilityPublic),
+		// A publication of a PRIVATE project, everything else open: the row
+		// is dropped for the project axis alone, so the rights document is the
+		// readable default rather than an unreadable one that would hide
+		// which axis refused it.
 		EntryState{Kind: EntryKnowledgePublication, ID: testPubID, Version: "v3.0",
-			Title: "Secret claim", Visibility: VisibilityPrivate, PublishedAt: testInstant},
+			Title: "Secret claim", Visibility: VisibilityPrivate,
+			Rights: rights.New(), RightsValid: true, PublishedAt: testInstant},
 		EntryState{Kind: EntryAssetVersion, ID: testVersionID, Version: "v4.0-unresolved",
 			Title: "Unresolved", Visibility: "", PublishedAt: testInstant},
 	)
@@ -133,6 +168,123 @@ func TestPrivateEntriesAreNeverRendered(t *testing.T) {
 	}
 	if !strings.Contains(string(doc), "v1.0") {
 		t.Errorf("the rendered document does not contain the public version:\n%s", doc)
+	}
+}
+
+// TestMembersOnlyPublicationsAreNeverRendered is the 发布不等于公开 rule
+// (owner ruling L3-20260916-1 #1) applied to the FEED: a publication may live
+// in a PUBLIC project and still be members-only, because who may read it is
+// knowledgepublish.AudienceFor's decision over three inputs and the project's
+// preset is only one of them. Every case here is a public project — a feed
+// that dropped the whole project would prove nothing about the row — and the
+// assertion is on the RENDERED BYTES as well as on the model, because a leak
+// that survived Render would be a leak that shipped.
+//
+// The three members-only shapes are the three the rule refuses:
+//
+//	pinned policy   — the version's own visibility axis is not the project's
+//	rights token    — the declaration pins a metadata visibility of its own
+//	unreadable      — the stored document is not one this build can read
+//
+// and the open row is the control: without it, a model that rendered nothing
+// at all would pass.
+func TestMembersOnlyPublicationsAreNeverRendered(t *testing.T) {
+	pinned := knowledgePublication(testPubID, "v1.0", "Pinned Revision")
+	policy := "6f1e0c2a-3b44-4c1d-8b7e-2f5a6d0e1c33"
+	pinned.VisibilityPolicyID = &policy
+
+	rightsPinned := knowledgePublication(testPubID, "v2.0", "Rights-Pinned Revision")
+	rightsPinned.Rights.Visibility.Metadata = rights.MetadataVisibility("members_only_policy_v1")
+
+	unreadable := knowledgePublication(testPubID, "v3.0", "Unreadable Revision")
+	// The zero document, carried as what it is: a declaration this build
+	// could not parse (the reader answers RightsValid=false for it, and the
+	// rule must not read "no token" as "public").
+	unreadable.Rights = rights.Document{}
+	unreadable.RightsValid = false
+
+	open := knowledgePublication(testVersionID, "v4.0", "Open Revision")
+
+	feed, ok := BuildFeed(projectTarget(), publicProjectState(pinned, rightsPinned, unreadable, open), testBase)
+	if !ok {
+		t.Fatal("a public project with an open publication must have a feed")
+	}
+	if len(feed.Entries) != 1 || feed.Entries[0].Version != "v4.0" {
+		t.Fatalf("entries = %+v, want exactly the open v4.0", feed.Entries)
+	}
+	doc, err := Render(feed, FormatAtom)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for _, leak := range []string{"Pinned Revision", "Rights-Pinned Revision", "Unreadable Revision", testPubID} {
+		if strings.Contains(string(doc), leak) {
+			t.Errorf("the rendered document contains %q — a members-only publication reached the network:\n%s", leak, doc)
+		}
+	}
+	if !strings.Contains(string(doc), "Open Revision") {
+		t.Errorf("the rendered document does not contain the open publication:\n%s", doc)
+	}
+
+	// A knowledge target whose ONLY publication is members-only has no feed
+	// at all — the same 404 its own page answers — rather than an empty one.
+	for _, members := range [][]EntryState{{pinned}, {rightsPinned}, {unreadable}} {
+		if _, ok := BuildFeed(knowledgeTarget(), publicProjectState(members...), testBase); ok {
+			t.Error("a knowledge object whose only publication is members-only rendered a feed")
+		}
+	}
+}
+
+// TestKnowledgeFeedIsNamedByThePublicationItCarries: a knowledge object has
+// no title of its own, so the feed's title is the newest RENDERABLE
+// publication's. Naming it from the newest publication would put the title of
+// a members-only revision, published above an open one, into the <title> of a
+// public document — the same disclosure the entry filter makes, one field
+// over. The reader's own Title (the only thing it could answer with) is
+// ignored for a knowledge target.
+func TestKnowledgeFeedIsNamedByThePublicationItCarries(t *testing.T) {
+	open := knowledgePublication(testVersionID, "v1.0", "Open Revision")
+	open.PublishedAt = testInstant.Add(-time.Hour)
+	hidden := knowledgePublication(testPubID, "v2.0", "Withheld Revision")
+	hidden.Rights.Visibility.Metadata = rights.MetadataVisibility("members_only_policy_v1")
+
+	state := publicProjectState(hidden, open)
+	// What a reader that read the newest publication's title would answer,
+	// and the value the model must NOT use.
+	state.Title = "Withheld Revision"
+	feed, ok := BuildFeed(knowledgeTarget(), state, testBase)
+	if !ok {
+		t.Fatal("the open publication must give the object a feed")
+	}
+	if feed.Title != "Open Revision" {
+		t.Errorf("knowledge feed title = %q, want the newest RENDERABLE publication's title", feed.Title)
+	}
+	doc, err := Render(feed, FormatAtom)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(string(doc), "Withheld Revision") {
+		t.Errorf("the document names the members-only revision:\n%s", doc)
+	}
+
+	// The control: an OPEN newest publication is what the feed is named by —
+	// a model that simply never set a title would pass the assertion above.
+	newest := knowledgePublication(testPubID, "v3.0", "Newest Open Revision")
+	newest.PublishedAt = testInstant.Add(time.Hour)
+	named, ok := BuildFeed(knowledgeTarget(), publicProjectState(open, newest), testBase)
+	if !ok {
+		t.Fatal("no feed")
+	}
+	if named.Title != "Newest Open Revision" {
+		t.Errorf("knowledge feed title = %q, want the newest open publication's title", named.Title)
+	}
+
+	// A project feed is named by the project, whatever its rows say.
+	project, ok := BuildFeed(projectTarget(), publicProjectState(open, newest), testBase)
+	if !ok {
+		t.Fatal("no feed")
+	}
+	if project.Title != "Open Photocatalysts" {
+		t.Errorf("project feed title = %q, want the project's own name", project.Title)
 	}
 }
 
@@ -231,9 +383,8 @@ func TestStableIdsAndVersionLinks(t *testing.T) {
 	// are the control: an implementation that simply cleared every link would
 	// satisfy this half of the test and fail that one.
 	knowledge, ok := BuildFeed(knowledgeTarget(), State{
-		Found: true, Title: "A claim", ProjectVisibility: VisibilityPublic, CreatedAt: testInstant,
-		Entries: []EntryState{{Kind: EntryKnowledgePublication, ID: testPubID, Version: "v2.0",
-			Title: "A claim", Visibility: VisibilityPublic, PublishedAt: testInstant}},
+		Found: true, ProjectVisibility: VisibilityPublic, CreatedAt: testInstant,
+		Entries: []EntryState{knowledgePublication(testPubID, "v2.0", "A claim")},
 	}, testBase)
 	if !ok {
 		t.Fatal("a public knowledge object with a publication must have a feed")

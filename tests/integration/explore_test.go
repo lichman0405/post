@@ -24,7 +24,11 @@
 //     database holds a private project that PUBLISHED knowledge and an asset
 //     version, a private project with a publicized open opportunity, a
 //     disabled account, a deactivated organization, an internal opportunity
-//     and a closed one. The answer must name none of the private things, and
+//     and a closed one. The two of those that are NOT on the open network
+//     are the private project's knowledge publication (publishing knowledge
+//     is a state, not a visibility — knowledgepublish.AudienceFor) and the
+//     asset with no public version; the answer must carry neither, must name
+//     none of the private things, and
 //     the negative assertions run against the RAW RESPONSE BODY — so a field
 //     some layer added on its own fails here, which is what makes this a
 //     check on the whole surface rather than on one function. Each negative
@@ -73,6 +77,7 @@ import (
 	"github.com/lichman0405/post/internal/contribution"
 	"github.com/lichman0405/post/internal/persistence"
 	"github.com/lichman0405/post/internal/persistence/testdb"
+	"github.com/lichman0405/post/internal/rights"
 )
 
 // exploreTaskID namespaces this task's test databases
@@ -112,7 +117,18 @@ const (
 	exploreRetiredHandle = "explore-int-retired"
 	exploreRetiredName   = "Retired Integration"
 
-	exploreOpenKnowledgeTitle   = "Integration Open Question"
+	exploreOpenKnowledgeTitle = "Integration Open Question"
+	// exploreSecondKnowledgeTitle is the SECOND public project's publication:
+	// the section needs two rows for the freshness order to measure anything,
+	// and the fixture writes them in the reverse of their freshness order.
+	exploreSecondKnowledgeTitle = "Integration Second Question"
+	// exploreHiddenKnowledgeTitle is a publication of the PRIVATE project.
+	// Since the audience rule (knowledgepublish.AudienceFor, owner ruling
+	// L3-20260916-1 #1) decides who may read a publication, publishing one
+	// is not what puts it on the network: this row is a publication, and it
+	// must appear in NO answer on this anonymous surface — its title is in
+	// the forbidden list below. Its project's OWN asset version and
+	// publicized opportunity are the two rows that do travel.
 	exploreHiddenKnowledgeTitle = "Integration Hidden Question"
 
 	exploreOpenAssetTitle   = "Integration Public Asset"
@@ -318,11 +334,20 @@ func seedExploreFixture(t *testing.T, ctx context.Context, w *exploreWorld) {
 	seedExploreAsset(t, ctx, pool, w.hiddenProjectID, w.aliceID,
 		exploreHiddenAssetTitle, "0.9.0", "public", exploreDay(15))
 
-	// --- knowledge: the private project's publication FIRST, so the
-	// section's freshness order (the public project's row, newest) is the
-	// reverse of the write order ------------------------------------------
+	// --- knowledge: three publications, and only the public projects' two
+	// are on the network ------------------------------------------------
+	// The audience rule (knowledgepublish.AudienceFor, ruling
+	// L3-20260916-1 #1) is what decides it, and it is the reason the
+	// private project's row renders NOTHING here while its asset version and
+	// its publicized opportunity do: publishing knowledge records a state,
+	// and who may read it is the version's own visibility axis — not the act
+	// of publishing. The two rows that do render are written in the reverse
+	// of their freshness order, so a section that echoed the read order
+	// fails instead of passing by coincidence.
 	seedExploreKnowledge(t, ctx, pool, w.hiddenProjectID, w.aliceID, 2,
 		exploreHiddenKnowledgeTitle, "superseded", exploreDay(11))
+	seedExploreKnowledge(t, ctx, pool, secondProjectID, w.aliceID, 2,
+		exploreSecondKnowledgeTitle, "superseded", exploreDay(12))
 	seedExploreKnowledge(t, ctx, pool, w.openProjectID, w.aliceID, 1,
 		exploreOpenKnowledgeTitle, "active", exploreDay(14))
 
@@ -346,8 +371,21 @@ func seedExploreFixture(t *testing.T, ctx context.Context, w *exploreWorld) {
 		exploreInternalTask, "advanced", time.Time{}, exploreKeepInternal, "")
 }
 
-// seedExploreKnowledge writes one research question, its first version and
-// the publication that puts that version on the network.
+// seedExploreKnowledge writes one research question, one version of it and
+// the publication of that version.
+//
+// Nothing here says the publication is on the network: whether it is, is
+// decided by the audience rule over the row (the version's OWN visibility
+// axis, the owning project's preset, and the stored rights document), which
+// is the question this surface exists to answer — a fixture that wrote "this
+// one is public" would be asserting the answer.
+//
+// The rights document is the model's own default (rights.New, the values
+// specs/policies/rights-template.yaml shows), written out through the same
+// canonical marshalling the publish command stores: metadata visibility
+// follows the project policy, which is the one token AudienceFor resolves.
+// A fixture that stored some other document would be exercising the
+// fail-closed branch rather than the rule's happy path.
 //
 // The object type is research_question because that is the type 00062's
 // target guard resolves a research_question opportunity target against — the
@@ -370,11 +408,15 @@ func seedExploreKnowledge(
 		 VALUES ($1, $2, $3, 'https://open-rd.example/schemas/research_question.schema.json', '1',
 		         $4, $5, '{}'::jsonb, 'sha256:'||$4, $6) RETURNING id`,
 		objectID, versionNo, stateID, title, lifecycle, authorID)
+	rightsJSON, err := rights.New().Marshal()
+	if err != nil {
+		t.Fatalf("seed rights for %q: %v", title, err)
+	}
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO knowledge_publications
 		   (object_version_id, public_version, rights_json, published_by, published_at)
-		 VALUES ($1, $2, '{"version":1}'::jsonb, $3, $4)`,
-		versionID, "v"+strconv.Itoa(versionNo), authorID, publishedAt); err != nil {
+		 VALUES ($1, $2, $3::jsonb, $4, $5)`,
+		versionID, "v"+strconv.Itoa(versionNo), rightsJSON, authorID, publishedAt); err != nil {
 		t.Fatalf("publish %q: %v", title, err)
 	}
 }
@@ -692,28 +734,40 @@ func TestExploreIndexOverRealPostgres(t *testing.T) {
 		}
 	}
 
-	// --- Knowledge: BOTH publications, only the public project named ------
+	// --- Knowledge: the two publications the NETWORK may read, each with
+	// its public project named, and NOT the private project's -------------
+	// The audience rule is what decides the membership of this section, and
+	// it decides it over each row's own facts (the version's visibility
+	// axis, the project's preset, the stored rights document) — which is why
+	// the private project's publication, legal as it is, is in no answer
+	// here.
 	knowledgeTitles := exploreTitles(index.Knowledge.Items, func(k exploreWireKnowledge) string { return k.Title })
 	assertExploreOrder(t, "Knowledge", knowledgeTitles,
-		[]string{exploreOpenKnowledgeTitle, exploreHiddenKnowledgeTitle})
+		[]string{exploreOpenKnowledgeTitle, exploreSecondKnowledgeTitle})
+	assertExploreLacks(t, "Knowledge", exploreHiddenKnowledgeTitle, knowledgeTitles)
 	for _, k := range index.Knowledge.Items {
 		if k.ID == "" || k.ObjectID == "" || k.ObjectType != "research_question" {
 			t.Errorf("the publication row is not fully rendered: %+v", k)
 		}
+		// A publication of a private project is a publication whose audience
+		// is that project's members: it is in no row of this anonymous
+		// answer, and its project's identity is therefore not on this
+		// surface by construction rather than by a withheld field.
+		if k.Project == nil {
+			t.Errorf("a publication of a public project lost its project: %+v", k)
+			continue
+		}
 		switch k.Title {
 		case exploreOpenKnowledgeTitle:
-			if k.Project == nil || k.Project.ID != w.openProjectID {
-				t.Errorf("the public project's publication lost its project: %+v", k.Project)
+			if k.Project.ID != w.openProjectID {
+				t.Errorf("the public project's publication named the wrong project: %+v", k.Project)
 			}
 			if k.LifecycleState != "active" || k.PublicVersion != "v1" {
 				t.Errorf("the published version's own state did not reach the index: %+v", k)
 			}
-		case exploreHiddenKnowledgeTitle:
-			// The publication is public (docs/12 §2: a private project may
-			// publish knowledge), so it is listed — and it travels WITHOUT
-			// its project.
-			if k.Project != nil {
-				t.Errorf("the private project's publication named its project: %+v", k.Project)
+		case exploreSecondKnowledgeTitle:
+			if k.Project.ID == w.openProjectID || k.Project.ID == w.hiddenProjectID {
+				t.Errorf("the second public project's publication named the wrong project: %+v", k.Project)
 			}
 			// The published VERSION's own state (docs/43): a superseded
 			// version renders as superseded, so a reader never takes stale
@@ -760,8 +814,11 @@ func TestExploreIndexOverRealPostgres(t *testing.T) {
 	// The publicized row of the PRIVATE project is in this list and sorts
 	// first (it is the newest): what publicizing does is put the opportunity
 	// on the open network, and what a private project may not do is be named
-	// on it — so the row renders with a nil project, exactly as the asset
-	// and knowledge rows do.
+	// on it — so the row renders with a nil project, exactly as the private
+	// project's asset version does. The private project's knowledge
+	// PUBLICATIONS are not on this list at all: a publicize is what puts an
+	// opportunity on the network, and a publish is not (see the knowledge
+	// section above).
 	taskTitles := exploreTitles(index.Contributions.Items, func(c exploreWireContribution) string { return c.Title })
 	assertExploreOrder(t, "Contributions", taskTitles,
 		[]string{exploreHiddenTask, exploreIntermediateTask, exploreAdvancedTask, exploreBeginnerTask})
@@ -795,23 +852,27 @@ func TestExploreIndexOverRealPostgres(t *testing.T) {
 	// AND id — all three, because a field that carried one of them would not
 	// have to carry the others), the disabled account, the deactivated
 	// organization, the two opportunities that are not on the open network,
-	// and the asset with no public version.
+	// the asset with no public version, and the private project's knowledge
+	// PUBLICATION — which is the one entry here that exists precisely
+	// because publishing is not publishing-to-the-network (ruling
+	// L3-20260916-1 #1): the row is a publication, the version it published
+	// is invisible to the network, and a reader of this index must not learn
+	// even its title.
 	//
-	// Three rows are deliberately NOT forbidden: the private project's
-	// PUBLICATION, its public ASSET VERSION and its publicized OPPORTUNITY.
-	// All three are public objects — an explicit publication, a public
-	// version and an explicit publicize are what make them so (docs/12 §2/§3)
-	// — and forbidding them would be a stricter rule than the platform has.
-	// What may not appear is whose they are, which is what this list checks,
-	// and it is why the project's name, slug AND id are all three forbidden
-	// rather than one: a field carrying any one of them need not carry the
-	// others.
+	// Two rows are deliberately NOT forbidden: the private project's public
+	// ASSET VERSION and its publicized OPPORTUNITY. Both are public objects —
+	// a public version and an explicit publicize are what make them so
+	// (docs/12 §2/§3) — and forbidding them would be a stricter rule than the
+	// platform has. What may not appear is whose they are, which is what this
+	// list checks, and it is why the project's name, slug AND id are all
+	// three forbidden rather than one: a field carrying any one of them need
+	// not carry the others.
 	forbidInBody(t, "explore index", raw,
 		exploreHiddenProjectSlug, exploreHiddenProjectName, w.hiddenProjectID,
 		exploreRetiredHandle, exploreRetiredName,
 		exploreRetiredOrgSlug, exploreRetiredOrgName, exploreRetiredOrgDesc,
 		exploreInternalTask, exploreClosedTask,
-		exploreDraftAssetTitle,
+		exploreDraftAssetTitle, exploreHiddenKnowledgeTitle,
 	)
 	// ...and the same bytes must carry the public identities, so a leak check
 	// that passed because the index was empty fails here instead.
@@ -820,12 +881,12 @@ func TestExploreIndexOverRealPostgres(t *testing.T) {
 		exploreSecondProjectName, exploreSecondProjectSlug,
 		exploreActiveOrgName, exploreSecondOrgName, exploreActiveOrgDesc,
 		exploreAliceName, exploreBobName, exploreAliceBio,
-		exploreOpenKnowledgeTitle, exploreHiddenKnowledgeTitle,
+		exploreOpenKnowledgeTitle, exploreSecondKnowledgeTitle,
 		exploreOpenAssetTitle, exploreSecondAssetTitle, exploreHiddenAssetTitle,
 		exploreBeginnerTask, exploreAdvancedTask, exploreIntermediateTask,
 		// The rows of a private project that were explicitly made public are
-		// on the network (that is what an explicit publication, a public
-		// version and a publicize DO); only their project is withheld.
+		// on the network (that is what a public version and a publicize DO);
+		// only their project is withheld.
 		exploreHiddenTask,
 	} {
 		if !strings.Contains(raw, want) {

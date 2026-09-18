@@ -272,6 +272,40 @@ type feedFixture struct {
 	privateObjectID        string
 	privatePublicationID   string
 	privateObjectTitle     string
+
+	// The fail-closed side of 发布不等于公开 (docs/12 §2): publications inside
+	// the PUBLIC project that the network may not read, one per axis of the
+	// audience rule so a fix that handled one axis would fail on the others.
+	// They are members-only although their project is public, which is legal
+	// and is exactly the row the feeds used to serve.
+	//
+	//	policyMembersOnly*   the version pins a policy of its own
+	//	rightsMembersOnly*   the declaration's metadata token is not the
+	//	                     project's
+	//	unreadableRights*    the declaration is one this build cannot read
+	policyMembersOnlyObjectID string
+	policyMembersOnlyPubID    string
+	policyMembersOnlyTitle    string
+	rightsMembersOnlyObjectID string
+	rightsMembersOnlyPubID    string
+	rightsMembersOnlyTitle    string
+	unreadableRightsObjectID  string
+	unreadableRightsPubID     string
+	unreadableRightsTitle     string
+
+	// A second PUBLIC project holding one object published twice: an open
+	// publication, and a members-only one published ABOVE it. It lives in a
+	// project of its own so that the counts asserted for the first project
+	// stay what they are — and its own feed is where the title axis is
+	// settled: a feed is named by the newest publication it RENDERS, never by
+	// one it withholds.
+	stackedProject       string
+	stackedObjectID      string
+	stackedOpenPubID     string
+	stackedOpenTitle     string
+	stackedHiddenPubID   string
+	stackedHiddenTitle   string
+	stackedHiddenVersion string
 }
 
 // seedFeedFixture writes the fixture. Project, state, object and publication
@@ -292,6 +326,11 @@ func seedFeedFixture(t *testing.T, ctx context.Context, w *feedWorld) *feedFixtu
 		publicObjectTitle:      "Solvent-Free Synthesis",
 		unpublishedObjectTitle: "Draft Claim Never Published",
 		privateObjectTitle:     "Withheld Claim",
+		policyMembersOnlyTitle: "Policy-Governed Claim",
+		rightsMembersOnlyTitle: "Members-Only Rights Claim",
+		unreadableRightsTitle:  "Unreadable Rights Claim",
+		stackedOpenTitle:       "Stacked Open Claim",
+		stackedHiddenTitle:     "Stacked Withheld Claim",
 	}
 
 	f.publicProject = mustQueryUUID(t, ctx, pool,
@@ -337,17 +376,22 @@ func seedFeedFixture(t *testing.T, ctx context.Context, w *feedWorld) *feedFixtu
 	// The titles are deliberately free of digits: the negative assertions
 	// below are plain substring checks on the raw body, and a digit-bearing
 	// title could collide with a timestamp.
-	seedObject := func(projectID, ownerID, title string, state string) string {
+	//
+	// A non-nil policy pins the version's own visibility axis
+	// (scientific_object_versions.visibility_policy_id) at the row level:
+	// the version is then governed by that policy, and this build resolves
+	// no policy into a network grant.
+	seedObject := func(projectID, ownerID, title string, state string, policy *string) string {
 		t.Helper()
 		objectID := mustQueryUUID(t, ctx, pool,
 			`INSERT INTO scientific_objects (project_id, object_type, created_by)
 			 VALUES ($1, 'claim', $2) RETURNING id`, projectID, ownerID)
 		mustQueryUUID(t, ctx, pool,
 			`INSERT INTO scientific_object_versions
-				(object_id, version_no, state_id, schema_id, schema_version, title, lifecycle_state, payload, integrity_hash, created_by)
+				(object_id, version_no, state_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by)
 			 VALUES ($1, 1, $2, 'https://open-rd.example/schemas/claim.schema.json', '1',
-			         $3, 'active', '{}'::jsonb, 'x', $4) RETURNING id`,
-			objectID, state, title, ownerID)
+			         $3, 'active', '{}'::jsonb, $4, 'x', $5) RETURNING id`,
+			objectID, state, title, policy, ownerID)
 		return objectID
 	}
 	// The version row of an object's first version, read back by its own key
@@ -359,19 +403,53 @@ func seedFeedFixture(t *testing.T, ctx context.Context, w *feedWorld) *feedFixtu
 		return mustQueryUUID(t, ctx, pool,
 			`SELECT id::text FROM scientific_object_versions WHERE object_id = $1 AND version_no = 1`, objectID)
 	}
-	publishKnowledge := func(versionID, publisherID string) string {
+	publishKnowledge := func(versionID, publisherID string, rightsJSON []byte, publishedAtOffsetSecs int) string {
 		t.Helper()
 		return mustQueryUUID(t, ctx, pool,
-			`INSERT INTO knowledge_publications (object_version_id, public_version, rights_json, published_by)
-			 VALUES ($1, $2, '{"license":"CC-BY-4.0"}'::jsonb, $3) RETURNING id`,
-			versionID, f.publicObjectVersion, publisherID)
+			`INSERT INTO knowledge_publications
+			   (object_version_id, public_version, rights_json, published_by, published_at)
+			 VALUES ($1, $2, $3::jsonb, $4, now() + make_interval(secs => $5)) RETURNING id`,
+			versionID, f.publicObjectVersion, rightsJSON, publisherID, publishedAtOffsetSecs)
+	}
+
+	// The rights declarations this fixture publishes under.
+	//
+	// openRights is the document the product's own publish writes when the
+	// caller declares nothing narrower (rights.New(): metadata
+	// project_policy, data access restricted) — the same bytes
+	// tests/integration/explore_test.go publishes with, and the shape the
+	// audience rule resolves to a network grant for a public project.
+	openRights, err := rights.New().Marshal()
+	if err != nil {
+		t.Fatalf("marshal the open rights declaration: %v", err)
+	}
+	// membersOnlyRights is a READABLE document whose metadata token is not
+	// the project's: the publication is members-only although nothing about
+	// it is unreadable, which is why "the rights document did not parse"
+	// cannot be the whole rule.
+	membersOnlyRights := rights.New()
+	membersOnlyRights.Visibility.Metadata = rights.MetadataVisibility("members_only_policy_v1")
+	membersOnlyRaw, err := membersOnlyRights.Marshal()
+	if err != nil {
+		t.Fatalf("marshal the members-only rights declaration: %v", err)
+	}
+	// unreadableRights is the declaration this build must refuse to
+	// interpret: it carries no version, and `license` is not a field of the
+	// rights model (the standard license is standard_license_id), so
+	// rights.Parse — which refuses unknown fields — rejects it. The control
+	// below is what makes the row evidence rather than an assertion about a
+	// field someone once wrote.
+	unreadableRights := []byte(`{"license":"CC-BY-4.0"}`)
+	if doc, err := rights.Parse(unreadableRights); err == nil {
+		t.Fatalf("fixture: %s parses as %+v, so it is not the unreadable declaration this fixture is about",
+			unreadableRights, doc)
 	}
 
 	// The blob carrier: an object in the public project whose version holds
 	// the open attachment. It is never published and so never appears in a
 	// feed — it exists because the asset publish gate resolves the blob's
 	// access through its attachments (assets.Preview).
-	carrier := seedObject(f.publicProject, aliceID, "Feed Blob Carrier", publicState)
+	carrier := seedObject(f.publicProject, aliceID, "Feed Blob Carrier", publicState, nil)
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO blob_attachments (blob_id, scientific_object_version_id, attachment_role, access_level, state_id)
 		 VALUES ($1, $2, 'data', 'open', $3)`,
@@ -410,19 +488,78 @@ func seedFeedFixture(t *testing.T, ctx context.Context, w *feedWorld) *feedFixtu
 	}).body(t), "feed-private-asset-1")
 	f.privateAssetPID = published.AssetPID
 
-	// The published knowledge objects.
-	f.publicObjectID = seedObject(f.publicProject, aliceID, f.publicObjectTitle, publicState)
-	f.publicPublicationID = publishKnowledge(firstVersionID(f.publicObjectID), aliceID)
+	// The published knowledge objects. The first is the OPEN one: a
+	// publication of a public project, under the rights model's own
+	// fail-closed default, which the network may read.
+	f.publicObjectID = seedObject(f.publicProject, aliceID, f.publicObjectTitle, publicState, nil)
+	f.publicPublicationID = publishKnowledge(firstVersionID(f.publicObjectID), aliceID, openRights, 0)
+
+	// The three members-only publications of the SAME public project, one
+	// per axis. They are what the anonymous feeds must not carry: the
+	// project is public, so nothing about the project's own visibility
+	// excludes them, and only the audience rule does.
+	pinnedPolicy := genRandomUUID(t, ctx, pool)
+	f.policyMembersOnlyObjectID = seedObject(f.publicProject, aliceID, f.policyMembersOnlyTitle, publicState, &pinnedPolicy)
+	f.policyMembersOnlyPubID = publishKnowledge(firstVersionID(f.policyMembersOnlyObjectID), aliceID, openRights, 0)
+
+	f.rightsMembersOnlyObjectID = seedObject(f.publicProject, aliceID, f.rightsMembersOnlyTitle, publicState, nil)
+	f.rightsMembersOnlyPubID = publishKnowledge(firstVersionID(f.rightsMembersOnlyObjectID), aliceID, membersOnlyRaw, 0)
+
+	f.unreadableRightsObjectID = seedObject(f.publicProject, aliceID, f.unreadableRightsTitle, publicState, nil)
+	f.unreadableRightsPubID = publishKnowledge(firstVersionID(f.unreadableRightsObjectID), aliceID, unreadableRights, 0)
 
 	// An object in the public project that was never published: no feed.
-	f.unpublishedObjectID = seedObject(f.publicProject, aliceID, f.unpublishedObjectTitle, publicState)
+	f.unpublishedObjectID = seedObject(f.publicProject, aliceID, f.unpublishedObjectTitle, publicState, nil)
 
 	// A PUBLISHED object in the private project: the same shape as the
 	// public one, one visibility flag away from being reachable.
-	f.privateObjectID = seedObject(f.privateProject, bobID, f.privateObjectTitle, privateState)
-	f.privatePublicationID = publishKnowledge(firstVersionID(f.privateObjectID), bobID)
+	f.privateObjectID = seedObject(f.privateProject, bobID, f.privateObjectTitle, privateState, nil)
+	f.privatePublicationID = publishKnowledge(firstVersionID(f.privateObjectID), bobID, openRights, 0)
+
+	// The stacked object, in a public project of its own: an open
+	// publication, and a members-only one published an hour LATER, on a
+	// version of its own with a title of its own. The explicit offsets are
+	// what makes "newer" a fact of the fixture rather than of the order two
+	// inserts happened to run in; the second version is a NEW ROW because
+	// scientific_object_versions is append-only (migration 00014) — a
+	// version is a row, never an edit.
+	f.stackedProject = mustQueryUUID(t, ctx, pool,
+		`INSERT INTO projects (slug, name, purpose, visibility, created_by)
+		 VALUES ('stacked-lab', 'Stacked Lab', 'One object, published twice.', 'public', $1) RETURNING id`, aliceID)
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO project_memberships (project_id, user_id, role) VALUES ($1, $2, 'owner')`,
+		f.stackedProject, aliceID); err != nil {
+		t.Fatalf("seed stacked membership: %v", err)
+	}
+	stackedState := mustQueryUUID(t, ctx, pool,
+		`INSERT INTO project_states (project_id, state_hash, manifest_version)
+		 VALUES ($1, 'genesis-feed-stacked', '1') RETURNING id`, f.stackedProject)
+	f.stackedObjectID = seedObject(f.stackedProject, aliceID, f.stackedOpenTitle, stackedState, nil)
+	// The second version COPIES the first and appends: object_id, schema and
+	// payload travel with it, and the only thing that is new is the version
+	// number and the title.
+	f.stackedHiddenVersion = mustQueryUUID(t, ctx, pool,
+		`INSERT INTO scientific_object_versions
+		   (object_id, version_no, state_id, schema_id, schema_version, title,
+		    lifecycle_state, payload, integrity_hash, created_by)
+		 SELECT object_id, version_no + 1, state_id, schema_id, schema_version, $2,
+		        'active', payload, 'x', created_by
+		 FROM scientific_object_versions WHERE id = $1::uuid RETURNING id`,
+		firstVersionID(f.stackedObjectID), f.stackedHiddenTitle)
+	f.stackedOpenPubID = publishKnowledge(firstVersionID(f.stackedObjectID), aliceID, openRights, 0)
+	f.stackedHiddenPubID = publishKnowledge(f.stackedHiddenVersion, aliceID, membersOnlyRaw, 3600)
 
 	return f
+}
+
+// genRandomUUID asks the database for a uuid. The fixture's pinned policy is
+// a value no resolver in this build reads (nothing resolves a policy id into
+// a grant), so any uuid says the same thing: this version carries an axis of
+// its own. It is generated by the database so the fixture does not have to
+// invent one.
+func genRandomUUID(t *testing.T, ctx context.Context, pool *pgxpool.Pool) string {
+	t.Helper()
+	return mustQueryUUID(t, ctx, pool, `SELECT gen_random_uuid()::text`)
 }
 
 // --------------------------------------------------------------------------
@@ -762,6 +899,273 @@ func TestPrivateRowsAreNeverRenderedFromThePublicFeed(t *testing.T) {
 			t.Errorf("the public project's feed names %q, which belongs to the private project:\n%s", leak, raw)
 		}
 	}
+}
+
+// TestMembersOnlyPublicationsAreNotInAnyAnonymousFeed is 发布不等于公开
+// (docs/12 §2, owner ruling L3-20260916-1 #1) at the surface a subscriber
+// actually reads.
+//
+// The fixture's public project holds four publications: one OPEN one and
+// three the network may not read, each members-only by a DIFFERENT axis of
+// the audience rule. The project's visibility is 'public' for every one of
+// them, which is the point — the feeds used to take "a publication's
+// visibility IS its project's" for the rule and served all four.
+//
+// The negatives are asserted on the RAW BODY of both anonymous feed targets
+// (the project feed and each object's own knowledge feed), so a field the
+// transport or the reader added on its own fails here too, and the fixture
+// carries its own control: the pre-fix read rule is run over the same rows
+// and must find all four, so the negatives cannot pass on a fixture that
+// never wrote them.
+func TestMembersOnlyPublicationsAreNotInAnyAnonymousFeed(t *testing.T) {
+	ctx := context.Background()
+	w := newFeedWorld(t, ctx)
+	f := seedFeedFixture(t, ctx, w)
+
+	// The control, in two parts. First: the rows exist and the projects are
+	// public — nothing about either project's own visibility excludes them.
+	membersOnly := []struct{ name, objectID, pubID, title string }{
+		{"a version that pins a visibility policy", f.policyMembersOnlyObjectID, f.policyMembersOnlyPubID, f.policyMembersOnlyTitle},
+		{"a declaration whose metadata token is not the project's", f.rightsMembersOnlyObjectID, f.rightsMembersOnlyPubID, f.rightsMembersOnlyTitle},
+		{"a declaration this build cannot read", f.unreadableRightsObjectID, f.unreadableRightsPubID, f.unreadableRightsTitle},
+	}
+	for _, m := range membersOnly {
+		var visibility string
+		if err := w.pool.QueryRow(ctx, `
+			SELECT p.visibility
+			FROM knowledge_publications kp
+			JOIN scientific_object_versions sov ON sov.id = kp.object_version_id
+			JOIN scientific_objects so ON so.id = sov.object_id
+			JOIN projects p ON p.id = so.project_id
+			WHERE kp.id = $1::uuid`, m.pubID).Scan(&visibility); err != nil {
+			t.Fatalf("read the project of the publication for %s: %v", m.name, err)
+		}
+		if visibility != "public" {
+			t.Fatalf("fixture: the %s lives in a %q project — the case only means something inside a PUBLIC one",
+				m.name, visibility)
+		}
+	}
+	// The three axes really are the axes they claim to be, read back from
+	// the rows: an axis a fixture only MEANT to set is an axis the feed
+	// would not have to filter.
+	if got := readSingleText(t, ctx, w.pool,
+		`SELECT visibility_policy_id::text FROM scientific_object_versions WHERE object_id = $1::uuid`,
+		f.policyMembersOnlyObjectID); got == "" {
+		t.Fatal("fixture: the policy-governed version carries no visibility_policy_id")
+	}
+	// The rights axis, read as bytes and then judged the way the reader
+	// judges it: the members-only declaration must PARSE (its axis is the
+	// token it states, not a parse failure) and must not state the project's
+	// own policy.
+	membersDoc, err := rights.Parse(readRightsRaw(t, ctx, w.pool, f.rightsMembersOnlyPubID))
+	if err != nil {
+		t.Fatalf("fixture: the members-only declaration does not parse: %v", err)
+	}
+	if membersDoc.Visibility.Metadata == rights.MetadataProjectPolicy {
+		t.Fatal("fixture: the members-only declaration states the project's own policy, so it is not the row this case is about")
+	}
+	// And the unreadable one must be genuinely unreadable — the same parse
+	// the reader performs, refused — and refused for the reason this case is
+	// about: it declares a `license`, which is not a field of the rights
+	// model (the standard license is standard_license_id), under no document
+	// version at all. The bytes are read back from the column, so this is
+	// the document the feed would have had to interpret.
+	unreadableStored := readRightsRaw(t, ctx, w.pool, f.unreadableRightsPubID)
+	if _, err := rights.Parse(unreadableStored); err == nil {
+		t.Fatalf("fixture: %s parses, so the row is not the unreadable one", unreadableStored)
+	}
+	var declared map[string]json.RawMessage
+	if err := json.Unmarshal(unreadableStored, &declared); err != nil {
+		t.Fatalf("fixture: the stored declaration is not JSON at all: %v", err)
+	}
+	if _, ok := declared["version"]; ok {
+		t.Fatalf("fixture: the stored declaration carries a document version (%s), so it is not the shape this case is about",
+			unreadableStored)
+	}
+	if _, ok := declared["license"]; !ok {
+		t.Fatalf("fixture: the stored declaration is %s, want the license-only shape this case is about", unreadableStored)
+	}
+
+	// Second: the read rule this fix replaced — the project's visibility and
+	// nothing else — really does admit all four publications of the public
+	// project. That is what makes the negative assertions below evidence
+	// rather than decoration: on the old rule these rows were in the feed.
+	//
+	// It is run as SQL here and nowhere else: it is the DEFECT, quoted for
+	// the fixture's sake, not a rule anything is built on.
+	var candidates int
+	if err := w.pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM knowledge_publications kp
+		JOIN scientific_object_versions sov ON sov.id = kp.object_version_id
+		JOIN scientific_objects so ON so.id = sov.object_id
+		JOIN projects p ON p.id = so.project_id
+		WHERE so.project_id = $1::uuid AND p.visibility = 'public'`,
+		f.publicProject).Scan(&candidates); err != nil {
+		t.Fatalf("count the project's publications: %v", err)
+	}
+	if candidates != len(membersOnly)+1 {
+		t.Fatalf("fixture: the public project holds %d publications, want the %d members-only ones and the open one "+
+			"— the leak this test is about would not have been possible with fewer",
+			candidates, len(membersOnly))
+	}
+
+	// The project feed: still exactly the two rows the network may read (the
+	// asset version and the open publication), and none of the members-only
+	// publications in the body.
+	status, _, raw := anonymousFeed(t, w.ts.URL, "/api/v1/feeds/projects/"+f.publicProject, nil)
+	if status != http.StatusOK {
+		t.Fatalf("anonymous project feed = %d, want 200: %s", status, raw)
+	}
+	if doc := parseFeed(t, raw); len(doc.Entries) != 2 {
+		t.Fatalf("project feed entries = %d, want the asset version and the open publication:\n%s", len(doc.Entries), raw)
+	}
+	// The open publication IS there — the control that keeps the negatives
+	// below from passing on a feed that renders nothing at all.
+	if !strings.Contains(raw, f.publicPublicationID) || !strings.Contains(raw, f.publicObjectTitle) {
+		t.Errorf("the project feed dropped the OPEN publication %s:\n%s", f.publicPublicationID, raw)
+	}
+	for _, m := range membersOnly {
+		for _, leak := range []string{m.pubID, m.objectID, m.title} {
+			if strings.Contains(raw, leak) {
+				t.Errorf("the public project's feed carries %q, which is members-only (%s):\n%s", leak, m.name, raw)
+			}
+		}
+	}
+
+	// Each members-only object's own knowledge feed: the SAME 404 an id that
+	// names nothing gets, byte for byte. A feed is a URL a reader subscribes
+	// to, so an answer that told the two apart would be an existence oracle
+	// for work the network may not see.
+	unknown := "2b2b2b2b-2b2b-4b2b-8b2b-2b2b2b2b2b2b"
+	unknownStatus, _, unknownBody := anonymousFeed(t, w.ts.URL, "/api/v1/feeds/knowledge/"+unknown, nil)
+	if unknownStatus != http.StatusNotFound {
+		t.Fatalf("an unknown knowledge object's feed = %d, want 404", unknownStatus)
+	}
+	for _, m := range membersOnly {
+		status, _, body := anonymousFeed(t, w.ts.URL, "/api/v1/feeds/knowledge/"+m.objectID, nil)
+		if status != http.StatusNotFound {
+			t.Errorf("the feed of the object whose publication is members-only (%s) = %d, want 404: %s", m.name, status, body)
+			continue
+		}
+		if code := feedErrorCode(t, body); code != feedshttp.CodeFeedNotFound {
+			t.Errorf("%s: refusal code = %q, want %q", m.name, code, feedshttp.CodeFeedNotFound)
+		}
+		if body != unknownBody {
+			t.Errorf("%s: a members-only publication and an unknown id answer different bodies:\nmembers-only: %s\nunknown: %s",
+				m.name, body, unknownBody)
+		}
+	}
+}
+
+// TestKnowledgeFeedIsNamedByAPublicationItCarries pins the title axis of the
+// same rule, end to end.
+//
+// The stacked object was published twice: an OPEN publication, and a
+// members-only one published an hour LATER on a version with a title of its
+// own. A knowledge object has no title of its own, so the feed's name is
+// whichever publication is newest — and "newest" must mean newest among the
+// rows the feed RENDERS. Naming it from the newest row the reader returned
+// would put a members-only revision's title into the <title> of a public
+// document: the same disclosure the entry filter makes, one field over.
+func TestKnowledgeFeedIsNamedByAPublicationItCarries(t *testing.T) {
+	ctx := context.Background()
+	w := newFeedWorld(t, ctx)
+	f := seedFeedFixture(t, ctx, w)
+
+	// The control: the withheld publication really is the NEWER one — the
+	// property the feed's ordering and its title both turn on — and it
+	// really carries a title of its own. Without this the assertions below
+	// would pass on a fixture where nothing was ever withheld.
+	if got := readSingleText(t, ctx, w.pool,
+		`SELECT title FROM scientific_object_versions WHERE id = $1::uuid`, f.stackedHiddenVersion); got != f.stackedHiddenTitle {
+		t.Fatalf("fixture: the withheld version's title is %q, want %q", got, f.stackedHiddenTitle)
+	}
+	if got := readSingleText(t, ctx, w.pool,
+		`SELECT (newer.published_at > older.published_at)::text
+		 FROM knowledge_publications newer, knowledge_publications older
+		 WHERE newer.id = $1::uuid AND older.id = $2::uuid`,
+		f.stackedHiddenPubID, f.stackedOpenPubID); got != "true" {
+		t.Fatalf("fixture: the withheld publication is not newer than the open one (%s)", got)
+	}
+	// And both hang off versions of the SAME object, the withheld one a LATER
+	// version — which is what makes its title the one a "name the feed after
+	// the newest publication" read would have used.
+	if got := readSingleText(t, ctx, w.pool,
+		`SELECT (hidden.version_no > opened.version_no)::text
+		 FROM knowledge_publications hp
+		 JOIN scientific_object_versions hidden ON hidden.id = hp.object_version_id
+		 JOIN knowledge_publications op ON op.id = $2::uuid
+		 JOIN scientific_object_versions opened ON opened.id = op.object_version_id
+		 WHERE hp.id = $1::uuid AND hidden.object_id = opened.object_id`,
+		f.stackedHiddenPubID, f.stackedOpenPubID); got != "true" {
+		t.Fatalf("fixture: the withheld publication is not on a later version of the same object (%s)", got)
+	}
+
+	// The knowledge feed: the open publication, named by its own title.
+	status, _, raw := anonymousFeed(t, w.ts.URL, "/api/v1/feeds/knowledge/"+f.stackedObjectID, nil)
+	if status != http.StatusOK {
+		t.Fatalf("anonymous knowledge feed = %d, want 200: %s", status, raw)
+	}
+	doc := parseFeed(t, raw)
+	if len(doc.Entries) != 1 || doc.Entries[0].ID != "urn:post:knowledge-publication:"+f.stackedOpenPubID {
+		t.Fatalf("knowledge feed entries = %+v, want exactly the open publication %s", doc.Entries, f.stackedOpenPubID)
+	}
+	if doc.Title != f.stackedOpenTitle {
+		t.Errorf("knowledge feed title = %q, want the newest publication it CARRIES (%q), not the members-only one published above it",
+			doc.Title, f.stackedOpenTitle)
+	}
+	for _, leak := range []string{f.stackedHiddenTitle, f.stackedHiddenPubID, f.stackedHiddenVersion} {
+		if strings.Contains(raw, leak) {
+			t.Errorf("the knowledge feed carries %q, which belongs to the members-only publication:\n%s", leak, raw)
+		}
+	}
+
+	// The same object, through the project feed of the project that owns it:
+	// one entry, named by the same title.
+	status, _, raw = anonymousFeed(t, w.ts.URL, "/api/v1/feeds/projects/"+f.stackedProject, nil)
+	if status != http.StatusOK {
+		t.Fatalf("the stacked project's feed = %d, want 200: %s", status, raw)
+	}
+	doc = parseFeed(t, raw)
+	if len(doc.Entries) != 1 || doc.Entries[0].ID != "urn:post:knowledge-publication:"+f.stackedOpenPubID {
+		t.Fatalf("stacked project feed entries = %+v, want exactly the open publication", doc.Entries)
+	}
+	if doc.Title != "Stacked Lab" {
+		t.Errorf("project feed title = %q, want the project's own name (a project feed is named by its project)", doc.Title)
+	}
+	for _, leak := range []string{f.stackedHiddenTitle, f.stackedHiddenPubID} {
+		if strings.Contains(raw, leak) {
+			t.Errorf("the stacked project's feed carries %q, which belongs to the members-only publication:\n%s", leak, raw)
+		}
+	}
+}
+
+// readSingleText reads one text column out of one row. A NULL answers "",
+// and the fixtures that use it treat "" as "not set".
+func readSingleText(t *testing.T, ctx context.Context, pool *pgxpool.Pool, sql string, args ...any) string {
+	t.Helper()
+	var out *string
+	if err := pool.QueryRow(ctx, sql, args...).Scan(&out); err != nil {
+		t.Fatalf("read %s: %v", sql, err)
+	}
+	if out == nil {
+		return ""
+	}
+	return *out
+}
+
+// readRightsRaw reads one publication's stored declaration, byte for byte:
+// the value under test is what is IN the row, not what a helper would have
+// written.
+func readRightsRaw(t *testing.T, ctx context.Context, pool *pgxpool.Pool, pubID string) []byte {
+	t.Helper()
+	var raw []byte
+	if err := pool.QueryRow(ctx,
+		`SELECT rights_json FROM knowledge_publications WHERE id = $1::uuid`, pubID).Scan(&raw); err != nil {
+		t.Fatalf("read the stored rights declaration of %s: %v", pubID, err)
+	}
+	return raw
 }
 
 // TestPrivateVersionsDoNotSuppressPublicOnes: the feed reads are BOUNDED —

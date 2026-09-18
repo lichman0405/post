@@ -11,6 +11,7 @@ import (
 	"github.com/lichman0405/post/internal/assets"
 	"github.com/lichman0405/post/internal/contribution"
 	"github.com/lichman0405/post/internal/domain"
+	"github.com/lichman0405/post/internal/rights"
 )
 
 var base = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -37,7 +38,30 @@ func privateProject(id string, age int) domain.Project {
 	return p
 }
 
+// publishedKnowledge builds a row the NETWORK may see: published, from a
+// public project, with the version inheriting that visibility and a rights
+// declaration that defers to the project's policy.
+//
+// The audience inputs are not decoration since T0805. A publication exists
+// the moment someone writes it, and whether the network may read it is a
+// SEPARATE question the version's own visibility axis answers
+// (knowledgepublish.AudienceFor) — so a fixture that left them zero would
+// describe a publication that is real and not the network's, which is the
+// case restrictedKnowledge below covers deliberately.
 func publishedKnowledge(id, projectID string, age int) explore.KnowledgeRow {
+	row := restrictedKnowledge(id, projectID, age)
+	row.ProjectVisibility = "public"
+	row.Rights = projectPolicyRights()
+	row.RightsValid = true
+	return row
+}
+
+// restrictedKnowledge builds a publication the NETWORK may not see: the row
+// exists and is published, and the version's own visibility is not the
+// project's. Everything the two share lives here so a change to the row's
+// shape cannot leave the two fixtures disagreeing about anything but the
+// audience.
+func restrictedKnowledge(id, projectID string, age int) explore.KnowledgeRow {
 	return explore.KnowledgeRow{
 		PublicationID:  id,
 		ObjectID:       "obj-" + id,
@@ -48,6 +72,14 @@ func publishedKnowledge(id, projectID string, age int) explore.KnowledgeRow {
 		PublishedAt:    at(age),
 		LifecycleState: "active",
 	}
+}
+
+// projectPolicyRights is the rights declaration whose metadata axis is the
+// fail-closed default ("whatever the owning project's policy says").
+func projectPolicyRights() rights.Document {
+	var doc rights.Document
+	doc.Visibility.Metadata = rights.MetadataProjectPolicy
+	return doc
 }
 
 func opportunity(id, projectID string, age int, vis contribution.OpportunityVisibility, state contribution.OpportunityState) contribution.ContributionOpportunity {
@@ -191,6 +223,70 @@ func TestPrivateProjectIsNotListed(t *testing.T) {
 	}
 }
 
+// TestRestrictedPublicationNeverReachesTheNetwork is the T0805 rule on the
+// ANONYMOUS surface, and it is the one this section could get wrong in the
+// direction nobody reports.
+//
+// This is the only reader that renders a publication to a caller who is not a
+// member of the project that owns it, and before T0805 knowledge_publications
+// had no writer at all — so the query here had never returned a row and its
+// missing predicate had never mattered. The moment the publish path exists it
+// does: 发布不等于公开 (owner ruling L3-20260916-1 #1) says a publication may
+// exist and stay the project's, and a reader that keyed on the PUBLICATION's
+// existence alone would print every one of them.
+//
+// Three rows, one per input of knowledgepublish.AudienceFor, and the public
+// one is a CONTROL: without it the test would pass on a reader that renders
+// nothing at all, which is the failure mode a "does it leak" test has.
+func TestRestrictedPublicationNeverReachesTheNetwork(t *testing.T) {
+	audience := "restricted-audience-policy"
+	restrictedRights := projectPolicyRights()
+	restrictedRights.Visibility.Metadata = "some-other-policy"
+
+	in := explore.BuildIndex(explore.Input{
+		Projects: []domain.Project{publicProject("pub", 1), publicProject("pub2", 1), publicProject("pub3", 1)},
+		Knowledge: []explore.KnowledgeRow{
+			// The version pins a visibility policy of its own. The owning
+			// project is PUBLIC — this is the combination the ruling is
+			// about, and the one a project-only rule gets wrong.
+			func() explore.KnowledgeRow {
+				row := publishedKnowledge("k-policy-pinned", "pub", 0)
+				row.VisibilityPolicyID = &audience
+				return row
+			}(),
+			// The version inherits a PRIVATE project's visibility.
+			restrictedKnowledge("k-in-private-project", "priv", 0),
+			// The version inherits a public project, and the published rights
+			// declaration pins a metadata visibility this build cannot
+			// resolve — refused rather than assumed public.
+			func() explore.KnowledgeRow {
+				row := publishedKnowledge("k-rights-pinned", "pub3", 0)
+				row.Rights = restrictedRights
+				return row
+			}(),
+			// The control: same shape, nothing pinned.
+			publishedKnowledge("k-network", "pub2", 0),
+		},
+	})
+
+	if got := knowledgeIDs(in); !equalStrings(got, []string{"k-network"}) {
+		t.Fatalf("Knowledge section = %v, want only the network-visible publication", got)
+	}
+
+	// The leak assertion the section's other tests use: the rendered bytes
+	// must not carry a restricted publication's identity at all. A section
+	// that listed it and hid a field would still be a directory of it.
+	rendered, err := json.Marshal(in.Knowledge)
+	if err != nil {
+		t.Fatalf("render the section: %v", err)
+	}
+	for _, secret := range []string{"k-policy-pinned", "k-in-private-project", "k-rights-pinned"} {
+		if strings.Contains(string(rendered), secret) {
+			t.Errorf("the rendered section names %q: %s", secret, rendered)
+		}
+	}
+}
+
 // TestPrivateProjectIsNeverNamed is the second half of "private 不出现": a
 // knowledge publication and an opportunity may travel WITHOUT their project
 // (docs/12 §2 lets a private project publish), but the private project's
@@ -271,8 +367,7 @@ func TestPrivateProjectIsNeverNamed(t *testing.T) {
 func TestPrivateProjectHiddenByReaderIsNotCreatableByReader(t *testing.T) {
 	in := explore.BuildIndex(explore.Input{
 		Knowledge: []explore.KnowledgeRow{
-			{PublicationID: "k", ObjectID: "o", ObjectType: "research_question",
-				Title: "t", ProjectID: "priv-never-listed", PublishedAt: at(0)},
+			publishedKnowledge("k", "priv-never-listed", 0),
 		},
 	})
 	if len(in.Knowledge.Items) != 1 {

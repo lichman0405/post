@@ -57,8 +57,21 @@ func (s *ReleaseStore) ListReleaseReviews(ctx context.Context, stateID, mainBran
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list release reviews: %w", err)
 	}
-	// Group the flat rows by pull request, preserving the query's order
-	// (PR number, then review time, then row id).
+	return listReleaseReviewsFromRows(rows), nil
+}
+
+// listReleaseReviewsFromRows groups the flat ListReleaseReviews rows by
+// pull request, preserving the query's order (PR number, then review
+// time, then row id).
+//
+// It is a package-level function rather than a loop inside
+// ListReleaseReviews because TWO readers now need it and they must not
+// disagree: the release gate (ListReleaseReviews, over the pool) and the
+// knowledge publication decision (KnowledgePublishStore, over its own
+// transaction — internal/application/knowledgepublish requires exactly
+// the evidence a release requires, and "this version passed review" has
+// to be one read, not two reads that agree today).
+func listReleaseReviewsFromRows(rows []sqlc.ListReleaseReviewsRow) []releases.ReviewRecord {
 	records := make([]releases.ReviewRecord, 0, len(rows))
 	for _, row := range rows {
 		proposed := pgUUIDToText(row.ProposedStateID)
@@ -80,7 +93,7 @@ func (s *ReleaseStore) ListReleaseReviews(ctx context.Context, stateID, mainBran
 			CreatedAt:  row.CreatedAt.Time,
 		})
 	}
-	return records, nil
+	return records
 }
 
 // CreateRelease implements releases.ReleaseStorePort. The insert runs in

@@ -64,7 +64,13 @@ const appendOnlyTaskID = "T0013"
 // rights-holder chain is the append-only governance event the same sentence
 // names — a transfer supersedes a holding by APPENDING, so "转移之后，转移
 // 之前的持有关系仍要读得出来" is exactly what the guard enforces: the
-// previous holder is a row no write path can rewrite or remove. The same
+// previous holder is a row no write path can rewrite or remove.
+// Migration 00083 joins
+// knowledge_publication_creations (T0805, the same ledger on the knowledge
+// side): a publication points at an append-only scientific object version,
+// so the ledger entry that replays it is history for exactly the reason
+// release_creations and asset_publish_creations are — a rewritten entry
+// would rewrite which version a key already published. The same
 // list drives the catalog assertion and the per-table rejection loop.
 var appendOnlyTables = []string{
 	"scientific_object_versions",
@@ -88,6 +94,7 @@ var appendOnlyTables = []string{
 	"semantic_merge_conflicts",
 	"merge_creations",
 	"asset_publish_creations",
+	"knowledge_publication_creations",
 	"asset_version_parties",
 	"asset_rights_holder_events",
 }

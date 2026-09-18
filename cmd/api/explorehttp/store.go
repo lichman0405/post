@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/lichman0405/post/internal/application/explore"
+	"github.com/lichman0405/post/internal/rights"
 )
 
 // Store is the PostgreSQL adapter for the three Explore sections that had
@@ -24,13 +25,17 @@ import (
 //
 // # What the queries do NOT read
 //
-//   - listPublishedKnowledge never joins projects. A publication may come
-//     from a private project (docs/12 §2 lets a private project publish
-//     Knowledge), and the index names the publishing project only when that
-//     project is public — which the model decides from the public project
-//     set. A private project's name, slug and visibility therefore never
-//     leave the database on this path: not "read and withheld", never
-//     selected.
+//   - listPublishedKnowledge never reads a private project's name or slug.
+//     A publication may come from a private project (docs/12 §2 lets a
+//     private project publish Knowledge), and the index names the
+//     publishing project only when that project is public — which the model
+//     decides from the public project set. What the query DOES read since
+//     T0805 is projects.visibility, as one of the three inputs of the
+//     audience rule (knowledgepublish.AudienceFor): a publication exists
+//     from the moment someone publishes it, and whether the network may see
+//     it is a separate question the version's OWN axis answers. Reading the
+//     preset is what lets that question be answered at all on an anonymous
+//     surface; the project's identity still does not leave the database.
 //   - listPublicPeople never reads users.email. The directory renders
 //     handle, display name and bio; email is identity, not a profile field
 //     (internal/application/profile).
@@ -59,6 +64,22 @@ func NewStore(pool *pgxpool.Pool) *Store {
 //
 // The LIMIT is explore.SectionLimit: the section renders the newest twenty, and
 // reading more than it renders would only widen the read for no answer.
+//
+// The last three columns are the audience rule's inputs, and they are read
+// rather than filtered on. This surface is ANONYMOUS by construction
+// (cmd/api/explorehttp/doc.go), and it is the one reader that would render a
+// publication to a caller who is not a member of the project that owns it —
+// so "which publications may the network see" has to be decided here, and it
+// must be decided by the same rule the publication's own page decides with
+// (knowledgepublish.AudienceFor), not by a predicate SQL happens to spell
+// the same way today. The row is read; explore.KnowledgeRow.Published
+// applies the rule and the index renders a shorter list.
+//
+// A publication whose version pins a visibility policy of its own, or whose
+// project is private, or whose rights document pins a metadata visibility
+// this build cannot resolve, therefore renders NOTHING here while still
+// being a publication the project's own members read — which is exactly the
+// 发布不等于公开 ruling (L3-20260916-1 #1).
 const knowledgeQuery = `
 SELECT kp.id::text,
        so.id::text,
@@ -67,10 +88,14 @@ SELECT kp.id::text,
        sov.title,
        so.project_id::text,
        kp.published_at,
-       sov.lifecycle_state
+       sov.lifecycle_state,
+       sov.visibility_policy_id::text,
+       p.visibility,
+       kp.rights_json
 FROM knowledge_publications kp
 JOIN scientific_object_versions sov ON sov.id = kp.object_version_id
 JOIN scientific_objects so ON so.id = sov.object_id
+JOIN projects p ON p.id = so.project_id
 ORDER BY kp.published_at DESC, kp.id
 LIMIT $1`
 
@@ -85,6 +110,11 @@ func (s *Store) ListPublishedKnowledge(ctx context.Context) ([]explore.Knowledge
 	out := make([]explore.KnowledgeRow, 0, explore.SectionLimit)
 	for rows.Next() {
 		var row explore.KnowledgeRow
+		var (
+			policyID   *string
+			projectVis string
+			rightsJSON []byte
+		)
 		if err := rows.Scan(
 			&row.PublicationID,
 			&row.ObjectID,
@@ -94,8 +124,22 @@ func (s *Store) ListPublishedKnowledge(ctx context.Context) ([]explore.Knowledge
 			&row.ProjectID,
 			&row.PublishedAt,
 			&row.LifecycleState,
+			&policyID,
+			&projectVis,
+			&rightsJSON,
 		); err != nil {
 			return nil, fmt.Errorf("explore: scan published knowledge: %w", err)
+		}
+		row.VisibilityPolicyID = policyID
+		row.ProjectVisibility = projectVis
+		// An unreadable declaration is carried as unreadable rather than as
+		// the zero document: the zero document's metadata axis is the empty
+		// string, which AudienceFor refuses — but only because "" is not the
+		// project-policy token. Saying so explicitly keeps "we could not read
+		// this" a fact the model holds instead of an accident of zero values.
+		if doc, err := rights.Parse(rightsJSON); err == nil {
+			row.Rights = doc
+			row.RightsValid = true
 		}
 		out = append(out, row)
 	}

@@ -116,6 +116,15 @@ type KnowledgePublication struct {
 	RightsJson      []byte             `json:"rights_json"`
 	PublishedBy     pgtype.UUID        `json:"published_by"`
 	PublishedAt     pgtype.Timestamptz `json:"published_at"`
+	Pid             string             `json:"pid"`
+}
+
+type KnowledgePublicationCreation struct {
+	ID             pgtype.UUID        `json:"id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	PublicationID  pgtype.UUID        `json:"publication_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type MergeCreation struct {
