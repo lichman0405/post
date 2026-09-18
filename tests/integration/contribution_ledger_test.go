@@ -68,7 +68,9 @@ import (
 const ledgerTaskID = "T0807"
 
 // utcDate renders the UTC calendar date n days before now in the text form
-// the date columns take.
+// the date columns take; utcDay is the same date as a time.Time, for the one
+// call that takes a time (OrgStore.CreateOrganization dates the creator's
+// owner membership with the value it is handed — see the fixture).
 //
 // The membership windows these tests control are dated in UTC ON PURPOSE:
 // the projection resolves "affiliation at time" at the event instant's UTC
@@ -76,10 +78,24 @@ const ledgerTaskID = "T0807"
 // the LOCAL calendar date (internal/application/orgs dateOnly/today — for a
 // UTC node the two coincide). A fixture that mixed a local-dated membership
 // into a UTC-ruled projection would make these assertions depend on the
-// machine's timezone, which is exactly the kind of test that passes here and
-// fails in CI.
+// machine's clock, which is exactly the kind of test that passes here and
+// fails in CI. It bit: todayUTC() (tests/integration/org_permission_test.go)
+// reads the LOCAL year/month/day and stamps it UTC, so a membership dated
+// "today" with it already covers an event at the event's own UTC date
+// whenever the local calendar has not rolled over yet — on CI (UTC) always,
+// and on a UTC+8 machine from 08:00 local on. T0807 went red on exactly that.
+// utcDay is the UTC-labelled opposite: built from time.Now().UTC(), so the
+// date it names is the UTC date in every timezone.
 func utcDate(daysAgo int) string {
-	return time.Now().UTC().AddDate(0, 0, -daysAgo).Format("2006-01-02")
+	return utcDay(daysAgo).Format("2006-01-02")
+}
+
+// utcDay is utcDate as a time.Time: UTC midnight of that date. The store
+// renders the date from the value's own location, so a UTC-labelled time
+// yields the UTC calendar date whatever TZ the test process runs under.
+func utcDay(daysAgo int) time.Time {
+	now := time.Now().UTC().AddDate(0, 0, -daysAgo)
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 // ledgerFixture seeds a project owned by orgA with alice as its owner, plus
@@ -124,14 +140,18 @@ func newLedgerFixture(t *testing.T, ctx context.Context) *ledgerFixture {
 	bob := seedUser("ledger-bob@example.com", "ledger-bob", "Bob")
 
 	orgStore := persistence.NewOrgStore(pool)
+	// alice owns orgA for good (the end-to-end write path authorizes
+	// through this membership); bob's window ENDED at the start of 2026.
+	// CreateOrganization always writes its creator an owner membership dated
+	// with the value passed here, so alice's is re-dated to that unbounded
+	// window right after, in UTC text like every other window in this
+	// fixture.
 	orgA, _, err := orgStore.CreateOrganization(ctx, domain.Organization{
 		Slug: "ledger-fixture-a", Name: "Ledger Fixture A",
-	}, alice.ID, todayUTC())
+	}, alice.ID, utcDay(0))
 	if err != nil {
 		t.Fatalf("create fixture org A: %v", err)
 	}
-	// alice owns orgA for good (the end-to-end write path authorizes
-	// through this membership); bob's window ENDED at the start of 2026.
 	if _, err := pool.Exec(ctx, `UPDATE organization_memberships
 		SET affiliation_start = '2025-01-01', affiliation_end = NULL
 		WHERE organization_id = $1 AND user_id = $2`, orgA.ID, alice.ID); err != nil {
@@ -142,21 +162,28 @@ func newLedgerFixture(t *testing.T, ctx context.Context) *ledgerFixture {
 		VALUES ($1, $2, 'contributor', '2025-01-01', '2026-01-01', false)`, orgA.ID, bob.ID); err != nil {
 		t.Fatalf("seed bob's ended org A membership: %v", err)
 	}
-	orgB, _, err := orgStore.CreateOrganization(ctx, domain.Organization{
-		Slug: "ledger-fixture-b", Name: "Ledger Fixture B",
-	}, alice.ID, todayUTC())
-	if err != nil {
-		t.Fatalf("create fixture org B: %v", err)
-	}
+	// orgB is BOB's organization and bob is its creator — that is the point
+	// of the line below, not a detail. CreateOrganization ALWAYS writes its
+	// caller an owner membership, so creating orgB with alice (as this
+	// fixture first did) leaves her with a SECOND membership starting at the
+	// date passed here, and the projection resolves an actor's organization
+	// by taking the LATEST-starting membership that covers the event
+	// instant. An orgB membership dated "today" therefore outranks orgA for
+	// an event happening today, and the end-to-end assertion below would
+	// depend on where the machine's clock sits — which is the bug this
+	// fixture was fixed for (see utcDate): it was green here and red in CI,
+	// for the same code.
+	//
 	// bob is in orgB as of yesterday (UTC) — the CURRENT affiliation his
-	// newer events must resolve to. (The start is deliberately in the past
+	// newer events must resolve to. The start is deliberately in the past
 	// rather than "today": the projection compares the event's UTC date
 	// against the membership's dates, and a membership starting today would
-	// be a boundary case in the fixture instead of in the assertion.)
-	if _, err := pool.Exec(ctx, `INSERT INTO organization_memberships
-		(organization_id, user_id, role, affiliation_start, affiliation_end, verified)
-		VALUES ($1, $2, 'contributor', $3, NULL, false)`, orgB.ID, bob.ID, utcDate(1)); err != nil {
-		t.Fatalf("seed bob's current org B membership: %v", err)
+	// be a boundary case in the fixture instead of in the assertion.
+	orgB, _, err := orgStore.CreateOrganization(ctx, domain.Organization{
+		Slug: "ledger-fixture-b", Name: "Ledger Fixture B",
+	}, bob.ID, utcDay(1))
+	if err != nil {
+		t.Fatalf("create fixture org B: %v", err)
 	}
 
 	projectStore := persistence.NewProjectStore(pool)
@@ -324,6 +351,16 @@ func unmappedCount(batch contribution.LedgerBatch, eventType string) int64 {
 	return 0
 }
 
+// textOrNull renders a nullable text column for a test message. The message
+// has to carry the VALUE: printing the *string itself with %v prints the
+// pointer (0x...), which is unreadable exactly where it matters — a CI log.
+func textOrNull(v *string) string {
+	if v == nil {
+		return "<NULL>"
+	}
+	return *v
+}
+
 // ---------------------------------------------------------------------------
 // The required test: "contribution projection".
 
@@ -439,11 +476,11 @@ func TestContributionLedgerProjectionEndToEnd(t *testing.T) {
 		t.Errorf("actor_id = %s, want %s (the event's actor)", row.ActorID, f.alice.ID)
 	}
 	if row.OrgAtTime == nil || *row.OrgAtTime != f.orgA {
-		t.Errorf("organization_id_at_time = %v, want org A %s (alice's membership at the event instant)",
-			row.OrgAtTime, f.orgA)
+		t.Errorf("organization_id_at_time = %s, want org A %s (alice's membership at the event instant)",
+			textOrNull(row.OrgAtTime), f.orgA)
 	}
 	if row.ProjectID == nil || *row.ProjectID != f.project.ID {
-		t.Errorf("project_id = %v, want %s", row.ProjectID, f.project.ID)
+		t.Errorf("project_id = %s, want %s", textOrNull(row.ProjectID), f.project.ID)
 	}
 	if row.EventType != "scientific_object.version_created" {
 		t.Errorf("event_type = %q, want the source event's name", row.EventType)
@@ -460,7 +497,7 @@ func TestContributionLedgerProjectionEndToEnd(t *testing.T) {
 			row.AcceptedContext, row.ReleasedContext)
 	}
 	if row.SourceEventID == nil || *row.SourceEventID != hypothesisEventID {
-		t.Errorf("research_event_id = %v, want %s", row.SourceEventID, hypothesisEventID)
+		t.Errorf("research_event_id = %s, want %s", textOrNull(row.SourceEventID), hypothesisEventID)
 	}
 	// via: the source event carries no channel, so the row carries none.
 	// NOT a default: the alternative — writing 'api' — would read exactly
@@ -552,13 +589,13 @@ func TestContributionLedgerAffiliationIsTheOneAtEventTime(t *testing.T) {
 	// implementation that read the current organization (or the first
 	// membership row) would give orgB three times.
 	if r := f.mustRowFor(t, ctx, old); r.OrgAtTime == nil || *r.OrgAtTime != f.orgA {
-		t.Errorf("organization at 2025-06-01 = %v, want org A %s (bob's membership then)", r.OrgAtTime, f.orgA)
+		t.Errorf("organization at 2025-06-01 = %s, want org A %s (bob's membership then)", textOrNull(r.OrgAtTime), f.orgA)
 	}
 	if r := f.mustRowFor(t, ctx, current); r.OrgAtTime == nil || *r.OrgAtTime != f.orgB {
-		t.Errorf("organization today = %v, want org B %s (his membership now)", r.OrgAtTime, f.orgB)
+		t.Errorf("organization today = %s, want org B %s (his membership now)", textOrNull(r.OrgAtTime), f.orgB)
 	}
 	if r := f.mustRowFor(t, ctx, before); r.OrgAtTime != nil {
-		t.Errorf("organization at 2024-06-01 = %v, want NULL (no membership covered the instant)", *r.OrgAtTime)
+		t.Errorf("organization at 2024-06-01 = %s, want NULL (no membership covered the instant)", textOrNull(r.OrgAtTime))
 	}
 	// acceptance: the two contribution.accepted events carry the accepted
 	// context — the docs/13 §4 dimension that has an event of its own.
@@ -570,10 +607,11 @@ func TestContributionLedgerAffiliationIsTheOneAtEventTime(t *testing.T) {
 	// bob joins orgC as of today (UTC) while STILL a member of orgB: from
 	// now on two memberships cover the instant, and the later start wins —
 	// the tie-break is deterministic, not whichever row the planner read
-	// first.
+	// first. The window is written as UTC text after the create, so no
+	// rendering of a time.Time can shift it.
 	orgC, _, err := persistence.NewOrgStore(f.pool).CreateOrganization(ctx, domain.Organization{
 		Slug: "ledger-fixture-c", Name: "Ledger Fixture C",
-	}, f.bob.ID, todayUTC())
+	}, f.bob.ID, utcDay(0))
 	if err != nil {
 		t.Fatalf("create fixture org C: %v", err)
 	}
@@ -598,14 +636,16 @@ func TestContributionLedgerAffiliationIsTheOneAtEventTime(t *testing.T) {
 		t.Errorf("pass after the change: candidates/projected = %d/%d, want 1/1", reRun.Candidates, reRun.Projected)
 	}
 	if r := f.mustRowFor(t, ctx, moved); r.OrgAtTime == nil || *r.OrgAtTime != orgC.ID {
-		t.Errorf("organization for the new event = %v, want org C %s (the latest affiliation covering ITS instant)",
-			r.OrgAtTime, orgC.ID)
+		t.Errorf("organization for the new event = %s, want org C %s (the latest affiliation covering ITS instant)",
+			textOrNull(r.OrgAtTime), orgC.ID)
 	}
 	if r := f.mustRowFor(t, ctx, old); r.OrgAtTime == nil || *r.OrgAtTime != f.orgA {
-		t.Errorf("organization of the 2025-06-01 row after the change = %v, want org A %s unchanged", r.OrgAtTime, f.orgA)
+		t.Errorf("organization of the 2025-06-01 row after the change = %s, want org A %s unchanged",
+			textOrNull(r.OrgAtTime), f.orgA)
 	}
 	if r := f.mustRowFor(t, ctx, current); r.OrgAtTime == nil || *r.OrgAtTime != f.orgB {
-		t.Errorf("organization of today's earlier row after the change = %v, want org B %s unchanged", r.OrgAtTime, f.orgB)
+		t.Errorf("organization of today's earlier row after the change = %s, want org B %s unchanged",
+			textOrNull(r.OrgAtTime), f.orgB)
 	}
 }
 
@@ -769,7 +809,7 @@ func TestContributionLedgerViaIsCopiedNotGuessed(t *testing.T) {
 		t.Fatalf("projection pass: %v", err)
 	}
 	if r := f.mustRowFor(t, ctx, withChannel); r.Via == nil || *r.Via != channel {
-		t.Errorf("via = %v, want %q: the channel is copied from the event's envelope column", r.Via, channel)
+		t.Errorf("via = %s, want %q: the channel is copied from the event's envelope column", textOrNull(r.Via), channel)
 	}
 	if r := f.mustRowFor(t, ctx, withoutChannel); r.Via != nil {
 		t.Errorf("via = %q, want NULL: an event with no channel must not be given one", *r.Via)
