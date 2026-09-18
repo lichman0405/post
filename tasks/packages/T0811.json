@@ -7,13 +7,25 @@
   "decision_level_max": "L1",
   "dependencies": ["T0805", "T0803"],
   "requirements": [
-    "Project/Knowledge/PR 支持 discussion thread",
-    "Discussion 不进入 Evidence/Reputation",
-    "有权限用户可将讨论提案转 Issue/Hypothesis/External Evidence proposal，并保留原作者 provenance"
+    "**先说清楚：这个功能在树里是从零开始的。** `infra/migrations/**` 里 `comment|discussion|thread` 只命中 DDL 的 `COMMENT ON` 与 `00009_issues_pull_requests.sql:38` 的 PR 评审裁决值；Go 侧只有 3 处常量/错误串；`cmd/**` 零条评论路由；**`specs/api/openapi.yaml` 里 `comment|discussion` 的命中数是 0（我核过）**；`apps/web/` 零个评论组件。**没有表、没有 store、没有 service、没有路由、没有 UI——都要你建。**",
+    "**「不改变科学状态」必须是结构性的，不是约定。** 写评论这条路径**不得**触碰这三处：(1) `internal/application/states/service.go:94` 的 `Commit`（`:46-48` 逐字：「at least one is required — … a transition without operations is a no-op, not a state change」）；(2) 不得插入 `scientific_object_versions`（`infra/migrations/00005_scientific_objects.sql:11-27`）或 `relation_versions`（`00004_rsg_state.sql:8-24`）；(3) 不得写 `contribution_events`（`00011_external_contribution.sql:21-32`，append-only 由 `00014:21,75-76` 与 `00015:22-23` 锁死）。**验收不能只断言「没有报错」**——那三张表今天在这条路径上本来就是空的，「没报错」平凡成立。必须钉住**没有任何账本行被写**。",
+    "**规格里没有「discussion」的定义**，全仓库只有两处页面列举：`docs/09_VERSION_CONTROL.md:17`（PR 包含 discussion）、`docs/42_PAGE_SPECS.md:13`（PR 页有 Discussion 区块）。所以「普通评论不改变科学状态」这条**不是我抄来的，是需求本身给的**——把它实现成结构性的，而不是靠约定。**并且记住一个结构事实：讨论不是 scientific object，所以它不能作为关系的一端**（`relation_versions` 的端点是指向对象版本的 FK）。",
+    "**promote 的三个目标，各自的现状先看清：** ① **Issue**：表在 `infra/migrations/00009_issues_pull_requests.sql`，查询 `internal/persistence/queries/issues_prs.sql:5-8` 的 `CreateIssue` **存在但没有任何非 sqlc 调用方——你是第一个用它的人**；`docs/03_GLOSSARY_DOMAIN_MODEL.md:25` 只有一句「项目希望回答的科研问题，可包含子问题，不等同 Issue」，**Issue 没有正式定义**，别给它编语义。② **Hypothesis**：有定义（`docs/03:27-28`），是 scientific object type，创建走 `internal/application/rsg/service.go:206` 的 `CreateObject`（`:292` `CreateObjectVersion`、`:386` `CreateRelation`，各自构造 `states.CommitParams`）。③ **External Evidence proposal**：`docs/15_AGENT_MCP_API.md:9,:13` 说「创建 evidence assertion proposal」「由 Web governance action 完成」，但**「proposal」在全仓库没有术语定义**——它的形状是可推的：`evidence_assertions.review_state`（`00007:15`）默认就是 `unreviewed`，而 `00058:52-55` 明确 `unreviewed → reviewed → rejected` 是合法的就地状态变更。**一条 unreviewed 的证据断言就是一条待办提案，用这个读法，不要另造「proposal」表。**",
+    "**provenance 必须复用既有机制，不许另造第二套。** 仓库里 provenance 的正统表示是**关系版本**（`docs/44_SCHEMA_RELATION_CATALOG.md:5`、`:12`；`internal/rsg/relationcatalog/catalog.go:75-113`，`ProvenanceInference` 在 `:39-41`，`ProvenanceTypes()` 在 `:194-205`；读侧 `internal/rsg/provenance/graph.go:51` + `walk.go:61`，HTTP 在 `cmd/api/provenancehttp/wiring.go:68-69`）。**但讨论不是对象，不能作为关系的一端**——所以这一条的 provenance 走「作者列 + 审计/事件」这条既有路径：`scientific_objects.created_by`（`00005:7`）、`scientific_object_versions.created_by`（`:24`）、审计 `RecordAuditLogEntry`（`internal/persistence/queries/events_audit.sql:26-33`）。**注意：`contribution_events` 目前没有任何 Go 写入方，且 T0807（Contribution Ledger projection）处于 blocked——不要把验收挂在它上面。**",
+    "**权限：不许新增动作。** `internal/authz/action.go` 一共 15 个动作（我核过计数），没有一个是评论或提升；`specs/policies/permissions-matrix.csv` 是权威，由 `TestPermissionMatrixMatchesCSV`（`internal/authz/matrix.go:5-11`）钉住与 Go 表逐格一致。**复用 `ActionWriteScientificState`（`action.go:19-20`），不要新造权限动作**——新动作等于改权限模型，那是 L3，不许。`ActionMutateFilesWeb`（`action.go:41-43`）是个先例：它存在**只是为了对所有人拒绝**。",
+    "**契约由我维护，不在你的范围里。** `specs/api/openapi.yaml` 里零条评论/提升路径（我核过）。你需要的路径与响应形状，**在 RESULT 里点名并给出建议**（按既有风格），**不要自己改 `specs/api/**`**。",
+    "**不得碰 reputation 这条线。** CLAUDE.md 不变量 14：Contribution Ledger append-only；`docs/13_CONTRIBUTION_REPUTATION.md:5` 的事件词表里**根本没有 comment/discussion**（列的是 created object、proposed hypothesis、performed experiment 这些客观事件），`:27` 逐字写着不用 Like 数做信誉。**仓库里目前没有任何 reputation 表或代码**——所以「讨论不进 reputation」今天平凡成立，**正因如此你的测试必须钉住「没有任何账本行被写」**，否则这条验收是空的。",
+    "**e2e 的落点与登记测试。** 任务登记的 blocking 测试是 `tasks/tests.json` 的 `T0811-TEST-01`「discussion promotion e2e」。Go e2e 的家是 `tests/e2e/*.go`（例：`tests/e2e/privacy_e2e_test.go`、`tests/e2e/asset_page_e2e_test.go`），验收脚本的家是 `tests/acceptance/*.sh`。",
+    "**迁移的规矩**（编号我分配）：`infra/migrations/README.md:114-128`——用 `python3 scripts/gen_schema_snapshot.py` 重新生成 `specs/database/postgres.sql`，跑 `make check-schema-snapshot` 与 `make check-spec-version`；**绝不改已有的编号文件，绝不写 down migration**。"
   ],
   "acceptance_criteria": [
-    "普通评论不会改变 scientific state",
-    "Promote 后 origin discussion/author 可追溯"
+    "**三个层面都能挂讨论**：Project／Knowledge／PR 各自能挂 discussion thread，且走**真实产品路径**（不是夹具摆出来的）；有集成测试。",
+    "**普通评论不改变科学状态，且可证**：写一条评论之后，`scientific_object_versions`、`relation_versions`、`contribution_events` 三张表**逐行不变**（断言零新增，而不是「没报错」）；同时**证明这条路径根本没有调用 `states.Commit`**（例如评论 service 的依赖里不含 `states.Service`，或有一条会在被调用时报错的替身）。",
+    "**promote 三条路径各自走通**：从一条讨论提案能提升为 (a) Issue、(b) Hypothesis（scientific object，经 `rsg.CreateObject` 的真实状态提交）、(c) External Evidence proposal（一条 `review_state='unreviewed'` 的 evidence assertion，**不另造表**）；三条都要有测试。",
+    "**provenance 可追溯**：提升之后能回答「它来自哪条讨论、原作者是谁」——落在既有机制上（作者列 + 审计）。要有两条断言：可追溯链完整；**`relation_versions` 里没有为讨论新增任何行**。",
+    "**权限不新增动作**：`internal/authz/action.go` 的动作数与 `specs/policies/permissions-matrix.csv` 的行数**不变**，`TestPermissionMatrixMatchesCSV` 仍绿；提升复用 `ActionWriteScientificState`，并有测试证明「无权限者提升被拒」（fail-closed）。",
+    "**登记的测试真的跑**：`T0811-TEST-01`「discussion promotion e2e」在 `tests/e2e/` 里有对应实现，且**真的从讨论一路走到提升**（只测 service 层不算）。",
+    "RESULT 里写明：哪些推进是真实产品路径；哪些规格没写清（Issue 无正式定义、「proposal」无术语定义、契约缺路由）而按 fail-closed 处理；**以及你建议的契约形状**（契约由我定，你给建议）。"
   ],
   "tests": ["discussion promotion e2e"],
   "allowed_scope": [

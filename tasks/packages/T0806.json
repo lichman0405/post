@@ -7,13 +7,25 @@
   "decision_level_max": "L1",
   "dependencies": ["T0805", "T0504"],
   "requirements": [
-    "其他 Project evidence 指向 published version",
-    "origin/reviewed/unreviewed 分类",
-    "origin maintainer 无删除权"
+    "**本条需求的出处是 `docs/10_EVIDENCE_PROVENANCE.md:39`（§7 Network external evidence）与 `docs/31_MASTER_ACCEPTANCE.md:29`（Gate D）**，原文：「Published Knowledge Object 页面区分 Origin Evidence、Reviewed External Evidence、Unreviewed External Evidence」。**这三类是读侧分类，不是三张表**——它由「来源是 origin 还是外部」与「评审状态」两根轴导出。`docs/24_TEST_STRATEGY.md:16` 补上第三件事：「external evidence 不可被 origin maintainer 静默删除」。",
+    "**不要新造第二根轴。** `evidence_assertions.review_state`（`infra/migrations/00007_evidence.sql:15`，`unreviewed|reviewed|rejected`）已经是 reviewed/unreviewed 那根轴，Go 侧在 `internal/domain/evidence_assertion.go:229-245`。**外部/内部这根轴规格也点了名**：`docs/10_EVIDENCE_PROVENANCE.md:14` 的字段清单里有 `external/internal` 与 `visibility`，而 `evidence_assertions`（`00007:3-18`）**两列都没有**。按 docs/10 把这两列补齐（迁移编号我分配，见任务包），**不许另造一张「外部证据表」来代替它**。取值语义要么在规格里有出处，要么在 RESULT 里写明你的读法与理由。",
+    "**删除防护必须是结构性的，这是本任务的硬核。** `evidence_assertions` 上**现在没有任何删除防护**：`grep -n evidence infra/migrations/00014_append_only_enforcement.sql infra/migrations/00015_append_only_truncate.sql` 零命中，裸 `DELETE` 今天合法。参考 `00014`/`00015` 既有的两道防线。**但别做成全表禁删**：`00058_evidence_assertion_guards.sql:52-55` 明确写着 `unreviewed → reviewed → rejected` 是**合法的就地状态变更**（触发器守的是版本日志，不是这种成员行）——防护要挡住的是**删除**，不是评审。",
+    "**目标必须是已发布版本，且要能跨项目。** 外部证据挂的是 published version；`knowledge_publications`（`infra/migrations/00010_releases_assets.sql:64-72`）**没有 project 列**，它的归属要靠 `object_version_id → scientific_object_versions.object_id → scientific_objects.project_id` 这条链推出来（`00005_scientific_objects.sql:4-9`、`:11-28`）。「其他 Project 的证据指向 published version」这条必须走真实产品路径，不许用测试夹具把两个项目的关系摆出来。",
+    "**冲突证据必须能并存，且不得被净立场算术。** `infra/migrations/00058_evidence_assertion_guards.sql:40-46` 逐字写明 `(target_object_version_id, evidence_object_version_id)` 这一对**故意不唯一**——同一条证据可以在同一目标版本上同时挂 supports 与 contradicts，各自独立评审；加唯一约束会把两种立场压成一行、逼出一个赢家，那正是领域禁止的。**不得引入任何把冲突证据合并、裁决或打分的东西**，也不得把它「修」成唯一。",
+    "**§8 的标签本轮不做——我已经把它划出范围。** `docs/10_EVIDENCE_PROVENANCE.md:43-45`（§8 Network Evidence State）允许平台产生描述性标签（limited evidence、mixed evidence、actively contested、independently reproduced），但**这四个标签的判定规则规格里没有**：那是科研语义，属 L3，须由 owner 裁定，本轮不实现。你只须保证**不产生任何 Truth Score／净立场**（CLAUDE.md §9.13）。",
+    "**不要为文档提到的表而造表。** `docs/21_DATA_MODEL.md:24` 点名了 `external_evidence_links`，但**全仓库不存在**，也只有那一行提到它。**不要为了「补齐文档」而建它**；若你判断 §7 确实需要一张独立的表（而不是补 `evidence_assertions` 的列），在 RESULT 里说明理由并建（编号我分配）。",
+    "**事件要真的发出来。** `specs/events/event-types.yaml:28` 已声明 `knowledge.external_evidence_added`，**目前没有生产者**（`internal/events/subscription.go:290` 记着「no producer addresses a published knowledge object yet」）。在生产路径上发它，`Event.Visibility` 必填且显式（`internal/events/event.go:45-65`，不许猜）。**注意一处文档不一致**：`docs/18:9` 把它拼成 `external_evidence.added`——按 YAML 的拼法写，`docs/**` 不在你范围内，别去改文档。",
+    "**读出口就是契约里那条没人实现的 GET。** `specs/api/openapi.yaml:292-296` 的 `GET /knowledge/{knowledgeId}`（summary 逐字 `Published knowledge object plus origin/network evidence state`）今天**没有实现**，它正是这三分类的天然读出口。**契约（`specs/api/**`）由我维护**：你按既有契约实现；若契约缺字段或响应形状不够，**在 RESULT 里点名**，不要自己改契约文件。该接口 `security: []`（匿名可读）——所以 **private／未发布的对象绝不能从这里泄漏**（与 T0805 匿名检索收紧同一条原则；owner 裁定 `L3-20260916-1`：发布 ≠ 公开）。",
+    "**一律 fail-closed。** 读不到、解析失败、权限不明、归属链断——**全部视为不可见/拒绝**（`docs/12_AUTHORIZATION.md` §5：不能静默放宽；`internal/authz/engine.go` 对未登记动作默认拒绝）。缺失不得成为放行理由。"
   ],
   "acceptance_criteria": [
-    "反对证据可见",
-    "private evidence 不泄漏"
+    "**跨项目证据落库并按三类分开呈现**：一条来自**另一个项目**的 evidence assertion 能挂到本项目的 **published version** 上，并且在读出口上按 origin/reviewed/unreviewed **三类分开呈现**（不是合成一个清单）。要有一个用**真实产品路径**（建两个项目 → 发布 → 挂证据）的集成测试，不许手工构造状态。",
+    "**删除防护可证**：origin maintainer（以及项目 owner）对外部反证的删除请求被拒；**并且**有一条**绕过应用层**的反证——直接 SQL `DELETE` 被数据库拒绝——否则说明为什么数据库层做不到，并给出等价的结构性证据。**光有 handler 里的一个 if 不算数**。",
+    "**冲突并存且独立评审**：同一条 evidence_object_version 在同一 target_object_version 上可以同时存在 `supports` 与 `contradicts` 两行，两行的 `review_state` 各自独立变更，**没有任何东西把它们合并成一个结论**；有测试钉住（并顺手确认你没有引入唯一约束）。",
+    "**没有 Truth Score**：读出口的响应里不出现任何分数、净立场或可信度数值——要有断言钉住（例如响应结构里不存在这类字段）。",
+    "**事件真的发出**：`knowledge.external_evidence_added` 在生产路径上被发出，`Visibility` 显式且与对象可见性一致；有测试断言事件行与 visibility 值。",
+    "**不泄漏**：private／未发布对象的证据不通过 `GET /knowledge/{knowledgeId}` 或任何新查询泄漏给未授权者；要有否定断言（不是「没报错」就算过）。",
+    "RESULT 里写明：哪些推进走的是真实产品路径；哪些规格没写清而按 fail-closed 处理；以及**你为什么不实现 §8 的四个标签**（一句话即可）。"
   ],
   "tests": ["external evidence tests"],
   "allowed_scope": [
