@@ -1014,6 +1014,19 @@ var explicitIndexes = map[string][]string{
 	// badge: those need the read rows too, so they cannot use a partial
 	// index that excludes them.
 	"subscription_deliveries_unread_idx": {"user_id", "created_at DESC", "id DESC", "WHERE"},
+	// T1004 (00080): the two reads behind the anonymous public feeds. A
+	// project's feed walks its assets by origin_project_id, which had no
+	// index at all before this migration; one asset's feed reads its
+	// versions newest-first through the PARTIAL index, whose predicate is
+	// the feed's own visibility filter — so the index holds exactly the
+	// rows a public reader may be served, and its ordering columns
+	// (published_at DESC, id DESC) are the feed's total order, which is
+	// what makes one database state render one document. The predicate is
+	// the same filter the canonical query applies in
+	// internal/persistence/queries/feeds.sql (T1004 ruling one: the
+	// visibility filter is pushed into SQL, so LIMIT falls after it).
+	"research_assets_origin_project_idx":           {"origin_project_id"},
+	"research_asset_versions_public_published_idx": {"asset_id", "published_at DESC", "id DESC", "WHERE"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
