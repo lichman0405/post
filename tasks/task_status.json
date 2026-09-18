@@ -3669,9 +3669,10 @@
       ]
     },
     "T0410": {
-      "status": "verification",
-      "started_at": "2026-09-18T22:05:43Z",
-      "worker_run_id": "run-1ee271260132aaeb",
+      "status": "running",
+      "started_at": "2026-09-18T23:24:18Z",
+      "worker_run_id": "run-64ee0b7843977529",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n**你的交付没有被判出任何缺陷。** 被拒的原因是：在你被评审的期间，main 往前走了，\n而 G2 验证的是「**当前 main + 本任务的完整改动**」，不是你这个 worktree 里那棵孤立的树。\n合不上是 Gate 在正确工作，不是你的错。\n\n## 发生了什么\n\n你的分支基底停在 `6445c7f`（T0804 的合并点）。在那之后 main 上了三笔：\n\n1. `66c5879` **T0807 Contribution Ledger projection** —— 它带迁移\n   `infra/migrations/00087_contribution_ledger_projection.sql`，并重写了\n   `internal/persistence/sqlc/models.go` 与 `internal/persistence/sqlc/events_audit.sql.go`；\n2. `8750c8b` 一笔 Supervisor 的账面落地（fork 的对外契约、五份任务书、两项等裁）——\n   它改了 `tasks/tasks.json` 与 `specs/**`，**规格指纹因此重算**；\n3. T1111 的合并（它没有带迁移）。\n\n## rddev 已经替你做完的（不要重做）\n\n`rddev rebaseline T0410` 把**生成物**从你的补丁里排除、把其余改动应用到当前 main、\n然后**重新生成**那些生成物——生成物是输入的函数，文本三方合并必然错（套你的旧值会还原一份\n描述旧规格的指纹，套 main 的会丢掉你的规格改动），唯一正确的解法是重算。\n\n所以现在：`specs/SPEC_VERSION.json`（当前 `sha256:47074d1d7706ebba`）、\n`specs/database/postgres.sql`、`internal/persistence/sqlc/**` 都是**在新基底上重新生成**的结果。\n你的迁移 `infra/migrations/00089_pull_request_creation_key.sql` 原样保留，号也没变。\n\n## 唯一一处真实的文本重叠，我已经试算过，但你要复核\n\n`tests/integration/migration_test.go`：T0807 改的是 `contribution_events` 与\n`research_events` 两张表的期望列与索引，你改的是 `pull_requests` 的。\n我用 `git merge-file` 做过三方合并，**退出码 0、零冲突块**——两侧改的是同一文件的不同位置。\n所以它合过来了，但**你必须亲自复核**：推进之后那个文件里**两套期望必须同时存在**\n（T0807 那两张表 + 你的 `pull_requests`）。缺任何一套都是这次推进引入的回归，\n而不是你的原始交付有问题。\n\n## 你要做的三件事\n\n1. **在新基底上重新验证**：把你在 RESULT 里声明过的验证全套重跑一遍，重点是\n   `tests/integration/migration_test.go`、`tests/integration/merge_governance_e2e_test.go`、\n   `tests/integration/pr_flow_e2e_test.go`，以及 `go build ./...` 与 `go vet ./...`。\n2. **重新提交 RESULT**：内容以**新树**为准。请在 RESULT 里明确记一句「本次为基线推进后的\n   重新验证」——改了什么、重跑了什么、结果如何。**不要把上一次的输出原样抄过来**：\n   抄过来的证据描述的是另一棵树。\n3. **不要为了「让 Gate 变绿」改动任何功能语义**。只有在重跑**真的红了**的时候才改，\n   并在 RESULT 里说明那处红是推进引入的、还是你原有的。\n\n## 范围不变\n\n`allowed_scope` 与 `forbidden_scope` 一个字都没变，按原任务包执行。\n",
       "history": [
         {
           "from": "todo",
@@ -3692,8 +3693,31 @@
           "at": "2026-09-18T23:01:28Z",
           "run_id": "run-95673aab0b45111a",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-18T23:24:17Z",
+          "run_id": "run-bbbedd56dafb7559",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n**你的交付没有被判出任何缺陷。** 被拒的原因是：在你被评审的期间，main 往前走了，\n而 G2 验证的是「**当前 main + 本任务的完整改动**」，不是你这个 worktree 里那棵孤立的树。\n合不上是 Gate 在正确工作，不是你的错。\n\n## 发生了什么\n\n你的分支基底停在 `6445c7f`（T0804 的合并点）。在那之后 main 上了三笔：\n\n1. `66c5879` **T0807 Contribution Ledger projection** —— 它带迁移\n   `infra/migrations/00087_contribution_ledger_projection.sql`，并重写了\n   `internal/persistence/sqlc/models.go` 与 `internal/persistence/sqlc/events_audit.sql.go`；\n2. `8750c8b` 一笔 Supervisor 的账面落地（fork 的对外契约、五份任务书、两项等裁）——\n   它改了 `tasks/tasks.json` 与 `specs/**`，**规格指纹因此重算**；\n3. T1111 的合并（它没有带迁移）。\n\n## rddev 已经替你做完的（不要重做）\n\n`rddev rebaseline T0410` 把**生成物**从你的补丁里排除、把其余改动应用到当前 main、\n然后**重新生成**那些生成物——生成物是输入的函数，文本三方合并必然错（套你的旧值会还原一份\n描述旧规格的指纹，套 main 的会丢掉你的规格改动），唯一正确的解法是重算。\n\n所以现在：`specs/SPEC_VERSION.json`（当前 `sha256:47074d1d7706ebba`）、\n`specs/database/postgres.sql`、`internal/persistence/sqlc/**` 都是**在新基底上重新生成**的结果。\n你的迁移 `infra/migrations/00089_pull_request_creation_key.sql` 原样保留，号也没变。\n\n## 唯一一处真实的文本重叠，我已经试算过，但你要复核\n\n`tests/integration/migration_test.go`：T0807 改的是 `contribution_events` 与\n`research_events` 两张表的期望列与索引，你改的是 `pull_requests` 的。\n我用 `git merge-file` 做过三方合并，**退出码 0、零冲突块**——两侧改的是同一文件的不同位置。\n所以它合过来了，但**你必须亲自复核**：推进之后那个文件里**两套期望必须同时存在**\n（T0807 那两张表 + 你的 `pull_requests`）。缺任何一套都是这次推进引入的回归，\n而不是你的原始交付有问题。\n\n## 你要做的三件事\n\n1. **在新基底上重新验证**：把你在 RESULT 里声明过的验证全套重跑一遍，重点是\n   `tests/integration/migration_test.go`、`tests/integration/merge_governance_e2e_test.go`、\n   `tests/integration/pr_flow_e2e_test.go`，以及 `go build ./...` 与 `go vet ./...`。\n2. **重新提交 RESULT**：内容以**新树**为准。请在 RESULT 里明确记一句「本次为基线推进后的\n   重新验证」——改了什么、重跑了什么、结果如何。**不要把上一次的输出原样抄过来**：\n   抄过来的证据描述的是另一棵树。\n3. **不要为了「让 Gate 变绿」改动任何功能语义**。只有在重跑**真的红了**的时候才改，\n   并在 RESULT 里说明那处红是推进引入的、还是你原有的。\n\n## 范围不变\n\n`allowed_scope` 与 `forbidden_scope` 一个字都没变，按原任务包执行。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-18T23:24:18Z",
+          "run_id": "run-64ee0b7843977529",
+          "reason": "worker spawn"
         }
       ]
+    },
+    "T0411": {
+      "status": "blocked",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "L3 待裁定（2026-09-19 立档）：缺口是 T0410 交付时照出的——PR 的对外面有五条路由（列表/建/diff/提交评审/:merge），**中间「送进评审」这一步没有门**。状态机已写在 docs/43:13，守卫已放行两条边（00051:88 open→review_required、00051:90 changes_requested→review_required），服务层 RequestReview 已实现且确实写状态列，**但它没有任何生产调用者**，specs/api/openapi.yaml 里 request-review 零命中。后果：经产品建出的 PR 永远无法被评审、因而永远无法合并。缺的是一行权限：specs/policies/permissions-matrix.csv 15 行里没有 request_review，internal/authz/action.go 没有对应动作，engine.go 对未登记动作默认拒绝。三个候选形状已写进任务书（A 复用 open_pr，Supervisor 倾向此；B 新增一行 request_review；C 让建 PR 直接落在 review_required）。**非成员那一格决定 T0804 外部贡献流程能否走通**（open_pr 是 allow_from_fork），这是 L3，等 owner 一句话裁定后再开工。",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
     },
     "T0501": {
       "status": "merged",
@@ -4858,6 +4882,15 @@
           "run_id": "run-44baa5e65c4b2501"
         }
       ]
+    },
+    "T0610": {
+      "status": "blocked",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "SPEC_BLOCKED（2026-09-19 从 T0602 拆出时判定）：reopen 的语义、事件名、存储状态位全都现成（docs/43:10 的状态机、docs/46:11、specs/events/event-types.yaml:23 的 scientific_object.reopened、infra/migrations/00005:20 的 CHECK 里已有 'reopened'），**只差一行权限**：specs/policies/permissions-matrix.csv 里没有 reopen 行，internal/authz/action.go 的动作总表里也没有 reopen 动作，而未登记动作在 internal/authz/engine.go 里默认拒绝。两个候选形状已写进任务书（A：与 abort_main_object 对称；B：复用 write_scientific_state，代价是 contributor 也能撤销 maintainer 的 abort）。Supervisor 倾向 A。权限属 §5 的 L3，等 owner 一句话裁定后把那一行填进 permissions-matrix.csv 再开工。",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
     },
     "T0701": {
       "status": "merged",
@@ -6260,6 +6293,33 @@
       "accepted_by_supervisor_at": null,
       "merged_at": null
     },
+    "T0814": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "2026-09-19 立账：T0804 把 fork 的服务层做完了（并把它接到执行侧：ForkGate 与 00086 的触发器），但产品路径上缺「发起 fork」这步；契约由 Supervisor 先落地，本任务照契约接线。来源：docs/31_MASTER_ACCEPTANCE.md:17，T0804 复核时发现。",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0815": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "2026-09-19 立账：CI 的 migration-integration 偶发超时（3/14），证据见 tasks/decisions.md。不许用放大 timeout 掩盖——先量再修。",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0816": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "2026-09-19 立账：T0807 独立评审的 major finding 1（orgs 用本地日历日打戳却标 UTC，投影按事件时刻 UTC 日解析）+ 我裁定时数出的第三处（internal/events/subscription_store.go:296 把 date 转 timestamptz 判定成员）。三处口径不一致会让「事件当时的组织」在 UTC+8 这类主机上每天有 8 小时记错或记成 NULL。口径由 Supervisor 裁定为 UTC 日历日、区间含两端，对齐到已合并且被测试钉住的投影一侧。依赖 T0807（它交付了被对齐的那一侧）。",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
     "T0901": {
       "status": "todo",
       "started_at": null,
@@ -7250,11 +7310,12 @@
       ]
     },
     "T1111": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-18T21:07:27Z",
       "notes": "2026-09-18 立档，来源：T1110 合并后自动化安全审查报出的 CWE-214 发现（issue #273）",
       "worker_run_id": "run-60eca88e4b82397a",
       "accepted_by_supervisor_at": "2026-09-18T23:13:06Z",
+      "merged_at": "2026-09-18T23:22:54Z",
       "history": [
         {
           "from": "todo",
@@ -7281,6 +7342,13 @@
           "to": "accepted",
           "at": "2026-09-18T23:13:06Z",
           "run_id": "run-8a8b73c8033b9356"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-18T23:22:54Z",
+          "run_id": "run-8bdf905f584a45ba",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -7352,51 +7420,6 @@
       "started_at": null,
       "completed_at": null,
       "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
-    },
-    "T0814": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "2026-09-19 立账：T0804 把 fork 的服务层做完了（并把它接到执行侧：ForkGate 与 00086 的触发器），但产品路径上缺「发起 fork」这步；契约由 Supervisor 先落地，本任务照契约接线。来源：docs/31_MASTER_ACCEPTANCE.md:17，T0804 复核时发现。",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
-    },
-    "T0815": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "2026-09-19 立账：CI 的 migration-integration 偶发超时（3/14），证据见 tasks/decisions.md。不许用放大 timeout 掩盖——先量再修。",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
-    },
-    "T0816": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "2026-09-19 立账：T0807 独立评审的 major finding 1（orgs 用本地日历日打戳却标 UTC，投影按事件时刻 UTC 日解析）+ 我裁定时数出的第三处（internal/events/subscription_store.go:296 把 date 转 timestamptz 判定成员）。三处口径不一致会让「事件当时的组织」在 UTC+8 这类主机上每天有 8 小时记错或记成 NULL。口径由 Supervisor 裁定为 UTC 日历日、区间含两端，对齐到已合并且被测试钉住的投影一侧。依赖 T0807（它交付了被对齐的那一侧）。",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
-    },
-    "T0610": {
-      "status": "blocked",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "SPEC_BLOCKED（2026-09-19 从 T0602 拆出时判定）：reopen 的语义、事件名、存储状态位全都现成（docs/43:10 的状态机、docs/46:11、specs/events/event-types.yaml:23 的 scientific_object.reopened、infra/migrations/00005:20 的 CHECK 里已有 'reopened'），**只差一行权限**：specs/policies/permissions-matrix.csv 里没有 reopen 行，internal/authz/action.go 的动作总表里也没有 reopen 动作，而未登记动作在 internal/authz/engine.go 里默认拒绝。两个候选形状已写进任务书（A：与 abort_main_object 对称；B：复用 write_scientific_state，代价是 contributor 也能撤销 maintainer 的 abort）。Supervisor 倾向 A。权限属 §5 的 L3，等 owner 一句话裁定后把那一行填进 permissions-matrix.csv 再开工。",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
-    },
-    "T0411": {
-      "status": "blocked",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "L3 待裁定（2026-09-19 立档）：缺口是 T0410 交付时照出的——PR 的对外面有五条路由（列表/建/diff/提交评审/:merge），**中间「送进评审」这一步没有门**。状态机已写在 docs/43:13，守卫已放行两条边（00051:88 open→review_required、00051:90 changes_requested→review_required），服务层 RequestReview 已实现且确实写状态列，**但它没有任何生产调用者**，specs/api/openapi.yaml 里 request-review 零命中。后果：经产品建出的 PR 永远无法被评审、因而永远无法合并。缺的是一行权限：specs/policies/permissions-matrix.csv 15 行里没有 request_review，internal/authz/action.go 没有对应动作，engine.go 对未登记动作默认拒绝。三个候选形状已写进任务书（A 复用 open_pr，Supervisor 倾向此；B 新增一行 request_review；C 让建 PR 直接落在 review_required）。**非成员那一格决定 T0804 外部贡献流程能否走通**（open_pr 是 allow_from_fork），这是 L3，等 owner 一句话裁定后再开工。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null
