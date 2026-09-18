@@ -174,6 +174,15 @@ type StoredAsset struct {
 type StoredPin struct {
 	// Pin is the canonical pid@version the manifest declared.
 	Pin DependencyPin
+	// VersionID is the resolved version ROW's internal id
+	// (research_asset_versions.id). The preview itself never renders it —
+	// a pin is named by its identity, not by a uuid — and it is carried
+	// because a WRITE keyed by the resolved version needs it: the publish
+	// records the project's use of this version as an asset_dependencies
+	// row, whose asset_version_id column is exactly this (T0707). Reading
+	// it from the same resolution the preview ran is what keeps "which
+	// version does this pin name" one answer.
+	VersionID string
 	// Visibility is the pinned version's current visibility.
 	Visibility Visibility
 }

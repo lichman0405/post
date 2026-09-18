@@ -12,11 +12,13 @@
 //     The versions this suite reads are published through the real publish
 //     command, so the manifest, the rights document, the integrity hash and
 //     the research events are the ones production writes — not a fixture's
-//     idea of them. The two kinds of row no product writer can produce are
-//     seeded by SQL, and said so where they are seeded: asset_lineage and
-//     asset_dependencies have no writer yet (T0709 ships a READER), and the
-//     projects, releases and memberships a fixture needs are rows rather
-//     than requests.
+//     idea of them. The rows no product writer can produce are seeded by
+//     SQL, and said so where they are seeded: asset_lineage has no writer
+//     yet, and the asset_dependencies rows here carry dependency types
+//     outside the Go vocabulary on purpose (T0707 gave the table its
+//     writer, so a reader that relied on the writer's values would be
+//     untested by its own fixture) — the projects, releases and
+//     memberships a fixture needs are rows rather than requests.
 //
 //  2. The disclosure rules hold over those rows. The fixture is RAW: the
 //     database holds a private project's public usage of the rendered
@@ -648,6 +650,12 @@ func seedAssetPageFixture(t *testing.T, ctx context.Context, w *assetPageWorld, 
 		f.subjectVersions["1.0"], f.subjectVersions["2.0"], f.depPrivateVersionID); err != nil {
 		t.Fatalf("seed lineage: %v", err)
 	}
+	// The dependency types are deliberately OUTSIDE the platform's
+	// vocabulary (internal/assets/dependency_type.go writes depends_on and
+	// references, and the column has no CHECK): a row the product's own
+	// writer could not produce is what tells a reader that renders stored
+	// values from a reader that assumes the writer's, and the page renders
+	// them verbatim (the assertion below reads "reuses" back off the wire).
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO asset_dependencies (project_id, asset_version_id, dependency_type, visibility_of_usage)
 		 VALUES ($1, $2, 'reuses', 'public'),

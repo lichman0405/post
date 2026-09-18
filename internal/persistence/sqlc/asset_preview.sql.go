@@ -187,6 +187,7 @@ func (q *Queries) ListPreviewObjectVersionRefs(ctx context.Context, ids []pgtype
 
 const listPreviewPins = `-- name: ListPreviewPins :many
 SELECT (ra.pid || '@' || rav.version)::text AS pin,
+       rav.id::text AS version_id,
        rav.visibility
 FROM research_asset_versions rav
 JOIN research_assets ra ON ra.id = rav.asset_id
@@ -195,6 +196,7 @@ WHERE (ra.pid || '@' || rav.version) = ANY($1::text[])
 
 type ListPreviewPinsRow struct {
 	Pin        string `json:"pin"`
+	VersionID  string `json:"version_id"`
 	Visibility string `json:"visibility"`
 }
 
@@ -207,6 +209,14 @@ type ListPreviewPinsRow struct {
 // A pin with no row here does not exist; the caller reports that as an
 // unresolved dependency, which is why the query returns what it finds
 // rather than a row per requested pin.
+//
+// The version row's own id comes back beside its visibility because the
+// resolution is shared: the publish's transaction runs this same read to
+// decide the preview's private-dependency blockers, and what it has to WRITE
+// afterwards — the asset_dependencies row recording the project's use of the
+// pinned version (T0707) — is keyed by that id. Carrying it here is what
+// keeps "does this pin resolve, and to which row" one answer instead of two
+// joins that could drift apart; the read-only preview surfaces ignore it.
 func (q *Queries) ListPreviewPins(ctx context.Context, pins []string) ([]ListPreviewPinsRow, error) {
 	rows, err := q.db.Query(ctx, listPreviewPins, pins)
 	if err != nil {
@@ -216,7 +226,7 @@ func (q *Queries) ListPreviewPins(ctx context.Context, pins []string) ([]ListPre
 	var items []ListPreviewPinsRow
 	for rows.Next() {
 		var i ListPreviewPinsRow
-		if err := rows.Scan(&i.Pin, &i.Visibility); err != nil {
+		if err := rows.Scan(&i.Pin, &i.VersionID, &i.Visibility); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

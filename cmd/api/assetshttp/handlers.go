@@ -25,14 +25,16 @@ const (
 	CodePreviewUnavailable = "ASSET_PREVIEW_UNAVAILABLE"
 )
 
-// handlers owns the preview route and the publish route (T0705), and the
-// asset hub's read routes (T0709: page.go).
+// handlers owns the preview route and the publish route (T0705), the asset
+// hub's read routes (T0709: page.go) and the project-side dependency read
+// (T0707: dependencies.go).
 type handlers struct {
-	state    StateReader
-	projects Gate
-	publish  PublishCommand
-	pages    PageReader
-	members  Membership
+	state        StateReader
+	projects     Gate
+	publish      PublishCommand
+	pages        PageReader
+	members      Membership
+	dependencies DependencyReader
 }
 
 // previewRequest is the request body: the proposed publish, in the shape

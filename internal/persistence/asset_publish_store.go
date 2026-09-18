@@ -290,6 +290,18 @@ func (s *AssetPublishStore) Publish(ctx context.Context, req assetpublish.Publis
 			RightsJSON:    json.RawMessage(version.RightsJson),
 		}
 
+		// The usages the version declares (T0707): a project using an exact
+		// asset version is recorded HERE, inside the publish's transaction, so
+		// the row exists exactly when the version that declares it does. The
+		// declarations are the command's (assets.PublishedUsages over the
+		// manifest's pins); what this store adds is the resolution the
+		// transaction owns — the pin → version ROW id the usage is keyed by —
+		// read from the same resolution the preview above ran, so a pin that
+		// resolves to nothing records nothing rather than half an identity.
+		if err := recordUsageDeclarations(ctx, q, projectID, req.Usages, state.Pins); err != nil {
+			return err
+		}
+
 		if req.IdempotencyKey != nil {
 			versionID, err := textUUID(out.ID)
 			if err != nil {
@@ -329,6 +341,56 @@ func (s *AssetPublishStore) Publish(ctx context.Context, req assetpublish.Publis
 		return assetpublish.PublishedVersion{}, mapAssetPublishError(err)
 	}
 	return out, nil
+}
+
+// recordUsageDeclarations writes the asset_dependencies rows one publish
+// declares (T0707): the project's use of each pinned version, keyed by that
+// version's ROW id.
+//
+// The resolution it needs is the one the transaction already ran: resolved
+// carries one entry per pin that names a stored version (assets.StoredPin,
+// read by the same AssetStateStore the preview above used), with the row id
+// beside the visibility. A declaration whose pin is not in that set names no
+// version the repository holds, so there is no asset_version_id to write and
+// the row is skipped — the pin itself is still rendered by the page as an
+// unresolved dependency, which is the honest form of that fact.
+//
+// One INSERT per declaration, not a batch: a publish declares a handful of
+// versions, the statement is a single-row upsert (RecordAssetDependency),
+// and they run inside the transaction that already holds the project's lock.
+// The upsert makes the write idempotent for the case the primary key
+// collapses — two versions of one asset pinning the same version — which is
+// why the same project republishing a usage is one row rather than a
+// conflict.
+func recordUsageDeclarations(ctx context.Context, q *sqlc.Queries, projectID pgtype.UUID, declarations []assets.UsageDeclaration, resolved []assets.StoredPin) error {
+	if len(declarations) == 0 {
+		return nil
+	}
+	versionIDByPin := make(map[assets.DependencyPin]string, len(resolved))
+	for _, pin := range resolved {
+		if pin.VersionID != "" {
+			versionIDByPin[pin.Pin] = pin.VersionID
+		}
+	}
+	for _, decl := range declarations {
+		versionID, ok := versionIDByPin[decl.Pin]
+		if !ok {
+			continue
+		}
+		assetVersionID, err := textUUID(versionID)
+		if err != nil {
+			return fmt.Errorf("persistence: record asset usage: resolved version id %q: %w", versionID, err)
+		}
+		if err := q.RecordAssetDependency(ctx, sqlc.RecordAssetDependencyParams{
+			ProjectID:         projectID,
+			AssetVersionID:    assetVersionID,
+			DependencyType:    string(decl.Type),
+			VisibilityOfUsage: string(decl.VisibilityOfUsage),
+		}); err != nil {
+			return fmt.Errorf("persistence: record asset usage %q: %w", decl.Pin, err)
+		}
+	}
+	return nil
 }
 
 // resolveAsset decides which research_assets row the version belongs to

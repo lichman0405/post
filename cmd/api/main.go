@@ -707,6 +707,10 @@ func run(args []string) int {
 		// answer to it.
 		Pages:   persistence.NewAssetPageStore(pool),
 		Members: projectAPI.Service(),
+		// The project-side dependency read (T0707): the other end of the
+		// same asset_dependencies table the publish above writes, keyed by
+		// the project instead of the asset.
+		Dependencies: persistence.NewProjectDependencyStore(pool),
 	})
 	assetsAPI.Register(v1)
 	// Knowledge publication (T0805): the missing publish path for
