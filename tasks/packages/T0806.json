@@ -1,0 +1,64 @@
+{
+  "id": "T0806",
+  "phase": "P8",
+  "phase_name": "开放网络、Fork、贡献与 Research Profile",
+  "title": "External Evidence Network Aggregation",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "dependencies": ["T0805", "T0504"],
+  "requirements": [
+    "其他 Project evidence 指向 published version",
+    "origin/reviewed/unreviewed 分类",
+    "origin maintainer 无删除权"
+  ],
+  "acceptance_criteria": [
+    "反对证据可见",
+    "private evidence 不泄漏"
+  ],
+  "tests": ["external evidence tests"],
+  "allowed_scope": [
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "specs/events/**",
+    "internal/persistence/**",
+    "internal/domain/**",
+    "internal/contribution/**",
+    "internal/events/**",
+    "internal/application/**",
+    "go.mod",
+    "go.sum",
+    ".env.example",
+    "cmd/api/**",
+    "cmd/worker/**",
+    "apps/web/**",
+    "tests/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "specs/api/openapi.yaml",
+    "internal/authz/**",
+    "specs/policies/**",
+    "internal/rsg/**"
+  ],
+  "relevant_specs": [
+    "**三条需求的真正出处是 `docs/10_EVIDENCE_PROVENANCE.md:39-41`（§7 Network external evidence），不是 `docs/19_EXTERNAL_REFERENCES.md`**。原文：「Published Knowledge Object 页面区分 Origin Evidence、Reviewed External Evidence、Unreviewed External Evidence。原发布者不能删除外部反证；只能对其本项目 assessment 负责。」`docs/19` 讲的是 DOI/专利这类**外部引用**，跟本任务无关，别照它写。",
+    "`docs/31_MASTER_ACCEPTANCE.md:29`（Gate D — Network）：「Published knowledge 可收到 external evidence，区分 origin/reviewed/unreviewed。」——这是验收口径。",
+    "`docs/24_TEST_STRATEGY.md:16`：「external evidence 不可被 origin maintainer 静默删除。」",
+    "`docs/10_EVIDENCE_PROVENANCE.md:43-45`（§8 Network Evidence State）：平台可产生描述性标签（limited evidence、mixed evidence、actively contested、independently reproduced），**不得产生隐式 Truth Score**（CLAUDE.md §9.13）。标签要按透明规则算，不许存成数值。",
+    "**`evidence_assertions` 表：`infra/migrations/00007_evidence.sql:3-18`**（快照 `specs/database/postgres.sql:272-287`）。全部列：`project_id`(:5)、`state_id`(:6)、`target_object_version_id`(:7)、`evidence_object_version_id`(:8)、`relation_type`(:9，九值 CHECK)、`evidence_type`(:10)、`scope`(:11)、`review_state`(:15)、`created_by`(:16)。**先读它，再动手。**",
+    "**reviewed/unreviewed 这根轴已经存在，不要新造**：`review_state text NOT NULL DEFAULT 'unreviewed' CHECK(review_state IN ('unreviewed','reviewed','rejected'))`（`00007_evidence.sql:15`），Go 侧 `internal/domain/evidence_assertion.go:229-245`（`EvidenceReviewUnreviewed/Reviewed/Rejected`）。",
+    "**「反对证据可见」已经是结构性的，不要去「解决」它**：`infra/migrations/00058_evidence_assertion_guards.sql:40-46` 逐字写明 (target_object_version_id, evidence_object_version_id) 这一对**故意不唯一**——同一条证据版本可以在同一个目标版本上同时挂 supports 与 contradicts，各自独立评审；加唯一约束会把两种立场压成一行、逼出一个赢家，那正是领域禁止的净立场算术。**T0806 不得引入任何把冲突证据合并/裁决/打分的东西。**",
+    "**`00058:52-55` 是「评审是就地状态变更」的依据**：append-only 触发器（00014/00015）守的是**版本日志**，不是这种无版本的成员行；所以 unreviewed → reviewed → rejected 是合法的就地更新。",
+    "**真正缺的东西，逐条列清（这些是你要面对的空白）**：(1) `evidence_assertions` **没有** `external`/`internal` 列，也**没有** `visibility` 列，而 `docs/10_EVIDENCE_PROVENANCE.md:13` 把这两样列为必备字段；(2) `docs/21_DATA_MODEL.md:24` 点名的 `external_evidence_links` 表**全仓库不存在**（只有那一行提到）；(3) **`evidence_assertions` 上现在没有任何删除防护**——`grep evidence infra/migrations/00014_append_only_enforcement.sql infra/migrations/00015_append_only_truncate.sql` 零命中，裸 DELETE 目前是合法的；(4) `specs/api/openapi.yaml:292-296` 的 `GET /knowledge/{knowledgeId}`（summary 逐字写着 `Published knowledge object plus origin/network evidence state`）**没有任何实现**，而它正是这三分类的天然读出口。",
+    "`infra/migrations/00010_releases_assets.sql:64-72`：`knowledge_publications` 的列与 `UNIQUE(object_version_id,public_version)`。**注意它没有 project 列**——publication 的归属要靠 `object_version_id → scientific_object_versions.object_id → scientific_objects.project_id` 这条链（`00005_scientific_objects.sql:4-9`、`:11-28`）推出来。",
+    "`internal/evidence/` **是个只有 doc.go 的空壳**（`internal/evidence/doc.go:1-6`，标着 T0002 scaffold）。证据断言现有的 Go 面：`internal/domain/evidence_assertion.go:279`（`type EvidenceAssertion`，字段在 :279-316，**没有** external/origin/visibility）、`:317` `Validate()`；查询只有两条 (`internal/persistence/queries/evidence.sql:5` `CreateEvidenceAssertion`、`:16` `ListEvidenceAssertionsForTarget`)，**两条都没有任何非 sqlc 的生产调用方**（没有 service、没有 handler、没有 `evidencehttp` 包）。也就是说证据这条链的写入面基本是从零开始。",
+    "`specs/events/event-types.yaml:28` 已声明 `knowledge.external_evidence_added`；`internal/events/subscription.go:290` 记着「no producer addresses a published knowledge object yet」——**这个事件目前没有生产者**，需要你来发。另记一处不一致：`docs/18_EVENTS_SUBSCRIPTIONS.md:9` 把它拼成 `external_evidence.added`（`docs/**` 不在你的范围内，别去改文档，按 YAML 的拼法写）。",
+    "`internal/events/event.go:82` `func Record(ctx, db DBTX, e Event) error`——事件写入的口子；`Event.Visibility`（`:45-65`）是**必填且显式**的，不许猜。已有消费方的例子（抄它的挂法）：`internal/events/fanout.go:14-17` + 游标列 `infra/migrations/00059_webhook_endpoints.sql:76-79`；worker 注册在 `cmd/worker/main.go:119,132-133,151`。"
+  ],
+  "scope_note": "这是**按本任务的实际交付面**调整过的范围。相对 DAG 里的 phase 级默认值：**加** `specs/events/**` + `internal/events/**` + `cmd/worker/**`（本任务要发 `knowledge.external_evidence_added`，那需要一个生产者；没有这几条，需求第 1 条在结构上就落不了地）；**加** `internal/domain/**`（`EvidenceAssertion` 域类型在这里）。**明确不加**（并写进 forbidden_scope）：`internal/authz/**` + `specs/policies/**`（权限矩阵是安全边界，改动归 Supervisor，见下）、`internal/rsg/**`（本任务不动 RSG 关系目录）、`specs/api/openapi.yaml`（契约由 Supervisor 维护；本任务要用的两条路由已经存在，见下）、`docs/**`。",
+  "supervisor_scope_narrowing": "2026-09-18 定稿。四点说明：\n（一）**本任务不被 SPEC_BLOCKED 卡住，可以开工**。三条需求有明确的规格出处（docs/10 §7），分类轴与「反证可见」的机制都已在树里，缺的是连接与读出口，不是产品语义。\n（二）**两个正交的轴，不要把它们合成一个枚举**：\n  - 「origin 还是 external」＝这条证据断言的属主项目，和它所指的 published 版本**所属项目**是不是同一个。两边都读得到：`evidence_assertions.project_id`，以及 publication 那条链推出来的项目。\n  - 「reviewed 还是 unreviewed」＝`evidence_assertions.review_state`，**已经存在**。\n  三分类（Origin / Reviewed External / Unreviewed External）是这两个轴**算出来的**，不要新增一个存三值的列——存了就必然和 review_state 漂移，而且 `00058:40-46` 已经把「同一目标上并存相反立场」定成不可合并的性质。\n（三）**权限模型归我，不归这次改动**。「origin maintainer 无删除权」请实现成**两道**：(a) 根本没有删除这条路（不注册 DELETE 路由、不写 Delete 查询）；(b) 数据库层一道守卫，让绕过应用层的裸 DELETE 也失败——注意 `evidence_assertions` 现在**完全没有**删除防护，这正是缺口所在。**不要**往 `internal/authz/**` 或 `specs/policies/**` 加权限动作：那两处在你的 forbidden_scope 里，而且矩阵由 CSV 锁死（`internal/authz/matrix.go:5-11`，`TestPermissionMatrixMatchesCSV` 会漂移即红）。若你判定不加一个矩阵动作就实现不了，记 `blocked` 并说明，由我拍板。\n（四）**契约不需要你改**：`GET /knowledge/{knowledgeId}`（`specs/api/openapi.yaml:292-296`）已经声明成 `Published knowledge object plus origin/network evidence state`，照它的 summary 实现即可；`knowledge.external_evidence_added`（`specs/events/event-types.yaml:28`）也已经声明。**契约里已有的东西你去实现它，契约里没有的东西别自己加**——要加先记 blocked 告诉我。"
+}

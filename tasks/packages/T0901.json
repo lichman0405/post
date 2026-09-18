@@ -1,0 +1,65 @@
+{
+  "id": "T0901",
+  "phase": "P9",
+  "phase_name": "Search 与 Evidence-backed Research Answer",
+  "title": "Search Document Projection",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "dependencies": ["T0805", "T0705"],
+  "requirements": [
+    "public/authorized searchable entity projection",
+    "structured fields + text",
+    "incremental outbox updates"
+  ],
+  "acceptance_criteria": [
+    "private 默认不进 public projection",
+    "rebuild command"
+  ],
+  "tests": ["search projection"],
+  "allowed_scope": [
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "internal/persistence/**",
+    "internal/search/**",
+    "internal/events/**",
+    "internal/application/**",
+    "go.mod",
+    "go.sum",
+    ".env.example",
+    "cmd/api/**",
+    "cmd/worker/**",
+    "Makefile",
+    "tests/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "specs/api/openapi.yaml",
+    "specs/events/**",
+    "internal/authz/**",
+    "specs/policies/**",
+    "apps/web/**"
+  ],
+  "relevant_specs": [
+    "**投影表已经建好了，缺的是投影器。** `infra/migrations/00013_search_projection.sql:2-15`（快照 `specs/database/postgres.sql:542-554`）：`search_documents(entity_ref text PRIMARY KEY, entity_type text NOT NULL, visibility text NOT NULL, project_id uuid REFERENCES projects(id) ON DELETE RESTRICT, title text NOT NULL, content text NOT NULL, structured jsonb NOT NULL DEFAULT '{}'::jsonb, embedding vector(1536), updated_at timestamptz NOT NULL DEFAULT now())`，加两条索引 `:14` GIN FTS（`to_tsvector('simple', title || ' ' || content)`）与 `:15` structured GIN。**先读这张表，再动手。** `vector` 扩展在 `00001_extensions.sql:3` 就已创建。",
+    "**`internal/search/` 是个空壳**：整个目录只有 `internal/search/doc.go` 五一行，`grep -rn \"internal/search\"` 全仓库**零个 import**。本任务的 Go 代码基本是从零开始。",
+    "**读的那条查询已经写好了，复用它，不要另写一条**：`internal/persistence/queries/search.sql:17-38` `-- name: SearchDocuments :many`，可见性过滤在 `:36` —— `AND (visibility = 'public' OR project_id = ANY(@allowed_project_ids::uuid[]))`。`:21-31` 的注释是这条查询的要害，逐字读它：**传空数组只会得到 public 行，永远不会得到整张表**。这条语义是 fail-closed 的根，别改掉。",
+    "**写的那条也已经有了**：`internal/persistence/queries/search.sql:5-15` `-- name: UpsertSearchDocument :exec`（`ON CONFLICT (entity_ref) DO UPDATE`）——**这就是幂等点**，增量更新靠它，不要另建一套写入。",
+    "**这张表被有意排除在 append-only 之外**——它是可重建投影，不是历史：`infra/migrations/00014_append_only_enforcement.sql:16` 的注释块、`00015_append_only_truncate.sql`，正面证据在 `tests/integration/append_only_truncate_test.go:119`（`TRUNCATE search_documents` **必须成功**）。**所以 rebuild 是合法的**；但反过来说，投影里丢掉任何东西都不是「历史丢失」，别用它当借口。",
+    "**表结构有钉子，改它就要一起挪**：`tests/integration/migration_test.go:736-739`（列清单，含 `embedding` vector）、`:874-875`（索引）、`:1157`（表清单）。",
+    "**已有的那条访问控制测试必须继续绿**：`tests/integration/search_access_test.go:23` `TestSearchDocumentsEnforcesAccessControl`（直接插行在 `:51-59`，fail-closed 断言在 `:81-105`）。它是本任务「private 不泄漏」这条的地基。",
+    "**泄漏是本项目最高等级的安全场景，不是一般验收项**：`docs/31_MASTER_ACCEPTANCE.md:32,35`（`## Gate E — Search` / `- [ ] Search 无 private leakage。`）；`docs/54_SECURITY_THREAT_MODEL.md:10` 把「Private Project/Branch 内容出现在 Search/Explore/API error」列为最高等级场景。",
+    "**「public 路径上不读私有数据」的既有先例，照它做**：`cmd/api/explorehttp/store.go:25-33` —— 注释逐字写着私有项目的 name/slug/visibility「never leave the database on this path: not read and withheld, never selected」。**选中再过滤是错的；根本不要选中。**",
+    "**受众解析的模板**：`internal/events/subscription_store.go:263-274`（`TargetTypeKnowledge`：membership → `public` → `none`），`:248-257`（`TargetTypeAsset`）。`docs/12_PERMISSIONS_RIGHTS_POLICY.md:7-11`（V1 UI 两个 preset，底层用 policy id/scope）、`:15`（**不扩大可见性原则**：private→public 必须显式人工确认 + 审计/事件）。`docs/23_SECURITY_PRIVACY.md:19-21`（所有 query/search/export/download 都要按 tenant/project/object policy 过滤）。",
+    "**「增量 outbox 更新」的机制已经有了，照抄它的挂法**：`outbox_events`（`infra/migrations/00012_events_audit.sql:14-22`），`00046_outbox_idempotent_publish.sql:32-36` 补了 `actor_id`/`project_id`/`visibility text NOT NULL DEFAULT 'private'`/`last_error`，`:38-39` 的注释说明 `'private'` 是 **fail-closed 默认**（「an event is never more visible than its subject」）。写入方：`internal/events/event.go:82` `func Record(ctx, db DBTX, e Event) error`；`Event.Visibility`（`:45-65`）**必填且显式，不许猜**；校验在 `:121-126`（只允许 public|private）。**每个消费者自带一个游标列**——已有两例：`infra/migrations/00059_webhook_endpoints.sql:76-79`（`outbox_events.webhook_fanned_out_at` + 索引 `:83-84`）、`infra/migrations/00078_subscriptions.sql:159`（订阅自己的游标表）。**目前没有任何 search 消费者**，你是第一个。`docs/adr/ADR-013-domain-events-outbox.md:4`：所有 Research Event 与 DB state 同事务写 outbox，由 worker 异步投递，**Consumer 幂等**。",
+    "**该投影哪些事件**：`specs/events/event-types.yaml:17`（`state.committed`）、`:25-28`（`release.published`、`research_asset.version_published`、`knowledge.version_published`、`knowledge.external_evidence_added`）、`:35`（`policy.version_published`）。**注意 `specs/events/**` 在你的 forbidden_scope 里——事件词表由我维护，你按已有的拼法投影，不要加新事件类型；需要新的就记 blocked 告诉我。**",
+    "**worker / 后台任务的地基**：`cmd/worker/main.go:7` 逐字写着「The only registered job type is `\"smoke\"`」，注册在 `:97`；注册 API 是 `internal/worker/worker.go:105` `func (l *Loop) Register(jobType string, h Handler)`（`Job` 在 `:31`、`Handler` 在 `:42`、`NewLoop` 在 `:68`），入队 `internal/worker/queue.go:51`。已有消费者都在 `cmd/worker`：dispatcher（`internal/events/publish.go:64,92,112`，挂载在 `cmd/worker/main.go:119`）、webhook fanout（`internal/events/fanout.go:14-17`，挂载 `:132-133`）、订阅 fanout（`internal/events/subscription_fanout.go`，挂载 `:151`）。",
+    "**rebuild 命令没有任何先例**：`grep -rn reindex` 在 `cmd/`、`internal/`、`infra/` 里只有注释命中。可抄的形状是 `cmd/rddev db.go`（`rddev db migrate`，`cmd/rddev/main.go:60`）+ `Makefile:65-71`（`migrate:` 目标，`go run ./cmd/rddev db migrate`）。**`cmd/rddev` 不在你的范围内**，见下面的决定。",
+    "`docs/14_SEARCH_DISCOVERY.md:5`：只搜索平台 network 内 public/accessible content + 已正式纳入项目的 External Reference snapshots，**不做全互联网 scholar crawler**。`:11` 检索是 structured filters + FTS + semantic + graph traversal + scientific ranking 的组合，本任务只做**投影**这一步（ranking 是 T0905，向量是 T0902，**不要把它们的活儿干了**）。`docs/adr/ADR-005-postgres-first-graph-search.md:5`：结构化/FTS/vector/traversal 都先在 Postgres 实现，达到明确规模阈值后再加 projection engine——**V1 不引入 OpenSearch**。"
+  ],
+  "scope_note": "这是**按本任务的实际交付面**调整过的范围。相对 DAG 里的 phase 级默认值：**加** `internal/events/**` + `cmd/worker/**` + `Makefile`——需求第 3 条「增量 outbox 更新」在结构上要求一个 outbox 消费者，而消费者按仓库既有形状必须挂在 `cmd/worker`（两例都挂在那里），rebuild 命令也需要一个可执行的入口；DAG 默认范围里这三条**都没有**，不改就落不了地。**加** `internal/application/**`（投影服务放这里）。**明确不加**（并写进 forbidden_scope）：`specs/api/openapi.yaml`（契约由我维护；本任务不需要新路由）、`specs/events/**`（事件词表由我维护）、`internal/authz/**` + `specs/policies/**`（权限矩阵是安全边界）、`apps/web/**`（本任务是投影，不是搜索界面——那是 T0907）、`internal/rsg/**` + `internal/domain/**`。",
+  "supervisor_scope_narrowing": "2026-09-18 定稿。四点说明：\n（一）**范围缺口是这次最主要的修正**。DAG 里 T0901 的 allowed_scope 有 `internal/persistence/**` 和 `internal/search/**`，但**没有** `cmd/worker/**` 和 `internal/events/**`——而「incremental outbox updates」这条需求，按仓库里已有的两个消费者（webhook fanout、subscription fanout）的挂法，消费者只能住在 `cmd/worker`。照原范围派工，需求第 3 条在结构上就完不成。这是补范围，不是放宽验收。\n（二）**rebuild 命令的落点我拍板**：允许你动 `Makefile` 加一个目标，实现体放在 `cmd/worker/**` 里（一个 job type，加一个可执行的入口）。理由是 `Makefile:65-71` 的 `migrate` 就是这个形状（make 目标委托给 Go CLI），而 `cmd/rddev` 不在你的范围内。**形状你自己定（job type + flag、还是独立子命令），但必须满足三条**：(1) 能从一台干净的开发机上真的跑起来；(2) 幂等——连跑两次结果一致；(3) 有测试覆盖，而不是只有一条命令。\n（三）**投影的可见性必须是「从源头照抄」，不是「算出来」**：`search_documents.visibility` 的值要来自被投影实体自己的可见性轴，并且**默认落到 private**（fail-closed）。绝不允许出现「拿不准就先写 public」。特别提醒：`search_documents.visibility` 上**没有 CHECK 约束**（`00013:6`），所以数据库不会替你挡这个错——你得自己挡。\n（四）**这一轮只做投影，不做检索质量**：排名的科学规则（T0905）、embedding 的 provider 与 pgvector 索引（T0902）、Search Answer 生成（T0906）、搜索 Web UI（T0907）都不是你的事。`embedding` 那一列先留空是对的——它是 T0902 的交付面。**若你发现某条需求的完成依赖上面任何一个，记 blocked 说明，不要顺手实现。**"
+}

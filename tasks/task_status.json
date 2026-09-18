@@ -5258,13 +5258,10 @@
       "merged_at": null
     },
     "T0711": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
+      "status": "running",
+      "started_at": "2026-09-18T07:33:41Z",
       "notes": "SPEC_BLOCKED resolved: T0805 package landed and knowledge publish OpenAPI contract added per L3-20260916-1",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null,
+      "worker_run_id": "run-a0826dd7c4416cd1",
       "history": [
         {
           "from": "todo",
@@ -5277,7 +5274,21 @@
           "from": "blocked",
           "to": "todo",
           "at": "2026-09-18T07:18:07.969334Z",
+          "run_id": "",
           "reason": "Supervisor resolved SPEC_BLOCKED: required spec/contract now in place"
+        },
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-18T07:33:40Z",
+          "run_id": "run-76c80e2519499b8b"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-18T07:33:41Z",
+          "run_id": "run-a0826dd7c4416cd1",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -5588,13 +5599,10 @@
       ]
     },
     "T0805": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
+      "status": "running",
+      "started_at": "2026-09-18T07:34:05Z",
       "notes": "SPEC_BLOCKED resolved: T0805 package landed and knowledge publish OpenAPI contract added per L3-20260916-1",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null,
+      "worker_run_id": "run-fd172462660949fa",
       "history": [
         {
           "from": "todo",
@@ -5607,7 +5615,21 @@
           "from": "blocked",
           "to": "todo",
           "at": "2026-09-18T07:18:07.969334Z",
+          "run_id": "",
           "reason": "Supervisor resolved SPEC_BLOCKED: required spec/contract now in place"
+        },
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-18T07:34:04Z",
+          "run_id": "run-1dfacb390c55c014"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-18T07:34:05Z",
+          "run_id": "run-fd172462660949fa",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -5952,7 +5974,7 @@
       ]
     },
     "T1005": {
-      "status": "running",
+      "status": "worker_failed",
       "started_at": "2026-09-16T11:40:41Z",
       "worker_run_id": "run-e8333470450776a5",
       "history": [
@@ -5968,6 +5990,13 @@
           "at": "2026-09-16T11:40:41Z",
           "run_id": "run-e8333470450776a5",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "worker_failed",
+          "at": "2026-09-18T07:40:52Z",
+          "run_id": "run-7edd2bef96af6508",
+          "reason": "worker exited -1"
         }
       ]
     },
@@ -6308,9 +6337,9 @@
       "merged_at": null
     },
     "T1110": {
-      "status": "rejected",
-      "started_at": "2026-09-16T10:58:47Z",
-      "worker_run_id": "run-fff6a43fe2176fa2",
+      "status": "running",
+      "started_at": "2026-09-18T07:37:11Z",
+      "worker_run_id": "run-20c09307da654203",
       "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
       "history": [
         {
@@ -6346,6 +6375,13 @@
           "at": "2026-09-16T11:09:59Z",
           "run_id": "run-b30b7f28eeddc576",
           "reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-18T07:37:11Z",
+          "run_id": "run-20c09307da654203",
+          "reason": "worker spawn"
         }
       ]
     },
