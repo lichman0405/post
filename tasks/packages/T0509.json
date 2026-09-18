@@ -1,0 +1,68 @@
+{
+  "id": "T0509",
+  "phase": "P5",
+  "phase_name": "Evidence、Knowledge 与 External References",
+  "title": "Literature evidence extraction data model",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "dependencies": ["T0508", "T0504"],
+  "requirements": [
+    "specific figure/table/section/location metadata：一条文献断言的「具体位置」**记在既有的 `reasoning_note` 里**，是一个人类可读的定位串（例如 `figure 3b, 298 K isotherm`）。**不新建定位表、不加定位列**——见裁定一，这不是省事，是仓库已经做过的决定。",
+    "human confirmed flag：**复用既有的 `evidence_assertions.review_state`**（三值 CHECK），不新增布尔列。见裁定三。",
+    "snapshot source：**复用既有的 `external_reference_snapshots` 表**，不建第二套快照机制。见裁定四。",
+    "**把缺掉的中间那层补起来**：`internal/persistence/queries/evidence.sql` 的 `CreateEvidenceAssertion` 已经由 sqlc 生成，但 `cmd/` 与 `internal/application/` 里**零调用者**；契约里 `POST /projects/{projectId}/branches/{branchId}/evidence-assertions` 也已经存在（`specs/api/openapi.yaml:128`）却没有任何实现。本任务就是补这一层：应用服务 + HTTP handler，挂在**既有那条路径**上。",
+    "**写路径必须在插入之前调用 `CheckEvidenceAssertion`**，这不是我的要求，是那段代码自己写下的契约：`internal/rsg/semantics/evidence_assertion.go:55-58` 逐字「The checks stay payload-pure: they never read storage, and **the future evidence write path is expected to call this before inserting** (the same contract the object write path has with `Check`)。」",
+    "**返回的 hints 不得被静默丢弃**。`CheckEvidenceAssertion` 返回 `(errs, hints)` 两个值；hints 是**给作者的提示**，不是错误。你要决定它们在响应里怎么出现（照既有写路径对 hints 的处置方式），但**不能收下就扔**——那样等于把「只警告」悄悄变成「什么都不说」。"
+  ],
+  "acceptance_criteria": [
+    "**「禁止只有 DOI 就标 supports」= 拒绝「一个位置都没写」，不是拒绝「位置写得不够充分」。** 对 `evidence_type = 'literature'` 且 `reasoning_note` 去空白后为空 的断言，写路径必须**拒绝**（不是警告）。有一条测试真的构造这个请求并看到它被拒。",
+    "**反方向必须同时钉住，否则这条验收是坏的**：对**写了位置**的断言——哪怕那个位置在科学上很弱——必须**接受**（至多给出 hint）。要有一条测试证明它被接受。理由逐字在 `internal/rsg/semantics/evidence_assertion.go:26-28`：「**Both rules warn only**: whether the evidence genuinely establishes causation and **whether a note names a sufficient unit are scientific calls the check must not make for the author**.」**判「够不够」是不许做的**（CLAUDE.md §9.12）。**只测前一方向的实现，会把这条禁令一起做掉。**",
+    "**API validation**：走契约里已有的 `POST /projects/{projectId}/branches/{branchId}/evidence-assertions`，**不得新造路径、不得改契约**（`specs/api/openapi.yaml` 由我维护）。契约里这条带 `IdempotencyKey` 参数——照仓库既有的幂等形状处理。",
+    "**既有测试一条都不许变红，尤其这些**：`internal/rsg/semantics/evidence_assertion_test.go`（它逐条钉住两个 hint 的产生条件，含 `:130` 的 `HintLiteratureEvidenceUnitUnnamed` 用例）、`internal/domain/evidence_assertion_test.go`、`tests/integration/` 下与 evidence 相关的用例。**你的新写路径是给它们加一个调用者，不是改它们的语义。**",
+    "**不新增列、不新增表**：如果你判断非加不可，停下来在 RESULT 里说明理由并标 `blocked`，由我拍板——`docs/10_EVIDENCE_PROVENANCE.md:13` 点名缺的那两列（external/internal、visibility）**归 T0806**，不是你的。",
+    "RESULT 里逐条说明：三个 requirement 各自落在了哪个**既有**结构上（note / review_state / external_reference_snapshots），以及你为「hints 去哪了」做的选择与理由。"
+  ],
+  "allowed_scope": [
+    "internal/evidence/**",
+    "internal/application/**",
+    "internal/persistence/**",
+    "internal/rsg/**",
+    "internal/domain/**",
+    "cmd/api/**",
+    "go.mod",
+    "go.sum",
+    ".env.example",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "infra/migrations/**",
+    "tests/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "specs/api/openapi.yaml",
+    "specs/events/**",
+    "specs/policies/**",
+    "internal/authz/**",
+    "apps/web/**",
+    "packages/schemas/**"
+  ],
+  "relevant_specs": [
+    "**先读这三段代码，它们把「具体位置记在哪」已经决定完了。** `internal/rsg/semantics/evidence_assertion.go:19-24` 逐字：「a literature assertion without a reasoning note earns a warning — docs/10 §6: a DOI may not support a claim directly; the assertion must name the specific evidence unit (figure, table, results assertion, supplementary dataset, method). **The V1 schema has no excerpt field, so the reasoning note is the only place the unit can be named**; the check can only see whether that place is empty.」同一句在 `internal/domain/evidence_assertion.go:301-305` 复述。**这就是「位置标识模型」的答案：V1 没有定位模型，位置就是 note 里的一句话。**",
+    "**`docs/10_EVIDENCE_PROVENANCE.md:37`（要求原文）**：「不能 `DOI -> supports Claim`。必须定位文献中的具体 evidence unit：figure/table/results assertion/supplementary dataset/method。保留 source pointer、snapshot/excerpt metadata、human confirmation。」——注意最后三项：**source pointer 与 snapshot metadata 已有承载体**（`external_reference_snapshots`，见下），human confirmation 就是 `review_state`。",
+    "**`docs/19_EXTERNAL_REFERENCES.md:19`（同一要求的另一种写法）**：「External Reference 不是自动 Evidence。需要 Evidence Assertion 指向具体 location/excerpt/figure/table/dataset/method，记录 human confirmation 和 relation。」",
+    "**既有的 hint 机制就是这条验收的现成仪器，别另造一套。** `CheckEvidenceAssertion`（`internal/rsg/semantics/evidence_assertion.go:60`）返回 `(errs []error, hints []Hint)`；`:75-83` 是文献那条 hint 的产生条件（`EvidenceType == domain.EvidenceTypeLiterature && strings.TrimSpace(a.ReasoningNote) == \"\"`），提示码 `HintLiteratureEvidenceUnitUnnamed = \"LITERATURE_EVIDENCE_UNIT_UNNAMED\"`（`:45`）。测试在 `internal/rsg/semantics/evidence_assertion_test.go:130`。**看清楚：它现在只 warn。**",
+    "**`domain.EvidenceType` 是判「是不是文献断言」的地方**（`internal/domain/evidence_assertion.go`）——你的校验要按它分流，**不要按 `relation_type` 或字符串猜**。",
+    "**「快照来源」的承载体已经建好，不要建第二个**：`specs/database/postgres.sql:444` 的 `external_reference_snapshots` 表已有，且 `:644` 有一条 **append-only 触发器**。`docs/19_EXTERNAL_REFERENCES.md:9` 是它的出处。",
+    "**「人工确认」的承载体也已经建好**：`evidence_assertions.review_state text NOT NULL DEFAULT 'unreviewed' CHECK(review_state IN ('unreviewed','reviewed','rejected'))`（`infra/migrations/00007_evidence.sql`，快照见 `specs/database/postgres.sql`）。**不要为「human confirmed」加一个布尔列**——那会与这一列漂移。",
+    "**存储层已经写好了，你要用的是它**：`internal/persistence/queries/evidence.sql` 的 `CreateEvidenceAssertion`（INSERT ... RETURNING *）与 `ListEvidenceAssertionsForTarget`；生成物在 `internal/persistence/sqlc/evidence.sql.go`。**这两个查询目前全仓库零调用者**（`grep -rn \"CreateEvidenceAssertion\" --include='*.go' internal/ cmd/ tests/` 只命中生成文件自己）——这就是本任务的空白所在。",
+    "**契约里那条路径长什么样**：`specs/api/openapi.yaml:128-136` 是 `POST /projects/{projectId}/branches/{branchId}/evidence-assertions`，summary「Create evidence assertion」，带 `ProjectId` / `BranchId` / `IdempotencyKey` 三个参数，响应 `201`。**它没有 requestBody schema**——请求体形状由你定，但路径与幂等参数照用。",
+    "**写路径挂哪儿：照既有形状。** 路由用标准库 `http.NewServeMux()` + Go 1.22 方法化 pattern（**不是 chi**）；所有产品路由挂在 `cmd/api/main.go` 的 `v1` 子 mux 上，由 `authAPI.Guard(v1)` 包住，而那个 guard **按方法判定**——GET 放行，POST/PUT/PATCH/DELETE 要 session + CSRF。handler 包照 `cmd/api/` 下已有的 26 个 `*http` 包的写法（例如 `cmd/api/rsghttp/`、`cmd/api/reviewhttp/`）。**找一个「在分支上创建对象」的既有写路径整条读一遍**（`internal/application/sciobjects/`、`internal/application/states/`、`internal/application/branches/` 是候选），把你的新路径做成同型，而不是自创一层。",
+    "**`internal/evidence/` 现在是空的**——只有 `doc.go`，逐字写着「Package evidence owns evidence assertions and their provenance chains per docs/10_EVIDENCE_PROVENANCE.md」。**这个包是为本任务准备的落点**，把你的服务层放进去（或按上面那条既有形状放进 `internal/application/`，二选一，在 RESULT 里说明选择）。",
+    "**迁移号由我在派工时分配，写进任务包。** 账本 `.rddev/runtime/migration-numbers.json`，分配器幂等。**不要自己选号，也不要拿「main 最大号 + 1」去猜**（CLAUDE.md §8.1）。**而且本任务很可能根本不需要迁移**——三个 requirement 全部落在既有结构上。判断不需要就别建，在 RESULT 里说明理由；不要为了用掉一个号而造表。若你确实要建，规矩是 `infra/migrations/README.md`：已发布的迁移永不修改、`specs/database/postgres.sql` 只能由 `python3 scripts/gen_schema_snapshot.py` 重新生成、不写 down migration，改完跑 `make check-schema-snapshot` 与 `make check-spec-version`，并同步扩 `tests/integration/migration_test.go` 的目录夹具（`canonicalTables` / `explicitIndexes`，那里是全等比较）。"
+  ],
+  "scope_note": "这是**按本任务的实际交付面调整过的范围**。相对 DAG 里的 phase 级默认值：**加** `internal/application/**` 与 `cmd/api/**`（本任务的真实工作量是补写路径那一层，而 DAG 默认范围里两者都没有——不加就落不了地）。**明确不加**（并写进 forbidden_scope）：`specs/api/openapi.yaml`（契约由我维护，而且路径本来就存在，你不需要改它）、`specs/events/**`、`specs/policies/**` 与 `internal/authz/**`（权限矩阵是安全边界；本任务的鉴权由 `/api/v1` 的统一 guard 与既有分支权限提供，**不要自己发明新权限判定**）、`apps/web/**`（本轮不做前端——DAG 默认里有它，但验收两条都是 API 侧的，加进来只会扩大冲突面）、`packages/schemas/**`、`docs/**`。",
+  "supervisor_scope_narrowing": "2026-09-18 定稿。**这个任务被误标成「等定」两个月，现在撤回。** 2026-09-16 的阻塞理由逐字是「文献里『具体位置』（图/表/小节）用什么标识——规格要求定位到具体 evidence unit（docs/10:37、docs/19:19），但位置标识模型全仓库不存在」——**「模型不存在」是事实，但它不是缺口，是决定**：那两段代码（`evidence_assertion.go:19-24`）明写着 V1 schema 没有 excerpt 字段，所以 note 就是唯一能写位置的地方。**规格要的是「断言必须指出具体位置」，没要求位置有机器可解析的结构**；把「没有 locator 表」读成「规格缺失」，是把实现选型当成了产品语义。所以这是我的层，我拍板。\n\n**裁定一：位置记在既有的 `reasoning_note` 里，人类可读字符串，不新建表、不加列。** 既有代码与既有测试里已经有字面量先例（`figure 3b`）。**将来**若要做结构化定位（图/表编号可查询），那是一条独立任务、一次独立的 schema 决定；V1 不做。\n\n**裁定二（本轮最要紧的一条）：验收「禁止只有 DOI 就标 supports」的作用域是「什么都没写」，不是「写得不够好」。** 这两者在文档里离得很近，容易混：`evidence_assertion.go:26-28` 逐字写着两条规则**只警告**，理由是「whether a note names a sufficient unit are scientific calls the check must not make for the author」。**所以你的校验只能问一个问题：note 是不是空的。** 一旦你开始判断「这个位置够不够具体」，你就越过了 CLAUDE.md §9.12 与 `docs/10 §4`「V1 不自动赋数值权重」划的那条线——那是替科学家做科学判断。**测试必须两个方向都有**（空的被拒、写了但弱的被接受），否则一个只会拒绝的实现也能让单向测试变绿，而那条禁令就被静默做掉了。\n\n**裁定三：`human confirmed` 复用 `evidence_assertions.review_state`，不加布尔列。** 那一列已经是三值 CHECK、已经有默认值 `unreviewed`，语义与「人工确认过没有」逐字对应。加一个 `human_confirmed boolean` 会产生两个真相源。\n\n**裁定四：`snapshot source` 复用 `external_reference_snapshots`。** 该表已存在且带 append-only 触发器（`postgres.sql:644`），`docs/19:9` 是它的出处。**这条 requirement 的工作量是「把断言与快照接起来」，不是「造一个快照机制」。**\n\n**裁定五：hints 不得静默丢弃。** `CheckEvidenceAssertion` 返回的 `hints` 是给作者的提示（「你的证据只支持相关性」「你没写具体位置」）。仓库里其它写路径怎么处置 hints 就怎么做——**先看一遍再决定**；如果确实没有任何先例，那就在响应体里带出来，并在 RESULT 里点名说明这是你定的。**把 hints 收下就扔，等于把「只警告」变成「不告诉作者」**，那与本任务验收的精神相反。\n\n**另外两条边界**：（1）**不要动 `CheckEvidenceAssertion` 的语义**——它返回 errs 与 hints 的分工是两个既有测试钉住的。你可以在**调用侧**把「note 为空」升级为拒绝（那是写路径的策略），但**不要**去改那个函数让它返回 error。（2）`docs/10_EVIDENCE_PROVENANCE.md:13` 点名缺的 external/internal 与 visibility 两列**归 T0806**，`docs/21_DATA_MODEL.md:24` 点名的 `external_evidence_links` 表全仓库只有那一行提到、已被判为早期设计残留（`tasks/decisions.md:9205`，issue #251）——**这两件都不是你的**，看到它们不要顺手去建。"
+}

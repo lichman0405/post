@@ -74,7 +74,7 @@
     "`internal/gitprovider/refsync.go`（T0303）：分叉点解析与「按分支行创建/删除 provider side ref」的既有实现；注意它**不搬内容**，所以它不写 semantic state 是有理由的——fork 导入**搬内容**，所以不能照抄它的处理。",
     "`internal/persistence/main_freeze_store.go`（T0601，我刚验收过）：**幂等、并发、事务边界、fail-closed 可见性**四件事在本仓库的标准写法都在这个文件里，`Freeze` 的比较并交换写法值得先读一遍再动手。",
     "`docs/23_SECURITY_PRIVACY.md:21` 与 `docs/57_DEMO_UAT.md:7`：可见性与「restricted blob download 必须失败」的负向场景。",
-    "`docs/12_AUTHORIZATION.md` §5：Organization policy 是最低要求、Project policy 可更严**不能更松**——fork 的判定不得比矩阵更松。"
+    "`docs/12_PERMISSIONS_RIGHTS_POLICY.md` §5：Organization policy 是最低要求、Project policy 可更严**不能更松**——fork 的判定不得比矩阵更松。"
   ],
   "scope_note": "这是 Supervisor 收窄后的范围（已从 phase 级默认上限删掉 `apps/web/**`，另按本任务实际需要加入 `internal/gitprovider/**`、`internal/persistence/**`、`internal/rights/**`）。`internal/rsg/**` 与 `internal/authz/**` 刻意不在其中：读不受限，要改就在 RESULT 里点名，由 Supervisor 接手。"
 }

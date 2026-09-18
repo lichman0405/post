@@ -77,9 +77,5 @@
   ],
   "dependencies": [
     "T0705"
-  ],
-  "baseline_sha": "",
-  "max_turns": 0,
-  "max_budget_usd": 0,
-  "migration_number": 0
+  ]
 }

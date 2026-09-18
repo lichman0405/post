@@ -37,3 +37,18 @@ python3 scripts/validate_task_state.py    # 9 项检查
 另外多一个 `supervisor_scope_narrowing`：**为什么这么划范围**。
 它会被原样带进 `tasks/tasks.json`，也就是会被 Worker 读到 —— 这是有意的，
 让干活的人看见每一条范围决定的依据，而不是自己猜。
+
+**但不要照抄整条任务。** 最自然的写法是"打开 `tasks/tasks.json` 里那条、改掉要改的字段"，
+而那样写出来的任务书会顺手带上四个**落地工具一律拒收**的字段（`apply-packages.py:131`）：
+
+    baseline_sha, max_budget_usd, max_turns, migration_number
+
+它们住在任务表里，但**不归任务书管**：`migration_number` 是派工时按账本现发的
+（`worker_spawn.go:207` → `AllocateMigrationNumber`，账本 `.rddev/runtime/migration-numbers.json`），
+任务表里那个值**会被覆盖**，所以它不是真相源；另外三个同理。
+落地时表里已有的值会被原样保留，任务书根本不需要提它们。
+
+**照抄的代价**：2026-09-18 一次演练里五份任务书全带着这四个字段，
+`apply-packages --dry-run` 在第一份就退出，后面几份**根本没被检查到**——
+工具是遇到第一个错就停的。所以落地前**务必先跑一遍 `--dry-run` 看全部**，
+别等空窗开了才发现。

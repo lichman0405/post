@@ -1,0 +1,69 @@
+{
+  "id": "T0506",
+  "phase": "P5",
+  "phase_name": "Evidence、Knowledge 与 External References",
+  "title": "Evidence Graph Projection",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "dependencies": ["T0504"],
+  "requirements": [
+    "Claim/Hypothesis→evidence grouping：**按「断言钉住的那个对象版本」分组**，一组一个目标。这是字面照做——requirement 用的词是 grouping（分组），不是 union（合并）。",
+    "**假设（Hypothesis）页面的形状我拍板：分成两段，不合并。** 一段是**直接挂在假设上**的断言，另一段是**它下属的主张**（每条主张带着自己的断言）。**不得把两段并成一张清单，不得给出条数/比例/分数**（CLAUDE.md §9.13、`docs/10 §4`「V1 不自动赋数值权重」）。见裁定一。",
+    "origin/external placeholder：**requirement 自己写的就是 placeholder**，所以它就是个占位。有真实来源就填（`evidence_type` 是现成的来源轴），**没有来源就空着，绝不许编一个值**。`docs/10_EVIDENCE_PROVENANCE.md:13` 点名的那两列（external/internal、visibility）**归 T0806**，不是你的。见裁定四。",
+    "conflicting evidence：**支持与反驳必须并排显示，永远不许合并、不许选一个赢家。** 这不是我定的，是 `00058` 的注释逐字定死的（见 relevant_specs）——一个唯一约束就会被读成「净立场」，而领域禁止净立场算术。",
+    "**立场标签用既有规则算，不要自己再写一套**：`internal/domain/evidence_assertion.go:115` 的 `RelationStance` 已经把九个关系映射成 supporting / contesting / neutral 三桶，映射不到的关系返回 `(\\\"\\\", false)`——**那是 fail-closed，照它做：算不出立场就不要显示立场**，不要猜、不要归到 neutral。",
+    "**读路径与 provenance API 分开**（这是验收第二条）：`cmd/api/provenancehttp/` 服务的是 `GET /api/v1/projects/{projectId}/provenance/graph` 与 `.../objects/{objectId}/lineage`，数据来自可重建的 `provenance_edges` 投影。**不要把证据塞进那两条路径**，也不要复用它的 store——证据是另一张表、另一套语义（CLAUDE.md §9.10：Provenance Graph != Evidence Graph）。见裁定三。"
+  ],
+  "acceptance_criteria": [
+    "**可回答为什么相信/质疑**：给定一个对象版本，读路径要能同时给出**支持它的**与**反驳它的**断言，各自成组。有一条集成测试真的构造「同一目标上同时有 support 与 contradict」，并断言**两条都出现**。",
+    "**那条测试必须同时钉住反方向**：不能是「把两条合并成一条再显示」也算过——测试要断言响应里 support 与 contradict **各自还在**，且没有出现任何条数/比例/净值的字段。仓库自己点过这个坏形状：`tests/integration/asset_page_test.go:714-727` 逐字「**An empty string is a failure rather than a pass: a check that forbade nothing is the shape that reads green while measuring nothing**」。",
+    "**与 provenance API 分开**：新的读路径**不得挂在** `provenancehttp` 的路由前缀下、**不得**读写 `provenance_edges`。有一条测试或一次代码检查证明两者互不引用（在 RESULT 里给出你的验证方式）。",
+    "**假设页面两段分开**：有一条测试构造「假设 H 直接有一条断言、H 下属的主张 C 也有一条断言」，断言响应里**两段各归各的**，且 H 那一段里**不出现** C 的断言（不合并），同时**不出现**任何聚合数字。",
+    "**算不出立场就不显示立场**：有一条测试用一个 `RelationStance` 映射不到的关系（返回 false 的那些），断言它**不带立场标签**地出现，而不是被硬塞进 supporting/contesting/neutral。",
+    "**既有测试一条都不许变红**，尤其 `internal/domain/evidence_assertion_test.go` 的 `TestRelationStance`（`:40`）与 `TestRelationStanceIsALabelNotAScore`（`:74`）——**这两条钉住的正是本任务最容易踩坏的东西**。",
+    "**不要新建与证据无关的表**。你要用的查询已经存在（`ListEvidenceAssertionsForTarget`，目前零调用者）；不够用就在它旁边扩，**不要另起一套查询文件**。若判断需要新列或新表，停下来标 `blocked` 说明理由，由我拍板。",
+    "RESULT 里逐条说明三个 requirement 各自的落点，以及「origin/external」这一条你**填了什么、没填什么、为什么**。"
+  ],
+  "allowed_scope": [
+    "internal/evidence/**",
+    "internal/application/**",
+    "internal/persistence/**",
+    "internal/domain/**",
+    "internal/rsg/**",
+    "cmd/api/**",
+    "apps/web/**",
+    "go.mod",
+    "go.sum",
+    ".env.example",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "infra/migrations/**",
+    "tests/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "specs/api/openapi.yaml",
+    "specs/events/**",
+    "specs/policies/**",
+    "internal/authz/**",
+    "packages/schemas/**",
+    "cmd/api/provenancehttp/**"
+  ],
+  "relevant_specs": [
+    "**「支持与反驳并排」是仓库里写死的设计，先读这段再动手。** `infra/migrations/00058_evidence_assertion_guards.sql:38-46` 逐字：「Deliberately NOT constrained here: `(target_object_version_id, evidence_object_version_id)` uniqueness. The pair is **NOT unique BY DESIGN** (task acceptance criterion: 支持与反驳可同时存在): one evidence version may carry a supports AND a contradicts assertion on the same target version, side by side, each reviewed on its own. A unique constraint on the pair would collapse the two stances into one row and **force a winner — exactly the net-position arithmetic the domain forbids**.」**你的投影必须让这个设计在界面上成立，而不是把它抹平。**",
+    "**同一条注释还点名了立场规则在哪**：`... Stance labels (supporting/contesting/neutral) are computed by a transparent rule in the domain layer`。那条规则就是 `internal/domain/evidence_assertion.go:115-127` 的 `RelationStance`：supports/validates/reproduces/consistent_with → `supporting`；contradicts/challenges/inconsistent_with/fails_to_reproduce → `contesting`；contextualizes → `neutral`；**其余返回 `(\\\"\\\", false)`**。常量在 `:98`/`:103`/`:105`。**九个关系的清单在 `:108` 的注释里，照抄，不要自己归纳。**",
+    "**「不赋数值权重」是两条独立出处的硬禁令**：`docs/10_EVIDENCE_PROVENANCE.md:29` 逐字「V1 不自动赋数值权重。」；CLAUDE.md §9 不变量 13「不生成 Truth Score / Research Score」。`tests/integration/asset_page_test.go:714-727` 那条注释是同一个精神在测试层的写法。**所以「支持 5 条、反驳 2 条」这种计数也不要——它离净值只有一步。**",
+    "**`docs/10_EVIDENCE_PROVENANCE.md` 是本任务的主规格，整篇不长，全读。** 特别是 `:13`（external/internal 与 visibility 两列，**归 T0806**）与 `:37`（文献断言必须指出具体 evidence unit）。",
+    "**读路径的落点已经留好，而且是空的**：`internal/persistence/queries/evidence.sql` 的 `ListEvidenceAssertionsForTarget`（按 `target_object_version_id` 取该目标的全部断言，`ORDER BY created_at, id`），生成物 `internal/persistence/sqlc/evidence.sql.go:78`。**它目前全仓库零调用者**（`querier.go:520` 只是接口声明）。`internal/evidence/` 也只有一个 `doc.go`。**本任务是把这两处接起来。**",
+    "**验收说的「与 provenance API 分开」，指的是一条真实存在的路由**：`cmd/api/provenancehttp/handlers.go:51`「handleGraph: `GET /api/v1/projects/{projectId}/provenance/graph` — the …」与 `:83` 的 `.../objects/{objectId}/lineage`，数据来自 `provenance_edges`（`cmd/api/main.go:553-559` 逐字「routes over the rebuildable provenance_edges projection (migration …)」）。**证据不是那个图的一部分**——CLAUDE.md §9 不变量 10 逐字「Provenance Graph != Evidence Graph」。你的新读路径**另起一处**，挂法照 `v1` 子 mux 上已有的读路径（GET 由 `authAPI.Guard` 放行，但仍要按项目成员关系做可见性判定——**读路径的可见性见下一条**）。",
+    "**可见性 fail-closed 是既有教条，照抄**：`cmd/api/provenancehttp/store.go:76` 逐字「membership in the path project is checked second, and only then is the …」；`:45`「first in the handlers, so this is a backstop, not the normal path」。**证据的可见性不许比它所依据的断言更松**：读不到某个目标版本的人，也不该看到钉在它上面的断言。**如果你判断需要新的可见性规则，那是 L3，停下来问我，不要自己定。**",
+    "**「假设（Hypothesis）的证据怎么算」——规格里确实没有汇总规则，这是本任务唯一的空白，我按下面裁定一处理，你不要再去 `docs/` 里找答案**：`docs/08_SCIENTIFIC_OBJECTS.md:17` 的 Hypothesis 字段表逐字「字段：statement、question_ref、scope、proposer、hypothesis_type、current assessment、competing/refines/derived relations。Hypothesis 不『转化覆盖』为 Claim；后续 Claim 与其建立 tested_by/supports 等历史关系。」——**有历史关系，没有汇总规则，这就是全部**。`docs/08:51` 的 Finding 字段表里有「contained claim versions」与「summary scope」，说明「包含哪些主张版本」这件事在 Finding 上有先例，Hypothesis 上照这个思路走即可。",
+    "**`internal/evidence/` 只有一个 `doc.go`**，逐字：「Package evidence owns evidence assertions and their provenance chains per docs/10_EVIDENCE_PROVENANCE.md」。**这个包是为本任务与 T0509 准备的落点。**",
+    "**迁移号由我在派工时分配并写进任务包**（账本 `.rddev/runtime/migration-numbers.json`，分配器幂等）。**不要自己选号**（CLAUDE.md §8.1）。**本任务很可能不需要迁移**——`evidence_assertions` 表与两条查询都已存在。不需要就别建，在 RESULT 里说明理由。若确实要建，规矩见 `infra/migrations/README.md`：已发布迁移永不修改、`specs/database/postgres.sql` 只能由 `python3 scripts/gen_schema_snapshot.py` 重新生成、不写 down migration，改完跑 `make check-schema-snapshot` 与 `make check-spec-version`，并同步扩 `tests/integration/migration_test.go` 的 `canonicalTables` / `explicitIndexes`（那里是全等比较）。"
+  ],
+  "scope_note": "这是**按本任务的实际交付面调整过的范围**。相对 DAG 里的 phase 级默认值：**加** `internal/application/**`（读侧服务层的落点；DAG 默认里没有它）与 `infra/migrations/**`（只在确需迁移时才用）。**明确不加**（写进 forbidden_scope）：`cmd/api/provenancehttp/**`（**这是验收第二条的实体**——不许你把证据塞进那个 API 里，也不许你改它的 store）、`specs/api/openapi.yaml`（契约由我维护）、`specs/events/**`、`specs/policies/**` 与 `internal/authz/**`（权限矩阵是安全边界）、`docs/**`。`apps/web/**` **保留**在范围内但**不是本任务的重点**：验收两条都是读侧数据形状，前端页面（Evidence/Provenance UI）是 **T0507**。**如果你只做完 API 侧，那是可以接受的**；若顺手做了前端，必须在 RESULT 里说明与 T0507 的分界，避免两个任务重复做同一页。",
+  "supervisor_scope_narrowing": "2026-09-18 定稿。**这个任务当初被标成「等定」，我现在撤回，只保留一条我自己的裁定。** 2026-09-16 的阻塞理由逐字是「一个假设的证据集合怎么算——是它下面各主张证据的并集，还是直接挂在假设上的那些——规格没写」。**前半句是对的（规格确实没写汇总规则），后半句的推论是错的**：requirement 用的词是 **grouping**，不是 union——要求本身就是「按目标把证据分好组」，没有要任何人造一个假设级的证据集合。所以「没有汇总规则」不是缺口，是**没有人要求过汇总**。\n\n**裁定一（唯一需要拍板的一条）：假设页面 = 两段分开列，不合并、不计分。** 具体是：第一段「直接挂在假设上的断言」；第二段「它下属的主张」，每条主张带着它自己的断言。**不做并集，不给任何条数/比例/净值。** 理由三条：(a) 字面照 requirement 的 grouping；(b) `docs/10:29` 与 CLAUDE.md §9.13 是**禁令**——一旦把多来源证据折成一个数或一个合并清单，就滑向 Truth Score 那一类东西，而 `00058` 的注释把这套推理写得比我能写的更清楚；(c) 这个选择**不发明任何科研语义**，它只是拒绝把两类东西混在一起，而且**可逆**——将来 owner 若要「假设级合并视图」，那是一条独立任务、一次独立的科研语义决定，不是今天在这里顺手做掉。\n\n**裁定二（本轮最容易被做坏的一条）：立场标签只能用 `domain.RelationStance`，算不出来就不显示。** 那段代码对映射不到的关系返回 `(\\\"\\\", false)`——这不是遗漏，是 fail-closed。**不要为了让界面好看而把未知关系归到 neutral**；`neutral` 只属于 `contextualizes` 一个关系。`TestRelationStanceIsALabelNotAScore` 就是钉这件事的。\n\n**裁定三：读路径另起一处，不碰 `provenancehttp`。** 验收原文「与 provenance API 分开」是硬要求，而 `cmd/api/provenancehttp/**` 已经进 forbidden_scope——**动它就是改动另一个已验收任务的交付物，并且把两个领域图混在一起**（§9.10）。\n\n**裁定四：origin/external 保持是 placeholder。** requirement 用的词就是 placeholder；有真实来源（`evidence_type`）就填，没有就空着。`docs/10:13` 的两列归 T0806。**我看到的最坏做法是「为了不空着而填一个看起来合理的外部标记」**——那是在证据上伪造来源，比空着坏得多。\n\n**一条边界**：`internal/rsg/**` 在范围内但**只读**。证据断言是 RSG 之外的另一种关系（§9.10），如果你判断必须改 RSG 侧的 `catalog` 或语义，在 RESULT 里点名说清楚，我来接，**不要自己扩范围**。\n\n**关于 T0806 的一个已知缺口（记录在案，不是给你的活）**：T0506 的 origin/external 那一轴要用到的两列由 T0806 负责，而 T0506 的 DAG 依赖里**没有** T0806。我**故意不加**这条依赖：加上会让 T0506 与它下游的 5 个任务一起等 T0806，而 origin/external 在 requirement 里本来就是个 placeholder。**代价是 T0506 交付时那一轴是空的——那是预期，不是缺陷**，T0806 落地后由一条后续小任务接上。"
+}

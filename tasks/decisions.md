@@ -10252,3 +10252,96 @@ owner 若不同意，这一条可以单独翻——它被单独记出来就是�
 **我尝试直接关闭被权限挡下了**（理由是：那几个 issue 不是本次会话创建的，而你这次只说了「继续工作」，没有点名它们；公开仓库也不该写内部路径）。所以它们仍开着，裁定改记在这里。要关的话你说一声。
 
 仍**真的**需要你拍板的只剩两件：T0602 的 reopen 权限格子（`#250`），以及 T1106 要不要允许页面加载外部资源（`#253` 残余）。
+
+## 2026-09-18 T0410 / T0608 侦察结论（两个都还不能派）
+
+两份只读侦察已完成，结论都是**现在派下去就是错的**，理由如下。
+
+**T0410「PR/Branch 完整 E2E」——在等 T0604，硬依据是它自己的验收标准。**
+它的验收只有一条：「两条 E2E 在 CI 稳定通过」，其中一条要走 `open → review → approved → merge_ready`。
+而今天**产品路径上没有任何办法把 PR 变成 `merge_ready`**：`internal/persistence/review_store.go:104-114` 只落
+`review_required → changes_requested`，注释逐字「The approved half is deliberately absent: deciding WHEN the
+dimensions add up to an approval is **T0604's** required-review calculation, not invented here」；
+`internal/application/reviews/service.go:25-27`、`ports.go:70-73` 同义。现成的反面教材就在树里：
+`tests/integration/merge_governance_e2e_test.go:439-442` 直接调 `SetState(Approved)` / `SetState(MergeReady)`
+跳过产品路径，自己的注释 `:421-424` 承认「no HTTP route in this build」。**T0604 今天派出去了，它就是这一环。**
+
+**T0608「Release/Abort/Policy E2E」——比 T0410 多一层：它还缺 T0602，而 T0602 卡在 L3。**
+链路里的「later abort object」就是对象 abort，全路由表里没有 `:abort-proposal`
+（`internal/application/rsg/service.go` 无 Abort 方法；`internal/persistence/queries/rsg.sql:55-67` 的
+`SetBranchLifecycle` 只更新 `branches` 表），唯一的写法在测试里手拼（`tests/integration/diff_test.go:181-185`
+逐字「the abort path **the V1 write API does not expose yet**」）。`internal/authz/action.go:37-38` 的
+`ActionAbortMainObject` 已经就绪**但零调用者**，注释指名 T0602。
+**DAG 里存在一条缺口：T0608 的依赖是 `[T0606, T0604]`，缺 `T0602`。** 不补这条边，T0608 要么做不到、要么构造状态。
+
+**一条没人认领的规格**：`docs/11_RELEASE_ASSET_HUB.md:35` 要求「过去引用仍解析到原 version，同时显示
+later status warning」。侦察在 `apps/web/lib/releases.ts`、`assets.ts`、`internal/application/releases/**`、
+`internal/application/manifests/**` 里 grep `abort|supersede|lifecycle` **零命中**，`releases` 与
+`research_assets` 两张表也**没有 status 列**（`infra/migrations/00010_releases_assets.sql:14-26,36-48`）。
+全树没有任何任务持有它——T0711 的「不做」清单里没有，T0710 也不是。
+**裁定：这一条归 T0602**（它是「Nothing disappears; state only evolves」在资产面的落地，与对象 abort 同一套状态语义），
+**不另立任务**。T0602 放行时把这条写进它的 requirements。
+
+## 2026-09-18 一个没人认领的 CI 洞（这是 Supervisor 自己的活）
+
+**核实无误：`docs/25_CICD_DEVOPS.md` 列的 CI 清单第 8 项是「Playwright E2E」，而实际 CI 里一套都没有。**
+`.github/workflows/ci.yml` 的 7 个 job 是 spec-validation / task-state / go / web / acceptance / python /
+migration-integration，`specs/orchestrator/gates.json` 的 `required_jobs` 与之一致。
+仓库里其实有 **9 套 Playwright 测试**（`tests/e2e-{anonymous,explore,files,assets,pulls,conflicts,settings,shell}`、
+`tests/web-smoke`，都是 `playwright 1.55.0`），**但一套都没接进 CI**——写了，没接线。
+
+**为什么只能我来做**：`gates.json` 头部逐字写着「G2 re-runs CI's EXACT steps — the jobs of
+`.github/workflows/ci.yml`, steps verbatim (**a sync unit test fails when this file drifts from ci.yml**)」——
+即 `gates.json` 是 `ci.yml` 的**镜像**，两者由单元测试强制不许漂移。而 `specs/orchestrator/**` 按
+CLAUDE.md §8.1 是 **Supervisor-only**，Worker 拿不到。**所以这一对文件只能由我改，且必须同时改。**
+
+**副作用（这就是它为什么不能随时做）**：`specs/orchestrator/gates.json` 在 `specs/` 下，**是规格指纹的输入**——
+一改，`specs/SPEC_VERSION.json` 就动，正在跑的 Worker 的 G2 合成树立刻变红。**必须和任务书落地挤同一个空窗。**
+
+**同一件事也让 T0410 的范围不够用**：它的验收是「两条 E2E **在 CI** 稳定通过」，而它的 `allowed_scope` 是
+`["infra/migrations/**","specs/database/postgres.sql","specs/SPEC_VERSION.json","internal/persistence/**",
+"internal/rsg/**","internal/application/**","internal/domain/**","go.mod","go.sum",".env.example","cmd/api/**",
+"apps/web/**","tests/**"]`——**够不着 `.github/workflows/**`，也够不着 `specs/orchestrator/gates.json`**。
+裁决：**T0410 写测试套件（`tests/**` 在它范围内，这是它的真实交付），我接 CI 接线**。
+两者是同一验收的两半，缺一不可；**接线在我这边完成前，T0410 不算完成**。T0410 的任务书里要写明这条分界。
+
+**另一条同批修出的缺口**：T0410 的 E2E 需要 `POST /projects/{projectId}/pull-requests`（PR create），
+契约在 `specs/api/openapi.yaml:172-184` 但**没有实现**——`cmd/api/pullrequestshttp/wiring.go:44-47` 只注册了 4 条 GET。
+**裁定：不新立任务**，补这条路由是 T0410 范围内的 L1 实现（契约已给），写进它的 requirements。
+
+## 2026-09-18 引文更正（T0604，暂存等落地）
+
+侦察指出 T0604 任务书把 `merge_ready` 的强制引成 `internal/application/merge/service.go:215-217`。
+**我自己核过：行号漂了。** 今天 `:215` 是 `Replayed bool`（`internal/application/merge/errors.go` 里的
+`PR_NOT_MERGEABLE` 判定在 `service.go:428-430`：`if pr.State != domain.PullRequestStateMergeReady { return nil,
+&NotMergeableError{...} }`）。
+`tasks/packages/T0604.json` 里两处已改。**`tasks/tasks.json` 里那两处（T0604 自己的条目在 `:3376`；
+T0409 已合并的条目在 `:2578`）不能现在改——T0604 正带着那份任务书在跑，改它会让 G2 合成树对不上。**
+T0409 那处是历史记录，随它去。
+
+## 2026-09-18 新增三条 L3（都记下，不打断流水线）
+
+侦察 T0708 / T0808 / T0809 时各挖出一条规格没写、又不该由我替 owner 决定的事。
+**三条都不在关键路径上**（关键路径是 P9 那条搜索链），所以按 §5「不影响其他任务继续执行」，
+**我不打断当前流水线**，记在这里，连同原有的两条一起等 owner 一并裁定：
+
+1. **T0708 —— `derivatives: unspecified` 与 `restricted` 各自对「派生」意味着什么？**
+   规格零处规定。`docs/11:27` 只说「Fork/Derive：创建新的 Asset/Object identity，保留 lineage」。
+   仓库自己的取向是「unspecified 不是绿灯」：`internal/rights/usage.go:9-14` 逐字「a declaration that says
+   nothing stays unspecified and the UI renders it as "not declared" rather than as a green light」。
+   但「不是绿灯」推不出「必须拒绝」——**拒绝谁、放行谁是权利语义**。
+   同批：谁能对一条公开资产发起 derive（矩阵里没有该 action，`internal/authz/action.go` 的 15 个 action 里也没有）。
+2. **T0808 —— Profile 到底展示哪些维度？** `docs/13:19` 与 `docs/04:48` 是**两份不一致的列表**，
+   只有 3 项重合；而 `docs/04:48` 的 Review quality / Cross-project impact / Industrial-Public contribution
+   **在库里没有证据源**，前两个还要引入「review 质量」「跨项目影响」的判定，正撞 `docs/02`「不做自动科学真值判定」。
+   同批：`docs/04:56` 要求的「披露级别」没有任何取值集合定义，谁签发也没写；以及「任何计数是不是算泄漏」
+   （`docs/23:21` 逐字「私有对象计数也不能通过 public API 泄漏」）。
+3. **T0809 —— 高层 credit 的角色词表。** `docs/13:11` 只给「creators/major contributors/method designer **等**」，
+   「等」是开口的。复用 `docs/04:30-42` 的 13 个 contribution role 是一种读法，但那 13 个是**事件角色**
+   且 `docs/04:44` 逐字「这些不是身份，不赋权，不计固定分值」——把事件角色当 credit 头衔会把两件事混起来。
+   谁是「主要贡献者」是科研语义。同批：谁可以发起 dispute（只在 credit 里被署名、并非项目成员的人能不能发起）、
+   谁可以 resolve（哪一级 maintainer）、未 resolution 的 dispute 在公开 Profile 上是否显示
+   （`docs/13:15` 只说「不参与排名」，不等于「不显示」）。
+
+连同原有的两条（T0602 的 reopen 权限格子 / issue #250；T1106 是否允许页面加载外部第三方资源 / issue #253 残余），
+**现在共五条待 owner 裁定**，全部不在关键路径上。

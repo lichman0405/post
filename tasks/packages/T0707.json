@@ -59,7 +59,7 @@
     "**`docs/23_SECURITY_PRIVACY.md:21`**：私有用法/计数不得泄漏的既有裁决（与 issue #238 / T0712 同一类）",
     "**`docs/42_PAGE_SPECS.md:19`**：资产页十一项里的 dependencies 与 used/derived public links",
     "`infra/migrations/00010_releases_assets.sql:55-62`：`asset_dependencies` 的实际列与 `visibility_of_usage` 的既有 CHECK",
-    "`infra/migrations/00045_...sql:47-58`：CITATION/DEPENDENCY IS THE ONLY ADMITTED EDGE（逐字）",
+    "`infra/migrations/00045_external_reference_live_identity_and_snapshot.sql:47-58`：CITATION/DEPENDENCY IS THE ONLY ADMITTED EDGE（逐字）",
     "`infra/migrations/00064_asset_pid_origin.sql:41-45`（及 `00066:21-30`、`00067:22-34`、`00045:74-79`）：**词表定义在 Go 侧、不加 DB CHECK** 的既有约定，四处",
     "`internal/assets/dependency.go:9-18`：pin 的精确版本要求",
     "`cmd/api/provenancehttp/wiring.go:57-70`：读路径挂在 v1 mux 上、不进契约的先例",
@@ -72,9 +72,5 @@
   ],
   "dependencies": [
     "T0705"
-  ],
-  "baseline_sha": "",
-  "max_turns": 0,
-  "max_budget_usd": 0,
-  "migration_number": 0
+  ]
 }

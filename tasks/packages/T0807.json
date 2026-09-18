@@ -12,7 +12,7 @@
     "**`via` 这一列 `docs/13:7` 点名要求，表里没有，要补**。`docs/13:7` 逐字：「每个 event：actor person id、affiliation at time、project/object refs、role tags、**via agent/client**、timestamp、accepted/released context。」仓库里有**两套**叫 `via` 的词表，**别选错**：\n  - `audit_log.via`（`00012:47`，无 CHECK，Go 侧四个值 `session`/`password`/`oidc`/`internal`，定义在 `internal/domain/audit.go:73-79`）——那是**「这个动作是怎么认证进来的」**。\n  - `state_commits.via`（`00004_rsg_state.sql:46`，六个值 `web`/`api`/`mcp`/`claude_code`/`git_compat`/`system`，Go 侧在 `internal/domain/state.go:63`，校验在 `internal/application/states/service.go:270`）——那是**「这个改动是从哪个通道来的」**。\n  `docs/13:7` 说的是 **agent/client**，所以取**后者**这套。**但关键在「值从哪来」**：`research_events`（`00012:4-13`）**没有 `via` 列**，`outbox_events` 的信封也没有（`00046:36-40` 只补了 `actor_id`/`project_id`/`visibility`/`last_error`）。**不许填一个读起来像事实的默认值。** 照 `00046` 自己的规矩办——逐字：the publisher must copy them from the outbox row, **never re-derive them from the payload**；也就是说信封列要一路带过来（outbox → research_event → 账本）。如果你判断通道在投影那一刻确实不可知，在 RESULT 里点名说明，不要编。",
     "**`accepted_context` / `released_context` 是什么，依据在 `docs/13:4`**：它把 **Accepted Contribution** 与 **Release inclusion** 列为 Reputation Profile 里**两个不同的维度**（逐字：accepted contributions、assets reused、protocols derived、independent reproductions、reviews、cross-org collaboration、confidential verified contributions）。这两个布尔列就是那两件事的记录位。**你要把触发条件写清楚并在 RESULT 里逐条说明**（什么事件让哪个变 true；`contribution.accepted` 已在 `specs/events/event-types.yaml` 里），并且**必须在同一行上、按事件当时的事实判定**——不许事后回填。",
     "**「affiliation at time」是「事件发生当时」，不是「投影当时」**：`organization_id_at_time` 这一列（`00011:23`）的名字就是这条要求。**投影必须取 `occurred_at` 那一刻的归属。** 这是可测的：让某人换组织，再重跑投影，**已经记下的那几行不得改变**。",
-    "**「同一 event 不重复 credit」的机器形状仓库里已经有先例，照它做**：`infra/migrations/00046_transactional_outbox_publish.sql:16-25` 与它下面的偏索引——逐字：`research_events.outbox_event_id` pins the outbox row each event came from, and **the partial unique index below makes the retried insert a no-op**（`research_events_outbox_event_uniq`，`WHERE outbox_event_id IS NOT NULL`）。**账本行同样要钉住它的来源事件，并用「来源非空 + 偏唯一索引」让重放成为 no-op**（`INSERT ... ON CONFLICT DO NOTHING`）。这样投影可以**反复重跑**而不会把同一次贡献记两遍。",
+    "**「同一 event 不重复 credit」的机器形状仓库里已经有先例，照它做**：`infra/migrations/00046_outbox_idempotent_publish.sql:16-25` 与它下面的偏索引——逐字：`research_events.outbox_event_id` pins the outbox row each event came from, and **the partial unique index below makes the retried insert a no-op**（`research_events_outbox_event_uniq`，`WHERE outbox_event_id IS NOT NULL`）。**账本行同样要钉住它的来源事件，并用「来源非空 + 偏唯一索引」让重放成为 no-op**（`INSERT ... ON CONFLICT DO NOTHING`）。这样投影可以**反复重跑**而不会把同一次贡献记两遍。",
     "**投影只记事件，不产生任何分数——这条是硬约束**：`docs/13:19` 逐字「禁止单一分数」；`docs/13:25-27` 的 Anti-gaming 逐字「不使用 Like 数做信誉。raw commit count/experiment count 不作为质量代理。重复自建项目互相引用不得直接等价为独立 external impact」；CLAUDE.md §9 不变量 13「不生成 Truth Score / Research Score」。**所以：不得在账本行上放任何聚合值、计数器、权重、排名**，也不得为了让 Profile 好渲染而先算一个总分。账本记事实，Profile 怎么展示是后面的事。",
     "**append-only 已经由数据库强制，你不必再加，但必须证明它对你的新写入路径同样生效**：触发器在 `00014_append_only_enforcement.sql:75-76`（BEFORE UPDATE OR DELETE）与 `00015_append_only_truncate.sql:22-23`（BEFORE TRUNCATE），既有测试在 `tests/integration/append_only_test.go:74` 与 `:582-592`。**纠错只能追加新事件，不得改旧行**（`docs/13:11`、`:15`，CLAUDE.md §9 不变量 14「Contribution Ledger append-only；Credit 可纠错但留痕」）。",
     "**加列会碰一个既有测试，改它是「补上」而不是「放宽」**：`tests/integration/migration_test.go:589-590` 逐列断言了 `contribution_events` 的列集合。加 `via` 之后这个期望清单**要补上新列**——**只许往严里补（新列的 类型/非空/默认值 都要断言），不许改成子集或弱断言**（CLAUDE.md §5.1）。",
@@ -61,7 +61,7 @@
     "**`docs/13_CONTRIBUTION_REPUTATION.md`（整篇很短，全读）**：`:5` 事件清单、`:7` 每条事件必须带的七项（**`via` 就在这一行**）、`:11` 纠错作为新事件、`:15` 不得直接改原事件、`:19` 禁止单一分数、`:25-27` Anti-gaming——本任务的验收依据",
     "**`docs/04_USERS_ROLES.md:26-44`**：十三个 Contribution Role 取值（`:30-42`）与它的性质「不是身份、不赋权、不计固定分值」（`:44`）",
     "**`specs/events/event-types.yaml`（只读）**：25 个事件名的唯一真相源，含 `contribution.accepted` / `credit.dispute_opened` / `credit.dispute_resolved`",
-    "**`infra/migrations/00046_transactional_outbox_publish.sql:1-60`**：来源钉住 + 偏唯一索引做幂等、以及「信封列必须从 outbox 行复制、不许从 payload 重推」的逐字规矩——**本任务去重要照抄的形状**",
+    "**`infra/migrations/00046_outbox_idempotent_publish.sql:1-60`**：来源钉住 + 偏唯一索引做幂等、以及「信封列必须从 outbox 行复制、不许从 payload 重推」的逐字规矩——**本任务去重要照抄的形状**",
     "`infra/migrations/00011_external_contribution.sql:21-32`：`contribution_events` 的实际列（**注意没有 `via`**）",
     "`infra/migrations/00012_events_audit.sql:4-13`（`research_events` 的实际列，**同样没有 `via`**）与 `:47`（`audit_log.via` 的写法，无 CHECK）",
     "`infra/migrations/00004_rsg_state.sql:46`＋`internal/domain/state.go:63`＋`internal/application/states/service.go:270`：**通道**词表的六个取值与它的校验收口",
@@ -79,9 +79,5 @@
   "dependencies": [
     "T0409",
     "T0705"
-  ],
-  "baseline_sha": "",
-  "max_turns": 0,
-  "max_budget_usd": 0,
-  "migration_number": 0
+  ]
 }

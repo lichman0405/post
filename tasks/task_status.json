@@ -4561,8 +4561,10 @@
       ]
     },
     "T0604": {
-      "status": "ready",
+      "status": "running",
+      "started_at": "2026-09-18T08:20:45Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：required-review 判定（几个 review、哪几个维度、哪个 responsibility 签、什么变更对应什么要求）规格全无。T0409 的交付代码逐字把这一步指名交给 T0604（internal/application/reviews/service.go:25-27），前置 T0404/T0603 均已合并。",
+      "worker_run_id": "run-2dcabe960f21dcec",
       "history": [
         {
           "from": "todo",
@@ -4576,6 +4578,13 @@
           "to": "ready",
           "at": "2026-09-18T08:07:26Z",
           "run_id": "run-0887ecf66032ceb9"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-18T08:20:45Z",
+          "run_id": "run-2dcabe960f21dcec",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -5260,7 +5269,7 @@
       "merged_at": null
     },
     "T0711": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-18T07:33:41Z",
       "notes": "SPEC_BLOCKED resolved: T0805 package landed and knowledge publish OpenAPI contract added per L3-20260916-1",
       "worker_run_id": "run-a0826dd7c4416cd1",
@@ -5291,6 +5300,13 @@
           "at": "2026-09-18T07:33:41Z",
           "run_id": "run-a0826dd7c4416cd1",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-18T08:20:43Z",
+          "run_id": "run-a2d280aebbf17fe5",
+          "reason": "collect: all checks passed"
         }
       ]
     },
