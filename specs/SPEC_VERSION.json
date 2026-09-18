@@ -1,9 +1,9 @@
 {
   "algorithm": "sha256",
-  "combined_digest": "e18bb523cb4b7f5899132281872203bfc0bf4d6319d5a27cd59eacf837fd3f42",
+  "combined_digest": "81ed08b37e56a0987b627c0b5a486a19a7112f788dfdc9e8e95071c67b7f8f2a",
   "files": {
     "specs/README.md": "2a0398dfb3ead0586034364d7411d845b84fd33b7c43d1ce9199d6a14ef4cf1a",
-    "specs/api/openapi.yaml": "8f2e4cb78ae6c66991d8ad1a4ca15a67248b2cbeee4ebe259323af4a8f08aad1",
+    "specs/api/openapi.yaml": "0856d72ed4044b82b6ceae287600871034cae3d4396caad33be369c080978544",
     "specs/database/postgres.sql": "5839d3f9e0c98e332307c9618dad33881cfa0b479401e9ebe13660f9ff5b06f2",
     "specs/events/event-types.yaml": "5987d653a176348dd86cb6563578de8095e9f8390cca72b332f51dac5edf954c",
     "specs/mcp/tools.json": "f6b5fb023aba882a259bbe7d001bdd2755c1120f1dc768fe7512a7383fdbaca9",
@@ -39,9 +39,9 @@
     "specs/schemas/sample.schema.json": "fed5737f271de54c07ebcb429740b224023ce0ffee84e173ff48b7fa7639732a",
     "specs/ui/page-inventory.csv": "c89311bf12526e5d5762a351d71a447caa1c9a79912a172449dd3639141387fb",
     "specs/ui/routes.yaml": "88ae6cb829eae37dd8ae5f8815ce2b4eabc9ec82c51c95cf43223be91922f570",
-    "tasks/tasks.json": "1f1e392ddb03375310bb89e241905b8837d79859148236b6f5b428d826b69d04"
+    "tasks/tasks.json": "3469675d0455bafe1182c1d6607c4ba7fd9d0ccae692c4e06c3647e6665ab89b"
   },
   "input_count": 38,
   "marker_format": 1,
-  "spec_version": "sha256:e18bb523cb4b7f58"
+  "spec_version": "sha256:81ed08b37e56a098"
 }

@@ -4286,21 +4286,26 @@
       "phase_name": "Research Asset Hub、Rights 与 Publish",
       "title": "Asset Governance 与 Rights Holder Transfer",
       "v1_required": true,
-      "dependencies": [
-        "T0705"
-      ],
+      "decision_level_max": "L1",
       "requirements": [
-        "实现 Rights Holder/Custodian/Maintainer/Creator/Contributor 分离",
-        "ownership transfer append-only event",
-        "transfer 不改变 asset id/version/origin/creator"
+        "**缺口不是我发明的，代码自己写在那儿了**。`internal/assets/page.go:190-201` 逐字：the publish gate **validates** the creator ids a publish declares (`internal/assets.PublishCandidate.CreatorIDs`) but **no table stores them** — the version row's only actor is `published_by`；同一段还写着「rendering it as what it is, with the role named, is the honest half of an item whose other half **needs a schema change**（reported in the task result, not silently dropped）」。**那一半就是本任务。** 而被丢掉的那份名单今天是真的被收上来了：`internal/assets/gate.go:221-227` 让发布**必须**至少有一个 creator（`validation.CheckAssetContributors`；判定在 `:344-349`）。**平台在发布时索要一份署名名单，校验完就扔了**——本任务把它存下来。（`internal/assets/page.go:725` 是同一件事的第二处注释。）",
+        "**六种角色要分开，不是合成一个「owner」**。`docs/11_RELEASE_ASSET_HUB.md:31` 逐字：「分离 Rights Holder、Custodian、Maintainer、Creator、Contributor、Originating Project。」注意其中两处不能塌陷：**Creator ≠ Contributor**（`internal/assets/gate.go:49-51` 也把两者并称 creators/contributors，指向 docs/11 §3 与 CLAUDE.md 不变量 14），以及 **Originating Project 是一个项目，既不是人也不是组织**——把这三样塞进同一个「party」列，正是这条规格要防的事。",
+        "**所有权转移是 append-only 的**。`docs/11:31` 逐字：「Ownership transfer 是 append-only governance event；Creator/history 永久保留。」`docs/26_OBSERVABILITY.md:25` 把 ownership transfer 列在**最高风险那一档**（与 visibility、rights、policy、merge、publish、abort/reopen 并列），并要求 audit append-only。所以：**转移只能追加，不得改写任何既有行**；转移之后，转移**之前**的持有关系仍要读得出来。这也对上 CLAUDE.md §9 不变量 8：Nothing disappears; state only evolves。",
+        "**转移不得改变 asset id / version / origin / creator**——这是本任务自己的验收条款，四条都要有断言。判例：`infra/migrations/00064_asset_pid_origin.sql` 已经立下同一形状的规矩（pid 不随 slug/org 变化，那是它自己的验收）；这里 pid 同样不得随 holder 变化。**creator 与 contributor 是署名，不是所有权**——换持有者不是换作者。",
+        "**权利人可以是组织，人和组织要分开记**（owner 今天的裁定，原文记在 `tasks/decisions.md` 的 L3-20260916-1）。**这条不需要你发明形状——schema 本来就是分开的**：`infra/migrations/00002_identity.sql:3` 是 `users`，`:12` 是 `organizations`，两张独立的表。所以：**把「哪一种」和「哪一个」一起记下来**（kind 与 id 并存），**不要**造一个多态的 `actor_id`——那样读的人就再也分不清这个持有者是人还是组织；**也不要**为了装持有者新造一张「当事人」表，那会把已经分开的两张表又糊回去。",
+        "**权限只有 owner——这一行没有歧义**。`specs/policies/permissions-matrix.csv:13` 是 `change_rights_holder,deny,deny,deny,deny,deny,allow,deny`，表头在同文件 `:1`（`public_anonymous,authenticated_nonmember,viewer,contributor,maintainer,owner,agent_default`）。**注意它与发布那一行的区别**：发布那行 maintainer 是 `conditional`（于是我去查了它未定义、按 fail-closed 收成拒绝），而**这一行 maintainer 直接是 `deny`**——照它做，**只有 owner**。`specs/mcp/tools.json:26-31` 把 `change_rights_holder` 列在 `forbidden_default_agent_actions` 里（与 `merge_main`、`publish_private_to_public` 同档）。动作名**已经注册好了**：`internal/authz/action.go:36` 的 `ActionChangeRightsHolder`。**`internal/authz/**` 在你范围之外**——权限模型不许你动，它已经就位，你按它用即可。",
+        "**不做**：不做 credit dispute（`docs/26_OBSERVABILITY.md:25` 里它是与 ownership transfer 并列的**另一条**高风险动作，不是本任务）；不做 scientific review 维度；不删除、不覆盖任何历史；不碰发布流程本身（那是 T0705，已完工）。"
       ],
-      "deliverables": [],
       "acceptance_criteria": [
-        "转移后旧历史可见",
-        "Creator 不被新 owner 替换"
-      ],
-      "tests": [
-        "asset governance tests"
+        "**发布时收上来的 creator/contributor 名单真的落库了**——照 `internal/assets/page.go:190-201` 点名的那个缺口（validated but no table stores them）。有测试：发布一个声明了 creator 列表的资产，事后**从库里读回**该列表，与请求里给的逐项一致",
+        "**六种角色分开存**（`docs/11_RELEASE_ASSET_HUB.md:31`）。有测试证明它们不是同一格：Creator 与 Contributor 可各自独立，Rights Holder 与 Creator 可指向不同方，Originating Project 与这三者都不是一回事",
+        "**转移后旧历史可见**：做一次所有权转移之后，转移**前**的持有关系仍然读得出来（append-only，不是 UPDATE 覆盖）——有测试",
+        "**Creator 不被新 owner 替换**：转移前后，Creator 那一格**逐字不变**——有测试（这是本任务的验收条款之二，逐字：Creator 不被新 owner 替换）",
+        "转移**不改变** asset id、version、origin、creator——四条各有独立断言（可参照 `00064` 对 pid 稳定性的验收写法）",
+        "**权利人可以是组织，且人与组织分开记**：两条测试——一个用户持有者、一个组织持有者；**读出来的结果能分辨是哪一种**（kind 与 id 并存）。反例要有：不得出现「只知道 id、不知道是人还是组织」的读取路径",
+        "权限 **fail-closed**：owner 能转移；**maintainer 被拒**；匿名被拒——三条都有测试（`specs/policies/permissions-matrix.csv:13`，这一行 maintainer 是 `deny`，照它做，不要照发布那行的 `conditional`）",
+        "转移记 **append-only 审计/事件**（`docs/26_OBSERVABILITY.md:25` 把 ownership transfer 列在最高风险一档）——有测试读得到那次转移的记录，且再转移一次时上一条仍在",
+        "RESULT 里点名回答：`internal/assets/page.go:190-201` 说「另一半需要一次 schema 变更」——**你做的是不是那一半**？若你判断不是、或还缺别的东西，照实说。另外点名回答：`publish` 门里那份 creator 名单在**没有经过发布**的资产上（例如既有存量数据）是空的，你的读路径怎么处理这种行——照实说，不要编一个默认值填上去"
       ],
       "allowed_scope": [
         "infra/migrations/**",
@@ -4309,23 +4314,56 @@
         "internal/persistence/**",
         "internal/assets/**",
         "internal/rights/**",
-        "go.mod",
-        "go.sum",
-        ".env.example",
+        "internal/domain/**",
+        "internal/application/**",
+        "internal/observability/**",
         "cmd/api/**",
         "apps/web/**",
         "packages/schemas/**",
-        "tests/**"
+        "tests/**",
+        "go.mod",
+        "go.sum",
+        ".env.example"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "specs/api/openapi.yaml",
+        "specs/events/event-types.yaml",
+        "specs/mcp/tools.json",
+        "specs/policies/**",
+        "internal/authz/**",
+        "Makefile",
+        "scripts/**"
       ],
-      "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "**`internal/assets/page.go:190-201`**：本任务的缺口定义处，逐字写着 creator 名单 validated but no table stores them、另一半 needs a schema change——**先读它**。`:725` 是同一件事的第二处注释",
+        "**`docs/11_RELEASE_ASSET_HUB.md:31`**：六种角色分离、ownership transfer 是 append-only governance event、Creator/history 永久保留——本任务的总依据",
+        "**`specs/policies/permissions-matrix.csv:1,13`**：表头与 `change_rights_holder` 那一行（只有 owner 是 allow）——权限依据",
+        "**`specs/mcp/tools.json:26-31`**：`change_rights_holder` 在 `forbidden_default_agent_actions` 里——agent 默认不许",
+        "**`internal/authz/action.go:36`**：`ActionChangeRightsHolder` 已注册，动作名以它为准（**该目录你不要改**）",
+        "**`internal/assets/gate.go:44-51, 221-227, 344-349`**：`CreatorIDs` 的定义、发布时「至少要有一个 creator」的强制、以及它的校验——那份名单今天从哪来、又被丢在哪一步",
+        "**`infra/migrations/00002_identity.sql:3,12,20`**：`users` 与 `organizations` 是两张独立的表（外加 `organization_memberships`）——「人和组织分开记」已经有的形状",
+        "**`infra/migrations/00064_asset_pid_origin.sql`**：pid 不随可变更属性变化的先例与它的验收写法——照它写「转移不改变 id」",
+        "**`docs/26_OBSERVABILITY.md:25`**：ownership transfer 属最高风险动作、audit append-only；同页还有一条 credit dispute，那是**别的**任务",
+        "**`infra/migrations/00066_rights_document.sql`**：`rights_json` 是**权利声明文档**（许可、用途、可见性），**不是**「谁是权利人」——两者不是一回事，别把本任务的需求塞进那个文档",
+        "**`infra/migrations/00010_releases_assets.sql:64-71`**：`knowledge_publications.rights_json`——同一份文档模型的知识侧",
+        "`tasks/decisions.md` 的 **L3-20260916-1**：「权利人可以是组织吗 → 可以，人和组织分开记」的裁定原文",
+        "`CLAUDE.md` §9 不变量 8（Nothing disappears; state only evolves）与不变量 14（Contribution Ledger append-only；Credit 可纠错但留痕）"
+      ],
+      "scope_note": "这是**按本任务的实际交付面**收窄后的范围。相对 DAG 里的 phase 级默认值：保留 `infra/migrations/**` + `specs/database/postgres.sql` + `specs/SPEC_VERSION.json`（本任务要落新表并重新生成快照与指纹）；保留 `internal/persistence/**`、`internal/assets/**`、`internal/rights/**`、`packages/schemas/**`、`tests/**`、`cmd/api/**`、`apps/web/**`；**加** `internal/domain/**`（审计与组织相关的领域类型在那里：`internal/domain/audit.go`、`internal/domain/organization.go`）、`internal/application/**`（转移命令要有个家，`internal/application/assetpublish` 就是同一层级的先例）、`internal/observability/**`（高风险动作的审计落点）；**移出** `internal/authz/**`（**权限模型不许你动**——`ActionChangeRightsHolder` 已经注册好了，你按它用；要改权限矩阵得先回到我）、`specs/api/openapi.yaml`、`specs/events/event-types.yaml`、`specs/mcp/tools.json`、`specs/policies/**`（四份都是 Supervisor-only 的规格，你只读）、`scripts/**`、`Makefile`。",
+      "supervisor_scope_narrowing": "2026-09-16 定稿。五点说明：\n（一）**它的 L3 已经问过 owner 了**：本任务卡在「权利人能不能是组织」这一条上（issue #240 一类），我今天问了 owner，答：**可以，而且人和组织分开记**。原文记在 `tasks/decisions.md` L3-20260916-1。**裁定落进 schema 的形状是现成的**——`users` 与 `organizations` 本来就是两张表（`00002_identity.sql:3,12`），所以要求是「kind 与 id 一起记」，不是「新造一张当事人表」。\n（二）**我把缺口的出处钉在代码上，没有自己去发明需求**。`internal/assets/page.go:190-201` 那段注释是别人（T0709 那条线）留下的诚实之言：门收了 creator 名单，没有表存它，于是页面只好把 publisher 标成 `Role: \"publisher\"` 而不是冒称 Creator。它自己写明「the other half needs a schema change」。**本任务就是那另一半。** 这样写有个好处：如果 Worker 判断我读错了那段注释，它有一个可以指着反驳的具体句子，而不是只能跟我争抽象需求。\n（三）**「转移之后能不能撤回」我没有问 owner**，按保守默认办：**append-only，不做撤销**（要撤销就再追加一次转移）。依据是 `docs/11:31` 与 `docs/26:25` 都只管「append-only」，没有任何一处写过撤销。若你判断不做撤销会让某条既有规格无法满足，在 RESULT 里说。\n（四）**迁移号不在这份任务书里定死**——派工时由 `rddev` 从分配账上取号并写进任务包，**以任务包里那行「its number is **NNNNN**」为准**。**不得自行选号。**\n（五）**存量数据我没有给指令**，这是有意的：`internal/assets/page.go` 的注释与 `00066` 的迁移注释都立过同一条规矩——**不要替没有声明过的人发明一份声明**（`00066` 逐字：inventing a declaration for a row that stated none is precisely the upgrade 00064 warns against）。所以对发布之前就存在的资产行，**不要回填一份假名单**；怎么读这种行，写进 RESULT 让我看。",
+      "tests": [
+        "asset governance tests"
+      ],
+      "dependencies": [
+        "T0705"
+      ],
+      "baseline_sha": "",
+      "max_turns": 0,
+      "max_budget_usd": 0,
+      "migration_number": 0
     },
     {
       "id": "T0801",
@@ -4551,46 +4589,90 @@
       "phase_name": "开放网络、Fork、贡献与 Research Profile",
       "title": "Published Knowledge Object",
       "v1_required": true,
-      "dependencies": [
-        "T0503",
-        "T0704"
-      ],
+      "decision_level_max": "L1",
       "requirements": [
-        "Q/H/Claim/Finding explicit Publish to Network",
-        "fixed version/rights/PID-like id",
-        "not auto on main"
+        "**要建的是「发布这条命令」——桌子、门牌、事件名三样都摆好了，写入口一处都没有**。`knowledge_publications`（`infra/migrations/00010_releases_assets.sql:64-71`：`id`/`object_version_id`/`public_version`/`rights_json`/`published_by`/`published_at`，唯一约束 `UNIQUE(object_version_id,public_version)`）**自建库以来没有任何写入方**；事件名 `knowledge.version_published` 已经在 `specs/events/event-types.yaml:27`；对外读取路径 `GET /knowledge/{knowledgeId}` 在 `specs/api/openapi.yaml:293`。**缺的是发布这条路。** 契约里 knowledge 只有那一个公开 GET，`publish` 与 `publish-preview` 两条都没有——而**资产那两条都在**（`specs/api/openapi.yaml:229-241`）。**照资产的形状补这两条**（`:publish-preview` 先，`:publish` 后，summary 写明 human governance action）。",
+        "**「发布」不等于「公开」——owner 已裁定（`tasks/decisions.md` L3-20260916-1），而且这根轴已经存在，不要新造一根**。知识对象版本早就有可见性轴：`scientific_object_versions.visibility_policy_id`（`infra/migrations/00005_scientific_objects.sql:22`）。它不是随手加的：它是 RSG manifest 的一部分（`internal/rsg/schemareg/schemas/rsg-manifest.schema.json:66,124`）、**服务端权威**（各 entity schema 头部逐字：The fields id, version, schema_ref, lifecycle_state, created_by, created_at and `visibility_policy_id` are server-authoritative (docs/23 §3, docs/12 §3)）、并且 RSG 冲突判定把它当**权利**字段处理（`internal/rsg/conflict/doc.go:36`）。**所以要求是：发布不得扩大可见范围，公开读取必须尊重这根既有轴；不要新加一个 `public`/`private` 列来冒充它。** 判例：`docs/12_PERMISSIONS_RIGHTS_POLICY.md:13` 逐字允许「Private Project：project/RSG/private blobs 默认不可见；**可显式 Publish Asset/Knowledge/Attestation**」；资产侧的写法是 `internal/application/assetpublish/command.go:283-286` 与 `:441-444` 的 `requirePolicy`（逐字：A private publication widens nothing; the rule is about public assets and is not read）。",
+        "**`public_version` = 对外显示的版本名，由发布者在请求里给出，服务端原样存**（owner 裁定二）。表上已有 `UNIQUE(object_version_id,public_version)`（`00010:70`）。**不要服务端生成它**——它不是 pid，它是给人看的标签；也不要做任何规范化或推导。",
+        "**同一个知识对象版本只能对外发布一次，第二次拒绝**（owner 裁定三）。**注意这条是应用层规则，数据库不会替你拒**：那条唯一约束**允许**同一版本有多行，只要 `public_version` 不同。所以「拒绝第二次」必须由你在命令里判，并且**必须有测试钉住**。这条裁定同时消掉了对外读取的歧义——同一版本不存在多行，`GET /knowledge/{knowledgeId}` 不必为「返回哪一行」发明规则。",
+        "**稳定编号**：知识对象要有对外稳定的 PID，形态照资产那一套——26 位小写 Crockford base32，CHECK 与生成器都在 `infra/migrations/00064_asset_pid_origin.sql`（生成器是 Go 侧的 `internal/assets.NewPID()`）。依据：`docs/03_GLOSSARY_DOMAIN_MODEL.md:71`（Published Knowledge Object「显式 Publish to Network 的 Research Question/Hypothesis/Claim/Finding 版本，**可被跨 Project 引用**或贡献 External Evidence」）与 `docs/05_INFORMATION_ARCHITECTURE.md:38`（「所有页面必须显示 persistent identity、version、origin、rights、lineage、current network state」）。**pid 不得由可变更属性推出**——`00064` 自己的验收逐字：asset ID 不随 slug/org 变化。若你判断需要动 `internal/assets/`（例如把 NewPID 挪成公共位置），**在 RESULT 里说明再动**，它已在你的范围内但请标注。",
+        "**生命周期照 `docs/43_STATE_MACHINES.md:21-22`**——这是全仓库唯一写明的发布状态机，逐字：「private candidate → publication_review → published；失败回到 private candidate，**不存在自动 published**」。它与资产那条 `:publish` 的性质一致（`specs/api/openapi.yaml:235` 的 summary：human governance action）。中间那一格（`publication_review`）落成什么形态——是表上一列、还是走既有的评审/PR 通道——**由你判断并在 RESULT 里说明理由**；但**「没有经过 review 就能变成 published」必须不可能**，并且要有测试钉住。",
+        "**权限 fail-closed**：矩阵那一行 `publish_private_to_public`（`specs/policies/permissions-matrix.csv:12`）取值是 `deny,deny,deny,deny,conditional,allow,deny`，表头在同文件 `:1`（`public_anonymous,authenticated_nonmember,viewer,contributor,maintainer,owner,agent_default`）。逐格读：匿名/非成员/viewer/contributor 全 `deny`，**maintainer 是 `conditional`**，**owner 是 `allow`**，agent 默认 `deny`。**`conditional` 的那个「什么情况」在规格里从未定义**（那是 issue #237）。**照资产的先例：只有 owner 能发布，maintainer 不能**——因为 `conditional` 没定义，把它读成允许就是把 fail-closed 关到错的一边。",
+        "**事件名用机器可读那一份**：`specs/events/event-types.yaml:27` 的 `knowledge.version_published`。`docs/18_EVENTS_SUBSCRIPTIONS.md:9` 写的 `knowledge.published` 是**旧拼法**，全树其余事件名以机器可读那份为准（判例：T0409 的 `pr.merged` → `pull_request.merged`）。发布成功要记这条事件。",
+        "**预览面是规格点名的，不是可选的**：`specs/mcp/tools.json:22` 已经有 `{\"name\":\"knowledge.publish_preview\",\"mode\":\"proposal\",\"args\":[\"knowledge_version_ref\",\"rights\"]}`。所以 `:publish-preview` 的参数与 proposal 性质要和它对得上——它是**提案**，不是执行。",
+        "**别假定「项目可见性」这一根轴就够了——这是 T1002 的独立 review 点出来的，不是你的事后麻烦**。T1002 刚落的订阅功能里，知识对象的受众是落在**所属项目的可见性**上的（`internal/events/subscription_store.go:263` 的 `audienceQueries['knowledge']`：`knowledge_publications.object_version_id → scientific_object_versions.object_id → scientific_objects.project_id → projects.visibility`）。review 的原话：**「this query puts a knowledge object's audience on the owning project's visibility, while owner ruling L3-20260916-1 says the publication's own visibility axis is `scientific_object_versions.visibility_policy_id` — T0805 must not assume the project axis is sufficient」**。**所以：你的公开读取不得只读项目轴**——裁定说的是发布自己那根轴（见 requirement 2）。**若你发现两根轴会给出不同答案**（公开项目里的受限版本，或受限项目里的公开版本），在 RESULT 里点名说清你按哪一根判、为什么，以及订阅侧那条查询是否因此需要改——**需要就说，那不在你范围内**。",
+        "**不做**：不做撤回、不做缩小可见范围（V1 的保守默认，我**没有**问过 owner，并在 `tasks/decisions.md` L3-20260916-1 里单独记出以便翻案）；不做检索；不做网络页面渲染（那是别的任务）；不改 `specs/**` 里除快照与指纹之外的东西。"
       ],
-      "deliverables": [],
       "acceptance_criteria": [
-        "进入 main 不等于公开网络",
-        "publish explicit"
-      ],
-      "tests": [
-        "knowledge publish tests"
+        "`knowledge_publications` **有了写入方**：发布成功会在该表落一行，并**记 `knowledge.version_published` 事件**（`specs/events/event-types.yaml:27` 那个拼法）——有测试读事件表确认，不是只看接口返回码",
+        "契约里有 `:publish-preview` 与 `:publish` 两条（**这两条由我在派工这一步补进 `specs/api/openapi.yaml`**，形状对齐 `:229-241` 的资产那两条；你在契约里应该直接读得到它们。**若读不到，记 `blocked` 并告诉我——不要自己加**），实现与契约一致；`:publish-preview` 是 **proposal** 性质，参数对得上 `specs/mcp/tools.json:22`",
+        "**发布不等于公开**：能发布一个可见性受限的版本，发布之后它对非成员**仍然不可见**——有测试钉住；并且**没有**新加 `public`/`private` 列来冒充那根轴（它已经是 `scientific_object_versions.visibility_policy_id`）",
+        "**同一版本第二次发布被拒**，且有测试钉住——这条是应用层规则（表上唯一约束只约束「同版本+同名字」，不阻止换名再来一次）",
+        "`public_version` **原样存**发布者给的名字：服务端不生成、不规范化、不推导——有测试（含一个刻意古怪但合法的名字）",
+        "权限 **fail-closed**：owner 能发布；**maintainer 被拒**；匿名被拒——三条都有测试（`specs/policies/permissions-matrix.csv:12`）",
+        "PID 是 **26 位小写 Crockford base32**，且**不随 slug/org 变化**——有测试（照 `00064` 自己的验收：asset ID 不随 slug/org 变化）",
+        "**「没经过 review 就直接 published」不可能**——有测试；RESULT 里说明 `publication_review` 那一格落在哪里以及为什么（`docs/43:21-22`）",
+        "RESULT 里点名回答：`visibility_policy_id` 这根轴在**公开读取路径上被谁读、在哪一行**；如果你发现**没有任何公开读取读它**，照实说（那说明这根轴目前是名义上的，是既有实现的缺口，不是你的错，但我要知道）",
+        "**项目可见性不足以决定公开读取**——至少一条测试用一个「两根轴会给出不同答案」的组合：**公开项目里的可见性受限版本**，断言公开读取按 `scientific_object_versions.visibility_policy_id` 判、而不是按项目；反向组合（受限项目里的公开版本）若你的实现会拒，也一并钉住。并在 RESULT 里点名回答 T1002 review 提出的那处不一致（`internal/events/subscription_store.go:263`）：订阅侧按项目轴、发布侧按版本轴，两者要不要统一、由谁改"
       ],
       "allowed_scope": [
         "infra/migrations/**",
         "specs/database/postgres.sql",
         "specs/SPEC_VERSION.json",
         "internal/persistence/**",
+        "internal/assets/**",
         "internal/contribution/**",
         "internal/application/**",
-        "go.mod",
-        "go.sum",
-        ".env.example",
+        "internal/domain/**",
+        "internal/rsg/**",
         "cmd/api/**",
         "apps/web/**",
-        "tests/**"
+        "tests/**",
+        "go.mod",
+        "go.sum",
+        ".env.example"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "specs/api/openapi.yaml",
+        "specs/events/event-types.yaml",
+        "specs/mcp/tools.json",
+        "specs/policies/**",
+        "internal/rights/**",
+        "internal/storage/**",
+        "Makefile",
+        "scripts/**"
       ],
-      "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "**`infra/migrations/00010_releases_assets.sql:64-71`**：`knowledge_publications` 的实际列与唯一约束——**这是你要写入的表，先读它**",
+        "**`infra/migrations/00005_scientific_objects.sql:11-27`**：`scientific_object_versions` 的实际列，含 `lifecycle_state` 的 CHECK 与 **`visibility_policy_id`**（见 requirement 2）",
+        "**`docs/43_STATE_MACHINES.md:21-22`**：唯一写明的发布状态机 `private candidate → publication_review → published`（不接受自动 published）——本任务的生命周期依据",
+        "**`docs/12_PERMISSIONS_RIGHTS_POLICY.md:13`**：私有项目里**可显式 Publish Asset/Knowledge/Attestation**——「发布≠公开」的规格依据",
+        "**`specs/policies/permissions-matrix.csv:1,12`**：表头七个角色与 `publish_private_to_public` 那一行的七格取值——权限依据",
+        "**`specs/api/openapi.yaml:229-241`**（资产那两条的先例）与 **`:279`**（既有的 `GET /knowledge/{knowledgeId}`）",
+        "**`specs/mcp/tools.json:22`**：`knowledge.publish_preview` 的参数与 proposal 性质——预览面依据",
+        "**`specs/events/event-types.yaml:27`**：`knowledge.version_published` 的准确拼法（`docs/18:9` 的 `knowledge.published` 是旧拼法）",
+        "**`infra/migrations/00064_asset_pid_origin.sql`**：pid 的形态（26 位 Crockford）、CHECK、以及「pid 不随 slug/org 变化」的验收——照抄这个形状",
+        "**`internal/application/assetpublish/command.go:283-286` 与 `:441-444`**：资产侧的发布命令与 `requirePolicy`（A private publication widens nothing…）——**本任务要照的先例**",
+        "**`internal/rsg/schemareg/schemas/rsg-manifest.schema.json:66,124`** 与 **`internal/rsg/conflict/doc.go:36`**：`visibility_policy_id` 是 manifest 的一部分、是服务端权威、且被当**权利**字段——见 requirement 2",
+        "`docs/03_GLOSSARY_DOMAIN_MODEL.md:71` 与 `docs/05_INFORMATION_ARCHITECTURE.md:38`：可跨 Project 引用、页面必须显示 persistent identity",
+        "`tasks/decisions.md` 的 **L3-20260916-1**：owner 对「发布≠公开 / `public_version` / 只能发一次」的三条裁定原文与理由"
+      ],
+      "scope_note": "这是**按本任务的实际交付面**收窄后的范围。相对 DAG 里的 phase 级默认值：保留 `infra/migrations/**` + `specs/database/postgres.sql` + `specs/SPEC_VERSION.json`（要落发布状态并重新生成快照与指纹）；保留 `internal/persistence/**`；**加** `internal/domain/**`（事件名与审计常量住在那里）、`internal/assets/**`（pid 生成器 `NewPID()` 在那里，本任务复用它）、`internal/rsg/**`（**只读**那根可见性轴与 manifest schema；若你判断必须改它，在 RESULT 里说明交给我）；**移出** `specs/api/openapi.yaml`（**契约是我改的，不是你的**——两条路径由我在派工这一步补进去，你按它实现；读不到就记 `blocked`）、`specs/events/event-types.yaml`、`specs/mcp/tools.json`（三份都是 **Supervisor-only 的规格，你只读**）、`specs/policies/**`、`internal/rights/**`（只读不改）、`internal/storage/**`、`scripts/**`、`Makefile`。",
+      "supervisor_scope_narrowing": "2026-09-16 定稿（T0805 原标「等定」，本任务书撤回该标记）。六点说明：\n（一）**为什么撤**：它卡在四条 owner 裁定上（issue #249 的五问里，四条是公开性语义＝L3，我不敢自己定；稳定编号那一条是我自己定的）。**owner 已答，四条都按我给的保守建议裁定**，原文记在 `tasks/decisions.md` L3-20260916-1。它后面排着 **24 个下游任务**（P9–P12 大半），所以这是今天最有价值的一次解锁。\n（二）**我改了契约（这一条重要）**：任务要求它实现 `:publish` 与 `:publish-preview`，而那两条**在契约里根本不存在**。`specs/api/openapi.yaml` 是 **Supervisor-only**，所以这两条**由我在派工这一步补进契约**（形状对齐资产的 `:229-241` 那两条），Worker 按契约实现即可，**不许可自己改契约**——这条我写进了 forbidden_scope。**派工时我会先确认契约里确实有这两条再放行**；Worker 若在树里读不到，记 `blocked` 而不是自己补。\n（三）**`publication_review` 那一格我没有替你钉死**：`docs/43:21-22` 只写了三个状态与「不存在自动 published」，**没写中间那格怎么落**。这是实现选择（L1），你判断并说明理由；但硬要求是「没经过 review 就直接 published 必须不可能」，必须有测试。\n（四）**我在写裁定记录时自己错过一次，已更正，这也是给你的提醒**：我原先顺手写成「要给 `knowledge_publications` 补一根可见性列」，复核发现**那根轴早就有**（`scientific_object_versions.visibility_policy_id`，manifest 的一部分、服务端权威、被当权利字段）。**所以要求是「不得扩大可见范围 + 公开读取尊重那根既有轴」，不是「新加一列」。** 你若发现还有别的既有轴我漏了，在 RESULT 里点名，不要照我的话硬加。\n（五）**「发布之后能不能撤回」我没有问 owner**（它不像前三条那样改变对外形态的初衷），按我在 issue #249 里写明的保守默认办：**V1 不做撤回**。它被单独记出来就是为了好翻案；若你判断不做撤回会让某条既有规格无法满足，在 RESULT 里说。\n（六）**迁移号不在这份任务书里定死**——派工时由 `rddev` 从分配账上取号并写进任务包，**以任务包里那行「its number is **NNNNN**」为准**。**不得自行选号。** 若你判断既有列已够用、不需要迁移，那就不建，在 RESULT 里说明理由（但注意：发布状态与 pid 看起来都需要落列）。",
+      "tests": [
+        "knowledge publish tests"
+      ],
+      "dependencies": [
+        "T0503",
+        "T0704"
+      ],
+      "baseline_sha": "",
+      "max_turns": 0,
+      "max_budget_usd": 0,
+      "migration_number": 0
     },
     {
       "id": "T0806",

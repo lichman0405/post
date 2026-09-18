@@ -240,6 +240,20 @@ paths:
         - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '201': {description: Asset version published}
+  /projects/{projectId}/knowledge:publish-preview:
+    post:
+      summary: Build publication impact/rights preview for a knowledge object version
+      parameters: [{$ref: '#/components/parameters/ProjectId'}]
+      responses:
+        '200': {description: Preview}
+  /projects/{projectId}/knowledge:publish:
+    post:
+      summary: Publish approved knowledge object version; human governance action
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201': {description: Knowledge object version published}
   /search:
     post:
       summary: Search Open R&D Network and generate evidence-backed answer
