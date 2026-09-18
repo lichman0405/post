@@ -5258,10 +5258,10 @@
       "merged_at": null
     },
     "T0711": {
-      "status": "blocked",
+      "status": "todo",
       "started_at": null,
       "completed_at": null,
-      "notes": "SPEC_BLOCKED（2026-09-16T00:14:44Z 判定，记于 T0705 合并之前）：缺的是「人」这一半：保管人/维护者/权利持有人三者的区别无定义（docs/04_USERS_ROLES.md 只定义四种访问角色）；权利可以挂在谁身上无定义（research_assets 无持有人列，全库任何表都没有）。授权那一半已写好（矩阵第 13 行 owner=allow、其余 deny、无 conditional；代码在 internal/authz/matrix.go:112）。",
+      "notes": "SPEC_BLOCKED resolved: T0805 package landed and knowledge publish OpenAPI contract added per L3-20260916-1",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null,
@@ -5272,6 +5272,12 @@
           "at": "2026-09-16T00:14:44Z",
           "run_id": "supervisor-manual",
           "reason": "SPEC_BLOCKED：见 issue #253"
+        },
+        {
+          "from": "blocked",
+          "to": "todo",
+          "at": "2026-09-18T07:18:07.969334Z",
+          "reason": "Supervisor resolved SPEC_BLOCKED: required spec/contract now in place"
         }
       ]
     },
@@ -5582,10 +5588,10 @@
       ]
     },
     "T0805": {
-      "status": "blocked",
+      "status": "todo",
       "started_at": null,
       "completed_at": null,
-      "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：发布命令的接口在契约里不存在；public_version 含义、能否重复发布、公开状态存哪、对外稳定编号四处全空（knowledge_publications 表缺 visibility 与 public id 两列）。",
+      "notes": "SPEC_BLOCKED resolved: T0805 package landed and knowledge publish OpenAPI contract added per L3-20260916-1",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null,
@@ -5596,6 +5602,12 @@
           "at": "2026-09-16T00:08:07Z",
           "run_id": "supervisor-manual",
           "reason": "SPEC_BLOCKED：见 issue #249"
+        },
+        {
+          "from": "blocked",
+          "to": "todo",
+          "at": "2026-09-18T07:18:07.969334Z",
+          "reason": "Supervisor resolved SPEC_BLOCKED: required spec/contract now in place"
         }
       ]
     },
