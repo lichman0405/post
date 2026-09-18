@@ -8,6 +8,12 @@
 # orchestrator transient state (Supervisor-owned runtime; never committed)
 .worktrees/
 .rddev/
+# Dev-stack scratch. `POST_MAIL_SINK_DIR` defaults to `.dev/mail` and the sink
+# writes whole notification bodies there, so this is committed-content-adjacent
+# in a way a normal cache dir is not: it must be invisible to git, not merely
+# unused. T1005's task book names the invisibility test; the ignore rule is the
+# Supervisor's, because `.gitignore` is outside that task's allowed_scope.
+.dev/
 # Supervisor work worktrees (`rddev branch create --worktree post-wt/...`). Same
 # class as /api /rddev below: a whole checkout of this repository, one `git add
 # -A` away from being committed from the main tree. Ignoring it here is what
