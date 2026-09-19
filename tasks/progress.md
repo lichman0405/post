@@ -2851,6 +2851,10 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
    补 `specs/orchestrator/gates.json` 的 G3 override、`python3 scripts/spec_version.py --write`
    重新生成指纹——三件缺一，main 当场红，在飞任务的 G2 跟着红。
 3. **顺序已满足**：修复任务以**含 T0507 的 main** 为基线（两者会碰同一条页面调用点）——T0507 已合并。
+4. **T0812 已冻结**（`blocked`，2026-09-19）：驱动在工人掉到 1 个时会派 `task next` 的第一名，
+   而 T0812 的真依赖（T0511 那条读规则）还进不了 DAG——冻结的理由、核验与**解冻命令**
+   （T0511 合并后 `./bin/rddev task ready T0812`，这条也写进了 `land-T0511.py` 头部）见 decisions.md。
+   **下一个可派的是 T0814**（fork 生产接口）：契约已在主库、不碰指纹输入，**故意不冻**。
 
 **历史（压成一行，免得再翻）**：P2 时代"T0208 是唯一关键路径"、T0705 时代"等 T0705"两张现场**都已作废**。
 
