@@ -712,10 +712,47 @@ var canonicalTables = map[string]tableExp{
 		fks:  []fkExp{fk("actor_id", "users", "RESTRICT"), fk("organization_id_at_time", "organizations", "RESTRICT"), fk("project_id", "projects", "RESTRICT"), fk("research_event_id", "research_events", "RESTRICT")},
 	},
 	"credit_disputes": {
+		// 00011's current-state table, unchanged in SHAPE by T0809 (00103):
+		// closing a dispute updates this row in place, which is the design
+		// (tests/integration/append_only_test.go, "mutable by design"), and
+		// 00103 adds only the credit_disputes_state_guard trigger over it —
+		// no column, no constraint, so nothing in this entry moves. The
+		// append-only half of the dispute record is the event pair the
+		// ledger projects, not this table.
 		cols:   []colExp{c("id", u, false, true), c("project_id", u, true, false), c("opened_by", u, false, false), c("target_ref", txt, false, false), c("claim", txt, false, false), c("state", txt, false, true), c("resolution", txt, true, false), c("opened_at", ts, false, true), c("resolved_at", ts, true, false)},
 		pk:     []string{"id"},
 		checks: []string{"state = ANY"},
 		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("opened_by", "users", "RESTRICT")},
+	},
+	"credit_attribution_statements": {
+		// 00103 (T0809). docs/13 §2's high-level credit declaration: one
+		// row per declaration act, never revised (a correction is the next
+		// ordinal). target_kind is carried as a column AND inside
+		// target_ref, and the pair is checkable — the second CHECK is what
+		// refuses a row whose two spellings disagree, so a reader may use
+		// either without trusting the other. recorded_by is NOT NULL: a
+		// credit with no attributable declarer would be an anonymous
+		// assertion about someone else's authorship (00082's rule).
+		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("target_kind", txt, false, false), c("target_ref", txt, false, false), c("ordinal", i4, false, false), c("recorded_by", u, false, false), c("recorded_at", ts, false, true)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"project_id", "target_kind", "target_ref", "ordinal"}},
+		checks:  []string{"target_kind = ANY", "target_ref ~~", "ordinal >= 1"},
+		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("recorded_by", "users", "RESTRICT")},
+	},
+	"credit_attribution_parties": {
+		// 00103 (T0809). The parties one declaration names. The role
+		// vocabulary is TWO values on purpose: docs/13 §2 ends its list
+		// with 等 and the open end is an undecided product question
+		// (tasks/decisions.md), so the CHECK fails closed on everything
+		// it could later name, including method_designer. party_id carries
+		// no foreign key for the reason 00082's asset_version_parties
+		// does not: a (kind, id) reference points into users for one kind
+		// and organizations for the other.
+		cols:    []colExp{c("id", u, false, true), c("statement_id", u, false, false), c("role", txt, false, false), c("party_kind", txt, false, false), c("party_id", u, false, false), c("position", i4, false, false)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"statement_id", "role", "party_id"}, {"statement_id", "role", "position"}},
+		checks:  []string{"role = ANY", "party_kind = ANY", `"position" >= 0`},
+		fks:     []fkExp{fk("statement_id", "credit_attribution_statements", "RESTRICT")},
 	},
 	"research_events": {
 		// T0807 (00087) appended via: the channel the write arrived
@@ -1268,6 +1305,16 @@ var explicitIndexes = map[string][]string{
 	// not collide; the index is what makes a repeated creation return the
 	// first proposal rather than opening a second.
 	"pull_requests_creation_key_idx": {"project_id", "creation_key", "WHERE", "UNIQUE"},
+	// T0809 (00103): the credit reads. A declaration chain is read per
+	// target from the newest end (the current credit is the greatest
+	// ordinal, exactly as the rights-holder chain is), its items are read
+	// per declaration in declared order, and the dispute list is read per
+	// project and per target newest first — an operator scan, not a point
+	// lookup.
+	"credit_attribution_statements_target_ordinal": {"project_id", "target_kind", "target_ref", "ordinal DESC"},
+	"credit_attribution_parties_statement":         {"statement_id", "role", "position"},
+	"credit_disputes_project_opened":               {"project_id", "opened_at DESC"},
+	"credit_disputes_target":                       {"target_ref", "opened_at DESC"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
@@ -1439,6 +1486,7 @@ func TestUpgradePath(t *testing.T) {
 		"asset_publish_creations",
 		"knowledge_publication_creations",
 		"asset_version_parties", "asset_rights_holder_events",
+		"credit_attribution_statements", "credit_attribution_parties",
 	}
 	for _, name := range present {
 		if _, ok := intermediate.Tables[name]; !ok {
