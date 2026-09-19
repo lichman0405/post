@@ -58,6 +58,17 @@ Status: Accepted
 成员判据的现成读：`internal/persistence/project_store.go:177`
 （`GetMembership(ctx, projectID, userID)`，实现在 `projects.ProjectStore` 上）。
 
+**这不是新发明的规矩，仓库里已有先例**：T0808 的返工给匿名主页的读加了同轴的渲染谓词，
+并在查询头部留下逐字警告——`internal/persistence/queries/research_profile.sql:36-38`：
+**"Two axes are therefore deliberately NOT filtered by the project's visibility, and a future
+edit must not \"tidy\" them into one `visibility = 'public'`"**，理由在 `:44-49`：
+**"an assertion whose project is private is still the person's own act … What this read must
+filter on is the assertion's OWN axis … \"an assertion nothing explicitly made public is not
+rendered anywhere\". Both surfaces are anonymous reads, so that axis is not optional."**
+本 ADR 与它是同一条规矩的两面：**匿名面按 `visibility` 渲染，非匿名面按读者身份**——
+同样不许把两条轴"整理"成一条谓词（若把这条读改成对所有人加 `ea.visibility = 'public'`，
+成员应该看得见的东西会被一起挡掉）。
+
 ## 为什么是"两方成员的并集"，而不是只给断言方
 
 这条规则**只移走与这一行没有任何已记录关系的读者**（匿名者、以及既不属于断言方也不属于
