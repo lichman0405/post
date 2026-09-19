@@ -267,6 +267,10 @@ func (s *Service) CreateEvidenceAssertion(ctx context.Context, actor domain.User
 				BranchID:                branchID,
 				ActorID:                 actor.ID,
 				KnowledgePID:            publication.PID,
+				// The assertion is written by the commit above, so the
+				// event reports that commit's own channel declaration —
+				// one declaration, read twice (never "api" spelled here).
+				Via: params.Via,
 				// The event is never more visible than its subject (docs/12
 				// §3): public only when the assertion itself is, and the
 				// publication is network-visible (which the cross-project
@@ -348,6 +352,11 @@ type externalEvidenceEventParams struct {
 	ActorID                 string
 	KnowledgePID            string
 	Visibility              string
+	// Via is the channel the committing write arrived through
+	// (domain.StateVia): the case's own state commit declares it and the
+	// event copies it into the outbox envelope (00046: envelope columns
+	// are copied, never re-derived). Empty is a legal "not recorded".
+	Via domain.StateVia
 }
 
 // externalEvidenceAddedEvent builds the knowledge.external_evidence_added
@@ -388,6 +397,7 @@ func externalEvidenceAddedEvent(p externalEvidenceEventParams) (events.Event, er
 		ActorID:    p.ActorID,
 		ProjectID:  p.ProjectID,
 		Visibility: p.Visibility,
+		Via:        p.Via,
 		Payload:    payload,
 	}, nil
 }

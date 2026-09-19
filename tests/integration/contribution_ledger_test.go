@@ -63,6 +63,7 @@ import (
 	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/persistence"
 	"github.com/lichman0405/post/internal/persistence/testdb"
+	"github.com/lichman0405/post/internal/rsg/schemareg"
 )
 
 const ledgerTaskID = "T0807"
@@ -114,7 +115,11 @@ func utcDay(daysAgo int) time.Time {
 // membership windows instead — his events are written directly into the
 // log, which needs no permission at all.
 type ledgerFixture struct {
-	svc        *rsg.Service
+	svc *rsg.Service
+	// dbURL is the fixture database's connection URL (T0813: the wiring
+	// test hands it to a real cmd/worker process, which must connect to
+	// the same database the fixture seeded).
+	dbURL      string
 	pool       *pgxpool.Pool
 	store      *contribution.LedgerStore
 	projector  *appcontribution.LedgerProjector
@@ -129,7 +134,7 @@ type ledgerFixture struct {
 
 func newLedgerFixture(t *testing.T, ctx context.Context) *ledgerFixture {
 	t.Helper()
-	pool, _ := testdb.Setup(t, ctx, adminURL(t), ledgerTaskID)
+	pool, dbURL := testdb.Setup(t, ctx, adminURL(t), ledgerTaskID)
 	cred := persistence.NewCredentialStore(pool)
 	seedUser := func(email, handle, name string) domain.User {
 		t.Helper()
@@ -228,6 +233,7 @@ func newLedgerFixture(t *testing.T, ctx context.Context) *ledgerFixture {
 	store := contribution.NewLedgerStore(pool)
 	return &ledgerFixture{
 		svc:        svc,
+		dbURL:      dbURL,
 		pool:       pool,
 		store:      store,
 		projector:  appcontribution.NewLedgerProjector(store, appcontribution.WithLedgerLogger(outboxTestLogger())),
@@ -502,11 +508,28 @@ func TestContributionLedgerProjectionEndToEnd(t *testing.T) {
 	if row.SourceEventID == nil || *row.SourceEventID != hypothesisEventID {
 		t.Errorf("research_event_id = %s, want %s", textOrNull(row.SourceEventID), hypothesisEventID)
 	}
-	// via: the source event carries no channel, so the row carries none.
-	// NOT a default: the alternative — writing 'api' — would read exactly
-	// like a recorded fact.
-	if row.Via != nil {
-		t.Errorf("via = %q, want NULL: an event whose envelope carries no channel must not be given one", *row.Via)
+	// via: the row carries the channel the EVENT's envelope carries — copied,
+	// never chosen by the projection. The hypothesis was created through the
+	// real RSG service, and that write path declares its channel
+	// (states.CommitParams{Via: domain.ViaAPI}, T0813), so the envelope here
+	// is 'api' and the assertion is an equality against the source column:
+	// it fails both when the producer stops declaring AND when the
+	// projection writes anything other than what the event said. The "no
+	// channel in, NULL out" half is pinned by
+	// TestContributionLedgerViaIsCopiedNotGuessed (which records both
+	// events itself) and by the wiring test's control case.
+	var eventVia *string
+	if err := f.pool.QueryRow(ctx, `SELECT via FROM research_events WHERE id = $1`, hypothesisEventID).
+		Scan(&eventVia); err != nil {
+		t.Fatalf("read the source event's via: %v", err)
+	}
+	if eventVia == nil || *eventVia != string(domain.ViaAPI) {
+		t.Fatalf("the source event's via = %s, want %q: the RSG write path declares the channel it was written through",
+			textOrNull(eventVia), domain.ViaAPI)
+	}
+	if row.Via == nil || *row.Via != *eventVia {
+		t.Errorf("via = %s, want %s copied from the source event's envelope (never a default)",
+			textOrNull(row.Via), textOrNull(eventVia))
 	}
 	// The timestamp is the EVENT's, never the projection run's.
 	var eventOccurredAt time.Time
@@ -971,6 +994,12 @@ func TestContributionLedgerMappingMatchesTheEventVocabulary(t *testing.T) {
 		specSet[e] = true
 	}
 
+	// The schema registry the RSG write path resolves object types with:
+	// a version_created event can only ever carry a type this registry
+	// answers for (internal/application/rsg schemaFor), which is what makes
+	// the check below the difference between a mapping row and a DEAD one.
+	reg := mustRegistry(t)
+
 	mapped := contribution.MappedEventTypes()
 	for _, e := range mapped {
 		if !specSet[e] {
@@ -989,6 +1018,17 @@ func TestContributionLedgerMappingMatchesTheEventVocabulary(t *testing.T) {
 		for objectType, roles := range m.ObjectTypeRoles {
 			if !contribution.ValidContributionRoles(roles) {
 				t.Errorf("mapping %q's object type %q carries roles outside docs/04 §4: %v", e, objectType, roles)
+			}
+			// The key must be a type a payload can actually spell. The
+			// table carried "evidence_assertion" → Validation once, and it
+			// was unreachable: the registry's schema for that type is
+			// evidence-assertion.schema.json, so schemaFor refuses the
+			// token and no version_created event can ever name it. A dead
+			// row reads as coverage that does not exist (T0807 review).
+			id := schemareg.CanonicalNamespace + objectType + ".schema.json"
+			if _, err := reg.Lookup(schemareg.Ref{ID: id, Version: schemareg.CanonicalV1}); err != nil {
+				t.Errorf("mapping %q keys object type %q, which resolves to no registered schema (%s): no event can ever hit this row — %v",
+					e, objectType, id, err)
 			}
 		}
 	}

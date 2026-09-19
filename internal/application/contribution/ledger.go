@@ -31,13 +31,14 @@ import (
 //     again — after a crash, a redeploy or by accident — a no-op instead of
 //     a duplicate.
 //
-// WHERE THIS RUNS, honestly: the projector is wired nowhere yet. The
-// process that owns background consumers is cmd/worker, which is outside
-// T0807's write scope, and unilaterally moving worker responsibilities into
-// cmd/api is not this task's decision to make. The projector is therefore
-// delivered as a service with Run/RunOnce and driven, for now, by its
-// tests; wiring it into cmd/worker is the remaining one-line composition
-// step and is reported as such.
+// WHERE THIS RUNS: cmd/worker, as its seventh background consumer of the
+// shared database pool — the same mount as the outbox dispatcher, the two
+// event fan-outs, the search projection and the embedding backlog. It joins
+// the same wait group, so it stops when the root context is cancelled on
+// shutdown, and it retries a failed pass forever like every other consumer
+// rather than exiting the process. (T0807 delivered the projection and
+// reported the mount as the remaining composition step, because cmd/worker
+// was outside its write scope; T0813 is that step.)
 type LedgerProjector struct {
 	store     LedgerPort
 	log       *slog.Logger

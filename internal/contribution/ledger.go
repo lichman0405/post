@@ -2,6 +2,7 @@ package contribution
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -203,24 +204,35 @@ func (m LedgerMapping) RefsFor(payload map[string]any) []LedgerRef {
 //   - protocol is a method → Method Development;
 //   - material and sample are the physical objects an experimental
 //     investigation works on → Experimental Investigation;
-//   - claim and finding are what Analysis produces → Analysis;
-//   - evidence_assertion is a claim tested against evidence → Validation.
+//   - claim and finding are what Analysis produces → Analysis.
 //
 // external_reference and any future object type record no role: docs/04 §4
 // has no value for registering a citation, and a role tag that was invented
 // to fill a gap would be indistinguishable from a recorded one.
+//
+// Every key here must be a type a version_created event can actually carry,
+// i.e. an object type the schema registry resolves (internal/rsg/schemareg):
+// the RSG write path refuses any other type before a version row — and so a
+// version_created event — can exist (internal/application/rsg schemaFor).
+// The table carried "evidence_assertion" → Validation once, and it was a
+// DEAD ROW: the registry's schema for that type is named
+// evidence-assertion.schema.json, so `evidence_assertion` resolves to
+// nothing and no event can ever spell it (the T0807 review caught it; the
+// drift test now resolves every key so the next one cannot hide). A dead row
+// reads as coverage that does not exist. Validation contributions are not
+// unrecorded by its removal — the `evidence_assertion.created` mapping below
+// carries RoleValidation.
 var scientificObjectTypeRoles = map[string][]ContributionRole{
-	"research_question":  {RoleResearchQuestionProposal},
-	"hypothesis":         {RoleHypothesisProposal},
-	"protocol":           {RoleMethodDevelopment},
-	"experiment":         {RoleExperimentalInvestigation},
-	"calculation":        {RoleComputationalInvestigation},
-	"dataset":            {RoleDataCuration},
-	"material":           {RoleExperimentalInvestigation},
-	"sample":             {RoleExperimentalInvestigation},
-	"claim":              {RoleAnalysis},
-	"finding":            {RoleAnalysis},
-	"evidence_assertion": {RoleValidation},
+	"research_question": {RoleResearchQuestionProposal},
+	"hypothesis":        {RoleHypothesisProposal},
+	"protocol":          {RoleMethodDevelopment},
+	"experiment":        {RoleExperimentalInvestigation},
+	"calculation":       {RoleComputationalInvestigation},
+	"dataset":           {RoleDataCuration},
+	"material":          {RoleExperimentalInvestigation},
+	"sample":            {RoleExperimentalInvestigation},
+	"claim":             {RoleAnalysis},
+	"finding":           {RoleAnalysis},
 }
 
 // ledgerMappings is the projection's table — the complete answer to "which
@@ -414,6 +426,13 @@ type LedgerRow struct {
 	Via string
 }
 
+// ErrNoLedgerMapping reports that an event's type has no row in the
+// mapping table. It is a fact about the vocabulary, not a failure: the
+// projection counts these events and reports them (LedgerBatch.Unmapped),
+// which is why the exported ProjectEvent answers it with ok=false rather
+// than with an error.
+var ErrNoLedgerMapping = errors.New("contribution: event type has no ledger mapping")
+
 // ProjectEvent renders one source event into the ledger row it produces.
 // ok is false when the event's type has no mapping — the caller counts that
 // and moves on; it is a fact about the vocabulary, not an error.
@@ -424,9 +443,21 @@ type LedgerRow struct {
 // leave the event re-appearing as a candidate forever. What is lost is the
 // tags, and the caller logs it.
 func ProjectEvent(src LedgerSource) (LedgerRow, bool) {
+	row, err := projectEvent(src)
+	return row, err == nil
+}
+
+// projectEvent is ProjectEvent with the REASON it refused, which is what a
+// caller inside this package reports: ErrNoLedgerMapping for a type the
+// table does not cover, and the role vocabulary's own error (which names
+// the offending code and the canonical set) for a table entry that spells
+// a role docs/04 §4 does not define. The second one is a programming error
+// in the table, and saying "no ledger mapping" about it would be false —
+// the mapping is right there.
+func projectEvent(src LedgerSource) (LedgerRow, error) {
 	m, ok := LedgerMappingFor(src.EventType)
 	if !ok {
-		return LedgerRow{}, false
+		return LedgerRow{}, fmt.Errorf("%w: %s", ErrNoLedgerMapping, src.EventType)
 	}
 	payload := decodeLedgerPayload(src.Payload)
 	row := LedgerRow{
@@ -444,12 +475,10 @@ func ProjectEvent(src LedgerSource) (LedgerRow, bool) {
 	// A mapping's own vocabulary is checked here, at the boundary between
 	// the table and the row: a typo in an ObjectTypeRoles entry would
 	// otherwise be written to the ledger as a role docs/04 never defined.
-	for _, r := range row.RoleCodes {
-		if !r.Valid() {
-			return LedgerRow{}, false
-		}
+	if err := RoleVocabularyError(row.RoleCodes); err != nil {
+		return LedgerRow{}, err
 	}
-	return row, true
+	return row, nil
 }
 
 // decodeLedgerPayload reads the event payload as a JSON object; anything

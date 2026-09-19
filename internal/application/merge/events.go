@@ -26,6 +26,18 @@ import (
 // is its own task and this event does not write contribution rows.
 const eventPullRequestMerged = "pull_request.merged"
 
+// mergeVia is the channel a merge arrives through, declared ONCE for the
+// whole package (T0813): the accepted state's commit carries it as
+// state_commits.via (service.go, states.CommitParams{Via: mergeVia}) and
+// the pull_request.merged event carries it as the outbox envelope column,
+// which the publisher copies into research_events and the Contribution
+// Ledger copies into contribution_events (00046/00087). Naming it once is
+// what keeps the two halves of one transition from reporting different
+// channels; every merge in this build arrives through the REST API
+// (cmd/api/mergehttp), and a path that reached this service from anywhere
+// else would have to change this line — which is the point.
+const mergeVia = domain.ViaAPI
+
 // mergeEventPayload is the payload of pull_request.merged.
 type mergeEventPayload struct {
 	// PayloadVersion is the envelope's payload_version; it has no column of
@@ -75,6 +87,7 @@ func (s *Service) recordMergeEvent(ctx context.Context, tx states.Transaction, p
 		ActorID:    actorID,
 		ProjectID:  p.input.ProjectID,
 		Visibility: eventVisibility(p.targetBranch.Visibility),
+		Via:        mergeVia,
 		Payload:    payload,
 	})
 }

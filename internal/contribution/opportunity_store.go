@@ -744,12 +744,20 @@ func textUUID(s string) (pgtype.UUID, error) {
 
 // withTx runs fn inside one transaction: committed on nil, rolled back
 // otherwise (the local twin of the persistence helper).
+//
+// The rollback runs on a non-cancelled context, the convention the events
+// package states for its own transactions (internal/events/publish.go, and
+// fanout.go / inbox_store.go / subscription_store.go / webhook_store.go the
+// same shape): a caller that cancels ctx — the LedgerProjector does exactly
+// that when the worker shuts down — must not be able to abort the rollback
+// itself and leave the connection mid-transaction. The T0807 review asked
+// for this at wiring time, which is now.
 func withTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) error) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 	if err := fn(tx); err != nil {
 		return err
 	}

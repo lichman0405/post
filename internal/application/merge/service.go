@@ -564,7 +564,7 @@ func (s *Service) commit(ctx context.Context, actor domain.User, p *prepared) (*
 		ProjectID:       p.input.ProjectID,
 		BranchID:        p.targetBranch.ID,
 		ActorID:         actor.ID,
-		Via:             domain.ViaAPI,
+		Via:             mergeVia,
 		Message:         message,
 		Operations:      operations,
 		BaseStateID:     &targetHead,
