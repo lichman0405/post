@@ -1,12 +1,17 @@
 # 开发进度
 
-> **当前这一刻**：**97/141 已合并；在跑的只剩一个工人——T0902 在按返工单重做。**
-> 主库是绿的（`7908704`），规格指纹 `sha256:95d8ca49abc9885c` 没动过（改书要等空窗，见第八条①和第九条）。
-> 今天合了五笔——T0410（提案"从建到合"整条路）、T0901（搜索的中间那条腿）、T0903（提问理解）、
-> T0806（外部证据网络，带迁移 00091）、T0816（"某人某天属于哪个组织"的三处口径收成一处）。
+> **当前这一刻**：**98/141 已合并；三个工人同时在跑——T0904（搜索的第三条腿：把向量和关系网接进来，
+> 带迁移 00095）、T0813（贡献账本接上生产）、T1203（部署模板）**，驱动已在后台接管机械段。
+> 主库是绿的（`9bd77cc`），规格指纹 `sha256:21b75e375da5c858` 与主库一致。
+> 今天合了六笔——T0410（提案"从建到合"整条路）、T0901（搜索的中间那条腿）、T0903（提问理解）、
+> T0806（外部证据网络，带迁移 00091）、T0816（"某人某天属于哪个组织"的三处口径收成一处）、
+> T0902（向量那一半：provider 端口 + 批量任务 + 迁移 00092）。
+> 今天还做了一件不产出功能的事：**把任务书里 33 处已经过期的说法一次改掉**
+> （有的是文档改了名书里还写着旧名，有的是行号漂了，有的是原文写反了）——改书必须在没有工人跑的
+> 空当里做，所以攒到现在一次改完（见第十条）。
 > 进度数字：**P0 14/14、P1 10/10、P2 15/15、P3 9/9 全部完成**；
-> P4 10/11、P5 6/10、P6 6/10、P7 9/12、P8 8/15、**P9 2/8**、P10 6/7、P11 2/12、P12 0/8；
-> 合计 **97/141 已合并**。
+> P4 10/11、P5 6/10、P6 6/10、P7 9/12、P8 8/15、**P9 3/8**、P10 6/7、P11 2/12、P12 0/8；
+> 合计 **98/141 已合并**。
 >
 > **〇、今天先说一件我自己犯的错，因为它耽误了事。** T0602（"终止一条主线对象"）在状态表里
 > 一直写着"卡住、等你定"，实际**那个判定我 9-19 早就撤回了**——书也写全了（12 条需求、8 条验收），
@@ -182,6 +187,38 @@
 > **"只读地检查一个会写文件的脚本"这件事不存在**——要看它的内容就该读文本，不是执行它。
 > 这次没出事，靠的是两条既有纪律（改动走"旧串恰好出现一次"的断言脚本、动手前做逐字节备份），
 > **不是靠我当时的判断**。顺带得到一个有用的：A 组 20 处对当前的书确实全部对得上，**空窗期照跑即可。**
+
+> **十、这一轮我做了什么（2026-09-19，第五轮）。**
+>
+> **① 今天合了第六笔：T0902（第 98 个）——"搜索的向量那一半"。** 这一本上一版被我打回过
+> （它要交的两个命令**根本跑不起来**，而交付记录里写着"跑过了"）。返工后由一个**独立的评审工人**
+> 自己搭临时库、真把两个命令跑了一遍（第一次写入 2 行、第二次 0 行，退出码都是 0）才放行；
+> 我另外用**当初证明它坏掉的那把尺子**重新量过一次。
+>
+> **② 空窗到了，把攒着的 33 处改书一次改完。** 这些不是错别字：有的是**文档改了名、书里还写着旧名字**
+> （工人照旧名字会找不到文件），有的是代码挪了行、对不上了，还有一处**原文说反了**
+> （说某个常量没人用，实际在用——真话是"没有任何事件会产出它"）。另外两本书的"允许写入范围"里
+> 还躺着 `docs/**` 和 CI 配置——**那是明确归我的地盘**，工人拿着这个范围就等于真的能改。都收走了。
+> 改完我逐条核了落地情况，其中最值钱的一条：**书里引用的 51 个文档文件，一个一个确认都存在。**
+>
+> **③ 改书时被自己的检查挡住一次，记一笔。** 我给一批替换写"这个旧字符串必须恰好出现 3 次"的断言，
+> 它报"出现 4 次"——**我漏算了嵌套在里面的一次**。因为断言是全有全无的，那一轮**什么都没写**。
+> 这正是断言该做的事：**挡住的是我，不是文件。**
+>
+> **④ 空窗一关就派了三本，理由不是按任务号顺序。** **T0904**（搜索的第三条腿：把向量和关系网接进来）
+> 拿迁移链这一轮的**唯一时间片**——因为它是能开工的任务里**别人等着的最多的那本（15 本）**，
+> 而且正好接在刚合入的两笔后面。另外两本：**T0813**（贡献账本接上生产）、
+> **T1203**（部署模板——范围最小，跟谁都不碰）。**没派 T0814 的原因是具体的**：它和 T0904
+> **都要往同一个文件里插线**（`cmd/api/main.go`，全仓库唯一的路由装配点），两个工人同时改同一处，
+> 收尾时大概率要动我的手；T0813 动的是另一个入口，跟 T0904 在这个点上零重叠。
+>
+> **⑤ 一件看起来像"跳号"、其实不是的事。** T0904 分到的迁移号是 **00095**，不是 00093。
+> 因为 00093 和 00094 早先分给了另外两本任务，那两本**后来合入了、但没用掉那个号**；
+> 规则是**号一旦分出去就不回收**，所以磁盘上永远不会出现 00093 和 00094 这两个文件。
+> **将来谁写"迁移号必须连续"的测试，那会是个错的测试。**
+>
+> **⑥ 现在三个工人同时在跑**（同一基线），盯工人→收件→评审→验收→提交→开 PR→等 CI→合入→再派
+> 这一段已交给后台驱动，它活在对话之外，我离开也不会停。
 
 <details><summary><b>（上一刻）T0901 并入主干（第 94 个）；工位空转的原因查清</b></summary>
 > **当前这一刻**：**92/141 已合并。今天把攒着的账面一次落完（fork 的对外契约、五份任务书），
@@ -2637,7 +2674,11 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ### 一句话
 
-**现在只有一件事在跑（T0705），它一落地就有三件事可以同时开工。** 我在等它，也在把这一刻要做的准备先做好。
+**2026-09-19 复核：下面第 1、2 两条是 T0705 时代的现场，已经作废**（T0705 早就合入了，
+"等 T0705"与"T0705 一合并就做的三件事"都不成立）。**当前实况只有一句**：
+三个工人在跑（T0904 / T0813 / T1203），机械段由后台驱动接管，我在等的下一个判断点是
+**它们之中任何一本收件**——收回来我自己核 diff、核范围、核验收标准、重跑指定测试，再合。
+下面第 3、4、5 条（并行条件的由来、管道毛病 #243、待 owner 的一句话）仍然有效，保留。
 
 ### 1. 等 T0705（唯一在飞的事）
 
@@ -2690,9 +2731,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-18T23:16:04Z
+生成时间：2026-09-19T05:33:45Z
 
-状态分布：todo 41 · ready 2 · running 0 · worker_failed 0 · verification 1 · rejected 0 · blocked 5 · accepted 1 · merged 91（合计 141/141 个任务）
+状态分布：todo 32 · ready 3 · running 3 · worker_failed 0 · verification 0 · rejected 0 · blocked 5 · accepted 0 · merged 98（合计 141/141 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -2753,7 +2794,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0407 | Scientific Conflict Resolution UI | P4 | merged | 2026-09-14T18:21:29Z |  | 2026-09-14T21:49:46Z | 2026-09-14T21:53:00Z |
 | T0408 | PR Research Diff UI | P4 | merged | 2026-09-15T12:44:40Z |  | 2026-09-15T13:06:20Z | 2026-09-15T13:12:44Z |
 | T0409 | Merge Governance 与 frozen main 更新 | P4 | merged | 2026-09-15T22:47:47Z |  | 2026-09-15T23:34:48Z | 2026-09-15T23:41:45Z |
-| T0410 | PR/Branch 完整 E2E | P4 | verification | 2026-09-18T22:05:43Z |  |  |  |
+| T0410 | PR/Branch 完整 E2E | P4 | merged | 2026-09-18T23:24:18Z |  | 2026-09-19T01:35:29Z | 2026-09-19T01:44:41Z |
 | T0411 | 把提案送进评审：产品路径与权限（等一行 L3 裁定） | P4 | blocked |  |  |  |  |
 | T0501 | Research Question 与 Hypothesis 关系模型 | P5 | merged | 2026-09-14T10:52:04Z |  | 2026-09-14T11:17:35Z | 2026-09-14T11:21:07Z |
 | T0502 | Claim 结构与 scope | P5 | merged | 2026-09-14T11:24:17Z |  | 2026-09-14T11:46:32Z | 2026-09-14T11:49:54Z |
@@ -2766,7 +2807,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0509 | Literature evidence extraction data model | P5 | ready |  |  |  |  |
 | T0510 | Knowledge workflow E2E | P5 | todo |  |  |  |  |
 | T0601 | Freeze Main Governance | P6 | merged | 2026-09-16T11:27:32Z |  | 2026-09-16T11:46:40Z | 2026-09-16T11:52:51Z |
-| T0602 | 主线对象 Abort 状态迁移（abort 半；reopen 已拆出为 T0610） | P6 | blocked |  |  |  |  |
+| T0602 | 主线对象 Abort 状态迁移（abort 半；reopen 已拆出为 T0610） | P6 | ready |  |  |  |  |
 | T0603 | Organization/Project Policy Engine | P6 | merged | 2026-09-14T03:42:50Z |  | 2026-09-14T04:09:38Z | 2026-09-14T04:12:31Z |
 | T0604 | Scientific Responsibility / Reviewer Routing | P6 | merged | 2026-09-18T17:16:45Z |  | 2026-09-18T17:58:47Z | 2026-09-18T18:07:33Z |
 | T0605 | Release Manifest Builder | P6 | merged | 2026-09-14T08:39:33Z |  | 2026-09-14T09:24:39Z | 2026-09-14T09:33:18Z |
@@ -2782,7 +2823,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0705 | Asset Publish Governance | P7 | merged | 2026-09-15T23:43:26Z |  | 2026-09-16T00:40:34Z | 2026-09-16T00:47:27Z |
 | T0706 | Asset Metadata Revision | P7 | blocked |  |  |  |  |
 | T0707 | Asset Reference/Dependency | P7 | merged | 2026-09-18T16:10:13Z |  | 2026-09-18T16:43:56Z | 2026-09-18T16:50:28Z |
-| T0708 | Asset Fork/Derive + Lineage | P7 | todo |  |  |  |  |
+| T0708 | Asset Fork/Derive + Lineage | P7 | blocked |  |  |  |  |
 | T0709 | Asset Hub Pages/Explore | P7 | merged | 2026-09-16T01:57:45Z |  | 2026-09-16T02:36:27Z | 2026-09-16T02:41:11Z |
 | T0710 | Asset 完整 E2E | P7 | todo |  |  |  |  |
 | T0711 | Asset Governance 与 Rights Holder Transfer | P7 | merged | 2026-09-18T13:53:19Z |  | 2026-09-18T14:22:43Z | 2026-09-18T14:29:04Z |
@@ -2792,21 +2833,21 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0803 | Open Contribution Opportunity | P8 | merged | 2026-09-15T12:54:08Z |  | 2026-09-15T13:23:30Z | 2026-09-15T13:28:59Z |
 | T0804 | External Fork/Contribution flow | P8 | merged | 2026-09-18T19:41:46Z |  | 2026-09-18T20:35:11Z | 2026-09-18T21:02:29Z |
 | T0805 | Published Knowledge Object | P8 | merged | 2026-09-18T15:04:09Z |  | 2026-09-18T16:00:06Z | 2026-09-18T16:08:04Z |
-| T0806 | External Evidence Network Aggregation | P8 | todo |  |  |  |  |
+| T0806 | External Evidence Network Aggregation | P8 | merged | 2026-09-19T03:37:27Z |  | 2026-09-19T04:27:41Z | 2026-09-19T04:39:54Z |
 | T0807 | Contribution Ledger projection | P8 | merged | 2026-09-18T21:59:48Z |  | 2026-09-18T22:48:50Z | 2026-09-18T22:57:22Z |
 | T0808 | Research Profile / Organization Profile | P8 | todo |  |  |  |  |
 | T0809 | Credit Attribution/Dispute 基础 | P8 | todo |  |  |  |  |
 | T0810 | 最小 Open Network 闭环 E2E | P8 | todo |  |  |  |  |
 | T0811 | Discussion 与 Promote to Research Object | P8 | todo |  |  |  |  |
 | T0812 | Private Evidence / Public Attestation 基础 | P8 | todo |  |  |  |  |
-| T0813 | Contribution Ledger 接上生产（worker 挂载 + via 真实来源） | P8 | todo |  |  |  |  |
+| T0813 | Contribution Ledger 接上生产（worker 挂载 + via 真实来源） | P8 | running | 2026-09-19T05:32:05Z |  |  |  |
 | T0814 | Fork 发起与外部提案的生产接口（契约由 Supervisor 落地，本任务照契约接线，并改 fork 的命名规则） | P8 | todo |  |  |  |  |
 | T0815 | CI 的 migration-integration 偶发超时：量出时间去哪了，按证据修 | P11 | todo |  |  |  |  |
-| T0816 | affiliation 日期口径统一（打戳 / 解析 / 判定 三处生产口径一处定义；夹具助手同批改） | P8 | todo |  |  |  |  |
-| T0901 | Search Document Projection | P9 | todo |  |  |  |  |
-| T0902 | Embedding Provider 与 pgvector | P9 | todo |  |  |  |  |
-| T0903 | Scientific Query Planner | P9 | todo |  |  |  |  |
-| T0904 | Hybrid Retrieval + Graph Expansion | P9 | todo |  |  |  |  |
+| T0816 | affiliation 日期口径统一（打戳 / 解析 / 判定 三处生产口径一处定义；夹具助手同批改） | P8 | merged | 2026-09-19T03:17:44Z |  | 2026-09-19T04:38:57Z | 2026-09-19T04:47:25Z |
+| T0901 | Search Document Projection | P9 | merged | 2026-09-19T01:45:22Z |  | 2026-09-19T02:24:58Z | 2026-09-19T02:59:55Z |
+| T0902 | Embedding Provider 与 pgvector | P9 | merged | 2026-09-19T04:40:55Z |  | 2026-09-19T05:17:11Z | 2026-09-19T05:27:07Z |
+| T0903 | Scientific Query Planner | P9 | merged | 2026-09-19T03:08:10Z |  | 2026-09-19T03:55:21Z | 2026-09-19T04:04:51Z |
+| T0904 | Hybrid Retrieval + Graph Expansion | P9 | running | 2026-09-19T05:31:44Z |  |  |  |
 | T0905 | Scientific Ranking | P9 | todo |  |  |  |  |
 | T0906 | Evidence-backed Answer Generator/API | P9 | todo |  |  |  |  |
 | T0907 | Search Answer Web UI | P9 | todo |  |  |  |  |
@@ -2828,10 +2869,10 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1108 | 性能基线与索引调优 | P11 | todo |  |  |  |  |
 | T1109 | 生产级 Observability/Dashboards | P11 | todo |  |  |  |  |
 | T1110 | Backup/Restore 自动化演练 | P11 | merged | 2026-09-18T09:13:47Z |  | 2026-09-18T09:49:45Z | 2026-09-18T09:56:37Z |
-| T1111 | 凭据不进进程参数表：git 调用统一走环境变量传 header | P11 | accepted | 2026-09-18T21:07:27Z |  | 2026-09-18T23:13:06Z |  |
+| T1111 | 凭据不进进程参数表：git 调用统一走环境变量传 header | P11 | merged | 2026-09-18T21:07:27Z |  | 2026-09-18T23:13:06Z | 2026-09-18T23:22:54Z |
 | T1201 | 完整 Seed Demo Data Builder | P12 | todo |  |  |  |  |
 | T1202 | Canonical MOF Workflow E2E | P12 | todo |  |  |  |  |
-| T1203 | Staging 部署模板 | P12 | todo |  |  |  |  |
+| T1203 | Staging 部署模板 | P12 | running | 2026-09-19T05:32:06Z |  |  |  |
 | T1204 | 生产 Runbook/Release/Recovery 验证 | P12 | todo |  |  |  |  |
 | T1205 | OpenAPI/MCP/Schema 文档最终同步 | P12 | todo |  |  |  |  |
 | T1206 | Master Security/Quality Gate | P12 | todo |  |  |  |  |
@@ -2839,4 +2880,3 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1208 | 完整 Project 可移植导出 | P12 | todo |  |  |  |  |
 
 <!-- AUTO-PROGRESS:END -->
-

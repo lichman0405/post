@@ -6398,13 +6398,24 @@
       "merged_at": null
     },
     "T0813": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-19T05:32:05Z",
+      "worker_run_id": "run-950362abf43e8fec",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-19T05:31:21Z",
+          "run_id": "run-e1627dc4af145704"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-19T05:32:05Z",
+          "run_id": "run-950362abf43e8fec",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0814": {
       "status": "todo",
@@ -6665,13 +6676,24 @@
       ]
     },
     "T0904": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-19T05:31:44Z",
+      "worker_run_id": "run-218989a29bdd1ed9",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-19T05:31:20Z",
+          "run_id": "run-f424bb2ca3894164"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-19T05:31:44Z",
+          "run_id": "run-218989a29bdd1ed9",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0905": {
       "status": "todo",
@@ -7688,13 +7710,24 @@
       "merged_at": null
     },
     "T1203": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-19T05:32:06Z",
+      "worker_run_id": "run-336ad50b80d9d7f1",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-19T05:31:21Z",
+          "run_id": "run-9c37c310b7f154e3"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-19T05:32:06Z",
+          "run_id": "run-336ad50b80d9d7f1",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T1204": {
       "status": "todo",
