@@ -12895,3 +12895,162 @@ TRUNCATE 与重新推导在**同一个事务**里，失败整体回滚（`defer 
 另一件事、且代码自己写了（`rebuild.go:40-50`）：**重建把 `embedding` 置 NULL**——今天全库向量
 本来就是空的，无损失；**等 T0902 填上向量之后，第一次重建会把它们抹掉，那就是检索回退**。
 这条已写在代码与 `RESULT.json` 里，不是隐藏的。
+
+### T0806 是 P8 整批的闸门；下一波怎么开（同日，排队时算的）
+
+T0806 一合，`rddev task next` 里 8 个任务同时解闸。我把这批（13 个候选）的**两两范围重叠**
+全算了一遍，得到一个**必须写下来的结构性事实**：
+
+**13 个候选里，每一个两两组合都有重叠。** 原因不是设计得差，是任务书的 `allowed_scope` 一律
+写成宽 glob——`internal/persistence/**`、`internal/application/**`、`go.mod`、`go.sum`、
+`tests/**`、`infra/migrations/**`、`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`
+几乎人人都有。**按字面读，没有任何两个任务是文件不相交的。**
+
+所以「互不阻塞」不能用 allowed_scope 判断，得用**真实的串行约束**判断。这里只有一条硬的：
+**迁移链**（§8.1 的编号 + `assertMigrationMergeOrder` 按号顺序合入）。加迁移的任务**只能一个一个
+合**，每个都要走一遍「推进 → 工人返工 → 重收集 → 重 G2 → 重评审」，**一轮就是几十分钟**。
+把加迁移的任务并行铺开，等于自己给自己制造排队。
+
+**按这条筛出来的结论**（唯一一次算清，值得记）：
+
+| 任务 | 加迁移 | 动 `cmd/api` | 动 `cmd/worker` |
+| --- | --- | --- | --- |
+| **T0813** | 否 | 否 | 是 |
+| **T0814** | 否 | 是 | 否 |
+| **T0816** | 否 | 否 | 否 |
+| 其余 10 个 | **是** | — | — |
+
+**所以 T0806 合入后的第一波就是这三个**：正好 3 个（§2 的默认工位数），**都不加迁移**（不互锁），
+而且**入口点天然错开**——一个改 worker 的挂载、一个改 api 的接线、一个两个都不改。
+三者仍共享 `internal/persistence/**` 与 `internal/application/**`，重叠由 `rebaseline` 吸收；
+**但没有一条迁移链互锁**，这是关键。
+
+加迁移的那 10 个（T0506/T0509/T1007/T0608/T0808/T0809/T0811/T0902/T0903 + 已在跑的 T0806）
+**同时最多两个在飞**，按号顺序合——这是我之前记的「一次一环」在数量上的具体化。
+
+
+## 2026-09-19 两条 L3 只在任务书里写了「等 owner 裁定」，却没进这份档 —— 补记
+
+**怎么发现的**：准备派 T0902/T0903 时通读两本书，两本的裁定一都写着「真实 provider 的接线是一条
+独立任务，**等 owner 裁定**」，T0903 的裁定三还逐字写着「**已记入 `tasks/decisions.md` 等 owner
+裁定**」。我不放心，回档里查了一遍——**两条都零命中**，`tasks/progress.md` 给你的清单里也没有。
+**书里写了「等 owner」，owner 从来没被告知。记在没人看的地方等于没记。** 补在这里。
+
+### L3-⓪（最要紧的一条）平台内容能不能送出到第三方 embedding / LLM 服务
+
+**规格一处都没写这件事。** 相关的几句只擦到边上，逐字（我今天自己核过，不是转述）：
+
+- `docs/20_TECH_ARCHITECTURE.md:77`：`Embedding/LLM provider 通过 port abstraction。`
+  —— 它规定的是**接口形状**（走端口），**不是**内容可不可以离开平台。
+- `docs/52_BACKEND_STANDARD.md`（External adapters 一节）：
+  `Gitea、S3、Redis、email、LLM、scientific adapter 都通过 port。不得让外部 provider ID 变成
+  domain primary identity。` —— 同上，管的是**身份**不是**流向**。
+- `docs/55_DATA_CLASSIFICATION.md`：`SECRET 永远不进入普通 logs/search/vector embedding。`
+  —— 禁的是 SECRET 进检索，**没说** PROJECT_PRIVATE 的内容能不能发给外部模型。
+- `docs/59_PRODUCT_ANALYTICS.md`：`不把科研内容送第三方 analytics SaaS。`
+  —— 禁的是**分析型 SaaS**，与推理型模型服务是不是同一件事，规格没表态。
+- `docs/23_SECURITY_PRIVACY.md:21`：`所有 query/search/export/download 进行 tenant/project/object
+  policy 过滤。` —— 管的是**未授权可见**，不是**送出平台外**。授权了的人仍然是你发出去的那一方之外的第三方。
+
+**为什么归你（§5 L3）**：它是**隐私 + 法律**问题（平台上的科研内容离开平台），而且同时命中 §5.1
+的停止条件「**需要新的外部凭证、付费服务或账号授权**」——真接一个 provider 就必然要 API key、
+多数还要付费。
+
+**今天怎么办的（已按此派工，所以它不挡路）**：T0902（embedding）与 T0903（query planner）的裁定一
+都把本轮**收窄成「端口 + 确定性假件 + 零联网」**：所有测试走假件，不需要任何密钥，`RESULT` 里若发现
+「顺手就能写个真适配器」也不许写，只许报上来。**验收没有一条因此变弱**——两条验收（失败不阻塞 /
+可重建；非法 plan 回退 / 不访问未授权实体）在假件上都能完整证明。
+
+**要你答的一句话**：平台上的内容——**项目名、知识对象正文、用户敲进搜索框的那句话**——
+**可不可以**发给平台之外的模型服务（比如某个商用 embedding/LLM 接口）？
+选「可以」：我另立一条接线任务，并要一并定「哪些分类不许出」。
+
+### L3-① 登录之前能不能搜索
+
+**规格与契约说的是两件事，两边都逐字在**（引文逐条核过）：
+
+- 规格侧 `docs/05_INFORMATION_ARCHITECTURE.md:9` 逐字：`登录前保留 Explore/Search/Public entity 浏览；需要写操作时引导登录。`
+  同篇 `:15` 把「**搜索入口**」列在未登录可见的那一栏里。
+- 契约侧 `specs/api/openapi.yaml:10-11` 是全局 `security: - bearerAuth: []`；`:536-540` 逐字：
+  `/api/v1 that is neither an /auth/* route nor marked security: [] is default-deny — an unauthenticated`
+  `write is 401 before routing, so a new product route inherits the guard by being mounted in the subtree`
+  `rather than by opting in.` 而 `POST /search`（`:392` 起、到 `:406` 止）**没有** `security: []`。
+
+**两种都自洽的读法**：(a) 契约是疏漏，Search 该像规格说的那样匿名可读；(b) 规格里那个「Search」指的是
+首页入口与 Explore，真正的 `/search` 是登录功能。
+
+**我的处置（已按此派工，所以它不挡路）**：**按契约走，要登录。** 三条理由：它落在 fail-closed 那一侧；
+它是**现存且成文的**契约；而「把内容的对外可见性扩大」正是 §5.1 明文要我停下来问你的那类决定。
+
+**要你答的一句话**：不登录的人能不能用搜索？
+选 (a) 的话我要动两处，**而且第二处有 fail-open 的风险**：契约要给 `POST /search` 加 `security: []`；
+同时 T0903 新写的 scope 组装层今天明写着「没有 actor 就是没有 scope，就是拒绝」，那句要跟着改——
+改错方向就是 fail-open。
+
+### 顺带记下：本次核对还抓出两处任务书本身的错误陈述（待空窗改书）
+
+核对 T0813/T0814/T0816 三本书的坐标时，除了确认绝大多数引文属实，还抓出**两处错的**。
+两处都要改书，而改书动 `tasks/tasks.json` → **动规格指纹** → 会连累在跑的 T0806。
+所以**先记在这里，等没有工人在跑的空窗再落**（与 T1203/T0815 的重写同批）。
+
+**（一）T0814 需求 5 把人指到了错的目录。** 书里写「今天是 `pullrequests.Service.Create` 把整条链
+包成 `ErrStore`（HTTP 会答 503）」。**核对结果：不是它。** 实际是：`Service.Create` 用的是
+`wrapStoreError`（`internal/application/pullrequests/service.go:36-45`、`:203-223`），它把**已枚举的
+结果放行**、只包住剩下的；而那条 POST 路由的处理器**根本不走 `Service.Create`**，它走
+`forks.OpenExternalPR`（`cmd/api/pullrequestshttp/handler.go:42-52`），503 出自
+`openErrorOutcome` 的**默认分支**（`:346`）。**结论（今天答 503、要改成契约里的 409）是对的，
+机制说错了**——而机制错会让工人去改错的文件。改书时把落点改成
+`cmd/api/pullrequestshttp/handler.go`（在 T0814 的 `allowed_scope` 里，`cmd/api/**`）。
+
+**（二）T0813 说 `RoleProjectMaintenance`「没人用」，它有人用。** 实际：
+`internal/contribution/roles.go:79` 定义的常量在 `:99` 的词表标签里、并被 `ContributionRoles()`（`:106`）、
+`Valid()`（`:120`）、`Label()`（`:116`）返回。**真正成立的是另一句话**：**没有任何事件或账本映射会产出
+这个角色**（`ledgerMappings` 里没有它，`specs/events/event-types.yaml` 的 25 个事件里也没有任何记录
+维护行为的事件）。改书时把「没人用的常量」改成「词表里有、但今天没有任何事件会产出它」——
+否则工人一查就发现书在说假话，然后开始怀疑整本书。
+
+**另有两处只是坐标偏了、不构成误导，不必改**：T0813 引的 `cmd/worker/main.go` 三个消费者实际在
+`:181` / `:194-195` / `:213`（书里写 `:119`/`:132`/`:151`）——书里点了构造名（`dispatcher :=`、
+signed-webhook 的 fanout+deliverer、subscription fanout），工人按名字找得到；T0814 说
+`00042`/`00086` 的「两个触发器」，准确说是两个**函数**（触发器对象另带 `_trigger` 后缀）。
+
+
+## 2026-09-19 派工前的坐标核对：两份独立核对，抓出 6 处错误陈述，其余属实
+
+**方法**：派 T0902/T0903 之前（以及为下一波 T0813/T0814/T0816 预备），把三本书里**所有**
+「某文件某行已经怎样了」的断言交给**独立代理**逐条回仓库核，每条给四选一的判定：属实 / 坐标错 /
+不存在 / 描述错。**尺子被明确要求是对抗性的**——近似命中不算属实，函数在别处就算坐标错，
+「已经做了 X」但实际没做 X 就是描述错。**目的只有一个：拦住 T1203 那一类**——书里断言的**前提根本不存在**，
+工人开了工才发现，白烧一个工位。
+
+**结论：没有一条前提是不存在的。载重的事实全部属实**，抓出的都是坐标漂移与措辞过头。
+
+**确认属实的载重事实**（这些是书能不能用的地基，逐条核过）：
+- T0814：`POST /projects/{projectId}/forks` 契约真在（`specs/api/openapi.yaml:51-146`，声明了 8 个状态码）；
+  服务层 `internal/application/forks` 的 `Fork`/`OpenExternalPR`/`authorizeCreateBranch`/`authorizeOpenPR`
+  四个函数都在（`:144`/`:278`/`:585`/`:619`）；权限表第 5-7 行逐字对（`create_branch,deny,external_fork_only` 等）。
+- T0902：`embedding vector(1536)` 真在（`00013_search_projection.sql:11`），扩展在 `00001_extensions.sql:3`；
+  读写两条查询确实都不碰这一列；`oidctest` 那个「当普通包发布的假件」模板真在且真被测试用。
+- T0903：`docs/14:9` 的**八项**逐字对；`docs/54:16` 的第七号威胁逐字对；jsonschema/v6 是**直接**依赖
+  （`go.mod:10`），`schema.go:30` 的 `Validate` 入口在；`internal/search/scope.go` **确实不存在**（文件名空着）。
+- T0813：`ledger.go:223` 那条 `"evidence_assertion"` 死行**成立且机理清楚**——`Registry.Lookup`
+  是精确命中、不做归一化，而 `typeTokenRe` 不允许连字符，所以带下划线的 token 永远拼不出带连字符的文件名。
+
+**抓出的 6 处**（前两条上次已记，此处合并成一张清单）：
+
+| # | 位置 | 书里写的 | 实际 | 要不要改书 |
+|---|---|---|---|---|
+| 1 | T0814 需求 5 | 503 来自 `pullrequests.Service.Create` 包成 `ErrStore` | 不是它：那条 POST 走 `forks.OpenExternalPR`，503 出自 `openErrorOutcome` 默认分支 | **要**——会把人指到错的目录 |
+| 2 | T0813 | `RoleProjectMaintenance` 「没人用的常量」 | 在用（词表标签/`ContributionRoles`/`Valid`/`Label`）；真话是「没有任何事件会产出它」 | **要** |
+| 3 | T0903 裁定二 | `@allowed_project_ids`「零调用者」 | **生产代码**零调用者；测试三处手动传（`search_access_test.go:63`、`search_projection_test.go:489/:545/:559`） | 要（措辞） |
+| 4 | T0902 验收第 5 条 | 三个夹具在 `736-739`/`874-875`/`1157`，**都是全等比较** | 实际在 `896-897`/`1065-1066`/`1406`；**前两处全等、第三处只是成员检查**（加列不会让它红） | 要 |
+| 5 | T0903 裁定三 | openapi 的 default-deny 注释在 `306-311`、`POST /search` 在 `257-271` | 实际 `536-540` 与 `392-406`（**实质属实**：`/search` 确实没有 `security: []`） | 要（坐标） |
+| 6 | T0902 relevant_specs | `00014` 有一段注释把 `search_documents` 排除 | 是**不在名单里**（`:16-23` 的受管表清单不含它），没有一段注释说这件事。效果相同 | 要（措辞） |
+
+**为什么不改书就直接派工**：改书动 `tasks/tasks.json` → **动规格指纹** → 会连累在跑的 T0806 的 G2 门。
+而上面这 6 处要么是坐标漂移（书是 9-18 写的，仓库一直在动；工人按名字 grep 就能找到），
+要么是措辞过头（工人一 grep 就看见真相，而且**不影响要建什么**）。**两条判据合起来才成立**：
+书里**没有**「前提不存在」这一类，才允许带着这 6 处开工。
+
+**待空窗改书（与 T1203/T0815 重写同批）**：上表 6 条，加 T1203（验收要一份全仓不存在的部署模板）、
+T0815（前提已被 `d3abb0b` 改掉：超时早已从 10 分钟提到 20 分钟）。
