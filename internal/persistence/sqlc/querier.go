@@ -104,6 +104,8 @@ type Querier interface {
 	CreateProgram(ctx context.Context, arg CreateProgramParams) (Program, error)
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
 	CreateProjectState(ctx context.Context, arg CreateProjectStateParams) (ProjectState, error)
+	// creation_key is the creation request's Idempotency-Key (migration 00089):
+	// empty when the caller sent none, and UNIQUE per project when it did not.
 	CreatePullRequest(ctx context.Context, arg CreatePullRequestParams) (PullRequest, error)
 	// Typed relations and their append-only version log (canonical tables:
 	// relations, relation_versions). Historical content is never UPDATEd in
@@ -536,6 +538,11 @@ type Querier interface {
 	// The join is an inner one on a NOT NULL foreign key: every version row
 	// has exactly one asset row.
 	GetPublishedAssetVersion(ctx context.Context, id pgtype.UUID) (GetPublishedAssetVersionRow, error)
+	// The creation replay read (T0410, migration 00089): the proposal a previous
+	// request with this Idempotency-Key opened. Only a non-empty key names
+	// anything — '' is "no key", shared by every key-less row, so it is excluded
+	// here rather than left to the partial index.
+	GetPullRequestByCreationKey(ctx context.Context, arg GetPullRequestByCreationKeyParams) (PullRequest, error)
 	GetPullRequestByProjectAndNumber(ctx context.Context, arg GetPullRequestByProjectAndNumberParams) (PullRequest, error)
 	// The refresh/transition row lock (T0402): serializes the head refresh
 	// against concurrent state transitions inside one transaction.

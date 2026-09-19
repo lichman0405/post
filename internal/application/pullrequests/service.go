@@ -182,6 +182,16 @@ func validateCreate(in CreatePullRequestParams) error {
 	if in.CreatedBy == "" {
 		return fmt.Errorf("%w: created_by is required", ErrValidation)
 	}
+	// The Idempotency-Key is optional on the command (an internal caller
+	// opening a proposal by hand sends none), but a key that IS sent has
+	// to be a usable one: below the contract's minLength it names nothing
+	// a retry could be matched against, and storing it would let a client
+	// believe a retry is safe when the row it would collide with is not
+	// the one it meant.
+	if in.CreationKey != "" && len(in.CreationKey) < MinCreationKeyLen {
+		return fmt.Errorf("%w: creation_key must be at least %d characters (specs/api/openapi.yaml IdempotencyKey)",
+			ErrValidation, MinCreationKeyLen)
+	}
 	return nil
 }
 

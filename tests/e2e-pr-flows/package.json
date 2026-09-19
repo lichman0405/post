@@ -1,0 +1,13 @@
+{
+  "name": "@post/e2e-pr-flows",
+  "version": "0.1.0",
+  "private": true,
+  "description": "T0410 required test \"playwright pr flows\": two flows of the seed project (docs/34) driven in real Chromium against the real stack — the routes cmd/api mounts in front of the real auth guard, over real PostgreSQL and real Gitea. Flow one is batch create → objects → push → open pull request → request review → three review submissions → merge, with the reviews submitted through the app's own review form; flow two is one scientific conflict that the merge refuses to settle until a human records keep_both on the conflicts page and the same merge then lands carrying it. Self-contained like tests/e2e-pulls: harness deps live in this directory's own npm project (its own lockfile), outside the pnpm workspace.",
+  "type": "module",
+  "scripts": {
+    "e2e": "node pr-flows-e2e.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}

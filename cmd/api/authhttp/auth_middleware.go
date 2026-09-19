@@ -98,6 +98,16 @@ const (
 	headerACCred   = "Access-Control-Allow-Credentials"
 	headerACMethod = "Access-Control-Allow-Methods"
 	headerACHeader = "Access-Control-Allow-Headers"
+	// headerIdem is the contract's request-idempotency header
+	// (components.parameters.IdempotencyKey, specs/api/openapi.yaml) —
+	// required by the write routes that create a durable record. The web
+	// app sends it from the browser (lib/milestones.ts, lib/releases.ts,
+	// lib/pulls.ts), so it is a header a preflight must admit: a CORS
+	// allow-list that omits it lets the write be refused by the browser
+	// itself, before the API ever sees it. No Go client can notice, which
+	// is exactly why tests/e2e-pr-flows drives the real routes in a real
+	// browser.
+	headerIdem = "Idempotency-Key"
 )
 
 // stateChangingMethods are the verbs the write guard covers. Reads stay
@@ -299,7 +309,8 @@ func (g *guard) applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	}
 	if r.Method == http.MethodOptions {
 		w.Header().Set(headerACMethod, "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set(headerACHeader, strings.Join([]string{headerCT, headerCSRF, observability.HeaderCorrelationID}, ", "))
+		w.Header().Set(headerACHeader, strings.Join(
+			[]string{headerCT, headerCSRF, headerIdem, observability.HeaderCorrelationID}, ", "))
 		w.WriteHeader(http.StatusNoContent)
 		return false
 	}

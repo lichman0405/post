@@ -259,6 +259,12 @@ type OpenPRRequest struct {
 	TargetBranchID string
 	Title          string
 	Body           string
+	// CreationKey is the proposal's Idempotency-Key
+	// (specs/api/openapi.yaml, components.parameters.IdempotencyKey):
+	// empty when the caller sent none. A non-empty key is unique per
+	// project — a repeated request is answered with the proposal the
+	// first one opened, never with a second (migration 00089).
+	CreationKey string
 }
 
 // OpenExternalPR resolves the open_pr cell for the actor and proposes
@@ -294,6 +300,7 @@ func (s *Service) OpenExternalPR(ctx context.Context, actor domain.User, in Open
 		Title:          in.Title,
 		Body:           in.Body,
 		CreatedBy:      actor.ID,
+		CreationKey:    in.CreationKey,
 	})
 	if err != nil {
 		return domain.PullRequest{}, mapPullRequestError(err)
