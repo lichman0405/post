@@ -14349,3 +14349,45 @@ unit/集成/e2e（真 PostgreSQL），确认 **diff 只增不减**（29 个文�
    而 `apps/web/.../pulls/[number]/page.tsx` 里一次都没出现这个词；全 DAG 也没有任何任务管它。
    已开成 `tasks/window-queue.md` 的 **C 段**：空窗里**要么立一本 UI 任务，要么把 docs/42:13
    那一格删掉**，不许悬着。
+
+## 2026-09-19 17:5x 又抓到一个**静默**的口子，而且更大：`tests/e2e` 在 CI 里从来没真跑过
+
+**怎么发现的**：我在审 T0811 的评审风险第 0 条（"这个 e2e 在没有数据库时是 skip，于是报绿"）
+时问了一句"那 CI 里到底有没有数据库给它"。
+
+**事实（都核过，不是推的）**：
+
+- CI 的 `go` job 跑的是 `go test $(go list ./... | grep -v '/tests/integration')`——
+  **它包含 `./tests/e2e`**（`go list` 输出了这个包），而**这个 job 没有 postgres service**。
+- 唯一的带库 job 是 `migration-integration`，它跑 `make test-integration`，
+  而那个目标**只跑 `./tests/integration`**。
+- **全仓库（`ci.yml` / `Makefile` / `scripts/ci.sh`）搜 `tests/e2e` 零命中**——
+  除了上面那个通配。
+
+**我把它跑出来看了（不是推理）**：`tests/e2e` 里现在**只有 `conflict_e2e_test.go` 要数据库**
+（`grep -l pgxpool tests/e2e/*.go` 只有一个文件，93 个 `tests/integration` 文件是有库的）。
+把库指到一个**死端口**、照 CI 的形状跑：
+
+```
+POSTGRES_TEST_ADMIN_URL=postgres://...@127.0.0.1:59999/dead go test ./tests/e2e -count=1 -v
+→ go test exit=0
+→ 27 个 --- PASS、1 个 --- SKIP（TestE2EConflictResolution）、结尾 "ok ... 2.210s"
+```
+
+**同一个测试**在真库上跑（`make infra-up` 那套）是 `--- PASS: TestE2EConflictResolution (0.90s)`。
+所以这不是"没测到"，是**测了、报绿、其实一次都没跑**。**T0811 一并，`TestE2EDiscussionPromotion`
+就是第二个这样的测试**，而它正是那本任务的**登记阻塞测试**。
+
+**为什么这比"注释写错"严重得多**：§6 的 G3 条要求跨边界的链路**用真 PostgreSQL 跑**；
+CI 是这条要求的**唯一自动哨兵**，而"真 e2e 一次没跑"这件事**完全静默**——
+名字出现在 job 输出里、结果是绿的。**判据仍然是"静默 vs 大声"**，这条静默，所以必须加机械守卫。
+
+**修法（已定，进 `tasks/window-queue.md`）**：① 在**有库的那个 job** 里**显式加一步**
+`go test ./tests/e2e -count=1 -v`（带 `POSTGRES_TEST_ADMIN_URL`）；
+② 让 skip **变大声**：加一个共享帮手 `RequireDB(t)`——当环境变量 `POST_REQUIRE_E2E_DB=1` 且库不可达时
+**`t.Fatalf` 而不是 `t.Skipf`**，并**在有库的那个 job 里设上这个变量**（库真挂了就该红，不该绿）；
+③ 配一个 fixture 单测证明这个守卫**能红**（本仓库惯例）。
+**这条要改 `ci.yml` → 必须同步 `specs/orchestrator/gates.json` → 空窗。**
+
+**一句话给以后**：**"CI 绿"只等于"CI 里写的那些命令返回 0"**，
+不等于"那些命令真的做了它们名字里说的事"。凡是"包一层 skip 就当过"的地方，都要按这条查一遍。
