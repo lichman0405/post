@@ -21,17 +21,23 @@ func TestValidateTarget(t *testing.T) {
 	}{
 		{"project by uuid", Target{TargetTypeProject, uuid}, true},
 		{"asset by pid", Target{TargetTypeAsset, pid}, true},
-		{"knowledge by uuid", Target{TargetTypeKnowledge, uuid}, true},
+		{"knowledge by pid", Target{TargetTypeKnowledge, pid}, true},
 		{"user by uuid", Target{TargetTypeUser, uuid}, true},
 		{"organization by uuid", Target{TargetTypeOrganization, uuid}, true},
 		{"unknown type", Target{"planet", uuid}, false},
 		{"empty type", Target{"", uuid}, false},
-		// The id's shape is per type: an asset is addressed by its pid and
-		// nothing else, and every other target by a uuid. Getting this
-		// backwards is what would turn the audience queries' ::uuid casts
-		// into a runtime error.
+		// The id's shape is per type: an asset and a published knowledge
+		// object are addressed by their pid and nothing else, and the row-id
+		// targets by a uuid. Getting this backwards is what would turn the
+		// audience queries' ::uuid casts into a runtime error — and for
+		// knowledge it is the bug T0901 fixed: a publication's row uuid never
+		// leaves the process, so a target demanding one could never be
+		// created.
 		{"asset addressed by uuid", Target{TargetTypeAsset, uuid}, false},
+		{"knowledge addressed by uuid", Target{TargetTypeKnowledge, uuid}, false},
 		{"project addressed by pid", Target{TargetTypeProject, pid}, false},
+		{"knowledge pid with an excluded letter", Target{TargetTypeKnowledge, "01j9z6k3m4n5p6q7r8s9t0v1wL"}, false},
+		{"knowledge pid one character short", Target{TargetTypeKnowledge, pid[:25]}, false},
 		{"empty id", Target{TargetTypeProject, ""}, false},
 		{"upper-case uuid", Target{TargetTypeProject, "3F8A1C62-9B4D-4F1E-8A77-0C2D5E6F7A80"}, false},
 		{"asset pid with an excluded letter", Target{TargetTypeAsset, "01j9z6k3m4n5p6q7r8s9t0v1wL"}, false},
@@ -241,11 +247,25 @@ func TestEventTargets(t *testing.T) {
 			[]Target{{TargetTypeProject, project}, {TargetTypeUser, actor}},
 		},
 		{
-			// A knowledge event has a target type but no producer-side
-			// addressing rule yet, so it addresses no knowledge object
-			// (internal/events/subscription.go EventTargets).
-			"a knowledge event addresses no knowledge target yet",
-			"knowledge.published", actor, project, `{"publication_id":"` + otherUUID + `"}`,
+			// A published knowledge object is addressed by its pid, exactly
+			// as an asset is: the producer writes the pid
+			// (knowledge_publish_store.go knowledgeVersionPublishedPayload)
+			// and the public read resolves one BY pid.
+			"a knowledge publish addresses the publication its payload names",
+			EventTypeKnowledgeVersionPublished, actor, project, `{"publication_id":"` + assetPID + `"}`,
+			[]Target{{TargetTypeProject, project}, {TargetTypeUser, actor}, {TargetTypeKnowledge, assetPID}},
+		},
+		{
+			// The publication's ROW uuid is not its identity: it never leaves
+			// the process, so an event carrying one addresses no knowledge
+			// target.
+			"a knowledge publish whose publication id is a uuid addresses no knowledge target",
+			EventTypeKnowledgeVersionPublished, actor, project, `{"publication_id":"` + otherUUID + `"}`,
+			[]Target{{TargetTypeProject, project}, {TargetTypeUser, actor}},
+		},
+		{
+			"a knowledge publish with no publication id addresses only the envelope",
+			EventTypeKnowledgeVersionPublished, actor, project, `{}`,
 			[]Target{{TargetTypeProject, project}, {TargetTypeUser, actor}},
 		},
 	}
@@ -275,8 +295,11 @@ func TestEventTargetsEveryTargetIsValidatable(t *testing.T) {
 		`{"asset_id":"01j9z6k3m4n5p6q7r8s9t0v1w2"}`,
 		`{"asset_id":"nonsense"}`,
 		`{"asset_id":""}`,
+		`{"publication_id":"01j9z6k3m4n5p6q7r8s9t0v1w2"}`,
+		`{"publication_id":"3f8a1c62-9b4d-4f1e-8a77-0c2d5e6f7a80"}`,
+		`{"publication_id":"nonsense"}`,
 	}
-	for _, e := range []string{"state.committed", EventTypeAssetVersionPublished, "knowledge.published"} {
+	for _, e := range []string{"state.committed", EventTypeAssetVersionPublished, EventTypeKnowledgeVersionPublished} {
 		for _, p := range payloads {
 			for _, targets := range [][]Target{
 				EventTargets(e, "3f8a1c62-9b4d-4f1e-8a77-0c2d5e6f7a80", "7c1b2d33-4e55-4a66-9b77-8c99d0e1f2a3", []byte(p)),
@@ -286,9 +309,12 @@ func TestEventTargetsEveryTargetIsValidatable(t *testing.T) {
 					if err := ValidateTarget(target); err != nil {
 						t.Errorf("EventTargets(%s, %s) produced %+v: %v", e, p, target, err)
 					}
-					if target.Type == TargetTypeKnowledge || target.Type == TargetTypeOrganization {
-						t.Errorf("EventTargets(%s, %s) produced a %s target; the organization is the "+
-							"fan-out's to resolve and the knowledge rule has no producer yet", e, p, target.Type)
+					// The organization is the fan-out's to resolve from the
+					// schema, so it is the one target type that must NOT
+					// appear here.
+					if target.Type == TargetTypeOrganization {
+						t.Errorf("EventTargets(%s, %s) produced an organization target; the "+
+							"organization is the fan-out's to resolve", e, p)
 					}
 				}
 			}

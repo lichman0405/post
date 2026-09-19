@@ -741,8 +741,11 @@ var canonicalTables = map[string]tableExp{
 		// vocabulary the pre-00078 table left open: target_type is one of
 		// the five followable kinds, target_id is non-empty and shaped for
 		// its type (a uuid for everything addressed by a canonical id, the
-		// 26-character asset pid for an asset — the same rule 00064's
-		// research_assets_pid_format carries), and channels is a non-empty
+		// 26-character pid for the two kinds a user addresses one of —
+		// asset since 00078, the same rule 00064's research_assets_pid_format
+		// carries, and knowledge since 00090, 00083's
+		// knowledge_publications_pid_format — because those two are the kinds
+		// whose page URL is built from a pid), and channels is a non-empty
 		// subset of the V1 channel set. The target_id shape is what makes
 		// the audience queries' ::uuid casts safe rather than a query error
 		// waiting on a hand-written row.
@@ -894,6 +897,18 @@ var canonicalTables = map[string]tableExp{
 		cols: []colExp{c("entity_ref", txt, false, false), c("entity_type", txt, false, false), c("visibility", txt, false, false), c("project_id", u, true, false), c("title", txt, false, false), c("content", txt, false, false), c("structured", jb, false, true), colExp{name: "embedding", dataType: vec, udtName: "vector", nullable: true}, c("updated_at", ts, false, true)},
 		pk:   []string{"entity_ref"},
 		fks:  []fkExp{fk("project_id", "projects", "RESTRICT")},
+	},
+	"search_projected_events": {
+		// T0901 (00090): the search projection's cursor — one row per outbox
+		// event the projector has consumed, written in the same transaction
+		// as the document it projects, so a crash between the two re-runs an
+		// idempotent upsert instead of losing the event. It is 00078's
+		// subscription_fanned_events shape exactly, and the reason is the
+		// same: outbox_events is modeled by checked-in sqlc queries, so a
+		// per-consumer cursor column there would move generated code.
+		cols: []colExp{c("outbox_event_id", u, false, false), c("projected_at", ts, false, true)},
+		pk:   []string{"outbox_event_id"},
+		fks:  []fkExp{fk("outbox_event_id", "outbox_events", "RESTRICT")},
 	},
 	"provenance_edges": {
 		// T0505 (00043): the rebuildable provenance graph projection — one

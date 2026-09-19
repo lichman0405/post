@@ -132,7 +132,10 @@ var uuidShape = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 // assetPIDShape mirrors research_assets_pid_format (migration 00064): 26
 // Crockford base32 characters, the identity internal/assets.NewPID
-// generates and /assets/{pid} is built from.
+// generates and /assets/{pid} is built from. A knowledge publication's pid
+// is the same shape (knowledge_publications_pid_format, migration 00083,
+// carries the identical regexp), so both targets are checked by this one
+// pattern.
 var assetPIDShape = regexp.MustCompile(`^[0-9a-hjkmnp-tv-z]{26}$`)
 
 // ValidateTargetType reports whether t is one of the five canonical target
@@ -145,19 +148,34 @@ func ValidateTargetType(t string) bool {
 	return false
 }
 
-// ValidateTargetID checks the id's shape for its type: a uuid for every
-// target addressed by a canonical identifier, the asset pid for an asset.
-// The shape is a precondition of the resolution queries — they cast
-// project/knowledge/user/organization ids to uuid — so it is checked at
-// the boundary rather than discovered as a query error, and the migration
-// carries the same rule as a CHECK for sessions that write SQL directly.
+// ValidateTargetID checks the id's shape for its type: a uuid for a target
+// addressed by a row id, the pid for an asset and for a published
+// knowledge object.
+//
+// The shape is a precondition of the resolution queries — the ones that
+// cast their target to uuid do it because their rows are addressed by a
+// uuid — so it is checked at the boundary rather than discovered as a
+// query error, and the migration carries the same rule as a CHECK
+// (subscriptions_target_id_shape) for sessions that write SQL directly.
+//
+// A knowledge target is a PID for the same reason an asset target is
+// (00090, which moved both the CHECK and every stored row): a pid is the
+// identity the surface is addressed by (/api/v1/knowledge/{pid},
+// cmd/api/knowledgehttp) and the identity the event payload carries
+// (knowledge_publish_store.go: publication_id is the PID). The publication
+// row's uuid never leaves the process, so a target_id demanding one was an
+// identifier no subscriber could ever hold.
 func ValidateTargetID(targetType, id string) error {
 	switch targetType {
 	case TargetTypeAsset:
 		if !assetPIDShape.MatchString(id) {
 			return fmt.Errorf("%w: asset id must be a 26-character asset pid", ErrTargetShape)
 		}
-	case TargetTypeProject, TargetTypeKnowledge, TargetTypeUser, TargetTypeOrganization:
+	case TargetTypeKnowledge:
+		if !assetPIDShape.MatchString(id) {
+			return fmt.Errorf("%w: knowledge id must be a 26-character publication pid", ErrTargetShape)
+		}
+	case TargetTypeProject, TargetTypeUser, TargetTypeOrganization:
 		if !uuidShape.MatchString(id) {
 			return fmt.Errorf("%w: %s id must be a uuid", ErrTargetShape, targetType)
 		}
@@ -291,12 +309,14 @@ func SubscribesTo(filters []string, eventType string) bool {
 //   - asset: eventTypeAssetVersionPublished's payload asset_id, the pid
 //     its producer documents (internal/persistence/asset_publish_store.go
 //     assetVersionPublishedPayload) and the identity /assets/{pid} uses.
-//   - knowledge: no producer addresses a published knowledge object yet
-//     (T0805 owns that surface), so an event names no knowledge target
-//     today and a knowledge subscription receives nothing until one does.
-//     The target type is still resolvable and followable (the store's
-//     audience query is defined for it) — what is missing is the
-//     producer, not the rule.
+//   - knowledge: eventTypeKnowledgeVersionPublished's payload
+//     publication_id, the pid its producer documents
+//     (internal/persistence/knowledge_publish_store.go
+//     knowledgeVersionPublishedPayload, T0805) and the identity
+//     /api/v1/knowledge/{pid} uses. The pid is what the producer writes —
+//     the publication's row uuid never leaves the process — which is why a
+//     knowledge target is shaped like an asset target and not like the
+//     row-id targets (00090).
 //
 // The organization target needs one lookup; EventTargets therefore returns
 // only what the event itself names, and the fan-out appends the
@@ -328,6 +348,11 @@ type payloadTarget struct {
 // publish path.
 const EventTypeAssetVersionPublished = "research_asset.version_published"
 
+// EventTypeKnowledgeVersionPublished is the knowledge.version_published
+// research event (specs/events/event-types.yaml), produced by the
+// knowledge publish path.
+const EventTypeKnowledgeVersionPublished = "knowledge.version_published"
+
 // eventTargetPayloadKeys is the closed half of the mapping: which payload
 // key of which event type names a subscription target. A key that is
 // absent, empty or not the target's shape is skipped — an event that does
@@ -335,7 +360,8 @@ const EventTypeAssetVersionPublished = "research_asset.version_published"
 // fail-closed direction (a subscription is never delivered an event whose
 // target the event does not actually name).
 var eventTargetPayloadKeys = map[string][]payloadTarget{
-	EventTypeAssetVersionPublished: {{Key: "asset_id", Type: TargetTypeAsset}},
+	EventTypeAssetVersionPublished:     {{Key: "asset_id", Type: TargetTypeAsset}},
+	EventTypeKnowledgeVersionPublished: {{Key: "publication_id", Type: TargetTypeKnowledge}},
 }
 
 // payloadString reads one top-level string field of a JSON object payload.

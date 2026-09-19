@@ -132,7 +132,7 @@ func (s *NotificationStore) TargetLabel(ctx context.Context, target Target) (str
 var subjectLabelQueries = map[string]string{
 	TargetTypeProject:      `SELECT name FROM projects WHERE id = $1::uuid`,
 	TargetTypeAsset:        `SELECT title FROM research_assets WHERE pid = $1`,
-	TargetTypeKnowledge:    `SELECT sov.title FROM knowledge_publications kp JOIN scientific_object_versions sov ON sov.id = kp.object_version_id WHERE kp.id = $1::uuid`,
+	TargetTypeKnowledge:    `SELECT sov.title FROM knowledge_publications kp JOIN scientific_object_versions sov ON sov.id = kp.object_version_id WHERE kp.pid = $1`,
 	TargetTypeUser:         `SELECT display_name FROM users WHERE id = $1::uuid`,
 	TargetTypeOrganization: `SELECT name FROM organizations WHERE id = $1::uuid`,
 }

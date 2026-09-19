@@ -9,6 +9,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/lichman0405/post/internal/application/knowledgepublish"
+	"github.com/lichman0405/post/internal/rights"
 )
 
 // SubscriptionStore is the subscription persistence: the CRUD the
@@ -203,11 +206,20 @@ WHERE subscription_id = $1 AND status = 'pending'`
 //	project      member of it; else public if its visibility is public
 //	asset        the audience of the project the asset originates from
 //	             (the project read gate is what the asset page itself runs)
-//	knowledge    the audience of the project owning the published object
+//	knowledge    member of the project owning the object; else the
+//	             publication's own audience — knowledgepublish.AudienceFor,
+//	             which is what "发布不等于公开" means (see knowledgeAudience)
 //	user         the person themselves; else public (a live profile is
 //	             public — a disabled account is not)
 //	organization an active member; else public unless deactivated
 func (s *SubscriptionStore) TargetAudience(ctx context.Context, db DBTX, target Target, userID string) (AudienceLevel, error) {
+	if target.Type == TargetTypeKnowledge {
+		// A publication's audience is not "the project's visibility" and it
+		// is not a CASE expression either: it is the three-axis rule the
+		// publish side and the read path already share, so it is asked
+		// rather than restated (see knowledgeAudience).
+		return knowledgeAudience(ctx, db, target, userID)
+	}
 	query, ok := audienceQueries[target.Type]
 	if !ok {
 		return AudienceNone, fmt.Errorf("%w: unknown target type %q", ErrTargetShape, target.Type)
@@ -256,23 +268,6 @@ FROM research_assets a
 JOIN projects p ON p.id = a.origin_project_id
 WHERE a.pid = $1`,
 
-	// A published knowledge object: it belongs to the project that owns
-	// the scientific object it versions, and that project's audience is
-	// the publication's — the same rule as an asset (a publication is not
-	// a licence to hand out a private project's content).
-	TargetTypeKnowledge: `
-SELECT CASE
-         WHEN EXISTS (SELECT 1 FROM project_memberships m
-                      WHERE m.project_id = so.project_id AND m.user_id = $2::uuid) THEN 'member'
-         WHEN p.visibility = 'public' THEN 'public'
-         ELSE 'none'
-       END
-FROM knowledge_publications kp
-JOIN scientific_object_versions sov ON sov.id = kp.object_version_id
-JOIN scientific_objects so ON so.id = sov.object_id
-JOIN projects p ON p.id = so.project_id
-WHERE kp.id = $1::uuid`,
-
 	// A person: everyone may see a live profile, and only the person
 	// themselves is a "member" of their own identity — a private event
 	// attributed to them (a credit dispute, say) is not for their
@@ -300,6 +295,89 @@ SELECT CASE
 FROM organizations o
 WHERE o.id = $1::uuid`,
 }
+
+// knowledgeAudience resolves one user's level on a published knowledge
+// object, addressed by its PID.
+//
+// # Why it is not a row of audienceQueries
+//
+// The other four types resolve to a level inside SQL, because their rule is
+// a property of the target's row. A publication's is not: whether the
+// network may read it is knowledgepublish.AudienceFor — three axes (the
+// version's own visibility_policy_id, the owning project's visibility, the
+// rights document's metadata axis) whose documented meaning is "发布不等于公开":
+// a version pinned to a policy of its own, or a rights document that
+// declares a metadata visibility, stays members-only even in a public
+// project. Restating those three axes as a CASE here would be a second
+// implementation of the rule the publish path and the read path already
+// share — and the one place a divergence would show up is a publication
+// being delivered to subscribers its read path refuses. So the query reads
+// the three axes as DATA and the rule is asked in Go.
+//
+// # The levels
+//
+//   - a member of the owning project: 'member'. Membership is the
+//     relationship to the target — the same relationship the asset query
+//     resolves, and the level at which private events are delivered.
+//   - anyone else: 'public' when AudienceFor answers AudienceNetwork (the
+//     publication is readable by an anonymous caller, so a follower who is
+//     not in the project may be told it happened), 'none' otherwise.
+//
+// Fail-closed, as everywhere in this file: an unknown pid reads no row and
+// is AudienceNone; a row whose rights document does not parse states no
+// metadata axis and can never reach AudienceNetwork; a publication that is
+// members-only answers 'none' to a non-member rather than 'public'.
+func knowledgeAudience(ctx context.Context, db DBTX, target Target, userID string) (AudienceLevel, error) {
+	var (
+		member     bool
+		projectVis string
+		policyID   *string
+		rightsJSON []byte
+	)
+	err := db.QueryRow(ctx, knowledgeAudienceQuery, target.ID, userID).Scan(&member, &projectVis, &policyID, &rightsJSON)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// No publication has that pid: no relationship, no delivery.
+			return AudienceNone, nil
+		}
+		return AudienceNone, fmt.Errorf("events: resolve audience for %s %s: %w", target.Type, target.ID, err)
+	}
+	if member {
+		return AudienceMember, nil
+	}
+	doc, err := rights.Parse(rightsJSON)
+	if err != nil {
+		// An unreadable rights document resolves no metadata axis, so it can
+		// never be a network audience. AudienceFor would refuse it too (the
+		// zero document's metadata axis is not project_policy); the branch is
+		// explicit so that stays true if rights.Parse ever becomes lenient.
+		return AudienceNone, nil
+	}
+	if knowledgepublish.AudienceFor(projectVis, policyID, doc) == knowledgepublish.AudienceNetwork {
+		return AudiencePublic, nil
+	}
+	return AudienceNone, nil
+}
+
+// knowledgeAudienceQuery reads the three inputs AudienceFor decides with,
+// plus whether the caller is a member of the project that owns the object.
+// It reads an unparseable rights document rather than filtering the row
+// out: the audience rule is what refuses it, and a row that vanished from
+// the query would be refused by nothing.
+//
+// The publications are addressed by pid (00083/00090): kp.id never leaves
+// the process.
+const knowledgeAudienceQuery = `
+SELECT EXISTS (SELECT 1 FROM project_memberships m
+               WHERE m.project_id = so.project_id AND m.user_id = $2::uuid),
+       p.visibility,
+       sov.visibility_policy_id::text,
+       kp.rights_json
+FROM knowledge_publications kp
+JOIN scientific_object_versions sov ON sov.id = kp.object_version_id
+JOIN scientific_objects so ON so.id = sov.object_id
+JOIN projects p ON p.id = so.project_id
+WHERE kp.pid = $1`
 
 // TargetAudienceFor is TargetAudience on the store's own pool, for callers
 // that are not already inside a transaction (the application service's
