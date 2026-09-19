@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/lichman0405/post/internal/application/knowledgepublish"
+	"github.com/lichman0405/post/internal/domain"
 	"github.com/lichman0405/post/internal/rights"
 )
 
@@ -224,8 +225,16 @@ func (s *SubscriptionStore) TargetAudience(ctx context.Context, db DBTX, target 
 	if !ok {
 		return AudienceNone, fmt.Errorf("%w: unknown target type %q", ErrTargetShape, target.Type)
 	}
+	// The organization rule is the only one of these that reads a calendar
+	// day, and the day is the caller's: it is resolved here, in UTC, so that
+	// neither the process's clock zone nor the database session's can decide
+	// who is a member (domain.AffiliationDay — one convention, one place).
+	args := []any{target.ID, userID}
+	if target.Type == TargetTypeOrganization {
+		args = append(args, domain.AffiliationDayText(time.Now()))
+	}
 	var level string
-	err := db.QueryRow(ctx, query, target.ID, userID).Scan(&level)
+	err := db.QueryRow(ctx, query, args...).Scan(&level)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// The target does not exist (or is not the shape the query
@@ -282,13 +291,27 @@ FROM users u
 WHERE u.id = $1::uuid`,
 
 	// An organization: an active membership, else public unless the
-	// organization is deactivated. An expired affiliation is not a
-	// membership (domain.OrganizationMembership.Active, docs/04 §6).
+	// organization is deactivated. The membership window is the affiliation
+	// date convention — domain.AffiliationWindowSQL, both ends covered —
+	// compared date-to-date against the day the caller passes as $3, so a
+	// membership that ends today is a membership today (the end date is the
+	// last day of the affiliation, not the first day without one).
+	//
+	// $3 is computed in Go, in UTC (domain.AffiliationDayText), and it is a
+	// date, not an instant: the previous form of this predicate converted the
+	// date column to timestamptz and compared it with now(), which made the
+	// DATABASE SESSION's timezone the arbiter. The same row read 'member'
+	// through a UTC-12 session and 'public' through a UTC one. A date column
+	// has one meaning in every session.
+	//
+	// Note that deactivated_at above is a timestamptz and is compared with
+	// now() on purpose: that column names an instant, so it has no day to be
+	// read in.
 	TargetTypeOrganization: `
 SELECT CASE
          WHEN EXISTS (SELECT 1 FROM organization_memberships om
                       WHERE om.organization_id = o.id AND om.user_id = $2::uuid
-                        AND (om.affiliation_end IS NULL OR om.affiliation_end::timestamptz > now())) THEN 'member'
+                        AND ` + domain.AffiliationWindowSQL("om", "$3::date") + `) THEN 'member'
          WHEN o.deactivated_at IS NULL OR o.deactivated_at > now() THEN 'public'
          ELSE 'none'
        END

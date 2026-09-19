@@ -74,18 +74,21 @@ const ledgerTaskID = "T0807"
 //
 // The membership windows these tests control are dated in UTC ON PURPOSE:
 // the projection resolves "affiliation at time" at the event instant's UTC
-// date (documented in the store), and the org service dates memberships by
-// the LOCAL calendar date (internal/application/orgs dateOnly/today — for a
-// UTC node the two coincide). A fixture that mixed a local-dated membership
-// into a UTC-ruled projection would make these assertions depend on the
-// machine's clock, which is exactly the kind of test that passes here and
-// fails in CI. It bit: todayUTC() (tests/integration/org_permission_test.go)
-// reads the LOCAL year/month/day and stamps it UTC, so a membership dated
-// "today" with it already covers an event at the event's own UTC date
-// whenever the local calendar has not rolled over yet — on CI (UTC) always,
-// and on a UTC+8 machine from 08:00 local on. T0807 went red on exactly that.
-// utcDay is the UTC-labelled opposite: built from time.Now().UTC(), so the
-// date it names is the UTC date in every timezone.
+// date (documented in the store), and the org service dates memberships in
+// those same UTC days (internal/application/orgs today — T0816 put every site
+// on the convention in internal/domain; until then the service read the LOCAL
+// calendar date, which coincided with UTC only on a UTC node). A fixture that
+// mixed a local-dated membership into a UTC-ruled projection would make these
+// assertions depend on the machine's clock, which is exactly the kind of test
+// that passes here and fails in CI. It bit: todayUTC()
+// (tests/integration/org_permission_test.go) read the LOCAL year/month/day and
+// stamped it UTC, so a membership dated "today" with it already covered an
+// event at the event's own UTC date whenever the local calendar had not
+// rolled over yet — on CI (UTC) always, and on a UTC+8 machine from 08:00
+// local on. T0807 went red on exactly that, and T0816 had the helper call the
+// convention too, so fixture and service now agree by construction. utcDay
+// stays the UTC-labelled opposite: built from time.Now().UTC(), so the date it
+// names is the UTC date in every timezone.
 func utcDate(daysAgo int) string {
 	return utcDay(daysAgo).Format("2006-01-02")
 }

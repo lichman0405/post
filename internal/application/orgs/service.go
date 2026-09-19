@@ -256,15 +256,30 @@ func (s *Service) RemoveMember(ctx context.Context, actor domain.User, orgID, us
 	return nil
 }
 
-// dateOnly truncates a timestamp to its calendar date (the canonical
+// dateOnly truncates a timestamp to the calendar date it names (the canonical
 // columns are date, not timestamptz).
+//
+// It reads the value's OWN year/month/day, and that is the point: this is the
+// normalizer for dates a caller supplied. "2026-09-19" is a day, not an
+// instant, and it must not be moved across a day boundary by whatever zone
+// the server happens to run in (the transport parses it as UTC midnight, so
+// the day it names is the day it meant). Only "now" needs the affiliation
+// convention's UTC day — an instant has no date of its own; see today below
+// and domain.AffiliationDay.
 func dateOnly(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
-// today returns the current calendar date in UTC (affiliation spans are
-// dates).
-func today() time.Time { return dateOnly(time.Now()) }
+// today returns the affiliation day of "now": the current calendar date in
+// UTC, as the convention in internal/domain defines it and the ledger
+// projection resolves against (docs/13 §1 "affiliation at time").
+//
+// It used to read the LOCAL year/month/day and label it UTC, which dated a
+// membership created in the first hours of a UTC+8 morning one day into the
+// future: the projection then found no organization for the person's work on
+// the day they joined. One convention, asked of one place
+// (domain.AffiliationDay) — see tests/integration/affiliation_date_test.go.
+func today() time.Time { return domain.AffiliationDay(time.Now()) }
 
 // validatedOrgFields applies the free-text input rules: name required
 // (max 200 chars), description bounded (max 4000 chars).
