@@ -47,6 +47,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/audithttp"
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/conflicthttp"
+	"github.com/lichman0405/post/cmd/api/evidencehttp"
 	"github.com/lichman0405/post/cmd/api/explorehttp"
 	"github.com/lichman0405/post/cmd/api/feedshttp"
 	"github.com/lichman0405/post/cmd/api/fileshttp"
@@ -78,6 +79,7 @@ import (
 	"github.com/lichman0405/post/internal/application/branches"
 	appcontribution "github.com/lichman0405/post/internal/application/contribution"
 	"github.com/lichman0405/post/internal/application/diffs"
+	"github.com/lichman0405/post/internal/application/evidencegraph"
 	"github.com/lichman0405/post/internal/application/feeds"
 	"github.com/lichman0405/post/internal/application/forks"
 	"github.com/lichman0405/post/internal/application/knowledgepublish"
@@ -653,6 +655,24 @@ func run(args []string) int {
 		Gate:  projectAPI.Service(),
 	})
 	provenanceAPI.Register(v1)
+	// Evidence graph projection (T0506): the read over evidence_assertions
+	// grouped by the exact target version each assertion pins, plus the
+	// hypothesis page's two separate sections. It is not the surface above
+	// and shares nothing with it — different table (evidence_assertions, not
+	// the rebuildable provenance_edges projection), different relation
+	// semantics (why this evidence bears on that proposition, not where it
+	// came from: CLAUDE.md §9 invariant 10), and its own route prefix. Reads
+	// run the same project visibility gate as every other project read; the
+	// per-target query is the one the schema already carried.
+	evidenceGraphAPI := evidencehttp.New(evidencehttp.Deps{
+		Service: evidencegraph.New(evidencegraph.Deps{
+			Objects:    persistence.NewScientificObjectStore(pool),
+			Assertions: persistence.NewEvidenceGraphStore(pool),
+			Relations:  persistence.NewRelationStore(pool),
+		}),
+		Gate: projectAPI.Service(),
+	})
+	evidenceGraphAPI.Register(v1)
 	// Scientific Conflict Resolution surface (T0407): the conflict view
 	// read (report + evidence + recorded decisions) and the resolution
 	// plan write over the three-way base/source/target triple. The reads
