@@ -14139,7 +14139,26 @@ origin 侧根本不查 audience。
 
 **还欠的两笔**：T0808 评审的 `doc.go` 引注与 `sections.tsx` 注释，**要等 T0808 合入主库才改得了**
 （它们现在只存在于那条分支上；改在验收中的工作树里等于插手正在被验收的交付）。合入后立刻按同样的
-对照格式补，两条 finding 的原文已逐字抄在上一节。
+对照格式补，两条 finding 的原文已逐字抄在上一节。**改法已在等合入期间逐句核过、写死在下面**
+（免得下一次上下文压缩把细节丢了）：
+
+- **`internal/application/researchprofile/doc.go`**：①`:2` 的 "docs/05 §3/§4 name" 改成
+  "docs/05 §4 与 `specs/ui/page-inventory.csv:16-17` name"（§3 是 Project 导航条目表，
+  与这两个页面无关）；②`:8-13` 改成以 inventory 行先说清两个面的出处与可见性——
+  `/{user},Research Profile,optional if public,contribution identity` 与
+  `/orgs/{org},Organization Profile,optional if public,institutional research identity`
+  （**我逐字核过 CSV 这两行**），并保留 docs/42:27-28 的 Research Profile 内容表
+  （**逐字对过，引用无误**），但写明 **docs/42 里没有 Organization 块**（`grep -c Organization` = 0），
+  所以组织面的形状来自那一行 inventory 加本包下面自己列出的维度。
+- **`apps/web/app/components/research-profile-sections.tsx:39-43`**：在"每一行都问 `printableEntity`"
+  后补一句例外——`ReuseList`（`:209-232`）直接渲染 `EntityLink`、不问它，因为
+  `ProfileReuse.project`（`lib/research-profile.ts:119-124`）**按类型就不可为 null**
+  （"a usage whose project may not be named is dropped by the API"），
+  所以那一格不存在"被隐去"的情形；**是"覆盖面写宽了"，不是漏挡**。
+
+**这段的出处我也复核了，不与评审只对一半**：`docs/42_PAGE_SPECS.md` 里 `Organization` 出现 0 次；
+`docs/05` §3 是 `Overview | Research | …` 的 Project 导航条目表，§4 才是 "Network entity 页面"
+（逐条列着 Person/Organization Research Profile）；`specs/ui/page-inventory.csv:16-17` 是这两行的真出处。
 
 **体检出一个坐标漂移，顺手修了**：上面我写 `evidence.sql:73-112` 是对的，而 ADR-024 与 T0511 的任务书
 （以及本文件早先几节）引的是 `:67-73` 与 `:74-109`——真坐标是 **`:66-71`**（无谓词那条）与
