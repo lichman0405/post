@@ -13641,3 +13641,54 @@ T0902/T0903 后面——**迁移号是稀缺资源（一次只落一条），所
 
 **四、驱动重新武装。** `rddev drive --poll 60s` 在后台（pid 2916258，心跳正常），
 adopt 了已在跑的 3 个工人，`decisions waiting: 0`。三个工人同一基线 `9bd77cc`。
+
+## 2026-09-19 T0808 打回：评审抓到一个真泄漏，而它自己的测试把泄漏钉死了
+
+**一、事实（我逐条进树核过，不是照抄评审）。** 评审给了 5 条意见（2 阻塞 + 1 major + 1 minor + 1 nit），
+**每一条引用的行我都对到了原文**，全部成立：
+
+- **阻塞一（泄漏）**：`ListPersonReproductions`（`internal/persistence/queries/research_profile.sql:261-273`）
+  只按 `ea.created_by` + `ea.relation_type` 过滤，**select 列表里没有 `ea.visibility`**，于是
+  `ports.go:193` 的 `ReproductionRow` 没有这个字段，`model.go:434-446` 只查了关系类型与断言方项目的可见性。
+  而 `infra/migrations/00091:63-65` 给了 `evidence_assertions` **自己的可见性轴**（`DEFAULT 'private'`，
+  头注释逐字 "an assertion nothing explicitly made public is not rendered anywhere"），
+  既有公开断言读 `internal/persistence/queries/evidence.sql:109` 用的就是 `AND ea.visibility = 'public'`。
+  → **一条 private 断言（relation / review_state / 时间戳）出现在匿名的
+  `GET /api/v1/users/{id}/research-profile` 上**（`cmd/api/main.go:388-394` 注释逐字写明这两页是 public）。
+- **最坏的部分是测试**：`tests/integration/research_profile_test.go:317-325` 的 `assert(...)` **不写 visibility 列**
+  （吃 DEFAULT `'private'`），`:327-328` 插两条，`:674-693`（`:678` Fatal）断言**两条都渲染**。
+  **套件在证明泄漏，不是在抓它。**
+- **阻塞二（窗口饥饿）**：十条读**全部** `LIMIT @row_limit`（`FetchLimit = 200`，`ports.go:59`），
+  **没有一条带可见性谓词**，过滤全在 Go（`:9-18` 的头注释自己写明不按可见性过滤）。可证后果：
+  最近的 200 行里若多数要被丢弃，**更老的公开行永远进不了窗口** → 某一维明明有公开行却渲染成空。
+  这正是 **T1004 决定一**（`decisions.md:10654` 逐字「可见性过滤下沉到 SQL、**LIMIT 在过滤之后**」）
+  与 `:437-438` 强制项（「任何返回**集合**的读查询都必须显式接受并应用 scope」）否定的形状；
+  它引的 `asset_page.sql` 先例**正是 T1004 裁定为不适用**的那一类（无 LIMIT + 成员视角）。
+- **major**：`doc.go:59` 宣称「Every dimension re-checks the visibility ... **even though the store's query already filters**」
+  —— **两个分句都是假的**。一句宣称了代码并不具备的不变量，就是**教下一个读者"这里不会泄漏"**。
+- **minor**：`research-profile-sections.tsx:209` 的占位串与 `apps/web/lib/research-profile.ts:53-56` 的规则
+  （"never a placeholder"）直接矛盾，且**不可达**（`model.go:417-419` 会整行丢弃）。
+- **nit**：`tests/e2e/research_profile_e2e_test.go:291` 把 `ActorID` 设成组织 id，那条断言只按子串 grep handle。
+
+**二、裁定：打回 + 同会话返工**（CLAUDE.md §11 第一次失败）。**不是"记档后合并"** ——
+那条规则只适用于「机制说错了、但防线还在」；这里是**防线不在**（真泄漏 + 测试钉死 + 违反我自己的强制项），
+落在 §5.1 条件 6 的排除项里。返工信 `/tmp/T0808-rework-1.md` 逐条给了位置与要求，并**明确禁止两件事**：
+(a) **不许发明"账本可见性轴"**（`contribution_events` 没有可见性列是**已知 L3**，要 owner 拍板，不在本任务内）；
+(b) **除本单点名的那几处断言外一条都不许动**（不许借"修测试"顺手放宽别的东西）。
+返工信要求两处**改前红 / 改后绿**的两次输出：隐私断言、窗口饥饿测试（后者照 T1004 的
+`TestPrivateVersionsDoNotSuppressPublicOnes` 形状）。**第二条要求 5 特别写明：SQL 谓词必须逐字对应渲染规则**，
+不许用一个笼统的 `visibility='public'` 盖过去——assets 维度里"私有项目的公开版本照样列出、只是不带项目名"
+是**刻意**的既有规则，在 SQL 里把它滤掉就是制造另一个 bug。判据只有一条：**只排除模型会丢弃的行**。
+
+**三、流程事实。** rework 起在 `--parallel 4`（当时 3 个工人在跑、默认上限 3；`--parallel` 只是限流检查、
+不是占位）。返工工作树基线 `f291b88b`（T0813 那笔）。**已 grep 核验返工信真的进了 `prompt.md`**
+（关键句逐条命中）—— 这条我出过错，**记录里的理由不一定送达**。驱动那条判断点已
+`rddev drive --clear-decision T0808` 清掉（挡它的条件已消失：任务不再停在 verification）。
+
+**四、一条值得记的机制教训：把缺陷断言成正确行为的测试，比没有测试更坏** ——
+它把缺陷锁死，还会在返工单里变成"测试要求这样"。本单因此要求把"private 那条从渲染变成不渲染"
+**并带正面控制**，防止改成"整维什么都不渲染"也能变绿。
+
+**五、评审本身值得肯定：** 两条阻塞都不是格式问题，是**在匿名面上真泄漏私有数据**与
+**违反我在 T1004 定过的强制项**。评审工人没有 Git 权限、只能读，但它读到了 `00091` 的 `DEFAULT 'private'`
+与 `evidence.sql:109` 的既有谓词，据此判定这条读缺谓词——**这正是"独立评审"该有的样子**。
