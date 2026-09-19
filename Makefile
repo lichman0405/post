@@ -88,10 +88,24 @@ test-integration: ## integration suite against real PostgreSQL; loud failure (wi
 # test-integration`) failed with "no PostgreSQL reachable" on a fresh clone, and
 # a Worker, which cannot start Docker itself, had no way to reach a database.
 # Override with POSTGRES_TEST_ADMIN_URL for a non-default stack.
+#
+# -timeout 20m, not Go's 10m default: measured over 26 consecutive main runs on
+# 2026-09-18/19, this suite's CI job takes 280-330s normally, but three runs on
+# *three different GitHub-hosted runners* exceeded 600s and were killed — at
+# 699s, 710s and 711s. The tree was byte-identical between a 320s run and a
+# 710s one (only tasks/decisions.md differed, verified with git diff), and in
+# both inspected kills the panic dump showed a test that had started 1s/4s
+# earlier, so tests were still completing at the deadline: that is runner
+# contention, not a hang and not a race. The 10m default turned that into an
+# intermittent false red on main (~12% of runs), which blocks merges for no
+# reason. Nothing is masked by this: every test must still pass, and a genuine
+# hang is still caught, ten minutes later. If you are reading this because you
+# want to raise it again, get the same shape of evidence first — a test that
+# is *stuck*, not a suite that is *slow*.
 	@PG_TEST_URL="$${POSTGRES_TEST_ADMIN_URL:-postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post}"; \
 	if python3 scripts/pg-ready.py "$$PG_TEST_URL"; then \
 		echo ">> test-integration: running integration suite against $$PG_TEST_URL"; \
-		POSTGRES_TEST_ADMIN_URL="$$PG_TEST_URL" go test ./tests/integration -count=1; \
+		POSTGRES_TEST_ADMIN_URL="$$PG_TEST_URL" go test ./tests/integration -count=1 -timeout 20m; \
 	else \
 		echo ">> test-integration: FAILED — integration tests require a real PostgreSQL and none is reachable (see pg-ready above)." >&2; \
 		exit 1; \
