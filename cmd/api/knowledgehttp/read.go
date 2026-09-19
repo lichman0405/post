@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/lichman0405/post/cmd/api/authhttp"
+	"github.com/lichman0405/post/internal/application/evidencenetwork"
 	"github.com/lichman0405/post/internal/application/knowledgepublish"
 	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/observability"
@@ -46,13 +47,16 @@ import (
 //
 // # What the response may contain
 //
-// The publication's own facts and the version it published — never the blob,
-// never a rights narrowing, never search. The version's origin/network
-// evidence state, which the contract's summary also names, is NOT rendered
-// here: no read for it exists yet on this surface, and a section invented by
-// an implementation task would be a contract decision made in the wrong
-// place (the same restraint assetshttp records for the browse route). See the
-// task result.
+// The publication's own facts, the version it published, and that version's
+// origin/network evidence state — never the blob, never a rights narrowing,
+// never search. The evidence state is the document's own third part
+// (T0806): the assertions against the PUBLISHED version, presented as the
+// three classes docs/10 §7 names, computed by evidencenetwork.Build over the
+// two axes (who asserted it, and how it was reviewed). Which assertions the
+// document may present is decided by the assertion's own visibility and, for
+// another project's assertion, that project's preset — never by the
+// caller's identity, which is why the section is built AFTER mayRead and
+// only for a caller who may read the publication at all.
 
 // Wire codes (docs/45: stable codes, no dependency detail).
 const (
@@ -97,6 +101,13 @@ type publishedKnowledgePayload struct {
 	// (docs/12 §2) and its members read it here; naming the project's slug or
 	// name would publish an identity the ruling's second axis does not.
 	Project projectPayload `json:"project"`
+	// Evidence is the published version's origin/network evidence state: the
+	// three classes of assertions about THIS version, each presented
+	// separately (docs/10 §7, docs/31 Gate D). It is always present — the
+	// three arrays are what makes "this object has no external evidence" a
+	// statement the document can make, rather than something a reader infers
+	// from a missing field.
+	Evidence evidencenetwork.Section `json:"evidence"`
 }
 
 // objectPayload is the knowledge object the published version belongs to.
@@ -163,7 +174,50 @@ func (h *handlers) handlePublishedKnowledge(w http.ResponseWriter, r *http.Reque
 		writeKnowledgeNotFound(w, r)
 		return
 	}
-	authhttp.WriteJSON(w, http.StatusOK, publishedKnowledgeFromDomain(entry))
+	// The evidence section is read only now — after the caller was found to
+	// be one who may read this publication at all — so an unreadable
+	// publication never reaches a query about its evidence, and this route
+	// cannot be used to ask "does anything assert evidence against X?" about
+	// a publication the caller may not see.
+	//
+	// A failed read is the route's 503, never an empty section: the section is
+	// the document's statement about what the repository holds, and one built
+	// over a failed read would answer "this published object has no external
+	// evidence" when the truth is that nobody finished looking (docs/10 §7 is
+	// a claim about the object, and a false negative there is exactly the
+	// silent deletion docs/24 §2 forbids — carried out by the read path).
+	section, err := h.evidenceSection(r, entry)
+	if err != nil {
+		observability.LoggerFromContext(r.Context()).Error("knowledge read: evidence read failed", "error", err, "pid", pid)
+		writeKnowledgeUnavailable(w, r)
+		return
+	}
+	payload := publishedKnowledgeFromDomain(entry)
+	payload.Evidence = section
+	authhttp.WriteJSON(w, http.StatusOK, payload)
+}
+
+// evidenceSection reads and assembles the evidence network of the published
+// version.
+//
+// The owning project's id is passed with the version id because the origin
+// side of the classification IS that project (docs/10 §7's first axis): the
+// store cannot derive it from the version alone without a second read that
+// could disagree with the publication the document is about.
+//
+// A nil port is a FAILURE, not an empty section. The port is optional in
+// Deps so a test can build the surface without a database, and a read served
+// by a surface that was never given the evidence read must not answer "no
+// evidence" — that is the fail-closed direction the whole surface takes.
+func (h *handlers) evidenceSection(r *http.Request, entry knowledgepublish.PublishedKnowledge) (evidencenetwork.Section, error) {
+	if h.evidence == nil {
+		return evidencenetwork.Section{}, errors.New("knowledge read: no evidence port is wired")
+	}
+	rows, truncated, err := h.evidence.ListPublishedEvidence(r.Context(), entry.ObjectVersionID, entry.ProjectID, evidencenetwork.MaxAssertions)
+	if err != nil {
+		return evidencenetwork.Section{}, err
+	}
+	return evidencenetwork.Build(entry.ProjectID, rows, truncated), nil
 }
 
 // mayRead reports whether the caller of r may read one resolved publication:

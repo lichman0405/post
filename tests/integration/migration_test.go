@@ -344,7 +344,7 @@ var canonicalTables = map[string]tableExp{
 		pk:   []string{"relation_type"},
 	},
 	"evidence_assertions": {
-		cols: []colExp{c("id", u, false, true), c("project_id", u, false, false), c("state_id", u, false, false), c("target_object_version_id", u, false, false), c("evidence_object_version_id", u, false, false), c("relation_type", txt, false, false), c("evidence_type", txt, false, false), c("scope", jb, false, true), c("directness", txt, false, true), c("inference_nature", txt, false, true), c("reasoning_note", txt, true, false), c("review_state", txt, false, true), c("created_by", u, false, false), c("created_at", ts, false, true)},
+		cols: []colExp{c("id", u, false, true), c("project_id", u, false, false), c("state_id", u, false, false), c("target_object_version_id", u, false, false), c("evidence_object_version_id", u, false, false), c("relation_type", txt, false, false), c("evidence_type", txt, false, false), c("scope", jb, false, true), c("directness", txt, false, true), c("inference_nature", txt, false, true), c("reasoning_note", txt, true, false), c("review_state", txt, false, true), c("created_by", u, false, false), c("created_at", ts, false, true), c("evidence_origin", txt, false, true), c("visibility", txt, false, true)},
 		pk:   []string{"id"},
 		// T0504 (00058): the full evidence-assertion schema enum surface as
 		// CHECKs — evidence_type, directness, inference_nature and the
@@ -353,7 +353,13 @@ var canonicalTables = map[string]tableExp{
 		// which mirrors domain.EvidenceAssertion.Validate.
 		// Deliberately NO unique on the (target, evidence) pair: supports
 		// and contradicts coexist on the same pair (task acceptance).
-		checks: []string{"relation_type = ANY", "review_state = ANY", "evidence_type = ANY", "directness = ANY", "inference_nature = ANY", "jsonb_typeof(scope) = 'object'", "target_object_version_id <> evidence_object_version_id"},
+		// T0806 (00091) adds the two axes' storage columns — evidence_origin
+		// (docs/10 §3's external/internal) and the assertion's own
+		// visibility — each with its own enum CHECK and its fail-closed
+		// default ('internal'/'private'). The three CLASSES docs/10 §7 names
+		// are still computed from these two axes and review_state; no
+		// three-valued class column exists here.
+		checks: []string{"relation_type = ANY", "review_state = ANY", "evidence_type = ANY", "directness = ANY", "inference_nature = ANY", "jsonb_typeof(scope) = 'object'", "target_object_version_id <> evidence_object_version_id", "evidence_origin = ANY", "visibility = ANY"},
 		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("state_id", "project_states", "RESTRICT"), fk("target_object_version_id", "scientific_object_versions", "RESTRICT"), fk("evidence_object_version_id", "scientific_object_versions", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
 	},
 	"blobs": {

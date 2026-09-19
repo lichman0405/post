@@ -104,6 +104,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/knowledgehttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
+	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
 	"github.com/lichman0405/post/internal/application/knowledgepublish"
@@ -158,7 +159,16 @@ type knowledgeWorld struct {
 // exactly as cmd/api/main.go does.
 func newKnowledgeWorld(t *testing.T, ctx context.Context) *knowledgeWorld {
 	t.Helper()
-	pool, _ := testdb.Setup(t, ctx, adminURL(t), knowledgePublishTaskID)
+	return newKnowledgeWorldFor(t, ctx, knowledgePublishTaskID)
+}
+
+// newKnowledgeWorldFor is the same composition over a named test database, so
+// a later task's suite (T0806's evidence network) composes the SAME world —
+// one wiring, so a test cannot pass against a tree production does not
+// build — while keeping its own database namespace (docs/66 §3).
+func newKnowledgeWorldFor(t *testing.T, ctx context.Context, taskID string) *knowledgeWorld {
+	t.Helper()
+	pool, _ := testdb.Setup(t, ctx, adminURL(t), taskID)
 
 	authAPI := authhttp.New(authhttp.Deps{
 		Users:    persistence.NewCredentialStore(pool),
@@ -198,6 +208,10 @@ func newKnowledgeWorld(t *testing.T, ctx context.Context) *knowledgeWorld {
 		Authz:     authz.NewMatrixEngine(),
 		Schemas:   reg,
 		Events:    events.Recorder{},
+		// The evidence-assertion write (T0806) is part of the same RSG
+		// service, so the seed helper and the evidence route below run the
+		// production command over the production store.
+		Evidence: persistence.NewEvidenceStore(pool),
 	})
 
 	mux := http.NewServeMux()
@@ -218,7 +232,13 @@ func newKnowledgeWorld(t *testing.T, ctx context.Context) *knowledgeWorld {
 		// (cmd/api/main.go wires them the same way).
 		Projects: projectAPI.Service(),
 		Members:  projectAPI.Service(),
+		// The published version's evidence network (T0806), over the same
+		// store the evidence write uses.
+		Evidence: persistence.NewEvidenceStore(pool),
 	}).Register(mux)
+	// The RSG write surface, which carries the contract's evidence-assertion
+	// route: the ONE write path an assertion has.
+	rsghttp.New(rsghttp.Deps{Service: svc}).Register(mux)
 
 	ts := httptest.NewServer(authAPI.Guard(mux))
 	t.Cleanup(ts.Close)

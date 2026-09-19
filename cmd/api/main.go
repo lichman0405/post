@@ -578,6 +578,14 @@ func run(args []string) int {
 		// which would refuse a non-member's fork write even in their own
 		// fork.
 		ForkGate: persistence.NewForkStore(pool),
+		// The evidence network (T0806): the write side of docs/10 §7 — the
+		// evidence assertion command resolves both version pins through this
+		// adapter, refuses a target that is not published (and a cross-project
+		// assertion on a publication whose audience is not the network), and
+		// records the row inside the state commit. It also serves the read
+		// the published knowledge document renders. Optional by contract: a
+		// nil Evidence makes the command fail closed.
+		Evidence: persistence.NewEvidenceStore(pool),
 	})
 	rsgAPI := rsghttp.New(rsghttp.Deps{Service: rsgSvc})
 	rsgAPI.Register(v1)
@@ -844,6 +852,12 @@ func run(args []string) int {
 		// a member" would be a second answer to it.
 		Projects: projectAPI.Service(),
 		Members:  projectAPI.Service(),
+		// The published version's origin/network evidence state (T0806),
+		// served by the same read the evidence write path uses: one adapter
+		// answers both "may this assertion land" and "what does this
+		// published version carry", so the two cannot disagree about what the
+		// rows say.
+		Evidence: persistence.NewEvidenceStore(pool),
 	})
 	knowledgeAPI.Register(v1)
 	// The Explore index (T0802): the six dimensions of docs/05 §6 in one

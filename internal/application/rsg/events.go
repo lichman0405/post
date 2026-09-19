@@ -11,14 +11,21 @@ import (
 )
 
 // The domain events this service produces (specs/events/event-types.yaml):
-// one state.committed per scientific-state write, plus one
-// scientific_object.version_created per object version the write created.
-// Payloads carry identity/reference only (docs/52「Workers」关于 job
-// payload 的口径，事件沿用同一原则) — never bulk sensitive data;
-// consumers resolve rows by id.
+// one state.committed per scientific-state write, one
+// scientific_object.version_created per object version the write created,
+// and — since T0806 — one knowledge.external_evidence_added per
+// cross-project evidence assertion. Payloads carry identity/reference only
+// (docs/52「Workers」关于 job payload 的口径，事件沿用同一原则) — never
+// bulk sensitive data; consumers resolve rows by id.
+//
+// The external-evidence name is the YAML's. docs/18 §2 spells the same event
+// `external_evidence.added` in its prose tour and says itself that the
+// vocabulary file is canonical, so the wire name is the YAML's — the
+// document is not edited from here.
 const (
 	eventStateCommitted                 = "state.committed"
 	eventScientificObjectVersionCreated = "scientific_object.version_created"
+	eventKnowledgeExternalEvidenceAdded = "knowledge.external_evidence_added"
 )
 
 // eventVisibility maps a branch's visibility to the event vocabulary:

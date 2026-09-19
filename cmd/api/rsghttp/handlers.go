@@ -263,6 +263,117 @@ func (h *handlers) handleCreateRelation(w http.ResponseWriter, r *http.Request) 
 	authhttp.WriteJSON(w, http.StatusCreated, relationPayloadFromResult(res))
 }
 
+type createEvidenceAssertionRequest struct {
+	// TargetVersionRef and EvidenceVersionRef are the schema's two version
+	// pins (specs/schemas/evidence-assertion.schema.json); the platform's
+	// optional `object_version:` prefix is stripped here, exactly as the
+	// publish surface strips it from knowledge_version_ref.
+	TargetVersionRef   string          `json:"target_version_ref"`
+	EvidenceVersionRef string          `json:"evidence_version_ref"`
+	Relation           string          `json:"relation"`
+	EvidenceType       string          `json:"evidence_type"`
+	Scope              json.RawMessage `json:"scope"`
+	Directness         string          `json:"directness"`
+	InferenceNature    string          `json:"inference_nature"`
+	ReasoningNote      string          `json:"reasoning_note"`
+}
+
+// evidenceAssertionPayload is the client-visible assertion shape: the stored
+// row's own facts, including the two axes the write derived
+// (evidence_origin, visibility) and the review state the row was born with.
+// Nothing here is client input echoed back.
+type evidenceAssertionPayload struct {
+	ID                      string          `json:"id"`
+	ProjectID               string          `json:"project_id"`
+	StateID                 string          `json:"state_id"`
+	TargetObjectVersionID   string          `json:"target_object_version_id"`
+	EvidenceObjectVersionID string          `json:"evidence_object_version_id"`
+	Relation                string          `json:"relation"`
+	EvidenceType            string          `json:"evidence_type"`
+	Scope                   json.RawMessage `json:"scope"`
+	Directness              string          `json:"directness"`
+	InferenceNature         string          `json:"inference_nature"`
+	ReasoningNote           string          `json:"reasoning_note"`
+	ReviewState             string          `json:"review_state"`
+	EvidenceOrigin          string          `json:"evidence_origin"`
+	Visibility              string          `json:"visibility"`
+	CreatedBy               string          `json:"created_by"`
+	CreatedAt               time.Time       `json:"created_at"`
+	Hints                   []hintPayload   `json:"hints,omitempty"`
+}
+
+// handleCreateEvidenceAssertion: POST
+// /api/v1/projects/{projectId}/branches/{branchId}/evidence-assertions — the
+// OpenAPI route for an evidence assertion (specs/api/openapi.yaml declares no
+// request body for it; the body carries the evidence-assertion schema's own
+// field names, which is the vocabulary specs/mcp/tools.json already gives the
+// operation). The write path is the RSG service's evidence command; the two
+// derived axes (evidence_origin, visibility) are NOT accepted from the
+// client — there is no field for them here, deliberately.
+func (h *handlers) handleCreateEvidenceAssertion(w http.ResponseWriter, r *http.Request) {
+	actor, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	var req createEvidenceAssertionRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	res, err := h.svc.CreateEvidenceAssertion(r.Context(), actor, r.PathValue("projectId"), r.PathValue("branchId"), rsg.CreateEvidenceAssertionInput{
+		TargetVersionRef:   versionRefID(req.TargetVersionRef),
+		EvidenceVersionRef: versionRefID(req.EvidenceVersionRef),
+		Relation:           req.Relation,
+		EvidenceType:       req.EvidenceType,
+		Scope:              req.Scope,
+		Directness:         req.Directness,
+		InferenceNature:    req.InferenceNature,
+		ReasoningNote:      req.ReasoningNote,
+	})
+	if err != nil {
+		rsgError(w, r, err)
+		return
+	}
+	authhttp.WriteJSON(w, http.StatusCreated, evidenceAssertionPayloadFromResult(res))
+}
+
+// versionRefID strips the platform's `object_version:` ref prefix if the
+// caller sent one. It does not validate: the command refuses a reference that
+// is not a version uuid, and doing the shape check in two places is how the
+// two come to disagree about what a legal reference is (the publish surface's
+// versionID does the same).
+func versionRefID(ref string) string {
+	ref = strings.TrimSpace(ref)
+	return strings.TrimPrefix(ref, "object_version:")
+}
+
+// evidenceAssertionPayloadFromResult renders the stored assertion (the
+// service returns the row as the database wrote it) plus the advisory hints.
+func evidenceAssertionPayloadFromResult(res rsg.EvidenceAssertionResult) evidenceAssertionPayload {
+	row := res.Assertion
+	out := evidenceAssertionPayload{
+		ID:                      row.ID,
+		ProjectID:               row.ProjectID,
+		StateID:                 row.StateID,
+		TargetObjectVersionID:   row.TargetObjectVersionID,
+		EvidenceObjectVersionID: row.EvidenceObjectVersionID,
+		Relation:                row.RelationType,
+		EvidenceType:            row.EvidenceType,
+		Scope:                   row.Scope,
+		Directness:              row.Directness,
+		InferenceNature:         row.InferenceNature,
+		ReasoningNote:           row.ReasoningNote,
+		ReviewState:             row.ReviewState,
+		EvidenceOrigin:          row.EvidenceOrigin,
+		Visibility:              row.Visibility,
+		CreatedBy:               row.CreatedBy,
+		CreatedAt:               row.CreatedAt.UTC(),
+	}
+	for _, hint := range res.Hints {
+		out.Hints = append(out.Hints, hintPayload{Code: hint.Code, Message: hint.Message})
+	}
+	return out
+}
+
 // handleGetObject: GET
 // /api/v1/projects/{projectId}/branches/{branchId}/objects/{objectId} —
 // the visibility-aware read (T0106): as visible as its project, existence
@@ -443,6 +554,13 @@ func rsgErrorOutcome(err error) (status int, code, message string) {
 		var blocked *rsgvalidation.GateBlockedError
 		errors.As(err, &blocked)
 		return http.StatusUnprocessableEntity, blocked.Code(), "the write was refused: the commit's validation gate is blocked (run :validate for the full report)"
+	case errors.As(err, new(*rsg.EvidenceRefUnavailableError)):
+		// One outcome for every reason a version cannot be pinned at that end
+		// of an evidence assertion (does not exist / carries no publication /
+		// is published to its own members only / belongs to another project).
+		// The message is the error's own and says none of that: a caller must
+		// not learn from the wire which of the reasons applied (docs/45).
+		return http.StatusNotFound, rsg.CodeEvidenceRefUnavailable, err.Error()
 	case errors.Is(err, rsg.ErrValidation):
 		return http.StatusBadRequest, rsg.CodeValidation, err.Error()
 	default:

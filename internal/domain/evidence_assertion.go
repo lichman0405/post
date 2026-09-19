@@ -291,12 +291,14 @@ type EvidenceAssertion struct {
 	// object; kept raw so no information is lost in the round-trip).
 	Scope json.RawMessage
 	// Directness states how directly the evidence bears on the target
-	// (schema: directness). Empty means "not declared" — the storage
-	// layer defaults it to unknown.
+	// (schema: directness). Empty means "not declared"; the write command
+	// normalizes it to EvidenceDirectnessUnknown before the row is built
+	// (the column's DEFAULT would not apply, because the INSERT names the
+	// column, and 00058's CHECK does not admit the empty string).
 	Directness EvidenceDirectness
 	// InferenceNature states what the evidence itself establishes
-	// (schema: inference_nature). Empty means "not declared" — the
-	// storage layer defaults it to unknown.
+	// (schema: inference_nature). Empty means "not declared", normalized
+	// to EvidenceInferenceUnknown under the same rule as Directness.
 	InferenceNature EvidenceInferenceNature
 	// ReasoningNote is the author's free-text explanation of the
 	// assertion (schema: reasoning_note). It is also where a literature

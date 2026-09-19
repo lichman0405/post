@@ -50,15 +50,18 @@ type stubService struct {
 	overview rsg.ProjectOverview
 	err      error
 
-	createBranchCalls        int
-	createObjectCalls        int
-	createObjectVersionCalls int
-	createRelationCalls      int
-	getObjectCalls           int
-	getObjectDetailCalls     int
-	queryCalls               int
-	researchOutlineCalls     int
-	projectOverviewCalls     int
+	evidenceAssertion rsg.EvidenceAssertionResult
+
+	createBranchCalls            int
+	createObjectCalls            int
+	createObjectVersionCalls     int
+	createRelationCalls          int
+	getObjectCalls               int
+	getObjectDetailCalls         int
+	queryCalls                   int
+	researchOutlineCalls         int
+	projectOverviewCalls         int
+	createEvidenceAssertionCalls int
 
 	lastProjectID string
 	lastBranchID  string
@@ -120,6 +123,12 @@ func (s *stubService) ProjectOverview(_ context.Context, _ projects.Reader, proj
 	s.projectOverviewCalls++
 	s.lastProjectID = projectID
 	return s.overview, s.err
+}
+
+func (s *stubService) CreateEvidenceAssertion(_ context.Context, _ domain.User, projectID, branchID string, in rsg.CreateEvidenceAssertionInput) (rsg.EvidenceAssertionResult, error) {
+	s.createEvidenceAssertionCalls++
+	s.lastProjectID, s.lastBranchID, s.lastInput = projectID, branchID, in
+	return s.evidenceAssertion, s.err
 }
 
 func cannedBranch() domain.Branch {
@@ -403,6 +412,113 @@ func TestGetObjectHappyPath(t *testing.T) {
 	}
 }
 
+const evidenceAssertionsBase = objectsBase + "/evidence-assertions"
+
+// cannedEvidenceAssertion is one stored assertion as the store returns it:
+// the two axes are SERVER-DERIVED, so the canned row carries the values a
+// derivation produced, not values a body sent.
+func cannedEvidenceAssertion() rsg.EvidenceAssertionResult {
+	return rsg.EvidenceAssertionResult{
+		Assertion: rsg.EvidenceAssertionRow{
+			ID:                      "assertion-1",
+			ProjectID:               rsgTestProjectID,
+			StateID:                 "state-2",
+			TargetObjectVersionID:   "ver-target",
+			EvidenceObjectVersionID: "ver-evidence",
+			RelationType:            "contradicts",
+			EvidenceType:            "experimental",
+			Scope:                   json.RawMessage(`{"conditions":"298 K"}`),
+			Directness:              "direct",
+			InferenceNature:         "observational",
+			ReasoningNote:           "the isotherm does not reproduce",
+			ReviewState:             "unreviewed",
+			EvidenceOrigin:          "external",
+			Visibility:              "private",
+			CreatedBy:               "user-1",
+			CreatedAt:               time.Date(2026, 9, 18, 10, 0, 0, 0, time.UTC),
+		},
+		Hints: []semantics.Hint{{Code: semantics.HintClaimCompound, Message: "a claim may be compound"}},
+	}
+}
+
+// TestCreateEvidenceAssertionRoute pins the one write path of the evidence
+// network: the path values and the schema fields reach the command, and the
+// response renders the STORED row. The body below deliberately carries
+// evidence_origin, visibility and review_state claims: none of the three is
+// an input of the command, so the response must show the row the store
+// answered with, not what the caller asked for. (T0806's rule: the two
+// classification axes are derived server-side; a request that claims them is
+// ignored, never echoed.)
+func TestCreateEvidenceAssertionRoute(t *testing.T) {
+	stub := &stubService{evidenceAssertion: cannedEvidenceAssertion()}
+	ts, authed, _, csrf := newRSGTestServer(t, stub)
+
+	resp := rsgWrite(t, authed, http.MethodPost, ts.URL+evidenceAssertionsBase, csrf,
+		`{"target_version_ref":"object_version:ver-target","evidence_version_ref":"object_version:ver-evidence",`+
+			`"relation":"contradicts","evidence_type":"experimental","scope":{"conditions":"298 K"},`+
+			`"directness":"direct","inference_nature":"observational","reasoning_note":"the isotherm does not reproduce",`+
+			`"evidence_origin":"internal","visibility":"public","review_state":"reviewed"}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body %s)", resp.StatusCode, respBody(resp))
+	}
+	payload := decodePayload(t, resp)
+	if stub.createEvidenceAssertionCalls != 1 || stub.lastProjectID != rsgTestProjectID || stub.lastBranchID != "branch-1" {
+		t.Fatalf("calls = %d, project = %q, branch = %q", stub.createEvidenceAssertionCalls, stub.lastProjectID, stub.lastBranchID)
+	}
+	in, ok := stub.lastInput.(rsg.CreateEvidenceAssertionInput)
+	if !ok {
+		t.Fatalf("input = %#v", stub.lastInput)
+	}
+	// The refs reach the command as bare ids: the "object_version:" prefix
+	// the shared version-ref normalizer accepts is stripped here, so the
+	// command never sees a spelling it would have to parse.
+	if in.TargetVersionRef != "ver-target" || in.EvidenceVersionRef != "ver-evidence" {
+		t.Errorf("refs = %q / %q", in.TargetVersionRef, in.EvidenceVersionRef)
+	}
+	if in.Relation != "contradicts" || in.EvidenceType != "experimental" || in.Directness != "direct" || in.InferenceNature != "observational" {
+		t.Errorf("declared facts = %+v", in)
+	}
+	if string(in.Scope) != `{"conditions":"298 K"}` {
+		t.Errorf("scope = %s", in.Scope)
+	}
+	// The derived axes are the store's, not the body's.
+	if payload["evidence_origin"] != "external" || payload["visibility"] != "private" || payload["review_state"] != "unreviewed" {
+		t.Errorf("payload rendered the client's claims: %v", payload)
+	}
+	if payload["id"] != "assertion-1" || payload["relation"] != "contradicts" {
+		t.Errorf("payload = %v", payload)
+	}
+	if _, ok := payload["hints"]; !ok {
+		t.Errorf("payload lacks hints: %v", payload)
+	}
+}
+
+// TestEvidenceAssertionsHaveNoDeleteRoute is the application half of the
+// deletion protection, asserted at the router: the contract declares one
+// write path for assertions, and this build registers exactly that. The
+// origin maintainer's delete request has nothing to reach — which is why
+// the storage guard (migration 00091) is the layer that has to refuse the
+// request that bypasses the application, and the integration suite proves
+// it does.
+func TestEvidenceAssertionsHaveNoDeleteRoute(t *testing.T) {
+	stub := &stubService{evidenceAssertion: cannedEvidenceAssertion()}
+	ts, authed, _, csrf := newRSGTestServer(t, stub)
+
+	for _, path := range []string{evidenceAssertionsBase, evidenceAssertionsBase + "/assertion-1"} {
+		for _, method := range []string{http.MethodDelete, http.MethodPut, http.MethodPatch} {
+			resp := rsgWrite(t, authed, method, ts.URL+path, csrf, `{}`)
+			status := resp.StatusCode
+			resp.Body.Close()
+			if status < 400 {
+				t.Errorf("%s %s = %d, want a refusal: assertions have one write path", method, path, status)
+			}
+		}
+	}
+	if stub.createEvidenceAssertionCalls != 0 {
+		t.Errorf("the refused requests reached the command %d times", stub.createEvidenceAssertionCalls)
+	}
+}
+
 func TestWriteWithoutSessionIsRejected(t *testing.T) {
 	stub := &stubService{object: cannedObject()}
 	ts, _, _, _ := newRSGTestServer(t, stub)
@@ -517,6 +633,7 @@ func TestRSGErrorMapping(t *testing.T) {
 		{"schema gate blocked", &rsgvalidation.GateBlockedError{Report: schemaBlocked}, http.StatusUnprocessableEntity, "SCHEMA_VALIDATION_FAILED", false},
 		{"mixed gate blocked", &rsgvalidation.GateBlockedError{Report: mixedBlocked}, http.StatusUnprocessableEntity, "RSG_VALIDATION_FAILED", false},
 		{"semantic validation", rsg.ErrValidation, http.StatusBadRequest, rsg.CodeValidation, false},
+		{"evidence ref unavailable", &rsg.EvidenceRefUnavailableError{Side: "target", VersionID: "v"}, http.StatusNotFound, rsg.CodeEvidenceRefUnavailable, false},
 		{"unknown failure", errors.New("db down"), http.StatusServiceUnavailable, rsg.CodeUnavailable, true},
 	}
 	for _, tt := range tests {

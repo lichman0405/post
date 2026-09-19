@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lichman0405/post/internal/application/evidencenetwork"
 	"github.com/lichman0405/post/internal/application/knowledgepublish"
 	"github.com/lichman0405/post/internal/application/projects"
 )
@@ -388,4 +389,309 @@ func TestKnowledgeReadDoesNotTouchThePublishCommand(t *testing.T) {
 	if !knowledgepublish.ValidPID(testPID) {
 		t.Fatalf("the fixture pid is not a pid")
 	}
+}
+
+// The evidence section of the published document (T0806, docs/10 §7, docs/31
+// Gate D). What these cases pin at the transport is what the ROUTE does with
+// the rows the store answers: it asks for the PUBLISHED version and its
+// owning project, it renders the three classes separately, it drops an
+// assertion the network may not see even if the store handed it over, it
+// answers 503 rather than an empty section when the read failed, and it never
+// reaches the evidence read for a publication the caller may not read.
+
+const (
+	testOtherProjectID = "22222222-2222-4222-8222-222222222222"
+	testEvidenceVerID  = "44444444-4444-4444-8444-444444444444"
+	testPrivateSrcID   = "99999999-9999-4999-8999-999999999999"
+)
+
+// evidenceNetwork is the store's answer for the published version: one
+// assertion from its own project, two from a public project (one reviewed,
+// one not), and one from a project the network may not see. The classes are
+// the three docs/10 §7 names, and the fourth row is the one Build must
+// refuse on its own.
+func evidenceNetwork() []evidencenetwork.Assertion {
+	return []evidencenetwork.Assertion{
+		{
+			ID: "0a000000-0000-4000-8000-000000000001", Relation: "supports", Stance: "supporting",
+			EvidenceType: "experimental", Directness: "direct", InferenceNature: "deductive",
+			Scope: json.RawMessage(`{}`), ReviewState: "reviewed",
+			AssertingProjectID: testProjectID, TargetObjectVersionID: testVersionID,
+			EvidenceObjectVersionID: testEvidenceVerID, CreatedAt: "2026-09-19T00:00:00Z",
+			SourceProjectVisibility: "public",
+		},
+		{
+			ID: "0a000000-0000-4000-8000-000000000002", Relation: "contradicts", Stance: "contesting",
+			EvidenceType: "experimental", Directness: "direct", InferenceNature: "deductive",
+			Scope: json.RawMessage(`{}`), ReviewState: "reviewed",
+			AssertingProjectID: testOtherProjectID, TargetObjectVersionID: testVersionID,
+			EvidenceObjectVersionID: testEvidenceVerID, CreatedAt: "2026-09-19T00:00:01Z",
+			SourceProjectVisibility: "public",
+		},
+		{
+			ID: "0a000000-0000-4000-8000-000000000003", Relation: "contradicts", Stance: "contesting",
+			EvidenceType: "computational", Directness: "indirect", InferenceNature: "abductive",
+			Scope: json.RawMessage(`{}`), ReviewState: "unreviewed",
+			AssertingProjectID: testOtherProjectID, TargetObjectVersionID: testVersionID,
+			EvidenceObjectVersionID: testEvidenceVerID, CreatedAt: "2026-09-19T00:00:02Z",
+			SourceProjectVisibility: "public",
+		},
+		{
+			// The row the store's own predicate should never have returned:
+			// another project's assertion, from a project the network may not
+			// see. It must not reach the document even though it is here.
+			ID: "0a000000-0000-4000-8000-000000000004", Relation: "supports", Stance: "supporting",
+			EvidenceType: "experimental", Directness: "direct", InferenceNature: "deductive",
+			Scope: json.RawMessage(`{}`), ReviewState: "reviewed",
+			AssertingProjectID: testPrivateSrcID, TargetObjectVersionID: testVersionID,
+			EvidenceObjectVersionID: testEvidenceVerID, CreatedAt: "2026-09-19T00:00:03Z",
+			SourceProjectVisibility: "private",
+		},
+	}
+}
+
+// TestKnowledgeReadPresentsTheThreeEvidenceClassesSeparately: the published
+// document carries the version's evidence as THREE arrays — the classes
+// docs/10 §7 names — not one merged list. The class is the bucket an
+// assertion is in, so a client reads the distinction off the shape of the
+// document rather than re-deriving it.
+func TestKnowledgeReadPresentsTheThreeEvidenceClassesSeparately(t *testing.T) {
+	srv := newDefaultServer(t)
+	srv.network.rows = evidenceNetwork()
+
+	resp := srv.getAnonymous(t, knowledgeURL(testPID))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("read = %d: %s", resp.StatusCode, readBody(t, resp))
+	}
+	body := decodeJSON(t, resp)
+	evidence, ok := body["evidence"].(map[string]any)
+	if !ok {
+		t.Fatalf("evidence = %v, want the section", body["evidence"])
+	}
+	for _, key := range []string{"origin", "reviewed_external", "unreviewed_external"} {
+		if _, present := evidence[key]; !present {
+			t.Errorf("the section has no %q array: %v", key, evidence)
+		}
+	}
+	ids := func(key string) []string {
+		rows, _ := evidence[key].([]any)
+		out := make([]string, 0, len(rows))
+		for _, row := range rows {
+			m, _ := row.(map[string]any)
+			id, _ := m["id"].(string)
+			out = append(out, id)
+		}
+		return out
+	}
+	// The origin bucket holds the object's OWN project's assertion — the
+	// REVIEWED one: review state is the other axis, and it does not move an
+	// assertion out of the origin class.
+	if got := ids("origin"); len(got) != 1 || got[0] != "0a000000-0000-4000-8000-000000000001" {
+		t.Errorf("origin = %v, want the published project's own assertion", got)
+	}
+	if got := ids("reviewed_external"); len(got) != 1 || got[0] != "0a000000-0000-4000-8000-000000000002" {
+		t.Errorf("reviewed_external = %v, want the reviewed assertion from the other project", got)
+	}
+	if got := ids("unreviewed_external"); len(got) != 1 || got[0] != "0a000000-0000-4000-8000-000000000003" {
+		t.Errorf("unreviewed_external = %v, want the unreviewed assertion from the other project", got)
+	}
+	if evidence["truncated"] != false {
+		t.Errorf("truncated = %v, want false for a complete section", evidence["truncated"])
+	}
+}
+
+// TestKnowledgeReadDropsEvidenceTheNetworkMayNotSee: the fourth fixture row
+// is another project's assertion whose project is not public. The store's SQL
+// predicate already excludes it; the section re-checks, so a row that reached
+// here anyway — through a query that drifted, or a write that bypassed the
+// evidence command — is still refused where the decision is made. The
+// assertion is not merely "not rendered": its id is absent from the response
+// BYTES, so no other part of the document can carry it.
+func TestKnowledgeReadDropsEvidenceTheNetworkMayNotSee(t *testing.T) {
+	srv := newDefaultServer(t)
+	srv.network.rows = evidenceNetwork()
+
+	resp := srv.getAnonymous(t, knowledgeURL(testPID))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("read = %d: %s", resp.StatusCode, readBody(t, resp))
+	}
+	raw := readBody(t, resp)
+	if strings.Contains(raw, testPrivateSrcID) {
+		t.Errorf("the response names a project the network may not see: %s", raw)
+	}
+	if strings.Contains(raw, "0a000000-0000-4000-8000-000000000004") {
+		t.Errorf("the response carries an assertion from an invisible project: %s", raw)
+	}
+	body, err := unmarshalJSON(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	evidence, _ := body["evidence"].(map[string]any)
+	for _, key := range []string{"origin", "reviewed_external", "unreviewed_external"} {
+		rows, _ := evidence[key].([]any)
+		if len(rows) != 1 {
+			t.Errorf("%s has %d rows, want 1 (the invisible project's assertion must be dropped, not moved)", key, len(rows))
+		}
+	}
+}
+
+// TestKnowledgeReadScopesTheEvidenceReadToThePublishedVersion: the evidence a
+// document carries is the evidence about the version THIS publication
+// published, in the project that owns it. Asking for anything else would
+// answer about a different object — and the owning project is what the origin
+// axis is measured against.
+func TestKnowledgeReadScopesTheEvidenceReadToThePublishedVersion(t *testing.T) {
+	srv := newDefaultServer(t)
+
+	resp := srv.getAnonymous(t, knowledgeURL(testPID))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("read = %d: %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+	if srv.network.gotVersion != testVersionID {
+		t.Errorf("evidence read for version %q, want the PUBLISHED version %q", srv.network.gotVersion, testVersionID)
+	}
+	if srv.network.gotProject != testProjectID {
+		t.Errorf("evidence read against project %q, want the owning project %q", srv.network.gotProject, testProjectID)
+	}
+	if srv.network.gotLimit != evidencenetwork.MaxAssertions {
+		t.Errorf("evidence read limit = %d, want the section's bound %d", srv.network.gotLimit, evidencenetwork.MaxAssertions)
+	}
+}
+
+// TestKnowledgeReadNeverAsksForEvidenceOfAWithheldPublication: the evidence
+// read runs only after the caller was found to be one who may read the
+// publication AT ALL. A caller who is answered 404 must not have caused a
+// query about that publication's evidence — the 404 is the only thing that
+// must separate a real publication from an unknown pid, and a read that
+// happened anyway would be a difference another layer could leak.
+func TestKnowledgeReadNeverAsksForEvidenceOfAWithheldPublication(t *testing.T) {
+	srv := newDefaultServer(t)
+	srv.read.entry = membersKnowledge()
+	srv.members.member = false
+
+	resp := srv.get(t, knowledgeURL(testPID))
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("read = %d, want 404: %s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+	if srv.network.calls != 0 {
+		t.Errorf("a withheld publication ran the evidence read %d times", srv.network.calls)
+	}
+}
+
+// TestKnowledgeReadFailsClosedOnAnEvidenceReadFailure: a document whose
+// evidence section could not be read is NOT served with an empty section.
+// "This published object carries no external evidence" is a claim about the
+// repository, and one made over a failed read would report the silent
+// absence docs/24 §2 forbids. The route answers its 503 instead.
+func TestKnowledgeReadFailsClosedOnAnEvidenceReadFailure(t *testing.T) {
+	t.Run("the evidence read fails", func(t *testing.T) {
+		srv := newDefaultServer(t)
+		srv.network.err = errors.New("connection reset")
+
+		resp := srv.getAnonymous(t, knowledgeURL(testPID))
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("read = %d, want 503: %s", resp.StatusCode, readBody(t, resp))
+		}
+		if code := errorCode(t, resp); code != CodeKnowledgeUnavailable {
+			t.Errorf("code = %q, want %q", code, CodeKnowledgeUnavailable)
+		}
+	})
+
+	t.Run("no evidence port is wired", func(t *testing.T) {
+		// Deps.Evidence is optional so a caller can build the surface
+		// without a database. A read served by such a surface must fail
+		// closed: it cannot answer "no evidence" about a repository it never
+		// looked at.
+		srv := newServer(t, Deps{
+			Publish:  &fakePublish{preview: previewAnswer(), stored: storedPublication()},
+			Read:     &fakeRead{entry: networkKnowledge(), found: true},
+			Projects: &fakeGate{},
+			Members:  &fakeMembers{},
+		})
+
+		resp := srv.getAnonymous(t, knowledgeURL(testPID))
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("read = %d, want 503: %s", resp.StatusCode, readBody(t, resp))
+		}
+		if code := errorCode(t, resp); code != CodeKnowledgeUnavailable {
+			t.Errorf("code = %q, want %q", code, CodeKnowledgeUnavailable)
+		}
+	})
+}
+
+// TestKnowledgeReadPublishesNoScore: docs/10 §8's four labels (limited
+// evidence, mixed evidence, actively contested, independently reproduced) are
+// out of scope — an owner decision this build does not make — and CLAUDE.md
+// §9.13 forbids a Truth Score outright. What is pinned here is that the
+// section has no place to put one: no response key anywhere is a score, and
+// no assertion carries a numeric aggregate. The assertions are rendered side
+// by side, including two that contradict each other.
+func TestKnowledgeReadPublishesNoScore(t *testing.T) {
+	srv := newDefaultServer(t)
+	srv.network.rows = evidenceNetwork()
+
+	resp := srv.getAnonymous(t, knowledgeURL(testPID))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("read = %d: %s", resp.StatusCode, readBody(t, resp))
+	}
+	raw := readBody(t, resp)
+	body, err := unmarshalJSON(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, banned := range []string{"truth_score", "research_score", "confidence_score", "score", "weight"} {
+		if keyAnywhere(body, banned) {
+			t.Errorf("the document carries a %q key: %s", banned, raw)
+		}
+	}
+	evidence, _ := body["evidence"].(map[string]any)
+	rows, _ := evidence["reviewed_external"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("reviewed_external = %v, want the fixture's row", evidence["reviewed_external"])
+	}
+	row, _ := rows[0].(map[string]any)
+	for key, value := range row {
+		if _, numeric := value.(float64); numeric {
+			t.Errorf("assertion field %q is numeric (%v): the section carries facts, never an aggregate", key, value)
+		}
+	}
+	// The two external assertions on this pair disagree (contradicts vs the
+	// origin's supports) and both are present, each with its own stance. A
+	// document that adjudicated them would have dropped one.
+	if row["stance"] != "contesting" {
+		t.Errorf("stance = %v, want the relation's own label", row["stance"])
+	}
+}
+
+// unmarshalJSON decodes a body already read out of the response — the twin of
+// decodeJSON for the cases that need the raw bytes as well.
+func unmarshalJSON(body string) (map[string]any, error) {
+	var out map[string]any
+	err := json.Unmarshal([]byte(body), &out)
+	return out, err
+}
+
+// keyAnywhere reports whether any object in the decoded document has the
+// given key, at any depth.
+func keyAnywhere(v any, key string) bool {
+	switch node := v.(type) {
+	case map[string]any:
+		if _, present := node[key]; present {
+			return true
+		}
+		for _, child := range node {
+			if keyAnywhere(child, key) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range node {
+			if keyAnywhere(child, key) {
+				return true
+			}
+		}
+	}
+	return false
 }

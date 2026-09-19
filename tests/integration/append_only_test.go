@@ -16,10 +16,14 @@
 //
 // Exempt tables (mutable by design; see RESULT.json for the full decision):
 // current state and workflow tables (users, projects, branches, issues, pull
-// requests, reviews, evidence_assertions, credit_disputes, subscriptions,
+// requests, reviews, credit_disputes, subscriptions,
 // blobs, blob_attachments, asset_dependencies, external_references, …), the
 // worker bookkeeping tables (outbox_events, webhook_deliveries) and the
 // rebuildable search projection (search_documents).
+//
+// evidence_assertions left that list in T0806 (migration 00091): it is no
+// longer deletable, by any path — see targetedGuardTriggers below for why
+// only the DELETE half of the pair was taken.
 package integration
 
 import (
@@ -207,6 +211,19 @@ var targetedGuardTriggers = map[string]string{
 	"project_forks:project_forks_guard":            ":O:27",
 	"project_forks:project_forks_no_truncate":      ":O:34",
 	"pull_requests:pull_request_fork_gate_trigger": ":O:7",
+	// T0806 (00091) adds the evidence assertion's delete protection: the
+	// DELETE half of the 00014 pair (BEFORE DELETE, FOR EACH ROW → 11) plus
+	// the TRUNCATE half (BEFORE TRUNCATE, FOR EACH STATEMENT → 34) on
+	// evidence_assertions. Deliberately NOT the full append-only pair: the
+	// UPDATE half is left open because reviewing an assertion
+	// (unreviewed → reviewed → rejected) is a legitimate in-place state
+	// change that 00058's header describes, and 原发布者不能删除外部反证 is
+	// about deletion, not about review. evidence_assertions is therefore
+	// not in appendOnlyTables — but unlike the other targeted guards it
+	// covers a whole table with a before-each-row delete refusal, so the
+	// integration test drives a raw DELETE against it.
+	"evidence_assertions:evidence_assertions_delete_guard": ":O:11",
+	"evidence_assertions:evidence_assertions_no_truncate":  ":O:34",
 }
 
 // triggerRows returns every user trigger in the public schema as sorted

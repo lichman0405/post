@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/lichman0405/post/internal/application/evidencenetwork"
 	"github.com/lichman0405/post/internal/application/knowledgepublish"
 	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/domain"
@@ -57,6 +58,24 @@ type Membership interface {
 	GetMembership(ctx context.Context, actor domain.User, projectID string) (domain.ProjectMembership, error)
 }
 
+// Evidence reads the evidence network of one published object version: the
+// assertions the network may see, and whether the read was cut (T0806).
+//
+// It applies NO audience rule of its own beyond the assertion's own
+// visibility — who may read the DOCUMENT is mayRead's decision, already made
+// when this is called, and the two answer different questions: mayRead is
+// "may this caller read this publication", this is "which assertions about
+// the published version does the platform present". The production value is
+// *persistence.EvidenceStore.
+//
+// It is optional in the same sense the other deps are not: a nil Evidence
+// makes the read FAIL CLOSED (503, never a document with an empty evidence
+// section), because a document that reported "no evidence" for an object
+// whose evidence nobody could read is a false statement about the repository.
+type Evidence interface {
+	ListPublishedEvidence(ctx context.Context, targetObjectVersionID, targetProjectID string, limit int) ([]evidencenetwork.Assertion, bool, error)
+}
+
 // Deps carries the adapters the surface needs.
 type Deps struct {
 	// Publish is the publication command (T0805).
@@ -68,6 +87,9 @@ type Deps struct {
 	// Members is the membership read the public read needs to tell a
 	// member's view of a publication from the network's.
 	Members Membership
+	// Evidence is the evidence-network read the published document renders
+	// (T0806).
+	Evidence Evidence
 }
 
 // New wires the handlers.
@@ -77,6 +99,7 @@ func New(deps Deps) *API {
 		read:     deps.Read,
 		projects: deps.Projects,
 		members:  deps.Members,
+		evidence: deps.Evidence,
 	}}
 }
 
@@ -90,6 +113,7 @@ type handlers struct {
 	read     Read
 	projects Gate
 	members  Membership
+	evidence Evidence
 }
 
 // Register mounts the three routes on the v1 mux.
