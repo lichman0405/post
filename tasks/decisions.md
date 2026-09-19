@@ -13372,3 +13372,66 @@ CLAUDE.md §4 把它列为「验收测试状态」真相源，但实测：已合
 `.rddev/runtime/gates/<TASK>/` 的门记录里，比这个汇总字段更强、更细。所以**记档，不回填**：
 手工回填 95 条等于造一种没有读者的仪式；若将来要它真，正确做法是**从门记录机械派生**，不是手抄。
 （这一条我按〇之三的教训先查了惯例再下结论——惯例是「登记即止」，所以这不是"维护漏了"，是字段本身没有读者。）
+
+## 2026-09-19 批量改书定稿（A 20 处 + B 9 处）、两处 scope 收窄，与 T0902 的一次打回
+
+**一、改书批次定稿：A 组 20 处 + B 组 9 处，落在 13 个任务上。** 逐条清单在两份脚本的输出里
+（`/tmp/fixA.py`、`/tmp/fixB.py`，都是「旧串在全文件恰好出现 1 次」的纯文本替换，跑完必须重生成规格指纹）。
+逐任务自检过一遍：141 个任务里只有这 13 个变了，且只动了该动的字段（`requirements` / `acceptance_criteria` /
+`relevant_specs` / `dependencies` / `tests` / `allowed_scope` / `forbidden_scope` / `scope_note` /
+`supervisor_scope_narrowing`），顶层 `phases`/`task_count`/`version` 未动。
+其中两处不是核对工报上来的，是我自己加的：T1007 的**验收第 6 条**补上「review required 标记」
+（新需求要求了它，但门读的是验收标准，不改这条它测不到），以及下面第三条的两处 scope 收窄。
+
+**二、T0816 从「排除」改回「包含」。** 原想排除（它在跑，怕契约与它手上的包分叉），复核后改主意：
+它唯一的改动是参考清单里一个文档名笔误（`docs/13_CONTRIBUTION_LEDGER.md` 不存在），**改不动正在跑的
+工人的契约**——包在 spawn 时就渲染好了；而为一行字再开一次空窗不划算，空窗是稀缺资源。
+**这不是降低标准**：参考清单不是需求，工人手上的需求一字未动。
+
+**三、两处 `allowed_scope` 收窄。理由是同一条机制：白名单是闸门，禁名单只是嘱咐。**
+我核过代码：collect 的 scope 检查**只认白名单**（`internal/devorchestrator/worker_collect.go:291` 的
+`ScopeMatchesPathWithDerived`），`forbidden_scope` 只被渲染进工人的提示词（`worker_render.go:475-477`），
+**从不参与校验**。所以「把某个面放进禁名单」并不阻止写入，把它从白名单里拿走才阻止。
+- **T1203**：白名单里的 `docs/**` 收进 `forbidden_scope`。四条需求（compose、secrets 占位、TLS 反代说明、
+  healthcheck）没有一条要写 docs，而 §8.1 逐字「其余 `specs/**` 与 `docs/**` 仍为 Supervisor-only」。
+  T1201–T1208 这一段是**同一份模板复制来的 8 本**，只有 T1203 在今天的派工池里，所以只收它——
+  其余 7 本随各自的书重写时再定，**不猜**。
+- **T0815**：白名单里的 `.github/workflows/**` 同上收走。理由不是口号，是一条可复现的互锁：
+  `internal/devorchestrator/gate_spec_test.go:22` 的 `TestGatesSpecSyncsWithCIWorkflow` 逐字比较 ci.yml 的
+  job 列表与**每条 `run` 命令和 env** 对 `specs/orchestrator/gates.json`，而 `specs/**` 在 T0815 的禁名单里
+  ——**工人改了 ci.yml 的任何一条命令就必然红，且无权把 gates.json 改回去**。这与它自己的验收第 3 条
+  （根因不在仓库内 → 由 Supervisor 决定，不要自行放宽 Gate）一致。先例是 T0410：「你写测试套件，我接线」。
+
+**四、T0903 合并（PR #288）。** CI 8 项全绿（run 35419975858），accept 的 G1–G4 全 passed。
+
+**五、T0902 打回，1 条 blocking——我自己复现过。**
+独立评审指出 `Makefile:90` 的 `POST_WORKER_DB` 值里第 92–96 行有 **7 个**没转义的 `#`；GNU Make 在
+**变量定义**里把 `#` 当注释起点、且反斜杠续行**先**被拼成一行，于是值断在第 92 行，随后的 `if … fi`、
+十个 `POST_*` 赋值与结尾的 `go run ./cmd/worker` 全被丢弃。**我的复现**：`make -p` 打印的值停在
+`raw="$${POSTGRES_TEST_ADMIN_URL`；`make -n search-embed` 与 `make -n search-rebuild` 展开出来都是残片
+后面直接接目标名。后果：本任务要交的 `make search-embed` 与 **T0901 原有的** `make search-rebuild`
+（`git log -S` 确认由 478cf05 带进来）都跑不起来。基线对照：同样这些行在重构前是 **recipe 行**（tab 开头），
+make 不剥 recipe 行的注释，所以当时无害——变成本次的**变量值**才致命。
+**这一类缺陷整条流水线抓不到**，因为没有任何测试/检查/CI 会跑这两个目标（集成测试直接调二进制）。
+评审提的「加一条 `make -n <target>` 冒烟检查」能堵住这一类，**这条归我接线，未决**。
+对评审另两条 minor 与一条 nit 的处置：夹具只钉一个合取项 → **要求补全三个**；测试计数器无同步 →
+**要求用 mutex/atomic**；「确定性嵌入器被接进生产 worker」→ **裁定保持现状**（验收第 3 条要求恰好一个实现，
+而任务要交的入口必须真能跑；且每行写入的身份 `post-local/sha256-bag@v1` 让这条边界**在数据里可分辨**，
+不只靠散文）。我另加一条：`Recompute` 的终止依赖「选取条件与写入永远一致」，而写入是 `:exec`、不看
+影响行数 → **要么修成有界（0 行就报错），要么给出为什么不可能为 0 的论证**。
+
+**六、T0814 的前提我核过，书是好的；但这一格仍然不派。**
+逐条核过（派工前的必做项）：`specs/api/openapi.yaml:51` 与 `:269` 两条路由在；
+`specs/policies/permissions-matrix.csv` 第 5–7 行三格与首列全 deny 与书一致；
+`internal/application/forks/service.go` 的 `Fork(:144)`/`OpenExternalPR(:278)`/`authorizeCreateBranch(:585)`/
+`authorizeOpenPR(:619)` 都在；`00042` 的 `pull_request_semantic_gate` 与 `00086` 的 `pull_request_fork_gate`
+都在、都 `ERRCODE P0001`、RAISE 文本与书里引的前缀逐字相同；`docs/31_MASTER_ACCEPTANCE.md:17` 逐字
+「Public Project 外部用户可 fork/contribute」。
+**需求 8 那条「合法 fork 会被永久锁死」的前提也是真的**：`forkProjectOverTakenName`（`:516`）在持有者是
+**本人**时直接 `ErrForkSlugTaken`——代码里写明理由（记录分不清「他自己的项目」与「他在途的 fork 请求」，
+所以不升级到保留名），而派生名由 (父 slug, handle) 决定，不同组织里同名的两个父项目会撞同一个派生名。
+**两处行号漂移**（`forkSlug` 书里写 `:686`、实际 `:693`；`forkProjectOverTakenName` 书里写 `:508-527`、
+函数实际在 `:516`）：**随它被派之前的那次窗口一起改**，不为两处坐标单独开窗。
+**不派的理由**：T0806 正在改 `cmd/api/main.go`，而 T0814 的活恰恰是在同一条路由表上接线
+（`forksSvc` 就在 `main.go:608` 构造、路由注册也在那一段）——按 §2「并行仅用于冲突面可控的任务」，
+这一格空着是判断，不是漏派。
