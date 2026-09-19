@@ -6155,9 +6155,11 @@
       ]
     },
     "T0806": {
-      "status": "verification",
+      "status": "merged",
       "started_at": "2026-09-19T03:37:27Z",
       "worker_run_id": "run-96bbdd6412bfe605",
+      "accepted_by_supervisor_at": "2026-09-19T04:27:41Z",
+      "merged_at": "2026-09-19T04:39:54Z",
       "rejection_reason": "# 返工 T0806：一处**真的会打到调用方**的缺陷，评审已经复现，改法二选一\n\n## 一、这条不是风格问题，是调用方按平台自己声明的参数发请求就会撞上\n\n独立评审在**没有改动你的工作树**的前提下，另起一份副本、走**真实产品路径**复现了它，还带了三组对照：\n\n| 请求体 | 实际答复 | 应当 |\n|---|---|---|\n| **只给 `specs/mcp/tools.json:13` 为这个操作声明的那组参数** | **503 SERVICE_UNAVAILABLE（`retryable: true`）** | 201 |\n| 只给 `directness` | 503 | 201 |\n| 只给 `inference_nature` | 503 | 201 |\n| 只不给 `scope`（对照） | 201 | 201 |\n| 两个都给（对照） | 201 | 201 |\n\n**机制——三处各自都对，合起来错：**\n\n1. `internal/domain/evidence_assertion.go:336-341` 的 `Validate` **明确放行空值**：写的是\n   `if a.Directness != \"\" && !ValidEvidenceDirectness(...)`，空串不进这个分支。\n2. 于是 `internal/application/rsg/evidence.go` 把**空串原样**传给存储。\n3. 而 `internal/persistence/queries/evidence.sql:56-63` 的 INSERT **显式列出了这两列**\n   （`... scope, directness, inference_nature, ...` 与对应的 `@scope, @directness, @inference_nature`），\n   所以建表时那个 `DEFAULT 'unknown'`（`infra/migrations/00007_evidence.sql`）**根本不会生效**，\n   `infra/migrations/00058_evidence_assertion_guards.sql:73-76` 的 CHECK 于是拒收空串——\n   而那个错误被映射成了**可重试的服务故障**。\n\n**两个后果，第二个更严重：**\n\n- **(a) 你写下的行为没有实现。** `internal/application/rsg/evidence.go:93-96` 逐字写着\n  「Directness and InferenceNature are the schema's declarations; **empty means \"not declared\" and\n  is stored as the schema's own 'unknown'**」，`internal/domain/evidence_assertion.go:293-299`\n  又复述了一遍。这两句注释承诺的行为**代码里没有**。\n- **(b) 一个永久性的入参错误被报成了 retryable 的故障。** `docs/45` 的规矩是永久错误不能报成\n  可重试的故障——调用方会照着 `retryable: true` 去重试，而它**永远不会成功**。\n\n**为什么整套测试没抓到**：单测与集成的请求体**每一条都同时给了这两个字段**。\n\n## 二、改法：二选一，你定，并在 RESULT 里说明理由\n\n- **甲：按你已经写下的文档办**——入库前把空串归一成 `'unknown'`。这是你在两处注释里承诺过的行为；\n  改完之后，平台自己声明的那组 MCP 参数才真的能用。\n- **乙：拒收，但用 400 `VALIDATION_FAILED` 并点名是哪个字段。** 如果你认为「未声明」不该被静默补成\n  `'unknown'`（那确实算替调用方做了一个声明），那也必须把答复码改对——**不能是 503**。\n\n**我倾向甲**，理由是 `unknown` 本来就是 schema 给这两列定的默认值，「未声明」与「未知」在这两列上是\n同一件事；而乙会让平台**自己声明的那组参数**用不了。但这是你的判断，写清理由即可。\n\n**无论选哪个，答复码那半必须一起对：入参错误永远不是 503。**\n\n## 三、必须补的测试\n\n评审说套件漏掉它，是因为**每个请求体都给了这两个字段**。所以补两条：\n\n1. **只给 `tools.json:13` 声明的那组参数**（不含这两个字段）→ 断言得到 **201**\n   （若你选乙，则断言 **400** 且错误码与字段名正确），**明确不是 503**。\n2. **一条能失败的证明**：把归一那一步去掉（或改回直传空串）后，第 1 条**必须转红**，\n   **把实测输出贴进 RESULT**。\n\n## 四、其余四条评审意见**不用你改**，我逐条已裁定\n\n- **minor（`internal/persistence/queries/evidence.sql:109`，会员也看不到本项目自己的证据）**：\n  **不改。** 我核过——这不是规格留白，而是一个**已命名但未接线的面**：同一个 SQL 文件里的\n  `ListEvidenceAssertionsForTarget` 头注逐字写着 \"this is the owning project's read\"，\n  设计早就点名了这条面，只是没人接线。进任务队列。\n- **minor（`internal/application/rsg/evidence.go:188`，跨项目断言要求断言方是公开项目）**：\n  **不改，而且我明确认可这个收窄。** 理由：一条公开渲染的断言行带着 `project_id`，\n  若它能由私有项目写下，就等于把「某个私有项目存在」这件事公开了——`docs/12 §3` 的\n  「不扩大可见性」正好管这个。你做成 fail-closed 是对的。\n- **nit（`Idempotency-Key` 没读）**：**不改。** 与其它 rsg 创建路由一致（只有发布知识那条读了），\n  是继承来的既有缺口，已登记。\n- **nit（transport 要求 `evidence_type` 而 `tools.json:13` 没列它）**：**不改代码**，\n  但**在 RESULT 里留一句**，因为将来做 MCP 层的人会撞上这处契约漂移。\n\n## 五、边界重申（照旧，不打折）\n\n**不许为了让测试变绿而删除、跳过或弱化任何既有断言，不许放宽断言，不许放大超时。**\n\n另外，你上一轮已经因为 **`tests[]` 里列了没跑的命令**被 collect 拒过一次。这次\n**`tests[]` 里只列你真的跑过的命令**；没跑的门写进 `notes_for_supervisor`，并说明为什么没跑、\n你用什么事实判断它不适用于这次改动。\n",
       "history": [
         {
@@ -6235,6 +6237,19 @@
           "at": "2026-09-19T04:06:09Z",
           "run_id": "run-4b462d6721a54ba9",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-19T04:27:41Z",
+          "run_id": "run-e9cc3e91c4c05cc4"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-19T04:39:54Z",
+          "run_id": "run-a9be58673a8051cf",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -6410,10 +6425,12 @@
       "merged_at": null
     },
     "T0816": {
-      "status": "verification",
+      "status": "merged",
       "started_at": "2026-09-19T03:17:44Z",
       "notes": "2026-09-19 立账：T0807 独立评审的 major finding 1（orgs 用本地日历日打戳却标 UTC，投影按事件时刻 UTC 日解析）+ 我裁定时数出的第三处（internal/events/subscription_store.go:296 把 date 转 timestamptz 判定成员）。三处口径不一致会让「事件当时的组织」在 UTC+8 这类主机上每天有 8 小时记错或记成 NULL。口径由 Supervisor 裁定为 UTC 日历日、区间含两端，对齐到已合并且被测试钉住的投影一侧。依赖 T0807（它交付了被对齐的那一侧）。",
       "worker_run_id": "run-975b798d176375d9",
+      "accepted_by_supervisor_at": "2026-09-19T04:38:57Z",
+      "merged_at": "2026-09-19T04:47:25Z",
       "history": [
         {
           "from": "todo",
@@ -6434,6 +6451,19 @@
           "at": "2026-09-19T04:09:58Z",
           "run_id": "run-3e09c6093f11c1a5",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-19T04:38:57Z",
+          "run_id": "run-d680050298ad1459"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-19T04:47:25Z",
+          "run_id": "run-4a30439cee496192",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -6509,9 +6539,9 @@
     },
     "T0902": {
       "status": "running",
-      "started_at": "2026-09-19T04:08:42Z",
-      "worker_run_id": "run-16db731af4a7853b",
-      "rejection_reason": "# T0902 返工单（2026-09-19，第 1 次）\n\n这不是「再润色一下」。独立评审在你交付的 diff 里找到一处**会让交付物直接不可用**的缺陷，而你的 RESULT 把它写成了「已验证」。逐条如下。\n\n## 一、必须修：Makefile 的两个目标已经跑不起来（blocking）\n\n**事实。** `Makefile:90` 的 `POST_WORKER_DB` 是一个 **Make 变量**的值，而它的值里第 **92–96 行**有 **7 个没转义的 `#`**（`${...#postgres://}`、`${raw#postgresql:***@}`、`${creds#*:}`、`${hostpart#*/}`、`${hostport##*:}`）。GNU Make 在**变量定义**里把 `#` 当注释起点，而且反斜杠续行**先**被拼成一行——于是这个值到第 92 行就断了：随后的 `if … fi`、十个 `POST_*` 赋值、以及结尾的 `go run ./cmd/worker` **全部被丢弃**。\n\n**我自己复现过**（不是照抄评审的话）：\n\n- `make -p` 打印出的 `POST_WORKER_DB` 值停在 `raw=\"$${POSTGRES_TEST_ADMIN_URL`，后面什么都没有；\n- `make -n search-embed` 展开出来的是那段残片，后面直接接 ` -search-embed`。\n\n**后果。** `make search-embed`（本任务要求交的入口）与 `make search-rebuild`（T0901 已有的入口，被这次重构**弄坏了**）都跑不起来——两条 recipe 展开出来都是语法不完整的 shell 片段。\n\n**为什么整条流水线都没抓到。** 没有任何测试、检查或 CI 阶段会去跑这两个目标；集成测试是直接调二进制（`post-worker -search-embed`），所以只有 flag 那条路被证明过。这也是评审的风险清单里点名的同一件事。\n\n**主仓库基线对照：** 同样这些行在重构前是 **recipe 行**（tab 开头），make 不剥 recipe 行里的 `#`，所以当时无害；是这次把它变成**变量值**才致命的。\n\n**要求：**\n\n1. 把 92–96 行里的 7 个 `#` 转义成 `\\#`（最小改法）。若你要换别的形状，在 RESULT 里说明理由并给出等价证据；**不许**改成两条 recipe 各抄一份 prelude——那正是这次重构要消除的漂移。\n2. **真的把两个目标各跑一遍**（`make search-embed`、`make search-rebuild`），对上一个装了当前迁移的库（你的集成测试怎么拿到库，就怎么拿）。RESULT 里给出：库是怎么来的、两条完整命令、以及原始输出（含退出码）。若环境里确实拿不到这样的库，写清你怎么试的、错在哪一行——**但不要写「已验证」**。\n\n## 二、必须改：RESULT 里有一句假话\n\n`acceptance[1]` 写着「Two entry points, both exercised」。按上面那条，交付物里这两个入口**当时一个都跑不起来**。把没跑过的写成跑过，是这次返工的另一半原因，不是小事。\n\n返工后：RESULT 里每一句「已跑过／已验证」都要有对应的命令与输出；没跑的，写「没跑」和原因。\n\n## 三、也要修（评审的 minor / nit）\n\n3. `tests/integration/migration_test.go:908`：新 CHECK 把 `(embedding IS NULL)` 与 provider / model / version **三个合取项**绑在一起，但夹具只钉了 `(embedding IS NULL) = (embedding_model IS NULL)` 这一个子串；匹配是子串式的（`catalog_test.go:330-343`），将来掉两个合取项它还是绿的。**把三个都钉上**——各自仍只匹配到一条约束定义，机制不变。\n4. `tests/integration/search_embedding_test.go:698`：`failingEmbedder.calls` 在循环协程里加、在测试协程里读，中间没有同步（现在只是靠 Redis 往返的 happens-before 侥幸有序；断言一挪就成数据竞争，而本仓库没有目标跑 `-race`）。用 mutex 或 atomic，让测试自己的仪表是安全的。\n\n## 四、我裁定的一条（不用改代码）\n\n5. 评审的 minor：`Deterministic` 被当作**生产实现**接进了 worker（`cmd/worker/main.go:176`，`embedding.NewDeterministic(embedding.LocalModel)`），而不是照 `***.go` 那样只做测试件。**裁定：保持现状。** 理由：\n\n   - 你的验收第 3 条要求「恰好一个实现、没有出网路径」，而本任务要求交的入口必须真的能跑；把唯一实现留在测试里，入口就是空的。\n   - 每行写进去的身份是 `post-local/sha256-bag@v1`（`LocalModel`）——**这在数据里就是可分辨的**，不是只靠散文声明：T0904/T0905 能按 `embedding_provider` 把假向量与真 provider 的向量分开。\n   - 所以这里的要求只有一条：RESULT 与包文档把这件事讲明白（一句话：这不是语义嵌入，真 provider 落地前它是占位）。**不许**为了让评审满意而删掉生产接线。\n\n## 五、我加的一条（不是评审的 blocking，但请一并办）\n\n6. 评审的风险第 1 条：`Recompute` 只会因为「选取条件与写入永远一致」而终止，而 `UpdateSearchDocumentEmbedding` 是 `:exec`、**不看影响行数**——将来任何让写入静默不生效的改动（触发器、改 WHERE、改列名）都会让常驻消费者**无限转**。**要么**把写入改成有界（写出影响行数，0 行就报错，别静默继续），**要么**在 RESULT 里给出「为什么结构上不可能为 0」的论证。二选一，写清依据。\n\n## 六、边界重申（照旧，不许放宽）\n\n- 只改 `allowed_scope` 内的文件；**不许**为了让门变绿而删测试、跳过测试、放宽断言、放大超时（`CLAUDE.md` §5.1、§6）。\n- 迁移号仍是 **00092**，别换号（00091 是 T0806 的，我先合它；你按现号继续）。\n- 修完自己跑：受影响的 Go 测试全绿 + `make search-embed` / `make search-rebuild` 实跑 + 你原有的 15 条测试仍全绿。RESULT 里给出你**实际跑过**的命令与结果。\n",
+      "started_at": "2026-09-19T04:40:55Z",
+      "worker_run_id": "run-aa2bf86e6e321ebf",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（d0c1dab1cb97），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
       "history": [
         {
           "from": "todo",
@@ -6545,6 +6575,27 @@
           "to": "running",
           "at": "2026-09-19T04:08:42Z",
           "run_id": "run-16db731af4a7853b",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-19T04:40:48Z",
+          "run_id": "run-774154801a05d393",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-19T04:40:54Z",
+          "run_id": "run-58fde97fd72e27ba",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（d0c1dab1cb97），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-19T04:40:55Z",
+          "run_id": "run-aa2bf86e6e321ebf",
           "reason": "worker spawn"
         }
       ]
