@@ -14195,6 +14195,31 @@ T0806/T0703 都早已合并，所以它本来是可派的。
 （两边各插几行）——那是**合并冲突**，按 §1 本来就是我该处理的活，不是语义冲突，不构成不派的理由。
 （我 17:0x 记的"T0806 正在改 main.go 所以不派 T0814"那条理由**已随 T0806 合并而失效**，这里更新。）
 
+## 2026-09-19 17:2x T0602 的独立 G2 **在返工后的树上重做了一遍**
+
+**为什么要重做**：驱动在 17:08 自己发现"被评审的那次提交已被后续返工顶掉"
+（`reviewed c12e452c99b4, code is now d6fe01fbb603`，两个是 `ReviewDiffSHA`，不是提交号），
+于是重派了一本评审。我傍晚那次 G2 是在**返工前**的交付上做的，**代码已经变了，旧读数作废**——
+G2 的对象是"这次要合进去的那棵树"，不是"某个曾经存在的版本"。
+
+**我这次看到的（全部是我自己跑的命令，不是转抄 RESULT）**：
+
+- **任务书要求的 `abort tests`**：`POSTGRES_TEST_ADMIN_URL=<从 Makefile 安全取出的本机开发库> go test
+  ./tests/integration -run 'TestAbort' -count=1 -timeout 25m` → `ok … 2.521s`。
+  **但它快得可疑，所以我没有就此算数**：加 `-v` 重跑，确认**真跑了三个顶层用例并且全过**——
+  `TestAbortProposalEndToEnd`(0.90s)、`TestAbortProposalConcurrency`(0.73s)、
+  `TestAbortRefusesAKeyBorrowedFromAnotherObject`(0.83s)。第三个正是这次返工为"借来的 Idempotency-Key"
+  新加的用例。（`-run` 匹配不到东西时也会打印 `ok`——这类假绿我今天已经栽过一次，所以这条必查。）
+- **返工碰过的四个单测包**：`go test ./internal/application/aborts/ ./internal/application/pullrequests/
+  ./cmd/api/aborthttp/ ./internal/persistence/ -count=1` → **4/4 ok**。
+- **范围**：交付面 **27 个路径、0 个越界**（用 `allowed_scope` 的 13 条 glob 逐条对过）；
+  **迁移文件是 `infra/migrations/00100_scientific_object_abort_record.sql`**——就是我派工时发的号，
+  没有自选号。
+
+**结论**：G2 通过（在**当前**这棵树上）。剩下的判断点在驱动那边：评审回来 → accept → push → PR →
+合并（合并顺序上 T0602 必须先落，它一落 00100 到位，T0808/T0809 那两条"等迁移顺序"的判断点就能清）。
+
+
 
 **体检出一个坐标漂移，顺手修了**：上面我写 `evidence.sql:73-112` 是对的，而 ADR-024 与 T0511 的任务书
 （以及本文件早先几节）引的是 `:67-73` 与 `:74-109`——真坐标是 **`:66-71`**（无谓词那条）与
