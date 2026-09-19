@@ -1,0 +1,31 @@
+{
+  "name": "intent-answer-minimal",
+  "note": "A plain answer question whose provider states only the required fields: pins which of the eight items may be absent and that an absent one is omitted, not null.",
+  "query": "What CO2 uptake has been reported for Mg-MOF-74?",
+  "provider_document": {
+    "plan_version": "1",
+    "intent": "answer",
+    "target_object": {
+      "entity_types": [
+        "asset"
+      ]
+    },
+    "network_scope": "platform",
+    "visibility": "accessible"
+  },
+  "expected_plan": {
+    "status": "planned",
+    "query": "What CO2 uptake has been reported for Mg-MOF-74?",
+    "document": {
+      "plan_version": "1",
+      "intent": "answer",
+      "target_object": {
+        "entity_types": [
+          "asset"
+        ]
+      },
+      "network_scope": "platform",
+      "visibility": "accessible"
+    }
+  }
+}

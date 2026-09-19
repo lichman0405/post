@@ -1,0 +1,11 @@
+{
+  "name": "fallback-provider-error",
+  "note": "The provider is unreachable. The search must degrade to structured results (docs/27 §SLO) rather than fail, so the plan carries the caller's question and no document.",
+  "query": "Which zeolites were tested for CO2 uptake in 2026?",
+  "provider_error": "plannertest: upstream unavailable",
+  "expected_plan": {
+    "status": "fallback",
+    "reason": "provider_error",
+    "query": "Which zeolites were tested for CO2 uptake in 2026?"
+  }
+}

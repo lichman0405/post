@@ -1,0 +1,24 @@
+{
+  "name": "fallback-unknown-field",
+  "note": "docs/54 #7 in its most direct form: the provider tries to hand the planner a list of candidate entities. The vocabulary has no such field and additionalProperties is false, so the document is refused instead of quietly ignored.",
+  "query": "Summarize what we know about the best-performing sorbent in the project.",
+  "provider_document": {
+    "plan_version": "1",
+    "intent": "answer",
+    "target_object": {
+      "entity_types": [
+        "asset"
+      ],
+      "entity_ids": [
+        "3c9a5f21-7b4e-4a10-9c8d-2f6e1b0a4d33"
+      ]
+    },
+    "network_scope": "platform",
+    "visibility": "accessible"
+  },
+  "expected_plan": {
+    "status": "fallback",
+    "reason": "invalid_plan",
+    "query": "Summarize what we know about the best-performing sorbent in the project."
+  }
+}
