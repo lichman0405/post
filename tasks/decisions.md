@@ -13953,3 +13953,43 @@ T0506 自己就已经把 `ListEvidenceAssertionsForTarget`（不带可见性谓�
 列为**可选的加固项**（"不单开任务、不占队列"）。**今天这一条改变的是那个收尾**：
 可见性那一轴不再是可选加固，而是**要开任务修的缺陷**（ADR-024）。早先那条的"不单开任务"仍然只对
 它自己那一轴有效——两者不要互相引用成"已经决定不用修"。
+
+### ⑦ 修复任务已经**写好并演练过**，只等空当：T0511（暂存于 `tasks/packages/T0511.json`）
+
+**任务书**：`tasks/packages/T0511.json`（标题"证据断言的读带上读者（ADR-024）：非公开行只给当事项目"）。
+它把 ADR-024 的判据原样交给工人，并划清了 L3 边界（ADR-024 末尾三条属 owner，不许自创）。
+**依赖 `T0506, T0507`**——后者是硬的：修复以含 T0507 的 main 为基线，否则两者会抢同一条页面调用点。
+
+**为什么它不是 T0812 的一部分**：`T0812`（Private Evidence / Public Attestation 基础）的验收里
+确实有一条"公共页面无法反推出 private project/data"，但它是一个**功能**（建 attestation），
+排在 P8、还没派工。把一条**正在漏的缺陷**塞进一个未来功能里，等于用功能的排期给缺陷排期。
+所以：**单独立 T0511**，并且把 `T0812.dependencies` 加上 `T0511`（功能建立在修好的读之上），
+这条依赖在落地时同笔写进 `tasks/tasks.json`。
+
+**落地流程已经在一份仓库副本上完整演练过**（2026-09-19，`/tmp/t0511-test2/repo`），
+顺序与证据：
+
+```
+python3 .rddev/tools/land-T0511.py            # 骨架 + 状态 + 测试登记 + G3 override + T0812 依赖
+python3 .rddev/tools/apply-packages.py T0511  # 把任务书字段落进 tasks/tasks.json
+python3 scripts/spec_version.py --write       # 指纹（同一笔提交）
+python3 scripts/validate_task_state.py        # 9 项检查，演练中全过
+```
+
+`apply-packages.py` **只往已存在的任务上书**（对全新任务它会 `die: T0811 is not in the DAG`），
+所以新立账必须先写骨架——这一步由 `land-T0511.py` 承担，它**故意把骨架的 `allowed_scope` 写成空**：
+一个"账立了但书还没落"的任务不该有任何写入面。骨架的 `id/dependencies/tests` 与任务书逐字一致，
+否则 `apply-packages` 会以"结构性改动"拒收。
+
+**演练抓出一个真 bug（记下来，因为它会重演）**：脚本原先把备份写成 `<原文件>.bak`，
+其中一份落在 `specs/orchestrator/gates.json.bak`——**`specs/**` 全目录都是指纹输入**，
+于是输入数从 38 变成 39，而这不是产品的变化，是**安全网自己制造的假象**。
+已改成备份写到 `.rddev/runtime/land-backups/`（gitignore 内），复验后输入数仍是 38、
+`specs/` 里没有脏文件。**这条也说明：落地脚本必须先演练再上真仓库。**
+
+**空当条件（比"没有工人在跑"更准）**：真正会让在飞任务 G2 变红的，是"**该任务的交付里含
+`specs/**`（即指纹文件）**"——因为 G2 合成的是"当前 main + 该任务的 diff"，main 的
+`tasks.json`/`gates.json` 一变，它那份按旧 base 算的 marker 立刻对不上。
+**实测（本日 17:0x）**：T0602、T0808、T0811 **三条全带 `specs/SPEC_VERSION.json`**
+（`git diff --name-only main` 逐个核过），所以**三条都收完之后**才是安全空当。
+（若某个任务不带 `specs/**`，它在跑并不影响落地——这条细化值得下次用。）
