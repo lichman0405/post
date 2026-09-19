@@ -13692,3 +13692,44 @@ adopt 了已在跑的 3 个工人，`decisions waiting: 0`。三个工人同一�
 **五、评审本身值得肯定：** 两条阻塞都不是格式问题，是**在匿名面上真泄漏私有数据**与
 **违反我在 T1004 定过的强制项**。评审工人没有 Git 权限、只能读，但它读到了 `00091` 的 `DEFAULT 'private'`
 与 `evidence.sql:109` 的既有谓词，据此判定这条读缺谓词——**这正是"独立评审"该有的样子**。
+
+## 2026-09-19 自动安全扫描报的 evidencegraph「越权读」：机制属实，但**防线在写入路径上**，裁定记录不改
+
+**扫描报的**（`internal/application/evidencegraph/service.go`，T0506 那笔，已合入）：
+`HypothesisEvidence` 的 claims 循环（`:149-159`）对每个 subordinate claim 直接
+`s.versions(ctx, c.ObjectID)` 与 `s.groups(...)`，**不校验该 claim 对象属于路径项目**；
+建议在循环里加 `s.object(ctx, projectID, c.ObjectID)` 的项目校验。**这条机制我确认属实**：
+`subordinateClaims`（`:234-270`）只按 relation 类型、source 对象类型、target 是假设、去重来筛，
+**确实没有项目谓词**；`versions()`（`:211-220`）与 `groups()`（`:171-186`）也都不带项目。
+
+**但"能否被触发"取决于写入侧，我把整条链走完了：**
+
+1. **列出关系的查询是按容器项目过滤的**：`internal/persistence/queries/relations.sql:103`
+   `WHERE r.project_id = @project_id`（`AND (src.id = @object_id OR tgt.id = @object_id)`），
+   `internal/persistence/relation_store.go:301-305` 的注释也逐字写着"项目边界在 relations **容器行**上执行"
+   —— 即**端点对象本身不受它约束**，这正是扫描器担心的那一半。
+2. **唯一的 HTTP 写入路径拒绝跨项目端点**：`rsg.Service.CreateRelation`
+   （`internal/application/rsg/service.go:401`，由 `cmd/api/rsghttp/handlers.go:253` 调用）
+   对 source 与 target **都**调 `requireEndpoint`（`:420-425`），而它逐字拒绝
+   `obj.ProjectID != projectID`（`:489`），且答案与"版本不存在"**同形**（`docs/45` 无存在性预言机）。
+3. **合并路径也拒绝**：fork 的提案合并时，`internal/rsg/merge/endpoints.go` 的
+   `endpointIndex.resolve` 会对任何"端点版本不在目标谱系里"的边返回 withheld
+   （注释逐字 "Never write an edge to a version nobody can name"），**根本不会写出这条边**。
+4. **对象不能改属项目**：`internal/persistence/queries/scientific_objects.sql` 里唯一的 UPDATE
+   只递增 `current_version_no`（`:27-30`），`project_id` 没有任何更新路径。
+5. **第二个关系服务没有生产调用者**：`internal/application/relations/service.go:33` 的
+   `CreateRelation` **确实不做端点项目校验**，但全仓库没有任何地方 `NewService` 它
+   （`cmd/` 只引它的错误类型做映射）——是死代码，不可达。
+
+**结论：一条 `relations.project_id = A` 的关系，其两端对象必然也在 A** —— 由 2/3 写入时保证、由 4 排除事后移动。
+所以扫描器报的读取缺口**不可触发**：**防线不在读里，在写里。**
+
+**裁定：记录，不当缺陷修，也不改这一笔的验收结论。** 依据是我自己的规矩
+（"机制说错了、防线还在"→ 记录；"证据/覆盖说错了"或"防线不在"→ 打回）。**读里补一句项目校验属于加固
+（defense in depth），不是修 bug**：它对合法数据零行为变化，但写生产代码不在我的职责内（CLAUDE.md §1），
+**列为此后任何触到 `internal/application/evidencegraph/**` 的任务的可选加固项**，不单开任务、不占队列。
+
+**顺带核过、同样是"注释的主张"而这次有代码兜着**：这两条路由（`cmd/api/evidencehttp/wiring.go:63-64`）
+的注释说 "Reads run the same project visibility gate as every other project read" ——
+`handlers.go:90` 确实先调 `h.gate.Get(ctx, reader(r), projectID)` 并在出错时直接拒。**注释有代码支撑。**
+（对照：T0808 的 `doc.go:59` 是同一形状的主张，而那里**没有**代码支撑——这就是我打回它的原因。）

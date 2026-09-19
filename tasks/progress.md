@@ -2747,7 +2747,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-19T07:57:23Z
+生成时间：2026-09-19T08:02:12Z
 
 状态分布：todo 29 · ready 0 · running 3 · worker_failed 0 · verification 1 · rejected 0 · blocked 5 · accepted 0 · merged 103（合计 141/141 个任务）
 
