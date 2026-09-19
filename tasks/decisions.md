@@ -14391,3 +14391,64 @@ CI 是这条要求的**唯一自动哨兵**，而"真 e2e 一次没跑"这件事
 
 **一句话给以后**：**"CI 绿"只等于"CI 里写的那些命令返回 0"**，
 不等于"那些命令真的做了它们名字里说的事"。凡是"包一层 skip 就当过"的地方，都要按这条查一遍。
+
+---
+
+## 2026-09-19 两笔：驱动"自伤"（我改调度器 → 在跑的驱动拒绝干活）与 T0811 基线推进
+
+### 一、我自己把驱动弄停了，然后修好了——记下来，因为它会复发
+
+**事实**：我提交心跳保活 `258c3fa`（改的是 `internal/devorchestrator/`）的时候，
+驱动（pid 2916258）正卡在一次 `task accept` 里。而驱动有一条自检
+（`internal/devorchestrator/binary_staleness.go:24`）：
+
+    OrchestratorSourcePaths = []string{"cmd/rddev", "internal/devorchestrator"}
+
+每个 tick 开始时它跑 `git log <二进制内嵌的 vcs.revision>..main -- <上面两条路径>`，
+**只要 main 上有它没编进去的调度器提交，就把自己标成 `stale_binary` 并"什么都不做"**
+（它自己的话：will act on nothing until it is rebuilt and restarted）。
+我这笔提交正好落在这个窗口里，**下一次 tick 它就会停摆**——而那时 T0602 刚验收通过、
+正要走 push/PR/merge。
+
+**处置（顺序不能乱）**：① 等那次 accept 自己走完（不能在飞行中杀，它正在写状态）；
+② 停驱动（`kill`，它没有信号处理，状态本来就在盘上：flock 自己释放、registry/status 都是文件）；
+③ `make rddev`；④ 重启 `bin/rddev drive --poll 60s`（pid 1398817，心跳 0 秒、无 stale）。
+选在"没有子进程"的空隙做的（`pgrep -P` 查过），不能在 commit/push 途中切。
+
+**顺带验到的一件事**：新二进制的心跳保活**在真实场景里成立**——
+旧的只在 tick 之间写心跳，一次 ~10 分钟的 accept 会让 `rddev status` 报
+"dead (heartbeat stale)"（StaleAfter = 3 分钟），那正是我最可能误判并**杀掉一个正在验收的驱动**的时刻。
+新的独立 goroutine 每 30 秒刷一次，重启后 status 一直显示 "alive (heartbeat Ns ago)"。
+
+**判据（给以后）**：**"我为修调度器而提交" 与 "驱动还在跑" 这两件事天然冲突。**
+凡是要改 `cmd/rddev` 或 `internal/devorchestrator`，一律按上面四步做；
+**`rddev status` 的 `stale_binary` 字段是唯一诚实的读数，不要从"进程还在"推健康。**
+
+### 二、T0811 基线推进：合不进 main 的原因是**别人的合并在同一处锚点插入**，不是它的错
+
+**事实**：驱动在 17:40:58 记了一条判断点——`task accept T0811` 失败：
+
+    the task's change does not apply to current main ... git apply
+    /tmp/post-integration-T0811-*.patch: exit status 1:
+    error: patch failed: tests/integration/knowledge_publish_test.go:252
+
+**查证（不是猜的）**：T0811 的基线是 `21ae522`；之后 **T0507 合进 main（`6fd4c83`，#298）**，
+它改的正是共享测试世界那个函数的尾部——`newKnowledgeWorldFor` 里注册了
+`provenancehttp` / `evidencegraph` / `evidencehttp` 三个面；**T0811 恰好在同一处锚点插入 discussion 面的注册**
+（`git -C .rddev/worktrees/T0811 diff HEAD -- tests/integration/...` 就是那 19 行），
+于是补丁的上下文行对不上。**机制属实、责任不在工人。**
+
+**处置**：`bin/rddev rebaseline T0811 --reason-file`（这是本仓库为这件事专门造的工具：
+推进基线、把工作带过去、派生件**重新生成而不是文本合并**、然后带着原因把工人打回重做、在新基线上重验）。
+结果：`baseline 21ae5226f4a0 -> 258c3fa81565 (31 file(s) carried; regenerated
+internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql)`，
+工人已在跑（pid 1435951）。
+
+**为什么必须重做而不能"我手工解一下冲突就算了"**：门把评审结论**钉在代码指纹上**
+（`internal/devorchestrator/gate_run.go:593`：`a verdict must not outlive the code it judged`），
+基线一推进、`diff_sha` 就变，旧 verdict 立刻作废 → 反正要重评。
+**手工解冲突只省下"重做"这一步，省不掉"重评"，而重做的成本远小于让一份过期的评审结论蒙混过关。**
+
+**给以后**：`rddev task accept` 报 "does not apply to current main" 时，
+**先去 main 上查那个文件最近被谁改过**（`git log --oneline main -- <file>`），
+再决定是 rebaseline（机械冲突）还是别的；**不要先怀疑工人**。
