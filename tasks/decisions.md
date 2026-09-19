@@ -13993,3 +13993,65 @@ python3 scripts/validate_task_state.py        # 9 项检查，演练中全过
 **实测（本日 17:0x）**：T0602、T0808、T0811 **三条全带 `specs/SPEC_VERSION.json`**
 （`git diff --name-only main` 逐个核过），所以**三条都收完之后**才是安全空当。
 （若某个任务不带 `specs/**`，它在跑并不影响落地——这条细化值得下次用。）
+
+---
+
+## 2026-09-19 傍晚：T0507 落地、T0602/T0808 的独立 G2、以及我自己的一次误判
+
+### ① 我的误判：把健康的驱动读成"卡住了"（照实记，两次了）
+17:00–17:07 驱动每轮打印 `T0507 pushed; awaiting merge`，我据此判断它可能卡在误分类的等待里，
+于 17:07:35 手动跑了 `rddev pr merge T0507`，得到
+`PR merged but the accepted -> merged transition failed: cannot go from "merged" to "merged"`。
+
+核对时间戳后事实是：**PR 由驱动自己在 09:07:34Z 合并**（`mergedAt`），我那条只是撞在同一秒的重复动作；
+驱动的 `git-pr-merge` 记录（`.rddev/runtime/gates/T0507/git-pr-merge-run-a7e6e8860cff875d.json`）
+与状态里的 `merged_at=09:07:35Z` 都是驱动那一笔写全的。**没有留下缺口，也没有任何"驱动坏了"的证据。**
+
+**判据（下次直接用）**：驱动**对任何它等不掉的拒绝都会写一条 decision**。
+"反复打印同一行等待 + 没有任何 decision" = 它在等一件会变的事（CI 正是），不是卡死。
+要探它，用**只读**的 `rddev pr status <TASK>`（它把 7 项 G4 逐条打出来），
+**不要重跑那个会改状态的动作**——并发两个 `pr merge` 就是这次这种"看着像报错、实则无害"的场面。
+
+这与我先前把 T0809 长 accept 期间"心跳发虚"读成死亡是**同一个错误的第二次**：
+长动作与正常等待都不是卡死。两次都是我先怀疑、后核对、**我错**。
+
+### ② T0602 的独立 G2（本轮交付：abort 返工完成，`completed`）
+- 交付面 27 项，逐项落在它自己的 `allowed_scope` 内；无 `docs/**`、`tasks/**`、`apps/web/**`、`internal/authz/**`。
+- 迁移号：main 目前最高 00092，它持 00100——号正确；它自己合并时不存在乱序（乱序的是它后面的 00101/00103）。
+- **我自己重跑了指定测试**（真 PostgreSQL）：`go test ./tests/integration -run 'TestAbort'` → 绿；
+  并再用 `-v` 证明仪器真测了东西：`TestAbortProposalEndToEnd`、`TestAbortProposalConcurrency`、
+  `TestAbortRefusesAKeyBorrowedFromAnotherObject` 三条真跑真过（含子测试共 7 个 `=== RUN`）。
+- 自述抽查两条，都对：① `abort_e2e_test.go` 里**没有 `.SetState(` 调用**（全文唯一一处 `SetState`
+  在 `:604` 的注释里，交代这段历史）；② 评审确实是**经 review 路由提交**的（`:639` 打
+  `POST /api/v1/projects/%s/pull-requests/%d/reviews`）。
+- 我要求的"能变红"实录有三份（原地更新 + 触发器 → 503；关掉触发器 → `:780` 断言红；
+  把旧行 title 改写 → `:838` 逐列对比红）。我进树核了这三条断言确实存在：
+  `abort_e2e_test.go:779-781`、`:837-840`，以及 `:784` 的"没给就是 NULL，不是空串"。
+- **与刚落地的 T0507 的冲突面**：唯一重叠是 `cmd/api/main.go`，且是不同区段
+  （T0507 在 589-690 改接线；T0602 在 43-73 加 import、967 加 `Aborts:` 字段）——合成不会撞。
+
+### ③ T0808 的独立 G2（本轮交付：第二次返工）
+- 先读**返工信本身**：它在 `.rddev/workers/T0808/prompt.md` 的 `## Rework` 一节里逐条编号
+  （这是"工人到底被告知了什么"的唯一真相源，照旧核过）。
+- 本轮交付面 6 个文件，全部在 scope 内；上一轮的工作已提交在分支（`cd8fdcd`），**没有被回退**：
+  `research_profile.sql:160` 的 `p.visibility = 'public'` 谓词、`:36-38` 的"不许整理成一条"警告、
+  `:47` 的 00091 引文都原样在。
+- **我自己重跑了三条**：① 网页单测 `scripts/web-unit-tests.sh` → `tests 244 / pass 244 / fail 0`；
+  ② 真库集成 `go test ./tests/integration -run 'TestResearchProfile'` → 绿（含
+  `TestResearchProfileWindowIsCountedInRenderableRows`、`TestResearchProfileIntegrationExistenceHiding`）；
+  ③ e2e `go test ./tests/e2e -run 'TestE2EResearchProfile'` → 3 条全过。
+- 两条修复都进树核过：`printableEntity`（`apps/web/lib/research-profile.ts`）在
+  `null`/`undefined`/空名时返回 `null`，**不返回任何占位串**；四个列表都以它为唯一判据；
+  附属行的 role、两端日期、verified 原样保留。变异检验实录在 RESULT 里
+  （把占位串放回去 → `✖ a withheld identity prints NOTHING — never a placeholder naming the absence`，
+  `pass 21 / fail 1`；还原 → 22/22）。
+- 第二条：假查询名 `ListPublicAssertions` → 真名 `ListPublishedEvidenceForTarget`，
+  用 `scripts/gen_sqlc.sh` 重生成、漂移检查 clean（我核过：全树已无 `ListPublicAssertions`）。
+- 一条观察（不是缺陷）：这一轮的 e2e 是**进程内**的 HTTP 级、读适配器是假的，所以只要 0.08 秒；
+  真库上的可见性谓词由集成套件与 G3 的 `rsg-real-services`/`gitea-real-services` 覆盖。
+  **别把 0.08 秒读成"没测"**——`-v` 里三条 e2e 都真跑。
+
+### ④ 空当仍未开（T0511 落地）
+此刻在飞且带指纹的四条：T0602（评审中）、T0808（评审中）、T0811（跑）、T0510（刚派）。
+四条都合完之后才是空当。顺序上 **T0602（00100）必须最先合**；它一合，
+我就要 `rddev drive --clear-decision T0809`（那条 merge 决定等的就是 00100 先落地）。
