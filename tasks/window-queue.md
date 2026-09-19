@@ -20,12 +20,10 @@
 是**过期草稿**，live 那份更新，落了会把更正改回去；详见 `tasks/packages/README.md`）。
 
 **怎么确认还需要做**：`python3 .rddev/tools/packages-vs-dag.py | grep T0511` → 仍是 `NOT IN DAG`。
-再看一眼 T0511 是否已经被合并/已经存在（`./bin/rddev task inspect T0511`）。
 
 **步骤**（顺序不能乱，每一步都在 `land-T0511.py` 的头注释里）：
 
 ```sh
-python3 .rddev/tools/packages-vs-dag.py                       # 先看：只有 T0511 该落
 python3 .rddev/tools/land-T0511.py --dry-run                   # 干跑
 python3 .rddev/tools/land-T0511.py                             # 写 tasks/tasks.json
 python3 scripts/spec_version.py --write                        # 重生成指纹，不跑这步 main 红
@@ -60,27 +58,57 @@ DAG 里表达不出来，而它要改的两个文件正被 T0511 重写。
 **为什么必须和 CI 一起改**：`actions/checkout@v4` 默认 `fetch-depth: 1`，基准 ref 不在本地，
 塞进 `make fmt-check` 会让**每次 CI 变红**。所以它是一条**新 CI 步骤**（`fetch-depth: 0`），
 而改 `.github/workflows/ci.yml` 就必须同步改 **`specs/orchestrator/gates.json`**（指纹输入）。
-**一句话：这条拆不开，一起落。**
 
-**优先级**：**排在 A 之后。** 空窗是稀缺资源，落任务书能解锁工人（吞吐），
-这条是防护（正确性）——若这次空窗只够做一件，做 A。
+**优先级**：**排在 A 之后。** 空窗是稀缺资源，落任务书能解锁工人（吞吐），这条是防护（正确性）。
 
 ---
 
-## C. 记着但**不属于空窗**的事（写在这是为了不忘，别在空窗里顺手做）
+## C. 开一条新账：PR 页缺 Discussion 区块（**新，2026-09-19 记**）
+
+**为什么**：`docs/42_PAGE_SPECS.md:13` 逐字写着 PR 页的区块里有 **Discussion**；
+`apps/web/app/(main)/projects/[id]/pulls/[number]/page.tsx` 里**一次都没出现这个词**。
+T0811 合并后**接口侧已经有了**（开话题、评论、升格），但界面上仍然**开不了、看不到**。
+这不是 T0811 违约（它 7 条验收标准里没有 UI 那条，`deliverables: []`，同阶段的 T0805
+也是同一形状——**API + 客户端库，不带页面**），是**页面规格与交付之间的缺口**，
+而且**没有任何一本在册的任务管它**（我查过：全 DAG 里只有 T0811 提到 discussion）。
+
+**怎么确认还需要做**：`grep -rn "Discussion" apps/web/app/\(main\)/projects/\[id\]/pulls/` → 仍为空。
+
+**要做的事**：空窗里**立一本任务**（写进 `tasks/packages/` 再落），覆盖
+"PR 页 Discussion 区块 + 知识对象页/项目页的话题入口"，接 T0811 已有的路由与客户端库。
+**若认定 V1 不需要它**（即这一格不属于 V1 验收），那就**改 `docs/42:13` 把这一格删掉**——
+两条路都行，**但不许两头都不做、让它悬着**。
+
+---
+
+## D. 记着但**不属于空窗**的事（写在这是为了不忘，别在空窗里顺手做）
 
 - **T0602 一合并，立刻清两条判断点**：`./bin/rddev drive --clear-decision T0808` 与
-  `--clear-decision T0809`。**驱动会跳过带判断点的任务**——不清，那两个 PR 永远不会被重试合并
-  （两条都是"等迁移顺序"，00100 一落就成立）。**这不是空窗工作，是合并那一刻的动作。**
-- **T0808 合并后改两处注释**（逐字文本已核过，在 `tasks/decisions.md` 里）：
-  `internal/application/researchprofile/doc.go` 的第 2 行与第 8-13 行、
-  `apps/web/app/components/research-profile-sections.tsx:39-43`（加 `ReuseList` 例外，
-  依据是 `lib/research-profile.ts:119-124` 的 `ProfileReuse.project` 非空）。
-  改完**要把修正记在那两条原始发现上**（记账要闭环）。
-- **T0811 合并后改一句注释**：`infra/migrations/00104_discussions.sql` 里
-  `discussion_promotions` 的 CHECK 注释说 ref「cannot name nothing」——**实测 `'issue:'` 能过**
-  （三条 kind 都测过），它钉的是"kind 前缀与 ref 一致"，不钉"非空"。产品路径上 ref 由 Go 用真
-  uuid 拼出、够不到空值，**保护完整 → 按判据记账后合并**，合并后把话说准。
+  `--clear-decision T0809`。**驱动会跳过带判断点的任务**——不清，那两个 PR 永远不会被重试合并。
+  **这不是空窗工作，是合并那一刻的动作。**
+- **T0602 合并后的三处小修**（评审 `approve` 时带的 `minor`/`nit`，我判为"记账后自己修"）：
+  ① `internal/application/aborts/service.go:792` `requireShape` 只用长度卡 `replacement_ref`，
+  而 00100 的 CHECK 要 `length(btrim(...)) BETWEEN 1 AND 512`——**全空格值**（`"   "`）能过命令、
+  死在 CHECK，23514 没进映射表（`internal/persistence/scientific_object_store.go:180-183` 只有
+  22P02/23503/23502），最终被答成 **503 `retryable:true`**。评审**在真库上复现过**：
+  这是"把调用方的错报成可重试的服务错"，客户端会一直重试一个**永远不可能成功**的请求。
+  修法：`requireShape` 里拒掉 `TrimSpace` 为空的值（**这就是 SQL 已经写明的规则，不是我新造语义**）。
+  ② `internal/persistence/pullrequest_store.go:243` 与 `internal/persistence/scientific_object_store.go:345`
+  两处**新写的注释**把 SQL 的空串字面量 `''` 打成了弯引号 `”`，读起来像被截断。
+  ③ T0602 的 `RESULT.json` 里 `acceptance[3].evidence` 引的 sha256 是**另一个文件**的
+  （`scientific_object_abort.go` 的，却写成"这个文件的"），事实本身为真（改写确实回滚了，
+  评审独立复现过），**只是引错了对象**——`RESULT.json` 是工人的留档，**我不改它**，
+  只把更正记进 `tasks/decisions.md`。
+- **T0811 合并后的三处小修**（评审 `approve` 时带的 `minor`/`nit`）：
+  ① `cmd/api/discussionhttp/handlers.go:451` 的 `DELETE .../threads/{threadId}/comments/{commentId}`
+  **从不读** `threadId`，所以**路径与效果可以不一致**（删的评论其实在另一个话题里；不是越权——
+  store 仍卡所有权与项目范围）。同文件的 `handlePromote` 就是反例（它传 ThreadID 让命令拒配对），
+  **照那个先例补上**即可。
+  ② `infra/migrations/00104_discussions.sql:127` 的 CHECK 注释说 ref「cannot name nothing」——
+  **我和评审各自独立用 psql 量过**：`'issue:'` 能过，它钉的是"kind 前缀与 ref 一致"。
+  产品路径够不到空值，**保护完整 → 记账后合并**，合并后把话说准。
+  ③ `internal/persistence/discussion_store.go:282` PR 目标 id **验过就原样存**：
+  对 `'007'` 能通过存在性检查（按 7 去查），却把 `'007'` 存进 `target_id`，
+  以后按 `'7'` 列/筛就找不到。修法：pull_request 目标**存解析后的十进制形式**。
 - **`make -n <target>` 之类的 CI 步骤自检**：**我倾向于不做**。它要防的失败是**大声**的
-  （目标不存在 → make 自己报错），不是静默的，性价比不够。列在这里只为说明**我考虑过并否掉了**，
-  免得以后又当成新点子重新捡起来。
+  （目标不存在 → make 自己报错），不是静默的，性价比不够。列在这里只为说明**我考虑过并否掉了**。
