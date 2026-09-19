@@ -6538,9 +6538,11 @@
       ]
     },
     "T0902": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-19T04:40:55Z",
       "worker_run_id": "run-aa2bf86e6e321ebf",
+      "accepted_by_supervisor_at": "2026-09-19T05:17:11Z",
+      "merged_at": "2026-09-19T05:27:07Z",
       "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（d0c1dab1cb97），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
       "history": [
         {
@@ -6597,6 +6599,26 @@
           "at": "2026-09-19T04:40:55Z",
           "run_id": "run-aa2bf86e6e321ebf",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-19T04:52:30Z",
+          "run_id": "run-30b3b2291a0f9981",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-19T05:17:11Z",
+          "run_id": "run-5f3badbcbba5c21d"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-19T05:27:07Z",
+          "run_id": "run-fc058276026b7fb5",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
