@@ -304,11 +304,13 @@ func TestSearchEmbeddingLeavesTheProjectionAlone(t *testing.T) {
 		t.Fatalf("the projection's own write went missing: title = %q", title)
 	}
 
-	// The document's text changed, so its vector is now stale: the next
-	// recompute selects it — but only because the TEXT is not part of the
-	// predicate. It is not: the predicate is the model identity. What this
-	// asserts is the documented boundary — a re-projection does not
-	// re-embed, and the vector is refreshed by the embedding job's own pass.
+	// The document's text changed, so its vector is now stale — and this
+	// pass does NOT repair it. The backlog predicate is the model identity,
+	// not the text, so a text-only change is invisible to it: an in-place
+	// re-projection keeps the vector computed from the previous text, and no
+	// pass of this job will notice. What repairs a text-stale vector is a
+	// model change (the predicate then selects the row) or a rebuild (it
+	// truncates and re-inserts, leaving embedding NULL for this job to fill).
 	if report, err := w.Recompute(ctx); err != nil || report.Embedded != 0 {
 		t.Fatalf("Recompute after re-projection = %+v, %v; want embedded=0 (the predicate is the model identity, not the text)", report, err)
 	}

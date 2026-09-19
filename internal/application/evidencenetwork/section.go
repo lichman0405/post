@@ -95,12 +95,16 @@ type Section struct {
 // targetProjectID is the project that OWNS the published object version the
 // rows were read for — the origin side of axis 1.
 //
-// The re-check is the point of this function. The store's predicate
-// (ListPublishedEvidenceForTarget) already excludes rows the network may not
-// see; that predicate is a read strategy, and this is the rule, so a row
-// that slipped past it — written by a path that never went through the
-// evidence command, or read by a query that drifted — is still refused
-// HERE, where the decision is made. A dropped row is the fail-closed
+// The re-check is the point of this function, and it is exactly as wide as
+// the input it reads. ListPublishedEvidenceForTarget filtered on two axes
+// (`ea.visibility = 'public'`, and the asserting project's preset for the
+// external half); that predicate is a read strategy, and re-applying the
+// cross-project half of it HERE is the rule, so a row that slipped past the
+// query — written by a path that never went through the evidence command, or
+// read by a query that drifted — is still refused where the decision is
+// made. The row's OWN visibility has no second check: Assertion does not
+// carry that column, so the predicate is the only thing that reads it (the
+// query header says which rows it returns). A dropped row is the fail-closed
 // direction: the reader sees less, never more.
 func Build(targetProjectID string, rows []Assertion, truncated bool) Section {
 	section := Section{

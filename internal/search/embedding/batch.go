@@ -146,7 +146,7 @@ func (r Report) String() string {
 	return fmt.Sprintf("embedded=%d batches=%d", r.Embedded, r.Batches)
 }
 
-// RunOnce embeds at most one batch of documents and returns what it did.A
+// RunOnce embeds at most one batch of documents and returns what it did.
 //
 // The three steps are deliberately ordered read -> embed -> write, with NO
 // transaction open while the embedder runs. That is not an optimisation: a

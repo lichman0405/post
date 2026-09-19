@@ -71,9 +71,13 @@ import (
 // # Fail closed
 //
 // Every read failure — an unresolvable version, an unreadable publication
-// record, a rights document that does not parse — refuses the write. A
-// refused write leaves no row: the assertion and its events commit or roll
-// back together (the transactional outbox).
+// record — refuses the write. A rights document that does not parse refuses
+// it on the cross-project branch, through step 5's audience rule: AudienceFor
+// treats a document it cannot read as no licence to publish, so the target is
+// never NETWORK-visible. An origin-side assertion does not consult the
+// audience at all, so there the stored document neither admits nor refuses
+// the write. A refused write leaves no row: the assertion and its events
+// commit or roll back together (the transactional outbox).
 
 // CreateEvidenceAssertionInput carries one evidence-assertion creation.
 //

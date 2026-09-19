@@ -352,9 +352,11 @@ type VersionProjectFacts struct {
 
 // KnowledgePublicationFacts is the publication a version carries, with
 // every input knowledgepublish.AudienceFor decides on. The store parses the
-// stored rights document; RightsValid is false when the stored bytes are not
-// a document this build can read, and AudienceFor refuses such a document
-// rather than treating it as a licence to publish.
+// stored rights document; RightsValid records whether those bytes were a
+// document this build could read. Nothing on this path branches on that
+// flag: the audience rule consults Rights, and a document that did not parse
+// arrives as its zero value, which AudienceFor refuses rather than treating
+// as a licence to publish.
 type KnowledgePublicationFacts struct {
 	ID              string
 	PID             string
