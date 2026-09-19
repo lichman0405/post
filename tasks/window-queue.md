@@ -38,7 +38,28 @@ DAG 里表达不出来，而它要改的两个文件正被 T0511 重写。
 
 ---
 
-## B. 两处 baseline 的"只许变短"守卫（**新，2026-09-19 发现**）
+## B. 让 CI 真的跑 `tests/e2e`（**新，2026-09-19 发现，静默口子**）
+
+**为什么**：CI 的 `go` job 跑 `go test $(go list ./... | grep -v '/tests/integration')`，
+**它包含 `./tests/e2e`，而这个 job 没有数据库**；唯一带库的 job 只跑 `./tests/integration`。
+**全仓库搜 `tests/e2e` 零命中**。也就是说：`tests/e2e` 里要库的那些链路在 CI 里**永远 skip，而 job 报绿**。
+**我跑出来看过**（库指死端口、照 CI 形状）：`exit=0`、**27 个 PASS、1 个 SKIP**、结尾 `ok`；
+同一个测试在真库上是 `PASS (0.90s)`。**T0811 一并，它的登记阻塞测试就是第二个这样的。**
+
+**怎么确认还需要做**：`grep -rn "tests/e2e" .github/workflows/ci.yml Makefile scripts/ci.sh` → 若仍为空，就还没修。
+
+**修法（已定）**：① 在**有库的 job**（`migration-integration`）里**显式加一步**
+`go test ./tests/e2e -count=1`（带 `POSTGRES_TEST_ADMIN_URL`）；
+② 让 skip **变大声**：共享帮手 `RequireDB(t)`——环境变量 `POST_REQUIRE_E2E_DB=1` 且库不可达时
+**`t.Fatalf` 而不是 `t.Skipf`**，并在那个 job 里设上它（库挂了该红，不该绿）；
+③ 配 fixture 单测证明守卫**能红**（本仓库惯例）。
+**要改 `ci.yml` → 必须同步 `specs/orchestrator/gates.json`（指纹输入）→ 空窗。**
+
+**优先级**：**排在 A 之后、C 之前**——它是**门本身的正确性**，而且每多一本 e2e 任务就更漏一点。
+
+---
+
+## C. 两处 baseline 的"只许变短"守卫（**新，2026-09-19 发现**）
 
 **为什么**：`ops/ci/gofmt-baseline.txt` 与 `ops/ci/staticcheck-baseline.txt` 是两道门的豁免名单，
 文件开头自己写着"New files are never added to this list"——**没有东西在检查这条**。
@@ -63,7 +84,7 @@ DAG 里表达不出来，而它要改的两个文件正被 T0511 重写。
 
 ---
 
-## C. 开一条新账：PR 页缺 Discussion 区块（**新，2026-09-19 记**）
+## D. 开一条新账：PR 页缺 Discussion 区块（**新，2026-09-19 记**）
 
 **为什么**：`docs/42_PAGE_SPECS.md:13` 逐字写着 PR 页的区块里有 **Discussion**；
 `apps/web/app/(main)/projects/[id]/pulls/[number]/page.tsx` 里**一次都没出现这个词**。
@@ -81,7 +102,7 @@ T0811 合并后**接口侧已经有了**（开话题、评论、升格），但�
 
 ---
 
-## D. 记着但**不属于空窗**的事（写在这是为了不忘，别在空窗里顺手做）
+## E. 记着但**不属于空窗**的事（写在这是为了不忘，别在空窗里顺手做）
 
 - **T0602 一合并，立刻清两条判断点**：`./bin/rddev drive --clear-decision T0808` 与
   `--clear-decision T0809`。**驱动会跳过带判断点的任务**——不清，那两个 PR 永远不会被重试合并。
