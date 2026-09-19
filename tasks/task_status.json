@@ -4447,13 +4447,8 @@
       ]
     },
     "T0602": {
-      "status": "blocked",
-      "started_at": null,
-      "completed_at": null,
+      "status": "ready",
       "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：abort 要记的字段（reason code、human explanation、replacement ref）在库里无处可存；reopen 这条在契约、权限矩阵、审批规则三处全空。",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null,
       "history": [
         {
           "from": "todo",
@@ -4461,6 +4456,12 @@
           "at": "2026-09-16T00:08:07Z",
           "run_id": "supervisor-manual",
           "reason": "SPEC_BLOCKED：见 issue #250"
+        },
+        {
+          "from": "blocked",
+          "to": "ready",
+          "at": "2026-09-19T03:16:01Z",
+          "run_id": "run-537096308aca5cf1"
         }
       ]
     },
@@ -6155,9 +6156,9 @@
     },
     "T0806": {
       "status": "running",
-      "started_at": "2026-09-19T03:00:33Z",
-      "worker_run_id": "run-c3f3d7fe3a0ea6de",
-      "rejection_reason": "# T0806 推进基线（rebaseline）——不是返工，是主库往前走了\n\n## 一句话\n\n你的交付没有被判出任何缺陷。被拒的原因是**主库往前走了**：你开工时的基线 `4403893` 现在落后\n**7 笔**，其中两笔带迁移（T0410 的 `00089`、T0901 的 `00090`）已经合进主库。\n`rddev rebaseline` 会把你的改动搬到新主库基线上，**你的代码一个字都不用改**——它只在搬不动\n的时候才需要你出手。\n\n## 主库在你开工之后发生了什么\n\n- `4bf4032` **T0410 已合入**：迁移 `00089`（`pull_requests.creation_key` 的部分唯一索引）、\n  `cmd/api/main.go` 挂了一条新路由、`tests/integration/migration_test.go` 多了一组表/索引期望。\n- `478cf05` **T0901 已合入**：迁移 `00090`（`search_projected_events` 投影游标表）、\n  `internal/search/**` 一整套投影器、`cmd/worker/main.go` 挂了消费者、`Makefile` 加了\n  `search-rebuild` 目标、`tests/integration/migration_test.go` **又多了一组期望**。\n- 若干笔监督侧提交：文档、CI 集成测试上限 10 分钟 → 20 分钟、orchestrator 措辞修正。\n  这些不碰你改的文件。\n\n**现在主库停在 `478cf05`，迁移到 `00090`。你的 `00091` 号没变，仍是下一个。**\n\n## 我预付过的账：改动面重叠\n\n我把「你的工作区」和「T0901 合并之后的主库」做过一次三方合并预演（`git merge-file`，在\nworktree **之外**跑的），每个有重叠的文件的结果：\n\n- `specs/database/postgres.sql` —— **生成物**，`rebaseline` 按规则**重新生成**，不走文本合并。\n- `specs/SPEC_VERSION.json` —— 同上，**生成物**，重新生成。\n- `tests/integration/migration_test.go` —— **唯一的真文本重叠**，预演 `exit=0`（无冲突）。\n  注意这个文件**已经叠了两轮**（T0410 一轮、T0901 一轮），所以你要复核的**不是两套期望、\n  而是三套**（见下）。\n- `cmd/api/main.go`（T0410 改过、你也改）—— 对当前主库预演 `exit=0`（无冲突）。这一类在本仓库\n  历史上出过「两边插在同一个 import 锚点后面」的冲突，**这次预演是干净的**。\n\n（预演用的尺子我先自检过：造一对必然冲突的输入，它给出 `exit=1`。**能说出「不」的尺子才算数。**）\n\n**所以正常情况下你不需要做任何事。** 如果 `git merge-file` 仍然要求你判断，那说明预演漏了\n什么，届时**以 `rddev rebaseline` 的实际报错为准，不要以我这封信为准**。\n\n## 你要做的事\n\n1. **复核 `tests/integration/migration_test.go` 里三套期望同时存在**：T0410 的 `pull_requests`\n   那一套、T0901 的 `search_projected_events` / `00090` 那一套、以及你自己的 `00091`。\n   缺任何一套都是这次推进引入的回归。文件里不应有任何冲突标记。\n2. **复核 `Makefile`**：它现在同时有 CI 那条 `-timeout 20m`（`test-integration` 配方里）\n   和 T0901 新加的 `search-rebuild` 目标及其 `.PHONY` 条目——两者都要在。\n3. **重新读一遍被重新生成的两个文件**（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`），\n   确认 `00089`、`00090`、`00091` 的对象都在里面。**生成物不许手工编辑**——发现问题告诉我，\n   不要自己改。\n4. **在新基底上重跑你任务书指定的那组测试**（external evidence 那套，外加你动过的\n   `tests/integration/append_only_test.go`、`knowledge_publish_test.go`、`migration_test.go`）。\n   基线动了，旧的红绿不算数。\n5. **重新提交 `RESULT.json`**，内容以**新树**为准：明确写一句「本次为基线推进后的重新验证」，\n   记清改了什么、重跑了什么、结果如何。**不要把上一次的输出原样抄过来**——抄过来的证据描述的是\n   另一棵树。\n\n## 记录约定（重申，免得又踩）\n\n`tests[]` **只列你真跑过的命令**。跑不了但仍算完成的门，写进 `risks` /\n`notes_for_supervisor`，并在那里说明「排除了什么、为什么」。**删了不说和写了没跑是同一类错误。**\n`not_run` 属于 `blocked` / `failed` 的报告。\n\n## 范围（不变）\n\n`allowed_scope` 与 `forbidden_scope` 一个字没改。上面提到的两个生成物是**规格里声明的派生产物**，\n覆盖它不算越界——但**方式只有重新生成这一种**。**不要为了「让 Gate 变绿」改动任何功能语义。**\n只有在重跑**真的红了**的时候才改，并在 RESULT 里说明那处红是推进引入的、还是你原有的。\n",
+      "started_at": "2026-09-19T03:37:27Z",
+      "worker_run_id": "run-96bbdd6412bfe605",
+      "rejection_reason": "# 返工 T0806：一处**真的会打到调用方**的缺陷，评审已经复现，改法二选一\n\n## 一、这条不是风格问题，是调用方按平台自己声明的参数发请求就会撞上\n\n独立评审在**没有改动你的工作树**的前提下，另起一份副本、走**真实产品路径**复现了它，还带了三组对照：\n\n| 请求体 | 实际答复 | 应当 |\n|---|---|---|\n| **只给 `specs/mcp/tools.json:13` 为这个操作声明的那组参数** | **503 SERVICE_UNAVAILABLE（`retryable: true`）** | 201 |\n| 只给 `directness` | 503 | 201 |\n| 只给 `inference_nature` | 503 | 201 |\n| 只不给 `scope`（对照） | 201 | 201 |\n| 两个都给（对照） | 201 | 201 |\n\n**机制——三处各自都对，合起来错：**\n\n1. `internal/domain/evidence_assertion.go:336-341` 的 `Validate` **明确放行空值**：写的是\n   `if a.Directness != \"\" && !ValidEvidenceDirectness(...)`，空串不进这个分支。\n2. 于是 `internal/application/rsg/evidence.go` 把**空串原样**传给存储。\n3. 而 `internal/persistence/queries/evidence.sql:56-63` 的 INSERT **显式列出了这两列**\n   （`... scope, directness, inference_nature, ...` 与对应的 `@scope, @directness, @inference_nature`），\n   所以建表时那个 `DEFAULT 'unknown'`（`infra/migrations/00007_evidence.sql`）**根本不会生效**，\n   `infra/migrations/00058_evidence_assertion_guards.sql:73-76` 的 CHECK 于是拒收空串——\n   而那个错误被映射成了**可重试的服务故障**。\n\n**两个后果，第二个更严重：**\n\n- **(a) 你写下的行为没有实现。** `internal/application/rsg/evidence.go:93-96` 逐字写着\n  「Directness and InferenceNature are the schema's declarations; **empty means \"not declared\" and\n  is stored as the schema's own 'unknown'**」，`internal/domain/evidence_assertion.go:293-299`\n  又复述了一遍。这两句注释承诺的行为**代码里没有**。\n- **(b) 一个永久性的入参错误被报成了 retryable 的故障。** `docs/45` 的规矩是永久错误不能报成\n  可重试的故障——调用方会照着 `retryable: true` 去重试，而它**永远不会成功**。\n\n**为什么整套测试没抓到**：单测与集成的请求体**每一条都同时给了这两个字段**。\n\n## 二、改法：二选一，你定，并在 RESULT 里说明理由\n\n- **甲：按你已经写下的文档办**——入库前把空串归一成 `'unknown'`。这是你在两处注释里承诺过的行为；\n  改完之后，平台自己声明的那组 MCP 参数才真的能用。\n- **乙：拒收，但用 400 `VALIDATION_FAILED` 并点名是哪个字段。** 如果你认为「未声明」不该被静默补成\n  `'unknown'`（那确实算替调用方做了一个声明），那也必须把答复码改对——**不能是 503**。\n\n**我倾向甲**，理由是 `unknown` 本来就是 schema 给这两列定的默认值，「未声明」与「未知」在这两列上是\n同一件事；而乙会让平台**自己声明的那组参数**用不了。但这是你的判断，写清理由即可。\n\n**无论选哪个，答复码那半必须一起对：入参错误永远不是 503。**\n\n## 三、必须补的测试\n\n评审说套件漏掉它，是因为**每个请求体都给了这两个字段**。所以补两条：\n\n1. **只给 `tools.json:13` 声明的那组参数**（不含这两个字段）→ 断言得到 **201**\n   （若你选乙，则断言 **400** 且错误码与字段名正确），**明确不是 503**。\n2. **一条能失败的证明**：把归一那一步去掉（或改回直传空串）后，第 1 条**必须转红**，\n   **把实测输出贴进 RESULT**。\n\n## 四、其余四条评审意见**不用你改**，我逐条已裁定\n\n- **minor（`internal/persistence/queries/evidence.sql:109`，会员也看不到本项目自己的证据）**：\n  **不改。** 我核过——这不是规格留白，而是一个**已命名但未接线的面**：同一个 SQL 文件里的\n  `ListEvidenceAssertionsForTarget` 头注逐字写着 \"this is the owning project's read\"，\n  设计早就点名了这条面，只是没人接线。进任务队列。\n- **minor（`internal/application/rsg/evidence.go:188`，跨项目断言要求断言方是公开项目）**：\n  **不改，而且我明确认可这个收窄。** 理由：一条公开渲染的断言行带着 `project_id`，\n  若它能由私有项目写下，就等于把「某个私有项目存在」这件事公开了——`docs/12 §3` 的\n  「不扩大可见性」正好管这个。你做成 fail-closed 是对的。\n- **nit（`Idempotency-Key` 没读）**：**不改。** 与其它 rsg 创建路由一致（只有发布知识那条读了），\n  是继承来的既有缺口，已登记。\n- **nit（transport 要求 `evidence_type` 而 `tools.json:13` 没列它）**：**不改代码**，\n  但**在 RESULT 里留一句**，因为将来做 MCP 层的人会撞上这处契约漂移。\n\n## 五、边界重申（照旧，不打折）\n\n**不许为了让测试变绿而删除、跳过或弱化任何既有断言，不许放宽断言，不许放大超时。**\n\n另外，你上一轮已经因为 **`tests[]` 里列了没跑的命令**被 collect 拒过一次。这次\n**`tests[]` 里只列你真的跑过的命令**；没跑的门写进 `notes_for_supervisor`，并说明为什么没跑、\n你用什么事实判断它不适用于这次改动。\n",
       "history": [
         {
           "from": "todo",
@@ -6205,6 +6206,27 @@
           "to": "running",
           "at": "2026-09-19T03:00:33Z",
           "run_id": "run-c3f3d7fe3a0ea6de",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-19T03:12:30Z",
+          "run_id": "run-77c983b44f1395d5",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-19T03:37:22Z",
+          "run_id": "run-ca078a759aafa746",
+          "reason": "# 返工 T0806：一处**真的会打到调用方**的缺陷，评审已经复现，改法二选一\n\n## 一、这条不是风格问题，是调用方按平台自己声明的参数发请求就会撞上\n\n独立评审在**没有改动你的工作树**的前提下，另起一份副本、走**真实产品路径**复现了它，还带了三组对照：\n\n| 请求体 | 实际答复 | 应当 |\n|---|---|---|\n| **只给 `specs/mcp/tools.json:13` 为这个操作声明的那组参数** | **503 SERVICE_UNAVAILABLE（`retryable: true`）** | 201 |\n| 只给 `directness` | 503 | 201 |\n| 只给 `inference_nature` | 503 | 201 |\n| 只不给 `scope`（对照） | 201 | 201 |\n| 两个都给（对照） | 201 | 201 |\n\n**机制——三处各自都对，合起来错：**\n\n1. `internal/domain/evidence_assertion.go:336-341` 的 `Validate` **明确放行空值**：写的是\n   `if a.Directness != \"\" && !ValidEvidenceDirectness(...)`，空串不进这个分支。\n2. 于是 `internal/application/rsg/evidence.go` 把**空串原样**传给存储。\n3. 而 `internal/persistence/queries/evidence.sql:56-63` 的 INSERT **显式列出了这两列**\n   （`... scope, directness, inference_nature, ...` 与对应的 `@scope, @directness, @inference_nature`），\n   所以建表时那个 `DEFAULT 'unknown'`（`infra/migrations/00007_evidence.sql`）**根本不会生效**，\n   `infra/migrations/00058_evidence_assertion_guards.sql:73-76` 的 CHECK 于是拒收空串——\n   而那个错误被映射成了**可重试的服务故障**。\n\n**两个后果，第二个更严重：**\n\n- **(a) 你写下的行为没有实现。** `internal/application/rsg/evidence.go:93-96` 逐字写着\n  「Directness and InferenceNature are the schema's declarations; **empty means \"not declared\" and\n  is stored as the schema's own 'unknown'**」，`internal/domain/evidence_assertion.go:293-299`\n  又复述了一遍。这两句注释承诺的行为**代码里没有**。\n- **(b) 一个永久性的入参错误被报成了 retryable 的故障。** `docs/45` 的规矩是永久错误不能报成\n  可重试的故障——调用方会照着 `retryable: true` 去重试，而它**永远不会成功**。\n\n**为什么整套测试没抓到**：单测与集成的请求体**每一条都同时给了这两个字段**。\n\n## 二、改法：二选一，你定，并在 RESULT 里说明理由\n\n- **甲：按你已经写下的文档办**——入库前把空串归一成 `'unknown'`。这是你在两处注释里承诺过的行为；\n  改完之后，平台自己声明的那组 MCP 参数才真的能用。\n- **乙：拒收，但用 400 `VALIDATION_FAILED` 并点名是哪个字段。** 如果你认为「未声明」不该被静默补成\n  `'unknown'`（那确实算替调用方做了一个声明），那也必须把答复码改对——**不能是 503**。\n\n**我倾向甲**，理由是 `unknown` 本来就是 schema 给这两列定的默认值，「未声明」与「未知」在这两列上是\n同一件事；而乙会让平台**自己声明的那组参数**用不了。但这是你的判断，写清理由即可。\n\n**无论选哪个，答复码那半必须一起对：入参错误永远不是 503。**\n\n## 三、必须补的测试\n\n评审说套件漏掉它，是因为**每个请求体都给了这两个字段**。所以补两条：\n\n1. **只给 `tools.json:13` 声明的那组参数**（不含这两个字段）→ 断言得到 **201**\n   （若你选乙，则断言 **400** 且错误码与字段名正确），**明确不是 503**。\n2. **一条能失败的证明**：把归一那一步去掉（或改回直传空串）后，第 1 条**必须转红**，\n   **把实测输出贴进 RESULT**。\n\n## 四、其余四条评审意见**不用你改**，我逐条已裁定\n\n- **minor（`internal/persistence/queries/evidence.sql:109`，会员也看不到本项目自己的证据）**：\n  **不改。** 我核过——这不是规格留白，而是一个**已命名但未接线的面**：同一个 SQL 文件里的\n  `ListEvidenceAssertionsForTarget` 头注逐字写着 \"this is the owning project's read\"，\n  设计早就点名了这条面，只是没人接线。进任务队列。\n- **minor（`internal/application/rsg/evidence.go:188`，跨项目断言要求断言方是公开项目）**：\n  **不改，而且我明确认可这个收窄。** 理由：一条公开渲染的断言行带着 `project_id`，\n  若它能由私有项目写下，就等于把「某个私有项目存在」这件事公开了——`docs/12 §3` 的\n  「不扩大可见性」正好管这个。你做成 fail-closed 是对的。\n- **nit（`Idempotency-Key` 没读）**：**不改。** 与其它 rsg 创建路由一致（只有发布知识那条读了），\n  是继承来的既有缺口，已登记。\n- **nit（transport 要求 `evidence_type` 而 `tools.json:13` 没列它）**：**不改代码**，\n  但**在 RESULT 里留一句**，因为将来做 MCP 层的人会撞上这处契约漂移。\n\n## 五、边界重申（照旧，不打折）\n\n**不许为了让测试变绿而删除、跳过或弱化任何既有断言，不许放宽断言，不许放大超时。**\n\n另外，你上一轮已经因为 **`tests[]` 里列了没跑的命令**被 collect 拒过一次。这次\n**`tests[]` 里只列你真的跑过的命令**；没跑的门写进 `notes_for_supervisor`，并说明为什么没跑、\n你用什么事实判断它不适用于这次改动。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-19T03:37:27Z",
+          "run_id": "run-96bbdd6412bfe605",
           "reason": "worker spawn"
         }
       ]
@@ -6381,13 +6403,25 @@
       "merged_at": null
     },
     "T0816": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
+      "status": "running",
+      "started_at": "2026-09-19T03:17:44Z",
       "notes": "2026-09-19 立账：T0807 独立评审的 major finding 1（orgs 用本地日历日打戳却标 UTC，投影按事件时刻 UTC 日解析）+ 我裁定时数出的第三处（internal/events/subscription_store.go:296 把 date 转 timestamptz 判定成员）。三处口径不一致会让「事件当时的组织」在 UTC+8 这类主机上每天有 8 小时记错或记成 NULL。口径由 Supervisor 裁定为 UTC 日历日、区间含两端，对齐到已合并且被测试钉住的投影一侧。依赖 T0807（它交付了被对齐的那一侧）。",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "worker_run_id": "run-975b798d176375d9",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-19T03:17:31Z",
+          "run_id": "run-8db2bb1af7b7ba56"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-19T03:17:44Z",
+          "run_id": "run-975b798d176375d9",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0901": {
       "status": "merged",

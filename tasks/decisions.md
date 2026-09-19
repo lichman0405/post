@@ -13054,3 +13054,286 @@ signed-webhook 的 fanout+deliverer、subscription fanout），工人按名字�
 
 **待空窗改书（与 T1203/T0815 重写同批）**：上表 6 条，加 T1203（验收要一份全仓不存在的部署模板）、
 T0815（前提已被 `d3abb0b` 改掉：超时早已从 10 分钟提到 20 分钟）。
+
+
+## 2026-09-19 一次范围普查：§8.1 那句「Worker 写入 `specs/` 的唯一入口」与实做对不上，而且不是一两天了
+
+**起因**：重看 T1203 的任务书时注意到它的 `allowed_scope` 里有 `docs/**`，而 CLAUDE.md §8.1 最后一句
+逐字写着「其余 `specs/**` 与 `docs/**` 仍为 Supervisor-only」。我原本以为这是一本书的笔误，
+**于是把全部 141 个任务扫了一遍。结论：不是笔误，是规则书与实做的长期偏差。**
+
+**§8.1 的原文**（逐字）：「**这是 Worker 写入 `specs/` 的唯一入口**：该快照在
+`specs/orchestrator/derived-artifacts.json` 中声明为 `infra/migrations/**` 的 derived artifact，
+scope 校验强制"覆盖迁移目录者必须覆盖它"，写入方式只有重新生成。其余 `specs/**` 与 `docs/**`
+仍为 Supervisor-only。」
+
+**实做是什么样**（今天实测扫描 141 个任务）：
+
+- `allowed_scope` 带 `specs/**` 各子树的：**已合并的 30 多个**。T0201–T0214 **全部**带 `specs/schemas/**`；
+  T0009–T0012 带 `specs/orchestrator/**`；T0005 带 `specs/database/**`；T0001 甚至带整个 `specs/**`。
+- **此刻正在跑**的 T0806 带 `specs/events/**`。
+- 未完结任务里带 `docs/**` 的：**整个 P12 八个任务**（T1201–T1208），T1205 另带
+  `specs/api/**` + `specs/mcp/**` + `specs/schemas/**`。
+- 未完结任务里带 `specs/policies/permissions-matrix.csv` 的：T0610（blocked 中）。
+
+**所以这句话按字面读是假的。**两种可能的真相，我不自行选边：
+
+(a) **这句话想说的是**「`specs/database/postgres.sql` 只能靠重新生成写」——即 §8.1 整节是**关于 schema 演进**的，
+「唯一入口」指的是**在 schema 这件事上**的唯一入口，别的 `specs/` 子树各有各的任务范围管着。
+支持这一读法的证据：该句紧接在讲派生 artifact 的那一句之后，整节标题就是「Schema 演进与 canonical snapshot」。
+(b) **这些任务范围写宽了**，应该逐个收窄。
+
+**为什么今天不构成实际危害**（这也是我判定它不紧急的依据）：`docs/**` 与 `specs/` 里除 `tasks.json`
+以外的文件**都不是规格指纹的输入**，所以工人写它们不会让主库变红；而 scope 校验只看
+`allowed_scope`，**它不认识「Supervisor-only」这个概念**——所以也不会有机器拦下来。**没有机器在管这件事，
+它只靠我派工时把范围写对。**
+
+**处置**：不改 CLAUDE.md（那是 owner 给我的规约，改它等于我替 owner 改规则），
+不逐个改 30 个已合并任务的历史范围（改了也不影响已合并的事实）。**记在这里，按 (a) 理解继续工作**——
+理由是我这半个月的实际操作一直按 (a) 在做，而按 (a) 没有出过事故；按 (b) 理解等于说 30 多个已验收的
+任务全部越了界，那与「四道门全过」的事实矛盾。**留给 owner 一句话定音**：§8.1 那句要不要改成
+「（schema 演进这件事上）Worker 写 `specs/` 的唯一入口」。
+
+## 2026-09-19 第二轮派工前核对：7 本书，抓出 2 处「假称规格沉默」——那是最危险的一类
+
+前一轮核了 5 本（T0813/T0814/T0816/T0902/T0903），这一轮核 7 本
+（T0506 / T0509 / T1007 / T0608 / T0808 / T0809 / T0811）。方法同前：书里所有
+「某文件某行已经怎样了」的断言，交给独立代理逐条回仓库核，尺子明确要求是对抗性的
+（近似命中不算属实）。
+
+**先说分类，因为这个分类本身是这一轮的收获：**
+
+- **一类是坐标错**：行号漂了几行、文件里数出 26 个 `*http` 包而实际 28 个、某句引用差一行。
+  这类**不影响判断**——工人到了现场会自己看见真代码。改书是把它写对，不改书的危害有限。
+- **另一类是「假称规格沉默」**。它出现在 `supervisor_scope_narrowing` 里，作用是
+  **给砍掉一条要求提供理由**。这类**必须先改书再派工**：工人按书干活，书说「规格没写，
+  所以我没让你做」，工人就交付一个**缩小了的功能并报完成**，而四道门**全绿**——
+  因为门测的是书里的验收，不是被砍掉的那条。
+
+**这一轮抓到两处第二类，两处都是我自己写的。**
+
+### （一）T1007：我把「标识符撞名」当成了「规则不存在」
+
+我写的理由逐字是：「`review_required` 在本仓库是 **PR 的一个状态**
+（`internal/domain/pullrequest.go:87`），不是提醒机制；**规格里与 impact 相关的唯一表述是
+「PR 首屏展示 dependency impact」**」。
+
+**后半句是假的，我亲眼核了两处：**
+
+- `docs/18_EVENTS_SUBSCRIPTIONS.md:39`（§5 Dependency Watch）逐字：「当上游 dependency
+  abort/supersede/new version/rights restriction 时，分析受影响下游，**并创建 alert。
+  系统只标记 review required**，不自动改科学结论。」
+- `docs/02_V1_SCOPE.md:58`，在 `### Events` 之下逐字：「- Dependency impact alert。」
+
+**而 `docs/18` 就在这本书自己的 `relevant_specs` 里。**
+
+**错法很具体**：`review_required` 确实同时是 PR 的一个状态取值，但 docs/18 §5 说的
+「标记 review required」是一条**不含这个标识符的独立规则**；我拿撞名否掉了规则本身。
+
+**修法（已定，等空窗改书）**：不照抄存根那条字面，按本仓库的落法还原——
+alert 的载体就是**已经登记**的 `dependency.impact_detected`
+（`specs/events/event-types.yaml:29-30`；`docs/18 §2` 把它归在 Dependency 组），
+**载荷必须带「需要复核」这个标记**，且**只标记、不改状态**（它与本任务需求第 4 条
+「不自动 invalidate」是同一条规则的两半）；投递属 `docs/18 §3–§4`（订阅与输出接口），
+归各自的任务。**仓库里没有任何 alert/notification 实体表**——迁移里只有 outbox
+（`00046`）与 email digest（`00081`）沾到 notification 一词——所以**不许新开表**。
+
+### （二）T0608：那行链路的最后两环在仓库里不存在
+
+要求逐字是：「policy requires reviewers→merge→release→**later abort object**→
+**old release warning** but immutable」。
+
+前四环我核过都真。**后两环：**
+
+- **later abort object**：全仓库**没有任何路由写 `lifecycle_state='aborted'`**。
+  我刚亲手复核：`LifecycleAborted` 只是域常量（`internal/domain/scientific_object.go:88`），
+  唯一**写** aborted 的是 branch（`internal/application/branches/service.go:92`），
+  科学对象的创建两处硬编码 `LifecycleActive`（`internal/application/rsg/service.go:273` 与 `:370`）。
+  **但读的路径已经在等它了**：`internal/application/knowledgepublish/preview.go:245` 已经会因为
+  版本 aborted 而拒绝发布（那里管这叫 "currently RETRACTED"）——平台半只脚已经在等 abort。
+  **这是 T0602 的活，而 T0602 不在 T0608 的依赖表里。**
+- **old release warning**：`docs/11_RELEASE_ASSET_HUB.md:35` 只对 Published **Asset** Version
+  承诺「同时显示 later status warning」；`internal/`、`cmd/` 里零命中，`releases` 表
+  （`infra/migrations/00010_releases_assets.sql:14-26`）没有 status/notice 列。
+
+**处置**：T0608 依赖表补 T0602；那两环要么等 T0602 合入，要么单独拆一个资产侧任务。
+**等空窗一起改。**
+
+### 其余五本：前提全部属实，坐标错若干
+
+这些只影响可读性，**不挡派工**：
+
+- **T0506**：一处框架陈述是假的——书说「读路径的落点已经留好，而且是空的」，实际
+  `internal/application/resolutions/store_pg.go:216` 的 `ListEvidenceForObjectVersion`
+  **已经存在且在用**（`cmd/api/backupdr/open.go:61-66` 管它叫 "the product's only reader of
+  evidence_assertions"），书里没提它。另有 `querier.go:520`→`:807`、
+  `cmd/api/main.go:553-559`→`:638-641` 两处漂移。
+- **T0509**：`specs/api/openapi.yaml:128`→ 实际 `:225-233`；`postgres.sql:444`→`:454`、
+  `:644`→`:654`；`internal/rsg/semantics/evidence_assertion.go:75-83`→`:76-84`；
+  「26 个 `*http` 包」→ 实际 28。
+- **T0811**：三处**已过期**的陈述，其中两处会让工人造重复东西——
+  「`contribution_events` 目前没有任何 Go 写入方」**已经是假的**（我亲手核过：
+  `internal/contribution/ledger_store.go:224-228` 就是一个 `INSERT INTO contribution_events`，
+  T0807 合并后它就在跑）；「T0807 处于 blocked」**已经是假的**（`merged`）；
+  「grep `reputation` 只命中文档」也不准。
+- **T0809**：「dispute 的 open/resolution append-only」**不能被读成 `credit_disputes` 表是
+  append-only**——我核过 `tests/integration/append_only_test.go:18-22`，它把 `credit_disputes`
+  明确列在「Exempt tables (mutable by design)」里。另：**权限矩阵里没有 dispute 那一行**
+  （`specs/policies/permissions-matrix.csv` 15 个动作行、`internal/authz/action.go:9-44`
+  15 个动作，都没有 dispute），该任务会撞上「未登记的动作默认拒绝」。
+- **T0808**：全部前提属实（没有声称存在而实际不存在的东西），但**没有 research-profile 存储**，
+  引用的每个面都得新建；注册测试名 `T0808-TEST-01` 与既有
+  `tests/e2e/profile_e2e_test.go:30` 的 `T0102-TEST-02` **撞名**。
+
+### 顺带修一处我自己的记账漏子：T0602 被我自己藏了几天
+
+`tasks/task_status.json` 里 T0602 还是 `blocked`，可 **2026-09-19 的复核早就撤回了那个判定**
+（见本档「更正：T0602 的 SPEC_BLOCKED 判重了」，T0602 书里需求第 1 条也逐字写着撤回）。
+**判定撤了、状态那格没翻**——于是这个任务在 dispatch 池里被自己藏住了。它的书是**写全的**：
+12 条需求、8 条验收，引用都核过（`docs/46:7` 逐字规定 abort 记什么；
+权限行 `internal/authz/matrix.go:121-129` 已存在；契约 `specs/api/openapi.yaml:210-218`
+已声明；`scientific_object_versions.lifecycle_state` 的 CHECK 里**已经有 `'aborted'`**）。
+
+已 `rddev task ready T0602`（`blocked -> ready`，`run-537096308aca5cf1`），
+依赖 T0208/T0409 均已合并，规格指纹**未动**（`sha256:95d8ca49abc9885c`——
+`task_status.json` 不是指纹输入，这一点已由本次操作再次确认）。
+
+### 这一轮学到的查法
+
+**核任务书时，优先核「我用来砍要求的那条理由」，而不是核行号。**
+行号错了，工人到了现场会自己发现；**理由错了，工人不会知道**——因为工人只看得见
+被砍之后的那本书，看不见被砍掉的那条。所以理由必须是**由别人回仓库验的**，
+而且验法是「规格里真的没有别的相关表述吗」，不是「这句引用是否存在」。
+
+## 2026-09-19 T0806（网络外部证据）验收：G1/G2/G3 通过，G4 只卡在「评审过期」，另判七条风险
+
+### 门禁结果
+
+`rddev task accept T0806`（`run-6e1e99666e6edcb8`）判定：
+**G1 passed / G2 passed / G3 passed / G4 failed**，唯一理由是——
+
+> the review verdict (run-6d41f3dab8a55663, 2026-09-19T01:28:03.729Z) is older than the latest
+> collect (run-77c983b44f1395d5, 2026-09-19T03:12:30.381Z) — it judged a different tree
+
+那条评审是对着**旧基线 `4403893`** 做的（rebaseline 之前），rebaseline 把改动搬到了新主库基线上，
+所以**它评的确实不是现在这棵树**，门禁拒绝得对。**G2 与 G3 都是跑在当前树上的**
+（G2 记录 `run-6e1e99666e6edcb8-g2` 起于 03:12:37；G3 记录 `run-6e1e99666e6edcb8-g3` 起于 03:21:36，
+含 `rsg-real-services`、`gitea-real-services` 等真实服务作业）。已重新派独立评审
+（`rddev review spawn T0806` → `T0806-review`，`run-ca51e37f76bb60c6`）。
+
+### 我自己独立核过的部分（不是读工人的自述）
+
+- **迁移 `00091` 的删除防护**（`infra/migrations/00091_external_evidence_network.sql`）：
+  只取 `00014` 那一对的 **DELETE 一半**（`BEFORE DELETE ... FOR EACH ROW`）与 `00015` 的
+  **TRUNCATE 一半**，用的是**同一支 `append_only_guard()`、同一个 SQLSTATE P0001**；
+  **故意不取 UPDATE 一半**，因为 `00058` 逐字说「评审是一次合法的原地状态变更
+  （unreviewed → reviewed → rejected）」。迁移头里还写了**为什么不做「智能判定这行是不是外部」**：
+  那种防护正好能被它要防的人绕过——先把 `project_id` UPDATE 成自己的再 DELETE。
+- **分类器**（`internal/domain/evidence_network.go`）：三分类是**读时算的**，不入库；
+  `AssertionIsExternal` 在两端 id 任一为空时**判为 external**（fail-closed：不明的所有者绝不
+  呈现为「本项目的证据」）；`rejected` **刻意落进 `unreviewed_external`** 而不是丢掉或洗成
+  「已评审」——因为「已评审」是一个只能由 `review_state='reviewed'` 支撑的**正面主张**。
+- **读路径谓词**（`internal/persistence/queries/evidence.sql:109-110`）：
+  `ea.visibility='public' AND (ea.project_id = <目标项目> OR sp.visibility='public')`。
+- **写路由**（`cmd/api/rsghttp/wiring.go`）：只注册了 `POST .../evidence-assertions` 一条，
+  **没有 PUT/PATCH/DELETE**；且它在 `/api/v1/` 之下，即 `authAPI.Guard` 层之后
+  （匿名写 401、带会话的写要 CSRF）。
+- **三个被改的既有测试，全是「加强」不是「弱化」**（我逐条读了 diff）：
+  `append_only_test.go` 把 `evidence_assertions` **移出豁免表**并把两个新触发器加进
+  `targetedGuardTriggers` 的期望（`:O:11` = BEFORE DELETE FOR EACH ROW，`:O:34` = BEFORE TRUNCATE）；
+  `migration_test.go` 把两个新列与两条新 CHECK **加进穷举期望**；
+  `knowledge_publish_test.go` 抽出 `newKnowledgeWorldFor` 让两个套件复用**同一份接线**
+  （防「测试通过而生产搭不起来」）。
+
+### 七条风险的处置（全部「记录并合入」，无一构成拒绝理由）
+
+1. **会员受众的已发布页面证据区是空的，连本项目成员也看不到。** 我核过：断言自身的
+   `visibility` 由**断言方的项目 preset** 推出，所以私有项目的断言永远是 `'private'`，
+   被 `ea.visibility='public'` 挡掉。方向是 fail-closed（少看，绝不多看），有测试钉住，**不是回归**
+   （本任务之前根本没有证据区）。**判定：这不是规格留白，是一个「已命名但未接线的面」。**
+   依据：同一个 SQL 文件里本来就有 `ListEvidenceAssertionsForTarget`，头注逐字写着
+   「Rows are returned unfiltered by visibility: **this is the owning project's read**」——
+   设计早就点名了「本项目自己看证据」这条面，只是**没人接线**（T0806 接的是网络读那条）。
+   所以它进**任务队列**，不进 owner 的问题清单。
+2. **`reviewed_external` 这一桶在产品面上不可达**：V1 没有证据评审路由，集成测试是用裸 SQL 做
+   那次 UPDATE 的（同时证明了桶能用、且防护只管 DELETE）。已登记为后续任务。
+3. **路由不读契约声明的 `Idempotency-Key`**：与仓库里其它 rsg 创建路由**完全一致**
+   （只有发布知识那条读了），是**继承来的既有缺口**，不是本任务引入的不一致。
+4. **证据区上限 200 条**（`evidencenetwork.MaxAssertions`），超出置 `truncated=true`，
+   **丢的是最旧的**（保最新反证——这是本功能最不能做错的一次截断）。已披露。
+5. **`evidence_origin`/`visibility` 两列不是读的真相源**（读时重算）。**这是刻意的**，
+   理由在 00091 头注里（可编辑的声明不能让一行在两个桶之间搬动）。
+6. **任何角色都不能删除一行**（含断言方自己）——比要求更强，因为**数据库不知道 actor**。
+   与 CLAUDE.md §9.8 一致；**代价是没有任何擦除路径**（例如法律层面的下架），
+   将来若要，必须**刻意重新审视这道防护**，不能绕。
+7. 证据读给每条 `GET /api/v1/knowledge/{pid}` 加了一条有界 SELECT；若该路由变热，
+   需要 `(target_object_version_id, visibility)` 上的覆盖索引。
+
+### 六个 follow-up（登记为候选任务，不挡本次合入）
+
+证据评审路由（含审计）；共享的创建路由幂等台账；`evidence_assertion.created` 至今**无发射方**；
+`visibility_policy_id` **有读者无写者**（所以受众规则里「策略钉住」那一条分支在生产上不可达）；
+`docs/10 §8` 的四个描述性标签需 owner 裁定规则（且 `docs/21:24` 仍写着一张不存在的
+`external_evidence_links` 表）；已发布知识对象的 Web 页面尚未存在，三类目前只有 API 呈现。
+
+## 2026-09-19 T0806 独立评审：request_changes，1 条 blocking——我核过机制全对，判返工（同一 session）
+
+### 评审做了什么（值得记下来，这是评审该有的样子）
+
+`T0806-review`（`run-ca51e37f76bb60c6`）判定 **request_changes（1 blocking / 0 major / 2 minor / 2 nit）**，
+而且它**没有改动被评的工作树**（`git status --porcelain` 的 md5 与收件时一致，29 行）。
+它的独立动作包括：**重新推导每一个派生文件并要求逐字节相同**
+（`gen_schema_snapshot.py --check` 与 `spec_version.py --check` 都过）；**在 /tmp 的副本里
+重新生成 sqlc v1.31.1 并与 `internal/persistence/sqlc` 对比（干净）**；
+**自己重跑了整套集成测试**（408.099s，exit 0），并重跑了全部 7 条验收。
+
+### blocking：调用方按**平台自己声明的参数组**发请求，得到 503（可重试）
+
+**机制三处各自都对，合起来错**，我逐条回仓库核过：
+
+1. `internal/domain/evidence_assertion.go:336-341` 的 `Validate` **放行空值**
+   （写的是 `if a.Directness != "" && !ValidEvidenceDirectness(...)`，空串不进分支）；
+2. 于是空串被原样传到存储；
+3. 而 `internal/persistence/queries/evidence.sql:56-63` 的 INSERT **显式列出这两列**，
+   所以 `DEFAULT 'unknown'`（`00007`）**不生效**，`00058:73-76` 的 CHECK 拒收空串。
+
+**两个后果**：(a) 工人**自己在两处写下**的行为（`rsg/evidence.go:93-96`、`evidence_assertion.go:293-299`
+逐字「empty means "not declared" and is stored as the schema's own 'unknown'」）**没有实现**；
+(b) **永久性的入参错误被报成了 retryable 的故障**，而 `docs/45` 的规矩正相反——
+调用方会照着 `retryable: true` 重试，而它永远不会成功。
+
+**评审的复现带对照**：只给 `specs/mcp/tools.json:13` 声明的那组参数 → 503；只给 `directness` → 503；
+只给 `inference_nature` → 503；**只不给 `scope` → 201**；两个都给 → 201。
+**套件漏掉它是因为每个请求体都同时给了这两个字段**——这正是"测试全绿"与"功能正确"之间那道缝。
+
+### 处置：**返工同一 session**，不销毁重建——理由记在这里
+
+CLAUDE.md §11 的字面是「第二次不通过**或**出现架构误解：销毁 Worker，启动全新 Worker」。
+本次按拒绝次数算已是第二次（上一次是 collect 因「`tests[]` 列了没跑的命令」拒绝）。
+**我仍然选择返工同一 session，理由三条：**
+
+1. §11 给返工开的条件是「**问题明确且 context 仍可靠**」，本次两条都硬满足：
+   评审给到了 file:line、机制、可复现的对照实验，**而工人自己的注释就把意图写对了**——
+   这是接线走神，不是架构误解。
+2. **销毁重建在这里没有收益只有代价**：修法是「把空串归一成 `'unknown'`」或「改报 400」，
+   外加两条测试；重建意味着让一个新 worker 重新建立 31 个文件的上下文。
+3. 两次的**性质不同**：上一次是 RESULT 记账（代码本身没被判错），本次是首次真正的正确性缺陷。
+   §11 那条阈值防的是「同一个坏心智模型反复出错」，而本次证据指向的是走神。
+
+**若本次返工再不平，下一次就按 §11 销毁重建**——这条我写在这里，免得下次又找理由。
+
+**返工信**：`/tmp/t0806-rework.md`，已用 `rddev task reject --reason-file` **与**
+`rddev worker rework --reason-file` **两次给出**（后者会替换已记录的理由），
+并**已核实在工人手上的 `prompt.md:136` 起**（不是它写着"收到"就算数）。
+
+### 四条非 blocking 意见，我逐条裁定（**都不改**）
+
+- **minor `evidence.sql:109`（会员也看不到本项目自己的证据）**：**不改**，且**不是规格留白**——
+  同一文件里 `ListEvidenceAssertionsForTarget` 的头注逐字写着 "this is the owning project's
+  read"，**设计早已点名这条面，只是没人接线**。进任务队列。
+- **minor `rsg/evidence.go:188`（跨项目断言要求断言方是公开项目）**：**不改，且明确认可这个收窄**。
+  一条公开渲染的断言行带着 `project_id`；若它能由私有项目写下，就等于公开了「某个私有项目存在」——
+  正是 `docs/12 §3`「不扩大可见性」管的事。fail-closed 是对的。
+- **nit（`Idempotency-Key` 没读）**：**不改**，与其它 rsg 创建路由一致，继承来的既有缺口。
+- **nit（transport 要 `evidence_type` 而 `tools.json:13` 没列）**：**不改代码**，但要求工人
+  在 RESULT 里留一句——将来做 MCP 层的人会撞上这处契约漂移。
