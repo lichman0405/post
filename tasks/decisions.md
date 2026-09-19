@@ -14055,3 +14055,41 @@ python3 scripts/validate_task_state.py        # 9 项检查，演练中全过
 此刻在飞且带指纹的四条：T0602（评审中）、T0808（评审中）、T0811（跑）、T0510（刚派）。
 四条都合完之后才是空当。顺序上 **T0602（00100）必须最先合**；它一合，
 我就要 `rddev drive --clear-decision T0809`（那条 merge 决定等的就是 00100 先落地）。
+
+### ⑤ T0808 评审判「通过」，两条 finding 的裁定：记录合并，注释由我改（L0）
+
+评审（`verdict-run-599d57903e21893c.json`）复现了全部证据而不只是读：e2e 3 PASS（就是任务书要求的
+`research profile e2e`）、真库集成 8 PASS（含 `TestResearchProfileWindowIsCountedInRenderableRows`）、
+`researchprofile` 单元包 ok、网页 244/244、`tsc --noEmit` 0、gofmt/vet 干净、指纹与 schema 快照都 current；
+并且**自己在一个 /tmp 副本里重跑了变异检验**（把占位串放回去 → 新用例红，断言文字逐字与它写的一致），
+还**独立重生成 sqlc 并逐字节对比**，证明那次注释修复是真重生成。结论 **approve**，两条 finding：
+
+1. **minor**（`internal/application/researchprofile/doc.go:11`，并涉及 `:2`）：包注释把规则的出处指错了——
+   它说 Organization Profile 出自 `docs/42`、可见性出自 `docs/05 §3`。**我自己核过**：
+   `docs/42_PAGE_SPECS.md` 里 `Organization` 出现 **0 次**；`docs/05 §3` 是「Project 导航」的条目列表，
+   **没有路由表、没有可见性表述**；真出处是 `specs/ui/page-inventory.csv:16-17`
+   （`/{user},Research Profile,optional if public,contribution identity` 与
+   `/orgs/{org},Organization Profile,optional if public,institutional research identity`）。
+2. **nit**（`apps/web/app/components/research-profile-sections.tsx:39`）：新注释说「每一行都问 `printableEntity`」，
+   但 `ReuseList`（`:207-227`）直接渲染 `EntityLink`、从不调用它。评审自己也说了这是**有意的**——
+   reuse 的类型是非空的、解析边界就拒绝 null，那一格不存在"被隐去"的情形；**只有这句注释夸大了覆盖面**。
+
+**裁定：两条都不打回，都记录。** 理由是我写下的那条判据——**"不实的是覆盖面/证据声明" 才打回；
+"机制为真、防线仍在"的虚报记录合并**：
+
+- 这两条里**没有任何防线缺失**。第一条是**引注指错文件**（被引的短语真实存在、设计也对，
+  错的是"它出自哪份文件"）；第二条夸大了**适用范围**，而它描述的那道防线（`printableEntity`）
+  在它该管的四格里**确实生效**（reuse 那一格按类型就不可能拿到 null，所以不是漏挡）。
+- 另外：**本轮返工不是这两条的作者**——本轮 6 个文件的增量里没有 `doc.go`，
+  这两条都在上一轮就已提交在分支上（`cd8fdcd`）。本轮把它被要求的两条都做对了（我也独立复跑过，见 ③）。
+
+**代价我照实认并自己补**：这两处注释**由我按 L0 修**（注释措辞不是业务实现）。
+它们加入我已有的"注释清理"批次（`evidencenetwork/section.go:114`、`rsg/ports.go:371`、
+`search_embedding_test.go:311`、`batch.go:149`），在空当里一次改完。
+**这不是"让 Gate 变绿"**：行为、覆盖面、两条验收标准的证据我都独立复核过（③），
+改的只是两句**说错了话**的注释；而且我会在改完后把**两处 finding 原文与我的改法逐条对照留档**，
+免得"记录"变成"忘掉"。
+
+评审另外留了 7 条风险（都不是阻塞；其中"`contribution_events` 没有自己的可见性轴""`docs/13 §5`
+的私密贡献摘要未做"两条正是我早已挂给 owner 的 L3；"窗口饥饿夹具只盖住十条读里的五条"
+与"reproduction 维度仍不带被复现对象"两条我记进跟进清单）。
