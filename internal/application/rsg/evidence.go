@@ -34,7 +34,14 @@ import (
 //  2. shape — the domain's EvidenceAssertion.Validate over enums, the two
 //     version pins and the scope object, plus the uuid shape of both pins
 //     (a ref that could never name a version row is a caller error, not a
-//     store failure).
+//     store failure), plus the one semantic check that is a REFUSAL here
+//     rather than an advisory: a literature assertion that names no evidence
+//     unit at all (an empty reasoning note). The check itself keeps warning
+//     — whether a note names a SUFFICIENT unit is not its call — and this
+//     command promotes that one hint, and only that one, by its code; see
+//     the loop below. It lands before step 3's lookups, for the reason
+//     step 1 does: the semantic checks are payload-pure, so nothing about
+//     the repository is consulted to reach it.
 //  3. resolve both ends — the target version and the cited version, each
 //     through scientific_object_versions -> scientific_objects -> projects.
 //     The cited version must belong to THIS project: an assertion cites the
@@ -176,6 +183,43 @@ func (s *Service) CreateEvidenceAssertion(ctx context.Context, actor domain.User
 		return EvidenceAssertionResult{}, fmt.Errorf("%w: evidence_version_ref must name an object version (object_version:<uuid>)", ErrValidation)
 	}
 
+	// The semantic checks (docs/10 §5/§6) run here, with the shape rules and
+	// before either VERSION is resolved, because they are payload-PURE: they
+	// never touch storage (internal/rsg/semantics says so by contract). A
+	// payload this write will refuse anyway is therefore refused before the
+	// first lookup of the objects it names, which is the half that matters for
+	// disclosure: a caller whose payload was the problem learns only that,
+	// whatever the repository holds (docs/45).
+	//
+	// The target's structured claim is not resolved: this command has no claim
+	// port, and the causal-basis hint is the one check that needs it; the
+	// structural checks and the literature-unit hint run regardless.
+	_, hints := semantics.CheckEvidenceAssertion(content, nil)
+
+	// One of those advisories is a REFUSAL on this path. A literature
+	// assertion whose reasoning note is blank names no evidence unit at all
+	// (docs/10 §6: a DOI may not support a claim directly; docs/19 §4: the
+	// assertion points at a specific location/excerpt/figure/table/dataset/
+	// method), and the check's own predicate for that is exactly "the place is
+	// empty" — the place being the reasoning note, because V1's schema carries
+	// no excerpt field for it.
+	//
+	// The promotion is keyed on the hint CODE, never on a second condition
+	// spelled out here: one predicate, one definition. It deliberately does
+	// NOT promote the other advisory, and it makes no judgement about a note
+	// that IS present — whether the note names a SUFFICIENT unit stays the
+	// author's and the reviewer's call, which the check must not make for them
+	// and neither does this command (docs/10 §4: V1 不自动赋数值权重;
+	// CLAUDE.md §9.12).
+	for _, hint := range hints {
+		if hint.Code == semantics.HintLiteratureEvidenceUnitUnnamed {
+			// The advisory is not dropped on the way out: the refusal carries
+			// it, so the author still reads the guidance the hint would have
+			// rendered (docs/10 §6's locate-the-unit list).
+			return EvidenceAssertionResult{}, &LiteratureEvidenceUnitUnnamedError{Hint: hint}
+		}
+	}
+
 	// Both ends are resolved from storage; a version that does not exist and
 	// a version this caller may not pin both answer the one outcome below.
 	targetFacts, err := s.evidence.GetVersionProjectFacts(ctx, target)
@@ -227,12 +271,6 @@ func (s *Service) CreateEvidenceAssertion(ctx context.Context, actor domain.User
 	if external {
 		origin = domain.EvidenceOriginExternal
 	}
-
-	// The advisory checks (docs/10 §5/§6). The target's structured claim is
-	// not resolved here — this command has no claim port, and the
-	// causal-basis hint is the one check that needs it; the structural
-	// checks and the literature-unit hint run regardless.
-	_, hints := semantics.CheckEvidenceAssertion(content, nil)
 
 	assertionID, err := newID()
 	if err != nil {

@@ -634,6 +634,13 @@ func TestRSGErrorMapping(t *testing.T) {
 		{"mixed gate blocked", &rsgvalidation.GateBlockedError{Report: mixedBlocked}, http.StatusUnprocessableEntity, "RSG_VALIDATION_FAILED", false},
 		{"semantic validation", rsg.ErrValidation, http.StatusBadRequest, rsg.CodeValidation, false},
 		{"evidence ref unavailable", &rsg.EvidenceRefUnavailableError{Side: "target", VersionID: "v"}, http.StatusNotFound, rsg.CodeEvidenceRefUnavailable, false},
+		// T0509: a literature assertion with no evidence unit is the caller's
+		// own permanent input mistake — 400, not the retryable 503 that a
+		// caller would keep resending (docs/45). The code is the semantic
+		// check's own, and the message is its advisory.
+		{"literature evidence unit unnamed", &rsg.LiteratureEvidenceUnitUnnamedError{
+			Hint: semantics.Hint{Code: semantics.HintLiteratureEvidenceUnitUnnamed, Message: "this literature assertion names no specific evidence unit."},
+		}, http.StatusBadRequest, semantics.HintLiteratureEvidenceUnitUnnamed, false},
 		{"unknown failure", errors.New("db down"), http.StatusServiceUnavailable, rsg.CodeUnavailable, true},
 	}
 	for _, tt := range tests {

@@ -15,6 +15,7 @@ import (
 	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/rights"
 	"github.com/lichman0405/post/internal/rsg/schemareg"
+	"github.com/lichman0405/post/internal/rsg/semantics"
 )
 
 // The evidence-assertion write command's own tests (T0806): the rules that
@@ -552,5 +553,167 @@ func TestCreateEvidenceAssertionRefusesAMalformedReference(t *testing.T) {
 	}
 	if store.writeCalls != 0 {
 		t.Errorf("a malformed reference reached the store")
+	}
+}
+
+// --------------------------------------------------------------------------
+// T0509: the literature evidence unit — a REFUSAL on this write path
+// --------------------------------------------------------------------------
+
+// TestCreateEvidenceAssertionRefusesLiteratureWithoutAnEvidenceUnit: docs/10
+// §6 forbids `DOI -> supports Claim` outright (docs/19 §4 states the same rule
+// from the reference side), and V1's schema carries no excerpt field, so the
+// reasoning note is the only place a literature assertion can name the unit it
+// cites. An EMPTY note therefore names no unit under any reading, and this
+// write path refuses it.
+//
+// The distinction this test exists to keep: the rule is "nothing was written",
+// NOT "what was written is not good enough". Both notes below are empty of any
+// location — one literally, one after trimming — and both are refused.
+func TestCreateEvidenceAssertionRefusesLiteratureWithoutAnEvidenceUnit(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		note string
+	}{
+		{"an empty note", ""},
+		{"a whitespace-only note", " \t\n "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := networkedEvidence()
+			in := validEvidenceInput()
+			in.EvidenceType = "literature"
+			in.ReasoningNote = tc.note
+			svc, rec, sts := newEvidenceService(t, store, nil)
+
+			_, err := svc.CreateEvidenceAssertion(context.Background(), ownerActor(), "project-1", "branch-1", in)
+			var refused *LiteratureEvidenceUnitUnnamedError
+			if !errors.As(err, &refused) {
+				t.Fatalf("err = %v, want LiteratureEvidenceUnitUnnamedError", err)
+			}
+			if refused.Code() != semantics.HintLiteratureEvidenceUnitUnnamed {
+				t.Errorf("code = %q, want %q", refused.Code(), semantics.HintLiteratureEvidenceUnitUnnamed)
+			}
+			// The promoted advisory travels WITH the refusal — this is what
+			// "the hints are not silently dropped" means on this path: the
+			// author still reads the locate-the-unit guidance.
+			for _, want := range []string{"figure", "table", "reasoning note"} {
+				if !strings.Contains(refused.Error(), want) {
+					t.Errorf("the refusal message %q does not carry the advisory's %q", refused.Error(), want)
+				}
+			}
+			if store.writeCalls != 0 || sts.committed != 0 {
+				t.Errorf("the refusal wrote a row (%d writes, %d commits)", store.writeCalls, sts.committed)
+			}
+			if len(rec.recorded) != 0 {
+				t.Errorf("the refusal recorded %d events", len(rec.recorded))
+			}
+		})
+	}
+}
+
+// TestCreateEvidenceAssertionRefusesLiteratureBeforeAnyRead: the semantic
+// checks are payload-pure, so the refusal lands before the first storage read.
+// The world below has NO target version at all — a write that read first would
+// answer EvidenceRefUnavailableError — and the payload mistake still decides,
+// which is what keeps a denial from disclosing whether the versions named
+// exist (docs/45, the ordering rule this file's header states).
+func TestCreateEvidenceAssertionRefusesLiteratureBeforeAnyRead(t *testing.T) {
+	store := networkedEvidence()
+	delete(store.facts, evTargetVer)
+	svc, _, _ := newEvidenceService(t, store, nil)
+
+	in := validEvidenceInput()
+	in.EvidenceType = "literature"
+	in.ReasoningNote = ""
+	_, err := svc.CreateEvidenceAssertion(context.Background(), ownerActor(), "project-1", "branch-1", in)
+	var refused *LiteratureEvidenceUnitUnnamedError
+	if !errors.As(err, &refused) {
+		t.Fatalf("err = %v, want LiteratureEvidenceUnitUnnamedError — the payload rule runs before the version lookup", err)
+	}
+	if store.writeCalls != 0 {
+		t.Errorf("the refusal reached the store")
+	}
+}
+
+// TestCreateEvidenceAssertionAcceptsLiteratureThatNamesAnyUnit: the OTHER
+// direction, and the half that keeps the rule honest. Whether a note names a
+// SUFFICIENT unit is a scientific call the check must not make for the author
+// (internal/rsg/semantics/evidence_assertion.go: "Both rules warn only"), so
+// this write path judges nothing about the note's content — every non-empty
+// note below is accepted and stored as written, including the ones no reviewer
+// would credit. An implementation that only ever refused could pass the
+// negative test above; it cannot pass this one.
+func TestCreateEvidenceAssertionAcceptsLiteratureThatNamesAnyUnit(t *testing.T) {
+	// "the paper" and "?" name no usable location in any scientific reading —
+	// and are exactly what this command must NOT be the judge of.
+	for _, note := range []string{
+		"figure 3b, 298 K isotherm",
+		"Table 2",
+		"the paper",
+		"somewhere in section 4",
+		"?",
+	} {
+		t.Run(note, func(t *testing.T) {
+			store := networkedEvidence()
+			in := validEvidenceInput()
+			in.EvidenceType = "literature"
+			in.ReasoningNote = note
+			svc, rec, sts := newEvidenceService(t, store, nil)
+
+			res, err := svc.CreateEvidenceAssertion(context.Background(), ownerActor(), "project-1", "branch-1", in)
+			if err != nil {
+				t.Fatalf("a literature assertion with a note was refused: %v", err)
+			}
+			if store.writeCalls != 1 || sts.committed != 1 {
+				t.Errorf("writes = %d, commits = %d, want the assertion to land as one state commit", store.writeCalls, sts.committed)
+			}
+			if len(rec.recorded) == 0 {
+				t.Error("no event was recorded for the accepted assertion")
+			}
+			if store.gotWrite.ReasoningNote != note {
+				t.Errorf("stored reasoning_note = %q, want %q — the location is the caller's text, never rewritten", store.gotWrite.ReasoningNote, note)
+			}
+			if store.gotWrite.EvidenceType != string(domain.EvidenceTypeLiterature) {
+				t.Errorf("stored evidence_type = %q, want literature", store.gotWrite.EvidenceType)
+			}
+			if res.Assertion.ReasoningNote != note {
+				t.Errorf("returned reasoning_note = %q, want %q", res.Assertion.ReasoningNote, note)
+			}
+			for _, hint := range res.Hints {
+				if hint.Code == semantics.HintLiteratureEvidenceUnitUnnamed {
+					t.Errorf("the unnamed-unit advisory fired for a note that IS present: %+v", hint)
+				}
+			}
+		})
+	}
+}
+
+// TestCreateEvidenceAssertionLeavesNonLiteratureNotesAlone: the rule is scoped
+// by the EVIDENCE TYPE, never by the relation or by a guess about the text
+// (docs/10 §6 is about literature evidence specifically). An experimental
+// assertion with no note — the shape the existing integration cases post — is
+// untouched.
+func TestCreateEvidenceAssertionLeavesNonLiteratureNotesAlone(t *testing.T) {
+	for _, evidenceType := range []domain.EvidenceType{
+		domain.EvidenceTypeExperimental,
+		domain.EvidenceTypeComputational,
+		domain.EvidenceTypeDataset,
+		domain.EvidenceTypeExternalAttestation,
+		domain.EvidenceTypeOther,
+	} {
+		t.Run(string(evidenceType), func(t *testing.T) {
+			store := networkedEvidence()
+			in := validEvidenceInput()
+			in.EvidenceType = string(evidenceType)
+			in.ReasoningNote = ""
+			svc, _, _ := newEvidenceService(t, store, nil)
+
+			if _, err := svc.CreateEvidenceAssertion(context.Background(), ownerActor(), "project-1", "branch-1", in); err != nil {
+				t.Fatalf("%s assertion with no note was refused: %v", evidenceType, err)
+			}
+			if store.writeCalls != 1 {
+				t.Errorf("writes = %d, want 1", store.writeCalls)
+			}
+		})
 	}
 }
