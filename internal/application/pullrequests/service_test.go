@@ -35,6 +35,11 @@ type fakeRepo struct {
 	refreshNumber    int64
 	refreshOut       domain.PullRequest
 	refreshErr       error
+
+	getKeyProjectID string
+	getKey          string
+	getKeyOut       domain.PullRequest
+	getKeyErr       error
 }
 
 func (f *fakeRepo) CreatePullRequest(_ context.Context, in CreatePullRequestParams) (domain.PullRequest, error) {
@@ -45,6 +50,11 @@ func (f *fakeRepo) CreatePullRequest(_ context.Context, in CreatePullRequestPara
 func (f *fakeRepo) GetPullRequest(_ context.Context, projectID string, number int64) (domain.PullRequest, error) {
 	f.getProjectID, f.getNumber = projectID, number
 	return f.getOut, f.getErr
+}
+
+func (f *fakeRepo) GetPullRequestByCreationKey(_ context.Context, projectID, creationKey string) (domain.PullRequest, error) {
+	f.getKeyProjectID, f.getKey = projectID, creationKey
+	return f.getKeyOut, f.getKeyErr
 }
 
 func (f *fakeRepo) ListPullRequests(_ context.Context, projectID string) ([]domain.PullRequest, error) {
@@ -140,6 +150,44 @@ func TestGetValidatesAndMaps(t *testing.T) {
 	}
 	repo.getErr = errors.New("db down")
 	if _, err := svc.Get(ctx, "p", 1); !errors.Is(err, ErrStore) {
+		t.Fatalf("store failure: error = %v, want ErrStore", err)
+	}
+}
+
+// TestGetByCreationKeyValidatesAndMaps: the replay read a creation command
+// depends on. An empty project id and an empty key are shape refusals (the
+// empty key names nothing by construction — the adapter's index is partial
+// on non-empty keys, migration 00089 — so it must not reach the store as a
+// lookup that could match something), a key that names nothing passes
+// ErrPullRequestNotFound through, and anything else from the adapter is a
+// store failure with the cause kept.
+func TestGetByCreationKeyValidatesAndMaps(t *testing.T) {
+	ctx := context.Background()
+	repo := &fakeRepo{getKeyOut: domain.PullRequest{ID: "pr-1", Number: 7, State: domain.PullRequestStateOpen}}
+	svc := NewService(repo)
+	pr, err := svc.GetByCreationKey(ctx, "11111111-1111-1111-1111-111111111111", "abort-key-0001")
+	if err != nil || pr.Number != 7 {
+		t.Fatalf("GetByCreationKey = %+v, %v", pr, err)
+	}
+	if repo.getKeyProjectID != "11111111-1111-1111-1111-111111111111" || repo.getKey != "abort-key-0001" {
+		t.Fatalf("GetByCreationKey forwarded (%q, %q)", repo.getKeyProjectID, repo.getKey)
+	}
+	repo.getKeyProjectID, repo.getKey = "", ""
+	if _, err := svc.GetByCreationKey(ctx, "", "abort-key-0001"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("empty project: error = %v, want ErrValidation", err)
+	}
+	if _, err := svc.GetByCreationKey(ctx, "p", ""); !errors.Is(err, ErrValidation) {
+		t.Fatalf("empty key: error = %v, want ErrValidation", err)
+	}
+	if repo.getKeyProjectID != "" || repo.getKey != "" {
+		t.Fatalf("a shape refusal reached the store with (%q, %q)", repo.getKeyProjectID, repo.getKey)
+	}
+	repo.getKeyErr = ErrPullRequestNotFound
+	if _, err := svc.GetByCreationKey(ctx, "p", "abort-key-0001"); !errors.Is(err, ErrPullRequestNotFound) {
+		t.Fatalf("an unknown key: error = %v, want ErrPullRequestNotFound", err)
+	}
+	repo.getKeyErr = errors.New("db down")
+	if _, err := svc.GetByCreationKey(ctx, "p", "abort-key-0001"); !errors.Is(err, ErrStore) {
 		t.Fatalf("store failure: error = %v, want ErrStore", err)
 	}
 }

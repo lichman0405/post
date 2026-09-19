@@ -32,10 +32,14 @@ RETURNING current_version_no;
 -- name: CreateScientificObjectVersion :one
 INSERT INTO scientific_object_versions
     (object_id, version_no, state_id, branch_id, schema_id, schema_version,
-     title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by)
+     title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by,
+     abort_reason_code, abort_explanation, abort_replacement_ref, aborted_by, aborted_at,
+     abort_request_key)
 VALUES
     (@object_id, @version_no, @state_id, @branch_id, @schema_id, @schema_version,
-     @title, @lifecycle_state, @payload, @visibility_policy_id, @integrity_hash, @created_by)
+     @title, @lifecycle_state, @payload, @visibility_policy_id, @integrity_hash, @created_by,
+     @abort_reason_code, @abort_explanation, @abort_replacement_ref, @aborted_by, @aborted_at,
+     @abort_request_key)
 RETURNING *;
 
 -- name: CanonicalizeScientificObjectPayload :one
@@ -61,3 +65,13 @@ LIMIT 1;
 SELECT * FROM scientific_object_versions
 WHERE object_id = @object_id
 ORDER BY version_no;
+
+-- name: GetScientificObjectVersionByAbortRequestKey :one
+-- The abort command's idempotency lookup (T0602). The key's home is the row
+-- the request produced (migration 00100), so a repeated request reads the
+-- version the first one appended instead of appending a second — no second
+-- audit row, no second scientific_object.aborted event. Scoped to the
+-- object, which is the only scope a route that names one object can replay
+-- in; the partial unique index makes the pair unique by construction.
+SELECT * FROM scientific_object_versions
+WHERE object_id = @object_id AND abort_request_key = @abort_request_key;

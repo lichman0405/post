@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/lichman0405/post/internal/application/merge"
 	"github.com/lichman0405/post/internal/application/sciobjects"
 	"github.com/lichman0405/post/internal/domain"
 	"github.com/lichman0405/post/internal/persistence/sqlc"
@@ -329,8 +331,76 @@ func versionInsertParams(objectID string, versionNo int, in sciobjects.VersionPa
 	if p.CreatedBy, err = textUUID(in.CreatedBy); err != nil {
 		return p, err
 	}
+	if err := abortInsertParams(&p, in); err != nil {
+		return p, err
+	}
 	return p, nil
 }
+
+// abortInsertParams fills the abort record's six columns (migration 00100).
+// The record is all-or-nothing — the database's abort_record_shape CHECK
+// enforces the same rule — so a caller that supplies only part of it is
+// refused here, before the row reaches the server, with the same
+// ErrValidation shape every other malformed version input gets. A version
+// with no record leaves every column NULL, never ”.
+func abortInsertParams(p *sqlc.CreateScientificObjectVersionParams, in sciobjects.VersionParams) error {
+	if in.AbortRequestKey != "" {
+		if len(in.AbortRequestKey) < minAbortRequestKeyLen {
+			return fmt.Errorf("%w: the abort request key must be at least %d characters",
+				sciobjects.ErrValidation, minAbortRequestKeyLen)
+		}
+		p.AbortRequestKey = ptrText(in.AbortRequestKey)
+	}
+	if in.Abort == nil {
+		if in.LifecycleState == domain.LifecycleAborted && p.AbortRequestKey != nil {
+			// An aborted version may legitimately carry no record (a
+			// pre-00100 row, or a fixture that only moves the lifecycle),
+			// but a request key without a record would name a decision
+			// nothing recorded.
+			return fmt.Errorf("%w: an abort request key requires the abort record it belongs to", sciobjects.ErrValidation)
+		}
+		return nil
+	}
+	if in.LifecycleState != domain.LifecycleAborted {
+		return fmt.Errorf("%w: an abort record belongs to a version in lifecycle %q, not %q",
+			sciobjects.ErrValidation, domain.LifecycleAborted, in.LifecycleState)
+	}
+	if strings.TrimSpace(in.Abort.ReasonCode) == "" {
+		return fmt.Errorf("%w: the abort reason code is required", sciobjects.ErrValidation)
+	}
+	if strings.TrimSpace(in.Abort.Explanation) == "" {
+		return fmt.Errorf("%w: the abort explanation is required", sciobjects.ErrValidation)
+	}
+	if in.Abort.DecidedBy == "" {
+		return fmt.Errorf("%w: the abort actor is required", sciobjects.ErrValidation)
+	}
+	if in.Abort.DecidedAt.IsZero() {
+		return fmt.Errorf("%w: the abort time is required", sciobjects.ErrValidation)
+	}
+	decidedBy, err := textUUID(in.Abort.DecidedBy)
+	if err != nil {
+		return fmt.Errorf("%w: abort actor: %v", sciobjects.ErrValidation, err)
+	}
+	p.AbortReasonCode = ptrText(in.Abort.ReasonCode)
+	p.AbortExplanation = ptrText(in.Abort.Explanation)
+	if in.Abort.ReplacementRef != "" {
+		p.AbortReplacementRef = ptrText(in.Abort.ReplacementRef)
+	}
+	p.AbortedBy = decidedBy
+	p.AbortedAt = pgtype.Timestamptz{Time: in.Abort.DecidedAt, Valid: true}
+	return nil
+}
+
+// minAbortRequestKeyLen is the contract's own Idempotency-Key bound
+// (specs/api/openapi.yaml, components.parameters.IdempotencyKey: minLength
+// 8), enforced at the adapter the same way pullrequests.MinCreationKeyLen
+// is: a key too short to be a deliberate token is refused rather than
+// stored.
+const minAbortRequestKeyLen = 8
+
+// ptrText returns a pointer to s — the nullable-text shape sqlc generates
+// for a `text` column without NOT NULL.
+func ptrText(s string) *string { return &s }
 
 // payloadHash is the sha256 hex digest of the exact payload bytes.
 func payloadHash(payload []byte) string {
@@ -368,7 +438,84 @@ func versionFromRow(row sqlc.ScientificObjectVersion) domain.ScientificObjectVer
 		IntegrityHash:      row.IntegrityHash,
 		CreatedBy:          pgUUIDToText(row.CreatedBy),
 		CreatedAt:          row.CreatedAt.Time,
+		Abort:              abortRecordFromRow(row),
 	}
 }
 
-var _ sciobjects.Repository = (*ScientificObjectStore)(nil)
+// abortRecordFromRow reads the abort record the row carries, or nil when it
+// carries none. The two required halves — the reason code and the
+// explanation — decide presence: migration 00100's abort_record_shape CHECK
+// makes the record all-or-nothing, so a row that has one has them all, and a
+// row that has none has none of them. Nil (not a zero-valued record) is what
+// "not an abort" reads as, so no caller has to test a sentinel string.
+func abortRecordFromRow(row sqlc.ScientificObjectVersion) *domain.AbortRecord {
+	if row.AbortReasonCode == nil || row.AbortExplanation == nil {
+		return nil
+	}
+	rec := &domain.AbortRecord{
+		ReasonCode:  *row.AbortReasonCode,
+		Explanation: *row.AbortExplanation,
+		DecidedBy:   pgUUIDToText(row.AbortedBy),
+	}
+	if row.AbortReplacementRef != nil {
+		rec.ReplacementRef = *row.AbortReplacementRef
+	}
+	if row.AbortedAt.Valid {
+		rec.DecidedAt = row.AbortedAt.Time
+	}
+	return rec
+}
+
+// GetVersionByAbortRequestKey implements sciobjects.Repository: the version
+// an earlier abort request with this Idempotency-Key appended, or
+// ErrVersionNotFound when the key has not been used on this object. It is the
+// read half of the abort command's replay (migration 00100 keeps the key on
+// the version row, so the state itself is the idempotency record). The
+// pool-bound GetVersionByID above is the sibling read this one mirrors.
+func (s *ScientificObjectStore) GetVersionByAbortRequestKey(ctx context.Context, objectID, requestKey string) (domain.ScientificObjectVersion, error) {
+	if requestKey == "" {
+		return domain.ScientificObjectVersion{}, sciobjects.ErrVersionNotFound
+	}
+	objectUUID, err := textUUID(objectID)
+	if err != nil {
+		return domain.ScientificObjectVersion{}, sciobjects.ErrObjectNotFound
+	}
+	row, err := sqlc.New(s.pool).GetScientificObjectVersionByAbortRequestKey(ctx, sqlc.GetScientificObjectVersionByAbortRequestKeyParams{
+		ObjectID:        objectUUID,
+		AbortRequestKey: ptrText(requestKey),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || isInvalidText(err) {
+			return domain.ScientificObjectVersion{}, sciobjects.ErrVersionNotFound
+		}
+		return domain.ScientificObjectVersion{}, fmt.Errorf("%w: %v", sciobjects.ErrStore, err)
+	}
+	return versionFromRow(row), nil
+}
+
+// AbortRecordOf implements merge.AbortReader: the abort record versionID
+// carries, or nil when that version is not an abort. The read exists for the
+// merge, which copies the record onto the accepted version (a main-line abort
+// reaches main only through a Research PR, so the merge is the one place the
+// record has to travel). It reads the row by id, so a version the merge is
+// about to materialize from a proposal branch is found whether or not the
+// branch has since been closed.
+func (s *ScientificObjectStore) AbortRecordOf(ctx context.Context, versionID string) (*domain.AbortRecord, error) {
+	id, err := textUUID(versionID)
+	if err != nil {
+		return nil, nil
+	}
+	row, err := sqlc.New(s.pool).GetScientificObjectVersionByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || isInvalidText(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("%w: %v", sciobjects.ErrStore, err)
+	}
+	return abortRecordFromRow(row), nil
+}
+
+var (
+	_ sciobjects.Repository = (*ScientificObjectStore)(nil)
+	_ merge.AbortReader     = (*ScientificObjectStore)(nil)
+)

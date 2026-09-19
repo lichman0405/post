@@ -36,6 +36,15 @@ type Repository interface {
 	// ErrPullRequestNotFound (a PR number of another project reports the
 	// same outcome — never leak another project's entity existence).
 	GetPullRequest(ctx context.Context, projectID string, number int64) (domain.PullRequest, error)
+	// GetPullRequestByCreationKey returns the project's PR that an
+	// earlier creation request carrying creationKey opened, or
+	// ErrPullRequestNotFound when no non-empty key matches (migration
+	// 00089: the key is unique per project, and '' is "no key", shared by
+	// every key-less row, so it never names one). It is the replay read of
+	// a creation command: the caller that re-sends a request finds the
+	// proposal the first attempt opened — including one that has since
+	// merged — instead of opening a second.
+	GetPullRequestByCreationKey(ctx context.Context, projectID, creationKey string) (domain.PullRequest, error)
 	// ListPullRequests returns every PR of the project, in number order.
 	ListPullRequests(ctx context.Context, projectID string) ([]domain.PullRequest, error)
 	// SetPullRequestState transitions the PR expected → to through the

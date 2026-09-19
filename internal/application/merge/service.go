@@ -42,8 +42,14 @@ type Deps struct {
 	Commits   CommitPort
 	Objects   ObjectWriter
 	Relations RelationWriter
-	Projects  ProjectGate
-	Authz     Authz
+	// Aborts reads the abort record an aborted source version carries, so
+	// the accepted version carries the same one (T0602). It is required
+	// exactly when such a version is materialized and the port is nil: the
+	// merge then REFUSES rather than write a lifecycle 'aborted' row that
+	// records no actor, reason or explanation (see requireAbortRecord).
+	Aborts   AbortReader
+	Projects ProjectGate
+	Authz    Authz
 	// Checks re-runs the PR's integrity review server-side (docs/22 §7).
 	// Nil is NOT a legitimate wiring for the command: a merge that cannot
 	// re-run its validation must refuse, not skip it (see requireIntegrity).
@@ -82,6 +88,7 @@ type Service struct {
 	commits     CommitPort
 	objects     ObjectWriter
 	relations   RelationWriter
+	aborts      AbortReader
 	projects    ProjectGate
 	authz       Authz
 	checks      IntegrityChecker
@@ -113,6 +120,7 @@ func NewService(d Deps) *Service {
 		commits:     absentToNil(d.Commits),
 		objects:     absentToNil(d.Objects),
 		relations:   absentToNil(d.Relations),
+		aborts:      absentToNil(d.Aborts),
 		projects:    absentToNil(d.Projects),
 		authz:       absentToNil(d.Authz),
 		checks:      absentToNil(d.Checks),
@@ -648,6 +656,10 @@ func (s *Service) materialize(ctx context.Context, tx states.Transaction, stateI
 			if !ok {
 				return nil, fmt.Errorf("%w: the plan materializes object %s but its source version is not in the diff", ErrStore, c.TargetID)
 			}
+			abort, err := s.abortRecordFor(ctx, src)
+			if err != nil {
+				return nil, err
+			}
 			v, err := s.objects.CreateVersionInTx(ctx, tx, c.TargetID, heads.Objects[c.TargetID], sciobjects.VersionParams{
 				StateID:        stateID,
 				BranchID:       &branchID,
@@ -660,6 +672,17 @@ func (s *Service) materialize(ctx context.Context, tx states.Transaction, stateI
 				// never widens or drops it (docs/12 §3).
 				VisibilityPolicyID: src.VisibilityPolicyID,
 				CreatedBy:          actorID,
+				// An abort travels with the version too, for the same
+				// reason the rights policy does: it is governance
+				// attached to the content, and the accepted state must
+				// carry it or main would show an aborted version nobody
+				// can account for (T0602, docs/46:7).
+				Abort: abort,
+				// The abort request's Idempotency-Key deliberately does
+				// NOT travel: it names a request made against the
+				// proposal branch, and the key's uniqueness is scoped to
+				// the object, so copying it onto main would be a second
+				// row claiming a request that did not produce it.
 			})
 			if err != nil {
 				return nil, err
@@ -909,6 +932,34 @@ func objectDetail(objectType string) []byte {
 		return nil
 	}
 	return detail
+}
+
+// abortRecordFor returns the abort record the source version carries, or nil
+// when the version is not an abort.
+//
+// The rule is fail-closed in the direction that matters: a version whose
+// lifecycle is 'aborted' MUST carry a record, so a read that returns none —
+// or an unwired reader — refuses the merge rather than materializing an
+// aborted version whose actor, reason and explanation are gone. The database
+// enforces the same shape on the row it lands (migration 00100's
+// abort_record_shape CHECK), so this is the application half of one rule and
+// the refusal here is what turns that constraint violation into a named
+// merge outcome instead of a raw write failure.
+func (s *Service) abortRecordFor(ctx context.Context, src manifest.ObjectVersion) (*domain.AbortRecord, error) {
+	if domain.LifecycleState(src.LifecycleState) != domain.LifecycleAborted {
+		return nil, nil
+	}
+	if s.aborts == nil {
+		return nil, fmt.Errorf("%w: the plan materializes aborted version %s but no abort reader is wired — refusing to write an abort with no record of who decided it or why", ErrStore, src.ID)
+	}
+	rec, err := s.aborts.AbortRecordOf(ctx, src.ID)
+	if err != nil {
+		return nil, err
+	}
+	if rec == nil {
+		return nil, fmt.Errorf("%w: aborted version %s carries no abort record — docs/46:7 requires actor, time, reason code and explanation on every abort", ErrStore, src.ID)
+	}
+	return rec, nil
 }
 
 // objectVersionsOf indexes the plan's diff by object id.

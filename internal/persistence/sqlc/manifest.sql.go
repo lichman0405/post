@@ -71,28 +71,34 @@ WITH RECURSIVE lineage(id) AS (
   JOIN lineage l ON ps.id = l.id
   WHERE ps.parent_state_id IS NOT NULL
 )
-SELECT sov.id, sov.object_id, sov.version_no, sov.state_id, sov.branch_id, sov.schema_id, sov.schema_version, sov.title, sov.lifecycle_state, sov.payload, sov.visibility_policy_id, sov.integrity_hash, sov.created_by, sov.created_at, so.object_type
+SELECT sov.id, sov.object_id, sov.version_no, sov.state_id, sov.branch_id, sov.schema_id, sov.schema_version, sov.title, sov.lifecycle_state, sov.payload, sov.visibility_policy_id, sov.integrity_hash, sov.created_by, sov.created_at, sov.abort_reason_code, sov.abort_explanation, sov.abort_replacement_ref, sov.aborted_by, sov.aborted_at, sov.abort_request_key, so.object_type
 FROM scientific_object_versions sov
 JOIN scientific_objects so ON so.id = sov.object_id
 WHERE sov.state_id IN (SELECT id FROM lineage)
 `
 
 type ListManifestObjectVersionsRow struct {
-	ID                 pgtype.UUID        `json:"id"`
-	ObjectID           pgtype.UUID        `json:"object_id"`
-	VersionNo          int32              `json:"version_no"`
-	StateID            pgtype.UUID        `json:"state_id"`
-	BranchID           pgtype.UUID        `json:"branch_id"`
-	SchemaID           string             `json:"schema_id"`
-	SchemaVersion      string             `json:"schema_version"`
-	Title              string             `json:"title"`
-	LifecycleState     string             `json:"lifecycle_state"`
-	Payload            []byte             `json:"payload"`
-	VisibilityPolicyID pgtype.UUID        `json:"visibility_policy_id"`
-	IntegrityHash      string             `json:"integrity_hash"`
-	CreatedBy          pgtype.UUID        `json:"created_by"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	ObjectType         string             `json:"object_type"`
+	ID                  pgtype.UUID        `json:"id"`
+	ObjectID            pgtype.UUID        `json:"object_id"`
+	VersionNo           int32              `json:"version_no"`
+	StateID             pgtype.UUID        `json:"state_id"`
+	BranchID            pgtype.UUID        `json:"branch_id"`
+	SchemaID            string             `json:"schema_id"`
+	SchemaVersion       string             `json:"schema_version"`
+	Title               string             `json:"title"`
+	LifecycleState      string             `json:"lifecycle_state"`
+	Payload             []byte             `json:"payload"`
+	VisibilityPolicyID  pgtype.UUID        `json:"visibility_policy_id"`
+	IntegrityHash       string             `json:"integrity_hash"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	AbortReasonCode     *string            `json:"abort_reason_code"`
+	AbortExplanation    *string            `json:"abort_explanation"`
+	AbortReplacementRef *string            `json:"abort_replacement_ref"`
+	AbortedBy           pgtype.UUID        `json:"aborted_by"`
+	AbortedAt           pgtype.Timestamptz `json:"aborted_at"`
+	AbortRequestKey     *string            `json:"abort_request_key"`
+	ObjectType          string             `json:"object_type"`
 }
 
 // Manifest export snapshot (task T0206). The manifest of a state is the
@@ -132,6 +138,12 @@ func (q *Queries) ListManifestObjectVersions(ctx context.Context, stateID pgtype
 			&i.IntegrityHash,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.AbortReasonCode,
+			&i.AbortExplanation,
+			&i.AbortReplacementRef,
+			&i.AbortedBy,
+			&i.AbortedAt,
+			&i.AbortRequestKey,
 			&i.ObjectType,
 		); err != nil {
 			return nil, err

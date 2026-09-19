@@ -237,6 +237,32 @@ func (s *PullRequestStore) GetPullRequest(ctx context.Context, projectID string,
 	return pullRequestFromRow(row), nil
 }
 
+// GetPullRequestByCreationKey implements pullrequests.Repository: the
+// creation replay read (migration 00089's per-project unique key). An
+// unknown or foreign project, an unused key and the empty key all report
+// ErrPullRequestNotFound — the query itself excludes ” so that the
+// "no key" rows a key-less creation writes can never be reached, and the
+// project scoping means a foreign project's key answers exactly as an
+// unused one does (docs/45: never leak another project's entity
+// existence).
+func (s *PullRequestStore) GetPullRequestByCreationKey(ctx context.Context, projectID, creationKey string) (domain.PullRequest, error) {
+	pid, err := textUUID(projectID)
+	if err != nil {
+		return domain.PullRequest{}, pullrequests.ErrPullRequestNotFound
+	}
+	row, err := sqlc.New(s.pool).GetPullRequestByCreationKey(ctx, sqlc.GetPullRequestByCreationKeyParams{
+		ProjectID:   pid,
+		CreationKey: creationKey,
+	})
+	if errors.Is(err, pgx.ErrNoRows) || isInvalidText(err) {
+		return domain.PullRequest{}, pullrequests.ErrPullRequestNotFound
+	}
+	if err != nil {
+		return domain.PullRequest{}, fmt.Errorf("persistence: get pull request by creation key: %w", err)
+	}
+	return pullRequestFromRow(row), nil
+}
+
 // ListPullRequests implements pullrequests.Repository. An unknown project
 // has no PRs: empty list, not an error (the same read discipline as the
 // version logs).

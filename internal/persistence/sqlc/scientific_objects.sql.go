@@ -82,26 +82,36 @@ func (q *Queries) CreateScientificObject(ctx context.Context, arg CreateScientif
 const createScientificObjectVersion = `-- name: CreateScientificObjectVersion :one
 INSERT INTO scientific_object_versions
     (object_id, version_no, state_id, branch_id, schema_id, schema_version,
-     title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by)
+     title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by,
+     abort_reason_code, abort_explanation, abort_replacement_ref, aborted_by, aborted_at,
+     abort_request_key)
 VALUES
     ($1, $2, $3, $4, $5, $6,
-     $7, $8, $9, $10, $11, $12)
-RETURNING id, object_id, version_no, state_id, branch_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by, created_at
+     $7, $8, $9, $10, $11, $12,
+     $13, $14, $15, $16, $17,
+     $18)
+RETURNING id, object_id, version_no, state_id, branch_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by, created_at, abort_reason_code, abort_explanation, abort_replacement_ref, aborted_by, aborted_at, abort_request_key
 `
 
 type CreateScientificObjectVersionParams struct {
-	ObjectID           pgtype.UUID `json:"object_id"`
-	VersionNo          int32       `json:"version_no"`
-	StateID            pgtype.UUID `json:"state_id"`
-	BranchID           pgtype.UUID `json:"branch_id"`
-	SchemaID           string      `json:"schema_id"`
-	SchemaVersion      string      `json:"schema_version"`
-	Title              string      `json:"title"`
-	LifecycleState     string      `json:"lifecycle_state"`
-	Payload            []byte      `json:"payload"`
-	VisibilityPolicyID pgtype.UUID `json:"visibility_policy_id"`
-	IntegrityHash      string      `json:"integrity_hash"`
-	CreatedBy          pgtype.UUID `json:"created_by"`
+	ObjectID            pgtype.UUID        `json:"object_id"`
+	VersionNo           int32              `json:"version_no"`
+	StateID             pgtype.UUID        `json:"state_id"`
+	BranchID            pgtype.UUID        `json:"branch_id"`
+	SchemaID            string             `json:"schema_id"`
+	SchemaVersion       string             `json:"schema_version"`
+	Title               string             `json:"title"`
+	LifecycleState      string             `json:"lifecycle_state"`
+	Payload             []byte             `json:"payload"`
+	VisibilityPolicyID  pgtype.UUID        `json:"visibility_policy_id"`
+	IntegrityHash       string             `json:"integrity_hash"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	AbortReasonCode     *string            `json:"abort_reason_code"`
+	AbortExplanation    *string            `json:"abort_explanation"`
+	AbortReplacementRef *string            `json:"abort_replacement_ref"`
+	AbortedBy           pgtype.UUID        `json:"aborted_by"`
+	AbortedAt           pgtype.Timestamptz `json:"aborted_at"`
+	AbortRequestKey     *string            `json:"abort_request_key"`
 }
 
 func (q *Queries) CreateScientificObjectVersion(ctx context.Context, arg CreateScientificObjectVersionParams) (ScientificObjectVersion, error) {
@@ -118,6 +128,12 @@ func (q *Queries) CreateScientificObjectVersion(ctx context.Context, arg CreateS
 		arg.VisibilityPolicyID,
 		arg.IntegrityHash,
 		arg.CreatedBy,
+		arg.AbortReasonCode,
+		arg.AbortExplanation,
+		arg.AbortReplacementRef,
+		arg.AbortedBy,
+		arg.AbortedAt,
+		arg.AbortRequestKey,
 	)
 	var i ScientificObjectVersion
 	err := row.Scan(
@@ -135,6 +151,12 @@ func (q *Queries) CreateScientificObjectVersion(ctx context.Context, arg CreateS
 		&i.IntegrityHash,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.AbortReasonCode,
+		&i.AbortExplanation,
+		&i.AbortReplacementRef,
+		&i.AbortedBy,
+		&i.AbortedAt,
+		&i.AbortRequestKey,
 	)
 	return i, err
 }
@@ -175,7 +197,7 @@ func (q *Queries) CreateScientificObjectWithID(ctx context.Context, arg CreateSc
 }
 
 const getLatestScientificObjectVersion = `-- name: GetLatestScientificObjectVersion :one
-SELECT id, object_id, version_no, state_id, branch_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by, created_at FROM scientific_object_versions
+SELECT id, object_id, version_no, state_id, branch_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by, created_at, abort_reason_code, abort_explanation, abort_replacement_ref, aborted_by, aborted_at, abort_request_key FROM scientific_object_versions
 WHERE object_id = $1
 ORDER BY version_no DESC
 LIMIT 1
@@ -199,6 +221,12 @@ func (q *Queries) GetLatestScientificObjectVersion(ctx context.Context, objectID
 		&i.IntegrityHash,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.AbortReasonCode,
+		&i.AbortExplanation,
+		&i.AbortReplacementRef,
+		&i.AbortedBy,
+		&i.AbortedAt,
+		&i.AbortRequestKey,
 	)
 	return i, err
 }
@@ -221,8 +249,52 @@ func (q *Queries) GetScientificObjectByID(ctx context.Context, id pgtype.UUID) (
 	return i, err
 }
 
+const getScientificObjectVersionByAbortRequestKey = `-- name: GetScientificObjectVersionByAbortRequestKey :one
+SELECT id, object_id, version_no, state_id, branch_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by, created_at, abort_reason_code, abort_explanation, abort_replacement_ref, aborted_by, aborted_at, abort_request_key FROM scientific_object_versions
+WHERE object_id = $1 AND abort_request_key = $2
+`
+
+type GetScientificObjectVersionByAbortRequestKeyParams struct {
+	ObjectID        pgtype.UUID `json:"object_id"`
+	AbortRequestKey *string     `json:"abort_request_key"`
+}
+
+// The abort command's idempotency lookup (T0602). The key's home is the row
+// the request produced (migration 00100), so a repeated request reads the
+// version the first one appended instead of appending a second — no second
+// audit row, no second scientific_object.aborted event. Scoped to the
+// object, which is the only scope a route that names one object can replay
+// in; the partial unique index makes the pair unique by construction.
+func (q *Queries) GetScientificObjectVersionByAbortRequestKey(ctx context.Context, arg GetScientificObjectVersionByAbortRequestKeyParams) (ScientificObjectVersion, error) {
+	row := q.db.QueryRow(ctx, getScientificObjectVersionByAbortRequestKey, arg.ObjectID, arg.AbortRequestKey)
+	var i ScientificObjectVersion
+	err := row.Scan(
+		&i.ID,
+		&i.ObjectID,
+		&i.VersionNo,
+		&i.StateID,
+		&i.BranchID,
+		&i.SchemaID,
+		&i.SchemaVersion,
+		&i.Title,
+		&i.LifecycleState,
+		&i.Payload,
+		&i.VisibilityPolicyID,
+		&i.IntegrityHash,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.AbortReasonCode,
+		&i.AbortExplanation,
+		&i.AbortReplacementRef,
+		&i.AbortedBy,
+		&i.AbortedAt,
+		&i.AbortRequestKey,
+	)
+	return i, err
+}
+
 const getScientificObjectVersionByID = `-- name: GetScientificObjectVersionByID :one
-SELECT id, object_id, version_no, state_id, branch_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by, created_at FROM scientific_object_versions WHERE id = $1
+SELECT id, object_id, version_no, state_id, branch_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by, created_at, abort_reason_code, abort_explanation, abort_replacement_ref, aborted_by, aborted_at, abort_request_key FROM scientific_object_versions WHERE id = $1
 `
 
 func (q *Queries) GetScientificObjectVersionByID(ctx context.Context, id pgtype.UUID) (ScientificObjectVersion, error) {
@@ -243,12 +315,18 @@ func (q *Queries) GetScientificObjectVersionByID(ctx context.Context, id pgtype.
 		&i.IntegrityHash,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.AbortReasonCode,
+		&i.AbortExplanation,
+		&i.AbortReplacementRef,
+		&i.AbortedBy,
+		&i.AbortedAt,
+		&i.AbortRequestKey,
 	)
 	return i, err
 }
 
 const getScientificObjectVersionByNo = `-- name: GetScientificObjectVersionByNo :one
-SELECT id, object_id, version_no, state_id, branch_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by, created_at FROM scientific_object_versions
+SELECT id, object_id, version_no, state_id, branch_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by, created_at, abort_reason_code, abort_explanation, abort_replacement_ref, aborted_by, aborted_at, abort_request_key FROM scientific_object_versions
 WHERE object_id = $1 AND version_no = $2
 `
 
@@ -275,12 +353,18 @@ func (q *Queries) GetScientificObjectVersionByNo(ctx context.Context, arg GetSci
 		&i.IntegrityHash,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.AbortReasonCode,
+		&i.AbortExplanation,
+		&i.AbortReplacementRef,
+		&i.AbortedBy,
+		&i.AbortedAt,
+		&i.AbortRequestKey,
 	)
 	return i, err
 }
 
 const listScientificObjectVersions = `-- name: ListScientificObjectVersions :many
-SELECT id, object_id, version_no, state_id, branch_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by, created_at FROM scientific_object_versions
+SELECT id, object_id, version_no, state_id, branch_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by, created_at, abort_reason_code, abort_explanation, abort_replacement_ref, aborted_by, aborted_at, abort_request_key FROM scientific_object_versions
 WHERE object_id = $1
 ORDER BY version_no
 `
@@ -309,6 +393,12 @@ func (q *Queries) ListScientificObjectVersions(ctx context.Context, objectID pgt
 			&i.IntegrityHash,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.AbortReasonCode,
+			&i.AbortExplanation,
+			&i.AbortReplacementRef,
+			&i.AbortedBy,
+			&i.AbortedAt,
+			&i.AbortRequestKey,
 		); err != nil {
 			return nil, err
 		}

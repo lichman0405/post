@@ -235,6 +235,24 @@ type ObjectWriter interface {
 	CreateVersionInTx(ctx context.Context, tx states.Transaction, objectID string, expected int, in sciobjects.VersionParams) (domain.ScientificObjectVersion, error)
 }
 
+// AbortReader reads the abort record a version row carries, or nil when the
+// version is not an abort (and for every version written before migration
+// 00100).
+//
+// It is the merge's read of a GOVERNANCE record it did not create. docs/46:7
+// requires every abort to record actor/time/reason code/explanation, and a
+// main-line abort reaches the accepted state only by this merge — so without
+// this read the accepted version would carry lifecycle 'aborted' and nothing
+// explaining it, which is an abort nobody can account for. The merge copies
+// the record the source version already holds; it never invents or edits one
+// (a merge resolves structural conflicts, docs/60 — the scientific decision
+// was made where the abort was proposed and is carried, not re-decided).
+//
+// The production implementation is persistence.ScientificObjectStore.
+type AbortReader interface {
+	AbortRecordOf(ctx context.Context, versionID string) (*domain.AbortRecord, error)
+}
+
 // RelationWriter appends one relation version on the commit transaction.
 // The production implementation is persistence.RelationStore
 // (AppendRelationVersionInTx); the same append-only rule as ObjectWriter, and

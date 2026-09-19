@@ -17,9 +17,10 @@ import (
 // mapping and validation rules are exercised against a store that behaves
 // like the real one.
 type fakeRepo struct {
-	mu       sync.Mutex
-	objects  map[string]domain.ScientificObject
-	versions map[string][]domain.ScientificObjectVersion
+	mu        sync.Mutex
+	objects   map[string]domain.ScientificObject
+	versions  map[string][]domain.ScientificObjectVersion
+	abortKeys map[string]string // objectID \x00 requestKey -> version id
 }
 
 func newFakeRepo() *fakeRepo {
@@ -74,8 +75,18 @@ func (f *fakeRepo) CreateVersion(ctx context.Context, objectID string, expected 
 		Title: in.Title, LifecycleState: in.LifecycleState,
 		Payload: in.Payload, VisibilityPolicyID: in.VisibilityPolicyID,
 		IntegrityHash: "hash-next", CreatedBy: in.CreatedBy, CreatedAt: time.Now(),
+		Abort: in.Abort,
 	}
 	f.versions[objectID] = append(f.versions[objectID], v)
+	if in.AbortRequestKey != "" {
+		// The adapter's unique index reads (object_id, request_key): the
+		// fake mirrors it as an index of the same pair so a second
+		// request with one key cannot resolve to two versions.
+		if f.abortKeys == nil {
+			f.abortKeys = map[string]string{}
+		}
+		f.abortKeys[objectID+"\x00"+in.AbortRequestKey] = v.ID
+	}
 	return v, nil
 }
 
@@ -94,6 +105,37 @@ func (f *fakeRepo) GetVersion(ctx context.Context, objectID string, versionNo in
 	defer f.mu.Unlock()
 	for _, v := range f.versions[objectID] {
 		if v.VersionNo == versionNo {
+			return v, nil
+		}
+	}
+	return domain.ScientificObjectVersion{}, ErrVersionNotFound
+}
+
+func (f *fakeRepo) GetVersionByID(ctx context.Context, versionID string) (domain.ScientificObjectVersion, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, log := range f.versions {
+		for _, v := range log {
+			if v.ID == versionID {
+				return v, nil
+			}
+		}
+	}
+	return domain.ScientificObjectVersion{}, ErrVersionNotFound
+}
+
+func (f *fakeRepo) GetVersionByAbortRequestKey(ctx context.Context, objectID, requestKey string) (domain.ScientificObjectVersion, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if requestKey == "" {
+		return domain.ScientificObjectVersion{}, ErrVersionNotFound
+	}
+	versionID, ok := f.abortKeys[objectID+"\x00"+requestKey]
+	if !ok {
+		return domain.ScientificObjectVersion{}, ErrVersionNotFound
+	}
+	for _, v := range f.versions[objectID] {
+		if v.ID == versionID {
 			return v, nil
 		}
 	}
