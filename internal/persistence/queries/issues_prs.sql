@@ -12,17 +12,27 @@ SELECT * FROM issues
 WHERE project_id = @project_id AND number = @number;
 
 -- name: CreatePullRequest :one
+-- creation_key is the creation request's Idempotency-Key (migration 00089):
+-- empty when the caller sent none, and UNIQUE per project when it did not.
 INSERT INTO pull_requests
     (project_id, number, source_branch_id, target_branch_id,
-     base_state_id, proposed_state_id, title, body, created_by)
+     base_state_id, proposed_state_id, title, body, created_by, creation_key)
 VALUES
     (@project_id, @number, @source_branch_id, @target_branch_id,
-     @base_state_id, @proposed_state_id, @title, @body, @created_by)
+     @base_state_id, @proposed_state_id, @title, @body, @created_by, @creation_key)
 RETURNING *;
 
 -- name: GetPullRequestByProjectAndNumber :one
 SELECT * FROM pull_requests
 WHERE project_id = @project_id AND number = @number;
+
+-- name: GetPullRequestByCreationKey :one
+-- The creation replay read (T0410, migration 00089): the proposal a previous
+-- request with this Idempotency-Key opened. Only a non-empty key names
+-- anything — '' is "no key", shared by every key-less row, so it is excluded
+-- here rather than left to the partial index.
+SELECT * FROM pull_requests
+WHERE project_id = @project_id AND creation_key = @creation_key AND creation_key <> '';
 
 -- name: GetPullRequestByProjectAndNumberForUpdate :one
 -- The refresh/transition row lock (T0402): serializes the head refresh

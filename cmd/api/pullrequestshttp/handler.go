@@ -2,12 +2,14 @@ package pullrequestshttp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/lichman0405/post/cmd/api/authhttp"
+	"github.com/lichman0405/post/internal/application/forks"
 	"github.com/lichman0405/post/internal/application/prchecks"
 	"github.com/lichman0405/post/internal/application/prdiff"
 	"github.com/lichman0405/post/internal/application/projects"
@@ -20,6 +22,7 @@ import (
 // handlers owns the pull-request routes.
 type handlers struct {
 	prs      PullRequests
+	create   PRCreator
 	checks   CheckRunner
 	diff     DiffRunner
 	projects ProjectReader
@@ -30,6 +33,23 @@ type handlers struct {
 type PullRequests interface {
 	List(ctx context.Context, projectID string) ([]domain.PullRequest, error)
 	Get(ctx context.Context, projectID string, number int64) (domain.PullRequest, error)
+}
+
+// PRCreator opens a proposal: POST
+// /api/v1/projects/{projectId}/pull-requests (specs/api/openapi.yaml, "Open
+// pull request with RSG diff").
+//
+// The port is deliberately NOT pullrequests.Service.Create. Opening a pull
+// request is a governance action — specs/policies/permissions-matrix.csv
+// gives it its own cell (open_pr: deny / allow_from_fork / deny / allow /
+// allow / allow / allow) — and the package that resolves that cell against
+// a REAL project, a REAL membership and (for a non-member) the fork lineage
+// is internal/application/forks, whose OpenExternalPR proposes through the
+// very same pull-request path. The production implementation is
+// *forks.Service; a handler that authorized by itself would be a second,
+// drifting copy of the matrix.
+type PRCreator interface {
+	OpenExternalPR(ctx context.Context, actor domain.User, in forks.OpenPRRequest) (domain.PullRequest, error)
 }
 
 // CheckRunner runs the integrity review. The production implementation is
@@ -50,6 +70,13 @@ type DiffRunner interface {
 type ProjectReader interface {
 	Get(ctx context.Context, r projects.Reader, projectID string) (domain.Project, error)
 }
+
+// codeForbidden is every matrix refusal's wire code (docs/45): rsg, reviews,
+// resolutions, merge and mainfreeze all answer AUTH_FORBIDDEN for a denied
+// action cell, and the open_pr cell is one of them. Defined here rather than
+// taken from a neighbour so this surface names the string it emits — the
+// same reason gittokenshttp defines its own access-forbidden code.
+const codeForbidden = "AUTH_FORBIDDEN"
 
 // reader resolves the caller for the project read gate (T0106): a session
 // makes them authenticated, its absence makes them anonymous.
@@ -182,6 +209,139 @@ func (h *handlers) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	authhttp.WriteJSON(w, http.StatusOK, prToPayload(pr))
+}
+
+// createPullRequestRequest is the wire body of the open-pull-request route.
+// The contract (specs/api/openapi.yaml, "Open pull request with RSG diff")
+// declares the route's parameters and its 201 answer; the body is this
+// package's own shape, and it names only what the command reads: the branch
+// pair and the proposal's text. The project comes from the path, the opener
+// from the guarded principal — never from the client.
+type createPullRequestRequest struct {
+	// SourceBranchID names the branch the proposed changes live on. For a
+	// member it is a branch of the project; for an external contributor it
+	// must be a branch of their own fork of it (open_pr =
+	// allow_from_fork), which the command resolves.
+	SourceBranchID string `json:"source_branch_id"`
+	// TargetBranchID names the branch the proposal merges into (main,
+	// docs/09 §3).
+	TargetBranchID string `json:"target_branch_id"`
+	Title          string `json:"title"`
+	Body           string `json:"body"`
+}
+
+// idempotencyHeader is the contract-required creation key
+// (components.parameters.IdempotencyKey: required, minLength 8).
+const idempotencyHeader = "Idempotency-Key"
+
+// creationKey reads the Idempotency-Key off the header (and nowhere else:
+// a body field would be a second, undocumented way to name the same
+// thing). A missing or too-short key is refused in place — the route
+// promises that a repeat returns the proposal the first request opened,
+// and a request that cannot carry a key cannot be given that promise.
+func creationKey(w http.ResponseWriter, r *http.Request) (string, bool) {
+	key := r.Header.Get(idempotencyHeader)
+	if key == "" {
+		authhttp.WriteError(w, r, http.StatusBadRequest, pullrequests.CodeValidation,
+			idempotencyHeader+" is required on this route: it is what makes a repeated request return the pull request it already opened instead of opening a second")
+		return "", false
+	}
+	if len(key) < pullrequests.MinCreationKeyLen {
+		authhttp.WriteError(w, r, http.StatusBadRequest, pullrequests.CodeValidation,
+			idempotencyHeader+" must be at least "+strconv.Itoa(pullrequests.MinCreationKeyLen)+" characters (specs/api/openapi.yaml)")
+		return "", false
+	}
+	return key, true
+}
+
+// handleCreate: POST /api/v1/projects/{projectId}/pull-requests.
+//
+// The only write on this surface, and the entry point of the
+// open → review_required → approved → merge_ready → merged walk: without it
+// the machine's first transition has no product path, which is the gap this
+// route closes.
+//
+// The project read gate is NOT run here, deliberately: the command resolves
+// the caller's visibility itself (a private project the caller may not read
+// answers the existence-hiding project-not-found), and it resolves the
+// open_pr matrix cell beside it. A gate in front would either duplicate that
+// resolution or, worse, refuse a non-member whose fork lineage is exactly
+// what makes their proposal legitimate.
+func (h *handlers) handleCreate(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectId")
+	actor, ok := authhttp.PrincipalFrom(r.Context())
+	if !ok {
+		authhttp.WriteError(w, r, http.StatusUnauthorized, "AUTH_UNAUTHENTICATED",
+			"authentication required")
+		return
+	}
+	key, ok := creationKey(w, r)
+	if !ok {
+		return
+	}
+	if h.create == nil {
+		authhttp.WriteError(w, r, http.StatusServiceUnavailable, pullrequests.CodeUnavailable,
+			"pull requests unavailable")
+		return
+	}
+	var req createPullRequestRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+	if err := dec.Decode(&req); err != nil {
+		authhttp.WriteError(w, r, http.StatusBadRequest, pullrequests.CodeValidation,
+			"request body must be valid JSON")
+		return
+	}
+	pr, err := h.create.OpenExternalPR(r.Context(), actor.User, forks.OpenPRRequest{
+		ProjectID:      projectID,
+		SourceBranchID: req.SourceBranchID,
+		TargetBranchID: req.TargetBranchID,
+		Title:          req.Title,
+		Body:           req.Body,
+		CreationKey:    key,
+	})
+	if err != nil {
+		openError(w, r, err)
+		return
+	}
+	authhttp.WriteJSON(w, http.StatusCreated, prToPayload(pr))
+}
+
+// openError renders one proposal-opening outcome as the standard envelope
+// (docs/45: one outcome, one stable code, whichever layer reports it). The
+// codes are the shared strings of the packages the outcomes belong to, so
+// the same refusal carries the same name whether it came from this route or
+// from the review and merge routes downstream of it.
+func openError(w http.ResponseWriter, r *http.Request, err error) {
+	status, code, message := openErrorOutcome(err)
+	authhttp.WriteError(w, r, status, code, message)
+}
+
+func openErrorOutcome(err error) (status int, code, message string) {
+	switch {
+	case errors.Is(err, forks.ErrForbidden):
+		// The matrix refusal. A caller who may not propose here learns
+		// nothing about what exists: the same answer covers a project they
+		// may read but not propose to and one they may not read at all is
+		// answered below as project-not-found, which is the distinction
+		// docs/45 draws (an unreadable project's existence is not
+		// confirmed).
+		return http.StatusForbidden, codeForbidden, "you are not permitted to open a pull request in this project"
+	case errors.Is(err, forks.ErrProjectNotFound), errors.Is(err, projects.ErrProjectNotFound):
+		return http.StatusNotFound, projects.CodeProjectNotFound, "project not found"
+	case errors.Is(err, forks.ErrBranchNotFound), errors.Is(err, pullrequests.ErrBranchNotFound):
+		return http.StatusNotFound, pullrequests.CodeBranchNotFound, "branch not found in the project"
+	case errors.As(err, new(*pullrequests.BranchNotActiveError)):
+		// A closed research path (merged/aborted) accepts no proposal. The
+		// status matches the RSG write surface's answer for the same fact
+		// (rsghttp: branch lifecycle not active => 409).
+		return http.StatusConflict, pullrequests.CodeBranchNotActive, "branch lifecycle is not active"
+	case errors.Is(err, pullrequests.ErrBranchHeadMissing):
+		return http.StatusConflict, pullrequests.CodeBranchHeadMissing, "branch has no head state"
+	case errors.Is(err, forks.ErrValidation), errors.Is(err, pullrequests.ErrValidation):
+		return http.StatusBadRequest, pullrequests.CodeValidation, "validation failed"
+	default:
+		return http.StatusServiceUnavailable, pullrequests.CodeUnavailable, "pull requests unavailable"
+	}
 }
 
 // handleChecks: GET /api/v1/projects/{projectId}/pull-requests/{number}/checks

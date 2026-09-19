@@ -57,11 +57,11 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 const createPullRequest = `-- name: CreatePullRequest :one
 INSERT INTO pull_requests
     (project_id, number, source_branch_id, target_branch_id,
-     base_state_id, proposed_state_id, title, body, created_by)
+     base_state_id, proposed_state_id, title, body, created_by, creation_key)
 VALUES
     ($1, $2, $3, $4,
-     $5, $6, $7, $8, $9)
-RETURNING id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at
+     $5, $6, $7, $8, $9, $10)
+RETURNING id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at, creation_key
 `
 
 type CreatePullRequestParams struct {
@@ -74,8 +74,11 @@ type CreatePullRequestParams struct {
 	Title           string      `json:"title"`
 	Body            string      `json:"body"`
 	CreatedBy       pgtype.UUID `json:"created_by"`
+	CreationKey     string      `json:"creation_key"`
 }
 
+// creation_key is the creation request's Idempotency-Key (migration 00089):
+// empty when the caller sent none, and UNIQUE per project when it did not.
 func (q *Queries) CreatePullRequest(ctx context.Context, arg CreatePullRequestParams) (PullRequest, error) {
 	row := q.db.QueryRow(ctx, createPullRequest,
 		arg.ProjectID,
@@ -87,6 +90,7 @@ func (q *Queries) CreatePullRequest(ctx context.Context, arg CreatePullRequestPa
 		arg.Title,
 		arg.Body,
 		arg.CreatedBy,
+		arg.CreationKey,
 	)
 	var i PullRequest
 	err := row.Scan(
@@ -103,6 +107,7 @@ func (q *Queries) CreatePullRequest(ctx context.Context, arg CreatePullRequestPa
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.MergedAt,
+		&i.CreationKey,
 	)
 	return i, err
 }
@@ -198,8 +203,44 @@ func (q *Queries) GetIssueByProjectAndNumber(ctx context.Context, arg GetIssueBy
 	return i, err
 }
 
+const getPullRequestByCreationKey = `-- name: GetPullRequestByCreationKey :one
+SELECT id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at, creation_key FROM pull_requests
+WHERE project_id = $1 AND creation_key = $2 AND creation_key <> ''
+`
+
+type GetPullRequestByCreationKeyParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	CreationKey string      `json:"creation_key"`
+}
+
+// The creation replay read (T0410, migration 00089): the proposal a previous
+// request with this Idempotency-Key opened. Only a non-empty key names
+// anything — ” is "no key", shared by every key-less row, so it is excluded
+// here rather than left to the partial index.
+func (q *Queries) GetPullRequestByCreationKey(ctx context.Context, arg GetPullRequestByCreationKeyParams) (PullRequest, error) {
+	row := q.db.QueryRow(ctx, getPullRequestByCreationKey, arg.ProjectID, arg.CreationKey)
+	var i PullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Number,
+		&i.SourceBranchID,
+		&i.TargetBranchID,
+		&i.BaseStateID,
+		&i.ProposedStateID,
+		&i.Title,
+		&i.Body,
+		&i.State,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.MergedAt,
+		&i.CreationKey,
+	)
+	return i, err
+}
+
 const getPullRequestByProjectAndNumber = `-- name: GetPullRequestByProjectAndNumber :one
-SELECT id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at FROM pull_requests
+SELECT id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at, creation_key FROM pull_requests
 WHERE project_id = $1 AND number = $2
 `
 
@@ -225,12 +266,13 @@ func (q *Queries) GetPullRequestByProjectAndNumber(ctx context.Context, arg GetP
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.MergedAt,
+		&i.CreationKey,
 	)
 	return i, err
 }
 
 const getPullRequestByProjectAndNumberForUpdate = `-- name: GetPullRequestByProjectAndNumberForUpdate :one
-SELECT id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at FROM pull_requests
+SELECT id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at, creation_key FROM pull_requests
 WHERE project_id = $1 AND number = $2
 FOR UPDATE
 `
@@ -259,12 +301,13 @@ func (q *Queries) GetPullRequestByProjectAndNumberForUpdate(ctx context.Context,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.MergedAt,
+		&i.CreationKey,
 	)
 	return i, err
 }
 
 const listPullRequestsByProject = `-- name: ListPullRequestsByProject :many
-SELECT id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at FROM pull_requests
+SELECT id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at, creation_key FROM pull_requests
 WHERE project_id = $1
 ORDER BY number
 `
@@ -292,6 +335,7 @@ func (q *Queries) ListPullRequestsByProject(ctx context.Context, projectID pgtyp
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.MergedAt,
+			&i.CreationKey,
 		); err != nil {
 			return nil, err
 		}
@@ -353,7 +397,7 @@ const refreshPullRequestProposedState = `-- name: RefreshPullRequestProposedStat
 UPDATE pull_requests
 SET proposed_state_id = $1
 WHERE project_id = $2 AND number = $3
-RETURNING id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at
+RETURNING id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at, creation_key
 `
 
 type RefreshPullRequestProposedStateParams struct {
@@ -384,6 +428,7 @@ func (q *Queries) RefreshPullRequestProposedState(ctx context.Context, arg Refre
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.MergedAt,
+		&i.CreationKey,
 	)
 	return i, err
 }
@@ -393,7 +438,7 @@ UPDATE pull_requests
 SET state = $1,
     merged_at = CASE WHEN $1 = 'merged' THEN now() ELSE NULL END
 WHERE project_id = $2 AND number = $3 AND state = $4
-RETURNING id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at
+RETURNING id, project_id, number, source_branch_id, target_branch_id, base_state_id, proposed_state_id, title, body, state, created_by, created_at, merged_at, creation_key
 `
 
 type SetPullRequestStateParams struct {
@@ -431,6 +476,7 @@ func (q *Queries) SetPullRequestState(ctx context.Context, arg SetPullRequestSta
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.MergedAt,
+		&i.CreationKey,
 	)
 	return i, err
 }

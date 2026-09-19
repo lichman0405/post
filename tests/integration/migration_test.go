@@ -433,7 +433,12 @@ var canonicalTables = map[string]tableExp{
 		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
 	},
 	"pull_requests": {
-		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("number", i8, false, false), c("source_branch_id", u, false, false), c("target_branch_id", u, false, false), c("base_state_id", u, false, false), c("proposed_state_id", u, false, false), c("title", txt, false, false), c("body", txt, false, true), c("state", txt, false, true), c("created_by", u, false, false), c("created_at", ts, false, true), c("merged_at", ts, true, false)},
+		// T0410 (00089): creation_key carries the contract-mandated
+		// Idempotency-Key of the open-pull-request route, defaulting to
+		// '' for a creation that sends none; its uniqueness is the
+		// partial index below, not a constraint (absent keys must not
+		// collide with each other).
+		cols:    []colExp{c("id", u, false, true), c("project_id", u, false, false), c("number", i8, false, false), c("source_branch_id", u, false, false), c("target_branch_id", u, false, false), c("base_state_id", u, false, false), c("proposed_state_id", u, false, false), c("title", txt, false, false), c("body", txt, false, true), c("state", txt, false, true), c("created_by", u, false, false), c("created_at", ts, false, true), c("merged_at", ts, true, false), c("creation_key", txt, false, true)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"project_id", "number"}},
 		// The state CHECK is the T0402 addition (00051): the canonical
@@ -1216,6 +1221,12 @@ var explicitIndexes = map[string][]string{
 	// T0804 (00086): the parent side of the fork lineage read — a parent
 	// project's forks, newest first.
 	"project_forks_parent_idx": {"parent_project_id", "created_at DESC"},
+	// T0410 (00089): the Idempotency-Key of the open-pull-request route.
+	// PARTIAL on creation_key <> '' because '' is the absent key (every
+	// pre-00089 row and every creation that sends none) and those must
+	// not collide; the index is what makes a repeated creation return the
+	// first proposal rather than opening a second.
+	"pull_requests_creation_key_idx": {"project_id", "creation_key", "WHERE", "UNIQUE"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded

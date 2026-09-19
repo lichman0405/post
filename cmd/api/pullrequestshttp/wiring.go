@@ -9,6 +9,12 @@ type Deps struct {
 	// PullRequests serves the list and detail endpoints (the pullrequests
 	// application service).
 	PullRequests PullRequests
+	// Create serves the open-pull-request endpoint (the forks application
+	// service, whose OpenExternalPR resolves the open_pr matrix cell and
+	// proposes through the same pull-request path as an internal PR).
+	// REQUIRED: without it the create route fails closed (503) rather than
+	// opening proposals with no authorization at all.
+	Create PRCreator
 	// Checks serves the checks endpoint (the prchecks application
 	// service).
 	Checks CheckRunner
@@ -24,6 +30,7 @@ type Deps struct {
 func New(deps Deps) *API {
 	return &API{handlers: &handlers{
 		prs:      deps.PullRequests,
+		create:   deps.Create,
 		checks:   deps.Checks,
 		diff:     deps.Diff,
 		projects: deps.Projects,
@@ -35,13 +42,22 @@ type API struct {
 	handlers *handlers
 }
 
-// Register mounts the four read endpoints. The sub-resource routes
-// register before the {number} detail route: ServeMux matches the most
-// specific pattern, but the explicit order documents the intent —
-// "/checks" and "/diff" are never consumed as a {number} (which they
-// could not parse anyway).
+// Register mounts the collection's read endpoint, the open-pull-request
+// write, and the per-PR reads. The sub-resource routes register before the
+// {number} detail route: ServeMux matches the most specific pattern, but
+// the explicit order documents the intent — "/checks" and "/diff" are never
+// consumed as a {number} (which they could not parse anyway).
+//
+// The POST is the collection's second verb and the only write on this
+// surface (specs/api/openapi.yaml, "Open pull request with RSG diff"). It
+// coexists with the merge surface's remainder route
+// (cmd/api/mergehttp: POST /api/v1/projects/{projectId}/pull-requests/
+// {number...}) because that pattern requires at least one more segment,
+// while this one stops at the collection — ServeMux picks the more specific
+// pattern for a longer path and this one for the bare collection.
 func (a *API) Register(v1 *http.ServeMux) {
 	v1.HandleFunc("GET /api/v1/projects/{projectId}/pull-requests", a.handlers.handleList)
+	v1.HandleFunc("POST /api/v1/projects/{projectId}/pull-requests", a.handlers.handleCreate)
 	v1.HandleFunc("GET /api/v1/projects/{projectId}/pull-requests/{number}/checks", a.handlers.handleChecks)
 	v1.HandleFunc("GET /api/v1/projects/{projectId}/pull-requests/{number}/diff", a.handlers.handleDiff)
 	v1.HandleFunc("GET /api/v1/projects/{projectId}/pull-requests/{number}", a.handlers.handleGet)

@@ -82,6 +82,30 @@ func (s *PullRequestStore) CreatePullRequest(ctx context.Context, in pullrequest
 			}
 			return err
 		}
+		// The creation replay (T0410, migration 00089): a request that
+		// repeats an Idempotency-Key gets the proposal the first request
+		// opened, and nothing is written a second time. The read is INSIDE
+		// this transaction and after the project row lock, so two
+		// concurrent repeats of one key cannot both miss it: the second
+		// waits on the lock, then reads the row the first committed. An
+		// empty key names nothing (it is the shared "no key" value) and is
+		// answered by the query's own `creation_key <> ''`, not by a
+		// check here that a later edit could drop.
+		if in.CreationKey != "" {
+			replayed, err := q.GetPullRequestByCreationKey(ctx, sqlc.GetPullRequestByCreationKeyParams{
+				ProjectID:   projectID,
+				CreationKey: in.CreationKey,
+			})
+			switch {
+			case err == nil:
+				created = pullRequestFromRow(replayed)
+				return nil
+			case errors.Is(err, pgx.ErrNoRows), isInvalidText(err):
+				// No proposal carries this key yet: open one.
+			default:
+				return err
+			}
+		}
 		// The source branch is read WITHOUT the project scope: an external
 		// proposal's source branch lives in the contributor's own fork
 		// project (docs/04 §2), which is a different project from the one
@@ -172,6 +196,7 @@ func (s *PullRequestStore) CreatePullRequest(ctx context.Context, in pullrequest
 			Title:           in.Title,
 			Body:            in.Body,
 			CreatedBy:       createdBy,
+			CreationKey:     in.CreationKey,
 		})
 		if err != nil {
 			return mapPullRequestWriteError(err)

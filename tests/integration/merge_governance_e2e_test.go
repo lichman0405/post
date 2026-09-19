@@ -3,6 +3,7 @@ package integration
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,15 +17,21 @@ import (
 	"github.com/lichman0405/post/cmd/api/mergehttp"
 	"github.com/lichman0405/post/cmd/api/policyhttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
+	"github.com/lichman0405/post/cmd/api/pullrequestshttp"
+	"github.com/lichman0405/post/cmd/api/reviewhttp"
 
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
 	"github.com/lichman0405/post/internal/application/diffs"
+	"github.com/lichman0405/post/internal/application/forks"
 	"github.com/lichman0405/post/internal/application/merge"
 	"github.com/lichman0405/post/internal/application/policy"
 	"github.com/lichman0405/post/internal/application/prchecks"
+	"github.com/lichman0405/post/internal/application/prdiff"
 	"github.com/lichman0405/post/internal/application/pullrequests"
 	"github.com/lichman0405/post/internal/application/resolutions"
+	"github.com/lichman0405/post/internal/application/responsibilities"
+	"github.com/lichman0405/post/internal/application/reviews"
 	"github.com/lichman0405/post/internal/application/rsg"
 	"github.com/lichman0405/post/internal/application/states"
 	"github.com/lichman0405/post/internal/authz"
@@ -265,6 +272,39 @@ func TestMergeGovernanceEndToEnd(t *testing.T) {
 	})
 	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool))
 	resolutionSvc := resolutions.NewService(diffSvc, resolutions.NewPGStore(pool), projectSvc, authz.NewMatrixEngine())
+	// The proposal's two write surfaces, wired as cmd/api wires them (T0410):
+	// the open-pull-request route's command is the forks service (it resolves
+	// the open_pr cell against the real membership), and the review
+	// submissions run through the responsibilities stack, so the proposal
+	// below reaches merge_ready the way a real one does rather than by a
+	// state assignment this test performs.
+	prStore := persistence.NewPullRequestStore(pool)
+	prSvc := pullrequests.NewService(prStore)
+	forksSvc := forks.NewService(forks.Deps{
+		Projects:     projectSvc,
+		Branches:     branches.NewService(branchStore),
+		BranchWriter: rsgSvc,
+		Forks:        persistence.NewForkStore(pool),
+		PullRequests: prSvc,
+		Authz:        authz.NewMatrixEngine(),
+	})
+	routingSvc := responsibilities.NewService(responsibilities.Deps{
+		Rules:     persistence.NewResponsibilityStore(pool),
+		Projects:  projectStore,
+		Members:   projectSvc,
+		PRs:       prStore,
+		Branches:  branchStore,
+		Diffs:     prdiff.NewService(prStore, branchStore, diffSvc),
+		Policies:  policyStore,
+		Evaluator: policy.NewRuleEvaluator(),
+	})
+	reviewsSvc := reviews.NewService(reviews.Deps{
+		Repo:           persistence.NewReviewStore(pool),
+		Projects:       projectSvc,
+		Authz:          authz.NewMatrixEngine(),
+		Responsibility: routingSvc,
+		Routing:        routingSvc,
+	})
 	// The merge command, wired exactly as cmd/api wires it: the Git port is the
 	// real bridge over the real adapter, and the ref guard accepts the identity
 	// the provider's own merge whitelist names.
@@ -320,6 +360,12 @@ func TestMergeGovernanceEndToEnd(t *testing.T) {
 	authAPI.Register(apiMux)
 	apiMux.Handle("/api/v1/projects", projectAPI.Routes())
 	apiMux.Handle("/api/v1/projects/", projectAPI.Routes())
+	pullrequestshttp.New(pullrequestshttp.Deps{
+		PullRequests: prSvc,
+		Create:       forksSvc,
+		Projects:     projectSvc,
+	}).Register(apiMux)
+	reviewhttp.New(reviewhttp.Deps{Service: reviewsSvc, Projects: projectSvc}).Register(apiMux)
 	mergeAPI := mergehttp.New(mergehttp.Deps{Command: mergeSvc, Projects: projectSvc})
 	mergeAPI.Register(apiMux)
 	ts := httptest.NewServer(authAPI.Guard(apiMux))
@@ -331,6 +377,13 @@ func TestMergeGovernanceEndToEnd(t *testing.T) {
 	// possible (or wanted) — the principal the handler reads is the guard's.
 	uc, aliceID := signup(t, ts.URL, "merge-gov@example.com", "merge-gov")
 	alice := domain.User{ID: aliceID}
+	// The two reviewers the proposal's routing needs: a maintainer who may
+	// approve without a condition and a viewer whose approval is conditional
+	// on the responsibility label. Both sign up through the same endpoint.
+	maintainerC, maintainerID := signup(t, ts.URL, "merge-gov-reviewer@example.com", "merge-gov-reviewer")
+	viewerC, viewerID := signup(t, ts.URL, "merge-gov-observer@example.com", "merge-gov-observer")
+	maintainer := domain.User{ID: maintainerID}
+	viewer := domain.User{ID: viewerID}
 
 	// ---- The project, provisioned for real: repository, bootstrap main,
 	// webhook and T0302's protection rule, all applied by the production
@@ -370,6 +423,32 @@ func TestMergeGovernanceEndToEnd(t *testing.T) {
 	}
 	if !prot.Canonical([]string{owner}) {
 		t.Fatalf("gitea integration: main protection = %+v, want the canonical rule for %s", prot, owner)
+	}
+
+	// The reviewers' memberships and the project's routing rule: the one
+	// responsibility the claim change is routed to, held by both reviewers so
+	// the recorded label is exactly the one the routing asked for. This is
+	// fixture data (no route adds a member or writes a Research Owners rule in
+	// this build); the reviews themselves are HTTP submissions.
+	for _, m := range []struct {
+		user domain.User
+		role domain.ProjectRole
+	}{{maintainer, domain.ProjectRoleMaintainer}, {viewer, domain.ProjectRoleViewer}} {
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO project_memberships (project_id, user_id, role) VALUES ($1, $2, $3)`,
+			project.ID, m.user.ID, m.role); err != nil {
+			t.Fatalf("seed the %s membership: %v", m.role, err)
+		}
+		if _, err := routingSvc.Assign(ctx, alice, project.ID, m.user.ID, "Data Reviewer"); err != nil {
+			t.Fatalf("assign the responsibility label: %v", err)
+		}
+	}
+	if _, err := routingSvc.AddRule(ctx, alice, project.ID, responsibilities.AddRuleInput{
+		MatchKind:      domain.ResearchOwnerMatchObjectType,
+		MatchValue:     "claim",
+		Responsibility: "Data Reviewer",
+	}); err != nil {
+		t.Fatalf("route claim changes to a reviewer: %v", err)
 	}
 
 	mainBranch, err := rsgSvc.CreateBranch(ctx, alice, project.ID, rsg.CreateBranchInput{
@@ -418,29 +497,83 @@ func TestMergeGovernanceEndToEnd(t *testing.T) {
 		t.Fatalf("create the research claim: %v", err)
 	}
 
-	// ---- The proposal, driven through the real review machine to merge_ready.
-	// docs/43's later transitions have no HTTP route in this build (T0408 owns
-	// the UI), so the service is called directly; the state machine, its
-	// preconditions and its rows are the production ones.
-	prSvc := pullrequests.NewService(persistence.NewPullRequestStore(pool))
-	pr, err := prSvc.Create(ctx, pullrequests.CreatePullRequestParams{
-		ProjectID:      project.ID,
-		SourceBranchID: researchBranch.ID,
-		TargetBranchID: mainBranch.ID,
-		Title:          "governed merge",
-		CreatedBy:      alice.ID,
-	})
+	// ---- The proposal: opened by the contract's own route (T0410 added it,
+	// specs/api/openapi.yaml "Open pull request with RSG diff"), then driven
+	// through the real review machine to merge_ready.
+	//
+	// The state walk is NOT performed by this test any more. It used to be two
+	// SetState calls (review_required -> approved -> merge_ready) that wrote
+	// the states a merge needs without anything having approved the proposal —
+	// the merge assertions below were satisfied by a proposal that no review
+	// had ever looked at. The transitions now happen where production performs
+	// them: the open route creates the proposal, and the satisfaction of the
+	// required-review calculation inside a review submission walks it to
+	// merge_ready. The only direct call left is RequestReview, because docs/43's
+	// open -> review_required transition has no route in this build (no contract
+	// operation, no request_review cell in specs/policies/permissions-matrix.csv
+	// — inventing one would be inventing a product action).
+	openBody := `{"source_branch_id":"` + researchBranch.ID + `","target_branch_id":"` + mainBranch.ID + `","title":"governed merge","body":"T0409 merge governance"}`
+	openResp := uc.doKeyed(t, http.MethodPost, "/api/v1/projects/"+project.ID+"/pull-requests", openBody, "merge-gov-open-00000001")
+	if openResp.StatusCode != http.StatusCreated {
+		t.Fatalf("open the pull request = %d: %s", openResp.StatusCode, readAll(t, openResp))
+	}
+	var pr domain.PullRequest
+	var opened struct {
+		Number int64  `json:"number"`
+		State  string `json:"state"`
+	}
+	if err := json.NewDecoder(openResp.Body).Decode(&opened); err != nil {
+		t.Fatalf("decode the opened pull request: %v", err)
+	}
+	if opened.State != string(domain.PullRequestStateOpen) {
+		t.Fatalf("the opened pull request is %q, want %q", opened.State, domain.PullRequestStateOpen)
+	}
+	pr, err = prSvc.Get(ctx, project.ID, opened.Number)
 	if err != nil {
-		t.Fatalf("create the pull request: %v", err)
+		t.Fatalf("read the opened pull request: %v", err)
 	}
 	if _, err := prSvc.RequestReview(ctx, project.ID, pr.Number); err != nil {
 		t.Fatalf("request review: %v", err)
 	}
-	if _, err := prSvc.SetState(ctx, project.ID, pr.Number, domain.PullRequestStateApproved); err != nil {
-		t.Fatalf("approve the pull request: %v", err)
+	// The two required dimensions, submitted over the review route: the
+	// scientific judgment of the subject the rule routed, and the
+	// whole-proposal integrity judgment. The second submission is the one that
+	// satisfies the calculation, and the store's own projection performs the
+	// review_required -> approved -> merge_ready walk inside it.
+	for _, submission := range []struct {
+		client *testUserClient
+		kind   string
+	}{
+		{viewerC, "scientific"},
+		{maintainerC, "integrity"},
+	} {
+		body := fmt.Sprintf(`{"kind":%q,"decision":"approved","body":"reviewed for the merge governance e2e"}`, submission.kind)
+		resp := submission.client.do(t, http.MethodPost,
+			fmt.Sprintf("/api/v1/projects/%s/pull-requests/%d/reviews", project.ID, pr.Number), body)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("submit the %s review = %d: %s", submission.kind, resp.StatusCode, readAll(t, resp))
+		}
 	}
-	if _, err := prSvc.SetState(ctx, project.ID, pr.Number, domain.PullRequestStateMergeReady); err != nil {
-		t.Fatalf("mark the pull request merge_ready: %v", err)
+	pr, err = prSvc.Get(ctx, project.ID, pr.Number)
+	if err != nil {
+		t.Fatalf("read the pull request after the reviews: %v", err)
+	}
+	if pr.State != domain.PullRequestStateMergeReady {
+		t.Fatalf("the reviewed pull request is %q, want %q: the review submissions did not walk the machine",
+			pr.State, domain.PullRequestStateMergeReady)
+	}
+	// The walk is a fact of the record, not of the row: the submission that
+	// satisfied the calculation wrote the governance audit row naming the state
+	// it moved to. A SetState shortcut writes no such row.
+	var completed int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM audit_log
+		 WHERE action = $1 AND after_summary->>'pull_request_number' = $2`,
+		domain.ActionPullRequestReviewCompleted, fmt.Sprint(pr.Number)).Scan(&completed); err != nil {
+		t.Fatalf("count the review-completed audit rows: %v", err)
+	}
+	if completed != 1 {
+		t.Fatalf("review-completed audit rows = %d, want exactly one advance", completed)
 	}
 
 	// ---- The governance policy in force: main_protected true, on the

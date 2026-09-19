@@ -284,6 +284,8 @@ type PullRequest struct {
 	CreatedBy       pgtype.UUID        `json:"created_by"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	MergedAt        pgtype.Timestamptz `json:"merged_at"`
+	// The Idempotency-Key the creation request carried (specs/api/openapi.yaml components.parameters.IdempotencyKey); empty when the request sent none. UNIQUE per project among non-empty keys: a repeated request returns the proposal the first one opened instead of opening a second.
+	CreationKey string `json:"creation_key"`
 }
 
 type Relation struct {

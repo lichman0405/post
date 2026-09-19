@@ -79,6 +79,7 @@ import (
 	appcontribution "github.com/lichman0405/post/internal/application/contribution"
 	"github.com/lichman0405/post/internal/application/diffs"
 	"github.com/lichman0405/post/internal/application/feeds"
+	"github.com/lichman0405/post/internal/application/forks"
 	"github.com/lichman0405/post/internal/application/knowledgepublish"
 	"github.com/lichman0405/post/internal/application/mainfreeze"
 	"github.com/lichman0405/post/internal/application/manifests"
@@ -226,6 +227,17 @@ func run(args []string) int {
 	var (
 		mergeAdapter *gitprovider.GiteaAdapter
 		mergeLogin   string
+		// The external-contribution path's provider halves (T0410): the
+		// provisioner that makes the fork project's repository exist, and the
+		// importer that copies the parent's commit into it. Carried out of
+		// this block for the same reason as the merge adapter — they come
+		// from the provisioning configuration — because the fork service is
+		// assembled later, with the other application services. Both stay nil
+		// without provisioning, exactly like reconcilerPort below: there is
+		// no provider to call, and the one route that would use them (the
+		// external fork) does not exist in this build.
+		forkProvisioner forks.RepoProvisioner
+		forkImporter    forks.ContentImporter
 	)
 	if gitCfg.ProvisioningEnabled() {
 		provisioningStore := gitprovider.NewProvisionStore(pool)
@@ -278,6 +290,12 @@ func run(args []string) int {
 		pushIngester := gitprovider.NewPushIngester(giteaAdapter, ingestStore, reg)
 		mux.Handle("POST /api/v1/git/hooks/gitea",
 			gitprovider.NewPushWebhookHandler(pushIngester, ingestStore))
+		// The fork halves (T0410). The importer takes the SAME ingester the
+		// webhook is served by, on purpose: the copy the fork lands is
+		// inspected by the one push-inspection implementation (T0305), so
+		// the fork's branch is judged by the same rules as any other push.
+		forkProvisioner = provisioner
+		forkImporter = gitprovider.NewForkImporter(giteaAdapter, gitprovider.NewForkImportStore(pool), pushIngester)
 		go func() {
 			if err := provisioningLoop.Run(ctx); err != nil {
 				slog.Error("post-api: provisioning loop failed", "error", err)
@@ -502,24 +520,6 @@ func run(args []string) int {
 		Policies: persistence.NewPolicyStore(pool),
 		Engine:   integrity.New(reg),
 	})
-	pullrequestsAPI := pullrequestshttp.New(pullrequestshttp.Deps{
-		PullRequests: pullrequests.NewService(persistence.NewPullRequestStore(pool)),
-		Checks:       checksSvc,
-		// The PR's Research State Diff (T0408): the PR's own fixed base,
-		// its proposed head and the target branch's current head, computed
-		// by the T0401 engine. The base is never re-derived from the target
-		// — it does not drift as main advances.
-		Diff: prdiff.NewService(
-			persistence.NewPullRequestStore(pool),
-			persistence.NewBranchStore(pool),
-			diffSvc,
-		),
-		// PRs and their check reports are exactly as visible as their
-		// project: the same project-read gate every other project read
-		// runs (T0106 read matrix).
-		Projects: projectAPI.Service(),
-	})
-	pullrequestsAPI.Register(v1)
 	// Project schema profiles (T0213): namespaced, versioned JSON Schema
 	// extensions of the official base schemas. The persisted profile rows
 	// are re-registered into the runtime registry at startup (LoadAll) —
@@ -553,9 +553,10 @@ func run(args []string) int {
 	// instance, so a transition cannot be validated one way here and another
 	// way there.
 	stateSvc := states.NewService(stateStore, appvalidation.NewGuard(rsgvalidation.NewValidator(reg), persistence.NewValidationTxProbe()))
+	branchSvc := branches.NewService(persistence.NewBranchStore(pool))
 	rsgSvc := rsg.NewService(rsg.Deps{
 		Projects:       projectAPI.Service(),
-		Branches:       branches.NewService(persistence.NewBranchStore(pool)),
+		Branches:       branchSvc,
 		States:         stateSvc,
 		Latest:         stateStore,
 		Objects:        persistence.NewScientificObjectStore(pool),
@@ -580,6 +581,59 @@ func run(args []string) int {
 	})
 	rsgAPI := rsghttp.New(rsghttp.Deps{Service: rsgSvc})
 	rsgAPI.Register(v1)
+	// Pull requests (T0402, T0408; the open route is T0410). One command
+	// instance serves the reads and the open: `Create` is the same
+	// pullrequests.Service the list and detail endpoints read through, so a
+	// proposal opened over the route and one read back from the list are the
+	// same rows through the same adapter.
+	//
+	// The open route's command is the external-contribution service
+	// (T0804/T0410). Opening a pull request is its own governance action —
+	// specs/policies/permissions-matrix.csv gives it its own cell
+	// (`open_pr`: deny / allow_from_fork / deny / allow / allow / allow /
+	// allow) — and that service is the one place the cell is resolved
+	// against a real project, a real membership and, for a non-member, the
+	// fork lineage. It proposes through the very same pull-request command
+	// below, so an external contribution is an ordinary proposal
+	// (specs/api/openapi.yaml: "Open pull request with RSG diff").
+	//
+	// Assembled HERE, after the RSG service, because the fork command
+	// creates the fork's branch through the canonical RSG service — the fork
+	// branch is an ordinary branch with an ordinary genesis state. The two
+	// provider ports (Repos, Imports) are the ones carried out of the
+	// provisioning block above and are nil without provisioning, exactly like
+	// every other provider dependency: the only method that reaches them is
+	// Fork, and this build has no fork route.
+	prSvc := pullrequests.NewService(persistence.NewPullRequestStore(pool))
+	forksSvc := forks.NewService(forks.Deps{
+		Projects:     projectAPI.Service(),
+		Branches:     branchSvc,
+		BranchWriter: rsgSvc,
+		Forks:        persistence.NewForkStore(pool),
+		Repos:        forkProvisioner,
+		Imports:      forkImporter,
+		PullRequests: prSvc,
+		Authz:        authz.NewMatrixEngine(),
+	})
+	pullrequestsAPI := pullrequestshttp.New(pullrequestshttp.Deps{
+		PullRequests: prSvc,
+		Create:       forksSvc,
+		Checks:       checksSvc,
+		// The PR's Research State Diff (T0408): the PR's own fixed base,
+		// its proposed head and the target branch's current head, computed
+		// by the T0401 engine. The base is never re-derived from the target
+		// — it does not drift as main advances.
+		Diff: prdiff.NewService(
+			persistence.NewPullRequestStore(pool),
+			persistence.NewBranchStore(pool),
+			diffSvc,
+		),
+		// PRs and their check reports are exactly as visible as their
+		// project: the same project-read gate every other project read
+		// runs (T0106 read matrix).
+		Projects: projectAPI.Service(),
+	})
+	pullrequestsAPI.Register(v1)
 	// Provenance graph projection (T0505): read-only graph + lineage
 	// routes over the rebuildable provenance_edges projection (migration
 	// 00043). Reads run the same project visibility gate as every other

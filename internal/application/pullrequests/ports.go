@@ -75,4 +75,21 @@ type CreatePullRequestParams struct {
 	// CreatedBy names the user opening the PR (the consuming API task
 	// passes a resolved identity).
 	CreatedBy string
+	// CreationKey is the creation request's Idempotency-Key
+	// (specs/api/openapi.yaml, components.parameters.IdempotencyKey).
+	// Empty means the caller sent none. When set, it is unique per
+	// project: a repeated request returns the proposal the first one
+	// opened instead of opening a second (migration 00089). A non-empty
+	// key must be at least MinCreationKeyLen characters — the contract's
+	// own minLength, enforced here so no write path can store a key too
+	// short to be a deliberate token.
+	CreationKey string
 }
+
+// MinCreationKeyLen is the Idempotency-Key's minimum length on the
+// pull-request creation route (specs/api/openapi.yaml,
+// components.parameters.IdempotencyKey: minLength 8). It lives with the
+// command the way mainfreeze.MinIdempotencyKeyLen lives with the freeze:
+// the transport reads the bound from the same place the domain enforces
+// it, so the two cannot drift.
+const MinCreationKeyLen = 8
