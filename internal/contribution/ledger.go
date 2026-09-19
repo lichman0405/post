@@ -83,7 +83,38 @@ const (
 	RefAssetVersion LedgerRefKind = "asset_version"
 	// RefKnowledgePublication names a published knowledge object version.
 	RefKnowledgePublication LedgerRefKind = "knowledge_publication"
+	// RefCreditDispute names a credit dispute (credit_disputes.id), the
+	// row docs/13 §3's open/resolve pair is about. It is a ref kind of its
+	// own rather than a reuse of the "asset"/"release"/"finding" kinds a
+	// credit declaration's target_ref carries: a dispute is an entity with
+	// an identity, and a ledger row that pointed at the target only would
+	// say a credit was disputed without saying by which dispute.
+	RefCreditDispute LedgerRefKind = "credit_dispute"
 )
+
+// ledgerRefKinds is every kind above, in declaration order. It exists so a
+// reader can ask whether a ref kind is one this projection produces
+// (ValidLedgerRefKind) without restating the list — the same shape
+// creditRoles has for the credit vocabulary, and for the same reason: one
+// definition, checkable in one place.
+var ledgerRefKinds = []LedgerRefKind{
+	RefObject, RefObjectVersion, RefState, RefPullRequest, RefMerge, RefRelease,
+	RefAsset, RefAssetVersion, RefKnowledgePublication, RefCreditDispute,
+}
+
+// ValidLedgerRefKind reports whether k is a ref kind this projection
+// produces. A "kind:value" text whose kind is not one of these is not a
+// ledger ref, whatever it looks like — which is what
+// internal/application/credit checks a dispute's evidence refs against
+// before it records them.
+func ValidLedgerRefKind(k LedgerRefKind) bool {
+	for _, v := range ledgerRefKinds {
+		if v == k {
+			return true
+		}
+	}
+	return false
+}
 
 // LedgerRef is one canonical "kind:value" reference in a ledger row's
 // object_refs.
@@ -330,15 +361,24 @@ var ledgerMappings = []LedgerMapping{
 	},
 	{
 		EventType: "credit.dispute_opened",
+		Refs:      []LedgerRefSpec{{Kind: RefCreditDispute, PayloadKey: "dispute_id"}},
 		Why: "docs/13 §3: the dispute is part of the record ('旧 attribution 和 dispute history 保留') " +
 			"and docs/13 §2 makes corrections new events rather than edits. Recording the dispute " +
 			"as an append-only fact is what keeps that history readable; the ledger makes no " +
 			"reputation claim about it (docs/13 §3: a dispute does not enter the public reputation " +
-			"until resolution), and no role or context flag is set. No producer exists yet.",
+			"until resolution), and no role or context flag is set. The producer is the credit " +
+			"dispute command (internal/application/credit; recorded by " +
+			"internal/persistence/credit_store.go when a dispute row is written), whose payload " +
+			"carries dispute_id, the target ref and the ledger evidence the claim points at.",
 	},
 	{
 		EventType: "credit.dispute_resolved",
-		Why:       "the resolution half of the same record (docs/13 §3). No producer exists yet.",
+		Refs:      []LedgerRefSpec{{Kind: RefCreditDispute, PayloadKey: "dispute_id"}},
+		Why: "the resolution half of the same record (docs/13 §3): one row per dispute closed, " +
+			"produced by the same command as the opening and by the same store, in the " +
+			"transaction that closes the credit_disputes row. The row's actor is the maintainer " +
+			"who decided, and the outcome (resolved or rejected) travels in the payload beside " +
+			"the dispute's id, so the two halves of one dispute join on the same ref.",
 	},
 }
 
