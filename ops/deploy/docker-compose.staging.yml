@@ -1,0 +1,470 @@
+# =============================================================================
+# POST staging deployment — Docker Compose template (T1203)
+# =============================================================================
+#
+# This is NOT the local development stack. The repository root's
+# docker-compose.yml says of itself, verbatim: "This is a LOCAL DEV stack
+# only" — infrastructure in containers, applications host-native, every port
+# bound to 127.0.0.1, every credential a dev-only default. This file is the
+# other end of that axis: every application in a container, exactly one
+# surface published to the network (a TLS reverse proxy), every credential
+# injected from an uncommitted env file, and a healthcheck behind every
+# claim that something is up.
+#
+# Ordering, rollback and secrets follow the specifications rather than this
+# file's taste:
+#   docs/35_DEPLOYMENT_RUNBOOK.md:9-10  migrations job, then API/worker/MCP,
+#                                       then Web
+#   docs/35_DEPLOYMENT_RUNBOOK.md:17    the application rolls back to the
+#                                       previous image; the database only
+#                                       moves forward
+#   docs/25_CICD_DEVOPS.md:32           every container uses an immutable
+#                                       digest; production deploy runs a
+#                                       staging smoke + migration check +
+#                                       backup checkpoint first
+#
+# WHAT THIS FILE CANNOT DO TODAY: it cannot deploy anything. There is no
+# Dockerfile anywhere in this repository (`find . -iname 'Dockerfile*'` is
+# empty), so none of the six application images below exist. Every one of
+# them is therefore a REQUIRED variable — the `${VAR:?reason}` form refuses
+# an empty value, so a stack configured with no real digests fails closed at
+# interpretation time instead of quietly pulling something mutable. Read
+# README.md § "What is missing" before telling anyone staging is deployable:
+# it names what is absent and who owns it.
+#
+# Usage (from the repository root):
+#   cp ops/deploy/staging.env.example ops/deploy/.env   # then fill it in
+#   docker compose -f ops/deploy/docker-compose.staging.yml config   # parse only
+#   docker compose -f ops/deploy/docker-compose.staging.yml up -d --wait
+# `ops/deploy/.env` is the file Compose reads for the ${...} substitutions
+# below (project directory = this file's directory). It is covered by the
+# repository .gitignore (`.env`, `.env.*`) and must never be committed —
+# staging.env.example carries placeholders only.
+
+name: ${POST_STAGING_PROJECT:-post-staging}
+
+# -----------------------------------------------------------------------------
+# Healthcheck waivers — "have one, or write down why not"
+# -----------------------------------------------------------------------------
+# Every long-running service below either defines a healthcheck or appears
+# here with a reason. A service that does neither is a finding reported by
+# ops/deploy/validate-staging-compose.py (run by
+# tests/acceptance/deploy-staging-smoke.sh): an omitted healthcheck has to be
+# a decision somebody wrote down, never an oversight. A stale waiver — one
+# naming a service that now has a healthcheck — is a finding too.
+#
+# worker: no check exists that would say anything true. cmd/worker/main.go
+# runs six goroutines over Redis and PostgreSQL and exposes no listener: no
+# /healthz, no /readyz, and no heartbeat key in Redis (the only key it writes
+# is the per-job idempotency marker, which a wedged worker stops writing —
+# but a worker with an empty queue never writes one either, so it cannot
+# distinguish "idle" from "dead"). The one check available without changing
+# the binary is "the process exists", which answers healthy while every
+# consumer goroutine is stuck in a retry loop — exactly the false green the
+# rest of this codebase refuses (/healthz is liveness-only and /readyz
+# reports the dependency truth; cmd/api/main.go:8-11). Until the worker grows
+# a health surface, `restart: unless-stopped` plus the runbook's
+# enqueue-and-complete smoke step is what covers it, and that limitation is
+# named rather than papered over with `pgrep`.
+x-post-healthcheck-waivers:
+  worker: >-
+    cmd/worker has no HTTP surface and no heartbeat key; a process-liveness
+    check would report healthy with every consumer goroutine wedged in a
+    retry loop. Covered by the restart policy and the runbook's queue smoke
+    step instead. See README.md § "Healthchecks".
+
+# -----------------------------------------------------------------------------
+# Shared application environment
+# -----------------------------------------------------------------------------
+# The Go core (internal/config) validates this exact surface at startup and
+# refuses to boot without it: POST_ENV selects the layer, the four required
+# values (POST_DB_PASSWORD, POST_DB_SSLMODE, POST_BLOB_ACCESS_KEY,
+# POST_BLOB_SECRET_KEY, POST_GITEA_TOKEN) have no default in any layer, and
+# POST_ENV=prod is the layer this stack runs (.env.example, internal/config
+# fieldSpecs). `prod` here means "the production configuration layer", not
+# "the production environment": staging deploys the same layer production
+# does, which is the point of staging.
+x-post-app-env: &post-app-env
+  POST_ENV: prod
+  POST_DB_HOST: "${POST_DB_HOST:?set POST_DB_HOST (bundled infra: postgres)}"
+  POST_DB_PORT: "${POST_DB_PORT:?set POST_DB_PORT (bundled infra: 5432)}"
+  POST_DB_USER: "${POST_DB_USER:?set POST_DB_USER}"
+  POST_DB_PASSWORD: "${POST_DB_PASSWORD:?set POST_DB_PASSWORD — never a dev value}"
+  POST_DB_NAME: "${POST_DB_NAME:?set POST_DB_NAME}"
+  POST_DB_SSLMODE: "${POST_DB_SSLMODE:?set POST_DB_SSLMODE (verify-full against a managed database)}"
+  POST_REDIS_ADDR: "${POST_REDIS_ADDR:?set POST_REDIS_ADDR (host:port)}"
+  POST_BLOB_ENDPOINT: "${POST_BLOB_ENDPOINT:?set POST_BLOB_ENDPOINT (http(s) URL)}"
+  POST_BLOB_ACCESS_KEY: "${POST_BLOB_ACCESS_KEY:?set POST_BLOB_ACCESS_KEY}"
+  POST_BLOB_SECRET_KEY: "${POST_BLOB_SECRET_KEY:?set POST_BLOB_SECRET_KEY}"
+  POST_BLOB_BUCKET: "${POST_BLOB_BUCKET:?set POST_BLOB_BUCKET}"
+  POST_BLOB_USE_TLS: "${POST_BLOB_USE_TLS:?set POST_BLOB_USE_TLS (true or false)}"
+  POST_GITEA_BASE_URL: "${POST_GITEA_BASE_URL:?set POST_GITEA_BASE_URL}"
+  POST_GITEA_TOKEN: "${POST_GITEA_TOKEN:?set POST_GITEA_TOKEN}"
+
+services:
+  # ---------------------------------------------------------------------------
+  # Stage 1 — migrations job (docs/35_DEPLOYMENT_RUNBOOK.md:9)
+  # ---------------------------------------------------------------------------
+  # A one-shot job, not a service: it runs the forward-only migrations to
+  # head and exits, and the rest of the stack waits for that exit to be
+  # SUCCESSFUL (see every `depends_on: migrate` below). Nothing is deployed
+  # against an unmigrated schema, and nothing is deployed at all if the
+  # migration fails.
+  migrate:
+    # The runner applies the migrations embedded in the tree
+    # (infra/migrations, `go:embed *.sql`), is idempotent, and reports how
+    # many it applied — a rollback is a NEW forward migration, never a
+    # down-migration (docs/35:17, CLAUDE.md §8 "state only evolves").
+    #
+    # The image must contain the migration runner and nothing that is not
+    # needed to apply migrations. In-tree, the only runner is
+    # `rddev db migrate` (cmd/rddev/db.go) — and `rddev` is the Supervisor's
+    # orchestration CLI, carrying the git control plane and Worker
+    # management. Shipping that into a staging host is wrong on purpose
+    # rather than by accident, so README.md § "What is missing" names a
+    # runner-only binary as an ownerless gap instead of quietly blessing
+    # this one.
+    image: "${POST_MIGRATE_IMAGE:?set POST_MIGRATE_IMAGE to <repo>@sha256:<digest>}"
+    # One-shot. `restart: "no"` is docs/35:17 written as configuration: a
+    # migration that fails or breaks compatibility means STOP and repair
+    # under an ADR — the runbook explicitly refuses "patch production by
+    # hand and move on". A restart loop would apply that same half-done
+    # migration again, repeatedly, unattended.
+    restart: "no"
+    # The DSN is passed in the environment, never on the command line: a
+    # command line is visible in `docker inspect` and `ps`. rddev reads it
+    # from POSTGRES_TEST_ADMIN_URL (cmd/rddev/db.go:53) — the name is a
+    # development-flow artifact, and the reason it is used here is that it
+    # is the variable that exists.
+    command: ["rddev", "db", "migrate"]
+    environment:
+      <<: *post-app-env
+      POSTGRES_TEST_ADMIN_URL: >-
+        postgres://${POST_DB_USER:?}:${POST_DB_PASSWORD:?}@${POST_DB_HOST:?}:${POST_DB_PORT:?}/${POST_DB_NAME:?}?sslmode=${POST_DB_SSLMODE:?}
+    depends_on:
+      postgres:
+        condition: service_healthy
+        # required: false — `postgres` only exists when the bundled-infra
+        # profile is on. With managed PostgreSQL the dependency is skipped
+        # rather than fatal; every other dependency on a bundled service in
+        # this file carries the same flag, and the validator refuses a
+        # bundled dependency that lacks it (the stack would refuse to start
+        # with the profile off).
+        required: false
+
+  # ---------------------------------------------------------------------------
+  # Stage 2 — API, worker, MCP, scientific adapter (docs/35:10)
+  # ---------------------------------------------------------------------------
+  api:
+    image: "${POST_API_IMAGE:?set POST_API_IMAGE to <repo>@sha256:<digest>}"
+    restart: unless-stopped
+    environment:
+      <<: *post-app-env
+      POST_API_ADDR: ":8080"
+      # The browser origin the API's CORS and OIDC completion redirects are
+      # bound to (internal/application/authn). The proxy below serves this
+      # exact origin, so an operator editing one of the two must edit both.
+      POST_WEB_ORIGIN: "${POST_WEB_ORIGIN:?set POST_WEB_ORIGIN to the public https origin}"
+      # Reachable FROM the Gitea container (T0301 registers it on every
+      # provisioned repository, T0305 receives). With bundled Gitea this is
+      # the compose service name; with an external provider it must be the
+      # API's public URL. Left optional because the API starts with webhook
+      # provisioning off and logs which keys are missing, rather than
+      # refusing to boot.
+      POST_GITEA_WEBHOOK_URL: "${POST_GITEA_WEBHOOK_URL:-http://api:8080/api/v1/git/hooks/gitea}"
+      # OIDC is enabled exactly when the issuer is set; client id and secret
+      # are then required together (.env.example). Empty means "OIDC login
+      # disabled", which the API logs — an empty environment value is
+      # treated as absent by the loader.
+      POST_OIDC_ISSUER: "${POST_OIDC_ISSUER:-}"
+      POST_OIDC_CLIENT_ID: "${POST_OIDC_CLIENT_ID:-}"
+      POST_OIDC_CLIENT_SECRET: "${POST_OIDC_CLIENT_SECRET:-}"
+    depends_on:
+      # Stage 1 must have EXITED ZERO before the API starts (docs/35:9-10).
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
+    # /readyz, not /healthz: readiness is the API's own honest answer about
+    # PostgreSQL and Redis (503 not_ready when a dependency is down, never a
+    # false ok — cmd/api/main.go:8-11). Traffic is only allowed in once the
+    # API itself says it is ready. `curl -f` is load-bearing: without it a
+    # 503 exits 0 and the healthcheck would pass on a not-ready API.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/readyz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  worker:
+    image: "${POST_WORKER_IMAGE:?set POST_WORKER_IMAGE to <repo>@sha256:<digest>}"
+    restart: unless-stopped
+    environment:
+      <<: *post-app-env
+      # Email delivery is OFF by default (empty = unset for the loader).
+      # V1 has no SMTP transport — internal/application/notifications/ports.go:72
+      # says production SMTP "is a transport this port is waiting for" — so
+      # the only transport that exists is the development file sink, which
+      # writes whole plaintext notification bodies into a directory. Pointing
+      # that at a staging volume would make "email works" a thing someone
+      # believes; the empty default makes the worker log that it is disabled
+      # instead. README.md § "What is missing" names the gap and its owner.
+      POST_MAIL_SINK_DIR: "${POST_MAIL_SINK_DIR:-}"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
+    # No healthcheck — see x-post-healthcheck-waivers.worker above.
+
+  mcp:
+    image: "${POST_MCP_IMAGE:?set POST_MCP_IMAGE to <repo>@sha256:<digest>}"
+    restart: unless-stopped
+    environment:
+      <<: *post-app-env
+      POST_MCP_ADDR: ":9080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9080/readyz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  adapter:
+    # services/scientific-adapter — the Python scientific service (pymatgen/
+    # ASE live here and nowhere else, CLAUDE.md §7). It is in stage 2 because
+    # the web app cannot render scientific content without it
+    # (SCIENTIFIC_ADAPTER_URL below is required, not optional).
+    image: "${POST_ADAPTER_IMAGE:?set POST_ADAPTER_IMAGE to <repo>@sha256:<digest>}"
+    restart: unless-stopped
+    environment:
+      POST_ENV: prod
+      # 0.0.0.0, not the 127.0.0.1 default: the default is right for a
+      # host-native process and wrong inside a container, where loopback
+      # would make the service unreachable from the rest of the stack.
+      POST_SCIENTIFIC_ADAPTER_HOST: "0.0.0.0"
+      POST_SCIENTIFIC_ADAPTER_PORT: "9100"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9100/readyz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Stage 3 — Web (docs/35:11)
+  # ---------------------------------------------------------------------------
+  web:
+    image: "${POST_WEB_IMAGE:?set POST_WEB_IMAGE to <repo>@sha256:<digest>}"
+    restart: unless-stopped
+    environment:
+      # apps/web/lib/config.ts: POST_ENV is mandatory and ambiguous layers are
+      # refused — NODE_ENV=production (which `next start` sets) with anything
+      # but POST_ENV=prod is a startup failure. Both URLs are required and
+      # must be absolute http(s).
+      POST_ENV: prod
+      # Server-side fetch targets. The service names are resolvable on this
+      # network; nothing here reaches the browser (the browser only ever
+      # talks to the proxy origin).
+      API_BASE_URL: http://api:8080
+      SCIENTIFIC_ADAPTER_URL: http://adapter:9100
+    depends_on:
+      api:
+        condition: service_healthy
+      adapter:
+        condition: service_healthy
+    healthcheck:
+      # `/` is the web app's own status page (apps/web/app/(main)/page.tsx):
+      # server-rendered, unauthenticated, and it reads the live readiness of
+      # the API and the adapter. A 200 therefore means the Next process
+      # answered AND its validated configuration loaded — getWebConfig()
+      # throws on a missing or invalid API_BASE_URL / SCIENTIFIC_ADAPTER_URL,
+      # and that throw is a 500, which `curl -f` reports as a failure. What
+      # it does not mean is "the API is up": that page deliberately renders
+      # "down" instead of failing when an upstream is unreachable, which is
+      # why api and adapter are separately depended on as healthy above.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # TLS reverse proxy — the ONLY published surface
+  # ---------------------------------------------------------------------------
+  proxy:
+    image: "${POST_PROXY_IMAGE:?set POST_PROXY_IMAGE to <repo>@sha256:<digest>}"
+    restart: unless-stopped
+    # 80 exists only to redirect to 443 and to answer ACME http-01 challenges
+    # if the operator uses a certificate automation that needs it. Everything
+    # else in this file is reachable only through this service, on this
+    # network.
+    ports:
+      - "${POST_HTTP_PORT:-80}:80"
+      - "${POST_HTTPS_PORT:-443}:443"
+    volumes:
+      # Mounted as a plain .conf, deliberately NOT via the nginx image's
+      # /etc/nginx/templates/*.template mechanism: that path runs envsubst
+      # over the file, which rewrites nginx's own $host, $scheme and
+      # $proxy_add_x_forwarded_for into empty strings unless a filter is
+      # configured. A config with no substitution has no such failure mode,
+      # and does not need one — the hostname reaches the proxy through TLS
+      # (server_name is a catch-all).
+      - ./reverse-proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # The certificate and its key are supplied by the operator (a managed
+      # certificate, certbot output, or the platform's secret store) at a
+      # path outside this repository, mounted read-only. Nothing in the
+      # repository holds a private key.
+      - ${POST_TLS_DIR:?set POST_TLS_DIR to the directory holding tls.crt and tls.key}:/etc/nginx/tls:ro
+      # Read-only here, writable by whatever does the issuance: this is the
+      # webroot an ACME http-01 client writes a challenge file into, and the
+      # proxy serves it back. Mounted rather than left out so that the
+      # nginx config's /.well-known/acme-challenge/ location points at a path
+      # that exists; an unmounted root would serve 404s and look like it
+      # worked. DNS-01 and managed certificates never touch it.
+      - acme_webroot:/var/www/acme:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      # A loopback-only listener inside the container, never published: the
+      # check must not depend on the public hostname resolving, on a
+      # certificate being trusted, or on an upstream being up. What it
+      # proves is bounded and stated in the runbook — the proxy process
+      # answers HTTP. Whether the upstreams answer is what the runbook smoke
+      # step checks, from outside.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8081/healthz-proxy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Bundled infrastructure — profile `bundled-infra`, off by default
+  # ---------------------------------------------------------------------------
+  # docs/35_DEPLOYMENT_RUNBOOK.md:4 lists PostgreSQL, Redis, S3 and Gitea as
+  # PREREQUISITES. A production staging topology points at managed services
+  # and these four stay off; a self-contained staging box (the one the
+  # runbook's smoke step can actually exercise end to end) turns the profile
+  # on with --profile bundled-infra. Same images and same pinned tags as the
+  # local dev stack, so what the smoke step exercises matches what developers
+  # run — with different credentials, SSL-mode and exposure.
+  postgres:
+    profiles: ["bundled-infra"]
+    image: "${POST_INFRA_POSTGRES_IMAGE:?set POST_INFRA_POSTGRES_IMAGE to <repo>@sha256:<digest>}"
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POST_DB_USER:?set POST_DB_USER}"
+      POSTGRES_PASSWORD: "${POST_DB_PASSWORD:?set POST_DB_PASSWORD}"
+      POSTGRES_DB: "${POST_DB_NAME:?set POST_DB_NAME}"
+      # Read by the bootstrap script below, not by PostgreSQL itself.
+      GITEA_DB_USER: "${GITEA_DB_USER:?set GITEA_DB_USER}"
+      GITEA_DB_PASSWORD: "${GITEA_DB_PASSWORD:?set GITEA_DB_PASSWORD}"
+      GITEA_DB_NAME: "${GITEA_DB_NAME:?set GITEA_DB_NAME}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # The same bootstrap script the local stack uses (T0003), not a copy:
+      # it creates the Gitea role and database from the three variables above
+      # and enables pgvector. It runs once, on a fresh data volume, and never
+      # again — so it is a bootstrap, not a migration path. Migrations are
+      # the `migrate` job's job, in one place, both here and in local dev.
+      - ../../infra/docker/postgres/initdb.d:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  redis:
+    profiles: ["bundled-infra"]
+    image: "${POST_INFRA_REDIS_IMAGE:?set POST_INFRA_REDIS_IMAGE to <repo>@sha256:<digest>}"
+    restart: unless-stopped
+    # appendonly: the queue and the idempotency markers survive a restart of
+    # this container. Job loss on a Redis restart is a correctness problem
+    # (at-least-once becomes at-most-once), not a performance one.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  minio:
+    profiles: ["bundled-infra"]
+    image: "${POST_INFRA_MINIO_IMAGE:?set POST_INFRA_MINIO_IMAGE to <repo>@sha256:<digest>}"
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: "${POST_BLOB_ACCESS_KEY:?set POST_BLOB_ACCESS_KEY}"
+      MINIO_ROOT_PASSWORD: "${POST_BLOB_SECRET_KEY:?set POST_BLOB_SECRET_KEY}"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  gitea:
+    profiles: ["bundled-infra"]
+    image: "${POST_INFRA_GITEA_IMAGE:?set POST_INFRA_GITEA_IMAGE to <repo>@sha256:<digest>}"
+    restart: unless-stopped
+    environment:
+      GITEA__database__DB_TYPE: postgres
+      GITEA__database__HOST: "${POST_DB_HOST:?set POST_DB_HOST}:${POST_DB_PORT:?set POST_DB_PORT}"
+      GITEA__database__NAME: "${GITEA_DB_NAME:?set GITEA_DB_NAME (a database in the same PostgreSQL)}"
+      GITEA__database__USER: "${GITEA_DB_USER:?set GITEA_DB_USER}"
+      GITEA__database__PASSWD: "${GITEA_DB_PASSWORD:?set GITEA_DB_PASSWORD}"
+      GITEA__server__DOMAIN: "${POST_STAGING_HOSTNAME:?set POST_STAGING_HOSTNAME}"
+      GITEA__server__ROOT_URL: ${POST_WEB_ORIGIN:?set POST_WEB_ORIGIN}/gitea/
+      GITEA__server__HTTP_PORT: "3000"
+      # Gitea is infrastructure, never a user-facing surface (ADR-019):
+      # registration off, and the UI is not published by the proxy.
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      GITEA__security__INSTALL_LOCK: "true"
+      # Webhook delivery must reach the API on this network only. Not "*":
+      # the platform's own API is the only intended target (T0301/T0305).
+      GITEA__security__ALLOWED_HOST_LIST: "loopback,private"
+    volumes:
+      - gitea_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 18
+      start_period: 45s
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  gitea_data:
+  acme_webroot:
