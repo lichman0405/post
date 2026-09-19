@@ -3,6 +3,8 @@ package rsg
 import (
 	"errors"
 	"fmt"
+
+	"github.com/lichman0405/post/internal/rsg/semantics"
 )
 
 // Sentinel errors the RSG service produces itself (docs/45: the wire
@@ -53,6 +55,54 @@ func (e *EvidenceRefUnavailableError) Error() string {
 
 // Code is the stable wire code of this outcome (docs/45).
 func (e *EvidenceRefUnavailableError) Code() string { return CodeEvidenceRefUnavailable }
+
+// LiteratureEvidenceUnitUnnamedError reports a literature assertion that
+// names no evidence unit at all: evidence_type = 'literature' with an empty
+// reasoning note. docs/10 §6 forbids exactly that shape ("a DOI may not
+// support a claim directly"), and docs/19 §4 writes the same rule from the
+// reference side ("Evidence Assertion 指向具体 location/excerpt/figure/table/
+// dataset/method").
+//
+// # Why this is a refusal when the semantic check only warns
+//
+// internal/rsg/semantics.CheckEvidenceAssertion WARNS about this shape, and
+// keeps warning: whether a note names a SUFFICIENT unit is a scientific call
+// the check must not make for the author (evidence_assertion.go:26-28,
+// docs/10 §4: V1 不自动赋数值权重; CLAUDE.md §9.12). That split is untouched —
+// this type is the CALLER's policy, applied by the write path, over the one
+// predicate the check does own: "is the place empty".
+//
+// The two questions are not the same question, and the difference is the
+// whole rule. A blank note names no unit under any reading, so no scientific
+// judgement is needed to refuse it: there is nothing there to be judged. A
+// non-empty note is accepted whatever it says — a weak location that a DOI
+// would not stand behind is the AUTHOR's and the REVIEWER's call, never this
+// command's (the assertion is stored with its relation and its review_state,
+// never folded into a verdict).
+type LiteratureEvidenceUnitUnnamedError struct {
+	// Hint is the semantic check's own advisory — the one this refusal
+	// promotes. Carrying it (rather than restating the guidance) is what
+	// keeps the advisory from being dropped on the way out: the refusal
+	// message IS the hint message, so the author still reads what to write.
+	Hint semantics.Hint
+}
+
+// Error implements error. The message is the promoted advisory, prefixed the
+// way the other refusal on this surface is (GateBlockedError): the caller is
+// told the write was refused and what the next step is (docs/45), and nothing
+// about the store, the versions or the project leaks with it.
+func (e *LiteratureEvidenceUnitUnnamedError) Error() string {
+	return "the write was refused: " + e.Hint.Message
+}
+
+// Code is the stable wire code of this outcome (docs/45). It IS the semantic
+// check's own code for the condition — one token for one condition, whether a
+// caller meets it as the advisory or, on this write path, as the refusal.
+// Inventing a second spelling for the same fact is how two vocabularies come
+// to disagree about it, so this constant is read, never re-written.
+func (e *LiteratureEvidenceUnitUnnamedError) Code() string {
+	return semantics.HintLiteratureEvidenceUnitUnnamed
+}
 
 // Wire codes (docs/45). The shared outcomes reuse the canonical code
 // strings of the owning packages (projects, branches, states, sciobjects,

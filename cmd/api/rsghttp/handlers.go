@@ -561,6 +561,16 @@ func rsgErrorOutcome(err error) (status int, code, message string) {
 		// The message is the error's own and says none of that: a caller must
 		// not learn from the wire which of the reasons applied (docs/45).
 		return http.StatusNotFound, rsg.CodeEvidenceRefUnavailable, err.Error()
+	case errors.As(err, new(*rsg.LiteratureEvidenceUnitUnnamedError)):
+		// A literature assertion with no evidence unit is the caller's OWN
+		// permanent input mistake (docs/10 §6) — resending it changes nothing
+		// — so it answers a 400 and never the retryable 503 (docs/45). The
+		// code is the semantic check's own, and the message is its advisory,
+		// so the author is told which unit to locate rather than merely that
+		// the write was refused.
+		var unnamed *rsg.LiteratureEvidenceUnitUnnamedError
+		errors.As(err, &unnamed)
+		return http.StatusBadRequest, unnamed.Code(), unnamed.Error()
 	case errors.Is(err, rsg.ErrValidation):
 		return http.StatusBadRequest, rsg.CodeValidation, err.Error()
 	default:

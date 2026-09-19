@@ -193,7 +193,17 @@ type externalEvidenceFixture struct {
 // newExternalEvidenceFixture builds the world through the product path.
 func newExternalEvidenceFixture(t *testing.T, ctx context.Context) *externalEvidenceFixture {
 	t.Helper()
-	w := newKnowledgeWorldFor(t, ctx, evidenceNetworkTaskID)
+	return newExternalEvidenceFixtureFor(t, ctx, evidenceNetworkTaskID)
+}
+
+// newExternalEvidenceFixtureFor is the same world over a named test database,
+// so a later task's suite composes THIS fixture (one wiring, so a test cannot
+// pass against a world production does not build) while keeping its own
+// database namespace — the same shape newKnowledgeWorldFor gives the world
+// itself.
+func newExternalEvidenceFixtureFor(t *testing.T, ctx context.Context, taskID string) *externalEvidenceFixture {
+	t.Helper()
+	w := newKnowledgeWorldFor(t, ctx, taskID)
 	w.signups(t)
 
 	f := &externalEvidenceFixture{w: w}
