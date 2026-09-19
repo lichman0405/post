@@ -5394,10 +5394,10 @@
       ]
     },
     "T0708": {
-      "status": "todo",
+      "status": "blocked",
       "started_at": null,
       "completed_at": null,
-      "notes": "",
+      "notes": "SPEC_BLOCKED（2026-09-19 立档，等 owner 一句话）：验收里那条「禁止 rights 不允许的 derive」要求平台对使用声明做允许/拒绝判定——这是权限/法律语义，按 CLAUDE.md §5 属 L3，我不自行选边。仓库自己禁止我猜：internal/rights/usage.go 包注释逐字写 \"unspecified\" is a real answer, not a missing one，并同时否定两种坍缩（collapsing the two would invent a permission nobody granted）——当 restricted 用是发明一条没人声明的禁令，当 allowed 用是发明一条没人给的许可；docs/12 §4 逐字「字段不替代法律合同」；internal/rights/doc.go 逐字 the platform records the declaration and does not judge it；非测试代码里对 usage 声明零判定先例。要问的就是：usage.derivatives 为 unspecified 时默认怎么算。它是默认值（document.go:107-121 的新文档模板即 PermissionUnspecified），所以这一句话决定该功能对绝大多数资产是否可用。ADR-023 已落（docs/adr/，不在规格指纹内）；任务包先不写——留白派工等于请工人替我猜。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null
@@ -6514,7 +6514,7 @@
       ]
     },
     "T0903": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-19T03:08:10Z",
       "worker_run_id": "run-9ea2b17699bff9c7",
       "history": [
@@ -6530,6 +6530,13 @@
           "at": "2026-09-19T03:08:10Z",
           "run_id": "run-9ea2b17699bff9c7",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-19T03:38:33Z",
+          "run_id": "run-a5974cd6b3618864",
+          "reason": "collect: all checks passed"
         }
       ]
     },
