@@ -11,6 +11,151 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const listScopeAdjacentRelationVersions = `-- name: ListScopeAdjacentRelationVersions :many
+SELECT DISTINCT ON (rv.relation_id)
+  rv.relation_id,
+  rv.relation_type,
+  rv.source_object_version_id,
+  rv.target_object_version_id,
+  so_s.project_id::text AS source_project_id,
+  so_t.project_id::text AS target_project_id
+FROM relation_versions rv
+JOIN relations r ON r.id = rv.relation_id
+JOIN scientific_object_versions sov_s ON sov_s.id = rv.source_object_version_id
+JOIN scientific_objects so_s ON so_s.id = sov_s.object_id
+JOIN scientific_object_versions sov_t ON sov_t.id = rv.target_object_version_id
+JOIN scientific_objects so_t ON so_t.id = sov_t.object_id
+WHERE (rv.source_object_version_id = ANY($1::uuid[])
+       OR rv.target_object_version_id = ANY($1::uuid[]))
+  AND r.project_id   = ANY($2::uuid[])
+  AND so_s.project_id = ANY($2::uuid[])
+  AND so_t.project_id = ANY($2::uuid[])
+ORDER BY rv.relation_id, rv.version_no DESC
+`
+
+type ListScopeAdjacentRelationVersionsParams struct {
+	VersionIds []pgtype.UUID `json:"version_ids"`
+	ProjectIds []pgtype.UUID `json:"project_ids"`
+}
+
+type ListScopeAdjacentRelationVersionsRow struct {
+	RelationID            pgtype.UUID `json:"relation_id"`
+	RelationType          string      `json:"relation_type"`
+	SourceObjectVersionID pgtype.UUID `json:"source_object_version_id"`
+	TargetObjectVersionID pgtype.UUID `json:"target_object_version_id"`
+	SourceProjectID       string      `json:"source_project_id"`
+	TargetProjectID       string      `json:"target_project_id"`
+}
+
+// One traversal hop, scope-filtered IN SQL.
+//
+// It is the retrieval's shape of 00036's ListAdjacentRelationVersions (the
+// RSG query surface's, T0209), with the same as-of rule — no lineage pin
+// here, so each relation renders at its newest version — and one difference
+// that matters: the RSG query deliberately returns an edge of any project so
+// that its SERVICE can authorize the hop, while a search has no such second
+// gate to run — its authorization is the scope, resolved once
+// (internal/search/scope.go) — so the scope is applied where the rows are
+// read. An edge enters only when the relation's own project AND both
+// endpoint projects are in the caller's scope; a hidden endpoint would
+// otherwise leak its pinned version id through the edge it appears on.
+//
+// This is strictly NARROWER than T0209's per-project requireRead, on purpose.
+// T0209's surface is reached with a project in hand and a public project is
+// readable by anyone there; a search is reached with no project at all, and
+// invariant 6 ("Publish controls visibility") means an unpublished object
+// version is not the network's to read. A non-member therefore expands into
+// nothing; the public half of the graph is still searchable, one surface up,
+// because the projection indexes exactly the published things.
+func (q *Queries) ListScopeAdjacentRelationVersions(ctx context.Context, arg ListScopeAdjacentRelationVersionsParams) ([]ListScopeAdjacentRelationVersionsRow, error) {
+	rows, err := q.db.Query(ctx, listScopeAdjacentRelationVersions, arg.VersionIds, arg.ProjectIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListScopeAdjacentRelationVersionsRow
+	for rows.Next() {
+		var i ListScopeAdjacentRelationVersionsRow
+		if err := rows.Scan(
+			&i.RelationID,
+			&i.RelationType,
+			&i.SourceObjectVersionID,
+			&i.TargetObjectVersionID,
+			&i.SourceProjectID,
+			&i.TargetProjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listScopeObjectVersions = `-- name: ListScopeObjectVersions :many
+SELECT sov.id AS object_version_id,
+       sov.object_id,
+       sov.version_no,
+       sov.title,
+       so.object_type,
+       so.project_id::text AS project_id
+FROM scientific_object_versions sov
+JOIN scientific_objects so ON so.id = sov.object_id
+WHERE sov.id = ANY($1::uuid[])
+  AND so.project_id = ANY($2::uuid[])
+ORDER BY sov.id
+`
+
+type ListScopeObjectVersionsParams struct {
+	VersionIds []pgtype.UUID `json:"version_ids"`
+	ProjectIds []pgtype.UUID `json:"project_ids"`
+}
+
+type ListScopeObjectVersionsRow struct {
+	ObjectVersionID pgtype.UUID `json:"object_version_id"`
+	ObjectID        pgtype.UUID `json:"object_id"`
+	VersionNo       int32       `json:"version_no"`
+	Title           string      `json:"title"`
+	ObjectType      string      `json:"object_type"`
+	ProjectID       string      `json:"project_id"`
+}
+
+// The node rows of one traversal level. Scope-filtered in SQL for the same
+// reason as the hop above: the ids come from edges the previous level
+// admitted, and re-stating the scope here means a defect in the hop's filter
+// still cannot return another project's object version. The three columns
+// the retrieval reports beyond the ids are the ones a candidate must carry
+// and nothing else — no payload, no content: a candidate is a citation
+// pointer, and the answer layer reads the object through its own surface.
+func (q *Queries) ListScopeObjectVersions(ctx context.Context, arg ListScopeObjectVersionsParams) ([]ListScopeObjectVersionsRow, error) {
+	rows, err := q.db.Query(ctx, listScopeObjectVersions, arg.VersionIds, arg.ProjectIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListScopeObjectVersionsRow
+	for rows.Next() {
+		var i ListScopeObjectVersionsRow
+		if err := rows.Scan(
+			&i.ObjectVersionID,
+			&i.ObjectID,
+			&i.VersionNo,
+			&i.Title,
+			&i.ObjectType,
+			&i.ProjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const searchDocuments = `-- name: SearchDocuments :many
 SELECT entity_ref, entity_type, visibility, project_id, title, content, structured, updated_at,
        ts_rank(to_tsvector('simple', title || ' ' || content), plainto_tsquery('simple', $1)) AS rank
@@ -88,6 +233,320 @@ func (q *Queries) SearchDocuments(ctx context.Context, arg SearchDocumentsParams
 	return items, nil
 }
 
+const searchDocumentsByFacets = `-- name: SearchDocumentsByFacets :many
+SELECT entity_ref, entity_type, visibility, project_id, title, content, structured, updated_at
+FROM search_documents
+WHERE ($1::text[] IS NULL OR entity_type = ANY($1::text[]))
+  AND ($2::jsonb IS NULL OR structured @> $2::jsonb)
+  AND ($3::boolean = false OR visibility = 'public')
+  AND (visibility = 'public' OR project_id = ANY($4::uuid[]))
+ORDER BY entity_ref
+LIMIT $5
+`
+
+type SearchDocumentsByFacetsParams struct {
+	EntityTypes       []string      `json:"entity_types"`
+	StructuredFilter  []byte        `json:"structured_filter"`
+	PublicOnly        bool          `json:"public_only"`
+	AllowedProjectIds []pgtype.UUID `json:"allowed_project_ids"`
+	PageSize          int32         `json:"page_size"`
+}
+
+type SearchDocumentsByFacetsRow struct {
+	EntityRef  string             `json:"entity_ref"`
+	EntityType string             `json:"entity_type"`
+	Visibility string             `json:"visibility"`
+	ProjectID  pgtype.UUID        `json:"project_id"`
+	Title      string             `json:"title"`
+	Content    string             `json:"content"`
+	Structured []byte             `json:"structured"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+// The structured-filter signal: recall by facet alone, with no text
+// predicate at all. It is what makes a question like "the claims about CO2
+// uptake" answerable when the wording of the question does not occur in the
+// documents, and it is the one signal whose caller must supply a filter —
+// without one it would be "the first N rows of the index", which is not an
+// answer to anything. The retrieval layer enforces that (a facets-only
+// recall runs only when a facet was given); this query does not need to,
+// because returning rows the caller asked for is exactly its job.
+//
+// ORDER BY entity_ref is a stable order rather than a ranking: there is no
+// text to rank against, and inventing a relevance order here would be
+// inventing a score (CLAUDE.md §9.13). The fusion layer treats this signal
+// as an unordered set by ranking it in that order — deterministically, which
+// is what reproducibility needs.
+func (q *Queries) SearchDocumentsByFacets(ctx context.Context, arg SearchDocumentsByFacetsParams) ([]SearchDocumentsByFacetsRow, error) {
+	rows, err := q.db.Query(ctx, searchDocumentsByFacets,
+		arg.EntityTypes,
+		arg.StructuredFilter,
+		arg.PublicOnly,
+		arg.AllowedProjectIds,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchDocumentsByFacetsRow
+	for rows.Next() {
+		var i SearchDocumentsByFacetsRow
+		if err := rows.Scan(
+			&i.EntityRef,
+			&i.EntityType,
+			&i.Visibility,
+			&i.ProjectID,
+			&i.Title,
+			&i.Content,
+			&i.Structured,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchDocumentsByVector = `-- name: SearchDocumentsByVector :many
+SELECT entity_ref, entity_type, visibility, project_id, title, content, structured, updated_at,
+       (1 - (embedding <=> $1::vector))::float8 AS similarity
+FROM search_documents
+WHERE embedding IS NOT NULL
+  AND embedding_provider = $2::text
+  AND embedding_model    = $3::text
+  AND embedding_version  = $4::text
+  AND ($5::text[] IS NULL OR entity_type = ANY($5::text[]))
+  AND ($6::jsonb IS NULL OR structured @> $6::jsonb)
+  AND ($7::boolean = false OR visibility = 'public')
+  AND (visibility = 'public' OR project_id = ANY($8::uuid[]))
+ORDER BY embedding <=> $1::vector, entity_ref
+LIMIT $9
+`
+
+type SearchDocumentsByVectorParams struct {
+	Embedding         string        `json:"embedding"`
+	EmbeddingProvider string        `json:"embedding_provider"`
+	EmbeddingModel    string        `json:"embedding_model"`
+	EmbeddingVersion  string        `json:"embedding_version"`
+	EntityTypes       []string      `json:"entity_types"`
+	StructuredFilter  []byte        `json:"structured_filter"`
+	PublicOnly        bool          `json:"public_only"`
+	AllowedProjectIds []pgtype.UUID `json:"allowed_project_ids"`
+	PageSize          int32         `json:"page_size"`
+}
+
+type SearchDocumentsByVectorRow struct {
+	EntityRef  string             `json:"entity_ref"`
+	EntityType string             `json:"entity_type"`
+	Visibility string             `json:"visibility"`
+	ProjectID  pgtype.UUID        `json:"project_id"`
+	Title      string             `json:"title"`
+	Content    string             `json:"content"`
+	Structured []byte             `json:"structured"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	Similarity float64            `json:"similarity"`
+}
+
+// The vector signal. Two things about it are load-bearing.
+//
+//  1. The provenance match. A vector is only meaningful against the model
+//     that produced it (internal/search/embedding/port.go, Model), so a row
+//     whose stored provider/model/version is not the one that embedded THIS
+//     query is not a worse match — it is not a match at all, and comparing
+//     against it would produce a confident, meaningless distance. The three
+//     columns are compared, not just the version: two implementations can
+//     ship the same version label. Rows left behind by a replaced model are
+//     simply not recalled here; the batch job is what brings them back
+//     (SearchDocumentsNeedingEmbedding selects exactly them).
+//
+//  2. The exact scan. There is no ivfflat/hnsw index on the column, and that
+//     is 00092's recorded decision, not an omission: an approximate index can
+//     be less accurate than the scan, never more, and V1's scale does not
+//     require one. Adding one is a measurable performance decision with its
+//     own evidence, and this query is where its effect would be felt.
+//
+// @embedding arrives in pgvector's text input syntax and is cast explicitly,
+// exactly as UpdateSearchDocumentEmbedding writes it: the column's type is
+// not one the driver knows, and the server parses it (sqlc.yaml's override).
+//
+// The ::float8 cast on the score is not decoration: pgvector's `<=>` is an
+// operator over a type sqlc has no mapping for (sqlc.yaml overrides the
+// column, not the operator), and without the cast the generator typed the
+// result as int32 — a real double precision value read through an integer
+// destination, which pgx refuses at scan time. The cast states the type the
+// expression actually has.
+func (q *Queries) SearchDocumentsByVector(ctx context.Context, arg SearchDocumentsByVectorParams) ([]SearchDocumentsByVectorRow, error) {
+	rows, err := q.db.Query(ctx, searchDocumentsByVector,
+		arg.Embedding,
+		arg.EmbeddingProvider,
+		arg.EmbeddingModel,
+		arg.EmbeddingVersion,
+		arg.EntityTypes,
+		arg.StructuredFilter,
+		arg.PublicOnly,
+		arg.AllowedProjectIds,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchDocumentsByVectorRow
+	for rows.Next() {
+		var i SearchDocumentsByVectorRow
+		if err := rows.Scan(
+			&i.EntityRef,
+			&i.EntityType,
+			&i.Visibility,
+			&i.ProjectID,
+			&i.Title,
+			&i.Content,
+			&i.Structured,
+			&i.UpdatedAt,
+			&i.Similarity,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchDocumentsFullText = `-- name: SearchDocumentsFullText :many
+
+SELECT entity_ref, entity_type, visibility, project_id, title, content, structured, updated_at,
+       ts_rank(to_tsvector('simple', title || ' ' || content), plainto_tsquery('simple', $1)) AS rank
+FROM search_documents
+WHERE to_tsvector('simple', title || ' ' || content) @@ plainto_tsquery('simple', $1)
+  AND ($2::text[] IS NULL OR entity_type = ANY($2::text[]))
+  AND ($3::jsonb IS NULL OR structured @> $3::jsonb)
+  AND ($4::boolean = false OR visibility = 'public')
+  AND (visibility = 'public' OR project_id = ANY($5::uuid[]))
+ORDER BY rank DESC, entity_ref
+LIMIT $6
+`
+
+type SearchDocumentsFullTextParams struct {
+	Query             string        `json:"query"`
+	EntityTypes       []string      `json:"entity_types"`
+	StructuredFilter  []byte        `json:"structured_filter"`
+	PublicOnly        bool          `json:"public_only"`
+	AllowedProjectIds []pgtype.UUID `json:"allowed_project_ids"`
+	PageSize          int32         `json:"page_size"`
+}
+
+type SearchDocumentsFullTextRow struct {
+	EntityRef  string             `json:"entity_ref"`
+	EntityType string             `json:"entity_type"`
+	Visibility string             `json:"visibility"`
+	ProjectID  pgtype.UUID        `json:"project_id"`
+	Title      string             `json:"title"`
+	Content    string             `json:"content"`
+	Structured []byte             `json:"structured"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	Rank       float32            `json:"rank"`
+}
+
+// ---------------------------------------------------------------------------
+// T0904: the retrieval surface.
+//
+// docs/14 §2 fixes the pipeline as "structured filters + FTS + semantic
+// candidate retrieval + graph traversal + scientific ranking", and
+// ADR-005 keeps all four in PostgreSQL for V1. T0901 filled the projection,
+// T0902 filled the vector, T0903 wrote the plan; these three reads are what
+// turns a plan into candidates, and they are the FTS, the vector and the
+// structured-filter recall signals respectively (the graph traversal is
+// ListScopeAdjacentRelationVersions / ListScopeObjectVersions below).
+//
+// # Why these are new queries and not a widened SearchDocuments
+//
+// The canonical read (SearchDocuments, above) stays exactly as it is: it is
+// the access-control regression test's subject (tests/integration/
+// search_access_test.go) and the surface T0905/T0906 will serve. What the
+// retrieval adds is NARROWING that has to happen in SQL rather than after
+// the fact, because a narrowing applied after LIMIT is not a narrowing: a
+// question whose plan names knowledge documents would otherwise take the
+// page of best-matching rows across every entity type and then throw most
+// of it away, reporting "no knowledge answer" for a corpus that has one.
+//
+// The access predicate is therefore repeated VERBATIM in each of them —
+// `(visibility = 'public' OR project_id = ANY(@allowed_project_ids::uuid[]))`
+// — and NOT re-derived. A second implementation of that rule is how two
+// answers to "who may see this row" start to disagree, so the integration
+// suite pins that this copy and the canonical query return the same rows for
+// the same input, and that the fail-closed property (an empty scope yields
+// public rows only, never the table) holds for each of them independently of
+// the other. A query that could not accept a scope could not enforce one.
+//
+// # public_only
+//
+// The plan's `visibility` item is a NARROWING HINT and never a grant
+// (planner.VisibilityPublic / VisibilityAccessible). It arrives here as a
+// boolean that can only ever REMOVE rows: 'public' means "the rows the read
+// query returns to anybody", and 'accessible' means "whatever the scope
+// already allows", which is the predicate below unchanged. There is
+// deliberately no value of this flag that widens anything.
+//
+// # entity_types / structured_filter
+//
+// entity_types is the plan's target_object vocabulary (the projection's own
+// entity types). structured_filter is the caller's facet filter
+// (specs/api/openapi.yaml, POST /search: `filters`), matched as jsonb
+// containment so a caller can ask for one facet — {"object_type":"claim"} is
+// how "Claims" is recalled — without this query knowing any facet's name.
+// Both are ANDed onto the access predicate, so neither can be used to reach
+// a row the predicate refuses.
+//
+// The FTS signal. The text semantics are the canonical query's, character
+// for character — the same to_tsvector expression, the same
+// plainto_tsquery, the same ts_rank — so the two cannot disagree about what
+// "matches" means, and the index the projection built
+// (search_documents_fts_idx) serves both.
+func (q *Queries) SearchDocumentsFullText(ctx context.Context, arg SearchDocumentsFullTextParams) ([]SearchDocumentsFullTextRow, error) {
+	rows, err := q.db.Query(ctx, searchDocumentsFullText,
+		arg.Query,
+		arg.EntityTypes,
+		arg.StructuredFilter,
+		arg.PublicOnly,
+		arg.AllowedProjectIds,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchDocumentsFullTextRow
+	for rows.Next() {
+		var i SearchDocumentsFullTextRow
+		if err := rows.Scan(
+			&i.EntityRef,
+			&i.EntityType,
+			&i.Visibility,
+			&i.ProjectID,
+			&i.Title,
+			&i.Content,
+			&i.Structured,
+			&i.UpdatedAt,
+			&i.Rank,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const searchDocumentsNeedingEmbedding = `-- name: SearchDocumentsNeedingEmbedding :many
 SELECT entity_ref, title, content
 FROM search_documents
@@ -141,6 +600,79 @@ func (q *Queries) SearchDocumentsNeedingEmbedding(ctx context.Context, arg Searc
 	for rows.Next() {
 		var i SearchDocumentsNeedingEmbeddingRow
 		if err := rows.Scan(&i.EntityRef, &i.Title, &i.Content); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchSeedObjectVersions = `-- name: SearchSeedObjectVersions :many
+
+SELECT kp.pid,
+       sov.id        AS object_version_id,
+       sov.object_id,
+       sov.version_no,
+       sov.title,
+       so.object_type,
+       so.project_id::text AS project_id
+FROM knowledge_publications kp
+JOIN scientific_object_versions sov ON sov.id = kp.object_version_id
+JOIN scientific_objects so ON so.id = sov.object_id
+WHERE kp.pid = ANY($1::text[])
+`
+
+type SearchSeedObjectVersionsRow struct {
+	Pid             string      `json:"pid"`
+	ObjectVersionID pgtype.UUID `json:"object_version_id"`
+	ObjectID        pgtype.UUID `json:"object_id"`
+	VersionNo       int32       `json:"version_no"`
+	Title           string      `json:"title"`
+	ObjectType      string      `json:"object_type"`
+	ProjectID       string      `json:"project_id"`
+}
+
+// ---------------------------------------------------------------------------
+// The graph half.
+//
+// A document is not an object version: search_documents indexes the network's
+// readable things (a published knowledge object, an asset version, a
+// release, a state), and the relation graph (relations / relation_versions,
+// 00006) connects scientific object VERSIONS. The mapping from one to the
+// other exists for exactly one entity type and it is a typed column, not a
+// convention: a knowledge publication pins the object version it published
+// (knowledge_publications.object_version_id, 00010/00083 — "what is
+// published, and what a foreign project cites, is one version"). An asset
+// and a release are bundles whose own surfaces (their manifests) are where
+// their content is read from, and a state is a transition; none of the three
+// is a version-pinned object, so none of them seeds an expansion. That is the
+// boundary of this task and not a missing join.
+//
+// The seed mapping: the pinned object version behind each recalled
+// publication pid. The version id is the graph's addressing unit, and the
+// object id + version_no are the citation (docs/21, ADR-010: the answer
+// cites a platform-determined version), which is why they travel together.
+func (q *Queries) SearchSeedObjectVersions(ctx context.Context, pids []string) ([]SearchSeedObjectVersionsRow, error) {
+	rows, err := q.db.Query(ctx, searchSeedObjectVersions, pids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchSeedObjectVersionsRow
+	for rows.Next() {
+		var i SearchSeedObjectVersionsRow
+		if err := rows.Scan(
+			&i.Pid,
+			&i.ObjectVersionID,
+			&i.ObjectID,
+			&i.VersionNo,
+			&i.Title,
+			&i.ObjectType,
+			&i.ProjectID,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
