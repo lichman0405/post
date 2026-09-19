@@ -192,6 +192,14 @@ func strPtr(s string) *string { return &s }
 // signed-up user id and the CSRF token the writes must echo.
 func newRSGTestServer(t *testing.T, svc Service) (*httptest.Server, *http.Client, string, string) {
 	t.Helper()
+	return newRSGTestServerDeps(t, Deps{Service: svc})
+}
+
+// newRSGTestServerDeps is newRSGTestServer with the whole Deps visible, so a
+// test can wire the object page's graph readers (T0507) as well as the
+// service.
+func newRSGTestServerDeps(t *testing.T, deps Deps) (*httptest.Server, *http.Client, string, string) {
+	t.Helper()
 	authAPI := authhttp.New(authhttp.Deps{
 		Users:    memstore.NewUsers(),
 		Sessions: memstore.NewSessions(),
@@ -207,7 +215,7 @@ func newRSGTestServer(t *testing.T, svc Service) (*httptest.Server, *http.Client
 	})
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/auth/", authAPI.Routes())
-	New(Deps{Service: svc}).Register(mux)
+	New(deps).Register(mux)
 	ts := httptest.NewServer(authAPI.Guard(mux))
 	t.Cleanup(ts.Close)
 

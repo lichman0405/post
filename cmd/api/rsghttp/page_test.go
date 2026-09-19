@@ -96,10 +96,13 @@ func TestObjectDetailPageRenders(t *testing.T) {
 		`<summary data-version-summary>Version <strong>2</strong> of 2</summary>`,
 		`data-lifecycle-state="active"`,
 		"MOF-5 refined",
-		// tabs: all five, metadata active — and each tab link carries its
-		// own tab key, so switching tabs actually switches tabs
-		`data-tab="metadata"`, `data-tab="relations"`, `data-tab="history"`, `data-tab="files"`, `data-tab="evidence"`,
-		`tab=relations`, `tab=history`, `tab=files`, `tab=evidence`,
+		// tabs: all seven, metadata active — and each tab link carries its
+		// own tab key, so switching tabs actually switches tabs. Provenance
+		// and evidence are two of them (T0507): the page's two graphs, each
+		// reachable on its own.
+		`data-tab="metadata"`, `data-tab="relations"`, `data-tab="provenance"`, `data-tab="evidence"`,
+		`data-tab="history"`, `data-tab="files"`,
+		`tab=relations`, `tab=provenance`, `tab=evidence`, `tab=history`, `tab=files`,
 		// Work with Agent CTA and the pre-filled tool references (quotes
 		// render escaped in a text node: &#34;name&#34;)
 		`data-agent-menu`, `data-agent-summary`,
