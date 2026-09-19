@@ -9,6 +9,7 @@ import {
   publicPageMetadata,
 } from "../../../../lib/entity-meta";
 import { ProfileCard } from "./profile-card";
+import { ResearchProfileCard } from "./research-profile-card";
 
 /**
  * The public profile page: server component that resolves the validated
@@ -50,6 +51,10 @@ export default async function ProfilePage({
     <div className="profile-main">
       <Suspense fallback={null}>
         <ProfileCard apiBaseUrl={cfg.apiBaseUrl} userId={id} />
+        {/* T0808: the Research Profile (docs/42) under the identity card.
+            One page, two reads: the card above is the editable identity
+            (owner-only PATCH), this one is the public research record. */}
+        <ResearchProfileCard apiBaseUrl={cfg.apiBaseUrl} userId={id} />
       </Suspense>
     </div>
   );

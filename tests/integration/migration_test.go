@@ -1289,6 +1289,32 @@ var explicitIndexes = map[string][]string{
 	// not collide; the index is what makes a repeated creation return the
 	// first proposal rather than opening a second.
 	"pull_requests_creation_key_idx": {"project_id", "creation_key", "WHERE", "UNIQUE"},
+	// T0808 (00101): the Research Profile / Organization Profile read
+	// paths — the five "everything about THIS person / THIS organization"
+	// reads the two profile surfaces make, on tables that until now were
+	// only ever read the other way round (by project, by asset, by state).
+	//
+	//   - one actor's ledger rows, newest first (the person's
+	//     contributions dimension);
+	//   - the ledger rows recorded while the actor was affiliated with one
+	//     organization (the organization's public research activity), which
+	//     is also what keeps a person's history readable after they leave:
+	//     the rows already written keep naming the organization;
+	//   - the versions one party is credited on — the REVERSE of
+	//     asset_version_parties_version_role, whose party_id is not a
+	//     leading column of anything (T0711 indexed the version side);
+	//   - the assertions one author made of the two reproduction relations
+	//     (00041 indexed target/evidence, the directions the evidence
+	//     network reads);
+	//   - the usages of one asset VERSION, which the profile's reused-assets
+	//     dimension reads and which the asset page's used_by block already
+	//     wants (the PK's leading column is project_id, so a lookup by
+	//     asset_version_id alone is not a prefix of it).
+	"contribution_events_actor_occurred_idx":  {"actor_id", "occurred_at DESC", "id DESC"},
+	"contribution_events_org_occurred_idx":    {"organization_id_at_time", "occurred_at DESC", "id DESC"},
+	"asset_version_parties_party_idx":         {"party_kind", "party_id"},
+	"evidence_assertions_author_relation_idx": {"created_by", "relation_type"},
+	"asset_dependencies_version_idx":          {"asset_version_id"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
