@@ -14250,3 +14250,35 @@ G2 的对象是"这次要合进去的那棵树"，不是"某个曾经存在的�
 **本文件早先几节的旧坐标按这条读**（journal 不回改，改的是活文档）。另外，安全评审的自动化扫描
 在 `cmd/api/rsghttp/graph.go` 上独立报了同一条缺陷（`evidencePanelFor` 不接读者）——**与我已下的
 ADR-024/T0511 是同一件事，不新增动作**，只是外部工具对该判断的一次独立印证。
+
+## 2026-09-19 17:2x T0811 的独立 G2（结构性那半条）：我用「变异」把它逼到失败过
+
+T0811 的验收标准第 2 条要求「写评论不改变科学状态」是**结构性的**，不能只断言「没报错」。
+Worker 交的东西里有两条主张：① 评论路径**够不着**提交状态的机器（`Deps` 里没有任何
+commit 方法、port 接口里没有、包内不 import `internal/application/states`）；② 行为上评论
+只调 thread port。**主张要能失效才算数**，所以我没有只读它，而是**让它在受控条件下失效**：
+
+- **变异 A（反射那半边）**：用 `go test -overlay=` 把一份**改过的 `command.go`** 喂给编译器
+  （给 `Deps` 加一个带 `Commit(ctx)` 的接口字段），**磁盘上的树一个字节没动**。
+  结果：`Deps.Probe exposes Commit: a state-committing method reachable from the discussion command`
+  → **FAIL**。撤销 overlay → PASS。
+- **变异 B（import 那半边）**：这条断言是**运行时读盘**（`parser.ParseDir(".")`），
+  overlay 影响不到它，所以换了做法：`go test -c` 编出测试二进制，**在一个只放了该包生产文件的
+  临时目录里跑它**（CWD 就是被读的那个 "."），把 `ports.go` 换成带一行
+  `_ ".../internal/application/states"` 的版本。结果：
+  `ports.go imports github.com/lichman0405/post/internal/application/states: ...` → **FAIL**；
+  同一个二进制放回未变异的目录 → **PASS**。两个方向都验过。
+- 双重闸门：这两个变异各自独立触发（我做 A 时 B 没动、做 B 时 A 没动），说明它们不是一条
+  断言的两种说法。测试自己还带「量具空转」守卫（`seen == 0`、`len(pkgs) == 0`、`files < 3`）。
+- 行为那半条非空转：同一个假替身的计数器在提升路径上被断言为 **1**
+  （`command_test.go:695`、`:745`），所以「评论时它们是 0」不是「这个计数器不会动」。
+
+**顺带一条真发现（已判为"记账后合并"，不返工）**：`00104_discussions.sql` 里
+`discussion_promotions` 的 CHECK 注释写着 ref「cannot name nothing」（冒号后不能为空）。
+**我拿真 PostgreSQL 量了**：`'issue:' = 'issue' || ':' || substring('issue:' FROM length('issue')+2)`
+→ **t**（三种 kind 都 t），而 `'issueXabc'` → **f**。也就是说这条 CHECK 钉的是
+**kind 前缀与 ref 一致**（这半边确实钉死了），**不钉「非空」也不钉 uuid 形状**。
+产品路径上 ref 由 Go 用真实 uuid 拼出，够不到空值，**保护本身是完整的**——所以按既定判据
+（证据类虚报 → 拒；机制类虚报而保护仍在 → 记账后合并）**不当返工理由**，等它合并后我按
+注释清理批次改掉那半句话。（`tests/integration/migration_test.go` 里对这条 CHECK 的描述
+反而写得准确：它明说 identifier 那半是自由文本。）
