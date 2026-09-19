@@ -684,3 +684,76 @@ func readIfAny(t *testing.T, path string) string {
 	}
 	return strings.TrimSpace(string(b))
 }
+
+// A heartbeat that is only written between ticks goes stale during the one step
+// that blocks longest: acceptance shells out to `rddev task accept`, which
+// re-runs the gate suite (~9 minutes, three times StaleAfter). The window is a
+// claim about the process — silence means it is gone, never that it is busy —
+// so it has to hold while the driver is inside a tick, which is the state a
+// reader finds it in most of the time it is doing something expensive.
+func TestTheHeartbeatStaysFreshWhileATickIsBlocked(t *testing.T) {
+	root := t.TempDir()
+	const stale = "1970-01-01T00:00:00.000Z"
+	if err := WriteDriverStatus(root, &DriverStatus{PID: os.Getpid(), HeartbeatAt: stale, State: "starting"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The main loop is "blocked in a tick" here: nothing else writes the file
+	// while the keepalive runs.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := startHeartbeat(ctx, root, os.Getpid(), 20*time.Millisecond)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got, err := ReadDriverStatus(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.HeartbeatAt != stale {
+			if !got.Alive(time.Now()) {
+				t.Fatalf("the keepalive wrote a heartbeat that reads as dead: %q", got.HeartbeatAt)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the heartbeat was never refreshed while the tick was blocked: " +
+				"a driver in the middle of an acceptance reads as dead")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Stopping it stops the writes: a keepalive that outlives its driver would
+	// keep a crashed process looking alive forever.
+	stop()
+	before, err := ReadDriverStatus(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	after, err := ReadDriverStatus(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.HeartbeatAt != before.HeartbeatAt {
+		t.Errorf("the heartbeat kept moving after the keepalive was stopped: %q then %q",
+			before.HeartbeatAt, after.HeartbeatAt)
+	}
+
+	// And it leaves someone else's status file alone: a driver that died left
+	// its file behind, and the adoption that follows must not be papered over
+	// by a keepalive refreshing a heartbeat it does not own.
+	if err := WriteDriverStatus(root, &DriverStatus{PID: os.Getpid() + 1, HeartbeatAt: stale}); err != nil {
+		t.Fatal(err)
+	}
+	stop2 := startHeartbeat(context.Background(), root, os.Getpid(), 20*time.Millisecond)
+	defer stop2()
+	time.Sleep(100 * time.Millisecond)
+	other, err := ReadDriverStatus(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.HeartbeatAt != stale {
+		t.Errorf("the keepalive refreshed a status file belonging to pid %d: %q", os.Getpid()+1, other.HeartbeatAt)
+	}
+}

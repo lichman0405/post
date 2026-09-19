@@ -1,6 +1,7 @@
 package devorchestrator
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -80,6 +82,55 @@ type DriverStatus struct {
 // considered dead. Generous: a driver blocked on a 90-minute Worker still
 // heartbeats every tick, so silence means the process is gone, not busy.
 const StaleAfter = 3 * time.Minute
+
+// heartbeatEvery is how often the keepalive rewrites the status file while the
+// driver is busy. Well inside StaleAfter, so a reader with a clock skew of a
+// few seconds still sees a live driver as live.
+const heartbeatEvery = 30 * time.Second
+
+// startHeartbeat keeps the driver's heartbeat fresh for as long as it runs,
+// from a goroutine, because ONE TICK CAN BLOCK FOR MINUTES: the acceptance step
+// shells out to `rddev task accept`, which re-runs the gate suite and takes
+// about nine minutes — three times StaleAfter. Writing the heartbeat only
+// between ticks made a live driver read as "dead (heartbeat stale)" for most of
+// every acceptance, which is the one signal `rddev status` exists to report
+// honestly; it is also the moment a reader would be most tempted to restart a
+// driver that is in the middle of an acceptance.
+//
+// It re-reads and rewrites the status file rather than sharing the driver's
+// in-memory struct: two goroutines mutating one value need a lock at every one
+// of the seven sites that write it, and the file is already committed
+// atomically (writeFileAtomic), so the worst case here is a lost update of a
+// display field that the next tick rewrites anyway. A status file whose PID is
+// not ours — a driver that died and left the file, with another about to adopt
+// the slot — is left alone.
+func startHeartbeat(ctx context.Context, repoRoot string, pid int, every time.Duration) (stop func()) {
+	if every <= 0 {
+		every = heartbeatEvery
+	}
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				cur, err := ReadDriverStatus(repoRoot)
+				if err != nil || cur == nil || cur.PID != pid {
+					continue
+				}
+				cur.HeartbeatAt = nowRFC3339()
+				_ = WriteDriverStatus(repoRoot, cur)
+			}
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(done) }) }
+}
 
 // Alive reports whether the heartbeat is recent enough to believe.
 func (s *DriverStatus) Alive(now time.Time) bool {

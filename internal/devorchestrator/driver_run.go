@@ -110,6 +110,16 @@ func (o *DriveOpts) Drive(ctx context.Context) error {
 	_ = WriteDriverStatus(o.RepoRoot, st)
 	o.logf("started (pid %d, parallel %d)", st.PID, o.Parallel)
 
+	// The heartbeat is kept fresh on its own goroutine, not only between
+	// ticks: a tick can block for minutes. The acceptance step shells out to
+	// `rddev task accept`, which re-runs the gate suite and takes about nine
+	// minutes — three times StaleAfter — so a live driver reported "dead
+	// (heartbeat stale)" for most of every acceptance. The window means what
+	// its own comment says (driver.go: StaleAfter): silence is the process
+	// being gone, never merely busy.
+	stopHeartbeat := startHeartbeat(ctx, o.RepoRoot, st.PID, heartbeatEvery)
+	defer stopHeartbeat()
+
 	// Adoption, not assumption: whatever state the repository is in — Workers
 	// already running from a previous driver, a Worker that finished while
 	// nothing was watching, a decision left open — the first tick reads it from
