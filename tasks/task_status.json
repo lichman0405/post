@@ -3669,10 +3669,11 @@
       ]
     },
     "T0410": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-18T23:24:18Z",
       "worker_run_id": "run-64ee0b7843977529",
       "accepted_by_supervisor_at": "2026-09-19T01:35:29Z",
+      "merged_at": "2026-09-19T01:44:41Z",
       "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n**你的交付没有被判出任何缺陷。** 被拒的原因是：在你被评审的期间，main 往前走了，\n而 G2 验证的是「**当前 main + 本任务的完整改动**」，不是你这个 worktree 里那棵孤立的树。\n合不上是 Gate 在正确工作，不是你的错。\n\n## 发生了什么\n\n你的分支基底停在 `6445c7f`（T0804 的合并点）。在那之后 main 上了三笔：\n\n1. `66c5879` **T0807 Contribution Ledger projection** —— 它带迁移\n   `infra/migrations/00087_contribution_ledger_projection.sql`，并重写了\n   `internal/persistence/sqlc/models.go` 与 `internal/persistence/sqlc/events_audit.sql.go`；\n2. `8750c8b` 一笔 Supervisor 的账面落地（fork 的对外契约、五份任务书、两项等裁）——\n   它改了 `tasks/tasks.json` 与 `specs/**`，**规格指纹因此重算**；\n3. T1111 的合并（它没有带迁移）。\n\n## rddev 已经替你做完的（不要重做）\n\n`rddev rebaseline T0410` 把**生成物**从你的补丁里排除、把其余改动应用到当前 main、\n然后**重新生成**那些生成物——生成物是输入的函数，文本三方合并必然错（套你的旧值会还原一份\n描述旧规格的指纹，套 main 的会丢掉你的规格改动），唯一正确的解法是重算。\n\n所以现在：`specs/SPEC_VERSION.json`（当前 `sha256:47074d1d7706ebba`）、\n`specs/database/postgres.sql`、`internal/persistence/sqlc/**` 都是**在新基底上重新生成**的结果。\n你的迁移 `infra/migrations/00089_pull_request_creation_key.sql` 原样保留，号也没变。\n\n## 唯一一处真实的文本重叠，我已经试算过，但你要复核\n\n`tests/integration/migration_test.go`：T0807 改的是 `contribution_events` 与\n`research_events` 两张表的期望列与索引，你改的是 `pull_requests` 的。\n我用 `git merge-file` 做过三方合并，**退出码 0、零冲突块**——两侧改的是同一文件的不同位置。\n所以它合过来了，但**你必须亲自复核**：推进之后那个文件里**两套期望必须同时存在**\n（T0807 那两张表 + 你的 `pull_requests`）。缺任何一套都是这次推进引入的回归，\n而不是你的原始交付有问题。\n\n## 你要做的三件事\n\n1. **在新基底上重新验证**：把你在 RESULT 里声明过的验证全套重跑一遍，重点是\n   `tests/integration/migration_test.go`、`tests/integration/merge_governance_e2e_test.go`、\n   `tests/integration/pr_flow_e2e_test.go`，以及 `go build ./...` 与 `go vet ./...`。\n2. **重新提交 RESULT**：内容以**新树**为准。请在 RESULT 里明确记一句「本次为基线推进后的\n   重新验证」——改了什么、重跑了什么、结果如何。**不要把上一次的输出原样抄过来**：\n   抄过来的证据描述的是另一棵树。\n3. **不要为了「让 Gate 变绿」改动任何功能语义**。只有在重跑**真的红了**的时候才改，\n   并在 RESULT 里说明那处红是推进引入的、还是你原有的。\n\n## 范围不变\n\n`allowed_scope` 与 `forbidden_scope` 一个字都没变，按原任务包执行。\n",
       "history": [
         {
@@ -3721,6 +3722,13 @@
           "to": "accepted",
           "at": "2026-09-19T01:35:29Z",
           "run_id": "run-2b404922e2312507"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-19T01:44:41Z",
+          "run_id": "run-8f74fdfa6d3bc684",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -6146,10 +6154,10 @@
       ]
     },
     "T0806": {
-      "status": "verification",
-      "started_at": "2026-09-19T01:08:16Z",
-      "worker_run_id": "run-8c19a8850b11d800",
-      "rejection_reason": "collect rejected: result-consistency: result-tests: status completed but 2 test(s) not_run (make test-integration (the Makefile target rather than the direct go test above); pnpm --filter @post/web typecheck / pnpm --filter @post/web lint / bash scripts/web-unit-tests.sh / cd services/scientific-adapter && uv run pytest) and 0 test(s) failed () — a completed claim with unrun or failing tests is a contradiction; run them or report status blocked/failed",
+      "status": "running",
+      "started_at": "2026-09-19T03:00:33Z",
+      "worker_run_id": "run-c3f3d7fe3a0ea6de",
+      "rejection_reason": "# T0806 推进基线（rebaseline）——不是返工，是主库往前走了\n\n## 一句话\n\n你的交付没有被判出任何缺陷。被拒的原因是**主库往前走了**：你开工时的基线 `4403893` 现在落后\n**7 笔**，其中两笔带迁移（T0410 的 `00089`、T0901 的 `00090`）已经合进主库。\n`rddev rebaseline` 会把你的改动搬到新主库基线上，**你的代码一个字都不用改**——它只在搬不动\n的时候才需要你出手。\n\n## 主库在你开工之后发生了什么\n\n- `4bf4032` **T0410 已合入**：迁移 `00089`（`pull_requests.creation_key` 的部分唯一索引）、\n  `cmd/api/main.go` 挂了一条新路由、`tests/integration/migration_test.go` 多了一组表/索引期望。\n- `478cf05` **T0901 已合入**：迁移 `00090`（`search_projected_events` 投影游标表）、\n  `internal/search/**` 一整套投影器、`cmd/worker/main.go` 挂了消费者、`Makefile` 加了\n  `search-rebuild` 目标、`tests/integration/migration_test.go` **又多了一组期望**。\n- 若干笔监督侧提交：文档、CI 集成测试上限 10 分钟 → 20 分钟、orchestrator 措辞修正。\n  这些不碰你改的文件。\n\n**现在主库停在 `478cf05`，迁移到 `00090`。你的 `00091` 号没变，仍是下一个。**\n\n## 我预付过的账：改动面重叠\n\n我把「你的工作区」和「T0901 合并之后的主库」做过一次三方合并预演（`git merge-file`，在\nworktree **之外**跑的），每个有重叠的文件的结果：\n\n- `specs/database/postgres.sql` —— **生成物**，`rebaseline` 按规则**重新生成**，不走文本合并。\n- `specs/SPEC_VERSION.json` —— 同上，**生成物**，重新生成。\n- `tests/integration/migration_test.go` —— **唯一的真文本重叠**，预演 `exit=0`（无冲突）。\n  注意这个文件**已经叠了两轮**（T0410 一轮、T0901 一轮），所以你要复核的**不是两套期望、\n  而是三套**（见下）。\n- `cmd/api/main.go`（T0410 改过、你也改）—— 对当前主库预演 `exit=0`（无冲突）。这一类在本仓库\n  历史上出过「两边插在同一个 import 锚点后面」的冲突，**这次预演是干净的**。\n\n（预演用的尺子我先自检过：造一对必然冲突的输入，它给出 `exit=1`。**能说出「不」的尺子才算数。**）\n\n**所以正常情况下你不需要做任何事。** 如果 `git merge-file` 仍然要求你判断，那说明预演漏了\n什么，届时**以 `rddev rebaseline` 的实际报错为准，不要以我这封信为准**。\n\n## 你要做的事\n\n1. **复核 `tests/integration/migration_test.go` 里三套期望同时存在**：T0410 的 `pull_requests`\n   那一套、T0901 的 `search_projected_events` / `00090` 那一套、以及你自己的 `00091`。\n   缺任何一套都是这次推进引入的回归。文件里不应有任何冲突标记。\n2. **复核 `Makefile`**：它现在同时有 CI 那条 `-timeout 20m`（`test-integration` 配方里）\n   和 T0901 新加的 `search-rebuild` 目标及其 `.PHONY` 条目——两者都要在。\n3. **重新读一遍被重新生成的两个文件**（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`），\n   确认 `00089`、`00090`、`00091` 的对象都在里面。**生成物不许手工编辑**——发现问题告诉我，\n   不要自己改。\n4. **在新基底上重跑你任务书指定的那组测试**（external evidence 那套，外加你动过的\n   `tests/integration/append_only_test.go`、`knowledge_publish_test.go`、`migration_test.go`）。\n   基线动了，旧的红绿不算数。\n5. **重新提交 `RESULT.json`**，内容以**新树**为准：明确写一句「本次为基线推进后的重新验证」，\n   记清改了什么、重跑了什么、结果如何。**不要把上一次的输出原样抄过来**——抄过来的证据描述的是\n   另一棵树。\n\n## 记录约定（重申，免得又踩）\n\n`tests[]` **只列你真跑过的命令**。跑不了但仍算完成的门，写进 `risks` /\n`notes_for_supervisor`，并在那里说明「排除了什么、为什么」。**删了不说和写了没跑是同一类错误。**\n`not_run` 属于 `blocked` / `failed` 的报告。\n\n## 范围（不变）\n\n`allowed_scope` 与 `forbidden_scope` 一个字没改。上面提到的两个生成物是**规格里声明的派生产物**，\n覆盖它不算越界——但**方式只有重新生成这一种**。**不要为了「让 Gate 变绿」改动任何功能语义。**\n只有在重跑**真的红了**的时候才改，并在 RESULT 里说明那处红是推进引入的、还是你原有的。\n",
       "history": [
         {
           "from": "todo",
@@ -6184,6 +6192,20 @@
           "at": "2026-09-19T01:10:28Z",
           "run_id": "run-375693c63c6b4c61",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-19T03:00:32Z",
+          "run_id": "run-f04335b9ab61c473",
+          "reason": "# T0806 推进基线（rebaseline）——不是返工，是主库往前走了\n\n## 一句话\n\n你的交付没有被判出任何缺陷。被拒的原因是**主库往前走了**：你开工时的基线 `4403893` 现在落后\n**7 笔**，其中两笔带迁移（T0410 的 `00089`、T0901 的 `00090`）已经合进主库。\n`rddev rebaseline` 会把你的改动搬到新主库基线上，**你的代码一个字都不用改**——它只在搬不动\n的时候才需要你出手。\n\n## 主库在你开工之后发生了什么\n\n- `4bf4032` **T0410 已合入**：迁移 `00089`（`pull_requests.creation_key` 的部分唯一索引）、\n  `cmd/api/main.go` 挂了一条新路由、`tests/integration/migration_test.go` 多了一组表/索引期望。\n- `478cf05` **T0901 已合入**：迁移 `00090`（`search_projected_events` 投影游标表）、\n  `internal/search/**` 一整套投影器、`cmd/worker/main.go` 挂了消费者、`Makefile` 加了\n  `search-rebuild` 目标、`tests/integration/migration_test.go` **又多了一组期望**。\n- 若干笔监督侧提交：文档、CI 集成测试上限 10 分钟 → 20 分钟、orchestrator 措辞修正。\n  这些不碰你改的文件。\n\n**现在主库停在 `478cf05`，迁移到 `00090`。你的 `00091` 号没变，仍是下一个。**\n\n## 我预付过的账：改动面重叠\n\n我把「你的工作区」和「T0901 合并之后的主库」做过一次三方合并预演（`git merge-file`，在\nworktree **之外**跑的），每个有重叠的文件的结果：\n\n- `specs/database/postgres.sql` —— **生成物**，`rebaseline` 按规则**重新生成**，不走文本合并。\n- `specs/SPEC_VERSION.json` —— 同上，**生成物**，重新生成。\n- `tests/integration/migration_test.go` —— **唯一的真文本重叠**，预演 `exit=0`（无冲突）。\n  注意这个文件**已经叠了两轮**（T0410 一轮、T0901 一轮），所以你要复核的**不是两套期望、\n  而是三套**（见下）。\n- `cmd/api/main.go`（T0410 改过、你也改）—— 对当前主库预演 `exit=0`（无冲突）。这一类在本仓库\n  历史上出过「两边插在同一个 import 锚点后面」的冲突，**这次预演是干净的**。\n\n（预演用的尺子我先自检过：造一对必然冲突的输入，它给出 `exit=1`。**能说出「不」的尺子才算数。**）\n\n**所以正常情况下你不需要做任何事。** 如果 `git merge-file` 仍然要求你判断，那说明预演漏了\n什么，届时**以 `rddev rebaseline` 的实际报错为准，不要以我这封信为准**。\n\n## 你要做的事\n\n1. **复核 `tests/integration/migration_test.go` 里三套期望同时存在**：T0410 的 `pull_requests`\n   那一套、T0901 的 `search_projected_events` / `00090` 那一套、以及你自己的 `00091`。\n   缺任何一套都是这次推进引入的回归。文件里不应有任何冲突标记。\n2. **复核 `Makefile`**：它现在同时有 CI 那条 `-timeout 20m`（`test-integration` 配方里）\n   和 T0901 新加的 `search-rebuild` 目标及其 `.PHONY` 条目——两者都要在。\n3. **重新读一遍被重新生成的两个文件**（`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`），\n   确认 `00089`、`00090`、`00091` 的对象都在里面。**生成物不许手工编辑**——发现问题告诉我，\n   不要自己改。\n4. **在新基底上重跑你任务书指定的那组测试**（external evidence 那套，外加你动过的\n   `tests/integration/append_only_test.go`、`knowledge_publish_test.go`、`migration_test.go`）。\n   基线动了，旧的红绿不算数。\n5. **重新提交 `RESULT.json`**，内容以**新树**为准：明确写一句「本次为基线推进后的重新验证」，\n   记清改了什么、重跑了什么、结果如何。**不要把上一次的输出原样抄过来**——抄过来的证据描述的是\n   另一棵树。\n\n## 记录约定（重申，免得又踩）\n\n`tests[]` **只列你真跑过的命令**。跑不了但仍算完成的门，写进 `risks` /\n`notes_for_supervisor`，并在那里说明「排除了什么、为什么」。**删了不说和写了没跑是同一类错误。**\n`not_run` 属于 `blocked` / `failed` 的报告。\n\n## 范围（不变）\n\n`allowed_scope` 与 `forbidden_scope` 一个字没改。上面提到的两个生成物是**规格里声明的派生产物**，\n覆盖它不算越界——但**方式只有重新生成这一种**。**不要为了「让 Gate 变绿」改动任何功能语义。**\n只有在重跑**真的红了**的时候才改，并在 RESULT 里说明那处红是推进引入的、还是你原有的。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-19T03:00:33Z",
+          "run_id": "run-c3f3d7fe3a0ea6de",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -6368,10 +6390,12 @@
       "merged_at": null
     },
     "T0901": {
-      "status": "accepted",
-      "started_at": "2026-09-18T23:25:47Z",
-      "worker_run_id": "run-3e4676e9772a5d83",
-      "accepted_by_supervisor_at": "2026-09-19T01:26:21Z",
+      "status": "merged",
+      "started_at": "2026-09-19T01:45:22Z",
+      "worker_run_id": "run-3b2071140b23d9c5",
+      "accepted_by_supervisor_at": "2026-09-19T02:24:58Z",
+      "merged_at": "2026-09-19T02:59:55Z",
+      "rejection_reason": "# 基线推进：你没有缺陷，是 main 往前走了\n\n**你的交付没有被判出任何缺陷，评审也给了 approve。** 被拒的原因是：在你收工与评审期间，\nmain 往前走了，而 G2 验证的是「**当前 main + 本任务的完整改动**」，不是你这个 worktree 里\n那棵孤立的树。合不上是 Gate 在正确工作，不是你的错。\n\n## 发生了什么\n\n你的基底停在 `4403893`。在那之后 main 上了五笔：\n\n1. `ab8ff34` —— 修工人规则书与验收器打架（只动 `internal/devorchestrator/**`）；\n2. `f206d9a`、`ab52d88`、`75aef6a` —— 账面（`tasks/**`）；\n3. `d3abb0b` —— 集成测试上限从 10 分钟改到 20 分钟（**动了 `Makefile`**）；\n4. `4bf4032` —— **T0410 合并**（PR #286）。它带迁移 `00089`，并改写了\n   `specs/database/postgres.sql`、`specs/SPEC_VERSION.json` 与\n   `tests/integration/migration_test.go`。\n\n## rddev 已经替你做完的（不要重做）\n\n`rddev rebaseline T0901` 把**生成物**从你的补丁里排除、把其余改动应用到当前 main，\n然后**重新生成**那些生成物——生成物是输入的函数，文本三方合并必然错（套你的旧值会还原\n一份描述旧规格的指纹，套 main 的会丢掉你的规格改动），唯一正确的解法是重算。\n\n所以现在 `specs/database/postgres.sql`、`specs/SPEC_VERSION.json` 都是**在新基底上重新\n生成**的结果。你的迁移 `infra/migrations/00090_search_projection_consumer.sql` 原样保留，\n号也没变（`00090`，不许自选别的号）。\n\n## 两处真实的文本重叠：我试算过，但你要自己复核\n\n1. **`Makefile`** —— `d3abb0b` 改的是 `test-integration` 那条配方（约 91–100 行）；\n   你加的是 `migrate` 之后的新目标 `search-rebuild`（约 82 行起）与 `.PHONY` 那一行。\n2. **`tests/integration/migration_test.go`** —— T0410 加的是 `pull_requests` 相关的期望；\n   你加的是 `00090` 与搜索投影相关的期望。\n\n我用 `git merge-file` 做过三方合并，**两处都是退出码 0、零冲突块**（两侧改的是同一文件的\n不同位置）。所以它们合过来了，但**你必须亲自复核**：推进之后，**两套期望必须同时存在**\n（T0410 的 `pull_requests` + 你的 `00090`/搜索那套）。缺任何一套都是这次推进引入的回归，\n而不是你的原始交付有问题。\n\n## 你要做的三件事\n\n1. **在新基底上重新验证**：把 RESULT 里声明过的验证全套重跑一遍。至少包含\n   `go build ./...`、`go vet ./...`、你新增的 `internal/search` 与 `internal/events` 测试、\n   `tests/integration/search_projection_test.go`、`tests/integration/migration_test.go`，\n   以及你那条指定测试（`search projection`，含 `make search-rebuild` 的幂等性）。\n2. **重新提交 RESULT**，内容以**新树**为准，并明确记一句「本次为基线推进后的重新验证」：\n   改了什么、重跑了什么、结果如何。**不要把上一次的输出原样抄过来**——抄过来的证据\n   描述的是另一棵树。\n3. **不要为了让 Gate 变绿改动任何功能语义**。只有重跑**真的红了**才改，并在 RESULT 里\n   说明那处红是推进引入的、还是你原有的。\n\n## 范围不变\n\n`allowed_scope` 与 `forbidden_scope` 一个字都没变，按原任务包执行。\n",
       "history": [
         {
           "from": "todo",
@@ -6398,6 +6422,40 @@
           "to": "accepted",
           "at": "2026-09-19T01:26:21Z",
           "run_id": "run-ed023665c2f4ff7d"
+        },
+        {
+          "from": "accepted",
+          "to": "rejected",
+          "at": "2026-09-19T01:45:21Z",
+          "run_id": "run-c6e239e66e3a757f",
+          "reason": "# 基线推进：你没有缺陷，是 main 往前走了\n\n**你的交付没有被判出任何缺陷，评审也给了 approve。** 被拒的原因是：在你收工与评审期间，\nmain 往前走了，而 G2 验证的是「**当前 main + 本任务的完整改动**」，不是你这个 worktree 里\n那棵孤立的树。合不上是 Gate 在正确工作，不是你的错。\n\n## 发生了什么\n\n你的基底停在 `4403893`。在那之后 main 上了五笔：\n\n1. `ab8ff34` —— 修工人规则书与验收器打架（只动 `internal/devorchestrator/**`）；\n2. `f206d9a`、`ab52d88`、`75aef6a` —— 账面（`tasks/**`）；\n3. `d3abb0b` —— 集成测试上限从 10 分钟改到 20 分钟（**动了 `Makefile`**）；\n4. `4bf4032` —— **T0410 合并**（PR #286）。它带迁移 `00089`，并改写了\n   `specs/database/postgres.sql`、`specs/SPEC_VERSION.json` 与\n   `tests/integration/migration_test.go`。\n\n## rddev 已经替你做完的（不要重做）\n\n`rddev rebaseline T0901` 把**生成物**从你的补丁里排除、把其余改动应用到当前 main，\n然后**重新生成**那些生成物——生成物是输入的函数，文本三方合并必然错（套你的旧值会还原\n一份描述旧规格的指纹，套 main 的会丢掉你的规格改动），唯一正确的解法是重算。\n\n所以现在 `specs/database/postgres.sql`、`specs/SPEC_VERSION.json` 都是**在新基底上重新\n生成**的结果。你的迁移 `infra/migrations/00090_search_projection_consumer.sql` 原样保留，\n号也没变（`00090`，不许自选别的号）。\n\n## 两处真实的文本重叠：我试算过，但你要自己复核\n\n1. **`Makefile`** —— `d3abb0b` 改的是 `test-integration` 那条配方（约 91–100 行）；\n   你加的是 `migrate` 之后的新目标 `search-rebuild`（约 82 行起）与 `.PHONY` 那一行。\n2. **`tests/integration/migration_test.go`** —— T0410 加的是 `pull_requests` 相关的期望；\n   你加的是 `00090` 与搜索投影相关的期望。\n\n我用 `git merge-file` 做过三方合并，**两处都是退出码 0、零冲突块**（两侧改的是同一文件的\n不同位置）。所以它们合过来了，但**你必须亲自复核**：推进之后，**两套期望必须同时存在**\n（T0410 的 `pull_requests` + 你的 `00090`/搜索那套）。缺任何一套都是这次推进引入的回归，\n而不是你的原始交付有问题。\n\n## 你要做的三件事\n\n1. **在新基底上重新验证**：把 RESULT 里声明过的验证全套重跑一遍。至少包含\n   `go build ./...`、`go vet ./...`、你新增的 `internal/search` 与 `internal/events` 测试、\n   `tests/integration/search_projection_test.go`、`tests/integration/migration_test.go`，\n   以及你那条指定测试（`search projection`，含 `make search-rebuild` 的幂等性）。\n2. **重新提交 RESULT**，内容以**新树**为准，并明确记一句「本次为基线推进后的重新验证」：\n   改了什么、重跑了什么、结果如何。**不要把上一次的输出原样抄过来**——抄过来的证据\n   描述的是另一棵树。\n3. **不要为了让 Gate 变绿改动任何功能语义**。只有重跑**真的红了**才改，并在 RESULT 里\n   说明那处红是推进引入的、还是你原有的。\n\n## 范围不变\n\n`allowed_scope` 与 `forbidden_scope` 一个字都没变，按原任务包执行。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-19T01:45:22Z",
+          "run_id": "run-3b2071140b23d9c5",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-19T02:08:13Z",
+          "run_id": "run-3cabf4e8b5f6d205",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-19T02:24:58Z",
+          "run_id": "run-7e34ec3cf4f61ceb"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-19T02:59:55Z",
+          "run_id": "run-ff070fdc57dba197",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },

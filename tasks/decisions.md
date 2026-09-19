@@ -12732,3 +12732,166 @@ CI 接线（`ci.yml` + `gates.json`）按裁定五是我的活，而 `gates.json
 其余一律 `AudienceNone`——**与裁定 1、2 一致**。fail-closed 的默认分支
 （`projectedVisibility`：两边都为 public 才 public）读过了，写法正确。
 指定测试我另起一遍独立跑。
+
+## 2026-09-19 T0708 侦察：一半我能定（已落 ADR-023），一半要 owner 一句话
+
+**起因**：核「哪些任务在等我」。T0708（Asset Fork/Derive + Lineage，`docs/31:23` 的
+主验收项）卡在一句我自己写下的判语上——「它先要一次 L2 裁定」。今天把证据补齐了，
+结论是**它其实是两半，只有一小半是 L3**。
+
+**（一）我已定并落 ADR-023（L2，与权限无关）**：Fork/Derive 是一次**动作**，创建新的
+asset version，并在同一事务往 `asset_lineage` 写**一条**边。**不是**发布清单上的一个字段。
+三条依据都自己核过：
+
+- `docs/11:27` 要的是「创建新的 Asset/Object identity」——清单字段创建不了 identity；
+- `research_asset_versions.origin_refs` 装不下：词表是**封闭四类**
+  （`project`/`release`/`state`/`object_version`，`internal/assets/origin.go`），
+  回答的是「**发布自**什么」，且**发布后不可变**，记不了此后才发生的派生；
+- `asset_lineage`（`00010:49-54`）就是为这件事建的表，`forked_from`/`derived_from`/
+  `supersedes` 已在其 CHECK 里，而 `00086_external_fork.sql` 头部**逐字**说明项目级 fork
+  归 `project_forks`、**资产级那一半留给 `asset_lineage`**。
+
+顺带记下一条**不合并**的决定：`asset_lineage` 用 `derived_from`，领域关系目录
+（`docs/44:9`、`internal/rsg/relationcatalog/catalog.go:106`）用 `derived_asset_from`。
+两个主体两张表，**保持不同**，已在 ADR-023 里写死。
+
+**（二）「谁可以派生」不是 L3——规格已经答了**，我先前那句「先要一次 L2 裁定」说得太粗。
+`docs/02_V1_SCOPE.md:8` 把「被其他项目**引用、Fork**、依赖」列为 **V1 必须证明的产品假设**，
+`:41` 又把 `Fork/Derive` 列进 Asset 必做功能。加上既有的格：新版本落在「调用者有发布权的
+项目」（`permissions-matrix.csv` 的 `publish_private_to_public`：非成员/观察者/贡献者
+一律 deny，维护者 conditional、所有者 allow），源版本对调用者**可读**（既有可见性规则），
+Agent 自然被挡（该格 agent 是 deny）。**全部落在既有格上，不需要发明任何新语义。**
+
+**（三）真正需要 owner 一句话的，只有一处**——「发布方对 `usage.derivatives` 声明
+**`unspecified`** 时，派生放行还是挡住？」
+
+这**不能由我定**，理由是仓库存档自己写死了不许我猜：
+
+- `internal/rights/usage.go` 的包注释逐字：`"unspecified" is a real answer, not a missing
+  one`，并且**同时否定了两种坍缩**——「collapsing the two would **invent a permission nobody
+  granted**」，同时 UI 也不得把它渲染成「a green light」。也就是说：当 `restricted` 用是
+  发明了一条没人声明的禁令，当 `allowed` 用是发明了一条没人给的许可。
+- `docs/12 §4` 逐字「字段不替代法律合同」；`internal/rights/doc.go` 逐字「the platform
+  records the declaration and **does not judge it**」。
+- **全仓库没有任何先例**：`grep -rn 'Derivatives|CommercialUse|ModelTraining|Redistribution'`
+  在 `internal/`、`cmd/` 的非测试代码里**零命中**（除 rights 包自己的定义与校验）——
+  没有任何地方拿使用声明做过允许/拒绝判定。
+
+而 T0708 的验收里那条「**禁止 rights 不允许的 derive**」正要求这种判定。**这是权限/法律
+语义，按 §5 属 L3**，故标记 `SPEC_BLOCKED` 等一句话，不自行选边。
+
+**代价如实记下**：`unspecified` 是**默认值**（`document.go:107-121` 的新文档模板就是
+`Derivatives: PermissionUnspecified`）。所以这一句话**决定这个功能对绝大多数资产是否可用**：
+选「挡住」等于要求发布方逐条显式opt-in，选「放行」等于平台对沉默不设障碍。两种都是自洽产品，
+不是工程对错——所以归 owner。
+
+**我已经做完的**：ADR-023 已落（`docs/adr/`，不在规格指纹里）。T0708 的任务包**先不写**——
+把答案留白再派工，等于请工人替我猜。等一句话，随后即刻成书派工。
+
+### 工位为什么在空转，以及 T1203 的任务书是坏的（同一天，排队时的核查）
+
+今天 10:09 只有一名评审工人在跑，**三个业务工位全空**。我按 §2「并行仅用于互不阻塞、
+冲突面可控」逐条核过 `todo` 里依赖已全部合完的任务（T0608/T0808/T0809/T0811/T0813/
+T0814/T0816/T1007/T1203 共 9 个），**结论是空转不是漏派**：
+
+- 在途的 T0901 与 T0806 **扇面极大**——两者合起来覆盖 `internal/persistence/**`、
+  `internal/application/**`、`internal/domain/**`、`internal/events/**`、`cmd/api/**`、
+  `cmd/worker/**`、`infra/migrations/**`。上列 9 个里 **8 个**都落在这个扇面内。
+- 剩下的 T1203 与在途任务**零文件重叠**（`tests/acceptance/**`、`tests/e2e/**`、`ops/**`、
+  `docs/**`、`examples/**`），本来是可派的——**但它的任务书是坏的**，见下。
+
+**T1203「Staging 部署模板」的核心缺陷（已核实，不是猜）**：
+
+1. 它的验收写「干净 staging 可按 runbook 部署」，要求写
+   「Docker production compose 或 k8s manifests」——**这需要应用镜像**。
+2. 但**全仓库一个 `Dockerfile` 都没有**：`find . -iname 'Dockerfile*'` 零命中（排除 `.git`）。
+3. 根 `docker-compose.yml` 是**本地开发基础设施**，不是应用编排；CLAUDE.md §7 逐字
+   「Local infra：Docker Compose；**应用 host-native 运行**」。
+4. 而 T1203 的 `allowed_scope` 只有 `tests/acceptance/**`、`tests/e2e/**`、`ops/**`、
+   `docs/**`、`examples/**`——**造镜像（Dockerfile、构建目标）不在其中**。
+
+所以照现在的任务书派工，工人只有两条路：**越界写 Dockerfile**（会被范围校验拒收），
+或者**返回 blocked**。两条都白烧一个工位。
+
+**顺带一处与总规约打架**：`allowed_scope` 里含 `docs/**`，而 §8.1 逐字「其余 `specs/**` 与
+`docs/**` 仍为 Supervisor-only」。这条目前**没有机械校验**（范围校验只看 diff 是否落在
+allowed_scope 内），所以它不会拦下工人，但会让工人写出「合规却不该写」的文件。
+
+**处置**：**不派**。理由不止上面两条——T1203 是 P12 最后一个阶段，staging 模板要引用的
+服务接口在 P8–P11 还会变，现在写出来等用的时候就是过期的。**任务书重写（补 Dockerfile
+前置任务或扩范围、去掉 `docs/**`）排进空窗**，与 `tasks/tasks.json` 的其他改动一批做——
+单独改 `tasks/tasks.json` 会移动规格指纹，**红色主库并连坐在途任务的 G2**。
+
+**结论**：当前真正的瓶颈是**在途两个任务的扇面太大**，而不是派工不足。正确的动作是
+尽快把 T0901、T0806 收掉，把扇面打开——不是拿工位去开 P12 的推测性工作。
+
+### T0901 的独立评审：approve，1 major 记入不拒收
+
+评审工人另起了一个**全新迁移的库**（66 个迁移）、手工播了 **12 个覆盖全部四类实体与全部
+可见性轴**的实体，再跑运维入口 `make search-rebuild` 对着它验：投影出的可见性**12 例逐条
+命中 fail-closed 预测**（含「公开项目里的私有 branch 上的 state」「private project 里的
+release」「钉了 `visibility_policy_id` 的知识出版物」「rights metadata 不是 project_policy
+的那种」）；空 scope 的规范查询**只返回 4 行 public、从不返回整表**；种进去的鬼行被清掉
+（`removed=13` 然后 `12`，与 `RebuildReport.Removed` 文档里的语义一致）；第二遍结果相同；
+**所有行的 `embedding` 保持 NULL**。它自己也重跑了那 6 条新集成测试（`ok 36.691s`）与
+既有 `TestSearchDocumentsEnforcesAccessControl`。
+
+**裁定：approve。** 那条 major 是**已披露的契约缺口**——任务书点名 6 种事件类型，投影只映射了
+**有生产者的那 4 种**；另外两种被**消费并计入 `PassReport.Unmapped`**，且每种只告警一次。
+它不是隐藏的（`RESULT.json` 里两条都记为 follow-up），而且今天**没有生产者会发它们**
+（其中一条的生产者归 T0806——任务包 `tasks/packages/T0806.json` 自己写着「目前没有生产者」）。
+今天映射它们等于**猜 payload 键和实体轴**，而任务书明令「按已有拼法投影，不要加新事件类型」。
+按 `Reject vs record`：**记录，不拒收**。
+
+**评审的风险 #3 我自己查实了，它比字面看起来轻——不是活漏洞**。风险原文说「项目从公开改私有
+若不发自己的事件，检索行会一直以公开身份被检出去」，而查询的闸门确实就是行上的
+`visibility` 列（`docs/23 §5`、`search_access_test.go` 头部注释逐字「returns a row only if it is
+public or its project is in that scope」）。**但今天没有任何应用路径能改项目可见性**：
+
+- `project.visibility_changed` **在 `specs/events/event-types.yaml:13` 声明了，全仓无人发**
+  （`.go`/`.yaml`/`.sql` 全查，只有那一行 YAML）。
+- `UPDATE projects SET visibility` 在**生产代码里零命中**，只出现在测试夹具
+  （`inbox_test.go`、`subscription_test.go`、`email_digest_test.go`、`asset_preview_test.go`）。
+- `UpdateProjectSettings` 的参数只有 purpose + activity_status，
+  `internal/application/projects/settings.go` 逐字「UpdateSettings refuses any visibility
+  change until the publishing guard lands」，返回 `ErrVisibilityChangeNotSupported`。
+
+所以这是**跨任务的耦合要求，不是本任务的缺陷**：**将来做「项目可见性变更 / 发布守卫」的那个
+任务，必须同时发出 `project.visibility_changed` 并把它接进投影规则**（否则就是真的活漏洞）。
+仓库今天**还没有任何任务认领「项目可见性变更」**——我查过任务表，`publish_private_to_public`
+这个动作只被 T0705（资产发布）与 T0805（知识发布）用过，**都是资产/知识级的发布，不是项目级的
+可见性变更**。这条记在这里等立账。
+
+**其余 3 minor + 2 nit 一并记录，不阻断**：
+
+1. **minor** `cmd/worker/main.go:161`：`search.rebuild` 这个 job type **没注册自己的超时**，
+   于是继承 `worker.DefaultTimeout`（30 秒），而 `docs/52 §17` 要求每种 job type 有自己的
+   超时。大库上重建超过 30 秒 → context 取消 → 单事务回滚（**安全，不会有半截状态**）→
+   重试 3 次后进 dead-letter，**要运维自己发现**。测试里看不见（夹具索引太小）。
+   `-search-rebuild` 那条命令行路径不受影响。**这是要补的真活**。
+2. **minor** `infra/migrations/00090:62`：把 `subscriptions.target_id` 从
+   `knowledge_publications.id` 改写成 `kp.pid` 的那段数据步骤，**只在「本来就没有知识订阅行」
+   的测试库上跑过**，所以**在有数据的部署上的升级路径未经验证**。Goose 把迁移包在一个事务里，
+   中途失败会整体回滚而不是改一半——这一层是安全的。V1 尚无已部署的实例，故记账不阻断。
+3. **minor** `internal/search/projection.go:284`：`payloadString` 与 26 位 pid 正则
+   **重复实现了** `internal/events/subscription.go:370` 与 `:139` 的同名物。今天逐字相同、
+   没有行为分叉，但将来改 pid 字母表或 payload 读取约定**必须改两处，否则投影与订阅校验会
+   静默漂移**。（这条与更早记下的 helper 重复风险是同一件。）
+4. **nit** `Makefile:98`：`search-rebuild` 用 shell 模式匹配从 `POSTGRES_TEST_ADMIN_URL`
+   拆 `POST_DB_*`，假定 `user:password@host:port/db` 形状；无密码或 URL 编码凭据的合法 URL
+   会拆错、之后报一个看不懂的连接/认证错。已文档化的流程都带密码，拆错也不会**静默连到
+   另一个库**，所以是表面问题。
+5. **nit** `internal/search/projector.go:126`：**major 那条所依赖的 `PassReport.Unmapped`
+   记账本身没有测试**——套件里唯一的引用（`search_projection_test.go:398`）断言它在映射路径
+   跑完后是**空**的，没有任何单测喂一个无规则的事件类型进去。**一条针对 `project()` 的单测
+   就能把这个披露永久钉住。** 这条要补。
+
+**一并纠正我自己一个不准确的说法**：我在 T0901 的 G2 笔记里写过「`make search-rebuild` 是个
+没有确认的 TRUNCATE 隐患」——**夸大了，撤回**。读了 `internal/search/rebuild.go:54-90`：
+TRUNCATE 与重新推导在**同一个事务**里，失败整体回滚（`defer tx.Rollback`），**读者看不到索引
+被清空**；而且 `tests/integration/append_only_truncate_test.go:117-121` **明确断言对
+`search_documents` 的 TRUNCATE 必须成功**（注释逐字「the guard is too broad」就会红），
+即这张表是**派生态、按设计可变**，`00015` 那套 append-only 防线是**定向的**。真正该交账的是
+另一件事、且代码自己写了（`rebuild.go:40-50`）：**重建把 `embedding` 置 NULL**——今天全库向量
+本来就是空的，无损失；**等 T0902 填上向量之后，第一次重建会把它们抹掉，那就是检索回退**。
+这条已写在代码与 `RESULT.json` 里，不是隐藏的。
