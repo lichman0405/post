@@ -95,6 +95,8 @@ type EvidenceAssertion struct {
 	ReviewState             string             `json:"review_state"`
 	CreatedBy               pgtype.UUID        `json:"created_by"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	EvidenceOrigin          string             `json:"evidence_origin"`
+	Visibility              string             `json:"visibility"`
 }
 
 type Issue struct {

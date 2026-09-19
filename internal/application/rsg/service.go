@@ -42,6 +42,7 @@ type Service struct {
 	latest         LatestStatePort
 	objects        ObjectPort
 	relations      RelationPort
+	evidence       EvidencePort
 	queries        QueryPort
 	profiles       ProfilePort
 	schemaProfiles ProfileResolver
@@ -62,12 +63,17 @@ type Service struct {
 // states guard: an unwired recorder fails the write rather than drop its
 // events.
 type Deps struct {
-	Projects       ProjectGate
-	Branches       BranchPort
-	States         StatePort
-	Latest         LatestStatePort
-	Objects        ObjectPort
-	Relations      RelationPort
+	Projects  ProjectGate
+	Branches  BranchPort
+	States    StatePort
+	Latest    LatestStatePort
+	Objects   ObjectPort
+	Relations RelationPort
+	// Evidence is the evidence-assertion slice (T0806). Optional to
+	// construct; a service wired without one refuses an evidence write
+	// rather than guessing (fail closed), like every other missing
+	// adapter here.
+	Evidence       EvidencePort
 	Queries        QueryPort
 	Profiles       ProfilePort
 	SchemaProfiles ProfileResolver
@@ -91,6 +97,7 @@ func NewService(deps Deps) *Service {
 		latest:         deps.Latest,
 		objects:        deps.Objects,
 		relations:      deps.Relations,
+		evidence:       deps.Evidence,
 		queries:        deps.Queries,
 		schemaProfiles: deps.SchemaProfiles,
 		profiles:       deps.Profiles,

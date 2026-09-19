@@ -3,14 +3,17 @@ package rsg
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/lichman0405/post/internal/application/branches"
+	"github.com/lichman0405/post/internal/application/knowledgepublish"
 	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/application/relations"
 	"github.com/lichman0405/post/internal/application/sciobjects"
 	"github.com/lichman0405/post/internal/application/states"
 	"github.com/lichman0405/post/internal/domain"
 	"github.com/lichman0405/post/internal/events"
+	"github.com/lichman0405/post/internal/rights"
 )
 
 // Ports (docs/52: application orchestrates against ports; adapters live in
@@ -119,6 +122,35 @@ type RelationPort interface {
 	// endpoint display labels resolved (the object detail page's relations
 	// tab); empty when the object has no relations.
 	ListVersionsForObject(ctx context.Context, projectID, objectID string) ([]ObjectRelationVersion, error)
+}
+
+// EvidencePort is the evidence-assertion slice the RSG service needs
+// (T0806). The production implementation is persistence.EvidenceStore;
+// CreateEvidenceAssertionInTx runs on the commit transaction, like the
+// object and relation writes.
+//
+// The evidence GRAPH stays separate from the RSG relation graph (domain
+// invariant 10): the write below lands an evidence_assertions row and
+// never a relations row, and the reads are the evidence table's own.
+type EvidencePort interface {
+	// CreateEvidenceAssertionInTx writes the assertion row on the commit
+	// transaction. state_id is the transition the assertion was created
+	// in (docs/10 §3's "created transition"), so the assertion is
+	// traceable to the commit that carries it like every other member
+	// row.
+	CreateEvidenceAssertionInTx(ctx context.Context, tx states.Transaction, in CreateEvidenceAssertionInTxParams) (EvidenceAssertionRow, error)
+	// GetVersionProjectFacts resolves one version's owning project through
+	// the object it belongs to (scientific_object_versions ->
+	// scientific_objects -> projects), with the version's own visibility
+	// axis. It answers sciobjects.ErrVersionNotFound for a version that
+	// does not exist — the same outcome for every caller, so a version of
+	// another project is not distinguishable from a missing one.
+	GetVersionProjectFacts(ctx context.Context, objectVersionID string) (VersionProjectFacts, error)
+	// GetKnowledgePublicationForVersion returns the publication a version
+	// carries, and false when it carries none. It applies NO audience
+	// filter: the rule is knowledgepublish.AudienceFor and the caller
+	// applies it, exactly as the public read does.
+	GetKnowledgePublicationForVersion(ctx context.Context, objectVersionID string) (KnowledgePublicationFacts, bool, error)
 }
 
 // ProfilePort resolves display handles for creator ids — the detail page
@@ -242,6 +274,107 @@ type CreateRelationInTxParams struct {
 	RelationID string
 	ProjectID  string
 	Version    relations.VersionParams
+}
+
+// CreateEvidenceAssertionInTxParams carries one evidence assertion into the
+// commit transaction. Unlike an object or a relation it has no version log —
+// the row IS the assertion, and it is append-only at the storage layer
+// (migration 00091's DELETE guard), so there is nothing to bump. ID is
+// pre-generated for the same reason the object and relation ids are: the
+// commit's operation summary names the real row (commit_linkage), and the
+// column accepts an explicit id (its default is only for writers that have
+// no commit to name it in).
+//
+// EvidenceOrigin and Visibility are SERVER-DERIVED, never client input: the
+// service resolves the two axes (the project comparison, and the asserting
+// project's/branch's/cited version's visibility) before the store is
+// reached, and 00091's header says why the read side recomputes the first
+// of them rather than trusting this record.
+type CreateEvidenceAssertionInTxParams struct {
+	ID        string
+	ProjectID string
+	// StateID is the commit's state — the transition the assertion was
+	// created in (docs/10 §3).
+	StateID                 string
+	TargetObjectVersionID   string
+	EvidenceObjectVersionID string
+	RelationType            string
+	EvidenceType            string
+	Scope                   json.RawMessage
+	Directness              string
+	InferenceNature         string
+	ReasoningNote           string
+	CreatedBy               string
+	EvidenceOrigin          string
+	Visibility              string
+}
+
+// EvidenceAssertionRow is one stored assertion as the store hands it back:
+// the row's own facts, no derived class (the three network classes are
+// computed — see internal/domain.ClassifyEvidenceNetwork).
+type EvidenceAssertionRow struct {
+	ID                      string
+	ProjectID               string
+	StateID                 string
+	TargetObjectVersionID   string
+	EvidenceObjectVersionID string
+	RelationType            string
+	EvidenceType            string
+	Scope                   json.RawMessage
+	Directness              string
+	InferenceNature         string
+	ReasoningNote           string
+	ReviewState             string
+	EvidenceOrigin          string
+	Visibility              string
+	CreatedBy               string
+	CreatedAt               time.Time
+}
+
+// VersionProjectFacts is one version's owning project chain: the version,
+// the object it belongs to and the project that owns the object. Both ends
+// of an assertion are resolved with this shape — the target end decides
+// origin vs external (docs/10 §7 axis 1) and the evidence end answers the
+// same question about the cited version.
+type VersionProjectFacts struct {
+	ObjectVersionID string
+	ObjectID        string
+	ObjectType      string
+	// ProjectID is the owning project's id, and ProjectVisibility its
+	// preset (projects.visibility).
+	ProjectID         string
+	ProjectVisibility string
+	// VisibilityPolicyID is the VERSION's own visibility axis
+	// (scientific_object_versions.visibility_policy_id); nil inherits the
+	// project's preset.
+	VisibilityPolicyID *string
+}
+
+// KnowledgePublicationFacts is the publication a version carries, with
+// every input knowledgepublish.AudienceFor decides on. The store parses the
+// stored rights document; RightsValid is false when the stored bytes are not
+// a document this build can read, and AudienceFor refuses such a document
+// rather than treating it as a licence to publish.
+type KnowledgePublicationFacts struct {
+	ID              string
+	PID             string
+	PublicVersion   string
+	ObjectVersionID string
+	ProjectID       string
+	// ProjectVisibility is the OWNING project's preset and
+	// VisibilityPolicyID the version's own axis — the same two facts the
+	// public read resolves, so a publication's audience has one definition
+	// wherever it is asked.
+	ProjectVisibility  string
+	VisibilityPolicyID *string
+	Rights             rights.Document
+	RightsValid        bool
+}
+
+// Audience is the audience of the resolved publication, by the one rule
+// (knowledgepublish.AudienceFor) — never a second spelling of it.
+func (p KnowledgePublicationFacts) Audience() knowledgepublish.Audience {
+	return knowledgepublish.AudienceFor(p.ProjectVisibility, p.VisibilityPolicyID, p.Rights)
 }
 
 // Command inputs (the transport decodes JSON into these and the service

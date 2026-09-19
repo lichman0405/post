@@ -13,6 +13,7 @@ import (
 
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/internal/application/authn"
+	"github.com/lichman0405/post/internal/application/evidencenetwork"
 	"github.com/lichman0405/post/internal/application/knowledgepublish"
 	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/domain"
@@ -138,6 +139,30 @@ func (f *fakeMembers) GetMembership(_ context.Context, _ domain.User, projectID 
 	}
 }
 
+// fakeEvidence is the evidence-network read (T0806): the rows it answers
+// with, the truncation flag, and what it was asked for — so a case can pin
+// that the read is scoped to the PUBLISHED version and to the project that
+// owns it.
+type fakeEvidence struct {
+	rows      []evidencenetwork.Assertion
+	truncated bool
+	err       error
+
+	gotVersion string
+	gotProject string
+	gotLimit   int
+	calls      int
+}
+
+func (f *fakeEvidence) ListPublishedEvidence(_ context.Context, targetObjectVersionID, targetProjectID string, limit int) ([]evidencenetwork.Assertion, bool, error) {
+	f.calls++
+	f.gotVersion, f.gotProject, f.gotLimit = targetObjectVersionID, targetProjectID, limit
+	if f.err != nil {
+		return nil, false, f.err
+	}
+	return f.rows, f.truncated, nil
+}
+
 // server is the composed surface: the real auth guard (so the
 // session/CSRF rule is the production one, not a stub) over a mux carrying
 // this package's three routes.
@@ -150,6 +175,7 @@ type server struct {
 	members *fakeMembers
 	command *fakePublish
 	read    *fakeRead
+	network *fakeEvidence
 }
 
 // newServer composes the surface and signs up one session, so that every
@@ -207,10 +233,12 @@ func newServer(t *testing.T, deps Deps) *server {
 		members: membersOf(deps.Members),
 		command: publishOf(deps.Publish),
 		read:    readOf(deps.Read),
+		network: evidenceOf(deps.Evidence),
 	}
 }
 
-// gateOf, membersOf, publishOf and readOf recover the fakes from Deps.
+// gateOf, membersOf, publishOf, readOf and evidenceOf recover the fakes from
+// Deps.
 func gateOf(g Gate) *fakeGate {
 	f, _ := g.(*fakeGate)
 	return f
@@ -231,9 +259,15 @@ func readOf(r Read) *fakeRead {
 	return f
 }
 
-// newDefaultServer wires the four fakes with benign answers: a gate that
-// admits, a non-member, a command that answers a publishable preview, and a
-// read that finds a network-visible publication.
+func evidenceOf(e Evidence) *fakeEvidence {
+	f, _ := e.(*fakeEvidence)
+	return f
+}
+
+// newDefaultServer wires the five fakes with benign answers: a gate that
+// admits, a non-member, a command that answers a publishable preview, a read
+// that finds a network-visible publication, and an evidence read that finds
+// nothing asserted against it.
 func newDefaultServer(t *testing.T) *server {
 	t.Helper()
 	return newServer(t, Deps{
@@ -241,6 +275,7 @@ func newDefaultServer(t *testing.T) *server {
 		Read:     &fakeRead{entry: networkKnowledge(), found: true},
 		Projects: &fakeGate{},
 		Members:  &fakeMembers{},
+		Evidence: &fakeEvidence{},
 	})
 }
 

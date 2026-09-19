@@ -75,6 +75,56 @@ type Querier interface {
 	// Evidence assertions (canonical table: evidence_assertions). Evidence is a
 	// directed, typed relation between object versions — separate from the RSG
 	// relation graph (invariant 10: Provenance Graph != Evidence Graph).
+	//
+	// T0806 adds the network-evidence read and the two columns 00091 adds:
+	// evidence_origin (docs/10 §3's external/internal) and visibility.
+	//
+	// # Who decides what, here
+	//
+	// The three read classes (Origin / Reviewed External / Unreviewed External,
+	// docs/10 §7) are NOT spelled in SQL. ListPublishedEvidenceForTarget returns
+	// the two FACTS the classification is computed from — the asserting
+	// project's id (compared by the caller against the published version's
+	// owning project) and the assertion's review_state — and
+	// internal/domain.ClassifyEvidenceNetwork decides.
+	//
+	// The predicates below ARE spelled here, and they are the read STRATEGY that
+	// keeps the fail-closed rule cheap; the caller re-checks each row before
+	// rendering it (the same split feeds.sql's header describes, and the same
+	// reason: a predicate is never a substitute for the rule). Two things are
+	// filtered:
+	//
+	//   ea.visibility = 'public'          the assertion's own visibility axis:
+	//                                     an assertion nothing made public is
+	//                                     not rendered on the public read, and
+	//                                     'private' is the column DEFAULT.
+	//   (origin OR asserting project public)
+	//                                     the asserting project's own visibility.
+	//                                     A public assertion can only be written
+	//                                     by a public project through the write
+	//                                     path; this half is the structural
+	//                                     refusal for a row written any OTHER
+	//                                     way (a private project's work is not
+	//                                     published by asserting it somewhere
+	//                                     else, docs/12 §2 发布不等于公开), and
+	//                                     the origin half is why an assertion in
+	//                                     the published object's OWN project is
+	//                                     judged by the publication read gate
+	//                                     the caller already passed rather than
+	//                                     by the project's preset again.
+	// The assertion row, written inside a state commit (states.WriteFunc): the
+	// state_id the commit assigns is the transition the assertion was created
+	// in (docs/10 §3's "created transition"), so the assertion is traceable to
+	// the commit that carries it, like every other member row.
+	//
+	// The id is supplied by the caller (the column's default is for writers
+	// that have no commit to name the row in): the commit's operation summary
+	// carries the same id, which is what makes the assertion findable from the
+	// transition and the transition findable from the assertion.
+	//
+	// evidence_origin and visibility are SERVER-DERIVED inputs of this query,
+	// never client input: the caller resolves the project comparison and the
+	// visibility axes before it gets here (see 00091's header).
 	CreateEvidenceAssertion(ctx context.Context, arg CreateEvidenceAssertionParams) (EvidenceAssertion, error)
 	// Issues, pull requests, reviews (canonical tables: issues, pull_requests,
 	// reviews). A research PR is a proposed RSG diff; merge controls acceptance
@@ -439,6 +489,14 @@ type Querier interface {
 	// idempotency_key) (migration 00083) makes this at most one row by
 	// construction.
 	GetKnowledgePublicationCreation(ctx context.Context, arg GetKnowledgePublicationCreationParams) (pgtype.UUID, error)
+	// The publication a version carries, with the inputs the audience rule
+	// decides with (knowledgepublish.AudienceFor): the project's preset, the
+	// version's own visibility axis, and the rights document read RAW — the
+	// rights token is a Go parse, never a JSON predicate (feeds.sql's header
+	// makes the same argument). The row is fetched whatever the audience turns
+	// out to be; the caller refuses rather than the query filtering, so there
+	// is one definition of who may read a publication.
+	GetKnowledgePublicationForVersion(ctx context.Context, objectVersionID pgtype.UUID) (GetKnowledgePublicationForVersionRow, error)
 	// The project's most recent state (T0208): the default fork point for a
 	// branch created without an explicit base_ref. Deterministic on (created_at,
 	// id): states created in one transaction share a timestamp, the id breaks
@@ -584,6 +642,15 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email *string) (User, error)
 	GetUserByHandle(ctx context.Context, handle string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
+	// One version's owning project, resolved through the object it belongs to
+	// (scientific_object_versions -> scientific_objects -> projects), with the
+	// version's own visibility axis.
+	//
+	// Both ends of an assertion are resolved with this query, because both
+	// answers come from the same chain: the TARGET end decides origin vs
+	// external (is this project the one the published version belongs to?), and
+	// the EVIDENCE end answers the same question about the cited version.
+	GetVersionProjectFacts(ctx context.Context, objectVersionID pgtype.UUID) (GetVersionProjectFactsRow, error)
 	// Asset governance (T0711): the rows and reads of the two tables
 	// migration 00082 adds — the parties a published version credits, and the
 	// asset's append-only rights-holder chain.
@@ -804,6 +871,8 @@ type Querier interface {
 	// states: the nullability of the pair has to survive into the generated type.
 	ListAssetRightsHolderEvents(ctx context.Context, assetID pgtype.UUID) ([]ListAssetRightsHolderEventsRow, error)
 	ListBranchesByProject(ctx context.Context, projectID pgtype.UUID) ([]Branch, error)
+	// Every assertion against one target version, oldest first. Rows are
+	// returned unfiltered by visibility: this is the owning project's read.
 	ListEvidenceAssertionsForTarget(ctx context.Context, objectVersionID pgtype.UUID) ([]EvidenceAssertion, error)
 	// One asset's PUBLIC versions, newest first — the rows this feed exists for,
 	// which is why the predicate above and migration 00080's partial index have
@@ -1023,6 +1092,26 @@ type Querier interface {
 	// visibility predicate is the read policy: a private row can never reach
 	// this result set.
 	ListPublicProjects(ctx context.Context) ([]Project, error)
+	// The evidence section of GET /knowledge/{knowledgeId}: the assertions
+	// against one PUBLISHED object version that the network read may render.
+	//
+	// The asserting project travels with each row because the caller needs BOTH
+	// ends of the origin/external axis to classify the row (see the file
+	// header); source_project_visibility is the strategy half of the predicate
+	// above and is re-checked by the caller.
+	//
+	// Newest first, bounded by @row_limit: the evidence on a popular published
+	// object is unbounded, and an unbounded read is a resource a writer can
+	// exhaust. The bound cuts the OLDEST rows — a reader of network evidence is
+	// looking for what the network has to say, and silently dropping the newest
+	// counter-evidence would be the one truncation this feature must not make
+	// (docs/24: external evidence 不可被 origin maintainer 静默删除). The
+	// caller fetches one row beyond the limit and reports whether the section
+	// was truncated rather than presenting a short list as complete.
+	//
+	// The order is total ((created_at, id) DESC), so one database state renders
+	// one document.
+	ListPublishedEvidenceForTarget(ctx context.Context, arg ListPublishedEvidenceForTargetParams) ([]ListPublishedEvidenceForTargetRow, error)
 	ListPullRequestsByProject(ctx context.Context, projectID pgtype.UUID) ([]PullRequest, error)
 	ListRelationVersions(ctx context.Context, relationID pgtype.UUID) ([]RelationVersion, error)
 	// Each relation of the project with its as-of version (same lineage rule as
