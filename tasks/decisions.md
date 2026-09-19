@@ -14282,3 +14282,31 @@ commit 方法、port 接口里没有、包内不 import `internal/application/st
 （证据类虚报 → 拒；机制类虚报而保护仍在 → 记账后合并）**不当返工理由**，等它合并后我按
 注释清理批次改掉那半句话。（`tests/integration/migration_test.go` 里对这条 CHECK 的描述
 反而写得准确：它明说 identifier 那半是自由文本。）
+
+## 2026-09-19 17:4x 发现一个**静默**削弱门的口子：两个 baseline 只靠"约定"不许加新条目
+
+**口子是什么**：`ops/ci/gofmt-baseline.txt` 与 `ops/ci/staticcheck-baseline.txt` 是两道门（`make fmt-check`、
+`make staticcheck`）的**豁免名单**。两个文件的开头都写着同一条契约——"New files are never added to this
+list"。**这条契约没有任何东西在检查**：`scripts/staticcheck.sh` 只做"报告行是否在名单里"的过滤，
+`scripts/tests/staticcheck-unit-test.sh` 测的是**过滤逻辑**，不是名单**内容**。也就是说，
+**把新文件写进名单 = 门变绿**，而这个动作**不留任何痕迹**。
+
+**为什么这值得管（而不是"我看着就行"）**：这条路径的失败模式是**静默**的——门照样绿。
+其它"CI 步骤引用了不存在的脚本/目标"之类的口子会**大声**失败（bash 报 No such file、make 报
+No rule），所以那些不值得为它加分。**静默 vs 大声，是决定要不要加机械守卫的分界线。**
+而且这是**可达**的：今天有 **20 本任务**的 `allowed_scope` 含 `ops/**`（T1106/T1110/T1203/T1206…），
+Worker 改这两个文件**不算越界**，只剩我肉眼在 diff 里发现这一道防线。
+
+**为什么现在不做（要等空窗）**：守卫必须拿**一个基准版本**来比（"相对 main 是否新增了条目"），
+而 CI 里 `actions/checkout@v4` 默认 `fetch-depth: 1`，**基准 ref 根本不在本地**——把它塞进
+`make fmt-check` / `staticcheck.sh` 会让**每次 CI 都 fail-closed 变红**。所以它只能作为**一条
+带 `fetch-depth: 0` 的 CI 步骤**存在，而改 `.github/workflows/ci.yml` 就必须同步改
+`specs/orchestrator/gates.json`（G2 逐条照抄 ci.yml 的步骤，有同步单测钉着）——**那是指纹输入**，
+必须空窗。**设计已定**（写进 `tasks/window-queue.md`）：
+"新增的非注释条目 → 红；删除/改注释/重排 → 允许；基准取不到 → **fail-closed 报错并指明要 fetch-depth**"，
+并配一个 fixture 单测（照本仓库惯例：每道检查都要有证明它**能红**的测试）。
+
+**顺带一条观察，不改动**：`scripts/validate_workflows.py`（T0008 造的，为的是"ci.yml 语法坏了 =
+仓库其实没有 CI"）**只在本地的 `scripts/ci.sh` 里跑，CI 里没有对应 job**——这不是漏配，是**结构上
+不可能**：ci.yml 自己坏了的时候，任何 ci.yml 里的 job 都不会跑。所以它只能在本地阶段兜住，
+而本地阶段由我（或 rddev 的 G2/G4）来跑。**这条不改，只记下它的能力边界。**
