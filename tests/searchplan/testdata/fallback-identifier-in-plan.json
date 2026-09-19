@@ -1,0 +1,30 @@
+{
+  "name": "fallback-identifier-in-plan",
+  "note": "The schema-valid version of the same attack: the entity id is smuggled into a field that IS in the vocabulary. Only the identifier guard can catch this one, which is why the fallback reason is identifier_in_plan and not invalid_plan.",
+  "query": "What evidence do we have for the sample with the highest reported uptake?",
+  "provider_document": {
+    "plan_version": "1",
+    "intent": "conditions",
+    "target_object": {
+      "entity_types": [
+        "asset"
+      ]
+    },
+    "condition_scope": {
+      "comparators": [
+        {
+          "property": "sample",
+          "op": "eq",
+          "value": "3c9a5f21-7b4e-4a10-9c8d-2f6e1b0a4d33"
+        }
+      ]
+    },
+    "network_scope": "platform",
+    "visibility": "accessible"
+  },
+  "expected_plan": {
+    "status": "fallback",
+    "reason": "identifier_in_plan",
+    "query": "What evidence do we have for the sample with the highest reported uptake?"
+  }
+}

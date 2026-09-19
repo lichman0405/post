@@ -1,0 +1,12 @@
+{
+  "name": "fallback-provider-timeout",
+  "note": "The provider does answer, 200ms later, but the 20ms budget expires first and the answer is dropped: pins that a hang exits the same degraded-but-usable way as an error, and that the planner does not ask again.",
+  "query": "Compare the CO2 uptake of Mg-MOF-74 and HKUST-1 at 298 K",
+  "provider_delay_ms": 200,
+  "timeout_ms": 20,
+  "expected_plan": {
+    "status": "fallback",
+    "reason": "provider_timeout",
+    "query": "Compare the CO2 uptake of Mg-MOF-74 and HKUST-1 at 298 K"
+  }
+}

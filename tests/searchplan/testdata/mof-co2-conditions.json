@@ -1,0 +1,109 @@
+{
+  "name": "mof-co2-conditions",
+  "note": "The whole contract in one case: a conditions question about a materials property plans into all eight docs/14 §2 items, and the question's '<' and '>' survive rendering unescaped.",
+  "query": "Which MOF has a CO2 uptake > 4 mmol/g and a pore diameter < 2 nm, measured at 298 K?",
+  "provider_document": {
+    "plan_version": "1",
+    "intent": "conditions",
+    "target_object": {
+      "entity_types": [
+        "asset",
+        "knowledge"
+      ]
+    },
+    "property": {
+      "names": [
+        "CO2 uptake",
+        "pore diameter"
+      ]
+    },
+    "condition_scope": {
+      "text": "measured at 298 K and 1 bar",
+      "comparators": [
+        {
+          "property": "CO2 uptake",
+          "op": "gt",
+          "value": "4",
+          "unit": "mmol/g"
+        },
+        {
+          "property": "pore diameter",
+          "op": "lt",
+          "value": "2",
+          "unit": "nm"
+        }
+      ]
+    },
+    "evidence_preference": {
+      "types": [
+        "experimental"
+      ],
+      "prefer": [
+        "independently_reproduced"
+      ]
+    },
+    "network_scope": "platform",
+    "visibility": "accessible",
+    "ranking_constraints": {
+      "order_by": [
+        "query_scope_match",
+        "evidence_profile",
+        "version_freshness"
+      ]
+    }
+  },
+  "expected_plan": {
+    "status": "planned",
+    "query": "Which MOF has a CO2 uptake > 4 mmol/g and a pore diameter < 2 nm, measured at 298 K?",
+    "document": {
+      "plan_version": "1",
+      "intent": "conditions",
+      "target_object": {
+        "entity_types": [
+          "asset",
+          "knowledge"
+        ]
+      },
+      "property": {
+        "names": [
+          "CO2 uptake",
+          "pore diameter"
+        ]
+      },
+      "condition_scope": {
+        "text": "measured at 298 K and 1 bar",
+        "comparators": [
+          {
+            "property": "CO2 uptake",
+            "op": "gt",
+            "value": "4",
+            "unit": "mmol/g"
+          },
+          {
+            "property": "pore diameter",
+            "op": "lt",
+            "value": "2",
+            "unit": "nm"
+          }
+        ]
+      },
+      "evidence_preference": {
+        "types": [
+          "experimental"
+        ],
+        "prefer": [
+          "independently_reproduced"
+        ]
+      },
+      "network_scope": "platform",
+      "visibility": "accessible",
+      "ranking_constraints": {
+        "order_by": [
+          "query_scope_match",
+          "evidence_profile",
+          "version_freshness"
+        ]
+      }
+    }
+  }
+}
