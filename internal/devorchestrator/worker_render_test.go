@@ -399,14 +399,25 @@ func TestRenderSystemPromptContainsContract(t *testing.T) {
 		"No Git control-plane", "allowed_scope", "Never weaken",
 		"/repo/.rddev/workers/T0001/RESULT.json",
 		"EARLY", "not accepted",
-		// The two recording conventions a RESULT gets rejected for getting
+		// The three recording conventions a RESULT gets rejected for getting
 		// wrong, and that nothing else in the package states: a deliberate
 		// break-and-revert is a `passed` entry (T0709 lost an attempt to
-		// recording one as `failed`, which contradicts a completed status),
-		// and a pre-existing failure is `blocked`, never hidden or worked
+		// recording one as `failed`, which contradicts a completed status);
+		// a pre-existing failure is `blocked`, never hidden or worked
 		// around (T0601 recorded one honestly as `failed` and was rejected
-		// for the contradiction rather than for the report).
+		// for the contradiction rather than for the report); and an
+		// unexecuted command is not a `tests[]` entry at all under
+		// `completed` (T0707 and T0806 were each sent back for listing one,
+		// both times with the reasoning right and the field wrong — the
+		// rulebook said "anything not executed is not_run with a reason",
+		// which the consistency check refuses outright).
+		// The third one is asserted by its distinctive phrases, not by the
+		// token `not_run`: that word appears three times in the rendered
+		// prompt, so a Contains on it stays green while the rule is deleted
+		// (measured — the first version of this assertion survived exactly
+		// that mutation).
 		"MUTATION CHECK", "predates your change", "blocked",
+		"lists the commands you RAN", "has no place under", "notes_for_supervisor",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("system prompt missing %q", want)
