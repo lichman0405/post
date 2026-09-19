@@ -58,6 +58,28 @@ func (s *Service) Get(ctx context.Context, projectID string, number int64) (doma
 	return pr, nil
 }
 
+// GetByCreationKey returns the project's PR that an earlier creation
+// request carrying creationKey opened, or ErrPullRequestNotFound when the
+// key names nothing (no such key, or the empty key, which names nothing
+// by construction — migration 00089). It is the replay read a creation
+// command needs: a repeated request finds the proposal the first attempt
+// opened, including one that has since merged, instead of opening a
+// second. The caller owns the decision to replay — this method only
+// answers what the key names.
+func (s *Service) GetByCreationKey(ctx context.Context, projectID, creationKey string) (domain.PullRequest, error) {
+	if projectID == "" {
+		return domain.PullRequest{}, fmt.Errorf("%w: project_id is required", ErrValidation)
+	}
+	if creationKey == "" {
+		return domain.PullRequest{}, fmt.Errorf("%w: creation key is required", ErrValidation)
+	}
+	pr, err := s.repo.GetPullRequestByCreationKey(ctx, projectID, creationKey)
+	if err != nil {
+		return domain.PullRequest{}, wrapStoreError(err)
+	}
+	return pr, nil
+}
+
 // List returns every PR of the project, in number order.
 func (s *Service) List(ctx context.Context, projectID string) ([]domain.PullRequest, error) {
 	if projectID == "" {

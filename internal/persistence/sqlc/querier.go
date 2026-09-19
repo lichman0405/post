@@ -632,6 +632,13 @@ type Querier interface {
 	// profile v2 never invalidates history written under v1 (docs/21 §8).
 	GetSchemaProfile(ctx context.Context, arg GetSchemaProfileParams) (ProjectSchemaProfile, error)
 	GetScientificObjectByID(ctx context.Context, id pgtype.UUID) (ScientificObject, error)
+	// The abort command's idempotency lookup (T0602). The key's home is the row
+	// the request produced (migration 00100), so a repeated request reads the
+	// version the first one appended instead of appending a second — no second
+	// audit row, no second scientific_object.aborted event. Scoped to the
+	// object, which is the only scope a route that names one object can replay
+	// in; the partial unique index makes the pair unique by construction.
+	GetScientificObjectVersionByAbortRequestKey(ctx context.Context, arg GetScientificObjectVersionByAbortRequestKeyParams) (ScientificObjectVersion, error)
 	GetScientificObjectVersionByID(ctx context.Context, id pgtype.UUID) (ScientificObjectVersion, error)
 	GetScientificObjectVersionByNo(ctx context.Context, arg GetScientificObjectVersionByNoParams) (ScientificObjectVersion, error)
 	GetStateCommitByID(ctx context.Context, id pgtype.UUID) (StateCommit, error)

@@ -43,6 +43,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/lichman0405/post/cmd/api/aborthttp"
 	"github.com/lichman0405/post/cmd/api/assetshttp"
 	"github.com/lichman0405/post/cmd/api/audithttp"
 	"github.com/lichman0405/post/cmd/api/authhttp"
@@ -73,6 +74,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/templateshttp"
 	"github.com/lichman0405/post/cmd/api/validationhttp"
 	"github.com/lichman0405/post/cmd/api/webhookshttp"
+	"github.com/lichman0405/post/internal/application/aborts"
 	"github.com/lichman0405/post/internal/application/assetpublish"
 	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
@@ -1002,9 +1004,16 @@ func run(args []string) int {
 		Commits:   stateSvc,
 		Objects:   persistence.NewScientificObjectStore(pool),
 		Relations: persistence.NewRelationStore(pool),
-		Projects:  projectAPI.Service(),
-		Authz:     authz.NewMatrixEngine(),
-		Checks:    checksSvc,
+		// The abort reader (T0602): when the plan materializes a version
+		// the abort lifecycle moved, the merge copies docs/46:7's record
+		// onto the row it writes rather than landing an 'aborted' version
+		// with nobody's name on it. Wiring it is not optional in the sense
+		// that matters: without it the merge REFUSES such a plan instead of
+		// writing a record-less abort.
+		Aborts:   persistence.NewScientificObjectStore(pool),
+		Projects: projectAPI.Service(),
+		Authz:    authz.NewMatrixEngine(),
+		Checks:   checksSvc,
 		// The policy in force is read through the owning service (T0603) and
 		// evaluated through the typed rule surface: the merge asks a question
 		// (main_protected?) and never reads policy_json itself.
@@ -1045,6 +1054,29 @@ func run(args []string) int {
 	})
 	freezeAPI := freezehttp.New(freezehttp.Deps{Command: freezeCommand})
 	freezeAPI.Register(v1)
+	// Abort proposals (T0602): the command behind
+	// POST /projects/{projectId}/objects/{objectId}:abort-proposal. It never
+	// writes main — docs/46:9 requires branch → PR → merge for a main
+	// object, so the command forks a proposal branch off main's head,
+	// appends the aborted version (with docs/46:7's record, the audit row
+	// and the scientific_object.aborted event in one transaction), and opens
+	// the Research PR. The merge above is what makes the abort effective.
+	//
+	// The membership port is the raw project store, as the freeze command is
+	// wired: it answers "no membership" for a stranger AND for a project that
+	// does not exist, which is what lets the command refuse both with the
+	// same permission-class outcome without disclosing which one it was.
+	abortSvc := aborts.NewService(aborts.Deps{
+		Members:      persistence.NewProjectStore(pool),
+		Authz:        authz.NewMatrixEngine(),
+		Objects:      persistence.NewScientificObjectStore(pool),
+		Branches:     branchSvc,
+		PullRequests: prSvc,
+		Commits:      stateSvc,
+		Events:       events.Recorder{},
+	})
+	abortAPI := aborthttp.New(aborthttp.Deps{Command: abortSvc})
+	abortAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	srv := &http.Server{

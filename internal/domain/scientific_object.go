@@ -76,6 +76,52 @@ type ScientificObjectVersion struct {
 	IntegrityHash string
 	CreatedBy     string
 	CreatedAt     time.Time
+	// Abort is the abort record this version carries, or nil when it is not
+	// an abort (and for every version written before migration 00100). It
+	// is governance data about the version, never part of Payload: the
+	// payload of an aborted version is the aborted version's content,
+	// byte-for-byte, so an abort moves the lifecycle without changing what
+	// the version says (docs/46 — a correction appends, it never rewrites).
+	Abort *AbortRecord
+}
+
+// AbortRecord is the record docs/46:7 requires of every abort, verbatim:
+// "Abort 必须记录 actor、time、reason code、human explanation、
+// replacement/superseding ref(optional)、review/approval if main object."
+// The review/approval half is structural rather than a field — a main-line
+// abort reaches the accepted state only through a Research PR merge, whose
+// reviews are the PR's own records — so the five fields here are the record
+// itself.
+//
+// It is a domain value, not a wire DTO: ReasonCode and Explanation are
+// required, ReplacementRef is optional, and DecidedAt is server-derived
+// (docs/23 §3 — timestamps are never accepted from an untrusted caller).
+type AbortRecord struct {
+	// ReasonCode is the caller-supplied reason token (docs/46:7's "reason
+	// code", the `reason_code` argument of specs/mcp/tools.json's
+	// object.abort_proposal). It is an OPEN string in V1: no specification
+	// enumerates the values, so none is invented here — the code checks the
+	// token's SHAPE (lowercase [a-z0-9_], 1..64) and stores the value as
+	// given. The cost of the open set is named in the T0602 task result:
+	// aborts cannot be broken down by reason until a vocabulary is decided,
+	// and narrowing later is a normal, forward-only change.
+	ReasonCode string
+	// Explanation is the human explanation — the part of an abort no machine
+	// can reconstruct, and the reason it is required rather than optional.
+	Explanation string
+	// ReplacementRef names the object version that supersedes the aborted
+	// one (docs/46:7's "replacement/superseding ref(optional)"). Empty
+	// means none was given; it is stored as NULL, never as an empty string,
+	// so "no replacement" and "a replacement that is nothing" stay distinct.
+	ReplacementRef string
+	// DecidedBy is the actor who decided the abort (docs/46:7's "actor").
+	// It is NOT the version row's CreatedBy: when a Research PR merge
+	// materializes the abort onto main, the new row's CreatedBy is the
+	// merging actor, while this stays the aborting one.
+	DecidedBy string
+	// DecidedAt is the server-derived time of the abort decision
+	// (docs/46:7's "time"). It travels with the record onto main.
+	DecidedAt time.Time
 }
 
 // LifecycleState is the scientific_object_versions.lifecycle_state CHECK:

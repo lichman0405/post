@@ -426,6 +426,18 @@ type ScientificObjectVersion struct {
 	IntegrityHash      string             `json:"integrity_hash"`
 	CreatedBy          pgtype.UUID        `json:"created_by"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	// The abort's reason code (docs/46:7). An OPEN caller-supplied token in V1 — no vocabulary is defined by any spec, and this platform does not invent one; the column CHECKs the shape (^[a-z0-9_]{1,64}$) and records the value as given.
+	AbortReasonCode *string `json:"abort_reason_code"`
+	// The human explanation the abort recorded (docs/46:7) — the part no machine can reconstruct. Non-blank when the record exists.
+	AbortExplanation *string `json:"abort_explanation"`
+	// The optional replacement/superseding ref (docs/46:7). NULL means none was given; it is never stored as an empty string.
+	AbortReplacementRef *string `json:"abort_replacement_ref"`
+	// The actor who decided the abort (docs/46:7 "actor"). Not the row's created_by: after a Research PR merge materializes the abort onto main, created_by is the merging actor while this stays the aborting one.
+	AbortedBy pgtype.UUID `json:"aborted_by"`
+	// Server-derived time of the abort decision (docs/46:7 "time"); never caller-supplied. Travels with the record when a merge materializes the abort onto main.
+	AbortedAt pgtype.Timestamptz `json:"aborted_at"`
+	// The Idempotency-Key the abort request carried (specs/api/openapi.yaml components.parameters.IdempotencyKey); NULL when none. UNIQUE per object among non-NULL keys, so a repeated request reads the row the first one wrote instead of appending a second (the migration-00089 pattern). Not carried onto main by a merge: it names a request, not history.
+	AbortRequestKey *string `json:"abort_request_key"`
 }
 
 type StateCommit struct {

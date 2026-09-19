@@ -146,6 +146,23 @@ const (
 	// prefix; the knowledge event's name already has the shape this
 	// vocabulary uses.
 	ActionKnowledgeVersionPublished = "knowledge.version_published"
+
+	// T0602 abort governance: one row per scientific-object version written
+	// in lifecycle 'aborted', in the same transaction as the version row
+	// itself. docs/46:7 requires every abort to record actor/time/reason
+	// code/human explanation beside the transition, and docs/26 lists
+	// abort/reopen among the highest-risk actions that must be audited —
+	// so this row is the governance record that the append-only version row
+	// is not: it names the request that decided the abort (via,
+	// correlation_id) and it is queryable per project without walking the
+	// version log.
+	//
+	// It spells the same dotted name as the research EVENT the abort emits
+	// (scientific_object.aborted, specs/events/event-types.yaml) — the
+	// coincidence of two registries ActionPullRequestMerged records above.
+	// The audit vocabulary is this file, the event vocabulary is the event
+	// spec, and neither list is derived from the other.
+	ActionScientificObjectAborted = "scientific_object.aborted"
 )
 
 // Stable via values (the audit_log.via column): how the action arrived.

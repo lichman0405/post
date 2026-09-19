@@ -313,11 +313,28 @@ var canonicalTables = map[string]tableExp{
 		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
 	},
 	"scientific_object_versions": {
-		cols:    []colExp{c("id", u, false, true), c("object_id", u, false, false), c("version_no", i4, false, false), c("state_id", u, false, false), c("branch_id", u, true, false), c("schema_id", txt, false, false), c("schema_version", txt, false, false), c("title", txt, false, false), c("lifecycle_state", txt, false, false), c("payload", jb, false, false), c("visibility_policy_id", u, true, false), c("integrity_hash", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
+		// abort_reason_code … abort_request_key are the T0602 addition
+		// (00100): docs/46:7's record of an abort, carried by the version
+		// row the abort appends. They are nullable because every version
+		// that is not an abort has none — and the all-or-nothing
+		// abort_record_shape CHECK is what makes "none" the only other
+		// state the row can be in.
+		cols:    []colExp{c("id", u, false, true), c("object_id", u, false, false), c("version_no", i4, false, false), c("state_id", u, false, false), c("branch_id", u, true, false), c("schema_id", txt, false, false), c("schema_version", txt, false, false), c("title", txt, false, false), c("lifecycle_state", txt, false, false), c("payload", jb, false, false), c("visibility_policy_id", u, true, false), c("integrity_hash", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true), c("abort_reason_code", txt, true, false), c("abort_explanation", txt, true, false), c("abort_replacement_ref", txt, true, false), c("aborted_by", u, true, false), c("aborted_at", ts, true, false), c("abort_request_key", txt, true, false)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"object_id", "version_no"}},
-		checks:  []string{"version_no > 0", "lifecycle_state = ANY"},
-		fks:     []fkExp{fk("object_id", "scientific_objects", "RESTRICT"), fk("state_id", "project_states", "RESTRICT"), fk("branch_id", "branches", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
+		checks: []string{
+			"version_no > 0", "lifecycle_state = ANY",
+			// The four per-column shape guards and the one all-or-nothing
+			// guard that keeps an aborted row from holding half a record.
+			// Each fragment must name exactly one definition — the plain
+			// "abort_… IS NULL" spellings appear in both a shape guard and
+			// the all-or-nothing guard, so the matcher's "exactly one def"
+			// rule refuses them.
+			"abort_reason_code ~", "length(btrim(abort_explanation))",
+			"length(btrim(abort_replacement_ref))", "length(abort_request_key) >= 8",
+			"aborted_by IS NULL",
+		},
+		fks: []fkExp{fk("object_id", "scientific_objects", "RESTRICT"), fk("state_id", "project_states", "RESTRICT"), fk("branch_id", "branches", "RESTRICT"), fk("created_by", "users", "RESTRICT"), fk("aborted_by", "users", "RESTRICT")},
 	},
 	"relations": {
 		// current_version_no is the T0203 addition (00025): the
@@ -1083,8 +1100,12 @@ var gooseTable = tableExp{
 // by name; each maps to substrings its indexdef must contain.
 var explicitIndexes = map[string][]string{
 	"scientific_object_versions_payload_gin": {"USING gin", "payload"},
-	"relation_versions_source_idx":           {"source_object_version_id", "relation_type"},
-	"relation_versions_target_idx":           {"target_object_version_id", "relation_type"},
+	// T0602 (00100): the idempotency read's index — the abort request key,
+	// unique per object and only where it is set, so the state itself is
+	// the idempotency record without a second table.
+	"scientific_object_versions_abort_request_key_idx": {"UNIQUE", "object_id", "abort_request_key", "WHERE"},
+	"relation_versions_source_idx":                     {"source_object_version_id", "relation_type"},
+	"relation_versions_target_idx":                     {"target_object_version_id", "relation_type"},
 	// T0203: the query-by-type paths join relation_versions to relations
 	// on the project boundary (migration 00025).
 	"relations_project_idx":             {"project_id"},
