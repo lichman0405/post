@@ -101,12 +101,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/lichman0405/post/cmd/api/authhttp"
+	"github.com/lichman0405/post/cmd/api/evidencehttp"
 	"github.com/lichman0405/post/cmd/api/knowledgehttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
+	"github.com/lichman0405/post/internal/application/evidencegraph"
 	"github.com/lichman0405/post/internal/application/knowledgepublish"
 	"github.com/lichman0405/post/internal/application/rsg"
 	"github.com/lichman0405/post/internal/application/states"
@@ -239,6 +241,17 @@ func newKnowledgeWorldFor(t *testing.T, ctx context.Context, taskID string) *kno
 	// The RSG write surface, which carries the contract's evidence-assertion
 	// route: the ONE write path an assertion has.
 	rsghttp.New(rsghttp.Deps{Service: svc}).Register(mux)
+	// The evidence-graph read (T0506): the same project gate, the same object
+	// and relation stores, over the evidence table — composed here the way
+	// cmd/api/main.go composes it.
+	evidencehttp.New(evidencehttp.Deps{
+		Service: evidencegraph.New(evidencegraph.Deps{
+			Objects:    persistence.NewScientificObjectStore(pool),
+			Assertions: persistence.NewEvidenceGraphStore(pool),
+			Relations:  persistence.NewRelationStore(pool),
+		}),
+		Gate: projectAPI.Service(),
+	}).Register(mux)
 
 	ts := httptest.NewServer(authAPI.Guard(mux))
 	t.Cleanup(ts.Close)
