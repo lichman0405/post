@@ -6497,10 +6497,10 @@
       ]
     },
     "T0808": {
-      "status": "verification",
+      "status": "accepted",
       "started_at": "2026-09-19T08:50:45Z",
       "worker_run_id": "run-f185c20ce10e2bf4",
-      "accepted_by_supervisor_at": "2026-09-19T08:37:09Z",
+      "accepted_by_supervisor_at": "2026-09-19T09:18:52Z",
       "rejection_reason": "# T0808 返工单（第二次打回）\n\n**先说你这次做对了什么**，因为它决定了本单的范围：上一轮的两条阻塞（reproduction 维度泄漏\n未公开断言；十条读全部\"先取窗口再筛\"）**都真修了且有测试兜着**——SQL 里选了 `ea.visibility` 并加了谓词、\nGo 侧独立再检查保留、夹具显式给出可见性、窗口饥饿测试一次盖住五个维度、`doc.go` 那句假话改成了真话、\nreuse 的占位分支删了、e2e 的 `ActorID` 换成真人 id。独立评审也自己复现了每一条。\n**这些我一条都不要你动。**\n\n卡住的是**独立评审新报的两条**（一条 minor、一条 nit），我进树核对后**两条都成立**。\n其中那条 minor，**和我上一轮让你删掉的 reuse 占位串是同一个形状**——只是这次在另一个组件里。\n\n---\n\n## 一（minor）Affiliations 那一格在匿名页上打了个\"该组织已停用\"的探针\n\n`apps/web/app/components/research-profile-sections.tsx:99`：\n\n```tsx\nlabel={a.organization?.name ?? \"Organization not named\"}\n```\n\n三个事实，我逐个核过：\n\n1. **同一个文件自己写的规则 2**（`:30-35`）逐字：\n\n   > A WITHHELD IDENTITY IS NOT A MISSING ONE. Where the API sends `project: null`\n   > (**a private origin project, a private using project, a deactivated organization**)\n   > these components render the row WITHOUT the link and **say nothing about why**.\n   > The alternative — \"project hidden\" — would tell a reader that a project exists\n   > and is being hidden, which is the disclosure the null exists to prevent.\n\n   **规则 2 点名了\"停用组织\"这一情形，而这里偏偏说了。**\n2. `***.go:346-353`：`Organization` **只在\n   `row.OrganizationDeactivatedAt != nil` 时为 nil**（另一条 `OrganizationID == \"\" && Role == \"\"`\n   的判据是\"读取器坏了\"才丢弃整行，正常数据到不了）。也就是说：\n   **这个 null 在可达数据上等价于\"雇主已停用\"。**\n3. `EntityLink`（同文件 `:72-79`）在 `url` 为 null/空时渲染一个**不带链接的 span** ——\n   本身完全符合规则 2；**违规的只有那个替补字符串**。\n\n**后果**：一个认识此人雇主的读者，在这张**匿名可读**的页面上看到 \"Organization not named\"，\n就能确认那家组织**已停用**。这是\"可区分的被隐去\"标记，正是规则 2 与这个模型存在的理由。\n\n**要求：**\n\n1. **让这一格服从规则 2**：行照旧保留（role、两端日期、verified 一个不少——那是任务验收要求的），\n   **不许出现任何形式的\"隐去标记\"**：既不许留这个串，也**不许换一个新的串**去说明为什么没名字。\n   具体形状（例如组织缺席时干脆不渲染那个实体标签）你定，但判据是**规则 2 那句 \"say nothing about why\"**。\n2. **把这条规则放到仓库测试的地方去。** 这个仓库没有组件级测试，测试都在\n   `apps/web/lib/*.test.mjs`（纯模块）。所以把\"要不要渲染实体标签\"这件事**抽到\n   `apps/web/lib/research-profile.ts` 里的一个纯函数**（形状你定），在\n   `apps/web/lib/research-profile.test.mjs` 里给它一条测试。\n   **该测试必须能失败**：做完之后做一次变异检验——把占位串放回去，测试**必须变红**，\n   **两次输出都贴进 RESULT**。（值不值得抽成函数你可以在 RESULT 里说明理由，但\"可测\"这一条不打折。）\n3. **不许**为了这条去改 `internal/application/researchprofile/**` 的模型（`Organization` 就该是 null）、\n   也不许改 `lib/research-profile.ts` 的解析/拒绝规则——**只动渲染与那条新函数**。\n\n---\n\n## 二（nit）注释点名了一个**不存在的查询**\n\n`internal/persistence/queries/research_profile.sql:363` 逐字写着先例是\n`（internal/persistence/queries/evidence.sql, ListPublicAssertions）`。**全仓库没有这个查询**：\n`grep -rn 'ListPublicAssertions'` 只命中**这句话本身**，以及它被 sqlc 抄进去的两个生成文件\n（`internal/persistence/sqlc/querier.go:1205`、`internal/persistence/sqlc/research_profile.sql.go:704`）。\n真名是 **`ListPublishedEvidenceForTarget`**（`internal/persistence/queries/evidence.sql:73`，\n谓词在 `:109`，与这里的谓词确实一致）。\n\n**要求：**\n\n4. 改成真名，并**重新生成** `internal/persistence/sqlc/**`（`scripts/gen_sqlc.sh`；`sqlc` 在 PATH 上，\n   CI 里有漂移测试，**手改生成文件会被它抓住**）。把生成的输出与 `git diff --stat` 贴进 RESULT，\n   证明**只有**预期的那几个文件变了（两个生成文件 + 那一行注释）。\n\n---\n\n## 明确不许做的事\n\n- 上一轮修好的东西**一条都不许回退或\"顺手简化\"**：SQL 谓词、Go 侧再检查、窗口饥饿测试、\n  `doc.go` 的真话、reuse 的类型（现在是非空）、e2e 的真人 id。\n- **不许为了让测试变绿而删测试、跳过测试、放宽断言或放大超时**。\n- 不许改 `specs/**`、`tasks/**`、`docs/**`、`infra/migrations/**`；\n  更**不许**去动评审列为风险、而我在上一轮明确划给 owner 的那两条 L3\n  （账本可见性轴、私密贡献摘要）——那些不在你范围内。\n- 不许动 `allowed_scope` 之外的路径。\n\n---\n\n## 交账要求\n\nRESULT 里按本单编号逐条写：**改了什么、在哪一行、用什么证明**。必须贴出两次输出的：\n\n- 第一条要求 2 的变异检验（把占位串放回去 → 测试变红 / 恢复 → 绿）；\n- 第二条要求 4 的 `scripts/gen_sqlc.sh` 输出与 `git diff --stat`。\n\n**范围声明照旧**：本单之外没动的，请在 RESULT 里一句话确认。\n",
       "history": [
         {
@@ -6570,6 +6570,12 @@
           "at": "2026-09-19T09:04:04Z",
           "run_id": "run-6169746d1ea7bd89",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-19T09:18:52Z",
+          "run_id": "run-02191fbaffee32e8"
         }
       ]
     },
@@ -6637,10 +6643,10 @@
       ]
     },
     "T0812": {
-      "status": "todo",
+      "status": "blocked",
       "started_at": null,
       "completed_at": null,
-      "notes": "",
+      "notes": "T0811/T0511 未落地前不派（Supervisor 冻结，2026-09-19 17:2x）。理由：T0812（Private Evidence / Public Attestation）与 T0511（ADR-024：证据断言的读带上读者）会改同一条读——`internal/persistence/queries/evidence.sql` 的无谓词读与 `internal/application/evidencegraph/**`——并行做必然得到同一规则的两种写法，而 ADR-024 逐字禁止把不同的轴'整理'成另一套谓词。DAG 里此刻看不出这条依赖：T0812 → T0511 的边要跟 T0511 的条目同笔落进 tasks/tasks.json（追加依赖不能引用不存在的任务），而那次落地要等指纹空当；T0812 现有的依赖 T0806/T0703 都已合并，所以 `rddev task next` 会把它列成可派——这条 notes 就是补上 DAG 还没表达的那一半。解冻：T0511 合并后跑 `./bin/rddev task ready T0812`（todo→blocked→ready 都是状态机里的合法边）。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null

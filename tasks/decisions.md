@@ -14160,6 +14160,42 @@ origin 侧根本不查 audience。
 `docs/05` §3 是 `Overview | Research | …` 的 Project 导航条目表，§4 才是 "Network entity 页面"
 （逐条列着 Person/Organization Research Profile）；`specs/ui/page-inventory.csv:16-17` 是这两行的真出处。
 
+## 2026-09-19 17:2x 冻结 T0812：DAG 里还没表达的那半条依赖
+
+**怎么发现的（不是凭感觉排查，是读驱动源码时撞上的）**：`driver_run.go:411-423` 的 `dispatch`
+取 `rddev task next` 的**第一行**就去 `worker spawn`；默认并行度是 **2**（`cmd/rddev/drive.go:83`），
+判据在 `:267` `len(running) < o.Parallel`。也就是说**只要在跑的工人掉到 1 个，驱动就会派 `task next`
+的第一名**。此刻第一名正是 **T0812**（P8 Private Evidence / Public Attestation）——它现有的依赖
+T0806/T0703 都早已合并，所以它本来是可派的。
+
+**为什么不能派它**：T0812 与 T0511 会改**同一条读**——`internal/persistence/queries/evidence.sql`
+的无谓词读与 `internal/application/evidencegraph/**`。同一套可见性判据并行做两遍，正是 ADR-024
+逐字禁止的"把不同的轴整理成另一种写法"，而且 T0511 的整个意义就是"这条规则只写一次"。
+我在立 T0511 时已经定过这条依赖（`land-T0511.py` 的 `DEPENDENT = "T0812"`），但**DAG 里此刻
+表达不出来**：追加依赖不能引用还不存在的任务，而 T0511 的条目要跟 `tasks/tasks.json` 同笔落地，
+那要等指纹空当。**结论：DAG 缺的那半条，得由状态档补上，否则驱动会照着半个 DAG 派活。**
+
+**做法**：把 `tasks/task_status.json` 里 T0812 从 `todo` 改成 `blocked`，`notes` 写清理由与解冻命令。
+这是状态机里的**合法边**（`internal/devorchestrator/state.go:41` `todo -> {ready, blocked}`），
+而 CLI 没有暴露 `block` 子命令（`cmd/rddev/task.go` 只有 next/ready/inspect/verify/accept/reject/merged），
+所以我直接改状态档——它按 §4 本来就是我的真相源，且**不是指纹输入**，不需要空当。
+
+**核验过三件**：① 文件仍能被解析、T0812 = `blocked`；② `python3 scripts/validate_task_state.py`
+**9/9 通过**（含 `TASKSTATE-TESTS-COVERAGE`："every DAG task has at least one registered test"）；
+③ `rddev task next` 不再列 T0812（第一名变成 T0814）。驱动侧也确认过：`tasksNeedingAction`
+（`driver_run.go:573-576`）只认 running/verification/accepted，blocked 既不进等待队列也不会被 step。
+
+**解冻命令写进了工具本身**（`land-T0511.py` 的头部步骤末尾加了一段）：T0511 **合并之后**
+跑 `./bin/rddev task ready T0812`——`task ready` 会检查"每个依赖都已合并"，所以**跑不早**，
+这条护栏不靠我记性。
+
+**T0814 我故意不冻**：它的前置契约（我落的 `specs/api/openapi.yaml:51` 的 `POST /projects/{projectId}/forks`）
+已经在主库上，任务书写全了；它**不碰任何指纹输入**（`infra/migrations/**`、`tasks/**` 不在它范围里），
+所以它变成可派也不会推迟 T0511 的空当。它与在跑的 T0510 唯一的交叠是 `cmd/api/main.go` 的路由表
+（两边各插几行）——那是**合并冲突**，按 §1 本来就是我该处理的活，不是语义冲突，不构成不派的理由。
+（我 17:0x 记的"T0806 正在改 main.go 所以不派 T0814"那条理由**已随 T0806 合并而失效**，这里更新。）
+
+
 **体检出一个坐标漂移，顺手修了**：上面我写 `evidence.sql:73-112` 是对的，而 ADR-024 与 T0511 的任务书
 （以及本文件早先几节）引的是 `:67-73` 与 `:74-109`——真坐标是 **`:66-71`**（无谓词那条）与
 **`:73-112`**（公开读那条，谓词其实在 `:109-110` 两行）。两处已就地改正（ADR 与任务书）；
