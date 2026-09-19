@@ -20,10 +20,13 @@ import (
 	"time"
 
 	"github.com/lichman0405/post/cmd/api/authhttp"
+	"github.com/lichman0405/post/cmd/api/evidencehttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
+	"github.com/lichman0405/post/cmd/api/provenancehttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
+	"github.com/lichman0405/post/internal/application/evidencegraph"
 	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/application/rsg"
 	"github.com/lichman0405/post/internal/application/states"
@@ -59,6 +62,9 @@ type objectDetailFixture struct {
 	publicBranchID    string
 	publicObjectID    string // one version
 	hostileObjectID   string // payload name carries markup
+	// The dataset version the object's v2 was derived from: the provenance
+	// edge's origin, which the page's provenance tab must show (T0507).
+	datasetVersionID string
 }
 
 // objectDetailPage fetches the object route with a browser Accept header
@@ -124,15 +130,39 @@ func newObjectDetailFixture(t *testing.T, ctx context.Context) *objectDetailFixt
 		Objects:   persistence.NewScientificObjectStore(pool),
 		Relations: persistence.NewRelationStore(pool),
 		Profiles:  persistence.NewProfileStore(pool),
-		Authz:     authz.NewMatrixEngine(),
-		Schemas:   reg,
-		Events:    events.Recorder{},
+		// The evidence-assertion write path (T0507's fixture seeds the
+		// evidence graph through the contract's own route, not by hand-built
+		// rows — the composition is the one cmd/api/main.go builds).
+		Evidence: persistence.NewEvidenceStore(pool),
+		Authz:    authz.NewMatrixEngine(),
+		Schemas:  reg,
+		Events:   events.Recorder{},
 	})
-	rsgAPI := rsghttp.New(rsghttp.Deps{Service: rsgSvc})
+	// The page's two graph tabs read through the same two adapters the JSON
+	// graph routes serve (T0505's projection store, T0506's evidence-graph
+	// service), exactly as cmd/api/main.go wires them: the page and the API
+	// cannot disagree about a project's provenance or evidence, because there
+	// is one adapter per graph and both go through it.
+	provenanceStore := provenancehttp.NewProjectionStore(pool)
+	evidenceGraphSvc := evidencegraph.New(evidencegraph.Deps{
+		Objects:    persistence.NewScientificObjectStore(pool),
+		Assertions: persistence.NewEvidenceGraphStore(pool),
+		Relations:  persistence.NewRelationStore(pool),
+	})
+	rsgAPI := rsghttp.New(rsghttp.Deps{
+		Service:    rsgSvc,
+		Provenance: provenanceStore,
+		Evidence:   evidenceGraphSvc,
+	})
 	apiMux := http.NewServeMux()
 	apiMux.Handle("/api/v1/auth/", authAPI.Routes())
 	apiMux.Handle("/api/v1/projects", projectAPI.Routes())
 	apiMux.Handle("/api/v1/projects/", projectAPI.Routes())
+	// The JSON graph routes the page's tabs read through, mounted here too so
+	// the suite can hold the page against the reads it renders from (and so
+	// the composition is the one cmd/api/main.go builds).
+	provenancehttp.New(provenancehttp.Deps{Store: provenanceStore, Gate: projectAPI.Service()}).Register(apiMux)
+	evidencehttp.New(evidencehttp.Deps{Service: evidenceGraphSvc, Gate: projectAPI.Service()}).Register(apiMux)
 	rsgAPI.Register(apiMux)
 	ts := httptest.NewServer(authAPI.Guard(apiMux))
 	t.Cleanup(ts.Close)
@@ -280,6 +310,7 @@ func newObjectDetailFixture(t *testing.T, ctx context.Context) *objectDetailFixt
 		publicBranchID:    publicBranchID,
 		publicObjectID:    publicObject.ID,
 		hostileObjectID:   hostileObject.ID,
+		datasetVersionID:  datasetResp.VersionID,
 	}
 }
 
@@ -471,16 +502,76 @@ func TestObjectDetailE2E(t *testing.T) {
 	})
 
 	t.Run("placeholder tabs answer honestly", func(t *testing.T) {
+		// History and Files are still placeholders; they must say so.
 		tabText := map[string]string{
-			"history":  "version history timeline arrives",
-			"files":    "Files attached to this object are read-only",
-			"evidence": "Evidence assertions arrive",
+			"history": "version history timeline arrives",
+			"files":   "Files attached to this object are read-only",
 		}
 		for tab, want := range tabText {
 			resp := f.page(t, f.alice, f.objectPath(f.objectID)+"?tab="+tab)
 			mustStatus(t, resp, http.StatusOK)
 			if body := readAll(t, resp); !strings.Contains(body, want) {
 				t.Errorf("%s tab lacks %q", tab, want)
+			}
+		}
+	})
+
+	t.Run("the two graph tabs render the real graphs, not placeholders", func(t *testing.T) {
+		// The provenance tab must show the edge this fixture really created
+		// (v2 derived_from the dataset), through the SAME reader its JSON
+		// route serves — and the placeholder that used to stand here must be
+		// gone. This is a different composition path from the graph suite's
+		// public/published world: here the page is read on a PRIVATE project
+		// by its owner.
+		resp := f.page(t, f.alice, f.objectPath(f.objectID)+"?tab=provenance")
+		mustStatus(t, resp, http.StatusOK)
+		body := readAll(t, resp)
+		for _, want := range []string{
+			`data-graph="provenance"`, `data-graph-state="ok"`,
+			`data-graph-list="provenance"`, `data-graph-diagram="provenance"`,
+			`data-row-relation="derived_from"`, "isotherm series",
+			// the catalog's own one-line meaning for the relation
+			"was derived or transformed from the target object version",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("provenance tab lacks %q", want)
+			}
+		}
+		for _, gone := range []string{"arrive with", "Evidence assertions arrive", "Provenance arrives"} {
+			if strings.Contains(body, gone) {
+				t.Errorf("the provenance tab still renders a placeholder: %q", gone)
+			}
+		}
+
+		// The evidence tab: no assertion was recorded about this object, so
+		// the honest answer is "nothing is recorded" — not the unavailable
+		// state, and not the provenance edge.
+		resp = f.page(t, f.alice, f.objectPath(f.objectID)+"?tab=evidence")
+		mustStatus(t, resp, http.StatusOK)
+		body = readAll(t, resp)
+		if !strings.Contains(body, `data-graph-state="ok"`) || !strings.Contains(body, `data-graph-empty="evidence"`) {
+			t.Errorf("the evidence tab does not answer the empty state: %s", body)
+		}
+		if strings.Contains(body, "Evidence assertions arrive") {
+			t.Errorf("the evidence tab still renders the placeholder")
+		}
+		if strings.Contains(body, "derived_from") {
+			t.Errorf("the evidence tab renders the provenance edge")
+		}
+	})
+
+	t.Run("graph tabs hide with the object", func(t *testing.T) {
+		// A denied read must not disclose that the object has a graph: the
+		// page answers the same neutral not-found whatever tab is asked for,
+		// and renders no panel.
+		for _, tab := range []string{"provenance", "evidence"} {
+			resp := f.page(t, f.anon, f.objectPath(f.objectID)+"?tab="+tab)
+			mustStatus(t, resp, http.StatusNotFound)
+			body := readAll(t, resp)
+			for _, forbidden := range []string{"data-graph=", "isotherm series", "derived_from"} {
+				if strings.Contains(body, forbidden) {
+					t.Errorf("the denied %s read leaks %q", tab, forbidden)
+				}
 			}
 		}
 	})

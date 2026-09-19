@@ -105,6 +105,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/knowledgehttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
+	"github.com/lichman0405/post/cmd/api/provenancehttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
@@ -238,19 +239,39 @@ func newKnowledgeWorldFor(t *testing.T, ctx context.Context, taskID string) *kno
 		// store the evidence write uses.
 		Evidence: persistence.NewEvidenceStore(pool),
 	}).Register(mux)
-	// The RSG write surface, which carries the contract's evidence-assertion
-	// route: the ONE write path an assertion has.
-	rsghttp.New(rsghttp.Deps{Service: svc}).Register(mux)
-	// The evidence-graph read (T0506): the same project gate, the same object
-	// and relation stores, over the evidence table — composed here the way
-	// cmd/api/main.go composes it.
+	// The provenance-graph read (T0505) and the evidence-graph read (T0506):
+	// the same project gate, the same object and relation stores, over the
+	// projected edges and the evidence table — composed here the way
+	// cmd/api/main.go composes it. The provenance adapter is built ONCE and
+	// handed to both its own JSON route and the page's provenance tab, so a
+	// case can check that the two agree.
+	provenanceStore := provenancehttp.NewProjectionStore(pool)
+	provenancehttp.New(provenancehttp.Deps{
+		Store: provenanceStore,
+		Gate:  projectAPI.Service(),
+	}).Register(mux)
+	// The projection is built ONCE and handed to
+	// both its own JSON route and the object detail page's evidence tab, so
+	// the page and the API cannot disagree (main.go's own comment).
+	evidenceGraphSvc := evidencegraph.New(evidencegraph.Deps{
+		Objects:    persistence.NewScientificObjectStore(pool),
+		Assertions: persistence.NewEvidenceGraphStore(pool),
+		Relations:  persistence.NewRelationStore(pool),
+	})
 	evidencehttp.New(evidencehttp.Deps{
-		Service: evidencegraph.New(evidencegraph.Deps{
-			Objects:    persistence.NewScientificObjectStore(pool),
-			Assertions: persistence.NewEvidenceGraphStore(pool),
-			Relations:  persistence.NewRelationStore(pool),
-		}),
-		Gate: projectAPI.Service(),
+		Service: evidenceGraphSvc,
+		Gate:    projectAPI.Service(),
+	}).Register(mux)
+	// The RSG write surface, which carries the contract's evidence-assertion
+	// route — the ONE write path an assertion has — and the object detail
+	// page, whose two graph tabs read the SAME two adapters the JSON routes
+	// above serve (T0507). The provenance adapter travels with its transport
+	// (T0505's L1 decision); the page's provenance tab reads the projected
+	// edges through it exactly as its JSON route does.
+	rsghttp.New(rsghttp.Deps{
+		Service:    svc,
+		Provenance: provenanceStore,
+		Evidence:   evidenceGraphSvc,
 	}).Register(mux)
 
 	ts := httptest.NewServer(authAPI.Guard(mux))

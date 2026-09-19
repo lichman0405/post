@@ -24,8 +24,18 @@ import (
 // handlers owns the RSG routes. Every handler: resolve the caller (the
 // guard put the principal there — writes require it), parse the request,
 // call the rsg service, render the payload or the standard error envelope.
+//
+// provenance and evidence are the two graph reads the object detail page's
+// Provenance and Evidence tabs render (T0507). They are separate ports
+// because they ARE separate graphs (CLAUDE.md §9 invariant 10): different
+// tables, different relation vocabularies, different services, and neither
+// one is derivable from the other. A nil reader is not an error — the page
+// renders that graph as unreadable rather than inventing one (see
+// graphStateUnavailable in graph.go).
 type handlers struct {
-	svc Service
+	svc        Service
+	provenance ProvenanceReader
+	evidence   EvidenceReader
 }
 
 // branchPayload is the client-visible branch shape.

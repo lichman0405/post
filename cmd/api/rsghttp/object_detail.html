@@ -118,6 +118,63 @@
     border: 1px dashed var(--border); border-radius: 6px; padding: 24px;
     color: var(--muted); text-align: center;
   }
+  /* The two graph tabs (T0507). One stylesheet, two identity namespaces:
+     every rule and every hook below is spelled with data-graph="provenance"
+     or data-graph="evidence", never with a shared "graph" class that would
+     let one tab's styling or test selectors drift onto the other. */
+  .graph-panel { margin-top: 4px; }
+  .graph-lead, .graph-boundary, .graph-direction-note {
+    margin: 0 0 8px; font-size: 13px; color: var(--muted); max-width: 96ch;
+  }
+  .graph-lead { color: var(--fg); }
+  .graph-boundary {
+    border-left: 3px solid var(--border); padding: 2px 0 2px 10px;
+  }
+  .graph-directions { margin: 0 0 4px; font-size: 13px; display: flex; gap: 12px; align-items: baseline; }
+  .graph-directions .dir-label { color: var(--muted); font-size: 12px; }
+  .graph-directions a { font-size: 13px; }
+  .graph-directions a[aria-current="true"] { font-weight: 600; color: var(--fg); }
+  .graph-figure { margin: 12px 0; }
+  .graph-svg {
+    display: block; width: 100%; height: auto; max-width: 100%;
+    background: #ffffff; border: 1px solid var(--border); border-radius: 6px;
+  }
+  .graph-svg .node rect { fill: var(--subtle); stroke: var(--border); stroke-width: 1; }
+  .graph-svg .node-start rect { fill: var(--accent-subtle); stroke: rgba(9, 105, 218, .45); }
+  .graph-svg .node-target rect { fill: var(--accent-subtle); stroke: rgba(9, 105, 218, .45); }
+  .graph-svg .node-label { font-size: 12px; fill: var(--fg); }
+  .graph-svg .node-type { font-size: 10px; fill: var(--muted); }
+  .graph-svg .edge line { stroke-width: 2; }
+  .graph-svg .edge-provenance line { stroke: var(--accent); }
+  .graph-svg .edge-supporting line { stroke: var(--success); }
+  .graph-svg .edge-contesting line { stroke: var(--danger); stroke-dasharray: 7 4; }
+  .graph-svg .edge-neutral line { stroke: var(--muted); stroke-dasharray: 2 3; }
+  .graph-svg .edge-unlabeled line { stroke: var(--attention); stroke-dasharray: 9 3 2 3; }
+  .graph-svg .edge-label {
+    font-size: 10px; fill: var(--fg); paint-order: stroke;
+    stroke: #ffffff; stroke-width: 3px; stroke-linejoin: round;
+  }
+  .graph-legend { margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted);
+    display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .graph-legend li { display: flex; align-items: center; gap: 6px; }
+  .graph-legend .swatch { width: 18px; height: 0; border-top-width: 2px; border-top-style: solid; display: inline-block; }
+  .graph-legend .swatch.supporting { border-top-color: var(--success); }
+  .graph-legend .swatch.contesting { border-top-color: var(--danger); border-top-style: dashed; }
+  .graph-legend .swatch.neutral { border-top-color: var(--muted); border-top-style: dotted; }
+  .graph-legend .swatch.unlabeled { border-top-color: var(--attention); border-top-style: dashed; }
+  table.graph-list { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  table.graph-list caption {
+    text-align: left; font-size: 12px; color: var(--muted); padding: 0 0 8px;
+  }
+  table.graph-list th, table.graph-list td {
+    text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border);
+    font-size: 13px; vertical-align: top;
+  }
+  table.graph-list thead th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  table.graph-list tbody th { font-weight: 400; }
+  table.graph-list td.semantics { color: var(--muted); }
+  table.graph-list td.semantics[data-semantics="absent"] { color: var(--attention); }
+  .section-subtitle { font-size: 14px; font-weight: 600; margin: 20px 0 0; }
   .placeholder {
     border: 1px solid var(--border); border-radius: 6px; padding: 32px 24px;
     background: var(--subtle); color: var(--muted); text-align: center;
@@ -208,14 +265,139 @@
       <h2>Files</h2>
       <p>Files attached to this object are read-only and arrive with the Files milestone. Nothing here is editable.</p>
     </div>
+    {{else if eq .Tab "provenance"}}
+    <section class="graph-panel" data-graph="provenance" data-graph-state="{{.Provenance.State}}" aria-labelledby="provenance-heading">
+      <h2 class="section-title" id="provenance-heading">Provenance</h2>
+      <p class="graph-lead" data-graph-lead="provenance">{{.Provenance.Lead}}</p>
+      <p class="graph-boundary" data-graph-boundary="provenance">{{.Provenance.Boundary}} <a href="{{.Provenance.CounterHref}}" data-graph-cross-link="evidence">Open the Evidence tab</a>.</p>
+      {{if eq .Provenance.State "ok"}}
+      <p class="graph-directions" role="group" aria-label="Provenance walk direction">
+        <span class="dir-label">Walk</span>
+        <a href="{{.Provenance.UpstreamHref}}" data-graph-direction="upstream"{{if .Provenance.UpstreamCurrent}} aria-current="true"{{end}}>Origins (upstream)</a>
+        <a href="{{.Provenance.DownHref}}" data-graph-direction="downstream"{{if .Provenance.DownCurrent}} aria-current="true"{{end}}>Dependents (downstream)</a>
+      </p>
+      <p class="graph-direction-note" data-graph-direction-note="provenance">{{.Provenance.DirectionNote}}</p>
+      {{if .Provenance.Rows}}
+      <figure class="graph-figure">
+        {{template "graphDiagram" .Provenance.Diagram}}
+        <figcaption>Diagram of the <code data-graph-tab="provenance">provenance</code> edges listed below, drawn from the walk over the current version. The list is the accessible form: every edge drawn here is one row there, with the same id.</figcaption>
+      </figure>
+      <h3 class="section-subtitle" id="provenance-list-heading">Edges</h3>
+      <table class="graph-list" data-graph-list="provenance">
+        <caption>One row per provenance edge in this walk. "What the relation means" is the relation catalog's own wording; a relation the catalog does not define shows no meaning rather than an invented one.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Relation</th>
+            <th scope="col">What the relation means</th>
+            <th scope="col">Source version</th>
+            <th scope="col">Target version</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Provenance.Rows}}
+          <tr data-row-edge-id="{{.EdgeID}}" data-row-relation="{{.Relation}}">
+            <th scope="row"><code>{{.Relation}}</code></th>
+            <td class="semantics" data-row-semantics="{{if .SemanticsKnown}}catalog{{else}}absent{{end}}">{{if .SemanticsKnown}}{{.Semantics}}{{else}}No meaning is recorded for this relation: it is not a relation the catalog defines.{{end}}</td>
+            <td>{{.SourceLabel}}</td>
+            <td>{{.TargetLabel}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="empty-state" data-graph-empty="provenance">{{.Provenance.Empty}}</p>
+      {{end}}
+      {{else}}
+      <p class="empty-state" data-graph-unavailable="provenance">{{.Provenance.Unavailable}}</p>
+      {{end}}
+    </section>
     {{else if eq .Tab "evidence"}}
-    <div class="placeholder">
-      <h2>Evidence</h2>
-      <p>Evidence assertions arrive with the Evidence domain milestone. Provenance and evidence graphs land with them.</p>
-    </div>
+    <section class="graph-panel" data-graph="evidence" data-graph-state="{{.Evidence.State}}" aria-labelledby="evidence-heading">
+      <h2 class="section-title" id="evidence-heading">Evidence</h2>
+      <p class="graph-lead" data-graph-lead="evidence">{{.Evidence.Lead}}</p>
+      <p class="graph-boundary" data-graph-boundary="evidence">{{.Evidence.Boundary}} <a href="{{.Evidence.CounterHref}}" data-graph-cross-link="provenance">Open the Provenance tab</a>.</p>
+      {{if eq .Evidence.State "ok"}}
+      {{if .Evidence.TargetLabel}}<p class="graph-direction-note" data-graph-target="evidence">About version: {{.Evidence.TargetLabel}}</p>{{end}}
+      {{if .Evidence.Rows}}
+      <figure class="graph-figure">
+        {{template "graphDiagram" .Evidence.Diagram}}
+        <figcaption>Diagram of the <code data-graph-tab="evidence">evidence</code> assertions listed below: each evidence version on the left, the version this page is about on the right. The list is the accessible form: every assertion drawn here is one row there, with the same id. Stroke colour is repeated by the stance column, never the only carrier of it.</figcaption>
+      </figure>
+      <ul class="graph-legend" data-graph-legend="evidence">
+        <li><span class="swatch supporting" aria-hidden="true"></span>supporting — the assertion's relation supports the target</li>
+        <li><span class="swatch contesting" aria-hidden="true"></span>contesting — the relation contradicts the target</li>
+        <li><span class="swatch neutral" aria-hidden="true"></span>neutral — the relation is recorded without a direction</li>
+        <li><span class="swatch unlabeled" aria-hidden="true"></span>no stance label — the relation has no stance the domain rule derives</li>
+      </ul>
+      <h3 class="section-subtitle" id="evidence-list-heading">Assertions</h3>
+      <table class="graph-list" data-graph-list="evidence">
+        <caption>One row per evidence assertion pinned to this version. "What the relation means" is the relation catalog's own wording; the stance is the label the domain rule derives from the relation, and a relation it does not map shows no stance rather than a guessed one.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Relation</th>
+            <th scope="col">What the relation means</th>
+            <th scope="col">Stance</th>
+            <th scope="col">Evidence version</th>
+            <th scope="col">Evidence type</th>
+            <th scope="col">Review state</th>
+            <th scope="col">Recorded at</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Evidence.Rows}}
+          <tr data-row-edge-id="{{.AssertionID}}" data-row-relation="{{.Relation}}" data-row-stance="{{if .StanceKnown}}{{.Stance}}{{end}}">
+            <th scope="row"><code>{{.Relation}}</code></th>
+            <td class="semantics" data-row-semantics="{{if .SemanticsKnown}}catalog{{else}}absent{{end}}">{{if .SemanticsKnown}}{{.Semantics}}{{else}}No meaning is recorded for this relation: it is not a relation the catalog defines.{{end}}</td>
+            <td data-row-stance-label="{{if .StanceKnown}}{{.Stance}}{{else}}none{{end}}">{{if .StanceKnown}}{{.Stance}}{{else}}no stance label{{end}}</td>
+            <td><code>{{.EvidenceVersionID}}</code></td>
+            <td>{{.EvidenceType}}</td>
+            <td>{{.ReviewState}}</td>
+            <td>{{.CreatedAt}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="empty-state" data-graph-empty="evidence">{{.Evidence.Empty}}</p>
+      {{end}}
+      {{else}}
+      <p class="empty-state" data-graph-unavailable="evidence">{{.Evidence.Unavailable}}</p>
+      {{end}}
+    </section>
     {{end}}
   </main>
   <footer class="readonly-note">This page is read-only. Scientific state changes happen through the agent (MCP) or the API — there is no scientific edit form on the web surface.</footer>
 </div>
 </body>
 </html>
+{{define "graphDiagram"}}
+{{/* One SVG per graph tab. aria-hidden: the picture is an illustration of the
+     table beside it and carries no content of its own — every edge drawn here
+     has the same id as one row of that table (data-edge-id == data-row-edge-id).
+     The marker id is namespaced by the diagram's identity so the two diagrams on
+     this page can never resolve to each other's arrowhead. */}}
+<svg class="graph-svg" viewBox="0 0 {{.Width}} {{.Height}}" preserveAspectRatio="xMidYMid meet" role="presentation" aria-hidden="true" focusable="false" data-graph-diagram="{{.MarkerID}}">
+  <defs>
+    <marker id="arrow-{{.MarkerID}}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#59636e"></path>
+    </marker>
+  </defs>
+  {{if .Edges}}
+  <g class="graph-edges" data-graph-edge-layer="{{.MarkerID}}">
+    {{range .Edges}}<g class="edge edge-{{.Tone}}" data-edge-id="{{.ID}}" data-edge-relation="{{.Relation}}"{{if .HasStance}} data-edge-stance="{{.Stance}}"{{end}}>
+      <line x1="{{.X1}}" y1="{{.Y1}}" x2="{{.X2}}" y2="{{.Y2}}" marker-end="url(#arrow-{{$.MarkerID}})"></line>
+      <text class="edge-label" x="{{.LabelX}}" y="{{.LabelY}}" text-anchor="middle">{{.Relation}}</text>
+    </g>
+    {{end}}
+  </g>
+  {{end}}
+  <g class="graph-nodes" data-graph-node-layer="{{.MarkerID}}">
+    {{range .Nodes}}<g class="node node-{{.Kind}}" data-node-id="{{.ID}}" data-node-kind="{{.Kind}}">
+      <rect x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="{{.H}}" rx="6"></rect>
+      <text class="node-label" x="{{.CX}}" y="{{.CY}}" dy="-3" text-anchor="middle">{{.Label}}</text>
+      <text class="node-type" x="{{.CX}}" y="{{.CY}}" dy="13" text-anchor="middle">{{.Type}}</text>
+    </g>
+    {{end}}
+  </g>
+</svg>
+{{end}}

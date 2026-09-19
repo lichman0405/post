@@ -125,6 +125,18 @@ func (s *ProjectionStore) ObjectStart(ctx context.Context, objectID, projectID s
 	return start, nil
 }
 
+// ObjectStartNode is ObjectStart for callers that want the resolved node
+// and nothing else (the object detail page's provenance tab, T0507): the
+// resolution, the error sentinels and the existence-hiding order are the
+// method above, not a second copy of them.
+func (s *ProjectionStore) ObjectStartNode(ctx context.Context, objectID, projectID string, versionNo *int) (provenance.Node, error) {
+	start, err := s.ObjectStart(ctx, objectID, projectID, versionNo)
+	if err != nil {
+		return provenance.Node{}, err
+	}
+	return start.Node, nil
+}
+
 // isUUID rejects anything that cannot be a uuid column value before it
 // reaches PostgreSQL (the same shape persistence stores use).
 func isUUID(s string) bool {

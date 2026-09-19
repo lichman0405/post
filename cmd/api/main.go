@@ -589,8 +589,10 @@ func run(args []string) int {
 		// nil Evidence makes the command fail closed.
 		Evidence: persistence.NewEvidenceStore(pool),
 	})
-	rsgAPI := rsghttp.New(rsghttp.Deps{Service: rsgSvc})
-	rsgAPI.Register(v1)
+	// The RSG surface is mounted further down, after the two graph
+	// projections below: its object detail page renders their tabs, so it is
+	// constructed with the very stores their JSON routes read through (T0507
+	// — one adapter per graph, one answer per graph).
 	// Pull requests (T0402, T0408; the open route is T0410). One command
 	// instance serves the reads and the open: `Create` is the same
 	// pullrequests.Service the list and detail endpoints read through, so a
@@ -650,8 +652,9 @@ func run(args []string) int {
 	// project read; the pgx adapter lives in provenancehttp because
 	// T0505's scope excludes internal/persistence (L1, recorded in the
 	// task result).
+	provenanceStore := provenancehttp.NewProjectionStore(pool)
 	provenanceAPI := provenancehttp.New(provenancehttp.Deps{
-		Store: provenancehttp.NewProjectionStore(pool),
+		Store: provenanceStore,
 		Gate:  projectAPI.Service(),
 	})
 	provenanceAPI.Register(v1)
@@ -664,15 +667,27 @@ func run(args []string) int {
 	// came from: CLAUDE.md §9 invariant 10), and its own route prefix. Reads
 	// run the same project visibility gate as every other project read; the
 	// per-target query is the one the schema already carried.
+	evidenceGraphSvc := evidencegraph.New(evidencegraph.Deps{
+		Objects:    persistence.NewScientificObjectStore(pool),
+		Assertions: persistence.NewEvidenceGraphStore(pool),
+		Relations:  persistence.NewRelationStore(pool),
+	})
 	evidenceGraphAPI := evidencehttp.New(evidencehttp.Deps{
-		Service: evidencegraph.New(evidencegraph.Deps{
-			Objects:    persistence.NewScientificObjectStore(pool),
-			Assertions: persistence.NewEvidenceGraphStore(pool),
-			Relations:  persistence.NewRelationStore(pool),
-		}),
-		Gate: projectAPI.Service(),
+		Service: evidenceGraphSvc,
+		Gate:    projectAPI.Service(),
 	})
 	evidenceGraphAPI.Register(v1)
+	// Scientific Object Detail surface (T0210), mounted here so its graph
+	// tabs render the two projections above through the SAME readers their
+	// JSON routes serve (T0507): the page and the API cannot disagree about
+	// a project's provenance or evidence, because there is one adapter per
+	// graph and both go through it. Read-only, no write verb of its own.
+	rsgAPI := rsghttp.New(rsghttp.Deps{
+		Service:    rsgSvc,
+		Provenance: provenanceStore,
+		Evidence:   evidenceGraphSvc,
+	})
+	rsgAPI.Register(v1)
 	// Scientific Conflict Resolution surface (T0407): the conflict view
 	// read (report + evidence + recorded decisions) and the resolution
 	// plan write over the three-way base/source/target triple. The reads

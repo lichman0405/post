@@ -25,16 +25,30 @@ type Service interface {
 	ProjectOverview(ctx context.Context, r projects.Reader, projectID string) (rsg.ProjectOverview, error)
 }
 
-// Deps carries the service the surface calls. The production wiring is in
-// cmd/api/main.go (the rsg service composed over the persistence stores,
-// the projects read gate and the matrix engine).
+// Deps carries the service the surface calls plus the two graph reads the
+// object detail page's graph tabs render. The production wiring is in
+// cmd/api/main.go (the rsg service composed over the persistence stores, the
+// projects read gate and the matrix engine; the provenance projection store
+// and the evidence-graph service the JSON routes read through as well).
+//
+// Provenance and Evidence are optional by contract: a build without them
+// serves the page with those two tabs stating that the graph could not be
+// read, which is the same answer a failing read gets. nil never means "empty
+// graph" — an empty graph is a claim about the data, and an unwired reader
+// knows nothing about it.
 type Deps struct {
-	Service Service
+	Service    Service
+	Provenance ProvenanceReader
+	Evidence   EvidenceReader
 }
 
 // New wires the handler.
 func New(deps Deps) *API {
-	return &API{handlers: &handlers{svc: deps.Service}}
+	return &API{handlers: &handlers{
+		svc:        deps.Service,
+		provenance: deps.Provenance,
+		evidence:   deps.Evidence,
+	}}
 }
 
 // API is the mounted RSG surface.

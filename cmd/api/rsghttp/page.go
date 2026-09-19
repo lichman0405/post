@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/lichman0405/post/internal/application/rsg"
+	"github.com/lichman0405/post/internal/rsg/provenance"
 )
 
 // The Scientific Object Detail page (T0210): the HTML representation of
@@ -88,12 +89,20 @@ func wantsHTML(r *http.Request) bool {
 
 // pageTabs are the detail page's tab keys, in display order. Unknown tab
 // values fall back to metadata (a navigation is never an error).
+//
+// Provenance and Evidence are TWO tabs, not one tab with two views: docs/42
+// §Scientific Object Detail names them as two items of the page's body, and
+// the acceptance criterion for T0507 is that a reader does not confuse them
+// (docs/10 §1) — a reader who has to change a control inside one tab to see
+// the other has already been told they are the same surface. Each tab states
+// what it answers and links to the other one by name.
 var pageTabs = []struct{ Key, Label string }{
 	{"metadata", "Metadata"},
 	{"relations", "Relations"},
+	{graphProvenance, "Provenance"},
+	{graphEvidence, "Evidence"},
 	{"history", "History"},
 	{"files", "Files"},
-	{"evidence", "Evidence"},
 }
 
 // pageTab normalizes the ?tab= value to one of the page tabs.
@@ -143,13 +152,59 @@ func (h *handlers) handleObjectDetailPage(w http.ResponseWriter, r *http.Request
 		renderObjectPageError(w, r, status, code, message)
 		return
 	}
+	// The graph tabs read through T0505's and T0506's own services, from the
+	// version this page resolved — never from the raw ?version= parameter,
+	// and never at all on a tab that does not show them: a page load should
+	// cost the queries the page renders.
+	selected := detail.Selected.VersionNo
+	model := objectPageModelFrom(r, detail, versionNo)
+	tabHref := pageTabHref(r)
+	if model.Tab == graphProvenance {
+		model.Provenance = provenancePanelFor(r.Context(), h.provenance, projectID, objectID, &selected,
+			pageDirection(r), tabHref)
+	}
+	if model.Tab == graphEvidence {
+		model.Evidence = evidencePanelFor(r.Context(), h.evidence, projectID, objectID, &selected, tabHref)
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Add("Vary", "Accept")
-	if err := objectDetailTemplate.Execute(w, objectPageModelFrom(r, detail, versionNo)); err != nil {
+	if err := objectDetailTemplate.Execute(w, model); err != nil {
 		// The template parses at init and the model is plain data — an
 		// execute failure is a programming error, and the response is
 		// already partially written.
 		slog.Error("rsghttp: object detail page render failed", "error", err)
+	}
+}
+
+// pageDirection reads the provenance tab's ?direction= parameter: upstream
+// (the default) walks the origins, downstream walks the dependents. Anything
+// else is treated as the default — a navigation is never an error, the same
+// rule pageTab follows.
+func pageDirection(r *http.Request) provenance.WalkDirection {
+	dir, ok := provenance.ParseWalkDirection(r.URL.Query().Get("direction"))
+	if !ok {
+		return provenance.WalkUpstream
+	}
+	return dir
+}
+
+// pageTabHref builds a link to another tab of the same object page, keeping
+// the selected version and (for the provenance tab) the walk direction. Every
+// href on the page is built from the request path, so the page never hard-codes
+// the mount prefix.
+func pageTabHref(r *http.Request) func(tab, direction string) string {
+	base := r.URL.Path
+	version := r.URL.Query().Get("version")
+	return func(tab, direction string) string {
+		query := url.Values{}
+		query.Set("tab", tab)
+		if version != "" {
+			query.Set("version", version)
+		}
+		if direction != "" {
+			query.Set("direction", direction)
+		}
+		return base + "?" + query.Encode()
 	}
 }
 
@@ -194,6 +249,11 @@ type objectPageModel struct {
 	Relations         []objectPageRelation
 	AgentGetJSON      string
 	AgentVersionJSON  string
+	// The two graph tabs (T0507). At most one is filled: the one the page is
+	// showing. A tab the reader did not open costs no read and renders
+	// nothing — there is no "other graph" data lurking in this page.
+	Provenance provenancePanel
+	Evidence   evidencePanel
 }
 
 type objectPageVersion struct {
