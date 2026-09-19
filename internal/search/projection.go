@@ -190,6 +190,30 @@ func mappedEventTypes() []string {
 	return out
 }
 
+// EntityTypes returns the entity types a projected document can carry — the
+// closed vocabulary of search_documents.entity_type — sorted.
+//
+// It is derived from the rule table, like rebuildableEntityTypes, so a rule
+// added for a new entity type extends this set rather than leaving a reader
+// that still believes the vocabulary is the old one. The retrieval layer
+// (internal/search/retrieval) validates a plan's target_object against it and
+// refuses an unknown type, which is only a meaningful refusal if the
+// vocabulary has one definition — hence this accessor rather than each
+// reader keeping its own list.
+func EntityTypes() []string {
+	seen := make(map[string]bool, len(projectionRules))
+	out := make([]string, 0, len(projectionRules))
+	for _, r := range projectionRules {
+		if seen[r.EntityType] {
+			continue
+		}
+		seen[r.EntityType] = true
+		out = append(out, r.EntityType)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // The canonical visibility values. They are the ones the projects/branches
 // surfaces use and the ones internal/events validates its events against —
 // search_documents.visibility is the same vocabulary, and the read query

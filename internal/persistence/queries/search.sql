@@ -100,3 +100,237 @@ SET embedding          = @embedding::vector,
     embedding_model    = @embedding_model::text,
     embedding_version  = @embedding_version::text
 WHERE entity_ref = @entity_ref;
+
+-- ---------------------------------------------------------------------------
+-- T0904: the retrieval surface.
+--
+-- docs/14 §2 fixes the pipeline as "structured filters + FTS + semantic
+-- candidate retrieval + graph traversal + scientific ranking", and
+-- ADR-005 keeps all four in PostgreSQL for V1. T0901 filled the projection,
+-- T0902 filled the vector, T0903 wrote the plan; these three reads are what
+-- turns a plan into candidates, and they are the FTS, the vector and the
+-- structured-filter recall signals respectively (the graph traversal is
+-- ListScopeAdjacentRelationVersions / ListScopeObjectVersions below).
+--
+-- # Why these are new queries and not a widened SearchDocuments
+--
+-- The canonical read (SearchDocuments, above) stays exactly as it is: it is
+-- the access-control regression test's subject (tests/integration/
+-- search_access_test.go) and the surface T0905/T0906 will serve. What the
+-- retrieval adds is NARROWING that has to happen in SQL rather than after
+-- the fact, because a narrowing applied after LIMIT is not a narrowing: a
+-- question whose plan names knowledge documents would otherwise take the
+-- page of best-matching rows across every entity type and then throw most
+-- of it away, reporting "no knowledge answer" for a corpus that has one.
+--
+-- The access predicate is therefore repeated VERBATIM in each of them —
+-- `(visibility = 'public' OR project_id = ANY(@allowed_project_ids::uuid[]))`
+-- — and NOT re-derived. A second implementation of that rule is how two
+-- answers to "who may see this row" start to disagree, so the integration
+-- suite pins that this copy and the canonical query return the same rows for
+-- the same input, and that the fail-closed property (an empty scope yields
+-- public rows only, never the table) holds for each of them independently of
+-- the other. A query that could not accept a scope could not enforce one.
+--
+-- # public_only
+--
+-- The plan's `visibility` item is a NARROWING HINT and never a grant
+-- (planner.VisibilityPublic / VisibilityAccessible). It arrives here as a
+-- boolean that can only ever REMOVE rows: 'public' means "the rows the read
+-- query returns to anybody", and 'accessible' means "whatever the scope
+-- already allows", which is the predicate below unchanged. There is
+-- deliberately no value of this flag that widens anything.
+--
+-- # entity_types / structured_filter
+--
+-- entity_types is the plan's target_object vocabulary (the projection's own
+-- entity types). structured_filter is the caller's facet filter
+-- (specs/api/openapi.yaml, POST /search: `filters`), matched as jsonb
+-- containment so a caller can ask for one facet — {"object_type":"claim"} is
+-- how "Claims" is recalled — without this query knowing any facet's name.
+-- Both are ANDed onto the access predicate, so neither can be used to reach
+-- a row the predicate refuses.
+
+-- name: SearchDocumentsFullText :many
+--
+-- The FTS signal. The text semantics are the canonical query's, character
+-- for character — the same to_tsvector expression, the same
+-- plainto_tsquery, the same ts_rank — so the two cannot disagree about what
+-- "matches" means, and the index the projection built
+-- (search_documents_fts_idx) serves both.
+SELECT entity_ref, entity_type, visibility, project_id, title, content, structured, updated_at,
+       ts_rank(to_tsvector('simple', title || ' ' || content), plainto_tsquery('simple', @query)) AS rank
+FROM search_documents
+WHERE to_tsvector('simple', title || ' ' || content) @@ plainto_tsquery('simple', @query)
+  AND (@entity_types::text[] IS NULL OR entity_type = ANY(@entity_types::text[]))
+  AND (@structured_filter::jsonb IS NULL OR structured @> @structured_filter::jsonb)
+  AND (@public_only::boolean = false OR visibility = 'public')
+  AND (visibility = 'public' OR project_id = ANY(@allowed_project_ids::uuid[]))
+ORDER BY rank DESC, entity_ref
+LIMIT @page_size;
+
+-- name: SearchDocumentsByVector :many
+--
+-- The vector signal. Two things about it are load-bearing.
+--
+-- 1. The provenance match. A vector is only meaningful against the model
+--    that produced it (internal/search/embedding/port.go, Model), so a row
+--    whose stored provider/model/version is not the one that embedded THIS
+--    query is not a worse match — it is not a match at all, and comparing
+--    against it would produce a confident, meaningless distance. The three
+--    columns are compared, not just the version: two implementations can
+--    ship the same version label. Rows left behind by a replaced model are
+--    simply not recalled here; the batch job is what brings them back
+--    (SearchDocumentsNeedingEmbedding selects exactly them).
+--
+-- 2. The exact scan. There is no ivfflat/hnsw index on the column, and that
+--    is 00092's recorded decision, not an omission: an approximate index can
+--    be less accurate than the scan, never more, and V1's scale does not
+--    require one. Adding one is a measurable performance decision with its
+--    own evidence, and this query is where its effect would be felt.
+--
+-- @embedding arrives in pgvector's text input syntax and is cast explicitly,
+-- exactly as UpdateSearchDocumentEmbedding writes it: the column's type is
+-- not one the driver knows, and the server parses it (sqlc.yaml's override).
+--
+-- The ::float8 cast on the score is not decoration: pgvector's `<=>` is an
+-- operator over a type sqlc has no mapping for (sqlc.yaml overrides the
+-- column, not the operator), and without the cast the generator typed the
+-- result as int32 — a real double precision value read through an integer
+-- destination, which pgx refuses at scan time. The cast states the type the
+-- expression actually has.
+SELECT entity_ref, entity_type, visibility, project_id, title, content, structured, updated_at,
+       (1 - (embedding <=> @embedding::vector))::float8 AS similarity
+FROM search_documents
+WHERE embedding IS NOT NULL
+  AND embedding_provider = @embedding_provider::text
+  AND embedding_model    = @embedding_model::text
+  AND embedding_version  = @embedding_version::text
+  AND (@entity_types::text[] IS NULL OR entity_type = ANY(@entity_types::text[]))
+  AND (@structured_filter::jsonb IS NULL OR structured @> @structured_filter::jsonb)
+  AND (@public_only::boolean = false OR visibility = 'public')
+  AND (visibility = 'public' OR project_id = ANY(@allowed_project_ids::uuid[]))
+ORDER BY embedding <=> @embedding::vector, entity_ref
+LIMIT @page_size;
+
+-- name: SearchDocumentsByFacets :many
+--
+-- The structured-filter signal: recall by facet alone, with no text
+-- predicate at all. It is what makes a question like "the claims about CO2
+-- uptake" answerable when the wording of the question does not occur in the
+-- documents, and it is the one signal whose caller must supply a filter —
+-- without one it would be "the first N rows of the index", which is not an
+-- answer to anything. The retrieval layer enforces that (a facets-only
+-- recall runs only when a facet was given); this query does not need to,
+-- because returning rows the caller asked for is exactly its job.
+--
+-- ORDER BY entity_ref is a stable order rather than a ranking: there is no
+-- text to rank against, and inventing a relevance order here would be
+-- inventing a score (CLAUDE.md §9.13). The fusion layer treats this signal
+-- as an unordered set by ranking it in that order — deterministically, which
+-- is what reproducibility needs.
+SELECT entity_ref, entity_type, visibility, project_id, title, content, structured, updated_at
+FROM search_documents
+WHERE (@entity_types::text[] IS NULL OR entity_type = ANY(@entity_types::text[]))
+  AND (@structured_filter::jsonb IS NULL OR structured @> @structured_filter::jsonb)
+  AND (@public_only::boolean = false OR visibility = 'public')
+  AND (visibility = 'public' OR project_id = ANY(@allowed_project_ids::uuid[]))
+ORDER BY entity_ref
+LIMIT @page_size;
+
+-- ---------------------------------------------------------------------------
+-- The graph half.
+--
+-- A document is not an object version: search_documents indexes the network's
+-- readable things (a published knowledge object, an asset version, a
+-- release, a state), and the relation graph (relations / relation_versions,
+-- 00006) connects scientific object VERSIONS. The mapping from one to the
+-- other exists for exactly one entity type and it is a typed column, not a
+-- convention: a knowledge publication pins the object version it published
+-- (knowledge_publications.object_version_id, 00010/00083 — "what is
+-- published, and what a foreign project cites, is one version"). An asset
+-- and a release are bundles whose own surfaces (their manifests) are where
+-- their content is read from, and a state is a transition; none of the three
+-- is a version-pinned object, so none of them seeds an expansion. That is the
+-- boundary of this task and not a missing join.
+
+-- name: SearchSeedObjectVersions :many
+--
+-- The seed mapping: the pinned object version behind each recalled
+-- publication pid. The version id is the graph's addressing unit, and the
+-- object id + version_no are the citation (docs/21, ADR-010: the answer
+-- cites a platform-determined version), which is why they travel together.
+SELECT kp.pid,
+       sov.id        AS object_version_id,
+       sov.object_id,
+       sov.version_no,
+       sov.title,
+       so.object_type,
+       so.project_id::text AS project_id
+FROM knowledge_publications kp
+JOIN scientific_object_versions sov ON sov.id = kp.object_version_id
+JOIN scientific_objects so ON so.id = sov.object_id
+WHERE kp.pid = ANY(@pids::text[]);
+
+-- name: ListScopeAdjacentRelationVersions :many
+--
+-- One traversal hop, scope-filtered IN SQL.
+--
+-- It is the retrieval's shape of 00036's ListAdjacentRelationVersions (the
+-- RSG query surface's, T0209), with the same as-of rule — no lineage pin
+-- here, so each relation renders at its newest version — and one difference
+-- that matters: the RSG query deliberately returns an edge of any project so
+-- that its SERVICE can authorize the hop, while a search has no such second
+-- gate to run — its authorization is the scope, resolved once
+-- (internal/search/scope.go) — so the scope is applied where the rows are
+-- read. An edge enters only when the relation's own project AND both
+-- endpoint projects are in the caller's scope; a hidden endpoint would
+-- otherwise leak its pinned version id through the edge it appears on.
+--
+-- This is strictly NARROWER than T0209's per-project requireRead, on purpose.
+-- T0209's surface is reached with a project in hand and a public project is
+-- readable by anyone there; a search is reached with no project at all, and
+-- invariant 6 ("Publish controls visibility") means an unpublished object
+-- version is not the network's to read. A non-member therefore expands into
+-- nothing; the public half of the graph is still searchable, one surface up,
+-- because the projection indexes exactly the published things.
+SELECT DISTINCT ON (rv.relation_id)
+  rv.relation_id,
+  rv.relation_type,
+  rv.source_object_version_id,
+  rv.target_object_version_id,
+  so_s.project_id::text AS source_project_id,
+  so_t.project_id::text AS target_project_id
+FROM relation_versions rv
+JOIN relations r ON r.id = rv.relation_id
+JOIN scientific_object_versions sov_s ON sov_s.id = rv.source_object_version_id
+JOIN scientific_objects so_s ON so_s.id = sov_s.object_id
+JOIN scientific_object_versions sov_t ON sov_t.id = rv.target_object_version_id
+JOIN scientific_objects so_t ON so_t.id = sov_t.object_id
+WHERE (rv.source_object_version_id = ANY(@version_ids::uuid[])
+       OR rv.target_object_version_id = ANY(@version_ids::uuid[]))
+  AND r.project_id   = ANY(@project_ids::uuid[])
+  AND so_s.project_id = ANY(@project_ids::uuid[])
+  AND so_t.project_id = ANY(@project_ids::uuid[])
+ORDER BY rv.relation_id, rv.version_no DESC;
+
+-- name: ListScopeObjectVersions :many
+--
+-- The node rows of one traversal level. Scope-filtered in SQL for the same
+-- reason as the hop above: the ids come from edges the previous level
+-- admitted, and re-stating the scope here means a defect in the hop's filter
+-- still cannot return another project's object version. The three columns
+-- the retrieval reports beyond the ids are the ones a candidate must carry
+-- and nothing else — no payload, no content: a candidate is a citation
+-- pointer, and the answer layer reads the object through its own surface.
+SELECT sov.id AS object_version_id,
+       sov.object_id,
+       sov.version_no,
+       sov.title,
+       so.object_type,
+       so.project_id::text AS project_id
+FROM scientific_object_versions sov
+JOIN scientific_objects so ON so.id = sov.object_id
+WHERE sov.id = ANY(@version_ids::uuid[])
+  AND so.project_id = ANY(@project_ids::uuid[])
+ORDER BY sov.id;
