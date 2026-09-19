@@ -31,6 +31,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/internal/application/authn"
+	"github.com/lichman0405/post/internal/domain"
 	"github.com/lichman0405/post/internal/persistence"
 	"github.com/lichman0405/post/internal/persistence/memstore"
 	"github.com/lichman0405/post/internal/persistence/testdb"
@@ -38,13 +39,13 @@ import (
 
 const orgTaskID = "T0103"
 
-// todayUTC is the local calendar date at UTC midnight — the same
-// truncation the org service applies to affiliation dates (its dateOnly
-// helper is unexported), so assertions are timezone-independent.
-func todayUTC() time.Time {
-	now := time.Now()
-	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-}
+// todayUTC is today's affiliation day: the day the org service stamps onto
+// the memberships it creates and ends. It is asked of the convention the
+// service itself calls (domain.AffiliationDay, T0816) rather than recomputed
+// here — this helper used to read the LOCAL year/month/day and label it UTC,
+// which agreed with the service only because the service had the same bug.
+// Two copies of a rule are two answers waiting to happen; the copy is gone.
+func todayUTC() time.Time { return domain.AffiliationDay(time.Now()) }
 
 // testUserClient is one browser: session cookies + the CSRF token bound to
 // its session.

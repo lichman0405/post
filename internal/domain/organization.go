@@ -113,18 +113,31 @@ type OrganizationMembership struct {
 }
 
 // Active reports whether the affiliation is currently in force: started and
-// not ended yet. Comparison runs date-to-date (calendar days, UTC) — the
-// canonical columns are dates, so "starts today" is active for the whole
-// of today regardless of the local clock.
+// not ended yet. The comparison is made in whole UTC calendar days
+// (AffiliationDay, the convention in affiliation.go), so "starts today" is
+// active for the whole of today whatever zone the process's clock runs in.
+//
+// # The end date is exclusive HERE, and that is a different question
+//
+// This method answers a governance question — "does this membership still
+// confer powers right now" — and docs/04 §6 settles it: a member whose
+// affiliation ended holds no governance powers. Ending an affiliation stamps
+// TODAY as the end date, and the powers must stop the same day, so a
+// membership ending today is not active here. The API pins that: the moment a
+// member leaves, their read of the organization is refused
+// (tests/integration/org_permission_test.go).
+//
+// The affiliation window itself (AffiliationWindowSQL) covers BOTH ends, and
+// answers a different question: which organization a contribution belongs to
+// (docs/13 §1 "affiliation at time"). The two boundaries therefore sit one
+// day apart on the end date, on purpose: one is "may act now", the other is
+// "was affiliated on that day". T0816 unified the day both are measured in
+// and left this boundary alone — moving it would move when a removal takes
+// effect, which is a product decision, not a cleanup.
 func (m OrganizationMembership) Active() bool {
-	now := dateUTC(time.Now())
+	now := AffiliationDay(time.Now())
 	if m.AffiliationEnd != nil && !m.AffiliationEnd.After(now) {
 		return false
 	}
 	return !m.AffiliationStart.After(now)
-}
-
-// dateUTC truncates a timestamp to its UTC calendar date.
-func dateUTC(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }

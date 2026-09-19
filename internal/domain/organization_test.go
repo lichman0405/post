@@ -79,10 +79,11 @@ func TestOrganizationActive(t *testing.T) {
 }
 
 func TestMembershipActive(t *testing.T) {
-	// The local calendar date at UTC midnight — the same truncation
-	// Active() applies, so the test is timezone-independent.
-	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	// Today as the convention defines it (AffiliationDay) — the same day
+	// Active() compares against. Reading the local year/month/day here, as
+	// this helper used to, made the fixture disagree with the code it sets up
+	// for exactly the hours the two readings differ (T0816).
+	today := AffiliationDay(time.Now())
 	m := OrganizationMembership{AffiliationStart: today}
 	if !m.Active() {
 		t.Error("open-ended started membership must be active")

@@ -8,6 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/lichman0405/post/internal/domain"
 )
 
 // LedgerStore is the Contribution Ledger projection's PostgreSQL adapter
@@ -223,7 +225,11 @@ SELECT r.event_type, count(*)
 // $2 is occurred_at's UTC date, computed in Go from the event's instant
 // rather than from now(): the affiliation belongs to when the act
 // happened, and a projection run must not be an input to its own output.
-const ledgerInsertRowQuery = `
+// The window it is compared against is not written here — it is
+// domain.AffiliationWindowSQL, the one definition of "was this person
+// affiliated on that day" (both ends included), shared with the events
+// audience query so the two cannot answer differently.
+var ledgerInsertRowQuery = `
 INSERT INTO contribution_events
     (actor_id, organization_id_at_time, project_id, event_type, role_codes,
      object_refs, accepted_context, released_context, occurred_at, via,
@@ -232,8 +238,7 @@ SELECT $1, (
          SELECT m.organization_id
            FROM organization_memberships m
           WHERE m.user_id = $1
-            AND (m.affiliation_start IS NULL OR m.affiliation_start <= $2::date)
-            AND (m.affiliation_end IS NULL OR m.affiliation_end >= $2::date)
+            AND ` + domain.AffiliationWindowSQL("m", "$2::date") + `
           ORDER BY m.affiliation_start DESC NULLS LAST, m.organization_id
           LIMIT 1
        ), $3, $4, $5, $6, $7, $8, $9, $10, $11
@@ -301,10 +306,13 @@ func ledgerInsertRow(ctx context.Context, tx pgx.Tx, row LedgerRow) (int, error)
 	if err != nil {
 		return 0, fmt.Errorf("%w: ledger source event: %v", ErrStore, err)
 	}
-	// The affiliation date is the event's UTC date: memberships carry
-	// dates, the ledger carries instants, and choosing one zone and stating
-	// it is the only way the two can be compared at all.
-	affiliationDate := row.OccurredAt.UTC().Format("2006-01-02")
+	// The affiliation date is the event's affiliation day — its UTC calendar
+	// date (domain.AffiliationDayText): memberships carry dates, the ledger
+	// carries instants, and the convention says which day an instant falls
+	// on. It is rendered as text so the ::date cast in the query parses a
+	// day rather than converting a timestamp in whatever zone the session
+	// runs in.
+	affiliationDate := domain.AffiliationDayText(row.OccurredAt)
 	tag, err := tx.Exec(ctx, ledgerInsertRowQuery,
 		actor, affiliationDate, projectID, row.EventType, RoleCodes(row.RoleCodes),
 		refs, row.AcceptedContext, row.ReleasedContext, row.OccurredAt,
