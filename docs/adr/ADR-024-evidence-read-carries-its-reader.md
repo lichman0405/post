@@ -15,10 +15,10 @@ Status: Accepted
 
 落地这条列的读有两条（`internal/persistence/queries/evidence.sql`）：
 
-- `ListEvidenceAssertionsForTarget`（`:67-73`）——头部逐字写着
+- `ListEvidenceAssertionsForTarget`（`:66-71`）——头部逐字写着
   **"Rows are returned unfiltered by visibility: this is the owning project's read."**，
   查询里**没有任何可见性谓词**；
-- `ListPublishedEvidenceForTarget`（`:74-109`）——带 `AND ea.visibility = 'public'`，
+- `ListPublishedEvidenceForTarget`（`:73-112`）——带 `AND ea.visibility = 'public'`，
   是公开网络读（`GET /knowledge/{knowledgeId}`，`internal/persistence/evidence_store.go:186`）。
 
 而 T0506 接上、T0507 又铺到人可读页面的，是**前一条**：

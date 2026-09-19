@@ -4229,10 +4229,11 @@
       ]
     },
     "T0507": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-19T07:38:15Z",
       "worker_run_id": "run-ae43076f3eed5507",
       "accepted_by_supervisor_at": "2026-09-19T08:47:55Z",
+      "merged_at": "2026-09-19T09:07:35Z",
       "history": [
         {
           "from": "todo",
@@ -4259,6 +4260,13 @@
           "to": "accepted",
           "at": "2026-09-19T08:47:55Z",
           "run_id": "run-0d34ac4a1f24808e"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-19T09:07:35Z",
+          "run_id": "run-5c3c8ff9e74cda9f",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -4412,13 +4420,24 @@
       ]
     },
     "T0510": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-19T09:07:39Z",
+      "worker_run_id": "run-3218d84983a3ee1a",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-19T09:07:37Z",
+          "run_id": "run-28e6635c4fbba400"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-19T09:07:39Z",
+          "run_id": "run-3218d84983a3ee1a",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0601": {
       "status": "merged",
@@ -4534,7 +4553,7 @@
       ]
     },
     "T0602": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-19T08:16:17Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：abort 要记的字段（reason code、human explanation、replacement ref）在库里无处可存；reopen 这条在契约、权限矩阵、审批规则三处全空。",
       "worker_run_id": "run-cb6ffa3d7632f9f3",
@@ -4580,6 +4599,13 @@
           "at": "2026-09-19T08:16:17Z",
           "run_id": "run-cb6ffa3d7632f9f3",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-19T09:07:35Z",
+          "run_id": "run-22539c232de48195",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -6471,7 +6497,7 @@
       ]
     },
     "T0808": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-19T08:50:45Z",
       "worker_run_id": "run-f185c20ce10e2bf4",
       "accepted_by_supervisor_at": "2026-09-19T08:37:09Z",
@@ -6537,6 +6563,13 @@
           "at": "2026-09-19T08:50:45Z",
           "run_id": "run-f185c20ce10e2bf4",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-19T09:04:04Z",
+          "run_id": "run-6169746d1ea7bd89",
+          "reason": "collect: all checks passed"
         }
       ]
     },

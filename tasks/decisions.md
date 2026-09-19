@@ -14093,3 +14093,57 @@ python3 scripts/validate_task_state.py        # 9 项检查，演练中全过
 评审另外留了 7 条风险（都不是阻塞；其中"`contribution_events` 没有自己的可见性轴""`docs/13 §5`
 的私密贡献摘要未做"两条正是我早已挂给 owner 的 L3；"窗口饥饿夹具只盖住十条读里的五条"
 与"reproduction 维度仍不带被复现对象"两条我记进跟进清单）。
+
+## 2026-09-19 注释清理批次（四笔）做完：T0806 第一/五、T0902 第零/二
+
+我上面承诺过"改完后把 finding 原文与改法逐条对照留档"。四笔都在主库上改完、提交 `7032ca5`，
+**行为一个字没动**：gofmt/build/vet 干净，`evidencenetwork`、`rsg`、`search/embedding` 三个单测包全绿，
+`tests/integration` 编译通过。逐条对照如下。
+
+**一（T0806 minor，`internal/application/evidencenetwork/section.go:114`）。**
+原文：**「Go 侧的第二层只覆盖了规则的一半」**——`ea.visibility = 'public'` 在 SQL 谓词里，而 `Assertion`
+没有这个字段，所以 `Build` 的 fail-closed 复查只在"断言方项目不公开"那半起作用；
+`section.go:100` 的 "that predicate is a read strategy, and this is the rule" **声称的第二层保证
+在可见性那根轴上不存在**。
+**改法：把话说准。** 我读了查询本身（`internal/persistence/queries/evidence.sql:73-112`），谓词是
+`ea.visibility = 'public' AND (ea.project_id = @target_project_id::uuid OR sp.visibility = 'public')`，
+而 Go 侧复查逐字只做 `external && SourceProjectVisibility != public`——**`OR` 那一半被复写了一遍，
+`AND` 那一半没有任何第二道**。新注释写明：复查的宽度**恰好等于它读得到的输入**，
+行自身的可见性列只有谓词在读（查询头部就是它的说明）。
+**没有**选另一种改法（把列带进读模型再复查）：那要动正被评审钉住的查询与读模型，属行为改动，不是 L0。
+
+**二（T0806 nit，`internal/application/rsg/ports.go:371` 与 `evidence.go:66-68`）。**
+原文：**「`RightsValid` 被填但没人读」**，且 `evidence.go` 的注释说「rights 文档解析不了就拒绝写入」，
+而对 origin 侧的写入，这个效果只是**经由 `AudienceFor` 的零值文档**间接发生、**且只在跨项目那条支路**；
+行为无害（跨项目一律拒），说明说宽了。
+**改法：把话说准。** 我全树查过 `RightsValid`：rsg 这条路上**没有任何读者**（只有
+`internal/persistence/evidence_store.go:155` 在写、`rsg/evidence_test.go` 在造夹具），其余包各读各的
+`knowledgepublish.PublishedKnowledge`。真正的拒绝点是 `rsg/evidence.go:253`
+`if external && publication.Audience() != knowledgepublish.AudienceNetwork`——**只在跨项目支路**。
+两处注释改成：这条路上没人读那个旗标、规则读的是 `Rights`；解析失败在跨项目支路上经第 5 步拒绝，
+origin 侧根本不查 audience。
+
+**三（T0902 minor，`tests/integration/search_embedding_test.go:311`）。**
+原文：注释最后一句 **"the vector is refreshed by the embedding job's own pass"** 与它下面两行的
+`want embedded=0` 自相矛盾——就地重投影后，行保留的是**用旧文本算出来的向量**，而积压谓词只比模型身份，
+**本任务的任何一趟都不会去修它**。
+**改法：把这句反过来写，并补上真正的修复路径。** 我核过"什么东西才修得动"这个说法成立：
+`Rebuild` 是 `TRUNCATE` + 重插（`internal/search/rebuild.go:65`），文档自己写着
+`embedding is NULL for every rebuilt row`（`:46-50`）；而 `UpsertSearchDocument` 的
+`ON CONFLICT DO UPDATE` **不含 embedding 列**（`internal/persistence/queries/search.sql:14-23`）。
+所以是"模型变更"或"rebuild 之后再嵌入"，注释照此写。（顺带：原注释前半句 "the next recompute selects it"
+也是反的——那一趟**不**选它——一并改正。）
+
+**四（T0902 nit，`internal/search/embedding/batch.go:149`）。**
+原文：文档注释里多出一个 "A"（`returns what it did.A`）。**改法：删掉那个 A。**
+
+**还欠的两笔**：T0808 评审的 `doc.go` 引注与 `sections.tsx` 注释，**要等 T0808 合入主库才改得了**
+（它们现在只存在于那条分支上；改在验收中的工作树里等于插手正在被验收的交付）。合入后立刻按同样的
+对照格式补，两条 finding 的原文已逐字抄在上一节。
+
+**体检出一个坐标漂移，顺手修了**：上面我写 `evidence.sql:73-112` 是对的，而 ADR-024 与 T0511 的任务书
+（以及本文件早先几节）引的是 `:67-73` 与 `:74-109`——真坐标是 **`:66-71`**（无谓词那条）与
+**`:73-112`**（公开读那条，谓词其实在 `:109-110` 两行）。两处已就地改正（ADR 与任务书）；
+**本文件早先几节的旧坐标按这条读**（journal 不回改，改的是活文档）。另外，安全评审的自动化扫描
+在 `cmd/api/rsghttp/graph.go` 上独立报了同一条缺陷（`evidencePanelFor` 不接读者）——**与我已下的
+ADR-024/T0511 是同一件事，不新增动作**，只是外部工具对该判断的一次独立印证。
