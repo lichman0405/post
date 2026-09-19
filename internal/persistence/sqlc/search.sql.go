@@ -88,6 +88,122 @@ func (q *Queries) SearchDocuments(ctx context.Context, arg SearchDocumentsParams
 	return items, nil
 }
 
+const searchDocumentsNeedingEmbedding = `-- name: SearchDocumentsNeedingEmbedding :many
+SELECT entity_ref, title, content
+FROM search_documents
+WHERE embedding IS NULL
+   OR embedding_provider IS DISTINCT FROM $1::text
+   OR embedding_model    IS DISTINCT FROM $2::text
+   OR embedding_version  IS DISTINCT FROM $3::text
+ORDER BY entity_ref
+LIMIT $4
+`
+
+type SearchDocumentsNeedingEmbeddingParams struct {
+	EmbeddingProvider string `json:"embedding_provider"`
+	EmbeddingModel    string `json:"embedding_model"`
+	EmbeddingVersion  string `json:"embedding_version"`
+	BatchSize         int32  `json:"batch_size"`
+}
+
+type SearchDocumentsNeedingEmbeddingRow struct {
+	EntityRef string `json:"entity_ref"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+}
+
+// The embedding backlog: the documents whose stored vector is not the one
+// the CURRENT model would produce. That is exactly two states, and they are
+// one predicate — the vector is missing, or its provenance is not this
+// model's (T0902, internal/search/embedding). A stable ORDER BY makes a
+// batch resumable and a run reproducible: two passes over the same backlog
+// select the same rows, so "the same input twice" is not a coincidence of
+// the planner.
+//
+// This is a READ of rows that are about to be written, not a claim on them:
+// no row lock is taken and none is held while the embedder runs (see the
+// batch job for why). Two batch jobs running at once may therefore select
+// the same rows and write the same values — the write is idempotent, which
+// is the same at-least-once/ idempotent pairing the queue itself is built
+// on.
+func (q *Queries) SearchDocumentsNeedingEmbedding(ctx context.Context, arg SearchDocumentsNeedingEmbeddingParams) ([]SearchDocumentsNeedingEmbeddingRow, error) {
+	rows, err := q.db.Query(ctx, searchDocumentsNeedingEmbedding,
+		arg.EmbeddingProvider,
+		arg.EmbeddingModel,
+		arg.EmbeddingVersion,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchDocumentsNeedingEmbeddingRow
+	for rows.Next() {
+		var i SearchDocumentsNeedingEmbeddingRow
+		if err := rows.Scan(&i.EntityRef, &i.Title, &i.Content); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateSearchDocumentEmbedding = `-- name: UpdateSearchDocumentEmbedding :execrows
+UPDATE search_documents
+SET embedding          = $1::vector,
+    embedding_provider = $2::text,
+    embedding_model    = $3::text,
+    embedding_version  = $4::text
+WHERE entity_ref = $5
+`
+
+type UpdateSearchDocumentEmbeddingParams struct {
+	Embedding         string `json:"embedding"`
+	EmbeddingProvider string `json:"embedding_provider"`
+	EmbeddingModel    string `json:"embedding_model"`
+	EmbeddingVersion  string `json:"embedding_version"`
+	EntityRef         string `json:"entity_ref"`
+}
+
+// The projection's SECOND write path, and deliberately not the first: this
+// updates the vector and its provenance and touches nothing else. T0901's
+// UpsertSearchDocument stays the single writer of a document's derived
+// content and visibility, so re-running the projection does not erase a
+// vector while re-embedding does not rewrite a document (and the two can
+// run concurrently without fighting). The split is what makes the pair
+// idempotent in both directions: each writer owns its columns.
+//
+// embedding is assigned from a text parameter holding pgvector's input
+// syntax ("[0.1,0.2,...]"). The cast is explicit because the column's type
+// is not one the driver knows; the server does the parsing, which is how
+// this repository keeps a pgvector Go dependency out of the module (see
+// sqlc.yaml's vector override for the generation half of the same fact).
+//
+// :execrows, not :exec — the row count is not decoration, it is what makes
+// the recompute loop bounded. The batch job loop terminates because a row
+// it has written stops matching the backlog predicate; if a write ever
+// lands nowhere (a BEFORE UPDATE trigger that returns NULL, a changed
+// WHERE, a renamed column), the row stays in the backlog and the job would
+// select it forever. Reporting the count lets the job say "this write did
+// not land" and fail loudly instead of spinning, which matters because the
+// same code runs as a resident consumer where a spin is invisible.
+func (q *Queries) UpdateSearchDocumentEmbedding(ctx context.Context, arg UpdateSearchDocumentEmbeddingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateSearchDocumentEmbedding,
+		arg.Embedding,
+		arg.EmbeddingProvider,
+		arg.EmbeddingModel,
+		arg.EmbeddingVersion,
+		arg.EntityRef,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertSearchDocument = `-- name: UpsertSearchDocument :exec
 
 INSERT INTO search_documents (entity_ref, entity_type, visibility, project_id, title, content, structured)
@@ -113,8 +229,16 @@ type UpsertSearchDocumentParams struct {
 }
 
 // Search projection (canonical table: search_documents). Rebuildable by
-// construction (docs/14: Postgres FTS + structured filters; embeddings are a
-// later concern, OpenSearch explicitly post-V1).
+// construction (docs/14: Postgres FTS + structured filters, and since T0902
+// pgvector embeddings as well; OpenSearch explicitly post-V1).
+//
+// Two writers, one row each, and they do not overlap: T0901's projection
+// owns the document (entity_type, visibility, project_id, title, content,
+// structured), T0902's batch embedding job owns the vector and its
+// provenance (embedding, embedding_provider, embedding_model,
+// embedding_version). The visibility filter below is T0901's and is
+// untouched by the embedding work: a vector is an attribute of a row that
+// was already access-filtered, not a second way in.
 func (q *Queries) UpsertSearchDocument(ctx context.Context, arg UpsertSearchDocumentParams) error {
 	_, err := q.db.Exec(ctx, upsertSearchDocument,
 		arg.EntityRef,

@@ -900,9 +900,29 @@ var canonicalTables = map[string]tableExp{
 		fks: []fkExp{fk("actor_id", "users", "RESTRICT"), fk("project_id", "projects", "RESTRICT"), fk("organization_id", "organizations", "RESTRICT")},
 	},
 	"search_documents": {
-		cols: []colExp{c("entity_ref", txt, false, false), c("entity_type", txt, false, false), c("visibility", txt, false, false), c("project_id", u, true, false), c("title", txt, false, false), c("content", txt, false, false), c("structured", jb, false, true), colExp{name: "embedding", dataType: vec, udtName: "vector", nullable: true}, c("updated_at", ts, false, true)},
+		// T0902 (00092): the three embedding-provenance columns. They are
+		// appended by ALTER TABLE, so they are last in ordinal order, and
+		// they are nullable because "no vector has been computed for this
+		// row" is a real state (internal/rights/usage.go's unset-vs-empty
+		// rule) — NOT because a provider may be unknown.
+		cols: []colExp{c("entity_ref", txt, false, false), c("entity_type", txt, false, false), c("visibility", txt, false, false), c("project_id", u, true, false), c("title", txt, false, false), c("content", txt, false, false), c("structured", jb, false, true), colExp{name: "embedding", dataType: vec, udtName: "vector", nullable: true}, c("updated_at", ts, false, true), c("embedding_provider", txt, true, false), c("embedding_model", txt, true, false), c("embedding_version", txt, true, false)},
 		pk:   []string{"entity_ref"},
-		fks:  []fkExp{fk("project_id", "projects", "RESTRICT")},
+		// T0902 (00092): the vector and its provenance are one fact, so the
+		// database refuses half of it — a vector with no provenance is a row
+		// that is re-embedded forever, and provenance with no vector is a
+		// row that claims an embedding it does not have.
+		//
+		// ONE substring, and it spans all three conjuncts. The comparison is
+		// per definition, not per condition: catalog_test.go requires each
+		// substring to match exactly one definition AND the number of
+		// substrings to equal the number of CHECK definitions on the table
+		// (there is one), so three separate substrings would be a fixture
+		// that cannot be satisfied at all. Stating the whole conjunction as
+		// one substring pins all three parts of it: dropping the provider,
+		// the model or the version term breaks the substring, and so does
+		// weakening `=` to something one-directional.
+		checks: []string{"(embedding IS NULL) = (embedding_provider IS NULL)) AND ((embedding IS NULL) = (embedding_model IS NULL)) AND ((embedding IS NULL) = (embedding_version IS NULL)"},
+		fks:    []fkExp{fk("project_id", "projects", "RESTRICT")},
 	},
 	"search_projected_events": {
 		// T0901 (00090): the search projection's cursor — one row per outbox

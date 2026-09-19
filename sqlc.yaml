@@ -27,3 +27,31 @@ sql:
         emit_all_enum_values: true
         emit_interface: true
         omit_unused_structs: true
+
+        # pgvector's `vector` is an extension type sqlc has no built-in
+        # mapping for. Measured with sqlc v1.31.1 on the T0902 tree, before
+        # this override existed:
+        #
+        #   SET embedding = @v::vector      -> "syntax error at or near" (no
+        #                                      override)
+        #   SET embedding = @v              -> same
+        #   SELECT embedding                -> GENERATES pgvector.Vector and
+        #                                      imports github.com/pgvector/
+        #                                      pgvector-go, a dependency this
+        #                                      module does not have
+        #   SELECT embedding::text          -> fine, no override needed
+        #
+        # So the mapping below is what makes the WRITE generatable, and it
+        # maps the column to string: the vector crosses the boundary as
+        # pgvector's own text input syntax ("[0.1,0.2,...]"), which the
+        # server parses via the explicit ::vector cast in the query. That
+        # keeps a pgvector Go client out of go.mod entirely (T0902 decision,
+        # recorded in the task result) — the column is read back the same
+        # way, as embedding::text, so no query ever asks the driver to
+        # understand the type. Note the override does NOT cover result
+        # columns: SELECT embedding still emits pgvector.Vector even with
+        # this in place, which is why every read of the column casts it to
+        # text.
+        overrides:
+          - db_type: "vector"
+            go_type: "string"

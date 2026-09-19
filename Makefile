@@ -21,7 +21,7 @@ STATICCHECK_VER := 2026.2.1
 
 .PHONY: help bootstrap check build rddev test test-integration dev smoke sync-schemas \
 	check-schema-drift check-schema-snapshot check-openapi check-spec-version fmt-check staticcheck lint-python type-python \
-	progress ci migrate search-rebuild infra-up infra-init infra infra-down infra-ps infra-logs
+	progress ci migrate search-rebuild search-embed infra-up infra-init infra infra-down infra-ps infra-logs
 
 help: ## list targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN { FS = ":.*## " } { printf "  %-20s %s\n", $$1, $$2 }'
@@ -79,6 +79,42 @@ migrate: ## apply the embedded migrations to the dev database (idempotent)
 # POSTGRES_TEST_ADMIN_URL or the same default as test-integration.
 	go run ./cmd/rddev db migrate
 
+# POST_WORKER_DB is the configuration every `go run ./cmd/worker` command-line
+# target below runs with: the connection named the way `make migrate` names it
+# (POST_DB_*), with the dev defaults the rest of this file uses and
+# POSTGRES_TEST_ADMIN_URL taking precedence when it is set, so the documented
+# flow (`make infra-up && make migrate && make search-rebuild`) works on a
+# fresh clone without exporting anything. It lives in one place because the
+# two search commands take the same configuration, and the same twenty lines
+# of shell in two targets is how one of them silently drifts from the other.
+# `#` must be written `\#` here. In a recipe line make does not treat `#` as a
+# comment, so the same text was harmless while these twenty lines lived inside
+# each target; in a VARIABLE VALUE it is a comment, and make stripped everything
+# from the first `${...#...}` (line 2 of the value) to the end of the logical
+# line — the `if ... fi`, all ten POST_* assignments and the trailing `go run
+# ./cmd/worker` — leaving both search targets expanding to a shell fragment that
+# ends mid-word. The integration tests did not catch it because they invoke the
+# binary directly; `make -n search-embed` shows it in one line.
+POST_WORKER_DB = PG_DB_PASSWORD="$${POST_DB_PASSWORD:-postgres_dev_pw}"; \
+	if [ -n "$${POSTGRES_TEST_ADMIN_URL:-}" ]; then \
+		raw="$${POSTGRES_TEST_ADMIN_URL\#postgres://}"; raw="$${raw\#postgresql://}"; \
+		creds="$${raw%%@*}"; hostpart="$${raw\#*@}"; \
+		PG_DB_USER="$${creds%%:*}"; PG_DB_PASSWORD="$${creds\#*:}"; \
+		hostport="$${hostpart%%/*}"; PG_DB_NAME="$${hostpart\#*/}"; PG_DB_NAME="$${PG_DB_NAME%%\?*}"; \
+		PG_DB_HOST="$${hostport%%:*}"; PG_DB_PORT="$${hostport\#\#*:}"; \
+	fi; \
+	POST_ENV="$${POST_ENV:-dev}" \
+	POST_DB_HOST="$${PG_DB_HOST:-$${POST_DB_HOST:-127.0.0.1}}" \
+	POST_DB_PORT="$${PG_DB_PORT:-$${POST_DB_PORT:-5432}}" \
+	POST_DB_USER="$${PG_DB_USER:-$${PG_DB_USER:-postgres}}" \
+	POST_DB_PASSWORD="$$PG_DB_PASSWORD" \
+	POST_DB_NAME="$${PG_DB_NAME:-$${POST_DB_NAME:-post}}" \
+	POST_DB_SSLMODE="$${POST_DB_SSLMODE:-disable}" \
+	POST_BLOB_ACCESS_KEY="$${POST_BLOB_ACCESS_KEY:-dev-ak}" \
+	POST_BLOB_SECRET_KEY="$${POST_BLOB_SECRET_KEY:-dev-sk}" \
+	POST_GITEA_TOKEN="$${POST_GITEA_TOKEN:-dev-token}" \
+	go run ./cmd/worker
+
 search-rebuild: ## rebuild the search projection from its sources (idempotent; needs PostgreSQL only)
 # The projection is derived state, so it is rebuildable: this re-derives every
 # search_documents row from the entities it indexes (T0901,
@@ -93,25 +129,20 @@ search-rebuild: ## rebuild the search projection from its sources (idempotent; n
 # it (POST_DB_*), with the dev defaults the rest of this file uses, so the
 # documented flow (`make infra-up && make migrate && make search-rebuild`) works
 # on a fresh clone without exporting anything.
-	@PG_DB_PASSWORD="$${POST_DB_PASSWORD:-postgres_dev_pw}"; \
-	if [ -n "$${POSTGRES_TEST_ADMIN_URL:-}" ]; then \
-		raw="$${POSTGRES_TEST_ADMIN_URL#postgres://}"; raw="$${raw#postgresql://}"; \
-		creds="$${raw%%@*}"; hostpart="$${raw#*@}"; \
-		PG_DB_USER="$${creds%%:*}"; PG_DB_PASSWORD="$${creds#*:}"; \
-		hostport="$${hostpart%%/*}"; PG_DB_NAME="$${hostpart#*/}"; PG_DB_NAME="$${PG_DB_NAME%%\?*}"; \
-		PG_DB_HOST="$${hostport%%:*}"; PG_DB_PORT="$${hostport##*:}"; \
-	fi; \
-	POST_ENV="$${POST_ENV:-dev}" \
-	POST_DB_HOST="$${PG_DB_HOST:-$${POST_DB_HOST:-127.0.0.1}}" \
-	POST_DB_PORT="$${PG_DB_PORT:-$${POST_DB_PORT:-5432}}" \
-	POST_DB_USER="$${PG_DB_USER:-$${POST_DB_USER:-postgres}}" \
-	POST_DB_PASSWORD="$$PG_DB_PASSWORD" \
-	POST_DB_NAME="$${PG_DB_NAME:-$${POST_DB_NAME:-post}}" \
-	POST_DB_SSLMODE="$${POST_DB_SSLMODE:-disable}" \
-	POST_BLOB_ACCESS_KEY="$${POST_BLOB_ACCESS_KEY:-dev-ak}" \
-	POST_BLOB_SECRET_KEY="$${POST_BLOB_SECRET_KEY:-dev-sk}" \
-	POST_GITEA_TOKEN="$${POST_GITEA_TOKEN:-dev-token}" \
-	go run ./cmd/worker -search-rebuild
+	@$(POST_WORKER_DB) -search-rebuild
+
+search-embed: ## recompute every search document embedding that is stale (idempotent; needs PostgreSQL only)
+# The embedding column is derived state too, so it is recomputable: this
+# recomputes the vector (and the model provenance 00092 records beside it) of
+# every search_documents row whose stored vector is not the current model's
+# (T0902, internal/search/embedding). It is idempotent in the strong sense —
+# a second run selects nothing because every row already carries the current
+# model's provenance, so it writes nothing and reports embedded=0 — and it is
+# what an operator runs after the embedder changes, since a vector from a
+# replaced model must be recomputed, not kept. The same recompute is the
+# search.embed job type the worker registers; this target is the operator's
+# direct entry point, and it needs no Redis.
+	@$(POST_WORKER_DB) -search-embed
 
 test-integration: ## integration suite against real PostgreSQL; loud failure (with reason) when unreachable
 # The default port is 5432, the port `make infra-up` actually publishes: it is
