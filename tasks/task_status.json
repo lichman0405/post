@@ -6494,7 +6494,7 @@
       ]
     },
     "T0902": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-19T03:07:55Z",
       "worker_run_id": "run-a55d1324d4b33714",
       "history": [
@@ -6510,6 +6510,13 @@
           "at": "2026-09-19T03:07:55Z",
           "run_id": "run-a55d1324d4b33714",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-19T03:51:17Z",
+          "run_id": "run-90285959d7adf564",
+          "reason": "collect: all checks passed"
         }
       ]
     },
