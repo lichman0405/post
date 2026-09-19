@@ -12604,3 +12604,131 @@ T0806：10 / 7 / 13），包文件与 DAG 一致（无需空档）。
 几乎所有任务都互相重叠（实测 T0901 ∩ T0806 有 12 项相交，含迁移与 `cmd/api/**`），
 **看了等于没看**。要看的是**需求里逐字点名的文件**：两个任务都往同一个装配文件里加东西，
 就不能并行；只是 scope 清单上写着同一个目录、实际改的是不同文件，就可以并行。
+
+
+## 2026-09-19 规则书与验收器打架，以及一次被误判成"卡住"的 90 分钟
+
+### 一、我的规则书把工人往自相矛盾里推（已修，`ab8ff34`）
+
+T0806 收工被拒，唯一一条是：
+
+```
+[FAIL] result-consistency: result-tests: status completed but 2 test(s) not_run
+```
+
+它 `tests[]` 里多写了两条自己没跑的门（`make test-integration`、web/python 那组），
+**理由逐条是真的**：我亲手查过那个工作树，确实没有 `apps/web/node_modules`、
+没有 `services/scientific-adapter/.venv`、没有 `tests/e2e-pr-flows/node_modules`；
+它 31 个改动文件里没有一个落在 `apps/web/**`、`packages/**`、`services/**` 下；
+任务书要求的那一条测试（`external evidence tests`）也确实有 `passed` 条目。
+
+**关键不是它对不对，是它照谁做的。** 工人规则书 `system.md` 逐字写着
+「anything not executed is `not_run` with a reason」——**正是我的规则书叫它这么写的**，
+而验收器又不许完成状态下出现 `not_run`。两条规矩打架，听哪条都错。
+
+**裁定早在 T0707 就下过**（见本档 2026-09-18 那节）：从 `tests[]` 删掉该条，
+把"排除了什么、为什么"如实写进 `risks`/`notes`，**不许默默删**。**但那条裁定只进了
+决定档，没进规则书**，所以今天又踩一次。**账要记在这里：把裁定写进决定档 ≠ 写进
+工人的合约。**同一形状已经发生三次（T0707、T0806，以及更早那两次"两条约定"的来处
+`e5944bd`），前三次都是在返工信里临时教一遍。
+
+**修法**：`internal/devorchestrator/worker_render.go` 里把"两条记录约定"扩成**三条**，
+第三条逐字：`tests[]` 只列真跑过的命令；`not_run` 属于 `blocked`/`failed` 报告；
+跑不了但仍算完成的门写进 `risks`/`notes_for_supervisor`，**删了不说等于另一半错误**。
+`anything not executed is not_run with a reason` 那句删掉。
+
+**验收器一个字没动。** 这条修的是 orchestrator 自己的措辞（§1 允许的自修复），
+Gate 标准没有降低——只是不再把工人推进一个无解的矛盾里。
+
+**测试**：断言从两条改三条。第一版我用裸词 `"not_run"` 断言，**做反向验证时发现它
+测的是空气**——该词在渲染出的规则书里出现 3 次，把整条规矩删掉后断言依然全绿。
+改用特征短语（`lists the commands you RAN` / `has no place under`）后，整条删除
+能让它三条一起报 missing。**这正是 `Prove the instrument can say no` 那条教训的
+又一个实例：先证明尺子能说不，再信它的读数。**
+
+### 二、90 分钟白等：`exit_status` 不是工人写的（教训已记入长期记忆）
+
+今天 07:33 / 07:57 / 08:15，三个工人（T0410 返工、T0901、T0806）先后收工
+`exit=0`；我的观察器读到 08:58 仍报"等满 90 分钟无工人收工"。
+
+原因：**`registry.json` 的 `exit_status` 不是 Worker 写的**，是 `DiscoverWorkers`
+在 reconcile 时回填的（`worker list` / `status` / `drive` 每跳一次）。我手敲驱动、
+不跑 `drive`，就没人回填；观察器盯的是一个**永远不会自己变**的字段。
+`bin/rddev worker list` 一跑，三个人立刻都显示 `exited exit=0`。
+
+`driver_run.go:216` 的注释**早就写着这件事**（"a driver that only reconciles at
+startup never notices a Worker exiting — it reports 'still working' forever"）。
+**读物在手边而没读，是我的错，不是工具的错。**
+
+### 三、集成测试的 10 分钟上限变成主库的假红灯（已修，`d3abb0b`）
+
+主库上一笔**纯文档**提交（`f206d9a`，只加 46 行 `tasks/decisions.md`）CI 红了，
+`migration-integration` 撞 `panic: test timed out after 10m0s`。
+
+查了连续 26 次主库运行：
+
+- 这个 job 正常 **280–330 秒**；同一棵树另一次 320 秒；
+- **3 次**越过 600 秒被杀（699 / 710 / 711 秒），落在**三台不同的 runner** 上；
+- 两次被杀时 panic dump 里"正在跑"的测试**才刚开始 1 秒 / 4 秒**——测试一路在完成，
+  **是 runner 争用导致的慢，不是挂死、不是 race**；
+- 失败那笔与上一笔绿色提交之间，测试代码 `git diff` **逐字节相同**。
+
+**10 分钟默认值把这种抖动变成约 12% 的假红灯。** 改成 `-timeout 20m`：不掩盖任何东西
+（每个测试仍必须通过，真挂死仍会被抓，只是晚十分钟）。Makefile 注释里写明了再调大的
+门槛：「先拿到同样形状的证据——**卡住的**测试，不是**变慢的**套件」。
+
+**这是"放大 timeout"禁令的一个边界情形，我明确判过**：§6 禁的是**为让 Gate 变绿**
+放大 timeout **掩盖 race**。这里 Gate 本来就是假红——测试全过、套件只是慢，
+且有"测试仍在完成"的正面证据。**记为容量修正，不是放宽。**
+
+### 四、T0410 的 G2：那条"真实缺口"是记录，不是拒收
+
+它 AC3 自己交代：`open → review_required` 这一步**没有对外路由**（`wiring.go` 只挂
+5 条，没有 request-review；`specs/api/openapi.yaml` 与 `permissions-matrix.csv` 里
+都没有这一格），所以浏览器套件里用了一个 `/harness/` 替身直接调**生产命令**
+`pullrequests.Service.RequestReview`——**走的是生产命令自己的状态迁移**
+（`internal/application/pullrequests/service.go:75-78` → `setState` → `SetState`
+→ `repo.SetPullRequestState`），而不是绕开服务、直接写状态列。
+
+> **2026-09-19 更正**：本节初稿在此处写的是「不碰状态列」，**那句是错的**——我照
+> 工人的自述转抄，没有自己读 `service.go`。T0410 的评审独立指出后我逐行核过：
+> `RequestReview` 就是 `setState`，**它确实写 `pull_requests.state`**。
+> 错的方向是把测试说得**更弱**：真正成立的事实比原文更强——替身做的是**真实状态
+> 迁移**，只是经由生产命令，而非绕过服务直写列。任务书 AC3 禁的是「改回捷径」
+> （直写状态列绕过服务），这一点它没犯。按 `Reject vs record` 的判据：机制措辞不实、
+> 但保护完好（且更强）→ **记录，不拒收**。同一个错也留在两处代码注释里
+> （`tests/e2e-pr-flows/harness/main.go:42`、`pr-flows-e2e.mjs:44`）与它的
+> RESULT 验收 #3 里，已记为待改的 follow-up，**不在本轮合入前改动**
+> ——评审已按指纹封存，改动会让评审失去依据。
+
+**我独立核过，四条全实**：wiring 里确实没有该路由；契约与权限表里各 0 处提及；
+`SetState` 在 `merge_governance_e2e_test.go` 里只剩两行注释；替身 `main.go:598` 调的
+就是生产命令。
+
+而任务书 AC3 **本来就写了这种情况怎么办**：「如果走不通，那是真实缺陷——把它写进
+RESULT 交给 Supervisor，不得删断言、skip 或改回捷径」。**它正是这么做的。**
+→ 按 `Reject vs record` 规则：**记录，不拒收**。它没有把缺口藏起来，也没有自行发明
+契约或权限（那是 L3）。这条缺口与我在案上的 L3 问题 ① （T0411「提案怎么进评审」，
+三选一）是同一件事的两种外形，等 owner 裁定后一并解决。
+
+**其余 G2 独立复核（我自己跑的，不采信它的自述）**：
+零状态构造 grep 复现 = 零匹配；浏览器套件**我亲手跑** `bash tests/e2e-pr-flows/run.sh`
+→ exit 0、**89 条 ok**、路由清单里两个 `/harness/` 恰好各 2 次；规格指纹
+`python3 scripts/spec_version.py --check` = `sha256:a881d90be293b0ac`（与它的声明一致）；
+快照 `--check` = current（65 个迁移）；24 个改动路径**全部**在 `allowed_scope` 内
+（我按 glob 逐条比对）；CORS 那处是**纯增**（预检 allow-headers 加 `Idempotency-Key`）。
+
+**一处我另记账的**：G3 的两个 job 是 `rsg-real-services` 与 `gitea-real-services`，
+**浏览器套件没有被任何门跑到**。它是本任务的指定测试，今天靠"我亲手跑"当证据；
+CI 接线（`ci.yml` + `gates.json`）按裁定五是我的活，而 `gates.json` 在 `specs/` 下、
+一改就动指纹，**必须等没有工人在跑的空窗**——所以排在三个任务合完之后，不许插队。
+
+### 五、T0901 的 G2（进行中）
+
+三处"必须一起落"的知识订阅改动**逐处核实**：`ValidateTargetID` 的 knowledge 分支
+已用 pid 形状（`:174-177`）；迁移 `00090` 把 CHECK 的 knowledge 分支换成同一正则，
+**并且带 uuid→pid 的数据转换（上下行都有）**；受众查询按 `kp.pid = $1` 解析（`:380`）。
+受众规则走的是发布侧同一个 `knowledgepublish.AudienceFor` 三根轴（`:356`），
+其余一律 `AudienceNone`——**与裁定 1、2 一致**。fail-closed 的默认分支
+（`projectedVisibility`：两边都为 public 才 public）读过了，写法正确。
+指定测试我另起一遍独立跑。
