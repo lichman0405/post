@@ -39,6 +39,17 @@
 // visibility copied fail-closed from the entity's own axes), and the index
 // it maintains is rebuildable from its sources: -search-rebuild, or the
 // search.rebuild job type, re-derives every row from current state.
+//
+// T0902: the embedding half of the search projection has arrived — a sixth
+// goroutine over the same pool fills search_documents.embedding (and the
+// provenance 00092 adds beside it) through the embedding port
+// (internal/search/embedding), and it too is rebuildable through a command:
+// -search-embed, or the search.embed job type, recomputes every vector that
+// is not the current model's. The embedder the worker runs is the in-process
+// one — no provider, no network, no key — because whether platform content
+// may be sent to a third-party embedding service is a question the specs do
+// not answer, so it is a task of its own rather than a decision this one
+// takes (see the package documentation).
 package main
 
 import (
@@ -54,6 +65,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -64,6 +76,7 @@ import (
 	"github.com/lichman0405/post/internal/observability"
 	"github.com/lichman0405/post/internal/persistence"
 	"github.com/lichman0405/post/internal/search"
+	"github.com/lichman0405/post/internal/search/embedding"
 	"github.com/lichman0405/post/internal/version"
 	"github.com/lichman0405/post/internal/worker"
 )
@@ -80,6 +93,17 @@ const (
 // loop's at-least-once delivery can run it more than once.
 const searchRebuildJobType = "search.rebuild"
 
+// searchEmbedJobType is the job type that recomputes the projection's
+// embeddings (T0902) — the same call -search-embed makes, enqueued instead
+// of typed. Its per-type timeout is longer than the loop's 30s default
+// because one job drains the whole backlog; a timeout is safe there anyway,
+// since the job is idempotent and resumable (the next attempt re-selects
+// what is left).
+const searchEmbedJobType = "search.embed"
+
+// searchEmbedTypeTimeout bounds one search.embed job.
+const searchEmbedTypeTimeout = 2 * time.Minute
+
 func main() {
 	os.Exit(run(os.Args[1:]))
 }
@@ -95,6 +119,14 @@ func run(args []string) int {
 	// the same call either way (runSearchRebuild).
 	searchRebuild := flags.Bool("search-rebuild", false,
 		"rebuild the search projection from its sources and exit")
+	// -search-embed is the same kind of entry point for the projection's
+	// vectors (T0902): recompute every search_documents row whose embedding
+	// is not the current model's, report what it did, and exit. It is the
+	// "rebuild" of a derived column, so it is idempotent, it needs PostgreSQL
+	// and nothing else (no Redis, no queue), and it is the call the
+	// search.embed job type makes.
+	searchEmbed := flags.Bool("search-embed", false,
+		"recompute the embedding of every search document that needs it and exit")
 	if err := flags.Parse(args); err != nil {
 		return exitConfig
 	}
@@ -134,11 +166,33 @@ func run(args []string) int {
 		return runSearchRebuild(ctx, pool, logger)
 	}
 
+	// The embedding port's one implementation, built once and used by both
+	// paths below. LocalModel names the in-process embedder this binary
+	// contains; a deployment that reaches a real provider replaces the
+	// implementation AND its identity together, which is what the provenance
+	// columns record. There is no configuration here on purpose: no
+	// environment variable turns on an outbound embedder, because none
+	// exists yet (T0902 package documentation).
+	embedder, err := embedding.NewDeterministic(embedding.LocalModel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "post-worker: embedding configuration error:\n%v\n", err)
+		return exitConfig
+	}
+	embedJob, err := embedding.NewWorker(pool, embedder, embedding.WithLogger(logger))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "post-worker: embedding configuration error:\n%v\n", err)
+		return exitConfig
+	}
+	if *searchEmbed {
+		return runSearchEmbed(ctx, embedJob, logger)
+	}
+
 	redisClient := redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr})
 	defer redisClient.Close()
 
 	queue := worker.NewRedisQueue(redisClient, "post")
-	loop := worker.NewLoop(queue, worker.WithLogger(logger))
+	loop := worker.NewLoop(queue, worker.WithLogger(logger),
+		worker.WithTypeTimeout(searchEmbedJobType, searchEmbedTypeTimeout))
 	loop.Register("smoke", func(ctx context.Context, job worker.Job) error {
 		// The payload is caller-controlled input on this scaffold path, so
 		// it goes through the shared redactor before it reaches the log —
@@ -172,6 +226,25 @@ func run(args []string) int {
 			"job_id", job.ID, "correlation_id", job.CorrelationID,
 			"removed", report.Removed, "projected", report.Projected,
 			"by_entity_type", report.EntityTypes())
+		return nil
+	})
+	// The embedding backlog (T0902): the job-queue form of -search-embed,
+	// and the same call. Returning the error is the whole of the retry
+	// policy — the loop retries with capped exponential backoff and
+	// dead-letters after the cap (internal/worker/worker.go), and the job is
+	// idempotent, so an attempt that dies mid-backlog loses nothing.
+	loop.Register(searchEmbedJobType, func(ctx context.Context, job worker.Job) error {
+		report, err := embedJob.Recompute(ctx)
+		if err != nil {
+			slog.Error("post-worker: search embed job failed",
+				"job_id", job.ID, "correlation_id", job.CorrelationID,
+				"model", embedJob.Model().String(), "error", err)
+			return err
+		}
+		slog.Info("post-worker: search embed job complete",
+			"job_id", job.ID, "correlation_id", job.CorrelationID,
+			"embedded", report.Embedded, "batches", report.Batches,
+			"model", embedJob.Model().String())
 		return nil
 	})
 
@@ -226,6 +299,18 @@ func run(args []string) int {
 	go func() {
 		defer pipelineWG.Done()
 		_ = projector.Run(ctx)
+	}()
+	// The embedding backlog (T0902), the sixth consumer of the same pool: it
+	// fills search_documents.embedding for the rows the projector writes (and
+	// for any row a model change has made stale), through the embedding port.
+	// It joins the same wait group and stops on ctx cancellation like every
+	// other consumer. What it is embedding with is stated at startup, for the
+	// same reason the mail transport is: "no vectors appeared" and "embeddings
+	// were never configured" must not look the same.
+	pipelineWG.Add(1)
+	go func() {
+		defer pipelineWG.Done()
+		_ = embedJob.Run(ctx)
 	}()
 	// The email digest sender (T1005), the last consumer of the same pool:
 	// it claims the pending email rows the subscription fan-out writes, when
@@ -285,7 +370,8 @@ func run(args []string) int {
 	defer shutdown(stop, dispatcherWG.Wait, pipelineWG.Wait, pool.Close)
 
 	slog.Info("post-worker running",
-		"version", version.Version, "queue", "post:queue:jobs", "cfg", cfg)
+		"version", version.Version, "queue", "post:queue:jobs", "cfg", cfg,
+		"embedding_model", embedJob.Model().String(), "embedding_transport", "in-process (no provider, no network)")
 	if err := loop.Run(ctx); err != nil {
 		slog.Error("post-worker loop failed", "error", err)
 		return exitRuntime
@@ -322,6 +408,36 @@ func runSearchRebuild(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logg
 	// command reads what it did without parsing the JSON log.
 	fmt.Printf("search rebuild: removed=%d projected=%d %s\n",
 		report.Removed, report.Projected, strings.Join(report.EntityTypes(), " "))
+	return exitOK
+}
+
+// runSearchEmbed is the -search-embed entry point: recompute every document
+// whose stored vector is not the current model's, report what it did, and
+// exit.
+//
+// It is the same call the search.embed job type makes, driven directly, and
+// it is independent of the job queue for the same reason -search-rebuild is:
+// recomputing a derived column is an operator action on a machine that has
+// PostgreSQL, and making it require a live Redis would make an embedding
+// repair depend on a component the repair does not touch.
+//
+// Running it twice is the same as running it once: the second run selects
+// nothing (every row already carries the current model's vector and
+// provenance) and reports embedded=0 — the idempotence is in the selection
+// predicate, not in a comparison of results.
+func runSearchEmbed(ctx context.Context, job *embedding.Worker, logger *slog.Logger) int {
+	report, err := job.Recompute(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "post-worker: search embed failed:\n%v\n", err)
+		return exitRuntime
+	}
+	logger.Info("post-worker: search embed complete",
+		"embedded", report.Embedded, "batches", report.Batches,
+		"model", job.Model().String())
+	// The report also goes to stdout in one line, like the rebuild's, so an
+	// operator reads what it did without parsing the JSON log — and so a run
+	// that embedded nothing is distinguishable from a run that did nothing.
+	fmt.Printf("search embed: %s model=%s\n", report, job.Model())
 	return exitOK
 }
 
