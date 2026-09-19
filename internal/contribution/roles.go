@@ -76,6 +76,23 @@ const (
 	RoleAssetStewardship ContributionRole = "asset_stewardship"
 	// RoleProjectMaintenance is "Project Maintenance" — the upkeep work
 	// that keeps a project running.
+	//
+	// It is part of the docs/04 §4 vocabulary (the document's ninth
+	// contribution role, and docs/13 §1 lists the maintenance category
+	// among the acts the ledger records), and it is NOT dead: the label
+	// table below carries it, ContributionRoles enumerates that table, and
+	// Label/Valid/ParseContributionRole all answer out of it.
+	//
+	// What is missing today is an EVENT that produces it: no event in
+	// specs/events/event-types.yaml records maintenance work, and no row of
+	// the projection's mapping table (internal/contribution/ledger.go)
+	// resolves to this role. So no ledger row carries it, and none can
+	// until such an event exists — at which point the event either gets a
+	// mapping (and this role is what it records) or does not, and is then
+	// COUNTED as an unmapped type in every projection report rather than
+	// being projected under a role invented to cover the gap. Inventing an
+	// event name for maintenance is a spec change and belongs to whoever
+	// owns specs/events/**, not here.
 	RoleProjectMaintenance ContributionRole = "project_maintenance"
 )
 

@@ -54,6 +54,11 @@ func TestRecordValidation(t *testing.T) {
 		{"visibility vocabulary", func(e *Event) { e.Visibility = "internal" }, "visibility must be"},
 		{"payload must be JSON", func(e *Event) { e.Payload = json.RawMessage(`{`) }, "not valid JSON"},
 		{"payload must be object", func(e *Event) { e.Payload = json.RawMessage(`[1,2]`) }, "JSON object"},
+		// The channel is optional but never guessed: one outside
+		// domain.StateVia's six values is refused before the insert (fail
+		// closed, like the state commit's own via check).
+		{"via outside the vocabulary", func(e *Event) { e.Via = domain.StateVia("api_v2") }, "not a canonical channel"},
+		{"via misspelled near a real channel", func(e *Event) { e.Via = domain.StateVia("git") }, "not a canonical channel"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -158,6 +163,72 @@ func TestRecordNullsEmptyIdentity(t *testing.T) {
 	}
 	if !strings.Contains(db.sql, "INSERT INTO outbox_events") {
 		t.Errorf("Record() SQL = %q, want the outbox insert", db.sql)
+	}
+}
+
+// TestRecordViaColumn pins the envelope column docs/13 §1's seventh field
+// travels in: every canonical channel reaches the INSERT verbatim, an unset
+// channel reaches it as NULL (never a default — a fabricated 'api' would
+// read exactly like a recorded fact, 00087), and the argument position is
+// last so the columns that were here before it keep theirs.
+func TestRecordViaColumn(t *testing.T) {
+	// The six values of domain.StateVia (docs/15 §5). Listed here rather
+	// than read from the domain package because the domain package exposes
+	// the validator, not an enumeration: this list failing to compile is
+	// the signal that the vocabulary moved.
+	channels := []domain.StateVia{
+		domain.ViaWeb, domain.ViaAPI, domain.ViaMCP,
+		domain.ViaClaudeCode, domain.ViaGitCompat, domain.ViaSystem,
+	}
+	for _, via := range channels {
+		if !domain.ValidStateVia(via) {
+			t.Fatalf("test list names %q, which domain.ValidStateVia refuses — the vocabulary moved", via)
+		}
+		db := &fakeDB{}
+		err := Record(context.Background(), db, Event{
+			EventType:  "state.committed",
+			Visibility: VisibilityPublic,
+			Via:        via,
+			Payload:    json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Fatalf("Record(via=%q) error = %v", via, err)
+		}
+		if got := db.args[6]; got != string(via) {
+			t.Errorf("via argument = %#v, want %q", got, via)
+		}
+		if !strings.Contains(db.sql, "via") {
+			t.Errorf("Record() SQL = %q, want the via column in the insert", db.sql)
+		}
+	}
+
+	// Unset: the column gets NULL, not "" and not a channel.
+	db := &fakeDB{}
+	if err := Record(context.Background(), db, Event{
+		EventType:  "state.committed",
+		Visibility: VisibilityPrivate,
+		Payload:    json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatalf("Record() without a channel: %v", err)
+	}
+	if db.args[6] != nil {
+		t.Errorf("unset via argument = %#v, want nil (NULL means the path recorded no channel)", db.args[6])
+	}
+
+	// Out of vocabulary: refused, and NOTHING is executed — the record is
+	// fail-closed, so a bad channel cannot reach the outbox at all.
+	db = &fakeDB{}
+	err := Record(context.Background(), db, Event{
+		EventType:  "state.committed",
+		Visibility: VisibilityPublic,
+		Via:        domain.StateVia("api_v2"),
+		Payload:    json.RawMessage(`{}`),
+	})
+	if err == nil || !strings.Contains(err.Error(), "not a canonical channel") {
+		t.Fatalf("Record(via=api_v2) error = %v, want a canonical-channel refusal", err)
+	}
+	if db.sql != "" || db.args != nil {
+		t.Errorf("Record() executed %q with args %v on an unknown channel", db.sql, db.args)
 	}
 }
 

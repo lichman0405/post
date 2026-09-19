@@ -86,7 +86,15 @@ type PendingEvent struct {
 	Visibility    string
 	Payload       []byte
 	CorrelationID string
-	OccurredAt    time.Time
+	// Via is the channel the write path recorded on the outbox row
+	// (domain.StateVia's vocabulary), nil when it recorded none. The
+	// publish step COPIES it into the research event; it is never
+	// re-derived from the payload — the envelope rule 00046 states for the
+	// other envelope columns, which exists because a payload is
+	// producer-written data about the event while an envelope column is
+	// what the write path recorded.
+	Via        *string
+	OccurredAt time.Time
 }
 
 // Run publishes the outbox backlog until ctx is cancelled: one pass
@@ -161,7 +169,7 @@ func (d *Dispatcher) RunOnce(ctx context.Context) (int, error) {
 }
 
 const claimPendingOutbox = `
-SELECT id, event_type, actor_id, project_id, visibility, payload, correlation_id, created_at
+SELECT id, event_type, actor_id, project_id, visibility, payload, correlation_id, via, created_at
 FROM outbox_events
 WHERE published_at IS NULL
 ORDER BY created_at, id
@@ -182,11 +190,13 @@ func claimPending(ctx context.Context, tx pgx.Tx, batch int) ([]PendingEvent, er
 			id  pgtype.UUID
 			act pgtype.UUID
 			pro pgtype.UUID
+			via *string
 			p   PendingEvent
 		)
-		if err := rows.Scan(&id, &p.EventType, &act, &pro, &p.Visibility, &p.Payload, &p.CorrelationID, &p.OccurredAt); err != nil {
+		if err := rows.Scan(&id, &p.EventType, &act, &pro, &p.Visibility, &p.Payload, &p.CorrelationID, &via, &p.OccurredAt); err != nil {
 			return nil, err
 		}
+		p.Via = via
 		p.OutboxID = uuidString(id)
 		p.ActorID = uuidPtr(act)
 		p.ProjectID = uuidPtr(pro)
@@ -195,9 +205,12 @@ func claimPending(ctx context.Context, tx pgx.Tx, batch int) ([]PendingEvent, er
 	return pending, rows.Err()
 }
 
+// via is appended last, beside outbox_event_id: the envelope columns keep
+// their positions and the new one is obviously the copy of the outbox
+// row's own via ($9).
 const insertResearchEvent = `
-INSERT INTO research_events (event_type, actor_id, project_id, visibility, payload, correlation_id, occurred_at, outbox_event_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO research_events (event_type, actor_id, project_id, visibility, payload, correlation_id, occurred_at, outbox_event_id, via)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (outbox_event_id) WHERE outbox_event_id IS NOT NULL DO NOTHING`
 
 const markOutboxPublished = `
@@ -211,8 +224,10 @@ SET attempts = attempts + 1, last_error = $2
 WHERE id = $1`
 
 // PublishEvent publishes one claimed outbox row inside its own savepoint:
-// the research event insert (idempotent — a previous attempt's row makes
-// it a no-op) and the published-mark either both land or both roll back,
+// every envelope column — actor, project, visibility, correlation id and
+// the channel (via) — is copied from the outbox row, never re-derived from
+// the payload (00046). The research event insert (idempotent — a previous
+// attempt's row makes it a no-op) and the published-mark either both land or both roll back,
 // so a crash between the two leaves the row pending for a retry that
 // cannot duplicate the event. The savepoint keeps the caller's outer
 // transaction usable after a failure (one broken row must not abort the
@@ -227,7 +242,8 @@ func PublishEvent(ctx context.Context, tx pgx.Tx, p PendingEvent) error {
 	// stays usable after sp.Rollback.
 	if _, err := sp.Exec(ctx, insertResearchEvent,
 		p.EventType, nullableText(deref(p.ActorID)), nullableText(deref(p.ProjectID)),
-		p.Visibility, p.Payload, p.CorrelationID, p.OccurredAt, p.OutboxID); err != nil {
+		p.Visibility, p.Payload, p.CorrelationID, p.OccurredAt, p.OutboxID,
+		nullableText(deref(p.Via))); err != nil {
 		_ = sp.Rollback(ctx)
 		return fmt.Errorf("insert research event: %w", err)
 	}

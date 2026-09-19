@@ -54,6 +54,18 @@ type Event struct {
 	// without one is refused, never guessed — a silent default could
 	// publish a private event publicly.
 	Visibility string
+	// Via is the channel the write that produced this event arrived
+	// through (docs/13 §1's seventh field, "via agent/client"): the
+	// state_commits.via vocabulary of docs/15 §5 — web, api, mcp,
+	// claude_code, git_compat, system (domain.StateVia). It is an envelope
+	// column, not payload data: it travels outbox → research event →
+	// Contribution Ledger by being copied verbatim at each hop, and it is
+	// never re-derived from the payload (00046). Empty means the write
+	// path did not record a channel and the column stays NULL — never a
+	// guessed default, since a fabricated 'api' would read exactly like a
+	// recorded fact (00087). A value OUTSIDE the vocabulary is refused:
+	// fail closed, like the state commit's own via check.
+	Via domain.StateVia
 	// CorrelationID traces the event across API → outbox → published
 	// event (docs/26 §2). Empty means "fill from the request context, and
 	// generate one when there is none".
@@ -101,15 +113,18 @@ func Record(ctx context.Context, db DBTX, e Event) error {
 	}
 	if _, err := db.Exec(ctx, insertOutboxEvent,
 		e.EventType, nullableText(e.ActorID), nullableText(e.ProjectID),
-		e.Visibility, payload, correlationID); err != nil {
+		e.Visibility, payload, correlationID, nullableVia(e.Via)); err != nil {
 		return fmt.Errorf("events: record %s: %w", e.EventType, err)
 	}
 	return nil
 }
 
+// The via column is appended LAST so the argument positions of the
+// columns that were here before it do not move (the unit tests pin them by
+// index, and so does anyone reading a pgx trace).
 const insertOutboxEvent = `
-INSERT INTO outbox_events (event_type, actor_id, project_id, visibility, payload, correlation_id)
-VALUES ($1, $2, $3, $4, $5, $6)`
+INSERT INTO outbox_events (event_type, actor_id, project_id, visibility, payload, correlation_id, via)
+VALUES ($1, $2, $3, $4, $5, $6, $7)`
 
 // validate checks the event's shape before it reaches the database: the
 // producer-facing contract, kept strict so a programming error fails the
@@ -123,6 +138,15 @@ func (e Event) validate() error {
 	default:
 		return fmt.Errorf("events: visibility must be %q or %q, got %q",
 			VisibilityPublic, VisibilityPrivate, e.Visibility)
+	}
+	// The channel is optional (a path that does not know one records
+	// none), but a value outside the vocabulary is refused before any
+	// storage — fail closed, exactly as the state commit's own via check
+	// does (internal/application/states validateCommitParams). The
+	// vocabulary is domain.StateVia's, never re-spelled here.
+	if e.Via != "" && !domain.ValidStateVia(e.Via) {
+		return fmt.Errorf("events: via %q is not a canonical channel (web, api, mcp, claude_code, git_compat, system)",
+			e.Via)
 	}
 	if len(e.Payload) > 0 && string(e.Payload) != "null" {
 		var v any
@@ -175,6 +199,16 @@ func nullableText(s string) any {
 		return nil
 	}
 	return s
+}
+
+// nullableVia renders an unset channel as NULL. The empty StateVia is not
+// a member of the vocabulary and is not a default: it is the absence of a
+// declaration, and NULL is what says so in the column (00087).
+func nullableVia(v domain.StateVia) any {
+	if v == "" {
+		return nil
+	}
+	return string(v)
 }
 
 // newUUID generates a UUID v4 with crypto/rand (the same shape as the rsg

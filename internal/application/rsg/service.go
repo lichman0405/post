@@ -288,7 +288,7 @@ func (s *Service) CreateObject(ctx context.Context, actor domain.User, projectID
 		// The outbox events share this transaction (T1001): the state
 		// change and its events commit or roll back together.
 		return s.recordCommitEvents(ctx, tx, params, stateID, visibility, func(stateID string) (events.Event, error) {
-			return versionCreatedEvent(projectID, objectID, in.ObjectType, stateID, branchID, actor.ID, title, v.VersionNo, visibility)
+			return versionCreatedEvent(projectID, objectID, in.ObjectType, stateID, branchID, actor.ID, title, v.VersionNo, visibility, params.Via)
 		})
 	}
 	_, _, err = s.states.Commit(ctx, params, write)
@@ -382,7 +382,7 @@ func (s *Service) CreateObjectVersion(ctx context.Context, actor domain.User, pr
 			return werr
 		}
 		return s.recordCommitEvents(ctx, tx, params, stateID, visibility, func(stateID string) (events.Event, error) {
-			return versionCreatedEvent(projectID, objectID, obj.ObjectType, stateID, branchID, actor.ID, title, versionNo, visibility)
+			return versionCreatedEvent(projectID, objectID, obj.ObjectType, stateID, branchID, actor.ID, title, versionNo, visibility, params.Via)
 		})
 	}
 	_, _, err = s.states.Commit(ctx, params, write)

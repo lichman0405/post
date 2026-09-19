@@ -50,6 +50,15 @@
 // may be sent to a third-party embedding service is a question the specs do
 // not answer, so it is a task of its own rather than a decision this one
 // takes (see the package documentation).
+//
+// T0813: the Contribution Ledger projection is mounted — a seventh
+// goroutine over the same pool turns research_events into the
+// contribution_events ledger (docs/13 §1) through the mapping table in
+// internal/contribution/ledger.go. T0807 delivered the projection and said
+// in its own result that nothing drove it in a running process; this is the
+// composition step that makes the ledger record facts in production. Its
+// via column is filled from the event envelope, and the write paths that
+// know their channel now declare it (internal/events).
 package main
 
 import (
@@ -70,8 +79,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	appcontribution "github.com/lichman0405/post/internal/application/contribution"
 	"github.com/lichman0405/post/internal/application/notifications"
 	"github.com/lichman0405/post/internal/config"
+	"github.com/lichman0405/post/internal/contribution"
 	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/observability"
 	"github.com/lichman0405/post/internal/persistence"
@@ -312,6 +323,28 @@ func run(args []string) int {
 		defer pipelineWG.Done()
 		_ = embedJob.Run(ctx)
 	}()
+	// The Contribution Ledger projection (T0807 projection, mounted by
+	// T0813), a consumer of the same published events: it turns
+	// research_events rows into contribution_events ledger rows (docs/13
+	// §1) through the mapping table in internal/contribution/ledger.go. It
+	// keeps no cursor of its own — the ledger row's research_event_id IS
+	// its progress (the partial unique index contribution_events_research_
+	// event_uniq makes a re-run a no-op), which is what lets it be rebuilt
+	// by running it again. Before this line existed the projection was
+	// delivered but driven only by its tests, so the ledger recorded
+	// nothing in any running deployment.
+	//
+	// Its channel column (via) is filled from the event's own envelope
+	// column, which the write path declares and the outbox publisher copies
+	// verbatim; a write path that records no channel produces a NULL, never
+	// a guessed default (00087).
+	ledgerProjector := appcontribution.NewLedgerProjector(
+		contribution.NewLedgerStore(pool), appcontribution.WithLedgerLogger(logger))
+	pipelineWG.Add(1)
+	go func() {
+		defer pipelineWG.Done()
+		_ = ledgerProjector.Run(ctx)
+	}()
 	// The email digest sender (T1005), the last consumer of the same pool:
 	// it claims the pending email rows the subscription fan-out writes, when
 	// the subscriber's cadence says a digest is due, re-authorizes every
@@ -371,7 +404,12 @@ func run(args []string) int {
 
 	slog.Info("post-worker running",
 		"version", version.Version, "queue", "post:queue:jobs", "cfg", cfg,
-		"embedding_model", embedJob.Model().String(), "embedding_transport", "in-process (no provider, no network)")
+		"embedding_model", embedJob.Model().String(), "embedding_transport", "in-process (no provider, no network)",
+		// Stated at startup for the reason the embedding model is: the
+		// ledger projector says nothing on a pass with no candidates, so
+		// "the ledger is running and there was nothing to project" and "the
+		// ledger is not running at all" must not look the same in the log.
+		"contribution_ledger", "research_events -> contribution_events")
 	if err := loop.Run(ctx); err != nil {
 		slog.Error("post-worker loop failed", "error", err)
 		return exitRuntime

@@ -116,13 +116,24 @@ func stateCommittedEvent(params states.CommitParams, stateID, visibility string)
 		ActorID:    params.ActorID,
 		ProjectID:  params.ProjectID,
 		Visibility: visibility,
-		Payload:    payload,
+		// The channel is the commit's own declaration (state_commits.via,
+		// already in the payload above), so the envelope column and the
+		// payload cannot disagree: one source, read twice. It is filled
+		// from params.Via rather than spelled "api" here because the
+		// declaration belongs to the write path that made the commit
+		// (docs/15 §5, T0813 ruling).
+		Via:     params.Via,
+		Payload: payload,
 	}, nil
 }
 
 // versionCreatedEvent builds the scientific_object.version_created event
 // for one object version written by the commit.
-func versionCreatedEvent(projectID, objectID, objectType, stateID, branchID, actorID, title string, versionNo int, visibility string) (events.Event, error) {
+//
+// via is the commit's own channel declaration (the same params.Via the
+// state.committed event carries): the object version was written BY that
+// commit, so the two events of one transition report the same channel.
+func versionCreatedEvent(projectID, objectID, objectType, stateID, branchID, actorID, title string, versionNo int, visibility string, via domain.StateVia) (events.Event, error) {
 	payload, err := json.Marshal(struct {
 		ObjectID   string `json:"object_id"`
 		ObjectType string `json:"object_type"`
@@ -146,6 +157,7 @@ func versionCreatedEvent(projectID, objectID, objectType, stateID, branchID, act
 		ActorID:    actorID,
 		ProjectID:  projectID,
 		Visibility: visibility,
+		Via:        via,
 		Payload:    payload,
 	}, nil
 }

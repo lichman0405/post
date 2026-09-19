@@ -140,14 +140,17 @@ func (s *LedgerStore) ProjectBatch(ctx context.Context, limit int) (LedgerBatch,
 		}
 		batch.Candidates = len(candidates)
 		for _, src := range candidates {
-			row, ok := ProjectEvent(src)
-			if !ok {
+			row, err := projectEvent(src)
+			if err != nil {
 				// Unreachable: the scan is parameterised by the mapping
-				// table. If it ever happens, the event stays a candidate and
-				// the next pass reports it again — it is never dropped
-				// silently.
-				return fmt.Errorf("%w: %s has no ledger mapping but was scanned as a candidate",
-					ErrStore, describeSource(src))
+				// table, so a candidate's type is mapped by construction —
+				// what is left is a table entry that spells a role docs/04
+				// §4 does not define, which is a programming error and must
+				// fail the pass rather than write a bogus tag. The event
+				// stays a candidate and the next pass reports it again — it
+				// is never dropped silently.
+				return fmt.Errorf("%w: %s was scanned as a candidate but produces no ledger row: %v",
+					ErrStore, describeSource(src), err)
 			}
 			inserted, err := ledgerInsertRow(ctx, tx, row)
 			if err != nil {
