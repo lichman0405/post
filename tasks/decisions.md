@@ -13733,3 +13733,223 @@ adopt 了已在跑的 3 个工人，`decisions waiting: 0`。三个工人同一�
 的注释说 "Reads run the same project visibility gate as every other project read" ——
 `handlers.go:90` 确实先调 `h.gate.Get(ctx, reader(r), projectID)` 并在出错时直接拒。**注释有代码支撑。**
 （对照：T0808 的 `doc.go:59` 是同一形状的主张，而那里**没有**代码支撑——这就是我打回它的原因。）
+
+---
+
+## 2026-09-19 T0602 打回（第一次）：验收标准 1 的证据测试没走评审台
+
+**状态**：T0602 在 `verification`，驱动的 `rddev task accept` 被拒（"the latest review verdict is
+`request_changes` with 1 blocking finding(s)"）。`rddev task inspect T0602` 的历史显示
+`blocked(09-16) → ready(09-19T03:16) → running(06:56) → verification(07:55)`，**没有先前的打回记录**，
+所以按 §11 是**同会话返工**，不是重开工人。已执行
+`rddev task reject T0602 --reason-file /tmp/T0602-rework-1.md`（verification → rejected）
+与 `rddev worker rework T0602 --reason-file 同一份 --parallel 4`（run-cb6ffa3d7632f9f3，pid 412631），
+并**已核对返工单真的进了 `prompt.md`**（标题、`driveToMergeReady`、那句假证据、agent 禁止条款、fail-closed 均在）。
+
+**独立核过、三条都成立**（我逐条进 `.rddev/worktrees/T0602` 看代码，不采信评审转述）：
+
+1. **（阻塞）验收标准 1 的证据测试走的是自己摆状态**：`tests/integration/abort_e2e_test.go:534-545`
+   的 `driveToMergeReady` 直接 `prSvc.SetState(...Approved)` 与 `SetState(...MergeReady)`（调用点 `:884`），
+   全文件 grep 评审路由/`SubmitReview` **零命中**；而验收标准 1 逐字点名这个形状是禁止的。
+   文件头 `:48-53` 还写着"driven through the real review machine to merge_ready"——**与代码相反**。
+   正例同在 `tests/integration/merge_governance_e2e_test.go:504-560`（走
+   `POST /api/v1/projects/{id}/pull-requests/{n}/reviews`，`cmd/api/reviewhttp/wiring.go:60`），
+   且该正例 `:511-514` 写明**为什么唯一保留的直接调用是 `RequestReview`**（docs/43 的
+   open → review_required 在这个构建没有路由）——返工单要求保留它，只换掉那两行 `SetState`。
+   后果：`docs/46:5` 的"main 对象 abort 要 review/approval"**恰恰没被它唯一的证据测试碰到**。
+2. **（major）RESULT 的证据与代码相反**：`acceptance[0].evidence` 里的
+   "No SetState-style shortcut anywhere in the file" 被 `:539`/`:542` 直接证伪。这不是证据不足，是记录说谎。
+3. **（major）一个 `Idempotency-Key` 用在同项目两个对象上会拿回别人的 PR**：三个索引串起来即证——
+   abort 键按对象唯一（`00100:124-125` `ON scientific_object_versions (object_id, abort_request_key)`）、
+   PR creation key 按**项目**唯一（`00089:36-37` `ON pull_requests (project_id, creation_key)`）、
+   适配器对已用键**返回既有行而不是报错**（`internal/persistence/pullrequest_store.go:95-105`）、
+   而 `openProposal`（`internal/application/aborts/service.go:576-590`，`CreationKey: in.IdempotencyKey` 在 `:584`）
+   **从不检查还回来的 PR 是不是它刚 fork 的那条分支**。返工单要求 fail-closed 拒绝、
+   且**不许引入 read-then-write**（并发幂等的单赢机制是验收标准 5 的根）。
+   次要项两条（`ports.go:36` 的 `Branches.GetHead` 死接口、`pullrequests/service.go:69` 的
+   `GetByCreationKey` 无测试）与 nit 两条（`service.go:899-901` 两个分支逐字相同、
+   `aborthttp/wiring.go:49` 的 POST 通配）也一并列入。
+
+**agent 那一格：记录，不打回。** 评审把它列为待裁定的风险（矩阵格是 `proposal_only`，
+而命令两条线都拒绝——矩阵判定 + 域层 `AgentNotPermittedError`）。我的判断：
+
+- 规格那头**确实存在**"agent 发 abort 提议"的通道：`specs/mcp/tools.json:23`
+  `{"name":"object.abort_proposal","mode":"proposal"}`，且 abort **不在** `forbidden_default_agent_actions`
+  （`merge_main, publish_private_to_public, change_rights_holder, delete_history, force_push_main`）里。
+- 但**本构建没有任何 agent 写通道**（`cmd/api/assetshttp/publish.go:118-129` 与
+  `cmd/api/knowledgehttp/publish.go:197-204` 是既有先例：`IsAgent: false` 是"关于本次构建"的陈述，
+  命令侧的兜底"每次调用都被咨询"）。所以这一格**今天在产品里不可达**。
+- 全仓库 `VerdictProposalOnly` **没有任何非测试消费者**（只有 `verdict.go:24` 的定义与
+  `matrix.go:101`（create_release）、`:128`（abort）两格）；`verdict.go:33-36` 自身的规则是
+  "只有 `allow` 放行，未解条件的条件式判决取拒绝"。contribution 的先例（`service.go:173-175`）
+  守的是**生效**那一步（`Publicize`，"an agent never publicizes, whatever else holds"），不是创建。
+- 工人对这一点**如实披露**（`acceptance[2].evidence` 写明两条线都拒绝、且用 owner 的 user id + `IsAgent:true`
+  隔离了矩阵的影响；e2e 断言两个对象都没有带该键的版本）——不是谎称覆盖。
+  按我自己的规矩（"证据/覆盖说错"→ 打回；"机制说法与形式不合但防线在"→ 记录），**这一格记录**。
+
+**因此这是一条 L3，挂给 owner**：`object.abort_proposal`（mode=proposal）与 `proposal_only` 那一格
+是否要落成"agent 可以开出一条**由人合并**的 abort 提议"。**实现更严（拒绝）是 fail-closed，可接受；
+放宽成"放行成 PR"是产品/权限语义决定，不在本任务内**——返工单里已明确禁止工人为了凑验收标准 3 的字面去改它。
+
+**打回时的两条老规矩照旧执行**：返工单里每一处 `file:line` 都先进树核对过（评审这次的引用**全对**，
+只有我把 `merge_governance` 的理由句从 `:510-514` 校正为 `:511-514`）；且明确禁止
+"为了让测试变绿而删测试、跳过测试、放宽断言、放大超时"。
+
+---
+
+## 2026-09-19 T0808 第二次打回 + 一条新的硬约束：迁移必须按号递增合入
+
+**① 迁移顺序不是口味问题，是硬约束（今天由驱动撞出来）。** T0808 的返工在 08:20 收件、08:37 验收通过，
+驱动的 `rddev pr merge` 在 08:48 **被拒**，逐字：
+
+> it carries migration 00101, and T0602 still holds 00100, which main does not have yet.
+> The migration runner (goose v3, internal/persistence/migrate.go) refuses out-of-order migrations:
+> a database that has already applied 00101 halts with "found 1 missing (out-of-order) migration"
+> before it will apply 00100, and **CI cannot see it because every CI job migrates a fresh database**.
+
+**记录在案的三条推论**：
+（a）**带迁移的任务只能按号递增合入**。当前在飞的四本里，T0602=00100、T0808=00101、
+T0507=00102（已分配、其树里尚未使用）、T0809=00103 —— 所以**顺序被钉死**：T0602 必须最先。
+（b）**CI 永远抓不到这一类**（每个 job 都拿新库），所以它只能靠合并顺序约束，不能靠测试兜。
+（c）驱动把这条记成"要 Supervisor 裁定"是对的：它不是缺陷，是**排程事实**，
+    而驱动无权决定合并顺序之外的任何事。
+
+**② 我自己对 T0808 返工的独立验收，抓到两条必须再返工的东西。** 独立评审这一轮的结论是 `approve`，
+但留了一条 minor、一条 nit，**我进树核对后两条都成立**：
+
+- **（minor，与上一轮同一形状）`apps/web/app/components/research-profile-sections.tsx:99`
+  的 `?? "Organization not named"` 是一个"该组织已停用"的探针。** 三个事实：
+  同文件自己写的规则 2（`:30-35`）逐字点名了"a deactivated organization"这一情形并要求
+  "render the row WITHOUT the link and **say nothing about why**"；
+  `internal/application/researchprofile/model.go:346-353` 里 `Organization` **只在
+  `OrganizationDeactivatedAt != nil` 时为 nil**（另一条判据是"读取器坏了"，正常数据到不了）；
+  `EntityLink`（`:72-79`）在 url 为 null 时渲染无链接 span，本身符合规则 2 —— **违规的只有那个替补串**。
+  所以在一个**匿名可读**的页面上，认识此人雇主的读者能由此确认该组织**已停用**。
+  **这正是我上一轮要求删掉 reuse 占位串的同一条理由**，同一个文件、同一条规则，不能只修一处。
+- **（nit）`internal/persistence/queries/research_profile.sql:363` 点名了一个不存在的查询**
+  `ListPublicAssertions`（全仓零命中，只命中这句话本身），真名是
+  `ListPublishedEvidenceForTarget`（`evidence.sql:73`，谓词 `:109` 一致）；
+  而 sqlc 已把这个错名**抄进两个生成文件**（`sqlc/querier.go:1205`、`sqlc/research_profile.sql.go:704`）。
+
+**处置**：`rddev task reject T0808 --reason-file /tmp/T0808-rework-2.md`（**accepted → rejected**，
+状态机允许从 accepted 打回）+ `rddev worker rework T0808 --reason-file 同一份 --parallel 4`
+（run-f185c20ce10e2bf4，pid 838356，**接在上一次的提交 cd8fdcd 之上**——不是从零重来）。
+返工单只提两件事，并明确：上一轮修好的（SQL 谓词、Go 侧再检查、窗口饥饿测试、`doc.go` 真话、
+reuse 非空类型、e2e 真人 id）**一条都不许回退**。按 §11 这是**第二次不通过 → 新工人**（旧会话本已退出）。
+
+**③ 为什么这次值得为一条 minor + 一条 nit 再返工一轮**：不是因为严苛，是因为**代价≈0 而理由同一**——
+T0808 本来就被迁移顺序挡在 T0602 后面（合并窗口根本没到），而且这个缺陷与我上一轮打回的是
+**同一个形状**（可区分的被隐去标记），只修一处等于让规则形同虚设。
+**同时明确要求"可测"**：这个仓库没有组件级测试（测试都在 `apps/web/lib/*.test.mjs`），
+所以要求把"要不要渲染实体标签"抽成 lib 里的纯函数并给一条**能变红**的测试（变异检验：把占位串放回去必须红）。
+
+**④ 我自己的验收还欠一步，记在这里免得忘**：这一轮我做了**代码级**独立核对（谓词位置、模型再检查、
+饥饿测试的形状、`doc.go`、被删的分支、e2e 夹具），**执行证据用的是收件门 G1–G4 与评审工人自己的复现**；
+按 §6"重新运行指定测试"，**下一次验收时我自己要跑那两条**（`TestResearchProfileWindowIsCountedInRenderableRows`
+与 privacy 断言所在的集成套件 + e2e），不能只读代码。
+
+---
+
+## 2026-09-19 T0507 的裁决：不打回，但这条泄露必须专门开一刀（并且我先纠正我自己上一轮的错话）
+
+### ① 先纠正我自己的记录
+
+我上一轮就这条读写过：**"今天没有任何人能看到它（唯一的读出口是公开的 `GET /knowledge/{id}`）"**，
+并据此判"本轮不动、升级为 L3、进 owner 清单"。**这句话是错的，而且错在最关键的那半句上。**
+
+T0506 自己就已经把 `ListEvidenceAssertionsForTarget`（不带可见性谓词的那条）接到了
+`GET /api/v1/projects/{projectId}/objects/{objectId}/evidence`
+（`cmd/api/evidencehttp/wiring.go:63`）。这条路由的**门只问"项目对这个读者可不可见"**
+（`wiring.go:26-31`、`handlers.go:57-60`），**不问读者是谁**，
+所以对公开项目**匿名读者直接过门**——这一点还被测试正面钉死：
+`tests/integration/evidence_graph_test.go:644-650` 要求"anonymous read of a public project = 200"。
+过门之后立刻是 `h.service.ObjectEvidence(ctx, projectID, objectID, versionNo)`——**读者没有被传下去**。
+
+所以真相不是"将来出现'仅成员可读'的面之前要有答案"，而是
+**今天就有一个匿名可读的面，而且它读的是不带谓词的行**。我上一轮的措辞把风险写小了，
+这条更正写在这里，按老规矩：我自己的断言同样要能被反驳。
+
+### ② 我核过的事实链（逐条，可复核）
+
+- 读：`internal/persistence/queries/evidence.sql:67-73`，头部逐字
+  **"Rows are returned unfiltered by visibility: this is the owning project's read."**，
+  查询里没有可见性谓词；公开网络读是另一条 `:74-109`（带 `ea.visibility = 'public'`，
+  给 `GET /knowledge/{knowledgeId}` 用，`internal/persistence/evidence_store.go:186`）。
+- 绑定：`internal/persistence/evidence_graph_store.go:55` 调的正是前者。
+- 列语义：`infra/migrations/00091_external_evidence_network.sql:42-66` ——
+  "whether the assertion may be rendered by the PUBLIC network read (GET /knowledge/{knowledgeId},
+  which is `security: []`)"，DEFAULT `'private'`，理由是
+  "an assertion nothing explicitly made public is not rendered anywhere (docs/12 §5)"。
+- 写路径：`internal/application/rsg/evidence.go:257-268` —— 断言方项目公开 + 无可见性策略 +
+  **提交分支公开**，三条同时成立才存 `public`，"Anything unclear stays private"。
+  也就是说 **private 行在正常业务里就会出现**（私有组织的判断、未合并分支上的草稿）。
+- 页面侧（T0507）：`cmd/api/rsghttp/graph.go:398-404` 的 `evidencePanelFor` **不接读者**，
+  读在 `:418`（`r.ObjectEvidence(ctx, projectID, objectID, versionNo)`）；页面走的是与 JSON
+  同一条 `handleGetObject` 路由的 HTML 分支（`cmd/api/rsghttp/handlers.go:395`），
+  在"与项目同可见"的 T0106 读通过之后渲染。
+- **执行证据**：T0507 的独立评审在真实 PostgreSQL 上探过——把一行改成 `visibility='private'`，
+  **匿名的证据页签照样渲染那一行**。JSON 路由那一半我是**读代码断定**的（同一个 handler：
+  门后直接 `h.service.ObjectEvidence`，无读者参数）；这一半要在修复任务的验收里用一条匿名集成测试
+  变成执行证据，不能停在我的阅读上。
+
+### ③ 裁决：**T0507 不打回**，让它合；这条泄露专门立一个任务修
+
+不打回的三条理由，缺一条我都会打回：
+
+1. **不是 T0507 造的**。泄露在 main 上由**已合并的 T0506** 造成，T0507 只是把同一批行铺到了
+   人可读的页面上。打回 T0507 关不掉任何东西。
+2. **T0507 修不了**。真要修得动 `internal/application/evidencegraph/**`（读的主人是服务），
+   **不在 T0507 的 `allowed_scope` 里**，改出来 collect 也会拒；退一步"在页面里另写一份可见性判据"
+   等于**同一条规则两份实现**，而且只堵页面、JSON 路由照漏——架构上比不打回更糟。
+3. **书的判据是"页面读和它 JSON 路由同一个适配器"**，工人照做了，评审也判它 NOT BLOCKING，
+   并明确写了"per-row 谓词是新规则，属 L3，正是 T0506 被禁止自创的那一级"。
+
+**同时**：这条泄露不是"记录一下就完了"那一类（保护缺席 → 要修），只是修它的地方不在 T0507 里。
+
+### ④ 修法与顺序
+
+- 规则已经写进 **`docs/adr/ADR-024-evidence-read-carries-its-reader.md`**（L2，我自己的职责）：
+  读者进到读里去；渲染谓词 = `public` ∪ **断言方项目成员** ∪ **目标对象所属项目成员**；
+  读者解析不出/成员查不到 → 只给 `public`（与该列 DEFAULT 同向的 fail-closed）。
+  成员判据的现成读：`internal/persistence/project_store.go:177`。
+- **顺序**：T0507 的 diff **不含迁移**（`git status --short` 里 0 个 `infra/migrations/` 文件），
+  所以它**不被迁移顺序阻塞**，PR 一绿就可能立刻合并。修复任务以**含 T0507 的 main** 为基线，
+  这样两个出口一次对齐，也不会和 T0507 抢同一条调用点。
+- **今晚不能立账**，理由记清楚：改 `tasks/tasks.json` 会动 digest，而 T0602 与 T0808
+  两个返工**都在飞**，且它们的 diff **都包含 `specs/SPEC_VERSION.json`**
+  （他们带迁移 → `specs/database/postgres.sql` 变 → marker 必须重算），
+  他们那份 marker 是按**我改之前**的 `tasks.json` 算的。我在 main 上改 `tasks.json`，
+  合成候选的 digest 立刻对不上 → 两个在飞任务的 G2 一起红。
+  **安静窗一到就立账**（这两本落地合并之后），同笔补 `specs/orchestrator/gates.json` 的 G3 override，
+  再跑 `scripts/update_progress.py` 那类生成器，别让 main 红。
+- 该任务的验收必须含一条**能红的匿名用例**：夹具现成
+  （`tests/integration/evidence_graph_test.go:264-270` 的 `mustAssertEvidence(t, projectID, branchID, body)`
+  可以在 `:153` 的私有项目 `eg-gamma` 上造断言，目标指向公开项目 alpha 的对象），
+  要求"改动前红、改动后绿"，两次输出贴进 RESULT。
+
+### ⑤ 进 owner 清单的 L3 残留（本裁决不替 owner 决定）
+
+1. 一个**既能读公开项目、又与这一行无关的登录用户**，将来可否看到非公开行——ADR-024 判**不**
+   （fail-closed）。若产品要放开，那是放宽，必须显式记录。
+2. **目标方成员能看到别人（可能是它并不信任的私有项目）尚未公开的草稿**这一情形，
+   是否收窄到"只有断言方可见"。ADR-024 保持今天的答案（两方成员都可见，`docs/24 §2`
+   "external evidence 不可被 origin maintainer 静默删除"支持看得见），收窄与否属科研语义/隐私，留给 owner。
+
+### ⑥ 与今天早先那条裁定（`decisions.md:13696`）的关系，把话说清
+
+同一条读、**两个不同的轴**，别混起来：
+
+- **早先那条（安全扫描报的）**：`HypothesisEvidence` 的 claims 循环里 `versions()`/`groups()`
+  不带项目谓词，理论上能顺着关系摸到别的项目对象。我当时的裁定是**"防线在写入路径上"**——
+  关系容器的项目谓词、写入路径拒绝跨项目端点、合并路径拒绝"端点不在目标谱系里"的边、
+  `project_id` 没有更新路径（四条都逐条走过）——**这条裁定今天依然成立，我不动它。**
+  它末尾那句"注释有代码支撑"（门确实在跑）也依然成立。
+- **今天这条**：轴是 **`visibility` 这一列**。写路径把它按 fail-closed 推导出来
+  （`rsg/evidence.go:257-268`，"Anything unclear stays private"），**恰恰是因为这些行不该被公开面渲染**；
+  而读不带谓词、门只问项目——于是**写路径盖的那个章，读这边不认**。
+  这不是"防线在写里"被推翻，而是：**写路径的保护只有在读认这个章的时候才成立。**
+
+**同时更新那条早先裁定的收尾**：它把"给 `internal/application/evidencegraph/**` 补一句项目校验"
+列为**可选的加固项**（"不单开任务、不占队列"）。**今天这一条改变的是那个收尾**：
+可见性那一轴不再是可选加固，而是**要开任务修的缺陷**（ADR-024）。早先那条的"不单开任务"仍然只对
+它自己那一轴有效——两者不要互相引用成"已经决定不用修"。

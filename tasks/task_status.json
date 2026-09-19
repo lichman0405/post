@@ -4229,9 +4229,10 @@
       ]
     },
     "T0507": {
-      "status": "running",
+      "status": "accepted",
       "started_at": "2026-09-19T07:38:15Z",
       "worker_run_id": "run-ae43076f3eed5507",
+      "accepted_by_supervisor_at": "2026-09-19T08:47:55Z",
       "history": [
         {
           "from": "todo",
@@ -4245,6 +4246,19 @@
           "at": "2026-09-19T07:38:15Z",
           "run_id": "run-ae43076f3eed5507",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-19T08:20:16Z",
+          "run_id": "run-02a761bdf840d897",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-19T08:47:55Z",
+          "run_id": "run-0d34ac4a1f24808e"
         }
       ]
     },
@@ -4520,10 +4534,11 @@
       ]
     },
     "T0602": {
-      "status": "verification",
-      "started_at": "2026-09-19T06:56:31Z",
+      "status": "running",
+      "started_at": "2026-09-19T08:16:17Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:08:07Z 判定）：abort 要记的字段（reason code、human explanation、replacement ref）在库里无处可存；reopen 这条在契约、权限矩阵、审批规则三处全空。",
-      "worker_run_id": "run-c1db04f28e0909c4",
+      "worker_run_id": "run-cb6ffa3d7632f9f3",
+      "rejection_reason": "# T0602 返工单（第一次打回）\n\n**你的交付没有通过验收。** 先说清楚哪些**没问题**：abort 记录落在 `scientific_object_versions` 的六列上、\nall-or-nothing CHECK、不塞 payload；命令从不直写 main（fork + append + PR）；审计行与版本插入同事务、\n事件在 commit 自己的写回调里发出；幂等用状态本身而不是新账本表（`abort_request_key` + 按对象的部分唯一索引 +\n条件更新版本号）；merge 侧把 `docs/46:7` 的记录搬到被接受的版本上、并拒绝没有记录的 aborted 行；\nreason_code 开放取值有痕迹且无硬编码清单。范围也干净。这些我都进树核对过。\n\n**卡住的是本任务第一条验收标准本身**：那条\"必须走真实产品路径\"的测试没有走评审。\n独立评审给了 1 条阻塞 + 2 条 major，我逐条进你的工作树核对，**三条都成立**。\n\n下面每一条都给了确切位置与必须变成什么样。**本单之外的东西一条都不要动。**\n\n---\n\n## 一（阻塞）验收标准 1 要求的那条测试没有走评审台\n\n`tests/integration/abort_e2e_test.go:534-545`：\n\n```go\n// driveToMergeReady takes the proposal the abort command opened through the\n// real review machine (docs/43) to the only state the merge engine accepts.\nfunc (f *abortFixture) driveToMergeReady(t *testing.T, ctx context.Context, number int64) {\n\tt.Helper()\n\tif _, err := f.prs.RequestReview(ctx, f.project.ID, number); err != nil { ... }\n\tif _, err := f.prs.SetState(ctx, f.project.ID, number, domain.PullRequestStateApproved); err != nil { ... }\n\tif _, err := f.prs.SetState(ctx, f.project.ID, number, domain.PullRequestStateMergeReady); err != nil { ... }\n}\n```\n\n调用点在 `:884`（`f.driveToMergeReady(t, ctx, wire.PullRequestNumber)`），全文件**没有任何一处提交评审**\n（夹具根本没接 `cmd/api/reviewhttp`）。而本任务书第一条验收标准的原话是：\n\n> **不许在测试里直接把状态摆出来**（既有的反面教材是 `freeze_main_e2e_test.go:849-853` 与\n> `pullrequest_test.go:331-336`：评审还没提交就直接 `prSvc.SetState` 把 PR 走成 approved→merge_ready）\n\n**你写下的正是书里点名禁止的那两行。** 更糟的是文件头 `:48-53` 逐字写着相反的话：\n\"carried by the Research PR the command opens, **driven through the real review machine to merge_ready**\"。\n于是\"main 对象 abort 要 review/approval\"（`docs/46:5`）这件事——也就是 branch → PR → merge 这一步的**全部意义**——\n**恰恰没有被它唯一的证据测试碰到**。今天这条测试能通过，是因为它自己把答案摆好了。\n\n**正例就在同一个包里**，`tests/integration/merge_governance_e2e_test.go:504-560`（这本书点名让你照抄的那条）：\n开 PR 走真实路由，然后**用 `POST /api/v1/projects/{id}/pull-requests/{n}/reviews` 提交两次评审**\n（`cmd/api/reviewhttp/wiring.go:60` 就是这条路由），`review_required → approved → merge_ready` 的迁移是\n**存储自己的投影在提交评审的过程中走完的**。那条测试的注释 `:504-514` 还专门写了它自己以前也是 `SetState` 写法、\n为什么改掉。\n\n**要求：**\n\n1. `driveToMergeReady` 改成**提交评审台路线**走到 merge_ready：接上 `cmd/api/reviewhttp`，按\n   required-review 规则要的那几维提交（自己从 reviews 规则的实现里读出到底要哪几维，**不要猜**），\n   让状态迁移由提交本身推动。\n   **`RequestReview` 这一次直接调用可以保留**——`merge_governance_e2e_test.go:511-514` 已经写明理由\n   （docs/43 的 open → review_required 在本构建没有路由，没有契约操作、矩阵里也没有 request_review 格，\n   发明一条就是发明产品动作）。**照抄它那句理由，不要连它一起删掉。**\n2. **改完必须证明评审是承重的**：做一次变异检验——把提交的评审去掉（或去掉其中一维），\n   这条 e2e **必须变红**（PR 到不了 merge_ready / merge 不予受理）。**两次输出都贴进 RESULT。**\n3. 文件头 `:48-53` 那句改成**描述改后形状的真话**（现在它描述的正是你还没做的事）。\n4. 断言仍然只读存储（这一条你已经做对了，保持）。\n\n---\n\n## 二（major）RESULT 里对第一条验收标准的证据与代码相反\n\n`.rddev/workers/T0602/RESULT.json` 的 `acceptance[0].evidence` 里逐字写着：\n\n> No SetState-style shortcut anywhere in the file.\n\n**文件里有两处**（`:539` 与 `:542`）。这不是\"证据不足\"，是**证据与代码相反**：\n只读 RESULT 的人会得出\"这个禁止的形状不存在\"的结论。改完第一条之后，\n**把这段证据重写成与代码逐字相符的描述**——写清楚测试现在怎么走到 merge_ready、哪一次直接调用被保留及为什么。\n\n---\n\n## 三（major）同一个 `Idempotency-Key` 用在同项目两个对象上，会拿回**别人的 PR**\n\n三个索引串起来是可证的：\n\n- abort 自己的键**按对象**唯一：`infra/migrations/00100_scientific_object_abort_record.sql:124-125`\n  `ON scientific_object_versions (object_id, abort_request_key)`；\n- 但同一个键被交给了 PR 适配器当 creation key（`internal/application/aborts/service.go:576-590` 的\n  `CreationKey: in.IdempotencyKey`），而 PR 的键**按项目**唯一：\n  `infra/migrations/00089_*.sql:36-37` `ON pull_requests (project_id, creation_key)`；\n- 适配器对\"键已用过\"的答案是**返回那一行而不是报错**：`internal/persistence/pullrequest_store.go:95-105`。\n\n**后果**：请求 A（对象 A，键 K）提交了 A 的 aborted 版本、开出 PR #n；请求 B（对象 B，同一个键 K）在\n`(B,K)` 下查不到版本 → 提交 B 的 aborted 版本到一条新分支（分支名按对象生成，不撞）→\n然后 `prs.Create` **把属于 A 的 PR #n 原样还给 B**，于是 B 拿到一个 201、\n里面报的是 **A 的 PR 号**，而 B 的提议分支**根本没有 PR**。\n`openProposal` 从头到尾没有检查过\"还回来的 PR 是不是我这条分支的\"。\n\n**要求（fail-closed）：**\n\n5. 把\"还回来的 PR 属于我刚才 fork 的那条分支\"变成**被检查的事实**：拿\n   `pr.SourceBranchID` 与你刚创建的 `branch.ID` 比对，不一致就**拒绝**（冲突类错误，\n   错误里**不要**提到另一个对象的存在）。**若你选别的机制**（例如交给适配器的 creation key 改为按对象派生），\n   要求不变：**一个键用在两个对象上，永远不许返回属于别人的 PR。**\n   **不许引入 read-then-write** 来\"提前查一下\"——幂等的并发断言（验收标准 5）必须继续成立，\n   你现在的单赢机制（条件更新版本号）是这条测试的根，不要动它。\n6. 补一条测试：**同项目、两个对象、同一个 `Idempotency-Key`**，断言第二笔**拒绝**、\n   不返回第一笔的 PR、且第一笔的 PR 与 A 的版本行**原样不变**。\n   **这条测试在你改之前必须是红的**（把改前的失败输出与改后的通过输出都贴进 RESULT）。\n7. 现存风险 #1 的形状要在 RESULT 里**明说**：拒绝发生在版本提交之后，所以被拒的那笔会留下一条\n   \"有 aborted 版本、没有 PR\"的提议分支——这与你自己披露的风险 #1 是同一个形状，**不要把它说成已经解决**。\n\n---\n\n## 四（minor，顺手做掉）\n\n8. `internal/application/aborts/ports.go:36` 的 `Branches.GetHead`：**声明了、假实现也写了，但服务从不调用**\n   （fork 基点来自分支行自己的 `base_state_id`）。它暗示一次并不存在的 head 读。**删掉它与其假实现**\n   （删之前用 grep 证明零调用者，把输出贴进 RESULT）。\n9. `***.go:69` 新增的公开方法 `GetByCreationKey` **没有测试**——\n   两个校验分支与 `ErrPullRequestNotFound` 的映射（正是 abort 重放依赖的那个结果，\n   `internal/application/aborts/service.go:659-668`）都没被走过。补上，跑绿。\n\n---\n\n## 五（nit，只在**不扩大 diff** 的前提下做）\n\n10. `internal/application/aborts/service.go:899-901`：`ErrStore` 分支与 default 分支**逐字相同**，\n    这个 case 什么都不加。合并成一条。\n11. `cmd/api/aborthttp/wiring.go:49` 是\"其余路径全吃\"的 POST 通配，`/objects/` 下**任何** POST 现在都进这个处理器\n    （以前未匹配的 POST 是 405，现在是 404）。**代码不用改**——但如果你检查后认为注释里没有写明\n    \"将来在同前缀下加兄弟 POST 时要注意 ServeMux 优先级\"，补一句；**如果已经写清楚了，就在 RESULT 里说明，别硬加。**\n\n---\n\n## 明确不许做的事\n\n- **不许动 agent 那一格的行为。** 任务书第 7 条要的两道防线（`internal/authz` 的矩阵判定 + 域层\n  `AgentNotPermittedError` 兜底）**就照现在的样子保留**，拒绝就是拒绝。\n  规格里 `specs/mcp/tools.json:23` 有一条 `object.abort_proposal`（`\"mode\":\"proposal\"`）、且 abort\n  **不在** `forbidden_default_agent_actions` 里——所以\"agent 能不能开出一条由人合并的 abort 提议\"\n  是**产品/权限语义**，属 owner 拍板，**不在本任务内**。\n  **不许**为了让验收标准 3 的字面更好看而把 `proposal_only` 改成\"放行成 PR\"。\n  在 RESULT 里**用一句话如实写出这一格今天的行为**（拒绝；两条线各是什么），让记录自己带着这件事。\n- **不许为了让测试变绿而删测试、跳过测试、放宽断言或放大超时**（CLAUDE.md §5.1、§6）。\n  本单要求你改的断言只有：第一条那个 helper 与文件头注释、第二条那段 RESULT 证据、第三条那处拒绝。\n- 不许改 `internal/authz/**`（矩阵、动作常量、CSV 三者一字不动——**这点你做对了，继续保持**）、\n  不许改 `specs/**`、`tasks/**`、`docs/**`、`infra/migrations/**`。\n- 不许动 `allowed_scope` 之外的路径。\n\n---\n\n## 交账要求\n\nRESULT 里按本单编号逐条写：**改了什么、在哪一行、用什么证明**。其中三处**必须贴出两次输出**：\n\n- 第一条要求 2：去掉评审提交后 e2e 变红 / 恢复后变绿；\n- 第三条要求 6：新测试改前红 / 改后绿；\n- 第四条要求 8、9 的删前 grep 证明与测试跑绿输出。\n\n另：`acceptance[0].evidence` 与 `acceptance[2].evidence` 两段重写后，**必须与代码逐字相符**。\n",
       "history": [
         {
           "from": "todo",
@@ -4551,6 +4566,20 @@
           "at": "2026-09-19T07:55:15Z",
           "run_id": "run-06291df5621aedff",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-19T08:16:12Z",
+          "run_id": "run-48675bf463e5d8ce",
+          "reason": "# T0602 返工单（第一次打回）\n\n**你的交付没有通过验收。** 先说清楚哪些**没问题**：abort 记录落在 `scientific_object_versions` 的六列上、\nall-or-nothing CHECK、不塞 payload；命令从不直写 main（fork + append + PR）；审计行与版本插入同事务、\n事件在 commit 自己的写回调里发出；幂等用状态本身而不是新账本表（`abort_request_key` + 按对象的部分唯一索引 +\n条件更新版本号）；merge 侧把 `docs/46:7` 的记录搬到被接受的版本上、并拒绝没有记录的 aborted 行；\nreason_code 开放取值有痕迹且无硬编码清单。范围也干净。这些我都进树核对过。\n\n**卡住的是本任务第一条验收标准本身**：那条\"必须走真实产品路径\"的测试没有走评审。\n独立评审给了 1 条阻塞 + 2 条 major，我逐条进你的工作树核对，**三条都成立**。\n\n下面每一条都给了确切位置与必须变成什么样。**本单之外的东西一条都不要动。**\n\n---\n\n## 一（阻塞）验收标准 1 要求的那条测试没有走评审台\n\n`tests/integration/abort_e2e_test.go:534-545`：\n\n```go\n// driveToMergeReady takes the proposal the abort command opened through the\n// real review machine (docs/43) to the only state the merge engine accepts.\nfunc (f *abortFixture) driveToMergeReady(t *testing.T, ctx context.Context, number int64) {\n\tt.Helper()\n\tif _, err := f.prs.RequestReview(ctx, f.project.ID, number); err != nil { ... }\n\tif _, err := f.prs.SetState(ctx, f.project.ID, number, domain.PullRequestStateApproved); err != nil { ... }\n\tif _, err := f.prs.SetState(ctx, f.project.ID, number, domain.PullRequestStateMergeReady); err != nil { ... }\n}\n```\n\n调用点在 `:884`（`f.driveToMergeReady(t, ctx, wire.PullRequestNumber)`），全文件**没有任何一处提交评审**\n（夹具根本没接 `cmd/api/reviewhttp`）。而本任务书第一条验收标准的原话是：\n\n> **不许在测试里直接把状态摆出来**（既有的反面教材是 `freeze_main_e2e_test.go:849-853` 与\n> `pullrequest_test.go:331-336`：评审还没提交就直接 `prSvc.SetState` 把 PR 走成 approved→merge_ready）\n\n**你写下的正是书里点名禁止的那两行。** 更糟的是文件头 `:48-53` 逐字写着相反的话：\n\"carried by the Research PR the command opens, **driven through the real review machine to merge_ready**\"。\n于是\"main 对象 abort 要 review/approval\"（`docs/46:5`）这件事——也就是 branch → PR → merge 这一步的**全部意义**——\n**恰恰没有被它唯一的证据测试碰到**。今天这条测试能通过，是因为它自己把答案摆好了。\n\n**正例就在同一个包里**，`tests/integration/merge_governance_e2e_test.go:504-560`（这本书点名让你照抄的那条）：\n开 PR 走真实路由，然后**用 `POST /api/v1/projects/{id}/pull-requests/{n}/reviews` 提交两次评审**\n（`cmd/api/reviewhttp/wiring.go:60` 就是这条路由），`review_required → approved → merge_ready` 的迁移是\n**存储自己的投影在提交评审的过程中走完的**。那条测试的注释 `:504-514` 还专门写了它自己以前也是 `SetState` 写法、\n为什么改掉。\n\n**要求：**\n\n1. `driveToMergeReady` 改成**提交评审台路线**走到 merge_ready：接上 `cmd/api/reviewhttp`，按\n   required-review 规则要的那几维提交（自己从 reviews 规则的实现里读出到底要哪几维，**不要猜**），\n   让状态迁移由提交本身推动。\n   **`RequestReview` 这一次直接调用可以保留**——`merge_governance_e2e_test.go:511-514` 已经写明理由\n   （docs/43 的 open → review_required 在本构建没有路由，没有契约操作、矩阵里也没有 request_review 格，\n   发明一条就是发明产品动作）。**照抄它那句理由，不要连它一起删掉。**\n2. **改完必须证明评审是承重的**：做一次变异检验——把提交的评审去掉（或去掉其中一维），\n   这条 e2e **必须变红**（PR 到不了 merge_ready / merge 不予受理）。**两次输出都贴进 RESULT。**\n3. 文件头 `:48-53` 那句改成**描述改后形状的真话**（现在它描述的正是你还没做的事）。\n4. 断言仍然只读存储（这一条你已经做对了，保持）。\n\n---\n\n## 二（major）RESULT 里对第一条验收标准的证据与代码相反\n\n`.rddev/workers/T0602/RESULT.json` 的 `acceptance[0].evidence` 里逐字写着：\n\n> No SetState-style shortcut anywhere in the file.\n\n**文件里有两处**（`:539` 与 `:542`）。这不是\"证据不足\"，是**证据与代码相反**：\n只读 RESULT 的人会得出\"这个禁止的形状不存在\"的结论。改完第一条之后，\n**把这段证据重写成与代码逐字相符的描述**——写清楚测试现在怎么走到 merge_ready、哪一次直接调用被保留及为什么。\n\n---\n\n## 三（major）同一个 `Idempotency-Key` 用在同项目两个对象上，会拿回**别人的 PR**\n\n三个索引串起来是可证的：\n\n- abort 自己的键**按对象**唯一：`infra/migrations/00100_scientific_object_abort_record.sql:124-125`\n  `ON scientific_object_versions (object_id, abort_request_key)`；\n- 但同一个键被交给了 PR 适配器当 creation key（`internal/application/aborts/service.go:576-590` 的\n  `CreationKey: in.IdempotencyKey`），而 PR 的键**按项目**唯一：\n  `infra/migrations/00089_*.sql:36-37` `ON pull_requests (project_id, creation_key)`；\n- 适配器对\"键已用过\"的答案是**返回那一行而不是报错**：`internal/persistence/pullrequest_store.go:95-105`。\n\n**后果**：请求 A（对象 A，键 K）提交了 A 的 aborted 版本、开出 PR #n；请求 B（对象 B，同一个键 K）在\n`(B,K)` 下查不到版本 → 提交 B 的 aborted 版本到一条新分支（分支名按对象生成，不撞）→\n然后 `prs.Create` **把属于 A 的 PR #n 原样还给 B**，于是 B 拿到一个 201、\n里面报的是 **A 的 PR 号**，而 B 的提议分支**根本没有 PR**。\n`openProposal` 从头到尾没有检查过\"还回来的 PR 是不是我这条分支的\"。\n\n**要求（fail-closed）：**\n\n5. 把\"还回来的 PR 属于我刚才 fork 的那条分支\"变成**被检查的事实**：拿\n   `pr.SourceBranchID` 与你刚创建的 `branch.ID` 比对，不一致就**拒绝**（冲突类错误，\n   错误里**不要**提到另一个对象的存在）。**若你选别的机制**（例如交给适配器的 creation key 改为按对象派生），\n   要求不变：**一个键用在两个对象上，永远不许返回属于别人的 PR。**\n   **不许引入 read-then-write** 来\"提前查一下\"——幂等的并发断言（验收标准 5）必须继续成立，\n   你现在的单赢机制（条件更新版本号）是这条测试的根，不要动它。\n6. 补一条测试：**同项目、两个对象、同一个 `Idempotency-Key`**，断言第二笔**拒绝**、\n   不返回第一笔的 PR、且第一笔的 PR 与 A 的版本行**原样不变**。\n   **这条测试在你改之前必须是红的**（把改前的失败输出与改后的通过输出都贴进 RESULT）。\n7. 现存风险 #1 的形状要在 RESULT 里**明说**：拒绝发生在版本提交之后，所以被拒的那笔会留下一条\n   \"有 aborted 版本、没有 PR\"的提议分支——这与你自己披露的风险 #1 是同一个形状，**不要把它说成已经解决**。\n\n---\n\n## 四（minor，顺手做掉）\n\n8. `internal/application/aborts/ports.go:36` 的 `Branches.GetHead`：**声明了、假实现也写了，但服务从不调用**\n   （fork 基点来自分支行自己的 `base_state_id`）。它暗示一次并不存在的 head 读。**删掉它与其假实现**\n   （删之前用 grep 证明零调用者，把输出贴进 RESULT）。\n9. `***.go:69` 新增的公开方法 `GetByCreationKey` **没有测试**——\n   两个校验分支与 `ErrPullRequestNotFound` 的映射（正是 abort 重放依赖的那个结果，\n   `internal/application/aborts/service.go:659-668`）都没被走过。补上，跑绿。\n\n---\n\n## 五（nit，只在**不扩大 diff** 的前提下做）\n\n10. `internal/application/aborts/service.go:899-901`：`ErrStore` 分支与 default 分支**逐字相同**，\n    这个 case 什么都不加。合并成一条。\n11. `cmd/api/aborthttp/wiring.go:49` 是\"其余路径全吃\"的 POST 通配，`/objects/` 下**任何** POST 现在都进这个处理器\n    （以前未匹配的 POST 是 405，现在是 404）。**代码不用改**——但如果你检查后认为注释里没有写明\n    \"将来在同前缀下加兄弟 POST 时要注意 ServeMux 优先级\"，补一句；**如果已经写清楚了，就在 RESULT 里说明，别硬加。**\n\n---\n\n## 明确不许做的事\n\n- **不许动 agent 那一格的行为。** 任务书第 7 条要的两道防线（`internal/authz` 的矩阵判定 + 域层\n  `AgentNotPermittedError` 兜底）**就照现在的样子保留**，拒绝就是拒绝。\n  规格里 `specs/mcp/tools.json:23` 有一条 `object.abort_proposal`（`\"mode\":\"proposal\"`）、且 abort\n  **不在** `forbidden_default_agent_actions` 里——所以\"agent 能不能开出一条由人合并的 abort 提议\"\n  是**产品/权限语义**，属 owner 拍板，**不在本任务内**。\n  **不许**为了让验收标准 3 的字面更好看而把 `proposal_only` 改成\"放行成 PR\"。\n  在 RESULT 里**用一句话如实写出这一格今天的行为**（拒绝；两条线各是什么），让记录自己带着这件事。\n- **不许为了让测试变绿而删测试、跳过测试、放宽断言或放大超时**（CLAUDE.md §5.1、§6）。\n  本单要求你改的断言只有：第一条那个 helper 与文件头注释、第二条那段 RESULT 证据、第三条那处拒绝。\n- 不许改 `internal/authz/**`（矩阵、动作常量、CSV 三者一字不动——**这点你做对了，继续保持**）、\n  不许改 `specs/**`、`tasks/**`、`docs/**`、`infra/migrations/**`。\n- 不许动 `allowed_scope` 之外的路径。\n\n---\n\n## 交账要求\n\nRESULT 里按本单编号逐条写：**改了什么、在哪一行、用什么证明**。其中三处**必须贴出两次输出**：\n\n- 第一条要求 2：去掉评审提交后 e2e 变红 / 恢复后变绿；\n- 第三条要求 6：新测试改前红 / 改后绿；\n- 第四条要求 8、9 的删前 grep 证明与测试跑绿输出。\n\n另：`acceptance[0].evidence` 与 `acceptance[2].evidence` 两段重写后，**必须与代码逐字相符**。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-19T08:16:17Z",
+          "run_id": "run-cb6ffa3d7632f9f3",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -6443,9 +6472,10 @@
     },
     "T0808": {
       "status": "running",
-      "started_at": "2026-09-19T07:56:40Z",
-      "worker_run_id": "run-4248f871216eb844",
-      "rejection_reason": "# T0808 返工单（第一次打回）\n\n**你的交付没有通过验收。** 范围、测试规模、生成物这些都没问题；**卡住的是隐私边界**——\n这正是本任务第二条验收标准「private info 不泄漏」。独立评审给了 2 条阻塞意见，我逐条进了你的工作树核对，\n**两条都成立**，而且第一条最坏的部分是：**测试把缺陷钉死了**。\n\n下面每一条都给了确切位置与必须变成什么样。**本单之外的东西一条都不要动。**\n\n---\n\n## 一（阻塞）reproduction 维度把从未公开过的断言渲染出去了\n\n`internal/persistence/queries/research_profile.sql` 的 `ListPersonReproductions`（`:261-273`）只按\n`ea.created_by` 与 `ea.relation_type` 过滤，**没有断言自身的可见性谓词**；它的 select 列表里\n（`:261-267`）**也没有 `ea.visibility`**。于是 `***.go:193`\n的 `ReproductionRow` 根本没有这个字段，`model.go:434-446` 里也只查了 `reproductionRelation(row.Relation)`\n与断言方项目的可见性。\n\n而 `infra/migrations/00091_external_evidence_network.sql:63-65` 给 `evidence_assertions` 加了\n**它自己的可见性轴**，逐字：\n\n```\nADD COLUMN visibility text NOT NULL DEFAULT 'private'\n  CONSTRAINT evidence_assertions_visibility_check\n  CHECK (visibility IN ('public', 'private'));\n```\n\n它头上的原话是 \"an assertion nothing explicitly made public is not rendered anywhere\"。\n仓库里已有的公开断言读也正是这么做的：`internal/persistence/queries/evidence.sql:109` 有\n`AND ea.visibility = 'public'`。\n\n**后果**：一条 private 断言（它的 relation、review_state、时间戳）会出现在**匿名**的\n`GET /api/v1/users/{id}/research-profile` 上。这两个 profile 路由是匿名可达的 ——\n`cmd/api/main.go:388-394` 的注释逐字写明 \"the guard lets anonymous reads through, so the two pages are public\"。\n\n**测试把缺陷钉死了，这一条必须一起改：** `tests/integration/research_profile_test.go:317-325` 的\n`assert(...)` 插入时**没有写 visibility 列**（所以走 DEFAULT `'private'`），而 `:327-328` 又\ninsert 了两条（`f.open` 与 `f.secret`）；`:674-693` 断言**两条都渲染**（`:678` 是\n`len(payload.Reproductions) != 2` 就 Fatal）。也就是说**今天的套件在证明泄漏、而不是在抓它**。\n\n**要求：**\n1. 读里加上断言自身的可见性谓词（`ea.visibility = 'public'`），并**把 `ea.visibility` 也选出来**，\n   让 Go 侧仍然**独立再判一次**——见下方第三条要求 5：Go 侧的再检查**要保留，不许删**。\n2. 夹具改成**显式**给出两条断言的可见性（一条 public、一条 private），不要靠 DEFAULT 隐式成立。\n3. 断言改成：**public 那条渲染、private 那条不渲染**；**必须带正面控制**（public 那条仍在，\n   且它所属项目名照旧渲染）——否则\"整维什么都不渲染\"也能让测试变绿。\n\n---\n\n## 二（阻塞）十条读全部是\"先 LIMIT、再在 Go 里过滤\"——这是我明确否定过的形状\n\n`research_profile.sql` 的十条读**全部** `LIMIT @row_limit`（`FetchLimit = 200`，`ports.go:59`），\n**没有一条带可见性谓词**（文件头 `:9-18` 自己写明 \"these queries do NOT filter by visibility\"），\n过滤全在 Go 里做（`model.go:392-421` assets/reuse、`:434-446` reproductions、`:505-546` 组织读、以及贡献循环）。\n\n**这不是口味问题，是可证的缺陷：当最近的 200 行里多数是要被丢弃的行，更老的公开行永远进不了窗口**，\n于是某一维**明明有公开行却渲染成空或不足**（例：一个人最近的账本行全是私有项目的工作）。\n\n这条我在 **T1004 已经定过**，逐字引给你看：\n\n- `tasks/decisions.md:10654`：「它**做对了**决定一（可见性过滤下沉到 SQL、**LIMIT 在过滤之后**，\n  还配了 `***`）」\n- 源头是 `tasks/decisions.md:437-438` 的强制项：「**任何返回集合的读查询都必须显式接受并应用 scope**；\n  只按主键返回单实体的查询不在此列。」\n\n你引以为据的 `asset_page.sql` 先例，**正是 T1004 裁定为不适用**的那一类（它没有 LIMIT、且是成员视角）。\n文件头\"SQL 过滤会让规则不可证伪\"的理由，**我不接受用来替代 SQL 过滤**——两条可以并存。\n\n**要求：**\n4. **每一条读都要在 SQL 里表达它的渲染谓词，且 LIMIT 在谓词之后**；Go 侧原有的再检查**保留**\n   （防线不要合并成一条）。\n5. **谓词必须与你的渲染规则逐字对应，不许用一个笼统的 `visibility = 'public'` 盖过去。**\n   例如 assets 维度里\"**私有项目的公开版本照样列出、只是不带项目名**\"是**刻意**的既有规则\n   （`model.go:350` 与 `:404-411` 的注释），这类行**必须继续被读出来**——在 SQL 里把它们滤掉\n   就是制造另一个 bug。判据是：**只排除模型会丢弃的行**（模型丢弃的判据见 `:417-419`、\n   `:417` 与 `:520` 三处 `publicProject(...) == nil → continue`）。\n6. 补一条测试，形状照 T1004 那条 `***`：\n   **造一个\"最近 N 行全是被丢弃的私有行、公开行被挤到窗口之外\"的人**，断言**更老的公开行照样渲染**。\n   **这条测试在你改之前必须是红的**（把两次输出贴进 RESULT）。\n\n---\n\n## 三（major）`doc.go` 在教下一个读者\"泄漏不可能\"\n\n`***.go:59` 逐字：\n\n> Every dimension re-checks the visibility of the row it renders **even though the store's query already filters**\n\n**两个分句都是假的**：`research_profile.sql` 没有任何查询按可见性过滤（它自己的头注释 `:9-18`\n说的正好相反），reproduction 维度除了关系类型什么都没再查。**一句宣称了代码并不具备的不变量，\n就是把下一个读者教会\"这里不会泄漏\"。** 改完代码后把这句改成描述改后形状的**真话**。\n\n---\n\n## 四（minor，属于\"将来会咬人\"）\n\n`apps/web/app/components/research-profile-sections.tsx:209` 在 `project === null` 时渲染占位串\n「a project not named here」。这与同一条规则的文件注释（`apps/web/lib/research-profile.ts:53-56`\n逐字 \"never a placeholder: a withheld project is indistinguishable from no project at all\"）\n**直接矛盾**，也与模型的不变量矛盾：`model.go:417-419` 在使用方项目不公开时**整行丢弃**，\n所以 `reuse.project` 永远不为 null —— **这条分支今天不可达**。一旦将来可达，它渲染的正是\n这个模型要防的那个\"可区分的被隐去\"标记。**删掉这条分支**（或改成与规则一致的形状），\n并让类型上的可能性与模型一致。\n\n---\n\n## 五（nit）\n\n`tests/e2e/research_profile_e2e_test.go:291` 的夹具把账本行的 `ActorID` 设成了 `rpE2EOrgID`\n（**组织 id**），而这个字段是人 id；`:480-484` 的组织活跃度断言只按子串 grep `alice.User.Handle`，\n所以 `model.go:536` 的 `webProfilePath(row.ActorID)` 这条路**从来没被真正走到过**。\n改成真人 id，并让断言真的覆盖 actor 链接。\n\n---\n\n## 明确不许做的事\n\n- **不许发明\"账本可见性轴\"。** 评审的另一条风险（`contribution_events` 没有自己的可见性列、\n  T0807 投影不看 `research_events.visibility`）**是已知的 L3**，要 owner 拍板，**不在本任务内**。\n  **不要**为了消掉它去加列、改投影或改 `specs/**`（那些也不在你的允许范围内）。在 RESULT 里点名即可。\n- **不许为了让测试变绿而删测试、跳过测试、放宽断言或放大超时**（CLAUDE.md §5.1、§6）。\n  **本单要求你改的断言，只有\"现在断言错了行为\"的那几处**（第一条要求 3、第三条那句 doc 注释、\n  第四条那条分支、第五条那个夹具）。**除此之外一条都不许动。**\n- 不许改 `specs/**`、`tasks/**`、`docs/**`、`infra/migrations/**`。\n\n---\n\n## 交账要求\n\nRESULT 里按本单编号逐条写：**改了什么、在哪一行、以及你用什么证明改前是坏的**\n（\"先跑出红再改\"或变异检验都行）。其中两条**必须贴出两次输出**（改前红 / 改后绿）：\n\n- 第一条要求 3 的隐私断言（private 那条从\"渲染\"变成\"不渲染\"）；\n- 第二条要求 6 的窗口饥饿测试。\n",
+      "started_at": "2026-09-19T08:50:45Z",
+      "worker_run_id": "run-f185c20ce10e2bf4",
+      "accepted_by_supervisor_at": "2026-09-19T08:37:09Z",
+      "rejection_reason": "# T0808 返工单（第二次打回）\n\n**先说你这次做对了什么**，因为它决定了本单的范围：上一轮的两条阻塞（reproduction 维度泄漏\n未公开断言；十条读全部\"先取窗口再筛\"）**都真修了且有测试兜着**——SQL 里选了 `ea.visibility` 并加了谓词、\nGo 侧独立再检查保留、夹具显式给出可见性、窗口饥饿测试一次盖住五个维度、`doc.go` 那句假话改成了真话、\nreuse 的占位分支删了、e2e 的 `ActorID` 换成真人 id。独立评审也自己复现了每一条。\n**这些我一条都不要你动。**\n\n卡住的是**独立评审新报的两条**（一条 minor、一条 nit），我进树核对后**两条都成立**。\n其中那条 minor，**和我上一轮让你删掉的 reuse 占位串是同一个形状**——只是这次在另一个组件里。\n\n---\n\n## 一（minor）Affiliations 那一格在匿名页上打了个\"该组织已停用\"的探针\n\n`apps/web/app/components/research-profile-sections.tsx:99`：\n\n```tsx\nlabel={a.organization?.name ?? \"Organization not named\"}\n```\n\n三个事实，我逐个核过：\n\n1. **同一个文件自己写的规则 2**（`:30-35`）逐字：\n\n   > A WITHHELD IDENTITY IS NOT A MISSING ONE. Where the API sends `project: null`\n   > (**a private origin project, a private using project, a deactivated organization**)\n   > these components render the row WITHOUT the link and **say nothing about why**.\n   > The alternative — \"project hidden\" — would tell a reader that a project exists\n   > and is being hidden, which is the disclosure the null exists to prevent.\n\n   **规则 2 点名了\"停用组织\"这一情形，而这里偏偏说了。**\n2. `***.go:346-353`：`Organization` **只在\n   `row.OrganizationDeactivatedAt != nil` 时为 nil**（另一条 `OrganizationID == \"\" && Role == \"\"`\n   的判据是\"读取器坏了\"才丢弃整行，正常数据到不了）。也就是说：\n   **这个 null 在可达数据上等价于\"雇主已停用\"。**\n3. `EntityLink`（同文件 `:72-79`）在 `url` 为 null/空时渲染一个**不带链接的 span** ——\n   本身完全符合规则 2；**违规的只有那个替补字符串**。\n\n**后果**：一个认识此人雇主的读者，在这张**匿名可读**的页面上看到 \"Organization not named\"，\n就能确认那家组织**已停用**。这是\"可区分的被隐去\"标记，正是规则 2 与这个模型存在的理由。\n\n**要求：**\n\n1. **让这一格服从规则 2**：行照旧保留（role、两端日期、verified 一个不少——那是任务验收要求的），\n   **不许出现任何形式的\"隐去标记\"**：既不许留这个串，也**不许换一个新的串**去说明为什么没名字。\n   具体形状（例如组织缺席时干脆不渲染那个实体标签）你定，但判据是**规则 2 那句 \"say nothing about why\"**。\n2. **把这条规则放到仓库测试的地方去。** 这个仓库没有组件级测试，测试都在\n   `apps/web/lib/*.test.mjs`（纯模块）。所以把\"要不要渲染实体标签\"这件事**抽到\n   `apps/web/lib/research-profile.ts` 里的一个纯函数**（形状你定），在\n   `apps/web/lib/research-profile.test.mjs` 里给它一条测试。\n   **该测试必须能失败**：做完之后做一次变异检验——把占位串放回去，测试**必须变红**，\n   **两次输出都贴进 RESULT**。（值不值得抽成函数你可以在 RESULT 里说明理由，但\"可测\"这一条不打折。）\n3. **不许**为了这条去改 `internal/application/researchprofile/**` 的模型（`Organization` 就该是 null）、\n   也不许改 `lib/research-profile.ts` 的解析/拒绝规则——**只动渲染与那条新函数**。\n\n---\n\n## 二（nit）注释点名了一个**不存在的查询**\n\n`internal/persistence/queries/research_profile.sql:363` 逐字写着先例是\n`（internal/persistence/queries/evidence.sql, ListPublicAssertions）`。**全仓库没有这个查询**：\n`grep -rn 'ListPublicAssertions'` 只命中**这句话本身**，以及它被 sqlc 抄进去的两个生成文件\n（`internal/persistence/sqlc/querier.go:1205`、`internal/persistence/sqlc/research_profile.sql.go:704`）。\n真名是 **`ListPublishedEvidenceForTarget`**（`internal/persistence/queries/evidence.sql:73`，\n谓词在 `:109`，与这里的谓词确实一致）。\n\n**要求：**\n\n4. 改成真名，并**重新生成** `internal/persistence/sqlc/**`（`scripts/gen_sqlc.sh`；`sqlc` 在 PATH 上，\n   CI 里有漂移测试，**手改生成文件会被它抓住**）。把生成的输出与 `git diff --stat` 贴进 RESULT，\n   证明**只有**预期的那几个文件变了（两个生成文件 + 那一行注释）。\n\n---\n\n## 明确不许做的事\n\n- 上一轮修好的东西**一条都不许回退或\"顺手简化\"**：SQL 谓词、Go 侧再检查、窗口饥饿测试、\n  `doc.go` 的真话、reuse 的类型（现在是非空）、e2e 的真人 id。\n- **不许为了让测试变绿而删测试、跳过测试、放宽断言或放大超时**。\n- 不许改 `specs/**`、`tasks/**`、`docs/**`、`infra/migrations/**`；\n  更**不许**去动评审列为风险、而我在上一轮明确划给 owner 的那两条 L3\n  （账本可见性轴、私密贡献摘要）——那些不在你范围内。\n- 不许动 `allowed_scope` 之外的路径。\n\n---\n\n## 交账要求\n\nRESULT 里按本单编号逐条写：**改了什么、在哪一行、用什么证明**。必须贴出两次输出的：\n\n- 第一条要求 2 的变异检验（把占位串放回去 → 测试变红 / 恢复 → 绿）；\n- 第二条要求 4 的 `scripts/gen_sqlc.sh` 输出与 `git diff --stat`。\n\n**范围声明照旧**：本单之外没动的，请在 RESULT 里一句话确认。\n",
       "history": [
         {
           "from": "todo",
@@ -6480,13 +6510,41 @@
           "at": "2026-09-19T07:56:40Z",
           "run_id": "run-4248f871216eb844",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-19T08:20:16Z",
+          "run_id": "run-c70f386273efcfdf",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-19T08:37:09Z",
+          "run_id": "run-f67a87a61e9884a6"
+        },
+        {
+          "from": "accepted",
+          "to": "rejected",
+          "at": "2026-09-19T08:50:40Z",
+          "run_id": "run-c4bc67c6779c1e16",
+          "reason": "# T0808 返工单（第二次打回）\n\n**先说你这次做对了什么**，因为它决定了本单的范围：上一轮的两条阻塞（reproduction 维度泄漏\n未公开断言；十条读全部\"先取窗口再筛\"）**都真修了且有测试兜着**——SQL 里选了 `ea.visibility` 并加了谓词、\nGo 侧独立再检查保留、夹具显式给出可见性、窗口饥饿测试一次盖住五个维度、`doc.go` 那句假话改成了真话、\nreuse 的占位分支删了、e2e 的 `ActorID` 换成真人 id。独立评审也自己复现了每一条。\n**这些我一条都不要你动。**\n\n卡住的是**独立评审新报的两条**（一条 minor、一条 nit），我进树核对后**两条都成立**。\n其中那条 minor，**和我上一轮让你删掉的 reuse 占位串是同一个形状**——只是这次在另一个组件里。\n\n---\n\n## 一（minor）Affiliations 那一格在匿名页上打了个\"该组织已停用\"的探针\n\n`apps/web/app/components/research-profile-sections.tsx:99`：\n\n```tsx\nlabel={a.organization?.name ?? \"Organization not named\"}\n```\n\n三个事实，我逐个核过：\n\n1. **同一个文件自己写的规则 2**（`:30-35`）逐字：\n\n   > A WITHHELD IDENTITY IS NOT A MISSING ONE. Where the API sends `project: null`\n   > (**a private origin project, a private using project, a deactivated organization**)\n   > these components render the row WITHOUT the link and **say nothing about why**.\n   > The alternative — \"project hidden\" — would tell a reader that a project exists\n   > and is being hidden, which is the disclosure the null exists to prevent.\n\n   **规则 2 点名了\"停用组织\"这一情形，而这里偏偏说了。**\n2. `***.go:346-353`：`Organization` **只在\n   `row.OrganizationDeactivatedAt != nil` 时为 nil**（另一条 `OrganizationID == \"\" && Role == \"\"`\n   的判据是\"读取器坏了\"才丢弃整行，正常数据到不了）。也就是说：\n   **这个 null 在可达数据上等价于\"雇主已停用\"。**\n3. `EntityLink`（同文件 `:72-79`）在 `url` 为 null/空时渲染一个**不带链接的 span** ——\n   本身完全符合规则 2；**违规的只有那个替补字符串**。\n\n**后果**：一个认识此人雇主的读者，在这张**匿名可读**的页面上看到 \"Organization not named\"，\n就能确认那家组织**已停用**。这是\"可区分的被隐去\"标记，正是规则 2 与这个模型存在的理由。\n\n**要求：**\n\n1. **让这一格服从规则 2**：行照旧保留（role、两端日期、verified 一个不少——那是任务验收要求的），\n   **不许出现任何形式的\"隐去标记\"**：既不许留这个串，也**不许换一个新的串**去说明为什么没名字。\n   具体形状（例如组织缺席时干脆不渲染那个实体标签）你定，但判据是**规则 2 那句 \"say nothing about why\"**。\n2. **把这条规则放到仓库测试的地方去。** 这个仓库没有组件级测试，测试都在\n   `apps/web/lib/*.test.mjs`（纯模块）。所以把\"要不要渲染实体标签\"这件事**抽到\n   `apps/web/lib/research-profile.ts` 里的一个纯函数**（形状你定），在\n   `apps/web/lib/research-profile.test.mjs` 里给它一条测试。\n   **该测试必须能失败**：做完之后做一次变异检验——把占位串放回去，测试**必须变红**，\n   **两次输出都贴进 RESULT**。（值不值得抽成函数你可以在 RESULT 里说明理由，但\"可测\"这一条不打折。）\n3. **不许**为了这条去改 `internal/application/researchprofile/**` 的模型（`Organization` 就该是 null）、\n   也不许改 `lib/research-profile.ts` 的解析/拒绝规则——**只动渲染与那条新函数**。\n\n---\n\n## 二（nit）注释点名了一个**不存在的查询**\n\n`internal/persistence/queries/research_profile.sql:363` 逐字写着先例是\n`（internal/persistence/queries/evidence.sql, ListPublicAssertions）`。**全仓库没有这个查询**：\n`grep -rn 'ListPublicAssertions'` 只命中**这句话本身**，以及它被 sqlc 抄进去的两个生成文件\n（`internal/persistence/sqlc/querier.go:1205`、`internal/persistence/sqlc/research_profile.sql.go:704`）。\n真名是 **`ListPublishedEvidenceForTarget`**（`internal/persistence/queries/evidence.sql:73`，\n谓词在 `:109`，与这里的谓词确实一致）。\n\n**要求：**\n\n4. 改成真名，并**重新生成** `internal/persistence/sqlc/**`（`scripts/gen_sqlc.sh`；`sqlc` 在 PATH 上，\n   CI 里有漂移测试，**手改生成文件会被它抓住**）。把生成的输出与 `git diff --stat` 贴进 RESULT，\n   证明**只有**预期的那几个文件变了（两个生成文件 + 那一行注释）。\n\n---\n\n## 明确不许做的事\n\n- 上一轮修好的东西**一条都不许回退或\"顺手简化\"**：SQL 谓词、Go 侧再检查、窗口饥饿测试、\n  `doc.go` 的真话、reuse 的类型（现在是非空）、e2e 的真人 id。\n- **不许为了让测试变绿而删测试、跳过测试、放宽断言或放大超时**。\n- 不许改 `specs/**`、`tasks/**`、`docs/**`、`infra/migrations/**`；\n  更**不许**去动评审列为风险、而我在上一轮明确划给 owner 的那两条 L3\n  （账本可见性轴、私密贡献摘要）——那些不在你范围内。\n- 不许动 `allowed_scope` 之外的路径。\n\n---\n\n## 交账要求\n\nRESULT 里按本单编号逐条写：**改了什么、在哪一行、用什么证明**。必须贴出两次输出的：\n\n- 第一条要求 2 的变异检验（把占位串放回去 → 测试变红 / 恢复 → 绿）；\n- 第二条要求 4 的 `scripts/gen_sqlc.sh` 输出与 `git diff --stat`。\n\n**范围声明照旧**：本单之外没动的，请在 RESULT 里一句话确认。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-19T08:50:45Z",
+          "run_id": "run-f185c20ce10e2bf4",
+          "reason": "worker spawn"
         }
       ]
     },
     "T0809": {
-      "status": "running",
+      "status": "accepted",
       "started_at": "2026-09-19T07:55:17Z",
       "worker_run_id": "run-c0613677d12a2eb5",
+      "accepted_by_supervisor_at": "2026-09-19T08:58:12Z",
       "history": [
         {
           "from": "todo",
@@ -6500,6 +6558,19 @@
           "at": "2026-09-19T07:55:17Z",
           "run_id": "run-c0613677d12a2eb5",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-19T08:24:30Z",
+          "run_id": "run-430e07ca329f25c8",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-19T08:58:12Z",
+          "run_id": "run-ba84ddd0dca68a42"
         }
       ]
     },
@@ -6513,13 +6584,24 @@
       "merged_at": null
     },
     "T0811": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-19T08:37:11Z",
+      "worker_run_id": "run-3ab4b40cd8a75300",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-19T08:24:31Z",
+          "run_id": "run-9e4241fc63cc59b7"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-19T08:37:11Z",
+          "run_id": "run-3ab4b40cd8a75300",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0812": {
       "status": "todo",
