@@ -480,7 +480,7 @@
 
 **Required tests**
 - profile api
-- profile e2e
+- research profile e2e
 
 ---
 

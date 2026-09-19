@@ -1114,7 +1114,7 @@
     {
       "id": "T0808-TEST-01",
       "task_id": "T0808",
-      "name": "profile e2e",
+      "name": "research profile e2e",
       "gate": "task-defined",
       "blocking": true,
       "status": "not_run",

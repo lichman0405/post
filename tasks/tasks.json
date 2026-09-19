@@ -3360,21 +3360,21 @@
       ],
       "requirements": [
         "**先说清楚这份任务书为什么和原来那条不一样。** 本任务原先的台账文字是「branch 中 abort/reopen／main 对象需 PR／reason/replacement」，并在 2026-09-16 被整条判为 `SPEC_BLOCKED`。**2026-09-19 复核后撤回该判定**（理由与逐条证据见 `tasks/decisions.md`：「更正：T0602 的 SPEC_BLOCKED 判重了」）：那份判定漏翻了 `docs/46_ABORT_RETENTION.md`（该文件 **2026-09-12** 随初始提交进仓库，比判定早四天），也误判了权限矩阵为空。**本任务现在只交 abort 这一半**；reopen 那一半拆到 T0610，它只差一行权限决定（属 L3，不在你范围）。",
-        "**规格已经写死了三件事，逐字照办，不要重新设计。**（一）记什么：`docs/46_ABORT_RETENTION.md:7` 逐字「Abort 必须记录 actor、time、reason code、human explanation、replacement/superseding ref(optional)、review/approval if main object。」（二）怎么走：`:9` 逐字「main 中对象 Abort 必须 branch → PR → merge；不能在详情页直接一键修改 current main。」（三）不删除：`:5` 逐字「正式 Scientific Object、relation、state commit、release、asset version、contribution/audit event 不能普通物理删除」，`:11` 逐字「Reopen 创建新 transition，保留历史 abort。」",
+        "**规格已经写死了三件事，逐字照办，不要重新设计。**（一）记什么：`docs/46_ABORT_RETENTION.md:7` 逐字「Abort 必须记录 actor、time、reason code、human explanation、replacement/superseding ref(optional)、review/approval if main object。」（二）怎么走：`:9` 逐字「main 中对象 Abort 必须 branch → PR → merge；不能在详情页直接一键修改 current main。」（三）不删除：`:3` 逐字「正式 Scientific Object、relation、state commit、release、asset version、contribution/audit event 不能普通物理删除」，`:11` 逐字「Reopen 创建新 transition，保留历史 abort。」",
         "**权限不要发明，那一行已经存在而且与规格 CSV 一致。** `internal/authz/matrix.go:121-129` 有 `ActionAbortMainObject`：匿名/非成员/viewer/contributor 全 `Deny`、**maintainer `VerdictViaPR`、owner `VerdictViaPR`、agent `VerdictProposalOnly`**；常量定义在 `internal/authz/action.go:37-38`，注释逐字写着「aborts a main-branch object (**T0602**)」。规格侧同一条在 `specs/policies/permissions-matrix.csv:14`：`abort_main_object,deny,deny,deny,deny,via_pr,via_pr,proposal_only`。**两者一字不差，所以你既不需要改代码里的矩阵，也不需要改 CSV —— 两者都不许动。** 注意它是 `ViaPR` 而不是 `Allow`：这正是「必须经 PR」在权限层的表达，与 `docs/46:9` 是同一句话的两种写法。**这一行今天是个死行**：全仓库除了定义与 `internal/authz/engine_test.go:63` 的单测，没有任何调用者。把它接上生产是本任务的一部分。",
-        "**契约也已经声明好了，路由没实现——按已声明的形状实现，不许改契约。** `specs/api/openapi.yaml:210-218` 是 `POST /projects/{projectId}/objects/{objectId}:abort-proposal`，摘要逐字「Propose abort for object; main objects require PR flow」，参数 `ProjectId` + path 的 `objectId`，响应 `201` 描述逐字「Proposal or branch change created」。**注意这个摘要本身就是规格**：main 对象收到的是 proposal，真正生效靠 PR 合并。`specs/mcp/tools.json:23` 是同一件事的 MCP 面：`object.abort_proposal(project_id, object_version_ref, reason_code, explanation)`。**`specs/api/**` 与 `specs/mcp/**` 都不在你范围内。**",
+        "**契约声明了路由，但只声明了一半——按已声明的部分实现；没有声明的部分由你自行设计、在 RESULT 里说明，契约本身不许改。** `specs/api/openapi.yaml:345-355` 是 `POST /projects/{projectId}/objects/{objectId}:abort-proposal`，摘要逐字「Propose abort for object; main objects require PR flow」，参数 `ProjectId` + path 的 `objectId`，响应 `201` 描述逐字「Proposal or branch change created」（逐字位置：路由 `:345`、摘要 `:347`、path 参数 `ProjectId`（`:349`）与 `objectId`（`:350-353`）、201 响应 `:355`）。**「已声明的形状」到此为止——声明了什么、没声明什么要逐项分清**：**没有 requestBody**（这条路由没有任何 body schema，`reason_code`/`explanation` 的字段名、必填性、形状都不在契约里），**也没有 `Idempotency-Key` 参数**（同一份契约里其它写路由大多 `$ref` 了它，这条没有）。**这两样由你自行设计**：可参考的唯一形状是 MCP 面 `specs/mcp/tools.json:23` 的四个实参（`project_id, object_version_ref, reason_code, explanation`），幂等键照 `specs/api/openapi.yaml:657-661` 的 `IdempotencyKey` 组件既有定义（header、必填、minLength 8）；你选了什么、为什么，写进 RESULT。**注意这个摘要本身就是规格**：main 对象收到的是 proposal，真正生效靠 PR 合并。`specs/mcp/tools.json:23` 是同一件事的 MCP 面：`object.abort_proposal(project_id, object_version_ref, reason_code, explanation)`。**`specs/api/**` 与 `specs/mcp/**` 都不在你范围内。**",
         "**`reason_code` 按开放字符串落，不要自造词表。** 全仓库没有任何 reason code 取值清单（`docs/46:7` 与 `tools.json:23` 都要求这个字段，两处都没有列举取值）。**这是刻意的裁定，不是遗漏**：`tools.json` 把它列为**调用方传入的参数**，而 `docs/46` 要求的是「必须记录」、不是「必须取自闭集」。所以：校验非空与形状（建议 `[a-z0-9_]{1,64}` 这类），把取值原样记录，**不在代码里写死一张表**。**必须把这个决定写进代码注释与 RESULT**，并写明代价：V1 无法按原因分类统计，日后要闭集是一次正常收窄。**若你判断没有闭集就无法满足某条验收，标 `blocked` 说明，不要自己编一张表**——那正是 §5 禁止的「猜产品语义」。",
         "**存储形状是 L1，你自己定，但有三条硬约束。** `infra/migrations/00005_scientific_objects.sql:20` 的 `scientific_object_versions.lifecycle_state` **CHECK 里已经有 `'aborted'`**，而这张表是**追加式版本表**（每版带 `version_no`/`state_id`/`created_by`/`created_at`/`payload jsonb`）；`infra/migrations/00014_append_only_enforcement.sql:9` 逐字「Corrections never mutate a row: they append a new one (abort/reopen, ...)」。三条硬约束：(1) **abort 是追加一个新版本，不是改旧行**——历史版本必须逐字节不变；(2) `docs/46:7` 要的三位（reason code / human explanation / replacement ref）要有明确归属，**你想把 abort 元数据塞进 `payload jsonb` 也可以，但要在 RESULT 里说明为什么它不与科研内容混淆**；(3) **`lifecycle_state` 的 CHECK 里已有 `'reopened'` 但本任务不许产生它**——那是 T0610 的。",
         "**Agent 是 `ProposalOnly`，两道防线都要有。** 矩阵那一格是 `proposal_only`，实现必须走 `internal/authz` 的判定；**另加一道域层兜底**，形状照抄 `internal/application/contribution/service.go:173-175`（`if by.IsAgent { return ..., &AgentNotPermittedError{...} }`，错误类型在同包 `errors.go`）。分寸：`docs/60_AGENT_SAFETY_BOUNDARIES.md` 与 `specs/mcp/tools.json` 的 `forbidden_default_agent_actions` **未必**逐字点名 abort，**矩阵才是这一条的规格权威**，不要把它说成 MCP 清单里也有。",
         "**拒绝必须发生在目标查询之前。** 照 `internal/application/releases/errors.go` 里 `ErrForbidden` 的既有注释：授权在**任何目标查询之前**解析，所以拒绝本身不泄漏「这个对象/项目存不存在」。被拒的调用方要能看出**是被授权挡的**，而不是一句笼统的 forbidden。",
         "**审计与领域事件写在与状态变更同一个事务里。** 事件名**已经登记**，不许另拼：`specs/events/event-types.yaml:22` 是 `scientific_object.aborted`（同族的 `:23` 是 `scientific_object.reopened`，归 T0610）。审计动作照 `internal/domain/audit.go` 既有的「完整名词 + 点分」惯例。事件的 visibility 必须 fail-closed，照既有各面的做法。**同事务**：不许先改状态后补事件。",
         "**幂等用状态本身，不要新建台账表。** 同一个 `Idempotency-Key` 重复请求返回同一结果、不产生第二条 audit 或第二个事件（契约里 `POST /projects/{projectId}/releases` 一带的 `IdempotencyKey` 是同一套规矩，见 `specs/api/openapi.yaml` 的 `IdempotencyKey` 参数定义：必填、minLength 8）。并发安全用条件更新（比较交换），只有一个能赢，**只有赢家写 audit 与事件**——不许「先读后写」。",
-        "**「历史不可变」要有能失败的证明。** `docs/43:7` 逐字「active → merged | aborted；merged/aborted history immutable」。请构造：对象在 main 上有一个已合并版本 V1，abort 之后产生 V2；**从存储里把 V1 逐列读回并与 abort 前逐字节比对**，必须完全相同。**断言读的是存储，不是函数的返回值或内存里的对象。**",
+        "**「历史不可变」要有能失败的证明。** `docs/43:10` 逐字「active → aborted → reopened → active；可 superseded（关系/状态事件）但不物理删除。」（原书这里引 `:7` 是错的——`:7` 那句是 **Branch** 状态机「active → merged | aborted；merged/aborted history immutable」，对象状态机在 `docs/43_STATE_MACHINES.md:10`。）请构造：对象在 main 上有一个已合并版本 V1，abort 之后产生 V2；**从存储里把 V1 逐列读回并与 abort 前逐字节比对**，必须完全相同。**断言读的是存储，不是函数的返回值或内存里的对象。**",
         "**不做 / 边界**：**不实现 reopen**（T0610，它缺一行权限，属 L3）；不改 `specs/**`（契约、MCP 工具表、权限 CSV、事件名全都已经声明好了，本任务一个都不改）；不改 `docs/**`、`tasks/**`；不做界面（`apps/web/**` 不在范围内）；**不新增权限矩阵行**。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "**abort 经真实产品路径生效**：从「对象在 main 上处于 active」到「存储里出现 lifecycle_state='aborted' 的新版本」，**全程走产品路径**——abort-proposal 路由 → PR → merge。**不许在测试里直接把状态摆出来**（既有的反面教材是 `tests/integration/merge_governance_e2e_test.go:439-442` 直接调 `SetState` 跳过产品路径）。断言读的是**存储里的版本行**。",
+        "**abort 经真实产品路径生效**：从「对象在 main 上处于 active」到「存储里出现 lifecycle_state='aborted' 的新版本」，**全程走产品路径**——abort-proposal 路由 → PR → merge。**不许在测试里直接把状态摆出来**（既有的反面教材是 `tests/integration/freeze_main_e2e_test.go:849-853` 与 `tests/integration/pullrequest_test.go:331-336`：评审还没提交就直接 `prSvc.SetState` 把 PR 走成 approved→merge_ready；`tests/integration/merge_governance_e2e_test.go` **以前**是这种写法，已经在它自己的 `:504-514` 注释里改成走评审路由了，不要再拿它当反例）。断言读的是**存储里的版本行**。",
         "**`docs/46:7` 的五位 + actor/time 都被记录且可读回**：actor、time、reason code、human explanation、replacement ref（可选）——逐项断言存在且取值正确，**不是只断言「有记录」**。replacement ref 为空时断言它确实是 NULL 而不是空串（区分「没给」与「给了空」）。",
         "**权限逐格成立且拒绝不泄漏存在性**：viewer/contributor/非成员/匿名**全部被拒**；maintainer 与 owner 得到的是**必须经 PR**（不是直接放行）；agent 得到 **proposal_only**——它发出的东西是提议，**不是已生效的 abort**（断言存储里没有它产生的 aborted 版本）。另有一条：对一个**不存在**的对象发起 abort，无权调用者的错误与「对象存在但无权」**不可区分**。",
         "**历史逐字节不变**：abort 前已合并的版本 V1，在 abort 之后从存储逐列读回，与 abort 前逐字节相同；abort 产生的是**新版本行**，不是对 V1 的修改。这条要能失败——RESULT 里附上「若改成原地更新则本断言转红」的实测。",
@@ -3418,12 +3418,13 @@
       "decision_level_max": "L1",
       "relevant_specs": [
         "docs/46_ABORT_RETENTION.md",
-        "docs/43_VERSION_MATRIX.md",
+        "docs/43_STATE_MACHINES.md",
         "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
         "docs/45_ERROR_MODEL.md",
         "docs/18_EVENTS_SUBSCRIPTIONS.md",
         "docs/09_VERSION_CONTROL.md",
-        "docs/31_MASTER_ACCEPTANCE.md"
+        "docs/31_MASTER_ACCEPTANCE.md",
+        "docs/47_MCP_TOOL_CATALOG.md:12"
       ],
       "scope_note": "范围按实际交付面收窄。**保留** `internal/authz/**` 之外的一切授权能力是**只读使用**：本任务**不许改** `internal/authz/matrix.go`、`internal/authz/action.go` 或 `specs/policies/permissions-matrix.csv`——那一行已经存在且与规格 CSV 一致，你只需要**调用**它（所以 `internal/authz/**` 干脆不在 allowed_scope 里，避免误改）。**保留** `infra/migrations/**` + 两个派生文件，因为要新增存储三位元数据的形状；这可能是本任务唯一的新迁移。**保留** `cmd/api/**` 因为要注册那条已声明的路由；**保留** `cmd/worker/**` 是因为 PR 合并后的状态推进可能落在 worker 侧（若你判断不需要，不动即可）。**不给** `specs/**` 的任何子目录：契约、MCP 工具表、权限 CSV、事件名**全都已经声明好了**，这是本任务与前身判定的最大差别。**不给** `apps/web/**`（不做界面）、`docs/**` 与 `tasks/**`（Supervisor 专属）。",
       "supervisor_scope_narrowing": "2026-09-19 重写。**这份任务书是「撤回过重判定」的产物**，所以它把复核用到的证据全部写进需求，而不是让工人重新发现一遍：(1) `docs/46_ABORT_RETENTION.md` **存在且自 2026-09-12 就在仓库里**（`git log -- docs/46_ABORT_RETENTION.md` → `fecf24d 2026-09-12`），它把字段与流程都写死了；原判定漏翻这份文档。(2) 权限那一行**在代码与规格 CSV 里都有且一字不差**（`internal/authz/matrix.go:121` 与 `specs/policies/permissions-matrix.csv:14`），原判定写的「权限矩阵全空」是错的。(3) 契约路由与 MCP 工具**都已声明、都未实现**——所以本任务是接线，不是设计。(4) 事件名 `scientific_object.aborted` **已登记**，不需要新增。(5) 存储的**状态位已经在 `CHECK` 里**（`00005:20` 有 `'aborted'`），且这张表本来就是追加式版本表。**唯一真正开放的是 reason code 的取值词表**，我把裁定写死在需求里（开放字符串、不自造、留下代价说明），因为这既符合 §5「不猜产品语义」，也不至于为一个字段停掉整条主验收路径。**reopen 拆出去了**（T0610）：它只差一行权限（`specs/policies/permissions-matrix.csv` 里没有 reopen 行、`internal/authz/action.go` 的动作总表里也没有），而权限是 §5 明文列出的 L3，我不代裁定。"
@@ -3490,7 +3491,7 @@
         "**责任标签与 Research Owners 规则是「项目数据」，不是写死在代码里的规则**（`docs/04_USERS_ROLES.md` §3 原文「项目可配置」）。迁移 00073 建表承载「对象类型 / Schema / 领域 → 责任标签」，以及「谁在哪个项目持哪些责任标签」。**不要塞进 `internal/domain/policy.go` 的词表**：那份词表是「扁平的一组具名规则 + 严松序」（`internal/domain/policy.go:22-25`），装不下一张映射。词表留给别的用途。",
         "**required-review 判定：`approved` 那一半被两处代码逐字指名交给你。** `internal/application/reviews/service.go:25-27`：「It does NOT decide when the PR is approved: that needs the required-review calculation (T0604: which responsibilities/kinds are required for which changes), which is deliberately not invented here.」`internal/persistence/review_store.go:95-101`：「The approved half is deliberately absent: deciding WHEN the dimensions add up to an approval is T0604's required-review calculation」。**今天产品路径上没有任何办法把一个 PR 变成可合并态**（T0406 的合并服务只接受 `merge_ready`，`internal/application/merge/service.go:215-217`）。本任务把它接上。",
         "**责任不赋权，一个字都不许松。** `docs/04_USERS_ROLES.md` §3 原文：「责任用于 Review routing，**不自动赋予更高访问权限**」。责任标签**不得**进入 `internal/authz` 的任何判定；一个持「Data Reviewer」标签的 viewer 仍然不能 merge main。这条要有一个测试证明它不松。",
-        "**一律 fail-closed。** 缺规则、缺标签、解析失败、配置里没有对应项——**全部当作不满足**，拒绝，不得放行（`docs/12_AUTHORIZATION.md` §5：「Organization policy 是最低治理要求。Project policy 可更严格，**不能静默放宽**」；`internal/authz/engine.go` 对未登记动作也是默认拒绝）。这与 T0601 的处置同一条原则：**缺失不得成为放行理由**。",
+        "**一律 fail-closed。** 缺规则、缺标签、解析失败、配置里没有对应项——**全部当作不满足**，拒绝，不得放行（`docs/12_PERMISSIONS_RIGHTS_POLICY.md` §5：「Organization policy 是最低治理要求。Project policy 可更严格，**不能静默放宽**」；`internal/authz/engine.go` 对未登记动作也是默认拒绝）。这与 T0601 的处置同一条原则：**缺失不得成为放行理由**。",
         "**词表里已有的两条规则要真的被消费，不再是死字。** `internal/domain/policy.go:36-45` 定义了 `main_protected` / `release_min_reviewers` / `raw_data_retention_days` / `public_asset_ip_review` / `required_schema_profiles`，`docs/12` §5 逐条点了名（「例：main protected、release min reviewers、raw data retention、public asset IP review、required schema profile」），但今天**没有任何代码消费它们做判定**（只在项目模板里被写入）。本任务至少要消费与 review 直接相关的两条：`release_min_reviewers`（release 合并至少要有几个 approve）与 `public_asset_ip_review`（公开资产需要 IP review）。**取值来自项目配置，不是你编的默认值。**",
         "**`reviews.responsibility` 这一列已经在等你了**：`infra/migrations/00061_scientific_review_dimensions.sql:31-35` 的注释逐字写着「responsibility records which scientific responsibility the reviewer acted under (docs/04 §3: responsibility is for review …) … the application's reviewer-responsibility hook (T0604 lands the rule-based resolver)」，`:71` 加了 `responsibility text NOT NULL DEFAULT ''`。今天它**只被写空串**。本任务要让它在生产路径上真的被填上。",
         "**状态推进走既有的面，不要另开一条路**：`internal/application/pullrequests` 的 `SetState` 是既有的状态迁移面（T0402 留下、T0406 的合并 saga 在用）。`docs/43` 第 13 行的状态机是 `open → review_required → changes_requested/approved → merge_ready → merged`，你只能沿这条线推进。**不得绕过 `merge_ready`**——T0406 的合并服务只接受它，那是既定的安全边界。",
@@ -3540,7 +3541,7 @@
       "decision_level_max": "L1",
       "relevant_specs": [
         "**`docs/04_USERS_ROLES.md` §3「Scientific Responsibility（什么需要你审核）」（先读这一节）**：整节只有两句，但两句都是本任务的规格依据——「不与 Access Role 混合。项目可配置：Experimental Reviewer、Computational Reviewer、Data Reviewer、Project Lead、IP Reviewer 等责任标签。责任用于 Review routing，不自动赋予更高访问权限。」「类似 CODEOWNERS 的 Research Owners 规则可按对象类型/Schema/领域匹配 reviewer。」注意「等」字与「项目可配置」：标签集合与映射都是项目数据。",
-        "`docs/12_AUTHORIZATION.md` §5 Organization Policy：「Organization policy 是最低治理要求。Project policy 可更严格，不能静默放宽。Policy 版本化；Release 绑定当时 policy version。」并逐条点名了 main protected / release min reviewers / raw data retention / public asset IP review / required schema profile —— 这五条就是 `internal/domain/policy.go:36-45` 的五个规则键。",
+        "`docs/12_PERMISSIONS_RIGHTS_POLICY.md` §5 Organization Policy：「Organization policy 是最低治理要求。Project policy 可更严格，不能静默放宽。Policy 版本化；Release 绑定当时 policy version。」并逐条点名了 main protected / release min reviewers / raw data retention / public asset IP review / required schema profile —— 这五条就是 `internal/domain/policy.go:36-45` 的五个规则键。",
         "`docs/43_STATE_MACHINES.md` 第 13 行 PR 状态机：`open → review_required → changes_requested/approved → merge_ready → merged；也可 closed/aborted。Scientific/Integrity review 各自状态。`",
         "`internal/application/reviews/ports.go:57-81`（`ResponsibilityGate` 的完整定义与注释）与 `:93`：钩子在 Service 上的接线点。注释逐字写着你的任务范围与「until then production wires nil」。",
         "`internal/application/reviews/service.go:18-27`：T0404 留下的交接说明——它不做 approval 判定，那需要 required-review calculation，**指名 T0604**。",
@@ -3702,10 +3703,12 @@
       "v1_required": true,
       "dependencies": [
         "T0606",
-        "T0604"
+        "T0604",
+        "T0602"
       ],
       "requirements": [
-        "policy requires reviewers→merge→release→later abort object→old release warning but immutable"
+        "policy requires reviewers→merge→release→对象 abort（经 T0602 的产品路径）→旧 release 逐字节不变（**不是**「release 显示告警」）",
+        "**那两条腿的真实形状（2026-09-19 回树核过；别再照旧说法派工）**：(a) **「later abort object」是真的，但今天没有产品路径**——对象生命周期在 `docs/43_STATE_MACHINES.md:10` 逐字「active → aborted → reopened → active；可 superseded（关系/状态事件）但不物理删除」，abort 要记什么、怎么走在 `docs/46_ABORT_RETENTION.md:7,9`；可是全仓库**唯一写 aborted 的是 branch**（`internal/application/branches/service.go:92`），科学对象的创建两处硬编码 `LifecycleActive`（`internal/application/rsg/service.go:280`、`:377`），`ActionAbortMainObject`（`internal/authz/action.go:37-38`）零生产调用者——**这一半由 T0602 交付，所以依赖表补上了它**。(b) **「old release warning」不是 release 的，是 Asset Version 的**：规格承诺的「过去引用仍解析到原 version，同时显示 later status warning」在 `docs/11_RELEASE_ASSET_HUB.md:35`（§7 Abort/Supersede），资产状态机同此（`docs/43_STATE_MACHINES.md:19`「published → active；后来可 status notice aborted/superseded，但 version content immutable」）。**Release 自己不会、也不该显示任何可变状态**：它是 immutable snapshot，`internal/domain/release.go:9-15` 逐字（the release renders from the row alone, never from live state, so an old release cannot drift），`releases` 表另有 append-only 触发器（`infra/migrations/00014_append_only_enforcement.sql:55-57`）。**而资产面那个「later status warning」今天没有任何任务在交**（`docs/42_PAGE_SPECS.md:16` 的 Release 页清单与 `:19` 的 Asset 页清单都没有这一项；T0709 已合并且它的书里没有它）——所以本任务要断言的是「abort 之后旧的 release 行与 asset version 行逐字节不变」，**不要断言一个不存在的 release 告警字段**；这个缺口在 RESULT 里点名。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
@@ -4055,7 +4058,7 @@
       "relevant_specs": [
         "docs/23_SECURITY_PRIVACY.md §4（private→public 是最高风险 operation：human explicit action、impact preview、rights validation、no hidden private dependency leak、audit event、optional org policy approvals；Agent token 默认无 visibility:publish scope）、§5（所有 query/search/export/download 按 tenant/project/object policy 过滤）",
         "docs/12_PERMISSIONS_RIGHTS_POLICY.md §2（Private Project 默认不可见；可显式 Publish Asset/Knowledge/Attestation）、§3（不扩大可见性原则：private→public、restricted→open、named access→public 都要求有权限的人显式确认并产生 audit/event；Agent/MCP 不得自动执行）、§5（org policy 是最低治理要求，project policy 可更严格不能静默放宽）",
-        "docs/11_RESEARCH_OBJECT_MODEL.md §3（发布门槛：source accepted state/release、version fixed、provenance、creators/contributors、rights/license、visibility、dependency pin、hash、required metadata、schema validation）、§5（依赖钉与 Asset/Object identity）",
+        "docs/11_RELEASE_ASSET_HUB.md §3（发布门槛：source accepted state/release、version fixed、provenance、creators/contributors、rights/license、visibility、dependency pin、hash、required metadata、schema validation）、§5（依赖钉与 Asset/Object identity）",
         "docs/22_API_DESIGN.md §3（Idempotency-Key 对 create/command/publish/merge/release）、§6（高风险 command 必须 server-side authorization + policy validation）、§7（Command 必须再次 server-side run validation，不能信任前端预检）",
         "docs/31_MASTER_ACCEPTANCE.md Gate C（private→public 有影响预览和显式确认）",
         "docs/45_ERROR_MODEL.md（PRIVATE_TO_PUBLIC_REQUIRES_APPROVAL、ASSET_VERSION_IMMUTABLE、IDEMPOTENCY_CONFLICT、RIGHTS_POLICY_BLOCKS_ACTION、DEPENDENCY_UNRESOLVED、BLOB_NOT_ATTACHED —— 用这些既有码，不要发明）",
@@ -4981,7 +4984,7 @@
         "private info 不泄漏"
       ],
       "tests": [
-        "profile e2e"
+        "research profile e2e"
       ],
       "allowed_scope": [
         "infra/migrations/**",
@@ -5018,7 +5021,8 @@
       ],
       "requirements": [
         "creator/major contributor metadata",
-        "dispute open/resolution append-only"
+        "**dispute 的 open/resolution 是 append-only 的「事件」，不是 append-only 的表**：`credit_disputes`（`infra/migrations/00011_external_contribution.sql:34-44`：`state` open/resolved/rejected、`resolution`、`resolved_at`）是**当前状态表**，`tests/integration/append_only_test.go:17-22` 把它明确列在「Exempt tables (mutable by design)」里——**结案是就地更新这一行，这是设计不是漏洞**。append-only 的那一半在账本侧：`contribution_events` 由 `infra/migrations/00014_append_only_enforcement.sql:75-76` 的触发器钉死。所以「dispute history 可查」落成两件事：(a) 开/结各发一条**已登记**的事件 `credit.dispute_opened` / `credit.dispute_resolved`（`specs/events/event-types.yaml:32-33`），投影侧早已为它们备好映射（`internal/contribution/ledger.go:320-330`，注释逐字「No producer exists yet」——**生产者就是你**）；(b) 更新 `credit_disputes` 当前行时**不得改写任何账本行**（`docs/13_CONTRIBUTION_REPUTATION.md:11` 逐字「correction 作为新 event，旧 attribution 和 dispute history 保留」）。",
+        "**权限主体是从规格推导的，不是发明的**：`docs/13_CONTRIBUTION_REPUTATION.md:15` 逐字「Contributor 可发起 dispute，附带 ledger evidence；Maintainer/Organization governance 处理。不得直接改原事件。Dispute 本身不参与公共 reputation 排名直到 resolution。」——**谁发起、谁处理、以及不能做什么，这三件事规格都写了**；`docs/60_AGENT_SAFETY_BOUNDARIES.md:5` 把 `credit dispute resolution` 列进「必须 human-governed」的清单（所以 agent 那一格不得是放行）；`docs/26_OBSERVABILITY.md:25` 把 credit dispute 列为高风险审计项；`docs/04_USERS_ROLES.md:13-16` 给出 Owner/Maintainer/Contributor 三档各自的治理能力。**但矩阵里没有 dispute 这一行**（`specs/policies/permissions-matrix.csv` 15 个动作行、`internal/authz/action.go:9-44` 15 个动作都没有它），而 `internal/authz/engine.go:39-40` 对**未登记动作默认拒绝**——所以这条路径只有两条合法落法：**复用矩阵里已有的某一行**（在 RESULT 里逐条点名：用了哪一行、为什么它承接得住、那一行的格子是否与规格两句一致——**发起**只给 Contributor 及以上、**处理**只给 Maintainer/Owner、agent 不得自动），或者**你认为没有一行承接得住 → 标 `blocked` 并说明**。**不许新增动作行**：`specs/policies/**` 与 `internal/authz/**` 都不在本任务范围内，新增动作等于改权限模型（L3，由 owner 裁定）。规格**没写**的两个边界——**哪一级 maintainer 处理**、**只在 credit 里被署名、并非项目成员的人能否发起**——是 L3（已记账在 `tasks/decisions.md`），**按 fail-closed 实现并在 RESULT 里点名，不要自造规则**。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
@@ -5049,7 +5053,15 @@
         "tasks/progress.md"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
+      "relevant_specs": [
+        "docs/13_CONTRIBUTION_REPUTATION.md",
+        "docs/04_USERS_ROLES.md",
+        "docs/60_AGENT_SAFETY_BOUNDARIES.md",
+        "docs/26_OBSERVABILITY.md",
+        "docs/18_EVENTS_SUBSCRIPTIONS.md",
+        "specs/events/event-types.yaml",
+        "specs/policies/permissions-matrix.csv"
+      ],
       "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
     },
     {
@@ -5113,7 +5125,7 @@
         "**「不改变科学状态」必须是结构性的，不是约定。** 写评论这条路径**不得**触碰这三处：(1) `internal/application/states/service.go:94` 的 `Commit`（`:46-48` 逐字：「at least one is required — … a transition without operations is a no-op, not a state change」）；(2) 不得插入 `scientific_object_versions`（`infra/migrations/00005_scientific_objects.sql:11-27`）或 `relation_versions`（`00006_relations.sql:8-21`）；(3) 不得写 `contribution_events`（`00011_external_contribution.sql:21-32`，append-only 由 `00014:21,75-76` 与 `00015:22-23` 锁死）。**验收不能只断言「没有报错」**——那三张表今天在这条路径上本来就是空的，「没报错」平凡成立。必须钉住**没有任何账本行被写**。",
         "**规格里没有「discussion」的定义**，全仓库只有两处页面列举：`docs/09_VERSION_CONTROL.md:17`（PR 包含 discussion）、`docs/42_PAGE_SPECS.md:13`（PR 页有 Discussion 区块）。所以「普通评论不改变科学状态」这条**不是我抄来的，是需求本身给的**——把它实现成结构性的，而不是靠约定。**并且记住一个结构事实：讨论不是 scientific object，所以它不能作为关系的一端**（`relation_versions` 的端点是指向对象版本的 FK）。",
         "**promote 的三个目标，各自的现状先看清：** ① **Issue**：表在 `infra/migrations/00009_issues_pull_requests.sql`，查询 `internal/persistence/queries/issues_prs.sql:5-8` 的 `CreateIssue` **存在但没有任何非 sqlc 调用方——你是第一个用它的人**；`docs/03_GLOSSARY_DOMAIN_MODEL.md:25` 只有一句「项目希望回答的科研问题，可包含子问题，不等同 Issue」，**Issue 没有正式定义**，别给它编语义。② **Hypothesis**：有定义（`docs/03:27-28`），是 scientific object type，创建走 `internal/application/rsg/service.go:206` 的 `CreateObject`（`:292` `CreateObjectVersion`、`:386` `CreateRelation`，各自构造 `states.CommitParams`）。③ **External Evidence proposal**：`docs/15_AGENT_MCP_API.md:9,:13` 说「创建 evidence assertion proposal」「由 Web governance action 完成」，但**「proposal」在全仓库没有术语定义**——它的形状是可推的：`evidence_assertions.review_state`（`00007:15`）默认就是 `unreviewed`，而 `00058:52-55` 明确 `unreviewed → reviewed → rejected` 是合法的就地状态变更。**一条 unreviewed 的证据断言就是一条待办提案，用这个读法，不要另造「proposal」表。**",
-        "**provenance 必须复用既有机制，不许另造第二套。** 仓库里 provenance 的正统表示是**关系版本**（`docs/44_SCHEMA_RELATION_CATALOG.md:5`、`:12`；`internal/rsg/relationcatalog/catalog.go:75-113`，`ProvenanceInference` 在 `:39-41`，`ProvenanceTypes()` 在 `:194-205`；读侧 `internal/rsg/provenance/graph.go:51` + `walk.go:61`，HTTP 在 `cmd/api/provenancehttp/wiring.go:68-69`）。**但讨论不是对象，不能作为关系的一端**——所以这一条的 provenance 走「作者列 + 审计/事件」这条既有路径：`scientific_objects.created_by`（`00005:7`）、`scientific_object_versions.created_by`（`:24`）、审计 `RecordAuditLogEntry`（`internal/persistence/queries/events_audit.sql:26-33`）。**注意：`contribution_events` 目前没有任何 Go 写入方，且 T0807（Contribution Ledger projection）处于 blocked——不要把验收挂在它上面。**",
+        "**provenance 必须复用既有机制，不许另造第二套。** 仓库里 provenance 的正统表示是**关系版本**（`docs/44_SCHEMA_RELATION_CATALOG.md:5`、`:12`；`internal/rsg/relationcatalog/catalog.go:75-113`，`ProvenanceInference` 在 `:39-41`，`ProvenanceTypes()` 在 `:194-205`；读侧 `internal/rsg/provenance/graph.go:51` + `walk.go:61`，HTTP 在 `cmd/api/provenancehttp/wiring.go:68-69`）。**但讨论不是对象，不能作为关系的一端**——所以这一条的 provenance 走「作者列 + 审计/事件」这条既有路径：`scientific_objects.created_by`（`00005:7`）、`scientific_object_versions.created_by`（`:24`）、审计 `RecordAuditLogEntry`（`internal/persistence/queries/events_audit.sql:26-33`）。**注意：这两句今天都已经过期。`contribution_events` 有 Go 写入方了**——`internal/contribution/ledger_store.go:232` 的 `ledgerInsertRowQuery` 就是那条 `INSERT INTO contribution_events`（执行点 `:316`），由 `internal/application/contribution/ledger.go:41` 的 `LedgerProjector` 驱动；**T0807（Contribution Ledger projection）也已合并**（`tasks/task_status.json`：`merged`，2026-09-18T22:57:22Z）。**还没挂进 worker** 是真的（那是 T0813），所以生产路径上它不会自己跑——但代码在，你的测试可以真把它驱动起来，**「没有任何账本行被写」因此不再平凡成立**：先让投影跑一遍（或断言基线计数非零）、再写评论、再断言三张表一行没变。**",
         "**权限：不许新增动作。** `internal/authz/action.go` 一共 15 个动作（我核过计数），没有一个是评论或提升；`specs/policies/permissions-matrix.csv` 是权威，由 `TestPermissionMatrixMatchesCSV`（`internal/authz/matrix.go:5-11`）钉住与 Go 表逐格一致。**复用 `ActionWriteScientificState`（`action.go:19-20`），不要新造权限动作**——新动作等于改权限模型，那是 L3，不许。`ActionMutateFilesWeb`（`action.go:41-43`）是个先例：它存在**只是为了对所有人拒绝**。",
         "**契约由我维护，不在你的范围里。** `specs/api/openapi.yaml` 里零条评论/提升路径（我核过）。你需要的路径与响应形状，**在 RESULT 里点名并给出建议**（按既有风格），**不要自己改 `specs/api/**`**。",
         "**不得碰 reputation 这条线。** CLAUDE.md 不变量 14：Contribution Ledger append-only；`docs/13_CONTRIBUTION_REPUTATION.md:5` 的事件词表里**根本没有 comment/discussion**（列的是 created object、proposed hypothesis、performed experiment 这些客观事件），`:27` 逐字写着不用 Like 数做信誉。**仓库里目前没有任何 reputation 表或代码**——所以「讨论不进 reputation」今天平凡成立，**正因如此你的测试必须钉住「没有任何账本行被写」**，否则这条验收是空的。",
@@ -5165,10 +5177,10 @@
         "**先说清楚：这个功能在树里是从零开始的。** `grep -rn comment|discussion|thread` 在 `infra/migrations/**` 只命中 SQL 的 `COMMENT ON` 这类 DDL，加一个 token：`00009_issues_pull_requests.sql:38` 的 `CHECK(decision IN ('approved','changes_requested','commented'))`——那是 **PR 评审的裁决值，不是评论区**（`00061_scientific_review_dimensions.sql:57` 把它改成 `comment`）。Go 侧 grep 只有 3 处命中，全是常量或错误串（`internal/domain/review.go:80`、`internal/application/reviews/service.go:197`、`internal/config/envfile.go:53`）。`cmd/**` 零条评论路由，`specs/api/openapi.yaml` 零条评论路径，`apps/web/` 零个评论组件。**没有表、没有 store、没有 service、没有路由、没有 UI——都要你建。**",
         "**规格里没有「discussion」的定义，也没有一句话说它不影响 reputation。** 全仓库只有两处提到 discussion，都是列举页面组件：`docs/09_VERSION_CONTROL.md:17`（PR 包含 discussion）、`docs/42_PAGE_SPECS.md:13`（PR 页有 Discussion 区块）。**所以「普通评论不改变科学状态」这条不是我抄来的，是需求本身给的**，你要把它实现成结构性的，而不是靠约定（见下面的决定）。",
         "**「不进入 Evidence/Reputation」在代码里的确切含义，三条各自有明确位置**——写评论这条路径**不得**触碰其中任何一条：(1) 不得进入 `internal/application/states/service.go:94` `func (s *Service) Commit(ctx, in CommitParams, write WriteFunc)`（`:45-48` 逐字写着 operations 至少一条，「a transition without operations is a no-op, not a state change」）；(2) 不得插入 `scientific_object_versions`（`infra/migrations/00005_scientific_objects.sql:11-27`，被 `00014_append_only_enforcement.sql:21,37-39` 当版本日志守着）或 `relation_versions`（`00006_relations.sql:8-21`）；(3) 不得写 `contribution_events`（`infra/migrations/00011_external_contribution.sql:21-32`，append-only 由 `00014:21,75-76` 与 `00015:22-23` 锁死）。**账本的事件词表里根本没有 comment/discussion**——`docs/13_CONTRIBUTION_REPUTATION.md:5` 列的是 created object、proposed hypothesis、performed experiment 这些客观事件。`docs/13:27` 还逐字写着不用 Like 数做信誉。CLAUDE.md 不变量 14：Contribution Ledger append-only。",
-        "**仓库里目前没有任何 reputation 表或代码**（grep `reputation` 只命中文档与 doc.go）。所以「讨论不进 reputation」今天是可以被平凡满足的——**正因如此，你的测试不能只断言「没有报错」，必须钉住「没有任何账本行被写」**，否则这条验收是空的。",
+        "**仓库里目前没有任何 reputation 表或代码**——`grep -rin reputation` 的命中全是注释、文档或测试，没有表、没有类型、没有服务：`internal/contribution/roles.go:29-30`、`internal/contribution/ledger.go:40,284,324`、`internal/contribution/ledger_store.go:70`、`internal/application/explore/doc.go:60`、`internal/contribution/doc.go:2`，以及一条禁止账本列名含 `reputation` 的测试 `tests/integration/contribution_ledger_test.go:923-926`（原书那句「只命中文档与 doc.go」是错的，已按实测改写）。所以「讨论不进 reputation」今天是可以被平凡满足的——**正因如此，你的测试不能只断言「没有报错」，必须钉住「没有任何账本行被写」**，否则这条验收是空的。",
         "**promote 的三个目标各自的家底**：\n  · **Issue**：表在 `infra/migrations/00009_issues_pull_requests.sql`，查询 `internal/persistence/queries/issues_prs.sql:5-8` `CreateIssue` **存在但没有任何非 sqlc 调用方**——你是第一个写它的人。`docs/03_GLOSSARY_DOMAIN_MODEL.md:25` 只有一句「项目希望回答的科研问题，可包含子问题，不等同 Issue」，**Issue 没有正式定义**。\n  · **Hypothesis**：`docs/03_GLOSSARY_DOMAIN_MODEL.md:27-28` 有定义（「尚待检验的科学命题，保留其提出历史，即使以后被证伪也不消失」）。它是一个 scientific object type，创建走 `internal/application/rsg/service.go:206` `CreateObject`（`:292` `CreateObjectVersion`、`:386` `CreateRelation`；每个都构造 `states.CommitParams`，`:239-245`/`:342-348`/`:427-433`）。\n  · **External Evidence proposal**：`docs/15_AGENT_MCP_API.md:9`（「创建 evidence assertion proposal」）、`:13`（「可创建 proposal，由 Web governance action 完成」）——**「proposal」在全仓库没有术语定义**，但它的形状是可推的：`evidence_assertions` 表在 `infra/migrations/00007_evidence.sql:3-18`，`review_state`（`:15`）默认就是 `unreviewed`，而 `00058_evidence_assertion_guards.sql:52-55` 明确「unreviewed → reviewed → rejected 是合法的就地状态变更」。**一条 unreviewed 的证据断言就是一条待办提案**——用这个读法，不要另造「proposal」表。",
         "**provenance 必须复用既有机制，不许另造第二套**：仓库的 provenance 正统表示是**关系版本**（provenance 类别的关系类型）——`docs/44_SCHEMA_RELATION_CATALOG.md:5`（列表含 `derived_from`、`originates_from`、`published_from`）、`:12`（自定义类型要声明语义/源类型/目标类型）；Go 目录 `internal/rsg/relationcatalog/catalog.go:75-113`，`ProvenanceInference` 标志在 `:39-41`，`ProvenanceTypes()` 在 `:194-205`；读侧 `internal/rsg/provenance/graph.go:51` `Build` + `walk.go:61` `Walk`，HTTP 在 `cmd/api/provenancehttp/wiring.go:68-69`。**但注意一个结构事实（见下面的决定）：讨论不是 scientific object，所以它不能作为关系的一端**——`relation_versions` 的端点是指向对象版本的 FK。",
-        "**每个对象版本上已有作者列**：`scientific_objects.created_by`（`00005_scientific_objects.sql:7`）与 `scientific_object_versions.created_by`（`:24`）。可追溯性还能落在 `contribution_events.actor_id` + `object_refs`（`00011_external_contribution.sql:23,28`）与审计日志（`internal/persistence/queries/events_audit.sql:26-33` `RecordAuditLogEntry`）——**但 `contribution_events` 目前没有任何 Go 写入方，且 T0807（Contribution Ledger projection）处于 blocked**，所以不要把你的验收挂在它上面。",
+        "**每个对象版本上已有作者列**：`scientific_objects.created_by`（`00005_scientific_objects.sql:7`）与 `scientific_object_versions.created_by`（`:24`）。可追溯性还能落在 `contribution_events.actor_id` + `object_refs`（`00011_external_contribution.sql:23,28`）与审计日志（`internal/persistence/queries/events_audit.sql:26-33` `RecordAuditLogEntry`）——**`contribution_events` 今天有 Go 写入方**（`internal/contribution/ledger_store.go:232` 的 `INSERT INTO contribution_events`，执行点 `:316`，由 `internal/application/contribution/ledger.go:41` 的 `LedgerProjector` 驱动），**T0807 也已合并**（2026-09-18）——所以可以挂，只是要记得投影器还没挂进 worker（T0813）：在测试里把投影驱动起来，再断言写评论不新增任何账本行。",
         "**权限：矩阵里没有、也不会有 comment/promote 动作。** `internal/authz/action.go:10-44` 一共 15 个动作，没有一个是评论或提升；`specs/policies/permissions-matrix.csv:1` 是权威、由 `TestPermissionMatrixMatchesCSV`（`internal/authz/matrix.go:5-11`）钉住与 Go 表逐格一致。可复用的现成动作是 `ActionWriteScientificState`（`action.go:19-20`，矩阵行 `matrix.go:49-57`）。另外 `action.go:41-43` 的 `ActionMutateFilesWeb` 是个先例——它存在**只是为了对所有人拒绝**。",
         "**契约：没有评论路由，也没有 promote 路由。** `specs/api/openapi.yaml` 里零条 comment/discussion 路径。**契约由我维护，不在你的范围里**——按下面的决定办。",
         "**e2e 测试的落点**：`tests/e2e/*.go` 是 Go e2e 的家（例：`tests/e2e/privacy_e2e_test.go`、`tests/e2e/asset_page_e2e_test.go`），`tests/acceptance/*.sh` 是验收脚本的家。任务登记的 blocking 测试是 `tasks/tests.json:1145-1151` 的 `T0811-TEST-01`「discussion promotion e2e」。",
@@ -5244,7 +5256,7 @@
         "**七、不做**：不改 `specs/**`（`specs/events/event-types.yaml` 是 Supervisor-only，你只读）；不做 Reputation Profile 展示；不做 Credit Dispute；**本任务不该新建迁移**——`00087` 已把三列加好，`infra/**` 在禁止范围内；若你判断确实需要新迁移，记 `blocked` 说明，不要自行选号（CLAUDE.md §8.1）。",
         "**顺带清掉一处「死行」——来自 T0807 的独立评审，评审明说它的家在这里。这一条与上面第六条不冲突，先说清楚为什么：第六条保护的是 `ledgerMappings`（事件类型 → 账本行）；这里动的是 `scientificObjectTypeRoles`（对象类型 → 角色），**是另一张表**，它只是被 `scientific_object.version_created` 那条映射当作 `ObjectTypeRoles` 引用。**事实（我自己复核过，不是采信评审）：`internal/contribution/ledger.go:221` 的 `\"evidence_assertion\": {RoleValidation}` **永远打不中**——对象类型 token 先过 `typeTokenRe = ^[a-z][a-z0-9_]*$`（`internal/application/rsg/service.go:788`，下划线是允许的），然后拼成注册 id `schemareg.CanonicalNamespace + objectType + \".schema.json\"`（`service.go:722`），而证据断言在注册表里是**带连字符**的 `internal/rsg/schemareg/schemas/evidence-assertion.schema.json`，于是 `Lookup` 必然失败（`service.go:723-726` 返回 false）——没有任何 version_created 事件会带 `object_type=\"evidence_assertion\"`。**评审的原话值得记住**：「A dead row in a decision table reads as coverage that does not exist」——死行读起来像有一层覆盖，而实际没有。**处置：删掉那一行，以及上面注释里对应的一句**（`ledger.go:205-207` 那三行里的 「evidence_assertion is a claim tested against evidence → Validation」）。校验类贡献**不会因此失去覆盖**：它由 `:247` 的 `evidence_assertion.created` 那条映射承担，两条路径不会被混淆。**若你复核后认为那行应该保留，在 RESULT 里说明理由并别删**——但「因为删起来麻烦」不是理由。",
         "**另外两处小清理，同一份评审指出，也归这里。**（1）`internal/contribution/roles.go:162` 的 `RoleVocabularyError` **导出了、写了文档、全仓库没有任何调用者**，而 `ledger.go:447-451` 手写了同一个循环——要么在那里用它，要么收回导出，二选一。（2）`internal/contribution/opportunity_store.go:752` 的 `ProjectBatch` 继承的 `withTx`，其 defer 回滚跑在**调用方的 ctx** 上；投影器关机时会取消那个 ctx，同仓库既有约定是让回滚跑在 `context.WithoutCancel(ctx)` 上（`internal/events/publish.go:130-132`，`fanout.go`/`inbox_store.go`/`subscription_store.go`/`webhook_store.go` 同形）。评审逐字说它「should adopt the events package's convention when the projector is wired up (T0813)」——接线正是本任务。",
-        "**补一段文档：`docs/13 §1` 的第九类「maintained project」今天没有落点。** T0807 的独立评审指出，`docs/04 §4` 的 Project Maintenance 这一类在 `docs/13 §1` 列举的九类比贡献里排第九，而 T0807 的 RESULT 一次都没提（八类有映射与 Why 引用，第九类没有）。接线时交代清楚：**今天 `specs/events/event-types.yaml` 里没有任何事件记录维护行为**，所以维护贡献不会进账本；而 `internal/contribution/roles.go:77-79` 里那个没人用的 `RoleProjectMaintenance` 常量，会让每个读者都问一句「维护到底该不该被记录？」。**答案写进代码注释与 RESULT，一句话就够**：今天没有对应事件，将来若有会被计为未映射。**不要顺手给维护发明一个事件名**——那是改规格（`specs/events/**` 不在你范围内），属 L3。"
+        "**补一段文档：`docs/13 §1` 的第九类「maintained project」今天没有落点。** T0807 的独立评审指出，`docs/04 §4` 的 Project Maintenance 这一类在 `docs/13 §1` 列举的九类比贡献里排第九，而 T0807 的 RESULT 一次都没提（八类有映射与 Why 引用，第九类没有）。接线时交代清楚：**今天 `specs/events/event-types.yaml` 里没有任何事件记录维护行为**，所以维护贡献不会进账本；而 `internal/contribution/roles.go:79` 的 `RoleProjectMaintenance` 常量会让每个读者都问一句「维护到底该不该被记录？」——**它不是没人用的死常量**（原书写「没人用」是错的）：常量在 `:79` 声明（注释在 `:77`），一条 `contributionRoleLabels` 词表项（`:99`）把它挂进词表；而 `ContributionRoles()`（`:105-112`）枚举的就是这张词表，`Label()`（`:116`）与 `Valid()`（`:119-122`）也都是查这张词表——它们读的是**词表**，不是这个名字。漂移测试 `tests/integration/contribution_ledger_test.go:1085` 还把它枚举出来。**真正的空白是「没有任何事件会产出它」**：`specs/events/event-types.yaml` 里没有维护行为的事件，`internal/contribution/ledger.go:212` 的 `scientificObjectTypeRoles` 映射表里也没有任何一条指向它（该文件全文不含 `ProjectMaintenance` 字样）。**答案写进代码注释与 RESULT，一句话就够**：今天没有对应事件，将来若有会被计为未映射。**不要顺手给维护发明一个事件名**——那是改规格（`specs/events/**` 不在你范围内），属 L3。"
       ],
       "acceptance_criteria": [
         "**worker 里真的挂上了**：`cmd/worker/main.go` 构造投影器并 `go projector.Run(ctx)`，随关闭退出；且有一条测试证明**循环被驱动后账本真的落行**，不是只测函数存在。",
@@ -6057,6 +6069,7 @@
         "**不自动 invalidate（存根第 4 条）**：impact 是**提示**，不是状态迁移。`docs/11_RELEASE_ASSET_HUB.md` §7 逐字：「Published Asset Version 不删除。若出现问题，追加 abort/supersede state/event 并指向 replacement；过去引用仍解析到原 version，同时显示 later status warning。」**不许**因为检测到影响就去改任何对象的状态、visibility、release 成员或评审状态。本任务**只读 + 只发事件**。",
         "**跑在后台 worker 里，不在请求路径上**：`docs/20_TECH_ARCHITECTURE.md:71` 逐字点名（Go worker 处理：git ingestion、blob hash/preview、embedding、event delivery、**impact analysis**、notification digest、reconciliation）。触发源用已合并的 outbox / 事件流（T1001），**不要新开一个让人手动触发的 HTTP 端点**——那会把「上游变更触发」变成「有人记得去点」。",
         "**两个事件名已经登记，载荷由你定义**：`specs/events/event-types.yaml:29-30` 里已经有 `dependency.status_changed` 与 `dependency.impact_detected`（`docs/18_EVENTS_SUBSCRIPTIONS.md:17` 点名）。**注意：本仓库不为事件载荷建模**——`specs/events/` 下只有 `event-types.yaml` 这一个文件，里面只有名字清单与必填信封字段（`event_id`/`event_type`/`occurred_at`/`actor_id`/`correlation_id`/`visibility`/`payload_version`），**没有载荷 schema**，载荷是 Go 侧发射时构造的。所以载荷由你设计，但必须携带：**被影响对象的身份**、**direct/indirect 的区分**、**触发它的上游对象**。每个字段在 RESULT 里说明为什么在那里。",
+        "**发出告警这一条规格写了，不许砍（本条是这本书 2026-09-19 更正的一部分）**：`docs/18_EVENTS_SUBSCRIPTIONS.md:39`（§5 Dependency Watch）逐字「当上游 dependency abort/supersede/new version/rights restriction 时，分析受影响下游，并创建 alert。系统只标记 review required，不自动改科学结论。」；`docs/02_V1_SCOPE.md:58` 在 V1 的 Events 范围里也列着「Dependency impact alert」。落法照本仓库实况：**告警的载体就是已经登记的 `dependency.impact_detected`**（`specs/events/event-types.yaml:29-30`，`docs/18:17` 归在 Dependency 组），**载荷必须携带「review required」（需要复核）这个标记**，并且**只标记、不改任何状态**（与本任务「不自动 invalidate」是同一条规则的两半，不是可选项）。**不许新开 alert/notification 表**——通知管线已经有主（订阅/投递/摘要归 T1002/T1003/T1005，`docs/18 §3–§4`），本任务只负责**发出**这个事件。",
         "**读取面在 PR 首屏，但本任务不做 Web UI**：`docs/06_UI_UX_SPEC.md:38` 逐字（PR 首屏展示 Research State Diff：新增/修改/Abort 的科研对象、知识变化、Evidence 变化、Protocol/Schema changes、visibility changes、**dependency impact**）与 `docs/09_VERSION_CONTROL.md:17`（PR 包含：…review requirements、discussion、visibility impact、**dependency impact**、merge strategy）。落点是已存在的 `internal/application/prchecks/`。**把服务层的答案交出来就够了**，页面渲染归页面任务。",
         "**隐私这条不许重犯（issue #238 的同一类，T0707 已立过先例）**：`docs/23_SECURITY_PRIVACY.md:17` 把「no hidden private dependency leak」列为 publish 的必带项之一。**一次 impact 结果不得让调用者看出一个他无权读的实体的存在**——名称、编号、**计数**都不得泄漏。先例逐字在 T0707 的 `internal/assets/usage.go`：「公开资产页只显示 `visibility_of_usage = 'public'` 的那些用法；私有用法既不显示也不能被计数推断出来。」规矩在 `docs/23_SECURITY_PRIVACY.md:21`：「8 private projects use this」只有在产品策略明确允许的匿名聚合阈值下才显示，**V1 可以直接不显示 private 数量**。本任务照 V1 这条办。",
         "**遍历照本仓库已有的先例写，不要另起一套图算法**：`internal/persistence/queries/rsg_query.sql` 的头部逐字说明 sqlc 解析不了递归，所以那里用的是**裸 pgx 递归查询**（同一个目录下 `manifest.sql:16/32/53`、`releases_assets.sql:88` 是同一写法的其他实例）；相邻读取已经有 `ListAdjacentRelationVersions`（`rsg_query.sql:59`）。沿这个先例写递归 CTE。**注意 `depends_on` 的方向**：被影响的是下游（dependent），不是上游（dependency）。",
@@ -6069,7 +6082,7 @@
         "**direct / indirect 在返回数据里可分**：一条既有直接影响又有间接影响的用例，断言两者被分到不同的类别（不是同一个值、也不是只差一个计数）。",
         "**不自动 invalidate，用读回证明**：分析跑完之后，把所有被影响对象的状态、visibility、release 成员、评审状态**从表里读回**并与分析前逐字节比对，必须完全相同。断言读的是**存储**，不是分析函数的返回值。",
         "**不泄漏私有实体（issue #238 同类）**：构造一个**私有**项目依赖某公开资产的情形，由一个无权读该私有项目的调用者取 impact 结果——**看不出**那个项目的存在：名称、id、**计数**都不得出现。断言里的字符串必须是**真实存在的行**（空串算失败，那会让断言永远为真）。",
-        "**`dependency.impact_detected` 幂等**：同一笔上游变更**重放**时不得发出第二条事件（与 T1001 的 outbox 幂等一脉相承）；载荷携带被影响对象身份、direct/indirect 区分、以及触发的上游对象——逐项断言字段存在且取值正确，不是只断言「有事件」。",
+        "**`dependency.impact_detected` 幂等**：同一笔上游变更**重放**时不得发出第二条事件（与 T1001 的 outbox 幂等一脉相承）；载荷携带被影响对象身份、direct/indirect 区分、触发的上游对象、以及**「review required」（需要复核）标记**（需求 7 的落法，取自 `docs/18_EVENTS_SUBSCRIPTIONS.md:39` 原话）——逐项断言字段存在且取值正确，不是只断言「有事件」。**「只标记、不改状态」这半句与验收第 4 条合起来才算完整**：事件发出后，对象的状态 / visibility / release 成员 / 评审状态逐字节未变。",
         "**跑在 worker 里**：分析由后台 worker 消费事件触发，**没有**新增的「手动触发」HTTP 端点（在契约里断言没有这样的路径被加上）。PR 首屏的读取面从服务层取答案（`internal/application/prchecks/`），页面渲染不在本任务内。"
       ],
       "tests": [
@@ -6115,7 +6128,7 @@
         "docs/02_V1_SCOPE.md"
       ],
       "scope_note": "这是**按本任务的实际交付面**收窄后的范围，不是 phase 级默认上限。逐条说明：**保留** `infra/migrations/**` + `specs/database/postgres.sql` + `specs/SPEC_VERSION.json` —— 递归遍历很可能需要索引，允许为此新增迁移（但**不许新开表**，见需求最后一条）；**保留** `internal/persistence/**` 是因为递归查询住在那里（照 `rsg_query.sql` 先例）；**保留** `internal/events/**` 是因为两个事件名与 outbox 发射在那里；**保留** `internal/application/**` + `internal/application/prchecks/**`（在 `internal/application/**` 之下）是读取面的落点；**保留** `cmd/worker/**` 是因为它必须跑在后台 worker 里（`docs/20:71`），而 `cmd/api/**` 只允许接线读取面。**明确不给**：`specs/api/**`（本任务不加端点）、`specs/events/**`（事件名已登记，载荷在 Go 侧）、`specs/schemas/**` 与 `packages/**`（不改任何 schema）、`apps/web/**`（页面渲染不归本任务）、`docs/**` 与 `tasks/**`（Supervisor 专属）。",
-      "supervisor_scope_narrowing": "2026-09-19 撰写。这份任务书是从一个 148 字的空壳补出来的，补写时逐条回树核过引用，并将下列**核过的事实**写进需求而不是让工人去猜：(1) 判定依据是 `catalog.go:78` 的 `DependencyInference` 标记，`references` 明确不带它——这条把「沿哪些边走」从设计问题降成了读代码问题；(2) 两个事件名**已经登记**在 `specs/events/event-types.yaml:29-30`，不需要新登记；(3) **事件载荷在本仓库不建模**（`specs/events/` 下只有那一个文件，只有名字清单，没有载荷 schema），所以载荷由本任务定义——我把这一点明写出来，是因为「载荷没规定」很容易被工人读成「我随便定」，而实际约束是「字段必须能支撑 direct/indirect 与身份，且逐字段说明理由」；(4) 递归遍历的**写法先例在 `rsg_query.sql` 的裸 pgx 递归**（那里逐字写了 sqlc 解析不了递归），不写清这条，工人很可能另造一套图算法；(5) 读取面的出处是 `docs/06:38` 与 `docs/09:17` 的「PR 首屏显示 dependency impact」，落点 `internal/application/prchecks/` 已存在。**存根里那条「review required alerts」我没有照抄进来**：`review_required` 在本仓库是 **PR 的一个状态**（`internal/domain/pullrequest.go:87`），不是提醒机制；规格里与 impact 相关的唯一表述是「PR 首屏展示 dependency impact」，所以我按**读取面在 PR 页面 + 发 `dependency.impact_detected` 事件**来落，而不是自造一套「提醒谁、要不要重新评审」的产品规则——后者规格没有，属于 L3，工人不许发明，我也不替它发明。"
+      "supervisor_scope_narrowing": "2026-09-19 撰写。这份任务书是从一个 148 字的空壳补出来的，补写时逐条回树核过引用，并将下列**核过的事实**写进需求而不是让工人去猜：(1) 判定依据是 `catalog.go:78` 的 `DependencyInference` 标记，`references` 明确不带它——这条把「沿哪些边走」从设计问题降成了读代码问题；(2) 两个事件名**已经登记**在 `specs/events/event-types.yaml:29-30`，不需要新登记；(3) **事件载荷在本仓库不建模**（`specs/events/` 下只有那一个文件，只有名字清单，没有载荷 schema），所以载荷由本任务定义——我把这一点明写出来，是因为「载荷没规定」很容易被工人读成「我随便定」，而实际约束是「字段必须能支撑 direct/indirect 与身份，且逐字段说明理由」；(4) 递归遍历的**写法先例在 `rsg_query.sql` 的裸 pgx 递归**（那里逐字写了 sqlc 解析不了递归），不写清这条，工人很可能另造一套图算法；(5) 读取面的出处是 `docs/06:38` 与 `docs/09:17` 的「PR 首屏显示 dependency impact」，落点 `internal/application/prchecks/` 已存在。**更正（2026-09-19）：先前那句「规格里与 impact 相关的唯一表述是 PR 首屏」是假的——规格要求了告警，是我砍错的。**`review_required` 确实同时是 **PR 的一个状态取值**（`internal/domain/pullrequest.go:87`），但它与 `docs/18` §5 说的「标记 review required」是**两条不同的东西**：我用标识符撞名否掉了规则本身。真相有两处，都是规格原话：`docs/18_EVENTS_SUBSCRIPTIONS.md:39`（§5 Dependency Watch）逐字「当上游 dependency abort/supersede/new version/rights restriction 时，分析受影响下游，并创建 alert。系统只标记 review required，不自动改科学结论。」；`docs/02_V1_SCOPE.md:58` 在 V1 的 Events 范围里列着「Dependency impact alert」。**告警的载体就是已经登记的 `dependency.impact_detected`**（`specs/events/event-types.yaml:29-30`），**载荷携带这个「需要复核」标记**，而且**只标记、不改科学结论**——后半句是规格原话，不是我发明的规则（它与本任务「不自动 invalidate」是同一条规则的两半）。**不新开 alert/notification 表**：告警作为领域事件进入既有管线，订阅与投递归 `docs/18 §3–§4` 的既有任务（`infra/migrations/00078_subscriptions.sql:113,131` 的 delivery 行是指向事件、不带内容的指针）。"
     },
     {
       "id": "T1101",
@@ -6702,7 +6715,8 @@
         "T1110"
       ],
       "requirements": [
-        "Docker production compose 或 k8s manifests",
+        "**只用 Docker Compose，不做 k8s manifests**：canonical 基线里唯一被点名的编排是 Compose —— `CLAUDE.md:120`（§7 技术基线）逐字「Local infra：Docker Compose；应用 host-native 运行」，而 `k8s`/`kubernetes`/`helm`/`kubectl` 在 `docs/`、`specs/`、`CLAUDE.md`、`ops/`、`Makefile`、`README.md` 里**零命中**（`grep -rin` 核过）。选不选 k8s 不是本任务可以自选的实现决定，基线已经定了；编排照 Compose 写。",
+        "**先把实况写清楚（2026-09-19 核过，别再自己发现一遍）：全仓库一个 `Dockerfile` 都没有**（`find . -iname 'Dockerfile*'` 零命中），`ops/` 下只有脚本与文档（`doctor.sh`、`bootstrap-ubuntu.sh`、`backup-restore-drill.sh`、`DEV_COMMANDS.md`、`ci/`、`tests/`），**没有 `deploy/` 目录**，也没有 `k8s/`、`helm/`、`charts/`、`manifests/`；根 `docker-compose.yml` 起的是**本地开发基础设施**（postgres/redis/minio/gitea/mailpit，文件头逐字「This is a LOCAL DEV stack only」），不是应用编排。而本任务的 `allowed_scope` 只有 `tests/acceptance/**`、`tests/e2e/**`、`ops/**`、`examples/**`（**`docs/**` 已于 2026-09-19 收走，见 scope_note**）——**造不了应用镜像**。所以本任务交的是 **Compose 编排模板 + secrets/TLS/healthcheck 的形状 + runbook**，不交镜像；规格侧 `docs/35_DEPLOYMENT_RUNBOOK.md:9-10,17` 的部署顺序（migrations job → API/worker/MCP → Web、回滚 previous image）与 `docs/25_CICD_DEVOPS.md:32`（所有容器用 immutable digest；production deploy 先 staging smoke）都要求镜像这一环有主，**这个缺口在 RESULT 里点名（缺什么、谁来做），不许把书里的验收写成「已经能部署」**。另外：`docs/**` 已从 `allowed_scope` 收走、写进 `forbidden_scope`（CLAUDE.md §8.1 逐字「其余 `specs/**` 与 `docs/**` 仍为 Supervisor-only」）——部署说明写进 `ops/**`，不要往 `docs/**` 写。",
         "secrets placeholders",
         "TLS/reverse proxy notes",
         "healthchecks"
@@ -6718,18 +6732,18 @@
         "tests/acceptance/**",
         "tests/e2e/**",
         "ops/**",
-        "docs/**",
         "examples/**"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
         "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/progress.md",
+        "docs/**"
       ],
       "decision_level_max": "L1",
       "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。**2026-09-19 已按此收窄：`docs/**` 从 allowed_scope 移到 forbidden_scope**——本任务四条需求（compose、secrets 占位、TLS/反代说明、healthcheck）没有一条要写 `docs/**`，而 `docs/**` 按 CLAUDE.md §8.1 是 Supervisor-only。部署说明写进 `ops/**`（那里才是本任务的交付面）。T1201–T1208 的 scope 是同一份模板复制来的，**不要按兄弟任务的 scope 推断自己的**。"
     },
     {
       "id": "T1204",
@@ -7172,7 +7186,7 @@
         "**两道数据库门都报同一个 SQLSTATE（P0001），要能分辨。** 开 PR 的那条 INSERT 会被两个触发器拒绝：`00042` 的 `pull_request_semantic_gate`（源分支的语义状态是 `unstructured_changes`，契约里答 409、线码 `BRANCH_UNSTRUCTURED_CHANGES`）与 `00086` 的 `pull_request_fork_gate`（跨项目源分支不是本人的 fork，服务层本该先拦成 403）。两者都是 P0001，**靠 RAISE 的文本开头分辨**（前者 `pull request cannot be opened from branch …`，后者 `pull request on project … cannot take its source branch from project …`）——`infra/migrations/**` 不在你的范围内，不要靠改触发器加标记。**判定要读得准**：今天是 `pullrequests.Service.Create` 把整条链包成 `ErrStore`（HTTP 会答 503），对用户就是「服务不可用」而不是「你的分支里有解析不了的内容」——这条要修成契约里写的那种答案。**判不准时要 fail closed**：分不清就按 503 答，不要猜成 409。",
         "**幂等按状态本身做**：同一个 (父项目, 人) 重复发起 fork，第二次要返回既有 fork（契约里的 200），不新建项目/分支/谱系行、不重复拷贝内容。**不要引入 key 台账**（服务层已经是这个形状）。",
         "**fail closed**：fork 项目的可见性缺省是 private（fork 的内容在本人发布之前是他自己的，发布是治理动作、不是 fork 的副作用）。",
-        "**改一条命名规则（Supervisor 定的，照办，理由写给你看）**：fork 项目的 slug 现在的主名是 `<父 slug>-<人的 handle>`（`internal/application/forks/service.go:686` 的 `forkSlug`），**只有超长才**退到带摘要的 `forkSlugDigest`。这会让**合法 fork 被永久锁死**：① 组织项目的 slug 只在组织内唯一（`00019:16`：`projects_personal_slug_idx` 是 `WHERE organization_id IS NULL`），所以两个组织可以各有一个 `mof-curie`——同一个人先后 fork 两个，第二个的派生名被**自己刚建的那个 fork** 占住，`forkProjectOverTakenName`（`:508-527`）直接拒（自己名下的持有者不升级、连保留名都不试）；② slug **不可改**（`internal/application/projects/settings.go:47-55` 的 `UpdateSettingsInput` 没有 name/slug，项目也不能删）——所以撞上就是永久的、用户毫无出路。**改法：`forkSlug` 的主名一律用今天那个超长兜底的形状**——`forkSlugDigest(head, handle, forkPairDigest(parentID, actorID), \"\")`，即 slug 一律由这一对 (父, 人) 派生并带它的 8 位摘要。**保留名（`-2`）与那条 `ErrForkSlugTaken` 拒绝原样保留**，它们是最后一道兜底，不是要被删的东西。**不要**改成'撞了才升级到保留名'：那会把代码注释里写的**孤儿行**危险请回来（'自己名下占着'与'自己在飞'在记录里分不开）。**显示名不变**（`forkName` 照旧），变的只是 URL。**T0804 那几条断言可读 slug 的测试要跟着改**（`internal/application/forks/service_test.go:333-334`、`:782`、`:792`）：规则本身变了，测试跟着它断言的规则走——**这不是'改测试迁就实现'**，但除这几条断言之外**不许放宽任何一条测试**。",
+        "**改一条命名规则（Supervisor 定的，照办，理由写给你看）**：fork 项目的 slug 现在的主名是 `<父 slug>-<人的 handle>`（`internal/application/forks/service.go:693` 的 `forkSlug`），**只有超长才**退到带摘要的 `forkSlugDigest`。这会让**合法 fork 被永久锁死**：① 组织项目的 slug 只在组织内唯一（`00019:16`：`projects_personal_slug_idx` 是 `WHERE organization_id IS NULL`），所以两个组织可以各有一个 `mof-curie`——同一个人先后 fork 两个，第二个的派生名被**自己刚建的那个 fork** 占住，`forkProjectOverTakenName`（`:529-533` 的同名持有者分支）直接拒（自己名下的持有者不升级、连保留名都不试）；② slug **不可改**（`internal/application/projects/settings.go:47-55` 的 `UpdateSettingsInput` 没有 name/slug，项目也不能删）——所以撞上就是永久的、用户毫无出路。**改法：`forkSlug` 的主名一律用今天那个超长兜底的形状**——`forkSlugDigest(head, handle, forkPairDigest(parentID, actorID), \"\")`，即 slug 一律由这一对 (父, 人) 派生并带它的 8 位摘要。**保留名（`-2`）与那条 `ErrForkSlugTaken` 拒绝原样保留**，它们是最后一道兜底，不是要被删的东西。**不要**改成'撞了才升级到保留名'：那会把代码注释里写的**孤儿行**危险请回来（'自己名下占着'与'自己在飞'在记录里分不开）。**显示名不变**（`forkName` 照旧），变的只是 URL。**T0804 那几条断言可读 slug 的测试要跟着改**（`internal/application/forks/service_test.go:333-334`、`:782`、`:792`）：规则本身变了，测试跟着它断言的规则走——**这不是'改测试迁就实现'**，但除这几条断言之外**不许放宽任何一条测试**。",
         "**范围纪律**：只改 `allowed_scope`。`specs/**`（除两个生成物，本任务不需要）、`tasks/**`、`docs/**`、`infra/migrations/**`、`apps/web/**` 都不在你的范围内。**不许为了让测试变绿而删测试、跳过测试、放宽断言或放大超时**（`CLAUDE.md` §5.1、§6）。"
       ],
       "deliverables": [],
@@ -7226,9 +7240,9 @@
       "v1_required": false,
       "dependencies": [],
       "requirements": [
-        "**先量，再改。** 现状（Supervisor 已核，逐条给证据）：2026-09-16 到今天，main 上 `migration-integration`（就是 `make test-integration`）**成功的运行普遍 253–354 秒**（Go 测试自带的时限是 **600 秒**，即 `go test` 的默认 `-timeout 10m`），**两次超时**：`301ce5e` **699 秒** 与 `6ba4741` **711 秒**，两次都是 `panic: test timed out after 10m0s`。（同一窗口里还有三次失败是 2026-09-18 下午那次**真的坏了**——253–279 秒就失败、不是超时，那次已经修好，**不算在偶发里**。）",
+        "**先量，再改。** 现状（Supervisor 已核，逐条给证据；**2026-09-19 更新**）：2026-09-16 到今天，main 上 `migration-integration`（就是 `make test-integration`）**成功的运行普遍 253–354 秒**，其中**两次**被杀：`301ce5e` **699 秒** 与 `6ba4741` **711 秒**，都是 `panic: test timed out after 10m0s`。**但「时限是 600 秒」这一条已经过期——时限现在不是 go test 的默认值了**：`d3abb0b`（2026-09-19，只改 `Makefile`）按连续 26 次 main 运行的实测（正常 **280–330 秒**；**3 次**越过 600 秒被杀：699 / 710 / 711 秒，落在**三台不同的 runner** 上）把这条作业固定成 `-timeout 20m`（注释 `Makefile:157-169`、命令 `:142`；裁定记在 `tasks/decisions.md:12663`），理由是 10 分钟默认值把 runner 争用变成约 12% 的假红灯。**所以：「偶发假红灯」这个症状已经按容量修正处理掉了，不是靠掩盖（每个测试仍必须过，真挂死仍会被抓）；留给你的问题是「同一棵树为什么能从 320 秒漂到 710 秒、多出来的三四百秒花在哪、慢的那些点分别等的是谁」。**（同一窗口里还有三次失败是 2026-09-18 下午那次**真的坏了**——253–279 秒就失败、不是超时，那次已经修好，**不算在偶发里**。）",
         "**关于那两次超时，我能从日志里读出来的只有这些，别把它当结论**：转储很薄（`301ce5e` 8 个协程、`6ba4741` 4 个），**没有堆积、没有互锁**；两次被点名「正在跑」的测试**各不相同**，而且它们**只跑了 2 秒和 4 秒**——说明整个套件在那两次就是**跑超了 600 秒**，**不是某一条测试卡死**。所以「时间去哪了」今天**没有现成答案**，这正是要你去量的：至少给出各测试/各阶段的耗时分布，以及慢的那些点分别等的是谁（哪个服务、超时值、重试次数），并回答「比平时多出来的那 300 多秒花在哪」。",
-        "**不许用「把超时调大」来掩盖。** `CLAUDE.md` §5.1 逐字禁止「任意放大 timeout 掩盖 race/慢」。如果真的证明了「整套本来就该跑 700 秒、600 秒的默认值是历史遗留」，那也可以在 RESULT 里**用证据**提出改时限或分片的方案——但那必须是量化结论之后的建议，不是第一步动作。",
+        "**不许用「把超时调大」来掩盖。** `CLAUDE.md` §5.1 逐字禁止「任意放大 timeout 掩盖 race/慢」。如果真的证明了「整套本来就该跑 700 秒、600 秒的默认值是历史遗留」，那也可以在 RESULT 里**用证据**提出改时限或分片的方案——但那必须是量化结论之后的建议，不是第一步动作。（**2026-09-19 补记：这件事 owner 已经做过了**——`d3abb0b` 把时限提到 `-timeout 20m`，见上面第 1 条。所以「把时限调大」不再是本任务的交付选项；只有当你有**新证据**表明 20m 也不够（例如出现 `panic: test timed out after 20m0s`）时，才回到这一条。）",
         "**不许为了让作业变绿而删测试、跳过测试、放宽断言。** 同样禁止把集成测试从 CI 里摘出去。",
         "**范围纪律**：只改 `allowed_scope`。本任务不需要动 `specs/**`、`tasks/**`、`docs/**`。"
       ],
@@ -7246,7 +7260,6 @@
         "tests/**",
         "internal/**",
         "Makefile",
-        ".github/workflows/**",
         "scripts/**",
         "go.mod",
         "go.sum"
@@ -7257,13 +7270,15 @@
         "docs/**",
         "infra/migrations/**",
         ".git/**",
-        "CLAUDE.md"
+        "CLAUDE.md",
+        ".github/workflows/**"
       ],
       "decision_level_max": "L1",
       "relevant_specs": [
         "docs/24_TEST_STRATEGY.md",
         "docs/67_TEST_GATES.md"
-      ]
+      ],
+      "scope_note": "这是按本任务的实际交付面调整过的范围。**2026-09-19 收窄：`.github/workflows/**` 从 allowed_scope 移到 forbidden_scope。** 理由不是「不许碰 CI」这句口号，是一条可复现的互锁：`internal/devorchestrator/gate_spec_test.go` 的 `TestGatesSpecSyncsWithCIWorkflow` 逐字比较 ci.yml 的 job 列表与**每条 `run` 命令和 env** 对 `specs/orchestrator/gates.json`，而 `specs/**` 在你的 forbidden_scope 里——**你改了 ci.yml 的任何一条命令，同步测试就红，而你没有权限把 gates.json 改回去**。这也与本任务验收第 3 条一致：根因不在仓库内时「由 Supervisor 决定，不要自行放宽 Gate」。所以：**量化结论指向 CI 侧时（分片、预热镜像、job 超时），把方案写进 RESULT 交给我接线**；仓库内的修（Go 代码、测试、Makefile）仍归你。"
     },
     {
       "id": "T0816",
@@ -7318,7 +7333,7 @@
       ],
       "decision_level_max": "L1",
       "relevant_specs": [
-        "docs/13_CONTRIBUTION_LEDGER.md",
+        "docs/13_CONTRIBUTION_REPUTATION.md",
         "docs/04_USERS_ROLES.md",
         "docs/10_EVIDENCE_PROVENANCE.md"
       ],
@@ -7337,7 +7352,7 @@
       ],
       "requirements": [
         "**这份任务书只差一样东西，先说清楚是哪一样，不要重新去发现一遍。** 2026-09-19 复核 T0602 时把 abort 与 reopen 切开：abort 那一半的规格几乎全有（契约、权限、事件名、存储位都现成），**reopen 这一半除了一行权限之外也全都有**——逐条如下，全部核过：",
-        "**语义有出处**：`docs/43_VERSION_CONTROL.md:10` 逐字「active → aborted → reopened → active；可 superseded（关系/状态事件）但不物理删除。」`docs/46_ABORT_RETENTION.md:11` 逐字「Reopen 创建新 transition，保留历史 abort。」**这两句合起来就是本任务的行为规格**：reopen 是**追加一个新的 transition**，abort 那一段历史必须留着。",
+        "**语义有出处**：`docs/43_STATE_MACHINES.md:10` 逐字「active → aborted → reopened → active；可 superseded（关系/状态事件）但不物理删除。」`docs/46_ABORT_RETENTION.md:11` 逐字「Reopen 创建新 transition，保留历史 abort。」**这两句合起来就是本任务的行为规格**：reopen 是**追加一个新的 transition**，abort 那一段历史必须留着。",
         "**事件名已经登记**：`specs/events/event-types.yaml:23` 是 `scientific_object.reopened`（它的姊妹 `:22` `scientific_object.aborted` 归 T0602）。**不许另拼名字**，也不许改`specs/events/**`。",
         "**存储的状态位已经在 CHECK 里**：`infra/migrations/00005_scientific_objects.sql:20` 的`scientific_object_versions.lifecycle_state` 取值集合是`('active','aborted','reopened','superseded')` —— **`'reopened'` 已经在里面了**。而这张表是**追加式版本表**（每版带 `version_no`/`state_id`/`created_by`/`created_at`），`infra/migrations/00014_append_only_enforcement.sql:9` 逐字「Corrections never mutate a row: they append a new one (abort/reopen, ...)」。所以**存储这一层几乎不用动**，除非 T0602 为 abort 元数据新增的形状需要一并照顾（若它新增了列，reopen 按同一形状记录reason/explanation 即可——**沿用它的决定，不要另立一套**）。",
         "**必须走 PR，不许一键改 main**：`docs/09_VERSION_CONTROL.md:9-10` 逐字「即便 Owner 也只能经 PR merge」——main 上的科研状态只能经 PR 合并推进。**这不是从 abort 那条类推出来的**，是 main 的一般规矩；`docs/46:9` 只是把它在 abort 上又说了一遍。",
@@ -7393,7 +7408,7 @@
       ],
       "relevant_specs": [
         "docs/46_ABORT_RETENTION.md",
-        "docs/43_VERSION_CONTROL.md",
+        "docs/43_STATE_MACHINES.md",
         "docs/09_VERSION_CONTROL.md",
         "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
         "docs/18_EVENTS_SUBSCRIPTIONS.md",
