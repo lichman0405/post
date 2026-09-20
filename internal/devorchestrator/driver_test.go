@@ -225,6 +225,42 @@ func TestTheLoopRevisitsVerificationAndAccepted(t *testing.T) {
 // test, and there was none — so the property was being asserted by grepping for
 // the message string. The grep proves the sentence exists; it does not prove the
 // driver reaches it, and it says nothing about the state left behind.
+// The same exit, one state further along. A task the driver still owes work on
+// is not "nothing to do", and the state that most looks like completion —
+// accepted, waiting on CI for a merge — is the one that was missed: the check
+// counted only `running`, so on 2026-09-20 the driver exited with the idle
+// message while T0607's merge was still pending, and the merge then waited for a
+// human.
+//
+// This test is only meaningful next to
+// TestAnExhaustedDriverReportsCompletionInsteadOfWaiting: either one alone is
+// satisfied by returning a constant.
+func TestAnAcceptedTaskAwaitingCIMeansTheDriverIsNotExhausted(t *testing.T) {
+	root := t.TempDir()
+	dagPath := writeDAG(t, root)
+	statePath := filepath.Join(root, "task_status.json")
+	if err := os.WriteFile(statePath, []byte(`{"version":2,"tasks":{
+		"T0001":{"status":"accepted"},"T0002":{"status":"merged"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	o := &DriveOpts{
+		RepoRoot: root, DagPath: dagPath, StatePath: statePath,
+		Binary:     writeIdleRddev(t, filepath.Join(root, "calls.log")),
+		Out:        &strings.Builder{},
+		StaleCheck: func() (string, bool) { return "", false },
+	}
+	done, err := o.exhausted()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done {
+		t.Error("an accepted task waiting on CI was reported as nothing to do — " +
+			"the driver would exit and the merge would wait for a human, which is " +
+			"the T0607 failure of 2026-09-20")
+	}
+}
+
 func TestAnExhaustedDriverReportsCompletionInsteadOfWaiting(t *testing.T) {
 	root := t.TempDir()
 	dagPath := writeDAG(t, root)

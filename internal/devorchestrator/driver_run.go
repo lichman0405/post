@@ -176,11 +176,23 @@ func (o *DriveOpts) Drive(ctx context.Context) error {
 
 // exhausted reports whether there is nothing left the driver can act on.
 func (o *DriveOpts) exhausted() (bool, error) {
-	running, err := o.runningTasks()
+	// Every task in running, verification or accepted is work this driver still
+	// owes: collecting a Worker, collecting a review, running the acceptance
+	// gate, pushing, merging. Counting only `running` made the one state that
+	// most looks like completion — accepted, waiting on CI for a merge — read as
+	// "nothing to do": the driver announced completion and exited while the
+	// merge was still pending. Found 2026-09-20, with the dispatch pool
+	// deliberately held empty for a landing window, which is the only reason the
+	// false answer surfaced; the condition itself was always reachable.
+	//
+	// It asks tasksNeedingAction rather than re-listing the states on purpose:
+	// that is the set tick walks, and "what I act on" and "what counts as work
+	// left" drifting apart is exactly this bug.
+	owed, err := o.tasksNeedingAction()
 	if err != nil {
 		return false, err
 	}
-	if len(running) > 0 {
+	if len(owed) > 0 {
 		return false, nil
 	}
 	out, _ := o.run("task", "next")
