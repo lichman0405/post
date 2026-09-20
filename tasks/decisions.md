@@ -14955,3 +14955,312 @@ collect 把非 0 读成"这一轮没有完成"，所以一次丢失的运行仍�
 the unrecorded sentinel -1`），还原后 sha256 与变异前一致。已 `make rddev` 重建并重启驱动。
 **同时要记住的教训是监视本身**：我起的那条"等日志"的后台监视在旧日志文件上永远不退出，也不会叫我——
 这一轮真正发现卡住的是 owner，不是任何自动化。
+
+## 2026-09-21（续一）：e2e 夹具的日期口径——main 在本机每天有 8 小时是红的
+
+### 1. 现象与第一判断
+
+T0612 的 G2 `go` 作业红：`tests/e2e` 里两条
+
+```
+--- FAIL: TestE2EConflictResolution (0.74s)
+    conflict_e2e_test.go:443: create fixture project: projects: not allowed
+--- FAIL: TestE2EDiscussionPromotion (0.62s)
+    discussion_promote_e2e_test.go:415: create fixture project: projects: not allowed
+```
+
+T0612 的 diff 只有 `tests/integration/abort_e2e_test.go`，与这个包无关。`projects: not allowed`
+是 `internal/application/projects.ErrForbidden`，由 `ProjectStore.CreateProject` 在创建者的组织
+成员关系"不存在或不 active"时返回。
+
+### 2. 定位（两步，都在 main 上做）
+
+- **在 main 上原样复现**：`go test ./tests/e2e -run 'TestE2EConflictResolution|TestE2EDiscussionPromotion'`
+  → 两条都 FAIL。所以**与 T0612 无关，是 main 自己红**。
+- **同一棵树 `TZ=UTC` 跑同样两条 → ok**。唯一变量是进程的本地时区，于是范围收到"日期口径"上。
+
+机制：两个夹具调 `dayStartUTC()`，它取 `time.Now()` 的**本地**年月日、再标成 UTC 午夜。本机 UTC+8，
+本地 00:00–08:00 这段时间里那个日期在 UTC 还是**明天**；`domain.OrganizationMembership.Active()`
+（T0816 统一的判定：`!AffiliationStart.After(domain.AffiliationDay(time.Now()))`）把它读成"尚未生效"
+→ `ErrForbidden` → 夹具建项目被拒。
+
+这正是 T0816 修过的那一类：`internal/application/orgs/service.go` 的 `today()` 注释里写着同一句话
+（"dated a membership created in the first hours of a UTC+8 morning one day into the future"），
+生产与 integration 夹具都改了，**e2e 包这两处漏了**。
+
+### 3. 影响面（为什么不能当 flake 放过）
+
+- 本机 UTC+8：**每天本地 00:00–08:00 的 8 小时里，`tests/e2e` 必红**——确定性的时段性红，不是偶发。
+- CI 跑在 UTC，所以 PR 的 CI 绿、`gates.json` 的 `go` 作业在本机 G2/G1 上红：夜里落地的 G2 全中
+  （T0612 的 G2 在本地 05:57 跑，正落在窗口里）。`go` 是 G4 的 required job，于是这个窗口里
+  **任何任务都别想合并**。
+- 一处口径错、两处调用点、整条流水线在特定时段停摆：这是控制平面的问题，不是某一个任务的问题。
+
+### 4. 处置：Supervisor 直接修（`CLAUDE.md` §1 的"极小 integration glue"）
+
+测试断言**只加强不放宽**：把 `dayStartUTC()` 换成 `affiliationToday()` = `domain.AffiliationDay(time.Now())`，
+即"今天"只向唯一定义处（`internal/domain/affiliation.go`）问一次；两处调用点同步改名。
+commit `e08131d`（`tests/e2e/**`，不进 spec digest，不影响在飞任务）。
+
+证据链（本地 06:0x，正在窗口内）：
+
+| 时刻 | 树 | TZ | 结果 |
+|---|---|---|---|
+| 修前 | main | 本地 CST | 两条 FAIL（原样复现） |
+| 修前 | main | UTC | ok（把范围收到"本地日期标成 UTC"） |
+| 修后 | main | 本地 CST | 两条 ok；整包 `-count=1` ok |
+| 修后 | main | UTC | 整包 ok |
+
+顺手把同类写法在全仓扫了一遍，剩下的都是**故意**不是 UTC 的：`orgs/service.go` 的 `dateOnly`
+（调用方给的日期，保其自身年月日）、`tests/integration` 的 `utcDay/utcDate`（显式 `time.Now().UTC()`）、
+`org_permission_test.go` 的 `todayUTC()`（T0816 已改成 `domain.AffiliationDay`）、`rpE2EDay`（固定日期）。
+
+### 5. 待办（要立账，但必须等安静窗口）
+
+把"夹具打戳必须走 `domain.AffiliationDay`"变成**能失败的检查**：最省事的一条是在最坏时区
+（`TZ=Pacific/Kiritimati`，UTC+14）下跑 `tests/e2e`——本地日期永远超前于 UTC 日期，任何"本地日期
+标 UTC"的写法在**任何时刻**都会红，不必等到凌晨。这要改 `specs/orchestrator/gates.json`（spec
+digest 会动），必须等没有 Worker 在飞时落地，见下一条。
+
+## 2026-09-21（续二）：T0608 的阻断不是它的错——旧基线
+
+T0608 的 collect 被拒（`status: "blocked"`）。读它的 RESULT：阻断判断成立且给了可验证的证据——
+它拿到的 worktree HEAD 是 `3ba0ed7`（2026-09-19），T0611 的 `ListReleaseReviews` 修复是 2026-09-20
+才进 main 的，所以**提交树自己**跑不出 release 那一段；它没有拿"组合树上是绿的"冒充交付是绿的，
+也没有去改产品代码把自己救绿。这属于旧基线，不属于工程失败。
+
+处置：`rddev rebaseline T0608`（基线 `3ba0ed7` → `e08131d`，6 个文件原样带过），
+再用**同一个 session** rework，让它在新基线上把整套真跑一遍。rework 因并行上限（3/3）暂时排队，
+等一个槽位出来再发。这再次印证：**并行上限是硬约束**，rebaseline 里的自动 rework 会被它挡住，
+这不是错误，是队列。
+
+## 2026-09-21（续三）：T0612 的复核结论与两条 nit（记录，不阻断）
+
+复核给 `approve`，并自己复跑过：能证明窗口真实（`aborts/service.go:183-186` 的契约、
+`:535` 在事务内追加版本而 `:599-600` 在事务外建 PR、`:663` 的 replay 走 `resultFromRecorded`
+从不设 `PullRequestNumber`），`-run TestAbortProposalConcurrency -count=60` 60/60 通过，
+diff 与 collect 的 diff.txt 逐字节一致，没有 skip、没有动 timeout、探针文件已删。
+
+两条 **nit（不阻断，但要留档）**：
+
+1. **证据引用的精度**：T0612 的 RESULT 说某段 FAIL 文本是"逐字"摘自 `/tmp/t0612-mutA2.log`，
+   但日志里那条实际上写的是 `(0.36s)`，引文里是 `(1.49s)`；其余细节（PROBE 行、39 PASS/1 FAIL、
+   40/40 both-201、那对 CI 形状的 id）逐字符对得上，`1.49s` 在整个盘上不存在。**属于誊写错误，
+   不是编造观测**——但写"逐字"就该逐字。以後给 Worker 的信里要再强调一次：引用证据必须是复制的，
+   不是记忆的。
+2. **断言的语义边界**：`sameAbortTwoWays` 的注释说这几个身份字段"Nothing here can differ without
+   the race having produced two aborts"。对这个夹具成立，但 `AbortedVersionID` 两条路径的来法不同
+   （新写的那次取 `named.ID`，replay 那次由读到的行推 `VersionNo-1`），所以相等性是**追加模式**
+   （abort 落在 `CurrentVersionNo+1`）的性质，不是同一个渲染器的性质。今天无害；若这个 helper
+   被复用，将来的红可能被误读成"真的发生了两次 abort"。
+
+复核同时记了三条风险（承认的窗口形状也正是真回归会呈现的形状；`AbortedVersionID` 的推导依赖版本号
+连续；该分支在 CI 上的价值取决于……）。这些是这次契约导向改动的固有性质，不改判定。
+
+## 2026-09-21（续四）：我自己制造的一次假红——同一任务的两个 gate 抢同一棵临时树
+
+T0612 的 G2 重跑绿了、G3 我手工起了一次，结果 G3 的 `gitea-real-services` 收尾时报：
+
+```
+FAIL this script moved HEAD in /home/shibo/code/post/.rddev/runtime/integration/T0612
+     (e08131d45274cf32b01abc2e1152d6ad8020d2ad -> ) — the gate graded a tree it had already changed
+```
+
+**不是产品红。** 我清掉 T0612 的 decision 之后，驱动在 06:20 的那一跳自己走了
+`rddev task accept T0612`——而 `accept` **本来就会自己跑 G3**（`cmd/rddev/task.go:332-352`：
+没有覆盖全部 G3 jobs 的绿色记录时它自己 `RunGate`）。两个 gate 共用
+`.rddev/runtime/integration/<TASK>` 这一棵临时树，驱动那边一 prepare，我这边的 HEAD 就消失了，
+于是那个"树在我评分期间被改过"的守门断言（它本身是好的、必要的）把一次干净的运行判成了红。
+
+**教训有两条，都属于我：**
+
+1. **不要手工给驱动正在推进的任务跑 gate。** `accept` 已经包含 G3，我那次 G3 从一开始就是多余的；
+   G2 那次（06:13）之所以正当，是因为驱动当时被 decision 卡住、不会自己重试。
+   判据很简单：**先看驱动这一跳在不在动这个任务**，动就别碰。
+2. 反过来说，这条"树被改过"的断言证明它按设计工作了：它宁可红，也不肯为一个已经被换掉的树打分。
+   它红得对，只是红的原因是**我**。
+
+**要不要在编排器里加锁**（第二个 gate 运行要么等、要么明确拒绝，而不是互相拆树）：先记着，
+不加。理由：驱动自己是串行的，唯一能造出这种撞车的操作者是我，而成本最低的修法是**我别这么做**；
+真要加，也应该是一个"同一任务已有 gate 在跑"的显式拒绝 + 能失败的测试，属于安静窗口里的小活。
+
+## 2026-09-21（续五）：把三个"空窗期按住"的任务放回派工集（队列已经见底）
+
+`rddev task next` 第一次**什么都不返回**：todo 里 16 个全被未合并的依赖挡着，真正能派的只剩被我自己
+按住的 T0906 / T1007 / T1102。按住它们的条件是"带指纹的任务落地期间不开窗口"，而那个条件早就满足了：
+T0607 与 T0905 都已 merged，当前 main 就是落地后的 main。
+
+处置：`python3 .rddev/tools/hold-dispatch.py --restore` → 三个任务回到 `ready`（各自的旧 note 一并还原，
+T1007/T1102 还带着一句"Worker stale，待清理后重派"，registry 里它们是 `exit=-1 (reconciled)`，进程已不在）。
+再问 `rddev task next`，三个都出来了。
+
+**这条值得记下来的是那个误判的形状**：我连着几轮都在盯 T0608/T0610/T0810 这几笔"卡住的任务"，
+而真正的队首是**被我自己按住的三个**——一个临时机制如果没有到期自动解除，就会在条件消失之后继续
+堵着，且堵得悄无声息（状态显示 `blocked`，理由还写着已经过期的原因）。以后按住任务必须同时写下
+**解除条件**（T0906/T1007/T1102 的 note 里写了"落地一完成立刻翻回"，是我没去执行）。
+
+## 2026-09-21（续六）：资产版本的"later status warning"是一句没人交付的承诺（记录，暂不立账）
+
+T0608 的 Worker 在 RESULT 里点名了这个缺口，我独立核过，成立：
+
+- `docs/11_RELEASE_ASSET_HUB.md:35` 逐字："Published Asset Version 不删除。若出现问题，追加
+  abort/supersede state/event并指向replacement；过去引用仍解析到原 version，同时显示 later status warning。"
+- `docs/43_STATE_MACHINES.md:19` 逐字："published → active；后来可 status notice aborted/superseded，
+  但 version content immutable。"
+- 但 `infra/migrations/00010_releases_assets.sql:36-47` 的 `research_asset_versions` **没有 status 列**
+  （只有 visibility / integrity_hash / published_at），全库也没有任何 `notice` 形状的表
+  （`grep -i notice specs/database/postgres.sql` 只命中一条无关注释）。
+- 已经建起来的是 **supersede 的"边"**，不是"状态与警告"：`asset_lineage.relation_type` 的闭集
+  `('forked_from','derived_from','supersedes')`（`00010:52`），页面按边渲染成 lineage 条目
+  （`internal/assets/page.go:319-341`，页面字段 `:418`，fail-closed 只渲染对端可公开打开的边）。
+- `abort` 那一半完全不存在：资产版本上没有 abort 概念、没有事件、没有权限行。
+
+所以 T0608 的处理是对的：它只断言老 release 行与老 asset version 行在 abort 前后逐字节不变，
+**不去断言一个不存在的字段**。
+
+**为什么不现在立账**：写入口（谁有权 abort 一个已发布的 asset version）属权限语义，按 §5 是 L3，
+立出来的任务书会当场挂在 SPEC_BLOCKED 上（T0610、T0411 就是这么挂着的）。等 T0608 把缺口连同证据
+落进 RESULT、并经合并进入 main 之后，再决定这一次是**只立"读侧"那一半**（资产的 lineage 里已有
+supersedes 边，读侧不新增任何权限就能把"这个版本已被 X 取代"作为 later status 呈现出来），
+还是连同写侧一起等 owner 一句话。两件事都要动 `tasks/tasks.json`，所以都要等安静窗口。
+
+## 2026-09-21（续七）：一次自造的假警报——把 phase 级样板 `scope_note` 当成了"任务书没写"的哨兵
+
+我在扫"还剩哪些任务没有任务书"时，用了这个判据：`tasks/tasks.json` 里 `scope_note` 以
+「这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope」开头。
+按它扫，T0906/T1102/T1107/T1201… 共 22 个未完成任务全都"没写"，于是我**把 T0906 从派工集里按住了**
+（`blocked` + note，原状态存 `.rddev/runtime/hold-T0906.json`）。
+
+几分钟后我按合并任务的口径复算：**116 个已合并任务里有 79 个带着这句一模一样的 note**。
+也就是说它是 package 生成时的样板，不是"还没写"的信号。T0906 的任务书是
+`requirements` 三条 + `acceptance_criteria` 两条 + `tests` 一条——与同 phase 已合并的
+T0904/T0905 **逐个字段同形**。而且 `scope_note` 在 `cmd/rddev` 与 `internal/` 里**零命中**：
+没有任何东西读它，所以它不可能是一道门。
+
+处置：T0906 已原样翻回 `ready`（三分钟后）。这是同一类错误的第四次，形态是新的：
+前三次我数错了任务书的"长度"，这次我信了一个**看起来像机器校验标记的字段**而没有去查它的消费者。
+**一个字段没人读，它就不是门槛**；判"没写任务书"仍然只能拿全体已合并任务做对照组。
+
+## 2026-09-21（续八）：浏览器套件一套都没接进任何门禁（比 #223 那张票更宽）
+
+起因是 T0613 复核的一条 risk：它说 `tests/e2e-activity` 没跑。我去查谁在跑浏览器套件，结果是**没人**：
+
+- 仓库里有 **10 套 Playwright 套件**：`tests/e2e-activity`、`-anonymous`、`-assets`、`-conflicts`、
+  `-explore`、`-files`、`-pr-flows`、`-pulls`、`-settings`、`-shell`，外加共享引导
+  `tests/web-smoke/bootstrap-deps.sh`；
+- `.github/workflows/` 里一个都没有；`specs/orchestrator/gates.json` 的 14 个 job 里一个都没有；
+  `Makefile` 里没有；`docs/`、`specs/` 里也没有引用。
+- CI 的 `acceptance` job 跑的是**门禁机器自己的** e2e（four-gate / rejection-retry /
+  supervisor-git / driver-persistence / phase-boundary），不是浏览器。
+- 唯一的现役覆盖面是 `web` job 的 typecheck / lint / 单测 / 生产构建——**没有一次真实浏览器渲染**。
+
+已开的 #223 只点了 `tests/e2e-shell` 一套（且它当时已坏）。这里记的是它的**边界**：
+不是"有一套忘了接"，是**十套全套在门禁之外**。CLAUDE.md §6 的 G3 逐字要求跨边界任务用
+"真实 PostgreSQL/Gitea/MinIO/Redis/**浏览器**"，§12 的完成声明要求 Master Acceptance 有可复现证据——
+按现状，V1 的 UI 证据只有构建与单元测试。**这条路要不要在 V1 收口前补齐、补哪几套、进哪个 job、
+CI 时间花多少，是一个要单独决策的活**，先记录，不在这一轮动手（#223 仍然 OPEN，`gh` 侧的外写不由我做）。
+
+## 2026-09-21（续九）：T0613 的复核结论（approve + 一条 minor）与我要怎么处置它
+
+复核给 `approve`，自己重推了契约又复跑了集成套件，不是读 RESULT 交差。一条 **minor**：
+
+`internal/application/audit/service.go:12` 的 `Service` 文档还写着"a project's activity is visible
+exactly to the project's members"——**正是这个任务存在要纠正的那句错话**（公开项目的读闸对任何已登录
+读者放行）。同一次改动已经把另外两处同类自述改掉了（`cmd/api/audithttp/audit_handlers.go` 的
+'member-only'、`internal/application/audit/adapters.go` 的那句），漏了这一处。
+
+处置：**不因此拒收**。它不是"覆盖或证据的虚假声明"，产品保护是完整的（读的谓词已经是对的），
+属 T0608 那一类——**照实记录、照常合并**。修法是把那句改成"gate 放行谁就谁可见（成员，以及公开项目上的
+任何已登录读者）"，属 CLAUDE.md §5 的 L0 机械决策。**但它必须等 T0613 合并之后**：
+T0613 的 diff 正好改这个文件，我现在动 main 会让它的 compose 撞车。
+
+复核同时记了两条 risk（公开项目的 Activity 研究半边对非成员会显得"什么都没发生过"；
+UI 那半没有覆盖，因为浏览器套件根本没在跑——见上一条）。
+
+## 2026-09-21（续十）：★ 需要 owner 重新确认的一件事——canonical origin 现在是 **public**
+
+`L3-20260912-1` 记的是 owner 2026-09-12 的裁定：`lichman0405/post` 保持 **PRIVATE**，
+并写明了后续规则逐字——「**若将来 visibility 再变，必须重新确认**」。
+
+今天我查询时实测与那条裁定相反（两次查询、同一个 remote，`git remote -v` 与 API 的
+`full_name` 都是 `lichman0405/post`）：
+
+```
+$ gh api repos/lichman0405/post --jq '{full_name,private,visibility}'
+{"full_name":"lichman0405/post","private":false,"visibility":"public"}
+```
+
+旁证：仓库的 `secret_scanning` 与 `secret_scanning_push_protection` 都是 enabled，
+而这两项在私有仓库上需要 GHAS——它们开着，通常意味着仓库是公开的。
+
+**我不擅自把它改回去，也不擅自当作"owner 有意公开"**：可见性是外部治理状态（CLAUDE.md §2.1），
+改动本身属 L3，且这条裁定的原文就要求重新确认。按 §8.2 的第四条停止条件，这是要报给 owner 的
+那一类——但**它不挡任何任务**，我照常推进，只把它挂在报告里等一句话。
+
+**影响面（我核过，目前没有需要紧急处置的东西）**：
+
+- 操作口径**不变**：`L3-20260912-1` 的后果段逐字写着"按**非公开**信息处理；即使将来改为 public，
+  也不得依赖『当前是公开的』这一假设"。所以工作方式不用改。
+- 公开面上已有的敏感形状是**已知的**：Issue #141 记了 15 个已提交的 `tasks/results/*/RESULT.json`
+  里 4 个带凭证形状（启动命令内联 DSN），当时的结论是**逐个查过、全部是 dev 默认值与故意种的假值**。
+  今天复看，`grep` 命中 3 个文件，都是 `postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post`
+  这一类 dev 默认值。
+- 仓库里没有任何真实 `.env` / 私钥 / 证书进入版本控制（`git ls-files` 逐个查过，
+  名字里带 secret 的六个文件都是源码：`internal/config/secretscan.go` 这一类）。
+
+**要 owner 一句话的**：这是你有意改成 public 的吗？若是，我把 `L3-20260912-1` 更新为
+"public（owner 有意）"并保留"内容仍按非公开处理"的口径；若不是，需要改回 PRIVATE。
+
+## 2026-09-21（续十一）：续六那条缺口的更硬的一半——`asset_lineage` 连**写入口**都不存在
+
+续六记的是"later status warning 没人交付"。今天把它的上游查到底，结论比续六更硬：
+
+- **`asset_lineage` 在产品代码里没有任何 INSERT。** 全仓 `INSERT INTO asset_lineage` 只命中两处，
+  都在测试里：`tests/integration/asset_page_test.go:648`、`tests/integration/append_only_test.go:676`。
+  `internal/persistence/queries/` 下唯一碰这张表的文件是 `asset_page.sql`，而它只有 SELECT
+  （`ListAssetPageLineage`）。也就是说续六说的"边已经建起来了"，**建起来的只是表的形状与读路径**，
+  产品里没有任何一条路径能造出一条边。
+- **这张表本来该由谁写，是写着的**：`tasks/tasks.json` 的 **T0708（Asset Fork/Derive + Lineage）**，
+  验收第一条逐字"derived asset 保留 parent version"。而 T0708 正挂在 L3 上（"禁止 rights 不允许的
+  derive"要平台对使用声明做允许/拒绝判定，`internal/rights/usage.go` 的包注释逐字禁止我替 owner 选边）。
+- **`supersedes` 那一半更彻底**：它既没有写入口，也没有拥有者表面（没有 abort 概念、没有事件、
+  没有权限行——续六已核）。
+
+所以这次**连"只立读侧那一半"也不立**，理由是新的、也是决定性的：读侧要渲染的"这个版本已被 X 取代"，
+它的数据源恰好是一个 **L3 挂起的任务**（T0708）加上一条**根本不存在**的写路径。立出来的任务书会当场
+要么依赖 T0708 而僵在 todo，要么只能拿 SQL 直接种行来做证据——那是把"产品里做不到"包装成"页面能显示"。
+**记录到此为止，等 T0708 的 rights 裁定**：那条一句话落地后，读侧的通知才是一个能与之配对交付的活。
+
+（顺带一条给未来的我：判断"某个能力是不是已经建起来了"，**要查写入侧，不能查表结构和读路径**。
+续六我查了 migration、查了 page.go 的渲染、查了 CHECK 闭集，全是"读"这一侧的证据，
+所以得出了"边已经建起来"这个偏乐观的结论。）
+
+## 2026-09-21（续十二）：`rddev drive --parallel N` 抬不动 Worker 池——`maximum: 4` 从驱动器里够不着
+
+重启驱动器时我用了 `--parallel 4`（§2 允许到 4，机器 16 核、当时 load 2.08）。行为实测：
+
+- 驱动器 banner 记的是 `started (pid 281420, parallel 4)`，`driver.json` 的 `parallel` 也是 4；
+- 但它派工时的报错是 **`4 Worker(s) running, limit 3 (default 3, hard max 4)`** —— 池的上限还是 3；
+- 于是每个 tick 都会多出**一行**同样被拒的日志：`T1007: no free Worker slot for the Worker — waiting for one to finish`。
+
+读码定位（三处，互相印证）：
+
+- `internal/devorchestrator/driver_run.go:289`：`if len(since) < o.Parallel` —— 驱动器自己的 `--parallel`
+  只决定"**要不要再试着派一个**"；
+- 同文件 `dispatch()`（`:432-470`）真正发出去的命令是 `worker spawn <TASK>`（只可能追加 `--timeout`），
+  **不带 `--parallel`**；
+- `internal/devorchestrator/worker_spawn.go:100-105`：`parallel := opts.Parallel; if parallel == 0 { parallel = DefaultParallelWorkers }`
+  —— 没传就是 3，`gateParallelism`（`:696-714`）照这个数拒。
+
+规格那一侧写的是池：`specs/orchestrator/rddev-cli.yaml:37-39` 逐字 `parallel_workers: default: 3 / maximum: 4`。
+
+**所以这不是"我传错了参数"，是两个旋钮没有接上**：规格允许的 `maximum: 4` 只能靠人工
+`rddev worker spawn <TASK> --parallel 4` 够到，**从驱动器里够不着**；驱动器那句 `parallel 4` 只影响
+它自己的派工判据，于是它每个 tick 都去撞一次自己抬不动的门。它**不降低任何门**（拒绝被正确归类成
+"等待"而不是"decision"），也不是阻塞——只是日志噪音 + 规格里那个 4 实际上不可达。
+
+**处置**：不在这一轮动代码。改它要么动 `cmd/rddev` 要么动 `internal/devorchestrator`，按
+`.rddev` 的 stale-binary 守卫（`staleTick`，driver_run.go:500+），**任何一个落在 main 上的这类提交都会让
+正在跑的驱动器把整轮 tick 全按住**，直到我重新 build 并重启——为了日志噪音在活任务在飞的时候做这件事
+不值得。当前 ready 池只有 3 个任务（T0906/T1007/T1102），3 个槽本来就装得下，**这一个的收益是零**。
+记在这里，等安静窗口连同别的一起处理（同一个窗口里要动的还有：T0708 的 rights 裁定后读侧通知的立账）。
