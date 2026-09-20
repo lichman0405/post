@@ -142,7 +142,7 @@ func newConflictEnv(t *testing.T, ctx context.Context) *conflictEnv {
 	orgStore := persistence.NewOrgStore(pool)
 	org, _, err := orgStore.CreateOrganization(ctx, domain.Organization{
 		Slug: "conflict-e2e", Name: "Conflict E2E",
-	}, alice.ID, dayStartUTC())
+	}, alice.ID, affiliationToday())
 	if err != nil {
 		t.Fatalf("create fixture org: %v", err)
 	}
@@ -283,10 +283,17 @@ func newConflictEnv(t *testing.T, ctx context.Context) *conflictEnv {
 	return env
 }
 
-func dayStartUTC() time.Time {
-	now := time.Now()
-	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-}
+// affiliationToday is the day the fixtures' memberships start on: "today"
+// asked of the one place that defines it (domain.AffiliationDay).
+//
+// It used to read time.Now()'s LOCAL year/month/day and label it UTC. On a
+// UTC+8 host from 00:00 to 08:00 local that day is still the FUTURE in UTC, so
+// the creator's membership read as not-yet-active and the fixture's project
+// creation was refused ("projects: not allowed") — the date-convention bug
+// T0816 fixed in production (internal/domain/affiliation.go, orgs.today) and in
+// the integration fixtures, missed in this package. Green on CI (UTC) and after
+// 08:00 local; red in the first hours of a UTC+8 morning.
+func affiliationToday() time.Time { return domain.AffiliationDay(time.Now()) }
 
 // do issues one request through the env's cookie jar (JSON content type
 // implied by a non-empty body, like the auth e2e client).

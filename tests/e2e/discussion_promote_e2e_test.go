@@ -151,7 +151,7 @@ func newDiscussionEnv(t *testing.T, ctx context.Context) *discussionEnv {
 	orgStore := persistence.NewOrgStore(pool)
 	org, _, err := orgStore.CreateOrganization(ctx, domain.Organization{
 		Slug: "discusion-e2e", Name: "Discussion E2E",
-	}, alice.ID, dayStartUTC())
+	}, alice.ID, affiliationToday())
 	if err != nil {
 		t.Fatalf("create fixture org: %v", err)
 	}
