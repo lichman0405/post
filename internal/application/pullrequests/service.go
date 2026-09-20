@@ -218,16 +218,22 @@ func validateCreate(in CreatePullRequestParams) error {
 }
 
 // wrapStoreError keeps the expected domain outcomes (missing PR/branch,
-// closed branch, missing head, invalid transition, CAS conflict,
-// terminal, project missing, validation) and turns everything else —
-// including an adapter that cannot run — into ErrStore for the handler,
-// with the cause kept for the log.
+// closed branch, missing head, unstructured source content, invalid
+// transition, CAS conflict, terminal, project missing, validation) and
+// turns everything else — including an adapter that cannot run — into
+// ErrStore for the handler, with the cause kept for the log.
+//
+// ErrBranchUnstructuredChanges is one of the kept outcomes because it is a
+// RULE's refusal, not an outage: the source branch's recorded semantic
+// state is unstructured_changes (00042) and the answer belongs to the
+// caller, who can act on it — 409 on the wire, not "service unavailable".
 func wrapStoreError(err error) error {
 	if err == nil ||
 		errors.Is(err, ErrPullRequestNotFound) ||
 		errors.Is(err, ErrBranchNotFound) ||
 		errors.Is(err, ErrBranchNotActive) ||
 		errors.Is(err, ErrBranchHeadMissing) ||
+		errors.Is(err, ErrBranchUnstructuredChanges) ||
 		errors.Is(err, ErrValidation) ||
 		errors.Is(err, projects.ErrProjectNotFound) ||
 		errors.As(err, new(*TransitionError)) ||

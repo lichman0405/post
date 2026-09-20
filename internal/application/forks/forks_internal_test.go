@@ -1,6 +1,8 @@
 package forks
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 
@@ -202,15 +204,51 @@ func TestForkSlugReserveIsDeterministicForThePair(t *testing.T) {
 	parent := domain.Project{ID: "11111111-1111-4111-8111-111111111111", Slug: "mof-gas"}
 	curie := domain.User{ID: "77777777-7777-4777-8777-777777777777", Handle: "curie"}
 	other := domain.User{ID: "88888888-8888-4888-8888-888888888888", Handle: "curie"}
+	want := "mof-gas-curie-" + pairDigestOf(parent.ID, curie.ID)
 	for i := 0; i < 100; i++ {
 		if got := forkSlugReserve(parent.Slug, curie, parent.ID); got != forkSlugReserve(parent.Slug, curie, parent.ID) {
 			t.Fatalf("the reserved name is not a function of the pair: %q then %q", got, forkSlugReserve(parent.Slug, curie, parent.ID))
 		}
-		if got := forkSlug(parent.Slug, curie, parent.ID); got != "mof-gas-curie" {
-			t.Fatalf("the derived name = %q, want mof-gas-curie", got)
+		if got := forkSlug(parent.Slug, curie, parent.ID); got != want {
+			t.Fatalf("the derived name = %q, want %q", got, want)
 		}
 	}
 	if forkSlugReserve(parent.Slug, curie, parent.ID) == forkSlugReserve(parent.Slug, other, parent.ID) {
 		t.Fatalf("two actors reserved the same name for one project")
+	}
+}
+
+// pairDigestOf re-derives the pair's digest from its definition — sha256
+// over the parent id, a NUL and the actor id, the first four bytes in hex —
+// so the assertions below pin the VALUE rather than calling the function
+// they are checking.
+func pairDigestOf(parentID, actorID string) string {
+	sum := sha256.Sum256([]byte(parentID + "\x00" + actorID))
+	return hex.EncodeToString(sum[:4])
+}
+
+// TestForkSlugCarriesThePairDigest pins the rule's two halves at once: the
+// name is built from what it always was (the parent's slug and the actor's
+// handle, readable), and it now always ends with the digest of (parent id,
+// actor id). The digest is what lets one actor fork two projects that share
+// a slug, which an organization-scoped slug makes possible and a
+// slug-based name would turn into a permanent refusal.
+func TestForkSlugCarriesThePairDigest(t *testing.T) {
+	first := domain.Project{ID: "11111111-1111-4111-8111-111111111111", Slug: "mof-curie"}
+	second := domain.Project{ID: "22222222-2222-4222-8222-222222222222", Slug: "mof-curie"}
+	curie := domain.User{ID: "77777777-7777-4777-8777-777777777777", Handle: "curie"}
+	gotFirst := forkSlug(first.Slug, curie, first.ID)
+	gotSecond := forkSlug(second.Slug, curie, second.ID)
+	if want := "mof-curie-curie-" + pairDigestOf(first.ID, curie.ID); gotFirst != want {
+		t.Errorf("derived name = %q, want %q", gotFirst, want)
+	}
+	if gotFirst == gotSecond {
+		t.Fatalf("two same-named parents derived one name %q — the second fork would be refused by the first fork's own project", gotFirst)
+	}
+	// The reserved name is the same name under the reserve mark: still one
+	// function of the pair, and never equal to the derived one.
+	reserved := forkSlugReserve(first.Slug, curie, first.ID)
+	if reserved != gotFirst+forkReserveMark {
+		t.Errorf("reserved name = %q, want the derived name plus %q", reserved, forkReserveMark)
 	}
 }

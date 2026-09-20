@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -208,6 +209,7 @@ func (s *PullRequestStore) CreatePullRequest(ctx context.Context, in pullrequest
 		if errors.Is(err, pullrequests.ErrBranchNotFound) ||
 			errors.Is(err, pullrequests.ErrBranchNotActive) ||
 			errors.Is(err, pullrequests.ErrBranchHeadMissing) ||
+			errors.Is(err, pullrequests.ErrBranchUnstructuredChanges) ||
 			errors.Is(err, pullrequests.ErrValidation) ||
 			errors.Is(err, projects.ErrProjectNotFound) ||
 			errors.As(err, new(*pullrequests.BranchNotActiveError)) {
@@ -392,13 +394,60 @@ func (s *PullRequestStore) RefreshProposedState(ctx context.Context, projectID s
 	return refreshed, nil
 }
 
+// The two database gates a pull_requests INSERT runs into, told apart by
+// the text their RAISE statement starts with. Both raise SQLSTATE P0001
+// (infra/migrations/00042 and 00086 use the same ERRCODE), so the code
+// alone cannot say which rule refused the row — and the two outcomes are
+// not interchangeable: one is the caller's own content (409, they can fix
+// it) and the other is a cross-project source the application layer
+// refuses as a permission outcome before the insert is ever attempted.
+//
+// The prefixes are the migrations' own sentences, one line each. Matching
+// on them is prefix matching on purpose: the rest of each message names
+// row identifiers that must not be parsed. A message that matches NEITHER
+// — a third trigger added later, or a rewording that leaves these stale —
+// stays a store failure and is answered 503, which is the fail-closed
+// direction: an unplaceable refusal is never reported as a rule the caller
+// can act on.
+const (
+	// semanticGateRaise is 00042's pull_request_semantic_gate: the source
+	// branch's recorded semantic state is unstructured_changes, so no
+	// formal PR may be opened from it (docs/16 §4).
+	semanticGateRaise = "pull request cannot be opened from branch "
+	// forkGateRaise is 00086's pull_request_fork_gate: a cross-project
+	// source branch that is not the opener's own fork of the PR's project.
+	// That read is the store's own check as well (it answers
+	// ErrBranchNotFound for the same condition before the insert); this is
+	// the backstop for a path that got past it.
+	forkGateRaise = "pull request on project "
+)
+
 // mapPullRequestWriteError turns a failed PR insert into the package
 // outcomes: foreign-key and constraint violations on the validated input
-// are domain validation results, everything else is an adapter failure
-// with the cause kept.
+// are domain validation results, a refusal by one of the two semantic
+// gates is that gate's own outcome, and everything else is an adapter
+// failure with the cause kept.
 func mapPullRequestWriteError(err error) error {
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && (pgErr.Code == "23503" || pgErr.Code == "23502" || pgErr.Code == "22P02") || isInvalidText(err) {
+	if errors.As(err, &pgErr) {
+		switch {
+		case pgErr.Code == "23503" || pgErr.Code == "23502" || pgErr.Code == "22P02":
+			return pullrequests.ErrValidation
+		case pgErr.Code == "P0001" && strings.HasPrefix(pgErr.Message, semanticGateRaise):
+			// Both verbs are %w: the outcome is the gate's, and the
+			// database's own refusal stays in the chain. Its text names the
+			// branch and the semantic state it refused on — what an operator
+			// reading a log needs, and what a caller that asserts on the
+			// gate itself (tests/integration/external_fork_e2e_test.go) reads
+			// back. Dropping it here would answer "unstructured changes" to a
+			// caller with no way to see which rule said so.
+			return fmt.Errorf("%w: %w", pullrequests.ErrBranchUnstructuredChanges, err)
+		case pgErr.Code == "P0001" && strings.HasPrefix(pgErr.Message, forkGateRaise) &&
+			strings.Contains(pgErr.Message, "cannot take its source branch from project"):
+			return pullrequests.ErrBranchNotFound
+		}
+	}
+	if isInvalidText(err) {
 		return pullrequests.ErrValidation
 	}
 	return err

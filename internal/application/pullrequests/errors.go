@@ -30,6 +30,18 @@ var (
 	// ErrBranchHeadMissing: a branch of the pair has no head state yet —
 	// a PR always pins two existing states.
 	ErrBranchHeadMissing = errors.New("pullrequests: branch has no head state")
+	// ErrBranchUnstructuredChanges: the SOURCE branch's recorded semantic
+	// state is unstructured_changes, so it cannot open a formal PR. The
+	// rule is docs/16 §4's and it is enforced in the canonical store
+	// (migration 00042's pull_request_semantic_gate, a BEFORE INSERT
+	// trigger that refuses with SQLSTATE P0001) — a branch carrying
+	// changes the platform cannot parse keeps its files and its history,
+	// and its proposal waits until the required scientific semantics are
+	// filled. The adapter recognises that trigger by the text its RAISE
+	// statement starts with, because the trigger and 00086's fork gate
+	// share the one SQLSTATE; anything it cannot attribute stays a store
+	// failure rather than being guessed into this outcome.
+	ErrBranchUnstructuredChanges = errors.New("pullrequests: the source branch carries unstructured changes")
 	// ErrValidation: an input fails the domain shape rules (empty
 	// identity, an invalid title, an oversized body, source == target,
 	// an unknown state value, ...).
@@ -46,11 +58,16 @@ const (
 	CodeBranchNotFound      = "BRANCH_NOT_FOUND"
 	CodeBranchNotActive     = "BRANCH_NOT_ACTIVE"
 	CodeBranchHeadMissing   = "BRANCH_HEAD_MISSING"
-	CodeInvalidTransition   = "PR_INVALID_TRANSITION"
-	CodeStateConflict       = "PR_STATE_CONFLICT"
-	CodeTerminal            = "PR_TERMINAL"
-	CodeValidation          = "VALIDATION_FAILED"
-	CodeUnavailable         = "SERVICE_UNAVAILABLE"
+	// CodeBranchUnstructuredChanges is the contract's own name for the
+	// semantic gate's refusal (specs/api/openapi.yaml, POST
+	// /projects/{projectId}/pull-requests, 409): the source branch's
+	// content is not understood well enough to be proposed.
+	CodeBranchUnstructuredChanges = "BRANCH_UNSTRUCTURED_CHANGES"
+	CodeInvalidTransition         = "PR_INVALID_TRANSITION"
+	CodeStateConflict             = "PR_STATE_CONFLICT"
+	CodeTerminal                  = "PR_TERMINAL"
+	CodeValidation                = "VALIDATION_FAILED"
+	CodeUnavailable               = "SERVICE_UNAVAILABLE"
 )
 
 // TransitionError reports a lifecycle move docs/43 does not allow — the

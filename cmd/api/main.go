@@ -53,6 +53,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/explorehttp"
 	"github.com/lichman0405/post/cmd/api/feedshttp"
 	"github.com/lichman0405/post/cmd/api/fileshttp"
+	"github.com/lichman0405/post/cmd/api/forkshttp"
 	"github.com/lichman0405/post/cmd/api/freezehttp"
 	"github.com/lichman0405/post/cmd/api/gittokenshttp"
 	"github.com/lichman0405/post/cmd/api/inboxhttp"
@@ -240,9 +241,10 @@ func run(args []string) int {
 		// this block for the same reason as the merge adapter — they come
 		// from the provisioning configuration — because the fork service is
 		// assembled later, with the other application services. Both stay nil
-		// without provisioning, exactly like reconcilerPort below: there is
-		// no provider to call, and the one route that would use them (the
-		// external fork) does not exist in this build.
+		// without provisioning; the fork route itself still registers (it is
+		// part of the product API) but answers 503 naming the missing keys,
+		// so a disabled deployment never writes a project row and never calls
+		// a nil adapter.
 		forkProvisioner forks.RepoProvisioner
 		forkImporter    forks.ContentImporter
 	)
@@ -629,7 +631,7 @@ func run(args []string) int {
 	// provider ports (Repos, Imports) are the ones carried out of the
 	// provisioning block above and are nil without provisioning, exactly like
 	// every other provider dependency: the only method that reaches them is
-	// Fork, and this build has no fork route.
+	// Fork, which is the route below.
 	prSvc := pullrequests.NewService(persistence.NewPullRequestStore(pool))
 	forksSvc := forks.NewService(forks.Deps{
 		Projects:     projectAPI.Service(),
@@ -660,6 +662,25 @@ func run(args []string) int {
 		Projects: projectAPI.Service(),
 	})
 	pullrequestsAPI.Register(v1)
+	// Fork surface (T0814): the external-contribution entry —
+	// POST /api/v1/projects/{projectId}/forks. It is the entry of the same
+	// graph the open route above consumes: a non-member's fork is what
+	// makes their later proposal legitimate (open_pr = allow_from_fork),
+	// and the lineage row this route writes is the fact that the open route
+	// reads back. The service instance is shared with the open route on
+	// purpose — one command, whose idempotent repeat and whose lineage are
+	// the same rows for both.
+	//
+	// The project reader is the same reader every project read uses, so the
+	// route's public-parent condition (a fork of a non-PUBLIC parent may
+	// not be created public) is answered by the one visibility rule rather
+	// than a second copy of it.
+	forksAPI := forkshttp.New(forkshttp.Deps{
+		Forks:    forksSvc,
+		Projects: projectAPI.Service(),
+		Missing:  gitCfg.Missing,
+	})
+	forksAPI.Register(v1)
 	// Provenance graph projection (T0505): read-only graph + lineage
 	// routes over the rebuildable provenance_edges projection (migration
 	// 00043). Reads run the same project visibility gate as every other

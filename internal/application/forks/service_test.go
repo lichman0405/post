@@ -2,6 +2,8 @@ package forks_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -46,6 +48,20 @@ func researchBranch() domain.Branch {
 }
 
 func actor() domain.User { return domain.User{ID: actorID, Handle: "curie", DisplayName: "Marie"} }
+
+// forkSlugFor spells out the rule the fork applies to the slug: the parent's
+// slug, the actor's handle, and the digest of the pair (parent id, actor id)
+// — sha256 over the two, NUL-separated, first four bytes in hex. The tests
+// below assert on the VALUE the fork inserts, so the expectation is derived
+// here from the rule rather than by calling the derivation under test.
+//
+// It is the SHORT-name spelling: the fixtures' "mof-gas" and "curie" leave
+// the name far inside the 64-character bound, so the shortening that the
+// long-name tests measure does not bite here.
+func forkSlugFor(parentSlug, handle, parentID, userID string) string {
+	sum := sha256.Sum256([]byte(parentID + "\x00" + userID))
+	return parentSlug + "-" + handle + "-" + hex.EncodeToString(sum[:4])
+}
 
 // ---------------------------------------------------------------- fakes
 
@@ -330,8 +346,8 @@ func TestForkCreatesTheForkAndImportsTheLine(t *testing.T) {
 		t.Fatalf("project creates = %d, want 1", len(h.projects.createCalls))
 	}
 	created := h.projects.createCalls[0]
-	if created.Slug != "mof-gas-curie" {
-		t.Fatalf("derived slug = %q, want mof-gas-curie", created.Slug)
+	if want := forkSlugFor("mof-gas", "curie", parentID, actorID); created.Slug != want {
+		t.Fatalf("derived slug = %q, want %q", created.Slug, want)
 	}
 	if created.Visibility != domain.VisibilityPrivate {
 		t.Fatalf("fork visibility = %q, want private (fail closed)", created.Visibility)
@@ -779,8 +795,8 @@ func TestForkSlugIsDerivedFromParentAndActor(t *testing.T) {
 	if got := h.projects.createCalls[0].Name; got != "My fork" {
 		t.Fatalf("fork name = %q, want the caller's", got)
 	}
-	if got := h.projects.createCalls[0].Slug; got != "mof-gas-curie" {
-		t.Fatalf("slug = %q, want mof-gas-curie", got)
+	if want := forkSlugFor("mof-gas", "curie", parentID, actorID); h.projects.createCalls[0].Slug != want {
+		t.Fatalf("slug = %q, want %q", h.projects.createCalls[0].Slug, want)
 	}
 	other := actor()
 	other.ID = otherActor
@@ -789,8 +805,56 @@ func TestForkSlugIsDerivedFromParentAndActor(t *testing.T) {
 	if _, err := h2.svc.Fork(context.Background(), other, forks.ForkRequest{ProjectID: parentID}); err != nil {
 		t.Fatalf("second actor Fork: %v", err)
 	}
-	if got := h2.projects.createCalls[0].Slug; got != "mof-gas-faraday" {
-		t.Fatalf("second slug = %q, want mof-gas-faraday", got)
+	if want := forkSlugFor("mof-gas", "faraday", parentID, otherActor); h2.projects.createCalls[0].Slug != want {
+		t.Fatalf("second slug = %q, want %q", h2.projects.createCalls[0].Slug, want)
+	}
+}
+
+// TestForkSlugTellsTwoSameNamedParentsApart is the lock-out this rule exists
+// to close. A project's slug is unique per ORGANIZATION (00019: the personal
+// index covers organization_id IS NULL only), so two organizations may each
+// hold a "mof-curie" — and one actor may fork both. Under a name derived
+// from the parent's SLUG alone both forks would derive the same string, the
+// second insert would lose to the fork of the FIRST (a project the actor
+// themselves created), and forkProjectOverTakenName answers that holder with
+// ErrForkSlugTaken because the record cannot tell an in-flight fork from a
+// project that merely holds the name. A slug is not editable and a project
+// row is not deletable, so the second fork would be refused forever.
+//
+// The digest of the pair (parent id, actor id) is what separates them: same
+// slug, different parents, two names.
+func TestForkSlugTellsTwoSameNamedParentsApart(t *testing.T) {
+	const secondParent = "99999999-9999-4999-8999-999999999999"
+	h := newHarness(t)
+	if _, err := h.svc.Fork(context.Background(), actor(), forks.ForkRequest{ProjectID: parentID}); err != nil {
+		t.Fatalf("first fork: %v", err)
+	}
+	first := h.projects.createCalls[0].Slug
+
+	// The second parent carries the SAME slug and a different id, which is
+	// what an organization-scoped slug collision looks like to this service.
+	other := publicParent()
+	other.ID = secondParent
+	h2 := newHarness(t, func(h *harness) {
+		h.projects.project = other
+		h.branches.byID[mainID] = domain.Branch{ID: mainID, ProjectID: secondParent, Name: domain.MainBranchName, GitRef: "refs/heads/main"}
+		h.branches.list = []domain.Branch{h.branches.byID[mainID]}
+	})
+	if _, err := h2.svc.Fork(context.Background(), actor(), forks.ForkRequest{ProjectID: secondParent}); err != nil {
+		t.Fatalf("second fork of a same-named parent: %v", err)
+	}
+	second := h2.projects.createCalls[0].Slug
+
+	if first == second {
+		t.Fatalf("two same-named parents derived the same fork slug %q — the second fork would be permanently locked out", first)
+	}
+	for _, tc := range []struct{ got, want string }{
+		{first, forkSlugFor("mof-gas", "curie", parentID, actorID)},
+		{second, forkSlugFor("mof-gas", "curie", secondParent, actorID)},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("slug = %q, want %q (the pair's own digest)", tc.got, tc.want)
+		}
 	}
 }
 
@@ -919,8 +983,9 @@ func TestForkSlugStaysWithinTheBound(t *testing.T) {
 //	to the pair's reserved name and completes there — the holder is not
 //	touched, and nothing is written as if the fork already existed.
 func TestForkMovesToTheReservedNameWhenAnotherProjectHoldsTheName(t *testing.T) {
+	want := forkSlugFor("mof-gas", "curie", parentID, actorID)
 	h := newHarness(t, func(h *harness) {
-		h.projects.createErrFor = map[string]error{"mof-gas-curie": projects.ErrSlugTaken}
+		h.projects.createErrFor = map[string]error{want: projects.ErrSlugTaken}
 		h.links.slugHeld = true
 		h.links.slugCreator = otherActor
 	})
@@ -935,8 +1000,8 @@ func TestForkMovesToTheReservedNameWhenAnotherProjectHoldsTheName(t *testing.T) 
 		t.Fatalf("project creates = %+v, want the derived name and then the reserved one", h.projects.createCalls)
 	}
 	derived, reserved := h.projects.createCalls[0].Slug, h.projects.createCalls[1].Slug
-	if derived != "mof-gas-curie" {
-		t.Fatalf("first slug = %q, want the derived mof-gas-curie", derived)
+	if derived != want {
+		t.Fatalf("first slug = %q, want the derived %q", derived, want)
 	}
 	if !strings.HasPrefix(reserved, derived) || !strings.HasSuffix(reserved, "-2") {
 		t.Fatalf("reserved slug = %q, want the derived name %q carrying the reserve mark", reserved, derived)
@@ -975,8 +1040,9 @@ func TestForkMovesToTheReservedNameWhenAnotherProjectHoldsTheName(t *testing.T) 
 //   - and the answer says what is true of the record instead of reporting a
 //     fork that may not exist.
 func TestForkRefusesAccuratelyWhenTheActorOwnsTheName(t *testing.T) {
+	want := forkSlugFor("mof-gas", "curie", parentID, actorID)
 	h := newHarness(t, func(h *harness) {
-		h.projects.createErrFor = map[string]error{"mof-gas-curie": projects.ErrSlugTaken}
+		h.projects.createErrFor = map[string]error{want: projects.ErrSlugTaken}
 		h.links.slugHeld = true
 		h.links.slugCreator = actorID
 	})
@@ -992,7 +1058,7 @@ func TestForkRefusesAccuratelyWhenTheActorOwnsTheName(t *testing.T) {
 			h.repos.ids, len(h.creator.inputs), len(h.links.claims), len(h.imports.reqs), len(h.links.setCalls))
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "mof-gas-curie") {
+	if !strings.Contains(msg, want) {
 		t.Errorf("the refusal does not name the slug it lost to: %q", msg)
 	}
 	if strings.Contains(msg, "already being created") {
@@ -1044,7 +1110,7 @@ func TestForkReportsAStoreFailureWhenTheHolderCannotBeRead(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, func(h *harness) {
-				h.projects.createErrFor = map[string]error{"mof-gas-curie": projects.ErrSlugTaken}
+				h.projects.createErrFor = map[string]error{forkSlugFor("mof-gas", "curie", parentID, actorID): projects.ErrSlugTaken}
 				tc.set(h)
 			})
 			_, err := h.svc.Fork(context.Background(), actor(), forks.ForkRequest{ProjectID: parentID})

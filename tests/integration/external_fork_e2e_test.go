@@ -62,6 +62,8 @@ package integration
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -78,6 +80,8 @@ import (
 
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/fileshttp"
+	"github.com/lichman0405/post/cmd/api/forkshttp"
+	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
 	"github.com/lichman0405/post/cmd/api/pullrequestshttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
@@ -238,10 +242,27 @@ func newExternalForkFixture(t *testing.T) *externalForkFixture {
 	})
 	mux := http.NewServeMux()
 	authAPI.Register(mux)
+	// The organization surface, registered the same dual way cmd/api does:
+	// the fork e2e's two same-named-parents case needs projects that live in
+	// two organizations, which is the only way two projects may share a slug.
+	orgAPI := orgshttp.New(orgshttp.Deps{Store: orgStore})
+	mux.Handle("/api/v1/organizations", orgAPI.Routes())
+	mux.Handle("/api/v1/organizations/", orgAPI.Routes())
 	mux.Handle("/api/v1/projects", projectAPI.Routes())
 	mux.Handle("/api/v1/projects/", projectAPI.Routes())
 	rsghttp.New(rsghttp.Deps{Service: rsgSvc}).Register(mux)
-	pullrequestshttp.New(pullrequestshttp.Deps{PullRequests: prSvc, Projects: projectSvc}).Register(mux)
+	// The proposal route (T0814 wired it): `Create` is the external
+	// contribution command, the same instance the fork route below shares,
+	// so an external proposal over HTTP is the very call the T0804 tests
+	// make in-process.
+	pullrequestshttp.New(pullrequestshttp.Deps{
+		PullRequests: prSvc,
+		Create:       forkSvc,
+		Projects:     projectSvc,
+	}).Register(mux)
+	// The fork route (T0814): the external-contribution entry, with the
+	// same project reader every other project read uses.
+	forkshttp.New(forkshttp.Deps{Forks: forkSvc, Projects: projectSvc}).Register(mux)
 	// The read-only file surface (T0307): the only place the product serves
 	// bytes out of a repository, and therefore the surface criterion 5 has
 	// to probe.
@@ -563,9 +584,10 @@ func TestExternalForkEndToEnd(t *testing.T) {
 
 	// ---- (4) The anonymous column: all three cells are deny. The two
 	// actions with an HTTP route are refused before routing (401, the
-	// guard's structural answer), the third is refused by the service (the
-	// product has no PR-create route yet — pullrequestshttp is read-only —
-	// so the service IS its product path).
+	// guard's structural answer), and here the third is refused by the
+	// service — T0814 wired the proposal and fork ROUTES afterwards, and
+	// their anonymous answers over real HTTP are asserted in
+	// external_fork_http_e2e_test.go (which drives all three).
 	anonymous := newTestUserClient(fx.ts.URL)
 	for _, tc := range []struct {
 		name string
@@ -1823,9 +1845,16 @@ func TestExternalForkLineageClaimIsACompareAndSwap(t *testing.T) {
 
 // derivedForkSlug is the name the fork service derives for (parent, actor),
 // as the test side must see it to occupy that name: the parent's slug, a
-// dash, and the actor's identity — their handle, or their id compacted when
-// they carry none (which is what these fixture actors pass: the service is
-// called with domain.User{ID}).
+// dash, the actor's identity — their handle, or their id compacted when they
+// carry none (which is what these fixture actors pass: the service is called
+// with domain.User{ID}) — and the pair's digest (forkSlug, T0814).
+//
+// The digest is part of EVERY fork name, short ones included, so the name a
+// third party must hold to contest a fork is this one and not the plain
+// "<parent slug>-<handle>". That shape is still fully computable from public
+// facts — the parent's id and the actor's id are both public — which is what
+// these tests rest on: somebody else can occupy the name a fork will derive,
+// and the flow must survive that.
 //
 // It is deliberately a re-derivation and not a call into the service: the
 // point of the tests below is that SOMEBODY ELSE can compute this name from
@@ -1838,7 +1867,8 @@ func derivedForkSlug(t *testing.T, parent domain.Project, actor domain.User) str
 	if handle == "" {
 		handle = strings.ReplaceAll(actor.ID, "-", "")
 	}
-	slug := parent.Slug + "-" + handle
+	sum := sha256.Sum256([]byte(parent.ID + "\x00" + actor.ID))
+	slug := parent.Slug + "-" + handle + "-" + hex.EncodeToString(sum[:4])
 	if !domain.ValidProjectSlug(slug) {
 		t.Fatalf("external fork e2e: the fixture's derived slug %q is not a valid project slug — this test needs the unshortened shape", slug)
 	}

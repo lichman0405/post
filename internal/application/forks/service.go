@@ -351,13 +351,15 @@ func (s *Service) Lineage(ctx context.Context, reader projects.Reader, projectID
 // cannot be deleted (nothing disappears; state only evolves).
 //
 // The loose end that compare-and-swap has is that the name it arbitrates
-// on is not a secret: a personal-slug index is global, so a third party can
-// register "<parent slug>-<handle>" before the actor forks, and the actor's
-// own older project can already hold it. Either way the name is gone for
-// good (nothing is deleted), so a fork that only ever tried the derived name
-// would be deadlocked by a name its own owner cannot free — and reporting
-// that as "a fork of yours is being created" would be a claim no row
-// supports. On a lost insert the holder's creator therefore decides:
+// on is not a secret: it is computable from public facts (the parent's
+// slug and id, the actor's handle and id), so a third party can register
+// "<parent slug>-<handle>-<pair digest>" before the actor forks, and the
+// actor's own older project can already hold it. Either way the name is
+// gone for good (nothing is deleted), so a fork that only ever tried the
+// derived name would be deadlocked by a name its own owner cannot free —
+// and reporting that as "a fork of yours is being created" would be a
+// claim no row supports. On a lost insert the holder's creator therefore
+// decides:
 //
 //   - held by ANOTHER actor (forkProjectOverTakenName): provably not this
 //     pair's fork project, because a fork project is created by the actor
@@ -679,24 +681,36 @@ func (s *Service) sourceBranch(ctx context.Context, parent domain.Project, branc
 // itself is the compare-and-swap, before any other row exists to be
 // duplicated.
 //
-// The shape is "<parent slug>-<actor handle>" while that fits in the
-// 64-character bound (maxForkSlug, the domain's own). When it does not,
-// BOTH parts are shortened around a digest of the pair — the parent's id
-// and the actor's id — so the result is a valid project slug for every
-// input the domain accepts, at any handle length, and still tells apart
-// the forks the long names alone could not: two long-named parents for one
-// actor, and two actors whose handles share a long prefix. What the
-// shortening drops is carried by the digest, which is why the actor's part
-// is not kept whole the way it was before: a 64-character handle cannot
-// coexist with any parent slug at all, so something has to give, and the
-// digest is what makes giving it up safe.
+// The shape carries the pair's digest ALWAYS, not only when the plain
+// "<parent slug>-<actor handle>" overflows the 64-character bound
+// (maxForkSlug, the domain's own). The long-name case is still what the
+// shortening is for — the parent's slug and the actor's handle are both
+// cut around forkPairDigest(parentID, actorID), so the result is a valid
+// project slug at any handle length the domain accepts and still tells
+// apart two long-named parents for one actor and two actors whose handles
+// share a long prefix.
+//
+// What the digest adds on the SHORT names is the reason it is
+// unconditional. A personal-slug index is global, but a parent's slug is
+// not: a project's slug is unique per organization (00019's
+// projects_personal_slug_idx covers only organization_id IS NULL), so two
+// organizations may each hold a "mof-curie" — and with the plain shape,
+// one actor forking both derives the SAME name twice. The second fork
+// then loses the insert to the fork of the FIRST one, which is the
+// actor's own project: forkProjectOverTakenName answers ErrForkSlugTaken
+// for a holder this actor created, because the record cannot tell an
+// in-flight fork of theirs from a project that merely holds the name. A
+// slug is not editable and a project row is not deletable
+// (internal/application/projects/settings.go: UpdateSettingsInput has no
+// name/slug), so that answer would be PERMANENT: a legal fork of a
+// readable project, refused forever by a name the actor cannot free.
+// Deriving from the pair (parent id, actor id) makes two same-named
+// parents two different names, so the deadlock cannot arise, and the
+// "held by another actor" escalation to forkSlugReserve keeps its
+// meaning: it is about a name somebody else registered, not about the
+// actor's own earlier fork.
 func forkSlug(parentSlug string, actor domain.User, parentID string) string {
-	head := slugToken(parentSlug)
-	handle := forkHandle(actor)
-	if base := head + "-" + handle; len(base) <= maxForkSlug {
-		return base
-	}
-	return forkSlugDigest(head, handle, forkPairDigest(parentID, actor.ID), "")
+	return forkSlugDigest(slugToken(parentSlug), forkHandle(actor), forkPairDigest(parentID, actor.ID), "")
 }
 
 // forkSlugReserve is the name a fork falls back to when its derived name is
@@ -728,14 +742,19 @@ func forkHandle(actor domain.User) string {
 	return slugToken(strings.ReplaceAll(actor.ID, "-", ""))
 }
 
-// forkPairDigest shortens the pair (parent id, actor id) to eight hex
-// characters. Both ids were the parts a shortened name stopped carrying
-// whole, so both go in: the parent's id keeps two long-named parents apart
-// for one actor, and the actor's id keeps two actors apart when their
-// handles are cut to the same prefix.
+// forkPairDigest reduces the pair (parent id, actor id) to eight hex
+// characters. BOTH ids go in, and both are needed whatever the name's
+// length:
+//
+//   - the parent's id, because a slug is unique per organization and two
+//     organizations may hold the same one — the plain
+//     "<parent slug>-<handle>" would collide for one actor forking both
+//     (see forkSlug);
+//   - the actor's id, because two actors' handles can be cut to the same
+//     prefix by the shortening below.
 //
 // A digest collision — 32 bits, and it would have to land on the same pair
-// of shortened names as well — costs a fork its derived name, not its
+// of name parts as well — costs a fork its derived name, not its
 // identity: it escalates to the reserved name or is answered with
 // ErrForkSlugTaken, and the number of forks per pair is decided by the
 // slug's unique index, never by this digest.
@@ -744,10 +763,13 @@ func forkPairDigest(parentID, actorID string) string {
 	return hex.EncodeToString(sum[:4])
 }
 
-// forkSlugDigest renders the shortened shape: as much of the actor's handle
-// as it needs (the handle is what names the fork to its owner), as much of
-// the parent's slug as is then left, the pair's digest and the reserve mark
-// when this is the reserved name.
+// forkSlugDigest renders the fork's name: as much of the actor's handle as
+// it needs (the handle is what names the fork to its owner), as much of the
+// parent's slug as is then left, the pair's digest and the reserve mark
+// when this is the reserved name. Every fork name is rendered here, short
+// ones included — the digest is what makes two same-named parents two
+// names (forkSlug), and shortening is what keeps the result inside the
+// bound for the long ones.
 //
 // The budget is computed from the tail that must fit — not guessed — and
 // the handle is cut to it, so the result is at most maxForkSlug characters
@@ -948,6 +970,14 @@ func mapBranchError(err error) error {
 // outcomes through unchanged — the caller of an external proposal sees the
 // same answers an internal one does — and reports anything else as a store
 // failure.
+//
+// ErrBranchUnstructuredChanges is one of the passed-through outcomes, and
+// it is the one this function exists for as much as the others: an
+// external contributor's fork branch is just as capable of carrying
+// unparseable content as an internal one (docs/16 §4), the database gate
+// refuses the insert either way (00042), and the contributor is the one
+// who has to fill the semantics in. Folding it into ErrStore would tell
+// them the platform is down.
 func mapPullRequestError(err error) error {
 	switch {
 	case err == nil,
@@ -955,6 +985,7 @@ func mapPullRequestError(err error) error {
 		errors.Is(err, pullrequests.ErrBranchNotFound),
 		errors.Is(err, pullrequests.ErrBranchNotActive),
 		errors.Is(err, pullrequests.ErrBranchHeadMissing),
+		errors.Is(err, pullrequests.ErrBranchUnstructuredChanges),
 		errors.Is(err, projects.ErrProjectNotFound),
 		errors.Is(err, ErrForbidden):
 		return err

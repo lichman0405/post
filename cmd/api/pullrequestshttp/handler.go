@@ -337,6 +337,18 @@ func openErrorOutcome(err error) (status int, code, message string) {
 		return http.StatusConflict, pullrequests.CodeBranchNotActive, "branch lifecycle is not active"
 	case errors.Is(err, pullrequests.ErrBranchHeadMissing):
 		return http.StatusConflict, pullrequests.CodeBranchHeadMissing, "branch has no head state"
+	case errors.Is(err, pullrequests.ErrBranchUnstructuredChanges):
+		// The source branch's recorded semantic state is
+		// unstructured_changes (00042's pull_request_semantic_gate): its
+		// content carries changes the platform cannot parse, and docs/16
+		// §4 forbids proposing them until the required scientific
+		// semantics are filled. 409, the contract's answer for this state,
+		// and the same status the closed-branch and missing-head cases
+		// above use — the request is well-formed, the branch is simply not
+		// in a state that can carry a formal proposal. The message names
+		// the fix, because the caller is the one who has to make it.
+		return http.StatusConflict, pullrequests.CodeBranchUnstructuredChanges,
+			"the source branch carries changes the platform cannot parse; fill the required scientific semantics before proposing from it"
 	case errors.Is(err, forks.ErrValidation), errors.Is(err, pullrequests.ErrValidation):
 		return http.StatusBadRequest, pullrequests.CodeValidation, "validation failed"
 	default:
