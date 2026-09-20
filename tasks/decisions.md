@@ -14826,3 +14826,119 @@ main 之后还能不能被发布」是 L3，停下来报 blocked。**这个判�
 立 T0611 的任务书时我把 release gate 写成主角、把发布门写进了第 6 段（「两个读者不许有分歧」），
 **但漏了一句「修完之后发布门的结论也会变，那是预期的」**——于是 Worker 撞到它时只能停下来问。
 下次立这种「修共享读」的任务，书里要写明**下游读者的预期变化**，并把允许改动的测试点名。
+
+---
+
+## 2026-09-20（安全评审的两条，一条我判成缺陷、一条要 owner 裁定）
+
+自动安全评审（`internal/persistence/queries/events_audit.sql`，MEDIUM／授权·可见性）报了一条，
+我逐行核过之后发现它其实是**两条**，**性质完全不同**，所以处置也不同。
+
+### 第一条：Activity 的研究事件读不带读者——**我判成缺陷，立 T0613**
+
+**事实**：`ListProjectActivity` 的 research 支路（`internal/persistence/queries/events_audit.sql:91-101`）
+把 `research_events` 的行**不分可见性**整片返回；而路由的门只是**项目**读门
+（`cmd/api/main.go:479-487` 的 `audit.ProjectsReadGate(projectAPI.Service())`），**公开项目**的读对
+**每一个 matrix 类别**都是 allow（`specs/policies/permissions-matrix.csv:2`）。于是**任何已登录的读者**
+读一个公开项目的 Activity，就能看到该项目的私有分支上的提交事件（`payload` 里带 state id、branch id、
+提交消息）。事件确实是 `private`：`internal/application/rsg/events.go:36-42`
+（写路径自己的话：`an event is never more visible than its subject`）。
+
+**为什么这是缺陷而不是设计**：它违反两条**已经写死的**规矩——① 上面那条写路径的规矩；
+② ADR-024 的渲染判据（非公开行只给当事项目成员；解析不出来时只给 public 行，fail-closed）。
+同一条轴在别处已经被守住（`internal/events/fanout.go:181`、`internal/events/subscription.go:267`）。
+`internal/application/audit/service.go:50-55` 把"事件的 visibility 只渲染、不复查"写成了设计理由，
+**这一句站不住**：那一列的语义就是"能不能被公开读渲染"，谁在读就必须进到读里——
+和 ADR-024 推翻证据读的那条论证是**同一个论证**。
+
+**为什么不算越 L3**：这是把 ADR-024 已经定下的规矩铺到**第三个读出口**（它当时只对齐了证据的两个出口），
+方向是**收窄**、fail-closed，且成员仍然看得见自己项目的私有行（`tests/integration/activity_sources_test.go:303-304`
+现在正面钉着这一条）。**不改写任何产品规则。** 已立 **T0613**（书在 `tasks/packages/T0613.json`，
+依赖 T0511——先让 ADR-024 的证据侧落地，再照同一条轴做第三处；同时避免两个工人同时重生 sqlc）。
+
+**为什么以前的测试没抓到**：`tests/integration/activity_sources_test.go` 建的是**私有**项目
+（`:191`）——私有项目的门本来就挡住非成员，所以"整片返回"在那格上是安全的。**公开项目 + 私有事件**
+这一格从来没有人测过。
+
+### 第二条：`branches.visibility` 在读侧完全没有被执法——**要 owner 裁定，我不动**
+
+**事实（读代码得到的，不是猜）**：`branches.visibility` 存在（`infra/migrations/00004_rsg_state.sql:16`，
+`CHECK (visibility IN ('public','private'))`）、由创建者显式指定（`cmd/api/rsghttp/handlers.go:144-166`）、
+并且**被写进了事件的可见性**（`rsg/events.go` 的 `eventVisibility(branch.Visibility)`）——
+**但读侧没有任何地方按它过滤**：`internal/persistence/queries/rsg.sql` 只在两条 INSERT 里出现这一列，
+`internal/application/rsg/service.go` 的 `GetObject` 只检查"项目读门"与"分支存在"。
+也就是说：**公开项目里的一条私有分支，非成员只要知道 branch id，就能读到里面的对象。**
+
+**为什么我不动**：文档没有回答"非成员在公开项目的私有分支里能读什么"。
+`docs/09_VERSION_CONTROL.md:5` 只说新分支的**默认**可见性、以及 private→public 必须走显式评审；
+`docs/12_PERMISSIONS_RIGHTS_POLICY.md` §2 只说"Public Project：accepted RSG 与公开研发历史可见"、
+§3 只说"不扩大可见性"；ADR-024 只管证据断言那一列。**"私有分支对非成员意味着什么"是权限模型的决定**，
+属于 L3，**不是我该自己定的**。所以：记录下来、留待 owner 裁定，**不在 T0613 里顺手修**
+（顺手修会把一件要人拍板的事做成既成事实）。
+
+**这一条也说明 T0613 只关掉了一半的门**：Activity 修好之后，非成员不再从 Activity 里**拿到**
+私有分支的 branch id；但"知道 id 就能读"这件事要等上面这条裁定。**两件事都要说清楚，不能只报好消息。**
+
+## 2026-09-21（T0817 加宽范围；T0612 的无声死亡；派工器的「无收割」死结）
+
+### 1. T0817 的第一轮返回 blocked —— 判断是对的，范围加两处
+
+Worker 把 merge 侧的源侧读法改对了，而且给了完整证据：**三层负向证据全绿**（store 的 not-found；
+原始 INSERT 撞 00086 的 `pull_request_fork_gate`，`P0001` 且消息含三个短语；停触发器造出**插入门之后**的形状后
+merge 显式拒绝且一个字节都不写——0 条 `semantic_merges`、目标分支头未动、PR 仍 `merge_ready`），
+**MUTATION CHECK 证明那一行改动是承重的**（把源侧读法改回 `s.branch(ctx, pr.ProjectID, pr.SourceBranchID)`，
+同一条 e2e 立刻退化成 `404 BRANCH_NOT_FOUND`，还原后哈希一致）。
+
+**闭环没走完的原因不在他手里**：merge 请求被它自己服务端重跑的完整性前置检查拒绝，
+`409 PR_INTEGRITY_BLOCKED`，两条 blocking 都来自 `allowed_scope` 之外——
+
+- (a) `provenance/source_chain_unbroken`：源链**有 2 个 head**。其中 `a607c68f` 是 fork 导入写下的那个状态
+  （`internal/gitprovider/push_ingestion_store.go:311` 的 `INSERT INTO project_states`，`parent_state_id` 为 NULL、
+  没有任何 `state_commits` 行；导入只推进 `git_branch_refs.head_sha`，**不动 `branches.base_state_id`**），
+  `f069c226` 是贡献者随后写的状态（父 = fork 项目的 genesis root）。
+- (b) `provenance/commit_linkage`：`internal/application/prchecks` **只在 PR 的项目里**解析链的边界
+  （`service.go:219`/`:226`），跨项目的源链在它眼里根本不成链。
+
+**裁决：这两处都归 T0817，`allowed_scope` 加上 `internal/application/prchecks/**` 与 `internal/gitprovider/**`。**
+理由：它们是**同一个「项目只有一个」的假设**的另外两个出口——T0817 自己的题目就是「凡是在 merge 路径上按
+`in.ProjectID` 取值的地方，都要重新问一次这个值属于哪一侧」。拆成三个任务只会把同一条链的读法分三次改，
+每一次还要在同一个闭环上把三层证据重跑一遍。**这不是 L2**：没有新的跨模块接口，没有新的存储边界，
+也没有放宽任何一道门；改的是同一批读法里「问一次属于哪一侧」的覆盖面。
+
+约束照旧写进任务书（`tasks/packages/T0817.json` 最后一条）：**优先在最窄的地方修**（能落在
+`internal/application/forks/**` 的导入编排里，就不要动 `internal/gitprovider/**` 的通用推送路径）；
+若确实要动 push 摄取，必须证明**非 fork 的推送路径**行为未变并点名钉着它的测试；
+闭环上若还有第三处同源读法挡路，范围内就一并修、范围外就停下来报。
+
+### 2. T0612 的进程无声死亡：退出码记 unknown（-1），同一 session 续跑
+
+**事实**：2026-09-20 22:14，T0612 的 Worker（pid 2498387）与它的 reaper（session leader，pid 2498386）
+**一起消失**，`exit.status` 两个副本（`.rddev/workers/T0612/` 与 `.rddev/runtime/tasks/T0612/`）谁都没写。
+于是 `rddev worker list` 一直报 `stale … no exit status recorded`，而**派工脚本从 22:48 起一直在
+`pending [T0612] / T0612 still working`**——空转 **7.5 小时**（直到 owner 问"你卡死了吗"）。
+它的 diff 是完整的：`tests/integration/abort_e2e_test.go`（+66/-2，已把裸的 `PullRequestNumber` 比较换成
+`sameAbortTwoWays(a,b)`）+ 一个自标 TEMPORARY 的探针文件；缺的是 `RESULT.json` 与收尾的实测证据。
+
+**处置**：`task reject`（running → rejected，理由写事实，不写评价）→ 把 `-1` 写进**两个** `exit.status` 副本 →
+`rddev worker list` 把它 reconcile 成 `exited(-1)` → `worker rework --reason-file` **resume 同一个 session**
+（diff 不重来）。返工信里写明：**这不是判失败，是运行状态**；要收的是 `RESULT.json`、mutation check 原文、
+真 PostgreSQL 上 `-TestAbort -v` 与 `make test-integration` 全绿、并**删掉探针文件**（三条结论搬进 RESULT）。
+
+**`-1` 是诚实的**：它是仓库自己给「没有记录到退出码」的哨兵（`internal/devorchestrator/worker_stop.go` 的
+`recordStop`：`or a synthetic -1 when none was recorded`），**不是 0**——collect 把非 0 读成"这一轮没完成"。
+写两个副本是为了让 collect 的 gate-inputs 字节比对仍然成立（一个真实退出码在两边本来就是一致的）。
+**我为什么手工写**：没有任何命令支持「reaper 没写时替它记一个」，见下。
+
+### 3. 派工器的死结：reaper 没写 exit.status 时，任务无路可走
+
+**这是缺陷，记在这里，今天修。** `reconcileWorker` 只在推导出的状态是 `WorkerExited` 时才去读退出码，
+而 `WorkerExited` 的前提正是**存在** `exit.status`——于是「进程没了、reaper 也没留痕」的 Worker 永远停在
+`WorkerStale`：
+
+- `collect` 拒绝（`exit status … not recorded`），
+- `rework` / `respawn` 拒绝（`the previous Worker … has not exited`），
+- 任务因此**永远停在 `running`**，唯一出路是手工写一个退出码（今天做的），
+- 而派工脚本**永远不会自己发现**——它读到的只是"还在干"。
+
+今天在盘上还有两个同样的记录（T1007、T1102）。**这不是某一笔任务的事，是控制平面的事**：
+一个 Worker 死得没有收割记录，不该让它的任务在被人工发现之前一直悬着。

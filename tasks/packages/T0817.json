@@ -27,7 +27,9 @@
 
     "**需要新迁移怎么办**：本任务**预期不需要**新迁移（`project_forks` 与 `semantic_merges` 都已经存在）。若你判断确实需要，**不要自己选号**，在 RESULT 里报上来由我分配。",
 
-    "**范围纪律**：只改 `allowed_scope`。`specs/**`、`tasks/**`、`docs/**`、`infra/migrations/**` 都不在你的范围内。**不许为了让测试变绿而删测试、跳过测试、放宽断言或放大超时**（`CLAUDE.md` §5.1、§6）。"
+    "**范围纪律**：只改 `allowed_scope`。`specs/**`、`tasks/**`、`docs/**`、`infra/migrations/**` 都不在你的范围内。**不许为了让测试变绿而删测试、跳过测试、放宽断言或放大超时**（`CLAUDE.md` §5.1、§6）。",
+
+    "**（2026-09-21 Supervisor 裁决，覆盖上一轮返回的 `blocked`）** 你的第一次交付把 merge 侧的源侧读法改对了，负向证据三层齐全（store 的 not-found / 00086 触发器的 P0001 / 触发器之后的形状 merge 显式拒绝且一个字节都不写），但闭环被两个 **`allowed_scope` 之外**的阻塞挡成 409 `PR_INTEGRITY_BLOCKED`，你在 RESULT 里点名了它们：(a) fork 导入在 fork 分支上留下一个「既不是分支头、也没有任何 `state_commit` 命名它」的状态——`internal/gitprovider` 的 push 摄取只推进 `git_branch_refs.head_sha`、不动 `branches.base_state_id`（`internal/gitprovider/push_ingestion_store.go:311` 写下的状态 `parent_state_id` 为 NULL）；(b) `internal/application/prchecks` 只在 **PR 的项目**里解析链的边界（`internal/application/prchecks/service.go:219`/`:226`），于是跨项目链被判成「2 个 head」（`provenance/source_chain_unbroken`、`provenance/commit_linkage`）。**裁决：这两处都归本任务。** 它们是同一个「项目只有一个」的假设的另两个出口，拆成三个任务只会把同一条链的读法分三次改、每次都要在同一个闭环上重跑一遍证据。`allowed_scope` 已因此加上 `internal/application/prchecks/**` 与 `internal/gitprovider/**`。要求：① **优先在最窄的地方修**——能落在 `internal/application/forks/**`（导入的编排，已在范围内）就不要动 `internal/gitprovider/**` 的通用推送路径；② 若确实要动 push 摄取，必须证明**非 fork 的推送路径**行为未变，并在 RESULT 里点名哪条既有测试钉着它；③ 闭环上若还有第三处同源读法挡路，落在 `allowed_scope` 内就一并修、落在范围外就停下来在 RESULT 里报；④ 这三处都属于「把项目从一个变成两侧」的同一件事，**不许**顺手放宽任何一道门（第 4 条照旧）。"
   ],
   "deliverables": [
     "merge 路径在源侧按「源分支自己所在的项目」解析源分支、提案状态与内容版本，目标侧仍按 PR 的项目落地",
@@ -48,6 +50,8 @@
     "internal/application/forks/**",
     "internal/application/diffs/**",
     "internal/application/pullrequests/**",
+    "internal/application/prchecks/**",
+    "internal/gitprovider/**",
     "internal/persistence/**",
     "cmd/api/**",
     "tests/**",
@@ -71,6 +75,6 @@
     "specs/policies/permissions-matrix.csv",
     "docs/adr/ADR-023-asset-fork-derive-lineage.md"
   ],
-  "scope_note": "范围按「这一改动会碰到什么」划：merge 服务本身、fork 谱系的读、以及 merge 用到的两个协作者（diffs 的输入与 rsg merge 计划的输入）——后两个正是把「项目」从一个变成两个时必须一起看的地方。`internal/persistence/**` 是必须的：解析源侧项目需要一条按 id 读分支/谱系的查询（`queries/**` 改了就要重新生成 `sqlc/**`，那是派生件）。`cmd/api/**` 只在你需要把「源侧项目」这件事暴露到接线层时才用得上——如果你用了，在 RESULT 里说明为什么不能在服务层解析。`infra/migrations/**` 不在范围内：本次预期不需要 schema 变化，需要就报上来。",
+  "scope_note": "范围按「这一改动会碰到什么」划：merge 服务本身、fork 谱系的读、以及 merge 用到的两个协作者（diffs 的输入与 rsg merge 计划的输入）——后两个正是把「项目」从一个变成两个时必须一起看的地方。`internal/persistence/**` 是必须的：解析源侧项目需要一条按 id 读分支/谱系的查询（`queries/**` 改了就要重新生成 `sqlc/**`，那是派生件）。`cmd/api/**` 只在你需要把「源侧项目」这件事暴露到接线层时才用得上——如果你用了，在 RESULT 里说明为什么不能在服务层解析。`infra/migrations/**` 不在范围内：本次预期不需要 schema 变化，需要就报上来。**2026-09-21 加宽（Supervisor 裁决）**：`internal/application/prchecks/**` 与 `internal/gitprovider/**` 进范围——第一次交付在闭环上量出两个同源的跨项目盲点，它们不在原范围里，于是那一次只能返回 blocked。加宽的理由与边界写在 `requirements` 最后一条。",
   "supervisor_scope_narrowing": "**没有收窄，是把 T0814 的一半拆出来。** T0814 的 `allowed_scope` 里没有 merge 服务、也没有 persistence 的查询层——那正是它的 AC8 走不通的原因，也是一个「照契约接线」的任务不该顺手改 merge 的理由。拆出来之后两边的范围各自干净：T0814 只接 HTTP 与契约，本任务只改合并路径。**依赖写 T0804 与 T0601：前者给 fork 谱系，后者给 merge 引擎和「main 只能经 merge 前进」这条结构性规则；两者都已合并，所以本任务随时可派。**"
 }

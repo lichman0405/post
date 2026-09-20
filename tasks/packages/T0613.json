@@ -1,0 +1,75 @@
+{
+  "id": "T0613",
+  "dependencies": [
+    "T0511"
+  ],
+  "tests": [
+    "activity feed audience e2e"
+  ],
+  "phase": "P6",
+  "phase_name": "Frozen Main、Abort、Policy 与 Release",
+  "title": "Activity 的研究事件读必须带上读者：非公开行不给非成员（ADR-024 同一条规矩的第三个出口）",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "requirements": [
+    "**出处是 2026-09-20 的自动安全评审，不是新需求。** 它在 `internal/persistence/queries/events_audit.sql` 上标了一条 MEDIUM（授权/可见性）：`ListProjectActivity` 的 research 支路把 `research_events` 的行**不分可见性**整片返回。**我自己核过，成立**，而且它违反的是仓库里**已经写死的两条规矩**（下面第 3 条）——所以这是把 ADR-024 那条规矩铺到**第三个读出口**，不是新造产品规则。",
+    "**为什么可达（逐行核过，你也要自己再核一遍并写进 RESULT）。**路由的门只是**项目**读门：`cmd/api/main.go:479-487` 把 `audit.ProjectsReadGate(projectAPI.Service())` 交给 Activity 表面，注释逐字 `so a resource's activity is exactly as visible as the resource itself`；而**公开项目**的读对**每一个 matrix 类别**都是 allow（`specs/policies/permissions-matrix.csv:2` 逐字 `read_public_project,allow,allow,allow,allow,allow,allow,allow`；`internal/application/projects/service.go:137` 同文）。于是**任何已登录的读者**都能读公开项目的 Activity，而 research 支路（`internal/persistence/queries/events_audit.sql:91-101`）**没有任何可见性谓词**：`e.visibility` 只是被 SELECT 出来当数据渲染。而私有分支上的提交事件确实会被存成 `private`（`internal/application/rsg/events.go:36-42`，分支可见性由创建者显式指定：`cmd/api/rsghttp/handlers.go:144-166`），公开项目里开一条私有分支是合法形状。",
+    "**它违反的两条既有规矩。** ①**写路径自己的规矩**：`internal/application/rsg/events.go:31-35` 逐字 `an event is never more visible than its subject`——私有分支上的科学状态写，事件就存 `private`。②**ADR-024 的渲染判据**（`docs/adr/ADR-024-evidence-read-carries-its-reader.md` 的「决定」第 2、3 条）：一行可以渲染给某读者，当且仅当它是 `public`，**或**该读者是当事项目的成员；读者解析不出来、成员关系查不到时**只给 public 行**（fail-closed）。同一条轴在别处已经守住了：`internal/events/fanout.go:181`、`internal/events/subscription.go:267` 都只按 `VisibilityPublic` 放行。",
+    "**你要做的（判据与位置）。** 让**读者成为这条读的显式输入**，并把渲染谓词放进 `ListProjectActivity` **自己**（即 SQL 里），**不是在 HTTP/传输层筛**（ADR-024 第 1 条逐字：`由读自己决定渲染哪些行——不是取回全量再在传输层筛`）。判据与 ADR-024 同轴：`e.visibility = 'public'` **或** 该读者是**这个项目**的成员。成员读是现成的：`internal/persistence/project_store.go:177` 的 `GetMembership(ctx, projectID, userID)`。",
+    "**不许把两条轴『整理』成一条谓词。** 这是 ADR-024 末段与 `internal/persistence/queries/research_profile.sql:36-38` 逐字留下的纪律（`a future edit must not \"tidy\" them into one visibility = 'public'`）：**成员仍然必须看得见自己项目的私有行**——`tests/integration/activity_sources_test.go:303-304` 现在正面钉着这一条（私有项目里那两条私有事件按 `visibility` 原样返回）。你**不许**把它改成「所有人都只看 public」。改完之后的形状是 **public ∪ 本项目成员**。",
+    "**治理那一支（audit_log）不动。** 那份表**没有任何逐行可见性列**（`infra/migrations/00012_events_audit.sql:44-56` 的列清单里没有），「项目的 activity 与项目本身同可见」是 T0110 定下、也是那一支唯一可用的规矩。你要在 RESULT 里把这个判断写出来（为什么 research 支路要加谓词、governance 支路不加），**不要顺手把 audit 支路也改掉**。",
+    "**fail-closed。** 成员关系读不到（报错、超时、actor 解析不出来）时**只给 public 行**：不许放行，也不许把「查不到」当成「是成员」。与 ADR-024 第 3 条同向、与 `rsg/events.go` 的 `Anything unclear stays private` 同向。",
+    "**先证明它现在真的漏（硬要求）。** 在真 PostgreSQL 上造出完整形状——**公开项目 + 私有分支 + 该分支上的提交事件**（事件 `visibility='private'`）——然后用一个**非成员**的已登录读者读 `GET /api/v1/projects/{id}/activity?source=research`，断言那一行**现在在场**；改完之后**同一条断言必须变成不在场**，而同一页里的 public 行**仍然在场**。**两个状态都要贴进 RESULT**：只有「改完是绿的」等于没有证据说明你修的是这个缺陷。",
+    "**派生件按生成器重新生成，不许手改**：`internal/persistence/queries/**` 是源，`internal/persistence/sqlc/**` 是派生（`make sqlc`；`make check-sqlc-drift` 不许红）。**`infra/migrations/**` 不在范围内**——本任务不需要新迁移（`research_events.visibility` 已经在列上）。若你判断非迁移不可，**停下来在 RESULT 里报，不要自己选号**。",
+    "**不许弱化任何东西**：不 skip、不删、不放宽既有断言（特别是 `tests/integration/activity_sources_test.go` 与 `tests/integration/audit_test.go`），不放大任何超时（`CLAUDE.md` §5.1、§6）。**若你发现某条既有断言与第 5 条冲突，停下来在 RESULT 里报，不要自己改期望值**——改别的任务的期望值要先有 Supervisor 的裁决。"
+  ],
+  "deliverables": [
+    "`internal/persistence/queries/events_audit.sql`：research 支路的渲染谓词（读者身份进到读里；public ∪ 本项目成员）",
+    "配套 Go：`internal/application/audit/**`（读者/成员身份成为显式输入）、`internal/persistence/audit_store.go`，必要时 `cmd/api/audithttp/**`、`cmd/api/main.go` 的接线",
+    "`internal/persistence/sqlc/**`：由 `make sqlc` 重新生成（不许手改）",
+    "`tests/integration/**`：非成员读公开项目 Activity 的**负面**断言 + 成员仍看得见私有行的**正面**断言（真 PostgreSQL、真实产品路径）",
+    "RESULT：改动前/改动后两个状态的实测输出、mutation check 实录、以及为什么 governance 支路不动"
+  ],
+  "acceptance_criteria": [
+    "公开项目的 Activity（research 支路）对**非成员**读者只返回 `visibility='public'` 的行；对**项目成员**返回全部行（私有行仍在场，`visibility` 字段照旧渲染）。",
+    "渲染谓词在 SQL 里（`ListProjectActivity` 自己），不是传输层筛；读者/成员身份是这条读的显式输入。",
+    "成员关系读不到时只给 public 行（fail-closed），有测试钉住。",
+    "governance 支路一行未动；`tests/integration/activity_sources_test.go` 与 `tests/integration/audit_test.go` 的既有断言一条不减、全部通过。",
+    "至少一条 mutation check 实录：把谓词去掉或放宽，看到新断言的 FAIL 原文，再改回来（证据开头写 `MUTATION CHECK`）。",
+    "真 PostgreSQL 上 `go test ./tests/integration -run 'TestActivity|TestAudit' -count=1 -v` 跑绿并证明用例真跑了（`-run` 匹配不到也会打印 ok）；`make test-integration` 全绿。",
+    "diff 全部落在 `allowed_scope` 内；`specs/**`、`tasks/**`、`docs/**`、`infra/migrations/**` 一个字节未动。"
+  ],
+  "allowed_scope": [
+    "internal/application/audit/**",
+    "internal/persistence/audit_store.go",
+    "internal/persistence/queries/events_audit.sql",
+    "internal/persistence/sqlc/**",
+    "cmd/api/audithttp/**",
+    "cmd/api/main.go",
+    "tests/**",
+    "go.mod",
+    "go.sum",
+    ".env.example"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "docs/**",
+    "infra/migrations/**",
+    "internal/application/rsg/**",
+    "internal/events/**",
+    "specs/**",
+    "tasks/progress.md",
+    "tasks/task_status.json"
+  ],
+  "relevant_specs": [
+    "**先读这条规则本身**：`docs/adr/ADR-024-evidence-read-carries-its-reader.md`。它与本任务同一条轴：非匿名面**按读者身份**渲染，匿名面按行的 `visibility` 渲染；并且逐字留下一条纪律——**两条轴不许被整理成一条谓词**。它没有的规则不要自己补。",
+    "**写路径为什么把行盖成 private**：`internal/application/rsg/events.go:31-42`（`an event is never more visible than its subject`，`eventVisibility(branch.Visibility)`，Anything unclear stays private）。分支可见性是**创建者显式指定**的：`cmd/api/rsghttp/handlers.go:144-166`，列在 `infra/migrations/00004_rsg_state.sql:16`（`CHECK (visibility IN ('public','private'))`）。",
+    "**同一条轴在别处的守法（先例，不是新发明）**：`internal/events/fanout.go:181`（`if e.visibility != VisibilityPublic` 才…）与 `internal/events/subscription.go:267`（`return eventVisibility == VisibilityPublic`）。",
+    "**门只问项目、不问读者**：`cmd/api/audithttp/audit_handlers.go:208-214` 与 `internal/application/audit/adapters.go:10-18` 两处注释都自称 `member-only`（前者逐字 `reads require a session (activity is member-only, like the project/org reads)`），但 `projectsReadGate.Get` 走的是 `projects.Service.Get(..., Reader{Authenticated: true})`，而公开项目那一支对每个类别都 allow——自称与实现对公开项目并不一致，这正是缺陷的入口。`internal/application/audit/service.go:50-55` 的注释把「事件的 visibility 只渲染、不在这里复查」写成了设计理由，**本任务推翻的正是这句**（理由与 ADR-024 相同：那一列既然写着「能不能被公开读渲染」，谁在读就必须进到读里）。",
+    "**夹具已经能造出这条形状**：`tests/integration/activity_sources_test.go:114-123` 的 `seedResearchEvent(t, ctx, pool, projectID, actorID, eventType, visibility, payload, occurredAt)` 可以直接种一条 `private` 事件；同文件 `:129` 起是主用例，`:191` 现在建的是**私有**项目、`:255`/`:260` 种的是私有事件——**所以今天这条漏从来没被测到过**：私有项目的门本来就挡住非成员。你要补的正是公开项目那一格。",
+    "**别把治理支路一起改**：`infra/migrations/00012_events_audit.sql:44-56` 是 `audit_log` 的列清单（没有 visibility 列），`:3-11` 是 `research_events`（有）。T0110/T0607 的 Activity 设计见 `internal/application/audit/service.go` 与 `internal/application/audit/adapters.go` 的注释、以及查询头部 `internal/persistence/queries/events_audit.sql:35-70` 那段理由。",
+    "**顺手记一笔（不在本任务范围内，已另立）**：`branches.visibility` 这一列在**读侧完全没有被执法**——`internal/persistence/queries/rsg.sql` 只在两条 INSERT 里出现它，`internal/application/rsg/service.go` 的 `GetObject` 只查项目门与分支存在性。也就是说「公开项目里的私有分支，非成员知道 branch id 就能读到里面的对象」。**那一条**要 owner 裁定（权限模型），**不要在本任务里顺手修**（见 `tasks/decisions.md` 2026-09-20 的「分支可见性」一节）。"
+  ],
+  "scope_note": "范围只覆盖**第三个读出口**：Activity feed 的 research 支路（查询 + 读的签名 + 接线 + 证明它的集成测试）。`specs/**`（除派生件，本任务没有）、`tasks/**`、`docs/**`、`infra/migrations/**` 都不在范围内——**这次不需要迁移**（列已经在 `research_events` 上）。范围里**故意包含** `cmd/api/main.go`：如果读者/成员身份要成为构造参数，组合根必须跟着改，否则改不动；但**只许改与这条读相关的接线**。`internal/application/rsg/**` 与 `internal/events/**` 列进 `forbidden_scope` 是让「不动写路径、不动扇出」这条边界结构上成立——本任务是读侧的活。**分支可见性在读侧完全没被执法**这件事是一件更大的、要 owner 裁定的问题，**不在本任务内**。"
+}

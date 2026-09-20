@@ -1720,6 +1720,16 @@
       "status": "not_run",
       "last_run": null,
       "evidence": null
+    },
+    {
+      "id": "T0613-TEST-01",
+      "task_id": "T0613",
+      "name": "activity feed audience e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
     }
   ]
 }

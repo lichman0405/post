@@ -4462,10 +4462,12 @@
       ]
     },
     "T0511": {
-      "status": "verification",
+      "status": "merged",
       "started_at": "2026-09-20T13:17:20Z",
       "notes": "新立账（2026-09-19）：证据断言的读带上读者，见 docs/adr/ADR-024。任务书在 tasks/packages/T0511.json；未落地前 allowed_scope 为空，故意如此。",
       "worker_run_id": "run-696debc9dfefc82f",
+      "accepted_by_supervisor_at": "2026-09-20T14:09:56Z",
+      "merged_at": "2026-09-20T14:18:17Z",
       "history": [
         {
           "from": "todo",
@@ -4486,6 +4488,19 @@
           "at": "2026-09-20T13:44:59Z",
           "run_id": "run-6b661ce99b82ecfe",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-20T14:09:56Z",
+          "run_id": "run-878ceba9c1be7bb2"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-20T14:18:17Z",
+          "run_id": "run-08521046e797317a",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -5242,10 +5257,12 @@
       "merged_at": null
     },
     "T0611": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-20T13:52:25Z",
       "notes": "新立账（2026-09-20）：T0608 第 6 段走不通的上游原因——Release 的验收记录读不到「经合并进入 main」的 PR 的评审。裁决见 tasks/decisions.md，架构理由见 docs/adr/ADR-026。任务书在 tasks/packages/T0611.json；未落地前 allowed_scope 为空，故意如此。",
       "worker_run_id": "run-14b567bdef8ca6e9",
+      "accepted_by_supervisor_at": "2026-09-20T14:39:52Z",
+      "merged_at": "2026-09-20T14:48:15Z",
       "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
       "history": [
         {
@@ -5274,20 +5291,68 @@
           "at": "2026-09-20T13:52:25Z",
           "run_id": "run-14b567bdef8ca6e9",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-20T14:11:10Z",
+          "run_id": "run-6031aa17d66addae",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-20T14:39:52Z",
+          "run_id": "run-56163af979b15897"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-20T14:48:15Z",
+          "run_id": "run-9217baab144bc23b",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0612": {
-      "status": "ready",
+      "status": "running",
+      "started_at": "2026-09-20T21:43:35Z",
       "notes": "新立账（2026-09-20）：T1204 的 CI 红在 TestAbortProposalConcurrency，而那条断言与契约（internal/application/aborts/service.go:183-186）矛盾——见 tasks/packages/T0612.json。任务书已落地（8 条需求 / 6 条验收；allowed_scope = tests/integration/**，internal/** 在 forbidden_scope），等派工池空位。",
+      "worker_run_id": "run-21a35846e7335b8d",
+      "rejection_reason": "T0612 这一轮运行在 2026-09-20 22:14 无声中断：Worker 进程（pid 2498387）与它的 reaper（session leader，pid 2498386）一起消失，**没有任何 exit.status 落盘**，因此这一轮没有产出 RESULT.json，运行不能算完成。按仓库规矩记 rejected——它记录的是这次运行的状态，不是对代码质量的评价。\n\nworking tree 完整保留在 `.rddev/workers/../worktrees/T0612`：`tests/integration/abort_e2e_test.go`（+66/-2，已把裸的 PullRequestNumber 比较换成 sameAbortTwoWays(a,b)）与一个新探针文件 `tests/integration/t0612_probe_test.go`（文件自己标着 TEMPORARY PROBE / deleted before submission）。退出码由 Supervisor 记为 unknown（-1）——reaper 从未写它，这个值是「没记录到」的诚实表示，不是 0。\n\n处置：同一 session resume 续做（rework），diff 不重来。返工信见 /tmp/t0612-rework.md（同时已写进 RejectRecord 的 reasons[0]）。\n",
       "history": [
         {
           "from": "todo",
           "to": "ready",
           "at": "2026-09-20T13:46:15Z",
           "run_id": "run-3d72ef377d97828e"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-20T14:09:59Z",
+          "run_id": "run-6a650ff5884ee222",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-20T21:43:30Z",
+          "run_id": "run-62b6b4c982746d20",
+          "reason": "T0612 这一轮运行在 2026-09-20 22:14 无声中断：Worker 进程（pid 2498387）与它的 reaper（session leader，pid 2498386）一起消失，**没有任何 exit.status 落盘**，因此这一轮没有产出 RESULT.json，运行不能算完成。按仓库规矩记 rejected——它记录的是这次运行的状态，不是对代码质量的评价。\n\nworking tree 完整保留在 `.rddev/workers/../worktrees/T0612`：`tests/integration/abort_e2e_test.go`（+66/-2，已把裸的 PullRequestNumber 比较换成 sameAbortTwoWays(a,b)）与一个新探针文件 `tests/integration/t0612_probe_test.go`（文件自己标着 TEMPORARY PROBE / deleted before submission）。退出码由 Supervisor 记为 unknown（-1）——reaper 从未写它，这个值是「没记录到」的诚实表示，不是 0。\n\n处置：同一 session resume 续做（rework），diff 不重来。返工信见 /tmp/t0612-rework.md（同时已写进 RejectRecord 的 reasons[0]）。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T21:43:35Z",
+          "run_id": "run-21a35846e7335b8d",
+          "reason": "worker spawn"
         }
       ]
+    },
+    "T0613": {
+      "status": "todo",
+      "notes": "新立账（2026-09-20）：自动安全评审在 events_audit.sql 上报了一条授权/可见性问题——ListProjectActivity 的 research 支路不分可见性整片返回，而公开项目的 Activity 对任何已登录读者开放，于是私有分支上的提交事件被非成员读到。它违反写路径自己的规矩（rsg/events.go：an event is never more visible than its subject）与 ADR-024 的渲染判据，判成缺陷；书在 tasks/packages/T0613.json，处置见 tasks/decisions.md 同日「安全评审的两条」。依赖 T0511：先让 ADR-024 的证据侧落地，再照同一条轴做第三处。"
     },
     "T0701": {
       "status": "merged",
@@ -7072,10 +7137,12 @@
       ]
     },
     "T0814": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-20T13:38:01Z",
       "notes": "AC8 要求的外部 fork PR 完整闭合路径（fork → 写状态 → 开 PR → 既有 merge 路径合并）在当前 merge 实现下不可行：merge 按 PR project 解析 source branch，而 fork-sourced branch 活在 fork project。需要先产品/架构决策：拆分 AC8 为 follow-up，还是允许改 merge 路径。先标 blocked，空窗期拆任务。",
       "worker_run_id": "run-de7d343ff20fcbc4",
+      "accepted_by_supervisor_at": "2026-09-20T14:29:22Z",
+      "merged_at": "2026-09-20T14:40:00Z",
       "rejection_reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: 主验收闭合：docs/31_MASTER_ACCEPTANCE.md:17「Public Project 外部用户可 fork/contribute」在真实 HTTP 路径上从头到尾走通一遍（fork → 在自己的 fork 里写状态 → 对上游开 PR → 评审/合并按既有路径），给出一条可复现的证据。 (failed)",
       "history": [
         {
@@ -7138,6 +7205,26 @@
           "at": "2026-09-20T13:38:01Z",
           "run_id": "run-de7d343ff20fcbc4",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-20T13:59:13Z",
+          "run_id": "run-77f2a375e0318927",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-20T14:29:22Z",
+          "run_id": "run-b5022dd99964c879"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-20T14:40:00Z",
+          "run_id": "run-6177bce03913282e",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -7250,10 +7337,11 @@
       ]
     },
     "T0817": {
-      "status": "running",
+      "status": "ready",
       "started_at": "2026-09-20T13:45:11Z",
       "notes": "新立账（2026-09-20）：T0814 的 AC8 拆出来的合并那一半——merge 必须能在源分支自己所在的项目里读它。裁决见 tasks/decisions.md，架构理由见 docs/adr/ADR-025。任务书在 tasks/packages/T0817.json；未落地前 allowed_scope 为空，故意如此。",
       "worker_run_id": "run-c870854592a0b93c",
+      "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
       "history": [
         {
           "from": "todo",
@@ -7267,6 +7355,19 @@
           "at": "2026-09-20T13:45:11Z",
           "run_id": "run-c870854592a0b93c",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-20T14:30:34Z",
+          "run_id": "run-d6a72c1dd21d0c2c",
+          "reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification"
+        },
+        {
+          "from": "rejected",
+          "to": "ready",
+          "at": "2026-09-20T21:44:31Z",
+          "run_id": "run-6ab6fdf5a6e61d97"
         }
       ]
     },
@@ -7616,13 +7717,16 @@
       ]
     },
     "T0906": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "blocked",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-20T13:54:20Z",
+          "run_id": "run-3bb9eb3b57445ebd"
+        }
+      ],
+      "notes": "**空窗期临时移出派工集（Supervisor，2026-09-20）**：本任务的 `allowed_scope` 含 `specs/**`（或 `infra/migrations/**`），它的 diff 会带上 `specs/SPEC_VERSION.json`。而 T0607 与 T0905 两笔带指纹的正在飞，落地 `tasks/tasks.json`（它是指纹的输入）会顶掉它们的 G2。所以本任务在落地期间被按住，**落地一完成立刻翻回**（`.rddev/tools/hold-dispatch.py --restore`），并让它在**新基线**上派出——那样它自己算出来的指纹才是对的。"
     },
     "T0907": {
       "status": "todo",
@@ -8348,9 +8452,9 @@
       ]
     },
     "T1007": {
-      "status": "ready",
+      "status": "blocked",
       "started_at": "2026-09-19T11:40:29Z",
-      "notes": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。",
+      "notes": "**空窗期临时移出派工集（Supervisor，2026-09-20）**：本任务的 `allowed_scope` 含 `specs/**`（或 `infra/migrations/**`），它的 diff 会带上 `specs/SPEC_VERSION.json`。而 T0607 与 T0905 两笔带指纹的正在飞，落地 `tasks/tasks.json`（它是指纹的输入）会顶掉它们的 G2。所以本任务在落地期间被按住，**落地一完成立刻翻回**（`.rddev/tools/hold-dispatch.py --restore`），并让它在**新基线**上派出——那样它自己算出来的指纹才是对的。",
       "worker_run_id": "run-1a2252a9ec4ea195",
       "history": [
         {
@@ -8391,9 +8495,9 @@
       "merged_at": null
     },
     "T1102": {
-      "status": "ready",
+      "status": "blocked",
       "started_at": "2026-09-19T12:02:07Z",
-      "notes": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。",
+      "notes": "**空窗期临时移出派工集（Supervisor，2026-09-20）**：本任务的 `allowed_scope` 含 `specs/**`（或 `infra/migrations/**`），它的 diff 会带上 `specs/SPEC_VERSION.json`。而 T0607 与 T0905 两笔带指纹的正在飞，落地 `tasks/tasks.json`（它是指纹的输入）会顶掉它们的 G2。所以本任务在落地期间被按住，**落地一完成立刻翻回**（`.rddev/tools/hold-dispatch.py --restore`），并让它在**新基线**上派出——那样它自己算出来的指纹才是对的。",
       "worker_run_id": "run-cfd158672804b3ff",
       "history": [
         {

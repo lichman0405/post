@@ -994,6 +994,12 @@
         "rsg-real-services",
         "gitea-real-services"
       ]
+    },
+    "T0613": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services"
+      ]
     }
   }
 }

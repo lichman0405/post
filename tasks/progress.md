@@ -2916,9 +2916,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-20T13:52:45Z
+生成时间：2026-09-20T21:44:50Z
 
-状态分布：todo 17 · ready 3 · running 3 · worker_failed 0 · verification 1 · rejected 1 · blocked 7 · accepted 1 · merged 112（合计 145/145 个任务）
+状态分布：todo 17 · ready 1 · running 1 · worker_failed 0 · verification 0 · rejected 1 · blocked 10 · accepted 0 · merged 116（合计 146/146 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -2991,7 +2991,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0508 | External Reference live identity + snapshot | P5 | merged | 2026-09-14T14:51:21Z |  | 2026-09-14T15:13:55Z | 2026-09-14T15:17:22Z |
 | T0509 | Literature evidence extraction data model | P5 | merged | 2026-09-19T06:46:24Z |  | 2026-09-19T07:17:10Z | 2026-09-19T07:35:55Z |
 | T0510 | Knowledge workflow E2E | P5 | merged | 2026-09-19T09:07:39Z |  | 2026-09-19T10:05:42Z | 2026-09-19T10:23:25Z |
-| T0511 | 证据断言的读带上读者（ADR-024）：非公开行只给当事项目 | P5 | verification | 2026-09-20T13:17:20Z |  |  |  |
+| T0511 | 证据断言的读带上读者（ADR-024）：非公开行只给当事项目 | P5 | merged | 2026-09-20T13:17:20Z |  | 2026-09-20T14:09:56Z | 2026-09-20T14:18:17Z |
 | T0601 | Freeze Main Governance | P6 | merged | 2026-09-16T11:27:32Z |  | 2026-09-16T11:46:40Z | 2026-09-16T11:52:51Z |
 | T0602 | 主线对象 Abort 状态迁移（abort 半；reopen 已拆出为 T0610） | P6 | merged | 2026-09-19T08:16:17Z |  | 2026-09-19T09:38:51Z | 2026-09-19T09:48:01Z |
 | T0603 | Organization/Project Policy Engine | P6 | merged | 2026-09-14T03:42:50Z |  | 2026-09-14T04:09:38Z | 2026-09-14T04:12:31Z |
@@ -3002,8 +3002,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0608 | Release/Abort/Policy E2E | P6 | blocked | 2026-09-19T10:22:15Z |  |  |  |
 | T0609 | Project Milestone 基础 | P6 | merged | 2026-09-15T13:30:51Z |  | 2026-09-15T14:00:41Z | 2026-09-15T14:12:50Z |
 | T0610 | 主线对象 Reopen 状态迁移（等一行权限的 L3 裁定） | P6 | blocked |  |  |  |  |
-| T0611 | Release 的验收记录必须覆盖「经合并进入 main」的状态（T0608 第 6 段的上游缺陷） | P6 | running | 2026-09-20T13:52:25Z |  |  |  |
-| T0612 | 并发 abort 的两份 201：断言只能写契约允许的东西，那个窗口要显式钉住 | P6 | ready |  |  |  |  |
+| T0611 | Release 的验收记录必须覆盖「经合并进入 main」的状态（T0608 第 6 段的上游缺陷） | P6 | merged | 2026-09-20T13:52:25Z |  | 2026-09-20T14:39:52Z | 2026-09-20T14:48:15Z |
+| T0612 | 并发 abort 的两份 201：断言只能写契约允许的东西，那个窗口要显式钉住 | P6 | running | 2026-09-20T21:43:35Z |  |  |  |
+| T0613 | Activity 的研究事件读必须带上读者：非公开行不给非成员（ADR-024 同一条规矩的第三个出口） | P6 | todo |  |  |  |  |
 | T0701 | Research Asset Core/PID | P7 | merged | 2026-09-15T15:21:35Z |  | 2026-09-15T15:51:33Z | 2026-09-15T15:57:18Z |
 | T0702 | 四类 Asset Manifest validator | P7 | merged | 2026-09-15T17:36:13Z |  | 2026-09-15T18:02:29Z | 2026-09-15T18:09:43Z |
 | T0703 | Rights Model | P7 | merged | 2026-09-15T16:37:35Z |  | 2026-09-15T17:09:14Z | 2026-09-15T17:14:12Z |
@@ -3029,16 +3030,16 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0811 | Discussion 与 Promote to Research Object | P8 | merged | 2026-09-20T11:05:19Z |  | 2026-09-20T11:42:51Z | 2026-09-20T11:51:03Z |
 | T0812 | Private Evidence / Public Attestation 基础 | P8 | blocked |  |  |  |  |
 | T0813 | Contribution Ledger 接上生产（worker 挂载 + via 真实来源） | P8 | merged | 2026-09-19T05:32:05Z |  | 2026-09-19T06:46:22Z | 2026-09-19T06:58:59Z |
-| T0814 | Fork 发起与外部提案的生产接口（契约由 Supervisor 落地，本任务照契约接线，并改 fork 的命名规则） | P8 | running | 2026-09-20T13:38:01Z |  |  |  |
+| T0814 | Fork 发起与外部提案的生产接口（契约由 Supervisor 落地，本任务照契约接线，并改 fork 的命名规则） | P8 | merged | 2026-09-20T13:38:01Z |  | 2026-09-20T14:29:22Z | 2026-09-20T14:40:00Z |
 | T0815 | CI 的 migration-integration 偶发超时：量出时间去哪了，按证据修 | P11 | merged | 2026-09-20T11:14:58Z |  | 2026-09-20T13:07:34Z | 2026-09-20T13:24:56Z |
 | T0816 | affiliation 日期口径统一（打戳 / 解析 / 判定 三处生产口径一处定义；夹具助手同批改） | P8 | merged | 2026-09-19T03:17:44Z |  | 2026-09-19T04:38:57Z | 2026-09-19T04:47:25Z |
-| T0817 | 外部 fork 提案的合并路径：merge 必须能在源分支自己所在的项目里读它 | P8 | running | 2026-09-20T13:45:11Z |  |  |  |
+| T0817 | 外部 fork 提案的合并路径：merge 必须能在源分支自己所在的项目里读它 | P8 | ready | 2026-09-20T13:45:11Z |  |  |  |
 | T0901 | Search Document Projection | P9 | merged | 2026-09-19T01:45:22Z |  | 2026-09-19T02:24:58Z | 2026-09-19T02:59:55Z |
 | T0902 | Embedding Provider 与 pgvector | P9 | merged | 2026-09-19T04:40:55Z |  | 2026-09-19T05:17:11Z | 2026-09-19T05:27:07Z |
 | T0903 | Scientific Query Planner | P9 | merged | 2026-09-19T03:08:10Z |  | 2026-09-19T03:55:21Z | 2026-09-19T04:04:51Z |
 | T0904 | Hybrid Retrieval + Graph Expansion | P9 | merged | 2026-09-19T05:31:44Z |  | 2026-09-19T06:56:28Z | 2026-09-19T07:04:51Z |
 | T0905 | Scientific Ranking | P9 | merged | 2026-09-20T12:54:18Z |  | 2026-09-20T13:37:58Z | 2026-09-20T13:45:08Z |
-| T0906 | Evidence-backed Answer Generator/API | P9 | todo |  |  |  |  |
+| T0906 | Evidence-backed Answer Generator/API | P9 | blocked |  |  |  |  |
 | T0907 | Search Answer Web UI | P9 | todo |  |  |  |  |
 | T0908 | Search → Draft Research Context | P9 | todo |  |  |  |  |
 | T1001 | Transactional Outbox | P10 | merged | 2026-09-14T15:17:43Z |  | 2026-09-14T15:51:18Z | 2026-09-14T15:54:45Z |
@@ -3047,9 +3048,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1004 | RSS/Atom Feeds | P10 | merged | 2026-09-18T12:12:00Z |  | 2026-09-18T12:33:57Z | 2026-09-18T12:42:06Z |
 | T1005 | Email Digest abstraction | P10 | merged | 2026-09-18T12:47:25Z |  | 2026-09-18T13:19:42Z | 2026-09-18T13:25:53Z |
 | T1006 | Signed Webhooks | P10 | merged | 2026-09-15T03:32:24Z |  | 2026-09-15T04:54:21Z | 2026-09-15T05:00:53Z |
-| T1007 | Dependency Impact Analysis | P10 | ready | 2026-09-19T11:40:29Z |  |  |  |
+| T1007 | Dependency Impact Analysis | P10 | blocked | 2026-09-19T11:40:29Z |  |  |  |
 | T1101 | 统一 Primer-style Design System | P11 | todo |  |  |  |  |
-| T1102 | Research Map 高质量交互 | P11 | ready | 2026-09-19T12:02:07Z |  |  |  |
+| T1102 | Research Map 高质量交互 | P11 | blocked | 2026-09-19T12:02:07Z |  |  |  |
 | T1103 | Publication/Visibility Security UX | P11 | todo |  |  |  |  |
 | T1104 | 全站 Accessibility AA | P11 | todo |  |  |  |  |
 | T1105 | I18N 基线 | P11 | todo |  |  |  |  |
@@ -3062,7 +3063,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1201 | 完整 Seed Demo Data Builder | P12 | todo |  |  |  |  |
 | T1202 | Canonical MOF Workflow E2E | P12 | todo |  |  |  |  |
 | T1203 | Staging 部署模板 | P12 | merged | 2026-09-19T05:32:06Z |  | 2026-09-19T06:02:21Z | 2026-09-19T06:10:29Z |
-| T1204 | 生产 Runbook/Release/Recovery 验证 | P12 | accepted | 2026-09-20T12:21:32Z |  | 2026-09-20T13:17:17Z |  |
+| T1204 | 生产 Runbook/Release/Recovery 验证 | P12 | merged | 2026-09-20T12:21:32Z |  | 2026-09-20T13:17:17Z | 2026-09-20T13:53:19Z |
 | T1205 | OpenAPI/MCP/Schema 文档最终同步 | P12 | todo |  |  |  |  |
 | T1206 | Master Security/Quality Gate | P12 | todo |  |  |  |  |
 | T1207 | V1 最终验收与交付报告 | P12 | todo |  |  |  |  |
