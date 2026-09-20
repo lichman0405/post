@@ -15482,3 +15482,32 @@ Worker 就会（正确地）把它写进 `acceptance`，而它只要不是 `pass
 2. 没有任何界面/文档链到 attestation 页面（只能靠知道 pid 访问）。
    两条都要**立账成新任务**；改 `tasks/tasks.json` 会动 spec digest，
    必须挑**没有 Worker 在跑 G2 的安静窗口**，并与 `gates.json` 的 G3 覆盖同笔提交。
+
+### T0812 的 G2 抽验（我独立复核的结论，2026-09-21 07:40）
+
+返工后它写进 RESULT 的话，我逐条对着**代码和测试**核过，不是只读它的说明：
+
+- **blocking（跨租户泄漏）修在正确的层**：`ResolveAttestationTarget*` 这两条读**带上了读者**
+  ——`internal/persistence/queries/attestations.sql` 里新增谓词 `@reader_user_id`
+  （`:88` 与 `:117`，两条读各一处；文件开头那段注释把理由写清了：这两条读解析的是**别人**的行，
+  返回的 title/对象 id/版本 id/拥有方 visibility 在对方私有的时候就是对方的私有数据，
+  所以"这个读者能不能读这一行"必须在**读里**回答，与 `events_audit.sql`/`evidence.sql` 同一套
+  ADR-024 形状）；
+  于是"读不到的目标"和"不存在的目标"**是同一条代码路径**，不是"拒绝时少写几个字段"。
+- **测试是两面的，而且第二面才是关键**：
+  `tests/integration/attestation_privacy_e2e_test.go:768` 起那个子测试
+  （另一个用户私有项目里的版本）先打**控制组**（一个不存在的 id → 404），再拿三种方式
+  （对方的 protocol 版本、对方的 asset 版本、以及走 preview 路由的那一次）逐个断言
+  **逐字段 `reflect.DeepEqual` 等于控制组**，另加显式的"响应里不许出现对方 title/对象 id/版本 id/
+  项目 id 或 slug"子串扫描、以及"不许出现 `preview`/`reasons`"。
+  然后**反过来**：同一个调用者、对自己私有的版本，必须拿到 **409 且指名**——
+  这一条把"一刀切全部拒绝"那种假修法挡在门外。
+- 它自己解释了为什么比较是**404 对 404**而不是 409 对 404：修对之后，那条带预览的 409
+  对这个输入**根本不可达**，所以"两个响应是同一个文档"才是被测的性质；
+  而 409-对-404 的比较**只要少一个字段就能过**。这个理由比我信里要求的更强。
+- mutation check 它列了 F/G/H/J/I 五条（含本次新加的 J：掐掉对象谓词的 public 臂）。
+
+结论：**blocking 那条是真的修掉了，且修在承重的地方**。第 II、III 条（重复 `<main>` 地标、
+5xx 被塌成 404）同批处理。第 IV 条已按我的信移到 `follow_up_issues`，
+**真实路径**与我记的一致（`POST …/attestations:publish-preview`、`:publish`，
+读 `GET /api/v1/attestations/{attestationId}`），待立账见 `.rddev/runtime/follow-ups-to-be-booked.md`。

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 146,
+  "task_count": 147,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -5656,6 +5656,77 @@
       "supervisor_scope_narrowing": "**没有收窄，是把 T0814 的一半拆出来。** T0814 的 `allowed_scope` 里没有 merge 服务、也没有 persistence 的查询层——那正是它的 AC8 走不通的原因，也是一个「照契约接线」的任务不该顺手改 merge 的理由。拆出来之后两边的范围各自干净：T0814 只接 HTTP 与契约，本任务只改合并路径。**依赖写 T0804 与 T0601：前者给 fork 谱系，后者给 merge 引擎和「main 只能经 merge 前进」这条结构性规则；两者都已合并，所以本任务随时可派。**"
     },
     {
+      "id": "T0818",
+      "phase": "P8",
+      "phase_name": "开放网络、Fork、贡献与 Research Profile",
+      "title": "RSG 按状态谱系读：外部 fork 合并后，上游项目必须看得见自己 main 上的落地内容",
+      "v1_required": true,
+      "dependencies": [
+        "T0817"
+      ],
+      "requirements": [
+        "**来历**：T0817（外部 fork 提案的合并路径）把「源侧按源分支自己所在的项目读」接通之后，独立评审在 approve 的同时报出一条 major；评审把「这层表示要不要改」明确留给 Supervisor。我按它给的引用逐环复核，每一环都成立——**T0817 按它自己任务书的需求 6 逐字「停下来在 RESULT 里报」是对的**，那条需求写明这是「一条新的架构问题，不是本任务的顺手活」。本任务就是那条新问题，裁决写在 `docs/adr/ADR-027-a-projects-rsg-is-enumerated-by-its-state-lineage.md`。",
+        "**事实链（逐环可核）**：①落地版本行挂在**源（fork）谱系**的容器上——`internal/application/merge/service.go:743` 的 `s.objects.CreateVersionInTx(ctx, tx, c.TargetID, …)`，`c.TargetID` 即计划里的 `c.ObjectID`（`internal/rsg/merge/merge.go:342`）；②写入层不校验容器属于哪个项目——`internal/persistence/scientific_object_tx.go:82`，对拿到的容器做计数器 CAS（`:87-96`）再插版本行；③读法因此分叉——`ListObjectVersionsAsOf` 的谓词是 `WHERE so.project_id = @project_id`（`internal/persistence/queries/rsg_query.sql`），`ListRelationVersionsAsOf` 同形，于是**上游项目按项目域读看不见自己 main 上刚合进来的内容**（`rsg.Service.Query`、`ResearchOutline`、search、knowledge publish 都走它），而按 state 读的 manifest（`internal/persistence/queries/manifest.sql:19-27`）看得见。同一个状态，两条读法两个答案。",
+        "**要做的不是改写入侧**。ADR-025 的 Alternatives 已经逐字否决过「把 fork 的提案内部化进上游项目」——「会造出第二个 source of truth，一次 fork 提案要在两个项目里各有一份状态；`pull_request_fork_gate`（00086）存在的理由正是不许这样绕。否决。」所以**容器保持在源身份上不改**，要改的是**读**：一个项目的 RSG = 它自己状态谱系携带的版本，与容器的 `project_id` 无关（ADR-027 Decision 2）。",
+        "**两个方向都要**：①上游项目在它自己的谱系里看得见落地内容（对象与关系）；②fork 项目**不**因为上游状态而把落地版本渲染成自己对象的 latest。只做①不做②，等于把「看得见」当成「都看得见」。",
+        "**授权面不许放宽**：枚举范围是「我的谱系携带的版本」，不是「对方项目的所有版本」。要有一条断言证明：B 没有合进 A 的版本，A 的读者一条也看不到（构造出来并断言不可见）。",
+        "**不许粉饰**：既有的断言里凡把 `so.project_id = @project_id` 当作「本项目的 RSG」的，都建立在被 ADR-027 取代的假设上——要改就**逐条说明理由**并保留强度，不许为了让新读法变绿而删断言、放宽断言或跳过测试。若你判定某条既有断言编码的是**当前**行为（而不是该有的行为），在 RESULT 里点名它、说明为什么它现在不该成立。",
+        "**若需要 schema/index 变化**（例如按 state_id 枚举的新索引）：**不要自己加迁移**。报上来，编号由我分配（CLAUDE.md §8.1）。",
+        "**诚实报告**：逐条写清改了哪几条查询、谓词现在是什么、search/knowledge 等调用方是否受影响、以及你不能确定的地方。"
+      ],
+      "deliverables": [
+        "按状态谱系枚举的两条读（对象与关系），谓词不再以 `scientific_objects.project_id` 作为「本项目的 RSG 里有什么」的判据",
+        "先红后绿的证据：新断言在未改代码的树上**失败**一次，失败输出留在 RESULT 里",
+        "两个方向的真 PostgreSQL e2e：上游项目域读看得见落地内容；fork 的读不误渲染",
+        "授权面断言：未合进上游的版本仍不可见",
+        "RESULT 里的逐条报告（改了哪些查询、调用方影响、不确定处、是否需要迁移）"
+      ],
+      "acceptance_criteria": [
+        "**仪器能说不（先做这一步）**：把「上游项目按项目域读看得见落地内容」这条断言写出来后，先在**未改代码**的树上跑到**失败**，把失败输出留在 RESULT 里。一个从没红过的新断言，不能当作它测得住的证据。",
+        "**上游方向成立**：真 PostgreSQL 上 A（public）被 B fork → B 在 fork 分支写出状态 → 对 A 开 PR → merge 之后，A 的项目域读（`ListObjectVersionsAsOf` / `ListRelationVersionsAsOf`，经 `rsg.Service.Query` 与 `ResearchOutline`）能看到落地版本，且**逐条断言内容**（不只是 id 出现）。",
+        "**fork 方向也成立**：同一个对象在 **B 自己的读**里，**不**把落地版本当作它的 latest。",
+        "**没有新增身份**：合并前后两个项目的 `scientific_objects` 行数不变（不许靠「在上游复制一份容器」过关）。",
+        "**授权面不放宽**：B 未合进 A 的版本在 A 的读里不可见（构造一条并断言不可见）。",
+        "**既有证据不缩水**：T0817 的 manifest（按 state）断言、`TestExternalForkMergeRefusesANonForkSource` 与相关门禁测试全绿，断言强度不减；被改动的既有断言在 RESULT 里逐条给出理由。",
+        "**生成物按生成器**：`internal/persistence/sqlc/**` 重新生成，不手工编辑；`make test-integration` 全绿。",
+        "**诚实报告**：改了哪几条查询、谓词现在是什么、调用方影响、不确定处、是否需要迁移。"
+      ],
+      "tests": [
+        "external fork merge: the upstream project's RSG reads the landed content"
+      ],
+      "allowed_scope": [
+        "internal/persistence/**",
+        "internal/application/rsg/**",
+        "internal/application/merge/**",
+        "internal/application/search/**",
+        "internal/application/knowledge/**",
+        "internal/rsg/**",
+        "tests/**",
+        "go.mod",
+        "go.sum"
+      ],
+      "forbidden_scope": [
+        "specs/**",
+        "tasks/**",
+        "docs/**",
+        "infra/migrations/**",
+        ".git/**",
+        "CLAUDE.md",
+        "apps/web/**"
+      ],
+      "decision_level_max": "L2",
+      "relevant_specs": [
+        "docs/adr/ADR-027-a-projects-rsg-is-enumerated-by-its-state-lineage.md",
+        "docs/adr/ADR-025-merge-reads-the-source-side-in-its-own-project.md",
+        "docs/adr/ADR-023-asset-fork-derive-lineage.md",
+        "docs/adr/ADR-024-evidence-read-carries-its-reader.md",
+        "docs/09_VERSION_CONTROL.md",
+        "docs/31_MASTER_ACCEPTANCE.md"
+      ],
+      "scope_note": "范围按「这条读法会被谁读」划：查询层（`internal/persistence/**`，含生成物）与它的两个主要调用面（`internal/application/rsg/**` 的 RSG 读、`internal/application/search/**` 与 `internal/application/knowledge/**` 的派生读），加上 `internal/rsg/**`（查询与计划的定义处）与 `tests/**`（两个方向的 e2e）。`internal/application/merge/**` 只为「万一落地路径也要跟着调」保留，预计用不到。**`infra/migrations/**` 不在范围内**：需要索引或 schema 变化就报上来，编号由我分配。",
+      "supervisor_scope_narrowing": "**没有收窄，是 T0817 评审的 major 单独立账。** 这条不是「顺手改」：它改的是读模型（跨项目 join 与「项目域读」的定义），属于 L2，所以它有独立的 ADR（ADR-027）与独立的负向断言要求。依赖写 T0817：它的 e2e 与负向证据是本任务的起点，且本任务要改的正是它落地路径产生的那层表示。"
+    },
+    {
       "id": "T0901",
       "phase": "P9",
       "phase_name": "Search 与 Evidence-backed Research Answer",
@@ -7015,7 +7086,8 @@
       "dependencies": [
         "T1201",
         "T0908",
-        "T1007"
+        "T1007",
+        "T0818"
       ],
       "requirements": [
         "从 Q 到 H/branch/exp/calc/evidence/claim/finding/PR/main/release/assets/external project evidence/profile credit",

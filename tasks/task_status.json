@@ -7509,11 +7509,11 @@
       ]
     },
     "T0817": {
-      "status": "verification",
-      "started_at": "2026-09-20T22:54:47Z",
+      "status": "running",
+      "started_at": "2026-09-20T23:44:55Z",
       "notes": "新立账（2026-09-20）：T0814 的 AC8 拆出来的合并那一半——merge 必须能在源分支自己所在的项目里读它。裁决见 tasks/decisions.md，架构理由见 docs/adr/ADR-025。任务书在 tasks/packages/T0817.json；未落地前 allowed_scope 为空，故意如此。",
-      "worker_run_id": "run-428736b3f2cd455d",
-      "rejection_reason": "# T0817 返工：一条 blocking 我核过了，成立；修法由我裁\n\n复核给的是 `request_changes`：1 blocking + 1 major + 1 minor。**核心工作复核是认的**——\n源侧按分支自己所在的项目读、只经 fork 谱系放行外来项目、每条链按链自己所在项目判边界，\n这些都对。要返工的是下面三条。**blocking 那一条我逐行核过，成立，不是口味问题。**\n\n## 一、blocking：你把通用推送路径的语义改掉了，而且没有证据\n\n`internal/gitprovider/push_ingestion_store.go` 里 `upsertPushedState` 新加的 owner 检查\n（`:399-403` 一带）是**无差别**生效的：任何一笔投递，只要它的 head commit 已经是本项目里\n**另一个分支**的状态行，就直接返回错误→整笔投递回滚（没有 ingestion 行、没有 head 指针推进、\n没有 change 行、没有 candidates）。\n\n这改掉了**文档化的既有行为**：\n\n- `internal/gitprovider/push_ingestion_store.go:144-147` 逐字写着\n  \"`ON CONFLICT` on the content hash — **the same commit on another branch reuses the same state**\"；\n- 而且**你自己这个新函数的注释**（`:366-372`）现在还在这么写——\"the same commit on another branch of\n  the project reuses the row instead of writing a second one\"——**注释和代码相反**。\n- 触发它的场景不是刁钻的：`git push origin main:<some-branch>`、在一个已有 commit 上建分支，\n  都会撞上。\n\n**我的裁定（L1，不必再问）**：**把 owner 检查收进 fork import 那一路**\n（例如 `in.ForkImport != nil` 时才做这件事），**通用推送保持复用语义不变**。\n理由：你需要的保证——复制过来的 head 记成一次真实状态迁移、一条链只有一个 head——\n来自 fork import；通用路径的复用是既有契约，要不要改它是**另一个决定**，不在本任务里做。\n\n**并且必须补上钉住它的测试**：向同一项目投递一个**已经被记录过的 commit**到一个**第二个分支**\n（`git push origin main:<branch>` 或等价形状），断言：整笔投递**成功**、`project_states` 的那一行\n**被复用**（没有第二行）、head 指针推进。\n\n你上一轮 RESULT 里\"the non-fork push path is provably unchanged\"这句是**站不住的**：\n你引的 mutation check 3 只放宽了 `:322` 那个 `case in.ForkImport != nil:` 的 switch（父链那一半），\n**从没碰过这条 owner 检查**；你点名的 `TestGiteaPushIngestionEndToEnd` 自始至终只往**一个分支**投递、\n每次都是**不同的 commit**（`tests/integration/gitea_push_ingestion_test.go:376-625`）——\n也就是说**被改动的这个 case 一条测试都没盖到**。**把那句断言改掉，或者用上一条测试把它变成真的。**\n\n## 二、major：RESULT 的证据与 diff 不符\n\nRESULT 的验收 1 证据（`:104`）与运行摘要（`:40`）都写着 B 提出的\"对象版本**与关系版本**逐项落地\"\n（carry … object version **and relation version** with their payloads / item by item）。\n但 `tests/integration/external_fork_merge_e2e_test.go` 里**根本没有任何关系版本**：\n对象版本是真逐项断言的（payload 逐字节，`:801-857`），关系版本全文只出现两行 store 接线\n（`:239`、`:291`）。\n\n**二选一，不许留着**：① 真的让贡献者的提案里带一个关系版本，并逐项断言它落地（更强，推荐）；\n② 把证据句里的\"与关系版本\"删掉，让证据与测试一致。**改完再核对一遍 RESULT 里每一条证据\n都能被只读复核用 grep 找到对应断言。**\n\n## 三、minor：负向测试自己的注释说错了，而且门真的开过\n\n`tests/integration/external_fork_merge_e2e_test.go:1148-1151` 的注释说\n\"停用触发器与插入是一个事务（PostgreSQL DDL 是事务性的），所以没有第二个 session 会看到门关着\"。\n但实际代码是：那条事务在**触发器仍然停用**的情况下 **COMMIT** 了（`:1160-1173`），\n`ENABLE` 是它之后**另一条语句**（`:1174`）。这两个来回之间，00086 的门对**那个库上所有 session**\n都是开的（进程若死在中间，它会一直开着，直到下一次跑时把模板库删掉）。\n\n修：把 `ENABLE` 放进**同一个事务**里再 COMMIT；或者立刻 ENABLE 之后**再断言一次**门会拒绝\nraw insert（现在那次 P0001 断言发生在停用之前，等于没验回来）。\n\n## 四、边界与纪律（不变）\n\n- **测试与断言只准加强，不准放宽**：不许删断言、skip、放大 timeout、把 FAIL 改成容忍。\n- 只动任务书 `allowed_scope` 内的东西；不碰 `specs/**`、`docs/**`。\n- **不 commit / 不 push**（Git 控制面不属于你）；只留工作树 diff 与 `RESULT.json`。\n- RESULT 照实写：这三条都改完并跑到绿再写 `completed`；哪条没改完就如实写清楚。\n",
+      "worker_run_id": "run-4099fdec7b873134",
+      "rejection_reason": "# T0817 第二次返工：**main 在你之后长出了一个新的调用点**（不是你的错）\n\n验收门 G2（= CI 的同一批 job，按**当前 main** 合成你的改动）在 `go vet ./...` 这一步红了：\n\n```\n# github.com/lichman0405/post/tests/e2e-release/harness\nvet: tests/e2e-release/harness/main.go:406:76: not enough arguments in call to diffs.NewService\n\thave (*persistence.StateStore, *persistence.ManifestStore)\n\twant (diffs.StatePort, diffs.SnapshotPort, diffs.ProposalPort)\n```\n\n## 为什么这不是你漏的\n\n- 你的基线是 `9c27db3`（今天 06:53），**落后 main 6 笔**。\n- 那个调用点来自 **T0608**（`1f5d170`，[T0608] Release/Abort/Policy E2E，今天 07:06 合并）——\n  在你的基线**之后**才进 main，所以**你的工作树里根本没有这个文件**，你不可能看到它。\n- 你把 `diffs.NewService` 的签名从两参数改成三参数（加了 `ProposalPort`），\n  在**你当时能看到的树**上每一个调用点都接对了；是 main 后来长出的新调用点还停在旧签名上。\n\n已经把你的基线推进到当前 main（rebaseline），现在 `tests/e2e-release/harness/main.go` 在你的树里了。\n\n## 要你做的（很小）\n\n1. **把那个调用点接到你的新签名上。** 第三个参数传什么由你按实现决定——看 harness 里\n   紧邻的几行（`prdiff.NewService(prStore, branchStore, diffSvc)` 之类），它手上有什么就用什么；\n   如果 harness 手上确实没有合适的实现，**不要**退回两参数签名，在 RESULT 里报清楚并说你需要什么。\n2. **在整个模块上验证，不要只跑你改过的包**：\n   - `go vet ./...`\n   - `go build ./...`\n   - 你原来的那套（`make test-integration`、你的 e2e、`go test ./...`）\n3. **主动扫一遍还有没有别的同类失配**：`grep -rn \"diffs.NewService\" .`（全树）。\n   T0608 可能还带来别的同签名调用；发现就一起修，并在 RESULT 里逐条列出。\n4. **不许为了让门变绿把签名改回两参数**——第三个 port 是这次修复的一部分。\n   要改的是调用点，不是你的设计。\n\n## 不用重做的\n\n你的实现、你的断言、你的证据链都保留。RESULT 里补一节就够了：\n「基线推进后新增/失配的调用点、以及各自怎么处理的」。\n",
       "history": [
         {
           "from": "todo",
@@ -7589,6 +7589,20 @@
           "at": "2026-09-20T23:24:14Z",
           "run_id": "run-7e04f17ec9c56d0d",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-20T23:44:54Z",
+          "run_id": "run-1f3b2560d182b101",
+          "reason": "# T0817 第二次返工：**main 在你之后长出了一个新的调用点**（不是你的错）\n\n验收门 G2（= CI 的同一批 job，按**当前 main** 合成你的改动）在 `go vet ./...` 这一步红了：\n\n```\n# github.com/lichman0405/post/tests/e2e-release/harness\nvet: tests/e2e-release/harness/main.go:406:76: not enough arguments in call to diffs.NewService\n\thave (*persistence.StateStore, *persistence.ManifestStore)\n\twant (diffs.StatePort, diffs.SnapshotPort, diffs.ProposalPort)\n```\n\n## 为什么这不是你漏的\n\n- 你的基线是 `9c27db3`（今天 06:53），**落后 main 6 笔**。\n- 那个调用点来自 **T0608**（`1f5d170`，[T0608] Release/Abort/Policy E2E，今天 07:06 合并）——\n  在你的基线**之后**才进 main，所以**你的工作树里根本没有这个文件**，你不可能看到它。\n- 你把 `diffs.NewService` 的签名从两参数改成三参数（加了 `ProposalPort`），\n  在**你当时能看到的树**上每一个调用点都接对了；是 main 后来长出的新调用点还停在旧签名上。\n\n已经把你的基线推进到当前 main（rebaseline），现在 `tests/e2e-release/harness/main.go` 在你的树里了。\n\n## 要你做的（很小）\n\n1. **把那个调用点接到你的新签名上。** 第三个参数传什么由你按实现决定——看 harness 里\n   紧邻的几行（`prdiff.NewService(prStore, branchStore, diffSvc)` 之类），它手上有什么就用什么；\n   如果 harness 手上确实没有合适的实现，**不要**退回两参数签名，在 RESULT 里报清楚并说你需要什么。\n2. **在整个模块上验证，不要只跑你改过的包**：\n   - `go vet ./...`\n   - `go build ./...`\n   - 你原来的那套（`make test-integration`、你的 e2e、`go test ./...`）\n3. **主动扫一遍还有没有别的同类失配**：`grep -rn \"diffs.NewService\" .`（全树）。\n   T0608 可能还带来别的同签名调用；发现就一起修，并在 RESULT 里逐条列出。\n4. **不许为了让门变绿把签名改回两参数**——第三个 port 是这次修复的一部分。\n   要改的是调用点，不是你的设计。\n\n## 不用重做的\n\n你的实现、你的断言、你的证据链都保留。RESULT 里补一节就够了：\n「基线推进后新增/失配的调用点、以及各自怎么处理的」。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T23:44:55Z",
+          "run_id": "run-4099fdec7b873134",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -9151,6 +9165,15 @@
       "merged_at": null
     },
     "T1208": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T0818": {
       "status": "todo",
       "started_at": null,
       "completed_at": null,

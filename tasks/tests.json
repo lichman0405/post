@@ -1702,6 +1702,16 @@
       "evidence": null
     },
     {
+      "id": "T0818-TEST-01",
+      "task_id": "T0818",
+      "name": "external fork merge: the upstream project's RSG reads the landed content",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
       "id": "T0611-TEST-01",
       "task_id": "T0611",
       "name": "release review after merge e2e",
