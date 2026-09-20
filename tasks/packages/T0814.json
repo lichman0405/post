@@ -1,0 +1,66 @@
+{
+  "id": "T0814",
+  "phase": "P8",
+  "phase_name": "开放网络、Fork、贡献与 Research Profile",
+  "title": "Fork 发起与外部提案的生产接口（契约由 Supervisor 落地，本任务照契约接线，并改 fork 的命名规则）",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "dependencies": [
+    "T0804",
+    "T0403"
+  ],
+  "requirements": [
+    "**契约已经写好了，是 Supervisor 落的，照它实现，不许自行改契约。** `specs/api/openapi.yaml` 有 `POST /projects/{projectId}/forks`（本任务新增的那条），以及扩写后的 `POST /projects/{projectId}/pull-requests`（那一支此前只有一句 summary、没有实现）。两条的请求体、状态码与语义**都以契约为准**——本任务包不再抄一份状态码清单，抄了就会漂移。**如果你判断契约写错了或不够，不要自己改 `specs/**`（那是 Supervisor-only）——在 RESULT 里点名报上来。**",
+    "**三格矩阵不是你要发明的，你只负责把它接到 HTTP 上。** `specs/policies/permissions-matrix.csv` 第 5-7 行逐字写着 `create_branch` 对非成员是 `external_fork_only`、`write_scientific_state` 是 `own_fork_only`、`open_pr` 是 `allow_from_fork`。**服务层已经解析好了**（`internal/application/forks`：`Service.Fork` / `Service.OpenExternalPR`，含 `authorizeCreateBranch` / `authorizeOpenPR`），**照它接线，不要重写一套判定**。不要新增 action、不要新增 verdict、不要放宽任何一格。",
+    "**匿名用户三件事全拒**（矩阵第一列三格都是 `deny`），三条都要有 HTTP 层的测试——这是同一张表里已经写好的边界，不是本任务新定的。",
+    "**非成员对 private project 要答「存在性隐藏」的 404，不是 403。** 今天这一条在服务层已经是`ErrProjectNotFound`（读门先行），接到 HTTP 时不要把它降级成 403——那会把私有项目的存在泄露出去。",
+    "**两道数据库门都报同一个 SQLSTATE（P0001），要能分辨。** 开 PR 的那条 INSERT 会被两个触发器拒绝：`00042` 的 `pull_request_semantic_gate`（源分支的语义状态是 `unstructured_changes`，契约里答 409、线码 `BRANCH_UNSTRUCTURED_CHANGES`）与 `00086` 的 `pull_request_fork_gate`（跨项目源分支不是本人的 fork，服务层本该先拦成 403）。两者都是 P0001，**靠 RAISE 的文本开头分辨**（前者 `pull request cannot be opened from branch …`，后者 `pull request on project … cannot take its source branch from project …`）——`infra/migrations/**` 不在你的范围内，不要靠改触发器加标记。**判定要读得准**：今天是 `pullrequests.Service.Create` 把整条链包成 `ErrStore`（HTTP 会答 503），对用户就是「服务不可用」而不是「你的分支里有解析不了的内容」——这条要修成契约里写的那种答案。**判不准时要 fail closed**：分不清就按 503 答，不要猜成 409。",
+    "**幂等按状态本身做**：同一个 (父项目, 人) 重复发起 fork，第二次要返回既有 fork（契约里的 200），不新建项目/分支/谱系行、不重复拷贝内容。**不要引入 key 台账**（服务层已经是这个形状）。",
+    "**fail closed**：fork 项目的可见性缺省是 private（fork 的内容在本人发布之前是他自己的，发布是治理动作、不是 fork 的副作用）。",
+    "**改一条命名规则（Supervisor 定的，照办，理由写给你看）**：fork 项目的 slug 现在的主名是 `<父 slug>-<人的 handle>`（`internal/application/forks/service.go:693` 的 `forkSlug`），**只有超长才**退到带摘要的 `forkSlugDigest`。这会让**合法 fork 被永久锁死**：① 组织项目的 slug 只在组织内唯一（`00019:16`：`projects_personal_slug_idx` 是 `WHERE organization_id IS NULL`），所以两个组织可以各有一个 `mof-curie`——同一个人先后 fork 两个，第二个的派生名被**自己刚建的那个 fork** 占住，`forkProjectOverTakenName`（`:529-533` 的同名持有者分支）直接拒（自己名下的持有者不升级、连保留名都不试）；② slug **不可改**（`internal/application/projects/settings.go:47-55` 的 `UpdateSettingsInput` 没有 name/slug，项目也不能删）——所以撞上就是永久的、用户毫无出路。**改法：`forkSlug` 的主名一律用今天那个超长兜底的形状**——`forkSlugDigest(head, handle, forkPairDigest(parentID, actorID), \"\")`，即 slug 一律由这一对 (父, 人) 派生并带它的 8 位摘要。**保留名（`-2`）与那条 `ErrForkSlugTaken` 拒绝原样保留**，它们是最后一道兜底，不是要被删的东西。**不要**改成'撞了才升级到保留名'：那会把代码注释里写的**孤儿行**危险请回来（'自己名下占着'与'自己在飞'在记录里分不开）。**显示名不变**（`forkName` 照旧），变的只是 URL。**T0804 那几条断言可读 slug 的测试要跟着改**（`internal/application/forks/service_test.go:333-334`、`:782`、`:792`）：规则本身变了，测试跟着它断言的规则走——**这不是'改测试迁就实现'**，但除这几条断言之外**不许放宽任何一条测试**。",
+    "**这条 AC8 是收窄过的，理由与边界都要看见（2026-09-20）**：第一次交付的独立评审在真实 PostgreSQL 上证明了「外部 fork 提的 PR 走不到既有 merge 路径」——`internal/application/merge/service.go:439` `source, err := s.branch(ctx, in.ProjectID, pr.SourceBranchID)` 把源分支钉在 PR 的项目上，而 fork 的源分支活在 fork 项目。修它要改 merge 路径（跨模块，L2），已拆成 **T0817**。所以本任务**只到「PR 在真实 HTTP 路径上开出来」**：fork → 在自己的 fork 里写状态 → 对上游开 PR （含三格权限矩阵、存在性隐藏的 404、匿名拒绝、幂等、fork 命名规则），并给出一条可复现证据。**合并、以及依赖合并的产物（例如 profile credit 的那一段），都不在本任务的验收里**——你既不许用 stub 假装它通过，也不许在 RESULT 里把它记成 passed。",
+    "**范围纪律**：只改 `allowed_scope`。`specs/**`（除两个生成物，本任务不需要）、`tasks/**`、`docs/**`、`infra/migrations/**`、`apps/web/**` 都不在你的范围内。**不许为了让测试变绿而删测试、跳过测试、放宽断言或放大超时**（`CLAUDE.md` §5.1、§6）。"
+  ],
+  "deliverables": [],
+  "acceptance_criteria": [
+    "**非成员的已登录用户通过真实 HTTP 路径 fork 一个 public project 成功**：`POST /api/v1/projects/{id}/forks` 返回 201，响应里有 fork 项目、fork 分支与谱系行；**同一个账号对 private project 做同样的事得到 404**（存在性隐藏，不是 403）。",
+    "**匿名用户三个端点全部被拒**：发起 fork、写自己 fork 的科研状态、从 fork 开 PR——三条都要有测试，答案与 guard 的结构性拒绝一致（401）。",
+    "**重复发起是幂等的**：第二次请求返回 200 与同一个 fork，且**项目数、分支数、谱系行数都不增长**（要有行数断言，不是只看响应体）。",
+    "**两个同名父项目（分属两个组织）被同一个人分别 fork 时都要成功**，且两个 fork 的 slug 不同、各自带这一对 (父, 人) 的摘要（`forkPairDigest`）——这条是为了证明①那条永久锁死已经被关掉；要有测试，不是靠 RESULT 里一句话。",
+    "**外部提案走既有 PR 路径**：从自己的 fork 通过 `POST /api/v1/projects/{id}/pull-requests` 对上游开 PR 成功（201）；**不从 fork 直接对上游开被拒**；**从别人的 fork 开被拒**。三条都要有测试。",
+    "**不可解析内容的 fork 分支开不出正式 PR**：真 PostgreSQL 上断言 `pull_request_semantic_gate`（`00042`）真的拦住它，且 HTTP 层把它映射成契约里写的那个答案。",
+    "**契约与实现一致**：契约里声明的两条端点都有实现，且实际返回的状态码集合与契约一致——要有一条对照检查（把契约读出来与实际路由表/响应码对一遍），不是靠 RESULT 里一句话。",
+    "**到 PR 开出来为止的真实路径闭合**：`docs/31_MASTER_ACCEPTANCE.md:17`「Public Project 外部用户可 fork/contribute」的**第一段**——fork → 在自己的 fork 里写状态 → 对上游开 PR——在**真实 HTTP 路径**上走通，并给出一条可复现的证据。**合并那一段不在本任务的验收里**（2026-09-20 拆分，裁决记在 `tasks/decisions.md`、架构理由记在 `docs/adr/ADR-025`）：merge 今天按 PR 的项目解析源分支，而 fork-sourced branch 活在 fork 项目，修它要动 merge 服务与 persistence，属跨模块改动，已拆成 **T0817**。**不许把「合并」用 stub/mock 假装走通**——第一次独立评审正是因此判 blocking；整条闭环（含合并）由 T0810 的端到端用例在 T0817 合并后收口。"
+  ],
+  "tests": [
+    "external fork http e2e",
+    "fork propose authorization e2e"
+  ],
+  "allowed_scope": [
+    "cmd/api/**",
+    "internal/application/**",
+    "internal/persistence/**",
+    "tests/**",
+    "go.mod",
+    "go.sum",
+    ".env.example"
+  ],
+  "forbidden_scope": [
+    "specs/**",
+    "tasks/**",
+    "docs/**",
+    "infra/migrations/**",
+    "apps/web/**",
+    ".git/**",
+    "CLAUDE.md"
+  ],
+  "relevant_specs": [
+    "specs/api/openapi.yaml",
+    "specs/policies/permissions-matrix.csv",
+    "docs/04_USERS_ROLES.md",
+    "docs/31_MASTER_ACCEPTANCE.md",
+    "docs/16_GIT_COMPATIBILITY.md",
+    "docs/45_ERROR_MODEL.md"
+  ],
+  "scope_note": "**2026-09-20 收窄 AC8**：合并那一段拆成 T0817（见上一条需求）。本任务的交付面因此不变——它本来就不含 merge 服务，这次只是把验收写成实际能做到的那一段。"
+}

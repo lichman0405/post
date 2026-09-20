@@ -1680,6 +1680,36 @@
       "status": "not_run",
       "last_run": null,
       "evidence": null
+    },
+    {
+      "id": "T0511-TEST-01",
+      "task_id": "T0511",
+      "name": "evidence read audience e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0817-TEST-01",
+      "task_id": "T0817",
+      "name": "external fork merge e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0611-TEST-01",
+      "task_id": "T0611",
+      "name": "release review after merge e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
     }
   ]
 }

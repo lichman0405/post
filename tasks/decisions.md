@@ -14546,3 +14546,106 @@ claude CLI 就退回它自己的环境默认。我试过在驱动进程里导出
 
 **不追溯**：这个改动不改变已经跑起来的工人。T0810 仍在它的环境模型上跑完，我不拿"模型不对"当理由否定它——
 它的交付照样逐条过 G2；验不过时，拒绝重派的那一次才会吃到 `RDDEV_WORKER_MODEL`。
+
+## 2026-09-20：两笔 blocked 的裁决 —— 都是**缺陷在我这一侧的树里**，拆任务，不等人
+
+**背景**：今天有两笔被标 `blocked`（T0814 与 T0608），标记时写的都是"需要产品/架构裁决"。
+我逐行读了代码之后把两笔都判成**同一类**：**产品语义早就写好了，是树里没照它实现。**
+所以两笔都不升级为 L3，也不需要 owner 说话；两笔都拆出**一个新的 L2 任务**去补那一层。
+
+### 一、T0814 的 AC8：外部 fork 提的 PR 走不到 merge（拆出 T0817）
+
+**事实**：`internal/application/merge/service.go:439` 是
+`source, err := s.branch(ctx, in.ProjectID, pr.SourceBranchID)`——**源分支被钉在 PR 所属的项目上**；
+`:441` 同形解析 target；`:456-465` 的 `diffs.Inputs{ProjectID: in.ProjectID, ...}` 与
+`s.plans.Plan(ctx, in.ProjectID, ...)` 也把整个计算钉在同一个项目。而 fork 的源分支活在 **fork 项目**。
+所以外部提案一进 merge 就在源侧读不到东西。T0814 的独立评审在真实 PostgreSQL 上复现过，我读代码时独立确认了同一处。
+
+**为什么这不是 L3**：产品语义三处都写着——`specs/policies/permissions-matrix.csv:5-7` 的
+`external_fork_only` / `own_fork_only` / `allow_from_fork`，`docs/04 §2` 的"可 Fork 并从自己的空间发起外部 PR"，
+`docs/31_MASTER_ACCEPTANCE.md:17` 的"Public Project 外部用户可 fork/contribute"；
+数据库层也早写好了（`00086` 的 `pull_request_fork_gate`，头部注释逐字说跨项目源分支是**可表示的**）。
+缺的是 merge 那一层没照它做。**没有一条新规则要创造。**
+
+**处置**：
+1. T0814 的 AC8 **收窄**到"fork → 在自己的 fork 里写状态 → 对上游开 PR，在真实 HTTP 路径上走通"，
+   任务书已按此改写（`tasks/packages/T0814.json`，用 `.rddev/tools/mk-package-T0814.py` 从 DAG 条目派生，逐个替换都断言命中一次）。
+   **合并那一段不在它的验收里**，也不许用 stub 假装——第一次评审判 blocking 正是因为"看起来走通了"。
+2. 新立 **T0817**（P8，v1_required，L2）：merge 在**源分支自己所在的项目**里读源侧，落点仍是上游项目。
+   范围给到 merge / forks / diffs / pullrequests / persistence / tests。
+3. 架构理由写进 **`docs/adr/ADR-025`**（跨模块接口改动，按 `CLAUDE.md` §5 必须有 ADR）。
+4. 整条闭环（含合并）由 T0810 的端到端用例在 T0817 合并后收口——**T0810 的依赖表要补 T0814/T0817**，
+   但它此刻在飞，等它不跑了再改（改在飞的条目会让它的 G2 直接红）。
+
+### 二、T0608 第 6 段：Release 读不到"经合并进来"的评审（拆出 T0611）
+
+**事实**：`internal/persistence/queries/releases_assets.sql:88-107` 的 `ListReleaseReviews` 沿
+`project_states.parent_state_id` 向上走血缘，再挑 `pr.proposed_state_id IN (血缘)` 的评审；
+而 main **只能**经 merge 前进（`00069:53-56` 逐字；合并提交用 `BaseStateID: &targetHead`），
+**合并产生的新状态其 parent 是合并前的目标头，不是提案**——所以提案状态永远不在血缘里，
+对"经合并进入 main"的状态这份记录**恒为空**，而 main 上的状态**全部**是这么来的。
+
+**影响比"记录难看"重**：同一份记录喂 release gate（`internal/application/releases/service.go:309-318` →
+`validator.go:162` 逐字 "scientific and integrity review must be recorded and approved (docs/11 §1)"）。
+也就是说**真实产品路径上（提案 → 评审批准 → 合并 → 发布）发布会自己的门拒掉**；
+`docs/11:5` 要求 manifest 固定 "review/approval record"，两条规格今天都不可满足。
+
+**为什么测试没抓到**：T0605 的契约与 T0606 的 E2E 钉的都是**合并之前**的形状
+（PR 的 `proposed_state_id` 恰好就是 main 的那个头：`f.seedPR(t, ctx, 1, f.genesis, head1)`），
+真实路径（merge 产生新状态）**一条测试都没有**。这是"绿的是被覆盖的那一半"的又一个实例。
+
+**处置**：
+1. 新立 **T0611**（P6，v1_required，L2）：验收记录沿**合并边**可读
+   （`semantic_merges.result_state_id → pull_request_id`），**加**一条边、不替换既有的那一支
+   （`proposed_state_id IN 血缘` 是 T0605 的契约，撤掉它会让另一类状态失去记录）。
+2. 架构理由写进 **`docs/adr/ADR-026`**。
+3. 我否决了两个替代方案并写进 ADR：改 merge 让提案进血缘（动 frozen main 的推进语义）、
+   在 release 侧放宽门的判定（用放宽 Gate 掩盖缺陷，§6 逐字禁止）。
+4. **T0608 继续保持 blocked**，等 T0611 合并后再 `task ready`——它的 AC 是整条链，上游没修它必红。
+
+### 三、顺手解冻的一笔：T0511 落地后 T0812 才能派
+
+`tasks/packages/T0511.json`（ADR-024 的落地：证据断言的读带上读者）从 2026-09-19 就写好了，
+一直卡在"没有安静窗口"，而 **T0812 被手工冻结在等它**（依赖边不可能先于任务存在）。
+今天一并在窗口里落地：`land-T0511.py` 写骨架 + 给 T0812 补依赖边，`apply-packages.py T0511` 落书。
+**T0511 合并之后**才跑 `task ready T0812`；在那之前 T0812 不许派——它与 T0511 改同一条读，
+并行做必然得到同一规则的两种写法，而 ADR-024 逐字禁止把不同的轴"整理"成另一套谓词。
+
+**给以后**：标 `blocked` 时写的理由里，"需要产品/架构裁决"这五个字要**当场分清楚是哪一种**——
+产品语义没写（L3，等人）还是树里没照写（工程缺陷，拆任务）。
+今天这两笔我都标错了第一版：它们从来不是产品问题，是我没把两层分开看。
+
+## 2026-09-20（续）：T0810 停在半路——它的验收里有一段今天不可能通过
+
+**判断**：把正在跑的 T0810（"最小 Open Network 闭环 E2E"）停下来并 reject，**不是对它交付的否定**，
+是排期更正。理由只有一条，且是可验证的：
+
+`tasks/tasks.json` 里 T0810 的要求逐字是
+`public project→discover→fork/contribute→PR merge→profile credit→external evidence`。
+其中 **PR merge 那一段与 T0814 撞的是同一堵墙**：外部用户的 fork 是**另一个项目**，
+源分支因此属于 fork 项目，而合并路径把源侧钉在 PR 所属项目上
+（`internal/application/merge/service.go:439`，同处 `:456-465` 的 `diffs.Inputs`/`plans.Plan` 也传 `in.ProjectID`）。
+**一个要求里含"完整链路"的任务，在链路中间断着一截的时候，只有两种结局：假装走通（我必拒），
+或者耗掉几小时写出一个 blocked。** 两种都不如现在就停。
+
+**为什么不是"再等等看"**：
+1. 它的 `decision_level_max` 是 **L1**，而修 merge 是 **L2**（跨模块，已由 T0817 拥有）——
+   它**没有权限**自己修，所以它跑到底也只能报 blocked；
+2. 同一个修法出现两个实现是一份要还的债（T0810 的 `allowed_scope` 里恰好含 `internal/application/**`，
+   不设边界它是有可能顺手改的）；
+3. 它当时用的是**环境默认模型**（registry `model: ""`，spawn 发生在驱动重启之前、拿不到
+   `RDDEV_WORKER_MODEL`），重开一次本来也要付。
+
+**处置**：
+1. `rddev task reject T0810 --reason-file`（理由全文即给未来 rework 的信，落在 `.rddev/runtime/gates/T0810/`），
+   然后 `rddev worker stop T0810`（exit 143）。状态 `running → rejected`，而 `rejected` **不在**派工集里
+   （`rddev task next` 只收 todo/ready），驱动随即把它从 pending 里去掉，**没有产生 decision**。
+2. 在窗口里给 DAG 补边：**T0810.dependencies += T0817**（脚本 `.rddev/tools/edit-T0810-deps.py`）。
+   **只加 T0817，不加 T0814**：T0814 是同一段路径的**平行证明**，不是 T0810 读的能力；
+   把平行证明写成依赖，等于让两个证明互相排队，白等一轮。
+3. **worktree 保留**（`rework` 保留 diff，`respawn` 会 `reset --hard + clean -fd` 把它删掉）——
+   它已经写好的 `tests/integration/network_fake_git_test.go`（652 行 in-memory Git transport）
+   是"完整链路 CI 可跑"这条 AC 真正需要的东西，**不许丢**。T0817 合并后走 `rework` 续跑。
+
+**给以后**：一个 worker 正在跑的任务，如果它的验收里有一段**已经被判定为"树里没照规格写"**，
+要当场问一句"它跑到底有没有可能通过"。**不能通过的就不是在跑，是在烧钱。**

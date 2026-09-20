@@ -1,0 +1,76 @@
+{
+  "id": "T0817",
+  "dependencies": [
+    "T0804",
+    "T0601"
+  ],
+  "tests": [
+    "external fork merge e2e"
+  ],
+  "phase": "P8",
+  "phase_name": "开放网络、Fork、贡献与 Research Profile",
+  "title": "外部 fork 提案的合并路径：merge 必须能在源分支自己所在的项目里读它",
+  "v1_required": true,
+  "decision_level_max": "L2",
+  "requirements": [
+    "**这一条是 T0814 的 AC8 拆出来的一半，不是新需求。** T0814（外部 fork 的生产接口）第一次交付被独立评审判 blocking：**外部 fork 提的 PR 走不到既有的 merge 路径**。裁决（2026-09-20，记在 `tasks/decisions.md`）：T0814 的 AC8 收窄到「PR 在真实 HTTP 路径上开出来」，**合并那一半拆成本任务**；merge 路径要改，但它是跨模块的接口改动（L2），不能塞进一个「照契约接线」的任务里顺手做。",
+
+    "**为什么今天走不通（我逐行读过，两处独立确认）**：数据库层**已经允许**跨项目源分支，而且要求它是诚实的——`infra/migrations/00086_external_fork.sql` 的 `pull_request_fork_gate` 只在「源分支所属项目是这个 PR 项目的 fork，且 fork 人是 PR 作者」时才放行插入，头部注释逐字写着 `pull_requests has always carried source_branch_id and target_branch_id with no constraint tying them to the PR's project — the same-project rule lived only in the store — so an external PR is representable`。**但 merge 服务把两侧都钉在 PR 的项目上**：`internal/application/merge/service.go:439` 是 `source, err := s.branch(ctx, in.ProjectID, pr.SourceBranchID)`，`:441` 同形解析 target；`:456-465` 的 `diffs.Inputs{ProjectID: in.ProjectID, ...}` 与 `s.plans.Plan(ctx, in.ProjectID, ...)` 也把整个计算钉在同一个项目。所以外部 fork 的 PR 一进 merge 就在源侧读不到东西。这不是猜测：T0814 的独立评审在真实 PostgreSQL 上复现过，我在读这段代码时独立确认了同一处。",
+
+    "**目标**：让 merge 在**源分支自己所在的项目**里读源侧（源分支、被提案的状态、以及源状态的版本内容），把结果落进 **PR 所属项目**的目标分支。核心是「项目」从**一个**变成**源侧与目标侧各自的**——凡是在 merge 路径上按 `in.ProjectID` 取值的地方，都要重新问一次「这个值属于哪一侧」。",
+
+    "**不许放宽任何一道门（fail closed）**：① `pull_request_fork_gate`（00086，插入门）照旧，不许为了「让它更顺」绕过或改它；② merge 侧要有对称判定：源分支不在 PR 项目里、且源侧项目不是 PR 作者本人的 fork 时，merge **必须拒绝**，不许「按 PR 项目查一遍、查不到就报 not found」；③ PR 状态机（`merge_ready` 才可合）、main freeze、`pull_request_semantic_gate`、版本头锁（`*versionHeadsMovedError` 的重试）一处都不许动；④ 内容搬运仍是「逐字拷贝源版本内容」（`materialize`，`:641-660`），`VisibilityPolicyID` 与 abort 记录的携带规则不因源在别的项目而放宽——**跨项目不是放宽 rights 的理由**。",
+
+    "**负向证据要有，但要说清楚是哪一层在挡**：构造一个「源分支属于一个**不是** PR 作者 fork 的项目」的 PR——如果插入门（00086）先拒，就把**那一层**钉住（SQLSTATE/文本要断言）；如果你能构造出插入门之后的形状，则 merge 必须 fail closed。**你选可行的那条，并在 RESULT 里点名哪一层在挡、为什么另一层不可达**；不要为了凑一条测试去写一个永远走不到的断言。",
+
+    "**表示的诚实性**：`semantic_merges` 一行今天把 base/source/target 三个状态钉死（`infra/migrations/00069_semantic_merge.sql:50-80`），外部 fork 的 PR 里 `source_state_id` 属于 **fork 项目**、`target_state_id`/`base_state_id` 属于**上游项目**，行的 `project_id` 是上游项目。如果你发现这层表示需要改，**停下来在 RESULT 里报**——那是一条新的架构问题，不是本任务的顺手活。",
+
+    "**需要新迁移怎么办**：本任务**预期不需要**新迁移（`project_forks` 与 `semantic_merges` 都已经存在）。若你判断确实需要，**不要自己选号**，在 RESULT 里报上来由我分配。",
+
+    "**范围纪律**：只改 `allowed_scope`。`specs/**`、`tasks/**`、`docs/**`、`infra/migrations/**` 都不在你的范围内。**不许为了让测试变绿而删测试、跳过测试、放宽断言或放大超时**（`CLAUDE.md` §5.1、§6）。"
+  ],
+  "deliverables": [
+    "merge 路径在源侧按「源分支自己所在的项目」解析源分支、提案状态与内容版本，目标侧仍按 PR 的项目落地",
+    "真 PostgreSQL 上跑通的闭环：public 项目 A 被 B fork → B 在自己的 fork 分支提交状态 → 对 A 开 PR → 评审 → merge → A 的 main 头前进且内容逐条来自 B 的提案",
+    "负向证据：非 fork 的跨项目源分支在哪一层被拒（钉住那一层）",
+    "`tasks/decisions.md` 之外的架构结论写进 `docs/adr/`（若你在实现中判定了新的跨模块边界，在 RESULT 里点名，由我落 ADR）"
+  ],
+  "acceptance_criteria": [
+    "**闭环成立**：真 PostgreSQL 上，A（public）被 B fork，B 在 fork 分支写出状态，对 A 开 PR 并被评审批准，merge 之后 **A 的 main 头是一个新状态**，且该状态里带 B 提议的对象/关系版本——内容**逐条断言**（不是只看状态 id 变了）。",
+    "**源侧读对了**：测试必须能证明 merge 读的是 fork 项目的分支与状态（例如断言 `semantic_merges.source_state_id` 属于 fork 项目、且断言 fork 分支在合并后被标记 merged），而不是「恰好也能读到 PR 项目里的同名东西」。",
+    "**门没被放宽**：非 fork 的跨项目源分支仍然被拒（钉住拒它的那一层），PR 状态机/main freeze/semantic gate 的既有测试一条不减、断言不宽。",
+    "**跨项目不放宽 rights**：搬进上游的内容逐字保留源版本的可见性策略；若源版本带 abort 记录，abort 也照旧随内容走（`materialize` 的既有规则），要有断言。",
+    "**既有测试全绿**：`make test-integration` 全绿，且被改动的包的单测全绿；派生件（`internal/persistence/sqlc/**`）按生成器重新生成、不手工编辑。",
+    "**诚实报告**：RESULT 里逐条写清改了哪几处「按项目取值」、每一处现在取的是哪一侧、以及你不能确定的地方。"
+  ],
+  "allowed_scope": [
+    "internal/application/merge/**",
+    "internal/application/forks/**",
+    "internal/application/diffs/**",
+    "internal/application/pullrequests/**",
+    "internal/persistence/**",
+    "cmd/api/**",
+    "tests/**",
+    "go.mod",
+    "go.sum",
+    ".env.example"
+  ],
+  "forbidden_scope": [
+    "specs/**",
+    "tasks/**",
+    "docs/**",
+    "infra/migrations/**",
+    ".git/**",
+    "CLAUDE.md",
+    "apps/web/**"
+  ],
+  "relevant_specs": [
+    "docs/09_VERSION_CONTROL.md",
+    "docs/43_STATE_MACHINES.md",
+    "docs/04_USERS_ROLES.md",
+    "specs/policies/permissions-matrix.csv",
+    "docs/adr/ADR-023-asset-fork-derive-lineage.md"
+  ],
+  "scope_note": "范围按「这一改动会碰到什么」划：merge 服务本身、fork 谱系的读、以及 merge 用到的两个协作者（diffs 的输入与 rsg merge 计划的输入）——后两个正是把「项目」从一个变成两个时必须一起看的地方。`internal/persistence/**` 是必须的：解析源侧项目需要一条按 id 读分支/谱系的查询（`queries/**` 改了就要重新生成 `sqlc/**`，那是派生件）。`cmd/api/**` 只在你需要把「源侧项目」这件事暴露到接线层时才用得上——如果你用了，在 RESULT 里说明为什么不能在服务层解析。`infra/migrations/**` 不在范围内：本次预期不需要 schema 变化，需要就报上来。",
+  "supervisor_scope_narrowing": "**没有收窄，是把 T0814 的一半拆出来。** T0814 的 `allowed_scope` 里没有 merge 服务、也没有 persistence 的查询层——那正是它的 AC8 走不通的原因，也是一个「照契约接线」的任务不该顺手改 merge 的理由。拆出来之后两边的范围各自干净：T0814 只接 HTTP 与契约，本任务只改合并路径。**依赖写 T0804 与 T0601：前者给 fork 谱系，后者给 merge 引擎和「main 只能经 merge 前进」这条结构性规则；两者都已合并，所以本任务随时可派。**"
+}

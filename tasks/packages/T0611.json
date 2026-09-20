@@ -1,0 +1,74 @@
+{
+  "id": "T0611",
+  "dependencies": [
+    "T0605",
+    "T0601"
+  ],
+  "tests": [
+    "release review after merge e2e"
+  ],
+  "phase": "P6",
+  "phase_name": "Frozen Main、Abort、Policy 与 Release",
+  "title": "Release 的验收记录必须覆盖「经合并进入 main」的状态（T0608 第 6 段的上游缺陷）",
+  "v1_required": true,
+  "decision_level_max": "L2",
+  "requirements": [
+    "**这是 T0608 第 6 段（合并之后经 Releases 表单切片）走不通的上游原因，不是新需求。** 2026-09-20 把 T0608 标了 blocked 等裁决；裁决结果（记进 `tasks/decisions.md`）：**缺陷真实存在，修在下面这条路径上**，修完 T0608 才解封。",
+
+    "**缺陷（两处代码互相印证，我逐行读过）**：① `internal/persistence/queries/releases_assets.sql:88-107` 的 `ListReleaseReviews` 用 `WITH RECURSIVE lineage(id)` 沿 `project_states.parent_state_id` 向上走，再匹配 `pr.proposed_state_id IN (SELECT id FROM lineage) AND pr.target_branch_id = @main_branch_id`。② main 今天**只能**经 Research PR merge 前进——`infra/migrations/00069_semantic_merge.sql:53-56` 逐字 `The Research PR this merge executes. NOT NULL on purpose: main (and every other target branch) advances only this way (docs/09 §3/§4)`，而合并提交在 `internal/application/merge/service.go:570-590` 用 `BaseStateID: &targetHead` 落笔，也就是**新状态的 parent 是合并前的目标头，不是提案**。两条合起来：合并产生的状态 M 的血缘是 {M, 合并前的 main 头, …}，**提案状态 P 永远不在里面**，所以对「经合并进入 main」的状态，这个查询**恒为空**。",
+
+    "**影响是功能坏了，不是记录难看**：同一份记录还喂 release gate —— `internal/application/releases/service.go:309-318` 把它变成 `rsgvalidation.ReleaseFacts.ReviewApproved`，`internal/rsg/validation/validator.go:162` 逐字 `scientific and integrity review must be recorded and approved (docs/11 §1)`。所以在今天的产品路径上（提案 → 评审批准 → 合并 → 发布），**发布会被自己的门拒掉**；而 `docs/11_RELEASE_ASSET_HUB.md:5` 逐字要求 Release manifest 固定 `review/approval record`。两条规格今天都**不可满足**。",
+
+    "**为什么既有测试没抓到（你要在 RESULT 里如实引用，别照抄我的结论就完事）**：T0605 的契约（`tests/integration/release_store_test.go:22-32`）与 T0606 的 E2E（`tests/integration/release_e2e_test.go:447-451`）钉的都是**合并之前**的形状——PR 的 `proposed_state_id` 恰好就是 main 的那个头（`f.seedPR(t, ctx, 1, f.genesis, head1)`）。**真实路径（merge 产生新状态）一条测试都没有**。",
+
+    "**你要做的（记录的形状）**：一个状态的验收记录 = 它**血缘内状态**所对应 PR 的评审 **∪** 它**血缘内状态**作为 `semantic_merges.result_state_id` 的 merge 行所属 PR 的评审。也就是**让合并边可读**（`semantic_merges.result_state_id → pull_request_id`），而不是绕道去猜提案。**现有那一支不许删**：`proposed_state_id` 在血缘内就计入，是 T0605 写下的契约，撤掉它会让另一类状态失去记录。",
+
+    "**顺序与分组不许漂**：记录仍按 PR number、再评审时间、再行 id 排序（沿用现有 `ORDER BY`）；同一个 PR 不许出现两组；分组必须走 `internal/persistence/release_store.go:63-74` 的**同一个 helper**——那段注释逐字写着它存在的理由：release gate 与 knowledge publish 是**两个读者**，它们不许对同一份记录有分歧（`internal/persistence/knowledge_publish_store.go:143`）。",
+
+    "**先证明它现在真的坏（这条是硬要求）**：在真 PostgreSQL 上造一条完整链路（fork/研究分支提交 → 开 PR → 批准评审 → merge），断言 `ListReleaseReviews` 对合并后的 main 头返回**空**；改完之后同一条测试必须返回**非空**。**两个状态都要贴进 RESULT**——只有「改完之后是绿的」，等于没有证据说明你修的是这个缺陷。",
+
+    "**范围纪律**：只改 `allowed_scope`。**本次不需要新迁移**——`semantic_merges`（00069）已经把合并边存下来了，你要做的是把它读出来。若你判断必须改 schema，停下来在 RESULT 里报，**不要自己选号**。`specs/**`（除派生件）、`tasks/**`、`docs/**` 都不在你的范围内。",
+
+    "**不许弱化**：不许为了让门变绿而放宽 `validator.go:162` 的判定、不许把 required kinds 从 (scientific, integrity) 缩成任意一条、不许 skip/删掉 T0605 与 T0606 的既有断言、不许放大超时（`CLAUDE.md` §5.1、§6）。"
+  ],
+  "deliverables": [
+    "`ListReleaseReviews` 的合并边支线：血缘内状态作为 merge 结果的那些 PR 的评审也计入，且与既有支线合并去重、同一 PR 只有一组",
+    "真 PostgreSQL 上「合并产生 main 头 → 发布成功」的完整 E2E，含 manifest `reviews` 段的逐条断言",
+    "一条先红后绿的证据：同一条测试在改之前返回空记录、改之后返回那条 PR 的评审",
+    "反向断言：未合并的研究分支状态仍在血缘外，贡献为空（T0605 的既有契约不许被放宽）"
+  ],
+  "acceptance_criteria": [
+    "**缺陷可复现**：真 PostgreSQL 上，经一次真实 merge 进入 main 的状态，其 `ListReleaseReviews` 在改动前为空——这条要先跑出来并记进 RESULT。",
+    "**修好了**：同一条链路上 `POST .../releases` 返回 201（不再被 `RELEASE_GATE_BLOCKED` 拒），manifest 的 `reviews` 段带着那条 PR 的评审，字段（`reviewer_id`/`review_kind`/`decision`/`created_at`）与数据库行逐字一致。",
+    "**合并边可读且不重复**：一条链上**两次**合并的评审都出现在后续状态的记录里；同一个 PR 只出现一组；排序规则不变。",
+    "**既有契约不退化**：T0605 的 `tests/integration/release_store_test.go` 与 T0606 的 `tests/integration/release_e2e_test.go` 全部保持通过、断言一条不减；未合并研究分支的贡献仍为空。",
+    "**派生件按生成器重新生成**：`internal/persistence/sqlc/**` 不许手工编辑；`make check-sqlc-drift`（或仓库里等价的驱动）不红。",
+    "**全绿**：`make test-integration` 全绿，被改动的包的单测全绿。"
+  ],
+  "allowed_scope": [
+    "internal/persistence/**",
+    "internal/application/releases/**",
+    "tests/**",
+    "go.mod",
+    "go.sum",
+    ".env.example"
+  ],
+  "forbidden_scope": [
+    "specs/**",
+    "tasks/**",
+    "docs/**",
+    "infra/migrations/**",
+    ".git/**",
+    "CLAUDE.md",
+    "apps/web/**",
+    "cmd/api/**"
+  ],
+  "relevant_specs": [
+    "docs/11_RELEASE_ASSET_HUB.md",
+    "docs/09_VERSION_CONTROL.md",
+    "docs/43_STATE_MACHINES.md",
+    "docs/31_MASTER_ACCEPTANCE.md"
+  ],
+  "scope_note": "范围只覆盖「读这份记录」的那一层：查询（`internal/persistence/queries/releases_assets.sql`）、它的派生件 `internal/persistence/sqlc/**`、分组与门（`internal/persistence/release_store.go`、`internal/application/releases/**`）、以及证明它的集成测试。`cmd/api/**` **故意不在范围内**：这是读的语义问题，不是接线问题——如果你觉得非改路由不可，说明你的修法放错了层，在 RESULT 里报。`infra/migrations/**` 也不在：合并边已经在 `semantic_merges`（00069）里存着。",
+  "supervisor_scope_narrowing": "**范围是按「缺陷在哪一层」收的，不是按「哪一层方便」。** 替代方案我否决过两个：①**改 merge，让提案状态也进 main 的血缘**（例如把合并提交挂到提案上）——那会改掉 frozen main 的推进语义，动的是 `docs/09` 的结构性规则，代价远大于收益；②**在 release 侧放宽门的判定**（例如「合并过的状态免检评审」）——那是用放宽 Gate 掩盖缺陷，`CLAUDE.md` §6 逐字禁止。所以修的是**记录本身**：合并是一条真实的边，记录就该沿它读得到。依赖写 T0605（它定义了这份记录的契约）与 T0601（它定义了 main 怎么前进），两者都已合并。"
+}

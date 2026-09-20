@@ -4461,6 +4461,18 @@
         }
       ]
     },
+    "T0511": {
+      "status": "ready",
+      "notes": "新立账（2026-09-19）：证据断言的读带上读者，见 docs/adr/ADR-024。任务书在 tasks/packages/T0511.json；未落地前 allowed_scope 为空，故意如此。",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-20T12:51:37Z",
+          "run_id": "run-946b1ed440ec15e1"
+        }
+      ]
+    },
     "T0601": {
       "status": "merged",
       "started_at": "2026-09-16T11:27:32Z",
@@ -5007,10 +5019,12 @@
       ]
     },
     "T0607": {
-      "status": "verification",
-      "started_at": "2026-09-20T11:45:28Z",
-      "worker_run_id": "run-22827b12aeee8801",
-      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（e7f06ba63efa），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
+      "status": "merged",
+      "started_at": "2026-09-20T12:08:08Z",
+      "worker_run_id": "run-d8a34c98e00b23d5",
+      "accepted_by_supervisor_at": "2026-09-20T12:39:41Z",
+      "merged_at": "2026-09-20T12:49:12Z",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（ddfd8ee194f9），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
       "history": [
         {
           "from": "todo",
@@ -5066,6 +5080,40 @@
           "at": "2026-09-20T12:00:41Z",
           "run_id": "run-95bada5cdb24dc94",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-20T12:07:56Z",
+          "run_id": "run-73d1a3867dc3d50e",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（ddfd8ee194f9），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T12:08:08Z",
+          "run_id": "run-d8a34c98e00b23d5",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-20T12:21:29Z",
+          "run_id": "run-d5f2281a5bda18c5",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-20T12:39:41Z",
+          "run_id": "run-27c18f603619cb35"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-20T12:49:12Z",
+          "run_id": "run-f5eaf57e17d2a86b",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -5176,6 +5224,18 @@
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null
+    },
+    "T0611": {
+      "status": "ready",
+      "notes": "新立账（2026-09-20）：T0608 第 6 段走不通的上游原因——Release 的验收记录读不到「经合并进入 main」的 PR 的评审。裁决见 tasks/decisions.md，架构理由见 docs/adr/ADR-026。任务书在 tasks/packages/T0611.json；未落地前 allowed_scope 为空，故意如此。",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-20T12:51:37Z",
+          "run_id": "run-44159c6428f274e2"
+        }
+      ]
     },
     "T0701": {
       "status": "merged",
@@ -6775,9 +6835,10 @@
       ]
     },
     "T0810": {
-      "status": "running",
+      "status": "rejected",
       "started_at": "2026-09-20T12:00:44Z",
       "worker_run_id": "run-063da3e3c1b7fa22",
+      "rejection_reason": "**这不是对你交付的否定，是排期的更正（Supervisor，2026-09-20）。** 现在把你停下来，\n是因为**本任务此刻不可能被诚实地验收通过**，继续跑下去只会烧时间。\n\n## 事实\n\n你的任务要求逐字写着：`public project→discover→fork/contribute→PR merge→profile credit→external evidence`，\n验收标准是「完整链路 CI 可跑」。**其中「PR merge」那一步，今天的代码走不通。**\n\n链路是：外部用户 fork 出一个**自己的项目**，在自己的 fork 里写状态（分支因此属于 **fork 项目**），\n再对上游项目开 PR。而合并路径把源侧钉在 PR 所属项目上：\n\n- `internal/application/merge/service.go:439` `source, err := s.branch(ctx, in.ProjectID, pr.SourceBranchID)`\n- 同处 `:456-465`，读源状态版本内容的 `diffs.Inputs` 与 `plans.Plan` 也传 `ProjectID: in.ProjectID`\n\n源分支活在 fork 项目，于是在上游项目里查不到——**第一步就落空**。这不是你的实现问题，\n是合并服务缺一条能力；它在数据库与权限层**已经是被允许的输入**（`infra/migrations/00086_external_fork.sql`\n的 `pull_request_fork_gate` 正是为这件事写的），只是读的那一侧没接上。\n\n## 我做了什么\n\n这条已经拆成 **T0817**——「外部 fork 提案的合并路径：merge 必须能在源分支自己所在的项目里读它」，\n`allowed_scope: internal/application/merge/**`，架构理由记在 `docs/adr/ADR-025`。\n**本任务现在的依赖里会加上 T0817（以及 T0814——「真实 HTTP 路径上开出外部 PR」那一段）。**\n\n## 你要注意的两件事\n\n1. **不许用 stub/mock/假合并把这一步「走通」。** RESULT 里把它记成 passed 而实际没经过真实\n   合并路径，是这一轮最容易被抓住的事——T0814 的第一次交付就是因为这个被判 blocking。\n   你现在写的 in-memory Git transport（`tests/integration/network_fake_git_test.go`）本身没问题：\n   它替换的是**传输**那一半，而且你在文件头把「这里不测什么」写清楚了。**保留它。**\n2. **你也不许自己修 merge。** 本任务 `decision_level_max: L1`，而这是跨模块改动（L2），\n   已经由 T0817 拥有；同一个修法出现两个实现，是一份要还的债。\n\n## 恢复时怎么做\n\n等 T0817 合并后我会把你重开（worktree 与你的这段进度都保留）。那时链路才是可通的：\n合并 → profile credit → external evidence 都能在真实路径上跑完。恢复后先确认\n`internal/application/merge/service.go` 的源侧解析已经改了，再继续把闭环收口。\n",
       "history": [
         {
           "from": "todo",
@@ -6791,6 +6852,13 @@
           "at": "2026-09-20T12:00:44Z",
           "run_id": "run-063da3e3c1b7fa22",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-20T12:13:22Z",
+          "run_id": "run-1ae07b9990993d4e",
+          "reason": "**这不是对你交付的否定，是排期的更正（Supervisor，2026-09-20）。** 现在把你停下来，\n是因为**本任务此刻不可能被诚实地验收通过**，继续跑下去只会烧时间。\n\n## 事实\n\n你的任务要求逐字写着：`public project→discover→fork/contribute→PR merge→profile credit→external evidence`，\n验收标准是「完整链路 CI 可跑」。**其中「PR merge」那一步，今天的代码走不通。**\n\n链路是：外部用户 fork 出一个**自己的项目**，在自己的 fork 里写状态（分支因此属于 **fork 项目**），\n再对上游项目开 PR。而合并路径把源侧钉在 PR 所属项目上：\n\n- `internal/application/merge/service.go:439` `source, err := s.branch(ctx, in.ProjectID, pr.SourceBranchID)`\n- 同处 `:456-465`，读源状态版本内容的 `diffs.Inputs` 与 `plans.Plan` 也传 `ProjectID: in.ProjectID`\n\n源分支活在 fork 项目，于是在上游项目里查不到——**第一步就落空**。这不是你的实现问题，\n是合并服务缺一条能力；它在数据库与权限层**已经是被允许的输入**（`infra/migrations/00086_external_fork.sql`\n的 `pull_request_fork_gate` 正是为这件事写的），只是读的那一侧没接上。\n\n## 我做了什么\n\n这条已经拆成 **T0817**——「外部 fork 提案的合并路径：merge 必须能在源分支自己所在的项目里读它」，\n`allowed_scope: internal/application/merge/**`，架构理由记在 `docs/adr/ADR-025`。\n**本任务现在的依赖里会加上 T0817（以及 T0814——「真实 HTTP 路径上开出外部 PR」那一段）。**\n\n## 你要注意的两件事\n\n1. **不许用 stub/mock/假合并把这一步「走通」。** RESULT 里把它记成 passed 而实际没经过真实\n   合并路径，是这一轮最容易被抓住的事——T0814 的第一次交付就是因为这个被判 blocking。\n   你现在写的 in-memory Git transport（`tests/integration/network_fake_git_test.go`）本身没问题：\n   它替换的是**传输**那一半，而且你在文件头把「这里不测什么」写清楚了。**保留它。**\n2. **你也不许自己修 merge。** 本任务 `decision_level_max: L1`，而这是跨模块改动（L2），\n   已经由 T0817 拥有；同一个修法出现两个实现，是一份要还的债。\n\n## 恢复时怎么做\n\n等 T0817 合并后我会把你重开（worktree 与你的这段进度都保留）。那时链路才是可通的：\n合并 → profile credit → external evidence 都能在真实路径上跑完。恢复后先确认\n`internal/application/merge/service.go` 的源侧解析已经改了，再继续把闭环收口。\n"
         }
       ]
     },
@@ -6952,7 +7020,7 @@
       ]
     },
     "T0814": {
-      "status": "blocked",
+      "status": "ready",
       "started_at": "2026-09-20T10:49:12Z",
       "notes": "AC8 要求的外部 fork PR 完整闭合路径（fork → 写状态 → 开 PR → 既有 merge 路径合并）在当前 merge 实现下不可行：merge 按 PR project 解析 source branch，而 fork-sourced branch 活在 fork project。需要先产品/架构决策：拆分 AC8 为 follow-up，还是允许改 merge 路径。先标 blocked，空窗期拆任务。",
       "worker_run_id": "run-a3191c8e3a8b7076",
@@ -7005,11 +7073,17 @@
           "at": "2026-09-20T11:08:43Z",
           "run_id": "supervisor-decision",
           "reason": "AC8 要求的外部 fork PR 完整闭合路径（fork → 写状态 → 开 PR → 既有 merge 路径合并）在当前 merge 实现下不可行：merge 按 PR project 解析 source branch，而 fork-sourced branch 活在 fork project。需要先产品/架构决策：拆分 AC8 为 follow-up，还是允许改 merge 路径。先标 blocked，空窗期拆任务。"
+        },
+        {
+          "from": "blocked",
+          "to": "ready",
+          "at": "2026-09-20T12:51:37Z",
+          "run_id": "run-d50e0dd52d661769"
         }
       ]
     },
     "T0815": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-20T11:14:58Z",
       "notes": "2026-09-19 立账：CI 的 migration-integration 偶发超时（3/14），证据见 tasks/decisions.md。不许用放大 timeout 掩盖——先量再修。",
       "worker_run_id": "run-4e0526b87f10b766",
@@ -7048,6 +7122,13 @@
           "at": "2026-09-20T11:14:58Z",
           "run_id": "run-4e0526b87f10b766",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-20T12:42:01Z",
+          "run_id": "run-1b861687ee2399f4",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -7091,6 +7172,18 @@
           "at": "2026-09-19T04:47:25Z",
           "run_id": "run-4a30439cee496192",
           "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
+    },
+    "T0817": {
+      "status": "ready",
+      "notes": "新立账（2026-09-20）：T0814 的 AC8 拆出来的合并那一半——merge 必须能在源分支自己所在的项目里读它。裁决见 tasks/decisions.md，架构理由见 docs/adr/ADR-025。任务书在 tasks/packages/T0817.json；未落地前 allowed_scope 为空，故意如此。",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-20T12:51:37Z",
+          "run_id": "run-027731423dba89f9"
         }
       ]
     },
@@ -7334,7 +7427,7 @@
       ]
     },
     "T0905": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-20T10:55:26Z",
       "worker_run_id": "run-1ebd17efbf65c177",
       "rejection_reason": "独立评审给了 request_changes，1 条 blocking + 若干文档/覆盖项。下面按优先级处理。\n\n【B · BLOCKING — 必须修：scope 外版本被报成「unversioned」，解释是错的】\n\n问题：`internal/search/ranking/store.go:87` 的 `VersionsForPids` 把 caller project scope 外的行直接 `continue` 掉，导致 ranker 看到的是一个**空 versionID**；然后 `rank.go:503-504` 走 assessVersion，把它当成「没有版本信息」处理，返回 `LevelUnversioned`（rank 2，高于 unknown），并在 `rank.go:539-542` 写出原因 \"the candidate resolves to no scientific object version, so there are no facts to read\"。\n\n这个解释是假的：版本**存在**，只是 caller 不被允许读。Reviewer 用真实 SQLStore + 真实 retriever + 真实 Ranker 在测试库上复现了：out-of-scope 文档报的是 unversioned + 那段假原因。\n\n你要做的：\n1. 让 `VersionsForPids` 能区分「这个 pid 没有版本」和「这个 pid 有版本但不在 scope 内」。\n   可以返回一个额外集合（或 map），把 scope-refused 的 pid 标出来；**不要**为了区分而引入 read-then-write 或改变现有查询的 fail-closed 语义。\n2. 在 ranker 里，scope-refused 的版本要走到 `LevelUnknown`，并给出真实原因：版本在 caller 的 project scope 外。\n   对应文档：`factor.go` 的 `LevelUnknown` 注释已经这么说了，`rank.go` 的 `unreadAssessment` 注释也指向这条路。\n3. 更新 golden fixtures（如果它们现在钉的是错误值）。\n4. 重跑 ranking 的单元测试、集成测试、required test，全部要绿。\n\n【M · MAJOR — 测试钉的不是真实路径】\n\n`tests/integration/ranking_test.go:730` 的 `TestRankingReportsOutOfScopeAsUnknown` 自己 hand-build 了一个带 out-of-scope `ObjectVersionID` 的 Candidate，但真实 retriever 会把 out-of-scope seed 丢掉、返回 `ObjectVersionID == \"\"`。所以这个测试号称测的是「真实会发生的情况」，实际上走的是一条 unreachable 的路。\n\n你要做的：\n- 改成用真实 retriever 驱动 out-of-scope 候选（像 `TestRankingOverRetrievalOutput` 那样），然后钉真实输出。\n- 这个改动应该和 blocking 修复一起让测试变真；如果改完之后测试描述的意图仍然 unreachable，把注释也改成真话。\n\n【m · minor / nit — 顺手修】\n\n- `factor.go:118` 的 reproduction-ladder 注释与实现不一致（实现把任何 failure 都当 dispute）。**不要**在这里改实现，改注释让它与当前实现一致；如果你确认应该按注释实现，必须先报上来，不要自己改产品语义。\n- `search.sql:466` public-evidence 谓词比 evidence 表自己的公开网络读宽松（没要求 asserting project 是 public）。今天是 unreachable 的差（项目可见性不能变），但注释声称\"exactly that meaning\"。把注释改成真实语义，或在查询里补上 `p.visibility = 'public'` 并更新测试；**不要**在注释上撒谎。\n- `search.sql:492` contradiction count 用 ANY version 的 type = 'contradicts'，而平台其它 relation 读只读最新版本。同样：要么按 as-of 规则改查询，要么注释写明故意不同。\n- `RESULT.json` 里\"factor vocabulary\"和\"prestige\"两段证据有夸大（列了不存在的 level、列了没检查的禁用词）。按实际测了什么重写，不要写没有的覆盖。\n- 几处 garbled HTML escape 注释（`result.go:108`、golden test :755/:865）把字面字符修成可读说明。\n- migration 的 `-- +goose Down` 段与仓库 \"no down migrations\" 的 README 不一致。这是仓库既有先例（00092/00100 也这样），先不要大动，RESULT 里如实说明即可。\n\n【约束】\n- 不要改 ranking 的 factor/level 词汇表（closed vocabulary）或者新增 prestige 输入。\n- 不要为了绿而删断言、skip 测试、放大 timeout。\n- 改完必须跑 `make check-spec-version` 与 `make check-schema-snapshot`（如果动了 schema 或迁移；没动也要确认不红）。\n- `RESULT.json` 里 acceptance evidence 必须逐字与代码/测试实际行为相符。\n",
@@ -7393,6 +7486,13 @@
           "at": "2026-09-20T10:55:26Z",
           "run_id": "run-1ebd17efbf65c177",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-20T12:39:41Z",
+          "run_id": "run-aa7b47ff9e512332",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -8494,13 +8594,31 @@
       ]
     },
     "T1204": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-20T12:21:32Z",
+      "worker_run_id": "run-cdb0a7b6b0e0c9e3",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-20T12:21:30Z",
+          "run_id": "run-428de93361b00c1a"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-20T12:21:32Z",
+          "run_id": "run-cdb0a7b6b0e0c9e3",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-20T12:43:10Z",
+          "run_id": "run-d1bd816643f16441",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T1205": {
       "status": "todo",

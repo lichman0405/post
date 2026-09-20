@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 141,
+  "task_count": 144,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -3263,6 +3263,78 @@
       "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
     },
     {
+      "id": "T0511",
+      "phase": "P5",
+      "phase_name": "Evidence、Knowledge 与 External References",
+      "title": "证据断言的读带上读者（ADR-024）：非公开行只给当事项目",
+      "v1_required": true,
+      "dependencies": [
+        "T0506",
+        "T0507"
+      ],
+      "requirements": [
+        "**判据在 `docs/adr/ADR-024-evidence-read-carries-its-reader.md`，照它实现，不许自创。** 读的签名显式带上读者；一行可以渲染给某读者，当且仅当满足其一：`ea.visibility = 'public'`；或该读者是**断言方项目**的成员；或该读者是**目标对象所属项目**的成员。**读者解析不出来、成员关系查不到时，只给 `public` 行**（fail-closed，与该列 DEFAULT `'private'` 同向）。",
+        "**一次修两个出口，判据必须同一条。** ① JSON 路由 `GET /api/v1/projects/{projectId}/objects/{objectId}/evidence`（`cmd/api/evidencehttp/wiring.go:63`）；② 对象详情页的证据页签（`cmd/api/rsghttp/graph.go:398-418` 的 `evidencePanelFor`，读在 `:418`）。**另外要自己清点**同文件 `wiring.go:64` 的 `/hypotheses/{objectId}/evidence` 是否读同一批行——若是，一并覆盖并在 RESULT 里说明你核过。",
+        "**谓词进 SQL，不要用『取回全量再在 Go 里筛』当唯一防线。** 落点是 `internal/persistence/queries/evidence.sql` 那条现在不带谓词的读（`:66-71`，头部逐字写着 `Rows are returned unfiltered by visibility: this is the owning project's read.`），改完用 `scripts/gen_sqlc.sh` 重新生成（sqlc 版本钉在 v1.31.1，CI 里有漂移测试，**手改生成文件会被抓住**）。公开读那条（`:73-112`，谓词在 `:109-110`）是现成的写法参照，**不要动它**。成员判据用现成的 `GetMembership`（`internal/persistence/project_store.go:177`）。若你另加了 Go 侧第二道检查，说明理由，并让两道**各自都能变红**（否则那一道是装饰）。",
+        "**读者从请求解析，别新造身份概念。** JSON 侧现成的是 `cmd/api/evidencehttp/handlers.go:53-60` 里那个 `reader(r)`（`projects.Reader`，匿名为零值）；页面侧要把读者一路传进 `evidencePanelFor`（它现在**不接读者**）。**不要新建权限判定、不要碰 `internal/authz/**`**：本任务不新增权限模型，只是把已有的可见性列与已有的成员关系读出来。",
+        "**不许退化成『只挡匿名』。** ADR-024 的三选一里没有『登录即可看』这一条：一个能读公开项目、但与这一行毫无关系的**登录用户**同样不许看到非公开行。",
+        "**写路径与列的语义一个字都不许动**：`internal/application/rsg/evidence.go:257-268` 的推导（断言方公开 + 无策略 + 提交分支公开才是 public，`Anything unclear stays private`）与 `infra/migrations/00091_external_evidence_network.sql:42-66` 的列说明都保持原样。**本任务不加迁移**（现有列 + `project_members` 就够表达这条判据）；若你认为必须加列或改列，**停下来报 `blocked`**，不要自己加。",
+        "**L3 边界**：ADR-024 末尾『尚未决定』那三条属于 owner（无关登录用户将来可否放宽、目标方成员看到别人未公开草稿是否收窄、`contribution_events` 是否也要可见性轴）。你只实现『决定』那一节。觉得判据不足以满足验收，**报 `blocked` 并说明冲突**，不要自行发明别的可见性规则。"
+      ],
+      "deliverables": [],
+      "acceptance_criteria": [
+        "**两个方向都要有测试，缺一即坏**：① 匿名读者在**公开项目**上读这条路由与这个页面，**看不到任何非公开行**；② 同一夹具里的**公开行一条都不能少**（防止修成『谁都看不到』）。",
+        "**当事两方成员仍看得到**：断言方项目成员看得到该行；目标对象所属项目成员也看得到该行。各要一条测试。",
+        "**与该行无关的登录用户看不到**（只挡匿名不算完成）。要有一条测试真的用一个能读公开项目、但不属于任何一方当事项目的登录用户去读。",
+        "**能变红**：把谓词改回今天的无过滤读 → 新测试**必须红**；恢复 → 绿。**两次输出都贴进 RESULT**。若同时保留了 Go 侧第二道检查，把其中任意一道去掉时测试仍须红——否则那道检查是装饰，如实说明。",
+        "**修的是行集，不是状态码**：`tests/integration/evidence_graph_test.go:644-650`（匿名读公开项目 = 200、私有项目 = PROJECT_NOT_FOUND）必须**照旧绿**——不要把匿名读改成 404/403 来『通过』本任务。存在性隐藏规则（`docs/45`）不变。",
+        "**两个出口同一结论**：`tests/integration/graph_page_e2e_test.go` 现在钉着『一个图一个答案』（页面与 JSON 路由同夹具同结论），修完之后它必须照旧绿；如果它因为行集变化需要新增断言，只能**加强**，不许放宽。"
+      ],
+      "tests": [
+        "evidence read audience e2e"
+      ],
+      "allowed_scope": [
+        "internal/application/evidencegraph/**",
+        "internal/application/projects/**",
+        "internal/persistence/**",
+        "cmd/api/**",
+        "tests/**",
+        "specs/database/postgres.sql",
+        "specs/SPEC_VERSION.json",
+        "go.mod",
+        "go.sum",
+        ".env.example"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "docs/**",
+        "specs/api/openapi.yaml",
+        "specs/events/**",
+        "specs/policies/**",
+        "internal/authz/**",
+        "internal/application/rsg/**",
+        "internal/domain/**",
+        "infra/migrations/**",
+        "apps/web/**",
+        "packages/schemas/**"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "**先读这条规则本身**：`docs/adr/ADR-024-evidence-read-carries-its-reader.md`（判据、为什么是两方成员的并集、后果、以及留给 owner 的『尚未决定』三条）。它没有的规则不要自己补。",
+        "**列的语义**（为什么 private 行不该被公开面渲染）：`infra/migrations/00091_external_evidence_network.sql:42-66` 逐字写它是 `whether the assertion may be rendered by the PUBLIC network read (GET /knowledge/{knowledgeId}, which is security: [])`，DEFAULT `'private'`，理由是 `an assertion nothing explicitly made public is not rendered anywhere (docs/12 §5)`。",
+        "**写路径怎么盖的章**：`internal/application/rsg/evidence.go:257-268`——断言方项目公开、无可见性策略、**提交所在分支公开**，三条同时成立才存 `public`，`Anything unclear stays private`。也就是说 private 行在正常业务里就会出现（私有组织对公开对象的判断、未合并分支上的草稿）。",
+        "**两条读的差别**：`internal/persistence/queries/evidence.sql:66-71`（无谓词，头部自称 `the owning project's read`，由 `internal/persistence/evidence_graph_store.go:55` 调用）与 `:73-112`（带 `ea.visibility = 'public'`，给 `GET /knowledge/{knowledgeId}` 用，`internal/persistence/evidence_store.go:186`）。",
+        "**门只问项目、不问读者**：`cmd/api/evidencehttp/wiring.go:26-31`（门的定义）与 `cmd/api/evidencehttp/handlers.go:53-60`（门通过后直接 `h.service.ObjectEvidence(ctx, projectID, objectID, versionNo)`——**没有读者参数**）。页面侧同理：`cmd/api/rsghttp/graph.go:398-418`，页面走 `cmd/api/rsghttp/handlers.go:389-400` 的 HTML 分支，在『与项目同可见』的 T0106 读通过之后渲染。",
+        "**夹具已经能造出这条形状**：`tests/integration/evidence_graph_test.go:264-270` 的 `mustAssertEvidence(t, projectID, branchID, body)` 可以指定断言方项目与分支；`:153` 已有私有项目 `eg-gamma`、`:152` 公开项目 `eg-alpha`。你要的『私有项目断言公开对象』用例不用新建夹具。",
+        "**外部证据的立场**（为什么目标方成员保留可见）：`docs/24` §2 逐字 `external evidence 不可被 origin maintainer 静默删除`——删不掉的前提是看得见。",
+        "**同一条列的先例（已过评审、即将合并）**：T0808 的返工给匿名主页的读加了渲染谓词，注释逐字写着 `Both surfaces are anonymous reads, so that axis is not optional`（`internal/persistence/queries/research_profile.sql:48-49`），并引用 00091 的 `an assertion nothing explicitly made public is not rendered anywhere`。**和 ADR-024 是同一条规矩**（匿名面按 `visibility` 渲染、非匿名面按读者身份）。那本书同时留下一条纪律：**不同的轴不许被『整理』成一条谓词**（同文件 `:36-38` 逐字警告 `a future edit must not \"tidy\" them into one visibility = 'public'`）——**这条对你同样成立**：你要的是「public ∪ 两方成员」，不是给所有人加一条 `visibility = 'public'`。"
+      ],
+      "scope_note": "这是**按本任务的实际交付面调整过的范围**：加 `internal/application/evidencegraph/**`（读的主人在这个服务里，不改它就只能在各传输层各写一份判据）、`internal/persistence/**`（谓词进 SQL 与 sqlc 重生成）、`cmd/api/**`（两个出口与 `main.go` 的接线）、`tests/**`。相对 phase 级默认值：**去掉** `infra/migrations/**`（本任务明确不加迁移）、`internal/rsg/**`（写路径的推导不动）、`internal/evidence/**`、`internal/domain/**`、`apps/web/**`（页面是服务端渲染，前端不需要改）、`packages/schemas/**`。`internal/application/projects/**` 只允许用在『把已有的成员读接出去』的必要范围，**不许改权限模型或矩阵**（那两张表在 `internal/authz/**`，已进 forbidden_scope）。",
+      "supervisor_scope_narrowing": "为什么这么划：①**这次要动的就是那条读的主人**——`internal/application/evidencegraph/**` 是 T0506/T0507 都没覆盖到的地方（T0507 的 allowed_scope 里没有它，所以那个工人在自己的任务里**修不了**这条缺陷，这也是我没有打回 T0507 的原因之一）。②谓词必须进 SQL：今天的问题就是『读不带谓词』，在传输层补过滤等于同一条规则两份实现，而且两条路由会各写一份。③`internal/application/projects/**` 是**只读地复用已有成员判据**（`GetMembership`）的通道，不是让你动权限。④`specs/database/postgres.sql` 与 `specs/SPEC_VERSION.json` 列在范围内是**兜底**：本任务预期不改 schema，但一旦改了生成物就必须同笔重新生成，宁可先允许。⑤`infra/migrations/**` 明确排除：本任务不加迁移，若你判断必须加，报 `blocked` 而不是自己加（迁移编号由 Supervisor 在派工时按账本发放）。"
+    },
+    {
       "id": "T0601",
       "phase": "P6",
       "phase_name": "Frozen Main、Abort、Policy 与 Release",
@@ -3786,6 +3858,72 @@
       "decision_level_max": "L1",
       "relevant_specs": [],
       "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+    },
+    {
+      "id": "T0611",
+      "phase": "P6",
+      "phase_name": "Frozen Main、Abort、Policy 与 Release",
+      "title": "Release 的验收记录必须覆盖「经合并进入 main」的状态（T0608 第 6 段的上游缺陷）",
+      "v1_required": true,
+      "dependencies": [
+        "T0605",
+        "T0601"
+      ],
+      "requirements": [
+        "**这是 T0608 第 6 段（合并之后经 Releases 表单切片）走不通的上游原因，不是新需求。** 2026-09-20 把 T0608 标了 blocked 等裁决；裁决结果（记进 `tasks/decisions.md`）：**缺陷真实存在，修在下面这条路径上**，修完 T0608 才解封。",
+        "**缺陷（两处代码互相印证，我逐行读过）**：① `internal/persistence/queries/releases_assets.sql:88-107` 的 `ListReleaseReviews` 用 `WITH RECURSIVE lineage(id)` 沿 `project_states.parent_state_id` 向上走，再匹配 `pr.proposed_state_id IN (SELECT id FROM lineage) AND pr.target_branch_id = @main_branch_id`。② main 今天**只能**经 Research PR merge 前进——`infra/migrations/00069_semantic_merge.sql:53-56` 逐字 `The Research PR this merge executes. NOT NULL on purpose: main (and every other target branch) advances only this way (docs/09 §3/§4)`，而合并提交在 `internal/application/merge/service.go:570-590` 用 `BaseStateID: &targetHead` 落笔，也就是**新状态的 parent 是合并前的目标头，不是提案**。两条合起来：合并产生的状态 M 的血缘是 {M, 合并前的 main 头, …}，**提案状态 P 永远不在里面**，所以对「经合并进入 main」的状态，这个查询**恒为空**。",
+        "**影响是功能坏了，不是记录难看**：同一份记录还喂 release gate —— `internal/application/releases/service.go:309-318` 把它变成 `rsgvalidation.ReleaseFacts.ReviewApproved`，`internal/rsg/validation/validator.go:162` 逐字 `scientific and integrity review must be recorded and approved (docs/11 §1)`。所以在今天的产品路径上（提案 → 评审批准 → 合并 → 发布），**发布会被自己的门拒掉**；而 `docs/11_RELEASE_ASSET_HUB.md:5` 逐字要求 Release manifest 固定 `review/approval record`。两条规格今天都**不可满足**。",
+        "**为什么既有测试没抓到（你要在 RESULT 里如实引用，别照抄我的结论就完事）**：T0605 的契约（`tests/integration/release_store_test.go:22-32`）与 T0606 的 E2E（`tests/integration/release_e2e_test.go:447-451`）钉的都是**合并之前**的形状——PR 的 `proposed_state_id` 恰好就是 main 的那个头（`f.seedPR(t, ctx, 1, f.genesis, head1)`）。**真实路径（merge 产生新状态）一条测试都没有**。",
+        "**你要做的（记录的形状）**：一个状态的验收记录 = 它**血缘内状态**所对应 PR 的评审 **∪** 它**血缘内状态**作为 `semantic_merges.result_state_id` 的 merge 行所属 PR 的评审。也就是**让合并边可读**（`semantic_merges.result_state_id → pull_request_id`），而不是绕道去猜提案。**现有那一支不许删**：`proposed_state_id` 在血缘内就计入，是 T0605 写下的契约，撤掉它会让另一类状态失去记录。",
+        "**顺序与分组不许漂**：记录仍按 PR number、再评审时间、再行 id 排序（沿用现有 `ORDER BY`）；同一个 PR 不许出现两组；分组必须走 `internal/persistence/release_store.go:63-74` 的**同一个 helper**——那段注释逐字写着它存在的理由：release gate 与 knowledge publish 是**两个读者**，它们不许对同一份记录有分歧（`internal/persistence/knowledge_publish_store.go:143`）。",
+        "**先证明它现在真的坏（这条是硬要求）**：在真 PostgreSQL 上造一条完整链路（fork/研究分支提交 → 开 PR → 批准评审 → merge），断言 `ListReleaseReviews` 对合并后的 main 头返回**空**；改完之后同一条测试必须返回**非空**。**两个状态都要贴进 RESULT**——只有「改完之后是绿的」，等于没有证据说明你修的是这个缺陷。",
+        "**范围纪律**：只改 `allowed_scope`。**本次不需要新迁移**——`semantic_merges`（00069）已经把合并边存下来了，你要做的是把它读出来。若你判断必须改 schema，停下来在 RESULT 里报，**不要自己选号**。`specs/**`（除派生件）、`tasks/**`、`docs/**` 都不在你的范围内。",
+        "**不许弱化**：不许为了让门变绿而放宽 `validator.go:162` 的判定、不许把 required kinds 从 (scientific, integrity) 缩成任意一条、不许 skip/删掉 T0605 与 T0606 的既有断言、不许放大超时（`CLAUDE.md` §5.1、§6）。"
+      ],
+      "deliverables": [
+        "`ListReleaseReviews` 的合并边支线：血缘内状态作为 merge 结果的那些 PR 的评审也计入，且与既有支线合并去重、同一 PR 只有一组",
+        "真 PostgreSQL 上「合并产生 main 头 → 发布成功」的完整 E2E，含 manifest `reviews` 段的逐条断言",
+        "一条先红后绿的证据：同一条测试在改之前返回空记录、改之后返回那条 PR 的评审",
+        "反向断言：未合并的研究分支状态仍在血缘外，贡献为空（T0605 的既有契约不许被放宽）"
+      ],
+      "acceptance_criteria": [
+        "**缺陷可复现**：真 PostgreSQL 上，经一次真实 merge 进入 main 的状态，其 `ListReleaseReviews` 在改动前为空——这条要先跑出来并记进 RESULT。",
+        "**修好了**：同一条链路上 `POST .../releases` 返回 201（不再被 `RELEASE_GATE_BLOCKED` 拒），manifest 的 `reviews` 段带着那条 PR 的评审，字段（`reviewer_id`/`review_kind`/`decision`/`created_at`）与数据库行逐字一致。",
+        "**合并边可读且不重复**：一条链上**两次**合并的评审都出现在后续状态的记录里；同一个 PR 只出现一组；排序规则不变。",
+        "**既有契约不退化**：T0605 的 `tests/integration/release_store_test.go` 与 T0606 的 `tests/integration/release_e2e_test.go` 全部保持通过、断言一条不减；未合并研究分支的贡献仍为空。",
+        "**派生件按生成器重新生成**：`internal/persistence/sqlc/**` 不许手工编辑；`make check-sqlc-drift`（或仓库里等价的驱动）不红。",
+        "**全绿**：`make test-integration` 全绿，被改动的包的单测全绿。"
+      ],
+      "tests": [
+        "release review after merge e2e"
+      ],
+      "allowed_scope": [
+        "internal/persistence/**",
+        "internal/application/releases/**",
+        "tests/**",
+        "go.mod",
+        "go.sum",
+        ".env.example"
+      ],
+      "forbidden_scope": [
+        "specs/**",
+        "tasks/**",
+        "docs/**",
+        "infra/migrations/**",
+        ".git/**",
+        "CLAUDE.md",
+        "apps/web/**",
+        "cmd/api/**"
+      ],
+      "decision_level_max": "L2",
+      "relevant_specs": [
+        "docs/11_RELEASE_ASSET_HUB.md",
+        "docs/09_VERSION_CONTROL.md",
+        "docs/43_STATE_MACHINES.md",
+        "docs/31_MASTER_ACCEPTANCE.md"
+      ],
+      "scope_note": "范围只覆盖「读这份记录」的那一层：查询（`internal/persistence/queries/releases_assets.sql`）、它的派生件 `internal/persistence/sqlc/**`、分组与门（`internal/persistence/release_store.go`、`internal/application/releases/**`）、以及证明它的集成测试。`cmd/api/**` **故意不在范围内**：这是读的语义问题，不是接线问题——如果你觉得非改路由不可，说明你的修法放错了层，在 RESULT 里报。`infra/migrations/**` 也不在：合并边已经在 `semantic_merges`（00069）里存着。",
+      "supervisor_scope_narrowing": "**范围是按「缺陷在哪一层」收的，不是按「哪一层方便」。** 替代方案我否决过两个：①**改 merge，让提案状态也进 main 的血缘**（例如把合并提交挂到提案上）——那会改掉 frozen main 的推进语义，动的是 `docs/09` 的结构性规则，代价远大于收益；②**在 release 侧放宽门的判定**（例如「合并过的状态免检评审」）——那是用放宽 Gate 掩盖缺陷，`CLAUDE.md` §6 逐字禁止。所以修的是**记录本身**：合并是一条真实的边，记录就该沿它读得到。依赖写 T0605（它定义了这份记录的契约）与 T0601（它定义了 main 怎么前进），两者都已合并。"
     },
     {
       "id": "T0701",
@@ -5074,7 +5212,8 @@
         "T0802",
         "T0804",
         "T0806",
-        "T0808"
+        "T0808",
+        "T0817"
       ],
       "requirements": [
         "public project→discover→fork/contribute→PR merge→profile credit→external evidence"
@@ -5108,7 +5247,7 @@
       ],
       "decision_level_max": "L1",
       "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。\n\n**2026-09-20 排期更正**：本任务的 `PR merge` 一段依赖 T0817——合并路径今天把源侧钉在 PR 所属项目上（`internal/application/merge/service.go:439`），fork 来的源分支活在 fork 项目，查不到；裁决见 `tasks/decisions.md`、架构理由见 `docs/adr/ADR-025`。T0817 合并后再 rework 本任务（worktree 与已写的 in-memory Git transport 保留）。"
     },
     {
       "id": "T0811",
@@ -5197,7 +5336,8 @@
       "v1_required": true,
       "dependencies": [
         "T0806",
-        "T0703"
+        "T0703",
+        "T0511"
       ],
       "requirements": [
         "私有 Project 可对 public Protocol/Claim/Asset 发布 attestation，不暴露底层 private evidence",
@@ -5313,6 +5453,75 @@
       ],
       "scope_note": "这是**按本任务的实际交付面**调整过的范围：相对 DAG 里的 phase 级默认值，**加** `internal/events/**`（`via` 的信封链第一条腿在那里——T0807 就是因为没有这个范围才留下缺口）与 `cmd/worker/**` + `internal/worker/**`（挂载点）；**去掉** `infra/migrations/**`、`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`（本任务不该建迁移、也不该动生成物，列在 forbidden 里是**故意**的：`00087` 已经把三列加好）与 `apps/web/**`（无界面交付）、`cmd/api/**`（通道值在应用服务层就定，不需要动 HTTP 面）。",
       "supervisor_scope_narrowing": "2026-09-19 定稿。四点：\n（一）**为什么和 T0807 分开、又为什么合成一个任务。** T0807 的书里没有「挂载」这条要求、范围也不含 `cmd/worker/**` 与 `internal/events/**`——它在 RESULT 里点名这两个洞是**诚实**，不是违约（第 3 条 `via` 我本来就留了口子：「确实不可知就点名说明，不要编」，它一个默认值都没填，还把诚实状态写进了迁移注释）。所以不返工它，缺口另立本任务：挂载与 `via` 合在一起，因为「让账本真的跑起来、且记的是真事实」是一件事；`via` 的设计裁定（第三条）与挂载的落点都在下面写清了。\n（二）**与 T0901 有文件重叠，不得并行。** T0901（Search Document Projection，已暂存未派工）的允许范围同样含 `internal/events/**` 与 `cmd/worker/**`（它也要挂一个消费者）。两者串行派工，先后由 Supervisor 定；**这不是依赖关系，所以没写进 `dependencies`**（`dependencies` 只表达真实前置）。\n（三）**`via` 的 L1 裁定：照「写路径自己声明通道」的先例，不知道就留 NULL。** 现成先例是 `Via: domain.ViaAPI` 直接写在应用服务里（rsg/merge 四处）。**不许**为了「让列非空」而给所有事件塞一个默认通道——那正是 `00087` 注释里点名的「读起来像事实的默认值」。词表与校验都用现成的（`StateVia` / `ValidStateVia`），不要另造。\n（四）**本任务不该有新迁移。** 三列 `00087` 已加好；`infra/**` 因此进 forbidden。若工人判断确实需要新迁移，它必须记 `blocked` 说明——迁移号由派工时分配（CLAUDE.md §8.1），不许自选。\n（六）**2026-09-19 追加一条**：T0807 评审的 minor finding 3 —— 映射表里那个永远不会命中的键由你顺手删掉（见需求最后一条）。这是清理，不是新功能；如果你在实现中发现它**其实可达**（有调用点真的会产出 `object_type=evidence_assertion`），**不要删**，在 RESULT 里给出那条调用链并说明评审判断有误。"
+    },
+    {
+      "id": "T0817",
+      "phase": "P8",
+      "phase_name": "开放网络、Fork、贡献与 Research Profile",
+      "title": "外部 fork 提案的合并路径：merge 必须能在源分支自己所在的项目里读它",
+      "v1_required": true,
+      "dependencies": [
+        "T0804",
+        "T0601"
+      ],
+      "requirements": [
+        "**这一条是 T0814 的 AC8 拆出来的一半，不是新需求。** T0814（外部 fork 的生产接口）第一次交付被独立评审判 blocking：**外部 fork 提的 PR 走不到既有的 merge 路径**。裁决（2026-09-20，记在 `tasks/decisions.md`）：T0814 的 AC8 收窄到「PR 在真实 HTTP 路径上开出来」，**合并那一半拆成本任务**；merge 路径要改，但它是跨模块的接口改动（L2），不能塞进一个「照契约接线」的任务里顺手做。",
+        "**为什么今天走不通（我逐行读过，两处独立确认）**：数据库层**已经允许**跨项目源分支，而且要求它是诚实的——`infra/migrations/00086_external_fork.sql` 的 `pull_request_fork_gate` 只在「源分支所属项目是这个 PR 项目的 fork，且 fork 人是 PR 作者」时才放行插入，头部注释逐字写着 `pull_requests has always carried source_branch_id and target_branch_id with no constraint tying them to the PR's project — the same-project rule lived only in the store — so an external PR is representable`。**但 merge 服务把两侧都钉在 PR 的项目上**：`internal/application/merge/service.go:439` 是 `source, err := s.branch(ctx, in.ProjectID, pr.SourceBranchID)`，`:441` 同形解析 target；`:456-465` 的 `diffs.Inputs{ProjectID: in.ProjectID, ...}` 与 `s.plans.Plan(ctx, in.ProjectID, ...)` 也把整个计算钉在同一个项目。所以外部 fork 的 PR 一进 merge 就在源侧读不到东西。这不是猜测：T0814 的独立评审在真实 PostgreSQL 上复现过，我在读这段代码时独立确认了同一处。",
+        "**目标**：让 merge 在**源分支自己所在的项目**里读源侧（源分支、被提案的状态、以及源状态的版本内容），把结果落进 **PR 所属项目**的目标分支。核心是「项目」从**一个**变成**源侧与目标侧各自的**——凡是在 merge 路径上按 `in.ProjectID` 取值的地方，都要重新问一次「这个值属于哪一侧」。",
+        "**不许放宽任何一道门（fail closed）**：① `pull_request_fork_gate`（00086，插入门）照旧，不许为了「让它更顺」绕过或改它；② merge 侧要有对称判定：源分支不在 PR 项目里、且源侧项目不是 PR 作者本人的 fork 时，merge **必须拒绝**，不许「按 PR 项目查一遍、查不到就报 not found」；③ PR 状态机（`merge_ready` 才可合）、main freeze、`pull_request_semantic_gate`、版本头锁（`*versionHeadsMovedError` 的重试）一处都不许动；④ 内容搬运仍是「逐字拷贝源版本内容」（`materialize`，`:641-660`），`VisibilityPolicyID` 与 abort 记录的携带规则不因源在别的项目而放宽——**跨项目不是放宽 rights 的理由**。",
+        "**负向证据要有，但要说清楚是哪一层在挡**：构造一个「源分支属于一个**不是** PR 作者 fork 的项目」的 PR——如果插入门（00086）先拒，就把**那一层**钉住（SQLSTATE/文本要断言）；如果你能构造出插入门之后的形状，则 merge 必须 fail closed。**你选可行的那条，并在 RESULT 里点名哪一层在挡、为什么另一层不可达**；不要为了凑一条测试去写一个永远走不到的断言。",
+        "**表示的诚实性**：`semantic_merges` 一行今天把 base/source/target 三个状态钉死（`infra/migrations/00069_semantic_merge.sql:50-80`），外部 fork 的 PR 里 `source_state_id` 属于 **fork 项目**、`target_state_id`/`base_state_id` 属于**上游项目**，行的 `project_id` 是上游项目。如果你发现这层表示需要改，**停下来在 RESULT 里报**——那是一条新的架构问题，不是本任务的顺手活。",
+        "**需要新迁移怎么办**：本任务**预期不需要**新迁移（`project_forks` 与 `semantic_merges` 都已经存在）。若你判断确实需要，**不要自己选号**，在 RESULT 里报上来由我分配。",
+        "**范围纪律**：只改 `allowed_scope`。`specs/**`、`tasks/**`、`docs/**`、`infra/migrations/**` 都不在你的范围内。**不许为了让测试变绿而删测试、跳过测试、放宽断言或放大超时**（`CLAUDE.md` §5.1、§6）。"
+      ],
+      "deliverables": [
+        "merge 路径在源侧按「源分支自己所在的项目」解析源分支、提案状态与内容版本，目标侧仍按 PR 的项目落地",
+        "真 PostgreSQL 上跑通的闭环：public 项目 A 被 B fork → B 在自己的 fork 分支提交状态 → 对 A 开 PR → 评审 → merge → A 的 main 头前进且内容逐条来自 B 的提案",
+        "负向证据：非 fork 的跨项目源分支在哪一层被拒（钉住那一层）",
+        "`tasks/decisions.md` 之外的架构结论写进 `docs/adr/`（若你在实现中判定了新的跨模块边界，在 RESULT 里点名，由我落 ADR）"
+      ],
+      "acceptance_criteria": [
+        "**闭环成立**：真 PostgreSQL 上，A（public）被 B fork，B 在 fork 分支写出状态，对 A 开 PR 并被评审批准，merge 之后 **A 的 main 头是一个新状态**，且该状态里带 B 提议的对象/关系版本——内容**逐条断言**（不是只看状态 id 变了）。",
+        "**源侧读对了**：测试必须能证明 merge 读的是 fork 项目的分支与状态（例如断言 `semantic_merges.source_state_id` 属于 fork 项目、且断言 fork 分支在合并后被标记 merged），而不是「恰好也能读到 PR 项目里的同名东西」。",
+        "**门没被放宽**：非 fork 的跨项目源分支仍然被拒（钉住拒它的那一层），PR 状态机/main freeze/semantic gate 的既有测试一条不减、断言不宽。",
+        "**跨项目不放宽 rights**：搬进上游的内容逐字保留源版本的可见性策略；若源版本带 abort 记录，abort 也照旧随内容走（`materialize` 的既有规则），要有断言。",
+        "**既有测试全绿**：`make test-integration` 全绿，且被改动的包的单测全绿；派生件（`internal/persistence/sqlc/**`）按生成器重新生成、不手工编辑。",
+        "**诚实报告**：RESULT 里逐条写清改了哪几处「按项目取值」、每一处现在取的是哪一侧、以及你不能确定的地方。"
+      ],
+      "tests": [
+        "external fork merge e2e"
+      ],
+      "allowed_scope": [
+        "internal/application/merge/**",
+        "internal/application/forks/**",
+        "internal/application/diffs/**",
+        "internal/application/pullrequests/**",
+        "internal/persistence/**",
+        "cmd/api/**",
+        "tests/**",
+        "go.mod",
+        "go.sum",
+        ".env.example"
+      ],
+      "forbidden_scope": [
+        "specs/**",
+        "tasks/**",
+        "docs/**",
+        "infra/migrations/**",
+        ".git/**",
+        "CLAUDE.md",
+        "apps/web/**"
+      ],
+      "decision_level_max": "L2",
+      "relevant_specs": [
+        "docs/09_VERSION_CONTROL.md",
+        "docs/43_STATE_MACHINES.md",
+        "docs/04_USERS_ROLES.md",
+        "specs/policies/permissions-matrix.csv",
+        "docs/adr/ADR-023-asset-fork-derive-lineage.md"
+      ],
+      "scope_note": "范围按「这一改动会碰到什么」划：merge 服务本身、fork 谱系的读、以及 merge 用到的两个协作者（diffs 的输入与 rsg merge 计划的输入）——后两个正是把「项目」从一个变成两个时必须一起看的地方。`internal/persistence/**` 是必须的：解析源侧项目需要一条按 id 读分支/谱系的查询（`queries/**` 改了就要重新生成 `sqlc/**`，那是派生件）。`cmd/api/**` 只在你需要把「源侧项目」这件事暴露到接线层时才用得上——如果你用了，在 RESULT 里说明为什么不能在服务层解析。`infra/migrations/**` 不在范围内：本次预期不需要 schema 变化，需要就报上来。",
+      "supervisor_scope_narrowing": "**没有收窄，是把 T0814 的一半拆出来。** T0814 的 `allowed_scope` 里没有 merge 服务、也没有 persistence 的查询层——那正是它的 AC8 走不通的原因，也是一个「照契约接线」的任务不该顺手改 merge 的理由。拆出来之后两边的范围各自干净：T0814 只接 HTTP 与契约，本任务只改合并路径。**依赖写 T0804 与 T0601：前者给 fork 谱系，后者给 merge 引擎和「main 只能经 merge 前进」这条结构性规则；两者都已合并，所以本任务随时可派。**"
     },
     {
       "id": "T0901",
@@ -7187,6 +7396,7 @@
         "**幂等按状态本身做**：同一个 (父项目, 人) 重复发起 fork，第二次要返回既有 fork（契约里的 200），不新建项目/分支/谱系行、不重复拷贝内容。**不要引入 key 台账**（服务层已经是这个形状）。",
         "**fail closed**：fork 项目的可见性缺省是 private（fork 的内容在本人发布之前是他自己的，发布是治理动作、不是 fork 的副作用）。",
         "**改一条命名规则（Supervisor 定的，照办，理由写给你看）**：fork 项目的 slug 现在的主名是 `<父 slug>-<人的 handle>`（`internal/application/forks/service.go:693` 的 `forkSlug`），**只有超长才**退到带摘要的 `forkSlugDigest`。这会让**合法 fork 被永久锁死**：① 组织项目的 slug 只在组织内唯一（`00019:16`：`projects_personal_slug_idx` 是 `WHERE organization_id IS NULL`），所以两个组织可以各有一个 `mof-curie`——同一个人先后 fork 两个，第二个的派生名被**自己刚建的那个 fork** 占住，`forkProjectOverTakenName`（`:529-533` 的同名持有者分支）直接拒（自己名下的持有者不升级、连保留名都不试）；② slug **不可改**（`internal/application/projects/settings.go:47-55` 的 `UpdateSettingsInput` 没有 name/slug，项目也不能删）——所以撞上就是永久的、用户毫无出路。**改法：`forkSlug` 的主名一律用今天那个超长兜底的形状**——`forkSlugDigest(head, handle, forkPairDigest(parentID, actorID), \"\")`，即 slug 一律由这一对 (父, 人) 派生并带它的 8 位摘要。**保留名（`-2`）与那条 `ErrForkSlugTaken` 拒绝原样保留**，它们是最后一道兜底，不是要被删的东西。**不要**改成'撞了才升级到保留名'：那会把代码注释里写的**孤儿行**危险请回来（'自己名下占着'与'自己在飞'在记录里分不开）。**显示名不变**（`forkName` 照旧），变的只是 URL。**T0804 那几条断言可读 slug 的测试要跟着改**（`internal/application/forks/service_test.go:333-334`、`:782`、`:792`）：规则本身变了，测试跟着它断言的规则走——**这不是'改测试迁就实现'**，但除这几条断言之外**不许放宽任何一条测试**。",
+        "**这条 AC8 是收窄过的，理由与边界都要看见（2026-09-20）**：第一次交付的独立评审在真实 PostgreSQL 上证明了「外部 fork 提的 PR 走不到既有 merge 路径」——`internal/application/merge/service.go:439` `source, err := s.branch(ctx, in.ProjectID, pr.SourceBranchID)` 把源分支钉在 PR 的项目上，而 fork 的源分支活在 fork 项目。修它要改 merge 路径（跨模块，L2），已拆成 **T0817**。所以本任务**只到「PR 在真实 HTTP 路径上开出来」**：fork → 在自己的 fork 里写状态 → 对上游开 PR （含三格权限矩阵、存在性隐藏的 404、匿名拒绝、幂等、fork 命名规则），并给出一条可复现证据。**合并、以及依赖合并的产物（例如 profile credit 的那一段），都不在本任务的验收里**——你既不许用 stub 假装它通过，也不许在 RESULT 里把它记成 passed。",
         "**范围纪律**：只改 `allowed_scope`。`specs/**`（除两个生成物，本任务不需要）、`tasks/**`、`docs/**`、`infra/migrations/**`、`apps/web/**` 都不在你的范围内。**不许为了让测试变绿而删测试、跳过测试、放宽断言或放大超时**（`CLAUDE.md` §5.1、§6）。"
       ],
       "deliverables": [],
@@ -7198,7 +7408,7 @@
         "**外部提案走既有 PR 路径**：从自己的 fork 通过 `POST /api/v1/projects/{id}/pull-requests` 对上游开 PR 成功（201）；**不从 fork 直接对上游开被拒**；**从别人的 fork 开被拒**。三条都要有测试。",
         "**不可解析内容的 fork 分支开不出正式 PR**：真 PostgreSQL 上断言 `pull_request_semantic_gate`（`00042`）真的拦住它，且 HTTP 层把它映射成契约里写的那个答案。",
         "**契约与实现一致**：契约里声明的两条端点都有实现，且实际返回的状态码集合与契约一致——要有一条对照检查（把契约读出来与实际路由表/响应码对一遍），不是靠 RESULT 里一句话。",
-        "**主验收闭合**：`docs/31_MASTER_ACCEPTANCE.md:17`「Public Project 外部用户可 fork/contribute」在**真实 HTTP 路径**上从头到尾走通一遍（fork → 在自己的 fork 里写状态 → 对上游开 PR → 评审/合并按既有路径），给出一条可复现的证据。"
+        "**到 PR 开出来为止的真实路径闭合**：`docs/31_MASTER_ACCEPTANCE.md:17`「Public Project 外部用户可 fork/contribute」的**第一段**——fork → 在自己的 fork 里写状态 → 对上游开 PR——在**真实 HTTP 路径**上走通，并给出一条可复现的证据。**合并那一段不在本任务的验收里**（2026-09-20 拆分，裁决记在 `tasks/decisions.md`、架构理由记在 `docs/adr/ADR-025`）：merge 今天按 PR 的项目解析源分支，而 fork-sourced branch 活在 fork 项目，修它要动 merge 服务与 persistence，属跨模块改动，已拆成 **T0817**。**不许把「合并」用 stub/mock 假装走通**——第一次独立评审正是因此判 blocking；整条闭环（含合并）由 T0810 的端到端用例在 T0817 合并后收口。"
       ],
       "tests": [
         "external fork http e2e",
@@ -7230,7 +7440,8 @@
         "docs/31_MASTER_ACCEPTANCE.md",
         "docs/16_GIT_COMPATIBILITY.md",
         "docs/45_ERROR_MODEL.md"
-      ]
+      ],
+      "scope_note": "**2026-09-20 收窄 AC8**：合并那一段拆成 T0817（见上一条需求）。本任务的交付面因此不变——它本来就不含 merge 服务，这次只是把验收写成实际能做到的那一段。"
     },
     {
       "id": "T0815",
