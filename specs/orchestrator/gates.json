@@ -90,6 +90,9 @@
         },
         {
           "run": "bash scripts/tests/progress-update-test.sh"
+        },
+        {
+          "run": "bash scripts/tests/tests-ledger-unit-test.sh"
         }
       ]
     },
