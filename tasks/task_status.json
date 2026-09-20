@@ -5008,9 +5008,9 @@
     },
     "T0607": {
       "status": "running",
-      "started_at": "2026-09-20T10:59:51Z",
-      "worker_run_id": "run-1234dbcc68250540",
-      "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
+      "started_at": "2026-09-20T11:45:28Z",
+      "worker_run_id": "run-22827b12aeee8801",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（e7f06ba63efa），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
       "history": [
         {
           "from": "todo",
@@ -5037,6 +5037,27 @@
           "to": "running",
           "at": "2026-09-20T10:59:51Z",
           "run_id": "run-1234dbcc68250540",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-20T11:32:20Z",
+          "run_id": "run-eaa82930d69c16af",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-20T11:45:27Z",
+          "run_id": "run-fa1fe1261f8c06d2",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（e7f06ba63efa），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T11:45:28Z",
+          "run_id": "run-22827b12aeee8801",
           "reason": "worker spawn"
         }
       ]
@@ -6756,9 +6777,11 @@
       "merged_at": null
     },
     "T0811": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-20T11:05:19Z",
       "worker_run_id": "run-2e6e77c01ab5e8e7",
+      "accepted_by_supervisor_at": "2026-09-20T11:42:51Z",
+      "merged_at": "2026-09-20T11:51:03Z",
       "rejection_reason": "G2 的 `go` job 红了，具体是 staticcheck 在本任务新增的测试代码里发现一个 **NEW finding**：\n\n    ***_test.go:375:15:\n    go/parser.ParseDir has been deprecated since Go 1.25 ...\n\n这是你的代码引入的新 finding，不能进 baseline，必须修。\n\n你要做的：\n1. 把 `go/parser.ParseDir` 换成 `golang.org/x/tools/go/packages` 的等效用法（staticcheck 自己已经给提示了）。\n2. 跑 `make staticcheck` 确认清零。\n3. 重跑你原来的 G1 命令（至少包括 `make fmt-check`、`go vet ./...`、`make staticcheck`、go test 相关包）。\n4. 更新 `RESULT.json` 的 tests 记录，说明修了这个问题之后重跑的结果。\n\n约束：\n- 不要 suppress 或 baseline 这个 finding。\n- 不要动无关文件。\n",
       "history": [
         {
@@ -6836,6 +6859,26 @@
           "at": "2026-09-20T11:05:19Z",
           "run_id": "run-2e6e77c01ab5e8e7",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-20T11:24:14Z",
+          "run_id": "run-9689c8ef4aefc621",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-20T11:42:51Z",
+          "run_id": "run-23c5a7d8deb36428"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-20T11:51:03Z",
+          "run_id": "run-40b1d2a6279ffd3f",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
