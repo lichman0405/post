@@ -317,6 +317,7 @@ func TestOpenPullRequestOutcomes(t *testing.T) {
 		{"branch not found", pullrequests.ErrBranchNotFound, http.StatusNotFound, pullrequests.CodeBranchNotFound},
 		{"branch not active", &pullrequests.BranchNotActiveError{BranchID: "branch-src", Lifecycle: "merged"}, http.StatusConflict, pullrequests.CodeBranchNotActive},
 		{"branch head missing", pullrequests.ErrBranchHeadMissing, http.StatusConflict, pullrequests.CodeBranchHeadMissing},
+		{"unstructured branch changes", pullrequests.ErrBranchUnstructuredChanges, http.StatusConflict, pullrequests.CodeBranchUnstructuredChanges},
 		{"validation", pullrequests.ErrValidation, http.StatusBadRequest, pullrequests.CodeValidation},
 		{"forks validation", forks.ErrValidation, http.StatusBadRequest, pullrequests.CodeValidation},
 		{"store outage", pullrequests.ErrStore, http.StatusServiceUnavailable, pullrequests.CodeUnavailable},
