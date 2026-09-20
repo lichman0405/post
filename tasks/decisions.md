@@ -14721,3 +14721,55 @@ DAG 141 → 144：立账 T0511（证据断言的读带上读者，ADR-024）、T
 T0814 的 AC8 收窄一半并 `blocked → ready`；T0810 补 T0817 依赖边（只补它，不补 T0814）。
 主库指纹 `sha256:0a40ba651f6aae84 → sha256:d74a7420fe6b1835`（38 个输入，同一笔重算）。
 `validate_task_state.py` 9 条全过，`check-spec-version`/`check-schema-snapshot` 均 current。
+
+## 2026-09-20（续）：T1204 的 CI 红在一条与它无关的并发用例上——我重跑了一次，并把那条断言立成 T0612
+
+### 事实
+
+- 21:27 驱动报 `DECISION NEEDED: T1204 merge — the PR's required checks did not pass on GitHub — not passing: migration-integration (FAILURE)`。
+- 红的是 `tests/integration/abort_e2e_test.go:1172`（`TestAbortProposalConcurrency`）：
+  `both concurrent requests reported a proposal, but different ones:
+  {… PullRequestNumber:1 PRState:open … Replayed:false} vs {… PullRequestNumber:0 … Replayed:true}`。
+- **与 T1204 无关是能证明的**，不是"我觉得"：T1204 的 diff 只有 6 个路径，全在 `ops/**` 与 `tests/acceptance/**`；
+  红的是 Go 集成用例，在 abort 路径上。两者不相交。
+
+### 机制（我读代码读出来的，不是猜的）
+
+`internal/application/aborts/service.go:663` 的 `replay()` 用 `resultFromRecorded`（`:906`）渲染，
+**它从不设置 `PullRequestNumber`**；会填它的只有 `:686-689`，条件是提案行的 `SourceBranchID` 等于版本行上的分支。
+而新提案那条路**先提交版本、再开提案**：版本走事务（`AppendAbortVersionInTx`，`:535`），
+`openProposal` 里的 `s.prs.Create`（`:599-600`）在**事务之外**。于是有一个真实窗口：
+请求 A 的版本行已可见、提案行还没写；此刻带同一个 Idempotency-Key 的请求 B 读到版本并重放，
+它的 201 里号就是 0。CI 上那两个响应正是这个窗口的两端。
+
+### 为什么我说错的是断言，不是产品
+
+`internal/application/aborts/service.go:183-186` 是那个字段**自己的文档注释**，逐字：
+
+> PullRequestNumber is the Research PR's per-project number. It is 0 only in the replay
+> case where the first attempt committed the version and died before opening the PR (see replay()).
+
+契约已经把 0 写成合法值，测试的 `:1169-1174` 却要求两份 201 的号必须相等——
+**它与契约矛盾，也与这个测试自己 `:1116-1119` 声明的性质（"要断言的是 loser 什么也没写"）矛盾**。
+把「重放里为 0」改成「事务内开提案」是 L2/L3 的语义改动，**不由我决定**；所以这一笔是**测试侧**的活。
+
+### 我做了什么（以及为什么这不是"重跑到绿为止"）
+
+1. `gh run rerun 35513122344 --failed` —— **同一个检查、同一份代码**，第二次 `migration-integration pass 7m39s`。
+   没有删、没有跳、没有放宽任何断言，也没有放大超时。
+2. 断言"红的是无关的东西"有三条独立证据：路径不相交（上面）、主库自己的 CI 长期绿同一套用例、
+   这次重跑绿。
+3. **但没有把它扫掉**：那条断言确实过严，它还会再咬。已立 **T0612**
+   （书在 `tasks/packages/T0612.json`，落地脚本 `.rddev/tools/land-T0612.py` 已就绪并 dry-run 通过），
+   要求是**只动 `tests/integration/**`**、把允许分支显式写出来并指向契约、且要给出 mutation check
+   证明新断言仍能变红。`internal/**` 写进了 `forbidden_scope`——边界要结构上成立，不能只是嘴上说。
+
+**给以后**：CI 红时的第一个问题不是"要不要重跑"，而是**"这条路和这次改动的 diff 相交吗"**。
+相交就必须查到底；不相交也要三条证据齐了才敢重跑，并且**必须留下一个任务**，
+否则重跑就变成了把间歇性缺陷扫到地毯下。
+
+### 落地窗口（T0612 什么时候能进 DAG）
+
+`tasks/tasks.json` 是规格指纹的输入。**T0905 的 diff 带着 `specs/SPEC_VERSION.json`**，
+它此刻正走到 accept/merge，此时落地会立刻把它的 G2 弄红（今天已经为同一件事给它做过一次 rebaseline）。
+所以 T0612 的骨架**等 T0905 合并之后再落**——书已经写好、脚本已经 dry-run 过，只等这个空当。

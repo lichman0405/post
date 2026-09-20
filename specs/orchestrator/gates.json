@@ -988,6 +988,12 @@
       "g3_jobs": [
         "rsg-real-services"
       ]
+    },
+    "T0612": {
+      "g3_jobs": [
+        "rsg-real-services",
+        "gitea-real-services"
+      ]
     }
   }
 }

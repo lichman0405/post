@@ -1,0 +1,54 @@
+{
+  "id": "T0612",
+  "dependencies": [
+    "T0602"
+  ],
+  "tests": [
+    "concurrent abort replay contract e2e"
+  ],
+  "phase": "P6",
+  "phase_name": "Frozen Main、Abort、Policy 与 Release",
+  "title": "并发 abort 的两份 201：断言只能写契约允许的东西，那个窗口要显式钉住",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "requirements": [
+    "**这是我在 CI 上抓到的间歇红灯，不是新功能。** 2026-09-20，T1204 的 PR #305 的必过检查 `migration-integration` 红在 `tests/integration/abort_e2e_test.go:1172`（`TestAbortProposalConcurrency`）：`both concurrent requests reported a proposal, but different ones: {… PullRequestNumber:1 PRState:open … Replayed:false} vs {… PullRequestNumber:0 PRState: Replayed:true}`（CI run 35513122344 / job 106084429068）。主库自己的 CI 长期跑绿同一套用例，所以它是**间歇**的。**它和 T1204 无关**：T1204 的 diff 只有 `ops/**` 与 `tests/acceptance/**`。",
+    "**机制（我读过代码，你要自己再核一遍，并把核的结果写进 RESULT）。** `internal/application/aborts/service.go:663` 的 `replay()` 由 `resultFromRecorded`（同文件 `:906`）渲染，而**它从不设置 `PullRequestNumber`**；会填它的只有一处：同文件 `:686-689`，条件是 `pr.SourceBranchID != \"\" && pr.SourceBranchID == out.BranchID`。新提案那条路是**先提交版本、再开提案**——版本走事务（`AppendAbortVersionInTx`，同文件 `:535`），`openProposal`（同文件 `:599`）里的 `s.prs.Create`（`:600`）在**那个事务之外**。于是存在一个真实窗口：请求 A 的版本行已经可见、提案行还没写；此刻请求 B 带着同一个 Idempotency-Key 读到版本并重放，它的 201 里 `pull_request_number` 就是 0。",
+    "**契约逐字允许 0，所以错的是断言，不是产品。** `internal/application/aborts/service.go:183-186` 是那个字段自己的文档注释，逐字：`PullRequestNumber is the Research PR's per-project number. It is 0 only in the replay case where the first attempt committed the version and died before opening the PR (see replay()).` 测试自己的注释（`tests/integration/abort_e2e_test.go:1116-1119`）也写着 loser 的结局不断言一定是成功、**要断言的是 loser 什么也没写**；而 `:1169-1174` 那一支却要求两份 201 的 `PullRequestNumber` 必须相等——**它与契约矛盾，也与本测试自己声明的性质矛盾**。",
+    "**你要做的（只动测试）**：把 `tests/integration/abort_e2e_test.go:1169` 那一支改成**只断言契约保证的东西**，并把那个窗口**显式写出来**，而不是把断言删掉或弱化：① 两份 201 的 `VersionID`、`AbortedVersionID`、`BranchID` 必须一致；② `PullRequestNumber` **允许不一致，但唯一允许的情形是**不一致的那一份 `Replayed == true` 且它的号是 `0`（即契约里那个窗口）；③ **其余任何不一致仍然必须红**；④ 那个窗口要在测试里有个**名字**（注释或子测试名）并指向 `service.go:183-186`，让后来的人知道它是契约的一部分，不是漏测。",
+    "**不许把这一支整体删掉，也不许把它降级成「只比较 VersionID」。** 这一支的价值就在于它点名了两份答案可能不同这个事实；删掉它，下次真出现「两份答案版本都不一样」时就没有任何东西会红。",
+    "**证明这个断言还能变红**（仓库规矩：一个断言要先证明它会红才算数）。至少给一条 mutation check：临时把允许条件放宽到「任何不一致都放行」或构造一个 `Replayed == true` 但号非 0 的形状，看到红输出，再改回来。按仓库惯例，**故意破坏再恢复**记 `passed`，证据开头写 `MUTATION CHECK`，并给出观察到的 FAIL 原文。",
+    "**不许动产品代码。** `pull_request_number` 在重放里为 0 是**已经写进契约字段注释**的行为；把它改成「事务内开提案」是 L2/L3 的语义改动，不在本任务内。`internal/**` 列在 `forbidden_scope` 里，越界 diff 会被拒。",
+    "**不许为了让门禁变绿去删、跳过或弱化别的断言，也不许放大超时。**"
+  ],
+  "deliverables": [
+    "`tests/integration/abort_e2e_test.go`：并发断言改成「契约允许的那一种不一致放行、其余仍红」，并给那个窗口起名指向契约",
+    "RESULT 里：机制核实的结果（你自己读到的行号与代码）、mutation check 的实录、以及在真 PostgreSQL 上跑绿 `TestAbortProposalConcurrency` 的命令与输出"
+  ],
+  "acceptance_criteria": [
+    "`tests/integration/abort_e2e_test.go` 的并发断言与 `internal/application/aborts/service.go:183-186` 的契约一致：两份 201 的 `VersionID`/`AbortedVersionID`/`BranchID` 必须一致；`PullRequestNumber` 只在「不一致的那一份 `Replayed == true` 且号为 0」时放行；其余不一致仍然失败。",
+    "那个允许分支在测试里有名字或注释，并指向 `service.go:183-186` 那句契约原文。",
+    "至少一条 mutation check 的实录：破坏后的 FAIL 原文 + 确认已恢复。",
+    "在真 PostgreSQL 上 `go test ./tests/integration -run 'TestAbort' -count=1` 跑绿；并加 `-v` 证明用例真跑了（`-run` 匹配不到也会打印 ok）。",
+    "diff 全部落在 `tests/integration/**`；`internal/**` 一个字节都没动。",
+    "没有删除、跳过或弱化任何其他断言，没有放大任何超时。"
+  ],
+  "allowed_scope": [
+    "tests/integration/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "internal/**",
+    "specs/**",
+    "tasks/task_status.json",
+    "tasks/progress.md"
+  ],
+  "relevant_specs": [
+    "docs/46_ABORT_RETENTION.md",
+    "docs/43_STATE_MACHINES.md",
+    "docs/45_ERROR_MODEL.md",
+    "docs/24_TEST_STRATEGY.md"
+  ],
+  "scope_note": "范围只有 `tests/integration/**` 一处，**是刻意的**：产品侧「重放里 `pull_request_number` 可以为 0」已经写进契约字段注释（`internal/application/aborts/service.go:183-186`），要不要把它变成「事务内开提案」是 L2/L3 的语义改动，不由本任务决定。把 `internal/**` 列进 forbidden_scope 是让这条边界**结构上**成立，而不只是嘴上说说。任务的名额只有一个测试：`TestAbortProposalConcurrency` 是长跑用例，重跑用 `-run 'TestAbort'` 就够。"
+}

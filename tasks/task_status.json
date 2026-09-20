@@ -4462,14 +4462,30 @@
       ]
     },
     "T0511": {
-      "status": "ready",
+      "status": "verification",
+      "started_at": "2026-09-20T13:17:20Z",
       "notes": "新立账（2026-09-19）：证据断言的读带上读者，见 docs/adr/ADR-024。任务书在 tasks/packages/T0511.json；未落地前 allowed_scope 为空，故意如此。",
+      "worker_run_id": "run-696debc9dfefc82f",
       "history": [
         {
           "from": "todo",
           "to": "ready",
           "at": "2026-09-20T12:51:37Z",
           "run_id": "run-946b1ed440ec15e1"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-20T13:17:20Z",
+          "run_id": "run-696debc9dfefc82f",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-20T13:44:59Z",
+          "run_id": "run-6b661ce99b82ecfe",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -5226,14 +5242,23 @@
       "merged_at": null
     },
     "T0611": {
-      "status": "ready",
+      "status": "running",
+      "started_at": "2026-09-20T13:18:44Z",
       "notes": "新立账（2026-09-20）：T0608 第 6 段走不通的上游原因——Release 的验收记录读不到「经合并进入 main」的 PR 的评审。裁决见 tasks/decisions.md，架构理由见 docs/adr/ADR-026。任务书在 tasks/packages/T0611.json；未落地前 allowed_scope 为空，故意如此。",
+      "worker_run_id": "run-32a53bade8d573d6",
       "history": [
         {
           "from": "todo",
           "to": "ready",
           "at": "2026-09-20T12:51:37Z",
           "run_id": "run-44159c6428f274e2"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-20T13:18:44Z",
+          "run_id": "run-32a53bade8d573d6",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -7020,10 +7045,10 @@
       ]
     },
     "T0814": {
-      "status": "ready",
-      "started_at": "2026-09-20T10:49:12Z",
+      "status": "running",
+      "started_at": "2026-09-20T13:38:01Z",
       "notes": "AC8 要求的外部 fork PR 完整闭合路径（fork → 写状态 → 开 PR → 既有 merge 路径合并）在当前 merge 实现下不可行：merge 按 PR project 解析 source branch，而 fork-sourced branch 活在 fork project。需要先产品/架构决策：拆分 AC8 为 follow-up，还是允许改 merge 路径。先标 blocked，空窗期拆任务。",
-      "worker_run_id": "run-a3191c8e3a8b7076",
+      "worker_run_id": "run-de7d343ff20fcbc4",
       "rejection_reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: 主验收闭合：docs/31_MASTER_ACCEPTANCE.md:17「Public Project 外部用户可 fork/contribute」在真实 HTTP 路径上从头到尾走通一遍（fork → 在自己的 fork 里写状态 → 对上游开 PR → 评审/合并按既有路径），给出一条可复现的证据。 (failed)",
       "history": [
         {
@@ -7079,14 +7104,23 @@
           "to": "ready",
           "at": "2026-09-20T12:51:37Z",
           "run_id": "run-d50e0dd52d661769"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-20T13:38:01Z",
+          "run_id": "run-de7d343ff20fcbc4",
+          "reason": "worker spawn"
         }
       ]
     },
     "T0815": {
-      "status": "verification",
+      "status": "merged",
       "started_at": "2026-09-20T11:14:58Z",
       "notes": "2026-09-19 立账：CI 的 migration-integration 偶发超时（3/14），证据见 tasks/decisions.md。不许用放大 timeout 掩盖——先量再修。",
       "worker_run_id": "run-4e0526b87f10b766",
+      "accepted_by_supervisor_at": "2026-09-20T13:07:34Z",
+      "merged_at": "2026-09-20T13:24:56Z",
       "rejection_reason": "G3 真服务门红了：`make test-integration` 里的 `TestRestoreDrill` 在创建 organization 时拿到 403 Forbidden。\n\n这条失败不一定是你 testdb 改动直接造成的，但它出现在你的 G3 里，你必须先定位、再修。\n\n你要做的：\n1. 在真 PostgreSQL 上复现 `TestRestoreDrill` 的失败（跑 `go test ./tests/integration -run TestRestoreDrill -count=1 -v`）。\n2. 定位 403 的来源：是请求没带 token / session？是 organization 创建路由的权限矩阵变了？还是 testdb 模板克隆导致某个序列/策略状态与 fresh migrate 不一致？\n3. 判断责任：\n   - 如果是你 testdb 改动（CREATE DATABASE ... TEMPLATE、模板缓存、清理顺序）导致的状态泄漏或序列漂移，修 testdb。\n   - 如果是 pre-existing 的测试/权限问题，也要给出证据，并在 RESULT 里说明；但 G3 必须绿，所以你需要让测试能在这个模式下通过（例如加隔离、修 fixture、或在测试里按当前行为断言）。\n4. 跑完整 `make test-integration` 确认全绿（不只是 `TestRestoreDrill`）。\n5. 更新 `RESULT.json`：写明失败原因、修复位置、重跑命令与结果。\n\n约束：\n- 不要 skip `TestRestoreDrill` 或弱化它的断言。\n- 不要动 `internal/authz/**` 的权限矩阵常量/CSV  unless 你能证明那是个真实 bug 而不是测试 setup 问题。\n- 跑 `make check-spec-version` 与 `make check-schema-snapshot` 确认派生件没漂移。\n",
       "history": [
         {
@@ -7129,6 +7163,19 @@
           "at": "2026-09-20T12:42:01Z",
           "run_id": "run-1b861687ee2399f4",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-20T13:07:34Z",
+          "run_id": "run-93f4693e1100bedb"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-20T13:24:56Z",
+          "run_id": "run-781c11b4372424c3",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -7176,14 +7223,23 @@
       ]
     },
     "T0817": {
-      "status": "ready",
+      "status": "running",
+      "started_at": "2026-09-20T13:45:11Z",
       "notes": "新立账（2026-09-20）：T0814 的 AC8 拆出来的合并那一半——merge 必须能在源分支自己所在的项目里读它。裁决见 tasks/decisions.md，架构理由见 docs/adr/ADR-025。任务书在 tasks/packages/T0817.json；未落地前 allowed_scope 为空，故意如此。",
+      "worker_run_id": "run-c870854592a0b93c",
       "history": [
         {
           "from": "todo",
           "to": "ready",
           "at": "2026-09-20T12:51:37Z",
           "run_id": "run-027731423dba89f9"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-20T13:45:11Z",
+          "run_id": "run-c870854592a0b93c",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -7427,10 +7483,12 @@
       ]
     },
     "T0905": {
-      "status": "verification",
-      "started_at": "2026-09-20T10:55:26Z",
-      "worker_run_id": "run-1ebd17efbf65c177",
-      "rejection_reason": "独立评审给了 request_changes，1 条 blocking + 若干文档/覆盖项。下面按优先级处理。\n\n【B · BLOCKING — 必须修：scope 外版本被报成「unversioned」，解释是错的】\n\n问题：`internal/search/ranking/store.go:87` 的 `VersionsForPids` 把 caller project scope 外的行直接 `continue` 掉，导致 ranker 看到的是一个**空 versionID**；然后 `rank.go:503-504` 走 assessVersion，把它当成「没有版本信息」处理，返回 `LevelUnversioned`（rank 2，高于 unknown），并在 `rank.go:539-542` 写出原因 \"the candidate resolves to no scientific object version, so there are no facts to read\"。\n\n这个解释是假的：版本**存在**，只是 caller 不被允许读。Reviewer 用真实 SQLStore + 真实 retriever + 真实 Ranker 在测试库上复现了：out-of-scope 文档报的是 unversioned + 那段假原因。\n\n你要做的：\n1. 让 `VersionsForPids` 能区分「这个 pid 没有版本」和「这个 pid 有版本但不在 scope 内」。\n   可以返回一个额外集合（或 map），把 scope-refused 的 pid 标出来；**不要**为了区分而引入 read-then-write 或改变现有查询的 fail-closed 语义。\n2. 在 ranker 里，scope-refused 的版本要走到 `LevelUnknown`，并给出真实原因：版本在 caller 的 project scope 外。\n   对应文档：`factor.go` 的 `LevelUnknown` 注释已经这么说了，`rank.go` 的 `unreadAssessment` 注释也指向这条路。\n3. 更新 golden fixtures（如果它们现在钉的是错误值）。\n4. 重跑 ranking 的单元测试、集成测试、required test，全部要绿。\n\n【M · MAJOR — 测试钉的不是真实路径】\n\n`tests/integration/ranking_test.go:730` 的 `TestRankingReportsOutOfScopeAsUnknown` 自己 hand-build 了一个带 out-of-scope `ObjectVersionID` 的 Candidate，但真实 retriever 会把 out-of-scope seed 丢掉、返回 `ObjectVersionID == \"\"`。所以这个测试号称测的是「真实会发生的情况」，实际上走的是一条 unreachable 的路。\n\n你要做的：\n- 改成用真实 retriever 驱动 out-of-scope 候选（像 `TestRankingOverRetrievalOutput` 那样），然后钉真实输出。\n- 这个改动应该和 blocking 修复一起让测试变真；如果改完之后测试描述的意图仍然 unreachable，把注释也改成真话。\n\n【m · minor / nit — 顺手修】\n\n- `factor.go:118` 的 reproduction-ladder 注释与实现不一致（实现把任何 failure 都当 dispute）。**不要**在这里改实现，改注释让它与当前实现一致；如果你确认应该按注释实现，必须先报上来，不要自己改产品语义。\n- `search.sql:466` public-evidence 谓词比 evidence 表自己的公开网络读宽松（没要求 asserting project 是 public）。今天是 unreachable 的差（项目可见性不能变），但注释声称\"exactly that meaning\"。把注释改成真实语义，或在查询里补上 `p.visibility = 'public'` 并更新测试；**不要**在注释上撒谎。\n- `search.sql:492` contradiction count 用 ANY version 的 type = 'contradicts'，而平台其它 relation 读只读最新版本。同样：要么按 as-of 规则改查询，要么注释写明故意不同。\n- `RESULT.json` 里\"factor vocabulary\"和\"prestige\"两段证据有夸大（列了不存在的 level、列了没检查的禁用词）。按实际测了什么重写，不要写没有的覆盖。\n- 几处 garbled HTML escape 注释（`result.go:108`、golden test :755/:865）把字面字符修成可读说明。\n- migration 的 `-- +goose Down` 段与仓库 \"no down migrations\" 的 README 不一致。这是仓库既有先例（00092/00100 也这样），先不要大动，RESULT 里如实说明即可。\n\n【约束】\n- 不要改 ranking 的 factor/level 词汇表（closed vocabulary）或者新增 prestige 输入。\n- 不要为了绿而删断言、skip 测试、放大 timeout。\n- 改完必须跑 `make check-spec-version` 与 `make check-schema-snapshot`（如果动了 schema 或迁移；没动也要确认不红）。\n- `RESULT.json` 里 acceptance evidence 必须逐字与代码/测试实际行为相符。\n",
+      "status": "merged",
+      "started_at": "2026-09-20T12:54:18Z",
+      "worker_run_id": "run-15dd4a78d6ef82da",
+      "accepted_by_supervisor_at": "2026-09-20T13:37:58Z",
+      "merged_at": "2026-09-20T13:45:08Z",
+      "rejection_reason": "T0905 的基线动了，这一轮是重新扎根，不是质疑你的东西。**排序因子索引那部分工作我一个字都没否定。**\n\n发生了什么：你开工之后，main 上落了两次东西——T0607（Activity/Audit Timeline）合并进来了，另外我自己落了一笔立账\n（T0511/T0817/T0611 三笔新任务进 DAG）。你的 diff 里带着 `specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、\n`internal/persistence/sqlc/*`，这些是**派生件**，它们描述的是你开工时那份 specs。现在那两份已经对不上了\n（你那份写的是 `sha256:ae978b6439994581`，main 现在是 `sha256:d74a7420fe6b1835`）。scratch 门禁拒绝一个「合不进当前 main」的改动，\n这是它该做的，不是你的错。\n\n## 这一轮要做的\n\n1. **你的代码改动原样保留**：`infra/migrations/00110_ranking_factor_indexes.sql`、`internal/search/ranking/`、\n   `internal/persistence/queries/search.sql`、`tests/integration/ranking_test.go`、`tests/ranking/`——这些是你的交付物，不要重写。\n\n2. **派生件一律靠重新生成，绝不手工合并文本**。`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、\n   `internal/persistence/sqlc/**` 都由迁移和查询重新算出来：\n   - `python3 scripts/spec_version.py --write`\n   - `python3 scripts/gen_schema_snapshot.py --write`\n   - `make sqlc`（或仓库里对应的生成目标）\n   手工去 merge 这些文件一定会错：**取分支那一份**会把 main 上 T0607 的 00107 迁移从快照里抹掉，\n   **取 main 那一份**会把你的 00110 从快照里抹掉。两种都是错的。\n\n3. **`tests/integration/migration_test.go` 你要重新读一遍**。T0607 也改了这个文件（它加了 00107）。\n   如果你在里面写死了迁移条数或最大版本号，改成**从目录动态算出来**（按 `maxVersionNo` 那种写法），\n   否则下一个落迁移的人会替你把它弄红。断言本身该有的严格程度不要降。\n\n4. **在新基线上重跑你的 G1**，然后照实更新 `RESULT.json`：跑过的命令、真实输出、以及哪些没跑。\n   记录里的每句话都会被当成「已经验过」，所以一句站不住的话会污染整份证据。\n\n## 不要做的\n\n- 不要为了让门禁变绿去删测试、放宽断言、放大超时。\n- 不要动 `tasks/**`、`specs/**` 里派生件之外的文件（`docs/**` 也归我）。\n- 不要顺手改别的任务的代码。\n\n---\n\n## 附：`tests/integration/migration_test.go` 为什么会「合不进去」，以及这一条你要自己放回去\n\n这不是冲突，是**两边往同一个锚点后面各插了一段**。\n\n你的基线（T0510 那次合并）里，`explicitIndexes` 这个 map 的**最后一条**就是\n`\"pull_requests_creation_key_idx\"`，你把它接在后面。而在你开工之后，main 上又落了\nT0811 那批，同样接在这个锚点后面——所以现在的 main 里，`pull_requests_creation_key_idx`\n后面已经跟了 T0808/T0809/T0811 三段，末尾才是 `}`。\n\n两边都「插在同一行后面」，三方合并就判成冲突。**内容上没有任何重叠**，纯粹是位置。\n\n为了能把你整支改动挪到新基线上，我把这个文件**先退回基线版本**（也就是你现在看到的：\n你的那 9 行不在了）。**你要做的事只有一件**：把这 9 行原样放回去，\n位置改成 map 的**最后一条之后、`}` 之前**，也就是接在 T0811 那批的后面：\n\n```go\n\t// T0905 (00110): the scientific ranking's review read. A review is\n\t// recorded against the STATE a version was created in, so the fact\n\t// read goes from a version to its state to the reviews on it — a\n\t// direction 00009 never indexed, because until now every review read\n\t// started from the pull request (reviews is indexed by its primary\n\t// key, and pull_requests by number). The ranking asks this of every\n\t// candidate it is handed, in one statement, so the lookup has to be\n\t// an index probe rather than a scan of the table.\n\t\"reviews_reviewed_state_idx\": {\"reviewed_state_id\"},\n```\n\n一字不改地照抄（含注释）。这条不是可选的美化：它是你这个迁移里唯一那个索引的**断言**，\n没有它，「这个索引真的建出来了」就没有任何东西在验。放回去之后重跑你的 G1。\n\n如果你放回去时发现 `\"reviews_reviewed_state_idx\"` 这个名字在 map 里已经有一条（那说明我判断错了），\n**停下来在 RESULT 里说明**，不要留两条。\n",
       "history": [
         {
           "from": "todo",
@@ -7493,14 +7551,48 @@
           "at": "2026-09-20T12:39:41Z",
           "run_id": "run-aa7b47ff9e512332",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-20T12:54:17Z",
+          "run_id": "run-11c070f8c86e4d36",
+          "reason": "T0905 的基线动了，这一轮是重新扎根，不是质疑你的东西。**排序因子索引那部分工作我一个字都没否定。**\n\n发生了什么：你开工之后，main 上落了两次东西——T0607（Activity/Audit Timeline）合并进来了，另外我自己落了一笔立账\n（T0511/T0817/T0611 三笔新任务进 DAG）。你的 diff 里带着 `specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、\n`internal/persistence/sqlc/*`，这些是**派生件**，它们描述的是你开工时那份 specs。现在那两份已经对不上了\n（你那份写的是 `sha256:ae978b6439994581`，main 现在是 `sha256:d74a7420fe6b1835`）。scratch 门禁拒绝一个「合不进当前 main」的改动，\n这是它该做的，不是你的错。\n\n## 这一轮要做的\n\n1. **你的代码改动原样保留**：`infra/migrations/00110_ranking_factor_indexes.sql`、`internal/search/ranking/`、\n   `internal/persistence/queries/search.sql`、`tests/integration/ranking_test.go`、`tests/ranking/`——这些是你的交付物，不要重写。\n\n2. **派生件一律靠重新生成，绝不手工合并文本**。`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`、\n   `internal/persistence/sqlc/**` 都由迁移和查询重新算出来：\n   - `python3 scripts/spec_version.py --write`\n   - `python3 scripts/gen_schema_snapshot.py --write`\n   - `make sqlc`（或仓库里对应的生成目标）\n   手工去 merge 这些文件一定会错：**取分支那一份**会把 main 上 T0607 的 00107 迁移从快照里抹掉，\n   **取 main 那一份**会把你的 00110 从快照里抹掉。两种都是错的。\n\n3. **`tests/integration/migration_test.go` 你要重新读一遍**。T0607 也改了这个文件（它加了 00107）。\n   如果你在里面写死了迁移条数或最大版本号，改成**从目录动态算出来**（按 `maxVersionNo` 那种写法），\n   否则下一个落迁移的人会替你把它弄红。断言本身该有的严格程度不要降。\n\n4. **在新基线上重跑你的 G1**，然后照实更新 `RESULT.json`：跑过的命令、真实输出、以及哪些没跑。\n   记录里的每句话都会被当成「已经验过」，所以一句站不住的话会污染整份证据。\n\n## 不要做的\n\n- 不要为了让门禁变绿去删测试、放宽断言、放大超时。\n- 不要动 `tasks/**`、`specs/**` 里派生件之外的文件（`docs/**` 也归我）。\n- 不要顺手改别的任务的代码。\n\n---\n\n## 附：`tests/integration/migration_test.go` 为什么会「合不进去」，以及这一条你要自己放回去\n\n这不是冲突，是**两边往同一个锚点后面各插了一段**。\n\n你的基线（T0510 那次合并）里，`explicitIndexes` 这个 map 的**最后一条**就是\n`\"pull_requests_creation_key_idx\"`，你把它接在后面。而在你开工之后，main 上又落了\nT0811 那批，同样接在这个锚点后面——所以现在的 main 里，`pull_requests_creation_key_idx`\n后面已经跟了 T0808/T0809/T0811 三段，末尾才是 `}`。\n\n两边都「插在同一行后面」，三方合并就判成冲突。**内容上没有任何重叠**，纯粹是位置。\n\n为了能把你整支改动挪到新基线上，我把这个文件**先退回基线版本**（也就是你现在看到的：\n你的那 9 行不在了）。**你要做的事只有一件**：把这 9 行原样放回去，\n位置改成 map 的**最后一条之后、`}` 之前**，也就是接在 T0811 那批的后面：\n\n```go\n\t// T0905 (00110): the scientific ranking's review read. A review is\n\t// recorded against the STATE a version was created in, so the fact\n\t// read goes from a version to its state to the reviews on it — a\n\t// direction 00009 never indexed, because until now every review read\n\t// started from the pull request (reviews is indexed by its primary\n\t// key, and pull_requests by number). The ranking asks this of every\n\t// candidate it is handed, in one statement, so the lookup has to be\n\t// an index probe rather than a scan of the table.\n\t\"reviews_reviewed_state_idx\": {\"reviewed_state_id\"},\n```\n\n一字不改地照抄（含注释）。这条不是可选的美化：它是你这个迁移里唯一那个索引的**断言**，\n没有它，「这个索引真的建出来了」就没有任何东西在验。放回去之后重跑你的 G1。\n\n如果你放回去时发现 `\"reviews_reviewed_state_idx\"` 这个名字在 map 里已经有一条（那说明我判断错了），\n**停下来在 RESULT 里说明**，不要留两条。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T12:54:18Z",
+          "run_id": "run-15dd4a78d6ef82da",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-20T13:18:33Z",
+          "run_id": "run-b4b068b6af5160b7",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-20T13:37:58Z",
+          "run_id": "run-5cfadfcf0420fe90"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-20T13:45:08Z",
+          "run_id": "run-5118a0210de87c68",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0906": {
-      "status": "todo",
+      "status": "blocked",
       "started_at": null,
       "completed_at": null,
-      "notes": "",
+      "notes": "**空窗期临时移出派工集（Supervisor，2026-09-20）**：本任务的 `allowed_scope` 含 `specs/**`（或 `infra/migrations/**`），它的 diff 会带上 `specs/SPEC_VERSION.json`。而 T0607 与 T0905 两笔带指纹的正在飞，落地 `tasks/tasks.json`（它是指纹的输入）会顶掉它们的 G2。所以本任务在落地期间被按住，**落地一完成立刻翻回**（`.rddev/tools/hold-dispatch.py --restore`），并让它在**新基线**上派出——那样它自己算出来的指纹才是对的。",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null
@@ -8229,9 +8321,9 @@
       ]
     },
     "T1007": {
-      "status": "ready",
+      "status": "blocked",
       "started_at": "2026-09-19T11:40:29Z",
-      "notes": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。",
+      "notes": "**空窗期临时移出派工集（Supervisor，2026-09-20）**：本任务的 `allowed_scope` 含 `specs/**`（或 `infra/migrations/**`），它的 diff 会带上 `specs/SPEC_VERSION.json`。而 T0607 与 T0905 两笔带指纹的正在飞，落地 `tasks/tasks.json`（它是指纹的输入）会顶掉它们的 G2。所以本任务在落地期间被按住，**落地一完成立刻翻回**（`.rddev/tools/hold-dispatch.py --restore`），并让它在**新基线**上派出——那样它自己算出来的指纹才是对的。",
       "worker_run_id": "run-1a2252a9ec4ea195",
       "history": [
         {
@@ -8272,9 +8364,9 @@
       "merged_at": null
     },
     "T1102": {
-      "status": "ready",
+      "status": "blocked",
       "started_at": "2026-09-19T12:02:07Z",
-      "notes": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。",
+      "notes": "**空窗期临时移出派工集（Supervisor，2026-09-20）**：本任务的 `allowed_scope` 含 `specs/**`（或 `infra/migrations/**`），它的 diff 会带上 `specs/SPEC_VERSION.json`。而 T0607 与 T0905 两笔带指纹的正在飞，落地 `tasks/tasks.json`（它是指纹的输入）会顶掉它们的 G2。所以本任务在落地期间被按住，**落地一完成立刻翻回**（`.rddev/tools/hold-dispatch.py --restore`），并让它在**新基线**上派出——那样它自己算出来的指纹才是对的。",
       "worker_run_id": "run-cfd158672804b3ff",
       "history": [
         {
@@ -8594,9 +8686,10 @@
       ]
     },
     "T1204": {
-      "status": "verification",
+      "status": "accepted",
       "started_at": "2026-09-20T12:21:32Z",
       "worker_run_id": "run-cdb0a7b6b0e0c9e3",
+      "accepted_by_supervisor_at": "2026-09-20T13:17:17Z",
       "history": [
         {
           "from": "todo",
@@ -8617,6 +8710,12 @@
           "at": "2026-09-20T12:43:10Z",
           "run_id": "run-d1bd816643f16441",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-20T13:17:17Z",
+          "run_id": "run-60673749050eb341"
         }
       ]
     },
@@ -8655,6 +8754,10 @@
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null
+    },
+    "T0612": {
+      "status": "todo",
+      "notes": "新立账（2026-09-20）：T1204 的 CI 红在 TestAbortProposalConcurrency，而那条断言与契约（service.go:183-186）矛盾——见 tasks/packages/T0612.json。未落地前 allowed_scope 为空，故意如此。"
     }
   },
   "version": 2

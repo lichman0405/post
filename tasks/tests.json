@@ -1710,6 +1710,16 @@
       "status": "not_run",
       "last_run": null,
       "evidence": null
+    },
+    {
+      "id": "T0612-TEST-01",
+      "task_id": "T0612",
+      "name": "concurrent abort replay contract e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
     }
   ]
 }
