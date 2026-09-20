@@ -246,12 +246,28 @@ Because the proxy resolves upstreams through Docker's DNS rather than binding
 their addresses at startup, the recreated container is picked up within the
 resolver's 10s TTL; no proxy restart is needed.
 
-**A migration is not rolled back.** There is no down-migration and there will
-not be one: forward-only is the invariant (`docs/35:17`, CLAUDE.md §8). If a
-migration breaks compatibility, the runbook's answer is to stop the traffic and
-repair it under an ADR — never to hand-patch production SQL and move on. This
-is also why the migrate job is `restart: "no"`: a failing migration stops the
-deployment instead of being retried in a loop against a half-applied schema.
+**A migration is not rolled back.** Forward-only is the invariant (`docs/35:17`,
+CLAUDE.md §8), and it is an invariant about what can RUN, not about what is
+written down: the migration files in `infra/migrations/` do carry goose
+`-- +goose Down` sections, some of them with executable SQL, and none of them is
+reachable. This sentence used to read "there is no down-migration and there will
+not be one", which was wrong about the files and right about the invariant — a
+reader who opened one of them would have concluded the rule was already broken,
+and a reader who trusted the sentence would have deleted the sections, which is
+the one change that could make them dangerous.
+
+What actually keeps them unreachable is that the runner only moves forward:
+`persistence.Migrate` and `persistence.MigrateTo` apply the pending migrations
+in order, and a target version below the current one applies nothing.
+`rddev db` has no down subcommand, and the migrate job cannot be retried against
+a half-applied schema (`restart: "no"` below). `tests/acceptance/runbook-drill.sh`
+re-derives all of that from the tree and then executes it against PostgreSQL: it
+pins a scratch database at an older schema version, repairs it forward to head,
+and requires a rollback attempt to move nothing. If a migration breaks
+compatibility, the runbook's answer is to stop the traffic and repair it under
+an ADR — never to hand-patch production SQL and move on. This is also why the
+migrate job is `restart: "no"`: a failing migration stops the deployment instead
+of being retried in a loop against a half-applied schema.
 
 ## Verifying the template
 

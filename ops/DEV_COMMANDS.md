@@ -127,6 +127,30 @@ bash ops/tests/doctor-smoke-test.sh # 宿主端到端自洽性冒烟测试（bas
 
 **这轮验收是「流程能跑通」，不是「达到 RPO 24h / RTO 4h」**（`docs/37_BACKUP_DR.md:12-13`）：脚本与报告都不测量 RPO/RTO，也都不断言、不声称任何 RPO/RTO。
 
+## 部署/发布/回滚 Runbook 演练（T1204 起可用，docs/35、docs/36、docs/37）
+
+```bash
+bash tests/acceptance/runbook-drill.sh              # blocking test `runbook drill`
+python3 ops/runbook-verify.py                       # 只跑规则引擎：文档与实际命令是否一致
+python3 ops/runbook-verify.py --list-checks         # 打印每条规则断言什么；不验证任何东西
+python3 ops/runbook-verify.py --selftest            # 每条规则各来一次变异，必须被自己这条规则拒绝
+python3 ops/runbook-verify.py --json                # 同样的结论，机器可读
+```
+
+把 `docs/35_DEPLOYMENT_RUNBOOK.md`、`docs/36_RELEASE_RUNBOOK.md`、`docs/37_BACKUP_DR.md`、`ops/deploy/README.md`、`ops/DEV_COMMANDS.md` 当作语料，把**每条命令、每个标志、每个文件、每个变量、每条关于本仓库有/没有某物的断言**重新在这棵树上解一遍（D1–D7、T1–T2 共 9 条规则）。**发现即失败，0 发现才算通过。**
+
+`ops/runbook-steps.json` 是这三本 runbook 的**清单**：每个章节都要在这里按**怎么执行**分类——`mechanised`（有命令，命令在树上解析得到，且语料里有文档点名它）、`named-unavailable`（有命令且能解析，但今天跑不了，`blocked_by` 必须指向一条**仍然成立**的 tree claim）、`manual`、`provider`、`absent`。**runbook 里新加一节而不在这里分类，就是一条 finding** —— 这就是这个任务存在的意义：没人说过怎么执行的步骤，正是要被抓出来的缺口。文档里的结构性标题（如 docs/35 的 `## 顺序`）在 `containers` 里声明，且**双向校验**。
+
+`ops/runbook-recovery`（`go run ./ops/runbook-recovery --admin-url …`）是**回滚/forward-fix 场景的执行体**，跑在真实 PostgreSQL 上：建一个 run-scoped 空库（`test_T1204_runbook_drill_*`，跑完必删，失败路径也删），把它**钉在旧 schema 版本**上（模拟从旧备份恢复），forward repair 到 head，在 head 上重跑 migrate job（必须是 0 条），然后**真的尝试一次回滚**（`MigrateTo` 给一个低于当前的版本），要求它**什么都没动**。退出码：`0` 场景复现了 runbook；`1` 没复现；`2` 用法错误；`3` 这台机器没有 PostgreSQL。
+
+退出码：`0` 全部通过；`1` 有检查失败；`2` 缺输入/工具/服务（**算失败，不静默跳过** —— 与 `tests/acceptance/deploy-staging-smoke.sh` 和 docs/37 同一约定）；`3` 用法错误。
+
+**这不是一次部署。** 仓库里没有 Dockerfile（tree claim `no-dockerfile`），没有镜像，起不来任何东西，所以**文档里那些 docker compose 子命令只做到「解析得到」**（规则 D4），真跑要等镜像落地。干跑能诚实做到的三件事：命令全部解析得到；拿现有工具去跑现有产物（模板校验器、schema 快照、secret 扫描、备份演练的 `--help` 与 fail-closed 出口码）；以及**用真实数据库执行回滚故事里唯一不需要运行中部署的那一半**。
+
+**没跑的都打出来，不丢。** 真实 Compose parser 与重型备份/恢复演练是**显式 opt-in**（`RUNBOOK_DRILL_DOCKER=1` / `RUNBOOK_DRILL_BACKUP=1`）：它们要么需要 Docker daemon，要么需要镜像，而且「某个工具在不在机器上」不该决定一个 Gate 的结论。默认不打这两个开关时，脚本会逐条打印**为什么没跑**以及它替代检查了什么。
+
+**这份 gate 自己能被打开开关的只有这些，其余全是硬失败。** 七处 `MUTATION CHECK` 故意让检查失败一次：引擎的 `--selftest`、从副本里删掉一条规则（它的变异必须变成「存活」）、喂一份点名了不存在脚本的 runbook 副本、喂一份多出一节/一个标题的 runbook 副本、拿一份改过一条迁移的**副本**去查 schema 快照（必须报 STALE）、备份演练的 fail-closed 出口码逐个真跑、以及给恢复程序一个不存在的目标版本（它的中心断言必须失败）。**这份 gate 自己的退出码接线不在其中**（那等于让 gate 递归跑自己），只做过一次性手工断链验证并记在 T1204 的 RESULT.json 里。
+
 ## Supervisor 无人值守驱动（2026-09-13）
 
 ```bash
