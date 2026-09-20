@@ -15348,3 +15348,77 @@ T0810 那一笔更险：我给它准备的返工信里逐字写着「T0817 已�
 它让 `rebaseline` 的自动返工拿不到槽，而报错文案是「the tree advanced but the rework failed」——
 **树已经动了、任务停在 rejected**，这个中间态得靠人接。修法应该是把并行度一路传下去
 （driver → spawn/rebaseline/rework），等安静窗口和续十二那笔一起做。
+
+## 续十四 — `tasks/tests.json` 是空的账本，而 T1206 拿它当验收条件（2026-09-21）
+
+### 发现
+
+T1206（Master Security/Quality Gate）的验收条件是两条：`Critical/High=0`、**`tests.json blocking 全 passed`**。
+T1207 是 `所有 V1 gate checked`。也就是说**最终验收读的是 `tasks/tests.json`**。
+
+今天查它的时候是这样：**173 条 blocking 用例，只有 22 条 passed，151 条 not_run**。
+原因是这个文件**没有任何东西在维护**：
+
+- `internal/` 与 `cmd/` 下的 Go 代码里**没有一处**提到 `tests.json`（`grep -rn tests.json internal/ cmd/` 为空）；
+- 唯一碰它的是 `scripts/validate_task_state.py`，而且只校验**形状**（id 唯一、`blocking` 是 bool、
+  `status` 在枚举里、`last_run` 是 ISO 时间），**不校验 status 与任务状态是否一致**；
+- docs/24 §7 要求「所有 blocking test suite 必须同步写入 tests.json」——**要求写了，没人执行**。
+
+这不是「少记了几笔」，而是**最终 Gate 的仪表盘本身是坏的**：任务都做完了它也是红的，
+于是到 T1206 那天只剩两条路——要么把 151 条手工涂绿（**造假**），要么发现来不及（**验收卡死**）。
+
+### 判断：这是记账，不是把 Gate 涂绿
+
+区分点在于**证据是谁的**。一个任务走到 `merged`，意味着它已经过了 G1（Worker 跑了任务书要求的用例）、
+G2（Supervisor 独立看 diff/scope/验收条件）、G4（合并门）。它的 `RESULT.json` 里逐条记着每个必测项的
+label / command / status，其中 label 被要求**与任务书的必测名一字不差**。于是：
+
+- **任务已合并 + 该任务的 RESULT.json 里有同名且 passed 的用例** → 这件事**已经被证明过了**，
+  回填是在补账本；
+- **任务没合并** → 用例**确实没跑**，`not_run` 就是真话，一个字都不动。
+
+### 做了什么
+
+新增 `scripts/reconcile_tests_ledger.py`（默认 dry-run，`--apply` 才写），规则：
+
+1. 只动**任务状态是 `merged`** 的条目，其余一律跳过；
+2. 必须在该任务的 `RESULT.json` 里找到 **label 完全相等**且 `passed` 的用例，找不到就不写（不做模糊匹配——
+   模糊匹配就是「大概差不多的测试」变成 passed 的机器）；
+3. 写进去的 evidence **如实说明来源**：是 Worker 在合并的那棵树上的记录、经该任务的 G2/G4 验证，
+   **不是** Supervisor 重跑；重跑的证据由重跑自己写，两者不混。
+4. 顺带打一份**残留清单**：已合并但找不到证据的、以及任务本来就还没做完的。
+
+结果：**133 passed / 40 not_run**（173 条）。40 条里：
+
+- **27 条**属于**还没合并**的任务（T0817/T0810/T0906/T1007/T1102/T0812 正在飞，其余在 DAG 后面排队）。
+  这是**如实**的红，它们会在各自合并后被同一把脚本收掉。
+- **13 条**属于**已经合并、但账本里找不到证据**的任务，需要**真跑一次**（T1206 的活）：
+  - `T0010-TEST-01/02/03`（worktree integration / two-worker concurrency smoke / worker crash recovery）
+    与 `T0011-TEST-01/02/03`（git control denial / scope violation / result schema）——
+    这六条真正的 e2e 是 `tests/worker-collect/e2e-live.sh`（它自己的头注释就写着 T0011），
+    但它会**真起 7 个 `claude -p` Worker、花真钱**（每条 `--max-turns 12 --max-budget-usd 2`），
+    现在 4 个 Worker 在跑，跑它等于和流水线抢资源，所以**不在今天跑，留给 T1206**；
+  - `T0205-TEST-G3` / `T0207-TEST-G3`（两个 real-services G3 脚本）、
+    `T0215-TEST-01`（版本计数回填）、`T0705-TEST-01`（publish security）、`T0816-TEST-01/02/03`（时区/日历日）——
+    这几条是**当年用别的 label 记的**，同名对不上；**不猜、不回填**。
+- **T0012 的三条**（four-gate / rejection-retry / supervisor-git）今天**由 Supervisor 当场重跑**：
+  `bash tests/acceptance/<name>.sh` 三条都是 `exit 0 all e2e checks passed`，
+  用新脚本 `scripts/record_test_run.py` 如实写进账本（命令、退出码、输出尾巴、日期）。
+
+### 仪表盘要能说「不」才算仪表盘
+
+怕的是「我这个回填脚本把自己哄了」。所以查了两件事：
+
+- **抽三条真重跑**：`go test ./internal/authz/`（8 个用例）、`go test ./internal/rsg/diff/ -run TestGolden`
+  （`TestGoldenDiff`/`TestGoldenEmptyDiff`/`TestGoldenDiffRepeats` 三条 `--- PASS`）、
+  `go test ./internal/application/authn/`——全绿。
+- **对照能红**：故意把 `-run` 写成不存在的名字，Go 输出的是 `[no tests to run]`——
+  说明「绿」不是选择器空转出来的，这个检查**区分得开**。
+  新脚本的对照也在：喂一个不存在的 id，它报 `no such entry` 并拒绝写。
+
+### 纪律
+
+`tasks/tests.json` **不是 spec digest 的输入**（`scripts/speclib.py:84-91`：digest = `tasks/tasks.json`
++ `specs/**` 去掉 marker 本身），所以改它**不会动 marker、不会弄红 main、也不会弄红在飞任务的 G2**。
+改动只在 `tasks/tests.json` + 两个新脚本，**没有放宽任何断言**：一条用例从 `not_run` 变 `passed`
+只发生在「它所属的任务已经合并、且该任务自己的交付记录里有同名 passed」，其余一律留在红里。

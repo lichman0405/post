@@ -257,9 +257,9 @@
       "name": "four-gate acceptance e2e",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T23:30:28Z",
+      "evidence": "Supervisor ran `bash tests/acceptance/four-gate-e2e.sh` -> exit 0 on 2026-09-20T23:30:28Z. Last output: ok   T0002 is rejected, never verification ; ok   task accept T0002 is refused while rejected ; ok   the refusal names the illegal transition explicitly ; all e2e checks passed Re-run by the Supervisor on current main to check the suite still exercises the merged orchestrator, not as part of a task dispatch."
     },
     {
       "id": "T0012-TEST-02",
@@ -267,9 +267,9 @@
       "name": "rejection/retry e2e",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T23:30:28Z",
+      "evidence": "Supervisor ran `bash tests/acceptance/rejection-retry-e2e.sh` -> exit 0 on 2026-09-20T23:30:28Z. Last output: ok   review spawn T0003 (attempt 4) ; ok   review collect T0003 (attempt 4) ; ok   the re-dispatched review approved the current code ; all e2e checks passed"
     },
     {
       "id": "T0012-TEST-03",
@@ -277,9 +277,9 @@
       "name": "supervisor git control e2e",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T23:30:28Z",
+      "evidence": "Supervisor ran `bash tests/acceptance/supervisor-git-e2e.sh` -> exit 0 on 2026-09-20T23:30:28Z. Last output: ok   pr merge folded accepted -> merged ; ok   commit wrote its GitRecord evidence ; ok   merge wrote its GitRecord evidence ; all e2e checks passed"
     },
     {
       "id": "T0101-TEST-01",
@@ -287,9 +287,9 @@
       "name": "auth unit",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T18:42:00Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/application/authn/ ./cmd/api/... -count=1` on the tree that was merged -- RESULT.json test label 'auth unit', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-12T18:42:00Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0101-TEST-02",
@@ -297,9 +297,9 @@
       "name": "auth e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T18:42:00Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/e2e -count=1 -v` on the tree that was merged -- RESULT.json test label 'auth e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-12T18:42:00Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0102-TEST-01",
@@ -307,9 +307,9 @@
       "name": "profile api",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T20:07:44Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/application/profile/ ./internal/domain/ ./cmd/api/... -count=1` on the tree that was merged -- RESULT.json test label 'profile api', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-12T20:07:44Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0102-TEST-02",
@@ -317,9 +317,9 @@
       "name": "profile e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T20:07:44Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/e2e -run 'TestE2EProfile' -count=1 -v` on the tree that was merged -- RESULT.json test label 'profile e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-12T20:07:44Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0103-TEST-01",
@@ -327,9 +327,9 @@
       "name": "org permission integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T20:54:16Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run TestOrgPermissionIntegration -count=1 -v` on the tree that was merged -- RESULT.json test label 'org permission integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-12T20:54:16Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0104-TEST-01",
@@ -337,9 +337,9 @@
       "name": "project api",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T22:56:07Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=\"postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post\" go test ./tests/integration -run TestProjectAPI -count=1` on the tree that was merged -- RESULT.json test label 'project api', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-12T22:56:07Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0105-TEST-01",
@@ -347,9 +347,9 @@
       "name": "permission matrix tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-12T23:33:35Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/authz/ -count=1` on the tree that was merged -- RESULT.json test label 'permission matrix tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-12T23:33:35Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0106-TEST-01",
@@ -357,9 +357,9 @@
       "name": "privacy negative e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-13T02:19:50Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/e2e -run TestE2EPrivacyNegative -count=1 -v` on the tree that was merged -- RESULT.json test label 'privacy negative e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-13T02:19:50Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0107-TEST-01",
@@ -367,9 +367,9 @@
       "name": "visual smoke",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-13T00:00:41Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `bash tests/web-smoke/run.sh  (builds apps/web with POST_ENV=prod API_BASE_URL=http://127.0.0.1:18080 SCIENTIFIC_ADAPTER_URL=http://127.0.0.1:19100, serves via next start on 127.0.0.1:31107, runs node visual-smoke.mjs in Chromium headless shell)` on the tree that was merged -- RESULT.json test label 'visual smoke', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-13T00:00:41Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0107-TEST-02",
@@ -377,9 +377,9 @@
       "name": "a11y smoke",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-13T00:00:41Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `bash tests/web-smoke/run.sh  (same server; runs node a11y-smoke.mjs with axe-core 4.10.3 injected via addScriptTag content; two passes per route: runOnly tag set wcag2a/wcag2aa/wcag21a/wcag21aa/wcag22aa and runOnly tag set best-practice)` on the tree that was merged -- RESULT.json test label 'a11y smoke', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-13T00:00:41Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0108-TEST-01",
@@ -387,9 +387,9 @@
       "name": "project shell e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-13T00:57:38Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `bash tests/e2e-shell/run.sh` on the tree that was merged -- RESULT.json test label 'project shell e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-13T00:57:38Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0109-TEST-01",
@@ -397,9 +397,9 @@
       "name": "settings e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-13T02:46:38Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `bash tests/e2e-settings/run.sh` on the tree that was merged -- RESULT.json test label 'settings e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-13T02:46:38Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0110-TEST-01",
@@ -407,9 +407,9 @@
       "name": "audit integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-13T01:26:45Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run TestAuditIntegration -count=1 -v` on the tree that was merged -- RESULT.json test label 'audit integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-13T01:26:45Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0201-TEST-01",
@@ -417,9 +417,9 @@
       "name": "schema unit",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-13T15:27:35Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test -race ./internal/rsg/schemareg/ -count=1` on the tree that was merged -- RESULT.json test label 'schema unit', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-13T15:27:35Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0202-TEST-01",
@@ -427,9 +427,9 @@
       "name": "object repository integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-13T16:34:10Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=\"postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post\" go test ./tests/integration -race -count=1 -run TestScientificObjectRepository -v` on the tree that was merged -- RESULT.json test label 'object repository integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-13T16:34:10Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0203-TEST-01",
@@ -437,9 +437,9 @@
       "name": "relation integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-13T17:47:30Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test -count=1 -race ./tests/integration/` on the tree that was merged -- RESULT.json test label 'relation integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-13T17:47:30Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0204-TEST-01",
@@ -447,9 +447,9 @@
       "name": "state integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-13T22:56:15Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run 'TestState|TestCreateInitialState' -count=1 -race -v` on the tree that was merged -- RESULT.json test label 'state integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-13T22:56:15Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0205-TEST-01",
@@ -457,9 +457,9 @@
       "name": "branch unit/integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-13T23:26:23Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/domain ./internal/application/branches ./internal/application/states ./internal/persistence -count=1` on the tree that was merged -- RESULT.json test label 'branch unit/integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-13T23:26:23Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0206-TEST-01",
@@ -467,9 +467,9 @@
       "name": "golden manifest tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T07:50:40Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/rsg/manifest/ -count=1 -run 'TestGolden|TestManifestContentMirrors' -v` on the tree that was merged -- RESULT.json test label 'golden manifest tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T07:50:40Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0207-TEST-01",
@@ -477,9 +477,9 @@
       "name": "validation unit/integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T01:32:13Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL='postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post' go test ./... -count=1` on the tree that was merged -- RESULT.json test label 'validation unit/integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T01:32:13Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0208-TEST-01",
@@ -487,9 +487,9 @@
       "name": "object type tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T02:41:06Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration/ -run 'TestEveryObjectTypeCreatesAndVersions|TestRelationCreateValidatesCatalogAndEndpoints|TestWriteDenialPrecedesLookupAndHidesExistence|TestGetObjectVisibility|TestVersionConflictPassthrough' -count=1 -v` on the tree that was merged -- RESULT.json test label 'object type tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T02:41:06Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0209-TEST-01",
@@ -497,9 +497,9 @@
       "name": "rsg query integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T08:42:52Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration/ -run 'TestRSGQuery' -count=1 -v` on the tree that was merged -- RESULT.json test label 'rsg query integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T08:42:52Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0210-TEST-01",
@@ -507,9 +507,9 @@
       "name": "object detail e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T05:11:18Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration/ -run TestObjectDetailE2E -count=1 -v` on the tree that was merged -- RESULT.json test label 'object detail e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T05:11:18Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0211-TEST-01",
@@ -517,9 +517,9 @@
       "name": "research page e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T11:17:54Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run 'TestResearchPageE2E' -count=1 -v` on the tree that was merged -- RESULT.json test label 'research page e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T11:17:54Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0212-TEST-01",
@@ -527,9 +527,9 @@
       "name": "overview e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T12:03:51Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL='postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post' go test ./tests/integration/ -run TestOverviewPageE2E -v -count=1` on the tree that was merged -- RESULT.json test label 'overview e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T12:03:51Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0213-TEST-01",
@@ -537,9 +537,9 @@
       "name": "schema extension integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T10:25:27Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run 'TestSchemaProfile' -count=1 -v` on the tree that was merged -- RESULT.json test label 'schema extension integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T10:25:27Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0214-TEST-01",
@@ -547,9 +547,9 @@
       "name": "template creation e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-15T01:00:23Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=\"postgres://postgres:***@127.0.0.1:5432/post\" go test ./tests/integration -count=1 -run 'TestTemplateCreationE2E|TestTemplateCreationHTTPSurface' -v` on the tree that was merged -- RESULT.json test label 'template creation e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-15T01:00:23Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0301-TEST-01",
@@ -557,9 +557,9 @@
       "name": "gitea integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-13T23:53:45Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/t0301_g3_auth POST_GITEA_BASE_URL=http://127.0.0.1:3000 GITEA_ADMIN_USER=postadmin GITEA_ADMIN_PASSWORD=postadmin_dev_pw POST_GITEA_WEBHOOK_URL=http://172.19.0.1:8080/api/v1/git/hooks/gitea go test -count=1 -run 'TestGitea' -v ./tests/integration` on the tree that was merged -- RESULT.json test label 'gitea integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-13T23:53:45Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0302-TEST-01",
@@ -567,9 +567,9 @@
       "name": "git protection e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T00:34:39Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POST_GITEA_TOKEN=<token> POST_G3_HOOK_HOST=172.19.0.1 bash tests/acceptance/gitea-real-services-e2e.sh` on the tree that was merged -- RESULT.json test label 'git protection e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T00:34:39Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0303-TEST-01",
@@ -577,9 +577,9 @@
       "name": "git branch integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T02:21:07Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post POST_GITEA_TOKEN=773f8ab624c7f9b5a9d52c92fcfa45a443b81d5c go test ./tests/integration -run 'TestGiteaBranchRef' -v -count=1` on the tree that was merged -- RESULT.json test label 'git branch integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T02:21:07Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0304-TEST-01",
@@ -587,9 +587,9 @@
       "name": "git auth integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T03:33:06Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run TestGitAuthIntegration -count=1 -v（合并基线 ee58f2c0e3af）` on the tree that was merged -- RESULT.json test label 'git auth integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T03:33:06Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0305-TEST-01",
@@ -597,9 +597,9 @@
       "name": "git ingestion integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T05:58:23Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run 'TestGiteaPushIngestionEndToEnd|TestPushIngestionStaleDeliveryDoesNotRewindHead|TestPushIngestionStaleCreationPushCannotRewindHead' -v` on the tree that was merged -- RESULT.json test label 'git ingestion integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T05:58:23Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0306-TEST-01",
@@ -607,9 +607,9 @@
       "name": "unstructured negative",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T12:29:12Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration/ -run TestUnstructuredChangeStateNegative -v` on the tree that was merged -- RESULT.json test label 'unstructured negative', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T12:29:12Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0307-TEST-01",
@@ -617,9 +617,9 @@
       "name": "files api",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T06:56:45Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/gitprovider/ -run 'TestGiteaGetTree|TestGiteaGetFileContent|TestGiteaGetRaw|TestGiteaGetHistory' -count=1` on the tree that was merged -- RESULT.json test label 'files api', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T06:56:45Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0308-TEST-01",
@@ -627,9 +627,9 @@
       "name": "files read-only e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T07:50:21Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `bash tests/e2e-files/run.sh` on the tree that was merged -- RESULT.json test label 'files read-only e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T07:50:21Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0309-TEST-01",
@@ -637,9 +637,9 @@
       "name": "reconciliation integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T16:43:01Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:***@127.0.0.1:5432/post go test ./tests/integration/ -run 'Reconciliation' -count=1 -v` on the tree that was merged -- RESULT.json test label 'reconciliation integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T16:43:01Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0401-TEST-01",
@@ -647,9 +647,9 @@
       "name": "golden diff",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T09:08:52Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/rsg/diff/ -count=1 -run 'TestGolden' -v` on the tree that was merged -- RESULT.json test label 'golden diff', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T09:08:52Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0402-TEST-01",
@@ -657,9 +657,9 @@
       "name": "pr integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T17:09:30Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run TestPullRequest -count=1` on the tree that was merged -- RESULT.json test label 'pr integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T17:09:30Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0403-TEST-01",
@@ -667,9 +667,9 @@
       "name": "integrity tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T22:52:37Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:***@127.0.0.1:5432/post go test -run TestIntegrityChecksIntegration -count=1 -v ./tests/integration/` on the tree that was merged -- RESULT.json test label 'integrity tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T22:52:37Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0404-TEST-01",
@@ -677,9 +677,9 @@
       "name": "review tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-15T11:58:36Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./cmd/api/reviewhttp/ ./internal/application/reviews/ ./internal/domain/ -count=1` on the tree that was merged -- RESULT.json test label 'review tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-15T11:58:36Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0405-TEST-01",
@@ -687,9 +687,9 @@
       "name": "conflict unit",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T10:50:01Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/rsg/conflict/ -count=1 -v` on the tree that was merged -- RESULT.json test label 'conflict unit', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T10:50:01Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0406-TEST-01",
@@ -697,9 +697,9 @@
       "name": "merge integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-15T21:21:36Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run 'TestMerge|TestAppendRelationVersion|TestSemanticMergeRecord' -count=1 -v` on the tree that was merged -- RESULT.json test label 'merge integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-15T21:21:36Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0407-TEST-01",
@@ -707,9 +707,9 @@
       "name": "conflict e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T21:53:00Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/e2e -run TestE2EConflictResolution -count=1 -v` on the tree that was merged -- RESULT.json test label 'conflict e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T21:53:00Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0408-TEST-01",
@@ -717,9 +717,9 @@
       "name": "pr ui e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-15T13:12:44Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `bash tests/e2e-pulls/run.sh` on the tree that was merged -- RESULT.json test label 'pr ui e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-15T13:12:44Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0409-TEST-01",
@@ -727,9 +727,9 @@
       "name": "merge governance e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-15T23:41:45Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL='postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post' go test ./tests/integration/ -run 'TestMergeGovernanceEndToEnd' -count=20 -timeout 900s` on the tree that was merged -- RESULT.json test label 'merge governance e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-15T23:41:45Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0410-TEST-01",
@@ -737,9 +737,9 @@
       "name": "playwright pr flows",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-19T01:44:41Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `bash tests/e2e-pr-flows/run.sh` on the tree that was merged -- RESULT.json test label 'playwright pr flows', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-19T01:44:41Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0501-TEST-01",
@@ -747,9 +747,9 @@
       "name": "knowledge relation tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T11:21:07Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration/ -count=1 -run 'TestKnowledgeRelationEndpointGuard|TestAddressesQuestionAcceptsFindingSource|TestQuestionReferenceGuard|TestKnowledgeRelationEndpointTypesMatchCatalog|TestSchemaEnumsMatchDomainTypes|TestIssueCloseDoesNotChangeQuestionState' -v` on the tree that was merged -- RESULT.json test label 'knowledge relation tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T11:21:07Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0502-TEST-01",
@@ -757,9 +757,9 @@
       "name": "claim unit",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T11:49:54Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/domain/ ./internal/rsg/semantics/ -count=1` on the tree that was merged -- RESULT.json test label 'claim unit', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T11:49:54Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0503-TEST-01",
@@ -767,9 +767,9 @@
       "name": "finding tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-15T02:07:38Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/domain ./internal/rsg/semantics -count=1 -v -run 'Finding|ValidUUID'` on the tree that was merged -- RESULT.json test label 'finding tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-15T02:07:38Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0504-TEST-01",
@@ -777,9 +777,9 @@
       "name": "evidence tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-15T03:06:01Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/domain/ ./internal/rsg/semantics/ -count=1 -run 'Evidence|Stance|Relation' -v` on the tree that was merged -- RESULT.json test label 'evidence tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-15T03:06:01Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0505-TEST-01",
@@ -787,9 +787,9 @@
       "name": "provenance integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T14:27:50Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `make test-integration` on the tree that was merged -- RESULT.json test label 'provenance integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T14:27:50Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0506-TEST-01",
@@ -797,9 +797,9 @@
       "name": "evidence graph integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-19T07:37:08Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/integration -count=1 -run 'TestEvidenceGraphAnswersWhyBelieveAndWhyDoubt|TestHypothesisEvidenceKeepsItsTwoSectionsApart|TestStoredRelationsAreWithinTheDomainStanceVocabulary|TestEvidenceGraphIsGatedBeforeAnyRead|TestEvidenceGraphAggregateScanCanFail' -v -timeout 10m` on the tree that was merged -- RESULT.json test label 'evidence graph integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-19T07:37:08Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0507-TEST-01",
@@ -807,9 +807,9 @@
       "name": "graph e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-19T09:07:35Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run 'TestGraphPage' -count=1 -v -timeout 10m` on the tree that was merged -- RESULT.json test label 'graph e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-19T09:07:35Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0508-TEST-01",
@@ -817,9 +817,9 @@
       "name": "external ref tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T15:17:22Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/rsg/externalref/ -count=1 -v` on the tree that was merged -- RESULT.json test label 'external ref tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T15:17:22Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0509-TEST-01",
@@ -827,9 +827,9 @@
       "name": "literature evidence negative",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-19T07:35:55Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run 'TestLiteratureEvidence|TestANonLiteratureAssertionNeedsNoNote' -count=1 -v -timeout 10m` on the tree that was merged -- RESULT.json test label 'literature evidence negative', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-19T07:35:55Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0510-TEST-01",
@@ -837,9 +837,9 @@
       "name": "knowledge e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-19T10:23:25Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=\"postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post\" go test ./tests/integration -run TestKnowledgeWorkflowEndToEnd -count=3 -v -timeout 20m` on the tree that was merged -- RESULT.json test label 'knowledge e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-19T10:23:25Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0601-TEST-01",
@@ -847,9 +847,9 @@
       "name": "freeze e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-16T11:52:51Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -count=1 -run TestFreezeMainGovernanceEndToEnd -v` on the tree that was merged -- RESULT.json test label 'freeze e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-16T11:52:51Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0602-TEST-01",
@@ -857,9 +857,9 @@
       "name": "abort tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-19T09:48:01Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL='postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post' go test ./tests/integration -run 'TestAbort' -count=1 -timeout 25m` on the tree that was merged -- RESULT.json test label 'abort tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-19T09:48:01Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0603-TEST-01",
@@ -867,9 +867,9 @@
       "name": "policy tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T04:12:31Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `make test-integration` on the tree that was merged -- RESULT.json test label 'policy tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T04:12:31Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0604-TEST-01",
@@ -877,9 +877,9 @@
       "name": "review routing",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-18T18:07:33Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=\"postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post\" go test ./tests/integration -count=1 -run 'TestReviewRouting|TestResponsibilityNeverWidensAuthz' -v` on the tree that was merged -- RESULT.json test label 'review routing', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-18T18:07:33Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0605-TEST-01",
@@ -887,9 +887,9 @@
       "name": "release golden",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T09:33:18Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/application/releases -run TestGolden -count=1` on the tree that was merged -- RESULT.json test label 'release golden', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T09:33:18Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0606-TEST-01",
@@ -897,9 +897,9 @@
       "name": "release e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T17:58:08Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL='postgres://postgres:***@127.0.0.1:5432/post' go test ./tests/integration/ -run '^TestReleaseE2E$' -count=1 -v` on the tree that was merged -- RESULT.json test label 'release e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T17:58:08Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0607-TEST-01",
@@ -907,9 +907,9 @@
       "name": "activity e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T12:49:12Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `bash tests/e2e-activity/run.sh` on the tree that was merged -- RESULT.json test label 'activity e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-20T12:49:12Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0608-TEST-01",
@@ -917,9 +917,9 @@
       "name": "playwright release flow",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T23:06:25Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `bash tests/e2e-release/run.sh` on the tree that was merged -- RESULT.json test label 'playwright release flow', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-20T23:06:25Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0609-TEST-01",
@@ -927,9 +927,9 @@
       "name": "milestone tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-15T14:12:50Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/domain/ ./internal/application/milestones/ ./internal/persistence/ ./cmd/api/milestonehttp/ -count=1` on the tree that was merged -- RESULT.json test label 'milestone tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-15T14:12:50Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0701-TEST-01",
@@ -937,9 +937,9 @@
       "name": "asset core",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-15T15:57:18Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL='postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post' go test ./tests/integration/ -run '^TestAssetCore' -count=1 -v` on the tree that was merged -- RESULT.json test label 'asset core', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-15T15:57:18Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0702-TEST-01",
@@ -947,9 +947,9 @@
       "name": "asset validators",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-15T18:09:43Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/assets/ -count=1` on the tree that was merged -- RESULT.json test label 'asset validators', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-15T18:09:43Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0703-TEST-01",
@@ -957,9 +957,9 @@
       "name": "rights tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-15T17:14:12Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/rights/... -count=1` on the tree that was merged -- RESULT.json test label 'rights tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-15T17:14:12Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0704-TEST-01",
@@ -967,9 +967,9 @@
       "name": "publish preview tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-15T19:04:57Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/assets/ -count=1` on the tree that was merged -- RESULT.json test label 'publish preview tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-15T19:04:57Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0705-TEST-01",
@@ -997,9 +997,9 @@
       "name": "asset dependency tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-18T16:50:28Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/assets/... ./cmd/api/assetshttp/... ./internal/application/assetpublish/... -count=1` on the tree that was merged -- RESULT.json test label 'asset dependency tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-18T16:50:28Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0708-TEST-01",
@@ -1017,9 +1017,9 @@
       "name": "asset ui e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-16T02:41:11Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `bash tests/e2e-assets/run.sh` on the tree that was merged -- RESULT.json test label 'asset ui e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-16T02:41:11Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0710-TEST-01",
@@ -1037,9 +1037,9 @@
       "name": "asset governance tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-18T14:29:04Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -count=1 -v -run 'TestAssetGovernance'` on the tree that was merged -- RESULT.json test label 'asset governance tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-18T14:29:04Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0801-TEST-01",
@@ -1047,9 +1047,9 @@
       "name": "anonymous e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-16T03:25:11Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `bash tests/e2e-anonymous/run.sh  (starts the mock API on 31142, builds apps/web, `next start` on 31141, then: node tests/e2e-anonymous/anonymous-e2e.mjs http://127.0.0.1:31141 http://127.0.0.1:31142)` on the tree that was merged -- RESULT.json test label 'anonymous e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-16T03:25:11Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0802-TEST-01",
@@ -1057,9 +1057,9 @@
       "name": "explore e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-16T04:17:01Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/e2e/ -run 'TestE2EExplore' -count=1 -v` on the tree that was merged -- RESULT.json test label 'explore e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-16T04:17:01Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0803-TEST-01",
@@ -1067,9 +1067,9 @@
       "name": "contribution opportunity tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-15T13:28:59Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=\"postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post\" go test ./tests/integration/ -count=1 -v -run 'TestMarkOpenSnapshotsTargetAndMetadata|TestAgentMarkRefusedSuggestNeedsApproval|TestRejectAndCloseLifecycle|TestOneActiveOpportunityPerTarget|TestPublicizeExplicitAuditedAndAgentRefused|TestPublicizeRequiresOpenAndMetadataFrozen|TestDatabaseGuardRefusesEveryRawPath|TestTargetExistenceGuardAtCommit|TestValidationAndForeignReads'` on the tree that was merged -- RESULT.json test label 'contribution opportunity tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-15T13:28:59Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0804-TEST-01",
@@ -1077,9 +1077,9 @@
       "name": "external fork e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-18T21:02:29Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test -count=1 -v -timeout 280s -run 'TestExternalFork' ./tests/integration/` on the tree that was merged -- RESULT.json test label 'external fork e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-18T21:02:29Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0805-TEST-01",
@@ -1087,9 +1087,9 @@
       "name": "knowledge publish tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-18T16:08:04Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test -count=1 $(go list ./... | grep -v '/tests/integration')` on the tree that was merged -- RESULT.json test label 'knowledge publish tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-18T16:08:04Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0806-TEST-01",
@@ -1097,9 +1097,9 @@
       "name": "external evidence tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-19T04:39:54Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run 'TestEvidence' -count=1 -v` on the tree that was merged -- RESULT.json test label 'external evidence tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-19T04:39:54Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0807-TEST-01",
@@ -1107,9 +1107,9 @@
       "name": "contribution projection",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-18T22:57:22Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `TZ=UTC go test ./tests/integration -run 'TestContributionLedger|TestContributionRoleVocabularyMatchesDocs04' -count=3` on the tree that was merged -- RESULT.json test label 'contribution projection', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-18T22:57:22Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0808-TEST-01",
@@ -1117,9 +1117,9 @@
       "name": "research profile e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T07:36:17Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/e2e/ -run 'TestE2EResearchProfile' -count=1 -v -timeout 5m` on the tree that was merged -- RESULT.json test label 'research profile e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-20T07:36:17Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0809-TEST-01",
@@ -1127,9 +1127,9 @@
       "name": "credit dispute",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T10:21:30Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run 'TestCredit' -count=1 -v -timeout 20m` on the tree that was merged -- RESULT.json test label 'credit dispute', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-20T10:21:30Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0810-TEST-01",
@@ -1147,9 +1147,9 @@
       "name": "discussion promotion e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T11:51:03Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/e2e -run TestE2EDiscussionPromotion -count=1 -v  (baseline 79215a6, second rebase)` on the tree that was merged -- RESULT.json test label 'discussion promotion e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-20T11:51:03Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0812-TEST-01",
@@ -1167,9 +1167,9 @@
       "name": "search projection",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-19T02:59:55Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/integration/ -run 'TestSearchProjection' -count=1 -v -timeout 20m` on the tree that was merged -- RESULT.json test label 'search projection', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-19T02:59:55Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0902-TEST-01",
@@ -1177,9 +1177,9 @@
       "name": "embedding tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-19T05:27:07Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/integration -count=1 -timeout 20m -run 'TestSearchEmbedding|TestEmbeddingFailure|TestSearchEmbedCommand' -v` on the tree that was merged -- RESULT.json test label 'embedding tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-19T05:27:07Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0903-TEST-01",
@@ -1187,9 +1187,9 @@
       "name": "planner contract",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-19T04:04:51Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/searchplan/ -count=1 -v` on the tree that was merged -- RESULT.json test label 'planner contract', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-19T04:04:51Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0904-TEST-01",
@@ -1197,9 +1197,9 @@
       "name": "retrieval integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-19T07:04:51Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/integration/ -run 'Retrieval|FullTextQueryMatchesTheCanonicalRead|RetrieverRefusesASeed|TraversalQueries|StoreSpellsNoNarrowing' -count=1 -v` on the tree that was merged -- RESULT.json test label 'retrieval integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-19T07:04:51Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0905-TEST-01",
@@ -1207,9 +1207,9 @@
       "name": "ranking golden",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T13:45:08Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/ranking/ -run 'TestGoldenRankings$' -count=1 -v` on the tree that was merged -- RESULT.json test label 'ranking golden', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-20T13:45:08Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0906-TEST-01",
@@ -1247,9 +1247,9 @@
       "name": "outbox integration",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-14T15:54:45Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL='postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post' go test ./tests/integration -run 'TestOutbox' -race -count=3` on the tree that was merged -- RESULT.json test label 'outbox integration', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-14T15:54:45Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1002-TEST-01",
@@ -1257,9 +1257,9 @@
       "name": "subscription tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-16T11:36:18Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run 'TestSubscription|TestRevokedAccess|TestUnsubscribeTakesEffect|TestFanOutFailClosed' -count=1 -v` on the tree that was merged -- RESULT.json test label 'subscription tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-16T11:36:18Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1003-TEST-01",
@@ -1267,9 +1267,9 @@
       "name": "inbox e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-18T12:07:54Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run 'TestInbox' -count=1 -v` on the tree that was merged -- RESULT.json test label 'inbox e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-18T12:07:54Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1004-TEST-01",
@@ -1277,9 +1277,9 @@
       "name": "feed tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-18T12:42:06Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test -count=1 ./internal/application/feeds/... ./cmd/api/feedshttp/...` on the tree that was merged -- RESULT.json test label 'feed tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-18T12:42:06Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1005-TEST-01",
@@ -1287,9 +1287,9 @@
       "name": "email tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-18T13:25:53Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/integration -run 'TestEmailDigest|TestCadenceChange|TestNotificationPreferencesHTTPAuth' -count=1` on the tree that was merged -- RESULT.json test label 'email tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-18T13:25:53Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1006-TEST-01",
@@ -1297,9 +1297,9 @@
       "name": "webhook security",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-15T05:00:53Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `make test-integration` on the tree that was merged -- RESULT.json test label 'webhook security', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-15T05:00:53Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1007-TEST-01",
@@ -1407,9 +1407,9 @@
       "name": "restore drill",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-18T09:56:37Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `./ops/backup-restore-drill.sh --no-infra   (which runs: cd <repo> && go test ./tests/integration -run '^TestRestoreDrill$' -count=1 -v -timeout 15m)` on the tree that was merged -- RESULT.json test label 'restore drill', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-18T09:56:37Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1201-TEST-01",
@@ -1437,9 +1437,9 @@
       "name": "deployment smoke",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-19T06:10:29Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `bash tests/acceptance/deploy-staging-smoke.sh` on the tree that was merged -- RESULT.json test label 'deployment smoke', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-19T06:10:29Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1204-TEST-01",
@@ -1447,9 +1447,9 @@
       "name": "runbook drill",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T13:53:19Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `bash tests/acceptance/runbook-drill.sh` on the tree that was merged -- RESULT.json test label 'runbook drill', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-20T13:53:19Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1205-TEST-01",
@@ -1557,9 +1557,9 @@
       "name": "asset preview disclosure tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-15T22:42:04Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./internal/assets/ -count=1` on the tree that was merged -- RESULT.json test label 'asset preview disclosure tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-15T22:42:04Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1111-TEST-01",
@@ -1567,9 +1567,9 @@
       "name": "restore drill e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": "尚未执行——任务 2026-09-18 立档，未派工。"
+      "status": "passed",
+      "last_run": "2026-09-18T23:22:54Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `env -u POST_GITEA_TOKEN -u POST_GITEA_BASE_URL bash ops/backup-restore-drill.sh --no-infra` on the tree that was merged -- RESULT.json test label 'restore drill e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-18T23:22:54Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1111-TEST-02",
@@ -1577,9 +1577,9 @@
       "name": "gitea real services e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": "尚未执行——任务 2026-09-18 立档，未派工。"
+      "status": "passed",
+      "last_run": "2026-09-18T23:22:54Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `set -a; . /home/shibo/code/post/.env.dev; set +a; bash tests/acceptance/gitea-real-services-e2e.sh` on the tree that was merged -- RESULT.json test label 'gitea real services e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-18T23:22:54Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0813-TEST-01",
@@ -1587,9 +1587,9 @@
       "name": "contribution ledger wiring",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-19T06:58:59Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/integration -run 'TestContributionLedgerProjectorIsMountedInTheWorker' -count=1 -v` on the tree that was merged -- RESULT.json test label 'contribution ledger wiring', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-19T06:58:59Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0813-TEST-02",
@@ -1597,9 +1597,9 @@
       "name": "via envelope chain",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-19T06:58:59Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/integration -run 'TestContributionLedgerVia' -count=1 -v` on the tree that was merged -- RESULT.json test label 'via envelope chain', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-19T06:58:59Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0814-TEST-01",
@@ -1607,9 +1607,9 @@
       "name": "external fork http e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T14:40:00Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -count=1 -timeout 20m -v -run 'TestExternalForkHTTPEndToEnd'` on the tree that was merged -- RESULT.json test label 'external fork http e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-20T14:40:00Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0814-TEST-02",
@@ -1617,9 +1617,9 @@
       "name": "fork propose authorization e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T14:40:00Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -count=1 -timeout 20m -v -run 'TestForkProposeAuthorizationEndToEnd'` on the tree that was merged -- RESULT.json test label 'fork propose authorization e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-20T14:40:00Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0815-TEST-01",
@@ -1627,9 +1627,9 @@
       "name": "ci migration integration timing",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T13:24:56Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `make test-integration   # frozen tree, run twice` on the tree that was merged -- RESULT.json test label 'ci migration integration timing', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-20T13:24:56Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0816-TEST-01",
@@ -1687,9 +1687,9 @@
       "name": "evidence read audience e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T14:18:17Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration/ -count=1 -v -timeout 25m -run 'TestEvidenceReadAudience'` on the tree that was merged -- RESULT.json test label 'evidence read audience e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-20T14:18:17Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0817-TEST-01",
@@ -1707,9 +1707,9 @@
       "name": "release review after merge e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T14:48:15Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run 'TestReleaseReview' -count=1 -v -timeout 10m` on the tree that was merged -- RESULT.json test label 'release review after merge e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-20T14:48:15Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0612-TEST-01",
@@ -1717,9 +1717,9 @@
       "name": "concurrent abort replay contract e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T22:40:12Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post go test ./tests/integration -run 'TestAbort' -count=1 -timeout 20m -v` on the tree that was merged -- RESULT.json test label 'concurrent abort replay contract e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-20T22:40:12Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0613-TEST-01",
@@ -1727,9 +1727,9 @@
       "name": "activity feed audience e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-20T22:53:28Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/integration -run 'TestActivity|TestAudit' -count=1 -v` on the tree that was merged -- RESULT.json test label 'activity feed audience e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-20T22:53:28Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     }
   ]
 }

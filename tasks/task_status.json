@@ -5149,10 +5149,12 @@
       ]
     },
     "T0608": {
-      "status": "verification",
+      "status": "merged",
       "started_at": "2026-09-20T22:25:52Z",
       "notes": "第 6 段（合并后经 Releases 表单切片）被上游 release_review 递归 CTE 缺陷卡住：合并产生的 state 的 parent 是 targetHead，导致 PR 的 proposed_state_id 不在祖先链上，matching_reviews=0。修法涉及 release/merge 的 L2 语义；先标 blocked，待裁决/拆任务。",
       "worker_run_id": "run-6925a5fe93383b6f",
+      "accepted_by_supervisor_at": "2026-09-20T22:53:19Z",
+      "merged_at": "2026-09-20T23:06:25Z",
       "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
       "history": [
         {
@@ -5215,6 +5217,19 @@
           "at": "2026-09-20T22:35:32Z",
           "run_id": "run-28769e3bbba93586",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-20T22:53:19Z",
+          "run_id": "run-4ddb6ebfc0523c39"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-20T23:06:25Z",
+          "run_id": "run-16eb2f20745ae4dc",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -5407,11 +5422,12 @@
       ]
     },
     "T0613": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-20T21:48:28Z",
       "notes": "新立账（2026-09-20）：自动安全评审在 events_audit.sql 上报了一条授权/可见性问题——ListProjectActivity 的 research 支路不分可见性整片返回，而公开项目的 Activity 对任何已登录读者开放，于是私有分支上的提交事件被非成员读到。它违反写路径自己的规矩（rsg/events.go：an event is never more visible than its subject）与 ADR-024 的渲染判据，判成缺陷；书在 tasks/packages/T0613.json，处置见 tasks/decisions.md 同日「安全评审的两条」。依赖 T0511：先让 ADR-024 的证据侧落地，再照同一条轴做第三处。",
       "worker_run_id": "run-7e3f7e0942c6ec4d",
       "accepted_by_supervisor_at": "2026-09-20T22:35:11Z",
+      "merged_at": "2026-09-20T22:53:28Z",
       "history": [
         {
           "from": "todo",
@@ -5438,6 +5454,13 @@
           "to": "accepted",
           "at": "2026-09-20T22:35:11Z",
           "run_id": "run-c90935848c81cb12"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-20T22:53:28Z",
+          "run_id": "run-95c022ae07b3957e",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -7174,9 +7197,10 @@
     },
     "T0812": {
       "status": "running",
-      "started_at": "2026-09-20T21:51:08Z",
+      "started_at": "2026-09-20T22:54:56Z",
       "notes": "T0811/T0511 未落地前不派（Supervisor 冻结，2026-09-19 17:2x）。理由：T0812（Private Evidence / Public Attestation）与 T0511（ADR-024：证据断言的读带上读者）会改同一条读——`internal/persistence/queries/evidence.sql` 的无谓词读与 `internal/application/evidencegraph/**`——并行做必然得到同一规则的两种写法，而 ADR-024 逐字禁止把不同的轴'整理'成另一套谓词。DAG 里此刻看不出这条依赖：T0812 → T0511 的边要跟 T0511 的条目同笔落进 tasks/tasks.json（追加依赖不能引用不存在的任务），而那次落地要等指纹空当；T0812 现有的依赖 T0806/T0703 都已合并，所以 `rddev task next` 会把它列成可派——这条 notes 就是补上 DAG 还没表达的那一半。解冻：T0511 合并后跑 `./bin/rddev task ready T0812`（todo→blocked→ready 都是状态机里的合法边）。",
-      "worker_run_id": "run-2a4f6afcb37d9738",
+      "worker_run_id": "run-f59cd1a6470e54f3",
+      "rejection_reason": "# T0812 返工：一条 blocking 是**隐私泄漏**，必须先堵上；另有两条 minor 顺手修\n\n复核给的是 `request_changes`。**设计那半边复核是认的**：公开投影选不出私有列、\nattribution 是\"记录时的 org_visibility 与组织当前设置\"的合取、迁移 00120 的\npid/CHECK/trigger 纪律都对。要返工的是下面这些——**第一条不是口味问题，是照你任务书\n自己的验收标准（\"无法反推出 private project/data\"）判的缺陷。**\n\n## 一、blocking：拒绝/预览这条路径把**别人的私有对象**泄给了任何已登录调用者\n\n链条复核写得很细，我照它核过：`***.sql:30-51` 的\n`ResolveAttestationTargetObject` / `…TargetAsset`（`WHERE sov.id = @object_version_id`）\n**没有可见性/项目范围的条件**，把 `sov.title`、`so.object_type`、`so.project_id`、`p.visibility`\n读进 `TargetFacts`（`internal/persistence/attestation_store.go:184-231`）。\njudge 会正确地拒绝一个非公开目标，**但拒绝时把预览一起交了出去**：\n`Attest`（`:266-268`）返回 `&attestations.Refused{Preview: BuildPreview(facts, want)}`，\n`BuildPreview` → `publicTargetOf`（`***.go:97,112-119`）\n把 `Target.Title / ObjectID / VersionID` 抄进 `Preview.Target`，\n`targetVisibilityRule`（`internal/application/attestations/judge.go:293-303`）还把\n\"the project that owns it is \\\"<visibility>\\\"\" 回显出去；\n`writeAttestBlocked`（`cmd/api/attestationhttp/publish.go:222-234`）把它序列化成 409 的\n`blockedEnvelope.Preview`，**`…:publish` 与 `…:publish-preview` 都走这条**。\n\n复核的复现（它自己的 out-of-tree overlay probe，打在你这棵 worktree 上）：一个**自己拥有一个项目、\n与受害项目毫无关系**的调用者，拿到了\n`{\"kind\":\"protocol\",\"object_id\":\"1d3e18a1-…\",\"version_id\":\"78118512-…\",\"title\":\"PROBE-VICTIM-SECRET-TITLE\"}`\n**外加受害项目自己的 visibility**；而换一个随机 UUID 得到的是 404。\n也就是说这条线还是个**存在性预言机**（有没有这个版本，一问便知）。\n\n**要什么**：把拒绝路径修成\"**对一个你无权读的目标，什么都不能说**\"——\n409 的 body 与\"目标不存在\"的 404 在**可观察字段上不可区分**（不给 title、不给\nobject/version id、不给拥有方项目的 visibility；给得出的话只给调用者自己请求的那个 id 与\n一句可执行的下一步）。修法你定，但**不许靠\"前端不显示\"**（CLAUDE.md §5.1）。\n读侧 `ResolvePublicAttestation` 那条已经是对的，别去动它。\n\n**并且把测试补成\"能说不\"的形状**：现在 `tests/integration/attestation_privacy_e2e_test.go`\n只对**调用者自己拥有**的私有项目做那个子测试，所以这条规矩在\"你本来就拥有这份数据\"的地方才被验过。\n要加一个子测试：**另一个用户拥有的项目里的一个版本**，断言 409 的 body 与 404 的 body\n**逐字段不可区分**（没有 title、没有 object/version id、没有对方项目的 visibility）。\n这是这个缺陷能溜到 collect 的原因，必须一起补上。\n\n## 二、minor：两个 <main> 地标\n\n`apps/web/app/(main)/attestations/[pid]/page.tsx:111` 在 `(main)/layout.tsx` 已有的\n`<main id=\"main\" tabIndex={-1}>` 里又渲染了一个 `<main className=\"att-main\">`，\n于是每个 attestation 页面有两个 main 地标。仓库自己的规矩是\"一个文档一个非隐藏 main\"\n（`layout.tsx:6`），同级的其它面板为此用 `<div>`。换成 `<div>`/`<article>`。\n\n## 三、minor：5xx 被塌成 404\n\n`apps/web/app/(main)/attestations/[pid]/page.tsx:80` 的 `read()` 把**所有**失败都塌成 `null`，\n路由随后 `notFound()`——于是一次**临时的后端故障**在读者和搜索引擎眼里就是永久的\n\"No such attestation\"。`lib/attestations.ts` 里已经有\n`messageForAttestationCode('SERVICE_UNAVAILABLE')` 这套可重试文案，页面却没用它。\n后端故障不是关于\"这条记录是否存在\"的陈述（`docs/45` 要求错误里写出下一步）。分开处理。\n\n## 四、另外两条（复核记在 risks 里，**不许在本任务里扩范围**）\n\n- 新路由没进 `specs/api/openapi.yaml` / `specs/mcp/tools.json`（在你 `allowed_scope` 之外）。\n- 没有任何地方链到 attestation（只能靠知道 pid 访问）。\n这两条留给我立账；RESULT 里把它们的**真实路径**写准（`POST /api/v1/projects/{projectId}/attestations:publish-preview`\n与 `:publish`、读是 `GET /api/v1/attestations/{attestationId}`），别再写成 \"GET/POST /api/v1/attestations\"。\n\n## 五、边界与纪律（不变）\n\n- **测试与断言只准加强，不准放宽**：不许删断言、skip、放大 timeout、把 FAIL 改成容忍。\n- 只动 `allowed_scope` 内的东西；不碰 `specs/**`、`docs/**`。\n- **不 commit / 不 push**；只留工作树 diff 与 `RESULT.json`，照实写 status。\n",
       "history": [
         {
           "from": "blocked",
@@ -7189,6 +7213,41 @@
           "to": "running",
           "at": "2026-09-20T21:51:08Z",
           "run_id": "run-2a4f6afcb37d9738",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-20T22:42:37Z",
+          "run_id": "run-3da1b4f2795b0351",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-20T22:53:42Z",
+          "run_id": "run-c21fddeba826ae84",
+          "reason": "# T0812 返工：一条 blocking 是**隐私泄漏**，必须先堵上；另有两条 minor 顺手修\n\n复核给的是 `request_changes`。**设计那半边复核是认的**：公开投影选不出私有列、\nattribution 是\"记录时的 org_visibility 与组织当前设置\"的合取、迁移 00120 的\npid/CHECK/trigger 纪律都对。要返工的是下面这些——**第一条不是口味问题，是照你任务书\n自己的验收标准（\"无法反推出 private project/data\"）判的缺陷。**\n\n## 一、blocking：拒绝/预览这条路径把**别人的私有对象**泄给了任何已登录调用者\n\n链条复核写得很细，我照它核过：`***.sql:30-51` 的\n`ResolveAttestationTargetObject` / `…TargetAsset`（`WHERE sov.id = @object_version_id`）\n**没有可见性/项目范围的条件**，把 `sov.title`、`so.object_type`、`so.project_id`、`p.visibility`\n读进 `TargetFacts`（`internal/persistence/attestation_store.go:184-231`）。\njudge 会正确地拒绝一个非公开目标，**但拒绝时把预览一起交了出去**：\n`Attest`（`:266-268`）返回 `&attestations.Refused{Preview: BuildPreview(facts, want)}`，\n`BuildPreview` → `publicTargetOf`（`***.go:97,112-119`）\n把 `Target.Title / ObjectID / VersionID` 抄进 `Preview.Target`，\n`targetVisibilityRule`（`internal/application/attestations/judge.go:293-303`）还把\n\"the project that owns it is \\\"<visibility>\\\"\" 回显出去；\n`writeAttestBlocked`（`cmd/api/attestationhttp/publish.go:222-234`）把它序列化成 409 的\n`blockedEnvelope.Preview`，**`…:publish` 与 `…:publish-preview` 都走这条**。\n\n复核的复现（它自己的 out-of-tree overlay probe，打在你这棵 worktree 上）：一个**自己拥有一个项目、\n与受害项目毫无关系**的调用者，拿到了\n`{\"kind\":\"protocol\",\"object_id\":\"1d3e18a1-…\",\"version_id\":\"78118512-…\",\"title\":\"PROBE-VICTIM-SECRET-TITLE\"}`\n**外加受害项目自己的 visibility**；而换一个随机 UUID 得到的是 404。\n也就是说这条线还是个**存在性预言机**（有没有这个版本，一问便知）。\n\n**要什么**：把拒绝路径修成\"**对一个你无权读的目标，什么都不能说**\"——\n409 的 body 与\"目标不存在\"的 404 在**可观察字段上不可区分**（不给 title、不给\nobject/version id、不给拥有方项目的 visibility；给得出的话只给调用者自己请求的那个 id 与\n一句可执行的下一步）。修法你定，但**不许靠\"前端不显示\"**（CLAUDE.md §5.1）。\n读侧 `ResolvePublicAttestation` 那条已经是对的，别去动它。\n\n**并且把测试补成\"能说不\"的形状**：现在 `tests/integration/attestation_privacy_e2e_test.go`\n只对**调用者自己拥有**的私有项目做那个子测试，所以这条规矩在\"你本来就拥有这份数据\"的地方才被验过。\n要加一个子测试：**另一个用户拥有的项目里的一个版本**，断言 409 的 body 与 404 的 body\n**逐字段不可区分**（没有 title、没有 object/version id、没有对方项目的 visibility）。\n这是这个缺陷能溜到 collect 的原因，必须一起补上。\n\n## 二、minor：两个 <main> 地标\n\n`apps/web/app/(main)/attestations/[pid]/page.tsx:111` 在 `(main)/layout.tsx` 已有的\n`<main id=\"main\" tabIndex={-1}>` 里又渲染了一个 `<main className=\"att-main\">`，\n于是每个 attestation 页面有两个 main 地标。仓库自己的规矩是\"一个文档一个非隐藏 main\"\n（`layout.tsx:6`），同级的其它面板为此用 `<div>`。换成 `<div>`/`<article>`。\n\n## 三、minor：5xx 被塌成 404\n\n`apps/web/app/(main)/attestations/[pid]/page.tsx:80` 的 `read()` 把**所有**失败都塌成 `null`，\n路由随后 `notFound()`——于是一次**临时的后端故障**在读者和搜索引擎眼里就是永久的\n\"No such attestation\"。`lib/attestations.ts` 里已经有\n`messageForAttestationCode('SERVICE_UNAVAILABLE')` 这套可重试文案，页面却没用它。\n后端故障不是关于\"这条记录是否存在\"的陈述（`docs/45` 要求错误里写出下一步）。分开处理。\n\n## 四、另外两条（复核记在 risks 里，**不许在本任务里扩范围**）\n\n- 新路由没进 `specs/api/openapi.yaml` / `specs/mcp/tools.json`（在你 `allowed_scope` 之外）。\n- 没有任何地方链到 attestation（只能靠知道 pid 访问）。\n这两条留给我立账；RESULT 里把它们的**真实路径**写准（`POST /api/v1/projects/{projectId}/attestations:publish-preview`\n与 `:publish`、读是 `GET /api/v1/attestations/{attestationId}`），别再写成 \"GET/POST /api/v1/attestations\"。\n\n## 五、边界与纪律（不变）\n\n- **测试与断言只准加强，不准放宽**：不许删断言、skip、放大 timeout、把 FAIL 改成容忍。\n- 只动 `allowed_scope` 内的东西；不碰 `specs/**`、`docs/**`。\n- **不 commit / 不 push**；只留工作树 diff 与 `RESULT.json`，照实写 status。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T22:53:53Z",
+          "run_id": "run-2585c991d4f3d28f",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-20T22:54:55Z",
+          "run_id": "run-88053935701eeb59",
+          "reason": "# T0812 返工：一条 blocking 是**隐私泄漏**，必须先堵上；另有两条 minor 顺手修\n\n复核给的是 `request_changes`。**设计那半边复核是认的**：公开投影选不出私有列、\nattribution 是\"记录时的 org_visibility 与组织当前设置\"的合取、迁移 00120 的\npid/CHECK/trigger 纪律都对。要返工的是下面这些——**第一条不是口味问题，是照你任务书\n自己的验收标准（\"无法反推出 private project/data\"）判的缺陷。**\n\n## 一、blocking：拒绝/预览这条路径把**别人的私有对象**泄给了任何已登录调用者\n\n链条复核写得很细，我照它核过：`***.sql:30-51` 的\n`ResolveAttestationTargetObject` / `…TargetAsset`（`WHERE sov.id = @object_version_id`）\n**没有可见性/项目范围的条件**，把 `sov.title`、`so.object_type`、`so.project_id`、`p.visibility`\n读进 `TargetFacts`（`internal/persistence/attestation_store.go:184-231`）。\njudge 会正确地拒绝一个非公开目标，**但拒绝时把预览一起交了出去**：\n`Attest`（`:266-268`）返回 `&attestations.Refused{Preview: BuildPreview(facts, want)}`，\n`BuildPreview` → `publicTargetOf`（`***.go:97,112-119`）\n把 `Target.Title / ObjectID / VersionID` 抄进 `Preview.Target`，\n`targetVisibilityRule`（`internal/application/attestations/judge.go:293-303`）还把\n\"the project that owns it is \\\"<visibility>\\\"\" 回显出去；\n`writeAttestBlocked`（`cmd/api/attestationhttp/publish.go:222-234`）把它序列化成 409 的\n`blockedEnvelope.Preview`，**`…:publish` 与 `…:publish-preview` 都走这条**。\n\n复核的复现（它自己的 out-of-tree overlay probe，打在你这棵 worktree 上）：一个**自己拥有一个项目、\n与受害项目毫无关系**的调用者，拿到了\n`{\"kind\":\"protocol\",\"object_id\":\"1d3e18a1-…\",\"version_id\":\"78118512-…\",\"title\":\"PROBE-VICTIM-SECRET-TITLE\"}`\n**外加受害项目自己的 visibility**；而换一个随机 UUID 得到的是 404。\n也就是说这条线还是个**存在性预言机**（有没有这个版本，一问便知）。\n\n**要什么**：把拒绝路径修成\"**对一个你无权读的目标，什么都不能说**\"——\n409 的 body 与\"目标不存在\"的 404 在**可观察字段上不可区分**（不给 title、不给\nobject/version id、不给拥有方项目的 visibility；给得出的话只给调用者自己请求的那个 id 与\n一句可执行的下一步）。修法你定，但**不许靠\"前端不显示\"**（CLAUDE.md §5.1）。\n读侧 `ResolvePublicAttestation` 那条已经是对的，别去动它。\n\n**并且把测试补成\"能说不\"的形状**：现在 `tests/integration/attestation_privacy_e2e_test.go`\n只对**调用者自己拥有**的私有项目做那个子测试，所以这条规矩在\"你本来就拥有这份数据\"的地方才被验过。\n要加一个子测试：**另一个用户拥有的项目里的一个版本**，断言 409 的 body 与 404 的 body\n**逐字段不可区分**（没有 title、没有 object/version id、没有对方项目的 visibility）。\n这是这个缺陷能溜到 collect 的原因，必须一起补上。\n\n## 二、minor：两个 <main> 地标\n\n`apps/web/app/(main)/attestations/[pid]/page.tsx:111` 在 `(main)/layout.tsx` 已有的\n`<main id=\"main\" tabIndex={-1}>` 里又渲染了一个 `<main className=\"att-main\">`，\n于是每个 attestation 页面有两个 main 地标。仓库自己的规矩是\"一个文档一个非隐藏 main\"\n（`layout.tsx:6`），同级的其它面板为此用 `<div>`。换成 `<div>`/`<article>`。\n\n## 三、minor：5xx 被塌成 404\n\n`apps/web/app/(main)/attestations/[pid]/page.tsx:80` 的 `read()` 把**所有**失败都塌成 `null`，\n路由随后 `notFound()`——于是一次**临时的后端故障**在读者和搜索引擎眼里就是永久的\n\"No such attestation\"。`lib/attestations.ts` 里已经有\n`messageForAttestationCode('SERVICE_UNAVAILABLE')` 这套可重试文案，页面却没用它。\n后端故障不是关于\"这条记录是否存在\"的陈述（`docs/45` 要求错误里写出下一步）。分开处理。\n\n## 四、另外两条（复核记在 risks 里，**不许在本任务里扩范围**）\n\n- 新路由没进 `specs/api/openapi.yaml` / `specs/mcp/tools.json`（在你 `allowed_scope` 之外）。\n- 没有任何地方链到 attestation（只能靠知道 pid 访问）。\n这两条留给我立账；RESULT 里把它们的**真实路径**写准（`POST /api/v1/projects/{projectId}/attestations:publish-preview`\n与 `:publish`、读是 `GET /api/v1/attestations/{attestationId}`），别再写成 \"GET/POST /api/v1/attestations\"。\n\n## 五、边界与纪律（不变）\n\n- **测试与断言只准加强，不准放宽**：不许删断言、skip、放大 timeout、把 FAIL 改成容忍。\n- 只动 `allowed_scope` 内的东西；不碰 `specs/**`、`docs/**`。\n- **不 commit / 不 push**；只留工作树 diff 与 `RESULT.json`，照实写 status。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T22:54:56Z",
+          "run_id": "run-f59cd1a6470e54f3",
           "reason": "worker spawn"
         }
       ]
@@ -7437,10 +7496,10 @@
     },
     "T0817": {
       "status": "verification",
-      "started_at": "2026-09-20T22:06:07Z",
+      "started_at": "2026-09-20T22:54:47Z",
       "notes": "新立账（2026-09-20）：T0814 的 AC8 拆出来的合并那一半——merge 必须能在源分支自己所在的项目里读它。裁决见 tasks/decisions.md，架构理由见 docs/adr/ADR-025。任务书在 tasks/packages/T0817.json；未落地前 allowed_scope 为空，故意如此。",
-      "worker_run_id": "run-c04cec6aaad8c720",
-      "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
+      "worker_run_id": "run-428736b3f2cd455d",
+      "rejection_reason": "# T0817 返工：一条 blocking 我核过了，成立；修法由我裁\n\n复核给的是 `request_changes`：1 blocking + 1 major + 1 minor。**核心工作复核是认的**——\n源侧按分支自己所在的项目读、只经 fork 谱系放行外来项目、每条链按链自己所在项目判边界，\n这些都对。要返工的是下面三条。**blocking 那一条我逐行核过，成立，不是口味问题。**\n\n## 一、blocking：你把通用推送路径的语义改掉了，而且没有证据\n\n`internal/gitprovider/push_ingestion_store.go` 里 `upsertPushedState` 新加的 owner 检查\n（`:399-403` 一带）是**无差别**生效的：任何一笔投递，只要它的 head commit 已经是本项目里\n**另一个分支**的状态行，就直接返回错误→整笔投递回滚（没有 ingestion 行、没有 head 指针推进、\n没有 change 行、没有 candidates）。\n\n这改掉了**文档化的既有行为**：\n\n- `internal/gitprovider/push_ingestion_store.go:144-147` 逐字写着\n  \"`ON CONFLICT` on the content hash — **the same commit on another branch reuses the same state**\"；\n- 而且**你自己这个新函数的注释**（`:366-372`）现在还在这么写——\"the same commit on another branch of\n  the project reuses the row instead of writing a second one\"——**注释和代码相反**。\n- 触发它的场景不是刁钻的：`git push origin main:<some-branch>`、在一个已有 commit 上建分支，\n  都会撞上。\n\n**我的裁定（L1，不必再问）**：**把 owner 检查收进 fork import 那一路**\n（例如 `in.ForkImport != nil` 时才做这件事），**通用推送保持复用语义不变**。\n理由：你需要的保证——复制过来的 head 记成一次真实状态迁移、一条链只有一个 head——\n来自 fork import；通用路径的复用是既有契约，要不要改它是**另一个决定**，不在本任务里做。\n\n**并且必须补上钉住它的测试**：向同一项目投递一个**已经被记录过的 commit**到一个**第二个分支**\n（`git push origin main:<branch>` 或等价形状），断言：整笔投递**成功**、`project_states` 的那一行\n**被复用**（没有第二行）、head 指针推进。\n\n你上一轮 RESULT 里\"the non-fork push path is provably unchanged\"这句是**站不住的**：\n你引的 mutation check 3 只放宽了 `:322` 那个 `case in.ForkImport != nil:` 的 switch（父链那一半），\n**从没碰过这条 owner 检查**；你点名的 `TestGiteaPushIngestionEndToEnd` 自始至终只往**一个分支**投递、\n每次都是**不同的 commit**（`tests/integration/gitea_push_ingestion_test.go:376-625`）——\n也就是说**被改动的这个 case 一条测试都没盖到**。**把那句断言改掉，或者用上一条测试把它变成真的。**\n\n## 二、major：RESULT 的证据与 diff 不符\n\nRESULT 的验收 1 证据（`:104`）与运行摘要（`:40`）都写着 B 提出的\"对象版本**与关系版本**逐项落地\"\n（carry … object version **and relation version** with their payloads / item by item）。\n但 `tests/integration/external_fork_merge_e2e_test.go` 里**根本没有任何关系版本**：\n对象版本是真逐项断言的（payload 逐字节，`:801-857`），关系版本全文只出现两行 store 接线\n（`:239`、`:291`）。\n\n**二选一，不许留着**：① 真的让贡献者的提案里带一个关系版本，并逐项断言它落地（更强，推荐）；\n② 把证据句里的\"与关系版本\"删掉，让证据与测试一致。**改完再核对一遍 RESULT 里每一条证据\n都能被只读复核用 grep 找到对应断言。**\n\n## 三、minor：负向测试自己的注释说错了，而且门真的开过\n\n`tests/integration/external_fork_merge_e2e_test.go:1148-1151` 的注释说\n\"停用触发器与插入是一个事务（PostgreSQL DDL 是事务性的），所以没有第二个 session 会看到门关着\"。\n但实际代码是：那条事务在**触发器仍然停用**的情况下 **COMMIT** 了（`:1160-1173`），\n`ENABLE` 是它之后**另一条语句**（`:1174`）。这两个来回之间，00086 的门对**那个库上所有 session**\n都是开的（进程若死在中间，它会一直开着，直到下一次跑时把模板库删掉）。\n\n修：把 `ENABLE` 放进**同一个事务**里再 COMMIT；或者立刻 ENABLE 之后**再断言一次**门会拒绝\nraw insert（现在那次 P0001 断言发生在停用之前，等于没验回来）。\n\n## 四、边界与纪律（不变）\n\n- **测试与断言只准加强，不准放宽**：不许删断言、skip、放大 timeout、把 FAIL 改成容忍。\n- 只动任务书 `allowed_scope` 内的东西；不碰 `specs/**`、`docs/**`。\n- **不 commit / 不 push**（Git 控制面不属于你）；只留工作树 diff 与 `RESULT.json`。\n- RESULT 照实写：这三条都改完并跑到绿再写 `completed`；哪条没改完就如实写清楚。\n",
       "history": [
         {
           "from": "todo",
@@ -7480,6 +7539,41 @@
           "to": "verification",
           "at": "2026-09-20T22:40:17Z",
           "run_id": "run-73d8f4abc70ecb6f",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-20T22:53:42Z",
+          "run_id": "run-901030b8460c1b7f",
+          "reason": "# T0817 返工：一条 blocking 我核过了，成立；修法由我裁\n\n复核给的是 `request_changes`：1 blocking + 1 major + 1 minor。**核心工作复核是认的**——\n源侧按分支自己所在的项目读、只经 fork 谱系放行外来项目、每条链按链自己所在项目判边界，\n这些都对。要返工的是下面三条。**blocking 那一条我逐行核过，成立，不是口味问题。**\n\n## 一、blocking：你把通用推送路径的语义改掉了，而且没有证据\n\n`internal/gitprovider/push_ingestion_store.go` 里 `upsertPushedState` 新加的 owner 检查\n（`:399-403` 一带）是**无差别**生效的：任何一笔投递，只要它的 head commit 已经是本项目里\n**另一个分支**的状态行，就直接返回错误→整笔投递回滚（没有 ingestion 行、没有 head 指针推进、\n没有 change 行、没有 candidates）。\n\n这改掉了**文档化的既有行为**：\n\n- `internal/gitprovider/push_ingestion_store.go:144-147` 逐字写着\n  \"`ON CONFLICT` on the content hash — **the same commit on another branch reuses the same state**\"；\n- 而且**你自己这个新函数的注释**（`:366-372`）现在还在这么写——\"the same commit on another branch of\n  the project reuses the row instead of writing a second one\"——**注释和代码相反**。\n- 触发它的场景不是刁钻的：`git push origin main:<some-branch>`、在一个已有 commit 上建分支，\n  都会撞上。\n\n**我的裁定（L1，不必再问）**：**把 owner 检查收进 fork import 那一路**\n（例如 `in.ForkImport != nil` 时才做这件事），**通用推送保持复用语义不变**。\n理由：你需要的保证——复制过来的 head 记成一次真实状态迁移、一条链只有一个 head——\n来自 fork import；通用路径的复用是既有契约，要不要改它是**另一个决定**，不在本任务里做。\n\n**并且必须补上钉住它的测试**：向同一项目投递一个**已经被记录过的 commit**到一个**第二个分支**\n（`git push origin main:<branch>` 或等价形状），断言：整笔投递**成功**、`project_states` 的那一行\n**被复用**（没有第二行）、head 指针推进。\n\n你上一轮 RESULT 里\"the non-fork push path is provably unchanged\"这句是**站不住的**：\n你引的 mutation check 3 只放宽了 `:322` 那个 `case in.ForkImport != nil:` 的 switch（父链那一半），\n**从没碰过这条 owner 检查**；你点名的 `TestGiteaPushIngestionEndToEnd` 自始至终只往**一个分支**投递、\n每次都是**不同的 commit**（`tests/integration/gitea_push_ingestion_test.go:376-625`）——\n也就是说**被改动的这个 case 一条测试都没盖到**。**把那句断言改掉，或者用上一条测试把它变成真的。**\n\n## 二、major：RESULT 的证据与 diff 不符\n\nRESULT 的验收 1 证据（`:104`）与运行摘要（`:40`）都写着 B 提出的\"对象版本**与关系版本**逐项落地\"\n（carry … object version **and relation version** with their payloads / item by item）。\n但 `tests/integration/external_fork_merge_e2e_test.go` 里**根本没有任何关系版本**：\n对象版本是真逐项断言的（payload 逐字节，`:801-857`），关系版本全文只出现两行 store 接线\n（`:239`、`:291`）。\n\n**二选一，不许留着**：① 真的让贡献者的提案里带一个关系版本，并逐项断言它落地（更强，推荐）；\n② 把证据句里的\"与关系版本\"删掉，让证据与测试一致。**改完再核对一遍 RESULT 里每一条证据\n都能被只读复核用 grep 找到对应断言。**\n\n## 三、minor：负向测试自己的注释说错了，而且门真的开过\n\n`tests/integration/external_fork_merge_e2e_test.go:1148-1151` 的注释说\n\"停用触发器与插入是一个事务（PostgreSQL DDL 是事务性的），所以没有第二个 session 会看到门关着\"。\n但实际代码是：那条事务在**触发器仍然停用**的情况下 **COMMIT** 了（`:1160-1173`），\n`ENABLE` 是它之后**另一条语句**（`:1174`）。这两个来回之间，00086 的门对**那个库上所有 session**\n都是开的（进程若死在中间，它会一直开着，直到下一次跑时把模板库删掉）。\n\n修：把 `ENABLE` 放进**同一个事务**里再 COMMIT；或者立刻 ENABLE 之后**再断言一次**门会拒绝\nraw insert（现在那次 P0001 断言发生在停用之前，等于没验回来）。\n\n## 四、边界与纪律（不变）\n\n- **测试与断言只准加强，不准放宽**：不许删断言、skip、放大 timeout、把 FAIL 改成容忍。\n- 只动任务书 `allowed_scope` 内的东西；不碰 `specs/**`、`docs/**`。\n- **不 commit / 不 push**（Git 控制面不属于你）；只留工作树 diff 与 `RESULT.json`。\n- RESULT 照实写：这三条都改完并跑到绿再写 `completed`；哪条没改完就如实写清楚。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T22:53:47Z",
+          "run_id": "run-0bea08274f378cd1",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-20T22:54:45Z",
+          "run_id": "run-f9b752a869e53e82",
+          "reason": "# T0817 返工：一条 blocking 我核过了，成立；修法由我裁\n\n复核给的是 `request_changes`：1 blocking + 1 major + 1 minor。**核心工作复核是认的**——\n源侧按分支自己所在的项目读、只经 fork 谱系放行外来项目、每条链按链自己所在项目判边界，\n这些都对。要返工的是下面三条。**blocking 那一条我逐行核过，成立，不是口味问题。**\n\n## 一、blocking：你把通用推送路径的语义改掉了，而且没有证据\n\n`internal/gitprovider/push_ingestion_store.go` 里 `upsertPushedState` 新加的 owner 检查\n（`:399-403` 一带）是**无差别**生效的：任何一笔投递，只要它的 head commit 已经是本项目里\n**另一个分支**的状态行，就直接返回错误→整笔投递回滚（没有 ingestion 行、没有 head 指针推进、\n没有 change 行、没有 candidates）。\n\n这改掉了**文档化的既有行为**：\n\n- `internal/gitprovider/push_ingestion_store.go:144-147` 逐字写着\n  \"`ON CONFLICT` on the content hash — **the same commit on another branch reuses the same state**\"；\n- 而且**你自己这个新函数的注释**（`:366-372`）现在还在这么写——\"the same commit on another branch of\n  the project reuses the row instead of writing a second one\"——**注释和代码相反**。\n- 触发它的场景不是刁钻的：`git push origin main:<some-branch>`、在一个已有 commit 上建分支，\n  都会撞上。\n\n**我的裁定（L1，不必再问）**：**把 owner 检查收进 fork import 那一路**\n（例如 `in.ForkImport != nil` 时才做这件事），**通用推送保持复用语义不变**。\n理由：你需要的保证——复制过来的 head 记成一次真实状态迁移、一条链只有一个 head——\n来自 fork import；通用路径的复用是既有契约，要不要改它是**另一个决定**，不在本任务里做。\n\n**并且必须补上钉住它的测试**：向同一项目投递一个**已经被记录过的 commit**到一个**第二个分支**\n（`git push origin main:<branch>` 或等价形状），断言：整笔投递**成功**、`project_states` 的那一行\n**被复用**（没有第二行）、head 指针推进。\n\n你上一轮 RESULT 里\"the non-fork push path is provably unchanged\"这句是**站不住的**：\n你引的 mutation check 3 只放宽了 `:322` 那个 `case in.ForkImport != nil:` 的 switch（父链那一半），\n**从没碰过这条 owner 检查**；你点名的 `TestGiteaPushIngestionEndToEnd` 自始至终只往**一个分支**投递、\n每次都是**不同的 commit**（`tests/integration/gitea_push_ingestion_test.go:376-625`）——\n也就是说**被改动的这个 case 一条测试都没盖到**。**把那句断言改掉，或者用上一条测试把它变成真的。**\n\n## 二、major：RESULT 的证据与 diff 不符\n\nRESULT 的验收 1 证据（`:104`）与运行摘要（`:40`）都写着 B 提出的\"对象版本**与关系版本**逐项落地\"\n（carry … object version **and relation version** with their payloads / item by item）。\n但 `tests/integration/external_fork_merge_e2e_test.go` 里**根本没有任何关系版本**：\n对象版本是真逐项断言的（payload 逐字节，`:801-857`），关系版本全文只出现两行 store 接线\n（`:239`、`:291`）。\n\n**二选一，不许留着**：① 真的让贡献者的提案里带一个关系版本，并逐项断言它落地（更强，推荐）；\n② 把证据句里的\"与关系版本\"删掉，让证据与测试一致。**改完再核对一遍 RESULT 里每一条证据\n都能被只读复核用 grep 找到对应断言。**\n\n## 三、minor：负向测试自己的注释说错了，而且门真的开过\n\n`tests/integration/external_fork_merge_e2e_test.go:1148-1151` 的注释说\n\"停用触发器与插入是一个事务（PostgreSQL DDL 是事务性的），所以没有第二个 session 会看到门关着\"。\n但实际代码是：那条事务在**触发器仍然停用**的情况下 **COMMIT** 了（`:1160-1173`），\n`ENABLE` 是它之后**另一条语句**（`:1174`）。这两个来回之间，00086 的门对**那个库上所有 session**\n都是开的（进程若死在中间，它会一直开着，直到下一次跑时把模板库删掉）。\n\n修：把 `ENABLE` 放进**同一个事务**里再 COMMIT；或者立刻 ENABLE 之后**再断言一次**门会拒绝\nraw insert（现在那次 P0001 断言发生在停用之前，等于没验回来）。\n\n## 四、边界与纪律（不变）\n\n- **测试与断言只准加强，不准放宽**：不许删断言、skip、放大 timeout、把 FAIL 改成容忍。\n- 只动任务书 `allowed_scope` 内的东西；不碰 `specs/**`、`docs/**`。\n- **不 commit / 不 push**（Git 控制面不属于你）；只留工作树 diff 与 `RESULT.json`。\n- RESULT 照实写：这三条都改完并跑到绿再写 `completed`；哪条没改完就如实写清楚。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T22:54:47Z",
+          "run_id": "run-428736b3f2cd455d",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-20T23:24:14Z",
+          "run_id": "run-7e04f17ec9c56d0d",
           "reason": "collect: all checks passed"
         }
       ]
@@ -7830,7 +7924,7 @@
       ]
     },
     "T0906": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-20T22:37:52Z",
       "worker_run_id": "run-0394bfc1b7f4bb60",
       "history": [
@@ -7846,6 +7940,13 @@
           "at": "2026-09-20T22:37:52Z",
           "run_id": "run-0394bfc1b7f4bb60",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-20T23:30:41Z",
+          "run_id": "run-85eb3b250f0c6c6a",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -8573,10 +8674,11 @@
       ]
     },
     "T1007": {
-      "status": "ready",
-      "started_at": "2026-09-19T11:40:29Z",
+      "status": "running",
+      "started_at": "2026-09-20T23:06:23Z",
       "notes": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。",
-      "worker_run_id": "run-1a2252a9ec4ea195",
+      "worker_run_id": "run-4a56d52f92d68205",
+      "rejection_reason": "# T1007：你的基线停在了 9/19，我把它推到当前 main 了（不是你的错，也不是否定你的交付）\n\n（Supervisor，2026-09-21。）\n\n## 一、发生了什么\n\n你这棵树是从 **c1861bf（2026-09-19 的 main）** 切的，**落后当前 main 33 笔提交**。\n原因不是你的工作，而是控制面：你这个任务在 9/19 跑过一次，那次**进程与它的 reaper 一起消失**、\n谁都没写退出码；今早我重启驱动重新派工时，派工路径**沿用了已存在的 task branch**，\n没有从当前 main 重切——于是你在两天前的树上干活。\n\n**这不是小事：那 33 笔改动涉及的 172 个文件里，有 120 个落在你这个任务的 `allowed_scope` 之内**，\n其中就包括你要接的那几个面：\n\n- `internal/application/audit/**`（T0607 #303、**T0613 #311**）：活动/审计这条读现在**必须带上读者**——\n  ADR-024 的第三个出口。事件行自带的 visibility 决定它给谁看，**传错读者 = 把非公开行泄给非成员**。\n  你那边如果要落一条可读的活动/审计行，签名和判据都变了，**按旧树写出来的东西在新树上是错的**。\n- `internal/persistence/queries/**` 与 `internal/persistence/sqlc/**`：六笔合并都动过，\n  派生件一律重新生成。\n- `internal/domain/**`（T0607、T0811）：T0607 给 Activity/Audit 加了新的模型面。\n\n## 二、我现在做了什么\n\n**基线已推进到当前 main**（`159de18`），你已写的那一个文件（`internal/rsg/relationcatalog/catalog.go`）\n**被原样带过来了，没有丢**。同一个 session 继续，上下文都在。\n\n迁移号仍然是 **111**（Supervisor 分配，`infra/migrations/00111_*.sql` 目前是空的，未被占用；\n当前树里最大的既有迁移是 `00110`）。\n\n## 三、请你做的事\n\n1. **不要假设旧树上的结论还成立**。先把这几处按**新树**重读一遍再继续：\n   审计/活动那条读的**读者参数**、`internal/persistence/queries` 里你打算用的每一条、\n   以及 `internal/domain` 里你引用的类型。\n2. 已经写下的代码**按新树重新过一遍编译与测试**（`go build ./...` 是底线）。\n3. 任务书要求的验收一条都别放宽——特别是那几条**必须能失败**的断言\n   （`references` 边不被跟随、私有实体不泄漏且断言字符串必须取自真实存在的行、\n   direct/indirect 可分、以及\"跑完把状态从表里读回、与跑前逐字节相同\"）。\n4. 迁移号用 **111**，不要自己另选。\n\n## 四、边界与纪律（不变）\n\n- 不 commit / 不 push（Git 控制面不属于你）；只留工作树 diff 与 `RESULT.json`。\n- 只动 `allowed_scope` 内的东西；不碰 `specs/**`、`docs/**`（`specs/database/postgres.sql`\n  与 `specs/SPEC_VERSION.json` 是派生件，按生成器重新生成）。\n- 测试与断言只准加强，不准放宽：不许删断言、skip、放大 timeout。\n- RESULT 照实写。\n",
       "history": [
         {
           "from": "todo",
@@ -8603,6 +8705,27 @@
           "to": "ready",
           "at": "2026-09-20T11:15:33Z",
           "run_id": "run-bd87d8126a9b6e0e"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-20T22:59:28Z",
+          "run_id": "run-1254c8ea39142413",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-20T23:06:15Z",
+          "run_id": "run-db2bcbc7822d827c",
+          "reason": "# T1007：你的基线停在了 9/19，我把它推到当前 main 了（不是你的错，也不是否定你的交付）\n\n（Supervisor，2026-09-21。）\n\n## 一、发生了什么\n\n你这棵树是从 **c1861bf（2026-09-19 的 main）** 切的，**落后当前 main 33 笔提交**。\n原因不是你的工作，而是控制面：你这个任务在 9/19 跑过一次，那次**进程与它的 reaper 一起消失**、\n谁都没写退出码；今早我重启驱动重新派工时，派工路径**沿用了已存在的 task branch**，\n没有从当前 main 重切——于是你在两天前的树上干活。\n\n**这不是小事：那 33 笔改动涉及的 172 个文件里，有 120 个落在你这个任务的 `allowed_scope` 之内**，\n其中就包括你要接的那几个面：\n\n- `internal/application/audit/**`（T0607 #303、**T0613 #311**）：活动/审计这条读现在**必须带上读者**——\n  ADR-024 的第三个出口。事件行自带的 visibility 决定它给谁看，**传错读者 = 把非公开行泄给非成员**。\n  你那边如果要落一条可读的活动/审计行，签名和判据都变了，**按旧树写出来的东西在新树上是错的**。\n- `internal/persistence/queries/**` 与 `internal/persistence/sqlc/**`：六笔合并都动过，\n  派生件一律重新生成。\n- `internal/domain/**`（T0607、T0811）：T0607 给 Activity/Audit 加了新的模型面。\n\n## 二、我现在做了什么\n\n**基线已推进到当前 main**（`159de18`），你已写的那一个文件（`internal/rsg/relationcatalog/catalog.go`）\n**被原样带过来了，没有丢**。同一个 session 继续，上下文都在。\n\n迁移号仍然是 **111**（Supervisor 分配，`infra/migrations/00111_*.sql` 目前是空的，未被占用；\n当前树里最大的既有迁移是 `00110`）。\n\n## 三、请你做的事\n\n1. **不要假设旧树上的结论还成立**。先把这几处按**新树**重读一遍再继续：\n   审计/活动那条读的**读者参数**、`internal/persistence/queries` 里你打算用的每一条、\n   以及 `internal/domain` 里你引用的类型。\n2. 已经写下的代码**按新树重新过一遍编译与测试**（`go build ./...` 是底线）。\n3. 任务书要求的验收一条都别放宽——特别是那几条**必须能失败**的断言\n   （`references` 边不被跟随、私有实体不泄漏且断言字符串必须取自真实存在的行、\n   direct/indirect 可分、以及\"跑完把状态从表里读回、与跑前逐字节相同\"）。\n4. 迁移号用 **111**，不要自己另选。\n\n## 四、边界与纪律（不变）\n\n- 不 commit / 不 push（Git 控制面不属于你）；只留工作树 diff 与 `RESULT.json`。\n- 只动 `allowed_scope` 内的东西；不碰 `specs/**`、`docs/**`（`specs/database/postgres.sql`\n  与 `specs/SPEC_VERSION.json` 是派生件，按生成器重新生成）。\n- 测试与断言只准加强，不准放宽：不许删断言、skip、放大 timeout。\n- RESULT 照实写。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T23:06:23Z",
+          "run_id": "run-4a56d52f92d68205",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -8616,10 +8739,10 @@
       "merged_at": null
     },
     "T1102": {
-      "status": "ready",
-      "started_at": "2026-09-19T12:02:07Z",
+      "status": "running",
+      "started_at": "2026-09-20T23:24:18Z",
       "notes": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。",
-      "worker_run_id": "run-cfd158672804b3ff",
+      "worker_run_id": "run-2286fd8723836e81",
       "history": [
         {
           "from": "todo",
@@ -8646,6 +8769,13 @@
           "to": "ready",
           "at": "2026-09-20T11:15:33Z",
           "run_id": "run-04d9e92e5c23d117"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-20T23:24:18Z",
+          "run_id": "run-2286fd8723836e81",
+          "reason": "worker spawn"
         }
       ]
     },
