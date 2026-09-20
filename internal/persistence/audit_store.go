@@ -50,9 +50,13 @@ func (s *AuditStore) Record(ctx context.Context, e domain.AuditEntry) error {
 	return nil
 }
 
-// ListProjectActivity implements audit.Store: the project's audit rows,
-// newest first, keyset-paginated on (occurred_at, id).
-func (s *AuditStore) ListProjectActivity(ctx context.Context, projectID string, before *audit.Cursor, limit int) ([]domain.AuditRecord, error) {
+// ListProjectActivity implements audit.Store: the project's Activity rows,
+// newest first, keyset-paginated on (occurred_at, id) across BOTH
+// registries. source selects which registry the page reads (""
+// reads both); the two branches and the one cursor are the SQL's, not the
+// caller's — see queries/events_audit.sql's ListProjectActivity for why a
+// page has to be cut by the database.
+func (s *AuditStore) ListProjectActivity(ctx context.Context, projectID string, before *audit.Cursor, limit int, source domain.ActivitySource) ([]domain.AuditRecord, error) {
 	id, err := textUUID(projectID)
 	if err != nil {
 		return nil, nil // an id that is not a uuid matches no rows
@@ -61,21 +65,35 @@ func (s *AuditStore) ListProjectActivity(ctx context.Context, projectID string, 
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list project activity: %w", err)
 	}
-	rows, err := sqlc.New(s.pool).ListProjectAuditEntries(ctx, sqlc.ListProjectAuditEntriesParams{
-		ProjectID: id,
-		BeforeTs:  beforeTS,
-		BeforeID:  beforeID,
-		PageLimit: int32(limit),
+	rows, err := sqlc.New(s.pool).ListProjectActivity(ctx, sqlc.ListProjectActivityParams{
+		ProjectID:         id,
+		IncludeGovernance: source.IncludesGovernance(),
+		IncludeResearch:   source.IncludesResearch(),
+		BeforeTs:          beforeTS,
+		BeforeID:          beforeID,
+		PageLimit:         int32(limit),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("persistence: list project activity: %w", err)
 	}
 	out := make([]domain.AuditRecord, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, auditRecordFromListRow(
+		rec := auditRecordFromListRow(
 			r.ID, r.ActorID, r.Via, r.Action, r.TargetRef, r.ProjectID,
 			r.OrganizationID, r.CorrelationID, r.BeforeSummary, r.AfterSummary,
-			r.Metadata, r.OccurredAt, r.ActorHandle, r.ActorDisplayName))
+			r.Metadata, r.OccurredAt, r.ActorHandle, r.ActorDisplayName)
+		// The row's own source, read back from the SQL branch that
+		// produced it — never re-derived here from the action name or
+		// from which columns are NULL. The audit vocabulary and the event
+		// vocabulary overlap on purpose (scientific_object.aborted is both
+		// an audit action and an event type), so a name cannot tell the
+		// two registries apart; the query can, and it says.
+		rec.Source = domain.ActivitySource(r.Source)
+		rec.Payload = r.Payload
+		if r.Visibility != nil {
+			rec.Visibility = *r.Visibility
+		}
+		out = append(out, rec)
 	}
 	return out, nil
 }
@@ -102,10 +120,16 @@ func (s *AuditStore) ListOrganizationActivity(ctx context.Context, orgID string,
 	}
 	out := make([]domain.AuditRecord, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, auditRecordFromListRow(
+		rec := auditRecordFromListRow(
 			r.ID, r.ActorID, r.Via, r.Action, r.TargetRef, r.ProjectID,
 			r.OrganizationID, r.CorrelationID, r.BeforeSummary, r.AfterSummary,
-			r.Metadata, r.OccurredAt, r.ActorHandle, r.ActorDisplayName))
+			r.Metadata, r.OccurredAt, r.ActorHandle, r.ActorDisplayName)
+		// The organization feed reads audit_log alone — research events
+		// are project-scoped (00012) — so every row it returns is a
+		// governance row, and the source is stated here rather than
+		// selected by the query: there is no second branch for it to name.
+		rec.Source = domain.ActivitySourceGovernance
+		out = append(out, rec)
 	}
 	return out, nil
 }

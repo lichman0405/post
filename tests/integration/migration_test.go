@@ -1367,6 +1367,16 @@ var explicitIndexes = map[string][]string{
 	// T0804 (00086): the parent side of the fork lineage read — a parent
 	// project's forks, newest first.
 	"project_forks_parent_idx": {"parent_project_id", "created_at DESC"},
+	// T0607 (00107): the research-event half of the project Activity feed.
+	// The feed reads audit_log and research_events as ONE keyset-paginated
+	// sequence on (occurred_at, id), so its research branch asks exactly
+	// what the T0110 entry above asks of the audit half — this project's
+	// rows, newest first, from this cursor — and the index mirrors
+	// audit_log_project_occurred_idx column for column so one index serves
+	// the ORDER BY and the `(occurred_at, id) < (before_ts, before_id)`
+	// predicate at once. Before it, research_events had no index beyond its
+	// primary key: every earlier reader asked by identity.
+	"research_events_project_occurred_idx": {"project_id", "occurred_at DESC", "id DESC"},
 	// T0410 (00089): the Idempotency-Key of the open-pull-request route.
 	// PARTIAL on creation_key <> '' because '' is the absent key (every
 	// pre-00089 row and every creation that sends none) and those must

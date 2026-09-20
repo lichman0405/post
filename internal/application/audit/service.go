@@ -33,21 +33,51 @@ const DefaultLimit = 50
 // names; a hostile client must not be able to demand unbounded pages).
 const maxLimit = 200
 
-// ProjectActivity returns one page of the project's audit log, newest
+// ProjectActivity returns one page of the project's Activity, newest
 // first, plus the cursor for the next page ("" when the page is the last).
 // Non-members get the same not-found answer as for the project itself
 // (existence hiding, via the projects surface's gate).
-func (s *Service) ProjectActivity(ctx context.Context, actor domain.User, projectID, cursor string, limit int) ([]domain.AuditRecord, string, error) {
+//
+// source selects which registry the page reads: "" reads both — the
+// governance rows (audit_log, T0110) and the research events
+// (research_events, T1001) as one (occurred_at, id)-ordered sequence, each
+// row carrying its domain.ActivitySource — while ActivitySourceGovernance
+// and ActivitySourceResearch narrow the page to one registry. Any other
+// value is ErrValidation, never an empty page: a filter the reader did not
+// ask for must not look like "there is nothing here".
+//
+// One read gate covers both sources, and it is the project's own: the
+// activity feed shows exactly what its scope may show. The event's stored
+// visibility is rendered, not re-checked here — the platform decides who
+// may read a project's rows once (the projects surface's visibility
+// matrix), and a second gate derived from an event's payload would be a
+// second rule to keep in step (the argument internal/application/feeds
+// makes in "Why not the research event log").
+func (s *Service) ProjectActivity(ctx context.Context, actor domain.User, projectID string, source domain.ActivitySource, cursor string, limit int) ([]domain.AuditRecord, string, error) {
 	if _, err := s.projects.Get(ctx, actor, projectID); err != nil {
 		return nil, "", err // the gate's sentinel: PROJECT_NOT_FOUND for non-members
 	}
-	return s.page(ctx, s.store.ListProjectActivity, projectID, cursor, limit)
+	list := func(ctx context.Context, scope string, before *Cursor, limit int) ([]domain.AuditRecord, error) {
+		return s.store.ListProjectActivity(ctx, scope, before, limit, source)
+	}
+	return s.page(ctx, list, projectID, cursor, limit)
 }
 
 // OrgActivity returns one page of the organization's audit log, newest
 // first, plus the cursor for the next page. Non-members get the
 // organization surface's not-found answer.
-func (s *Service) OrgActivity(ctx context.Context, actor domain.User, orgID, cursor string, limit int) ([]domain.AuditRecord, string, error) {
+//
+// The organization feed is governance-only, so source may be "" or
+// ActivitySourceGovernance and nothing else: research events are
+// project-scoped (research_events carries no organization id, 00012), so
+// "the organization's research events" is a query this database cannot
+// answer, and answering ActivitySourceResearch with an empty page would
+// present that gap as a fact about the organization. It is ErrValidation —
+// the same refusal an unknown filter value gets.
+func (s *Service) OrgActivity(ctx context.Context, actor domain.User, orgID string, source domain.ActivitySource, cursor string, limit int) ([]domain.AuditRecord, string, error) {
+	if source == domain.ActivitySourceResearch {
+		return nil, "", fmt.Errorf("%w: the organization activity feed carries governance records only", ErrValidation)
+	}
 	if _, err := s.orgs.Get(ctx, actor, orgID); err != nil {
 		return nil, "", err // the gate's sentinel: ORG_NOT_FOUND for non-members
 	}

@@ -3,6 +3,7 @@ package audithttp
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -26,10 +27,19 @@ type handlers struct {
 	svc *audit.Service
 }
 
-// activityEntryPayload is the client-visible audit row shape. The jsonb
+// activityEntryPayload is the client-visible Activity row shape. The jsonb
 // summaries are embedded raw — they are already canonical JSON.
+//
+// source (T0607) is always present and is what tells the page which
+// registry the row came from: "governance" (audit_log) or "research"
+// (research_events). The payload is the research row's event body and
+// visibility the visibility it was recorded with; both are absent on a
+// governance row, exactly as target_ref and the before/after summaries are
+// absent on a research row. Nothing is inferred from which keys are
+// missing: the source says which half is meaningful.
 type activityEntryPayload struct {
 	ID               string          `json:"id"`
+	Source           string          `json:"source"`
 	ActorID          *string         `json:"actor_id"`
 	ActorHandle      *string         `json:"actor_handle"`
 	ActorDisplayName *string         `json:"actor_display_name"`
@@ -42,12 +52,15 @@ type activityEntryPayload struct {
 	BeforeSummary    json.RawMessage `json:"before_summary,omitempty"`
 	AfterSummary     json.RawMessage `json:"after_summary,omitempty"`
 	Metadata         json.RawMessage `json:"metadata,omitempty"`
+	Payload          json.RawMessage `json:"payload,omitempty"`
+	Visibility       string          `json:"visibility,omitempty"`
 	OccurredAt       time.Time       `json:"occurred_at"`
 }
 
 func activityEntryFromDomain(r domain.AuditRecord) activityEntryPayload {
 	return activityEntryPayload{
 		ID:               r.ID,
+		Source:           string(r.Source),
 		ActorID:          r.ActorID,
 		ActorHandle:      r.ActorHandle,
 		ActorDisplayName: r.ActorDisplayName,
@@ -60,6 +73,8 @@ func activityEntryFromDomain(r domain.AuditRecord) activityEntryPayload {
 		BeforeSummary:    json.RawMessage(r.BeforeSummary),
 		AfterSummary:     json.RawMessage(r.AfterSummary),
 		Metadata:         json.RawMessage(r.Metadata),
+		Payload:          json.RawMessage(r.Payload),
+		Visibility:       r.Visibility,
 		OccurredAt:       r.OccurredAt,
 	}
 }
@@ -78,9 +93,24 @@ func pageParams(r *http.Request) (cursor string, limit int, err error) {
 	return cursor, limit, nil
 }
 
+// sourceParam parses the source filter: absent (or "source=") means the
+// page reads both registries, "governance" and "research" narrow it to
+// one. Any other value is a validation error — never an empty page, which
+// is what silently ignoring an unknown filter would look like (a reader
+// who mistyped a value would be told "this project has no such history").
+func sourceParam(r *http.Request) (domain.ActivitySource, error) {
+	source, err := domain.ParseActivitySource(r.URL.Query().Get("source"))
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", audit.ErrValidation, err)
+	}
+	return source, nil
+}
+
 // handleProjectActivity: GET /api/v1/projects/{projectId}/activity — the
-// project's audit log, newest first, member-only (the same visibility as
-// the project itself). Any other verb answers 405: the log is read-only.
+// project's Activity, newest first, member-only (the same visibility as
+// the project itself): the governance rows (audit_log) and the research
+// events, or one of the two when ?source=governance|research says so. Any
+// other verb answers 405: the log is read-only.
 func (h *handlers) handleProjectActivity(w http.ResponseWriter, r *http.Request) {
 	if !readOnly(w, r) {
 		return
@@ -95,7 +125,13 @@ func (h *handlers) handleProjectActivity(w http.ResponseWriter, r *http.Request)
 			"cursor and limit must be valid")
 		return
 	}
-	entries, next, err := h.svc.ProjectActivity(r.Context(), actor, r.PathValue("projectId"), cursor, limit)
+	source, err := sourceParam(r)
+	if err != nil {
+		authhttp.WriteError(w, r, http.StatusBadRequest, audit.CodeValidationFailed,
+			"source must be governance or research (or absent for both)")
+		return
+	}
+	entries, next, err := h.svc.ProjectActivity(r.Context(), actor, r.PathValue("projectId"), source, cursor, limit)
 	if err != nil {
 		h.activityError(w, r, err)
 		return
@@ -104,8 +140,11 @@ func (h *handlers) handleProjectActivity(w http.ResponseWriter, r *http.Request)
 }
 
 // handleOrgActivity: GET /api/v1/organizations/{orgId}/activity — the
-// organization's audit log, newest first, member-only. Read-only like the
-// project feed.
+// organization's governance log, newest first, member-only. Read-only like
+// the project feed. ?source=governance (or no source) is the whole feed;
+// ?source=research is refused rather than answered empty, because research
+// events are project-scoped and an empty page would report that gap as a
+// fact about the organization (internal/application/audit.Service).
 func (h *handlers) handleOrgActivity(w http.ResponseWriter, r *http.Request) {
 	if !readOnly(w, r) {
 		return
@@ -120,7 +159,13 @@ func (h *handlers) handleOrgActivity(w http.ResponseWriter, r *http.Request) {
 			"cursor and limit must be valid")
 		return
 	}
-	entries, next, err := h.svc.OrgActivity(r.Context(), actor, r.PathValue("orgId"), cursor, limit)
+	source, err := sourceParam(r)
+	if err != nil {
+		authhttp.WriteError(w, r, http.StatusBadRequest, audit.CodeValidationFailed,
+			"source must be governance (or absent)")
+		return
+	}
+	entries, next, err := h.svc.OrgActivity(r.Context(), actor, r.PathValue("orgId"), source, cursor, limit)
 	if err != nil {
 		h.activityError(w, r, err)
 		return

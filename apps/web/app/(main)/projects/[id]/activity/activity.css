@@ -1,0 +1,319 @@
+/* T0607 Activity timeline — GitHub/Primer design tokens (ADR-012, docs/06),
+   the same neutral/dense/bordered language as conflicts.css and
+   projects.css: no gradients, no glass, no marketing cards. The page is a
+   RECORD (docs/26 §1): it renders two registries side by side and never
+   presents one row as more than what it is, so the styling carries only two
+   distinctions — which registry a row came from, and which family it
+   belongs to. Everything else is dense text with hairline separators. */
+
+.activity-page {
+  padding: 16px 0;
+}
+
+.activity-section {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background: var(--bgColor-default, #ffffff);
+  padding: 16px;
+}
+
+.activity-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.activity-section-desc {
+  margin: 6px 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fgColor-muted, #59636e);
+  max-width: 72ch;
+}
+
+/* The registry filter. Chips are links to the filtered URL, so the selected
+   one is marked by aria-current and by the same border/fill the Primer
+   segmented controls use. */
+.activity-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+  margin-bottom: 4px;
+}
+
+.activity-chip {
+  display: inline-block;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--fgColor-default, #1f2328);
+  background: var(--bgColor-muted, #f6f8fa);
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  text-decoration: none;
+}
+
+.activity-chip:hover {
+  background: var(--bgColor-inset, #eff2f5);
+  border-color: var(--borderColor-muted, #d8dee4);
+}
+
+.activity-chip-selected,
+.activity-chip-selected:hover {
+  color: var(--fgColor-onEmphasis, #ffffff);
+  background: var(--bgColor-accent-emphasis, #0969da);
+  border-color: var(--bgColor-accent-emphasis, #0969da);
+}
+
+/* States: loading, empty, error. The error keeps the API's stable-code
+   wording (lib/activity's messageForAuditCode) and Primer's danger colour. */
+.activity-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 0;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.activity-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--fgColor-default, #1f2328);
+  background: var(--bgColor-danger-muted, #ffebe9);
+  border: 1px solid var(--borderColor-danger-muted, #ff818266);
+  border-radius: 6px;
+}
+
+.activity-error code {
+  padding: 1px 5px;
+  font-size: 12px;
+  background: var(--bgColor-default, #ffffff);
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+}
+
+.activity-retry {
+  margin-left: auto;
+  padding: 3px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fgColor-default, #1f2328);
+  background: var(--bgColor-default, #ffffff);
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.activity-retry:hover {
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+/* The timeline itself: one hairline per row, newest first. */
+.activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.activity-row {
+  display: flex;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.activity-row:last-child {
+  border-bottom: none;
+}
+
+.activity-row-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin-top: 2px;
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 6px;
+}
+
+/* The families with rendering of their own get their colour from the
+   platform's meaning, not from decoration: a retraction is a danger
+   (docs/46), a reopening restores a state, a release fixes one. */
+.activity-row-abort .activity-row-marker {
+  color: var(--fgColor-danger, #d1242f);
+  background: var(--bgColor-danger-muted, #ffebe9);
+  border-color: var(--borderColor-danger-muted, #ff818266);
+}
+
+.activity-row-reopen .activity-row-marker {
+  color: var(--fgColor-open, #1a7f37);
+  background: var(--bgColor-open-muted, #dafbe1);
+  border-color: var(--borderColor-open-muted, #4ac26b66);
+}
+
+.activity-row-release .activity-row-marker {
+  color: var(--fgColor-accent, #0969da);
+  background: var(--bgColor-accent-muted, #ddf4ff);
+  border-color: var(--borderColor-accent-muted, #54aeff66);
+}
+
+.activity-row-body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.activity-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 8px;
+}
+
+.activity-row-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Which registry the row came from — always rendered, never inferred by
+   the reader from the row's shape. */
+.activity-row-source,
+.activity-row-visibility {
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 999px;
+}
+
+.activity-row-source[data-activity-source="research"] {
+  color: var(--fgColor-accent, #0969da);
+  background: var(--bgColor-accent-muted, #ddf4ff);
+  border-color: var(--borderColor-accent-muted, #54aeff66);
+}
+
+.activity-row-time {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.activity-actor {
+  color: var(--fgColor-accent, #0969da);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.activity-actor:hover {
+  text-decoration: underline;
+}
+
+.activity-actor-unknown {
+  color: var(--fgColor-muted, #59636e);
+  font-weight: 400;
+}
+
+.activity-target {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.activity-target:hover {
+  text-decoration: underline;
+}
+
+.activity-correlation {
+  padding: 0 5px;
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+  font-size: 11px;
+  background: var(--bgColor-muted, #f6f8fa);
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 6px;
+}
+
+/* The facts a family records: a definition list, because each line labels a
+   value the row itself carries. */
+.activity-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.activity-detail {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.activity-detail dt {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.activity-detail dt::after {
+  content: ":";
+}
+
+.activity-detail dd {
+  margin: 0;
+  color: var(--fgColor-default, #1f2328);
+  overflow-wrap: anywhere;
+}
+
+.activity-more {
+  display: flex;
+  justify-content: center;
+  padding-top: 12px;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.activity-load-more {
+  padding: 5px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fgColor-default, #1f2328);
+  background: var(--bgColor-muted, #f6f8fa);
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.activity-load-more:hover:not(:disabled) {
+  background: var(--bgColor-inset, #eff2f5);
+}
+
+.activity-load-more:disabled {
+  color: var(--fgColor-muted, #59636e);
+  cursor: default;
+}
