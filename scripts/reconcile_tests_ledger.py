@@ -21,12 +21,34 @@ status and its output. An entry whose task is merged, and whose name matches a
 passed test in that task's RESULT.json, is a fact already proven; recording it
 is bookkeeping, not a gate being talked into green.
 
+The trust boundary, stated plainly
+----------------------------------
+The key to this file is the task being `merged` in tasks/task_status.json, and
+Workers cannot write that file: it is forbidden scope for them
+(specs/orchestrator/worker-permissions.yaml) and the Supervisor owns every
+transition into it. So a flipped entry means "the Supervisor accepted this task,
+and the Worker's record for the tree that merged says this test passed". It does
+NOT mean the Supervisor re-ran this test -- the evidence string says so.
+
+What that leaves open: a Worker could record `passed` for a command it did not
+really run, and no amount of reading files here would tell. This tool raises the
+bar (the task must be merged; the entry must name a command that exists; the
+label must match exactly) but it cannot close that, because the only thing that
+closes it is running the test again -- which is what scripts/record_test_run.py
+is for, and a real re-run writes its own evidence string.
+
 What it deliberately does NOT do
 --------------------------------
 * It never touches an entry whose task is not `merged`. Those tests have not
   run because the work is not done, and `not_run` is the truthful value.
 * It never writes `passed` for a test it cannot point at. No label match, no
   flip -- that entry stays in the residue report.
+* It never writes `passed` from an entry that records no command.
+  specs/orchestrator/worker-result.schema.json requires `command` on every test
+  entry, so an entry without one is not a record of a run and is not evidence of
+  anything; it goes to the residue report. (Checked on 2026-09-21 across every
+  RESULT.json in .rddev/workers: no entry anywhere claimed `passed` without a
+  command, so this rule refuses nothing that was ever true.)
 * It does not claim the Supervisor re-ran anything. The evidence string says
   where the pass came from (the Worker's own record, on the tree that merged)
   and leaves "verified by re-run" to a real re-run, whose result is written by
@@ -145,8 +167,16 @@ def main() -> int:
             residue_merged.append((entry["id"], tid, name, why))
             continue
 
-        merged_at = clean(task.get("merged_at") or task.get("accepted_by_supervisor_at") or "", 40)
+        # The schema requires `command` on every test entry, so an entry without
+        # one is a claim about nothing that was run. Refused, not backfilled.
         command = clean(hit.get("command"), 300)
+        if not command:
+            residue_merged.append((entry["id"], tid, name,
+                                   "the matching entry records no command, and "
+                                   "worker-result.schema.json requires one -- it is not a run"))
+            continue
+
+        merged_at = clean(task.get("merged_at") or task.get("accepted_by_supervisor_at") or "", 40)
         evidence = (
             "Backfilled from the task's own Worker record on %s (not a fresh re-run). "
             "The Worker ran `%s` on the tree that was merged -- RESULT.json test label "
@@ -154,7 +184,7 @@ def main() -> int:
             "acceptance review) and G4, merging at %s. The pass is the Worker's recorded "
             "run as validated by that acceptance, not a Supervisor re-run; a re-run "
             "writes its own evidence string."
-            % (today, command or "(command not recorded)", name, merged_at or "an unrecorded time")
+            % (today, command, name, merged_at or "an unrecorded time")
         )
         flipped.append((entry, merged_at, evidence))
 

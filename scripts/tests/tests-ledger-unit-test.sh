@@ -16,6 +16,13 @@
 #   4. merged, label found but failed   -> MUST NOT flip
 #   5. record_test_run --exit-code 1    -> MUST write `failed`, never `passed`
 #   6. record_test_run unknown id       -> MUST refuse (exit 2) and write nothing
+#   9. merged, label matches, status passed, but the entry records NO command
+#      -> MUST NOT flip: worker-result.schema.json requires `command` on every
+#      test entry, so a command-less claim is not a record of a run. This is the
+#      forgeable-evidence case: everything a forger must produce is a label and
+#      the word "passed", and both are free. Requiring the command they would
+#      have run is the cheapest thing that makes the claim falsifiable, since a
+#      Supervisor can re-run a named command and cannot re-run a blank field.
 # Each rule is tested BOTH ways where it matters: case 1 proves the tool is not
 # simply inert (a tool that never writes anything would pass cases 2-4).
 set -uo pipefail
@@ -32,7 +39,7 @@ bad()  { echo "FAIL $1"; failures=$((failures + 1)); }
 # A minimal repository: the two state files the tools read, and one Worker
 # record per task. Nothing else is needed — neither tool looks at the DAG.
 mkdir -p "$WORK/tasks"
-for t in T1001 T1002 T1003 T1004 T1005; do mkdir -p "$WORK/.rddev/workers/$t"; done
+for t in T1001 T1002 T1003 T1004 T1005 T1006 T1007; do mkdir -p "$WORK/.rddev/workers/$t"; done
 
 cat >"$WORK/tasks/task_status.json" <<'JSON'
 {"tasks": {
@@ -40,7 +47,9 @@ cat >"$WORK/tasks/task_status.json" <<'JSON'
   "T1002": {"status": "running"},
   "T1003": {"status": "merged",  "merged_at": "2026-09-20T11:00:00Z"},
   "T1004": {"status": "merged",  "merged_at": "2026-09-20T12:00:00Z"},
-  "T1005": {"status": "merged",  "merged_at": "2026-09-20T13:00:00Z"}
+  "T1005": {"status": "merged",  "merged_at": "2026-09-20T13:00:00Z"},
+  "T1006": {"status": "merged",  "merged_at": "2026-09-20T14:00:00Z"},
+  "T1007": {"status": "merged",  "merged_at": "2026-09-20T15:00:00Z"}
 }}
 JSON
 
@@ -50,7 +59,9 @@ cat >"$WORK/tasks/tests.json" <<'JSON'
   {"id": "T1002-TEST-01", "task_id": "T1002", "name": "case two running",     "gate": "G1/G2", "blocking": true, "status": "not_run", "last_run": "", "evidence": ""},
   {"id": "T1003-TEST-01", "task_id": "T1003", "name": "case three no label",  "gate": "G1/G2", "blocking": true, "status": "not_run", "last_run": "", "evidence": ""},
   {"id": "T1004-TEST-01", "task_id": "T1004", "name": "case four failed run", "gate": "G1/G2", "blocking": true, "status": "not_run", "last_run": "", "evidence": ""},
-  {"id": "T1005-TEST-01", "task_id": "T1005", "name": "case five near miss", "gate": "G1/G2", "blocking": true, "status": "not_run", "last_run": "", "evidence": ""}
+  {"id": "T1005-TEST-01", "task_id": "T1005", "name": "case five near miss", "gate": "G1/G2", "blocking": true, "status": "not_run", "last_run": "", "evidence": ""},
+  {"id": "T1006-TEST-01", "task_id": "T1006", "name": "case nine no command",    "gate": "G1/G2", "blocking": true, "status": "not_run", "last_run": "", "evidence": ""},
+  {"id": "T1007-TEST-01", "task_id": "T1007", "name": "case nine blank command", "gate": "G1/G2", "blocking": true, "status": "not_run", "last_run": "", "evidence": ""}
 ]}
 JSON
 
@@ -90,6 +101,21 @@ cat >"$WORK/.rddev/workers/T1005/RESULT.json" <<'JSON'
   {"label": "case five near miss (rework)", "command": "go test ./v/", "status": "passed"}
 ]}
 JSON
+# T1006 / T1007: the label matches, the status is `passed`, the task is merged
+# -- every box the old rule asked for is ticked, and there is no command. Both
+# shapes a forger would produce are here: the key left out, and the key present
+# but empty. worker-result.schema.json requires `command` on every test entry,
+# so neither is a record of a run.
+cat >"$WORK/.rddev/workers/T1006/RESULT.json" <<'JSON'
+{"task_id": "T1006", "status": "completed", "tests": [
+  {"label": "case nine no command", "status": "passed"}
+]}
+JSON
+cat >"$WORK/.rddev/workers/T1007/RESULT.json" <<'JSON'
+{"task_id": "T1007", "status": "completed", "tests": [
+  {"label": "case nine blank command", "command": "   ", "status": "passed"}
+]}
+JSON
 
 # --- the fixture is what this test thinks it is ---------------------------
 # Learned the hard way: the first version of this file wrote the T1003/T1004
@@ -97,7 +123,7 @@ JSON
 # because there was no RESULT.json at all -- i.e. for the opposite reason to the
 # one they claim to test (unmatched label vs. no record). A fixture that failed
 # to materialise makes the assertions below vacuous, so assert it materialised.
-for t in T1001 T1002 T1003 T1004 T1005; do
+for t in T1001 T1002 T1003 T1004 T1005 T1006 T1007; do
   if ! python3 -c "
 import json,sys
 r=json.load(open('$WORK/.rddev/workers/$t/RESULT.json'))
@@ -176,6 +202,17 @@ else
   bad "4b. a near-miss label was matched -> $(status_of T1005-TEST-01)"
 fi
 
+# 9. A `passed` claim with no command is not a run, however well it matches.
+#    Both shapes (key absent, key blank) must be left alone -- and left for a
+#    human, so the residue report has to name them. If this case ever flips,
+#    the ledger is accepting evidence that cannot be checked: a forger's whole
+#    cost would be the label and the word `passed`.
+if [ "$(status_of T1006-TEST-01)" = "not_run" ] && [ "$(status_of T1007-TEST-01)" = "not_run" ]; then
+  ok "9. a matched passed claim with no command was NOT recorded (absent and blank)"
+else
+  bad "9. a command-less claim was recorded: T1006=$(status_of T1006-TEST-01) T1007=$(status_of T1007-TEST-01)"
+fi
+
 # The residue report must name the merged-but-unprovable entries, so a human
 # sees them rather than a silent gap: that is what T1206 has to run.
 out=$(python3 "$ROOT/scripts/reconcile_tests_ledger.py" --repo "$WORK" --residue 2>&1)
@@ -183,6 +220,12 @@ if grep -q "T1003-TEST-01" <<<"$out" && grep -q "T1004-TEST-01" <<<"$out"; then
   ok "5. the residue report names the merged entries that lack evidence"
 else
   bad "5. the residue report hid an unproven merged entry"
+fi
+if grep -q "T1006-TEST-01" <<<"$out" && grep -q "T1007-TEST-01" <<<"$out" \
+   && grep -q "records no command" <<<"$out"; then
+  ok "9. the residue report names the command-less claims and why"
+else
+  bad "9. the residue report did not explain the command-less refusal"
 fi
 
 # --- record_test_run.py ----------------------------------------------------
