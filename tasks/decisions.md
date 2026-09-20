@@ -14649,3 +14649,75 @@ claude CLI 就退回它自己的环境默认。我试过在驱动进程里导出
 
 **给以后**：一个 worker 正在跑的任务，如果它的验收里有一段**已经被判定为"树里没照规格写"**，
 要当场问一句"它跑到底有没有可能通过"。**不能通过的就不是在跑，是在烧钱。**
+
+## 2026-09-20（收工）：驱动把自己判成"没事干"而退出；以及一次真正的落地窗口
+
+### L1-20260920-2：驱动的 `exhausted()` 只数 `running`，把"已验收、等 CI"读成"无事可做"
+
+**现象**：20:45:28 驱动打印
+`nothing to do: no dispatchable work, no running Worker, no open decision` 并退出，
+而当时 `pending [T0607 T0815 T0905 T1204]`——**T0607 的 PR 已经开着在等 CI**，它的合并就这样停在了半路等我。
+
+**根因**：`exhausted()`（`internal/devorchestrator/driver_run.go`）问的是 `runningTasks()`。
+`accepted`、`verification` 这两个状态在它眼里**等于不存在**，而"已验收、等 CI 合并"恰恰是
+**最像收工**的那个状态。条件一直可达；这次浮出水面只是因为我为了腾出一个落地窗口
+**故意把派工池清空了**——池子一空，"没有 running"和"真的没事干"就重合了。
+
+**改法**：改问 `tasksNeedingAction()`，而**不是**在 `exhausted()` 里重新罗列一遍状态。
+那是 tick 真正走的集合，而"我实际会做的"和"我算作还有活"这两者漂移，正是这个 bug 本身。
+
+**怎么证明它真的修好了**：新测试 `TestAnAcceptedTaskAwaitingCIMeansTheDriverIsNotExhausted`
+（状态表 `{"T0001":{"status":"accepted"},"T0002":{"status":"merged"}}` → 必须返回"没做完"）。
+它与既有的 `TestAnExhaustedDriverReportsCompletionInsteadOfWaiting` **成对才有意义**——
+任意一个单独都可以靠"永远返回常量"满足。已用 `git stash` 验证过：只留修复时通过，
+去掉修复则失败并报出 T0607 那句话。（"先证明它会红"。）
+
+### 落地窗口：为什么它永远不会自己出现，以及怎么**造**一个
+
+**结构性问题**：`tasks/tasks.json` 是规格指纹的输入，改它 = 指纹变 = **所有在跑任务的 G2 一起红**。
+而派工池**永远会自动填满**带指纹的任务（迁移/规格类），所以"等到没人跑"这件事不会自然发生。
+
+**解法**（`.rddev/tools/hold-dispatch.py`）：把**带指纹**的可派任务临时收成 `blocked`
+（`RISKY_PREFIXES = specs/ / infra/migrations/ / internal/persistence/queries/`），
+**留下干净的**（如 T1204，scope 是 `ops/**`、`tests/acceptance/**`）继续可派。
+收起的任务原状态存进 `.rddev/runtime/hold-dispatch.json`，落地完 `--restore` 原样放回。
+本次：`held 2 task(s): ['T1007','T1102']; still dispatchable: ['T1204']`。
+
+**顺序铁律**（三条，都是踩出来的）：
+1. **只在带指纹的那一笔 MERGED 之后才落地**——不是"它退出了"就行。T0607 未合并前落地，
+   它自己的 diff 会撞上我新写的主库指纹。
+2. **在 T0905 的 rebaseline 之前落地**：rebaseline 会把落地顺带吸收掉，一次顶两次。
+3. **推送在放回之前**：`worker spawn` 是从 **integration tip（origin/main）** 切分支的，
+   先放回再推，新派出去的工人会从旧 main 切，白重评一次。
+
+**落地前先在丢弃副本上彩排**：`/tmp/land-rehearsal`（`git archive HEAD` 的拷贝）上跑通了全程，
+`verify-landing.py` 的 20 条断言全绿；而在**真的树上**落地前，其中 8 条落地断言**全部失败**——
+**这就是这个断言脚本有牙的证明**。没有这一步，"全绿"只说明脚本不会红，不说明它测到了东西。
+
+### L1-20260920-3：T0905 的 rebaseline 在同一锚点撞车——挪位，不是合并
+
+**现象**：`rddev rebaseline T0905` 拒绝：
+`a three-way merge of it conflicts with main's own change to the same lines of tests/integration/migration_test.go`。
+
+**根因**：`explicitIndexes` 这张 map 里，T0905 的基线（T0510 那次合并）中
+`"pull_requests_creation_key_idx"` 是**最后一条**，它接在后面；而它开工之后 main 上落的
+T0811 那批**也接在同一个锚点后面**。两边都"插在同一行后面"，三方合并判冲突。
+**内容上零重叠，纯位置。**
+
+**处置**（"先挪开、推进、再放回"）：
+1. 把 T0905 那 9 行从 worktree 里**原样抽出**（从 `.rddev/runtime/rebaseline/T0905-*/change.patch` 里取，逐字），
+   然后 `git checkout -- tests/integration/migration_test.go`（它在那个文件里只有这一处改动）；
+2. 重跑 rebaseline → 基线 `c1861bfd36c0 → 8189273810d4`，21 个文件带过去，派生件按重新生成处理；
+3. **那 9 行由工人在新基线上放回**，位置改成"末尾 `}` 之前"。**这一点是刻意的**：
+   rebaseline 是同一条命令里"推进 + rework"，我插不进中间那一秒；而**派生件靠生成、非派生件靠人**，
+   与其赌一个竞态，不如把**逐字文本和落点写进信里**，然后**在 review 时核对那 9 行确实回来了**
+   （它们不是美化：那是 00110 那个唯一索引**唯一的断言**）。
+   ⚠️ 信是走在 **RejectRecord** 上的（`task reject --reason-file`），不是 `--reason-file` 直接传给 rework——
+   已核 `prompt.md` 确实含该指令（`worker_log_vs_run_log` 那条记忆在这里救了一次）。
+
+### 落地这一笔本身的内容
+
+DAG 141 → 144：立账 T0511（证据断言的读带上读者，ADR-024）、T0817（ADR-025）、T0611（ADR-026）；
+T0814 的 AC8 收窄一半并 `blocked → ready`；T0810 补 T0817 依赖边（只补它，不补 T0814）。
+主库指纹 `sha256:0a40ba651f6aae84 → sha256:d74a7420fe6b1835`（38 个输入，同一笔重算）。
+`validate_task_state.py` 9 条全过，`check-spec-version`/`check-schema-snapshot` 均 current。
