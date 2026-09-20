@@ -80,6 +80,37 @@ type Branch struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
+type DiscussionComment struct {
+	ID        pgtype.UUID        `json:"id"`
+	ThreadID  pgtype.UUID        `json:"thread_id"`
+	ProjectID pgtype.UUID        `json:"project_id"`
+	Body      string             `json:"body"`
+	CreatedBy pgtype.UUID        `json:"created_by"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+	DeletedBy pgtype.UUID        `json:"deleted_by"`
+}
+
+type DiscussionPromotion struct {
+	ID           pgtype.UUID        `json:"id"`
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	ThreadID     pgtype.UUID        `json:"thread_id"`
+	CommentID    pgtype.UUID        `json:"comment_id"`
+	PromotedKind string             `json:"promoted_kind"`
+	PromotedRef  string             `json:"promoted_ref"`
+	PromotedBy   pgtype.UUID        `json:"promoted_by"`
+	PromotedAt   pgtype.Timestamptz `json:"promoted_at"`
+}
+
+type DiscussionThread struct {
+	ID         pgtype.UUID        `json:"id"`
+	ProjectID  pgtype.UUID        `json:"project_id"`
+	TargetType string             `json:"target_type"`
+	TargetID   string             `json:"target_id"`
+	CreatedBy  pgtype.UUID        `json:"created_by"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
 type EvidenceAssertion struct {
 	ID                      pgtype.UUID        `json:"id"`
 	ProjectID               pgtype.UUID        `json:"project_id"`

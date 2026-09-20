@@ -48,6 +48,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/audithttp"
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/conflicthttp"
+	"github.com/lichman0405/post/cmd/api/discussionhttp"
 	"github.com/lichman0405/post/cmd/api/evidencehttp"
 	"github.com/lichman0405/post/cmd/api/explorehttp"
 	"github.com/lichman0405/post/cmd/api/feedshttp"
@@ -82,6 +83,7 @@ import (
 	"github.com/lichman0405/post/internal/application/branches"
 	appcontribution "github.com/lichman0405/post/internal/application/contribution"
 	"github.com/lichman0405/post/internal/application/diffs"
+	"github.com/lichman0405/post/internal/application/discussions"
 	"github.com/lichman0405/post/internal/application/evidencegraph"
 	"github.com/lichman0405/post/internal/application/feeds"
 	"github.com/lichman0405/post/internal/application/forks"
@@ -986,6 +988,29 @@ func run(args []string) int {
 		Projects: projectAPI.Service(),
 	})
 	milestoneAPI.Register(v1)
+	// Discussions (T0811): the conversation a project, a knowledge object or
+	// a research PR carries, and the promotion of one comment into a
+	// proposed research object. The three tables of 00104 are the whole of
+	// the ordinary write path — a thread, a comment and a tombstone touch
+	// nothing else — while a promotion goes through the command that owns
+	// the object it creates: rsgSvc for a Hypothesis (a real state commit)
+	// and for an external-evidence proposal, the store's own transaction for
+	// an Issue. A promotion is authorized as write_scientific_state, the
+	// same action the RSG writes evaluate, with the own_fork_only cell
+	// resolved by the same fork lineage read; the discussion surface adds no
+	// action to the matrix.
+	discussionsAPI := discussionhttp.New(discussionhttp.Deps{
+		Command: discussions.NewCommand(discussions.Deps{
+			Projects:   projectAPI.Service(),
+			Threads:    persistence.NewDiscussionStore(pool),
+			Promotions: persistence.NewDiscussionStore(pool),
+			Hypotheses: rsgSvc,
+			Evidence:   rsgSvc,
+			Authz:      authz.NewMatrixEngine(),
+			ForkGate:   persistence.NewForkStore(pool),
+		}),
+	})
+	discussionsAPI.Register(v1)
 	// Research PR merge (T0406/T0409): the governance command that advances a
 	// project's frozen main, and the only write path that ever does. The
 	// service plans the merge (the pure engine), re-runs the PR's integrity
