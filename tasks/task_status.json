@@ -5042,7 +5042,7 @@
       ]
     },
     "T0608": {
-      "status": "rejected",
+      "status": "blocked",
       "started_at": "2026-09-19T10:22:15Z",
       "worker_run_id": "run-c96a44023881ce99",
       "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
@@ -5066,8 +5066,16 @@
           "at": "2026-09-19T10:40:42Z",
           "run_id": "run-ddb2b0fa3c2c0bd5",
           "reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification"
+        },
+        {
+          "from": "rejected",
+          "to": "blocked",
+          "at": "2026-09-20T11:08:43Z",
+          "run_id": "supervisor-decision",
+          "reason": "第 6 段（合并后经 Releases 表单切片）被上游 release_review 递归 CTE 缺陷卡住：合并产生的 state 的 parent 是 targetHead，导致 PR 的 proposed_state_id 不在祖先链上，matching_reviews=0。修法涉及 release/merge 的 L2 语义；先标 blocked，待裁决/拆任务。"
         }
-      ]
+      ],
+      "notes": "第 6 段（合并后经 Releases 表单切片）被上游 release_review 递归 CTE 缺陷卡住：合并产生的 state 的 parent 是 targetHead，导致 PR 的 proposed_state_id 不在祖先链上，matching_reviews=0。修法涉及 release/merge 的 L2 语义；先标 blocked，待裁决/拆任务。"
     },
     "T0609": {
       "status": "merged",
@@ -6883,9 +6891,9 @@
       ]
     },
     "T0814": {
-      "status": "rejected",
+      "status": "blocked",
       "started_at": "2026-09-20T10:49:12Z",
-      "notes": "2026-09-19 立账：T0804 把 fork 的服务层做完了（并把它接到执行侧：ForkGate 与 00086 的触发器），但产品路径上缺「发起 fork」这步；契约由 Supervisor 先落地，本任务照契约接线。来源：docs/31_MASTER_ACCEPTANCE.md:17，T0804 复核时发现。",
+      "notes": "AC8 要求的外部 fork PR 完整闭合路径（fork → 写状态 → 开 PR → 既有 merge 路径合并）在当前 merge 实现下不可行：merge 按 PR project 解析 source branch，而 fork-sourced branch 活在 fork project。需要先产品/架构决策：拆分 AC8 为 follow-up，还是允许改 merge 路径。先标 blocked，空窗期拆任务。",
       "worker_run_id": "run-a3191c8e3a8b7076",
       "rejection_reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: 主验收闭合：docs/31_MASTER_ACCEPTANCE.md:17「Public Project 外部用户可 fork/contribute」在真实 HTTP 路径上从头到尾走通一遍（fork → 在自己的 fork 里写状态 → 对上游开 PR → 评审/合并按既有路径），给出一条可复现的证据。 (failed)",
       "history": [
@@ -6929,14 +6937,22 @@
           "at": "2026-09-20T11:04:11Z",
           "run_id": "run-c18846acb97805a0",
           "reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: 主验收闭合：docs/31_MASTER_ACCEPTANCE.md:17「Public Project 外部用户可 fork/contribute」在真实 HTTP 路径上从头到尾走通一遍（fork → 在自己的 fork 里写状态 → 对上游开 PR → 评审/合并按既有路径），给出一条可复现的证据。 (failed)"
+        },
+        {
+          "from": "rejected",
+          "to": "blocked",
+          "at": "2026-09-20T11:08:43Z",
+          "run_id": "supervisor-decision",
+          "reason": "AC8 要求的外部 fork PR 完整闭合路径（fork → 写状态 → 开 PR → 既有 merge 路径合并）在当前 merge 实现下不可行：merge 按 PR project 解析 source branch，而 fork-sourced branch 活在 fork project。需要先产品/架构决策：拆分 AC8 为 follow-up，还是允许改 merge 路径。先标 blocked，空窗期拆任务。"
         }
       ]
     },
     "T0815": {
-      "status": "verification",
+      "status": "rejected",
       "started_at": "2026-09-19T10:40:44Z",
       "notes": "2026-09-19 立账：CI 的 migration-integration 偶发超时（3/14），证据见 tasks/decisions.md。不许用放大 timeout 掩盖——先量再修。",
       "worker_run_id": "run-5a1499d30c36c664",
+      "rejection_reason": "G3 真服务门红了：`make test-integration` 里的 `TestRestoreDrill` 在创建 organization 时拿到 403 Forbidden。\n\n这条失败不一定是你 testdb 改动直接造成的，但它出现在你的 G3 里，你必须先定位、再修。\n\n你要做的：\n1. 在真 PostgreSQL 上复现 `TestRestoreDrill` 的失败（跑 `go test ./tests/integration -run TestRestoreDrill -count=1 -v`）。\n2. 定位 403 的来源：是请求没带 token / session？是 organization 创建路由的权限矩阵变了？还是 testdb 模板克隆导致某个序列/策略状态与 fresh migrate 不一致？\n3. 判断责任：\n   - 如果是你 testdb 改动（CREATE DATABASE ... TEMPLATE、模板缓存、清理顺序）导致的状态泄漏或序列漂移，修 testdb。\n   - 如果是 pre-existing 的测试/权限问题，也要给出证据，并在 RESULT 里说明；但 G3 必须绿，所以你需要让测试能在这个模式下通过（例如加隔离、修 fixture、或在测试里按当前行为断言）。\n4. 跑完整 `make test-integration` 确认全绿（不只是 `TestRestoreDrill`）。\n5. 更新 `RESULT.json`：写明失败原因、修复位置、重跑命令与结果。\n\n约束：\n- 不要 skip `TestRestoreDrill` 或弱化它的断言。\n- 不要动 `internal/authz/**` 的权限矩阵常量/CSV  unless 你能证明那是个真实 bug 而不是测试 setup 问题。\n- 跑 `make check-spec-version` 与 `make check-schema-snapshot` 确认派生件没漂移。\n",
       "history": [
         {
           "from": "todo",
@@ -6957,6 +6973,13 @@
           "at": "2026-09-19T11:52:15Z",
           "run_id": "run-81b35dcb4f30575f",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-20T11:07:59Z",
+          "run_id": "run-8fb7d1014e46822d",
+          "reason": "G3 真服务门红了：`make test-integration` 里的 `TestRestoreDrill` 在创建 organization 时拿到 403 Forbidden。\n\n这条失败不一定是你 testdb 改动直接造成的，但它出现在你的 G3 里，你必须先定位、再修。\n\n你要做的：\n1. 在真 PostgreSQL 上复现 `TestRestoreDrill` 的失败（跑 `go test ./tests/integration -run TestRestoreDrill -count=1 -v`）。\n2. 定位 403 的来源：是请求没带 token / session？是 organization 创建路由的权限矩阵变了？还是 testdb 模板克隆导致某个序列/策略状态与 fresh migrate 不一致？\n3. 判断责任：\n   - 如果是你 testdb 改动（CREATE DATABASE ... TEMPLATE、模板缓存、清理顺序）导致的状态泄漏或序列漂移，修 testdb。\n   - 如果是 pre-existing 的测试/权限问题，也要给出证据，并在 RESULT 里说明；但 G3 必须绿，所以你需要让测试能在这个模式下通过（例如加隔离、修 fixture、或在测试里按当前行为断言）。\n4. 跑完整 `make test-integration` 确认全绿（不只是 `TestRestoreDrill`）。\n5. 更新 `RESULT.json`：写明失败原因、修复位置、重跑命令与结果。\n\n约束：\n- 不要 skip `TestRestoreDrill` 或弱化它的断言。\n- 不要动 `internal/authz/**` 的权限矩阵常量/CSV  unless 你能证明那是个真实 bug 而不是测试 setup 问题。\n- 跑 `make check-spec-version` 与 `make check-schema-snapshot` 确认派生件没漂移。\n"
         }
       ]
     },
@@ -8038,7 +8061,7 @@
       ]
     },
     "T1007": {
-      "status": "running",
+      "status": "worker_failed",
       "started_at": "2026-09-19T11:40:29Z",
       "worker_run_id": "run-1a2252a9ec4ea195",
       "history": [
@@ -8054,8 +8077,16 @@
           "at": "2026-09-19T11:40:29Z",
           "run_id": "run-1a2252a9ec4ea195",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "worker_failed",
+          "at": "2026-09-20T11:09:41Z",
+          "run_id": "supervisor-reconcile",
+          "reason": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。"
         }
-      ]
+      ],
+      "notes": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。"
     },
     "T1101": {
       "status": "todo",
@@ -8067,7 +8098,7 @@
       "merged_at": null
     },
     "T1102": {
-      "status": "running",
+      "status": "worker_failed",
       "started_at": "2026-09-19T12:02:07Z",
       "worker_run_id": "run-cfd158672804b3ff",
       "history": [
@@ -8083,8 +8114,16 @@
           "at": "2026-09-19T12:02:07Z",
           "run_id": "run-cfd158672804b3ff",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "worker_failed",
+          "at": "2026-09-20T11:09:41Z",
+          "run_id": "supervisor-reconcile",
+          "reason": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。"
         }
-      ]
+      ],
+      "notes": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。"
     },
     "T1103": {
       "status": "todo",
