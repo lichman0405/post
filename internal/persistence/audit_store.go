@@ -50,16 +50,37 @@ func (s *AuditStore) Record(ctx context.Context, e domain.AuditEntry) error {
 	return nil
 }
 
-// ListProjectActivity implements audit.Store: the project's Activity rows,
-// newest first, keyset-paginated on (occurred_at, id) across BOTH
-// registries. source selects which registry the page reads (""
-// reads both); the two branches and the one cursor are the SQL's, not the
+// ListProjectActivity implements audit.Store: the Activity rows of one
+// project that readerUserID may be RENDERED, newest first,
+// keyset-paginated on (occurred_at, id) across BOTH registries. source
+// selects which registry the page reads ("" reads both); the two branches,
+// the audience predicate and the one cursor are the SQL's, not the
 // caller's — see queries/events_audit.sql's ListProjectActivity for why a
-// page has to be cut by the database.
-func (s *AuditStore) ListProjectActivity(ctx context.Context, projectID string, before *audit.Cursor, limit int, source domain.ActivitySource) ([]domain.AuditRecord, error) {
+// page has to be cut by the database, and for why the governance branch
+// takes no audience and the research branch does.
+//
+// The reader is an input of this read (ADR-024): the research rows are the
+// ones whose stored visibility means something, and the caller is not
+// necessarily a member — a public project's gate admits every signed-in
+// reader — so the row set has to be the reader's, decided where the rows
+// are.
+//
+// An EMPTY readerUserID is the unresolvable reader and is passed to SQL as
+// NULL, which is the query's fail-closed branch: the membership clause
+// cannot be true for a reader that names no user, so the answer is exactly
+// the public rows. The same answer is given for an id that cannot be a
+// uuid — a caller that handed us something that names no user gets no
+// user's rows. It is NOT an error: an unreadable reader is not a broken
+// read, and refusing the page would turn an audience question into an
+// outage.
+func (s *AuditStore) ListProjectActivity(ctx context.Context, projectID, readerUserID string, before *audit.Cursor, limit int, source domain.ActivitySource) ([]domain.AuditRecord, error) {
 	id, err := textUUID(projectID)
 	if err != nil {
 		return nil, nil // an id that is not a uuid matches no rows
+	}
+	reader, err := textUUID(readerUserID)
+	if err != nil {
+		reader = pgtype.UUID{} // no user id resolved: the public rows only
 	}
 	beforeTS, beforeID, err := cursorParams(before)
 	if err != nil {
@@ -69,6 +90,7 @@ func (s *AuditStore) ListProjectActivity(ctx context.Context, projectID string, 
 		ProjectID:         id,
 		IncludeGovernance: source.IncludesGovernance(),
 		IncludeResearch:   source.IncludesResearch(),
+		ReaderUserID:      reader,
 		BeforeTs:          beforeTS,
 		BeforeID:          beforeID,
 		PageLimit:         int32(limit),

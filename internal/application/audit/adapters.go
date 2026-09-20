@@ -11,10 +11,16 @@ import (
 //
 // T0106 made the project read take a projects.Reader, because the visibility
 // matrix decides what an ANONYMOUS reader sees, while this gate's vocabulary is
-// an authenticated actor: the activity feed is member-only. The two are the
-// same call with the authenticated end of the matrix filled in — which is what
-// this states, in one place, instead of teaching either package the other's
+// an authenticated actor: the Activity surface requires a session. The two are
+// the same call with the authenticated end of the matrix filled in — which is
+// what this states, in one place, instead of teaching either package the other's
 // vocabulary.
+//
+// What the gate answers is "may this reader read this PROJECT", and that is all
+// it answers: a public project's read is allowed for every matrix class, so
+// passing it does not establish membership. The research rows of the feed carry
+// a visibility of their own and are narrower than the project (ADR-024, T0613);
+// that predicate belongs to the read and lives with the rows, not here.
 //
 // It lives here rather than at the composition root because two callers need
 // it (cmd/api and the audit integration test) and a second copy would be a

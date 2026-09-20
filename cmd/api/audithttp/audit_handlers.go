@@ -107,10 +107,17 @@ func sourceParam(r *http.Request) (domain.ActivitySource, error) {
 }
 
 // handleProjectActivity: GET /api/v1/projects/{projectId}/activity — the
-// project's Activity, newest first, member-only (the same visibility as
-// the project itself): the governance rows (audit_log) and the research
-// events, or one of the two when ?source=governance|research says so. Any
-// other verb answers 405: the log is read-only.
+// project's Activity, newest first, readable by whoever may read the
+// project: the governance rows (audit_log) and the research events, or one
+// of the two when ?source=governance|research says so. Any other verb
+// answers 405: the log is read-only.
+//
+// The reader travels down with the request (svc.ProjectActivity takes the
+// actor): on a PUBLIC project the gate admits readers who are not members,
+// and the research events carry a visibility of their own, so which of
+// those rows are rendered is the read's answer and not this surface's
+// (ADR-024). Nothing is filtered here — this handler only resolves the
+// principal and renders what came back.
 func (h *handlers) handleProjectActivity(w http.ResponseWriter, r *http.Request) {
 	if !readOnly(w, r) {
 		return
@@ -205,9 +212,11 @@ func writeActivity(w http.ResponseWriter, entries []domain.AuditRecord, next str
 	authhttp.WriteJSON(w, http.StatusOK, payload)
 }
 
-// principal resolves the authenticated actor; reads require a session
-// (activity is member-only, like the project/org reads), so the 401 is
-// written here.
+// principal resolves the authenticated actor; reads require a session (the
+// Activity surface is not anonymous, unlike the public knowledge reads), so
+// the 401 is written here. The actor is also the audience the research rows
+// are rendered to — it is handed to the service, which hands it to the
+// read.
 func principal(w http.ResponseWriter, r *http.Request) (domain.User, bool) {
 	p, ok := authhttp.PrincipalFrom(r.Context())
 	if !ok {
