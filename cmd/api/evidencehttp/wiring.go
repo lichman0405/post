@@ -11,6 +11,11 @@ import (
 
 // Service is the evidence-graph read port the handlers call. The production
 // implementation is *evidencegraph.Service.
+//
+// Both reads take the caller (projects.Reader) and the gate does not stand in
+// for it: the gate answers "may this reader see this PROJECT", the reader
+// answers "which ROWS of it may be rendered" (ADR-024). An anonymous reader
+// can pass the gate on a public project and must still see no private row.
 type Service interface {
 	// ObjectEvidence reads one object's evidence grouped by the target
 	// version each assertion pins; versionNo nil reads the whole object,
@@ -18,10 +23,10 @@ type Service interface {
 	// for an object outside the path project (the same answer a nonexistent
 	// one gets) and sciobjects.ErrVersionNotFound for a version the log does
 	// not hold.
-	ObjectEvidence(ctx context.Context, projectID, objectID string, versionNo *int) (evidence.ObjectEvidence, error)
+	ObjectEvidence(ctx context.Context, reader projects.Reader, projectID, objectID string, versionNo *int) (evidence.ObjectEvidence, error)
 	// HypothesisEvidence reads the two-section hypothesis page. An object
 	// that is not a hypothesis answers sciobjects.ErrObjectNotFound.
-	HypothesisEvidence(ctx context.Context, projectID, objectID string) (evidence.HypothesisEvidence, error)
+	HypothesisEvidence(ctx context.Context, reader projects.Reader, projectID, objectID string) (evidence.HypothesisEvidence, error)
 }
 
 // Gate is the project read gate — the same member-only, existence-hiding

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/application/rsg"
 	"github.com/lichman0405/post/internal/application/sciobjects"
 	"github.com/lichman0405/post/internal/domain"
@@ -19,6 +20,16 @@ import (
 // selection, not about repeating that.
 
 const projID = "11111111-1111-4111-8111-111111111111"
+
+// anon is the zero reader — the anonymous caller the transports build when no
+// session resolved. Most of the cases below are about the service's
+// SELECTION (which object, which versions, which sections), and the audience
+// has its own test at the bottom of this file.
+var anon = projects.Reader{}
+
+// member is a resolved caller: the identity every audience decision is made
+// about.
+var member = projects.Reader{UserID: "33333333-3333-4333-8333-333333333333", Authenticated: true}
 
 type fakeObjects struct {
 	objects  map[string]domain.ScientificObject
@@ -52,11 +63,16 @@ type fakeAssertions struct {
 	// asked records every version id the service read assertions for, in
 	// order — the "which versions were queried" evidence.
 	asked []string
-	err   error
+	// readers records the reader of every call, in order — ADR-024's
+	// evidence at this layer: the reader is an input of the READ, so no
+	// query may be issued without one.
+	readers []string
+	err     error
 }
 
-func (f *fakeAssertions) ListForTargetVersion(_ context.Context, versionID string) ([]evidence.Assertion, error) {
+func (f *fakeAssertions) ListForTargetVersion(_ context.Context, versionID, readerUserID string) ([]evidence.Assertion, error) {
 	f.asked = append(f.asked, versionID)
+	f.readers = append(f.readers, readerUserID)
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -123,7 +139,7 @@ func TestObjectEvidenceUnpinnedAsksEveryVersionAndKeepsOnlyTheOccupied(t *testin
 	}}
 	svc := newService(objs, asserts, &fakeRelations{})
 
-	out, err := svc.ObjectEvidence(context.Background(), projID, "obj", nil)
+	out, err := svc.ObjectEvidence(context.Background(), anon, projID, "obj", nil)
 	if err != nil {
 		t.Fatalf("ObjectEvidence: %v", err)
 	}
@@ -152,7 +168,7 @@ func TestObjectEvidencePinnedAsksOneVersionAndAnswersEvenWhenEmpty(t *testing.T)
 	svc := newService(objs, asserts, &fakeRelations{})
 
 	no := 1
-	out, err := svc.ObjectEvidence(context.Background(), projID, "obj", &no)
+	out, err := svc.ObjectEvidence(context.Background(), anon, projID, "obj", &no)
 	if err != nil {
 		t.Fatalf("ObjectEvidence: %v", err)
 	}
@@ -184,14 +200,14 @@ func TestObjectEvidenceRefusesAForeignObjectAndAnUnknownVersion(t *testing.T) {
 	}
 	svc := newService(objs, &fakeAssertions{}, &fakeRelations{})
 
-	if _, err := svc.ObjectEvidence(context.Background(), projID, "theirs", nil); !errors.Is(err, sciobjects.ErrObjectNotFound) {
+	if _, err := svc.ObjectEvidence(context.Background(), anon, projID, "theirs", nil); !errors.Is(err, sciobjects.ErrObjectNotFound) {
 		t.Errorf("foreign object error = %v, want ErrObjectNotFound", err)
 	}
-	if _, err := svc.ObjectEvidence(context.Background(), projID, "missing", nil); !errors.Is(err, sciobjects.ErrObjectNotFound) {
+	if _, err := svc.ObjectEvidence(context.Background(), anon, projID, "missing", nil); !errors.Is(err, sciobjects.ErrObjectNotFound) {
 		t.Errorf("unknown object error = %v, want ErrObjectNotFound", err)
 	}
 	no := 99
-	if _, err := svc.ObjectEvidence(context.Background(), projID, "obj", &no); !errors.Is(err, sciobjects.ErrVersionNotFound) {
+	if _, err := svc.ObjectEvidence(context.Background(), anon, projID, "obj", &no); !errors.Is(err, sciobjects.ErrVersionNotFound) {
 		t.Errorf("unknown version error = %v, want ErrVersionNotFound", err)
 	}
 }
@@ -223,7 +239,7 @@ func TestHypothesisEvidenceKeepsTheTwoSectionsApart(t *testing.T) {
 	}}
 	svc := newService(objs, asserts, rels)
 
-	out, err := svc.HypothesisEvidence(context.Background(), projID, "hyp")
+	out, err := svc.HypothesisEvidence(context.Background(), anon, projID, "hyp")
 	if err != nil {
 		t.Fatalf("HypothesisEvidence: %v", err)
 	}
@@ -284,7 +300,7 @@ func TestHypothesisEvidenceRefusesOtherObjectTypes(t *testing.T) {
 		versions: map[string][]domain.ScientificObjectVersion{"c1": {version("c1v1", 1, "claim one")}},
 	}
 	svc := newService(objs, &fakeAssertions{}, &fakeRelations{})
-	if _, err := svc.HypothesisEvidence(context.Background(), projID, "c1"); !errors.Is(err, sciobjects.ErrObjectNotFound) {
+	if _, err := svc.HypothesisEvidence(context.Background(), anon, projID, "c1"); !errors.Is(err, sciobjects.ErrObjectNotFound) {
 		t.Errorf("claim asked for as hypothesis: err = %v, want ErrObjectNotFound", err)
 	}
 }
@@ -326,7 +342,7 @@ func TestStoreFailuresBecomeErrStore(t *testing.T) {
 		err:      boom,
 	}
 	svc := newService(objs, &fakeAssertions{err: boom}, &fakeRelations{err: boom})
-	if _, err := svc.HypothesisEvidence(context.Background(), projID, "hyp"); !errors.Is(err, ErrStore) {
+	if _, err := svc.HypothesisEvidence(context.Background(), anon, projID, "hyp"); !errors.Is(err, ErrStore) {
 		t.Errorf("object store failure: err = %v, want ErrStore", err)
 	}
 
@@ -335,11 +351,87 @@ func TestStoreFailuresBecomeErrStore(t *testing.T) {
 		versions: map[string][]domain.ScientificObjectVersion{"hyp": {version("h1", 1, "h")}},
 	}
 	svc = newService(objs, &fakeAssertions{err: boom}, &fakeRelations{})
-	if _, err := svc.HypothesisEvidence(context.Background(), projID, "hyp"); !errors.Is(err, ErrStore) {
+	if _, err := svc.HypothesisEvidence(context.Background(), anon, projID, "hyp"); !errors.Is(err, ErrStore) {
 		t.Errorf("assertion store failure: err = %v, want ErrStore", err)
 	}
 	svc = newService(objs, &fakeAssertions{}, &fakeRelations{err: boom})
-	if _, err := svc.HypothesisEvidence(context.Background(), projID, "hyp"); !errors.Is(err, ErrStore) {
+	if _, err := svc.HypothesisEvidence(context.Background(), anon, projID, "hyp"); !errors.Is(err, ErrStore) {
 		t.Errorf("relation store failure: err = %v, want ErrStore", err)
+	}
+}
+
+// TestEveryAssertionReadCarriesTheReader (ADR-024) — the reader is an INPUT
+// of the read, so there is no path through this service that reads assertions
+// for a caller it was not given. The probe is the reader the store observes:
+// a service that dropped it (or re-derived it, or defaulted it) would show up
+// here as an empty or foreign user id, whatever it did with the rows.
+//
+// It covers BOTH reads and every query each one issues, because "the reader
+// reaches the store" is only true if it reaches it on the subordinate claims'
+// versions too — the hypothesis page's second section reads the same way the
+// first one does.
+func TestEveryAssertionReadCarriesTheReader(t *testing.T) {
+	objs := &fakeObjects{
+		objects: map[string]domain.ScientificObject{
+			"obj": {ID: "obj", ObjectType: "claim", ProjectID: projID},
+			"hyp": {ID: "hyp", ObjectType: "hypothesis", ProjectID: projID},
+			"c1":  {ID: "c1", ObjectType: "claim", ProjectID: projID},
+		},
+		versions: map[string][]domain.ScientificObjectVersion{
+			"obj": {version("v1", 1, "first"), version("v2", 2, "second")},
+			"hyp": {version("h1", 1, "hypothesis v1")},
+			"c1":  {version("c1v1", 1, "claim one")},
+		},
+	}
+	rels := &fakeRelations{rows: []rsg.ObjectRelationVersion{
+		relation("r1", "rel-c1", SubordinateRelationType, "c1", ObjectTypeClaim, "hyp"),
+	}}
+
+	// The object read: the unpinned form asks every version of the object, so
+	// every one of those queries must carry the reader.
+	asserts := &fakeAssertions{}
+	svc := newService(objs, asserts, rels)
+	if _, err := svc.ObjectEvidence(context.Background(), member, projID, "obj", nil); err != nil {
+		t.Fatalf("ObjectEvidence: %v", err)
+	}
+	if len(asserts.readers) != 2 {
+		t.Fatalf("assertion reads = %d, want one per version of the object", len(asserts.readers))
+	}
+	for i, got := range asserts.readers {
+		if got != member.UserID {
+			t.Errorf("read %d carried reader %q, want %q", i, got, member.UserID)
+		}
+	}
+
+	// The hypothesis page: the direct section AND each subordinate claim's
+	// version go through the same read, so both must carry it.
+	asserts = &fakeAssertions{}
+	svc = newService(objs, asserts, rels)
+	if _, err := svc.HypothesisEvidence(context.Background(), member, projID, "hyp"); err != nil {
+		t.Fatalf("HypothesisEvidence: %v", err)
+	}
+	if len(asserts.readers) != 2 {
+		t.Fatalf("assertion reads = %d, want one for the hypothesis and one for its claim", len(asserts.readers))
+	}
+	for i, got := range asserts.readers {
+		if got != member.UserID {
+			t.Errorf("hypothesis-page read %d carried reader %q, want %q", i, got, member.UserID)
+		}
+	}
+
+	// And an anonymous caller is carried as the empty user id rather than
+	// dropped altogether: the store has to be asked the question, because
+	// "which rows may this caller see" for an anonymous caller is still the
+	// read's question (it is answered by the public predicate, not by
+	// skipping the read).
+	asserts = &fakeAssertions{}
+	svc = newService(objs, asserts, rels)
+	if _, err := svc.ObjectEvidence(context.Background(), anon, projID, "obj", nil); err != nil {
+		t.Fatalf("ObjectEvidence (anonymous): %v", err)
+	}
+	for i, got := range asserts.readers {
+		if got != "" {
+			t.Errorf("anonymous read %d carried reader %q, want the empty user id", i, got)
+		}
 	}
 }

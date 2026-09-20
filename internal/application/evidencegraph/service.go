@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/application/rsg"
 	"github.com/lichman0405/post/internal/application/sciobjects"
 	"github.com/lichman0405/post/internal/domain"
@@ -58,7 +59,18 @@ func New(deps Deps) *Service {
 }
 
 // ObjectEvidence reads one object's evidence, grouped by the target version
-// each assertion pins.
+// each assertion pins, AS ONE READER (ADR-024).
+//
+// The reader decides which rows are rendered, and it is an input of the read
+// rather than a filter over its result: the one audience rule — public
+// assertions, plus the private ones of the asserting project's and the target
+// project's own members — is the store query's predicate
+// (AssertionStore.ListForTargetVersion), so both of this read's transports
+// get it by construction and neither can spell it a second way. An
+// unresolvable reader (the zero projects.Reader) resolves to no user id and
+// therefore sees exactly the public rows; it is never an error, because the
+// alternative — refusing to read at all — would turn an audience question
+// into an outage.
 //
 // versionNo nil answers for the whole object: one group per version that
 // carries at least one assertion, in version order (an inventory — a version
@@ -66,7 +78,9 @@ func New(deps Deps) *Service {
 // versionNo answers for that version ALONE, and its group is returned even
 // when it carries no assertions: the caller asked a direct question about
 // one version and "no evidence on this version" is its answer, not an empty
-// document.
+// document. A version whose every assertion is outside the reader's audience
+// is a version carrying nothing, and is answered as such: the read says what
+// the reader may see, and never that something was withheld.
 //
 // The object is resolved first and its owning project is compared with the
 // path project (case-insensitively — a uuid spelled in another case names
@@ -74,7 +88,7 @@ func New(deps Deps) *Service {
 // foreign object answers exactly what a nonexistent one answers
 // (sciobjects.ErrObjectNotFound), so the read is no existence oracle for
 // objects outside the path project.
-func (s *Service) ObjectEvidence(ctx context.Context, projectID, objectID string, versionNo *int) (evidence.ObjectEvidence, error) {
+func (s *Service) ObjectEvidence(ctx context.Context, reader projects.Reader, projectID, objectID string, versionNo *int) (evidence.ObjectEvidence, error) {
 	obj, err := s.object(ctx, projectID, objectID)
 	if err != nil {
 		return evidence.ObjectEvidence{}, err
@@ -91,7 +105,7 @@ func (s *Service) ObjectEvidence(ctx context.Context, projectID, objectID string
 		}
 		selected = []domain.ScientificObjectVersion{v}
 	}
-	groups, err := s.groups(ctx, selected, versionNo != nil)
+	groups, err := s.groups(ctx, reader, selected, versionNo != nil)
 	if err != nil {
 		return evidence.ObjectEvidence{}, err
 	}
@@ -116,10 +130,18 @@ func (s *Service) ObjectEvidence(ctx context.Context, projectID, objectID string
 // No total, no ratio, no net position is computed across the two sections,
 // and none across the claims inside the second one.
 //
+// The reader is the same explicit input the object read takes (ADR-024) and
+// it carries into BOTH sections: the direct assertions and every subordinate
+// claim's assertions come from the one per-target read, so one audience rule
+// covers the whole page. A claim whose own evidence is outside the reader's
+// audience is still listed — the claim list is complete, and the claim itself
+// is a row of this project — with an empty evidence list, which is the same
+// shape a claim carrying nothing already has.
+//
 // The path object must be a hypothesis: any other type answers the same
 // not-found an unknown object answers (the route's name is its contract; a
 // claim's own evidence is on the object read).
-func (s *Service) HypothesisEvidence(ctx context.Context, projectID, objectID string) (evidence.HypothesisEvidence, error) {
+func (s *Service) HypothesisEvidence(ctx context.Context, reader projects.Reader, projectID, objectID string) (evidence.HypothesisEvidence, error) {
 	obj, err := s.object(ctx, projectID, objectID)
 	if err != nil {
 		return evidence.HypothesisEvidence{}, err
@@ -131,7 +153,7 @@ func (s *Service) HypothesisEvidence(ctx context.Context, projectID, objectID st
 	if err != nil {
 		return evidence.HypothesisEvidence{}, err
 	}
-	direct, err := s.groups(ctx, versions, false)
+	direct, err := s.groups(ctx, reader, versions, false)
 	if err != nil {
 		return evidence.HypothesisEvidence{}, err
 	}
@@ -151,7 +173,7 @@ func (s *Service) HypothesisEvidence(ctx context.Context, projectID, objectID st
 		if err != nil {
 			return evidence.HypothesisEvidence{}, err
 		}
-		groups, err := s.groups(ctx, cv, false)
+		groups, err := s.groups(ctx, reader, cv, false)
 		if err != nil {
 			return evidence.HypothesisEvidence{}, err
 		}
@@ -168,11 +190,14 @@ func (s *Service) HypothesisEvidence(ctx context.Context, projectID, objectID st
 // would save no round trips anyone can feel. includeEmpty decides whether a
 // version carrying nothing still gets its group (see the two read comments
 // above for which read wants which).
-func (s *Service) groups(ctx context.Context, versions []domain.ScientificObjectVersion, includeEmpty bool) ([]evidence.TargetGroup, error) {
+//
+// The reader travels with every one of those queries — there is no path in
+// this package that reads assertions for a reader it does not have.
+func (s *Service) groups(ctx context.Context, reader projects.Reader, versions []domain.ScientificObjectVersion, includeEmpty bool) ([]evidence.TargetGroup, error) {
 	targets := make([]evidence.Target, 0, len(versions))
 	rows := make([]evidence.Assertion, 0)
 	for _, v := range versions {
-		assertions, err := s.assertions.ListForTargetVersion(ctx, v.ID)
+		assertions, err := s.assertions.ListForTargetVersion(ctx, v.ID, reader.UserID)
 		if err != nil {
 			return nil, fmt.Errorf("%w: list assertions for version %s: %v", ErrStore, v.ID, err)
 		}

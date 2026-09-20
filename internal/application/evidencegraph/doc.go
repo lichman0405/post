@@ -22,8 +22,29 @@
 // It is NOT the network evidence read either (T0806,
 // internal/application/evidencenetwork): that one renders a PUBLISHED
 // object's evidence to an audience and classifies it Origin / Reviewed
-// External / Unreviewed External. This one is the owning project's read of
-// its own objects and classes nothing.
+// External / Unreviewed External. This one renders the assertions pinned to
+// an object of the path project and classes nothing.
+//
+// # The read carries its reader (ADR-024)
+//
+// Every read here takes the caller as an explicit input (projects.Reader —
+// the identity the transports already resolve for every other
+// visibility-aware read, not a second model of who a caller is), and the
+// reader decides WHICH ROWS are rendered: an assertion's own
+// visibility = 'public', or the reader being a member of the asserting
+// project, or of the project that owns the target version. The predicate
+// lives in the store query (internal/persistence/queries/evidence.sql,
+// ListEvidenceAssertionsForTarget), not in a filter over a full result set,
+// so both transports that serve this read — the JSON routes and the object
+// detail page's evidence tab — get one rule and cannot disagree.
+//
+// This is the axis the PLATFORM read needs and is deliberately not folded
+// into the public read's `visibility = 'public'`: that predicate belongs to
+// the anonymous surfaces (GET /knowledge/{knowledgeId} and the research
+// profile), and applying it here would take from the two parties rows they
+// see today. The repository has both rules on purpose; see
+// internal/persistence/queries/research_profile.sql's warning against
+// "tidying" the axes into one.
 //
 // # Grouping, not union
 //
@@ -37,7 +58,9 @@
 // Every rule here answers "less" rather than "more" when the facts are
 // unclear: an object outside the path project answers exactly what a
 // nonexistent object answers (docs/45: no existence oracle), a store
-// failure is an error and never an empty page, and a relation the stance
+// failure is an error and never an empty page, a relation the stance
 // rule does not know is rendered without a stance label rather than guessed
-// into one (internal/evidence.Group).
+// into one (internal/evidence.Group), and a reader the audience rule cannot
+// resolve to a user id is answered the PUBLIC rows rather than every row —
+// the same direction as the column's own DEFAULT 'private'.
 package evidencegraph

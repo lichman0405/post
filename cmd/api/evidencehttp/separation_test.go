@@ -57,7 +57,7 @@ type fakeService struct {
 	out evidence.ObjectEvidence
 }
 
-func (f *fakeService) ObjectEvidence(_ context.Context, projectID, objectID string, _ *int) (evidence.ObjectEvidence, error) {
+func (f *fakeService) ObjectEvidence(_ context.Context, _ projects.Reader, projectID, objectID string, _ *int) (evidence.ObjectEvidence, error) {
 	f.calls++
 	out := f.out
 	out.ProjectID = projectID
@@ -65,7 +65,7 @@ func (f *fakeService) ObjectEvidence(_ context.Context, projectID, objectID stri
 	return out, nil
 }
 
-func (f *fakeService) HypothesisEvidence(_ context.Context, _, _ string) (evidence.HypothesisEvidence, error) {
+func (f *fakeService) HypothesisEvidence(_ context.Context, _ projects.Reader, _, _ string) (evidence.HypothesisEvidence, error) {
 	f.calls++
 	return evidence.HypothesisEvidence{}, nil
 }
