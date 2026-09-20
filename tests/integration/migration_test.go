@@ -22,13 +22,16 @@ package integration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/lichman0405/post/infra/migrations"
 	"github.com/lichman0405/post/internal/persistence"
@@ -51,6 +54,13 @@ const taskID = "T0005"
 // reach the stack it names is not a stricter test, only a louder one.
 func adminURL(t *testing.T) string {
 	t.Helper()
+	return adminURLFromEnv()
+}
+
+// adminURLFromEnv is adminURL without the *testing.T, so TestMain can reach
+// the same database the tests do (it has no T to hand it, and the URL must
+// not be spelled out twice).
+func adminURLFromEnv() string {
 	if u := os.Getenv("POSTGRES_TEST_ADMIN_URL"); u != "" {
 		return u
 	}
@@ -1508,7 +1518,7 @@ var maxVersionNo = func() int64 {
 //     indexes, extensions) — verified by querying pg_catalog.
 func TestFreshInstallCatalog(t *testing.T) {
 	ctx := testCtx(t)
-	pool, _ := testdb.Setup(t, ctx, adminURL(t), taskID)
+	pool, _ := testdb.SetupFromScratch(t, ctx, adminURL(t), taskID)
 
 	got := takeSnapshot(t, ctx, pool)
 
@@ -1525,11 +1535,93 @@ func TestFreshInstallCatalog(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+//
+//	1b. The template clone IS the database a fresh migrate makes (T0815).
+//
+// Setup hands a test a clone of the run's migrated template instead of
+// re-running the migration set on a database of its own
+// (internal/persistence/testdb): that is what took the CI job's provisioning
+// cost from 41.6% of the run down to ~18%, by replacing 377 replays of the 69
+// migrations with 77 of them plus 384 file-level clones. The trade is only
+// sound if the clone and a fresh migrate are the same database, and this is
+// the test that says so rather than assuming it — structure through the same
+// snapshot the fresh-install case compares against the canonical fixture,
+// schema version through goose_db_version, and contents through the row count
+// of every public table, so a migration that seeds reference rows is covered
+// as well as one that only writes DDL.
+func TestTemplateCloneEqualsAFreshMigrate(t *testing.T) {
+	ctx := testCtx(t)
+	clonePool, _ := testdb.Setup(t, ctx, adminURL(t), taskID)
+	freshPool, _ := testdb.SetupFromScratch(t, ctx, adminURL(t), taskID)
+
+	clone, fresh := takeSnapshot(t, ctx, clonePool), takeSnapshot(t, ctx, freshPool)
+	if got, want := snapshotJSON(t, clone), snapshotJSON(t, fresh); got != want {
+		t.Errorf("the template clone's catalog differs from a fresh migrate:\nclone: %s\nfresh: %s", got, want)
+	}
+
+	if got, want := appliedVersion(t, ctx, clonePool), appliedVersion(t, ctx, freshPool); got != want {
+		t.Errorf("the template clone is at schema version %d, a fresh migrate at %d", got, want)
+	} else if got != maxVersionNo {
+		t.Errorf("both are at version %d, want head %d", got, maxVersionNo)
+	}
+
+	cloneRows, freshRows := tableRowCounts(t, ctx, clonePool), tableRowCounts(t, ctx, freshPool)
+	if !reflect.DeepEqual(cloneRows, freshRows) {
+		for name, n := range freshRows {
+			if cloneRows[name] != n {
+				t.Errorf("table %s: the template clone has %d rows, a fresh migrate %d — "+
+					"the template is carrying state a fresh migrate would not", name, cloneRows[name], n)
+			}
+		}
+		for name, n := range cloneRows {
+			if _, ok := freshRows[name]; !ok {
+				t.Errorf("table %s: only the template clone has it (%d rows)", name, n)
+			}
+		}
+	}
+}
+
+// tableRowCounts counts the rows of every base table in the public schema.
+func tableRowCounts(t *testing.T, ctx context.Context, pool *pgxpool.Pool) map[string]int64 {
+	t.Helper()
+	rows, err := pool.Query(ctx, `
+		SELECT table_name FROM information_schema.tables
+		WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+		ORDER BY table_name`)
+	if err != nil {
+		t.Fatalf("row counts: list tables: %v", err)
+	}
+	names := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			t.Fatalf("row counts: scan table name: %v", err)
+		}
+		names = append(names, name)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatalf("row counts: list tables: %v", err)
+	}
+
+	counts := make(map[string]int64, len(names))
+	for _, name := range names {
+		var n int64
+		if err := pool.QueryRow(ctx, fmt.Sprintf(`SELECT count(*) FROM %q`, name)).Scan(&n); err != nil {
+			t.Fatalf("row counts: count %s: %v", name, err)
+		}
+		counts[name] = n
+	}
+	return counts
+}
+
+// ---------------------------------------------------------------------------
 //  2. Repeat migrate: running the migration on an already-migrated database is
 //     a safe no-op — zero applied, same version, byte-identical catalog.
 func TestRepeatMigrateIsNoop(t *testing.T) {
 	ctx := testCtx(t)
-	pool, url := testdb.Setup(t, ctx, adminURL(t), taskID)
+	pool, url := testdb.SetupFromScratch(t, ctx, adminURL(t), taskID)
 
 	before := takeSnapshot(t, ctx, pool)
 	beforeVersion := appliedVersion(t, ctx, pool)
@@ -1662,8 +1754,11 @@ func TestUpgradePath(t *testing.T) {
 		}
 	}
 
-	// Fresh reference install.
-	freshPool, _ := testdb.Setup(t, ctx, adminURL(t), taskID)
+	// Fresh reference install. Deliberately SetupFromScratch: the claim
+	// below is that the upgraded database is indistinguishable from one the
+	// migration set built from empty, so that side of the comparison has to
+	// be built by the migration set.
+	freshPool, _ := testdb.SetupFromScratch(t, ctx, adminURL(t), taskID)
 	fresh := takeSnapshot(t, ctx, freshPool)
 
 	if snapshotJSON(t, upgraded) != snapshotJSON(t, fresh) {

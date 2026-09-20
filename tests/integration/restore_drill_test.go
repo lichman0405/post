@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -144,11 +145,16 @@ func requireRestoreDrillDeps(t *testing.T, ctx context.Context) (admin, blobEndp
 // asks for the same three, for the same account, through the same dev
 // admin's basic auth, and revokes it the same way. No new credential and
 // no new account: it is the scope list that differs.
+//
+// POST_GITEA_TOKEN is deliberately NOT honoured here. Its documented dev
+// value is exactly that two-scope token (init-gitea.sh, .env.dev), and the
+// G3 gate injects it into every G3 job's environment — so a suite run as a
+// G3 job would 403 at org creation the moment this helper deferred to it.
+// Deferring buys nothing anyway: org deletion below already authenticates
+// as the dev admin, and backupdr's restore-side mint does the same, so no
+// environment the drill runs in lacks the basic-auth credential.
 func drillGiteaToken(t *testing.T, base string) string {
 	t.Helper()
-	if v := os.Getenv("POST_GITEA_TOKEN"); v != "" {
-		return v
-	}
 	adminUser := envDefault("GITEA_ADMIN_USER", "postadmin")
 	adminPass := envDefault("GITEA_ADMIN_PASSWORD", "postadmin_dev_pw")
 	svc := envDefault("GITEA_SERVICE_ACCOUNT", "post-git-svc")
@@ -194,6 +200,38 @@ func drillGiteaToken(t *testing.T, base string) string {
 		resp.Body.Close()
 	})
 	return minted.SHA1
+}
+
+// TestDrillGiteaTokenIgnoresTheEnvironmentToken pins the helper's refusal
+// to honour POST_GITEA_TOKEN: the documented dev value of that variable is
+// the two-scope service token (init-gitea.sh, .env.dev), the G3 gate
+// injects it into every G3 job's environment, and org creation answers 403
+// without write:organization. On code that defers to the variable this test
+// fails — no mint happens and the environment value comes back.
+func TestDrillGiteaTokenIgnoresTheEnvironmentToken(t *testing.T) {
+	minted := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/tokens"):
+			minted = true
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"id":1,"sha1":"minted-three-scope-token"}`)
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("POST_GITEA_TOKEN", "env-token-must-not-be-used")
+
+	if got := drillGiteaToken(t, srv.URL); got != "minted-three-scope-token" {
+		t.Fatalf("drillGiteaToken returned %q, want the freshly minted three-scope token", got)
+	}
+	if !minted {
+		t.Fatal("drillGiteaToken never minted: POST_GITEA_TOKEN short-circuited the three-scope mint")
+	}
 }
 
 // newDrillFixture builds the source environment: one migrated database with
@@ -1075,7 +1113,11 @@ func gitOutEnv(t *testing.T, dir string, env []string, args ...string) string {
 	return out.String()
 }
 
-// giteaCreateOrg creates the drill's own organization.
+// giteaCreateOrg creates the drill's own organization. The failure message
+// carries the provider's answer body: a 403 here is which-middleware
+// information ("token does not have required scope" vs "not allowed to
+// create organization"), and a run that throws it away has to be reproduced
+// to be diagnosed.
 func giteaCreateOrg(t *testing.T, base, token, org string) {
 	t.Helper()
 	body := fmt.Sprintf(`{"username":%q,"description":"T1110 restore drill (created and deleted by the test)"}`, org)
@@ -1088,7 +1130,9 @@ func giteaCreateOrg(t *testing.T, base, token, org string) {
 			"documented dev Gitea (`make infra-up`)", base)
 	}
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusConflict {
-		t.Fatalf("restore drill: create organization %s = %s", org, resp.Status)
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		t.Fatalf("restore drill: create organization %s = %s: %s", org, resp.Status,
+			strings.TrimSpace(string(raw)))
 	}
 }
 
