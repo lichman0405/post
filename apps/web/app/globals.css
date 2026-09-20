@@ -89,7 +89,9 @@
 
 .profile-main {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
   padding: 48px 16px;
 }
 
@@ -144,6 +146,137 @@
 .profile-loading {
   display: flex;
   align-items: center;
+  gap: 8px;
+}
+
+/* T0808 Research Profile / Organization Profile. Primer tokens only: neutral
+   background, hairline borders, dense type — no gradients, no cards-within-
+   cards. The dimensions are dense lists because that is what they are. */
+
+.rp-card {
+  width: 100%;
+  max-width: 720px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  padding: 20px;
+}
+
+.rp-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rp-title {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.rp-handle {
+  display: block;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.rp-bio {
+  margin: 8px 0 0;
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+
+.rp-section {
+  margin-top: 20px;
+}
+
+.rp-section-title {
+  margin: 0 0 6px;
+  padding-bottom: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.rp-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rp-row {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.rp-row:last-child {
+  border-bottom: none;
+}
+
+.rp-row-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.rp-entity {
+  font-weight: 500;
+}
+
+.rp-event {
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+}
+
+.rp-meta {
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.rp-roles {
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.rp-empty {
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.rp-footnote {
+  margin: 20px 0 0;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* The /organizations index: no directory, one lookup. */
+
+.org-index {
+  max-width: 480px;
+  margin: 48px auto;
+  padding: 0 16px;
+}
+
+.org-index-title {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+.org-index-desc {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.org-lookup {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.org-lookup-actions {
+  display: flex;
   gap: 8px;
 }
 

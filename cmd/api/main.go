@@ -67,6 +67,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/provenancehttp"
 	"github.com/lichman0405/post/cmd/api/pullrequestshttp"
 	"github.com/lichman0405/post/cmd/api/releasehttp"
+	"github.com/lichman0405/post/cmd/api/researchprofilehttp"
 	"github.com/lichman0405/post/cmd/api/reviewhttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/cmd/api/schemaprofileshttp"
@@ -386,6 +387,15 @@ func run(args []string) int {
 		Profiles: persistence.NewProfileStore(pool),
 	})
 	profileAPI.Register(v1)
+	// Research Profile / Organization Profile (T0808): the two public read
+	// models docs/05 §4 lists as network entity pages. Registered on the same
+	// guarded v1 mux as everything else; both routes are GETs, and the guard
+	// lets anonymous reads through, so the two pages are public while every
+	// write in the subtree still needs a session + CSRF token.
+	researchProfileAPI := researchprofilehttp.New(researchprofilehttp.Deps{
+		Reader: persistence.NewResearchProfileStore(pool),
+	})
+	researchProfileAPI.Register(v1)
 	orgStore := persistence.NewOrgStore(pool)
 	orgAPI := orgshttp.New(orgshttp.Deps{Store: orgStore})
 	// The bare path is registered alongside the subtree so requests to
