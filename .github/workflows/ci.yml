@@ -59,6 +59,12 @@ jobs:
         run: bash scripts/tests/task-state-unit-test.sh
       - name: Progress-view helper fixture tests
         run: bash scripts/tests/progress-update-test.sh
+      # The ledger tools write tests.json, which T1206's acceptance criterion
+      # reads. Their safety rule -- never record `passed` for an entry whose
+      # task is not merged, and never for one they cannot point at -- is a
+      # refusal rule, so it is tested with fixtures that try to break it.
+      - name: tests.json ledger tool unit tests
+        run: bash scripts/tests/tests-ledger-unit-test.sh
 
   # Stage 3 — Go: fmt / vet / staticcheck / unit (no database).
   go:

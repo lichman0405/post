@@ -7197,10 +7197,10 @@
     },
     "T0812": {
       "status": "running",
-      "started_at": "2026-09-20T22:54:56Z",
+      "started_at": "2026-09-20T23:34:59Z",
       "notes": "T0811/T0511 未落地前不派（Supervisor 冻结，2026-09-19 17:2x）。理由：T0812（Private Evidence / Public Attestation）与 T0511（ADR-024：证据断言的读带上读者）会改同一条读——`internal/persistence/queries/evidence.sql` 的无谓词读与 `internal/application/evidencegraph/**`——并行做必然得到同一规则的两种写法，而 ADR-024 逐字禁止把不同的轴'整理'成另一套谓词。DAG 里此刻看不出这条依赖：T0812 → T0511 的边要跟 T0511 的条目同笔落进 tasks/tasks.json（追加依赖不能引用不存在的任务），而那次落地要等指纹空当；T0812 现有的依赖 T0806/T0703 都已合并，所以 `rddev task next` 会把它列成可派——这条 notes 就是补上 DAG 还没表达的那一半。解冻：T0511 合并后跑 `./bin/rddev task ready T0812`（todo→blocked→ready 都是状态机里的合法边）。",
-      "worker_run_id": "run-f59cd1a6470e54f3",
-      "rejection_reason": "# T0812 返工：一条 blocking 是**隐私泄漏**，必须先堵上；另有两条 minor 顺手修\n\n复核给的是 `request_changes`。**设计那半边复核是认的**：公开投影选不出私有列、\nattribution 是\"记录时的 org_visibility 与组织当前设置\"的合取、迁移 00120 的\npid/CHECK/trigger 纪律都对。要返工的是下面这些——**第一条不是口味问题，是照你任务书\n自己的验收标准（\"无法反推出 private project/data\"）判的缺陷。**\n\n## 一、blocking：拒绝/预览这条路径把**别人的私有对象**泄给了任何已登录调用者\n\n链条复核写得很细，我照它核过：`***.sql:30-51` 的\n`ResolveAttestationTargetObject` / `…TargetAsset`（`WHERE sov.id = @object_version_id`）\n**没有可见性/项目范围的条件**，把 `sov.title`、`so.object_type`、`so.project_id`、`p.visibility`\n读进 `TargetFacts`（`internal/persistence/attestation_store.go:184-231`）。\njudge 会正确地拒绝一个非公开目标，**但拒绝时把预览一起交了出去**：\n`Attest`（`:266-268`）返回 `&attestations.Refused{Preview: BuildPreview(facts, want)}`，\n`BuildPreview` → `publicTargetOf`（`***.go:97,112-119`）\n把 `Target.Title / ObjectID / VersionID` 抄进 `Preview.Target`，\n`targetVisibilityRule`（`internal/application/attestations/judge.go:293-303`）还把\n\"the project that owns it is \\\"<visibility>\\\"\" 回显出去；\n`writeAttestBlocked`（`cmd/api/attestationhttp/publish.go:222-234`）把它序列化成 409 的\n`blockedEnvelope.Preview`，**`…:publish` 与 `…:publish-preview` 都走这条**。\n\n复核的复现（它自己的 out-of-tree overlay probe，打在你这棵 worktree 上）：一个**自己拥有一个项目、\n与受害项目毫无关系**的调用者，拿到了\n`{\"kind\":\"protocol\",\"object_id\":\"1d3e18a1-…\",\"version_id\":\"78118512-…\",\"title\":\"PROBE-VICTIM-SECRET-TITLE\"}`\n**外加受害项目自己的 visibility**；而换一个随机 UUID 得到的是 404。\n也就是说这条线还是个**存在性预言机**（有没有这个版本，一问便知）。\n\n**要什么**：把拒绝路径修成\"**对一个你无权读的目标，什么都不能说**\"——\n409 的 body 与\"目标不存在\"的 404 在**可观察字段上不可区分**（不给 title、不给\nobject/version id、不给拥有方项目的 visibility；给得出的话只给调用者自己请求的那个 id 与\n一句可执行的下一步）。修法你定，但**不许靠\"前端不显示\"**（CLAUDE.md §5.1）。\n读侧 `ResolvePublicAttestation` 那条已经是对的，别去动它。\n\n**并且把测试补成\"能说不\"的形状**：现在 `tests/integration/attestation_privacy_e2e_test.go`\n只对**调用者自己拥有**的私有项目做那个子测试，所以这条规矩在\"你本来就拥有这份数据\"的地方才被验过。\n要加一个子测试：**另一个用户拥有的项目里的一个版本**，断言 409 的 body 与 404 的 body\n**逐字段不可区分**（没有 title、没有 object/version id、没有对方项目的 visibility）。\n这是这个缺陷能溜到 collect 的原因，必须一起补上。\n\n## 二、minor：两个 <main> 地标\n\n`apps/web/app/(main)/attestations/[pid]/page.tsx:111` 在 `(main)/layout.tsx` 已有的\n`<main id=\"main\" tabIndex={-1}>` 里又渲染了一个 `<main className=\"att-main\">`，\n于是每个 attestation 页面有两个 main 地标。仓库自己的规矩是\"一个文档一个非隐藏 main\"\n（`layout.tsx:6`），同级的其它面板为此用 `<div>`。换成 `<div>`/`<article>`。\n\n## 三、minor：5xx 被塌成 404\n\n`apps/web/app/(main)/attestations/[pid]/page.tsx:80` 的 `read()` 把**所有**失败都塌成 `null`，\n路由随后 `notFound()`——于是一次**临时的后端故障**在读者和搜索引擎眼里就是永久的\n\"No such attestation\"。`lib/attestations.ts` 里已经有\n`messageForAttestationCode('SERVICE_UNAVAILABLE')` 这套可重试文案，页面却没用它。\n后端故障不是关于\"这条记录是否存在\"的陈述（`docs/45` 要求错误里写出下一步）。分开处理。\n\n## 四、另外两条（复核记在 risks 里，**不许在本任务里扩范围**）\n\n- 新路由没进 `specs/api/openapi.yaml` / `specs/mcp/tools.json`（在你 `allowed_scope` 之外）。\n- 没有任何地方链到 attestation（只能靠知道 pid 访问）。\n这两条留给我立账；RESULT 里把它们的**真实路径**写准（`POST /api/v1/projects/{projectId}/attestations:publish-preview`\n与 `:publish`、读是 `GET /api/v1/attestations/{attestationId}`），别再写成 \"GET/POST /api/v1/attestations\"。\n\n## 五、边界与纪律（不变）\n\n- **测试与断言只准加强，不准放宽**：不许删断言、skip、放大 timeout、把 FAIL 改成容忍。\n- 只动 `allowed_scope` 内的东西；不碰 `specs/**`、`docs/**`。\n- **不 commit / 不 push**；只留工作树 diff 与 `RESULT.json`，照实写 status。\n",
+      "worker_run_id": "run-941f1381f859bc91",
+      "rejection_reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: Rework item IV (two items recorded for the Supervisor, NOT implemented in this task): the new route is in neither specs/api/openapi.yaml nor specs/mcp/tools.json, and nothing links to an attestation. The RESULT must state the real paths. (not_applicable)",
       "history": [
         {
           "from": "blocked",
@@ -7248,6 +7248,20 @@
           "to": "running",
           "at": "2026-09-20T22:54:56Z",
           "run_id": "run-f59cd1a6470e54f3",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-20T23:31:45Z",
+          "run_id": "run-f900eeaf1e4203c4",
+          "reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: Rework item IV (two items recorded for the Supervisor, NOT implemented in this task): the new route is in neither specs/api/openapi.yaml nor specs/mcp/tools.json, and nothing links to an attestation. The RESULT must state the real paths. (not_applicable)"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T23:34:59Z",
+          "run_id": "run-941f1381f859bc91",
           "reason": "worker spawn"
         }
       ]

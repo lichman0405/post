@@ -77,6 +77,20 @@ def worker_results() -> dict:
     return out
 
 
+def clean(text, limit: int = 300) -> str:
+    """Flatten Worker-authored text before it lands in a TRACKED state file.
+
+    RESULT.json is written by a Worker and never tracked; tasks/tests.json is
+    tracked and committed. Copying one into the other makes the Worker's strings
+    part of the repository's record, so they are flattened to one line, stripped
+    of control characters and capped: a label or command is a fact to quote, not
+    a place to put a paragraph.
+    """
+    flat = " ".join(str(text or "").split())
+    flat = "".join(ch for ch in flat if ch >= " ")
+    return flat[:limit]
+
+
 def matching_pass(result: dict, name: str):
     """The RESULT.json test entry this ledger entry refers to, if any.
 
@@ -99,7 +113,11 @@ def main() -> int:
                     help="write the changes (default: report only)")
     ap.add_argument("--residue", action="store_true",
                     help="print only the entries that stay unpassed")
+    ap.add_argument("--repo", help="repository root (default: this script's repo)")
     args = ap.parse_args()
+    if args.repo:
+        global REPO
+        REPO = os.path.abspath(args.repo)
 
     ledger = load(TESTS_REL)
     entries = ledger.get("tests") or []
@@ -127,8 +145,8 @@ def main() -> int:
             residue_merged.append((entry["id"], tid, name, why))
             continue
 
-        merged_at = task.get("merged_at") or task.get("accepted_by_supervisor_at") or ""
-        command = (hit.get("command") or "").strip()
+        merged_at = clean(task.get("merged_at") or task.get("accepted_by_supervisor_at") or "", 40)
+        command = clean(hit.get("command"), 300)
         evidence = (
             "Backfilled from the task's own Worker record on %s (not a fresh re-run). "
             "The Worker ran `%s` on the tree that was merged -- RESULT.json test label "

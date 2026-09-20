@@ -1,41 +1,42 @@
-# 开发进度
-
-> **当前这一刻（2026-09-21 上午）**：**119/146 已合并**（80%）。今早合了七笔：T0612（并发 abort 的
-> 两份 201）、T0613（Activity 的研究事件读必须带上读者，ADR-024 的第三个出口）、T0608
-> （Release/Abort/Policy E2E）、以及前面几笔 + 我自己对驱动器的两处修复。
-> 在飞四笔：**T0812**（私密证据/公开 attestation，返工中——堵一条跨租户泄漏）、
-> **T0817**（外部 fork 提案的合并路径，返工中）、**T0906**（证据支撑的问答 API）、
-> **T1007**（依赖影响分析——刚从落后 33 笔的基线上救回来，见下）。
-> **关键路径**是 T0817 → T0810 → T1201 → T1202 → T1205 → T1206 → T1207（7 层），
-> T0817 一合并，扳机自动把 T0810 推上当前 main 返工，不需要我在场。
-> 剩下 27 笔里 **5 笔是 L3**（要 owner 一句话，见下），其余按 DAG 自动派工。
+> **当前这一刻（2026-09-21 上午 07:35）**：**119/146 已合并**（82%）。剩 27 笔
+> **全部都是 `v1_required=true`**——没有"可以不做"的，这也意味着 T1207 的验收
+> 「task_status 所有 required done」要等**每一笔**。
+> 在飞四笔：**T0817**（外部 fork 提案的合并路径，评审中）、**T0906**（证据支撑的问答 API，评审中）、
+> **T1007**（依赖影响分析，跑在纠正后的基线上）、**T1102**（Research Map 交互，今天首次在当天 main 上开跑）。
+> **T0812**（私密证据/公开 attestation）第二次交付被 collect 拒收，但**拒的是一条记账位置、
+> 不是缺陷**——见下。**T0810** 停在 rejected，T0817 一合并，扳机自动把它推上当前 main 返工。
+> **关键路径**是 T0817 → T0810 → T1201 → T1202 → T1205 → T1206 → T1207（7 层）。
+> 剩下 27 笔里 **5 笔是 L3**（要 owner 一句话，清单在 `.rddev/runtime/owner-decisions-needed.md`，
+> 每笔都带推荐答案），其余按 DAG 自动派工。
 >
-> **今天量出一个新的控制面缺陷（重）：派工沿用了旧分支。** 盘上三笔任务的分支停在过去——
-> **T1007 正在跑，落后 main 33 笔**；T1102 排队中，同样 33 笔；T0810 22 笔。
-> 根因是 `worker spawn` 的 `ensureWorktree` 只在分支**不存在**时从 integration tip 切，
-> 已存在就沿用、不问一句——而已存在的分支正是「进程消失的那次」或「被我 park 的那次」留下的。
-> 后果不是洁癖：T1007 那 33 笔里 main 改了 172 个文件，**120 个落在它自己的 `allowed_scope` 之内**，
-> 包括 T0613 那条审计读的规矩——**而 T1007 的验收标准正是照那条规矩判的**。
-> 已修（提交 0cec4d5）：起新 session 的 Worker 必须从包含当前 integration tip 的分支出发，
-> 否则拒发并指名 `rddev rebaseline`；rework 不受影响（保留基线就是 resume 的定义）。
-> 五个用例 + 两个 mutation check。T1007 已 rebaseline 续跑（它写的那个文件原样带过来了），
-> T1102 的旧分支直接删掉重切，T0810 的扳机改成 rebaseline。详见 decisions.md 续十三。
+> **今天补上了一个会让"最后验收永远收不了口"的洞：`tasks/tests.json` 是一本没人维护的账。**
+> T1206 的验收条件逐字是「`tests.json` blocking 全 passed」，但**没有任何代码在维护它**——
+> `internal/`/`cmd/` 下的 Go 里一处都没提到它，唯一的消费者 `validate_task_state.py` 只校验形状。
+> 量出来的样子是：**173 条 blocking，只有 22 条 passed、151 条 not_run**。
+> 也就是说任务全做完了它也是红的，到 T1206 那天只剩"手工涂绿"和"验收卡死"两条路。
+> 处置：只对**任务已合并、且该任务自己的 `RESULT.json` 里有同名 passed 用例**的条目补账
+> （108 条），evidence 如实写成"Worker 在合并的那棵树上的记录、经该任务 G2/G4 验证"，
+> **不冒充 Supervisor 重跑**；找不到证据的一条都不写。**133 passed / 40 not_run**：
+> 27 条属于还没合并的任务（`not_run` 是实话），13 条属于已合并但要真跑一次的，留给 T1206。
+> T0012 的三条今天当场重跑（`tests/acceptance/{four-gate,rejection-retry,supervisor-git}-e2e.sh`
+> 全部 exit 0）。仪表盘自查做了对照：把 `-run` 写成不存在的名字，Go 报 `[no tests to run]`，
+> 证明"绿"不是空转出来的。见 decisions.md 续十四。
 >
-> **今早的主戏是"卡了 7.5 小时"，而且是 owner 先看出来的。** T0612 的 Worker 与它的 reaper
-> 在昨晚 22:14 **一起消失**且谁都没写 `exit.status`，驱动读到的只是"还在干"，于是一直等下去；
-> 我上一轮起的那条等日志的后台监视也没把我叫醒。处置：把退出码按仓库自己的哨兵记成 unknown(-1)、
-> 同一 session resume 续跑（diff 一个字节没丢）；**根因判定为控制平面缺陷并当场修了**——
-> "进程与 reaper 一起消失"时 collect/rework/respawn 三条路全拒，任务永远停在 running 且没有任何
-> 合法迁移（盘上还有 T1007/T1102 两笔同样形状，上一轮是手工绕过去的）。修复带测试与 mutation check
-> （提交 3382eed），已重建 `bin/rddev` 并重启驱动。见 `decisions.md` 2026-09-21 那一节。
+> **T0812 被拒收，但责任在我。** 我上一封返工信把"新路由没进 `specs/api/openapi.yaml`、
+> 没有界面链到 attestation"编号成**「返工条目 IV」**，同时又写着"**不许在本任务里扩范围**"——
+> 于是 Worker 被要求把一个**它被禁止实现的条目**写进 `acceptance` 数组。它按最诚实的方式处理
+> （标 `not_applicable` 并附上自己 grep 验证的证据），结果撞在 collect 的
+> 「`completed` 时 acceptance 每条都得 `passed`」上。同一次 collect 的**其它 14 项全 ok**
+> （37 个改动路径全在 scope 内、secrets 无泄漏、13 条测试全 passed），**它的活是干净的**。
+> 处置：第二封短信让它把第 IV 条挪进 `notes_for_supervisor`/`follow_up_issues`，
+> **代码一个字不动、测试不重跑**；返工在等槽位（4 个全满），扳机脚本抢到槽就发。
+> 顺带记下规则本身的张力：schema **允许** `not_applicable`，collect **不接受**它——
+> 两者并存意味着"诚实标注一个不适用的条目必然被拒"，今天改我的信、不改检查。见 decisions.md 续十五。
 >
-> **T0817 加宽了范围。** 第一轮返回 blocked 是**对的**：merge 侧的源侧读法改对了，三层负向证据齐全，
-> mutation check 证明那一行是承重的；闭环被两个 `allowed_scope` **之外**的跨项目盲点挡在
-> `409 PR_INTEGRITY_BLOCKED`——(a) fork 导入写下的状态没接进分支基线（既不是分支头，也没有任何
-> `state_commit` 命名它），(b) `prchecks` 只在 PR 的项目里解析链边界，跨项目链被判成"2 个 head"。
-> 它们是同一个「项目只有一个」假设的**另两个出口**，拆成三笔任务只会把同一条链的读法分三次改，
-> 所以两处都归 T0817：`allowed_scope` 加上 `internal/application/prchecks/**` 与
-> `internal/gitprovider/**`，并要求优先落在最窄处（导入编排）修。
+> **今早量出的控制面缺陷（重）：派工沿用了旧分支。** 已修（提交 `e390164`，
+> `requireBaselineNotBehindMain`）：起新 session 的 Worker 必须从包含当前 integration tip 的分支出发，
+> 否则拒发并指名 `rddev rebaseline`；rework 不受影响。修复带五个用例 + 两个 mutation check。
+> T1007 已 rebaseline 续跑、T1102 的旧分支删掉重切、T0810 的扳机改成 rebaseline。见 decisions.md 续十三。
 >
 > **以下这段是 2026-09-20 的当日记录。**
 > **T0611 今天咬了一次**：它把合并边读通了（缺陷已证：改动前对合并后的 main 头返回空），却撞上
@@ -2953,9 +2954,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-20T23:12:19Z
+生成时间：2026-09-20T23:33:35Z
 
-状态分布：todo 16 · ready 1 · running 4 · worker_failed 0 · verification 0 · rejected 1 · blocked 5 · accepted 0 · merged 119（合计 146/146 个任务）
+状态分布：todo 16 · ready 0 · running 2 · worker_failed 0 · verification 2 · rejected 2 · blocked 5 · accepted 0 · merged 119（合计 146/146 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -3065,18 +3066,18 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0809 | Credit Attribution/Dispute 基础 | P8 | merged | 2026-09-19T07:55:17Z |  | 2026-09-19T08:58:12Z | 2026-09-20T10:21:30Z |
 | T0810 | 最小 Open Network 闭环 E2E | P8 | rejected | 2026-09-20T12:00:44Z |  |  |  |
 | T0811 | Discussion 与 Promote to Research Object | P8 | merged | 2026-09-20T11:05:19Z |  | 2026-09-20T11:42:51Z | 2026-09-20T11:51:03Z |
-| T0812 | Private Evidence / Public Attestation 基础 | P8 | running | 2026-09-20T22:54:56Z |  |  |  |
+| T0812 | Private Evidence / Public Attestation 基础 | P8 | rejected | 2026-09-20T22:54:56Z |  |  |  |
 | T0813 | Contribution Ledger 接上生产（worker 挂载 + via 真实来源） | P8 | merged | 2026-09-19T05:32:05Z |  | 2026-09-19T06:46:22Z | 2026-09-19T06:58:59Z |
 | T0814 | Fork 发起与外部提案的生产接口（契约由 Supervisor 落地，本任务照契约接线，并改 fork 的命名规则） | P8 | merged | 2026-09-20T13:38:01Z |  | 2026-09-20T14:29:22Z | 2026-09-20T14:40:00Z |
 | T0815 | CI 的 migration-integration 偶发超时：量出时间去哪了，按证据修 | P11 | merged | 2026-09-20T11:14:58Z |  | 2026-09-20T13:07:34Z | 2026-09-20T13:24:56Z |
 | T0816 | affiliation 日期口径统一（打戳 / 解析 / 判定 三处生产口径一处定义；夹具助手同批改） | P8 | merged | 2026-09-19T03:17:44Z |  | 2026-09-19T04:38:57Z | 2026-09-19T04:47:25Z |
-| T0817 | 外部 fork 提案的合并路径：merge 必须能在源分支自己所在的项目里读它 | P8 | running | 2026-09-20T22:54:47Z |  |  |  |
+| T0817 | 外部 fork 提案的合并路径：merge 必须能在源分支自己所在的项目里读它 | P8 | verification | 2026-09-20T22:54:47Z |  |  |  |
 | T0901 | Search Document Projection | P9 | merged | 2026-09-19T01:45:22Z |  | 2026-09-19T02:24:58Z | 2026-09-19T02:59:55Z |
 | T0902 | Embedding Provider 与 pgvector | P9 | merged | 2026-09-19T04:40:55Z |  | 2026-09-19T05:17:11Z | 2026-09-19T05:27:07Z |
 | T0903 | Scientific Query Planner | P9 | merged | 2026-09-19T03:08:10Z |  | 2026-09-19T03:55:21Z | 2026-09-19T04:04:51Z |
 | T0904 | Hybrid Retrieval + Graph Expansion | P9 | merged | 2026-09-19T05:31:44Z |  | 2026-09-19T06:56:28Z | 2026-09-19T07:04:51Z |
 | T0905 | Scientific Ranking | P9 | merged | 2026-09-20T12:54:18Z |  | 2026-09-20T13:37:58Z | 2026-09-20T13:45:08Z |
-| T0906 | Evidence-backed Answer Generator/API | P9 | running | 2026-09-20T22:37:52Z |  |  |  |
+| T0906 | Evidence-backed Answer Generator/API | P9 | verification | 2026-09-20T22:37:52Z |  |  |  |
 | T0907 | Search Answer Web UI | P9 | todo |  |  |  |  |
 | T0908 | Search → Draft Research Context | P9 | todo |  |  |  |  |
 | T1001 | Transactional Outbox | P10 | merged | 2026-09-14T15:17:43Z |  | 2026-09-14T15:51:18Z | 2026-09-14T15:54:45Z |
@@ -3087,7 +3088,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1006 | Signed Webhooks | P10 | merged | 2026-09-15T03:32:24Z |  | 2026-09-15T04:54:21Z | 2026-09-15T05:00:53Z |
 | T1007 | Dependency Impact Analysis | P10 | running | 2026-09-20T23:06:23Z |  |  |  |
 | T1101 | 统一 Primer-style Design System | P11 | todo |  |  |  |  |
-| T1102 | Research Map 高质量交互 | P11 | ready | 2026-09-19T12:02:07Z |  |  |  |
+| T1102 | Research Map 高质量交互 | P11 | running | 2026-09-20T23:24:18Z |  |  |  |
 | T1103 | Publication/Visibility Security UX | P11 | todo |  |  |  |  |
 | T1104 | 全站 Accessibility AA | P11 | todo |  |  |  |  |
 | T1105 | I18N 基线 | P11 | todo |  |  |  |  |

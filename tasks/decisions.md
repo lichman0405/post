@@ -15422,3 +15422,63 @@ label / command / status，其中 label 被要求**与任务书的必测名一�
 + `specs/**` 去掉 marker 本身），所以改它**不会动 marker、不会弄红 main、也不会弄红在飞任务的 G2**。
 改动只在 `tasks/tests.json` + 两个新脚本，**没有放宽任何断言**：一条用例从 `not_run` 变 `passed`
 只发生在「它所属的任务已经合并、且该任务自己的交付记录里有同名 passed」，其余一律留在红里。
+
+## 续十五 — T0812 被 collect 拒收：**是我的返工信写坏的，不是它做错了**（2026-09-21）
+
+### 事实
+
+T0812 第二次交付（修那条 blocking 隐私泄漏）在 07:31 被 collect 拒收，理由只有一条：
+
+> `result-consistency: result-acceptance: status completed but acceptance entries not passed:
+> Rework item IV (…) (not_applicable)`
+
+同一次 collect 的其它 14 项**全 ok**：scope 37 个改动路径全在 `allowed_scope` 内、
+refs 无越界、secrets 无泄漏、`result-tests` 13 条全 passed、
+`result-tests-coverage` 必测项有 passed 条目。**它的活是干净的。**
+
+### 根因：我把「我自己的事」写成了它的返工条目
+
+上一封返工信（`.rddev/runtime/t0812-rework.md`）第四节是我自己写的：
+
+> 另外两条（复核记在 risks 里，**不许在本任务里扩范围**）……
+> 这两条留给我立账；RESULT 里把它们的**真实路径**写准
+
+我把这两条编号成 **「返工条目 IV」**，同时又说「不许实现」。于是 Worker 被要求
+**把一个它被禁止实现的条目写进 `acceptance` 数组**。它按最诚实的方式处理——
+标 `not_applicable`、附上证据（还去 `grep` 验证了「specs 里确实没有、web 里确实没有链接」）——
+然后撞在 collect 的规矩上：**`status` 是 `completed` 时，`acceptance` 数组每一条都必须是 `passed`**。
+
+顺带记下这个**规则本身的张力**（今天不改，留给安静窗口）：
+`specs/orchestrator/worker-result.schema.json` 的 acceptance 条目**明确允许** `not_applicable`
+（`enum: passed|failed|not_applicable`），而 collect 的一致性检查在 `completed` 下**不接受**它。
+两者并存意味着：**诚实标注一个不适用的条目必然被拒**。
+它不是可以随手放宽的检查（放宽了，Worker 就能把每条标准都标 `not_applicable` 再宣称 completed），
+所以今天正确的处置是**改我的信**，不是改检查。
+
+### 处置
+
+- 裁定：**不是验收缺陷，是记账位置不对**。立账在案的处置是让它把第 IV 条从 `acceptance`
+  移到 `notes_for_supervisor` / `follow_up_issues`（字段都在 schema 里、都不阻塞），
+  **代码一个字不动、测试不重跑**（没有代码改动，重跑只是烧钱）。
+- 第二封返工信：`.rddev/runtime/t0812-rework2.md`，开头就写明「**这次不是你的错，是我上一封信写坏了**」。
+- 07:33 时 4 个槽位全满（T0817-review / T0906-review / T1007 / T1102），`worker rework` 被
+  「parallelism limit reached」拒；而驱动器会在一个 tick 内把空出来的槽填给下一个 ready 任务，
+  **所以返工要跟它抢**——用 `.rddev/runtime/fire-t0812-rework-when-slot-frees.sh`（10 秒一轮重试，
+  判定成功**看任务状态真的变成 `running`，不看退出码**：`rework` 在容量不足时也退出 0）。
+- T0812 的 decision 已用 `rddev drive --clear-decision T0812` 清掉（`decisions.json` 现有 0 条）。
+
+### 教训（给我自己）
+
+**返工信里不要把我自己的条目编号成「返工条目 N」。** 只要它长得像验收标准，
+Worker 就会（正确地）把它写进 `acceptance`，而它只要不是 `passed` 就会撞 collect。
+以后这类「留给我立账」的事，写进信里时要明确写成**「不计入 acceptance 数组」**，
+或者干脆不写进返工信、只写在 `.rddev/runtime/` 的待办里。
+
+### 顺带立下的待办（T0812 的第 IV 条内容，属我）
+
+1. 新增路由未进 `specs/api/openapi.yaml` 与 `specs/mcp/tools.json`
+   （`POST /api/v1/projects/{projectId}/attestations:publish-preview`、`:publish`；
+   读 `GET /api/v1/attestations/{attestationId}`）——`specs/**` 只有我能写；
+2. 没有任何界面/文档链到 attestation 页面（只能靠知道 pid 访问）。
+   两条都要**立账成新任务**；改 `tasks/tasks.json` 会动 spec digest，
+   必须挑**没有 Worker 在跑 G2 的安静窗口**，并与 `gates.json` 的 G3 覆盖同笔提交。
