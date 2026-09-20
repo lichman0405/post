@@ -1118,6 +1118,14 @@ func branchHead(t *testing.T, ctx context.Context, pool *pgxpool.Pool, branchID 
 // by the replay read (when the winner committed before the loser looked) or
 // refused with the conflict code (when it did not). What is asserted is that
 // the loser wrote NOTHING, which is the property the criterion names.
+//
+// When BOTH requests are answered 201, the two answers must describe the same
+// abort — with one exception the contract itself names, the REPLAY GAP: the
+// replayed answer may report pull_request_number 0 when it read the version
+// before the winner had opened the proposal. sameAbortTwoWays below is that
+// rule, spelled out with its citation; it is not a weakening of this branch,
+// it is this branch written against the contract instead of against an
+// assumption the contract does not make.
 func TestAbortProposalConcurrency(t *testing.T) {
 	ctx := testCtx(t)
 	f := newAbortFixture(t, ctx)
@@ -1167,9 +1175,13 @@ func TestAbortProposalConcurrency(t *testing.T) {
 		t.Fatal("neither concurrent request produced the proposal")
 	}
 	if winners == 2 {
+		// Both requests were answered 201: one fresh proposal, one replay of
+		// the version the other committed. They must be the same abort. The
+		// only field they may disagree on is pull_request_number, and only in
+		// the one window sameAbortTwoWays names.
 		a, b := results[0].wire, results[1].wire
-		if a.VersionID != b.VersionID || a.PullRequestNumber != b.PullRequestNumber {
-			t.Fatalf("both concurrent requests reported a proposal, but different ones: %+v vs %+v", a, b)
+		if err := sameAbortTwoWays(a, b); err != nil {
+			t.Fatalf("both concurrent requests reported a proposal, but different ones: %v (a=%+v, b=%+v)", err, a, b)
 		}
 	}
 	if rows := versionsOfObject(t, ctx, pool, objectID); len(rows) != 2 {
@@ -1188,6 +1200,58 @@ func TestAbortProposalConcurrency(t *testing.T) {
 		t.Fatalf("the race opened %d pull requests for one Idempotency-Key, want 1", prs)
 	}
 }
+
+// sameAbortTwoWays reports whether two 201s answering ONE Idempotency-Key
+// describe the same abort. It refuses every disagreement except one the
+// contract itself names — the REPLAY GAP.
+//
+// VersionID, AbortedVersionID and BranchID are the abort's identity, and the
+// contract fixes all three for both answers: the fresh one renders them from
+// the row it just appended (resultFrom, internal/application/aborts/service.go:885,
+// which starts from the replay's own renderer), and the replay renders them
+// from that same row read back by key (resultFromRecorded, :906). Nothing
+// here can differ without the race having produced two aborts, which is the
+// property this test exists to hold.
+//
+// PullRequestNumber is the exception, and the contract states it verbatim
+// (service.go:183-186):
+//
+//	PullRequestNumber is the Research PR's per-project number. It is 0 only
+//	in the replay case where the first attempt committed the version and
+//	died before opening the PR (see replay()).
+//
+// That is the REPLAY GAP, and the race this test drives can land in it: the
+// version is committed inside the commit transaction (:535), the proposal is
+// opened AFTER it and OUTSIDE that transaction (:600), so a request reading
+// the key between the two sees a version and no proposal, replays, and is
+// answered 201 with pull_request_number 0 and replayed true (:685-704 leave
+// the number at zero and name no PR). The answer is the contract's own, not a
+// second abort. So a disagreement is admitted only when the side holding the
+// 0 is the REPLAYED one: a 0 on the fresh answer, a non-zero on a replayed
+// one, or any other pair of numbers, is a violation and fails here.
+func sameAbortTwoWays(a, b abortWire) error {
+	switch {
+	case a.VersionID != b.VersionID:
+		return fmt.Errorf("the two answers name different abort versions (%q vs %q)", a.VersionID, b.VersionID)
+	case a.AbortedVersionID != b.AbortedVersionID:
+		return fmt.Errorf("the two answers report aborting different versions (%q vs %q)", a.AbortedVersionID, b.AbortedVersionID)
+	case a.BranchID != b.BranchID:
+		return fmt.Errorf("the two answers committed to different branches (%q vs %q)", a.BranchID, b.BranchID)
+	case a.PullRequestNumber == b.PullRequestNumber:
+		return nil
+	}
+	if isReplayGap(a) || isReplayGap(b) {
+		return nil
+	}
+	return fmt.Errorf("the two answers name different proposals (%d vs %d) and neither is the replayed one reporting the gap "+
+		"service.go:183-186 allows (replayed=%t carrying %d, replayed=%t carrying %d)",
+		a.PullRequestNumber, b.PullRequestNumber, a.Replayed, a.PullRequestNumber, b.Replayed, b.PullRequestNumber)
+}
+
+// isReplayGap is the one shape service.go:183-186 admits on a replayed answer:
+// it replayed a version whose proposal was not yet readable, so it has no
+// proposal number to report.
+func isReplayGap(w abortWire) bool { return w.Replayed && w.PullRequestNumber == 0 }
 
 // TestAbortRefusesAKeyBorrowedFromAnotherObject is the fail-closed half of
 // the idempotency rule: ONE Idempotency-Key, one project, TWO objects.
