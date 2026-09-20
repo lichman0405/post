@@ -5007,7 +5007,7 @@
       ]
     },
     "T0607": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-20T11:45:28Z",
       "worker_run_id": "run-22827b12aeee8801",
       "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（e7f06ba63efa），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
@@ -5059,6 +5059,13 @@
           "at": "2026-09-20T11:45:28Z",
           "run_id": "run-22827b12aeee8801",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-20T12:00:41Z",
+          "run_id": "run-95bada5cdb24dc94",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -6768,13 +6775,24 @@
       ]
     },
     "T0810": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-20T12:00:44Z",
+      "worker_run_id": "run-063da3e3c1b7fa22",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-20T12:00:42Z",
+          "run_id": "run-45b9b233d63b031b"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-20T12:00:44Z",
+          "run_id": "run-063da3e3c1b7fa22",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0811": {
       "status": "merged",
