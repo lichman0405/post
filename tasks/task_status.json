@@ -5007,9 +5007,9 @@
       ]
     },
     "T0607": {
-      "status": "rejected",
-      "started_at": "2026-09-19T10:06:58Z",
-      "worker_run_id": "run-6f0bfff9aab47649",
+      "status": "running",
+      "started_at": "2026-09-20T10:59:51Z",
+      "worker_run_id": "run-1234dbcc68250540",
       "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
       "history": [
         {
@@ -5031,6 +5031,13 @@
           "at": "2026-09-19T10:47:06Z",
           "run_id": "run-33226661e6136031",
           "reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T10:59:51Z",
+          "run_id": "run-1234dbcc68250540",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -6741,7 +6748,7 @@
       "merged_at": null
     },
     "T0811": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-20T10:42:40Z",
       "worker_run_id": "run-3df045ba0b4801b4",
       "rejection_reason": "你的改动现在合不到当前 main 上，需要再推进一次基线。\n\n**证据**：\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run:\n    error: patch failed: internal/domain/audit.go:146\n\n**原因（不是你的错）**：你上一次 rework 的基线是 `258c3fa`（Supervisor 在 9-19 推进过一次）。\n之后 T0602（`0d33097`，主线对象 abort 状态迁移，#300）合进了 main，它在\n`internal/domain/audit.go` 的 `ActionKnowledgeVersionPublished` 常量后面插入了\n`ActionScientificObjectAborted` 整块注释与常量——而你 T0811 的 diff 也要在同一个锚点\n（`ActionKnowledgeVersionPublished` 之后）插入 `ActionDiscussionPromoted` 整块。\n两个块都是顺序追加、语义不冲突，只是补丁上下文对不上。\n\n**你要做的**：\n1. 在新基线上，保留 T0602 的 `ActionScientificObjectAborted` 整块，再把你的\n   `ActionDiscussionPromoted` 整块接在后面（顺序：T0602 在前，T0811 在后）。\n2. 重新生成派生件（`scripts/gen_schema_snapshot.py`、`scripts/spec_version.py --write`），\n   不要手动合并 `specs/SPEC_VERSION.json` 或 `specs/database/postgres.sql`。\n3. 重跑你自己的 G1 命令，确认在新基线上仍然全绿。\n4. 更新 `RESULT.json`，说明这是第二次基线推进后重跑的。\n\n**不在此列的事**：这不是对你工作质量的否定。旧评审结论会作废，新基线上会重新走独立评审。\n",
@@ -6800,6 +6807,13 @@
           "at": "2026-09-20T10:42:40Z",
           "run_id": "run-3df045ba0b4801b4",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-20T10:55:30Z",
+          "run_id": "run-10d83ec1166e5463",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -6855,10 +6869,11 @@
       ]
     },
     "T0814": {
-      "status": "verification",
-      "started_at": "2026-09-19T09:23:15Z",
+      "status": "running",
+      "started_at": "2026-09-20T10:49:12Z",
       "notes": "2026-09-19 立账：T0804 把 fork 的服务层做完了（并把它接到执行侧：ForkGate 与 00086 的触发器），但产品路径上缺「发起 fork」这步；契约由 Supervisor 先落地，本任务照契约接线。来源：docs/31_MASTER_ACCEPTANCE.md:17，T0804 复核时发现。",
-      "worker_run_id": "run-c1aae51e761afa8d",
+      "worker_run_id": "run-a3191c8e3a8b7076",
+      "rejection_reason": "独立评审给了 request_changes，1 条 blocking + 1 条 major + 若干 minor/nit。按下面优先级处理。\n\n【B · BLOCKING — AC8（主验收闭合）当前无法成立，需要如实改写 RESULT】\n\nReviewer 核实：外部 fork 提的 PR，其 source branch 活在 contributor 的 fork project 里，而 `internal/application/merge/service.go:431` 的 `MergePullRequest` 用 `s.branch(ctx, in.ProjectID, pr.SourceBranchID)` 去解析 branch，这一路（`merge_store.go:66/:75/:206`）都是按 **PR 的 project** 去查 branch。fork 里的 branch 在 PR project 里不存在，所以 merge 会返回 `merge.ErrBranchNotFound`。\n\n也就是说，\"fork → 写 fork → propose → review → merge\" 这条路在当前 tree 上**走不到最后一步**。这是跨模块的产品语义问题（外部贡献如何进入合并路径），可能涉及 T0409 的领地；**本任务不自行实现这个修复**。\n\n你要做的：\n1. 在 `RESULT.json` 里把 AC8 从 \"passed\" 改成 **not satisfied**，并写清楚证据：\n   - merge path 解析 source branch 是按 PR project 作用域（给出具体文件/行号）；\n   - fork-sourced branch 不在该作用域内，会报 `ErrBranchNotFound`；\n   - 因此 docs/31:17 的旅程在当前树没有 end；\n   - 把这条作为一个 **named follow-up** 记录（例如 `T0814-follow-up: merge path must resolve fork-sourced source branch`）。\n2. 把你原来 RESULT 里 \"argued from the row shape rather than demonstrated\" 那段证据替换成上面的真话；原来关于 \"if it were pinned differently...\" 的假设也要说明它现在不成立。\n3. 不要试图在 `internal/application/merge/**` 或 `internal/persistence/merge_store.go` 里加 fork 感知来让 AC8 成立——那会让本任务超出它的 decision level。\n\n【M · MAJOR — provisioning 禁用时 fork 路由会 panic，要加 503 守卫】\n\n问题：`cmd/api/main.go:242-243` 在配置缺失时把 `forkProvisioner`/`forkImporter` 留 nil；`internal/gitprovider/config.go:69` 定义这种部署为 \"provisioning disabled\"。`Service.Fork` → `ensureFork` 会先把 fork project 行写进库（`forks/service.go:378`），然后对 nil interface 调用 `s.repos.Provision`（`forks/service.go:417`），导致 panic、连接被 abort，而且那个 slug 被actor 自己的 lineage-less project 永久占住，后续请求永远 409 FORK_NAME_TAKEN。\n\n你要做的：\n- 让 disabled 部署对 fork 路由返回 **fail-closed 503**，并在响应或日志里**点名缺少哪些配置 key**。\n- 已有惯例：`cmd/api/main.go:438-439`（git tokens）和 `:458`（files）就是这样处理的。照那个模式做，不要发明新形状。\n- 注意 `forkshttp/handlers.go:203` 的 `h.forks == nil` 检查不会触发，因为 service 非 nil；所以守卫要放在 service 层或路由注册层，并确保 disabled 模式下不会先写 project 行再失败。\n- 更新 `main.go` 里关于 \"no provider to call\" 的注释，让它与现在实际行为一致。\n- 补一条测试：在 provisioning disabled 模式下调用 fork 路由，断言返回 503 且没有 project 行残留。\n\n【m · MINOR — PR 路由的 contract 对照检查不对称】\n\n`cmd/api/pullrequestshttp/contract_test.go:149` 的 `***` 只检查了 declared path、409 存在、code 等于 contract token，但**没把 contract 声明的 status 集合与路由实际返回的集合做双向比较**。fork 路由的 contract test 做了这个双向检查，PR 路由也要做。\n\n你要做的：\n- 扩展 PR 路由的 contract test，像 fork 路由那样比较 \"contract 声明的状态集合\" 与 \"代码实际返回的状态集合\" 双向包含。\n- 404 文案 mismatch（contract 写 BRANCH_NOT_FOUND，surface 答 PROJECT_NOT_FOUND）是 pre-existing，按现有做法记录为 follow-up，不要 paper over。\n\n【nit】\n- `specs/api/openapi.yaml:98` 的 line reference `internal/application/forks/service.go:821` 已经 stale；specs 是 Supervisor-only，但你已经在 follow-ups 里记了两条 contract 项，把这条也加进 follow-up 即可，不要自己改 specs。\n\n【约束】\n- 不要改 `internal/application/merge/**` 或 `internal/persistence/merge_store.go` 来让 AC8 成立。\n- 不要弱化任何现有测试或断言。\n- 改完重跑 `cmd/api/forkshttp` + `cmd/api/pullrequestshttp` 的测试、`TestExternalFork` 全家、e2e 必测项、完整 unit suite。\n- `RESULT.json` 必须自洽：AC8 不能写 passed；新增/修改的测试要有 passed 条目；如实记录哪些跟着了、哪些被拆成 follow-up。\n",
       "history": [
         {
           "from": "todo",
@@ -6879,6 +6894,20 @@
           "at": "2026-09-19T10:06:55Z",
           "run_id": "run-b40062bf276dac49",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-20T10:48:58Z",
+          "run_id": "run-49a246a5f30aca9b",
+          "reason": "独立评审给了 request_changes，1 条 blocking + 1 条 major + 若干 minor/nit。按下面优先级处理。\n\n【B · BLOCKING — AC8（主验收闭合）当前无法成立，需要如实改写 RESULT】\n\nReviewer 核实：外部 fork 提的 PR，其 source branch 活在 contributor 的 fork project 里，而 `internal/application/merge/service.go:431` 的 `MergePullRequest` 用 `s.branch(ctx, in.ProjectID, pr.SourceBranchID)` 去解析 branch，这一路（`merge_store.go:66/:75/:206`）都是按 **PR 的 project** 去查 branch。fork 里的 branch 在 PR project 里不存在，所以 merge 会返回 `merge.ErrBranchNotFound`。\n\n也就是说，\"fork → 写 fork → propose → review → merge\" 这条路在当前 tree 上**走不到最后一步**。这是跨模块的产品语义问题（外部贡献如何进入合并路径），可能涉及 T0409 的领地；**本任务不自行实现这个修复**。\n\n你要做的：\n1. 在 `RESULT.json` 里把 AC8 从 \"passed\" 改成 **not satisfied**，并写清楚证据：\n   - merge path 解析 source branch 是按 PR project 作用域（给出具体文件/行号）；\n   - fork-sourced branch 不在该作用域内，会报 `ErrBranchNotFound`；\n   - 因此 docs/31:17 的旅程在当前树没有 end；\n   - 把这条作为一个 **named follow-up** 记录（例如 `T0814-follow-up: merge path must resolve fork-sourced source branch`）。\n2. 把你原来 RESULT 里 \"argued from the row shape rather than demonstrated\" 那段证据替换成上面的真话；原来关于 \"if it were pinned differently...\" 的假设也要说明它现在不成立。\n3. 不要试图在 `internal/application/merge/**` 或 `internal/persistence/merge_store.go` 里加 fork 感知来让 AC8 成立——那会让本任务超出它的 decision level。\n\n【M · MAJOR — provisioning 禁用时 fork 路由会 panic，要加 503 守卫】\n\n问题：`cmd/api/main.go:242-243` 在配置缺失时把 `forkProvisioner`/`forkImporter` 留 nil；`internal/gitprovider/config.go:69` 定义这种部署为 \"provisioning disabled\"。`Service.Fork` → `ensureFork` 会先把 fork project 行写进库（`forks/service.go:378`），然后对 nil interface 调用 `s.repos.Provision`（`forks/service.go:417`），导致 panic、连接被 abort，而且那个 slug 被actor 自己的 lineage-less project 永久占住，后续请求永远 409 FORK_NAME_TAKEN。\n\n你要做的：\n- 让 disabled 部署对 fork 路由返回 **fail-closed 503**，并在响应或日志里**点名缺少哪些配置 key**。\n- 已有惯例：`cmd/api/main.go:438-439`（git tokens）和 `:458`（files）就是这样处理的。照那个模式做，不要发明新形状。\n- 注意 `forkshttp/handlers.go:203` 的 `h.forks == nil` 检查不会触发，因为 service 非 nil；所以守卫要放在 service 层或路由注册层，并确保 disabled 模式下不会先写 project 行再失败。\n- 更新 `main.go` 里关于 \"no provider to call\" 的注释，让它与现在实际行为一致。\n- 补一条测试：在 provisioning disabled 模式下调用 fork 路由，断言返回 503 且没有 project 行残留。\n\n【m · MINOR — PR 路由的 contract 对照检查不对称】\n\n`cmd/api/pullrequestshttp/contract_test.go:149` 的 `***` 只检查了 declared path、409 存在、code 等于 contract token，但**没把 contract 声明的 status 集合与路由实际返回的集合做双向比较**。fork 路由的 contract test 做了这个双向检查，PR 路由也要做。\n\n你要做的：\n- 扩展 PR 路由的 contract test，像 fork 路由那样比较 \"contract 声明的状态集合\" 与 \"代码实际返回的状态集合\" 双向包含。\n- 404 文案 mismatch（contract 写 BRANCH_NOT_FOUND，surface 答 PROJECT_NOT_FOUND）是 pre-existing，按现有做法记录为 follow-up，不要 paper over。\n\n【nit】\n- `specs/api/openapi.yaml:98` 的 line reference `internal/application/forks/service.go:821` 已经 stale；specs 是 Supervisor-only，但你已经在 follow-ups 里记了两条 contract 项，把这条也加进 follow-up 即可，不要自己改 specs。\n\n【约束】\n- 不要改 `internal/application/merge/**` 或 `internal/persistence/merge_store.go` 来让 AC8 成立。\n- 不要弱化任何现有测试或断言。\n- 改完重跑 `cmd/api/forkshttp` + `cmd/api/pullrequestshttp` 的测试、`TestExternalFork` 全家、e2e 必测项、完整 unit suite。\n- `RESULT.json` 必须自洽：AC8 不能写 passed；新增/修改的测试要有 passed 条目；如实记录哪些跟着了、哪些被拆成 follow-up。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T10:49:12Z",
+          "run_id": "run-a3191c8e3a8b7076",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -7193,9 +7222,10 @@
       ]
     },
     "T0905": {
-      "status": "verification",
-      "started_at": "2026-09-19T10:47:09Z",
-      "worker_run_id": "run-376faa85d9e1c73b",
+      "status": "running",
+      "started_at": "2026-09-20T10:55:26Z",
+      "worker_run_id": "run-1ebd17efbf65c177",
+      "rejection_reason": "独立评审给了 request_changes，1 条 blocking + 若干文档/覆盖项。下面按优先级处理。\n\n【B · BLOCKING — 必须修：scope 外版本被报成「unversioned」，解释是错的】\n\n问题：`internal/search/ranking/store.go:87` 的 `VersionsForPids` 把 caller project scope 外的行直接 `continue` 掉，导致 ranker 看到的是一个**空 versionID**；然后 `rank.go:503-504` 走 assessVersion，把它当成「没有版本信息」处理，返回 `LevelUnversioned`（rank 2，高于 unknown），并在 `rank.go:539-542` 写出原因 \"the candidate resolves to no scientific object version, so there are no facts to read\"。\n\n这个解释是假的：版本**存在**，只是 caller 不被允许读。Reviewer 用真实 SQLStore + 真实 retriever + 真实 Ranker 在测试库上复现了：out-of-scope 文档报的是 unversioned + 那段假原因。\n\n你要做的：\n1. 让 `VersionsForPids` 能区分「这个 pid 没有版本」和「这个 pid 有版本但不在 scope 内」。\n   可以返回一个额外集合（或 map），把 scope-refused 的 pid 标出来；**不要**为了区分而引入 read-then-write 或改变现有查询的 fail-closed 语义。\n2. 在 ranker 里，scope-refused 的版本要走到 `LevelUnknown`，并给出真实原因：版本在 caller 的 project scope 外。\n   对应文档：`factor.go` 的 `LevelUnknown` 注释已经这么说了，`rank.go` 的 `unreadAssessment` 注释也指向这条路。\n3. 更新 golden fixtures（如果它们现在钉的是错误值）。\n4. 重跑 ranking 的单元测试、集成测试、required test，全部要绿。\n\n【M · MAJOR — 测试钉的不是真实路径】\n\n`tests/integration/ranking_test.go:730` 的 `TestRankingReportsOutOfScopeAsUnknown` 自己 hand-build 了一个带 out-of-scope `ObjectVersionID` 的 Candidate，但真实 retriever 会把 out-of-scope seed 丢掉、返回 `ObjectVersionID == \"\"`。所以这个测试号称测的是「真实会发生的情况」，实际上走的是一条 unreachable 的路。\n\n你要做的：\n- 改成用真实 retriever 驱动 out-of-scope 候选（像 `TestRankingOverRetrievalOutput` 那样），然后钉真实输出。\n- 这个改动应该和 blocking 修复一起让测试变真；如果改完之后测试描述的意图仍然 unreachable，把注释也改成真话。\n\n【m · minor / nit — 顺手修】\n\n- `factor.go:118` 的 reproduction-ladder 注释与实现不一致（实现把任何 failure 都当 dispute）。**不要**在这里改实现，改注释让它与当前实现一致；如果你确认应该按注释实现，必须先报上来，不要自己改产品语义。\n- `search.sql:466` public-evidence 谓词比 evidence 表自己的公开网络读宽松（没要求 asserting project 是 public）。今天是 unreachable 的差（项目可见性不能变），但注释声称\"exactly that meaning\"。把注释改成真实语义，或在查询里补上 `p.visibility = 'public'` 并更新测试；**不要**在注释上撒谎。\n- `search.sql:492` contradiction count 用 ANY version 的 type = 'contradicts'，而平台其它 relation 读只读最新版本。同样：要么按 as-of 规则改查询，要么注释写明故意不同。\n- `RESULT.json` 里\"factor vocabulary\"和\"prestige\"两段证据有夸大（列了不存在的 level、列了没检查的禁用词）。按实际测了什么重写，不要写没有的覆盖。\n- 几处 garbled HTML escape 注释（`result.go:108`、golden test :755/:865）把字面字符修成可读说明。\n- migration 的 `-- +goose Down` 段与仓库 \"no down migrations\" 的 README 不一致。这是仓库既有先例（00092/00100 也这样），先不要大动，RESULT 里如实说明即可。\n\n【约束】\n- 不要改 ranking 的 factor/level 词汇表（closed vocabulary）或者新增 prestige 输入。\n- 不要为了绿而删断言、skip 测试、放大 timeout。\n- 改完必须跑 `make check-spec-version` 与 `make check-schema-snapshot`（如果动了 schema 或迁移；没动也要确认不红）。\n- `RESULT.json` 里 acceptance evidence 必须逐字与代码/测试实际行为相符。\n",
       "history": [
         {
           "from": "todo",
@@ -7216,6 +7246,41 @@
           "at": "2026-09-19T11:40:26Z",
           "run_id": "run-cbf54745404acf8b",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-20T10:48:58Z",
+          "run_id": "run-e29eda23384cac3a",
+          "reason": "独立评审给了 request_changes，1 条 blocking + 若干文档/覆盖项。下面按优先级处理。\n\n【B · BLOCKING — 必须修：scope 外版本被报成「unversioned」，解释是错的】\n\n问题：`internal/search/ranking/store.go:87` 的 `VersionsForPids` 把 caller project scope 外的行直接 `continue` 掉，导致 ranker 看到的是一个**空 versionID**；然后 `rank.go:503-504` 走 assessVersion，把它当成「没有版本信息」处理，返回 `LevelUnversioned`（rank 2，高于 unknown），并在 `rank.go:539-542` 写出原因 \"the candidate resolves to no scientific object version, so there are no facts to read\"。\n\n这个解释是假的：版本**存在**，只是 caller 不被允许读。Reviewer 用真实 SQLStore + 真实 retriever + 真实 Ranker 在测试库上复现了：out-of-scope 文档报的是 unversioned + 那段假原因。\n\n你要做的：\n1. 让 `VersionsForPids` 能区分「这个 pid 没有版本」和「这个 pid 有版本但不在 scope 内」。\n   可以返回一个额外集合（或 map），把 scope-refused 的 pid 标出来；**不要**为了区分而引入 read-then-write 或改变现有查询的 fail-closed 语义。\n2. 在 ranker 里，scope-refused 的版本要走到 `LevelUnknown`，并给出真实原因：版本在 caller 的 project scope 外。\n   对应文档：`factor.go` 的 `LevelUnknown` 注释已经这么说了，`rank.go` 的 `unreadAssessment` 注释也指向这条路。\n3. 更新 golden fixtures（如果它们现在钉的是错误值）。\n4. 重跑 ranking 的单元测试、集成测试、required test，全部要绿。\n\n【M · MAJOR — 测试钉的不是真实路径】\n\n`tests/integration/ranking_test.go:730` 的 `TestRankingReportsOutOfScopeAsUnknown` 自己 hand-build 了一个带 out-of-scope `ObjectVersionID` 的 Candidate，但真实 retriever 会把 out-of-scope seed 丢掉、返回 `ObjectVersionID == \"\"`。所以这个测试号称测的是「真实会发生的情况」，实际上走的是一条 unreachable 的路。\n\n你要做的：\n- 改成用真实 retriever 驱动 out-of-scope 候选（像 `TestRankingOverRetrievalOutput` 那样），然后钉真实输出。\n- 这个改动应该和 blocking 修复一起让测试变真；如果改完之后测试描述的意图仍然 unreachable，把注释也改成真话。\n\n【m · minor / nit — 顺手修】\n\n- `factor.go:118` 的 reproduction-ladder 注释与实现不一致（实现把任何 failure 都当 dispute）。**不要**在这里改实现，改注释让它与当前实现一致；如果你确认应该按注释实现，必须先报上来，不要自己改产品语义。\n- `search.sql:466` public-evidence 谓词比 evidence 表自己的公开网络读宽松（没要求 asserting project 是 public）。今天是 unreachable 的差（项目可见性不能变），但注释声称\"exactly that meaning\"。把注释改成真实语义，或在查询里补上 `p.visibility = 'public'` 并更新测试；**不要**在注释上撒谎。\n- `search.sql:492` contradiction count 用 ANY version 的 type = 'contradicts'，而平台其它 relation 读只读最新版本。同样：要么按 as-of 规则改查询，要么注释写明故意不同。\n- `RESULT.json` 里\"factor vocabulary\"和\"prestige\"两段证据有夸大（列了不存在的 level、列了没检查的禁用词）。按实际测了什么重写，不要写没有的覆盖。\n- 几处 garbled HTML escape 注释（`result.go:108`、golden test :755/:865）把字面字符修成可读说明。\n- migration 的 `-- +goose Down` 段与仓库 \"no down migrations\" 的 README 不一致。这是仓库既有先例（00092/00100 也这样），先不要大动，RESULT 里如实说明即可。\n\n【约束】\n- 不要改 ranking 的 factor/level 词汇表（closed vocabulary）或者新增 prestige 输入。\n- 不要为了绿而删断言、skip 测试、放大 timeout。\n- 改完必须跑 `make check-spec-version` 与 `make check-schema-snapshot`（如果动了 schema 或迁移；没动也要确认不红）。\n- `RESULT.json` 里 acceptance evidence 必须逐字与代码/测试实际行为相符。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T10:49:11Z",
+          "run_id": "run-6ab94ae3b6a3d8e4",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "worker_failed",
+          "at": "2026-09-20T10:50:11Z",
+          "run_id": "run-ac832d3b225966f5",
+          "reason": "worker exited 1"
+        },
+        {
+          "from": "worker_failed",
+          "to": "rejected",
+          "at": "2026-09-20T10:54:27Z",
+          "run_id": "run-ac832d3b225966f5",
+          "reason": "Worker API tokenization failure; Supervisor respawning with model override"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T10:55:26Z",
+          "run_id": "run-1ebd17efbf65c177",
+          "reason": "worker spawn"
         }
       ]
     },
