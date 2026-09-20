@@ -239,7 +239,12 @@ SELECT pr.number AS pull_request_number,
 FROM reviews r
 JOIN pull_requests pr ON pr.id = r.pull_request_id
 WHERE pr.target_branch_id = $1
-  AND pr.proposed_state_id IN (SELECT id FROM lineage)
+  AND (pr.proposed_state_id IN (SELECT id FROM lineage)
+       OR EXISTS (
+         SELECT 1 FROM semantic_merges sm
+         WHERE sm.pull_request_id = pr.id
+           AND sm.result_state_id IN (SELECT id FROM lineage)
+       ))
 ORDER BY pr.number, r.created_at, r.id
 `
 
@@ -259,13 +264,39 @@ type ListReleaseReviewsRow struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
-// The review/approval record of one release (T0605): every review row of
-// the research PRs targeting main whose proposed state is the released
-// state or one of its ancestors — the reviews that accepted this lineage
-// into main (docs/09 §4: frozen main updates only through PR merge, so a
-// proposed state inside main's lineage got there through its PR). The
-// target filter names main explicitly: a duplicate proposal of the same
-// state against another branch is not part of main's acceptance record.
+// The review/approval record of one release (T0605, extended by T0611):
+// every review row of the research PRs targeting main that either
+//
+//  1. proposed a state which is the released state or one of its
+//     ancestors (the T0605 edge), or
+//  2. were merged into the lineage — the merge row that accepted the
+//     proposal recorded a result state inside that lineage
+//     (semantic_merges.result_state_id, the T0611 edge).
+//
+// Edge 2 is what makes the states that entered main the ONE way docs/09
+// §3 allows readable at all. A merge commits a NEW state whose parent is
+// the target head it ran on — not the proposal (migration 00069 pins the
+// triple; internal/application/merge commits BaseStateID = target head) —
+// so the proposal state is never an ancestor of the accepted state, and
+// edge 1 alone answers EMPTY for exactly the lineage that got there by
+// being merged. Both edges stay: a proposal inside the lineage is part of
+// the record whether or not it was ever merged, and dropping edge 1 would
+// lose those states' reviews.
+//
+// The two edges are ONE predicate over ONE select, so a PR that matches
+// both (its proposed state is an ancestor AND its merge result is in the
+// lineage) is still one group of rows, each review row counted once: the
+// union is of PRs, and a union spelled as two selects would emit that
+// PR's reviews twice.
+//
+// No target filter is repeated on edge 2. It does not need one: the merge
+// row's target branch is the branch its result state was committed on
+// (00069 says so in as many words), so a result state inside the lineage
+// — which is main's own chain by construction — is a merge ONTO main. The
+// target filter outside names main explicitly for edge 1, where it is
+// needed: a duplicate proposal of the same state against another branch is
+// not part of main's acceptance record.
+//
 // Ordered by PR number then review time then row id (a total order — the
 // release manifest's canonical sorting is the releases package's rule,
 // not the store's).
