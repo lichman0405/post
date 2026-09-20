@@ -1428,11 +1428,48 @@ type Querier interface {
 	// plan of a filtered page is the plan of the unfiltered one minus a
 	// branch.
 	//
-	// Every audit row comes back whatever its action, and every event row
-	// whatever its stored visibility: the Activity feed's authorization is the
-	// project read gate (member-only, existence hiding), the same gate for
-	// both sources, and it is not re-derived from a payload here. The
-	// visibility travels as data because the page renders it.
+	// The two branches do NOT share an audience rule, and that asymmetry is
+	// deliberate rather than an oversight waiting to be tidied away.
+	//
+	// The GOVERNANCE branch is the audit_log read. That table carries no
+	// per-row visibility column at all (00012's column list), so "a project's
+	// activity is as visible as the project" is the only rule available to it,
+	// and the project read gate its caller already ran has applied that rule.
+	// The reader input below cannot narrow this branch, because there is no
+	// column here to narrow it by; every audit row comes back whatever its
+	// action.
+	//
+	// The RESEARCH branch is the research_events read, and those rows DO carry
+	// a visibility column whose meaning the write path fixes (rsg/events.go:
+	// an event is never more visible than its subject, so a write committed to
+	// a private branch is stored 'private'). A PUBLIC project's read is
+	// allowed for every matrix class (read_public_project), so "the gate
+	// passed" does not mean "the caller is a member" — the gate is not enough
+	// for these rows. The reader is therefore an explicit input of this read
+	// (@reader_user_id; ADR-024's third outlet), and a research row is
+	// rendered to that reader when EITHER
+	//
+	//   e.visibility = 'public'   the row's own axis: a thing nothing
+	//                             explicitly made public is not rendered
+	//                             outside its project (00012, docs/12 §5); or
+	//   the reader holds a project_memberships row for THIS project (e.project_id)
+	//                             — the same criterion projects.
+	//                             ProjectStore.GetMembership answers, expressed
+	//                             here so the filter is the read's rather than
+	//                             its caller's.
+	//
+	// A future edit must NOT "tidy" the two axes into one
+	// `visibility = 'public'` predicate: a member must still see her own
+	// project's private rows, and a predicate written for the anonymous
+	// audience would take exactly those rows away from her. It is the same
+	// discipline research_profile.sql:36-38 records for the anonymous reads and
+	// ADR-024's 决定 2-3 records for this one.
+	//
+	// Fail closed: a reader that resolves to no user id arrives as SQL NULL,
+	// and the membership clause is then NULL rather than true, so an
+	// unresolvable reader gets exactly the public rows — the same direction as
+	// the column's own default and rsg/events.go's "anything unclear stays
+	// private".
 	//
 	// Organization scope, target ref and the before/after summaries are NULL
 	// on every research row by construction — research events have no such

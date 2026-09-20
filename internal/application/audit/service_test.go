@@ -32,10 +32,14 @@ type fakeStoreCall struct {
 	// test can pin that the service passes the reader's filter through
 	// unchanged instead of the store having to re-derive it.
 	source domain.ActivitySource
+	// reader is the user id the read was told to render for (ADR-024), so
+	// a test can pin that the service hands the row set's audience down
+	// rather than leaving the store to guess it.
+	reader string
 }
 
-func (f *fakeStore) ListProjectActivity(_ context.Context, projectID string, before *audit.Cursor, limit int, source domain.ActivitySource) ([]domain.AuditRecord, error) {
-	f.calls = append(f.calls, fakeStoreCall{projectID, before, limit, source})
+func (f *fakeStore) ListProjectActivity(_ context.Context, projectID, readerUserID string, before *audit.Cursor, limit int, source domain.ActivitySource) ([]domain.AuditRecord, error) {
+	f.calls = append(f.calls, fakeStoreCall{projectID, before, limit, source, readerUserID})
 	return f.rows, f.err
 }
 
@@ -249,6 +253,52 @@ func TestProjectActivityPassesSourceFilter(t *testing.T) {
 		if got := store.calls[0].source; got != tc.source {
 			t.Errorf("store source = %q, want %q (the filter is passed through, not re-derived)", got, tc.source)
 		}
+	}
+}
+
+// TestProjectActivityCarriesTheReader: ADR-024 makes the reader an INPUT of
+// the read, and the Activity feed's research rows are the ones that need it
+// — a public project's gate admits signed-in non-members, so the row set
+// has to be the reader's. The service must hand the actor's id down with
+// every page, cursor included: the second page of a feed is the same
+// audience as the first, or a reader could page past the boundary.
+//
+// The zero actor (an unresolvable reader) is passed as the EMPTY id, which
+// is the store's anonymous-audience branch — never a wider set, and never
+// an error the surface would have to turn into an outage.
+func TestProjectActivityCarriesTheReader(t *testing.T) {
+	store := &fakeStore{}
+	svc := newTestService(store, nil, nil)
+	actor := domain.User{ID: "11111111-2222-4333-8444-555555555555"}
+
+	if _, _, err := svc.ProjectActivity(context.Background(), actor, "p1", "", "", 10); err != nil {
+		t.Fatalf("ProjectActivity: %v", err)
+	}
+	if len(store.calls) != 1 {
+		t.Fatalf("store calls = %d, want 1", len(store.calls))
+	}
+	if got := store.calls[0].reader; got != actor.ID {
+		t.Errorf("the read was given reader %q, want the actor id %q (the row set is the reader's, ADR-024)", got, actor.ID)
+	}
+
+	// The org feed has no per-row visibility to render (audit_log carries
+	// none), so it carries no reader: the governance rows are exactly as
+	// visible as the organization the gate already admitted the caller to.
+	store.calls = nil
+	if _, _, err := svc.OrgActivity(context.Background(), actor, "o1", "", "", 10); err != nil {
+		t.Fatalf("OrgActivity: %v", err)
+	}
+	if len(store.calls) != 1 {
+		t.Fatalf("store calls = %d, want 1", len(store.calls))
+	}
+
+	// An unresolvable actor travels as the empty id, not as a guess.
+	store.calls = nil
+	if _, _, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", "", "", 10); err != nil {
+		t.Fatalf("ProjectActivity (no actor): %v", err)
+	}
+	if got := store.calls[0].reader; got != "" {
+		t.Errorf("an unresolvable actor was given to the read as reader %q, want the empty id (fail closed)", got)
 	}
 }
 

@@ -47,18 +47,29 @@ const maxLimit = 200
 // ask for must not look like "there is nothing here".
 //
 // One read gate covers both sources, and it is the project's own: the
-// activity feed shows exactly what its scope may show. The event's stored
-// visibility is rendered, not re-checked here — the platform decides who
-// may read a project's rows once (the projects surface's visibility
-// matrix), and a second gate derived from an event's payload would be a
-// second rule to keep in step (the argument internal/application/feeds
-// makes in "Why not the research event log").
+// activity feed shows what its scope may show. The gate alone is enough for
+// the governance rows — audit_log has no per-row visibility column, so
+// "as visible as the project" is the only rule there is to apply to them —
+// but it is NOT enough for the research events: those carry a visibility
+// of their own (rsg/events.go: an event is never more visible than its
+// subject), and a public project's read is allowed for every matrix class,
+// so passing the gate does not make the caller a member of the project it
+// passed on.
+//
+// So the reader travels INTO the read (ADR-024's third outlet): the actor
+// is the research rows' audience, and the store decides which of them are
+// rendered — a row that is public, or one belonging to a project the actor
+// is a member of. This is not a second authorization rule beside the
+// matrix: it is the one the row's own visibility column names, applied
+// where the rows are. A reader who cannot be resolved gets the public rows
+// only (fail closed), never the whole set.
 func (s *Service) ProjectActivity(ctx context.Context, actor domain.User, projectID string, source domain.ActivitySource, cursor string, limit int) ([]domain.AuditRecord, string, error) {
 	if _, err := s.projects.Get(ctx, actor, projectID); err != nil {
 		return nil, "", err // the gate's sentinel: PROJECT_NOT_FOUND for non-members
 	}
+	reader := actor.ID
 	list := func(ctx context.Context, scope string, before *Cursor, limit int) ([]domain.AuditRecord, error) {
-		return s.store.ListProjectActivity(ctx, scope, before, limit, source)
+		return s.store.ListProjectActivity(ctx, scope, reader, before, limit, source)
 	}
 	return s.page(ctx, list, projectID, cursor, limit)
 }

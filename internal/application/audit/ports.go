@@ -19,7 +19,17 @@ type Store interface {
 	// paginated as ONE ordered sequence on (occurred_at, id): a page of a
 	// project that mixes audit rows and events is still exactly one keyset
 	// window, never a concatenation of two.
-	ListProjectActivity(ctx context.Context, projectID string, before *Cursor, limit int, source domain.ActivitySource) ([]domain.AuditRecord, error)
+	//
+	// readerUserID is the reader the rows are rendered to, and it is an
+	// input of the read rather than a filter over its result (ADR-024):
+	// the research events carry a visibility of their own, and a public
+	// project's read gate admits readers who are not members of it, so the
+	// row set cannot be derived from the gate alone. An EMPTY (or
+	// unresolvable) reader id is the anonymous audience and must answer the
+	// publicly visible rows only — never the full set, and never an error.
+	// Governance rows take no audience: audit_log has no per-row visibility
+	// column to render them by.
+	ListProjectActivity(ctx context.Context, projectID, readerUserID string, before *Cursor, limit int, source domain.ActivitySource) ([]domain.AuditRecord, error)
 	// ListOrganizationActivity returns the organization's governance rows
 	// newest-first. Research events are project-scoped (research_events
 	// carries no organization id), so this feed has one source and no
