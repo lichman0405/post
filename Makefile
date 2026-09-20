@@ -167,10 +167,30 @@ test-integration: ## integration suite against real PostgreSQL; loud failure (wi
 # hang is still caught, ten minutes later. If you are reading this because you
 # want to raise it again, get the same shape of evidence first — a test that
 # is *stuck*, not a suite that is *slow*.
+#
+# The trailing "testdb: ..." line is T0815's answer to where the time goes. It
+# is written by tests/integration/main_test.go (via POST_TESTDB_STATS, because
+# `go test` throws away a passing test binary's output) and it separates the
+# two things a bare "ok ... 217s" conflates: the work the suite does, and the
+# cost of getting each test a database to do it in. Before T0815 that second
+# part was 41.6% of the job — 377 databases, each one created and then
+# migrated through all 69 migrations, i.e. ~26,000 DDL transactions whose cost
+# tracks how contended the runner is rather than what the suite tests, which
+# is the whole reason one GitHub runner took 320s and another 710s on a
+# byte-identical tree. Setup now clones a per-run migrated template
+# (internal/persistence/testdb), so the migrate figure should be a handful of
+# templates, not the test count. If it ever climbs back to the test count,
+# something has started calling SetupFromScratch on the hot path.
 	@PG_TEST_URL="$${POSTGRES_TEST_ADMIN_URL:-postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post}"; \
 	if python3 scripts/pg-ready.py "$$PG_TEST_URL"; then \
 		echo ">> test-integration: running integration suite against $$PG_TEST_URL"; \
-		POSTGRES_TEST_ADMIN_URL="$$PG_TEST_URL" go test ./tests/integration -count=1 -timeout 20m; \
+		stats="$$(mktemp)"; \
+		POSTGRES_TEST_ADMIN_URL="$$PG_TEST_URL" POST_TESTDB_STATS="$$stats" \
+			go test ./tests/integration -count=1 -timeout 20m; \
+		rc=$$?; \
+		[ -s "$$stats" ] && cat "$$stats"; \
+		rm -f "$$stats"; \
+		exit $$rc; \
 	else \
 		echo ">> test-integration: FAILED — integration tests require a real PostgreSQL and none is reachable (see pg-ready above)." >&2; \
 		exit 1; \
