@@ -131,6 +131,29 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 		return nil, err
 	}
 
+	// 1a) A Worker starting a NEW session must start from a baseline no older
+	// than the main it will be graded against. ensureWorktree cuts a missing
+	// branch from the integration tip and says why — but it ADOPTS an existing
+	// one, and an existing branch is what an earlier attempt leaves behind: a
+	// run whose process vanished, or one the Supervisor parked. Adopting it
+	// without asking hands today's Worker yesterday's tree, silently.
+	//
+	// Measured 2026-09-21: T1007 and T1102 were re-dispatched after their first
+	// Workers vanished, and both started 33 commits behind main. 120 of the 172
+	// files main had changed in the meantime fell inside T1007's allowed_scope,
+	// including the audit read rule (T0613) that its own acceptance criteria are
+	// graded by. Nothing in the run said so; it simply proceeded.
+	//
+	// A resumed session is the other case, and is deliberately left alone:
+	// keeping its baseline is what resuming IS (the first-rejection policy keeps
+	// the Worker's context and its accumulated diff), and `rddev rebaseline` is
+	// the door that advances it — with a reason the Worker is told.
+	if opts.ResumeSession == "" {
+		if err := requireBaselineNotBehindMain(repoRoot, opts.TaskID, branch); err != nil {
+			return nil, err
+		}
+	}
+
 	// 1b) A respawn starts from a clean tree: the rejected diff is discarded
 	// (its evidence lives in the collect report and the reject record) and
 	// the worktree is reset to the branch tip — the new Worker starts from
@@ -564,6 +587,53 @@ func TaskBranch(taskID, title string) string {
 		slug = "work"
 	}
 	return "task/" + taskID + "-" + slug
+}
+
+// requireBaselineNotBehindMain refuses to dispatch a NEW Worker onto a task
+// branch that is not current with the integration tip.
+//
+// It refuses rather than advancing by itself, and the difference matters: an
+// existing branch may carry a previous attempt's uncommitted work — a Worker
+// that vanished mid-run leaves a real diff behind. Whether that work is worth
+// carrying forward is the Supervisor's call, and it is a call the tooling
+// already has a verb for (`rddev rebaseline TASK`, which carries the work and
+// tells the Worker why its tree moved). Advancing here would silently choose:
+// discarding the work, or merging it into a tree nobody looked at.
+//
+// This is the same rule the stale-binary guard applies to the tooling itself —
+// a gate must not grade from a tree older than the rules it enforces — asked of
+// the baseline instead of the binary.
+func requireBaselineNotBehindMain(repoRoot, taskID, branch string) error {
+	tip, err := IntegrationTip(repoRoot)
+	if err != nil {
+		return err
+	}
+	ref := "refs/heads/" + branch
+	// merge-base --is-ancestor exits 1 for "no" and something else for "could
+	// not answer"; only the first is a verdict.
+	err = gitOutputErr(repoRoot, "merge-base", "--is-ancestor", tip, ref)
+	if err == nil {
+		return nil
+	}
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 1 {
+		return fmt.Errorf("asking whether %s starts from the integration tip: %w", branch, err)
+	}
+	behind, _ := gitOutput(repoRoot, "rev-list", "--count", ref+".."+tip)
+	detail := ""
+	if n := strings.TrimSpace(behind); n != "" {
+		detail = fmt.Sprintf(" (main has %s commit(s) it does not have)", n)
+	}
+	return fmt.Errorf("refusing to dispatch %s: its branch %s does not start from the integration tip %s%s — this branch is left over from an earlier attempt, and a new Worker on it would read a tree older than the main it is graded against. Advance it onto main (the work that attempt left behind is carried, and the Worker is told why) with `rddev rebaseline %s --reason-file FILE`, then dispatch again. A resumed session (rework) is not affected: it keeps its baseline on purpose",
+		taskID, branch, tip[:12], detail, taskID)
+}
+
+// gitOutputErr is gitOutput for a caller that reads the exit code rather than
+// the text: merge-base --is-ancestor answers in its exit status and writes
+// nothing, so the wrapper above would hide the answer in a message.
+func gitOutputErr(dir string, args ...string) error {
+	_, err := runGit(dir, 0, args...)
+	return err
 }
 
 // ensureWorktree creates or adopts the task worktree on the task branch.
