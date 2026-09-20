@@ -14497,3 +14497,24 @@ internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql)
 - `scripts/spec_version.py --write` 必须在 `scripts/gen_schema_snapshot.py` 之后跑。
 - 如果 rebaseline 后 branch 上出现多余 commit（例如我不小心 `git rebase` 出了 commit `9dcbabe`），
   不要直接提交那个 branch；要把它还原成“基线 + uncommitted diff”的 Worker 状态，否则后续 gate 对不上。
+
+## 2026-09-20：T0607 的 rebaseline 被 map 锚点挡住，手工挪位后推进成功
+
+**事实**：T0607（项目 Activity feed 的 research_events 索引，迁移 `00107`）在 G2 被拒：
+`rddev task accept` 报 "does not apply to current main"，冲突只在 `tests/integration/migration_test.go`。
+`rddev rebaseline T0607` 也拒绝，说 three-way merge 在同一文件冲突、需要人。
+
+**根因**：T0607 的 fixture 改动是往 `explicitIndexes` map 的**末尾**（`pull_requests_creation_key_idx` 之后、
+`}` 之前）插一条 `research_events_project_occurred_idx`；但 main 在这两个锚点之间又插了
+T0808/T0809/T0811 等若干个块，所以 T0607 的 hunk 尾上下文（紧跟 `}`）在 main 上不存在。
+
+**处置**：在 T0607 的 worktree 里把同一条 map 记录**整体挪到** T0804 块之后、T0410 注释之前——
+那段上下文在 baseline 与 main 上逐字相同，patch 即可干净应用。先用
+`git -C .rddev/worktrees/T0607 diff HEAD -- tests/integration/migration_test.go | git apply --check`
+在主库上验证过，再跑 `rddev rebaseline T0607`，成功：
+`baseline 3ba0ed749342 -> e7f06ba63efa (26 file(s) carried; regenerated
+internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql)`，工人已在新基线上重做。
+
+**给以后**：这类"两边各自往同一个 map/slice 末尾追加"的冲突，机器判不了是因为**尾部锚点被另一边改掉了**；
+把新增项挪到一个**两边都未改动的稳定锚点**（本例是 T0804 块与 T0410 块之间），
+比强行做三方合并省事，也不改动任何一方的语义。挪之前先用 `git apply --check` 在主库上验，别直接跑 rebaseline。
