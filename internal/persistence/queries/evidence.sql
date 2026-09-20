@@ -64,11 +64,46 @@ VALUES
 RETURNING *;
 
 -- name: ListEvidenceAssertionsForTarget :many
--- Every assertion against one target version, oldest first. Rows are
--- returned unfiltered by visibility: this is the owning project's read.
-SELECT * FROM evidence_assertions
-WHERE target_object_version_id = @object_version_id
-ORDER BY created_at, id;
+-- Every assertion against one target version that the given reader may be
+-- RENDERED, oldest first. The reader is an explicit input of the read
+-- (ADR-024), and the row it may see is decided here rather than after the
+-- rows are fetched (a predicate — see the file header for why).
+--
+-- A row is rendered to a reader when any ONE of the three holds:
+--
+--   ea.visibility = 'public'   the assertion's own axis. An assertion nothing
+--                              explicitly made public is not rendered anywhere
+--                              (00091's header, docs/12 §5).
+--   the reader is a member of the ASSERTING project (ea.project_id)
+--   the reader is a member of the TARGET's own project (so.project_id)
+--
+-- Both membership clauses are the same criterion the project store's
+-- GetMembership answers (a project_memberships row for (project, user)),
+-- expressed here so the filter is the read's rather than its caller's. They
+-- are the union the ADR names, and they are deliberately NOT folded into a
+-- single `visibility = 'public'` predicate: members must still see what they
+-- see today (an anonymous-only predicate would take the private row away from
+-- both parties, and the target project's maintainers must keep seeing external
+-- evidence about their own object — docs/24 §2, "external evidence 不可被
+-- origin maintainer 静默删除").
+--
+-- Fail closed: a reader that resolves to no user id arrives as SQL NULL, and
+-- every membership clause is then NULL rather than true, so an unresolvable
+-- reader gets exactly the public rows. Same direction as the column's own
+-- DEFAULT 'private'.
+SELECT ea.*
+FROM evidence_assertions ea
+JOIN scientific_object_versions sov ON sov.id = ea.target_object_version_id
+JOIN scientific_objects so ON so.id = sov.object_id
+WHERE ea.target_object_version_id = @object_version_id
+  AND (
+      ea.visibility = 'public'
+      OR EXISTS (SELECT 1 FROM project_memberships am
+                 WHERE am.project_id = ea.project_id AND am.user_id = @reader_user_id)
+      OR EXISTS (SELECT 1 FROM project_memberships tm
+                 WHERE tm.project_id = so.project_id AND tm.user_id = @reader_user_id)
+  )
+ORDER BY ea.created_at, ea.id;
 
 -- name: ListPublishedEvidenceForTarget :many
 -- The evidence section of GET /knowledge/{knowledgeId}: the assertions

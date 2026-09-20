@@ -164,7 +164,7 @@ func (h *handlers) handleObjectDetailPage(w http.ResponseWriter, r *http.Request
 			pageDirection(r), tabHref)
 	}
 	if model.Tab == graphEvidence {
-		model.Evidence = evidencePanelFor(r.Context(), h.evidence, projectID, objectID, &selected, tabHref)
+		model.Evidence = evidencePanelFor(r.Context(), h.evidence, reader(r), projectID, objectID, &selected, tabHref)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Add("Vary", "Accept")

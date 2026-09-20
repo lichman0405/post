@@ -55,10 +55,17 @@ func reader(r *http.Request) projects.Reader {
 // uses). Once the gate passes, the service resolves the object, checks it
 // belongs to the path project BEFORE any version lookup, and reads the
 // evidence.
+//
+// The reader is then handed to the read as well (ADR-024), and it is not the
+// same question the gate asked: the gate decided the PROJECT was readable,
+// the read decides which of its evidence ROWS this reader may be shown. One
+// resolved reader serves both, so a request cannot pass one gate as one
+// caller and read as another.
 func (h *handlers) handleObjectEvidence(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectId")
 	objectID := r.PathValue("objectId")
-	if _, err := h.gate.Get(r.Context(), reader(r), projectID); err != nil {
+	caller := reader(r)
+	if _, err := h.gate.Get(r.Context(), caller, projectID); err != nil {
 		evidenceError(w, r, err)
 		return
 	}
@@ -66,7 +73,7 @@ func (h *handlers) handleObjectEvidence(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	out, err := h.service.ObjectEvidence(r.Context(), projectID, objectID, versionNo)
+	out, err := h.service.ObjectEvidence(r.Context(), caller, projectID, objectID, versionNo)
 	if err != nil {
 		evidenceError(w, r, err)
 		return
@@ -83,15 +90,19 @@ func (h *handlers) handleObjectEvidence(w http.ResponseWriter, r *http.Request) 
 //
 // Same gate-first order as the object read above, and the same
 // existence-hiding answer for an object outside the path project or for an
-// object that is not a hypothesis.
+// object that is not a hypothesis. The reader travels into the read here too,
+// for the same reason: the hypothesis page's evidence is read through the
+// very same per-target query, so it is the very same rows and must obey the
+// very same audience rule (ADR-024; see the note on the object read).
 func (h *handlers) handleHypothesisEvidence(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectId")
 	objectID := r.PathValue("objectId")
-	if _, err := h.gate.Get(r.Context(), reader(r), projectID); err != nil {
+	caller := reader(r)
+	if _, err := h.gate.Get(r.Context(), caller, projectID); err != nil {
 		evidenceError(w, r, err)
 		return
 	}
-	out, err := h.service.HypothesisEvidence(r.Context(), projectID, objectID)
+	out, err := h.service.HypothesisEvidence(r.Context(), caller, projectID, objectID)
 	if err != nil {
 		evidenceError(w, r, err)
 		return

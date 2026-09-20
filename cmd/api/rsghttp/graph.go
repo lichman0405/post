@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/evidence"
 	"github.com/lichman0405/post/internal/rsg/provenance"
 	"github.com/lichman0405/post/internal/rsg/relationcatalog"
@@ -63,11 +64,17 @@ type ProvenanceReader interface {
 // production implementation is *evidencegraph.Service — the same read the
 // evidence JSON routes serve, so the page's groups, stances and omissions are
 // the projection's, not a second implementation of them.
+//
+// It takes the reader (ADR-024) for the same reason the JSON route does: the
+// evidence rows the page may render depend on who is reading, and the
+// T0106 gate the page already passed answered a different question — whether
+// this reader may see the PROJECT at all. The page hands over the reader it
+// resolved once for that gate, never a second one.
 type EvidenceReader interface {
 	// ObjectEvidence reads one object's evidence grouped by the target
 	// version each assertion pins. A pinned version gets its group even when
 	// it carries no assertions.
-	ObjectEvidence(ctx context.Context, projectID, objectID string, versionNo *int) (evidence.ObjectEvidence, error)
+	ObjectEvidence(ctx context.Context, reader projects.Reader, projectID, objectID string, versionNo *int) (evidence.ObjectEvidence, error)
 }
 
 // The page's two graph identities. They are also the data-graph attribute
@@ -391,6 +398,13 @@ func connectEdges(diagram graphDiagram, edges []provenance.Edge) []graphEdge {
 // shows: the read is pinned to that version, so the answer is about this
 // version alone — "why believe or doubt THIS version".
 //
+// The reader is the page's own resolved caller (handlers.reader), handed to
+// the SAME read the JSON route serves (ADR-024): which assertions a version
+// carries depends on who is asking, and the tab must render the reader's set,
+// not everyone's. It is not re-derived here and not consulted for anything
+// else — this panel applies no rule of its own, so the page and the route
+// cannot end up with two spellings of one audience.
+//
 // Both stances are rendered side by side, never merged and never netted: the
 // projection hands back supporting and contesting as separate arrays
 // (internal/evidence/projection.go), and the page walks all four buckets in
@@ -398,6 +412,7 @@ func connectEdges(diagram graphDiagram, edges []provenance.Edge) []graphEdge {
 func evidencePanelFor(
 	ctx context.Context,
 	r EvidenceReader,
+	reader projects.Reader,
 	projectID, objectID string,
 	versionNo *int,
 	tabHref func(tab, direction string) string,
@@ -415,7 +430,7 @@ func evidencePanelFor(
 		panel.State = graphStateUnavailable
 		return panel
 	}
-	read, err := r.ObjectEvidence(ctx, projectID, objectID, versionNo)
+	read, err := r.ObjectEvidence(ctx, reader, projectID, objectID, versionNo)
 	if err != nil {
 		panel.State = graphStateUnavailable
 		return panel

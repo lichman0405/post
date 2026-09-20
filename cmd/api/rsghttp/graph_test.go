@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/domain"
 	"github.com/lichman0405/post/internal/evidence"
 	"github.com/lichman0405/post/internal/rsg/provenance"
@@ -72,14 +73,21 @@ func (s *stubProvenance) ObjectStartNode(_ context.Context, _, _ string, _ *int)
 // stubEvidence is T0506's read with three assertions about the page's
 // version — one per stance the domain rule derives, deliberately on
 // different evidence versions so the picture has three edges.
+//
+// It also records the reader it was handed (ADR-024): the page's job with
+// the caller is to PASS it to the one read, so what this stub can pin is that
+// the value reaching the read is the request's own caller and not a constant.
 type stubEvidence struct {
 	read  evidence.ObjectEvidence
 	err   error
 	calls int
+	// readers records the reader of every call, in order.
+	readers []projects.Reader
 }
 
-func (s *stubEvidence) ObjectEvidence(_ context.Context, _, _ string, _ *int) (evidence.ObjectEvidence, error) {
+func (s *stubEvidence) ObjectEvidence(_ context.Context, reader projects.Reader, _, _ string, _ *int) (evidence.ObjectEvidence, error) {
 	s.calls++
+	s.readers = append(s.readers, reader)
 	if s.err != nil {
 		return evidence.ObjectEvidence{}, s.err
 	}
@@ -287,6 +295,66 @@ func TestGraphPanelsFailClosed(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// The reader travels into the read (ADR-024)
+// ---------------------------------------------------------------------------
+
+// TestEvidenceTabReadsAsTheRequestCaller: the evidence panel hands the read
+// the caller THE REQUEST resolved, not a constant. The two halves are one
+// test on purpose — passing the empty reader for everyone and passing a
+// hard-coded identity for everyone are the same defect seen from two sides,
+// and only asking both callers can tell "the reader is carried" from "one
+// reader is carried".
+//
+// The provenance tab is deliberately not part of this: its read takes no
+// reader (a project's edges are as visible as the project, which the T0106
+// gate already settled), so there is nothing there to carry.
+func TestEvidenceTabReadsAsTheRequestCaller(t *testing.T) {
+	anon := stubEvidenceReader()
+	anonBody := getGraphPage(t, stubProvenanceReader(), anon, "?tab=evidence")
+	if len(anon.readers) != 1 {
+		t.Fatalf("anonymous page: evidence reads = %d, want 1", len(anon.readers))
+	}
+	if anon.readers[0] != (projects.Reader{}) {
+		t.Errorf("anonymous page handed the read %+v, want the zero reader", anon.readers[0])
+	}
+	if !strings.Contains(anonBody, `data-graph-state="ok"`) {
+		t.Errorf("the anonymous page did not render the panel at all")
+	}
+
+	// The same page, same tab, read by a caller with a session: the panel must
+	// hand over THAT caller's identity. It is the same page and the same
+	// fixture, so only the reader differs — which is the whole point.
+	authed := stubEvidenceReader()
+	ts, client, userID, csrf := newRSGTestServerDeps(t, Deps{
+		Service: &stubService{detail: cannedDetail()}, Provenance: stubProvenanceReader(), Evidence: authed,
+	})
+	req, err := http.NewRequest(http.MethodGet, ts.URL+objectsBase+"/objects/"+graphObjectID+"?tab=evidence", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Accept", "text/html")
+	req.Header.Set("X-CSRF-Token", csrf)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET the evidence tab as a signed-in caller: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("signed-in evidence tab = %d, want 200 (body %s)", resp.StatusCode, respBody(resp))
+	}
+	if len(authed.readers) != 1 {
+		t.Fatalf("signed-in page: evidence reads = %d, want 1", len(authed.readers))
+	}
+	want := projects.Reader{UserID: userID, Authenticated: true}
+	if authed.readers[0] != want {
+		t.Errorf("signed-in page handed the read %+v, want the request's own caller %+v", authed.readers[0], want)
+	}
+	if userID == "" {
+		t.Fatalf("the fixture did not resolve a user id, so the assertion above measured nothing")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Relation semantics
 // ---------------------------------------------------------------------------
 
@@ -307,7 +375,7 @@ func TestRelationSemanticsAreTheCatalogsOwn(t *testing.T) {
 		t.Errorf("semantics = %q (known %v), want the catalog's %q", prov.Rows[0].Semantics, prov.Rows[0].SemanticsKnown, want.Semantics)
 	}
 
-	ev := evidencePanelFor(context.Background(), stubEvidenceReader(), rsgTestProjectID, graphObjectID, intPtr(2), stubTabHref)
+	ev := evidencePanelFor(context.Background(), stubEvidenceReader(), projects.Reader{}, rsgTestProjectID, graphObjectID, intPtr(2), stubTabHref)
 	if len(ev.Rows) != 3 {
 		t.Fatalf("evidence rows = %d, want 3", len(ev.Rows))
 	}
@@ -586,7 +654,7 @@ func TestEvidenceDiagramPointsEveryEdgeAtItsOwnTarget(t *testing.T) {
 			},
 		},
 	}}
-	panel := evidencePanelFor(context.Background(), reader, rsgTestProjectID, graphObjectID, nil,
+	panel := evidencePanelFor(context.Background(), reader, projects.Reader{}, rsgTestProjectID, graphObjectID, nil,
 		func(tab, direction string) string { return "" })
 	if len(panel.Rows) != 2 {
 		t.Fatalf("rows = %d, want 2 (both groups' assertions)", len(panel.Rows))
