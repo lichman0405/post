@@ -1,0 +1,13 @@
+{
+  "name": "@post/e2e-release",
+  "version": "0.1.0",
+  "private": true,
+  "description": "T0608 required test \"playwright release flow\": one flow of the seed project driven in real Chromium against the real stack — the routes cmd/api mounts in front of the real auth guard, over real PostgreSQL. A project policy that requires two distinct reviewers holds a research pull request at review_required until a second reviewer approves; the merge then lands, the release is cut through the app's own Releases tab, one object version is published as an asset through the publish route, and the object is finally aborted through the product abort path (T0602). The point of the flow is its last assertion: the already-cut release row and the already-published asset version row are byte-identical before and after the abort. Self-contained like tests/e2e-pr-flows: harness deps live in this directory's own npm project (its own lockfile), outside the pnpm workspace.",
+  "type": "module",
+  "scripts": {
+    "e2e": "node release-e2e.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}
