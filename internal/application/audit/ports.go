@@ -12,11 +12,18 @@ import (
 // (persistence.appendAudit) and through the authn service's recorder, never
 // through this surface.
 type Store interface {
-	// ListProjectActivity returns the project's audit rows newest-first.
-	// A nil before means "from the top".
-	ListProjectActivity(ctx context.Context, projectID string, before *Cursor, limit int) ([]domain.AuditRecord, error)
-	// ListOrganizationActivity returns the organization's audit rows
-	// newest-first.
+	// ListProjectActivity returns the project's Activity rows newest-first
+	// — governance (audit_log) rows, research events, or both, as source
+	// selects ("" reads both registries, T0607). A nil before means "from
+	// the top". Every row carries its Source, and the two streams are
+	// paginated as ONE ordered sequence on (occurred_at, id): a page of a
+	// project that mixes audit rows and events is still exactly one keyset
+	// window, never a concatenation of two.
+	ListProjectActivity(ctx context.Context, projectID string, before *Cursor, limit int, source domain.ActivitySource) ([]domain.AuditRecord, error)
+	// ListOrganizationActivity returns the organization's governance rows
+	// newest-first. Research events are project-scoped (research_events
+	// carries no organization id), so this feed has one source and no
+	// source parameter.
 	ListOrganizationActivity(ctx context.Context, orgID string, before *Cursor, limit int) ([]domain.AuditRecord, error)
 }
 

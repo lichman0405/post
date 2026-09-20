@@ -1,0 +1,13 @@
+{
+  "name": "@post/e2e-activity",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Activity timeline e2e (T0607 required test \"activity e2e\"): real Chromium drives the built web app through the project's Activity tab — the governance/research filter, the actor/via links, the abort/reopen/release rendering and the keyset pagination — against a network-layer mock of the Go API whose shapes tests/integration/activity_sources_test.go locks against real PostgreSQL.",
+  "type": "module",
+  "scripts": {
+    "e2e": "node activity-e2e.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}

@@ -218,10 +218,30 @@ type AuditEntry struct {
 	Metadata       any    // extra facts (jsonb; nil renders as {})
 }
 
-// AuditRecord is one stored audit row as read back for the Activity page,
-// with the actor's handle/display name joined in for rendering.
+// AuditRecord is one Activity row as read back for the Activity page, with
+// the actor's handle/display name joined in for rendering.
+//
+// It is ONE row type for one page that reads TWO registries (T0607), and
+// Source says which registry the row came from:
+//
+//   - SourceGovernance is an audit_log row. Action is a domain.Action* name,
+//     TargetRef and the two summaries carry the state before/after the
+//     change, and OrganizationID may be set.
+//   - SourceResearch is a research_events row. Action is an EVENT TYPE
+//     (specs/events/event-types.yaml), Payload is the event body and
+//     Visibility is the visibility the event was recorded with. Such a row
+//     has no target ref, no before/after summaries and no organization
+//     scope — research events are project-scoped (00012) — so those fields
+//     are nil/empty on it, exactly as Action is never empty on either.
+//
+// The name stays AuditRecord rather than growing a second type: the two
+// shapes are the same eight envelope fields plus per-source detail, and a
+// second type would have made every row of the page a choice between two
+// nullable halves. The reader never has to guess which half is live: the
+// Source field is required and is never the zero value on a stored row.
 type AuditRecord struct {
 	ID               string
+	Source           ActivitySource
 	ActorID          *string
 	ActorHandle      *string
 	ActorDisplayName *string
@@ -234,7 +254,14 @@ type AuditRecord struct {
 	BeforeSummary    []byte // raw jsonb; nil when NULL
 	AfterSummary     []byte
 	Metadata         []byte
-	OccurredAt       time.Time
+	// Payload is the raw jsonb event body of a research row (nil on a
+	// governance row). Visibility is the visibility the event was
+	// recorded with ("" on a governance row — an audit row has no
+	// visibility of its own; what a reader may see is decided by the
+	// scope's read gate, which is the same gate for both sources).
+	Payload    []byte
+	Visibility string
+	OccurredAt time.Time
 }
 
 // RequestInfo carries the audit identity of the current call: who acted and

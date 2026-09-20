@@ -165,28 +165,50 @@ func (q *Queries) ListPendingOutboxEvents(ctx context.Context, batchSize int32) 
 	return items, nil
 }
 
-const listProjectAuditEntries = `-- name: ListProjectAuditEntries :many
-SELECT a.id, a.actor_id, a.via, a.action, a.target_ref, a.project_id,
-       a.organization_id, a.correlation_id, a.before_summary,
-       a.after_summary, a.metadata, a.occurred_at,
-       u.handle AS actor_handle, u.display_name AS actor_display_name
-FROM audit_log a
-LEFT JOIN users u ON u.id = a.actor_id
-WHERE a.project_id = $1
-  AND ($2::timestamptz IS NULL
-       OR (a.occurred_at, a.id) < ($2::timestamptz, $3::uuid))
-ORDER BY a.occurred_at DESC, a.id DESC
-LIMIT $4
+const listProjectActivity = `-- name: ListProjectActivity :many
+SELECT activity.source, activity.id, activity.actor_id, activity.via, activity.action, activity.target_ref, activity.project_id, activity.organization_id, activity.correlation_id, activity.before_summary, activity.after_summary, activity.metadata, activity.payload, activity.visibility, activity.occurred_at, u.handle AS actor_handle, u.display_name AS actor_display_name
+FROM (
+    SELECT 'governance'::text AS source,
+           a.id, a.actor_id, a.via, a.action, a.target_ref, a.project_id,
+           a.organization_id, a.correlation_id, a.before_summary,
+           a.after_summary, a.metadata,
+           NULL::jsonb AS payload,
+           NULL::text AS visibility,
+           a.occurred_at
+    FROM audit_log a
+    WHERE a.project_id = $1
+      AND $2::bool
+      AND ($3::timestamptz IS NULL
+           OR (a.occurred_at, a.id) < ($3::timestamptz, $4::uuid))
+    UNION ALL
+    SELECT 'research'::text AS source,
+           e.id, e.actor_id, COALESCE(e.via, '')::text AS via, e.event_type,
+           NULL::text AS target_ref, e.project_id, NULL::uuid AS organization_id,
+           e.correlation_id, NULL::jsonb AS before_summary,
+           NULL::jsonb AS after_summary, NULL::jsonb AS metadata,
+           e.payload, e.visibility, e.occurred_at
+    FROM research_events e
+    WHERE e.project_id = $1
+      AND $5::bool
+      AND ($3::timestamptz IS NULL
+           OR (e.occurred_at, e.id) < ($3::timestamptz, $4::uuid))
+) activity
+LEFT JOIN users u ON u.id = activity.actor_id
+ORDER BY activity.occurred_at DESC, activity.id DESC
+LIMIT $6
 `
 
-type ListProjectAuditEntriesParams struct {
-	ProjectID pgtype.UUID        `json:"project_id"`
-	BeforeTs  pgtype.Timestamptz `json:"before_ts"`
-	BeforeID  pgtype.UUID        `json:"before_id"`
-	PageLimit int32              `json:"page_limit"`
+type ListProjectActivityParams struct {
+	ProjectID         pgtype.UUID        `json:"project_id"`
+	IncludeGovernance bool               `json:"include_governance"`
+	BeforeTs          pgtype.Timestamptz `json:"before_ts"`
+	BeforeID          pgtype.UUID        `json:"before_id"`
+	IncludeResearch   bool               `json:"include_research"`
+	PageLimit         int32              `json:"page_limit"`
 }
 
-type ListProjectAuditEntriesRow struct {
+type ListProjectActivityRow struct {
+	Source           string             `json:"source"`
 	ID               pgtype.UUID        `json:"id"`
 	ActorID          pgtype.UUID        `json:"actor_id"`
 	Via              string             `json:"via"`
@@ -198,29 +220,71 @@ type ListProjectAuditEntriesRow struct {
 	BeforeSummary    []byte             `json:"before_summary"`
 	AfterSummary     []byte             `json:"after_summary"`
 	Metadata         []byte             `json:"metadata"`
+	Payload          []byte             `json:"payload"`
+	Visibility       *string            `json:"visibility"`
 	OccurredAt       pgtype.Timestamptz `json:"occurred_at"`
 	ActorHandle      *string            `json:"actor_handle"`
 	ActorDisplayName *string            `json:"actor_display_name"`
 }
 
-// Project Activity page: the project's audit rows newest-first, with the
-// actor's handle/display name joined for rendering. Keyset pagination on
-// (occurred_at, id): a nil before pair means "from the top".
-func (q *Queries) ListProjectAuditEntries(ctx context.Context, arg ListProjectAuditEntriesParams) ([]ListProjectAuditEntriesRow, error) {
-	rows, err := q.db.Query(ctx, listProjectAuditEntries,
+// Project Activity page (T0110, extended by T0607): the project's
+// governance rows (audit_log) and its research events (research_events),
+// newest first, as ONE key-set-paginated sequence on (occurred_at, id),
+// with the actor's handle/display name joined for rendering. A nil before
+// pair means "from the top".
+//
+// Why a union rather than two reads the caller merges: a page is one
+// window, and the window has to be cut by the database. Two independent
+// LIMITs produce two pages whose boundaries do not line up — the merged
+// result would either duplicate rows across pages or lose them, depending
+// on how the caller weaves them — so the ordering and the cursor test
+// happen where the rows are: here.
+//
+// The two branches are the two registries docs/26 §1 keeps apart, and the
+// source column is which one a row came from, not a derived label: the
+// audit branch is literally the audit_log read and the research branch is
+// literally the research_events read. Both branches carry the same keyset
+// predicate written twice on purpose — it is what lets each branch ride
+// its own (project_id, occurred_at DESC, id DESC) index instead of
+// scanning the project's whole history to apply the cursor afterwards
+// (00107 adds the research_events index the second branch needs).
+//
+// include_governance/include_research are the source filter the reader
+// sent ("" = both): a false branch reads nothing, which is how a filtered
+// page stays one window rather than becoming a second query shape. The
+// filter is applied inside each branch beside the keyset predicate so the
+// plan of a filtered page is the plan of the unfiltered one minus a
+// branch.
+//
+// Every audit row comes back whatever its action, and every event row
+// whatever its stored visibility: the Activity feed's authorization is the
+// project read gate (member-only, existence hiding), the same gate for
+// both sources, and it is not re-derived from a payload here. The
+// visibility travels as data because the page renders it.
+//
+// Organization scope, target ref and the before/after summaries are NULL
+// on every research row by construction — research events have no such
+// columns (00012) — and the payload/visibility columns are NULL on every
+// audit row. The row's source says which half is live, so a client never
+// has to infer it from which fields are NULL.
+func (q *Queries) ListProjectActivity(ctx context.Context, arg ListProjectActivityParams) ([]ListProjectActivityRow, error) {
+	rows, err := q.db.Query(ctx, listProjectActivity,
 		arg.ProjectID,
+		arg.IncludeGovernance,
 		arg.BeforeTs,
 		arg.BeforeID,
+		arg.IncludeResearch,
 		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListProjectAuditEntriesRow
+	var items []ListProjectActivityRow
 	for rows.Next() {
-		var i ListProjectAuditEntriesRow
+		var i ListProjectActivityRow
 		if err := rows.Scan(
+			&i.Source,
 			&i.ID,
 			&i.ActorID,
 			&i.Via,
@@ -232,6 +296,8 @@ func (q *Queries) ListProjectAuditEntries(ctx context.Context, arg ListProjectAu
 			&i.BeforeSummary,
 			&i.AfterSummary,
 			&i.Metadata,
+			&i.Payload,
+			&i.Visibility,
 			&i.OccurredAt,
 			&i.ActorHandle,
 			&i.ActorDisplayName,

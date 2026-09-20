@@ -28,15 +28,19 @@ type fakeStoreCall struct {
 	scope  string
 	before *audit.Cursor
 	limit  int
+	// source is the registry filter the call carried ("" = both), so a
+	// test can pin that the service passes the reader's filter through
+	// unchanged instead of the store having to re-derive it.
+	source domain.ActivitySource
 }
 
-func (f *fakeStore) ListProjectActivity(_ context.Context, projectID string, before *audit.Cursor, limit int) ([]domain.AuditRecord, error) {
-	f.calls = append(f.calls, fakeStoreCall{projectID, before, limit})
+func (f *fakeStore) ListProjectActivity(_ context.Context, projectID string, before *audit.Cursor, limit int, source domain.ActivitySource) ([]domain.AuditRecord, error) {
+	f.calls = append(f.calls, fakeStoreCall{projectID, before, limit, source})
 	return f.rows, f.err
 }
 
 func (f *fakeStore) ListOrganizationActivity(_ context.Context, orgID string, before *audit.Cursor, limit int) ([]domain.AuditRecord, error) {
-	f.calls = append(f.calls, fakeStoreCall{orgID, before, limit})
+	f.calls = append(f.calls, fakeStoreCall{scope: orgID, before: before, limit: limit})
 	return f.rows, f.err
 }
 
@@ -109,7 +113,7 @@ func TestProjectActivityAuthorizesThroughGate(t *testing.T) {
 	store := &fakeStore{}
 	svc := newTestService(store, projects.ErrProjectNotFound, nil)
 
-	_, _, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", "", 10)
+	_, _, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", "", "", 10)
 	if !errors.Is(err, projects.ErrProjectNotFound) {
 		t.Fatalf("error = %v, want projects.ErrProjectNotFound (non-members get the owning surface's sentinel)", err)
 	}
@@ -122,7 +126,7 @@ func TestOrgActivityAuthorizesThroughGate(t *testing.T) {
 	store := &fakeStore{}
 	svc := newTestService(store, nil, orgs.ErrOrgNotFound)
 
-	_, _, err := svc.OrgActivity(context.Background(), domain.User{}, "o1", "", 10)
+	_, _, err := svc.OrgActivity(context.Background(), domain.User{}, "o1", "", "", 10)
 	if !errors.Is(err, orgs.ErrOrgNotFound) {
 		t.Fatalf("error = %v, want orgs.ErrOrgNotFound", err)
 	}
@@ -136,11 +140,11 @@ func TestActivityPageDefaultsAndClampsLimit(t *testing.T) {
 	svc := newTestService(store, nil, nil)
 
 	// limit 0 -> DefaultLimit.
-	if _, _, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", "", 0); err != nil {
+	if _, _, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", "", "", 0); err != nil {
 		t.Fatalf("ProjectActivity: %v", err)
 	}
 	// limit 500 -> clamped to 200.
-	if _, _, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", "", 500); err != nil {
+	if _, _, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", "", "", 500); err != nil {
 		t.Fatalf("ProjectActivity: %v", err)
 	}
 	got := []int{store.calls[0].limit, store.calls[1].limit}
@@ -172,7 +176,7 @@ func TestActivityPageCursorAndTermination(t *testing.T) {
 	// A full page yields a cursor naming the last row.
 	store := &fakeStore{rows: rows(audit.DefaultLimit)}
 	svc := newTestService(store, nil, nil)
-	records, next, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", "", audit.DefaultLimit)
+	records, next, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", "", "", audit.DefaultLimit)
 	if err != nil || len(records) != audit.DefaultLimit {
 		t.Fatalf("page = %d rows, %v", len(records), err)
 	}
@@ -185,7 +189,7 @@ func TestActivityPageCursorAndTermination(t *testing.T) {
 		t.Errorf("cursor = %+v, want last row %+v", c, last)
 	}
 	// Feeding the cursor back reaches the store as the before pair.
-	if _, _, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", next, audit.DefaultLimit); err != nil {
+	if _, _, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", "", next, audit.DefaultLimit); err != nil {
 		t.Fatalf("second page: %v", err)
 	}
 	call := store.calls[len(store.calls)-1]
@@ -195,7 +199,7 @@ func TestActivityPageCursorAndTermination(t *testing.T) {
 
 	// A short page terminates the log: next cursor is empty.
 	store.rows = rows(3)
-	if _, next, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", "", 10); err != nil || next != "" {
+	if _, next, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", "", "", 10); err != nil || next != "" {
 		t.Errorf("short page next = %q, %v; want empty", next, err)
 	}
 }
@@ -212,7 +216,7 @@ func TestActivityRejectsMalformedCursor(t *testing.T) {
 	} {
 		store := &fakeStore{}
 		svc := newTestService(store, nil, nil)
-		if _, _, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", bad, 10); !errors.Is(err, audit.ErrValidation) {
+		if _, _, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", "", bad, 10); !errors.Is(err, audit.ErrValidation) {
 			t.Errorf("cursor %q: error = %v, want audit.ErrValidation", bad, err)
 		}
 		if len(store.calls) != 0 {
@@ -221,10 +225,59 @@ func TestActivityRejectsMalformedCursor(t *testing.T) {
 	}
 }
 
+// TestProjectActivityPassesSourceFilter: the reader's source filter reaches
+// the store verbatim, and the absence of one is the absence of a filter —
+// not a third value the store would have to interpret. The three cases are
+// the three a client can send; the store's own behaviour under each is the
+// integration suite's (real SQL, real branches).
+func TestProjectActivityPassesSourceFilter(t *testing.T) {
+	for _, tc := range []struct {
+		source domain.ActivitySource
+	}{
+		{""}, // both registries
+		{domain.ActivitySourceGovernance},
+		{domain.ActivitySourceResearch},
+	} {
+		store := &fakeStore{}
+		svc := newTestService(store, nil, nil)
+		if _, _, err := svc.ProjectActivity(context.Background(), domain.User{}, "p1", tc.source, "", 10); err != nil {
+			t.Fatalf("ProjectActivity(source=%q): %v", tc.source, err)
+		}
+		if len(store.calls) != 1 {
+			t.Fatalf("source %q: store calls = %d, want 1", tc.source, len(store.calls))
+		}
+		if got := store.calls[0].source; got != tc.source {
+			t.Errorf("store source = %q, want %q (the filter is passed through, not re-derived)", got, tc.source)
+		}
+	}
+}
+
+// TestOrgActivityRefusesResearchSource: research events are project-scoped,
+// so "the organization's research events" is a query this database cannot
+// answer. It is refused as a validation error — and refused BEFORE the
+// read gate and before the store, because the answer does not depend on
+// who is asking: a member must not get an empty page that reads as "this
+// organization has no research events", and a non-member must not get the
+// not-found that would confirm the organization exists.
+func TestOrgActivityRefusesResearchSource(t *testing.T) {
+	store := &fakeStore{}
+	svc := newTestService(store, nil, orgs.ErrOrgNotFound)
+	if _, _, err := svc.OrgActivity(context.Background(), domain.User{}, "o1", domain.ActivitySourceResearch, "", 10); !errors.Is(err, audit.ErrValidation) {
+		t.Errorf("error = %v, want audit.ErrValidation", err)
+	}
+	if len(store.calls) != 0 {
+		t.Error("a refused source must not reach the store")
+	}
+	// The governance source (and the absence of one) is the feed itself.
+	if _, _, err := svc.OrgActivity(context.Background(), domain.User{}, "o1", domain.ActivitySourceGovernance, "", 10); !errors.Is(err, orgs.ErrOrgNotFound) {
+		t.Errorf("governance source: error = %v, want the org gate's sentinel", err)
+	}
+}
+
 func TestActivityStoreFailureWrapsSentinel(t *testing.T) {
 	store := &fakeStore{err: errors.New("connection refused")}
 	svc := newTestService(store, nil, nil)
-	if _, _, err := svc.OrgActivity(context.Background(), domain.User{}, "o1", "", 10); !errors.Is(err, audit.ErrStore) {
+	if _, _, err := svc.OrgActivity(context.Background(), domain.User{}, "o1", "", "", 10); !errors.Is(err, audit.ErrStore) {
 		t.Errorf("error = %v, want audit.ErrStore", err)
 	}
 }
