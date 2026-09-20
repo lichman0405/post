@@ -1,0 +1,260 @@
+{
+  "version": 1,
+  "comment": "The runbooks as an inventory: every section of docs/35, docs/36 and docs/37, classified by how it is performed. Read by ops/runbook-verify.py (rule D6) and printed by tests/acceptance/runbook-drill.sh. Adding a section to one of those documents fails the drill until it is classified here — that is the point: a step nobody has said how to perform is the gap this task exists to find.",
+  "kinds": {
+    "mechanised": "a command performs this step; the command resolves in the tree and a corpus document names it",
+    "named-unavailable": "a command performs this step and resolves, but the step cannot run yet; blocked_by names the tree claim that says why (ops/runbook-steps.json § tree_claims)",
+    "manual": "a person performs it with no command in the runbooks",
+    "provider": "an external service or credential performs it (the PostgreSQL provider, the object store, CI)",
+    "absent": "nothing in the runbooks or the tree performs it yet"
+  },
+  "corpus": [
+    "docs/35_DEPLOYMENT_RUNBOOK.md",
+    "docs/36_RELEASE_RUNBOOK.md",
+    "docs/37_BACKUP_DR.md",
+    "ops/deploy/README.md",
+    "ops/DEV_COMMANDS.md"
+  ],
+  "docs": [
+    {
+      "path": "docs/35_DEPLOYMENT_RUNBOOK.md",
+      "sections": "^[0-9]+\\. |^## ",
+      "containers": ["## 顺序"]
+    },
+    {
+      "path": "docs/36_RELEASE_RUNBOOK.md",
+      "sections": "^- "
+    },
+    {
+      "path": "docs/37_BACKUP_DR.md",
+      "sections": "^## "
+    }
+  ],
+  "declared_gaps": [
+    {
+      "doc": "ops/DEV_COMMANDS.md",
+      "marker": "开发环境完成 P0 后应支持",
+      "scope": "next-fence",
+      "reason": "The document declares this block to be the target interface — the commands the environment is supposed to support once P0 is complete — and several of them (make test-e2e, rddev doctor as a CLI) do not exist yet. It is not a claim about today's tree, and the exclusion is checked: delete the marker sentence and the block is enforced again."
+    }
+  ],
+  "steps": [
+    {
+      "id": "deploy-0-prerequisites",
+      "doc": "docs/35_DEPLOYMENT_RUNBOOK.md",
+      "anchor": "## 前置",
+      "kind": "manual",
+      "command": null,
+      "note": "Nine prerequisites — domain, TLS, Postgres, Redis, S3, Gitea, SMTP/Email provider, OIDC credentials, secret manager — that an operator obtains and verifies before step 1. Most of them are provider accounts whose credentials docs/25 § 发布 forbids the development system to hold, and the tree contains neither a command that provisions any of them nor one that checks they are present: the deployment template only names the variables they have to fill (ops/deploy/staging.env.example). This section was invisible to the inventory until the section pattern covered `## ` headings, which is exactly the kind of silently unclassified step this file exists to prevent."
+    },
+    {
+      "id": "deploy-1-db-backup",
+      "doc": "docs/35_DEPLOYMENT_RUNBOOK.md",
+      "anchor": "1. 备份/确认 DB。",
+      "kind": "provider",
+      "command": null,
+      "note": "The tree has no production backup entry point: the only backup-shaped thing in it is the restore drill (ops/backup-restore-drill.sh), which restores into an empty environment rather than taking a scheduled production dump. ops/deploy/README.md § What is missing #3 names that gap and its owner, so this step is the PostgreSQL provider's backup today."
+    },
+    {
+      "id": "deploy-2-migrate-job",
+      "doc": "docs/35_DEPLOYMENT_RUNBOOK.md",
+      "anchor": "2. 部署 migrations job。",
+      "kind": "named-unavailable",
+      "command": "docker compose -f ops/deploy/docker-compose.staging.yml run --rm migrate",
+      "blocked_by": "no-dockerfile",
+      "note": "The service, its depends_on ordering and its restart: \"no\" all exist (ops/deploy/README.md step 2); the image does not, and neither does the migration runner the image is supposed to contain (ops/deploy/README.md § What is missing #2)."
+    },
+    {
+      "id": "deploy-3-apps",
+      "doc": "docs/35_DEPLOYMENT_RUNBOOK.md",
+      "anchor": "3. 部署 API/worker/MCP。",
+      "kind": "named-unavailable",
+      "command": "docker compose -f ops/deploy/docker-compose.staging.yml up -d --wait api worker mcp adapter",
+      "blocked_by": "no-dockerfile",
+      "note": "The template starts four services here, not three: ops/deploy/README.md step 3 adds the scientific adapter to docs/35's API/worker/MCP. That is an addition, not a contradiction — docs/35 fixes the order, the template fixes the service list."
+    },
+    {
+      "id": "deploy-4-web",
+      "doc": "docs/35_DEPLOYMENT_RUNBOOK.md",
+      "anchor": "4. 部署 Web。",
+      "kind": "named-unavailable",
+      "command": "docker compose -f ops/deploy/docker-compose.staging.yml up -d --wait web proxy",
+      "blocked_by": "no-dockerfile",
+      "note": "The proxy comes up last on purpose: it is the only published surface and it waits for the API and the web app to report healthy."
+    },
+    {
+      "id": "deploy-5-gitea-webhook",
+      "doc": "docs/35_DEPLOYMENT_RUNBOOK.md",
+      "anchor": "5. 检查 Gitea webhook/service account。",
+      "kind": "manual",
+      "command": null,
+      "note": "An operator checks that Gitea can reach the API's webhook endpoint (the compose file defaults it to http://api:8080/api/v1/git/hooks/gitea). There is no command in the runbooks that performs the check, and a webhook Gitea cannot reach is accepted and never delivered."
+    },
+    {
+      "id": "deploy-6-storage-policy",
+      "doc": "docs/35_DEPLOYMENT_RUNBOOK.md",
+      "anchor": "6. 检查 object storage bucket policy/CORS。",
+      "kind": "manual",
+      "command": null,
+      "note": "Bucket policy and CORS live in the object-storage account, not in this tree: the local stack's infra/docker/init.sh configures the DEV MinIO bucket and is not a staging mechanism. ops/deploy/README.md step 6 names what has to hold (CORS for POST_WEB_ORIGIN)."
+    },
+    {
+      "id": "deploy-7-smoke",
+      "doc": "docs/35_DEPLOYMENT_RUNBOOK.md",
+      "anchor": "7. smoke：health/auth/public/private/branch/PR/upload/search。",
+      "kind": "named-unavailable",
+      "command": "curl -fsS https://staging.example.com/healthz",
+      "blocked_by": "no-dockerfile",
+      "note": "ops/deploy/README.md step 7 gives the three curl commands; /healthz and /readyz are routes cmd/api really mounts, so the command is well-formed — there is simply no deployment to point it at. The eight check areas of the runbook are broader than the three endpoints the template documents."
+    },
+    {
+      "id": "deploy-8-canonical-e2e",
+      "doc": "docs/35_DEPLOYMENT_RUNBOOK.md",
+      "anchor": "8. run canonical minimal E2E。",
+      "kind": "absent",
+      "command": null,
+      "note": "The canonical minimal E2E is task T1202 (canonical MOF workflow E2E), which is not merged. The feature-shaped browser suites under tests/e2e-*/** exist, but no command runs the canonical workflow end to end."
+    },
+    {
+      "id": "deploy-rollback",
+      "doc": "docs/35_DEPLOYMENT_RUNBOOK.md",
+      "anchor": "## 回滚",
+      "kind": "named-unavailable",
+      "command": "docker compose -f ops/deploy/docker-compose.staging.yml up -d --no-deps api",
+      "blocked_by": "no-dockerfile",
+      "note": "Two halves. The application half is the documented digest revert (ops/deploy/README.md § Rollback) and needs a running deployment. The database half — \"DB 只 forward repair\" — is re-derived from the tree by rule T2 and executed for real, against PostgreSQL, by tests/acceptance/runbook-recovery (restore an older schema version, repair forward to head, and a rollback attempt that must move nothing)."
+    },
+    {
+      "id": "release-1-ci-green",
+      "doc": "docs/36_RELEASE_RUNBOOK.md",
+      "anchor": "- 所有 blocking CI 绿。",
+      "kind": "mechanised",
+      "command": "make ci",
+      "note": "`make ci` (bash scripts/ci.sh) reproduces the workflow's stage list locally, in the same order. The authoritative blocking run is .github/workflows/ci.yml on GitHub, whose job list this command is kept in step with by hand — a local green is evidence about the same gates, not proof the remote run happened."
+    },
+    {
+      "id": "release-2-migration",
+      "doc": "docs/36_RELEASE_RUNBOOK.md",
+      "anchor": "- Changelog、migration、feature flags、security scan 完成。",
+      "kind": "absent",
+      "command": null,
+      "note": "Migration half: docs/36 names no command. The tree's mechanisms are `make check-schema-snapshot` (migrations still equal the canonical schema), `make check-schema-drift` and the migration-integration CI job, which applies the set to a real pgvector PostgreSQL — none of them is named by this runbook."
+    },
+    {
+      "id": "release-2-changelog-flags-scan",
+      "doc": "docs/36_RELEASE_RUNBOOK.md",
+      "anchor": "- Changelog、migration、feature flags、security scan 完成。",
+      "kind": "absent",
+      "command": null,
+      "note": "Changelog: the repository has no CHANGELOG file and no convention for one. Feature flags: no flag mechanism exists in the tree (no feature-flag table, loader or env). Security scan: the secret scan exists as a Go test (internal/config TestRepoExampleFilesAreSecretFree) and is run by the deployment smoke gate, but there is no dependency/CVE scan and CI has no security job — docs/25_CICD_DEVOPS.md item 9 asks for one."
+    },
+    {
+      "id": "release-3-staging-e2e",
+      "doc": "docs/36_RELEASE_RUNBOOK.md",
+      "anchor": "- staging canonical E2E。",
+      "kind": "absent",
+      "command": null,
+      "note": "Two gaps, not one: there is no staging environment to run against (no images — tree claim no-dockerfile, ops/deploy/README.md § What is missing #1), and the canonical E2E is T1202, not merged. tests/acceptance/deploy-staging-smoke.sh checks the staging template statically and does not stand in for this step."
+    },
+    {
+      "id": "release-4-image-digest",
+      "doc": "docs/36_RELEASE_RUNBOOK.md",
+      "anchor": "- 生成 immutable image digest。",
+      "kind": "absent",
+      "command": null,
+      "note": "Nothing builds an image: there is no Dockerfile, and CI has no container build/SBOM stage (docs/25 item 10). What does exist is the rule that consumes the digest — the staging validator refuses an image pinned by anything but @sha256:<64 hex> (rule R03), and the compose file refuses to interpret without one."
+    },
+    {
+      "id": "release-5-post-deploy-smoke",
+      "doc": "docs/36_RELEASE_RUNBOOK.md",
+      "anchor": "- 生产部署后 smoke。",
+      "kind": "named-unavailable",
+      "command": "curl -fsS https://staging.example.com/healthz",
+      "blocked_by": "no-dockerfile",
+      "note": "The same smoke command as the deployment runbook's step 7, and beyond the missing images there is no production environment at all — a production deploy also needs credentials the development system is forbidden to hold (docs/25 § 发布)."
+    },
+    {
+      "id": "release-6-observation-window",
+      "doc": "docs/36_RELEASE_RUNBOOK.md",
+      "anchor": "- 观察 error/queue/outbox/git drift 30min 的指标窗口（自动/人工可按环境）。",
+      "kind": "manual",
+      "command": null,
+      "note": "docs/26_OBSERVABILITY.md defines the signals (errors, queue depth, outbox lag, git drift); nothing in the tree opens a 30-minute window on them, and the runbook itself allows this to be automatic or by hand depending on the environment."
+    },
+    {
+      "id": "release-7-failure-path",
+      "doc": "docs/36_RELEASE_RUNBOOK.md",
+      "anchor": "- 失败按 deployment runbook rollback/forward fix。",
+      "kind": "named-unavailable",
+      "command": "docker compose -f ops/deploy/docker-compose.staging.yml up -d --no-deps api",
+      "blocked_by": "no-dockerfile",
+      "note": "The same two halves as docs/35 § 回滚: the application rolls back to the previous digest (needs images), the database only moves forward (re-derived by rule T2, executed by tests/acceptance/runbook-recovery)."
+    },
+    {
+      "id": "backup-1-what-to-back-up",
+      "doc": "docs/37_BACKUP_DR.md",
+      "anchor": "## 需要备份",
+      "kind": "mechanised",
+      "command": "./ops/backup-restore-drill.sh",
+      "note": "The drill covers the four classes docs/37 names — PostgreSQL, S3 blobs/manifests, Gitea repositories, critical secrets/config metadata — and refuses the run if a credential value reaches the artifacts. It is an exercise of the process, not a scheduled production backup (deploy-1-db-backup)."
+    },
+    {
+      "id": "backup-2-consistency",
+      "doc": "docs/37_BACKUP_DR.md",
+      "anchor": "## 一致性",
+      "kind": "mechanised",
+      "command": "./ops/backup-restore-drill.sh",
+      "note": "The drill reconciles the four axes docs/37 names — DB ↔ Git refs ↔ blob hashes ↔ release manifests — and records the snapshot timestamp. It reports drift and never repairs it: findings land in the audit log, repairs_applied stays 0."
+    },
+    {
+      "id": "backup-3-v1-acceptance",
+      "doc": "docs/37_BACKUP_DR.md",
+      "anchor": "## V1 验收",
+      "kind": "mechanised",
+      "command": "./ops/backup-restore-drill.sh",
+      "note": "The empty-environment restore is the run's own subject: the drill proves the target is empty (0 tables, no bucket, no organization) before writing anything, then opens Seed Project, Release, Asset, Files and Evidence Graph on the restored environment."
+    },
+    {
+      "id": "backup-4-rpo-rto",
+      "doc": "docs/37_BACKUP_DR.md",
+      "anchor": "## RPO/RTO 目标",
+      "kind": "absent",
+      "command": null,
+      "note": "No RPO or RTO is measured, asserted or claimed anywhere: docs/37 puts V1's acceptance at \"the process runs\", and the drill prints that it measures neither."
+    }
+  ],
+  "tree_claims": [
+    {
+      "id": "no-dockerfile",
+      "doc": "ops/deploy/README.md",
+      "anchor": "There is no `Dockerfile` anywhere in this repository",
+      "check": {
+        "kind": "empty-find",
+        "glob": "Dockerfile*"
+      },
+      "note": "The claim every \"cannot deploy yet\" statement rests on. When a Dockerfile lands, this check fails and the inventory's named-unavailable steps have to be revisited — which is the intent."
+    },
+    {
+      "id": "worker-has-no-health-surface",
+      "doc": "ops/deploy/README.md",
+      "anchor": "The worker has no healthcheck, deliberately",
+      "check": {
+        "kind": "absent",
+        "pattern": "healthz|readyz|ListenAndServe|http\\.Server",
+        "paths": ["cmd/worker"]
+      },
+      "note": "Why the compose file carries a healthcheck waiver for the worker instead of a probe. If cmd/worker grows an HTTP surface, this check fails, the waiver becomes stale, and the template's own validator already refuses a stale waiver."
+    },
+    {
+      "id": "no-file-mounted-secrets",
+      "doc": "ops/deploy/README.md",
+      "anchor": "the Go loader has no `*_FILE` support",
+      "check": {
+        "kind": "absent",
+        "pattern": "_FILE",
+        "paths": ["internal/config"]
+      },
+      "note": "Why the runbook does not use Compose's secrets: mechanism — a file-mounted secret would look configured and reach nothing. Add *_FILE support to the loader and this check fails, so the runbook has to be revisited rather than quietly describing the old loader."
+    }
+  ]
+}
