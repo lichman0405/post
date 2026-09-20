@@ -300,3 +300,19 @@ func writeAuthoritativeExitStatus(repoRoot, taskID string, code int) error {
 	}
 	return writeFileAtomic(authoritativeExitStatusPath(repoRoot, taskID), []byte(fmt.Sprintf("%d\n", code)))
 }
+
+// writeExitStatusCopies writes *both* exit.status copies — the task-dir one
+// and the Supervisor-side authoritative one. The reaper writes both when it
+// witnesses the exit; whoever has to reconstruct a lost run (discovery
+// reconciling a Worker whose reaper never got to write) must write both too,
+// or VerifyGateInputs would later compare a present copy against an absent
+// one and read the reconstruction itself as tampering.
+func writeExitStatusCopies(repoRoot, taskID string, code int) error {
+	if err := writeAuthoritativeExitStatus(repoRoot, taskID, code); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(WorkerTaskDir(repoRoot, taskID), 0o755); err != nil {
+		return err
+	}
+	return writeFileAtomic(exitStatusPath(repoRoot, taskID), []byte(fmt.Sprintf("%d\n", code)))
+}

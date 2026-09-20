@@ -190,6 +190,108 @@ func TestDiscoverWorkersRestartDiscovery(t *testing.T) {
 	}
 }
 
+// TestDiscoverWorkersReconcilesALostRun: a Worker whose process *and* whose
+// reaper are both gone, with no exit.status on either copy, is over — only
+// the number is missing, and the unrecorded sentinel records that. Without
+// this the record stayed stale forever and the task had no legal move: collect
+// refused for a missing exit status, rework/respawn for a Worker that "has not
+// exited", and the driver reported it as still working indefinitely
+// (2026-09-21: T0612 sat that way for 7.5 hours).
+//
+// The guard is the reaper: a record whose session leader was never recorded
+// (or is still alive) stays stale, because nothing can show the writer is
+// done.
+func TestDiscoverWorkersReconcilesALostRun(t *testing.T) {
+	repo := writeFakeRepo(t)
+
+	// reaped returns a pid that has already exited, with its real starttime.
+	reaped := func() (int, uint64) {
+		t.Helper()
+		cmd := exec.Command("sh", "-c", "exit 0")
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		st, _ := procStartTime(cmd.Process.Pid)
+		if err := cmd.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		return cmd.Process.Pid, st
+	}
+	workerPid, workerSt := reaped()
+	reaperPid, _ := reaped()
+
+	// a live reaper: the run is not over, whatever the Worker's pid says
+	live := exec.Command("sh", "-c", "sleep 30")
+	if err := live.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = live.Process.Kill(); _, _ = live.Process.Wait() }()
+
+	save := func(taskID string, leader int) {
+		t.Helper()
+		rec := &WorkerRecord{TaskID: taskID, RunID: "run-" + taskID, SessionID: "s",
+			ClaudeVersion: "v", PID: workerPid, StartTime: workerSt, SessionLeaderPID: leader,
+			Worktree: "/w", Branch: "b", BaselineSHA: "0123456789abcdef", RefsBefore: []string{},
+			LogPath:   filepath.Join(WorkerTaskDir(repo, taskID), "worker.log"),
+			ResultDir: WorkerTaskDir(repo, taskID), StartedAt: "t"}
+		if err := SaveRegistry(repo, rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save("T0101", reaperPid)        // Worker and reaper both gone
+	save("T0102", live.Process.Pid) // Worker gone, reaper alive
+	save("T0103", 0)                // no reaper recorded: nothing to check
+
+	views, err := DiscoverWorkers(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byTask := map[string]WorkerView{}
+	for _, v := range views {
+		byTask[v.Record.TaskID] = v
+	}
+
+	lost := byTask["T0101"]
+	if lost.Status != WorkerExited || lost.Record.ExitStatus == nil || *lost.Record.ExitStatus != ExitStatusUnrecorded {
+		t.Fatalf("T0101 status=%s exit=%v, want exited with the unrecorded sentinel %d (collect reads %d as the run did not complete)",
+			lost.Status, lost.Record.ExitStatus, ExitStatusUnrecorded, ExitStatusUnrecorded)
+	}
+	if *lost.Record.ExitStatus == 0 {
+		t.Fatal("the sentinel must never be 0 — a lost run must not read as a completed one")
+	}
+	if lost.Record.ExitSource != ExitSourceReconciled {
+		t.Errorf("T0101 exit source = %q, want %q", lost.Record.ExitSource, ExitSourceReconciled)
+	}
+	// the reconstruction is durable and lands in both copies: a later
+	// verifyGateInputs compares them, and one present copy against one absent
+	// one would read as tampering
+	for _, path := range []string{exitStatusPath(repo, "T0101"), authoritativeExitStatusPath(repo, "T0101")} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("exit.status not written to %s: %v", path, err)
+		}
+		if strings.TrimSpace(string(data)) != strconv.Itoa(ExitStatusUnrecorded) {
+			t.Errorf("%s = %q, want %d", path, strings.TrimSpace(string(data)), ExitStatusUnrecorded)
+		}
+	}
+	rec, err := LoadRegistry(repo, "T0101")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.ExitStatus == nil || *rec.ExitStatus != ExitStatusUnrecorded || rec.EndedAt == "" {
+		t.Errorf("reconcile not persisted: exit=%v ended_at=%q", rec.ExitStatus, rec.EndedAt)
+	}
+
+	for _, id := range []string{"T0102", "T0103"} {
+		if byTask[id].Status != WorkerStale {
+			t.Errorf("%s status = %s, want stale — the run is only over once the reaper that writes the code is shown to be gone", id, byTask[id].Status)
+		}
+		if got, err := LoadRegistry(repo, id); err != nil || got.ExitStatus != nil {
+			t.Errorf("%s: exit status recorded as %v, want none", id, got.ExitStatus)
+		}
+	}
+}
+
 // TestDiscoverWorkersToleratesGarbage: task dirs without a registry or with a
 // truncated registry fail loudly (drift), never silently.
 func TestDiscoverWorkersTruncatedRegistryFails(t *testing.T) {

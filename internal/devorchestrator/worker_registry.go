@@ -44,8 +44,10 @@ const (
 	// WorkerExited: the reaper recorded an exit status; the run is over.
 	WorkerExited WorkerStatus = "exited"
 	// WorkerStale: the pid is gone or reused but no exit status was recorded
-	// (rddev or the host died, or the reaper was killed). A stale worker is
-	// never treated as completed — collect (T0011) owns that judgement.
+	// (rddev or the host died, or the reaper was killed) *and* the reaper
+	// cannot be shown to be over, so the run's fate is still open. A stale
+	// worker is never treated as completed — collect (T0011) owns that
+	// judgement.
 	WorkerStale WorkerStatus = "stale"
 )
 
@@ -55,6 +57,14 @@ const (
 	ExitSourceStop       = "stop"       // rddev worker stop terminated the run
 	ExitSourceReconciled = "reconciled" // discovery merged exit.status into the registry
 )
+
+// ExitStatusUnrecorded is the exit code recorded when a run is over but no
+// reaper left a number behind: the Worker's process *and* its reaper both
+// died without writing exit.status (the host slept, the process group was
+// killed, the machine went down). It is deliberately not 0 — collect reads a
+// non-zero code as "the Worker did not complete", so a lost run can never
+// read as a finished one.
+const ExitStatusUnrecorded = -1
 
 // WorkerRecord is the on-disk registry entry (specs/orchestrator/
 // worker-registry.schema.json). start_time is the /proc/<pid>/stat field-22
@@ -253,6 +263,42 @@ func reconcileWorker(repoRoot string, rec *WorkerRecord) (WorkerView, error) {
 		// it in so the exit code survives process restarts of the reader.
 		code, err := readExitStatus(repoRoot, rec.TaskID)
 		if err != nil {
+			return v, err
+		}
+		now := time.Now().UTC().Format(time.RFC3339)
+		rec.ExitStatus = &code
+		rec.EndedAt = now
+		rec.ExitSource = ExitSourceReconciled
+		rec.ReconciledAt = now
+		if err := SaveRegistry(repoRoot, rec); err != nil {
+			return v, fmt.Errorf("reconciling registry for %s: %w", rec.TaskID, err)
+		}
+		v.Record = *rec
+		v.Status = WorkerExited
+	}
+
+	// The run is over but nothing recorded a number: the process is gone and
+	// so is the reaper that was supposed to write exit.status (the host slept,
+	// the process group was killed, the machine went down). Left as stale, the
+	// task has no legal move — collect refuses for a missing exit status, and
+	// rework/respawn refuse for a Worker that "has not exited" — so it sits in
+	// `running` while the driver reports it as still working, indefinitely
+	// (2026-09-21: T0612 sat that way for 7.5 hours). Once the reaper itself
+	// is gone there is nothing left to wait
+	// for, and the honest record is the unrecorded sentinel: not 0, so collect
+	// still reads the run as one that did not complete.
+	// A live reaper is not waited on: it may still write the code, so the
+	// record stays stale until it is gone. A record that never named a reaper
+	// stays stale too — nothing there can show the writer is finished.
+	if rec.ExitStatus == nil && v.Status == WorkerStale && rec.SessionLeaderPID > 0 &&
+		!pidExists(rec.SessionLeaderPID) {
+		// The reaper may still have written the code on its way out; a late
+		// copy beats the sentinel.
+		code := ExitStatusUnrecorded
+		if c, err := readExitStatus(repoRoot, rec.TaskID); err == nil {
+			code = c
+		}
+		if err := writeExitStatusCopies(repoRoot, rec.TaskID, code); err != nil {
 			return v, err
 		}
 		now := time.Now().UTC().Format(time.RFC3339)
