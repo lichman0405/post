@@ -15264,3 +15264,87 @@ $ gh api repos/lichman0405/post --jq '{full_name,private,visibility}'
 正在跑的驱动器把整轮 tick 全按住**，直到我重新 build 并重启——为了日志噪音在活任务在飞的时候做这件事
 不值得。当前 ready 池只有 3 个任务（T0906/T1007/T1102），3 个槽本来就装得下，**这一个的收益是零**。
 记在这里，等安静窗口连同别的一起处理（同一个窗口里要动的还有：T0708 的 rights 裁定后读侧通知的立账）。
+
+## 2026-09-21（续十三）：派工沿用旧分支——一笔在跑的任务从落后 main 33 笔的树上起步
+
+**这是今天量出来的第二个控制面缺陷，比续十二那笔重。**
+
+### 症状（实测）
+
+盘上 16 个 task 分支里，去掉已经合并的，有三笔的分支停在过去：
+
+| 分支 | 落后 main | 当时状态 |
+|---|---|---|
+| `task/T1007-dependency-impact-analysis` | **33 笔** | **running（正在跑！）** |
+| `task/T1102-research-map` | **33 笔** | ready（排队等下个槽） |
+| `task/T0810-open-network-e2e` | **22 笔** | rejected（我挂的扳机一响就要 rework） |
+
+### 根因
+
+`worker spawn` 缺一条守卫。`internal/devorchestrator/worker_spawn.go` 的 `ensureWorktree` 里，
+分支**不存在**时它从 `IntegrationTip` 切（注释逐字写了为什么不能切自 checkout 的 HEAD、也不能切自
+过期的 main，见 #123）。但分支**已存在**时那个 `if !exists` 整段被跳过——**沿用**，不问一句。
+而已存在的分支是什么？是上一次尝试留下的：**进程消失的那次**，或者**被我 park 的那次**。
+
+于是今早我修完「进程与 reaper 一起消失」（T0612 那一笔）重启驱动器时，
+**重新派工沿着旧分支切下去**，把 9/19 的树交给了今天的 Worker，**一句提示都没有**。
+
+### 后果的量（这是为什么要修，而不是"看着不顺眼"）
+
+T1007 被判决的那 33 笔里，main 改了 **172 个文件**，其中 **120 个落在 T1007 的 `allowed_scope` 之内**
+（它的范围是 `internal/**`、`cmd/api/**`、`tests/**`、`infra/migrations/**` 这一级的宽范围）。
+其中最要命的是 **T0613（#311）**：审计/活动那条读现在**必须带上读者**（ADR-024 第三个出口），
+而非公开行给不给非成员看，正是按 T1007 **自己的验收标准**判的。它照着旧树写出来的东西，
+在新树上要么编译不过、要么语义就是错的。**它跑了将近半小时才被我在盘上翻出来。**
+
+T0810 那一笔更险：我给它准备的返工信里逐字写着「T0817 已经合并进 main，去读代码」，
+而它的基线是 22 笔之前——**信里那句话会是假的**，Worker 会去找一段不存在的改动。
+（扳机因此从 `worker rework` 改成了 `rddev rebaseline`，见下。）
+
+### 处置（L1，已落码）
+
+`worker_spawn.go` 新增 `requireBaselineNotBehindMain`，在 `Spawn` 的 worktree 阶段之后调用：
+
+- **只对起新 session 的 Worker**（`opts.ResumeSession == ""`，即 spawn 与 respawn）生效；
+- **rework 不在此列**——保留基线正是「resume」的定义（第一次返工的政策要保住上下文和已积累的 diff），
+  推进它由 `rddev rebaseline` 负责，那条路**会带着理由告诉 Worker**；
+- 判据是 `git merge-base --is-ancestor <tip> <branch>`：落后与分叉都拒，恰在 tip 上、或带着自己提交的
+  都放行（后者是每一笔有工作的任务分支的正常形状）；
+- **拒绝而不自行推进**：已存在的分支可能带着上一次尝试没提交的工作，值不值得带走是 Supervisor 的判断，
+  而工具已经有那个动词（`rebaseline` 会原样带走）。在这里替它选，要么丢掉那份工作、
+  要么把没人看过的 diff 合进树里。拒绝文案直接指名 `rddev rebaseline TASK --reason-file FILE`。
+
+这和 stale-binary 守卫是**同一条规矩**——门不应该拿比它执行的规则更老的树来判分——只是问的对象
+从二进制换成了基线。
+
+**测试**：`internal/devorchestrator/worker_baseline_test.go`，五个用例（落后被拒且不移动分支、
+恰在 tip 通过、带自己提交通过、分叉被拒、以及**走 `Spawn` 全流程**钉住调用点那一个）。
+两个 mutation check 都做了：把判据改成一律通过 → 两个拒绝用例红；把调用点关掉 → Spawn 用例红
+（越过守卫、死在更后面的 scope 校验上）。**一个只测 helper 的测试，调用点被删掉照样绿**，
+所以第五个用例不是重复。
+
+### 同时做的两笔处置
+
+- **T1007**：`worker stop` → `rddev rebaseline T1007 --reason-file`（带了信，见
+  `.rddev/runtime/t1007-rebaseline.md`：告诉它基线从哪来、新树里哪些面变了、迁移号仍是 111）。
+  已经写下的那个文件（`internal/rsg/relationcatalog/catalog.go`）**原样带过来了**。
+  ⚠️ `rebaseline` 内部那次 `worker rework` **不带 `--parallel`**，用默认 3——驱动器跑在 4 上、
+  3 个在飞时会被拒（**基线已推进、返工没起**），于是我又补了一次
+  `worker rework T1007 --parallel 4`。这条要记住：**Supervisor 手工起 Worker 时必须自己带 `--parallel 4`**。
+- **T1102**：它的 worktree 是干净的、`RESULT.json` 只是 placeholder（没有值得带走的工作），
+  所以直接 **`git worktree remove` + `git branch -D`**，让下次派工从当时的 tip 重切；
+  分支与 worktree 都属于 Supervisor 的 Git 控制面，删除合法。
+- **T0810 的扳机**从 `worker rework` 改成 `rddev rebaseline`
+  （`.rddev/runtime/watch-t0817-then-fire-t0810.sh`）：它 22 笔的落后不推进就白跑，
+  而 rebaseline 自带「推进基线 + 记录理由 + 同一 session 返工」三件事，
+  正好也是把「已经 rejected、没有 rejected→rejected 迁移」那个坑绕开的唯一门（#126）。
+  ⚠️ 这个脚本还会撞上同一个坑：rebaseline 会先推进基线、再把 `worker rework` 因为插槽失败，
+  于是**重跑会撞「nothing to advance」**——脚本因此带状态回读（已经是 running 就算成功）与
+  `--parallel 4` 兜底。
+
+### 顺带记下的一个**仍然存在**的缺口（不在这轮修）
+
+续十二说的那个 `--parallel` 没接上，**今天又咬了一次**：不只是日志噪音了，
+它让 `rebaseline` 的自动返工拿不到槽，而报错文案是「the tree advanced but the rework failed」——
+**树已经动了、任务停在 rejected**，这个中间态得靠人接。修法应该是把并行度一路传下去
+（driver → spawn/rebaseline/rework），等安静窗口和续十二那笔一起做。

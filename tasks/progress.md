@@ -1,11 +1,25 @@
 # 开发进度
 
-> **当前这一刻（2026-09-21 早上）**：**112/146 已合并**。最近合的四笔是 T0611（Release 的验收记录必须
-> 覆盖「经合并进入 main」的状态，#309）、T0814（Fork 发起与外部提案的生产接口，#308）、
-> T0511（证据断言的读带上读者，ADR-024，#307），再往前是 T0905（#306）、T1204（#305）、T0815（#304）。
-> 在飞三笔：**T0608**（Release/Abort/Policy E2E）、**T0612**（并发 abort 的断言收尾）、
-> **T0613**（Activity 的研究事件读要带上读者——自动安全评审报的，我核实成立后立账）。
-> 派工池里 **T0817 排下一个**（已加宽范围，见下），T0812 也 ready。
+> **当前这一刻（2026-09-21 上午）**：**119/146 已合并**（80%）。今早合了七笔：T0612（并发 abort 的
+> 两份 201）、T0613（Activity 的研究事件读必须带上读者，ADR-024 的第三个出口）、T0608
+> （Release/Abort/Policy E2E）、以及前面几笔 + 我自己对驱动器的两处修复。
+> 在飞四笔：**T0812**（私密证据/公开 attestation，返工中——堵一条跨租户泄漏）、
+> **T0817**（外部 fork 提案的合并路径，返工中）、**T0906**（证据支撑的问答 API）、
+> **T1007**（依赖影响分析——刚从落后 33 笔的基线上救回来，见下）。
+> **关键路径**是 T0817 → T0810 → T1201 → T1202 → T1205 → T1206 → T1207（7 层），
+> T0817 一合并，扳机自动把 T0810 推上当前 main 返工，不需要我在场。
+> 剩下 27 笔里 **5 笔是 L3**（要 owner 一句话，见下），其余按 DAG 自动派工。
+>
+> **今天量出一个新的控制面缺陷（重）：派工沿用了旧分支。** 盘上三笔任务的分支停在过去——
+> **T1007 正在跑，落后 main 33 笔**；T1102 排队中，同样 33 笔；T0810 22 笔。
+> 根因是 `worker spawn` 的 `ensureWorktree` 只在分支**不存在**时从 integration tip 切，
+> 已存在就沿用、不问一句——而已存在的分支正是「进程消失的那次」或「被我 park 的那次」留下的。
+> 后果不是洁癖：T1007 那 33 笔里 main 改了 172 个文件，**120 个落在它自己的 `allowed_scope` 之内**，
+> 包括 T0613 那条审计读的规矩——**而 T1007 的验收标准正是照那条规矩判的**。
+> 已修（提交 0cec4d5）：起新 session 的 Worker 必须从包含当前 integration tip 的分支出发，
+> 否则拒发并指名 `rddev rebaseline`；rework 不受影响（保留基线就是 resume 的定义）。
+> 五个用例 + 两个 mutation check。T1007 已 rebaseline 续跑（它写的那个文件原样带过来了），
+> T1102 的旧分支直接删掉重切，T0810 的扳机改成 rebaseline。详见 decisions.md 续十三。
 >
 > **今早的主戏是"卡了 7.5 小时"，而且是 owner 先看出来的。** T0612 的 Worker 与它的 reaper
 > 在昨晚 22:14 **一起消失**且谁都没写 `exit.status`，驱动读到的只是"还在干"，于是一直等下去；
@@ -36,7 +50,11 @@
 > 而那一段今天走不通（与 T0814 撞的是同一堵墙），跑到底也只会写出一个 blocked。理由与处置见
 > `decisions.md` 今天「T0810 停在半路」那一节；它的 worktree 与已写的 in-memory Git transport 保留，
 > **T0817 合并后 rework 续跑**。
-> 七笔 blocked：T0411/T0610/T0706/T0708/T1106 是老账；**T0814/T0608 的"卡住"已经撤回了**——
+> **五笔 blocked 全是 L3，要 owner 一句话**（T0411 送 PR 进评审没有门 / T0610 reopen 缺一行权限 /
+> T0706 资产元数据修订 / T0708 rights 的 unspecified 要不要判 / T1106 加固阈值）。
+> 五笔都 `v1_required`，而 T1207 的验收逐字要求「所有 required done」——**没有这五句话，V1 收不了口**。
+> 每一笔我都给了推荐答案，写成 `.rddev/runtime/owner-decisions-needed.md` 交给 owner 逐条勾。
+> （**T0814/T0608 的"卡住"已经撤回了**——
 > 它们不是产品问题，是**树里没照规格写**（merge 读不到 fork 的源分支、验收记录读不到经合并进 main 的状态），
 > 已拆成 T0817/T0611 两笔新任务（ADR-025/026），两笔都已 ready；**T0812 在等 T0511 合并**。
 > **今天还修了驱动自己的一个 bug**（见 decisions.md 与下面"收工"一节）：它把"已验收、等 CI"
@@ -2935,9 +2953,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-20T21:50:43Z
+生成时间：2026-09-20T23:12:19Z
 
-状态分布：todo 16 · ready 2 · running 3 · worker_failed 0 · verification 0 · rejected 1 · blocked 8 · accepted 0 · merged 116（合计 146/146 个任务）
+状态分布：todo 16 · ready 1 · running 4 · worker_failed 0 · verification 0 · rejected 1 · blocked 5 · accepted 0 · merged 119（合计 146/146 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -3018,12 +3036,12 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0605 | Release Manifest Builder | P6 | merged | 2026-09-14T08:39:33Z |  | 2026-09-14T09:24:39Z | 2026-09-14T09:33:18Z |
 | T0606 | Immutable Release API/UI | P6 | merged | 2026-09-14T17:12:24Z |  | 2026-09-14T17:34:41Z | 2026-09-14T17:58:08Z |
 | T0607 | Activity/Audit Timeline 增强 | P6 | merged | 2026-09-20T12:08:08Z |  | 2026-09-20T12:39:41Z | 2026-09-20T12:49:12Z |
-| T0608 | Release/Abort/Policy E2E | P6 | running | 2026-09-20T21:47:22Z |  |  |  |
+| T0608 | Release/Abort/Policy E2E | P6 | merged | 2026-09-20T22:25:52Z |  | 2026-09-20T22:53:19Z | 2026-09-20T23:06:25Z |
 | T0609 | Project Milestone 基础 | P6 | merged | 2026-09-15T13:30:51Z |  | 2026-09-15T14:00:41Z | 2026-09-15T14:12:50Z |
 | T0610 | 主线对象 Reopen 状态迁移（等一行权限的 L3 裁定） | P6 | blocked |  |  |  |  |
 | T0611 | Release 的验收记录必须覆盖「经合并进入 main」的状态（T0608 第 6 段的上游缺陷） | P6 | merged | 2026-09-20T13:52:25Z |  | 2026-09-20T14:39:52Z | 2026-09-20T14:48:15Z |
-| T0612 | 并发 abort 的两份 201：断言只能写契约允许的东西，那个窗口要显式钉住 | P6 | running | 2026-09-20T21:43:35Z |  |  |  |
-| T0613 | Activity 的研究事件读必须带上读者：非公开行不给非成员（ADR-024 同一条规矩的第三个出口） | P6 | running | 2026-09-20T21:48:28Z |  |  |  |
+| T0612 | 并发 abort 的两份 201：断言只能写契约允许的东西，那个窗口要显式钉住 | P6 | merged | 2026-09-20T21:43:35Z |  | 2026-09-20T22:20:09Z | 2026-09-20T22:40:12Z |
+| T0613 | Activity 的研究事件读必须带上读者：非公开行不给非成员（ADR-024 同一条规矩的第三个出口） | P6 | merged | 2026-09-20T21:48:28Z |  | 2026-09-20T22:35:11Z | 2026-09-20T22:53:28Z |
 | T0701 | Research Asset Core/PID | P7 | merged | 2026-09-15T15:21:35Z |  | 2026-09-15T15:51:33Z | 2026-09-15T15:57:18Z |
 | T0702 | 四类 Asset Manifest validator | P7 | merged | 2026-09-15T17:36:13Z |  | 2026-09-15T18:02:29Z | 2026-09-15T18:09:43Z |
 | T0703 | Rights Model | P7 | merged | 2026-09-15T16:37:35Z |  | 2026-09-15T17:09:14Z | 2026-09-15T17:14:12Z |
@@ -3047,18 +3065,18 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0809 | Credit Attribution/Dispute 基础 | P8 | merged | 2026-09-19T07:55:17Z |  | 2026-09-19T08:58:12Z | 2026-09-20T10:21:30Z |
 | T0810 | 最小 Open Network 闭环 E2E | P8 | rejected | 2026-09-20T12:00:44Z |  |  |  |
 | T0811 | Discussion 与 Promote to Research Object | P8 | merged | 2026-09-20T11:05:19Z |  | 2026-09-20T11:42:51Z | 2026-09-20T11:51:03Z |
-| T0812 | Private Evidence / Public Attestation 基础 | P8 | ready |  |  |  |  |
+| T0812 | Private Evidence / Public Attestation 基础 | P8 | running | 2026-09-20T22:54:56Z |  |  |  |
 | T0813 | Contribution Ledger 接上生产（worker 挂载 + via 真实来源） | P8 | merged | 2026-09-19T05:32:05Z |  | 2026-09-19T06:46:22Z | 2026-09-19T06:58:59Z |
 | T0814 | Fork 发起与外部提案的生产接口（契约由 Supervisor 落地，本任务照契约接线，并改 fork 的命名规则） | P8 | merged | 2026-09-20T13:38:01Z |  | 2026-09-20T14:29:22Z | 2026-09-20T14:40:00Z |
 | T0815 | CI 的 migration-integration 偶发超时：量出时间去哪了，按证据修 | P11 | merged | 2026-09-20T11:14:58Z |  | 2026-09-20T13:07:34Z | 2026-09-20T13:24:56Z |
 | T0816 | affiliation 日期口径统一（打戳 / 解析 / 判定 三处生产口径一处定义；夹具助手同批改） | P8 | merged | 2026-09-19T03:17:44Z |  | 2026-09-19T04:38:57Z | 2026-09-19T04:47:25Z |
-| T0817 | 外部 fork 提案的合并路径：merge 必须能在源分支自己所在的项目里读它 | P8 | ready | 2026-09-20T13:45:11Z |  |  |  |
+| T0817 | 外部 fork 提案的合并路径：merge 必须能在源分支自己所在的项目里读它 | P8 | running | 2026-09-20T22:54:47Z |  |  |  |
 | T0901 | Search Document Projection | P9 | merged | 2026-09-19T01:45:22Z |  | 2026-09-19T02:24:58Z | 2026-09-19T02:59:55Z |
 | T0902 | Embedding Provider 与 pgvector | P9 | merged | 2026-09-19T04:40:55Z |  | 2026-09-19T05:17:11Z | 2026-09-19T05:27:07Z |
 | T0903 | Scientific Query Planner | P9 | merged | 2026-09-19T03:08:10Z |  | 2026-09-19T03:55:21Z | 2026-09-19T04:04:51Z |
 | T0904 | Hybrid Retrieval + Graph Expansion | P9 | merged | 2026-09-19T05:31:44Z |  | 2026-09-19T06:56:28Z | 2026-09-19T07:04:51Z |
 | T0905 | Scientific Ranking | P9 | merged | 2026-09-20T12:54:18Z |  | 2026-09-20T13:37:58Z | 2026-09-20T13:45:08Z |
-| T0906 | Evidence-backed Answer Generator/API | P9 | blocked |  |  |  |  |
+| T0906 | Evidence-backed Answer Generator/API | P9 | running | 2026-09-20T22:37:52Z |  |  |  |
 | T0907 | Search Answer Web UI | P9 | todo |  |  |  |  |
 | T0908 | Search → Draft Research Context | P9 | todo |  |  |  |  |
 | T1001 | Transactional Outbox | P10 | merged | 2026-09-14T15:17:43Z |  | 2026-09-14T15:51:18Z | 2026-09-14T15:54:45Z |
@@ -3067,9 +3085,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1004 | RSS/Atom Feeds | P10 | merged | 2026-09-18T12:12:00Z |  | 2026-09-18T12:33:57Z | 2026-09-18T12:42:06Z |
 | T1005 | Email Digest abstraction | P10 | merged | 2026-09-18T12:47:25Z |  | 2026-09-18T13:19:42Z | 2026-09-18T13:25:53Z |
 | T1006 | Signed Webhooks | P10 | merged | 2026-09-15T03:32:24Z |  | 2026-09-15T04:54:21Z | 2026-09-15T05:00:53Z |
-| T1007 | Dependency Impact Analysis | P10 | blocked | 2026-09-19T11:40:29Z |  |  |  |
+| T1007 | Dependency Impact Analysis | P10 | running | 2026-09-20T23:06:23Z |  |  |  |
 | T1101 | 统一 Primer-style Design System | P11 | todo |  |  |  |  |
-| T1102 | Research Map 高质量交互 | P11 | blocked | 2026-09-19T12:02:07Z |  |  |  |
+| T1102 | Research Map 高质量交互 | P11 | ready | 2026-09-19T12:02:07Z |  |  |  |
 | T1103 | Publication/Visibility Security UX | P11 | todo |  |  |  |  |
 | T1104 | 全站 Accessibility AA | P11 | todo |  |  |  |  |
 | T1105 | I18N 基线 | P11 | todo |  |  |  |  |
