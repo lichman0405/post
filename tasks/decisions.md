@@ -14452,3 +14452,48 @@ internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql)
 **给以后**：`rddev task accept` 报 "does not apply to current main" 时，
 **先去 main 上查那个文件最近被谁改过**（`git log --oneline main -- <file>`），
 再决定是 rebaseline（机械冲突）还是别的；**不要先怀疑工人**。
+
+## 2026-09-20：T0809 基线推进与合并（T0808 落地后冲突，手工 rebaseline 后重评合进）
+
+**事实**：T0809（贡献署名/争议，迁移 `00103`）在 9-20 10:21 合进 main（`8f8d85c`，#299）。
+它不是一次普通合并——它先被 T0808 的落地顶出了 main，需要**手工等价 rebaseline + 重新评审**。
+
+**冲突证据（都核对过）**：
+
+- T0809 的原基线是 `085d885`（main 在 T0808 合之前的状态）。T0808（`51208fe`，#297）带了迁移 `00101`，
+  合进 main 之后，T0809 的 patch 打不上当前 main：
+
+      error: patch failed: tests/integration/migration_test.go:...
+      error: patch failed: specs/SPEC_VERSION.json:1
+      error: patch failed: specs/database/postgres.sql:79
+
+- 真实代码冲突只在 `tests/integration/migration_test.go` 一处：T0808 加了
+  `contribution_events_*` 索引注释块，T0809 加了 `credit_attribution_*` / `credit_disputes_*` 块，
+  两个块在 catalog fixture 里是**顺序拼接**关系，不是语义冲突。
+- `specs/SPEC_VERSION.json` 与 `specs/database/postgres.sql` 是**派生件**（`derived-artifacts.json`），
+  只能重新生成，不能文本合并。
+
+**处置**：
+
+1. 把工作树 HEAD 切到当前 main（`51208fe`），把 T0809 的完整 diff 以 uncommitted changes 形式重新应用
+   （`git diff 51208fe 9dcbabe | git apply`）。
+2. 代码冲突处保留**两个块**（T0808 的 `contribution_events_*` 在前，T0809 的 `credit_attribution_*` 在后），
+   不丢任何一方。
+3. 重新生成派生件：`scripts/gen_schema_snapshot.py` → `scripts/spec_version.py --write`。
+   这里我犯了一个小错：先跑了 `--write` 再跑 snapshot，结果 digest 又变；重跑一遍后
+   `make check-spec-version` 与 `make check-schema-snapshot` 都绿。
+4. 更新 `.rddev/workers/T0809/registry.json` 与 `.rddev/runtime/tasks/T0809/gate-inputs.json`
+   的 `baseline_sha` 到 `51208fe`。
+5. 旧评审结论作废（`gate_run.go:593` 把 verdict 绑在 `diff_sha` 上），删掉 decisions.json 里
+   之前记的 T0809 "push"/"merge" 拒绝，重新派 Review Worker；新 verdict 为 `approve`。
+6. 驱动在收集到新 approve 后自动 `push` → `pr merge`，T0809 合进 main。
+
+**为什么必须这么绕**：基线推进改变代码指纹，旧 verdict 必然失效。
+手工解冲突只省“重做”，省不掉“重评”；而让一个过期 verdict 过关等于直接破坏 G4。
+
+**给以后**：
+
+- 派生件冲突永远走“ours + 重新生成”，不要文本合并。
+- `scripts/spec_version.py --write` 必须在 `scripts/gen_schema_snapshot.py` 之后跑。
+- 如果 rebaseline 后 branch 上出现多余 commit（例如我不小心 `git rebase` 出了 commit `9dcbabe`），
+  不要直接提交那个 branch；要把它还原成“基线 + uncommitted diff”的 Worker 状态，否则后续 gate 对不上。
