@@ -1,8 +1,15 @@
 # 开发进度
 
-> **当前这一刻**：**110/144 已合并**（最近一笔是 T0607「项目 Activity feed 的 research_events 索引」，#303）。
-> 在飞三笔：T0815（查 CI 的 migration-integration 偶发超时）、T0905（科学排序——基线推进后重做中，
-> 见下面"收工"一节）、T1204（上线/演练手册）。
+> **当前这一刻**：**112/145 已合并**（最近一笔是 T0905「Scientific Ranking」，#306）。这一段还合了
+> T0815（CI 的 migration-integration 偶发超时：量出时间去哪了，按证据修，#304）、
+> T1204（生产 Runbook/Release/Recovery 验证，#305）。
+> 在飞四笔：T0511（提案撤回）、T0611（返工中，见下面"T0611 的裁决"）、T0814、T0817；
+> 派工池里 T0612/T1007/T1102 三笔 ready 等空位（并行上限 3，这一轮我按硬上限 4 放了 T0611 返工）。
+> **T0611 今天咬了一次**：它把合并边读通了（缺陷已证：改动前对合并后的 main 头返回空），却撞上
+> 发布门与 release gate **共用同一条读**——"经合并进 main 的那个版本还能不能发布"被 Worker 判成 L3
+> 停下来报 blocked（报得对）。我的裁决：**门自己的拒绝理由就是血缘规则，那条 409 是缺陷的后果，
+> 不是规则**；期望值改成 201，理由与"为什么这不算越 L3 的线"逐条记在 decisions.md 今天最后一节。
+> 裁决已随返工信发到 Worker（`--reason-file`，已核 prompt.md 收到了）。
 > **今天把一个积了几天的大动作做完（"收工"）**：T0511/T0817/T0611 三笔新任务立账进 DAG，
 > T0814 的 AC8 收窄后从 blocked 回到 ready，T0810 补上 T0817 依赖边，两篇 ADR（025/026）落档。
 > 派工池里现在有 T0511/T0817/T0611/T0814/T1007/T1102 六笔 ready。
@@ -26,7 +33,7 @@
 > 别去重跑它正在重试的动作（我 17:07 就这么干过一次，见 decisions.md 傍晚那一节）。
 > **今天我还犯了一个"自己把驱动弄停"的错**：我修驱动的提交动了它自己的源码，而驱动有一条自检——
 > main 上有它没编进去的调度器提交，它就**拒绝做任何事**。已重建二进制并重启（见 decisions.md 今天最后一节）。
-> 主库指纹 `sha256:d74a7420fe6b1835`（38 个输入）随各笔合并推进，以 `scripts/spec_version.py --check` 为准。
+> 主库指纹 `sha256:dac9d0422769f71a`（38 个输入）随各笔合并推进，以 `scripts/spec_version.py --check` 为准。
 > 今天合了十三笔——T0410（提案"从建到合"整条路）、T0901（搜索的中间那条腿）、T0903（提问理解）、
 > T0806（外部证据网络，带迁移 00091）、T0816（"某人某天属于哪个组织"的三处口径收成一处）、
 > T0902（向量那一半）、T1203（部署模板）、T0813（贡献账本接上生产）、T0904（搜索的第三条腿：
@@ -2909,9 +2916,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-19T09:50:31Z
+生成时间：2026-09-20T13:52:45Z
 
-状态分布：todo 25 · ready 0 · running 3 · worker_failed 0 · verification 1 · rejected 0 · blocked 6 · accepted 1 · merged 105（合计 141/141 个任务）
+状态分布：todo 17 · ready 3 · running 3 · worker_failed 0 · verification 1 · rejected 1 · blocked 7 · accepted 1 · merged 112（合计 145/145 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -2983,17 +2990,20 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0507 | Evidence/Provenance UI | P5 | merged | 2026-09-19T07:38:15Z |  | 2026-09-19T08:47:55Z | 2026-09-19T09:07:35Z |
 | T0508 | External Reference live identity + snapshot | P5 | merged | 2026-09-14T14:51:21Z |  | 2026-09-14T15:13:55Z | 2026-09-14T15:17:22Z |
 | T0509 | Literature evidence extraction data model | P5 | merged | 2026-09-19T06:46:24Z |  | 2026-09-19T07:17:10Z | 2026-09-19T07:35:55Z |
-| T0510 | Knowledge workflow E2E | P5 | verification | 2026-09-19T09:07:39Z |  |  |  |
+| T0510 | Knowledge workflow E2E | P5 | merged | 2026-09-19T09:07:39Z |  | 2026-09-19T10:05:42Z | 2026-09-19T10:23:25Z |
+| T0511 | 证据断言的读带上读者（ADR-024）：非公开行只给当事项目 | P5 | verification | 2026-09-20T13:17:20Z |  |  |  |
 | T0601 | Freeze Main Governance | P6 | merged | 2026-09-16T11:27:32Z |  | 2026-09-16T11:46:40Z | 2026-09-16T11:52:51Z |
 | T0602 | 主线对象 Abort 状态迁移（abort 半；reopen 已拆出为 T0610） | P6 | merged | 2026-09-19T08:16:17Z |  | 2026-09-19T09:38:51Z | 2026-09-19T09:48:01Z |
 | T0603 | Organization/Project Policy Engine | P6 | merged | 2026-09-14T03:42:50Z |  | 2026-09-14T04:09:38Z | 2026-09-14T04:12:31Z |
 | T0604 | Scientific Responsibility / Reviewer Routing | P6 | merged | 2026-09-18T17:16:45Z |  | 2026-09-18T17:58:47Z | 2026-09-18T18:07:33Z |
 | T0605 | Release Manifest Builder | P6 | merged | 2026-09-14T08:39:33Z |  | 2026-09-14T09:24:39Z | 2026-09-14T09:33:18Z |
 | T0606 | Immutable Release API/UI | P6 | merged | 2026-09-14T17:12:24Z |  | 2026-09-14T17:34:41Z | 2026-09-14T17:58:08Z |
-| T0607 | Activity/Audit Timeline 增强 | P6 | todo |  |  |  |  |
-| T0608 | Release/Abort/Policy E2E | P6 | todo |  |  |  |  |
+| T0607 | Activity/Audit Timeline 增强 | P6 | merged | 2026-09-20T12:08:08Z |  | 2026-09-20T12:39:41Z | 2026-09-20T12:49:12Z |
+| T0608 | Release/Abort/Policy E2E | P6 | blocked | 2026-09-19T10:22:15Z |  |  |  |
 | T0609 | Project Milestone 基础 | P6 | merged | 2026-09-15T13:30:51Z |  | 2026-09-15T14:00:41Z | 2026-09-15T14:12:50Z |
 | T0610 | 主线对象 Reopen 状态迁移（等一行权限的 L3 裁定） | P6 | blocked |  |  |  |  |
+| T0611 | Release 的验收记录必须覆盖「经合并进入 main」的状态（T0608 第 6 段的上游缺陷） | P6 | running | 2026-09-20T13:52:25Z |  |  |  |
+| T0612 | 并发 abort 的两份 201：断言只能写契约允许的东西，那个窗口要显式钉住 | P6 | ready |  |  |  |  |
 | T0701 | Research Asset Core/PID | P7 | merged | 2026-09-15T15:21:35Z |  | 2026-09-15T15:51:33Z | 2026-09-15T15:57:18Z |
 | T0702 | 四类 Asset Manifest validator | P7 | merged | 2026-09-15T17:36:13Z |  | 2026-09-15T18:02:29Z | 2026-09-15T18:09:43Z |
 | T0703 | Rights Model | P7 | merged | 2026-09-15T16:37:35Z |  | 2026-09-15T17:09:14Z | 2026-09-15T17:14:12Z |
@@ -3013,20 +3023,21 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0805 | Published Knowledge Object | P8 | merged | 2026-09-18T15:04:09Z |  | 2026-09-18T16:00:06Z | 2026-09-18T16:08:04Z |
 | T0806 | External Evidence Network Aggregation | P8 | merged | 2026-09-19T03:37:27Z |  | 2026-09-19T04:27:41Z | 2026-09-19T04:39:54Z |
 | T0807 | Contribution Ledger projection | P8 | merged | 2026-09-18T21:59:48Z |  | 2026-09-18T22:48:50Z | 2026-09-18T22:57:22Z |
-| T0808 | Research Profile / Organization Profile | P8 | running | 2026-09-19T09:49:59Z |  | 2026-09-19T09:18:52Z |  |
-| T0809 | Credit Attribution/Dispute 基础 | P8 | accepted | 2026-09-19T07:55:17Z |  | 2026-09-19T08:58:12Z |  |
-| T0810 | 最小 Open Network 闭环 E2E | P8 | todo |  |  |  |  |
-| T0811 | Discussion 与 Promote to Research Object | P8 | running | 2026-09-19T09:42:13Z |  |  |  |
+| T0808 | Research Profile / Organization Profile | P8 | merged | 2026-09-19T09:49:59Z |  | 2026-09-19T10:22:12Z | 2026-09-20T07:36:17Z |
+| T0809 | Credit Attribution/Dispute 基础 | P8 | merged | 2026-09-19T07:55:17Z |  | 2026-09-19T08:58:12Z | 2026-09-20T10:21:30Z |
+| T0810 | 最小 Open Network 闭环 E2E | P8 | rejected | 2026-09-20T12:00:44Z |  |  |  |
+| T0811 | Discussion 与 Promote to Research Object | P8 | merged | 2026-09-20T11:05:19Z |  | 2026-09-20T11:42:51Z | 2026-09-20T11:51:03Z |
 | T0812 | Private Evidence / Public Attestation 基础 | P8 | blocked |  |  |  |  |
 | T0813 | Contribution Ledger 接上生产（worker 挂载 + via 真实来源） | P8 | merged | 2026-09-19T05:32:05Z |  | 2026-09-19T06:46:22Z | 2026-09-19T06:58:59Z |
-| T0814 | Fork 发起与外部提案的生产接口（契约由 Supervisor 落地，本任务照契约接线，并改 fork 的命名规则） | P8 | running | 2026-09-19T09:23:15Z |  |  |  |
-| T0815 | CI 的 migration-integration 偶发超时：量出时间去哪了，按证据修 | P11 | todo |  |  |  |  |
+| T0814 | Fork 发起与外部提案的生产接口（契约由 Supervisor 落地，本任务照契约接线，并改 fork 的命名规则） | P8 | running | 2026-09-20T13:38:01Z |  |  |  |
+| T0815 | CI 的 migration-integration 偶发超时：量出时间去哪了，按证据修 | P11 | merged | 2026-09-20T11:14:58Z |  | 2026-09-20T13:07:34Z | 2026-09-20T13:24:56Z |
 | T0816 | affiliation 日期口径统一（打戳 / 解析 / 判定 三处生产口径一处定义；夹具助手同批改） | P8 | merged | 2026-09-19T03:17:44Z |  | 2026-09-19T04:38:57Z | 2026-09-19T04:47:25Z |
+| T0817 | 外部 fork 提案的合并路径：merge 必须能在源分支自己所在的项目里读它 | P8 | running | 2026-09-20T13:45:11Z |  |  |  |
 | T0901 | Search Document Projection | P9 | merged | 2026-09-19T01:45:22Z |  | 2026-09-19T02:24:58Z | 2026-09-19T02:59:55Z |
 | T0902 | Embedding Provider 与 pgvector | P9 | merged | 2026-09-19T04:40:55Z |  | 2026-09-19T05:17:11Z | 2026-09-19T05:27:07Z |
 | T0903 | Scientific Query Planner | P9 | merged | 2026-09-19T03:08:10Z |  | 2026-09-19T03:55:21Z | 2026-09-19T04:04:51Z |
 | T0904 | Hybrid Retrieval + Graph Expansion | P9 | merged | 2026-09-19T05:31:44Z |  | 2026-09-19T06:56:28Z | 2026-09-19T07:04:51Z |
-| T0905 | Scientific Ranking | P9 | todo |  |  |  |  |
+| T0905 | Scientific Ranking | P9 | merged | 2026-09-20T12:54:18Z |  | 2026-09-20T13:37:58Z | 2026-09-20T13:45:08Z |
 | T0906 | Evidence-backed Answer Generator/API | P9 | todo |  |  |  |  |
 | T0907 | Search Answer Web UI | P9 | todo |  |  |  |  |
 | T0908 | Search → Draft Research Context | P9 | todo |  |  |  |  |
@@ -3036,9 +3047,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1004 | RSS/Atom Feeds | P10 | merged | 2026-09-18T12:12:00Z |  | 2026-09-18T12:33:57Z | 2026-09-18T12:42:06Z |
 | T1005 | Email Digest abstraction | P10 | merged | 2026-09-18T12:47:25Z |  | 2026-09-18T13:19:42Z | 2026-09-18T13:25:53Z |
 | T1006 | Signed Webhooks | P10 | merged | 2026-09-15T03:32:24Z |  | 2026-09-15T04:54:21Z | 2026-09-15T05:00:53Z |
-| T1007 | Dependency Impact Analysis | P10 | todo |  |  |  |  |
+| T1007 | Dependency Impact Analysis | P10 | ready | 2026-09-19T11:40:29Z |  |  |  |
 | T1101 | 统一 Primer-style Design System | P11 | todo |  |  |  |  |
-| T1102 | Research Map 高质量交互 | P11 | todo |  |  |  |  |
+| T1102 | Research Map 高质量交互 | P11 | ready | 2026-09-19T12:02:07Z |  |  |  |
 | T1103 | Publication/Visibility Security UX | P11 | todo |  |  |  |  |
 | T1104 | 全站 Accessibility AA | P11 | todo |  |  |  |  |
 | T1105 | I18N 基线 | P11 | todo |  |  |  |  |
@@ -3051,7 +3062,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1201 | 完整 Seed Demo Data Builder | P12 | todo |  |  |  |  |
 | T1202 | Canonical MOF Workflow E2E | P12 | todo |  |  |  |  |
 | T1203 | Staging 部署模板 | P12 | merged | 2026-09-19T05:32:06Z |  | 2026-09-19T06:02:21Z | 2026-09-19T06:10:29Z |
-| T1204 | 生产 Runbook/Release/Recovery 验证 | P12 | todo |  |  |  |  |
+| T1204 | 生产 Runbook/Release/Recovery 验证 | P12 | accepted | 2026-09-20T12:21:32Z |  | 2026-09-20T13:17:17Z |  |
 | T1205 | OpenAPI/MCP/Schema 文档最终同步 | P12 | todo |  |  |  |  |
 | T1206 | Master Security/Quality Gate | P12 | todo |  |  |  |  |
 | T1207 | V1 最终验收与交付报告 | P12 | todo |  |  |  |  |

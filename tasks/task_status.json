@@ -5243,9 +5243,10 @@
     },
     "T0611": {
       "status": "running",
-      "started_at": "2026-09-20T13:18:44Z",
+      "started_at": "2026-09-20T13:52:25Z",
       "notes": "新立账（2026-09-20）：T0608 第 6 段走不通的上游原因——Release 的验收记录读不到「经合并进入 main」的 PR 的评审。裁决见 tasks/decisions.md，架构理由见 docs/adr/ADR-026。任务书在 tasks/packages/T0611.json；未落地前 allowed_scope 为空，故意如此。",
-      "worker_run_id": "run-32a53bade8d573d6",
+      "worker_run_id": "run-14b567bdef8ca6e9",
+      "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
       "history": [
         {
           "from": "todo",
@@ -5259,6 +5260,32 @@
           "at": "2026-09-20T13:18:44Z",
           "run_id": "run-32a53bade8d573d6",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-20T13:46:14Z",
+          "run_id": "run-b0c0191f4e67a9a1",
+          "reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T13:52:25Z",
+          "run_id": "run-14b567bdef8ca6e9",
+          "reason": "worker spawn"
+        }
+      ]
+    },
+    "T0612": {
+      "status": "ready",
+      "notes": "新立账（2026-09-20）：T1204 的 CI 红在 TestAbortProposalConcurrency，而那条断言与契约（internal/application/aborts/service.go:183-186）矛盾——见 tasks/packages/T0612.json。任务书已落地（8 条需求 / 6 条验收；allowed_scope = tests/integration/**，internal/** 在 forbidden_scope），等派工池空位。",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-20T13:46:15Z",
+          "run_id": "run-3d72ef377d97828e"
         }
       ]
     },
@@ -7589,10 +7616,10 @@
       ]
     },
     "T0906": {
-      "status": "blocked",
+      "status": "todo",
       "started_at": null,
       "completed_at": null,
-      "notes": "**空窗期临时移出派工集（Supervisor，2026-09-20）**：本任务的 `allowed_scope` 含 `specs/**`（或 `infra/migrations/**`），它的 diff 会带上 `specs/SPEC_VERSION.json`。而 T0607 与 T0905 两笔带指纹的正在飞，落地 `tasks/tasks.json`（它是指纹的输入）会顶掉它们的 G2。所以本任务在落地期间被按住，**落地一完成立刻翻回**（`.rddev/tools/hold-dispatch.py --restore`），并让它在**新基线**上派出——那样它自己算出来的指纹才是对的。",
+      "notes": "",
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null
@@ -8321,9 +8348,9 @@
       ]
     },
     "T1007": {
-      "status": "blocked",
+      "status": "ready",
       "started_at": "2026-09-19T11:40:29Z",
-      "notes": "**空窗期临时移出派工集（Supervisor，2026-09-20）**：本任务的 `allowed_scope` 含 `specs/**`（或 `infra/migrations/**`），它的 diff 会带上 `specs/SPEC_VERSION.json`。而 T0607 与 T0905 两笔带指纹的正在飞，落地 `tasks/tasks.json`（它是指纹的输入）会顶掉它们的 G2。所以本任务在落地期间被按住，**落地一完成立刻翻回**（`.rddev/tools/hold-dispatch.py --restore`），并让它在**新基线**上派出——那样它自己算出来的指纹才是对的。",
+      "notes": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。",
       "worker_run_id": "run-1a2252a9ec4ea195",
       "history": [
         {
@@ -8364,9 +8391,9 @@
       "merged_at": null
     },
     "T1102": {
-      "status": "blocked",
+      "status": "ready",
       "started_at": "2026-09-19T12:02:07Z",
-      "notes": "**空窗期临时移出派工集（Supervisor，2026-09-20）**：本任务的 `allowed_scope` 含 `specs/**`（或 `infra/migrations/**`），它的 diff 会带上 `specs/SPEC_VERSION.json`。而 T0607 与 T0905 两笔带指纹的正在飞，落地 `tasks/tasks.json`（它是指纹的输入）会顶掉它们的 G2。所以本任务在落地期间被按住，**落地一完成立刻翻回**（`.rddev/tools/hold-dispatch.py --restore`），并让它在**新基线**上派出——那样它自己算出来的指纹才是对的。",
+      "notes": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。",
       "worker_run_id": "run-cfd158672804b3ff",
       "history": [
         {
@@ -8686,10 +8713,11 @@
       ]
     },
     "T1204": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-20T12:21:32Z",
       "worker_run_id": "run-cdb0a7b6b0e0c9e3",
       "accepted_by_supervisor_at": "2026-09-20T13:17:17Z",
+      "merged_at": "2026-09-20T13:53:19Z",
       "history": [
         {
           "from": "todo",
@@ -8716,6 +8744,13 @@
           "to": "accepted",
           "at": "2026-09-20T13:17:17Z",
           "run_id": "run-60673749050eb341"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-20T13:53:19Z",
+          "run_id": "run-28ab1f4ef37dd781",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -8754,10 +8789,6 @@
       "worker_run_id": null,
       "accepted_by_supervisor_at": null,
       "merged_at": null
-    },
-    "T0612": {
-      "status": "todo",
-      "notes": "新立账（2026-09-20）：T1204 的 CI 红在 TestAbortProposalConcurrency，而那条断言与契约（service.go:183-186）矛盾——见 tasks/packages/T0612.json。未落地前 allowed_scope 为空，故意如此。"
     }
   },
   "version": 2

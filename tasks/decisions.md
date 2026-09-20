@@ -14773,3 +14773,56 @@ T0814 的 AC8 收窄一半并 `blocked → ready`；T0810 补 T0817 依赖边（
 `tasks/tasks.json` 是规格指纹的输入。**T0905 的 diff 带着 `specs/SPEC_VERSION.json`**，
 它此刻正走到 accept/merge，此时落地会立刻把它的 G2 弄红（今天已经为同一件事给它做过一次 rebaseline）。
 所以 T0612 的骨架**等 T0905 合并之后再落**——书已经写好、脚本已经 dry-run 过，只等这个空当。
+
+---
+
+## 2026-09-20（T0611 裁决）：发布门读的是同一份记录，那条 409 期望跟着改
+
+### 谁报的、报了什么
+
+T0611 的 Worker 把合并边读通了、也证明了改动前后（空 → 非空），然后在 `make test-integration`
+上撞到 `tests/integration/knowledge_e2e_test.go:1200`：**main 自己 append 的那个版本原来被拒 409，
+修完之后变成 201**。它查出来发布门与 release gate **读的是同一条查询和同一个分组 helper**
+（`internal/persistence/knowledge_publish_store.go:141-173`），于是判定「一个版本的状态经合并进入
+main 之后还能不能被发布」是 L3，停下来报 blocked。**这个判断是对的，报得也对**——那是产品/公开性
+层面的问题，不由 Worker 定。collect 按规矩把这次运行记成 rejected（诚实的未完成不是完成），
+**不是对 Worker 的否定**。
+
+### 裁决：409 那条期望要改成 201，理由四条
+
+1. **门的规则是血缘规则，写在它自己的拒绝理由里。** `internal/application/knowledgepublish/preview.go:230-262`
+   的 `Judge()` 逐字：`the record of this version's lineage into main carries no approved %s review, so the
+   version has not passed publication review`。规则里**没有**任何一处说「被发布的必须是评审钉住的那一个版本」。
+2. **「经合并进入 main 的状态读不到记录」已经被我裁成缺陷**（同日 T0608 解封的裁决）。
+   发布门与 release gate 共用这条读，`knowledge_publish_store.go:143-150` 的注释逐字写着两个读者
+   **不许对同一份记录有分歧**。读修好了，两个读者看到的就都是「有评审」。**这不是新增规则，
+   是既有规则第一次能被走到。**
+3. **`knowledge_e2e_test.go:1131-1150` 与 `:1189-1193` 那两段话说的「main's chain carries no PROPOSAL」
+   正是这个缺陷的机制本身**，不是一条独立的模型事实——它把「读坏了」写成了「规则如此」。
+   T0510 写下它的时候（2026-09-19）这个缺陷还没被裁决，所以它不是一条能对抗第 2 条的裁定。
+4. **那两段话剩下的规范部分（"what is publishable is the reviewed version, wherever it was written"）
+   规格里没有出处。** `docs/09_VERSION_CONTROL.md:5` 只写「任何 private→public 必须显式 publication
+   review」，`docs/43_STATE_MACHINES.md:22` 只写状态机。要实现成「血缘里有评审、但版本不是被钉住的
+   那个，仍然拒绝」，那才是**新造产品语义**——我不造。
+
+### 为什么这一笔不越 L3 的线（这一条要能站住，所以逐条写）
+
+- 改动后能发布的那一行，**内容是逐字相同的评审过的内容**：这是 T0510 自己钉的
+  （`tests/integration/knowledge_e2e_test.go:1107-1121`：`:1114-1117` 断言它的标题就是评审过的
+  那句话（`claimV2Statement`），`:1118-1121` 断言它是 v3——断言在 **内容**上，文件自己的注释逐字
+  "the appended version carries what the reviewers approved, so the assertion is on the CONTENT"）。
+- 被钉住的那个版本**今天就能发布**（同一份测试里就是 201），同一个项目、同一份 rights 请求体。
+- 所以**能变成公开的内容集合一个字节都没变**，变的只是「哪一行版本可以承载它」。
+- owner 的 `L3-20260916-1 #3` 把「一个版本只发布一次」**明确限定在版本粒度**，并特意说明不落到
+  object 粒度（`infra/migrations/00083_knowledge_publication_identity.sql:93-105` 逐字写着
+  「同一个知识对象**版本**只能对外发布一次」，且**故意不加** object_version_id 的唯一索引）。
+  同一对象的另一个版本被发布，不在这条裁决禁止的范围内。
+
+**产品代码一行都不动**：`Judge()` 不改。改的是一份测试里的期望值 + 它的说明文字。
+
+### 给以后（同类形状）
+
+一个共享的读被修好时，**所有读者都会跟着变**，而不只是立任务时想到的那一个。
+立 T0611 的任务书时我把 release gate 写成主角、把发布门写进了第 6 段（「两个读者不许有分歧」），
+**但漏了一句「修完之后发布门的结论也会变，那是预期的」**——于是 Worker 撞到它时只能停下来问。
+下次立这种「修共享读」的任务，书里要写明**下游读者的预期变化**，并把允许改动的测试点名。
