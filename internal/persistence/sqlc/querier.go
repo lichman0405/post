@@ -1810,6 +1810,75 @@ type Querier interface {
 	// on.
 	SearchDocumentsNeedingEmbedding(ctx context.Context, arg SearchDocumentsNeedingEmbeddingParams) ([]SearchDocumentsNeedingEmbeddingRow, error)
 	// ---------------------------------------------------------------------------
+	// T0905: the ranking's factor reads.
+	//
+	// docs/14 §3 orders the candidate set by "query/scope match、evidence
+	// profile、review state、independent reproduction、contradictory evidence、
+	// version/freshness", and "不得主要按 popularity/star/organization
+	// prestige". Every one of those six is a READ of rows the platform already
+	// keeps — nothing is stored for the ranking, and no table is added for it.
+	// That is a property worth stating in the query rather than in prose: a
+	// ranking that had its own table would be a second copy of the evidence
+	// graph, and the two would drift.
+	//
+	// This query is the WHOLE database side of the ranking: one row per object
+	// version, carrying the counts each factor is decided from. The decision
+	// itself is internal/search/ranking's, in Go, where it is unit-testable and
+	// where a golden fixture can pin it byte for byte.
+	//
+	// # Why aggregate counts and not the rows
+	//
+	// The ranking never renders an assertion, a review or a relation: it renders
+	// a LEVEL and a sentence ("2 evidence assertions, of which 1 reviewed"). What
+	// it needs from the database is therefore a count per bucket, and shipping
+	// the rows would mean reading — and holding — data the ranking has no use
+	// for. It is also the shape that keeps the read bounded: the response is one
+	// row per requested version, whatever the corpus's density.
+	//
+	// # Scope
+	//
+	// Same boundary as ListScopeObjectVersions, and for the same reason: the
+	// ids arrive from candidates the caller has already been authorized to see,
+	// so the scope is applied to this read's OUTPUT as well as enforced a second
+	// time where the facts live.
+	//
+	//   * the version itself must belong to a project in the scope. A candidate
+	//     whose version is outside it reports NO facts, and the ranking says so
+	//     (an "unknown" factor), rather than reading another project's evidence
+	//     to order a row the caller may see.
+	//   * a contradictory RELATION is admitted by the same three-way rule as
+	//     the traversal hop (relation project AND both endpoint projects in
+	//     scope): a contradiction asserted by a project the caller is not in is
+	//     not the caller's graph's to know about.
+	//   * an evidence assertion is admitted when its project is in scope or the
+	//     ASSERTION's own visibility is public (00091's column). That is one
+	//     conjunct looser than the evidence table's own public-network read
+	//     (ListPublishedEvidenceForTarget), which additionally requires the
+	//     asserting project to be public unless it is the target's own. The
+	//     difference is unreachable through the write path — only a public
+	//     project can write a public assertion there, and a project's
+	//     visibility cannot change — so the two predicates agree on every row
+	//     the platform can produce; this read does not repeat the network
+	//     read's structural refusal because its boundary is the caller's
+	//     scope, not the anonymous network's. docs/10 §7 is why public external
+	//     evidence counts here: on a published Knowledge Object the network is
+	//     shown Reviewed and Unreviewed External Evidence, and a ranking that
+	//     could not see it would rank by origin evidence alone.
+	//
+	// # Why counts are ::integer
+	//
+	// So the generated Go type is int32 and matches the aggregate columns'
+	// siblings elsewhere in this file (projects.sql's owner_count). A count that
+	// could overflow int32 is a corpus nobody has.
+	//
+	// A FACT SHEET per object version — never a verdict. Every column is a count
+	// or a flag read from a row someone else wrote; no column is a score, and
+	// nothing here is computed from another column in this result. docs/10 §4
+	// ("V1 不自动赋数值权重") is the reason that split matters: the weights would
+	// have to live somewhere, and a weight that lived in SQL would be a
+	// judgement the platform made about evidence types without a human.
+	SearchRankingFacts(ctx context.Context, arg SearchRankingFactsParams) ([]SearchRankingFactsRow, error)
+	// ---------------------------------------------------------------------------
 	// The graph half.
 	//
 	// A document is not an object version: search_documents indexes the network's
