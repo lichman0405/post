@@ -14942,3 +14942,16 @@ merge 显式拒绝且一个字节都不写——0 条 `semantic_merges`、目标
 
 今天在盘上还有两个同样的记录（T1007、T1102）。**这不是某一笔任务的事，是控制平面的事**：
 一个 Worker 死得没有收割记录，不该让它的任务在被人工发现之前一直悬着。
+
+**已修（同一日，提交 3382eed，直接落 main：orchestrator 自身阻塞，`CLAUDE.md` §1 的例外）。**
+规则改成：**reaper 一旦被证明不在，这个运行就结束了**——少的只是那个数字，于是 discovery 把
+`ExitStatusUnrecorded(-1)`（`recordStop` 用的是同一个哨兵）写进 registry，并把**两个** `exit.status`
+副本一起写下来（`VerifyGateInputs` 要比对两副本；只写一个会让重组本身读成篡改）。它**不是 0**，
+collect 把非 0 读成"这一轮没有完成"，所以一次丢失的运行仍然不可能读成完成。
+守卫是 reaper 本身：session leader 还活着、或这条记录从来没记过 leader 时**保持 stale**——没有东西
+能证明写的人已经收工（这也让 2026-09-18 那条既有断言"stale 不能被读成完成"原样成立）。测试把三种形状
+都钉住并断言两份副本、可持久化与哨兵非 0；**mutation check**：把守卫改成 `false`，
+`TestDiscoverWorkersReconcilesALostRun` 立刻红（`T0101 status=stale exit=<nil>, want exited with
+the unrecorded sentinel -1`），还原后 sha256 与变异前一致。已 `make rddev` 重建并重启驱动。
+**同时要记住的教训是监视本身**：我起的那条"等日志"的后台监视在旧日志文件上永远不退出，也不会叫我——
+这一轮真正发现卡住的是 owner，不是任何自动化。

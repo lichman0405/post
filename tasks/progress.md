@@ -1,10 +1,29 @@
 # 开发进度
 
-> **当前这一刻**：**112/145 已合并**（最近一笔是 T0905「Scientific Ranking」，#306）。这一段还合了
-> T0815（CI 的 migration-integration 偶发超时：量出时间去哪了，按证据修，#304）、
-> T1204（生产 Runbook/Release/Recovery 验证，#305）。
-> 在飞四笔：T0511（提案撤回）、T0611（返工中，见下面"T0611 的裁决"）、T0814、T0817；
-> 派工池里 T0612/T1007/T1102 三笔 ready 等空位（并行上限 3，这一轮我按硬上限 4 放了 T0611 返工）。
+> **当前这一刻（2026-09-21 早上）**：**112/146 已合并**。最近合的四笔是 T0611（Release 的验收记录必须
+> 覆盖「经合并进入 main」的状态，#309）、T0814（Fork 发起与外部提案的生产接口，#308）、
+> T0511（证据断言的读带上读者，ADR-024，#307），再往前是 T0905（#306）、T1204（#305）、T0815（#304）。
+> 在飞三笔：**T0608**（Release/Abort/Policy E2E）、**T0612**（并发 abort 的断言收尾）、
+> **T0613**（Activity 的研究事件读要带上读者——自动安全评审报的，我核实成立后立账）。
+> 派工池里 **T0817 排下一个**（已加宽范围，见下），T0812 也 ready。
+>
+> **今早的主戏是"卡了 7.5 小时"，而且是 owner 先看出来的。** T0612 的 Worker 与它的 reaper
+> 在昨晚 22:14 **一起消失**且谁都没写 `exit.status`，驱动读到的只是"还在干"，于是一直等下去；
+> 我上一轮起的那条等日志的后台监视也没把我叫醒。处置：把退出码按仓库自己的哨兵记成 unknown(-1)、
+> 同一 session resume 续跑（diff 一个字节没丢）；**根因判定为控制平面缺陷并当场修了**——
+> "进程与 reaper 一起消失"时 collect/rework/respawn 三条路全拒，任务永远停在 running 且没有任何
+> 合法迁移（盘上还有 T1007/T1102 两笔同样形状，上一轮是手工绕过去的）。修复带测试与 mutation check
+> （提交 3382eed），已重建 `bin/rddev` 并重启驱动。见 `decisions.md` 2026-09-21 那一节。
+>
+> **T0817 加宽了范围。** 第一轮返回 blocked 是**对的**：merge 侧的源侧读法改对了，三层负向证据齐全，
+> mutation check 证明那一行是承重的；闭环被两个 `allowed_scope` **之外**的跨项目盲点挡在
+> `409 PR_INTEGRITY_BLOCKED`——(a) fork 导入写下的状态没接进分支基线（既不是分支头，也没有任何
+> `state_commit` 命名它），(b) `prchecks` 只在 PR 的项目里解析链边界，跨项目链被判成"2 个 head"。
+> 它们是同一个「项目只有一个」假设的**另两个出口**，拆成三笔任务只会把同一条链的读法分三次改，
+> 所以两处都归 T0817：`allowed_scope` 加上 `internal/application/prchecks/**` 与
+> `internal/gitprovider/**`，并要求优先落在最窄处（导入编排）修。
+>
+> **以下这段是 2026-09-20 的当日记录。**
 > **T0611 今天咬了一次**：它把合并边读通了（缺陷已证：改动前对合并后的 main 头返回空），却撞上
 > 发布门与 release gate **共用同一条读**——"经合并进 main 的那个版本还能不能发布"被 Worker 判成 L3
 > 停下来报 blocked（报得对）。我的裁决：**门自己的拒绝理由就是血缘规则，那条 409 是缺陷的后果，
@@ -33,7 +52,7 @@
 > 别去重跑它正在重试的动作（我 17:07 就这么干过一次，见 decisions.md 傍晚那一节）。
 > **今天我还犯了一个"自己把驱动弄停"的错**：我修驱动的提交动了它自己的源码，而驱动有一条自检——
 > main 上有它没编进去的调度器提交，它就**拒绝做任何事**。已重建二进制并重启（见 decisions.md 今天最后一节）。
-> 主库指纹 `sha256:dac9d0422769f71a`（38 个输入）随各笔合并推进，以 `scripts/spec_version.py --check` 为准。
+> 主库指纹 `sha256:59e6ec6d3bf3ad07`（38 个输入）随各笔合并推进，以 `scripts/spec_version.py --check` 为准。
 > 今天合了十三笔——T0410（提案"从建到合"整条路）、T0901（搜索的中间那条腿）、T0903（提问理解）、
 > T0806（外部证据网络，带迁移 00091）、T0816（"某人某天属于哪个组织"的三处口径收成一处）、
 > T0902（向量那一半）、T1203（部署模板）、T0813（贡献账本接上生产）、T0904（搜索的第三条腿：
@@ -2916,9 +2935,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-20T21:44:50Z
+生成时间：2026-09-20T21:50:43Z
 
-状态分布：todo 17 · ready 1 · running 1 · worker_failed 0 · verification 0 · rejected 1 · blocked 10 · accepted 0 · merged 116（合计 146/146 个任务）
+状态分布：todo 16 · ready 2 · running 3 · worker_failed 0 · verification 0 · rejected 1 · blocked 8 · accepted 0 · merged 116（合计 146/146 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -2999,12 +3018,12 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0605 | Release Manifest Builder | P6 | merged | 2026-09-14T08:39:33Z |  | 2026-09-14T09:24:39Z | 2026-09-14T09:33:18Z |
 | T0606 | Immutable Release API/UI | P6 | merged | 2026-09-14T17:12:24Z |  | 2026-09-14T17:34:41Z | 2026-09-14T17:58:08Z |
 | T0607 | Activity/Audit Timeline 增强 | P6 | merged | 2026-09-20T12:08:08Z |  | 2026-09-20T12:39:41Z | 2026-09-20T12:49:12Z |
-| T0608 | Release/Abort/Policy E2E | P6 | blocked | 2026-09-19T10:22:15Z |  |  |  |
+| T0608 | Release/Abort/Policy E2E | P6 | running | 2026-09-20T21:47:22Z |  |  |  |
 | T0609 | Project Milestone 基础 | P6 | merged | 2026-09-15T13:30:51Z |  | 2026-09-15T14:00:41Z | 2026-09-15T14:12:50Z |
 | T0610 | 主线对象 Reopen 状态迁移（等一行权限的 L3 裁定） | P6 | blocked |  |  |  |  |
 | T0611 | Release 的验收记录必须覆盖「经合并进入 main」的状态（T0608 第 6 段的上游缺陷） | P6 | merged | 2026-09-20T13:52:25Z |  | 2026-09-20T14:39:52Z | 2026-09-20T14:48:15Z |
 | T0612 | 并发 abort 的两份 201：断言只能写契约允许的东西，那个窗口要显式钉住 | P6 | running | 2026-09-20T21:43:35Z |  |  |  |
-| T0613 | Activity 的研究事件读必须带上读者：非公开行不给非成员（ADR-024 同一条规矩的第三个出口） | P6 | todo |  |  |  |  |
+| T0613 | Activity 的研究事件读必须带上读者：非公开行不给非成员（ADR-024 同一条规矩的第三个出口） | P6 | running | 2026-09-20T21:48:28Z |  |  |  |
 | T0701 | Research Asset Core/PID | P7 | merged | 2026-09-15T15:21:35Z |  | 2026-09-15T15:51:33Z | 2026-09-15T15:57:18Z |
 | T0702 | 四类 Asset Manifest validator | P7 | merged | 2026-09-15T17:36:13Z |  | 2026-09-15T18:02:29Z | 2026-09-15T18:09:43Z |
 | T0703 | Rights Model | P7 | merged | 2026-09-15T16:37:35Z |  | 2026-09-15T17:09:14Z | 2026-09-15T17:14:12Z |
@@ -3028,7 +3047,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0809 | Credit Attribution/Dispute 基础 | P8 | merged | 2026-09-19T07:55:17Z |  | 2026-09-19T08:58:12Z | 2026-09-20T10:21:30Z |
 | T0810 | 最小 Open Network 闭环 E2E | P8 | rejected | 2026-09-20T12:00:44Z |  |  |  |
 | T0811 | Discussion 与 Promote to Research Object | P8 | merged | 2026-09-20T11:05:19Z |  | 2026-09-20T11:42:51Z | 2026-09-20T11:51:03Z |
-| T0812 | Private Evidence / Public Attestation 基础 | P8 | blocked |  |  |  |  |
+| T0812 | Private Evidence / Public Attestation 基础 | P8 | ready |  |  |  |  |
 | T0813 | Contribution Ledger 接上生产（worker 挂载 + via 真实来源） | P8 | merged | 2026-09-19T05:32:05Z |  | 2026-09-19T06:46:22Z | 2026-09-19T06:58:59Z |
 | T0814 | Fork 发起与外部提案的生产接口（契约由 Supervisor 落地，本任务照契约接线，并改 fork 的命名规则） | P8 | merged | 2026-09-20T13:38:01Z |  | 2026-09-20T14:29:22Z | 2026-09-20T14:40:00Z |
 | T0815 | CI 的 migration-integration 偶发超时：量出时间去哪了，按证据修 | P11 | merged | 2026-09-20T11:14:58Z |  | 2026-09-20T13:07:34Z | 2026-09-20T13:24:56Z |
