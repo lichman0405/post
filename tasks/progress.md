@@ -1,8 +1,9 @@
 # 开发进度
 
 > **当前这一刻**：**106/141 已合并；T0809 刚合进主库**。
-> 在飞与待处理：T0811/T0905/T0607 正在跑；T0814/T0608 已标 **blocked**（AC8 / release_review 缺陷
-> 需产品/架构裁决）；T0815 已 reject、等空位再派；T1007/T1102 stale 待清理重派。
+> 在飞：T0811/T0905/T0607/T0815 正在跑（T0815 刚用 `claude-sonnet-5` 重派，处理 `TestRestoreDrill` 403）；
+> T0814/T0608 已标 **blocked**（AC8 / release_review 缺陷需产品/架构裁决）；
+> T1007/T1102 已清掉 stale、改回 **ready**，等下一个并行空位再用 `claude-sonnet-5` 重派。
 > **T0811 被顶了两次**：第一次是 T0507 在同一测试夹具锚点插注册块，第二次是 T0602 在
 > `audit.go` 同一锚点插常量块——都是顺序追加、语义不冲突，基线一推进指纹就变，所以要重评两次。
 > 派生件（`specs/SPEC_VERSION.json`、`specs/database/postgres.sql`）一律重新生成，不文本合并。

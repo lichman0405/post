@@ -6948,10 +6948,10 @@
       ]
     },
     "T0815": {
-      "status": "rejected",
-      "started_at": "2026-09-19T10:40:44Z",
+      "status": "running",
+      "started_at": "2026-09-20T11:14:58Z",
       "notes": "2026-09-19 立账：CI 的 migration-integration 偶发超时（3/14），证据见 tasks/decisions.md。不许用放大 timeout 掩盖——先量再修。",
-      "worker_run_id": "run-5a1499d30c36c664",
+      "worker_run_id": "run-4e0526b87f10b766",
       "rejection_reason": "G3 真服务门红了：`make test-integration` 里的 `TestRestoreDrill` 在创建 organization 时拿到 403 Forbidden。\n\n这条失败不一定是你 testdb 改动直接造成的，但它出现在你的 G3 里，你必须先定位、再修。\n\n你要做的：\n1. 在真 PostgreSQL 上复现 `TestRestoreDrill` 的失败（跑 `go test ./tests/integration -run TestRestoreDrill -count=1 -v`）。\n2. 定位 403 的来源：是请求没带 token / session？是 organization 创建路由的权限矩阵变了？还是 testdb 模板克隆导致某个序列/策略状态与 fresh migrate 不一致？\n3. 判断责任：\n   - 如果是你 testdb 改动（CREATE DATABASE ... TEMPLATE、模板缓存、清理顺序）导致的状态泄漏或序列漂移，修 testdb。\n   - 如果是 pre-existing 的测试/权限问题，也要给出证据，并在 RESULT 里说明；但 G3 必须绿，所以你需要让测试能在这个模式下通过（例如加隔离、修 fixture、或在测试里按当前行为断言）。\n4. 跑完整 `make test-integration` 确认全绿（不只是 `TestRestoreDrill`）。\n5. 更新 `RESULT.json`：写明失败原因、修复位置、重跑命令与结果。\n\n约束：\n- 不要 skip `TestRestoreDrill` 或弱化它的断言。\n- 不要动 `internal/authz/**` 的权限矩阵常量/CSV  unless 你能证明那是个真实 bug 而不是测试 setup 问题。\n- 跑 `make check-spec-version` 与 `make check-schema-snapshot` 确认派生件没漂移。\n",
       "history": [
         {
@@ -6980,6 +6980,13 @@
           "at": "2026-09-20T11:07:59Z",
           "run_id": "run-8fb7d1014e46822d",
           "reason": "G3 真服务门红了：`make test-integration` 里的 `TestRestoreDrill` 在创建 organization 时拿到 403 Forbidden。\n\n这条失败不一定是你 testdb 改动直接造成的，但它出现在你的 G3 里，你必须先定位、再修。\n\n你要做的：\n1. 在真 PostgreSQL 上复现 `TestRestoreDrill` 的失败（跑 `go test ./tests/integration -run TestRestoreDrill -count=1 -v`）。\n2. 定位 403 的来源：是请求没带 token / session？是 organization 创建路由的权限矩阵变了？还是 testdb 模板克隆导致某个序列/策略状态与 fresh migrate 不一致？\n3. 判断责任：\n   - 如果是你 testdb 改动（CREATE DATABASE ... TEMPLATE、模板缓存、清理顺序）导致的状态泄漏或序列漂移，修 testdb。\n   - 如果是 pre-existing 的测试/权限问题，也要给出证据，并在 RESULT 里说明；但 G3 必须绿，所以你需要让测试能在这个模式下通过（例如加隔离、修 fixture、或在测试里按当前行为断言）。\n4. 跑完整 `make test-integration` 确认全绿（不只是 `TestRestoreDrill`）。\n5. 更新 `RESULT.json`：写明失败原因、修复位置、重跑命令与结果。\n\n约束：\n- 不要 skip `TestRestoreDrill` 或弱化它的断言。\n- 不要动 `internal/authz/**` 的权限矩阵常量/CSV  unless 你能证明那是个真实 bug 而不是测试 setup 问题。\n- 跑 `make check-spec-version` 与 `make check-schema-snapshot` 确认派生件没漂移。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T11:14:58Z",
+          "run_id": "run-4e0526b87f10b766",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -8061,8 +8068,9 @@
       ]
     },
     "T1007": {
-      "status": "worker_failed",
+      "status": "ready",
       "started_at": "2026-09-19T11:40:29Z",
+      "notes": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。",
       "worker_run_id": "run-1a2252a9ec4ea195",
       "history": [
         {
@@ -8084,9 +8092,14 @@
           "at": "2026-09-20T11:09:41Z",
           "run_id": "supervisor-reconcile",
           "reason": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。"
+        },
+        {
+          "from": "worker_failed",
+          "to": "ready",
+          "at": "2026-09-20T11:15:33Z",
+          "run_id": "run-bd87d8126a9b6e0e"
         }
-      ],
-      "notes": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。"
+      ]
     },
     "T1101": {
       "status": "todo",
@@ -8098,8 +8111,9 @@
       "merged_at": null
     },
     "T1102": {
-      "status": "worker_failed",
+      "status": "ready",
       "started_at": "2026-09-19T12:02:07Z",
+      "notes": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。",
       "worker_run_id": "run-cfd158672804b3ff",
       "history": [
         {
@@ -8121,9 +8135,14 @@
           "at": "2026-09-20T11:09:41Z",
           "run_id": "supervisor-reconcile",
           "reason": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。"
+        },
+        {
+          "from": "worker_failed",
+          "to": "ready",
+          "at": "2026-09-20T11:15:33Z",
+          "run_id": "run-04d9e92e5c23d117"
         }
-      ],
-      "notes": "Worker stale：进程已无响应且未记录 exit status。Supervisor 标记为 worker_failed，待清理后使用 claude-sonnet-5 重派。"
+      ]
     },
     "T1103": {
       "status": "todo",
