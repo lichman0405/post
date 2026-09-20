@@ -84,6 +84,7 @@
 --   00103_credit_attribution_dispute.sql
 --   00104_discussions.sql
 --   00107_activity_research_event_scope.sql
+--   00110_ranking_factor_indexes.sql
 
 
 -- ===== 00001_extensions.sql =====
@@ -6965,3 +6966,71 @@ CREATE INDEX research_events_project_occurred_idx
 
 COMMENT ON INDEX research_events_project_occurred_idx IS
   'The project Activity feed''s research-event branch (T0607): the project''s research events newest-first, the shape the (occurred_at, id) keyset cursor of internal/persistence.ListProjectActivity rides. Mirrors audit_log_project_occurred_idx (00020) so both halves of the merged feed are range scans.';
+
+
+-- ===== 00110_ranking_factor_indexes.sql =====
+
+-- T0905. One index, and the reason it is the only schema change this task
+-- needs.
+--
+-- T0905 orders T0904's retrieval candidates by the six factors docs/14 §3
+-- names (query/scope match, evidence profile, review state, independent
+-- reproduction, contradictory evidence, version/freshness). Each factor is
+-- a READ of rows that already exist — evidence_assertions (00007),
+-- reviews (00009/00061), relation_versions (00006) and
+-- scientific_object_versions (00005). Nothing new has to be stored: the
+-- ranking is a view over facts the platform already keeps, which is what
+-- makes it re-derivable and what makes a "ranking model" that silently
+-- accumulated its own state unnecessary (and would be a second copy of the
+-- truth).
+--
+-- What those reads need is an index, and exactly one of them is missing.
+--
+-- # The review-state read, and why it had no index
+--
+-- A candidate's review state is read from the reviews recorded on the
+-- project STATE its object version was created in: reviews.reviewed_state_id
+-- (00061) is the exact head a reviewer judged, and
+-- scientific_object_versions.state_id (00005) is the state a version was
+-- created in. Joining the two is the only way to answer "was this version
+-- reviewed", because reviews are recorded per pull request and per state,
+-- never per object version — deliberately, since a review is a judgment
+-- about one proposed state, not about a moving target.
+--
+-- reviews carries exactly two indexes and neither can serve that join:
+--
+--   1. its primary key on id;
+--   2. reviews_reviewer_kind_state_key, the UNIQUE
+--      (pull_request_id, reviewer_id, review_kind, reviewed_state_id) from
+--      00061 — which LEADS with pull_request_id, so a lookup by
+--      reviewed_state_id alone cannot use it (a B-tree is usable from its
+--      leading column onward, never from the middle).
+--
+-- So the read was a sequential scan of the whole table per ranking pass.
+-- The table is small today, which is exactly why this is the moment to add
+-- the index rather than later: the write cost is one index entry per review,
+-- and a table that only grows is a table whose seq scan only gets worse.
+--
+-- # Why not an index for the evidence read
+--
+-- evidence_assertions already has evidence_assertions_target_idx
+-- (target_object_version_id, created_at, id) from the migration that added
+-- its guards, and that is the leading column this task's read filters on.
+-- The contradiction read over relation_versions is served by 00006's
+-- relation_versions_source_idx / relation_versions_target_idx, and the
+-- version ordinal by scientific_object_versions' UNIQUE (object_id,
+-- version_no). Adding a second index for any of them would be an index
+-- nothing selects by.
+--
+-- # What this index is NOT
+--
+-- It is not a uniqueness rule and carries no predicate: every review row is
+-- indexed, so a future read by state (a review round's own listing, T0604's
+-- responsibility routing) can use it too. It is also not a new grant —
+-- reviews are read only through queries that join them onto rows the
+-- caller's scope already admitted, and this index changes no predicate
+-- anywhere.
+CREATE INDEX reviews_reviewed_state_idx ON reviews (reviewed_state_id);
+
+COMMENT ON INDEX reviews_reviewed_state_idx IS
+  'The review-state lookup for T0905''s scientific ranking: reviews of one project state (reviews.reviewed_state_id, 00061), which the table''s UNIQUE constraint cannot serve because it leads with pull_request_id.';

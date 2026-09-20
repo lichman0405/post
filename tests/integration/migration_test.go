@@ -1437,6 +1437,15 @@ var explicitIndexes = map[string][]string{
 	"discussion_comments_thread_idx":    {"thread_id", "created_at", "id"},
 	"discussion_promotions_ref_idx":     {"project_id", "promoted_kind", "promoted_ref", "promoted_at", "id"},
 	"discussion_promotions_comment_idx": {"comment_id", "promoted_at", "id"},
+	// T0905 (00110): the scientific ranking's review read. A review is
+	// recorded against the STATE a version was created in, so the fact
+	// read goes from a version to its state to the reviews on it — a
+	// direction 00009 never indexed, because until now every review read
+	// started from the pull request (reviews is indexed by its primary
+	// key, and pull_requests by number). The ranking asks this of every
+	// candidate it is handed, in one statement, so the lookup has to be
+	// an index probe rather than a scan of the table.
+	"reviews_reviewed_state_idx": {"reviewed_state_id"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded

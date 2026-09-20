@@ -1,0 +1,910 @@
+{
+  "name": "mof-co2-ranking",
+  "note": "The canonical case: eight candidates over one question, covering both halves of every factor's ladder and every one of docs/10 §8's four labels. The order it pins is docs/14 §3's own factor order read as a priority — query/scope match first — so a candidate recalled by the question's CONTENT outranks one recalled only by the caller's structured filter, whatever their evidence says. The sharp instance is deliberate and visible rather than avoided: the out-of-scope candidate (nothing could be read about it) sorts above the rejected-evidence one, because the question matched the first and only the filter matched the second. A reviewer who disagrees with that consequence is disagreeing with the factor order, which is the spec's, and this fixture is where they can see it. The out-of-scope candidate arrives exactly as the retrieval hands one over — a public document carrying no version pin, because the traversal seeds only in-scope versions — and the ranking resolves its pid through the publication map to a version that EXISTS outside the caller's scope. Every database-backed factor is therefore `unknown` with the scope as the reason, never `unversioned`: that level claims there is no version, and there is one — it is only unreadable.",
+  "request": {
+    "query": "Mg-MOF-74 CO2 uptake at <1 bar and 298 K"
+  },
+  "candidates": [
+    {
+      "ref": "knowledge:0123456789abcdefghjkmnpqrs",
+      "kind": "document",
+      "entity_type": "knowledge",
+      "identity": "0123456789abcdefghjkmnpqrs",
+      "version": "v2",
+      "title": "Mg-MOF-74 CO2 uptake claim",
+      "object_type": "claim",
+      "object_id": "b0000000-0000-4000-8000-000000000001",
+      "object_version_id": "a0000000-0000-4000-8000-000000000001",
+      "version_no": 2,
+      "signals": [
+        {
+          "signal": "full_text",
+          "rank": 1,
+          "score": 0.0612
+        },
+        {
+          "signal": "vector",
+          "rank": 1,
+          "score": 0.312
+        }
+      ],
+      "score": 0.0325
+    },
+    {
+      "ref": "knowledge:1123456789abcdefghjkmnpqrs",
+      "kind": "document",
+      "entity_type": "knowledge",
+      "identity": "1123456789abcdefghjkmnpqrs",
+      "version": "v1",
+      "title": "Mg-MOF-74 CO2 uptake finding at 298 K",
+      "object_type": "finding",
+      "object_id": "b0000000-0000-4000-8000-000000000002",
+      "object_version_id": "a0000000-0000-4000-8000-000000000002",
+      "version_no": 1,
+      "signals": [
+        {
+          "signal": "full_text",
+          "rank": 2,
+          "score": 0.0401
+        }
+      ],
+      "score": 0.0161
+    },
+    {
+      "ref": "object_version:b0000000-0000-4000-8000-000000000003@1",
+      "kind": "object_version",
+      "identity": "b0000000-0000-4000-8000-000000000003",
+      "title": "Mg-MOF-74 framework sample",
+      "object_type": "material",
+      "object_id": "b0000000-0000-4000-8000-000000000003",
+      "object_version_id": "a0000000-0000-4000-8000-000000000003",
+      "version_no": 1,
+      "signals": [
+        {
+          "signal": "graph",
+          "rank": 1
+        }
+      ],
+      "hops": 1,
+      "score": 0.0161
+    },
+    {
+      "ref": "knowledge:2123456789abcdefghjkmnpqrs",
+      "kind": "document",
+      "entity_type": "knowledge",
+      "identity": "2123456789abcdefghjkmnpqrs",
+      "version": "v1",
+      "title": "Mg-MOF-74 CO2 uptake replication report",
+      "object_type": "experiment",
+      "object_id": "b0000000-0000-4000-8000-000000000004",
+      "object_version_id": "a0000000-0000-4000-8000-000000000004",
+      "version_no": 1,
+      "signals": [
+        {
+          "signal": "full_text",
+          "rank": 3,
+          "score": 0.0298
+        },
+        {
+          "signal": "facets",
+          "rank": 1
+        }
+      ],
+      "score": 0.0319
+    },
+    {
+      "ref": "knowledge:3123456789abcdefghjkmnpqrs",
+      "kind": "document",
+      "entity_type": "knowledge",
+      "identity": "3123456789abcdefghjkmnpqrs",
+      "version": "v1",
+      "title": "Mg-MOF-74 CO2 uptake not reproduced at 298 K",
+      "object_type": "finding",
+      "object_id": "b0000000-0000-4000-8000-000000000005",
+      "object_version_id": "a0000000-0000-4000-8000-000000000005",
+      "version_no": 1,
+      "signals": [
+        {
+          "signal": "facets",
+          "rank": 2
+        }
+      ],
+      "score": 0.0161
+    },
+    {
+      "ref": "knowledge:4123456789abcdefghjkmnpqrs",
+      "kind": "document",
+      "entity_type": "knowledge",
+      "identity": "4123456789abcdefghjkmnpqrs",
+      "version": "v1",
+      "title": "Mg-MOF-74 CO2 uptake claim, unreviewed external assertion",
+      "object_type": "claim",
+      "object_id": "b0000000-0000-4000-8000-000000000006",
+      "version_no": 1,
+      "signals": [
+        {
+          "signal": "full_text",
+          "rank": 4,
+          "score": 0.0188
+        }
+      ],
+      "score": 0.0159
+    },
+    {
+      "ref": "release:c0000000-0000-4000-8000-000000000007",
+      "kind": "document",
+      "entity_type": "release",
+      "identity": "c0000000-0000-4000-8000-000000000007",
+      "version": "1.2.0",
+      "title": "Mg-MOF-74 uptake dataset release 1.2.0",
+      "signals": [
+        {
+          "signal": "facets",
+          "rank": 3
+        }
+      ],
+      "score": 0.0161
+    },
+    {
+      "ref": "object_version:b0000000-0000-4000-8000-000000000008@3",
+      "kind": "object_version",
+      "identity": "b0000000-0000-4000-8000-000000000008",
+      "title": "Mg-MOF-74 CO2 uptake claim, withdrawn",
+      "object_type": "claim",
+      "object_id": "b0000000-0000-4000-8000-000000000008",
+      "object_version_id": "a0000000-0000-4000-8000-000000000008",
+      "version_no": 3,
+      "signals": [
+        {
+          "signal": "graph",
+          "rank": 2
+        }
+      ],
+      "hops": 2,
+      "score": 0.0159
+    }
+  ],
+  "facts": [
+    {
+      "object_version_id": "a0000000-0000-4000-8000-000000000001",
+      "object_id": "b0000000-0000-4000-8000-000000000001",
+      "version_no": 2,
+      "newest_version_no": 2,
+      "lifecycle_state": "active",
+      "is_newest": true,
+      "evidence": {
+        "assertions": 4,
+        "reviewed": 3,
+        "rejected": 0,
+        "direct": 3,
+        "supporting": 3,
+        "contradicting": 1
+      },
+      "reproduction": {
+        "reproduces": 2,
+        "independent": 1,
+        "failed": 0
+      },
+      "reviews": {
+        "scientific": 1,
+        "approved": 1,
+        "changes_requested": 0
+      },
+      "relations": {
+        "contradicting": 1
+      }
+    },
+    {
+      "object_version_id": "a0000000-0000-4000-8000-000000000002",
+      "object_id": "b0000000-0000-4000-8000-000000000002",
+      "version_no": 1,
+      "newest_version_no": 1,
+      "lifecycle_state": "active",
+      "is_newest": true,
+      "evidence": {
+        "assertions": 2,
+        "reviewed": 0,
+        "rejected": 0,
+        "direct": 2,
+        "supporting": 2,
+        "contradicting": 0
+      },
+      "reproduction": {
+        "reproduces": 0,
+        "independent": 0,
+        "failed": 0
+      },
+      "reviews": {
+        "scientific": 0,
+        "approved": 0,
+        "changes_requested": 0
+      },
+      "relations": {
+        "contradicting": 0
+      }
+    },
+    {
+      "object_version_id": "a0000000-0000-4000-8000-000000000003",
+      "object_id": "b0000000-0000-4000-8000-000000000003",
+      "version_no": 1,
+      "newest_version_no": 3,
+      "lifecycle_state": "active",
+      "is_newest": false,
+      "evidence": {
+        "assertions": 0,
+        "reviewed": 0,
+        "rejected": 0,
+        "direct": 0,
+        "supporting": 0,
+        "contradicting": 0
+      },
+      "reproduction": {
+        "reproduces": 0,
+        "independent": 0,
+        "failed": 0
+      },
+      "reviews": {
+        "scientific": 0,
+        "approved": 0,
+        "changes_requested": 0
+      },
+      "relations": {
+        "contradicting": 0
+      }
+    },
+    {
+      "object_version_id": "a0000000-0000-4000-8000-000000000004",
+      "object_id": "b0000000-0000-4000-8000-000000000004",
+      "version_no": 1,
+      "newest_version_no": 1,
+      "lifecycle_state": "active",
+      "is_newest": true,
+      "evidence": {
+        "assertions": 3,
+        "reviewed": 1,
+        "rejected": 0,
+        "direct": 1,
+        "supporting": 1,
+        "contradicting": 2
+      },
+      "reproduction": {
+        "reproduces": 1,
+        "independent": 0,
+        "failed": 1
+      },
+      "reviews": {
+        "scientific": 1,
+        "approved": 0,
+        "changes_requested": 1
+      },
+      "relations": {
+        "contradicting": 0
+      }
+    },
+    {
+      "object_version_id": "a0000000-0000-4000-8000-000000000005",
+      "object_id": "b0000000-0000-4000-8000-000000000005",
+      "version_no": 1,
+      "newest_version_no": 2,
+      "lifecycle_state": "active",
+      "is_newest": false,
+      "evidence": {
+        "assertions": 2,
+        "reviewed": 0,
+        "rejected": 2,
+        "direct": 0,
+        "supporting": 0,
+        "contradicting": 2
+      },
+      "reproduction": {
+        "reproduces": 1,
+        "independent": 1,
+        "failed": 1
+      },
+      "reviews": {
+        "scientific": 0,
+        "approved": 0,
+        "changes_requested": 0
+      },
+      "relations": {
+        "contradicting": 1
+      }
+    },
+    {
+      "object_version_id": "a0000000-0000-4000-8000-000000000008",
+      "object_id": "b0000000-0000-4000-8000-000000000008",
+      "version_no": 3,
+      "newest_version_no": 3,
+      "lifecycle_state": "aborted",
+      "is_newest": true,
+      "evidence": {
+        "assertions": 0,
+        "reviewed": 0,
+        "rejected": 0,
+        "direct": 0,
+        "supporting": 0,
+        "contradicting": 0
+      },
+      "reproduction": {
+        "reproduces": 0,
+        "independent": 0,
+        "failed": 0
+      },
+      "reviews": {
+        "scientific": 0,
+        "approved": 0,
+        "changes_requested": 0
+      },
+      "relations": {
+        "contradicting": 0
+      }
+    }
+  ],
+  "publications": {
+    "0123456789abcdefghjkmnpqrs": "a0000000-0000-4000-8000-000000000001",
+    "1123456789abcdefghjkmnpqrs": "a0000000-0000-4000-8000-000000000002",
+    "2123456789abcdefghjkmnpqrs": "a0000000-0000-4000-8000-000000000004",
+    "3123456789abcdefghjkmnpqrs": "a0000000-0000-4000-8000-000000000005",
+    "4123456789abcdefghjkmnpqrs": "a0000000-0000-4000-8000-000000000006"
+  },
+  "out_of_scope": [
+    "a0000000-0000-4000-8000-000000000006"
+  ],
+  "expected_ranking": {
+    "query": "Mg-MOF-74 CO2 uptake at <1 bar and 298 K",
+    "factors": [
+      "query_scope_match",
+      "evidence",
+      "review",
+      "reproduction",
+      "conflict",
+      "version"
+    ],
+    "ranked": [
+      {
+        "rank": 1,
+        "ref": "knowledge:0123456789abcdefghjkmnpqrs",
+        "kind": "document",
+        "entity_type": "knowledge",
+        "object_type": "claim",
+        "title": "Mg-MOF-74 CO2 uptake claim",
+        "version": "v2",
+        "object_version_id": "a0000000-0000-4000-8000-000000000001",
+        "labels": [
+          "mixed_evidence",
+          "actively_contested",
+          "independently_reproduced"
+        ],
+        "factors": [
+          {
+            "factor": "query_scope_match",
+            "level": "question",
+            "level_rank": 0,
+            "reason": "recalled by the question's own content (full_text, vector); the question imposed no narrowing"
+          },
+          {
+            "factor": "evidence",
+            "level": "reviewed",
+            "level_rank": 0,
+            "reason": "4 evidence assertions target this version, 3 reviewed, 3 direct",
+            "facts": {
+              "assertions": 4,
+              "direct": 3,
+              "rejected": 0,
+              "reviewed": 3
+            }
+          },
+          {
+            "factor": "review",
+            "level": "approved",
+            "level_rank": 0,
+            "reason": "1 scientific review on the state this version was created in, 1 approved",
+            "facts": {
+              "approved": 1,
+              "changes_requested": 0,
+              "scientific": 1
+            }
+          },
+          {
+            "factor": "reproduction",
+            "level": "independent",
+            "level_rank": 0,
+            "reason": "2 reproductions recorded, 1 from another project",
+            "facts": {
+              "failed": 0,
+              "independent": 1,
+              "reproduces": 2
+            }
+          },
+          {
+            "factor": "conflict",
+            "level": "contested",
+            "level_rank": 1,
+            "reason": "1 contradictory evidence assertion and 1 contradicts relation touch this version",
+            "facts": {
+              "evidence_assertions": 1,
+              "relations": 1
+            }
+          },
+          {
+            "factor": "version",
+            "level": "current",
+            "level_rank": 0,
+            "reason": "version 2 is the newest version of its object and is active",
+            "facts": {
+              "newest_version_no": 2,
+              "version_no": 2
+            }
+          }
+        ]
+      },
+      {
+        "rank": 2,
+        "ref": "knowledge:2123456789abcdefghjkmnpqrs",
+        "kind": "document",
+        "entity_type": "knowledge",
+        "object_type": "experiment",
+        "title": "Mg-MOF-74 CO2 uptake replication report",
+        "version": "v1",
+        "object_version_id": "a0000000-0000-4000-8000-000000000004",
+        "labels": [
+          "mixed_evidence",
+          "actively_contested"
+        ],
+        "factors": [
+          {
+            "factor": "query_scope_match",
+            "level": "question",
+            "level_rank": 0,
+            "reason": "recalled by the question's own content (full_text); the question imposed no narrowing"
+          },
+          {
+            "factor": "evidence",
+            "level": "reviewed",
+            "level_rank": 0,
+            "reason": "3 evidence assertions target this version, 1 reviewed, 1 direct",
+            "facts": {
+              "assertions": 3,
+              "direct": 1,
+              "rejected": 0,
+              "reviewed": 1
+            }
+          },
+          {
+            "factor": "review",
+            "level": "reviewed",
+            "level_rank": 1,
+            "reason": "1 scientific review on the state this version was created in, none approved, 1 requesting changes",
+            "facts": {
+              "approved": 0,
+              "changes_requested": 1,
+              "scientific": 1
+            }
+          },
+          {
+            "factor": "reproduction",
+            "level": "self",
+            "level_rank": 2,
+            "reason": "1 reproduction recorded, all from the version's own project, and 1 recorded failure to reproduce",
+            "facts": {
+              "failed": 1,
+              "independent": 0,
+              "reproduces": 1
+            }
+          },
+          {
+            "factor": "conflict",
+            "level": "contested",
+            "level_rank": 1,
+            "reason": "2 contradictory evidence assertions touch this version",
+            "facts": {
+              "evidence_assertions": 2,
+              "relations": 0
+            }
+          },
+          {
+            "factor": "version",
+            "level": "current",
+            "level_rank": 0,
+            "reason": "version 1 is the newest version of its object and is active",
+            "facts": {
+              "newest_version_no": 1,
+              "version_no": 1
+            }
+          }
+        ]
+      },
+      {
+        "rank": 3,
+        "ref": "knowledge:1123456789abcdefghjkmnpqrs",
+        "kind": "document",
+        "entity_type": "knowledge",
+        "object_type": "finding",
+        "title": "Mg-MOF-74 CO2 uptake finding at 298 K",
+        "version": "v1",
+        "object_version_id": "a0000000-0000-4000-8000-000000000002",
+        "labels": [],
+        "factors": [
+          {
+            "factor": "query_scope_match",
+            "level": "question",
+            "level_rank": 0,
+            "reason": "recalled by the question's own content (full_text); the question imposed no narrowing"
+          },
+          {
+            "factor": "evidence",
+            "level": "asserted",
+            "level_rank": 1,
+            "reason": "2 evidence assertions target this version, none reviewed, 2 direct",
+            "facts": {
+              "assertions": 2,
+              "direct": 2,
+              "rejected": 0,
+              "reviewed": 0
+            }
+          },
+          {
+            "factor": "review",
+            "level": "unreviewed",
+            "level_rank": 2,
+            "reason": "no scientific review is recorded on the state this version was created in",
+            "facts": {
+              "approved": 0,
+              "changes_requested": 0,
+              "scientific": 0
+            }
+          },
+          {
+            "factor": "reproduction",
+            "level": "none",
+            "level_rank": 3,
+            "reason": "no reproduction is recorded",
+            "facts": {
+              "failed": 0,
+              "independent": 0,
+              "reproduces": 0
+            }
+          },
+          {
+            "factor": "conflict",
+            "level": "uncontested",
+            "level_rank": 0,
+            "reason": "nothing on the platform contradicts this version (no contradictory evidence assertion, no contradicts relation)",
+            "facts": {
+              "evidence_assertions": 0,
+              "relations": 0
+            }
+          },
+          {
+            "factor": "version",
+            "level": "current",
+            "level_rank": 0,
+            "reason": "version 1 is the newest version of its object and is active",
+            "facts": {
+              "newest_version_no": 1,
+              "version_no": 1
+            }
+          }
+        ]
+      },
+      {
+        "rank": 4,
+        "ref": "knowledge:4123456789abcdefghjkmnpqrs",
+        "kind": "document",
+        "entity_type": "knowledge",
+        "object_type": "claim",
+        "title": "Mg-MOF-74 CO2 uptake claim, unreviewed external assertion",
+        "version": "v1",
+        "object_version_id": "a0000000-0000-4000-8000-000000000006",
+        "labels": [],
+        "factors": [
+          {
+            "factor": "query_scope_match",
+            "level": "question",
+            "level_rank": 0,
+            "reason": "recalled by the question's own content (full_text); the question imposed no narrowing"
+          },
+          {
+            "factor": "evidence",
+            "level": "unknown",
+            "level_rank": 4,
+            "reason": "the version this candidate resolves to is not in the caller's project scope, so no facts about it were read"
+          },
+          {
+            "factor": "review",
+            "level": "unknown",
+            "level_rank": 3,
+            "reason": "the version this candidate resolves to is not in the caller's project scope, so no facts about it were read"
+          },
+          {
+            "factor": "reproduction",
+            "level": "unknown",
+            "level_rank": 4,
+            "reason": "the version this candidate resolves to is not in the caller's project scope, so no facts about it were read"
+          },
+          {
+            "factor": "conflict",
+            "level": "unknown",
+            "level_rank": 2,
+            "reason": "the version this candidate resolves to is not in the caller's project scope, so no facts about it were read"
+          },
+          {
+            "factor": "version",
+            "level": "unknown",
+            "level_rank": 3,
+            "reason": "the version this candidate resolves to is not in the caller's project scope, so no facts about it were read"
+          }
+        ]
+      },
+      {
+        "rank": 5,
+        "ref": "knowledge:3123456789abcdefghjkmnpqrs",
+        "kind": "document",
+        "entity_type": "knowledge",
+        "object_type": "finding",
+        "title": "Mg-MOF-74 CO2 uptake not reproduced at 298 K",
+        "version": "v1",
+        "object_version_id": "a0000000-0000-4000-8000-000000000005",
+        "labels": [
+          "actively_contested",
+          "independently_reproduced"
+        ],
+        "factors": [
+          {
+            "factor": "query_scope_match",
+            "level": "conditions",
+            "level_rank": 1,
+            "reason": "recalled by the structured filter the question carried, not by its wording; the question imposed no narrowing"
+          },
+          {
+            "factor": "evidence",
+            "level": "rejected",
+            "level_rank": 2,
+            "reason": "2 evidence assertions target this version, none reviewed and 2 rejected",
+            "facts": {
+              "assertions": 2,
+              "direct": 0,
+              "rejected": 2,
+              "reviewed": 0
+            }
+          },
+          {
+            "factor": "review",
+            "level": "unreviewed",
+            "level_rank": 2,
+            "reason": "no scientific review is recorded on the state this version was created in",
+            "facts": {
+              "approved": 0,
+              "changes_requested": 0,
+              "scientific": 0
+            }
+          },
+          {
+            "factor": "reproduction",
+            "level": "disputed",
+            "level_rank": 1,
+            "reason": "1 reproduction recorded, 1 from another project, and 1 recorded failure to reproduce",
+            "facts": {
+              "failed": 1,
+              "independent": 1,
+              "reproduces": 1
+            }
+          },
+          {
+            "factor": "conflict",
+            "level": "contested",
+            "level_rank": 1,
+            "reason": "2 contradictory evidence assertions and 1 contradicts relation touch this version",
+            "facts": {
+              "evidence_assertions": 2,
+              "relations": 1
+            }
+          },
+          {
+            "factor": "version",
+            "level": "historical",
+            "level_rank": 1,
+            "reason": "version 1 is not the newest version of its object (the newest is 2)",
+            "facts": {
+              "newest_version_no": 2,
+              "version_no": 1
+            }
+          }
+        ]
+      },
+      {
+        "rank": 6,
+        "ref": "release:c0000000-0000-4000-8000-000000000007",
+        "kind": "document",
+        "entity_type": "release",
+        "title": "Mg-MOF-74 uptake dataset release 1.2.0",
+        "version": "1.2.0",
+        "labels": [],
+        "factors": [
+          {
+            "factor": "query_scope_match",
+            "level": "conditions",
+            "level_rank": 1,
+            "reason": "recalled by the structured filter the question carried, not by its wording; the question imposed no narrowing"
+          },
+          {
+            "factor": "evidence",
+            "level": "unknown",
+            "level_rank": 4,
+            "reason": "the candidate resolves to no scientific object version, so there are no facts to read"
+          },
+          {
+            "factor": "review",
+            "level": "unknown",
+            "level_rank": 3,
+            "reason": "the candidate resolves to no scientific object version, so there are no facts to read"
+          },
+          {
+            "factor": "reproduction",
+            "level": "unknown",
+            "level_rank": 4,
+            "reason": "the candidate resolves to no scientific object version, so there are no facts to read"
+          },
+          {
+            "factor": "conflict",
+            "level": "unknown",
+            "level_rank": 2,
+            "reason": "the candidate resolves to no scientific object version, so there are no facts to read"
+          },
+          {
+            "factor": "version",
+            "level": "unversioned",
+            "level_rank": 2,
+            "reason": "the candidate does not resolve to a scientific object version, so no freshness is recorded"
+          }
+        ]
+      },
+      {
+        "rank": 7,
+        "ref": "object_version:b0000000-0000-4000-8000-000000000003@1",
+        "kind": "object_version",
+        "object_type": "material",
+        "title": "Mg-MOF-74 framework sample",
+        "object_version_id": "a0000000-0000-4000-8000-000000000003",
+        "labels": [
+          "limited_evidence"
+        ],
+        "factors": [
+          {
+            "factor": "query_scope_match",
+            "level": "related",
+            "level_rank": 2,
+            "reason": "reached by relation traversal from a recalled document, not recalled itself; the question imposed no narrowing"
+          },
+          {
+            "factor": "evidence",
+            "level": "none",
+            "level_rank": 3,
+            "reason": "no evidence assertion targets this version",
+            "facts": {
+              "assertions": 0,
+              "direct": 0,
+              "rejected": 0,
+              "reviewed": 0
+            }
+          },
+          {
+            "factor": "review",
+            "level": "unreviewed",
+            "level_rank": 2,
+            "reason": "no scientific review is recorded on the state this version was created in",
+            "facts": {
+              "approved": 0,
+              "changes_requested": 0,
+              "scientific": 0
+            }
+          },
+          {
+            "factor": "reproduction",
+            "level": "none",
+            "level_rank": 3,
+            "reason": "no reproduction is recorded",
+            "facts": {
+              "failed": 0,
+              "independent": 0,
+              "reproduces": 0
+            }
+          },
+          {
+            "factor": "conflict",
+            "level": "uncontested",
+            "level_rank": 0,
+            "reason": "nothing on the platform contradicts this version (no contradictory evidence assertion, no contradicts relation)",
+            "facts": {
+              "evidence_assertions": 0,
+              "relations": 0
+            }
+          },
+          {
+            "factor": "version",
+            "level": "historical",
+            "level_rank": 1,
+            "reason": "version 1 is not the newest version of its object (the newest is 3)",
+            "facts": {
+              "newest_version_no": 3,
+              "version_no": 1
+            }
+          }
+        ]
+      },
+      {
+        "rank": 8,
+        "ref": "object_version:b0000000-0000-4000-8000-000000000008@3",
+        "kind": "object_version",
+        "object_type": "claim",
+        "title": "Mg-MOF-74 CO2 uptake claim, withdrawn",
+        "object_version_id": "a0000000-0000-4000-8000-000000000008",
+        "labels": [
+          "limited_evidence"
+        ],
+        "factors": [
+          {
+            "factor": "query_scope_match",
+            "level": "related",
+            "level_rank": 2,
+            "reason": "reached by relation traversal from a recalled document, not recalled itself; the question imposed no narrowing"
+          },
+          {
+            "factor": "evidence",
+            "level": "none",
+            "level_rank": 3,
+            "reason": "no evidence assertion targets this version",
+            "facts": {
+              "assertions": 0,
+              "direct": 0,
+              "rejected": 0,
+              "reviewed": 0
+            }
+          },
+          {
+            "factor": "review",
+            "level": "unreviewed",
+            "level_rank": 2,
+            "reason": "no scientific review is recorded on the state this version was created in",
+            "facts": {
+              "approved": 0,
+              "changes_requested": 0,
+              "scientific": 0
+            }
+          },
+          {
+            "factor": "reproduction",
+            "level": "none",
+            "level_rank": 3,
+            "reason": "no reproduction is recorded",
+            "facts": {
+              "failed": 0,
+              "independent": 0,
+              "reproduces": 0
+            }
+          },
+          {
+            "factor": "conflict",
+            "level": "uncontested",
+            "level_rank": 0,
+            "reason": "nothing on the platform contradicts this version (no contradictory evidence assertion, no contradicts relation)",
+            "facts": {
+              "evidence_assertions": 0,
+              "relations": 0
+            }
+          },
+          {
+            "factor": "version",
+            "level": "aborted",
+            "level_rank": 4,
+            "reason": "version 3 was aborted; it is still returned, and ranked last",
+            "facts": {
+              "newest_version_no": 3,
+              "version_no": 3
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

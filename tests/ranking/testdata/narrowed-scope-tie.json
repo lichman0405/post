@@ -1,0 +1,459 @@
+{
+  "name": "narrowed-scope-tie",
+  "note": "A narrowed question, a full tie, and a publication that answers for nothing. Three things this pins that the canonical case cannot. (1) The query/scope factor reports the NARROWING as well as the match, so a result obtained under a filter says which filter — the reason strings here carry all three of entity types, public-only and the facet object. (2) The two candidates ranked first and second are identical on all six factors, and they appear in the opposite order from their pids: the retrieval listed D first, so D is rank 1. Where the factors cannot separate two candidates the platform does not invent a separation — it keeps the recall's order and says the same thing about both. (3) A knowledge document whose pid resolves to no publication is reported as resolving to nothing, which is a different statement from every other row here and carries a different reason.",
+  "request": {
+    "query": "which public claims about CO2 uptake in <MOF> materials were recorded?",
+    "entity_types": [
+      "knowledge"
+    ],
+    "public_only": true,
+    "facets": "{\"object_type\":\"claim\"}"
+  },
+  "candidates": [
+    {
+      "ref": "knowledge:5123456789abcdefghjkmnpqrs",
+      "kind": "document",
+      "entity_type": "knowledge",
+      "identity": "5123456789abcdefghjkmnpqrs",
+      "version": "v1",
+      "title": "CO2 uptake in HKUST-1 at 298 K",
+      "object_type": "claim",
+      "object_id": "d0000000-0000-4000-8000-00000000000d",
+      "signals": [
+        {
+          "signal": "facets",
+          "rank": 1
+        }
+      ],
+      "score": 0.0161
+    },
+    {
+      "ref": "knowledge:6123456789abcdefghjkmnpqrs",
+      "kind": "document",
+      "entity_type": "knowledge",
+      "identity": "6123456789abcdefghjkmnpqrs",
+      "version": "v1",
+      "title": "CO2 uptake in ZIF-8 at 298 K",
+      "object_type": "claim",
+      "object_id": "d0000000-0000-4000-8000-00000000000c",
+      "signals": [
+        {
+          "signal": "facets",
+          "rank": 1
+        }
+      ],
+      "score": 0.0161
+    },
+    {
+      "ref": "object_version:d0000000-0000-4000-8000-00000000000e@2",
+      "kind": "object_version",
+      "identity": "d0000000-0000-4000-8000-00000000000e",
+      "title": "CO2 uptake in UiO-66 at 298 K",
+      "object_type": "claim",
+      "object_id": "d0000000-0000-4000-8000-00000000000e",
+      "object_version_id": "e0000000-0000-4000-8000-00000000000e",
+      "version_no": 2,
+      "signals": [
+        {
+          "signal": "facets",
+          "rank": 2
+        }
+      ],
+      "hops": 1,
+      "score": 0.0161
+    },
+    {
+      "ref": "knowledge:7123456789abcdefghjkmnpqrs",
+      "kind": "document",
+      "entity_type": "knowledge",
+      "identity": "7123456789abcdefghjkmnpqrs",
+      "version": "v1",
+      "title": "CO2 uptake in MOF-5 at 298 K, withdrawn publication",
+      "object_type": "claim",
+      "signals": [
+        {
+          "signal": "facets",
+          "rank": 3
+        }
+      ],
+      "score": 0.0159
+    }
+  ],
+  "facts": [
+    {
+      "object_version_id": "e0000000-0000-4000-8000-00000000000c",
+      "object_id": "d0000000-0000-4000-8000-00000000000c",
+      "version_no": 1,
+      "newest_version_no": 1,
+      "lifecycle_state": "active",
+      "is_newest": true,
+      "evidence": {
+        "assertions": 1,
+        "reviewed": 1,
+        "rejected": 0,
+        "direct": 1,
+        "supporting": 1,
+        "contradicting": 0
+      },
+      "reproduction": {
+        "reproduces": 0,
+        "independent": 0,
+        "failed": 0
+      },
+      "reviews": {
+        "scientific": 0,
+        "approved": 0,
+        "changes_requested": 0
+      },
+      "relations": {
+        "contradicting": 0
+      }
+    },
+    {
+      "object_version_id": "e0000000-0000-4000-8000-00000000000d",
+      "object_id": "d0000000-0000-4000-8000-00000000000d",
+      "version_no": 1,
+      "newest_version_no": 1,
+      "lifecycle_state": "active",
+      "is_newest": true,
+      "evidence": {
+        "assertions": 1,
+        "reviewed": 1,
+        "rejected": 0,
+        "direct": 1,
+        "supporting": 1,
+        "contradicting": 0
+      },
+      "reproduction": {
+        "reproduces": 0,
+        "independent": 0,
+        "failed": 0
+      },
+      "reviews": {
+        "scientific": 0,
+        "approved": 0,
+        "changes_requested": 0
+      },
+      "relations": {
+        "contradicting": 0
+      }
+    },
+    {
+      "object_version_id": "e0000000-0000-4000-8000-00000000000e",
+      "object_id": "d0000000-0000-4000-8000-00000000000e",
+      "version_no": 2,
+      "newest_version_no": 2,
+      "lifecycle_state": "active",
+      "is_newest": true,
+      "evidence": {
+        "assertions": 2,
+        "reviewed": 0,
+        "rejected": 0,
+        "direct": 2,
+        "supporting": 2,
+        "contradicting": 0
+      },
+      "reproduction": {
+        "reproduces": 1,
+        "independent": 1,
+        "failed": 0
+      },
+      "reviews": {
+        "scientific": 1,
+        "approved": 1,
+        "changes_requested": 0
+      },
+      "relations": {
+        "contradicting": 1
+      }
+    }
+  ],
+  "publications": {
+    "5123456789abcdefghjkmnpqrs": "e0000000-0000-4000-8000-00000000000d",
+    "6123456789abcdefghjkmnpqrs": "e0000000-0000-4000-8000-00000000000c"
+  },
+  "unresolved_pids": [
+    "7123456789abcdefghjkmnpqrs"
+  ],
+  "expected_ranking": {
+    "query": "which public claims about CO2 uptake in <MOF> materials were recorded?",
+    "factors": [
+      "query_scope_match",
+      "evidence",
+      "review",
+      "reproduction",
+      "conflict",
+      "version"
+    ],
+    "ranked": [
+      {
+        "rank": 1,
+        "ref": "knowledge:5123456789abcdefghjkmnpqrs",
+        "kind": "document",
+        "entity_type": "knowledge",
+        "object_type": "claim",
+        "title": "CO2 uptake in HKUST-1 at 298 K",
+        "version": "v1",
+        "object_version_id": "e0000000-0000-4000-8000-00000000000d",
+        "labels": [],
+        "factors": [
+          {
+            "factor": "query_scope_match",
+            "level": "conditions",
+            "level_rank": 1,
+            "reason": "recalled by the structured filter the question carried, not by its wording; the question narrowed to entity types knowledge; public rows only; a structured filter was applied"
+          },
+          {
+            "factor": "evidence",
+            "level": "reviewed",
+            "level_rank": 0,
+            "reason": "1 evidence assertion targets this version, 1 reviewed, 1 direct",
+            "facts": {
+              "assertions": 1,
+              "direct": 1,
+              "rejected": 0,
+              "reviewed": 1
+            }
+          },
+          {
+            "factor": "review",
+            "level": "unreviewed",
+            "level_rank": 2,
+            "reason": "no scientific review is recorded on the state this version was created in",
+            "facts": {
+              "approved": 0,
+              "changes_requested": 0,
+              "scientific": 0
+            }
+          },
+          {
+            "factor": "reproduction",
+            "level": "none",
+            "level_rank": 3,
+            "reason": "no reproduction is recorded",
+            "facts": {
+              "failed": 0,
+              "independent": 0,
+              "reproduces": 0
+            }
+          },
+          {
+            "factor": "conflict",
+            "level": "uncontested",
+            "level_rank": 0,
+            "reason": "nothing on the platform contradicts this version (no contradictory evidence assertion, no contradicts relation)",
+            "facts": {
+              "evidence_assertions": 0,
+              "relations": 0
+            }
+          },
+          {
+            "factor": "version",
+            "level": "current",
+            "level_rank": 0,
+            "reason": "version 1 is the newest version of its object and is active",
+            "facts": {
+              "newest_version_no": 1,
+              "version_no": 1
+            }
+          }
+        ]
+      },
+      {
+        "rank": 2,
+        "ref": "knowledge:6123456789abcdefghjkmnpqrs",
+        "kind": "document",
+        "entity_type": "knowledge",
+        "object_type": "claim",
+        "title": "CO2 uptake in ZIF-8 at 298 K",
+        "version": "v1",
+        "object_version_id": "e0000000-0000-4000-8000-00000000000c",
+        "labels": [],
+        "factors": [
+          {
+            "factor": "query_scope_match",
+            "level": "conditions",
+            "level_rank": 1,
+            "reason": "recalled by the structured filter the question carried, not by its wording; the question narrowed to entity types knowledge; public rows only; a structured filter was applied"
+          },
+          {
+            "factor": "evidence",
+            "level": "reviewed",
+            "level_rank": 0,
+            "reason": "1 evidence assertion targets this version, 1 reviewed, 1 direct",
+            "facts": {
+              "assertions": 1,
+              "direct": 1,
+              "rejected": 0,
+              "reviewed": 1
+            }
+          },
+          {
+            "factor": "review",
+            "level": "unreviewed",
+            "level_rank": 2,
+            "reason": "no scientific review is recorded on the state this version was created in",
+            "facts": {
+              "approved": 0,
+              "changes_requested": 0,
+              "scientific": 0
+            }
+          },
+          {
+            "factor": "reproduction",
+            "level": "none",
+            "level_rank": 3,
+            "reason": "no reproduction is recorded",
+            "facts": {
+              "failed": 0,
+              "independent": 0,
+              "reproduces": 0
+            }
+          },
+          {
+            "factor": "conflict",
+            "level": "uncontested",
+            "level_rank": 0,
+            "reason": "nothing on the platform contradicts this version (no contradictory evidence assertion, no contradicts relation)",
+            "facts": {
+              "evidence_assertions": 0,
+              "relations": 0
+            }
+          },
+          {
+            "factor": "version",
+            "level": "current",
+            "level_rank": 0,
+            "reason": "version 1 is the newest version of its object and is active",
+            "facts": {
+              "newest_version_no": 1,
+              "version_no": 1
+            }
+          }
+        ]
+      },
+      {
+        "rank": 3,
+        "ref": "object_version:d0000000-0000-4000-8000-00000000000e@2",
+        "kind": "object_version",
+        "object_type": "claim",
+        "title": "CO2 uptake in UiO-66 at 298 K",
+        "object_version_id": "e0000000-0000-4000-8000-00000000000e",
+        "labels": [
+          "actively_contested",
+          "independently_reproduced"
+        ],
+        "factors": [
+          {
+            "factor": "query_scope_match",
+            "level": "conditions",
+            "level_rank": 1,
+            "reason": "recalled by the structured filter the question carried, not by its wording; the question narrowed to entity types knowledge; public rows only; a structured filter was applied"
+          },
+          {
+            "factor": "evidence",
+            "level": "asserted",
+            "level_rank": 1,
+            "reason": "2 evidence assertions target this version, none reviewed, 2 direct",
+            "facts": {
+              "assertions": 2,
+              "direct": 2,
+              "rejected": 0,
+              "reviewed": 0
+            }
+          },
+          {
+            "factor": "review",
+            "level": "approved",
+            "level_rank": 0,
+            "reason": "1 scientific review on the state this version was created in, 1 approved",
+            "facts": {
+              "approved": 1,
+              "changes_requested": 0,
+              "scientific": 1
+            }
+          },
+          {
+            "factor": "reproduction",
+            "level": "independent",
+            "level_rank": 0,
+            "reason": "1 reproduction recorded, 1 from another project",
+            "facts": {
+              "failed": 0,
+              "independent": 1,
+              "reproduces": 1
+            }
+          },
+          {
+            "factor": "conflict",
+            "level": "contested",
+            "level_rank": 1,
+            "reason": "1 contradicts relation touches this version",
+            "facts": {
+              "evidence_assertions": 0,
+              "relations": 1
+            }
+          },
+          {
+            "factor": "version",
+            "level": "current",
+            "level_rank": 0,
+            "reason": "version 2 is the newest version of its object and is active",
+            "facts": {
+              "newest_version_no": 2,
+              "version_no": 2
+            }
+          }
+        ]
+      },
+      {
+        "rank": 4,
+        "ref": "knowledge:7123456789abcdefghjkmnpqrs",
+        "kind": "document",
+        "entity_type": "knowledge",
+        "object_type": "claim",
+        "title": "CO2 uptake in MOF-5 at 298 K, withdrawn publication",
+        "version": "v1",
+        "labels": [],
+        "factors": [
+          {
+            "factor": "query_scope_match",
+            "level": "conditions",
+            "level_rank": 1,
+            "reason": "recalled by the structured filter the question carried, not by its wording; the question narrowed to entity types knowledge; public rows only; a structured filter was applied"
+          },
+          {
+            "factor": "evidence",
+            "level": "unknown",
+            "level_rank": 4,
+            "reason": "the candidate resolves to no scientific object version, so there are no facts to read"
+          },
+          {
+            "factor": "review",
+            "level": "unknown",
+            "level_rank": 3,
+            "reason": "the candidate resolves to no scientific object version, so there are no facts to read"
+          },
+          {
+            "factor": "reproduction",
+            "level": "unknown",
+            "level_rank": 4,
+            "reason": "the candidate resolves to no scientific object version, so there are no facts to read"
+          },
+          {
+            "factor": "conflict",
+            "level": "unknown",
+            "level_rank": 2,
+            "reason": "the candidate resolves to no scientific object version, so there are no facts to read"
+          },
+          {
+            "factor": "version",
+            "level": "unversioned",
+            "level_rank": 2,
+            "reason": "the candidate does not resolve to a scientific object version, so no freshness is recorded"
+          }
+        ]
+      }
+    ]
+  }
+}
