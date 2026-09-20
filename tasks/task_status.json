@@ -6741,10 +6741,10 @@
       "merged_at": null
     },
     "T0811": {
-      "status": "verification",
-      "started_at": "2026-09-19T09:42:13Z",
-      "worker_run_id": "run-2132bd9c748c8ec4",
-      "rejection_reason": "你的改动现在合不到当前 main 上，需要**在新基线上重做一遍**（工具会先帮你把基线推进到 main，再把你已交的工作带过去）。\n\n**证据（验收器原话）**：\n\n    rddev task accept: the task's change does not apply to current main —\n    bring the branch up to date and re-run: git apply\n    /tmp/post-integration-T0811-*.patch: exit status 1:\n    error: patch failed: tests/integration/knowledge_publish_test.go:252\n\n**原因（已独立核对，不是你的错）**：你的基线是 `21ae522`。之后 T0507 合进了 main\n（`6fd4c83`，\"[T0507] Evidence/Provenance UI\"，#298），它**重写了共享测试世界那个函数的尾部**——\n`tests/integration/knowledge_publish_test.go` 的 `newKnowledgeWorldFor`，\n在里面注册了 `provenancehttp` / `evidencegraph` / `evidencehttp` 三个面。\n**而你恰好在同一处锚点插入 discussion 面的注册**，于是补丁的上下文行对不上了。\n\n**你要做的**：\n\n1. 在推进后的新基线上，把你的 discussion 注册**重新放回那个共享 world**：\n   保留 T0507 那三个注册，同时把你的 `discussionhttp.New(...)` 加进去——\n   这个世界要像 `cmd/api/main.go` 那样**两个面都在**，否则测试会过在一个生产根本不建的世界里\n   （这正是你原注释里写的理由，继续按那个标准做）。\n2. 重跑你自己那套 G1（你上次跑过的同一批命令），确认在新基线上仍然全绿。\n3. 更新 `RESULT.json`：说明这次是在推进后的基线上重跑的、跑了哪些、结果如何。\n   仍然不提交任何 Git 操作，只留工作区改动。\n\n**不在此列的事**：这不是对你工作质量的否定。评审结论是 `approve`，\n但门把评审结论**钉在代码指纹上**（`internal/devorchestrator/gate_run.go:593`：\n\"a verdict must not outlive the code it judged\"），基线一推进指纹就变，\n所以这次重做之后会**重新走一遍独立评审**，属正常流程。\n",
+      "status": "running",
+      "started_at": "2026-09-20T10:42:40Z",
+      "worker_run_id": "run-3df045ba0b4801b4",
+      "rejection_reason": "你的改动现在合不到当前 main 上，需要再推进一次基线。\n\n**证据**：\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run:\n    error: patch failed: internal/domain/audit.go:146\n\n**原因（不是你的错）**：你上一次 rework 的基线是 `258c3fa`（Supervisor 在 9-19 推进过一次）。\n之后 T0602（`0d33097`，主线对象 abort 状态迁移，#300）合进了 main，它在\n`internal/domain/audit.go` 的 `ActionKnowledgeVersionPublished` 常量后面插入了\n`ActionScientificObjectAborted` 整块注释与常量——而你 T0811 的 diff 也要在同一个锚点\n（`ActionKnowledgeVersionPublished` 之后）插入 `ActionDiscussionPromoted` 整块。\n两个块都是顺序追加、语义不冲突，只是补丁上下文对不上。\n\n**你要做的**：\n1. 在新基线上，保留 T0602 的 `ActionScientificObjectAborted` 整块，再把你的\n   `ActionDiscussionPromoted` 整块接在后面（顺序：T0602 在前，T0811 在后）。\n2. 重新生成派生件（`scripts/gen_schema_snapshot.py`、`scripts/spec_version.py --write`），\n   不要手动合并 `specs/SPEC_VERSION.json` 或 `specs/database/postgres.sql`。\n3. 重跑你自己的 G1 命令，确认在新基线上仍然全绿。\n4. 更新 `RESULT.json`，说明这是第二次基线推进后重跑的。\n\n**不在此列的事**：这不是对你工作质量的否定。旧评审结论会作废，新基线上会重新走独立评审。\n",
       "history": [
         {
           "from": "todo",
@@ -6786,6 +6786,20 @@
           "at": "2026-09-19T09:54:30Z",
           "run_id": "run-7c0343d57a520807",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-20T10:42:00Z",
+          "run_id": "run-3922a2ed8e890a85",
+          "reason": "你的改动现在合不到当前 main 上，需要再推进一次基线。\n\n**证据**：\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run:\n    error: patch failed: internal/domain/audit.go:146\n\n**原因（不是你的错）**：你上一次 rework 的基线是 `258c3fa`（Supervisor 在 9-19 推进过一次）。\n之后 T0602（`0d33097`，主线对象 abort 状态迁移，#300）合进了 main，它在\n`internal/domain/audit.go` 的 `ActionKnowledgeVersionPublished` 常量后面插入了\n`ActionScientificObjectAborted` 整块注释与常量——而你 T0811 的 diff 也要在同一个锚点\n（`ActionKnowledgeVersionPublished` 之后）插入 `ActionDiscussionPromoted` 整块。\n两个块都是顺序追加、语义不冲突，只是补丁上下文对不上。\n\n**你要做的**：\n1. 在新基线上，保留 T0602 的 `ActionScientificObjectAborted` 整块，再把你的\n   `ActionDiscussionPromoted` 整块接在后面（顺序：T0602 在前，T0811 在后）。\n2. 重新生成派生件（`scripts/gen_schema_snapshot.py`、`scripts/spec_version.py --write`），\n   不要手动合并 `specs/SPEC_VERSION.json` 或 `specs/database/postgres.sql`。\n3. 重跑你自己的 G1 命令，确认在新基线上仍然全绿。\n4. 更新 `RESULT.json`，说明这是第二次基线推进后重跑的。\n\n**不在此列的事**：这不是对你工作质量的否定。旧评审结论会作废，新基线上会重新走独立评审。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T10:42:40Z",
+          "run_id": "run-3df045ba0b4801b4",
+          "reason": "worker spawn"
         }
       ]
     },
