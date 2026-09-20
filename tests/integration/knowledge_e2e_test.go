@@ -1138,18 +1138,19 @@ func TestKnowledgeWorkflowEndToEnd(t *testing.T) {
 	// does not carry. Publication has a gate of its own, and it is the
 	// release gate's own query: knowledgepublish.Judge approves a version
 	// only when the lineage of its state into main carries the approved
-	// reviews of a research PR (ListReleaseReviews), and what that query
-	// names is the state a PR PROPOSED to main — the branch head the
-	// reviewers pinned, claim v2. Not v1 (an earlier version of the same
-	// object), and not main's own appended version either: main's chain
-	// carries no proposal, so what is publishable is the reviewed version,
-	// wherever it was written.
+	// reviews of a research PR (ListReleaseReviews). Two rows below carry
+	// that record and both publish: the branch head the reviewers pinned
+	// (claim v2), and main's own appended version of the same object — the
+	// lineage of the state main holds it at contains the merge's result
+	// state, so the merge edge (semantic_merges.result_state_id →
+	// pull_request_id, which T0611 made readable) puts the accepted PR's
+	// approved reviews in it as well. v1 is not on main's side of that
+	// merge at all, does not carry the record, and stays refused.
 	//
-	// The three refusals after the success are what make that a checked
-	// statement rather than a story: v1 is refused as unreviewed, main's
-	// appended version is refused for the same reason, and the published
-	// version is refused the second time because a version is published
-	// once. A gate nobody walked into is a gate nobody checked.
+	// The two refusals around the successes are what make that a checked
+	// statement rather than a story: v1 is refused as unreviewed, and the
+	// published version is refused the second time because a version is
+	// published once. A gate nobody walked into is a gate nobody checked.
 	const publishedName = "MOF-AMINE-A humid-cycling chain (claim v2)"
 	publishResp := alice.doKeyed(t, http.MethodPost,
 		"/api/v1/projects/"+w.projectID+"/knowledge:publish",
@@ -1186,21 +1187,42 @@ func TestKnowledgeWorkflowEndToEnd(t *testing.T) {
 	}
 	mustRefusalReason(t, unreviewed, knowledgepublish.ReasonReviewRequired)
 
-	// main's own appended version is refused for the same reason, and the
-	// reason is a real consequence of the model rather than a quirk to work
-	// around: main's chain carries no PROPOSAL, so ListReleaseReviews finds
-	// no review of a state in its lineage. What the reviewers approved is the
-	// version they pinned; that is the row the network gets.
-	mainVersionRefused := alice.doKeyed(t, http.MethodPost,
+	// main's own appended version publishes too, and what approves it is the
+	// same record rather than a second rule: since T0611 ListReleaseReviews
+	// reads the merge edge (semantic_merges.result_state_id →
+	// pull_request_id), the lineage of the state the merge wrote on main
+	// contains that merge's result state and therefore the PR the merge
+	// executed — the reviewers' approval IS this version's acceptance
+	// record. Before that fix the edge went unread, the query matched
+	// proposals only, and no proposal is ever an ancestor of a merged state,
+	// so this row was refused as unreviewed: the defect was in the read.
+	// Judge is unchanged, so the release gate and the publication gate still
+	// reach one conclusion over one record, and the row that publishes here
+	// is main's own row and nothing else.
+	mainVersionPublished := alice.doKeyed(t, http.MethodPost,
 		"/api/v1/projects/"+w.projectID+"/knowledge:publish",
 		fmt.Sprintf(`{"knowledge_version_ref":"object_version:%s","rights":%s,"public_version":"%s (main v%d)"}`,
 			claimOnMain.VersionID, knowledgeE2ERights(t), publishedName, claimOnMain.CurrentVersion),
 		"knowledge-e2e-publish-000004")
-	if mainVersionRefused.StatusCode != http.StatusConflict {
+	if mainVersionPublished.StatusCode != http.StatusCreated {
 		t.Fatalf("publishing main's appended version = %d, want %d: %s",
-			mainVersionRefused.StatusCode, http.StatusConflict, readAll(t, mainVersionRefused))
+			mainVersionPublished.StatusCode, http.StatusCreated, readAll(t, mainVersionPublished))
 	}
-	mustRefusalReason(t, mainVersionRefused, knowledgepublish.ReasonReviewRequired)
+	var mainPublication struct {
+		PID             string `json:"pid"`
+		ObjectVersionID string `json:"object_version_id"`
+		PublicVersion   string `json:"public_version"`
+	}
+	decodeJSON(t, mainVersionPublished, &mainPublication)
+	if mainPublication.PID == "" || mainPublication.ObjectVersionID != claimOnMain.VersionID {
+		t.Fatalf("the publication = %+v, want a pid and main's own appended version %s",
+			mainPublication, claimOnMain.VersionID)
+	}
+	mainPublicName := fmt.Sprintf("%s (main v%d)", publishedName, claimOnMain.CurrentVersion)
+	if mainPublication.PublicVersion != mainPublicName {
+		t.Errorf("the publication is named %q, want the name the publisher sent (%q)",
+			mainPublication.PublicVersion, mainPublicName)
+	}
 
 	// And a version is published once: the accepted version, again, under a
 	// fresh key (a repeated key would be the idempotent replay, which is a
