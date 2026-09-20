@@ -6748,10 +6748,10 @@
       "merged_at": null
     },
     "T0811": {
-      "status": "verification",
-      "started_at": "2026-09-20T10:42:40Z",
-      "worker_run_id": "run-3df045ba0b4801b4",
-      "rejection_reason": "你的改动现在合不到当前 main 上，需要再推进一次基线。\n\n**证据**：\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run:\n    error: patch failed: internal/domain/audit.go:146\n\n**原因（不是你的错）**：你上一次 rework 的基线是 `258c3fa`（Supervisor 在 9-19 推进过一次）。\n之后 T0602（`0d33097`，主线对象 abort 状态迁移，#300）合进了 main，它在\n`internal/domain/audit.go` 的 `ActionKnowledgeVersionPublished` 常量后面插入了\n`ActionScientificObjectAborted` 整块注释与常量——而你 T0811 的 diff 也要在同一个锚点\n（`ActionKnowledgeVersionPublished` 之后）插入 `ActionDiscussionPromoted` 整块。\n两个块都是顺序追加、语义不冲突，只是补丁上下文对不上。\n\n**你要做的**：\n1. 在新基线上，保留 T0602 的 `ActionScientificObjectAborted` 整块，再把你的\n   `ActionDiscussionPromoted` 整块接在后面（顺序：T0602 在前，T0811 在后）。\n2. 重新生成派生件（`scripts/gen_schema_snapshot.py`、`scripts/spec_version.py --write`），\n   不要手动合并 `specs/SPEC_VERSION.json` 或 `specs/database/postgres.sql`。\n3. 重跑你自己的 G1 命令，确认在新基线上仍然全绿。\n4. 更新 `RESULT.json`，说明这是第二次基线推进后重跑的。\n\n**不在此列的事**：这不是对你工作质量的否定。旧评审结论会作废，新基线上会重新走独立评审。\n",
+      "status": "running",
+      "started_at": "2026-09-20T11:05:19Z",
+      "worker_run_id": "run-2e6e77c01ab5e8e7",
+      "rejection_reason": "G2 的 `go` job 红了，具体是 staticcheck 在本任务新增的测试代码里发现一个 **NEW finding**：\n\n    ***_test.go:375:15:\n    go/parser.ParseDir has been deprecated since Go 1.25 ...\n\n这是你的代码引入的新 finding，不能进 baseline，必须修。\n\n你要做的：\n1. 把 `go/parser.ParseDir` 换成 `golang.org/x/tools/go/packages` 的等效用法（staticcheck 自己已经给提示了）。\n2. 跑 `make staticcheck` 确认清零。\n3. 重跑你原来的 G1 命令（至少包括 `make fmt-check`、`go vet ./...`、`make staticcheck`、go test 相关包）。\n4. 更新 `RESULT.json` 的 tests 记录，说明修了这个问题之后重跑的结果。\n\n约束：\n- 不要 suppress 或 baseline 这个 finding。\n- 不要动无关文件。\n",
       "history": [
         {
           "from": "todo",
@@ -6814,6 +6814,20 @@
           "at": "2026-09-20T10:55:30Z",
           "run_id": "run-10d83ec1166e5463",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-20T11:05:18Z",
+          "run_id": "run-f84e6b358a101d4e",
+          "reason": "G2 的 `go` job 红了，具体是 staticcheck 在本任务新增的测试代码里发现一个 **NEW finding**：\n\n    ***_test.go:375:15:\n    go/parser.ParseDir has been deprecated since Go 1.25 ...\n\n这是你的代码引入的新 finding，不能进 baseline，必须修。\n\n你要做的：\n1. 把 `go/parser.ParseDir` 换成 `golang.org/x/tools/go/packages` 的等效用法（staticcheck 自己已经给提示了）。\n2. 跑 `make staticcheck` 确认清零。\n3. 重跑你原来的 G1 命令（至少包括 `make fmt-check`、`go vet ./...`、`make staticcheck`、go test 相关包）。\n4. 更新 `RESULT.json` 的 tests 记录，说明修了这个问题之后重跑的结果。\n\n约束：\n- 不要 suppress 或 baseline 这个 finding。\n- 不要动无关文件。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-20T11:05:19Z",
+          "run_id": "run-2e6e77c01ab5e8e7",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -6869,11 +6883,11 @@
       ]
     },
     "T0814": {
-      "status": "running",
+      "status": "rejected",
       "started_at": "2026-09-20T10:49:12Z",
       "notes": "2026-09-19 立账：T0804 把 fork 的服务层做完了（并把它接到执行侧：ForkGate 与 00086 的触发器），但产品路径上缺「发起 fork」这步；契约由 Supervisor 先落地，本任务照契约接线。来源：docs/31_MASTER_ACCEPTANCE.md:17，T0804 复核时发现。",
       "worker_run_id": "run-a3191c8e3a8b7076",
-      "rejection_reason": "独立评审给了 request_changes，1 条 blocking + 1 条 major + 若干 minor/nit。按下面优先级处理。\n\n【B · BLOCKING — AC8（主验收闭合）当前无法成立，需要如实改写 RESULT】\n\nReviewer 核实：外部 fork 提的 PR，其 source branch 活在 contributor 的 fork project 里，而 `internal/application/merge/service.go:431` 的 `MergePullRequest` 用 `s.branch(ctx, in.ProjectID, pr.SourceBranchID)` 去解析 branch，这一路（`merge_store.go:66/:75/:206`）都是按 **PR 的 project** 去查 branch。fork 里的 branch 在 PR project 里不存在，所以 merge 会返回 `merge.ErrBranchNotFound`。\n\n也就是说，\"fork → 写 fork → propose → review → merge\" 这条路在当前 tree 上**走不到最后一步**。这是跨模块的产品语义问题（外部贡献如何进入合并路径），可能涉及 T0409 的领地；**本任务不自行实现这个修复**。\n\n你要做的：\n1. 在 `RESULT.json` 里把 AC8 从 \"passed\" 改成 **not satisfied**，并写清楚证据：\n   - merge path 解析 source branch 是按 PR project 作用域（给出具体文件/行号）；\n   - fork-sourced branch 不在该作用域内，会报 `ErrBranchNotFound`；\n   - 因此 docs/31:17 的旅程在当前树没有 end；\n   - 把这条作为一个 **named follow-up** 记录（例如 `T0814-follow-up: merge path must resolve fork-sourced source branch`）。\n2. 把你原来 RESULT 里 \"argued from the row shape rather than demonstrated\" 那段证据替换成上面的真话；原来关于 \"if it were pinned differently...\" 的假设也要说明它现在不成立。\n3. 不要试图在 `internal/application/merge/**` 或 `internal/persistence/merge_store.go` 里加 fork 感知来让 AC8 成立——那会让本任务超出它的 decision level。\n\n【M · MAJOR — provisioning 禁用时 fork 路由会 panic，要加 503 守卫】\n\n问题：`cmd/api/main.go:242-243` 在配置缺失时把 `forkProvisioner`/`forkImporter` 留 nil；`internal/gitprovider/config.go:69` 定义这种部署为 \"provisioning disabled\"。`Service.Fork` → `ensureFork` 会先把 fork project 行写进库（`forks/service.go:378`），然后对 nil interface 调用 `s.repos.Provision`（`forks/service.go:417`），导致 panic、连接被 abort，而且那个 slug 被actor 自己的 lineage-less project 永久占住，后续请求永远 409 FORK_NAME_TAKEN。\n\n你要做的：\n- 让 disabled 部署对 fork 路由返回 **fail-closed 503**，并在响应或日志里**点名缺少哪些配置 key**。\n- 已有惯例：`cmd/api/main.go:438-439`（git tokens）和 `:458`（files）就是这样处理的。照那个模式做，不要发明新形状。\n- 注意 `forkshttp/handlers.go:203` 的 `h.forks == nil` 检查不会触发，因为 service 非 nil；所以守卫要放在 service 层或路由注册层，并确保 disabled 模式下不会先写 project 行再失败。\n- 更新 `main.go` 里关于 \"no provider to call\" 的注释，让它与现在实际行为一致。\n- 补一条测试：在 provisioning disabled 模式下调用 fork 路由，断言返回 503 且没有 project 行残留。\n\n【m · MINOR — PR 路由的 contract 对照检查不对称】\n\n`cmd/api/pullrequestshttp/contract_test.go:149` 的 `***` 只检查了 declared path、409 存在、code 等于 contract token，但**没把 contract 声明的 status 集合与路由实际返回的集合做双向比较**。fork 路由的 contract test 做了这个双向检查，PR 路由也要做。\n\n你要做的：\n- 扩展 PR 路由的 contract test，像 fork 路由那样比较 \"contract 声明的状态集合\" 与 \"代码实际返回的状态集合\" 双向包含。\n- 404 文案 mismatch（contract 写 BRANCH_NOT_FOUND，surface 答 PROJECT_NOT_FOUND）是 pre-existing，按现有做法记录为 follow-up，不要 paper over。\n\n【nit】\n- `specs/api/openapi.yaml:98` 的 line reference `internal/application/forks/service.go:821` 已经 stale；specs 是 Supervisor-only，但你已经在 follow-ups 里记了两条 contract 项，把这条也加进 follow-up 即可，不要自己改 specs。\n\n【约束】\n- 不要改 `internal/application/merge/**` 或 `internal/persistence/merge_store.go` 来让 AC8 成立。\n- 不要弱化任何现有测试或断言。\n- 改完重跑 `cmd/api/forkshttp` + `cmd/api/pullrequestshttp` 的测试、`TestExternalFork` 全家、e2e 必测项、完整 unit suite。\n- `RESULT.json` 必须自洽：AC8 不能写 passed；新增/修改的测试要有 passed 条目；如实记录哪些跟着了、哪些被拆成 follow-up。\n",
+      "rejection_reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: 主验收闭合：docs/31_MASTER_ACCEPTANCE.md:17「Public Project 外部用户可 fork/contribute」在真实 HTTP 路径上从头到尾走通一遍（fork → 在自己的 fork 里写状态 → 对上游开 PR → 评审/合并按既有路径），给出一条可复现的证据。 (failed)",
       "history": [
         {
           "from": "todo",
@@ -6908,6 +6922,13 @@
           "at": "2026-09-20T10:49:12Z",
           "run_id": "run-a3191c8e3a8b7076",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-20T11:04:11Z",
+          "run_id": "run-c18846acb97805a0",
+          "reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: 主验收闭合：docs/31_MASTER_ACCEPTANCE.md:17「Public Project 外部用户可 fork/contribute」在真实 HTTP 路径上从头到尾走通一遍（fork → 在自己的 fork 里写状态 → 对上游开 PR → 评审/合并按既有路径），给出一条可复现的证据。 (failed)"
         }
       ]
     },
