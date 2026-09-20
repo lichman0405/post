@@ -74,8 +74,17 @@ const appendOnlyTaskID = "T0013"
 // side): a publication points at an append-only scientific object version,
 // so the ledger entry that replays it is history for exactly the reason
 // release_creations and asset_publish_creations are — a rewritten entry
-// would rewrite which version a key already published. The same
-// list drives the catalog assertion and the per-table rejection loop.
+// would rewrite which version a key already published. Migration 00103
+// (T0809) joins the credit-attribution pair: docs/13 §2's "correction 作为
+// 新 event，旧 attribution 和 dispute history 保留" makes a declaration
+// history the moment it is written, so the declaration and its party rows
+// take both halves of the guard — a correction APPENDS at the next ordinal,
+// and the declaration it corrects stays a row no write path can rewrite or
+// remove. credit_disputes does NOT join this list: docs/13 §3's dispute has
+// a current state that governance closes IN PLACE, which is why it is on the
+// exempt list above and carries a targeted guard instead (see
+// targetedGuardTriggers). The same list drives the catalog assertion and
+// the per-table rejection loop.
 var appendOnlyTables = []string{
 	"scientific_object_versions",
 	"relation_versions",
@@ -101,6 +110,8 @@ var appendOnlyTables = []string{
 	"knowledge_publication_creations",
 	"asset_version_parties",
 	"asset_rights_holder_events",
+	"credit_attribution_statements",
+	"credit_attribution_parties",
 }
 
 // targetedGuardTriggers are the NON-append-only row guards added after
@@ -224,6 +235,19 @@ var targetedGuardTriggers = map[string]string{
 	// integration test drives a raw DELETE against it.
 	"evidence_assertions:evidence_assertions_delete_guard": ":O:11",
 	"evidence_assertions:evidence_assertions_no_truncate":  ":O:34",
+	// T0809 (00103) adds the credit dispute's state guard: BEFORE INSERT OR
+	// UPDATE, FOR EACH ROW → 23. Deliberately NOT the append-only pair.
+	// credit_disputes is a CURRENT-STATE table (docs/13 §3's dispute is
+	// resolved by updating its row) and is on the exempt list in this file's
+	// header; what it had no guard for was the SHAPE of that update, so the
+	// function pins a dispute as born open, pins its identity/target/claim,
+	// and admits exactly one transition — open → resolved|rejected, with a
+	// resolution and a resolved_at, after which the row is terminal. The
+	// append-only half of "dispute history 可查" is not this table at all: it
+	// is the credit.dispute_opened/credit.dispute_resolved pair the ledger
+	// projects into contribution_events, which is already in
+	// appendOnlyTables above.
+	"credit_disputes:credit_disputes_state_guard": ":O:23",
 }
 
 // triggerRows returns every user trigger in the public schema as sorted
@@ -601,6 +625,48 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 			},
 			del: func(id string) error {
 				_, err := pool.Exec(ctx, `DELETE FROM asset_rights_holder_events WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			// T0809 (00103): a high-level credit declaration. docs/13 §2
+			// makes a correction a NEW declaration and keeps the old one
+			// ("旧 attribution ... 保留"), so rewriting or deleting a
+			// declaration would rewrite who a target credits.
+			table: "credit_attribution_statements",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO credit_attribution_statements
+					(project_id, target_kind, target_ref, ordinal, recorded_by)
+					VALUES ($1, 'asset', 'asset:0123456789abcdefghjkmnpqrs', 1, $2) RETURNING id`, p1, u1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE credit_attribution_statements SET ordinal = 99 WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM credit_attribution_statements WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			// T0809 (00103): the parties one declaration names. They are
+			// part of the declaration's record, so the guard covers them
+			// for the same reason it covers the declaration.
+			table: "credit_attribution_parties",
+			insert: func() string {
+				// The statements case ran first: its row is the parent.
+				statementID := mustQueryUUID(`SELECT id FROM credit_attribution_statements
+					WHERE project_id = $1 AND ordinal = 1 LIMIT 1`, p1)
+				return mustQueryUUID(`INSERT INTO credit_attribution_parties
+					(statement_id, role, party_kind, party_id, position)
+					VALUES ($1, 'creator', 'user', $2, 0) RETURNING id`, statementID, u1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE credit_attribution_parties SET role = 'major_contributor' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM credit_attribution_parties WHERE id = $1`, id)
 				return err
 			},
 		},
