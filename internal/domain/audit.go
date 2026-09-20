@@ -163,6 +163,35 @@ const (
 	// The audit vocabulary is this file, the event vocabulary is the event
 	// spec, and neither list is derived from the other.
 	ActionScientificObjectAborted = "scientific_object.aborted"
+
+	// T0811 discussion promotion: one row per discussion comment promoted
+	// into a proposed object (an Issue, a Hypothesis scientific object, or
+	// an external-evidence proposal), written in the same transaction as
+	// the promotion record it belongs to. docs/26 §5 makes the HIGHEST-risk
+	// actions audited, and this one is a governance action by the ruling in
+	// the task package: it creates a row in ANOTHER object's table out of a
+	// conversation, under write_scientific_state, and who did it is exactly
+	// what the provenance chain must answer later.
+	//
+	// # Why NOTHING in this file audits a comment
+	//
+	// A comment is not an audited action and no constant for one exists
+	// here on purpose. Writing and withdrawing a comment changes no
+	// scientific state (internal/domain/discussion.go), the row records its
+	// own author and time, and 00104 keeps a withdrawn comment as a
+	// tombstone — so the audit log would be a second copy of facts the
+	// discussion tables already hold, for an action the audit vocabulary
+	// (docs/26's high-risk list: authentication, governance, membership,
+	// visibility, merge, publish, abort/reopen) does not name. A future
+	// decision to audit comments belongs to whoever decides it is a
+	// high-risk action; inventing the constant here would decide it.
+	//
+	// The name follows the dotted `<subject>.<verb-past>` convention of the
+	// constants above. It is deliberately NOT an event name: it does not
+	// appear in specs/events/event-types.yaml, and no research event is
+	// emitted for a promotion (the two registries are separate — the note
+	// beside ActionPullRequestMerged).
+	ActionDiscussionPromoted = "discussion.promoted"
 )
 
 // Stable via values (the audit_log.via column): how the action arrived.

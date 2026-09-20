@@ -393,6 +393,23 @@ func (q *Queries) ListReviewsByPullRequest(ctx context.Context, arg ListReviewsB
 	return items, nil
 }
 
+const nextIssueNumber = `-- name: NextIssueNumber :one
+SELECT (COALESCE(MAX(number), 0) + 1)::bigint AS number FROM issues WHERE project_id = $1
+`
+
+// The per-project issue number allocator (T0811, the first caller of
+// CreateIssue). Same shape as the PR store's own allocation: the
+// INSERT ... SELECT pair runs inside one transaction that has already
+// row-locked the project row (GetProjectByIDForUpdate), so MAX(number)+1
+// cannot race a concurrent create and issues(project_id, number) is never
+// violated. Numbers start at 1 for every project.
+func (q *Queries) NextIssueNumber(ctx context.Context, projectID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, nextIssueNumber, projectID)
+	var number int64
+	err := row.Scan(&number)
+	return number, err
+}
+
 const refreshPullRequestProposedState = `-- name: RefreshPullRequestProposedState :one
 UPDATE pull_requests
 SET proposed_state_id = $1

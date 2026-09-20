@@ -72,6 +72,21 @@ type Querier interface {
 	// read (and visibility-defaulted against) in the same transaction by the
 	// adapter.
 	CreateBranchFromState(ctx context.Context, arg CreateBranchFromStateParams) (Branch, error)
+	CreateDiscussionComment(ctx context.Context, arg CreateDiscussionCommentParams) (DiscussionComment, error)
+	// One promotion record: the comment that was proposed, what it became,
+	// who promoted it. promoted_ref is "<kind>:<uuid>" — the CHECK in 00104
+	// derives the prefix from promoted_kind, so the pair cannot disagree.
+	CreateDiscussionPromotion(ctx context.Context, arg CreateDiscussionPromotionParams) (DiscussionPromotion, error)
+	// Discussion threads, comments and promotions (T0811; canonical tables
+	// discussion_threads, discussion_comments, discussion_promotions,
+	// migration 00104).
+	//
+	// Every query here touches those three tables and nothing else: no
+	// statement in this file names scientific_object_versions, relation_versions
+	// or contribution_events, which is the SQL half of "a comment does not
+	// change scientific state" (the Go half is that the discussions command
+	// has no state-commit port at all).
+	CreateDiscussionThread(ctx context.Context, arg CreateDiscussionThreadParams) (DiscussionThread, error)
 	// Evidence assertions (canonical table: evidence_assertions). Evidence is a
 	// directed, typed relation between object versions — separate from the RSG
 	// relation graph (invariant 10: Provenance Graph != Evidence Graph).
@@ -339,6 +354,22 @@ type Querier interface {
 	// scan NULL into *string". The cast belongs in Go (pgUUIDToText), where
 	// the absence is a value the reader decides about.
 	GetCurrentAssetRightsHolder(ctx context.Context, assetID pgtype.UUID) (GetCurrentAssetRightsHolderRow, error)
+	// One comment of one project (same boundary rule as GetDiscussionThread).
+	GetDiscussionComment(ctx context.Context, arg GetDiscussionCommentParams) (DiscussionComment, error)
+	// The project that owns the object a publication pid names (T0811's
+	// knowledge target check): a thread's knowledge target must be a
+	// publication OF THE THREAD'S PROJECT, and this resolves the one fact that
+	// decides it. It is a read of the publication, its version and the object
+	// that carries it — no visibility predicate: the command's project gate
+	// has already run the caller's read rule, and a second SQL-shaped copy of
+	// it is how two answers to "who may see this" start to disagree (the same
+	// rule knowledgepublish.AudienceFor owns).
+	GetDiscussionKnowledgeTargetProject(ctx context.Context, pid string) (pgtype.UUID, error)
+	GetDiscussionPromotion(ctx context.Context, arg GetDiscussionPromotionParams) (DiscussionPromotion, error)
+	// One thread of one project. project_id is in the predicate, not a filter
+	// applied afterwards: a thread id of another project is not-found, never a
+	// foreign thread (existence hiding, docs/45).
+	GetDiscussionThread(ctx context.Context, arg GetDiscussionThreadParams) (DiscussionThread, error)
 	// The asset an asset feed is about, addressed by its pid — the persistent
 	// identity every asset URL is built from (migration 00064,
 	// internal/assets/url.go), never the slug or the owning organization.
@@ -978,6 +1009,23 @@ type Querier interface {
 	// states: the nullability of the pair has to survive into the generated type.
 	ListAssetRightsHolderEvents(ctx context.Context, assetID pgtype.UUID) ([]ListAssetRightsHolderEventsRow, error)
 	ListBranchesByProject(ctx context.Context, projectID pgtype.UUID) ([]Branch, error)
+	// One thread's comments in creation order. Deleted comments are RETURNED:
+	// the row is never removed (CLAUDE.md §9.8) and the transport renders the
+	// tombstone; only the body stops being served.
+	ListDiscussionComments(ctx context.Context, threadID pgtype.UUID) ([]DiscussionComment, error)
+	// The reverse read: every promotion that produced the object a ref names,
+	// oldest first. The promoted object does not carry its origin — a
+	// scientific object, an issue row and an evidence assertion all have their
+	// own tables — so this is the query that answers "where did this come
+	// from", joined by the caller to discussion_comments (the author) and
+	// discussion_threads (the target).
+	ListDiscussionPromotionsByRef(ctx context.Context, arg ListDiscussionPromotionsByRefParams) ([]DiscussionPromotion, error)
+	// The threads of one target, oldest first (created_at, id — a total
+	// order). comment_count counts the comments that still stand (a deleted
+	// comment is retained but no longer part of the conversation, which is
+	// what the list renders), and last_comment_at is the newest one's time —
+	// NULL for a thread whose opening comment was deleted.
+	ListDiscussionThreads(ctx context.Context, arg ListDiscussionThreadsParams) ([]ListDiscussionThreadsRow, error)
 	// Every assertion against one target version, oldest first. Rows are
 	// returned unfiltered by visibility: this is the owning project's read.
 	ListEvidenceAssertionsForTarget(ctx context.Context, objectVersionID pgtype.UUID) ([]EvidenceAssertion, error)
@@ -1473,6 +1521,13 @@ type Querier interface {
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
 	MarkBlobIntegrity(ctx context.Context, arg MarkBlobIntegrityParams) error
 	MarkOutboxEventPublished(ctx context.Context, id pgtype.UUID) error
+	// The per-project issue number allocator (T0811, the first caller of
+	// CreateIssue). Same shape as the PR store's own allocation: the
+	// INSERT ... SELECT pair runs inside one transaction that has already
+	// row-locked the project row (GetProjectByIDForUpdate), so MAX(number)+1
+	// cannot race a concurrent create and issues(project_id, number) is never
+	// violated. Numbers start at 1 for every project.
+	NextIssueNumber(ctx context.Context, projectID pgtype.UUID) (int64, error)
 	// The publish command's insert (T0805). This query had no producer before
 	// it — knowledge_publications has had no writer since migration 00010 —
 	// so extending it with the pid column (migration 00083) is not a change
@@ -1751,6 +1806,11 @@ type Querier interface {
 	// merged_at consistency itself; this CAS is the application-side
 	// serialization on top.
 	SetPullRequestState(ctx context.Context, arg SetPullRequestStateParams) (PullRequest, error)
+	// The delete surface's only write: a tombstone (when, by whom), never a
+	// DELETE. The `deleted_at IS NULL` predicate is the compare-and-swap — a
+	// second delete of the same comment matches nothing and is reported as
+	// not-found rather than overwriting the first tombstone's author.
+	SoftDeleteDiscussionComment(ctx context.Context, arg SoftDeleteDiscussionCommentParams) (DiscussionComment, error)
 	// UpdateBranchBaseState is the branch head compare-and-swap behind
 	// CommitState (T0204): the head pointer advances to the new state only
 	// while it still equals the base the commit was built on, so the branch

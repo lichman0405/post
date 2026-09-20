@@ -101,6 +101,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/lichman0405/post/cmd/api/authhttp"
+	"github.com/lichman0405/post/cmd/api/discussionhttp"
 	"github.com/lichman0405/post/cmd/api/evidencehttp"
 	"github.com/lichman0405/post/cmd/api/knowledgehttp"
 	"github.com/lichman0405/post/cmd/api/orgshttp"
@@ -109,6 +110,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
+	"github.com/lichman0405/post/internal/application/discussions"
 	"github.com/lichman0405/post/internal/application/evidencegraph"
 	"github.com/lichman0405/post/internal/application/knowledgepublish"
 	"github.com/lichman0405/post/internal/application/rsg"
@@ -272,6 +274,23 @@ func newKnowledgeWorldFor(t *testing.T, ctx context.Context, taskID string) *kno
 		Service:    svc,
 		Provenance: provenanceStore,
 		Evidence:   evidenceGraphSvc,
+	}).Register(mux)
+	// The discussion surface (T0811), composed the way cmd/api/main.go
+	// composes it: the discussion command over the SAME project service, the
+	// SAME RSG service the two state-committing promotions run and the SAME
+	// fork gate the RSG write path resolves its conditional cell with. One
+	// wiring, so a discussion test cannot pass against a world production
+	// does not build.
+	discussionhttp.New(discussionhttp.Deps{
+		Command: discussions.NewCommand(discussions.Deps{
+			Projects:   projectAPI.Service(),
+			Threads:    persistence.NewDiscussionStore(pool),
+			Promotions: persistence.NewDiscussionStore(pool),
+			Hypotheses: svc,
+			Evidence:   svc,
+			Authz:      authz.NewMatrixEngine(),
+			ForkGate:   persistence.NewForkStore(pool),
+		}),
 	}).Register(mux)
 
 	ts := httptest.NewServer(authAPI.Guard(mux))

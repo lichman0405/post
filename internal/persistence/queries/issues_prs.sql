@@ -11,6 +11,15 @@ RETURNING *;
 SELECT * FROM issues
 WHERE project_id = @project_id AND number = @number;
 
+-- name: NextIssueNumber :one
+-- The per-project issue number allocator (T0811, the first caller of
+-- CreateIssue). Same shape as the PR store's own allocation: the
+-- INSERT ... SELECT pair runs inside one transaction that has already
+-- row-locked the project row (GetProjectByIDForUpdate), so MAX(number)+1
+-- cannot race a concurrent create and issues(project_id, number) is never
+-- violated. Numbers start at 1 for every project.
+SELECT (COALESCE(MAX(number), 0) + 1)::bigint AS number FROM issues WHERE project_id = @project_id;
+
 -- name: CreatePullRequest :one
 -- creation_key is the creation request's Idempotency-Key (migration 00089):
 -- empty when the caller sent none, and UNIQUE per project when it did not.

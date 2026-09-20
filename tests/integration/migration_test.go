@@ -1125,6 +1125,53 @@ var canonicalTables = map[string]tableExp{
 			fk("fork_branch_id", "branches", "RESTRICT"),
 		},
 	},
+	// 00104 (T0811): discussion threads — a conversation attached to a
+	// project, a published knowledge object or a research pull request.
+	// Note what this table does NOT have: no version column, no branch, no
+	// state pointer. A discussion is a member row in its own right, not a
+	// scientific version, which is why nothing here references
+	// scientific_object_versions or state_commits. target_id is TEXT
+	// because the target speaks its own addressing scheme (project uuid,
+	// publication pid, pull request number); the project-target CHECK
+	// pins the one case where the text must agree with the project column.
+	"discussion_threads": {
+		cols:   []colExp{c("id", u, false, true), c("project_id", u, false, false), c("target_type", txt, false, false), c("target_id", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true)},
+		pk:     []string{"id"},
+		checks: []string{"target_type = ANY", "target_type <> 'project'", "btrim"},
+		fks:    []fkExp{fk("project_id", "projects", "RESTRICT"), fk("created_by", "users", "RESTRICT")},
+	},
+	// 00104 (T0811): comments. Withdrawal is a tombstone: deleted_at and
+	// deleted_by are nullable and the CHECK keeps them together, so "who
+	// withdrew it" can never be lost while the body stays (the row is
+	// never deleted — CLAUDE.md §9.8).
+	"discussion_comments": {
+		cols:   []colExp{c("id", u, false, true), c("thread_id", u, false, false), c("project_id", u, false, false), c("body", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true), c("deleted_at", ts, true, false), c("deleted_by", u, true, false)},
+		pk:     []string{"id"},
+		checks: []string{"btrim", "(deleted_at IS NULL) = (deleted_by IS NULL)"},
+		fks: []fkExp{
+			fk("thread_id", "discussion_threads", "RESTRICT"),
+			fk("project_id", "projects", "RESTRICT"),
+			fk("created_by", "users", "RESTRICT"),
+			fk("deleted_by", "users", "RESTRICT"),
+		},
+	},
+	// 00104 (T0811): the promotion provenance record. A promotion is a row
+	// here, NEVER a relation_versions edge: a relation's endpoints are
+	// scientific_object_versions, and a comment has no version. The
+	// promoted_ref CHECK pins the (kind:identifier) spelling so the record
+	// always names its target in one shape; the identifier half is free
+	// text because the three kinds address their objects differently.
+	"discussion_promotions": {
+		cols:   []colExp{c("id", u, false, true), c("project_id", u, false, false), c("thread_id", u, false, false), c("comment_id", u, false, false), c("promoted_kind", txt, false, false), c("promoted_ref", txt, false, false), c("promoted_by", u, false, false), c("promoted_at", ts, false, true)},
+		pk:     []string{"id"},
+		checks: []string{"promoted_kind = ANY", "SUBSTRING(promoted_ref"},
+		fks: []fkExp{
+			fk("project_id", "projects", "RESTRICT"),
+			fk("thread_id", "discussion_threads", "RESTRICT"),
+			fk("comment_id", "discussion_comments", "RESTRICT"),
+			fk("promoted_by", "users", "RESTRICT"),
+		},
+	},
 }
 
 // gooseTable is the only non-canonical table the runner may create.
@@ -1362,6 +1409,14 @@ var explicitIndexes = map[string][]string{
 	"credit_attribution_parties_statement":         {"statement_id", "role", "position"},
 	"credit_disputes_project_opened":               {"project_id", "opened_at DESC"},
 	"credit_disputes_target":                       {"target_ref", "opened_at DESC"},
+	// T0811 (00104): the two discussion reads that must not scan a table
+	// that grows without bound — a target's threads, newest first, and a
+	// thread's comments in order — plus the two provenance reads: the
+	// promotions of a promoted object and the promotions of a comment.
+	"discussion_threads_target_idx":     {"project_id", "target_type", "target_id", "created_at", "id"},
+	"discussion_comments_thread_idx":    {"thread_id", "created_at", "id"},
+	"discussion_promotions_ref_idx":     {"project_id", "promoted_kind", "promoted_ref", "promoted_at", "id"},
+	"discussion_promotions_comment_idx": {"comment_id", "promoted_at", "id"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded
@@ -1530,6 +1585,7 @@ func TestUpgradePath(t *testing.T) {
 		"project_template_instantiations",
 		"contribution_opportunities",
 		"project_milestones", "project_milestone_creations",
+		"discussion_threads", "discussion_comments", "discussion_promotions",
 		"asset_publish_creations",
 		"knowledge_publication_creations",
 		"asset_version_parties", "asset_rights_holder_events",
