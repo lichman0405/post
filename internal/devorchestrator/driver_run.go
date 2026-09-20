@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -461,6 +462,14 @@ func (o *DriveOpts) dispatch(st *DriverStatus, open []Decision) bool {
 		}
 	}
 	args := []string{"worker", "spawn", next}
+	// The driver's own --parallel IS the Worker pool it is driving. Passing it
+	// through is what makes `rddev drive --parallel N` mean anything: gateParallelism
+	// reads the limit from the spawn, not from the driver, so a driver that kept
+	// the value to itself would dispatch forever against a pool it cannot widen
+	// (specs/orchestrator/rddev-cli.yaml: parallel_workers.maximum = 4).
+	if o.Parallel > 0 {
+		args = append(args, "--parallel", strconv.Itoa(o.Parallel))
+	}
 	if o.WorkerTimeout > 0 {
 		args = append(args, "--timeout", o.WorkerTimeout.String())
 	}
