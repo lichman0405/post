@@ -14518,3 +14518,31 @@ internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql)
 **给以后**：这类"两边各自往同一个 map/slice 末尾追加"的冲突，机器判不了是因为**尾部锚点被另一边改掉了**；
 把新增项挪到一个**两边都未改动的稳定锚点**（本例是 T0804 块与 T0410 块之间），
 比强行做三方合并省事，也不改动任何一方的语义。挪之前先用 `git apply --check` 在主库上验，别直接跑 rebaseline。
+
+## L1-20260920-1 —— 驱动自动派工时不给 `--model`，工人一直在跑"环境默认"模型
+
+**事实**：20:00:44 驱动自动派出去的 T0810，实际跑的模型是 `deepseek-flash`，不是我要的 `claude-sonnet-5`。
+两处证据：`.rddev/workers/T0810/worker.log` 里 `"model":"deepseek-flash"` 出现 229 次
+（`claude-sonnet-5` 只有 1 次）；`.rddev/workers/T0810/registry.json` 的 `model` 字段**是空的**——
+空到 `rddev worker list` 都显示不出来。对照手动用 `--model claude-sonnet-5` 派的 T0815 / T0905，
+registry 里记得清清楚楚（`model=claude-sonnet-5`）。也就是说：**驱动派出去的工人跑在哪个模型上，
+既不取决于我的意图，也没有任何地方记下来过**。
+
+**根因**：`rddev drive` 自己没有 `--model` 参数；它派工的方式是把 `rddev worker spawn TASK`
+当子进程调起来（review 同理），于是 `SpawnOpts.Model` 为空字符串；
+而 `internal/devorchestrator/worker_guard.go` 只在 Model 非空时才追加 `--model`，
+claude CLI 就退回它自己的环境默认。我试过在驱动进程里导出 `ANTHROPIC_MODEL=claude-sonnet-5`——**不管用**，
+模型由 CLI 自己的配置决定，不看这个变量（这也解释了为什么那 1 次 `claude-sonnet-5` 不是它）。
+
+**处置（L1）**：`cmd/rddev/worker.go` 的 `buildSpawnOpts` 与 `cmd/rddev/review.go` 的 review spawn，
+在 `--model` 缺省时读环境变量 `RDDEV_WORKER_MODEL`。显式 `--model` 仍然优先，行为不变的部分照旧。
+以后驱动这样起：`RDDEV_WORKER_MODEL=claude-sonnet-5 bin/rddev drive --poll 60s --parallel 3`。
+评审工人走同一条路：评审判的是别人的代码，它自己跑在哪个模型上同样应当是我指定的，而不是环境碰巧给的——
+"独立评审"如果连模型都是随机的，它的独立性就是碰运气。
+
+**为什么是 L1**：这是"工具的参数从哪里取值"，不动产品语义、不动安全边界、不动权限、不动架构。
+`cmd/rddev/worker.go` 的用法说明里本来就写着 `--model` 的语义是"默认继承 Supervisor 环境（L1-20260912-5）"，
+这次只是把那句约定真正落到"驱动"这条路径上——此前它是**没落地**的，只有手工派工才吃到。
+
+**不追溯**：这个改动不改变已经跑起来的工人。T0810 仍在它的环境模型上跑完，我不拿"模型不对"当理由否定它——
+它的交付照样逐条过 G2；验不过时，拒绝重派的那一次才会吃到 `RDDEV_WORKER_MODEL`。

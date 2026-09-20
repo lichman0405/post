@@ -166,9 +166,13 @@ func buildSpawnOpts(vals map[string]string, taskID, repoRoot string, stderr io.W
 		DagPath:   stringOr(vals["--tasks-json"], devorchestrator.DefaultDAGPath),
 		StatePath: stringOr(vals["--state-json"], devorchestrator.DefaultStatePath),
 		TaskID:    taskID,
-		Model:     vals["--model"],
-		Effort:    vals["--effort"],
-		RunID:     vals["--run-id"],
+		// RDDEV_WORKER_MODEL is the dispatch-wide default the driver inherits:
+		// the driver has no --model flag of its own, so without this every
+		// Worker it spawns falls back to whatever the claude CLI's ambient
+		// default happens to be (L1-20260920-1).
+		Model:  stringOr(vals["--model"], os.Getenv("RDDEV_WORKER_MODEL")),
+		Effort: vals["--effort"],
+		RunID:  vals["--run-id"],
 		// Only rework/respawn read this; a first spawn has no rejection to
 		// explain, and Spawn itself never consults it.
 		ReasonFile: vals["--reason-file"],

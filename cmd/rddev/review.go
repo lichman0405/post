@@ -86,7 +86,10 @@ func runReview(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 			DagPath:   stringOr(vals["--tasks-json"], devorchestrator.DefaultDAGPath),
 			StatePath: stringOr(vals["--state-json"], devorchestrator.DefaultStatePath),
 			TaskID:    taskArg,
-			Model:     vals["--model"],
+			// Reviews are Workers too: the same dispatch-wide default applies,
+			// so an independent review never silently runs on a different
+			// ambient model than the work it judges (L1-20260920-1).
+			Model:     stringOr(vals["--model"], os.Getenv("RDDEV_WORKER_MODEL")),
 			RunID:     vals["--run-id"],
 			ClaudeBin: vals["--claude-bin"],
 		}
