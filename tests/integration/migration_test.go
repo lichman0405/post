@@ -137,9 +137,18 @@ var canonicalTables = map[string]tableExp{
 	"organizations": {
 		// deactivated_at is the T0103 addition (00017) — the only "delete"
 		// the domain offers; the canonical seed will be back-ported.
-		cols:    []colExp{c("id", u, false, true), c("slug", txt, false, false), c("name", txt, false, false), c("description", txt, true, false), c("created_at", ts, false, true), c("deactivated_at", ts, true, false)},
+		//
+		// attestation_attribution is the T0812 addition (00120): the
+		// organization's own standing answer to "may we be named on an
+		// attestation we issue", defaulting to 'anonymous' because being
+		// named is a widening and docs/12 §3 requires an explicit choice
+		// for private→public. The attestation records its own org_visibility
+		// as well; the projection names the organization only when BOTH say
+		// named (internal/application/attestations.Present).
+		cols:    []colExp{c("id", u, false, true), c("slug", txt, false, false), c("name", txt, false, false), c("description", txt, true, false), c("created_at", ts, false, true), c("deactivated_at", ts, true, false), c("attestation_attribution", txt, false, true)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"slug"}},
+		checks:  []string{"attestation_attribution = ANY"},
 	},
 	"organization_memberships": {
 		cols:   []colExp{c("organization_id", u, false, false), c("user_id", u, false, false), c("role", txt, false, false), c("affiliation_start", dt, true, false), c("affiliation_end", dt, true, false), c("verified", bl, false, true)},
@@ -1182,6 +1191,69 @@ var canonicalTables = map[string]tableExp{
 			fk("promoted_by", "users", "RESTRICT"),
 		},
 	},
+	// 00120 (T0812): the attestation — a minimal public statement a project
+	// makes about a PUBLIC version it did not author. The shape carries the
+	// requirement's "attestation != evidence" structurally: ONE target pin
+	// (evidence_assertions pins two), no evidence column, and no free text
+	// at all. The private side (attesting project, basis state, internal
+	// review) is cited by id and never projected.
+	//
+	// target_object_version_id and target_asset_version_id are both
+	// NULLABLE, and the exactly-one CHECK is what makes a row have a
+	// target: both NULL is a statement about nothing, both set is a
+	// statement about two things with no read able to say which one the
+	// result is about. The kind is DERIVED from which column is set, which
+	// is why there is no target_kind column to disagree with the row it
+	// points at.
+	//
+	// pid is the public identity a citation resolves (its uniqueness is the
+	// explicit index below, deliberately NOT a constraint), minted by the
+	// command and carrying the same column DEFAULT and 26-character
+	// Crockford base32 CHECK the asset (00064) and publication (00083) pids
+	// do.
+	//
+	// The three enumerated columns are the record's whole public half, and
+	// validation_result is three-valued ON PURPOSE — no weight, no score,
+	// nothing derivable (CLAUDE.md §9.13).
+	//
+	// The cross-table half of the private side — basis state belongs to the
+	// attesting project, the review judges exactly that state, the
+	// organization owns the project — cannot be a CHECK and is the
+	// attestations_private_side trigger (tests/integration/append_only_test.go).
+	"attestations": {
+		cols: []colExp{
+			c("id", u, false, true),
+			c("pid", txt, false, true),
+			c("target_object_version_id", u, true, false),
+			c("target_asset_version_id", u, true, false),
+			c("attesting_project_id", u, false, false),
+			c("attesting_organization_id", u, true, false),
+			c("basis_state_id", u, false, false),
+			c("internal_review_id", u, false, false),
+			c("validation_type", txt, false, false),
+			c("validation_result", txt, false, false),
+			c("org_visibility", txt, false, false),
+			c("created_by", u, false, false),
+			c("created_at", ts, false, true),
+		},
+		pk: []string{"id"},
+		checks: []string{
+			"validation_type = ANY",
+			"validation_result = ANY",
+			"org_visibility = ANY",
+			"pid ~",
+			"IS NULL) <> (target_asset_version_id IS NULL)",
+		},
+		fks: []fkExp{
+			fk("target_object_version_id", "scientific_object_versions", "RESTRICT"),
+			fk("target_asset_version_id", "research_asset_versions", "RESTRICT"),
+			fk("attesting_project_id", "projects", "RESTRICT"),
+			fk("attesting_organization_id", "organizations", "RESTRICT"),
+			fk("basis_state_id", "project_states", "RESTRICT"),
+			fk("internal_review_id", "reviews", "RESTRICT"),
+			fk("created_by", "users", "RESTRICT"),
+		},
+	},
 }
 
 // gooseTable is the only non-canonical table the runner may create.
@@ -1437,6 +1509,24 @@ var explicitIndexes = map[string][]string{
 	"discussion_comments_thread_idx":    {"thread_id", "created_at", "id"},
 	"discussion_promotions_ref_idx":     {"project_id", "promoted_kind", "promoted_ref", "promoted_at", "id"},
 	"discussion_promotions_comment_idx": {"comment_id", "promoted_at", "id"},
+	// T0812 (00120): the attestation's persistent identity — pid is what a
+	// citation resolves and what GET /api/v1/attestations/{attestationId} is
+	// addressed by, so two rows answering to one pid is the identity
+	// failing (the same reason the asset and publication pid indexes
+	// exist). Uniqueness is an index rather than a constraint because the
+	// create command mints the pid in Go.
+	"attestations_pid_uniq": {"pid", "UNIQUE"},
+	// T0812 (00120): the two natural target reads — "the attestations about
+	// this object version", newest first (the shape a public listing
+	// rides), and the same for an asset version. The keyset order is
+	// (created_at DESC, id DESC) so the read walks the index instead of
+	// sorting.
+	"attestations_target_object_idx": {"target_object_version_id", "created_at DESC", "id DESC"},
+	"attestations_target_asset_idx":  {"target_asset_version_id", "created_at DESC", "id DESC"},
+	// T0812 (00120): the attesting project's own read — a member listing
+	// what this project has attested. A stable forward walk, not a keyset
+	// page, which is why the order is ascending.
+	"attestations_attesting_project_idx": {"attesting_project_id", "created_at", "id"},
 	// T0905 (00110): the scientific ranking's review read. A review is
 	// recorded against the STATE a version was created in, so the fact
 	// read goes from a version to its state to the reviews on it — a
