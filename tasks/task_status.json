@@ -10822,10 +10822,10 @@
       ]
     },
     "T1205": {
-      "status": "running",
+      "status": "rejected",
       "started_at": "2026-09-21T23:13:33Z",
       "worker_run_id": "run-22fc1efdc63a15ea",
-      "rejection_reason": "# T1205 review 结论：request_changes\n\n仪器本身诚实且核心逻辑正确：独立 rebuilt `tests/cmd/contractgate` 后 `-check-inventory` pass；192 个 /api/v1 字面值、153 个注册型调用、134 条 inventory 行均核对无误；98 条未记录路由都有 suggest+reason；probe 也验证 exemption/citation 机制工作。\n\n但有一个 **blocking** 问题：\n\n- `tests/contract/inventory.go:131` 产生 **NEW staticcheck finding S1016**：`should convert e (type Exemption) to SuggestedExemption instead of using struct literal`。\n- `make staticcheck` 是 CI `go` job 的第 3 步，也是每个任务 G2 要重跑的 job—— merge 会红 T1205 自己的 G4 和所有在飞工人的 G2。\n- RESULT.json 里声称跑过 CI 的 `go` job 且没有 FAIL，但实际没有跑 fmt/vet/staticcheck。\n\n**返工要求：**\n1. 修掉 S1016：把 `inv.Suggested = append(inv.Suggested, SuggestedExemption{...})` 改成 `inv.Suggested = append(inv.Suggested, SuggestedExemption(e))`（已验证可编译且 staticcheck 静默）。\n2. 重新跑 `make staticcheck`、`make check`、CI 的 `go` job，把真实结果写进 RESULT.json。\n3. （major）把 enumerator 的 advisory list 暴露给 reader/JSON 输出，避免 chi 风格未知 router 上的注册被静默吞掉；同时修正 RESULT 里「chi-style .Get/.Post 被识别」的措辞，因为 fixture 并未覆盖未知 receiver 的情况。\n4. （minor）修正 RESULT 里对 inventory reason 的引用，改为实际文本；统一 `-write-inventory`/`-check-inventory` 等路径是相对于 `-root` 还是 CWD。\n",
+      "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/supervisor/task-status-running-2026-09-22 *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
       "history": [
         {
           "from": "todo",
@@ -10860,6 +10860,13 @@
           "at": "2026-09-21T23:13:33Z",
           "run_id": "run-22fc1efdc63a15ea",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-21T23:24:23Z",
+          "run_id": "run-b739da3592bb9729",
+          "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/supervisor/task-status-running-2026-09-22 *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check"
         }
       ]
     },
@@ -10882,10 +10889,10 @@
       "merged_at": null
     },
     "T1208": {
-      "status": "running",
+      "status": "rejected",
       "started_at": "2026-09-21T23:21:38Z",
       "worker_run_id": "run-0e80eb227c40c2cd",
-      "rejection_reason": "# T1208 review 结论：request_changes\n\n验收逻辑本身已满足：独立重跑 `bash tests/acceptance/project-export-portability-e2e.sh` 得到 31 ok / 0 FAIL，四个 identifier class 两边一致、source fingerprint 字节相同、三处 tamper 都按位置拒绝、第二次导入被拒绝、mutation check 证明每处拒绝都 load-bearing；运行前后工作树无变化、无残留。\n\n但 **blocking**：新 package 让 `make staticcheck` 失败，而它是 CI `go` job 的第 3 步、G4 required job——当前交付无法绿 CI。\n\n`bash scripts/staticcheck.sh` 在 frozen tree 上报告 **3 条 NEW finding**，全部在 `tests/acceptance/portability/`，且都不在 baseline 里：\n- `git.go:161:6` func `commitTreeSHA` is unused (U1000)；其 doc 注释说「tree id 会 carried in the report」，实际无调用。\n- `git.go:349:17` func `(*gitea).deleteRepo` is unused (U1000)。\n- `import.go:462:10` error strings should not be capitalized (ST1005, \"Git commit differs: ...\")。\n\n**返工要求：**\n1. 删除 `commitTreeSHA` 和 `deleteRepo`（或把它们 wire 起来），并把错误字符串小写化。\n2. 重新跑 `make staticcheck` 并通过。\n3. 把 staticcheck 加入 RESULT.json 的测试列表（docs/67 的 G1 已把它与 go test、go vet 并列）。\n4. 重新跑完整 G1/G3 并把真实结果写进 RESULT.json。\n\n其余 minor/nit（import 侧 Git identifier 比较对象是自己、blob 集合两边定义不同、releases 只导一行、bundle ref 集单向校验、assemble 阶段 put=0、G3 job 未接线、MinIO/Gitea token 残留）见 review RESULT.json，本轮不阻塞但请顺手评估。\n",
+      "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/supervisor/task-status-running-2026-09-22 *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
       "history": [
         {
           "from": "todo",
@@ -10920,6 +10927,13 @@
           "at": "2026-09-21T23:21:38Z",
           "run_id": "run-0e80eb227c40c2cd",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-21T23:25:27Z",
+          "run_id": "run-89c8b2111c943727",
+          "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/supervisor/task-status-running-2026-09-22 *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check"
         }
       ]
     }
