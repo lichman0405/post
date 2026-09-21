@@ -1,0 +1,45 @@
+# specs/api/openapi-exemptions.yaml
+#
+# The exemption list for the contract gate (T1205).
+#
+# RULE THIS FILE EXISTS FOR
+#   Every route mounted under /api/v1 must be EITHER declared in specs/api/openapi.yaml
+#   OR listed here with a citation to a written decision.  A mounted route in neither place
+#   fails the gate.  A route listed here without a citation also fails: an exemption whose
+#   reason is "we did not get to it" is not an exemption, it is an undocumented endpoint
+#   wearing a hat.
+#
+# WHO MAY WRITE THIS FILE
+#   The Supervisor, and only the Supervisor (CLAUDE.md §8.1 — specs/** is Supervisor-only).
+#   The comparison tool READS it.  A Worker that writes this file fails its task: deciding
+#   which endpoints go undocumented is not a Worker-sized decision (see tasks/tasks.json
+#   T1205 acceptance criterion 4).
+#
+# PATH SPELLING — the one thing that must not be guessed
+#   Absolute, exactly as registered on the mux, including the /api/v1 prefix, with wildcard
+#   names as written in Go.  Examples:
+#       /api/v1/assets
+#       /api/v1/projects/{projectId}/assets:derive
+#       /api/v1/projects/{projectId}/pull-requests/{number...}      <- a catch-all, see below
+#   specs/api/openapi.yaml spells its paths RELATIVE to servers.url (/api/v1).  The tool
+#   joins the two before comparing.  Never mix the spellings in this file.
+#
+# WHAT DOES *NOT* BELONG HERE
+#   Verb-suffix catch-alls.  Patterns like POST /api/v1/search/{rest...} exist only because
+#   Go's ServeMux rejects `{id}:verb` as a pattern; the handler splits the suffix.  They
+#   SERVE contract entries (e.g. /search/{searchId}:start-project) and must be resolved by
+#   the tool against the contract, not parked here.  Parking them here would hide a real
+#   registered endpoint behind a shape the contract cannot express.
+
+version: 1
+
+# Each entry:
+#   method    — the HTTP method as registered (GET/POST/PUT/PATCH/DELETE, or ANY for a
+#               pattern registered with no method, which matches every method)
+#   path      — absolute, as above
+#   decision  — the written decision this rests on: an ADR path (docs/adr/NNNN-*.md), a doc
+#               section (docs/NN_*.md §N), or a decisions.md entry (tasks/decisions.md ㉚).
+#               A citation that does not resolve to real text is worse than no citation.
+#   reason    — one line on what the route is and why it is exempt rather than contracted.
+#   follow_up — optional: the task or milestone that is expected to contract it.
+exemptions: []
