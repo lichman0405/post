@@ -16030,3 +16030,80 @@ T0706 我合的不是 `origin/main`，是 **T0610 的 tip（a010d09）**——�
 **它是本地提交，没推。** 若 T0610 的复核在最后一刻要求返工，这一格要重做——
 我认这个风险，因为 T0610 已经在上一轮评审里过了，而且叠上去的只是同一族机械动作。
 **但这是判断，不是规则**：换成一笔没评过的任务时，不要叠。
+
+## ⑮ T0610 独立复核：approve、8 条全部非阻断，但第 1 条是产品面的**真空白**（2026-09-21）
+
+T0610 在合并后的树上重开了一次独立复核（verdict 绑代码身份：合成把 HEAD 从 5f052e1 挪到
+a010d09，上一轮的 verdict 因此作废）。结论 `approve`，8 条 finding 全部 minor/nit。
+
+### 第 1 条我自己复核过，它是真的，而且它不是「小」
+
+评审的原话：**reopen 命令在任何一个部署出去的二进制里都够不到。**
+
+我核了树：
+
+```
+grep -rn 'reopens\.New\|reopens\.Service{' cmd internal   -> 零命中（测试之外）
+grep -rn 'application/reopens'（非测试）                  -> 只有 internal/persistence/scientific_object_reopen.go:10
+```
+
+也就是说，`internal/application/reopens/service.go`（979 行，带幂等、审计、事件、权限）
+**没有任何生产构造点**。生产里用到的只是这个包被 `merge.Deps.Reopens` 消费的那一半——
+`ReopenReader`，读一条 reopen 记录。**写的那一半（发起 reopen 提案）没有入口。**
+
+这不是工人偷懒：任务书自己写着「不给 `specs/api/**`：reopen 的契约路由需要在裁定之后确认
+（今天 `openapi.yaml` 里 reopen 零命中）——若裁定要求新增路由，标 blocked 回来报告，
+不要自己往契约里加路径」。
+
+**但裁定（形状 A）恰恰要求有路由**：`reopen_main_object,deny,deny,deny,deny,via_pr,via_pr,proposal_only`
+里的 `via_pr` 就是「maintainer/owner **只能经 PR**」——没有入口，就没有 PR。
+按任务书那句话，工人本应标 `blocked` 回来；它选择了把命令实现完、只接到 merge 那一侧。
+
+**我不把它当返工理由**，两个原因：一是它实现的东西本身是对的（AC-1 的「PR → merge」路径
+在测试里走的是真服务），二是**缺的那一半是一个契约决策**——往公开 API 里加一条 reopen 路由，
+属于 L2/L3，不是工人能自己定的（`specs/api/**` 本来就被禁）。
+
+**处置**：记在这里，迁移链走完后**立一张任务**收「reopen 的入口路由 + 契约路径」。
+在它落地之前，T0610 交付的是**一个完整的、被真实测试驱动过的领域能力，没有对外开关**。
+
+### 其余七条（全非阻断，逐条记下来，`.rddev/` 不入库、不记就丢）
+
+| # | 级别 | 位置 | 内容 |
+|---|---|---|---|
+| 2 | minor | `infra/migrations/00123_…sql:1` | 迁移与收窄文里「存储层不需要新迁移」一句字面矛盾；任务书自己的例外条款允许（T0602 元数据形状要求时照做） |
+| 3 | minor | `internal/application/reopens/service.go:371` | `openProposal` 因**非** `ErrIdempotencyKeyInUse` 失败时，回退的 `replayIfRecorded` 会读到自己刚提交的那一行，返回 201 `Replayed=true`、`PullRequestNumber=0` |
+| 4 | minor | `specs/SPEC_VERSION.json:3` | RESULT 引的摘要（`e2e2839829a80b51`、76 个迁移）比复核的树**旧一代**（复核树是 `830674ca90c2f468`、78 个迁移）——rebaseline/合成把派生文件推进了一代，RESULT 的引用没跟着改 |
+| 5 | nit | `internal/authz/action.go:39` | 注释说 reopen 的是 `lifecycle='reopened'` 的对象；命令实际要求 `aborted`（`service.go:303` 拒绝包括 `reopened` 在内的一切其他状态） |
+| 6 | nit | `internal/application/reopens/service.go:212` | 步骤序注释称「第 4 步先于第 5 步」，实际 `GetObject`（:236）在 `GetVersionByReopenRequestKey`（:250）之前 |
+| 7 | nit | `.rddev/workers/T0610/RESULT.json:1084` | 非测试行号引用在 rebaseline 后没有重新推导（AC-8 引 `main.go:1084`，复核树是 `:1165`） |
+| 8 | nit | `tasks/tests.json:1671` | 账本里写的是「T0610's Worker (G1 local gate) ran …」，而 `scripts/record_test_run.py` 硬编码的是「Supervisor ran …」形式；RESULT 解释了替换 |
+
+第 4、7 两条是同一族：**rebaseline/合成动了树之后，RESULT 里的引用没有跟着重算**。
+它们不改行为，但按「证据里说的话必须是真的」这条规矩，属于要在后续任务里清掉的账——
+第 5、6 两条是注释里的假事实，尤其第 5 条那句把一个 fail-closed 的前置条件说反了方向。
+
+### 顺带：评审点名了一处我没有主动补的 G4
+
+评审的话：**「完整集成套件与单元套件最后一次跑是工人在合并前的树上跑的。
+G4 自己在合并后的树上重跑，才是关上这个缺口的检查。」**
+
+缺口是真的，我补了：合并后的树上跑了 `go test ./...`（除 integration）+ 定向集成，
+评审结束后又补跑了**完整** `go test ./tests/integration/...`。这三条都在下面。
+**这是「合并不是终点、合成是一次代码变更」的同一个教训**——上一轮 G1/G2 的绿，
+是对另一棵树的绿。
+
+### 附带查证：剩下的任务里，谁还可能带迁移号
+
+§8.1 说迁移号由 Supervisor 在派工时分配，但**实际做法是工人按「基线 tip 的下一个号」自己取的**
+（`tasks/packages/T0610.json`、T0706、T0708 的包里都**没有**迁移号，
+`tasks/tasks.json` 里的 `migration_number` 字段在这几笔上都是 `0`=无迁移）。
+这条记下来是因为它有一个必须知道的后果：
+
+**号是按派工顺序发的，而合并必须升序。** 派得早、落在旧基线上的任务会取到一个**小的**号；
+它要是晚于一个取了**大的**号的任务完成，合并闸门就会拒绝它，它得等——这就是 §⑫ 那条链
+串行的另一面。
+
+查了剩下 12 笔的 `allowed_scope`，**只有两笔能带迁移**：`T0908`（12 条 scope）与 `T1108`（10 条）。
+两笔都排在链之后派工，届时 main 的 tip 是 00128 之后，各自取到的号自然更大、也仍然升序。
+**当前这支队列里没有会插队的小号。** 但下一次派工时仍要**先看 scope 里有没有 `infra/migrations/**`，
+再看它会不会先于更大的号完成**——今天 T0907/T1107 两笔不带迁移，是运气不是设计。
