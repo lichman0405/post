@@ -11,6 +11,67 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const insertSearchRecord = `-- name: InsertSearchRecord :one
+
+INSERT INTO search_records (
+    actor_id, query, filters, plan, signals, selected_refs, citations, answer
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+)
+RETURNING id, created_at
+`
+
+type InsertSearchRecordParams struct {
+	ActorID      pgtype.UUID `json:"actor_id"`
+	Query        string      `json:"query"`
+	Filters      []byte      `json:"filters"`
+	Plan         []byte      `json:"plan"`
+	Signals      []byte      `json:"signals"`
+	SelectedRefs []string    `json:"selected_refs"`
+	Citations    []string    `json:"citations"`
+	Answer       []byte      `json:"answer"`
+}
+
+type InsertSearchRecordRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// ---------------------------------------------------------------------------
+// The search answer record (T0906, migration 00121)
+//
+// One row per answered search, written once by the search API. What it is for
+// and what it deliberately is not (a cache) is the migration's header; what
+// belongs here is the write path's own rule.
+//
+// Every column is passed as a value the caller already produced, and the
+// INSERT does not compute anything. That is deliberate: the row must record
+// the search that RAN. The citations are the answer's own citation list, the
+// selected refs are the retrieval's ranked refs, and a query that derived
+// either one would be a second producer of the invariant — the generator's
+// guard and the table's CHECK (citations <@ selected_refs) already refuse an
+// ungrounded citation, and a third refusal written in SQL here could only
+// disagree with them.
+//
+// There is no UPDATE and no DELETE: docs/22 §8 saves the record as evidence
+// of what was answered, and CLAUDE.md §9.8's "nothing disappears" applies to
+// an answer that was published to a reader as much as to a scientific object.
+func (q *Queries) InsertSearchRecord(ctx context.Context, arg InsertSearchRecordParams) (InsertSearchRecordRow, error) {
+	row := q.db.QueryRow(ctx, insertSearchRecord,
+		arg.ActorID,
+		arg.Query,
+		arg.Filters,
+		arg.Plan,
+		arg.Signals,
+		arg.SelectedRefs,
+		arg.Citations,
+		arg.Answer,
+	)
+	var i InsertSearchRecordRow
+	err := row.Scan(&i.ID, &i.CreatedAt)
+	return i, err
+}
+
 const listScopeAdjacentRelationVersions = `-- name: ListScopeAdjacentRelationVersions :many
 SELECT DISTINCT ON (rv.relation_id)
   rv.relation_id,

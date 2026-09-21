@@ -1,0 +1,53 @@
+{
+  "name": "no-sources",
+  "note": "A search that returned nothing. The provider is not called at all — there is no vocabulary to answer from — and the fallback reason is the search's rather than the deployment's, even with no provider configured.",
+  "query": "Which MOF materials show CO2 uptake above 3 mmol/g at 298 K, and has that been reproduced?",
+  "signals": [
+    {
+      "signal": "full_text",
+      "ran": true,
+      "hits": 3
+    },
+    {
+      "signal": "vector",
+      "skipped": "no_embedder"
+    },
+    {
+      "signal": "facets",
+      "skipped": "no_facets"
+    },
+    {
+      "signal": "graph",
+      "ran": true,
+      "hits": 2
+    }
+  ],
+  "provider": {
+    "absent": true
+  },
+  "expected_answer": {
+    "answer_version": "1",
+    "status": "fallback",
+    "reason": "no_sources",
+    "query": "Which MOF materials show CO2 uptake above 3 mmol/g at 298 K, and has that been reproduced?",
+    "answer_view": false,
+    "summary": "",
+    "citations": [],
+    "limitations": [
+      {
+        "text": "the search returned no source, so there is nothing a written answer could cite",
+        "origin": "platform"
+      },
+      {
+        "text": "the vector signal did not run: no embedder is configured, so the question could not be embedded and no stored vector could be compared against it",
+        "origin": "platform"
+      },
+      {
+        "text": "the facet signal did not run: the question carried no structured filter, and the facet signal without one would be the newest rows of the index rather than a match",
+        "origin": "platform"
+      }
+    ],
+    "conflicts": [],
+    "sources": []
+  }
+}

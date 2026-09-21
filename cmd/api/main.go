@@ -73,6 +73,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/reviewhttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/cmd/api/schemaprofileshttp"
+	"github.com/lichman0405/post/cmd/api/searchhttp"
 	"github.com/lichman0405/post/cmd/api/subscriptionshttp"
 	"github.com/lichman0405/post/cmd/api/templateshttp"
 	"github.com/lichman0405/post/cmd/api/validationhttp"
@@ -117,6 +118,9 @@ import (
 	"github.com/lichman0405/post/internal/rsg/integrity"
 	"github.com/lichman0405/post/internal/rsg/schemareg"
 	rsgvalidation "github.com/lichman0405/post/internal/rsg/validation"
+	"github.com/lichman0405/post/internal/search/answer"
+	"github.com/lichman0405/post/internal/search/ranking"
+	"github.com/lichman0405/post/internal/search/retrieval"
 	"github.com/lichman0405/post/internal/version"
 	"github.com/lichman0405/post/internal/worker"
 )
@@ -1133,6 +1137,64 @@ func run(args []string) int {
 	})
 	abortAPI := aborthttp.New(aborthttp.Deps{Command: abortSvc})
 	abortAPI.Register(v1)
+	// Evidence-backed search (T0906): POST /api/v1/search runs the whole
+	// pipeline — resolve the actor's scope, plan, retrieve, rank, answer —
+	// and records the search (query plan, selected refs, citations) before
+	// it answers (docs/22 §8; the record is what /search/{searchId}:start-project
+	// addresses later).
+	//
+	// Two steps are deliberately left unwired, and both absences are the
+	// supported state the search packages document rather than a gap:
+	//
+	//   * the PLANNER has no provider. planner.New refuses a nil provider,
+	//     so no planner is constructed at all: planning is skipped, the
+	//     retrieval runs on the question alone, and the record's plan column
+	//     is null — which says "this deployment planned nothing", not "the
+	//     plan failed". A provider adapter is what a deployment that has
+	//     answered "may a question leave the platform" would add.
+	//   * the EMBEDDER is nil, so the vector signal does not run and the
+	//     vector half of the corpus is not compared. The retrieval REPORTS
+	//     this (SignalReport.Skipped = no_embedder) and the answer's
+	//     limitations carry it, because "the vector signal did not run" and
+	//     "no stored vector matched" are different statements about the
+	//     corpus and only one of them is true here.
+	//
+	// The answer generator is built with no provider for the same reason, and
+	// that is a state it accepts: an answer model that is absent costs the
+	// written summary, never the structured result underneath it.
+	retrievalStore, err := retrieval.NewSQLStore(pool)
+	if err != nil {
+		slog.Error("post-api: retrieval store setup failed", "error", err)
+		return exitRuntime
+	}
+	rankingStore, err := ranking.NewSQLStore(pool)
+	if err != nil {
+		slog.Error("post-api: ranking store setup failed", "error", err)
+		return exitRuntime
+	}
+	searcher, err := retrieval.NewRetriever(retrievalStore, nil)
+	if err != nil {
+		slog.Error("post-api: retriever setup failed", "error", err)
+		return exitRuntime
+	}
+	ranker, err := ranking.NewRanker(rankingStore)
+	if err != nil {
+		slog.Error("post-api: ranker setup failed", "error", err)
+		return exitRuntime
+	}
+	answerer, err := answer.New(answer.Deps{Logger: logger})
+	if err != nil {
+		slog.Error("post-api: answer generator setup failed", "error", err)
+		return exitRuntime
+	}
+	searchAPI := searchhttp.New(searchhttp.Deps{
+		Scope:     persistence.NewProjectStore(pool),
+		Retriever: searcher,
+		Ranker:    ranker,
+		Answerer:  answerer,
+		Records:   persistence.NewSearchRecordStore(pool),
+	})
+	searchAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	srv := &http.Server{

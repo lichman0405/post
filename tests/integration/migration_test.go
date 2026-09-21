@@ -1182,6 +1182,40 @@ var canonicalTables = map[string]tableExp{
 			fk("promoted_by", "users", "RESTRICT"),
 		},
 	},
+	// 00121 (T0906): the record of one search — docs/22 §8's "服务端保存
+	// query plan、selected entity ids、answer citations", and what
+	// /search/{searchId}:start-project addresses. Four of the ten columns
+	// are jsonb documents (the filters as sent, the plan, the retrieval's
+	// signal report, the answer itself) because none of them is a fact the
+	// database has a question about; the two that carry an invariant —
+	// the selected refs and the citations — are text[] so that the CHECK
+	// can state it. Two CHECKs: the question must not be blank, and
+	// citations ⊆ selected_refs. The second is the database's own refusal
+	// of an ungrounded citation, independent of the Go guard the answer
+	// package enforces (internal/search/answer/grounding.go).
+	//
+	// plan and filters are nullable; signals, selected_refs, citations and
+	// answer are not. "No plan" is a real state of a real search (a
+	// deployment with no provider plans nothing and still searches), while a
+	// search that ran always has a signal report and always has an answer
+	// document — even a fallback is a document.
+	"search_records": {
+		cols: []colExp{
+			c("id", u, false, true),
+			c("actor_id", u, false, false),
+			c("query", txt, false, false),
+			c("filters", jb, true, false),
+			c("plan", jb, true, false),
+			c("signals", jb, false, false),
+			arr("selected_refs", false, false),
+			arr("citations", false, false),
+			c("answer", jb, false, false),
+			c("created_at", ts, false, true),
+		},
+		pk:     []string{"id"},
+		checks: []string{"btrim", "<@"},
+		fks:    []fkExp{fk("actor_id", "users", "RESTRICT")},
+	},
 }
 
 // gooseTable is the only non-canonical table the runner may create.
@@ -1701,6 +1735,7 @@ func TestUpgradePath(t *testing.T) {
 		"knowledge_publication_creations",
 		"asset_version_parties", "asset_rights_holder_events",
 		"credit_attribution_statements", "credit_attribution_parties",
+		"search_records",
 	}
 	for _, name := range present {
 		if _, ok := intermediate.Tables[name]; !ok {
