@@ -179,6 +179,32 @@ test("sourceHref resolves the answer's own path and leaves nothing else", () => 
   assert.equal(sourceHref(API, "https://example.test/x"), "https://example.test/x");
 });
 
+test("sourceHref passes an absolute address through only when it is http(s)", () => {
+  // The return value lands in an anchor's href
+  // (app/(main)/search/search-answer.tsx: sourceHref(...) -> <a href>). A
+  // scheme that runs code when followed must therefore become "no address"
+  // — the empty string the caller already renders as text — and never a
+  // link. Each scheme is asserted on its own line on purpose: one combined
+  // assertion would go green as soon as the first of them was refused.
+  assert.equal(sourceHref(API, "javascript:alert(1)"), "");
+  assert.equal(sourceHref(API, "data:text/html,<script>alert(1)</script>"), "");
+  assert.equal(sourceHref(API, "vbscript:MsgBox(1)"), "");
+  // The scheme test is case-insensitive, so the allowlist has to be too.
+  assert.equal(sourceHref(API, "JaVaScRiPt:alert(1)"), "");
+  // The two schemes this app does serve are still handed back untouched —
+  // and the allowlist for them is case-insensitive in its own right, not
+  // only the scheme detector above.
+  assert.equal(sourceHref(API, "https://example.org/x"), "https://example.org/x");
+  assert.equal(sourceHref(API, "http://example.org/x"), "http://example.org/x");
+  assert.equal(sourceHref(API, "HTTPS://example.org/x"), "HTTPS://example.org/x");
+  // A path with no scheme at all is still an API path and still gets the
+  // origin; this function adds no separator, so the result is the literal
+  // concatenation (docs: "it adds no path segment").
+  assert.equal(sourceHref(API, "objects/1"), `${API}objects/1`);
+  // Whitespace-only is still "no address" — the empty branch above it.
+  assert.equal(sourceHref(API, "   "), "");
+});
+
 test("citedSources is the subset the answer marked, not a re-recipe", () => {
   const body = answerBody({
     sources: [
