@@ -17002,3 +17002,43 @@ T1107 这一轮就是这么丢的（复核已 approve、G2 已过，卡在一条
    （例如让 handler hijack 连接后立即关闭：端口整场测试都活着，没有取号竞态），并给出「能红」的自证。
 3. 修完之前，任何人看到 `TestDeliveryTryClassification` 红在 `transport_error:_no_code` 上，
    先按本条核对失败消息里是不是带着 `http status 302`——带着就是这条 flake，不是被测代码的问题。
+
+## ㉖ 把 T1205 从 T1202 后面解开：它等的那条依赖在事实里不存在（2026-09-21）
+
+**做了什么**：`tasks/tasks.json` 里 T1205 的 `dependencies` 由 `["T1202"]` 改成
+`["T0101","T0104","T0203","T0205","T0207","T0208"]`——也就是**它自己那三条 G3 门点名要断言的
+任务**（`auth-real-services` / `rsg-real-services` / `gitea-real-services` 的 `requires_tasks` 并集），
+六笔全部已合并。
+
+**为什么可以**：T1205 的交付物是「**路由枚举器 + 契约比对器**」——把 `cmd/**` 与 `internal/**`
+里挂载的 `(方法, 路径模式)` 收齐，再与 `specs/api/openapi.yaml` 双向比对。所以它等的是
+**端点集合定稿**，不是某一笔任务的产物。逐条核过剩下的未合并任务：
+**只有 T0909 的范围碰得到 API 面**（`cmd/api/searchhttp/**`、
+`internal/application/researchcontext/**`、`internal/persistence/**`），而它改的是 confirm 的
+**失败路径**（状态写与记录的原子性、错误分类），**不动任何路径**；
+其余 T1202 / T1208 / T1103 / T1104 / T1105 / T1112 的范围里**一条 API 面的路径都没有**
+（T1202 只有 `tests/**` + `ops/**` + `examples/**`）。
+
+**第一次我改错了，而且是仓库自己把它挡下来的。** 我先把它改成 `[]`，`go test ./internal/devorchestrator`
+立刻红在 `TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt` 上，逐字：
+
+> task T1205 (P12) carries G3 job "rsg-real-services", which asserts T0203's work, but T0203 is not
+> among its dependencies ([]) — the gate is red by construction: the task can never be accepted,
+> however correct its work is, and the refusal will read like a real integration failure
+
+这条检查要的是**依赖的传递闭包**里含 G3 门点名的每一笔。**原来那笔 `T1202` 一直在替 T1205 扛着这份
+祖先关系**——T1202 的传递依赖里就有这六笔。也就是说 `T1202 → T1205` 这条边一直同时扛着两件事：
+「按相位排在后面」与「供上闸门要断言的祖先」。我解开它时把第二件也一起拆了，**是这条门告诉我
+那六笔得自己写上去**。改成一笔一笔写清楚，闭包重新成立，整包转绿。
+
+**不这么做的代价**：T1205 等的不是「T1202 做完」，而是「T1202 **合并**」——中间还隔着一轮
+复核 + 验收 + CI（今天实测一轮 45–75 分钟），而这一段在关键链上是纯串行：
+`T1202 → T1205 → T1206 → T1207`。解开之后 T1205 与 T1202 并行。
+
+**风险，以及它为什么小**：唯一会让 T1205 的清单作废的是「它跑完之后又有任务增删端点」。
+按逐条核过的结论，剩下的任务里不会发生这件事；而且 T1205 交付的**比对器是常驻的**
+（它自己就是一条门），真出现漂移它会在门重新跑时自己红，而不是悄悄放过。
+
+**没有放宽任何东西**：T1205 的验收契约（枚举器变异自证、双向红绿实测、清单可核对、
+`specs/**` 一个字节不动、MCP 对账）**一字未改**，它带的三条 G3 门也**一条没动**——
+改的只是它**等谁**、**什么时候开始跑**。

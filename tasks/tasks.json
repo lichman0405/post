@@ -7605,7 +7605,12 @@
       "title": "OpenAPI/MCP/Schema 文档最终同步",
       "v1_required": true,
       "dependencies": [
-        "T1202"
+        "T0101",
+        "T0104",
+        "T0203",
+        "T0205",
+        "T0207",
+        "T0208"
       ],
       "requirements": [
         "**任务书的验收是「无 undocumented public endpoint」。先把这句话变成一件可机械判定的事。** 现状（我核过，你可以复核）：`specs/api/openapi.yaml` 的 `paths` 是 36 条，而 `cmd/**` 与 `internal/**` 里挂载的 `/api/v1` 路由远多于此——**注意别用 grep 数**：注册形式至少有四种（`HandleFunc(\"POST /api/v1/…\")`、`Handle(\"…\")`、子路由 `v1.Handle(\"/api/v1/projects\", projectAPI.Routes())`、以及包内 `.Get/.Post/…`），我用正则数出来的数字不可信，**你要用一个能覆盖全部形式的枚举器**。",
