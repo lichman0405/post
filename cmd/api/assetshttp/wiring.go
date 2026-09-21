@@ -57,6 +57,12 @@ type Deps struct {
 	// Dependencies is the project-side dependency read (T0707). The
 	// production value is *persistence.ProjectDependencyStore.
 	Dependencies DependencyReader
+	// Metadata is the asset metadata revision use case (T0706). The
+	// production value is *assetmetadata.Command, over the store that owns
+	// the revision transaction. It is required like the rest: a surface
+	// wired without its write port answers 500 on the one route it serves,
+	// which is a wiring bug rather than a degradation to answer around.
+	Metadata MetadataCommand
 }
 
 // New wires the handlers.
@@ -68,6 +74,7 @@ func New(deps Deps) *API {
 		pages:        deps.Pages,
 		members:      deps.Members,
 		dependencies: deps.Dependencies,
+		metadata:     deps.Metadata,
 	}}
 }
 
@@ -109,4 +116,13 @@ func (a *API) Register(v1 *http.ServeMux) {
 	// under the projects subtree the project surface owns, and it is more
 	// specific than that subtree's routes, so the two coexist.
 	v1.HandleFunc("GET /api/v1/projects/{projectId}/dependencies", a.handlers.handleProjectDependencies)
+	// The metadata revision (T0706). Not a contract path either, and the
+	// same decision: docs/11 §4 gives asset metadata its own revisable
+	// surface and the contract has no route for it yet, so it is mounted
+	// here. PATCH and GET on /api/v1/assets/{assetId} coexist because the
+	// method selects the pattern — the read is the public asset page
+	// (T0709), the write is this task's metadata revision, and they are
+	// the two halves of one address (assets.AssetAPIPath). See metadata.go
+	// for why the project id is a body field rather than a path segment.
+	v1.HandleFunc("PATCH /api/v1/assets/{assetId}", a.handlers.handleAssetMetadata)
 }

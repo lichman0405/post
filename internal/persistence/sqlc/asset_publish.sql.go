@@ -43,7 +43,7 @@ const createResearchAssetWithPID = `-- name: CreateResearchAssetWithPID :one
 
 INSERT INTO research_assets (asset_type, slug, title, origin_project_id, pid)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, asset_type, slug, title, origin_project_id, created_at, pid
+RETURNING id, asset_type, slug, title, origin_project_id, created_at, pid, description, keywords, contact, documentation, cover_blob_id
 `
 
 type CreateResearchAssetWithPIDParams struct {
@@ -93,6 +93,11 @@ func (q *Queries) CreateResearchAssetWithPID(ctx context.Context, arg CreateRese
 		&i.OriginProjectID,
 		&i.CreatedAt,
 		&i.Pid,
+		&i.Description,
+		&i.Keywords,
+		&i.Contact,
+		&i.Documentation,
+		&i.CoverBlobID,
 	)
 	return i, err
 }
@@ -178,7 +183,7 @@ func (q *Queries) GetPublishedAssetVersion(ctx context.Context, id pgtype.UUID) 
 }
 
 const getResearchAssetByPIDRow = `-- name: GetResearchAssetByPIDRow :one
-SELECT id, asset_type, slug, title, origin_project_id, created_at, pid FROM research_assets WHERE pid = $1
+SELECT id, asset_type, slug, title, origin_project_id, created_at, pid, description, keywords, contact, documentation, cover_blob_id FROM research_assets WHERE pid = $1
 `
 
 // The asset row behind a pid, in full. GetPreviewAssetByPID (the
@@ -196,6 +201,11 @@ func (q *Queries) GetResearchAssetByPIDRow(ctx context.Context, pid string) (Res
 		&i.OriginProjectID,
 		&i.CreatedAt,
 		&i.Pid,
+		&i.Description,
+		&i.Keywords,
+		&i.Contact,
+		&i.Documentation,
+		&i.CoverBlobID,
 	)
 	return i, err
 }

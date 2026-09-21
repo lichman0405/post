@@ -361,9 +361,17 @@ func ValidPID(pid assets.PID) bool { return assets.ValidPID(string(pid)) }
 // MaxSlugLen and MaxTitleLen bound the display fields of a newly created
 // asset. The columns are unbounded text; a publish is not the place to
 // store an essay, and a bounded refusal is one a client can act on.
+//
+// They are assets.SlugMaxLen and assets.TitleMaxLen, aliased rather than
+// restated: the metadata revision surface writes the same two columns
+// (T0706, docs/11 §4 makes title and slug revisable metadata), so a value
+// a publish would refuse to create must not be reachable through a
+// revision either, and two literals that had to agree would be two
+// answers waiting to drift. The bound lives in the domain package
+// beside the Asset type it describes.
 const (
-	MaxSlugLen  = 128
-	MaxTitleLen = 256
+	MaxSlugLen  = assets.SlugMaxLen
+	MaxTitleLen = assets.TitleMaxLen
 )
 
 // requirePublish authorizes the publish: resolve the actor's membership
