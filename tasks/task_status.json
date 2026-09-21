@@ -10157,10 +10157,11 @@
       ]
     },
     "T1109": {
-      "status": "verification",
-      "started_at": "2026-09-21T10:49:59Z",
-      "worker_run_id": "run-1231a33b9d62055b",
-      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T1109-3438266685.patch: exit status 1: error: patch failed: cmd/api/main.go:1300\n    error: cmd/api/main.go: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n",
+      "status": "accepted",
+      "started_at": "2026-09-21T21:34:35Z",
+      "worker_run_id": "run-bb8759413b65a825",
+      "accepted_by_supervisor_at": "2026-09-21T22:27:59Z",
+      "rejection_reason": "# T1109 rebaseline：main 上的 Makefile 变了，补丁贴不上\n\n当前 main 已经合并了 T1108（性能基线）和 T0909（confirm 原子化），`Makefile` 与 `internal/events/**`、`internal/gitprovider/**` 等文件都与你的分支基线不同。\n\n`rddev task accept` 的原话：\n\n    error: patch failed: Makefile:19\n\n这不是你的代码缺陷，是基线漂移。`rddev rebaseline` 会把你的分支推到当前 main，保留你手上的改动，然后你在新基线上重新跑完整验收并更新 RESULT。\n\n要求不变：生产级可观测性 / Dashboards；G1/G2/G3 通过；失败就写失败。\n",
       "history": [
         {
           "from": "todo",
@@ -10320,6 +10321,32 @@
           "at": "2026-09-21T11:16:54Z",
           "run_id": "run-2a817eb5c145f7c9",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T21:34:33Z",
+          "run_id": "run-f97662ec147883c5",
+          "reason": "# T1109 rebaseline：main 上的 Makefile 变了，补丁贴不上\n\n当前 main 已经合并了 T1108（性能基线）和 T0909（confirm 原子化），`Makefile` 与 `internal/events/**`、`internal/gitprovider/**` 等文件都与你的分支基线不同。\n\n`rddev task accept` 的原话：\n\n    error: patch failed: Makefile:19\n\n这不是你的代码缺陷，是基线漂移。`rddev rebaseline` 会把你的分支推到当前 main，保留你手上的改动，然后你在新基线上重新跑完整验收并更新 RESULT。\n\n要求不变：生产级可观测性 / Dashboards；G1/G2/G3 通过；失败就写失败。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T21:34:35Z",
+          "run_id": "run-bb8759413b65a825",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T21:37:42Z",
+          "run_id": "run-6c2e939738568d31"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-21T22:27:59Z",
+          "run_id": "run-6192139eba952252"
         }
       ]
     },
@@ -10481,8 +10508,9 @@
     },
     "T1112": {
       "status": "verification",
-      "started_at": "2026-09-21T10:50:00Z",
-      "worker_run_id": "run-973c8863bcff2b7d",
+      "started_at": "2026-09-21T21:36:05Z",
+      "worker_run_id": "run-37d2c7a3b3dd92bf",
+      "rejection_reason": "# T1112 rebaseline：Makefile 变了，补丁贴不上\n\n当前 main 已经合并了 T1108（性能基线）和 T0909（confirm 原子化），`Makefile` 的结构与你的分支基线不同。\n\n`rddev task accept` 的原话：\n\n    error: patch failed: Makefile:19\n\n这不是你浏览器测试接进 make 的代码有问题，是基线漂移。`rddev rebaseline` 会把你推到当前 main，保留你的改动，然后在新基线上重新验证。\n\n注意：PR #325 也刚合并了项目工作区的演示 UI，但那个改动不涉及 `tests/web-smoke/` 或 `Makefile` 里你碰的部分，应该不冲突。\n\n要求不变：浏览器测试套件接进 `make`，断言写错必须报错；G1/G2/G3 通过。\n",
       "history": [
         {
           "from": "todo",
@@ -10503,6 +10531,26 @@
           "at": "2026-09-21T11:11:29Z",
           "run_id": "run-4387b21f6b9ab9de",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T21:36:03Z",
+          "run_id": "run-5a5a4bcd7e4d8dc8",
+          "reason": "# T1112 rebaseline：Makefile 变了，补丁贴不上\n\n当前 main 已经合并了 T1108（性能基线）和 T0909（confirm 原子化），`Makefile` 的结构与你的分支基线不同。\n\n`rddev task accept` 的原话：\n\n    error: patch failed: Makefile:19\n\n这不是你浏览器测试接进 make 的代码有问题，是基线漂移。`rddev rebaseline` 会把你推到当前 main，保留你的改动，然后在新基线上重新验证。\n\n注意：PR #325 也刚合并了项目工作区的演示 UI，但那个改动不涉及 `tests/web-smoke/` 或 `Makefile` 里你碰的部分，应该不冲突。\n\n要求不变：浏览器测试套件接进 `make`，断言写错必须报错；G1/G2/G3 通过。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T21:36:05Z",
+          "run_id": "run-37d2c7a3b3dd92bf",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T21:37:42Z",
+          "run_id": "run-09a9b39c2035faed"
         }
       ]
     },
@@ -10605,9 +10653,11 @@
       ]
     },
     "T1202": {
-      "status": "rejected",
-      "started_at": "2026-09-21T10:11:21Z",
-      "worker_run_id": "run-88eac517e93279ec",
+      "status": "merged",
+      "started_at": "2026-09-21T21:11:21Z",
+      "worker_run_id": "run-e59b9874af3169c0",
+      "accepted_by_supervisor_at": "2026-09-21T21:35:06Z",
+      "merged_at": "2026-09-21T21:43:29Z",
       "rejection_reason": "collect rejected: residue: 1 process(es) the Worker started are still running: pid 284365 (/tmp/t1202/k/api) session 284356 group 284356. The Worker (pid 95601) has already exited — nothing owns these any more and nothing collects them on its own. Collect them with: kill -TERM -- -284356",
       "history": [
         {
@@ -10629,6 +10679,33 @@
           "at": "2026-09-21T10:57:17Z",
           "run_id": "run-f1dcb25a452b1a1e",
           "reason": "collect rejected: residue: 1 process(es) the Worker started are still running: pid 284365 (/tmp/t1202/k/api) session 284356 group 284356. The Worker (pid 95601) has already exited — nothing owns these any more and nothing collects them on its own. Collect them with: kill -TERM -- -284356"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T21:11:21Z",
+          "run_id": "run-e59b9874af3169c0",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T21:16:28Z",
+          "run_id": "run-ae1acd515446c163",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-21T21:35:06Z",
+          "run_id": "run-5ad8e95032ab2b67"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-21T21:43:29Z",
+          "run_id": "run-b87205d1fa6be1ab",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -10762,13 +10839,31 @@
       "merged_at": null
     },
     "T1208": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-21T21:56:45Z",
+      "worker_run_id": "run-6c6965584d96b40d",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-21T21:43:31Z",
+          "run_id": "run-a2d7fe1aa1ecc9c1"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-21T21:56:45Z",
+          "run_id": "run-6c6965584d96b40d",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T22:20:33Z",
+          "run_id": "run-9ca324a49ca8fbdd",
+          "reason": "collect: all checks passed"
+        }
+      ]
     }
   },
   "version": 2
