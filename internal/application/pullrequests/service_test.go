@@ -40,6 +40,15 @@ type fakeRepo struct {
 	getKey          string
 	getKeyOut       domain.PullRequest
 	getKeyErr       error
+
+	reviewProjectID string
+	reviewNumber    int64
+	reviewKey       string
+	reviewOut       domain.PullRequest
+	reviewErr       error
+	// reviewCalls counts the calls that REACHED the adapter, so a test can
+	// prove an invalid request was refused before any write was attempted.
+	reviewCalls int
 }
 
 func (f *fakeRepo) CreatePullRequest(_ context.Context, in CreatePullRequestParams) (domain.PullRequest, error) {
@@ -71,6 +80,19 @@ func (f *fakeRepo) SetPullRequestState(_ context.Context, projectID string, numb
 func (f *fakeRepo) RefreshProposedState(_ context.Context, projectID string, number int64) (domain.PullRequest, error) {
 	f.refreshProjectID, f.refreshNumber = projectID, number
 	return f.refreshOut, f.refreshErr
+}
+
+// RequestReview mirrors the adapter: the row it answers carries the state the
+// move landed on, and the Idempotency-Key the request arrived with is recorded
+// where a test can read it. It is a DIFFERENT call from SetPullRequestState
+// because the adapter's is too — the move and its audit row are one
+// transaction there, and an empty key is a valid one (the keyless internal
+// form), so nothing here refuses on the key: that bound is the command's.
+func (f *fakeRepo) RequestReview(_ context.Context, projectID string, number int64, idempotencyKey string) (domain.PullRequest, error) {
+	f.reviewCalls++
+	f.reviewProjectID, f.reviewNumber, f.reviewKey = projectID, number, idempotencyKey
+	f.reviewOut.State = domain.PullRequestStateReviewRequired
+	return f.reviewOut, f.reviewErr
 }
 
 func validCreateParams() CreatePullRequestParams {
@@ -270,6 +292,17 @@ func TestSetStateNamedFlows(t *testing.T) {
 	for name, want := range states {
 		repo.getOut.State = domain.PullRequestStateOpen
 		repo.setTo = ""
+		repo.reviewOut.State = ""
+		// got is the state the command drove, read from wherever that
+		// command's adapter call records it: SetPullRequestState for the
+		// named flows, RequestReview for the review move (a method of its
+		// own — the move and its audit row are one transaction there).
+		got := func() domain.PullRequestState {
+			if name == "review" {
+				return repo.reviewOut.State
+			}
+			return repo.setTo
+		}
 		var err error
 		switch name {
 		case "review":
@@ -282,8 +315,8 @@ func TestSetStateNamedFlows(t *testing.T) {
 			repo.getOut.State = domain.PullRequestStateMergeReady
 			_, err = svc.MarkMerged(ctx, "p", 1)
 		}
-		if err != nil || repo.setTo != want {
-			t.Errorf("%s: err=%v setTo=%s, want %s", name, err, repo.setTo, want)
+		if err != nil || got() != want {
+			t.Errorf("%s: err=%v target=%s, want %s", name, err, got(), want)
 		}
 	}
 	// MarkMerged from open is an illegal transition (merge_ready →
@@ -293,6 +326,76 @@ func TestSetStateNamedFlows(t *testing.T) {
 	if _, err := svc.MarkMerged(ctx, "p", 1); err == nil {
 		t.Fatal("MarkMerged from open succeeded, want TransitionError")
 	}
+}
+
+// TestRequestReviewKeyedForwardsTheContractKey is the command half of the
+// route's Idempotency-Key contract (specs/api/openapi.yaml,
+// components.parameters.IdempotencyKey: required, minLength 8 on
+// POST .../{prId}:request-review).
+//
+// Three shapes, and the third is the one that has to hold the line: the
+// keyless form is the internal caller's (a fixture, a projection, an operator
+// fixing a stuck proposal) and carries no key; a key the contract would accept
+// reaches the adapter VERBATIM, because the adapter is what records it on the
+// audit row; and a key below the bound is refused by the command, so no write
+// path can store a token too short to be a deliberate one — the same bound
+// the creation route enforces on its own key (migration 00089).
+func TestRequestReviewKeyedForwardsTheContractKey(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("the internal keyless form", func(t *testing.T) {
+		repo := &fakeRepo{reviewOut: domain.PullRequest{ID: "pr-1", Number: 7}}
+		svc := NewService(repo)
+		pr, err := svc.RequestReview(ctx, "p", 7)
+		if err != nil || pr.ID != "pr-1" {
+			t.Fatalf("RequestReview = %+v, %v", pr, err)
+		}
+		if repo.reviewCalls != 1 || repo.reviewKey != "" {
+			t.Fatalf("adapter got %d calls with key %q, want one call with no key", repo.reviewCalls, repo.reviewKey)
+		}
+	})
+
+	t.Run("an acceptable key reaches the adapter verbatim", func(t *testing.T) {
+		const key = "pr-review-00000001"
+		repo := &fakeRepo{reviewOut: domain.PullRequest{ID: "pr-1", Number: 7}}
+		svc := NewService(repo)
+		if _, err := svc.RequestReviewKeyed(ctx, "p", 7, key); err != nil {
+			t.Fatalf("RequestReviewKeyed: %v", err)
+		}
+		if repo.reviewKey != key {
+			t.Fatalf("adapter got key %q, want %q", repo.reviewKey, key)
+		}
+		if repo.reviewProjectID != "p" || repo.reviewNumber != 7 {
+			t.Fatalf("adapter got (%q, %d), want the request's", repo.reviewProjectID, repo.reviewNumber)
+		}
+	})
+
+	t.Run("a key below the contract's minLength never reaches the adapter", func(t *testing.T) {
+		repo := &fakeRepo{reviewOut: domain.PullRequest{ID: "pr-1", Number: 7}}
+		svc := NewService(repo)
+		short := make([]byte, MinCreationKeyLen-1)
+		for i := range short {
+			short[i] = 'k'
+		}
+		_, err := svc.RequestReviewKeyed(ctx, "p", 7, string(short))
+		if !errors.Is(err, ErrValidation) {
+			t.Fatalf("a %d-character key: err = %v, want ErrValidation", len(short), err)
+		}
+		if repo.reviewCalls != 0 {
+			t.Fatalf("the adapter was reached %d times with a key the contract refuses", repo.reviewCalls)
+		}
+	})
+
+	t.Run("a malformed address never reaches the adapter", func(t *testing.T) {
+		repo := &fakeRepo{}
+		svc := NewService(repo)
+		if _, err := svc.RequestReviewKeyed(ctx, "p", 0, "pr-review-00000001"); !errors.Is(err, ErrValidation) {
+			t.Fatalf("number 0: err = %v, want ErrValidation", err)
+		}
+		if repo.reviewCalls != 0 {
+			t.Fatalf("the adapter was reached %d times for a malformed address", repo.reviewCalls)
+		}
+	})
 }
 
 func TestRefreshProposedValidatesAndMaps(t *testing.T) {

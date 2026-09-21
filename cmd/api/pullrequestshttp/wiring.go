@@ -15,6 +15,12 @@ type Deps struct {
 	// REQUIRED: without it the create route fails closed (503) rather than
 	// opening proposals with no authorization at all.
 	Create PRCreator
+	// Review serves the request-review endpoint (the same forks application
+	// service, whose RequestReview resolves the open_pr cell for the move
+	// docs/43 names and drives the pull-request command). REQUIRED for that
+	// route: without it the route fails closed (503) rather than moving any
+	// state with no authorization at all.
+	Review RequestReviewer
 	// Checks serves the checks endpoint (the prchecks application
 	// service).
 	Checks CheckRunner
@@ -31,6 +37,7 @@ func New(deps Deps) *API {
 	return &API{handlers: &handlers{
 		prs:      deps.PullRequests,
 		create:   deps.Create,
+		review:   deps.Review,
 		checks:   deps.Checks,
 		diff:     deps.Diff,
 		projects: deps.Projects,
@@ -55,6 +62,13 @@ type API struct {
 // {number...}) because that pattern requires at least one more segment,
 // while this one stops at the collection — ServeMux picks the more specific
 // pattern for a longer path and this one for the bare collection.
+//
+// The collection has a THIRD write — POST .../{prId}:request-review (T0411) —
+// and it is deliberately not registered here: its verb lives inside the last
+// path segment, which ServeMux can only capture as a remainder wildcard, and
+// this prefix's one remainder owner is the merge surface. This package exports
+// the handler for it (RequestReviewHandler) and mergehttp dispatches the verb
+// to that handler; see requestreview.go for the whole of that reasoning.
 func (a *API) Register(v1 *http.ServeMux) {
 	v1.HandleFunc("GET /api/v1/projects/{projectId}/pull-requests", a.handlers.handleList)
 	v1.HandleFunc("POST /api/v1/projects/{projectId}/pull-requests", a.handlers.handleCreate)

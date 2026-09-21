@@ -23,6 +23,7 @@ import (
 type handlers struct {
 	prs      PullRequests
 	create   PRCreator
+	review   RequestReviewer
 	checks   CheckRunner
 	diff     DiffRunner
 	projects ProjectReader
