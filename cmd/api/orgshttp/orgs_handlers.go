@@ -31,16 +31,30 @@ type orgPayload struct {
 	Description   string     `json:"description"`
 	CreatedAt     time.Time  `json:"created_at"`
 	DeactivatedAt *time.Time `json:"deactivated_at"`
+	// AttestationAttribution is the organization's standing answer to "may
+	// this organization be named on an attestation it issues" (T0812,
+	// migration 00120). It is reported on the SINGLE-organization read and
+	// on the update that set it, and omitted from the directory list —
+	// hence omitempty: the list answers "which organizations are there",
+	// and this is a per-organization setting a caller reads when it opens
+	// one. The value itself is never empty (anonymous or named), so an
+	// absent field can only mean "not reported here".
+	AttestationAttribution string `json:"attestation_attribution,omitempty"`
 }
 
-func orgPayloadFromDomain(o domain.Organization) orgPayload {
+// orgPayloadFromDomain renders one organization. attribution is passed
+// separately because it is not a field of domain.Organization — the domain
+// type is not T0812's to widen — and is read through
+// orgs.Service.AttestationAttribution; the list passes "" (see the field).
+func orgPayloadFromDomain(o domain.Organization, attribution string) orgPayload {
 	return orgPayload{
-		ID:            o.ID,
-		Slug:          o.Slug,
-		Name:          o.Name,
-		Description:   o.Description,
-		CreatedAt:     o.CreatedAt,
-		DeactivatedAt: o.DeactivatedAt,
+		ID:                     o.ID,
+		Slug:                   o.Slug,
+		Name:                   o.Name,
+		Description:            o.Description,
+		CreatedAt:              o.CreatedAt,
+		DeactivatedAt:          o.DeactivatedAt,
+		AttestationAttribution: attribution,
 	}
 }
 
@@ -129,8 +143,12 @@ func (h *handlers) handleCreate(w http.ResponseWriter, r *http.Request) {
 		h.orgError(w, r, err)
 		return
 	}
+	// A new organization starts anonymous (the column's DEFAULT, migration
+	// 00120), and the response says so rather than leaving the caller to
+	// infer it from an absent field: being named is the widening, and the
+	// safe value is the one worth stating out loud.
 	authhttp.WriteJSON(w, http.StatusCreated, map[string]any{
-		"organization": orgPayloadFromDomain(org),
+		"organization": orgPayloadFromDomain(org, string(orgs.AttestationAttributionAnonymous)),
 		"membership":   membershipPayloadFromDomain(membership),
 	})
 }
@@ -148,7 +166,10 @@ func (h *handlers) handleList(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]orgPayload, 0, len(list))
 	for _, o := range list {
-		out = append(out, orgPayloadFromDomain(o))
+		// The directory list omits the attestation attribution: it is a
+		// per-organization setting, read when a caller opens one (see
+		// orgPayload).
+		out = append(out, orgPayloadFromDomain(o, ""))
 	}
 	authhttp.WriteJSON(w, http.StatusOK, map[string]any{"organizations": out})
 }
@@ -159,12 +180,18 @@ func (h *handlers) handleGet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	org, err := h.svc.Get(r.Context(), actor, r.PathValue("orgId"))
+	orgID := r.PathValue("orgId")
+	org, err := h.svc.Get(r.Context(), actor, orgID)
 	if err != nil {
 		h.orgError(w, r, err)
 		return
 	}
-	authhttp.WriteJSON(w, http.StatusOK, orgPayloadFromDomain(org))
+	attribution, err := h.svc.AttestationAttribution(r.Context(), actor, orgID)
+	if err != nil {
+		h.orgError(w, r, err)
+		return
+	}
+	authhttp.WriteJSON(w, http.StatusOK, orgPayloadFromDomain(org, attribution))
 }
 
 type updateOrgRequest struct {
@@ -173,10 +200,22 @@ type updateOrgRequest struct {
 	// description), an explicit empty description clears it.
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
+	// AttestationAttribution is the organization's standing answer to "may
+	// this organization be named on an attestation it issues": "anonymous"
+	// or "named" (migration 00120, T0812). Absent means unchanged, and the
+	// application refuses a value outside the two.
+	//
+	// It is settable only through this endpoint, and only by an owner: it
+	// is the one switch that decides whether the organization's name ever
+	// reaches the network on a statement about somebody else's work, so it
+	// belongs beside the other governed organization fields rather than on
+	// a surface of its own.
+	AttestationAttribution *string `json:"attestation_attribution"`
 }
 
-// handleUpdate: PATCH /api/v1/organizations/{orgId} — rename/describe,
-// owner only. The slug is not mutable (stable public identity).
+// handleUpdate: PATCH /api/v1/organizations/{orgId} — rename/describe/set
+// the attestation attribution, owner only. The slug is not mutable (stable
+// public identity).
 func (h *handlers) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	actor, ok := principal(w, r)
 	if !ok {
@@ -186,12 +225,22 @@ func (h *handlers) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	org, err := h.svc.Update(r.Context(), actor, r.PathValue("orgId"), req.Name, req.Description)
+	orgID := r.PathValue("orgId")
+	org, err := h.svc.Update(r.Context(), actor, orgID, req.Name, req.Description, req.AttestationAttribution)
 	if err != nil {
 		h.orgError(w, r, err)
 		return
 	}
-	authhttp.WriteJSON(w, http.StatusOK, orgPayloadFromDomain(org))
+	// The attribution is read back rather than echoed from the request: the
+	// response describes what is STORED, and a reply assembled from the
+	// caller's own bytes would agree with the caller even when the write
+	// did not.
+	attribution, err := h.svc.AttestationAttribution(r.Context(), actor, orgID)
+	if err != nil {
+		h.orgError(w, r, err)
+		return
+	}
+	authhttp.WriteJSON(w, http.StatusOK, orgPayloadFromDomain(org, attribution))
 }
 
 // handleDeactivate: DELETE /api/v1/organizations/{orgId} — soft delete
