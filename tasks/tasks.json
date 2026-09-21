@@ -4411,7 +4411,7 @@
         "`internal/storage/doc.go`：今天 blob 面的实际状态（脚手架），用来判断 cover 能不能做"
       ],
       "scope_note": "这是**按本任务的实际交付面**收窄后的范围，不是 phase 级默认上限。逐条说明：保留 `infra/migrations/**` + `specs/database/postgres.sql` + `specs/SPEC_VERSION.json`（要加元数据列，并按 `specs/orchestrator/derived-artifacts.json` 的规则重新生成快照与指纹）；加 `internal/persistence/**`（sqlc 产物派生自迁移目录，改 schema 却够不到查询层会被收工拒绝——见 decisions.md L1-119）；加 `internal/application/**`、`internal/authz/**`、`internal/domain/**`（要建应用层服务、接角色门、用共享的 audit 动作名）；移出 `specs/policies/**`（权限矩阵是 Supervisor-only）、`internal/rights/**`（本任务只按既有判定读，不改它）、`internal/storage/**` 与 `scripts/**`、`Makefile`（cover 若需要 blob 通道，那是 T1106 的事）。",
-      "supervisor_scope_narrowing": "2026-09-16 定稿（T0706 原本标「等定」，本任务书撤回该标记）。四点说明：\n（一）**先说为什么原本标了「等定」、以及为什么撤**：原判断是「没有先例、没人有权改、字段集是开放的」。复核发现**三条都不成立**——先例是 `internal/application/projects/settings.go:35-43` 的同事务审计（已合并）；「谁有权」那一类问题今天已经按同一个形状解决过两次（T0109 用角色门顶着并记后续，L1-20260916-101 对 T0705 又做了一次）；字段集由 `docs/11:21` 点名五项。这是「读到了定义就停下、没往下读理由」的又一处（见 decisions.md L1-118）。\n（二）**权限矩阵那一格我不给你**：`specs/policies/**` 是 Supervisor-only。照 `settings.go:29-33` 的先例——用默认拒绝的角色门，把「补矩阵行」写进 RESULT 交给我。**不要自己发明一条权限规则。**\n（三）**`cover` 你大概做不了，这是已知的，不扣分**：blob 面上今天没有签名 URL 与 TTL（`internal/storage/doc.go` 只有脚手架）。要么用既有的公开 blob 引用，要么在 RESULT 里说明并留出字段——**不要新增上传通道**，那是 T1106 的范围。\n（四）**迁移号不在这份任务书里定死**——派工时由 `rddev` 从分配账上取号并写进任务包，**以任务包里那行「its number is **NNNNN**」为准**。**不得自行选号。** 若你判断本任务根本不需要迁移（例如既有列已够用），那就不建——在 RESULT 里说明理由。",
+      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 裁定）——按 `internal/application/projects/settings.go` 的既有形状办：就地改列 + 与状态变更同一事务写一行 `audit_log`。**\n\n裁定原文：**不采用「追加一条修订行」**。元数据修订 = 就地更新可变列 + 同事务写 audit 行（before/after 进 `before_summary`/`after_summary`，`infra/migrations/00012_events_audit.sql:52-53` 那两列就是为它存在的），并写该请求的 correlation id。\n\n依据：\n- `docs/11_RELEASE_ASSET_HUB.md:21` 逐字「Scientific Version 不可变；描述、keywords、cover、contact、documentation 等 Asset Metadata 可独立 revision，保留 audit，不产生新的 scientific version」——「保留 audit」正是那两列的存在理由；\n- 追加修订行会让「资产元数据」与「scientific version」两条版本流并存，而 `docs/11:21` 恰恰不许元数据产生新版本；\n- 谁能改：矩阵里没有这一行，按 `settings.go:29-33` 的先例用**默认拒绝的服务器端角色门**（owner/maintainer）顶着，并把「补矩阵行」记进 RESULT 的 follow_up 给我；**不要**自己往 `specs/policies/permissions-matrix.csv` 加行。\n- `cover` 若需要 blob 面上不存在的通道（签名 URL/TTL），按任务书原文点名留位，**不要**为了凑齐五项而造一条上传通道（那是 T1106 的范围）。",
       "baseline_sha": "",
       "max_turns": 0,
       "max_budget_usd": 0,
@@ -4508,14 +4508,25 @@
         "T0707"
       ],
       "requirements": [
-        "new identity from source version",
-        "lineage graph",
-        "rights check"
+        "**这一步是资产那一侧的写路径，先把「缺什么」说清楚，不要重新去发现一遍。** 2026-09-21 复核：**表、读法、渲染都在**，缺的是**写入与判定**。逐条如下，都核过：① `infra/migrations/00010_releases_assets.sql:49-53` 已有 `asset_lineage(parent_asset_version_id, child_asset_version_id, relation_type)`，`relation_type` 的 CHECK 是 `('forked_from','derived_from','supersedes')`；② 它是**追加式**的：`00014_append_only_enforcement.sql:63` 的 `asset_lineage_append_only` 触发器 + `00015_append_only_truncate.sql:14` 的 no-truncate；③ 资产页的读法已经在读它（`asset_page.sql` 里 `FROM asset_lineage al`，渲染成 page 的 `lineage` 段）；**④ 但全树没有任何 Go 代码写它**——`grep -rn 'asset_lineage' --include='*.go' internal cmd` 只有 sqlc 生成物与读法。**所以本任务的实质是：把「创建新资产 identity + 写一条 lineage 边」做成一条经鉴权与 rights 判定的产品路径。**",
+        "**规格出处（不要另立一套）**：`docs/11_RELEASE_ASSET_HUB.md:27` 逐字「Fork/Derive：创建新的 Asset/Object identity，保留 lineage」；`docs/31_MASTER_ACCEPTANCE.md` Gate C 逐字「Asset PID/version/lineage/rights/reference/dependency/fork 工作」；关系名的词汇表在 `docs/44_SCHEMA_RELATION_CATALOG.md:9`（`forked_from` / `derived_asset_from` 等），而**表上的三个取值就是 00010 的 CHECK**——以 CHECK 为准，不要发明第四个名字。",
+        "**父版本必须是调用者读得到的**。判据与资产页的读门同一条（`cmd/api/assetshttp/page.go` 的 `h.projects.Get(..., state.Asset.OriginProjectID)`：发起项目 public，或调用者是该项目成员）。**非成员拿一个 id 就能派生别人私有项目里的资产 = 泄漏**（ADR-024「非公开行不给非成员」）。这条要有一对正反用例。",
+        "**rights 判定按裁定走**（见上面的「Supervisor rulings」）：`rights_json` → `internal/rights.Parse` → `Document.Usage.Derivatives`。`allowed` 放行、`restricted` 拒绝、`unspecified` 要求请求带显式确认、读不出来一律拒绝。三个值各要有用例，`unspecified` 那条还要有「带确认成功 / 不带确认被拒」两条。",
+        "**创建新 identity，不是拷贝行**：derive 产生的是**新的 asset（新 pid，`research_assets`）+ 新版本行**，父版本一个字节都不动（`00014` 的 append-only 触发器会在你写错时直接报错，不要靠它兜底——你的实现要本来就不去改）。父版本以 **version id** 固定进 lineage 边（`asset_lineage.parent_asset_version_id`），不是 asset id、更不是 slug（slug 是可改的显示级元数据，`internal/assets/asset.go:144-146`）。",
+        "**与既有发布路径的关系**：`internal/application/assetpublish` 是「发布一个新版本」的写路径，derive 是「从别人（或自己）的版本派生出一个新 identity」的写路径；两者共享**同一个授权门**（见裁定），但**不是同一个命令**：不要往 `assetpublish.Command` 里塞分支，新开一个命令（照 `assetpublish` 的 ports/errors/audit 形状），并在 RESULT 里说明你怎么划的。",
+        "**原子性**：新 asset、新版本行、lineage 边、audit 行**在同一个事务里**；任何一步失败则什么都不留。拒绝路径**不写任何行**（连 audit 都不写——照 `docs/45` 与 attestation 那边的既有做法）。",
+        "**不做 / 边界**：不实现 `supersedes`；不实现 reference/use 与 dependency（`asset_dependencies` 是 T1007 的邻居，不在本任务）；**不碰 blob 通道**（`internal/storage` 的脚手架不要动）；不改 `specs/policies/permissions-matrix.csv`、不改 `docs/**`、不改 `tasks/**`；`specs/**` 只允许动生成物（`postgres.sql`/`SPEC_VERSION.json`），**若确实需要新迁移，向我要编号，不要自己选号**（§8.1）。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
-        "derived asset 保留 parent version",
-        "禁止 rights 不允许的 derive"
+        "**lineage 边真的写进去了，而且是经产品路径**：一条用例从 HTTP 请求出发（不是直调服务层），断言**存储里** `asset_lineage` 那一行存在、`parent_asset_version_id` 钉的是**父版本 id**、`child_asset_version_id` 钉的是新版本的 id、`relation_type` 是请求里选的那个值。这条要**能失败**：RESULT 里附上「把写入那一行去掉则本断言转红」的实测。",
+        "**父版本不被改动**：derive 之后，父版本行按列读回与之前逐字节相同（含 `integrity_hash`、`rights_json`、`published_at`）；并且**没有**对 `asset_lineage` 的 UPDATE/DELETE（`00014:63` 的触发器在，但你要用一条**不会碰到触发器**的实现来证明：RESULT 里点名你的实现里没有任何 UPDATE/DELETE 语句）。",
+        "**rights 三值逐条成立**（每一条都要有独立用例，且都要断言**存储里没有任何新行**）：`restricted` → 拒绝；`allowed` → 成功；`unspecified` → 不带显式确认时拒绝、带了才成功，且成功那次的 audit 行里能读回那条确认；`rights_json` 解析失败 → 拒绝。**若你实现的判定与裁定不符（例如把 unspecified 一律放行），这一条就红。**",
+        "**读不到就不许派生**：非成员对「私有项目里的私有版本」派生 → 拒绝，且**错误与「版本不存在」不可区分**（照 `internal/application/releases/errors.go` 里 `ErrForbidden` 的既有注释：授权在任何目标查询之前解析）。",
+        "**新 identity 是新的**：derive 之后，子版本的 asset 的 pid 与父资产的 pid **不同**，子版本在**目标项目**里（`research_assets.origin_project_id` = 目标项目），父资产/父版本的行一个都没动。",
+        "**资产页看得见**：用既有读法（`GET /api/v1/assets/{pid}` 或那条 page 读法）读**子资产**，返回里 `lineage` 段至少有一条边指向父版本；读**父资产**时也能看到这条边（父子两侧都断言，因为 `asset_page.sql` 的读法是从两边取边的——只断言一侧会漏掉另一半的 bug）。",
+        "**幂等**：同一 `Idempotency-Key` 重放同一请求返回同一结果，**新 asset 只有一条、lineage 边只有一条、audit 只有一条**（是计数等于 1，不是「有行」）；并发两次只有一次生效（条件更新/唯一约束，不是先读后写）。",
+        "**RESULT 里写明**：你实现的命令落在哪个包、授权用的是哪个 action、`unspecified` 的确认字段叫什么名字、以及任何你判断规格没写清楚而按 fail-closed 处理的地方——**逐条点名**。"
       ],
       "tests": [
         "asset lineage"
@@ -4531,7 +4542,6 @@
         "go.sum",
         ".env.example",
         "cmd/api/**",
-        "apps/web/**",
         "packages/schemas/**",
         "tests/**"
       ],
@@ -4542,8 +4552,17 @@
         "tasks/progress.md"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/11_RELEASE_ASSET_HUB.md",
+        "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
+        "docs/44_SCHEMA_RELATION_CATALOG.md",
+        "docs/38_LEGAL_BOUNDARY.md",
+        "docs/31_MASTER_ACCEPTANCE.md",
+        "docs/45_ERROR_MODEL.md",
+        "docs/18_EVENTS_SUBSCRIPTIONS.md"
+      ],
+      "scope_note": "资产那一侧的 fork/derive 写路径：表与读法已在，缺的是判定与写入。范围收窄掉 apps/web/**（见裁定）。",
+      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 裁定）——usage.derivatives 的三个值，三种行为，一个都不许坍缩。**\n\n`internal/rights/usage.go` 的包注释逐字写着 `\"unspecified\" is a real answer, not a missing one`，\n并同时否定两种坍缩（不许当许可、不许当禁止）。这条规矩落到 derive 上就是：\n\n- `usage.derivatives == \"restricted\"` → **拒绝**（声明禁止衍生）；\n- `usage.derivatives == \"allowed\"` → **放行**（声明允许）；\n- `usage.derivatives == \"unspecified\"` → **既不拒绝也不放行**：要求请求里带一条**显式确认**\n  （确认内容与 actor 一并写进同一事务的 audit 行），没有确认就拒绝。\n\n`rights_json` 读不出来（缺失、解析失败、`internal/rights.Parse` 拒未知字段）→ **拒绝**：\n这是仓库自己的口径（`assetpublish` 的 requirePolicy：「an unreadable policy is not a permissive one」）。\n**不许**把 `unspecified` 自动升级成许可，也**不许**把它自动降级成禁令——两者都是在替人做法律判断\n（`docs/12 §4` 逐字「字段不替代法律合同」；`docs/38` 是同一件事的法律边界）。\n\n授权：derive 是往**目标项目**写一个新版本，所以用与 `internal/application/assetpublish/command.go`\n的 `requirePublish` **同一处判定**（目标项目成员身份 + `authz.ActionPublishPrivateToPublic`）——\n**不新增 action、不改 `specs/policies/permissions-matrix.csv`**。若你判断这个格子对某个角色不合适，\n照实写进 RESULT 并停下来报，不要自行放宽。\n\n读得到才算能 derive：**父版本必须对调用者可读**，判据与资产页的读门同一条\n（`cmd/api/assetshttp/page.go`：发起项目 public 或调用者是该项目成员）。**不许**用「id 猜得到就能派生」\n绕过它——那正是 ADR-024 那条规矩（非公开行不给非成员）要防的事。\n\n关系取名的规矩（`docs/11_RELEASE_ASSET_HUB.md:27` 逐字「Fork/Derive：创建新的 Asset/Object identity，\n保留 lineage」）：两者的共同点是**创建新 identity + 保留 lineage**，差别是关系的性质——\n`forked_from` 是谱系复制（`internal/rsg/relationcatalog/catalog.go` 归为 Lineage/network），\n`derived_from` 是转换派生（同表归为 Provenance/structure）。由**请求显式选择**这两个值之一；\n`supersedes` 不是本任务（不实现、不暴露）。\n\n范围收窄：本任务**不做界面**——资产页已经会渲染 lineage（`internal/assets/page.go:24`/`:508`、\n`internal/persistence/queries/asset_page.sql` 的 asset_lineage 读法），本任务的验收在\n「写路径 + 那条读法显示得出来」，另做一个 derive 表单属于另一个关注点。因此 `apps/web/**` 从\nallowed_scope 里去掉；若你发现不动界面就完不成某条验收，**照实报回来**，不要自己扩范围。"
     },
     {
       "id": "T0709",
@@ -6787,43 +6806,71 @@
         "T0705"
       ],
       "requirements": [
-        "rate limit",
-        "CSP/CSRF",
-        "signed upload TTL",
-        "preview sanitization",
-        "SSRF guard external refs"
+        "**先把「加固面在哪」说清楚，不要重新发现一遍。** 2026-09-21 复核（逐条核过，你可以复核我）：① **CSP / secure headers 全树为零**——`internal`、`cmd`、`apps` 里没有任何 `Content-Security-Policy`、`X-Frame-Options`、`Strict-Transport-Security`，`cmd/api/main.go:1140` 的 handler 链上只有 `observability.Middleware(logger)`；② **限流只有 authn 一处**——`internal/application/authn`（`service.go:44`/`:96` 逐字「rate-limited per email and per …」、`errors.go` 的「authn: rate limited (retry after %s)」），且是**内嵌在登录逻辑里**的，不是可复用的中间件；③ **SSRF 已经交付，别重做**（见第 5 条）；④ **上传面只有契约、没有实现**（见第 6 条）。所以本任务实际可做的加固是：**限流推广、响应头、出站字节与前端渲染的守卫**。",
+        "**限流（`docs/23_SECURITY_PRIVACY.md:29` 的 `rate limiting` + `login brute force protection`）**：把 authn 现有的限流**抽成共享中间件**，挂到**所有未认证即可到达的入口**（至少：登录/注册、公开读路由、external reference 触发点）。超限必须返回 **429 且带 `Retry-After`**（照 authn 既有错误的形状）。**限流器自身出错时必须拒绝请求（fail-closed），不得放行**——这一条要有用例。key 怎么取（匿名按 IP、已认证按 user/token）、窗口与阈值，由你定，**逐项写进 RESULT**。",
+        "**安全响应头（`docs/23:29` 的 `secure headers`、`CSP`、`SameSite`）**：API 侧加统一中间件；web 侧在 Next.js 配置里落 CSP（说明你选了哪些指令、是否用 nonce、是否 report-only、为什么这样能与 Next 共存）。**不新增任何依赖服务**（不许引 CSRF/CSP 的第三方托管服务）。",
+        "**出站字节永不解释执行（`docs/23:25` 逐字「Content-Disposition 安全、恶意文件扫描 hook、HTML/SVG active content sandbox、preview sanitization」）**：今天唯一把字节交给浏览器的出口是 `cmd/api/fileshttp/files.go:316-317`（`attachment` + `nosniff`）、`:349`（`nosniff`）与 `cmd/api/releasehttp/release_handlers.go:251`（`attachment`）。把「凡把字节交给浏览器的出口，必须是 `attachment` + `nosniff`」写成**能说不会**的守卫测试（见验收标准第 3 条），并覆盖到所有这类出口——**含新出现的出口**（守卫要能对新出口报警，而不是只钉死今天这三处）。",
+        "**SSRF 与 CSRF：不重做。** `docs/54_SECURITY_THREAT_MODEL.md:14`（「External Reference fetch SSRF 内网」）与 `docs/23:29` 的这两个面**已由 T0508 交付**，现在树里在 `internal/rsg/externalref/fetch.go`、`internal/rsg/externalref/doi.go`、`internal/events/webhook.go`、`internal/events/deliver.go`。你要做的是**指认**：在 RESULT 里逐个给出「文件:行 + 用例名 + 我能直接跑的命令」。**不许**复制一份、也不许重写。如果你复核后发现某条真的缺，照实报回来，不要顺手补。",
+        "**上传签名 TTL：本任务**不做**，并且**禁止**自己造通道。** 规格确实写了它（`docs/23:25` 的 `signed URL 短 TTL`），但它**今天没有可加固的面**，证据如下，你要自己复核一遍并写进 RESULT：① 契约只有两行占位——`specs/api/openapi.yaml:234` 的 `/projects/{projectId}/branches/{branchId}/blobs:request-upload` 与 `:242` 的 `…/{blobId}:finalize`，两者的响应都只有一句 description，**没有 requestBody、没有 schema**；② **没有路由、没有 handler**——`grep -rn 'blobs' cmd/api/main.go` 为空；③ **没有生产调用者**——`internal/persistence/queries/blobs.sql` 的 `CreateBlob`/`AttachBlob`/`MarkBlobIntegrity` 在 `internal` 与 `cmd` 里除 sqlc 生成物外**无调用者**，`internal/rsg/manifest/manifest.go` 的注释逐字写着 `no writer mutates them today`；④ **存储通道是脚手架**——`internal/storage/doc.go` 只有包注释，`cmd/api/backupdr/s3.go:23` 逐字写着 `internal/storage port (still a scaffold — doc.go and nothing else)`，`go.mod` 里也没有 S3/MinIO 客户端。**结论：没有上传面，就没有可加固的上传面。** 真要做它就得新建对象存储通道或引入第三方签名服务——那需要新的外部凭证，**不是你能决定的，也不是我能顺手决定的**。你要做的是：把这个结论**带证据**写进 RESULT，并把「TTL 语义将来该长什么样」写进 follow_up（建议：pending 的 blob 超过 TTL 不得被 attach；`blobs` 表需要一列 `expires_at`，属新迁移）。**不要写任何相关代码。**",
+        "**前端不渲染用户内容**：`apps/web` 全树唯一一处 `dangerouslySetInnerHTML` 是静态字面量（`apps/web/app/(main)/explore/page.tsx:58`，`<noscript>` 里的 CSS 常量）。要求一条**源码扫描守卫测试**：只允许字面量用法，出现变量/表达式/拼接即红。**不许**用「把那一处删掉」来让守卫通过。",
+        "**OWASP smoke（`docs/23:45` 的 `OWASP smoke`，`docs/31_MASTER_ACCEPTANCE.md` 的 Release 闸）**：交一条**一条命令就能跑**的 `tests/security/owasp-smoke.sh`，断言见验收标准；失败时非零退出。它是给 T1206/T1207 出可复现证据用的入口，所以**不要**只在某个 Go 测试文件里埋着。",
+        "**边界**：不改 `specs/**`、`docs/**`、`tasks/**`、`infra/migrations/**`；**不要改 `.github/workflows/ci.yml`**——CI 的每一步都在 `specs/orchestrator/gates.json` 里有对应条目，`internal/devorchestrator` 的 `TestGatesSpecSyncsWithCIWorkflow` 会在两边不一致时红，而 `specs/**` 只有我能改。你要接的入口是 `make`，我给你接 CI。**不新增第三方依赖**（`go.mod`/`go.sum` 若无必要不动）。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "限流中间件（抽自 authn 的既有实现）+ 其测试",
+        "安全响应头中间件（API 侧）+ web 侧 CSP 配置 + 其测试",
+        "出站字节 Content-Disposition/nosniff 守卫测试（能说不会，且对新出口报警）",
+        "dangerouslySetInnerHTML 源码守卫测试（能说不会）",
+        "tests/security/owasp-smoke.sh（一条命令，非零退出）",
+        "RESULT：SSRF/CSRF 逐条指认（文件:行 + 用例名 + 命令）、上传面结论与四项证据、全部阈值/指令集的取值"
+      ],
       "acceptance_criteria": [
-        "OWASP smoke",
-        "恶意 svg/html 不执行",
-        "URL SSRF negative"
+        "**限流能生效、也能说不会**：① 同一 key 连打，第 N+1 次得 429 且带 `Retry-After`；② **限流器故障时请求被拒**（fail-closed，不是放行）；③ 两条用例各要**当场演示能红**（RESULT 里写「把中间件摘掉 / 把阈值放大则哪条断言转红」的实测）。阈值与你取的 key 写进 RESULT。",
+        "**响应头逐条断言、且能红**：测试要断言**具体的头与具体的值**（不接受「存在即可」）；`Server` 头不得带版本号；带凭证的路由不得回 `Access-Control-Allow-Origin: *`。RESULT 里附「把中间件摘掉则本测试转红」的实测。",
+        "**字节出站守卫能说不会**：把 `attachment` 改成 `inline`、或删掉 `nosniff`，守卫测试必须红——**当场演示并把输出贴进 RESULT**，然后改回。守卫还要能对**新出现的**出站出口报警（不是只钉死今天这三处）：说明你的判据是什么。",
+        "**前端守卫能说不会**：临时往 `apps/web` 加一处非字面量的 `dangerouslySetInnerHTML`，守卫必须红——当场演示、然后改回。RESULT 里写明守卫的判据与豁免名单（今天应当只有 `explore/page.tsx:58` 那一处）。",
+        "**SSRF/CSRF 只指认、不重做**：RESULT 里逐条给出「文件:行 + 用例名 + 命令」，我复核时能直接跑；并且 diff 里**没有**任何对 `internal/rsg/externalref/**`、`internal/events/**` 的重复实现（只在确实缺守卫时才有例外，且要单独说明）。",
+        "**上传面：结论有证据、代码长为零**：RESULT 里点名第 6 条的四项证据（并附你自己复核的命令与输出）；diff 里**没有**任何新的上传 handler、对象存储通道、签名服务、`blobs` 相关的写路径代码。**若你写了，这条直接判红。**",
+        "**一条命令的 OWASP smoke**：`bash tests/security/owasp-smoke.sh` 一次跑通、失败非零；把它**原样输出**贴进 RESULT。数据要真实（真起 API 进程或真 `httptest` server，不是断言一个纸面清单）。",
+        "**不碰 CI**：`git diff --name-only` 里**没有** `.github/workflows/**`；`specs/**`、`docs/**`、`tasks/**`、`infra/migrations/**` 也都没有。若有，说明理由并停下报我。",
+        "**基础门绿**：`gofmt -l` 空、`go vet ./...`、`make lint`、以及你新增的测试在新树上绿；`go.mod`/`go.sum` 未动（若动了，说明是哪个依赖、为什么不能用标准库）。"
       ],
       "tests": [
         "security tests"
       ],
       "allowed_scope": [
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
-        "apps/web/**",
         "internal/**",
+        "cmd/**",
+        "apps/web/**",
+        "tests/**",
         "go.mod",
         "go.sum",
         ".env.example",
-        "cmd/**",
-        "infra/**",
-        "tests/**",
         "ops/**"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
         "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/progress.md",
+        ".github/workflows/**",
+        "specs/**",
+        "docs/**",
+        "tasks/**",
+        "infra/migrations/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/23_SECURITY_PRIVACY.md",
+        "docs/54_SECURITY_THREAT_MODEL.md",
+        "docs/17_FILES_STORAGE.md",
+        "docs/19_EXTERNAL_REFERENCES.md",
+        "docs/45_ERROR_MODEL.md",
+        "docs/31_MASTER_ACCEPTANCE.md",
+        "docs/26_OBSERVABILITY.md"
+      ],
+      "scope_note": "安全加固里**今天真的存在的那部分**：限流推广、响应头、出站字节与前端渲染的守卫。上传 TTL 与 SSRF 两条按裁定处理（前者无面可加固、后者已交付），见 supervisor_scope_narrowing。范围收窄：去掉 specs/** 与 infra/**（本任务不需要迁移、不需要改 schema），去掉 .github/**。",
+      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 裁定）——这批加固按仓库现有默认值落地；每一项的具体取值由你在 RESULT 里逐项点名，我复核后写进 `tasks/decisions.md`。**\n\n阈值、指令集、豁免名单这类东西**没有任何一份规格写过数**，它们是工程常数（L1），所以「取一个能通过 OWASP smoke 与负向用例的保守值」不改变任何既定语义。规格只写了**要求**，在这里：\n`docs/23_SECURITY_PRIVACY.md:25`（Blob：`signed URL 短 TTL`、`Content-Disposition 安全`、`HTML/SVG active content sandbox`、`preview sanitization`）、`:29`（Web：`CSP`、`CSRF`、`secure headers`、`SameSite`、`rate limiting`、`login brute force protection`、`SSRF guard`、`URL allow/deny strategy`）、`:45`（Release 闸：`OWASP smoke`）。**没有一个阈值是有规格依据的**——所以不要去找一个「正确的数」，取一个说得通的保守值并**把理由写下来**。\n\n**已经交付的两条不重做**：SSRF（`docs/54:14`）与 CSRF 面由 **T0508** 交付，落在 `internal/rsg/externalref/fetch.go`、`internal/rsg/externalref/doi.go`、`internal/events/webhook.go`、`internal/events/deliver.go`。你的活儿是**指认**它们（文件:行 + 用例名 + 命令），不是重写。重写会把已验收的东西变成未验收的东西。\n\n**上传签名 TTL 那条：接口本身是占位**（`specs/api/openapi.yaml:234`/`:242`，只有一句 description，没有 schema），**没有路由、没有 handler、没有生产调用者，存储端口是脚手架**（`internal/storage`；`cmd/api/backupdr/s3.go:23` 逐字「still a scaffold — doc.go and nothing else」）。本任务**只做服务端校验与 TTL 语义的将来形状**——**不新建对象存储通道、不引第三方签名服务**（那需要新的外部凭证，属于我必须停下的情形）。你在这条上的交付是**结论与证据**，不是代码；写了代码这条直接判红。\n\n**为什么范围里没有 `specs/**` 和 `infra/**`**：本任务**不改 schema、不需要迁移**，所以不该碰派生件。这不是省事——一个改动里只要带上被重新生成过的 `specs/SPEC_VERSION.json` 或 `specs/database/postgres.sql`，G2 的合成器（`git apply`）在 main 一动之后就会拒收（`specs/orchestrator/derived-artifacts.json` 逐字：生成物要重新生成、不能当文本合），于是每次都要多一轮 rebaseline。**把派生件排除在外，就是让这轮返工不发生。**\n\n**为什么范围里没有 `.github/**`**：CI 的每一步在 `specs/orchestrator/gates.json` 里都有对应条目，`internal/devorchestrator` 的 `TestGatesSpecSyncsWithCIWorkflow` 会逐条比对；你改 CI 而不改 gates.json，主干立刻红，而 gates.json 只有我能改。**你交可跑的命令（`tests/security/owasp-smoke.sh` 与一个 make 目标），接进 CI 是我的事。**\n\n**最后一条纪律（CLAUDE.md §6）**：**不许为了让门变绿删断言、skip、放宽、放大 timeout**。OWASP smoke 真跑出问题，照实写 `failed`/`blocked` 并给证据；「这条我没做」比「这条我标成 not_applicable」值钱。"
     },
     {
       "id": "T1107",
@@ -7830,7 +7877,7 @@
         "docs/31_MASTER_ACCEPTANCE.md"
       ],
       "scope_note": "范围与 T0602 对称，差别在**权限面是开的**：本任务**可能**需要往 `specs/policies/permissions-matrix.csv` 与 `internal/authz/` 增加一行——但**只有在 owner 裁定为形状 A 时才允许**，且加的必须是裁定逐字给的那一行。**若裁定为形状 B，这两个地方一行都不许改**（因为形状 B 的全部内容就是「不加行」）。**不给** `specs/api/**` 与 `specs/events/**`：reopen 的契约路由需要在裁定之后确认（今天 `openapi.yaml` 里 reopen 零命中）——若裁定要求新增路由，**标 blocked 回来报告**，不要自己往契约里加路径。**不给** `docs/**` 与 `tasks/tasks.json`（Supervisor 专属）。`tasks/tests.json` 是开着的，因为新测试要登记。",
-      "supervisor_scope_narrowing": "2026-09-19 从 T0602 拆出。**拆的理由**：T0602 原先被整条判为 SPEC_BLOCKED，复核后发现它的 abort 半几乎全有规格、可以立刻派工；而 reopen 半**只差一行权限**。把两者绑在一起，等于让一个已就绪的任务陪一个待裁定的问题一起停——而 `docs/31_MASTER_ACCEPTANCE.md:9` 有一条逐字「Abort/Reopen 保留完整历史」，它们都在主验收的必经路上，停一条就少一条。**拆完之后的账**：abort = T0602（可派工）、reopen = 本任务（等一行裁定）。**我为什么不自己裁**：权限是 CLAUDE.md §5 明文列出的 L3（「产品、科研语义、安全、权限、隐私、法律或公开性决策」），而这里要决定的正是「谁能撤销一次 abort」。我给了两个候选形状与各自的理由和代价，**倾向 A 但不下结论**——这正是 L3 该有的问法：把选择与后果摆清楚，让 owner 用一句话回答。",
+      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 裁定，替换任务书里「等 L3 裁定」那一段）——本任务按形状 A 实施（与 `abort_main_object` 逐格对称）。**\n\n裁定原文：`specs/policies/permissions-matrix.csv` 新增一行\n`reopen_main_object,deny,deny,deny,deny,via_pr,via_pr,proposal_only`\n（与 `:14` 的 `abort_main_object` 行**逐格相同**）；`internal/authz/action.go` 增 `ActionReopenMainObject`，矩阵表增对应行。\n\n依据：\n- `docs/43_STATE_MACHINES.md:10` 把 reopen 定义成 abort 的逆向边；`docs/46_ABORT_RETENTION.md:11` 要求保留 abort 历史、reopen 追加一个新的 transition；\n- `docs/09_VERSION_CONTROL.md:9-10` 逐字「即便 Owner 也只能经 PR merge」——main 的科研状态只能经 PR 推进，所以 `via_pr` 不是从 abort 类推出来的，是 main 的一般规矩；\n- **不采用形状 B**：复用 `write_scientific_state` 会让 contributor 能撤销 maintainer 的 abort（而 abort 它自己做不了）——那是**放宽**权限模型，方向反了。\n\n边界不变：不改 `docs/**`、`tasks/**`；不实现 abort（T0602 已做，沿用它的元数据形状）；存储层不需要新迁移。",
       "tests": [
         "reopen transition"
       ]
@@ -7904,7 +7951,7 @@
         "docs/04_USERS_ROLES.md"
       ],
       "scope_note": "范围按实际交付面定。**给** `internal/authz/**`——但这**只在 owner 裁定为形状 B 时才允许改动**（那时按裁定逐字加那一行）；**若裁定为 A，`internal/authz/**` 一行都不许改**（A 的全部内容就是「不加行」）。**给** `cmd/api/**` 是因为新路由要注册在那里。**给** `tests/**` 因为新测试与 G3 套件接口在那里。**不给** `specs/**` 的任何子目录：契约的路由由 Supervisor 落（`specs/api/**` 是 Supervisor 专属），权限 CSV 也在 `specs/` 下（`specs/policies/**`）——**即便裁定为形状 B，那一行也由 Supervisor 落，工人只在 `internal/authz/` 里跟**。**不给** `infra/migrations/**`：本任务不新增迁移，状态位与守卫都是现成的（00051 已放行这两条边）。**不给** `apps/web/**`、`docs/**`、`tasks/**`。",
-      "supervisor_scope_narrowing": "2026-09-19 撰写。**这份任务书的来源是 T0410 交付时照出的缺口**（写进了它的 RESULT `follow_up_issues` #1），我逐条回树复核过，并把复核用到的证据全部写进需求而不是让工人重新发现一遍：(1) 状态机**在 `docs/43:13` 里是写死的**，所以这不是设计任务；(2) 守卫在 `00051:88` 与 `:90` **放行了两条边**，所以「送审」是一个动作两个入口；(3) `RequestReview` **已实现且确实写状态列**——顺带更正一处既有材料里的错误描述（「不写任何状态列」）；(4) **它没有生产调用者**，契约里也没有这条路径，这是缺口的可测量形式；(5) `internal/authz/engine.go` 对未登记动作默认拒绝，所以**没有那一行就写不出这条路由**——这正是本任务必须停下的原因。**我为什么不自己裁**：要决定的是「谁能把一个提案送进评审」，而「权限」是 CLAUDE.md §5 明文列出的 L3；其中**非成员那一格直接决定 T0804 外部贡献流程能不能走通**（`open_pr` 那一行是 `allow_from_fork`），这不是我能替 owner 定的产品后果。我给了三个形状与各自的代价，**倾向 A 但不下结论**——这正是 L3 该有的问法：把选择与后果摆清楚，让 owner 用一句话回答。",
+      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 裁定，替换任务书里「等 L3 裁定」那一段）——本任务按形状 A 实施。**\n\n裁定原文：**这一步复用既有的 `open_pr` 权限格：不新增 CSV 行、不新增 action。**\n\n依据（全部是已经写下的规格，不是新造）：\n- 这条边的三处规格都已经在：`docs/43_STATE_MACHINES.md:13`、`infra/migrations/00051_pull_request_state_and_fixity.sql:88`/`:90`、`internal/application/pullrequests/service.go:98`——缺的只是「门」，不是语义。\n- `specs/policies/permissions-matrix.csv:7` 的 `open_pr` 是 `deny,allow_from_fork,deny,allow,allow,allow,allow`：非成员可以经 fork 开 PR。而 T1202 的验收要求「外部贡献者的 PR 被评审并合并」——这一步必须对 `allow_from_fork` 那一格放行，否则那条闭环断在评审门口。\n- 形状 C（创建即 `review_required`）会让 `'open'` 变成产品里不可达的状态——那是真实的语义变化，不是接线。\n- 形状 B 要逐格新裁 7 个格子，其中非成员那格猜错就断掉 T1202——那是发明权限。\n\n由此：授权用 `internal/authz/action.go` 里**既有的** `ActionOpenPR`，对 PR 所属项目求判定；**不要**改 `specs/policies/permissions-matrix.csv`，也**不要**往 `internal/authz/action.go` 加动作。若你判断形状 A 在某个格子上会授予调用者原本没有的能力（例如能编辑别人 PR 的人），**照实写进 RESULT 并停下来报**，不要自行放宽或收紧。\n\n契约路径由 Supervisor 落（已在 `specs/api/openapi.yaml` 里）：`POST /projects/{projectId}/pull-requests/{prId}:request-review`，照 `{prId}:merge` 的既有写法；你按它实现 handler，**不要**改契约文件。契约里这条路由与 `{prId}:merge` 一样带**必填**的 `Idempotency-Key`（`components/parameters/IdempotencyKey`：required、minLength 8）——所以送审要读它，并按任务书 AC6 的「同一 key 重放返回同一结果、audit 与事件各只有一条」实现；`{prId}:merge` 的 handler（`cmd/api/mergehttp/handler.go:86`/`:192` 的 `mergeKey`）就是现成的接法，照它来。",
       "tests": [
         "request review route"
       ]

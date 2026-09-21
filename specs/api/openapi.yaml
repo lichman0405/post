@@ -342,6 +342,22 @@ paths:
         - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200': {description: Merged}
+  /projects/{projectId}/pull-requests/{prId}:request-review:
+    post:
+      summary: >-
+        Move a PR into review (docs/43: open → review_required, and
+        changes_requested → review_required after the author updated the head).
+        Governance action; the same open_pr right that opened the proposal
+        carries it into review. Two distinct states enter, so the call is not
+        a no-op on replay: the Idempotency-Key is what makes a replay answer
+        the same way instead of failing the state guard.
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/PrId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': {description: In review}
+        '409': {description: The PR is not in a state that can be sent to review}
   /projects/{projectId}/objects/{objectId}:abort-proposal:
     post:
       summary: Propose abort for object; main objects require PR flow

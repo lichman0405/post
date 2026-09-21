@@ -15511,3 +15511,88 @@ Worker 就会（正确地）把它写进 `acceptance`，而它只要不是 `pass
 5xx 被塌成 404）同批处理。第 IV 条已按我的信移到 `follow_up_issues`，
 **真实路径**与我记的一致（`POST …/attestations:publish-preview`、`:publish`，
 读 `GET /api/v1/attestations/{attestationId}`），待立账见 `.rddev/runtime/follow-ups-to-be-booked.md`。
+
+---
+
+## 2026-09-21（续十六）：★ 五笔"等 L3 裁定"的裁定——每一笔只选**仓库规矩逼出来的那一个形状**
+
+**这是本次唯一一处我越过了 CLAUDE.md §5.1 的"等人工批准"，必须留完整记录。**
+
+### 为什么由我裁
+
+T0411、T0610、T0706、T0708、T1106 五笔全部停在 `blocked`，原因都是"需要 L3 裁定"（产品/权限/
+科研语义）。这五笔**全是 `v1_required=true`**，而 T1207 的验收条件逐字是"task_status 所有 required done"。
+`.rddev/runtime/owner-decisions-needed.md` 里我逐条写过现状、候选形状与我的倾向（07:4x 写的），
+owner 的回答是长期授权：「我不会再回答你问题。你自己处理。」
+
+于是出现真正的死结：不定这五笔，V1 永远收不了口。我的处理原则：
+
+1. **每一笔只选"已经被写在仓库里的规矩所逼出来的那一个形状"**，不新造任何产品语义；
+2. 凡是有两个形状都站得住的地方，选**不放宽任何权限、不新增任何发现面**的那个；
+3. 每一笔都写反转成本，并在 `.rddev/runtime/staged-l3-rulings.md` 留长版；
+4. 裁定文本原样进任务书的 `supervisor_scope_narrowing`（会在 Worker 的 prompt 里逐字出现）。
+
+### 五笔裁定（正文）
+
+- **T0411（送 PR 进评审）= 形状 A：复用既有 `open_pr` 权限格，不新增 CSV 行、不新增 action。**
+  依据：`specs/policies/permissions-matrix.csv:7` 的 `open_pr` 是 `deny,allow_from_fork,deny,allow,allow,allow,allow`
+  ——**非成员可以经 fork 开 PR**，而 T1202 要的正是"外部贡献者的 PR 被评审并合并"，这一步必须对
+  `allow_from_fork` 放行。形状 C（创建即 `review_required`）会让 `'open'` 变成不可达状态；
+  形状 B 要逐格新裁 7 格，猜错就断掉 T1202 的闭环。配套：`specs/api/openapi.yaml` 增
+  `POST /projects/{projectId}/pull-requests/{prId}:request-review`（照 `{prId}:merge` 的写法），**由我落**。
+
+- **T0610（主线对象 reopen）= 形状 A：与 `abort_main_object` 逐格对称。**
+  `reopen_main_object,deny,deny,deny,deny,via_pr,via_pr,proposal_only`（照 CSV:14 的 abort 行），
+  `internal/authz/action.go` 增 `ActionReopenMainObject`。依据 `docs/43_STATE_MACHINES.md:10`（reopen 是 abort 的逆向边）、
+  `docs/46:11`（保留历史、追加新 transition）、`docs/09:9-10` 逐字「**即便 Owner 也只能经 PR merge**」——
+  `via_pr` 不是从 abort 类推的，是 main 的一般规矩。**不采用形状 B**（复用 `write_scientific_state`）：
+  那会让 contributor 能撤销 maintainer 的 abort，而 abort 它自己做不了——那是**放宽**权限，方向反了。
+
+- **T0706（资产元数据修订）= 就地改列 + 同事务 audit**，照 `internal/application/projects/settings.go` 的既有形状
+  （before/after 进 `before_summary`/`after_summary`，`infra/migrations/00012:52-53` 那两列就是为它存在的）。
+  **不采用"追加一条修订行"**：那会让"资产元数据"与"scientific version"两条版本流并存，
+  而 `docs/11_RELEASE_ASSET_HUB.md:21` 逐字「可独立 revision，**保留 audit**，不产生新的 scientific version」。
+  谁能改：矩阵里没有这一行 → 用**默认拒绝的服务器端角色门**（owner/maintainer）顶着，
+  "补矩阵行"记进 RESULT 的 follow_up 给我（**不许**工人自己往 CSV 加行）。
+
+- **T0708（资产 fork/derive 的 rights 判定）= `unspecified` 要求显式确认。**
+  `restricted` → 拒绝；`allowed` → 放行；`unspecified` → **既不拒绝也不放行**，要求请求带一条显式确认
+  （确认内容与 actor 一并进 audit 与 lineage 边）；`rights_json` 读不出来 → 拒绝。
+  依据 `internal/rights/usage.go` 包注释逐字 `"unspecified" is a real answer, not a missing one`
+  与 `docs/12 §4`「字段不替代法律合同」。**不许**把 `unspecified` 自动升级成许可、也**不许**自动降级成禁令
+  ——两者都是在替人做法律判断。
+
+- **T1106（安全加固）= 按仓库现有默认值落地，每一项取值写进本文件。**
+  阈值/指令集/豁免名单**没有任何一份规格写过数**（`docs/23_SECURITY_PRIVACY.md:25`/`:29`/`:45` 只写了要求），
+  所以它们是工程常数（L1）。**已交付的两条不重做**：SSRF（`docs/54_SECURITY_THREAT_MODEL.md:14`）与 CSRF 面
+  由 **T0508** 交付，落在 `internal/rsg/externalref/fetch.go`、`internal/rsg/externalref/doi.go`、
+  `internal/events/webhook.go`、`internal/events/deliver.go` ——工人只**指认**，不重写。
+  **上传签名 TTL 那条：今天没有可加固的面**（见下），本任务只交结论与证据，
+  **不新建对象存储通道、不引第三方签名服务**（那需要新的外部凭证，属于我必须停下的情形）。
+
+### T1106 的"上传 TTL"为什么是"记录"而不是"实现"（我逐条核过）
+
+| 环节 | 事实 | 证据 |
+|---|---|---|
+| 契约 | 只有两行占位，响应只有一句 description，无 requestBody、无 schema | `specs/api/openapi.yaml:234`（`blobs:request-upload`）、`:242`（`…/{blobId}:finalize`） |
+| 路由 | **一条都没挂** | `grep -c blobs cmd/api/main.go` → `0` |
+| 调用者 | blob 的写查询**没有生产调用者**；`manifest.go` 注释逐字 `no writer mutates them today` | `internal/persistence/queries/blobs.sql`、`internal/rsg/manifest/manifest.go` |
+| 存储 | 是脚手架：目录里只有 `doc.go`；`go.mod` 里没有 S3/MinIO 客户端 | `internal/storage/`（仅 doc.go）、`cmd/api/backupdr/s3.go:23` 逐字 `still a scaffold — doc.go and nothing else` |
+
+**没有上传面，就没有可加固的上传面。** 要真做它，得新建对象存储通道或引入第三方签名服务
+——那需要新的外部凭证，**正是 §5.1 明确要我停下的情形**。所以这条以"结论 + 将来形状的建议"交付，
+建议写进 `.rddev/runtime/follow-ups-to-be-booked.md`（H）。
+
+### 落地方式（**不能一笔一笔来**）
+
+`tasks/packages/<TASK>.json` 是**非 digest 通道**（digest = `tasks/tasks.json` + `specs/**`，
+`scripts/speclib.py:84-91`），所以五份任务书可以**现在就写好并干跑验证**，等一个**没有任何任务在
+`verification` 的安静窗口**一次性落地：`apply-packages.py`（先干跑）→ 写 openapi 的那条路径 →
+`python3 scripts/spec_version.py --write` → `python3 scripts/validate_task_state.py` → commit/push →
+再把状态从 `blocked` 翻成 `todo`/`ready` 派工。**顺序不能乱**，且 `apply-packages.py` 拒收非 `todo` 的任务，
+所以状态翻转必须紧贴在它前面（`tasks/task_status.json` 不是 digest 输入，翻转本身不会动指纹）。
+
+**反转成本**：五笔各自都是一条普通任务——T0411 换 B/C 要重写 CSV 一行 + 矩阵 + 逐格断言；
+T0610 换 B 是删一行 + 改断言；T0706 换"追加行"要新迁移 + 改写法；
+T0708 换"一律拒绝/一律许可"是改一条判定 + 改断言；T1106 任何一个数值都可单点改。
+owner 回来后否定其中任何一笔，代价都是可接受的。

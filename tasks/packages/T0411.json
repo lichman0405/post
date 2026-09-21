@@ -1,0 +1,70 @@
+{
+  "acceptance_criteria": [
+    "**缺口本身要被证明，而不是被描述**：一条断言显示「经产品路径建出的 PR，在补上这一步之前无法到达 `merge_ready`」——用**补之前**的代码路径构造，并且这条断言要能失败（RESULT 里附上「把这一步接上之后本断言转红」的实测）。**只写一段说明不算证据。**",
+    "**送审经真实产品路径生效**：从「PR 处于 open」到「存储里该 PR 的 state 变成 review_required」，全程走 HTTP 路由，**不许在测试里直调服务层或摆状态**。断言读的是**存储里的那一行**。并且：把这次调用**用没有权限的身份重放**，必须被拒——两种调用都要有。",
+    "**两条边都通**：`open → review_required` 与 `changes_requested → review_required` **各有一条用例**（后者是作者改完再送审）。只做前者这条判红。",
+    "**权限逐格成立，按裁定那一行实现**：逐格断言（含非成员与 agent——若裁定为形状 A，非成员经 fork 的 PR 必须能送审，这条要**明确断言能成功**，而不是含糊地不断言）。**若你实现的格子与裁定不符，这条就红。**",
+    "**状态机其余部分不被这条改动**：`open → merged` 仍被数据库拒绝（守卫不能跳过）；已 `merged/closed/aborted` 的 PR 仍不可再动。两条都要有用例。",
+    "**幂等与并发**：同一 `Idempotency-Key` 重放同一请求返回同一结果，**audit 与事件各只有一条**（是计数等于 1，不是「有事件」）；并发两次只有一次生效（条件更新，不是先读后写）。",
+    "**拒绝不泄漏存在性**：对一个**不存在**的 PR 发起送审，无权调用者的错误与「PR 存在但无权」**不可区分**（照 `internal/application/releases/errors.go` 里 `ErrForbidden` 的既有注释：授权在任何目标查询之前解析）。",
+    "**RESULT 里写明**：你实现的是哪个形状、owner 的裁定原文（从哪读到的）、以及任何你判断规格没写清楚而按 fail-closed 处理的地方——**逐条点名**。"
+  ],
+  "allowed_scope": [
+    "internal/application/**",
+    "internal/domain/**",
+    "internal/persistence/**",
+    "internal/events/**",
+    "internal/authz/**",
+    "cmd/api/**",
+    "tests/**",
+    "go.mod",
+    "go.sum",
+    ".env.example"
+  ],
+  "decision_level_max": "L1",
+  "dependencies": [
+    "T0410"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "specs/**",
+    "infra/migrations/**",
+    "packages/**",
+    "apps/web/**",
+    "Makefile"
+  ],
+  "id": "T0411",
+  "phase": "P4",
+  "phase_name": "PR、Review 与 Semantic Merge",
+  "relevant_specs": [
+    "docs/43_STATE_MACHINES.md",
+    "docs/09_VERSION_CONTROL.md",
+    "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
+    "docs/45_ERROR_MODEL.md",
+    "docs/18_EVENTS_SUBSCRIPTIONS.md",
+    "docs/31_MASTER_ACCEPTANCE.md",
+    "docs/04_USERS_ROLES.md"
+  ],
+  "requirements": [
+    "**本任务只差一样东西，先说清楚是哪一样，不要重新去发现一遍。** 2026-09-19 复核时逐条核过：状态机的边**已写在规格里**、服务层的动作**已实现**、数据库的守卫**已放行**——**唯一缺的是「谁有权触发」与「对外怎么触发」**，而前者是 §5 明文的 L3（权限），本任务在那一行被裁定之前无法开工。下面逐条给出证据，不要推翻重来。",
+    "**状态机不是缺口，是规格**：`docs/43_STATE_MACHINES.md:13` 逐字「open → review_required → changes_requested/approved → merge_ready → merged；也可 closed/aborted。Scientific/Integrity review 各自状态。」所以本任务**不是**在设计一条新迁移，而是把一条已写死的迁移接上产品。",
+    "**这条边在数据库守卫里出现两次，所以它是一个动作、两个入口**：`infra/migrations/00051_pull_request_state_and_fixity.sql:88` 是`(OLD.state = 'open' AND NEW.state IN ('review_required','closed','aborted'))`；`:90` 是 `(OLD.state = 'changes_requested' AND NEW.state IN ('review_required','closed','aborted'))`。两处都是「把提案送去评审」：第一次送审，以及评审人提了修改意见、作者改完之后**再送一次**。**实现时两条边都要照顾到**，不要只做 open 那一条。",
+    "**服务层已经有这个动作，而且它确实写状态**：`internal/application/pullrequests/service.go:73-78` 的 `func (s *Service) RequestReview(ctx, projectID, number)` 直接 `return s.setState(ctx, projectID, number, domain.PullRequestStateReviewRequired)`，而 `setState` 末尾是 `s.repo.SetPullRequestState(...)`。**注意**：既有材料里有一处把它描述成「不写任何状态列」，那是错的——它就是写状态列的。**以代码为准。**",
+    "**它没有任何生产调用者，这就是缺口本身**：`grep -rn 'RequestReview' internal/ cmd/`去掉测试文件后只命中它自己的定义；`specs/api/openapi.yaml` 里 `request-review` 零命中。PR 今天的对外面**只有五条**：`GET /projects/{projectId}/pull-requests`（列表）、`POST /projects/{projectId}/pull-requests`（建，摘要逐字「Open pull request with RSG diff」，201 描述只有「PR opened」四个字）、`GET .../{prId}/diff`、`POST .../{prId}/reviews`（提交评审）、`POST .../{prId}:merge`。**中间那一步没有门。**",
+    "**后果要写进你的验证里**：经产品建出来的 PR 停在 `'open'`，而守卫只允许 `'open'` 去 `review_required|closed|aborted`；只有 `review_required` 才允许去 `approved|merge_ready`。所以**一条经产品建出的 PR 永远无法被评审、因而永远无法合并**——`POST .../{prId}:merge` 对任何产品路径建出的 PR 都不可达。这条不是推测，是守卫的迁移表逐字给出的；把它做成一条**能失败的断言**（见验收）。",
+    "**三个候选形状（owner 裁定用，工人不许自己选，Supervisor 也不代裁）**。共同的前提事实：`specs/policies/permissions-matrix.csv:7` 的 `open_pr` 是 `deny,allow_from_fork,deny,allow,allow,allow,allow`——**非成员可以经 fork 开 PR**；而 `:8` 的 `submit_scientific_review` 是 `deny,conditional,conditional,conditional,allow,allow,proposal_or_scoped`。CSV 不出现任何 request_review 行，`internal/authz/action.go` 也没有对应动作，而未登记动作在 `internal/authz/engine.go` 里**默认拒绝**。三个形状：",
+    "**形状 A（复用 open_pr，我倾向这个）**：不新增任何一行，把这一步当作「开着 PR 的人把自己的提案交出去评审」。依据：它不授予任何调用者原本没有的权力——能开这个提案的人本来就开了它；而 `review_required` 只是「请评审」，不是批准。**代价**：非成员经由 fork 开的 PR 也走这条路（`allow_from_fork`），也就是说外部贡献者能把自己的 PR 送进评审。**这恰恰是 T0804 外部贡献流程需要的行为**；若裁定为 B 而给非成员 deny，那条流程会断在评审门口。",
+    "**形状 B（新增一行 `request_review`）**：CSV 加一行、`internal/authz/action.go` 加一个`ActionRequestReview`、`matrix.go` 加对应行，并逐格决定 7 个格子。**代价**：7 格都要裁定，而且其中一格（非成员）**直接决定外部贡献流程能不能走通**——若 deny，则 fork 来的 PR 只能等人替它送审，产品里没有任何角色被指派做这件事。",
+    "**形状 C（不加动作、不加路由，改创建语义）**：让 `POST /projects/{projectId}/pull-requests` **直接建出 `review_required`**（数据库 DEFAULT 是 `'open'`，见 `infra/migrations/00009_issues_pull_requests.sql:26`）。依据：契约那条 201 只写「PR opened」，**没有**写初始状态，所以不与之矛盾。**代价**：`'open'` 会变成一个没有任何产品路径产生的状态——它仍是守卫的入口、仍能存，只是产品永远不给它。这是一个真实的语义变化，不是等价改写。",
+    "**裁定到达之前不许动手。** 若你被派到时台账里这个任务的 `notes` 仍然只有 L3 提问、没有裁定原文，**标 `blocked` 并停下**。不要自己往 `specs/policies/permissions-matrix.csv` 或 `internal/authz/` 加行（那是猜权限），也不要用形状 A 悄悄绕过（A 是一个**待裁定的选项**，不是默认值）。",
+    "**契约的路由由 Supervisor 加，不在你范围内。** `specs/api/**` 是 Supervisor 专属；路由形状（`POST /projects/{projectId}/pull-requests/{prId}:request-review`，照 `{prId}:merge` 的既有写法）会在裁定到达后由 Supervisor 落进 `specs/api/openapi.yaml`。**若你被派到时契约里仍没有这条路径**，那是裁定与契约还没落，标 `blocked` 回来报告，不要自己往契约里加路径。",
+    "**不做 / 边界**：不改 `docs/**`、`tasks/**`；不做界面（`apps/web/**` 不在范围内）；**不实现 abort/reopen**（T0602/T0610）；不动 merge 的那条边（T0409 已做）；不改 `specs/events/**`（事件名若需要新的，标 blocked 报告——先查 `event-types.yaml` 里有没有现成的）。"
+  ],
+  "scope_note": "范围按实际交付面定。**给** `internal/authz/**`——但这**只在 owner 裁定为形状 B 时才允许改动**（那时按裁定逐字加那一行）；**若裁定为 A，`internal/authz/**` 一行都不许改**（A 的全部内容就是「不加行」）。**给** `cmd/api/**` 是因为新路由要注册在那里。**给** `tests/**` 因为新测试与 G3 套件接口在那里。**不给** `specs/**` 的任何子目录：契约的路由由 Supervisor 落（`specs/api/**` 是 Supervisor 专属），权限 CSV 也在 `specs/` 下（`specs/policies/**`）——**即便裁定为形状 B，那一行也由 Supervisor 落，工人只在 `internal/authz/` 里跟**。**不给** `infra/migrations/**`：本任务不新增迁移，状态位与守卫都是现成的（00051 已放行这两条边）。**不给** `apps/web/**`、`docs/**`、`tasks/**`。",
+  "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 裁定，替换任务书里「等 L3 裁定」那一段）——本任务按形状 A 实施。**\n\n裁定原文：**这一步复用既有的 `open_pr` 权限格：不新增 CSV 行、不新增 action。**\n\n依据（全部是已经写下的规格，不是新造）：\n- 这条边的三处规格都已经在：`docs/43_STATE_MACHINES.md:13`、`infra/migrations/00051_pull_request_state_and_fixity.sql:88`/`:90`、`internal/application/pullrequests/service.go:98`——缺的只是「门」，不是语义。\n- `specs/policies/permissions-matrix.csv:7` 的 `open_pr` 是 `deny,allow_from_fork,deny,allow,allow,allow,allow`：非成员可以经 fork 开 PR。而 T1202 的验收要求「外部贡献者的 PR 被评审并合并」——这一步必须对 `allow_from_fork` 那一格放行，否则那条闭环断在评审门口。\n- 形状 C（创建即 `review_required`）会让 `'open'` 变成产品里不可达的状态——那是真实的语义变化，不是接线。\n- 形状 B 要逐格新裁 7 个格子，其中非成员那格猜错就断掉 T1202——那是发明权限。\n\n由此：授权用 `internal/authz/action.go` 里**既有的** `ActionOpenPR`，对 PR 所属项目求判定；**不要**改 `specs/policies/permissions-matrix.csv`，也**不要**往 `internal/authz/action.go` 加动作。若你判断形状 A 在某个格子上会授予调用者原本没有的能力（例如能编辑别人 PR 的人），**照实写进 RESULT 并停下来报**，不要自行放宽或收紧。\n\n契约路径由 Supervisor 落（已在 `specs/api/openapi.yaml` 里）：`POST /projects/{projectId}/pull-requests/{prId}:request-review`，照 `{prId}:merge` 的既有写法；你按它实现 handler，**不要**改契约文件。契约里这条路由与 `{prId}:merge` 一样带**必填**的 `Idempotency-Key`（`components/parameters/IdempotencyKey`：required、minLength 8）——所以送审要读它，并按任务书 AC6 的「同一 key 重放返回同一结果、audit 与事件各只有一条」实现；`{prId}:merge` 的 handler（`cmd/api/mergehttp/handler.go:86`/`:192` 的 `mergeKey`）就是现成的接法，照它来。",
+  "title": "把提案送进评审：产品路径与权限（等一行 L3 裁定）",
+  "v1_required": true
+}

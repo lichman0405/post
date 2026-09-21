@@ -1,20 +1,4 @@
 {
-  "id": "T0706",
-  "phase": "P7",
-  "phase_name": "Asset Hub",
-  "title": "Asset Metadata Revision",
-  "v1_required": true,
-  "decision_level_max": "L1",
-  "requirements": [
-    "**这一条规则已经写死了，照它做**：`docs/11_RELEASE_ASSET_HUB.md:21` 原文——「Scientific Version 不可变；描述、keywords、cover、contact、documentation 等 Asset Metadata 可独立 revision，保留 audit，不产生新的 scientific version。」也就是说：元数据**改得**，而且**改完不许动 scientific version，也不许产生新版本**。",
-    "**「追加一行还是改列 + 审计」这个先例仓库里有，而且是合并过的**：`internal/application/projects/settings.go:35-43` 逐字写着——每个 owner/maintainer 动作都在**与状态变更同一个事务里**写一行 `audit_log`，带 actor id、via、action、target、project 和该请求的 correlation id。`UpdateSettings`（`:132`）就是照这个形状改一个可变元数据字段的，带 before/after（`:190`、`:215-216`）。审计表的 `before_summary`/`after_summary` 两列就是为这件事存在的（`infra/migrations/00012_events_audit.sql:52-53`）。**照这个形状办，不要发明第二种。**",
-    "**元数据不是 scientific version，这条边界已经在代码注释里写死了，照着守**：`internal/application/assetpublish/command.go:197`（publishing a version is not an asset-metadata revision）、`cmd/api/assetshttp/publish.go:47-51`（a publish that names an existing asset refuses them — asset metadata is revised on its own surface）、`internal/assets/doc.go:58-61`。**你要建的是那条「它自己的面」。**",
-    "**`slug` 是可改的显示级元数据，但它绝不能进入身份或持久 URL**：`internal/assets/asset.go:144-146` 逐字（Slug is display-level, revisable metadata (docs/11 §4) — it never appears in an identity or a persistent URL），并由 `infra/migrations/00064_asset_pid_origin.sql:8-16` 保证——slug 改名与组织转移都不动 pid、因此也不动 `/assets/{pid}`。**改名后 pid 与公开 URL 必须一字不变，而且要有测试钉住。**",
-    "**谁能改：用角色门，并把「矩阵缺行」记成后续，不要自己发明权限**。先例是 `internal/application/projects/settings.go:29-33`——矩阵里没有设置/成员管理那一行时，用**默认拒绝的服务器端角色门**顶着，并把「补矩阵行」记成给 Supervisor 的后续；T0109 就是照这个形状验收的。本任务照办：`specs/policies/permissions-matrix.csv` **是 Supervisor-only 的规格文件，你不要改它**（`tasks/decisions.md:8531` 的 L1-20260916-101 对 T0705 是同一条处置）。",
-    "**`cover` 这一类要是做不了，就说明理由并留出位置，不要硬造**：`docs/11:21` 把 cover 列进可修订的元数据，但今天的 blob 存储面**没有签名 URL、没有 TTL**（`internal/storage/doc.go` 只有三行 T0602 之前的脚手架，全树没有 presign 代码）。**如果 cover 需要 blob 而 blob 面上没有路，在 RESULT 里点名说明并把字段留出来，不要为了凑齐五项而造一条上传通道**（那属于 T1106 的范围）。",
-    "**不得为了让页面好写而绕开审计或角色门**（CLAUDE.md §5.1）：不得把审计行写成「尽力而为」（必须同事务）、不得把拒绝写成两种不同的答复、不得放宽「不产生新 scientific version」这条。",
-    "**不做**：不改 `specs/**`（尤其不要动规格指纹）、不新增契约之外的权限规则、不改 `internal/rights/**` 的判定、不碰 blob 上传/下载通道、不改 `apps/web/**` 里与本页无关的东西。"
-  ],
   "acceptance_criteria": [
     "元数据修订**不产生新的 scientific asset version**，也**不改变任何既有版本的 hash 或 version 字段**（`docs/11:21`）——有一条测试真的断言这一点，而不只是「看起来没动」",
     "每次元数据修订都在**与状态变更同一个事务里**写一行 audit，带 actor、via、action、target、before/after（照 `settings.go:35-43` 的形状）——把事务拆开就会留下「改了但没记」的窗口，测试要能证明拆开会红",
@@ -41,6 +25,10 @@
     "go.sum",
     ".env.example"
   ],
+  "decision_level_max": "L1",
+  "dependencies": [
+    "T0705"
+  ],
   "forbidden_scope": [
     ".git/**",
     "CLAUDE.md",
@@ -52,6 +40,9 @@
     "Makefile",
     "scripts/**"
   ],
+  "id": "T0706",
+  "phase": "P7",
+  "phase_name": "Asset Hub",
   "relevant_specs": [
     "**`docs/11_RELEASE_ASSET_HUB.md:21`（先读这一条）**：元数据可独立 revision、保留 audit、不产生新 scientific version——本任务的全部依据",
     "`internal/application/projects/settings.go:29-43` 与 `:132/:184/:190/:215-216`：**同事务审计 + 角色门**的既有形状，逐行照抄",
@@ -64,12 +55,18 @@
     "`specs/policies/permissions-matrix.csv`：**只读它**，确认没有元数据修订这一行——不要改它",
     "`internal/storage/doc.go`：今天 blob 面的实际状态（脚手架），用来判断 cover 能不能做"
   ],
-  "scope_note": "这是**按本任务的实际交付面**收窄后的范围，不是 phase 级默认上限。逐条说明：保留 `infra/migrations/**` + `specs/database/postgres.sql` + `specs/SPEC_VERSION.json`（要加元数据列，并按 `specs/orchestrator/derived-artifacts.json` 的规则重新生成快照与指纹）；加 `internal/persistence/**`（sqlc 产物派生自迁移目录，改 schema 却够不到查询层会被收工拒绝——见 decisions.md L1-119）；加 `internal/application/**`、`internal/authz/**`、`internal/domain/**`（要建应用层服务、接角色门、用共享的 audit 动作名）；移出 `specs/policies/**`（权限矩阵是 Supervisor-only）、`internal/rights/**`（本任务只按既有判定读，不改它）、`internal/storage/**` 与 `scripts/**`、`Makefile`（cover 若需要 blob 通道，那是 T1106 的事）。",
-  "supervisor_scope_narrowing": "2026-09-16 定稿（T0706 原本标「等定」，本任务书撤回该标记）。四点说明：\n（一）**先说为什么原本标了「等定」、以及为什么撤**：原判断是「没有先例、没人有权改、字段集是开放的」。复核发现**三条都不成立**——先例是 `internal/application/projects/settings.go:35-43` 的同事务审计（已合并）；「谁有权」那一类问题今天已经按同一个形状解决过两次（T0109 用角色门顶着并记后续，L1-20260916-101 对 T0705 又做了一次）；字段集由 `docs/11:21` 点名五项。这是「读到了定义就停下、没往下读理由」的又一处（见 decisions.md L1-118）。\n（二）**权限矩阵那一格我不给你**：`specs/policies/**` 是 Supervisor-only。照 `settings.go:29-33` 的先例——用默认拒绝的角色门，把「补矩阵行」写进 RESULT 交给我。**不要自己发明一条权限规则。**\n（三）**`cover` 你大概做不了，这是已知的，不扣分**：blob 面上今天没有签名 URL 与 TTL（`internal/storage/doc.go` 只有脚手架）。要么用既有的公开 blob 引用，要么在 RESULT 里说明并留出字段——**不要新增上传通道**，那是 T1106 的范围。\n（四）**迁移号不在这份任务书里定死**——派工时由 `rddev` 从分配账上取号并写进任务包，**以任务包里那行「its number is **NNNNN**」为准**。**不得自行选号。** 若你判断本任务根本不需要迁移（例如既有列已够用），那就不建——在 RESULT 里说明理由。",
-  "tests": [
-    "asset metadata tests"
+  "requirements": [
+    "**这一条规则已经写死了，照它做**：`docs/11_RELEASE_ASSET_HUB.md:21` 原文——「Scientific Version 不可变；描述、keywords、cover、contact、documentation 等 Asset Metadata 可独立 revision，保留 audit，不产生新的 scientific version。」也就是说：元数据**改得**，而且**改完不许动 scientific version，也不许产生新版本**。",
+    "**「追加一行还是改列 + 审计」这个先例仓库里有，而且是合并过的**：`internal/application/projects/settings.go:35-43` 逐字写着——每个 owner/maintainer 动作都在**与状态变更同一个事务里**写一行 `audit_log`，带 actor id、via、action、target、project 和该请求的 correlation id。`UpdateSettings`（`:132`）就是照这个形状改一个可变元数据字段的，带 before/after（`:190`、`:215-216`）。审计表的 `before_summary`/`after_summary` 两列就是为这件事存在的（`infra/migrations/00012_events_audit.sql:52-53`）。**照这个形状办，不要发明第二种。**",
+    "**元数据不是 scientific version，这条边界已经在代码注释里写死了，照着守**：`internal/application/assetpublish/command.go:197`（publishing a version is not an asset-metadata revision）、`cmd/api/assetshttp/publish.go:47-51`（a publish that names an existing asset refuses them — asset metadata is revised on its own surface）、`internal/assets/doc.go:58-61`。**你要建的是那条「它自己的面」。**",
+    "**`slug` 是可改的显示级元数据，但它绝不能进入身份或持久 URL**：`internal/assets/asset.go:144-146` 逐字（Slug is display-level, revisable metadata (docs/11 §4) — it never appears in an identity or a persistent URL），并由 `infra/migrations/00064_asset_pid_origin.sql:8-16` 保证——slug 改名与组织转移都不动 pid、因此也不动 `/assets/{pid}`。**改名后 pid 与公开 URL 必须一字不变，而且要有测试钉住。**",
+    "**谁能改：用角色门，并把「矩阵缺行」记成后续，不要自己发明权限**。先例是 `internal/application/projects/settings.go:29-33`——矩阵里没有设置/成员管理那一行时，用**默认拒绝的服务器端角色门**顶着，并把「补矩阵行」记成给 Supervisor 的后续；T0109 就是照这个形状验收的。本任务照办：`specs/policies/permissions-matrix.csv` **是 Supervisor-only 的规格文件，你不要改它**（`tasks/decisions.md:8531` 的 L1-20260916-101 对 T0705 是同一条处置）。",
+    "**`cover` 这一类要是做不了，就说明理由并留出位置，不要硬造**：`docs/11:21` 把 cover 列进可修订的元数据，但今天的 blob 存储面**没有签名 URL、没有 TTL**（`internal/storage/doc.go` 只有三行 T0602 之前的脚手架，全树没有 presign 代码）。**如果 cover 需要 blob 而 blob 面上没有路，在 RESULT 里点名说明并把字段留出来，不要为了凑齐五项而造一条上传通道**（那属于 T1106 的范围）。",
+    "**不得为了让页面好写而绕开审计或角色门**（CLAUDE.md §5.1）：不得把审计行写成「尽力而为」（必须同事务）、不得把拒绝写成两种不同的答复、不得放宽「不产生新 scientific version」这条。",
+    "**不做**：不改 `specs/**`（尤其不要动规格指纹）、不新增契约之外的权限规则、不改 `internal/rights/**` 的判定、不碰 blob 上传/下载通道、不改 `apps/web/**` 里与本页无关的东西。"
   ],
-  "dependencies": [
-    "T0705"
-  ]
+  "scope_note": "这是**按本任务的实际交付面**收窄后的范围，不是 phase 级默认上限。逐条说明：保留 `infra/migrations/**` + `specs/database/postgres.sql` + `specs/SPEC_VERSION.json`（要加元数据列，并按 `specs/orchestrator/derived-artifacts.json` 的规则重新生成快照与指纹）；加 `internal/persistence/**`（sqlc 产物派生自迁移目录，改 schema 却够不到查询层会被收工拒绝——见 decisions.md L1-119）；加 `internal/application/**`、`internal/authz/**`、`internal/domain/**`（要建应用层服务、接角色门、用共享的 audit 动作名）；移出 `specs/policies/**`（权限矩阵是 Supervisor-only）、`internal/rights/**`（本任务只按既有判定读，不改它）、`internal/storage/**` 与 `scripts/**`、`Makefile`（cover 若需要 blob 通道，那是 T1106 的事）。",
+  "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 裁定）——按 `internal/application/projects/settings.go` 的既有形状办：就地改列 + 与状态变更同一事务写一行 `audit_log`。**\n\n裁定原文：**不采用「追加一条修订行」**。元数据修订 = 就地更新可变列 + 同事务写 audit 行（before/after 进 `before_summary`/`after_summary`，`infra/migrations/00012_events_audit.sql:52-53` 那两列就是为它存在的），并写该请求的 correlation id。\n\n依据：\n- `docs/11_RELEASE_ASSET_HUB.md:21` 逐字「Scientific Version 不可变；描述、keywords、cover、contact、documentation 等 Asset Metadata 可独立 revision，保留 audit，不产生新的 scientific version」——「保留 audit」正是那两列的存在理由；\n- 追加修订行会让「资产元数据」与「scientific version」两条版本流并存，而 `docs/11:21` 恰恰不许元数据产生新版本；\n- 谁能改：矩阵里没有这一行，按 `settings.go:29-33` 的先例用**默认拒绝的服务器端角色门**（owner/maintainer）顶着，并把「补矩阵行」记进 RESULT 的 follow_up 给我；**不要**自己往 `specs/policies/permissions-matrix.csv` 加行。\n- `cover` 若需要 blob 面上不存在的通道（签名 URL/TTL），按任务书原文点名留位，**不要**为了凑齐五项而造一条上传通道（那是 T1106 的范围）。",
+  "title": "Asset Metadata Revision",
+  "v1_required": true
 }

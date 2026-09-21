@@ -1,0 +1,74 @@
+{
+  "id": "T1106",
+  "phase": "P11",
+  "phase_name": "UI、安全、可访问性、性能与运维加固",
+  "title": "API/Upload 安全加固",
+  "v1_required": true,
+  "dependencies": [
+    "T0307",
+    "T0705"
+  ],
+  "requirements": [
+    "**先把「加固面在哪」说清楚，不要重新发现一遍。** 2026-09-21 复核（逐条核过，你可以复核我）：① **CSP / secure headers 全树为零**——`internal`、`cmd`、`apps` 里没有任何 `Content-Security-Policy`、`X-Frame-Options`、`Strict-Transport-Security`，`cmd/api/main.go:1140` 的 handler 链上只有 `observability.Middleware(logger)`；② **限流只有 authn 一处**——`internal/application/authn`（`service.go:44`/`:96` 逐字「rate-limited per email and per …」、`errors.go` 的「authn: rate limited (retry after %s)」），且是**内嵌在登录逻辑里**的，不是可复用的中间件；③ **SSRF 已经交付，别重做**（见第 5 条）；④ **上传面只有契约、没有实现**（见第 6 条）。所以本任务实际可做的加固是：**限流推广、响应头、出站字节与前端渲染的守卫**。",
+    "**限流（`docs/23_SECURITY_PRIVACY.md:29` 的 `rate limiting` + `login brute force protection`）**：把 authn 现有的限流**抽成共享中间件**，挂到**所有未认证即可到达的入口**（至少：登录/注册、公开读路由、external reference 触发点）。超限必须返回 **429 且带 `Retry-After`**（照 authn 既有错误的形状）。**限流器自身出错时必须拒绝请求（fail-closed），不得放行**——这一条要有用例。key 怎么取（匿名按 IP、已认证按 user/token）、窗口与阈值，由你定，**逐项写进 RESULT**。",
+    "**安全响应头（`docs/23:29` 的 `secure headers`、`CSP`、`SameSite`）**：API 侧加统一中间件；web 侧在 Next.js 配置里落 CSP（说明你选了哪些指令、是否用 nonce、是否 report-only、为什么这样能与 Next 共存）。**不新增任何依赖服务**（不许引 CSRF/CSP 的第三方托管服务）。",
+    "**出站字节永不解释执行（`docs/23:25` 逐字「Content-Disposition 安全、恶意文件扫描 hook、HTML/SVG active content sandbox、preview sanitization」）**：今天唯一把字节交给浏览器的出口是 `cmd/api/fileshttp/files.go:316-317`（`attachment` + `nosniff`）、`:349`（`nosniff`）与 `cmd/api/releasehttp/release_handlers.go:251`（`attachment`）。把「凡把字节交给浏览器的出口，必须是 `attachment` + `nosniff`」写成**能说不会**的守卫测试（见验收标准第 3 条），并覆盖到所有这类出口——**含新出现的出口**（守卫要能对新出口报警，而不是只钉死今天这三处）。",
+    "**SSRF 与 CSRF：不重做。** `docs/54_SECURITY_THREAT_MODEL.md:14`（「External Reference fetch SSRF 内网」）与 `docs/23:29` 的这两个面**已由 T0508 交付**，现在树里在 `internal/rsg/externalref/fetch.go`、`internal/rsg/externalref/doi.go`、`internal/events/webhook.go`、`internal/events/deliver.go`。你要做的是**指认**：在 RESULT 里逐个给出「文件:行 + 用例名 + 我能直接跑的命令」。**不许**复制一份、也不许重写。如果你复核后发现某条真的缺，照实报回来，不要顺手补。",
+    "**上传签名 TTL：本任务**不做**，并且**禁止**自己造通道。** 规格确实写了它（`docs/23:25` 的 `signed URL 短 TTL`），但它**今天没有可加固的面**，证据如下，你要自己复核一遍并写进 RESULT：① 契约只有两行占位——`specs/api/openapi.yaml:234` 的 `/projects/{projectId}/branches/{branchId}/blobs:request-upload` 与 `:242` 的 `…/{blobId}:finalize`，两者的响应都只有一句 description，**没有 requestBody、没有 schema**；② **没有路由、没有 handler**——`grep -rn 'blobs' cmd/api/main.go` 为空；③ **没有生产调用者**——`internal/persistence/queries/blobs.sql` 的 `CreateBlob`/`AttachBlob`/`MarkBlobIntegrity` 在 `internal` 与 `cmd` 里除 sqlc 生成物外**无调用者**，`internal/rsg/manifest/manifest.go` 的注释逐字写着 `no writer mutates them today`；④ **存储通道是脚手架**——`internal/storage/doc.go` 只有包注释，`cmd/api/backupdr/s3.go:23` 逐字写着 `internal/storage port (still a scaffold — doc.go and nothing else)`，`go.mod` 里也没有 S3/MinIO 客户端。**结论：没有上传面，就没有可加固的上传面。** 真要做它就得新建对象存储通道或引入第三方签名服务——那需要新的外部凭证，**不是你能决定的，也不是我能顺手决定的**。你要做的是：把这个结论**带证据**写进 RESULT，并把「TTL 语义将来该长什么样」写进 follow_up（建议：pending 的 blob 超过 TTL 不得被 attach；`blobs` 表需要一列 `expires_at`，属新迁移）。**不要写任何相关代码。**",
+    "**前端不渲染用户内容**：`apps/web` 全树唯一一处 `dangerouslySetInnerHTML` 是静态字面量（`apps/web/app/(main)/explore/page.tsx:58`，`<noscript>` 里的 CSS 常量）。要求一条**源码扫描守卫测试**：只允许字面量用法，出现变量/表达式/拼接即红。**不许**用「把那一处删掉」来让守卫通过。",
+    "**OWASP smoke（`docs/23:45` 的 `OWASP smoke`，`docs/31_MASTER_ACCEPTANCE.md` 的 Release 闸）**：交一条**一条命令就能跑**的 `tests/security/owasp-smoke.sh`，断言见验收标准；失败时非零退出。它是给 T1206/T1207 出可复现证据用的入口，所以**不要**只在某个 Go 测试文件里埋着。",
+    "**边界**：不改 `specs/**`、`docs/**`、`tasks/**`、`infra/migrations/**`；**不要改 `.github/workflows/ci.yml`**——CI 的每一步都在 `specs/orchestrator/gates.json` 里有对应条目，`internal/devorchestrator` 的 `TestGatesSpecSyncsWithCIWorkflow` 会在两边不一致时红，而 `specs/**` 只有我能改。你要接的入口是 `make`，我给你接 CI。**不新增第三方依赖**（`go.mod`/`go.sum` 若无必要不动）。"
+  ],
+  "deliverables": [
+    "限流中间件（抽自 authn 的既有实现）+ 其测试",
+    "安全响应头中间件（API 侧）+ web 侧 CSP 配置 + 其测试",
+    "出站字节 Content-Disposition/nosniff 守卫测试（能说不会，且对新出口报警）",
+    "dangerouslySetInnerHTML 源码守卫测试（能说不会）",
+    "tests/security/owasp-smoke.sh（一条命令，非零退出）",
+    "RESULT：SSRF/CSRF 逐条指认（文件:行 + 用例名 + 命令）、上传面结论与四项证据、全部阈值/指令集的取值"
+  ],
+  "acceptance_criteria": [
+    "**限流能生效、也能说不会**：① 同一 key 连打，第 N+1 次得 429 且带 `Retry-After`；② **限流器故障时请求被拒**（fail-closed，不是放行）；③ 两条用例各要**当场演示能红**（RESULT 里写「把中间件摘掉 / 把阈值放大则哪条断言转红」的实测）。阈值与你取的 key 写进 RESULT。",
+    "**响应头逐条断言、且能红**：测试要断言**具体的头与具体的值**（不接受「存在即可」）；`Server` 头不得带版本号；带凭证的路由不得回 `Access-Control-Allow-Origin: *`。RESULT 里附「把中间件摘掉则本测试转红」的实测。",
+    "**字节出站守卫能说不会**：把 `attachment` 改成 `inline`、或删掉 `nosniff`，守卫测试必须红——**当场演示并把输出贴进 RESULT**，然后改回。守卫还要能对**新出现的**出站出口报警（不是只钉死今天这三处）：说明你的判据是什么。",
+    "**前端守卫能说不会**：临时往 `apps/web` 加一处非字面量的 `dangerouslySetInnerHTML`，守卫必须红——当场演示、然后改回。RESULT 里写明守卫的判据与豁免名单（今天应当只有 `explore/page.tsx:58` 那一处）。",
+    "**SSRF/CSRF 只指认、不重做**：RESULT 里逐条给出「文件:行 + 用例名 + 命令」，我复核时能直接跑；并且 diff 里**没有**任何对 `internal/rsg/externalref/**`、`internal/events/**` 的重复实现（只在确实缺守卫时才有例外，且要单独说明）。",
+    "**上传面：结论有证据、代码长为零**：RESULT 里点名第 6 条的四项证据（并附你自己复核的命令与输出）；diff 里**没有**任何新的上传 handler、对象存储通道、签名服务、`blobs` 相关的写路径代码。**若你写了，这条直接判红。**",
+    "**一条命令的 OWASP smoke**：`bash tests/security/owasp-smoke.sh` 一次跑通、失败非零；把它**原样输出**贴进 RESULT。数据要真实（真起 API 进程或真 `httptest` server，不是断言一个纸面清单）。",
+    "**不碰 CI**：`git diff --name-only` 里**没有** `.github/workflows/**`；`specs/**`、`docs/**`、`tasks/**`、`infra/migrations/**` 也都没有。若有，说明理由并停下报我。",
+    "**基础门绿**：`gofmt -l` 空、`go vet ./...`、`make lint`、以及你新增的测试在新树上绿；`go.mod`/`go.sum` 未动（若动了，说明是哪个依赖、为什么不能用标准库）。"
+  ],
+  "allowed_scope": [
+    "internal/**",
+    "cmd/**",
+    "apps/web/**",
+    "tests/**",
+    "go.mod",
+    "go.sum",
+    ".env.example",
+    "ops/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/task_status.json",
+    "tasks/progress.md",
+    ".github/workflows/**",
+    "specs/**",
+    "docs/**",
+    "tasks/**",
+    "infra/migrations/**"
+  ],
+  "decision_level_max": "L1",
+  "relevant_specs": [
+    "docs/23_SECURITY_PRIVACY.md",
+    "docs/54_SECURITY_THREAT_MODEL.md",
+    "docs/17_FILES_STORAGE.md",
+    "docs/19_EXTERNAL_REFERENCES.md",
+    "docs/45_ERROR_MODEL.md",
+    "docs/31_MASTER_ACCEPTANCE.md",
+    "docs/26_OBSERVABILITY.md"
+  ],
+  "scope_note": "安全加固里**今天真的存在的那部分**：限流推广、响应头、出站字节与前端渲染的守卫。上传 TTL 与 SSRF 两条按裁定处理（前者无面可加固、后者已交付），见 supervisor_scope_narrowing。范围收窄：去掉 specs/** 与 infra/**（本任务不需要迁移、不需要改 schema），去掉 .github/**。",
+  "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 裁定）——这批加固按仓库现有默认值落地；每一项的具体取值由你在 RESULT 里逐项点名，我复核后写进 `tasks/decisions.md`。**\n\n阈值、指令集、豁免名单这类东西**没有任何一份规格写过数**，它们是工程常数（L1），所以「取一个能通过 OWASP smoke 与负向用例的保守值」不改变任何既定语义。规格只写了**要求**，在这里：\n`docs/23_SECURITY_PRIVACY.md:25`（Blob：`signed URL 短 TTL`、`Content-Disposition 安全`、`HTML/SVG active content sandbox`、`preview sanitization`）、`:29`（Web：`CSP`、`CSRF`、`secure headers`、`SameSite`、`rate limiting`、`login brute force protection`、`SSRF guard`、`URL allow/deny strategy`）、`:45`（Release 闸：`OWASP smoke`）。**没有一个阈值是有规格依据的**——所以不要去找一个「正确的数」，取一个说得通的保守值并**把理由写下来**。\n\n**已经交付的两条不重做**：SSRF（`docs/54:14`）与 CSRF 面由 **T0508** 交付，落在 `internal/rsg/externalref/fetch.go`、`internal/rsg/externalref/doi.go`、`internal/events/webhook.go`、`internal/events/deliver.go`。你的活儿是**指认**它们（文件:行 + 用例名 + 命令），不是重写。重写会把已验收的东西变成未验收的东西。\n\n**上传签名 TTL 那条：接口本身是占位**（`specs/api/openapi.yaml:234`/`:242`，只有一句 description，没有 schema），**没有路由、没有 handler、没有生产调用者，存储端口是脚手架**（`internal/storage`；`cmd/api/backupdr/s3.go:23` 逐字「still a scaffold — doc.go and nothing else」）。本任务**只做服务端校验与 TTL 语义的将来形状**——**不新建对象存储通道、不引第三方签名服务**（那需要新的外部凭证，属于我必须停下的情形）。你在这条上的交付是**结论与证据**，不是代码；写了代码这条直接判红。\n\n**为什么范围里没有 `specs/**` 和 `infra/**`**：本任务**不改 schema、不需要迁移**，所以不该碰派生件。这不是省事——一个改动里只要带上被重新生成过的 `specs/SPEC_VERSION.json` 或 `specs/database/postgres.sql`，G2 的合成器（`git apply`）在 main 一动之后就会拒收（`specs/orchestrator/derived-artifacts.json` 逐字：生成物要重新生成、不能当文本合），于是每次都要多一轮 rebaseline。**把派生件排除在外，就是让这轮返工不发生。**\n\n**为什么范围里没有 `.github/**`**：CI 的每一步在 `specs/orchestrator/gates.json` 里都有对应条目，`internal/devorchestrator` 的 `TestGatesSpecSyncsWithCIWorkflow` 会逐条比对；你改 CI 而不改 gates.json，主干立刻红，而 gates.json 只有我能改。**你交可跑的命令（`tests/security/owasp-smoke.sh` 与一个 make 目标），接进 CI 是我的事。**\n\n**最后一条纪律（CLAUDE.md §6）**：**不许为了让门变绿删断言、skip、放宽、放大 timeout**。OWASP smoke 真跑出问题，照实写 `failed`/`blocked` 并给证据；「这条我没做」比「这条我标成 not_applicable」值钱。"
+}
