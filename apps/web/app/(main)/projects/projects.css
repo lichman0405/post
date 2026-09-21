@@ -1324,7 +1324,7 @@
   gap: 24px;
   padding: 18px;
   border-bottom: 1px solid #d8dee4;
-  background: linear-gradient(135deg, #fff8c5, #fff);
+  background: #fff8c5;
 }
 
 .release-readiness-kicker {
