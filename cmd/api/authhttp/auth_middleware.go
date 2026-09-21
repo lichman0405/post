@@ -88,7 +88,13 @@ func PrincipalID(ctx context.Context) string {
 }
 
 const (
-	cookieSession  = "post_session"
+	// CookieSession is the session cookie's name. Exported so the edge
+	// middleware (internal/security) keys its per-session rate-limit
+	// bucket on the same cookie this guard resolves: two independent
+	// spellings of the name would let one request be "authenticated" for
+	// the guard and "anonymous" for the limiter.
+	CookieSession  = "post_session"
+	cookieSession  = CookieSession
 	cookieOIDC     = "post_oidc_state"
 	headerCSRF     = "X-CSRF-Token"
 	headerOrigin   = "Origin"
