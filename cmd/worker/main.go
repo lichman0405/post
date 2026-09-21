@@ -59,6 +59,15 @@
 // composition step that makes the ledger record facts in production. Its
 // via column is filled from the event envelope, and the write paths that
 // know their channel now declare it (internal/events).
+//
+// T1007: the dependency impact analysis is mounted — an eighth goroutine
+// over the same pool consumes the published event log (abort, supersede,
+// new version, reopen, asset version publish) and, for each change whose
+// subject has dependents, emits the registered `dependency.impact_detected`
+// alert per affected entity, marking review required and changing nothing
+// else (docs/19 §3, docs/18 §5). It reads the event log rather than a
+// request, which is what 「上游变更触发」 means: there is no HTTP route that
+// runs it, and a test asserts that cmd/api registers none.
 package main
 
 import (
@@ -80,6 +89,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	appcontribution "github.com/lichman0405/post/internal/application/contribution"
+	"github.com/lichman0405/post/internal/application/dependencyimpact"
 	"github.com/lichman0405/post/internal/application/notifications"
 	"github.com/lichman0405/post/internal/config"
 	"github.com/lichman0405/post/internal/contribution"
@@ -345,6 +355,32 @@ func run(args []string) int {
 		defer pipelineWG.Done()
 		_ = ledgerProjector.Run(ctx)
 	}()
+	// The dependency impact analysis (T1007), the eighth consumer of the same
+	// pool — and the only one that runs off the log itself rather than off a
+	// request. docs/19 §3's 「上游变更触发 impact analysis」 is what it
+	// implements: it reads the trigger events (abort, supersede, new version,
+	// reopen, asset version publish) that have no alert of their own yet,
+	// walks the dependency graph downstream of each one and records one
+	// `dependency.impact_detected` alert per affected entity. It marks review
+	// required and changes nothing else: each alert is an outbox row, which
+	// the dispatcher above publishes into the same append-only log the
+	// subscriptions and webhooks read, so the alert reaches the affected
+	// project's members through the pipeline that already exists
+	// (docs/18 §5).
+	//
+	// No cursor and no claim row: the alert's own payload key is the
+	// progress (migration 00111's partial unique index dedupes on
+	// (trigger_event_id, affected_kind, affected_id)), so a re-run after a
+	// restart re-derives and finds its alerts already written. It joins the
+	// same wait group and stops on ctx cancellation like every other
+	// consumer.
+	impactProjector := dependencyimpact.NewProjector(
+		persistence.NewDependencyImpactStore(pool), dependencyimpact.WithLogger(logger))
+	pipelineWG.Add(1)
+	go func() {
+		defer pipelineWG.Done()
+		_ = impactProjector.Run(ctx)
+	}()
 	// The email digest sender (T1005), the last consumer of the same pool:
 	// it claims the pending email rows the subscription fan-out writes, when
 	// the subscriber's cadence says a digest is due, re-authorizes every
@@ -409,7 +445,13 @@ func run(args []string) int {
 		// ledger projector says nothing on a pass with no candidates, so
 		// "the ledger is running and there was nothing to project" and "the
 		// ledger is not running at all" must not look the same in the log.
-		"contribution_ledger", "research_events -> contribution_events")
+		"contribution_ledger", "research_events -> contribution_events",
+		// The same statement for the impact analysis, and for the same
+		// reason with one more: it is triggered by an upstream change and
+		// not by a request, so if it were absent there would be nothing
+		// anywhere else in the system that could tell an operator the
+		// alerts were never produced.
+		"dependency_impact", "research_events -> dependency.impact_detected alerts")
 	if err := loop.Run(ctx); err != nil {
 		slog.Error("post-worker loop failed", "error", err)
 		return exitRuntime

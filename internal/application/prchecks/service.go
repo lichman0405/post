@@ -24,6 +24,12 @@ type Service struct {
 	manifest ManifestReader
 	policies PolicyLister
 	engine   *integrity.Engine
+	// impact is the dependency impact line of the PR first screen
+	// (impact.go, docs/06 §6). It is OPTIONAL in the sense that the engine's
+	// check does not need it, and required in the sense that matters:
+	// PullRequestImpact refuses to answer without it rather than returning an
+	// empty report, which would render as "nothing is affected".
+	impact ImpactReader
 }
 
 // Deps carries the adapters the service needs. Every port is a narrow
@@ -38,6 +44,12 @@ type Deps struct {
 	Manifest ManifestReader
 	Policies PolicyLister
 	Engine   *integrity.Engine
+	// Impact is the dependency impact read surface behind the PR first
+	// screen's impact line (impact.go). A composition root that omits it
+	// leaves PullRequestImpact answering ErrStore — the check endpoint is
+	// unaffected, and the impact line fails closed rather than rendering an
+	// empty "nothing downstream is affected".
+	Impact ImpactReader
 }
 
 // NewService wires the service.
@@ -50,6 +62,7 @@ func NewService(deps Deps) *Service {
 		manifest: deps.Manifest,
 		policies: deps.Policies,
 		engine:   deps.Engine,
+		impact:   deps.Impact,
 	}
 }
 

@@ -92,12 +92,69 @@ func (Recorder) Record(ctx context.Context, db DBTX, e Event) error {
 // whose event was silently dropped would have lost the event — the one
 // thing the outbox exists to prevent.
 func Record(ctx context.Context, db DBTX, e Event) error {
-	if err := e.validate(); err != nil {
+	args, err := prepare(ctx, e)
+	if err != nil {
 		return err
+	}
+	if _, err := db.Exec(ctx, insertOutboxEvent, args...); err != nil {
+		return fmt.Errorf("events: record %s: %w", e.EventType, err)
+	}
+	return nil
+}
+
+// RecordIdempotent records e like Record, but never writes the same event
+// twice. The duplicate decision belongs to the DATABASE: the statement
+// carries ON CONFLICT DO NOTHING, so a retry, a replay or two concurrent
+// producers converge on one row, and it reports whether THIS call is the
+// one that wrote it.
+//
+// It exists for the one producer whose events are derived rather than
+// willed: dependency impact analysis reads the event log and emits an alert
+// per (trigger, affected) pair, so the same upstream change replayed — by a
+// restarted worker, a re-scan, a second process — must not produce a second
+// alert. That producer's dedupe key is the caller's payload, and the index
+// it conflicts against is partial on the event type
+// (infra/migrations/00111_dependency_impact.sql), so no other producer's
+// events are constrained by it. A producer with a different key gets a
+// different partial index; passing a key this one does not carry would
+// silently stop deduplicating, which is why the key is stated at the index
+// and measured where the two meet:
+// tests/integration/dependency_impact_test.go replays a stored alert's own
+// payload through this function and reads the verdict back (refused with the
+// row present, accepted once it is gone, refused again after that) — three
+// answers on one payload, which is what makes the dedupe a fact about the
+// table rather than about this call.
+//
+// The one difference from Record: a conflict here is a NORMAL outcome
+// (inserted=false, nil error), while for Record it is a caller error. The
+// rest of the contract is shared — the same validation, the same envelope
+// rules, the same correlation-id resolution — because they are the same
+// write (prepare).
+func RecordIdempotent(ctx context.Context, db DBTX, e Event) (inserted bool, err error) {
+	args, err := prepare(ctx, e)
+	if err != nil {
+		return false, err
+	}
+	tag, err := db.Exec(ctx, insertOutboxEventIdempotent, args...)
+	if err != nil {
+		return false, fmt.Errorf("events: record %s: %w", e.EventType, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// prepare validates e and renders the outbox insert's arguments. Both
+// record paths go through it so that what an event IS — the fail-closed
+// validation, the payload_version envelope field, the correlation id that
+// falls back to the request context and then to a fresh uuid — has one
+// definition. A second copy would be a second contract for the same
+// message.
+func prepare(ctx context.Context, e Event) ([]any, error) {
+	if err := e.validate(); err != nil {
+		return nil, err
 	}
 	payload, err := withPayloadVersion(e.Payload)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	correlationID := e.CorrelationID
 	if correlationID == "" {
@@ -108,15 +165,13 @@ func Record(ctx context.Context, db DBTX, e Event) error {
 	if correlationID == "" {
 		correlationID, err = newUUID()
 		if err != nil {
-			return fmt.Errorf("events: correlation id: %w", err)
+			return nil, fmt.Errorf("events: correlation id: %w", err)
 		}
 	}
-	if _, err := db.Exec(ctx, insertOutboxEvent,
+	return []any{
 		e.EventType, nullableText(e.ActorID), nullableText(e.ProjectID),
-		e.Visibility, payload, correlationID, nullableVia(e.Via)); err != nil {
-		return fmt.Errorf("events: record %s: %w", e.EventType, err)
-	}
-	return nil
+		e.Visibility, payload, correlationID, nullableVia(e.Via),
+	}, nil
 }
 
 // The via column is appended LAST so the argument positions of the
@@ -125,6 +180,14 @@ func Record(ctx context.Context, db DBTX, e Event) error {
 const insertOutboxEvent = `
 INSERT INTO outbox_events (event_type, actor_id, project_id, visibility, payload, correlation_id, via)
 VALUES ($1, $2, $3, $4, $5, $6, $7)`
+
+// insertOutboxEventIdempotent is the same insert with the duplicate
+// absorbed, for the derived producers RecordIdempotent documents. The bare
+// ON CONFLICT (no target) covers every unique index on the table: the
+// producer-specific ones are partial, so a row outside their predicate is
+// unconstrained by them.
+const insertOutboxEventIdempotent = insertOutboxEvent + `
+ON CONFLICT DO NOTHING`
 
 // validate checks the event's shape before it reaches the database: the
 // producer-facing contract, kept strict so a programming error fails the
