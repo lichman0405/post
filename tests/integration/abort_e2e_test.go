@@ -181,8 +181,12 @@ func abortBody(versionID, reasonCode, explanation, replacementRef string) string
 
 // versionRow is one scientific_object_versions row read back column by
 // column. Every column of the canonical table is here, including the six
-// migration 00100 added, so "byte-identical" below is a claim about the whole
-// row rather than about the columns this task happens to care about.
+// migration 00100 added and the five T0610 added (00123), so "byte-identical"
+// below is a claim about the whole row rather than about the columns this
+// task happens to care about — and it STAYS that claim as the table grows,
+// which is why the reopen columns are listed here rather than in a second
+// reader: a reader that named only the columns its own task added would let
+// the other task's rows change under it unnoticed.
 type versionRow struct {
 	id                 string
 	objectID           string
@@ -204,13 +208,20 @@ type versionRow struct {
 	abortedBy          *string
 	abortedAt          *time.Time
 	abortRequestKey    *string
+	reopenReasonCode   *string
+	reopenExplanation  *string
+	reopenedBy         *string
+	reopenedAt         *time.Time
+	reopenRequestKey   *string
 }
 
 const versionRowColumns = `id::text, object_id::text, version_no, state_id::text, branch_id::text,
 	schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id::text,
 	integrity_hash, created_by::text, created_at,
 	abort_reason_code, abort_explanation, abort_replacement_ref, aborted_by::text,
-	aborted_at, abort_request_key`
+	aborted_at, abort_request_key,
+	reopen_reason_code, reopen_explanation, reopened_by::text, reopened_at,
+	reopen_request_key`
 
 // readVersion reads one version row straight out of the canonical table.
 func readVersion(t *testing.T, ctx context.Context, pool *pgxpool.Pool, versionID string) versionRow {
@@ -221,7 +232,9 @@ func readVersion(t *testing.T, ctx context.Context, pool *pgxpool.Pool, versionI
 		versionID).Scan(&r.id, &r.objectID, &r.versionNo, &r.stateID, &r.branchID, &r.schemaID,
 		&r.schemaVersion, &r.title, &r.lifecycleState, &r.payload, &r.visibilityPolicyID,
 		&r.integrityHash, &r.createdBy, &r.createdAt, &r.abortReasonCode, &r.abortExplanation,
-		&r.abortReplacement, &r.abortedBy, &r.abortedAt, &r.abortRequestKey); err != nil {
+		&r.abortReplacement, &r.abortedBy, &r.abortedAt, &r.abortRequestKey,
+		&r.reopenReasonCode, &r.reopenExplanation, &r.reopenedBy, &r.reopenedAt,
+		&r.reopenRequestKey); err != nil {
 		t.Fatalf("read version %s: %v", versionID, err)
 	}
 	return r
@@ -234,12 +247,15 @@ func (r versionRow) describe() string {
 	return fmt.Sprintf("id=%s object_id=%s version_no=%d state_id=%s branch_id=%v schema_id=%s "+
 		"schema_version=%s title=%s lifecycle_state=%s payload=%s visibility_policy_id=%v "+
 		"integrity_hash=%s created_by=%s created_at=%s abort_reason_code=%v abort_explanation=%v "+
-		"abort_replacement_ref=%v aborted_by=%v aborted_at=%v abort_request_key=%v",
+		"abort_replacement_ref=%v aborted_by=%v aborted_at=%v abort_request_key=%v "+
+		"reopen_reason_code=%v reopen_explanation=%v reopened_by=%v reopened_at=%v reopen_request_key=%v",
 		r.id, r.objectID, r.versionNo, r.stateID, ptrText(r.branchID), r.schemaID, r.schemaVersion,
 		r.title, r.lifecycleState, string(r.payload), ptrText(r.visibilityPolicyID),
 		r.integrityHash, r.createdBy, r.createdAt.UTC().Format(time.RFC3339Nano),
 		ptrText(r.abortReasonCode), ptrText(r.abortExplanation), ptrText(r.abortReplacement),
-		ptrText(r.abortedBy), r.abortedAt, ptrText(r.abortRequestKey))
+		ptrText(r.abortedBy), r.abortedAt, ptrText(r.abortRequestKey),
+		ptrText(r.reopenReasonCode), ptrText(r.reopenExplanation), ptrText(r.reopenedBy),
+		r.reopenedAt, ptrText(r.reopenRequestKey))
 }
 
 func ptrText(p *string) string {
@@ -265,7 +281,9 @@ func versionsOfObject(t *testing.T, ctx context.Context, pool *pgxpool.Pool, obj
 		if err := rows.Scan(&r.id, &r.objectID, &r.versionNo, &r.stateID, &r.branchID, &r.schemaID,
 			&r.schemaVersion, &r.title, &r.lifecycleState, &r.payload, &r.visibilityPolicyID,
 			&r.integrityHash, &r.createdBy, &r.createdAt, &r.abortReasonCode, &r.abortExplanation,
-			&r.abortReplacement, &r.abortedBy, &r.abortedAt, &r.abortRequestKey); err != nil {
+			&r.abortReplacement, &r.abortedBy, &r.abortedAt, &r.abortRequestKey,
+			&r.reopenReasonCode, &r.reopenExplanation, &r.reopenedBy, &r.reopenedAt,
+			&r.reopenRequestKey); err != nil {
 			t.Fatalf("scan a version row of %s: %v", objectID, err)
 		}
 		out = append(out, r)

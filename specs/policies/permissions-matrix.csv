@@ -12,5 +12,6 @@ create_release,deny,deny,deny,deny,allow,allow,proposal_only
 publish_private_to_public,deny,deny,deny,deny,conditional,allow,deny
 change_rights_holder,deny,deny,deny,deny,deny,allow,deny
 abort_main_object,deny,deny,deny,deny,via_pr,via_pr,proposal_only
+reopen_main_object,deny,deny,deny,deny,via_pr,via_pr,proposal_only
 read_files,public_policy,authorized,authorized,authorized,authorized,authorized,allow_if_authorized
 mutate_files_web,deny,deny,deny,deny,deny,deny,deny

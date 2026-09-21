@@ -36,6 +36,15 @@ const (
 	ActionChangeRightsHolder Action = "change_rights_holder"
 	// ActionAbortMainObject aborts a main-branch object (T0602).
 	ActionAbortMainObject Action = "abort_main_object"
+	// ActionReopenMainObject reopens a main-branch object that is in
+	// lifecycle 'reopened' — the reverse edge of the abort above (T0610,
+	// docs/43's object lifecycle "active → aborted → reopened → active").
+	// It is a row of the matrix in its own right, not a reuse of
+	// write_scientific_state: the ruling recorded for T0610 rejects that
+	// reuse because it would let a contributor undo a maintainer's abort
+	// while being unable to abort at all — a loosening of the permission
+	// model, not a simplification of it.
+	ActionReopenMainObject Action = "reopen_main_object"
 	// ActionReadFiles reads repository files (GitProvider-level).
 	ActionReadFiles Action = "read_files"
 	// ActionMutateFilesWeb mutates repository files through the web

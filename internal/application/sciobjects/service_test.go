@@ -17,10 +17,11 @@ import (
 // mapping and validation rules are exercised against a store that behaves
 // like the real one.
 type fakeRepo struct {
-	mu        sync.Mutex
-	objects   map[string]domain.ScientificObject
-	versions  map[string][]domain.ScientificObjectVersion
-	abortKeys map[string]string // objectID \x00 requestKey -> version id
+	mu         sync.Mutex
+	objects    map[string]domain.ScientificObject
+	versions   map[string][]domain.ScientificObjectVersion
+	abortKeys  map[string]string // objectID \x00 requestKey -> version id
+	reopenKeys map[string]string // the reopen's own index (migration 00123)
 }
 
 func newFakeRepo() *fakeRepo {
@@ -75,7 +76,7 @@ func (f *fakeRepo) CreateVersion(ctx context.Context, objectID string, expected 
 		Title: in.Title, LifecycleState: in.LifecycleState,
 		Payload: in.Payload, VisibilityPolicyID: in.VisibilityPolicyID,
 		IntegrityHash: "hash-next", CreatedBy: in.CreatedBy, CreatedAt: time.Now(),
-		Abort: in.Abort,
+		Abort: in.Abort, Reopen: in.Reopen,
 	}
 	f.versions[objectID] = append(f.versions[objectID], v)
 	if in.AbortRequestKey != "" {
@@ -86,6 +87,16 @@ func (f *fakeRepo) CreateVersion(ctx context.Context, objectID string, expected 
 			f.abortKeys = map[string]string{}
 		}
 		f.abortKeys[objectID+"\x00"+in.AbortRequestKey] = v.ID
+	}
+	if in.ReopenRequestKey != "" {
+		// The reopen's own index (migration 00123), kept apart from the
+		// abort's above: the two commands' keys are two columns in the
+		// adapter, and a fake that merged them would answer one command's
+		// request with the other command's row.
+		if f.reopenKeys == nil {
+			f.reopenKeys = map[string]string{}
+		}
+		f.reopenKeys[objectID+"\x00"+in.ReopenRequestKey] = v.ID
 	}
 	return v, nil
 }
@@ -131,6 +142,28 @@ func (f *fakeRepo) GetVersionByAbortRequestKey(ctx context.Context, objectID, re
 		return domain.ScientificObjectVersion{}, ErrVersionNotFound
 	}
 	versionID, ok := f.abortKeys[objectID+"\x00"+requestKey]
+	if !ok {
+		return domain.ScientificObjectVersion{}, ErrVersionNotFound
+	}
+	for _, v := range f.versions[objectID] {
+		if v.ID == versionID {
+			return v, nil
+		}
+	}
+	return domain.ScientificObjectVersion{}, ErrVersionNotFound
+}
+
+// GetVersionByReopenRequestKey is the reopen command's sibling read (migration
+// 00123). The fake keeps the two keys in two maps for the reason the columns
+// are two columns: one key sent to both commands must not answer with the other
+// command's row, and a fake that shared one map would hide exactly that bug.
+func (f *fakeRepo) GetVersionByReopenRequestKey(ctx context.Context, objectID, requestKey string) (domain.ScientificObjectVersion, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if requestKey == "" {
+		return domain.ScientificObjectVersion{}, ErrVersionNotFound
+	}
+	versionID, ok := f.reopenKeys[objectID+"\x00"+requestKey]
 	if !ok {
 		return domain.ScientificObjectVersion{}, ErrVersionNotFound
 	}

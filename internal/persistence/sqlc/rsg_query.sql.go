@@ -117,7 +117,7 @@ func (q *Queries) ListAdjacentRelationVersions(ctx context.Context, arg ListAdja
 
 const listObjectVersionsAsOf = `-- name: ListObjectVersionsAsOf :many
 
-SELECT DISTINCT ON (so.id) so.id, so.project_id, so.object_type, so.created_by, so.created_at, so.current_version_no, sov.id, sov.object_id, sov.version_no, sov.state_id, sov.branch_id, sov.schema_id, sov.schema_version, sov.title, sov.lifecycle_state, sov.payload, sov.visibility_policy_id, sov.integrity_hash, sov.created_by, sov.created_at, sov.abort_reason_code, sov.abort_explanation, sov.abort_replacement_ref, sov.aborted_by, sov.aborted_at, sov.abort_request_key
+SELECT DISTINCT ON (so.id) so.id, so.project_id, so.object_type, so.created_by, so.created_at, so.current_version_no, sov.id, sov.object_id, sov.version_no, sov.state_id, sov.branch_id, sov.schema_id, sov.schema_version, sov.title, sov.lifecycle_state, sov.payload, sov.visibility_policy_id, sov.integrity_hash, sov.created_by, sov.created_at, sov.abort_reason_code, sov.abort_explanation, sov.abort_replacement_ref, sov.aborted_by, sov.aborted_at, sov.abort_request_key, sov.reopen_reason_code, sov.reopen_explanation, sov.reopened_by, sov.reopened_at, sov.reopen_request_key
 FROM scientific_objects so
 JOIN scientific_object_versions sov ON sov.object_id = so.id
 WHERE ($1::text[] IS NULL OR so.object_type = ANY($1))
@@ -159,6 +159,11 @@ type ListObjectVersionsAsOfRow struct {
 	AbortedBy           pgtype.UUID        `json:"aborted_by"`
 	AbortedAt           pgtype.Timestamptz `json:"aborted_at"`
 	AbortRequestKey     *string            `json:"abort_request_key"`
+	ReopenReasonCode    *string            `json:"reopen_reason_code"`
+	ReopenExplanation   *string            `json:"reopen_explanation"`
+	ReopenedBy          pgtype.UUID        `json:"reopened_by"`
+	ReopenedAt          pgtype.Timestamptz `json:"reopened_at"`
+	ReopenRequestKey    *string            `json:"reopen_request_key"`
 }
 
 // RSG query surface (T0209): as-of version selection and the traversal's
@@ -247,6 +252,11 @@ func (q *Queries) ListObjectVersionsAsOf(ctx context.Context, arg ListObjectVers
 			&i.AbortedBy,
 			&i.AbortedAt,
 			&i.AbortRequestKey,
+			&i.ReopenReasonCode,
+			&i.ReopenExplanation,
+			&i.ReopenedBy,
+			&i.ReopenedAt,
+			&i.ReopenRequestKey,
 		); err != nil {
 			return nil, err
 		}
@@ -259,7 +269,7 @@ func (q *Queries) ListObjectVersionsAsOf(ctx context.Context, arg ListObjectVers
 }
 
 const listObjectVersionsByIDs = `-- name: ListObjectVersionsByIDs :many
-SELECT so.id, so.project_id, so.object_type, so.created_by, so.created_at, so.current_version_no, sov.id, sov.object_id, sov.version_no, sov.state_id, sov.branch_id, sov.schema_id, sov.schema_version, sov.title, sov.lifecycle_state, sov.payload, sov.visibility_policy_id, sov.integrity_hash, sov.created_by, sov.created_at, sov.abort_reason_code, sov.abort_explanation, sov.abort_replacement_ref, sov.aborted_by, sov.aborted_at, sov.abort_request_key
+SELECT so.id, so.project_id, so.object_type, so.created_by, so.created_at, so.current_version_no, sov.id, sov.object_id, sov.version_no, sov.state_id, sov.branch_id, sov.schema_id, sov.schema_version, sov.title, sov.lifecycle_state, sov.payload, sov.visibility_policy_id, sov.integrity_hash, sov.created_by, sov.created_at, sov.abort_reason_code, sov.abort_explanation, sov.abort_replacement_ref, sov.aborted_by, sov.aborted_at, sov.abort_request_key, sov.reopen_reason_code, sov.reopen_explanation, sov.reopened_by, sov.reopened_at, sov.reopen_request_key
 FROM scientific_object_versions sov
 JOIN scientific_objects so ON so.id = sov.object_id
 WHERE sov.id = ANY($1::uuid[])
@@ -293,6 +303,11 @@ type ListObjectVersionsByIDsRow struct {
 	AbortedBy           pgtype.UUID        `json:"aborted_by"`
 	AbortedAt           pgtype.Timestamptz `json:"aborted_at"`
 	AbortRequestKey     *string            `json:"abort_request_key"`
+	ReopenReasonCode    *string            `json:"reopen_reason_code"`
+	ReopenExplanation   *string            `json:"reopen_explanation"`
+	ReopenedBy          pgtype.UUID        `json:"reopened_by"`
+	ReopenedAt          pgtype.Timestamptz `json:"reopened_at"`
+	ReopenRequestKey    *string            `json:"reopen_request_key"`
 }
 
 // Batch fetch for the traversal: the pinned object + version rows of the
@@ -335,6 +350,11 @@ func (q *Queries) ListObjectVersionsByIDs(ctx context.Context, versionIds []pgty
 			&i.AbortedBy,
 			&i.AbortedAt,
 			&i.AbortRequestKey,
+			&i.ReopenReasonCode,
+			&i.ReopenExplanation,
+			&i.ReopenedBy,
+			&i.ReopenedAt,
+			&i.ReopenRequestKey,
 		); err != nil {
 			return nil, err
 		}

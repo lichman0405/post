@@ -1667,9 +1667,9 @@
       "name": "reopen transition",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T04:19:59Z",
+      "evidence": "T0610's Worker (G1 local gate) ran `go test -count=1 -v -run 'TestReopen' ./tests/integration/` -> exit 0 on 2026-09-21T04:19:59Z. Last output: PASS ; testdb: databases=3 templates=1 migrations=1 create=159ms migrate=403ms drop=371ms ; ok  \tgithub.com/lichman0405/post/tests/integration\t2.307s ; 04:16:54Z T0610 attempt 5, baseline b67226b731f8ab9f47bfe5da58f31fe02c2e1c4b: run made on the tree as submitted, after the rb5-m1a/m1b/m2 probes and the spec_version input perturbation were undone and both files verified back to their originals by sha256 (rb5-mutations-restore.log 04:16:45Z). Under load too: the Supervisor's T1201 G2 was running make test-integration against the same PostgreSQL."
     },
     {
       "id": "T0411-TEST-01",

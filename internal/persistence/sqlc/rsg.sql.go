@@ -531,7 +531,7 @@ func (q *Queries) ListStateCommitsByBranch(ctx context.Context, branchID pgtype.
 
 const listStateObjectVersionsByState = `-- name: ListStateObjectVersionsByState :many
 
-SELECT id, object_id, version_no, state_id, branch_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by, created_at, abort_reason_code, abort_explanation, abort_replacement_ref, aborted_by, aborted_at, abort_request_key FROM scientific_object_versions
+SELECT id, object_id, version_no, state_id, branch_id, schema_id, schema_version, title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by, created_at, abort_reason_code, abort_explanation, abort_replacement_ref, aborted_by, aborted_at, abort_request_key, reopen_reason_code, reopen_explanation, reopened_by, reopened_at, reopen_request_key FROM scientific_object_versions
 WHERE state_id = $1
 ORDER BY created_at, id
 `
@@ -570,6 +570,11 @@ func (q *Queries) ListStateObjectVersionsByState(ctx context.Context, stateID pg
 			&i.AbortedBy,
 			&i.AbortedAt,
 			&i.AbortRequestKey,
+			&i.ReopenReasonCode,
+			&i.ReopenExplanation,
+			&i.ReopenedBy,
+			&i.ReopenedAt,
+			&i.ReopenRequestKey,
 		); err != nil {
 			return nil, err
 		}
