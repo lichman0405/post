@@ -7684,8 +7684,8 @@
         "**证据要能复现，但录账不是你的活**：每条检查的命令、退出码、输出尾部，写进 RESULT——**按 `scripts/record_test_run.py` 的调用形状逐条列出**（`--id/--command/--exit-code/--output-file`，可直接粘贴执行的那种），并说明每条对应哪个检查。\n**你不要真的去写 `tasks/tests.json`**：那个文件是 CLAUDE.md §4 里 Supervisor-only 的账本，Worker 写它越界，`rddev worker collect` 会按越界拒收整个 diff。你**运行**检查（`scripts/**` 已在你的只读面内，跑脚本不需要写权限），**把调用写清楚**，由我在验收时逐条执行——这样账本上的 `passed` 才是我亲手跑出来的，不是你替我写上去的。顺带一句：这个工具拒绝为非零退出码记 `passed`，所以失败项如实写失败，别修饰。"
       ],
       "deliverables": [
-        "一条命令的总门（`tests/security/` 或 `tests/acceptance/` 下，命名自明），逐项输出 + 总退出码",
-        "缺席清单（机器可读）：dependency/CVE 扫描、SAST、容器扫描、SBOM 各一条，写清缺口与补法",
+        "一条命令的总门（`tests/security/` 或 `tests/acceptance/` 下，命名自明），逐项输出 + 总退出码。**「接进总门」= 接进这条脚本**——`.github/**` 不在你的 allowed_scope 里，`specs/orchestrator/gates.json` 是 Supervisor-only（CLAUDE.md §8.1），**所以别去改 CI、也别因为改不了而判 blocked**：把 CI 接上是我收尾的动作，你只要让这条脚本逐项可跑、逐项可红即可。",
+        "缺席清单（机器可读）：**SAST、容器扫描、SBOM 三项**各一条，写清缺口与补法。**dependency/CVE 扫描不在这份清单里**——它已由 Supervisor 补齐（`govulncheck` / `pnpm audit` / `uv audit`，Go/Node/Python 三面实测干净），你要做的是把它**接进总门**并附上运行证据，不是把它记成缺席。",
         "每条检查的红/绿实测（至少三条：secret 扫描、权限负向 e2e、owasp smoke 各做一次变异）",
         "RESULT：逐条实测证据 + 缺席清单 + 你建议的风险处置（**建议**，不是裁定）"
       ],
