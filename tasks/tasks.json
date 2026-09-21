@@ -6262,8 +6262,8 @@
         "internal/persistence/**",
         "internal/search/**",
         "internal/application/**",
-        "cmd/api/**",
-        "apps/web/**",
+        "cmd/api/searchhttp/**",
+        "cmd/api/main.go",
         "tests/**",
         "go.mod",
         "go.sum",
@@ -6286,8 +6286,8 @@
         "specs/policies/permissions-matrix.csv",
         "specs/ui/page-inventory.csv"
       ],
-      "scope_note": "**没有大砍，只把 T0906 的面摘出去。** `internal/search/**` 保留（draft 要从检索结果来）；`internal/search/answer/**` 与 `cmd/api/searchhttp/**` 里**答案生成那一段不属于你**——需要改动就报上来，那是 T0906 刚交付、刚过评审的面。\n\n**`specs/api/openapi.yaml` 不在你的范围里，两条路由我已经替你写进契约了**（路径 `:start-project` 与 `:confirm`，含必填 `Idempotency-Key`）。若实现中发现契约与领域口径有出入，**报上来由我改契约**，不要自己动 `specs/`。\n\n`infra/migrations/**` + 两份生成物保留：本任务要加迁移（**编号由任务包在派工时发**，见需求第 1 条），生成物必须由生成器重算，不能手工编辑。",
-      "supervisor_scope_narrowing": "**没有大砍，只把 T0906 的面摘出去。** `internal/search/**` 保留（draft 要从检索结果来）；`internal/search/answer/**` 与 `cmd/api/searchhttp/**` 里**答案生成那一段不属于你**——需要改动就报上来，那是 T0906 刚交付、刚过评审的面。\n\n**`specs/api/openapi.yaml` 不在你的范围里，两条路由我已经替你写进契约了**（路径 `:start-project` 与 `:confirm`，含必填 `Idempotency-Key`）。若实现中发现契约与领域口径有出入，**报上来由我改契约**，不要自己动 `specs/`。\n\n`infra/migrations/**` + 两份生成物保留：本任务要加迁移（编号 `00122` 已分配），生成物必须由生成器重算，不能手工编辑。\n\n**（2026-09-21 修订：迁移号不再写死）**初稿写了 `00122`，起草时它看着是空的，但账本显示 T0411 已经持有 `122`。这正是 T1108 那次踩过的同一个坑——**任务书里的号与派工时的号会打架**，而派工时渲染进工人任务包的是 `AllocateMigrationNumber` 发的号。所以本笔改成「以任务包为准」，并把当时的账本快照留在需求第 1 条里当参照。"
+      "scope_note": "**迁移编号由任务包在派工时发**（见需求第 1 条）。\n\n**`cmd/api/**` 收窄为 `cmd/api/searchhttp/**` + `cmd/api/main.go`**（2026-09-21）：`cmd/api/` 下有约 45 个域包（auth/protection/release/forks…），一条搜索任务持有整个 `cmd/api/**`，等于可以顺手改鉴权装配与发布出口。查证过挂载点就在 `cmd/api/main.go:388-422` 的 `v1.Handle(...)` + 各域 `Register(v1)`，你要动的是 `searchhttp` 自己的 wiring 加 main.go 里那一处挂载。\n\n**`apps/web/**` 已摘掉**：本任务交付物里**没有一条 UI 需求**（两条路由是 API 契约，`specs/ui/page-inventory.csv` 的 `/search` 行归前端自己的任务）。若你判断非改前端不可，**停下来在 RESULT 里写明**，不要越界。\n\n**`internal/persistence/**` 与 `internal/application/**` 保持不动**是有意为之：这两个目录**是平的**（store 与 service 直接在根下，不分子包），新 store/service 文件（如 `internal/persistence/research_context_draft_store.go`）**无法匹配更窄的 glob**，再收就会让任务书自己不可完成。",
+      "supervisor_scope_narrowing": "**没有大砍，只把 T0906 的面摘出去。** `internal/search/**` 保留（draft 要从检索结果来）；`internal/search/answer/**` 与 `cmd/api/searchhttp/**` 里**答案生成那一段不属于你**——需要改动就报上来，那是 T0906 刚交付、刚过评审的面。\n\n**`specs/api/openapi.yaml` 不在你的范围里，两条路由我已经替你写进契约了**（路径 `:start-project` 与 `:confirm`，含必填 `Idempotency-Key`）。若实现中发现契约与领域口径有出入，**报上来由我改契约**，不要自己动 `specs/`。\n\n`infra/migrations/**` + 两份生成物保留：本任务要加迁移（编号 `00122` 已分配），生成物必须由生成器重算，不能手工编辑。\n\n**（2026-09-21 修订：迁移号不再写死）**初稿写了 `00122`，起草时它看着是空的，但账本显示 T0411 已经持有 `122`。这正是 T1108 那次踩过的同一个坑——**任务书里的号与派工时的号会打架**，而派工时渲染进工人任务包的是 `AllocateMigrationNumber` 发的号。所以本笔改成「以任务包为准」，并把当时的账本快照留在需求第 1 条里当参照。\n\n**第二次修订（2026-09-21，自动安全评审触发）**：评审提「Overly Permissive IAM/RBAC」。采纳其中两条：`cmd/api/**` 收窄到 `searchhttp/**` + `main.go`；`apps/web/**` 摘掉（无 UI 交付物）。**未采纳第三条**（把 `internal/persistence/**`、`internal/application/**` 拆到子包）：这两个目录是平的，没有子包可拆，照办会让新文件的写入面变成空集——这正是「收窄到任务不可完成」的反面教材。收窄的判据是**有没有具名消费者**，不是越小越好。"
     },
     {
       "id": "T1001",
@@ -7110,11 +7110,18 @@
         "privacy suite"
       ],
       "allowed_scope": [
-        "tests/**",
-        "internal/search/**",
+        "apps/web/**",
+        "cmd/api/assetshttp/**",
+        "cmd/api/explorehttp/**",
+        "cmd/api/feedshttp/**",
+        "cmd/api/knowledgehttp/**",
+        "cmd/api/main.go",
+        "cmd/api/projectshttp/**",
+        "cmd/api/provenancehttp/**",
+        "cmd/api/searchhttp/**",
         "internal/persistence/**",
-        "cmd/api/**",
-        "apps/web/**"
+        "internal/search/**",
+        "tests/**"
       ],
       "forbidden_scope": [
         ".git/**",
@@ -7126,7 +7133,9 @@
         "internal/authz/**",
         "internal/rights/**",
         "internal/events/**",
-        "internal/devorchestrator/**"
+        "internal/devorchestrator/**",
+        "cmd/api/authhttp/**",
+        "cmd/api/httpmw/**"
       ],
       "decision_level_max": "L1",
       "relevant_specs": [
@@ -7137,8 +7146,8 @@
         "docs/21_DATA_MODEL.md",
         "specs/policies/permissions-matrix.csv"
       ],
-      "scope_note": "范围按「泄漏会从哪儿出去」划：读路径的查询层（`internal/persistence/**`、`internal/search/**`）、HTTP 边缘（`cmd/api/**`，不可区分 404/401 与错误文案在这一层成形）、以及界面侧的计数呈现（`apps/web/**`，那里今天已经有两条前端对照）、加上套件本身（`tests/**`）。**四条禁令**：`internal/authz/**` 是要被检验的规则书，改它等于改考卷；`internal/rights/**` 的可见性判定同理由；`specs/policies/permissions-matrix.csv` 是权限语义的真相源（改它就是改产品规则，L3）；`internal/devorchestrator/**` 与 `internal/events/**` 与本任务无关。**不做迁移**：若某条泄漏的修法需要改 schema 或加索引，报回来，编号由我分配（§8.1）。",
-      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄）——从 phase 级默认上限砍到五条，并加四条硬禁令。** 原上限含 `specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`infra/**`、`ops/**`、`go.mod`、`go.sum`、`.env.example` 与整个 `internal/**`；现在只留会真的出现在这条链上的目录。\n\n**收窄里我做了两个判断，都写进需求**：①**时序维不设阈值**（需求第 5 条）——规格里没有任何时序数字，设一个就是发明产品语义，属 §5 的 L3，我不替 owner 发明；改为「确定性的不可区分性逐项断言 + 时序只测量记录」。②**只许收紧**（需求第 7 条）——一个安全回归任务如果顺手放宽了任何一条可见性判定，它就是在把门改成能通过的样子；允许收紧（fail-closed）并要求带「改之前红」的证据，是因为那才是回归任务应有的产物。\n\n**为什么把 `internal/authz/**` 明确写进 forbidden**：本任务的验收是「负向套件全过」，而套件检验的对象正是这台引擎。让它可写，等于给「让门变绿」留了一条最短路——改判定比查泄漏容易得多。"
+      "scope_note": "**`cmd/api/**` 已收窄到本任务真正要验的那几个读面（2026-09-21 Supervisor 收窄，安全评审后）。**原来的一整个 `cmd/api/**` 会把 `cmd/api/authhttp/**` 也包进来——而 `authhttp` 正是**本任务要检验的匿名口径所在**（要求 6 逐字引的 `auth_middleware.go:144-152/178-186`）。**让被检验者能写考卷，和 `internal/authz/**` 不许动（要求 8）是同一件事**，所以它与 `httpmw` 一起进 `forbidden_scope`。留下的八个是要求 4 点名的公开面所在的包：资产页、依赖页、检索答案、feed、列表端点，以及 `main.go` 的接线。",
+      "supervisor_scope_narrowing": "**（2026-09-21 第 2 版·安全收窄）** 写入面从 `cmd/api/**` 收到八个具体路径 + `main.go`；`cmd/api/authhttp/**` 与 `cmd/api/httpmw/**` 明确禁写。\n\n这条收窄**不该让任务变得做不完**：要求 4 要补的后端计数泄漏对照读的是资产页/依赖页/检索答案/feed/列表端点，要求 7 允许的 fail-closed 收紧也只发生在这些读面上。**但如果你实测发现某处收紧必须落在上面没列的包里**（例如某个中间件在别处），**停下来不要改**，在 RESULT 的 follow_up 里点名是哪个文件、要改什么、为什么非它不可——由 Supervisor 决定放宽范围还是换个做法。\n\n**范围只约束你写什么，不约束你读什么**：`internal/authz/**`、`cmd/api/authhttp/**`、`specs/policies/permissions-matrix.csv` 你都可以读、可以引用、可以在测试里断言它们的行为——只是不能改它们（正是要求 8 的意思）。"
     },
     {
       "id": "T1108",
@@ -7230,7 +7239,7 @@
         "docs/adr/ADR-005-vector-search.md"
       ],
       "scope_note": "范围按「做这件事真的会碰到谁」划，共四块：**造数与测量**（`tests/benchmark/**`——新目录，`tests/` 下 20 个既有目录里没有重名的）、**索引与它唯一的生成物**（`infra/migrations/**` + `specs/database/postgres.sql`，后者**必须**在范围内，否则 `scope_validate.go:124` 那条「覆盖了标记输入却没覆盖它的派生物」会直接判不合规）、**被测量指认为瓶颈的查询形状**（`internal/persistence/queries/**`）与**可能被调的旋钮**（`internal/config/**`）、以及**接门要动的那一处**（`Makefile`）。`ops/ci/**` 留给阈值/基线文件的落地位置（照 `ops/ci/gofmt-baseline.txt`、`staticcheck-baseline.txt` 的惯例）。\n\n**`specs/**` 只开了一个口子**：`specs/database/postgres.sql` 这一个**生成物**（§8.1 的例外，且只能重新生成、不能手改）；`specs/api/**`、`specs/ui/**`、`specs/orchestrator/**`、`specs/schemas/**` 全部排除。**`apps/web/**` 排除**——前端那条「首个 loading state < 200ms」在本笔里只记账不测量，理由写在 AC 里：测它要一套真浏览器挂具，而本笔的量都在服务端与数据库这一侧；把它含进来会让一笔已经很重的任务再背一套挂具。**`internal/devorchestrator/**` 排除**（碰它会拖住正在跑的驱动）。\n\n说明一条口径：**`forbidden_scope` 不会被机械强制，真正拦人的是 `allowed_scope`**（收集期逐路径比对的就是它）。这里的 forbidden 是写给工人看的边界，别把它当成「没列进去就能写」。\n\n**`cmd/**` 我摘掉了**（2026-09-21）：初稿把 `cmd/**` 当成「可能被调的旋钮」放进来，但逐条读下来**没有任何一条要求需要动 `cmd/` 下的文件**——需求第 2 条提 `cmd/rddev/db.go` 是在陈述「`db` 只有 `migrate`、没有 seed」这个**现状**，不是让你去改它；需求第 8 条明确「`make` 目标归你、**CI 接线归我**」。而 `cmd/**` 覆盖 `cmd/api/**`，那里面有 authn/authz 装配、SSRF 名单与 release 出口——**一笔性能任务的授权不该伸进 API 服务器**。真需要动 `cmd/api/**`，那是另一笔任务。\n\n**`tests/**` 收成 `tests/benchmark/**`**，同理：被点名的消费者只有那一个新目录。`tests/integration/research_profile_test.go:1076-1135` 是**样板**（照它的形状写），不是让你去改它——需求第 13 条已写明原样留着。",
-      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄 + 三个 L1 决定）**\n\n**决定一：迁移编号在派工时由任务包发给你，以 `migration_number` 为准**（§8.1 要求编号由 Supervisor 侧分配、不许工人自己选；本仓的分配器是 `AllocateMigrationNumber`，`internal/devorchestrator/migration_numbers.go:83`，派工时链上最高是 `00110`）。**我在这里不写死一个号**——写死了反而会与任务包里的号打架（本笔初稿写过 `00111`，随后发现 `00111` 已在链上被另一个任务持有，正是这个坑）。\n\n**决定二：门里不许出现墙钟 SLO 断言。** 这是本笔最重要的一个决定，理由不是保守而是**已知的失败模式**：把 `p95 < 500ms` 写成 CI 断言，在共享 runner 上必然随机红，而随机红的门最后一定会被人用「放宽一点」修掉——那正是 `CLAUDE.md` 禁止的「为让门变绿而放宽 assertion」。所以**确定性层管形状（行数、计划可用索引、一个被明确标注为『回归天花板』的宽松上界），报告层管 SLO 对照**。**「SLO 达标与否是被记录下来的结论，不是 CI 断言」**——这句话我写进了需求第 7 条，也写进了 AC。\n\n**决定三：向量索引的两种结论都算合格，唯独不许不测。** `00092:63-71` 自己把这件事定成「a measurable performance decision with its own evidence」，还逐字留着「Left out as a decision, not by omission」。**本笔正是那个 evidence 该出现的地方**：量出来没超 2s → 用数字支持这个既有的决定；超了 → 加索引并给出前后对比与召回代价。**「加索引」不是本笔的成绩，「有数字」才是。**\n\n**收窄掉的东西**：原 phase 级默认给到整个 `internal/**`、`specs/SPEC_VERSION.json`、`.env.example`——与本任务无关，`internal/**` 收成 `internal/persistence/queries/**` + `internal/config/**` 两处真会动的，`specs/**` 收成一个生成物。**这同时消掉了一个真实的故障模式**：补丁带 `specs/**` 指纹，main 一动就 `git apply` 不上（本仓发生过，工具是 `rddev rebaseline`）。\n\n**为什么要把 T1201 的边界写死**（需求第 13 条）：仓库里已经有 `docs/34_SEED_DEMO_PROJECT.md` 这份「有科研语义的演示数据」规格和对应的 T1201，而本笔要的是容量规模的合成数据。两者都是「造数」，最容易顺手合并成一件——合并的代价是 T1201 的领域检查单被稀释，而本笔的规模基线被叙事数据拖慢。"
+      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄 + 三个 L1 决定）**\n\n**决定一：迁移编号在派工时由任务包发给你，以 `migration_number` 为准**（§8.1 要求编号由 Supervisor 侧分配、不许工人自己选；本仓的分配器是 `AllocateMigrationNumber`，`internal/devorchestrator/migration_numbers.go:83`，派工时链上最高是 `00110`）。**我在这里不写死一个号**——写死了反而会与任务包里的号打架（本笔初稿写过 `00111`，随后发现 `00111` 已在链上被另一个任务持有，正是这个坑）。\n\n**决定二：门里不许出现墙钟 SLO 断言。** 这是本笔最重要的一个决定，理由不是保守而是**已知的失败模式**：把 `p95 < 500ms` 写成 CI 断言，在共享 runner 上必然随机红，而随机红的门最后一定会被人用「放宽一点」修掉——那正是 `CLAUDE.md` 禁止的「为让门变绿而放宽 assertion」。所以**确定性层管形状（行数、计划可用索引、一个被明确标注为『回归天花板』的宽松上界），报告层管 SLO 对照**。**「SLO 达标与否是被记录下来的结论，不是 CI 断言」**——这句话我写进了需求第 7 条，也写进了 AC。\n\n**决定三：向量索引的两种结论都算合格，唯独不许不测。** `00092:63-71` 自己把这件事定成「a measurable performance decision with its own evidence」，还逐字留着「Left out as a decision, not by omission」。**本笔正是那个 evidence 该出现的地方**：量出来没超 2s → 用数字支持这个既有的决定；超了 → 加索引并给出前后对比与召回代价。**「加索引」不是本笔的成绩，「有数字」才是。**\n\n**收窄掉的东西**：原 phase 级默认给到整个 `internal/**`、`specs/SPEC_VERSION.json`、`.env.example`——与本任务无关，`internal/**` 收成 `internal/persistence/queries/**` + `internal/config/**` 两处真会动的，`specs/**` 收成一个生成物。**这同时消掉了一个真实的故障模式**：补丁带 `specs/**` 指纹，main 一动就 `git apply` 不上（本仓发生过，工具是 `rddev rebaseline`）。\n\n**为什么要把 T1201 的边界写死**（需求第 13 条）：仓库里已经有 `docs/34_SEED_DEMO_PROJECT.md` 这份「有科研语义的演示数据」规格和对应的 T1201，而本笔要的是容量规模的合成数据。两者都是「造数」，最容易顺手合并成一件——合并的代价是 T1201 的领域检查单被稀释，而本笔的规模基线被叙事数据拖慢。\n\n**第六次修订（2026-09-21，把 main 修绿）**：收窄时把 `internal/persistence/sqlc/**` 一并删掉了，而它是 `internal/persistence/queries/**` 与 `infra/migrations/**` 两个 marker 的**派生工件**（`specs/orchestrator/derived-artifacts.json`）。规则是「覆盖 marker 就必须同时覆盖派生工件」——删掉它的后果不是少给一点写入面，而是**这条任务在派工前就被判为不可执行**（`gate_spec_test.go:398`：dispatch refuses this, and the Worker cannot regenerate the artifact it must keep consistent），同时**把 main 的 `go` job 弄红了，连带所有在跑任务的 G2**。已补回。教训记在这里：收窄写入面时要顺着 derived-artifacts 的规则表走一遍，**marker 与派生工件是一对，不能只留一个**。"
     },
     {
       "id": "T1109",
@@ -7667,7 +7676,7 @@
         "**交付物是一条命令的「总门」**：把上面「有的」那些 + T1106 的 owasp smoke 串起来，一条命令跑完、退出码有意义、每条检查**各自可红**。**不许用「都跳过」换绿**：某条检查在今天的环境跑不了（例如需要 docker 而没有），要**明确打印 `NOT ASKED` 并让它影响退出码或进「缺席清单」**，不能静默跳过——仓库里已有这个形状的先例：`tests/acceptance/phase-boundary-checkpoint.sh` 的项 5 与 `ci.yml:146-151` 的 NOT ASKED。",
         "**缺席的那四项，用仓库既有的写法点名，不要造假**：`ops/runbook-steps.json:147-150` 用 `\"kind\": \"absent\"` + note 逐字承认缺口的做法就是先例。本任务把缺席项写成一份**机器可读的清单**（哪一项缺、为什么缺、今天靠什么替代、补它需要什么）。**风险接受不是你的决定**：`docs/23_SECURITY_PRIVACY.md:45` 要求「每个 Release 运行 dependency audit、SAST、secret scan、container scan、OWASP smoke、permission E2E。Critical/High 必须修复或有书面 ADR/risk acceptance（V1 不接受 Critical）」——**缺席项要不要作为 V1 风险被接受，由我以书面形式裁定**，你交清单与证据。",
         "**能补的尽量补（不引入外部账号、不联网装新东西的前提下）**：如果本机已有工具链能提供其中某一项（例如 Go 自带的能力、或既有脚本能覆盖的一半），就补进去并标明它覆盖了什么、没覆盖什么。补不了就如实进缺席清单。",
-        "**证据要能复现**：每条检查的命令、退出码、输出尾部，用 `scripts/record_test_run.py` 记进 `tasks/tests.json`（它拒绝为非零退出码记 `passed`）。"
+        "**证据要能复现，但录账不是你的活**：每条检查的命令、退出码、输出尾部，写进 RESULT——**按 `scripts/record_test_run.py` 的调用形状逐条列出**（`--id/--command/--exit-code/--output-file`，可直接粘贴执行的那种），并说明每条对应哪个检查。\n**你不要真的去写 `tasks/tests.json`**：那个文件是 CLAUDE.md §4 里 Supervisor-only 的账本，Worker 写它越界，`rddev worker collect` 会按越界拒收整个 diff。你**运行**检查（`scripts/**` 已在你的只读面内，跑脚本不需要写权限），**把调用写清楚**，由我在验收时逐条执行——这样账本上的 `passed` 才是我亲手跑出来的，不是你替我写上去的。顺带一句：这个工具拒绝为非零退出码记 `passed`，所以失败项如实写失败，别修饰。"
       ],
       "deliverables": [
         "一条命令的总门（`tests/security/` 或 `tests/acceptance/` 下，命名自明），逐项输出 + 总退出码",
@@ -7692,8 +7701,7 @@
         "tests/e2e/**",
         "tests/security/**",
         "ops/**",
-        "examples/**",
-        "scripts/**"
+        "examples/**"
       ],
       "forbidden_scope": [
         ".git/**",
@@ -7709,8 +7717,8 @@
         "docs/25_CICD_DEVOPS.md",
         "specs/orchestrator/gates.json"
       ],
-      "scope_note": "**摘掉 `docs/**`（Supervisor-only）**；**加入 `scripts/**` 与 `tests/security/**`**（前者是 `record_test_run.py` 所在，后者是 T1106 交付 owasp smoke 的地方）。\n\n**不碰 `.github/workflows/**`**：本任务是把门建起来并跑给你看，**要不要进 CI 是 Supervisor 的决定**（CI 的 job 清单与 `gates.json` 的 `required_jobs` 必须一致，改一处要同时改另一处，那是我的面）。你要的是「本地一条命令能跑」，外加一句「建议挂到哪个 job」。",
-      "supervisor_scope_narrowing": "摘掉 `docs/**`；加入 `scripts/**` 与 `tests/security/**`；把 `.github/workflows/**` 放进 `forbidden_scope`（CI 与 gates.json 的一致性由 Supervisor 维护）。"
+      "scope_note": "**摘掉 `docs/**`（Supervisor-only）**；**加入 `tests/security/**`**（T1106 交付 owasp smoke 的地方）。\n\n**`scripts/**` 已摘掉**（2026-09-21 收窄）：加它的原意是「`record_test_run.py` 所在」，但**跑脚本不需要写权限**——它在写入面里只会多给一条改证据记录器的路，而本任务恰恰是那个**被记录**的门。被考的人不该攥着笔：删除一个秘密扫描断言、把 `passed` 写宽松，只需改 `scripts/**` 里一个文件。现在你只**运行**它、把调用写进 RESULT，落账由我在验收时做。\n\n**不碰 `.github/workflows/**`**：本任务是把门建起来并跑给你看，**要不要进 CI 是 Supervisor 的决定**（CI 的 job 清单与 `gates.json` 的 `required_jobs` 必须一致，改一处要同时改另一处，那是我的面）。你要的是「本地一条命令能跑」，外加一句「建议挂到哪个 job」。",
+      "supervisor_scope_narrowing": "摘掉 `docs/**`；加入 `scripts/**` 与 `tests/security/**`；把 `.github/workflows/**` 放进 `forbidden_scope`（CI 与 gates.json 的一致性由 Supervisor 维护）。\n\n**第五次修订（2026-09-21，自动安全评审触发）**：评审提「worker-writable gate-evidence scripts」——本条**采纳，而且它比评审说的更具体**。查证：`scripts/record_test_run.py:37` 的 `TESTS_REL` 就是 `tasks/tests.json`，而 CLAUDE.md §4 把 `tasks/**` 定为 Worker 只读。所以原需求第 5 条「用 `record_test_run.py` 记进 `tasks/tests.json`」**是一句会越界的指令**，worker 照做就会在 collect 被拒。两处一并改：写入面摘掉 `scripts/**`（跑不需要写权限），需求改成「跑检查、把调用形状写进 RESULT」。"
     },
     {
       "id": "T1207",
@@ -7812,8 +7820,7 @@
         "tests/acceptance/**",
         "tests/e2e/**",
         "ops/**",
-        "examples/**",
-        "scripts/**"
+        "examples/**"
       ],
       "forbidden_scope": [
         ".git/**",
@@ -7828,8 +7835,8 @@
         "docs/31_MASTER_ACCEPTANCE.md",
         "docs/67_TEST_GATES.md"
       ],
-      "scope_note": "**摘掉 `docs/**`（Supervisor-only）**；加入 `scripts/**`（生成物 `--check` 的既有形状在那儿）。\n\n**不碰 `internal/**` 与 `cmd/**`**：本任务要证明「今天这套系统造出来的项目**可以被搬走**」。搬运过程中发现某个东西**根本没落盘**（例如 blob 只在内存里、或某类对象没有版本标识），**那就是这个任务的结论**——**报上来**并如实写进 RESULT，不要顺手去改产品代码把它补上（那是一条新账）。",
-      "supervisor_scope_narrowing": "摘掉 `docs/**`；加入 `scripts/**`。产品代码不在范围内：导不出来是结论，不是要顺手修的 bug。"
+      "scope_note": "**`scripts/**` 已从本任务摘出（2026-09-21 Supervisor 收窄，安全评审后）。**理由是那里放的不是普通工具，而是**验收仪器本身**：`scripts/record_test_run.py`（测试证据录入口）、`scripts/validate_specs.py`、`scripts/validate_task_state.py`、`scripts/spec_version.py`、`scripts/gen_schema_snapshot.py`、`scripts/reconcile_tests_ledger.py`、`scripts/staticcheck.sh`、`scripts/ci.sh`。**能让被验收者写验收仪器的写入面，等于让考生改卷子**——一个能改 `record_test_run.py` 的工人可以伪造测试证据，一个能改 `validate_specs.py` 的工人可以让规格校验放行。同一条口径已经用在 T1206 上（2026-09-21 同一轮）。",
+      "supervisor_scope_narrowing": "**（2026-09-21 第 2 版·安全收窄）`scripts/**` 移除。** 你的导出工具与它的 `--check` 校验器放在 `tests/acceptance/**`（要求 5 点名的 `*-real-services-e2e.sh` 就是既有形状）或 `ops/**`；幂等/完整性用的辅助脚本同样用 `tests/**` 或 `ops/**` 下的名字，**不要往 `scripts/` 里放**。如果你判断某个文件非落在 `scripts/**` 不可（例如必须复用 `speclib.py` 里的解析），**不要自己开这个口子**：在 RESULT 的 follow_up 里点名是哪一个文件、为什么、由 Supervisor 决定是放宽范围还是给你一个更合适的落点。\n\n**别再犯 T1108 那种错**：范围收窄只影响你**写**什么，不影响你**读**什么——整个 worktree 你都可以读，`scripts/` 下的既有脚本你随便调用（`python3 scripts/...` 只读执行没问题）。"
     },
     {
       "id": "T0013",
