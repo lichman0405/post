@@ -16169,3 +16169,63 @@ G4 自己在合并后的树上重跑，才是关上这个缺口的检查。」**
 
 结论：⑮ 那条「下次派工要先看 scope 再看完成顺序」的建议仍然成立，但**理由是号序==派工序**，
 不是「工人会自己挑号」。第 1 条那个「运气不是设计」的说法也收回——这是设计，而且设计是对的。
+
+## ⑰ T0907 顺手戳破的：`ok("标签", 条件)` 在 web-smoke 里是**死断言**，全仓 12 条（2026-09-21）
+
+T0907（搜索问答界面）改了两条既有烟测断言。它给的理由值得单独记下来——不是「界面变了所以改断言」，
+而是**那两条断言本来就永远不会红**。
+
+### 机理（已在运行时证明，不是读代码猜的）
+
+`tests/web-smoke/visual-smoke.mjs:18` 与 `a11y-smoke.mjs:24` 都是：
+
+    const ok = (label) => console.log(`ok   ${label}`);
+
+**只收一个参数**。所以 `ok("标签", 条件)` 里的条件被 JS 静默丢弃，无论真假都打一行 `ok`。
+实测：`ok("x", 1===2)` 与 `ok("x", 1===1)` 的输出逐字相同。
+
+这两个文件里的 `fail(label, detail)` 才是会记账的那个（`fails += 1`），
+所以**唯一能让这两条路变红的是「元素找不到抛异常」，条件表达式永远不参与**。
+
+### 范围：全仓扫一遍，12 条
+
+判据（脚本按这个跑的）：在**定义了单参 `ok`** 的文件里，找 `ok(` 调用中**顶层逗号**切出第二个实参、
+且第二个实参看起来是表达式（`await` / `(` / `标识符 比较符` / 数字 / `true|false|null`）的位置。
+两参的 `ok(where, what)`（`tests/e2e-explore`、`tests/e2e-search` 等自带的）是另一种东西，已排除。
+
+| 文件 | 行 | 被丢掉的条件 |
+|---|---|---|
+| `tests/web-smoke/a11y-smoke.mjs` | 190 | `page.locator("q").textContent() === "catalyst"` ← **T0907 已修** |
+| | 197 | `page.locator("h1").textContent().trim() === "Projects"` |
+| `tests/web-smoke/visual-smoke.mjs` | 91 | `(await header.count()) === 1` |
+| | 113 | `await searchInput.isVisible()` |
+| | 122 | `(await bell.count()) === 1` |
+| | 124 | `(await logo.count()) === 1` |
+| | 126 | `(await signIn.count()) >= 1` |
+| | 138 | `currentText === "Home"` |
+| | 221 | `page.locator("q").textContent() === "solid-state"` ← **T0907 已修** |
+| | 226 | `(await loginHeader.count()) === 1 && …` |
+| | 232 | `page.locator(".global-nav-links").first().isVisible()` |
+| | 247 | `await toggle.isVisible()` |
+
+**T0907 修了 2 条（改成 `fail()` 记账的真断言），剩 10 条还在。**
+
+### 为什么这不是「一笔任务的小瑕疵」，要单独记
+
+`tasks/tests.json` 里 **T0107 的「visual smoke」「a11y smoke」两条验收证据就是这两个文件**，
+状态都是 `passed`。也就是说：T0107 那两条账，
+**其中若干条具体断言从来没有被真正检查过**——「header 在 / 上渲染」「铃铛指向 /notifications」
+「`aria-current=page` 标中当前项」这些说法，在这两个文件里当时**不可能失败**。
+
+这不是 T0907 造成的（它继承的），也不是 T0107 的工人造假（他大概以为 `ok` 收条件）。
+它是**判据本身的形状错了**：一个只看标签的记账函数，被当成 `assert` 用。
+
+**处置**：
+1. **不阻断 T0907**——它做的是加强，不是削弱；任务书也只要求它改自己动过的那两处。
+2. 迁移链与在飞任务走完之后**立一张任务**收掉剩下 10 条。
+   在它落地前，T0107 那两条 `passed` 的**账目强度是有水分的**，记在这里备查。
+3. 立任务时必须**同时**做一件事：让 `ok` 在收到第二个实参时**报错**（或把它换成 `assert` 风格），
+   否则下一批人还会写出第 13 条。今天这 12 条能存在，是因为写错**不报错**。
+
+关联：记忆里的「仪器要能说不」（[[prove-the-instrument-can-say-no]]）与「被引为证据的断言必须证明它会红」
+（[[verify-cited-assertions]]）。**这条是那个教训在仓库里真实存在的一个实例，不是假设。**
