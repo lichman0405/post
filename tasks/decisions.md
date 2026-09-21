@@ -17042,3 +17042,70 @@ T1107 这一轮就是这么丢的（复核已 approve、G2 已过，卡在一条
 **没有放宽任何东西**：T1205 的验收契约（枚举器变异自证、双向红绿实测、清单可核对、
 `specs/**` 一个字节不动、MCP 对账）**一字未改**，它带的三条 G3 门也**一条没动**——
 改的只是它**等谁**、**什么时候开始跑**。
+
+## ㉗ 三件依赖扫描仪器进了门，以及我自己那把尺子先量错了两次（2026-09-21）
+
+### 1. 我装了什么、跑了什么、结论是什么
+
+`docs/23_SECURITY_PRIVACY.md:45` 要求每个 Release 跑 dependency audit；`ops/runbook-steps.json:149`
+逐字承认「there is no dependency/CVE scan and CI has no security job」。这不是文档写得狠，是仪器真的没有：
+`grep -rn gosec|govulncheck|trivy|npm audit` 全树零命中。
+
+**今天补上了，三面各自一条命令、都真跑过、都从零退出：**
+
+| 面 | 命令 | 结果 |
+|---|---|---|
+| Go（`cmd/**`、`internal/**`） | `govulncheck ./...` | rc=0，**0 条命中本仓库代码**；`-show verbose` 另报 3 条落在 required modules 里、代码不调用 |
+| Node / web | `pnpm audit --audit-level=low` | rc=0，`No known vulnerabilities found` |
+| Python adapter | `uv audit`（在 `services/scientific-adapter`） | rc=0，`no known vulnerabilities in 6 packages` |
+
+`govulncheck` 是新装的（v1.8.0，DB 2026-09-16），落在 `~/.local/bin`——**仓库外**，
+所以既不进 diff、也不影响任何 worker 的树；`pnpm`/`uv` 本机本来就有。
+我核过派工进程的环境变量，**Worker 的 PATH 里有 `~/.local/bin`**，所以这活工人接得住。
+
+**这条决定不越权**：装一个公开的 Go 官方漏洞工具不是新凭证、不是付费服务、不是产品语义
+（CLAUDE.md §5.1 的四条停止条件一条都没碰），属于 L1。
+
+### 2. 这把尺子当时说不了「不」——而且是两次
+
+我原本要动 `tasks/tasks.json`（见 §3），而那要先回答一个问题：
+**现在落一笔会改 `specs/SPEC_VERSION.json` 的提交，会不会打断在飞任务的 G2？**
+我照着记忆里那条规矩写了个探针 `/tmp/marker-window.py`，它第一次回答：
+
+> `WINDOW CLOSED — 4 carriers: T1101 / T1108 / T1109 / T1202`
+
+**四条全是假阳性。** 它们与 main 的 marker 内容不同，不是因为有哪笔任务改了 marker，
+而是因为**它们的基线本来就落后 main 5～19 个提交**——`git diff <merge-base> -- specs/SPEC_VERSION.json`
+对四条**全部为空**。我当时量的「基线新旧」，却把它当成了「补丁带不带 marker」。
+**过时的基线不是 carrier。**（记忆条目 [[in-flight-g2-composes-current-main]] 里那句
+「把 worktree 的 marker 内容与 main 比」在没有前移过的树上会给出错误答案，已按实测改写。）
+
+改对之后我给它加了一个**阳性对照**：拿一个**我知道确实在某笔任务 diff 里**的路径去问同一个问题。
+它又答错了——答 `WINDOW OPEN`。因为 T1202 那三处改动全是**新建文件（untracked）**，
+而 `git diff` **看不见未跟踪文件**。探针补上 untracked 分支后才对：
+
+```
+对照（问 tests/acceptance/mof-canonical-workflow.sh）：CARRIERS: 1 → WINDOW CLOSED  ✓
+真问题（问 specs/SPEC_VERSION.json）：              CARRIERS: 0 → WINDOW OPEN    ✓
+```
+
+**两次都是「先证明它会说不」救的场**：没有对照，我会拿着一个恒答 CLOSED 的尺子
+（第一次）或者恒答 OPEN 的尺子（第二次）去做决定，而两种错法都会是同一个后果——
+**在错误的时候落账，把在飞任务的 G2 打断**。
+
+### 3. 因此改了 T1206 / T1207 的任务书（不是返工，是任务书本身写错了）
+
+T1206 的 requirement 1 给了 Worker 一张「有的 / 没有」的事实清单，requirement 3 要它照着写
+**四项**缺席清单，其中第一项就是「dependency/CVE 扫描」。**这四项现在只剩三项**，
+清单本身已经过期——工人照书办事会写出一条**假的缺席**。所以改的是书，不是工人：
+
+- requirement 1：把 dependency/CVE 从「没有」里划掉，并把上面三条命令与退出码写进去；
+- requirement 4：`能补的尽量补` 的条件**已经成立**，明确要求把这三条**接进总门**、
+  至少对其中一条做一次变异证明它会红、工具不在的环境（如 CI）打 `NOT ASKED` 并按缺席记账；
+- AC4：四项 → **三项**，并加一句「只写在 RESULT 里而不接进门，本任务判不通过」；
+- T1207 的 requirement 4：它逐字引用了 T1206 的缺席清单，同步改掉，两处不许打架。
+
+**注意这里留了一个不能省的条件**：`docs/23_SECURITY_PRIVACY.md:45` 逐字「V1 不接受 Critical」。
+三面扫描**干净**是实测事实，但它**只覆盖依赖**——SAST、容器扫描、SBOM 仍缺，
+所以「Critical/High = 0」这句话今天的成立范围是**依赖面**，不是全表面。
+T1207 的剩余风险一节必须照这个范围写，不许扩写成「安全面已清」。
