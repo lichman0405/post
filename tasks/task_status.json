@@ -10521,7 +10521,7 @@
       ]
     },
     "T1112": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-21T23:20:47Z",
       "worker_run_id": "run-57e750d3bd78f834",
       "rejection_reason": "# T1112 rebaseline：main 已推进，web 演示 UI 的回归已修复\n\n当前 main 已合并：\n- PR #337 [T1202] Canonical MOF Workflow E2E\n- PR #338 hotfix/web-demo-regressions：移除 CSS gradient 违规、为 project overview 增加 overview/counts/branches 的 null-safety\n\n上一轮 review 指出 browser suites 因 apps/web 回归（projects.css gradient、projects/[id]/page.tsx 缺少 null-check）而无法通过。这些回归已在 main 修复，因此将 T1112 推到当前 main 重新验证。\n\n要求不变：浏览器测试套件接进 make，断言写错必须报错；G1/G2/G3 通过。\n",
@@ -10579,6 +10579,13 @@
           "at": "2026-09-21T23:20:47Z",
           "run_id": "run-57e750d3bd78f834",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T23:35:12Z",
+          "run_id": "run-2430dd63ec5581d3",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -10822,9 +10829,9 @@
       ]
     },
     "T1205": {
-      "status": "rejected",
-      "started_at": "2026-09-21T23:13:33Z",
-      "worker_run_id": "run-22fc1efdc63a15ea",
+      "status": "running",
+      "started_at": "2026-09-21T23:39:29Z",
+      "worker_run_id": "run-43db48e6bfe6f5c8",
       "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/supervisor/task-status-running-2026-09-22 *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
       "history": [
         {
@@ -10867,6 +10874,13 @@
           "at": "2026-09-21T23:24:23Z",
           "run_id": "run-b739da3592bb9729",
           "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/supervisor/task-status-running-2026-09-22 *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T23:39:29Z",
+          "run_id": "run-43db48e6bfe6f5c8",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -10889,9 +10903,9 @@
       "merged_at": null
     },
     "T1208": {
-      "status": "rejected",
-      "started_at": "2026-09-21T23:21:38Z",
-      "worker_run_id": "run-0e80eb227c40c2cd",
+      "status": "verification",
+      "started_at": "2026-09-21T23:36:20Z",
+      "worker_run_id": "run-ab6498671856d47e",
       "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/supervisor/task-status-running-2026-09-22 *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
       "history": [
         {
@@ -10934,6 +10948,20 @@
           "at": "2026-09-21T23:25:27Z",
           "run_id": "run-89c8b2111c943727",
           "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/supervisor/task-status-running-2026-09-22 *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T23:36:20Z",
+          "run_id": "run-ab6498671856d47e",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T23:39:30Z",
+          "run_id": "run-0bed469157536892",
+          "reason": "collect: all checks passed"
         }
       ]
     }
