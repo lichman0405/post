@@ -5353,11 +5353,11 @@
       ]
     },
     "T0610": {
-      "status": "verification",
-      "started_at": "2026-09-21T02:39:06Z",
+      "status": "running",
+      "started_at": "2026-09-21T04:04:25Z",
       "notes": "SPEC_BLOCKED（2026-09-19 从 T0602 拆出时判定）：reopen 的语义、事件名、存储状态位全都现成（docs/43:10 的状态机、docs/46:11、specs/events/event-types.yaml:23 的 scientific_object.reopened、infra/migrations/00005:20 的 CHECK 里已有 'reopened'），**只差一行权限**：specs/policies/permissions-matrix.csv 里没有 reopen 行，internal/authz/action.go 的动作总表里也没有 reopen 动作，而未登记动作在 internal/authz/engine.go 里默认拒绝。两个候选形状已写进任务书（A：与 abort_main_object 对称；B：复用 write_scientific_state，代价是 contributor 也能撤销 maintainer 的 abort）。Supervisor 倾向 A。权限属 §5 的 L3，等 owner 一句话裁定后把那一行填进 permissions-matrix.csv 再开工。",
-      "worker_run_id": "run-f386a04de9b08b2a",
-      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T0610-276356561.patch: exit status 1: error: patch failed: internal/persistence/sqlc/rsg_query.sql.go:117\n    error: internal/persistence/sqlc/rsg_query.sql.go: patch does not apply\n    error: patch failed: specs/SPEC_VERSION.json:1\n    error: specs/SPEC_VERSION.json: patch does not apply\n    error: patch failed: specs/database/postgres.sql:85\n    error: specs/database/postgres.sql: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n",
+      "worker_run_id": "run-b3e9a3878223e1ef",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-89e19c6470729abd-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T0610/gate-run-run-89e19c6470729abd-g2.json and the step logs\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n",
       "history": [
         {
           "from": "blocked",
@@ -5420,6 +5420,41 @@
           "at": "2026-09-21T02:51:03Z",
           "run_id": "run-f0ee88f0c52993a4",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T03:05:20Z",
+          "run_id": "run-c4d14b22bb2464c3",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T0610-2821304040.patch: exit status 1: error: patch failed: specs/SPEC_VERSION.json:1\n    error: specs/SPEC_VERSION.json: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T03:20:49Z",
+          "run_id": "run-cb772a4c3436ba14",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T03:38:22Z",
+          "run_id": "run-93cdbc5eaf7d72a6",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T04:04:24Z",
+          "run_id": "run-fd7808abc957a2c9",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-89e19c6470729abd-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T0610/gate-run-run-89e19c6470729abd-g2.json and the step logs\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T04:04:25Z",
+          "run_id": "run-b3e9a3878223e1ef",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -5943,11 +5978,11 @@
       ]
     },
     "T0706": {
-      "status": "rejected",
-      "started_at": "2026-09-21T01:25:16Z",
+      "status": "verification",
+      "started_at": "2026-09-21T03:38:38Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:14:44Z 判定，记于 T0705 合并之前）：一次「修订」在库里长什么样没有先例（追加修订行 vs 改列+写审计行）；谁有权改没有定义（权限矩阵无对应行，未登记的动作默认拒绝，internal/authz/engine.go:44）；字段是开放集合（docs/11_RELEASE_ASSET_HUB.md:21 的「等」，specs/schemas 与 packages/schemas 里都没有 schema）。\n\n---\n**已解除 SPEC_BLOCKED（2026-09-21 Supervisor 裁定）**：三个问题都有了落笔，全部写在任务包的 `supervisor_scope_narrowing` 里，是该任务契约的一部分。\n① 一次「修订」在库里长什么样 → **就地改可变列 + 与状态变更同一事务写一行 `audit_log`**（before/after 进 `before_summary`/`after_summary`，`infra/migrations/00012_events_audit.sql:52-53`），**不采用「追加一条修订行」**；依据 `docs/11_RELEASE_ASSET_HUB.md:21`——元数据可独立 revision，但**不产生新的 scientific version**，追加修订行会让两条版本流并存，正是那句不许的事。\n② 谁有权改 → 照 `internal/application/projects/settings.go:29-33` 的既有先例，用**默认拒绝的服务器端角色门**（owner/maintainer）顶着，**不往 `specs/policies/permissions-matrix.csv` 加行**；「补矩阵行」记进 RESULT 的 follow_up。\n③ 字段是开放集合 → 只做 `docs/11:21` 点名的那些；`cover` 若需要 blob 面上不存在的通道（签名 URL/TTL），照任务书点名留位，**不造上传通道**（那是 T1106 的范围）。\n上面那段原文是 2026-09-16 的判定，**保留**——它是这两笔为什么停了一周的记录。",
-      "worker_run_id": "run-a0770badfaeec391",
-      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T0706-1552779412.patch: exit status 1: error: patch failed: specs/SPEC_VERSION.json:1\n    error: specs/SPEC_VERSION.json: patch does not apply\n    error: patch failed: specs/database/postgres.sql:85\n    error: specs/database/postgres.sql: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n",
+      "worker_run_id": "run-52187ae2192144cb",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T0706-2062282197.patch: exit status 1: error: patch failed: specs/SPEC_VERSION.json:1\n    error: specs/SPEC_VERSION.json: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n",
       "history": [
         {
           "from": "todo",
@@ -5988,6 +6023,41 @@
           "at": "2026-09-21T02:31:15Z",
           "run_id": "run-c82fd97c307d5288",
           "reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T0706-1552779412.patch: exit status 1: error: patch failed: specs/SPEC_VERSION.json:1\n    error: specs/SPEC_VERSION.json: patch does not apply\n    error: patch failed: specs/database/postgres.sql:85\n    error: specs/database/postgres.sql: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T02:51:30Z",
+          "run_id": "run-b7df09084127b279",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T03:06:03Z",
+          "run_id": "run-0548bfba78bfb6a4",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T03:22:23Z",
+          "run_id": "run-3fda525f1764b839",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T0706-2062282197.patch: exit status 1: error: patch failed: specs/SPEC_VERSION.json:1\n    error: specs/SPEC_VERSION.json: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T03:38:38Z",
+          "run_id": "run-52187ae2192144cb",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T03:54:58Z",
+          "run_id": "run-6d06311560ec6202",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -6092,11 +6162,11 @@
       ]
     },
     "T0708": {
-      "status": "rejected",
-      "started_at": "2026-09-21T02:01:03Z",
+      "status": "verification",
+      "started_at": "2026-09-21T03:50:52Z",
       "notes": "SPEC_BLOCKED（2026-09-19 立档，等 owner 一句话）：验收里那条「禁止 rights 不允许的 derive」要求平台对使用声明做允许/拒绝判定——这是权限/法律语义，按 CLAUDE.md §5 属 L3，我不自行选边。仓库自己禁止我猜：internal/rights/usage.go 包注释逐字写 \"unspecified\" is a real answer, not a missing one，并同时否定两种坍缩（collapsing the two would invent a permission nobody granted）——当 restricted 用是发明一条没人声明的禁令，当 allowed 用是发明一条没人给的许可；docs/12 §4 逐字「字段不替代法律合同」；internal/rights/doc.go 逐字 the platform records the declaration and does not judge it；非测试代码里对 usage 声明零判定先例。要问的就是：usage.derivatives 为 unspecified 时默认怎么算。它是默认值（document.go:107-121 的新文档模板即 PermissionUnspecified），所以这一句话决定该功能对绝大多数资产是否可用。ADR-023 已落（docs/adr/，不在规格指纹内）；任务包先不写——留白派工等于请工人替我猜。\n\n---\n**已解除 SPEC_BLOCKED（2026-09-21 Supervisor 裁定）**：要问的那一句话有了答案，而且是 fail-closed 的**三值三分**——`restricted` → 拒绝；`allowed` → 放行；`unspecified` → **既不拒绝也不放行**（要求请求带一条**显式确认**，确认内容与 actor 一并写进同一事务的 audit 行，没有确认就拒绝）；`rights_json` 读不出来 → 拒绝。\n依据全部来自**仓库自己写下的约束**，不是我发明的产品语义：`internal/rights/usage.go` 的包注释逐字`\"unspecified\" is a real answer, not a missing one` 且**同时否定两种坍缩**（当允许用是发明一条没人给的许可，当禁止用是发明一条没人声明的禁令）；`docs/12 §4`「字段不替代法律合同」；`assetpublish` 的 requirePolicy「an unreadable policy is not a permissive one」。\n**落在两处**：`docs/adr/ADR-023-asset-fork-derive-lineage.md` 的「usage.derivatives 的三个取值」一节（判定与理由，可复核、可推翻，代价是改一个格子），以及**任务包的 `supervisor_scope_narrowing`**（实现契约：判定写在本任务自己的命令里、用与 `assetpublish.requirePublish` **同一处**判定、不新增 action、不改权限矩阵、不改 `internal/rights/**`）。\n上面那段原文是 2026-09-19 的判定，**保留**——它记录了当时为什么不肯猜。",
-      "worker_run_id": "run-330afa9185b6703b",
-      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T0708-132727314.patch: exit status 1: error: patch failed: specs/SPEC_VERSION.json:1\n    error: specs/SPEC_VERSION.json: patch does not apply\n    error: patch failed: specs/database/postgres.sql:85\n    error: specs/database/postgres.sql: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n",
+      "worker_run_id": "run-674cd7dde270f755",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T0708-1324323269.patch: exit status 1: error: patch failed: specs/SPEC_VERSION.json:1\n    error: specs/SPEC_VERSION.json: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n",
       "history": [
         {
           "from": "blocked",
@@ -6130,6 +6200,41 @@
           "at": "2026-09-21T02:40:40Z",
           "run_id": "run-547cf1ff833d3e31",
           "reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T0708-132727314.patch: exit status 1: error: patch failed: specs/SPEC_VERSION.json:1\n    error: specs/SPEC_VERSION.json: patch does not apply\n    error: patch failed: specs/database/postgres.sql:85\n    error: specs/database/postgres.sql: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T03:05:17Z",
+          "run_id": "run-3f08df84e8bc75c9",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T03:21:07Z",
+          "run_id": "run-a1e7db2161e9e0f6",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T03:35:32Z",
+          "run_id": "run-7e5af0d2c11012c4",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T0708-1324323269.patch: exit status 1: error: patch failed: specs/SPEC_VERSION.json:1\n    error: specs/SPEC_VERSION.json: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T03:50:52Z",
+          "run_id": "run-674cd7dde270f755",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T04:04:45Z",
+          "run_id": "run-c14e3a248e58f382",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -7408,10 +7513,10 @@
     },
     "T0812": {
       "status": "verification",
-      "started_at": "2026-09-21T02:37:41Z",
+      "started_at": "2026-09-21T03:33:55Z",
       "notes": "T0811/T0511 未落地前不派（Supervisor 冻结，2026-09-19 17:2x）。理由：T0812（Private Evidence / Public Attestation）与 T0511（ADR-024：证据断言的读带上读者）会改同一条读——`internal/persistence/queries/evidence.sql` 的无谓词读与 `internal/application/evidencegraph/**`——并行做必然得到同一规则的两种写法，而 ADR-024 逐字禁止把不同的轴'整理'成另一套谓词。DAG 里此刻看不出这条依赖：T0812 → T0511 的边要跟 T0511 的条目同笔落进 tasks/tasks.json（追加依赖不能引用不存在的任务），而那次落地要等指纹空当；T0812 现有的依赖 T0806/T0703 都已合并，所以 `rddev task next` 会把它列成可派——这条 notes 就是补上 DAG 还没表达的那一半。解冻：T0511 合并后跑 `./bin/rddev task ready T0812`（todo→blocked→ready 都是状态机里的合法边）。",
-      "worker_run_id": "run-491edf9b0354ea84",
-      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（9fe978e00348），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
+      "worker_run_id": "run-4b01ec73f2c05260",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（cb28cd6acb87），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n",
       "history": [
         {
           "from": "blocked",
@@ -7564,6 +7669,27 @@
           "to": "verification",
           "at": "2026-09-21T02:51:04Z",
           "run_id": "run-2f4c763031d97211",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T03:22:11Z",
+          "run_id": "run-b18791e07b73f8ac",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上重新验证并重新提交】\n\n你的交付在本地的合并态 Gate 上被拒，原因是**你的改动无法应用到当前 main**。\n**这是 Gate 在正确工作**：G2 现在验证的是「当前 main + 本任务完整改动」，而不是你 worktree 里那棵孤立的树。\n你运行期间 main 前进了（Supervisor 合并了别的工作），这是正常的。\n\n**Supervisor 已完成**：你的任务分支已合并当前 main（cb28cd6acb87），你的完整改动原样重新应用，改动集合逐个文件比对一致；唯一被排除的是生成物 internal/persistence/sqlc, specs/SPEC_VERSION.json, specs/database/postgres.sql（文本冲突对生成物没有意义，已在合并后的树上重新生成）。\n\n【你要做的】在合并后的基线上重跑 required tests 与 make test-integration，确认没有因合并而失效；确认 RESULT.json 自洽（completed 要求 tests[] 全部 passed，覆盖任务要求的条目带 label）；若一切照旧，原样重新提交 RESULT.json。\n\n【不要做的事】不要为了让 Gate 变绿而改动或放宽任何测试；不要删除测试；不要趁机重构无关代码。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T03:33:55Z",
+          "run_id": "run-4b01ec73f2c05260",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T04:03:33Z",
+          "run_id": "run-35a602d337959fc8",
           "reason": "collect: all checks passed"
         }
       ]
@@ -9394,10 +9520,13 @@
       "merged_at": null
     },
     "T1106": {
-      "status": "verification",
-      "started_at": "2026-09-21T01:56:37Z",
+      "status": "merged",
+      "started_at": "2026-09-21T03:20:48Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:14:44Z 判定，记于 T0705 合并之前）：五条各自的标准全无（限流阈值、CSP 策略、地址名单、多长算短 TTL）；其中 SSRF 与 CSRF 两条已由 T0508 与登录中间件交付，开工前须先划清本轮还差什么；上传签名那条接口本身是未实现的占位（specs/api/openapi.yaml:137/:145）。另：本任务从未被收窄过范围（无 supervisor_scope_narrowing）。",
-      "worker_run_id": "run-05e9fd7b2cccad4b",
+      "worker_run_id": "run-4b2123156d047e08",
+      "accepted_by_supervisor_at": "2026-09-21T03:53:54Z",
+      "merged_at": "2026-09-21T04:03:41Z",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-247bb2ef93405c8e-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T1106/gate-run-run-247bb2ef93405c8e-g2.json and the step logs\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n",
       "history": [
         {
           "from": "todo",
@@ -9425,6 +9554,40 @@
           "at": "2026-09-21T02:38:10Z",
           "run_id": "run-6af17db814b0de0b",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T03:03:44Z",
+          "run_id": "run-664c2b40b5ad39fb",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-247bb2ef93405c8e-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T1106/gate-run-run-247bb2ef93405c8e-g2.json and the step logs\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T03:20:48Z",
+          "run_id": "run-4b2123156d047e08",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T03:30:48Z",
+          "run_id": "run-88ea0e11a82c51d9",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-21T03:53:54Z",
+          "run_id": "run-cadf12fa4104861a"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-21T04:03:41Z",
+          "run_id": "run-ecd80254a0ca2b9e",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -9447,7 +9610,7 @@
       "merged_at": null
     },
     "T1109": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-21T02:26:06Z",
       "worker_run_id": "run-2172541edf36e9a0",
       "history": [
@@ -9463,6 +9626,13 @@
           "at": "2026-09-21T02:26:06Z",
           "run_id": "run-2172541edf36e9a0",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T04:06:53Z",
+          "run_id": "run-e97f505f9d929fcd",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -9623,7 +9793,7 @@
       ]
     },
     "T1201": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-21T02:30:40Z",
       "worker_run_id": "run-01bfd1c4815a19cb",
       "history": [
@@ -9639,6 +9809,27 @@
           "at": "2026-09-21T02:30:40Z",
           "run_id": "run-01bfd1c4815a19cb",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-21T03:31:52Z",
+          "run_id": "run-f95e0f6918427f7c",
+          "reason": "collect rejected: residue: 2 process(es) the Worker started are still running: pid 116102 (/tmp/t1201/diag-api) session 116046 group 116046; pid 3834799 (./api) session 3834796 group 3834796. The Worker (pid 3798786) has already exited — nothing owns these any more and nothing collects them on its own. Collect them with: kill -TERM -- -116046; kill -TERM -- -3834796"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T04:04:47Z",
+          "run_id": "run-9d791739cfcf4a46",
+          "reason": "Supervisor 修复重收：上一次 collect 被拒的唯一原因是「工人起的两个进程还活着」（/tmp/t1201/diag-api 与 ./api），**不是交付缺陷**——同一次的 scope/RESULT/11 条测试/6 条验收/密钥 全部 ok。这两个进程组已按要求清掉，故把状态退回 running 重新 collect，以免把一个已经做完的交付重跑一遍。"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T04:04:47Z",
+          "run_id": "run-314a4e2bd68559ea",
+          "reason": "collect: all checks passed"
         }
       ]
     },
