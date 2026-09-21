@@ -1740,6 +1740,36 @@
       "status": "passed",
       "last_run": "2026-09-20T22:53:28Z",
       "evidence": "Backfilled from the task's own Worker record on 2026-09-20 (not a fresh re-run). The Worker ran `go test ./tests/integration -run 'TestActivity|TestAudit' -count=1 -v` on the tree that was merged -- RESULT.json test label 'activity feed audience e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-20T22:53:28Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
+    },
+    {
+      "id": "T1112-TEST-01",
+      "task_id": "T1112",
+      "name": "browser suites wired",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T1113-TEST-01",
+      "task_id": "T1113",
+      "name": "sourceHref scheme allowlist",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
+    },
+    {
+      "id": "T0909-TEST-01",
+      "task_id": "T0909",
+      "name": "confirm failure path e2e",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": null
     }
   ]
 }

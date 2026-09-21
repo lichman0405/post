@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 147,
+  "task_count": 150,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -7672,7 +7672,7 @@
         "T1106"
       ],
       "requirements": [
-        "**先看清今天真有什么，别照着文档假设有。** 我逐条核过的现状：\n  - **有的**：secret 扫描（`internal/config/secretscan.go`，回归在 `internal/config/secretscan_test.go:87-90`，跑在 CI 的 `go` job 与 `make check`）；权限负向 e2e（`tests/e2e/privacy_e2e_test.go:30`，逐字「The negative path is the point」）；a11y（`tests/web-smoke/a11y-smoke.mjs`，axe-core，**但不在 CI 也不在 Makefile**）；部署模板静态校验（`tests/acceptance/deploy-staging-smoke.sh`，**不在 CI**）。\n  - **没有**：dependency/CVE 扫描、SAST、容器扫描、SBOM——`ops/runbook-steps.json:149` 自己逐字写着「there is no dependency/CVE scan and CI has no security job」，`:165` 写「CI has no container build/SBOM stage」。`grep -rn gosec|govulncheck|trivy|npm audit` 全树零命中（只有一个 `//nolint:gosec` 注释）。\n  - **本任务要收进门的**：`tests/security/owasp-smoke.sh` 由 **T1106** 交付，我已经在 `specs/orchestrator/gates.json` 里建好 G3 job `security-smoke` 指向它，并挂进 T1206 的 `g3_jobs`。 **依赖边已声明**：T1206 的 `dependencies` 里已补上 `T1106`，所以它一定在你之前合入——不会出现「G3 job 指向一个还不存在的脚本」这种假红。",
+        "**先看清今天真有什么，别照着文档假设有。** 我逐条核过的现状：\n  - **有的**：secret 扫描（`internal/config/secretscan.go`，回归在 `internal/config/secretscan_test.go:87-90`，跑在 CI 的 `go` job 与 `make check`）；权限负向 e2e（`tests/e2e/privacy_e2e_test.go:34`，逐字「The negative path is the point」）；a11y（`tests/web-smoke/a11y-smoke.mjs`，axe-core，**但不在 CI 也不在 Makefile**）；部署模板静态校验（`tests/acceptance/deploy-staging-smoke.sh`，**不在 CI**）。\n  - **没有**：dependency/CVE 扫描、SAST、容器扫描、SBOM——`ops/runbook-steps.json:149` 自己逐字写着「there is no dependency/CVE scan and CI has no security job」，`:165` 写「CI has no container build/SBOM stage」。`grep -rn gosec|govulncheck|trivy|npm audit` 全树零命中（只有一个 `//nolint:gosec` 注释）。\n  - **本任务要收进门的**：`tests/security/owasp-smoke.sh` 由 **T1106** 交付，我已经在 `specs/orchestrator/gates.json` 里建好 G3 job `security-smoke` 指向它，并挂进 T1206 的 `g3_jobs`。 **依赖边已声明**：T1206 的 `dependencies` 里已补上 `T1106`，所以它一定在你之前合入——不会出现「G3 job 指向一个还不存在的脚本」这种假红。",
         "**交付物是一条命令的「总门」**：把上面「有的」那些 + T1106 的 owasp smoke 串起来，一条命令跑完、退出码有意义、每条检查**各自可红**。**不许用「都跳过」换绿**：某条检查在今天的环境跑不了（例如需要 docker 而没有），要**明确打印 `NOT ASKED` 并让它影响退出码或进「缺席清单」**，不能静默跳过——仓库里已有这个形状的先例：`tests/acceptance/phase-boundary-checkpoint.sh` 的项 5 与 `ci.yml:146-151` 的 NOT ASKED。",
         "**缺席的那四项，用仓库既有的写法点名，不要造假**：`ops/runbook-steps.json:147-150` 用 `\"kind\": \"absent\"` + note 逐字承认缺口的做法就是先例。本任务把缺席项写成一份**机器可读的清单**（哪一项缺、为什么缺、今天靠什么替代、补它需要什么）。**风险接受不是你的决定**：`docs/23_SECURITY_PRIVACY.md:45` 要求「每个 Release 运行 dependency audit、SAST、secret scan、container scan、OWASP smoke、permission E2E。Critical/High 必须修复或有书面 ADR/risk acceptance（V1 不接受 Critical）」——**缺席项要不要作为 V1 风险被接受，由我以书面形式裁定**，你交清单与证据。",
         "**能补的尽量补（不引入外部账号、不联网装新东西的前提下）**：如果本机已有工具链能提供其中某一项（例如 Go 自带的能力、或既有脚本能覆盖的一半），就补进去并标明它覆盖了什么、没覆盖什么。补不了就如实进缺席清单。",
@@ -7690,7 +7690,7 @@
         "**跑不了的项不静默跳过**：打印 `NOT ASKED` 并进缺席清单；有断言证明「静默跳过」会让总门红（而不是绿）。",
         "**缺席清单完整且具体**：四项各有一条，含「今天靠什么替代 / 补它需要什么 / 影响是什么」；不许把缺席写成「不需要」。",
         "**a11y 与权限负向 e2e 真的进了门**（不再只靠人手工跑）。",
-        "**证据落账**：每条检查的真跑记录用 `scripts/record_test_run.py` 写进 `tasks/tests.json`（不许手改成 `passed`）。",
+        "**证据可落账，但账本不是你写的**：每条检查给出**一条可直接粘贴执行**的 `scripts/record_test_run.py` 调用（`--id/--command/--exit-code/--output-file`），命令、退出码与输出尾部同时写进 RESULT。**你不得写 `tasks/tests.json`**——那是 CLAUDE.md §4 里 Supervisor-only 的账本，`rddev worker collect` 会按越界拒收整个 diff；验收时由我逐条执行这些调用，账本上的 `passed` 因此是我亲手跑出来的。**任何 status 都不许手改成 `passed`。**",
         "**诚实报告**：缺席项与不确定处逐条点名，并给出你的处置建议。"
       ],
       "tests": [
@@ -8383,6 +8383,179 @@
       "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 裁定，替换任务书里「等 L3 裁定」那一段）——本任务按形状 A 实施。**\n\n裁定原文：**这一步复用既有的 `open_pr` 权限格：不新增 CSV 行、不新增 action。**\n\n依据（全部是已经写下的规格，不是新造）：\n- 这条边的三处规格都已经在：`docs/43_STATE_MACHINES.md:13`、`infra/migrations/00051_pull_request_state_and_fixity.sql:88`/`:90`、`internal/application/pullrequests/service.go:98`——缺的只是「门」，不是语义。\n- `specs/policies/permissions-matrix.csv:7` 的 `open_pr` 是 `deny,allow_from_fork,deny,allow,allow,allow,allow`：非成员可以经 fork 开 PR。而 T1202 的验收要求「外部贡献者的 PR 被评审并合并」——这一步必须对 `allow_from_fork` 那一格放行，否则那条闭环断在评审门口。\n- 形状 C（创建即 `review_required`）会让 `'open'` 变成产品里不可达的状态——那是真实的语义变化，不是接线。\n- 形状 B 要逐格新裁 7 个格子，其中非成员那格猜错就断掉 T1202——那是发明权限。\n\n由此：授权用 `internal/authz/action.go` 里**既有的** `ActionOpenPR`，对 PR 所属项目求判定；**不要**改 `specs/policies/permissions-matrix.csv`，也**不要**往 `internal/authz/action.go` 加动作。若你判断形状 A 在某个格子上会授予调用者原本没有的能力（例如能编辑别人 PR 的人），**照实写进 RESULT 并停下来报**，不要自行放宽或收紧。\n\n契约路径由 Supervisor 落（已在 `specs/api/openapi.yaml` 里）：`POST /projects/{projectId}/pull-requests/{prId}:request-review`，照 `{prId}:merge` 的既有写法；你按它实现 handler，**不要**改契约文件。契约里这条路由与 `{prId}:merge` 一样带**必填**的 `Idempotency-Key`（`components/parameters/IdempotencyKey`：required、minLength 8）——所以送审要读它，并按任务书 AC6 的「同一 key 重放返回同一结果、audit 与事件各只有一条」实现；`{prId}:merge` 的 handler（`cmd/api/mergehttp/handler.go:86`/`:192` 的 `mergeKey`）就是现成的接法，照它来。",
       "tests": [
         "request review route"
+      ]
+    },
+    {
+      "id": "T1112",
+      "phase": "P11",
+      "phase_name": "UI、安全、可访问性、性能与运维加固",
+      "title": "浏览器套件进 make，且断言写错必须报错",
+      "v1_required": true,
+      "decision_level_max": "L1",
+      "dependencies": [
+        "T1107",
+        "T0107"
+      ],
+      "requirements": [
+        "**这一笔的由来是一条实测出来的事实，不是「顺手加个便捷目标」。** 2026-09-21 全仓查过：`tests/e2e-*` 那几条浏览器套件**没有任何地方在跑它们**——`Makefile`、`.github/**`、`tests/**/*.sh` 里对 `e2e-shell` 的引用，在 T1107 之前是 **0 处**（T1107 的 `tests/acceptance/privacy-suite.sh` 是唯一新增的引用）。后果是 `tests/e2e-shell` 红着过了六天没人知道（见 `tasks/decisions.md` §⑱）。**修法不是「补一条命令」，是让「没人跑」变成「有人跑，而且红了会被看见」。**",
+        "**第二半更硬，也是本任务真正的重点：`tests/web-smoke` 的断言写错了不会报错。** 两个文件都把 `ok` 定义成**单参数**箭头函数：`tests/web-smoke/visual-smoke.mjs:18` 与 `tests/web-smoke/a11y-smoke.mjs:24`，都是 `const ok = (label) => console.log(...)`。于是**多传一个实参会被静默丢掉**。实测（2026-09-21，本仓当前 main）：全目录 `ok(...)` 调用里，**有 10 处带了第二个实参**——`visual-smoke.mjs` 9 处、`a11y-smoke.mjs` 1 处（T0907 修掉原 12 处里的 2 处之后剩下的数）。它们的形状是**看着像断言、永远不会失败**：",
+        "```js\n// visual-smoke.mjs:91 / :113 / :122 —— 第二参是条件，被丢掉了\nok(\"header renders on /\", (await header.count()) === 1);\nok(\"search form input[name=q] visible\", await searchInput.isVisible());\nok(\"notifications bell links to /notifications\", (await bell.count()) === 1);\n// a11y-smoke.mjs:208\nok(\"keyboard: Enter on the Projects link navigates\", (await page.locator(\"h1\").textContent())?.trim() === \"Projects\");\n```",
+        "**为什么这条必须修**：`tests/web-smoke` 是 T0107 两条验收证据之一（`tasks/decisions.md` §⑰ 记过这件事）。今天这 10 条能存在，是因为**写错不报错**——只要 `ok` 仍然接受第二个实参，下一批人还会写出第 15 条。**所以修法是两层，缺一不可**：(a) 让 `ok` 收到第二个实参时**直接抛错**（或在统计里记成失败并让退出码非零），把「写错」变成「当场红」；(b) 把那 10 处逐条改成真断言，或删掉并**写明为什么它不该存在**。",
+        "**要跑起来的是「所有」浏览器套件，不是一个写死的清单。** 不许在 Makefile 里手抄五个名字——**清单要由发现得来**（`tests/e2e-*/run.sh` 与 `tests/web-smoke/*.mjs` 有哪些就跑哪些），并把发现的清单打进 RESULT。理由：写死的清单正是「漏掉一条没人发现」的形状，本任务存在的理由就是消灭它。",
+        "**每条套件要能单独点名、失败可定位**：一条 `make` 目标跑全部，每条另有自己的目标或参数；**不许**把慢的与快的串成一条不可诊断的链（照 `tests/acceptance/privacy-suite.sh` 的分组形状，它是本仓既有的好先例）。缺依赖（没装 node / 没起栈）时**判失败并说清缺什么**，**不许静默跳过**——「跳过」不是「通过」。",
+        "**CI 那一半是我的，不是你的。** `.github/workflows/**` 对你**禁止改**（本仓 P11 既有任务同一口径）。你要交付的是**可直接粘贴的 YAML 片段**（写进 RESULT），并说清它依赖哪些前置服务与镜像；由我接进 CI。",
+        "**诚实报告**：哪些套件你今天真的跑通了、各自的墙钟代价、哪些必须起真栈才能跑、以及**你没能让它跑起来的是哪一条、卡在哪一步**。跑不通就如实写，不许用 stub 或跳过凑绿。",
+        "**顺手清掉一句假话（复核在 T1107 上找到的第三份拷贝）**：`tests/integration/privacy_sidechannel_test.go:948` 的注释还写着「The retrieval layer has no HTTP route today — cmd/api/searchhttp exposes POST /api/v1/search over the answer generator…」，**这半句是假的**：`cmd/api/searchhttp/doc.go:1-12` 与 `cmd/api/main.go:1294` 都明写着那条路由就是跑整条流水线、第三段就是 `retrieval.Retriever`。真正的理由更强也更该写：那条路由是 state-changing method，匿名调用者一律结构化 401，且要落一条 search 记录，**所以匿名读面上根本读不到检索答案**。T1107 的返工只改了 RESULT 里的两处，代码注释这第三处漏了。**逐条 `grep` 复算再改。**"
+      ],
+      "acceptance_criteria": [
+        "**先证明仪器能说不（第一步）**：在 `tests/web-smoke` 里制造一次「第二实参为假」的调用（例如 `ok(\"x\", false)`），**它必须让套件非零退出并指名是这一条**；把这次红的输出贴进 RESULT，再撤掉。**一个不会红的守卫不算守卫。**",
+        "**发现的清单是真的**：`ls tests/e2e-*/run.sh` 与 `ls tests/web-smoke/*.mjs` 的结果逐条出现在 `make` 的覆盖面里；少一条要说明为什么（例如那条不是浏览器套件）。RESULT 里给出**发现命令与它的原始输出**。",
+        "**10 处两参调用逐条有处置**：改成真断言的、删掉的，各给一份清单；删掉的逐条给理由。改完之后 `grep` 一遍 `ok(` 带第二实参的调用数**清零**（把这条 `grep` 与它的输出贴进 RESULT）。",
+        "**既有断言一条都没被放宽**：不许删测试文件、不许 `skip`、不许放宽阈值、不许放大 timeout。要改既有断言时逐条说明**为什么它比原来更强**。",
+        "**可重复**：连着跑两遍结果一致（或写明第一遍留下的残留与第二遍的行为）。需要起真栈的套件，写清 `make infra-up` 之类的确切前置与端口。",
+        "**诚实报告**：走不通的套件、为了让它跑通做的任何妥协，逐条点名。"
+      ],
+      "deliverables": [
+        "`Makefile` 的浏览器套件目标：一条跑全部，每条可单独点名，失败可定位",
+        "`tests/web-smoke` 的 `ok()` 收紧（第二实参即报错/记失败），与 14 处调用的逐条处置",
+        "RESULT 里可直接粘贴的 CI YAML 片段（`.github/**` 由 Supervisor 接）",
+        "RESULT：发现的套件清单、每条的墙钟代价、能红的证明、走不通的项"
+      ],
+      "allowed_scope": [
+        "tests/web-smoke/**",
+        "tests/e2e-shell/**",
+        "tests/e2e-*/run.sh",
+        "tests/integration/privacy_sidechannel_test.go",
+        "Makefile"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        ".github/workflows/**",
+        "specs/**",
+        "tasks/**",
+        "apps/web/**",
+        "internal/**",
+        "cmd/**"
+      ],
+      "relevant_specs": [
+        "docs/67_TEST_GATES.md"
+      ],
+      "scope_note": "`tests/**` 是宽的，但浏览器套件的 run.sh 散布在 `tests/e2e-*/` 下，逐条列全会随套件增减而失准。**边界靠这条说明约束**：只许动**浏览器套件**（`tests/e2e-*/**`、`tests/web-smoke/**`）与 `Makefile`；**不许**动 Go 集成测试的断言（`tests/integration/**`、`tests/e2e/**` 的 `*_test.go`）、`tests/acceptance/**` 里 T1107 新增的证据脚本。若发现某条套件的**产品代码**有缺陷：**报上来**，不要在门里顺手修（§㉑ 同一口径）。\n\n**范围按「本任务真的需要哪些路径」收窄（2026-09-21，安全评审触发）**：原来是 `tests/**`——那会让一笔「把浏览器套件接进 make」的任务顺手改到 `tests/acceptance/privacy-suite.sh`（**它是 T1107-TEST-01 的 blocking 门**）与 `tests/e2e/**` 里的 Go 断言。现在只给：`tests/web-smoke/**`（`ok()` 那两处定义与 10 处调用）、`tests/e2e-shell/**`（套件本体）、`tests/e2e-*/run.sh`（各套件入口）、`Makefile`；外加**一个文件** `tests/integration/privacy_sidechannel_test.go`——那是并进来的、只改一句注释的清理项。**跑不通的套件照实报，不许为了让它们跑通去改别的门。**",
+      "tests": [
+        "browser suites wired"
+      ]
+    },
+    {
+      "id": "T1113",
+      "phase": "P11",
+      "phase_name": "UI、安全、可访问性、性能与运维加固",
+      "title": "sourceHref 只放行 http(s)：把一处越界的信任收紧",
+      "v1_required": true,
+      "decision_level_max": "L1",
+      "dependencies": [
+        "T0907"
+      ],
+      "requirements": [
+        "**位置与形状（逐字在代码里）**：`apps/web/lib/search.ts:220` 的 `sourceHref(apiBaseUrl, href)`，第 `:225` 行是 `/^[a-z][a-z0-9+.-]*:/i.test(path) return path;`——**任何**带 scheme 的绝对地址原样放行。上一条注释写的意图是「已经解析过的绝对地址，再拼前缀会坏」。**代码比这句意图宽**：`javascript:`、`data:`、`vbscript:`、`file:` 同样命中这条正则。",
+        "**为什么这是缺陷而不是「按设计」**：这个值最终落到锚点上——消费者是 `apps/web/app/(main)/search/search-answer.tsx:552` 的 `sourceHref(apiBaseUrl, source.href)`，返回值被用作链接地址。`javascript:` 落进 href 就是一处可执行入口。今天的供给方是自家 API（所以**今天不可利用**），但这正是本仓库一贯要消掉的东西：**一处比它文档里写的意图更宽的信任**。",
+        "**收紧要窄而明确**：只放行 **http/https**（大小写不敏感，允许 `http://` 与 `https://`）；**其余一律落回既有那条「无地址」分支**（返回空串）——注释里已经写明了那条分支的语义：`an empty href stays empty so the page can render the source as text`。**不要**发明新的降级行为，也不要抛错：调用点的既有行为就是「空则按文本渲染」。",
+        "**测试要能证明自己会红**：`apps/web/lib/search.test.mjs` 已有 `sourceHref` 的测试。补的用例至少覆盖：`javascript:alert(1)`、`data:text/html,<script>`、`vbscript:MsgBox`、以及**大小写混合**的 `JaVaScRiPt:`（正则带 `i`，所以必须一起挡）；`https://example.org/x` 与 `http://example.org/x` **原样返回**；相对路径 `objects/1` **仍然拼前缀**。**改之前先跑一次让新用例红**，把输出留在 RESULT。",
+        "**不许改变其他行为**：`href` 为空/只有空白 → 空；相对路径的前缀拼接（含去掉尾部斜杠）→ 逐字不变。这一笔只动「放行哪些 scheme」。",
+        "**诚实报告**：你有没有发现别的调用点或是别的地方用了同一条正则、以及你有没有认为某个 scheme 必须保留（例如将来要支持 DOI 或 ORCID 的 https 之外形式）。**你的判断写下来，不许默默扩大范围。**"
+      ],
+      "acceptance_criteria": [
+        "**能红**：新用例在修复前必须失败一次，输出贴进 RESULT；修复后全绿。",
+        "**四种危险 scheme 返回空串**（`javascript:`/`data:`/`vbscript:`/混合大小写），**两个 http(s) 原样**，**相对路径拼接不变**——逐条断言，不是一条概括。",
+        "**既有测试一条都没被删弱**：`apps/web/lib/search.test.mjs` 原有用例全部保留且仍绿；`grep -c` 前后用例数与原文件对比写进 RESULT。",
+        "**没有越界改动**：`apps/web/app/**` 与 `internal/**` 的 diff 为空（消费者不需要改——空串分支它已经处理）。若你**认为**消费者必须改，**停下来报上来**，不要自己改。",
+        "**诚实报告**：同一条正则的其他使用点、以及你认为需要保留的例外。"
+      ],
+      "deliverables": [
+        "`apps/web/lib/search.ts` 的 scheme 白名单收紧（只 http/https，其余落回空串）",
+        "`apps/web/lib/search.test.mjs` 的新用例（四种危险 scheme + 两个放行 + 相对路径），含修复前变红的证据",
+        "RESULT：能红的证明、既有用例未变的依据、你判断不了而按最严处理的地方"
+      ],
+      "allowed_scope": [
+        "apps/web/lib/search.ts",
+        "apps/web/lib/search.test.mjs"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        ".github/workflows/**",
+        "specs/**",
+        "tasks/**",
+        "apps/web/app/**",
+        "internal/**",
+        "cmd/**"
+      ],
+      "relevant_specs": [],
+      "scope_note": "范围故意只有两个文件。**正则只有这一处**（`grep -n` 过 `apps/web` 与 `internal`）；若你找到第二处使用同一个放行判断的地方，**报上来**，由我决定是否并入本任务——**不要**自行扩大 diff。",
+      "tests": [
+        "sourceHref scheme allowlist"
+      ]
+    },
+    {
+      "id": "T0909",
+      "phase": "P9",
+      "phase_name": "Search 与 Evidence-backed Research Answer",
+      "title": "confirm 的失败路径必须原子化：状态与记录要么一起落，要么都不落",
+      "v1_required": true,
+      "decision_level_max": "L1",
+      "dependencies": [
+        "T0908"
+      ],
+      "requirements": [
+        "**这是一条复核在真 PostgreSQL 上打出来的、可复现的缺陷，不是「可能的」风险。** T0908 的复核用探针证伪了代码里那句自证：`internal/application/researchcontext/service.go:240-249` 写着「状态写与记录之间崩掉，下一次调用会修好它（the retry lands on the same state and records it）」。**那句话不成立。** 复现（复核逐字给过）：Alice 用同一个 `Idempotency-Key` K 先确认 draft1（201），再用 K 确认 draft2——draft2 的项目里 `branches=1`、`project_states=2`、`state_commits=1`、`scientific_object_versions=1` **都已经提交**，而 draft2 自己仍是 `status='draft'`。**一个被拒的请求留下了一份没有任何确认记录命名的初始状态。** 换一把新 key 重试也不行：重试走到 `CreateBranch(main)` 撞上「branch name already taken」，被归进 `ErrStore`，答 503（`retryable:true`），**draft 永远停在 draft**。",
+        "**为什么它自己修不好**：draft 行有 append-only 触发器，UPDATE/DELETE 都被拒（`00134` 的 guard），所以没有任何自愈路径；上面那 503 还告诉调用方「稍后再试」，而那个请求**再试一万次也不会成功**。同一个窗口也覆盖代码自己承认的崩溃/超时情形。",
+        "**house pattern 已经给了两条路**（复核给的，任选其一，但必须**真的**做到，不能只改注释）：(a) 把状态写与那行记录放进**同一个事务**（`00072` 的 publish ledger 就是这么做的）；(b) 让重试**认得**「这个项目已经有一条 main，且它的 state commit 携带的正是本 draft 的 research question」，从而从那里把记录补上。**选哪条你定，但要写清为什么**，以及它在「并发同一 key」与「崩在中途」两种情形下各自给出什么答复。",
+        "**同一处的第二半（复核 minor）**：`Confirm` 用 `fmt.Errorf(\"%w: record the confirmation: %v\", ErrStore, err)` 包了 store 的错误——**只用 `%v` 串了原因，于是 `ErrIdempotencyConflict` 没有进链**。而 `internal/persistence/research_context_store.go:226-230` 是**故意**把那个部分唯一索引冲突分类成 `ErrIdempotencyConflict` 的，`cmd/api/searchhttp/draft.go:383` 也**专门**写了 `IDEMPOTENCY_CONFLICT -> 409` 的分支——**那条分支从 confirm 到此不可达**。调用方拿到的是 503 `SERVICE_UNAVAILABLE`（`retryable:true`）。把原因用 `%w` 串进链里，或显式判 `ErrIdempotencyConflict`——**让那条已经写好的分类真的用得上**。",
+        "**顺手清掉同一笔里的第三处（复核 minor）**：`internal/persistence/queries/search.sql:567` 的注释说「Three columns and the actor, and nothing else」，还专门论证了不带 answer 文档；而 `:581` 的 SELECT **读了六列**（`id, actor_id, query, selected_refs, citations, answer`），唯一的消费者 `researchcontext.SearchRecord`（`internal/persistence/research_context_store.go:309`）只映射 `ID/ActorID/SelectedRefs`，**把 query、citations 和最大的那列 answer jsonb 读进进程又丢掉**。要么把 SELECT 收成那三列并重跑 sqlc，要么把注释改成真的——**两者选一，别让注释和代码互相打架**。",
+        "**第四处（复核 nit，便宜）**：两处交叉引用指错了地方——`internal/persistence/search_record_store.go:25` 说「the reader is now here (GetSearchRecord, below)」，而 `GetSearchRecord` **不在那个文件里**（它在 `research_context_store.go:309`）；`research_context_store.go:306` 那句对称地指向别处。**逐条 `grep` 复算再改，不要照记忆改。**",
+        "**不许为了达标放宽任何东西**：`citations <@ selected_refs` 的 CHECK、draft 行的 append-only guard、`Idempotency-Key` 的重放语义，全部原样。**这一笔不加迁移**（`00134` 已是 canonical history，不可改；复核提到的 refs guard 对 `NULL` 数组元素放行那一条**记录在 RESULT 即可**，要修得另开一笔带号的迁移）。",
+        "**诚实报告**：复核的 minor 里还有一条——`Start` 不是原子的（先建项目 `:154`、后插 draft `:178`），两个真正并发的同 search 启动**不是彼此的重放**，失败的那个会拿到 409 `PROJECT_SLUG_TAKEN`/留下孤儿项目。**它在本笔的范围之外还是之内，你自己判**：要修它就会碰到 projects 的写路径。判完把结论和理由写进 RESULT。**「说了理由」接受，「没说」不接受。**"
+      ],
+      "acceptance_criteria": [
+        "**仪器能说不（先做这一步）**：为每一条修复先写出**会红**的断言，红的输出留在 RESULT 里，再做修复。（复核已经给过其中一条的转红形状：同一个 key 用在两个 draft 上。）",
+        "**「被拒的确认不留状态」逐条断言存储**：同一个 key 确认两个 draft 时，第二个 draft 的项目下 `branches`/`project_states`/`state_commits`/`scientific_object_versions` 的计数**逐表断言**（真 PostgreSQL 按表读回），并且 draft2 的终态是**可解释的**（要么被拒且零状态，要么被正确重放）。**不许用「返回值是 4xx/5xx」代替存储断言。**",
+        "**「失败之后还能再确认」**：构造一次中途失败（例如让 `CreateBranch` 失败一次），证明**换 key 重试能把它确认成功**，或证明该 draft 被明确拒绝且**没有留下任何状态**——两者必须有其一，且用存储断言证明。",
+        "**分类真的用得上**：confirm 撞上 `ErrIdempotencyConflict` 时，答复是契约里的 **409 `IDEMPOTENCY_CONFLICT`**（不是 503 `retryable:true`）。写一条断言钉住状态码与 code。",
+        "**注释与代码一致**：`service.go:240-249` 那句自证要么变成真的（修复让它成立），要么被改成真的表述；`search.sql:567` 的注释与它的 SELECT 一致。两条各给一条 `grep`/`sed` 的实际输出。",
+        "**既有测试一条都没被删弱**：`tests/integration/search_start_project_test.go` 里 T0908 的 `TestStartResearchProjectE2E` 与那条 raw-SQL refs guard 的用例**原样通过**；前后用例数与断言数对比写进 RESULT。",
+        "**范围干净**：`specs/**`、`infra/migrations/**`、`apps/web/**`、`.github/**` 的 diff 为空。",
+        "**诚实报告**：`Start` 非原子性的判断与理由；refs guard 的 NULL 元素那条为什么本笔不修。"
+      ],
+      "deliverables": [
+        "confirm 的失败路径修复：状态写与记录原子化（或真正可自愈的重试），附能红的断言",
+        "`ErrIdempotencyConflict` 的链修复，使 409 `IDEMPOTENCY_CONFLICT` 在 confirm 上可达",
+        "`search.sql:567` 的投影/注释一致（收窄 SELECT + 重跑 sqlc，或改注释）",
+        "两处交叉引用改对",
+        "RESULT：每条修复的转红证据、存储断言、以及 `Start` 非原子性的判断"
+      ],
+      "allowed_scope": [
+        "internal/application/researchcontext/**",
+        "internal/persistence/**",
+        "cmd/api/searchhttp/**",
+        "tests/integration/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        ".github/workflows/**",
+        "specs/**",
+        "infra/migrations/**",
+        "tasks/**",
+        "apps/web/**"
+      ],
+      "relevant_specs": [
+        "docs/14_SEARCH_DISCOVERY.md",
+        "docs/43_STATE_MACHINES.md",
+        "docs/09_VERSION_CONTROL.md"
+      ],
+      "scope_note": "范围收在 confirm 这条路径上：`internal/application/researchcontext/**`、`internal/persistence/**`（含 `queries/**` 与 `sqlc/**`）、`cmd/api/searchhttp/**`、`tests/**`。\n\n**`specs/**` 整块禁写**：本笔不加迁移、不改契约（`:confirm` 的 404 契约缺口由 Supervisor 在同一笔记账里补），生成物因此不该动。若你判断必须动契约，**停下来报上来**。\n\n**`internal/application/**` 收窄成 `internal/application/researchcontext/**`**：T0908 那笔需要 flat 的 `internal/application/**`，是因为它要新建子包；本笔只改既有子包里的文件，没有这个理由。\n\n**`tests/**` 收窄成 `tests/integration/**`**（2026-09-21，安全评审触发）：原来的 `tests/**` 会让一笔 confirm 失败路径的任务能改到 `tests/acceptance/**` 那几道 blocking 门与浏览器套件。本任务的用例形态就是真 PostgreSQL 的集成用例（`search_start_project_test.go` 就在那里），`tests/integration/**` 正好够用。",
+      "tests": [
+        "confirm failure path e2e"
       ]
     }
   ]

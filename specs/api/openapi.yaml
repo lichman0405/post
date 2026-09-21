@@ -459,6 +459,7 @@ paths:
                 hypotheses: {type: array, items: {type: string}}
       responses:
         '201': {description: Draft research context created; body carries the draft id, the project id and the draft}
+        '400': {description: "The Idempotency-Key header is missing or shorter than 8 characters, or the body is not the shape above, code VALIDATION_FAILED"}
         '409': {description: The search record is not the caller's, or was already started}
   /research-context-drafts/{draftId}:confirm:
     post:
@@ -480,6 +481,8 @@ paths:
         - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '201': {description: Initial state created; body carries the branch id and the state commit}
+        '400': {description: "The Idempotency-Key header is missing or shorter than 8 characters, code VALIDATION_FAILED"}
+        '404': {description: No such draft, or one the caller may not see — the same answer for both, so a non-maintainer cannot tell an existing draft from a missing one (code RESEARCH_CONTEXT_DRAFT_NOT_FOUND)}
         '409': {description: The draft is not in a state that can be confirmed}
   /assets/{assetId}:
     get:

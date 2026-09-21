@@ -16871,3 +16871,134 @@ T1101 的评审也马上要派。换工具的窗口就是「停驱动 → 提交
 恢复后复绿。测试里另有一条负断言，防的是「拿基线 blob 去哈希」这种写错——
 **新增文件那条即使哈希错了也会通过**（基线里没有这个文件），所以必须单独钉住被改的那个文件。
 `go test ./internal/devorchestrator/` 全绿（17.7s）。**bin/rddev 尚未重建**，等提交窗口。
+
+## ㉔ 验收记录：T0908 / T1113 收下，T0908 的「major」立成 T0909（2026-09-21）
+
+### T0908（Search → Draft Research Context）——**收下，但那条 major 记账，不埋**
+
+复核三份都自己重跑过（不是读 RESULT）：`TestStartResearchProjectE2E` 与 raw-SQL refs guard 那条在真 PostgreSQL 上绿；
+六次变异里三次复现出**逐字节相同的转红行号**；`check-schema-snapshot`、sqlc drift、spec_version 三个 `--check` 都是 current。
+我自己另跑了一遍：范围 23 条路径全在范围里、两份生成物 current、指定测试 `ok 2.018s`、跑完 **23 → 23 条路径零残留**；
+它 RESULT 里「我碰过的文件里 `grep MUTATION` 为 0」这句也核了——全仓 3 处命中全在 `tests/e2e-activity/mutation-check.sh`
+与 `tests/acceptance/runbook-drill.sh` 这两个**它没碰过**的既有变异工具里，所以那句话成立（只是读得太宽会以为不成立）。
+
+**那条 major 是真的，而且是探针打出来的**：`Confirm` 先写状态（`CreateBranch`/`CreateObject`/`CommitForState`）再 CAS 那行记录，
+于是同一个 `Idempotency-Key` 用在第二个 draft 上时，**被拒的那个请求留下一份没有记录命名的初始状态**，
+draft 永远停在 `draft`（append-only guard 不让 UPDATE/DELETE，没有自愈路径），换新 key 重试撞 `branch name already taken` → 503。
+代码里那句「the next call repairs it」被证伪。
+
+**为什么仍然收下**：它的验收契约**全部成立**（复核逐条读过 8 条 AC），复核给的结论是 `approve`；
+这条 major 描述的是**失败路径**上的缺陷，不是契约未达成。而它落在关键链的链头（T1202 等它），
+返工一轮的代价远大于**另立一笔**——所以立成 **T0909**，与 T1202 并行跑，不占关键链。
+**这不是「为了让闸门变绿而放宽」**：缺陷原文、复现步骤、Falsification 证据全部落在 T0909 的任务书里，一个字没丢。
+
+### T1113（sourceHref 只放行 http(s)）——**收下**，4 条 minor/nit 记账
+
+复核 `approve`，而且它**独立复现了「能红」**：把交付的测试跑在基线源码上——
+`pass 14 / fail 1`、红的正是那条 scheme 白名单断言；跑在交付源码上 15/15。
+我自己另做了一次外树探针（把白名单改回旧行为、拷到 `/tmp` 跑）：同样 `fail 1`。**这台仪器能说不。**
+
+四条 minor/nit 全**非阻断**，其中两条值得记下来别再犯：
+1. 我在 ㉑ 里要的「`apiBaseUrl` 为空也要有一条」**没交**——14 条断言用的都是非空 base。复核做了差分探针证明这一笔**动不了**那个分支，
+   所以不阻断；下次写验收证据的形状时，**我自己得把这条写进任务书的 acceptance_criteria，而不是写在裁定里指望工人读到**。
+2. RESULT 里 `tests[]` 有 4 条变异检查标了 `status: passed`，而它们自己的证据正文写着 `fail 1`——
+   **「我设计的检查通过了」与「测试通过了」被同一个标签混在一起**，这让 collect 期那条「列出的测试全过」的检查对**打印过 FAIL 的运行**变绿。
+   这是一条**门自己**的账：值得给变异检查一个单独的标签，否则那条一致性检查会慢慢失去意义。
+
+### T0710（Asset 完整 E2E）——**收下**
+
+复核 `approve`，它自己数过：diff 恰好一个新文件、1330 行、全在 `tests/**` 里。
+我自己另做了一次**外树探针**（不用它的树）：从 main 新建工作树 + 拷进那一个文件 → `ok 4.097s`；
+然后在**产品代码**里把 `asset_lineage` 的 INSERT 两端对调（`internal/persistence/sqlc/asset_derive.sql.go`：
+`VALUES ($1,$2,$3)` → `VALUES ($2,$1,$3)`）→ **子测试 7/8/9 一起转红，而且红的时候打印的是库里真实的边行**
+（`{parentVersionID:e1339715… childVersionID:02a7da3a… relation:forked_from}`）。探针树已删除。
+**这是「这台仪器能说不」的最强形状**：红不是断言的形状错，是它读回了产品真的写错的那些行。
+
+两条 minor 记账，都**不阻断**：① 第 3 跳表头写的「或携带供给方的可见性」这个转红条件，**它的 fixture 造不出来**
+（两个项目与两侧版本都是 public）；② 子测试 10 对空期望没有守卫（`strings.Contains(raw, "")` 恒真）——套件整体仍会红，
+只是那一条自己不会。两条都写进待立任务清单，不占关键链。
+
+### T1107（隐私侧信道套件）——**收下**（返工第 1 次通过）
+
+上一轮的 blocking 是「门没跑任务点名的那 7 条负数」，复核这一轮**逐条复算了**：
+15 条点名测试的 `file:line` 全部命中 `func` 定义行，11 个被点名文件各有代表（含此前零代表的 `asset_publish_test.go`、`search_access_test.go`），
+它自己在冻结树上重跑 `PRIVACY_SUITE_GROUPS=edge,postgres` → exit 0、edge 7 例、postgres 41 例、0 条 SKIP。
+它在 `cmd/api/explorehttp/store.go:141` 核出的是**产品改动的方向**：这处是**收紧**（两条谓词等于 `AudienceFor` 前两个分支的否定），
+但它**确实改变了匿名面的可见输出**——以前被「规则本就拒绝的行」挤掉的公开出版物现在会渲染出来。**这是披露过的、也是修掉的真缺陷**，不是放宽权限；
+RESULT 的 AC6 写「没有任何放宽」，严格读会在这一句上产生歧义——**下次写这类句子要写「没有权限放宽」，别写「没有任何放宽」**。
+
+**遗留一处我要盯的**：`tests/integration/privacy_sidechannel_test.go:948` 的**代码注释**里还留着那句假话
+（「The retrieval layer has no HTTP route today」），返工只改了 RESULT 的两处。已写进 T1112 的必做项（同一 `tests/**` 范围内）。
+
+### ⑲ 那张「待立任务」清单的结算（2026-09-21 收工时）
+
+| 编号 | 结算 | 依据 |
+|---|---|---|
+| A | **仍在清单**（reopen 入口 + 契约） | 不是 V1 闭环上的东西，排到今天之后；F 并进它 |
+| B | **已立账 → T1112** | 10 处两参 `ok()`（不是我先前写的 14——见下）+ 让 `ok` 收到第二个实参就报错 |
+| C | **已关闭（T1107 返工里做到了）** | 见下：**清单这句话本身写反了** |
+| D | **已立账 → T1112** | 浏览器套件进 make/CI |
+| E | **记账，不修** | 见下 |
+| F | **并进 A** | 见下：两处都核过，是真的 |
+| G | **并进 A**（不是 T0909——它在 `internal/application/reopens/**`，不在 T0909 的范围里） | 见下：范围比原记录窄 |
+| H | **仍在清单**（T0906 复核 3/4/5） | 上一条链的欠账，未动 |
+| I | **已交付 → T1113（已 approve）** | 见上 |
+
+**C 那句「规格落后于已验收的产品」是错的，我把方向记反了。** 真相是：**规格是对的，套件是错的**。
+`docs/05_INFORMATION_ARCHITECTURE.md:19` 逐个列出十个 tab（含 `Milestones`），`specs/ui/routes.yaml:8` 也有 `milestones`；
+产品侧 `apps/web/app/(main)/projects/project-tabs.ts:41` 确实渲染它。而套件的 `TAB_LABELS` 只列了九个。
+T1107 的返工把它换成了**按 (key,label) 逐位比较**的 `TAB_CONTRACT`，里面**含 `milestones`**——所以 C 是它顺手做掉的，
+我不需要再改规格。**这正是「我说的话也要被复核」那一条**：清单是我的字，我也写反过。
+
+**B 的 14 → 10 也要记一笔。** T1112 的任务书里我一开始写「14 处带第二个实参」，`grep` 数出来就是 14——
+但那 14 里有 4 处是**字符串/模板里带逗号**的单参调用（`ok(\`desktop nav shows ${X.join(", ")} …\`)`）。
+按括号顶层逗号重新数（跳过引号内的），真数是 **10**（`visual-smoke.mjs` 9 + `a11y-smoke.mjs` 1），与 ⑲ 表里的「10 条」对上。
+**在派工前改掉了**：一本写着 14 的任务书会让工人去找四条不存在的调用。**`grep` 数出来的数不是数出来的数。**
+
+**E 为什么不修**：它记的是 `.rddev/workers/T0610/RESULT.json` 里的行号在 rebaseline 之后过期。
+`RESULT.json` 是**历史产物**，写完就不再维护；`grep` 过 `docs/`、`specs/`、`tasks/`，**没有任何活文档**引用那两个行号。
+真正要留下的教训是**流程**那条：**给评审人读的 RESULT 里，凡是「在哪个文件的第几行」都要在被冻结的那棵树上重新推导一次**——
+这条已经在 T0908 的任务书里以「逐条 `grep` 复算，不要照记忆改」的形状反复出现。
+
+**F 两处都核过，成立**：`internal/authz/action.go:39-40` 写 `ActionReopenMainObject` 的前置状态是 lifecycle `'reopened'`，
+而 `internal/application/reopens/service.go:303` 要求的是 **`aborted`**（`aborted → reopened` 才是那条边）；
+`reopens/service.go:196-214` 的步骤表把「object」放进第 5 步（目标读），而代码在幂等读**之前**就 `GetObject`（`:235-242`）——
+换句话说那张表的「Step 4 precedes step 5」只对 version/lifecycle 成立，对 object 不成立。并进 A（A 本来就要动这两个文件）。
+
+**G 比我记的窄**：`ErrIdempotencyKeyInUse` 那半**已经挡住了**（`service.go:371-372` 先返回拒绝，不落进回退），
+真正还在的是**其余** `openProposal` 失败（例如 store 错误）仍会落进 `replayIfRecorded`，
+读回自己刚提交的行、答 201 `Replayed=true`、`PullRequestNumber=0`——**一次真实失败被答成成功**。
+更远一层：reopen **在生产里没有入口**（就是 A），所以它今天不可达；**G 与 A 一起修**，T0909 里已逐条写明。
+
+## ㉕ T1107 的 CI 红不是 T1107 的错：`internal/events` 里一个端口复用的 flake（已证，2026-09-21）
+
+**CI 报的那一行**（PR #332，run `35586682132`，job `go`）：
+`--- FAIL: TestDeliveryTryClassification/transport_error:_no_code` ／
+`deliver_test.go:210: try() outcome = 3, want 2 (msg "http status 302")`。
+同一次 run 的其余 7 个 job（`acceptance`、`migration-integration`、`web`、`python`、`spec-validation`、`task-state`、`CodeRabbit`）**全绿**。
+
+**机制**：这个用例的「传输失败」端点是一个**已经关闭的临时端口**——`deadLn` 向系统要一个 `127.0.0.1:0`、记下地址、立刻 `Close()`，`deadURL` 就建在那个号上。
+紧随其后创建的两个 `httptest` server（`target`、`redirector`）也从同一个临时端口池取号，
+**取到刚释放的那个号是完全可能的**。一旦取到，`deadURL` 指向的就成了 redirector：
+「传输失败」这一个用例拿到一个真实的 **302**，落进 `outcomeRetryNoStreak`(3) 而不是 `outcomeRetry`(2)，
+失败消息里于是带着**另一个用例的** `http status 302`。
+
+**证据是打出来的，不是推出来的**：在一棵临时工作树里把那个端口**故意**交给 redirector
+（`httptest.NewUnstartedServer` + 复用 `deadAddr`），失败行与 CI **逐字节相同**：
+`try() outcome = 3, want 2 (msg "http status 302")`。
+同一棵树原样跑 `go test ./internal/events/ -count=30` 全绿，CI 自己那一版命令（整片 `go list` 扫）也全绿。
+**这是环境竞态，不是代码。**
+
+**为什么必须记账而不是重跑了事**：这条门每跑一次就有一点概率把一个**无辜的任务**打回一轮——
+T1107 这一轮就是这么丢的（复核已 approve、G2 已过，卡在一条与它无关的红上）。
+重跑能让这一次过去，**但门本身仍然是可被随机打红的**。
+
+**处置**：
+1. T1107 的补丁只碰 5 个文件（`cmd/api/explorehttp/store.go`、`tests/acceptance/privacy-mutation-check.sh`、
+   `tests/acceptance/privacy-suite.sh`、`tests/e2e-shell/shell-e2e.mjs`、`tests/integration/privacy_sidechannel_test.go`），
+   **没有一个在 `internal/events/`**，所以这次红与它的交付无关。已 `gh run rerun --failed`，并把驱动那条 decision 清掉。
+2. **这个 flake 要修**，不是重跑就算完。`internal/events/**` 在 **T1109** 的范围里，所以修它归 T1109：
+   它一交付就把这条作为返工项给它——把「已关闭的端口」换成**确定性**的传输失败
+   （例如让 handler hijack 连接后立即关闭：端口整场测试都活着，没有取号竞态），并给出「能红」的自证。
+3. 修完之前，任何人看到 `TestDeliveryTryClassification` 红在 `transport_error:_no_code` 上，
+   先按本条核对失败消息里是不是带着 `http status 302`——带着就是这条 flake，不是被测代码的问题。

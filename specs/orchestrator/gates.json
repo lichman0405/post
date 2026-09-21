@@ -1033,6 +1033,24 @@
         "auth-real-services",
         "rsg-real-services"
       ]
+    },
+    "T1112": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services"
+      ]
+    },
+    "T1113": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services"
+      ]
+    },
+    "T0909": {
+      "g3_jobs": [
+        "auth-real-services",
+        "rsg-real-services"
+      ]
     }
   }
 }

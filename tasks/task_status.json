@@ -6199,11 +6199,12 @@
       ]
     },
     "T0708": {
-      "status": "rejected",
-      "started_at": "2026-09-21T04:40:32Z",
+      "status": "merged",
+      "started_at": "2026-09-21T08:08:09Z",
       "notes": "SPEC_BLOCKED（2026-09-19 立档，等 owner 一句话）：验收里那条「禁止 rights 不允许的 derive」要求平台对使用声明做允许/拒绝判定——这是权限/法律语义，按 CLAUDE.md §5 属 L3，我不自行选边。仓库自己禁止我猜：internal/rights/usage.go 包注释逐字写 \"unspecified\" is a real answer, not a missing one，并同时否定两种坍缩（collapsing the two would invent a permission nobody granted）——当 restricted 用是发明一条没人声明的禁令，当 allowed 用是发明一条没人给的许可；docs/12 §4 逐字「字段不替代法律合同」；internal/rights/doc.go 逐字 the platform records the declaration and does not judge it；非测试代码里对 usage 声明零判定先例。要问的就是：usage.derivatives 为 unspecified 时默认怎么算。它是默认值（document.go:107-121 的新文档模板即 PermissionUnspecified），所以这一句话决定该功能对绝大多数资产是否可用。ADR-023 已落（docs/adr/，不在规格指纹内）；任务包先不写——留白派工等于请工人替我猜。\n\n---\n**已解除 SPEC_BLOCKED（2026-09-21 Supervisor 裁定）**：要问的那一句话有了答案，而且是 fail-closed 的**三值三分**——`restricted` → 拒绝；`allowed` → 放行；`unspecified` → **既不拒绝也不放行**（要求请求带一条**显式确认**，确认内容与 actor 一并写进同一事务的 audit 行，没有确认就拒绝）；`rights_json` 读不出来 → 拒绝。\n依据全部来自**仓库自己写下的约束**，不是我发明的产品语义：`internal/rights/usage.go` 的包注释逐字`\"unspecified\" is a real answer, not a missing one` 且**同时否定两种坍缩**（当允许用是发明一条没人给的许可，当禁止用是发明一条没人声明的禁令）；`docs/12 §4`「字段不替代法律合同」；`assetpublish` 的 requirePolicy「an unreadable policy is not a permissive one」。\n**落在两处**：`docs/adr/ADR-023-asset-fork-derive-lineage.md` 的「usage.derivatives 的三个取值」一节（判定与理由，可复核、可推翻，代价是改一个格子），以及**任务包的 `supervisor_scope_narrowing`**（实现契约：判定写在本任务自己的命令里、用与 `assetpublish.requirePublish` **同一处**判定、不新增 action、不改权限矩阵、不改 `internal/rights/**`）。\n上面那段原文是 2026-09-19 的判定，**保留**——它记录了当时为什么不肯猜。",
-      "worker_run_id": "run-92a23552ae99cb96",
-      "accepted_by_supervisor_at": "2026-09-21T05:22:48Z",
+      "worker_run_id": "run-4a338280dde75382",
+      "accepted_by_supervisor_at": "2026-09-21T08:40:28Z",
+      "merged_at": "2026-09-21T08:53:04Z",
       "rejection_reason": "# T0708 基线前移 + 一处手工合成（**不是返工**）：你的活没问题，是主线在你脚下往前走了\n\n**先说性质：这次不是因为你做错了什么。** 你上一轮的交付我收下过\n（`collect` 判 ok，状态走到 `verification -> accepted`），验收证据也齐。挡住你的是一件机械的事。\n\n## 发生了什么\n\n你交付之后，主线又落了 **T0907**（Search Answer Web UI，15:37）、**T0706**（Asset Metadata\nRevision，15:47），以及一次规格修补。而你的分支在 14:50 那次合并里**带着 T0706 的提交**\n（`96ae738`）。本仓库的 PR 是 **squash 合并**的——主线拿到的是那笔任务的**内容**、**没有它的提交**——\n于是你的分支与主线相对共同祖先都动过 `specs/SPEC_VERSION.json` 与 `specs/database/postgres.sql`，\nGitHub 判本 PR 冲突。而**冲突的 PR 不产生任何 check run**：CI 永远不会到，等的是一个不会来的事件。\n\n## 修复时出现了一处真代码冲突，我按 `CLAUDE.md §1` 手工合成了\n\n仓库有正规的修复脚本 `.rddev/runtime/repair-derived-conflicts.sh`（合并 main → 只允许派生文件冲突 →\n按生成重算）。**它拒绝了**，`exit 2`，原话：\n\n    出现了派生文件之外的冲突，停下来人工处理：\n       cmd/api/assetshttp/handlers.go\n       cmd/api/assetshttp/wiring.go\n\n脚本的规矩是「真实的代码冲突要人来看，不能自动取一边」，所以这一处由我手工合成。\n\n形状是你自己在 `wiring.go` 里预言过的那一个：**T0706 与 T0708 各自往同一个文件的同三处\n（`Deps` 字段、`New` 接线、路由）加了一个受治理的写入**，git 因此把三处相邻插入全判成冲突。\n\n**判据是证明过的，不是「看起来两边都是新增」**：\n\n- `wiring.go`：从 main 到你的分支 tip 的差异是 **21 行新增、0 行删除**——纯增加；\n- `handlers.go`：3 增 2 删，删掉的两行是被你的分支重排过的注释（T0706/T0707 的提及内容仍在）。\n\n也就是说，**主线在这两个文件里没有任何你的分支缺的内容**，取分支那侧不会丢东西。\n独立复核也过了：合并后相对 main 收敛掉 15 个文件，**全部是「main 动过、你的分支没动过」的**，\n并且它们在 main 与合并后的 HEAD 上**逐字节相同**；交付面没有凭空多出文件。\n\n派生文件不按文本合并，按生成重算（`gen_schema_snapshot.py` / `spec_version.py --write` /\n`gen_sqlc.sh`，其中 sqlc 重新生成后与自动合并逐字节相同）。\n\n**合并已经提交**（`0302427`）。**不要回退它、不要 `merge --abort`、不要 reset**——\n那会把这棵树打回冲突态。交付面从 37 个文件收敛到 19 个，`tasks/**` 不在其中。\n\n## 但有一件事没有发生：没有人在这棵树上跑过任何套件\n\n它只被生成器和 git 看过。**「跑绿」必须在合成后的新树上重新成立一次，不能从旧树平移。**\n\n## 所以你要做的，就这些\n\n1. **把你这笔的验收测试在新树上重跑一遍**，输出原文贴进 RESULT：\n   `tests/integration/asset_lineage_test.go`、`tests/integration/append_only_test.go`、\n   `tests/integration/migration_test.go`、`tests/security/exits_test.go`。\n2. **专门证 `assetshttp` 那一处没被合成挤掉**：`POST /api/v1/projects/{projectId}/assets:derive`\n   （**你的**）与 `PATCH /api/v1/assets/{assetId}`（T0706 的）**两条路由都要真的在**。\n   给一条**能失败**的证据——不是念代码，而是起一个真进程，两个端点各请求一次，贴原始输出\n   （包含状态码）。顺手也要能看到 `derive.go` 与 `metadata.go` 各自注册成功。\n3. **确认 `cmd/api/main.go` 里两边都还接着**：`deriveCommand` 进了 `assetshttp.Deps`，\n   `assetmetadata.NewCommand` 也在，且都进了同一个 `assetshttp.New`。\n4. RESULT 里**明确写一行「本轮是基线前移 + 手工合成，不是返工」**，并写明新基线 sha `0302427`。\n\n## 边界（不变）\n\n- 不为让任何检查变绿而删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。\n- 这一笔**不加迁移**；`specs/database/postgres.sql`、`specs/SPEC_VERSION.json` 由生成器重算，\n  **你不要手改**。\n- 不改 `specs/**`、`docs/**`、`tasks/**`、`.github/**`。\n- **判据是树**：RESULT 里每一句自述都要能被一条断言、一次 `grep` 或一次真实请求支持。\n",
       "history": [
         {
@@ -6307,6 +6308,33 @@
           "at": "2026-09-21T07:51:30Z",
           "run_id": "run-f7b0f2f914407411",
           "reason": "# T0708 基线前移 + 一处手工合成（**不是返工**）：你的活没问题，是主线在你脚下往前走了\n\n**先说性质：这次不是因为你做错了什么。** 你上一轮的交付我收下过\n（`collect` 判 ok，状态走到 `verification -> accepted`），验收证据也齐。挡住你的是一件机械的事。\n\n## 发生了什么\n\n你交付之后，主线又落了 **T0907**（Search Answer Web UI，15:37）、**T0706**（Asset Metadata\nRevision，15:47），以及一次规格修补。而你的分支在 14:50 那次合并里**带着 T0706 的提交**\n（`96ae738`）。本仓库的 PR 是 **squash 合并**的——主线拿到的是那笔任务的**内容**、**没有它的提交**——\n于是你的分支与主线相对共同祖先都动过 `specs/SPEC_VERSION.json` 与 `specs/database/postgres.sql`，\nGitHub 判本 PR 冲突。而**冲突的 PR 不产生任何 check run**：CI 永远不会到，等的是一个不会来的事件。\n\n## 修复时出现了一处真代码冲突，我按 `CLAUDE.md §1` 手工合成了\n\n仓库有正规的修复脚本 `.rddev/runtime/repair-derived-conflicts.sh`（合并 main → 只允许派生文件冲突 →\n按生成重算）。**它拒绝了**，`exit 2`，原话：\n\n    出现了派生文件之外的冲突，停下来人工处理：\n       cmd/api/assetshttp/handlers.go\n       cmd/api/assetshttp/wiring.go\n\n脚本的规矩是「真实的代码冲突要人来看，不能自动取一边」，所以这一处由我手工合成。\n\n形状是你自己在 `wiring.go` 里预言过的那一个：**T0706 与 T0708 各自往同一个文件的同三处\n（`Deps` 字段、`New` 接线、路由）加了一个受治理的写入**，git 因此把三处相邻插入全判成冲突。\n\n**判据是证明过的，不是「看起来两边都是新增」**：\n\n- `wiring.go`：从 main 到你的分支 tip 的差异是 **21 行新增、0 行删除**——纯增加；\n- `handlers.go`：3 增 2 删，删掉的两行是被你的分支重排过的注释（T0706/T0707 的提及内容仍在）。\n\n也就是说，**主线在这两个文件里没有任何你的分支缺的内容**，取分支那侧不会丢东西。\n独立复核也过了：合并后相对 main 收敛掉 15 个文件，**全部是「main 动过、你的分支没动过」的**，\n并且它们在 main 与合并后的 HEAD 上**逐字节相同**；交付面没有凭空多出文件。\n\n派生文件不按文本合并，按生成重算（`gen_schema_snapshot.py` / `spec_version.py --write` /\n`gen_sqlc.sh`，其中 sqlc 重新生成后与自动合并逐字节相同）。\n\n**合并已经提交**（`0302427`）。**不要回退它、不要 `merge --abort`、不要 reset**——\n那会把这棵树打回冲突态。交付面从 37 个文件收敛到 19 个，`tasks/**` 不在其中。\n\n## 但有一件事没有发生：没有人在这棵树上跑过任何套件\n\n它只被生成器和 git 看过。**「跑绿」必须在合成后的新树上重新成立一次，不能从旧树平移。**\n\n## 所以你要做的，就这些\n\n1. **把你这笔的验收测试在新树上重跑一遍**，输出原文贴进 RESULT：\n   `tests/integration/asset_lineage_test.go`、`tests/integration/append_only_test.go`、\n   `tests/integration/migration_test.go`、`tests/security/exits_test.go`。\n2. **专门证 `assetshttp` 那一处没被合成挤掉**：`POST /api/v1/projects/{projectId}/assets:derive`\n   （**你的**）与 `PATCH /api/v1/assets/{assetId}`（T0706 的）**两条路由都要真的在**。\n   给一条**能失败**的证据——不是念代码，而是起一个真进程，两个端点各请求一次，贴原始输出\n   （包含状态码）。顺手也要能看到 `derive.go` 与 `metadata.go` 各自注册成功。\n3. **确认 `cmd/api/main.go` 里两边都还接着**：`deriveCommand` 进了 `assetshttp.Deps`，\n   `assetmetadata.NewCommand` 也在，且都进了同一个 `assetshttp.New`。\n4. RESULT 里**明确写一行「本轮是基线前移 + 手工合成，不是返工」**，并写明新基线 sha `0302427`。\n\n## 边界（不变）\n\n- 不为让任何检查变绿而删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。\n- 这一笔**不加迁移**；`specs/database/postgres.sql`、`specs/SPEC_VERSION.json` 由生成器重算，\n  **你不要手改**。\n- 不改 `specs/**`、`docs/**`、`tasks/**`、`.github/**`。\n- **判据是树**：RESULT 里每一句自述都要能被一条断言、一次 `grep` 或一次真实请求支持。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T08:08:09Z",
+          "run_id": "run-4a338280dde75382",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T08:23:19Z",
+          "run_id": "run-d3d1cc836de4ac22",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-21T08:40:28Z",
+          "run_id": "run-dd888f6004db5d5a"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-21T08:53:04Z",
+          "run_id": "run-7f73d873d9ba4e2d",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -6389,13 +6417,46 @@
       ]
     },
     "T0710": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "merged",
+      "started_at": "2026-09-21T08:53:09Z",
+      "worker_run_id": "run-de3492e59e409a26",
+      "accepted_by_supervisor_at": "2026-09-21T10:03:21Z",
+      "merged_at": "2026-09-21T10:12:36Z",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-21T08:53:06Z",
+          "run_id": "run-dfb8333c455a23f7"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-21T08:53:09Z",
+          "run_id": "run-de3492e59e409a26",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T09:16:06Z",
+          "run_id": "run-da0f95a5d8585ba7",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-21T10:03:21Z",
+          "run_id": "run-a495c31c17fe6508"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-21T10:12:36Z",
+          "run_id": "run-7397085212c66d91",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T0711": {
       "status": "merged",
@@ -8720,9 +8781,12 @@
       ]
     },
     "T0908": {
-      "status": "running",
-      "started_at": "2026-09-21T07:37:10Z",
-      "worker_run_id": "run-cf4502800b4d920a",
+      "status": "merged",
+      "started_at": "2026-09-21T09:00:23Z",
+      "worker_run_id": "run-7aedb9d821b1b976",
+      "accepted_by_supervisor_at": "2026-09-21T09:34:23Z",
+      "merged_at": "2026-09-21T10:11:07Z",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T0908-2444044000.patch: exit status 1: error: patch failed: internal/persistence/sqlc/querier.go:38\n    error: internal/persistence/sqlc/querier.go: patch does not apply\n    error: patch failed: specs/SPEC_VERSION.json:1\n    error: specs/SPEC_VERSION.json: patch does not apply\n    error: patch failed: specs/database/postgres.sql:89\n    error: specs/database/postgres.sql: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n",
       "history": [
         {
           "from": "todo",
@@ -8736,6 +8800,58 @@
           "at": "2026-09-21T07:37:10Z",
           "run_id": "run-cf4502800b4d920a",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T08:29:44Z",
+          "run_id": "run-0f42c219bbfd2a9c",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T08:54:16Z",
+          "run_id": "run-c2977b63a4f4c78b",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T0908-2444044000.patch: exit status 1: error: patch failed: internal/persistence/sqlc/querier.go:38\n    error: internal/persistence/sqlc/querier.go: patch does not apply\n    error: patch failed: specs/SPEC_VERSION.json:1\n    error: specs/SPEC_VERSION.json: patch does not apply\n    error: patch failed: specs/database/postgres.sql:89\n    error: specs/database/postgres.sql: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T09:00:23Z",
+          "run_id": "run-7aedb9d821b1b976",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T09:16:06Z",
+          "run_id": "run-34f36f0172bf571a",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-21T09:34:23Z",
+          "run_id": "run-0d0fb7edb486050c"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-21T10:11:07Z",
+          "run_id": "run-c3ced334282acd44",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
+    },
+    "T0909": {
+      "status": "ready",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-21T10:16:57Z",
+          "run_id": "run-25ec02e907a4f423"
         }
       ]
     },
@@ -9586,9 +9702,10 @@
       ]
     },
     "T1101": {
-      "status": "running",
-      "started_at": "2026-09-21T07:38:17Z",
-      "worker_run_id": "run-90225ece13e6e60d",
+      "status": "verification",
+      "started_at": "2026-09-21T09:05:02Z",
+      "worker_run_id": "run-c5258e4ab9d817d8",
+      "rejection_reason": "# T1101 返工（第 1 次）：CSS 修剪剪掉了**还在用**的规则，而你的视觉基线把这个坏样子固化成了「正确」\n\n复核的结论是 `request_changes`，1 条 blocking。**我独立核过了，成立。** 另有**一条复核没说、\n我自己看出来的**，比那一条更贵——见第二节。\n\n## 一、blocking：删了活规则，页面还在用它\n\n`apps/web/app/(main)/projects/projects.css` 里这三样被删了，但页面还在渲染它们：\n\n| 被删的 | main 上在哪 | 谁还在用 |\n|---|---|---|\n| `.files-layout`（`grid-template-columns: 240px minmax(0,1fr) 280px; gap:12px; align-items:start`） | `projects.css:580` | `projects/[id]/files/page.tsx:257` `className=\"files-layout\"` |\n| `@media (max-width:900px)` 下单栏折叠的那条 | `projects.css:588` | 同上 |\n| `.files-tree`（边框/圆角/overflow 盒） | 同处 | `files/page.tsx:258` `className=\"files-tree\"` |\n\n**核过的方式**：在你的工作区里 `grep -n \"files-layout\\|files-tree\" apps/web/app/\\(main\\)/projects/projects.css`\n→ 一个都没有；`grep` 同一个词在 `files/page.tsx` → `257`、`258` 两行还在。\n\n同一族、范围小一点的一处：`projects/[id]/conflicts/page.tsx:589` 还在渲染\n`conflicts-evidence-item-type`，而 `conflicts.css` 里那条规则**被删光了**。\n\n**这不是「样式瘦身」，是产品页面的版式坏了。** Files 页失去三栏，`Repository` 那块也被挪了位。\n\n## 二、复核没说的那一条：你的视觉回归套件，对着坏版式说「0 pixels differ」\n\n你交的 14 张基线在 `tests/web-smoke/baseline/`。我把 `baseline/project-files.png` **打开看了**：\nFiles 页是**竖着堆**的——文件列表在上、`Select a file to preview it.` 的空框在下、\n`Repository` 再叠在最后。而 `files-layout` 是 `240px | 1fr | 280px` **三栏并排**。\n\n那张图宽 1280，所以 `@media (max-width:900px)` 的单栏折叠**根本不生效**——**本该是三栏**。\n\n**结论：你的基线是在把 CSS 剪完之后的那棵树上生成的。** 于是守卫在拿「坏的」比「坏的」，\n当然 0 difference。这有两个后果，第二个更贵：\n\n1. 这个守卫**抓不到它存在的理由**——它建立的那天就对这个缺陷免疫。\n2. 它现在把**坏版式记录成正确**。将来谁把三栏改回来，守卫反而会红，并且会**逼着后人**\n   把正确的版式当成回归。\n\n**而且它还腐蚀了你的证据**：RESULT 里「14 张基线 0 pixel differ」这句话，在基线与树同源的\n前提下，**证明不了「修剪没有改变外观」**——它只证明了「渲染是确定的」。这两件事完全不同。\n\n顺带说清：**「跑绿了」不是证据，「能红」才是。** 你上一轮把这条用在了别处（复核说你确实\n证明了几个 mutation 能被抓到，这点是做对的），但恰恰在**这条最需要它的守卫上**漏了。\n\n## 三、要你做的\n\n1. **把删掉的活规则原样恢复**：`.files-layout`（含 `gap`、`align-items`）、那条\n   `@media (max-width:900px)` 折叠、`.files-tree`；以及 `conflicts-evidence-item-type`。\n   **不许**改用「把 JSX 里的 className 删掉」来让两边对上——那是把产品改成迁就修剪，\n   方向反了。\n2. **用真正的判据重做基线，并证明它有意义**：\n   - 先在**未修剪的 CSS**（main 上那份）下生成基线，再在你的树上比对，**必须 0 differ**。\n     这才是「这次修剪不改变外观」的判据。（有哪一页是你**有意**改外观的，逐页写明哪一页、\n     为什么——那是另一回事，但要说出来。）\n   - 然后**证明守卫能红**：故意改坏一次（例如动 `files-layout` 的 `grid-template-columns`，\n     或把某个 className 从 JSX 拿掉），贴出**失败的像素数与退出码**，再改回来。\n     **这一次不是走过场**——你上一轮的基线正好演示了「绿」可以什么都不说明。\n3. **做一次全量类活性扫描**：这一笔删掉或改过的每一个 class，凡是被 `className=` / `class=`\n   引用的，都必须在 CSS 里有规则，或被你**明确记录为有意删除**。落进 RESULT。\n   （复核是靠这个扫描找到那两处的；把它变成你交付的一部分，而不是评审人的一次人工检查。）\n\n## 四、nit（便宜，但都是真的）\n\n- `tests/web-smoke/visual-regression.mjs:13` 的 docstring 说基线在\n  `tests/visual-regression/baseline/*.png`，**实际在 `tests/web-smoke/baseline/`**。改对。\n- `projects/[id]/conflicts/page.tsx:520`、`:559` 留着 `conflicts-threeway-table`、\n  `conflicts-evidence-columns` 两个**没有 CSS 的死钩子**——要么删，要么写明为什么留。\n- `tests/web-smoke/shots/desktop-home.png`、`shots/mobile-drawer.png` 被重写并进了 diff。\n  它们看起来是**每次跑都重写的产物转储**，不是基线。要么说明它们是产物并让它们不进评审面，\n  要么说清它们为什么该进。\n\n## 边界（一个字都没放宽）\n\n- **不许**删测试、跳过测试、弱化断言、**放宽 `TOLERANCE_PIXELS`** 或放大 timeout。\n  这一笔里所有为了变绿而放松的改动，比红着贵得多。\n- 基线必须反映**修好之后**的树，不能反映修之前的那棵。\n- 不碰 `.github/**`、`specs/**`、`docs/**`、`tasks/**`。\n- 这一笔**不加迁移**。\n\n## 一句话\n\n**修剪本身可能就是对的，但你把一个还在使用的版式剪掉了，而你的守卫因为和树同源，\n正好对此免疫。** 恢复那几条规则、按「未修剪的基线」重做判据、证明守卫能红，再报 `completed`。\n",
       "history": [
         {
           "from": "todo",
@@ -9602,6 +9719,48 @@
           "at": "2026-09-21T07:38:17Z",
           "run_id": "run-90225ece13e6e60d",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-21T08:13:36Z",
+          "run_id": "run-2ac0eff34955fe16",
+          "reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T08:30:44Z",
+          "run_id": "run-a2eb369633e712e1",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T08:41:39Z",
+          "run_id": "run-6e30aedf1252bf23",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T09:05:01Z",
+          "run_id": "run-364d5afa5b19ebdd",
+          "reason": "# T1101 返工（第 1 次）：CSS 修剪剪掉了**还在用**的规则，而你的视觉基线把这个坏样子固化成了「正确」\n\n复核的结论是 `request_changes`，1 条 blocking。**我独立核过了，成立。** 另有**一条复核没说、\n我自己看出来的**，比那一条更贵——见第二节。\n\n## 一、blocking：删了活规则，页面还在用它\n\n`apps/web/app/(main)/projects/projects.css` 里这三样被删了，但页面还在渲染它们：\n\n| 被删的 | main 上在哪 | 谁还在用 |\n|---|---|---|\n| `.files-layout`（`grid-template-columns: 240px minmax(0,1fr) 280px; gap:12px; align-items:start`） | `projects.css:580` | `projects/[id]/files/page.tsx:257` `className=\"files-layout\"` |\n| `@media (max-width:900px)` 下单栏折叠的那条 | `projects.css:588` | 同上 |\n| `.files-tree`（边框/圆角/overflow 盒） | 同处 | `files/page.tsx:258` `className=\"files-tree\"` |\n\n**核过的方式**：在你的工作区里 `grep -n \"files-layout\\|files-tree\" apps/web/app/\\(main\\)/projects/projects.css`\n→ 一个都没有；`grep` 同一个词在 `files/page.tsx` → `257`、`258` 两行还在。\n\n同一族、范围小一点的一处：`projects/[id]/conflicts/page.tsx:589` 还在渲染\n`conflicts-evidence-item-type`，而 `conflicts.css` 里那条规则**被删光了**。\n\n**这不是「样式瘦身」，是产品页面的版式坏了。** Files 页失去三栏，`Repository` 那块也被挪了位。\n\n## 二、复核没说的那一条：你的视觉回归套件，对着坏版式说「0 pixels differ」\n\n你交的 14 张基线在 `tests/web-smoke/baseline/`。我把 `baseline/project-files.png` **打开看了**：\nFiles 页是**竖着堆**的——文件列表在上、`Select a file to preview it.` 的空框在下、\n`Repository` 再叠在最后。而 `files-layout` 是 `240px | 1fr | 280px` **三栏并排**。\n\n那张图宽 1280，所以 `@media (max-width:900px)` 的单栏折叠**根本不生效**——**本该是三栏**。\n\n**结论：你的基线是在把 CSS 剪完之后的那棵树上生成的。** 于是守卫在拿「坏的」比「坏的」，\n当然 0 difference。这有两个后果，第二个更贵：\n\n1. 这个守卫**抓不到它存在的理由**——它建立的那天就对这个缺陷免疫。\n2. 它现在把**坏版式记录成正确**。将来谁把三栏改回来，守卫反而会红，并且会**逼着后人**\n   把正确的版式当成回归。\n\n**而且它还腐蚀了你的证据**：RESULT 里「14 张基线 0 pixel differ」这句话，在基线与树同源的\n前提下，**证明不了「修剪没有改变外观」**——它只证明了「渲染是确定的」。这两件事完全不同。\n\n顺带说清：**「跑绿了」不是证据，「能红」才是。** 你上一轮把这条用在了别处（复核说你确实\n证明了几个 mutation 能被抓到，这点是做对的），但恰恰在**这条最需要它的守卫上**漏了。\n\n## 三、要你做的\n\n1. **把删掉的活规则原样恢复**：`.files-layout`（含 `gap`、`align-items`）、那条\n   `@media (max-width:900px)` 折叠、`.files-tree`；以及 `conflicts-evidence-item-type`。\n   **不许**改用「把 JSX 里的 className 删掉」来让两边对上——那是把产品改成迁就修剪，\n   方向反了。\n2. **用真正的判据重做基线，并证明它有意义**：\n   - 先在**未修剪的 CSS**（main 上那份）下生成基线，再在你的树上比对，**必须 0 differ**。\n     这才是「这次修剪不改变外观」的判据。（有哪一页是你**有意**改外观的，逐页写明哪一页、\n     为什么——那是另一回事，但要说出来。）\n   - 然后**证明守卫能红**：故意改坏一次（例如动 `files-layout` 的 `grid-template-columns`，\n     或把某个 className 从 JSX 拿掉），贴出**失败的像素数与退出码**，再改回来。\n     **这一次不是走过场**——你上一轮的基线正好演示了「绿」可以什么都不说明。\n3. **做一次全量类活性扫描**：这一笔删掉或改过的每一个 class，凡是被 `className=` / `class=`\n   引用的，都必须在 CSS 里有规则，或被你**明确记录为有意删除**。落进 RESULT。\n   （复核是靠这个扫描找到那两处的；把它变成你交付的一部分，而不是评审人的一次人工检查。）\n\n## 四、nit（便宜，但都是真的）\n\n- `tests/web-smoke/visual-regression.mjs:13` 的 docstring 说基线在\n  `tests/visual-regression/baseline/*.png`，**实际在 `tests/web-smoke/baseline/`**。改对。\n- `projects/[id]/conflicts/page.tsx:520`、`:559` 留着 `conflicts-threeway-table`、\n  `conflicts-evidence-columns` 两个**没有 CSS 的死钩子**——要么删，要么写明为什么留。\n- `tests/web-smoke/shots/desktop-home.png`、`shots/mobile-drawer.png` 被重写并进了 diff。\n  它们看起来是**每次跑都重写的产物转储**，不是基线。要么说明它们是产物并让它们不进评审面，\n  要么说清它们为什么该进。\n\n## 边界（一个字都没放宽）\n\n- **不许**删测试、跳过测试、弱化断言、**放宽 `TOLERANCE_PIXELS`** 或放大 timeout。\n  这一笔里所有为了变绿而放松的改动，比红着贵得多。\n- 基线必须反映**修好之后**的树，不能反映修之前的那棵。\n- 不碰 `.github/**`、`specs/**`、`docs/**`、`tasks/**`。\n- 这一笔**不加迁移**。\n\n## 一句话\n\n**修剪本身可能就是对的，但你把一个还在使用的版式剪掉了，而你的守卫因为和树同源，\n正好对此免疫。** 恢复那几条规则、按「未修剪的基线」重做判据、证明守卫能红，再报 `completed`。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T09:05:02Z",
+          "run_id": "run-c5258e4ab9d817d8",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T10:03:32Z",
+          "run_id": "run-d2c19e6bed0997d4",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -9790,10 +9949,11 @@
       ]
     },
     "T1107": {
-      "status": "rejected",
-      "started_at": "2026-09-21T06:40:17Z",
-      "worker_run_id": "run-a68771a967836826",
-      "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
+      "status": "accepted",
+      "started_at": "2026-09-21T09:07:48Z",
+      "worker_run_id": "run-e62860b2c5afb7d4",
+      "accepted_by_supervisor_at": "2026-09-21T09:43:54Z",
+      "rejection_reason": "# T1107 返工（第 1 次）：套件是好的，但**它漏跑了任务点名的那几条**\n\n机器那几关你都过了。卡住你的不是代码质量，是复核 Worker 的结论 `request_changes`（1 条 blocking）。\n**我逐条独立核过了**（不是读你的 RESULT，是读你的树、跑 `grep`、看 `git status`），下面每一句你都能自己复算。\n\n**先说做对的地方**，免得你把这次返工理解成「全盘推翻」：复核自己确认了——你在冻结的树上重跑\n`go test ./tests/integration` 整包 402s 全绿、`tests/e2e` 全绿、受保护区 0 改动；\nshell-e2e 那处改动是**收紧**（tab 条从「数量+集合」变成 (key,label) 有序比较，六个真页面从\n「挂载即通过」变成「必须列出条目」），不是改绿。这些都成立，别动它们。\n\n---\n\n## 一、blocking：门没跑任务点名的 7 条负数\n\n任务包 `acceptance_criteria[1]` **逐个点名**要求这批既有负数「全部原样通过；RESULT 里给出它们的清单\n与各自跑了什么」。核过的结果：**套件的清单里没有下面这 7 条**（`EDGE_TESTS` 在 `privacy-suite.sh:68-75`，\n`POSTGRES_TESTS` 在 `:108-150`）：\n\n| 点名的测试 | 在哪 | 在套件里 |\n|---|---|---|\n| `***` | `tests/e2e/asset_page_e2e_test.go:886` | 无 |\n| `***` | `tests/integration/asset_publish_test.go:938` | 无 |\n| `***` | `tests/integration/knowledge_publish_test.go:1232` | 无 |\n| `***` | `tests/integration/search_access_test.go:23` | 无 |\n| `***` | `tests/integration/retrieval_test.go:803` | 无 |\n| `***` | `tests/integration/retrieval_test.go:991` | 无 |\n| `***` | `tests/integration/retrieval_test.go:1109` | 无 |\n\n我复算的方式（你自己跑一遍就能对上）：把上面 7 个名字逐个\n`grep -c <名字> tests/acceptance/privacy-suite.sh` → **7 个全是 0**；\n`grep -rl \"func <名字>(\" tests/` → **7 个全都存在**。\n\n**而且** `asset_publish_test.go` 与 `search_access_test.go` 这两个**被点名的文件**，\n在你的门里**没有任何代表**——一条都没有。\n\n**为什么这条最重**：这个套件在 `tasks/tests.json` 里是 `T1107-TEST-01`，**blocking: true**。\n也就是说，**将来证明这个任务达标的那个门，本身漏掉了任务点名要求它跑的东西**。\n漏掉的那几条又恰恰最贴题：拒绝先于目标查找、不可区分 404、检索谓词的自证反证\n（`retrieval_test.go:991` 是要求里单独举起来的反证）。\n\n复核在冻结的树上**独立跑过这 7 条，全部 PASS**——所以**这不是坏测试**，是门没把它们跑起来。\n\n### 要你做的\n\n1. **把这 7 条加进 `EDGE_TESTS` / `POSTGRES_TESTS` 相应的组**（组内的计数守卫会替你把关）。\n2. **如果你认为其中某条确实不该进这个门**，那就在 RESULT 里**写明是哪条、为什么**。\n   **「不说」不接受，「说了理由」接受。**\n3. 加完之后，**门的运行时间与每组计数要如实更新**（别让守卫的期望数停在旧值上）。\n\n---\n\n## 二、major：`acceptance[1]` 的第三个子句不成立\n\nAC2/AC8 要的是「RESULT 里给出它们的清单与各自跑了什么」「没有覆盖到的面与原因」。\n你写的证据是「11 个文件一个字节没动 + postgres 组 35 例、edge 组 6 例全绿」——\n**读者会据此认为点名的那批负数都被门跑到了**，实际上面那 7 条一条都没跑。\n`risks` 与 `follow_up_issues` 里也只写了「未覆盖的面」，**没有一处说明这批缺席的点名测试**。\n\n**要你做的**：AC2 的前两个子句（没被删弱、原样通过）你已经做到了，把它们**和第三个子句分开写**：\n一张点名单，逐条写「在哪跑、跑了什么」。**允许写「这一条不在门里，因为 X」——不允许沉默。**\n\n---\n\n## 三、minor，但都是真的（照实改）\n\n1. **RESULT 里有一句是假的**：`acceptance[1]` 写着「`git status --porcelain -- tests` 只有三个 `??`，\n   没有任何 `M`」。**我跑了同一条命令**，实际输出是：\n\n   ```\n    M tests/e2e-shell/shell-e2e.mjs\n   ?? tests/acceptance/privacy-mutation-check.sh\n   ?? tests/acceptance/privacy-suite.sh\n   ?? tests/integration/privacy_sidechannel_test.go\n   ```\n\n   那处 `M` 是**你这一笔的正当改动**，同一段的后一句其实已经承认了它——但**写下来的 `git` 结论是假的**。\n   这正是本仓库最怕的一类自述：「让读的人以为某件事被检查过，而它没有」。改对。\n\n2. **「检索层今天没有对外 HTTP 路由」这个理由是假的。** 核过了：\n   `cmd/api/searchhttp/doc.go:1-12` 写着 `POST /api/v1/search` 跑整条流水线，\n   第三段就是 `retrieval.Retriever`；`cmd/api/main.go:1294` 也真的接上了\n   （`retrieval.NewRetriever(retrievalStore, nil)`）。\n   **真实理由更强、也更该写下来**：那条路由是 state-changing method，匿名调用者一律结构化 401；\n   它还要落一条 search 记录——所以匿名读面上**根本读不到检索答案**，只能在层上做差分。\n   `RESULT` 的 `risks` 里把同一句假话复述了一遍，**两处一起改**。\n\n3. **契约点名的面缺一条没点名说明**：要求 4 枚举的公开面里有「检索答案」，\n   而计数差分读的六条面里没有它（只有第三条测试用文档差分覆盖了存在性维度）。\n   **排除的理由本身是站得住的**（就是上一条那个真理由），但**必须写进 RESULT**——\n   否则读者分不清「不必覆盖」和「漏了」。\n\n4. **nit，但注释比它验的强**：末尾那圈 needle 只找字面量 `\"draft-\"`，\n   而插在公开资产上的第 4 个私有版本标签是 `\"3.0\"`，**针里没有它**（真正兜住它的是上面的字节差分）。\n   要么把 `\"3.0\"` / `\"sha256:draft-ctl\"` 加进针里，要么把注释收窄到它实际验的范围。\n\n---\n\n## 边界（一个字都没放宽）\n\n- **不许**为了让任何检查变绿而删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。\n  **特别是**：不许把 `EDGE_TESTS` / `POSTGRES_TESTS` 的**计数守卫**放松来「容纳」这次改动——\n  那正是这条发现要防的东西。\n- 这一笔**不加迁移**。\n- 不碰 `.github/**`、`specs/**`、`docs/**`、`tasks/**`、`internal/authz/**`。\n- 既有的负向测试**原样留着**（AC2 前两个子句你已经做到了，别动）。\n\n## 一句话\n\n**套件本身做得不错，但它是 `T1107-TEST-01`——那个负责证明本任务达标的门——却漏跑了任务\n逐个点名要求它跑的 7 条负数（其中两个被点名的文件一条代表都没有）。** 把名字加进清单、\n把 RESULT 的点名单补全、把两处假话改成真的，再报 `completed`。\n",
       "history": [
         {
           "from": "todo",
@@ -9814,13 +9974,55 @@
           "at": "2026-09-21T07:02:36Z",
           "run_id": "run-fd17b4531b458786",
           "reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T08:41:18Z",
+          "run_id": "run-531c99692aea0fce",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T08:53:05Z",
+          "run_id": "run-4f6ad3f2a3fedcf9",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T09:07:43Z",
+          "run_id": "run-6ee269faa7947562",
+          "reason": "# T1107 返工（第 1 次）：套件是好的，但**它漏跑了任务点名的那几条**\n\n机器那几关你都过了。卡住你的不是代码质量，是复核 Worker 的结论 `request_changes`（1 条 blocking）。\n**我逐条独立核过了**（不是读你的 RESULT，是读你的树、跑 `grep`、看 `git status`），下面每一句你都能自己复算。\n\n**先说做对的地方**，免得你把这次返工理解成「全盘推翻」：复核自己确认了——你在冻结的树上重跑\n`go test ./tests/integration` 整包 402s 全绿、`tests/e2e` 全绿、受保护区 0 改动；\nshell-e2e 那处改动是**收紧**（tab 条从「数量+集合」变成 (key,label) 有序比较，六个真页面从\n「挂载即通过」变成「必须列出条目」），不是改绿。这些都成立，别动它们。\n\n---\n\n## 一、blocking：门没跑任务点名的 7 条负数\n\n任务包 `acceptance_criteria[1]` **逐个点名**要求这批既有负数「全部原样通过；RESULT 里给出它们的清单\n与各自跑了什么」。核过的结果：**套件的清单里没有下面这 7 条**（`EDGE_TESTS` 在 `privacy-suite.sh:68-75`，\n`POSTGRES_TESTS` 在 `:108-150`）：\n\n| 点名的测试 | 在哪 | 在套件里 |\n|---|---|---|\n| `***` | `tests/e2e/asset_page_e2e_test.go:886` | 无 |\n| `***` | `tests/integration/asset_publish_test.go:938` | 无 |\n| `***` | `tests/integration/knowledge_publish_test.go:1232` | 无 |\n| `***` | `tests/integration/search_access_test.go:23` | 无 |\n| `***` | `tests/integration/retrieval_test.go:803` | 无 |\n| `***` | `tests/integration/retrieval_test.go:991` | 无 |\n| `***` | `tests/integration/retrieval_test.go:1109` | 无 |\n\n我复算的方式（你自己跑一遍就能对上）：把上面 7 个名字逐个\n`grep -c <名字> tests/acceptance/privacy-suite.sh` → **7 个全是 0**；\n`grep -rl \"func <名字>(\" tests/` → **7 个全都存在**。\n\n**而且** `asset_publish_test.go` 与 `search_access_test.go` 这两个**被点名的文件**，\n在你的门里**没有任何代表**——一条都没有。\n\n**为什么这条最重**：这个套件在 `tasks/tests.json` 里是 `T1107-TEST-01`，**blocking: true**。\n也就是说，**将来证明这个任务达标的那个门，本身漏掉了任务点名要求它跑的东西**。\n漏掉的那几条又恰恰最贴题：拒绝先于目标查找、不可区分 404、检索谓词的自证反证\n（`retrieval_test.go:991` 是要求里单独举起来的反证）。\n\n复核在冻结的树上**独立跑过这 7 条，全部 PASS**——所以**这不是坏测试**，是门没把它们跑起来。\n\n### 要你做的\n\n1. **把这 7 条加进 `EDGE_TESTS` / `POSTGRES_TESTS` 相应的组**（组内的计数守卫会替你把关）。\n2. **如果你认为其中某条确实不该进这个门**，那就在 RESULT 里**写明是哪条、为什么**。\n   **「不说」不接受，「说了理由」接受。**\n3. 加完之后，**门的运行时间与每组计数要如实更新**（别让守卫的期望数停在旧值上）。\n\n---\n\n## 二、major：`acceptance[1]` 的第三个子句不成立\n\nAC2/AC8 要的是「RESULT 里给出它们的清单与各自跑了什么」「没有覆盖到的面与原因」。\n你写的证据是「11 个文件一个字节没动 + postgres 组 35 例、edge 组 6 例全绿」——\n**读者会据此认为点名的那批负数都被门跑到了**，实际上面那 7 条一条都没跑。\n`risks` 与 `follow_up_issues` 里也只写了「未覆盖的面」，**没有一处说明这批缺席的点名测试**。\n\n**要你做的**：AC2 的前两个子句（没被删弱、原样通过）你已经做到了，把它们**和第三个子句分开写**：\n一张点名单，逐条写「在哪跑、跑了什么」。**允许写「这一条不在门里，因为 X」——不允许沉默。**\n\n---\n\n## 三、minor，但都是真的（照实改）\n\n1. **RESULT 里有一句是假的**：`acceptance[1]` 写着「`git status --porcelain -- tests` 只有三个 `??`，\n   没有任何 `M`」。**我跑了同一条命令**，实际输出是：\n\n   ```\n    M tests/e2e-shell/shell-e2e.mjs\n   ?? tests/acceptance/privacy-mutation-check.sh\n   ?? tests/acceptance/privacy-suite.sh\n   ?? tests/integration/privacy_sidechannel_test.go\n   ```\n\n   那处 `M` 是**你这一笔的正当改动**，同一段的后一句其实已经承认了它——但**写下来的 `git` 结论是假的**。\n   这正是本仓库最怕的一类自述：「让读的人以为某件事被检查过，而它没有」。改对。\n\n2. **「检索层今天没有对外 HTTP 路由」这个理由是假的。** 核过了：\n   `cmd/api/searchhttp/doc.go:1-12` 写着 `POST /api/v1/search` 跑整条流水线，\n   第三段就是 `retrieval.Retriever`；`cmd/api/main.go:1294` 也真的接上了\n   （`retrieval.NewRetriever(retrievalStore, nil)`）。\n   **真实理由更强、也更该写下来**：那条路由是 state-changing method，匿名调用者一律结构化 401；\n   它还要落一条 search 记录——所以匿名读面上**根本读不到检索答案**，只能在层上做差分。\n   `RESULT` 的 `risks` 里把同一句假话复述了一遍，**两处一起改**。\n\n3. **契约点名的面缺一条没点名说明**：要求 4 枚举的公开面里有「检索答案」，\n   而计数差分读的六条面里没有它（只有第三条测试用文档差分覆盖了存在性维度）。\n   **排除的理由本身是站得住的**（就是上一条那个真理由），但**必须写进 RESULT**——\n   否则读者分不清「不必覆盖」和「漏了」。\n\n4. **nit，但注释比它验的强**：末尾那圈 needle 只找字面量 `\"draft-\"`，\n   而插在公开资产上的第 4 个私有版本标签是 `\"3.0\"`，**针里没有它**（真正兜住它的是上面的字节差分）。\n   要么把 `\"3.0\"` / `\"sha256:draft-ctl\"` 加进针里，要么把注释收窄到它实际验的范围。\n\n---\n\n## 边界（一个字都没放宽）\n\n- **不许**为了让任何检查变绿而删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。\n  **特别是**：不许把 `EDGE_TESTS` / `POSTGRES_TESTS` 的**计数守卫**放松来「容纳」这次改动——\n  那正是这条发现要防的东西。\n- 这一笔**不加迁移**。\n- 不碰 `.github/**`、`specs/**`、`docs/**`、`tasks/**`、`internal/authz/**`。\n- 既有的负向测试**原样留着**（AC2 前两个子句你已经做到了，别动）。\n\n## 一句话\n\n**套件本身做得不错，但它是 `T1107-TEST-01`——那个负责证明本任务达标的门——却漏跑了任务\n逐个点名要求它跑的 7 条负数（其中两个被点名的文件一条代表都没有）。** 把名字加进清单、\n把 RESULT 的点名单补全、把两处假话改成真的，再报 `completed`。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T09:07:48Z",
+          "run_id": "run-e62860b2c5afb7d4",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T09:19:23Z",
+          "run_id": "run-0497bb5b93d7a3c0",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-21T09:43:54Z",
+          "run_id": "run-b8fadbe644824875"
         }
       ]
     },
     "T1108": {
-      "status": "running",
-      "started_at": "2026-09-21T07:39:23Z",
-      "worker_run_id": "run-ac52b694856cc222",
+      "status": "verification",
+      "started_at": "2026-09-21T09:13:20Z",
+      "worker_run_id": "run-b4a92bcbd6206061",
+      "rejection_reason": "# T1108 返工（第 2 次）：报告里那个「语料库的代价」不是一个测出来的数\n\n机器那几关你都过了。卡住你的是复核的结论 `request_changes`，1 条 blocking。\n**我逐句核过了，成立。** 这一条的性质比上次重：上次是**账没记全**，这次是**账上记了一个错的数**。\n\n---\n\n## 一、blocking：`seeded in 0.5s` 这个数，量的是别的东西\n\n复核指 `tests/benchmark/main.go:154`。核过了，路径是这样：\n\n```go\nvar dropped time.Duration\nbenchURL, dropped, err = provision(ctx, adminURL, dbName)   // 只含 DROP / CREATE / Migrate\nseedFor += dropped\n...\ncorpus, err = seedCorpus(ctx, pool, sc)                     // ← 真活在这儿，它的耗时没人接\n```\n\n然后 `report.go:110` 把 `seedFor.Seconds()` 写进 `SeedSeconds`，`:207` 打印成\n`corpus: seeded in %.1fs`。\n\n**于是「语料库播种耗时」这个字段，量的是「建库+迁移」，不含那一百万行的 COPY。**\n\n复核在临时库上量过：`seed --scale spec` 墙钟 **36.2s**，报告打印 **0.5s**——差 ~72 倍。\n（ci 档语料只有 ~1s，所以在那一档这个错**看不出来**，这也正是它活到今天的原因。）\n\n**为什么这条最重**：验收标准 11 要的正是「seed 生成与测量的墙钟代价要报出来，这决定 CI 里\n到底能跑哪一档」——而**这正是那个决定 CI 档位的数**。你的 `ops/ci/perf-gate-job.yml` 的成本\n说明和 RESULT 的条目都建在这个数上。也就是说：**你的证据本身指向一个错值。**\n\n### 要你做的\n\n1. **把 `seedCorpus` 的墙钟接上**，与 `provision` 那段一起构成真正的播种耗时；分成两个字段\n   （例如 `provision_seconds` / `corpus_load_seconds`）比合成一个更好——**你要能说清「慢在哪一段」**，\n   因为将来要拿它决定 CI 跑哪一档。\n2. **改完之后，把 RESULT 里那个数改对**（标准 6 引的 `spec -- seed 0.5s` 是错的），\n   并按复核那样给你**自己实测**的三个数：seed / ANALYZE / measure，以及合计。\n3. **`ops/ci/perf-gate-job.yml` 的成本注记同步改对。**\n4. **不许**为了让数字好看去改 CI 档位或放宽 SLO——只改「量」和「报」。\n\n## 二、major：这条闸门会在一个**正确的**数据库上变红\n\n复核指 `tests/benchmark/gate.go:263`：\n\n```go\ngot == seeded || (extra > 0 && got > seeded && got <= seeded+extra)\n```\n\n`extra = writeAllowance` 是**一次跑**自己的追加量（35 行）。但每一次 `--no-seed` 都再追加 35 行，\n所以这条带子**只有一次跑那么宽**。复核复现过：一个没动过的 ci 语料上——\n第 1 次（全新 seed）PASS，第 2 次（`--no-seed`）PASS，**第 3 次 FAIL，三条红，exit 1**。\n\n**而数据库没有任何问题。** 多出来的行是**这个工具自己前几次跑写进去的**。\n更刺眼的是：`main.go` 的 usage 恰恰在宣传这个模式——「Run `\"all --no-seed\"` to re-check a\ncorpus that is already there」，而 `db.go` 论证固定库名，图的就是「spec 档不必重新播种也能复测」。\n\n**这正是你自己那份设计说明警告过的那种东西**：一条**在正确数据库上会红**的闸门，\n迟早会被人为了让 CI 变绿而放宽。**它现在就是一颗定时炸弹**，而且 RESULT 里一个字没提。\n\n### 要你做的\n\n让「正确」与「被前几次跑撑大」区分开，把「短于播种」与「因为旧跑而多于播种」**说成两句不同的话**。\n复核给了两条可行方向（对这三张 append-only 表接受 `got >= seeded`、让上限检查承担回归职责；\n或让 seed 把自己的行数、harness 把自己追加的计数记进库里，按那个界定）。\n\n**并且补一条能红的测试**：连跑三次 `--no-seed`，断言**第三次仍然 PASS**。\n（你现在这条测试在修之前就是红的——把它写成断言，别只写「我手动跑过」。）\n\n## 三、minor：都要改，理由逐条\n\n1. **`probe_deep_offset` 的 Boundary 行与 `scale.go` 矛盾**：那里说最深一页量的是\n   「hot project 的行」，而 `scale.go` 写明 hot project **不携带搜索文档**。**两者不能都对**，\n   改成真的那个，并说清实际量的是谁。\n2. **注释写了代码没有的行为**：`readCorpus` 说 `--scale spec` 配 `ci` 档语料是 misuse、\n   「should produce a red corpus check naming the tables that are short」——核一下代码是不是真这么干，\n   不是就把注释改对（或把行为补上）。\n3. **bench 目标把带密码的 URL 打出来了**：`echo \">> bench: scale=... against $$PG_BENCH_URL ...\"`。\n   你自己的 harness 在别的所有输出路径上都刻意脱敏（`redactURL`），**这里漏了**。\n   脱敏统一走同一个函数。\n4. **交付的「一条命令」和它的说明有两处对不上**：`make bench` 跑的是\n   `go run ./tests/benchmark all ...`（没有 `--json`），所以机器可读的产物根本没写出来。\n   要么补上，要么把说明改成实际的行为。\n5. **`research_map` 的总结把「一次跑得好」说成达标了**：你自己在总结里写了\n   「met THIS RUN but straddling across runs (925–2287ms)」——**那就不叫 met**。\n   把措辞改成它实际的样子，别让读的人以为它稳了。\n\n## 四、nit，但它会 panic\n\n`tests/benchmark/*.go`：`src := benchUUID(\"branch/hot\", 1+i%(c.Scale.HotBranches-1))`——\n`HotBranches == 1` 时是**整数除零，直接 panic**，而同一个文件里别处都做了保护。\n补上保护，并给它一条测试。\n\n## 边界（一个字都没放宽）\n\n- **不许**删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。\n  上面每一处修复都要**新的**断言，且新断言要**证明过自己能红**（改正之前先让它红一次）。\n- **不许**为了让数字好看去改 CI 档位、SLO 或 `writeAllowance` 的语义——那是把闸门调松，\n  正是第二节警告的那件事。\n- 不碰 `.github/**`、`specs/**`、`docs/**`、`tasks/**`。\n- 这一笔**不加迁移**；发给你的是 `00135`，你没用——**没用就继续不用**。\n\n## 一句话\n\n**报告里那个「语料库代价」不是一个测出来的数**（差了 72 倍，而且它正是决定 CI 档位的数），\n**而那条语料闸门第三次跑就会在一个正确的库上变红。** 把量接对、把闸门改成能区分\n「少了」和「被旧跑撑大了」、把带密码的 URL 脱敏，再报 `completed`。\n",
       "history": [
         {
           "from": "todo",
@@ -9834,14 +10036,56 @@
           "at": "2026-09-21T07:39:23Z",
           "run_id": "run-ac52b694856cc222",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-21T08:41:39Z",
+          "run_id": "run-a81a4a949617cb79",
+          "reason": "collect rejected: result-consistency: result-acceptance: status completed but only 9 acceptance entr(ies) for 11 criterion(a) in the task package (**满足 27_PERFORMANCE_SLO 开发目标或记录可接受偏差**（任务原文）：`docs/27` 点名的每一项都有实测值与对照；达标的逐条标注，未达标的逐条给出偏差、数值与分析。**没有「测不了」当借口的项**——测不了要说清楚为什么、以及要补什么才能测; **容量基线真的被造出来了**：`docs/27:20` 的两个档位都能一条命令生成，且**生成后真的断言了行数**（不是「跑完没报错」）；报告 SLO 对照用的是**全量档**; **索引改动由测量驱动**：每一条新索引都能追到一次具体测量与一个具体查询；向量索引那条按需求第 6 条二选一并**给出数字**（不加也要给数字）；`specs/database/postgres.sql` 由脚本重新生成而非手改，`make check-schema-snapshot` 绿；迁移编号用的是**任务包里发的那个号**（未自选、未占用他人号）; **门能失败**：一次真实转红的输出贴在 RESULT 里（例如把查询改成必然全表扫 / 把 seed 调掉一个数量级），随后是还原后的绿；**门的确定性层没有任何墙钟 SLO 断言**，宽松上界在代码注释与 RESULT 里都被标明「这是回归天花板，不是 SLO」; **没有开跳测暗门**：`grep -rn \"testing.Short\"` 在 `tests/` 与 `internal/` 仍为零；没有被 skip 的基准；既有 `research_profile_test.go:1076-1135` 未被改动（给出它未变的依据）; **规模没有缩水冒充**：CI/小档的运行（若有）在 RESULT 里被明确标注「不是 SLO 对照」；两个档位的墙钟代价都报出来了; **没有碰 CI 定义**：`.github/**` 的 diff 为空；`.github/workflows/ci.yml` 的 7 个 job 一个字节未变；RESULT 里给了可直接粘的 YAML 片段; **没有替 T1201 干活**：没有实现 `docs/34` 的演示 seed，没有用 `demo-mof-humidity-separation` 这个 slug，没有改 `apps/web/**`; **RESULT 里写明**：每项测量的端点/查询位置与样本量、每个索引改动的依据、没测的项与原因（含前端那条 200ms）、以及所有你判断不了而按最严处理的地方; **新包不会让无库的单元 job 变红**：`go test $(go list ./... | grep -v '/tests/integration')` 在**没有数据库**的环境下对你新增的 `tests/benchmark/...` 包是绿的（或只报 `no test files`）；把这条命令与输出贴进 RESULT。; **范围自检**：`git diff --name-only` 与 `git status --porcelain` 里**没有** `cmd/**`、没有 `tests/` 下 `benchmark/` 以外的路径、没有 `ops/` 下 `ci/` 以外的路径；有的话直接判红。) — every criterion needs an entry with evidence"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T08:42:55Z",
+          "run_id": "run-9d102afa8ee9cc5e",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T08:53:05Z",
+          "run_id": "run-833fc85113f8335c",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T09:07:43Z",
+          "run_id": "run-74b48f93b1deefbe",
+          "reason": "# T1108 返工（第 2 次）：报告里那个「语料库的代价」不是一个测出来的数\n\n机器那几关你都过了。卡住你的是复核的结论 `request_changes`，1 条 blocking。\n**我逐句核过了，成立。** 这一条的性质比上次重：上次是**账没记全**，这次是**账上记了一个错的数**。\n\n---\n\n## 一、blocking：`seeded in 0.5s` 这个数，量的是别的东西\n\n复核指 `tests/benchmark/main.go:154`。核过了，路径是这样：\n\n```go\nvar dropped time.Duration\nbenchURL, dropped, err = provision(ctx, adminURL, dbName)   // 只含 DROP / CREATE / Migrate\nseedFor += dropped\n...\ncorpus, err = seedCorpus(ctx, pool, sc)                     // ← 真活在这儿，它的耗时没人接\n```\n\n然后 `report.go:110` 把 `seedFor.Seconds()` 写进 `SeedSeconds`，`:207` 打印成\n`corpus: seeded in %.1fs`。\n\n**于是「语料库播种耗时」这个字段，量的是「建库+迁移」，不含那一百万行的 COPY。**\n\n复核在临时库上量过：`seed --scale spec` 墙钟 **36.2s**，报告打印 **0.5s**——差 ~72 倍。\n（ci 档语料只有 ~1s，所以在那一档这个错**看不出来**，这也正是它活到今天的原因。）\n\n**为什么这条最重**：验收标准 11 要的正是「seed 生成与测量的墙钟代价要报出来，这决定 CI 里\n到底能跑哪一档」——而**这正是那个决定 CI 档位的数**。你的 `ops/ci/perf-gate-job.yml` 的成本\n说明和 RESULT 的条目都建在这个数上。也就是说：**你的证据本身指向一个错值。**\n\n### 要你做的\n\n1. **把 `seedCorpus` 的墙钟接上**，与 `provision` 那段一起构成真正的播种耗时；分成两个字段\n   （例如 `provision_seconds` / `corpus_load_seconds`）比合成一个更好——**你要能说清「慢在哪一段」**，\n   因为将来要拿它决定 CI 跑哪一档。\n2. **改完之后，把 RESULT 里那个数改对**（标准 6 引的 `spec -- seed 0.5s` 是错的），\n   并按复核那样给你**自己实测**的三个数：seed / ANALYZE / measure，以及合计。\n3. **`ops/ci/perf-gate-job.yml` 的成本注记同步改对。**\n4. **不许**为了让数字好看去改 CI 档位或放宽 SLO——只改「量」和「报」。\n\n## 二、major：这条闸门会在一个**正确的**数据库上变红\n\n复核指 `tests/benchmark/gate.go:263`：\n\n```go\ngot == seeded || (extra > 0 && got > seeded && got <= seeded+extra)\n```\n\n`extra = writeAllowance` 是**一次跑**自己的追加量（35 行）。但每一次 `--no-seed` 都再追加 35 行，\n所以这条带子**只有一次跑那么宽**。复核复现过：一个没动过的 ci 语料上——\n第 1 次（全新 seed）PASS，第 2 次（`--no-seed`）PASS，**第 3 次 FAIL，三条红，exit 1**。\n\n**而数据库没有任何问题。** 多出来的行是**这个工具自己前几次跑写进去的**。\n更刺眼的是：`main.go` 的 usage 恰恰在宣传这个模式——「Run `\"all --no-seed\"` to re-check a\ncorpus that is already there」，而 `db.go` 论证固定库名，图的就是「spec 档不必重新播种也能复测」。\n\n**这正是你自己那份设计说明警告过的那种东西**：一条**在正确数据库上会红**的闸门，\n迟早会被人为了让 CI 变绿而放宽。**它现在就是一颗定时炸弹**，而且 RESULT 里一个字没提。\n\n### 要你做的\n\n让「正确」与「被前几次跑撑大」区分开，把「短于播种」与「因为旧跑而多于播种」**说成两句不同的话**。\n复核给了两条可行方向（对这三张 append-only 表接受 `got >= seeded`、让上限检查承担回归职责；\n或让 seed 把自己的行数、harness 把自己追加的计数记进库里，按那个界定）。\n\n**并且补一条能红的测试**：连跑三次 `--no-seed`，断言**第三次仍然 PASS**。\n（你现在这条测试在修之前就是红的——把它写成断言，别只写「我手动跑过」。）\n\n## 三、minor：都要改，理由逐条\n\n1. **`probe_deep_offset` 的 Boundary 行与 `scale.go` 矛盾**：那里说最深一页量的是\n   「hot project 的行」，而 `scale.go` 写明 hot project **不携带搜索文档**。**两者不能都对**，\n   改成真的那个，并说清实际量的是谁。\n2. **注释写了代码没有的行为**：`readCorpus` 说 `--scale spec` 配 `ci` 档语料是 misuse、\n   「should produce a red corpus check naming the tables that are short」——核一下代码是不是真这么干，\n   不是就把注释改对（或把行为补上）。\n3. **bench 目标把带密码的 URL 打出来了**：`echo \">> bench: scale=... against $$PG_BENCH_URL ...\"`。\n   你自己的 harness 在别的所有输出路径上都刻意脱敏（`redactURL`），**这里漏了**。\n   脱敏统一走同一个函数。\n4. **交付的「一条命令」和它的说明有两处对不上**：`make bench` 跑的是\n   `go run ./tests/benchmark all ...`（没有 `--json`），所以机器可读的产物根本没写出来。\n   要么补上，要么把说明改成实际的行为。\n5. **`research_map` 的总结把「一次跑得好」说成达标了**：你自己在总结里写了\n   「met THIS RUN but straddling across runs (925–2287ms)」——**那就不叫 met**。\n   把措辞改成它实际的样子，别让读的人以为它稳了。\n\n## 四、nit，但它会 panic\n\n`tests/benchmark/*.go`：`src := benchUUID(\"branch/hot\", 1+i%(c.Scale.HotBranches-1))`——\n`HotBranches == 1` 时是**整数除零，直接 panic**，而同一个文件里别处都做了保护。\n补上保护，并给它一条测试。\n\n## 边界（一个字都没放宽）\n\n- **不许**删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。\n  上面每一处修复都要**新的**断言，且新断言要**证明过自己能红**（改正之前先让它红一次）。\n- **不许**为了让数字好看去改 CI 档位、SLO 或 `writeAllowance` 的语义——那是把闸门调松，\n  正是第二节警告的那件事。\n- 不碰 `.github/**`、`specs/**`、`docs/**`、`tasks/**`。\n- 这一笔**不加迁移**；发给你的是 `00135`，你没用——**没用就继续不用**。\n\n## 一句话\n\n**报告里那个「语料库代价」不是一个测出来的数**（差了 72 倍，而且它正是决定 CI 档位的数），\n**而那条语料闸门第三次跑就会在一个正确的库上变红。** 把量接对、把闸门改成能区分\n「少了」和「被旧跑撑大了」、把带密码的 URL 脱敏，再报 `completed`。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T09:13:20Z",
+          "run_id": "run-b4a92bcbd6206061",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T10:03:44Z",
+          "run_id": "run-ec43025fd768067b",
+          "reason": "collect: all checks passed"
         }
       ]
     },
     "T1109": {
       "status": "running",
-      "started_at": "2026-09-21T07:33:23Z",
-      "worker_run_id": "run-3bb58e6113c6aaf1",
-      "rejection_reason": "# T1109 基线前移（不是返工）：你的活没问题，是主线在你脚下往前走了\n\n**先说清楚这一笔的性质：这次不是因为你做错了什么。** 你上一轮的交付我已经收下\n（`rddev worker collect` 判 ok，32 个文件全在范围内）。挡住你的是另一件事，而且是机械的。\n\n## 发生了什么\n\n你的基线是 `3e2c43d`。此后主线又落了 T0610、T0906、T1201、T1106，其中 **T0906 动了\n`cmd/api/main.go`**。于是 `rddev gate run G2` 在把你的改动往当前主线上套的时候直接拒绝：\n\n    the task's change does not apply to current main — bring the branch up to date and re-run:\n    git apply …: error: patch failed: cmd/api/main.go:1227\n\n**这不是缺陷，是「主线在任务被复核期间往前走了」**，本仓库的常规形状。\n\n## 前移是怎么完成的（这一段你要知道，因为它决定了你接下来该证什么）\n\n我先用了正规的那条路 `rddev rebaseline T1109`。**它拒绝了**，原话：\n\n    the task's change does not apply to main as a patch, and a three-way merge of it conflicts\n    with main's own change to the same lines of cmd/api/main.go — composing them needs a human\n\n原因是形状：`git apply` 是**文本补丁**，而 T0906 在 `mux.Handle(\"/api/v1/\", …)` **之前**插了一整块\nsearch 接线，你恰好改了**那一行本身**。两边改的是不相干的东西，补丁的上下文却对不上。\n\n于是**这一处由我（Supervisor）按 `CLAUDE.md §1`「merge conflict 可直接处理」手工合成**。\n合成的方向只有一种，我照这个做的：\n\n- **主线那一整块 search 接线原样保留**（`retrievalStore` … `searchAPI.Register(v1)`）；\n- **你的两处改动接在它之后**：`mux.Handle(\"/api/v1/\", authAPI.Guard(observability.RecordRoute(v1)))`\n  那一行，以及紧随其后的 `registerAPIMetrics(...)` 注册块。\n\n**合成是最小的，我核过**：\n\n- 交付面 32 个文件，合并前后**逐个相同**（文件集 diff 为空）；\n- 逐文件比内容，**只有 `cmd/api/main.go` 变了**——而 main 自 `3e2c43d` 以来碰过的、\n  且落在本笔交付面里的文件，也**恰好只有它**。其余 31 个文件逐字节原样；\n- `go build ./...` 通过。\n\n**但有一件事没有发生：没有人在这棵合成树上跑过任何套件。** 它只被编译器看过。\n\n## 所以你要做的，就这一件\n\n**在这棵树上把你的套件重跑一遍，并诚实报结果。**\n\n1. **`observability smoke` 全套在新基线上重跑**，输出原文贴进 RESULT。这是本次前移的**全部意义**：\n   合出来的树是一棵**没人验证过的新树**，「跑绿」必须在**新树上**重新成立一次，不能从旧树平移。\n2. **专门证一下 `cmd/api/main.go` 那一处没被合成挤掉**：合完以后，`/api/v1/search` 这条路由\n   （T0906 的）与 `/metrics`（你的）**都要真的在**。给一条能失败的证据——不是念代码，\n   而是打一个真进程，两个端点各请求一次，贴原始输出。\n3. **你上一轮为响应我三条意见所做的修改**（`PostSearchLatencySlow` 两个方向的断言、\n   `authhttp/envelope.go` 那句完备性自述的收窄、`PostOutboxBacklog` 的阴性对照），\n   **在新树上一并重跑**。\n4. RESULT 里**明确写一行「本轮是基线前移，不是返工」**，并写明新基线 sha `d21ad3c`。\n\n## 边界（不变）\n\n- 不为让任何检查变绿而删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。\n- 这一笔**不加迁移**；`specs/database/postgres.sql`、`specs/SPEC_VERSION.json` 由生成器重算，你不要手改。\n- 不改 `specs/**`、`docs/**`、`tasks/**`、`.github/**`（CI 接线归我，你给我可粘的 YAML 片段与墙钟代价）。\n- **判据是树**：RESULT 里每一句自述都要能被一条断言或一次 `grep` 支持。\n",
+      "started_at": "2026-09-21T09:34:55Z",
+      "worker_run_id": "run-ea59ccf299cbe0cc",
+      "rejection_reason": "# T1109 返工（第 1 次）：机器检查全过了，但第三方复核在你的代码里读出一处真缺陷\n\n**先说清楚性质。** 你这一轮把机器那几关全过了（scope、head-baseline、residue、result-tests、\nresult-tests-coverage、result-consistency）。被卡住的原因是**复核 Worker 的结论是\n`request_changes`**，带 1 条 blocking——而按规矩，没有通过的复核结论不许 merge。\n\n**那一条不是记帐问题，是代码问题。** 我逐条独立核过（不是读你的 RESULT，是读你的树），\n下面写的每一句你都能自己复算。\n\n---\n\n## 一、blocking：`method` 这个标签的值，是客户端自己挑的\n\n复核指 `internal/observability/metrics.go:141` 与 `:147`。核过了，成立：\n\n```go\nm.httpRequests = prometheus.NewCounterVec(..., []string{\"method\", \"route\", \"status\"})\nm.httpDuration = prometheus.NewHistogramVec(..., []string{\"method\", \"route\"})\n```\n\n而 `method` 的值来自 `internal/observability/middleware.go:59`：\n\n```go\nDefault().ObserveHTTP(r.Method, resolveRoute(routeCell.get(), r), status, elapsed.Seconds())\n```\n\n`r.Method` 在 Go 的 server 端**就是请求行里那个 token 本身**。`net/http` 只校验它是一个\n合法 token，不校验它是不是你知道的那几个动词。于是一个**匿名客户端**发\n`FOO /x HTTP/1.1`（换一个词一次），就在 `post_http_requests_total` 和\n`post_http_request_duration_seconds` 两个 family 上各造出一组新序列——**标签值的集合没有上界**。\n不限速、不需要登录、429 的那些请求本身也计入。这就是经典的基数爆炸：注册表只增不减，\n最终压垮 API 进程自己，并让每次 scrape 越拉越大。\n\n**最贵的一处是它同时把你自己的文档变成了假话。** 你在这批交付里反复写下相反的保证：\n\n- `metrics.go` 里那段设计说明：`...routes are Go 1.22+ ServeMux patterns (never r.URL.Path —\n  a project id in a label is unbounded cardinality and a leak of which ids exist)...\n  **No label is ever a user-supplied string.**`\n- `ops/observability/README.md:82`：`no label value is ever a user-supplied string`\n\n**你为 `route` 做对的那件事，正是你在 `method` 上漏掉的那件事。** 不是「注释写得不够准」——\n是这段注释现在会让下一个人**不去查**这条路径。本仓库最贵的一类缺陷就是「让闸门以为某件事\n被检查过，而它没有」，这条注释是同一族。\n\n### 要你做的\n\n**把 `method` 收成一个代码里写死的闭集**，其余一律落进一个桶（例如 `\"OTHER\"`）。\n具体形状你定，但必须满足：\n\n1. **闭集在代码里**，不是从请求里推算出来的；未知动词不得产生新的标签值。\n2. **有测试钉住它**，而且这条测试要能**证明自己会红**：构造一个非标准动词的请求，断言\n   标签值集合**不增长**。只断言「GET/POST 有值」是不够的——那在修复前后都是绿的。\n3. 修完之后，`metrics.go` 与 `README.md` 那两句保证**必须变成真的**。要么它们为真，\n   要么把它们改成真的表述。**不许留着假话过闸门。**\n4. **不许**用「把 `method` 标签整个删掉」来让它变绿——那会让 docs/26 要的按方法分列\n   失去能力，属于把缺陷从「漏报」换成「不报」。真做不下去，如实说，别硬凑。\n\n---\n\n## 二、major：两个 scrape target 死掉一个，你的规则看不见\n\n复核指 `ops/observability/alerts.yml:105`：\n\n```yaml\n- alert: PostMetricsEndpointMissing\n  expr: absent(post_db_up)\n```\n\n`post_db_up` 是**每个进程一条序列**。`absent()` 只在**整条指标完全消失**时才触发——也就是\n**两个 target 都没了**才响。而你自己在 `README:29-31` 里写死了：\n\n> The two processes must be scraped as two targets... A single-target scrape configuration\n> silently measures half the platform.\n\n**于是「worker 单独死掉」这个你最想看见的故障，恰恰是这套规则里最安静的。**\n更要命的是那 11 条规则里有 4 条（outbox 积压、发布失败、队列不可用、死信）**只由 worker 供给**——\nworker 一死，它们不是变红，是**没有输入**，于是安静地什么都不说。\n\n而告警自己的文案还写着 `means neither cmd/api nor cmd/worker has...`——**你写这句话的时候\n知道它只覆盖「两个都没了」，但规则集没有把「只有一个没了」补上。**\n\n### 要你做的\n\n让**「恰好一个 target 不再上报」变成可见的**。表达式你选，并写清它依赖什么假设\n（例如 job 名约定）。**如果**你核完认为在没有一份 job 命名约定的前提下它确实无法表达，\n那就**明说**：写清缺什么、补上它需要谁决定。**「做不到」是可接受的答案，「没说」不是。**\n\n这条**不许**用放宽 `for:`、放大 timeout 或删规则来敷衍。\n\n---\n\n## 三、必须改的两处事实错误（很便宜，但都是假的）\n\n1. **`ops/observability/README.md:203`（以及 RESULT 的 `acceptance[7]`）说**：silent-filter\n   那一档「没有任何状态、哪里都没计数」。**核过了，是假的**：\n   `internal/events/inbox_store.go:235` 就在数它——\n   `observability.Default().ObservePermissionDenial(\"inbox\", observability.DecisionFiltered)`。\n   把这句话改成真的。**顺带自查**：这一档还数了什么、漏了什么，照实写。\n2. **交叉引用整体对不上**。复核举了至少三处（`README:23` 指 `cmd/api/main.go:1196`，实际在\n   `:1343-1345`；`README:78`/`:203` 指 `envelope.go:40`，实际在 `:72`；指\n   `inbox_store.go:220`，实际在 `:235`）。\n   **一条一条 `grep` 复算，不要照记忆改。** 你上一轮在这类地方栽过一次，这次它们是\n   「读的人会白跑一趟」的错，不是无伤大雅。\n\n---\n\n## 四、minor，但它是真的：`WithBackoff` 会装出一条倒过来的梯子\n\n`internal/events/publish.go`：\n\n```go\nif min > 0 { dis.backoffMin = min }\nif max >= dis.backoffMin && max > 0 { dis.backoffMax = max }\n```\n\ndoc 上写的是「A cap below the first step is ignored rather than inverting the ladder」，\n**但守卫比的是已经被赋值之后的新 `backoffMin`**，而比不过时它**什么都不做**——\n`backoffMax` 留在旧值上。常量在 `publish.go:64,66`：`DefaultBackoffMin = time.Second`、\n`DefaultBackoffMax = 30 * time.Second`。\n\n所以 `WithBackoff(60*time.Second, 45*time.Second)` ⇒ `backoffMin=60s`、`backoffMax` 仍是 **30s**，\n于是退避是**降**的：60s → 30s → 30s。**与你文档的承诺正好相反。**\n\n改掉它，并补一条**能证明自己会红的**测试：拿一组「上限小于首步」的入参，断言梯子不降。\n\n---\n\n## 五、部署那一半：把「散文」变成可粘贴的东西\n\n复核指 `ops/deploy/docker-compose.staging.yml:204`：worker 服务的 metrics 端点**默认关着**\n（这是你记录过的设计选择），而 README 里**没有任何** `rule_files` / `scrape_config` /\n`job_name` 片段。结果是：**在真正发出去的 staging 部署里，11 条规则有 4 条永远不会响。**\n\n不必去改部署的开关（那是另一个决定），但**必须让操作者无法忽略**：\n\n1. README 里给出**可直接粘贴的两个 target 的 scrape 配置**；\n2. 一张表：**在这份 shipped staging 配置下，11 条规则里哪几条能响、哪几条永远不会响**。\n\n---\n\n## 边界（一个字都没放宽）\n\n- **不为让任何检查变绿而删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。**\n  上面每一条修复都要**新的**断言，且新断言必须**证明过自己能红**。\n- 不碰 `.github/**`、`specs/**`、`docs/**`、`tasks/**`、`internal/authz/**`。\n- 这一笔**不加迁移**。\n- RESULT 里每一句自述都要能被一条断言、一次 `grep` 或一次真实命令的输出支持。\n  你这一轮的 RESULT 质量是好的（复核能逐条复现）——**保持它，别退化成自述**。\n\n## 一句话\n\n**你交的东西机器全过了，是一个匿名客户端能用任意动词打爆的标签**——而且你自己的文档\n反复保证它不可能。把闭集补上、把两处假话改成真的、把倒过来的退避梯子改对，\n再报 `completed`。\n",
       "history": [
         {
           "from": "todo",
@@ -9937,6 +10181,41 @@
           "to": "running",
           "at": "2026-09-21T07:33:23Z",
           "run_id": "run-3bb58e6113c6aaf1",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-21T08:08:13Z",
+          "run_id": "run-2d381346259c72a3",
+          "reason": "collect rejected: residue: 1 process(es) the Worker started are still running: pid 2701178 (/tmp/t1109/bin/devredis -addr 127.0.0.1:42363) session 2701178 group 2701178. The Worker (pid 2670394) has already exited — nothing owns these any more and nothing collects them on its own. Collect them with: kill -TERM -- -2701178"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T08:12:52Z",
+          "run_id": "run-66fee6d081ca662c",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T08:25:27Z",
+          "run_id": "run-9466e9201194582c",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T09:03:04Z",
+          "run_id": "run-2c7ac80043670aba",
+          "reason": "# T1109 返工（第 1 次）：机器检查全过了，但第三方复核在你的代码里读出一处真缺陷\n\n**先说清楚性质。** 你这一轮把机器那几关全过了（scope、head-baseline、residue、result-tests、\nresult-tests-coverage、result-consistency）。被卡住的原因是**复核 Worker 的结论是\n`request_changes`**，带 1 条 blocking——而按规矩，没有通过的复核结论不许 merge。\n\n**那一条不是记帐问题，是代码问题。** 我逐条独立核过（不是读你的 RESULT，是读你的树），\n下面写的每一句你都能自己复算。\n\n---\n\n## 一、blocking：`method` 这个标签的值，是客户端自己挑的\n\n复核指 `internal/observability/metrics.go:141` 与 `:147`。核过了，成立：\n\n```go\nm.httpRequests = prometheus.NewCounterVec(..., []string{\"method\", \"route\", \"status\"})\nm.httpDuration = prometheus.NewHistogramVec(..., []string{\"method\", \"route\"})\n```\n\n而 `method` 的值来自 `internal/observability/middleware.go:59`：\n\n```go\nDefault().ObserveHTTP(r.Method, resolveRoute(routeCell.get(), r), status, elapsed.Seconds())\n```\n\n`r.Method` 在 Go 的 server 端**就是请求行里那个 token 本身**。`net/http` 只校验它是一个\n合法 token，不校验它是不是你知道的那几个动词。于是一个**匿名客户端**发\n`FOO /x HTTP/1.1`（换一个词一次），就在 `post_http_requests_total` 和\n`post_http_request_duration_seconds` 两个 family 上各造出一组新序列——**标签值的集合没有上界**。\n不限速、不需要登录、429 的那些请求本身也计入。这就是经典的基数爆炸：注册表只增不减，\n最终压垮 API 进程自己，并让每次 scrape 越拉越大。\n\n**最贵的一处是它同时把你自己的文档变成了假话。** 你在这批交付里反复写下相反的保证：\n\n- `metrics.go` 里那段设计说明：`...routes are Go 1.22+ ServeMux patterns (never r.URL.Path —\n  a project id in a label is unbounded cardinality and a leak of which ids exist)...\n  **No label is ever a user-supplied string.**`\n- `ops/observability/README.md:82`：`no label value is ever a user-supplied string`\n\n**你为 `route` 做对的那件事，正是你在 `method` 上漏掉的那件事。** 不是「注释写得不够准」——\n是这段注释现在会让下一个人**不去查**这条路径。本仓库最贵的一类缺陷就是「让闸门以为某件事\n被检查过，而它没有」，这条注释是同一族。\n\n### 要你做的\n\n**把 `method` 收成一个代码里写死的闭集**，其余一律落进一个桶（例如 `\"OTHER\"`）。\n具体形状你定，但必须满足：\n\n1. **闭集在代码里**，不是从请求里推算出来的；未知动词不得产生新的标签值。\n2. **有测试钉住它**，而且这条测试要能**证明自己会红**：构造一个非标准动词的请求，断言\n   标签值集合**不增长**。只断言「GET/POST 有值」是不够的——那在修复前后都是绿的。\n3. 修完之后，`metrics.go` 与 `README.md` 那两句保证**必须变成真的**。要么它们为真，\n   要么把它们改成真的表述。**不许留着假话过闸门。**\n4. **不许**用「把 `method` 标签整个删掉」来让它变绿——那会让 docs/26 要的按方法分列\n   失去能力，属于把缺陷从「漏报」换成「不报」。真做不下去，如实说，别硬凑。\n\n---\n\n## 二、major：两个 scrape target 死掉一个，你的规则看不见\n\n复核指 `ops/observability/alerts.yml:105`：\n\n```yaml\n- alert: PostMetricsEndpointMissing\n  expr: absent(post_db_up)\n```\n\n`post_db_up` 是**每个进程一条序列**。`absent()` 只在**整条指标完全消失**时才触发——也就是\n**两个 target 都没了**才响。而你自己在 `README:29-31` 里写死了：\n\n> The two processes must be scraped as two targets... A single-target scrape configuration\n> silently measures half the platform.\n\n**于是「worker 单独死掉」这个你最想看见的故障，恰恰是这套规则里最安静的。**\n更要命的是那 11 条规则里有 4 条（outbox 积压、发布失败、队列不可用、死信）**只由 worker 供给**——\nworker 一死，它们不是变红，是**没有输入**，于是安静地什么都不说。\n\n而告警自己的文案还写着 `means neither cmd/api nor cmd/worker has...`——**你写这句话的时候\n知道它只覆盖「两个都没了」，但规则集没有把「只有一个没了」补上。**\n\n### 要你做的\n\n让**「恰好一个 target 不再上报」变成可见的**。表达式你选，并写清它依赖什么假设\n（例如 job 名约定）。**如果**你核完认为在没有一份 job 命名约定的前提下它确实无法表达，\n那就**明说**：写清缺什么、补上它需要谁决定。**「做不到」是可接受的答案，「没说」不是。**\n\n这条**不许**用放宽 `for:`、放大 timeout 或删规则来敷衍。\n\n---\n\n## 三、必须改的两处事实错误（很便宜，但都是假的）\n\n1. **`ops/observability/README.md:203`（以及 RESULT 的 `acceptance[7]`）说**：silent-filter\n   那一档「没有任何状态、哪里都没计数」。**核过了，是假的**：\n   `internal/events/inbox_store.go:235` 就在数它——\n   `observability.Default().ObservePermissionDenial(\"inbox\", observability.DecisionFiltered)`。\n   把这句话改成真的。**顺带自查**：这一档还数了什么、漏了什么，照实写。\n2. **交叉引用整体对不上**。复核举了至少三处（`README:23` 指 `cmd/api/main.go:1196`，实际在\n   `:1343-1345`；`README:78`/`:203` 指 `envelope.go:40`，实际在 `:72`；指\n   `inbox_store.go:220`，实际在 `:235`）。\n   **一条一条 `grep` 复算，不要照记忆改。** 你上一轮在这类地方栽过一次，这次它们是\n   「读的人会白跑一趟」的错，不是无伤大雅。\n\n---\n\n## 四、minor，但它是真的：`WithBackoff` 会装出一条倒过来的梯子\n\n`internal/events/publish.go`：\n\n```go\nif min > 0 { dis.backoffMin = min }\nif max >= dis.backoffMin && max > 0 { dis.backoffMax = max }\n```\n\ndoc 上写的是「A cap below the first step is ignored rather than inverting the ladder」，\n**但守卫比的是已经被赋值之后的新 `backoffMin`**，而比不过时它**什么都不做**——\n`backoffMax` 留在旧值上。常量在 `publish.go:64,66`：`DefaultBackoffMin = time.Second`、\n`DefaultBackoffMax = 30 * time.Second`。\n\n所以 `WithBackoff(60*time.Second, 45*time.Second)` ⇒ `backoffMin=60s`、`backoffMax` 仍是 **30s**，\n于是退避是**降**的：60s → 30s → 30s。**与你文档的承诺正好相反。**\n\n改掉它，并补一条**能证明自己会红的**测试：拿一组「上限小于首步」的入参，断言梯子不降。\n\n---\n\n## 五、部署那一半：把「散文」变成可粘贴的东西\n\n复核指 `ops/deploy/docker-compose.staging.yml:204`：worker 服务的 metrics 端点**默认关着**\n（这是你记录过的设计选择），而 README 里**没有任何** `rule_files` / `scrape_config` /\n`job_name` 片段。结果是：**在真正发出去的 staging 部署里，11 条规则有 4 条永远不会响。**\n\n不必去改部署的开关（那是另一个决定），但**必须让操作者无法忽略**：\n\n1. README 里给出**可直接粘贴的两个 target 的 scrape 配置**；\n2. 一张表：**在这份 shipped staging 配置下，11 条规则里哪几条能响、哪几条永远不会响**。\n\n---\n\n## 边界（一个字都没放宽）\n\n- **不为让任何检查变绿而删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。**\n  上面每一条修复都要**新的**断言，且新断言必须**证明过自己能红**。\n- 不碰 `.github/**`、`specs/**`、`docs/**`、`tasks/**`、`internal/authz/**`。\n- 这一笔**不加迁移**。\n- RESULT 里每一句自述都要能被一条断言、一次 `grep` 或一次真实命令的输出支持。\n  你这一轮的 RESULT 质量是好的（复核能逐条复现）——**保持它，别退化成自述**。\n\n## 一句话\n\n**你交的东西机器全过了，是一个匿名客户端能用任意动词打爆的标签**——而且你自己的文档\n反复保证它不可能。把闭集补上、把两处假话改成真的、把倒过来的退避梯子改对，\n再报 `completed`。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T09:34:55Z",
+          "run_id": "run-ea59ccf299cbe0cc",
           "reason": "worker spawn"
         }
       ]
@@ -10097,6 +10376,48 @@
         }
       ]
     },
+    "T1113": {
+      "status": "merged",
+      "started_at": "2026-09-21T09:16:10Z",
+      "worker_run_id": "run-24c6d18c191f81d8",
+      "accepted_by_supervisor_at": "2026-09-21T09:53:03Z",
+      "merged_at": "2026-09-21T10:11:17Z",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-21T09:16:08Z",
+          "run_id": "run-de4db8fb4272acac"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-21T09:16:10Z",
+          "run_id": "run-24c6d18c191f81d8",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T09:20:28Z",
+          "run_id": "run-7e57cadeca7f47bc",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-21T09:53:03Z",
+          "run_id": "run-84138949665d892f"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-21T10:11:17Z",
+          "run_id": "run-2d4f5f94429100e7",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
+    },
     "T1201": {
       "status": "merged",
       "started_at": "2026-09-21T02:30:40Z",
@@ -10154,13 +10475,24 @@
       ]
     },
     "T1202": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-21T10:11:21Z",
+      "worker_run_id": "run-88eac517e93279ec",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-21T10:11:18Z",
+          "run_id": "run-330f56e48ca9d29b"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-21T10:11:21Z",
+          "run_id": "run-88eac517e93279ec",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T1203": {
       "status": "merged",
