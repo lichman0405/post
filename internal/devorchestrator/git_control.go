@@ -690,6 +690,15 @@ func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
 	}
 	for _, p := range untracked {
 		abs := filepath.Join(rec.Worktree, p)
+		// Every place this loop writes the NAME into the document, it writes
+		// git's own representation of that name: one containing a newline, a
+		// tab or a quote is C-quoted, exactly as `git diff` renders one
+		// (measured: git quotes these whatever core.quotePath says — that knob
+		// decides non-ASCII, not control bytes). Written raw, a Worker could
+		// name a file so the document broke into lines nobody wrote — and one
+		// of the readers of those lines is annotateBinaryLines at the end of
+		// this file, which resolves what it finds as a filesystem PATH.
+		q := quoteDiffPath(p)
 		// Lstat, not Stat: a symlink is reported as the link, never followed.
 		// The paths come from the Worker's own tree, so a symlink pointing at
 		// /etc/… or a credential file would otherwise have the SUPERVISOR read
@@ -706,7 +715,10 @@ func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
 				if err != nil {
 					return "", fmt.Errorf("reading symlink %s for the review diff: %w", p, err)
 				}
-				fmt.Fprintf(&b, "diff --git a/%s b/%s\nnew file mode 120000\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1 @@\n+%s\n\\ No newline at end of file\n", p, p, p, target)
+				// The target is quoted by the same rule as the name: it is
+				// bytes from the tree too, and a symlink whose target holds a
+				// newline would otherwise break the document at the same seam.
+				fmt.Fprintf(&b, "diff --git a/%s b/%s\nnew file mode 120000\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1 @@\n+%s\n\\ No newline at end of file\n", q, q, q, quoteDiffPath(target))
 			}
 			// Directories (a gitlink or an empty dir) carry no content.
 			continue
@@ -719,11 +731,11 @@ func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
 		if st.Mode()&0o111 != 0 {
 			mode = "100755"
 		}
-		fmt.Fprintf(&b, "diff --git a/%s b/%s\nnew file mode %s\n--- /dev/null\n+++ b/%s\n", p, p, mode, p)
+		fmt.Fprintf(&b, "diff --git a/%s b/%s\nnew file mode %s\n--- /dev/null\n+++ b/%s\n", q, q, mode, q)
 		// A NUL byte means Git would call it binary; say so rather than emit a
 		// body that is not a valid patch.
 		if bytes.IndexByte(data, 0) >= 0 {
-			fmt.Fprintf(&b, "Binary files /dev/null and b/%s differ\n", p)
+			fmt.Fprintf(&b, "Binary files /dev/null and b/%s differ\n", q)
 			continue
 		}
 		// The body is built from the raw bytes. It used to be TrimSuffix'd and
@@ -787,38 +799,140 @@ func annotateBinaryLines(doc, worktree string) string {
 	if !strings.Contains(doc, "Binary files ") {
 		return doc
 	}
+	// Resolved ONCE, and every read below is checked against it. The path being
+	// read is reconstructed by PARSING this document, and part of the document
+	// is built out of the Worker's own filenames — so it is input, not a value
+	// this program computed. Checked against the resolved root rather than the
+	// string, because the escape that matters is not ".." (filepath.Join's own
+	// Clean eats that before the OS ever sees it) but a symlinked directory
+	// INSIDE the tree, which the kernel follows one component at a time on the
+	// way out. Both were measured, not assumed.
+	rootReal, rootErr := filepath.EvalSymlinks(worktree)
 	var b strings.Builder
 	b.Grow(len(doc) + 256)
 	// SplitAfter, so the loop writes back exactly the bytes it read and the
 	// document is otherwise untouched.
 	for _, line := range strings.SplitAfter(doc, "\n") {
 		b.WriteString(line)
-		path, deleted, ok := binarySummaryPath(line)
+		s, ok := parseBinarySummary(line)
 		if !ok {
 			continue
 		}
-		if deleted {
-			// Nothing travels: the change removes the file. Say that, so the
-			// absence of a hash is not read as a failure to produce one.
-			fmt.Fprintf(&b, "[binary] %s deleted by this change\n", path)
+		if s.quoted {
+			// git's C-quoted form: the token is a REPRESENTATION of a name, not
+			// the name. Recovering it means unquoting, and unquoting is exactly
+			// how a document's text turns back into a path this code would hand
+			// to the filesystem. Refused, and said so, rather than guessed.
+			fmt.Fprintf(&b, "[binary] %s not hashed: the name is one git had to quote\n", s.path)
 			continue
 		}
-		abs := filepath.Join(worktree, path)
+		if s.deleted {
+			// Nothing travels: the change removes the file. Say that, so the
+			// absence of a hash is not read as a failure to produce one.
+			fmt.Fprintf(&b, "[binary] %s deleted by this change\n", s.path)
+			continue
+		}
+		if hasControlByte(s.path) {
+			// Belt to the outer loop's braces: since the untracked half now
+			// quotes and git quotes the tracked half, no line arriving here
+			// carries one. Checked here anyway, so the invariant lives beside
+			// the code that depends on it instead of two hundred lines away.
+			fmt.Fprintf(&b, "[binary] a path with a control byte in it was not hashed: %q\n", s.path)
+			continue
+		}
+		abs := filepath.Join(worktree, s.path)
 		st, err := os.Lstat(abs)
 		switch {
 		case err != nil:
-			fmt.Fprintf(&b, "[binary] %s not present in the worktree\n", path)
+			fmt.Fprintf(&b, "[binary] %s not present in the worktree\n", s.path)
 		case !st.Mode().IsRegular():
-			fmt.Fprintf(&b, "[binary] %s not a regular file in the worktree (mode %s)\n", path, st.Mode())
+			fmt.Fprintf(&b, "[binary] %s not a regular file in the worktree (mode %s)\n", s.path, st.Mode())
 		default:
-			data, err := os.ReadFile(abs)
-			if err != nil {
-				fmt.Fprintf(&b, "[binary] %s unreadable: %v\n", path, err)
+			// Lstat inspects the LAST component only, so a symlinked directory
+			// above it is invisible to the rule above: `link/secret` is a
+			// regular file as far as Lstat is concerned even when `link` points
+			// at the filesystem root. Resolve the directory that holds the file,
+			// require it to be inside the tree, and read the name inside THAT.
+			dirReal, err := filepath.EvalSymlinks(filepath.Dir(abs))
+			if err != nil || rootErr != nil || !withinDir(rootReal, dirReal) {
+				fmt.Fprintf(&b, "[binary] %s not hashed: it does not resolve to a file inside the worktree\n", s.path)
 				continue
 			}
-			fmt.Fprintf(&b, "[binary] %s size=%d sha256=%x\n", path, len(data), sha256.Sum256(data))
+			data, err := os.ReadFile(filepath.Join(dirReal, filepath.Base(abs)))
+			if err != nil {
+				fmt.Fprintf(&b, "[binary] %s unreadable: %v\n", s.path, err)
+				continue
+			}
+			fmt.Fprintf(&b, "[binary] %s size=%d sha256=%x\n", s.path, len(data), sha256.Sum256(data))
 		}
 	}
+	return b.String()
+}
+
+// binarySummary is what one "Binary files … differ" line names.
+type binarySummary struct {
+	// path is the name as the document spells it, from the b/ side — the side
+	// this change writes.
+	path string
+	// quoted records that the token is git's C-quoted rendering of a name
+	// rather than the name itself.
+	quoted bool
+	// deleted is a change that removes the file: no bytes travel.
+	deleted bool
+}
+
+// withinDir reports whether p is root itself or lives under it. Both are
+// already resolved paths. An empty root matches nothing: the caller reaches
+// here after EvalSymlinks has either succeeded or been recorded as failed, and
+// "" is how that failure is spelled.
+func withinDir(root, p string) bool {
+	if root == "" {
+		return false
+	}
+	return p == root || strings.HasPrefix(p, root+string(os.PathSeparator))
+}
+
+// hasControlByte reports whether a name carries a byte that cannot appear
+// literally in one line of the document.
+func hasControlByte(p string) bool {
+	for i := 0; i < len(p); i++ {
+		if c := p[i]; c < 0x20 || c == 0x7f {
+			return true
+		}
+	}
+	return false
+}
+
+// quoteDiffPath renders a path the way git renders one it cannot write
+// literally: control bytes, '"' and '\' escaped, the whole wrapped in double
+// quotes (git's quote_c_style). Measured against git rather than assumed — for
+// a name holding a newline git emits this form with core.quotePath both true
+// and false, so that knob decides non-ASCII, not control bytes.
+func quoteDiffPath(p string) string {
+	if !hasControlByte(p) && !strings.ContainsAny(p, `"\`) {
+		return p
+	}
+	var b strings.Builder
+	b.Grow(len(p) + 2)
+	b.WriteByte('"')
+	for i := 0; i < len(p); i++ {
+		switch c := p[i]; {
+		case c == '"' || c == '\\':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		case c == '\n':
+			b.WriteString(`\n`)
+		case c == '\t':
+			b.WriteString(`\t`)
+		case c == '\r':
+			b.WriteString(`\r`)
+		case c < 0x20 || c == 0x7f:
+			fmt.Fprintf(&b, `\%03o`, c)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	b.WriteByte('"')
 	return b.String()
 }
 
@@ -831,27 +945,34 @@ func annotateBinaryLines(doc, worktree string) string {
 // separator is the last one — the b/ side follows it. When even that cannot be
 // resolved the caller is told so by ok=false, rather than being handed a path
 // that might name a different file.
-func binarySummaryPath(line string) (path string, deleted bool, ok bool) {
+func parseBinarySummary(line string) (binarySummary, bool) {
 	const prefix = "Binary files "
 	rest := strings.TrimSuffix(strings.TrimSuffix(line, "\n"), " differ")
 	if !strings.HasPrefix(rest, prefix) {
-		return "", false, false
+		return binarySummary{}, false
 	}
 	middle := strings.TrimPrefix(rest, prefix)
 	i := strings.LastIndex(middle, " and ")
 	if i < 0 {
-		return "", false, false
+		return binarySummary{}, false
 	}
 	aSide, bSide := middle[:i], middle[i+len(" and "):]
 	if bSide == "/dev/null" {
 		// A deletion: name the file that went away. Strip the a/ prefix; a
 		// path with no prefix is left as-is.
-		return strings.TrimPrefix(aSide, "a/"), true, aSide != "/dev/null"
+		if aSide == "/dev/null" {
+			return binarySummary{}, false
+		}
+		a := strings.TrimPrefix(aSide, "a/")
+		return binarySummary{path: a, quoted: strings.HasPrefix(a, `"`), deleted: true}, true
+	}
+	if strings.HasPrefix(bSide, `"`) {
+		return binarySummary{path: bSide, quoted: true}, true
 	}
 	if !strings.HasPrefix(bSide, "b/") {
-		return "", false, false
+		return binarySummary{}, false
 	}
-	return strings.TrimPrefix(bSide, "b/"), false, true
+	return binarySummary{path: strings.TrimPrefix(bSide, "b/")}, true
 }
 
 // taskWorktreePatch returns the SAME change as taskWorktreeDiff, encoded so that

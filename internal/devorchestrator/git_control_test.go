@@ -1048,3 +1048,160 @@ func TestTheReviewDiffCarriesTheBytesOfBinaryFiles(t *testing.T) {
 		t.Errorf("the diff carries the BASELINE bytes for tracked.png, not the ones this change writes:\n%s", diff)
 	}
 }
+
+// TestTheReviewDiffStaysInsideTheWorktree closes the other side of the same
+// door.
+//
+// annotateBinaryLines recovers a filesystem path by PARSING the document, and
+// part of that document is built from the Worker's own filenames. A filename
+// may contain a newline, and the untracked half writes names RAW
+// ("Binary files /dev/null and b/%s differ\n"). So a Worker can name one file
+// so that the document grows a line that was never a filename — a second
+// "Binary files … differ" naming any path it likes — and that path then reached
+// os.Lstat/os.ReadFile after filepath.Join, which resolves "..".
+//
+// The result is not a patch bypass (only taskWorktreePatch is applied) but it
+// IS an arbitrary-file-read primitive against the Supervisor: size and SHA-256
+// of any host-readable file, embedded in the review input. That is exactly what
+// the symlink branch a few lines above exists to prevent, reached through the
+// newline channel instead of the symlink one.
+func TestTheReviewDiffStaysInsideTheWorktree(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "wt")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init", "-q")
+	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "-A")
+	runGit("commit", "-q", "-m", "baseline")
+	baseline := runGit("rev-parse", "HEAD")
+
+	// The file the Worker is not supposed to be able to read. Outside the
+	// worktree, one ".." up.
+	secret := []byte("OUTSIDE-THE-WORKTREE-8f3a1c\n")
+	if err := os.WriteFile(filepath.Join(root, "secret.txt"), secret, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The way out is a symlinked DIRECTORY inside the tree, not "..". A ".."
+	// written inside the crafted name is consumed by filepath.Join's own Clean
+	// before the OS ever sees it, which is what made the first version of this
+	// probe fail to reproduce: the evil file's own Lstat missed. A path with no
+	// ".." in it survives Join untouched, so the name resolves to the file that
+	// exists — and the injected line's "link/secret.txt" is resolved by the
+	// kernel, one component at a time, straight out of the tree.
+	if err := os.Symlink(root, filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+
+	// A binary untracked file (so the loop emits the binary stanza) whose NAME
+	// injects a second binary summary line naming link/secret.txt.
+	//
+	// The name is a PATH, so its components have to exist for git to list it:
+	// git descends real directories and refuses to descend a symlink, which is
+	// the whole reason the payload's own "link" is a directory while the
+	// worktree root's "link" is the symlink the injected line travels through.
+	// Built with the same string on both sides so the two cannot drift.
+	name := "evil\nBinary files /dev/null and b/link/secret.txt differ\nz"
+	payload := filepath.Join(dir, filepath.Dir(name))
+	if err := os.MkdirAll(payload, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte{0x00, 0x01}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := taskWorktreeDiff(&WorkerRecord{Worktree: dir, BaselineSHA: baseline})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The quoting half, asserted on the document's LINE STRUCTURE rather than
+	// by comparing against quoteDiffPath — comparing a function to itself
+	// proves nothing. One binary file must yield exactly one line beginning
+	// "Binary files ". A name that reaches the document raw splits it into
+	// lines nobody wrote, and each of those is another such line. Asserted here
+	// as well as the containment below because the two defences are
+	// independent: with containment alone this test would stay green while the
+	// quoting rotted, and vice versa.
+	summaries := 0
+	for _, l := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(l, "Binary files ") {
+			summaries++
+		}
+	}
+	if summaries != 1 {
+		t.Errorf("the document has %d lines beginning \"Binary files \" for 1 binary file — a filename split it into lines nobody wrote:\n%s", summaries, diff)
+	}
+	if leak := fmt.Sprintf("sha256=%x", sha256.Sum256(secret)); strings.Contains(diff, leak) {
+		t.Errorf("the review diff carries the hash of a file OUTSIDE the worktree — a Worker turned the review input into an arbitrary-file digest oracle:\n%s", diff)
+	}
+	// Named separately from the hash, because these fail for different reasons:
+	// refusing to read the file and reading it but reporting nothing are not
+	// the same outcome, and only the first is a fix.
+	if strings.Contains(diff, fmt.Sprintf("[binary] link/secret.txt size=%d", len(secret))) {
+		t.Errorf("the annotation read a file through a symlinked directory and reported it as if it were the Worker's own:\n%s", diff)
+	}
+}
+
+// TestTheBinaryAnnotationRefusesAPathThatResolvesOutsideTheTree proves the
+// CONTAINMENT half on its own, with the quoting half out of the way: the
+// document here is written by the test, so no filename rendering is involved in
+// getting "link/secret.txt" in front of the annotator.
+//
+// That isolation is the point. The two defences overlap — either one alone stops
+// the end-to-end payload — so a test that only drove taskWorktreeDiff would stay
+// green with either half deleted, and the deleted half would be free to rot.
+//
+// Lstat cannot catch this one: `link` is a symlinked DIRECTORY, so the file
+// underneath it is a perfectly ordinary regular file. Only resolving the
+// directory and checking where it lands does.
+func TestTheBinaryAnnotationRefusesAPathThatResolvesOutsideTheTree(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "wt")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	secret := []byte("OUTSIDE-THE-WORKTREE-8f3a1c\n")
+	if err := os.WriteFile(filepath.Join(root, "secret.txt"), secret, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(root, filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+
+	got := annotateBinaryLines("Binary files /dev/null and b/link/secret.txt differ\n", dir)
+	if leak := fmt.Sprintf("sha256=%x", sha256.Sum256(secret)); strings.Contains(got, leak) {
+		t.Errorf("the annotation hashed a file outside the worktree:\n%s", got)
+	}
+	if !strings.Contains(got, "does not resolve to a file inside the worktree") {
+		t.Errorf("the annotation did not say WHY it refused. A silent omission reads as \"there was nothing to report\", which is the failure mode this whole line of work is about:\n%s", got)
+	}
+
+	// And it can still say YES. Without this the test would pass just as well
+	// on a function that refuses everything, including the files it exists to
+	// describe.
+	inside := []byte("INSIDE-THE-WORKTREE\n")
+	if err := os.WriteFile(filepath.Join(dir, "inside.bin"), inside, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	okDiff := annotateBinaryLines("Binary files /dev/null and b/inside.bin differ\n", dir)
+	want := fmt.Sprintf("[binary] inside.bin size=%d sha256=%x", len(inside), sha256.Sum256(inside))
+	if !strings.Contains(okDiff, want) {
+		t.Errorf("the containment check stopped hashing ordinary files inside the tree.\nwant: %s\ngot: %s", want, okDiff)
+	}
+}
