@@ -8,6 +8,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AssetDeriveCreation struct {
+	ID                   pgtype.UUID        `json:"id"`
+	ProjectID            pgtype.UUID        `json:"project_id"`
+	IdempotencyKey       string             `json:"idempotency_key"`
+	AssetVersionID       pgtype.UUID        `json:"asset_version_id"`
+	ParentAssetVersionID pgtype.UUID        `json:"parent_asset_version_id"`
+	RelationType         string             `json:"relation_type"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type AssetLineage struct {
+	ParentAssetVersionID pgtype.UUID `json:"parent_asset_version_id"`
+	ChildAssetVersionID  pgtype.UUID `json:"child_asset_version_id"`
+	RelationType         string      `json:"relation_type"`
+}
+
 type AssetPublishCreation struct {
 	ID             pgtype.UUID        `json:"id"`
 	ProjectID      pgtype.UUID        `json:"project_id"`

@@ -98,6 +98,12 @@ var registry = map[string]exitSite{
 		Sites: 1, Kind: KindInlineText, Wire: "application/json, no disposition",
 		Note: "the asset publish refusal and its impact report",
 	},
+	"assetshttp/derive.go:writeDeriveBlocked": {
+		Sites: 1, Kind: KindInlineText, Wire: "application/json, no disposition",
+		Note: "the asset derive refusal and its impact report (T0708): the second exit in " +
+			"assetshttp, classified as its twin above is — a JSON envelope, so no browser " +
+			"renders it and no probe is owed for the kind, but it states nosniff itself",
+	},
 	"knowledgehttp/publish.go:writePublishBlocked": {
 		Sites: 1, Kind: KindInlineText, Wire: "application/json, no disposition",
 		Note: "the knowledge publish refusal and its re-check report",

@@ -57,11 +57,24 @@ type Deps struct {
 	// Dependencies is the project-side dependency read (T0707). The
 	// production value is *persistence.ProjectDependencyStore.
 	Dependencies DependencyReader
+	// Derive is the fork/derive use case (T0708). The production value is
+	// *assets.DeriveCommand, over the store that owns the derivation
+	// transaction — a governed write this surface registers, beside Publish
+	// above and the metadata revision below, and required for the same
+	// reason: a surface wired without one of its ports is a wiring bug, not
+	// a degradation to answer around.
+	Derive DeriveCommand
 	// Metadata is the asset metadata revision use case (T0706). The
 	// production value is *assetmetadata.Command, over the store that owns
 	// the revision transaction. It is required like the rest: a surface
 	// wired without its write port answers 500 on the one route it serves,
 	// which is a wiring bug rather than a degradation to answer around.
+	//
+	// It reached this struct at the same merge as Derive above: T0706 and
+	// T0708 each added one governed write to the same three places in this
+	// file (the Deps field, the New wiring, the route), so git saw three
+	// adjacent insertions and refused all three. Both sides are additive,
+	// which is why the resolution is "keep both" rather than a judgement.
 	Metadata MetadataCommand
 }
 
@@ -74,6 +87,7 @@ func New(deps Deps) *API {
 		pages:        deps.Pages,
 		members:      deps.Members,
 		dependencies: deps.Dependencies,
+		derive:       deps.Derive,
 		metadata:     deps.Metadata,
 	}}
 }
@@ -116,6 +130,13 @@ func (a *API) Register(v1 *http.ServeMux) {
 	// under the projects subtree the project surface owns, and it is more
 	// specific than that subtree's routes, so the two coexist.
 	v1.HandleFunc("GET /api/v1/projects/{projectId}/dependencies", a.handlers.handleProjectDependencies)
+	// The fork/derive write (T0708). Not in the contract either — see
+	// derive.go for why it is mounted anyway, and why its path follows the
+	// publish's custom-method shape. It is a POST because it is a governed
+	// write: it needs the session and CSRF guard the v1 subtree applies to
+	// every write, and its Idempotency-Key is a header, which is where
+	// docs/22 puts it.
+	v1.HandleFunc("POST /api/v1/projects/{projectId}/assets:derive", a.handlers.handleDerive)
 	// The metadata revision (T0706). Not a contract path either, and the
 	// same decision: docs/11 §4 gives asset metadata its own revisable
 	// surface and the contract has no route for it yet, so it is mounted
