@@ -135,6 +135,48 @@ type PullRequestOpener interface {
 	Create(ctx context.Context, in pullrequests.CreatePullRequestParams) (domain.PullRequest, error)
 }
 
+// PullRequestReviewer is the EXISTING pull-request service's review
+// surface, for the same reason PullRequestOpener is a port and not a
+// direct call: sending a proposal into review is a state machine move,
+// and the machine, its audit row and its compare-and-swap belong to
+// internal/application/pullrequests. The production implementation is
+// *pullrequests.Service.
+type PullRequestReviewer interface {
+	// Get returns the project's PR by number, or
+	// pullrequests.ErrPullRequestNotFound for a number the project does
+	// not hold (and for a project it does not hold either).
+	Get(ctx context.Context, projectID string, number int64) (domain.PullRequest, error)
+	// RequestReviewKeyed moves the PR into review and appends the audit
+	// row for it in the same transaction. idempotencyKey is the key the
+	// contract route carried; it is recorded on that row and otherwise
+	// unused (the state is the idempotency record), so a repeated call
+	// finds the PR already in review and returns it having written
+	// nothing.
+	//
+	// The KEYED form is named, not the bare RequestReview: the route the
+	// request arrived on always carries the contract's Idempotency-Key
+	// (specs/api/openapi.yaml makes it required on this operation), so
+	// the key has to reach the command that records it, and
+	// *pullrequests.Service's RequestReview is the keyless shape an
+	// internal caller uses. Naming the method this port actually needs
+	// is what lets the production value satisfy it — see the compile-time
+	// assertion below, which is the reason a wiring mistake here fails
+	// the build instead of failing closed at runtime.
+	RequestReviewKeyed(ctx context.Context, projectID string, number int64, idempotencyKey string) (domain.PullRequest, error)
+}
+
+// The production implementation, asserted at compile time.
+//
+// This port exists so the fork service can drive the pull-request state
+// machine without owning it, and the shape it names has to be a shape the
+// machine really has: an interface that NO production value satisfies
+// still compiles, and the only symptom is cmd/api passing nil and the
+// route answering 503 — a wiring gap that looks exactly like the
+// fail-closed path (forks.Service refuses an unwired review with
+// ErrStore). The assertion turns that into a build failure, which is
+// where it belongs.
+var _ PullRequestReviewer = (*pullrequests.Service)(nil)
+
 // Authz is the policy engine the three conditional cells are resolved
 // through (authz.Engine).
 type Authz = authz.Engine

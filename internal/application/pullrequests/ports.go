@@ -60,6 +60,28 @@ type Repository interface {
 	// never move, docs/43), and ErrBranchHeadMissing when the source
 	// branch has no head.
 	RefreshProposedState(ctx context.Context, projectID string, number int64) (domain.PullRequest, error)
+	// RequestReview moves the PR into review (docs/43: open →
+	// review_required, and the review loop's re-entry changes_requested →
+	// review_required) and appends the audit row for it in the same
+	// transaction. idempotencyKey is the key the contract route carried;
+	// it is recorded on that row and otherwise unused — the state is the
+	// idempotency record, so a repeated call finds the PR already in
+	// review_required and returns it having written nothing
+	// (internal/persistence/pullrequest_store.go).
+	//
+	// It fails with ErrPullRequestNotFound for an unknown or foreign PR
+	// (including a malformed project id), and with *TransitionError when
+	// the PR is in a state this edge does not leave from — approved,
+	// merge_ready, and the three terminal states (merged/closed/aborted),
+	// which docs/43 gives no outgoing edge at all.
+	//
+	// The terminal states are deliberately NOT singled out as
+	// *TerminalError, which is what RefreshProposedState answers for them:
+	// this command has refused them as *TransitionError since T0402 (an
+	// existing acceptance test pins it), and the contract declares one 409
+	// for the operation. The store explains it at length
+	// (internal/persistence/pullrequest_store.go).
+	RequestReview(ctx context.Context, projectID string, number int64, idempotencyKey string) (domain.PullRequest, error)
 }
 
 // CreatePullRequestParams carries one PR creation request. Number,
@@ -96,9 +118,15 @@ type CreatePullRequestParams struct {
 }
 
 // MinCreationKeyLen is the Idempotency-Key's minimum length on the
-// pull-request creation route (specs/api/openapi.yaml,
+// pull-request write routes (specs/api/openapi.yaml,
 // components.parameters.IdempotencyKey: minLength 8). It lives with the
 // command the way mainfreeze.MinIdempotencyKeyLen lives with the freeze:
 // the transport reads the bound from the same place the domain enforces
 // it, so the two cannot drift.
+//
+// One bound covers two commands — creation (CreationKey) and the review
+// request (RequestReviewKeyed) — because the contract declares ONE
+// parameter (components.parameters.IdempotencyKey) and both routes carry
+// that one, at that one length. A second constant here would be a second
+// place for the same number to be wrong.
 const MinCreationKeyLen = 8

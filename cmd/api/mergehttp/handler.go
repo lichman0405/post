@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lichman0405/post/cmd/api/authhttp"
+	"github.com/lichman0405/post/cmd/api/pullrequestshttp"
 	"github.com/lichman0405/post/internal/application/merge"
 	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/domain"
@@ -51,6 +52,10 @@ type projectReader interface {
 type handlers struct {
 	cmd      mergeCommand
 	projects projectReader
+	// review serves the collection's other suffix verb, ":request-review".
+	// Optional wiring: nil means this mux mounts the merge surface alone, and
+	// that verb fails closed (503).
+	review http.HandlerFunc
 }
 
 // mergeRequest is the optional body: the state commit's message. Nothing else
@@ -208,9 +213,39 @@ func mergeKey(w http.ResponseWriter, r *http.Request) (*string, bool) {
 	return &key, true
 }
 
+// handlePullRequestVerb: POST /api/v1/projects/{projectId}/pull-requests/
+// {number...} — every suffix verb the contract spells inside this collection's
+// last path segment.
+//
+// The route is registered as a REMAINDER wildcard because ServeMux cannot match
+// a suffix inside a segment ("{number}:merge" panics with "bad wildcard
+// segment"), and a prefix has exactly ONE remainder owner: a second
+// registration under it panics with "conflicts with pattern". This handler is
+// therefore the dispatcher for the whole segment, not only for ":merge". The
+// collection's second verb, ":request-review", is served by the package that
+// owns the collection and the pull-request document it answers with
+// (cmd/api/pullrequestshttp.RequestReviewHandler, wired in as
+// Deps.ReviewRequest); the merge command is not involved in it. Every other
+// suffix is the 404 it has always been — no route is widened by the trick.
+func (h *handlers) handlePullRequestVerb(w http.ResponseWriter, r *http.Request) {
+	switch segment := r.PathValue("number"); {
+	case strings.HasSuffix(segment, pullrequestshttp.RequestReviewVerb):
+		if h.review == nil {
+			authhttp.WriteError(w, r, http.StatusServiceUnavailable, merge.CodeUnavailable,
+				"pull request review unavailable")
+			return
+		}
+		h.review.ServeHTTP(w, r)
+	case strings.HasSuffix(segment, mergeVerb):
+		h.handleMerge(w, r)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
 // handleMerge: POST /api/v1/projects/{projectId}/pull-requests/{number}:merge.
-// The only write on this surface: it hands the command the actor and the key
-// and maps the command's own outcome onto the wire. There is no update, no
+// The only write on the merge surface: it hands the command the actor and the
+// key and maps the command's own outcome onto the wire. There is no update, no
 // delete and no second way to move main.
 func (h *handlers) handleMerge(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectId")

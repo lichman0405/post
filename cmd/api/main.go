@@ -656,12 +656,25 @@ func run(args []string) int {
 		Repos:        forkProvisioner,
 		Imports:      forkImporter,
 		PullRequests: prSvc,
-		Authz:        authz.NewMatrixEngine(),
+		// Reviews is the same pull-request service read through its review
+		// surface: sending an EXISTING proposal into review (T0411) is the
+		// pull-request state machine's move, driven from here because the
+		// authorization for it is the open_pr cell this service already
+		// resolves. Without it the route would fail closed with 503 — the
+		// service refuses rather than moving a row nobody authorized.
+		Reviews: prSvc,
+		Authz:   authz.NewMatrixEngine(),
 	})
 	pullrequestsAPI := pullrequestshttp.New(pullrequestshttp.Deps{
 		PullRequests: prSvc,
 		Create:       forksSvc,
-		Checks:       checksSvc,
+		// Sending a proposal into review (T0411) is a governance action,
+		// so it is authorized where every other open_pr decision is:
+		// the forks service resolves the SAME cell against the PR's
+		// project (including the non-member's fork lineage) and drives
+		// the pull-request command that moves the row.
+		Review: forksSvc,
+		Checks: checksSvc,
 		// The PR's Research State Diff (T0408): the PR's own fixed base,
 		// its proposed head and the target branch's current head, computed
 		// by the T0401 engine. The base is never re-derived from the target
@@ -1106,6 +1119,12 @@ func run(args []string) int {
 	mergeAPI := mergehttp.New(mergehttp.Deps{
 		Command:  mergeSvc,
 		Projects: projectAPI.Service(),
+		// The collection's last path segment has ONE remainder owner and it
+		// is this route (Go's ServeMux cannot match a suffix inside a
+		// segment, and a second remainder registration panics), so the other
+		// verb on that segment — ":request-review", T0411 — is served by the
+		// pull-request surface's handler, dispatched from here.
+		ReviewRequest: pullrequestsAPI.RequestReviewHandler(),
 	})
 	mergeAPI.Register(v1)
 	// Freeze main governance (T0601). The two halves of one rule live in
