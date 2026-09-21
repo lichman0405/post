@@ -1,0 +1,91 @@
+# perf-gate — the POST V1 performance gate (T1108), as a CI job.
+#
+# PASTE-READY, NOT PASTED. T1108's allowed scope excludes .github/**, so the
+# job below was NOT added to .github/workflows/ci.yml by this task: it is
+# recorded here for whoever owns that file. The step that reads it must keep
+# `.github/workflows/ci.yml` at seven jobs until then —
+# internal/devorchestrator's gate_spec_test.go:17-58 pins the job list.
+#
+# # How to paste
+#
+# Append this block as a new top-level job under `jobs:` in
+# .github/workflows/ci.yml (same two-space indent as `migration-integration`),
+# then update gate_spec_test.go's expected job list in the same commit. Nothing
+# else in the workflow changes: the job brings its own service container.
+#
+# # What it runs
+#
+# `make bench` — seed a corpus, run the deterministic gate (per-table row
+# counts, the index-usage plans, the regression ceilings), then print the
+# measurement report. It exits 1 if the gate fails and 0 otherwise, so the
+# step needs no assertion of its own. The human table goes to stderr and the
+# machine-readable document to stdout (`make bench > report.json` writes the
+# JSON alone), so the whole report is in the job log and a later step could
+# archive it without parsing prose.
+#
+# CI runs the "ci" tier: a 400-object corpus, a shape check rather than a
+# latency comparison. The docs/27 SLO comparison needs `--scale spec`
+# (docs/27:20's capacity baseline: 10k objects, 100k relations, 10k state
+# transitions, 100k search documents), which belongs to the operator or to a
+# nightly job, not to the per-PR critical path. The gate is identical at both
+# tiers, deliberately — see tests/benchmark/gate.go.
+#
+# # Why the gate does not assert the docs/27 budgets
+#
+# Because a gate that goes red when a shared runner is busy is a gate somebody
+# eventually loosens (CLAUDE.md: 禁止为让 Gate 通过 放宽 assertion). The
+# deterministic checks are size- and plan-based; the only timing check is a
+# regression ceiling twenty times the budget, which catches an order-of-
+# magnitude regression and ignores runner noise. The SLO verdict is recorded in
+# the report, printed to the job log, and is not a pass/fail.
+#
+# # Cost
+#
+# The run itself is seconds; the job is dominated by checkout + image pull.
+# Both rows below are MEASURED, from the harness's own per-stage report (the run
+# prints provision / corpus load / ANALYZE / measure / total, which is where
+# these come from). An earlier version of this note quoted ONE "seed" figure
+# that was taken from the provisioning step alone: it understated the ci tier
+# slightly and the spec tier by two orders of magnitude.
+#
+#   ci tier,   `make bench` end to end: 8.4s  (provision 0.46s + load 0.75s =
+#              1.20s to seed, ANALYZE 0.11s, measure 6.42s, total 8.08s)
+#   spec tier, `make bench SCALE=spec`: 229.6s (provision 0.5s + load 25.7s =
+#              26.2s to seed, ANALYZE 1.6s, measure 194.1s, 7.7s harness overhead)
+#
+# So the per-PR job costs a few seconds of measurement on top of the container
+# start, and the spec tier costs under four minutes — which is exactly why the
+# spec tier is a deliberate, separately-requested run rather than this job's
+# default: it would multiply the per-PR critical path by ~25 for a comparison
+# whose numbers do not move between two commits that touch no query.
+#
+# The job shares no state with other jobs and needs no cache.
+
+  perf-gate:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_dev_pw
+          POSTGRES_DB: post
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+      - name: "perf: performance baseline gate + report (make bench)"
+        env:
+          # The harness provisions its own database (post_bench) from the
+          # migrations and drops it on exit; it never touches the `post`
+          # database the integration suite uses.
+          POSTGRES_TEST_ADMIN_URL: postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post
+        run: make bench
