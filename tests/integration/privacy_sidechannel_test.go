@@ -945,10 +945,26 @@ func maxDuration(ds []time.Duration) time.Duration {
 // TestRetrievalCannotTellAnUnreadableDocumentFromNonexistent is the third of
 // the three surfaces the acceptance criterion names (项目面、资产面、检索面).
 //
-// The retrieval layer has no HTTP route today — cmd/api/searchhttp exposes
-// POST /api/v1/search over the answer generator, and the hybrid retriever is
-// reached through the Go API — so this item is made at the layer itself,
-// over the real projection, the real disclosure predicate and the real SQL.
+// The retrieval layer does have an HTTP route — cmd/api/searchhttp's
+// POST /api/v1/search runs the whole pipeline, and its third step is
+// retrieval.Retriever (cmd/api/searchhttp/doc.go:20-27, service.go:163,
+// wiring.go:31) — but that route is not on the surface this item is about.
+// It is a state-changing method: cmd/api/searchhttp/wiring.go:111 registers
+// three patterns, all POST, and an anonymous POST is challenged by the auth
+// guard with AUTH_UNAUTHENTICATED (wiring.go:117-124) before any handler
+// runs, which the handler states again as a structured 401 (handlers.go:200,
+// SEARCH_UNAUTHENTICATED). An answered search is recorded as well —
+// service.go:177 writes the row, and service.go:184 calls that writer "the
+// only writer of it" — so reaching the answer is a write, not a read. An
+// anonymous reader therefore cannot reach a retrieval answer over HTTP at
+// all, so this item is made at the layer itself, over the real projection,
+// the real disclosure predicate and the real SQL.
+//
+// (Until T1112 this paragraph said "the retrieval layer has no HTTP route
+// today". That was false, and the correction is the stronger claim: "no
+// route" invites somebody to add one and quietly move the surface, while
+// "the route is a POST that refuses anonymous callers and records the
+// search" says why that route cannot serve this item however it is written.)
 //
 // # Why the instrument is a differential and not "two queries that agree"
 //

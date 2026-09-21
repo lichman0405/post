@@ -21,11 +21,25 @@ import axe from "axe-core";
 const BASE = process.argv[2] ?? "http://127.0.0.1:31107";
 
 let fails = 0;
-const ok = (label) => console.log(`ok   ${label}`);
 const fail = (label, detail) => {
   fails += 1;
   console.log(`FAIL ${label}${detail ? `: ${detail}` : ""}`);
 };
+/* ok() takes a LABEL AND NOTHING ELSE — same guard, same reason as the copy
+ * in visual-smoke.mjs (T1112): a second argument to a `(label) =>` signature
+ * was silently discarded, and calls shaped like assertions therefore could
+ * never fail. Any second argument is now reported as a failed check naming
+ * the call. See that file for the full note. */
+function ok(label, ...extra) {
+  if (extra.length > 0) {
+    fail(
+      `ok(${JSON.stringify(label)}, …) called with ${extra.length + 1} arguments`,
+      "ok takes a label only — a second argument is discarded, so this line could never fail. Write it as an if/else that calls fail(label, detail).",
+    );
+    return;
+  }
+  console.log(`ok   ${label}`);
+}
 
 const browser = await chromium.launch();
 
@@ -205,7 +219,16 @@ await page.goto(BASE, { waitUntil: "load" });
 await page.locator(".global-nav-links a", { hasText: "Projects" }).first().focus();
 await page.keyboard.press("Enter");
 await page.waitForURL(/\/projects$/);
-ok("keyboard: Enter on the Projects link navigates", (await page.locator("h1").textContent())?.trim() === "Projects");
+// This was the tenth call of the shape T1112 removed: the comparison was
+// passed as a second argument to a `(label) =>` function, dropped, and the
+// line printed "ok" before it had looked at the heading at all. It is a real
+// check now, and it names the heading it actually saw when it fails.
+const projectsHeading = (await page.locator("h1").textContent())?.trim();
+if (projectsHeading !== "Projects") {
+  fail("keyboard: Enter on the Projects link navigates", `h1 is ${JSON.stringify(projectsHeading)}, expected "Projects"`);
+} else {
+  ok("keyboard: Enter on the Projects link navigates");
+}
 
 // 6. No positive tabindex anywhere (focus order stays natural).
 const positiveTabindex = await page.evaluate(() =>

@@ -19,12 +19,39 @@ SHELL := /bin/bash
 GO_UNIT_PKGS := $(shell go list ./... | grep -v '/tests/integration')
 STATICCHECK_VER := 2026.2.1
 
+# The browser suites (T1112). DISCOVERED, never written down here: these two
+# lines are re-evaluated on every `make` invocation, so a suite is in the
+# browser targets the day its run.sh lands in the tree. A hand-typed list is
+# the exact shape of the failure T1112 exists to remove — on 2026-09-21 a
+# repo-wide grep found ZERO references to tests/e2e-shell in the Makefile,
+# .github/** and tests/**/*.sh (before T1107's privacy-suite.sh added one),
+# so that suite's red went unseen for six days. `make browser-list` prints
+# what these expand to, next to the raw `ls` it was derived from.
+#   - the smoke checks come from `run.sh --list`, which is the same discovery
+#     the runner itself uses, so there is one definition of "a check" and not
+#     two that can drift.
+BROWSER_E2E_SUITES := $(patsubst tests/e2e-%/run.sh,%,$(sort $(wildcard tests/e2e-*/run.sh)))
+BROWSER_SMOKE_CHECKS := $(shell bash tests/web-smoke/run.sh --list 2>/dev/null)
+# The partition a CI job needs, discovered the same way: which suites read a
+# real PostgreSQL is asked of each suite's OWN run.sh rather than typed here,
+# so the partition cannot drift from the suites it partitions. As of T1112
+# that is tests/e2e-release and tests/e2e-pr-flows.
+BROWSER_E2E_DB_SUITES := $(shell grep -l 'POSTGRES_TEST_ADMIN_URL' tests/e2e-*/run.sh 2>/dev/null | sed -e 's|^tests/e2e-||' -e 's|/run\.sh$$||')
+BROWSER_E2E_NO_DB_SUITES := $(filter-out $(BROWSER_E2E_DB_SUITES),$(BROWSER_E2E_SUITES))
+
 .PHONY: help bootstrap check build rddev test test-integration bench dev smoke sync-schemas \
 	check-schema-drift check-schema-snapshot check-openapi check-spec-version fmt-check staticcheck lint-python type-python \
-	progress ci migrate search-rebuild search-embed infra-up infra-init infra infra-down infra-ps infra-logs
+	progress ci migrate search-rebuild search-embed infra-up infra-init infra infra-down infra-ps infra-logs \
+	browser-list browser-smoke browser-smoke-% browser-e2e browser-e2e-nodb browser-e2e-db browser-e2e-% browser-suites browser-ok-arity
 
 help: ## list targets
-	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN { FS = ":.*## " } { printf "  %-20s %s\n", $$1, $$2 }'
+# `[a-zA-Z_-]`, not `[a-zA-Z0-9_-]`, is how browser-e2e and every
+# `browser-e2e-<suite>` failed to appear in this list while existing and
+# working: the class silently drops any target whose name contains a digit,
+# and every browser suite is named after a task that has one. A target that
+# cannot be found in `make help` is half-way back to the failure T1112 fixes;
+# the digit is in the class now.
+	@grep -E '^[a-zA-Z0-9_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN { FS = ":.*## " } { printf "  %-20s %s\n", $$1, $$2 }'
 
 bootstrap: ## install every toolchain's pinned dependencies
 	pnpm install --frozen-lockfile
@@ -386,6 +413,65 @@ smoke: ## Docker-free CI smoke: start/check every app with real requests (no inf
 		echo "exit=$$rc (next 16 logs the ConfigError and never serves, but does not always exit by itself; timeout guarantees termination)"; \
 		grep -m1 "POST_ENV:" /tmp/post-smoke-web-noconfig.log; \
 		echo ">> smoke OK";'
+
+browser-list: ## print every browser suite/check `make browser-suites` would run, and the discovery it came from
+	@echo "e2e suites  (from tests/e2e-*/run.sh):"
+	@for s in $(BROWSER_E2E_SUITES); do echo "  e2e-$$s"; done
+	@echo "smoke checks (from tests/web-smoke/*.mjs):"
+	@for c in $(BROWSER_SMOKE_CHECKS); do echo "  $$c"; done
+	@echo ""
+	@echo "raw discovery:"
+	@ls tests/e2e-*/run.sh
+	@ls tests/web-smoke/*.mjs
+
+browser-smoke: ## run every web-smoke check (real Chromium against the built web app)
+	bash tests/web-smoke/run.sh
+
+browser-ok-arity: ## static check: no web-smoke ok() call passes a second argument (T1112)
+# The same guard the runner runs first, on its own so it can be pointed at
+# from a review or a CI step without a browser, a build or a server. Exit 0
+# is the evidence that the count of two-argument ok() calls is zero.
+	node tests/web-smoke/check-ok-arity.js
+
+browser-smoke-%: ## run one web-smoke check, e.g. `make browser-smoke-visual` (names: browser-list)
+	WEB_SMOKE_CHECKS=$* bash tests/web-smoke/run.sh
+
+browser-e2e: ## run every discovered tests/e2e-*/run.sh; a suite that cannot run fails the target
+# Grouped and per-suite on purpose: one red suite must not hide the suites
+# after it, and the summary has to locate the failure, not just count it
+# (the same shape as tests/acceptance/privacy-suite.sh). Every suite is
+# driven sequentially and never with `make -j`: tests/e2e-activity and
+# tests/e2e-conflicts share default port 31110, and tests/e2e-files and
+# tests/e2e-settings share 31109, so two of them in parallel would fail on
+# each other's port. Nothing here is a skip: a missing prerequisite is an
+# exit 1 from the suite that needs it, surfaced in the summary.
+	@if ! command -v node >/dev/null 2>&1; then 		echo "browser-e2e: FAILED — node is not on PATH; the browser suites cannot run and a skip is not a pass." >&2; 		exit 1; 	fi; 	case "$${BROWSER_E2E_ONLY:-all}" in 		all) suites="$(BROWSER_E2E_SUITES)";; 		nodb) suites="$(BROWSER_E2E_NO_DB_SUITES)";; 		db) suites="$(BROWSER_E2E_DB_SUITES)";; 		*) echo "browser-e2e: FAILED — BROWSER_E2E_ONLY='$$BROWSER_E2E_ONLY' is not all|nodb|db; refusing to guess which suites you meant." >&2; exit 1;; 	esac; 	echo "browser-e2e: running ($${BROWSER_E2E_ONLY:-all}):$$suites"; 	if [ ! -d apps/web/node_modules ]; then 		echo "browser-e2e: FAILED — apps/web/node_modules is missing (every suite here builds the web app). Run 'pnpm install --frozen-lockfile' first." >&2; 		exit 1; 	fi; 	needs_db=""; 	for s in $$suites; do 		grep -q 'POSTGRES_TEST_ADMIN_URL' tests/e2e-$$s/run.sh 2>/dev/null && needs_db="$$needs_db e2e-$$s"; 	done; 	if [ -n "$$needs_db" ]; then 		echo "browser-e2e: these suites read a real PostgreSQL:$$needs_db"; 		if python3 scripts/pg-ready.py "$${POSTGRES_TEST_ADMIN_URL:-postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post}" >/dev/null 2>&1; then 			echo "browser-e2e: database reachable"; 		else 			echo "browser-e2e: NO database reachable —$$needs_db will FAIL below. Start it with 'make infra-up' (tests/e2e-pr-flows additionally needs Gitea, and the git CLI on PATH)." >&2; 		fi; 	fi; 	passed=""; failed=""; 	for s in $$suites; do 		echo ""; echo "=================================================================="; 		echo "== browser-e2e: e2e-$$s"; echo "=================================================================="; 		if bash tests/e2e-$$s/run.sh; then passed="$$passed $$s"; 		else failed="$$failed $$s"; echo "browser-e2e: suite e2e-$$s FAILED" >&2; fi; 	done; 	echo ""; echo "== browser-e2e: summary =="; 	for s in $$passed; do echo "  ok   e2e-$$s"; done; 	for s in $$failed; do echo "  FAIL e2e-$$s"; done; 	if [ -n "$$failed" ]; then echo "browser-e2e: FAILED — suites:$$failed" >&2; exit 1; fi; 	echo "browser-e2e: all suites passed"
+
+browser-e2e-nodb: ## run only the e2e suites that need no database (discovered: they read no POSTGRES_TEST_ADMIN_URL)
+	@BROWSER_E2E_ONLY=nodb $(MAKE) browser-e2e
+
+browser-e2e-db: ## run only the e2e suites that read a real PostgreSQL (needs make infra-up; pr-flows also needs Gitea)
+	@BROWSER_E2E_ONLY=db $(MAKE) browser-e2e
+
+browser-e2e-%: ## run one suite, e.g. `make browser-e2e-shell` (names: browser-list)
+	bash tests/e2e-$*/run.sh
+
+browser-suites: ## every browser suite: web-smoke checks + all e2e suites
+# Run both groups regardless of individual failures so one red suite cannot
+# hide the other. The same shape as tests/acceptance/privacy-suite.sh: each
+# group reports its own summary, then this target reports the combined result.
+	@echo "== browser-suites: web-smoke =="
+	bash tests/web-smoke/run.sh; smoke_rc=$$?; \
+	echo ""; echo "== browser-suites: e2e =="; \
+	$(MAKE) browser-e2e; e2e_rc=$$?; \
+	echo ""; echo "== browser-suites: combined summary =="; \
+	if [ $$smoke_rc -ne 0 ]; then echo "  web-smoke: FAIL"; else echo "  web-smoke: ok"; fi; \
+	if [ $$e2e_rc -ne 0 ]; then echo "  browser-e2e: FAIL"; else echo "  browser-e2e: ok"; fi; \
+	if [ $$smoke_rc -ne 0 ] || [ $$e2e_rc -ne 0 ]; then \
+		echo "browser-suites: FAILED" >&2; \
+		exit 1; \
+	fi; \
+	echo "browser-suites: all groups passed"
 
 # Local infrastructure (Docker Compose, T0003). Applications stay host-native
 # (docs/66 §2); only the infra dependencies below run in containers.
