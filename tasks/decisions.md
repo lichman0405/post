@@ -15851,3 +15851,464 @@ return func() { once.Do(func() { close(done) }) }
 **什么时候落地**：**不现在落**。此刻 T0906/T0610/T0706/T0708 四笔已 accepted 在等合并，
 往 main 上再叠一个提交会让它们的基线集体落后、触发又一轮 rebaseline（其中两笔还要我手工合）。
 等这一批合完再落这个修复。修好的版本已实测，随时可落。
+
+**追记（当日 14:24）——我改了主意，落了，然后把「会不会坏事」量了一遍。**
+
+上面那条「不现在落」是**担心**，不是**测量**。真按它办之前我先量了一下：担心的机制是
+「main 前进 → 待合并任务的补丁套不上 → 又要 rebaseline 一轮」。于是把四笔的补丁
+（`git diff <merge-base> <branch>`）拿去对**推进后的 main** 做 `git apply --check`：
+
+| 任务 | 推进前 | 推进后 |
+|---|---|---|
+| T0906 | 能套 | **仍能套** ✅ |
+| T0610 / T0706 / T0708 | **本来就套不上** | 本来就套不上 |
+
+结论两条：①我的提交只碰 `internal/devorchestrator/driver.go` 与 `tasks/*`，四笔的补丁一个都没碰这些路径，
+所以**推进没有造成任何新的套不上**；②那三笔套不上是 **T0812 之前就存在的**（见 ⑫），跟这次提交无关。
+
+**所以落了**：`02b5669`，随 `09c76a0` 推到 origin/main；推之前把 CI 的 `task-state` 与
+`spec-validation` 两步在本地逐条跑过（全绿），没有把 main 弄红。
+
+**这条的教训**：把「我担心会坏事」写进决策记录时，要顺手写成**可测量的形式**（「什么会变红、
+怎么量」），否则它以后会被当成结论引用——我自己隔了两小时就差点照着一个没量过的担心办事。
+
+## ⑫ 迁移链是**严格串行**的，而且每一环落地后**下一环必然套不上**——这不是故障，是派生工件的算术（2026-09-21）
+
+### 现象
+
+T0906/T0610/T0706/T0708 四笔都已 `accepted`，`rddev pr status` 四笔全报
+「merge gate passed」。但把它们的补丁（`git diff <merge-base> <branch>`）拿去
+`git apply --check` 打到当前 main 上：
+
+| 任务 | 迁移号 | 套得上？ | 卡在哪 |
+|---|---|---|---|
+| T0906 | 00121 | ✅ | —— |
+| T0610 | 00123 | ❌ | `specs/SPEC_VERSION.json`、`specs/database/postgres.sql` |
+| T0706 | 00125 | ❌ | 同上 + `cmd/api/main.go` |
+| T0708 | 00128 | ❌ | `specs/SPEC_VERSION.json`、`specs/database/postgres.sql` |
+
+**为什么 T0906 是唯一能套的**：它的基线是今天 13:56 我手工推过的那棵树（见 ⑨），
+派生工件是在**T0812 落地之后**重新生成的，所以和 main 一致。另外三笔的基线都停在
+T0812（13:54 合并）**之前**，它们的补丁里带着**自己那一版的**派生工件。
+
+### 这不是四个独立的毛病，是同一条算术
+
+`specs/database/postgres.sql` 是 `infra/migrations/**` 的**函数**，`specs/SPEC_VERSION.json`
+是 `tasks/tasks.json` + `specs/**` 的函数。两个任务各自「在原树上加一个迁移、再重新生成快照」，
+产出的快照都是**「旧快照 + 我这一条」**。把它们先后打到 main 上，第二笔带的快照里
+**不含第一笔的迁移**——就算 `git apply` 侥幸套上了，落地结果也是**错的**。
+
+所以：**每合上一条迁移，链上其余每一笔的补丁就必然作废一次**，因为它们手里的派生工件
+又旧了一格。这解释了为什么**不能并行合**、也解释了为什么「先合的先赢、后面的重来」
+不是工具不好使，而是派生工件定义的直接后果。
+
+### 处置
+
+- **只能串行**：T0906 → T0610 → T0706 → T0708，一格一格来。
+- 每一环的处置是**重新组合 + 重新生成**（不是把文本合起来）：
+  - T0610 / T0708：只有派生工件冲突，属于「极小 integration glue」（CLAUDE.md §1）——
+    把该任务的树推到当前 main 上、**重新生成**两个派生文件、提交。
+  - T0706：另加 `cmd/api/main.go` 的真代码冲突，同 T0906 的解法（并集解 + 重新生成）。
+  - T0906 已经这么做过一次了（提交 `7db633f`），流程是通的。
+- **代价**：每次重新组合都会让该任务的 **review verdict 绑定的代码身份变旧**
+  （G2 记录不受影响，`pr status` 里能看到它仍然绿）。所以**每一环要多花一次独立评审**。
+  这是必要的：verdict 不能比它审过的代码活得久。
+- **不采用 `rddev rebaseline` 的原因**：它确实是为此设计的（`--exclude` 派生工件 + 重新生成），
+  但它走完还要 `task reject` + `worker rework`，等于把该任务**整轮重验**
+  （worker 重跑 + collect + review + accept）。对「只有派生工件冲突」这一种情形，
+  手工重组 + 重评审是同样的正确性、更低的代价。**若某笔的重组不是机械的
+  （T0706 如果 `main.go` 不是并集能解的），就退回 `rebaseline` 走整轮重验。**
+
+### 顺带纠正一条我自己的预测
+
+⑩ 里我写过「T0706 需要我手工合」。今天用 `git merge-tree --write-tree origin/main <branch>`
+复测：**四笔都能干净三方合并**（`merge-tree` 走真三方，`git apply` 要求上下文逐字相符，
+两者的严格程度不同——所以「能合」不等于「能套」）。T0706 的 `main.go` 到底要不要人判，
+等轮到它时按实际冲突面再定，不照抄两小时前的预测。
+
+**复测补充（14:30）**：把三条支线分别与 **T0906 的分支**做 `merge-tree`，**都干净**。
+所以 T0906 落地之后，剩下三笔的处理是**统一的机械动作**（合主线 + 重新生成两个派生文件），
+连 T0706 的 `cmd/api/main.go` 都由三方合并自解，不需要人判。
+
+## ⑬ T0906 独立评审的 5 条意见：1 条是编排器的，其余不阻断，但必须记下来（2026-09-21）
+
+评审结论 `approve`，`rddev review collect` 的原话是 **0 blocking, 0 major**。
+问题是 `.rddev/` 在 `.gitignore` 里，评审的 `RESULT.json` **只存在这台机器上**——
+按 §5.1 这五条都不阻断合并，但**不另记就会丢**。逐条记：
+
+| # | 类别 | 位置 | 内容 |
+|---|---|---|---|
+| 1 | **编排器** | `T0906-review/collect-report.json` | 评审输入**自述与内容不符**（见下） |
+| 2 | 测试质量 | `tests/security/exits_test.go:52` | `exitSite.Wire` 没有任何消费者（见下） |
+| 3 | 行为 | `cmd/api/searchhttp/handlers.go:151` | 查询含 **NUL 字节**返回 `503 SEARCH_UNAVAILABLE`（`retryable=true`），应是 400 |
+| 4 | 行为 | `internal/search/answer/grounding.go:206` | 版本锁定的判定过宽：任何含 `@` 的 token 都算「版本锁定引用」，提到作者邮箱的合法摘要被误判 |
+| 5 | 观感 | `cmd/api/searchhttp/handlers.go:245` | 同一路由媒体类型不一致：成功出口 `application/json; charset=utf-8`，错误出口 `application/json` |
+
+第 3、4、5 条是评审员**驱动真实路由复现**出来的，不是读代码猜的。
+
+### 第 1 条顺带解释了我今天早些时候的一次困惑
+
+评审员发现：`diff.txt` **自称**基线是 `3e479507`，内容却逐字节等于 `git diff 3e2c43d 7db633f`
+（origin/main → 分支头）。它自己写着「信任这份输入的人会审错一份东西」。
+
+我今天 14:10 前后曾判断「上一轮评审的指纹是在变异窗口里取的」——那个解释**是错的**。
+真相是 `taskWorktreeDiff` 的**基线标签**取自一条更早的记录，而**内容**取自当时的主线；
+两者不一致，以**内容**为准时评审本身没审错（它核对了 HEAD `7db633f`）。
+**教训**：我当时手里有两个候选解释（窗口竞态 / 标签与内容不符），我选了更戏剧的那个就往下走了。
+本该做的是**去读 `taskWorktreeDiff` 的实现**——一分钟后就能看到它用两条不同的来源。
+
+### 第 2 条是「尺子量不到自己」那一类
+
+`exitSite.Wire` 字段的用途是「这个出口实际发的头」，但**没有任何测试读它**；
+探针断言的是 `probe.contentType` / `probe.cacheControl`——**另一份手抄的字符串**。
+于是登记表与断言是两张各自维护的表，改了一边另一边不会红。
+这正是 [[prove-the-instrument-can-say-no]] 记录的形状。
+
+### 处置
+
+**五条都不在这里现改。** 理由是算术：动了 `cmd/api/searchhttp/**` 或 `internal/search/answer/**`
+就要**重开一次独立评审**（verdict 绑代码身份），而 T0906 正卡在迁移链的头一格。
+它们都不在 T0906 的验收标准内，评审自己判为非阻断。
+
+**待办**：迁移链走完后立一张任务，收第 3、4、5 条（行为/观感）与第 2 条（测试质量），
+第 1 条（编排器 `taskWorktreeDiff` 的标签）单独记一条编排器待修。
+
+## ⑭ 迁移链第一环落地：合并动作本身是机械的，但 **sqlc 那一半是静默的**（2026-09-21）
+
+§⑫ 把这条链记成「合主线 + 重新生成两个派生文件」。T0906 落地后我按这个动作做了 T0610，
+**动作是对的，但 §⑫ 漏了一件事**，值得单独记：真正的风险不在报冲突的那两个文件上。
+
+### 报冲突的两个文件是**安全**的，正因为它们会报
+
+T0610 合 `origin/main`（899d5eb）时，冲突只有两处：
+`specs/database/postgres.sql`（两边都往快照尾部追加）与 `specs/SPEC_VERSION.json`。
+**会报冲突是好事**——它逼你停手，而正确的处理方式只有一个：
+
+```
+python3 scripts/gen_schema_snapshot.py      # 78 个迁移
+python3 scripts/spec_version.py --write     # sha256 830674ca90c2f468
+```
+
+重新生成之后 `--check` 双双通过，`git diff` 显示的内容恰好等于「本任务那一份迁移」的增量。
+
+### 静默的那一半：`internal/persistence/sqlc/**` 自动合上了，而且合错了
+
+`git merge` **没有**在这个目录上报冲突——`models.go`、`querier.go` 都是「Auto-merging」。
+单看这一步，一切正常。
+
+但 `scripts/gen_sqlc.sh` 重新生成之后：
+
+| 文件 | 与合并结果 |
+|---|---|
+| `models.go`、`querier.go` | **不一致** |
+| `attestations.sql.go`、`organizations.sql.go`、`search.sql.go` | **不一致**（重新生成把它们还原成了 main 的原文） |
+
+也就是说：**文本合并产出的那份，和生成器产出的那份，不是同一个东西，而它没有报错。**
+§⑫ 记的是「每个派生文件都会报冲突，所以链条只能串行」；这一条更正它：
+**报冲突的那个反而好办，不报冲突的这个才是坑。**
+`sqlc` 的输出是按表的字母序重排的，两边的改动只要落在同一份文件的**不同区域**，
+`git` 的逐行合并就会把两边都塞进去、语法上还是一份合法的 Go 文件、`go build` 照样过——
+**只有重新生成才知道错了。**
+
+### 判据（下一环也照这个做）
+
+重新生成之后，`git diff --stat <本分支原 tip> -- internal/persistence/sqlc` 的净变化
+**必须恰好等于本任务自己动过的那几个 sqlc 文件**，一个不多一个不少。
+T0610 是 6 个（manifest / models / querier / rsg / rsg_query / scientific_objects），
+T0706 也是 6 个（asset_governance / asset_metadata / asset_publish / models / querier / releases_assets）。
+**「多了」就是合并把别人的东西改了，「少了」就是重新生成把本任务的东西吃了**——两个方向都要看。
+
+另外两处交叉验证：`cmd/api/main.go` 合并后三方接线记号必须都在
+（T0812 的 `Aborts:`、T0610 的 `Reopens:`、T0906 的 `answer.New`/`searchhttp`），
+`tests/integration/migration_test.go` 要按**符号计数**核（`grep -ci` 比对 main 与合并后，
+`attestation` 17=17），不能只看有没有冲突。
+
+### 一个动作上的选择：链上的下一环**叠在前一环的 tip 上**
+
+T0706 我合的不是 `origin/main`，是 **T0610 的 tip（a010d09）**——迁移号 00121→00123→00125
+必须升序，所以这一格本来就得等前一格落地；提前叠上去只是把等待重叠掉。
+**它是本地提交，没推。** 若 T0610 的复核在最后一刻要求返工，这一格要重做——
+我认这个风险，因为 T0610 已经在上一轮评审里过了，而且叠上去的只是同一族机械动作。
+**但这是判断，不是规则**：换成一笔没评过的任务时，不要叠。
+
+## ⑮ T0610 独立复核：approve、8 条全部非阻断，但第 1 条是产品面的**真空白**（2026-09-21）
+
+T0610 在合并后的树上重开了一次独立复核（verdict 绑代码身份：合成把 HEAD 从 5f052e1 挪到
+a010d09，上一轮的 verdict 因此作废）。结论 `approve`，8 条 finding 全部 minor/nit。
+
+### 第 1 条我自己复核过，它是真的，而且它不是「小」
+
+评审的原话：**reopen 命令在任何一个部署出去的二进制里都够不到。**
+
+我核了树：
+
+```
+grep -rn 'reopens\.New\|reopens\.Service{' cmd internal   -> 零命中（测试之外）
+grep -rn 'application/reopens'（非测试）                  -> 只有 internal/persistence/scientific_object_reopen.go:10
+```
+
+也就是说，`internal/application/reopens/service.go`（979 行，带幂等、审计、事件、权限）
+**没有任何生产构造点**。生产里用到的只是这个包被 `merge.Deps.Reopens` 消费的那一半——
+`ReopenReader`，读一条 reopen 记录。**写的那一半（发起 reopen 提案）没有入口。**
+
+这不是工人偷懒：任务书自己写着「不给 `specs/api/**`：reopen 的契约路由需要在裁定之后确认
+（今天 `openapi.yaml` 里 reopen 零命中）——若裁定要求新增路由，标 blocked 回来报告，
+不要自己往契约里加路径」。
+
+**但裁定（形状 A）恰恰要求有路由**：`reopen_main_object,deny,deny,deny,deny,via_pr,via_pr,proposal_only`
+里的 `via_pr` 就是「maintainer/owner **只能经 PR**」——没有入口，就没有 PR。
+按任务书那句话，工人本应标 `blocked` 回来；它选择了把命令实现完、只接到 merge 那一侧。
+
+**我不把它当返工理由**，两个原因：一是它实现的东西本身是对的（AC-1 的「PR → merge」路径
+在测试里走的是真服务），二是**缺的那一半是一个契约决策**——往公开 API 里加一条 reopen 路由，
+属于 L2/L3，不是工人能自己定的（`specs/api/**` 本来就被禁）。
+
+**处置**：记在这里，迁移链走完后**立一张任务**收「reopen 的入口路由 + 契约路径」。
+在它落地之前，T0610 交付的是**一个完整的、被真实测试驱动过的领域能力，没有对外开关**。
+
+### 其余七条（全非阻断，逐条记下来，`.rddev/` 不入库、不记就丢）
+
+| # | 级别 | 位置 | 内容 |
+|---|---|---|---|
+| 2 | minor | `infra/migrations/00123_…sql:1` | 迁移与收窄文里「存储层不需要新迁移」一句字面矛盾；任务书自己的例外条款允许（T0602 元数据形状要求时照做） |
+| 3 | minor | `internal/application/reopens/service.go:371` | `openProposal` 因**非** `ErrIdempotencyKeyInUse` 失败时，回退的 `replayIfRecorded` 会读到自己刚提交的那一行，返回 201 `Replayed=true`、`PullRequestNumber=0` |
+| 4 | minor | `specs/SPEC_VERSION.json:3` | RESULT 引的摘要（`e2e2839829a80b51`、76 个迁移）比复核的树**旧一代**（复核树是 `830674ca90c2f468`、78 个迁移）——rebaseline/合成把派生文件推进了一代，RESULT 的引用没跟着改 |
+| 5 | nit | `internal/authz/action.go:39` | 注释说 reopen 的是 `lifecycle='reopened'` 的对象；命令实际要求 `aborted`（`service.go:303` 拒绝包括 `reopened` 在内的一切其他状态） |
+| 6 | nit | `internal/application/reopens/service.go:212` | 步骤序注释称「第 4 步先于第 5 步」，实际 `GetObject`（:236）在 `GetVersionByReopenRequestKey`（:250）之前 |
+| 7 | nit | `.rddev/workers/T0610/RESULT.json:1084` | 非测试行号引用在 rebaseline 后没有重新推导（AC-8 引 `main.go:1084`，复核树是 `:1165`） |
+| 8 | nit | `tasks/tests.json:1671` | 账本里写的是「T0610's Worker (G1 local gate) ran …」，而 `scripts/record_test_run.py` 硬编码的是「Supervisor ran …」形式；RESULT 解释了替换 |
+
+第 4、7 两条是同一族：**rebaseline/合成动了树之后，RESULT 里的引用没有跟着重算**。
+它们不改行为，但按「证据里说的话必须是真的」这条规矩，属于要在后续任务里清掉的账——
+第 5、6 两条是注释里的假事实，尤其第 5 条那句把一个 fail-closed 的前置条件说反了方向。
+
+### 顺带：评审点名了一处我没有主动补的 G4
+
+评审的话：**「完整集成套件与单元套件最后一次跑是工人在合并前的树上跑的。
+G4 自己在合并后的树上重跑，才是关上这个缺口的检查。」**
+
+缺口是真的，我补了：合并后的树上跑了 `go test ./...`（除 integration）+ 定向集成，
+评审结束后又补跑了**完整** `go test ./tests/integration/...`。这三条都在下面。
+**这是「合并不是终点、合成是一次代码变更」的同一个教训**——上一轮 G1/G2 的绿，
+是对另一棵树的绿。
+
+### 附带查证：剩下的任务里，谁还可能带迁移号
+
+§8.1 说迁移号由 Supervisor 在派工时分配，但**实际做法是工人按「基线 tip 的下一个号」自己取的**
+（`tasks/packages/T0610.json`、T0706、T0708 的包里都**没有**迁移号，
+`tasks/tasks.json` 里的 `migration_number` 字段在这几笔上都是 `0`=无迁移）。
+这条记下来是因为它有一个必须知道的后果：
+
+**号是按派工顺序发的，而合并必须升序。** 派得早、落在旧基线上的任务会取到一个**小的**号；
+它要是晚于一个取了**大的**号的任务完成，合并闸门就会拒绝它，它得等——这就是 §⑫ 那条链
+串行的另一面。
+
+查了剩下 12 笔的 `allowed_scope`，**只有两笔能带迁移**：`T0908`（12 条 scope）与 `T1108`（10 条）。
+两笔都排在链之后派工，届时 main 的 tip 是 00128 之后，各自取到的号自然更大、也仍然升序。
+**当前这支队列里没有会插队的小号。** 但下一次派工时仍要**先看 scope 里有没有 `infra/migrations/**`，
+再看它会不会先于更大的号完成**——今天 T0907/T1107 两笔不带迁移，是运气不是设计。
+
+## ⑯ 更正 ⑮ 的最后一段：迁移号**不是**工人自己取的，是 `rddev` 在派工时发的（2026-09-21）
+
+⑮ 的末尾我写了一段「谁还可能带迁移号」，里面有两句是**错的**，这里逐句改掉。
+按「自己信里的话也要先核」这条规矩，核完就改，不留着。
+
+### 错在哪
+
+我在 ⑮ 里写：
+
+> §8.1 说迁移号由 Supervisor 在派工时分配，但**实际做法是工人按「基线 tip 的下一个号」自己取的**
+> （`tasks/packages/T0610.json`、T0706、T0708 的包里都**没有**迁移号，`tasks/tasks.json` 里的
+> `migration_number` 字段在这几笔上都是 `0`=无迁移）。
+
+三处都站不住：
+
+1. **我看错了文件。** `tasks/packages/*.json` 是**任务书**（键：`id`/`title`/`requirements`/
+   `allowed_scope`…），不是发给工人的包。真正发下去的是
+   `.rddev/workers/<TASK>/task-package.json`（键：`task_id`/`baseline_sha`/`migration_number`…）。
+   我 grep 了任务书，当然没有号。
+2. **号就在真包里**，而且就是实际用的那个：
+
+   ```
+   T0610=123  T0706=125  T0708=128  T0906=121  T0812=120
+   T0907=132  T1107=133  T1109=130
+   ```
+
+3. **分配是 `rddev` 干的，不是工人。** `internal/devorchestrator/worker_spawn.go:230`
+   在写任何运行时文件之前调用 `AllocateMigrationNumber(repoRoot, taskID)`，
+   再把结果塞进包；`worker_render.go:482` 把这句话写进给工人的提示词：
+   「If this task adds a SQL migration, its number is **%05d** — reserved for you at dispatch…
+   Do NOT pick your own number」。
+
+### 真正值得记住的是分配规则，不是「怎么发」
+
+`internal/devorchestrator/migration_numbers.go:83`：
+
+- 号 = **1 + max（盘上最高号，账本里所有已发过的号）**；
+- 账本在 `.rddev/runtime/migration-numbers.json`（Supervisor 所有），写是原子的，
+  「两个并发 spawn 不可能拿到同一个号」；
+- **幂等**：返工/重派保留原来那个号（`if n, ok := ledger[taskID]; ok { return n }`）；
+- **单调**：取消的任务也不回收它的号——「回收的号可能已经在别人的分支里了」。
+
+所以 ⑮ 里那句「派得早、落在旧基线上的任务会取到一个**小的**号」**不可能发生**：
+派得早 → 号小，派得晚 → 号大，**号序恒等于派工序**。真正的约束只剩一条，
+而且它就是 §⑫ 那条链的另一面：**号序 == 派工序，而合并必须按号升序**，
+所以晚派的任务不能抢在早派的前面落地。
+
+### 对今天这支队列的实际影响：没有
+
+`highestMigrationOnDisk` 读的是**主检出**的 `infra/migrations`。当前盘上最高是 00128（T0708 的，
+还在等合并），账本里已发到 **133**（T1107）。所以：
+
+- 今天在飞的五笔（129 T1106 / 130 T1109 / 131 T1201 / 132 T0907 / 133 T1107）号全在 128 之上，
+  且都不带迁移（scope 里没有 `infra/migrations/**`）——**占了号但不用号**，不参与排序。
+- 唯一会真带迁移的是 **T0908** 与 **T1108**，两笔都还没派工。它们派工时会拿到 ≥134 的号，
+  **先派的号小**。两笔并行、都要迁移的情况下，**先派工的那笔必须先进 main**，
+  否则后派的（号大）落地后，先派的（号小）会被 `migration_order.go` 拒绝。
+  处置：**T0908 先派、T1108 后派**，落地也按这个顺序等——不要两笔同时收口。
+
+结论：⑮ 那条「下次派工要先看 scope 再看完成顺序」的建议仍然成立，但**理由是号序==派工序**，
+不是「工人会自己挑号」。第 1 条那个「运气不是设计」的说法也收回——这是设计，而且设计是对的。
+
+## ⑰ T0907 顺手戳破的：`ok("标签", 条件)` 在 web-smoke 里是**死断言**，全仓 12 条（2026-09-21）
+
+T0907（搜索问答界面）改了两条既有烟测断言。它给的理由值得单独记下来——不是「界面变了所以改断言」，
+而是**那两条断言本来就永远不会红**。
+
+### 机理（已在运行时证明，不是读代码猜的）
+
+`tests/web-smoke/visual-smoke.mjs:18` 与 `a11y-smoke.mjs:24` 都是：
+
+    const ok = (label) => console.log(`ok   ${label}`);
+
+**只收一个参数**。所以 `ok("标签", 条件)` 里的条件被 JS 静默丢弃，无论真假都打一行 `ok`。
+实测：`ok("x", 1===2)` 与 `ok("x", 1===1)` 的输出逐字相同。
+
+这两个文件里的 `fail(label, detail)` 才是会记账的那个（`fails += 1`），
+所以**唯一能让这两条路变红的是「元素找不到抛异常」，条件表达式永远不参与**。
+
+### 范围：全仓扫一遍，12 条
+
+判据（脚本按这个跑的）：在**定义了单参 `ok`** 的文件里，找 `ok(` 调用中**顶层逗号**切出第二个实参、
+且第二个实参看起来是表达式（`await` / `(` / `标识符 比较符` / 数字 / `true|false|null`）的位置。
+两参的 `ok(where, what)`（`tests/e2e-explore`、`tests/e2e-search` 等自带的）是另一种东西，已排除。
+
+| 文件 | 行 | 被丢掉的条件 |
+|---|---|---|
+| `tests/web-smoke/a11y-smoke.mjs` | 190 | `page.locator("q").textContent() === "catalyst"` ← **T0907 已修** |
+| | 197 | `page.locator("h1").textContent().trim() === "Projects"` |
+| `tests/web-smoke/visual-smoke.mjs` | 91 | `(await header.count()) === 1` |
+| | 113 | `await searchInput.isVisible()` |
+| | 122 | `(await bell.count()) === 1` |
+| | 124 | `(await logo.count()) === 1` |
+| | 126 | `(await signIn.count()) >= 1` |
+| | 138 | `currentText === "Home"` |
+| | 221 | `page.locator("q").textContent() === "solid-state"` ← **T0907 已修** |
+| | 226 | `(await loginHeader.count()) === 1 && …` |
+| | 232 | `page.locator(".global-nav-links").first().isVisible()` |
+| | 247 | `await toggle.isVisible()` |
+
+**T0907 修了 2 条（改成 `fail()` 记账的真断言），剩 10 条还在。**
+
+### 为什么这不是「一笔任务的小瑕疵」，要单独记
+
+`tasks/tests.json` 里 **T0107 的「visual smoke」「a11y smoke」两条验收证据就是这两个文件**，
+状态都是 `passed`。也就是说：T0107 那两条账，
+**其中若干条具体断言从来没有被真正检查过**——「header 在 / 上渲染」「铃铛指向 /notifications」
+「`aria-current=page` 标中当前项」这些说法，在这两个文件里当时**不可能失败**。
+
+这不是 T0907 造成的（它继承的），也不是 T0107 的工人造假（他大概以为 `ok` 收条件）。
+它是**判据本身的形状错了**：一个只看标签的记账函数，被当成 `assert` 用。
+
+**处置**：
+1. **不阻断 T0907**——它做的是加强，不是削弱；任务书也只要求它改自己动过的那两处。
+2. 迁移链与在飞任务走完之后**立一张任务**收掉剩下 10 条。
+   在它落地前，T0107 那两条 `passed` 的**账目强度是有水分的**，记在这里备查。
+3. 立任务时必须**同时**做一件事：让 `ok` 在收到第二个实参时**报错**（或把它换成 `assert` 风格），
+   否则下一批人还会写出第 13 条。今天这 12 条能存在，是因为写错**不报错**。
+
+关联：记忆里的「仪器要能说不」（[[prove-the-instrument-can-say-no]]）与「被引为证据的断言必须证明它会红」
+（[[verify-cited-assertions]]）。**这条是那个教训在仓库里真实存在的一个实例，不是假设。**
+
+## ⑱ T1107 报 blocked：两条都核过了，是真的，而且都不是它的错（2026-09-21）
+
+T1107（搜索侧信道 / 隐私负数收口）跑完自己的活后**如实报 blocked**，`rddev worker collect`
+按规矩判掉（`RESULT.json` 报 blocked 就是被拒的跑，不是验收）。它挡住它的那个浏览器套件
+`tests/e2e-shell` 红了——我把它的每一句都独立核了一遍，**没有一句是编的**。
+
+### 它说的事实，逐条核过
+
+| 它说的 | 我核的方式 | 结果 |
+|---|---|---|
+| 这一笔一个字节没碰 `apps/web` 与 `tests/e2e-shell` | 在它的工作树里 `git diff --stat HEAD -- apps/web tests/e2e-shell` | **0 行**，成立 |
+| 套件要 9 个 tab，应用渲染 10 个 | 读 `specs/ui/routes.yaml:2-11` 与 `apps/web/.../project-tabs.ts:39-50` | 规格 9 个（无 milestones），应用 10 个，**成立** |
+| Milestones 是 T0609 加的 | `git log -S'milestones' -- project-tabs.ts` | `4065566 [T0609]`，**成立** |
+| 套件等 `[data-tab-placeholder="Pull requests"]`，产品已换成真页面 | 读 `shell-e2e.mjs:242` 与 `apps/web/.../pulls/page.tsx:61` | 占位符没了，页面是 `data-pulls-list`，**成立** |
+| 没有任何地方跑这五个浏览器套件 | 全仓 grep `e2e-shell`（Makefile/.yml/.sh） | 唯一的引用在 `tests/acceptance/privacy-suite.sh:184` 的 `BROWSER_SUITES` 里，**成立** |
+
+### 两条分歧不是一类，处理方式也不该一样
+
+**第一条（pulls 占位符）是纯粹的测试跟不上产品。** 产品往前走（`853559e [T0403]` 把 pulls
+从占位符换成真列表），测试还在等占位符。修法明确、而且**比原来更强**：断言真页面存在、
+断言它列出了条目，而不是等一个占位符出现。
+
+**第二条（9 vs 10 个 tab）要小心。** 工人给的两个选项里它说「测试与规格一致，应用不一致」——
+**这句是对的，而且比它以为的更硬**：我去核了 `docs/05 §3「Project 导航」`，
+它**也**列了那 9 个，`Milestones` 不在其中。也就是说**两份规格都说 9**。
+
+但应用那边不是半成品：`apps/web/app/(main)/projects/[id]/milestones/page.tsx` 是 344 行完整实现
+（列表 + 记录表单 + 幂等键 + 权限门 + 224 行单测 + 282 行客户端库），T0609 已经合并验收。
+**它是一笔已验收交付的、真实存在且可用的界面。**
+
+所以这件事的形状是：**规格落后于已验收的产品**，不是产品违反了规格。
+处置：把 `milestones` 补进 `specs/ui/routes.yaml` 与 `docs/05 §3`（位置与应用一致：releases 之后）。
+
+**这需要说清楚，因为它正是「改规格去迁就代码」这个坏动作的形状。** 允许的理由只有一条：
+它不是我在**新造**产品语义，是把 T0609 已交付、已验收、有完整实现与测试的那个页面的存在
+**如实登记**。判据是「那个页面是不是真的」——我看了，是真的。
+反过来的修法（把 tab 撤掉）也在桌面上，代价是删掉一个已验收功能；如果将来判定这个 tab 不该有，
+撤销成本就是删两行加一个路由。
+
+### 顺序不能反
+
+**先改规格，再改测试。** 反过来就是工人明确拒绝做的那件事——「把测试从 9 改成 10 让闸门变绿」。
+规格（`specs/**`、`docs/**`）是 Supervisor-only，所以这两步都得我做，而**先做哪一步是要点**：
+规格改完之后，测试断言 10 才是**在断言契约**，而不是在迁就结果。
+改测试时还要**加强**：不只数个数，把有序清单整个断言下来（含 milestones 的位置）。
+
+### 为什么现在不动手
+
+`specs/ui/routes.yaml` 是 `specs/SPEC_VERSION.json` 的**输入**——动它就会移动摘要，
+而**在飞的四个复核/工人（T0706-review、T0708-review、T0907-review、T1109）的 G2 都要过这一关**。
+规矩是：**等没有工人在跑再动 `specs/**`**，同笔重新生成摘要。
+所以这一条**记在这里排队**，不是忘了。
+
+### 顺带：这是今天第二条「没人跑所以烂掉」的套件
+
+第一条是 §⑰ 的 `ok()` 死断言（12 条，T0107 的验收证据在里面）。
+这一条更直白：**`tests/e2e-shell` 红了六天没人知道，因为除了 privacy-suite 没有任何地方跑它**，
+而 privacy-suite 是 T1107 才建起来的入口。
+立任务时要一并处理：**把这五个浏览器套件接进 Makefile / CI**，
+否则下一个套件还会这样烂掉——工人自己在 `follow_up_issues` 第 3 条里也是这么说的。
+
+## ⑲ 今天攒下的「待立任务」清单（2026-09-21，等工人跑完再立账）
+
+不是忘了，是**排队**：立账要动 `tasks/tasks.json`，那是 `specs/SPEC_VERSION.json` 的输入，
+动它就必须同笔重新生成摘要，而摘要一动，**在飞的每一笔 G2 都要重过**。
+规矩是不在有工人跑的时候动它。所以先把清单钉在这里，一笔都不许丢。
+
+| 编号 | 来源 | 内容 | 为什么必须立 |
+|---|---|---|---|
+| A | §⑮ 第 1 条 | **reopen 的入口路由 + 契约路径**：`internal/application/reopens` 写的那一半在生产里没有任何构造点，`specs/api/openapi.yaml` 里 reopen 零命中。裁定形状 A 的 `via_pr` 要求有入口，没有入口就没有 PR | T0610 交付的是一个**没有对外开关**的完整领域能力。往公开 API 加路由是 L2/L3，工人本来就无权做 |
+| B | §⑰ | **`tests/web-smoke` 的 10 条死断言**（T0907 已修 2 条）。必须**同时**让 `ok()` 在收到第二个实参时报错，否则下一批人还会写出第 13 条 | T0107 的两条验收证据正是这两个文件。今天这 12 条能存在，是因为写错**不报错** |
+| C | §⑱ | **`tests/e2e-shell` 的两处漂移**：pulls 占位符（测试跟不上产品）、9 vs 10 个 tab（规格落后于已验收的产品）。规格由我改，改完**再**加强测试断言 | 它是 T1107 的阻塞，也是**唯一**会跑那五个浏览器套件的地方 |
+| D | §⑱ / T1107 follow-up 3 | **把这五个浏览器套件接进 Makefile / CI** | `tests/e2e-shell` 红了六天没人知道。不接进去，下一个套件还会这样烂掉 |
+| E | §⑮ 第 4/7 条 | **rebaseline/合成之后 RESULT 里的引用没有重算**（`SPEC_VERSION.json:3` 引的摘要旧一代、`main.go:1084` 实际在 `:1165`） | 「证据里说的话必须是真的」 |
+| F | §⑮ 第 5/6 条 | 两处注释里的假事实：`internal/authz/action.go:39` 把 reopen 的前置状态说反（实际要求 `aborted`）、`reopens/service.go:212` 的步骤序注释与代码顺序相反 | 同上 |
+| G | §⑮ 第 3 条 | `reopens/service.go:371`：`openProposal` 因**非** `ErrIdempotencyKeyInUse` 失败时，回退的 `replayIfRecorded` 会读到自己刚提交的行，返回 201 `Replayed=true`、`PullRequestNumber=0` | 行为缺陷，非阻断但真 |
+| H | T0906 评审 3/4/5 | 待我回读 T0906 的复核 RESULT 逐条落地（含 `exitSite.Wire` 没有消费者这条测试质量问题） | 上一条链的欠账 |
+
+**立账时注意两条**：
+1. **迁移号**：A/B/C/D/E/F/G/H 里只有 A 可能与 `specs/api/**` 有关、**没有一笔带迁移**，
+   所以不会扰动号序。真正要盯的还是 T0908=134 / T1108=135 这两个已预占的号。
+2. 立完账要**同笔**跑 `python3 scripts/spec_version.py --write` 并提交，否则 main 立刻变红。
