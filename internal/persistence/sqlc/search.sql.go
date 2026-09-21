@@ -13,7 +13,7 @@ import (
 
 const getSearchRecord = `-- name: GetSearchRecord :one
 
-SELECT id, actor_id, query, selected_refs, citations, answer
+SELECT id, actor_id, selected_refs
 FROM search_records
 WHERE id = $1
 `
@@ -21,10 +21,7 @@ WHERE id = $1
 type GetSearchRecordRow struct {
 	ID           pgtype.UUID `json:"id"`
 	ActorID      pgtype.UUID `json:"actor_id"`
-	Query        string      `json:"query"`
 	SelectedRefs []string    `json:"selected_refs"`
-	Citations    []string    `json:"citations"`
-	Answer       []byte      `json:"answer"`
 }
 
 // ---------------------------------------------------------------------------
@@ -37,12 +34,15 @@ type GetSearchRecordRow struct {
 // the record is exactly the actor it belongs to and the set the draft's refs
 // may be drawn from.
 //
-// Three columns and the actor, and nothing else. The query is a read for ONE
-// caller, and a projection that carried the plan, the signals and the answer
-// document as well would be a second, unused way to reach the record's
-// contents — the answer is already reachable as the draft's substrate without
-// being copied into the draft table. A future reader that needs the answer
-// adds its own query, with its own argument for what it needs.
+// Three columns — the id, the actor the record belongs to, and selected_refs —
+// and nothing else. The query is a read for ONE caller, and a projection that
+// carried the plan, the signals and the answer document as well would be a
+// second, unused way to reach the record's contents — the answer is already
+// reachable as the draft's substrate without being copied into the draft
+// table. A future reader that needs the answer adds its own query, with its
+// own argument for what it needs; this one reads what its caller maps and no
+// more (researchcontext.SearchRecord has exactly these three fields, and the
+// sqlc row this generates has exactly these three columns).
 //
 // selected_refs is the important one: it is the boundary the draft's refs are
 // validated against (migration 00134's research_context_draft_refs_guard, and
@@ -52,14 +52,7 @@ type GetSearchRecordRow struct {
 func (q *Queries) GetSearchRecord(ctx context.Context, id pgtype.UUID) (GetSearchRecordRow, error) {
 	row := q.db.QueryRow(ctx, getSearchRecord, id)
 	var i GetSearchRecordRow
-	err := row.Scan(
-		&i.ID,
-		&i.ActorID,
-		&i.Query,
-		&i.SelectedRefs,
-		&i.Citations,
-		&i.Answer,
-	)
+	err := row.Scan(&i.ID, &i.ActorID, &i.SelectedRefs)
 	return i, err
 }
 

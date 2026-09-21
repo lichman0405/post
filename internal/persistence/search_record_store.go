@@ -22,9 +22,14 @@ import (
 // reader at all, on the argument that the only read the contract has resumes a
 // search's sources and that flow did not exist yet, so a read added then would
 // have been a query shape frozen before its caller. That caller is T0908 and
-// the reader is now here (GetSearchRecord, below): one answered search's actor
-// and its selected refs, which is what starting a Draft Research Context needs
-// and all it needs.
+// the reader it needed is this store's own: GetSearchRecord, one answered
+// search's actor and its selected refs, which is what starting a Draft Research
+// Context needs and all it needs.
+//
+// The method is on SearchRecordStore but declared in research_context_store.go,
+// beside the flow that makes the read (the store that owns the record owns its
+// reader, so it is not on *ResearchContextStore); the query it runs is with the
+// record's other queries, in queries/search.sql.
 //
 // The integration tests still read the stored row with their own SQL in the
 // places where the SUBJECT is the row rather than the flow — that is the

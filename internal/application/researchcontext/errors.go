@@ -33,8 +33,11 @@ const (
 	// must not be able to tell a draft that exists from one that does not.
 	CodeDraftNotFound = "RESEARCH_CONTEXT_DRAFT_NOT_FOUND"
 	// CodeNotConfirmable: the draft is not in a state that can be confirmed
-	// (contract, 409). In V1 that means it is already confirmed and the
-	// request carries a different key.
+	// (contract, 409). In V1 there are two ways to be in one: the draft is
+	// already confirmed and the request carries a different key, or the
+	// project it belongs to already has a main branch carrying research state
+	// this draft did not make (Service.Confirm's ProjectState read: a
+	// confirmation records the state it formed, and that branch is not it).
 	CodeNotConfirmable = "RESEARCH_CONTEXT_DRAFT_NOT_CONFIRMABLE"
 	// CodeValidationFailed: the request is not one of these commands as
 	// given (a missing key, a blank question, an unknown visibility).
@@ -71,8 +74,9 @@ var (
 	// "no permission" and "cannot see" answer the same, so this is the single
 	// error both produce.
 	ErrDraftNotFound = errors.New("researchcontext: draft not found")
-	// ErrNotConfirmable: the draft is already confirmed and this call carries
-	// a different key.
+	// ErrNotConfirmable: the draft is not in a state that can be confirmed —
+	// already confirmed under a different key, or the project already carries
+	// a state this draft did not make (see CodeNotConfirmable).
 	ErrNotConfirmable = errors.New("researchcontext: the draft is not in a state that can be confirmed")
 	// ErrUngroundedRef: a ref the draft carries was not returned by the
 	// search it was built from. It is its own sentinel because the caller can

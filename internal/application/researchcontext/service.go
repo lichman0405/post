@@ -225,8 +225,9 @@ func (s *Service) racingReplay(ctx context.Context, actor domain.User, in StartI
 //
 // # The order
 //
-//	validate → read the draft → authorize → replay → branch → object →
-//	commit → record
+//	validate → read the draft → authorize → replay → the key this request
+//	presents → what the project already has → branch → object → commit →
+//	record
 //
 // The authorization happens after the draft is read (its project is what the
 // membership is resolved in) and before ANYTHING about it is disclosed or
@@ -237,16 +238,50 @@ func (s *Service) racingReplay(ctx context.Context, actor domain.User, in StartI
 // The replay is a read of the already-confirmed row: the same key answers the
 // recorded confirmation, a different key is refused (the contract's 409).
 //
+// # The two reads that make the write recoverable
+//
 // The state writes are the ordinary RSG path — CreateBranch (which creates the
 // project's genesis state when it has none) and CreateObject on that branch —
 // so the initial state is reached exactly the way every other transition is.
-// The confirmation row is written LAST, as a compare-and-swap, and that order
-// is deliberate: a crash between the state write and the record leaves a
-// confirmed state with an unconfirmed draft row, which the next call repairs
-// (the CAS is still 'draft' → the state it writes is already there and its
-// commit is found by result state, so the retry lands on the same state and
-// records it). The reverse order would publish a confirmation whose state does
-// not exist.
+// They belong to a different store with transactions of its own, which is the
+// whole difficulty: the confirmation's record and the state it records cannot
+// be written together, so this flow reads before it writes, twice:
+//
+//   - LookupByConfirmKey, BEFORE any state is written. The unique index that
+//     refuses a reused key (research_context_drafts_confirm_key_uniq) can only
+//     speak at the very end of the sequence, by which time a branch, a state, a
+//     commit and an object version exist that nothing could ever take back (the
+//     draft row is append-only, 00134). A request that is going to be refused
+//     for its key must therefore be recognized by a read and refused having
+//     written nothing; the index stays the arbiter for a writer that races the
+//     read, and that refusal is mapped onto the same 409.
+//
+//   - ProjectState, BEFORE any state is written, reports what the project
+//     already has. The record is written LAST (writing it first would publish a
+//     confirmation whose state does not exist — and, the row being append-only,
+//     a record that lies could never be corrected), so a crash between the two
+//     leaves the state with no record. A retry recognizes its own work there
+//     (ProjectState.Ours: the question the confirmation stamps on everything it
+//     creates) and records it — the same ids the first attempt produced, no
+//     second transition. An attempt that stopped even earlier, between the
+//     branch and the object, is finished on the branch it left rather than
+//     abandoned: nothing else could ever confirm that draft.
+//
+// # What is still not atomic, and what that leaves
+//
+// Two confirmations of DIFFERENT drafts, racing each other under the same
+// (actor, key), can both pass the key read before either records: both write
+// their own project's state, one records, and the loser is refused
+// (ErrIdempotencyConflict → 409) having written state for a request that did
+// not land. That state is not lost work — the loser's own retry with a new key
+// adopts it by the rule above, which is the recovery the crash window gets.
+// What the loser must NOT do is leave a state that its next call cannot
+// recognize, and it does not: the state carries the draft's question.
+//
+// Two confirmations of the SAME draft are unaffected by any of this: the branch
+// name is unique per project (00004), so the loser fails in CreateBranch before
+// it writes anything, and the compare-and-swap on status = 'draft' is what
+// makes exactly one record.
 func (s *Service) Confirm(ctx context.Context, actor domain.User, in ConfirmInput) (ConfirmResult, error) {
 	if err := validateConfirm(actor, in); err != nil {
 		return ConfirmResult{}, err
@@ -274,15 +309,104 @@ func (s *Service) Confirm(ctx context.Context, actor domain.User, in ConfirmInpu
 		return ConfirmResult{}, ErrNotConfirmable
 	}
 
-	project, err := s.projects.Get(ctx, readerFor(actor), draft.ProjectID)
+	// The key this request presents, read before anything is written. A key
+	// that already names ANOTHER draft's confirmation is a retry of a
+	// different request, and it is answered as one here — with nothing written
+	// — rather than after a state write the store's index would refuse too
+	// late to prevent.
+	recorded, err := s.drafts.LookupByConfirmKey(ctx, actor.ID, in.IdempotencyKey)
 	if err != nil {
-		return ConfirmResult{}, fmt.Errorf("%w: read the draft's project: %v", ErrStore, err)
+		return ConfirmResult{}, fmt.Errorf("%w: read the confirming key: %v", ErrStore, err)
+	}
+	if recorded != nil && recorded.ID != in.DraftID {
+		return ConfirmResult{}, ErrIdempotencyConflict
 	}
 
-	// The initial branch. BaseRef is empty and that is the point: the
-	// project has no state yet (a draft is not an RSG), so the branch is
-	// created on the genesis root resolveBaseState makes for it — the same
-	// call internal/application/templates makes to seed a project's map.
+	// What the project already has: nothing (the ordinary case), an earlier
+	// attempt's own work, or a state this confirmation did not make.
+	existing, err := s.drafts.ProjectState(ctx, draft.ProjectID, draft.ResearchQuestion)
+	if err != nil {
+		return ConfirmResult{}, fmt.Errorf("%w: read the project's initial state: %v", ErrStore, err)
+	}
+	if existing.HasMain() && !existing.Ours(draft.ResearchQuestion) {
+		// A main branch carrying something else, on a project whose only draft
+		// is this one. Recording this draft against it would be a false record,
+		// and no retry can change what is there: the honest answer is the
+		// contract's 409, not a 503 that invites a caller to try forever.
+		return ConfirmResult{}, ErrNotConfirmable
+	}
+
+	var state InitialState
+	replayed := false
+	switch {
+	case existing.Adopted != nil:
+		// The transition an earlier attempt wrote: record it, write nothing.
+		state, replayed = *existing.Adopted, true
+	default:
+		branchID := existing.MainBranchID
+		if branchID == "" {
+			created, cerr := s.createInitialBranch(ctx, actor, draft)
+			if cerr != nil {
+				// A confirmation of THIS draft running in parallel may have
+				// created the branch between the read above and this call. If
+				// it did, the state it wrote is this draft's and this call
+				// records it; otherwise the failure is reported as one.
+				if adopted, aerr := s.adoptedState(ctx, draft); aerr == nil && adopted != nil {
+					return s.recordConfirmation(ctx, actor, in, *adopted, true)
+				}
+				return ConfirmResult{}, s.stateWriteFailed(ctx, in.DraftID, cerr)
+			}
+			branchID = created
+		}
+
+		// The research question, as the object every other surface creates: the
+		// same payload shape the template seeder writes (statement +
+		// question_state), validated by the same semantics and schema the RSG
+		// write path always runs. On a branch an earlier attempt left, this is
+		// the step it died before — and the branch's only content, since
+		// ProjectState.Ours trusts a purpose-carrying main branch only when
+		// nothing has been committed on it.
+		res, err := s.states.CreateObject(ctx, actor, draft.ProjectID, branchID, rsg.CreateObjectInput{
+			ObjectType: "research_question",
+			Payload:    questionPayload(draft.ResearchQuestion),
+		})
+		if err != nil {
+			return ConfirmResult{}, s.stateWriteFailed(ctx, in.DraftID, err)
+		}
+
+		// The transition that carried it. A branch's chain is linear and states
+		// are content-addressed, so exactly one commit produced this state; the
+		// reader refuses anything else rather than picking one.
+		commit, err := s.commits.CommitForState(ctx, branchID, res.Version.StateID)
+		if err != nil {
+			return ConfirmResult{}, fmt.Errorf("%w: read the confirmation's state commit: %v", ErrStore, err)
+		}
+
+		state = InitialState{
+			BranchID:  branchID,
+			StateID:   res.Version.StateID,
+			CommitID:  commit.ID,
+			ObjectID:  res.Object.ID,
+			VersionID: res.Version.ID,
+		}
+	}
+	return s.recordConfirmation(ctx, actor, in, state, replayed)
+}
+
+// createInitialBranch creates the project's main branch: the branch the
+// confirmation records its initial state on.
+//
+// BaseRef is empty and that is the point: the project has no state yet (a draft
+// is not an RSG), so the branch is created on the genesis root resolveBaseState
+// makes for it — the same call internal/application/templates makes to seed a
+// project's map. The purpose is the draft's question, which is also what makes a
+// branch left behind by a stopped attempt recognizable (ProjectState.Ours).
+func (s *Service) createInitialBranch(ctx context.Context, actor domain.User, draft Draft) (string, error) {
+	// The visibility the branch mirrors is the project's (docs/09 §1).
+	project, err := s.projects.Get(ctx, readerFor(actor), draft.ProjectID)
+	if err != nil {
+		return "", fmt.Errorf("%w: read the draft's project: %v", ErrStore, err)
+	}
 	purpose := purposeFor(draft.ResearchQuestion)
 	branch, err := s.states.CreateBranch(ctx, actor, draft.ProjectID, rsg.CreateBranchInput{
 		Name:       domain.MainBranchName,
@@ -291,55 +415,73 @@ func (s *Service) Confirm(ctx context.Context, actor domain.User, in ConfirmInpu
 		Purpose:    &purpose,
 	})
 	if err != nil {
-		return ConfirmResult{}, s.stateWriteFailed(ctx, in.DraftID, err)
+		return "", err
 	}
+	return branch.ID, nil
+}
 
-	// The research question, as the object every other surface creates: the
-	// same payload shape the template seeder writes (statement +
-	// question_state), validated by the same semantics and schema the RSG
-	// write path always runs.
-	res, err := s.states.CreateObject(ctx, actor, draft.ProjectID, branch.ID, rsg.CreateObjectInput{
-		ObjectType: "research_question",
-		Payload:    questionPayload(draft.ResearchQuestion),
-	})
+// adoptedState re-reads the project's initial state and returns the transition
+// an earlier attempt of THIS draft already wrote, or nil when there is none.
+//
+// It exists for the one call that cannot use the read Confirm already made: a
+// CreateBranch that failed because a parallel confirmation of the same draft
+// won the branch name. The read is repeated there on purpose — the answer it
+// needs is the one from AFTER that failure, and a cached one could not have it.
+func (s *Service) adoptedState(ctx context.Context, draft Draft) (*InitialState, error) {
+	state, err := s.drafts.ProjectState(ctx, draft.ProjectID, draft.ResearchQuestion)
 	if err != nil {
-		return ConfirmResult{}, s.stateWriteFailed(ctx, in.DraftID, err)
+		return nil, err
 	}
+	return state.Adopted, nil
+}
 
-	// The transition that carried it. A branch's chain is linear and states
-	// are content-addressed, so exactly one commit produced this state; the
-	// reader refuses anything else rather than picking one.
-	commit, err := s.commits.CommitForState(ctx, branch.ID, res.Version.StateID)
-	if err != nil {
-		return ConfirmResult{}, fmt.Errorf("%w: read the confirmation's state commit: %v", ErrStore, err)
-	}
-
+// recordConfirmation writes the confirmation row — the step that makes the
+// state the draft's initial state — and maps what the store refuses.
+//
+// replayed says whether this call wrote the state it records: false when the
+// state is this call's own work, true when it was already there (an earlier
+// attempt's transition, or a branch this call then finished). It is reported to
+// the caller as ConfirmResult.Replayed; what the caller GETS is the same either
+// way, because both are one draft becoming confirmed.
+func (s *Service) recordConfirmation(ctx context.Context, actor domain.User, in ConfirmInput, state InitialState, replayed bool) (ConfirmResult, error) {
 	stored, err := s.drafts.Confirm(ctx, ConfirmWrite{
 		DraftID:   in.DraftID,
 		ActorID:   actor.ID,
 		Key:       in.IdempotencyKey,
-		BranchID:  branch.ID,
-		StateID:   res.Version.StateID,
-		CommitID:  commit.ID,
-		ObjectID:  res.Object.ID,
-		VersionID: res.Version.ID,
+		BranchID:  state.BranchID,
+		StateID:   state.StateID,
+		CommitID:  state.CommitID,
+		ObjectID:  state.ObjectID,
+		VersionID: state.VersionID,
 	})
-	if err != nil {
-		if errors.Is(err, ErrNotConfirmable) {
-			// Another confirmation landed between the read above and this
-			// write. When it was the same caller with the same key, this IS
-			// the replay and is answered as one; otherwise the draft is
-			// confirmed by someone else's request and the refusal stands.
-			if fresh, rerr := s.drafts.Get(ctx, in.DraftID); rerr == nil &&
-				fresh.Status == DraftStatusConfirmed &&
-				fresh.ConfirmIdempotencyKey != nil && *fresh.ConfirmIdempotencyKey == in.IdempotencyKey {
-				return confirmResult(fresh, true), nil
-			}
-			return ConfirmResult{}, ErrNotConfirmable
-		}
-		return ConfirmResult{}, fmt.Errorf("%w: record the confirmation: %v", ErrStore, err)
+	if err == nil {
+		return confirmResult(stored, replayed), nil
 	}
-	return confirmResult(stored, false), nil
+	if errors.Is(err, ErrNotConfirmable) {
+		// Another confirmation landed between the read above and this write.
+		// When it was the same caller with the same key, this IS the replay and
+		// is answered as one; otherwise the draft is confirmed by someone
+		// else's request and the refusal stands.
+		if fresh, rerr := s.drafts.Get(ctx, in.DraftID); rerr == nil &&
+			fresh.Status == DraftStatusConfirmed &&
+			fresh.ConfirmIdempotencyKey != nil && *fresh.ConfirmIdempotencyKey == in.IdempotencyKey {
+			return confirmResult(fresh, true), nil
+		}
+		return ConfirmResult{}, ErrNotConfirmable
+	}
+	if errors.Is(err, ErrIdempotencyConflict) {
+		// The key named another draft's confirmation by the time this one tried
+		// to record it — the race the read above cannot close. That is the
+		// contract's own 409 and not a store failure: the caller reused a key,
+		// and the truthful answer says so. This case has to be named here
+		// because the wrap below drops it (see the wrap's own comment).
+		return ConfirmResult{}, ErrIdempotencyConflict
+	}
+	// %v, not %w, on the cause: nothing above classifies anything but this
+	// package's own sentinels — ErrNotConfirmable and ErrIdempotencyConflict
+	// have been taken out by the cases above — and a store error is a 503
+	// whatever it says internally.
+	return ConfirmResult{}, fmt.Errorf("%w: record the confirmation: %v", ErrStore, err)
 }
 
 // stateWriteFailed classifies a failed RSG write during a confirmation.
