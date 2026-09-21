@@ -3003,9 +3003,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-21T06:44:10Z
+生成时间：2026-09-21T06:58:27Z
 
-状态分布：todo 12 · ready 0 · running 3 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 3 · merged 129（合计 147/147 个任务）
+状态分布：todo 12 · ready 0 · running 3 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 2 · merged 130（合计 147/147 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -3088,7 +3088,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0607 | Activity/Audit Timeline 增强 | P6 | merged | 2026-09-20T12:08:08Z |  | 2026-09-20T12:39:41Z | 2026-09-20T12:49:12Z |
 | T0608 | Release/Abort/Policy E2E | P6 | merged | 2026-09-20T22:25:52Z |  | 2026-09-20T22:53:19Z | 2026-09-20T23:06:25Z |
 | T0609 | Project Milestone 基础 | P6 | merged | 2026-09-15T13:30:51Z |  | 2026-09-15T14:00:41Z | 2026-09-15T14:12:50Z |
-| T0610 | 主线对象 Reopen 状态迁移（等一行权限的 L3 裁定） | P6 | accepted | 2026-09-21T04:04:25Z |  | 2026-09-21T05:14:00Z |  |
+| T0610 | 主线对象 Reopen 状态迁移（等一行权限的 L3 裁定） | P6 | merged | 2026-09-21T04:04:25Z |  | 2026-09-21T05:14:00Z | 2026-09-21T06:57:09Z |
 | T0611 | Release 的验收记录必须覆盖「经合并进入 main」的状态（T0608 第 6 段的上游缺陷） | P6 | merged | 2026-09-20T13:52:25Z |  | 2026-09-20T14:39:52Z | 2026-09-20T14:48:15Z |
 | T0612 | 并发 abort 的两份 201：断言只能写契约允许的东西，那个窗口要显式钉住 | P6 | merged | 2026-09-20T21:43:35Z |  | 2026-09-20T22:20:09Z | 2026-09-20T22:40:12Z |
 | T0613 | Activity 的研究事件读必须带上读者：非公开行不给非成员（ADR-024 同一条规矩的第三个出口） | P6 | merged | 2026-09-20T21:48:28Z |  | 2026-09-20T22:35:11Z | 2026-09-20T22:53:28Z |
