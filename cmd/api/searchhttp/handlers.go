@@ -220,6 +220,16 @@ func writeSearchError(w http.ResponseWriter, r *http.Request, err error) {
 
 // writeSearchJSON writes a success envelope.
 //
+// It states its own headers rather than leaning on the layer above it. This
+// response does not leave through authhttp's envelope writers — the body is
+// the contract's searchResponse and the answer inside it is the answer
+// layer's own canonical rendering, so there is nothing for those writers to
+// wrap — which is exactly why nosniff is set here: it is what pins the media
+// type as data, and an exit that is safe only because internal/security's
+// edge added the header is an exit that is unsafe everywhere else it is
+// mounted (tests/security/exits_test.go classifies this function and probes
+// it without the edge).
+//
 // An answer is never cached by a shared cache: it is the caller's own scoped
 // result (a private project's sources reach no other reader), it changes as
 // the corpus does, and the citation trail it publishes is recorded under this
@@ -233,6 +243,10 @@ func writeSearchJSON(w http.ResponseWriter, r *http.Request, status int, body an
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	// nosniff, for the same reason every envelope writer states it: a JSON
+	// document is data, and the browser must not be free to decide otherwise
+	// from the bytes.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_, _ = w.Write(doc)

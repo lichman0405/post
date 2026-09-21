@@ -106,6 +106,11 @@ var registry = map[string]exitSite{
 		Sites: 1, Kind: KindInlineText, Wire: "application/json, no disposition",
 		Note: "the conflict report, written from pre-marshalled bytes so the detector's field order survives",
 	},
+	"searchhttp/handlers.go:writeSearchJSON": {
+		Sites: 1, Kind: KindInlineText, Wire: "application/json; charset=utf-8, no-store, no disposition",
+		Note: "the search answer (the search id and the answer document); no-store because it is the caller's own " +
+			"scoped result and the citation trail it publishes is recorded under that actor",
+	},
 
 	// ---- payload bytes that came from somewhere else ------------------
 	//
