@@ -1,0 +1,14 @@
+{
+  "name": "@post/e2e-search",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Search Answer e2e (T0907): real Chromium drives the built web app through /search — the answered / fallback (all six reasons) / loading / error states, the cited sources checked by ref against the document, the URL as the question's only address, a source click landing on the address the answer gave, and the absence of any section the answer did not fill — against mock-api.mjs, a real HTTP origin serving the exact wire shape cmd/api/searchhttp + internal/search/answer answer produce (the answer is read by a credentialed POST from the browser, and a source's href is a second document, so the harness is an origin rather than a route handler).",
+  "type": "module",
+  "scripts": {
+    "e2e": "node search-e2e.mjs"
+  },
+  "dependencies": {
+    "axe-core": "4.10.3",
+    "playwright": "1.55.0"
+  }
+}
