@@ -1,0 +1,399 @@
+/* T0907 Search Answer surface — GitHub/Primer design tokens (ADR-012,
+   docs/06, CLAUDE.md §10). Neutral background, thin borders, dense rows, blue
+   for interaction and nothing else. No gradients, no glass, no shadows: an
+   answer reads like a repository page, because that is what it is.
+
+   Every colour is a Primer token with the same literal fallback globals.css,
+   explore.css and assets.css use, so this surface follows the app's theme
+   instead of pinning its own palette.
+
+   One rule worth stating: a fallback is NOT an error. It is drawn in the
+   attention (yellow) family — the platform declining to write an answer it
+   could not ground — while only a request that produced no answer at all gets
+   the danger (red) family. Nothing here marks a source, a label or a factor
+   as trusted, verified or highly ranked: every chip is neutral text in a
+   bordered pill, and words like "independently_reproduced" are the API's own
+   tokens rendered verbatim. */
+
+.search {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+.search-title {
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.search-intro {
+  margin: 0;
+  max-width: 720px;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.search-intro-example {
+  color: var(--fgColor-default, #1f2328);
+}
+
+.search-query {
+  margin: 0 0 16px;
+  font-size: 14px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.search-query > span {
+  color: var(--fgColor-default, #1f2328);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- the panel, and its four states ---------- */
+
+.search-panel {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--bgColor-default, #ffffff);
+  padding: 16px;
+}
+
+.search-panel-loading {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.search-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+}
+
+/* The failure is the one state drawn in the danger family: there is no
+   answer, and the reader has to know it rather than read an empty result. */
+.search-panel-error {
+  border-color: var(--borderColor-danger-muted, rgba(255, 129, 130, 0.4));
+  background-color: var(--bgColor-danger-muted, #ffebe9);
+}
+
+.search-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.search-error-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.search-error-code,
+.search-error-request,
+.search-ref,
+.search-provenance-id,
+.search-citation {
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+}
+
+.search-retry {
+  margin-top: 12px;
+  padding: 5px 12px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--bgColor-default, #ffffff);
+  color: var(--fgColor-default, #1f2328);
+  font-size: 13px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.search-retry:hover {
+  background-color: var(--bgColor-muted, #f6f8fa);
+}
+
+/* ---------- sections ---------- */
+
+.search-section + .search-section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.search-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.search-section-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.search-section-note {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.search-count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background-color: var(--bgColor-muted, #f6f8fa);
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.search-badge {
+  padding: 0 6px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* ---------- the answer ---------- */
+
+.search-summary {
+  margin: 0;
+  font-size: 15px;
+  line-height: 24px;
+  overflow-wrap: anywhere;
+}
+
+.search-citations {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.search-citations-label,
+.search-ref,
+.search-kind,
+.search-version,
+.search-project {
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.search-citation {
+  padding: 1px 6px;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--fgColor-default, #1f2328);
+}
+
+/* ---------- the fallback ---------- */
+
+.search-fallback {
+  padding: 12px;
+  border: 1px solid var(--borderColor-attention-muted, rgba(212, 167, 44, 0.4));
+  border-radius: 6px;
+  background-color: var(--bgColor-attention-muted, #fff8c5);
+}
+
+.search-fallback-headline {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.search-fallback-note {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* ---------- rows: sources, statements, evidence, results ---------- */
+
+.search-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 6px;
+}
+
+.search-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.search-row:last-child {
+  border-bottom: none;
+}
+
+.search-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+}
+
+.search-row-title {
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.search-row-link {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.search-row-link:hover {
+  text-decoration: underline;
+}
+
+.search-row-link:focus-visible,
+.search-retry:focus-visible,
+.search-factors-summary:focus-visible {
+  outline: 2px solid var(--fgColor-accent, #0969da);
+  outline-offset: 2px;
+}
+
+.search-rank {
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+  font-variant-numeric: tabular-nums;
+}
+
+.search-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 4px 0 0;
+}
+
+.search-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
+.search-label {
+  padding: 0 6px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.search-statement-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.search-statement-kind {
+  margin-right: 6px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.search-evidence-refs {
+  margin: 6px 0 0;
+  padding: 0 0 0 12px;
+  list-style: none;
+  border-left: 2px solid var(--borderColor-muted, #d8dee4);
+  font-size: 13px;
+}
+
+.search-evidence-refs li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* ---------- ranking factors ---------- */
+
+.search-factors {
+  margin-top: 8px;
+}
+
+.search-factors-summary {
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+  cursor: pointer;
+}
+
+.search-factors-list {
+  margin: 6px 0 0;
+  padding: 0 0 0 12px;
+  list-style: none;
+  border-left: 2px solid var(--borderColor-muted, #d8dee4);
+}
+
+.search-factor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.search-factor-name {
+  min-width: 140px;
+  color: var(--fgColor-default, #1f2328);
+}
+
+.search-factor-level {
+  color: var(--fgColor-muted, #59636e);
+  font-weight: 600;
+}
+
+.search-factor-reason {
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* ---------- provenance ---------- */
+
+.search-provenance {
+  margin: 16px 0 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+@media (max-width: 600px) {
+  .search {
+    padding: 16px 12px 32px;
+  }
+
+  .search-factor-name {
+    min-width: 0;
+  }
+}
