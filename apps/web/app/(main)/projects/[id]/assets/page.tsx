@@ -1,12 +1,7 @@
-import { TabPlaceholder } from "../tab-placeholder";
-
-/** Assets tab: published/dependent/derived research assets land with the
- *  release & asset hub milestones; the shell route is navigable today. */
-export default function AssetsPage() {
-  return (
-    <TabPlaceholder title="Assets" milestone="the release & asset hub milestones">
-      Research assets this project publishes, depends on or derives from
-      list here.
-    </TabPlaceholder>
-  );
-}
+"use client";
+import {useEffect,useMemo,useState} from "react";
+import {Spinner} from "@primer/react";
+import {useProjectShell} from "../shell-context";
+import "../demo.css";
+type Obj={id:string;object_type:string;version_no:number;title:string;payload:Record<string,unknown>};
+export default function AssetsPage(){const shell=useProjectShell(),[objects,setObjects]=useState<Obj[]|null>(null);const url=useMemo(()=>shell?`${shell.apiBaseUrl}/api/v1/projects/${shell.project.id}/query?object_type=dataset&object_type=protocol&depth=0`:"",[shell]);useEffect(()=>{if(!url)return;const c=new AbortController();fetch(url,{credentials:"include",signal:c.signal}).then(r=>r.json()).then((q:{objects:Obj[]})=>setObjects(q.objects)).catch(()=>setObjects([]));return()=>c.abort()},[url]);if(!shell)return null;return <div className="demo-page" data-project-tab-content="assets"><section className="demo-page-head"><div><span className="demo-kicker">Publication pipeline</span><h2>Project assets</h2><p>Versioned datasets and protocols eligible for governed publication. They remain project-scoped until review and rights checks pass.</p></div><span className="demo-badge purple">release candidates</span></section>{objects===null?<div className="demo-loading"><Spinner aria-label="Loading project assets"/></div>:<div className="demo-asset-grid">{objects.map(o=><article className="demo-asset" key={o.id}><div className="demo-asset-icon">{o.object_type==="dataset"?"▦":"≡"}</div><div><span className="demo-kicker">{o.object_type} · v{o.version_no}</span><h3>{o.title}</h3><p>{String(o.payload.purpose??o.payload.quality_notes??o.title)}</p><div className="demo-labels"><span>project scoped</span><span>version pinned</span><span>review pending</span></div></div></article>)}</div>}</div>}
