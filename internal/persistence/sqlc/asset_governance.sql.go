@@ -171,7 +171,7 @@ func (q *Queries) GetPartyUser(ctx context.Context, id pgtype.UUID) (GetPartyUse
 }
 
 const getResearchAssetByPIDForUpdate = `-- name: GetResearchAssetByPIDForUpdate :one
-SELECT id, asset_type, slug, title, origin_project_id, created_at, pid FROM research_assets WHERE pid = $1 FOR UPDATE
+SELECT id, asset_type, slug, title, origin_project_id, created_at, pid, description, keywords, contact, documentation, cover_blob_id FROM research_assets WHERE pid = $1 FOR UPDATE
 `
 
 // The asset row behind a pid, LOCKED, for the rights-holder chain. This is
@@ -195,6 +195,11 @@ func (q *Queries) GetResearchAssetByPIDForUpdate(ctx context.Context, pid string
 		&i.OriginProjectID,
 		&i.CreatedAt,
 		&i.Pid,
+		&i.Description,
+		&i.Keywords,
+		&i.Contact,
+		&i.Documentation,
+		&i.CoverBlobID,
 	)
 	return i, err
 }

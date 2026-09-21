@@ -626,10 +626,25 @@ var canonicalTables = map[string]tableExp{
 		// pid is the T0701 addition (00064): the persistent identifier
 		// the public URLs are built from — random, fixed-shape (CHECK),
 		// unique, never derived from the slug or the owning organization.
-		cols:   []colExp{c("id", u, false, true), c("asset_type", txt, false, false), c("slug", txt, false, false), c("title", txt, false, false), c("origin_project_id", u, false, false), c("created_at", ts, false, true), c("pid", txt, false, true)},
-		pk:     []string{"id"},
+		//
+		// description/keywords/contact/documentation/cover_blob_id are the
+		// T0706 addition (00125): the Asset Metadata docs/11 §4 makes
+		// independently revisable — an IN-PLACE revision of this row (the
+		// table has no append-only trigger; research_asset_versions does),
+		// audited in the same transaction by
+		// internal/application/assetmetadata. The four scalar/list columns
+		// are NOT NULL with empty defaults, so an asset that never had
+		// metadata reads back as the Go zero value rather than as NULL;
+		// cover_blob_id is nullable and RESERVED — this build has no blob
+		// channel to serve a cover, so nothing writes it.
+		cols: []colExp{c("id", u, false, true), c("asset_type", txt, false, false), c("slug", txt, false, false), c("title", txt, false, false), c("origin_project_id", u, false, false), c("created_at", ts, false, true), c("pid", txt, false, true), c("description", txt, false, true), arr("keywords", false, true), arr("contact", false, true), arr("documentation", false, true), c("cover_blob_id", u, true, false)},
+		pk:   []string{"id"},
+		// No CHECK on the new columns: their bounds are enforced on the
+		// write path (internal/assets.MaxDescriptionLen and the list
+		// bounds), the same division the manifest's metadata block uses.
 		checks: []string{"asset_type = ANY", "pid ~"},
-		fks:    []fkExp{fk("origin_project_id", "projects", "RESTRICT")},
+		fks: []fkExp{fk("origin_project_id", "projects", "RESTRICT"),
+			fk("cover_blob_id", "blobs", "RESTRICT")},
 	},
 	"research_asset_versions": {
 		// origin_refs is the T0701 addition (00064): the mandatory

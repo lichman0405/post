@@ -87,6 +87,29 @@ const (
 	// other (the note beside ActionPullRequestMerged).
 	ActionAssetRightsHolderChanged = "asset.rights_holder_changed"
 
+	// T0706 asset metadata revision: one row per revision of an asset's
+	// metadata, written in the same transaction as the in-place update of
+	// the research_assets row it describes. docs/11 §4 makes the asset
+	// metadata (description, keywords, cover, contact, documentation,
+	// title, slug) independently revisable and says the revision 保留
+	// audit — this row IS that audit, and 00012's before_summary /
+	// after_summary columns (00012:52-53) are what it records into: the
+	// two columns exist for exactly this, a change whose before and after
+	// are two values of the same field rather than two rows.
+	//
+	// It is one row per revision, NOT a revision-history table. docs/11
+	// §4's other half is that a metadata revision 不产生新的 scientific
+	// version: a per-revision row anywhere would rebuild the second
+	// version stream the sentence exists to forbid, so the row that
+	// remembers a revision is this one — append-only by trigger
+	// (00014/00015) and read back through the Activity surface T0110
+	// owns.
+	//
+	// The name follows the dotted `<subject>.<verb-past>` convention of
+	// the constants above, like its neighbour ActionAssetRightsHolderChanged:
+	// same subject (the asset), same past-tense verb, same registry.
+	ActionAssetMetadataRevised = "asset.metadata_revised"
+
 	// T0604 scientific responsibility: one row per Research Owners rule
 	// written or deleted, and one per responsibility assignment written or
 	// removed, each in the same transaction as the row itself. docs/04 §3

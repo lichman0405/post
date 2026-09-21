@@ -390,6 +390,16 @@ type ResearchAsset struct {
 	OriginProjectID pgtype.UUID        `json:"origin_project_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	Pid             string             `json:"pid"`
+	// T0706. The asset's description — revisable asset metadata (docs/11 §4), NOT part of any scientific version. Revised in place by internal/application/assetmetadata, in the same transaction as the audit_log row recording the revision. Empty string means "no description recorded"; NULL is never stored.
+	Description string `json:"description"`
+	// T0706. The asset's keyword list — revisable asset metadata (docs/11 §4). An array because it is stored as a list; the count/length bounds live in internal/assets (MaxKeywords, MaxKeywordLen) and are enforced on the write path, not as a CHECK here.
+	Keywords []string `json:"keywords"`
+	// T0706. How to reach whoever is responsible for the asset — revisable asset metadata (docs/11 §4). Plain strings, not a structured party reference: docs/11 §6 already gives the responsible parties their own roles (Rights Holder, Custodian, Maintainer, Creator, Contributor) in their own tables, and a second structured copy here would be a second answer to "who is responsible".
+	Contact []string `json:"contact"`
+	// T0706. Where the asset is documented — revisable asset metadata (docs/11 §4). Plain strings: this build stores the reference the publisher declared and does not dereference it, so no URL shape is asserted here (a DOI, a repository path and an https link are all references).
+	Documentation []string `json:"documentation"`
+	// T0706. The blob that would be the asset's cover — RESERVED, and written by nothing in this build. docs/11 §4 lists cover among the revisable metadata, so the slot exists; the blob surface has no upload/download route and no signed-URL/TTL mechanism, so a cover set today is an image no reader could fetch. The revision command refuses a cover change by name (assetmetadata.ErrCoverNotSupported) rather than dropping it, and the channel that would fill this column belongs to the blob-transfer task. NULL is the state of every asset today.
+	CoverBlobID pgtype.UUID `json:"cover_blob_id"`
 }
 
 type ResearchAssetVersion struct {

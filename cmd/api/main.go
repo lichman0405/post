@@ -80,6 +80,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/validationhttp"
 	"github.com/lichman0405/post/cmd/api/webhookshttp"
 	"github.com/lichman0405/post/internal/application/aborts"
+	"github.com/lichman0405/post/internal/application/assetmetadata"
 	"github.com/lichman0405/post/internal/application/assetpublish"
 	"github.com/lichman0405/post/internal/application/attestations"
 	"github.com/lichman0405/post/internal/application/audit"
@@ -932,6 +933,19 @@ func run(args []string) int {
 		// same asset_dependencies table the publish above writes, keyed by
 		// the project instead of the asset.
 		Dependencies: persistence.NewProjectDependencyStore(pool),
+		// The asset metadata revision (T0706). docs/11 §4 makes an asset's
+		// description/keywords/cover/contact/documentation independently
+		// revisable with the audit kept and no new scientific version; the
+		// command revises the research_assets row in place and the store
+		// writes the audit_log row in the SAME transaction, under the asset
+		// row lock, with the before/after pair read from the row it is about
+		// to overwrite. The role gate is the default-deny maintainer rule
+		// the project settings surface uses — the permission matrix has no
+		// asset-metadata row, and specs/ is not a Worker's to edit.
+		Metadata: assetmetadata.NewCommand(assetmetadata.Deps{
+			Members: persistence.NewProjectStore(pool),
+			Store:   persistence.NewAssetMetadataStore(pool),
+		}),
 	})
 	assetsAPI.Register(v1)
 	// Knowledge publication (T0805): the missing publish path for
