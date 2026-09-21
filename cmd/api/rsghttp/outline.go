@@ -214,12 +214,20 @@ func (h *handlers) handleResearchPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// The outline's two view keys. They are named because the research map
+// (T1102) reads the same coordinate to decide which axis it draws; one
+// spelling per view everywhere.
+const (
+	researchViewQuestions = "questions"
+	researchViewFindings  = "findings"
+)
+
 // researchViews are the outline views, in display order (docs/42: By
 // Question / By Finding). Unknown values fall back to questions — a
 // navigation is never an error.
 var researchViews = []struct{ Key, Label string }{
-	{"questions", "By Question"},
-	{"findings", "By Finding"},
+	{researchViewQuestions, "By Question"},
+	{researchViewFindings, "By Finding"},
 }
 
 // researchView normalizes the ?view= value.
@@ -230,7 +238,7 @@ func researchView(r *http.Request) string {
 			return v.Key
 		}
 	}
-	return "questions"
+	return researchViewQuestions
 }
 
 // researchPageModel is the template's data shape.
@@ -240,9 +248,13 @@ type researchPageModel struct {
 	View        string
 	ViewLinks   []researchPageViewLink
 	CountsLine  string
-	Questions   []researchPageQuestion
-	Findings    []researchPageFinding
-	Unassigned  []researchPageRef
+	// Map is the Research Map (T1102): the coarse aggregated picture, its
+	// accessible table and the selected node's detail. It is built from the
+	// SAME outline the list columns render — the map adds no read.
+	Map        researchMap
+	Questions  []researchPageQuestion
+	Findings   []researchPageFinding
+	Unassigned []researchPageRef
 }
 
 type researchPageViewLink struct {
@@ -303,6 +315,7 @@ func researchPageModelFrom(r *http.Request, out rsg.ResearchOutline) researchPag
 		ProjectName: out.ProjectName,
 		View:        view,
 		CountsLine:  researchCountsLine(out.Counts),
+		Map:         buildResearchMap(out, view, researchMapPath(r), researchMapLinks{basePath: base, projectID: out.ProjectID}),
 		Questions:   make([]researchPageQuestion, 0, len(out.Questions)),
 		Findings:    make([]researchPageFinding, 0, len(out.Findings)),
 		Unassigned:  make([]researchPageRef, 0, len(out.Unassigned)),
