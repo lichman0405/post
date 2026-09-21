@@ -22,7 +22,7 @@
   a:hover { text-decoration: underline; }
   code, pre, .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono",
     Menlo, Consolas, monospace; }
-  .page { max-width: 1280px; margin: 0 auto; padding: 16px 24px 48px; }
+  .page { max-width: 1600px; margin: 0 auto; padding: 16px 24px 48px; }
   .breadcrumb { font-size: 12px; color: var(--muted); margin: 0 0 12px; }
   .breadcrumb .sep { margin: 0 4px; color: var(--border); }
   .breadcrumb code { color: var(--fg); }
@@ -42,6 +42,22 @@
   .tab.active { color: var(--fg); font-weight: 600; border-bottom-color: #fd8c73; }
   main { padding-top: 16px; }
   .section-title { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+
+  /* The workspace (docs/42 §Research Page): the outline/question tree on the
+     left, the Research Map in the middle, the selected node's detail on the
+     right. Every column is semantic HTML; nothing here needs a script. */
+  .workspace {
+    display: grid; gap: 24px; align-items: start;
+    grid-template-columns: minmax(280px, 1fr) minmax(360px, 1.6fr) minmax(260px, 1fr);
+  }
+  @media (max-width: 1100px) { .workspace { grid-template-columns: 1fr; } }
+  .col-outline, .col-detail { min-width: 0; }
+  .col-map { min-width: 0; }
+  .col-outline { border-right: 1px solid var(--border); padding-right: 20px; }
+  .col-detail { border-left: 1px solid var(--border); padding-left: 20px; }
+  @media (max-width: 1100px) {
+    .col-outline, .col-detail { border: none; padding: 0; }
+  }
 
   /* The outline: nested semantic lists, no canvas — keyboard reachable by
      construction (docs/06 §10: the graph must have an equivalent list). */
@@ -97,6 +113,55 @@
     margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--border);
     color: var(--muted); font-size: 12px;
   }
+  .muted { color: var(--muted); }
+
+  /* The Research Map (T1102): a coarse aggregated picture over an equivalent
+     table. Neutral Primer palette, thin borders, no gradients — the picture
+     carries no meaning the table beside it does not state in text. */
+  .map-lead { margin: 0 0 12px; font-size: 12px; color: var(--muted); max-width: 720px; }
+  .map-crumbs { font-size: 12px; color: var(--muted); margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; }
+  .map-crumbs .sep { color: var(--border); }
+  .map-crumbs a[aria-current="page"] { color: var(--fg); font-weight: 600; }
+  .map-figure { margin: 0 0 8px; }
+  .map-svg {
+    display: block; width: 100%; height: auto; max-width: 100%;
+    background: #ffffff; border: 1px solid var(--border); border-radius: 6px;
+  }
+  .map-figure figcaption { margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .map-svg .map-node rect { fill: var(--subtle); stroke: var(--border); stroke-width: 1; }
+  .map-svg .map-node-label { font-size: 12px; fill: var(--fg); }
+  .map-svg .map-node-type { font-size: 10px; fill: var(--muted); }
+  .map-svg .map-node-bucket rect { fill: var(--accent-subtle); stroke: rgba(9, 105, 218, .45); }
+  .map-svg .map-node-remainder rect { fill: #ffffff; stroke: var(--border); stroke-dasharray: 4 3; }
+  .map-svg .map-node-selected rect { stroke: #fd8c73; stroke-width: 2; }
+  .map-svg .map-edge line { stroke: var(--border); stroke-width: 2; }
+  .map-svg .map-edge-label {
+    font-size: 10px; fill: var(--muted); paint-order: stroke;
+    stroke: #ffffff; stroke-width: 3px; stroke-linejoin: round;
+  }
+  table.map-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  table.map-table caption { text-align: left; font-size: 12px; color: var(--muted); padding: 0 0 8px; }
+  table.map-table th, table.map-table td {
+    text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border);
+    font-size: 13px; vertical-align: top;
+  }
+  table.map-table th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  table.map-table tr[data-map-row-selected] { background: var(--accent-subtle); }
+  .map-row-parent, .map-row-note { color: var(--muted); font-size: 12px; }
+  .map-note { margin: 12px 0 0; font-size: 12px; color: var(--muted); }
+
+  /* The selected node's detail panel (docs/42: 右侧 selected node detail). */
+  .detail-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .detail-title { font-size: 15px; font-weight: 600; }
+  .detail-statement { margin: 6px 0 0; }
+  dl.detail-facts { margin: 12px 0 0; font-size: 13px; }
+  dl.detail-facts dt { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  dl.detail-facts dd { margin: 2px 0 0; }
+  .detail-sub { font-size: 13px; font-weight: 600; margin: 16px 0 6px; }
+  ul.detail-list { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+  ul.detail-list li { padding: 3px 0; border-bottom: 1px solid var(--border); }
+  ul.detail-list li:last-child { border-bottom: none; }
+  .detail-empty { color: var(--muted); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -116,60 +181,156 @@
     {{end}}
   </nav>
   <main data-research-view="{{.View}}">
-    {{if eq .View "questions"}}
-    {{if .Questions}}
-    <h2 class="section-title">Research questions</h2>
-    <ol class="outline" data-outline="questions" aria-label="Research outline by question">
-      {{range .Questions}}{{template "question" .}}{{end}}
-    </ol>
-    {{else}}
-    <div class="empty-state" data-outline="questions">No research questions yet. Questions appear here once they are created through the agent or the API, and the outline organizes everything that addresses them.</div>
-    {{end}}
-    {{if .Unassigned}}
-    <h2 class="section-title">Not linked to a question</h2>
-    <ul class="plain" data-outline="unassigned" aria-label="Objects not linked to a research question">
-      {{range .Unassigned}}{{template "ref" .}}{{end}}
-    </ul>
-    {{end}}
-    {{else}}
-    {{if .Findings}}
-    <h2 class="section-title">Findings</h2>
-    <ol class="findings" data-outline="findings" aria-label="Research outline by finding">
-      {{range .Findings}}
-      <li data-finding-id="{{.ObjectID}}">
-        <div>
-          <span class="type-badge">finding</span>
-          {{if .Href}}<a class="f-title" href="{{.Href}}">{{.Title}}</a>{{else}}<span class="f-title plain">{{.Title}}</span>{{end}}
-          {{if .Assessment}}<span class="state-badge {{.Assessment}}" data-assessment="{{.Assessment}}">{{.Assessment}}</span>{{end}}
+    <div class="workspace">
+      <aside class="col-outline" id="research-outline">
+        {{if eq .View "questions"}}
+        {{if .Questions}}
+        <h2 class="section-title">Research questions</h2>
+        <ol class="outline" data-outline="questions" aria-label="Research outline by question">
+          {{range .Questions}}{{template "question" .}}{{end}}
+        </ol>
+        {{else}}
+        <div class="empty-state" data-outline="questions">No research questions yet. Questions appear here once they are created through the agent or the API, and the outline organizes everything that addresses them.</div>
+        {{end}}
+        {{else}}
+        {{if .Findings}}
+        <h2 class="section-title">Findings</h2>
+        <ol class="findings" data-outline="findings" aria-label="Research outline by finding">
+          {{range .Findings}}
+          <li data-finding-id="{{.ObjectID}}">
+            <div>
+              <span class="type-badge">finding</span>
+              {{if .Href}}<a class="f-title" href="{{.Href}}">{{.Title}}</a>{{else}}<span class="f-title plain">{{.Title}}</span>{{end}}
+              {{if .Assessment}}<span class="state-badge {{.Assessment}}" data-assessment="{{.Assessment}}">{{.Assessment}}</span>{{end}}
+            </div>
+            {{if .Statement}}<p class="f-statement">{{.Statement}}</p>{{end}}
+            <div class="f-meta">
+              {{if .FindingType}}<span>finding type <code>{{.FindingType}}</code></span>{{end}}
+              {{if .Questions}}<span> · addresses: {{range $i, $q := .Questions}}{{if $i}}, {{end}}{{template "reflink" $q}}{{end}}</span>{{end}}
+            </div>
+            {{if .Claims}}
+            <ul class="f-claims" aria-label="Claims of this finding">
+              {{range .Claims}}
+              <li>{{if .Resolved}}{{if .Href}}<a href="{{.Href}}">{{.Title}}</a>{{else}}{{.Title}}{{end}}<code> (claim)</code>{{else}}<span class="mono">claim version {{.VersionID}}</span> <span class="f-meta">(not in this project)</span>{{end}}</li>
+              {{end}}
+            </ul>
+            {{end}}
+          </li>
+          {{end}}
+        </ol>
+        {{else}}
+        <div class="empty-state" data-outline="findings">No findings yet. Findings are the human-confirmed summaries; they appear here with their claims and the questions they address.</div>
+        {{end}}
+        {{end}}
+        {{if .Unassigned}}
+        <h2 class="section-title">Not linked to a question</h2>
+        <ul class="plain" data-outline="unassigned" aria-label="Objects not linked to a research question">
+          {{range .Unassigned}}{{template "ref" .}}{{end}}
+        </ul>
+        {{end}}
+      </aside>
+
+      <section class="col-map" aria-labelledby="research-map-title">
+        <h2 class="section-title" id="research-map-title">Research map</h2>
+        <p class="map-lead">{{.Map.Lead}}</p>
+        <nav class="map-crumbs" aria-label="Research map drill path">
+          {{range $i, $c := .Map.Crumbs}}{{if $i}}<span class="sep" aria-hidden="true">›</span>{{end}}<a href="{{$c.Href}}"{{if $c.Current}} aria-current="page"{{end}}>{{$c.Label}}</a>{{end}}
+        </nav>
+        {{if .Map.Nodes}}
+        <figure class="map-figure">
+          {{template "mapDiagram" .Map.Diagram}}
+          <figcaption>The picture illustrates the table below it: every box here is one row there, with the same identity, and every arrow is that row's relation. The table is the accessible form — nothing is stated by the picture alone.</figcaption>
+        </figure>
+        <table class="map-table" data-map-table="research">
+          <caption>Research map as a table: one row per drawn node, in the same order as the picture.</caption>
+          <thead>
+            <tr>
+              <th scope="col">Node</th>
+              <th scope="col">Kind</th>
+              <th scope="col">Relation</th>
+              <th scope="col">Rows</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Map.Rows}}
+            <tr data-map-row="{{.Key}}" data-map-row-kind="{{.Kind}}"{{if .Role}} data-map-row-role="{{.Role}}"{{end}}{{if .Selected}} data-map-row-selected="true"{{end}}>
+              <td>
+                {{if .Href}}<a href="{{.Href}}"{{if .Selected}} aria-current="true"{{end}}>{{.Label}}</a>{{else}}{{.Label}}{{end}}
+                {{if .State}} <span class="state-badge">{{.State}}</span>{{end}}
+                {{if .Parent}}<div class="map-row-parent">under {{.Parent}}</div>{{end}}
+              </td>
+              <td><code>{{.Kind}}</code></td>
+              <td>{{.Role}}</td>
+              <td>{{.Count}}{{if .RemainingNote}} <div class="map-row-note">{{.RemainingNote}}</div>{{end}}</td>
+              <td>{{if .DetailHref}}<a href="{{.DetailHref}}">open detail</a>{{end}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+        <p class="map-note" data-map-note>{{.Map.Note}}</p>
+        {{else}}
+        <div class="empty-state" data-map-empty>{{.Map.Empty}}</div>
+        {{end}}
+      </section>
+
+      <aside class="col-detail" aria-labelledby="research-detail-title" data-map-detail="selected">
+        <h2 class="section-title" id="research-detail-title">Selected node</h2>
+        {{if .Map.Detail.Empty}}
+        <p class="detail-empty" data-map-detail-empty>{{.Map.Detail.EmptyNote}}</p>
+        {{else}}
+        <div class="detail-head">
+          <span class="type-badge">{{.Map.Detail.Kind}}</span>
+          <span class="detail-title">{{.Map.Detail.Label}}</span>
+          {{if .Map.Detail.State}}<span class="state-badge">{{.Map.Detail.State}}</span>{{end}}
         </div>
-        {{if .Statement}}<p class="f-statement">{{.Statement}}</p>{{end}}
-        <div class="f-meta">
-          {{if .FindingType}}<span>finding type <code>{{.FindingType}}</code></span>{{end}}
-          {{if .Questions}}<span> · addresses: {{range $i, $q := .Questions}}{{if $i}}, {{end}}{{template "reflink" $q}}{{end}}</span>{{end}}
-        </div>
-        {{if .Claims}}
-        <ul class="f-claims" aria-label="Claims of this finding">
-          {{range .Claims}}
-          <li>{{if .Resolved}}{{if .Href}}<a href="{{.Href}}">{{.Title}}</a>{{else}}{{.Title}}{{end}}<code> (claim)</code>{{else}}<span class="mono">claim version {{.VersionID}}</span> <span class="f-meta">(not in this project)</span>{{end}}</li>
+        {{if .Map.Detail.Statement}}<p class="detail-statement">{{.Map.Detail.Statement}}</p>{{end}}
+        <dl class="detail-facts">
+          <dt>Type</dt>
+          <dd>{{.Map.Detail.Type}}</dd>
+          {{if .Map.Detail.Role}}
+          <dt>Relation</dt>
+          <dd>{{.Map.Detail.Role}}{{if .Map.Detail.Parent}} under {{.Map.Detail.Parent}}{{end}}</dd>
+          {{end}}
+          <dt>Rows it stands for</dt>
+          <dd>{{.Map.Detail.Count}}{{if .Map.Detail.CountNote}} — {{.Map.Detail.CountNote}}{{end}}</dd>
+        </dl>
+        {{if .Map.Detail.Buckets}}
+        <h3 class="detail-sub">Rolls up into</h3>
+        <ul class="detail-list" aria-label="Rollup of the selected node">
+          {{range .Map.Detail.Buckets}}
+          <li>{{if .Href}}<a href="{{.Href}}">{{.Label}}</a>{{else}}<span>{{.Label}}</span>{{end}} <span class="muted">{{.CountLabel}}</span></li>
           {{end}}
         </ul>
         {{end}}
-      </li>
-      {{end}}
-    </ol>
-    {{else}}
-    <div class="empty-state" data-outline="findings">No findings yet. Findings are the human-confirmed summaries; they appear here with their claims and the questions they address.</div>
-    {{end}}
-    {{if .Unassigned}}
-    <h2 class="section-title">Not linked to a question</h2>
-    <ul class="plain" data-outline="unassigned" aria-label="Objects not linked to a research question">
-      {{range .Unassigned}}{{template "ref" .}}{{end}}
-    </ul>
-    {{end}}
-    {{end}}
+        {{if .Map.Detail.Rows}}
+        <h3 class="detail-sub">Rows</h3>
+        <ul class="detail-list" aria-label="Rows the selected node stands for">
+          {{range .Map.Detail.Rows}}
+          <li>
+            {{if .Href}}<a href="{{.Href}}">{{.Label}}</a>{{else}}<span class="mono">{{.Label}}</span>{{end}}
+            <span class="muted">{{.Type}}</span>
+            {{if .State}}<span class="state-badge">{{.State}}</span>{{end}}
+            {{if .DetailHref}} <a href="{{.DetailHref}}">open</a>{{end}}
+          </li>
+          {{end}}
+        </ul>
+        {{if .Map.Detail.RowsNote}}<p class="map-row-note">{{.Map.Detail.RowsNote}}</p>{{end}}
+        {{end}}
+        {{if .Map.Detail.DepthNote}}<p class="map-row-note" data-map-depth-note>{{.Map.Detail.DepthNote}}</p>{{end}}
+        {{if .Map.Detail.DetailHref}}
+        <p><a href="{{.Map.Detail.DetailHref}}">Open the object detail page</a> — its provenance, evidence, relations and history.</p>
+        {{end}}
+        {{if .Map.Detail.Note}}<p class="map-row-note">{{.Map.Detail.Note}}</p>{{end}}
+        {{end}}
+      </aside>
+    </div>
   </main>
   <footer class="footer-note">
-    This outline is the accessible list view of the research state (docs/06 §10): semantic HTML, keyboard navigable, nothing expressed by canvas or color alone. The graphical research map arrives with the research map milestone. The page is read-only — scientific state changes happen through the agent (MCP) or the API.
+    This page is the accessible view of the research state (docs/06 §10): the outline list and the map's table are
+    semantic HTML, keyboard navigable, and nothing is expressed by canvas or colour alone. The map opens coarse and
+    aggregates by default (docs/06 §5) — select a node to drill into it, and every drill-down is a link, so it works
+    without a script. The page is read-only — scientific state changes happen through the agent (MCP) or the API.
   </footer>
 </div>
 </body>
@@ -202,4 +363,37 @@
 
 {{define "ref"}}
 <li><span class="type-badge">{{.ObjectType}}</span>{{template "reflink" .}}</li>
+{{end}}
+
+{{define "mapDiagram"}}
+{{/* The map's picture. aria-hidden: it is an illustration of the table beside
+     it and carries no content of its own — every node drawn here has the same
+     identity as one row of that table (data-map-node == data-map-row), and
+     every arrow is the relation column of the row its data-map-edge-to names.
+     The marker id is namespaced so this diagram can never resolve to another
+     diagram's arrowhead. */}}
+<svg class="map-svg" viewBox="0 0 {{.Width}} {{.Height}}" preserveAspectRatio="xMidYMid meet" role="presentation" aria-hidden="true" focusable="false" data-map-diagram="{{.MarkerID}}">
+  <defs>
+    <marker id="arrow-{{.MarkerID}}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#59636e"></path>
+    </marker>
+  </defs>
+  {{if .Edges}}
+  <g class="map-edges">
+    {{range .Edges}}<g class="map-edge" data-map-edge-to="{{.To}}" data-map-edge-from="{{.From}}" data-map-edge-role="{{.Role}}">
+      <line x1="{{.X1}}" y1="{{.Y1}}" x2="{{.X2}}" y2="{{.Y2}}" marker-end="url(#arrow-{{$.MarkerID}})"></line>
+      <text class="map-edge-label" x="{{.LabelX}}" y="{{.LabelY}}" text-anchor="middle">{{.Role}}</text>
+    </g>
+    {{end}}
+  </g>
+  {{end}}
+  <g class="map-nodes">
+    {{range .Nodes}}<g class="map-node map-node-{{.Kind}}{{if .Selected}} map-node-selected{{end}}" data-map-node="{{.Key}}" data-map-node-kind="{{.Kind}}">
+      <rect x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="{{.H}}" rx="6"></rect>
+      <text class="map-node-label" x="{{.CX}}" y="{{.CY}}" dy="-3" text-anchor="middle">{{.ShortLabel}}</text>
+      <text class="map-node-type" x="{{.CX}}" y="{{.CY}}" dy="13" text-anchor="middle">{{.Type}}</text>
+    </g>
+    {{end}}
+  </g>
+</svg>
 {{end}}

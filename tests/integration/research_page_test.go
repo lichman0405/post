@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
@@ -49,6 +50,12 @@ const researchPageTaskID = "T0211"
 // a member of nothing.
 type researchPageFixture struct {
 	ts *httptest.Server
+	// pool is the fixture's database. The HTTP surface is the subject of
+	// every test built on this fixture; the pool is here for the fixtures
+	// that must place state no HTTP call can place cheaply (T1102's scale
+	// project: the API's per-write cost grows with the project's size, so
+	// 1000 objects go in directly and the read path under test stays real).
+	pool *pgxpool.Pool
 
 	alice *testUserClient
 	bob   *testUserClient
@@ -168,7 +175,7 @@ func newResearchPageFixture(t *testing.T, ctx context.Context) *researchPageFixt
 	bob, _ := signup(t, ts.URL, "research-bob@example.com", "research-bob")
 	anon := newTestUserClient(ts.URL)
 
-	f := &researchPageFixture{ts: ts, alice: alice, bob: bob, anon: anon}
+	f := &researchPageFixture{ts: ts, alice: alice, bob: bob, anon: anon, pool: pool}
 
 	// --- the private project and its research state ---
 	resp := alice.do(t, http.MethodPost, "/api/v1/projects",
