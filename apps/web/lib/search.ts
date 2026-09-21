@@ -216,13 +216,22 @@ export function sourceKindLabel(source: SearchSource): string {
  * compose a URL this app might not serve. Resolving it against the API
  * origin is therefore the whole of this function — it adds no path segment,
  * and an empty href stays empty so the page can render the source as text.
+ *
+ * A future producer could hand back an absolute address instead; it is
+ * already resolved and re-prefixing it would corrupt it. Only http and https
+ * are handed back that way. Any other scheme — javascript:, data:, vbscript:,
+ * file: — is "no address" (the empty string above), not a link: the caller
+ * puts this value into an anchor's href, so passing one through would make
+ * this function the place where an executable address becomes clickable. The
+ * page already renders "no address" as text, so nothing downstream changes.
  */
 export function sourceHref(apiBaseUrl: string, href: string | undefined): string {
   const path = (href ?? "").trim();
   if (path === "") return "";
-  // A future producer could hand back an absolute address; it is already
-  // resolved and re-prefixing it would corrupt it.
-  if (/^[a-z][a-z0-9+.-]*:/i.test(path)) return path;
+  // Any scheme means an absolute address, which is never re-prefixed with
+  // the API origin — but only http(s) is an address this app will link to.
+  // The match is case-insensitive, so the allowlist has to be as well.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(path)) return /^https?:/i.test(path) ? path : "";
   return apiBaseUrl.replace(/\/+$/, "") + path;
 }
 
