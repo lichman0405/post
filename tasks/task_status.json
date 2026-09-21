@@ -8543,10 +8543,11 @@
       ]
     },
     "T0906": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-21T05:05:13Z",
       "worker_run_id": "run-98b2db4067ceb7f2",
       "accepted_by_supervisor_at": "2026-09-21T05:49:30Z",
+      "merged_at": "2026-09-21T06:34:50Z",
       "rejection_reason": "【返工 —— 基线我已手工推好，剩下的一件是真实缺陷】\n\n先把这棵树现在的状态说清楚，别重复劳动。\n\n你上次交付之后 main 往前走了，而且 **T1106 恰好和你插在同一个锚点上**：\n`cmd/api/main.go` 里 `rsgvalidation` 之后、`version` 之前——T1106 插\n`internal/security`，你插 `internal/search/{answer,ranking,retrieval}`。\n两边插在相邻的同一行，线性补丁带不过来，`rddev rebaseline` 对这笔任务\n**结构上永远合不动**（不是没轮到，是方法本身做不到）。\n\n所以这一趟的基线推进由 Supervisor 手工做完，**已经做完了，你不要再做**：\n\n* 你的 worktree 现在就是「最新 main + 你的全部改动」，上面有一个合并提交\n  `3e47950`（父：你的 `2a9f184` 与 main 的 `a5844fa`）；\n* `cmd/api/main.go` 的 import 冲突按**并集**解掉，四个 import 都在，按 gofmt 次序；\n* `specs/SPEC_VERSION.json` 与 `specs/database/postgres.sql` 是**派生工件**，\n  已按合并后的树重新生成，**不要手工编辑**；\n* `go build ./...` 在这棵树上是通过的。\n\n**你现在要做的是下面这一件真实缺陷。** 它不是「基线旧了」——是 main 上新立的\n一条全仓不变量把你新写的出口拦下来了。\n\nT1106 在 `tests/security/exits_test.go` 里立了一张「字节出口登记表」：`cmd/api`\n下**任何能把字节交给客户端的地方**都必须登记并分类，否则\n`TestEveryByteExitIsRegistered` 直接失败。你新写的那个出口没有登记：\n\n    你的函数      cmd/api/searchhttp/handlers.go:227   writeSearchJSON\n    写字节的位置  cmd/api/searchhttp/handlers.go:238   _, _ = w.Write(doc)\n    它实际发的头  Content-Type: application/json; charset=utf-8\n                  Cache-Control: no-store（没有 Content-Disposition）\n\n失败原文（我在这棵树上逐字跑过 `go test ./tests/security/ -run TestEveryByteExitIsRegistered -count=1`）：\n\n    --- FAIL: TestEveryByteExitIsRegistered\n        exits_test.go:205: these write sites are not in the byte-exit registry:\n        searchhttp/handlers.go:238\n\n**怎么修** —— 测试自己的失败信息里就写着办法，照做：\n\n1. 在 `tests/security/exits_test.go` 的 `registry` 里加一行\n   `\"searchhttp/handlers.go:writeSearchJSON\"`。字段照同类条目（比如\n   `\"authhttp/envelope.go:WriteJSON\"`）写：`Sites` 填 `1`、`Kind` 填\n   `KindInlineText`、`Wire` 要和**你实际发的头逐字一致**、`Note` 写清这个出口\n   是什么。你自己在 `writeSearchJSON` 上方已经写了它为什么 `no-store`\n   （答案是这个 actor 自己的结果、不是可从字节推导的公共内容），把那个理由写进 `Note`。\n   **注意 `Sites` 是那个函数里的写字节点个数——数错了同样会红。**\n2. 在 `***` 里给它加一条探针，断言它\n   **确实**发出上面那组头。探针要能在头被改坏的时候失败，不是复述你打算发的头。\n3. 跑 `go test ./tests/security/ -count=1`，全绿为止；再跑一遍任务书要求的用例。\n\n**红线（不许碰）：**\n\n* **不许为了变绿去动 `tests/security/exits_test.go` 的判定逻辑、删条目、放宽断言、\n  skip 用例或放大超时。** 那张表是全仓的安全不变量，不是你这个任务的障碍。\n  要改的是你的出口（头确实发错了的话），或者补一趟登记（本来就发对了的话）。\n* 不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`。\n* 改完跑 `gofmt -l ./cmd ./internal ./tests` 与 `go build ./...`，都干净。\n\n**交付**：把这一轮**真实跑过**的命令与结果写进 `RESULT.json`，**失败就写失败**。\n你不是在申请通过，你是在申请验收。\n",
       "history": [
         {
@@ -8643,17 +8644,35 @@
           "to": "accepted",
           "at": "2026-09-21T05:49:30Z",
           "run_id": "run-9b06c52c1975150a"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-21T06:34:50Z",
+          "run_id": "run-1ab344fc3f9e404f",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0907": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-21T06:40:15Z",
+      "worker_run_id": "run-991b46d168621285",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-21T06:40:13Z",
+          "run_id": "run-02bf81af1098e001"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-21T06:40:15Z",
+          "run_id": "run-991b46d168621285",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T0908": {
       "status": "todo",
@@ -9704,13 +9723,24 @@
       ]
     },
     "T1107": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-21T06:40:17Z",
+      "worker_run_id": "run-a68771a967836826",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-21T06:40:13Z",
+          "run_id": "run-3e1742b4e2ed47bf"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-21T06:40:17Z",
+          "run_id": "run-a68771a967836826",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T1108": {
       "status": "todo",
@@ -9723,9 +9753,9 @@
     },
     "T1109": {
       "status": "running",
-      "started_at": "2026-09-21T06:14:58Z",
-      "worker_run_id": "run-97fa4d083b385b78",
-      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T1109-2793173164.patch: exit status 1: error: patch failed: cmd/api/authhttp/envelope.go:22\n    error: cmd/api/authhttp/envelope.go: patch does not apply\n    error: patch failed: cmd/api/main.go:1174\n    error: cmd/api/main.go: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n",
+      "started_at": "2026-09-21T06:43:30Z",
+      "worker_run_id": "run-b59679d33eedaa24",
+      "rejection_reason": "# T1109 返工（第 1 次）：三处「证据说了不成立的话」\n\n评审结论是 `approve`（0 blocking）。但两条 major 我**自己复核过树**，都是真的，\n而且都属于同一族：**让合并闸门以为某件事被检查过了，而它没有。**\n这是本仓库最贵的一类缺陷，按 CLAUDE.md §5.1 第 4 条与 §11 返工。\n\n下面每条我都写明了**我在树里敲过的命令看到的东西**。判据是树里的事实，不是评审员的话；\n如果你认为我引用错了，拿反证据回来，我改判。\n\n---\n\n## 必须改的三条\n\n### 1. `PostSearchLatencySlow` 没有任何方向的断言，而你的产物说它被查了\n\n全树 `grep -rn LatencySlow`（排除 `.git/`）只有三处：\n\n```\nops/observability/alerts.yml:293        <- 规则本身\ntests/observability/gen-rule-tests.py:82  <- 严重度表\nops/observability/README.md:164         <- 文档行\n```\n\n**没有一处断言。** 也就是说：这条规则**两个方向都没有测过**。\n\n而 `tests/observability/metrics-alerts-e2e.sh`:\n\n- `:695` 打印 `the four rules below are checked against synthesised series`\n- `:776` 打印 `the five synthesised cases behaved as the rules say they should`\n- RESULT 里又写成「the other four … are therefore checked against SYNTHESISED series」\n\n我把 `:700` 起的 `SELF_TEST` 逐条点过：**五个 case，只覆盖三条规则**——\n`PostSearchUnavailable`（firing + quiet）、`PostWebhookFailuresSurge`（firing + quiet）、\n`PostJobDeadLettered`（firing）。**第四条规则一条断言都没有。**\n\n还有一处像是漏改的残迹：第二个 case 喂了\n`post_search_query_duration_seconds_bucket{outcome=\"ok\",le=\"+Inf\"}` 和 `le=\"0.5\"`，\n但那个 case 的断言是 `exp_samples: []`——**那两个序列根本没被读过**。\n\n**要做的**：把 p99 这条补成**两个方向**（尾部快 → 静默；尾部慢 → 触发）。\n\n**唯一的例外**：如果你能给出证据说明这条规则在本树里**确实无法被驱动**\n（不是「不好做」，是「做不到」，并且证据可复现），那么退一步的做法是\n**改掉 `:695` 的自述与 RESULT 里那句话**，并按验收标准第 5 条的规矩**点名写进「tier MISSED」**。\n\n两条路都行，**唯独不许留着现在这句不成立的话。**\n\n### 2. `cmd/api/authhttp/envelope.go:27` 的完备性断言不成立\n\n原话：「Every product refusal in this binary — 400 call sites across 40 handler packages,\nplus the guard's own CSRF and Origin refusals — leaves through here」。\n\n我核了 `internal/gitprovider/push_ingestion_http.go`：\n\n```\n:66   w.WriteHeader(http.StatusUnauthorized)   <- 无签名\n:97   w.WriteHeader(http.StatusUnauthorized)   <- 签名错\n:125  w.WriteHeader(http.StatusForbidden)      <- T0601 的 frozen main 拒绝\n```\n\n这个文件**从头到尾没有调用 `authhttp.WriteError`**。\n`internal/gitprovider/**` 在你的 allowed_scope 里，所以这不是「够不着」。\n\n后果不是学术性的：**frozen main 的 403 是运维知道「有人往冻结的主线直推」的唯一信号**，\n而它对**这个二进制里唯一一条为拒绝率建的规则**不可见——藏在一句自称全覆盖的注释后面。\n\n**要做的**，二选一：\n\n- 在那三处计数（或者让它们走 envelope）；**或**\n- 把那句注释收窄到事实上，**点名**这个 HMAC 自认证的接收者**在计数族的边界之外**。\n\n无论选哪条，RESULT 验收第 5 条里那句同样的过度声明要跟着对，\n并且按标准第 5 条的要求把它**点名写进「tier MISSED」那句**（现在只点了 404 那一类）。\n\n**评审员另外留了一个它自己没证成的问题，你顺手答一句**：\n`cmd/api/rsghttp/page.go:231` 的 `renderObjectPageError` 把状态码原样写出，\n调用点 `page.go:151` / `overview.go:197` / `outline.go:203` 传的是 `rsgErrorOutcome(err)`，\n而 JSON 那条路（`handlers.go:513-515`）是走 `authhttp.WriteError` 的。\n**这些 HTML 只读路径到底会不会返回 `rsg.ErrForbidden`？** 会就一并处理，不会就写「查过了，不会」。\n\n### 3. `tests/observability/metrics-alerts-e2e.sh` 约 `:500`：有规则的对照在「该静默的方向」上不可能失败\n\n`PostOutboxBacklog` 的探针行在**任何应用进程启动前**就插入、锁**整轮持有**，\n于是**每一个采样点上 gauge 都在 300s 以上**——这条规则**在所有样本里都在触发**，\n「不该报的时候不报」这一半**从来没有被证明过**。\n\n这与第 1 条同族：一把量不出「否」的尺子。\n补上会静默的那一半（解开锁、让 gauge 落回阈值以下，断言 `exp_samples: []`）。\n\n---\n\n## 其余五条：逐条答，不许静默略过\n\n| # | 位置 | 评审员的话（**我没有独立复核，你去核**） |\n|---|---|---|\n| 3 | `cmd/api/metrics.go:70` | `post_db_pool_acquires_total` 以 gauge 暴露，却用 `_total` 这个计数器名 |\n| 4 | `metrics-alerts-e2e.sh` 约 `:306` | 探针打印 `GET /metrics/../admin -> 404`，实际请求的是 `$WORKER_METRICS/admin`；curl 规范化了路径，**标签描述了一个没发出去的请求** |\n| 5 | `Makefile:356` | 目标自述的耗时（约 13 分钟）与 README §6 实测的 `6m56s` 不符 |\n| 6 | `internal/events/inbox_store.go:220` | `decision=\"filtered\"` 在循环里**每个被丢掉的可见性目标加一次**，而 `forbidden` / `unauthenticated` 是**每个被拒请求加一次** |\n| 7 | `ops/observability/README.md:460` | RESULT 验收 1 的「8 negative controls on the same capture」数错了 |\n\n**每一条在 RESULT 里写：改了 / 不改，以及为什么。** 不改就是不改，但要留话。\n\n---\n\n## 边界（与上次相同，重申）\n\n- **禁止**为让任何检查变绿而删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。\n- 这一笔**不动迁移**：`specs/database/postgres.sql`、`specs/SPEC_VERSION.json` 都不要碰。\n- **判据是树**：改完之后，第 1 条的每一句自述都要能被一条断言或一次 grep 支持。\n  你的 RESULT 是这个仓库里后来的人唯一看得到的证据——它说的每句话都要是真的。\n",
       "history": [
         {
           "from": "todo",
@@ -9779,6 +9809,27 @@
           "to": "running",
           "at": "2026-09-21T06:14:58Z",
           "run_id": "run-97fa4d083b385b78",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T06:35:48Z",
+          "run_id": "run-810a7f3c0098835f",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T06:43:19Z",
+          "run_id": "run-e5d03305e3d87f61",
+          "reason": "# T1109 返工（第 1 次）：三处「证据说了不成立的话」\n\n评审结论是 `approve`（0 blocking）。但两条 major 我**自己复核过树**，都是真的，\n而且都属于同一族：**让合并闸门以为某件事被检查过了，而它没有。**\n这是本仓库最贵的一类缺陷，按 CLAUDE.md §5.1 第 4 条与 §11 返工。\n\n下面每条我都写明了**我在树里敲过的命令看到的东西**。判据是树里的事实，不是评审员的话；\n如果你认为我引用错了，拿反证据回来，我改判。\n\n---\n\n## 必须改的三条\n\n### 1. `PostSearchLatencySlow` 没有任何方向的断言，而你的产物说它被查了\n\n全树 `grep -rn LatencySlow`（排除 `.git/`）只有三处：\n\n```\nops/observability/alerts.yml:293        <- 规则本身\ntests/observability/gen-rule-tests.py:82  <- 严重度表\nops/observability/README.md:164         <- 文档行\n```\n\n**没有一处断言。** 也就是说：这条规则**两个方向都没有测过**。\n\n而 `tests/observability/metrics-alerts-e2e.sh`:\n\n- `:695` 打印 `the four rules below are checked against synthesised series`\n- `:776` 打印 `the five synthesised cases behaved as the rules say they should`\n- RESULT 里又写成「the other four … are therefore checked against SYNTHESISED series」\n\n我把 `:700` 起的 `SELF_TEST` 逐条点过：**五个 case，只覆盖三条规则**——\n`PostSearchUnavailable`（firing + quiet）、`PostWebhookFailuresSurge`（firing + quiet）、\n`PostJobDeadLettered`（firing）。**第四条规则一条断言都没有。**\n\n还有一处像是漏改的残迹：第二个 case 喂了\n`post_search_query_duration_seconds_bucket{outcome=\"ok\",le=\"+Inf\"}` 和 `le=\"0.5\"`，\n但那个 case 的断言是 `exp_samples: []`——**那两个序列根本没被读过**。\n\n**要做的**：把 p99 这条补成**两个方向**（尾部快 → 静默；尾部慢 → 触发）。\n\n**唯一的例外**：如果你能给出证据说明这条规则在本树里**确实无法被驱动**\n（不是「不好做」，是「做不到」，并且证据可复现），那么退一步的做法是\n**改掉 `:695` 的自述与 RESULT 里那句话**，并按验收标准第 5 条的规矩**点名写进「tier MISSED」**。\n\n两条路都行，**唯独不许留着现在这句不成立的话。**\n\n### 2. `cmd/api/authhttp/envelope.go:27` 的完备性断言不成立\n\n原话：「Every product refusal in this binary — 400 call sites across 40 handler packages,\nplus the guard's own CSRF and Origin refusals — leaves through here」。\n\n我核了 `internal/gitprovider/push_ingestion_http.go`：\n\n```\n:66   w.WriteHeader(http.StatusUnauthorized)   <- 无签名\n:97   w.WriteHeader(http.StatusUnauthorized)   <- 签名错\n:125  w.WriteHeader(http.StatusForbidden)      <- T0601 的 frozen main 拒绝\n```\n\n这个文件**从头到尾没有调用 `authhttp.WriteError`**。\n`internal/gitprovider/**` 在你的 allowed_scope 里，所以这不是「够不着」。\n\n后果不是学术性的：**frozen main 的 403 是运维知道「有人往冻结的主线直推」的唯一信号**，\n而它对**这个二进制里唯一一条为拒绝率建的规则**不可见——藏在一句自称全覆盖的注释后面。\n\n**要做的**，二选一：\n\n- 在那三处计数（或者让它们走 envelope）；**或**\n- 把那句注释收窄到事实上，**点名**这个 HMAC 自认证的接收者**在计数族的边界之外**。\n\n无论选哪条，RESULT 验收第 5 条里那句同样的过度声明要跟着对，\n并且按标准第 5 条的要求把它**点名写进「tier MISSED」那句**（现在只点了 404 那一类）。\n\n**评审员另外留了一个它自己没证成的问题，你顺手答一句**：\n`cmd/api/rsghttp/page.go:231` 的 `renderObjectPageError` 把状态码原样写出，\n调用点 `page.go:151` / `overview.go:197` / `outline.go:203` 传的是 `rsgErrorOutcome(err)`，\n而 JSON 那条路（`handlers.go:513-515`）是走 `authhttp.WriteError` 的。\n**这些 HTML 只读路径到底会不会返回 `rsg.ErrForbidden`？** 会就一并处理，不会就写「查过了，不会」。\n\n### 3. `tests/observability/metrics-alerts-e2e.sh` 约 `:500`：有规则的对照在「该静默的方向」上不可能失败\n\n`PostOutboxBacklog` 的探针行在**任何应用进程启动前**就插入、锁**整轮持有**，\n于是**每一个采样点上 gauge 都在 300s 以上**——这条规则**在所有样本里都在触发**，\n「不该报的时候不报」这一半**从来没有被证明过**。\n\n这与第 1 条同族：一把量不出「否」的尺子。\n补上会静默的那一半（解开锁、让 gauge 落回阈值以下，断言 `exp_samples: []`）。\n\n---\n\n## 其余五条：逐条答，不许静默略过\n\n| # | 位置 | 评审员的话（**我没有独立复核，你去核**） |\n|---|---|---|\n| 3 | `cmd/api/metrics.go:70` | `post_db_pool_acquires_total` 以 gauge 暴露，却用 `_total` 这个计数器名 |\n| 4 | `metrics-alerts-e2e.sh` 约 `:306` | 探针打印 `GET /metrics/../admin -> 404`，实际请求的是 `$WORKER_METRICS/admin`；curl 规范化了路径，**标签描述了一个没发出去的请求** |\n| 5 | `Makefile:356` | 目标自述的耗时（约 13 分钟）与 README §6 实测的 `6m56s` 不符 |\n| 6 | `internal/events/inbox_store.go:220` | `decision=\"filtered\"` 在循环里**每个被丢掉的可见性目标加一次**，而 `forbidden` / `unauthenticated` 是**每个被拒请求加一次** |\n| 7 | `ops/observability/README.md:460` | RESULT 验收 1 的「8 negative controls on the same capture」数错了 |\n\n**每一条在 RESULT 里写：改了 / 不改，以及为什么。** 不改就是不改，但要留话。\n\n---\n\n## 边界（与上次相同，重申）\n\n- **禁止**为让任何检查变绿而删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。\n- 这一笔**不动迁移**：`specs/database/postgres.sql`、`specs/SPEC_VERSION.json` 都不要碰。\n- **判据是树**：改完之后，第 1 条的每一句自述都要能被一条断言或一次 grep 支持。\n  你的 RESULT 是这个仓库里后来的人唯一看得到的证据——它说的每句话都要是真的。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T06:43:30Z",
+          "run_id": "run-b59679d33eedaa24",
           "reason": "worker spawn"
         }
       ]

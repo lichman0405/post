@@ -3003,9 +3003,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-21T06:15:27Z
+生成时间：2026-09-21T06:44:10Z
 
-状态分布：todo 14 · ready 0 · running 1 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 4 · merged 128（合计 147/147 个任务）
+状态分布：todo 12 · ready 0 · running 3 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 3 · merged 129（合计 147/147 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -3127,8 +3127,8 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0903 | Scientific Query Planner | P9 | merged | 2026-09-19T03:08:10Z |  | 2026-09-19T03:55:21Z | 2026-09-19T04:04:51Z |
 | T0904 | Hybrid Retrieval + Graph Expansion | P9 | merged | 2026-09-19T05:31:44Z |  | 2026-09-19T06:56:28Z | 2026-09-19T07:04:51Z |
 | T0905 | Scientific Ranking | P9 | merged | 2026-09-20T12:54:18Z |  | 2026-09-20T13:37:58Z | 2026-09-20T13:45:08Z |
-| T0906 | Evidence-backed Answer Generator/API | P9 | accepted | 2026-09-21T05:05:13Z |  | 2026-09-21T05:49:30Z |  |
-| T0907 | Search Answer Web UI | P9 | todo |  |  |  |  |
+| T0906 | Evidence-backed Answer Generator/API | P9 | merged | 2026-09-21T05:05:13Z |  | 2026-09-21T05:49:30Z | 2026-09-21T06:34:50Z |
+| T0907 | Search Answer Web UI | P9 | running | 2026-09-21T06:40:15Z |  |  |  |
 | T0908 | Search → Draft Research Context | P9 | todo |  |  |  |  |
 | T1001 | Transactional Outbox | P10 | merged | 2026-09-14T15:17:43Z |  | 2026-09-14T15:51:18Z | 2026-09-14T15:54:45Z |
 | T1002 | Subscription Model / Follow/Watch | P10 | merged | 2026-09-16T10:57:20Z |  | 2026-09-16T11:31:28Z | 2026-09-16T11:36:18Z |
@@ -3143,9 +3143,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1104 | 全站 Accessibility AA | P11 | todo |  |  |  |  |
 | T1105 | I18N 基线 | P11 | todo |  |  |  |  |
 | T1106 | API/Upload 安全加固 | P11 | merged | 2026-09-21T03:20:48Z |  | 2026-09-21T03:53:54Z | 2026-09-21T04:03:41Z |
-| T1107 | 权限与 Search Side-channel 安全回归 | P11 | todo |  |  |  |  |
+| T1107 | 权限与 Search Side-channel 安全回归 | P11 | running | 2026-09-21T06:40:17Z |  |  |  |
 | T1108 | 性能基线与索引调优 | P11 | todo |  |  |  |  |
-| T1109 | 生产级 Observability/Dashboards | P11 | running | 2026-09-21T06:14:58Z |  |  |  |
+| T1109 | 生产级 Observability/Dashboards | P11 | running | 2026-09-21T06:43:30Z |  |  |  |
 | T1110 | Backup/Restore 自动化演练 | P11 | merged | 2026-09-18T09:13:47Z |  | 2026-09-18T09:49:45Z | 2026-09-18T09:56:37Z |
 | T1111 | 凭据不进进程参数表：git 调用统一走环境变量传 header | P11 | merged | 2026-09-18T21:07:27Z |  | 2026-09-18T23:13:06Z | 2026-09-18T23:22:54Z |
 | T1201 | 完整 Seed Demo Data Builder | P12 | merged | 2026-09-21T02:30:40Z |  | 2026-09-21T04:21:12Z | 2026-09-21T04:58:40Z |
