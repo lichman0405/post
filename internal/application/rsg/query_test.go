@@ -150,9 +150,25 @@ func queryObject(id, projectID, objectType, versionID string) ObjectQueryRow {
 	}
 }
 
-// queryEndpoint builds one endpoint context for canned relations.
+// queryEndpoint builds one endpoint context for canned relations: the
+// ordinary pin, whose version was written in the project that owns the
+// container it hangs on, so its container project and its carrier are the same
+// project. A landed pin (container = contributor, carrier = acceptor) is built
+// explicitly by the tests that are about that difference.
 func queryEndpoint(versionID, objectID, objectType, projectID string) EndpointContext {
-	return EndpointContext{VersionID: versionID, ObjectID: objectID, ObjectType: objectType, ProjectID: projectID}
+	return EndpointContext{
+		VersionID: versionID, ObjectID: objectID, ObjectType: objectType,
+		ProjectID: projectID, CarriedBy: projectID,
+	}
+}
+
+// queryCarriedEndpoint builds an endpoint context whose container and carrier
+// differ: an object of containerProject wearing a version the states of
+// carriedBy hold — the shape a merge lands (ADR-027 Decision 1).
+func queryCarriedEndpoint(versionID, objectID, objectType, containerProject, carriedBy string) EndpointContext {
+	e := queryEndpoint(versionID, objectID, objectType, containerProject)
+	e.CarriedBy = carriedBy
+	return e
 }
 
 // queryRelation builds one canned relation row (relation + its as-of
@@ -481,9 +497,11 @@ func TestQueryTraversalKeepsVisibleForeignHops(t *testing.T) {
 	}
 }
 
-// TestQueryEdgeWithHiddenEndpointIsPruned: an edge whose own project is
-// visible but whose endpoint project is not must not enter the slice —
-// its payload would disclose the hidden project's pinned version id.
+// TestQueryEdgeWithHiddenEndpointIsPruned: a seed edge whose own project is
+// visible but whose endpoint is CARRIED by a project the caller cannot read
+// must not enter the slice — its payload would disclose the hidden project's
+// pinned version id. The pin is authorized by its carrier (query.go's pin
+// check), and the hidden project's states are what carry it.
 func TestQueryEdgeWithHiddenEndpointIsPruned(t *testing.T) {
 	gates, port := queryFixture()
 	port.relations = append(port.relations, queryRelation("r4", qP, "forked_from", matVID, "p2-v1", matID, "p2-obj",
@@ -498,6 +516,75 @@ func TestQueryEdgeWithHiddenEndpointIsPruned(t *testing.T) {
 	if contains(relationIDs(res), "r4") || contains(objectIDs(res), "p2-obj") {
 		t.Fatalf("the edge with a hidden endpoint leaked, got objects=%v relations=%v", objectIDs(res), relationIDs(res))
 	}
+}
+
+// TestQuerySeedEdgeIsAuthorizedByPinCarrierNotContainer is the rule T0818
+// changes, at the service layer, in the direction that used to be broken: a
+// seed edge whose relation row AND endpoints wear an invisible project's
+// containers still enters the slice when BOTH pins are carried by the reading
+// project's own states — that is what a merged external fork's landed content
+// is, and the container is reported as it is (ADR-027 Decisions 1-3①).
+func TestQuerySeedEdgeIsAuthorizedByPinCarrierNotContainer(t *testing.T) {
+	gates, port := queryFixture()
+	// The contributor's project qP2 is PRIVATE and unreadable; the edge and
+	// both containers are its; both pins are carried by qP's states.
+	port.relations = append(port.relations, queryRelation("r5", qP2, "supports", "p2-v1", "p2-v2", "p2-obj", "p2-obj2",
+		queryCarriedEndpoint("p2-v1", "p2-obj", "material", qP2, qP),
+		queryCarriedEndpoint("p2-v2", "p2-obj2", "material", qP2, qP)))
+	port.byIDs["p2-v1"] = queryObject("p2-obj", qP2, "material", "p2-v1")
+	port.byIDs["p2-v2"] = queryObject("p2-obj2", qP2, "material", "p2-v2")
+	gates.outcomes[qP2] = projects.ErrProjectNotFound
+	svc := newQueryService(gates, port)
+
+	res, err := svc.Query(context.Background(), projects.Reader{UserID: "u1", Authenticated: true}, qP, QueryInput{})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if !contains(relationIDs(res), "r5") {
+		t.Fatalf("the landed edge was pruned on its containers, got relations=%v objects=%v", relationIDs(res), objectIDs(res))
+	}
+	// The landed node is reported with the contributor's container identity —
+	// the container did not become a gate, and it did not get rewritten
+	// either.
+	got, ok := findObject(res, "p2-obj")
+	if !ok || got.Object.ProjectID != qP2 || got.Version.ID != "p2-v1" {
+		t.Fatalf("the landed node must be reported as the contributor's container at the pinned version, got %+v", got)
+	}
+}
+
+// TestQuerySeedEdgeWithHiddenPinCarrierIsPruned is the negative half of the
+// same rule: the CONTAINER being readable is not permission. A pin carried by
+// a project this caller cannot read prunes the seed edge even when the edge and
+// that endpoint's container are both the caller's own — the enumeration range
+// is this project's lineage, never another project's versions (ADR-027
+// Decision 4).
+func TestQuerySeedEdgeWithHiddenPinCarrierIsPruned(t *testing.T) {
+	gates, port := queryFixture()
+	// Containers and the relation are all qP's; the source pin's version is
+	// carried by qP2's states, which u1 may not read.
+	port.relations = append(port.relations, queryRelation("r6", qP, "forked_from", matVID, "p2-v1", matID, "p2-obj",
+		queryEndpoint(matVID, matID, "material", qP),
+		queryCarriedEndpoint("p2-v1", "p2-obj", "material", qP, qP2)))
+	gates.outcomes[qP2] = projects.ErrProjectNotFound
+	svc := newQueryService(gates, port)
+
+	res, err := svc.Query(context.Background(), projects.Reader{UserID: "u1", Authenticated: true}, qP, QueryInput{})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if contains(relationIDs(res), "r6") {
+		t.Fatalf("an edge pinning a version carried by an unreadable project leaked, got relations=%v", relationIDs(res))
+	}
+}
+
+// findObject returns the slice row for one object id.
+func findObject(res QueryResult, objectID string) (ObjectResult, bool) {
+	for _, o := range res.Objects {
+		if o.Object.ID == objectID {
+			return o, true
+		}
+	}
+	return ObjectResult{}, false
 }
 
 // TestQueryHopStoreFailureFailsClosed: a store failure on a traversal hop

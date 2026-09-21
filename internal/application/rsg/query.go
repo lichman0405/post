@@ -31,9 +31,15 @@ import (
 //     node of another project enters the result only when its project
 //     passes requireRead for this caller — filtering the seed alone is
 //     the classic leak shape this rule exists to forbid;
-//   - an edge is included only when its own project AND both endpoint
-//     projects are visible: a hidden endpoint would otherwise leak its
-//     pinned version id through the edge's payload.
+//   - a seed edge is included only when both of its pinned endpoint
+//     versions are CARRIED by a project this caller may read, and a hop
+//     only when the projects it names (its own and both endpoints') are
+//     visible: an edge whose pins or projects this caller cannot read
+//     would otherwise leak its pinned version ids through its payload. The
+//     seed is authorized by the pins' carriers and not by the containers
+//     they hang on, because a seed edge is content this project's own
+//     lineage carries — after a merged external fork the containers belong
+//     to the contributor (ADR-027 Decisions 1-2; query.go's pin check).
 //
 // Slice pinning (L1): StateID (or BranchID → its head state) selects the
 // "as-of" view — each object/relation renders at its newest version whose
@@ -122,9 +128,24 @@ func (s *Service) Query(ctx context.Context, r projects.Reader, projectID string
 	}
 
 	// Relation selection. An edge is kept when it passes the type
-	// filters, the induced-edge rule, and — defensive, cross-project
-	// edges cannot be written through the API but direct store writes
-	// could — its own and both endpoints' projects are visible.
+	// filters, the induced-edge rule, and the pin authorization below.
+	//
+	// The seed rows are the edges THIS project's lineage carries (the read
+	// above is lineage-scoped, and projectID passed the entry gate), so the
+	// authorization cannot run on the containers the rows wear: after a merge
+	// accepted an external fork's proposal the relation row and its "own"
+	// object are the contributor's, while the pins are versions the merge
+	// wrote into this project's states (ADR-027 Decisions 1-2 — the state
+	// carries, the project authorizes, `project_id` is not the criterion for
+	// what is in this RSG). Authorizing on the container hid the project's own
+	// accepted content from it, which is the defect T0818 fixes.
+	//
+	// What stays checkable, and what a payload of pinned version ids could
+	// otherwise disclose, is each pin's CARRIER: an endpoint version carried by
+	// a state of a project this caller cannot read prunes the edge (defensive
+	// — the merge refuses to write an edge to a version the accepted state does
+	// not contain, but a direct store write need not). For every pin written in
+	// the project owning its container the two rules agree.
 	relationResults := make([]RelationResult, 0, len(relRows))
 	seenEdges := make(map[string]bool, len(relRows))
 	for _, row := range relRows {
@@ -134,7 +155,7 @@ func (s *Service) Query(ctx context.Context, r projects.Reader, projectID string
 		if objectFilter && !(typeMatched[row.Source.ObjectID] && typeMatched[row.Target.ObjectID]) {
 			continue
 		}
-		visible, err := vis.edge(ctx, row.Relation.ProjectID, row.Source.ProjectID, row.Target.ProjectID)
+		visible, err := vis.pins(ctx, row.Source.CarriedBy, row.Target.CarriedBy)
 		if err != nil {
 			return QueryResult{}, err
 		}
@@ -358,10 +379,38 @@ func (v *queryVisibility) project(ctx context.Context, projectID string) (bool, 
 	return true, nil
 }
 
-// edge reports whether one edge may enter the slice: its own project and
-// both endpoint projects must each pass the per-hop requireRead. A hidden
-// endpoint prunes the edge — an included edge would otherwise disclose
-// the hidden project's pinned version ids through its payload.
+// pins reports whether one seed edge's pinned endpoint versions may enter the
+// slice: the project that CARRIES each pinned version must pass requireRead.
+// A pin whose carriage this caller cannot read — including an empty carriage,
+// which names no readable project — prunes the edge, because an included edge
+// discloses its pins' version ids through its payload.
+//
+// It deliberately does not look at the containers the pinned versions hang on:
+// for a version this project's lineage carries, the container is reported as
+// it is (ADR-027 Decision 1), so gating the seed on the container hides the
+// project's own accepted content from it — the T0818 defect. The traversal
+// keeps the container rule (edge, below): its hops are not lineage-scoped, so
+// the projects a hop names are the only ones there are to authorize.
+func (v *queryVisibility) pins(ctx context.Context, carriers ...string) (bool, error) {
+	for _, p := range carriers {
+		visible, err := v.project(ctx, p)
+		if err != nil {
+			return false, err
+		}
+		if !visible {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// edge reports whether one traversal hop may enter the slice: the relation's
+// own project and both endpoint projects must each pass the per-hop
+// requireRead. A hidden project prunes the hop — an included hop would
+// otherwise disclose the hidden project's pinned version ids through its
+// payload. Hops are the rows the caller has NOT already been authorized for by
+// its own state lineage (the adjacency read is not project-filtered), which is
+// why the container rule lives here and the carrier rule in pins.
 func (v *queryVisibility) edge(ctx context.Context, edgeProject, sourceProject, targetProject string) (bool, error) {
 	for _, p := range []string{edgeProject, sourceProject, targetProject} {
 		visible, err := v.project(ctx, p)

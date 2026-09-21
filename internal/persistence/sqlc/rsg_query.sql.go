@@ -120,16 +120,16 @@ const listObjectVersionsAsOf = `-- name: ListObjectVersionsAsOf :many
 SELECT DISTINCT ON (so.id) so.id, so.project_id, so.object_type, so.created_by, so.created_at, so.current_version_no, sov.id, sov.object_id, sov.version_no, sov.state_id, sov.branch_id, sov.schema_id, sov.schema_version, sov.title, sov.lifecycle_state, sov.payload, sov.visibility_policy_id, sov.integrity_hash, sov.created_by, sov.created_at, sov.abort_reason_code, sov.abort_explanation, sov.abort_replacement_ref, sov.aborted_by, sov.aborted_at, sov.abort_request_key
 FROM scientific_objects so
 JOIN scientific_object_versions sov ON sov.object_id = so.id
-WHERE so.project_id = $1
-  AND ($2::text[] IS NULL OR so.object_type = ANY($2))
-  AND ($3::uuid[] IS NULL OR sov.state_id = ANY($3))
+WHERE ($1::text[] IS NULL OR so.object_type = ANY($1))
+  AND ($2::uuid[] IS NULL OR sov.state_id = ANY($2))
+  AND sov.state_id IN (SELECT ps.id FROM project_states ps WHERE ps.project_id = $3)
 ORDER BY so.id, sov.version_no DESC
 `
 
 type ListObjectVersionsAsOfParams struct {
-	ProjectID   pgtype.UUID   `json:"project_id"`
 	ObjectTypes []string      `json:"object_types"`
 	Lineage     []pgtype.UUID `json:"lineage"`
+	ProjectID   pgtype.UUID   `json:"project_id"`
 }
 
 type ListObjectVersionsAsOfRow struct {
@@ -170,13 +170,49 @@ type ListObjectVersionsAsOfRow struct {
 // raw pgx query: the sqlc analyzer (v1.31.1) cannot resolve the recursive
 // CTE's self-reference and rejects valid PostgreSQL ("column reference id is
 // ambiguous"), and the walk is one bounded query the adapter owns wholesale.
-// Each object of the project with its as-of version: the newest version whose
-// state is in the lineage (nil lineage = no state pinning, the newest version
-// overall). object_types nil = every type. The version log is append-only and
-// version_no is monotonically increasing, so the newest version_no in the
-// lineage is exactly the version the object had reached at the pinned state.
+//
+// ENUMERATION RULE (ADR-027, T0818). The two seed reads below enumerate a
+// project's RSG by what its STATE LINEAGE CARRIES, not by the container's
+// `project_id`:
+//
+//   - the carrier is the state (`sov.state_id` / `rv.state_id`), and the
+//     project is the authorization surface — a version belongs to the RSG of
+//     the project whose state holds it;
+//   - `scientific_objects.project_id` / `relations.project_id` cannot answer
+//     "what is in this project's RSG": they only happen to agree with the
+//     state's project while a container never carries a version from another
+//     project, which is exactly what a merged external fork breaks. The merge
+//     materializes the accepted content onto the CONTRIBUTOR's containers
+//     (ADR-027 Decision 1 — the landed version keeps its source identity, so
+//     there is one truth and one version sequence per object), and those rows
+//     are carried by the upstream project's states. Selecting by container
+//     made the upstream project unable to read its own main back.
+//
+// The project's state set is `project_states.project_id = @project_id`
+// (served by the existing UNIQUE(project_id, state_hash) index); with a pin,
+// `@lineage` is that state's ancestor chain, already project-verified by the
+// walk, so the two conditions agree there. No new index is required: the
+// pinned shape uses relation_versions_state_idx /
+// scientific_object_versions_state_idx (00026) and the unpinned one the
+// project_states unique index.
+//
+// The same rule decides what a seed edge may DISCLOSE, so
+// ListRelationVersionsAsOf also reports, for both of its pins, the project
+// whose state carries the pinned version (`*_carried_by`, a project_states
+// lookup on the pinned version's state_id). The caller authorizes a seed edge
+// by its pins' carriers, never by the containers the rows wear: for landed
+// content those are the contributor's, and gating on them would hide the
+// project's own accepted content from it (the T0818 defect).
+// One row per object the project's lineage carries, at the newest version the
+// lineage carries (nil lineage = no state pinning, the newest version among
+// the project's states). object_types nil = every type. The version log is
+// append-only and version_no is monotonically increasing, so the newest
+// version_no in the lineage is exactly the version the object had reached at
+// the pinned state. The object row is the container the version HANGS ON: an
+// object the upstream project accepted from an external fork is the
+// contributor's container, reported as such.
 func (q *Queries) ListObjectVersionsAsOf(ctx context.Context, arg ListObjectVersionsAsOfParams) ([]ListObjectVersionsAsOfRow, error) {
-	rows, err := q.db.Query(ctx, listObjectVersionsAsOf, arg.ProjectID, arg.ObjectTypes, arg.Lineage)
+	rows, err := q.db.Query(ctx, listObjectVersionsAsOf, arg.ObjectTypes, arg.Lineage, arg.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -327,25 +363,29 @@ SELECT DISTINCT ON (r.id)
   sov_s.object_id AS source_object_id,
   so_s.object_type AS source_object_type,
   so_s.project_id AS source_project_id,
+  ps_s.project_id AS source_carried_by,
   sov_t.object_id AS target_object_id,
   so_t.object_type AS target_object_type,
-  so_t.project_id AS target_project_id
+  so_t.project_id AS target_project_id,
+  ps_t.project_id AS target_carried_by
 FROM relations r
 JOIN relation_versions rv ON rv.relation_id = r.id
 JOIN scientific_object_versions sov_s ON sov_s.id = rv.source_object_version_id
 JOIN scientific_objects so_s ON so_s.id = sov_s.object_id
+JOIN project_states ps_s ON ps_s.id = sov_s.state_id
 JOIN scientific_object_versions sov_t ON sov_t.id = rv.target_object_version_id
 JOIN scientific_objects so_t ON so_t.id = sov_t.object_id
-WHERE r.project_id = $1
-  AND ($2::text[] IS NULL OR rv.relation_type = ANY($2))
-  AND ($3::uuid[] IS NULL OR rv.state_id = ANY($3))
+JOIN project_states ps_t ON ps_t.id = sov_t.state_id
+WHERE ($1::text[] IS NULL OR rv.relation_type = ANY($1))
+  AND ($2::uuid[] IS NULL OR rv.state_id = ANY($2))
+  AND rv.state_id IN (SELECT ps.id FROM project_states ps WHERE ps.project_id = $3)
 ORDER BY r.id, rv.version_no DESC
 `
 
 type ListRelationVersionsAsOfParams struct {
-	ProjectID     pgtype.UUID   `json:"project_id"`
 	RelationTypes []string      `json:"relation_types"`
 	Lineage       []pgtype.UUID `json:"lineage"`
+	ProjectID     pgtype.UUID   `json:"project_id"`
 }
 
 type ListRelationVersionsAsOfRow struct {
@@ -364,16 +404,32 @@ type ListRelationVersionsAsOfRow struct {
 	SourceObjectID        pgtype.UUID        `json:"source_object_id"`
 	SourceObjectType      string             `json:"source_object_type"`
 	SourceProjectID       pgtype.UUID        `json:"source_project_id"`
+	SourceCarriedBy       pgtype.UUID        `json:"source_carried_by"`
 	TargetObjectID        pgtype.UUID        `json:"target_object_id"`
 	TargetObjectType      string             `json:"target_object_type"`
 	TargetProjectID       pgtype.UUID        `json:"target_project_id"`
+	TargetCarriedBy       pgtype.UUID        `json:"target_carried_by"`
 }
 
-// Each relation of the project with its as-of version (same lineage rule as
-// objects) plus the endpoint objects' context (object id, object type,
-// project) the query selection rules need. relation_types nil = every type.
+// Each relation the project's lineage carries with its as-of version (same
+// state-lineage rule as objects) plus the endpoint objects' context the query
+// selection rules need. relation_types nil = every type.
+//
+// The endpoint context carries TWO facts about each pinned endpoint version,
+// and the reader needs both:
+//   - `*_project_id` is the CONTAINER the version hangs on — after a merge
+//     landed an external fork's proposal that container is the contributor's,
+//     while the pin is a version the merge wrote upstream (Decision 1);
+//   - `*_carried_by` is the project whose STATE CARRIES the pinned version —
+//     the authorization surface of the pin (Decisions 2 and 4). The two are
+//     equal for every version written in the project that owns its container,
+//     and differ exactly for content a merge landed: there the pin's carrier
+//     is the project reading this row, and its container is the contributor's.
+//
+// `state_id` is NOT NULL with a RESTRICT foreign key (00005 line 15 / 00006
+// line 12), so the carrier join is total: every pin names exactly one.
 func (q *Queries) ListRelationVersionsAsOf(ctx context.Context, arg ListRelationVersionsAsOfParams) ([]ListRelationVersionsAsOfRow, error) {
-	rows, err := q.db.Query(ctx, listRelationVersionsAsOf, arg.ProjectID, arg.RelationTypes, arg.Lineage)
+	rows, err := q.db.Query(ctx, listRelationVersionsAsOf, arg.RelationTypes, arg.Lineage, arg.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -397,9 +453,11 @@ func (q *Queries) ListRelationVersionsAsOf(ctx context.Context, arg ListRelation
 			&i.SourceObjectID,
 			&i.SourceObjectType,
 			&i.SourceProjectID,
+			&i.SourceCarriedBy,
 			&i.TargetObjectID,
 			&i.TargetObjectType,
 			&i.TargetProjectID,
+			&i.TargetCarriedBy,
 		); err != nil {
 			return nil, err
 		}

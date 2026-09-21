@@ -190,12 +190,14 @@ type ObjectRelationVersion struct {
 }
 
 // QueryPort is the persistence slice the RSG query (T0209) reads through.
-// The production implementation is persistence.RSGQueryStore. All list
-// shapes are project-scoped and lineage-pinned ("as-of" semantics, see the
-// Service.Query comment); ListAdjacentRelationVersions is the one
-// deliberately NOT project-scoped read: a traversal hop may touch a
-// relation of another project, and the service authorizes every hop's
-// projects before the row can enter the result.
+// The production implementation is persistence.RSGQueryStore. The two seed
+// lists are scoped by STATE LINEAGE, not by container ownership (ADR-027):
+// they return what the project's states carry, which after an external
+// fork's merge includes versions hanging on the contributor's containers.
+// ListAdjacentRelationVersions is the one deliberately NOT project-scoped
+// read: a traversal hop may touch a relation of another project, and the
+// service authorizes every hop's projects before the row can enter the
+// result.
 type QueryPort interface {
 	// ListStateLineage returns the state ancestry chain (the named state
 	// and every ancestor) project-verified: a missing state and a state of
@@ -203,13 +205,16 @@ type QueryPort interface {
 	// the same "not found" outcome for them (never leak another project's
 	// state existence, docs/45).
 	ListStateLineage(ctx context.Context, projectID, stateID string) ([]string, error)
-	// ListObjectVersions returns each object of the project with its
-	// as-of version (newest version whose state is in the lineage; nil
-	// lineage = newest overall). objectTypes nil = every type.
+	// ListObjectVersions returns one row per object the project's state
+	// lineage carries, at its as-of version (newest version whose state is
+	// in the lineage; nil lineage = the newest version among the project's
+	// states). objectTypes nil = every type. Object is the CONTAINER the
+	// version hangs on — after an external fork's merge, the contributor's.
 	ListObjectVersions(ctx context.Context, projectID string, objectTypes, lineage []string) ([]ObjectQueryRow, error)
-	// ListRelationVersions returns each relation of the project with its
-	// as-of version and the endpoint objects' context (object id, type,
-	// project) the selection rules need. relationTypes nil = every type.
+	// ListRelationVersions returns one row per relation the project's state
+	// lineage carries, at its as-of version, with the endpoint objects'
+	// context (object id, type, project) the selection rules need.
+	// relationTypes nil = every type.
 	ListRelationVersions(ctx context.Context, projectID string, relationTypes, lineage []string) ([]RelationQueryRow, error)
 	// ListAdjacentRelationVersions returns the as-of relation versions
 	// touching any of versionIDs (either endpoint), with both endpoints'
@@ -235,7 +240,20 @@ type EndpointContext struct {
 	VersionID  string
 	ObjectID   string
 	ObjectType string
-	ProjectID  string
+	// ProjectID is the CONTAINER's project: the project the object the pinned
+	// version hangs on belongs to. After a merge landed an external fork's
+	// proposal that is the contributor's (ADR-027 Decision 1).
+	ProjectID string
+	// CarriedBy is the project whose STATE CARRIES the pinned version — the
+	// authorization surface of the pin (ADR-027 Decisions 2 and 4). It equals
+	// ProjectID for every version written in the project owning its container
+	// and differs from it exactly for content a merge landed, where the
+	// carrier is the project that accepted the content and the container is
+	// the contributor's. Filled by the lineage-scoped seed read
+	// (ListRelationVersions); zero on traversal rows (AdjacentRelationRow),
+	// which are not lineage-scoped and are authorized by the projects they
+	// name (query.go).
+	CarriedBy string
 }
 
 // RelationQueryRow is one relation with its as-of version and the endpoint
