@@ -242,9 +242,14 @@ func newForkMergePlatform(t *testing.T) *forkMergePlatform {
 		Latest:    stateStore,
 		Objects:   persistence.NewScientificObjectStore(pool),
 		Relations: persistence.NewRelationStore(pool),
-		Authz:     authz.NewMatrixEngine(),
-		Schemas:   reg,
-		Events:    events.Recorder{},
+		// The query port, wired exactly as cmd/api/main.go:586 wires it. T0817's
+		// own loop never reads it; T0818's does, and a platform that could not
+		// answer Query would make that read "not configured" rather than a
+		// measurement.
+		Queries: persistence.NewRSGQueryStore(pool),
+		Authz:   authz.NewMatrixEngine(),
+		Schemas: reg,
+		Events:  events.Recorder{},
 		// write_scientific_state's own_fork_only cell is resolved through
 		// this gate, never assumed by the service.
 		ForkGate: forkStore,

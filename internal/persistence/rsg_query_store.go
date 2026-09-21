@@ -77,9 +77,11 @@ func (s *RSGQueryStore) ListStateLineage(ctx context.Context, projectID, stateID
 	return lineage, nil
 }
 
-// ListObjectVersions implements rsg.QueryPort: each object of the project
-// with its as-of version (the newest version whose state is in the
-// lineage; nil lineage = newest overall).
+// ListObjectVersions implements rsg.QueryPort: one row per object the
+// project's STATE LINEAGE carries, at its as-of version (the newest version
+// whose state is in the lineage; nil lineage = the newest version among the
+// project's states). The container the version hangs on is reported as it is
+// — after an external fork's merge it is the contributor's (ADR-027).
 func (s *RSGQueryStore) ListObjectVersions(ctx context.Context, projectID string, objectTypes, lineage []string) ([]rsg.ObjectQueryRow, error) {
 	projectUUID, err := textUUID(projectID)
 	if err != nil {
@@ -130,8 +132,12 @@ func (s *RSGQueryStore) ListObjectVersions(ctx context.Context, projectID string
 	return out, nil
 }
 
-// ListRelationVersions implements rsg.QueryPort: each relation of the
-// project with its as-of version and both endpoints' object context.
+// ListRelationVersions implements rsg.QueryPort: one row per relation the
+// project's state lineage carries, at its as-of version, with both endpoints'
+// object context — the containers the pinned endpoint versions hang on AND the
+// projects whose states carry those pins (EndpointContext.CarriedBy), because
+// the caller authorizes a seed edge by its pins' carriers, not by the
+// containers (ADR-027: a landed version's container is the contributor's).
 func (s *RSGQueryStore) ListRelationVersions(ctx context.Context, projectID string, relationTypes, lineage []string) ([]rsg.RelationQueryRow, error) {
 	projectUUID, err := textUUID(projectID)
 	if err != nil {
@@ -175,12 +181,14 @@ func (s *RSGQueryStore) ListRelationVersions(ctx context.Context, projectID stri
 				ObjectID:   pgUUIDToText(row.SourceObjectID),
 				ObjectType: row.SourceObjectType,
 				ProjectID:  pgUUIDToText(row.SourceProjectID),
+				CarriedBy:  pgUUIDToText(row.SourceCarriedBy),
 			},
 			Target: rsg.EndpointContext{
 				VersionID:  pgUUIDToText(row.TargetObjectVersionID),
 				ObjectID:   pgUUIDToText(row.TargetObjectID),
 				ObjectType: row.TargetObjectType,
 				ProjectID:  pgUUIDToText(row.TargetProjectID),
+				CarriedBy:  pgUUIDToText(row.TargetCarriedBy),
 			},
 		})
 	}

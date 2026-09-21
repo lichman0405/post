@@ -331,9 +331,13 @@ func buildOutline(projectID string, objRows []ObjectQueryRow, relRows []Relation
 	// therefore resolves endpoints by their container object (the endpoint
 	// context the query joins): an edge pinned to a superseded version
 	// still counts, and the rendered title/branch come from the object's
-	// current row. The relation list is this project's own slice, so the
-	// endpoint contexts are trusted here (no cross-project edges exist in
-	// a project-scoped read).
+	// current row. The relation list is this project's own slice — the edges
+	// its STATE LINEAGE carries, already authorized by their pins' carriers —
+	// so the endpoint contexts are trusted here. They are keyed by container
+	// object, and after a merge accepted an external fork's proposal those
+	// containers are the CONTRIBUTOR's while the versions are this project's
+	// (ADR-027 Decision 1): the linkage still runs on the object ids the query
+	// joined, exactly as it does for the project's own objects.
 	questionAddressedBy := make(map[string][]OutlineObjectRef)
 	questionAddressedSeen := make(map[string]map[string]bool)
 	for _, rel := range relRows {
