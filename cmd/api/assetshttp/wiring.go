@@ -57,6 +57,13 @@ type Deps struct {
 	// Dependencies is the project-side dependency read (T0707). The
 	// production value is *persistence.ProjectDependencyStore.
 	Dependencies DependencyReader
+	// Derive is the fork/derive use case (T0708). The production value is
+	// *assets.DeriveCommand, over the store that owns the derivation
+	// transaction — the second governed write this surface registers, beside
+	// Publish above, and required for the same reason: a surface wired
+	// without one of its ports is a wiring bug, not a degradation to answer
+	// around.
+	Derive DeriveCommand
 }
 
 // New wires the handlers.
@@ -68,6 +75,7 @@ func New(deps Deps) *API {
 		pages:        deps.Pages,
 		members:      deps.Members,
 		dependencies: deps.Dependencies,
+		derive:       deps.Derive,
 	}}
 }
 
@@ -109,4 +117,11 @@ func (a *API) Register(v1 *http.ServeMux) {
 	// under the projects subtree the project surface owns, and it is more
 	// specific than that subtree's routes, so the two coexist.
 	v1.HandleFunc("GET /api/v1/projects/{projectId}/dependencies", a.handlers.handleProjectDependencies)
+	// The fork/derive write (T0708). Not in the contract either — see
+	// derive.go for why it is mounted anyway, and why its path follows the
+	// publish's custom-method shape. It is a POST because it is a governed
+	// write: it needs the session and CSRF guard the v1 subtree applies to
+	// every write, and its Idempotency-Key is a header, which is where
+	// docs/22 puts it.
+	v1.HandleFunc("POST /api/v1/projects/{projectId}/assets:derive", a.handlers.handleDerive)
 }

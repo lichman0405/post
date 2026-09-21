@@ -107,6 +107,7 @@ import (
 	"github.com/lichman0405/post/internal/application/states"
 	"github.com/lichman0405/post/internal/application/templates"
 	appvalidation "github.com/lichman0405/post/internal/application/validation"
+	"github.com/lichman0405/post/internal/assets"
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/config"
 	"github.com/lichman0405/post/internal/contribution"
@@ -910,10 +911,38 @@ func run(args []string) int {
 		Store:    persistence.NewAssetPublishStore(pool, rsgvalidation.NewValidator(reg)),
 		Authz:    authz.NewMatrixEngine(),
 	})
+	// Asset fork/derive (T0708): POST .../assets:derive, the write docs/11 §5
+	// defines as "创建新的 Asset/Object identity，保留 lineage". The command
+	// decides the same authorization a publish does (the TARGET project's
+	// membership class against publish_private_to_public — no new action, no
+	// matrix edit), and the store's transaction adds the two decisions that
+	// are about the PARENT version: whether this caller may read it at all
+	// (the asset page's own ruler: a public project, or a member of it) and
+	// what its stored rights declaration says about derivatives. Both are
+	// re-made inside the transaction, beside the impact preview the publish
+	// also runs, and the new asset row, its version row, the lineage edge,
+	// the idempotency ledger entry, the audit row (which carries the rights
+	// verdict and the caller's confirmation) and the research event commit
+	// together or not at all.
+	//
+	// The membership adapter is the same *persistence.ProjectStore the
+	// publish above is wired over, and it is handed to the STORE as well as
+	// to the command: the parent read gate inside the transaction asks the
+	// same question the authorization outside it does, and there is one
+	// implementation of "is this caller a member" in this build.
+	projectStore := persistence.NewProjectStore(pool)
+	deriveCommand := assets.NewDeriveCommand(assets.DeriveDeps{
+		Members:  projectStore,
+		Policies: policyAPI.Service(),
+		Rules:    policy.NewRuleEvaluator(),
+		Store:    persistence.NewAssetDeriveStore(pool, rsgvalidation.NewValidator(reg), projectStore),
+		Authz:    authz.NewMatrixEngine(),
+	})
 	assetsAPI := assetshttp.New(assetshttp.Deps{
 		State:    assetshttp.NewPostgresStateStore(pool),
 		Projects: projectAPI.Service(),
 		Publish:  publishCommand,
+		Derive:   deriveCommand,
 		// The asset hub's reads (T0709). Pages is the read-only page reader;
 		// Members is the SAME project service the gate above is — the
 		// membership question is one the project surface already answers

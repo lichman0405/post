@@ -26,8 +26,8 @@ const (
 )
 
 // handlers owns the preview route and the publish route (T0705), the asset
-// hub's read routes (T0709: page.go) and the project-side dependency read
-// (T0707: dependencies.go).
+// hub's read routes (T0709: page.go), the project-side dependency read
+// (T0707: dependencies.go) and the fork/derive write (T0708: derive.go).
 type handlers struct {
 	state        StateReader
 	projects     Gate
@@ -35,6 +35,7 @@ type handlers struct {
 	pages        PageReader
 	members      Membership
 	dependencies DependencyReader
+	derive       DeriveCommand
 }
 
 // previewRequest is the request body: the proposed publish, in the shape

@@ -69,6 +69,12 @@ const appendOnlyTaskID = "T0013"
 // names — a transfer supersedes a holding by APPENDING, so "转移之后，转移
 // 之前的持有关系仍要读得出来" is exactly what the guard enforces: the
 // previous holder is a row no write path can rewrite or remove.
+// Migration 00128 joins asset_derive_creations (the T0708 Idempotency-Key
+// ledger of a research asset's DERIVATION): it points at an append-only
+// child version and at the parent version the child was created from, so
+// the entry that replays the derivation is history for exactly the reason
+// asset_publish_creations is — a rewritten entry would rewrite which
+// identity a key already created, and from which version.
 // Migration 00083 joins
 // knowledge_publication_creations (T0805, the same ledger on the knowledge
 // side): a publication points at an append-only scientific object version,
@@ -107,6 +113,7 @@ var appendOnlyTables = []string{
 	"semantic_merge_conflicts",
 	"merge_creations",
 	"asset_publish_creations",
+	"asset_derive_creations",
 	"knowledge_publication_creations",
 	"asset_version_parties",
 	"asset_rights_holder_events",
@@ -587,6 +594,29 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 			},
 			del: func(id string) error {
 				_, err := pool.Exec(ctx, `DELETE FROM asset_publish_creations WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			// The T0708 Idempotency-Key ledger of a DERIVATION. Same
+			// contract as the publish ledger above, over a different
+			// identity: the row names the NEW version the key created AND
+			// the parent version it was created from, so rewriting it would
+			// rewrite where an identity came from, and deleting it would let
+			// a replay create a second identity under one key.
+			table: "asset_derive_creations",
+			insert: func() string {
+				// av1 is the parent; av2 the child the derivation created.
+				return mustQueryUUID(`INSERT INTO asset_derive_creations
+					(project_id, idempotency_key, asset_version_id, parent_asset_version_id, relation_type)
+					VALUES ($1, 'derive-key-1', $2, $3, 'forked_from') RETURNING id`, p1, av2, av1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE asset_derive_creations SET relation_type = 'derived_from' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM asset_derive_creations WHERE id = $1`, id)
 				return err
 			},
 		},

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/internal/application/assetpublish"
@@ -88,7 +89,22 @@ type publishedPayload struct {
 
 // publishedFromDomain renders the stored version as the response body.
 func publishedFromDomain(v assetpublish.PublishedVersion) publishedPayload {
-	refs := v.OriginRefs
+	return publishedPayloadOf(v.AssetPID, v.Version, v.Visibility, v.IntegrityHash,
+		v.OriginRefs, v.PublishedBy, v.PublishedAt, v.Manifest, v.RightsJSON)
+}
+
+// publishedPayloadOf renders the nine fields a published version's response
+// carries, from the values both write paths return.
+//
+// It exists as one function because TWO responses carry these fields since
+// T0708: the publish's, and the derive's (derivedPayload embeds
+// publishedPayload and adds the three edge fields). A version's wire shape
+// is one shape — the timestamp format and the empty-list rule below are the
+// parts a second copy would sooner or later spell differently — and the
+// derivation's response is the publication's response plus its lineage.
+func publishedPayloadOf(assetPID, version string, visibility assets.Visibility, integrityHash string,
+	originRefs []string, publishedBy string, publishedAt time.Time, manifest, rightsJSON json.RawMessage) publishedPayload {
+	refs := originRefs
 	if refs == nil {
 		// A version with no provenance pins is a legal version (the gate
 		// asks only that a ref it is given be well-formed), and the wire
@@ -97,15 +113,15 @@ func publishedFromDomain(v assetpublish.PublishedVersion) publishedPayload {
 		refs = []string{}
 	}
 	return publishedPayload{
-		AssetPID:      v.AssetPID,
-		Version:       v.Version,
-		Visibility:    v.Visibility,
-		IntegrityHash: v.IntegrityHash,
+		AssetPID:      assetPID,
+		Version:       version,
+		Visibility:    visibility,
+		IntegrityHash: integrityHash,
 		OriginRefs:    refs,
-		PublishedBy:   v.PublishedBy,
-		PublishedAt:   v.PublishedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
-		Manifest:      v.Manifest,
-		Rights:        v.RightsJSON,
+		PublishedBy:   publishedBy,
+		PublishedAt:   publishedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+		Manifest:      manifest,
+		Rights:        rightsJSON,
 	}
 }
 

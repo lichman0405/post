@@ -1116,6 +1116,33 @@ var canonicalTables = map[string]tableExp{
 		uniques: [][]string{{"project_id", "idempotency_key"}},
 		fks:     []fkExp{fk("project_id", "projects", "RESTRICT"), fk("asset_version_id", "research_asset_versions", "RESTRICT")},
 	},
+	// 00128 (T0708): the Idempotency-Key ledger of a research asset
+	// DERIVATION — a fork/derive creating a NEW asset identity from an
+	// existing published version, with the lineage edge that records where
+	// it came from (docs/11 §5). Its shape is the fourth ledger of this
+	// kind (release_creations, merge_creations, asset_publish_creations,
+	// knowledge_publication_creations) and it is deliberately a table of
+	// its own rather than a column on the publish's: a key's meaning is
+	// the command that consumed it, and one key space would let a publish
+	// replay be answered with a version a derive created. The two extra
+	// columns are the derivation's identity — the (parent version,
+	// relation) pair the child was created FROM, which is what a replay is
+	// compared against. relation_type's CHECK is NARROWER than
+	// asset_lineage's above: a derivation records forked_from or
+	// derived_from and never supersedes (docs/11 §7), so a row no derive
+	// could have written cannot be created by one either. All three FKs
+	// are RESTRICT: a ledger entry without its child version, or without
+	// the parent edge it names, would turn a replay into a miss.
+	"asset_derive_creations": {
+		cols: []colExp{c("id", u, false, true), c("project_id", u, false, false), c("idempotency_key", txt, false, false),
+			c("asset_version_id", u, false, false), c("parent_asset_version_id", u, false, false), c("relation_type", txt, false, false), c("created_at", ts, false, true)},
+		pk:      []string{"id"},
+		uniques: [][]string{{"project_id", "idempotency_key"}},
+		checks:  []string{"relation_type = ANY"},
+		fks: []fkExp{fk("project_id", "projects", "RESTRICT"),
+			fk("asset_version_id", "research_asset_versions", "RESTRICT"),
+			fk("parent_asset_version_id", "research_asset_versions", "RESTRICT")},
+	},
 	// 00086 (T0804): the external fork lineage. The fork project is the
 	// PRIMARY KEY (a fork has one origin and can never claim a second);
 	// UNIQUE (parent_project_id, forked_by) is the idempotency key the
