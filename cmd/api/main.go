@@ -520,8 +520,12 @@ func run(args []string) int {
 	// The three-way diff use case (T0401): one instance serves both the PR
 	// page's diff read (T0408, through the prdiff resolution below) and the
 	// conflict resolution surface (T0407) — the engine is stateless and the
-	// ports are the same two read stores.
-	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool))
+	// ports are the same read stores. The third port is the proposal read
+	// (T0817) that lets the SOURCE side of a triple live in another project
+	// when a pull request of this one proposes it — the external fork's
+	// shape, and the only foreign source any of these callers may read.
+	pullRequestStore := persistence.NewPullRequestStore(pool)
+	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool), pullRequestStore)
 	// One check service, two consumers: the PR page's review read and the
 	// merge command's server-side re-run (docs/22 §7). The merge must run the
 	// SAME review the human read — a second instance would be a second
@@ -1069,7 +1073,14 @@ func run(args []string) int {
 		Aborts:   persistence.NewScientificObjectStore(pool),
 		Projects: projectAPI.Service(),
 		Authz:    authz.NewMatrixEngine(),
-		Checks:   checksSvc,
+		// The fork lineage (T0817): the merge reads a source branch out of
+		// its own project only when the lineage says that project is the PR
+		// author's fork of the PR's project — the same triple 00086's
+		// pull_request_fork_gate enforces on the row. Without it the merge
+		// refuses every cross-project source rather than reading a foreign
+		// project's branch on the say-so of a PR row.
+		Forks:  persistence.NewForkStore(pool),
+		Checks: checksSvc,
 		// The policy in force is read through the owning service (T0603) and
 		// evaluated through the typed rule surface: the merge asks a question
 		// (main_protected?) and never reads policy_json itself.

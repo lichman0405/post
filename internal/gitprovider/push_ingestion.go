@@ -278,6 +278,42 @@ type IngestPushParams struct {
 	Event      PushEvent
 	Changes    []ClassifiedChange
 	Candidates []SemanticCandidate
+
+	// ForkImport, when non-nil, marks this delivery as the content copy an
+	// external fork's import made (T0804). It is nil for every push
+	// delivery — a webhook, and the platform's own deliveries — and that is
+	// what keeps the two paths apart: the copy LANDS the branch on the
+	// imported content, so its pushed-head state is the branch's state,
+	// while a push records the facts of a commit and moves the ref pointer
+	// only. See ForkImportTransition.
+	ForkImport *ForkImportTransition
+}
+
+// ForkImportTransition is what a fork content copy adds to the delivery it
+// records: the actor the platform made the copy for, and the message the
+// transition is recorded under.
+//
+// A copy is the branch's FIRST content: the fork branch was created from a
+// state of its own project (the fork's genesis, or whatever the branch
+// forked) and the copy lands the parent's content on it. That is a state
+// transition like any other, and it has to look like one, or the branch's
+// chain is not a chain: the pushed-head state row alone — which is all a
+// push writes — would be a state of the branch that no state commit names
+// and that branches.base_state_id never reaches, so the branch would carry
+// two heads (the imported state and the first state a semantic write
+// commits on the branch) and the integrity review would refuse every
+// proposal from it (provenance/source_chain_unbroken, commit_linkage).
+// The transition therefore chains the pushed-head state to the state the
+// branch stands on, advances the branch's head to it, and records the
+// pair as a state commit — all in the delivery's own transaction.
+type ForkImportTransition struct {
+	// ActorID is the user whose request ran the import — the forker. It is
+	// the transition's actor, never left empty: state_commits.actor_id is
+	// NOT NULL, and the copy was made on this person's behalf (the pusher
+	// recorded on the delivery says the same thing on the Git side).
+	ActorID string
+	// Message is the transition's commit message.
+	Message string
 }
 
 // PushIngester is the push ingestion application service: all policy lives
@@ -473,11 +509,18 @@ type CopySource struct {
 // row instead of inspecting the copy's whole tree and poisoning the flag
 // with the bootstrap file. Nothing about the recorded facts changes: the
 // row names the same commit the copy puts on the ref.
-func (i *PushIngester) IngestCopy(ctx context.Context, ev PushEvent, src CopySource) (bool, error) {
+func (i *PushIngester) IngestCopy(ctx context.Context, ev PushEvent, src CopySource, tr ForkImportTransition) (bool, error) {
 	if err := i.refuseFrozenMain(ctx, ev); err != nil {
 		return false, err
 	}
+	// The transition travels with the delivery, so the store records the
+	// copy as the state transition it is (T0817) — see
+	// ForkImportTransition. A deletion-shaped copy (no head) carries no
+	// transition and is recorded exactly as a deletion-shaped push is.
 	params := IngestPushParams{Event: ev}
+	if !isZerosSHA(ev.After) {
+		params.ForkImport = &tr
+	}
 	if isZerosSHA(ev.After) {
 		return i.store.IngestPush(ctx, params)
 	}

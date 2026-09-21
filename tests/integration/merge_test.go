@@ -1166,12 +1166,20 @@ func TestMergeAppendsRelationVersionOnTheRealStack(t *testing.T) {
 	}
 }
 
-// relationVersionRow is one relation version as stored.
+// relationVersionRow is one relation version as stored. The first four
+// columns are what the merge tests compare verdicts on; ID, VersionNo,
+// Payload and CreatedBy are the row's identity and authorship, which the
+// external fork merge suite (T0817) reads to prove an edge travelled into
+// another project's state with its pins re-pointed rather than verbatim.
 type relationVersionRow struct {
+	ID                    string
+	VersionNo             int
 	StateID               string
 	RelationType          string
 	SourceObjectVersionID string
 	TargetObjectVersionID string
+	Payload               []byte
+	CreatedBy             string
 }
 
 // relationHead reads a relation's current version counter.
@@ -1214,9 +1222,11 @@ func (f *mergeFixture) relationVersionRow(t *testing.T, ctx context.Context, rel
 	t.Helper()
 	var row relationVersionRow
 	if err := f.pool.QueryRow(ctx, `
-		SELECT state_id::text, relation_type, source_object_version_id::text, target_object_version_id::text
+		SELECT id::text, version_no, state_id::text, relation_type,
+		       source_object_version_id::text, target_object_version_id::text, payload, created_by::text
 		FROM relation_versions WHERE relation_id = $1 AND version_no = $2`,
-		relationID, versionNo).Scan(&row.StateID, &row.RelationType, &row.SourceObjectVersionID, &row.TargetObjectVersionID); err != nil {
+		relationID, versionNo).Scan(&row.ID, &row.VersionNo, &row.StateID, &row.RelationType,
+		&row.SourceObjectVersionID, &row.TargetObjectVersionID, &row.Payload, &row.CreatedBy); err != nil {
 		t.Fatalf("read relation version %d: %v", versionNo, err)
 	}
 	return row

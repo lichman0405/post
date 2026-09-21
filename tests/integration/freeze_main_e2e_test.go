@@ -406,7 +406,7 @@ func TestFreezeMainGovernanceEndToEnd(t *testing.T) {
 		Schemas:   reg,
 		Events:    events.Recorder{},
 	})
-	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool))
+	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool), persistence.NewPullRequestStore(pool))
 	resolutionSvc := resolutions.NewService(diffSvc, resolutions.NewPGStore(pool), projectSvc, authz.NewMatrixEngine())
 	mergeSvc := merge.NewService(merge.Deps{
 		Store:     persistence.NewSemanticMergeStore(pool),

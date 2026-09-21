@@ -171,6 +171,12 @@ type ForkImportRequest struct {
 	// created there: the ingestion resolves the branch row from
 	// refs/heads/<TargetBranch>).
 	TargetBranch string
+	// ActorID is the user whose request ran the import — the forker. It is
+	// the imported transition's actor (T0817): the copy lands the branch on
+	// the parent's content, which is a state transition like any other, and
+	// a transition names who it was made for. Required — the platform never
+	// records a transition on nobody's behalf.
+	ActorID string
 }
 
 // ForkImportResult is the outcome of one import: the commit that was
@@ -222,8 +228,8 @@ func NewForkImporter(port GitPort, store ForkImportStore, ingest *PushIngester) 
 // drift, healed by retrying the request (the row insert is a no-op, the
 // copy re-runs).
 func (f *ForkImporter) Import(ctx context.Context, in ForkImportRequest) (ForkImportResult, error) {
-	if in.SourceProjectID == "" || in.TargetProjectID == "" || in.TargetBranch == "" {
-		return ForkImportResult{}, fmt.Errorf("%w: the fork import needs both projects and the target branch", ErrConflict)
+	if in.SourceProjectID == "" || in.TargetProjectID == "" || in.TargetBranch == "" || in.ActorID == "" {
+		return ForkImportResult{}, fmt.Errorf("%w: the fork import needs both projects, the target branch and the actor it is made for", ErrConflict)
 	}
 	source, err := f.store.ForkRepo(ctx, in.SourceProjectID)
 	if err != nil {
@@ -308,6 +314,9 @@ func (f *ForkImporter) Import(ctx context.Context, in ForkImportRequest) (ForkIm
 		Repository: sourceRepo,
 		Ref:        sourceRef,
 		ForkPoint:  baseline,
+	}, ForkImportTransition{
+		ActorID: in.ActorID,
+		Message: forkImportMessage(in, sourceRef, sourceSHA),
 	})
 	if err != nil {
 		return ForkImportResult{}, err
@@ -333,6 +342,17 @@ func (f *ForkImporter) Import(ctx context.Context, in ForkImportRequest) (ForkIm
 // forkImportPusher is the pusher recorded on an imported delivery: the
 // platform's own service identity, never a person's provider login.
 const forkImportPusher = "post-fork-service"
+
+// forkImportMessage is the commit message of the imported transition: what
+// arrived, where it came from, and which project it was copied out of. The
+// three facts are the ones a reader walking the branch's history back to its
+// root needs (docs/09 §2: a state commit names actor, channel, message and
+// the base → result pair), and none of them is inferred later from the
+// branch name.
+func forkImportMessage(in ForkImportRequest, sourceRef, sourceSHA string) string {
+	return fmt.Sprintf("fork import: %s@%s from project %s",
+		sourceRef, sourceSHA, in.SourceProjectID)
+}
 
 // forkImportDeliveryID is the delivery id of an imported copy. Deliveries
 // are correlation only — the dedupe key is (repository, ref, after) — and

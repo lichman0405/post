@@ -20,6 +20,9 @@ const (
 	sourceHead    = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	baselineSHA   = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	targetOldHead = "cccccccccccccccccccccccccccccccccccccccc"
+	// forkActor is the user the import is made for — the forker. A
+	// transition names an actor, so the import has no shape without one.
+	forkActor = "33333333-3333-4333-8333-333333333333"
 )
 
 // fakeForkImportStore answers the two reads the importer makes: the
@@ -162,6 +165,7 @@ func TestForkImportRecordsTheCopyBeforeItLands(t *testing.T) {
 	res, err := h.imp.Import(context.Background(), gitprovider.ForkImportRequest{
 		SourceProjectID: sourceProject,
 		TargetProjectID: targetProject,
+		ActorID:         forkActor,
 		SourceRef:       "refs/heads/feature",
 		TargetBranch:    "fork/feature",
 	})
@@ -241,6 +245,7 @@ func TestForkImportUsesTheLinesRecordedForkPoint(t *testing.T) {
 	if _, err := h.imp.Import(context.Background(), gitprovider.ForkImportRequest{
 		SourceProjectID: sourceProject,
 		TargetProjectID: targetProject,
+		ActorID:         forkActor,
 		SourceRef:       "refs/heads/feature",
 		TargetBranch:    "fork/feature",
 	}); err != nil {
@@ -274,6 +279,7 @@ func TestForkImportCarriesTheSourceLinesEvidenceWithoutAForkPoint(t *testing.T) 
 	if _, err := h.imp.Import(context.Background(), gitprovider.ForkImportRequest{
 		SourceProjectID: sourceProject,
 		TargetProjectID: targetProject,
+		ActorID:         forkActor,
 		SourceRef:       "refs/heads/line-r1",
 		TargetBranch:    "fork/feature",
 	}); err != nil {
@@ -323,6 +329,7 @@ func TestForkImportCarriesTheSourceLinesCandidates(t *testing.T) {
 	if _, err := h.imp.Import(context.Background(), gitprovider.ForkImportRequest{
 		SourceProjectID: sourceProject,
 		TargetProjectID: targetProject,
+		ActorID:         forkActor,
 		SourceRef:       "refs/heads/line-r4",
 		TargetBranch:    "fork/feature",
 	}); err != nil {
@@ -349,6 +356,7 @@ func TestForkImportPropagatesEvidenceFailures(t *testing.T) {
 	_, err := h.imp.Import(context.Background(), gitprovider.ForkImportRequest{
 		SourceProjectID: sourceProject,
 		TargetProjectID: targetProject,
+		ActorID:         forkActor,
 		SourceRef:       "refs/heads/line-r1",
 		TargetBranch:    "fork/feature",
 	})
@@ -370,6 +378,7 @@ func TestForkImportDefaultsToTheSourceDefaultBranch(t *testing.T) {
 	if _, err := h.imp.Import(context.Background(), gitprovider.ForkImportRequest{
 		SourceProjectID: sourceProject,
 		TargetProjectID: targetProject,
+		ActorID:         forkActor,
 		TargetBranch:    "fork/feature",
 	}); err != nil {
 		t.Fatalf("Import: %v", err)
@@ -392,6 +401,7 @@ func TestForkImportRefusesWhenTheSourceHeadIsUnreachable(t *testing.T) {
 	_, err := h.imp.Import(context.Background(), gitprovider.ForkImportRequest{
 		SourceProjectID: sourceProject,
 		TargetProjectID: targetProject,
+		ActorID:         forkActor,
 		SourceRef:       "refs/heads/feature",
 		TargetBranch:    "fork/feature",
 	})
@@ -413,6 +423,7 @@ func TestForkImportAppliesTheFrozenMainRule(t *testing.T) {
 	_, err := h.imp.Import(context.Background(), gitprovider.ForkImportRequest{
 		SourceProjectID: sourceProject,
 		TargetProjectID: targetProject,
+		ActorID:         forkActor,
 		SourceRef:       "refs/heads/feature",
 		TargetBranch:    "main",
 	})
@@ -435,6 +446,7 @@ func TestForkImportPropagatesForkPointFailures(t *testing.T) {
 	_, err := h.imp.Import(context.Background(), gitprovider.ForkImportRequest{
 		SourceProjectID: sourceProject,
 		TargetProjectID: targetProject,
+		ActorID:         forkActor,
 		SourceRef:       "refs/heads/feature",
 		TargetBranch:    "fork/feature",
 	})
@@ -454,6 +466,7 @@ func TestForkImportNeedsAProvisionedPair(t *testing.T) {
 	_, err := h.imp.Import(context.Background(), gitprovider.ForkImportRequest{
 		SourceProjectID: sourceProject,
 		TargetProjectID: targetProject,
+		ActorID:         forkActor,
 		SourceRef:       "refs/heads/feature",
 		TargetBranch:    "fork/feature",
 	})
@@ -471,6 +484,20 @@ func TestForkImportNeedsItsShape(t *testing.T) {
 	if _, err := h.imp.Import(context.Background(), gitprovider.ForkImportRequest{SourceProjectID: sourceProject}); !errors.Is(err, gitprovider.ErrConflict) {
 		t.Fatalf("Import without a target = %v, want ErrConflict", err)
 	}
+	// The actor is one of them: the copy lands a state transition, and a
+	// transition made for nobody is not a transition this platform records
+	// (T0817). The refusal is checked BEFORE any read, so the harness's
+	// store and provider are both untouched.
+	if _, err := h.imp.Import(context.Background(), gitprovider.ForkImportRequest{
+		SourceProjectID: sourceProject,
+		TargetProjectID: targetProject,
+		TargetBranch:    "fork/feature",
+	}); !errors.Is(err, gitprovider.ErrConflict) {
+		t.Fatalf("Import without an actor = %v, want ErrConflict", err)
+	}
+	if len(h.entries()) != 0 {
+		t.Fatalf("an actorless import reached the provider: %v", h.entries())
+	}
 }
 
 // TestForkImportDeliveryIDIsDerivedFromTheDelivery: deliverables are
@@ -480,6 +507,7 @@ func TestForkImportDeliveryIDIsDerived(t *testing.T) {
 	if _, err := h.imp.Import(context.Background(), gitprovider.ForkImportRequest{
 		SourceProjectID: sourceProject,
 		TargetProjectID: targetProject,
+		ActorID:         forkActor,
 		SourceRef:       "refs/heads/feature",
 		TargetBranch:    "fork/feature",
 	}); err != nil {
@@ -494,6 +522,7 @@ func TestForkImportDeliveryIDIsDerived(t *testing.T) {
 	if _, err := h2.imp.Import(context.Background(), gitprovider.ForkImportRequest{
 		SourceProjectID: sourceProject,
 		TargetProjectID: targetProject,
+		ActorID:         forkActor,
 		SourceRef:       "refs/heads/feature",
 		TargetBranch:    "fork/feature",
 	}); err != nil {

@@ -236,6 +236,28 @@ func (s *BranchStore) GetBranchHead(ctx context.Context, branchID string) (domai
 	return projectStateFromRow(state), nil
 }
 
+// GetBranchProject reads the project a branch belongs to, by the branch's
+// own id — the row is the answer, never an input (T0817). The cross-project
+// reads that have to judge a branch their caller did not scope (the merge's
+// source side, the integrity review's chain boundaries) ask this question
+// first, so "which project owns this branch" is read rather than assumed.
+// An unknown branch answers branches.ErrBranchNotFound, the same outcome
+// every other by-id branch read gives.
+func (s *BranchStore) GetBranchProject(ctx context.Context, branchID string) (string, error) {
+	id, err := textUUID(branchID)
+	if err != nil {
+		return "", branches.ErrBranchNotFound
+	}
+	branch, err := sqlc.New(s.pool).GetBranchByID(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) || isInvalidText(err) {
+		return "", branches.ErrBranchNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("persistence: get branch project: %w", err)
+	}
+	return pgUUIDToText(branch.ProjectID), nil
+}
+
 // mapBranchWriteError turns a failed branch insert into the package
 // outcomes: the (project, name) collision is a domain result, everything
 // else on the validated input is an adapter failure with the cause kept.

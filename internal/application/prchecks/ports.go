@@ -48,6 +48,13 @@ type BranchHeadReader interface {
 	// names no existing state (both are data outcomes, not adapter
 	// failures).
 	GetBranchHead(ctx context.Context, branchID string) (domain.ProjectState, error)
+	// GetBranchProject returns the project the branch row belongs to — the
+	// branch's OWN project, by the branch's own id. It is what a chain's
+	// boundary is judged in: a proposal's source branch may live in the
+	// contributor's fork (docs/04 §2, ADR-025), so the PR's project is the
+	// answer for the target side only. branches.ErrBranchNotFound for an
+	// unknown branch, like every other by-id branch read.
+	GetBranchProject(ctx context.Context, branchID string) (string, error)
 }
 
 // ManifestReader is the lineage read surface: the stored-form members of

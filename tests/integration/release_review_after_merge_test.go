@@ -147,7 +147,7 @@ func newReleaseMergeFixture(t *testing.T, ctx context.Context) *releaseMergeFixt
 	seedReleaseMergeAcceptedState(t, ctx, svc, aliceUser, projectID, mainBranch.ID)
 
 	policyStore := persistence.NewPolicyStore(pool)
-	diffsSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool))
+	diffsSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool), persistence.NewPullRequestStore(pool))
 	resolutionSvc := resolutions.NewService(
 		diffsSvc, resolutions.NewPGStore(pool), projectSvc, authz.NewMatrixEngine())
 	merges := merge.NewService(merge.Deps{
