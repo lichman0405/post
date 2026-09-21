@@ -1,0 +1,406 @@
+{
+  "name": "grounded-answer",
+  "note": "The acceptance path: a document that cites exactly what retrieval returned is accepted, carried as a View, and marks the sources it leans on. Pins both citation kinds (a document and a traversed object version) and the fact that an unaddressable source is still listed.",
+  "query": "Which MOF materials show CO2 uptake above 3 mmol/g at 298 K, and has that been reproduced?",
+  "signals": [
+    {
+      "signal": "full_text",
+      "ran": true,
+      "hits": 3
+    },
+    {
+      "signal": "vector",
+      "skipped": "no_embedder"
+    },
+    {
+      "signal": "facets",
+      "skipped": "no_facets"
+    },
+    {
+      "signal": "graph",
+      "ran": true,
+      "hits": 2
+    }
+  ],
+  "sources": [
+    {
+      "rank": 1,
+      "ref": "asset:AST-0001@2",
+      "kind": "document",
+      "entity_type": "asset",
+      "object_type": "material",
+      "identity": "AST-0001",
+      "version": "2",
+      "title": "Mg-MOF-74 CO2 uptake at 298 K",
+      "project_id": "3f2a5b7c-1d4e-4a6b-8c9d-0e1f2a3b4c5d",
+      "object_id": "1d2c3b4a-5e6f-4071-8293-a4b5c6d7e8f9",
+      "labels": [
+        "independently_reproduced"
+      ],
+      "factors": [
+        {
+          "factor": "query_scope_match",
+          "level": "question",
+          "level_rank": 0,
+          "reason": "recalled by the question's own content (full_text)"
+        },
+        {
+          "factor": "evidence",
+          "level": "reviewed",
+          "level_rank": 0,
+          "reason": "2 evidence assertions target this version, 1 reviewed",
+          "facts": {
+            "assertions": 2,
+            "direct": 0,
+            "rejected": 0,
+            "reviewed": 1
+          }
+        },
+        {
+          "factor": "review",
+          "level": "approved",
+          "level_rank": 0,
+          "reason": "1 scientific review on the state this version was created in, 1 approved",
+          "facts": {
+            "approved": 1,
+            "changes_requested": 0,
+            "scientific": 1
+          }
+        },
+        {
+          "factor": "reproduction",
+          "level": "independent",
+          "level_rank": 0,
+          "reason": "2 reproductions recorded, 2 from another project",
+          "facts": {
+            "failed": 0,
+            "independent": 2,
+            "reproduces": 2
+          }
+        },
+        {
+          "factor": "conflict",
+          "level": "uncontested",
+          "level_rank": 0,
+          "reason": "nothing on the platform contradicts this version (no contradictory evidence assertion, no contradicts relation)",
+          "facts": {
+            "evidence_assertions": 0,
+            "relations": 0
+          }
+        },
+        {
+          "factor": "version",
+          "level": "current",
+          "level_rank": 0,
+          "reason": "version 2 is the newest version of its object and is active",
+          "facts": {
+            "newest_version_no": 2,
+            "version_no": 2
+          }
+        }
+      ],
+      "signals": [
+        {
+          "signal": "full_text",
+          "rank": 1,
+          "score": 0.31
+        }
+      ]
+    },
+    {
+      "rank": 2,
+      "ref": "object_version:1d2c3b4a-5e6f-4071-8293-a4b5c6d7e8f9@1",
+      "kind": "object_version",
+      "object_type": "finding",
+      "identity": "1d2c3b4a-5e6f-4071-8293-a4b5c6d7e8f9",
+      "version": "1",
+      "title": "Uptake falls by 4% after ten cycles",
+      "project_id": "3f2a5b7c-1d4e-4a6b-8c9d-0e1f2a3b4c5d",
+      "object_id": "1d2c3b4a-5e6f-4071-8293-a4b5c6d7e8f9",
+      "object_version_id": "9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a",
+      "labels": [
+        "mixed_evidence",
+        "actively_contested"
+      ],
+      "factors": [
+        {
+          "factor": "query_scope_match",
+          "level": "related",
+          "level_rank": 2,
+          "reason": "reached by relation traversal from a recalled document, not recalled itself"
+        },
+        {
+          "factor": "evidence",
+          "level": "reviewed",
+          "level_rank": 0,
+          "reason": "3 evidence assertions target this version, 1 reviewed, 2 direct",
+          "facts": {
+            "assertions": 3,
+            "direct": 2,
+            "rejected": 0,
+            "reviewed": 1
+          }
+        },
+        {
+          "factor": "review",
+          "level": "reviewed",
+          "level_rank": 1,
+          "reason": "1 scientific review on the state this version was created in, none approved, 1 requesting changes",
+          "facts": {
+            "approved": 0,
+            "changes_requested": 1,
+            "scientific": 1
+          }
+        },
+        {
+          "factor": "reproduction",
+          "level": "disputed",
+          "level_rank": 1,
+          "reason": "2 reproductions recorded, 1 from another project, and 1 recorded failure to reproduce",
+          "facts": {
+            "failed": 1,
+            "independent": 1,
+            "reproduces": 2
+          }
+        },
+        {
+          "factor": "conflict",
+          "level": "contested",
+          "level_rank": 1,
+          "reason": "1 contradictory evidence assertion and 1 contradicts relation touch this version",
+          "facts": {
+            "evidence_assertions": 1,
+            "relations": 1
+          }
+        },
+        {
+          "factor": "version",
+          "level": "current",
+          "level_rank": 0,
+          "reason": "version 1 is the newest version of its object and is active",
+          "facts": {
+            "newest_version_no": 1,
+            "version_no": 1
+          }
+        }
+      ],
+      "signals": [
+        {
+          "signal": "graph",
+          "rank": 1,
+          "score": 0.5
+        }
+      ],
+      "hops": [
+        {
+          "relation_type": "derived_from",
+          "direction": "out",
+          "from_ref": "asset:AST-0001@2",
+          "depth": 1
+        }
+      ]
+    }
+  ],
+  "provider": {
+    "document": "{\n  \"answer_version\": \"1\",\n  \"summary\": \"Mg-MOF-74 takes up 3.2 mmol/g of CO2 at 298 K (asset:AST-0001@2). One independent reproduction is recorded against object_version:1d2c3b4a-5e6f-4071-8293-a4b5c6d7e8f9@1, together with one recorded failure to reproduce.\",\n  \"citations\": [\n    \"asset:AST-0001@2\",\n    \"object_version:1d2c3b4a-5e6f-4071-8293-a4b5c6d7e8f9@1\"\n  ]\n}"
+  },
+  "expected_answer": {
+    "answer_version": "1",
+    "status": "answered",
+    "query": "Which MOF materials show CO2 uptake above 3 mmol/g at 298 K, and has that been reproduced?",
+    "answer_view": true,
+    "summary": "Mg-MOF-74 takes up 3.2 mmol/g of CO2 at 298 K (asset:AST-0001@2). One independent reproduction is recorded against object_version:1d2c3b4a-5e6f-4071-8293-a4b5c6d7e8f9@1, together with one recorded failure to reproduce.",
+    "citations": [
+      "asset:AST-0001@2",
+      "object_version:1d2c3b4a-5e6f-4071-8293-a4b5c6d7e8f9@1"
+    ],
+    "limitations": [
+      {
+        "text": "the vector signal did not run: no embedder is configured, so the question could not be embedded and no stored vector could be compared against it",
+        "origin": "platform"
+      },
+      {
+        "text": "the facet signal did not run: the question carried no structured filter, and the facet signal without one would be the newest rows of the index rather than a match",
+        "origin": "platform"
+      },
+      {
+        "text": "1 source was reached by relation traversal rather than recalled by the question itself, so its place in this result is its relation to a source that matched",
+        "refs": [
+          "object_version:1d2c3b4a-5e6f-4071-8293-a4b5c6d7e8f9@1"
+        ],
+        "origin": "platform"
+      }
+    ],
+    "conflicts": [
+      {
+        "text": "1 contradictory evidence assertion and 1 contradicts relation touch this version",
+        "refs": [
+          "object_version:1d2c3b4a-5e6f-4071-8293-a4b5c6d7e8f9@1"
+        ],
+        "origin": "platform"
+      },
+      {
+        "text": "2 reproductions recorded, 1 from another project, and 1 recorded failure to reproduce",
+        "refs": [
+          "object_version:1d2c3b4a-5e6f-4071-8293-a4b5c6d7e8f9@1"
+        ],
+        "origin": "platform"
+      }
+    ],
+    "sources": [
+      {
+        "rank": 1,
+        "ref": "asset:AST-0001@2",
+        "kind": "document",
+        "entity_type": "asset",
+        "object_type": "material",
+        "title": "Mg-MOF-74 CO2 uptake at 298 K",
+        "version": "2",
+        "href": "/api/v1/assets/AST-0001?version=2",
+        "project_id": "3f2a5b7c-1d4e-4a6b-8c9d-0e1f2a3b4c5d",
+        "labels": [
+          "independently_reproduced"
+        ],
+        "factors": [
+          {
+            "factor": "query_scope_match",
+            "level": "question",
+            "level_rank": 0,
+            "reason": "recalled by the question's own content (full_text)"
+          },
+          {
+            "factor": "evidence",
+            "level": "reviewed",
+            "level_rank": 0,
+            "reason": "2 evidence assertions target this version, 1 reviewed",
+            "facts": {
+              "assertions": 2,
+              "direct": 0,
+              "rejected": 0,
+              "reviewed": 1
+            }
+          },
+          {
+            "factor": "review",
+            "level": "approved",
+            "level_rank": 0,
+            "reason": "1 scientific review on the state this version was created in, 1 approved",
+            "facts": {
+              "approved": 1,
+              "changes_requested": 0,
+              "scientific": 1
+            }
+          },
+          {
+            "factor": "reproduction",
+            "level": "independent",
+            "level_rank": 0,
+            "reason": "2 reproductions recorded, 2 from another project",
+            "facts": {
+              "failed": 0,
+              "independent": 2,
+              "reproduces": 2
+            }
+          },
+          {
+            "factor": "conflict",
+            "level": "uncontested",
+            "level_rank": 0,
+            "reason": "nothing on the platform contradicts this version (no contradictory evidence assertion, no contradicts relation)",
+            "facts": {
+              "evidence_assertions": 0,
+              "relations": 0
+            }
+          },
+          {
+            "factor": "version",
+            "level": "current",
+            "level_rank": 0,
+            "reason": "version 2 is the newest version of its object and is active",
+            "facts": {
+              "newest_version_no": 2,
+              "version_no": 2
+            }
+          }
+        ],
+        "cited": true
+      },
+      {
+        "rank": 2,
+        "ref": "object_version:1d2c3b4a-5e6f-4071-8293-a4b5c6d7e8f9@1",
+        "kind": "object_version",
+        "object_type": "finding",
+        "title": "Uptake falls by 4% after ten cycles",
+        "version": "1",
+        "project_id": "3f2a5b7c-1d4e-4a6b-8c9d-0e1f2a3b4c5d",
+        "labels": [
+          "mixed_evidence",
+          "actively_contested"
+        ],
+        "factors": [
+          {
+            "factor": "query_scope_match",
+            "level": "related",
+            "level_rank": 2,
+            "reason": "reached by relation traversal from a recalled document, not recalled itself"
+          },
+          {
+            "factor": "evidence",
+            "level": "reviewed",
+            "level_rank": 0,
+            "reason": "3 evidence assertions target this version, 1 reviewed, 2 direct",
+            "facts": {
+              "assertions": 3,
+              "direct": 2,
+              "rejected": 0,
+              "reviewed": 1
+            }
+          },
+          {
+            "factor": "review",
+            "level": "reviewed",
+            "level_rank": 1,
+            "reason": "1 scientific review on the state this version was created in, none approved, 1 requesting changes",
+            "facts": {
+              "approved": 0,
+              "changes_requested": 1,
+              "scientific": 1
+            }
+          },
+          {
+            "factor": "reproduction",
+            "level": "disputed",
+            "level_rank": 1,
+            "reason": "2 reproductions recorded, 1 from another project, and 1 recorded failure to reproduce",
+            "facts": {
+              "failed": 1,
+              "independent": 1,
+              "reproduces": 2
+            }
+          },
+          {
+            "factor": "conflict",
+            "level": "contested",
+            "level_rank": 1,
+            "reason": "1 contradictory evidence assertion and 1 contradicts relation touch this version",
+            "facts": {
+              "evidence_assertions": 1,
+              "relations": 1
+            }
+          },
+          {
+            "factor": "version",
+            "level": "current",
+            "level_rank": 0,
+            "reason": "version 1 is the newest version of its object and is active",
+            "facts": {
+              "newest_version_no": 1,
+              "version_no": 1
+            }
+          }
+        ],
+        "cited": true
+      }
+    ]
+  }
+}

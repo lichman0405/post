@@ -55,7 +55,7 @@ const createOrganization = `-- name: CreateOrganization :one
 
 INSERT INTO organizations (slug, name, description)
 VALUES ($1, $2, $3)
-RETURNING id, slug, name, description, created_at, deactivated_at
+RETURNING id, slug, name, description, created_at, deactivated_at, attestation_attribution
 `
 
 type CreateOrganizationParams struct {
@@ -76,6 +76,7 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		&i.Description,
 		&i.CreatedAt,
 		&i.DeactivatedAt,
+		&i.AttestationAttribution,
 	)
 	return i, err
 }
@@ -84,7 +85,7 @@ const deactivateOrganization = `-- name: DeactivateOrganization :one
 UPDATE organizations
 SET deactivated_at = now()
 WHERE id = $1
-RETURNING id, slug, name, description, created_at, deactivated_at
+RETURNING id, slug, name, description, created_at, deactivated_at, attestation_attribution
 `
 
 func (q *Queries) DeactivateOrganization(ctx context.Context, id pgtype.UUID) (Organization, error) {
@@ -97,6 +98,7 @@ func (q *Queries) DeactivateOrganization(ctx context.Context, id pgtype.UUID) (O
 		&i.Description,
 		&i.CreatedAt,
 		&i.DeactivatedAt,
+		&i.AttestationAttribution,
 	)
 	return i, err
 }
@@ -133,8 +135,29 @@ func (q *Queries) EndOrganizationAffiliation(ctx context.Context, arg EndOrganiz
 	return i, err
 }
 
+const getOrganizationAttestationAttribution = `-- name: GetOrganizationAttestationAttribution :one
+SELECT attestation_attribution FROM organizations WHERE id = $1
+`
+
+// The organization's standing answer to "may we be named on an attestation
+// we issue" (organizations.attestation_attribution, migration 00120, T0812).
+//
+// A column read rather than a field of GetOrganizationByID on purpose:
+// domain.Organization is not writable by this task and does not model the
+// setting, and widening the whole organization read to carry it would put a
+// governance setting on every org payload in the tree (cmd/api/orgshttp,
+// the research profile, the explore directory) — surfaces that must not
+// start rendering it. The one reader that needs it is the attestation
+// projection, and this is its query.
+func (q *Queries) GetOrganizationAttestationAttribution(ctx context.Context, id pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getOrganizationAttestationAttribution, id)
+	var attestation_attribution string
+	err := row.Scan(&attestation_attribution)
+	return attestation_attribution, err
+}
+
 const getOrganizationByID = `-- name: GetOrganizationByID :one
-SELECT id, slug, name, description, created_at, deactivated_at FROM organizations WHERE id = $1
+SELECT id, slug, name, description, created_at, deactivated_at, attestation_attribution FROM organizations WHERE id = $1
 `
 
 func (q *Queries) GetOrganizationByID(ctx context.Context, id pgtype.UUID) (Organization, error) {
@@ -147,12 +170,13 @@ func (q *Queries) GetOrganizationByID(ctx context.Context, id pgtype.UUID) (Orga
 		&i.Description,
 		&i.CreatedAt,
 		&i.DeactivatedAt,
+		&i.AttestationAttribution,
 	)
 	return i, err
 }
 
 const getOrganizationByIDForUpdate = `-- name: GetOrganizationByIDForUpdate :one
-SELECT id, slug, name, description, created_at, deactivated_at FROM organizations WHERE id = $1 FOR UPDATE
+SELECT id, slug, name, description, created_at, deactivated_at, attestation_attribution FROM organizations WHERE id = $1 FOR UPDATE
 `
 
 // Row-locks the organization: governance writes serialize on this lock, so
@@ -167,12 +191,13 @@ func (q *Queries) GetOrganizationByIDForUpdate(ctx context.Context, id pgtype.UU
 		&i.Description,
 		&i.CreatedAt,
 		&i.DeactivatedAt,
+		&i.AttestationAttribution,
 	)
 	return i, err
 }
 
 const getOrganizationBySlug = `-- name: GetOrganizationBySlug :one
-SELECT id, slug, name, description, created_at, deactivated_at FROM organizations WHERE slug = $1
+SELECT id, slug, name, description, created_at, deactivated_at, attestation_attribution FROM organizations WHERE slug = $1
 `
 
 func (q *Queries) GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error) {
@@ -185,6 +210,7 @@ func (q *Queries) GetOrganizationBySlug(ctx context.Context, slug string) (Organ
 		&i.Description,
 		&i.CreatedAt,
 		&i.DeactivatedAt,
+		&i.AttestationAttribution,
 	)
 	return i, err
 }
@@ -247,7 +273,7 @@ func (q *Queries) ListOrganizationMemberships(ctx context.Context, organizationI
 }
 
 const listOrganizations = `-- name: ListOrganizations :many
-SELECT id, slug, name, description, created_at, deactivated_at FROM organizations
+SELECT id, slug, name, description, created_at, deactivated_at, attestation_attribution FROM organizations
 ORDER BY created_at, id
 LIMIT $2 OFFSET $1
 `
@@ -273,6 +299,7 @@ func (q *Queries) ListOrganizations(ctx context.Context, arg ListOrganizationsPa
 			&i.Description,
 			&i.CreatedAt,
 			&i.DeactivatedAt,
+			&i.AttestationAttribution,
 		); err != nil {
 			return nil, err
 		}
@@ -285,7 +312,7 @@ func (q *Queries) ListOrganizations(ctx context.Context, arg ListOrganizationsPa
 }
 
 const listOrganizationsForUser = `-- name: ListOrganizationsForUser :many
-SELECT o.id, o.slug, o.name, o.description, o.created_at, o.deactivated_at
+SELECT o.id, o.slug, o.name, o.description, o.created_at, o.deactivated_at, o.attestation_attribution
 FROM organizations o
 JOIN organization_memberships m ON m.organization_id = o.id
 WHERE m.user_id = $1 AND m.affiliation_end IS NULL
@@ -310,6 +337,7 @@ func (q *Queries) ListOrganizationsForUser(ctx context.Context, userID pgtype.UU
 			&i.Description,
 			&i.CreatedAt,
 			&i.DeactivatedAt,
+			&i.AttestationAttribution,
 		); err != nil {
 			return nil, err
 		}
@@ -321,11 +349,43 @@ func (q *Queries) ListOrganizationsForUser(ctx context.Context, userID pgtype.UU
 	return items, nil
 }
 
+const setOrganizationAttestationAttribution = `-- name: SetOrganizationAttestationAttribution :one
+UPDATE organizations
+SET attestation_attribution = $1
+WHERE id = $2
+RETURNING attestation_attribution
+`
+
+type SetOrganizationAttestationAttributionParams struct {
+	AttestationAttribution string      `json:"attestation_attribution"`
+	ID                     pgtype.UUID `json:"id"`
+}
+
+// Flips the setting. Owner-governed (internal/application/orgs.Service
+// checks the caller's role before this runs); the row lock that serializes
+// it with the rest of the organization's governance is taken by the service's
+// own GetOrganizationByIDForUpdate.
+//
+// It does NOT touch any attestation that already exists. The recorded
+// org_visibility on those rows is a promise made under the setting in force
+// at the time, and the public projection honours the NARROWER of the two:
+// flipping this to 'anonymous' stops the organization being named on
+// everything it ever issued, and flipping it back does not re-name the
+// attestations issued while it was 'anonymous'. That conjunction lives in
+// one place (internal/application/attestations.Present) and is not repeated
+// here.
+func (q *Queries) SetOrganizationAttestationAttribution(ctx context.Context, arg SetOrganizationAttestationAttributionParams) (string, error) {
+	row := q.db.QueryRow(ctx, setOrganizationAttestationAttribution, arg.AttestationAttribution, arg.ID)
+	var attestation_attribution string
+	err := row.Scan(&attestation_attribution)
+	return attestation_attribution, err
+}
+
 const updateOrganization = `-- name: UpdateOrganization :one
 UPDATE organizations
 SET name = $1, description = $2
 WHERE id = $3
-RETURNING id, slug, name, description, created_at, deactivated_at
+RETURNING id, slug, name, description, created_at, deactivated_at, attestation_attribution
 `
 
 type UpdateOrganizationParams struct {
@@ -344,6 +404,7 @@ func (q *Queries) UpdateOrganization(ctx context.Context, arg UpdateOrganization
 		&i.Description,
 		&i.CreatedAt,
 		&i.DeactivatedAt,
+		&i.AttestationAttribution,
 	)
 	return i, err
 }

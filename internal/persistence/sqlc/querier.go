@@ -52,6 +52,17 @@ type Querier interface {
 	// transaction and the unique (asset_id, ordinal) is the database's own
 	// refusal of a chain that forked.
 	CreateAssetRightsHolderEvent(ctx context.Context, arg CreateAssetRightsHolderEventParams) (AssetRightsHolderEvent, error)
+	// The publish command's insert. One row, no ledger: an attestation has no
+	// idempotency key because a repeat is a LEGITIMATE second statement (a
+	// re-validation after a first inconclusive result), not a replay — the
+	// migration records that decision. Nothing sums these rows, so a duplicate
+	// buys the caller nothing either.
+	//
+	// The pid is passed in and never left to the column DEFAULT: a persistent
+	// identifier that two writers derive differently is not a persistent
+	// identity (00064 records the same decision for assets, 00083 for
+	// knowledge publications).
+	CreateAttestation(ctx context.Context, arg CreateAttestationParams) (Attestation, error)
 	// Blobs and their attachments (canonical tables: blobs, blob_attachments).
 	// Blob rows are metadata only; bytes live in S3/MinIO (invariant 7: knowledge
 	// visibility != blob accessibility).
@@ -566,6 +577,17 @@ type Querier interface {
 	GetMergeCreation(ctx context.Context, arg GetMergeCreationParams) (pgtype.UUID, error)
 	GetMilestone(ctx context.Context, arg GetMilestoneParams) (ProjectMilestone, error)
 	GetMilestoneCreation(ctx context.Context, arg GetMilestoneCreationParams) (pgtype.UUID, error)
+	// The organization's standing answer to "may we be named on an attestation
+	// we issue" (organizations.attestation_attribution, migration 00120, T0812).
+	//
+	// A column read rather than a field of GetOrganizationByID on purpose:
+	// domain.Organization is not writable by this task and does not model the
+	// setting, and widening the whole organization read to carry it would put a
+	// governance setting on every org payload in the tree (cmd/api/orgshttp,
+	// the research profile, the explore directory) — surfaces that must not
+	// start rendering it. The one reader that needs it is the attestation
+	// projection, and this is its query.
+	GetOrganizationAttestationAttribution(ctx context.Context, id pgtype.UUID) (string, error)
 	GetOrganizationByID(ctx context.Context, id pgtype.UUID) (Organization, error)
 	// Row-locks the organization: governance writes serialize on this lock, so
 	// the last-owner check and the change that depends on it are atomic.
@@ -811,6 +833,26 @@ type Querier interface {
 	// The table is append-only (the 00038 trigger): these queries INSERT and
 	// SELECT only — a profile change is a new version row, never an UPDATE.
 	InsertSchemaProfile(ctx context.Context, arg InsertSchemaProfileParams) (ProjectSchemaProfile, error)
+	// ---------------------------------------------------------------------------
+	// The search answer record (T0906, migration 00121)
+	//
+	// One row per answered search, written once by the search API. What it is for
+	// and what it deliberately is not (a cache) is the migration's header; what
+	// belongs here is the write path's own rule.
+	//
+	// Every column is passed as a value the caller already produced, and the
+	// INSERT does not compute anything. That is deliberate: the row must record
+	// the search that RAN. The citations are the answer's own citation list, the
+	// selected refs are the retrieval's ranked refs, and a query that derived
+	// either one would be a second producer of the invariant — the generator's
+	// guard and the table's CHECK (citations <@ selected_refs) already refuse an
+	// ungrounded citation, and a third refusal written in SQL here could only
+	// disagree with them.
+	//
+	// There is no UPDATE and no DELETE: docs/22 §8 saves the record as evidence
+	// of what was answered, and CLAUDE.md §9.8's "nothing disappears" applies to
+	// an answer that was published to a reader as much as to a scientific object.
+	InsertSearchRecord(ctx context.Context, arg InsertSearchRecordParams) (InsertSearchRecordRow, error)
 	// Project template instantiations (canonical table
 	// project_template_instantiations; 00056). The table is append-only (the
 	// 00056 trigger): the provenance fact "project X was created from template
@@ -1782,6 +1824,142 @@ type Querier interface {
 	// and the session flag on — the only sanctioned write path for the
 	// proposed state.
 	RefreshPullRequestProposedState(ctx context.Context, arg RefreshPullRequestProposedStateParams) (PullRequest, error)
+	// The attesting project, and the standing answer of its organization to
+	// "may we be named" (organizations.attestation_attribution, migration 00120).
+	//
+	// organization_attestation_attribution is NULL for a personal project (no
+	// organization) and non-NULL otherwise: the LEFT JOIN is the difference, and
+	// the command refuses the NULL branch for a project that has an organization
+	// (the trigger in 00120 makes the same rule unconditional).
+	ResolveAttestationAttester(ctx context.Context, projectID pgtype.UUID) (ResolveAttestationAttesterRow, error)
+	// The private state the attestation would rest on. Read so the command can
+	// name the project it belongs to rather than let the trigger answer with a
+	// constraint violation.
+	ResolveAttestationBasisState(ctx context.Context, stateID pgtype.UUID) (ResolveAttestationBasisStateRow, error)
+	// The internal review an attestation cites: the review, the pull request it
+	// was recorded on, and the state it judged.
+	//
+	// The row carries the PR's project and the reviewed state's project because
+	// the command checks them (the review must belong to the attesting project,
+	// and must have judged the attestation's own basis state) — the same two
+	// facts the trigger in 00120 makes unconditional for any write path. The
+	// check here exists so the refusal is a named reason rather than a
+	// constraint violation; the constraint is what makes it true.
+	ResolveAttestationInternalReview(ctx context.Context, reviewID pgtype.UUID) (ResolveAttestationInternalReviewRow, error)
+	// The research asset version an Asset attestation would name, and the TWO
+	// facts that decide whether it is public: research_asset_versions.visibility
+	// (the asset's own axis, written by the publish command) AND
+	// projects.visibility of the project that ORIGINATED it
+	// (research_assets.origin_project_id).
+	//
+	// The second axis is not decoration. An asset version can be flagged
+	// 'public' inside a project that is not, and the platform decides an
+	// asset's reachability by its origin project in three other places already:
+	// the asset page's read gate (cmd/api/assetshttp/page.go — the project read
+	// through projects.ProjectStore.Get, 404 for a non-member), the asset
+	// feed's existence (GetFeedAsset below, and the comment there names the
+	// same rule), and the subscription audience resolution (T1002). A predicate
+	// that consulted only the version's own axis would read a version as
+	// network-visible that the page, the feed and the subscription all refuse
+	// to show.
+	//
+	// The reader predicate is the same two arms as the object read above, with
+	// this kind's own public rule in the first one: the asset version is public
+	// on BOTH axes, or the reader holds a project_memberships row for the
+	// project the asset belongs to (research_assets.origin_project_id — the
+	// project whose read gate decides who may open the asset's page,
+	// asset_page.sql:42). The membership arm is a conjunction with the version
+	// being readable at all; it is not widened by the project axis, because a
+	// member of the origin project may read the version whatever either axis
+	// says.
+	//
+	// The origin project's visibility comes back with the row for the same
+	// reason the object read returns the owning project's: attestations.Facts.
+	// TargetIsPublic decides on it in Go, and a decision that is made in Go
+	// must be made over a fact the read handed it rather than over a second
+	// query (the arrangement ResolveAttestationTargetObject records).
+	ResolveAttestationTargetAsset(ctx context.Context, arg ResolveAttestationTargetAssetParams) (ResolveAttestationTargetAssetRow, error)
+	// Attestations (T0812, migration 00120): the public statement a project
+	// makes about a public object or asset version it did not author, plus the
+	// private side it cites and never discloses.
+	//
+	// # Two families of query, and the wall between them
+	//
+	// The RESOLUTION queries (ResolveAttestationTargetObject,
+	// ResolveAttestationTargetAsset, ResolveAttestationAttester,
+	// ResolveAttestationInternalReview) are the publish command's reads: they
+	// carry the private side because the decision is made on it.
+	//
+	// The PUBLIC READ (ResolvePublicAttestation) is a different query, and it
+	// deliberately has no column for the private side at all: attesting_project_id,
+	// basis_state_id and internal_review_id are NOT selected. The projection in
+	// internal/application/attestations cannot leak what it was never handed —
+	// which is a stronger guarantee than a projection that drops fields it
+	// holds, and it is the one this surface takes.
+	//
+	// # The audience rule is not in SQL (the public read), and IS in SQL (the target read)
+	//
+	// There is no visibility predicate on the public read, and that is the same
+	// decision internal/application/knowledgepublish records for
+	// ResolvePublishedKnowledge: the rule that decides who may see what is Go
+	// (attestations.Present), and a second, SQL-shaped copy of it is how two
+	// answers to "may this be shown" start to disagree. Unlike a publication,
+	// however, an attestation has NO audience gate to re-check — what this read
+	// returns is already the public half by construction (see above), so the
+	// predicate would have nothing to filter.
+	//
+	// The TARGET reads are the opposite case, and the two are not in tension.
+	// They are not projections of the attesting side at all: they resolve
+	// SOMEBODY ELSE'S row by an id the caller supplied, and everything they
+	// return (the title, the object id, the version id, the owning project's
+	// visibility) is that other party's private data when the row is private.
+	// So the question "may this reader read this row" has to be answered
+	// BEFORE any of it is handed back, and it is answered here, in the read —
+	// reader-relative, the same way events_audit.sql and evidence.sql answer it
+	// for their own rows (ADR-024: the read carries the reader). A caller that
+	// may not read the row gets no row at all, which is why this read cannot be
+	// an existence oracle: "not yours" and "does not exist" are one answer
+	// because they are one code path.
+	// The scientific object version a Protocol/Claim attestation would name:
+	// what it is, what type it is, and the two facts that decide whether it is
+	// PUBLIC (the owning project's preset, and the version's OWN visibility
+	// axis — scientific_object_versions.visibility_policy_id, migration 00005).
+	//
+	// No project_id filter: this read resolves the TARGET, which by definition
+	// belongs to another project (the attester attests somebody else's public
+	// work). The caller passes the id it already holds.
+	//
+	// The reader predicate (@reader_user_id) is the pair of axes the product
+	// reads such a version by, and it is the SAME pair attestations.Facts.
+	// TargetIsPublic decides on — the target's own public rule, or a
+	// project_memberships row for the project that owns it (the criterion
+	// projects.ProjectStore.GetMembership answers, expressed here so the filter
+	// is the read's rather than its caller's). A version the reader may not read
+	// is not returned at all, so the resolution answers the same "no such
+	// version" it answers for an id that names nothing.
+	//
+	// It is deliberately not "a target that could be attested": whether a
+	// READABLE target may be attested is Judge's decision in Go, and this
+	// predicate must not become a second, SQL-shaped copy of it. This answers
+	// "may this reader read this row", and nothing else.
+	//
+	// Fail closed: a reader that resolves to no user id arrives as SQL NULL, the
+	// membership clause is then NULL rather than true, and the row comes back
+	// only when it is genuinely public — the direction events_audit.sql:145 and
+	// evidence.sql:101 record for their own reader predicates.
+	ResolveAttestationTargetObject(ctx context.Context, arg ResolveAttestationTargetObjectParams) (ResolveAttestationTargetObjectRow, error)
+	// The public read, by pid (GET /api/v1/attestations/{attestationId}).
+	//
+	// It selects the PUBLIC HALF of the row (pid, validation_type,
+	// validation_result, org_visibility, created_at, the target pin) and the
+	// facts the attribution rule needs to apply: the organization the attestation
+	// recorded, and that organization's CURRENT standing setting. Nothing else.
+	//
+	// The private side is not merely unrendered here, it is unread:
+	// attesting_project_id, basis_state_id and internal_review_id have no column
+	// in this result. A projection cannot disclose what the query never handed
+	// it, and the privacy e2e asserts exactly that about the wire body.
+	ResolvePublicAttestation(ctx context.Context, pid string) (ResolvePublicAttestationRow, error)
 	// Everything the publication decision reads about the version being
 	// published, in ONE row: the version, the object it belongs to, the
 	// project that owns the object, and the main branch of that project.
@@ -2049,6 +2227,20 @@ type Querier interface {
 	// lifecycle is the project's), or it already closed; the adapter
 	// distinguishes by one read.
 	SetBranchLifecycle(ctx context.Context, arg SetBranchLifecycleParams) (Branch, error)
+	// Flips the setting. Owner-governed (internal/application/orgs.Service
+	// checks the caller's role before this runs); the row lock that serializes
+	// it with the rest of the organization's governance is taken by the service's
+	// own GetOrganizationByIDForUpdate.
+	//
+	// It does NOT touch any attestation that already exists. The recorded
+	// org_visibility on those rows is a promise made under the setting in force
+	// at the time, and the public projection honours the NARROWER of the two:
+	// flipping this to 'anonymous' stops the organization being named on
+	// everything it ever issued, and flipping it back does not re-name the
+	// attestations issued while it was 'anonymous'. That conjunction lives in
+	// one place (internal/application/attestations.Present) and is not repeated
+	// here.
+	SetOrganizationAttestationAttribution(ctx context.Context, arg SetOrganizationAttestationAttributionParams) (string, error)
 	// The state transition compare-and-swap (T0402, docs/43): the update
 	// matches only while the row is still in the expected state, so a
 	// concurrent transition fails the CAS instead of overwriting it.

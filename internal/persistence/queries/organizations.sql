@@ -85,3 +85,35 @@ RETURNING *;
 -- name: CountActiveOrganizationOwners :one
 SELECT count(*) FROM organization_memberships
 WHERE organization_id = @organization_id AND role = 'owner' AND affiliation_end IS NULL;
+
+-- name: GetOrganizationAttestationAttribution :one
+-- The organization's standing answer to "may we be named on an attestation
+-- we issue" (organizations.attestation_attribution, migration 00120, T0812).
+--
+-- A column read rather than a field of GetOrganizationByID on purpose:
+-- domain.Organization is not writable by this task and does not model the
+-- setting, and widening the whole organization read to carry it would put a
+-- governance setting on every org payload in the tree (cmd/api/orgshttp,
+-- the research profile, the explore directory) — surfaces that must not
+-- start rendering it. The one reader that needs it is the attestation
+-- projection, and this is its query.
+SELECT attestation_attribution FROM organizations WHERE id = @id;
+
+-- name: SetOrganizationAttestationAttribution :one
+-- Flips the setting. Owner-governed (internal/application/orgs.Service
+-- checks the caller's role before this runs); the row lock that serializes
+-- it with the rest of the organization's governance is taken by the service's
+-- own GetOrganizationByIDForUpdate.
+--
+-- It does NOT touch any attestation that already exists. The recorded
+-- org_visibility on those rows is a promise made under the setting in force
+-- at the time, and the public projection honours the NARROWER of the two:
+-- flipping this to 'anonymous' stops the organization being named on
+-- everything it ever issued, and flipping it back does not re-name the
+-- attestations issued while it was 'anonymous'. That conjunction lives in
+-- one place (internal/application/attestations.Present) and is not repeated
+-- here.
+UPDATE organizations
+SET attestation_attribution = @attestation_attribution
+WHERE id = @id
+RETURNING attestation_attribution;
