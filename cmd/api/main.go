@@ -83,6 +83,7 @@ import (
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
 	appcontribution "github.com/lichman0405/post/internal/application/contribution"
+	"github.com/lichman0405/post/internal/application/dependencyimpact"
 	"github.com/lichman0405/post/internal/application/diffs"
 	"github.com/lichman0405/post/internal/application/discussions"
 	"github.com/lichman0405/post/internal/application/evidencegraph"
@@ -541,6 +542,16 @@ func run(args []string) int {
 		Manifest: persistence.NewManifestStore(pool),
 		Policies: persistence.NewPolicyStore(pool),
 		Engine:   integrity.New(reg),
+		// The PR first screen's dependency impact line (T1007): the same
+		// analysis's read surface, with the caller's own access applied per
+		// affected project. The WRITE side of the analysis is not here — it
+		// runs in cmd/worker off the published event log, because 「上游变更
+		// 触发」 names no user a request could authenticate (docs/19 §3), and
+		// no route in this binary triggers it.
+		Impact: dependencyimpact.NewService(
+			persistence.NewDependencyImpactStore(pool),
+			dependencyimpact.ProjectsGate(projectAPI.Service()),
+		),
 	})
 	// Project schema profiles (T0213): namespaced, versioned JSON Schema
 	// extensions of the official base schemas. The persisted profile rows
