@@ -218,7 +218,36 @@ for (const [href, h1] of destinations) {
   }
   ok(`GET ${href} -> 200, h1 ${h1}, header present`);
 }
-ok("search result page echoes the query", await page.locator("q").textContent() === "solid-state");
+/* The search page is a real answer surface as of T0907, and this is the
+   assertion that replaces the placeholder's.
+ *
+ * Before: the stub echoed the query in a <q> element (`<q>` is the inline
+ * quotation element, used there as a hook) and the check was
+ * `ok("...", textContent === "solid-state")` — `ok` takes no condition, so
+ * the comparison was discarded and the line could not fail on a wrong query;
+ * a missing element was the only thing it could catch, by throwing.
+ *
+ * After: the query is still the fact, read from its own element, and it is
+ * now a real check. Two more are added that the stub could not have: that the
+ * page rendered one of the answer surface's states at all (with the API down
+ * this harness reaches none of the four by accident — the page could have
+ * been left a shell), and that a failure is announced rather than drawn as an
+ * empty result. Neither depends on the API being reachable, so this stays
+ * true whichever state the run lands in. */
+const searchEcho = (await page.locator("[data-search-query]").textContent())?.trim();
+if (searchEcho !== "solid-state") {
+  fail("search result page echoes the query", `page shows ${JSON.stringify(searchEcho)}`);
+} else {
+  ok("search result page echoes the query: solid-state");
+}
+const searchState = await page.locator("[data-search-state]").getAttribute("data-search-state");
+if (!["loading", "ready", "error"].includes(searchState ?? "")) {
+  fail("search page renders one of its states", `state=${JSON.stringify(searchState)}`);
+} else if (searchState === "error" && (await page.locator("main [role='alert']").count()) !== 1) {
+  fail("search page announces its failure", "the error state is not an alert");
+} else {
+  ok(`search page renders its ${searchState} state`);
+}
 
 /* The sign-in surface keeps the slim wordmark header (GitHub-style). */
 await page.goto(BASE + "/login", { waitUntil: "load" });

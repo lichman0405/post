@@ -1,3 +1,16 @@
+> **当前这一刻（2026-09-21 14:58）**：**130/147 已合并**；V1 必需 146 笔里 **129 笔已合并，还剩 17 笔**。
+>
+> **迁移链第一环已落**：T0610（00123）合并进 main（PR #326）。三格链路现在只剩两格——
+> T0706（00125）与 T0708（00128）都合成完毕、复核在跑，**逐格等前一格落地再推**。
+> 这是 §8.1 的硬约束：`rddev pr merge` 按迁移号升序放行，乱序会被拒。
+>
+> **在飞**：T0706、T0708（合成分支已就绪，独立复核运行中）；T0907（搜索问答界面）、
+> T1107、T1109（监控面板返工）三个工人在跑。**T0907 是关键路径的唯一闸口**——
+> T0908 / T1101 / T1108 三笔都在等它，而 T0908 之后是 T1202 → T1205 → T1206 → T1207 四层串行。
+>
+> **今日队列已经没有别的可并行项**：12 笔 todo 里 11 笔的依赖未满足，
+> 唯一成熟的 T0710 依赖 T0708，得等它合并。
+
 > **当前这一刻（2026-09-21 上午 10:57）**：**125/147 已合并**；V1 必需 146 笔里 **124 笔已合并，还剩 22 笔**。
 >
 > **关键路径**（8 层，前两层已在收尾）：**T0812 → T0906 → T0907 → T0908 → T1202 → T1205 → T1206 → T1207**。
@@ -3003,9 +3016,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-21T06:15:27Z
+生成时间：2026-09-21T06:58:27Z
 
-状态分布：todo 14 · ready 0 · running 1 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 4 · merged 128（合计 147/147 个任务）
+状态分布：todo 12 · ready 0 · running 3 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 2 · merged 130（合计 147/147 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -3088,7 +3101,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0607 | Activity/Audit Timeline 增强 | P6 | merged | 2026-09-20T12:08:08Z |  | 2026-09-20T12:39:41Z | 2026-09-20T12:49:12Z |
 | T0608 | Release/Abort/Policy E2E | P6 | merged | 2026-09-20T22:25:52Z |  | 2026-09-20T22:53:19Z | 2026-09-20T23:06:25Z |
 | T0609 | Project Milestone 基础 | P6 | merged | 2026-09-15T13:30:51Z |  | 2026-09-15T14:00:41Z | 2026-09-15T14:12:50Z |
-| T0610 | 主线对象 Reopen 状态迁移（等一行权限的 L3 裁定） | P6 | accepted | 2026-09-21T04:04:25Z |  | 2026-09-21T05:14:00Z |  |
+| T0610 | 主线对象 Reopen 状态迁移（等一行权限的 L3 裁定） | P6 | merged | 2026-09-21T04:04:25Z |  | 2026-09-21T05:14:00Z | 2026-09-21T06:57:09Z |
 | T0611 | Release 的验收记录必须覆盖「经合并进入 main」的状态（T0608 第 6 段的上游缺陷） | P6 | merged | 2026-09-20T13:52:25Z |  | 2026-09-20T14:39:52Z | 2026-09-20T14:48:15Z |
 | T0612 | 并发 abort 的两份 201：断言只能写契约允许的东西，那个窗口要显式钉住 | P6 | merged | 2026-09-20T21:43:35Z |  | 2026-09-20T22:20:09Z | 2026-09-20T22:40:12Z |
 | T0613 | Activity 的研究事件读必须带上读者：非公开行不给非成员（ADR-024 同一条规矩的第三个出口） | P6 | merged | 2026-09-20T21:48:28Z |  | 2026-09-20T22:35:11Z | 2026-09-20T22:53:28Z |
@@ -3127,8 +3140,8 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0903 | Scientific Query Planner | P9 | merged | 2026-09-19T03:08:10Z |  | 2026-09-19T03:55:21Z | 2026-09-19T04:04:51Z |
 | T0904 | Hybrid Retrieval + Graph Expansion | P9 | merged | 2026-09-19T05:31:44Z |  | 2026-09-19T06:56:28Z | 2026-09-19T07:04:51Z |
 | T0905 | Scientific Ranking | P9 | merged | 2026-09-20T12:54:18Z |  | 2026-09-20T13:37:58Z | 2026-09-20T13:45:08Z |
-| T0906 | Evidence-backed Answer Generator/API | P9 | accepted | 2026-09-21T05:05:13Z |  | 2026-09-21T05:49:30Z |  |
-| T0907 | Search Answer Web UI | P9 | todo |  |  |  |  |
+| T0906 | Evidence-backed Answer Generator/API | P9 | merged | 2026-09-21T05:05:13Z |  | 2026-09-21T05:49:30Z | 2026-09-21T06:34:50Z |
+| T0907 | Search Answer Web UI | P9 | running | 2026-09-21T06:40:15Z |  |  |  |
 | T0908 | Search → Draft Research Context | P9 | todo |  |  |  |  |
 | T1001 | Transactional Outbox | P10 | merged | 2026-09-14T15:17:43Z |  | 2026-09-14T15:51:18Z | 2026-09-14T15:54:45Z |
 | T1002 | Subscription Model / Follow/Watch | P10 | merged | 2026-09-16T10:57:20Z |  | 2026-09-16T11:31:28Z | 2026-09-16T11:36:18Z |
@@ -3143,9 +3156,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1104 | 全站 Accessibility AA | P11 | todo |  |  |  |  |
 | T1105 | I18N 基线 | P11 | todo |  |  |  |  |
 | T1106 | API/Upload 安全加固 | P11 | merged | 2026-09-21T03:20:48Z |  | 2026-09-21T03:53:54Z | 2026-09-21T04:03:41Z |
-| T1107 | 权限与 Search Side-channel 安全回归 | P11 | todo |  |  |  |  |
+| T1107 | 权限与 Search Side-channel 安全回归 | P11 | running | 2026-09-21T06:40:17Z |  |  |  |
 | T1108 | 性能基线与索引调优 | P11 | todo |  |  |  |  |
-| T1109 | 生产级 Observability/Dashboards | P11 | running | 2026-09-21T06:14:58Z |  |  |  |
+| T1109 | 生产级 Observability/Dashboards | P11 | running | 2026-09-21T06:43:30Z |  |  |  |
 | T1110 | Backup/Restore 自动化演练 | P11 | merged | 2026-09-18T09:13:47Z |  | 2026-09-18T09:49:45Z | 2026-09-18T09:56:37Z |
 | T1111 | 凭据不进进程参数表：git 调用统一走环境变量传 header | P11 | merged | 2026-09-18T21:07:27Z |  | 2026-09-18T23:13:06Z | 2026-09-18T23:22:54Z |
 | T1201 | 完整 Seed Demo Data Builder | P12 | merged | 2026-09-21T02:30:40Z |  | 2026-09-21T04:21:12Z | 2026-09-21T04:58:40Z |

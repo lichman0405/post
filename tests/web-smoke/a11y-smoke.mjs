@@ -187,7 +187,18 @@ await input.focus();
 await page.keyboard.type("catalyst");
 await page.keyboard.press("Enter");
 await page.waitForURL(/\/search\?q=catalyst/);
-ok("keyboard: search form submits to /search?q=catalyst", (await page.locator("q").textContent()) === "catalyst");
+// The search page renders the question from the URL server-side (T0907), so
+// it is on the page whatever the answer fetch does. The element changed with
+// the surface — the placeholder's <q> is gone — and so did what is checked:
+// the old line called ok() with a condition `ok` discards (it takes a label
+// only), so it could not fail on a wrong query. This one can, and the fact it
+// checks is the same one: the form's value reached the page.
+const submitted = (await page.locator("[data-search-query]").textContent())?.trim();
+if (submitted !== "catalyst") {
+  fail("keyboard: search form submits to /search?q=catalyst", `page shows ${JSON.stringify(submitted)}`);
+} else {
+  ok("keyboard: search form submits to /search?q=catalyst");
+}
 
 // 5. A nav link activates with Enter.
 await page.goto(BASE, { waitUntil: "load" });
