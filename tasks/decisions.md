@@ -16505,3 +16505,39 @@ HEAD 上逐字节相同**；交付面没有凭空多出文件。交付面 37 →
    否则树会打回冲突态。
 2. 这个 shell 是 **zsh**，`${PIPESTATUS[0]}` 不生效（会打印空）；取管道里第一个命令的退出码要用
    `$pipestatus[1]`。前面两次「退出码 =」空着就是这个原因，**不是脚本没返回**——差点据此误判。
+
+## ㉓ 迁移号把 T0708 从「边角」提到了「关键链的闸门」（2026-09-21）
+
+**发现**：`assertMigrationMergeOrder`（`internal/devorchestrator/migration_order.go:136`，
+唯一调用点 `git_control.go:563`，在 **`MergePR`** 里）拒绝一次合并的条件不是「本分支的号比主线小」，
+而是**「别的任务的工作树里还压着一个更小号、且尚未落在主线上」**。注释把意图写死了：
+
+> A task parked in `rejected` with a migration in its tree still blocks the higher numbers, and that is
+> the intent: either it merges, or the work it is holding is removed — which is a decision, not a timeout.
+
+**现状**：主线上最大号 `00125`。全部工作树里压着的只有两个：
+
+| 任务 | 压着的迁移 | 状态 |
+|---|---|---|
+| T0708 | `00128_asset_derive_creations.sql` | `rejected`（等我派返工） |
+| T0908 | `00134_research_context_draft.sql` | `running` |
+
+**推论（这是今天最要紧的一条调度事实）**：`00128 < 00134`，所以
+**T0908 合不进去，直到 T0708 先合并**。而 T0908 是今天最长那条链的头
+（T0908 → T1202 → T1205 → T1206 → T1207）。T0708 因此**不是「深度 2 的边角」**，
+它是那条链的闸门。顺序被钉死为：**T0708 合并 → T0908 合并 → T1108（预占 00135）**。
+
+**失败形状是可恢复的**：这个检查只在 `MergePR` 里，`collect`/`accept`/`OpenPR` 都不受影响。
+所以 T0908 跑完会被正常验收、正常开出 PR，**只有合并那一步被拒**——那是我该处理的判断点，
+不是这笔任务失败，也**不该**因此把它判回去重做。
+
+**同时记两条我今天亲手犯的测量错误**，它们差点写进给工人的信里：
+
+1. 量一笔任务「自己的改动」**不能用 `git diff main <branch>`**——那是**对称**的差集，
+   会把主线在分叉之后自己领先的提交算到分支账上。T0708 因此被读成 21，真值是 **19**；
+   合并前那 63 个里还含着一整套 T0706 的文件（被 merge 拖进来的，正是它冲突的原因）。
+   正确的尺子是**共同祖先**：`git diff --name-only $(git merge-base main BR) BR`。
+   **信里现在把尺子一并写出**，免得后来人换一把尺子复算。
+2. 我拿 `rddev worker list | grep -c " running "`（空格）去验一个守卫，数出 0，
+   于是宣布「看守是瞎的」。**守卫实际用的是制表符**（`"\trunning\t"`），数出 4，一直是好的——
+   我验的是守卫的一句话转述，不是它本身。**要判一个仪器坏，先拿到它字面的调用。**
