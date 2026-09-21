@@ -76,6 +76,24 @@ type Deps struct {
 	// with a smaller fan-out (a test, a constrained deployment) without a
 	// second code path.
 	Limits retrieval.Limits
+	// Drafts is the Draft Research Context flow (T0908): the two routes that
+	// turn an answer into a project, mounted on the same mux as the search
+	// itself. The production value is *researchcontext.Service.
+	//
+	// It is OPTIONAL at this level and the two routes fail closed (503) when
+	// it is nil, which is the opposite of how the pipeline's own dependencies
+	// above are treated. The reason is that they are a different surface
+	// mounted on the same mux: a search is one command, the flow is two more
+	// commands over a stored record, and a deployment (or a unit test) that
+	// wires the search pipeline alone is a coherent graph that must not panic
+	// on a route it does not serve. cmd/api/main.go wires it; the e2e test
+	// exercises both routes against real PostgreSQL.
+	Drafts DraftCommands
+	// ProvisionProject enqueues the provisioning job for a project the start
+	// route created, so the new project gets its repository now rather than at
+	// the next API start. Optional: nil disables the enqueue (see
+	// ProvisionEnqueuer).
+	ProvisionProject ProvisionEnqueuer
 }
 
 // New wires the handlers.
@@ -90,11 +108,25 @@ type API struct {
 
 // Register mounts the search route on the shared /api/v1 mux.
 //
-// One pattern, one method. The path is the contract's (specs/api/openapi.yaml,
-// /search), the mux is the api group's, and the route is registered BEFORE the
-// auth guard in main.go like every other product route — the guard is what
-// authenticates the request, and a handler behind it can rely on a principal
-// being present (nothing here resolves a session itself).
+// Three patterns, all POST. The paths are the contract's
+// (specs/api/openapi.yaml, /search and the two suffix verbs of the Draft
+// Research Context flow), the mux is the api group's, and the routes are
+// registered BEFORE the auth guard in main.go like every other product route —
+// the guard is what authenticates the request, and a handler behind it can
+// rely on a principal being present (nothing here resolves a session itself;
+// an anonymous POST is challenged by the guard with AUTH_UNAUTHENTICATED,
+// which is the contract's "an anonymous caller is refused" for the start
+// route).
+//
+// The two collections whose verbs live INSIDE a path segment are registered as
+// remainder wildcards, because ServeMux cannot match a suffix inside a segment
+// ("{searchId}:start-project" panics with "bad wildcard segment"): each
+// remainder has exactly one owner, this handler, which answers an unknown
+// suffix with 404 (draft.go). The exact POST /api/v1/search pattern is more
+// specific than its own remainder and keeps serving the search itself — the
+// same coexistence cmd/api/mergehttp's remainder has with the routes below it.
 func (a *API) Register(v1 *http.ServeMux) {
 	v1.HandleFunc("POST /api/v1/search", a.svc.handleSearch)
+	v1.HandleFunc("POST /api/v1/search/{rest...}", a.svc.handleSearchVerb)
+	v1.HandleFunc("POST /api/v1/research-context-drafts/{rest...}", a.svc.handleDraftVerb)
 }

@@ -103,6 +103,7 @@ import (
 	"github.com/lichman0405/post/internal/application/prdiff"
 	"github.com/lichman0405/post/internal/application/pullrequests"
 	"github.com/lichman0405/post/internal/application/releases"
+	"github.com/lichman0405/post/internal/application/researchcontext"
 	"github.com/lichman0405/post/internal/application/resolutions"
 	"github.com/lichman0405/post/internal/application/responsibilities"
 	"github.com/lichman0405/post/internal/application/reviews"
@@ -1335,12 +1336,47 @@ func run(args []string) int {
 		slog.Error("post-api: answer generator setup failed", "error", err)
 		return exitRuntime
 	}
+	// One SearchRecordStore for both surfaces: the search mounts it as its
+	// writer and the Draft Research Context flow reads the same records
+	// through the same object, so "the search a draft was started from" is
+	// one table read by one adapter rather than two views of it.
+	searchRecords := persistence.NewSearchRecordStore(pool)
+	// The confirmation's two persistence roles are one object: the draft
+	// store owns the 00134 rows, and the commit reader reads the RSG
+	// transition log (state_commits) the confirmation names.
+	draftStore := persistence.NewResearchContextStore(pool)
+	researchContext := researchcontext.New(researchcontext.Deps{
+		SearchRecords: searchRecords,
+		DraftStore:    draftStore,
+		Projects:      projectAPI.Service(),
+		StateWriter:   rsgSvc,
+		CommitReader:  draftStore,
+		Authz:         authz.NewMatrixEngine(),
+	})
 	searchAPI := searchhttp.New(searchhttp.Deps{
 		Scope:     persistence.NewProjectStore(pool),
 		Retriever: searcher,
 		Ranker:    ranker,
 		Answerer:  answerer,
-		Records:   persistence.NewSearchRecordStore(pool),
+		Records:   searchRecords,
+		Drafts:    researchContext,
+		// The project a start creates is provision-pending, exactly like one
+		// created by POST /api/v1/projects, and it is provisioned the same
+		// way: the same job (newProvisionJob) on the same queue. Best effort
+		// for the same reason the project surface is — the row is the truth
+		// and the API's startup sweep back-fills anything a failed enqueue
+		// skipped (enqueuePendingProvisioning, above).
+		ProvisionProject: func(ctx context.Context, projectID string) error {
+			correlationID := "start-project"
+			if cid, ok := observability.FromContext(ctx); ok {
+				correlationID = string(cid)
+			}
+			job, err := newProvisionJob(projectID, correlationID)
+			if err != nil {
+				return err
+			}
+			return provisioningQueue.Enqueue(ctx, job)
+		},
 	})
 	searchAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))

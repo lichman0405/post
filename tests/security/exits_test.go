@@ -116,6 +116,13 @@ var registry = map[string]exitSite{
 		Sites: 1, Kind: KindInlineText, Wire: "application/json, no disposition",
 		Note: "the attestation publish refusal (T0812) and its disclosure preview — the same document the preview route answers, so a caller can see which entry blocked it; what may appear in that preview is bounded where it is built, not here",
 	},
+	"searchhttp/draft.go:writeDraftJSON": {
+		Sites: 1, Kind: KindInlineText, Wire: "application/json; charset=utf-8, no-store, no disposition",
+		Note: "the Draft Research Context flow's two answers (start-project and confirm); written here rather " +
+			"than through authhttp's envelope writers because the contract's 201 carries the draft document " +
+			"itself, so the exit sets its own nosniff beside its own no-store — the body names a project and " +
+			"an initial state that belong to the caller who just made them",
+	},
 	"searchhttp/handlers.go:writeSearchJSON": {
 		Sites: 1, Kind: KindInlineText, Wire: "application/json; charset=utf-8, no-store, no disposition",
 		Note: "the search answer (the search id and the answer document); no-store because it is the caller's own " +

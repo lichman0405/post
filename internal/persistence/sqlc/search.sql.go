@@ -11,6 +11,58 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getSearchRecord = `-- name: GetSearchRecord :one
+
+SELECT id, actor_id, query, selected_refs, citations, answer
+FROM search_records
+WHERE id = $1
+`
+
+type GetSearchRecordRow struct {
+	ID           pgtype.UUID `json:"id"`
+	ActorID      pgtype.UUID `json:"actor_id"`
+	Query        string      `json:"query"`
+	SelectedRefs []string    `json:"selected_refs"`
+	Citations    []string    `json:"citations"`
+	Answer       []byte      `json:"answer"`
+}
+
+// ---------------------------------------------------------------------------
+// Reading a record back (T0908)
+//
+// The record was written write-only by design (see the block above: "There is
+// no UPDATE and no DELETE"). This is its first reader, and it exists now
+// because its caller exists: POST /search/{searchId}:start-project builds a
+// Draft Research Context out of one answered search, and what it needs from
+// the record is exactly the actor it belongs to and the set the draft's refs
+// may be drawn from.
+//
+// Three columns and the actor, and nothing else. The query is a read for ONE
+// caller, and a projection that carried the plan, the signals and the answer
+// document as well would be a second, unused way to reach the record's
+// contents — the answer is already reachable as the draft's substrate without
+// being copied into the draft table. A future reader that needs the answer
+// adds its own query, with its own argument for what it needs.
+//
+// selected_refs is the important one: it is the boundary the draft's refs are
+// validated against (migration 00134's research_context_draft_refs_guard, and
+// the write path's own pre-check before it creates the project). Reading it
+// here rather than from a cached copy is what makes the boundary the one the
+// SEARCH was answered with.
+func (q *Queries) GetSearchRecord(ctx context.Context, id pgtype.UUID) (GetSearchRecordRow, error) {
+	row := q.db.QueryRow(ctx, getSearchRecord, id)
+	var i GetSearchRecordRow
+	err := row.Scan(
+		&i.ID,
+		&i.ActorID,
+		&i.Query,
+		&i.SelectedRefs,
+		&i.Citations,
+		&i.Answer,
+	)
+	return i, err
+}
+
 const insertSearchRecord = `-- name: InsertSearchRecord :one
 
 INSERT INTO search_records (

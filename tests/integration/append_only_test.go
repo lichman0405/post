@@ -274,6 +274,21 @@ var targetedGuardTriggers = map[string]string{
 	// rather than replacing it: the pair makes the row immutable, this makes
 	// it well-founded.
 	"attestations:attestations_private_side": ":O:23",
+	// T0908 (00134) adds the research-context draft's two guards. The refs
+	// guard is BEFORE INSERT OR UPDATE, FOR EACH ROW → 23, and it pins for
+	// ANY write path the one shape this table must not hold: a draft carrying
+	// a ref the search it was started from never returned. It is the
+	// draft-side mirror of 00121's `citations <@ selected_refs` on the search
+	// row — the same rule, read across the join the draft creates. The row
+	// guard is BEFORE UPDATE OR DELETE, FOR EACH ROW → 27: a draft's identity
+	// (its search, its creator, its question) is fixed at creation, and
+	// confirmation is one-way — the row keeps its id and its search, and a
+	// confirmed draft cannot be deleted, so the project it started keeps a
+	// readable provenance. research_context_drafts is NOT in appendOnlyTables:
+	// confirmation legitimately updates the row in place (a current-state
+	// table, like credit_disputes).
+	"research_context_drafts:research_context_drafts_refs_guard": ":O:23",
+	"research_context_drafts:research_context_drafts_guard":      ":O:27",
 }
 
 // triggerRows returns every user trigger in the public schema as sorted
