@@ -118,6 +118,7 @@ import (
 	"github.com/lichman0405/post/internal/rsg/integrity"
 	"github.com/lichman0405/post/internal/rsg/schemareg"
 	rsgvalidation "github.com/lichman0405/post/internal/rsg/validation"
+	"github.com/lichman0405/post/internal/security"
 	"github.com/lichman0405/post/internal/version"
 	"github.com/lichman0405/post/internal/worker"
 )
@@ -368,6 +369,22 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "post-api: authentication configuration error:\n%v\n", err)
 		return exitConfig
 	}
+	// Edge hardening (T1106, docs/23 §7): the response-header set and the
+	// shared rate-limit budgets. Loaded fail-closed like every other
+	// configuration block — an unparseable budget refuses to start rather
+	// than silently running with a different policy than the operator
+	// wrote. The budgets are logged on one line at startup so the running
+	// policy is visible without reading the loader.
+	securityCfg, err := securityLoader().Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "post-api: security configuration error:\n%v\n", err)
+		return exitConfig
+	}
+	// One limiter instance, two consumers: the login service (per-email and
+	// per-IP brute-force budgets) and the edge middleware (the coarse
+	// per-class budgets). They share the Redis keyspace but never a bucket —
+	// the middleware namespaces its keys "edge:".
+	rateLimiter := persistence.NewRedisRateLimiter(redisClient)
 	// Audit (T0110): one store writes auth events and serves the Activity
 	// reads; the state-changing stores append audit rows inside their own
 	// transactions. The auth surface records through it best-effort (the
@@ -376,7 +393,7 @@ func run(args []string) int {
 	authAPI := authhttp.New(authhttp.Deps{
 		Users:      persistence.NewCredentialStore(pool),
 		Sessions:   persistence.NewRedisSessionStore(redisClient),
-		Limiter:    persistence.NewRedisRateLimiter(redisClient),
+		Limiter:    rateLimiter,
 		OIDCClient: newOIDCClientOrNil(authCfg),
 		Cfg:        *authCfg,
 		Secure:     cfg.Layer == config.LayerProd,
@@ -1176,9 +1193,28 @@ func run(args []string) int {
 	abortAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
+	// The edge chain, outermost first (T1106):
+	//   1. security.Headers stamps the secure response-header set on every
+	//      response — including the ones the limiter refuses below, so a
+	//      429 carries the same CSP and nosniff as a 200;
+	//   2. observability assigns the correlation id, which the limiter's
+	//      own error envelope reports as request_id;
+	//   3. security.RateLimit guards the WHOLE tree — not just /api/v1 —
+	//      because the two routes that bypass the /api/v1 guard are the
+	//      ones that most need a budget: the provider push receiver
+	//      (POST /api/v1/git/hooks/gitea, authenticated by HMAC, outside
+	//      the session guard by design) and the scaffold enqueue endpoint
+	//      (POST /internal/jobs). The only exemption is the pair of
+	//      liveness/readiness probes (security.ExemptProbePaths).
+	securityCfg.SessionCookie = authhttp.CookieSession
+	handler := security.Headers()(
+		observability.Middleware(logger)(
+			security.RateLimit(rateLimiter, *securityCfg)(mux)))
+	slog.Info("post-api: edge rate limiting active", "policy", securityCfg.Describe())
+
 	srv := &http.Server{
 		Addr:              cfg.Server.Addr,
-		Handler:           observability.Middleware(logger)(mux),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -1290,6 +1326,10 @@ func databaseDSN(cfg *config.Config) string {
 // authnLoader resolves the auth configuration environment (the loader is
 // injectable so main_test can run without real env).
 var authnLoader = func() authn.Loader { return authn.Loader{} }
+
+// securityLoader resolves the edge-hardening configuration environment
+// (injectable, same reason as authnLoader).
+var securityLoader = func() security.Loader { return security.Loader{} }
 
 // gitproviderLoader resolves the GitProvider configuration environment
 // (injectable, same reason as authnLoader).

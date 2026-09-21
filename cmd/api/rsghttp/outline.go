@@ -204,8 +204,7 @@ func (h *handlers) handleResearchPage(w http.ResponseWriter, r *http.Request) {
 		renderObjectPageError(w, r, status, code, message)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Add("Vary", "Accept")
+	writeDocumentHeaders(w)
 	if err := researchTemplate.Execute(w, researchPageModelFrom(r, outline)); err != nil {
 		// The template parses at init and the model is plain data — an
 		// execute failure is a programming error, and the response is

@@ -166,8 +166,7 @@ func (h *handlers) handleObjectDetailPage(w http.ResponseWriter, r *http.Request
 	if model.Tab == graphEvidence {
 		model.Evidence = evidencePanelFor(r.Context(), h.evidence, reader(r), projectID, objectID, &selected, tabHref)
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Add("Vary", "Accept")
+	writeDocumentHeaders(w)
 	if err := objectDetailTemplate.Execute(w, model); err != nil {
 		// The template parses at init and the model is plain data — an
 		// execute failure is a programming error, and the response is
@@ -208,6 +207,25 @@ func pageTabHref(r *http.Request) func(tab, direction string) string {
 	}
 }
 
+// writeDocumentHeaders declares a rendered document: the media type the
+// page templates produce, the Vary the representation depends on, and
+// nosniff. One function because all four page exits (the object detail
+// page, the error page, the overview and the research outline) carry the
+// same three facts, and a fact stated four times is a fact that drifts in
+// three of them.
+//
+// The edge (internal/security.Headers) sends nosniff on every response
+// anyway, and picks the document Content-Security-Policy from this same
+// media type. Stating it here is what makes the fact belong to the exit:
+// the outbound-byte guard in tests/security judges each handler on its own,
+// without the edge in the chain, so removing it here turns that guard red
+// rather than being silently repaired by a layer above.
+func writeDocumentHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Add("Vary", "Accept")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+}
+
 // renderObjectPageError answers an HTML request with the neutral error
 // page carrying the same status/code/message the JSON envelope answers.
 func renderObjectPageError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
@@ -215,8 +233,7 @@ func renderObjectPageError(w http.ResponseWriter, r *http.Request, status int, c
 	if status == http.StatusNotFound {
 		title = "Not found"
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Add("Vary", "Accept")
+	writeDocumentHeaders(w)
 	w.WriteHeader(status)
 	if err := objectPageErrorTemplate.Execute(w, map[string]string{
 		"Title":   title,

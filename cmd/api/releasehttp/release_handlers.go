@@ -249,6 +249,11 @@ func (h *handlers) handleGetReleaseManifest(w http.ResponseWriter, r *http.Reque
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="release-`+release.Version+`.manifest.json"`)
+	// The manifest is the one JSON this API hands over rather than renders:
+	// it is a state document a caller files away, so it leaves as a
+	// download. nosniff is stated beside the disposition — the pair is what
+	// the outbound-byte guard (tests/security) judges.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(doc)
 }
