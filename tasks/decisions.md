@@ -15596,3 +15596,65 @@ owner 的回答是长期授权：「我不会再回答你问题。你自己处�
 T0610 换 B 是删一行 + 改断言；T0706 换"追加行"要新迁移 + 改写法；
 T0708 换"一律拒绝/一律许可"是改一条判定 + 改断言；T1106 任何一个数值都可单点改。
 owner 回来后否定其中任何一笔，代价都是可接受的。
+
+## 2026-09-21（续十七）：P12 与 P9 的十笔任务书落地 —— 五条 L1/L2 决定
+
+这一笔把 T0907 / T0908 / T1201 / T1202 / T1205 / T1206 / T1207 / T1208 八笔任务书写实（原来是 phase 级默认上限 + 两三行占位验收），
+并把 T0810 / T1106 的范围收窄。**没有一条改产品语义、安全边界或核心架构原则**，逐条如下。
+
+### ① T0908 的两条契约路径（L2：跨模块接口，不新增 ADR 但在此留痕）
+
+`specs/api/openapi.yaml` 原本只有 `POST /search/{searchId}:start-project`，**没有请求体、没有响应形状，也没有「确认」那一步**。
+而 `docs/14_SEARCH_DISCOVERY.md:23-25` 逐字要求两段：「\"Start Research Project\"创建 Draft Research Context」+「**用户确认后才形成 initial state**」；
+`docs/31_MASTER_ACCEPTANCE.md:36` 把这条列为 Gate E 的一条。只有一条路由就写不出「确认才成状态」。
+
+**决定**：补第二个路径 `POST /research-context-drafts/{draftId}:confirm`，并把 `:start-project` 的请求体与两条的语义写进契约：
+
+- `:start-project` = 建 Project(planning) + 落 draft，**零科研状态**；带必填 `Idempotency-Key`（重放回到同一份 draft，不开第二个项目）。
+- `:confirm` = **唯一写科研状态的那一次**，经既有状态迁移路径形成 initial branch 与 research_question，因此被一次 state commit 命名。
+
+**为什么这是 L2 而不是 L3**：形状是文档逼出来的——draft 在 initial state 之前（`docs/07_RSG_SPEC.md:5`：RSG 是某个 state version 下的完整状态图），
+两步是文档自己写的两句话。没有新增任何产品语义，也没有新增发现面。
+**反转成本**：删掉第二条路径 + 改任务书一段；实现侧本来就要分两步，改动是局部的。
+
+### ② T1205（契约文档同步）改成「清单 + 建议处置，Supervisor 落笔」
+
+原文的 phase 默认范围把 `specs/api/**`、`specs/mcp/**`、`specs/schemas/**` 给了 Worker，**与 CLAUDE.md §8.1 逐字冲突**：
+「其余 `specs/**` 与 `docs/**` 仍为 Supervisor-only」，Worker 写入 `specs/` 的唯一入口是 schema 快照的重新生成。
+
+**决定**：`specs/**` 全部移出该任务范围、写进 `forbidden_scope`；任务形状改为**交清单**（哪些挂载路由不在契约、哪些契约路径没实现、MCP 工具与实现的差异），
+**契约怎么补、哪几条进豁免，由 Supervisor 落笔**。同时定死：豁免名单不许由 Worker 写——把几十条路由「登记成豁免」与「登记成契约」在机械上没有区别，
+但含义完全不同，那是判定权，不能交出去。
+
+**顺带的事实**（我量过，但**不是**可直接采信的结论）：契约 36 条路径，挂载的 `/api/v1` 路由远多于此；
+注册形式至少四种（`HandleFunc(\"METHOD /path\")`、`Handle`、子路由 `v1.Handle(\"/api/v1/projects\", pkg.Routes())`、包内 `.Get/.Post`），
+所以**正则数出来的数字不可信**——任务书要求 Worker 用 `go/ast` 枚举并用变异证明枚举器测得动，再由我据清单裁定。
+
+### ③ `specs/orchestrator/gates.json` 补两个 G3 job
+
+- `security-smoke` → `bash tests/security/owasp-smoke.sh`（T1106 交付）。挂给 **T1106** 与 **T1206**。
+- `mof-canonical` → `bash tests/acceptance/mof-canonical-workflow.sh`（T1202 交付）。挂给 **T1202** 与 **T1207**。
+
+**为什么**：T1202 的验收逐字要求「全程真实 DB/Git/blob/**browser**，非 mock 演示」，而它原来的 `g3_jobs` 三条全是 HTTP/DB 层，
+**没有一条会驱动浏览器**；T1201/T1202/T1206/T1207 原来的覆盖相同。门不覆盖验收标准要求的东西，等于那条标准没人测。
+（这两条脚本今天还不存在——它们是各自任务的交付物，闸门在交付后才跑。）
+
+### ④ T0810 与 T1106 的范围收窄
+
+- **T0810**（最小 Open Network 闭环 E2E）：摘掉 `infra/migrations/**`、两份生成物、`internal/persistence/**`、`apps/web/**`，
+  留 `tests/**`、`cmd/api/**`、`internal/contribution/**`、`internal/application/**`、`internal/rsg/**`。理由：闭环不建表；验收逐字是「CI 可跑」；
+  摘掉生成物同时消掉「main 一动补丁就 `git apply` 不上」这个真实故障模式。
+- **T1106**（API/Upload 安全加固）：原来是 `internal/**`（安全复核报的，我核过成立）——一个加固任务若能改 `internal/authz/**`（授权判定）
+  或 `internal/rsg/externalref/**`（SSRF 名单），它就能顺手把自己的守卫改松。改成逐子树列名（`internal/application/authn/**`、`internal/observability/**`、
+  `internal/config/**`、`internal/httpmw/**`、`internal/ratelimit/**`），SSL 与事件那两面出范围（只读、只指向，见任务书第 5 条）。
+  **注意 `forbidden_scope` 只渲染进 Worker 提示词、不在验收时机械拦截**（`internal/devorchestrator/worker_render.go:475-477`），真正拦人的是 `allowed_scope`。
+  **T0411 的 `internal/authz/**` 复核也提了**：查过它的工作树，11 个改动文件里 **0 个**碰 authz，本轮不构成实际暴露；G2 时若有 authz 改动，我逐行看。
+
+### ⑤ P12 六笔摘掉 `docs/**`
+
+T1201/T1202/T1205/T1206/T1207/T1208 的 phase 默认范围含 `docs/**`。按 §8.1 那是 Supervisor-only。
+交付物改落在 `tests/acceptance/**`、`tests/e2e/**`、`ops/**`、`examples/**`；**要写 `docs/` 就让 Worker 报上来**，由我落笔。
+
+### ⑥ 迁移号分配
+
+**`00122` 分配给 T0908**（`00121` 是 T0906 的，仍在飞）。编号由 Supervisor 分配、写进任务包，Worker 不得自选（§8.1）。

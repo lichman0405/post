@@ -1,0 +1,73 @@
+{
+  "id": "T0710",
+  "dependencies": [
+    "T0708",
+    "T0709"
+  ],
+  "tests": [
+    "asset canonical e2e"
+  ],
+  "phase": "P7",
+  "phase_name": "Release、Asset、Rights",
+  "title": "Asset 完整 E2E",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "requirements": [
+    "**任务原文逐字**：`Release→Dataset Asset publish→另一 Project reference/depend→fork derived`；验收逐字：**`PID/version/rights/lineage 全正确`**。这一笔就是把这条链在**真实路径**上从头发到尾跑一遍，并且逐段断言。",
+    "**每一跳今天在哪儿（2026-09-21 逐条核过，别重新发现）**：\n  - **(a) Release**：`POST /api/v1/projects/{projectId}/releases`（`cmd/api/releasehttp/release_wiring.go:50`），服务 `internal/application/releases/command.go:107`，main 冻结走 `POST …/main:freeze`（`cmd/api/freezehttp/wiring.go:45`）。现成的全链路测试是 `tests/integration/release_e2e_test.go:326 TestReleaseE2E`。\n  - **(b) Dataset 资产发布**：`POST /api/v1/projects/{projectId}/assets:publish`（`cmd/api/assetshttp/wiring.go:98`），`internal/application/assetpublish/command.go:36`；`dataset` 是四个合法 `asset_type` 之一（`internal/assets/asset.go:28`）。\n  - **(c) 跨项目引用/依赖**：**只有 `depends_on` 这一半**，而且是发布的副作用——`asset_dependencies` 的写入在 `internal/persistence/queries/asset_dependencies.sql:39`（`ON CONFLICT … DO UPDATE`），由 `internal/persistence/asset_publish_store.go:366 recordUsageDeclarations` 在发布事务里写；**没有独立的依赖声明路由**。现成证据 `tests/integration/asset_dependency_test.go:422 TestAssetDependencyPublishRecordsTheDeclaredUsages` 就是跨项目的（A 的 `pid@1.0` 被 B 的项目 pin 住）。\n  - **(d) fork/derive + lineage 边**：**这一跳由 T0708 提供，本任务依赖它的理由就是它**。DAG 里 `T0710` 的 `dependencies` 就是 `[\"T0708\",\"T0709\"]`——今天它是空的不是因为排期，是因为产品里根本没有这条路（表 `asset_lineage` 建好了、读法 `internal/persistence/queries/asset_page.sql:140 ListAssetPageLineage` 也有了、`assets/page.go:528` 也渲染了，**但全仓 `INSERT INTO asset_lineage` 只命中两处，都在测试里**）。\n  - **(e) PID**：`research_assets.pid`（迁移 `00064`，格式 CHECK `^[0-9a-hjkmnp-tv-z]{26}$` + 唯一索引），**由发布命令当场铸造**（`internal/application/assetpublish/command.go:265-299` 逐字「The pid is decided HERE, and this is the only place it is decided」，`assets.NewPID()`）。",
+    "**`references`（引用）这一半今天在规格层面就是不可表达的，不许在测试里把它「补」出来**。`internal/assets/usage.go:44-53` 逐字：「Every pin is a dependency, never a citation. … a manifest has no field that means \"background knowledge\": nothing in the document distinguishes a version that was consulted from one that was used as an input, **so a citation is not expressible here and this rule does not invent one**」。`DependencyTypeReferences = \"references\"` 在词表里、读法也会渲染它，但**没有任何产品路径能产生一行 `references`**。仓库里唯一造得出它的地方是测试的裸 SQL（`tests/integration/asset_page_test.go:658-663` 手插 `'reuses'`/`'cites'`/`'documents'`）——那是**别人**的测试夹具，用在它自己的目的上是对的；**但你不能拿它当「引用这条链通了」的证据**。所以：**你的 E2E 走 `depends_on` 那一半，并在 RESULT 里逐字写明「`references` 在 V1 不可表达，见 usage.go:44-53，本套件不伪造它」**。这是本笔最容易被抓的失分点：用一行手插 SQL 把「另一 Project reference」蒙过去。",
+    "**逐段断言，不许只跑一遍看没报错**（照 `tests/integration/release_e2e_test.go` 与 `tests/integration/external_fork_merge_e2e_test.go` 的密度办）。每一跳都要有「它真的发生了」的证据：\n  - Release 冻结的是**那一刻的 main 头**，之后 main 再动，release 的 manifest 不变（`docs/11` 的不可变口径）；\n  - 发布的资产真的拿到一个**合法形状且唯一**的 pid，且 `pid` 与 `version` 是两个不同的东西（不要混成一个字段）；\n  - 版本内容与 manifest 逐字段对得上（不是只看 HTTP 201）；\n  - 跨项目 pin 的**那一行**：`project_id` 是消费方项目、`asset_version_id` 解析到**提供方的那个版本行**、`dependency_type = depends_on`、`visibility_of_usage` 取版本自己的声明；\n  - fork/derive 之后：**新 identity 是新的**（asset_id / pid 不与父相同），**lineage 边真的在表里**且方向与类型正确（`relation_type IN ('forked_from','derived_from','supersedes')`），**父版本不可变**（`asset_lineage` 上有 append-only 触发器，见 `infra/migrations/00014:63` 与 `00015:14`）；\n  - **rights**：derive 的放行/拒绝按 T0708 落地的判定走，且**拒绝的那一档要被真的走到一次**（只有放行路径的 rights 断言等于没断言）。",
+    "**不许用 stub/mock 把 fork/derive 那一步「走通」**。RESULT 里写 passed 而实际没经过真实产品路径，是本 phase 最容易被抓住的事。真 PostgreSQL 是底线（`POSTGRES_TEST_ADMIN_URL`，`tests/e2e-release/run.sh:30` 有默认值）；挂具形状**复用既有的**，**不要再造第三套**：`tests/e2e-release/`（`run.sh:5-9` 逐字「Nothing is mocked.」，真 Chromium + 真 harness + 真 PostgreSQL）与 `tests/integration/`（真库上的 Go 集成）。",
+    "**可复现性必须写清楚**（我要照着你写的复跑一遍）：跑之前要什么（PostgreSQL 怎么起、哪些端口、`POSTGRES_TEST_ADMIN_URL` 默认值够不够、是否要联网装东西、装到哪）；脚本幂等吗（连着跑第二遍会不会因残留进程/残留库/端口占用而失败）；依赖不依赖本机既有的 Redis/MinIO/Gitea，还是自足。",
+    "**测试与断言只准加强，不准放宽**：不许删断言、不许 skip、不许放大 timeout、不许把 FAIL 改成容忍。这条没有例外。**特别是**：T0708/T0709 带进来的既有测试（`T0708-TEST-01` 那条 `asset lineage`、`tests/e2e-assets/`）**原样留着**，你的入口是把它们组织进这条链，不是替换它们。",
+    "**发现产品缺口时的正确动作是「报」，不是「补」**。典型的三类：fork/derive 的路由或判定有洞（那是 T0708 的面）、跨项目 pin 的可见性判定有洞（T0707/T0709 的面）、release 冻结语义有洞（T0605/T0606 的面）。**停下写证据（文件、行、复现命令）留在 RESULT 里交给我拆任务**，不要自己动 `internal/**`（不在你的范围内，见 scope）。像「提案送进评审没有路由」这类缺口，仓库里有现成先例：`tests/e2e-pr-flows/pr-flows-e2e.mjs:36-44` 用一条**测试自有**的 harness 端点直接调产品里的服务方法，**不碰任何状态列**——照这个形状做。",
+    "**验收的四个字要逐字对得上**：`PID/version/rights/lineage 全正确`。RESULT 里要有四段，每段点名它断言了什么、在哪个文件哪一行、以及**这条断言在什么情况下会红**（说不出会怎么红的断言，等于没有）。",
+    "**不做 / 边界**：不改 `specs/**`（契约是 Supervisor 的；缺路由先报）、`docs/**`、`tasks/**`、`infra/**`（**不新增迁移**，真需要就报，编号由我分配，§8.1）、`apps/web/**`（浏览器面由 T0709 的 e2e 管）。"
+  ],
+  "deliverables": [
+    "一条从 Release 到 fork/derive lineage 的完整 e2e，在真 PostgreSQL 上可重复跑",
+    "四段逐条断言：PID / version / rights / lineage，每段带「什么情况下会红」",
+    "跨项目 `depends_on` pin 的行级断言（项目、版本 id、类型、可见性）",
+    "rights 拒绝那一档的真实用例",
+    "`references` 不可表达的逐字说明（不伪造）",
+    "可复现性说明：起库、端口、幂等性、外部依赖"
+  ],
+  "acceptance_criteria": [
+    "**PID/version/rights/lineage 全正确**（任务原文）：四段断言各自成立，且每段在 RESULT 里点名了它的转红条件",
+    "**链路是端到端的真实路径**：Release → Dataset 发布 → 跨项目 `depends_on` → fork/derive + lineage 边，全程真 PostgreSQL、真 HTTP/真服务；没有任何一跳被 stub 掉（fork/derive 那一跳尤其）",
+    "**`references` 没有被伪造**：RESULT 里逐字写明它在本版不可表达（`internal/assets/usage.go:44-53`），套件里没有用裸 SQL 造一行 `references` 来充证据",
+    "**rights 的拒绝档被走到过**：有一条真实用例证明不允许的派生被拒，并给出该用例的转红条件",
+    "**lineage 边与不可变性**：边真的在 `asset_lineage` 里、方向/类型正确、父版本不可变（append-only 触发器挡住 UPDATE/DELETE 的那条也要有依据）",
+    "**可重复**：连着跑第二遍不因残留而失败；RESULT 给出一条从零开始的完整复跑命令，以及它需要的前提",
+    "**既有测试没有被削弱**：`T0708-TEST-01`、`T0709` 的 `tests/e2e-assets/`、`tests/integration/asset_*_test.go` 全部原样通过；没有删断言/skip/放大 timeout",
+    "**范围干净**：`internal/**`、`cmd/**`、`apps/web/**`、`specs/**`、`infra/**` 的 diff 为空（要改就先报回来）",
+    "**RESULT 里写明**：每一跳的断言位置、缺口（若有）的证据、以及所有你判断不了而按最严处理的地方"
+  ],
+  "allowed_scope": [
+    "tests/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "specs/**",
+    "docs/**",
+    "infra/**",
+    "internal/**",
+    "cmd/**",
+    "apps/web/**",
+    "packages/**",
+    "go.mod",
+    "go.sum"
+  ],
+  "relevant_specs": [
+    "docs/11_RELEASE_ASSET_HUB.md",
+    "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
+    "docs/21_DATA_MODEL.md",
+    "docs/adr/ADR-023-asset-fork-derive-lineage.md",
+    "specs/schemas/research-asset-version.schema.json",
+    "specs/api/openapi.yaml"
+  ],
+  "scope_note": "**只有 `tests/**`，这是本笔最硬的一条。** 理由：这一笔的产物是**证据**，不是产品路径——链上的每一跳要么已经合并（Release/发布/依赖/PID），要么由 T0708 提供（fork/derive + lineage 写入口）。E2E 挂具在本仓里本来就住在 `tests/**` 下（`tests/e2e-release/`、`tests/integration/`、`tests/e2e-pr-flows/`），连「缺失路由时调一次产品服务方法」的那种 harness 端点也写在测试里。**`internal/**` 与 `cmd/**` 明确排除**：一个 E2E 任务顺手改产品路径，等于把「发现的问题」和「修它的实现」混成一份没人复核的 diff——而这正是「用一行手插 SQL 让链看起来通了」的温床。**发现缺口就报**（需求第 8 条给了具体形状）。`go.mod`/`go.sum` 也排除：挂具不需要新依赖，真需要就报。",
+  "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄 + 立账）——只给 `tests/**`，并把「哪几跳已经存在」逐条钉进需求。**\n\n**立账时我先问了「这一笔到底缺什么」**，答案是：五跳里四跳已经合并并有各自的测试，**缺的是 (d) fork/derive + lineage 写入口，而那一跳是 T0708 的差事**——DAG 里 `T0710` 的依赖本来就是 `[T0708, T0709]`，所以这一笔不需要新的任务、也不需要我替 owner 拍任何产品决定，**把它写清楚、让它排在 T0708 之后即可**。\n\n**本笔里我定死的两件事**：①**`references` 不许伪造**（需求第 3 条）——`internal/assets/usage.go:44-53` 是仓库自己写下的「引用不可表达，本规则不发明一个」，而测试里恰好有裸 SQL 能手插一行，这是这条链最容易被蒙混的地方；②**缺口报回来、不要自己补**（需求第 8 条）——与 T0810 那封恢复信的口径一致（「不许自己改合并的内部，报回来」），因为同一个修法出现两个实现是一份要还的债。\n\n**为什么要一条可复现性说明**：E2E 的价值全在别人能否复跑。这条要求是从 T0810 的信里抄来的形状，它在那里救过一次场。"
+}

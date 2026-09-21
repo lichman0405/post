@@ -1,0 +1,68 @@
+{
+ "id": "T0907",
+ "phase": "P9",
+ "phase_name": "Search 与 Evidence-backed Research Answer",
+ "title": "Search Answer Web UI",
+ "v1_required": true,
+ "dependencies": [
+  "T0906"
+ ],
+ "requirements": [
+  "**先看清数据从哪来，别照着文档臆想字段。** 答案接口是 `POST /api/v1/search`，由 **T0906** 交付，响应外层是 `{\"search_id\": \"…\", \"answer\": { … }}`（`cmd/api/searchhttp/handlers.go:84-87`）。`answer` 的字段**逐字**只有这些（`internal/search/answer/answer.go:195-205` 的字段序就是它）：`answer_version`、`status`（`answered` / `fallback`，`answer.go:19-28`）、`reason`（仅 fallback 出现，闭集为 `no_provider` / `no_sources` / `provider_error` / `provider_timeout` / `invalid_answer` / `ungrounded_citation`，`answer.go:39-80`）、`query`、`answer_view`、`summary`、`citations`、`limitations`、`conflicts`、`sources`。`limitations`/`conflicts` 每条形如 `{text, refs, origin}`（`origin` 目前恒为 `\"platform\"`）。**`sources` 一份数据承担两个概念**——`answer.go:96-108` 逐字写着 docs/14 §4 要的「source objects」与「underlying results」在本实现里是**同一张列表**，靠每条的 `cited` 标出摘要真正引用的那个子集。单条形如 `rank`、`ref`、`kind`、`entity_type`、`object_type`、`title`、`version`、`href`、`project_id`、`labels`、`factors`、`cited`（`answer.go:110-147`）。",
+  "**`docs/42_PAGE_SPECS.md:25` 与 `docs/05_INFORMATION_ARCHITECTURE.md:42` 要的 `comparison` / `conditions` / `evidence_map` 三块，在答案文档里没有对应键。****不要在前端凭 `sources` 现推这三块**——那会让页面变成对答案的第二份定义。**照实渲染存在的字段，并在 RESULT 里点名这三块缺数据**（缺的是哪一块、文档出处在哪一行）。`evidence map` 这一块**有一个诚实的落法**：`limitations`/`conflicts` 每条都带 `refs`，把它们与 `sources` 的 `ref` 对齐、做成「主张 ↔ 证据」的对照视图——这用的是文档里真有的数据。做不做由你判断，做了就要在 RESULT 里说清它是从 `refs` 投射出来的。",
+  "**四种状态都要有，且都要有测**：请求中（loading）、`answered`、`fallback`（六种 `reason` 各有文案，**不是一句「出错了」**）、错误（400 `SEARCH_INVALID_REQUEST` / 401 `SEARCH_UNAUTHENTICATED` / 503 `SEARCH_UNAVAILABLE`，错误信封是 `{code, message, request_id, retryable}`，`cmd/api/authhttp/envelope.go:14-19`）。**fallback 不是错误**：它是平台**不愿意在没证据时给答案**的结果，页面要把它呈现成一种正常结论，而不是红色报错。",
+  "**URL 就是查询的住处**：`/search?q=…` 必须继续可用——导航栏的检索表单是 `GET` 到 `/search`（`apps/web/app/nav/global-nav.tsx:50`），`page.tsx:13-18` 现在从 `searchParams` 读 `q`。所以：query 从 URL 读、答案可以客户端取（`POST` 需要 cookie 与 JSON body），**但刷新、复制链接、新标签页打开必须得到同一个答案**。这条要有断言（见验收）。",
+  "**每条 source 都要能点开**（任务书原文的「可直接探索 source」）。答案里每条 source 带 `href`——**用它**，不要在前端拼 URL。若某些 `kind` 的 `href` 缺失或指不到真实页面，**报上来**（那是生产方 T0906 的事），不要自己编一条路径。",
+  "**设计系统照既有做法**：Primer 组件（`@primer/react` 38.39.0）+ 手写 CSS。**没有 Tailwind，也没有 `sx` prop**（`apps/web/app/globals.css:1-2` 逐字写着）。样式写成与页面同目录的一个 `.css`（如 `explore.css` / `assets.css` 那样），只用 globals.css 里的 Primer token；`.rp-card`、`.status-list`、`.rp-section-title` 这些既有类可以直接用。**测试会强制**：`tests/web-smoke/visual-smoke.mjs:37-52` 禁止渐变、backdrop blur、紫色。",
+  "**两个既有烟测现在把这一页当占位页断言，必须同笔更新**：`tests/web-smoke/visual-smoke.mjs:189`（`[\"/search?q=solid-state\", \"Search\"]`）与 `:191-206`（断言返回 200、第一个 `h1` 文本恰为 `Search`）；`tests/web-smoke/a11y-smoke.mjs:66`（扫描 `/search?q=catalyst`）与 `:185-190`（键盘提交后断言 `<q>` 元素文本为 query）。页面一改，这两处**必然**要么改要么红——**改要说明改成什么、为什么新断言仍然测得住原来那件事**。"
+ ],
+ "deliverables": [
+  "`/search` 页：query 来自 URL，答案按 `answered` / `fallback` / 错误三态渲染，loading 有稳定骨架",
+  "sources 列表：每条可点开（用答案里的 `href`），并标出 `cited` 子集",
+  "limitations / conflicts 区（每条带 refs），以及（若做）由 refs 投射的证据对照视图",
+  "新的浏览器 e2e（`tests/e2e-search/`，照 `tests/e2e-explore/` 的形状：独立 npm 项目 + playwright + 真实 HTTP mock origin）",
+  "更新后的两处既有烟测",
+  "RESULT：逐条写清缺数据的文档项、`href` 的可用性、以及每条新断言「怎么证明它测得动」"
+ ],
+ "acceptance_criteria": [
+  "**仪器能说不（先做这一步）**：新的 e2e 里，**至少三条**断言要各自做一次变异（把被测的那件事改坏——例如把 fallback 分支渲染成错误、把 `cited` 标记去掉、把 `href` 换成 `#`），确认它**转红**，把红的输出留在 RESULT 里。从没红过的断言不算证据。",
+  "**三态都渲染对**：`answered`（有 summary 且有 citations）、`fallback`（六种 `reason` 各有可区分文案）、错误（至少 503 与 401 两种 code 各有呈现）。用真实 HTTP mock 驱动，不是给组件喂 props。",
+  "**`sources` 与 `cited` 逐条对得上**：mock 里给 5 条 source、其中 2 条 `cited`，断言页面上被标为引用的**正是**那 2 条（按 `ref` 对，不按顺序对）。",
+  "**URL 可分享**：直接以 `/search?q=<有答案的查询>` 打开（不是先点表单），页面渲染出该查询的答案；刷新后仍是同一个 `search_id` 对应的答案。",
+  "**每条 source 都点得开**：e2e 里真的点一条，断言落到一个 200 的页面；把该条 source 的 `href` 去掉后这条断言**转红**。",
+  "**两处既有烟测仍然绿，且强度不降**：`tests/web-smoke/run.sh` 全绿；对改过的断言，逐条说明改前测的是什么、改后测的是什么、为什么没有变弱。",
+  "**不许在前端造数据**：页面上出现的每一条 claim / 数值 / 证据都必须来自响应体；用一次源码扫描或 e2e 断言证明（例如：mock 里不放某字段时，页面对应区域**不出现**而不是显示占位假值）。",
+  "**设计系统合规**：`visual-smoke` 的 css-policy 与 a11y 扫描（axe）全绿；键盘可达（tab 到每条 source、回车能打开）。",
+  "**诚实报告**：`comparison` / `conditions` / `evidence_map` 三块缺数据这件事、`href` 有没有指不到的地方、以及你不能确定的地方，逐条写进 RESULT。"
+ ],
+ "tests": [
+  "search ui e2e"
+ ],
+ "allowed_scope": [
+  "apps/web/**",
+  "packages/ui/**",
+  "tests/**",
+  "cmd/api/searchhttp/**",
+  "internal/search/answer/**"
+ ],
+ "forbidden_scope": [
+  "specs/**",
+  "docs/**",
+  "tasks/**",
+  "infra/migrations/**",
+  "internal/persistence/**",
+  ".git/**",
+  "CLAUDE.md"
+ ],
+ "decision_level_max": "L1",
+ "relevant_specs": [
+  "docs/14_SEARCH_DISCOVERY.md",
+  "docs/42_PAGE_SPECS.md",
+  "docs/05_INFORMATION_ARCHITECTURE.md",
+  "docs/adr/ADR-010-search-answer.md",
+  "specs/api/openapi.yaml",
+  "specs/ui/page-inventory.csv"
+ ],
+ "scope_note": "**收窄到「前端 + 它自己的测试」。** 摘掉 `infra/migrations/**`、`internal/persistence/**`、`specs/**`：本任务不建表、不改 schema，也不写契约（这些是 Supervisor 与上游任务的面）。摘掉它们同时消掉一个真实故障模式：带着生成物的补丁在 main 一动时 `git apply` 不上（`specs/orchestrator/derived-artifacts.json`）。\n\n**`cmd/api/searchhttp/**` 与 `internal/search/answer/**` 只保留给一种改动**：答案里 `href` 指不到真实页面、或某个字段与 UI 的读法对不上时的小修。**任何这类改动都必须让 T0906 的 grounding 测试原样全绿**（`cmd/api/searchhttp/grounding_test.go`、`internal/search/answer/*_test.go`）——那是「引用只能来自检索结果」那条不变量，一个字都不许放宽。**超出了这个小口子就报上来**，不要顺手扩面。\n\n`tests/**` 含两处要同笔更新的既有烟测（`tests/web-smoke/visual-smoke.mjs`、`tests/web-smoke/a11y-smoke.mjs`）与新的 `tests/e2e-search/`。",
+ "supervisor_scope_narrowing": "**收窄到「前端 + 它自己的测试」。** 摘掉 `infra/migrations/**`、`internal/persistence/**`、`specs/**`：本任务不建表、不改 schema，也不写契约（这些是 Supervisor 与上游任务的面）。摘掉它们同时消掉一个真实故障模式：带着生成物的补丁在 main 一动时 `git apply` 不上（`specs/orchestrator/derived-artifacts.json`）。\n\n**`cmd/api/searchhttp/**` 与 `internal/search/answer/**` 只保留给一种改动**：答案里 `href` 指不到真实页面、或某个字段与 UI 的读法对不上时的小修。**任何这类改动都必须让 T0906 的 grounding 测试原样全绿**（`cmd/api/searchhttp/grounding_test.go`、`internal/search/answer/*_test.go`）——那是「引用只能来自检索结果」那条不变量，一个字都不许放宽。**超出了这个小口子就报上来**，不要顺手扩面。\n\n`tests/**` 含两处要同笔更新的既有烟测（`tests/web-smoke/visual-smoke.mjs`、`tests/web-smoke/a11y-smoke.mjs`）与新的 `tests/e2e-search/`。"
+}

@@ -1,0 +1,64 @@
+{
+ "id": "T1202",
+ "phase": "P12",
+ "phase_name": "Canonical Workflow 与最终交付",
+ "title": "Canonical MOF Workflow E2E",
+ "v1_required": true,
+ "dependencies": [
+  "T1201",
+  "T0908",
+  "T1007",
+  "T0818"
+ ],
+ "requirements": [
+  "**这是一条门，不是一个演示。** `docs/31_MASTER_ACCEPTANCE.md:60`（Gate I）逐字：「完整 MOF workflow 从 Research Question 到外部项目贡献 Evidence 与 Profile credit，**全程真实 DB/Git/blob/browser，非 mock 演示**。」`docs/67_TEST_GATES.md:31` 逐字：「canonical MOF workflow 每个 phase milestone 至少跑一次，P12 必须完整跑通。」任务书逐字给的链路是：`Q → H/branch → experiment → calculation → evidence → claim → finding → PR → main → release → assets → external project evidence → profile credit`。",
+  "**入口脚本路径已经定死（我把它写进了闸门）：`tests/acceptance/mof-canonical-workflow.sh`。** `specs/orchestrator/gates.json` 里新增了 G3 job `mof-canonical` 指向它，T1202 的 `task_overrides.g3_jobs` 已经带上它——**也就是说：这个脚本会作为本任务的验收闸门真的被跑**，跑不过就合不了。",
+  "**每一步都要能被单独指认**：任务书的验收逐字写着「测试失败可定位 step」。所以脚本要按 step 组织（每步一个名字 + 一条断言），任一 step 红了要打印**是哪一步、期望什么、实际什么**，退出码非零。「跑完没报错」不算证据——每一跳都要有「它真的发生了」的断言（例如：合并之后**上游**的状态链上真的多了一个状态；external evidence 能按 pid 取回；profile credit 记在正确的贡献者名下）。",
+  "**不许 mock 掉关键一跳**。仓库里有两个真栈先例，照它们的形状来，别另起一套：`tests/e2e-pr-flows/run.sh:2-9`（逐字「Nothing is mocked: this is the one browser suite that needs the local dev stack (PostgreSQL, Gitea, and the git CLI on PATH) to be up」）与 `tests/e2e-release/run.sh:2-12`（真 PostgreSQL）。`tests/e2e-pr-flows/harness/main.go:504-583` 里已经有一个 MOF 项目的 seed（org `mof-humidity`、slug `demo-mof-humidity-separation`），**但种子数据应当来自 T1201 的 seed builder**，不要在脚本里再长一份。",
+  "**前置状态由 seed builder 自动生成，不依赖人工修 DB**（`docs/57_DEMO_UAT.md:5`）。所以脚本的第一步是调 T1201 的 builder（或断言它已经跑过），并把「库里现在有什么」读回一次作为基线。",
+  "**负向也要覆盖**：`docs/57_DEMO_UAT.md:7` 列了负向场景（匿名访问 private URL、Agent 尝试 publish、Git 直接推 main、restricted blob 下载、search 私有泄漏）。本任务**至少**要覆盖与这条闭环直接相关的两条（private 不可见、非成员不能合并），其余归 T1206。",
+  "**可复现性写清楚**（我要照着跑）：需要哪些服务在跑、端口、环境变量默认值够不够、装了什么、第二遍跑会不会因残留失败。",
+  "**诚实报告**：链路里今天走不通的那一跳，**停下来写清证据，不要用 stub 补**——上一轮 T0810 就是因为这个被停的。走不通就如实报 `failed`/`blocked` 并点名文件与行。"
+ ],
+ "deliverables": [
+  "`tests/acceptance/mof-canonical-workflow.sh`：一条命令跑完整闭环，逐步命名、逐步断言、失败可定位",
+  "浏览器那一段用真实 Chromium（照 `tests/e2e-pr-flows` 的做法），不是 curl 假装",
+  "负向断言（至少 private 不可见、非成员不能合并）",
+  "RESULT：每一步的实测证据、跳与跳之间的存储断言、以及走不通的项（若有）"
+ ],
+ "acceptance_criteria": [
+  "**仪器能说不（先做这一步）**：故意把链路上某一跳改坏（例如让合并那一步跳过），脚本必须**红**并**指名是哪一步**；把这段输出留在 RESULT 里。一个从没红过的门不算门。",
+  "**完整链路一次跑通**：从 Research Question 到 external contribution 与 profile credit，每一步都有断言；链路里的对象/状态/release/asset 都经真实 API 与真实服务产生。",
+  "**真实浏览器**：至少 PR/评审/合并这一段由真实 Chromium 驱动（脚本里能看出 playwright 启动），不是只有 HTTP 调用。",
+  "**终点断言**：external evidence 可按 pid 取回、profile credit 记在正确的贡献者名下、组织 affiliation 没有吞掉个人历史（`docs/31:30`）。",
+  "**可重复**：连着跑第二遍不因残留失败（或脚本自带 reset 并写明）。",
+  "**没被放宽**：链路里任何既有测试都不许删、不许 skip、不许放 timeout；需要改动既有测试时逐条说明理由并保持强度。",
+  "**诚实报告**：走不通的跳、以及你为了让它跑通做的任何妥协，逐条点名。"
+ ],
+ "tests": [
+  "canonical playwright"
+ ],
+ "allowed_scope": [
+  "tests/acceptance/**",
+  "tests/e2e/**",
+  "tests/e2e-pr-flows/**",
+  "ops/**",
+  "examples/**"
+ ],
+ "forbidden_scope": [
+  ".git/**",
+  "CLAUDE.md",
+  "tasks/task_status.json",
+  "tasks/progress.md"
+ ],
+ "decision_level_max": "L1",
+ "relevant_specs": [
+  "docs/31_MASTER_ACCEPTANCE.md",
+  "docs/67_TEST_GATES.md",
+  "docs/57_DEMO_UAT.md",
+  "docs/34_SEED_DEMO_PROJECT.md",
+  "specs/orchestrator/gates.json"
+ ],
+ "scope_note": "**摘掉 `docs/**`（Supervisor-only）**；`tests/e2e-pr-flows/**` **加进来**是故意的——那条真栈浏览器套件的 harness 与 seed 是你最该复用的东西，**复用它、不要复制它**（复制出第二份 harness 就是第二份要还的债）。\n\n**不碰 `internal/**`、`infra/migrations/**`、`cmd/**`**：本任务是门，不是修 bug。链路上哪一跳走不通，**报上来**，由我立新账；上一轮 T0810 就是因为在门里顺手修产品代码而被停的。",
+ "supervisor_scope_narrowing": "**摘掉 `docs/**`**（Supervisor-only，CLAUDE.md §8.1）；**加入 `tests/e2e-pr-flows/**`**：那里有唯一一条真栈浏览器套件与它的 harness/seed，本任务的浏览器那一段应当复用它而不是另写一套。其余保持 phase 默认。"
+}

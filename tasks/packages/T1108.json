@@ -1,0 +1,91 @@
+{
+  "id": "T1108",
+  "dependencies": [
+    "T0907",
+    "T1102"
+  ],
+  "tests": [
+    "perf benchmark"
+  ],
+  "phase": "P11",
+  "phase_name": "UI、安全、可访问性、性能与运维加固",
+  "title": "性能基线与索引调优",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "requirements": [
+    "**规格逐字，先照抄**：`docs/27_PERFORMANCE_SLO.md:3` 逐字「**V1 是工程目标，不承诺公网 SLA，但应满足以下开发验收。**」——这句话定了本笔的性质：你要产出的是一份**开发期基线**，不是线上 SLA。`:6-9` 页面：Project Overview **p95 API < 500ms**、常规列表 **p95 < 400ms**、Object detail **p95 < 500ms**、Research Map initial aggregated query **p95 < 1s**（复杂展开可异步）；`:12` Candidate retrieval **p95 < 2s**（seed/中小规模）；`:16` 常规 semantic command **p95 < 800ms**（不含 blob upload）；`:20` 容量基线：**单 Project 10k Scientific Objects / 100k relations / 10k state transitions / 1k branches+PR history**，Network seed **100 Projects / 100k searchable entities**。",
+    "**现状：这台仪器今天完全不存在，而且不是「弱」，是「零」（2026-09-21 逐条实测）**。`grep -rn \"func Benchmark\" --include=*.go` **全仓零命中**；`pgbench` / `k6` / `artillery` / `autocannon` **零**；`Makefile` 的 28 个目标里**没有任何 perf/bench 目标**（数法：`grep -cE \"^[a-z][a-z0-9-]*: ## \" Makefile` → 28；`grep -nE \"^[a-z-]*(bench|perf)[a-z-]*:\" Makefile` → 零命中）；`cmd/rddev` 的 17 个子命令里 `db` **只支持 `migrate`**（数法：`grep -oE '^\\s+case \"[a-z]+\"' cmd/rddev/main.go` → 17：version help doctor env task worker review gate git pr rebaseline refs branch drive status db workflow）（`cmd/rddev/db.go:15`、`:49`），**没有 seed**；`grep -rn \"testing.Short\"` 在 `tests/` 与 `internal/` **零命中**（也就是说仓库里没有任何「跳过慢测试」的暗门，本笔也不许开一个）。`tests/` 下 20 个目录里没有 benchmark，`grep \"for i := 0; i < [0-9]\\{3,\\}\"` 在集成测试里**零命中**——**没有任何批量造数的东西**。`internal/assets/asset.go:31` 那个 `TypeBenchmark` 是**资产类型**，不是基准测试，别被 grep 骗了。",
+    "**全仓只有一处查询计划断言，它是本笔的样板，不是本笔的成绩**：`tests/integration/research_profile_test.go:1076-1135 TestResearchProfileIntegrationMigrationIndexesExist`——先查 `pg_indexes`（`:1095`），再跑 `EXPLAIN (COSTS OFF)`（`:1109-1111`），断言计划里出现 `contribution_events_actor_occurred_idx`。**`:1105-1108` 自己的注释逐字说明了它的边界**：「this asserts the index is CHOOSABLE for the shape the query has, **not that the plan is pinned**」，而且它**不测任何耗时**。**照这个形状扩**，别发明第二种。",
+    "**索引现状（我数过，别重数）**：`infra/migrations/**` 里 `CREATE INDEX`/`CREATE UNIQUE INDEX` 共 **86 条**，最高编号 **00110**（`00110_ranking_factor_indexes.sql`）。**没有向量索引，而且这是记录在案的决定，不是遗漏**：`infra/migrations/00092_search_embedding_metadata.sql:63-71` 逐字「`# No index, deliberately` … an index is a measurable performance decision, not a semantic one … Left out as a decision, not by omission」；查询侧 `internal/persistence/queries/search.sql:186-190` 又重申一次，并逐字写着「**Adding one is a measurable performance decision with its own evidence, and this query is where its effect would be felt**」。**本笔就是那个 evidence 该出现的地方**——见需求第 6 条。",
+    "**交付物一：容量级 seed 生成器**。放在**新目录 `tests/benchmark/`**（`tests/` 下 20 个既有目录里没有重名的）。它要能按 `docs/27:20` 的两条基线造数：①**单项目档**（10k objects / 100k relations / 10k state transitions / 1k branches+PR）；②**网络档**（100 projects / 100k searchable entities）。要求：**一条命令跑起来、退出码可信、stdout 机器可读**（每张表的行数），并且**规模可参数化**但**默认就是规格的那个数**。**这条是本笔的地基：数不对，后面所有 p95 都是假的。** 生成完必须**先断言行数真的到位**（不是「跑完没报错」）。",
+    "**交付物二：逐项测量并逐项对照 SLO**。对 `docs/27` 点名的每一项产出**实测 p95 + 样本数 + 与目标的比值**，形成一张表：Project Overview API、常规列表、Object detail、Research Map 聚合查询、candidate retrieval、semantic command 写入。每一项要写清楚：**打的是哪个端点/哪条查询**（文件+行）、**量了多少次**、**冷/热**。**达到目标的逐条记「达标 + 实测值」；没达到的逐条记「偏差 + 实测值 + 你的分析」**——AC 的措辞是「满足…**或记录可接受偏差**」，所以**如实记录偏差是完全合格的交付**，把偏差藏起来才是失分。",
+    "**交付物三：索引调优，但只许被测量推着走**。规则：**先测，再决定改不改**。\n  - **许动的面**：`infra/migrations/**`（**编号以你任务包里的 `migration_number` 为准**——本仓由 `AllocateMigrationNumber` 在派工时发号并记账、返工沿用同一个号，`internal/devorchestrator/migration_numbers.go:83`；**不许自己选号、不许自己挑一个「看起来空」的号**，§8.1。派工时链上最高是 `00110`），以及 `internal/persistence/queries/**` 里确实被测量指认为瓶颈的查询形状。\n  - **向量索引这一条单独说清楚**：`00092:63-71` 把「加不加」定成「要证据的性能决定」。所以**你的动作是：在容量档上量 candidate retrieval，把数字摆出来，然后二选一**——①**没超 2s**：写「按 00092 的判断，V1 规模下精确扫描够用，本笔的实测支持这个决定，因此不加索引」**并把数字贴上**（这是一个**合格且有价值的结论**，不是没干活）；②**超了 2s**：加上 ivfflat/hnsw，**并且给出加之前/加之后的实测对比**、说明选了哪种、以及**召回代价**（近似索引可能更不准，永远不可能更准——00092 原话）。**两种都行，唯独不许「加了没说为什么」或「没测就说不用加」。**\n  - **迁移与快照**：`infra/migrations/**` 是 canonical schema history，`specs/database/postgres.sql` 是它的**生成物**——**用 `scripts/gen_schema_snapshot.py` 重新生成，绝不手工编辑**（§8.1；`make check-schema-snapshot` 会校验）。两个都在你范围内，正是因为派生件必须跟着动。\n  - **不许为了好看把索引堆上去**：每一条新索引都要能回答「哪次测量、哪个查询、差多少」，答不上来的删掉。",
+    "**交付物四：门，而且要能红**。`tasks/tests.json` 里登记着 `perf benchmark`（blocking）。**门的设计我替你定死，因为这里有一个真的陷阱**：\n  - **不许把 `p95 < 500ms` 这类数字直接写成 CI 断言。** CI runner 是共享的、会抖的；一个会随机红的墙钟断言，最后一定会被人用「放宽一点」修掉——而那正是 `CLAUDE.md` 禁止的事（禁止为让门变绿而放宽 assertion）。这个陷阱要现在就绕开，而不是等它把人逼到墙角。\n  - **所以门分两层**：①**确定性层（blocking）**：seed 行数确实到位 + 照 `research_profile_test.go:1076-1135` 的形状断言**计划可选用到索引**（`EXPLAIN (COSTS OFF)`，不钉死计划、不钉时间）+ **一条宽松的回归天花板**（比 SLO 宽若干倍，唯一职责是抓住数量级的退化；**你必须在代码注释与 RESULT 里都写明「这是回归天花板，不是 SLO」**）。②**报告层（记录，不在 CI 里断言）**：真实 p95 对 SLO 的对照表。**SLO 达标与否是一个被记录下来的测量结论，不是一个 CI 断言。**\n  - **门要能说「不会」**：RESULT 里要有一次**实际转红**的输出——例如把某条查询改成必然全表扫、或把 seed 行数调掉一个数量级，门必须红；然后把还原后的绿贴上。**一个从来没红过的门等于没有门。**\n  - **不许开 `testing.Short` 这类暗门**：本仓今天零命中，本笔之后也要是零。",
+    "**交付物五：一条 `make` 目标 + 交给我的 CI 片段。** 目标要能一条命令跑完（起库前提 → seed → 测量 → 门），并且**不要把它塞进 `make test-integration`**：那个目标有 20 分钟的 `-timeout` 预算（`Makefile:150-171` 逐字解释了为什么是 20m），基准测试跑在里面会把 G2 的每次集成都拖长。**`.github/workflows/ci.yml` 你不要动**——它与 `specs/orchestrator/gates.json` 被 `internal/devorchestrator/gate_spec_test.go:17-58` 逐步逐 env 对齐，`:31` 把 job 数写死成 7，而 gate spec 是 Supervisor 的只读区，你改了就会红一个你修不了的同步单测。**给我可直接粘的 YAML 片段 + 墙钟代价**，接线我落。",
+    "**顺带必须查的两处（我在事实核查里看见的、真实的嫌疑点，你去验，别照抄我的怀疑）**：①`internal/persistence/queries/search.sql:25` 的 `SearchDocuments` 用 **`LIMIT @page_size OFFSET @page_offset`**（`:45-46`）——深翻页在容量档上是什么样子，量一下；②`search.sql:400-417` 的 `SearchRankingFacts` 里有一个**逐行相关的子查询**（`:412-417` 对 `scientific_object_versions` 取 `max(version_no)`）——候选集变大时它是线性放大，量一下。**这两条我只看过，没有量过，所以它们的结论归你**；量完没问题是合格结论，量完有问题就按需求第 6 条处理。",
+    "**规模不许缩水，缩了要说**。报告的 SLO 对照必须用**规格的全量档**。如果 CI 上跑不起全量档（很可能跑不起），那就为 CI 另设一个**小档**并**明确标注它的数字不是 SLO 对照**——把所有测试都换成小档，然后拿小档的数字声称达标，是本笔最省事也最不能接受的骗法。**seed 生成与测量的墙钟代价要报出来**，这决定 CI 里到底能跑哪一档。",
+    "**可复现性**：本机怎么起库（`make infra-up` 起的是 `pgvector/pgvector:0.8.6-pg16`；**工人自己起不了 Docker**，所以要按 `Makefile:153-155` 描述的那条路走——只要求一个**可达**的 PostgreSQL）、`POSTGRES_TEST_ADMIN_URL` 的默认值够不够（默认 `postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post`）、幂等性（连跑第二遍会不会因残留数据而失败，残留怎么清）、需不需要联网装东西、装到哪。照 T0810 那封恢复信的形状写。",
+    "**不做 / 边界**：**不要实现 T1201**（`完整 Seed Demo Data Builder`，`docs/34_SEED_DEMO_PROJECT.md`，slug `demo-mof-humidity-separation`，有确定的对象数与叙事）——那一笔要的是**有科研语义的演示数据**，本笔要的是**容量规模的合成数据**，两码事，别合流也别复用它的 slug。不动 `apps/web/**`（前端那条「首个 loading state < 200ms」本笔**不测**，照实记账，见 AC）；不动 `docs/**`、`tasks/**`、`specs/**`（**只许动 `specs/database/postgres.sql` 这一个生成物**）、`.github/**`、`internal/devorchestrator/**`。不引外部压测工具（k6/pgbench/autocannon 都不引——仓库今天一个都没有，引进来又是一套 CI 要养的东西）。",
+    "**测试与断言只准加强，不准放宽**：不许删断言、不许 skip、不许放大 timeout、不许把 FAIL 改成容忍。**特别是**：`tests/integration/research_profile_test.go:1076-1135` 那条既有的计划断言**原样留着**，你的新门与它并列，不许合并、不许替换、不许顺手「优化」它。",
+    "**一个必须先知道的地形，否则你会被一个自己修不了的红卡住**：CI 的单元 job 跑的是 `go list ./... | grep -v '/tests/integration'`（`Makefile:19` 的 `GO_UNIT_PKGS`，`.github/workflows/ci.yml:86`），**任何新建的 `tests/` 子目录只要含 Go 文件就会被扫进去**，而那个 job **没有数据库**。`tests/ranking`、`tests/searchplan` 之所以没事，是因为它们不碰库（`grep -rln \"POSTGRES\\|pgx\\|sql.Open\" tests/ranking tests/searchplan tests/observability` 零命中）。对照一下：数据库那条路是 `Makefile:189` 的 `go test ./tests/integration -count=1 -timeout 20m`，而需求第 8 条**明确不要**把你的门塞进它（20 分钟预算会被基准拖死）。**所以你的门要满足两条同时成立**：① `go test` 扫到 `tests/benchmark/...` 时**不需要数据库也不红**；② 真正的容量档测量由新 `make` 目标驱动。最省事的形状是**把 `tests/benchmark/` 做成一个不含 `_test.go` 的普通包/可执行入口**（`go test` 对没有测试文件的包只报 `no test files`，是绿的），把断言放进可执行入口的退出码里，再由 `make` 目标调用——这样**连 CI 都不用为我改**。**不要**用 `testing.Short` 或「没库就 skip」绕过去：那既是需求第 2 条禁止的暗门，也会让门失去「能说不会」的能力。"
+  ],
+  "deliverables": [
+    "`tests/benchmark/` 下的容量级 seed 生成器（单项目档 10k/100k/10k/1k + 网络档 100 projects/100k entities），一行数一条命令，stdout 机器可读，行数自断言",
+    "逐项 p95 实测对 SLO 的对照表（端点/查询的文件+行、样本数、冷/热、实测值与比值）",
+    "索引调优：一条迁移（编号取任务包里发的那个，若测量支持）或「按 00092 的判断不加，实测数字在此」的书面结论；快照由脚本重新生成",
+    "两处嫌疑点的实测结论：`search.sql:25` 的 OFFSET 深翻页、`search.sql:400-417` 的逐行相关子查询",
+    "`perf benchmark` 门：确定性层（行数 + 计划可选用索引 + 标注为回归天花板的宽松上界）+ 报告层（p95 对照）",
+    "一次真实转红的证据（门能说「不会」）与还原后的绿",
+    "一条 `make` 目标 + 可直接粘的 CI YAML 片段 + 墙钟代价（seed 与测量分开报）",
+    "可复现性说明：起库、默认 URL、幂等性、外部依赖"
+  ],
+  "acceptance_criteria": [
+    "**满足 27_PERFORMANCE_SLO 开发目标或记录可接受偏差**（任务原文）：`docs/27` 点名的每一项都有实测值与对照；达标的逐条标注，未达标的逐条给出偏差、数值与分析。**没有「测不了」当借口的项**——测不了要说清楚为什么、以及要补什么才能测",
+    "**容量基线真的被造出来了**：`docs/27:20` 的两个档位都能一条命令生成，且**生成后真的断言了行数**（不是「跑完没报错」）；报告 SLO 对照用的是**全量档**",
+    "**索引改动由测量驱动**：每一条新索引都能追到一次具体测量与一个具体查询；向量索引那条按需求第 6 条二选一并**给出数字**（不加也要给数字）；`specs/database/postgres.sql` 由脚本重新生成而非手改，`make check-schema-snapshot` 绿；迁移编号用的是**任务包里发的那个号**（未自选、未占用他人号）",
+    "**门能失败**：一次真实转红的输出贴在 RESULT 里（例如把查询改成必然全表扫 / 把 seed 调掉一个数量级），随后是还原后的绿；**门的确定性层没有任何墙钟 SLO 断言**，宽松上界在代码注释与 RESULT 里都被标明「这是回归天花板，不是 SLO」",
+    "**没有开跳测暗门**：`grep -rn \"testing.Short\"` 在 `tests/` 与 `internal/` 仍为零；没有被 skip 的基准；既有 `research_profile_test.go:1076-1135` 未被改动（给出它未变的依据）",
+    "**规模没有缩水冒充**：CI/小档的运行（若有）在 RESULT 里被明确标注「不是 SLO 对照」；两个档位的墙钟代价都报出来了",
+    "**没有碰 CI 定义**：`.github/**` 的 diff 为空；`.github/workflows/ci.yml` 的 7 个 job 一个字节未变；RESULT 里给了可直接粘的 YAML 片段",
+    "**没有替 T1201 干活**：没有实现 `docs/34` 的演示 seed，没有用 `demo-mof-humidity-separation` 这个 slug，没有改 `apps/web/**`",
+    "**RESULT 里写明**：每项测量的端点/查询位置与样本量、每个索引改动的依据、没测的项与原因（含前端那条 200ms）、以及所有你判断不了而按最严处理的地方",
+    "**新包不会让无库的单元 job 变红**：`go test $(go list ./... | grep -v '/tests/integration')` 在**没有数据库**的环境下对你新增的 `tests/benchmark/...` 包是绿的（或只报 `no test files`）；把这条命令与输出贴进 RESULT。",
+    "**范围自检**：`git diff --name-only` 与 `git status --porcelain` 里**没有** `cmd/**`、没有 `tests/` 下 `benchmark/` 以外的路径、没有 `ops/` 下 `ci/` 以外的路径；有的话直接判红。"
+  ],
+  "allowed_scope": [
+    "tests/benchmark/**",
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "internal/persistence/queries/**",
+    "internal/config/**",
+    "ops/ci/**",
+    "Makefile",
+    "go.mod",
+    "go.sum"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "docs/**",
+    "apps/web/**",
+    "packages/**",
+    "internal/devorchestrator/**",
+    "specs/api/**",
+    "specs/ui/**",
+    "specs/orchestrator/**",
+    "specs/schemas/**",
+    ".github/**",
+    "pnpm-lock.yaml"
+  ],
+  "relevant_specs": [
+    "docs/27_PERFORMANCE_SLO.md",
+    "docs/21_DATA_MODEL.md",
+    "docs/68_SEARCH_ARCHITECTURE.md",
+    "docs/24_TEST_STRATEGY.md",
+    "docs/67_TEST_GATES.md",
+    "docs/adr/ADR-005-vector-search.md"
+  ],
+  "scope_note": "范围按「做这件事真的会碰到谁」划，共四块：**造数与测量**（`tests/benchmark/**`——新目录，`tests/` 下 20 个既有目录里没有重名的）、**索引与它唯一的生成物**（`infra/migrations/**` + `specs/database/postgres.sql`，后者**必须**在范围内，否则 `scope_validate.go:124` 那条「覆盖了标记输入却没覆盖它的派生物」会直接判不合规）、**被测量指认为瓶颈的查询形状**（`internal/persistence/queries/**`）与**可能被调的旋钮**（`internal/config/**`）、以及**接门要动的那一处**（`Makefile`）。`ops/ci/**` 留给阈值/基线文件的落地位置（照 `ops/ci/gofmt-baseline.txt`、`staticcheck-baseline.txt` 的惯例）。\n\n**`specs/**` 只开了一个口子**：`specs/database/postgres.sql` 这一个**生成物**（§8.1 的例外，且只能重新生成、不能手改）；`specs/api/**`、`specs/ui/**`、`specs/orchestrator/**`、`specs/schemas/**` 全部排除。**`apps/web/**` 排除**——前端那条「首个 loading state < 200ms」在本笔里只记账不测量，理由写在 AC 里：测它要一套真浏览器挂具，而本笔的量都在服务端与数据库这一侧；把它含进来会让一笔已经很重的任务再背一套挂具。**`internal/devorchestrator/**` 排除**（碰它会拖住正在跑的驱动）。\n\n说明一条口径：**`forbidden_scope` 不会被机械强制，真正拦人的是 `allowed_scope`**（收集期逐路径比对的就是它）。这里的 forbidden 是写给工人看的边界，别把它当成「没列进去就能写」。\n\n**`cmd/**` 我摘掉了**（2026-09-21）：初稿把 `cmd/**` 当成「可能被调的旋钮」放进来，但逐条读下来**没有任何一条要求需要动 `cmd/` 下的文件**——需求第 2 条提 `cmd/rddev/db.go` 是在陈述「`db` 只有 `migrate`、没有 seed」这个**现状**，不是让你去改它；需求第 8 条明确「`make` 目标归你、**CI 接线归我**」。而 `cmd/**` 覆盖 `cmd/api/**`，那里面有 authn/authz 装配、SSRF 名单与 release 出口——**一笔性能任务的授权不该伸进 API 服务器**。真需要动 `cmd/api/**`，那是另一笔任务。\n\n**`tests/**` 收成 `tests/benchmark/**`**，同理：被点名的消费者只有那一个新目录。`tests/integration/research_profile_test.go:1076-1135` 是**样板**（照它的形状写），不是让你去改它——需求第 13 条已写明原样留着。",
+  "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄 + 三个 L1 决定）**\n\n**决定一：迁移编号在派工时由任务包发给你，以 `migration_number` 为准**（§8.1 要求编号由 Supervisor 侧分配、不许工人自己选；本仓的分配器是 `AllocateMigrationNumber`，`internal/devorchestrator/migration_numbers.go:83`，派工时链上最高是 `00110`）。**我在这里不写死一个号**——写死了反而会与任务包里的号打架（本笔初稿写过 `00111`，随后发现 `00111` 已在链上被另一个任务持有，正是这个坑）。\n\n**决定二：门里不许出现墙钟 SLO 断言。** 这是本笔最重要的一个决定，理由不是保守而是**已知的失败模式**：把 `p95 < 500ms` 写成 CI 断言，在共享 runner 上必然随机红，而随机红的门最后一定会被人用「放宽一点」修掉——那正是 `CLAUDE.md` 禁止的「为让门变绿而放宽 assertion」。所以**确定性层管形状（行数、计划可用索引、一个被明确标注为『回归天花板』的宽松上界），报告层管 SLO 对照**。**「SLO 达标与否是被记录下来的结论，不是 CI 断言」**——这句话我写进了需求第 7 条，也写进了 AC。\n\n**决定三：向量索引的两种结论都算合格，唯独不许不测。** `00092:63-71` 自己把这件事定成「a measurable performance decision with its own evidence」，还逐字留着「Left out as a decision, not by omission」。**本笔正是那个 evidence 该出现的地方**：量出来没超 2s → 用数字支持这个既有的决定；超了 → 加索引并给出前后对比与召回代价。**「加索引」不是本笔的成绩，「有数字」才是。**\n\n**收窄掉的东西**：原 phase 级默认给到整个 `internal/**`、`specs/SPEC_VERSION.json`、`.env.example`——与本任务无关，`internal/**` 收成 `internal/persistence/queries/**` + `internal/config/**` 两处真会动的，`specs/**` 收成一个生成物。**这同时消掉了一个真实的故障模式**：补丁带 `specs/**` 指纹，main 一动就 `git apply` 不上（本仓发生过，工具是 `rddev rebaseline`）。\n\n**为什么要把 T1201 的边界写死**（需求第 13 条）：仓库里已经有 `docs/34_SEED_DEMO_PROJECT.md` 这份「有科研语义的演示数据」规格和对应的 T1201，而本笔要的是容量规模的合成数据。两者都是「造数」，最容易顺手合并成一件——合并的代价是 T1201 的领域检查单被稀释，而本笔的规模基线被叙事数据拖慢。"
+}

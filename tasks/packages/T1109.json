@@ -1,0 +1,80 @@
+{
+  "id": "T1109",
+  "dependencies": [
+    "T1007",
+    "T0007"
+  ],
+  "tests": [
+    "observability smoke"
+  ],
+  "phase": "P11",
+  "phase_name": "UI、安全、可访问性、性能与运维加固",
+  "title": "生产级 Observability/Dashboards",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "requirements": [
+    "**先接受一个事实：这一笔是从零建，仓库里今天一个指标都不存在（2026-09-21 逐条核过）**。`internal/observability/**` **六个文件全是日志与关联 id**——包注释 `doc.go:1-4` 自己写着「implements the P0 logging/correlation baseline」。`grep -rn '/metrics'` 全仓**零命中**；`grep -rniE 'prometheus|opentelemetry|otlp|otel|grafana|alertmanager'` 在 Go/YAML/config 里**零真命中**（只有 `pnpm-lock.yaml` 的一个 Next 传递依赖与 `docs/64:105` 的一句「可选 OpenTelemetry Collector」）；`go.mod` 里没有 metrics 模块；`grep -rn 'sync/atomic' internal/ cmd/` 只命中 4 处**全在 `_test.go`**。`cmd/api/main.go:193-201` 的根 mux 只有 `/healthz`、`/readyz`、`POST /internal/jobs` 三条非产品路由。**你要建的是这台仪器的第一版。**",
+    "**另一条也要先知道：规格点名要的指标，有几条今天连「可以量的源」都没有**。`docs/26_OBSERVABILITY.md:15-17` §3 逐字列了：HTTP latency/error、DB pool/query、queue depth/failures、Git ingestion lag、blob upload/failure、**outbox lag**、webhook success、search latency、**LLM planner failures**、**RSG reconciliation drift**、permission denied rates。逐条对一下今天的树：**HTTP 有源**（`internal/observability/middleware.go:38-43` 每个请求已经在记 method/path/status/duration 的日志行——把它变成计数器/直方图）；**queue depth 有源但没接**（`internal/worker/queue.go:121-133` 的 `Depth(ctx)` **已经实现了，却没有任何生产代码调用它**——它只被测试调用）；**outbox lag 有源**（`outbox_events` 表 + `internal/events/publish.go`）；**webhook success 有源**（`internal/events/deliver.go` 的投递分类已经在跑）；**search latency 有源**；**LLM planner failures 有源且名字都定好了**（`internal/search/planner/plan.go:70-72` 逐字「Reason names why a Plan fell back. It is a closed set so the fallback rate can be counted per cause」）；**RSG drift 有源**（`cmd/api/reconciliation.go:48-60` 的每轮汇总已经在打 `refs_checked`/`findings_opened`/`findings_open` 这些 attr，只是不是指标）；**permission denied 有源但要动授权判定点**（见需求第 7 条）。**没有源的那几条（`Git ingestion lag`、`blob upload/failure`）照实报「没有可量的源」，不要为了凑数造一个假的计数器。**",
+    "**规格逐字，照抄**：`docs/26_OBSERVABILITY.md:13` 逐字「三类记录」——「Application logs：工程运行。Domain audit log：谁对何科研状态做了什么。Research events：可订阅的业务事件。**三者不能混成一个日志表。**」；`:19` 逐字「每个 request/command/job/event 携带 request_id/correlation_id/actor_id/project_id（如适用）。跨 API→queue→Git/S3 保持 trace。」；`:27-29` §6 逐字「**P1：data visibility leak suspicion、RSG/Git drift、database unavailable、blob integrity mismatch。P2：event/outbox backlog、search unavailable、webhook failures surge。**」",
+    "**「告警」在这棵树上今天是数据库里的一行，不是一条通知**（我核过，别把它当成已经有了）：`internal/gitprovider/reconciler.go:9-14` 逐字「ANY drift is a high-severity operational alert」，但它的实现是 `reconciler_store.go:251-258` 写一行 `git_reconciliation_findings` + 一行 `audit_log`（`via='system'`，metadata 里 `severity: 'high'`）。**没有一个码路径把告警发到任何外部系统**——全仓 `alert` 一词只出现在注释里。所以本笔要把这条链的另一半建起来：**规则文件 + 一个真的会因故障而触发的判定**。",
+    "**交付的形状（我按今天树上有什么定的，不是我拍的）**：\n  1. **`/metrics` 端点**，Prometheus/OpenMetrics 文本格式，暴露上面「有源」的那些族。**实测要能从 `cmd/api` 的一个真实进程上 curl 到**（不是测试里 mock 的 handler）。\n  2. **告警规则文件**放 `ops/`（Prometheus rules 的 `groups/rules` 形状），覆盖 `docs/26 §6` 里**有指标支撑**的那些类；没有指标支撑的类（`blob integrity mismatch`、`data visibility leak suspicion`）**逐条写下「本版无规则，因为无指标源」**，不要写一条永远为假的假规则充数。\n  3. **故障注入要真的跑到那一步**：`tests/observability/` 已经有现成的挂具形状——`trace-e2e.sh` 用 `go build` 出真二进制定、`setsid` 起来、打真日志、grep 真输出；`canary-sweep.sh:119-127` 甚至已经示范了**先种一个假泄漏、证明这一步能红、再撤掉**。**照这个形状做故障注入**：杀掉 `devredis`（或停掉 PostgreSQL）→ 断言对应的**指标真的动了**（计数器涨了、gauge 升到阈值以上）→ 断言**规则真的会触发**。\n  4. **规则的触发不许靠嘴说**：用 Prometheus 自己的 `promtool` 做两件事——`promtool check rules` 检查规则文件语法，`promtool test rules` 用合成序列断言 `ALERTS{alertname=\"…\"} == 1`。二进制按仓库既有形状由挂具自己取（`tests/web-smoke/run.sh` 自己装 Chromium 就是这个先例：工具放在挂具自己的目录里，不动仓库的依赖）。**故障注入那一半要把真实抓下来的样本喂进规则判定**，让「故障 → 指标动 → 规则响」是一条链，不是两段各自为政的证据。\n  5. **日志与 trace 两件也要有交付物，但要诚实**：今天日志是 stderr 上的结构化 JSON（`cmd/api/main.go:174`），**没有任何日志后端**，所以「log dashboards」在 V1 里只能是一份**字段契约**（哪些字段在哪些事件上必然存在、每块面板该查什么），写在 `ops/` 下；trace 的底子是关联 id（`docs/26:19` 要的 API→queue→Git/S3），交付「一条 id 走完全程」的可复跑证据，并把既有的 `tests/observability/trace-e2e.sh` 接进你的套件（它今天**不被 Makefile、不被 `scripts/ci.sh`、不被 CI 调用**，`grep` 零命中——接线归你，你的 Makefile 目标里跑它）。\n  6. **`outbox lag` 这一条要连着两笔旧账一起做**：`tasks/decisions.md:6904-6923`（`L1-20260914-73`）逐字把 T1001 复核意见的第 2 条与第 5 条**记名交给你**——「PG 挂掉时每秒一行 Error，没有退避」与「有 `WithBatchSize` 却没有 `WithPollInterval`，调参面不一致」，并写着「T1109 的规格必须承接」。**这两条是本笔的硬义务，不是可选项。** 做的时候把 `internal/events/publish.go:33-40` 那两个 `const` 变成按 SLO 口径可调，并给退避一个真实的节奏（现在 `Run` 循环在 PG 挂掉时**每秒一行 ERROR 永远打下去**）。",
+    "**`permission denied rates` 这一条我单独限死，而且限死的办法是先挑更浅的那个位置**：\n  - **首选：在判定被「消费」的地方计数**，也就是 `cmd/api/**` 与 `internal/httpmw/**`（都在你范围内，且不碰授权包）。拒绝在边界上是一个**产品可见的结果**（`403`、或按不可区分口径返回的 `404`），在那里计数是同一件事的更浅做法。\n  - **只有在边界确实看不见的时候，才允许进 `internal/authz/**`**——典型情形是**静默过滤**（例如检索按权限裁掉行，既不 403 也不 404，边界上无从分辨）。**这是我唯一允许你碰这个包的理由，而且要先用证据说明为什么边界不够**（举出具体的判定点、文件与行）。\n  - **进包的规矩（若真进了）**：只许**加计数**，**不许改任何判定**——不许改 engine、不许改 verdict、不许改矩阵、不许改 fail-closed 语义、不许改任何默认值。自证方式不是你说没事，而是：**既有的授权测试全绿且逐条未改**（`tests/integration/project_authz_test.go:46 TestProjectAuthzMatrix`、`tests/integration/org_permission_test.go:187`、`tests/integration/search_access_test.go:23` 等），**加上一条计数器的对照证明**（放行的一次不涨、拒绝的一次涨）。\n  - **若你发现不改判定就没法量，停下来报，不要改判定。**\n  - **无论走哪条路，都要报「这一族量到的是哪一档拒绝」**：边界能看见的与静默过滤掉的，是不是都被算进去了；漏掉的那一档要写明。",
+    "**「三类记录不能混成一个日志表」是硬约束**（`docs/26:13` 逐字）：本笔**不动** `audit_log`（那是 domain audit，已经有自己的只读面 `cmd/api/audithttp/`），**不动** `research_events`（那是可订阅事件，已经有 outbox 发布链）。指标只能从既有记录里**读出来**，不许新建一张「什么都往里塞」的表，也不许把 audit 行的写入路径改成顺手发指标。",
+    "**门与接线**：`tasks/tests.json` 里登记着 `observability smoke`（blocking）。交付一个从仓库根一条命令跑起来的入口，把上面几块串起来（建/起真进程、抓指标、注入故障、跑 promtool、跑 trace-e2e）。**`.github/workflows/ci.yml` 不要动**——它与 `specs/orchestrator/gates.json` 被 `internal/devorchestrator/gate_spec_test.go:17-58` 逐步对齐（`:31` 把 job 数写死成 7），而 gate spec 是 Supervisor 的只读区，你改了 CI 就会红同步单测而修不了。**给我可直接粘的 YAML 片段 + 墙钟代价**，接线我落。",
+    "**依赖与边界**：允许引入 `github.com/prometheus/client_golang`（**这是我在本笔里替你定的 L1 决定**）——理由是规格点名的族里有 HTTP latency 这类直方图，手搓直方图分桶是一个 bug 农场；`go.mod`/`go.sum` 在范围内，加完要 `go mod tidy` 且 `make staticcheck`、`make check` 全绿。**不许**引入完整的可观测性栈（Grafana/Alertmanager/Collector 都不引——`ops/deploy/docker-compose.staging.yml` 里加监控容器不在本笔）。不改 `specs/**`、`docs/**`、`tasks/**`；不做产品语义改动；不新建迁移（**真需要一张表，报回来，编号由我分配**，§8.1）。"
+  ],
+  "deliverables": [
+    "`/metrics` 端点（Prometheus 文本格式），从真实 `cmd/api` 进程上可 curl 到",
+    "`ops/` 下的告警规则文件（覆盖 §6 里有指标支撑的类；无指标的类逐条写明为何无规则）",
+    "故障注入挂具：真进程 + 真故障 + 指标真动 + 规则真触发（照 `tests/observability/` 既有形状）",
+    "`promtool check rules` / `promtool test rules` 的证据，且故障注入的**真实样本**喂进规则判定",
+    "`ops/` 下的日志字段契约与 trace 走查文档；`trace-e2e.sh` 接进 Makefile 目标",
+    "T1001 第 2、5 条旧账的落地：outbox 退避 + `WithPollInterval` 可调面",
+    "`permission denied` 计数器（只加计数不改判定）+ 对照证明",
+    "交给我的 CI YAML 片段与墙钟代价"
+  ],
+  "acceptance_criteria": [
+    "**故障注入可触发预期 alert**（任务原文）：抹掉一个真实依赖（devredis/PostgreSQL）之后，①对应指标确实动了（给出改动前后的原始样本），②规则确实触发（`promtool test rules` 对**那次真实抓下来的样本**断言 `ALERTS == 1`）。**并且这条链能失败**：不注入故障时同一套判定**不**触发（阴性对照），输出原文贴进 RESULT",
+    "**`/metrics` 是真的**：从仓库根按 RESULT 给的命令起真进程、curl 到端点、贴出原始输出；端点暴露的每个族都在 RESULT 里点名它对应 `docs/26 §3` 的哪一项",
+    "**没有指标源的那几项照实报**：`Git ingestion lag`、`blob upload/failure`（以及任何你查过确实没有源的）逐条写明「无可量的源」与你的查法；规则文件里没有为它们写假规则",
+    "**没有把三类记录混起来**：`audit_log` 与 `research_events` 的写入路径未被本笔改动；没有新建「什么都塞」的表；`infra/migrations/**` 的 diff 为空",
+    "**`permission denied` 计数器只加不改判定**：计数优先落在边界（`cmd/api/**`/`internal/httpmw/**`）；**若**进了 `internal/authz/**`，必须先用证据说明边界为何看不见，且该包的 diff **只有计数**、既有授权测试全绿且**未改**、有「放行不涨、拒绝涨」的对照证明；RESULT 里写明这一族量到的是哪一档拒绝、漏掉了哪一档",
+    "**T1001 两条旧账落地**：outbox 发布在 PG 不可用时有真实退避（贴出改前「每秒一行 ERROR」与改后的节奏对比），`WithPollInterval` 存在且被至少一条测试用到",
+    "**trace 与日志两件有交付物**：`trace-e2e.sh` 从仓库根一条命令跑起来并接进 Makefile；日志字段契约在 `ops/` 下且与代码里实际打的字段一致（给出核对命令）",
+    "**没碰 CI 定义**：`.github/**` 的 diff 为空；RESULT 里给出可直接粘的 YAML 片段与墙钟代价",
+    "**RESULT 里写明**：每个指标族的源文件与行、每个规则的表达式与阈值为什么这么定、没有覆盖的面与原因、以及所有你判断不了而按最严处理的地方"
+  ],
+  "allowed_scope": [
+    "internal/observability/**",
+    "internal/worker/**",
+    "internal/events/**",
+    "internal/gitprovider/**",
+    "internal/search/**",
+    "internal/authz/**",
+    "cmd/**",
+    "ops/**",
+    "tests/**",
+    "Makefile",
+    "go.mod",
+    "go.sum"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "specs/**",
+    "docs/**",
+    "infra/**",
+    "apps/web/**",
+    "packages/**"
+  ],
+  "relevant_specs": [
+    "docs/26_OBSERVABILITY.md",
+    "docs/25_CICD_DEVOPS.md",
+    "docs/48_DEFINITION_OF_DONE.md",
+    "docs/16_RSG_GIT_SYNC.md",
+    "docs/67_TEST_GATES.md"
+  ],
+  "scope_note": "范围按「指标从哪儿来」逐条划：观测包本身（`internal/observability/**`）、队列（`internal/worker/**`——`Depth()` 已经写好却没人调）、事件与 webhook（`internal/events/**`）、git 漂移（`internal/gitprovider/**`——reconciler 已经在算，只差把数字暴露出来）、检索（`internal/search/**`——planner 的 fallback reason 是个封闭集合，天生为计数而生）、授权拒绝计数（`internal/authz/**`，**只许加计数，见需求第 7 条**）、进程接线（`cmd/**`）、规则与文档产物（`ops/**`）、挂具（`tests/**`）、以及依赖与 Makefile。**`infra/**` 明确排除**：不新建迁移、不改 compose——本笔不加监控容器，那会让 staging 栈多出一整套要维护的东西，而验收要的是「故障能触发预期告警」，不是「装了一个 Grafana」。**`apps/web/**` 排除**：前端指标（`docs/26 §4` 那类运营指标）不在本笔的验收面上。",
+  "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄 + 替工人定的两个 L1 决定）**\n\n**决定一：允许 `github.com/prometheus/client_golang`。** 规格要 HTTP latency，那是直方图；手搓分桶是一个 bug 农场。这是我作为 Supervisor 的 L1 决定（CLAUDE.md §5），写进需求第 10 条，工人不必再论证。**但监控栈本身不引**：Grafana / Alertmanager / Collector 一个都不装。\n\n**决定二：`internal/authz/**` 破例进范围，但只许加计数——而且**先试不碰它的那条路**。** 「permission denied rates」是 `docs/26 §3` 点名的族。排除这个包会让规格点名的一族永远交不出来，所以不能简单排除；但一次复核提醒我，**拒绝在边界上（`403`/`404`）本来就是产品可见的结果**，在 `cmd/api/**` 与 `internal/httpmw/**` 计数是同一件事的**更浅做法**，而这两处本来就在范围内。于是口径改成：**优先在判定被消费的地方计数；只有边界确实看不见（静默过滤那一档）才准进包，且要先用证据说明边界为何不够。** 进包的规矩不变：**只许加计数、不许改任何判定**，并用既有授权测试全绿且未改来自证。**这条改动让本笔的攻击面严格变窄，同时没有把规格点名的那一族丢掉。**\n\n**这一笔的形状是我按「树上有什么」定的，不是按理想架构定的**：`Git ingestion lag` 与 `blob upload/failure` 今天**没有可量的源**，所以规则文件里为它们写假规则是禁止的，照实报即可。反过来，`queue depth` 的源已经写好了（`Depth()` 无人调用）、planner 的 fallback reason 是封闭集合、reconciler 每轮已经在打计数 attr——**这三条是「已有一半、只差暴露」的典型，别重新发明**。\n\n**CI 接线又一次归我**：`gate_spec_test.go:31` 把 ci.yml 的 job 数写死成 7，而 gate spec 是只读区——工人改 CI 就会红一座它修不了的测试。这条口径在 T1104/T1105 两笔里也一样写着。"
+}

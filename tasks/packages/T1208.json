@@ -1,0 +1,62 @@
+{
+ "id": "T1208",
+ "phase": "P12",
+ "phase_name": "Canonical Workflow 与最终交付",
+ "title": "完整 Project 可移植导出",
+ "v1_required": true,
+ "dependencies": [
+  "T1202",
+  "T1007",
+  "T0812"
+ ],
+ "requirements": [
+  "**可移植导出的内容按 `CLAUDE.md:74`（§8 Canonical 数据真相边界）逐字来**：Release 把「**RSG snapshot hash + Git commit SHA + blob hashes + schema/policy/rights version**」固定为不可变状态。导出物就是这四样的**齐备**（少一样都不可移植）：RSG 的 manifest/快照、Git 的 ref 与 commit、blob 的内容（S3/MinIO 上的大对象）、以及 schema/policy/rights 的版本标识。",
+  "**导出是只读的**：整个过程不许改动源项目（不许写新版本、不许动 branch、不许改 blob）。要有断言证明导出前后源侧存储逐字节没变（至少：状态版本行数、branch head、blob 的 hash 集合）。",
+  "**要在另一套干净环境里真的导进去**：导入后按 §8 的口径重建——PostgreSQL 里的科研真相、Git 里的文本历史、S3/MinIO 里的大对象——并且 **RSG snapshot hash 与导出侧一致**、Git commit 一致、blob 逐字节一致（按内容 hash 比，不按路径比）。",
+  "**完整性要能在导入侧被检出，不是靠信任**：任何一处被改动（改一个 blob 字节、挪一个 commit、改一行 manifest）都要在导入时**被检出并拒绝**，而不是静默接受。仓库里已有这个形状的先例：schema 快照与 spec 指纹都是「生成物 + `--check`」，照那个形状做。",
+  "**真实服务**：PostgreSQL、S3/MinIO、Gitea 都用真的（`tests/acceptance/*-real-services-e2e.sh` 是既有形状；`make infra-up` 起本地栈）。**不许用内存里的假存储把这一段走通**。",
+  "**幂等与可重复**：同一项目导出两次得到同一份内容（或至少同一组 hash）；导入到已存在的目标上要么幂等、要么明确拒绝。",
+  "**诚实报告**：今天**导不出**或**重建不回来**的部分（例如某个 blob 没有落到 S3、某类对象没有版本字段）逐条点名，不要用「其余都一样」带过。"
+ ],
+ "deliverables": [
+  "导出器（一条命令：项目 → 一份可搬运的导出物 + 一份清单含四类 hash）",
+  "导入器/重建器（一条命令：导出物 → 干净环境里的项目）",
+  "端到端脚本：导出 → 干净环境导入 → 四类标识逐条比对（真 PostgreSQL + 真 S3/MinIO + 真 Gitea）",
+  "篡改检出用例：至少三类篡改各自被拒",
+  "RESULT：四类标识的实测值、只读性证据、以及导不出/重建不回来的项"
+ ],
+ "acceptance_criteria": [
+  "**仪器能说不（先做这一步）**：三类篡改（改 blob 一个字节、改 manifest 一行、换一个 commit）各做一次，确认导入侧**拒绝**并指名是哪儿；再把拒绝逻辑关掉，确认用例转红。两段输出都留在 RESULT 里。",
+  "**四类标识齐备且一致**：RSG snapshot hash、Git commit SHA、blob hashes、schema/policy/rights version——逐条给出导出侧与导入侧的实测值并断言相等。",
+  "**导出只读**：导出前后源侧的状态版本行数、branch head hash、blob 内容 hash 集合逐条相同。",
+  "**真实服务**：脚本里能看到真的 PostgreSQL / S3(MinIO) / Gitea 调用；没有内存假存储替代关键一跳。",
+  "**可重复**：同一项目导出两次的四类标识一致；导入到干净环境两次结果一致（或第二次明确拒绝并说明）。",
+  "**残留物清干净**：脚本跑完不留进程、不留端口占用、不留临时目录（我在同一台机器上要能立刻复跑）。",
+  "**诚实报告**：导不出/重建不回来的项与不确定处逐条点名。"
+ ],
+ "tests": [
+  "project export portability e2e"
+ ],
+ "allowed_scope": [
+  "tests/acceptance/**",
+  "tests/e2e/**",
+  "ops/**",
+  "examples/**",
+  "scripts/**"
+ ],
+ "forbidden_scope": [
+  ".git/**",
+  "CLAUDE.md",
+  "tasks/task_status.json",
+  "tasks/progress.md"
+ ],
+ "decision_level_max": "L1",
+ "relevant_specs": [
+  "docs/09_VERSION_CONTROL.md",
+  "docs/07_RSG_SPEC.md",
+  "docs/31_MASTER_ACCEPTANCE.md",
+  "docs/67_TEST_GATES.md"
+ ],
+ "scope_note": "**摘掉 `docs/**`（Supervisor-only）**；加入 `scripts/**`（生成物 `--check` 的既有形状在那儿）。\n\n**不碰 `internal/**` 与 `cmd/**`**：本任务要证明「今天这套系统造出来的项目**可以被搬走**」。搬运过程中发现某个东西**根本没落盘**（例如 blob 只在内存里、或某类对象没有版本标识），**那就是这个任务的结论**——**报上来**并如实写进 RESULT，不要顺手去改产品代码把它补上（那是一条新账）。",
+ "supervisor_scope_narrowing": "摘掉 `docs/**`；加入 `scripts/**`。产品代码不在范围内：导不出来是结论，不是要顺手修的 bug。"
+}

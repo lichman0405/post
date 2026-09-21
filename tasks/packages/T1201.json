@@ -1,0 +1,57 @@
+{
+  "id": "T1201",
+  "phase": "P12",
+  "phase_name": "Canonical Workflow 与最终交付",
+  "title": "完整 Seed Demo Data Builder",
+  "v1_required": true,
+  "dependencies": [
+    "T0810",
+    "T1007"
+  ],
+  "requirements": [
+    "**种子数据不是自由创作，`docs/34_SEED_DEMO_PROJECT.md` 是一张可逐条验收的清单**（`docs/24_TEST_STRATEGY.md:24` 逐字：「固定 Seed MOF 项目，见 34_SEED_DEMO_PROJECT.md。不要大量随机不可读 fixture；重要 E2E 使用可解释 domain data。」）。逐条照它造：slug `demo-mof-humidity-separation`（`:6`）、Research Question Q1（`:11`）、H1/H2（`:15-16`）、最小对象计数（`:18`：3 Materials / 5 Samples / 8 Experiments / 6 Calculations / 5 Datasets / 3 Protocol versions / 6 Claims / 3 Findings / 3 External References）、证据四类 + **一个故意 contested 的 finding**（`:21`）、四个 branch 名（`:24`）、三种 PR（`:27`）、两个 Release（`:31`）、四类 asset（`:33`）、以及 `:36` 的对外贡献（第二个 demo 用户/组织 Fork/Reference H1 → 一条相反实验证据 → external evidence/PR）。**计数是下限不是目标**：少一条就是没造出来。",
+    "**一条命令、从空库到可用、可重复跑**（`docs/57_DEMO_UAT.md:5` 逐字：「每步演示前置状态由 Seed builder 自动生成；**不可依赖人工修 DB**。」）。第二遍跑不许因为残留数据失败——要么幂等，要么显式 `--reset` 且写明它删了什么。",
+    "**全部标 synthetic**：`examples/README.md:1-3` 逐字「这些 JSON 不是生产数据……Demo 内容必须始终标注 synthetic。」种子造出的对象/资产/声明都要带上这个标记。",
+    "**种子要能被别的门用**：T1202 的 canonical MOF 闭环脚本要在它上面跑（`tasks/tests.json` 的 `T1201-TEST-01`「seed builder」是 blocking）。所以它得能被脚本调用（命令、退出码、stdout 的机器可读摘要），而不是只有一份文档告诉你点哪里。",
+    "**证据从存储里读，不从返回值读**：每条计数断言都直接查 PostgreSQL（`infra/migrations` 里的表），因为「API 说建了」不等于「库里真有」（CLAUDE.md 的「能力存在要查写入侧」同一件事）。",
+    "**诚实报告**：清单里今天做不到的项（例如某个对象类型还没有产品路径可写）、以及你为了造出某个计数而走的路径（走了产品 API 还是直接写库——**必须是前者**，直接写库就等于演示里没有那条产品路径）逐条写清。"
+  ],
+  "deliverables": [
+    "可调用的 seed builder（脚本 + 一处入口，`ops/` 或 `tests/acceptance/` 下）",
+    "逐条对齐 `docs/34_SEED_DEMO_PROJECT.md` 的计数与结构",
+    "一条 verification 脚本：从空库建、再按表读回逐条断言（含 contested finding 与 external contribution 那一段的前置）",
+    "RESULT：每条计数的实测值、幂等实测、以及「哪些对象是走产品 API 造出来的」"
+  ],
+  "acceptance_criteria": [
+    "**仪器能说不（先做这一步）**：把 builder 里某一条（例如 6 Claims 里的一条）少造一个，验证脚本必须**转红**并指出少的是哪一类；红的输出留在 RESULT 里。",
+    "**逐条计数对得上**：`docs/34_SEED_DEMO_PROJECT.md:18/:21/:24/:27/:31/:33` 每一项都有实测计数与断言，逐条列出实测值。",
+    "**全部经产品路径**：至少抽样断言对象/分支/PR/release 的创建走的是 HTTP API（例如断言审计/事件行存在，或从 API 能读回），而不是直插数据库。",
+    "**幂等**：连着跑两遍，第二遍不因残留失败，且计数不翻倍（第二遍后仍等于清单值）。",
+    "**synthetic 标记**：能按标记筛出全部种子对象（一条查询证明）。",
+    "**诚实报告**：做不到的项与走了库的项逐条点名。"
+  ],
+  "tests": [
+    "seed builder"
+  ],
+  "allowed_scope": [
+    "tests/acceptance/**",
+    "tests/e2e/**",
+    "ops/**",
+    "examples/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/task_status.json",
+    "tasks/progress.md"
+  ],
+  "decision_level_max": "L1",
+  "relevant_specs": [
+    "docs/34_SEED_DEMO_PROJECT.md",
+    "docs/57_DEMO_UAT.md",
+    "docs/24_TEST_STRATEGY.md",
+    "docs/31_MASTER_ACCEPTANCE.md"
+  ],
+  "scope_note": "**摘掉 `docs/**`（Supervisor-only）**：交付物写在 `tests/acceptance/**`、`tests/e2e/**`、`ops/**`、`examples/**`。要改 `docs/` 就报上来。\n\n**不碰 `infra/migrations/**` 与 `internal/**`**：种子数据要么用产品 API 造、要么用既有表直连——**不允许为了让 seed 好写而改 schema 或加产品代码**。真需要，报上来立新账。",
+  "supervisor_scope_narrowing": "**没有收窄别的，只摘掉 `docs/**`。** `docs/**` 是 Supervisor-only（CLAUDE.md §8.1）。本任务的交付物（脚本、样例、ops 清单）写在 `tests/acceptance/**`、`tests/e2e/**`、`ops/**`、`examples/**` 里；**要写 `docs/` 就报上来**，由 Supervisor 落笔。"
+}

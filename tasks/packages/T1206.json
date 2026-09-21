@@ -1,0 +1,61 @@
+{
+  "id": "T1206",
+  "phase": "P12",
+  "phase_name": "Canonical Workflow 与最终交付",
+  "title": "Master Security/Quality Gate",
+  "v1_required": true,
+  "dependencies": [
+    "T1202",
+    "T1204",
+    "T1205",
+    "T1106"
+  ],
+  "requirements": [
+    "**先看清今天真有什么，别照着文档假设有。** 我逐条核过的现状：\n  - **有的**：secret 扫描（`internal/config/secretscan.go`，回归在 `internal/config/secretscan_test.go:87-90`，跑在 CI 的 `go` job 与 `make check`）；权限负向 e2e（`tests/e2e/privacy_e2e_test.go:30`，逐字「The negative path is the point」）；a11y（`tests/web-smoke/a11y-smoke.mjs`，axe-core，**但不在 CI 也不在 Makefile**）；部署模板静态校验（`tests/acceptance/deploy-staging-smoke.sh`，**不在 CI**）。\n  - **没有**：dependency/CVE 扫描、SAST、容器扫描、SBOM——`ops/runbook-steps.json:149` 自己逐字写着「there is no dependency/CVE scan and CI has no security job」，`:165` 写「CI has no container build/SBOM stage」。`grep -rn gosec|govulncheck|trivy|npm audit` 全树零命中（只有一个 `//nolint:gosec` 注释）。\n  - **本任务要收进门的**：`tests/security/owasp-smoke.sh` 由 **T1106** 交付，我已经在 `specs/orchestrator/gates.json` 里建好 G3 job `security-smoke` 指向它，并挂进 T1206 的 `g3_jobs`。 **依赖边已声明**：T1206 的 `dependencies` 里已补上 `T1106`，所以它一定在你之前合入——不会出现「G3 job 指向一个还不存在的脚本」这种假红。",
+    "**交付物是一条命令的「总门」**：把上面「有的」那些 + T1106 的 owasp smoke 串起来，一条命令跑完、退出码有意义、每条检查**各自可红**。**不许用「都跳过」换绿**：某条检查在今天的环境跑不了（例如需要 docker 而没有），要**明确打印 `NOT ASKED` 并让它影响退出码或进「缺席清单」**，不能静默跳过——仓库里已有这个形状的先例：`tests/acceptance/phase-boundary-checkpoint.sh` 的项 5 与 `ci.yml:146-151` 的 NOT ASKED。",
+    "**缺席的那四项，用仓库既有的写法点名，不要造假**：`ops/runbook-steps.json:147-150` 用 `\"kind\": \"absent\"` + note 逐字承认缺口的做法就是先例。本任务把缺席项写成一份**机器可读的清单**（哪一项缺、为什么缺、今天靠什么替代、补它需要什么）。**风险接受不是你的决定**：`docs/23_SECURITY_PRIVACY.md:45` 要求「每个 Release 运行 dependency audit、SAST、secret scan、container scan、OWASP smoke、permission E2E。Critical/High 必须修复或有书面 ADR/risk acceptance（V1 不接受 Critical）」——**缺席项要不要作为 V1 风险被接受，由我以书面形式裁定**，你交清单与证据。",
+    "**能补的尽量补（不引入外部账号、不联网装新东西的前提下）**：如果本机已有工具链能提供其中某一项（例如 Go 自带的能力、或既有脚本能覆盖的一半），就补进去并标明它覆盖了什么、没覆盖什么。补不了就如实进缺席清单。",
+    "**证据要能复现，但录账不是你的活**：每条检查的命令、退出码、输出尾部，写进 RESULT——**按 `scripts/record_test_run.py` 的调用形状逐条列出**（`--id/--command/--exit-code/--output-file`，可直接粘贴执行的那种），并说明每条对应哪个检查。\n**你不要真的去写 `tasks/tests.json`**：那个文件是 CLAUDE.md §4 里 Supervisor-only 的账本，Worker 写它越界，`rddev worker collect` 会按越界拒收整个 diff。你**运行**检查（`scripts/**` 已在你的只读面内，跑脚本不需要写权限），**把调用写清楚**，由我在验收时逐条执行——这样账本上的 `passed` 才是我亲手跑出来的，不是你替我写上去的。顺带一句：这个工具拒绝为非零退出码记 `passed`，所以失败项如实写失败，别修饰。"
+  ],
+  "deliverables": [
+    "一条命令的总门（`tests/security/` 或 `tests/acceptance/` 下，命名自明），逐项输出 + 总退出码",
+    "缺席清单（机器可读）：dependency/CVE 扫描、SAST、容器扫描、SBOM 各一条，写清缺口与补法",
+    "每条检查的红/绿实测（至少三条：secret 扫描、权限负向 e2e、owasp smoke 各做一次变异）",
+    "RESULT：逐条实测证据 + 缺席清单 + 你建议的风险处置（**建议**，不是裁定）"
+  ],
+  "acceptance_criteria": [
+    "**仪器能说不（先做这一步）**：至少三条检查各做一次变异（例如往仓库里放一个假的 secret 样本、把一条权限负向断言的目标改错、把 owasp smoke 的某条守卫关掉），确认**转红**，红的输出留在 RESULT 里。",
+    "**总门一条命令**：跑完打印每条检查的名字 + 结果 + 总退出码；任一条红则退出码非零。",
+    "**跑不了的项不静默跳过**：打印 `NOT ASKED` 并进缺席清单；有断言证明「静默跳过」会让总门红（而不是绿）。",
+    "**缺席清单完整且具体**：四项各有一条，含「今天靠什么替代 / 补它需要什么 / 影响是什么」；不许把缺席写成「不需要」。",
+    "**a11y 与权限负向 e2e 真的进了门**（不再只靠人手工跑）。",
+    "**证据落账**：每条检查的真跑记录用 `scripts/record_test_run.py` 写进 `tasks/tests.json`（不许手改成 `passed`）。",
+    "**诚实报告**：缺席项与不确定处逐条点名，并给出你的处置建议。"
+  ],
+  "tests": [
+    "master suite"
+  ],
+  "allowed_scope": [
+    "tests/acceptance/**",
+    "tests/e2e/**",
+    "tests/security/**",
+    "ops/**",
+    "examples/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/task_status.json",
+    "tasks/progress.md"
+  ],
+  "decision_level_max": "L1",
+  "relevant_specs": [
+    "docs/23_SECURITY_PRIVACY.md",
+    "docs/31_MASTER_ACCEPTANCE.md",
+    "docs/67_TEST_GATES.md",
+    "docs/25_CICD_DEVOPS.md",
+    "specs/orchestrator/gates.json"
+  ],
+  "scope_note": "**摘掉 `docs/**`（Supervisor-only）**；**加入 `tests/security/**`**（T1106 交付 owasp smoke 的地方）。\n\n**`scripts/**` 已摘掉**（2026-09-21 收窄）：加它的原意是「`record_test_run.py` 所在」，但**跑脚本不需要写权限**——它在写入面里只会多给一条改证据记录器的路，而本任务恰恰是那个**被记录**的门。被考的人不该攥着笔：删除一个秘密扫描断言、把 `passed` 写宽松，只需改 `scripts/**` 里一个文件。现在你只**运行**它、把调用写进 RESULT，落账由我在验收时做。\n\n**不碰 `.github/workflows/**`**：本任务是把门建起来并跑给你看，**要不要进 CI 是 Supervisor 的决定**（CI 的 job 清单与 `gates.json` 的 `required_jobs` 必须一致，改一处要同时改另一处，那是我的面）。你要的是「本地一条命令能跑」，外加一句「建议挂到哪个 job」。",
+  "supervisor_scope_narrowing": "摘掉 `docs/**`；加入 `scripts/**` 与 `tests/security/**`；把 `.github/workflows/**` 放进 `forbidden_scope`（CI 与 gates.json 的一致性由 Supervisor 维护）。\n\n**第五次修订（2026-09-21，自动安全评审触发）**：评审提「worker-writable gate-evidence scripts」——本条**采纳，而且它比评审说的更具体**。查证：`scripts/record_test_run.py:37` 的 `TESTS_REL` 就是 `tasks/tests.json`，而 CLAUDE.md §4 把 `tasks/**` 定为 Worker 只读。所以原需求第 5 条「用 `record_test_run.py` 记进 `tasks/tests.json`」**是一句会越界的指令**，worker 照做就会在 collect 被拒。两处一并改：写入面摘掉 `scripts/**`（跑不需要写权限），需求改成「跑检查、把调用形状写进 RESULT」。"
+}

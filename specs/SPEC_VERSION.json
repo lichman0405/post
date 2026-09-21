@@ -1,15 +1,15 @@
 {
   "algorithm": "sha256",
-  "combined_digest": "e2108584f766fd627a8d230e013a02ed82ff2040eab7578e52dc85b20c468eb8",
+  "combined_digest": "4e55bc36402552e4d035abd2c3b0ca40ebe90bee0a49bb25166986c3c42a3c48",
   "files": {
     "specs/README.md": "2a0398dfb3ead0586034364d7411d845b84fd33b7c43d1ce9199d6a14ef4cf1a",
-    "specs/api/openapi.yaml": "511d4b73b17fa812a853054cc63ff756947fcc305ae08a637396992af9045da1",
+    "specs/api/openapi.yaml": "108350c3720aab57408f5a529821fa0c85e7c2ea7dcbc2ddd2ffcfa33e3697e5",
     "specs/database/postgres.sql": "a99f0b6aa39987b4db3d4c5052bc15c2b4ed98716c73c6511798239e0925dc22",
     "specs/events/event-types.yaml": "5987d653a176348dd86cb6563578de8095e9f8390cca72b332f51dac5edf954c",
     "specs/mcp/tools.json": "f6b5fb023aba882a259bbe7d001bdd2755c1120f1dc768fe7512a7383fdbaca9",
     "specs/orchestrator/decision-levels.yaml": "8a06ec18b8abd79c2462e3d3bcc5b785c51a8f970c54aaa279f174882e0f5a3f",
     "specs/orchestrator/derived-artifacts.json": "25c7cf0aa2f5dca78d2c3668a45db348c2aaaa9738be203832173f6a200694ba",
-    "specs/orchestrator/gates.json": "fc5535ddd2764a3b36c3684c35c8a994299cab1d6e110bbc35064fe0ab592a9f",
+    "specs/orchestrator/gates.json": "0e00276fb6f63afb563a68b21837d78f79fe1869464622153f7aa6b9ca139637",
     "specs/orchestrator/rddev-cli.yaml": "f73576090a3f8bb3b78d560e662e0a180c480917b12f731ad579879ed174a397",
     "specs/orchestrator/review-verdict.schema.json": "78940ff58ba1d84e05d739d1c4af2a4d47b2fa834e7ba2ce2bca5b337f66f9fd",
     "specs/orchestrator/source-repo-preflight.schema.json": "a69dd6840fd2c5558dfba7fdb19019430f1c9a3b248c19c6f0a93b2912882932",
@@ -39,9 +39,9 @@
     "specs/schemas/sample.schema.json": "fed5737f271de54c07ebcb429740b224023ce0ffee84e173ff48b7fa7639732a",
     "specs/ui/page-inventory.csv": "c89311bf12526e5d5762a351d71a447caa1c9a79912a172449dd3639141387fb",
     "specs/ui/routes.yaml": "88ae6cb829eae37dd8ae5f8815ce2b4eabc9ec82c51c95cf43223be91922f570",
-    "tasks/tasks.json": "05270f13d02e2981f77444a30c14bfd9ff992432356f8c3be30cf3e503b640d3"
+    "tasks/tasks.json": "1a0d84c6dd01943de1b54dca4e3010b83d7c17b97df55c608498ece38646eeda"
   },
   "input_count": 38,
   "marker_format": 1,
-  "spec_version": "sha256:e2108584f766fd62"
+  "spec_version": "sha256:4e55bc36402552e4"
 }

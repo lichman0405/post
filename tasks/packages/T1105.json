@@ -1,0 +1,79 @@
+{
+  "id": "T1105",
+  "dependencies": [
+    "T1101",
+    "T1104"
+  ],
+  "tests": [
+    "i18n e2e"
+  ],
+  "phase": "P11",
+  "phase_name": "UI、安全、可访问性、性能与运维加固",
+  "title": "I18N 基线",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "requirements": [
+    "**现状（2026-09-21 逐条实测）：这一笔是从零开始，而且起点比看上去干净。** 全仓 `grep -rniE \"i18n|locale|intl|translat\"` 在 `apps/web` 与 `packages/ui` 里**零命中基础设施**——没有消息目录、没有 `Intl` 使用、没有语言偏好。仅有的两处偶遇是 `files/page.tsx:308` 的 `localeCompare`（排序比较器，不是本地化）与 `users/[id]/profile-card.tsx:155` 的 `new Date(...).toLocaleDateString()`（**无参调用，输出随运行环境的默认 locale 变——这条要认真处理，见需求第 6 条**）。",
+    "**硬编码的中文只有一处，别把它漏掉也别虚报**：`grep -rnP '[\\x{4e00}-\\x{9fff}]' apps/web --include='*.tsx' --include='*.ts'` 实测 **17 行**，逐行看过——**16 行是注释**（`docs/09 §7` 之类的引用、`仅建议` 这类设计说明），**唯一一处渲染出来的字符串**是 `apps/web/app/(main)/projects/[id]/conflicts/page.tsx:386` 的 `仅建议 · advisory only`（它落在一个 `<span className=\"conflicts-advisory-badge\">` 里，是中英混排）。**这一条要进目录**（两个语言各一条，英文那条不要写成「advisory only」把「仅」丢了——先读它周围那段文案的语义再定译法，`docs/09 §7` 的语境是「agent 只解决结构冲突，人解决科学冲突」）。",
+    "**规格逐字，照抄**：`docs/28_ACCESSIBILITY_I18N.md:13` 逐字「V1 UI 至少设计为可国际化：**字符串集中管理，不把中文/英文硬编码散落组件**。正式上线语言可先 English + Simplified Chinese；**领域对象 ID/enum 使用英文稳定 code，显示 label 本地化**。」；`:17` 逐字「单位不是普通 i18n。**存储使用明确 unit + value；展示可转换但不能改变原始 recorded unit/provenance。避免用 locale formatting 造成小数/千位解析歧义。**」",
+    "**语言集合就是两个**：English 与 Simplified Chinese（`docs/28:13` 的字面）。基础英文照抄现在界面上的原文——**不要把现有英文改写一遍**（改写会让 T1104 刚立好的基线与既有 e2e 断言一起红，而这是本地化任务，不是文案润色任务）。",
+    "**不要改 URL 形状，这是本笔最硬的一条边界**。站点当前的路径是 `/projects/[id]/…`、`/assets/[pid]/…`、`/users/[id]/…`；`specs/ui/page-inventory.csv:5-7` 里写的却是 `/{org}/{project}` 形状——**这份文件是 Supervisor 的只读规格，路由形状归它管，不归你**。所以：**不做 `app/[locale]/…` 那类把 26 条路由整体前缀化的重构**。它同时会在两处立刻出事：既有 e2e 断言的是 `/search?q=catalyst`、`/projects$` 这些真实路径（`tests/web-smoke/a11y-smoke.mjs:189`/`:196`），而 `specs/ui/routes.yaml` 与 `page-inventory.csv` 是我不许你动的。**语言偏好走 cookie/偏好存储 + `lang` 属性这条路**，在 RESULT 里把「URL 前缀化」明确记为「留给后续的决定」，并给出你这样选的代价（深链不能带语言）。",
+    "**`<html lang>` 归你**（这一条是从 T1104 划过来的，T1104 里明确写了「不改、只记录」）：`apps/web/app/layout.tsx:15` 今天是硬编码的 `<html lang=\"en\">`。它必须跟着偏好变成动态的。**要求有测试钉住**：偏好为 zh-CN 时，页面输出的 `lang` 属性确实是 `zh-CN`（不是 `en`，也不是空）。这是 WCAG 3.1.1 的问题，也是本笔唯一一处**同时**属于无障碍的改动——所以你改它的时候 T1104 必须已经落地（见依赖）。",
+    "**科学值与单位**：`toLocaleDateString()` 无参调用（`profile-card.tsx:155`）要处理——它今天的输出取决于运行环境的默认 locale，同一份数据在两台机器上渲染出的日期不一样，这正是 `docs/28:17` 说的「locale formatting 造成歧义」。**但注意这一条不是「把日期本地化得更漂亮」，是「让它确定」**：显式指定格式或显式指定 locale，并在 RESULT 里说明你选了哪种、为什么。**数值与单位要证明切语言不改变它们**：找一个带单位的科学值（例如资产或 release 页上的量测，`unit` + `value` 分开存的那些），断言两种语言下**渲染出的数字与单位逐字相同**（`en` 下是 `1.5`，`zh-CN` 下不能变成 `1,5` 或 `1.5 千`），且**发往 API 的值一个字节都不变**。这条要用真数据跑，不要用「看起来对」的手写断言。",
+    "**enum 与 ID 不许本地化**：`docs/28:13` 逐字要求领域对象的 ID/enum 用**英文稳定 code**，只本地化显示 label。所以：切到 zh-CN 之后，`data-*` 属性、`href` 里的 id、请求体里的枚举值、以及任何被测试当作锚点的 code（例如 `data-conflict-advisory-badge` 这类）**必须原样**；变的只有人眼看到的文案。要有一条测试专门钉这个（例如断言某个 API 请求体里的 status/enum 值在两种语言下相同）。**本地化显示 label 不等于把 label 塞进 enum**——目录里的值只用于显示。",
+    "**覆盖面照实报，不要声称全站**：这一笔的验收是「**核心页面**可切语言」，所以做 `docs/42_PAGE_SPECS.md` 里存在的那几个核心页面（Project Overview、Research、PR、Release、Asset Page、Search Answer、Research Profile，加 `/`、`/projects`、`/login`；`/knowledge/{id}` 没有路由，照实报）。**同时**给一个能复跑的**剩余硬编码字符串计数**（例如一个 grep 脚本或一条测试，输出还有多少条未进目录的字面量），把「已进目录 / 仍未进」两个数字都写进 RESULT。**声称「全站已国际化」而实际只做了核心页面，是本笔最可能的失分方式**——T1104 的覆盖表就是照着这个形状写的，照它的格式办。",
+    "**i18n 套件要能跑、要能失败**：`tasks/tests.json` 里登记着 `i18n e2e`。交付一个能一键跑的入口（照 T1104 建起来的那条路的形状复用，**不要再造第二套浏览器挂具**），至少覆盖：切到 zh-CN → 核心页面文案确实变了且 `lang` 变了、切回 en → 复原、科学值与 enum/ID 两种语言下逐字相同、以及**目录缺 key 时的行为**（缺 key 是回落到英文原文、还是显示 key？**先定死一个行为**，用测试钉住，并说明为什么选它——「缺 key 显示 key」是能看到问题的，「静默回落」是看不到的）。**要有一次实测的转红**：把某个核心页面的一个字符串改回硬编码，套件必须红，把红的那次输出贴进 RESULT，再改回来。",
+    "**CI 接线归我，你不要动 `.github/workflows/`**（2026-09-21 实测后改的口径）。原因是一个真实的机关：`internal/devorchestrator/gate_spec_test.go:17-58` 把 `specs/orchestrator/gates.json` 与 `.github/workflows/ci.yml` **逐步逐 env 对齐**，`:31` 甚至把 job 数写死成 7（`t.Fatalf(\"ci.yml declares %d jobs, want 7\", len(ci))`），`:58` 要求 `required_jobs` 等于 ci.yml 的全部 job。而 `specs/orchestrator/gates.json` 是 **Supervisor 的**（§8.1 的只读区），你改不了——也就是说，你往 ci.yml 里加一个 job 或一个 step，同步单测立刻红，而修它的那一半在我手里。**所以：套件跑通 + 一条 `make` 目标（归你），CI 的那一段由我落**（同一笔提交里同时改 ci.yml 与 gates.json）。你要交的是：①从仓库根一条命令能跑起这个套件；②**给我可以直接粘的 YAML 片段**（step 名、`run`、需要的 `env`、以及它挂在哪个既有 job 上最合适）；③这个 step 的**墙钟代价**（装 Chromium 与构建 Next 各多久），因为 G2 每次都要跑它。",
+    "**不做 / 边界**：不引重量级 i18n 框架（要加运行时依赖就先在 RESULT 里论证：包大小、是否需要新的构建步骤、以及为什么现在的做法不够——**默认不加**）；不改 `specs/**`（含 `specs/ui/**` 的路由形状）、`docs/**`、`tasks/**`、`internal/**`、`cmd/**`、`infra/**`、`ops/**`；不做 URL 前缀化；**不把 Next server action 用来装载业务逻辑**（`CLAUDE.md` §7 逐字禁止把核心业务逻辑藏进 server actions）；不翻译代码注释（注释不是 UI 字符串）。"
+  ],
+  "deliverables": [
+    "两套消息目录（en / zh-CN）与集中管理机制，核心页面接上",
+    "语言偏好（cookie/偏好存储）+ 动态 `<html lang>`",
+    "科学值/单位/日期渲染的确定性处理（含 `profile-card.tsx:155` 的无参 `toLocaleDateString`）",
+    "一键可跑的 `i18n e2e` 入口（含缺 key 行为的钉死与一次实测转红）",
+    "剩余硬编码字符串的计数方法与两个数字（已进目录 / 仍未进）",
+    "RESULT 里的逐路由覆盖表与「URL 前缀化留给后续」的记账"
+  ],
+  "acceptance_criteria": [
+    "**核心页面可切语言**（任务原文）：核心页面在 en 与 zh-CN 两种偏好下都渲染完整；`<html lang>` 跟着变并有测试钉住；切回 en 复原",
+    "**科学值/单位不被错误本地化**（任务原文）：带单位的科学值在两种语言下**渲染逐字相同**、**发往 API 的值逐字相同**；日期渲染不再依赖运行环境默认 locale（`profile-card.tsx:155` 有说法）",
+    "**enum/ID 未被本地化**：请求体、`href`、`data-*` 锚点里的英文稳定 code 在两种语言下相同；只有显示 label 变了；有测试钉住",
+    "**唯一那处硬编码中文进了目录**：`conflicts/page.tsx:386` 的 `仅建议 · advisory only` 已由目录提供；`grep -rnP '[\\x{4e00}-\\x{9fff}]' apps/web` 的非注释命中数为 0（注释不算，且要在 RESULT 里给出这条命令的输出）",
+    "**覆盖是诚实的**：RESULT 里有逐路由表与「已进目录 / 仍未进」两个数字；没有出现「全站已国际化」这类说法，除非数字支持它",
+    "**套件能失败**：一次实测转红（改回一处硬编码 → 套件红）的输出原文贴在 RESULT 里，随后是还原后的绿；缺 key 的行为被定死并有测试",
+    "**没有 URL 前缀化**：`apps/web/app` 下没有新增 `[locale]` 段；既有路径形状未变；`tests/web-smoke/a11y-smoke.mjs:189`/`:196` 那两条路径断言仍绿",
+    "**没有碰 CI 定义**：`.github/**` 的 diff 为空；T1104 建的 a11y `make` 目标仍在，且你的新目标与它并列而不是替换它",
+    "**RESULT 里写明**：目录机制的选择与代价、缺 key 策略为什么选它、你**没有**覆盖的页面与原因、以及所有你判断不了而按最严处理的地方"
+  ],
+  "allowed_scope": [
+    "packages/ui/**",
+    "apps/web/**",
+    "tests/**",
+    "Makefile"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "specs/**",
+    "docs/**",
+    "infra/**",
+    "internal/**",
+    "cmd/**",
+    "ops/**",
+    "pnpm-lock.yaml",
+    "package.json",
+    ".github/**"
+  ],
+  "relevant_specs": [
+    "docs/28_ACCESSIBILITY_I18N.md",
+    "docs/42_PAGE_SPECS.md",
+    "docs/51_FRONTEND_STANDARD.md",
+    "docs/41_DESIGN_TOKENS.md",
+    "docs/09_RSG_AND_EVIDENCE.md",
+    "specs/ui/page-inventory.csv",
+    "specs/ui/routes.yaml"
+  ],
+  "scope_note": "范围与 T1104 同形：共享组件（`packages/ui/**`）、界面（`apps/web/**`）、套件（`tests/**`）、以及接门要动的那一处（`Makefile`——`.github/**` 不在范围内，理由见需求第 11 条）。**`specs/**` 特别重要地不在范围内**：`specs/ui/page-inventory.csv` 与 `routes.yaml` 是路由形状的真相源（而它们与实现今天的形状并不一致——`page-inventory.csv` 写 `/{org}/{project}`，实现是 `/projects/[id]`），**这个不一致不是你要修的东西，是你要绕开的东西**：本笔不做 URL 前缀化，理由写在需求第 5 条。`pnpm-lock.yaml` 与根 `package.json` 排除，默认不加运行时依赖。\n\n**（2026-09-21 补，实测后收窄）`.github/**` 移出范围。** `specs/orchestrator/gates.json` 与 `.github/workflows/ci.yml` 被 `internal/devorchestrator/gate_spec_test.go` 逐步对齐，且那份 gate spec 是 Supervisor 的只读区——工人改 ci.yml 就会红同步单测，而能修的那一半不在工人手里。CI 接线由我在同一笔提交里落。",
+  "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄 + 排期）——两条：范围砍到五条；依赖里加上 T1104。**\n\n**加 T1104 这个依赖是有意的**：两笔都是「扫过每一个页面」的活——T1104 改的是标记与属性（label、aria-live、reduced motion、skip link），T1105 改的是同一批文件里的每一个字符串。让它们并行，等于让两个工人同时重写同一批文件，冲突面是 26 条路由的每一行。串行是诚实的排法，而且它由 DAG 自己执行，不靠我记得。\n\n**本笔里我定死的三件事**：①**不做 URL 前缀化**（需求第 5 条）——路由形状归 `specs/ui/**` 管，且会让既有路径断言与规格一起出事；语言偏好走 cookie + `lang`，代价（深链不带语言）记在 RESULT 里。②**`<html lang>` 从 T1104 划到本笔**（需求第 6 条）——它必须与语言偏好一起改，否则两笔会先后改同一行；T1104 那边已被明确要求只记录、不改。③**基础英文照抄现状**（需求第 4 条）——本地化不是润色，改写英文会连累刚立的基线与既有断言。\n\n**为什么把「剩余硬编码字符串计数」写成交付物**：一笔 i18n 任务最容易交出的假成绩是「核心页面好了 → 说全站好了」。要一个能复跑的数字，比要一句形容词有用。"
+}
