@@ -9733,10 +9733,10 @@
       ]
     },
     "T1101": {
-      "status": "verification",
+      "status": "rejected",
       "started_at": "2026-09-21T11:09:58Z",
       "worker_run_id": "run-1b924f9dc676b161",
-      "rejection_reason": "# T1101 返工第三轮 —— 判据选错了：你量的是「修剪前后」，AC3 要的是「替换前后」\n\n## 门为什么红\n\nG4 的 review verdict 是 `request_changes`，1 条 blocking（另有 1 major、4 minor/nit）。\nblocking 的原话：AC3「视觉零回归」不成立——把**改动前的 HEAD 树**真渲染出来、与**你签入的基线**逐像素比，14 页里 10 页超容差。\n\n## 我核过的（这两条别来跟我争）\n\n**① 徽章色调的边框，HEAD 是透明的。**\n\n`apps/web/app/(main)/projects/projects.css`（HEAD）：\n\n- `:110` `.badge-public { color: fgColor-success; background: bgColor-success-muted; border-color: transparent; }`\n- `:116` `.badge-private { … border-color: transparent; }`\n- `:122` `.badge-frozen { … border-color: transparent; }`\n- `:94` `.badge` 基座：`padding: 1px 8px; border: 1px solid var(--borderColor-default); border-radius: 2em; font-size: 12px;`\n\n你的 `packages/ui/src/ui.css` 里 `.post-state-label` 基座与它**逐字相同**（圆角写法不同，渲染是同一个胶囊）；`-neutral` 的 `border-color` 也**正好等于** HEAD `.badge-muted` 的 `borderColor-default`。\n**但** `-success` / `-attention` / `-danger` 你给了带色调的边框（`#aceebb` / `#d4a72c` / `#ffcecb`）。\n\n评审量到某像素 `rgba(0,0,0,0) → rgb(172,238,187)`：**`#aceebb` 就是 `rgb(172,238,187)`**，正是你 `-success` 的 `--borderColor-success-muted`。\n**也就是说：这五处徽章，HEAD 与你的交付之间只差 `border-color` 一条属性。**\n\n**② 活动流那两个标签，HEAD 是 11px / 0 6px。**\n\n`apps/web/app/(main)/projects/[id]/activity/activity.css`（HEAD）`:196-205`：\n\n```\n.activity-row-source,\n.activity-row-visibility {\n  padding: 0 6px;\n  font-size: 11px;\n  line-height: 18px;\n  border-radius: 999px;\n}\n```\n\n你的交付里这两个类**已经不在 `activity.css` 里了**（grep 零命中），那两个位点改走 `<StateLabel>`（`activity/page.tsx:386`、`:393`），于是拿到 `.post-state-label` 的 `1px 8px / 12px`。\n**每个标签宽 4px、高 2px**；活动页标签多，这就是 `project-activity 3609` 的来源。（tone 映射本身是对的：research→accent、其余→neutral，与 HEAD `.activity-row-source[data-activity-source=\"research\"]` 一致。**只有尺寸变了。**）\n\n## 你的控制组按构造看不见这一类变化 —— 这才是要改的地方\n\n你的 AC3 证据用 `tests/web-smoke/control-stylesheet.mjs` 造一份「HEAD ∪ 本任务增补」的对照 CSS，然后**拿这棵树比这棵树**。\n两侧都带着**新的组件 CSS**，所以**只要变化发生在新组件内部，两侧同时变、差值抵消为 0**。\n你量的是「剪枝有没有丢规则」——那件事上一轮你已经做对了——**不是**「替换是否行为等价」。\n\n**你自己的 RESULT 里就写着这句**：「conflicts 那处外观变化是标记层的……**CSS 对照按构造看不见**」。\n你已经知道仪器有这个盲区，却仍然把 AC3 判成 `passed`。req[6] 要的是仪器**能说不**——这份仪器对**这一类**变化说不出来。\n\n评审换了一台看得见的仪器：`git archive HEAD` 出一棵**真的 HEAD 树** → 同一套构建与固定视口 → 与**你签入的基线**逐像素比（harness 同样的 pixelmatch 阈值 0.1 / 容差 64）。读数：\n\n`project-files 3577`、`project-activity 3609`、`pull-detail 652`、`release-detail 553`、`projects-directory 522`、`project-overview` / `research` / `pulls` / `releases` / `settings` **各 482**，另 `asset-page` 页高差 2px。\n\n**说清楚**：上面两条成因是我在 HEAD 上逐字核过的；**像素读数我没有重跑**，是评审的仪器量的。所以要你把第 3 条的量法**建进你的交付**——那个数以后要是你自己的。\n\n## 裁定：这次外形统一**没有**获授权，不许事后追认\n\n任务书 req[3] 逐字：「**替换必须是行为等价的——见验收第 3 条**」；AC3 逐字：「**视觉零回归**」。\n本任务**唯一**获授权的外观变化是 **AC4 的圆角**（`pull-detail.css` 的 10px → 6px），而且 AC4 要求你**写明选了哪个值、为什么**——那一处你做对了。\n\n「把彩色徽章的边框从 transparent 改成带色调」是一条**新的设计决定**：任务书没要，你不知道它会动多少页，也没在 RESULT 里报（你只报了 pull-detail 与 project-conflicts）。\n\n我考虑过另一个选择：由我出面把这 10 页的外观变更**逐页点名、追认为授权**。**我不这么做**，两条理由：\n\n1. 它**不需要**。统一形态用 HEAD 的外观就能做到——共享一个组件、把 HEAD 的规则搬进去就行。你不是做不到，是顺手改了。\n2. 追认它等于**为了让门变绿而放宽断言**。AC3 是断言，而这条断言在这笔任务里**是可满足的**（AC4 就示范了「有意变更该怎么写」）。\n\n**所以：除下面点名的两处例外，核心页的外观必须与 HEAD 等价。**\n\n两处例外（都是任务书自己授权的，但**都要给实测数**）：\n\n- `pull-detail`：AC4 的圆角统一。\n- `project-conflicts`：req[3] 把证据区判给共享 `Diff` 画（「`Diff` 是 PR/冲突差异的统一形态」），标记层变化是任务授权的。\n\n## 要做的（逐条，能核）\n\n1. **彩色色调的边框回到 HEAD**：`.post-state-label-success` / `-attention` / `-danger`（以及任何承载 `.badge-public/private/frozen` 语义的色调）的 `border-color` 回到 `transparent`。**你的 `-neutral` 已经是对的**（`borderColor-default`，与 HEAD `.badge-muted` 一致）——把它当模板。`project-badges.tsx:31/35/40` 的 tone 映射（public→success、private/frozen→attention）本身也对，**只改边框**。\n2. **活动流那两个标签回到 HEAD 的尺寸**（`padding: 0 6px; font-size: 11px`）。给共享组件加一个尺寸变体（例如 `StateLabel` 的 `small`）或让这两个位点保持原形，随你判断——**但渲染必须与 HEAD 等价**。\n3. **把量法换成看得见的那一种，并把数字写进 RESULT**：`git archive HEAD` → 构建 → 同一视口 → 与**你签入的基线**逐像素比。**目标：除上面两处例外，每一页差异像素数 ≤ 你写下的容差（64）；两个例外给实测像素数与像素落点。** 「CSS 对照按构造看不见」不再是被接受的答案。\n4. **基线在修好之后重拍**。今天那 14 张是你拿新渲染拍的，记的是变化本身、不是 HEAD。重拍之后，**第 3 条的量法要能过**——这两件事一起才叫闭环。\n5. **`project-conflicts` 不许再被跳过**：第 3 条的量法看得见它。超容差就逐像素说落在哪里、为什么是 req[3] 授权的。\n6. **props 段重写**（AC7；评审 major）：实测三项都不对——`Timeline` 收的是 `entries: TimelineEntry[]`（`Timeline.tsx:66`），你整段里 `TimelineEntry` **零命中**；`SidebarTrail` / `SidebarNav` **不存在**（`Sidebar.tsx` 导的是 `Sidebar` / `SidebarSection` / `SidebarList`），你却把前者写进了 RESULT；`StateLabel` 的色调是 `neutral|accent|success|attention|danger` **五个**，而且 `data-badge` 是**调用方**传的（`project-badges.tsx:31` 等），**组件自己不发光**。AC7 要的是**实际的**形状。\n7. **九个核心页逐页点名**（req[7] 逐字要求「在 RESULT 里逐页点名哪些进了基线、哪些因为还没有路由而不在」）。你的 RESULT 里 `knowledge` **零命中**。`docs/42_PAGE_SPECS.md` 的九个核心页一页一行：在基线的写页名 + 文件名；不在的写**为什么**——`/knowledge/{id}` 没有路由，**不要为它造路由**。\n8. **把新守卫接进每天跑的那条路**（评审 finding[4]）：`tests/web-smoke/run.sh` 今天只跑 `visual-smoke` + `a11y-smoke`（我核过 :94 起那一段），**没有任何东西会自动跑你新写的基线比对**。req[5] 说基线比对是**本任务的必测**——必测没人调用就不叫必测。`tests/**` 在你范围内。\n9. **两条小账**：`packages/ui/src/tokens.ts:*** 引的 `tests/web-smoke/css-policy.mjs` **不存在**（我 ls 过，零命中）——要么把文件补上，要么把那句话改掉；`packages/ui/src/index.ts` 导出的 `SidebarSection` / `SidebarList` 在 `apps/web` 里**无人 import**（我 grep 过，零命中）——要么用起来，要么在 RESULT 里照实说它们暂时没被用（AC0 要的是**真被用**，不是导出了放着）。\n10. **pull-detail 的像素解剖**（评审 finding[3]）：你写的落点比实测细，按第 3 条量出来的实际落点重写。\n\n## 不许做的\n\n- **不许为了让第 3 条变绿而放宽容差、删页、缩小视口、把基线当输出。** 容差是 req[5] 要求**显式写下**的数值；要改就说明为什么，**不是改成能过**。\n- **不许为了「等价」去删 JSX 的 `className` 迁就 CSS**（上一轮的教训）。\n- 不许改 `specs/**`、`docs/**`、`tasks/**`；不碰 Go（`internal/**`、`cmd/**`）；不改 `infra/**`；**不改 `.github/**`**——把守卫接进 CI 是**我的**收尾动作。\n- 失败就写失败。\n\n## 一句话\n\n上一轮你把「剪枝丢规则」修对了（四条规则按 HEAD 逐字恢复、子串相等核过）。这一轮的毛病不是手艺，是**判据**：你拿「修剪前后」当了「替换前后」。把第 3 条的量法做出来，剩下的都是机械活。\n",
+      "rejection_reason": "# T1101 第三轮 review 结论：request_changes\n\n核心数字（独立复现）对得上：12 页 0 px、pull-detail 170 px、project-conflicts 1280x1199→1280x1185、run.sh 88 ok/0 FAIL、+660/−801 与 CSS +183/−444，变异日志也一致。\n\n但有一处**未经授权且现有仪器都看不见**的外观变更：\n\n- `pull-detail.css:298 .pull-change-kind` 与 `:329 .pull-change-moved` 被删掉，改由 `packages/ui/src/ui.css` 的 `.post-diff-kind`/`.post-diff-note` 渲染。\n- 评审人在 /tmp 独立副本上实测 PR 页 scientific tab：\n  - HEAD 的 kind chip 是 59.8x18 / 55.9x18 / 57x18、radius 10px、font 11px/16px、padding 0 6px、neutral 文字 rgb(31,35,40)。\n  - 现在是 67.9x22 / 63.7x22 / 65x22、radius 999px、font 12px/18px、padding 1px 8px、neutral 文字 rgb(89,99,110)。\n  - moved 注记 175.2x18 → 193.9x22；面板 449px → 488px 高；同一面板区域 29807 px 不同（守卫容差 64）。\n- 这些元素只在 scientific/knowledge/evidence 非默认 tab 渲染，而 visual-regression.mjs 的 `PAGES` 只拍默认状态（ready 是 `[data-pull-panel=\"summary\"]`），所以基线对照、style-parity、section E 全看不见。\n- AC5 证据写「五处 10px 现在都是 6px」，但 `.pull-change-kind`/`.pull-change-moved` 已不存在，其替代者是 999px——证据被 diff 推翻。\n\n**返工要求：**\n1. 把这两个 chip 按 HEAD 度量写回 `pull-detail.css`（或让共享 Diff 组件能还原 HEAD 度量），并在 scientific tab 下实测像素等价。\n2. 同时修掉 RESULT.json 里 AC5 那条与 diff 矛盾的证据。\n3. 考虑把 `head-tree-visual.sh` 接进日常路径，并在 visual-regression.mjs 里给 pull-detail 补拍 scientific/knowledge/evidence tab 后的基线，堵住非默认状态的覆盖空洞。\n\n其余 minor/nit 见 review RESULT.json，不阻塞。\n",
       "history": [
         {
           "from": "todo",
@@ -9813,6 +9813,13 @@
           "at": "2026-09-21T11:41:03Z",
           "run_id": "run-2924a5ae0c74462c",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T22:53:15Z",
+          "run_id": "run-9b720c98b7e04110",
+          "reason": "# T1101 第三轮 review 结论：request_changes\n\n核心数字（独立复现）对得上：12 页 0 px、pull-detail 170 px、project-conflicts 1280x1199→1280x1185、run.sh 88 ok/0 FAIL、+660/−801 与 CSS +183/−444，变异日志也一致。\n\n但有一处**未经授权且现有仪器都看不见**的外观变更：\n\n- `pull-detail.css:298 .pull-change-kind` 与 `:329 .pull-change-moved` 被删掉，改由 `packages/ui/src/ui.css` 的 `.post-diff-kind`/`.post-diff-note` 渲染。\n- 评审人在 /tmp 独立副本上实测 PR 页 scientific tab：\n  - HEAD 的 kind chip 是 59.8x18 / 55.9x18 / 57x18、radius 10px、font 11px/16px、padding 0 6px、neutral 文字 rgb(31,35,40)。\n  - 现在是 67.9x22 / 63.7x22 / 65x22、radius 999px、font 12px/18px、padding 1px 8px、neutral 文字 rgb(89,99,110)。\n  - moved 注记 175.2x18 → 193.9x22；面板 449px → 488px 高；同一面板区域 29807 px 不同（守卫容差 64）。\n- 这些元素只在 scientific/knowledge/evidence 非默认 tab 渲染，而 visual-regression.mjs 的 `PAGES` 只拍默认状态（ready 是 `[data-pull-panel=\"summary\"]`），所以基线对照、style-parity、section E 全看不见。\n- AC5 证据写「五处 10px 现在都是 6px」，但 `.pull-change-kind`/`.pull-change-moved` 已不存在，其替代者是 999px——证据被 diff 推翻。\n\n**返工要求：**\n1. 把这两个 chip 按 HEAD 度量写回 `pull-detail.css`（或让共享 Diff 组件能还原 HEAD 度量），并在 scientific tab 下实测像素等价。\n2. 同时修掉 RESULT.json 里 AC5 那条与 diff 矛盾的证据。\n3. 考虑把 `head-tree-visual.sh` 接进日常路径，并在 visual-regression.mjs 里给 pull-detail 补拍 scientific/knowledge/evidence tab 后的基线，堵住非默认状态的覆盖空洞。\n\n其余 minor/nit 见 review RESULT.json，不阻塞。\n"
         }
       ]
     },
@@ -10507,10 +10514,10 @@
       ]
     },
     "T1112": {
-      "status": "verification",
+      "status": "rejected",
       "started_at": "2026-09-21T21:36:05Z",
       "worker_run_id": "run-37d2c7a3b3dd92bf",
-      "rejection_reason": "# T1112 rebaseline：Makefile 变了，补丁贴不上\n\n当前 main 已经合并了 T1108（性能基线）和 T0909（confirm 原子化），`Makefile` 的结构与你的分支基线不同。\n\n`rddev task accept` 的原话：\n\n    error: patch failed: Makefile:19\n\n这不是你浏览器测试接进 make 的代码有问题，是基线漂移。`rddev rebaseline` 会把你推到当前 main，保留你的改动，然后在新基线上重新验证。\n\n注意：PR #325 也刚合并了项目工作区的演示 UI，但那个改动不涉及 `tests/web-smoke/` 或 `Makefile` 里你碰的部分，应该不冲突。\n\n要求不变：浏览器测试套件接进 `make`，断言写错必须报错；G1/G2/G3 通过。\n",
+      "rejection_reason": "# T1112 rebaseline：main 已推进，web 演示 UI 的回归已修复\n\n当前 main 已合并：\n- PR #337 [T1202] Canonical MOF Workflow E2E\n- PR #338 hotfix/web-demo-regressions：移除 CSS gradient 违规、为 project overview 增加 overview/counts/branches 的 null-safety\n\n上一轮 review 指出 browser suites 因 apps/web 回归（projects.css gradient、projects/[id]/page.tsx 缺少 null-check）而无法通过。这些回归已在 main 修复，因此将 T1112 推到当前 main 重新验证。\n\n要求不变：浏览器测试套件接进 make，断言写错必须报错；G1/G2/G3 通过。\n",
       "history": [
         {
           "from": "todo",
@@ -10551,6 +10558,13 @@
           "to": "verification",
           "at": "2026-09-21T21:37:42Z",
           "run_id": "run-09a9b39c2035faed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T22:50:28Z",
+          "run_id": "run-df39862b4d55b8b7",
+          "reason": "# T1112 rebaseline：main 已推进，web 演示 UI 的回归已修复\n\n当前 main 已合并：\n- PR #337 [T1202] Canonical MOF Workflow E2E\n- PR #338 hotfix/web-demo-regressions：移除 CSS gradient 违规、为 project overview 增加 overview/counts/branches 的 null-safety\n\n上一轮 review 指出 browser suites 因 apps/web 回归（projects.css gradient、projects/[id]/page.tsx 缺少 null-check）而无法通过。这些回归已在 main 修复，因此将 T1112 推到当前 main 重新验证。\n\n要求不变：浏览器测试套件接进 make，断言写错必须报错；G1/G2/G3 通过。\n"
         }
       ]
     },
@@ -10794,9 +10808,10 @@
       ]
     },
     "T1205": {
-      "status": "verification",
+      "status": "rejected",
       "started_at": "2026-09-21T10:57:23Z",
       "worker_run_id": "run-51bd734370cd9991",
+      "rejection_reason": "# T1205 review 结论：request_changes\n\n仪器本身诚实且核心逻辑正确：独立 rebuilt `tests/cmd/contractgate` 后 `-check-inventory` pass；192 个 /api/v1 字面值、153 个注册型调用、134 条 inventory 行均核对无误；98 条未记录路由都有 suggest+reason；probe 也验证 exemption/citation 机制工作。\n\n但有一个 **blocking** 问题：\n\n- `tests/contract/inventory.go:131` 产生 **NEW staticcheck finding S1016**：`should convert e (type Exemption) to SuggestedExemption instead of using struct literal`。\n- `make staticcheck` 是 CI `go` job 的第 3 步，也是每个任务 G2 要重跑的 job—— merge 会红 T1205 自己的 G4 和所有在飞工人的 G2。\n- RESULT.json 里声称跑过 CI 的 `go` job 且没有 FAIL，但实际没有跑 fmt/vet/staticcheck。\n\n**返工要求：**\n1. 修掉 S1016：把 `inv.Suggested = append(inv.Suggested, SuggestedExemption{...})` 改成 `inv.Suggested = append(inv.Suggested, SuggestedExemption(e))`（已验证可编译且 staticcheck 静默）。\n2. 重新跑 `make staticcheck`、`make check`、CI 的 `go` job，把真实结果写进 RESULT.json。\n3. （major）把 enumerator 的 advisory list 暴露给 reader/JSON 输出，避免 chi 风格未知 router 上的注册被静默吞掉；同时修正 RESULT 里「chi-style .Get/.Post 被识别」的措辞，因为 fixture 并未覆盖未知 receiver 的情况。\n4. （minor）修正 RESULT 里对 inventory reason 的引用，改为实际文本；统一 `-write-inventory`/`-check-inventory` 等路径是相对于 `-root` 还是 CWD。\n",
       "history": [
         {
           "from": "todo",
@@ -10817,6 +10832,13 @@
           "at": "2026-09-21T11:15:50Z",
           "run_id": "run-07519203016e4dfc",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T22:53:15Z",
+          "run_id": "run-8374eba4266ab30f",
+          "reason": "# T1205 review 结论：request_changes\n\n仪器本身诚实且核心逻辑正确：独立 rebuilt `tests/cmd/contractgate` 后 `-check-inventory` pass；192 个 /api/v1 字面值、153 个注册型调用、134 条 inventory 行均核对无误；98 条未记录路由都有 suggest+reason；probe 也验证 exemption/citation 机制工作。\n\n但有一个 **blocking** 问题：\n\n- `tests/contract/inventory.go:131` 产生 **NEW staticcheck finding S1016**：`should convert e (type Exemption) to SuggestedExemption instead of using struct literal`。\n- `make staticcheck` 是 CI `go` job 的第 3 步，也是每个任务 G2 要重跑的 job—— merge 会红 T1205 自己的 G4 和所有在飞工人的 G2。\n- RESULT.json 里声称跑过 CI 的 `go` job 且没有 FAIL，但实际没有跑 fmt/vet/staticcheck。\n\n**返工要求：**\n1. 修掉 S1016：把 `inv.Suggested = append(inv.Suggested, SuggestedExemption{...})` 改成 `inv.Suggested = append(inv.Suggested, SuggestedExemption(e))`（已验证可编译且 staticcheck 静默）。\n2. 重新跑 `make staticcheck`、`make check`、CI 的 `go` job，把真实结果写进 RESULT.json。\n3. （major）把 enumerator 的 advisory list 暴露给 reader/JSON 输出，避免 chi 风格未知 router 上的注册被静默吞掉；同时修正 RESULT 里「chi-style .Get/.Post 被识别」的措辞，因为 fixture 并未覆盖未知 receiver 的情况。\n4. （minor）修正 RESULT 里对 inventory reason 的引用，改为实际文本；统一 `-write-inventory`/`-check-inventory` 等路径是相对于 `-root` 还是 CWD。\n"
         }
       ]
     },
@@ -10839,9 +10861,10 @@
       "merged_at": null
     },
     "T1208": {
-      "status": "verification",
+      "status": "rejected",
       "started_at": "2026-09-21T21:56:45Z",
       "worker_run_id": "run-6c6965584d96b40d",
+      "rejection_reason": "# T1208 review 结论：request_changes\n\n验收逻辑本身已满足：独立重跑 `bash tests/acceptance/project-export-portability-e2e.sh` 得到 31 ok / 0 FAIL，四个 identifier class 两边一致、source fingerprint 字节相同、三处 tamper 都按位置拒绝、第二次导入被拒绝、mutation check 证明每处拒绝都 load-bearing；运行前后工作树无变化、无残留。\n\n但 **blocking**：新 package 让 `make staticcheck` 失败，而它是 CI `go` job 的第 3 步、G4 required job——当前交付无法绿 CI。\n\n`bash scripts/staticcheck.sh` 在 frozen tree 上报告 **3 条 NEW finding**，全部在 `tests/acceptance/portability/`，且都不在 baseline 里：\n- `git.go:161:6` func `commitTreeSHA` is unused (U1000)；其 doc 注释说「tree id 会 carried in the report」，实际无调用。\n- `git.go:349:17` func `(*gitea).deleteRepo` is unused (U1000)。\n- `import.go:462:10` error strings should not be capitalized (ST1005, \"Git commit differs: ...\")。\n\n**返工要求：**\n1. 删除 `commitTreeSHA` 和 `deleteRepo`（或把它们 wire 起来），并把错误字符串小写化。\n2. 重新跑 `make staticcheck` 并通过。\n3. 把 staticcheck 加入 RESULT.json 的测试列表（docs/67 的 G1 已把它与 go test、go vet 并列）。\n4. 重新跑完整 G1/G3 并把真实结果写进 RESULT.json。\n\n其余 minor/nit（import 侧 Git identifier 比较对象是自己、blob 集合两边定义不同、releases 只导一行、bundle ref 集单向校验、assemble 阶段 put=0、G3 job 未接线、MinIO/Gitea token 残留）见 review RESULT.json，本轮不阻塞但请顺手评估。\n",
       "history": [
         {
           "from": "todo",
@@ -10862,6 +10885,13 @@
           "at": "2026-09-21T22:20:33Z",
           "run_id": "run-9ca324a49ca8fbdd",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T22:53:15Z",
+          "run_id": "run-fe494228baf5b697",
+          "reason": "# T1208 review 结论：request_changes\n\n验收逻辑本身已满足：独立重跑 `bash tests/acceptance/project-export-portability-e2e.sh` 得到 31 ok / 0 FAIL，四个 identifier class 两边一致、source fingerprint 字节相同、三处 tamper 都按位置拒绝、第二次导入被拒绝、mutation check 证明每处拒绝都 load-bearing；运行前后工作树无变化、无残留。\n\n但 **blocking**：新 package 让 `make staticcheck` 失败，而它是 CI `go` job 的第 3 步、G4 required job——当前交付无法绿 CI。\n\n`bash scripts/staticcheck.sh` 在 frozen tree 上报告 **3 条 NEW finding**，全部在 `tests/acceptance/portability/`，且都不在 baseline 里：\n- `git.go:161:6` func `commitTreeSHA` is unused (U1000)；其 doc 注释说「tree id 会 carried in the report」，实际无调用。\n- `git.go:349:17` func `(*gitea).deleteRepo` is unused (U1000)。\n- `import.go:462:10` error strings should not be capitalized (ST1005, \"Git commit differs: ...\")。\n\n**返工要求：**\n1. 删除 `commitTreeSHA` 和 `deleteRepo`（或把它们 wire 起来），并把错误字符串小写化。\n2. 重新跑 `make staticcheck` 并通过。\n3. 把 staticcheck 加入 RESULT.json 的测试列表（docs/67 的 G1 已把它与 go test、go vet 并列）。\n4. 重新跑完整 G1/G3 并把真实结果写进 RESULT.json。\n\n其余 minor/nit（import 侧 Git identifier 比较对象是自己、blob 集合两边定义不同、releases 只导一行、bundle ref 集单向校验、assemble 阶段 put=0、G3 job 未接线、MinIO/Gitea token 残留）见 review RESULT.json，本轮不阻塞但请顺手评估。\n"
         }
       ]
     }
