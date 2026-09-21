@@ -64,6 +64,12 @@ type fakeDrafts struct {
 	err        error
 	confirmErr error
 
+	// projectState is what the project already has when the confirmation looks
+	// (see DraftStore.ProjectState): zero value = a project with no main branch,
+	// which is the ordinary case every other test here runs in.
+	projectState    ProjectState
+	projectStateErr error
+
 	inserted  []Draft
 	confirmed []ConfirmWrite
 }
@@ -92,6 +98,38 @@ func (f *fakeDrafts) LookupByStartKey(_ context.Context, actorID, key string) (*
 		}
 	}
 	return nil, nil
+}
+
+// LookupByConfirmKey answers the confirm route's key read. The scan is the
+// partial unique index's own predicate (00134's
+// research_context_drafts_confirm_key_uniq: confirmed_by + the key, only where
+// the key is set), so the fake's answer and the index's refusal cannot disagree
+// about which key names which confirmation.
+func (f *fakeDrafts) LookupByConfirmKey(_ context.Context, actorID, key string) (*Draft, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	for i := range f.rows {
+		if f.rows[i].ConfirmIdempotencyKey != nil && f.rows[i].ConfirmedBy != nil &&
+			*f.rows[i].ConfirmedBy == actorID && *f.rows[i].ConfirmIdempotencyKey == key {
+			row := f.rows[i]
+			return &row, nil
+		}
+	}
+	return nil, nil
+}
+
+// ProjectState answers the confirmation's pre-write read of what the project
+// already has. The fake is told what to answer rather than deriving it: the
+// production answer is a join across branches, state_commits,
+// scientific_object_versions and scientific_objects, and a fake that
+// re-implemented that join would be a second, weaker copy of the rule the
+// integration test pins.
+func (f *fakeDrafts) ProjectState(_ context.Context, _, _ string) (ProjectState, error) {
+	if f.projectStateErr != nil {
+		return ProjectState{}, f.projectStateErr
+	}
+	return f.projectState, nil
 }
 
 func (f *fakeDrafts) Get(_ context.Context, draftID string) (Draft, error) {
@@ -718,6 +756,173 @@ func TestConfirmReportsAStateWriteFailureAsOne(t *testing.T) {
 		t.Fatalf("err = %v, want ErrStore", err)
 	}
 }
+
+// TestConfirmRefusesAKeyThatAlreadyConfirmedAnotherDraft: one key names one
+// confirmation (00134's research_context_drafts_confirm_key_uniq), and the
+// refusal has to happen BEFORE the state write — a key that is already spent
+// can be recognized by a read, and writing the branch, the state, the commit
+// and the object version of a request that is about to be refused is the
+// defect T0909 fixes: the refused draft keeps a state nothing names, and its
+// own retry then collides with the branch the refused call left behind.
+func TestConfirmRefusesAKeyThatAlreadyConfirmedAnotherDraft(t *testing.T) {
+	svc, drafts, states, commits := confirmedFixture(t, domain.ProjectRoleOwner)
+
+	// Another draft, already confirmed under the key this call presents.
+	const key = "confirm-key-01"
+	const otherDraft = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	confirmedElsewhere := Draft{ID: otherDraft, CreatedBy: testActor, Status: DraftStatusConfirmed}
+	confirmedElsewhere.ConfirmIdempotencyKey = strptr(key)
+	confirmedElsewhere.ConfirmedBy = strptr(testActor)
+	drafts.rows = append(drafts.rows, confirmedElsewhere)
+
+	_, err := svc.Confirm(context.Background(), actor(), ConfirmInput{DraftID: testDraft, IdempotencyKey: key})
+	if !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("err = %v, want ErrIdempotencyConflict", err)
+	}
+	if len(states.branches) != 0 || len(states.objects) != 0 {
+		t.Errorf("a confirmation refused on the key wrote state: %d branches, %d objects", len(states.branches), len(states.objects))
+	}
+	if commits.calls != 0 {
+		t.Errorf("a confirmation refused on the key read a state commit %d times", commits.calls)
+	}
+	if len(drafts.confirmed) != 0 {
+		t.Errorf("a confirmation refused on the key recorded %d confirmations", len(drafts.confirmed))
+	}
+}
+
+// TestConfirmAdoptsTheStateAnEarlierAttemptLeft: the window between the state
+// write and the record. The project already carries the initial state this
+// draft's own earlier attempt wrote — main, the question state, the commit, the
+// object version — and the draft does not name any of it. The retry must
+// RECORD that state, not write a second one (it cannot: main is taken) and not
+// answer 503 forever.
+func TestConfirmAdoptsTheStateAnEarlierAttemptLeft(t *testing.T) {
+	svc, drafts, states, commits := confirmedFixture(t, domain.ProjectRoleOwner)
+	adopted := InitialState{
+		BranchID:  testBranch,
+		StateID:   testState,
+		CommitID:  testCommit,
+		ObjectID:  testObject,
+		VersionID: testVersion,
+	}
+	drafts.projectState = ProjectState{MainBranchID: testBranch, Adopted: &adopted}
+
+	res, err := svc.Confirm(context.Background(), actor(), ConfirmInput{DraftID: testDraft, IdempotencyKey: "confirm-key-01"})
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if len(states.branches) != 0 || len(states.objects) != 0 {
+		t.Errorf("the adopted confirmation wrote state again: %d branches, %d objects", len(states.branches), len(states.objects))
+	}
+	if commits.calls != 0 {
+		t.Errorf("the adopted confirmation looked for a commit %d times, want 0: the transition it records is already known", commits.calls)
+	}
+	if len(drafts.confirmed) != 1 {
+		t.Fatalf("confirm writes = %d, want 1", len(drafts.confirmed))
+	}
+	w := drafts.confirmed[0]
+	if w.BranchID != testBranch || w.StateID != testState || w.CommitID != testCommit ||
+		w.ObjectID != testObject || w.VersionID != testVersion {
+		t.Errorf("recorded confirmation = %+v, want the adopted ids", w)
+	}
+	if res.BranchID != testBranch || res.StateCommitID != testCommit || res.StateID != testState {
+		t.Errorf("result = %+v, want the adopted ids", res)
+	}
+	if !res.Replayed {
+		t.Error("an adopted confirmation answered replayed=false: this call wrote no state, and replayed is what says so")
+	}
+	if res.Draft.Status != DraftStatusConfirmed {
+		t.Errorf("draft status = %q, want confirmed", res.Draft.Status)
+	}
+}
+
+// TestConfirmFinishesABranchAnEarlierAttemptLeft: the narrower half of the same
+// window — the earlier attempt created the branch and died before the
+// transition. main carries the draft's question as its purpose (the string
+// createInitialBranch passes) and nothing has ever been committed on it, so the
+// retry finishes the work THERE: it writes the question on the branch that is
+// already there and records it. The alternative is worse in both directions —
+// asking CreateBranch for a name that is taken fails forever, and refusing the
+// draft leaves a project carrying a branch the draft does not name.
+func TestConfirmFinishesABranchAnEarlierAttemptLeft(t *testing.T) {
+	svc, drafts, states, commits := confirmedFixture(t, domain.ProjectRoleOwner)
+	drafts.projectState = ProjectState{
+		MainBranchID: testBranch,
+		MainPurpose:  strptr(purposeFor(startInput().ResearchQuestion)),
+	}
+
+	res, err := svc.Confirm(context.Background(), actor(), ConfirmInput{DraftID: testDraft, IdempotencyKey: "confirm-key-01"})
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if len(states.branches) != 0 {
+		t.Errorf("the resumed confirmation created %d branches, want 0: the branch an earlier attempt left is the one to finish", len(states.branches))
+	}
+	if len(states.objects) != 1 {
+		t.Fatalf("objects written = %d, want 1 (the question, on that branch)", len(states.objects))
+	}
+	if states.branchOf != testBranch {
+		t.Errorf("the question was written on branch %s, want the branch the earlier attempt left (%s)", states.branchOf, testBranch)
+	}
+	if commits.calls != 1 {
+		t.Errorf("commit reads = %d, want 1: this call's own transition has to be named", commits.calls)
+	}
+	if len(drafts.confirmed) != 1 {
+		t.Fatalf("confirm writes = %d, want 1", len(drafts.confirmed))
+	}
+	if got := drafts.confirmed[0].BranchID; got != testBranch {
+		t.Errorf("recorded branch = %s, want %s", got, testBranch)
+	}
+	if res.Replayed {
+		t.Error("a resumed confirmation answered replayed=true: this call wrote the question, so the transition it records is partly its own")
+	}
+	if res.BranchID != testBranch || res.StateID != testState || res.StateCommitID != testCommit {
+		t.Errorf("result = %+v, want the ids of the transition this call wrote", res)
+	}
+}
+
+// TestConfirmRefusesAMainBranchItDidNotMake: the other side of adoption. A
+// project whose initial state carries a DIFFERENT research question — someone
+// else's state, or a state this draft has nothing to do with — is not this
+// confirmation's to record. It is refused with the contract's "not in a state
+// that can be confirmed", which is a 409 with a code: a 503 that says "try
+// again" would be advice that can never come true.
+func TestConfirmRefusesAMainBranchItDidNotMake(t *testing.T) {
+	svc, drafts, states, _ := confirmedFixture(t, domain.ProjectRoleOwner)
+	drafts.projectState = ProjectState{MainBranchID: testBranch}
+
+	_, err := svc.Confirm(context.Background(), actor(), ConfirmInput{DraftID: testDraft, IdempotencyKey: "confirm-key-01"})
+	if !errors.Is(err, ErrNotConfirmable) {
+		t.Fatalf("err = %v, want ErrNotConfirmable", err)
+	}
+	if len(states.branches) != 0 || len(states.objects) != 0 {
+		t.Errorf("a refusal wrote state: %d branches, %d objects", len(states.branches), len(states.objects))
+	}
+	if len(drafts.confirmed) != 0 {
+		t.Errorf("a refusal recorded a confirmation naming a state it did not make")
+	}
+}
+
+// TestConfirmPassesTheStoresKeyConflictThrough: the store classifies the
+// confirm key's unique index as ErrIdempotencyConflict
+// (persistence.ResearchContextStore.Confirm maps
+// research_context_drafts_confirm_key_uniq onto it) and the transport has a
+// branch for that sentinel (409 IDEMPOTENCY_CONFLICT,
+// cmd/api/searchhttp.writeDraftError). The classification is only worth
+// anything if the layer between them keeps it in the chain: a wrap that
+// stringified the cause with %v answers SERVICE_UNAVAILABLE retryable:true
+// instead, which tells the caller to retry a request that can never succeed.
+func TestConfirmPassesTheStoresKeyConflictThrough(t *testing.T) {
+	svc, drafts, _, _ := confirmedFixture(t, domain.ProjectRoleOwner)
+	drafts.confirmErr = ErrIdempotencyConflict
+
+	_, err := svc.Confirm(context.Background(), actor(), ConfirmInput{DraftID: testDraft, IdempotencyKey: "confirm-key-01"})
+	if !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("err = %v, want an error that satisfies errors.Is(err, ErrIdempotencyConflict)", err)
+	}
+}
+
+func strptr(s string) *string { return &s }
 
 // confirmedFixtureWith is confirmedFixture with an explicit membership map, so
 // the denials can be driven.

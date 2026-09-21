@@ -114,6 +114,83 @@ func (s *ResearchContextStore) Get(ctx context.Context, draftID string) (researc
 	return researchContextDraftFromRow(row), nil
 }
 
+// LookupByConfirmKey implements researchcontext.DraftStore: the draft an
+// actor's CONFIRM key already confirmed, or nil.
+//
+// It reads the very rows the partial unique index
+// (research_context_drafts_confirm_key_uniq) covers, with the index's own
+// predicate, so this read cannot disagree with the constraint about which key
+// names which confirmation. It exists because the confirmation runs it BEFORE
+// it writes research state: the write path is a different store with its own
+// transactions, so the index's refusal at the end of the flow arrives too late
+// to prevent a state being written for a request that is about to be refused.
+func (s *ResearchContextStore) LookupByConfirmKey(ctx context.Context, actorID, idempotencyKey string) (*researchcontext.Draft, error) {
+	actor, err := textUUID(actorID)
+	if err != nil {
+		return nil, nil
+	}
+	key := idempotencyKey
+	row, err := sqlc.New(s.pool).GetResearchContextDraftByConfirmKey(ctx, sqlc.GetResearchContextDraftByConfirmKeyParams{
+		ConfirmedBy:           actor,
+		ConfirmIdempotencyKey: &key,
+	})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("persistence: read research context draft by confirm key: %w", err)
+	}
+	draft := researchContextDraftFromRow(row)
+	return &draft, nil
+}
+
+// ProjectState implements researchcontext.DraftStore: what the draft's project
+// already has, as the confirmation must read it before it writes anything.
+//
+// The row it reads is the project's MAIN branch, with the branch's own purpose
+// and commit count and — when a transition on it produced a state carrying a
+// research_question whose statement is exactly the caller's question — that
+// transition's ids. A project with no main branch answers pgx.ErrNoRows, which
+// is the ordinary case: nothing has been written for it yet.
+//
+// Every field is a column (or a count of rows in one); nothing here decides
+// what the facts MEAN — whether the branch is this confirmation's own work is
+// the application's rule (researchcontext.ProjectState.Ours), and it is stated
+// once, there.
+func (s *ResearchContextStore) ProjectState(ctx context.Context, projectID, researchQuestion string) (researchcontext.ProjectState, error) {
+	project, err := textUUID(projectID)
+	if err != nil {
+		return researchcontext.ProjectState{}, fmt.Errorf("%w: project id: %v", researchcontext.ErrStore, err)
+	}
+	row, err := sqlc.New(s.pool).GetProjectInitialState(ctx, sqlc.GetProjectInitialStateParams{
+		ProjectID: project,
+		Statement: researchQuestion,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return researchcontext.ProjectState{}, nil
+	}
+	if err != nil {
+		return researchcontext.ProjectState{}, fmt.Errorf("persistence: read the project's initial state: %w", err)
+	}
+	state := researchcontext.ProjectState{
+		MainBranchID: pgUUIDToText(row.MainBranchID),
+		MainPurpose:  row.Purpose,
+		MainCommits:  int(row.MainCommits),
+	}
+	// The adoption columns are NULL together: the lateral join found no
+	// transition on this branch whose result state carries the question.
+	if row.CommitID.Valid {
+		state.Adopted = &researchcontext.InitialState{
+			BranchID:  state.MainBranchID,
+			StateID:   pgUUIDToText(row.StateID),
+			CommitID:  pgUUIDToText(row.CommitID),
+			ObjectID:  pgUUIDToText(row.ObjectID),
+			VersionID: pgUUIDToText(row.VersionID),
+		}
+	}
+	return state, nil
+}
+
 // Insert implements researchcontext.DraftStore: one INSERT, and the database's
 // unique keys decide who wins a race.
 //
@@ -300,12 +377,16 @@ func researchContextDraftFromRow(row sqlc.ResearchContextDraft) researchcontext.
 	}
 }
 
-// GetSearchRecord implements researchcontext.SearchRecords over
-// SearchRecordStore: one answered search's actor and its selected refs.
+// GetSearchRecord implements researchcontext.SearchRecords over the
+// SearchRecordStore declared in search_record_store.go: one answered search's
+// actor and its selected refs.
 //
-// It lives on the search record store rather than here because it reads
-// search_records — the store that owns the record owns its reader, which is
-// also why the reading query sits in queries/search.sql.
+// It is a method on *SearchRecordStore and not on *ResearchContextStore because
+// it reads search_records — the store that owns the record owns its reader.
+// What puts the method's declaration in THIS file is its only caller: the draft
+// flow's Start, which needs the record's actor (whose search it is) and its
+// selected refs (the boundary the draft's refs are checked against). The query
+// it runs sits with the record's other queries, in queries/search.sql.
 func (s *SearchRecordStore) GetSearchRecord(ctx context.Context, searchID string) (researchcontext.SearchRecord, error) {
 	id, err := textUUID(searchID)
 	if err != nil {

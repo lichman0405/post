@@ -564,12 +564,15 @@ RETURNING id, created_at;
 -- the record is exactly the actor it belongs to and the set the draft's refs
 -- may be drawn from.
 --
--- Three columns and the actor, and nothing else. The query is a read for ONE
--- caller, and a projection that carried the plan, the signals and the answer
--- document as well would be a second, unused way to reach the record's
--- contents — the answer is already reachable as the draft's substrate without
--- being copied into the draft table. A future reader that needs the answer
--- adds its own query, with its own argument for what it needs.
+-- Three columns — the id, the actor the record belongs to, and selected_refs —
+-- and nothing else. The query is a read for ONE caller, and a projection that
+-- carried the plan, the signals and the answer document as well would be a
+-- second, unused way to reach the record's contents — the answer is already
+-- reachable as the draft's substrate without being copied into the draft
+-- table. A future reader that needs the answer adds its own query, with its
+-- own argument for what it needs; this one reads what its caller maps and no
+-- more (researchcontext.SearchRecord has exactly these three fields, and the
+-- sqlc row this generates has exactly these three columns).
 --
 -- selected_refs is the important one: it is the boundary the draft's refs are
 -- validated against (migration 00134's research_context_draft_refs_guard, and
@@ -578,6 +581,6 @@ RETURNING id, created_at;
 -- SEARCH was answered with.
 
 -- name: GetSearchRecord :one
-SELECT id, actor_id, query, selected_refs, citations, answer
+SELECT id, actor_id, selected_refs
 FROM search_records
 WHERE id = @id;

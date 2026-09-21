@@ -387,8 +387,13 @@ func writeDraftError(w http.ResponseWriter, r *http.Request, err error) {
 		authhttp.WriteError(w, r, http.StatusNotFound, researchcontext.CodeDraftNotFound,
 			"draft research context not found")
 	case errors.Is(err, researchcontext.ErrNotConfirmable):
+		// The contract's own sentence for this 409 (specs/api/openapi.yaml).
+		// It is deliberately not "already confirmed": that is one of the two
+		// ways to be unconfirmable, and the other — the project's main branch
+		// carries research state this draft did not make — would be a false
+		// thing to say to the caller.
 		authhttp.WriteError(w, r, http.StatusConflict, researchcontext.CodeNotConfirmable,
-			"this draft research context is already confirmed")
+			"this draft research context is not in a state that can be confirmed")
 	case errors.Is(err, projects.ErrSlugTaken):
 		authhttp.WriteError(w, r, http.StatusConflict, projects.CodeProjectSlugTaken,
 			"a project with this slug already exists")

@@ -182,8 +182,11 @@ type ConfirmResult struct {
 	// object and its version 1.
 	QuestionObjectID  string
 	QuestionVersionID string
-	// Replayed reports that no state was written: the draft was already
-	// confirmed under this key, so the answer is the first call's.
+	// Replayed reports that this call wrote no research state: the draft was
+	// already confirmed under this key, or the state it records is the
+	// transition an earlier attempt of the same confirmation had already
+	// written (ProjectState.Adopted). A call that wrote state itself — even the
+	// question written on a branch an earlier attempt left — answers false.
 	Replayed bool
 }
 
@@ -198,6 +201,95 @@ type ConfirmWrite struct {
 	CommitID  string
 	ObjectID  string
 	VersionID string
+}
+
+// InitialState names the initial state a confirmation records: the branch, the
+// state the transition produced, the commit that names the transition
+// (docs/09 §2) and the research_question object version it created. The fresh
+// path and the adoption path both produce one; only where it comes from differs
+// (see ProjectState.Adopted).
+type InitialState struct {
+	BranchID  string
+	StateID   string
+	CommitID  string
+	ObjectID  string
+	VersionID string
+}
+
+// ProjectState is what the draft's project already has, as the confirmation
+// must read it BEFORE it writes anything.
+//
+// The confirmation is the one write in this flow that makes research state, and
+// it is not atomic across the two stores it touches: the state belongs to the
+// RSG write path (rsg.Service, its own transactions) and the record belongs to
+// the draft table. So the sequence "write the state, then record it" has a
+// window, and this value is what makes the window recoverable rather than
+// terminal — a retry reads what is already there instead of writing it twice.
+//
+// # The three answers, and why they are enough
+//
+//	no main branch        → the ordinary case: nothing has been written yet.
+//	main + this question  → an earlier attempt's own work (Ours): finish it.
+//	main + anything else  → not this confirmation's work; refuse.
+//
+// The middle case is recognized by what the confirmation itself put on the
+// branch, in the order it puts it there: the branch's purpose is the draft's
+// question (purposeFor, set when the branch is created), and the state the
+// transition produced carries a research_question object version whose
+// `statement` is that same question. A project that only has a draft has no
+// state at all (docs/14:25 — the initial state forms on confirmation), and the
+// confirmation is the only writer it has, so a main branch carrying this
+// draft's question can only have been put there by this draft's own
+// confirmation — by an attempt that died before it recorded what it wrote.
+//
+// # Why the purpose matters as well as the state
+//
+// The purpose is written FIRST and the state SECOND, so recognizing only the
+// state would leave the narrower half of the window unrecoverable: an attempt
+// that created the branch and died before the transition would leave a project
+// whose main branch carries nothing, which no retry could ever confirm and no
+// retry could ever clean up (the draft row is append-only). The purpose is
+// matched only when the branch has nothing on it (MainCommits == 0): a branch
+// with this draft's question as its purpose AND no transitions is that stopped
+// attempt, whereas a branch with commits of its own is somebody else's work
+// whatever its purpose says.
+type ProjectState struct {
+	// MainBranchID is the project's main branch, or "" when the project has no
+	// branch yet.
+	MainBranchID string
+	// MainPurpose is that branch's purpose column: the draft's question
+	// (purposeFor) when the confirmation created it, and whatever a branch this
+	// flow did not create carries. Nil for no main branch, or a branch that
+	// records no purpose.
+	MainPurpose *string
+	// MainCommits is how many transitions have been committed on that branch.
+	// Zero means nothing has been written onto it since it was created.
+	MainCommits int
+	// Adopted is the initial state an earlier attempt already wrote, or nil when
+	// the project's main branch does not carry this draft's research question.
+	Adopted *InitialState
+}
+
+// HasMain reports whether the project already has its main branch.
+func (p ProjectState) HasMain() bool { return p.MainBranchID != "" }
+
+// Ours reports whether the main branch is this draft's own confirmation's work
+// — the question the confirmation stamps on everything it creates, found on
+// the branch (see the type's doc). It is the one place that decision is made:
+// the store reports columns, the service reads them as this.
+func (p ProjectState) Ours(question string) bool {
+	switch {
+	case !p.HasMain():
+		return false
+	case p.Adopted != nil:
+		// The transition is there and its state carries this question.
+		return true
+	case p.MainCommits > 0:
+		// A branch with a history of its own is not a stopped attempt.
+		return false
+	default:
+		return p.MainPurpose != nil && *p.MainPurpose == purposeFor(question)
+	}
 }
 
 // Ports (docs/52: the application orchestrates against ports; adapters live in
@@ -222,6 +314,17 @@ type DraftStore interface {
 	// LookupByStartKey returns the draft an actor's start key already names,
 	// or nil.
 	LookupByStartKey(ctx context.Context, actorID, idempotencyKey string) (*Draft, error)
+	// LookupByConfirmKey returns the draft an actor's CONFIRM key already
+	// confirmed, or nil. UNIQUE (confirmed_by, confirm_idempotency_key) makes
+	// this at most one row by construction — the same index the store's CAS
+	// lands on, read ahead of the state write so a request that is about to be
+	// refused as a reused key costs nothing (see Service.Confirm).
+	LookupByConfirmKey(ctx context.Context, actorID, idempotencyKey string) (*Draft, error)
+	// ProjectState reads what the draft's project already has before the
+	// confirmation writes anything (see ProjectState): no main branch, a main
+	// branch carrying this draft's question, or a main branch carrying
+	// something else.
+	ProjectState(ctx context.Context, projectID, researchQuestion string) (ProjectState, error)
 	// Get returns one draft by id, or ErrDraftNotFound.
 	Get(ctx context.Context, draftID string) (Draft, error)
 	// Insert writes the draft, or reports ErrAlreadyStarted (the search has
