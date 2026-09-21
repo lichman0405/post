@@ -12,18 +12,22 @@ import (
 	"github.com/lichman0405/post/internal/rsg/manifest"
 )
 
-// Service orchestrates the three-way diff against the two read ports. It
+// Service orchestrates the three-way diff against the read ports. It
 // owns input validation (the port trusts, the service verifies) and the
 // project-membership check of the three states; it does NOT authorize —
 // consumers resolve visibility before calling it (package doc).
 type Service struct {
 	states    StatePort
 	snapshots SnapshotPort
+	proposals ProposalPort
 }
 
-// NewService wires the diff service.
-func NewService(states StatePort, snapshots SnapshotPort) *Service {
-	return &Service{states: states, snapshots: snapshots}
+// NewService wires the diff service. proposals may be nil, and a nil one
+// is not a licence: without it no source state of another project is
+// admissible at all (see admitsForeignSource), so every caller keeps the
+// same-project-only behaviour the three-state check has always had.
+func NewService(states StatePort, snapshots SnapshotPort, proposals ProposalPort) *Service {
+	return &Service{states: states, snapshots: snapshots, proposals: proposals}
 }
 
 // Params names the three states of the diff: the merge base, the source
@@ -38,10 +42,11 @@ type Params struct {
 // Diff computes the three-way Research State Diff of the named states:
 // the change list (objects created/updated/aborted/reopened, relations
 // changed), the summary categories, and the recorded file-level git refs.
-// The three states must exist and belong to the same project — a state of
-// another project reports ErrValidation, never its content. The same
-// inputs always render the same diff (internal/rsg/diff's canonical
-// serialization).
+// The three states must exist and belong to the same project, with the
+// one exception the external fork's cross-project proposal makes —
+// readInputs states it — so a state of an unrelated project reports
+// ErrValidation, never its content. The same inputs always render the
+// same diff (internal/rsg/diff's canonical serialization).
 func (s *Service) Diff(ctx context.Context, in Params) (*diff.Diff, error) {
 	inputs, err := s.readInputs(ctx, in)
 	if err != nil {
@@ -106,8 +111,24 @@ func (s *Service) readInputs(ctx context.Context, in Params) (diff.Inputs, error
 		role  string
 		state domain.ProjectState
 	}{{"base", base}, {"source", source}, {"target", target}} {
-		if st.state.ProjectID != in.ProjectID {
+		if st.state.ProjectID == in.ProjectID {
+			continue
+		}
+		if st.role != "source" {
 			return diff.Inputs{}, fmt.Errorf("%w: %s state %s does not belong to project %s", ErrValidation, st.role, st.state.ID, in.ProjectID)
+		}
+		// The source side is the one that may sit in another project, and
+		// only in the external fork's shape (docs/04 §2): the state is the
+		// head a pull request of THIS project proposes, so the project is
+		// already being asked to review it and its content is already on
+		// that proposal's diff. Anything else — a foreign project's state
+		// nobody proposed here — keeps the same answer it always had.
+		ok, err := s.admitsForeignSource(ctx, in.ProjectID, st.state.ID)
+		if err != nil {
+			return diff.Inputs{}, err
+		}
+		if !ok {
+			return diff.Inputs{}, fmt.Errorf("%w: source state %s does not belong to project %s and no pull request of that project proposes it", ErrValidation, st.state.ID, in.ProjectID)
 		}
 	}
 	baseSnap, err := s.readSnapshot(ctx, in.BaseStateID)
@@ -131,6 +152,21 @@ func (s *Service) readInputs(ctx context.Context, in Params) (diff.Inputs, error
 		SourceSnapshot: sourceSnap,
 		TargetSnapshot: targetSnap,
 	}, nil
+}
+
+// admitsForeignSource asks the one question that can make a source state
+// of another project readable: whether a pull request of projectID
+// proposes it. Fail closed on every input — no proposal port wired, a
+// failed read and a false answer all report the state as unreadable.
+func (s *Service) admitsForeignSource(ctx context.Context, projectID, stateID string) (bool, error) {
+	if s.proposals == nil {
+		return false, nil
+	}
+	ok, err := s.proposals.ProposesToProject(ctx, projectID, stateID)
+	if err != nil {
+		return false, fmt.Errorf("%w: read the proposal of state %s: %v", ErrStore, stateID, err)
+	}
+	return ok, nil
 }
 
 // readState resolves one state, mapping the adapter's not-found sentinel

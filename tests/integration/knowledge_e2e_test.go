@@ -192,7 +192,7 @@ func newKnowledgeE2EWorld(t *testing.T, ctx context.Context) *knowledgeE2EWorld 
 		Schemas:        reg,
 		Events:         events.Recorder{},
 	})
-	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool))
+	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool), persistence.NewPullRequestStore(pool))
 	resolutionSvc := resolutions.NewService(diffSvc, resolutions.NewPGStore(pool), projectSvc, authz.NewMatrixEngine())
 	prStore := persistence.NewPullRequestStore(pool)
 	prSvc := pullrequests.NewService(prStore)

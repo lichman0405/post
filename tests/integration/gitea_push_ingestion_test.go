@@ -892,6 +892,436 @@ func TestPushIngestionStaleDeliveryDoesNotRewindHead(t *testing.T) {
 	}
 }
 
+// TestPushIngestionReusesAStateOnASecondBranch pins the push path's
+// documented REUSE semantics — the same commit on another branch of the
+// project reuses the state row (see the contract on
+// gitprovider.PGPushIngestStore.IngestPush) — which the fork import's own
+// stricter rule must not touch. The shape is the one `git push origin
+// main:<branch>` produces: a commit that is ALREADY a state of the project
+// arrives as the head of a delivery to a SECOND branch. Both variants are
+// exercised:
+//
+//   - a creation delivery (before = zeros, the new ref's first push), and
+//   - a fast-forward delivery (before = the branch's previous head) whose
+//     head commit is likewise already a state of the first branch.
+//
+// In both, the delivery must SUCCEED in full (ingestion row recorded, no
+// head_skip_reason, head pointer advanced) and the state row must be REUSED:
+// exactly one row for the commit, the id the first branch recorded, still
+// owned by that branch — a second row, an error, or a lost advance all fail
+// the test. This is the regression pin for the owner check the fork import
+// needs: applied to every delivery, it would refuse this push.
+//
+// Pure database: the reuse is a store fact, no provider needed.
+func TestPushIngestionReusesAStateOnASecondBranch(t *testing.T) {
+	ctx := testCtx(t)
+	pool, _ := testdb.Setup(t, ctx, adminURL(t), pushIngestionTaskID)
+
+	user, err := persistence.NewCredentialStore(pool).CreateWithPassword(
+		ctx, "shared-state@example.com", "hash", "shared-state", "Shared State")
+	if err != nil {
+		t.Fatalf("gitea integration: seed user: %v", err)
+	}
+	project, _, err := persistence.NewProjectStore(pool).CreateProject(ctx, domain.Project{
+		Slug:            "shared-state",
+		Name:            "Shared State",
+		Purpose:         "T0305 reuse regression",
+		Visibility:      domain.VisibilityPrivate,
+		ProvisionStatus: domain.ProvisionPending,
+	}, user.ID)
+	if err != nil {
+		t.Fatalf("gitea integration: create project: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO git_repository_provisions
+		(project_id, owner, name, gitea_repo_id, webhook_id, webhook_secret)
+		VALUES ($1, 'post-git-svc', 'shared-state-repo', 63, 1, 'secret')`,
+		project.ID); err != nil {
+		t.Fatalf("gitea integration: insert provision row: %v", err)
+	}
+	forkSHA := strings.Repeat("3", 40)
+	var forkStateID string
+	if err := pool.QueryRow(ctx, `INSERT INTO project_states
+		(project_id, state_hash, manifest_version, git_commit_sha)
+		VALUES ($1, $2, 'v1', $3) RETURNING id`,
+		project.ID, gitprovider.GitStateHash(forkSHA), forkSHA).Scan(&forkStateID); err != nil {
+		t.Fatalf("gitea integration: insert base state: %v", err)
+	}
+	branchSvc := branches.NewService(persistence.NewBranchStore(pool))
+	first, err := branchSvc.Create(ctx, branches.CreateBranchParams{
+		ProjectID:   project.ID,
+		Name:        "semantic",
+		Visibility:  domain.BranchVisibilityPrivate,
+		BaseStateID: forkStateID,
+		CreatedBy:   user.ID,
+	})
+	if err != nil {
+		t.Fatalf("gitea integration: create the first branch: %v", err)
+	}
+	second, err := branchSvc.Create(ctx, branches.CreateBranchParams{
+		ProjectID:   project.ID,
+		Name:        "release",
+		Visibility:  domain.BranchVisibilityPrivate,
+		BaseStateID: forkStateID,
+		CreatedBy:   user.ID,
+	})
+	if err != nil {
+		t.Fatalf("gitea integration: create the second branch: %v", err)
+	}
+	// The second branch's ref is unborn: a creation delivery is the shape its
+	// first push takes (`git push origin main:release`), and the pointer
+	// advances from NULL.
+	var secondHead *string
+	if err := pool.QueryRow(ctx, `SELECT head_sha FROM git_branch_refs WHERE branch_id = $1`,
+		second.ID).Scan(&secondHead); err != nil {
+		t.Fatalf("gitea integration: read the second branch's refs row: %v", err)
+	}
+	if secondHead != nil {
+		t.Fatalf("gitea integration: the second branch's ref starts at %q, want unborn (head_sha NULL)", *secondHead)
+	}
+	// The first branch starts where the fork did (the syncer's arrival), so
+	// its pushes fast-forward from there.
+	shaA := strings.Repeat("d", 40)
+	shaB := strings.Repeat("e", 40)
+	if _, err := pool.Exec(ctx, `UPDATE git_branch_refs
+		SET sync_state = 'synced', fork_sha = $1, head_sha = $1, synced_at = now()
+		WHERE branch_id = $2`, forkSHA, first.ID); err != nil {
+		t.Fatalf("gitea integration: sync the first branch's refs row: %v", err)
+	}
+
+	store := gitprovider.NewPushIngestStore(pool)
+	event := func(ref, before, after, delivery string) gitprovider.PushEvent {
+		return gitprovider.PushEvent{
+			Ref:          ref,
+			Before:       before,
+			After:        after,
+			RepositoryID: 63,
+			Owner:        "post-git-svc",
+			Name:         "shared-state-repo",
+			Pusher:       "post-git-svc",
+			TotalCommits: 1,
+			DeliveryID:   delivery,
+		}
+	}
+	ingest := func(ev gitprovider.PushEvent, changes []gitprovider.ClassifiedChange) bool {
+		t.Helper()
+		inserted, err := store.IngestPush(ctx, gitprovider.IngestPushParams{Event: ev, Changes: changes})
+		if err != nil {
+			t.Fatalf("gitea integration: IngestPush(%s on %s): %v", ev.DeliveryID, ev.Ref, err)
+		}
+		return inserted
+	}
+	headOf := func(branchID string) string {
+		t.Helper()
+		var head string
+		if err := pool.QueryRow(ctx, `SELECT COALESCE(head_sha, '')
+			FROM git_branch_refs WHERE branch_id = $1`, branchID).Scan(&head); err != nil {
+			t.Fatalf("gitea integration: probe head of %s: %v", branchID, err)
+		}
+		return head
+	}
+	// stateRowOf reads the ONE state row of a commit: its id, the branch that
+	// owns it, and how many rows the commit has (a reuse writes none).
+	stateRowOf := func(sha string) (id, owner string, count int) {
+		t.Helper()
+		var ownerID *string
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM project_states
+			WHERE project_id = $1 AND git_commit_sha = $2`, project.ID, sha).Scan(&count); err != nil {
+			t.Fatalf("gitea integration: count the states of %s: %v", sha, err)
+		}
+		if count != 1 {
+			return "", "", count
+		}
+		if err := pool.QueryRow(ctx, `SELECT id::text, branch_id::text FROM project_states
+			WHERE project_id = $1 AND git_commit_sha = $2`, project.ID, sha).Scan(&id, &ownerID); err != nil {
+			t.Fatalf("gitea integration: read the state of %s: %v", sha, err)
+		}
+		if ownerID != nil {
+			owner = *ownerID
+		}
+		return id, owner, count
+	}
+	skipReasonOf := func(ref, sha string) *string {
+		t.Helper()
+		var reason *string
+		if err := pool.QueryRow(ctx, `SELECT head_skip_reason FROM git_push_ingestions
+			WHERE gitea_repo_id = 63 AND git_ref = $1 AND after_sha = $2`, ref, sha).Scan(&reason); err != nil {
+			t.Fatalf("gitea integration: read the ingestion row of %s on %s: %v", sha, ref, err)
+		}
+		return reason
+	}
+
+	// ---- The first branch records both commits as states of its own chain.
+	for _, push := range []struct{ before, after, delivery string }{
+		{forkSHA, shaA, "d-first-a"},
+		{shaA, shaB, "d-first-b"},
+	} {
+		if !ingest(event("refs/heads/semantic", push.before, push.after, push.delivery),
+			[]gitprovider.ClassifiedChange{
+				{Path: push.after[:4] + ".txt", Kind: gitprovider.ChangeAdded, File: gitprovider.FileKindUnstructured},
+			}) {
+			t.Fatalf("gitea integration: %s was not inserted", push.delivery)
+		}
+	}
+	stateAID, stateAOwner, nA := stateRowOf(shaA)
+	stateBID, _, nB := stateRowOf(shaB)
+	if nA != 1 || nB != 1 {
+		t.Fatalf("gitea integration: the fixture's commits hold %d/%d state rows, want 1 each", nA, nB)
+	}
+	if stateAOwner != first.ID {
+		t.Fatalf("gitea integration: the fixture's state A belongs to branch %s, want the first branch %s", stateAOwner, first.ID)
+	}
+
+	// ---- (a) `git push origin main:release`: a CREATION delivery whose head
+	// is already a state of the project (the first branch recorded it). The
+	// delivery must succeed in full and REUSE the row.
+	if !ingest(event("refs/heads/release", strings.Repeat("0", 40), shaA, "d-second-create"),
+		[]gitprovider.ClassifiedChange{
+			{Path: "copied.txt", Kind: gitprovider.ChangeAdded, File: gitprovider.FileKindUnstructured},
+		}) {
+		t.Fatal("gitea integration: the second branch's creation delivery was not inserted")
+	}
+	if reason := skipReasonOf("refs/heads/release", shaA); reason != nil {
+		t.Errorf("gitea integration: the creation delivery's head advance was refused (%q), want it advanced", *reason)
+	}
+	if head := headOf(second.ID); head != shaA {
+		t.Errorf("gitea integration: the second branch's head = %q, want the pushed %s", head, shaA)
+	}
+	reusedID, reusedOwner, reusedCount := stateRowOf(shaA)
+	if reusedCount != 1 {
+		t.Fatalf("gitea integration: the commit now holds %d state rows, want the existing one REUSED", reusedCount)
+	}
+	if reusedID != stateAID {
+		t.Errorf("gitea integration: the reused state's id = %s, want the first branch's row %s", reusedID, stateAID)
+	}
+	if reusedOwner != first.ID {
+		t.Errorf("gitea integration: the reused state now belongs to branch %s, want it left with %s", reusedOwner, first.ID)
+	}
+	var parents int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM project_states
+		WHERE project_id = $1 AND parent_state_id = $2`, project.ID, stateAID).Scan(&parents); err != nil {
+		t.Fatalf("gitea integration: count the children of state A: %v", err)
+	}
+	if parents != 1 {
+		t.Errorf("gitea integration: the reused state has %d children, want the one the first branch's chain made", parents)
+	}
+
+	// ---- (b) The fast-forward variant: the second branch advances to a
+	// commit the first branch already recorded.
+	if !ingest(event("refs/heads/release", shaA, shaB, "d-second-ff"),
+		[]gitprovider.ClassifiedChange{
+			{Path: "forward.txt", Kind: gitprovider.ChangeAdded, File: gitprovider.FileKindUnstructured},
+		}) {
+		t.Fatal("gitea integration: the second branch's fast-forward delivery was not inserted")
+	}
+	if reason := skipReasonOf("refs/heads/release", shaB); reason != nil {
+		t.Errorf("gitea integration: the fast-forward's head advance was refused (%q), want it advanced", *reason)
+	}
+	if head := headOf(second.ID); head != shaB {
+		t.Errorf("gitea integration: the second branch's head = %q, want the pushed %s", head, shaB)
+	}
+	ffID, ffOwner, ffCount := stateRowOf(shaB)
+	if ffCount != 1 || ffID != stateBID || ffOwner != first.ID {
+		t.Errorf("gitea integration: the fast-forward's state = %s owned by %s in %d row(s), want the first branch's %s owned by %s in 1",
+			ffID, ffOwner, ffCount, stateBID, first.ID)
+	}
+
+	// ---- Both deliveries are recorded facts of their own (an ingestion row
+	// per delivery, the second branch's two rows included).
+	var rows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM git_push_ingestions
+		WHERE gitea_repo_id = 63 AND git_ref = 'refs/heads/release'`).Scan(&rows); err != nil {
+		t.Fatalf("gitea integration: count the second branch's ingestions: %v", err)
+	}
+	if rows != 2 {
+		t.Errorf("gitea integration: the second branch holds %d ingestion row(s), want 2", rows)
+	}
+}
+
+// TestForkImportRefusesAStateOwnedByAnotherBranch pins the rule the fork
+// import needs and the generic push path must NOT have: an import LANDS its
+// branch on the copied content (it moves the branch's head to the state and
+// writes the commit naming it), so it may only use a state row of its own
+// branch. A copied commit that is already a state of ANOTHER branch of the
+// project is refused — the delivery rolls back whole (no ingestion row, no
+// change rows, no head move, no commit), because a transition that chained
+// this branch to a state of a foreign chain would describe a history that
+// never happened.
+//
+// The contrast with TestPushIngestionReusesAStateOnASecondBranch is the
+// point of both tests: the same commit arriving as an ordinary push is
+// REUSED (that is the push path's documented contract), and it is only the
+// import — the caller that must own the row it lands on — that refuses it.
+//
+// Pure database: the rule is a store fact, no provider needed.
+func TestForkImportRefusesAStateOwnedByAnotherBranch(t *testing.T) {
+	ctx := testCtx(t)
+	pool, _ := testdb.Setup(t, ctx, adminURL(t), pushIngestionTaskID)
+
+	user, err := persistence.NewCredentialStore(pool).CreateWithPassword(
+		ctx, "import-owner@example.com", "hash", "import-owner", "Import Owner")
+	if err != nil {
+		t.Fatalf("gitea integration: seed user: %v", err)
+	}
+	project, _, err := persistence.NewProjectStore(pool).CreateProject(ctx, domain.Project{
+		Slug:            "import-owner",
+		Name:            "Import Owner",
+		Purpose:         "T0817 fork import regression",
+		Visibility:      domain.VisibilityPrivate,
+		ProvisionStatus: domain.ProvisionPending,
+	}, user.ID)
+	if err != nil {
+		t.Fatalf("gitea integration: create project: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO git_repository_provisions
+		(project_id, owner, name, gitea_repo_id, webhook_id, webhook_secret)
+		VALUES ($1, 'post-git-svc', 'import-owner-repo', 71, 1, 'secret')`,
+		project.ID); err != nil {
+		t.Fatalf("gitea integration: insert provision row: %v", err)
+	}
+	forkSHA := strings.Repeat("4", 40)
+	var forkStateID string
+	if err := pool.QueryRow(ctx, `INSERT INTO project_states
+		(project_id, state_hash, manifest_version, git_commit_sha)
+		VALUES ($1, $2, 'v1', $3) RETURNING id`,
+		project.ID, gitprovider.GitStateHash(forkSHA), forkSHA).Scan(&forkStateID); err != nil {
+		t.Fatalf("gitea integration: insert base state: %v", err)
+	}
+	branchSvc := branches.NewService(persistence.NewBranchStore(pool))
+	upstream, err := branchSvc.Create(ctx, branches.CreateBranchParams{
+		ProjectID:   project.ID,
+		Name:        "upstream",
+		Visibility:  domain.BranchVisibilityPrivate,
+		BaseStateID: forkStateID,
+		CreatedBy:   user.ID,
+	})
+	if err != nil {
+		t.Fatalf("gitea integration: create the first branch: %v", err)
+	}
+	copied, err := branchSvc.Create(ctx, branches.CreateBranchParams{
+		ProjectID:   project.ID,
+		Name:        "copied",
+		Visibility:  domain.BranchVisibilityPrivate,
+		BaseStateID: forkStateID,
+		CreatedBy:   user.ID,
+	})
+	if err != nil {
+		t.Fatalf("gitea integration: create the second branch: %v", err)
+	}
+	shaX := strings.Repeat("f", 40)
+	if _, err := pool.Exec(ctx, `UPDATE git_branch_refs
+		SET sync_state = 'synced', fork_sha = $1, head_sha = $1, synced_at = now()
+		WHERE branch_id = $2`, forkSHA, upstream.ID); err != nil {
+		t.Fatalf("gitea integration: sync the first branch's refs row: %v", err)
+	}
+
+	store := gitprovider.NewPushIngestStore(pool)
+	// The first branch records the commit as a state of its chain.
+	if _, err := store.IngestPush(ctx, gitprovider.IngestPushParams{
+		Event: gitprovider.PushEvent{
+			Ref: "refs/heads/upstream", Before: forkSHA, After: shaX,
+			RepositoryID: 71, Owner: "post-git-svc", Name: "import-owner-repo",
+			Pusher: "post-git-svc", TotalCommits: 1, DeliveryID: "d-upstream-x",
+		},
+		Changes: []gitprovider.ClassifiedChange{
+			{Path: "x.txt", Kind: gitprovider.ChangeAdded, File: gitprovider.FileKindUnstructured},
+		},
+	}); err != nil {
+		t.Fatalf("gitea integration: the first branch's push: %v", err)
+	}
+	var ownerID, ownerBranch string
+	if err := pool.QueryRow(ctx, `SELECT id::text, branch_id::text FROM project_states
+		WHERE project_id = $1 AND git_commit_sha = $2`, project.ID, shaX).Scan(&ownerID, &ownerBranch); err != nil {
+		t.Fatalf("gitea integration: read the recorded state: %v", err)
+	}
+	if ownerBranch != upstream.ID {
+		t.Fatalf("gitea integration: the fixture's state belongs to branch %s, want %s", ownerBranch, upstream.ID)
+	}
+
+	// The IMPORT of the same commit onto the second branch. It must be
+	// refused, and it must leave nothing behind.
+	_, err = store.IngestPush(ctx, gitprovider.IngestPushParams{
+		Event: gitprovider.PushEvent{
+			Ref: "refs/heads/copied", Before: gitprovider.ZerosSHA, After: shaX,
+			RepositoryID: 71, Owner: "post-git-svc", Name: "import-owner-repo",
+			Pusher: "post-git-svc", TotalCommits: 1, DeliveryID: "d-import-x",
+		},
+		Changes: []gitprovider.ClassifiedChange{
+			{Path: "x.txt", Kind: gitprovider.ChangeAdded, File: gitprovider.FileKindUnstructured},
+		},
+		ForkImport: &gitprovider.ForkImportTransition{
+			ActorID: user.ID,
+			Message: "import the parent line into the fork",
+		},
+	})
+	if err == nil {
+		t.Fatal("the fork import landed a state row owned by another branch")
+	}
+	if !strings.Contains(err.Error(), "already the state of another branch") {
+		t.Errorf("the import's refusal = %v, want the ownership rule's own error", err)
+	}
+
+	// Nothing of the refused delivery was written: the transaction rolled
+	// back whole.
+	var ingestions, changes, commits, owned int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM git_push_ingestions
+		WHERE gitea_repo_id = 71 AND delivery_id = 'd-import-x'`).Scan(&ingestions); err != nil {
+		t.Fatalf("gitea integration: count the refused delivery's ingestions: %v", err)
+	}
+	if ingestions != 0 {
+		t.Errorf("the refused import left %d ingestion row(s)", ingestions)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM git_push_changes c
+		JOIN git_push_ingestions i ON i.id = c.ingestion_id
+		WHERE i.gitea_repo_id = 71`).Scan(&changes); err != nil {
+		t.Fatalf("gitea integration: count the change rows: %v", err)
+	}
+	if changes != 1 {
+		t.Errorf("the project holds %d change row(s), want only the first push's one", changes)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM state_commits
+		WHERE branch_id = $1`, copied.ID).Scan(&commits); err != nil {
+		t.Fatalf("gitea integration: count the second branch's commits: %v", err)
+	}
+	if commits != 0 {
+		t.Errorf("the refused import wrote %d state commit(s) on the second branch", commits)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM project_states
+		WHERE branch_id = $1`, copied.ID).Scan(&owned); err != nil {
+		t.Fatalf("gitea integration: count the second branch's states: %v", err)
+	}
+	if owned != 0 {
+		t.Errorf("the refused import left %d state row(s) on the second branch, want none", owned)
+	}
+	var head *string
+	if err := pool.QueryRow(ctx, `SELECT head_sha FROM git_branch_refs WHERE branch_id = $1`,
+		copied.ID).Scan(&head); err != nil {
+		t.Fatalf("gitea integration: read the second branch's head: %v", err)
+	}
+	if head != nil {
+		t.Errorf("the refused import moved the second branch's head to %q, want it unborn", *head)
+	}
+	// The refused delivery changed nothing on the branch that owns the
+	// state either: its head is still the pushed commit and its row is
+	// still the one the fixture recorded (an ordinary push writes no state
+	// commit — that is the import's rule, not the push path's).
+	var upstreamHead string
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(head_sha, '') FROM git_branch_refs
+		WHERE branch_id = $1`, upstream.ID).Scan(&upstreamHead); err != nil {
+		t.Fatalf("gitea integration: read the first branch's head: %v", err)
+	}
+	if upstreamHead != shaX {
+		t.Errorf("the first branch's head = %q, want its own pushed %s", upstreamHead, shaX)
+	}
+	var stillOwned int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM project_states
+		WHERE id = $1 AND branch_id = $2`, ownerID, upstream.ID).Scan(&stillOwned); err != nil {
+		t.Fatalf("gitea integration: re-read the owner of the state: %v", err)
+	}
+	if stillOwned != 1 {
+		t.Error("the refused import took the state row away from the branch that recorded it")
+	}
+}
+
 // TestPushIngestionStaleCreationPushCannotRewindHead is the regression test
 // for the guarded CREATION path, at the store boundary. The exact 5-step
 // shape the guard exists for:

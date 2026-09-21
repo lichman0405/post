@@ -174,8 +174,20 @@ type branchBoundaries struct {
 // head (a branch that has no states of its own has never moved, so its
 // head is the only state a pin may name for it). The target and source
 // resolutions stay in separate sets. A candidate is accepted only when it
-// exists and belongs to the PR's project — anything else is left out and
-// the engine's provenance checks fail on it.
+// exists and belongs to the project of the chain it is a boundary OF —
+// anything else is left out and the engine's provenance checks fail on it.
+//
+// That project is per side, and it is read rather than assumed (ADR-025):
+// the TARGET branch is the PR's own (the proposal's target is the branch
+// its project advances), while the SOURCE branch may live in the
+// contributor's fork, so its chain's boundary is a state of the fork's
+// project. Judging the source boundary against the PR's project would drop
+// exactly the boundary an external proposal has — the fork project's root
+// state that the fork branch was created from — and the source chain would
+// then be reported as broken (or, before the copied state is chained at
+// all, as having two heads). The rule is the same one every other
+// cross-project read in this build applies: ask which project the row
+// belongs to.
 func (s *Service) resolveBoundaries(ctx context.Context, pr domain.PullRequest, targetStates, sourceStates []domain.ProjectState) (branchBoundaries, error) {
 	// Each side collects its own candidates first: the same state may
 	// legitimately be a boundary for both chains (a source branch forked
@@ -211,36 +223,63 @@ func (s *Service) resolveBoundaries(ctx context.Context, pr domain.PullRequest, 
 	} else if parent := chainRoot(sourceStates).ParentStateID; parent != nil {
 		sourceCandidates[*parent] = true
 	}
-	// Resolve each candidate once: it counts only when it exists and
-	// belongs to the PR's project — anything else is left out and the
-	// engine's provenance checks fail on it.
-	valid := make(map[string]bool, len(targetCandidates)+len(sourceCandidates))
-	for id := range targetCandidates {
-		ok, err := s.validBoundary(ctx, pr.ProjectID, id)
-		if err != nil {
-			return branchBoundaries{}, err
-		}
-		valid[id] = ok
-	}
-	for id := range sourceCandidates {
-		ok, err := s.validBoundary(ctx, pr.ProjectID, id)
-		if err != nil {
-			return branchBoundaries{}, err
-		}
-		valid[id] = ok
+	// Resolve each candidate once PER SIDE: it counts only when it exists
+	// and belongs to the project of the chain it is the boundary of —
+	// anything else is left out and the engine's provenance checks fail on
+	// it. The per-side resolution is not a detail: a state can be a
+	// boundary of one chain and not of the other (the two sides may live in
+	// different projects, ADR-025), so one shared verdict per id would let
+	// the second side's answer overwrite the first's — accepting a boundary
+	// for the chain that does not own it, or dropping one from the chain
+	// that does.
+	sourceProjectID, err := s.sourceProject(ctx, pr)
+	if err != nil {
+		return branchBoundaries{}, err
 	}
 	out := branchBoundaries{target: map[string]bool{}, source: map[string]bool{}}
 	for id := range targetCandidates {
-		if valid[id] {
+		ok, err := s.validBoundary(ctx, pr.ProjectID, id)
+		if err != nil {
+			return branchBoundaries{}, err
+		}
+		if ok {
 			out.target[id] = true
 		}
 	}
 	for id := range sourceCandidates {
-		if valid[id] {
+		ok, err := s.validBoundary(ctx, sourceProjectID, id)
+		if err != nil {
+			return branchBoundaries{}, err
+		}
+		if ok {
 			out.source[id] = true
 		}
 	}
 	return out, nil
+}
+
+// sourceProject resolves the project the PR's SOURCE branch belongs to — the
+// side a source chain's boundary is judged in (ADR-025). The branch row is
+// the answer, read by the branch's own id; the PR's project is never
+// substituted for it, because assuming the side is exactly the reading this
+// task removes.
+//
+// An unknown source branch answers the PR's project, which decides nothing:
+// a branch that cannot be read has no chain and no head, so
+// resolveBoundaries produces no candidate for it at all (emptyChainBoundary
+// answers "" for the same reason) and the value is never consulted. Any
+// other read failure is a store error and is reported as one — an
+// unreadable database must not be reported as a blocked proposal.
+func (s *Service) sourceProject(ctx context.Context, pr domain.PullRequest) (string, error) {
+	projectID, err := s.branches.GetBranchProject(ctx, pr.SourceBranchID)
+	switch {
+	case err == nil:
+		return projectID, nil
+	case errors.Is(err, branches.ErrBranchNotFound):
+		return pr.ProjectID, nil
+	default:
+		return "", WrapStoreError(err)
+	}
 }
 
 // emptyChainBoundary resolves the boundary of a branch that has no states

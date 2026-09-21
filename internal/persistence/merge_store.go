@@ -85,6 +85,26 @@ func (s *SemanticMergeStore) GetBranch(ctx context.Context, projectID, branchID 
 	return branchFromRow(row), nil
 }
 
+// GetBranchByID implements merge.StorePort: one branch by its own id, the
+// row's project included. It is the merge's SOURCE-side read (T0817) — a
+// proposal's source branch may live in the contributor's fork project, so
+// the project is read out of the row rather than named by the caller. The
+// service judges the project the row reports; this adapter only reports it.
+func (s *SemanticMergeStore) GetBranchByID(ctx context.Context, branchID string) (domain.Branch, error) {
+	branchUUID, err := textUUID(branchID)
+	if err != nil {
+		return domain.Branch{}, merge.ErrBranchNotFound
+	}
+	row, err := sqlc.New(s.pool).GetBranchByID(ctx, branchUUID)
+	if errors.Is(err, pgx.ErrNoRows) || isInvalidText(err) {
+		return domain.Branch{}, merge.ErrBranchNotFound
+	}
+	if err != nil {
+		return domain.Branch{}, fmt.Errorf("persistence: get branch by id for merge: %w", err)
+	}
+	return branchFromRow(row), nil
+}
+
 // VersionHeads implements merge.StorePort: the current version counters of
 // the containers the plan will append to. This is the OPTIMISTIC prediction
 // read — it takes no lock, and the write transaction re-reads the same
@@ -187,25 +207,44 @@ func readVersionHeads(ctx context.Context, q querier, objectIDs, relationIDs []s
 //
 // The branches are locked in ascending id order so two merges over the same
 // pair cannot deadlock.
+//
+// Each branch is locked under ITS OWN project (T0817): the target under the
+// PR's project, the source under the project its row belongs to, which the
+// service read from the branch itself. Locking both under the PR's project
+// is what the cross-project source used to trip over — the source of an
+// external proposal is not a row of that project, so the lock found nothing
+// while the merge was legitimate. Scoping each side to the project its
+// caller named keeps the other direction honest too: a caller whose belief
+// about a side is wrong locks nothing and hears not-found.
 func (s *SemanticMergeStore) LockMergeScope(ctx context.Context, tx states.Transaction, in merge.LockScopeParams) (merge.MergeScope, error) {
 	projectUUID, err := textUUID(in.ProjectID)
 	if err != nil {
 		return merge.MergeScope{}, merge.ErrValidation
 	}
+	sourceProjectUUID, err := textUUID(in.SourceProjectID)
+	if err != nil {
+		return merge.MergeScope{}, merge.ErrBranchNotFound
+	}
 	q := sqlc.New(tx)
-	sourceID, targetID := in.SourceBranchID, in.TargetBranchID
-	if targetID < sourceID {
-		sourceID, targetID = targetID, sourceID
+	sides := []struct {
+		projectID pgtype.UUID
+		branchID  string
+	}{
+		{projectID: sourceProjectUUID, branchID: in.SourceBranchID},
+		{projectID: projectUUID, branchID: in.TargetBranchID},
+	}
+	if sides[1].branchID < sides[0].branchID {
+		sides[0], sides[1] = sides[1], sides[0]
 	}
 	locked := make(map[string]domain.Branch, 2)
-	for _, id := range []string{sourceID, targetID} {
-		branchUUID, err := textUUID(id)
+	for _, side := range sides {
+		branchUUID, err := textUUID(side.branchID)
 		if err != nil {
 			return merge.MergeScope{}, merge.ErrBranchNotFound
 		}
 		row, err := q.GetBranchByProjectAndIDForUpdate(ctx, sqlc.GetBranchByProjectAndIDForUpdateParams{
 			ID:        branchUUID,
-			ProjectID: projectUUID,
+			ProjectID: side.projectID,
 		})
 		if errors.Is(err, pgx.ErrNoRows) || isInvalidText(err) {
 			return merge.MergeScope{}, merge.ErrBranchNotFound
@@ -213,7 +252,7 @@ func (s *SemanticMergeStore) LockMergeScope(ctx context.Context, tx states.Trans
 		if err != nil {
 			return merge.MergeScope{}, fmt.Errorf("persistence: lock branch for merge: %w", err)
 		}
-		locked[id] = branchFromRow(row)
+		locked[side.branchID] = branchFromRow(row)
 	}
 	pr, err := q.GetPullRequestByProjectAndNumberForUpdate(ctx, sqlc.GetPullRequestByProjectAndNumberForUpdateParams{
 		ProjectID: projectUUID,

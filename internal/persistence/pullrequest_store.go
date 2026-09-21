@@ -46,6 +46,41 @@ func NewPullRequestStore(pool *pgxpool.Pool) *PullRequestStore {
 	return &PullRequestStore{pool: pool}
 }
 
+// ProposesToProject implements diffs.ProposalPort (T0817): whether a pull
+// request of projectID proposes stateID as its head. It is the read the
+// three-way diff makes about the ONE side of its triple that may live in
+// another project — the external fork's source state (docs/04 §2).
+//
+// The question is deliberately about the proposal and not about fork
+// lineage: what the diff needs is a bound on what a foreign source state
+// may expose, and "this project's own pull request proposes it" is
+// exactly the set of foreign states the project is already shown. A state
+// no proposal names — including one of a fork this project never saw a
+// proposal from — answers false, and the diff then refuses it as the
+// foreign state it always refused.
+//
+// Every id that cannot name a row answers false rather than failing: the
+// caller is asking a closed question about stored content, and "no such
+// proposal" is the answer that keeps the diff's membership check intact.
+func (s *PullRequestStore) ProposesToProject(ctx context.Context, projectID, stateID string) (bool, error) {
+	projectUUID, err := textUUID(projectID)
+	if err != nil {
+		return false, nil
+	}
+	stateUUID, err := textUUID(stateID)
+	if err != nil {
+		return false, nil
+	}
+	var proposed bool
+	err = s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pull_requests WHERE project_id = $1 AND proposed_state_id = $2)`,
+		projectUUID, stateUUID).Scan(&proposed)
+	if err != nil {
+		return false, fmt.Errorf("persistence: read proposal of state: %w", err)
+	}
+	return proposed, nil
+}
+
 // CreatePullRequest implements pullrequests.Repository.
 func (s *PullRequestStore) CreatePullRequest(ctx context.Context, in pullrequests.CreatePullRequestParams) (domain.PullRequest, error) {
 	projectID, err := textUUID(in.ProjectID)

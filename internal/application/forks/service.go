@@ -205,6 +205,10 @@ func (s *Service) Fork(ctx context.Context, actor domain.User, in ForkRequest) (
 		TargetProjectID: fork.ForkProjectID,
 		SourceRef:       line.GitRef,
 		TargetBranch:    forkBranch.Name,
+		// The copy lands the fork branch on the parent's content, which is
+		// a state transition of that branch — recorded in the forker's
+		// name, because the fork is this request's (T0817).
+		ActorID: actor.ID,
 	})
 	if err != nil {
 		// The lineage row stands (a fork exists); the content copy is the
