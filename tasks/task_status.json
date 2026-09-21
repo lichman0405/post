@@ -6000,11 +6000,12 @@
       ]
     },
     "T0706": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-21T03:38:38Z",
       "notes": "SPEC_BLOCKED（2026-09-16T00:14:44Z 判定，记于 T0705 合并之前）：一次「修订」在库里长什么样没有先例（追加修订行 vs 改列+写审计行）；谁有权改没有定义（权限矩阵无对应行，未登记的动作默认拒绝，internal/authz/engine.go:44）；字段是开放集合（docs/11_RELEASE_ASSET_HUB.md:21 的「等」，specs/schemas 与 packages/schemas 里都没有 schema）。\n\n---\n**已解除 SPEC_BLOCKED（2026-09-21 Supervisor 裁定）**：三个问题都有了落笔，全部写在任务包的 `supervisor_scope_narrowing` 里，是该任务契约的一部分。\n① 一次「修订」在库里长什么样 → **就地改可变列 + 与状态变更同一事务写一行 `audit_log`**（before/after 进 `before_summary`/`after_summary`，`infra/migrations/00012_events_audit.sql:52-53`），**不采用「追加一条修订行」**；依据 `docs/11_RELEASE_ASSET_HUB.md:21`——元数据可独立 revision，但**不产生新的 scientific version**，追加修订行会让两条版本流并存，正是那句不许的事。\n② 谁有权改 → 照 `internal/application/projects/settings.go:29-33` 的既有先例，用**默认拒绝的服务器端角色门**（owner/maintainer）顶着，**不往 `specs/policies/permissions-matrix.csv` 加行**；「补矩阵行」记进 RESULT 的 follow_up。\n③ 字段是开放集合 → 只做 `docs/11:21` 点名的那些；`cover` 若需要 blob 面上不存在的通道（签名 URL/TTL），照任务书点名留位，**不造上传通道**（那是 T1106 的范围）。\n上面那段原文是 2026-09-16 的判定，**保留**——它是这两笔为什么停了一周的记录。",
       "worker_run_id": "run-52187ae2192144cb",
       "accepted_by_supervisor_at": "2026-09-21T04:31:15Z",
+      "merged_at": "2026-09-21T07:47:40Z",
       "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T0706-2062282197.patch: exit status 1: error: patch failed: specs/SPEC_VERSION.json:1\n    error: specs/SPEC_VERSION.json: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n",
       "history": [
         {
@@ -6087,6 +6088,13 @@
           "to": "accepted",
           "at": "2026-09-21T04:31:15Z",
           "run_id": "run-4389010c0879e653"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-21T07:47:40Z",
+          "run_id": "run-1921bfedc4c52fe2",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -6191,12 +6199,12 @@
       ]
     },
     "T0708": {
-      "status": "accepted",
+      "status": "rejected",
       "started_at": "2026-09-21T04:40:32Z",
       "notes": "SPEC_BLOCKED（2026-09-19 立档，等 owner 一句话）：验收里那条「禁止 rights 不允许的 derive」要求平台对使用声明做允许/拒绝判定——这是权限/法律语义，按 CLAUDE.md §5 属 L3，我不自行选边。仓库自己禁止我猜：internal/rights/usage.go 包注释逐字写 \"unspecified\" is a real answer, not a missing one，并同时否定两种坍缩（collapsing the two would invent a permission nobody granted）——当 restricted 用是发明一条没人声明的禁令，当 allowed 用是发明一条没人给的许可；docs/12 §4 逐字「字段不替代法律合同」；internal/rights/doc.go 逐字 the platform records the declaration and does not judge it；非测试代码里对 usage 声明零判定先例。要问的就是：usage.derivatives 为 unspecified 时默认怎么算。它是默认值（document.go:107-121 的新文档模板即 PermissionUnspecified），所以这一句话决定该功能对绝大多数资产是否可用。ADR-023 已落（docs/adr/，不在规格指纹内）；任务包先不写——留白派工等于请工人替我猜。\n\n---\n**已解除 SPEC_BLOCKED（2026-09-21 Supervisor 裁定）**：要问的那一句话有了答案，而且是 fail-closed 的**三值三分**——`restricted` → 拒绝；`allowed` → 放行；`unspecified` → **既不拒绝也不放行**（要求请求带一条**显式确认**，确认内容与 actor 一并写进同一事务的 audit 行，没有确认就拒绝）；`rights_json` 读不出来 → 拒绝。\n依据全部来自**仓库自己写下的约束**，不是我发明的产品语义：`internal/rights/usage.go` 的包注释逐字`\"unspecified\" is a real answer, not a missing one` 且**同时否定两种坍缩**（当允许用是发明一条没人给的许可，当禁止用是发明一条没人声明的禁令）；`docs/12 §4`「字段不替代法律合同」；`assetpublish` 的 requirePolicy「an unreadable policy is not a permissive one」。\n**落在两处**：`docs/adr/ADR-023-asset-fork-derive-lineage.md` 的「usage.derivatives 的三个取值」一节（判定与理由，可复核、可推翻，代价是改一个格子），以及**任务包的 `supervisor_scope_narrowing`**（实现契约：判定写在本任务自己的命令里、用与 `assetpublish.requirePublish` **同一处**判定、不新增 action、不改权限矩阵、不改 `internal/rights/**`）。\n上面那段原文是 2026-09-19 的判定，**保留**——它记录了当时为什么不肯猜。",
       "worker_run_id": "run-92a23552ae99cb96",
       "accepted_by_supervisor_at": "2026-09-21T05:22:48Z",
-      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-171b281e82087f37-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T0708/gate-run-run-171b281e82087f37-g2.json and the step logs\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n",
+      "rejection_reason": "# T0708 基线前移 + 一处手工合成（**不是返工**）：你的活没问题，是主线在你脚下往前走了\n\n**先说性质：这次不是因为你做错了什么。** 你上一轮的交付我收下过\n（`collect` 判 ok，状态走到 `verification -> accepted`），验收证据也齐。挡住你的是一件机械的事。\n\n## 发生了什么\n\n你交付之后，主线又落了 **T0907**（Search Answer Web UI，15:37）、**T0706**（Asset Metadata\nRevision，15:47），以及一次规格修补。而你的分支在 14:50 那次合并里**带着 T0706 的提交**\n（`96ae738`）。本仓库的 PR 是 **squash 合并**的——主线拿到的是那笔任务的**内容**、**没有它的提交**——\n于是你的分支与主线相对共同祖先都动过 `specs/SPEC_VERSION.json` 与 `specs/database/postgres.sql`，\nGitHub 判本 PR 冲突。而**冲突的 PR 不产生任何 check run**：CI 永远不会到，等的是一个不会来的事件。\n\n## 修复时出现了一处真代码冲突，我按 `CLAUDE.md §1` 手工合成了\n\n仓库有正规的修复脚本 `.rddev/runtime/repair-derived-conflicts.sh`（合并 main → 只允许派生文件冲突 →\n按生成重算）。**它拒绝了**，`exit 2`，原话：\n\n    出现了派生文件之外的冲突，停下来人工处理：\n       cmd/api/assetshttp/handlers.go\n       cmd/api/assetshttp/wiring.go\n\n脚本的规矩是「真实的代码冲突要人来看，不能自动取一边」，所以这一处由我手工合成。\n\n形状是你自己在 `wiring.go` 里预言过的那一个：**T0706 与 T0708 各自往同一个文件的同三处\n（`Deps` 字段、`New` 接线、路由）加了一个受治理的写入**，git 因此把三处相邻插入全判成冲突。\n\n**判据是证明过的，不是「看起来两边都是新增」**：\n\n- `wiring.go`：从 main 到你的分支 tip 的差异是 **21 行新增、0 行删除**——纯增加；\n- `handlers.go`：3 增 2 删，删掉的两行是被你的分支重排过的注释（T0706/T0707 的提及内容仍在）。\n\n也就是说，**主线在这两个文件里没有任何你的分支缺的内容**，取分支那侧不会丢东西。\n独立复核也过了：合并后相对 main 收敛掉 15 个文件，**全部是「main 动过、你的分支没动过」的**，\n并且它们在 main 与合并后的 HEAD 上**逐字节相同**；交付面没有凭空多出文件。\n\n派生文件不按文本合并，按生成重算（`gen_schema_snapshot.py` / `spec_version.py --write` /\n`gen_sqlc.sh`，其中 sqlc 重新生成后与自动合并逐字节相同）。\n\n**合并已经提交**（`0302427`）。**不要回退它、不要 `merge --abort`、不要 reset**——\n那会把这棵树打回冲突态。交付面从 37 个文件收敛到 19 个，`tasks/**` 不在其中。\n\n## 但有一件事没有发生：没有人在这棵树上跑过任何套件\n\n它只被生成器和 git 看过。**「跑绿」必须在合成后的新树上重新成立一次，不能从旧树平移。**\n\n## 所以你要做的，就这些\n\n1. **把你这笔的验收测试在新树上重跑一遍**，输出原文贴进 RESULT：\n   `tests/integration/asset_lineage_test.go`、`tests/integration/append_only_test.go`、\n   `tests/integration/migration_test.go`、`tests/security/exits_test.go`。\n2. **专门证 `assetshttp` 那一处没被合成挤掉**：`POST /api/v1/projects/{projectId}/assets:derive`\n   （**你的**）与 `PATCH /api/v1/assets/{assetId}`（T0706 的）**两条路由都要真的在**。\n   给一条**能失败**的证据——不是念代码，而是起一个真进程，两个端点各请求一次，贴原始输出\n   （包含状态码）。顺手也要能看到 `derive.go` 与 `metadata.go` 各自注册成功。\n3. **确认 `cmd/api/main.go` 里两边都还接着**：`deriveCommand` 进了 `assetshttp.Deps`，\n   `assetmetadata.NewCommand` 也在，且都进了同一个 `assetshttp.New`。\n4. RESULT 里**明确写一行「本轮是基线前移 + 手工合成，不是返工」**，并写明新基线 sha `0302427`。\n\n## 边界（不变）\n\n- 不为让任何检查变绿而删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。\n- 这一笔**不加迁移**；`specs/database/postgres.sql`、`specs/SPEC_VERSION.json` 由生成器重算，\n  **你不要手改**。\n- 不改 `specs/**`、`docs/**`、`tasks/**`、`.github/**`。\n- **判据是树**：RESULT 里每一句自述都要能被一条断言、一次 `grep` 或一次真实请求支持。\n",
       "history": [
         {
           "from": "blocked",
@@ -6292,6 +6300,13 @@
           "to": "accepted",
           "at": "2026-09-21T05:22:48Z",
           "run_id": "run-9ff029505f69a656"
+        },
+        {
+          "from": "accepted",
+          "to": "rejected",
+          "at": "2026-09-21T07:51:30Z",
+          "run_id": "run-f7b0f2f914407411",
+          "reason": "# T0708 基线前移 + 一处手工合成（**不是返工**）：你的活没问题，是主线在你脚下往前走了\n\n**先说性质：这次不是因为你做错了什么。** 你上一轮的交付我收下过\n（`collect` 判 ok，状态走到 `verification -> accepted`），验收证据也齐。挡住你的是一件机械的事。\n\n## 发生了什么\n\n你交付之后，主线又落了 **T0907**（Search Answer Web UI，15:37）、**T0706**（Asset Metadata\nRevision，15:47），以及一次规格修补。而你的分支在 14:50 那次合并里**带着 T0706 的提交**\n（`96ae738`）。本仓库的 PR 是 **squash 合并**的——主线拿到的是那笔任务的**内容**、**没有它的提交**——\n于是你的分支与主线相对共同祖先都动过 `specs/SPEC_VERSION.json` 与 `specs/database/postgres.sql`，\nGitHub 判本 PR 冲突。而**冲突的 PR 不产生任何 check run**：CI 永远不会到，等的是一个不会来的事件。\n\n## 修复时出现了一处真代码冲突，我按 `CLAUDE.md §1` 手工合成了\n\n仓库有正规的修复脚本 `.rddev/runtime/repair-derived-conflicts.sh`（合并 main → 只允许派生文件冲突 →\n按生成重算）。**它拒绝了**，`exit 2`，原话：\n\n    出现了派生文件之外的冲突，停下来人工处理：\n       cmd/api/assetshttp/handlers.go\n       cmd/api/assetshttp/wiring.go\n\n脚本的规矩是「真实的代码冲突要人来看，不能自动取一边」，所以这一处由我手工合成。\n\n形状是你自己在 `wiring.go` 里预言过的那一个：**T0706 与 T0708 各自往同一个文件的同三处\n（`Deps` 字段、`New` 接线、路由）加了一个受治理的写入**，git 因此把三处相邻插入全判成冲突。\n\n**判据是证明过的，不是「看起来两边都是新增」**：\n\n- `wiring.go`：从 main 到你的分支 tip 的差异是 **21 行新增、0 行删除**——纯增加；\n- `handlers.go`：3 增 2 删，删掉的两行是被你的分支重排过的注释（T0706/T0707 的提及内容仍在）。\n\n也就是说，**主线在这两个文件里没有任何你的分支缺的内容**，取分支那侧不会丢东西。\n独立复核也过了：合并后相对 main 收敛掉 15 个文件，**全部是「main 动过、你的分支没动过」的**，\n并且它们在 main 与合并后的 HEAD 上**逐字节相同**；交付面没有凭空多出文件。\n\n派生文件不按文本合并，按生成重算（`gen_schema_snapshot.py` / `spec_version.py --write` /\n`gen_sqlc.sh`，其中 sqlc 重新生成后与自动合并逐字节相同）。\n\n**合并已经提交**（`0302427`）。**不要回退它、不要 `merge --abort`、不要 reset**——\n那会把这棵树打回冲突态。交付面从 37 个文件收敛到 19 个，`tasks/**` 不在其中。\n\n## 但有一件事没有发生：没有人在这棵树上跑过任何套件\n\n它只被生成器和 git 看过。**「跑绿」必须在合成后的新树上重新成立一次，不能从旧树平移。**\n\n## 所以你要做的，就这些\n\n1. **把你这笔的验收测试在新树上重跑一遍**，输出原文贴进 RESULT：\n   `tests/integration/asset_lineage_test.go`、`tests/integration/append_only_test.go`、\n   `tests/integration/migration_test.go`、`tests/security/exits_test.go`。\n2. **专门证 `assetshttp` 那一处没被合成挤掉**：`POST /api/v1/projects/{projectId}/assets:derive`\n   （**你的**）与 `PATCH /api/v1/assets/{assetId}`（T0706 的）**两条路由都要真的在**。\n   给一条**能失败**的证据——不是念代码，而是起一个真进程，两个端点各请求一次，贴原始输出\n   （包含状态码）。顺手也要能看到 `derive.go` 与 `metadata.go` 各自注册成功。\n3. **确认 `cmd/api/main.go` 里两边都还接着**：`deriveCommand` 进了 `assetshttp.Deps`，\n   `assetmetadata.NewCommand` 也在，且都进了同一个 `assetshttp.New`。\n4. RESULT 里**明确写一行「本轮是基线前移 + 手工合成，不是返工」**，并写明新基线 sha `0302427`。\n\n## 边界（不变）\n\n- 不为让任何检查变绿而删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。\n- 这一笔**不加迁移**；`specs/database/postgres.sql`、`specs/SPEC_VERSION.json` 由生成器重算，\n  **你不要手改**。\n- 不改 `specs/**`、`docs/**`、`tasks/**`、`.github/**`。\n- **判据是树**：RESULT 里每一句自述都要能被一条断言、一次 `grep` 或一次真实请求支持。\n"
         }
       ]
     },
@@ -8663,10 +8678,11 @@
       ]
     },
     "T0907": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-21T06:40:15Z",
       "worker_run_id": "run-991b46d168621285",
       "accepted_by_supervisor_at": "2026-09-21T07:24:30Z",
+      "merged_at": "2026-09-21T07:37:06Z",
       "history": [
         {
           "from": "todo",
@@ -8693,17 +8709,35 @@
           "to": "accepted",
           "at": "2026-09-21T07:24:30Z",
           "run_id": "run-6e24fd48206c25ed"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-21T07:37:06Z",
+          "run_id": "run-e094f0b00a31f27b",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T0908": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-21T07:37:10Z",
+      "worker_run_id": "run-cf4502800b4d920a",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-21T07:37:07Z",
+          "run_id": "run-1e8e849dfe9ed693"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-21T07:37:10Z",
+          "run_id": "run-cf4502800b4d920a",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T1001": {
       "status": "merged",
@@ -9552,13 +9586,24 @@
       ]
     },
     "T1101": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-21T07:38:17Z",
+      "worker_run_id": "run-90225ece13e6e60d",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-21T07:38:14Z",
+          "run_id": "run-f2b434614cf59a57"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-21T07:38:17Z",
+          "run_id": "run-90225ece13e6e60d",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T1102": {
       "status": "merged",
@@ -9773,13 +9818,24 @@
       ]
     },
     "T1108": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-21T07:39:23Z",
+      "worker_run_id": "run-ac52b694856cc222",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-21T07:39:20Z",
+          "run_id": "run-d88f1d834ad53abe"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-21T07:39:23Z",
+          "run_id": "run-ac52b694856cc222",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T1109": {
       "status": "running",

@@ -16307,9 +16307,10 @@ T1107（搜索侧信道 / 隐私负数收口）跑完自己的活后**如实报 
 | F | §⑮ 第 5/6 条 | 两处注释里的假事实：`internal/authz/action.go:39` 把 reopen 的前置状态说反（实际要求 `aborted`）、`reopens/service.go:212` 的步骤序注释与代码顺序相反 | 同上 |
 | G | §⑮ 第 3 条 | `reopens/service.go:371`：`openProposal` 因**非** `ErrIdempotencyKeyInUse` 失败时，回退的 `replayIfRecorded` 会读到自己刚提交的行，返回 201 `Replayed=true`、`PullRequestNumber=0` | 行为缺陷，非阻断但真 |
 | H | T0906 评审 3/4/5 | 待我回读 T0906 的复核 RESULT 逐条落地（含 `exitSite.Wire` 没有消费者这条测试质量问题） | 上一条链的欠账 |
+| I | 今日安全审查 → §㉑ | `apps/web/lib/search.ts:225` 的 `sourceHref` 把**任何**带 scheme 的绝对地址原样放行；收紧成只放行 `http(s)`，其余落回「无地址」那条既有分支 | 已合并代码（T0907）里的越界信任。**今天不可利用**，但那条分支**比它文档里写的意图宽** |
 
 **立账时注意两条**：
-1. **迁移号**：A/B/C/D/E/F/G/H 里只有 A 可能与 `specs/api/**` 有关、**没有一笔带迁移**，
+1. **迁移号**：A/B/C/D/E/F/G/H/I 里只有 A 可能与 `specs/api/**` 有关、**没有一笔带迁移**，
    所以不会扰动号序。真正要盯的还是 T0908=134 / T1108=135 这两个已预占的号。
 2. 立完账要**同笔**跑 `python3 scripts/spec_version.py --write` 并提交，否则 main 立刻变红。
 
@@ -16379,3 +16380,128 @@ WIP 提交做安全网 → `git merge main` → 只有一个文件真冲突 → 
 **不合并**，理由是它**不是任务 DAG 里的任何一笔**：没有任务书、没有 Worker、没有 G2/G3 记录，
 因此 `CLAUDE.md §5.1` 里「自主合并」的那几个前提**根本无法被评估**（第 1 条就要求 Worker 已交付且我完成独立 G2）。
 它不是阻塞项，留着不碍事；等它有了任务书或 owner 明确要，再走正规路。
+
+## ㉑ 安全审查提的 `sourceHref`：不是「今天能打」，是「那条分支比它自己写的意图宽」（2026-09-21）
+
+**发现**（自动化安全审查，MEDIUM）——`apps/web/lib/search.ts:225`：
+
+```ts
+// A future producer could hand back an absolute address; it is already
+// resolved and re-prefixing it would corrupt it.
+if (/^[a-z][a-z0-9+.-]*:/i.test(path)) return path;
+```
+
+这个返回值直接进 `<a href={href}>`（`search-answer.tsx:552` 取值、`:559` 落 href）。
+
+### 我核了三件事，它们决定今天到底有多大风险
+
+1. **生产者只有一家，且从不产出 scheme。** `href` 由 `internal/search/answer/locator.go` 造：
+   经 `assets.AssetAPIPath`（字面量前缀 `/api/v1/assets/`，`internal/assets/url.go:60`）
+   或字面量 `/api/v1/knowledge/`，版本参数过 `url.QueryEscape`，最后过 `hrefIfAddressable`——
+   标识段为空或含 `/?#` 就返回 `""`。**今天没有任何一条产品路径能把 scheme 送到这里。**
+2. **最顺手的那条已经被框架挡了，这条我是读源码确认的，不是凭印象。**
+   `apps/web/node_modules/react-dom/cjs/react-dom-client.development.js`：
+   `isJavaScriptProtocol`（`:27775`）连 `java\nscript:` 这种插控制字符/制表符/换行的写法都匹配，
+   `sanitizeURL`（`:3348`）把它换成
+   `javascript:throw new Error('React has blocked a javascript: URL as a security precaution.')`，
+   而该函数在**通用属性设值处**（`:23070`）生效，`href` 走的就是这条路。装着的版本是 react-dom 19.3.0。
+3. **残留风险是真的。** `data:` / `blob:` 不被 React 拦（顶层 `data:` 导航被主流浏览器拦，
+   但这不是这条分支可以依赖的理由）；更要紧的是**它信任的是 API 响应**——
+   注释自己写的就是「A future producer could hand back an absolute address」，
+   多一个生产者，这份信任就是白送的。**宽出来的部分没有任何东西需要它。**
+
+### 我把它定为 L1，不是 L3
+
+收紧成「只放行 `http(s)`」是**严格更窄**的方向：不改产品语义、权限模型、可访问性，
+也不删任何既有能力。`specs/**` 与 `docs/**` 里 **`sourceHref` 零命中**（grep 过），
+所以**没有任何规格要求这条直通**。按 §5.1「普通代码实现、bug fix 不得等待人工批准」——
+立账、派工、不停机。
+
+### 一条要照做的小规矩：不采纳审查给的写法
+
+审查建议改成 `const u = new URL(path); … return u.href;`。
+**不要**——`u.href` 会把原本逐字节返回的绝对地址**规范化**（补尾斜杠、小写主机名、百分号重编码），
+对一个今天合法的 `https://…` 而言，那是**行为变更**。
+最小改动是：`/^https?:/i` 通过则**原样返回**，否则返回 `""`（落回「无地址→渲染成文本」那条**已经存在**的分支）。
+
+### 范围：只改 `sourceHref` 一处，**不要**顺手去改别的
+
+全前端扫过一遍（`href={…}` / `src={…}` / `router.push` / `location.assign`）：
+
+- **`sourceHref` 是唯一带自定义 scheme 逻辑的地方**——它是唯一「有分支」的。
+- 其余一大批（`explore-tabs.tsx` 的 `project.url` / `asset.url` / `person.url`、
+  `asset-page.tsx` 的 `dep.url` / `edge.url` / `origin.link`、`assets-browse.tsx` 的
+  `asset.url` / `latest_url` …）**是把 API 返回的字段直接塞进 `<Link href>`**，
+  没有自己的 URL 逻辑。这是本仓库既定的形状（`lib/explore.ts`、`lib/assets.ts` 里
+  `url: string` 就是照抄 API 的 JSON）。
+
+**所以 I 的范围就是 `apps/web/lib/search.ts` 的 `sourceHref` + `apps/web/lib/search.test.mjs`，
+一个文件都不多。** 「前端整体信任 API 给的地址」是另一个层面的问题（要动就是 L2：
+要么定一条「API 返回的 url 必须由服务端保证是相对路径」的规矩并加校验，要么在前端加统一出口），
+**不在这一笔里**，别让工人顺手去改——那会把一笔 4 行的硬化变成一次没人复核的重构。
+
+**验收证据的形状**（按 §㉑ 上面那条「不许规范化」一起验）：
+既有用例（`search.test.mjs:173`，含 `https://example.test/x` **原样**通过）**必须继续绿**，
+新增 `javascript:`（大小写混写）与 `data:` 两类**必须落回 `""`**，
+且 `apiBaseUrl` 为空的边界也要有一条——因为空 base 正是「直通」和「拼前缀」两条路
+唯一会给出同样结果的场合。
+
+## ㉒ T0708 的修复里有一处**真代码冲突**：修复脚本拒绝了，我手工合成，并证明它是最小的（2026-09-21）
+
+### 形状
+
+T0706 落主线后，T0708 该修派生文件冲突。跑 `.rddev/runtime/repair-derived-conflicts.sh T0708`，
+**它按设计拒绝了**（`exit 2`）：
+
+    出现了派生文件之外的冲突，停下来人工处理：
+       cmd/api/assetshttp/handlers.go
+       cmd/api/assetshttp/wiring.go
+
+脚本的规矩是「真实的代码冲突要人来看，不能自动取一边」——这条规矩是对的，**它替我挡住了
+一次「自动取一边」的机会**。
+
+根因是 **T0706 与 T0708 各自往同一个文件的同三处**（`Deps` 字段、`New` 接线、路由）
+加了一个受治理的写入。T0708 的工人在 `wiring.go` 的注释里**自己预言过这次合并**：
+
+> T0706 and T0708 each added one governed write to the same three places in this file … Both sides are additive, which is why the resolution is "keep both" rather than a judgement.
+
+### 判据不是「看起来两边都是新增」，是量出来的
+
+按 `CLAUDE.md §1`「merge conflict 可直接处理」手工合成前，我先量了 main 到分支 tip 的差异：
+
+| 文件 | 新增 | 删除 | 结论 |
+|---|---|---|---|
+| `cmd/api/assetshttp/wiring.go` | 21 | **0** | 纯增加，取分支侧不可能丢主线的东西 |
+| `cmd/api/assetshttp/handlers.go` | 3 | 2 | 删的两行是被分支**重排过的注释**，T0706/T0707 的提及内容仍在 |
+
+即**主线在这两个文件里没有任何本分支缺的内容**，所以解得唯一：保留双方。
+
+### 第二道核对：那台仪器会说「不」
+
+修复脚本的自检本身**没法用在这一笔上**：它比较「相对 main 的代码文件集」在合并前后是否逐个相同，
+而**合并 main 本来就会让集合变小**（main 动过、分支没动过的文件，合并后两边一致了）。
+所以 `exit 3` 只说明集合变小，不说明交付面丢了。为此写了 `.rddev/runtime/verify-repair-shrink.sh`，
+判据换成正确的那个：**消失的文件里有没有本分支自己动过的**（用合并基点到合并前 tip 的差异判，
+不用 `main..tip`，那会把「main 往前走了」也算成「分支动过」）。
+
+**先证明它会说「不」，再用它的「通过」**：搭了个同形状的迷你仓库，让「本分支真交付过的文件」
+被 main 覆盖（合并时取 `--theirs`），它按预期 `exit 1` 并点名
+`✗ src/touched.txt 本分支动过，却被合并覆盖`；把解冲突方向反过来（取 `--ours`，交付被保住），
+它判 0。同一台仪器两个方向都给对。
+
+真跑 T0708：**15 个文件从差异集消失，全部是「main 动过、本分支没动过」，且在 main 与合并后
+HEAD 上逐字节相同**；交付面没有凭空多出文件。交付面 37 → **19 个文件**，`tasks/**` 不在其中。
+
+### 一条要照旧的规矩
+
+**Supervisor 有权解冲突 ≠ Supervisor 有权替工人宣布它验过。** 合出来的是一棵**没人跑过套件**的
+新树（T0907、T0706、规格修补都进来了），所以已经按 T1109 的同一形状交回工人：置 `rejected`、
+写信（`.rddev/runtime/t0708-baseline-letter.md`）要求在新树上重跑验收证据、并专门证
+`POST …/assets:derive`（T0708）与 `PATCH /api/v1/assets/{assetId}`（T0706）**两条路由都还在**。
+
+### 两条工具上的小账
+
+1. **合并提交已经落在分支上**（`0302427`），信里明确写了「不要回退它、不要 `merge --abort`」——
+   否则树会打回冲突态。
+2. 这个 shell 是 **zsh**，`${PIPESTATUS[0]}` 不生效（会打印空）；取管道里第一个命令的退出码要用
+   `$pipestatus[1]`。前面两次「退出码 =」空着就是这个原因，**不是脚本没返回**——差点据此误判。
