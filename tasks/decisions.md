@@ -17109,3 +17109,65 @@ T1206 的 requirement 1 给了 Worker 一张「有的 / 没有」的事实清单
 三面扫描**干净**是实测事实，但它**只覆盖依赖**——SAST、容器扫描、SBOM 仍缺，
 所以「Critical/High = 0」这句话今天的成立范围是**依赖面**，不是全表面。
 T1207 的剩余风险一节必须照这个范围写，不许扩写成「安全面已清」。
+
+## ㉘ 契约里有两条 blob 上传端点，而产品里**没有任何一处写得出 blob**（2026-09-21，我自己的交叉读数，不是闸门结论）
+
+### 1. 事情是怎么被看到的
+
+我为 T1205 做**独立**交叉读数（它自己的枚举器才是闸门，我这份只为验收时对得上），
+顺手往契约的另一个方向核了一遍：**契约里写了、代码里没挂**的端点。三条里两条长这样：
+
+- `POST /projects/{projectId}/branches/{branchId}/blobs:request-upload`（`specs/api/openapi.yaml:235`）
+- `POST /projects/{projectId}/branches/{branchId}/blobs/{blobId}:finalize`（`:243`）
+
+全树搜 `request-upload` / `requestUpload`：**零命中**。不是没挂路由，是**没有处理器**。
+
+### 2. 往写入侧一查，缺口比这两条端点大得多
+
+`blobs` 表在（`infra/migrations/00008_blobs.sql`），读路径在（`manifest.sql.go:23`、
+`asset_preview.sql.go:74`），sqlc 也生成了 `CreateBlob`（`blobs.sql.go:42`，`INSERT INTO blobs`）。
+**但全树找它的调用点，只有一个：`tests/integration/manifest_test.go:178`。**
+
+再把口径放宽到「任何往 `blobs` 表写行的代码」（`INSERT INTO blobs`，含手写 SQL）：
+命中的**每一条都在 `tests/integration/*_test.go` 里**——`asset_governance_test.go:163`、
+`asset_dependency_test.go:267`、`asset_page_test.go:524`、`knowledge_e2e_test.go:1410`、
+`asset_metadata_test.go:227`、`feed_test.go:367`、`asset_canonical_e2e_test.go:386`、
+`asset_preview_test.go:347/350`、`migration_test.go:2608`。
+
+**产品代码里一条都没有。**
+
+再问「那 MinIO 里的对象是谁放进去的」：全树 `PutObject` 的生产调用点只有
+`cmd/api/backupdr/`（`s3.go:222` 实现，`drill.go:603` 在 DR 演练里写回目标桶，`source.go:79` 读源）。
+那是**备份/灾备**，不是产品把内容放进 blob truth 的那条路。
+
+**所以今天的状态是**：产品里造不出 blob。表、读路径、`storage_key` 约定、发布/清单/预览
+全都在，唯独**写入口从来没有**——两个上传端点写在契约里、没写在代码里，正好是这件事的另一面。
+
+### 3. 这条为什么必须记账，以及它今天**不**阻断 V1
+
+记账的理由：这是一个**连贯**的缺口，不是零散遗漏——契约、表、读路径、测试各自的形状都对得上，
+缺的只有那一半写入侧。它不会自己冒出来，只会让**最终报告里 Gate C 的措辞**变成不实之词。
+
+**它不阻断 V1，理由是逐个核过的**：
+
+- Gate C 要的是「Release immutable、policy/schema/version/hash pinned」「Asset PID/version/lineage/
+  rights/reference/dependency/fork 工作」。这些**都在读侧与状态侧**，测试也是对**已存在的 blob 行**
+  做的（见上面那批测试）——发布、清单、血缘、权限都不需要**新建** blob。
+- Gate I（MOF 闭环）的链路是 `Q → … → release → assets → external evidence → profile credit`，
+  同样不经过「上传一个新 blob」。
+- 契约那两条端点属于「写了没做」，处理方式是**契约与实现对齐**，也就是 T1205 的收尾动作
+  （由我落笔改 `specs/api/openapi.yaml`），不是补一个上传服务。
+
+**但要写进 T1207 的剩余风险**，逐字点名：**产品的 blob 写入路径缺失**，今天的资产/发布链路
+只在**已存在的 blob 行**上被验证过，新 blob 的创建没有产品入口；
+契约里 `blobs:request-upload` / `blobs:{blobId}:finalize` 两条端点**没有实现**。
+
+### 4. 我对 T1205 的定位没变：我这份**不是**它的答案
+
+上面这些是我的交叉读数，用来在 G2 时核工人的清单**对不对得上**。
+T1205 的验收第 1 条要求**它自己的**枚举器先做变异证明它会红——我这份读数**不进任务包**，
+否则就把「工人自己造仪器」变成了「工人抄我的结论」，那正好把这条门存在的意义抹掉。
+
+（附：我这份交叉读数与 T1205 的正式清单若在**条数**上不一致，以谁的为准不由嗓门决定——
+按 AC3「清单里条数 = 比对器报出的条数，抽查任意三条能按路径在代码里找到注册点」，
+两边都要能被抽查复现；对不上就说明至少一方的枚举器漏了形式，那时再定位。）
