@@ -5353,11 +5353,12 @@
       ]
     },
     "T0610": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-21T04:04:25Z",
       "notes": "SPEC_BLOCKED（2026-09-19 从 T0602 拆出时判定）：reopen 的语义、事件名、存储状态位全都现成（docs/43:10 的状态机、docs/46:11、specs/events/event-types.yaml:23 的 scientific_object.reopened、infra/migrations/00005:20 的 CHECK 里已有 'reopened'），**只差一行权限**：specs/policies/permissions-matrix.csv 里没有 reopen 行，internal/authz/action.go 的动作总表里也没有 reopen 动作，而未登记动作在 internal/authz/engine.go 里默认拒绝。两个候选形状已写进任务书（A：与 abort_main_object 对称；B：复用 write_scientific_state，代价是 contributor 也能撤销 maintainer 的 abort）。Supervisor 倾向 A。权限属 §5 的 L3，等 owner 一句话裁定后把那一行填进 permissions-matrix.csv 再开工。",
       "worker_run_id": "run-b3e9a3878223e1ef",
       "accepted_by_supervisor_at": "2026-09-21T05:14:00Z",
+      "merged_at": "2026-09-21T06:57:09Z",
       "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-89e19c6470729abd-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T0610/gate-run-run-89e19c6470729abd-g2.json and the step logs\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n",
       "history": [
         {
@@ -5469,6 +5470,13 @@
           "to": "accepted",
           "at": "2026-09-21T05:14:00Z",
           "run_id": "run-b3737386ff8faf98"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-21T06:57:09Z",
+          "run_id": "run-872b3980d55775a8",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
