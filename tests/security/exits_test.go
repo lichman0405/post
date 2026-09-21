@@ -106,6 +106,10 @@ var registry = map[string]exitSite{
 		Sites: 1, Kind: KindInlineText, Wire: "application/json, no disposition",
 		Note: "the conflict report, written from pre-marshalled bytes so the detector's field order survives",
 	},
+	"attestationhttp/publish.go:writeAttestBlocked": {
+		Sites: 1, Kind: KindInlineText, Wire: "application/json, no disposition",
+		Note: "the attestation publish refusal (T0812) and its disclosure preview — the same document the preview route answers, so a caller can see which entry blocked it; what may appear in that preview is bounded where it is built, not here",
+	},
 
 	// ---- payload bytes that came from somewhere else ------------------
 	//

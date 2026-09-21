@@ -41,6 +41,22 @@ type AssetVersionParty struct {
 	RecordedAt     pgtype.Timestamptz `json:"recorded_at"`
 }
 
+type Attestation struct {
+	ID                      pgtype.UUID        `json:"id"`
+	Pid                     string             `json:"pid"`
+	TargetObjectVersionID   pgtype.UUID        `json:"target_object_version_id"`
+	TargetAssetVersionID    pgtype.UUID        `json:"target_asset_version_id"`
+	AttestingProjectID      pgtype.UUID        `json:"attesting_project_id"`
+	AttestingOrganizationID pgtype.UUID        `json:"attesting_organization_id"`
+	BasisStateID            pgtype.UUID        `json:"basis_state_id"`
+	InternalReviewID        pgtype.UUID        `json:"internal_review_id"`
+	ValidationType          string             `json:"validation_type"`
+	ValidationResult        string             `json:"validation_result"`
+	OrgVisibility           string             `json:"org_visibility"`
+	CreatedBy               pgtype.UUID        `json:"created_by"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+}
+
 type AuditLog struct {
 	ID             pgtype.UUID        `json:"id"`
 	ActorID        pgtype.UUID        `json:"actor_id"`
@@ -176,6 +192,8 @@ type Organization struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	// soft-delete marker: set when the organization is deactivated by its owner; NULL = active
 	DeactivatedAt pgtype.Timestamptz `json:"deactivated_at"`
+	// standing answer to "may this organization be named on an attestation it issues": anonymous (default) or named. The attestation records its own org_visibility as well; the public projection names the organization only when both say named (migration 00120, T0812)
+	AttestationAttribution string `json:"attestation_attribution"`
 }
 
 type OrganizationMembership struct {

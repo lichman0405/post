@@ -93,16 +93,33 @@ func (s *Service) List(ctx context.Context, actor domain.User) ([]domain.Organiz
 
 // Update renames the organization / rewrites its description. Owner only.
 // The slug is the organization's stable public identity and is not
-// mutable. name/description are pointers: nil means "unchanged" (PATCH
-// partial semantics — a name-only update must not wipe the description),
-// an explicit empty description clears it, an empty name is refused after
-// the merge.
-func (s *Service) Update(ctx context.Context, actor domain.User, orgID string, name, description *string) (domain.Organization, error) {
+// mutable. name/description/attestationAttribution are pointers: nil means
+// "unchanged" (PATCH partial semantics — a name-only update must not wipe
+// the description), an explicit empty description clears it, an empty name
+// is refused after the merge.
+//
+// attestationAttribution travels into the SAME store call as the two text
+// fields rather than following it, so the three edits land together or not
+// at all: they are three columns of one row, and a rename that succeeded
+// while the attribution that came with it silently did not would be a
+// settings screen that lies.
+func (s *Service) Update(ctx context.Context, actor domain.User, orgID string, name, description, attestationAttribution *string) (domain.Organization, error) {
 	if err := s.requireGovernor(ctx, actor.ID, orgID); err != nil {
 		return domain.Organization{}, err
 	}
-	if name == nil && description == nil {
-		return domain.Organization{}, fmt.Errorf("%w: at least one of name or description is required", ErrValidation)
+	if name == nil && description == nil && attestationAttribution == nil {
+		return domain.Organization{}, fmt.Errorf("%w: at least one of name, description or attestation_attribution is required", ErrValidation)
+	}
+	// The vocabulary is checked BEFORE anything is read or written: a
+	// request naming a value outside it is refused whatever the repository
+	// holds (docs/45).
+	var attributionPtr *string
+	if attestationAttribution != nil {
+		attribution := strings.TrimSpace(*attestationAttribution)
+		if !ValidAttestationAttribution(attribution) {
+			return domain.Organization{}, attributionValidationError(attribution)
+		}
+		attributionPtr = &attribution
 	}
 	current, err := s.store.GetOrganization(ctx, orgID)
 	if err != nil {
@@ -118,11 +135,27 @@ func (s *Service) Update(ctx context.Context, actor domain.User, orgID string, n
 	if !domain.ValidOrgName(next.Name) {
 		return domain.Organization{}, fmt.Errorf("%w: name is required (max 200 characters)", ErrValidation)
 	}
-	updated, err := s.store.UpdateOrganization(ctx, next)
+	updated, err := s.store.UpdateOrganization(ctx, next, attributionPtr)
 	if err != nil {
 		return domain.Organization{}, wrapStoreError(err)
 	}
 	return updated, nil
+}
+
+// AttestationAttribution reads the organization's standing answer to "may
+// this organization be named on an attestation it issues" (migration
+// 00120). Any current member may read it — it is the organization's own
+// setting, not a governance secret — and it is what the single-organization
+// read renders beside the name.
+func (s *Service) AttestationAttribution(ctx context.Context, actor domain.User, orgID string) (string, error) {
+	if _, err := s.Get(ctx, actor, orgID); err != nil {
+		return "", err
+	}
+	value, err := s.store.GetAttestationAttribution(ctx, orgID)
+	if err != nil {
+		return "", wrapStoreError(err)
+	}
+	return value, nil
 }
 
 // Deactivate soft-deletes the organization: deactivated_at is set, nothing

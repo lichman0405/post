@@ -45,6 +45,7 @@ import (
 
 	"github.com/lichman0405/post/cmd/api/aborthttp"
 	"github.com/lichman0405/post/cmd/api/assetshttp"
+	"github.com/lichman0405/post/cmd/api/attestationhttp"
 	"github.com/lichman0405/post/cmd/api/audithttp"
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/conflicthttp"
@@ -79,6 +80,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/webhookshttp"
 	"github.com/lichman0405/post/internal/application/aborts"
 	"github.com/lichman0405/post/internal/application/assetpublish"
+	"github.com/lichman0405/post/internal/application/attestations"
 	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
@@ -975,6 +977,40 @@ func run(args []string) int {
 		Evidence: persistence.NewEvidenceStore(pool),
 	})
 	knowledgeAPI.Register(v1)
+	// Private evidence / public attestation (T0812): the governance write
+	// that lets a project state, in public, that it validated a PUBLIC
+	// version somebody else's project published — "we validated this, this
+	// way, and the result was this" — without the private work underneath
+	// it coming along. docs/12 §2 逐字: "Private Project：project/RSG/private
+	// blobs 默认不可见；可显式 Publish Asset/Knowledge/Attestation", and
+	// docs/22 §28 lists create attestation among the high-risk commands.
+	//
+	// The privacy is STRUCTURAL, not a rendering rule (migration 00120):
+	// the table has no column a reasoning note, a citation or an excerpt
+	// could be written into, and the public read
+	// (ResolvePublicAttestation) has no column for the attesting project,
+	// the basis state or the internal review — so the projection cannot
+	// disclose what it was never handed. What it publishes is the
+	// attestation itself and nothing else: the attesting project's
+	// visibility, the basis state's visibility and the visibility of
+	// anything in them are all untouched (发布不等于公开, L3-20260916-1,
+	// from the other end).
+	//
+	// The matrix row is the same one the publication evaluates —
+	// publish_private_to_public — and the human backstop in front of it is
+	// the command's own: an agent may prepare an attestation and may not
+	// issue one.
+	attestationStore := persistence.NewAttestationStore(pool)
+	attestationCommand := attestations.NewCommand(attestations.Deps{
+		Members: persistence.NewProjectStore(pool),
+		Store:   attestationStore,
+		Authz:   authz.NewMatrixEngine(),
+	})
+	attestationAPI := attestationhttp.New(attestationhttp.Deps{
+		Attest: attestationCommand,
+		Read:   attestationStore,
+	})
+	attestationAPI.Register(v1)
 	// The Explore index (T0802): the six dimensions of docs/05 §6 in one
 	// anonymous read. Three of its six sections are the platform's EXISTING
 	// public reads, not new ones — the public project list, the asset hub's

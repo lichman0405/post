@@ -112,6 +112,13 @@ var appendOnlyTables = []string{
 	"asset_rights_holder_events",
 	"credit_attribution_statements",
 	"credit_attribution_parties",
+	// T0812 (00120): an attestation is a statement made in public, and it is
+	// never edited and never deleted (the requirement's "attestation !=
+	// evidence" is about what a row CARRIES, not about whether it may be
+	// rewritten). The same pair 00014/00015 installed, from the same guard
+	// function — the private-side guard below is a separate, unbypassable
+	// INSERT-time rule on top of it.
+	"attestations",
 }
 
 // targetedGuardTriggers are the NON-append-only row guards added after
@@ -248,6 +255,18 @@ var targetedGuardTriggers = map[string]string{
 	// projects into contribution_events, which is already in
 	// appendOnlyTables above.
 	"credit_disputes:credit_disputes_state_guard": ":O:23",
+	// T0812 (00120) adds the attestation's private-side guard: BEFORE INSERT
+	// OR UPDATE, FOR EACH ROW → 23. It pins, for ANY write path, the one
+	// shape this table must not be able to hold — an attestation resting on
+	// somebody else's private work: the basis state must be a state of the
+	// ATTESTING project, the cited internal review must be a review on a pull
+	// request of that project of EXACTLY that state, and the recorded
+	// organization must be the one that owns the attesting project (and must
+	// be recorded when the project belongs to one). attestations is ALSO in
+	// appendOnlyTables above, so this entry sits beside the append-only pair
+	// rather than replacing it: the pair makes the row immutable, this makes
+	// it well-founded.
+	"attestations:attestations_private_side": ":O:23",
 }
 
 // triggerRows returns every user trigger in the public schema as sorted
@@ -905,6 +924,41 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 			},
 			del: func(id string) error {
 				_, err := pool.Exec(ctx, `DELETE FROM semantic_merge_conflicts WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			// T0812 (00120). The attestation's own private side has to be
+			// built to insert one — a state of the ATTESTING project, and a
+			// review on a pull request of that project of EXACTLY that state
+			// — which is what the attestations_private_side guard requires
+			// of ANY write path. p1 belongs to organization o1, so the row
+			// must record it.
+			table: "attestations",
+			insert: func() string {
+				src := mustQueryUUID(`INSERT INTO branches (project_id, name, visibility, git_ref, created_by)
+					VALUES ($1, 'attest-source', 'private', 'refs/heads/attest-source', $2) RETURNING id`, p1, u1)
+				pr := mustQueryUUID(`INSERT INTO pull_requests
+					(project_id, number, source_branch_id, target_branch_id,
+					 base_state_id, proposed_state_id, title, state, created_by)
+					VALUES ($1, 2, $2, $3, $4, $5, 'attest a published version', 'open', $6) RETURNING id`,
+					p1, src, b1, s1, s2, u1)
+				rv := mustQueryUUID(`INSERT INTO reviews
+					(pull_request_id, reviewer_id, review_kind, decision, reviewed_state_id)
+					VALUES ($1, $2, 'scientific', 'approved', $3) RETURNING id`, pr, u1, s1)
+				return mustQueryUUID(`INSERT INTO attestations
+					(pid, target_object_version_id, attesting_project_id, attesting_organization_id,
+					 basis_state_id, internal_review_id, validation_type, validation_result,
+					 org_visibility, created_by)
+					VALUES ('01jq8zg9k0000000000000000a', $1, $2, $3, $4, $5, 'reproduction', 'confirmed', 'anonymous', $6)
+					RETURNING id`, sov2, p1, o1, s1, rv, u1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE attestations SET validation_result = 'refuted' WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM attestations WHERE id = $1`, id)
 				return err
 			},
 		},
