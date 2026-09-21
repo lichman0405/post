@@ -1,10 +1,10 @@
 {
   "algorithm": "sha256",
-  "combined_digest": "b0821485814a0180986c02bee06168a50cbf2718bb5d1bd8901d77c4f6f63507",
+  "combined_digest": "92377a1dfa87d953c07642f4b7597b04de1eae86f7f2bba939153df76e93245b",
   "files": {
     "specs/README.md": "2a0398dfb3ead0586034364d7411d845b84fd33b7c43d1ce9199d6a14ef4cf1a",
     "specs/api/openapi.yaml": "108350c3720aab57408f5a529821fa0c85e7c2ea7dcbc2ddd2ffcfa33e3697e5",
-    "specs/database/postgres.sql": "4692478d7826afe46d07745a556f770e7c1d215fcde92d50b706a3a65e1e2cc8",
+    "specs/database/postgres.sql": "fc6cf6f587738dd084e79e77601fad1e3112c37d4dcf436e94ecdac454477a8d",
     "specs/events/event-types.yaml": "5987d653a176348dd86cb6563578de8095e9f8390cca72b332f51dac5edf954c",
     "specs/mcp/tools.json": "f6b5fb023aba882a259bbe7d001bdd2755c1120f1dc768fe7512a7383fdbaca9",
     "specs/orchestrator/decision-levels.yaml": "8a06ec18b8abd79c2462e3d3bcc5b785c51a8f970c54aaa279f174882e0f5a3f",
@@ -43,5 +43,5 @@
   },
   "input_count": 38,
   "marker_format": 1,
-  "spec_version": "sha256:b0821485814a0180"
+  "spec_version": "sha256:92377a1dfa87d953"
 }
