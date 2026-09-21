@@ -15972,3 +15972,61 @@ T0812（13:54 合并）**之前**，它们的补丁里带着**自己那一版的
 
 **待办**：迁移链走完后立一张任务，收第 3、4、5 条（行为/观感）与第 2 条（测试质量），
 第 1 条（编排器 `taskWorktreeDiff` 的标签）单独记一条编排器待修。
+
+## ⑭ 迁移链第一环落地：合并动作本身是机械的，但 **sqlc 那一半是静默的**（2026-09-21）
+
+§⑫ 把这条链记成「合主线 + 重新生成两个派生文件」。T0906 落地后我按这个动作做了 T0610，
+**动作是对的，但 §⑫ 漏了一件事**，值得单独记：真正的风险不在报冲突的那两个文件上。
+
+### 报冲突的两个文件是**安全**的，正因为它们会报
+
+T0610 合 `origin/main`（899d5eb）时，冲突只有两处：
+`specs/database/postgres.sql`（两边都往快照尾部追加）与 `specs/SPEC_VERSION.json`。
+**会报冲突是好事**——它逼你停手，而正确的处理方式只有一个：
+
+```
+python3 scripts/gen_schema_snapshot.py      # 78 个迁移
+python3 scripts/spec_version.py --write     # sha256 830674ca90c2f468
+```
+
+重新生成之后 `--check` 双双通过，`git diff` 显示的内容恰好等于「本任务那一份迁移」的增量。
+
+### 静默的那一半：`internal/persistence/sqlc/**` 自动合上了，而且合错了
+
+`git merge` **没有**在这个目录上报冲突——`models.go`、`querier.go` 都是「Auto-merging」。
+单看这一步，一切正常。
+
+但 `scripts/gen_sqlc.sh` 重新生成之后：
+
+| 文件 | 与合并结果 |
+|---|---|
+| `models.go`、`querier.go` | **不一致** |
+| `attestations.sql.go`、`organizations.sql.go`、`search.sql.go` | **不一致**（重新生成把它们还原成了 main 的原文） |
+
+也就是说：**文本合并产出的那份，和生成器产出的那份，不是同一个东西，而它没有报错。**
+§⑫ 记的是「每个派生文件都会报冲突，所以链条只能串行」；这一条更正它：
+**报冲突的那个反而好办，不报冲突的这个才是坑。**
+`sqlc` 的输出是按表的字母序重排的，两边的改动只要落在同一份文件的**不同区域**，
+`git` 的逐行合并就会把两边都塞进去、语法上还是一份合法的 Go 文件、`go build` 照样过——
+**只有重新生成才知道错了。**
+
+### 判据（下一环也照这个做）
+
+重新生成之后，`git diff --stat <本分支原 tip> -- internal/persistence/sqlc` 的净变化
+**必须恰好等于本任务自己动过的那几个 sqlc 文件**，一个不多一个不少。
+T0610 是 6 个（manifest / models / querier / rsg / rsg_query / scientific_objects），
+T0706 也是 6 个（asset_governance / asset_metadata / asset_publish / models / querier / releases_assets）。
+**「多了」就是合并把别人的东西改了，「少了」就是重新生成把本任务的东西吃了**——两个方向都要看。
+
+另外两处交叉验证：`cmd/api/main.go` 合并后三方接线记号必须都在
+（T0812 的 `Aborts:`、T0610 的 `Reopens:`、T0906 的 `answer.New`/`searchhttp`），
+`tests/integration/migration_test.go` 要按**符号计数**核（`grep -ci` 比对 main 与合并后，
+`attestation` 17=17），不能只看有没有冲突。
+
+### 一个动作上的选择：链上的下一环**叠在前一环的 tip 上**
+
+T0706 我合的不是 `origin/main`，是 **T0610 的 tip（a010d09）**——迁移号 00121→00123→00125
+必须升序，所以这一格本来就得等前一格落地；提前叠上去只是把等待重叠掉。
+**它是本地提交，没推。** 若 T0610 的复核在最后一刻要求返工，这一格要重做——
+我认这个风险，因为 T0610 已经在上一轮评审里过了，而且叠上去的只是同一族机械动作。
+**但这是判断，不是规则**：换成一笔没评过的任务时，不要叠。
