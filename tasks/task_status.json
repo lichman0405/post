@@ -10082,7 +10082,7 @@
       ]
     },
     "T1109": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-21T09:34:55Z",
       "worker_run_id": "run-ea59ccf299cbe0cc",
       "rejection_reason": "# T1109 返工（第 1 次）：机器检查全过了，但第三方复核在你的代码里读出一处真缺陷\n\n**先说清楚性质。** 你这一轮把机器那几关全过了（scope、head-baseline、residue、result-tests、\nresult-tests-coverage、result-consistency）。被卡住的原因是**复核 Worker 的结论是\n`request_changes`**，带 1 条 blocking——而按规矩，没有通过的复核结论不许 merge。\n\n**那一条不是记帐问题，是代码问题。** 我逐条独立核过（不是读你的 RESULT，是读你的树），\n下面写的每一句你都能自己复算。\n\n---\n\n## 一、blocking：`method` 这个标签的值，是客户端自己挑的\n\n复核指 `internal/observability/metrics.go:141` 与 `:147`。核过了，成立：\n\n```go\nm.httpRequests = prometheus.NewCounterVec(..., []string{\"method\", \"route\", \"status\"})\nm.httpDuration = prometheus.NewHistogramVec(..., []string{\"method\", \"route\"})\n```\n\n而 `method` 的值来自 `internal/observability/middleware.go:59`：\n\n```go\nDefault().ObserveHTTP(r.Method, resolveRoute(routeCell.get(), r), status, elapsed.Seconds())\n```\n\n`r.Method` 在 Go 的 server 端**就是请求行里那个 token 本身**。`net/http` 只校验它是一个\n合法 token，不校验它是不是你知道的那几个动词。于是一个**匿名客户端**发\n`FOO /x HTTP/1.1`（换一个词一次），就在 `post_http_requests_total` 和\n`post_http_request_duration_seconds` 两个 family 上各造出一组新序列——**标签值的集合没有上界**。\n不限速、不需要登录、429 的那些请求本身也计入。这就是经典的基数爆炸：注册表只增不减，\n最终压垮 API 进程自己，并让每次 scrape 越拉越大。\n\n**最贵的一处是它同时把你自己的文档变成了假话。** 你在这批交付里反复写下相反的保证：\n\n- `metrics.go` 里那段设计说明：`...routes are Go 1.22+ ServeMux patterns (never r.URL.Path —\n  a project id in a label is unbounded cardinality and a leak of which ids exist)...\n  **No label is ever a user-supplied string.**`\n- `ops/observability/README.md:82`：`no label value is ever a user-supplied string`\n\n**你为 `route` 做对的那件事，正是你在 `method` 上漏掉的那件事。** 不是「注释写得不够准」——\n是这段注释现在会让下一个人**不去查**这条路径。本仓库最贵的一类缺陷就是「让闸门以为某件事\n被检查过，而它没有」，这条注释是同一族。\n\n### 要你做的\n\n**把 `method` 收成一个代码里写死的闭集**，其余一律落进一个桶（例如 `\"OTHER\"`）。\n具体形状你定，但必须满足：\n\n1. **闭集在代码里**，不是从请求里推算出来的；未知动词不得产生新的标签值。\n2. **有测试钉住它**，而且这条测试要能**证明自己会红**：构造一个非标准动词的请求，断言\n   标签值集合**不增长**。只断言「GET/POST 有值」是不够的——那在修复前后都是绿的。\n3. 修完之后，`metrics.go` 与 `README.md` 那两句保证**必须变成真的**。要么它们为真，\n   要么把它们改成真的表述。**不许留着假话过闸门。**\n4. **不许**用「把 `method` 标签整个删掉」来让它变绿——那会让 docs/26 要的按方法分列\n   失去能力，属于把缺陷从「漏报」换成「不报」。真做不下去，如实说，别硬凑。\n\n---\n\n## 二、major：两个 scrape target 死掉一个，你的规则看不见\n\n复核指 `ops/observability/alerts.yml:105`：\n\n```yaml\n- alert: PostMetricsEndpointMissing\n  expr: absent(post_db_up)\n```\n\n`post_db_up` 是**每个进程一条序列**。`absent()` 只在**整条指标完全消失**时才触发——也就是\n**两个 target 都没了**才响。而你自己在 `README:29-31` 里写死了：\n\n> The two processes must be scraped as two targets... A single-target scrape configuration\n> silently measures half the platform.\n\n**于是「worker 单独死掉」这个你最想看见的故障，恰恰是这套规则里最安静的。**\n更要命的是那 11 条规则里有 4 条（outbox 积压、发布失败、队列不可用、死信）**只由 worker 供给**——\nworker 一死，它们不是变红，是**没有输入**，于是安静地什么都不说。\n\n而告警自己的文案还写着 `means neither cmd/api nor cmd/worker has...`——**你写这句话的时候\n知道它只覆盖「两个都没了」，但规则集没有把「只有一个没了」补上。**\n\n### 要你做的\n\n让**「恰好一个 target 不再上报」变成可见的**。表达式你选，并写清它依赖什么假设\n（例如 job 名约定）。**如果**你核完认为在没有一份 job 命名约定的前提下它确实无法表达，\n那就**明说**：写清缺什么、补上它需要谁决定。**「做不到」是可接受的答案，「没说」不是。**\n\n这条**不许**用放宽 `for:`、放大 timeout 或删规则来敷衍。\n\n---\n\n## 三、必须改的两处事实错误（很便宜，但都是假的）\n\n1. **`ops/observability/README.md:203`（以及 RESULT 的 `acceptance[7]`）说**：silent-filter\n   那一档「没有任何状态、哪里都没计数」。**核过了，是假的**：\n   `internal/events/inbox_store.go:235` 就在数它——\n   `observability.Default().ObservePermissionDenial(\"inbox\", observability.DecisionFiltered)`。\n   把这句话改成真的。**顺带自查**：这一档还数了什么、漏了什么，照实写。\n2. **交叉引用整体对不上**。复核举了至少三处（`README:23` 指 `cmd/api/main.go:1196`，实际在\n   `:1343-1345`；`README:78`/`:203` 指 `envelope.go:40`，实际在 `:72`；指\n   `inbox_store.go:220`，实际在 `:235`）。\n   **一条一条 `grep` 复算，不要照记忆改。** 你上一轮在这类地方栽过一次，这次它们是\n   「读的人会白跑一趟」的错，不是无伤大雅。\n\n---\n\n## 四、minor，但它是真的：`WithBackoff` 会装出一条倒过来的梯子\n\n`internal/events/publish.go`：\n\n```go\nif min > 0 { dis.backoffMin = min }\nif max >= dis.backoffMin && max > 0 { dis.backoffMax = max }\n```\n\ndoc 上写的是「A cap below the first step is ignored rather than inverting the ladder」，\n**但守卫比的是已经被赋值之后的新 `backoffMin`**，而比不过时它**什么都不做**——\n`backoffMax` 留在旧值上。常量在 `publish.go:64,66`：`DefaultBackoffMin = time.Second`、\n`DefaultBackoffMax = 30 * time.Second`。\n\n所以 `WithBackoff(60*time.Second, 45*time.Second)` ⇒ `backoffMin=60s`、`backoffMax` 仍是 **30s**，\n于是退避是**降**的：60s → 30s → 30s。**与你文档的承诺正好相反。**\n\n改掉它，并补一条**能证明自己会红的**测试：拿一组「上限小于首步」的入参，断言梯子不降。\n\n---\n\n## 五、部署那一半：把「散文」变成可粘贴的东西\n\n复核指 `ops/deploy/docker-compose.staging.yml:204`：worker 服务的 metrics 端点**默认关着**\n（这是你记录过的设计选择），而 README 里**没有任何** `rule_files` / `scrape_config` /\n`job_name` 片段。结果是：**在真正发出去的 staging 部署里，11 条规则有 4 条永远不会响。**\n\n不必去改部署的开关（那是另一个决定），但**必须让操作者无法忽略**：\n\n1. README 里给出**可直接粘贴的两个 target 的 scrape 配置**；\n2. 一张表：**在这份 shipped staging 配置下，11 条规则里哪几条能响、哪几条永远不会响**。\n\n---\n\n## 边界（一个字都没放宽）\n\n- **不为让任何检查变绿而删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。**\n  上面每一条修复都要**新的**断言，且新断言必须**证明过自己能红**。\n- 不碰 `.github/**`、`specs/**`、`docs/**`、`tasks/**`、`internal/authz/**`。\n- 这一笔**不加迁移**。\n- RESULT 里每一句自述都要能被一条断言、一次 `grep` 或一次真实命令的输出支持。\n  你这一轮的 RESULT 质量是好的（复核能逐条复现）——**保持它，别退化成自述**。\n\n## 一句话\n\n**你交的东西机器全过了，是一个匿名客户端能用任意动词打爆的标签**——而且你自己的文档\n反复保证它不可能。把闭集补上、把两处假话改成真的、把倒过来的退避梯子改对，\n再报 `completed`。\n",
@@ -10217,6 +10217,13 @@
           "at": "2026-09-21T09:34:55Z",
           "run_id": "run-ea59ccf299cbe0cc",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T10:28:30Z",
+          "run_id": "run-063cd9955abb8ed8",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -10606,6 +10613,15 @@
       "merged_at": null
     },
     "T1208": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1112": {
       "status": "todo",
       "started_at": null,
       "completed_at": null,
