@@ -8845,13 +8845,44 @@
       ]
     },
     "T0909": {
-      "status": "ready",
+      "status": "merged",
+      "started_at": "2026-09-21T10:39:01Z",
+      "worker_run_id": "run-a9bb1b81c66e471e",
+      "accepted_by_supervisor_at": "2026-09-21T11:27:21Z",
+      "merged_at": "2026-09-21T11:37:48Z",
       "history": [
         {
           "from": "todo",
           "to": "ready",
           "at": "2026-09-21T10:16:57Z",
           "run_id": "run-25ec02e907a4f423"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-21T10:39:01Z",
+          "run_id": "run-a9bb1b81c66e471e",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T11:10:25Z",
+          "run_id": "run-3f1c7ac199911761",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-21T11:27:21Z",
+          "run_id": "run-f738d489842488b3"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-21T11:37:48Z",
+          "run_id": "run-fdf5ec936a5251d9",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -9703,9 +9734,9 @@
     },
     "T1101": {
       "status": "verification",
-      "started_at": "2026-09-21T09:05:02Z",
-      "worker_run_id": "run-c5258e4ab9d817d8",
-      "rejection_reason": "# T1101 返工（第 1 次）：CSS 修剪剪掉了**还在用**的规则，而你的视觉基线把这个坏样子固化成了「正确」\n\n复核的结论是 `request_changes`，1 条 blocking。**我独立核过了，成立。** 另有**一条复核没说、\n我自己看出来的**，比那一条更贵——见第二节。\n\n## 一、blocking：删了活规则，页面还在用它\n\n`apps/web/app/(main)/projects/projects.css` 里这三样被删了，但页面还在渲染它们：\n\n| 被删的 | main 上在哪 | 谁还在用 |\n|---|---|---|\n| `.files-layout`（`grid-template-columns: 240px minmax(0,1fr) 280px; gap:12px; align-items:start`） | `projects.css:580` | `projects/[id]/files/page.tsx:257` `className=\"files-layout\"` |\n| `@media (max-width:900px)` 下单栏折叠的那条 | `projects.css:588` | 同上 |\n| `.files-tree`（边框/圆角/overflow 盒） | 同处 | `files/page.tsx:258` `className=\"files-tree\"` |\n\n**核过的方式**：在你的工作区里 `grep -n \"files-layout\\|files-tree\" apps/web/app/\\(main\\)/projects/projects.css`\n→ 一个都没有；`grep` 同一个词在 `files/page.tsx` → `257`、`258` 两行还在。\n\n同一族、范围小一点的一处：`projects/[id]/conflicts/page.tsx:589` 还在渲染\n`conflicts-evidence-item-type`，而 `conflicts.css` 里那条规则**被删光了**。\n\n**这不是「样式瘦身」，是产品页面的版式坏了。** Files 页失去三栏，`Repository` 那块也被挪了位。\n\n## 二、复核没说的那一条：你的视觉回归套件，对着坏版式说「0 pixels differ」\n\n你交的 14 张基线在 `tests/web-smoke/baseline/`。我把 `baseline/project-files.png` **打开看了**：\nFiles 页是**竖着堆**的——文件列表在上、`Select a file to preview it.` 的空框在下、\n`Repository` 再叠在最后。而 `files-layout` 是 `240px | 1fr | 280px` **三栏并排**。\n\n那张图宽 1280，所以 `@media (max-width:900px)` 的单栏折叠**根本不生效**——**本该是三栏**。\n\n**结论：你的基线是在把 CSS 剪完之后的那棵树上生成的。** 于是守卫在拿「坏的」比「坏的」，\n当然 0 difference。这有两个后果，第二个更贵：\n\n1. 这个守卫**抓不到它存在的理由**——它建立的那天就对这个缺陷免疫。\n2. 它现在把**坏版式记录成正确**。将来谁把三栏改回来，守卫反而会红，并且会**逼着后人**\n   把正确的版式当成回归。\n\n**而且它还腐蚀了你的证据**：RESULT 里「14 张基线 0 pixel differ」这句话，在基线与树同源的\n前提下，**证明不了「修剪没有改变外观」**——它只证明了「渲染是确定的」。这两件事完全不同。\n\n顺带说清：**「跑绿了」不是证据，「能红」才是。** 你上一轮把这条用在了别处（复核说你确实\n证明了几个 mutation 能被抓到，这点是做对的），但恰恰在**这条最需要它的守卫上**漏了。\n\n## 三、要你做的\n\n1. **把删掉的活规则原样恢复**：`.files-layout`（含 `gap`、`align-items`）、那条\n   `@media (max-width:900px)` 折叠、`.files-tree`；以及 `conflicts-evidence-item-type`。\n   **不许**改用「把 JSX 里的 className 删掉」来让两边对上——那是把产品改成迁就修剪，\n   方向反了。\n2. **用真正的判据重做基线，并证明它有意义**：\n   - 先在**未修剪的 CSS**（main 上那份）下生成基线，再在你的树上比对，**必须 0 differ**。\n     这才是「这次修剪不改变外观」的判据。（有哪一页是你**有意**改外观的，逐页写明哪一页、\n     为什么——那是另一回事，但要说出来。）\n   - 然后**证明守卫能红**：故意改坏一次（例如动 `files-layout` 的 `grid-template-columns`，\n     或把某个 className 从 JSX 拿掉），贴出**失败的像素数与退出码**，再改回来。\n     **这一次不是走过场**——你上一轮的基线正好演示了「绿」可以什么都不说明。\n3. **做一次全量类活性扫描**：这一笔删掉或改过的每一个 class，凡是被 `className=` / `class=`\n   引用的，都必须在 CSS 里有规则，或被你**明确记录为有意删除**。落进 RESULT。\n   （复核是靠这个扫描找到那两处的；把它变成你交付的一部分，而不是评审人的一次人工检查。）\n\n## 四、nit（便宜，但都是真的）\n\n- `tests/web-smoke/visual-regression.mjs:13` 的 docstring 说基线在\n  `tests/visual-regression/baseline/*.png`，**实际在 `tests/web-smoke/baseline/`**。改对。\n- `projects/[id]/conflicts/page.tsx:520`、`:559` 留着 `conflicts-threeway-table`、\n  `conflicts-evidence-columns` 两个**没有 CSS 的死钩子**——要么删，要么写明为什么留。\n- `tests/web-smoke/shots/desktop-home.png`、`shots/mobile-drawer.png` 被重写并进了 diff。\n  它们看起来是**每次跑都重写的产物转储**，不是基线。要么说明它们是产物并让它们不进评审面，\n  要么说清它们为什么该进。\n\n## 边界（一个字都没放宽）\n\n- **不许**删测试、跳过测试、弱化断言、**放宽 `TOLERANCE_PIXELS`** 或放大 timeout。\n  这一笔里所有为了变绿而放松的改动，比红着贵得多。\n- 基线必须反映**修好之后**的树，不能反映修之前的那棵。\n- 不碰 `.github/**`、`specs/**`、`docs/**`、`tasks/**`。\n- 这一笔**不加迁移**。\n\n## 一句话\n\n**修剪本身可能就是对的，但你把一个还在使用的版式剪掉了，而你的守卫因为和树同源，\n正好对此免疫。** 恢复那几条规则、按「未修剪的基线」重做判据、证明守卫能红，再报 `completed`。\n",
+      "started_at": "2026-09-21T11:09:58Z",
+      "worker_run_id": "run-1b924f9dc676b161",
+      "rejection_reason": "# T1101 返工第三轮 —— 判据选错了：你量的是「修剪前后」，AC3 要的是「替换前后」\n\n## 门为什么红\n\nG4 的 review verdict 是 `request_changes`，1 条 blocking（另有 1 major、4 minor/nit）。\nblocking 的原话：AC3「视觉零回归」不成立——把**改动前的 HEAD 树**真渲染出来、与**你签入的基线**逐像素比，14 页里 10 页超容差。\n\n## 我核过的（这两条别来跟我争）\n\n**① 徽章色调的边框，HEAD 是透明的。**\n\n`apps/web/app/(main)/projects/projects.css`（HEAD）：\n\n- `:110` `.badge-public { color: fgColor-success; background: bgColor-success-muted; border-color: transparent; }`\n- `:116` `.badge-private { … border-color: transparent; }`\n- `:122` `.badge-frozen { … border-color: transparent; }`\n- `:94` `.badge` 基座：`padding: 1px 8px; border: 1px solid var(--borderColor-default); border-radius: 2em; font-size: 12px;`\n\n你的 `packages/ui/src/ui.css` 里 `.post-state-label` 基座与它**逐字相同**（圆角写法不同，渲染是同一个胶囊）；`-neutral` 的 `border-color` 也**正好等于** HEAD `.badge-muted` 的 `borderColor-default`。\n**但** `-success` / `-attention` / `-danger` 你给了带色调的边框（`#aceebb` / `#d4a72c` / `#ffcecb`）。\n\n评审量到某像素 `rgba(0,0,0,0) → rgb(172,238,187)`：**`#aceebb` 就是 `rgb(172,238,187)`**，正是你 `-success` 的 `--borderColor-success-muted`。\n**也就是说：这五处徽章，HEAD 与你的交付之间只差 `border-color` 一条属性。**\n\n**② 活动流那两个标签，HEAD 是 11px / 0 6px。**\n\n`apps/web/app/(main)/projects/[id]/activity/activity.css`（HEAD）`:196-205`：\n\n```\n.activity-row-source,\n.activity-row-visibility {\n  padding: 0 6px;\n  font-size: 11px;\n  line-height: 18px;\n  border-radius: 999px;\n}\n```\n\n你的交付里这两个类**已经不在 `activity.css` 里了**（grep 零命中），那两个位点改走 `<StateLabel>`（`activity/page.tsx:386`、`:393`），于是拿到 `.post-state-label` 的 `1px 8px / 12px`。\n**每个标签宽 4px、高 2px**；活动页标签多，这就是 `project-activity 3609` 的来源。（tone 映射本身是对的：research→accent、其余→neutral，与 HEAD `.activity-row-source[data-activity-source=\"research\"]` 一致。**只有尺寸变了。**）\n\n## 你的控制组按构造看不见这一类变化 —— 这才是要改的地方\n\n你的 AC3 证据用 `tests/web-smoke/control-stylesheet.mjs` 造一份「HEAD ∪ 本任务增补」的对照 CSS，然后**拿这棵树比这棵树**。\n两侧都带着**新的组件 CSS**，所以**只要变化发生在新组件内部，两侧同时变、差值抵消为 0**。\n你量的是「剪枝有没有丢规则」——那件事上一轮你已经做对了——**不是**「替换是否行为等价」。\n\n**你自己的 RESULT 里就写着这句**：「conflicts 那处外观变化是标记层的……**CSS 对照按构造看不见**」。\n你已经知道仪器有这个盲区，却仍然把 AC3 判成 `passed`。req[6] 要的是仪器**能说不**——这份仪器对**这一类**变化说不出来。\n\n评审换了一台看得见的仪器：`git archive HEAD` 出一棵**真的 HEAD 树** → 同一套构建与固定视口 → 与**你签入的基线**逐像素比（harness 同样的 pixelmatch 阈值 0.1 / 容差 64）。读数：\n\n`project-files 3577`、`project-activity 3609`、`pull-detail 652`、`release-detail 553`、`projects-directory 522`、`project-overview` / `research` / `pulls` / `releases` / `settings` **各 482**，另 `asset-page` 页高差 2px。\n\n**说清楚**：上面两条成因是我在 HEAD 上逐字核过的；**像素读数我没有重跑**，是评审的仪器量的。所以要你把第 3 条的量法**建进你的交付**——那个数以后要是你自己的。\n\n## 裁定：这次外形统一**没有**获授权，不许事后追认\n\n任务书 req[3] 逐字：「**替换必须是行为等价的——见验收第 3 条**」；AC3 逐字：「**视觉零回归**」。\n本任务**唯一**获授权的外观变化是 **AC4 的圆角**（`pull-detail.css` 的 10px → 6px），而且 AC4 要求你**写明选了哪个值、为什么**——那一处你做对了。\n\n「把彩色徽章的边框从 transparent 改成带色调」是一条**新的设计决定**：任务书没要，你不知道它会动多少页，也没在 RESULT 里报（你只报了 pull-detail 与 project-conflicts）。\n\n我考虑过另一个选择：由我出面把这 10 页的外观变更**逐页点名、追认为授权**。**我不这么做**，两条理由：\n\n1. 它**不需要**。统一形态用 HEAD 的外观就能做到——共享一个组件、把 HEAD 的规则搬进去就行。你不是做不到，是顺手改了。\n2. 追认它等于**为了让门变绿而放宽断言**。AC3 是断言，而这条断言在这笔任务里**是可满足的**（AC4 就示范了「有意变更该怎么写」）。\n\n**所以：除下面点名的两处例外，核心页的外观必须与 HEAD 等价。**\n\n两处例外（都是任务书自己授权的，但**都要给实测数**）：\n\n- `pull-detail`：AC4 的圆角统一。\n- `project-conflicts`：req[3] 把证据区判给共享 `Diff` 画（「`Diff` 是 PR/冲突差异的统一形态」），标记层变化是任务授权的。\n\n## 要做的（逐条，能核）\n\n1. **彩色色调的边框回到 HEAD**：`.post-state-label-success` / `-attention` / `-danger`（以及任何承载 `.badge-public/private/frozen` 语义的色调）的 `border-color` 回到 `transparent`。**你的 `-neutral` 已经是对的**（`borderColor-default`，与 HEAD `.badge-muted` 一致）——把它当模板。`project-badges.tsx:31/35/40` 的 tone 映射（public→success、private/frozen→attention）本身也对，**只改边框**。\n2. **活动流那两个标签回到 HEAD 的尺寸**（`padding: 0 6px; font-size: 11px`）。给共享组件加一个尺寸变体（例如 `StateLabel` 的 `small`）或让这两个位点保持原形，随你判断——**但渲染必须与 HEAD 等价**。\n3. **把量法换成看得见的那一种，并把数字写进 RESULT**：`git archive HEAD` → 构建 → 同一视口 → 与**你签入的基线**逐像素比。**目标：除上面两处例外，每一页差异像素数 ≤ 你写下的容差（64）；两个例外给实测像素数与像素落点。** 「CSS 对照按构造看不见」不再是被接受的答案。\n4. **基线在修好之后重拍**。今天那 14 张是你拿新渲染拍的，记的是变化本身、不是 HEAD。重拍之后，**第 3 条的量法要能过**——这两件事一起才叫闭环。\n5. **`project-conflicts` 不许再被跳过**：第 3 条的量法看得见它。超容差就逐像素说落在哪里、为什么是 req[3] 授权的。\n6. **props 段重写**（AC7；评审 major）：实测三项都不对——`Timeline` 收的是 `entries: TimelineEntry[]`（`Timeline.tsx:66`），你整段里 `TimelineEntry` **零命中**；`SidebarTrail` / `SidebarNav` **不存在**（`Sidebar.tsx` 导的是 `Sidebar` / `SidebarSection` / `SidebarList`），你却把前者写进了 RESULT；`StateLabel` 的色调是 `neutral|accent|success|attention|danger` **五个**，而且 `data-badge` 是**调用方**传的（`project-badges.tsx:31` 等），**组件自己不发光**。AC7 要的是**实际的**形状。\n7. **九个核心页逐页点名**（req[7] 逐字要求「在 RESULT 里逐页点名哪些进了基线、哪些因为还没有路由而不在」）。你的 RESULT 里 `knowledge` **零命中**。`docs/42_PAGE_SPECS.md` 的九个核心页一页一行：在基线的写页名 + 文件名；不在的写**为什么**——`/knowledge/{id}` 没有路由，**不要为它造路由**。\n8. **把新守卫接进每天跑的那条路**（评审 finding[4]）：`tests/web-smoke/run.sh` 今天只跑 `visual-smoke` + `a11y-smoke`（我核过 :94 起那一段），**没有任何东西会自动跑你新写的基线比对**。req[5] 说基线比对是**本任务的必测**——必测没人调用就不叫必测。`tests/**` 在你范围内。\n9. **两条小账**：`packages/ui/src/tokens.ts:*** 引的 `tests/web-smoke/css-policy.mjs` **不存在**（我 ls 过，零命中）——要么把文件补上，要么把那句话改掉；`packages/ui/src/index.ts` 导出的 `SidebarSection` / `SidebarList` 在 `apps/web` 里**无人 import**（我 grep 过，零命中）——要么用起来，要么在 RESULT 里照实说它们暂时没被用（AC0 要的是**真被用**，不是导出了放着）。\n10. **pull-detail 的像素解剖**（评审 finding[3]）：你写的落点比实测细，按第 3 条量出来的实际落点重写。\n\n## 不许做的\n\n- **不许为了让第 3 条变绿而放宽容差、删页、缩小视口、把基线当输出。** 容差是 req[5] 要求**显式写下**的数值；要改就说明为什么，**不是改成能过**。\n- **不许为了「等价」去删 JSX 的 `className` 迁就 CSS**（上一轮的教训）。\n- 不许改 `specs/**`、`docs/**`、`tasks/**`；不碰 Go（`internal/**`、`cmd/**`）；不改 `infra/**`；**不改 `.github/**`**——把守卫接进 CI 是**我的**收尾动作。\n- 失败就写失败。\n\n## 一句话\n\n上一轮你把「剪枝丢规则」修对了（四条规则按 HEAD 逐字恢复、子串相等核过）。这一轮的毛病不是手艺，是**判据**：你拿「修剪前后」当了「替换前后」。把第 3 条的量法做出来，剩下的都是机械活。\n",
       "history": [
         {
           "from": "todo",
@@ -9760,6 +9791,27 @@
           "to": "verification",
           "at": "2026-09-21T10:03:32Z",
           "run_id": "run-d2c19e6bed0997d4",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T10:52:52Z",
+          "run_id": "run-10c03103ef4402e6",
+          "reason": "# T1101 返工第三轮 —— 判据选错了：你量的是「修剪前后」，AC3 要的是「替换前后」\n\n## 门为什么红\n\nG4 的 review verdict 是 `request_changes`，1 条 blocking（另有 1 major、4 minor/nit）。\nblocking 的原话：AC3「视觉零回归」不成立——把**改动前的 HEAD 树**真渲染出来、与**你签入的基线**逐像素比，14 页里 10 页超容差。\n\n## 我核过的（这两条别来跟我争）\n\n**① 徽章色调的边框，HEAD 是透明的。**\n\n`apps/web/app/(main)/projects/projects.css`（HEAD）：\n\n- `:110` `.badge-public { color: fgColor-success; background: bgColor-success-muted; border-color: transparent; }`\n- `:116` `.badge-private { … border-color: transparent; }`\n- `:122` `.badge-frozen { … border-color: transparent; }`\n- `:94` `.badge` 基座：`padding: 1px 8px; border: 1px solid var(--borderColor-default); border-radius: 2em; font-size: 12px;`\n\n你的 `packages/ui/src/ui.css` 里 `.post-state-label` 基座与它**逐字相同**（圆角写法不同，渲染是同一个胶囊）；`-neutral` 的 `border-color` 也**正好等于** HEAD `.badge-muted` 的 `borderColor-default`。\n**但** `-success` / `-attention` / `-danger` 你给了带色调的边框（`#aceebb` / `#d4a72c` / `#ffcecb`）。\n\n评审量到某像素 `rgba(0,0,0,0) → rgb(172,238,187)`：**`#aceebb` 就是 `rgb(172,238,187)`**，正是你 `-success` 的 `--borderColor-success-muted`。\n**也就是说：这五处徽章，HEAD 与你的交付之间只差 `border-color` 一条属性。**\n\n**② 活动流那两个标签，HEAD 是 11px / 0 6px。**\n\n`apps/web/app/(main)/projects/[id]/activity/activity.css`（HEAD）`:196-205`：\n\n```\n.activity-row-source,\n.activity-row-visibility {\n  padding: 0 6px;\n  font-size: 11px;\n  line-height: 18px;\n  border-radius: 999px;\n}\n```\n\n你的交付里这两个类**已经不在 `activity.css` 里了**（grep 零命中），那两个位点改走 `<StateLabel>`（`activity/page.tsx:386`、`:393`），于是拿到 `.post-state-label` 的 `1px 8px / 12px`。\n**每个标签宽 4px、高 2px**；活动页标签多，这就是 `project-activity 3609` 的来源。（tone 映射本身是对的：research→accent、其余→neutral，与 HEAD `.activity-row-source[data-activity-source=\"research\"]` 一致。**只有尺寸变了。**）\n\n## 你的控制组按构造看不见这一类变化 —— 这才是要改的地方\n\n你的 AC3 证据用 `tests/web-smoke/control-stylesheet.mjs` 造一份「HEAD ∪ 本任务增补」的对照 CSS，然后**拿这棵树比这棵树**。\n两侧都带着**新的组件 CSS**，所以**只要变化发生在新组件内部，两侧同时变、差值抵消为 0**。\n你量的是「剪枝有没有丢规则」——那件事上一轮你已经做对了——**不是**「替换是否行为等价」。\n\n**你自己的 RESULT 里就写着这句**：「conflicts 那处外观变化是标记层的……**CSS 对照按构造看不见**」。\n你已经知道仪器有这个盲区，却仍然把 AC3 判成 `passed`。req[6] 要的是仪器**能说不**——这份仪器对**这一类**变化说不出来。\n\n评审换了一台看得见的仪器：`git archive HEAD` 出一棵**真的 HEAD 树** → 同一套构建与固定视口 → 与**你签入的基线**逐像素比（harness 同样的 pixelmatch 阈值 0.1 / 容差 64）。读数：\n\n`project-files 3577`、`project-activity 3609`、`pull-detail 652`、`release-detail 553`、`projects-directory 522`、`project-overview` / `research` / `pulls` / `releases` / `settings` **各 482**，另 `asset-page` 页高差 2px。\n\n**说清楚**：上面两条成因是我在 HEAD 上逐字核过的；**像素读数我没有重跑**，是评审的仪器量的。所以要你把第 3 条的量法**建进你的交付**——那个数以后要是你自己的。\n\n## 裁定：这次外形统一**没有**获授权，不许事后追认\n\n任务书 req[3] 逐字：「**替换必须是行为等价的——见验收第 3 条**」；AC3 逐字：「**视觉零回归**」。\n本任务**唯一**获授权的外观变化是 **AC4 的圆角**（`pull-detail.css` 的 10px → 6px），而且 AC4 要求你**写明选了哪个值、为什么**——那一处你做对了。\n\n「把彩色徽章的边框从 transparent 改成带色调」是一条**新的设计决定**：任务书没要，你不知道它会动多少页，也没在 RESULT 里报（你只报了 pull-detail 与 project-conflicts）。\n\n我考虑过另一个选择：由我出面把这 10 页的外观变更**逐页点名、追认为授权**。**我不这么做**，两条理由：\n\n1. 它**不需要**。统一形态用 HEAD 的外观就能做到——共享一个组件、把 HEAD 的规则搬进去就行。你不是做不到，是顺手改了。\n2. 追认它等于**为了让门变绿而放宽断言**。AC3 是断言，而这条断言在这笔任务里**是可满足的**（AC4 就示范了「有意变更该怎么写」）。\n\n**所以：除下面点名的两处例外，核心页的外观必须与 HEAD 等价。**\n\n两处例外（都是任务书自己授权的，但**都要给实测数**）：\n\n- `pull-detail`：AC4 的圆角统一。\n- `project-conflicts`：req[3] 把证据区判给共享 `Diff` 画（「`Diff` 是 PR/冲突差异的统一形态」），标记层变化是任务授权的。\n\n## 要做的（逐条，能核）\n\n1. **彩色色调的边框回到 HEAD**：`.post-state-label-success` / `-attention` / `-danger`（以及任何承载 `.badge-public/private/frozen` 语义的色调）的 `border-color` 回到 `transparent`。**你的 `-neutral` 已经是对的**（`borderColor-default`，与 HEAD `.badge-muted` 一致）——把它当模板。`project-badges.tsx:31/35/40` 的 tone 映射（public→success、private/frozen→attention）本身也对，**只改边框**。\n2. **活动流那两个标签回到 HEAD 的尺寸**（`padding: 0 6px; font-size: 11px`）。给共享组件加一个尺寸变体（例如 `StateLabel` 的 `small`）或让这两个位点保持原形，随你判断——**但渲染必须与 HEAD 等价**。\n3. **把量法换成看得见的那一种，并把数字写进 RESULT**：`git archive HEAD` → 构建 → 同一视口 → 与**你签入的基线**逐像素比。**目标：除上面两处例外，每一页差异像素数 ≤ 你写下的容差（64）；两个例外给实测像素数与像素落点。** 「CSS 对照按构造看不见」不再是被接受的答案。\n4. **基线在修好之后重拍**。今天那 14 张是你拿新渲染拍的，记的是变化本身、不是 HEAD。重拍之后，**第 3 条的量法要能过**——这两件事一起才叫闭环。\n5. **`project-conflicts` 不许再被跳过**：第 3 条的量法看得见它。超容差就逐像素说落在哪里、为什么是 req[3] 授权的。\n6. **props 段重写**（AC7；评审 major）：实测三项都不对——`Timeline` 收的是 `entries: TimelineEntry[]`（`Timeline.tsx:66`），你整段里 `TimelineEntry` **零命中**；`SidebarTrail` / `SidebarNav` **不存在**（`Sidebar.tsx` 导的是 `Sidebar` / `SidebarSection` / `SidebarList`），你却把前者写进了 RESULT；`StateLabel` 的色调是 `neutral|accent|success|attention|danger` **五个**，而且 `data-badge` 是**调用方**传的（`project-badges.tsx:31` 等），**组件自己不发光**。AC7 要的是**实际的**形状。\n7. **九个核心页逐页点名**（req[7] 逐字要求「在 RESULT 里逐页点名哪些进了基线、哪些因为还没有路由而不在」）。你的 RESULT 里 `knowledge` **零命中**。`docs/42_PAGE_SPECS.md` 的九个核心页一页一行：在基线的写页名 + 文件名；不在的写**为什么**——`/knowledge/{id}` 没有路由，**不要为它造路由**。\n8. **把新守卫接进每天跑的那条路**（评审 finding[4]）：`tests/web-smoke/run.sh` 今天只跑 `visual-smoke` + `a11y-smoke`（我核过 :94 起那一段），**没有任何东西会自动跑你新写的基线比对**。req[5] 说基线比对是**本任务的必测**——必测没人调用就不叫必测。`tests/**` 在你范围内。\n9. **两条小账**：`packages/ui/src/tokens.ts:*** 引的 `tests/web-smoke/css-policy.mjs` **不存在**（我 ls 过，零命中）——要么把文件补上，要么把那句话改掉；`packages/ui/src/index.ts` 导出的 `SidebarSection` / `SidebarList` 在 `apps/web` 里**无人 import**（我 grep 过，零命中）——要么用起来，要么在 RESULT 里照实说它们暂时没被用（AC0 要的是**真被用**，不是导出了放着）。\n10. **pull-detail 的像素解剖**（评审 finding[3]）：你写的落点比实测细，按第 3 条量出来的实际落点重写。\n\n## 不许做的\n\n- **不许为了让第 3 条变绿而放宽容差、删页、缩小视口、把基线当输出。** 容差是 req[5] 要求**显式写下**的数值；要改就说明为什么，**不是改成能过**。\n- **不许为了「等价」去删 JSX 的 `className` 迁就 CSS**（上一轮的教训）。\n- 不许改 `specs/**`、`docs/**`、`tasks/**`；不碰 Go（`internal/**`、`cmd/**`）；不改 `infra/**`；**不改 `.github/**`**——把守卫接进 CI 是**我的**收尾动作。\n- 失败就写失败。\n\n## 一句话\n\n上一轮你把「剪枝丢规则」修对了（四条规则按 HEAD 逐字恢复、子串相等核过）。这一轮的毛病不是手艺，是**判据**：你拿「修剪前后」当了「替换前后」。把第 3 条的量法做出来，剩下的都是机械活。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T11:09:58Z",
+          "run_id": "run-1b924f9dc676b161",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T11:41:03Z",
+          "run_id": "run-2924a5ae0c74462c",
           "reason": "collect: all checks passed"
         }
       ]
@@ -9949,10 +10001,11 @@
       ]
     },
     "T1107": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-21T09:07:48Z",
       "worker_run_id": "run-e62860b2c5afb7d4",
       "accepted_by_supervisor_at": "2026-09-21T09:43:54Z",
+      "merged_at": "2026-09-21T10:29:45Z",
       "rejection_reason": "# T1107 返工（第 1 次）：套件是好的，但**它漏跑了任务点名的那几条**\n\n机器那几关你都过了。卡住你的不是代码质量，是复核 Worker 的结论 `request_changes`（1 条 blocking）。\n**我逐条独立核过了**（不是读你的 RESULT，是读你的树、跑 `grep`、看 `git status`），下面每一句你都能自己复算。\n\n**先说做对的地方**，免得你把这次返工理解成「全盘推翻」：复核自己确认了——你在冻结的树上重跑\n`go test ./tests/integration` 整包 402s 全绿、`tests/e2e` 全绿、受保护区 0 改动；\nshell-e2e 那处改动是**收紧**（tab 条从「数量+集合」变成 (key,label) 有序比较，六个真页面从\n「挂载即通过」变成「必须列出条目」），不是改绿。这些都成立，别动它们。\n\n---\n\n## 一、blocking：门没跑任务点名的 7 条负数\n\n任务包 `acceptance_criteria[1]` **逐个点名**要求这批既有负数「全部原样通过；RESULT 里给出它们的清单\n与各自跑了什么」。核过的结果：**套件的清单里没有下面这 7 条**（`EDGE_TESTS` 在 `privacy-suite.sh:68-75`，\n`POSTGRES_TESTS` 在 `:108-150`）：\n\n| 点名的测试 | 在哪 | 在套件里 |\n|---|---|---|\n| `***` | `tests/e2e/asset_page_e2e_test.go:886` | 无 |\n| `***` | `tests/integration/asset_publish_test.go:938` | 无 |\n| `***` | `tests/integration/knowledge_publish_test.go:1232` | 无 |\n| `***` | `tests/integration/search_access_test.go:23` | 无 |\n| `***` | `tests/integration/retrieval_test.go:803` | 无 |\n| `***` | `tests/integration/retrieval_test.go:991` | 无 |\n| `***` | `tests/integration/retrieval_test.go:1109` | 无 |\n\n我复算的方式（你自己跑一遍就能对上）：把上面 7 个名字逐个\n`grep -c <名字> tests/acceptance/privacy-suite.sh` → **7 个全是 0**；\n`grep -rl \"func <名字>(\" tests/` → **7 个全都存在**。\n\n**而且** `asset_publish_test.go` 与 `search_access_test.go` 这两个**被点名的文件**，\n在你的门里**没有任何代表**——一条都没有。\n\n**为什么这条最重**：这个套件在 `tasks/tests.json` 里是 `T1107-TEST-01`，**blocking: true**。\n也就是说，**将来证明这个任务达标的那个门，本身漏掉了任务点名要求它跑的东西**。\n漏掉的那几条又恰恰最贴题：拒绝先于目标查找、不可区分 404、检索谓词的自证反证\n（`retrieval_test.go:991` 是要求里单独举起来的反证）。\n\n复核在冻结的树上**独立跑过这 7 条，全部 PASS**——所以**这不是坏测试**，是门没把它们跑起来。\n\n### 要你做的\n\n1. **把这 7 条加进 `EDGE_TESTS` / `POSTGRES_TESTS` 相应的组**（组内的计数守卫会替你把关）。\n2. **如果你认为其中某条确实不该进这个门**，那就在 RESULT 里**写明是哪条、为什么**。\n   **「不说」不接受，「说了理由」接受。**\n3. 加完之后，**门的运行时间与每组计数要如实更新**（别让守卫的期望数停在旧值上）。\n\n---\n\n## 二、major：`acceptance[1]` 的第三个子句不成立\n\nAC2/AC8 要的是「RESULT 里给出它们的清单与各自跑了什么」「没有覆盖到的面与原因」。\n你写的证据是「11 个文件一个字节没动 + postgres 组 35 例、edge 组 6 例全绿」——\n**读者会据此认为点名的那批负数都被门跑到了**，实际上面那 7 条一条都没跑。\n`risks` 与 `follow_up_issues` 里也只写了「未覆盖的面」，**没有一处说明这批缺席的点名测试**。\n\n**要你做的**：AC2 的前两个子句（没被删弱、原样通过）你已经做到了，把它们**和第三个子句分开写**：\n一张点名单，逐条写「在哪跑、跑了什么」。**允许写「这一条不在门里，因为 X」——不允许沉默。**\n\n---\n\n## 三、minor，但都是真的（照实改）\n\n1. **RESULT 里有一句是假的**：`acceptance[1]` 写着「`git status --porcelain -- tests` 只有三个 `??`，\n   没有任何 `M`」。**我跑了同一条命令**，实际输出是：\n\n   ```\n    M tests/e2e-shell/shell-e2e.mjs\n   ?? tests/acceptance/privacy-mutation-check.sh\n   ?? tests/acceptance/privacy-suite.sh\n   ?? tests/integration/privacy_sidechannel_test.go\n   ```\n\n   那处 `M` 是**你这一笔的正当改动**，同一段的后一句其实已经承认了它——但**写下来的 `git` 结论是假的**。\n   这正是本仓库最怕的一类自述：「让读的人以为某件事被检查过，而它没有」。改对。\n\n2. **「检索层今天没有对外 HTTP 路由」这个理由是假的。** 核过了：\n   `cmd/api/searchhttp/doc.go:1-12` 写着 `POST /api/v1/search` 跑整条流水线，\n   第三段就是 `retrieval.Retriever`；`cmd/api/main.go:1294` 也真的接上了\n   （`retrieval.NewRetriever(retrievalStore, nil)`）。\n   **真实理由更强、也更该写下来**：那条路由是 state-changing method，匿名调用者一律结构化 401；\n   它还要落一条 search 记录——所以匿名读面上**根本读不到检索答案**，只能在层上做差分。\n   `RESULT` 的 `risks` 里把同一句假话复述了一遍，**两处一起改**。\n\n3. **契约点名的面缺一条没点名说明**：要求 4 枚举的公开面里有「检索答案」，\n   而计数差分读的六条面里没有它（只有第三条测试用文档差分覆盖了存在性维度）。\n   **排除的理由本身是站得住的**（就是上一条那个真理由），但**必须写进 RESULT**——\n   否则读者分不清「不必覆盖」和「漏了」。\n\n4. **nit，但注释比它验的强**：末尾那圈 needle 只找字面量 `\"draft-\"`，\n   而插在公开资产上的第 4 个私有版本标签是 `\"3.0\"`，**针里没有它**（真正兜住它的是上面的字节差分）。\n   要么把 `\"3.0\"` / `\"sha256:draft-ctl\"` 加进针里，要么把注释收窄到它实际验的范围。\n\n---\n\n## 边界（一个字都没放宽）\n\n- **不许**为了让任何检查变绿而删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。\n  **特别是**：不许把 `EDGE_TESTS` / `POSTGRES_TESTS` 的**计数守卫**放松来「容纳」这次改动——\n  那正是这条发现要防的东西。\n- 这一笔**不加迁移**。\n- 不碰 `.github/**`、`specs/**`、`docs/**`、`tasks/**`、`internal/authz/**`。\n- 既有的负向测试**原样留着**（AC2 前两个子句你已经做到了，别动）。\n\n## 一句话\n\n**套件本身做得不错，但它是 `T1107-TEST-01`——那个负责证明本任务达标的门——却漏跑了任务\n逐个点名要求它跑的 7 条负数（其中两个被点名的文件一条代表都没有）。** 把名字加进清单、\n把 RESULT 的点名单补全、把两处假话改成真的，再报 `completed`。\n",
       "history": [
         {
@@ -10015,13 +10068,22 @@
           "to": "accepted",
           "at": "2026-09-21T09:43:54Z",
           "run_id": "run-b8fadbe644824875"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-21T10:29:45Z",
+          "run_id": "run-7118c637ac8ca294",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T1108": {
-      "status": "verification",
+      "status": "merged",
       "started_at": "2026-09-21T09:13:20Z",
       "worker_run_id": "run-b4a92bcbd6206061",
+      "accepted_by_supervisor_at": "2026-09-21T10:38:57Z",
+      "merged_at": "2026-09-21T10:57:17Z",
       "rejection_reason": "# T1108 返工（第 2 次）：报告里那个「语料库的代价」不是一个测出来的数\n\n机器那几关你都过了。卡住你的是复核的结论 `request_changes`，1 条 blocking。\n**我逐句核过了，成立。** 这一条的性质比上次重：上次是**账没记全**，这次是**账上记了一个错的数**。\n\n---\n\n## 一、blocking：`seeded in 0.5s` 这个数，量的是别的东西\n\n复核指 `tests/benchmark/main.go:154`。核过了，路径是这样：\n\n```go\nvar dropped time.Duration\nbenchURL, dropped, err = provision(ctx, adminURL, dbName)   // 只含 DROP / CREATE / Migrate\nseedFor += dropped\n...\ncorpus, err = seedCorpus(ctx, pool, sc)                     // ← 真活在这儿，它的耗时没人接\n```\n\n然后 `report.go:110` 把 `seedFor.Seconds()` 写进 `SeedSeconds`，`:207` 打印成\n`corpus: seeded in %.1fs`。\n\n**于是「语料库播种耗时」这个字段，量的是「建库+迁移」，不含那一百万行的 COPY。**\n\n复核在临时库上量过：`seed --scale spec` 墙钟 **36.2s**，报告打印 **0.5s**——差 ~72 倍。\n（ci 档语料只有 ~1s，所以在那一档这个错**看不出来**，这也正是它活到今天的原因。）\n\n**为什么这条最重**：验收标准 11 要的正是「seed 生成与测量的墙钟代价要报出来，这决定 CI 里\n到底能跑哪一档」——而**这正是那个决定 CI 档位的数**。你的 `ops/ci/perf-gate-job.yml` 的成本\n说明和 RESULT 的条目都建在这个数上。也就是说：**你的证据本身指向一个错值。**\n\n### 要你做的\n\n1. **把 `seedCorpus` 的墙钟接上**，与 `provision` 那段一起构成真正的播种耗时；分成两个字段\n   （例如 `provision_seconds` / `corpus_load_seconds`）比合成一个更好——**你要能说清「慢在哪一段」**，\n   因为将来要拿它决定 CI 跑哪一档。\n2. **改完之后，把 RESULT 里那个数改对**（标准 6 引的 `spec -- seed 0.5s` 是错的），\n   并按复核那样给你**自己实测**的三个数：seed / ANALYZE / measure，以及合计。\n3. **`ops/ci/perf-gate-job.yml` 的成本注记同步改对。**\n4. **不许**为了让数字好看去改 CI 档位或放宽 SLO——只改「量」和「报」。\n\n## 二、major：这条闸门会在一个**正确的**数据库上变红\n\n复核指 `tests/benchmark/gate.go:263`：\n\n```go\ngot == seeded || (extra > 0 && got > seeded && got <= seeded+extra)\n```\n\n`extra = writeAllowance` 是**一次跑**自己的追加量（35 行）。但每一次 `--no-seed` 都再追加 35 行，\n所以这条带子**只有一次跑那么宽**。复核复现过：一个没动过的 ci 语料上——\n第 1 次（全新 seed）PASS，第 2 次（`--no-seed`）PASS，**第 3 次 FAIL，三条红，exit 1**。\n\n**而数据库没有任何问题。** 多出来的行是**这个工具自己前几次跑写进去的**。\n更刺眼的是：`main.go` 的 usage 恰恰在宣传这个模式——「Run `\"all --no-seed\"` to re-check a\ncorpus that is already there」，而 `db.go` 论证固定库名，图的就是「spec 档不必重新播种也能复测」。\n\n**这正是你自己那份设计说明警告过的那种东西**：一条**在正确数据库上会红**的闸门，\n迟早会被人为了让 CI 变绿而放宽。**它现在就是一颗定时炸弹**，而且 RESULT 里一个字没提。\n\n### 要你做的\n\n让「正确」与「被前几次跑撑大」区分开，把「短于播种」与「因为旧跑而多于播种」**说成两句不同的话**。\n复核给了两条可行方向（对这三张 append-only 表接受 `got >= seeded`、让上限检查承担回归职责；\n或让 seed 把自己的行数、harness 把自己追加的计数记进库里，按那个界定）。\n\n**并且补一条能红的测试**：连跑三次 `--no-seed`，断言**第三次仍然 PASS**。\n（你现在这条测试在修之前就是红的——把它写成断言，别只写「我手动跑过」。）\n\n## 三、minor：都要改，理由逐条\n\n1. **`probe_deep_offset` 的 Boundary 行与 `scale.go` 矛盾**：那里说最深一页量的是\n   「hot project 的行」，而 `scale.go` 写明 hot project **不携带搜索文档**。**两者不能都对**，\n   改成真的那个，并说清实际量的是谁。\n2. **注释写了代码没有的行为**：`readCorpus` 说 `--scale spec` 配 `ci` 档语料是 misuse、\n   「should produce a red corpus check naming the tables that are short」——核一下代码是不是真这么干，\n   不是就把注释改对（或把行为补上）。\n3. **bench 目标把带密码的 URL 打出来了**：`echo \">> bench: scale=... against $$PG_BENCH_URL ...\"`。\n   你自己的 harness 在别的所有输出路径上都刻意脱敏（`redactURL`），**这里漏了**。\n   脱敏统一走同一个函数。\n4. **交付的「一条命令」和它的说明有两处对不上**：`make bench` 跑的是\n   `go run ./tests/benchmark all ...`（没有 `--json`），所以机器可读的产物根本没写出来。\n   要么补上，要么把说明改成实际的行为。\n5. **`research_map` 的总结把「一次跑得好」说成达标了**：你自己在总结里写了\n   「met THIS RUN but straddling across runs (925–2287ms)」——**那就不叫 met**。\n   把措辞改成它实际的样子，别让读的人以为它稳了。\n\n## 四、nit，但它会 panic\n\n`tests/benchmark/*.go`：`src := benchUUID(\"branch/hot\", 1+i%(c.Scale.HotBranches-1))`——\n`HotBranches == 1` 时是**整数除零，直接 panic**，而同一个文件里别处都做了保护。\n补上保护，并给它一条测试。\n\n## 边界（一个字都没放宽）\n\n- **不许**删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。\n  上面每一处修复都要**新的**断言，且新断言要**证明过自己能红**（改正之前先让它红一次）。\n- **不许**为了让数字好看去改 CI 档位、SLO 或 `writeAllowance` 的语义——那是把闸门调松，\n  正是第二节警告的那件事。\n- 不碰 `.github/**`、`specs/**`、`docs/**`、`tasks/**`。\n- 这一笔**不加迁移**；发给你的是 `00135`，你没用——**没用就继续不用**。\n\n## 一句话\n\n**报告里那个「语料库代价」不是一个测出来的数**（差了 72 倍，而且它正是决定 CI 档位的数），\n**而那条语料闸门第三次跑就会在一个正确的库上变红。** 把量接对、把闸门改成能区分\n「少了」和「被旧跑撑大了」、把带密码的 URL 脱敏，再报 `completed`。\n",
       "history": [
         {
@@ -10078,14 +10140,27 @@
           "at": "2026-09-21T10:03:44Z",
           "run_id": "run-ec43025fd768067b",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-21T10:38:57Z",
+          "run_id": "run-b415a3e09b009dff"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-21T10:57:17Z",
+          "run_id": "run-5de4605c4d19c953",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T1109": {
       "status": "verification",
-      "started_at": "2026-09-21T09:34:55Z",
-      "worker_run_id": "run-ea59ccf299cbe0cc",
-      "rejection_reason": "# T1109 返工（第 1 次）：机器检查全过了，但第三方复核在你的代码里读出一处真缺陷\n\n**先说清楚性质。** 你这一轮把机器那几关全过了（scope、head-baseline、residue、result-tests、\nresult-tests-coverage、result-consistency）。被卡住的原因是**复核 Worker 的结论是\n`request_changes`**，带 1 条 blocking——而按规矩，没有通过的复核结论不许 merge。\n\n**那一条不是记帐问题，是代码问题。** 我逐条独立核过（不是读你的 RESULT，是读你的树），\n下面写的每一句你都能自己复算。\n\n---\n\n## 一、blocking：`method` 这个标签的值，是客户端自己挑的\n\n复核指 `internal/observability/metrics.go:141` 与 `:147`。核过了，成立：\n\n```go\nm.httpRequests = prometheus.NewCounterVec(..., []string{\"method\", \"route\", \"status\"})\nm.httpDuration = prometheus.NewHistogramVec(..., []string{\"method\", \"route\"})\n```\n\n而 `method` 的值来自 `internal/observability/middleware.go:59`：\n\n```go\nDefault().ObserveHTTP(r.Method, resolveRoute(routeCell.get(), r), status, elapsed.Seconds())\n```\n\n`r.Method` 在 Go 的 server 端**就是请求行里那个 token 本身**。`net/http` 只校验它是一个\n合法 token，不校验它是不是你知道的那几个动词。于是一个**匿名客户端**发\n`FOO /x HTTP/1.1`（换一个词一次），就在 `post_http_requests_total` 和\n`post_http_request_duration_seconds` 两个 family 上各造出一组新序列——**标签值的集合没有上界**。\n不限速、不需要登录、429 的那些请求本身也计入。这就是经典的基数爆炸：注册表只增不减，\n最终压垮 API 进程自己，并让每次 scrape 越拉越大。\n\n**最贵的一处是它同时把你自己的文档变成了假话。** 你在这批交付里反复写下相反的保证：\n\n- `metrics.go` 里那段设计说明：`...routes are Go 1.22+ ServeMux patterns (never r.URL.Path —\n  a project id in a label is unbounded cardinality and a leak of which ids exist)...\n  **No label is ever a user-supplied string.**`\n- `ops/observability/README.md:82`：`no label value is ever a user-supplied string`\n\n**你为 `route` 做对的那件事，正是你在 `method` 上漏掉的那件事。** 不是「注释写得不够准」——\n是这段注释现在会让下一个人**不去查**这条路径。本仓库最贵的一类缺陷就是「让闸门以为某件事\n被检查过，而它没有」，这条注释是同一族。\n\n### 要你做的\n\n**把 `method` 收成一个代码里写死的闭集**，其余一律落进一个桶（例如 `\"OTHER\"`）。\n具体形状你定，但必须满足：\n\n1. **闭集在代码里**，不是从请求里推算出来的；未知动词不得产生新的标签值。\n2. **有测试钉住它**，而且这条测试要能**证明自己会红**：构造一个非标准动词的请求，断言\n   标签值集合**不增长**。只断言「GET/POST 有值」是不够的——那在修复前后都是绿的。\n3. 修完之后，`metrics.go` 与 `README.md` 那两句保证**必须变成真的**。要么它们为真，\n   要么把它们改成真的表述。**不许留着假话过闸门。**\n4. **不许**用「把 `method` 标签整个删掉」来让它变绿——那会让 docs/26 要的按方法分列\n   失去能力，属于把缺陷从「漏报」换成「不报」。真做不下去，如实说，别硬凑。\n\n---\n\n## 二、major：两个 scrape target 死掉一个，你的规则看不见\n\n复核指 `ops/observability/alerts.yml:105`：\n\n```yaml\n- alert: PostMetricsEndpointMissing\n  expr: absent(post_db_up)\n```\n\n`post_db_up` 是**每个进程一条序列**。`absent()` 只在**整条指标完全消失**时才触发——也就是\n**两个 target 都没了**才响。而你自己在 `README:29-31` 里写死了：\n\n> The two processes must be scraped as two targets... A single-target scrape configuration\n> silently measures half the platform.\n\n**于是「worker 单独死掉」这个你最想看见的故障，恰恰是这套规则里最安静的。**\n更要命的是那 11 条规则里有 4 条（outbox 积压、发布失败、队列不可用、死信）**只由 worker 供给**——\nworker 一死，它们不是变红，是**没有输入**，于是安静地什么都不说。\n\n而告警自己的文案还写着 `means neither cmd/api nor cmd/worker has...`——**你写这句话的时候\n知道它只覆盖「两个都没了」，但规则集没有把「只有一个没了」补上。**\n\n### 要你做的\n\n让**「恰好一个 target 不再上报」变成可见的**。表达式你选，并写清它依赖什么假设\n（例如 job 名约定）。**如果**你核完认为在没有一份 job 命名约定的前提下它确实无法表达，\n那就**明说**：写清缺什么、补上它需要谁决定。**「做不到」是可接受的答案，「没说」不是。**\n\n这条**不许**用放宽 `for:`、放大 timeout 或删规则来敷衍。\n\n---\n\n## 三、必须改的两处事实错误（很便宜，但都是假的）\n\n1. **`ops/observability/README.md:203`（以及 RESULT 的 `acceptance[7]`）说**：silent-filter\n   那一档「没有任何状态、哪里都没计数」。**核过了，是假的**：\n   `internal/events/inbox_store.go:235` 就在数它——\n   `observability.Default().ObservePermissionDenial(\"inbox\", observability.DecisionFiltered)`。\n   把这句话改成真的。**顺带自查**：这一档还数了什么、漏了什么，照实写。\n2. **交叉引用整体对不上**。复核举了至少三处（`README:23` 指 `cmd/api/main.go:1196`，实际在\n   `:1343-1345`；`README:78`/`:203` 指 `envelope.go:40`，实际在 `:72`；指\n   `inbox_store.go:220`，实际在 `:235`）。\n   **一条一条 `grep` 复算，不要照记忆改。** 你上一轮在这类地方栽过一次，这次它们是\n   「读的人会白跑一趟」的错，不是无伤大雅。\n\n---\n\n## 四、minor，但它是真的：`WithBackoff` 会装出一条倒过来的梯子\n\n`internal/events/publish.go`：\n\n```go\nif min > 0 { dis.backoffMin = min }\nif max >= dis.backoffMin && max > 0 { dis.backoffMax = max }\n```\n\ndoc 上写的是「A cap below the first step is ignored rather than inverting the ladder」，\n**但守卫比的是已经被赋值之后的新 `backoffMin`**，而比不过时它**什么都不做**——\n`backoffMax` 留在旧值上。常量在 `publish.go:64,66`：`DefaultBackoffMin = time.Second`、\n`DefaultBackoffMax = 30 * time.Second`。\n\n所以 `WithBackoff(60*time.Second, 45*time.Second)` ⇒ `backoffMin=60s`、`backoffMax` 仍是 **30s**，\n于是退避是**降**的：60s → 30s → 30s。**与你文档的承诺正好相反。**\n\n改掉它，并补一条**能证明自己会红的**测试：拿一组「上限小于首步」的入参，断言梯子不降。\n\n---\n\n## 五、部署那一半：把「散文」变成可粘贴的东西\n\n复核指 `ops/deploy/docker-compose.staging.yml:204`：worker 服务的 metrics 端点**默认关着**\n（这是你记录过的设计选择），而 README 里**没有任何** `rule_files` / `scrape_config` /\n`job_name` 片段。结果是：**在真正发出去的 staging 部署里，11 条规则有 4 条永远不会响。**\n\n不必去改部署的开关（那是另一个决定），但**必须让操作者无法忽略**：\n\n1. README 里给出**可直接粘贴的两个 target 的 scrape 配置**；\n2. 一张表：**在这份 shipped staging 配置下，11 条规则里哪几条能响、哪几条永远不会响**。\n\n---\n\n## 边界（一个字都没放宽）\n\n- **不为让任何检查变绿而删测试、跳过测试、弱化断言、放宽阈值或放大 timeout。**\n  上面每一条修复都要**新的**断言，且新断言必须**证明过自己能红**。\n- 不碰 `.github/**`、`specs/**`、`docs/**`、`tasks/**`、`internal/authz/**`。\n- 这一笔**不加迁移**。\n- RESULT 里每一句自述都要能被一条断言、一次 `grep` 或一次真实命令的输出支持。\n  你这一轮的 RESULT 质量是好的（复核能逐条复现）——**保持它，别退化成自述**。\n\n## 一句话\n\n**你交的东西机器全过了，是一个匿名客户端能用任意动词打爆的标签**——而且你自己的文档\n反复保证它不可能。把闭集补上、把两处假话改成真的、把倒过来的退避梯子改对，\n再报 `completed`。\n",
+      "started_at": "2026-09-21T10:49:59Z",
+      "worker_run_id": "run-1231a33b9d62055b",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T1109-3438266685.patch: exit status 1: error: patch failed: cmd/api/main.go:1300\n    error: cmd/api/main.go: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n",
       "history": [
         {
           "from": "todo",
@@ -10223,6 +10298,27 @@
           "to": "verification",
           "at": "2026-09-21T10:28:30Z",
           "run_id": "run-063cd9955abb8ed8",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-21T10:49:58Z",
+          "run_id": "run-2de8f67fa9bbf42b",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T1109-3438266685.patch: exit status 1: error: patch failed: cmd/api/main.go:1300\n    error: cmd/api/main.go: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T10:49:59Z",
+          "run_id": "run-1231a33b9d62055b",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T11:16:54Z",
+          "run_id": "run-2a817eb5c145f7c9",
           "reason": "collect: all checks passed"
         }
       ]
@@ -10383,6 +10479,33 @@
         }
       ]
     },
+    "T1112": {
+      "status": "verification",
+      "started_at": "2026-09-21T10:50:00Z",
+      "worker_run_id": "run-973c8863bcff2b7d",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-21T10:49:57Z",
+          "run_id": "run-6f735e66262324d8"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-21T10:50:00Z",
+          "run_id": "run-973c8863bcff2b7d",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T11:11:29Z",
+          "run_id": "run-4387b21f6b9ab9de",
+          "reason": "collect: all checks passed"
+        }
+      ]
+    },
     "T1113": {
       "status": "merged",
       "started_at": "2026-09-21T09:16:10Z",
@@ -10482,9 +10605,10 @@
       ]
     },
     "T1202": {
-      "status": "running",
+      "status": "rejected",
       "started_at": "2026-09-21T10:11:21Z",
       "worker_run_id": "run-88eac517e93279ec",
+      "rejection_reason": "collect rejected: residue: 1 process(es) the Worker started are still running: pid 284365 (/tmp/t1202/k/api) session 284356 group 284356. The Worker (pid 95601) has already exited — nothing owns these any more and nothing collects them on its own. Collect them with: kill -TERM -- -284356",
       "history": [
         {
           "from": "todo",
@@ -10498,6 +10622,13 @@
           "at": "2026-09-21T10:11:21Z",
           "run_id": "run-88eac517e93279ec",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-21T10:57:17Z",
+          "run_id": "run-f1dcb25a452b1a1e",
+          "reason": "collect rejected: residue: 1 process(es) the Worker started are still running: pid 284365 (/tmp/t1202/k/api) session 284356 group 284356. The Worker (pid 95601) has already exited — nothing owns these any more and nothing collects them on its own. Collect them with: kill -TERM -- -284356"
         }
       ]
     },
@@ -10586,13 +10717,31 @@
       ]
     },
     "T1205": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "verification",
+      "started_at": "2026-09-21T10:57:23Z",
+      "worker_run_id": "run-51bd734370cd9991",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-21T10:57:19Z",
+          "run_id": "run-f997eebe65e2dd33"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-21T10:57:23Z",
+          "run_id": "run-51bd734370cd9991",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T11:15:50Z",
+          "run_id": "run-07519203016e4dfc",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T1206": {
       "status": "todo",
@@ -10613,15 +10762,6 @@
       "merged_at": null
     },
     "T1208": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
-    },
-    "T1112": {
       "status": "todo",
       "started_at": null,
       "completed_at": null,
