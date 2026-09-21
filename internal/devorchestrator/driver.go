@@ -109,7 +109,17 @@ func startHeartbeat(ctx context.Context, repoRoot string, pid int, every time.Du
 		every = heartbeatEvery
 	}
 	done := make(chan struct{})
+	// stopped is closed by the goroutine itself as it returns, so stop() can
+	// wait for it. Closing done only ASKS the loop to stop: a tick already past
+	// its select still reads the status and writes the heartbeat, and that
+	// write lands after stop() returned. The caller's contract is "stopping it
+	// stops the writes" (the test asserts exactly this), and the way to keep
+	// that contract is to wait rather than to hope the window is small — the
+	// window is file I/O, which is slowest on the loaded runners where it
+	// matters most.
+	stopped := make(chan struct{})
 	go func() {
+		defer close(stopped)
 		ticker := time.NewTicker(every)
 		defer ticker.Stop()
 		for {
@@ -129,7 +139,12 @@ func startHeartbeat(ctx context.Context, repoRoot string, pid int, every time.Du
 		}
 	}()
 	var once sync.Once
-	return func() { once.Do(func() { close(done) }) }
+	return func() {
+		once.Do(func() {
+			close(done)
+			<-stopped
+		})
+	}
 }
 
 // Alive reports whether the heartbeat is recent enough to believe.

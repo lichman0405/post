@@ -142,6 +142,12 @@ func writeDocument(w http.ResponseWriter, r *http.Request, doc []byte, format fe
 		return
 	}
 	header.Set("Content-Type", format.ContentType())
+	// An XML feed is a document, not an opaque payload: the browser parses
+	// it, so the declared media type has to be the one it parses it as.
+	// nosniff is stated here as well as at the edge (internal/security) so
+	// the fact belongs to this exit — the guard in tests/security judges
+	// the handler on its own, without the edge in the chain.
+	header.Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(doc)
 }

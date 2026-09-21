@@ -47,7 +47,13 @@ type Deps struct {
 	// exactly when such a version is materialized and the port is nil: the
 	// merge then REFUSES rather than write a lifecycle 'aborted' row that
 	// records no actor, reason or explanation (see requireAbortRecord).
-	Aborts   AbortReader
+	Aborts AbortReader
+	// Reopens reads the reopen record a reopened source version carries, so
+	// the accepted version carries the same one (T0610). Unlike Aborts it is
+	// not a refusal gate: a record travels when the row has one, and a
+	// record-less reopened version is carried as it stands (see
+	// ReopenReader — no specification mandates a reopen record).
+	Reopens  ReopenReader
 	Projects ProjectGate
 	Authz    Authz
 	// Forks answers the fork-lineage question the cross-project source side
@@ -95,6 +101,7 @@ type Service struct {
 	objects     ObjectWriter
 	relations   RelationWriter
 	aborts      AbortReader
+	reopens     ReopenReader
 	projects    ProjectGate
 	authz       Authz
 	forks       ForkLineage
@@ -128,6 +135,7 @@ func NewService(d Deps) *Service {
 		objects:     absentToNil(d.Objects),
 		relations:   absentToNil(d.Relations),
 		aborts:      absentToNil(d.Aborts),
+		reopens:     absentToNil(d.Reopens),
 		projects:    absentToNil(d.Projects),
 		authz:       absentToNil(d.Authz),
 		forks:       absentToNil(d.Forks),
@@ -740,6 +748,10 @@ func (s *Service) materialize(ctx context.Context, tx states.Transaction, stateI
 			if err != nil {
 				return nil, err
 			}
+			reopen, err := s.reopenRecordFor(ctx, src)
+			if err != nil {
+				return nil, err
+			}
 			v, err := s.objects.CreateVersionInTx(ctx, tx, c.TargetID, heads.Objects[c.TargetID], sciobjects.VersionParams{
 				StateID:        stateID,
 				BranchID:       &branchID,
@@ -758,11 +770,20 @@ func (s *Service) materialize(ctx context.Context, tx states.Transaction, stateI
 				// carry it or main would show an aborted version nobody
 				// can account for (T0602, docs/46:7).
 				Abort: abort,
+				// A reopen travels with the version on the same terms
+				// (T0610): it is the record of the decision that undid the
+				// abort, and the row this merge writes carries the
+				// MERGING actor's created_by, so the deciding actor and
+				// time exist on main only if they are copied here. Nil
+				// when the source row has no record — no specification
+				// mandates one for a reopen (see ReopenReader).
+				Reopen: reopen,
 				// The abort request's Idempotency-Key deliberately does
 				// NOT travel: it names a request made against the
 				// proposal branch, and the key's uniqueness is scoped to
 				// the object, so copying it onto main would be a second
-				// row claiming a request that did not produce it.
+				// row claiming a request that did not produce it. The
+				// reopen request's key is left behind for the same reason.
 			})
 			if err != nil {
 				return nil, err
@@ -1040,6 +1061,29 @@ func (s *Service) abortRecordFor(ctx context.Context, src manifest.ObjectVersion
 		return nil, fmt.Errorf("%w: aborted version %s carries no abort record — docs/46:7 requires actor, time, reason code and explanation on every abort", ErrStore, src.ID)
 	}
 	return rec, nil
+}
+
+// reopenRecordFor returns the reopen record the source version carries, or
+// nil when the version is not a reopen — AND nil when it is one but carries
+// no record.
+//
+// The second nil is where this differs from abortRecordFor above, and the
+// difference is the specifications' rather than this function's: docs/46:7
+// mandates the abort record, so a record-less aborted version must not be
+// materialized; no sentence mandates a reopen record (docs/46:11 says only
+// "Reopen 创建新 transition，保留历史 abort"), so refusing to merge a
+// record-less reopened version would be inventing a rule no specification
+// states. The record travels when the row has one — which every reopen the
+// T0610 command produces does. An unwired reader is the same case: it can
+// copy nothing, and nothing requires it to.
+func (s *Service) reopenRecordFor(ctx context.Context, src manifest.ObjectVersion) (*domain.ReopenRecord, error) {
+	if domain.LifecycleState(src.LifecycleState) != domain.LifecycleReopened {
+		return nil, nil
+	}
+	if s.reopens == nil {
+		return nil, nil
+	}
+	return s.reopens.ReopenRecordOf(ctx, src.ID)
 }
 
 // objectVersionsOf indexes the plan's diff by object id.

@@ -45,6 +45,7 @@ import (
 
 	"github.com/lichman0405/post/cmd/api/aborthttp"
 	"github.com/lichman0405/post/cmd/api/assetshttp"
+	"github.com/lichman0405/post/cmd/api/attestationhttp"
 	"github.com/lichman0405/post/cmd/api/audithttp"
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/conflicthttp"
@@ -73,6 +74,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/reviewhttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/cmd/api/schemaprofileshttp"
+	"github.com/lichman0405/post/cmd/api/searchhttp"
 	"github.com/lichman0405/post/cmd/api/subscriptionshttp"
 	"github.com/lichman0405/post/cmd/api/templateshttp"
 	"github.com/lichman0405/post/cmd/api/validationhttp"
@@ -80,6 +82,7 @@ import (
 	"github.com/lichman0405/post/internal/application/aborts"
 	"github.com/lichman0405/post/internal/application/assetmetadata"
 	"github.com/lichman0405/post/internal/application/assetpublish"
+	"github.com/lichman0405/post/internal/application/attestations"
 	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
@@ -119,6 +122,10 @@ import (
 	"github.com/lichman0405/post/internal/rsg/integrity"
 	"github.com/lichman0405/post/internal/rsg/schemareg"
 	rsgvalidation "github.com/lichman0405/post/internal/rsg/validation"
+	"github.com/lichman0405/post/internal/search/answer"
+	"github.com/lichman0405/post/internal/search/ranking"
+	"github.com/lichman0405/post/internal/search/retrieval"
+	"github.com/lichman0405/post/internal/security"
 	"github.com/lichman0405/post/internal/version"
 	"github.com/lichman0405/post/internal/worker"
 )
@@ -369,6 +376,22 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "post-api: authentication configuration error:\n%v\n", err)
 		return exitConfig
 	}
+	// Edge hardening (T1106, docs/23 §7): the response-header set and the
+	// shared rate-limit budgets. Loaded fail-closed like every other
+	// configuration block — an unparseable budget refuses to start rather
+	// than silently running with a different policy than the operator
+	// wrote. The budgets are logged on one line at startup so the running
+	// policy is visible without reading the loader.
+	securityCfg, err := securityLoader().Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "post-api: security configuration error:\n%v\n", err)
+		return exitConfig
+	}
+	// One limiter instance, two consumers: the login service (per-email and
+	// per-IP brute-force budgets) and the edge middleware (the coarse
+	// per-class budgets). They share the Redis keyspace but never a bucket —
+	// the middleware namespaces its keys "edge:".
+	rateLimiter := persistence.NewRedisRateLimiter(redisClient)
 	// Audit (T0110): one store writes auth events and serves the Activity
 	// reads; the state-changing stores append audit rows inside their own
 	// transactions. The auth surface records through it best-effort (the
@@ -377,7 +400,7 @@ func run(args []string) int {
 	authAPI := authhttp.New(authhttp.Deps{
 		Users:      persistence.NewCredentialStore(pool),
 		Sessions:   persistence.NewRedisSessionStore(redisClient),
-		Limiter:    persistence.NewRedisRateLimiter(redisClient),
+		Limiter:    rateLimiter,
 		OIDCClient: newOIDCClientOrNil(authCfg),
 		Cfg:        *authCfg,
 		Secure:     cfg.Layer == config.LayerProd,
@@ -972,6 +995,40 @@ func run(args []string) int {
 		Evidence: persistence.NewEvidenceStore(pool),
 	})
 	knowledgeAPI.Register(v1)
+	// Private evidence / public attestation (T0812): the governance write
+	// that lets a project state, in public, that it validated a PUBLIC
+	// version somebody else's project published — "we validated this, this
+	// way, and the result was this" — without the private work underneath
+	// it coming along. docs/12 §2 逐字: "Private Project：project/RSG/private
+	// blobs 默认不可见；可显式 Publish Asset/Knowledge/Attestation", and
+	// docs/22 §28 lists create attestation among the high-risk commands.
+	//
+	// The privacy is STRUCTURAL, not a rendering rule (migration 00120):
+	// the table has no column a reasoning note, a citation or an excerpt
+	// could be written into, and the public read
+	// (ResolvePublicAttestation) has no column for the attesting project,
+	// the basis state or the internal review — so the projection cannot
+	// disclose what it was never handed. What it publishes is the
+	// attestation itself and nothing else: the attesting project's
+	// visibility, the basis state's visibility and the visibility of
+	// anything in them are all untouched (发布不等于公开, L3-20260916-1,
+	// from the other end).
+	//
+	// The matrix row is the same one the publication evaluates —
+	// publish_private_to_public — and the human backstop in front of it is
+	// the command's own: an agent may prepare an attestation and may not
+	// issue one.
+	attestationStore := persistence.NewAttestationStore(pool)
+	attestationCommand := attestations.NewCommand(attestations.Deps{
+		Members: persistence.NewProjectStore(pool),
+		Store:   attestationStore,
+		Authz:   authz.NewMatrixEngine(),
+	})
+	attestationAPI := attestationhttp.New(attestationhttp.Deps{
+		Attest: attestationCommand,
+		Read:   attestationStore,
+	})
+	attestationAPI.Register(v1)
 	// The Explore index (T0802): the six dimensions of docs/05 §6 in one
 	// anonymous read. Three of its six sections are the platform's EXISTING
 	// public reads, not new ones — the public project list, the asset hub's
@@ -1108,7 +1165,18 @@ func run(args []string) int {
 		// with nobody's name on it. Wiring it is not optional in the sense
 		// that matters: without it the merge REFUSES such a plan instead of
 		// writing a record-less abort.
-		Aborts:   persistence.NewScientificObjectStore(pool),
+		Aborts: persistence.NewScientificObjectStore(pool),
+		// The reopen reader (T0610): the same rule for the reverse edge —
+		// a 'reopened' version the plan materializes onto main carries the
+		// record of WHO decided the reopen and WHEN, because the row the
+		// merge writes is stamped with the MERGING actor and the deciding
+		// actor exists nowhere else (internal/application/merge/ports.go).
+		// Deliberately asymmetric with Aborts above: no specification
+		// mandates a reopen record (docs/46:11 says only that a reopen
+		// creates a new transition and keeps the abort history), so an
+		// unwired or record-less case copies nothing rather than refusing
+		// a plan no sentence forbids.
+		Reopens:  persistence.NewScientificObjectStore(pool),
 		Projects: projectAPI.Service(),
 		Authz:    authz.NewMatrixEngine(),
 		// The fork lineage (T0817): the merge reads a source branch out of
@@ -1188,11 +1256,88 @@ func run(args []string) int {
 	})
 	abortAPI := aborthttp.New(aborthttp.Deps{Command: abortSvc})
 	abortAPI.Register(v1)
+	// Evidence-backed search (T0906): POST /api/v1/search runs the whole
+	// pipeline — resolve the actor's scope, plan, retrieve, rank, answer —
+	// and records the search (query plan, selected refs, citations) before
+	// it answers (docs/22 §8; the record is what /search/{searchId}:start-project
+	// addresses later).
+	//
+	// Two steps are deliberately left unwired, and both absences are the
+	// supported state the search packages document rather than a gap:
+	//
+	//   * the PLANNER has no provider. planner.New refuses a nil provider,
+	//     so no planner is constructed at all: planning is skipped, the
+	//     retrieval runs on the question alone, and the record's plan column
+	//     is null — which says "this deployment planned nothing", not "the
+	//     plan failed". A provider adapter is what a deployment that has
+	//     answered "may a question leave the platform" would add.
+	//   * the EMBEDDER is nil, so the vector signal does not run and the
+	//     vector half of the corpus is not compared. The retrieval REPORTS
+	//     this (SignalReport.Skipped = no_embedder) and the answer's
+	//     limitations carry it, because "the vector signal did not run" and
+	//     "no stored vector matched" are different statements about the
+	//     corpus and only one of them is true here.
+	//
+	// The answer generator is built with no provider for the same reason, and
+	// that is a state it accepts: an answer model that is absent costs the
+	// written summary, never the structured result underneath it.
+	retrievalStore, err := retrieval.NewSQLStore(pool)
+	if err != nil {
+		slog.Error("post-api: retrieval store setup failed", "error", err)
+		return exitRuntime
+	}
+	rankingStore, err := ranking.NewSQLStore(pool)
+	if err != nil {
+		slog.Error("post-api: ranking store setup failed", "error", err)
+		return exitRuntime
+	}
+	searcher, err := retrieval.NewRetriever(retrievalStore, nil)
+	if err != nil {
+		slog.Error("post-api: retriever setup failed", "error", err)
+		return exitRuntime
+	}
+	ranker, err := ranking.NewRanker(rankingStore)
+	if err != nil {
+		slog.Error("post-api: ranker setup failed", "error", err)
+		return exitRuntime
+	}
+	answerer, err := answer.New(answer.Deps{Logger: logger})
+	if err != nil {
+		slog.Error("post-api: answer generator setup failed", "error", err)
+		return exitRuntime
+	}
+	searchAPI := searchhttp.New(searchhttp.Deps{
+		Scope:     persistence.NewProjectStore(pool),
+		Retriever: searcher,
+		Ranker:    ranker,
+		Answerer:  answerer,
+		Records:   persistence.NewSearchRecordStore(pool),
+	})
+	searchAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
+
+	// The edge chain, outermost first (T1106):
+	//   1. security.Headers stamps the secure response-header set on every
+	//      response — including the ones the limiter refuses below, so a
+	//      429 carries the same CSP and nosniff as a 200;
+	//   2. observability assigns the correlation id, which the limiter's
+	//      own error envelope reports as request_id;
+	//   3. security.RateLimit guards the WHOLE tree — not just /api/v1 —
+	//      because the two routes that bypass the /api/v1 guard are the
+	//      ones that most need a budget: the provider push receiver
+	//      (POST /api/v1/git/hooks/gitea, authenticated by HMAC, outside
+	//      the session guard by design) and the scaffold enqueue endpoint
+	//      (POST /internal/jobs). The only exemption is the pair of
+	//      liveness/readiness probes (security.ExemptProbePaths).
+	securityCfg.SessionCookie = authhttp.CookieSession
+	handler := security.Headers()(
+		observability.Middleware(logger)(
+			security.RateLimit(rateLimiter, *securityCfg)(mux)))
+	slog.Info("post-api: edge rate limiting active", "policy", securityCfg.Describe())
 
 	srv := &http.Server{
 		Addr:              cfg.Server.Addr,
-		Handler:           observability.Middleware(logger)(mux),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -1304,6 +1449,10 @@ func databaseDSN(cfg *config.Config) string {
 // authnLoader resolves the auth configuration environment (the loader is
 // injectable so main_test can run without real env).
 var authnLoader = func() authn.Loader { return authn.Loader{} }
+
+// securityLoader resolves the edge-hardening configuration environment
+// (injectable, same reason as authnLoader).
+var securityLoader = func() security.Loader { return security.Loader{} }
 
 // gitproviderLoader resolves the GitProvider configuration environment
 // (injectable, same reason as authnLoader).

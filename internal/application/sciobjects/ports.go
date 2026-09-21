@@ -46,6 +46,13 @@ type Repository interface {
 	// (migration 00100 keeps the key on the row the request produced, so
 	// the state itself is the idempotency record).
 	GetVersionByAbortRequestKey(ctx context.Context, objectID, requestKey string) (domain.ScientificObjectVersion, error)
+	// GetVersionByReopenRequestKey is its sibling for the reverse edge: the
+	// version an earlier reopen request carrying requestKey appended to
+	// objectID's log, or ErrVersionNotFound (migration 00123 keeps the key
+	// on the row, in the abort's own shape). The two reads are separate on
+	// purpose: one column shared by both commands would let a reopen's key
+	// answer an abort request with a reopened row.
+	GetVersionByReopenRequestKey(ctx context.Context, objectID, requestKey string) (domain.ScientificObjectVersion, error)
 	// GetLatestVersion returns the head of the version log, or
 	// ErrVersionNotFound (an object without versions is impossible via
 	// the port surface).
@@ -102,4 +109,12 @@ type VersionParams struct {
 	// second — the migration-00089 pattern, applied to the entity the
 	// request actually creates.
 	AbortRequestKey string
+	// Reopen carries the reopen record when this version IS a reopen
+	// (LifecycleState == domain.LifecycleReopened, migration 00123); nil for
+	// every other version. Same placement and same reason as Abort above:
+	// governance data about a version, never part of its content.
+	Reopen *domain.ReopenRecord
+	// ReopenRequestKey is the Idempotency-Key the reopen request carried; ""
+	// when none. Its own column (migration 00123), not the abort's.
+	ReopenRequestKey string
 }

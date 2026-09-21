@@ -109,7 +109,15 @@ func (s *OrgStore) GetOrganization(ctx context.Context, orgID string) (domain.Or
 // UpdateOrganization implements orgs.OrgStore. The rename/description
 // rewrite runs inside one transaction with its audit row: the before
 // summary is read in the same transaction the UPDATE commits.
-func (s *OrgStore) UpdateOrganization(ctx context.Context, org domain.Organization) (domain.Organization, error) {
+//
+// When attribution is non-nil the attestation-attribution write joins that
+// transaction, so the three edits land together or not at all (T0812: "the
+// organization may be anonymous or named" is a setting, and a settings
+// screen whose save half-applied would lie about what it stored). The
+// before/after summaries record it only when it is part of the change —
+// an audit row for a rename should describe the rename, not restate a
+// setting nothing touched.
+func (s *OrgStore) UpdateOrganization(ctx context.Context, org domain.Organization, attribution *string) (domain.Organization, error) {
 	id, err := textUUID(org.ID)
 	if err != nil {
 		return domain.Organization{}, orgs.ErrOrgNotFound
@@ -133,24 +141,61 @@ func (s *OrgStore) UpdateOrganization(ctx context.Context, org domain.Organizati
 			return err
 		}
 		updated = orgFromRow(row)
+		beforeSummary := map[string]any{
+			"name":        before.Name,
+			"description": nullStringToValue(before.Description),
+		}
+		afterSummary := map[string]any{
+			"name":        org.Name,
+			"description": nullString(org.Description),
+		}
+		if attribution != nil {
+			if _, err := q.SetOrganizationAttestationAttribution(ctx, sqlc.SetOrganizationAttestationAttributionParams{
+				ID:                     id,
+				AttestationAttribution: *attribution,
+			}); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return orgs.ErrOrgNotFound
+				}
+				return err
+			}
+			beforeSummary["attestation_attribution"] = before.AttestationAttribution
+			afterSummary["attestation_attribution"] = *attribution
+		}
 		return appendAudit(ctx, q, domain.AuditEntry{
 			Action:         domain.ActionOrgUpdated,
 			TargetRef:      "organization:" + org.ID,
 			OrganizationID: org.ID,
-			BeforeSummary: map[string]any{
-				"name":        before.Name,
-				"description": nullStringToValue(before.Description),
-			},
-			AfterSummary: map[string]any{
-				"name":        org.Name,
-				"description": nullString(org.Description),
-			},
+			BeforeSummary:  beforeSummary,
+			AfterSummary:   afterSummary,
 		})
 	})
 	if err != nil {
 		return domain.Organization{}, err
 	}
 	return updated, nil
+}
+
+// GetAttestationAttribution implements orgs.OrgStore: the organization's
+// standing answer to "may this organization be named on an attestation it
+// issues" (organizations.attestation_attribution, migration 00120).
+//
+// It is a read of its own rather than a field of domain.Organization
+// because the domain type is not T0812's to widen; the two are paired at
+// the one place they are rendered together (cmd/api/orgshttp).
+func (s *OrgStore) GetAttestationAttribution(ctx context.Context, orgID string) (string, error) {
+	id, err := textUUID(orgID)
+	if err != nil {
+		return "", orgs.ErrOrgNotFound
+	}
+	value, err := sqlc.New(s.pool).GetOrganizationAttestationAttribution(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", orgs.ErrOrgNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("%w: get attestation attribution: %v", orgs.ErrStore, err)
+	}
+	return value, nil
 }
 
 // DeactivateOrganization implements orgs.OrgStore. The soft-delete and its

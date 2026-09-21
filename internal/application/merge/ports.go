@@ -293,6 +293,30 @@ type AbortReader interface {
 	AbortRecordOf(ctx context.Context, versionID string) (*domain.AbortRecord, error)
 }
 
+// ReopenReader reads the reopen record a version row carries, or nil when the
+// version is not a reopen (and for every version written before migration
+// 00123). It is AbortReader's twin (T0610) and reads the same kind of
+// GOVERNANCE record: who decided the reopen, when, and why. A main-line reopen
+// reaches the accepted state only by this merge, and the merge materializes
+// the row under the MERGING actor's created_by — so without this read the
+// accepted version would carry lifecycle 'reopened' with no record of the
+// decision that put it there.
+//
+// One deliberate difference from AbortReader, and it is a difference the
+// specifications force rather than one this file chooses: docs/46:7 requires
+// every ABORT to record actor/time/reason code/explanation, so a record-less
+// aborted version refuses the merge (requireAbortRecord). No sentence
+// requires a reopen record — docs/46:11 says only "Reopen 创建新 transition，
+// 保留历史 abort" — so this reader COPIES what the row carries and does not
+// invent a refusal for what it does not. A record-less reopened version that
+// some other writer produced therefore still merges; it is simply carried as
+// it stands.
+//
+// The production implementation is persistence.ScientificObjectStore.
+type ReopenReader interface {
+	ReopenRecordOf(ctx context.Context, versionID string) (*domain.ReopenRecord, error)
+}
+
 // RelationWriter appends one relation version on the commit transaction.
 // The production implementation is persistence.RelationStore
 // (AppendRelationVersionInTx); the same append-only rule as ObjectWriter, and

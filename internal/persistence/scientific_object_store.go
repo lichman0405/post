@@ -334,6 +334,9 @@ func versionInsertParams(objectID string, versionNo int, in sciobjects.VersionPa
 	if err := abortInsertParams(&p, in); err != nil {
 		return p, err
 	}
+	if err := reopenInsertParams(&p, in); err != nil {
+		return p, err
+	}
 	return p, nil
 }
 
@@ -398,6 +401,60 @@ func abortInsertParams(p *sqlc.CreateScientificObjectVersionParams, in sciobject
 // stored.
 const minAbortRequestKeyLen = 8
 
+// reopenInsertParams fills the reopen record's five columns (migration
+// 00123). It is abortInsertParams' twin, rule for rule: all-or-nothing (the
+// database's reopen_record_shape CHECK enforces the same rule), the record
+// belongs to a version whose lifecycle is 'reopened', a request key without
+// the record it belongs to is refused, and an absent record leaves every
+// column NULL.
+//
+// 00100's abort_replacement_ref has no counterpart here on purpose: that
+// field is docs/46:7's "replacement/superseding ref", a field of an ABORT
+// record — a reopen has no replacement. See migration 00123.
+func reopenInsertParams(p *sqlc.CreateScientificObjectVersionParams, in sciobjects.VersionParams) error {
+	if in.ReopenRequestKey != "" {
+		if len(in.ReopenRequestKey) < minAbortRequestKeyLen {
+			return fmt.Errorf("%w: the reopen request key must be at least %d characters",
+				sciobjects.ErrValidation, minAbortRequestKeyLen)
+		}
+		p.ReopenRequestKey = ptrText(in.ReopenRequestKey)
+	}
+	if in.Reopen == nil {
+		if in.LifecycleState == domain.LifecycleReopened && p.ReopenRequestKey != nil {
+			// A reopened version may legitimately carry no record (a fixture
+			// that only moves the lifecycle), but a request key without a
+			// record would name a decision nothing recorded.
+			return fmt.Errorf("%w: a reopen request key requires the reopen record it belongs to", sciobjects.ErrValidation)
+		}
+		return nil
+	}
+	if in.LifecycleState != domain.LifecycleReopened {
+		return fmt.Errorf("%w: a reopen record belongs to a version in lifecycle %q, not %q",
+			sciobjects.ErrValidation, domain.LifecycleReopened, in.LifecycleState)
+	}
+	if strings.TrimSpace(in.Reopen.ReasonCode) == "" {
+		return fmt.Errorf("%w: the reopen reason code is required", sciobjects.ErrValidation)
+	}
+	if strings.TrimSpace(in.Reopen.Explanation) == "" {
+		return fmt.Errorf("%w: the reopen explanation is required", sciobjects.ErrValidation)
+	}
+	if in.Reopen.DecidedBy == "" {
+		return fmt.Errorf("%w: the reopen actor is required", sciobjects.ErrValidation)
+	}
+	if in.Reopen.DecidedAt.IsZero() {
+		return fmt.Errorf("%w: the reopen time is required", sciobjects.ErrValidation)
+	}
+	decidedBy, err := textUUID(in.Reopen.DecidedBy)
+	if err != nil {
+		return fmt.Errorf("%w: reopen actor: %v", sciobjects.ErrValidation, err)
+	}
+	p.ReopenReasonCode = ptrText(in.Reopen.ReasonCode)
+	p.ReopenExplanation = ptrText(in.Reopen.Explanation)
+	p.ReopenedBy = decidedBy
+	p.ReopenedAt = pgtype.Timestamptz{Time: in.Reopen.DecidedAt, Valid: true}
+	return nil
+}
+
 // ptrText returns a pointer to s — the nullable-text shape sqlc generates
 // for a `text` column without NOT NULL.
 func ptrText(s string) *string { return &s }
@@ -439,6 +496,7 @@ func versionFromRow(row sqlc.ScientificObjectVersion) domain.ScientificObjectVer
 		CreatedBy:          pgUUIDToText(row.CreatedBy),
 		CreatedAt:          row.CreatedAt.Time,
 		Abort:              abortRecordFromRow(row),
+		Reopen:             reopenRecordFromRow(row),
 	}
 }
 
@@ -466,6 +524,25 @@ func abortRecordFromRow(row sqlc.ScientificObjectVersion) *domain.AbortRecord {
 	return rec
 }
 
+// reopenRecordFromRow is abortRecordFromRow's twin for migration 00123's
+// columns: the record the row carries, or nil when it carries none. The two
+// required halves — the reason code and the explanation — decide presence,
+// because reopen_record_shape makes the record all-or-nothing.
+func reopenRecordFromRow(row sqlc.ScientificObjectVersion) *domain.ReopenRecord {
+	if row.ReopenReasonCode == nil || row.ReopenExplanation == nil {
+		return nil
+	}
+	rec := &domain.ReopenRecord{
+		ReasonCode:  *row.ReopenReasonCode,
+		Explanation: *row.ReopenExplanation,
+		DecidedBy:   pgUUIDToText(row.ReopenedBy),
+	}
+	if row.ReopenedAt.Valid {
+		rec.DecidedAt = row.ReopenedAt.Time
+	}
+	return rec
+}
+
 // GetVersionByAbortRequestKey implements sciobjects.Repository: the version
 // an earlier abort request with this Idempotency-Key appended, or
 // ErrVersionNotFound when the key has not been used on this object. It is the
@@ -483,6 +560,34 @@ func (s *ScientificObjectStore) GetVersionByAbortRequestKey(ctx context.Context,
 	row, err := sqlc.New(s.pool).GetScientificObjectVersionByAbortRequestKey(ctx, sqlc.GetScientificObjectVersionByAbortRequestKeyParams{
 		ObjectID:        objectUUID,
 		AbortRequestKey: ptrText(requestKey),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || isInvalidText(err) {
+			return domain.ScientificObjectVersion{}, sciobjects.ErrVersionNotFound
+		}
+		return domain.ScientificObjectVersion{}, fmt.Errorf("%w: %v", sciobjects.ErrStore, err)
+	}
+	return versionFromRow(row), nil
+}
+
+// GetVersionByReopenRequestKey implements sciobjects.Repository: the version
+// an earlier reopen request with this Idempotency-Key appended, or
+// ErrVersionNotFound when the key has not been used on this object. It is
+// the read half of the reopen command's replay (migration 00123 keeps the
+// key on the version row) and the exact sibling of the abort read above —
+// separate column, separate command, so neither read can answer for the
+// other's request.
+func (s *ScientificObjectStore) GetVersionByReopenRequestKey(ctx context.Context, objectID, requestKey string) (domain.ScientificObjectVersion, error) {
+	if requestKey == "" {
+		return domain.ScientificObjectVersion{}, sciobjects.ErrVersionNotFound
+	}
+	objectUUID, err := textUUID(objectID)
+	if err != nil {
+		return domain.ScientificObjectVersion{}, sciobjects.ErrObjectNotFound
+	}
+	row, err := sqlc.New(s.pool).GetScientificObjectVersionByReopenRequestKey(ctx, sqlc.GetScientificObjectVersionByReopenRequestKeyParams{
+		ObjectID:         objectUUID,
+		ReopenRequestKey: ptrText(requestKey),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) || isInvalidText(err) {
@@ -515,7 +620,29 @@ func (s *ScientificObjectStore) AbortRecordOf(ctx context.Context, versionID str
 	return abortRecordFromRow(row), nil
 }
 
+// ReopenRecordOf implements merge.ReopenReader: the reopen record versionID
+// carries, or nil when that version is not a reopen. AbortRecordOf's twin,
+// with the same reason for existing — a main-line reopen reaches main only
+// through a Research PR, so the merge is the one place the record has to
+// travel — and the same read-by-id shape, so a version the merge is about to
+// materialize is found whether or not the branch has since been closed.
+func (s *ScientificObjectStore) ReopenRecordOf(ctx context.Context, versionID string) (*domain.ReopenRecord, error) {
+	id, err := textUUID(versionID)
+	if err != nil {
+		return nil, nil
+	}
+	row, err := sqlc.New(s.pool).GetScientificObjectVersionByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || isInvalidText(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("%w: %v", sciobjects.ErrStore, err)
+	}
+	return reopenRecordFromRow(row), nil
+}
+
 var (
 	_ sciobjects.Repository = (*ScientificObjectStore)(nil)
 	_ merge.AbortReader     = (*ScientificObjectStore)(nil)
+	_ merge.ReopenReader    = (*ScientificObjectStore)(nil)
 )

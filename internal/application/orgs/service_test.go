@@ -20,6 +20,11 @@ type fakeStore struct {
 	users    map[string]domain.User
 	nextID   int
 	failWith error // when set, every method returns it (wrapped)
+	// attributions is organizations.attestation_attribution, which the
+	// real adapter keeps on the organization row but domain.Organization
+	// has no field for (T0812 does not widen the domain type), so the fake
+	// keeps it beside the row exactly as the store does.
+	attributions map[string]string
 	// failMembershipWith fails only GetMembership — it reproduces a store
 	// outage on the membership read while the organization read works,
 	// the exact path where availability errors were masked as 403/404.
@@ -28,10 +33,11 @@ type fakeStore struct {
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
-		orgs:    map[string]domain.Organization{},
-		members: map[[2]string]domain.OrganizationMembership{},
-		users:   map[string]domain.User{},
-		nextID:  1,
+		orgs:         map[string]domain.Organization{},
+		members:      map[[2]string]domain.OrganizationMembership{},
+		users:        map[string]domain.User{},
+		attributions: map[string]string{},
+		nextID:       1,
 	}
 }
 
@@ -78,7 +84,7 @@ func (f *fakeStore) GetOrganization(_ context.Context, orgID string) (domain.Org
 	return o, nil
 }
 
-func (f *fakeStore) UpdateOrganization(_ context.Context, org domain.Organization) (domain.Organization, error) {
+func (f *fakeStore) UpdateOrganization(_ context.Context, org domain.Organization, attribution *string) (domain.Organization, error) {
 	if f.failWith != nil {
 		return domain.Organization{}, f.failWith
 	}
@@ -89,7 +95,25 @@ func (f *fakeStore) UpdateOrganization(_ context.Context, org domain.Organizatio
 	existing.Name = org.Name
 	existing.Description = org.Description
 	f.orgs[org.ID] = existing
+	if attribution != nil {
+		f.attributions[org.ID] = *attribution
+	}
 	return existing, nil
+}
+
+func (f *fakeStore) GetAttestationAttribution(_ context.Context, orgID string) (string, error) {
+	if f.failWith != nil {
+		return "", f.failWith
+	}
+	if _, ok := f.orgs[orgID]; !ok {
+		return "", ErrOrgNotFound
+	}
+	// The column's DEFAULT, reproduced: an organization that has never set
+	// it is anonymous.
+	if v, ok := f.attributions[orgID]; ok {
+		return v, nil
+	}
+	return string(AttestationAttributionAnonymous), nil
 }
 
 func (f *fakeStore) DeactivateOrganization(_ context.Context, orgID string) error {
@@ -362,7 +386,7 @@ func TestServiceNonOwnerCannotPromoteSelf(t *testing.T) {
 	}
 	// Updating the organization profile.
 	newName := "New"
-	if _, err := svc.Update(context.Background(), bob, org.ID, &newName, nil); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.Update(context.Background(), bob, org.ID, &newName, nil, nil); !errors.Is(err, ErrForbidden) {
 		t.Errorf("non-owner update error = %v, want ErrForbidden", err)
 	}
 }
@@ -471,7 +495,7 @@ func TestServiceDeactivatedOrgRefusesWrites(t *testing.T) {
 		t.Errorf("remove after deactivation error = %v, want ErrOrgDeactivated", err)
 	}
 	newName := "New"
-	if _, err := svc.Update(context.Background(), alice, org.ID, &newName, nil); !errors.Is(err, ErrOrgDeactivated) {
+	if _, err := svc.Update(context.Background(), alice, org.ID, &newName, nil, nil); !errors.Is(err, ErrOrgDeactivated) {
 		t.Errorf("update after deactivation error = %v, want ErrOrgDeactivated", err)
 	}
 	// Reads still work for members.
@@ -532,7 +556,7 @@ func TestServiceUpdatePartialFields(t *testing.T) {
 
 	// Name only: the description must survive.
 	newName := "Acme Research Renamed"
-	updated, err := svc.Update(context.Background(), alice, org.ID, &newName, nil)
+	updated, err := svc.Update(context.Background(), alice, org.ID, &newName, nil, nil)
 	if err != nil {
 		t.Fatalf("Update name: %v", err)
 	}
@@ -541,7 +565,7 @@ func TestServiceUpdatePartialFields(t *testing.T) {
 	}
 	// Description only: the name must survive.
 	newDesc := "renewed lab"
-	updated, err = svc.Update(context.Background(), alice, org.ID, nil, &newDesc)
+	updated, err = svc.Update(context.Background(), alice, org.ID, nil, &newDesc, nil)
 	if err != nil {
 		t.Fatalf("Update description: %v", err)
 	}
@@ -549,12 +573,12 @@ func TestServiceUpdatePartialFields(t *testing.T) {
 		t.Errorf("after description-only update = %q/%q, want %q/%q", updated.Name, updated.Description, newName, newDesc)
 	}
 	// Neither field: refused.
-	if _, err := svc.Update(context.Background(), alice, org.ID, nil, nil); !errors.Is(err, ErrValidation) {
+	if _, err := svc.Update(context.Background(), alice, org.ID, nil, nil, nil); !errors.Is(err, ErrValidation) {
 		t.Errorf("empty update error = %v, want ErrValidation", err)
 	}
 	// A blank name can never result (even via explicit empty).
 	blank := ""
-	if _, err := svc.Update(context.Background(), alice, org.ID, &blank, nil); !errors.Is(err, ErrValidation) {
+	if _, err := svc.Update(context.Background(), alice, org.ID, &blank, nil, nil); !errors.Is(err, ErrValidation) {
 		t.Errorf("blank name error = %v, want ErrValidation", err)
 	}
 }
@@ -591,7 +615,7 @@ func TestServiceStoreFailureSurfacesErrStore(t *testing.T) {
 		t.Errorf("Deactivate during outage error = %v, want ErrStore", err)
 	}
 	newName := "x"
-	if _, err := svc.Update(context.Background(), alice, org.ID, &newName, nil); !errors.Is(err, ErrStore) {
+	if _, err := svc.Update(context.Background(), alice, org.ID, &newName, nil, nil); !errors.Is(err, ErrStore) {
 		t.Errorf("Update during outage error = %v, want ErrStore", err)
 	}
 }

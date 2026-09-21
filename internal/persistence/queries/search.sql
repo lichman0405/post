@@ -525,3 +525,31 @@ LEFT JOIN LATERAL (
 ) cx ON true
 WHERE so.project_id = ANY(@project_ids::uuid[])
 ORDER BY a.id;
+
+-- ---------------------------------------------------------------------------
+-- The search answer record (T0906, migration 00121)
+--
+-- One row per answered search, written once by the search API. What it is for
+-- and what it deliberately is not (a cache) is the migration's header; what
+-- belongs here is the write path's own rule.
+--
+-- Every column is passed as a value the caller already produced, and the
+-- INSERT does not compute anything. That is deliberate: the row must record
+-- the search that RAN. The citations are the answer's own citation list, the
+-- selected refs are the retrieval's ranked refs, and a query that derived
+-- either one would be a second producer of the invariant — the generator's
+-- guard and the table's CHECK (citations <@ selected_refs) already refuse an
+-- ungrounded citation, and a third refusal written in SQL here could only
+-- disagree with them.
+--
+-- There is no UPDATE and no DELETE: docs/22 §8 saves the record as evidence
+-- of what was answered, and CLAUDE.md §9.8's "nothing disappears" applies to
+-- an answer that was published to a reader as much as to a scientific object.
+
+-- name: InsertSearchRecord :one
+INSERT INTO search_records (
+    actor_id, query, filters, plan, signals, selected_refs, citations, answer
+) VALUES (
+    @actor_id, @query, @filters, @plan, @signals, @selected_refs, @citations, @answer
+)
+RETURNING id, created_at;

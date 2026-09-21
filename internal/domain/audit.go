@@ -187,6 +187,18 @@ const (
 	// spec, and neither list is derived from the other.
 	ActionScientificObjectAborted = "scientific_object.aborted"
 
+	// T0610 reopen: one row per reopen of a main-line object version,
+	// written in the same transaction as the version row it appends — the
+	// abort row's own rule, applied to the reverse edge of the same
+	// transition (docs/26 names "abort/reopen" together among the
+	// highest-risk audited actions, and docs/43:10 makes reopen the
+	// transition that undoes an abort). It spells the same dotted name as
+	// the research EVENT the reopen emits
+	// (scientific_object.reopened, specs/events/event-types.yaml:23) —
+	// the same coincidence of two independent registries the abort row
+	// above records.
+	ActionScientificObjectReopened = "scientific_object.reopened"
+
 	// T0811 discussion promotion: one row per discussion comment promoted
 	// into a proposed object (an Issue, a Hypothesis scientific object, or
 	// an external-evidence proposal), written in the same transaction as

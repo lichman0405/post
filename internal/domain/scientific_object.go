@@ -83,6 +83,13 @@ type ScientificObjectVersion struct {
 	// byte-for-byte, so an abort moves the lifecycle without changing what
 	// the version says (docs/46 — a correction appends, it never rewrites).
 	Abort *AbortRecord
+	// Reopen is the reopen record this version carries, or nil when it is
+	// not a reopen (and for every version written before migration 00123).
+	// It has the abort record's shape and its reason for existing: the
+	// merge materializes a version it did not decide, so the governance
+	// facts about the decision — who decided, when, and why — must travel
+	// on the row rather than being re-derived from the row's CreatedBy.
+	Reopen *ReopenRecord
 }
 
 // AbortRecord is the record docs/46:7 requires of every abort, verbatim:
@@ -121,6 +128,63 @@ type AbortRecord struct {
 	DecidedBy string
 	// DecidedAt is the server-derived time of the abort decision
 	// (docs/46:7's "time"). It travels with the record onto main.
+	DecidedAt time.Time
+}
+
+// ReopenRecord is the record a reopen carries on the version row it appends.
+//
+// # Where its shape comes from
+//
+// docs/46_ABORT_RETENTION.md:11 is the whole specification of reopen,
+// verbatim: "Reopen 创建新 transition，保留历史 abort。" — it creates a new
+// transition and preserves the abort's history. docs/43:10 adds the edge
+// ("active → aborted → reopened → active"), docs/03 §6 defines the state
+// ("在 abort 之后通过新 transition 恢复继续研究"), and nothing else in the
+// repository says what a reopen records.
+//
+// So the FIELD SET is not invented here. The shape is T0602's abort record,
+// which the T0610 task book requires reopen to follow
+// ("reopen 按同一形状记录 reason/explanation 即可——沿用它的决定，不要另立
+// 一套"): governance data about a version, stored in dedicated nullable
+// columns on the version row rather than folded into Payload, with the
+// deciding actor and time as their OWN fields rather than the row's
+// CreatedBy/CreatedAt (a Research PR merge materializes the row and its
+// CreatedBy is the merging actor).
+//
+// # Why ReasonCode and Explanation are required here too
+//
+// No sentence in docs/ requires a reopen to state a reason, and this type
+// does not claim one does. What it does claim is narrower: a reopen is the
+// one command in this build that may move a main-line object back out of
+// the state a maintainer's abort put it in, docs/26 lists "abort/reopen"
+// together among the HIGHEST-risk audited actions, and a governed state
+// change whose reason is optional records none in practice. Requiring the
+// two fields is therefore a request-shape decision (L1 — the reopen route
+// has no requestBody in any contract; the body is this task's design, as
+// the abort route's was), it tightens rather than loosens, and its cost is
+// named in the T0610 result: a reopen without a stated reason is refused
+// with VALIDATION_FAILED rather than recorded without one.
+type ReopenRecord struct {
+	// ReasonCode is the caller-supplied reason token, in the abort record's
+	// shape and with the abort record's ruling attached: an OPEN string in
+	// V1. No specification enumerates reopen reasons (none exists at all),
+	// so none is invented — the shape is checked ([a-z0-9_], 1..64) and the
+	// value is stored as given. The cost is the same one T0602 recorded:
+	// reopens cannot be broken down by reason until a vocabulary is
+	// decided, and narrowing later is a normal, forward-only change.
+	ReasonCode string
+	// Explanation is the human explanation — the part of a governance
+	// decision no machine can reconstruct, and the reason it is required
+	// rather than optional.
+	Explanation string
+	// DecidedBy is the actor who decided the reopen. It is NOT the version
+	// row's CreatedBy, for the reason AbortRecord.DecidedBy is not: after a
+	// merge, the row's CreatedBy is the merging actor while this stays the
+	// reopening one.
+	DecidedBy string
+	// DecidedAt is the server-derived time of the reopen decision
+	// (docs/23 §3: timestamps are never accepted from an untrusted caller).
+	// It travels with the record onto main.
 	DecidedAt time.Time
 }
 
