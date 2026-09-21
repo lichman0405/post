@@ -9733,9 +9733,9 @@
       ]
     },
     "T1101": {
-      "status": "rejected",
-      "started_at": "2026-09-21T11:09:58Z",
-      "worker_run_id": "run-1b924f9dc676b161",
+      "status": "running",
+      "started_at": "2026-09-21T23:18:21Z",
+      "worker_run_id": "run-e307b9af953657a6",
       "rejection_reason": "# T1101 第三轮 review 结论：request_changes\n\n核心数字（独立复现）对得上：12 页 0 px、pull-detail 170 px、project-conflicts 1280x1199→1280x1185、run.sh 88 ok/0 FAIL、+660/−801 与 CSS +183/−444，变异日志也一致。\n\n但有一处**未经授权且现有仪器都看不见**的外观变更：\n\n- `pull-detail.css:298 .pull-change-kind` 与 `:329 .pull-change-moved` 被删掉，改由 `packages/ui/src/ui.css` 的 `.post-diff-kind`/`.post-diff-note` 渲染。\n- 评审人在 /tmp 独立副本上实测 PR 页 scientific tab：\n  - HEAD 的 kind chip 是 59.8x18 / 55.9x18 / 57x18、radius 10px、font 11px/16px、padding 0 6px、neutral 文字 rgb(31,35,40)。\n  - 现在是 67.9x22 / 63.7x22 / 65x22、radius 999px、font 12px/18px、padding 1px 8px、neutral 文字 rgb(89,99,110)。\n  - moved 注记 175.2x18 → 193.9x22；面板 449px → 488px 高；同一面板区域 29807 px 不同（守卫容差 64）。\n- 这些元素只在 scientific/knowledge/evidence 非默认 tab 渲染，而 visual-regression.mjs 的 `PAGES` 只拍默认状态（ready 是 `[data-pull-panel=\"summary\"]`），所以基线对照、style-parity、section E 全看不见。\n- AC5 证据写「五处 10px 现在都是 6px」，但 `.pull-change-kind`/`.pull-change-moved` 已不存在，其替代者是 999px——证据被 diff 推翻。\n\n**返工要求：**\n1. 把这两个 chip 按 HEAD 度量写回 `pull-detail.css`（或让共享 Diff 组件能还原 HEAD 度量），并在 scientific tab 下实测像素等价。\n2. 同时修掉 RESULT.json 里 AC5 那条与 diff 矛盾的证据。\n3. 考虑把 `head-tree-visual.sh` 接进日常路径，并在 visual-regression.mjs 里给 pull-detail 补拍 scientific/knowledge/evidence tab 后的基线，堵住非默认状态的覆盖空洞。\n\n其余 minor/nit 见 review RESULT.json，不阻塞。\n",
       "history": [
         {
@@ -9820,6 +9820,13 @@
           "at": "2026-09-21T22:53:15Z",
           "run_id": "run-9b720c98b7e04110",
           "reason": "# T1101 第三轮 review 结论：request_changes\n\n核心数字（独立复现）对得上：12 页 0 px、pull-detail 170 px、project-conflicts 1280x1199→1280x1185、run.sh 88 ok/0 FAIL、+660/−801 与 CSS +183/−444，变异日志也一致。\n\n但有一处**未经授权且现有仪器都看不见**的外观变更：\n\n- `pull-detail.css:298 .pull-change-kind` 与 `:329 .pull-change-moved` 被删掉，改由 `packages/ui/src/ui.css` 的 `.post-diff-kind`/`.post-diff-note` 渲染。\n- 评审人在 /tmp 独立副本上实测 PR 页 scientific tab：\n  - HEAD 的 kind chip 是 59.8x18 / 55.9x18 / 57x18、radius 10px、font 11px/16px、padding 0 6px、neutral 文字 rgb(31,35,40)。\n  - 现在是 67.9x22 / 63.7x22 / 65x22、radius 999px、font 12px/18px、padding 1px 8px、neutral 文字 rgb(89,99,110)。\n  - moved 注记 175.2x18 → 193.9x22；面板 449px → 488px 高；同一面板区域 29807 px 不同（守卫容差 64）。\n- 这些元素只在 scientific/knowledge/evidence 非默认 tab 渲染，而 visual-regression.mjs 的 `PAGES` 只拍默认状态（ready 是 `[data-pull-panel=\"summary\"]`），所以基线对照、style-parity、section E 全看不见。\n- AC5 证据写「五处 10px 现在都是 6px」，但 `.pull-change-kind`/`.pull-change-moved` 已不存在，其替代者是 999px——证据被 diff 推翻。\n\n**返工要求：**\n1. 把这两个 chip 按 HEAD 度量写回 `pull-detail.css`（或让共享 Diff 组件能还原 HEAD 度量），并在 scientific tab 下实测像素等价。\n2. 同时修掉 RESULT.json 里 AC5 那条与 diff 矛盾的证据。\n3. 考虑把 `head-tree-visual.sh` 接进日常路径，并在 visual-regression.mjs 里给 pull-detail 补拍 scientific/knowledge/evidence tab 后的基线，堵住非默认状态的覆盖空洞。\n\n其余 minor/nit 见 review RESULT.json，不阻塞。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T23:18:21Z",
+          "run_id": "run-e307b9af953657a6",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -10514,9 +10521,9 @@
       ]
     },
     "T1112": {
-      "status": "rejected",
-      "started_at": "2026-09-21T21:36:05Z",
-      "worker_run_id": "run-37d2c7a3b3dd92bf",
+      "status": "running",
+      "started_at": "2026-09-21T23:20:47Z",
+      "worker_run_id": "run-57e750d3bd78f834",
       "rejection_reason": "# T1112 rebaseline：main 已推进，web 演示 UI 的回归已修复\n\n当前 main 已合并：\n- PR #337 [T1202] Canonical MOF Workflow E2E\n- PR #338 hotfix/web-demo-regressions：移除 CSS gradient 违规、为 project overview 增加 overview/counts/branches 的 null-safety\n\n上一轮 review 指出 browser suites 因 apps/web 回归（projects.css gradient、projects/[id]/page.tsx 缺少 null-check）而无法通过。这些回归已在 main 修复，因此将 T1112 推到当前 main 重新验证。\n\n要求不变：浏览器测试套件接进 make，断言写错必须报错；G1/G2/G3 通过。\n",
       "history": [
         {
@@ -10565,6 +10572,13 @@
           "at": "2026-09-21T22:50:28Z",
           "run_id": "run-df39862b4d55b8b7",
           "reason": "# T1112 rebaseline：main 已推进，web 演示 UI 的回归已修复\n\n当前 main 已合并：\n- PR #337 [T1202] Canonical MOF Workflow E2E\n- PR #338 hotfix/web-demo-regressions：移除 CSS gradient 违规、为 project overview 增加 overview/counts/branches 的 null-safety\n\n上一轮 review 指出 browser suites 因 apps/web 回归（projects.css gradient、projects/[id]/page.tsx 缺少 null-check）而无法通过。这些回归已在 main 修复，因此将 T1112 推到当前 main 重新验证。\n\n要求不变：浏览器测试套件接进 make，断言写错必须报错；G1/G2/G3 通过。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T23:20:47Z",
+          "run_id": "run-57e750d3bd78f834",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -10808,9 +10822,9 @@
       ]
     },
     "T1205": {
-      "status": "rejected",
-      "started_at": "2026-09-21T10:57:23Z",
-      "worker_run_id": "run-51bd734370cd9991",
+      "status": "running",
+      "started_at": "2026-09-21T23:13:33Z",
+      "worker_run_id": "run-22fc1efdc63a15ea",
       "rejection_reason": "# T1205 review 结论：request_changes\n\n仪器本身诚实且核心逻辑正确：独立 rebuilt `tests/cmd/contractgate` 后 `-check-inventory` pass；192 个 /api/v1 字面值、153 个注册型调用、134 条 inventory 行均核对无误；98 条未记录路由都有 suggest+reason；probe 也验证 exemption/citation 机制工作。\n\n但有一个 **blocking** 问题：\n\n- `tests/contract/inventory.go:131` 产生 **NEW staticcheck finding S1016**：`should convert e (type Exemption) to SuggestedExemption instead of using struct literal`。\n- `make staticcheck` 是 CI `go` job 的第 3 步，也是每个任务 G2 要重跑的 job—— merge 会红 T1205 自己的 G4 和所有在飞工人的 G2。\n- RESULT.json 里声称跑过 CI 的 `go` job 且没有 FAIL，但实际没有跑 fmt/vet/staticcheck。\n\n**返工要求：**\n1. 修掉 S1016：把 `inv.Suggested = append(inv.Suggested, SuggestedExemption{...})` 改成 `inv.Suggested = append(inv.Suggested, SuggestedExemption(e))`（已验证可编译且 staticcheck 静默）。\n2. 重新跑 `make staticcheck`、`make check`、CI 的 `go` job，把真实结果写进 RESULT.json。\n3. （major）把 enumerator 的 advisory list 暴露给 reader/JSON 输出，避免 chi 风格未知 router 上的注册被静默吞掉；同时修正 RESULT 里「chi-style .Get/.Post 被识别」的措辞，因为 fixture 并未覆盖未知 receiver 的情况。\n4. （minor）修正 RESULT 里对 inventory reason 的引用，改为实际文本；统一 `-write-inventory`/`-check-inventory` 等路径是相对于 `-root` 还是 CWD。\n",
       "history": [
         {
@@ -10839,6 +10853,13 @@
           "at": "2026-09-21T22:53:15Z",
           "run_id": "run-8374eba4266ab30f",
           "reason": "# T1205 review 结论：request_changes\n\n仪器本身诚实且核心逻辑正确：独立 rebuilt `tests/cmd/contractgate` 后 `-check-inventory` pass；192 个 /api/v1 字面值、153 个注册型调用、134 条 inventory 行均核对无误；98 条未记录路由都有 suggest+reason；probe 也验证 exemption/citation 机制工作。\n\n但有一个 **blocking** 问题：\n\n- `tests/contract/inventory.go:131` 产生 **NEW staticcheck finding S1016**：`should convert e (type Exemption) to SuggestedExemption instead of using struct literal`。\n- `make staticcheck` 是 CI `go` job 的第 3 步，也是每个任务 G2 要重跑的 job—— merge 会红 T1205 自己的 G4 和所有在飞工人的 G2。\n- RESULT.json 里声称跑过 CI 的 `go` job 且没有 FAIL，但实际没有跑 fmt/vet/staticcheck。\n\n**返工要求：**\n1. 修掉 S1016：把 `inv.Suggested = append(inv.Suggested, SuggestedExemption{...})` 改成 `inv.Suggested = append(inv.Suggested, SuggestedExemption(e))`（已验证可编译且 staticcheck 静默）。\n2. 重新跑 `make staticcheck`、`make check`、CI 的 `go` job，把真实结果写进 RESULT.json。\n3. （major）把 enumerator 的 advisory list 暴露给 reader/JSON 输出，避免 chi 风格未知 router 上的注册被静默吞掉；同时修正 RESULT 里「chi-style .Get/.Post 被识别」的措辞，因为 fixture 并未覆盖未知 receiver 的情况。\n4. （minor）修正 RESULT 里对 inventory reason 的引用，改为实际文本；统一 `-write-inventory`/`-check-inventory` 等路径是相对于 `-root` 还是 CWD。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T23:13:33Z",
+          "run_id": "run-22fc1efdc63a15ea",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -10861,9 +10882,9 @@
       "merged_at": null
     },
     "T1208": {
-      "status": "rejected",
-      "started_at": "2026-09-21T21:56:45Z",
-      "worker_run_id": "run-6c6965584d96b40d",
+      "status": "running",
+      "started_at": "2026-09-21T23:21:38Z",
+      "worker_run_id": "run-0e80eb227c40c2cd",
       "rejection_reason": "# T1208 review 结论：request_changes\n\n验收逻辑本身已满足：独立重跑 `bash tests/acceptance/project-export-portability-e2e.sh` 得到 31 ok / 0 FAIL，四个 identifier class 两边一致、source fingerprint 字节相同、三处 tamper 都按位置拒绝、第二次导入被拒绝、mutation check 证明每处拒绝都 load-bearing；运行前后工作树无变化、无残留。\n\n但 **blocking**：新 package 让 `make staticcheck` 失败，而它是 CI `go` job 的第 3 步、G4 required job——当前交付无法绿 CI。\n\n`bash scripts/staticcheck.sh` 在 frozen tree 上报告 **3 条 NEW finding**，全部在 `tests/acceptance/portability/`，且都不在 baseline 里：\n- `git.go:161:6` func `commitTreeSHA` is unused (U1000)；其 doc 注释说「tree id 会 carried in the report」，实际无调用。\n- `git.go:349:17` func `(*gitea).deleteRepo` is unused (U1000)。\n- `import.go:462:10` error strings should not be capitalized (ST1005, \"Git commit differs: ...\")。\n\n**返工要求：**\n1. 删除 `commitTreeSHA` 和 `deleteRepo`（或把它们 wire 起来），并把错误字符串小写化。\n2. 重新跑 `make staticcheck` 并通过。\n3. 把 staticcheck 加入 RESULT.json 的测试列表（docs/67 的 G1 已把它与 go test、go vet 并列）。\n4. 重新跑完整 G1/G3 并把真实结果写进 RESULT.json。\n\n其余 minor/nit（import 侧 Git identifier 比较对象是自己、blob 集合两边定义不同、releases 只导一行、bundle ref 集单向校验、assemble 阶段 put=0、G3 job 未接线、MinIO/Gitea token 残留）见 review RESULT.json，本轮不阻塞但请顺手评估。\n",
       "history": [
         {
@@ -10892,6 +10913,13 @@
           "at": "2026-09-21T22:53:15Z",
           "run_id": "run-fe494228baf5b697",
           "reason": "# T1208 review 结论：request_changes\n\n验收逻辑本身已满足：独立重跑 `bash tests/acceptance/project-export-portability-e2e.sh` 得到 31 ok / 0 FAIL，四个 identifier class 两边一致、source fingerprint 字节相同、三处 tamper 都按位置拒绝、第二次导入被拒绝、mutation check 证明每处拒绝都 load-bearing；运行前后工作树无变化、无残留。\n\n但 **blocking**：新 package 让 `make staticcheck` 失败，而它是 CI `go` job 的第 3 步、G4 required job——当前交付无法绿 CI。\n\n`bash scripts/staticcheck.sh` 在 frozen tree 上报告 **3 条 NEW finding**，全部在 `tests/acceptance/portability/`，且都不在 baseline 里：\n- `git.go:161:6` func `commitTreeSHA` is unused (U1000)；其 doc 注释说「tree id 会 carried in the report」，实际无调用。\n- `git.go:349:17` func `(*gitea).deleteRepo` is unused (U1000)。\n- `import.go:462:10` error strings should not be capitalized (ST1005, \"Git commit differs: ...\")。\n\n**返工要求：**\n1. 删除 `commitTreeSHA` 和 `deleteRepo`（或把它们 wire 起来），并把错误字符串小写化。\n2. 重新跑 `make staticcheck` 并通过。\n3. 把 staticcheck 加入 RESULT.json 的测试列表（docs/67 的 G1 已把它与 go test、go vet 并列）。\n4. 重新跑完整 G1/G3 并把真实结果写进 RESULT.json。\n\n其余 minor/nit（import 侧 Git identifier 比较对象是自己、blob 集合两边定义不同、releases 只导一行、bundle ref 集单向校验、assemble 阶段 put=0、G3 job 未接线、MinIO/Gitea token 残留）见 review RESULT.json，本轮不阻塞但请顺手评估。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-21T23:21:38Z",
+          "run_id": "run-0e80eb227c40c2cd",
+          "reason": "worker spawn"
         }
       ]
     }
