@@ -279,6 +279,9 @@
         {
           "run": "bash tests/security/owasp-smoke.sh"
         }
+      ],
+      "requires_tasks": [
+        "T1106"
       ]
     },
     "mof-canonical": {
@@ -286,6 +289,9 @@
         {
           "run": "bash tests/acceptance/mof-canonical-workflow.sh"
         }
+      ],
+      "requires_tasks": [
+        "T1202"
       ]
     }
   },

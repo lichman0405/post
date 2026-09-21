@@ -7198,6 +7198,7 @@
         "infra/migrations/**",
         "specs/database/postgres.sql",
         "internal/persistence/queries/**",
+        "internal/persistence/sqlc/**",
         "internal/config/**",
         "ops/ci/**",
         "Makefile",
