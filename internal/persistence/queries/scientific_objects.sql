@@ -34,12 +34,14 @@ INSERT INTO scientific_object_versions
     (object_id, version_no, state_id, branch_id, schema_id, schema_version,
      title, lifecycle_state, payload, visibility_policy_id, integrity_hash, created_by,
      abort_reason_code, abort_explanation, abort_replacement_ref, aborted_by, aborted_at,
-     abort_request_key)
+     abort_request_key,
+     reopen_reason_code, reopen_explanation, reopened_by, reopened_at, reopen_request_key)
 VALUES
     (@object_id, @version_no, @state_id, @branch_id, @schema_id, @schema_version,
      @title, @lifecycle_state, @payload, @visibility_policy_id, @integrity_hash, @created_by,
      @abort_reason_code, @abort_explanation, @abort_replacement_ref, @aborted_by, @aborted_at,
-     @abort_request_key)
+     @abort_request_key,
+     @reopen_reason_code, @reopen_explanation, @reopened_by, @reopened_at, @reopen_request_key)
 RETURNING *;
 
 -- name: CanonicalizeScientificObjectPayload :one
@@ -75,3 +77,13 @@ ORDER BY version_no;
 -- in; the partial unique index makes the pair unique by construction.
 SELECT * FROM scientific_object_versions
 WHERE object_id = @object_id AND abort_request_key = @abort_request_key;
+
+-- name: GetScientificObjectVersionByReopenRequestKey :one
+-- The reopen command's idempotency lookup (T0610). Migration 00123 gives the
+-- reopen its OWN key column rather than reusing the abort's: the two reads
+-- are consumed by two commands' replay paths, so a shared column would let a
+-- reopen's key answer an abort request with a reopened row. Scoped to the
+-- object, which is the only scope a route that names one object can replay
+-- in; the partial unique index makes the pair unique by construction.
+SELECT * FROM scientific_object_versions
+WHERE object_id = @object_id AND reopen_request_key = @reopen_request_key;

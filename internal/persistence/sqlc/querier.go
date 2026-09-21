@@ -776,6 +776,13 @@ type Querier interface {
 	GetScientificObjectVersionByAbortRequestKey(ctx context.Context, arg GetScientificObjectVersionByAbortRequestKeyParams) (ScientificObjectVersion, error)
 	GetScientificObjectVersionByID(ctx context.Context, id pgtype.UUID) (ScientificObjectVersion, error)
 	GetScientificObjectVersionByNo(ctx context.Context, arg GetScientificObjectVersionByNoParams) (ScientificObjectVersion, error)
+	// The reopen command's idempotency lookup (T0610). Migration 00123 gives the
+	// reopen its OWN key column rather than reusing the abort's: the two reads
+	// are consumed by two commands' replay paths, so a shared column would let a
+	// reopen's key answer an abort request with a reopened row. Scoped to the
+	// object, which is the only scope a route that names one object can replay
+	// in; the partial unique index makes the pair unique by construction.
+	GetScientificObjectVersionByReopenRequestKey(ctx context.Context, arg GetScientificObjectVersionByReopenRequestKeyParams) (ScientificObjectVersion, error)
 	GetStateCommitByID(ctx context.Context, id pgtype.UUID) (StateCommit, error)
 	// The project's template origin — at most one row exists (UNIQUE
 	// (project_id)); the query answers no-row when the project was created

@@ -1,10 +1,10 @@
 {
   "algorithm": "sha256",
-  "combined_digest": "92377a1dfa87d953c07642f4b7597b04de1eae86f7f2bba939153df76e93245b",
+  "combined_digest": "830674ca90c2f46868622bef408297b1599d6ee3dae127175be638a59acf8878",
   "files": {
     "specs/README.md": "2a0398dfb3ead0586034364d7411d845b84fd33b7c43d1ce9199d6a14ef4cf1a",
     "specs/api/openapi.yaml": "108350c3720aab57408f5a529821fa0c85e7c2ea7dcbc2ddd2ffcfa33e3697e5",
-    "specs/database/postgres.sql": "fc6cf6f587738dd084e79e77601fad1e3112c37d4dcf436e94ecdac454477a8d",
+    "specs/database/postgres.sql": "eee3118eeca7a40d1bb58898651f90df102aac913b13b99de863d42fd5665663",
     "specs/events/event-types.yaml": "5987d653a176348dd86cb6563578de8095e9f8390cca72b332f51dac5edf954c",
     "specs/mcp/tools.json": "f6b5fb023aba882a259bbe7d001bdd2755c1120f1dc768fe7512a7383fdbaca9",
     "specs/orchestrator/decision-levels.yaml": "8a06ec18b8abd79c2462e3d3bcc5b785c51a8f970c54aaa279f174882e0f5a3f",
@@ -19,7 +19,7 @@
     "specs/orchestrator/worker-permissions.yaml": "ced207553fac98138d959f6717d803db27a259a3a1fa87c1b7f8529484c8721a",
     "specs/orchestrator/worker-registry.schema.json": "907fe9143712217ba6983cacb1f5a61a6203d7cf61306f5cd0914ebba1cf9358",
     "specs/orchestrator/worker-result.schema.json": "c40f7994837f698d0b78079a989a708ea0e56050c93bada6602d9e7604467098",
-    "specs/policies/permissions-matrix.csv": "0143dade0b6dcddf04611ed5321f13b8e70f1ebfba9ad280cc2611b6aadd8e40",
+    "specs/policies/permissions-matrix.csv": "8065fb24b0e5dea93ab21e7152487238862be9b9057a45fe838577d72db078da",
     "specs/policies/rights-template.yaml": "849e73bc283b2319559592a341380ebf35fa7177f4585505da70382adbb6d10e",
     "specs/schemas/calculation.schema.json": "aae944e00e6a03cb47bbcb69c16e614ccc0ce41cd76d928aaafe16b01f36e439",
     "specs/schemas/claim.schema.json": "9b2bb36a9524d889c2416cd5a8c400ffdf779dc8e3c06c97bd3a5e54ed114c26",
@@ -43,5 +43,5 @@
   },
   "input_count": 38,
   "marker_format": 1,
-  "spec_version": "sha256:92377a1dfa87d953"
+  "spec_version": "sha256:830674ca90c2f468"
 }

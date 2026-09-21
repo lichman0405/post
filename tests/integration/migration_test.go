@@ -338,7 +338,15 @@ var canonicalTables = map[string]tableExp{
 		// that is not an abort has none — and the all-or-nothing
 		// abort_record_shape CHECK is what makes "none" the only other
 		// state the row can be in.
-		cols:    []colExp{c("id", u, false, true), c("object_id", u, false, false), c("version_no", i4, false, false), c("state_id", u, false, false), c("branch_id", u, true, false), c("schema_id", txt, false, false), c("schema_version", txt, false, false), c("title", txt, false, false), c("lifecycle_state", txt, false, false), c("payload", jb, false, false), c("visibility_policy_id", u, true, false), c("integrity_hash", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true), c("abort_reason_code", txt, true, false), c("abort_explanation", txt, true, false), c("abort_replacement_ref", txt, true, false), c("aborted_by", u, true, false), c("aborted_at", ts, true, false), c("abort_request_key", txt, true, false)},
+		// reopen_reason_code … reopen_request_key are the T0610 addition
+		// (00123): the same record shape 00100 gave the abort, applied to
+		// the reverse edge — the reopen APPENDS a transition and keeps the
+		// abort history (docs/46:11), so it needs a record of its own
+		// decision and a key of its own to replay against. Nullable for the
+		// same reason, with the same all-or-nothing guard; no counterpart to
+		// abort_replacement_ref, because docs/46:7 gives that field to an
+		// abort alone.
+		cols:    []colExp{c("id", u, false, true), c("object_id", u, false, false), c("version_no", i4, false, false), c("state_id", u, false, false), c("branch_id", u, true, false), c("schema_id", txt, false, false), c("schema_version", txt, false, false), c("title", txt, false, false), c("lifecycle_state", txt, false, false), c("payload", jb, false, false), c("visibility_policy_id", u, true, false), c("integrity_hash", txt, false, false), c("created_by", u, false, false), c("created_at", ts, false, true), c("abort_reason_code", txt, true, false), c("abort_explanation", txt, true, false), c("abort_replacement_ref", txt, true, false), c("aborted_by", u, true, false), c("aborted_at", ts, true, false), c("abort_request_key", txt, true, false), c("reopen_reason_code", txt, true, false), c("reopen_explanation", txt, true, false), c("reopened_by", u, true, false), c("reopened_at", ts, true, false), c("reopen_request_key", txt, true, false)},
 		pk:      []string{"id"},
 		uniques: [][]string{{"object_id", "version_no"}},
 		checks: []string{
@@ -352,8 +360,26 @@ var canonicalTables = map[string]tableExp{
 			"abort_reason_code ~", "length(btrim(abort_explanation))",
 			"length(btrim(abort_replacement_ref))", "length(abort_request_key) >= 8",
 			"aborted_by IS NULL",
+			// T0610 (00123): the reopen record's four guards, the same four
+			// the abort record above carries — three per-column shape
+			// guards and one all-or-nothing guard ("reopened_by IS NULL"
+			// names the all-or-nothing definition and nothing else). The
+			// request key's guard is the reopen's OWN column: the abort's
+			// key index is read by the abort command's replay path, so a
+			// reopen key written there would answer an abort request with a
+			// reopened row.
+			// "reopened_by IS NULL" is the fragment that names the
+			// all-or-nothing guard, and that guard is also what ties the
+			// record to the state it describes (a row carrying reopen
+			// metadata is a row whose lifecycle_state IS 'reopened'). One
+			// fragment, because the comparison counts fragments against
+			// definitions and the guard is one definition — the abort entry
+			// above states it with the same fragment for the same reason.
+			"reopen_reason_code ~", "length(btrim(reopen_explanation))",
+			"length(reopen_request_key) >= 8",
+			"reopened_by IS NULL",
 		},
-		fks: []fkExp{fk("object_id", "scientific_objects", "RESTRICT"), fk("state_id", "project_states", "RESTRICT"), fk("branch_id", "branches", "RESTRICT"), fk("created_by", "users", "RESTRICT"), fk("aborted_by", "users", "RESTRICT")},
+		fks: []fkExp{fk("object_id", "scientific_objects", "RESTRICT"), fk("state_id", "project_states", "RESTRICT"), fk("branch_id", "branches", "RESTRICT"), fk("created_by", "users", "RESTRICT"), fk("aborted_by", "users", "RESTRICT"), fk("reopened_by", "users", "RESTRICT")},
 	},
 	"relations": {
 		// current_version_no is the T0203 addition (00025): the
@@ -1304,8 +1330,13 @@ var explicitIndexes = map[string][]string{
 	// unique per object and only where it is set, so the state itself is
 	// the idempotency record without a second table.
 	"scientific_object_versions_abort_request_key_idx": {"UNIQUE", "object_id", "abort_request_key", "WHERE"},
-	"relation_versions_source_idx":                     {"source_object_version_id", "relation_type"},
-	"relation_versions_target_idx":                     {"target_object_version_id", "relation_type"},
+	// T0610 (00123): the reopen command's idempotency index, the abort's
+	// shape applied to a column of its own. The two keys are two columns
+	// because one column shared by both commands would let a reopen
+	// request's key answer an abort request's replay (and the reverse).
+	"scientific_object_versions_reopen_request_key_idx": {"UNIQUE", "object_id", "reopen_request_key", "WHERE"},
+	"relation_versions_source_idx":                      {"source_object_version_id", "relation_type"},
+	"relation_versions_target_idx":                      {"target_object_version_id", "relation_type"},
 	// T0203: the query-by-type paths join relation_versions to relations
 	// on the project boundary (migration 00025).
 	"relations_project_idx":             {"project_id"},

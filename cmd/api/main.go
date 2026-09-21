@@ -1151,7 +1151,18 @@ func run(args []string) int {
 		// with nobody's name on it. Wiring it is not optional in the sense
 		// that matters: without it the merge REFUSES such a plan instead of
 		// writing a record-less abort.
-		Aborts:   persistence.NewScientificObjectStore(pool),
+		Aborts: persistence.NewScientificObjectStore(pool),
+		// The reopen reader (T0610): the same rule for the reverse edge —
+		// a 'reopened' version the plan materializes onto main carries the
+		// record of WHO decided the reopen and WHEN, because the row the
+		// merge writes is stamped with the MERGING actor and the deciding
+		// actor exists nowhere else (internal/application/merge/ports.go).
+		// Deliberately asymmetric with Aborts above: no specification
+		// mandates a reopen record (docs/46:11 says only that a reopen
+		// creates a new transition and keeps the abort history), so an
+		// unwired or record-less case copies nothing rather than refusing
+		// a plan no sentence forbids.
+		Reopens:  persistence.NewScientificObjectStore(pool),
 		Projects: projectAPI.Service(),
 		Authz:    authz.NewMatrixEngine(),
 		// The fork lineage (T0817): the merge reads a source branch out of

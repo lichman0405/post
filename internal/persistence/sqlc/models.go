@@ -487,6 +487,16 @@ type ScientificObjectVersion struct {
 	AbortedAt pgtype.Timestamptz `json:"aborted_at"`
 	// The Idempotency-Key the abort request carried (specs/api/openapi.yaml components.parameters.IdempotencyKey); NULL when none. UNIQUE per object among non-NULL keys, so a repeated request reads the row the first one wrote instead of appending a second (the migration-00089 pattern). Not carried onto main by a merge: it names a request, not history.
 	AbortRequestKey *string `json:"abort_request_key"`
+	// The reopen's reason code, in the shape 00100 gave the abort record. An OPEN caller-supplied token in V1 — no spec names reopen reason codes at all, and this platform does not invent a vocabulary; the column CHECKs the shape (^[a-z0-9_]{1,64}$) and records the value as given.
+	ReopenReasonCode *string `json:"reopen_reason_code"`
+	// The human explanation the reopen recorded — the part no machine can reconstruct. Non-blank when the record exists.
+	ReopenExplanation *string `json:"reopen_explanation"`
+	// The actor who decided the reopen (not the row's created_by: after a Research PR merge materializes the reopen onto main, created_by is the merging actor while this stays the reopening one).
+	ReopenedBy pgtype.UUID `json:"reopened_by"`
+	// Server-derived time of the reopen decision; never caller-supplied. Travels with the record when a merge materializes the reopen onto main.
+	ReopenedAt pgtype.Timestamptz `json:"reopened_at"`
+	// The Idempotency-Key the reopen request carried (specs/api/openapi.yaml components.parameters.IdempotencyKey); NULL when none. UNIQUE per object among non-NULL keys, so a repeated request reads the row the first one wrote instead of appending a second (the migration-00100 pattern). Not carried onto main by a merge: it names a request, not history.
+	ReopenRequestKey *string `json:"reopen_request_key"`
 }
 
 type StateCommit struct {
