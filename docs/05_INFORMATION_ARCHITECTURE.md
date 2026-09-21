@@ -16,13 +16,14 @@
 
 ## 3. Project 导航
 
-`Overview | Research | Issues | Pull Requests | Releases | Assets | Files | Activity | Settings`
+`Overview | Research | Issues | Pull Requests | Releases | Milestones | Assets | Files | Activity | Settings`
 
 - Overview：Research Summary、main 状态、active branches、key findings、open questions、needs attention。
 - Research：默认 Research Map，以 Question/Findings/Paths 组织；可切换 Objects、Evidence、Provenance。
 - Issues：工作流事项。
 - Pull Requests：Research State Diff + Review。
 - Releases：immutable snapshots。
+- Milestones：项目研究时间线上的有日期事实（候选入选、论文投稿、专利申报、外部验证、自定义标签），按 `occurred_at` 升序即研究顺序；可以指向一个 release（链接可选），但它**不是**项目生命周期状态——列表不携带完成态，任何 milestone 都不驱动状态迁移。
 - Assets：本 Project 发布/依赖/衍生的 assets。
 - Files：只读底层 Git/Blob 专业视图。
 - Activity：state transitions、audit、contribution events。

@@ -5,6 +5,7 @@ project_tabs:
   - issues
   - pull_requests
   - releases
+  - milestones
   - assets
   - files
   - activity
