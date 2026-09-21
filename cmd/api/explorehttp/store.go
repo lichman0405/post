@@ -29,17 +29,19 @@ import (
 //     A publication may come from a private project (docs/12 §2 lets a
 //     private project publish Knowledge), and the index names the
 //     publishing project only when that project is public — which the model
-//     decides from the public project set. What the query DOES read since
-//     T0805 is projects.visibility, as one of the three inputs of the
-//     audience rule (knowledgepublish.AudienceFor): a publication exists
-//     from the moment someone publishes it, and whether the network may see
-//     it is a separate question the version's OWN axis answers. Reading the
-//     preset is what lets that question be answered at all on an anonymous
-//     surface; the project's identity still does not leave the database.
+//     decides from the public project set. What the query DOES read is
+//     projects.visibility, as one of the three inputs of the audience rule
+//     (knowledgepublish.AudienceFor): a publication exists from the moment
+//     someone publishes it, and whether the network may see it is a separate
+//     question the version's OWN axis answers. Reading the preset is what
+//     lets that question be answered at all on an anonymous surface; the
+//     project's identity still does not leave the database. Since T1107 the
+//     preset is also a WHERE predicate, so a private project's publication
+//     does not consume one of the twenty slots either — see knowledgeQuery.
 //   - listPublicPeople never reads users.email. The directory renders
 //     handle, display name and bio; email is identity, not a profile field
 //     (internal/application/profile).
-//   - Neither list renders a count of anything.
+//   - No list renders a count of anything.
 //
 // # Why the WHERE clauses exist although the model re-checks
 //
@@ -47,8 +49,10 @@ import (
 // (KnowledgeRow.PublicationID, PersonRow.DisabledAt,
 // OrganizationRow.DeactivatedAt) and BuildIndex re-reads it, so a store
 // regression renders a shorter index rather than a leak. The predicates here
-// are the primary filter: they keep the LIMIT honest (a deactivated row
-// consuming one of the twenty slots would silently shrink the section).
+// are the primary filter: they keep the LIMIT honest (a row the surface will
+// not render consuming one of the twenty slots would silently shrink the
+// section, and — before T1107's fix to knowledgeQuery — the shape of that
+// shrinkage was itself an existence oracle).
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -63,21 +67,59 @@ func NewStore(pool *pgxpool.Pool) *Store {
 // publication first.
 //
 // The LIMIT is explore.SectionLimit: the section renders the newest twenty, and
-// reading more than it renders would only widen the read for no answer.
+// reading more than it renders would only widen the read for no answer. That
+// sentence is the reason for the two predicates below, and until T1107 it was
+// also a claim this query did not honour: the LIMIT was taken over the whole
+// corpus — every private project's publications included — and the audience
+// rule was applied afterwards, in Go. A window read raw is a window a writer
+// can spend (internal/persistence/queries/feeds.sql:8-27 argues the same
+// point at length for the feed reads), and here it is worse than the
+// suppression that file describes: a reader who can enumerate the network's
+// publications through other public reads (GET /api/v1/knowledge/{pid}) sees
+// this section come back SHORT of the public corpus, and the shortfall is an
+// existence oracle for publications the reader may not see. docs/54's
+// scenario #1 is "a private project's content showing up in
+// Search/Explore/API error"; a count that shows up as an absence is the same
+// disclosure with the sign flipped, and docs/23 §5 forbids it in the same
+// breath as a rendered count.
 //
-// The last three columns are the audience rule's inputs, and they are read
-// rather than filtered on. This surface is ANONYMOUS by construction
-// (cmd/api/explorehttp/doc.go), and it is the one reader that would render a
-// publication to a caller who is not a member of the project that owns it —
-// so "which publications may the network see" has to be decided here, and it
-// must be decided by the same rule the publication's own page decides with
-// (knowledgepublish.AudienceFor), not by a predicate SQL happens to spell
-// the same way today. The row is read; explore.KnowledgeRow.Published
-// applies the rule and the index renders a shorter list.
+// # What is filtered here and what is still decided in Go
+//
+// Two of the audience rule's three inputs are predicates SQL can spell
+// EXACTLY, and they are spelled here — the same pair, for the same reason,
+// that feeds.sql:198-199 applies to the feed's knowledge half:
+//
+//	p.visibility = 'public'               -- axis 2: the owning project's preset
+//	sov.visibility_policy_id IS NULL      -- axis 1: a version that pins a
+//	                                      -- policy of its own is governed by
+//	                                      -- that policy, and this build
+//	                                      -- resolves no policy into a public
+//	                                      -- grant
+//
+// The third input is the published rights declaration's metadata token, and
+// it is NOT spellable here: the rule is "the token is exactly
+// rights.MetadataProjectPolicy, and a document this build cannot READ states
+// no token at all" — a Go parse, not a JSON predicate. Its column is still
+// read RAW (rights_json) and still travels to
+// explore.KnowledgeRow.Published(), which applies knowledgepublish.AudienceFor
+// — the same function the publication's own page applies. So the disclosure
+// rule has exactly one implementation and this query is not it; the query
+// only decides WHICH TWENTY rows that rule gets to see, and it is now the
+// twenty most recent rows this surface could render rather than the twenty
+// most recent rows in the table.
+//
+// The consequence is the one feeds.sql names for the same arrangement: the
+// window is EXACT for the two axes above and a window over CANDIDATES for the
+// rights axis, so a public project whose newest knowledge rows all carry a
+// non-network rights declaration can still spend part of the window on rows
+// the index does not render, and the section may be SHORTER than
+// explore.SectionLimit. It can never be longer and never wrong: the model
+// renders exactly the rows it decides are network-visible. Closing that last
+// gap by approximating the rights parse in SQL would be a second, weaker copy
+// of the rule — the defect feeds.sql refuses by name.
 //
 // A publication whose version pins a visibility policy of its own, or whose
-// project is private, or whose rights document pins a metadata visibility
-// this build cannot resolve, therefore renders NOTHING here while still
+// project is private, therefore never reaches the model at all, while still
 // being a publication the project's own members read — which is exactly the
 // 发布不等于公开 ruling (L3-20260916-1 #1).
 const knowledgeQuery = `
@@ -96,6 +138,8 @@ FROM knowledge_publications kp
 JOIN scientific_object_versions sov ON sov.id = kp.object_version_id
 JOIN scientific_objects so ON so.id = sov.object_id
 JOIN projects p ON p.id = so.project_id
+WHERE p.visibility = 'public'
+  AND sov.visibility_policy_id IS NULL
 ORDER BY kp.published_at DESC, kp.id
 LIMIT $1`
 

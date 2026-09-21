@@ -10,8 +10,16 @@
  *
  * What is asserted here (the task's acceptance criteria):
  *   - 所有 route 可导航: every shell tab route renders and navigates
- *     (Overview, Research, Issues, Pull requests, Releases, Assets,
- *     Files, Activity, Settings), with aria-current following the page.
+ *     (Overview, Research, Issues, Pull requests, Releases, Milestones,
+ *     Assets, Files, Activity, Settings), with aria-current following the
+ *     page. The bar is asserted as an ORDERED contract, not as a set: a tab
+ *     that changed place is a navigation change, and "these labels all
+ *     appear somewhere" cannot see one.
+ *   - the tabs that are now REAL pages are asserted to render their content,
+ *     not merely to mount: every route whose TabPlaceholder was replaced
+ *     (pulls, releases, milestones, files, activity, settings) is required
+ *     to LIST rows. A mount-only check also passes on the empty and the
+ *     error state, so it could not tell a working page from a broken one.
  *   - private unauthorized 不渲染 shell: for a project the API answers
  *     with the existence-hiding 404, the page shows the plain not-found
  *     state with NO shell chrome — no name, no badges, no tabs, and no
@@ -129,6 +137,78 @@ const ALLOY_MEMBERS = [
   },
 ];
 
+/* The four lists the REAL tab pages read (T0403 pulls, the releases hub,
+ * T0609 milestones, the Activity feed). Each shape is the one its client
+ * validates and cmd/api answers, and each page is asserted to LIST these
+ * rows — so a row that stops travelling is a failure here, not a quietly
+ * emptier page. The pulls shape is the one tests/e2e-pulls/pulls-e2e.mjs
+ * drives end to end. */
+
+const ALLOY_PULLS = [
+  {
+    id: "pr-00000000-0000-4000-8000-000000000007",
+    number: 7,
+    title: "Propose the single-phase claim",
+    body: "Adds the claim, the evidence assertion behind it and the supports edge.",
+    state: "open",
+    source_branch_id: "branch-proposal",
+    target_branch_id: "branch-main",
+    base_state_id: "bbbbbbbb-0000-4000-8000-000000000001",
+    proposed_state_id: "dddddddd-0000-4000-8000-000000000002",
+    created_by: "00000000-0000-4000-8000-000000000001",
+    created_at: "2026-09-14T09:00:00Z",
+  },
+];
+
+const ALLOY_RELEASES = [
+  {
+    id: "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    project_id: ALLOY.id,
+    version: "v0.1.0",
+    title: "First reproducible snapshot",
+    state_id: "eeeeeeee-0000-4000-8000-000000000005",
+    policy_version_id: null,
+    org_policy_version_id: null,
+    manifest_hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    created_by: "00000000-0000-4000-8000-000000000001",
+    created_at: "2026-09-15T09:00:00Z",
+  },
+];
+
+const ALLOY_MILESTONES = [
+  {
+    id: "22222222-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    project_id: ALLOY.id,
+    kind: "candidate_selected",
+    label: null,
+    occurred_at: "2026-09-16T09:00:00Z",
+    release_id: null,
+    created_by: "00000000-0000-4000-8000-000000000001",
+    created_at: "2026-09-16T09:00:00Z",
+  },
+];
+
+const ALLOY_ACTIVITY = [
+  {
+    id: "33333333-cccc-4ccc-8ccc-cccccccccccc",
+    source: "governance",
+    actor_id: "00000000-0000-4000-8000-000000000001",
+    actor_handle: "alice",
+    actor_display_name: "Alice Guo",
+    via: "ui",
+    action: "project.created",
+    target_ref: null,
+    project_id: ALLOY.id,
+    organization_id: null,
+    correlation_id: "44444444-dddd-4ddd-8ddd-dddddddddddd",
+    before_summary: null,
+    after_summary: null,
+    metadata: null,
+    visibility: null,
+    occurred_at: "2026-09-10T08:00:00Z",
+  },
+];
+
 const NOT_FOUND = {
   code: "PROJECT_NOT_FOUND",
   message: "project not found",
@@ -187,6 +267,21 @@ function installApiMock(page) {
     if (method === "GET" && pathname === `/api/v1/projects/${ALLOY.id}/members`) {
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ members: ALLOY_MEMBERS }) });
     }
+    // The four real tab pages, each with the envelope its own client
+    // validates: pulls answers a BARE ARRAY, the other three an object with
+    // the list under its name plus a cursor where the feed paginates.
+    if (method === "GET" && pathname === `/api/v1/projects/${ALLOY.id}/pull-requests`) {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ALLOY_PULLS) });
+    }
+    if (method === "GET" && pathname === `/api/v1/projects/${ALLOY.id}/releases`) {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ releases: ALLOY_RELEASES }) });
+    }
+    if (method === "GET" && pathname === `/api/v1/projects/${ALLOY.id}/milestones`) {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ milestones: ALLOY_MILESTONES }) });
+    }
+    if (method === "GET" && pathname === `/api/v1/projects/${ALLOY.id}/activity`) {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: ALLOY_ACTIVITY, next_cursor: null }) });
+    }
     // The Files tab (T0308) is the real read-only page now: it mounts one
     // tree read at the root of main — served here so the tab renders its
     // actual content, not an error state.
@@ -224,27 +319,76 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 page.on("pageerror", (error) => fail("uncaught page error", String(error).slice(0, 200)));
 await installApiMock(page);
 
-const TAB_LABELS = [
-  "Overview", "Research", "Issues", "Pull requests", "Releases",
-  "Assets", "Files", "Activity", "Settings",
+/**
+ * The tab bar as the CONTRACT states it — specs/ui/routes.yaml
+ * `project_tabs` plus the label each key renders (docs/05 §3 Project 导航).
+ * Asserted as an ordered list, key AND label: the previous shape compared a
+ * count and a set of labels, which accepts any permutation of the bar and
+ * any key/label mismatch that still produces the same set of strings.
+ */
+const TAB_CONTRACT = [
+  { key: "overview", label: "Overview" },
+  { key: "research", label: "Research" },
+  { key: "issues", label: "Issues" },
+  { key: "pulls", label: "Pull requests" },
+  { key: "releases", label: "Releases" },
+  { key: "milestones", label: "Milestones" },
+  { key: "assets", label: "Assets" },
+  { key: "files", label: "Files" },
+  { key: "activity", label: "Activity" },
+  { key: "settings", label: "Settings" },
 ];
 
-const assertTab = async (tabKey, pathSuffix, placeholderTitle, contentSelector = '[data-project-tab-content="overview"]') => {
-  await page.click(`[data-project-tab="${tabKey}"]`);
-  await page.waitForURL(`**/projects/${ALLOY.id}${pathSuffix}`);
-  const current = await page.getAttribute(`[data-project-tab="${tabKey}"]`, "aria-current");
+/** waitFor returns the selector's fate rather than throwing: a route that
+ *  fails must be REPORTED as one failure and let the remaining routes run.
+ *  The previous shape threw on the first missing selector and killed the
+ *  process, which is how pulls, releases and activity all drifted beneath a
+ *  single crash — everything after the first stale route was never probed. */
+const waitFor = async (selector) => {
+  try {
+    await page.waitForSelector(selector);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const assertTab = async ({ key, path: pathSuffix, placeholder, ready, rows }) => {
+  try {
+    await page.click(`[data-project-tab="${key}"]`);
+    await page.waitForURL(`**/projects/${ALLOY.id}${pathSuffix}`);
+  } catch (error) {
+    fail(`tab ${key}: navigates to ${pathSuffix}`, String(error).slice(0, 160));
+    return;
+  }
+  const current = await page.getAttribute(`[data-project-tab="${key}"]`, "aria-current");
   if (current !== "page") {
-    fail(`tab ${tabKey}: aria-current`, `got ${current}, want page`);
+    fail(`tab ${key}: aria-current`, `got ${current}, want page`);
   } else {
-    ok(`tab ${tabKey}: navigates to ${pathSuffix} and carries aria-current=page`);
+    ok(`tab ${key}: navigates to ${pathSuffix} and carries aria-current=page`);
   }
-  if (placeholderTitle !== null) {
-    await page.waitForSelector(`[data-tab-placeholder="${placeholderTitle}"]`);
-    ok(`tab ${tabKey}: renders its content`);
-  } else {
-    await page.waitForSelector(contentSelector);
-    ok(`tab ${tabKey}: renders its content`);
+  if (placeholder !== null) {
+    if (await waitFor(`[data-tab-placeholder="${placeholder}"]`)) {
+      ok(`tab ${key}: renders the ${placeholder} placeholder`);
+    } else {
+      fail(`tab ${key}: renders the ${placeholder} placeholder`, "the placeholder is gone — if a real page replaced it, point this route at that page instead of dropping the check");
+    }
+    return;
   }
+  if (!(await waitFor(ready))) {
+    fail(`tab ${key}: the real page renders`, `nothing matched ${ready}`);
+    return;
+  }
+  if (rows === undefined) {
+    ok(`tab ${key}: the real page renders`);
+    return;
+  }
+  if (!(await waitFor(rows))) {
+    fail(`tab ${key}: the real page LISTS its rows`, `nothing matched ${rows} — a page that mounts but lists nothing is also what an error or empty state looks like`);
+    return;
+  }
+  const listed = await page.locator(rows).count();
+  ok(`tab ${key}: the real page renders and lists ${listed} row(s) of ${rows}`);
 };
 
 /* ---------- 1. Directory: list, badges, links ---------- */
@@ -283,7 +427,7 @@ if ((await copperRow.locator(".badge-frozen").count()) !== 0) {
   ok("directory: unfrozen project carries no Frozen badge");
 }
 
-/* ---------- 2. Shell renders with badges and all nine tabs ---------- */
+/* ---------- 2. Shell renders with badges and the whole tab contract ---------- */
 
 await alloyRow.click();
 await page.waitForURL(`**/projects/${ALLOY.id}`);
@@ -305,35 +449,66 @@ if ((await page.locator(".project-shell .badge-frozen").count()) !== 1) {
 } else {
   ok("shell: Frozen main badge renders (main_frozen from the API)");
 }
-const tabLabels = await page.locator(".project-tab").allTextContents();
-const missing = TAB_LABELS.filter((label) => !tabLabels.some((t) => t.includes(label)));
-if (missing.length > 0) {
-  fail("shell: all nine tabs present", `missing: ${missing.join(", ")}`);
-} else if (tabLabels.length !== TAB_LABELS.length) {
-  fail("shell: tab count", `got ${tabLabels.length}, want ${TAB_LABELS.length}`);
+// The bar, read as an ordered (key, label) list and compared to the
+// contract position by position. A permutation, a renamed label, a missing
+// tab and an extra one are four different failures here; the count-and-set
+// check this replaces saw only the last two.
+const renderedTabs = await page.locator(".project-tab").evaluateAll((tabs) =>
+  tabs.map((tab) => ({
+    key: tab.getAttribute("data-project-tab"),
+    label: (tab.textContent ?? "").trim(),
+  })),
+);
+const barShape = (tabs) => tabs.map((tab) => `${tab.key}=${tab.label}`).join(" | ");
+const divergence = TAB_CONTRACT.findIndex(
+  (tab, i) => renderedTabs[i]?.key !== tab.key || renderedTabs[i]?.label !== tab.label,
+);
+if (divergence !== -1 || renderedTabs.length !== TAB_CONTRACT.length) {
+  const where = divergence === -1
+    ? `the bar has ${renderedTabs.length} tabs, the contract has ${TAB_CONTRACT.length}`
+    : `the first divergence is at position ${divergence}`;
+  fail("shell: the tab bar is the contract, in order",
+    `${where}\n  contract: ${barShape(TAB_CONTRACT)}\n  rendered: ${barShape(renderedTabs)}`);
 } else {
-  ok("shell: all nine tabs render (Overview … Settings)");
+  ok(`shell: the tab bar is the contract in order — ${TAB_CONTRACT.length} tabs, ` +
+     `${TAB_CONTRACT[0].label} … ${TAB_CONTRACT[TAB_CONTRACT.length - 1].label}`);
 }
 
 /* ---------- 3. 所有 route 可导航 ---------- */
 
+// Each entry is the route's state as the page source has it today:
+// `placeholder` is the TabPlaceholder title the route still renders (null
+// once the real page replaced it), `ready` proves the real page mounted and
+// `rows` proves it lists something. The earlier manifest named a
+// placeholder for THREE routes the product had already replaced — the run
+// crashed on the first of them, so the other two were never reached.
 const TAB_ROUTES = [
-  ["research", "/research", "Research"],
-  ["issues", "/issues", "Issues"],
-  ["pulls", "/pulls", "Pull requests"],
-  ["releases", "/releases", "Releases"],
-  ["assets", "/assets", "Assets"],
+  { key: "research", path: "/research", placeholder: "Research" },
+  { key: "issues", path: "/issues", placeholder: "Issues" },
+  // T0403 replaced the Pull requests placeholder with the real list page.
+  { key: "pulls", path: "/pulls", placeholder: null, ready: "[data-pulls-list]", rows: "[data-pull-row]" },
+  // The releases hub is a real page of its own (list + manifest links).
+  { key: "releases", path: "/releases", placeholder: null, ready: '[data-project-tab-content="releases"]', rows: "[data-release-row]" },
+  // T0609's milestones page; specs/ui/routes.yaml carries the tab.
+  { key: "milestones", path: "/milestones", placeholder: null, ready: '[data-project-tab-content="milestones"]', rows: "[data-milestone-row]" },
+  { key: "assets", path: "/assets", placeholder: "Assets" },
   // T0308 replaced the Files placeholder with the real read-only page.
-  ["files", "/files", null, "[data-files-page]"],
-  ["activity", "/activity", "Activity"],
+  { key: "files", path: "/files", placeholder: null, ready: "[data-files-page]", rows: "[data-files-entry]" },
+  // The Activity feed is the real member-only timeline.
+  { key: "activity", path: "/activity", placeholder: null, ready: '[data-project-tab-content="activity"]', rows: "[data-activity-row]" },
   // T0109 replaced the Settings placeholder with the real settings page.
-  ["settings", "/settings", null, "[data-settings]"],
-  ["overview", "", null],
+  { key: "settings", path: "/settings", placeholder: null, ready: "[data-settings]", rows: "[data-member-row]" },
+  // Overview is the landing route, a summary rather than a list.
+  { key: "overview", path: "", placeholder: null, ready: '[data-project-tab-content="overview"]' },
 ];
-for (const [key, suffix, placeholder, contentSelector] of TAB_ROUTES) {
-  await assertTab(key, suffix, placeholder, contentSelector);
+for (const route of TAB_ROUTES) {
+  await assertTab(route);
 }
-ok("navigability: all nine routes reachable from the tab bar");
+const realRoutes = TAB_ROUTES.filter((route) => route.placeholder === null);
+const listingRoutes = realRoutes.filter((route) => route.rows !== undefined);
+ok(`navigability: all ${TAB_ROUTES.length} routes reachable — ` +
+   `${TAB_ROUTES.length - realRoutes.length} still placeholders, ` +
+   `${realRoutes.length} real pages, ${listingRoutes.length} of them asserted to list rows`);
 
 /* ---------- 4. Permission-aware Settings ---------- */
 
