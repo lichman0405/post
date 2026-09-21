@@ -16565,3 +16565,76 @@ P11 的 T1103/T1104，**最长那条链的头 T1202 反而排在后面**。位�
 2. 我拿 `rddev worker list | grep -c " running "`（空格）去验一个守卫，数出 0，
    于是宣布「看守是瞎的」。**守卫实际用的是制表符**（`"\trunning\t"`），数出 4，一直是好的——
    我验的是守卫的一句话转述，不是它本身。**要判一个仪器坏，先拿到它字面的调用。**
+
+## ㉔ T1101 裁定：`e2e-shell` 不是它的门；**顺带修正 ㉓ 里那把尺子——对 Worker 它不成立**（2026-09-21）
+
+### 1. 裁定
+
+T1101 `rejected`，`collect-report.json` 里**九项全 `[ok]`，唯一 `[FAIL]` 是 `result-status`**——
+它诚实报了 `blocked`，而「诚实的未完成是 rejected，不是 verification」。八个验收项全过、
+56 个文件全在范围内（含真 Chromium 视觉回归 14 页 0 像素差 + 变异检查）。
+
+它卡住的那条，**核过了，不是它的**：
+
+- 这笔的必测项是 `tests/tasks.json` 里 T1101 的 `tests` 字段，**只有 `visual regression` 一个**，已绿。
+- `tests/e2e-shell` 是 **T0108 的任务测试**（`tasks/tests.json` 里 `T0108-TEST-01`，2026-09-13 合并时是绿的），
+  此后漂移成红。
+- 两处分歧的真相：**产品是对的，测试旧了**。
+  - tab 数 9 vs 10：第十个是 `Milestones`，`apps/web/app/(main)/projects/project-tabs.ts:41`，
+    由 `4065566 [T0609]` 加入，**经核是 T1101 基线 `5e75fb1` 的祖先**（开工前就在）；T1101 那 56 个文件里
+    **没有任何 tab 文件**。
+  - pulls 占位页被真实列表页替换，测试还在等 `[data-tab-placeholder="Pull requests"]`。
+- **容易踩的坑**：这个测试的期望值**不读规格**，写死在 `tests/e2e-shell/shell-e2e.mjs:227` 的 `TAB_LABELS`（9 个）。
+  所以 `37a0b69` 补的 `specs/ui/routes.yaml` **不会让它自动变绿**。规格侧已完成；测试侧归 **T1107**。
+
+**裁定**：规格侧已完成（产品对）；测试侧归 T1107；T1101 **不改 e2e-shell 的任何断言**
+（两个工人改同一个文件只会撞车）。**唯一保留**：它在 `shell-e2e.mjs` 里那 7 处 `.badge-*` → `[data-badge="*"]`
+——那是它换了属性之后选择器必须同步，属范围内正当连带改动。信在
+`.rddev/runtime/t1101-ruling-letter.md`。
+
+### 2. **修正 ㉓ 的那把尺子：对 Worker 的树，它读出 0**
+
+㉓ 说「量一笔任务自己的改动要用共同祖先 `git diff --name-only $(git merge-base main BR) BR`」。
+**这条对 Worker 不成立**：Worker **不许提交**（§3），分支引用**永远停在基线上**。
+实测 T1101 分支侧读出 **0 个文件**，而工作树里明明有 **56 个**；T1107 同样读出 0（实际 4 个）。
+控制组（两侧列表都非空：56/32、4/70）才让这个 0 露馅——**又一次「空集先自查读取器」**。
+
+**Worker 的改动只能用工作树量**：`git -C <worktree> status --porcelain -uall`。
+正确的冲突预检是「工作树改动集 ∩ 同期主线改动集」。按这把尺子重算：T1101 与 T1107 **交集都是 0**，
+两笔前移都不会撞车。
+
+### 3. 一个更紧的事实：**剩下的活全部堵在这 6 笔后面**
+
+用 `tasks/task_status.json` 的 `status` 字段（不是 `state`——我又读错过一次，整份输出全 `None`）重算：
+**依赖已齐的只有 6 笔**——4 笔在跑（T0708/T0908/T1108/T1109）+ 2 笔被拒（T1101/T1107）。
+其余 9 笔全部堵在它们后面：
+
+- T0710 ← T0708
+- **T1103 / T1104 / T1105 ← T1101**（所以 T1101 一笔卡三笔）
+- T1202 / T1208 ← T0908
+- T1205 ← T1202；T1206 ← T1202 + T1205；T1207 ← T1206
+
+也就是说：**驱动此刻无可派**（`rddev task next --json` → `{"next":[]}`），
+这既是额度满、也是依赖空——两件事同时成立。
+
+### 4. 修正后的执行序（替换 ㉓ 的那三条）
+
+1. **第一个空出的额度 → `rebaseline T1101 --reason-file .rddev/runtime/t1101-ruling-letter.md`**
+   （它一笔卡三笔，优先于 T1107）。若 `rebaseline` 已移树但内部返工被并发拒，
+   补一条 `worker rework T1101 --timeout 60m --parallel 4 --reason-file …`。
+2. **第二个空额度 → `rebaseline T1107 --reason-file .rddev/runtime/t1107-rework-letter.md`**
+   （那条信里的事实我逐条核过：`tests/e2e-shell` 确实不在 CI、不在 Makefile、不在 scripts 里）。
+3. T0708 合并后 → 若 T0908 的合并已被拒，手动重跑一次；**T0908 一合并立刻手动派 T1202**。
+4. **`tasks/tasks.json` 的编辑全部押到 T0708 合并之后**：只有 T0708 的分支带着已提交的
+   `SPEC_VERSION.json`，此刻改 `tasks.json` 会动摘要，直接把它的合并推回冲突态。
+   `tasks/decisions.md`、`docs/**`、`tasks/task_status.json` **不是摘要输入**，可以照常写。
+
+### 5. 两个机关，省掉两次手工
+
+- **`staleDecisions` 会自己清决定**（`driver.go:334`）：注册表 `RunID` 一变，那条决定就作废。
+  所以「返工了但决定还挂着、驱动整笔跳过」**不需要我手工清**——T1109 那条就是这么消失的。
+- **`rebaseline` 内部那次返工不带 `--parallel`**（`drive.go:379`，默认 3），而并发闸门数的是**活着的工人**：
+  4 个在跑时**任何上限都拦得住第 5 个**。所以 `rebaseline` 必须等出一个空额度再跑，
+  否则会走到「树移了、返工失败了」那一步（可恢复，但要补一条命令）。
+
+**信里那三条判据（祖先性、无 tab 文件、测试写死不读规格）都不是推理，是逐条跑过的命令。**
