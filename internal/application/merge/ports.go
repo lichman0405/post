@@ -33,6 +33,14 @@ type StorePort interface {
 	GetPullRequest(ctx context.Context, projectID string, number int64) (domain.PullRequest, error)
 	// GetBranch reads one project-scoped branch, or ErrBranchNotFound.
 	GetBranch(ctx context.Context, projectID, branchID string) (domain.Branch, error)
+	// GetBranchByID reads one branch by its own id, WITHOUT naming a
+	// project: the row's project_id is the answer, not an input. It is the
+	// read the merge's SOURCE side uses (T0817) — the source branch may
+	// live in another project (the external fork's proposal, docs/04 §2),
+	// and naming a project here would be the merge answering its own
+	// question instead of reading it. A missing branch reports
+	// ErrBranchNotFound.
+	GetBranchByID(ctx context.Context, branchID string) (domain.Branch, error)
 	// VersionHeads reads the current version counters of the objects and
 	// relations the plan will materialize. This is the optimistic
 	// prediction read: the write transaction re-reads them under a row lock
@@ -73,11 +81,23 @@ type StorePort interface {
 }
 
 // LockScopeParams names the rows LockMergeScope locks.
+//
+// The two sides carry their OWN project, because a merge's source and
+// target need not share one: the PR and the target branch are the PR
+// project's (that is what ProjectID names — the merge's TARGET side), and
+// the source branch is the one the service read by id, which for an
+// external proposal is the contributor's fork project (T0817). Each
+// branch is locked under its own project, so a caller whose belief about
+// a side is wrong locks nothing and hears ErrBranchNotFound rather than
+// locking a foreign row by accident.
 type LockScopeParams struct {
-	ProjectID      string
-	PRNumber       int64
-	SourceBranchID string
-	TargetBranchID string
+	ProjectID string
+	// SourceProjectID is the source branch's own project — equal to
+	// ProjectID for a same-project merge.
+	SourceProjectID string
+	PRNumber        int64
+	SourceBranchID  string
+	TargetBranchID  string
 }
 
 // MergeScope is the locked truth of the merge's rows: what the transaction
@@ -195,6 +215,26 @@ type GitStepParams struct {
 	SHA     string
 	State   domain.SemanticMergeGitState
 	Error   string
+}
+
+// ForkLineage answers the one cross-project question a merge asks: whether
+// a project that holds a proposal's source branch is a fork of the PR's
+// project, made by the PR's author. It is the SAME triple migration
+// 00086's pull_request_fork_gate enforces on the row (fork_project_id =
+// source's project AND parent_project_id = the PR's project AND forked_by
+// = the PR's creator), asked again on the merge side: a merge reads a
+// source branch out of its own project only for that shape, and refuses
+// every other foreign source.
+//
+// Asking the same question twice is deliberate (T0817): the gate is what
+// makes the row's shape impossible to create any other way, and this is
+// what keeps the merge from ACTING on a row whose shape it did not
+// verify. The production implementation is persistence.ForkStore.
+type ForkLineage interface {
+	// IsForkOf reports whether forkProjectID is a fork of parentProjectID
+	// made by forkedBy. A lineage row that does not exist is a false
+	// answer, not an error.
+	IsForkOf(ctx context.Context, forkProjectID, parentProjectID, forkedBy string) (bool, error)
 }
 
 // DiffPort composes the engine inputs of the base/source/target triple. The

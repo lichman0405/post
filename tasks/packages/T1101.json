@@ -1,0 +1,69 @@
+{
+  "id": "T1101",
+  "dependencies": [
+    "T0107",
+    "T0809",
+    "T0907"
+  ],
+  "tests": [
+    "visual regression"
+  ],
+  "phase": "P11",
+  "phase_name": "UI、安全、可访问性、性能与运维加固",
+  "title": "统一 Primer-style Design System",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "requirements": [
+    "**现状先说清楚，不要重新发现一遍（2026-09-21 复核，逐条可核）**：`packages/ui` 全包只有三个文件——`package.json`、`tsconfig.json`、`src/index.ts` 两行（`export { DevStatus } from \"./DevStatus\";` 与一行类型导出），加一个 `src/DevStatus.tsx`。**任务要的 `StateLabel`/`Table`/`Timeline`/`Diff`/`Sidebar` 一个都不存在**，包内也没有任何 `tokens` 文件。另一方面 `apps/web` 里手写 CSS 有 **9 个文件、4793 行**（`app/globals.css` 502、`app/nav/nav.css` 265、`app/(main)/projects/projects.css` 1774、`app/(main)/assets/assets.css` 472、`app/(main)/explore/explore.css` 206、`app/(main)/notifications/inbox.css` 329、`app/(main)/projects/[id]/activity/activity.css` 319、`app/(main)/projects/[id]/conflicts/conflicts.css` 451、`app/(main)/projects/[id]/pulls/[number]/pull-detail.css` 475）。这一笔要做的是**把重复的形态收进共享层**，不是把 4793 行推倒重写。",
+    "**规格逐字，照抄不要另立**：`docs/41_DESIGN_TOKENS.md:6-12` 是颜色角色全集——`canvas.default / canvas.subtle`、`fg.default / fg.muted`、`border.default / border.muted`、`accent.fg / accent.emphasis`、`success.fg / success.emphasis`、`attention.fg / attention.emphasis`、`danger.fg / danger.emphasis`；`:14` 逐字「**严禁定义 `brandGradient`、`purpleGlow`、`glassBackground` 等 token**」；`:17` 逐字「小/中等，信息工作台风格。Buttons/inputs 约 6px 视觉；card 不使用 24px+ 大圆角」；`:20` 逐字「仅 overlay/menu/dialog；普通 card 主要用 border，不用浮夸 shadow」；`:23` 逐字「正文 14–16px；辅助 12–14px；标题层级克制。ID/hash/code 使用 mono」；`:26` 逐字「4px base grid，常用 4/8/12/16/24/32。列表高密度但点击 target 可访问」。`docs/51_FRONTEND_STANDARD.md:5-6` 逐字「GitHub 风格、中性、高密度、明确边框与状态」「禁止渐变紫、霓虹、玻璃拟态、营销卡片墙、夸张动画」。`specs/ui/routes.yaml:19-23` 的 `visual_guardrails` 逐字：`gradients: forbidden`、`glassmorphism: forbidden`、`default_density: high`、`design_language: github_primer_like`。",
+    "**`packages/ui` 是共享层，`docs/65` 的 workspace 约定已经在仓库里打通**：`apps/web/package.json` 声明 `\"@post/ui\": \"workspace:*\"`，`apps/web/next.config.ts:6` 有 `transpilePackages: [\"@post/ui\"]`。所以新组件放 `packages/ui/src/**` 并从 `src/index.ts` 导出，`apps/web` 直接 `import { ... } from \"@post/ui\"`。**`packages/ui` 的 peerDependencies 已经写着 `@primer/react ^38.0.0` 与 `@primer/octicons-react ^19.0.0`**（`packages/ui/package.json`）——直接用它们，**不要**再引一套 UI 库。`packages/ui` 只有 `typecheck` 一个脚本（`tsc --noEmit`），新代码必须过它。",
+    "**五个组件是任务点名的交付物，逐个说清它替代的是什么（我核过重复形态）**：`StateLabel` 替代散在五处的徽章——`.badge`（`projects.css:94`）、`.conflicts-badge`（`conflicts.css:137`）、`.conflicts-advisory-badge`（`conflicts.css:236`）、`.files-readonly-badge`（`projects.css:569`）、`.files-kind-badge`（`projects.css:735`）；`Table` 是列表/事实表的统一形态（资产的「facts」与 release 的清单都是手写 `<table>`+各自 CSS）；`Timeline` 是活动流的统一形态（`activity/activity.css` 与 `pulls/[number]/pull-detail.css` 各写一套）；`Diff` 是 PR/冲突差异的统一形态（`pull-detail.css` 与 `conflicts.css` 各写一套）；`Sidebar` 是页面右栏/项目 shell 的统一形态（`.project-shell-breadcrumb` `projects.css:138`、`.files-breadcrumb` `projects.css:601`、`.release-detail-breadcrumb` `projects.css:1713`、`.asset-breadcrumb` `assets.css:174` 是同一个形态的四份）。**替换必须是行为等价的**——见验收第 3 条。",
+    "**tokens 也归共享层**：`packages/ui` 里给出**一套**以 `docs/41` 那 14 个角色为名的 token 常量（或 CSS 变量清单，随你判断哪个更符合既有模板），供自定义组件用；`apps/web` 各页不再各写各的裸值。现状是**同一个值在多个文件各写一遍**：`border: 1px solid var(--borderColor-default` 出现 **65 次**、`font-size: 12px` **103 次**、`color: var(--fgColor-muted` **162 次**，而 Primer token 的第二参数（裸 hex fallback）出现 **853 次**（最高频 `#59636e`×162、`#d0d7de`×84、`#1f2328`×55、`#d8dee4`×52、`#0969da`×48、`#f6f8fa`×46、`#ffffff`×41）。**不是要求你把 853 处全改掉**——是把共享层的组件与 token 定下来，并让**核心页面**走它们。",
+    "**视觉回归今天不存在，要把它建起来**（这是本任务的必测）：`tests/web-smoke/visual-smoke.mjs`（299 行）今天只做三件事——① 静态扫**两个** CSS 文件（`:36-38` `const cssFiles = [\"app/nav/nav.css\", \"app/globals.css\"]`）里有没有禁用特效与紫色；② 断言 header 高度 ≤64px、导航字号 ≤14px、每页一个 `#main`、禁用色/`backgroundImage`/`backdropFilter`；③ **截图存 artifact，不与任何基线比较**（`:282-291` 唯一 screenshot 点，无 fail 条件）。`shots/` 里今天有两张 PNG（`desktop-home.png`、`mobile-drawer.png`，Sep 13）但不是基线。**要交付的是基线比较**：把核心页在固定视口下的截图与**签入仓库的基线图**比对，差异像素比例超过一个**显式写下的容差**即红。",
+    "**视觉回归要能说不（先做这一步）**：基线比较必须证明它**能失败**——用一个只改一处视觉的变异（例如把某个核心页的 `border-radius` 从 6px 改成 14px，或把某个 token 换成一个明显不同的颜色）让它转红，把红的那次输出贴进 RESULT，再改回来贴绿。同理，**基线在未改动的树上必须零差异**（同一次运行的两次连续执行要么都绿、要么说明为什么不是零差异），否则它不是回归测试而是抛硬币。",
+    "**不要扩到全站**：`docs/42_PAGE_SPECS.md` 列的九个核心页面是 Project Overview、Research Page、Scientific Object Detail、PR、Release、Asset Page、Knowledge Network Page、Search Answer、Research Profile（`:3`/`:6`/`:9`/`:12`/`:15`/`:18`/`:21`/`:24`/`:27`）。其中 `/knowledge/{id}` **在 `apps/web` 里还没有路由**（`find apps/web/app -type d -name knowledge` 为空）——**照实报，不要为它造一条路由**。基线覆盖**存在的那些**核心页，并在 RESULT 里逐页点名哪些进了基线、哪些因为还没有路由而不在。",
+    "**边界**：不新增依赖到根 `pnpm-lock.yaml`（视觉回归需要的新依赖放进 `tests/web-smoke/` 自己的 npm 项目——那里已经有自己的 `package.json` 与 `package-lock.json`，`tests/web-smoke/run.sh:5-6` 逐字说明了为什么这样放）；不改 `specs/**`（`specs/ui/**` 是 Supervisor 的）；不改 `docs/**`、`tasks/**`；不碰 Go 代码（`internal/**`、`cmd/**` 不在范围内）；不改 `infra/**`。"
+  ],
+  "deliverables": [
+    "`packages/ui` 里的 `StateLabel`/`Table`/`Timeline`/`Diff`/`Sidebar` 五个组件 + 一套以 `docs/41` 角色为名的 token，全部从 `src/index.ts` 导出",
+    "核心页面改用共享组件与 token 的改动（重复形态收敛），且视觉效果不变",
+    "`tests/web-smoke/` 里的基线截图比对，含签入的基线图与显式容差",
+    "先红后绿的证据：变异一次视觉 → 比对转红；还原 → 转绿",
+    "RESULT 里逐页点名基线覆盖了哪些核心页、哪些因缺路由不在"
+  ],
+  "acceptance_criteria": [
+    "**五个组件真的在共享层，而且真的被用**：`packages/ui/src/index.ts` 导出这五个组件；`grep` 能证明 `apps/web` 的核心页面**确实 import 了它们**（不是导出完就放着）。`pnpm --filter @post/ui typecheck` 与 `pnpm --filter @post/web typecheck` 全绿。",
+    "**全站无 gradient / glass**（任务原文）：静态检查覆盖**全部** `apps/web/app/**/*.css`（不是今天那两个文件），无 `linear-gradient`/`radial-gradient`/`conic-gradient`/`backdrop-filter`/`blur(`；无 `docs/41:14` 点名的三类禁用 token；`box-shadow` 只出现在 overlay（今天唯一的非 overlay 是 `assets.css:426` 的 inset 高亮，属装饰性边而非阴影——若它被判为违规，改掉并在 RESULT 里说明）",
+    "**视觉零回归**：改了共享层与页面之后，核心页的基线比对在容差内通过。**并且**同一次运行在未改动树上是一致结果（见需求第 7 条）。",
+    "**视觉回归能失败**：RESULT 里给出变异后转红的实测输出（贴原文），及还原后的绿",
+    "**圆角与密度合 `docs/41`**：没有任何 `border-radius` ≥ 24px；`pull-detail.css` 今天用 10px 而其余文件用 6px（`:49`/`:132`/`:298`/`:329`/`:461` 五处）——统一到 `docs/41:17` 的口径，并在 RESULT 里说明你选了哪个值、为什么",
+    "**内联样式收敛**：`style={{` 的 12 处已知点（`(main)/status-panel.tsx:33`/`:42`、`(auth)/login/login-card.tsx:88`/`:96`、`(main)/users/[id]/profile-card.tsx:162`/`:193`）要么改走类/组件，要么在 RESULT 里逐条说明为什么必须留在行内。**特别注意 `login-card.tsx:88` 的 `fontSize: 22` 与其余页的 20 不一致**——这是「不一致自定义样式」的字面例子，给出你的取舍。",
+    "**没有把「重写」当交付**：改动的 CSS 行数与页数要在 RESULT 里报出来；如果某个页面没被收敛，说明理由，不要默默跳过",
+    "**RESULT 里写明**：五个组件各自的 props 形状、token 名清单、基线覆盖的页面清单与容差数值、以及你**没有**做的部分与原因"
+  ],
+  "allowed_scope": [
+    "packages/ui/**",
+    "apps/web/**",
+    "tests/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "specs/**",
+    "docs/**",
+    "infra/**",
+    "internal/**",
+    "cmd/**"
+  ],
+  "relevant_specs": [
+    "docs/41_DESIGN_TOKENS.md",
+    "docs/51_FRONTEND_STANDARD.md",
+    "docs/42_PAGE_SPECS.md",
+    "docs/06_UI_UX_SPEC.md",
+    "specs/ui/routes.yaml",
+    "specs/ui/page-inventory.csv"
+  ],
+  "scope_note": "范围按「谁会被这一改碰到」划：共享层（`packages/ui/**`）、消费方（`apps/web/**`）、以及新的回归设施（`tests/**`，基线图与比对脚本都放 `tests/web-smoke/`）。**`specs/**` 一律不在范围内**——`specs/ui/routes.yaml` 与 `specs/ui/page-inventory.csv` 是只读规格（Supervisor 的），本任务不改它们；`specs/database/postgres.sql` 与 `specs/SPEC_VERSION.json` 这两件派生件本来也不需要，去掉它们让本任务的补丁**不带指纹**，于是它能穿过后面的落地窗口，不被 main 的移动顶掉。**`internal/**`/`cmd/**` 不在范围内**：这是纯前端任务，任何需要改 Go 才能完成的验收都应当先报回来，不要自行扩范围。",
+  "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄）——从 phase 级默认上限砍到三条路径。** 原上限含 `specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`internal/**`、`cmd/**`、`infra/**`、`ops/**`、`go.mod`、`go.sum`、`.env.example`，这些与本任务无关，且 `specs/**` 会让补丁带上指纹（见 scope_note）。\n\n**「visual regression」这个词我在本任务里定死为「与签入基线的截图比对」**，不是「截图存 artifact」——后者今天已经有了（`tests/web-smoke/visual-smoke.mjs:282-291`），它不是回归测试，因为它没有 fail 条件。这一条是本次收窄里唯一新增的口径，理由写在需求第 6/7 条。\n\n**不给 `packages/ui` 加「组件库大改」的授权**：五个组件按任务原文点名，不加第六个；token 按 `docs/41` 的 14 个角色，不发明新角色（`:14` 逐字禁的就是发明 token）。"
+}

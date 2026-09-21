@@ -270,7 +270,7 @@ func TestMergeGovernanceEndToEnd(t *testing.T) {
 		Schemas:   reg,
 		Events:    events.Recorder{},
 	})
-	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool))
+	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool), persistence.NewPullRequestStore(pool))
 	resolutionSvc := resolutions.NewService(diffSvc, resolutions.NewPGStore(pool), projectSvc, authz.NewMatrixEngine())
 	// The proposal's two write surfaces, wired as cmd/api wires them (T0410):
 	// the open-pull-request route's command is the forks service (it resolves

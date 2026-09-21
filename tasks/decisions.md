@@ -9175,7 +9175,7 @@ T0409 合并为 **PR #247**（squash `926f292`），`infra/migrations/00070_merg
 - 要用那一列早就有（`infra/migrations/00003_projects.sql:22`），**所以本任务不新增迁移**——
   我因此把 `infra/migrations/**`、`specs/database/postgres.sql`、`specs/SPEC_VERSION.json` **移出**它的
   `allowed_scope`：不新增迁移就不该重新生成那份"所有建表语句的总和"，也不该动指纹。
-- **"不做解冻"不是我拍的，是规格定的**：`docs/09_VERSION_CONTROL.md:9-10` 逐字写着
+- **"不做解冻"不是我拍的，是规格定的**：`docs/09_VERSION_CONTROL.md:13` 逐字写着
   「Emergency unfreeze 不在 V1 提供，避免形成绕过路径」，契约里也确实只有 `:freeze` 没有 `:unfreeze`。
 - 授权那一格在矩阵里**没有 `conditional`**（`internal/authz/matrix.go:85-93`），所以不像发布那样需要
   fail-closed 的自定义判断（那一条是 #237）。
@@ -15544,7 +15544,7 @@ owner 的回答是长期授权：「我不会再回答你问题。你自己处�
 - **T0610（主线对象 reopen）= 形状 A：与 `abort_main_object` 逐格对称。**
   `reopen_main_object,deny,deny,deny,deny,via_pr,via_pr,proposal_only`（照 CSV:14 的 abort 行），
   `internal/authz/action.go` 增 `ActionReopenMainObject`。依据 `docs/43_STATE_MACHINES.md:10`（reopen 是 abort 的逆向边）、
-  `docs/46:11`（保留历史、追加新 transition）、`docs/09:9-10` 逐字「**即便 Owner 也只能经 PR merge**」——
+  `docs/46:11`（保留历史、追加新 transition）、`docs/09:13` 逐字「**即便 Owner 也只能经 PR merge**」——
   `via_pr` 不是从 abort 类推的，是 main 的一般规矩。**不采用形状 B**（复用 `write_scientific_state`）：
   那会让 contributor 能撤销 maintainer 的 abort，而 abort 它自己做不了——那是**放宽**权限，方向反了。
 
@@ -15596,3 +15596,113 @@ owner 的回答是长期授权：「我不会再回答你问题。你自己处�
 T0610 换 B 是删一行 + 改断言；T0706 换"追加行"要新迁移 + 改写法；
 T0708 换"一律拒绝/一律许可"是改一条判定 + 改断言；T1106 任何一个数值都可单点改。
 owner 回来后否定其中任何一笔，代价都是可接受的。
+
+## 2026-09-21（续十七）：P12 与 P9 的十笔任务书落地 —— 五条 L1/L2 决定
+
+这一笔把 T0907 / T0908 / T1201 / T1202 / T1205 / T1206 / T1207 / T1208 八笔任务书写实（原来是 phase 级默认上限 + 两三行占位验收），
+并把 T0810 / T1106 的范围收窄。**没有一条改产品语义、安全边界或核心架构原则**，逐条如下。
+
+### ① T0908 的两条契约路径（L2：跨模块接口，不新增 ADR 但在此留痕）
+
+`specs/api/openapi.yaml` 原本只有 `POST /search/{searchId}:start-project`，**没有请求体、没有响应形状，也没有「确认」那一步**。
+而 `docs/14_SEARCH_DISCOVERY.md:23-25` 逐字要求两段：「\"Start Research Project\"创建 Draft Research Context」+「**用户确认后才形成 initial state**」；
+`docs/31_MASTER_ACCEPTANCE.md:36` 把这条列为 Gate E 的一条。只有一条路由就写不出「确认才成状态」。
+
+**决定**：补第二个路径 `POST /research-context-drafts/{draftId}:confirm`，并把 `:start-project` 的请求体与两条的语义写进契约：
+
+- `:start-project` = 建 Project(planning) + 落 draft，**零科研状态**；带必填 `Idempotency-Key`（重放回到同一份 draft，不开第二个项目）。
+- `:confirm` = **唯一写科研状态的那一次**，经既有状态迁移路径形成 initial branch 与 research_question，因此被一次 state commit 命名。
+
+**为什么这是 L2 而不是 L3**：形状是文档逼出来的——draft 在 initial state 之前（`docs/07_RSG_SPEC.md:5`：RSG 是某个 state version 下的完整状态图），
+两步是文档自己写的两句话。没有新增任何产品语义，也没有新增发现面。
+**反转成本**：删掉第二条路径 + 改任务书一段；实现侧本来就要分两步，改动是局部的。
+
+### ② T1205（契约文档同步）改成「清单 + 建议处置，Supervisor 落笔」
+
+原文的 phase 默认范围把 `specs/api/**`、`specs/mcp/**`、`specs/schemas/**` 给了 Worker，**与 CLAUDE.md §8.1 逐字冲突**：
+「其余 `specs/**` 与 `docs/**` 仍为 Supervisor-only」，Worker 写入 `specs/` 的唯一入口是 schema 快照的重新生成。
+
+**决定**：`specs/**` 全部移出该任务范围、写进 `forbidden_scope`；任务形状改为**交清单**（哪些挂载路由不在契约、哪些契约路径没实现、MCP 工具与实现的差异），
+**契约怎么补、哪几条进豁免，由 Supervisor 落笔**。同时定死：豁免名单不许由 Worker 写——把几十条路由「登记成豁免」与「登记成契约」在机械上没有区别，
+但含义完全不同，那是判定权，不能交出去。
+
+**顺带的事实**（我量过，但**不是**可直接采信的结论）：契约 36 条路径，挂载的 `/api/v1` 路由远多于此；
+注册形式至少四种（`HandleFunc(\"METHOD /path\")`、`Handle`、子路由 `v1.Handle(\"/api/v1/projects\", pkg.Routes())`、包内 `.Get/.Post`），
+所以**正则数出来的数字不可信**——任务书要求 Worker 用 `go/ast` 枚举并用变异证明枚举器测得动，再由我据清单裁定。
+
+### ③ `specs/orchestrator/gates.json` 补两个 G3 job
+
+- `security-smoke` → `bash tests/security/owasp-smoke.sh`（T1106 交付）。挂给 **T1106** 与 **T1206**。
+- `mof-canonical` → `bash tests/acceptance/mof-canonical-workflow.sh`（T1202 交付）。挂给 **T1202** 与 **T1207**。
+
+**为什么**：T1202 的验收逐字要求「全程真实 DB/Git/blob/**browser**，非 mock 演示」，而它原来的 `g3_jobs` 三条全是 HTTP/DB 层，
+**没有一条会驱动浏览器**；T1201/T1202/T1206/T1207 原来的覆盖相同。门不覆盖验收标准要求的东西，等于那条标准没人测。
+（这两条脚本今天还不存在——它们是各自任务的交付物，闸门在交付后才跑。）
+
+### ④ T0810 与 T1106 的范围收窄
+
+- **T0810**（最小 Open Network 闭环 E2E）：摘掉 `infra/migrations/**`、两份生成物、`internal/persistence/**`、`apps/web/**`，
+  留 `tests/**`、`cmd/api/**`、`internal/contribution/**`、`internal/application/**`、`internal/rsg/**`。理由：闭环不建表；验收逐字是「CI 可跑」；
+  摘掉生成物同时消掉「main 一动补丁就 `git apply` 不上」这个真实故障模式。
+- **T1106**（API/Upload 安全加固）：原来是 `internal/**`（安全复核报的，我核过成立）——一个加固任务若能改 `internal/authz/**`（授权判定）
+  或 `internal/rsg/externalref/**`（SSRF 名单），它就能顺手把自己的守卫改松。改成逐子树列名（`internal/application/authn/**`、`internal/observability/**`、
+  `internal/config/**`、`internal/httpmw/**`、`internal/ratelimit/**`），SSL 与事件那两面出范围（只读、只指向，见任务书第 5 条）。
+  **注意 `forbidden_scope` 只渲染进 Worker 提示词、不在验收时机械拦截**（`internal/devorchestrator/worker_render.go:475-477`），真正拦人的是 `allowed_scope`。
+  **T0411 的 `internal/authz/**` 复核也提了**：查过它的工作树，11 个改动文件里 **0 个**碰 authz，本轮不构成实际暴露；G2 时若有 authz 改动，我逐行看。
+
+### ⑤ P12 六笔摘掉 `docs/**`
+
+T1201/T1202/T1205/T1206/T1207/T1208 的 phase 默认范围含 `docs/**`。按 §8.1 那是 Supervisor-only。
+交付物改落在 `tests/acceptance/**`、`tests/e2e/**`、`ops/**`、`examples/**`；**要写 `docs/` 就让 Worker 报上来**，由我落笔。
+
+### ⑥ 迁移号分配
+
+**`00122` 分配给 T0908**（`00121` 是 T0906 的，仍在飞）。编号由 Supervisor 分配、写进任务包，Worker 不得自选（§8.1）。
+
+### ⑦ 两处安全收窄：T1107 与 T1208（2026-09-21，自动化安全评审后复核成立）
+
+自动化安全评审对**任务书写入面**报了两条 MEDIUM，逐条核过，**都成立**，都按"被验收者不得同时持有验收仪器的笔"这一条口径收窄。
+
+- **T1208（完整 Project 可移植导出）摘掉 `scripts/**`。**
+  那里放的不是普通工具，而是**验收仪器本身**：`record_test_run.py`（测试证据录入口）、`validate_specs.py`、`validate_task_state.py`、
+  `spec_version.py`、`gen_schema_snapshot.py`、`reconcile_tests_ledger.py`、`staticcheck.sh`、`ci.sh`。
+  一个能改 `record_test_run.py` 的 Worker 可以**伪造测试证据**；一个能改 `validate_specs.py` 的 Worker 可以让规格校验放行。
+  导出工具与它的 `--check` 校验器改落在 `tests/acceptance/**` 或 `ops/**`（要求 5 点名的 `*-real-services-e2e.sh` 就是既有形状）。
+  **同一口径已用于 T1206**（同一轮、同一个发现）。
+
+- **T1107（权限与 Search Side-channel 安全回归）把 `cmd/api/**` 收到八个读面包 + `main.go`**，
+  并把 **`cmd/api/authhttp/**` 与 `cmd/api/httpmw/**` 写进 `forbidden_scope`**。
+  理由不是"太大了"，而是**它正挡在考卷上**：本任务要求 6 逐字引 `cmd/api/authhttp/auth_middleware.go:144-152/178-186` 的匿名口径、
+  要求 8 明令 `internal/authz/**` 不许动——**让被检验者能改写被检验的规则，与动 `internal/authz/**` 是同一件事**。
+  留下的八个包是要求 4 点名的公开面所在：`assetshttp`、`provenancehttp`、`explorehttp`、`searchhttp`、`feedshttp`、`projectshttp`、`knowledgehttp` 与接线 `main.go`。
+
+**两条纪律写进了任务书**，因为收窄本身有"让任务做不完"的风险（T1108 那次踩过）：
+① 范围只约束**写**什么，不约束**读**什么——`scripts/**`、`internal/authz/**`、`cmd/api/authhttp/**` 仍可读、可调用、可在测试里断言；
+② 若实测发现某处非落在没收进来的路径里，**停下来报**并在 RESULT 的 follow_up 点名，由 Supervisor 决定放宽还是换做法，**不许自己开口子**。
+
+### ⑧ 迁移号：撤掉 T0908(00126)/T1108(00127) 的预留，改为派工时分配（2026-09-21）
+
+**决定（L1，我职权内）**：从 `.rddev/runtime/migration-numbers.json` 删掉 `T0908: 126` 与 `T1108: 127`，
+让它们在被派工的那一刻按 `AllocateMigrationNumber` 正常领号。**没有别的改动**（台账最大值仍是 131，下一笔拿 00132）。
+
+**为什么必须撤。** 合并顺序的守卫在 `internal/devorchestrator/migration_order.go:136`
+（`assertMigrationMergeOrder`），它**只看前不看后**：拒绝「我这笔带 N，而另一个**工作树**里还压着 <N 的号」。
+它按**文件**判定（`migrationFilesInWorktree`），不按台账、不按任务状态——`migration_order.go:131-135` 逐字写明
+「A task parked in `rejected` with a migration in its tree still blocks the higher numbers」。
+
+于是**没有工作树的号等于不存在**，这带来一个它挡不住的方向：某笔任务**先合了高号**，之后一笔**低号**才被派工、
+才产生工作树、才合并——守卫看见的是「没有更低的号压着」，于是放行，而 main 上出现
+「已应用 132、又来了 126」的空洞。goose v3 默认拒绝乱序（`migration_order.go:18-28` 逐字：
+`found 1 missing (out-of-order) migration`），**已经迁到 132 的库此后一台都迁不动**——包括开发库与将来每一台部署库。
+CI 看不见：每个 CI job 都迁一棵全新库，文件按字典序全量应用，从来没有"已应用更高号"这个状态。
+
+**T0908/T1108 正是这个形状**：两者都**依赖 T0907**，而 T0907 在关键路径最末端、今天才可能被派工，
+所以它们必然在 T0907 之后才领到号。留着 126/127，就是给 main 埋一个"先 132 后 126"的空洞。
+撤掉之后，派工顺序即编号顺序，而守卫只允许在飞的号升序合并——两条合起来，**升序就成立**。
+
+**边界**：`00126`/`00127` 从未被任何分支或工作树添加过（`git log --all --diff-filter=A -- 'infra/migrations/00126*'` 为空），
+所以这两个号是真的空着，不是"已用但没落 main"。台账有备份：`.rddev/runtime/migration-numbers.json.bak-20260921`。
+
+**顺带说明为什么不是"给 T0907 一个低位号"**：那只能救 T0907 自己。只要**任何**在 T0907 之后派工的同链任务
+（T0710 依赖 T0708、T1107 依赖 T0906，都可能先于 T0907 派工）拿到低位号，空洞就换个位置出现。
+真正的不变量是「**号必须按派工顺序单调**」，所以修的是台账里那两笔**违反该不变量的历史预留**，不是给某一笔挑号。

@@ -80,6 +80,111 @@ func TestEndpointsValid(t *testing.T) {
 	}
 }
 
+// TestDependencyInferenceDirections pins the two ends of every
+// dependency-inference edge, which is what the impact analysis walks.
+//
+// The flag alone is not enough to walk with: it says "a change upstream
+// must trigger re-analysis downstream" and does not say which end is
+// downstream. depends_on names its DEPENDENCY as the target ("uses the
+// target as an actual input") and used_by names it as the source ("is used
+// by the target"), so a walker that assumed one direction would report the
+// objects UPSTREAM of a change as the ones affected by it.
+//
+// The test asserts both halves of the contract on every entry:
+//
+//   - a type carrying DependencyInference declares a direction, and its two
+//     ends are different;
+//   - a type NOT carrying the flag declares neither end — references is the
+//     one that matters, because it is the citation whose upstream changes
+//     only notify (docs/19 §3), and it sits one field away from depends_on
+//     in the table above.
+func TestDependencyInferenceDirections(t *testing.T) {
+	want := map[string][2]Endpoint{
+		"depends_on": {EndpointTarget, EndpointSource},
+		"used_by":    {EndpointSource, EndpointTarget},
+	}
+	for typ, ends := range want {
+		e, ok := Lookup(typ)
+		if !ok {
+			t.Fatalf("catalog lost type %q", typ)
+		}
+		if !e.DependencyInference {
+			t.Fatalf("%s must carry DependencyInference (docs/19 §3)", typ)
+		}
+		if e.DependencyEnd != ends[0] || e.DependentEnd != ends[1] {
+			t.Errorf("%s direction = dependency:%q dependent:%q, want dependency:%q dependent:%q",
+				typ, e.DependencyEnd, e.DependentEnd, ends[0], ends[1])
+		}
+		dependency, dependent, ok := DependencyDirection(typ)
+		if !ok {
+			t.Fatalf("DependencyDirection(%s) rejected a flagged type", typ)
+		}
+		if dependency != ends[0] || dependent != ends[1] {
+			t.Errorf("DependencyDirection(%s) = %q,%q, want %q,%q", typ, dependency, dependent, ends[0], ends[1])
+		}
+	}
+	for _, e := range Types() {
+		if e.DependencyInference {
+			if e.DependencyEnd == "" || e.DependentEnd == "" {
+				t.Errorf("%s carries DependencyInference with an undeclared direction (%q -> %q): the walk cannot tell which end is downstream",
+					e.Type, e.DependencyEnd, e.DependentEnd)
+			}
+			if e.DependencyEnd == e.DependentEnd {
+				t.Errorf("%s declares the same endpoint (%q) as both dependency and dependent", e.Type, e.DependencyEnd)
+			}
+			continue
+		}
+		if e.DependencyEnd != "" || e.DependentEnd != "" {
+			t.Errorf("%s declares a dependency direction without the flag; the flag is what says \"a change upstream triggers re-analysis\" (docs/19 §3)",
+				e.Type)
+		}
+		if _, _, ok := DependencyDirection(e.Type); ok {
+			t.Errorf("DependencyDirection(%s) accepted a type without the flag", e.Type)
+		}
+	}
+	if _, _, ok := DependencyDirection("no_such_type"); ok {
+		t.Error("DependencyDirection accepted an unknown type; it must fail closed")
+	}
+}
+
+// TestDependentTypesSplitsByDeclaredEnd pins DependentTypes to the
+// declarations above: the two sets are disjoint (an end is declared once
+// each way, never both), and a flagged type with no direction appears in
+// NEITHER set — its edges are not walked at all, which is why the test
+// above fails on such a declaration rather than leaving the hole silent.
+func TestDependentTypesSplitsByDeclaredEnd(t *testing.T) {
+	sources := DependentTypes(EndpointSource)
+	targets := DependentTypes(EndpointTarget)
+	if !reflect.DeepEqual(sources, []string{"depends_on"}) {
+		t.Errorf("DependentTypes(source) = %v, want [depends_on] (the type whose dependent is the edge's source)", sources)
+	}
+	if !reflect.DeepEqual(targets, []string{"used_by"}) {
+		t.Errorf("DependentTypes(target) = %v, want [used_by] (the type whose dependent is the edge's target)", targets)
+	}
+	seen := map[string]bool{}
+	for _, typ := range sources {
+		seen[typ] = true
+	}
+	for _, typ := range targets {
+		if seen[typ] {
+			t.Errorf("type %q appears in both dependent sets; one end is declared once", typ)
+		}
+	}
+	// references is the citation whose changes only notify: it must be in
+	// neither set, and that is the fact the impact analysis's acceptance
+	// turns into a measured failure by flipping the flag.
+	for _, set := range [][]string{sources, targets} {
+		for _, typ := range set {
+			if typ == "references" {
+				t.Errorf("references appears in a dependent set (%v): its upstream changes only notify (docs/19 §3)", set)
+			}
+		}
+	}
+	if DependentTypes("middle") != nil {
+		t.Error("DependentTypes returned a set for an endpoint that does not exist")
+	}
+}
+
 // TestExternalRefTargetTypes pins the citation/dependency pair of
 // docs/19 §3: the ONLY relation types that may point AT an external
 // reference are references (background knowledge; upstream changes only

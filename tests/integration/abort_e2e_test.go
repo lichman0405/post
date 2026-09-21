@@ -379,7 +379,7 @@ func newAbortFixture(t *testing.T, ctx context.Context) *abortFixture {
 		Schemas:   reg,
 		Events:    events.Recorder{},
 	})
-	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool))
+	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool), persistence.NewPullRequestStore(pool))
 	resolutionSvc := resolutions.NewService(diffSvc, resolutions.NewPGStore(pool), projectSvc, authz.NewMatrixEngine())
 	branchStore := persistence.NewBranchStore(pool)
 	prStore := persistence.NewPullRequestStore(pool)

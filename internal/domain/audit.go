@@ -192,6 +192,36 @@ const (
 	// emitted for a promotion (the two registries are separate — the note
 	// beside ActionPullRequestMerged).
 	ActionDiscussionPromoted = "discussion.promoted"
+
+	// T0411 review-request governance: one row per proposal sent into
+	// review (docs/43's open -> review_required, and the review loop's
+	// re-entry changes_requested -> review_required once the author has
+	// answered the requested changes), written in the same transaction as
+	// the state move itself. The move is the ONLY product path into
+	// review_required, and review_required is the only state a review
+	// submission advances (00051's transition map), so this row is what
+	// makes "who put this proposal in front of reviewers, and when"
+	// answerable — the question T1202's external-contribution loop has to
+	// be able to ask.
+	//
+	// # Why this action has NO research event beside it
+	//
+	// The audit vocabulary is this file, the event vocabulary is
+	// specs/events/event-types.yaml, and neither list is derived from the
+	// other (the note beside ActionPullRequestMerged). This transition is
+	// the case where the two registries do NOT share a name and none can
+	// be borrowed: docs/18 §2 defines the canonical event list as the YAML
+	// itself, and its Research PR group is exactly `pull_request.opened`,
+	// `pull_request.reviewed` and `pull_request.merged` — a review
+	// REQUEST is none of them. `reviewed` is the submission of a judgment
+	// (its payload carries review_id/kind/decision, persistence/
+	// review_store.go); emitting it for a request that has no review would
+	// tell every subscriber of that event that a judgment exists when none
+	// does. So the transition records an audit row and emits no event —
+	// the same deliberate asymmetry ActionDiscussionPromoted records
+	// below, taken for the same reason: naming an event is a change to
+	// specs/events/**, which is not this task's to make.
+	ActionPullRequestReviewRequested = "pull_request.review_requested"
 )
 
 // Stable via values (the audit_log.via column): how the action arrived.

@@ -28,7 +28,12 @@ type Deps struct {
 	Repos        RepoProvisioner
 	Imports      ContentImporter
 	PullRequests PullRequestOpener
-	Authz        authz.Engine
+	// Reviews is the same pull-request service, read through its review
+	// surface (see PullRequestReviewer). REQUIRED for the review request
+	// to work at all: without it that path fails closed with ErrStore
+	// rather than moving any state.
+	Reviews PullRequestReviewer
+	Authz   authz.Engine
 }
 
 // Service implements the external contribution path.
@@ -40,6 +45,7 @@ type Service struct {
 	repos    RepoProvisioner
 	imports  ContentImporter
 	prs      PullRequestOpener
+	reviews  PullRequestReviewer
 	authz    authz.Engine
 }
 
@@ -53,8 +59,42 @@ func NewService(deps Deps) *Service {
 		repos:    deps.Repos,
 		imports:  deps.Imports,
 		prs:      deps.PullRequests,
+		reviews:  deps.Reviews,
 		authz:    deps.Authz,
 	}
+}
+
+// Actor is who performs a governed pull-request action: the authenticated
+// user the request arrived as, and whether it arrived as a platform agent.
+// The flag is the matrix's own axis (internal/authz/actor.go: agents act
+// under agent_default, never under a human membership), so it travels with
+// the caller rather than being guessed by the layer that resolves a cell.
+type Actor struct {
+	// User is the authenticated user. An agent acts AS a user — the
+	// token's owner — so this is never empty.
+	User domain.User
+	// IsAgent reports whether the request arrived as a platform agent
+	// (MCP/API), not as a human session.
+	IsAgent bool
+}
+
+// RequestReviewRequest is one request to send an existing proposal into
+// review.
+type RequestReviewRequest struct {
+	// ProjectID is the project the proposal lives in — the parent, for an
+	// external contribution (the proposal is opened in the parent, from a
+	// branch of the contributor's fork).
+	ProjectID string
+	// Number is the proposal's project-scoped number.
+	Number int64
+	// IdempotencyKey is the contract-required key the request carried
+	// (specs/api/openapi.yaml, components.parameters.IdempotencyKey:
+	// required, minLength 8). Empty means the caller named none, which
+	// only an internal caller may do: the route requires it. It is
+	// recorded on the audit row of the move and otherwise unused — the
+	// state is the idempotency record
+	// (internal/persistence/pullrequest_store.go).
+	IdempotencyKey string
 }
 
 // ForkRequest is one external fork request.
@@ -205,6 +245,10 @@ func (s *Service) Fork(ctx context.Context, actor domain.User, in ForkRequest) (
 		TargetProjectID: fork.ForkProjectID,
 		SourceRef:       line.GitRef,
 		TargetBranch:    forkBranch.Name,
+		// The copy lands the fork branch on the parent's content, which is
+		// a state transition of that branch — recorded in the forker's
+		// name, because the fork is this request's (T0817).
+		ActorID: actor.ID,
 	})
 	if err != nil {
 		// The lineage row stands (a fork exists); the content copy is the
@@ -290,7 +334,12 @@ func (s *Service) OpenExternalPR(ctx context.Context, actor domain.User, in Open
 	if err != nil {
 		return domain.PullRequest{}, err
 	}
-	if err := s.authorizeOpenPR(ctx, actor, project, role, in.SourceBranchID); err != nil {
+	// IsAgent is false, and that is a statement about THIS PORT rather
+	// than about the product rule: OpenExternalPR is reached by a session
+	// route that resolves no agent flag (the convention aborthttp records
+	// at its own Actor construction). The flag travels with an Actor on
+	// the surfaces that have one — see RequestReview.
+	if err := s.authorizeOpenPR(ctx, Actor{User: actor}, project, role, in.SourceBranchID); err != nil {
 		return domain.PullRequest{}, err
 	}
 	pr, err := s.prs.Create(ctx, pullrequests.CreatePullRequestParams{
@@ -304,6 +353,54 @@ func (s *Service) OpenExternalPR(ctx context.Context, actor domain.User, in Open
 	})
 	if err != nil {
 		return domain.PullRequest{}, mapPullRequestError(err)
+	}
+	return pr, nil
+}
+
+// RequestReview sends an existing proposal into review under the SAME
+// open_pr cell that opened it (the 2026-09-21 Supervisor ruling on
+// T0411: no new CSV row, no new action).
+//
+// Why that cell and not a new one: the transition grants no right to
+// decide anything — review_required means "reviewers, look at this", not
+// approved — and the party who may put a proposal in front of reviewers
+// is the party who may put the proposal there in the first place. The
+// non-member's cell is allow_from_fork, and the condition is resolved
+// against the same lineage the proposal was opened under, so an external
+// contributor can carry their own contribution into review — which is
+// what the external-contribution flow needs and what a deny there would
+// break.
+//
+// The move itself is the pull-request service's (port PullRequestReviewer):
+// this method resolves WHO may ask, never how the row moves.
+func (s *Service) RequestReview(ctx context.Context, actor Actor, in RequestReviewRequest) (domain.PullRequest, error) {
+	if actor.User.ID == "" {
+		return domain.PullRequest{}, fmt.Errorf("%w: sending a pull request to review requires an authenticated actor", ErrForbidden)
+	}
+	if in.ProjectID == "" || in.Number < 1 {
+		return domain.PullRequest{}, fmt.Errorf("%w: project_id and a positive pull request number are required", ErrValidation)
+	}
+	// The project read gate first (T0106): a private project the actor
+	// may not read answers the existence-hiding not-found, before any
+	// matrix cell — and so before any question about the proposal — is
+	// resolved.
+	project, err := s.projects.Get(ctx, projects.Reader{UserID: actor.User.ID, Authenticated: true}, in.ProjectID)
+	if err != nil {
+		return domain.PullRequest{}, mapProjectError(err)
+	}
+	role, err := s.membershipRole(ctx, actor.User, project.ID)
+	if err != nil {
+		return domain.PullRequest{}, err
+	}
+	if err := s.authorizeReviewRequest(ctx, actor, project, role, in.Number); err != nil {
+		return domain.PullRequest{}, err
+	}
+	if s.reviews == nil {
+		return domain.PullRequest{}, fmt.Errorf("%w: no pull request service configured", ErrStore)
+	}
+	pr, err := s.reviews.RequestReviewKeyed(ctx, project.ID, in.Number, in.IdempotencyKey)
+	if err != nil {
+		return domain.PullRequest{}, mapReviewError(err)
 	}
 	return pr, nil
 }
@@ -609,6 +706,24 @@ func (s *Service) authorizeCreateBranch(ctx context.Context, parent domain.Proje
 	}
 }
 
+// openPRCell resolves the open_pr cell for the actor's class. It is the
+// ONE place the action name and the class resolution live, so the two
+// commands that act under this cell (opening a proposal, sending one to
+// review) cannot resolve it differently.
+func (s *Service) openPRCell(ctx context.Context, role *domain.ProjectRole, isAgent bool) (authz.Decision, error) {
+	if s.authz == nil {
+		return authz.Decision{}, fmt.Errorf("%w: no policy engine configured", ErrStore)
+	}
+	decision, err := s.authz.Authorize(ctx, authz.Request{
+		Action: authz.ActionOpenPR,
+		Class:  authz.ClassOf(true, role, isAgent),
+	})
+	if err != nil {
+		return authz.Decision{}, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+	return decision, nil
+}
+
 // authorizeOpenPR resolves the open_pr cell for the proposal.
 //
 // A member's cell is a plain allow; a non-member's is allow_from_fork,
@@ -618,16 +733,10 @@ func (s *Service) authorizeCreateBranch(ctx context.Context, parent domain.Proje
 // ErrForbidden — the count of projects does not grow, and the second
 // person to fork a popular project cannot propose from the first one's
 // work.
-func (s *Service) authorizeOpenPR(ctx context.Context, actor domain.User, project domain.Project, role *domain.ProjectRole, sourceBranchID string) error {
-	if s.authz == nil {
-		return fmt.Errorf("%w: no policy engine configured", ErrStore)
-	}
-	decision, err := s.authz.Authorize(ctx, authz.Request{
-		Action: authz.ActionOpenPR,
-		Class:  authz.ClassOf(true, role, false),
-	})
+func (s *Service) authorizeOpenPR(ctx context.Context, actor Actor, project domain.Project, role *domain.ProjectRole, sourceBranchID string) error {
+	decision, err := s.openPRCell(ctx, role, actor.IsAgent)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrStore, err)
+		return err
 	}
 	switch {
 	case decision.Permits():
@@ -637,7 +746,7 @@ func (s *Service) authorizeOpenPR(ctx context.Context, actor domain.User, projec
 		if ferr != nil {
 			return ferr
 		}
-		if !ok || fork.ParentProjectID != project.ID || fork.ForkedBy != actor.ID {
+		if !ok || fork.ParentProjectID != project.ID || fork.ForkedBy != actor.User.ID {
 			return fmt.Errorf("%w: open_pr is allow_from_fork for a non-member: branch %s must belong to the fork of project %s that this actor forked",
 				ErrForbidden, sourceBranchID, project.ID)
 		}
@@ -645,6 +754,58 @@ func (s *Service) authorizeOpenPR(ctx context.Context, actor domain.User, projec
 	default:
 		return fmt.Errorf("%w: open_pr on project %s is %s for this actor", ErrForbidden, project.ID, decision.Verdict)
 	}
+}
+
+// authorizeReviewRequest resolves the open_pr cell for sending an EXISTING
+// proposal into review (T0411), and nothing else: the move itself belongs
+// to the pull-request service.
+//
+// A class whose cell is a flat deny is refused here, before the proposal
+// is looked up at all — a caller who may not act on this project's
+// proposals learns nothing about which ones exist.
+//
+// The conditional class (a non-member's allow_from_fork) needs the
+// proposal: the condition is the same lineage fact the proposal was
+// opened under, and the lineage is read from the source branch the row
+// names. That read is why a MISSING proposal answers ErrForbidden here
+// rather than not-found, with the SAME refusal a lineage mismatch gets:
+// to a caller who may not act on this project's proposals, "there is no
+// such proposal" and "there is one and it is not yours" have to be one
+// answer, or the refusal itself reports which numbers the project holds
+// (docs/45 existence hiding; the note in
+// internal/application/releases/errors.go that authorization resolves
+// before any target query).
+func (s *Service) authorizeReviewRequest(ctx context.Context, actor Actor, project domain.Project, role *domain.ProjectRole, number int64) error {
+	const notYours = "sending a proposal of project %s to review is allow_from_fork for a non-member: only a proposal from this actor's own fork of that project can be sent to review"
+
+	decision, err := s.openPRCell(ctx, role, actor.IsAgent)
+	if err != nil {
+		return err
+	}
+	if decision.Permits() {
+		return nil
+	}
+	if decision.Verdict != authz.VerdictAllowFromFork {
+		return fmt.Errorf("%w: open_pr on project %s is %s for this actor", ErrForbidden, project.ID, decision.Verdict)
+	}
+	if s.reviews == nil {
+		return fmt.Errorf("%w: no pull request service configured", ErrStore)
+	}
+	pr, err := s.reviews.Get(ctx, project.ID, number)
+	if err != nil {
+		if errors.Is(err, pullrequests.ErrPullRequestNotFound) {
+			return fmt.Errorf("%w: "+notYours, ErrForbidden, project.ID)
+		}
+		return mapReviewError(err)
+	}
+	fork, ok, err := s.links.ForkOfBranch(ctx, pr.SourceBranchID)
+	if err != nil {
+		return err
+	}
+	if !ok || fork.ParentProjectID != project.ID || fork.ForkedBy != actor.User.ID {
+		return fmt.Errorf("%w: "+notYours, ErrForbidden, project.ID)
+	}
+	return nil
 }
 
 // sourceBranch resolves the parent line a fork is taken of: the named
@@ -921,6 +1082,34 @@ func truncate(s string, n int) string {
 		cut = cut[:len(cut)-1]
 	}
 	return strings.TrimSpace(cut)
+}
+
+// mapReviewError keeps the outcomes the review-request path must name, and
+// turns the rest into a store failure.
+//
+// The missing proposal and the three state refusals are kept rather than
+// swallowed: they are RULES' answers, not outages. A caller who was
+// permitted to ask (a member, an agent, the external contributor whose own
+// proposal this is) may be told that the number names no proposal (404) or
+// that docs/43 has no edge from the state it is in (409), and an answer of
+// "service unavailable" for either would hide a product rule behind an
+// outage. The refusals a caller may NOT be told anything by are raised
+// before this mapper is reached (authorizeReviewRequest).
+func mapReviewError(err error) error {
+	switch {
+	case err == nil,
+		errors.Is(err, pullrequests.ErrPullRequestNotFound),
+		errors.Is(err, pullrequests.ErrValidation),
+		errors.Is(err, ErrForbidden),
+		errors.As(err, new(*pullrequests.TransitionError)),
+		errors.As(err, new(*pullrequests.TerminalError)),
+		errors.As(err, new(*pullrequests.StateConflictError)):
+		return err
+	case errors.Is(err, projects.ErrProjectNotFound):
+		return ErrProjectNotFound
+	default:
+		return fmt.Errorf("%w: %v", ErrStore, err)
+	}
 }
 
 // mapProjectError keeps the projects service's outcomes in this package's

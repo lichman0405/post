@@ -82,6 +82,7 @@ func newJobHandler(queue *worker.RedisQueue, log *slog.Logger) http.Handler {
 
 		reqLog.Info("api: job enqueued", "job_id", id, "job_type", in.Type)
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(http.StatusAccepted)
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"job_id":         id,
@@ -96,6 +97,7 @@ var jobTypeRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 
 func writeJSONError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }

@@ -389,7 +389,7 @@ func buildAPI(ctx context.Context, pool *pgxpool.Pool, adapter *gitprovider.Gite
 	})
 	prStore := persistence.NewPullRequestStore(pool)
 	prSvc := pullrequests.NewService(prStore)
-	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool))
+	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool), prStore)
 	diffOfPR := prdiff.NewService(prStore, branchStore, diffSvc)
 	resolutionSvc := resolutions.NewService(diffSvc, resolutions.NewPGStore(pool), projectSvc, authz.NewMatrixEngine())
 	checksSvc := prchecks.NewService(prchecks.Deps{
@@ -411,11 +411,17 @@ func buildAPI(ctx context.Context, pool *pgxpool.Pool, adapter *gitprovider.Gite
 		Projects:  projectSvc,
 		Authz:     authz.NewMatrixEngine(),
 		Checks:    checksSvc,
-		Policies:  policySvc,
-		Rules:     policy.NewRuleEvaluator(),
-		Events:    events.Recorder{},
-		Git:       mergegit.New(adapter, gitprovider.NewUserAccessStore(pool)),
-		RefGuard:  gitprovider.RefGuard{MergeService: owner},
+		// The fork lineage (T0817), wired as cmd/api wires it: a source branch
+		// outside the PR's project is admissible only when the lineage says it
+		// is this PR author's fork of this project. These flows merge within
+		// one project, so it is never consulted — and leaving it nil would
+		// make a legitimate external proposal refuse.
+		Forks:    persistence.NewForkStore(pool),
+		Policies: policySvc,
+		Rules:    policy.NewRuleEvaluator(),
+		Events:   events.Recorder{},
+		Git:      mergegit.New(adapter, gitprovider.NewUserAccessStore(pool)),
+		RefGuard: gitprovider.RefGuard{MergeService: owner},
 	})
 	forksSvc := forks.NewService(forks.Deps{
 		Projects:     projectSvc,

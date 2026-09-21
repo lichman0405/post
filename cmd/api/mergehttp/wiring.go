@@ -27,11 +27,27 @@ type Deps struct {
 	// Projects is the project read gate: a merge is exactly as reachable as
 	// its project. The production adapter is projectAPI.Service().
 	Projects projectReader
+	// ReviewRequest serves the SECOND verb of this collection's last path
+	// segment, ":request-review" (T0411). It is an http.HandlerFunc rather
+	// than a command interface because the handler and the document it
+	// answers with belong to the package that owns this collection
+	// (cmd/api/pullrequestshttp.RequestReviewHandler) and this package
+	// dispatches to it without knowing either — see handlePullRequestVerb.
+	//
+	// It is taken as an option rather than as required wiring: a mux that
+	// mounts the merge surface alone (the E2E merge suite does) has no
+	// request-review route at all, and the verb then fails closed with 503
+	// rather than moving any state.
+	ReviewRequest http.HandlerFunc
 }
 
 // New wires the handlers.
 func New(deps Deps) *API {
-	return &API{handlers: &handlers{cmd: deps.Command, projects: deps.Projects}}
+	return &API{handlers: &handlers{
+		cmd:      deps.Command,
+		projects: deps.Projects,
+		review:   deps.ReviewRequest,
+	}}
 }
 
 // API is the mounted merge surface.
@@ -49,9 +65,15 @@ type API struct {
 // other path under this prefix reaches the same handler and is answered 404 by
 // the suffix check: no route is widened by the trick.
 //
+// The same pattern carries this collection's other suffix verb,
+// ":request-review" (T0411): a prefix has ONE remainder owner (a second
+// registration panics with "conflicts with pattern"), so the handler dispatches
+// that verb to the pull-request surface's own handler (Deps.ReviewRequest)
+// rather than the collection registering a route the mux would refuse.
+//
 // The more specific POST .../pull-requests/{number}/reviews route registered by
 // reviewhttp wins over this pattern (ServeMux picks the most specific match),
 // so the remainder wildcard does not swallow the review submission.
 func (a *API) Register(v1 *http.ServeMux) {
-	v1.HandleFunc("POST /api/v1/projects/{projectId}/pull-requests/{number...}", a.handlers.handleMerge)
+	v1.HandleFunc("POST /api/v1/projects/{projectId}/pull-requests/{number...}", a.handlers.handlePullRequestVerb)
 }

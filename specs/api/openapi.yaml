@@ -423,13 +423,64 @@ paths:
   /search/{searchId}:start-project:
     post:
       summary: Create Draft Research Context from search answer
+      description: >-
+        docs/14 §5: "Start Research Project" creates a Draft Research Context — research
+        question, referenced knowledge, dependencies, candidate materials, known
+        uncertainties, agent-suggested hypotheses. The search record's selected refs are
+        the substrate: the caller keeps, drops or reclassifies them. This call creates a
+        Project in planning plus the draft; it writes NO research state (no branch, no
+        object, no state commit) — docs/03: DRAFT is not yet an RSG, the initial state
+        forms only on confirmation (see :confirm below). Governance action: the same
+        create_project right that opens a project carries it, and an anonymous caller is
+        refused. Idempotency-Key is required for the same reason as every other write:
+        a replay resumes the same draft instead of opening a second project.
       parameters:
         - name: searchId
           in: path
           required: true
           schema: {type: string}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug, research_question]
+              properties:
+                name: {type: string}
+                slug: {type: string}
+                visibility: {enum: [public, private]}
+                research_question: {type: string}
+                referenced_refs: {type: array, items: {type: string}}
+                dependency_refs: {type: array, items: {type: string}}
+                candidate_refs: {type: array, items: {type: string}}
+                uncertainties: {type: array, items: {type: string}}
+                hypotheses: {type: array, items: {type: string}}
       responses:
-        '201': {description: Draft project context created}
+        '201': {description: Draft research context created; body carries the draft id, the project id and the draft}
+        '409': {description: The search record is not the caller's, or was already started}
+  /research-context-drafts/{draftId}:confirm:
+    post:
+      summary: Confirm a draft research context into the project's initial state
+      description: >-
+        docs/14 §5: "用户确认后才形成 initial state." Confirmation is where the draft stops
+        being a candidate: it is the single call that writes research state — the initial
+        branch and the research question object — through the ordinary state transition
+        path, so the transition is named by a state commit like any other write
+        (docs/09). Until it is confirmed the project has no branch and no state, which is
+        what makes "an agent answer never writes main by itself" checkable rather than
+        asserted. Only the project's maintainers may confirm; a caller without the right
+        is refused with the same answer as one who cannot see the draft.
+      parameters:
+        - name: draftId
+          in: path
+          required: true
+          schema: {type: string}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201': {description: Initial state created; body carries the branch id and the state commit}
+        '409': {description: The draft is not in a state that can be confirmed}
   /assets/{assetId}:
     get:
       security: []

@@ -1,0 +1,61 @@
+{
+  "id": "T1205",
+  "phase": "P12",
+  "phase_name": "Canonical Workflow 与最终交付",
+  "title": "OpenAPI/MCP/Schema 文档最终同步",
+  "v1_required": true,
+  "dependencies": [
+    "T1202"
+  ],
+  "requirements": [
+    "**任务书的验收是「无 undocumented public endpoint」。先把这句话变成一件可机械判定的事。** 现状（我核过，你可以复核）：`specs/api/openapi.yaml` 的 `paths` 是 36 条，而 `cmd/**` 与 `internal/**` 里挂载的 `/api/v1` 路由远多于此——**注意别用 grep 数**：注册形式至少有四种（`HandleFunc(\"POST /api/v1/…\")`、`Handle(\"…\")`、子路由 `v1.Handle(\"/api/v1/projects\", projectAPI.Routes())`、以及包内 `.Get/.Post/…`），我用正则数出来的数字不可信，**你要用一个能覆盖全部形式的枚举器**。",
+    "**枚举器要自己可证**：用 `go/ast` 扫 `cmd/**` + `internal/**` 的注册点，把「方法 + 路径模式」收齐；然后用一次变异证明它测得住——例如临时加一条新路由、或把某条注册换个形式，断言枚举结果**跟着变**（红了再绿）。**枚举器漏掉一条 = 这条门形同虚设。**",
+    "**两个方向都要判**：①挂载了但契约里没有（undocumented）；②契约里写了但没有挂载（例如 `/search` 与 `/search/{searchId}:start-project` 在 T0906/T0908 落地前就是这样）。两个方向都要有独立的红/绿实测。",
+    "**不要为了让门变绿去写一份宽豁免名单。** 这是本任务最容易走歪的地方：把几十条路由「登记成豁免」和「登记成契约」在机械上没有区别，但对 V1 的含义完全不同。**豁免名单由我（Supervisor）落笔**，条目必须引用一条既有的书面决定（ADR、`docs/` 的哪一节、或 `tasks/decisions.md` 的哪一条），你的交付是**清单 + 建议处置**，不是决定。",
+    "**`specs/**` 不在你的范围里**（CLAUDE.md §8.1：Worker 写 `specs/` 的唯一入口是 schema 快照的重新生成）。契约要怎么补、哪几条进豁免，**由我落笔**：你把清单交上来（机器可读），我改 `specs/api/openapi.yaml` 与豁免文件，然后门转绿——**这一步是任务的收尾，不是你的工作**。",
+    "**MCP 那一边同样**：`specs/mcp/tools.json` 与实现要对得上（哪些工具、read/write、参数），同样先枚举再比对；`docs/47_MCP_TOOL_CATALOG.md` 是文字面，**以实现为准**去核。",
+    "**诚实报告**：清单里每一条未登记路由，给出「它是什么、谁在用、建议进契约还是进豁免、理由」。**不要**把不认识的路由一律建议豁免——那等于把判定权丢掉。"
+  ],
+  "deliverables": [
+    "路由枚举器（能覆盖树里实际用到的全部注册形式）+ 它的自证变异实测",
+    "契约比对器：两个方向都判，红/绿各有实测",
+    "机器可读的清单：每条未登记/未挂载路由 + 建议处置 + 理由（`ops/` 或 `tests/contract/` 下）",
+    "MCP 工具与实现对账的同一形状的清单",
+    "RESULT：枚举器覆盖了哪些形式、两个方向的红绿输出、以及每条建议的理由"
+  ],
+  "acceptance_criteria": [
+    "**仪器能说不（先做这一步）**：枚举器与比对器各做一次变异并**转红**，红的输出留在 RESULT 里（枚举器漏一条要能被自己的测试抓住）。",
+    "**两个方向都有实测**：造一条挂载了但没登记的（红）→ 登记后绿；造一条登记了但没挂载的（红）→ 移除后绿。",
+    "**清单完整且可核对**：清单里条数 = 比对器报出的条数；抽查任意三条，能按清单里的路径在代码里找到注册点。",
+    "**没有自作主张**：`specs/**` 一个字节都没动；豁免名单不是由你写的（若你写了，本任务判不通过）。",
+    "**MCP 对账有结论**：逐条给出「契约里的工具 / 实现里的工具 / 差异」。",
+    "**诚实报告**：每条建议的理由与不确定处。"
+  ],
+  "tests": [
+    "contract suite"
+  ],
+  "allowed_scope": [
+    "ops/**",
+    "tests/**",
+    "packages/api-contracts/**",
+    "packages/schemas/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/task_status.json",
+    "tasks/progress.md",
+    "cmd/**",
+    "internal/**"
+  ],
+  "decision_level_max": "L1",
+  "relevant_specs": [
+    "specs/api/openapi.yaml",
+    "specs/mcp/tools.json",
+    "docs/22_API_DESIGN.md",
+    "docs/47_MCP_TOOL_CATALOG.md",
+    "docs/25_CICD_DEVOPS.md"
+  ],
+  "scope_note": "**把 `specs/**` 整个摘出去了**——包括原来给本任务的 `specs/api/**`、`specs/mcp/**`、`specs/schemas/**` 与 `specs/SPEC_VERSION.json`。理由是 CLAUDE.md §8.1 逐字：「其余 `specs/**` 与 `docs/**` 仍为 Supervisor-only」，Worker 写入 `specs/` 的唯一入口是 schema 快照的重新生成。所以本任务的形状改成「**你把清单与判定依据交上来，我落笔改契约**」，门在契约补完之后转绿。\n\n`cmd/**` 与 `internal/**` 保留**只读式**的使用（枚举注册点）；**本任务不改产品代码**——发现路由与实现不一致，报上来。",
+  "supervisor_scope_narrowing": "**本任务原来把 `specs/api/**`、`specs/mcp/**`、`specs/schemas/**` 放在 allowed_scope 里**，与 CLAUDE.md §8.1 冲突（`specs/**` 是 Supervisor-only，Worker 的唯一入口是 schema 快照）。这一版把 `specs/**` 全部移出并写进 `forbidden_scope`，任务形状相应改成「清单 + 建议处置交由 Supervisor 落笔」。同时摘掉 `docs/**`。\n\n**（2026-09-21 二次收窄，按安全复核）——`cmd/**` 与 `internal/**` 从 allowed_scope 里摘掉，改为 forbidden。** 理由：本任务的交付物是**清单与判定依据**，不是产品代码；「只读式使用」在机制上无法表达，allowed_scope 才是真正的闸门，留一个能改的目录就等于允许改。**枚举器与被变异证明都放在 `tests/**` 里**：枚举器是一个 `go run ./tests/...` 的独立程序（它**读** `cmd/**` 与 `internal/**` 是允许的——读不受 allowed_scope 约束），而「证明它说得出不会」的变异**打在 `tests/**` 里的合成 fixture 副本上**，不打在产品代码上——那样既不需要改产品树，也更强：一个只会对真实树点头的检查器是脆的，一个能对合成注册形态说不的检查器才是仪器。"
+}

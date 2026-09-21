@@ -237,6 +237,7 @@ func writePublishBlocked(w http.ResponseWriter, r *http.Request, refused *assetp
 		message = "the publication was refused: " + strings.Join(refused.Reasons, "; ")
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusConflict)
 	_ = json.NewEncoder(w).Encode(blockedEnvelope{
 		Code:      assetpublish.CodePublishBlocked,

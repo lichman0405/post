@@ -1,0 +1,75 @@
+{
+  "id": "T0908",
+  "phase": "P9",
+  "phase_name": "Search 与 Evidence-backed Research Answer",
+  "title": "Search → Draft Research Context",
+  "v1_required": true,
+  "dependencies": [
+    "T0907",
+    "T0104"
+  ],
+  "requirements": [
+    "**迁移编号不在本任务书里写死，以派工时任务包里的 `migration_number` 为准**（CLAUDE.md §8.1：编号由 Supervisor 侧的 `AllocateMigrationNumber` 在派工时发号并记账，Worker 不得自选；返工沿用同一个号）。文件名照仓库惯例：`infra/migrations/<任务包给的号>_research_context_draft.sql`，并在 `infra/migrations/migrations.go` 的清单里登记。**为什么这里不写数字**：起草本任务书时（2026-09-21）账本 `.rddev/runtime/migration-numbers.json` 上已发的号是 T0906=121、**T0411=122**、T0610=123、T0818=124——`00122` **已经被 T0411 占了**，而 T0908 还要排在 T0906→T0907 之后才派工，中间还会有人拿走号。**照任务包里的号写，不要照这本任务书里可能过时的数字写。**",
+    "**领域口径（逐字在 `docs/14_SEARCH_DISCOVERY.md:23-25`）**：「\"Start Research Project\"创建 Draft Research Context：Research Question、referenced knowledge、dependencies、candidate materials、known uncertainties、agent-suggested hypotheses。**用户确认后才形成 initial state。**」`docs/31_MASTER_ACCEPTANCE.md:36` 把「Answer → Draft Research Context → new Project 流程可用」列为 Gate E 的一条。**draft 不是 RSG 节点**（`docs/07_RSG_SPEC.md:5`：RSG 是某个 state version 下的完整状态图），它是 initial state 之前的候选物。",
+    "**上游给你留好了一个确切的空位**：T0906 落下的 `search_records` 表（`infra/migrations/00121_search_answer_record.sql:67-102`）带着 `id`、`query`、`filters`、`plan`、`signals`、`selected_refs`、`citations`、`answer`，**并且明确把读的那一半留给了你**——`internal/persistence/search_record_store.go:20-27` 逐字写着「One method, and **no reader** … the only reader in the contract resumes a search's sources, **and that flow is not this task's**」。`citations` 有一个 CHECK：`citations <@ selected_refs`（`00121:102`）。**这些是「答案引用只能来自检索结果」那条不变量的落点，不许放宽、不许绕开。**",
+    "**两条路由已经写进契约（我加的，`specs/api/openapi.yaml`）**，你要实现的就是它们：\n  1. `POST /search/{searchId}:start-project`（body 见契约：`name`/`slug`/`research_question` 必填，`referenced_refs`/`dependency_refs`/`candidate_refs`/`uncertainties`/`hypotheses` 可选）——**建 Project（planning）+ 落一行 draft，不写任何科研状态**；\n  2. `POST /research-context-drafts/{draftId}:confirm`——**确认时才形成 initial state**：经**既有的状态迁移路径**建出初始 branch 与 research_question 对象，因此这次迁移和别的写一样被一次 state commit 命名。\n  两条都**必须带 `Idempotency-Key`**（照 `cmd/api/mergehttp/handler.go:86`/`:192` 的 `mergeKey` 接法）。契约里逐字写了为什么：重放要**回到同一份 draft / 同一次确认**，而不是开出第二个项目、第二次状态。",
+    "**「Agent 答案不自动写 main」这句要能测，不能只是声明**：`:start-project` 落地之后，断言该项目的分支数为 0、`project_states`/`state_commits` 没有新行、`scientific_object_versions` 没有新行——**逐条断言存储**，不是断言返回值。确认之后，断言初始状态**可追溯**：能从 state commit 找回 research_question 那条对象版本。",
+    "**权限照既有口径，不许发明新的**：`specs/policies/permissions-matrix.csv:4` 的 `create_project` 是「匿名 deny、认证用户按角色 allow、org 内 scoped」；`specs/ui/page-inventory.csv:4` 的 `/search` 行写着 write behavior =「start project when logged in」。所以：匿名的 `:start-project` 被拒；确认只对**该项目的 maintainer 及以上**开放，且「没权限」与「看不见」返回同一个答复（照 `internal/application/projects` 既有写路径的形状）。",
+    "**引用面不许放宽**：draft 里出现的每个 ref 都必须来自这条 search record 的 `selected_refs`（用户可以在其中取舍与重新归类，**不能凭空加**）。构造一条不在 `selected_refs` 里的 ref 并断言被拒。",
+    "**诚实报告**：`uncertainties` / `hypotheses` 今天有没有地方可落（是只存在 draft 里，还是要成为对象）、confirm 之后 draft 行的终态是什么、以及你不能确定的地方，逐条写进 RESULT。"
+  ],
+  "deliverables": [
+    "迁移 `<任务包里的 migration_number>_research_context_draft.sql` + `migrations.go` 登记（**编号以任务包为准，不得改号**）",
+    "`search_records` 的读（T0906 留下的空位）：按 search id 取回该条记录及其 `selected_refs`",
+    "`POST /search/{searchId}:start-project`：建 planning 项目 + 落 draft，**零科研状态**，Idempotency-Key 生效",
+    "`POST /research-context-drafts/{draftId}:confirm`：经既有状态迁移路径形成 initial state，可追溯到 state commit",
+    "负向用例：匿名被拒、非 maintainer 被拒、`selected_refs` 之外的 ref 被拒、重放返回同一结果且不产生第二份状态",
+    "RESULT：逐条写清「建了哪些行、没建哪些行」的存储断言，以及不确定处"
+  ],
+  "acceptance_criteria": [
+    "**仪器能说不（先做这一步）**：至少三条新断言各做一次变异（例如让 `:start-project` 顺手建一个 branch、让重放真的建出第二个项目、让 confirm 绕过权限检查），确认**转红**，红的输出留在 RESULT 里。",
+    "**「确认前没有状态」逐条断言存储**：`:start-project` 之后，项目下 `branches` 计 0、`project_states` 计 0、`state_commits` 计 0、`scientific_object_versions` 计 0（真 PostgreSQL 上按表读回），且 `search_records.answer` 里的引用集与 draft 的 ref 集**逐条对得上**。",
+    "**「确认后状态可追溯」**：confirm 之后能由 state commit 找回 initial branch 与 research_question 的对象版本；该版本的 `base_state`/actor 按既有口径写入。",
+    "**Idempotency-Key 两条路由都成立**：同一 key 重放 → 同一 `project_id`/`draft_id`（或同一次确认结果），且存储里**只有一份**；换 key 重放同一 search → 明确拒绝（不是静默建第二份）。",
+    "**引用面不放宽**：不在 `selected_refs` 里的 ref 被拒；`citations <@ selected_refs` 那个 CHECK 仍在（不许为了塞进新数据放宽它）。",
+    "**权限负向 e2e**：匿名 `:start-project` 401/403；非 maintainer `:confirm` 被拒，且与「看不见该 draft」的答复一致。",
+    "**生成物按生成器**：`specs/database/postgres.sql` 由 `scripts/gen_schema_snapshot.py` 重新生成、`internal/persistence/sqlc/**` 由 `scripts/gen_sqlc.sh` 重新生成，`make check-schema-snapshot` 与 `bash tests/integration/check-sqlc-drift.sh` 全绿；三个 `--check` 的输出贴进 RESULT。",
+    "**诚实报告**：不确定处与「今天没地方落」的项（如 `hypotheses`）逐条写清。"
+  ],
+  "tests": [
+    "start project e2e"
+  ],
+  "allowed_scope": [
+    "infra/migrations/**",
+    "specs/database/postgres.sql",
+    "specs/SPEC_VERSION.json",
+    "internal/persistence/**",
+    "internal/search/**",
+    "internal/application/**",
+    "cmd/api/searchhttp/**",
+    "cmd/api/main.go",
+    "tests/**",
+    "go.mod",
+    "go.sum",
+    ".env.example"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/task_status.json",
+    "tasks/progress.md"
+  ],
+  "decision_level_max": "L1",
+  "relevant_specs": [
+    "docs/14_SEARCH_DISCOVERY.md",
+    "docs/07_RSG_SPEC.md",
+    "docs/31_MASTER_ACCEPTANCE.md",
+    "docs/09_VERSION_CONTROL.md",
+    "docs/43_STATE_MACHINES.md",
+    "specs/api/openapi.yaml",
+    "specs/policies/permissions-matrix.csv",
+    "specs/ui/page-inventory.csv"
+  ],
+  "scope_note": "**迁移编号由任务包在派工时发**（见需求第 1 条）。\n\n**`cmd/api/**` 收窄为 `cmd/api/searchhttp/**` + `cmd/api/main.go`**（2026-09-21）：`cmd/api/` 下有约 45 个域包（auth/protection/release/forks…），一条搜索任务持有整个 `cmd/api/**`，等于可以顺手改鉴权装配与发布出口。查证过挂载点就在 `cmd/api/main.go:388-422` 的 `v1.Handle(...)` + 各域 `Register(v1)`，你要动的是 `searchhttp` 自己的 wiring 加 main.go 里那一处挂载。\n\n**`apps/web/**` 已摘掉**：本任务交付物里**没有一条 UI 需求**（两条路由是 API 契约，`specs/ui/page-inventory.csv` 的 `/search` 行归前端自己的任务）。若你判断非改前端不可，**停下来在 RESULT 里写明**，不要越界。\n\n**`internal/persistence/**` 与 `internal/application/**` 保持不动**是有意为之：这两个目录**是平的**（store 与 service 直接在根下，不分子包），新 store/service 文件（如 `internal/persistence/research_context_draft_store.go`）**无法匹配更窄的 glob**，再收就会让任务书自己不可完成。",
+  "supervisor_scope_narrowing": "**没有大砍，只把 T0906 的面摘出去。** `internal/search/**` 保留（draft 要从检索结果来）；`internal/search/answer/**` 与 `cmd/api/searchhttp/**` 里**答案生成那一段不属于你**——需要改动就报上来，那是 T0906 刚交付、刚过评审的面。\n\n**`specs/api/openapi.yaml` 不在你的范围里，两条路由我已经替你写进契约了**（路径 `:start-project` 与 `:confirm`，含必填 `Idempotency-Key`）。若实现中发现契约与领域口径有出入，**报上来由我改契约**，不要自己动 `specs/`。\n\n`infra/migrations/**` + 两份生成物保留：本任务要加迁移（编号 `00122` 已分配），生成物必须由生成器重算，不能手工编辑。\n\n**（2026-09-21 修订：迁移号不再写死）**初稿写了 `00122`，起草时它看着是空的，但账本显示 T0411 已经持有 `122`。这正是 T1108 那次踩过的同一个坑——**任务书里的号与派工时的号会打架**，而派工时渲染进工人任务包的是 `AllocateMigrationNumber` 发的号。所以本笔改成「以任务包为准」，并把当时的账本快照留在需求第 1 条里当参照。\n\n**第二次修订（2026-09-21，自动安全评审触发）**：评审提「Overly Permissive IAM/RBAC」。采纳其中两条：`cmd/api/**` 收窄到 `searchhttp/**` + `main.go`；`apps/web/**` 摘掉（无 UI 交付物）。**未采纳第三条**（把 `internal/persistence/**`、`internal/application/**` 拆到子包）：这两个目录是平的，没有子包可拆，照办会让新文件的写入面变成空集——这正是「收窄到任务不可完成」的反面教材。收窄的判据是**有没有具名消费者**，不是越小越好。"
+}

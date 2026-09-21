@@ -95,8 +95,44 @@ func (s *Service) List(ctx context.Context, projectID string) ([]domain.PullRequ
 // RequestReview moves the PR into review (docs/43: open →
 // review_required, and the review loop's re-entry changes_requested →
 // review_required after the author updated the head).
+//
+// This is the command's keyless form — the shape an internal caller (a
+// fixture, a projection, an operator fixing a stuck proposal) uses, and
+// the shape it has had since T0402. The product route always carries the
+// contract's Idempotency-Key and calls RequestReviewKeyed.
 func (s *Service) RequestReview(ctx context.Context, projectID string, number int64) (domain.PullRequest, error) {
-	return s.setState(ctx, projectID, number, domain.PullRequestStateReviewRequired)
+	return s.RequestReviewKeyed(ctx, projectID, number, "")
+}
+
+// RequestReviewKeyed is RequestReview with the Idempotency-Key the
+// contract route carried (specs/api/openapi.yaml,
+// components.parameters.IdempotencyKey: required, minLength 8 on POST
+// .../{prId}:request-review).
+//
+// The key is OPTIONAL on the command and required on the route, which is
+// the same split the creation command makes for its CreationKey: an
+// internal caller names none, and a key that IS sent has to be a usable
+// one — below the contract's minLength it names nothing a retry could be
+// matched against. Where the creation key is a row lookup (migration
+// 00089), this key is recorded on the audit row and otherwise unused: the
+// state is the idempotency record, so a repeated request is answered by
+// the PR already being in review_required
+// (internal/persistence/pullrequest_store.go, and the freeze's identical
+// note in internal/application/mainfreeze/doc.go).
+func (s *Service) RequestReviewKeyed(ctx context.Context, projectID string, number int64, idempotencyKey string) (domain.PullRequest, error) {
+	if err := validateRef(projectID, number); err != nil {
+		return domain.PullRequest{}, err
+	}
+	if idempotencyKey != "" && len(idempotencyKey) < MinCreationKeyLen {
+		return domain.PullRequest{}, fmt.Errorf(
+			"%w: Idempotency-Key must be at least %d characters (specs/api/openapi.yaml)",
+			ErrValidation, MinCreationKeyLen)
+	}
+	pr, err := s.repo.RequestReview(ctx, projectID, number, idempotencyKey)
+	if err != nil {
+		return domain.PullRequest{}, wrapStoreError(err)
+	}
+	return pr, nil
 }
 
 // Close withdraws the PR without merging (docs/43: closed is terminal,

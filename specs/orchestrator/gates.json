@@ -273,6 +273,26 @@
           "run": "bash tests/acceptance/validation-gates-real-services-e2e.sh"
         }
       ]
+    },
+    "security-smoke": {
+      "steps": [
+        {
+          "run": "bash tests/security/owasp-smoke.sh"
+        }
+      ],
+      "requires_tasks": [
+        "T1106"
+      ]
+    },
+    "mof-canonical": {
+      "steps": [
+        {
+          "run": "bash tests/acceptance/mof-canonical-workflow.sh"
+        }
+      ],
+      "requires_tasks": [
+        "T1202"
+      ]
     }
   },
   "review": {
@@ -859,7 +879,8 @@
     "T1106": {
       "g3_jobs": [
         "auth-real-services",
-        "rsg-real-services"
+        "rsg-real-services",
+        "security-smoke"
       ]
     },
     "T1107": {
@@ -897,7 +918,8 @@
       "g3_jobs": [
         "auth-real-services",
         "rsg-real-services",
-        "gitea-real-services"
+        "gitea-real-services",
+        "mof-canonical"
       ]
     },
     "T1203": {
@@ -925,14 +947,16 @@
       "g3_jobs": [
         "auth-real-services",
         "rsg-real-services",
-        "gitea-real-services"
+        "security-smoke"
       ]
     },
     "T1207": {
       "g3_jobs": [
         "auth-real-services",
         "rsg-real-services",
-        "gitea-real-services"
+        "gitea-real-services",
+        "security-smoke",
+        "mof-canonical"
       ]
     },
     "T1208": {

@@ -46,6 +46,41 @@ func NewPullRequestStore(pool *pgxpool.Pool) *PullRequestStore {
 	return &PullRequestStore{pool: pool}
 }
 
+// ProposesToProject implements diffs.ProposalPort (T0817): whether a pull
+// request of projectID proposes stateID as its head. It is the read the
+// three-way diff makes about the ONE side of its triple that may live in
+// another project — the external fork's source state (docs/04 §2).
+//
+// The question is deliberately about the proposal and not about fork
+// lineage: what the diff needs is a bound on what a foreign source state
+// may expose, and "this project's own pull request proposes it" is
+// exactly the set of foreign states the project is already shown. A state
+// no proposal names — including one of a fork this project never saw a
+// proposal from — answers false, and the diff then refuses it as the
+// foreign state it always refused.
+//
+// Every id that cannot name a row answers false rather than failing: the
+// caller is asking a closed question about stored content, and "no such
+// proposal" is the answer that keeps the diff's membership check intact.
+func (s *PullRequestStore) ProposesToProject(ctx context.Context, projectID, stateID string) (bool, error) {
+	projectUUID, err := textUUID(projectID)
+	if err != nil {
+		return false, nil
+	}
+	stateUUID, err := textUUID(stateID)
+	if err != nil {
+		return false, nil
+	}
+	var proposed bool
+	err = s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pull_requests WHERE project_id = $1 AND proposed_state_id = $2)`,
+		projectUUID, stateUUID).Scan(&proposed)
+	if err != nil {
+		return false, fmt.Errorf("persistence: read proposal of state: %w", err)
+	}
+	return proposed, nil
+}
+
 // CreatePullRequest implements pullrequests.Repository.
 func (s *PullRequestStore) CreatePullRequest(ctx context.Context, in pullrequests.CreatePullRequestParams) (domain.PullRequest, error) {
 	projectID, err := textUUID(in.ProjectID)
@@ -322,6 +357,159 @@ func (s *PullRequestStore) SetPullRequestState(ctx context.Context, projectID st
 		return domain.PullRequest{}, fmt.Errorf("persistence: set pull request state: %w", err)
 	}
 	return pullRequestFromRow(row), nil
+}
+
+// reviewEntryStates are the two states docs/43 lets a proposal be sent to
+// review FROM, in the order this adapter tries them: `open` is the first
+// submission, `changes_requested` is the review loop's re-entry after the
+// author answered the requested changes. Migration 00051's transition map
+// spells both edges (00051:88 and 00051:90) and is the backstop for this
+// list.
+var reviewEntryStates = []domain.PullRequestState{
+	domain.PullRequestStateOpen,
+	domain.PullRequestStateChangesRequested,
+}
+
+// RequestReview implements pullrequests.Repository: the review-request
+// move (docs/43 open | changes_requested -> review_required), one audit
+// row, one transaction.
+//
+// # Why there is no idempotency table here
+//
+// The state IS the idempotency record, and that is a constraint rather
+// than a preference: this task may not add a migration (its scope
+// excludes infra/migrations/**), so the ledger the merge route keeps
+// (merge_creations, 00070) is not available to it. The tree already
+// answers this exact situation for the freeze (internal/application/
+// mainfreeze/doc.go, "Idempotency is the state, not a ledger"): the
+// Idempotency-Key is required on the route and CONSUMED by the state. A
+// repeated request — the same key or a different one — finds the PR
+// already in review_required and is answered with the row, writing
+// nothing: one audit row forever, by construction. The key itself is
+// recorded on the audit row (the request that asked), never consulted.
+//
+// # The shape of the move
+//
+// A conditional update, not a read-then-write: the compare-and-swap's
+// WHERE clause names the state it is willing to move FROM, so of two
+// concurrent requests exactly one can match and only the winner writes
+// the audit row. The two entry states are tried as two CAS attempts
+// rather than one `IN (...)` predicate, and that is deliberate — it is
+// how the winner knows WHICH edge it travelled (the audit row's
+// before_summary reports it, and "the first submission" and "re-entered
+// review after changes" are different facts to the Activity page). The
+// attempts cannot both match: the first one that lands leaves the row in
+// review_required, which is in neither WHERE clause.
+//
+// The loser's CAS matches nothing, and the classify read below then says
+// why: the PR is already in review (the replay — a success, not a
+// conflict), or it is in a state this edge does not leave from. That read
+// runs inside the same transaction and takes the row lock, so the reason
+// it reports is the state the request actually met.
+//
+// # Why the refusal does not single out the terminal states
+//
+// A merged/closed/aborted PR is refused as *TransitionError, the same
+// outcome approved and merge_ready get, and NOT as *TerminalError — which
+// this package raises for RefreshProposedState and the review-submission
+// path raises for a PR a review can no longer move. Two reasons, and the
+// first is the binding one:
+//
+//   - It is the behaviour this command has had since T0402, when it was
+//     the setState family's move (Close/Abort/MarkMerged/SetState all
+//     answer *TransitionError for a source state docs/43's map refuses,
+//     terminal ones included). An existing acceptance test pins it
+//     (tests/integration/pullrequest_test.go, "closed -> review_required
+//     ... want TransitionError"), and nothing about this task asks for a
+//     finer split: the contract declares ONE 409 for the operation
+//     ("The PR is not in a state that can be sent to review",
+//     specs/api/openapi.yaml) and both answers land on it.
+//   - A terminal PR is still refused, and refused by the map rather than
+//     by a special case: docs/43 gives merged/closed/aborted no outgoing
+//     edge, so "not a state that can be sent to review" is exactly what
+//     is true of it.
+func (s *PullRequestStore) RequestReview(ctx context.Context, projectID string, number int64, idempotencyKey string) (domain.PullRequest, error) {
+	pid, err := textUUID(projectID)
+	if err != nil {
+		return domain.PullRequest{}, pullrequests.ErrPullRequestNotFound
+	}
+	var out domain.PullRequest
+	err = WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		q := sqlc.New(tx)
+		for _, expected := range reviewEntryStates {
+			row, casErr := q.SetPullRequestState(ctx, sqlc.SetPullRequestStateParams{
+				ProjectID: pid,
+				Number:    number,
+				Expected:  string(expected),
+				NextState: string(domain.PullRequestStateReviewRequired),
+			})
+			if casErr == nil {
+				out = pullRequestFromRow(row)
+				return appendAudit(ctx, q, domain.AuditEntry{
+					Action:    domain.ActionPullRequestReviewRequested,
+					ProjectID: projectID,
+					TargetRef: "pull_request:" + out.ID,
+					BeforeSummary: map[string]any{
+						"state": string(expected),
+					},
+					AfterSummary: map[string]any{
+						"state":               string(domain.PullRequestStateReviewRequired),
+						"pull_request_id":     out.ID,
+						"pull_request_number": out.Number,
+						"source_branch_id":    out.SourceBranchID,
+						"target_branch_id":    out.TargetBranchID,
+					},
+					Metadata: map[string]any{
+						// The request that asked, recorded and never
+						// consulted (see the method doc): an operator
+						// tracing a retry can find it, and no code path
+						// reads it back.
+						"idempotency_key": idempotencyKey,
+					},
+				})
+			}
+			if !errors.Is(casErr, pgx.ErrNoRows) {
+				if isInvalidText(casErr) {
+					return pullrequests.ErrPullRequestNotFound
+				}
+				return fmt.Errorf("persistence: request review: %w", casErr)
+			}
+		}
+		// Nothing moved. Read the row the request actually met — locked,
+		// inside this transaction — and answer for the state it is in.
+		current, err := q.GetPullRequestByProjectAndNumberForUpdate(ctx, sqlc.GetPullRequestByProjectAndNumberForUpdateParams{
+			ProjectID: pid,
+			Number:    number,
+		})
+		if errors.Is(err, pgx.ErrNoRows) || isInvalidText(err) {
+			return pullrequests.ErrPullRequestNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("persistence: request review: %w", err)
+		}
+		out = pullRequestFromRow(current)
+		state := domain.PullRequestState(current.State)
+		if state == domain.PullRequestStateReviewRequired {
+			// The state the request asked for is the state the PR is in.
+			// Nothing is written and the row comes back, which is what
+			// makes a repeat answer the same way instead of failing the
+			// transition map.
+			return nil
+		}
+		// One refusal for every state docs/43 gives this edge no way out
+		// of — approved, merge_ready, and the three terminal states alike
+		// (see the method doc: the command's own behaviour since T0402,
+		// and the contract's single 409).
+		return &pullrequests.TransitionError{
+			Number: number,
+			From:   state,
+			To:     domain.PullRequestStateReviewRequired,
+		}
+	})
+	if err != nil {
+		return domain.PullRequest{}, err
+	}
+	return out, nil
 }
 
 // RefreshProposedState implements pullrequests.Repository — the explicit

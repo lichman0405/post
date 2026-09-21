@@ -132,11 +132,19 @@ func (f *fakePRReader) GetPullRequest(_ context.Context, _ string, _ int64) (dom
 }
 
 // fakeBranchHeadReader serves the branches' heads (the empty-chain
-// boundary read) and records the branch ids asked for.
+// boundary read), the branches' owning projects (the per-side boundary
+// read, ADR-025) and records the branch ids asked for.
 type fakeBranchHeadReader struct {
 	heads map[string]domain.ProjectState
 	errs  map[string]error
-	calls []string
+	// projects names the project a branch row belongs to. A branch absent
+	// from it belongs to proj-1, the fixture's project — the same-project
+	// shape every PR had before a fork could propose across projects; a
+	// cross-project proposal is built by naming the source branch here.
+	projects  map[string]string
+	projErrs  map[string]error
+	calls     []string
+	projCalls []string
 }
 
 func (f *fakeBranchHeadReader) GetBranchHead(_ context.Context, branchID string) (domain.ProjectState, error) {
@@ -149,6 +157,23 @@ func (f *fakeBranchHeadReader) GetBranchHead(_ context.Context, branchID string)
 		return domain.ProjectState{}, branches.ErrBranchNotFound
 	}
 	return head, nil
+}
+
+// GetBranchProject answers the branch row's own project. Membership of
+// heads is what "the branch exists" means here, so an unknown branch gives
+// the same ErrBranchNotFound the real store gives.
+func (f *fakeBranchHeadReader) GetBranchProject(_ context.Context, branchID string) (string, error) {
+	f.projCalls = append(f.projCalls, branchID)
+	if err := f.projErrs[branchID]; err != nil {
+		return "", err
+	}
+	if _, ok := f.heads[branchID]; !ok {
+		return "", branches.ErrBranchNotFound
+	}
+	if project, ok := f.projects[branchID]; ok {
+		return project, nil
+	}
+	return "proj-1", nil
 }
 
 // fakeProjectReader serves one project row.
@@ -422,4 +447,94 @@ func TestResolveBoundaries(t *testing.T) {
 		pinPR(svc, "state-foreign", s2.ID)
 		wantBlockedOn(t, svc, integrity.CheckBaseOnTargetChain)
 	})
+
+	t.Run("a project read failure is a store error, not a verdict", func(t *testing.T) {
+		// The side the source boundary is judged in is a read like any
+		// other: an unreachable database must not come back as a blocked
+		// proposal.
+		svc, _, stateReader, branchHeads := newTestService(t)
+		stateReader.states["branch-src"] = nil
+		stateReader.commits["branch-src"] = nil
+		branchHeads.projErrs = map[string]error{"branch-src": errors.New("connection refused")}
+		_, err := svc.CheckPullRequest(context.Background(), "proj-1", 7)
+		if !errors.Is(err, ErrStore) {
+			t.Fatalf("err = %v, want ErrStore", err)
+		}
+	})
+
+	// The two subtests below are the per-side resolution (ADR-025): the
+	// source branch of a fork proposal lives in the contributor's fork, so
+	// its chain's boundary is a state of the FORK's project while the
+	// target chain's boundary is a state of the PR's project. resolveBoundaries
+	// is called directly here because the fixture's engine verdicts would
+	// otherwise hide which set a candidate landed in.
+	t.Run("each chain's boundary is judged in its own project", func(t *testing.T) {
+		svc, _, stateReader, branchHeads := newTestService(t)
+		branchHeads.projects = map[string]string{"branch-src": "proj-fork"}
+		stateReader.byID["state-fork-root"] = domain.ProjectState{ID: "state-fork-root", ProjectID: "proj-fork"}
+		source := []domain.ProjectState{{
+			ID: "state-w1", ProjectID: "proj-fork", BranchID: strPtr("branch-src"),
+			ParentStateID: strPtr("state-fork-root"),
+		}}
+		out, err := svc.resolveBoundaries(context.Background(), crossProjectPR(), stateReader.states["branch-main"], source)
+		if err != nil {
+			t.Fatalf("resolveBoundaries: %v", err)
+		}
+		// The target boundary is the PR project's state; the source
+		// boundary is the fork project's — judged against the PR's project
+		// it would be dropped and the source chain reported as broken.
+		if !out.target[genesis.ID] || len(out.target) != 1 {
+			t.Fatalf("target boundaries = %v, want exactly {%s}", out.target, genesis.ID)
+		}
+		if !out.source["state-fork-root"] || len(out.source) != 1 {
+			t.Fatalf("source boundaries = %v, want exactly {state-fork-root}", out.source)
+		}
+		// The project is asked about the SOURCE branch, by its own id; the
+		// target side's project is the PR's and is not read.
+		if len(branchHeads.projCalls) != 1 || branchHeads.projCalls[0] != "branch-src" {
+			t.Fatalf("project reads = %v, want just the source branch", branchHeads.projCalls)
+		}
+	})
+
+	t.Run("one side's verdict never overwrites the other's", func(t *testing.T) {
+		// One state is the candidate of BOTH chains (both forked from it)
+		// and it belongs to the fork project: legitimate for the source
+		// chain, foreign to the target's. A single verdict per id would
+		// hand the second side's answer to the first — here it would accept
+		// a fork project's state as a boundary of the PR's own target chain,
+		// which is exactly the pin the provenance checks exist to refuse.
+		svc, _, stateReader, branchHeads := newTestService(t)
+		branchHeads.projects = map[string]string{"branch-src": "proj-fork"}
+		stateReader.byID["state-fork-root"] = domain.ProjectState{ID: "state-fork-root", ProjectID: "proj-fork"}
+		shared := strPtr("state-fork-root")
+		target := []domain.ProjectState{{
+			ID: "state-t1", ProjectID: "proj-1", BranchID: strPtr("branch-main"),
+			ParentStateID: shared,
+		}}
+		source := []domain.ProjectState{{
+			ID: "state-w1", ProjectID: "proj-fork", BranchID: strPtr("branch-src"),
+			ParentStateID: shared,
+		}}
+		out, err := svc.resolveBoundaries(context.Background(), crossProjectPR(), target, source)
+		if err != nil {
+			t.Fatalf("resolveBoundaries: %v", err)
+		}
+		if len(out.target) != 0 {
+			t.Fatalf("target boundaries = %v, want none: %s belongs to proj-fork", out.target, *shared)
+		}
+		if !out.source[*shared] {
+			t.Fatalf("source boundaries = %v, want {%s}", out.source, *shared)
+		}
+	})
+}
+
+// crossProjectPR is the PR row the per-side subtests resolve: the fixture's
+// PR, whose source branch lives in the contributor's fork.
+func crossProjectPR() domain.PullRequest {
+	return domain.PullRequest{
+		ID: "pr-1", ProjectID: "proj-1", Number: 7,
+		SourceBranchID: "branch-src", TargetBranchID: "branch-main",
+		BaseStateID: m2.ID, ProposedStateID: s2.ID,
+		Title: "proposal", State: domain.PullRequestStateReviewRequired, CreatedBy: "u-alice",
+	}
 }

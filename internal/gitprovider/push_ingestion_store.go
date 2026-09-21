@@ -295,9 +295,37 @@ func (s *PGPushIngestStore) IngestPush(ctx context.Context, in IngestPushParams)
 	// even when the head advance was refused: the push happened, the
 	// commit exists, and append-only history keeps it (only the pointer is
 	// guarded, never the facts of the delivery).
+	//
+	// A PUSH and a FORK IMPORT record the same row for different reasons,
+	// and the difference is the parent:
+	//
+	//   - a push chains the pushed head to the state of the commit it was
+	//     pushed on (resolved from `before`), and moves no branch pointer —
+	//     the ref pointer above is the only thing a push moves;
+	//   - the fork import (in.ForkImport, T0817) LANDS the branch on the
+	//     copied content, so the pushed head is the branch's next state and
+	//     is chained to what the branch stands on (its base_state_id, read
+	//     here inside the delivery's own transaction). A copy is the
+	//     branch's first content, so `before` is zeros and the push rule
+	//     has no state to name; the branch row does, and it is the honest
+	//     base — the chain then walks from the branch's head back through
+	//     the copy to the state the branch was created from, which is
+	//     exactly the boundary the integrity review resolves
+	//     (rsg/integrity: "the state the chain's root builds on — the
+	//     branches.base_state_id at fork time"). Without it the copied
+	//     state is a state of the branch that no commit names and no
+	//     pointer reaches, and every proposal from the branch is refused
+	//     for having two heads.
 	if branchID != nil && !isZerosSHA(ev.After) {
 		var parentID *string
-		if !isZerosSHA(ev.Before) {
+		switch {
+		case in.ForkImport != nil:
+			if err := tx.QueryRow(ctx,
+				`SELECT base_state_id::text FROM branches WHERE id = $1`,
+				*branchID).Scan(&parentID); err != nil {
+				return false, err
+			}
+		case !isZerosSHA(ev.Before):
 			err = tx.QueryRow(ctx,
 				`SELECT id::text FROM project_states
 				  WHERE project_id = $1 AND git_commit_sha = $2
@@ -307,13 +335,14 @@ func (s *PGPushIngestStore) IngestPush(ctx context.Context, in IngestPushParams)
 				return false, err
 			}
 		}
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO project_states
-			   (project_id, branch_id, parent_state_id, state_hash, git_commit_sha, manifest_version)
-			 VALUES ($1, $2, $3, $4, $5, 'v1')
-			 ON CONFLICT (project_id, state_hash) DO NOTHING`,
-			*projectID, *branchID, parentID, GitStateHash(ev.After), ev.After); err != nil {
+		stateID, err := upsertPushedState(ctx, tx, *projectID, *branchID, parentID, ev.After, in.ForkImport != nil)
+		if err != nil {
 			return false, err
+		}
+		if in.ForkImport != nil {
+			if err := recordForkImportTransition(ctx, tx, *projectID, *branchID, parentID, stateID, *in.ForkImport); err != nil {
+				return false, err
+			}
 		}
 	}
 
@@ -333,4 +362,120 @@ func (s *PGPushIngestStore) IngestPush(ctx context.Context, in IngestPushParams)
 		return false, err
 	}
 	return true, nil
+}
+
+// upsertPushedState records a delivery's head as a project state and returns
+// the row's id. The state is content-addressed by the commit
+// (UNIQUE(project_id, state_hash)), so the same commit on another branch of
+// the project REUSES the row instead of writing a second one — the
+// documented behaviour of this path (see the contract on IngestPush above),
+// and the reason a conflict is not an error here; the read-back makes the id
+// available either way, which is what lets the fork import chain the branch
+// to it.
+//
+// ownBranchRequired narrows that for the ONE caller that cannot live with the
+// reuse: the fork import (in.ForkImport, T0817). That caller LANDS its branch
+// on the copied content — recordForkImportTransition moves the head to this
+// state and writes the commit naming it — so a row owned by a different
+// branch would make the fork branch's chain run through another branch's
+// state and the transition name a state this branch never authored. With the
+// flag set, a foreign-owned row is refused and the delivery rolls back. A
+// plain push never sets it: `git push origin main:<branch>` — a commit that
+// is already a state of the project arriving as another branch's head — is
+// the reuse this path documents, and it stays a success.
+func upsertPushedState(ctx context.Context, tx pgx.Tx, projectID, branchID string, parentID *string, after string, ownBranchRequired bool) (string, error) {
+	hash := GitStateHash(after)
+	var id string
+	err := tx.QueryRow(ctx,
+		`INSERT INTO project_states
+		   (project_id, branch_id, parent_state_id, state_hash, git_commit_sha, manifest_version)
+		 VALUES ($1, $2, $3, $4, $5, 'v1')
+		 ON CONFLICT (project_id, state_hash) DO NOTHING
+		 RETURNING id::text`,
+		projectID, branchID, parentID, hash, after).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+	// The commit is already a state of this project: the push path REUSES
+	// the row (that is its documented contract), while the fork import
+	// refuses one it does not own — its transition would otherwise name a
+	// state of a foreign chain.
+	var owner *string
+	if err := tx.QueryRow(ctx,
+		`SELECT id::text, branch_id::text FROM project_states
+		  WHERE project_id = $1 AND state_hash = $2`,
+		projectID, hash).Scan(&id, &owner); err != nil {
+		return "", err
+	}
+	if ownBranchRequired && (owner == nil || *owner != branchID) {
+		return "", fmt.Errorf(
+			"gitprovider: the commit %s is already the state of another branch in project %s, so the fork import cannot land it as a state of this branch",
+			after, projectID)
+	}
+	return id, nil
+}
+
+// recordForkImportTransition makes a content copy a STATE TRANSITION rather
+// than only a fact (T0817): the branch MOVES to the state that carries the
+// copied content, and the move is recorded the way every other transition is
+// (docs/09 §2: a state commit names actor, via, message and the base →
+// result pair). Without it the copy leaves a state of the branch that no
+// commit names and no pointer reaches — a chain with two heads, which the
+// integrity review refuses, rightly, for every proposal from the branch.
+//
+// Both writes are guarded the way this package guards every pointer:
+//
+//   - the head advance is a compare-and-swap against the base the delivery
+//     read, with IS NOT DISTINCT FROM so that a branch standing on no state
+//     at all is matched rather than silently skipped. Zero rows means the
+//     branch moved underneath the copy: the delivery is refused and the
+//     whole transaction rolls back, because recording the copy while the
+//     branch points elsewhere is precisely the incoherent history this
+//     function exists to prevent;
+//   - the commit row is written only while no commit already names this
+//     result state ON THIS BRANCH, so re-recording one transition cannot
+//     make it two (the integrity review reads one commit per state).
+//
+// The actor is the person the platform made the copy for, never the
+// platform: state_commits.actor_id is NOT NULL and the copy is performed on
+// the forker's behalf (the delivery's pusher says the same on the Git side).
+// The via is 'git_compat' — the content arrived through the Git side, which
+// is the channel the vocabulary has for it (00004).
+func recordForkImportTransition(ctx context.Context, tx pgx.Tx, projectID, branchID string, baseStateID *string, stateID string, tr ForkImportTransition) error {
+	tag, err := tx.Exec(ctx,
+		`UPDATE branches SET base_state_id = $1
+		  WHERE id = $2 AND base_state_id IS NOT DISTINCT FROM $3`,
+		stateID, branchID, baseStateID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf(
+			"gitprovider: the branch moved while the copy was being recorded (it no longer stands on %v), so the copy was refused rather than landing on a history it does not describe",
+			derefOrNil(baseStateID))
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO state_commits
+		   (project_id, branch_id, base_state_id, result_state_id, actor_id, via, message, operation_summary)
+		 SELECT $1, $2, $3, $4, $5, 'git_compat', $6, '[]'::jsonb
+		  WHERE NOT EXISTS (
+		        SELECT 1 FROM state_commits
+		         WHERE branch_id = $2 AND result_state_id = $4)`,
+		projectID, branchID, baseStateID, stateID, tr.ActorID, tr.Message); err != nil {
+		return err
+	}
+	return nil
+}
+
+// derefOrNil is fmt's rendering of a nullable id: the value, or an explicit
+// nil, so an error message never reads "stands on " for a branch that stands
+// on nothing.
+func derefOrNil(id *string) any {
+	if id == nil {
+		return nil
+	}
+	return *id
 }

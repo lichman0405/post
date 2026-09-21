@@ -50,6 +50,12 @@ type Deps struct {
 	Aborts   AbortReader
 	Projects ProjectGate
 	Authz    Authz
+	// Forks answers the fork-lineage question the cross-project source side
+	// needs (T0817). It is required exactly when a merge's source branch
+	// lives outside the PR's project and the port is nil: the merge then
+	// REFUSES rather than read a foreign project's branch on the say-so of a
+	// PR row (see isAuthorsForkOfPRProject).
+	Forks ForkLineage
 	// Checks re-runs the PR's integrity review server-side (docs/22 §7).
 	// Nil is NOT a legitimate wiring for the command: a merge that cannot
 	// re-run its validation must refuse, not skip it (see requireIntegrity).
@@ -91,6 +97,7 @@ type Service struct {
 	aborts      AbortReader
 	projects    ProjectGate
 	authz       Authz
+	forks       ForkLineage
 	checks      IntegrityChecker
 	policies    PolicyReader
 	rules       RuleEvaluator
@@ -123,6 +130,7 @@ func NewService(d Deps) *Service {
 		aborts:      absentToNil(d.Aborts),
 		projects:    absentToNil(d.Projects),
 		authz:       absentToNil(d.Authz),
+		forks:       absentToNil(d.Forks),
 		checks:      absentToNil(d.Checks),
 		policies:    absentToNil(d.Policies),
 		rules:       absentToNil(d.Rules),
@@ -407,12 +415,17 @@ type prepared struct {
 	planJS []byte
 	digest string
 
-	pr            domain.PullRequest
-	sourceBranch  domain.Branch
-	targetBranch  domain.Branch
-	baseStateID   string
-	sourceStateID string
-	targetStateID string
+	pr           domain.PullRequest
+	sourceBranch domain.Branch
+	targetBranch domain.Branch
+	// sourceProjectID is the source branch's OWN project, read from its row
+	// (T0817). It is in.ProjectID for every proposal whose source is the
+	// project's own, and the contributor's fork project for an external
+	// proposal — the per-side answer the write transaction locks against.
+	sourceProjectID string
+	baseStateID     string
+	sourceStateID   string
+	targetStateID   string
 }
 
 // prepare reads the merge's inputs and computes the plan. It refuses a PR
@@ -436,7 +449,12 @@ func (s *Service) prepare(ctx context.Context, in Input) (*prepared, error) {
 	if pr.State != domain.PullRequestStateMergeReady {
 		return nil, &NotMergeableError{Number: pr.Number, State: pr.State}
 	}
-	source, err := s.branch(ctx, in.ProjectID, pr.SourceBranchID)
+	// The two sides carry their own project (T0817). The SOURCE branch is
+	// read by its own id — the row says which project it belongs to, and for
+	// an external proposal that is the contributor's fork, not the project
+	// the PR proposes to (docs/04 §2). The TARGET branch stays the PR's own
+	// project: a proposal's target is the branch its project advances.
+	source, err := s.sourceBranch(ctx, pr)
 	if err != nil {
 		return nil, err
 	}
@@ -453,6 +471,11 @@ func (s *Service) prepare(ctx context.Context, in Input) (*prepared, error) {
 	if target.BaseStateID == nil {
 		return nil, fmt.Errorf("%w: target branch %s has no head state to advance", ErrValidation, target.ID)
 	}
+	// The triple's PROJECT is the PR's — base and target are its own states,
+	// and the diff admits the source state of another project only because
+	// this very PR proposes it (diffs.ProposalPort). The resolution plan is
+	// read under the same project: the decisions were saved against the
+	// PR's project's triple, which is the side a human decides on.
 	inputs, err := s.diffs.Inputs(ctx, diffs.Params{
 		ProjectID:     in.ProjectID,
 		BaseStateID:   pr.BaseStateID,
@@ -488,17 +511,71 @@ func (s *Service) prepare(ctx context.Context, in Input) (*prepared, error) {
 	}
 	sum := sha256.Sum256(planJS)
 	return &prepared{
-		input:         in,
-		plan:          plan,
-		planJS:        planJS,
-		digest:        hex.EncodeToString(sum[:]),
-		pr:            pr,
-		sourceBranch:  source,
-		targetBranch:  target,
-		baseStateID:   pr.BaseStateID,
-		sourceStateID: pr.ProposedStateID,
-		targetStateID: *target.BaseStateID,
+		input:           in,
+		plan:            plan,
+		planJS:          planJS,
+		digest:          hex.EncodeToString(sum[:]),
+		pr:              pr,
+		sourceBranch:    source,
+		targetBranch:    target,
+		sourceProjectID: source.ProjectID,
+		baseStateID:     pr.BaseStateID,
+		sourceStateID:   pr.ProposedStateID,
+		targetStateID:   *target.BaseStateID,
 	}, nil
+}
+
+// sourceBranch reads the PR's source branch and decides whether the merge
+// may read it at all.
+//
+// The branch is read BY ITS OWN ID, not scoped to the PR's project, and
+// that is the point (T0817): a proposal's source branch may live in the
+// contributor's fork project (docs/04 §2), and a project-scoped read would
+// answer "not found" for exactly the case this path exists to serve —
+// while a read that named the PR's project would be the merge asserting a
+// side instead of reading it. The row's own project_id is what the merge
+// then judges.
+//
+// A source outside the PR's project is refused unless the fork lineage
+// says it is this PR author's own fork of this project — the same triple
+// migration 00086's pull_request_fork_gate enforces at the row. Both
+// refusals are reported in the branch-not-found vocabulary the package
+// already uses, so a caller who may not use the branch cannot tell "no
+// such branch" from "a branch in a project that is not its author's fork"
+// (docs/45; the same choice persistence.PullRequestStore makes when it
+// reads the same branch for the PR's creation).
+func (s *Service) sourceBranch(ctx context.Context, pr domain.PullRequest) (domain.Branch, error) {
+	source, err := s.branchByID(ctx, pr.SourceBranchID)
+	if err != nil {
+		return domain.Branch{}, err
+	}
+	if source.ProjectID == pr.ProjectID {
+		return source, nil
+	}
+	ok, err := s.isAuthorsForkOfPRProject(ctx, pr, source)
+	if err != nil {
+		return domain.Branch{}, err
+	}
+	if !ok {
+		return domain.Branch{}, ErrBranchNotFound
+	}
+	return source, nil
+}
+
+// isAuthorsForkOfPRProject asks the fork lineage whether the source
+// branch's project is a fork of the PR's project made by the PR's author.
+// A failed read refuses (ErrStore), and so does an unwired port: a merge
+// that cannot ask the question does not read a foreign project's branch.
+func (s *Service) isAuthorsForkOfPRProject(ctx context.Context, pr domain.PullRequest, source domain.Branch) (bool, error) {
+	if s.forks == nil {
+		return false, fmt.Errorf("%w: the fork lineage is not wired, so a source branch of project %s cannot be judged for a pull request of project %s",
+			ErrStore, source.ProjectID, pr.ProjectID)
+	}
+	ok, err := s.forks.IsForkOf(ctx, source.ProjectID, pr.ProjectID, pr.CreatedBy)
+	if err != nil {
+		return false, fmt.Errorf("%w: read the fork lineage of project %s: %v", ErrStore, source.ProjectID, err)
+	}
+	return ok, nil
 }
 
 // commit runs one attempt: read the version heads, build the operation
@@ -525,10 +602,13 @@ func (s *Service) commit(ctx context.Context, actor domain.User, p *prepared) (*
 		// this write. A difference is a refusal, not a re-plan — the human
 		// decided THIS triple.
 		scope, err := s.store.LockMergeScope(ctx, tx, LockScopeParams{
-			ProjectID:      p.input.ProjectID,
-			PRNumber:       p.input.Number,
-			SourceBranchID: p.sourceBranch.ID,
-			TargetBranchID: p.targetBranch.ID,
+			ProjectID: p.input.ProjectID,
+			// The source side's own project: the lock reads that branch
+			// there and nowhere else (T0817).
+			SourceProjectID: p.sourceProjectID,
+			PRNumber:        p.input.Number,
+			SourceBranchID:  p.sourceBranch.ID,
+			TargetBranchID:  p.targetBranch.ID,
 		})
 		if err != nil {
 			return err
@@ -1072,6 +1152,19 @@ func (s *Service) branch(ctx context.Context, projectID, branchID string) (domai
 	return b, nil
 }
 
+// branchByID reads one branch by its own id: the row's project is the
+// answer, never an input (the source side of a merge, T0817).
+func (s *Service) branchByID(ctx context.Context, branchID string) (domain.Branch, error) {
+	b, err := s.store.GetBranchByID(ctx, branchID)
+	if err != nil {
+		if errors.Is(err, ErrBranchNotFound) {
+			return domain.Branch{}, ErrBranchNotFound
+		}
+		return domain.Branch{}, fmt.Errorf("%w: read branch: %v", ErrStore, err)
+	}
+	return b, nil
+}
+
 // unwrapWriteError keeps the outcomes the write callback decided on. The
 // states service wraps a callback failure in *states.CommitWriteError and
 // every other failure in its own store error; the callback's domain outcome
@@ -1123,7 +1216,8 @@ func (s *Service) runGitStep(ctx context.Context, res *Result) {
 	// (replay → retryGitStep) name the same pair: a stored merge whose Git
 	// step failed has no branch rows in hand, and the id is stable while the
 	// ref name it maps to is the one T0303 maintains.
-	sourceRef, sourceErr := s.sourceRefOf(ctx, res.Merge)
+	sourceBranch, sourceErr := s.sourceBranchOf(ctx, res.Merge)
+	crossProject := sourceErr == nil && sourceBranch.ID != "" && sourceBranch.ProjectID != res.Merge.ProjectID
 	switch {
 	case s.git == nil:
 		step.Error = "no provider merge adapter is wired (T0409 owns it): the platform database truth is committed, the Git ref update has not happened"
@@ -1132,12 +1226,26 @@ func (s *Service) runGitStep(ctx context.Context, res *Result) {
 		// fail the step rather than merging an unnamed pair.
 		step.State = domain.GitStateFailed
 		step.Error = "resolve the merge's source ref: " + sourceErr.Error()
+	case crossProject:
+		// The source branch lives in ANOTHER project (the external
+		// proposal's fork, T0817) and the merge lands in this one. One
+		// provider-side merge cannot name that pair: GitMergeRequest names
+		// ONE repository (the merge's), and the source ref it would carry
+		// is a ref of the fork project's repository — handing the adapter
+		// that pair would advance a ref of this repository by a name that
+		// means nothing in it, or merge some other branch entirely. So the
+		// step is recorded as failed with the reason, never as done: the
+		// semantic truth is committed and the Git half is visibly not.
+		step.State = domain.GitStateFailed
+		step.Error = fmt.Sprintf(
+			"the source branch lives in project %s and the merge lands in project %s: a provider-side merge of that pair would need a pull request across repositories, and this build's GitMergeRequest names one repository — the semantic merge is committed, the Git half is not attempted",
+			sourceBranch.ProjectID, res.Merge.ProjectID)
 	default:
 		result, err := s.git.MergePullRequest(ctx, GitMergeRequest{
 			ProjectID: res.Merge.ProjectID,
 			Number:    res.Number,
 			TargetRef: deref(res.Merge.GitRef),
-			SourceRef: deref(sourceRef),
+			SourceRef: deref(gitRefOf(sourceBranch)),
 			TargetSHA: deref(res.Plan.Target.GitRef),
 			SourceSHA: deref(res.Plan.Source.GitRef),
 		})
@@ -1178,23 +1286,33 @@ func (s *Service) runGitStep(ctx context.Context, res *Result) {
 	}
 }
 
-// sourceRefOf resolves the provider ref of the branch a merge came FROM — the
-// head the provider-side pull request names. It is read from the branch row
-// by id, so a re-driven Git step (a client retrying its Idempotency-Key)
-// resolves exactly the ref the first attempt would have.
+// sourceBranchOf resolves the branch a merge came FROM — the head the
+// provider-side pull request names, and the side whose project decides
+// whether a provider-side merge is expressible at all (T0817).
+//
+// It is read by its own id, WITHOUT the merge's project, for the reason the
+// source side is read that way everywhere on this path: the row carries the
+// project, and a merge of an external proposal came from a branch of the
+// contributor's fork. The read runs here (and not at plan time) so a
+// re-driven Git step — a client retrying its Idempotency-Key — resolves
+// exactly the branch the first attempt would have.
 //
 // An empty id (a merge row written by hand, or a schema that predates the
-// column) resolves to nil, and a branch that is gone is an error: the caller
+// column) resolves to the zero branch, which the caller treats as "no
+// source side to name"; a branch that is gone is an error, and the caller
 // records a failed step rather than merging some other branch's pair.
-func (s *Service) sourceRefOf(ctx context.Context, m domain.SemanticMerge) (*string, error) {
+func (s *Service) sourceBranchOf(ctx context.Context, m domain.SemanticMerge) (domain.Branch, error) {
 	if m.SourceBranchID == "" {
-		return nil, nil
+		return domain.Branch{}, nil
 	}
-	b, err := s.store.GetBranch(ctx, m.ProjectID, m.SourceBranchID)
+	b, err := s.store.GetBranchByID(ctx, m.SourceBranchID)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, ErrBranchNotFound) {
+			return domain.Branch{}, ErrBranchNotFound
+		}
+		return domain.Branch{}, fmt.Errorf("%w: read the merge's source branch: %v", ErrStore, err)
 	}
-	return gitRefOf(b), nil
+	return b, nil
 }
 
 // deref reads an optional string, "" when nil.

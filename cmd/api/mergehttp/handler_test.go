@@ -81,6 +81,18 @@ func (f *fakeGate) Get(_ context.Context, r projects.Reader, projectID string) (
 // the server, the authed client, the actor id and the CSRF token.
 func newMergeTestServer(t *testing.T, cmd mergeCommand, gate projectReader) (*httptest.Server, *http.Client, string, string) {
 	t.Helper()
+	return newMergeTestServerWithDeps(t, Deps{Command: cmd, Projects: gate})
+}
+
+// newMergeTestServerWithDeps is newMergeTestServer with the whole Deps
+// supplied, for the tests that wire the collection's other suffix verb
+// (Deps.ReviewRequest) — the one the handler dispatches ":request-review" to.
+// Each extra is applied to the mux after this surface has registered, so a
+// test can mount a sibling route (reviewhttp's "/{prId}/reviews") and let
+// ServeMux resolve the two patterns against each other, which is what the real
+// mux does.
+func newMergeTestServerWithDeps(t *testing.T, deps Deps, extra ...func(*http.ServeMux)) (*httptest.Server, *http.Client, string, string) {
+	t.Helper()
 	authAPI := authhttp.New(authhttp.Deps{
 		Users:    memstore.NewUsers(),
 		Sessions: memstore.NewSessions(),
@@ -96,7 +108,10 @@ func newMergeTestServer(t *testing.T, cmd mergeCommand, gate projectReader) (*ht
 	})
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/auth/", authAPI.Routes())
-	New(Deps{Command: cmd, Projects: gate}).Register(mux)
+	New(deps).Register(mux)
+	for _, apply := range extra {
+		apply(mux)
+	}
 	ts := httptest.NewServer(authAPI.Guard(mux))
 	t.Cleanup(ts.Close)
 

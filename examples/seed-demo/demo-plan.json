@@ -1,0 +1,1629 @@
+{
+  "format_version": "seed-demo/v1",
+  "synthetic": true,
+  "synthetic_notice": "Every object in this file is fabricated demo content. Nothing here is a real measurement, a real publication or a real material claim. See examples/README.md and docs/34_SEED_DEMO_PROJECT.md.",
+  "marker": {
+    "tag": "synthetic",
+    "metadata_key": "seed_key",
+    "namespace": "demo-mof-humidity-separation",
+    "comment": "There is no synthetic column in the database, so the marker rides in the payload: every object carries tags[0]='synthetic' and metadata.seed_key=<key>. One SQL query over the tags array or the seed_key selects the whole seed."
+  },
+  "organizations": [
+    {
+      "key": "lab",
+      "slug": "demo-mof-lab",
+      "name": "Demo MOF Lab (synthetic)",
+      "description": "Synthetic research organization used by the seed demo builder."
+    },
+    {
+      "key": "external",
+      "slug": "demo-mof-external",
+      "name": "Demo External Group (synthetic)",
+      "description": "Synthetic second organization: the external contributor that forks the demo project."
+    }
+  ],
+  "users": [
+    {
+      "key": "owner",
+      "email": "demo.owner@example.invalid",
+      "handle": "demo-owner",
+      "display_name": "Demo Owner (synthetic)",
+      "password": "seed-demo-owner-pw-1",
+      "org": "lab"
+    },
+    {
+      "key": "external",
+      "email": "demo.external@example.invalid",
+      "handle": "demo-external",
+      "display_name": "Demo External (synthetic)",
+      "password": "seed-demo-external-pw-1",
+      "org": "external"
+    }
+  ],
+  "project": {
+    "slug": "demo-mof-humidity-separation",
+    "name": "MOF-X humidity separation (synthetic demo)",
+    "purpose": "验证 MOF-X 在高湿环境下的 C2H4/C2H6 separation performance（docs/34 清单；全部为 synthetic 演示数据）",
+    "visibility": "public",
+    "org": "lab"
+  },
+  "branches": [
+    {
+      "name": "humidity-40rh",
+      "visibility": "public",
+      "base": "main",
+      "purpose": "40% RH 工况下的选择性测量（synthetic）"
+    },
+    {
+      "name": "humidity-70rh",
+      "visibility": "public",
+      "base": "main",
+      "purpose": "70% RH 工况下的选择性测量（synthetic）"
+    },
+    {
+      "name": "protocol-activation-180c",
+      "visibility": "public",
+      "base": "main",
+      "purpose": "把活化温度改为 180 °C 的协议分支（synthetic；与 main 的科学冲突）"
+    },
+    {
+      "name": "mechanism-water-binding",
+      "visibility": "private",
+      "base": "main",
+      "purpose": "机理分支：水竞争吸附 vs 骨架降解（synthetic；private branch）"
+    }
+  ],
+  "review_routing": {
+    "_comment": "Research Owners routing (docs/04 §3, migration 00084): which responsibility answers for which change. Every pull request the demo opens carries objects of the types listed here, and the product's required-review calculation refuses to approve a change no rule routes — so this section is what makes the demo's merges reviewable rather than stuck at review_required. The product serves no HTTP route for this configuration today (see ops/seed-demo.md), so the builder writes it through the product's own application service.",
+    "responsibility": "Research Owner",
+    "match_kind": "object_type",
+    "match_types": [
+      "calculation",
+      "claim",
+      "dataset",
+      "experiment",
+      "external_reference",
+      "finding",
+      "hypothesis",
+      "material",
+      "protocol",
+      "research_question",
+      "sample"
+    ],
+    "assign_to": [
+      "owner"
+    ]
+  },
+  "main_objects": [
+    {
+      "key": "rq-q1",
+      "type": "research_question",
+      "branch": "main",
+      "payload": {
+        "statement": "MOF-X 在 298 K、40–70% RH 下是否仍保持 C2H4/C2H6 separation selectivity？",
+        "purpose": "The project's driving question (docs/34 §Research Question).",
+        "question_state": "open",
+        "scope": {
+          "temperature_k": 298,
+          "relative_humidity_pct": [
+            40,
+            70
+          ],
+          "gas_pair": [
+            "C2H4",
+            "C2H6"
+          ]
+        }
+      }
+    },
+    {
+      "key": "hyp-h1",
+      "type": "hypothesis",
+      "branch": "main",
+      "payload": {
+        "statement": "湿气条件下的性能下降主要来自 water competitive adsorption at the open metal sites。",
+        "question_id": "@rq-q1",
+        "hypothesis_type": "mechanistic",
+        "assessment": "under_test",
+        "scope": {
+          "temperature_k": 298,
+          "relative_humidity_pct": [
+            40,
+            70
+          ]
+        }
+      }
+    },
+    {
+      "key": "hyp-h2",
+      "type": "hypothesis",
+      "branch": "main",
+      "payload": {
+        "statement": "湿气条件下的性能下降来自 partial framework degradation（骨架水解）。",
+        "question_id": "@rq-q1",
+        "hypothesis_type": "mechanistic",
+        "assessment": "under_test",
+        "scope": {
+          "temperature_k": 298,
+          "relative_humidity_pct": [
+            40,
+            70
+          ],
+          "cycles": 5
+        }
+      }
+    },
+    {
+      "key": "mat-mof-x",
+      "type": "material",
+      "branch": "main",
+      "payload": {
+        "name": "MOF-X",
+        "formula": "Cu3(BTC)2",
+        "material_family": "metal-organic framework",
+        "aliases": [
+          "HKUST-1 analogue (synthetic label)"
+        ],
+        "identifiers": {
+          "demo_id": "synthetic-mof-x",
+          "note": "fabricated identifier — not a registry id"
+        }
+      }
+    },
+    {
+      "key": "mat-mof-y",
+      "type": "material",
+      "branch": "main",
+      "payload": {
+        "name": "MOF-Y",
+        "formula": "Zn4O(BDC)3",
+        "material_family": "metal-organic framework",
+        "aliases": [
+          "reference material (synthetic)"
+        ],
+        "identifiers": {
+          "demo_id": "synthetic-mof-y"
+        }
+      }
+    },
+    {
+      "key": "proto-activation",
+      "type": "protocol",
+      "branch": "main",
+      "payload": {
+        "purpose": "Thermal activation of MOF-X under vacuum before sorption measurement",
+        "domain": "materials chemistry",
+        "steps": [
+          {
+            "step": 1,
+            "action": "dry the powder at 80 C for 2 h"
+          },
+          {
+            "step": 2,
+            "action": "evacuate and ramp to the activation temperature"
+          },
+          {
+            "step": 3,
+            "action": "hold under vacuum, then cool to room temperature under vacuum"
+          }
+        ],
+        "parameters": {
+          "temperature_c": 150,
+          "duration_h": 12,
+          "atmosphere": "vacuum",
+          "ramp_k_per_min": 2
+        },
+        "requirements": [
+          "Schlenk line",
+          "oil-free vacuum pump"
+        ]
+      }
+    },
+    {
+      "key": "smp-mx-01",
+      "type": "sample",
+      "branch": "main",
+      "payload": {
+        "sample_code": "MX-01",
+        "material_id": "@mat-mof-x",
+        "physical_form": "powder",
+        "protocol_version_id": "@v:proto-activation"
+      }
+    },
+    {
+      "key": "smp-mx-02",
+      "type": "sample",
+      "branch": "main",
+      "payload": {
+        "sample_code": "MX-02",
+        "material_id": "@mat-mof-x",
+        "physical_form": "powder",
+        "protocol_version_id": "@v:proto-activation"
+      }
+    },
+    {
+      "key": "exp-dry-01",
+      "type": "experiment",
+      "branch": "main",
+      "payload": {
+        "objective": "Dry-gas single-component C2H4 and C2H6 isotherms on MOF-X at 298 K",
+        "conditions": {
+          "temperature_k": 298,
+          "relative_humidity_pct": 0,
+          "carrier": "He",
+          "pressure_kpa_max": 100
+        },
+        "operator_ids": [
+          "@user:owner"
+        ],
+        "sample_ids": [
+          "@smp-mx-01"
+        ],
+        "protocol_version_id": "@v:proto-activation",
+        "result_summary": "Type-I isotherms; C2H4 uptake 4.8 mmol/g at 100 kPa, C2H6 2.1 mmol/g."
+      }
+    },
+    {
+      "key": "exp-dry-02",
+      "type": "experiment",
+      "branch": "main",
+      "payload": {
+        "objective": "Dry-gas breakthrough of a 50/50 C2H4/C2H6 mixture on MOF-X at 298 K",
+        "conditions": {
+          "temperature_k": 298,
+          "relative_humidity_pct": 0,
+          "feed": "50/50 v/v C2H4/C2H6",
+          "flow_ml_min": 5
+        },
+        "operator_ids": [
+          "@user:owner"
+        ],
+        "sample_ids": [
+          "@smp-mx-02"
+        ],
+        "protocol_version_id": "@v:proto-activation",
+        "result_summary": "C2H6 breaks through first; C2H4/C2H6 uptake ratio 2.3."
+      }
+    },
+    {
+      "key": "calc-dft-water-cu",
+      "type": "calculation",
+      "branch": "main",
+      "payload": {
+        "objective": "Binding energy of one water molecule at the open Cu(II) site of MOF-X",
+        "input_object_ids": [
+          "@mat-mof-x",
+          "@proto-activation",
+          "@smp-mx-01"
+        ],
+        "method": "periodic DFT, PBE-D3, plane-wave 520 eV, 2x2x2 k-points",
+        "software": "VASP (synthetic labelling; no real calculation was run)",
+        "parameters": {
+          "cutoff_ev": 520,
+          "functional": "PBE-D3",
+          "kpoints": "2x2x2"
+        },
+        "result_summary": "-58 kJ/mol: water binds more strongly than C2H4 (-32 kJ/mol) at the same site."
+      },
+      "file": {
+        "media_type": "application/json",
+        "content": "{\"method\":\"periodic DFT, PBE-D3, plane-wave 520 eV, 2x2x2 k-points\",\"e_bind_water_kj_mol\":-58,\"e_bind_c2h4_kj_mol\":-32,\"note\":\"synthetic demo output\"}\n"
+      }
+    },
+    {
+      "key": "ds-dry-isotherm",
+      "type": "dataset",
+      "branch": "main",
+      "payload": {
+        "purpose": "Dry-gas single-component isotherm data underlying the baseline selectivity claim",
+        "data_type": "adsorption isotherm",
+        "access_level": "open",
+        "quality_notes": "Synthetic numbers; buoyancy correction applied; 3 pressure points repeated."
+      },
+      "file": {
+        "media_type": "text/csv",
+        "content": "relative_humidity_pct,pressure_kpa,c2h4_uptake_mmol_g,c2h6_uptake_mmol_g\n0,10,3.42,0.28\n0,50,3.71,0.31\n0,100,3.88,0.33\n"
+      }
+    },
+    {
+      "key": "ref-water-stability",
+      "type": "external_reference",
+      "branch": "main",
+      "payload": {
+        "source_type": "publication",
+        "external_identifier": "doi:10.5555/seed-demo.0001",
+        "canonical_url": "https://doi.invalid/10.5555/seed-demo.0001",
+        "upstream_version": "v1 (synthetic)",
+        "snapshot_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+        "accessed_at": "2026-01-14T09:30:00Z"
+      }
+    },
+    {
+      "key": "ref-isotherm-db",
+      "type": "external_reference",
+      "branch": "main",
+      "payload": {
+        "source_type": "database",
+        "external_identifier": "synthetic-db:seed-demo-isotherm-40rh",
+        "canonical_url": "https://db.invalid/seed-demo-isotherm-40rh",
+        "upstream_version": "2026-01 (synthetic)",
+        "accessed_at": "2026-01-16T11:05:00Z",
+        "snapshot_hash": "sha256:2f4c1c0d5b9a7e3f0c1d2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f"
+      }
+    },
+    {
+      "key": "ref-vendor-datasheet",
+      "type": "external_reference",
+      "branch": "main",
+      "payload": {
+        "source_type": "vendor",
+        "external_identifier": "synthetic-vendor:seed-demo-mofx-2026",
+        "canonical_url": "https://vendor.invalid/seed-demo-mofx-2026.pdf",
+        "upstream_version": "rev C (synthetic)",
+        "accessed_at": "2026-01-09T15:40:00Z",
+        "snapshot_hash": "sha256:91ab77e0c3d4f5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
+      }
+    }
+  ],
+  "main_conclusions": [
+    {
+      "key": "claim-c1",
+      "type": "claim",
+      "branch": "main",
+      "payload": {
+        "statement": "在 298 K 干气条件下，MOF-X 的 C2H4/C2H6 IAST selectivity 为 12.4 ± 0.6。",
+        "claim_type": "quantitative",
+        "subject_ref": "@mat-mof-x",
+        "property": "IAST selectivity",
+        "value": {
+          "number": 12.4,
+          "unit": "dimensionless",
+          "uncertainty": {
+            "kind": "std",
+            "value": 0.6
+          }
+        },
+        "scope": {
+          "conditions": [
+            {
+              "name": "temperature",
+              "value": 298,
+              "unit": "K"
+            },
+            {
+              "name": "relative_humidity",
+              "value": 0,
+              "unit": "%"
+            }
+          ],
+          "summary": {
+            "n": 3,
+            "uncertainty": {
+              "kind": "std",
+              "value": 0.6
+            }
+          }
+        },
+        "assessment": "supported"
+      }
+    },
+    {
+      "key": "claim-c2",
+      "type": "claim",
+      "payload": {
+        "statement": "在 40% RH、298 K 下 MOF-X 的 C2H4/C2H6 selectivity 保持在干气值的 90% 以上。",
+        "claim_type": "quantitative",
+        "subject_ref": "@smp-mx-40-01",
+        "property": "IAST selectivity",
+        "value": {
+          "number": 11.2,
+          "unit": "dimensionless",
+          "uncertainty": {
+            "kind": "std",
+            "value": 0.7
+          }
+        },
+        "scope": {
+          "conditions": [
+            {
+              "name": "temperature",
+              "value": 298,
+              "unit": "K"
+            },
+            {
+              "name": "relative_humidity",
+              "value": 40,
+              "unit": "%"
+            }
+          ],
+          "summary": {
+            "n": 3,
+            "uncertainty": {
+              "kind": "std",
+              "value": 0.7
+            }
+          }
+        },
+        "assessment": "supported"
+      },
+      "branch": "main"
+    },
+    {
+      "key": "find-f1",
+      "type": "finding",
+      "branch": "main",
+      "payload": {
+        "statement": "干气条件下 3 次独立 IAST 计算的选择性重复性良好（RSD 4.8%），基线与文献量级一致。",
+        "finding_type": "observation",
+        "claim_version_refs": [
+          "@vlist:claim-c1"
+        ],
+        "assessment": "accepted"
+      }
+    }
+  ],
+  "protocol_versions": [
+    {
+      "object": "proto-activation",
+      "branch": "main",
+      "patch": {
+        "purpose": "Thermal activation of MOF-X under vacuum, 180 C hold (protocol version 2)",
+        "parameters": {
+          "temperature_c": 180,
+          "duration_h": 12,
+          "atmosphere": "vacuum",
+          "ramp_k_per_min": 1
+        },
+        "steps": [
+          {
+            "step": 1,
+            "action": "dry the powder at 80 C for 2 h"
+          },
+          {
+            "step": 2,
+            "action": "evacuate and ramp to 180 C at 1 K/min"
+          },
+          {
+            "step": 3,
+            "action": "hold 12 h under vacuum, then cool under vacuum"
+          }
+        ]
+      }
+    },
+    {
+      "object": "proto-activation",
+      "branch": "main",
+      "patch": {
+        "purpose": "Thermal activation of MOF-X under vacuum, 180 C hold, extended soak (protocol version 3)",
+        "parameters": {
+          "temperature_c": 180,
+          "duration_h": 18,
+          "atmosphere": "vacuum",
+          "ramp_k_per_min": 1
+        },
+        "requirements": [
+          "Schlenk line",
+          "oil-free vacuum pump",
+          "in-situ XRD access (optional)"
+        ]
+      }
+    }
+  ],
+  "main_relations": [
+    {
+      "type": "tests_hypothesis",
+      "source": "exp-dry-01",
+      "target": "hyp-h1"
+    },
+    {
+      "type": "tests_hypothesis",
+      "source": "exp-dry-02",
+      "target": "hyp-h2"
+    },
+    {
+      "type": "follows_protocol",
+      "source": "exp-dry-01",
+      "target": "proto-activation"
+    },
+    {
+      "type": "performed_on",
+      "source": "exp-dry-01",
+      "target": "smp-mx-01"
+    },
+    {
+      "type": "performed_on",
+      "source": "exp-dry-02",
+      "target": "smp-mx-02"
+    },
+    {
+      "type": "derived_from",
+      "source": "ds-dry-isotherm",
+      "target": "exp-dry-01"
+    },
+    {
+      "type": "references",
+      "source": "calc-dft-water-cu",
+      "target": "ref-water-stability"
+    }
+  ],
+  "conclusion_relations": [
+    {
+      "type": "derived_from",
+      "source": "claim-c1",
+      "target": "ds-dry-isotherm"
+    },
+    {
+      "type": "addresses_question",
+      "source": "find-f1",
+      "target": "rq-q1"
+    },
+    {
+      "type": "derived_from",
+      "source": "claim-c2",
+      "target": "ds-iso-40"
+    }
+  ],
+  "main_evidence": [
+    {
+      "key": "ev-c1-exp-dry-01",
+      "target": "claim-c1",
+      "evidence": "exp-dry-01",
+      "relation": "supports",
+      "evidence_type": "experimental",
+      "directness": "direct",
+      "inference_nature": "observational",
+      "reasoning_note": "Synthetic: the isotherm experiment is the direct measurement the quantitative claim rests on."
+    },
+    {
+      "key": "ev-c1-exp-dry-02",
+      "target": "claim-c1",
+      "evidence": "exp-dry-02",
+      "relation": "reproduces",
+      "evidence_type": "experimental",
+      "directness": "direct",
+      "inference_nature": "observational",
+      "reasoning_note": "Synthetic: the breakthrough experiment reproduces the isotherm-derived selectivity independently."
+    },
+    {
+      "key": "ev-c2-exp-40-01",
+      "target": "claim-c2",
+      "evidence": "exp-40-01",
+      "relation": "supports",
+      "evidence_type": "experimental",
+      "directness": "direct",
+      "inference_nature": "observational",
+      "reasoning_note": "Synthetic: the 40% RH isotherm is the measurement the claim summarises."
+    },
+    {
+      "key": "ev-c2-ds-iso-40",
+      "target": "claim-c2",
+      "evidence": "ds-iso-40",
+      "relation": "supports",
+      "evidence_type": "dataset",
+      "directness": "direct",
+      "inference_nature": "observational",
+      "reasoning_note": "Synthetic: the released dataset behind the 40% RH claim."
+    },
+    {
+      "key": "ev-c2-calc-gcmc-40",
+      "target": "claim-c2",
+      "evidence": "calc-gcmc-40",
+      "relation": "consistent_with",
+      "evidence_type": "computational",
+      "directness": "indirect",
+      "inference_nature": "predictive",
+      "reasoning_note": "Synthetic: the simulation agrees with the experiment — consistent_with, not proof."
+    }
+  ],
+  "branches_content": {
+    "humidity-40rh": {
+      "objects": [
+        {
+          "key": "smp-mx-40-01",
+          "type": "sample",
+          "payload": {
+            "sample_code": "MX-40-01",
+            "material_id": "@mat-mof-x",
+            "physical_form": "powder",
+            "protocol_version_id": "@v:proto-activation"
+          }
+        },
+        {
+          "key": "smp-mx-40-02",
+          "type": "sample",
+          "payload": {
+            "sample_code": "MX-40-02",
+            "material_id": "@mat-mof-x",
+            "physical_form": "powder",
+            "protocol_version_id": "@v:proto-activation"
+          }
+        },
+        {
+          "key": "exp-40-01",
+          "type": "experiment",
+          "payload": {
+            "objective": "Single-component isotherms of C2H4 and C2H6 on MOF-X at 298 K and 40% RH",
+            "conditions": {
+              "temperature_k": 298,
+              "relative_humidity_pct": 40,
+              "carrier": "He",
+              "pressure_kpa_max": 100
+            },
+            "operator_ids": [
+              "@user:owner"
+            ],
+            "sample_ids": [
+              "@smp-mx-40-01"
+            ],
+            "protocol_version_id": "@v:proto-activation",
+            "result_summary": "Synthetic: C2H4 uptake falls to 4.4 mmol/g, C2H6 to 1.9 mmol/g — selectivity roughly preserved."
+          }
+        },
+        {
+          "key": "exp-40-02",
+          "type": "experiment",
+          "payload": {
+            "objective": "Breakthrough of a 50/50 C2H4/C2H6 mixture at 298 K and 40% RH",
+            "conditions": {
+              "temperature_k": 298,
+              "relative_humidity_pct": 40,
+              "feed": "50/50 v/v, 40% RH",
+              "flow_ml_min": 5
+            },
+            "operator_ids": [
+              "@user:owner"
+            ],
+            "sample_ids": [
+              "@smp-mx-40-02"
+            ],
+            "protocol_version_id": "@v:proto-activation",
+            "result_summary": "Synthetic: separation factor 2.1 vs 2.3 dry — within repeatability."
+          }
+        },
+        {
+          "key": "exp-40-03",
+          "type": "experiment",
+          "payload": {
+            "objective": "Cyclic stability of MOF-X at 298 K and 40% RH over 5 adsorption/desorption cycles",
+            "conditions": {
+              "temperature_k": 298,
+              "relative_humidity_pct": 40,
+              "cycles": 5
+            },
+            "operator_ids": [
+              "@user:owner"
+            ],
+            "sample_ids": [
+              "@smp-mx-40-01"
+            ],
+            "protocol_version_id": "@v:proto-activation",
+            "result_summary": "Synthetic: capacity loss 1.8% after 5 cycles — no measurable degradation at 40% RH."
+          }
+        },
+        {
+          "key": "calc-gcmc-40",
+          "type": "calculation",
+          "payload": {
+            "objective": "GCMC-simulated binary C2H4/C2H6 isotherm on MOF-X with 40% RH pre-loaded water",
+            "input_object_ids": [
+              "@mat-mof-x",
+              "@proto-activation",
+              "@smp-mx-40-01"
+            ],
+            "method": "GCMC, UFF + DREIDING, 1e6 equilibration / 1e6 production steps",
+            "software": "RASPA (synthetic labelling; no real calculation was run)",
+            "parameters": {
+              "relative_humidity_pct": 40,
+              "temperature_k": 298
+            },
+            "result_summary": "Synthetic: simulated selectivity 11.9 — the framework still discriminates at 40% RH."
+          },
+          "file": {
+            "media_type": "application/json",
+            "content": "{\"method\":\"GCMC, UFF + DREIDING\",\"rh_pct\":40,\"selectivity_simulated\":11.9,\"note\":\"synthetic demo output\"}\n"
+          }
+        },
+        {
+          "key": "ds-iso-40",
+          "type": "dataset",
+          "payload": {
+            "purpose": "40% RH isotherm and breakthrough data for the humidity campaign",
+            "data_type": "adsorption isotherm",
+            "access_level": "open",
+            "quality_notes": "Synthetic numbers; humidity controlled to ±1.5% RH."
+          },
+          "file": {
+            "media_type": "text/csv",
+            "content": "relative_humidity_pct,pressure_kpa,c2h4_uptake_mmol_g,c2h6_uptake_mmol_g\n40,10,2.98,0.40\n40,50,3.19,0.45\n40,100,3.31,0.48\n"
+          }
+        },
+        {
+          "key": "ds-breakthrough-40",
+          "type": "dataset",
+          "payload": {
+            "purpose": "40% RH breakthrough curves (5 cycles) for the cyclic stability experiment",
+            "data_type": "breakthrough curve",
+            "access_level": "open",
+            "quality_notes": "Synthetic numbers."
+          },
+          "file": {
+            "media_type": "text/csv",
+            "content": "cycle,time_min,c_c2h4_out,c_c2h6_out\n1,0,0.00,0.00\n1,12,0.41,0.06\n2,0,0.00,0.00\n2,12,0.44,0.07\n3,0,0.00,0.00\n3,12,0.45,0.07\n4,0,0.00,0.00\n4,12,0.47,0.08\n5,0,0.00,0.00\n5,12,0.49,0.09\n"
+          }
+        }
+      ],
+      "relations": [
+        {
+          "type": "tests_hypothesis",
+          "source": "exp-40-01",
+          "target": "hyp-h1"
+        },
+        {
+          "type": "follows_protocol",
+          "source": "exp-40-01",
+          "target": "proto-activation"
+        },
+        {
+          "type": "performed_on",
+          "source": "exp-40-01",
+          "target": "smp-mx-40-01"
+        },
+        {
+          "type": "performed_on",
+          "source": "exp-40-02",
+          "target": "smp-mx-40-02"
+        },
+        {
+          "type": "performed_on",
+          "source": "exp-40-03",
+          "target": "smp-mx-40-01"
+        },
+        {
+          "type": "derived_from",
+          "source": "ds-iso-40",
+          "target": "exp-40-01"
+        },
+        {
+          "type": "derived_from",
+          "source": "ds-breakthrough-40",
+          "target": "exp-40-02"
+        }
+      ],
+      "evidence": []
+    },
+    "humidity-70rh": {
+      "objects": [
+        {
+          "key": "smp-mx-70-01",
+          "type": "sample",
+          "payload": {
+            "sample_code": "MX-70-01",
+            "material_id": "@mat-mof-x",
+            "physical_form": "powder",
+            "protocol_version_id": "@v:proto-activation"
+          }
+        },
+        {
+          "key": "exp-70-01",
+          "type": "experiment",
+          "payload": {
+            "objective": "Single-component isotherms of C2H4 and C2H6 on MOF-X at 298 K and 70% RH",
+            "conditions": {
+              "temperature_k": 298,
+              "relative_humidity_pct": 70,
+              "carrier": "He",
+              "pressure_kpa_max": 100
+            },
+            "operator_ids": [
+              "@user:owner"
+            ],
+            "sample_ids": [
+              "@smp-mx-70-01"
+            ],
+            "protocol_version_id": "@v:proto-activation",
+            "result_summary": "Synthetic: C2H4 uptake falls to 3.1 mmol/g while C2H6 stays at 1.9 mmol/g — selectivity collapses."
+          }
+        },
+        {
+          "key": "exp-70-02",
+          "type": "experiment",
+          "payload": {
+            "objective": "Breakthrough of a 50/50 C2H4/C2H6 mixture at 298 K and 70% RH",
+            "conditions": {
+              "temperature_k": 298,
+              "relative_humidity_pct": 70,
+              "feed": "50/50 v/v, 70% RH",
+              "flow_ml_min": 5
+            },
+            "operator_ids": [
+              "@user:owner"
+            ],
+            "sample_ids": [
+              "@smp-mx-70-01"
+            ],
+            "protocol_version_id": "@v:proto-activation",
+            "result_summary": "Synthetic: separation factor falls to 1.4; the two fronts nearly coincide."
+          }
+        },
+        {
+          "key": "exp-70-03",
+          "type": "experiment",
+          "payload": {
+            "objective": "Cyclic stability of MOF-X at 298 K and 70% RH over 5 adsorption/desorption cycles",
+            "conditions": {
+              "temperature_k": 298,
+              "relative_humidity_pct": 70,
+              "cycles": 5
+            },
+            "operator_ids": [
+              "@user:owner"
+            ],
+            "sample_ids": [
+              "@smp-mx-70-01"
+            ],
+            "protocol_version_id": "@v:proto-activation",
+            "result_summary": "Synthetic: capacity loss 12.6% after 5 cycles, monotonic with cycle number."
+          }
+        },
+        {
+          "key": "calc-gcmc-70",
+          "type": "calculation",
+          "payload": {
+            "objective": "GCMC-simulated binary C2H4/C2H6 isotherm on MOF-X with 70% RH pre-loaded water",
+            "input_object_ids": [
+              "@mat-mof-x",
+              "@proto-activation",
+              "@smp-mx-70-01"
+            ],
+            "method": "GCMC, UFF + DREIDING, 1e6 equilibration / 1e6 production steps",
+            "software": "RASPA (synthetic labelling; no real calculation was run)",
+            "parameters": {
+              "relative_humidity_pct": 70,
+              "temperature_k": 298
+            },
+            "result_summary": "Synthetic: simulated selectivity 4.6 — competitive water occupancy alone explains part of the loss."
+          },
+          "file": {
+            "media_type": "application/json",
+            "content": "{\"method\":\"GCMC, UFF + DREIDING\",\"rh_pct\":70,\"selectivity_simulated\":4.6,\"note\":\"synthetic demo output\"}\n"
+          }
+        },
+        {
+          "key": "calc-degradation-fe",
+          "type": "calculation",
+          "payload": {
+            "objective": "Free-energy penalty of Cu-BTC linker hydrolysis in the presence of adsorbed water",
+            "input_object_ids": [
+              "@mat-mof-x",
+              "@proto-activation"
+            ],
+            "method": "DFT, PBE-D3 + implicit solvent (SMD)",
+            "software": "VASP (synthetic labelling; no real calculation was run)",
+            "parameters": {
+              "functional": "PBE-D3",
+              "solvation": "SMD"
+            },
+            "result_summary": "Synthetic: +41 kJ/mol per hydrolysed linker — thermodynamically accessible only above ~350 K at 70% RH."
+          },
+          "file": {
+            "media_type": "application/json",
+            "content": "{\"method\":\"DFT, PBE-D3 + SMD\",\"dG_hydrolysis_kj_mol\":41,\"note\":\"synthetic demo output\"}\n"
+          }
+        },
+        {
+          "key": "ds-iso-70",
+          "type": "dataset",
+          "payload": {
+            "purpose": "70% RH isotherm and breakthrough data for the humidity campaign",
+            "data_type": "adsorption isotherm",
+            "access_level": "open",
+            "quality_notes": "Synthetic numbers; humidity controlled to ±2% RH."
+          },
+          "file": {
+            "media_type": "text/csv",
+            "content": "relative_humidity_pct,pressure_kpa,c2h4_uptake_mmol_g,c2h6_uptake_mmol_g\n70,10,2.44,0.53\n70,50,2.61,0.59\n70,100,2.70,0.62\n"
+          }
+        },
+        {
+          "key": "ds-pxrd-70",
+          "type": "dataset",
+          "payload": {
+            "purpose": "PXRD patterns of MOF-X before and after 5 cycles at 70% RH",
+            "data_type": "powder diffraction",
+            "access_level": "open",
+            "quality_notes": "Synthetic numbers; two new reflections at 2θ 11.8 and 13.4 deg."
+          },
+          "file": {
+            "media_type": "text/csv",
+            "content": "two_theta_deg,intensity\n5.0,120\n7.4,940\n9.1,300\n11.8,210\n13.4,180\n18.2,460\n"
+          }
+        },
+        {
+          "key": "claim-c3",
+          "type": "claim",
+          "payload": {
+            "statement": "在 70% RH、298 K 下 MOF-X 的 C2H4/C2H6 selectivity 相对干气下降约 60%。",
+            "claim_type": "quantitative",
+            "subject_ref": "@smp-mx-70-01",
+            "property": "IAST selectivity",
+            "value": {
+              "number": 4.9,
+              "unit": "dimensionless",
+              "uncertainty": {
+                "kind": "std",
+                "value": 0.5
+              }
+            },
+            "scope": {
+              "conditions": [
+                {
+                  "name": "temperature",
+                  "value": 298,
+                  "unit": "K"
+                },
+                {
+                  "name": "relative_humidity",
+                  "value": 70,
+                  "unit": "%"
+                }
+              ],
+              "summary": {
+                "n": 3,
+                "uncertainty": {
+                  "kind": "std",
+                  "value": 0.5
+                }
+              }
+            },
+            "assessment": "supported"
+          }
+        },
+        {
+          "key": "find-f3",
+          "type": "finding",
+          "payload": {
+            "statement": "70% RH 下容量损失随循环次数单调增加（1.8% → 12.6%），不像纯竞争吸附那样可逆。",
+            "finding_type": "trend",
+            "claim_version_refs": [
+              "@vlist:claim-c3"
+            ],
+            "assessment": "preliminary"
+          }
+        }
+      ],
+      "relations": [
+        {
+          "type": "tests_hypothesis",
+          "source": "exp-70-01",
+          "target": "hyp-h2"
+        },
+        {
+          "type": "follows_protocol",
+          "source": "exp-70-01",
+          "target": "proto-activation"
+        },
+        {
+          "type": "performed_on",
+          "source": "exp-70-01",
+          "target": "smp-mx-70-01"
+        },
+        {
+          "type": "performed_on",
+          "source": "exp-70-03",
+          "target": "smp-mx-70-01"
+        },
+        {
+          "type": "derived_from",
+          "source": "ds-iso-70",
+          "target": "exp-70-01"
+        },
+        {
+          "type": "derived_from",
+          "source": "ds-pxrd-70",
+          "target": "exp-70-03"
+        },
+        {
+          "type": "derived_from",
+          "source": "claim-c3",
+          "target": "ds-iso-70"
+        },
+        {
+          "type": "references",
+          "source": "calc-degradation-fe",
+          "target": "ref-water-stability"
+        }
+      ],
+      "evidence": [
+        {
+          "key": "ev-c3-exp-70-01",
+          "target": "claim-c3",
+          "evidence": "exp-70-01",
+          "relation": "supports",
+          "evidence_type": "experimental",
+          "directness": "direct",
+          "inference_nature": "observational",
+          "reasoning_note": "Synthetic: the 70% RH isotherm is the measurement the claim summarises."
+        },
+        {
+          "key": "ev-c3-ds-pxrd-70",
+          "target": "claim-c3",
+          "evidence": "ds-pxrd-70",
+          "relation": "consistent_with",
+          "evidence_type": "dataset",
+          "directness": "indirect",
+          "inference_nature": "observational",
+          "reasoning_note": "Synthetic: the diffraction data is consistent with the measured loss but does not measure it."
+        },
+        {
+          "key": "ev-h2-exp-70-03",
+          "target": "hyp-h2",
+          "evidence": "exp-70-03",
+          "relation": "supports",
+          "evidence_type": "experimental",
+          "directness": "indirect",
+          "inference_nature": "associational",
+          "reasoning_note": "Synthetic: irreversible loss across cycles is circumstantial support for degradation, not proof of it."
+        }
+      ]
+    },
+    "protocol-activation-180c": {
+      "objects": [],
+      "relations": [],
+      "evidence": [],
+      "protocol_version": {
+        "object": "proto-activation",
+        "patch": {
+          "purpose": "Thermal activation of MOF-X at 180 C — the 180 C branch's protocol (scientific conflict with main)",
+          "parameters": {
+            "temperature_c": 180,
+            "duration_h": 6,
+            "atmosphere": "flowing N2",
+            "ramp_k_per_min": 5
+          },
+          "steps": [
+            {
+              "step": 1,
+              "action": "dry the powder at 80 C for 2 h"
+            },
+            {
+              "step": 2,
+              "action": "ramp to 180 C at 5 K/min in flowing N2"
+            },
+            {
+              "step": 3,
+              "action": "hold 6 h in flowing N2 (no vacuum)"
+            }
+          ],
+          "requirements": [
+            "tube furnace",
+            "N2 line"
+          ]
+        }
+      },
+      "main_divergent_version": {
+        "object": "proto-activation",
+        "branch": "main",
+        "patch": {
+          "purpose": "Thermal activation of MOF-X under vacuum, 180 C hold, slow-ramp variant (main's answer)",
+          "parameters": {
+            "temperature_c": 180,
+            "duration_h": 12,
+            "atmosphere": "vacuum",
+            "ramp_k_per_min": 1
+          },
+          "requirements": [
+            "Schlenk line",
+            "oil-free vacuum pump"
+          ]
+        }
+      }
+    },
+    "mechanism-water-binding": {
+      "objects": [
+        {
+          "key": "mat-mof-x-aged",
+          "type": "material",
+          "payload": {
+            "name": "MOF-X-aged-70RH",
+            "formula": "Cu3(BTC)2 (partially hydrolysed)",
+            "material_family": "metal-organic framework",
+            "aliases": [
+              "aged MOF-X (synthetic)"
+            ],
+            "identifiers": {
+              "demo_id": "synthetic-mof-x-aged"
+            }
+          }
+        },
+        {
+          "key": "ds-pxrd-aged",
+          "type": "dataset",
+          "payload": {
+            "purpose": "Diffraction patterns of the aged MOF-X sample and the Rietveld fit",
+            "data_type": "powder diffraction",
+            "access_level": "restricted",
+            "quality_notes": "Synthetic numbers; collected on the aged sample from the 70% RH branch."
+          },
+          "file": {
+            "media_type": "text/csv",
+            "content": "two_theta_deg,intensity,phase_fit\n5.0,110,intact\n7.4,880,intact\n11.8,340,hydrolysed\n13.4,300,hydrolysed\n18.2,430,intact\n"
+          }
+        },
+        {
+          "key": "calc-dft-competitive",
+          "type": "calculation",
+          "payload": {
+            "objective": "Competitive occupancy of the open Cu site by water vs C2H4 at 70% RH",
+            "input_object_ids": [
+              "@mat-mof-x-aged",
+              "@mat-mof-x",
+              "@proto-activation"
+            ],
+            "method": "periodic DFT, PBE-D3, competitive adsorption model",
+            "software": "VASP (synthetic labelling; no real calculation was run)",
+            "parameters": {
+              "relative_humidity_pct": 70,
+              "temperature_k": 298
+            },
+            "result_summary": "Synthetic: at 70% RH water occupies 78% of the open sites at 1 bar total pressure."
+          },
+          "file": {
+            "media_type": "application/json",
+            "content": "{\"method\":\"periodic DFT, PBE-D3, competitive adsorption\",\"rh_pct\":70,\"water_site_occupancy\":0.78,\"note\":\"synthetic demo output\"}\n"
+          }
+        },
+        {
+          "key": "calc-pxrd-rwp",
+          "type": "calculation",
+          "payload": {
+            "objective": "Rietveld refinement (Rwp) of the aged MOF-X diffraction pattern against two phase models",
+            "input_object_ids": [
+              "@ds-pxrd-aged",
+              "@mat-mof-x-aged"
+            ],
+            "method": "Rietveld refinement, two-phase model (intact + hydrolysed)",
+            "software": "GSAS-II (synthetic labelling; no real refinement was run)",
+            "parameters": {
+              "phases": 2,
+              "two_theta_range": "5-50"
+            },
+            "result_summary": "Synthetic: 22 wt% hydrolysed phase after 5 cycles at 70% RH."
+          },
+          "file": {
+            "media_type": "application/json",
+            "content": "{\"method\":\"Rietveld refinement, two-phase\",\"rwp\":8.4,\"hydrolysed_wt_pct\":22,\"note\":\"synthetic demo output\"}\n"
+          }
+        },
+        {
+          "key": "claim-c4",
+          "type": "claim",
+          "payload": {
+            "statement": "70% RH 下的选择性损失主要来自水分子在开放 Cu 位点的竞争吸附。",
+            "claim_type": "mechanistic",
+            "subject_ref": "@mat-mof-x-aged",
+            "property": "selectivity_loss_mechanism",
+            "scope": {
+              "conditions": [
+                {
+                  "name": "relative_humidity",
+                  "value": 70,
+                  "unit": "%"
+                }
+              ]
+            },
+            "assessment": "preliminary"
+          }
+        },
+        {
+          "key": "claim-c5",
+          "type": "claim",
+          "payload": {
+            "statement": "70% RH 循环后 MOF-X 出现约 22 wt% 的部分水解相。",
+            "claim_type": "descriptive",
+            "subject_ref": "@mat-mof-x-aged",
+            "property": "hydrolysis_fraction",
+            "scope": {
+              "conditions": [
+                {
+                  "name": "relative_humidity",
+                  "value": 70,
+                  "unit": "%"
+                }
+              ]
+            },
+            "assessment": "preliminary"
+          }
+        },
+        {
+          "key": "claim-c6",
+          "type": "claim",
+          "payload": {
+            "statement": "70% RH 下 MOF-X 选择性下降由水的竞争吸附主导，而非骨架降解。",
+            "claim_type": "causal",
+            "subject_ref": "@mat-mof-x-aged",
+            "property": "selectivity_loss_cause",
+            "scope": {
+              "conditions": [
+                {
+                  "name": "relative_humidity",
+                  "value": 70,
+                  "unit": "%"
+                },
+                {
+                  "name": "temperature",
+                  "value": 298,
+                  "unit": "K"
+                }
+              ]
+            },
+            "assessment": "contested"
+          }
+        },
+        {
+          "key": "find-f2",
+          "type": "finding",
+          "payload": {
+            "statement": "综合 DFT 竞争吸附计算与 PXRD 两相拟合：竞争吸附解释约 60% 的选择性损失，骨架降解解释其余部分——两者都成立，主因仍有争议。",
+            "finding_type": "integrated_conclusion",
+            "claim_version_refs": [
+              "@vlist:claim-c4",
+              "@vlist:claim-c5",
+              "@vlist:claim-c6"
+            ],
+            "assessment": "contested"
+          }
+        }
+      ],
+      "relations": [
+        {
+          "type": "tests_hypothesis",
+          "source": "claim-c4",
+          "target": "hyp-h1"
+        },
+        {
+          "type": "tests_hypothesis",
+          "source": "claim-c5",
+          "target": "hyp-h2"
+        },
+        {
+          "type": "references",
+          "source": "calc-dft-competitive",
+          "target": "ref-isotherm-db"
+        },
+        {
+          "type": "derived_from",
+          "source": "claim-c6",
+          "target": "claim-c4"
+        },
+        {
+          "type": "derived_from",
+          "source": "find-f2",
+          "target": "ds-pxrd-aged"
+        },
+        {
+          "type": "performed_on",
+          "source": "ds-pxrd-aged",
+          "target": "mat-mof-x-aged"
+        }
+      ],
+      "evidence": [
+        {
+          "key": "ev-c4-calc-dft-competitive",
+          "target": "claim-c4",
+          "evidence": "calc-dft-competitive",
+          "relation": "supports",
+          "evidence_type": "computational",
+          "directness": "indirect",
+          "inference_nature": "mechanistic",
+          "reasoning_note": "Synthetic: a computational mechanistic model supports the competitive-adsorption mechanism; it is not a measurement of the material."
+        },
+        {
+          "key": "ev-c5-ds-pxrd-aged",
+          "target": "claim-c5",
+          "evidence": "ds-pxrd-aged",
+          "relation": "supports",
+          "evidence_type": "dataset",
+          "directness": "direct",
+          "inference_nature": "observational",
+          "reasoning_note": "Synthetic: the two-phase refinement is the basis of the 22 wt% figure."
+        },
+        {
+          "key": "ev-c6-ds-pxrd-aged",
+          "target": "claim-c6",
+          "evidence": "ds-pxrd-aged",
+          "relation": "contradicts",
+          "evidence_type": "dataset",
+          "directness": "direct",
+          "inference_nature": "observational",
+          "reasoning_note": "Synthetic: a real 22 wt% hydrolysed phase contradicts 'degradation is not the cause'. This is the deliberately constructed contradiction docs/34 asks for."
+        },
+        {
+          "key": "ev-c6-calc-dft-competitive",
+          "target": "claim-c6",
+          "evidence": "calc-dft-competitive",
+          "relation": "supports",
+          "evidence_type": "computational",
+          "directness": "indirect",
+          "inference_nature": "mechanistic",
+          "reasoning_note": "Synthetic: the competitive-occupancy model supports the claim's positive half."
+        }
+      ]
+    }
+  },
+  "pull_requests": [
+    {
+      "key": "pr-clean-merge",
+      "branch": "humidity-40rh",
+      "action": "merge",
+      "title": "40% RH campaign: selectivity is preserved (synthetic)",
+      "body": "Synthetic demo PR. Adds the 40% RH samples, experiments, simulations, datasets and the quantitative claim C2, with three evidence assertions.\n\nNo conflict with main."
+    },
+    {
+      "key": "pr-protocol-conflict",
+      "branch": "protocol-activation-180c",
+      "action": "leave_conflicted",
+      "title": "Activation protocol at 180 C: 6 h in flowing N2 (synthetic)",
+      "body": "Synthetic demo PR. This branch proposes a different 180 C activation: 6 h in flowing N2, while main proposes 12 h under vacuum. The two differ in the same protocol fields, so the merge is a scientific conflict, not a structural one — a human decides which activation is right (CLAUDE.md §9 invariant 11)."
+    },
+    {
+      "key": "pr-selective-publication",
+      "branch": "mechanism-water-binding",
+      "action": "selective_publication",
+      "title": "Mechanism work: water binding vs framework degradation (synthetic)",
+      "body": "Synthetic demo PR. This branch is private. The demo publishes two selected versions from it (the contested claim C6 and the contested finding F2) instead of merging the branch wholesale — that is what selective publication means here."
+    },
+    {
+      "key": "pr-humidity-70rh",
+      "branch": "humidity-70rh",
+      "action": "merge",
+      "title": "humidity-70rh: 70% RH campaign (synthetic)",
+      "body": "Synthetic demo PR. The 70% RH campaign merges cleanly: its samples, experiments and datasets are new content, not a disagreement with main."
+    }
+  ],
+  "publication": {
+    "_comment": "The knowledge:publish gate of this product admits an evidence assertion only against a PUBLISHED object version (internal/application/rsg/evidence.go: the target must carry a knowledge_publications row). These are the versions the demo asserts evidence about; everything else stays unpublished.",
+    "rights": {
+      "holder": "demo-mof-lab (synthetic)",
+      "license": "CC-BY-4.0 (synthetic demo)"
+    },
+    "versions": [
+      {
+        "object": "hyp-h1",
+        "public_version": "seed-demo-1-hyp-h1"
+      },
+      {
+        "object": "hyp-h2",
+        "public_version": "seed-demo-1-hyp-h2"
+      },
+      {
+        "object": "claim-c1",
+        "public_version": "seed-demo-1-claim-c1"
+      },
+      {
+        "object": "claim-c2",
+        "public_version": "seed-demo-1-claim-c2"
+      },
+      {
+        "object": "claim-c3",
+        "public_version": "seed-demo-1-claim-c3"
+      },
+      {
+        "object": "claim-c4",
+        "public_version": "seed-demo-1-claim-c4"
+      },
+      {
+        "object": "claim-c5",
+        "public_version": "seed-demo-1-claim-c5"
+      },
+      {
+        "object": "claim-c6",
+        "public_version": "seed-demo-1-claim-c6"
+      },
+      {
+        "object": "find-f2",
+        "public_version": "seed-demo-1-find-f2"
+      },
+      {
+        "object": "find-f3",
+        "public_version": "seed-demo-1-find-f3"
+      }
+    ]
+  },
+  "releases": [
+    {
+      "key": "rel-r01",
+      "version": "R0.1",
+      "title": "R0.1 baseline — dry-gas selectivity (synthetic)",
+      "when": "after_main"
+    },
+    {
+      "key": "rel-r10",
+      "version": "R1.0",
+      "title": "R1.0 humidity validation — 40% RH campaign merged (synthetic)",
+      "when": "after_merges"
+    }
+  ],
+  "assets": [
+    {
+      "key": "asset-dataset",
+      "asset_type": "dataset",
+      "object": "ds-iso-40",
+      "title": "40% RH isotherm dataset (synthetic)",
+      "slug": "seed-demo-40rh-isotherm",
+      "manifest_metadata": {
+        "purpose": "Synthetic demo asset: 40% RH C2H4/C2H6 isotherms",
+        "data_type": "adsorption isotherm",
+        "blob_ids": [
+          "@blob:ds-iso-40"
+        ],
+        "access_level": "open",
+        "quality_notes": "synthetic"
+      }
+    },
+    {
+      "key": "asset-protocol",
+      "asset_type": "protocol",
+      "object": "proto-activation",
+      "title": "MOF-X activation protocol (synthetic)",
+      "slug": "seed-demo-activation-protocol",
+      "manifest_metadata": {
+        "purpose": "Synthetic demo asset: the thermal activation protocol",
+        "domain": "materials chemistry",
+        "steps": [
+          "dry the powder at 80 C for 2 h",
+          "evacuate and ramp to 180 C at 1 K/min",
+          "hold 18 h under vacuum, then cool under vacuum"
+        ],
+        "parameters": {
+          "temperature_c": "180",
+          "duration_h": "18",
+          "atmosphere": "vacuum",
+          "ramp_k_per_min": "1"
+        },
+        "requirements": [
+          "Schlenk line",
+          "oil-free vacuum pump"
+        ]
+      }
+    },
+    {
+      "key": "asset-material-collection",
+      "asset_type": "material_collection",
+      "object": "mat-mof-x",
+      "title": "MOF-X material collection (synthetic)",
+      "slug": "seed-demo-mofx-collection",
+      "manifest_metadata": {
+        "purpose": "Synthetic demo asset: the MOF-X material family as collected for this project",
+        "member_refs": [
+          "@mat-mof-x",
+          "@mat-mof-y"
+        ],
+        "selection_criteria": "Synthetic demo: MOF-X and its isostructural analogue MOF-Y, both activated the same way and measured on the same isotherm rig.",
+        "custodian": "demo-mof-lab (synthetic)"
+      }
+    },
+    {
+      "key": "asset-benchmark",
+      "asset_type": "benchmark",
+      "object": "ds-iso-70",
+      "title": "40/70% RH humidity benchmark (synthetic)",
+      "slug": "seed-demo-humidity-benchmark",
+      "manifest_metadata": {
+        "purpose": "Synthetic demo asset: the 40%/70% RH selectivity benchmark other groups can re-run",
+        "task": "C2H4/C2H6 IAST selectivity at 298 K under 0/40/70% RH",
+        "metrics": [
+          "iast_selectivity",
+          "relative_humidity_pct"
+        ],
+        "dataset_refs": [
+          "@ds-dry-isotherm",
+          "@ds-iso-40",
+          "@ds-iso-70"
+        ]
+      }
+    }
+  ],
+  "external_contribution": {
+    "user": "external",
+    "org": "external",
+    "fork": {
+      "source_branch": "main",
+      "name": "MOF-X humidity separation — external fork (synthetic)",
+      "purpose": "Synthetic demo fork: the external group re-runs the H1 experiment under their own activation conditions.",
+      "visibility": "public",
+      "branch_name": "external-replication"
+    },
+    "objects": [
+      {
+        "key": "ext-exp-01",
+        "type": "experiment",
+        "payload": {
+          "objective": "Independent replication of the MOF-X/C2H4-C2H6 water-competitive-adsorption experiment at 70% RH",
+          "operator_ids": [
+            "@user:external"
+          ],
+          "sample_ids": [
+            "@smp-mx-70-01"
+          ],
+          "protocol_version_id": "@proto-activation",
+          "conditions": {
+            "temperature_k": 298,
+            "relative_humidity_pct": 70,
+            "carrier": "He",
+            "activation_c": 180,
+            "activation_hold_h": 6
+          },
+          "result_summary": "Synthetic: the external group's sample loses only 18% selectivity at 70% RH — far less than the parent project measured. A contradictory result."
+        }
+      },
+      {
+        "key": "ext-ds-01",
+        "type": "dataset",
+        "payload": {
+          "purpose": "External replication dataset for the 70% RH selectivity measurement",
+          "data_type": "adsorption isotherm",
+          "access_level": "open",
+          "quality_notes": "Synthetic numbers from the external group's instrument."
+        },
+        "file": {
+          "media_type": "text/csv",
+          "content": "relative_humidity_pct,pressure_kpa,c2h4_uptake_mmol_g,c2h6_uptake_mmol_g\n70,10,1.98,0.62\n70,50,2.12,0.70\n70,100,2.19,0.75\n"
+        }
+      }
+    ],
+    "relations": [
+      {
+        "type": "derived_from",
+        "source": "ext-ds-01",
+        "target": "ext-exp-01"
+      }
+    ],
+    "evidence": [
+      {
+        "key": "ext-ev-h1",
+        "target": "hyp-h1",
+        "evidence": "ext-exp-01",
+        "relation": "fails_to_reproduce",
+        "evidence_type": "experimental",
+        "directness": "direct",
+        "inference_nature": "observational",
+        "reasoning_note": "Synthetic: the external group attempted an independent replication of the H1 water-competitive-adsorption experiment at 70% RH and did not reproduce the reported selectivity loss. Asserted from the fork against the parent's H1 version — a cross-project assertion, which is what makes its recorded origin external rather than internal."
+      },
+      {
+        "key": "ext-ev-contradicts",
+        "target": "claim-c6",
+        "evidence": "ext-exp-01",
+        "relation": "contradicts",
+        "evidence_type": "experimental",
+        "directness": "direct",
+        "inference_nature": "observational",
+        "reasoning_note": "Synthetic: the external group's 70% RH measurement contradicts the mechanism claim. Recorded as contradictory evidence, never as a verdict on the claim (CLAUDE.md §9 invariant 12)."
+      }
+    ],
+    "pull_request": {
+      "key": "pr-external",
+      "action": "leave_open",
+      "title": "External replication: 70% RH selectivity loss is smaller than reported (synthetic)",
+      "body": "Synthetic demo PR opened by the external contributor (forked project → parent main, allowed by the pull_request_fork_gate). It carries the replication dataset and the contradictory evidence assertion."
+    },
+    "_comment": "The external group forks the project and references its H1 from the fork. The reference is an evidence assertion, not an RSG relation: a relation endpoint must be a version of the SAME project (internal/application/rsg's requireEndpoint refuses a foreign-project endpoint with OBJECT_VERSION_NOT_FOUND), and the fork's content copy is taken from the parent branch's git files, which do not exist for content written through the object API — so the fork holds no replica of hyp-h1. An evidence assertion is the product's own cross-project path: the target may live in another project, and that is precisely what makes its origin external (internal/application/rsg's AssertionIsExternal)."
+  },
+  "hypothesis_revisions": [
+    {
+      "object": "hyp-h1",
+      "branch": "main",
+      "patch": {
+        "statement": "湿气条件下的性能下降主要来自 water competitive adsorption at the open metal sites；40% RH 数据把范围收窄到 open-metal-site 竞争吸附。",
+        "assessment": "under_test"
+      }
+    },
+    {
+      "object": "hyp-h2",
+      "branch": "main",
+      "patch": {
+        "statement": "湿气条件下的性能下降来自 partial framework degradation（骨架水解）；70% RH 的 PXRD 结果把该假设收窄到多次循环后的部分降解。",
+        "assessment": "under_test"
+      }
+    }
+  ]
+}

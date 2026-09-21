@@ -4537,7 +4537,6 @@
         "specs/SPEC_VERSION.json",
         "internal/persistence/**",
         "internal/assets/**",
-        "internal/rights/**",
         "go.mod",
         "go.sum",
         ".env.example",
@@ -4549,7 +4548,8 @@
         ".git/**",
         "CLAUDE.md",
         "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/progress.md",
+        "internal/rights/**"
       ],
       "decision_level_max": "L1",
       "relevant_specs": [
@@ -4562,7 +4562,7 @@
         "docs/18_EVENTS_SUBSCRIPTIONS.md"
       ],
       "scope_note": "资产那一侧的 fork/derive 写路径：表与读法已在，缺的是判定与写入。范围收窄掉 apps/web/**（见裁定）。",
-      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 裁定）——usage.derivatives 的三个值，三种行为，一个都不许坍缩。**\n\n`internal/rights/usage.go` 的包注释逐字写着 `\"unspecified\" is a real answer, not a missing one`，\n并同时否定两种坍缩（不许当许可、不许当禁止）。这条规矩落到 derive 上就是：\n\n- `usage.derivatives == \"restricted\"` → **拒绝**（声明禁止衍生）；\n- `usage.derivatives == \"allowed\"` → **放行**（声明允许）；\n- `usage.derivatives == \"unspecified\"` → **既不拒绝也不放行**：要求请求里带一条**显式确认**\n  （确认内容与 actor 一并写进同一事务的 audit 行），没有确认就拒绝。\n\n`rights_json` 读不出来（缺失、解析失败、`internal/rights.Parse` 拒未知字段）→ **拒绝**：\n这是仓库自己的口径（`assetpublish` 的 requirePolicy：「an unreadable policy is not a permissive one」）。\n**不许**把 `unspecified` 自动升级成许可，也**不许**把它自动降级成禁令——两者都是在替人做法律判断\n（`docs/12 §4` 逐字「字段不替代法律合同」；`docs/38` 是同一件事的法律边界）。\n\n授权：derive 是往**目标项目**写一个新版本，所以用与 `internal/application/assetpublish/command.go`\n的 `requirePublish` **同一处判定**（目标项目成员身份 + `authz.ActionPublishPrivateToPublic`）——\n**不新增 action、不改 `specs/policies/permissions-matrix.csv`**。若你判断这个格子对某个角色不合适，\n照实写进 RESULT 并停下来报，不要自行放宽。\n\n读得到才算能 derive：**父版本必须对调用者可读**，判据与资产页的读门同一条\n（`cmd/api/assetshttp/page.go`：发起项目 public 或调用者是该项目成员）。**不许**用「id 猜得到就能派生」\n绕过它——那正是 ADR-024 那条规矩（非公开行不给非成员）要防的事。\n\n关系取名的规矩（`docs/11_RELEASE_ASSET_HUB.md:27` 逐字「Fork/Derive：创建新的 Asset/Object identity，\n保留 lineage」）：两者的共同点是**创建新 identity + 保留 lineage**，差别是关系的性质——\n`forked_from` 是谱系复制（`internal/rsg/relationcatalog/catalog.go` 归为 Lineage/network），\n`derived_from` 是转换派生（同表归为 Provenance/structure）。由**请求显式选择**这两个值之一；\n`supersedes` 不是本任务（不实现、不暴露）。\n\n范围收窄：本任务**不做界面**——资产页已经会渲染 lineage（`internal/assets/page.go:24`/`:508`、\n`internal/persistence/queries/asset_page.sql` 的 asset_lineage 读法），本任务的验收在\n「写路径 + 那条读法显示得出来」，另做一个 derive 表单属于另一个关注点。因此 `apps/web/**` 从\nallowed_scope 里去掉；若你发现不动界面就完不成某条验收，**照实报回来**，不要自己扩范围。"
+      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 裁定）——usage.derivatives 的三个值，三种行为，一个都不许坍缩。**\n\n`internal/rights/usage.go` 的包注释逐字写着 `\"unspecified\" is a real answer, not a missing one`，\n并同时否定两种坍缩（不许当许可、不许当禁止）。这条规矩落到 derive 上就是：\n\n- `usage.derivatives == \"restricted\"` → **拒绝**（声明禁止衍生）；\n- `usage.derivatives == \"allowed\"` → **放行**（声明允许）；\n- `usage.derivatives == \"unspecified\"` → **既不拒绝也不放行**：要求请求里带一条**显式确认**\n  （确认内容与 actor 一并写进同一事务的 audit 行），没有确认就拒绝。\n\n`rights_json` 读不出来（缺失、解析失败、`internal/rights.Parse` 拒未知字段）→ **拒绝**：\n这是仓库自己的口径（`assetpublish` 的 requirePolicy：「an unreadable policy is not a permissive one」）。\n**不许**把 `unspecified` 自动升级成许可，也**不许**把它自动降级成禁令——两者都是在替人做法律判断\n（`docs/12 §4` 逐字「字段不替代法律合同」；`docs/38` 是同一件事的法律边界）。\n\n授权：derive 是往**目标项目**写一个新版本，所以用与 `internal/application/assetpublish/command.go`\n的 `requirePublish` **同一处判定**（目标项目成员身份 + `authz.ActionPublishPrivateToPublic`）——\n**不新增 action、不改 `specs/policies/permissions-matrix.csv`**。若你判断这个格子对某个角色不合适，\n照实写进 RESULT 并停下来报，不要自行放宽。\n\n读得到才算能 derive：**父版本必须对调用者可读**，判据与资产页的读门同一条\n（`cmd/api/assetshttp/page.go`：发起项目 public 或调用者是该项目成员）。**不许**用「id 猜得到就能派生」\n绕过它——那正是 ADR-024 那条规矩（非公开行不给非成员）要防的事。\n\n关系取名的规矩（`docs/11_RELEASE_ASSET_HUB.md:27` 逐字「Fork/Derive：创建新的 Asset/Object identity，\n保留 lineage」）：两者的共同点是**创建新 identity + 保留 lineage**，差别是关系的性质——\n`forked_from` 是谱系复制（`internal/rsg/relationcatalog/catalog.go` 归为 Lineage/network），\n`derived_from` 是转换派生（同表归为 Provenance/structure）。由**请求显式选择**这两个值之一；\n`supersedes` 不是本任务（不实现、不暴露）。\n\n范围收窄：本任务**不做界面**——资产页已经会渲染 lineage（`internal/assets/page.go:24`/`:508`、\n`internal/persistence/queries/asset_page.sql` 的 asset_lineage 读法），本任务的验收在\n「写路径 + 那条读法显示得出来」，另做一个 derive 表单属于另一个关注点。因此 `apps/web/**` 从\nallowed_scope 里去掉；若你发现不动界面就完不成某条验收，**照实报回来**，不要自己扩范围。\n\n**（2026-09-21 二次收窄，按安全复核）——`internal/rights/**` 从 allowed_scope 里摘掉。** 本任务用到的是 `internal/rights` 的**既有导出面**（`Parse`、`Document.Usage.Derivatives`、`Permission` 三个常量），全部是只读调用；判定（三个值怎么处理）写在**本任务自己的命令**里，不在 rights 包里。若你发现必须改 `internal/rights` 才做得成，**停下来报**——那会动到全平台共用的权利词汇表，是另一笔要单独评审的改动，不是本任务的顺手活。"
     },
     {
       "id": "T0709",
@@ -4642,7 +4642,7 @@
     {
       "id": "T0710",
       "phase": "P7",
-      "phase_name": "Research Asset Hub、Rights 与 Publish",
+      "phase_name": "Release、Asset、Rights",
       "title": "Asset 完整 E2E",
       "v1_required": true,
       "dependencies": [
@@ -4650,39 +4650,67 @@
         "T0709"
       ],
       "requirements": [
-        "Release→Dataset Asset publish→另一 Project reference/depend→fork derived"
+        "**任务原文逐字**：`Release→Dataset Asset publish→另一 Project reference/depend→fork derived`；验收逐字：**`PID/version/rights/lineage 全正确`**。这一笔就是把这条链在**真实路径**上从头发到尾跑一遍，并且逐段断言。",
+        "**每一跳今天在哪儿（2026-09-21 逐条核过，别重新发现）**：\n  - **(a) Release**：`POST /api/v1/projects/{projectId}/releases`（`cmd/api/releasehttp/release_wiring.go:50`），服务 `internal/application/releases/command.go:107`，main 冻结走 `POST …/main:freeze`（`cmd/api/freezehttp/wiring.go:45`）。现成的全链路测试是 `tests/integration/release_e2e_test.go:326 TestReleaseE2E`。\n  - **(b) Dataset 资产发布**：`POST /api/v1/projects/{projectId}/assets:publish`（`cmd/api/assetshttp/wiring.go:98`），`internal/application/assetpublish/command.go:36`；`dataset` 是四个合法 `asset_type` 之一（`internal/assets/asset.go:28`）。\n  - **(c) 跨项目引用/依赖**：**只有 `depends_on` 这一半**，而且是发布的副作用——`asset_dependencies` 的写入在 `internal/persistence/queries/asset_dependencies.sql:39`（`ON CONFLICT … DO UPDATE`），由 `internal/persistence/asset_publish_store.go:366 recordUsageDeclarations` 在发布事务里写；**没有独立的依赖声明路由**。现成证据 `tests/integration/asset_dependency_test.go:422 TestAssetDependencyPublishRecordsTheDeclaredUsages` 就是跨项目的（A 的 `pid@1.0` 被 B 的项目 pin 住）。\n  - **(d) fork/derive + lineage 边**：**这一跳由 T0708 提供，本任务依赖它的理由就是它**。DAG 里 `T0710` 的 `dependencies` 就是 `[\"T0708\",\"T0709\"]`——今天它是空的不是因为排期，是因为产品里根本没有这条路（表 `asset_lineage` 建好了、读法 `internal/persistence/queries/asset_page.sql:140 ListAssetPageLineage` 也有了、`assets/page.go:528` 也渲染了，**但全仓 `INSERT INTO asset_lineage` 只命中两处，都在测试里**）。\n  - **(e) PID**：`research_assets.pid`（迁移 `00064`，格式 CHECK `^[0-9a-hjkmnp-tv-z]{26}$` + 唯一索引），**由发布命令当场铸造**（`internal/application/assetpublish/command.go:265-299` 逐字「The pid is decided HERE, and this is the only place it is decided」，`assets.NewPID()`）。",
+        "**`references`（引用）这一半今天在规格层面就是不可表达的，不许在测试里把它「补」出来**。`internal/assets/usage.go:44-53` 逐字：「Every pin is a dependency, never a citation. … a manifest has no field that means \"background knowledge\": nothing in the document distinguishes a version that was consulted from one that was used as an input, **so a citation is not expressible here and this rule does not invent one**」。`DependencyTypeReferences = \"references\"` 在词表里、读法也会渲染它，但**没有任何产品路径能产生一行 `references`**。仓库里唯一造得出它的地方是测试的裸 SQL（`tests/integration/asset_page_test.go:658-663` 手插 `'reuses'`/`'cites'`/`'documents'`）——那是**别人**的测试夹具，用在它自己的目的上是对的；**但你不能拿它当「引用这条链通了」的证据**。所以：**你的 E2E 走 `depends_on` 那一半，并在 RESULT 里逐字写明「`references` 在 V1 不可表达，见 usage.go:44-53，本套件不伪造它」**。这是本笔最容易被抓的失分点：用一行手插 SQL 把「另一 Project reference」蒙过去。",
+        "**逐段断言，不许只跑一遍看没报错**（照 `tests/integration/release_e2e_test.go` 与 `tests/integration/external_fork_merge_e2e_test.go` 的密度办）。每一跳都要有「它真的发生了」的证据：\n  - Release 冻结的是**那一刻的 main 头**，之后 main 再动，release 的 manifest 不变（`docs/11` 的不可变口径）；\n  - 发布的资产真的拿到一个**合法形状且唯一**的 pid，且 `pid` 与 `version` 是两个不同的东西（不要混成一个字段）；\n  - 版本内容与 manifest 逐字段对得上（不是只看 HTTP 201）；\n  - 跨项目 pin 的**那一行**：`project_id` 是消费方项目、`asset_version_id` 解析到**提供方的那个版本行**、`dependency_type = depends_on`、`visibility_of_usage` 取版本自己的声明；\n  - fork/derive 之后：**新 identity 是新的**（asset_id / pid 不与父相同），**lineage 边真的在表里**且方向与类型正确（`relation_type IN ('forked_from','derived_from','supersedes')`），**父版本不可变**（`asset_lineage` 上有 append-only 触发器，见 `infra/migrations/00014:63` 与 `00015:14`）；\n  - **rights**：derive 的放行/拒绝按 T0708 落地的判定走，且**拒绝的那一档要被真的走到一次**（只有放行路径的 rights 断言等于没断言）。",
+        "**不许用 stub/mock 把 fork/derive 那一步「走通」**。RESULT 里写 passed 而实际没经过真实产品路径，是本 phase 最容易被抓住的事。真 PostgreSQL 是底线（`POSTGRES_TEST_ADMIN_URL`，`tests/e2e-release/run.sh:30` 有默认值）；挂具形状**复用既有的**，**不要再造第三套**：`tests/e2e-release/`（`run.sh:5-9` 逐字「Nothing is mocked.」，真 Chromium + 真 harness + 真 PostgreSQL）与 `tests/integration/`（真库上的 Go 集成）。",
+        "**可复现性必须写清楚**（我要照着你写的复跑一遍）：跑之前要什么（PostgreSQL 怎么起、哪些端口、`POSTGRES_TEST_ADMIN_URL` 默认值够不够、是否要联网装东西、装到哪）；脚本幂等吗（连着跑第二遍会不会因残留进程/残留库/端口占用而失败）；依赖不依赖本机既有的 Redis/MinIO/Gitea，还是自足。",
+        "**测试与断言只准加强，不准放宽**：不许删断言、不许 skip、不许放大 timeout、不许把 FAIL 改成容忍。这条没有例外。**特别是**：T0708/T0709 带进来的既有测试（`T0708-TEST-01` 那条 `asset lineage`、`tests/e2e-assets/`）**原样留着**，你的入口是把它们组织进这条链，不是替换它们。",
+        "**发现产品缺口时的正确动作是「报」，不是「补」**。典型的三类：fork/derive 的路由或判定有洞（那是 T0708 的面）、跨项目 pin 的可见性判定有洞（T0707/T0709 的面）、release 冻结语义有洞（T0605/T0606 的面）。**停下写证据（文件、行、复现命令）留在 RESULT 里交给我拆任务**，不要自己动 `internal/**`（不在你的范围内，见 scope）。像「提案送进评审没有路由」这类缺口，仓库里有现成先例：`tests/e2e-pr-flows/pr-flows-e2e.mjs:36-44` 用一条**测试自有**的 harness 端点直接调产品里的服务方法，**不碰任何状态列**——照这个形状做。",
+        "**验收的四个字要逐字对得上**：`PID/version/rights/lineage 全正确`。RESULT 里要有四段，每段点名它断言了什么、在哪个文件哪一行、以及**这条断言在什么情况下会红**（说不出会怎么红的断言，等于没有）。",
+        "**不做 / 边界**：不改 `specs/**`（契约是 Supervisor 的；缺路由先报）、`docs/**`、`tasks/**`、`infra/**`（**不新增迁移**，真需要就报，编号由我分配，§8.1）、`apps/web/**`（浏览器面由 T0709 的 e2e 管）。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "一条从 Release 到 fork/derive lineage 的完整 e2e，在真 PostgreSQL 上可重复跑",
+        "四段逐条断言：PID / version / rights / lineage，每段带「什么情况下会红」",
+        "跨项目 `depends_on` pin 的行级断言（项目、版本 id、类型、可见性）",
+        "rights 拒绝那一档的真实用例",
+        "`references` 不可表达的逐字说明（不伪造）",
+        "可复现性说明：起库、端口、幂等性、外部依赖"
+      ],
       "acceptance_criteria": [
-        "PID/version/rights/lineage 全正确"
+        "**PID/version/rights/lineage 全正确**（任务原文）：四段断言各自成立，且每段在 RESULT 里点名了它的转红条件",
+        "**链路是端到端的真实路径**：Release → Dataset 发布 → 跨项目 `depends_on` → fork/derive + lineage 边，全程真 PostgreSQL、真 HTTP/真服务；没有任何一跳被 stub 掉（fork/derive 那一跳尤其）",
+        "**`references` 没有被伪造**：RESULT 里逐字写明它在本版不可表达（`internal/assets/usage.go:44-53`），套件里没有用裸 SQL 造一行 `references` 来充证据",
+        "**rights 的拒绝档被走到过**：有一条真实用例证明不允许的派生被拒，并给出该用例的转红条件",
+        "**lineage 边与不可变性**：边真的在 `asset_lineage` 里、方向/类型正确、父版本不可变（append-only 触发器挡住 UPDATE/DELETE 的那条也要有依据）",
+        "**可重复**：连着跑第二遍不因残留而失败；RESULT 给出一条从零开始的完整复跑命令，以及它需要的前提",
+        "**既有测试没有被削弱**：`T0708-TEST-01`、`T0709` 的 `tests/e2e-assets/`、`tests/integration/asset_*_test.go` 全部原样通过；没有删断言/skip/放大 timeout",
+        "**范围干净**：`internal/**`、`cmd/**`、`apps/web/**`、`specs/**`、`infra/**` 的 diff 为空（要改就先报回来）",
+        "**RESULT 里写明**：每一跳的断言位置、缺口（若有）的证据、以及所有你判断不了而按最严处理的地方"
       ],
       "tests": [
         "asset canonical e2e"
       ],
       "allowed_scope": [
-        "infra/migrations/**",
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
-        "internal/persistence/**",
-        "internal/assets/**",
-        "internal/rights/**",
-        "go.mod",
-        "go.sum",
-        ".env.example",
-        "cmd/api/**",
-        "apps/web/**",
-        "packages/schemas/**",
         "tests/**"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        "infra/**",
+        "internal/**",
+        "cmd/**",
+        "apps/web/**",
+        "packages/**",
+        "go.mod",
+        "go.sum"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/11_RELEASE_ASSET_HUB.md",
+        "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
+        "docs/21_DATA_MODEL.md",
+        "docs/adr/ADR-023-asset-fork-derive-lineage.md",
+        "specs/schemas/research-asset-version.schema.json",
+        "specs/api/openapi.yaml"
+      ],
+      "scope_note": "**只有 `tests/**`，这是本笔最硬的一条。** 理由：这一笔的产物是**证据**，不是产品路径——链上的每一跳要么已经合并（Release/发布/依赖/PID），要么由 T0708 提供（fork/derive + lineage 写入口）。E2E 挂具在本仓里本来就住在 `tests/**` 下（`tests/e2e-release/`、`tests/integration/`、`tests/e2e-pr-flows/`），连「缺失路由时调一次产品服务方法」的那种 harness 端点也写在测试里。**`internal/**` 与 `cmd/**` 明确排除**：一个 E2E 任务顺手改产品路径，等于把「发现的问题」和「修它的实现」混成一份没人复核的 diff——而这正是「用一行手插 SQL 让链看起来通了」的温床。**发现缺口就报**（需求第 8 条给了具体形状）。`go.mod`/`go.sum` 也排除：挂具不需要新依赖，真需要就报。",
+      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄 + 立账）——只给 `tests/**`，并把「哪几跳已经存在」逐条钉进需求。**\n\n**立账时我先问了「这一笔到底缺什么」**，答案是：五跳里四跳已经合并并有各自的测试，**缺的是 (d) fork/derive + lineage 写入口，而那一跳是 T0708 的差事**——DAG 里 `T0710` 的依赖本来就是 `[T0708, T0709]`，所以这一笔不需要新的任务、也不需要我替 owner 拍任何产品决定，**把它写清楚、让它排在 T0708 之后即可**。\n\n**本笔里我定死的两件事**：①**`references` 不许伪造**（需求第 3 条）——`internal/assets/usage.go:44-53` 是仓库自己写下的「引用不可表达，本规则不发明一个」，而测试里恰好有裸 SQL 能手插一行，这是这条链最容易被蒙混的地方；②**缺口报回来、不要自己补**（需求第 8 条）——与 T0810 那封恢复信的口径一致（「不许自己改合并的内部，报回来」），因为同一个修法出现两个实现是一份要还的债。\n\n**为什么要一条可复现性说明**：E2E 的价值全在别人能否复跑。这条要求是从 T0810 的信里抄来的形状，它在那里救过一次场。"
     },
     {
       "id": "T0711",
@@ -5364,7 +5392,8 @@
         "T0817"
       ],
       "requirements": [
-        "public project→discover→fork/contribute→PR merge→profile credit→external evidence"
+        "public project→discover→fork/contribute→PR merge→profile credit→external evidence",
+        "**改文件的范围里没有 `internal/rsg/**`，但读它不受限**。RSG 状态链的断言（合并之后上游真的多了一个状态、链上每个状态被一次 commit 命名）用既有导出接口读即可。需要只在包内可见的夹具时写在 `tests/**`。发现 `internal/rsg/**` 或 `internal/application/merge/**` 里的真缺陷，停下写证据（文件、行、复现命令）报回来。"
       ],
       "deliverables": [],
       "acceptance_criteria": [
@@ -5374,28 +5403,32 @@
         "network e2e"
       ],
       "allowed_scope": [
-        "infra/migrations/**",
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
-        "internal/persistence/**",
+        "tests/**",
+        "cmd/api/**",
         "internal/contribution/**",
         "internal/application/**",
         "go.mod",
         "go.sum",
-        ".env.example",
-        "cmd/api/**",
-        "apps/web/**",
-        "tests/**"
+        ".env.example"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
         "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/progress.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        "infra/**",
+        "apps/web/**",
+        "internal/rsg/**",
+        "internal/application/merge/**",
+        "internal/events/**"
       ],
       "decision_level_max": "L1",
       "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。\n\n**2026-09-20 排期更正**：本任务的 `PR merge` 一段依赖 T0817——合并路径今天把源侧钉在 PR 所属项目上（`internal/application/merge/service.go:439`），fork 来的源分支活在 fork 项目，查不到；裁决见 `tasks/decisions.md`、架构理由见 `docs/adr/ADR-025`。T0817 合并后再 rework 本任务（worktree 与已写的 in-memory Git transport 保留）。"
+      "scope_note": "**收窄到「闭环 E2E 要跑通什么」，并把 schema 与前端摘出去。**\n\n摘掉的三类，各有理由：\n- `infra/migrations/**` + `specs/database/postgres.sql` + `specs/SPEC_VERSION.json`：本任务不建表、不改 schema，闭环要用的对象、关系、fork 门禁在既有迁移里都已经有了（`infra/migrations/00086_external_fork.sql`）。摘掉它们同时消掉一个真实故障模式：带着生成物的补丁在 main 一动时就 `git apply` 不上（`specs/orchestrator/derived-artifacts.json` 逐字写着生成物要重新生成、不能当文本合）。**真需要迁移或索引，报上来，编号由我分配**（CLAUDE.md §8.1）。\n- `internal/persistence/**`：理由同上，E2E 不写查询层。\n- `apps/web/**`：本任务的验收标准是「完整链路 **CI 可跑**」。链路的每一跳在 API 与真实服务上都能跑；把浏览器 UI 拉进来会让这条门依赖前端构建与浏览器环境，而那是 P11 的任务面。**要一个 web 侧断言就报上来。**\n\n`internal/application/**` 与 `internal/contribution/**` 保留：闭环里 profile credit 那一段可能要小改接线。`cmd/api/**` 保留：E2E 走真实 HTTP。\n\n**（2026-09-21 补，安全复核后）`internal/rsg/**` 从 allowed_scope 摘掉。** 理由：allowed_scope 管「能改哪些文件」，不管「能 import 什么」——E2E 断言 RSG 状态链，读既有导出接口就够了。只有包内可见的夹具写在 `tests/**` 里（照 `tests/integration/network_fake_git_test.go` 的形状）。发现 `internal/rsg/**` 或 `internal/application/merge/**` 的真缺陷，报回来，不要自己修——与本任务既有的「不许自己改合并内部」是同一条道理。",
+      "supervisor_scope_narrowing": "**收窄到「闭环 E2E 要跑通什么」，并把 schema 与前端摘出去。**\n\n摘掉的三类，各有理由：\n- `infra/migrations/**` + `specs/database/postgres.sql` + `specs/SPEC_VERSION.json`：本任务不建表、不改 schema，闭环要用的对象、关系、fork 门禁在既有迁移里都已经有了（`infra/migrations/00086_external_fork.sql`）。摘掉它们同时消掉一个真实故障模式：带着生成物的补丁在 main 一动时就 `git apply` 不上（`specs/orchestrator/derived-artifacts.json` 逐字写着生成物要重新生成、不能当文本合）。**真需要迁移或索引，报上来，编号由我分配**（CLAUDE.md §8.1）。\n- `internal/persistence/**`：理由同上，E2E 不写查询层。\n- `apps/web/**`：本任务的验收标准是「完整链路 **CI 可跑**」。链路的每一跳在 API 与真实服务上都能跑；把浏览器 UI 拉进来会让这条门依赖前端构建与浏览器环境，而那是 P11 的任务面。**要一个 web 侧断言就报上来。**\n\n`internal/application/**` 与 `internal/contribution/**` 保留：闭环里 profile credit 那一段可能要小改接线。`cmd/api/**` 保留：E2E 走真实 HTTP。"
     },
     {
       "id": "T0811",
@@ -6123,39 +6156,63 @@
         "T0906"
       ],
       "requirements": [
-        "answer/comparison/evidence map/limitations/sources/underlying results/start project",
-        "loading/fallback/error"
+        "**先看清数据从哪来，别照着文档臆想字段。** 答案接口是 `POST /api/v1/search`，由 **T0906** 交付，响应外层是 `{\"search_id\": \"…\", \"answer\": { … }}`（`cmd/api/searchhttp/handlers.go:84-87`）。`answer` 的字段**逐字**只有这些（`internal/search/answer/answer.go:195-205` 的字段序就是它）：`answer_version`、`status`（`answered` / `fallback`，`answer.go:19-28`）、`reason`（仅 fallback 出现，闭集为 `no_provider` / `no_sources` / `provider_error` / `provider_timeout` / `invalid_answer` / `ungrounded_citation`，`answer.go:39-80`）、`query`、`answer_view`、`summary`、`citations`、`limitations`、`conflicts`、`sources`。`limitations`/`conflicts` 每条形如 `{text, refs, origin}`（`origin` 目前恒为 `\"platform\"`）。**`sources` 一份数据承担两个概念**——`answer.go:96-108` 逐字写着 docs/14 §4 要的「source objects」与「underlying results」在本实现里是**同一张列表**，靠每条的 `cited` 标出摘要真正引用的那个子集。单条形如 `rank`、`ref`、`kind`、`entity_type`、`object_type`、`title`、`version`、`href`、`project_id`、`labels`、`factors`、`cited`（`answer.go:110-147`）。",
+        "**`docs/42_PAGE_SPECS.md:25` 与 `docs/05_INFORMATION_ARCHITECTURE.md:42` 要的 `comparison` / `conditions` / `evidence_map` 三块，在答案文档里没有对应键。****不要在前端凭 `sources` 现推这三块**——那会让页面变成对答案的第二份定义。**照实渲染存在的字段，并在 RESULT 里点名这三块缺数据**（缺的是哪一块、文档出处在哪一行）。`evidence map` 这一块**有一个诚实的落法**：`limitations`/`conflicts` 每条都带 `refs`，把它们与 `sources` 的 `ref` 对齐、做成「主张 ↔ 证据」的对照视图——这用的是文档里真有的数据。做不做由你判断，做了就要在 RESULT 里说清它是从 `refs` 投射出来的。",
+        "**四种状态都要有，且都要有测**：请求中（loading）、`answered`、`fallback`（六种 `reason` 各有文案，**不是一句「出错了」**）、错误（400 `SEARCH_INVALID_REQUEST` / 401 `SEARCH_UNAUTHENTICATED` / 503 `SEARCH_UNAVAILABLE`，错误信封是 `{code, message, request_id, retryable}`，`cmd/api/authhttp/envelope.go:14-19`）。**fallback 不是错误**：它是平台**不愿意在没证据时给答案**的结果，页面要把它呈现成一种正常结论，而不是红色报错。",
+        "**URL 就是查询的住处**：`/search?q=…` 必须继续可用——导航栏的检索表单是 `GET` 到 `/search`（`apps/web/app/nav/global-nav.tsx:50`），`page.tsx:13-18` 现在从 `searchParams` 读 `q`。所以：query 从 URL 读、答案可以客户端取（`POST` 需要 cookie 与 JSON body），**但刷新、复制链接、新标签页打开必须得到同一个答案**。这条要有断言（见验收）。",
+        "**每条 source 都要能点开**（任务书原文的「可直接探索 source」）。答案里每条 source 带 `href`——**用它**，不要在前端拼 URL。若某些 `kind` 的 `href` 缺失或指不到真实页面，**报上来**（那是生产方 T0906 的事），不要自己编一条路径。",
+        "**设计系统照既有做法**：Primer 组件（`@primer/react` 38.39.0）+ 手写 CSS。**没有 Tailwind，也没有 `sx` prop**（`apps/web/app/globals.css:1-2` 逐字写着）。样式写成与页面同目录的一个 `.css`（如 `explore.css` / `assets.css` 那样），只用 globals.css 里的 Primer token；`.rp-card`、`.status-list`、`.rp-section-title` 这些既有类可以直接用。**测试会强制**：`tests/web-smoke/visual-smoke.mjs:37-52` 禁止渐变、backdrop blur、紫色。",
+        "**两个既有烟测现在把这一页当占位页断言，必须同笔更新**：`tests/web-smoke/visual-smoke.mjs:189`（`[\"/search?q=solid-state\", \"Search\"]`）与 `:191-206`（断言返回 200、第一个 `h1` 文本恰为 `Search`）；`tests/web-smoke/a11y-smoke.mjs:66`（扫描 `/search?q=catalyst`）与 `:185-190`（键盘提交后断言 `<q>` 元素文本为 query）。页面一改，这两处**必然**要么改要么红——**改要说明改成什么、为什么新断言仍然测得住原来那件事**。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "`/search` 页：query 来自 URL，答案按 `answered` / `fallback` / 错误三态渲染，loading 有稳定骨架",
+        "sources 列表：每条可点开（用答案里的 `href`），并标出 `cited` 子集",
+        "limitations / conflicts 区（每条带 refs），以及（若做）由 refs 投射的证据对照视图",
+        "新的浏览器 e2e（`tests/e2e-search/`，照 `tests/e2e-explore/` 的形状：独立 npm 项目 + playwright + 真实 HTTP mock origin）",
+        "更新后的两处既有烟测",
+        "RESULT：逐条写清缺数据的文档项、`href` 的可用性、以及每条新断言「怎么证明它测得动」"
+      ],
       "acceptance_criteria": [
-        "不是 Google list 首屏",
-        "可直接探索 source"
+        "**仪器能说不（先做这一步）**：新的 e2e 里，**至少三条**断言要各自做一次变异（把被测的那件事改坏——例如把 fallback 分支渲染成错误、把 `cited` 标记去掉、把 `href` 换成 `#`），确认它**转红**，把红的输出留在 RESULT 里。从没红过的断言不算证据。",
+        "**三态都渲染对**：`answered`（有 summary 且有 citations）、`fallback`（六种 `reason` 各有可区分文案）、错误（至少 503 与 401 两种 code 各有呈现）。用真实 HTTP mock 驱动，不是给组件喂 props。",
+        "**`sources` 与 `cited` 逐条对得上**：mock 里给 5 条 source、其中 2 条 `cited`，断言页面上被标为引用的**正是**那 2 条（按 `ref` 对，不按顺序对）。",
+        "**URL 可分享**：直接以 `/search?q=<有答案的查询>` 打开（不是先点表单），页面渲染出该查询的答案；刷新后仍是同一个 `search_id` 对应的答案。",
+        "**每条 source 都点得开**：e2e 里真的点一条，断言落到一个 200 的页面；把该条 source 的 `href` 去掉后这条断言**转红**。",
+        "**两处既有烟测仍然绿，且强度不降**：`tests/web-smoke/run.sh` 全绿；对改过的断言，逐条说明改前测的是什么、改后测的是什么、为什么没有变弱。",
+        "**不许在前端造数据**：页面上出现的每一条 claim / 数值 / 证据都必须来自响应体；用一次源码扫描或 e2e 断言证明（例如：mock 里不放某字段时，页面对应区域**不出现**而不是显示占位假值）。",
+        "**设计系统合规**：`visual-smoke` 的 css-policy 与 a11y 扫描（axe）全绿；键盘可达（tab 到每条 source、回车能打开）。",
+        "**诚实报告**：`comparison` / `conditions` / `evidence_map` 三块缺数据这件事、`href` 有没有指不到的地方、以及你不能确定的地方，逐条写进 RESULT。"
       ],
       "tests": [
         "search ui e2e"
       ],
       "allowed_scope": [
-        "infra/migrations/**",
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
-        "internal/persistence/**",
-        "internal/search/**",
-        "go.mod",
-        "go.sum",
-        ".env.example",
-        "cmd/api/**",
         "apps/web/**",
-        "tests/**"
+        "packages/ui/**",
+        "tests/**",
+        "cmd/api/searchhttp/**",
+        "internal/search/answer/**"
       ],
       "forbidden_scope": [
+        "specs/**",
+        "docs/**",
+        "tasks/**",
+        "infra/migrations/**",
+        "internal/persistence/**",
         ".git/**",
-        "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "CLAUDE.md"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/14_SEARCH_DISCOVERY.md",
+        "docs/42_PAGE_SPECS.md",
+        "docs/05_INFORMATION_ARCHITECTURE.md",
+        "docs/adr/ADR-010-search-answer.md",
+        "specs/api/openapi.yaml",
+        "specs/ui/page-inventory.csv"
+      ],
+      "scope_note": "**收窄到「前端 + 它自己的测试」。** 摘掉 `infra/migrations/**`、`internal/persistence/**`、`specs/**`：本任务不建表、不改 schema，也不写契约（这些是 Supervisor 与上游任务的面）。摘掉它们同时消掉一个真实故障模式：带着生成物的补丁在 main 一动时 `git apply` 不上（`specs/orchestrator/derived-artifacts.json`）。\n\n**`cmd/api/searchhttp/**` 与 `internal/search/answer/**` 只保留给一种改动**：答案里 `href` 指不到真实页面、或某个字段与 UI 的读法对不上时的小修。**任何这类改动都必须让 T0906 的 grounding 测试原样全绿**（`cmd/api/searchhttp/grounding_test.go`、`internal/search/answer/*_test.go`）——那是「引用只能来自检索结果」那条不变量，一个字都不许放宽。**超出了这个小口子就报上来**，不要顺手扩面。\n\n`tests/**` 含两处要同笔更新的既有烟测（`tests/web-smoke/visual-smoke.mjs`、`tests/web-smoke/a11y-smoke.mjs`）与新的 `tests/e2e-search/`。",
+      "supervisor_scope_narrowing": "**收窄到「前端 + 它自己的测试」。** 摘掉 `infra/migrations/**`、`internal/persistence/**`、`specs/**`：本任务不建表、不改 schema，也不写契约（这些是 Supervisor 与上游任务的面）。摘掉它们同时消掉一个真实故障模式：带着生成物的补丁在 main 一动时 `git apply` 不上（`specs/orchestrator/derived-artifacts.json`）。\n\n**`cmd/api/searchhttp/**` 与 `internal/search/answer/**` 只保留给一种改动**：答案里 `href` 指不到真实页面、或某个字段与 UI 的读法对不上时的小修。**任何这类改动都必须让 T0906 的 grounding 测试原样全绿**（`cmd/api/searchhttp/grounding_test.go`、`internal/search/answer/*_test.go`）——那是「引用只能来自检索结果」那条不变量，一个字都不许放宽。**超出了这个小口子就报上来**，不要顺手扩面。\n\n`tests/**` 含两处要同笔更新的既有烟测（`tests/web-smoke/visual-smoke.mjs`、`tests/web-smoke/a11y-smoke.mjs`）与新的 `tests/e2e-search/`。"
     },
     {
       "id": "T0908",
@@ -6168,14 +6225,32 @@
         "T0104"
       ],
       "requirements": [
-        "用户选择 references/dependencies/candidates/hypotheses",
-        "先 draft 确认",
-        "生成 initial project state"
+        "**迁移编号不在本任务书里写死，以派工时任务包里的 `migration_number` 为准**（CLAUDE.md §8.1：编号由 Supervisor 侧的 `AllocateMigrationNumber` 在派工时发号并记账，Worker 不得自选；返工沿用同一个号）。文件名照仓库惯例：`infra/migrations/<任务包给的号>_research_context_draft.sql`，并在 `infra/migrations/migrations.go` 的清单里登记。**为什么这里不写数字**：起草本任务书时（2026-09-21）账本 `.rddev/runtime/migration-numbers.json` 上已发的号是 T0906=121、**T0411=122**、T0610=123、T0818=124——`00122` **已经被 T0411 占了**，而 T0908 还要排在 T0906→T0907 之后才派工，中间还会有人拿走号。**照任务包里的号写，不要照这本任务书里可能过时的数字写。**",
+        "**领域口径（逐字在 `docs/14_SEARCH_DISCOVERY.md:23-25`）**：「\"Start Research Project\"创建 Draft Research Context：Research Question、referenced knowledge、dependencies、candidate materials、known uncertainties、agent-suggested hypotheses。**用户确认后才形成 initial state。**」`docs/31_MASTER_ACCEPTANCE.md:36` 把「Answer → Draft Research Context → new Project 流程可用」列为 Gate E 的一条。**draft 不是 RSG 节点**（`docs/07_RSG_SPEC.md:5`：RSG 是某个 state version 下的完整状态图），它是 initial state 之前的候选物。",
+        "**上游给你留好了一个确切的空位**：T0906 落下的 `search_records` 表（`infra/migrations/00121_search_answer_record.sql:67-102`）带着 `id`、`query`、`filters`、`plan`、`signals`、`selected_refs`、`citations`、`answer`，**并且明确把读的那一半留给了你**——`internal/persistence/search_record_store.go:20-27` 逐字写着「One method, and **no reader** … the only reader in the contract resumes a search's sources, **and that flow is not this task's**」。`citations` 有一个 CHECK：`citations <@ selected_refs`（`00121:102`）。**这些是「答案引用只能来自检索结果」那条不变量的落点，不许放宽、不许绕开。**",
+        "**两条路由已经写进契约（我加的，`specs/api/openapi.yaml`）**，你要实现的就是它们：\n  1. `POST /search/{searchId}:start-project`（body 见契约：`name`/`slug`/`research_question` 必填，`referenced_refs`/`dependency_refs`/`candidate_refs`/`uncertainties`/`hypotheses` 可选）——**建 Project（planning）+ 落一行 draft，不写任何科研状态**；\n  2. `POST /research-context-drafts/{draftId}:confirm`——**确认时才形成 initial state**：经**既有的状态迁移路径**建出初始 branch 与 research_question 对象，因此这次迁移和别的写一样被一次 state commit 命名。\n  两条都**必须带 `Idempotency-Key`**（照 `cmd/api/mergehttp/handler.go:86`/`:192` 的 `mergeKey` 接法）。契约里逐字写了为什么：重放要**回到同一份 draft / 同一次确认**，而不是开出第二个项目、第二次状态。",
+        "**「Agent 答案不自动写 main」这句要能测，不能只是声明**：`:start-project` 落地之后，断言该项目的分支数为 0、`project_states`/`state_commits` 没有新行、`scientific_object_versions` 没有新行——**逐条断言存储**，不是断言返回值。确认之后，断言初始状态**可追溯**：能从 state commit 找回 research_question 那条对象版本。",
+        "**权限照既有口径，不许发明新的**：`specs/policies/permissions-matrix.csv:4` 的 `create_project` 是「匿名 deny、认证用户按角色 allow、org 内 scoped」；`specs/ui/page-inventory.csv:4` 的 `/search` 行写着 write behavior =「start project when logged in」。所以：匿名的 `:start-project` 被拒；确认只对**该项目的 maintainer 及以上**开放，且「没权限」与「看不见」返回同一个答复（照 `internal/application/projects` 既有写路径的形状）。",
+        "**引用面不许放宽**：draft 里出现的每个 ref 都必须来自这条 search record 的 `selected_refs`（用户可以在其中取舍与重新归类，**不能凭空加**）。构造一条不在 `selected_refs` 里的 ref 并断言被拒。",
+        "**诚实报告**：`uncertainties` / `hypotheses` 今天有没有地方可落（是只存在 draft 里，还是要成为对象）、confirm 之后 draft 行的终态是什么、以及你不能确定的地方，逐条写进 RESULT。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "迁移 `<任务包里的 migration_number>_research_context_draft.sql` + `migrations.go` 登记（**编号以任务包为准，不得改号**）",
+        "`search_records` 的读（T0906 留下的空位）：按 search id 取回该条记录及其 `selected_refs`",
+        "`POST /search/{searchId}:start-project`：建 planning 项目 + 落 draft，**零科研状态**，Idempotency-Key 生效",
+        "`POST /research-context-drafts/{draftId}:confirm`：经既有状态迁移路径形成 initial state，可追溯到 state commit",
+        "负向用例：匿名被拒、非 maintainer 被拒、`selected_refs` 之外的 ref 被拒、重放返回同一结果且不产生第二份状态",
+        "RESULT：逐条写清「建了哪些行、没建哪些行」的存储断言，以及不确定处"
+      ],
       "acceptance_criteria": [
-        "Agent answer 不自动写 main",
-        "确认后 state 可追踪"
+        "**仪器能说不（先做这一步）**：至少三条新断言各做一次变异（例如让 `:start-project` 顺手建一个 branch、让重放真的建出第二个项目、让 confirm 绕过权限检查），确认**转红**，红的输出留在 RESULT 里。",
+        "**「确认前没有状态」逐条断言存储**：`:start-project` 之后，项目下 `branches` 计 0、`project_states` 计 0、`state_commits` 计 0、`scientific_object_versions` 计 0（真 PostgreSQL 上按表读回），且 `search_records.answer` 里的引用集与 draft 的 ref 集**逐条对得上**。",
+        "**「确认后状态可追溯」**：confirm 之后能由 state commit 找回 initial branch 与 research_question 的对象版本；该版本的 `base_state`/actor 按既有口径写入。",
+        "**Idempotency-Key 两条路由都成立**：同一 key 重放 → 同一 `project_id`/`draft_id`（或同一次确认结果），且存储里**只有一份**；换 key 重放同一 search → 明确拒绝（不是静默建第二份）。",
+        "**引用面不放宽**：不在 `selected_refs` 里的 ref 被拒；`citations <@ selected_refs` 那个 CHECK 仍在（不许为了塞进新数据放宽它）。",
+        "**权限负向 e2e**：匿名 `:start-project` 401/403；非 maintainer `:confirm` 被拒，且与「看不见该 draft」的答复一致。",
+        "**生成物按生成器**：`specs/database/postgres.sql` 由 `scripts/gen_schema_snapshot.py` 重新生成、`internal/persistence/sqlc/**` 由 `scripts/gen_sqlc.sh` 重新生成，`make check-schema-snapshot` 与 `bash tests/integration/check-sqlc-drift.sh` 全绿；三个 `--check` 的输出贴进 RESULT。",
+        "**诚实报告**：不确定处与「今天没地方落」的项（如 `hypotheses`）逐条写清。"
       ],
       "tests": [
         "start project e2e"
@@ -6186,12 +6261,13 @@
         "specs/SPEC_VERSION.json",
         "internal/persistence/**",
         "internal/search/**",
+        "internal/application/**",
+        "cmd/api/searchhttp/**",
+        "cmd/api/main.go",
+        "tests/**",
         "go.mod",
         "go.sum",
-        ".env.example",
-        "cmd/api/**",
-        "apps/web/**",
-        "tests/**"
+        ".env.example"
       ],
       "forbidden_scope": [
         ".git/**",
@@ -6200,8 +6276,18 @@
         "tasks/progress.md"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/14_SEARCH_DISCOVERY.md",
+        "docs/07_RSG_SPEC.md",
+        "docs/31_MASTER_ACCEPTANCE.md",
+        "docs/09_VERSION_CONTROL.md",
+        "docs/43_STATE_MACHINES.md",
+        "specs/api/openapi.yaml",
+        "specs/policies/permissions-matrix.csv",
+        "specs/ui/page-inventory.csv"
+      ],
+      "scope_note": "**迁移编号由任务包在派工时发**（见需求第 1 条）。\n\n**`cmd/api/**` 收窄为 `cmd/api/searchhttp/**` + `cmd/api/main.go`**（2026-09-21）：`cmd/api/` 下有约 45 个域包（auth/protection/release/forks…），一条搜索任务持有整个 `cmd/api/**`，等于可以顺手改鉴权装配与发布出口。查证过挂载点就在 `cmd/api/main.go:388-422` 的 `v1.Handle(...)` + 各域 `Register(v1)`，你要动的是 `searchhttp` 自己的 wiring 加 main.go 里那一处挂载。\n\n**`apps/web/**` 已摘掉**：本任务交付物里**没有一条 UI 需求**（两条路由是 API 契约，`specs/ui/page-inventory.csv` 的 `/search` 行归前端自己的任务）。若你判断非改前端不可，**停下来在 RESULT 里写明**，不要越界。\n\n**`internal/persistence/**` 与 `internal/application/**` 保持不动**是有意为之：这两个目录**是平的**（store 与 service 直接在根下，不分子包），新 store/service 文件（如 `internal/persistence/research_context_draft_store.go`）**无法匹配更窄的 glob**，再收就会让任务书自己不可完成。",
+      "supervisor_scope_narrowing": "**没有大砍，只把 T0906 的面摘出去。** `internal/search/**` 保留（draft 要从检索结果来）；`internal/search/answer/**` 与 `cmd/api/searchhttp/**` 里**答案生成那一段不属于你**——需要改动就报上来，那是 T0906 刚交付、刚过评审的面。\n\n**`specs/api/openapi.yaml` 不在你的范围里，两条路由我已经替你写进契约了**（路径 `:start-project` 与 `:confirm`，含必填 `Idempotency-Key`）。若实现中发现契约与领域口径有出入，**报上来由我改契约**，不要自己动 `specs/`。\n\n`infra/migrations/**` + 两份生成物保留：本任务要加迁移（编号 `00122` 已分配），生成物必须由生成器重算，不能手工编辑。\n\n**（2026-09-21 修订：迁移号不再写死）**初稿写了 `00122`，起草时它看着是空的，但账本显示 T0411 已经持有 `122`。这正是 T1108 那次踩过的同一个坑——**任务书里的号与派工时的号会打架**，而派工时渲染进工人任务包的是 `AllocateMigrationNumber` 发的号。所以本笔改成「以任务包为准」，并把当时的账本快照留在需求第 1 条里当参照。\n\n**第二次修订（2026-09-21，自动安全评审触发）**：评审提「Overly Permissive IAM/RBAC」。采纳其中两条：`cmd/api/**` 收窄到 `searchhttp/**` + `main.go`；`apps/web/**` 摘掉（无 UI 交付物）。**未采纳第三条**（把 `internal/persistence/**`、`internal/application/**` 拆到子包）：这两个目录是平的，没有子包可拆，照办会让新文件的写入面变成空集——这正是「收窄到任务不可完成」的反面教材。收窄的判据是**有没有具名消费者**，不是越小越好。"
     },
     {
       "id": "T1001",
@@ -6573,40 +6659,62 @@
         "T0907"
       ],
       "requirements": [
-        "packages/ui 封装 tokens/components",
-        "StateLabel/Table/Timeline/Diff/Sidebar",
-        "去除不一致自定义样式"
+        "**现状先说清楚，不要重新发现一遍（2026-09-21 复核，逐条可核）**：`packages/ui` 全包只有三个文件——`package.json`、`tsconfig.json`、`src/index.ts` 两行（`export { DevStatus } from \"./DevStatus\";` 与一行类型导出），加一个 `src/DevStatus.tsx`。**任务要的 `StateLabel`/`Table`/`Timeline`/`Diff`/`Sidebar` 一个都不存在**，包内也没有任何 `tokens` 文件。另一方面 `apps/web` 里手写 CSS 有 **9 个文件、4793 行**（`app/globals.css` 502、`app/nav/nav.css` 265、`app/(main)/projects/projects.css` 1774、`app/(main)/assets/assets.css` 472、`app/(main)/explore/explore.css` 206、`app/(main)/notifications/inbox.css` 329、`app/(main)/projects/[id]/activity/activity.css` 319、`app/(main)/projects/[id]/conflicts/conflicts.css` 451、`app/(main)/projects/[id]/pulls/[number]/pull-detail.css` 475）。这一笔要做的是**把重复的形态收进共享层**，不是把 4793 行推倒重写。",
+        "**规格逐字，照抄不要另立**：`docs/41_DESIGN_TOKENS.md:6-12` 是颜色角色全集——`canvas.default / canvas.subtle`、`fg.default / fg.muted`、`border.default / border.muted`、`accent.fg / accent.emphasis`、`success.fg / success.emphasis`、`attention.fg / attention.emphasis`、`danger.fg / danger.emphasis`；`:14` 逐字「**严禁定义 `brandGradient`、`purpleGlow`、`glassBackground` 等 token**」；`:17` 逐字「小/中等，信息工作台风格。Buttons/inputs 约 6px 视觉；card 不使用 24px+ 大圆角」；`:20` 逐字「仅 overlay/menu/dialog；普通 card 主要用 border，不用浮夸 shadow」；`:23` 逐字「正文 14–16px；辅助 12–14px；标题层级克制。ID/hash/code 使用 mono」；`:26` 逐字「4px base grid，常用 4/8/12/16/24/32。列表高密度但点击 target 可访问」。`docs/51_FRONTEND_STANDARD.md:5-6` 逐字「GitHub 风格、中性、高密度、明确边框与状态」「禁止渐变紫、霓虹、玻璃拟态、营销卡片墙、夸张动画」。`specs/ui/routes.yaml:19-23` 的 `visual_guardrails` 逐字：`gradients: forbidden`、`glassmorphism: forbidden`、`default_density: high`、`design_language: github_primer_like`。",
+        "**`packages/ui` 是共享层，`docs/65` 的 workspace 约定已经在仓库里打通**：`apps/web/package.json` 声明 `\"@post/ui\": \"workspace:*\"`，`apps/web/next.config.ts:6` 有 `transpilePackages: [\"@post/ui\"]`。所以新组件放 `packages/ui/src/**` 并从 `src/index.ts` 导出，`apps/web` 直接 `import { ... } from \"@post/ui\"`。**`packages/ui` 的 peerDependencies 已经写着 `@primer/react ^38.0.0` 与 `@primer/octicons-react ^19.0.0`**（`packages/ui/package.json`）——直接用它们，**不要**再引一套 UI 库。`packages/ui` 只有 `typecheck` 一个脚本（`tsc --noEmit`），新代码必须过它。",
+        "**五个组件是任务点名的交付物，逐个说清它替代的是什么（我核过重复形态）**：`StateLabel` 替代散在五处的徽章——`.badge`（`projects.css:94`）、`.conflicts-badge`（`conflicts.css:137`）、`.conflicts-advisory-badge`（`conflicts.css:236`）、`.files-readonly-badge`（`projects.css:569`）、`.files-kind-badge`（`projects.css:735`）；`Table` 是列表/事实表的统一形态（资产的「facts」与 release 的清单都是手写 `<table>`+各自 CSS）；`Timeline` 是活动流的统一形态（`activity/activity.css` 与 `pulls/[number]/pull-detail.css` 各写一套）；`Diff` 是 PR/冲突差异的统一形态（`pull-detail.css` 与 `conflicts.css` 各写一套）；`Sidebar` 是页面右栏/项目 shell 的统一形态（`.project-shell-breadcrumb` `projects.css:138`、`.files-breadcrumb` `projects.css:601`、`.release-detail-breadcrumb` `projects.css:1713`、`.asset-breadcrumb` `assets.css:174` 是同一个形态的四份）。**替换必须是行为等价的**——见验收第 3 条。",
+        "**tokens 也归共享层**：`packages/ui` 里给出**一套**以 `docs/41` 那 14 个角色为名的 token 常量（或 CSS 变量清单，随你判断哪个更符合既有模板），供自定义组件用；`apps/web` 各页不再各写各的裸值。现状是**同一个值在多个文件各写一遍**：`border: 1px solid var(--borderColor-default` 出现 **65 次**、`font-size: 12px` **103 次**、`color: var(--fgColor-muted` **162 次**，而 Primer token 的第二参数（裸 hex fallback）出现 **853 次**（最高频 `#59636e`×162、`#d0d7de`×84、`#1f2328`×55、`#d8dee4`×52、`#0969da`×48、`#f6f8fa`×46、`#ffffff`×41）。**不是要求你把 853 处全改掉**——是把共享层的组件与 token 定下来，并让**核心页面**走它们。",
+        "**视觉回归今天不存在，要把它建起来**（这是本任务的必测）：`tests/web-smoke/visual-smoke.mjs`（299 行）今天只做三件事——① 静态扫**两个** CSS 文件（`:36-38` `const cssFiles = [\"app/nav/nav.css\", \"app/globals.css\"]`）里有没有禁用特效与紫色；② 断言 header 高度 ≤64px、导航字号 ≤14px、每页一个 `#main`、禁用色/`backgroundImage`/`backdropFilter`；③ **截图存 artifact，不与任何基线比较**（`:282-291` 唯一 screenshot 点，无 fail 条件）。`shots/` 里今天有两张 PNG（`desktop-home.png`、`mobile-drawer.png`，Sep 13）但不是基线。**要交付的是基线比较**：把核心页在固定视口下的截图与**签入仓库的基线图**比对，差异像素比例超过一个**显式写下的容差**即红。",
+        "**视觉回归要能说不（先做这一步）**：基线比较必须证明它**能失败**——用一个只改一处视觉的变异（例如把某个核心页的 `border-radius` 从 6px 改成 14px，或把某个 token 换成一个明显不同的颜色）让它转红，把红的那次输出贴进 RESULT，再改回来贴绿。同理，**基线在未改动的树上必须零差异**（同一次运行的两次连续执行要么都绿、要么说明为什么不是零差异），否则它不是回归测试而是抛硬币。",
+        "**不要扩到全站**：`docs/42_PAGE_SPECS.md` 列的九个核心页面是 Project Overview、Research Page、Scientific Object Detail、PR、Release、Asset Page、Knowledge Network Page、Search Answer、Research Profile（`:3`/`:6`/`:9`/`:12`/`:15`/`:18`/`:21`/`:24`/`:27`）。其中 `/knowledge/{id}` **在 `apps/web` 里还没有路由**（`find apps/web/app -type d -name knowledge` 为空）——**照实报，不要为它造一条路由**。基线覆盖**存在的那些**核心页，并在 RESULT 里逐页点名哪些进了基线、哪些因为还没有路由而不在。",
+        "**边界**：不新增依赖到根 `pnpm-lock.yaml`（视觉回归需要的新依赖放进 `tests/web-smoke/` 自己的 npm 项目——那里已经有自己的 `package.json` 与 `package-lock.json`，`tests/web-smoke/run.sh:5-6` 逐字说明了为什么这样放）；不改 `specs/**`（`specs/ui/**` 是 Supervisor 的）；不改 `docs/**`、`tasks/**`；不碰 Go 代码（`internal/**`、`cmd/**` 不在范围内）；不改 `infra/**`。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "`packages/ui` 里的 `StateLabel`/`Table`/`Timeline`/`Diff`/`Sidebar` 五个组件 + 一套以 `docs/41` 角色为名的 token，全部从 `src/index.ts` 导出",
+        "核心页面改用共享组件与 token 的改动（重复形态收敛），且视觉效果不变",
+        "`tests/web-smoke/` 里的基线截图比对，含签入的基线图与显式容差",
+        "先红后绿的证据：变异一次视觉 → 比对转红；还原 → 转绿",
+        "RESULT 里逐页点名基线覆盖了哪些核心页、哪些因缺路由不在"
+      ],
       "acceptance_criteria": [
-        "全站无 gradient/glass",
-        "visual regression 核心页"
+        "**五个组件真的在共享层，而且真的被用**：`packages/ui/src/index.ts` 导出这五个组件；`grep` 能证明 `apps/web` 的核心页面**确实 import 了它们**（不是导出完就放着）。`pnpm --filter @post/ui typecheck` 与 `pnpm --filter @post/web typecheck` 全绿。",
+        "**全站无 gradient / glass**（任务原文）：静态检查覆盖**全部** `apps/web/app/**/*.css`（不是今天那两个文件），无 `linear-gradient`/`radial-gradient`/`conic-gradient`/`backdrop-filter`/`blur(`；无 `docs/41:14` 点名的三类禁用 token；`box-shadow` 只出现在 overlay（今天唯一的非 overlay 是 `assets.css:426` 的 inset 高亮，属装饰性边而非阴影——若它被判为违规，改掉并在 RESULT 里说明）",
+        "**视觉零回归**：改了共享层与页面之后，核心页的基线比对在容差内通过。**并且**同一次运行在未改动树上是一致结果（见需求第 7 条）。",
+        "**视觉回归能失败**：RESULT 里给出变异后转红的实测输出（贴原文），及还原后的绿",
+        "**圆角与密度合 `docs/41`**：没有任何 `border-radius` ≥ 24px；`pull-detail.css` 今天用 10px 而其余文件用 6px（`:49`/`:132`/`:298`/`:329`/`:461` 五处）——统一到 `docs/41:17` 的口径，并在 RESULT 里说明你选了哪个值、为什么",
+        "**内联样式收敛**：`style={{` 的 12 处已知点（`(main)/status-panel.tsx:33`/`:42`、`(auth)/login/login-card.tsx:88`/`:96`、`(main)/users/[id]/profile-card.tsx:162`/`:193`）要么改走类/组件，要么在 RESULT 里逐条说明为什么必须留在行内。**特别注意 `login-card.tsx:88` 的 `fontSize: 22` 与其余页的 20 不一致**——这是「不一致自定义样式」的字面例子，给出你的取舍。",
+        "**没有把「重写」当交付**：改动的 CSS 行数与页数要在 RESULT 里报出来；如果某个页面没被收敛，说明理由，不要默默跳过",
+        "**RESULT 里写明**：五个组件各自的 props 形状、token 名清单、基线覆盖的页面清单与容差数值、以及你**没有**做的部分与原因"
       ],
       "tests": [
         "visual regression"
       ],
       "allowed_scope": [
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
+        "packages/ui/**",
         "apps/web/**",
-        "internal/**",
-        "go.mod",
-        "go.sum",
-        ".env.example",
-        "cmd/**",
-        "infra/**",
-        "tests/**",
-        "ops/**"
+        "tests/**"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        "infra/**",
+        "internal/**",
+        "cmd/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/41_DESIGN_TOKENS.md",
+        "docs/51_FRONTEND_STANDARD.md",
+        "docs/42_PAGE_SPECS.md",
+        "docs/06_UI_UX_SPEC.md",
+        "specs/ui/routes.yaml",
+        "specs/ui/page-inventory.csv"
+      ],
+      "scope_note": "范围按「谁会被这一改碰到」划：共享层（`packages/ui/**`）、消费方（`apps/web/**`）、以及新的回归设施（`tests/**`，基线图与比对脚本都放 `tests/web-smoke/`）。**`specs/**` 一律不在范围内**——`specs/ui/routes.yaml` 与 `specs/ui/page-inventory.csv` 是只读规格（Supervisor 的），本任务不改它们；`specs/database/postgres.sql` 与 `specs/SPEC_VERSION.json` 这两件派生件本来也不需要，去掉它们让本任务的补丁**不带指纹**，于是它能穿过后面的落地窗口，不被 main 的移动顶掉。**`internal/**`/`cmd/**` 不在范围内**：这是纯前端任务，任何需要改 Go 才能完成的验收都应当先报回来，不要自行扩范围。",
+      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄）——从 phase 级默认上限砍到三条路径。** 原上限含 `specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`internal/**`、`cmd/**`、`infra/**`、`ops/**`、`go.mod`、`go.sum`、`.env.example`，这些与本任务无关，且 `specs/**` 会让补丁带上指纹（见 scope_note）。\n\n**「visual regression」这个词我在本任务里定死为「与签入基线的截图比对」**，不是「截图存 artifact」——后者今天已经有了（`tests/web-smoke/visual-smoke.mjs:282-291`），它不是回归测试，因为它没有 fail 条件。这一条是本次收窄里唯一新增的口径，理由写在需求第 6/7 条。\n\n**不给 `packages/ui` 加「组件库大改」的授权**：五个组件按任务原文点名，不加第六个；token 按 `docs/41` 的 14 个角色，不发明新角色（`:14` 逐字禁的就是发明 token）。"
     },
     {
       "id": "T1102",
@@ -6666,40 +6774,64 @@
         "T1101"
       ],
       "requirements": [
-        "impact preview UI",
-        "double confirmation for visibility expansion",
-        "rights blockers",
-        "private dependency attestation display"
+        "**现状定性（2026-09-21 复核，逐条可核）：后端齐全，前端一个调用都没有。** 四条路由已经挂上并已被真服务 e2e 走过——`cmd/api/assetshttp/wiring.go:97-98`（`POST /api/v1/projects/{projectId}/assets:publish-preview`、`…/assets:publish`）与 `cmd/api/knowledgehttp/wiring.go:134-135`（`…/knowledge:publish-preview`、`…/knowledge:publish`）；权限门是 `internal/application/assetpublish/command.go:384 requirePublish`（`:402 Action: authz.ActionPublishPrivateToPublic`）；影响预览是 `internal/assets/preview.go:575 func Preview(...) (ImpactPreview, error)`，它在 publish 事务里被**服务端重跑**（`cmd/api/main.go:856` 逐字 `the server-side re-run of the impact preview`）。而 `apps/web` 里 `grep publish-preview` **零命中**——没有页面、没有按钮、没有调用。所以本任务是**接一条已经存在的链**，不是造后端。",
+        "**规格逐字，照抄，别换措辞**：`docs/06_UI_UX_SPEC.md:46-48` 第五节标题就叫 Publish/Visibility UX，正文逐字「**任何 private→public 必须独立确认页，列出：将公开的对象、metadata、blob access、依赖、private evidence/attestation、rights/license。禁止一个 generic “Are you sure?” 弹窗替代影响清单。**」；`docs/12_PERMISSIONS_RIGHTS_POLICY.md:17` 逐字「任何 private→public、restricted→open、named access→public 都要求有权限的人显式确认，并产生 audit/event。Agent/MCP 不得自动执行此类扩大操作。」；`docs/23_SECURITY_PRIVACY.md:17` 逐字「这是最高风险 operation。必须：human explicit action、impact preview、rights validation、no hidden private dependency leak、audit event、optional org policy approvals。Agent token 默认无 `visibility:publish` scope。」",
+        "**「独立确认页」是字面意思**：一个**页面**（有 URL、可回退、可直接访问），不是 `window.confirm`，不是弹窗，不是折叠在列表里的一个按钮。页面的主要面积就是那六类清单；确认动作是页面上的一个**明确的**动作，并且它提交的是**服务器给出的那一份预览**所对应的发布。任务的验收原文「不能一键 generic modal 发布敏感 state」指的就是这条。",
+        "**清单里的六类，逐类说明今天在数据里对应什么（我核过 `internal/assets/preview.go`，别自己猜）**：`objects`、`metadata`、`blobs`、`refs`、`private_dependencies` 五张清单与 `blockers` 都在 `ImpactPreview` 里（`:240` 起；`PrivateDependency` 在 `:490`）。映射到 `docs/06` 那六项是：将公开的对象→`objects`；metadata→`metadata`；blob access→`blobs`；依赖→`refs` + `private_dependencies`；rights/license→**来自版本自己的权利声明**（`apps/web/lib/rights.ts` 已有解析与渲染，`apps/web/app/components/rights-panel.tsx` 已有面板，**复用它而不是重写**）；**private evidence/attestation→今天平台上不存在这个功能**（见下一条）。",
+        "**`private evidence/attestation` 这一项要诚实处理**：attestation 在 V1 里**没有实现**——`specs/api/openapi.yaml` 与 `specs/mcp/tools.json` 里 `attest` 零命中；`internal/application/researchprofile/doc.go:84-88` 逐字写明了为什么不实现（规格没有定义谁能签发、披露级别词汇、以及计数从哪一刻起算泄漏）。唯一叫 attestation 的东西是 `evidence_type` 枚举值 `external_attestation`。**所以不要在清单里编一栏空数据**，也不要写「无 attestation」这种会被读成「检查过了没有」的话。照实渲染成**「本平台当前没有可公开的 attestation 功能」**这一类**说明状态**（并且要有一条测试钉住这一栏不是假的空列表）。",
+        "**阻断项必须是硬的**：`ImpactPreview` 的 `blockers` 非空时，页面**不能提供一个能成功的确认动作**——不是把按钮变灰然后不管，而是让确认路径本身走不通（后端本来也会拒：`internal/application/assetpublish/errors.go:113 CodePublishBlocked = \"ASSET_PUBLISH_BLOCKED\"` 与 `:821` 那个「状态变了就重跑 preview 再拒」的测试）。**同时**要处理「打开页面时没有阻断、点确认时状态已经变了」这一档：那一刻的拒绝要**在页面上说清楚是哪一类阻断项出现了**，而不是一句通用的失败提示。",
+        "**Agent 不许走这条路**：`docs/12:17` 逐字「Agent/MCP 不得自动执行此类扩大操作」。今天由 `internal/application/assetpublish/command.go:255 requireAgent` 在服务端兜底（agent 一律拒）。页面上**不提供**任何 agent 自动化的入口或承诺（不要写「Agent 可以代办」这类文案），并且要有一条测试证明匿名/低权角色在这一页上拿不到可用的确认动作。",
+        "**权限语义照抄现状，不要自创**：`specs/policies/permissions-matrix.csv:12` 那一行逐字 `publish_private_to_public,deny,deny,deny,deny,conditional,allow,deny`——**实际生效的是只有 owner**（maintainer 的 `conditional` 在 `internal/authz/verdict.go:35` 是 fail-closed 拒）。页面对 maintainer 的呈现要与这条一致：**可以给「这是 owner 才能做的操作」这类说明**，但**不许**在客户端自己实现一遍权限判定来放宽或收紧它——服务端是边界（`cmd/api/assetshttp/publish.go:116` 逐字 `NOT gated here — the command authorizes the actor against the permission`）。",
+        "**可见性变更那一格今天本来就拒绝，别顺手开**：`apps/web/app/(main)/projects/[id]/settings/page.tsx:244-261` 是一个 `disabled` 的 `<select>` 加一句说明，`cmd/api/projectshttp/projects_settings_handlers.go:92-94` 逐字写着 `A visibility field is refused with VISIBILITY_CHANGE_NOT_SUPPORTED: the setting is preview-only until the publishing guard lands (T0109 requirement), and an explicit refusal beats a silent drop.`。**本任务不改这个行为**——这一笔做的是「发布（publish）」这一条路径的界面，不是「改项目 visibility」。若你判断这两件事必须一起做，**停下来报**。",
+        "**e2e 要真的经过页面与真服务**：既有挂具已经就位，**复用它，不要另造一套**——`tests/e2e-release/run.sh` 起真 harness（`tests/e2e-release/harness/main.go`，真 PostgreSQL + 真 handler，`run.sh:5-9` 逐字 `Nothing is mocked.`），而 `release-e2e.mjs:965-970` 已经在真 Chromium 里走过 `POST …/assets:publish`。新用例要**在浏览器里**走完：打开确认页 → 看到六类清单 → 确认 → 发布成功；再加负向：阻断项存在时确认走不通、非 owner 拿不到确认动作、状态变化时得到**可读的**拒绝。",
+        "**不做 / 边界**：不改 Go 代码（`internal/**`、`cmd/**` 不在范围内——后端已经齐全，若你发现缺一条路由或一个字段，**报回来**，不要自己加）；不改 `specs/**`（契约与权限矩阵都是 Supervisor 的）；不改 `docs/**`、`tasks/**`；不实现 attestation 功能（那是另一个产品决策，见需求第 5 条）；不做知识（knowledge）发布的界面**除非**你判断它与资产发布是同一页面的同一形态——若是，做，并在 RESULT 里说明；若不是，只做资产并在 RESULT 里说明为什么。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "`apps/web` 里的独立发布确认页（有 URL、可回退），渲染 `ImpactPreview` 的六类清单与 rights 面板",
+        "阻断项的硬处理：有阻断则确认走不通；状态变化被拒时页面说清是哪一类",
+        "复用的 rights 渲染与既有的发布路由调用（`…:publish-preview` 与 `…:publish`）",
+        "`tests/e2e-release/` 里的浏览器用例：成功路径 + 三条负向",
+        "RESULT 里点名 attestation 那一栏是怎么渲染的、以及它为什么不是假的空列表"
+      ],
       "acceptance_criteria": [
-        "不能一键 generic modal 发布敏感 state"
+        "**不能一键 generic modal 发布敏感 state**（任务原文）：确认动作落在一个**独立页面**上，页面上有那六类清单；`grep` 能证明没有用 `window.confirm`/`alert`/通用 `Are you sure?` 文案替代清单——测试里断言**确认页的正文里出现了具体对象名/依赖名**，而不只是数量",
+        "**六类逐类点名**（`docs/06:48`）：对象、metadata、blob access、依赖、rights/license、private evidence/attestation——每一类在页面上都有一个**可被测试定位**的区块；attestation 那一栏按需求第 5 条诚实地渲染为「当前没有这个功能」的状态，并有一条测试钉住它不是空列表冒充",
+        "**阻断是硬的**：构造一个带私有依赖的候选（`internal/assets/preview.go` 有专门的阻断类），确认动作走不通；并且当发布事务里重跑 preview 发现状态已变时，页面呈现**可读的**拒绝（说出是哪一类阻断），不是通用失败",
+        "**Agent 与低权角色拿不到确认动作**：匿名与 maintainer（按 fail-closed 实际被拒的那一档）在这一页上都没有可用的确认路径；断言是**走接口**得到的，不是只看按钮的 disabled 属性",
+        "**不自行实现权限判定**：页面的显示与否走服务端答案或既有客户端角色门（`apps/web/lib/releases.ts:224 mayCreateRelease` 那一档的既有做法），没有在客户端新写一遍矩阵",
+        "**e2e 真的经过页面与真服务**：用例在真 Chromium 里打开真页面、打真 API（复用 `tests/e2e-release`），不是 mock 的 JSON；并且这条 e2e **能失败**——在 RESULT 里说明你把哪里改坏时它会红（例如把确认动作接到 preview 之外的路径上）",
+        "**没有顺手改可见性那格**：`settings/page.tsx` 的 `disabled` 控件与 `VISIBILITY_CHANGE_NOT_SUPPORTED` 行为不变；`tests/e2e-settings/settings-e2e.mjs:309-317` 那两条既有断言仍绿",
+        "**RESULT 里写明**：页面的 URL 形状、六类清单各自的数据来源（哪个字段/哪个接口）、attestation 那一栏的渲染与理由、你对 knowledge 发布做没做及为什么、以及所有你不知道该怎么判而按 fail-closed 处理的地方"
       ],
       "tests": [
         "publish ux e2e"
       ],
       "allowed_scope": [
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
         "apps/web/**",
-        "internal/**",
-        "go.mod",
-        "go.sum",
-        ".env.example",
-        "cmd/**",
-        "infra/**",
-        "tests/**",
-        "ops/**"
+        "tests/**"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        "infra/**",
+        "internal/**",
+        "cmd/**",
+        "packages/ui/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/06_UI_UX_SPEC.md",
+        "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
+        "docs/23_SECURITY_PRIVACY.md",
+        "docs/42_PAGE_SPECS.md",
+        "docs/51_FRONTEND_STANDARD.md",
+        "specs/policies/permissions-matrix.csv"
+      ],
+      "scope_note": "范围只有两条：界面（`apps/web/**`）与它自己的测试（`tests/**`，浏览器用例复用 `tests/e2e-release/`）。**后端一行都不改**——四条发布路由、影响预览、权限门、阻断码都已经在树上并有测试；本任务是把它们接上一个界面。这条判断是收窄的关键：把 `internal/**` 与 `cmd/**` 拿掉之后，「后端不齐」这个发现只能变成**报回来**，不能变成顺手改——而顺手改后端正是这种「接线任务」最容易失控的地方。`packages/ui/**` 也不在范围内：复用 `apps/web/app/components/rights-panel.tsx` 与既有类，若某个形态确实该沉进共享层，报回来给 T1101 那一笔，不要在这里动。",
+      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄）——把 phase 级默认上限砍成「界面 + 测试」两条。** 原上限含 `internal/**`、`cmd/**`、`infra/**`、`ops/**`、`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`go.mod`、`go.sum`、`.env.example`，与本任务无关。\n\n**为什么敢砍掉 `internal/**`**：我逐条核过发布链已经闭合——路由（`assetshttp/wiring.go:97-98`）、权限（`assetpublish/command.go:384`）、预览（`assets/preview.go:575`，且在事务内重跑）、阻断码（`errors.go:113`）、真服务 e2e（`tests/e2e-release`）全在。**若工人发现这个判断错了（缺路由、缺字段、缺阻断类），正确动作是停下来报，不是自己补**——这条写进了需求第 11 条。\n\n**`private evidence/attestation` 这一栏我在本收窄里定了口径**：不许编数据、不许写会被读成「检查过了没有」的话，只能诚实渲染成「本平台当前没有这个功能」，并要求一条测试钉住。理由：`internal/application/researchprofile/doc.go:84-88` 已经逐字说明它为什么不存在（规格缺三个定义），在这个前提上把一个空列表画成清单项，是拿界面冒充功能。"
     },
     {
       "id": "T1104",
@@ -6712,42 +6844,72 @@
         "T1102"
       ],
       "requirements": [
-        "axe checks",
-        "keyboard",
-        "labels/aria",
-        "contrast",
-        "reduced motion"
+        "**先看清楚已有的那台仪器，不要重造（2026-09-21 逐条核过）**：`tests/web-smoke/a11y-smoke.mjs` 不是玩具——它用 axe-core 4.10.3 扫 `:63-67` 那五行（`/`@1280、`/`@375、`/projects`、`/search?q=catalyst`、`/login`），**两趟**：WCAG 标签趟（`[\"wcag2a\",\"wcag2aa\",\"wcag21a\",\"wcag21aa\",\"wcag22aa\"]`）与 **best-practice 趟**（`:37-39` 逐字写着这趟是抓 WCAG 标签看不见的结构性回归——`landmark-no-duplicate-main`、`landmark-unique`、`heading-order`、`page-has-heading-one`，并且「它必须能够红」——T0107 返工时真的红过：`/` 上两个 `<main>`）。**每一趟都断言零违规**。再加一段真 Chromium 的键盘走查（`:250-257` 逐字断言搜索表单能纯键盘提交到 `/search?q=catalyst`、导航链接回车即达）。**这台仪器的问题是它没有门，不是它太弱。**",
+        "**真正缺的门（我核过）**：`tests/web-smoke/run.sh` 会跑它（末尾「visual smoke / a11y smoke」两段），但 `.github/workflows/ci.yml` 里 **7 个 job（spec-validation、task-state、go、web、acceptance、python、migration-integration）没有一个装浏览器**，`web` job 只做 typecheck/lint/unit/build；`Makefile` 里也**没有** web-smoke/a11y 目标（`grep -n 'web-smoke\\|a11y' Makefile` 零命中）。于是 `tasks/tests.json` 里那条 `a11y suite` 今天**没有任何东西在跑它**。本任务的头一件事就是把它接进门：**一条 `make` 目标（归你）+ 一段交给我的 CI 片段**（接线那一半归我，理由见下面那条需求），并且**报出这个 step 的墙钟代价**（要装 Chromium 与构建 Next，不是几秒钟的事）。",
+        "**规格逐字，照抄**：`docs/28_ACCESSIBILITY_I18N.md:5` 逐字「目标 WCAG 2.2 AA。键盘操作、focus ring、screen reader label、aria-live、对比度、skip links。Graph 视图提供结构化 outline/list；**状态不仅靠颜色**。」；`:9` 逐字「尊重 `prefers-reduced-motion`。不做无意义 motion；数据加载 skeleton/spinner 简洁。」",
+        "**覆盖面：现在扫 4 条真实路由，站上有 26 条**（`find apps/web/app -name page.tsx` 逐条数过）。要扩到 `docs/42_PAGE_SPECS.md` 那九个核心页面里**存在**的那些：Project Overview `/projects/[id]`、Research Page `/projects/[id]/research`、PR `/projects/[id]/pulls/[number]`、Release `/projects/[id]/releases/[releaseId]`、Asset Page `/assets/[pid]/[version]`、Search Answer `/search`、Research Profile `/users/[id]`，加上已扫的 `/`、`/projects`、`/login`。**`/knowledge/{id}` 在 `apps/web` 里没有路由**（Knowledge Network Page）——**照实报缺路由，不要为它造一条**。Scientific Object Detail 是否就是 `/assets/[pid]/[version]`，你去核，核完在 RESULT 里说明。",
+        "**扩路由时最容易骗自己的地方是「服务是关的」**：`run.sh:11-13` 逐字说 smoke 页在服务没起时也渲染（「the smoke pages render with the services \"down\"」），所以 `next start` 起来的动态路由扫到的是**空壳/错误态**，不是核心页面的真实内容。**不许把空壳通过当成核心页面 AA 通过。** 两条路选一条并说明理由：①动态路由走**真栈**（`tests/e2e-release/harness/main.go` 那套：真 PostgreSQL + 真 handler，`run.sh:5-9` 逐字「Nothing is mocked.」）；②明确在输出里标注每条路由是**「有数据」还是「服务关」**扫的，并且**核心页面的判定只取有数据那一档**。RESULT 里要有一张逐路由的表：路由 / 扫描态 / 两个标签趟的违规数。",
+        "**AC 里那句「无 serious/critical」是地板，不是天花板，不许拿它当放宽的台阶**。既有断言是**零违规**，它**原样留着**。新加进来的路由如果带出违规，**修掉**，不是加过滤、不是按 impact 放行、不是把它挪进一个「已知问题」白名单。**我核过的两个真实缺口，逐条要落实**：\n  - `prefers-reduced-motion` 在 `apps/web` 与 `packages/ui` 里**零命中**（`grep -rn` 实测）。站上的 motion 我核过：`apps/web/app/**/*.css` 里 `transition`/`animation`/`@keyframes` **零命中**，唯一会动的是 `@primer/react` 的 `Spinner`（十几处，例如 `milestones/page.tsx:189`、`releases/page.tsx:158`、`pulls/page.tsx:72`、`projects/project-directory.tsx:60`）。所以**不要假装在防一个不存在的东西**：把 motion 的来源逐条列出来（CSS、库组件、`scroll-behavior`、SVG/JS 驱动），能加 `@media (prefers-reduced-motion: reduce)` 的地方加上（含 T1101 刚立的共享层，让**新引入**的动效默认被覆盖），若某处确实无动效可减，**逐字写出「此处无动效」并给出你用的命令**。\n  - `aria-live` 在 `apps/web` 里**零命中**，而 `docs/28:5` 点名要它。加载与提交的**状态播报**要有个去处：`Spinner` 十几处里 `auth-status.tsx:54` 的 `<Spinner size=\"small\" />` **连 aria-label 都没有**；失败/成功提示是否被屏幕阅读器读到，你去逐条核并给出结论。**不要为了凑一条 `aria-live` 而到处撒**——每一处都要能说出「它播报的是什么事件」。",
+        "**键盘走查要留一份人能照着做的文档**（验收第 2 条逐字「手动键盘 smoke 文档」）。**它写在 `tests/web-smoke/` 下**（例如 `keyboard-checklist.md`）——`docs/**` 是 Supervisor 的只读区，你写不了；要进 `docs/` 由我来搬。文档要能被人**照着复跑**：起点 URL、每一步按什么键、期望看见什么（焦点环在哪个元素上、跳转落在哪条路由），并且与自动走查那条**分清**：自动走查证明的只是它断言的那几件事（`a11y-smoke.mjs` 头部 `:10-16` 逐字列了它证明什么），文档要把它**没有**自动化的部分写清楚。",
+        "**`<html lang=\"en\">` 不要动**：`apps/web/app/layout.tsx:15` 是硬编码的，它是 WCAG 3.1.1 的问题，但它属于 **T1105（I18N 基线）** 的面——那一笔要做 locale 路由与语言偏好，`lang` 必须跟着它一起变成动态的。本任务**照实记录**这一条（在 RESULT 里点名它、给出文件与行），**不改**，否则两笔任务会改同一行。",
+        "**skip link 的形状照抄既有的**：`apps/web/app/(main)/layout.tsx:16-18` 有一个跳转到 `#main` 的 skip link，样式在 `globals.css:286-303`，并且 `:20` 的注释逐字说明了 `tabIndex={-1}` 是为了让 skip link 真的能把焦点落到 landmark 上。`(auth)` 分组**没有**这个（`grep -rn skip apps/web/app/\\(auth\\)/` 零命中）——登录页恰恰是最该有的那一页。补的时候照既有形状，别另立一套样式。",
+        "**CI 接线归我，你不要动 `.github/workflows/`**（2026-09-21 实测后改的口径）。原因是一个真实的机关：`internal/devorchestrator/gate_spec_test.go:17-58` 把 `specs/orchestrator/gates.json` 与 `.github/workflows/ci.yml` **逐步逐 env 对齐**，`:31` 甚至把 job 数写死成 7（`t.Fatalf(\"ci.yml declares %d jobs, want 7\", len(ci))`），`:58` 要求 `required_jobs` 等于 ci.yml 的全部 job。而 `specs/orchestrator/gates.json` 是 **Supervisor 的**（§8.1 的只读区），你改不了——也就是说，你往 ci.yml 里加一个 job 或一个 step，同步单测立刻红，而修它的那一半在我手里。**所以：套件跑通 + 一条 `make` 目标（归你），CI 的那一段由我落**（同一笔提交里同时改 ci.yml 与 gates.json）。你要交的是：①从仓库根一条命令能跑起这个套件；②**给我可以直接粘的 YAML 片段**（step 名、`run`、需要的 `env`、以及它挂在哪个既有 job 上最合适）；③这个 step 的**墙钟代价**（装 Chromium 与构建 Next 各多久），因为 G2 每次都要跑它。",
+        "**不做 / 边界**：不加运行时依赖到 `pnpm-lock.yaml`（`tests/web-smoke/` 有自己的 `package.json` 与 `package-lock.json`，新工具放那里）；不改 `specs/**`、`docs/**`、`tasks/**`、`internal/**`、`cmd/**`、`infra/**`、`ops/**`；不做 i18n（T1105 的面）；不做视觉重设计（T1101 的面）。**违反项里如果必须在产品代码里改 Go 才能修，停下来报**。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "a11y 套件接进门：`make` 目标 + 可直接粘的 CI 片段（含 step 名/run/env 与墙钟代价）",
+        "覆盖核心页面的 axe 扫描（WCAG 趟 + best-practice 趟，零违规），逐路由标注扫描态",
+        "`prefers-reduced-motion` 的处理（含共享层的默认守卫）与 motion 来源清单",
+        "`aria-live`/状态播报的落实（含 `auth-status.tsx:54` 那个无标签 Spinner）",
+        "`(auth)` 分组的 skip link（照既有形状）",
+        "`tests/web-smoke/keyboard-checklist.md`：人能照着复跑的手动键盘走查文档",
+        "RESULT 里的逐路由表（路由/扫描态/两趟违规数）与逐条缺口结论"
+      ],
       "acceptance_criteria": [
-        "核心页面 automated a11y 无 serious/critical",
-        "手动键盘 smoke 文档"
+        "**核心页面 automated a11y 无 serious/critical**（任务原文）：每个被扫的核心页面在两个标签趟里都是**零违规**；并且**这条门能失败**——RESULT 里给出一次实际转红的证据（例如把某个 landmark 弄重复、或摘掉一个 label），再给出还原后的绿",
+        "**手动键盘 smoke 文档**（任务原文）：`tests/web-smoke/` 下的文档能被人照着走完，写明起点、按键、期望焦点；并且它诚实地区分「自动走查证过的」与「只有人能证的」",
+        "**套件真的能跑**：从仓库根一条 `make` 目标就能跑完整个 a11y 套件（给出目标名与实测输出）。RESULT 里给出**可直接粘进 ci.yml 的 YAML 片段**（step 名、`run`、`env`、挂哪个既有 job），以及**只在 CI 里**会发生的那一类失败（缺系统库、端口占用）你是怎么处理的——`.github/**` 的 diff 为空，接线由我在同一笔提交里落",
+        "**覆盖面可核**：RESULT 的逐路由表给出每条路由的扫描态（有数据 / 服务关）与两趟违规数；扫到的**有数据**核心页面数量 ≥ 7（`docs/42` 九页里除 `/knowledge/{id}` 外都存在）；缺路由的照实报",
+        "**零违规不是靠过滤得到的**：套件里没有 impact 白名单、没有 `disableRules`、没有把新路由加进扫描表的同时排除其违规；`grep` 能证明没有任何一条 `axe` 调用被削弱",
+        "**motion 与 aria-live 两条缺口有结论**：`prefers-reduced-motion` 的命中点与理由逐条列出（含共享层）；`aria-live` 加在哪、播报什么事件逐条列出；`auth-status.tsx:54` 那个无标签 Spinner 有了说法",
+        "**没碰不属于自己的面**：`apps/web/app/layout.tsx:15` 的 `lang` 未改（只在 RESULT 里点名）；`settings/page.tsx` 的可见性控件未改；i18n 未做；`specs/**` 与 `docs/**` 的 diff 为空",
+        "**没有碰 CI 定义**：`.github/**` 的 diff 为空（`git diff --stat` 可证），既有的 7 个 job 一个字节都没变——接线归我，理由见需求第 10 条",
+        "**RESULT 里写明**：每一条「我判断不了所以按最严处理」的地方、以及你**没有**覆盖的路由与原因"
       ],
       "tests": [
         "a11y suite"
       ],
       "allowed_scope": [
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
+        "packages/ui/**",
         "apps/web/**",
-        "internal/**",
-        "go.mod",
-        "go.sum",
-        ".env.example",
-        "cmd/**",
-        "infra/**",
         "tests/**",
-        "ops/**"
+        "Makefile"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        "infra/**",
+        "internal/**",
+        "cmd/**",
+        "ops/**",
+        "pnpm-lock.yaml",
+        "package.json",
+        ".github/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/28_ACCESSIBILITY_I18N.md",
+        "docs/42_PAGE_SPECS.md",
+        "docs/51_FRONTEND_STANDARD.md",
+        "docs/41_DESIGN_TOKENS.md",
+        "docs/06_UI_UX_SPEC.md",
+        "specs/ui/routes.yaml"
+      ],
+      "scope_note": "范围按「无障碍这件事会碰到谁」划：共享组件（`packages/ui/**`——T1101 刚把五个组件与 token 立在那里，focus ring / reduced motion / label 的正确形态属于它们）、界面（`apps/web/**`）、套件与文档（`tests/**`）、以及接门要动的那一处（`Makefile`——`.github/**` 不在范围内，见下）。**`specs/**` 一律不在范围内**：`specs/orchestrator/gates.json` 的 G3 job 定义是我挂的，`specs/ui/**` 是只读规格。**`docs/**` 不在范围内**——所以那份手动键盘文档落在 `tests/web-smoke/` 下，要进 `docs/` 由我搬。**`pnpm-lock.yaml` 与根 `package.json` 明确排除**：`tests/web-smoke/` 有自己的 npm 项目与锁文件（`run.sh:4-6` 逐字说明了为什么这样放——不动仓库的 pnpm-lock），新工具放那里。\n\n**（2026-09-21 补，实测后收窄）`.github/**` 移出范围。** `specs/orchestrator/gates.json` 与 `.github/workflows/ci.yml` 被 `internal/devorchestrator/gate_spec_test.go` 逐步对齐，且那份 gate spec 是 Supervisor 的只读区——工人改 ci.yml 就会红同步单测，而能修的那一半不在工人手里。CI 接线由我在同一笔提交里落。",
+      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄）——从 phase 级默认上限砍到五条，并把 i18n 的面明确划走。** 原上限含 `specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、整个 `internal/**`、`cmd/**`、`infra/**`、`ops/**`、`go.mod`、`go.sum`、`.env.example`，与本任务无关；`specs/**` 摘掉还顺带消掉「补丁带指纹、main 一动就 apply 不上」这个真实故障模式。\n\n**这一笔里我定死的三件事**：①**「核心页面」是可核的清单**，不是形容词——`docs/42` 九页里存在的那些，逐路由进 RESULT 的表；②**「服务关」扫出来的壳不算核心页面通过**——这条防的是「把 26 条路由全绿当成绩」这种最省事的骗法；③**「无 serious/critical」是地板不是天花板**——`tasks/tasks.json` 里这条 AC 的措辞比既有断言（零违规）松，我不接受用 AC 的措辞去覆盖既有断言，理由写进需求第 6 条。\n\n**`<html lang>` 划给 T1105**：它是 WCAG 3.1.1 的问题，但修它必须与 locale 路由/语言偏好一起做，否则 T1105 会再改一次同一行。本任务只记录、不改。\n\n**`(auth)` 缺 skip link 是收窄时新发现的**（`grep -rn skip apps/web/app/(auth)/` 零命中），写进需求第 9 条——登录页是最该有它的一页。"
     },
     {
       "id": "T1105",
@@ -6756,44 +6918,77 @@
       "title": "I18N 基线",
       "v1_required": true,
       "dependencies": [
-        "T1101"
+        "T1101",
+        "T1104"
       ],
       "requirements": [
-        "UI strings resource files",
-        "zh-CN/en",
-        "locale routes/preference",
-        "domain enums stable codes"
+        "**现状（2026-09-21 逐条实测）：这一笔是从零开始，而且起点比看上去干净。** 全仓 `grep -rniE \"i18n|locale|intl|translat\"` 在 `apps/web` 与 `packages/ui` 里**零命中基础设施**——没有消息目录、没有 `Intl` 使用、没有语言偏好。仅有的两处偶遇是 `files/page.tsx:308` 的 `localeCompare`（排序比较器，不是本地化）与 `users/[id]/profile-card.tsx:155` 的 `new Date(...).toLocaleDateString()`（**无参调用，输出随运行环境的默认 locale 变——这条要认真处理，见需求第 6 条**）。",
+        "**硬编码的中文只有一处，别把它漏掉也别虚报**：`grep -rnP '[\\x{4e00}-\\x{9fff}]' apps/web --include='*.tsx' --include='*.ts'` 实测 **17 行**，逐行看过——**16 行是注释**（`docs/09 §7` 之类的引用、`仅建议` 这类设计说明），**唯一一处渲染出来的字符串**是 `apps/web/app/(main)/projects/[id]/conflicts/page.tsx:386` 的 `仅建议 · advisory only`（它落在一个 `<span className=\"conflicts-advisory-badge\">` 里，是中英混排）。**这一条要进目录**（两个语言各一条，英文那条不要写成「advisory only」把「仅」丢了——先读它周围那段文案的语义再定译法，`docs/09 §7` 的语境是「agent 只解决结构冲突，人解决科学冲突」）。",
+        "**规格逐字，照抄**：`docs/28_ACCESSIBILITY_I18N.md:13` 逐字「V1 UI 至少设计为可国际化：**字符串集中管理，不把中文/英文硬编码散落组件**。正式上线语言可先 English + Simplified Chinese；**领域对象 ID/enum 使用英文稳定 code，显示 label 本地化**。」；`:17` 逐字「单位不是普通 i18n。**存储使用明确 unit + value；展示可转换但不能改变原始 recorded unit/provenance。避免用 locale formatting 造成小数/千位解析歧义。**」",
+        "**语言集合就是两个**：English 与 Simplified Chinese（`docs/28:13` 的字面）。基础英文照抄现在界面上的原文——**不要把现有英文改写一遍**（改写会让 T1104 刚立好的基线与既有 e2e 断言一起红，而这是本地化任务，不是文案润色任务）。",
+        "**不要改 URL 形状，这是本笔最硬的一条边界**。站点当前的路径是 `/projects/[id]/…`、`/assets/[pid]/…`、`/users/[id]/…`；`specs/ui/page-inventory.csv:5-7` 里写的却是 `/{org}/{project}` 形状——**这份文件是 Supervisor 的只读规格，路由形状归它管，不归你**。所以：**不做 `app/[locale]/…` 那类把 26 条路由整体前缀化的重构**。它同时会在两处立刻出事：既有 e2e 断言的是 `/search?q=catalyst`、`/projects$` 这些真实路径（`tests/web-smoke/a11y-smoke.mjs:189`/`:196`），而 `specs/ui/routes.yaml` 与 `page-inventory.csv` 是我不许你动的。**语言偏好走 cookie/偏好存储 + `lang` 属性这条路**，在 RESULT 里把「URL 前缀化」明确记为「留给后续的决定」，并给出你这样选的代价（深链不能带语言）。",
+        "**`<html lang>` 归你**（这一条是从 T1104 划过来的，T1104 里明确写了「不改、只记录」）：`apps/web/app/layout.tsx:15` 今天是硬编码的 `<html lang=\"en\">`。它必须跟着偏好变成动态的。**要求有测试钉住**：偏好为 zh-CN 时，页面输出的 `lang` 属性确实是 `zh-CN`（不是 `en`，也不是空）。这是 WCAG 3.1.1 的问题，也是本笔唯一一处**同时**属于无障碍的改动——所以你改它的时候 T1104 必须已经落地（见依赖）。",
+        "**科学值与单位**：`toLocaleDateString()` 无参调用（`profile-card.tsx:155`）要处理——它今天的输出取决于运行环境的默认 locale，同一份数据在两台机器上渲染出的日期不一样，这正是 `docs/28:17` 说的「locale formatting 造成歧义」。**但注意这一条不是「把日期本地化得更漂亮」，是「让它确定」**：显式指定格式或显式指定 locale，并在 RESULT 里说明你选了哪种、为什么。**数值与单位要证明切语言不改变它们**：找一个带单位的科学值（例如资产或 release 页上的量测，`unit` + `value` 分开存的那些），断言两种语言下**渲染出的数字与单位逐字相同**（`en` 下是 `1.5`，`zh-CN` 下不能变成 `1,5` 或 `1.5 千`），且**发往 API 的值一个字节都不变**。这条要用真数据跑，不要用「看起来对」的手写断言。",
+        "**enum 与 ID 不许本地化**：`docs/28:13` 逐字要求领域对象的 ID/enum 用**英文稳定 code**，只本地化显示 label。所以：切到 zh-CN 之后，`data-*` 属性、`href` 里的 id、请求体里的枚举值、以及任何被测试当作锚点的 code（例如 `data-conflict-advisory-badge` 这类）**必须原样**；变的只有人眼看到的文案。要有一条测试专门钉这个（例如断言某个 API 请求体里的 status/enum 值在两种语言下相同）。**本地化显示 label 不等于把 label 塞进 enum**——目录里的值只用于显示。",
+        "**覆盖面照实报，不要声称全站**：这一笔的验收是「**核心页面**可切语言」，所以做 `docs/42_PAGE_SPECS.md` 里存在的那几个核心页面（Project Overview、Research、PR、Release、Asset Page、Search Answer、Research Profile，加 `/`、`/projects`、`/login`；`/knowledge/{id}` 没有路由，照实报）。**同时**给一个能复跑的**剩余硬编码字符串计数**（例如一个 grep 脚本或一条测试，输出还有多少条未进目录的字面量），把「已进目录 / 仍未进」两个数字都写进 RESULT。**声称「全站已国际化」而实际只做了核心页面，是本笔最可能的失分方式**——T1104 的覆盖表就是照着这个形状写的，照它的格式办。",
+        "**i18n 套件要能跑、要能失败**：`tasks/tests.json` 里登记着 `i18n e2e`。交付一个能一键跑的入口（照 T1104 建起来的那条路的形状复用，**不要再造第二套浏览器挂具**），至少覆盖：切到 zh-CN → 核心页面文案确实变了且 `lang` 变了、切回 en → 复原、科学值与 enum/ID 两种语言下逐字相同、以及**目录缺 key 时的行为**（缺 key 是回落到英文原文、还是显示 key？**先定死一个行为**，用测试钉住，并说明为什么选它——「缺 key 显示 key」是能看到问题的，「静默回落」是看不到的）。**要有一次实测的转红**：把某个核心页面的一个字符串改回硬编码，套件必须红，把红的那次输出贴进 RESULT，再改回来。",
+        "**CI 接线归我，你不要动 `.github/workflows/`**（2026-09-21 实测后改的口径）。原因是一个真实的机关：`internal/devorchestrator/gate_spec_test.go:17-58` 把 `specs/orchestrator/gates.json` 与 `.github/workflows/ci.yml` **逐步逐 env 对齐**，`:31` 甚至把 job 数写死成 7（`t.Fatalf(\"ci.yml declares %d jobs, want 7\", len(ci))`），`:58` 要求 `required_jobs` 等于 ci.yml 的全部 job。而 `specs/orchestrator/gates.json` 是 **Supervisor 的**（§8.1 的只读区），你改不了——也就是说，你往 ci.yml 里加一个 job 或一个 step，同步单测立刻红，而修它的那一半在我手里。**所以：套件跑通 + 一条 `make` 目标（归你），CI 的那一段由我落**（同一笔提交里同时改 ci.yml 与 gates.json）。你要交的是：①从仓库根一条命令能跑起这个套件；②**给我可以直接粘的 YAML 片段**（step 名、`run`、需要的 `env`、以及它挂在哪个既有 job 上最合适）；③这个 step 的**墙钟代价**（装 Chromium 与构建 Next 各多久），因为 G2 每次都要跑它。",
+        "**不做 / 边界**：不引重量级 i18n 框架（要加运行时依赖就先在 RESULT 里论证：包大小、是否需要新的构建步骤、以及为什么现在的做法不够——**默认不加**）；不改 `specs/**`（含 `specs/ui/**` 的路由形状）、`docs/**`、`tasks/**`、`internal/**`、`cmd/**`、`infra/**`、`ops/**`；不做 URL 前缀化；**不把 Next server action 用来装载业务逻辑**（`CLAUDE.md` §7 逐字禁止把核心业务逻辑藏进 server actions）；不翻译代码注释（注释不是 UI 字符串）。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "两套消息目录（en / zh-CN）与集中管理机制，核心页面接上",
+        "语言偏好（cookie/偏好存储）+ 动态 `<html lang>`",
+        "科学值/单位/日期渲染的确定性处理（含 `profile-card.tsx:155` 的无参 `toLocaleDateString`）",
+        "一键可跑的 `i18n e2e` 入口（含缺 key 行为的钉死与一次实测转红）",
+        "剩余硬编码字符串的计数方法与两个数字（已进目录 / 仍未进）",
+        "RESULT 里的逐路由覆盖表与「URL 前缀化留给后续」的记账"
+      ],
       "acceptance_criteria": [
-        "核心页面可切语言",
-        "科学值/单位不被错误本地化"
+        "**核心页面可切语言**（任务原文）：核心页面在 en 与 zh-CN 两种偏好下都渲染完整；`<html lang>` 跟着变并有测试钉住；切回 en 复原",
+        "**科学值/单位不被错误本地化**（任务原文）：带单位的科学值在两种语言下**渲染逐字相同**、**发往 API 的值逐字相同**；日期渲染不再依赖运行环境默认 locale（`profile-card.tsx:155` 有说法）",
+        "**enum/ID 未被本地化**：请求体、`href`、`data-*` 锚点里的英文稳定 code 在两种语言下相同；只有显示 label 变了；有测试钉住",
+        "**唯一那处硬编码中文进了目录**：`conflicts/page.tsx:386` 的 `仅建议 · advisory only` 已由目录提供；`grep -rnP '[\\x{4e00}-\\x{9fff}]' apps/web` 的非注释命中数为 0（注释不算，且要在 RESULT 里给出这条命令的输出）",
+        "**覆盖是诚实的**：RESULT 里有逐路由表与「已进目录 / 仍未进」两个数字；没有出现「全站已国际化」这类说法，除非数字支持它",
+        "**套件能失败**：一次实测转红（改回一处硬编码 → 套件红）的输出原文贴在 RESULT 里，随后是还原后的绿；缺 key 的行为被定死并有测试",
+        "**没有 URL 前缀化**：`apps/web/app` 下没有新增 `[locale]` 段；既有路径形状未变；`tests/web-smoke/a11y-smoke.mjs:189`/`:196` 那两条路径断言仍绿",
+        "**没有碰 CI 定义**：`.github/**` 的 diff 为空；T1104 建的 a11y `make` 目标仍在，且你的新目标与它并列而不是替换它",
+        "**RESULT 里写明**：目录机制的选择与代价、缺 key 策略为什么选它、你**没有**覆盖的页面与原因、以及所有你判断不了而按最严处理的地方"
       ],
       "tests": [
         "i18n e2e"
       ],
       "allowed_scope": [
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
+        "packages/ui/**",
         "apps/web/**",
-        "internal/**",
-        "go.mod",
-        "go.sum",
-        ".env.example",
-        "cmd/**",
-        "infra/**",
         "tests/**",
-        "ops/**"
+        "Makefile"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        "infra/**",
+        "internal/**",
+        "cmd/**",
+        "ops/**",
+        "pnpm-lock.yaml",
+        "package.json",
+        ".github/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/28_ACCESSIBILITY_I18N.md",
+        "docs/42_PAGE_SPECS.md",
+        "docs/51_FRONTEND_STANDARD.md",
+        "docs/41_DESIGN_TOKENS.md",
+        "docs/09_RSG_AND_EVIDENCE.md",
+        "specs/ui/page-inventory.csv",
+        "specs/ui/routes.yaml"
+      ],
+      "scope_note": "范围与 T1104 同形：共享组件（`packages/ui/**`）、界面（`apps/web/**`）、套件（`tests/**`）、以及接门要动的那一处（`Makefile`——`.github/**` 不在范围内，理由见需求第 11 条）。**`specs/**` 特别重要地不在范围内**：`specs/ui/page-inventory.csv` 与 `routes.yaml` 是路由形状的真相源（而它们与实现今天的形状并不一致——`page-inventory.csv` 写 `/{org}/{project}`，实现是 `/projects/[id]`），**这个不一致不是你要修的东西，是你要绕开的东西**：本笔不做 URL 前缀化，理由写在需求第 5 条。`pnpm-lock.yaml` 与根 `package.json` 排除，默认不加运行时依赖。\n\n**（2026-09-21 补，实测后收窄）`.github/**` 移出范围。** `specs/orchestrator/gates.json` 与 `.github/workflows/ci.yml` 被 `internal/devorchestrator/gate_spec_test.go` 逐步对齐，且那份 gate spec 是 Supervisor 的只读区——工人改 ci.yml 就会红同步单测，而能修的那一半不在工人手里。CI 接线由我在同一笔提交里落。",
+      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄 + 排期）——两条：范围砍到五条；依赖里加上 T1104。**\n\n**加 T1104 这个依赖是有意的**：两笔都是「扫过每一个页面」的活——T1104 改的是标记与属性（label、aria-live、reduced motion、skip link），T1105 改的是同一批文件里的每一个字符串。让它们并行，等于让两个工人同时重写同一批文件，冲突面是 26 条路由的每一行。串行是诚实的排法，而且它由 DAG 自己执行，不靠我记得。\n\n**本笔里我定死的三件事**：①**不做 URL 前缀化**（需求第 5 条）——路由形状归 `specs/ui/**` 管，且会让既有路径断言与规格一起出事；语言偏好走 cookie + `lang`，代价（深链不带语言）记在 RESULT 里。②**`<html lang>` 从 T1104 划到本笔**（需求第 6 条）——它必须与语言偏好一起改，否则两笔会先后改同一行；T1104 那边已被明确要求只记录、不改。③**基础英文照抄现状**（需求第 4 条）——本地化不是润色，改写英文会连累刚立的基线与既有断言。\n\n**为什么把「剩余硬编码字符串计数」写成交付物**：一笔 i18n 任务最容易交出的假成绩是「核心页面好了 → 说全站好了」。要一个能复跑的数字，比要一句形容词有用。"
     },
     {
       "id": "T1106",
@@ -6883,39 +7078,76 @@
         "T0806"
       ],
       "requirements": [
-        "anonymous/auth role matrix E2E",
-        "计数/error/timing 不明显泄漏 private id",
-        "search post-filter guaranteed"
+        "**先搞清楚已经有什么，别重造（2026-09-21 复核）**。仓库里的权限负向测试已经很密：`tests/e2e/privacy_e2e_test.go:140 TestE2EPrivacyNegative`、`tests/e2e/asset_page_e2e_test.go:886 TestE2EAssetPageAnswersOneIndistinguishable404`、`tests/integration/privacy_test.go:49 TestPrivacyReadIsolation`、`tests/integration/project_authz_test.go:46 TestProjectAuthzMatrix`、`tests/integration/org_permission_test.go:187`、`tests/integration/activity_audience_failclosed_test.go:40`、`tests/integration/asset_publish_test.go:938 TestAssetPublishDenialPrecedesTheTargetLookup`、`tests/integration/knowledge_publish_test.go:1049 TestKnowledgePublishPermissionIsFailClosed` 与 `:1232`、`tests/integration/search_access_test.go:23`、`tests/integration/search_scope_test.go:40`、`tests/integration/retrieval_test.go:433/803/991/1109`，外加 JS 侧 `tests/e2e-anonymous/`、`tests/e2e-assets/`、`tests/e2e-explore/`、`tests/e2e-settings/`、`tests/e2e-shell/`。**本任务不是从零写一套，是把它们收成一条能一键跑的门，并且把已知的两个空白补上。**",
+        "**规格逐字，照抄**：`docs/23_SECURITY_PRIVACY.md:5` 把这件事列为最高风险之一，逐字「最大风险不是传统 XSS alone，而是：private research 泄漏、错误 publish、对象级权限绕过、signed URL 泄漏、Agent token 权限过大、Git transport 绕过 main protection、**search side-channel**、webhook secret 泄漏。」；`:13` 逐字「默认 deny。每个 command 明确 `actor + org + project + object + action + policy context`。权限单元测试和 property-based matrix test。」；`:21` 逐字「所有 query/search/export/download 进行 tenant/project/object policy 过滤。**私有对象计数也不能通过 public API 泄漏**；公开 asset 页面“8 private projects use this”仅在产品策略明确允许的匿名聚合阈值下显示，**V1 可直接不显示 private count**。」；`docs/45_ERROR_MODEL.md:24` 逐字「错误信息告诉用户下一步，不泄漏 private entity existence 或内部 stack。」；`docs/54_SECURITY_THREAT_MODEL.md:10` 把「Private Project/Branch 内容出现在 Search/Explore/API error」列为场景 #1，`:19` 逐字「每个场景必须有对应 automated negative test，映射见 traceability 文档。」",
+        "**过滤在 SQL 谓词里，不是 post-filter——这一点要当成性质来验，不要当口号**。文档检索的可见性谓词逐字在 `internal/persistence/queries/search.sql:44`（`AND (visibility = 'public' OR project_id = ANY(@allowed_project_ids::uuid[]))`），同一句复制在 `:167-168`（全文）与 `:211-212`（向量）；`internal/search/retrieval/store.go:17-24` 逐字说明「每一条授予或拒绝的谓词都在 SQL 里……加在这里就成了一条**读之后**才应用的规则，而那是 docs/21 §9 禁止的形状」。**唯二**在输出后应用 scope 的地方是图种子读——`internal/search/ranking/store.go:101-104` 与 `internal/search/retrieval/retrieval.go:695-700`——两处都有测试，甚至有一条第 `:991 TestTraversalQueriesAreWhatRefuseTheOtherProject` 是**反证**（跑无谓词版本，证明另一项目的 version id 真会回来）。**你的套件要保留这种反证的味道**：一条只会说「没泄漏」的测试，在过滤器被整个摘掉时也必须能红。",
+        "**空白一：计数泄漏在后端没有测试**。上面那条 `:21` 的「私有对象计数也不能通过 public API 泄漏」今天只有**前端**对照——`tests/e2e-assets/assets-e2e.mjs` 的 `check(\"private usage: no count of withheld usages is rendered\", ...)` 与 `tests/e2e-explore/explore-e2e.mjs` 的「无 popularity 词汇」。**要补的是后端**：构造「若干私有项目使用/依赖某个公开对象」的库状态，逐个读**公开**面（资产页、依赖页、检索答案、feed、列表端点），断言返回体里**推不出**私有实体的**存在、个数与身份**——不只是「没有那个名字」，而是「没有任何一个数字/枚举顺序/分页计数能把它数出来」。要有一条**能失败的**对照：先把计数真的渲染出来一次（或让某个端点返回真实计数），断言套件红，再改回来。",
+        "**空白二：时序（timing）这一维在规格里根本没有定义，不要发明**。`docs/**` 里 grep `时序`/`timing`/`constant-time` 只命中两处：`docs/32_RISK_REGISTER.md:8`（讲的是关系枚举，不是时序）与 `docs/23:21`（讲的是计数）。全仓唯一一处常时比较是 `cmd/api/authhttp/auth_middleware.go:194-196` 的 CSRF 比较（逐字「a missing header is the same 403 as a wrong one (no oracle)」）。**所以**：①**不许**为响应时间设一个阈值并据此判红——那是我没权发明的产品语义（CLAUDE.md §5，L3）；②要做的**确定性的那一半**是「**答案不可区分**」：对「不存在」与「存在但不可读」两种输入，断言 status、错误 code、错误文案、响应头、以及响应体字节长度**逐项相同**（`tests/e2e/asset_page_e2e_test.go:912` 的 `if body != first` 那种比法就是现成范式）；③时序**测量并记录**，不作门：把两类输入的耗时分布原样写进 RESULT，并逐字写下「规格没有给出任何时序阈值，所以本套件不设阈值」这句话。",
+        "**匿名口径照抄现状，不要在这条上重新开刀**：`cmd/api/authhttp/auth_middleware.go:144-152/178-186` 逐字「No/expired session: reads continue, writes answer 401.」「Structural 401 for unauthenticated writes」；`specs/policies/permissions-matrix.csv:2-3` 逐字 `read_public_project,allow,...` 与 `read_private_project,deny,...`；私有项目一律**存在性隐藏的 404**（`internal/authz/actor.go:15-16` 的 `ActorPublicAnonymous`，`cmd/api/assetshttp/page.go:233-238` 的单一 404 code）。**`docs/05_INFORMATION_ARCHITECTURE.md:9` 的「登录前保留 Search」读法与今天的 401 口径不一致，这件事已经被裁过**（`internal/search/scope.go:44-48` 逐字记录了 owner ruling 2026-09-18 与它记在 `tasks/decisions.md`）——**不要在本任务里翻这个案**，按现状断言。",
+        "**只许收紧，不许放宽**。本任务允许你在读路径上做**fail-closed 方向**的修改（更严地拒绝、更少地披露），**任何放宽都禁止**——包括「让某个角色多看见一点」「把某个 404 改成 403 更友好」「让不可区分的两个答案变得可区分」。每一处非测试改动要在 RESULT 里逐条点名：改了哪个文件、收紧在哪、**在你改之前哪条测试是红的**（把红的那次输出贴进去），改完之后是不是绿。**改不出红的证据，就不要改那段代码。**",
+        "**`internal/authz/**` 不许动**（见 scope）：它是本任务要检验的那本规则书。改它来让套件变绿，就是改考卷。同理 `internal/rights/**` 的可见性判定、`specs/policies/permissions-matrix.csv` 都不动。若你判断某条规则的**值**本身错了，**停下来报**——那是要单独裁定的。",
+        "**套件要能一键跑、并且进得了门**：`privacy suite` 这条必测在 `tasks/tests.json` 里登记着（`T1107-TEST-01`，`blocking: true`）。交付一个可以从仓库根调用的入口（照既有 `bash tests/acceptance/*.sh` 的形状），把上面那些既有 Go/JS 测试**按性质分组**跑起来（真 PostgreSQL 的那一档、HTTP 边缘那一档、浏览器那一档），并且**新补的两块**也要在其中。**不要**把慢测试与快测试混成一条不可诊断的链——失败时要能一眼看出是哪一类。",
+        "**不做 / 边界**：不改 `specs/**`（契约、权限矩阵都是 Supervisor 的）；不改 `docs/**`、`tasks/**`；不新增迁移；不做界面改动（`apps/web/**` 只在你需要补一条前端计数泄漏对照时才碰，且照既有 `assets-e2e.mjs` 的形状）；不重写既有的负向测试——**它们原样留着**，你的入口是把它们组织起来，不是替换它们。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "一键可跑的 privacy/permission 负向套件入口（分组、可诊断）",
+        "后端计数泄漏的负向测试（含一条能失败的对照）",
+        "「答案不可区分」的确定性断言（status/code/文案/头/字节长度逐项相同）",
+        "时序测量的原始数据 + 一句逐字的「规格没有给阈值，所以不设阈值」",
+        "RESULT 里逐条点名的 fail-closed 收紧（若有），每处带「改之前哪条红」的输出"
+      ],
       "acceptance_criteria": [
-        "permission negative suite 全过"
+        "**permission negative suite 全过**（任务原文）：套件入口从仓库根一条命令跑完全绿；并且**它真的跑了东西**——输出里能看到每一组的用例计数（不是「0 tests」也照样绿的壳）",
+        "**既有的负向证据一条都没被删弱**：`tests/e2e/privacy_e2e_test.go`、`tests/e2e/asset_page_e2e_test.go:886`、`tests/integration/privacy_test.go`、`project_authz_test.go`、`org_permission_test.go`、`activity_audience_failclosed_test.go`、`asset_publish_test.go`、`knowledge_publish_test.go`、`search_access_test.go`、`search_scope_test.go`、`retrieval_test.go`（含 `:991` 那条反证）全部原样通过；RESULT 里给出它们的清单与各自跑了什么",
+        "**计数泄漏有后端测试**：构造「私有项目使用公开对象」的库状态，逐个公开面断言推不出私有实体的存在/个数/身份；并且有**对照**证明这条测试能失败（渲染出计数则红）",
+        "**不可区分性逐项断言**：对「不存在」与「存在但不可读」，status、错误 code、文案、响应头、响应体字节长度逐项相同；至少覆盖项目面、资产面、检索面三处",
+        "**时序不设阈值**：RESULT 里有时序的原始测量数据，并且**逐字**写下规格未给阈值因此不设门；套件里没有任何基于耗时的断言",
+        "**只紧不松**：所有非测试改动都是 fail-closed 方向，逐条带「改之前红」的证据；没有任何放宽（无角色多看见、无 404→403、无可区分化）",
+        "**没碰规则书**：`internal/authz/**`、`internal/rights/**` 的可见性判定、`specs/policies/permissions-matrix.csv` 的 diff 为空",
+        "**RESULT 里写明**：套件入口的调用方式、分组与每组用例数、新补两块各自的失败对照、时序原始数据、以及你**没有**覆盖到的面与原因（例如检索层今天没有 HTTP 路由这件事）"
       ],
       "tests": [
         "privacy suite"
       ],
       "allowed_scope": [
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
         "apps/web/**",
-        "internal/**",
-        "go.mod",
-        "go.sum",
-        ".env.example",
-        "cmd/**",
-        "infra/**",
-        "tests/**",
-        "ops/**"
+        "cmd/api/assetshttp/**",
+        "cmd/api/explorehttp/**",
+        "cmd/api/feedshttp/**",
+        "cmd/api/knowledgehttp/**",
+        "cmd/api/main.go",
+        "cmd/api/projectshttp/**",
+        "cmd/api/provenancehttp/**",
+        "cmd/api/searchhttp/**",
+        "internal/persistence/**",
+        "internal/search/**",
+        "tests/**"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        "infra/**",
+        "internal/authz/**",
+        "internal/rights/**",
+        "internal/events/**",
+        "internal/devorchestrator/**",
+        "cmd/api/authhttp/**",
+        "cmd/api/httpmw/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/23_SECURITY_PRIVACY.md",
+        "docs/45_ERROR_MODEL.md",
+        "docs/54_SECURITY_THREAT_MODEL.md",
+        "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
+        "docs/21_DATA_MODEL.md",
+        "specs/policies/permissions-matrix.csv"
+      ],
+      "scope_note": "**`cmd/api/**` 已收窄到本任务真正要验的那几个读面（2026-09-21 Supervisor 收窄，安全评审后）。**原来的一整个 `cmd/api/**` 会把 `cmd/api/authhttp/**` 也包进来——而 `authhttp` 正是**本任务要检验的匿名口径所在**（要求 6 逐字引的 `auth_middleware.go:144-152/178-186`）。**让被检验者能写考卷，和 `internal/authz/**` 不许动（要求 8）是同一件事**，所以它与 `httpmw` 一起进 `forbidden_scope`。留下的八个是要求 4 点名的公开面所在的包：资产页、依赖页、检索答案、feed、列表端点，以及 `main.go` 的接线。",
+      "supervisor_scope_narrowing": "**（2026-09-21 第 2 版·安全收窄）** 写入面从 `cmd/api/**` 收到八个具体路径 + `main.go`；`cmd/api/authhttp/**` 与 `cmd/api/httpmw/**` 明确禁写。\n\n这条收窄**不该让任务变得做不完**：要求 4 要补的后端计数泄漏对照读的是资产页/依赖页/检索答案/feed/列表端点，要求 7 允许的 fail-closed 收紧也只发生在这些读面上。**但如果你实测发现某处收紧必须落在上面没列的包里**（例如某个中间件在别处），**停下来不要改**，在 RESULT 的 follow_up 里点名是哪个文件、要改什么、为什么非它不可——由 Supervisor 决定放宽范围还是换个做法。\n\n**范围只约束你写什么，不约束你读什么**：`internal/authz/**`、`cmd/api/authhttp/**`、`specs/policies/permissions-matrix.csv` 你都可以读、可以引用、可以在测试里断言它们的行为——只是不能改它们（正是要求 8 的意思）。"
     },
     {
       "id": "T1108",
@@ -6928,39 +7160,86 @@
         "T1102"
       ],
       "requirements": [
-        "生成 100 projects/100k entities benchmark seed",
-        "查询/graph/search profiling",
-        "必要 indexes"
+        "**规格逐字，先照抄**：`docs/27_PERFORMANCE_SLO.md:3` 逐字「**V1 是工程目标，不承诺公网 SLA，但应满足以下开发验收。**」——这句话定了本笔的性质：你要产出的是一份**开发期基线**，不是线上 SLA。`:6-9` 页面：Project Overview **p95 API < 500ms**、常规列表 **p95 < 400ms**、Object detail **p95 < 500ms**、Research Map initial aggregated query **p95 < 1s**（复杂展开可异步）；`:12` Candidate retrieval **p95 < 2s**（seed/中小规模）；`:16` 常规 semantic command **p95 < 800ms**（不含 blob upload）；`:20` 容量基线：**单 Project 10k Scientific Objects / 100k relations / 10k state transitions / 1k branches+PR history**，Network seed **100 Projects / 100k searchable entities**。",
+        "**现状：这台仪器今天完全不存在，而且不是「弱」，是「零」（2026-09-21 逐条实测）**。`grep -rn \"func Benchmark\" --include=*.go` **全仓零命中**；`pgbench` / `k6` / `artillery` / `autocannon` **零**；`Makefile` 的 28 个目标里**没有任何 perf/bench 目标**（数法：`grep -cE \"^[a-z][a-z0-9-]*: ## \" Makefile` → 28；`grep -nE \"^[a-z-]*(bench|perf)[a-z-]*:\" Makefile` → 零命中）；`cmd/rddev` 的 17 个子命令里 `db` **只支持 `migrate`**（数法：`grep -oE '^\\s+case \"[a-z]+\"' cmd/rddev/main.go` → 17：version help doctor env task worker review gate git pr rebaseline refs branch drive status db workflow）（`cmd/rddev/db.go:15`、`:49`），**没有 seed**；`grep -rn \"testing.Short\"` 在 `tests/` 与 `internal/` **零命中**（也就是说仓库里没有任何「跳过慢测试」的暗门，本笔也不许开一个）。`tests/` 下 20 个目录里没有 benchmark，`grep \"for i := 0; i < [0-9]\\{3,\\}\"` 在集成测试里**零命中**——**没有任何批量造数的东西**。`internal/assets/asset.go:31` 那个 `TypeBenchmark` 是**资产类型**，不是基准测试，别被 grep 骗了。",
+        "**全仓只有一处查询计划断言，它是本笔的样板，不是本笔的成绩**：`tests/integration/research_profile_test.go:1076-1135 TestResearchProfileIntegrationMigrationIndexesExist`——先查 `pg_indexes`（`:1095`），再跑 `EXPLAIN (COSTS OFF)`（`:1109-1111`），断言计划里出现 `contribution_events_actor_occurred_idx`。**`:1105-1108` 自己的注释逐字说明了它的边界**：「this asserts the index is CHOOSABLE for the shape the query has, **not that the plan is pinned**」，而且它**不测任何耗时**。**照这个形状扩**，别发明第二种。",
+        "**索引现状（我数过，别重数）**：`infra/migrations/**` 里 `CREATE INDEX`/`CREATE UNIQUE INDEX` 共 **86 条**，最高编号 **00110**（`00110_ranking_factor_indexes.sql`）。**没有向量索引，而且这是记录在案的决定，不是遗漏**：`infra/migrations/00092_search_embedding_metadata.sql:63-71` 逐字「`# No index, deliberately` … an index is a measurable performance decision, not a semantic one … Left out as a decision, not by omission」；查询侧 `internal/persistence/queries/search.sql:186-190` 又重申一次，并逐字写着「**Adding one is a measurable performance decision with its own evidence, and this query is where its effect would be felt**」。**本笔就是那个 evidence 该出现的地方**——见需求第 6 条。",
+        "**交付物一：容量级 seed 生成器**。放在**新目录 `tests/benchmark/`**（`tests/` 下 20 个既有目录里没有重名的）。它要能按 `docs/27:20` 的两条基线造数：①**单项目档**（10k objects / 100k relations / 10k state transitions / 1k branches+PR）；②**网络档**（100 projects / 100k searchable entities）。要求：**一条命令跑起来、退出码可信、stdout 机器可读**（每张表的行数），并且**规模可参数化**但**默认就是规格的那个数**。**这条是本笔的地基：数不对，后面所有 p95 都是假的。** 生成完必须**先断言行数真的到位**（不是「跑完没报错」）。",
+        "**交付物二：逐项测量并逐项对照 SLO**。对 `docs/27` 点名的每一项产出**实测 p95 + 样本数 + 与目标的比值**，形成一张表：Project Overview API、常规列表、Object detail、Research Map 聚合查询、candidate retrieval、semantic command 写入。每一项要写清楚：**打的是哪个端点/哪条查询**（文件+行）、**量了多少次**、**冷/热**。**达到目标的逐条记「达标 + 实测值」；没达到的逐条记「偏差 + 实测值 + 你的分析」**——AC 的措辞是「满足…**或记录可接受偏差**」，所以**如实记录偏差是完全合格的交付**，把偏差藏起来才是失分。",
+        "**交付物三：索引调优，但只许被测量推着走**。规则：**先测，再决定改不改**。\n  - **许动的面**：`infra/migrations/**`（**编号以你任务包里的 `migration_number` 为准**——本仓由 `AllocateMigrationNumber` 在派工时发号并记账、返工沿用同一个号，`internal/devorchestrator/migration_numbers.go:83`；**不许自己选号、不许自己挑一个「看起来空」的号**，§8.1。派工时链上最高是 `00110`），以及 `internal/persistence/queries/**` 里确实被测量指认为瓶颈的查询形状。\n  - **向量索引这一条单独说清楚**：`00092:63-71` 把「加不加」定成「要证据的性能决定」。所以**你的动作是：在容量档上量 candidate retrieval，把数字摆出来，然后二选一**——①**没超 2s**：写「按 00092 的判断，V1 规模下精确扫描够用，本笔的实测支持这个决定，因此不加索引」**并把数字贴上**（这是一个**合格且有价值的结论**，不是没干活）；②**超了 2s**：加上 ivfflat/hnsw，**并且给出加之前/加之后的实测对比**、说明选了哪种、以及**召回代价**（近似索引可能更不准，永远不可能更准——00092 原话）。**两种都行，唯独不许「加了没说为什么」或「没测就说不用加」。**\n  - **迁移与快照**：`infra/migrations/**` 是 canonical schema history，`specs/database/postgres.sql` 是它的**生成物**——**用 `scripts/gen_schema_snapshot.py` 重新生成，绝不手工编辑**（§8.1；`make check-schema-snapshot` 会校验）。两个都在你范围内，正是因为派生件必须跟着动。\n  - **不许为了好看把索引堆上去**：每一条新索引都要能回答「哪次测量、哪个查询、差多少」，答不上来的删掉。",
+        "**交付物四：门，而且要能红**。`tasks/tests.json` 里登记着 `perf benchmark`（blocking）。**门的设计我替你定死，因为这里有一个真的陷阱**：\n  - **不许把 `p95 < 500ms` 这类数字直接写成 CI 断言。** CI runner 是共享的、会抖的；一个会随机红的墙钟断言，最后一定会被人用「放宽一点」修掉——而那正是 `CLAUDE.md` 禁止的事（禁止为让门变绿而放宽 assertion）。这个陷阱要现在就绕开，而不是等它把人逼到墙角。\n  - **所以门分两层**：①**确定性层（blocking）**：seed 行数确实到位 + 照 `research_profile_test.go:1076-1135` 的形状断言**计划可选用到索引**（`EXPLAIN (COSTS OFF)`，不钉死计划、不钉时间）+ **一条宽松的回归天花板**（比 SLO 宽若干倍，唯一职责是抓住数量级的退化；**你必须在代码注释与 RESULT 里都写明「这是回归天花板，不是 SLO」**）。②**报告层（记录，不在 CI 里断言）**：真实 p95 对 SLO 的对照表。**SLO 达标与否是一个被记录下来的测量结论，不是一个 CI 断言。**\n  - **门要能说「不会」**：RESULT 里要有一次**实际转红**的输出——例如把某条查询改成必然全表扫、或把 seed 行数调掉一个数量级，门必须红；然后把还原后的绿贴上。**一个从来没红过的门等于没有门。**\n  - **不许开 `testing.Short` 这类暗门**：本仓今天零命中，本笔之后也要是零。",
+        "**交付物五：一条 `make` 目标 + 交给我的 CI 片段。** 目标要能一条命令跑完（起库前提 → seed → 测量 → 门），并且**不要把它塞进 `make test-integration`**：那个目标有 20 分钟的 `-timeout` 预算（`Makefile:150-171` 逐字解释了为什么是 20m），基准测试跑在里面会把 G2 的每次集成都拖长。**`.github/workflows/ci.yml` 你不要动**——它与 `specs/orchestrator/gates.json` 被 `internal/devorchestrator/gate_spec_test.go:17-58` 逐步逐 env 对齐，`:31` 把 job 数写死成 7，而 gate spec 是 Supervisor 的只读区，你改了就会红一个你修不了的同步单测。**给我可直接粘的 YAML 片段 + 墙钟代价**，接线我落。",
+        "**顺带必须查的两处（我在事实核查里看见的、真实的嫌疑点，你去验，别照抄我的怀疑）**：①`internal/persistence/queries/search.sql:25` 的 `SearchDocuments` 用 **`LIMIT @page_size OFFSET @page_offset`**（`:45-46`）——深翻页在容量档上是什么样子，量一下；②`search.sql:400-417` 的 `SearchRankingFacts` 里有一个**逐行相关的子查询**（`:412-417` 对 `scientific_object_versions` 取 `max(version_no)`）——候选集变大时它是线性放大，量一下。**这两条我只看过，没有量过，所以它们的结论归你**；量完没问题是合格结论，量完有问题就按需求第 6 条处理。",
+        "**规模不许缩水，缩了要说**。报告的 SLO 对照必须用**规格的全量档**。如果 CI 上跑不起全量档（很可能跑不起），那就为 CI 另设一个**小档**并**明确标注它的数字不是 SLO 对照**——把所有测试都换成小档，然后拿小档的数字声称达标，是本笔最省事也最不能接受的骗法。**seed 生成与测量的墙钟代价要报出来**，这决定 CI 里到底能跑哪一档。",
+        "**可复现性**：本机怎么起库（`make infra-up` 起的是 `pgvector/pgvector:0.8.6-pg16`；**工人自己起不了 Docker**，所以要按 `Makefile:153-155` 描述的那条路走——只要求一个**可达**的 PostgreSQL）、`POSTGRES_TEST_ADMIN_URL` 的默认值够不够（默认 `postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post`）、幂等性（连跑第二遍会不会因残留数据而失败，残留怎么清）、需不需要联网装东西、装到哪。照 T0810 那封恢复信的形状写。",
+        "**不做 / 边界**：**不要实现 T1201**（`完整 Seed Demo Data Builder`，`docs/34_SEED_DEMO_PROJECT.md`，slug `demo-mof-humidity-separation`，有确定的对象数与叙事）——那一笔要的是**有科研语义的演示数据**，本笔要的是**容量规模的合成数据**，两码事，别合流也别复用它的 slug。不动 `apps/web/**`（前端那条「首个 loading state < 200ms」本笔**不测**，照实记账，见 AC）；不动 `docs/**`、`tasks/**`、`specs/**`（**只许动 `specs/database/postgres.sql` 这一个生成物**）、`.github/**`、`internal/devorchestrator/**`。不引外部压测工具（k6/pgbench/autocannon 都不引——仓库今天一个都没有，引进来又是一套 CI 要养的东西）。",
+        "**测试与断言只准加强，不准放宽**：不许删断言、不许 skip、不许放大 timeout、不许把 FAIL 改成容忍。**特别是**：`tests/integration/research_profile_test.go:1076-1135` 那条既有的计划断言**原样留着**，你的新门与它并列，不许合并、不许替换、不许顺手「优化」它。",
+        "**一个必须先知道的地形，否则你会被一个自己修不了的红卡住**：CI 的单元 job 跑的是 `go list ./... | grep -v '/tests/integration'`（`Makefile:19` 的 `GO_UNIT_PKGS`，`.github/workflows/ci.yml:86`），**任何新建的 `tests/` 子目录只要含 Go 文件就会被扫进去**，而那个 job **没有数据库**。`tests/ranking`、`tests/searchplan` 之所以没事，是因为它们不碰库（`grep -rln \"POSTGRES\\|pgx\\|sql.Open\" tests/ranking tests/searchplan tests/observability` 零命中）。对照一下：数据库那条路是 `Makefile:189` 的 `go test ./tests/integration -count=1 -timeout 20m`，而需求第 8 条**明确不要**把你的门塞进它（20 分钟预算会被基准拖死）。**所以你的门要满足两条同时成立**：① `go test` 扫到 `tests/benchmark/...` 时**不需要数据库也不红**；② 真正的容量档测量由新 `make` 目标驱动。最省事的形状是**把 `tests/benchmark/` 做成一个不含 `_test.go` 的普通包/可执行入口**（`go test` 对没有测试文件的包只报 `no test files`，是绿的），把断言放进可执行入口的退出码里，再由 `make` 目标调用——这样**连 CI 都不用为我改**。**不要**用 `testing.Short` 或「没库就 skip」绕过去：那既是需求第 2 条禁止的暗门，也会让门失去「能说不会」的能力。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "`tests/benchmark/` 下的容量级 seed 生成器（单项目档 10k/100k/10k/1k + 网络档 100 projects/100k entities），一行数一条命令，stdout 机器可读，行数自断言",
+        "逐项 p95 实测对 SLO 的对照表（端点/查询的文件+行、样本数、冷/热、实测值与比值）",
+        "索引调优：一条迁移（编号取任务包里发的那个，若测量支持）或「按 00092 的判断不加，实测数字在此」的书面结论；快照由脚本重新生成",
+        "两处嫌疑点的实测结论：`search.sql:25` 的 OFFSET 深翻页、`search.sql:400-417` 的逐行相关子查询",
+        "`perf benchmark` 门：确定性层（行数 + 计划可选用索引 + 标注为回归天花板的宽松上界）+ 报告层（p95 对照）",
+        "一次真实转红的证据（门能说「不会」）与还原后的绿",
+        "一条 `make` 目标 + 可直接粘的 CI YAML 片段 + 墙钟代价（seed 与测量分开报）",
+        "可复现性说明：起库、默认 URL、幂等性、外部依赖"
+      ],
       "acceptance_criteria": [
-        "满足 27_PERFORMANCE_SLO 开发目标或记录可接受偏差"
+        "**满足 27_PERFORMANCE_SLO 开发目标或记录可接受偏差**（任务原文）：`docs/27` 点名的每一项都有实测值与对照；达标的逐条标注，未达标的逐条给出偏差、数值与分析。**没有「测不了」当借口的项**——测不了要说清楚为什么、以及要补什么才能测",
+        "**容量基线真的被造出来了**：`docs/27:20` 的两个档位都能一条命令生成，且**生成后真的断言了行数**（不是「跑完没报错」）；报告 SLO 对照用的是**全量档**",
+        "**索引改动由测量驱动**：每一条新索引都能追到一次具体测量与一个具体查询；向量索引那条按需求第 6 条二选一并**给出数字**（不加也要给数字）；`specs/database/postgres.sql` 由脚本重新生成而非手改，`make check-schema-snapshot` 绿；迁移编号用的是**任务包里发的那个号**（未自选、未占用他人号）",
+        "**门能失败**：一次真实转红的输出贴在 RESULT 里（例如把查询改成必然全表扫 / 把 seed 调掉一个数量级），随后是还原后的绿；**门的确定性层没有任何墙钟 SLO 断言**，宽松上界在代码注释与 RESULT 里都被标明「这是回归天花板，不是 SLO」",
+        "**没有开跳测暗门**：`grep -rn \"testing.Short\"` 在 `tests/` 与 `internal/` 仍为零；没有被 skip 的基准；既有 `research_profile_test.go:1076-1135` 未被改动（给出它未变的依据）",
+        "**规模没有缩水冒充**：CI/小档的运行（若有）在 RESULT 里被明确标注「不是 SLO 对照」；两个档位的墙钟代价都报出来了",
+        "**没有碰 CI 定义**：`.github/**` 的 diff 为空；`.github/workflows/ci.yml` 的 7 个 job 一个字节未变；RESULT 里给了可直接粘的 YAML 片段",
+        "**没有替 T1201 干活**：没有实现 `docs/34` 的演示 seed，没有用 `demo-mof-humidity-separation` 这个 slug，没有改 `apps/web/**`",
+        "**RESULT 里写明**：每项测量的端点/查询位置与样本量、每个索引改动的依据、没测的项与原因（含前端那条 200ms）、以及所有你判断不了而按最严处理的地方",
+        "**新包不会让无库的单元 job 变红**：`go test $(go list ./... | grep -v '/tests/integration')` 在**没有数据库**的环境下对你新增的 `tests/benchmark/...` 包是绿的（或只报 `no test files`）；把这条命令与输出贴进 RESULT。",
+        "**范围自检**：`git diff --name-only` 与 `git status --porcelain` 里**没有** `cmd/**`、没有 `tests/` 下 `benchmark/` 以外的路径、没有 `ops/` 下 `ci/` 以外的路径；有的话直接判红。"
       ],
       "tests": [
         "perf benchmark"
       ],
       "allowed_scope": [
+        "tests/benchmark/**",
+        "infra/migrations/**",
         "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
-        "apps/web/**",
-        "internal/**",
+        "internal/persistence/queries/**",
+        "internal/persistence/sqlc/**",
+        "internal/config/**",
+        "ops/ci/**",
+        "Makefile",
         "go.mod",
-        "go.sum",
-        ".env.example",
-        "cmd/**",
-        "infra/**",
-        "tests/**",
-        "ops/**"
+        "go.sum"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "docs/**",
+        "apps/web/**",
+        "packages/**",
+        "internal/devorchestrator/**",
+        "specs/api/**",
+        "specs/ui/**",
+        "specs/orchestrator/**",
+        "specs/schemas/**",
+        ".github/**",
+        "pnpm-lock.yaml"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/27_PERFORMANCE_SLO.md",
+        "docs/21_DATA_MODEL.md",
+        "docs/68_SEARCH_ARCHITECTURE.md",
+        "docs/24_TEST_STRATEGY.md",
+        "docs/67_TEST_GATES.md",
+        "docs/adr/ADR-005-vector-search.md"
+      ],
+      "scope_note": "范围按「做这件事真的会碰到谁」划，共四块：**造数与测量**（`tests/benchmark/**`——新目录，`tests/` 下 20 个既有目录里没有重名的）、**索引与它唯一的生成物**（`infra/migrations/**` + `specs/database/postgres.sql`，后者**必须**在范围内，否则 `scope_validate.go:124` 那条「覆盖了标记输入却没覆盖它的派生物」会直接判不合规）、**被测量指认为瓶颈的查询形状**（`internal/persistence/queries/**`）与**可能被调的旋钮**（`internal/config/**`）、以及**接门要动的那一处**（`Makefile`）。`ops/ci/**` 留给阈值/基线文件的落地位置（照 `ops/ci/gofmt-baseline.txt`、`staticcheck-baseline.txt` 的惯例）。\n\n**`specs/**` 只开了一个口子**：`specs/database/postgres.sql` 这一个**生成物**（§8.1 的例外，且只能重新生成、不能手改）；`specs/api/**`、`specs/ui/**`、`specs/orchestrator/**`、`specs/schemas/**` 全部排除。**`apps/web/**` 排除**——前端那条「首个 loading state < 200ms」在本笔里只记账不测量，理由写在 AC 里：测它要一套真浏览器挂具，而本笔的量都在服务端与数据库这一侧；把它含进来会让一笔已经很重的任务再背一套挂具。**`internal/devorchestrator/**` 排除**（碰它会拖住正在跑的驱动）。\n\n说明一条口径：**`forbidden_scope` 不会被机械强制，真正拦人的是 `allowed_scope`**（收集期逐路径比对的就是它）。这里的 forbidden 是写给工人看的边界，别把它当成「没列进去就能写」。\n\n**`cmd/**` 我摘掉了**（2026-09-21）：初稿把 `cmd/**` 当成「可能被调的旋钮」放进来，但逐条读下来**没有任何一条要求需要动 `cmd/` 下的文件**——需求第 2 条提 `cmd/rddev/db.go` 是在陈述「`db` 只有 `migrate`、没有 seed」这个**现状**，不是让你去改它；需求第 8 条明确「`make` 目标归你、**CI 接线归我**」。而 `cmd/**` 覆盖 `cmd/api/**`，那里面有 authn/authz 装配、SSRF 名单与 release 出口——**一笔性能任务的授权不该伸进 API 服务器**。真需要动 `cmd/api/**`，那是另一笔任务。\n\n**`tests/**` 收成 `tests/benchmark/**`**，同理：被点名的消费者只有那一个新目录。`tests/integration/research_profile_test.go:1076-1135` 是**样板**（照它的形状写），不是让你去改它——需求第 13 条已写明原样留着。",
+      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄 + 三个 L1 决定）**\n\n**决定一：迁移编号在派工时由任务包发给你，以 `migration_number` 为准**（§8.1 要求编号由 Supervisor 侧分配、不许工人自己选；本仓的分配器是 `AllocateMigrationNumber`，`internal/devorchestrator/migration_numbers.go:83`，派工时链上最高是 `00110`）。**我在这里不写死一个号**——写死了反而会与任务包里的号打架（本笔初稿写过 `00111`，随后发现 `00111` 已在链上被另一个任务持有，正是这个坑）。\n\n**决定二：门里不许出现墙钟 SLO 断言。** 这是本笔最重要的一个决定，理由不是保守而是**已知的失败模式**：把 `p95 < 500ms` 写成 CI 断言，在共享 runner 上必然随机红，而随机红的门最后一定会被人用「放宽一点」修掉——那正是 `CLAUDE.md` 禁止的「为让门变绿而放宽 assertion」。所以**确定性层管形状（行数、计划可用索引、一个被明确标注为『回归天花板』的宽松上界），报告层管 SLO 对照**。**「SLO 达标与否是被记录下来的结论，不是 CI 断言」**——这句话我写进了需求第 7 条，也写进了 AC。\n\n**决定三：向量索引的两种结论都算合格，唯独不许不测。** `00092:63-71` 自己把这件事定成「a measurable performance decision with its own evidence」，还逐字留着「Left out as a decision, not by omission」。**本笔正是那个 evidence 该出现的地方**：量出来没超 2s → 用数字支持这个既有的决定；超了 → 加索引并给出前后对比与召回代价。**「加索引」不是本笔的成绩，「有数字」才是。**\n\n**收窄掉的东西**：原 phase 级默认给到整个 `internal/**`、`specs/SPEC_VERSION.json`、`.env.example`——与本任务无关，`internal/**` 收成 `internal/persistence/queries/**` + `internal/config/**` 两处真会动的，`specs/**` 收成一个生成物。**这同时消掉了一个真实的故障模式**：补丁带 `specs/**` 指纹，main 一动就 `git apply` 不上（本仓发生过，工具是 `rddev rebaseline`）。\n\n**为什么要把 T1201 的边界写死**（需求第 13 条）：仓库里已经有 `docs/34_SEED_DEMO_PROJECT.md` 这份「有科研语义的演示数据」规格和对应的 T1201，而本笔要的是容量规模的合成数据。两者都是「造数」，最容易顺手合并成一件——合并的代价是 T1201 的领域检查单被稀释，而本笔的规模基线被叙事数据拖慢。\n\n**第六次修订（2026-09-21，把 main 修绿）**：收窄时把 `internal/persistence/sqlc/**` 一并删掉了，而它是 `internal/persistence/queries/**` 与 `infra/migrations/**` 两个 marker 的**派生工件**（`specs/orchestrator/derived-artifacts.json`）。规则是「覆盖 marker 就必须同时覆盖派生工件」——删掉它的后果不是少给一点写入面，而是**这条任务在派工前就被判为不可执行**（`gate_spec_test.go:398`：dispatch refuses this, and the Worker cannot regenerate the artifact it must keep consistent），同时**把 main 的 `go` job 弄红了，连带所有在跑任务的 G2**。已补回。教训记在这里：收窄写入面时要顺着 derived-artifacts 的规则表走一遍，**marker 与派生工件是一对，不能只留一个**。"
     },
     {
       "id": "T1109",
@@ -6973,38 +7252,74 @@
         "T0007"
       ],
       "requirements": [
-        "metrics/traces/log dashboards",
-        "outbox/queue/git drift/visibility audit alerts"
+        "**先接受一个事实：这一笔是从零建，仓库里今天一个指标都不存在（2026-09-21 逐条核过）**。`internal/observability/**` **六个文件全是日志与关联 id**——包注释 `doc.go:1-4` 自己写着「implements the P0 logging/correlation baseline」。`grep -rn '/metrics'` 全仓**零命中**；`grep -rniE 'prometheus|opentelemetry|otlp|otel|grafana|alertmanager'` 在 Go/YAML/config 里**零真命中**（只有 `pnpm-lock.yaml` 的一个 Next 传递依赖与 `docs/64:105` 的一句「可选 OpenTelemetry Collector」）；`go.mod` 里没有 metrics 模块；`grep -rn 'sync/atomic' internal/ cmd/` 只命中 4 处**全在 `_test.go`**。`cmd/api/main.go:193-201` 的根 mux 只有 `/healthz`、`/readyz`、`POST /internal/jobs` 三条非产品路由。**你要建的是这台仪器的第一版。**",
+        "**另一条也要先知道：规格点名要的指标，有几条今天连「可以量的源」都没有**。`docs/26_OBSERVABILITY.md:15-17` §3 逐字列了：HTTP latency/error、DB pool/query、queue depth/failures、Git ingestion lag、blob upload/failure、**outbox lag**、webhook success、search latency、**LLM planner failures**、**RSG reconciliation drift**、permission denied rates。逐条对一下今天的树：**HTTP 有源**（`internal/observability/middleware.go:38-43` 每个请求已经在记 method/path/status/duration 的日志行——把它变成计数器/直方图）；**queue depth 有源但没接**（`internal/worker/queue.go:121-133` 的 `Depth(ctx)` **已经实现了，却没有任何生产代码调用它**——它只被测试调用）；**outbox lag 有源**（`outbox_events` 表 + `internal/events/publish.go`）；**webhook success 有源**（`internal/events/deliver.go` 的投递分类已经在跑）；**search latency 有源**；**LLM planner failures 有源且名字都定好了**（`internal/search/planner/plan.go:70-72` 逐字「Reason names why a Plan fell back. It is a closed set so the fallback rate can be counted per cause」）；**RSG drift 有源**（`cmd/api/reconciliation.go:48-60` 的每轮汇总已经在打 `refs_checked`/`findings_opened`/`findings_open` 这些 attr，只是不是指标）；**permission denied 有源但要动授权判定点**（见需求第 7 条）。**没有源的那几条（`Git ingestion lag`、`blob upload/failure`）照实报「没有可量的源」，不要为了凑数造一个假的计数器。**",
+        "**规格逐字，照抄**：`docs/26_OBSERVABILITY.md:13` 逐字「三类记录」——「Application logs：工程运行。Domain audit log：谁对何科研状态做了什么。Research events：可订阅的业务事件。**三者不能混成一个日志表。**」；`:19` 逐字「每个 request/command/job/event 携带 request_id/correlation_id/actor_id/project_id（如适用）。跨 API→queue→Git/S3 保持 trace。」；`:27-29` §6 逐字「**P1：data visibility leak suspicion、RSG/Git drift、database unavailable、blob integrity mismatch。P2：event/outbox backlog、search unavailable、webhook failures surge。**」",
+        "**「告警」在这棵树上今天是数据库里的一行，不是一条通知**（我核过，别把它当成已经有了）：`internal/gitprovider/reconciler.go:9-14` 逐字「ANY drift is a high-severity operational alert」，但它的实现是 `reconciler_store.go:251-258` 写一行 `git_reconciliation_findings` + 一行 `audit_log`（`via='system'`，metadata 里 `severity: 'high'`）。**没有一个码路径把告警发到任何外部系统**——全仓 `alert` 一词只出现在注释里。所以本笔要把这条链的另一半建起来：**规则文件 + 一个真的会因故障而触发的判定**。",
+        "**交付的形状（我按今天树上有什么定的，不是我拍的）**：\n  1. **`/metrics` 端点**，Prometheus/OpenMetrics 文本格式，暴露上面「有源」的那些族。**实测要能从 `cmd/api` 的一个真实进程上 curl 到**（不是测试里 mock 的 handler）。\n  2. **告警规则文件**放 `ops/`（Prometheus rules 的 `groups/rules` 形状），覆盖 `docs/26 §6` 里**有指标支撑**的那些类；没有指标支撑的类（`blob integrity mismatch`、`data visibility leak suspicion`）**逐条写下「本版无规则，因为无指标源」**，不要写一条永远为假的假规则充数。\n  3. **故障注入要真的跑到那一步**：`tests/observability/` 已经有现成的挂具形状——`trace-e2e.sh` 用 `go build` 出真二进制定、`setsid` 起来、打真日志、grep 真输出；`canary-sweep.sh:119-127` 甚至已经示范了**先种一个假泄漏、证明这一步能红、再撤掉**。**照这个形状做故障注入**：杀掉 `devredis`（或停掉 PostgreSQL）→ 断言对应的**指标真的动了**（计数器涨了、gauge 升到阈值以上）→ 断言**规则真的会触发**。\n  4. **规则的触发不许靠嘴说**：用 Prometheus 自己的 `promtool` 做两件事——`promtool check rules` 检查规则文件语法，`promtool test rules` 用合成序列断言 `ALERTS{alertname=\"…\"} == 1`。二进制按仓库既有形状由挂具自己取（`tests/web-smoke/run.sh` 自己装 Chromium 就是这个先例：工具放在挂具自己的目录里，不动仓库的依赖）。**故障注入那一半要把真实抓下来的样本喂进规则判定**，让「故障 → 指标动 → 规则响」是一条链，不是两段各自为政的证据。\n  5. **日志与 trace 两件也要有交付物，但要诚实**：今天日志是 stderr 上的结构化 JSON（`cmd/api/main.go:174`），**没有任何日志后端**，所以「log dashboards」在 V1 里只能是一份**字段契约**（哪些字段在哪些事件上必然存在、每块面板该查什么），写在 `ops/` 下；trace 的底子是关联 id（`docs/26:19` 要的 API→queue→Git/S3），交付「一条 id 走完全程」的可复跑证据，并把既有的 `tests/observability/trace-e2e.sh` 接进你的套件（它今天**不被 Makefile、不被 `scripts/ci.sh`、不被 CI 调用**，`grep` 零命中——接线归你，你的 Makefile 目标里跑它）。\n  6. **`outbox lag` 这一条要连着两笔旧账一起做**：`tasks/decisions.md:6904-6923`（`L1-20260914-73`）逐字把 T1001 复核意见的第 2 条与第 5 条**记名交给你**——「PG 挂掉时每秒一行 Error，没有退避」与「有 `WithBatchSize` 却没有 `WithPollInterval`，调参面不一致」，并写着「T1109 的规格必须承接」。**这两条是本笔的硬义务，不是可选项。** 做的时候把 `internal/events/publish.go:33-40` 那两个 `const` 变成按 SLO 口径可调，并给退避一个真实的节奏（现在 `Run` 循环在 PG 挂掉时**每秒一行 ERROR 永远打下去**）。",
+        "**`permission denied rates` 这一条我单独限死，而且限死的办法是先挑更浅的那个位置**：\n  - **首选：在判定被「消费」的地方计数**，也就是 `cmd/api/**` 与 `internal/httpmw/**`（都在你范围内，且不碰授权包）。拒绝在边界上是一个**产品可见的结果**（`403`、或按不可区分口径返回的 `404`），在那里计数是同一件事的更浅做法。\n  - **只有在边界确实看不见的时候，才允许进 `internal/authz/**`**——典型情形是**静默过滤**（例如检索按权限裁掉行，既不 403 也不 404，边界上无从分辨）。**这是我唯一允许你碰这个包的理由，而且要先用证据说明为什么边界不够**（举出具体的判定点、文件与行）。\n  - **进包的规矩（若真进了）**：只许**加计数**，**不许改任何判定**——不许改 engine、不许改 verdict、不许改矩阵、不许改 fail-closed 语义、不许改任何默认值。自证方式不是你说没事，而是：**既有的授权测试全绿且逐条未改**（`tests/integration/project_authz_test.go:46 TestProjectAuthzMatrix`、`tests/integration/org_permission_test.go:187`、`tests/integration/search_access_test.go:23` 等），**加上一条计数器的对照证明**（放行的一次不涨、拒绝的一次涨）。\n  - **若你发现不改判定就没法量，停下来报，不要改判定。**\n  - **无论走哪条路，都要报「这一族量到的是哪一档拒绝」**：边界能看见的与静默过滤掉的，是不是都被算进去了；漏掉的那一档要写明。",
+        "**「三类记录不能混成一个日志表」是硬约束**（`docs/26:13` 逐字）：本笔**不动** `audit_log`（那是 domain audit，已经有自己的只读面 `cmd/api/audithttp/`），**不动** `research_events`（那是可订阅事件，已经有 outbox 发布链）。指标只能从既有记录里**读出来**，不许新建一张「什么都往里塞」的表，也不许把 audit 行的写入路径改成顺手发指标。",
+        "**门与接线**：`tasks/tests.json` 里登记着 `observability smoke`（blocking）。交付一个从仓库根一条命令跑起来的入口，把上面几块串起来（建/起真进程、抓指标、注入故障、跑 promtool、跑 trace-e2e）。**`.github/workflows/ci.yml` 不要动**——它与 `specs/orchestrator/gates.json` 被 `internal/devorchestrator/gate_spec_test.go:17-58` 逐步对齐（`:31` 把 job 数写死成 7），而 gate spec 是 Supervisor 的只读区，你改了 CI 就会红同步单测而修不了。**给我可直接粘的 YAML 片段 + 墙钟代价**，接线我落。",
+        "**依赖与边界**：允许引入 `github.com/prometheus/client_golang`（**这是我在本笔里替你定的 L1 决定**）——理由是规格点名的族里有 HTTP latency 这类直方图，手搓直方图分桶是一个 bug 农场；`go.mod`/`go.sum` 在范围内，加完要 `go mod tidy` 且 `make staticcheck`、`make check` 全绿。**不许**引入完整的可观测性栈（Grafana/Alertmanager/Collector 都不引——`ops/deploy/docker-compose.staging.yml` 里加监控容器不在本笔）。不改 `specs/**`、`docs/**`、`tasks/**`；不做产品语义改动；不新建迁移（**真需要一张表，报回来，编号由我分配**，§8.1）。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "`/metrics` 端点（Prometheus 文本格式），从真实 `cmd/api` 进程上可 curl 到",
+        "`ops/` 下的告警规则文件（覆盖 §6 里有指标支撑的类；无指标的类逐条写明为何无规则）",
+        "故障注入挂具：真进程 + 真故障 + 指标真动 + 规则真触发（照 `tests/observability/` 既有形状）",
+        "`promtool check rules` / `promtool test rules` 的证据，且故障注入的**真实样本**喂进规则判定",
+        "`ops/` 下的日志字段契约与 trace 走查文档；`trace-e2e.sh` 接进 Makefile 目标",
+        "T1001 第 2、5 条旧账的落地：outbox 退避 + `WithPollInterval` 可调面",
+        "`permission denied` 计数器（只加计数不改判定）+ 对照证明",
+        "交给我的 CI YAML 片段与墙钟代价"
+      ],
       "acceptance_criteria": [
-        "故障注入可触发预期 alert"
+        "**故障注入可触发预期 alert**（任务原文）：抹掉一个真实依赖（devredis/PostgreSQL）之后，①对应指标确实动了（给出改动前后的原始样本），②规则确实触发（`promtool test rules` 对**那次真实抓下来的样本**断言 `ALERTS == 1`）。**并且这条链能失败**：不注入故障时同一套判定**不**触发（阴性对照），输出原文贴进 RESULT",
+        "**`/metrics` 是真的**：从仓库根按 RESULT 给的命令起真进程、curl 到端点、贴出原始输出；端点暴露的每个族都在 RESULT 里点名它对应 `docs/26 §3` 的哪一项",
+        "**没有指标源的那几项照实报**：`Git ingestion lag`、`blob upload/failure`（以及任何你查过确实没有源的）逐条写明「无可量的源」与你的查法；规则文件里没有为它们写假规则",
+        "**没有把三类记录混起来**：`audit_log` 与 `research_events` 的写入路径未被本笔改动；没有新建「什么都塞」的表；`infra/migrations/**` 的 diff 为空",
+        "**`permission denied` 计数器只加不改判定**：计数优先落在边界（`cmd/api/**`/`internal/httpmw/**`）；**若**进了 `internal/authz/**`，必须先用证据说明边界为何看不见，且该包的 diff **只有计数**、既有授权测试全绿且**未改**、有「放行不涨、拒绝涨」的对照证明；RESULT 里写明这一族量到的是哪一档拒绝、漏掉了哪一档",
+        "**T1001 两条旧账落地**：outbox 发布在 PG 不可用时有真实退避（贴出改前「每秒一行 ERROR」与改后的节奏对比），`WithPollInterval` 存在且被至少一条测试用到",
+        "**trace 与日志两件有交付物**：`trace-e2e.sh` 从仓库根一条命令跑起来并接进 Makefile；日志字段契约在 `ops/` 下且与代码里实际打的字段一致（给出核对命令）",
+        "**没碰 CI 定义**：`.github/**` 的 diff 为空；RESULT 里给出可直接粘的 YAML 片段与墙钟代价",
+        "**RESULT 里写明**：每个指标族的源文件与行、每个规则的表达式与阈值为什么这么定、没有覆盖的面与原因、以及所有你判断不了而按最严处理的地方"
       ],
       "tests": [
         "observability smoke"
       ],
       "allowed_scope": [
-        "specs/database/postgres.sql",
-        "specs/SPEC_VERSION.json",
-        "apps/web/**",
-        "internal/**",
-        "go.mod",
-        "go.sum",
-        ".env.example",
+        "internal/observability/**",
+        "internal/worker/**",
+        "internal/events/**",
+        "internal/gitprovider/**",
+        "internal/search/**",
+        "internal/authz/**",
         "cmd/**",
-        "infra/**",
+        "ops/**",
         "tests/**",
-        "ops/**"
+        "Makefile",
+        "go.mod",
+        "go.sum"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
-        "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        "infra/**",
+        "apps/web/**",
+        "packages/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/26_OBSERVABILITY.md",
+        "docs/25_CICD_DEVOPS.md",
+        "docs/48_DEFINITION_OF_DONE.md",
+        "docs/16_RSG_GIT_SYNC.md",
+        "docs/67_TEST_GATES.md"
+      ],
+      "scope_note": "范围按「指标从哪儿来」逐条划：观测包本身（`internal/observability/**`）、队列（`internal/worker/**`——`Depth()` 已经写好却没人调）、事件与 webhook（`internal/events/**`）、git 漂移（`internal/gitprovider/**`——reconciler 已经在算，只差把数字暴露出来）、检索（`internal/search/**`——planner 的 fallback reason 是个封闭集合，天生为计数而生）、授权拒绝计数（`internal/authz/**`，**只许加计数，见需求第 7 条**）、进程接线（`cmd/**`）、规则与文档产物（`ops/**`）、挂具（`tests/**`）、以及依赖与 Makefile。**`infra/**` 明确排除**：不新建迁移、不改 compose——本笔不加监控容器，那会让 staging 栈多出一整套要维护的东西，而验收要的是「故障能触发预期告警」，不是「装了一个 Grafana」。**`apps/web/**` 排除**：前端指标（`docs/26 §4` 那类运营指标）不在本笔的验收面上。",
+      "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄 + 替工人定的两个 L1 决定）**\n\n**决定一：允许 `github.com/prometheus/client_golang`。** 规格要 HTTP latency，那是直方图；手搓分桶是一个 bug 农场。这是我作为 Supervisor 的 L1 决定（CLAUDE.md §5），写进需求第 10 条，工人不必再论证。**但监控栈本身不引**：Grafana / Alertmanager / Collector 一个都不装。\n\n**决定二：`internal/authz/**` 破例进范围，但只许加计数——而且**先试不碰它的那条路**。** 「permission denied rates」是 `docs/26 §3` 点名的族。排除这个包会让规格点名的一族永远交不出来，所以不能简单排除；但一次复核提醒我，**拒绝在边界上（`403`/`404`）本来就是产品可见的结果**，在 `cmd/api/**` 与 `internal/httpmw/**` 计数是同一件事的**更浅做法**，而这两处本来就在范围内。于是口径改成：**优先在判定被消费的地方计数；只有边界确实看不见（静默过滤那一档）才准进包，且要先用证据说明边界为何不够。** 进包的规矩不变：**只许加计数、不许改任何判定**，并用既有授权测试全绿且未改来自证。**这条改动让本笔的攻击面严格变窄，同时没有把规格点名的那一族丢掉。**\n\n**这一笔的形状是我按「树上有什么」定的，不是按理想架构定的**：`Git ingestion lag` 与 `blob upload/failure` 今天**没有可量的源**，所以规则文件里为它们写假规则是禁止的，照实报即可。反过来，`queue depth` 的源已经写好了（`Depth()` 无人调用）、planner 的 fallback reason 是封闭集合、reconciler 每轮已经在打计数 attr——**这三条是「已有一半、只差暴露」的典型，别重新发明**。\n\n**CI 接线又一次归我**：`gate_spec_test.go:31` 把 ci.yml 的 job 数写死成 7，而 gate spec 是只读区——工人改 CI 就会红一座它修不了的测试。这条口径在 T1104/T1105 两笔里也一样写着。"
     },
     {
       "id": "T1110",
@@ -7096,13 +7411,26 @@
         "T1007"
       ],
       "requirements": [
-        "按 34_SEED_DEMO_PROJECT 自动构建 demo",
-        "synthetic 标记",
-        "idempotent reset"
+        "**种子数据不是自由创作，`docs/34_SEED_DEMO_PROJECT.md` 是一张可逐条验收的清单**（`docs/24_TEST_STRATEGY.md:24` 逐字：「固定 Seed MOF 项目，见 34_SEED_DEMO_PROJECT.md。不要大量随机不可读 fixture；重要 E2E 使用可解释 domain data。」）。逐条照它造：slug `demo-mof-humidity-separation`（`:6`）、Research Question Q1（`:11`）、H1/H2（`:15-16`）、最小对象计数（`:18`：3 Materials / 5 Samples / 8 Experiments / 6 Calculations / 5 Datasets / 3 Protocol versions / 6 Claims / 3 Findings / 3 External References）、证据四类 + **一个故意 contested 的 finding**（`:21`）、四个 branch 名（`:24`）、三种 PR（`:27`）、两个 Release（`:31`）、四类 asset（`:33`）、以及 `:36` 的对外贡献（第二个 demo 用户/组织 Fork/Reference H1 → 一条相反实验证据 → external evidence/PR）。**计数是下限不是目标**：少一条就是没造出来。",
+        "**一条命令、从空库到可用、可重复跑**（`docs/57_DEMO_UAT.md:5` 逐字：「每步演示前置状态由 Seed builder 自动生成；**不可依赖人工修 DB**。」）。第二遍跑不许因为残留数据失败——要么幂等，要么显式 `--reset` 且写明它删了什么。",
+        "**全部标 synthetic**：`examples/README.md:1-3` 逐字「这些 JSON 不是生产数据……Demo 内容必须始终标注 synthetic。」种子造出的对象/资产/声明都要带上这个标记。",
+        "**种子要能被别的门用**：T1202 的 canonical MOF 闭环脚本要在它上面跑（`tasks/tests.json` 的 `T1201-TEST-01`「seed builder」是 blocking）。所以它得能被脚本调用（命令、退出码、stdout 的机器可读摘要），而不是只有一份文档告诉你点哪里。",
+        "**证据从存储里读，不从返回值读**：每条计数断言都直接查 PostgreSQL（`infra/migrations` 里的表），因为「API 说建了」不等于「库里真有」（CLAUDE.md 的「能力存在要查写入侧」同一件事）。",
+        "**诚实报告**：清单里今天做不到的项（例如某个对象类型还没有产品路径可写）、以及你为了造出某个计数而走的路径（走了产品 API 还是直接写库——**必须是前者**，直接写库就等于演示里没有那条产品路径）逐条写清。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "可调用的 seed builder（脚本 + 一处入口，`ops/` 或 `tests/acceptance/` 下）",
+        "逐条对齐 `docs/34_SEED_DEMO_PROJECT.md` 的计数与结构",
+        "一条 verification 脚本：从空库建、再按表读回逐条断言（含 contested finding 与 external contribution 那一段的前置）",
+        "RESULT：每条计数的实测值、幂等实测、以及「哪些对象是走产品 API 造出来的」"
+      ],
       "acceptance_criteria": [
-        "一条命令生成完整 demo 网络"
+        "**仪器能说不（先做这一步）**：把 builder 里某一条（例如 6 Claims 里的一条）少造一个，验证脚本必须**转红**并指出少的是哪一类；红的输出留在 RESULT 里。",
+        "**逐条计数对得上**：`docs/34_SEED_DEMO_PROJECT.md:18/:21/:24/:27/:31/:33` 每一项都有实测计数与断言，逐条列出实测值。",
+        "**全部经产品路径**：至少抽样断言对象/分支/PR/release 的创建走的是 HTTP API（例如断言审计/事件行存在，或从 API 能读回），而不是直插数据库。",
+        "**幂等**：连着跑两遍，第二遍不因残留失败，且计数不翻倍（第二遍后仍等于清单值）。",
+        "**synthetic 标记**：能按标记筛出全部种子对象（一条查询证明）。",
+        "**诚实报告**：做不到的项与走了库的项逐条点名。"
       ],
       "tests": [
         "seed builder"
@@ -7111,7 +7439,6 @@
         "tests/acceptance/**",
         "tests/e2e/**",
         "ops/**",
-        "docs/**",
         "examples/**"
       ],
       "forbidden_scope": [
@@ -7121,8 +7448,14 @@
         "tasks/progress.md"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/34_SEED_DEMO_PROJECT.md",
+        "docs/57_DEMO_UAT.md",
+        "docs/24_TEST_STRATEGY.md",
+        "docs/31_MASTER_ACCEPTANCE.md"
+      ],
+      "scope_note": "**摘掉 `docs/**`（Supervisor-only）**：交付物写在 `tests/acceptance/**`、`tests/e2e/**`、`ops/**`、`examples/**`。要改 `docs/` 就报上来。\n\n**不碰 `infra/migrations/**` 与 `internal/**`**：种子数据要么用产品 API 造、要么用既有表直连——**不允许为了让 seed 好写而改 schema 或加产品代码**。真需要，报上来立新账。",
+      "supervisor_scope_narrowing": "**没有收窄别的，只摘掉 `docs/**`。** `docs/**` 是 Supervisor-only（CLAUDE.md §8.1）。本任务的交付物（脚本、样例、ops 清单）写在 `tests/acceptance/**`、`tests/e2e/**`、`ops/**`、`examples/**` 里；**要写 `docs/` 就报上来**，由 Supervisor 落笔。"
     },
     {
       "id": "T1202",
@@ -7137,13 +7470,29 @@
         "T0818"
       ],
       "requirements": [
-        "从 Q 到 H/branch/exp/calc/evidence/claim/finding/PR/main/release/assets/external project evidence/profile credit",
-        "真实 DB/Git/S3/浏览器"
+        "**这是一条门，不是一个演示。** `docs/31_MASTER_ACCEPTANCE.md:60`（Gate I）逐字：「完整 MOF workflow 从 Research Question 到外部项目贡献 Evidence 与 Profile credit，**全程真实 DB/Git/blob/browser，非 mock 演示**。」`docs/67_TEST_GATES.md:31` 逐字：「canonical MOF workflow 每个 phase milestone 至少跑一次，P12 必须完整跑通。」任务书逐字给的链路是：`Q → H/branch → experiment → calculation → evidence → claim → finding → PR → main → release → assets → external project evidence → profile credit`。",
+        "**入口脚本路径已经定死（我把它写进了闸门）：`tests/acceptance/mof-canonical-workflow.sh`。** `specs/orchestrator/gates.json` 里新增了 G3 job `mof-canonical` 指向它，T1202 的 `task_overrides.g3_jobs` 已经带上它——**也就是说：这个脚本会作为本任务的验收闸门真的被跑**，跑不过就合不了。",
+        "**每一步都要能被单独指认**：任务书的验收逐字写着「测试失败可定位 step」。所以脚本要按 step 组织（每步一个名字 + 一条断言），任一 step 红了要打印**是哪一步、期望什么、实际什么**，退出码非零。「跑完没报错」不算证据——每一跳都要有「它真的发生了」的断言（例如：合并之后**上游**的状态链上真的多了一个状态；external evidence 能按 pid 取回；profile credit 记在正确的贡献者名下）。",
+        "**不许 mock 掉关键一跳**。仓库里有两个真栈先例，照它们的形状来，别另起一套：`tests/e2e-pr-flows/run.sh:2-9`（逐字「Nothing is mocked: this is the one browser suite that needs the local dev stack (PostgreSQL, Gitea, and the git CLI on PATH) to be up」）与 `tests/e2e-release/run.sh:2-12`（真 PostgreSQL）。`tests/e2e-pr-flows/harness/main.go:504-583` 里已经有一个 MOF 项目的 seed（org `mof-humidity`、slug `demo-mof-humidity-separation`），**但种子数据应当来自 T1201 的 seed builder**，不要在脚本里再长一份。",
+        "**前置状态由 seed builder 自动生成，不依赖人工修 DB**（`docs/57_DEMO_UAT.md:5`）。所以脚本的第一步是调 T1201 的 builder（或断言它已经跑过），并把「库里现在有什么」读回一次作为基线。",
+        "**负向也要覆盖**：`docs/57_DEMO_UAT.md:7` 列了负向场景（匿名访问 private URL、Agent 尝试 publish、Git 直接推 main、restricted blob 下载、search 私有泄漏）。本任务**至少**要覆盖与这条闭环直接相关的两条（private 不可见、非成员不能合并），其余归 T1206。",
+        "**可复现性写清楚**（我要照着跑）：需要哪些服务在跑、端口、环境变量默认值够不够、装了什么、第二遍跑会不会因残留失败。",
+        "**诚实报告**：链路里今天走不通的那一跳，**停下来写清证据，不要用 stub 补**——上一轮 T0810 就是因为这个被停的。走不通就如实报 `failed`/`blocked` 并点名文件与行。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "`tests/acceptance/mof-canonical-workflow.sh`：一条命令跑完整闭环，逐步命名、逐步断言、失败可定位",
+        "浏览器那一段用真实 Chromium（照 `tests/e2e-pr-flows` 的做法），不是 curl 假装",
+        "负向断言（至少 private 不可见、非成员不能合并）",
+        "RESULT：每一步的实测证据、跳与跳之间的存储断言、以及走不通的项（若有）"
+      ],
       "acceptance_criteria": [
-        "Master Gate I 全通过",
-        "测试失败可定位 step"
+        "**仪器能说不（先做这一步）**：故意把链路上某一跳改坏（例如让合并那一步跳过），脚本必须**红**并**指名是哪一步**；把这段输出留在 RESULT 里。一个从没红过的门不算门。",
+        "**完整链路一次跑通**：从 Research Question 到 external contribution 与 profile credit，每一步都有断言；链路里的对象/状态/release/asset 都经真实 API 与真实服务产生。",
+        "**真实浏览器**：至少 PR/评审/合并这一段由真实 Chromium 驱动（脚本里能看出 playwright 启动），不是只有 HTTP 调用。",
+        "**终点断言**：external evidence 可按 pid 取回、profile credit 记在正确的贡献者名下、组织 affiliation 没有吞掉个人历史（`docs/31:30`）。",
+        "**可重复**：连着跑第二遍不因残留失败（或脚本自带 reset 并写明）。",
+        "**没被放宽**：链路里任何既有测试都不许删、不许 skip、不许放 timeout；需要改动既有测试时逐条说明理由并保持强度。",
+        "**诚实报告**：走不通的跳、以及你为了让它跑通做的任何妥协，逐条点名。"
       ],
       "tests": [
         "canonical playwright"
@@ -7151,8 +7500,8 @@
       "allowed_scope": [
         "tests/acceptance/**",
         "tests/e2e/**",
+        "tests/e2e-pr-flows/**",
         "ops/**",
-        "docs/**",
         "examples/**"
       ],
       "forbidden_scope": [
@@ -7162,8 +7511,15 @@
         "tasks/progress.md"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/31_MASTER_ACCEPTANCE.md",
+        "docs/67_TEST_GATES.md",
+        "docs/57_DEMO_UAT.md",
+        "docs/34_SEED_DEMO_PROJECT.md",
+        "specs/orchestrator/gates.json"
+      ],
+      "scope_note": "**摘掉 `docs/**`（Supervisor-only）**；`tests/e2e-pr-flows/**` **加进来**是故意的——那条真栈浏览器套件的 harness 与 seed 是你最该复用的东西，**复用它、不要复制它**（复制出第二份 harness 就是第二份要还的债）。\n\n**不碰 `internal/**`、`infra/migrations/**`、`cmd/**`**：本任务是门，不是修 bug。链路上哪一跳走不通，**报上来**，由我立新账；上一轮 T0810 就是因为在门里顺手修产品代码而被停的。",
+      "supervisor_scope_narrowing": "**摘掉 `docs/**`**（Supervisor-only，CLAUDE.md §8.1）；**加入 `tests/e2e-pr-flows/**`**：那里有唯一一条真栈浏览器套件与它的 harness/seed，本任务的浏览器那一段应当复用它而不是另写一套。其余保持 phase 默认。"
     },
     {
       "id": "T1203",
@@ -7252,40 +7608,56 @@
         "T1202"
       ],
       "requirements": [
-        "生成 API docs/SDK",
-        "MCP tools 与实现一致",
-        "schema examples"
+        "**任务书的验收是「无 undocumented public endpoint」。先把这句话变成一件可机械判定的事。** 现状（我核过，你可以复核）：`specs/api/openapi.yaml` 的 `paths` 是 36 条，而 `cmd/**` 与 `internal/**` 里挂载的 `/api/v1` 路由远多于此——**注意别用 grep 数**：注册形式至少有四种（`HandleFunc(\"POST /api/v1/…\")`、`Handle(\"…\")`、子路由 `v1.Handle(\"/api/v1/projects\", projectAPI.Routes())`、以及包内 `.Get/.Post/…`），我用正则数出来的数字不可信，**你要用一个能覆盖全部形式的枚举器**。",
+        "**枚举器要自己可证**：用 `go/ast` 扫 `cmd/**` + `internal/**` 的注册点，把「方法 + 路径模式」收齐；然后用一次变异证明它测得住——例如临时加一条新路由、或把某条注册换个形式，断言枚举结果**跟着变**（红了再绿）。**枚举器漏掉一条 = 这条门形同虚设。**",
+        "**两个方向都要判**：①挂载了但契约里没有（undocumented）；②契约里写了但没有挂载（例如 `/search` 与 `/search/{searchId}:start-project` 在 T0906/T0908 落地前就是这样）。两个方向都要有独立的红/绿实测。",
+        "**不要为了让门变绿去写一份宽豁免名单。** 这是本任务最容易走歪的地方：把几十条路由「登记成豁免」和「登记成契约」在机械上没有区别，但对 V1 的含义完全不同。**豁免名单由我（Supervisor）落笔**，条目必须引用一条既有的书面决定（ADR、`docs/` 的哪一节、或 `tasks/decisions.md` 的哪一条），你的交付是**清单 + 建议处置**，不是决定。",
+        "**`specs/**` 不在你的范围里**（CLAUDE.md §8.1：Worker 写 `specs/` 的唯一入口是 schema 快照的重新生成）。契约要怎么补、哪几条进豁免，**由我落笔**：你把清单交上来（机器可读），我改 `specs/api/openapi.yaml` 与豁免文件，然后门转绿——**这一步是任务的收尾，不是你的工作**。",
+        "**MCP 那一边同样**：`specs/mcp/tools.json` 与实现要对得上（哪些工具、read/write、参数），同样先枚举再比对；`docs/47_MCP_TOOL_CATALOG.md` 是文字面，**以实现为准**去核。",
+        "**诚实报告**：清单里每一条未登记路由，给出「它是什么、谁在用、建议进契约还是进豁免、理由」。**不要**把不认识的路由一律建议豁免——那等于把判定权丢掉。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "路由枚举器（能覆盖树里实际用到的全部注册形式）+ 它的自证变异实测",
+        "契约比对器：两个方向都判，红/绿各有实测",
+        "机器可读的清单：每条未登记/未挂载路由 + 建议处置 + 理由（`ops/` 或 `tests/contract/` 下）",
+        "MCP 工具与实现对账的同一形状的清单",
+        "RESULT：枚举器覆盖了哪些形式、两个方向的红绿输出、以及每条建议的理由"
+      ],
       "acceptance_criteria": [
-        "contract tests 通过",
-        "无 undocumented public endpoint"
+        "**仪器能说不（先做这一步）**：枚举器与比对器各做一次变异并**转红**，红的输出留在 RESULT 里（枚举器漏一条要能被自己的测试抓住）。",
+        "**两个方向都有实测**：造一条挂载了但没登记的（红）→ 登记后绿；造一条登记了但没挂载的（红）→ 移除后绿。",
+        "**清单完整且可核对**：清单里条数 = 比对器报出的条数；抽查任意三条，能按清单里的路径在代码里找到注册点。",
+        "**没有自作主张**：`specs/**` 一个字节都没动；豁免名单不是由你写的（若你写了，本任务判不通过）。",
+        "**MCP 对账有结论**：逐条给出「契约里的工具 / 实现里的工具 / 差异」。",
+        "**诚实报告**：每条建议的理由与不确定处。"
       ],
       "tests": [
         "contract suite"
       ],
       "allowed_scope": [
-        "specs/api/**",
-        "specs/mcp/**",
-        "specs/schemas/**",
-        "specs/SPEC_VERSION.json",
-        "packages/api-contracts/**",
-        "packages/schemas/**",
-        "tests/acceptance/**",
-        "tests/e2e/**",
         "ops/**",
-        "docs/**",
-        "examples/**"
+        "tests/**",
+        "packages/api-contracts/**",
+        "packages/schemas/**"
       ],
       "forbidden_scope": [
         ".git/**",
         "CLAUDE.md",
         "tasks/task_status.json",
-        "tasks/progress.md"
+        "tasks/progress.md",
+        "cmd/**",
+        "internal/**"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "specs/api/openapi.yaml",
+        "specs/mcp/tools.json",
+        "docs/22_API_DESIGN.md",
+        "docs/47_MCP_TOOL_CATALOG.md",
+        "docs/25_CICD_DEVOPS.md"
+      ],
+      "scope_note": "**把 `specs/**` 整个摘出去了**——包括原来给本任务的 `specs/api/**`、`specs/mcp/**`、`specs/schemas/**` 与 `specs/SPEC_VERSION.json`。理由是 CLAUDE.md §8.1 逐字：「其余 `specs/**` 与 `docs/**` 仍为 Supervisor-only」，Worker 写入 `specs/` 的唯一入口是 schema 快照的重新生成。所以本任务的形状改成「**你把清单与判定依据交上来，我落笔改契约**」，门在契约补完之后转绿。\n\n`cmd/**` 与 `internal/**` 保留**只读式**的使用（枚举注册点）；**本任务不改产品代码**——发现路由与实现不一致，报上来。",
+      "supervisor_scope_narrowing": "**本任务原来把 `specs/api/**`、`specs/mcp/**`、`specs/schemas/**` 放在 allowed_scope 里**，与 CLAUDE.md §8.1 冲突（`specs/**` 是 Supervisor-only，Worker 的唯一入口是 schema 快照）。这一版把 `specs/**` 全部移出并写进 `forbidden_scope`，任务形状相应改成「清单 + 建议处置交由 Supervisor 落笔」。同时摘掉 `docs/**`。\n\n**（2026-09-21 二次收窄，按安全复核）——`cmd/**` 与 `internal/**` 从 allowed_scope 里摘掉，改为 forbidden。** 理由：本任务的交付物是**清单与判定依据**，不是产品代码；「只读式使用」在机制上无法表达，allowed_scope 才是真正的闸门，留一个能改的目录就等于允许改。**枚举器与被变异证明都放在 `tests/**` 里**：枚举器是一个 `go run ./tests/...` 的独立程序（它**读** `cmd/**` 与 `internal/**` 是允许的——读不受 allowed_scope 约束），而「证明它说得出不会」的变异**打在 `tests/**` 里的合成 fixture 副本上**，不打在产品代码上——那样既不需要改产品树，也更强：一个只会对真实树点头的检查器是脆的，一个能对合成注册形态说不的检查器才是仪器。"
     },
     {
       "id": "T1206",
@@ -7296,17 +7668,30 @@
       "dependencies": [
         "T1202",
         "T1204",
-        "T1205"
+        "T1205",
+        "T1106"
       ],
       "requirements": [
-        "全部 blocking tests",
-        "dependency/secret/container scan",
-        "a11y/perf/privacy"
+        "**先看清今天真有什么，别照着文档假设有。** 我逐条核过的现状：\n  - **有的**：secret 扫描（`internal/config/secretscan.go`，回归在 `internal/config/secretscan_test.go:87-90`，跑在 CI 的 `go` job 与 `make check`）；权限负向 e2e（`tests/e2e/privacy_e2e_test.go:30`，逐字「The negative path is the point」）；a11y（`tests/web-smoke/a11y-smoke.mjs`，axe-core，**但不在 CI 也不在 Makefile**）；部署模板静态校验（`tests/acceptance/deploy-staging-smoke.sh`，**不在 CI**）。\n  - **没有**：dependency/CVE 扫描、SAST、容器扫描、SBOM——`ops/runbook-steps.json:149` 自己逐字写着「there is no dependency/CVE scan and CI has no security job」，`:165` 写「CI has no container build/SBOM stage」。`grep -rn gosec|govulncheck|trivy|npm audit` 全树零命中（只有一个 `//nolint:gosec` 注释）。\n  - **本任务要收进门的**：`tests/security/owasp-smoke.sh` 由 **T1106** 交付，我已经在 `specs/orchestrator/gates.json` 里建好 G3 job `security-smoke` 指向它，并挂进 T1206 的 `g3_jobs`。 **依赖边已声明**：T1206 的 `dependencies` 里已补上 `T1106`，所以它一定在你之前合入——不会出现「G3 job 指向一个还不存在的脚本」这种假红。",
+        "**交付物是一条命令的「总门」**：把上面「有的」那些 + T1106 的 owasp smoke 串起来，一条命令跑完、退出码有意义、每条检查**各自可红**。**不许用「都跳过」换绿**：某条检查在今天的环境跑不了（例如需要 docker 而没有），要**明确打印 `NOT ASKED` 并让它影响退出码或进「缺席清单」**，不能静默跳过——仓库里已有这个形状的先例：`tests/acceptance/phase-boundary-checkpoint.sh` 的项 5 与 `ci.yml:146-151` 的 NOT ASKED。",
+        "**缺席的那四项，用仓库既有的写法点名，不要造假**：`ops/runbook-steps.json:147-150` 用 `\"kind\": \"absent\"` + note 逐字承认缺口的做法就是先例。本任务把缺席项写成一份**机器可读的清单**（哪一项缺、为什么缺、今天靠什么替代、补它需要什么）。**风险接受不是你的决定**：`docs/23_SECURITY_PRIVACY.md:45` 要求「每个 Release 运行 dependency audit、SAST、secret scan、container scan、OWASP smoke、permission E2E。Critical/High 必须修复或有书面 ADR/risk acceptance（V1 不接受 Critical）」——**缺席项要不要作为 V1 风险被接受，由我以书面形式裁定**，你交清单与证据。",
+        "**能补的尽量补（不引入外部账号、不联网装新东西的前提下）**：如果本机已有工具链能提供其中某一项（例如 Go 自带的能力、或既有脚本能覆盖的一半），就补进去并标明它覆盖了什么、没覆盖什么。补不了就如实进缺席清单。",
+        "**证据要能复现，但录账不是你的活**：每条检查的命令、退出码、输出尾部，写进 RESULT——**按 `scripts/record_test_run.py` 的调用形状逐条列出**（`--id/--command/--exit-code/--output-file`，可直接粘贴执行的那种），并说明每条对应哪个检查。\n**你不要真的去写 `tasks/tests.json`**：那个文件是 CLAUDE.md §4 里 Supervisor-only 的账本，Worker 写它越界，`rddev worker collect` 会按越界拒收整个 diff。你**运行**检查（`scripts/**` 已在你的只读面内，跑脚本不需要写权限），**把调用写清楚**，由我在验收时逐条执行——这样账本上的 `passed` 才是我亲手跑出来的，不是你替我写上去的。顺带一句：这个工具拒绝为非零退出码记 `passed`，所以失败项如实写失败，别修饰。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "一条命令的总门（`tests/security/` 或 `tests/acceptance/` 下，命名自明），逐项输出 + 总退出码",
+        "缺席清单（机器可读）：dependency/CVE 扫描、SAST、容器扫描、SBOM 各一条，写清缺口与补法",
+        "每条检查的红/绿实测（至少三条：secret 扫描、权限负向 e2e、owasp smoke 各做一次变异）",
+        "RESULT：逐条实测证据 + 缺席清单 + 你建议的风险处置（**建议**，不是裁定）"
+      ],
       "acceptance_criteria": [
-        "Critical/High=0",
-        "tests.json blocking 全 passed"
+        "**仪器能说不（先做这一步）**：至少三条检查各做一次变异（例如往仓库里放一个假的 secret 样本、把一条权限负向断言的目标改错、把 owasp smoke 的某条守卫关掉），确认**转红**，红的输出留在 RESULT 里。",
+        "**总门一条命令**：跑完打印每条检查的名字 + 结果 + 总退出码；任一条红则退出码非零。",
+        "**跑不了的项不静默跳过**：打印 `NOT ASKED` 并进缺席清单；有断言证明「静默跳过」会让总门红（而不是绿）。",
+        "**缺席清单完整且具体**：四项各有一条，含「今天靠什么替代 / 补它需要什么 / 影响是什么」；不许把缺席写成「不需要」。",
+        "**a11y 与权限负向 e2e 真的进了门**（不再只靠人手工跑）。",
+        "**证据落账**：每条检查的真跑记录用 `scripts/record_test_run.py` 写进 `tasks/tests.json`（不许手改成 `passed`）。",
+        "**诚实报告**：缺席项与不确定处逐条点名，并给出你的处置建议。"
       ],
       "tests": [
         "master suite"
@@ -7314,8 +7699,8 @@
       "allowed_scope": [
         "tests/acceptance/**",
         "tests/e2e/**",
+        "tests/security/**",
         "ops/**",
-        "docs/**",
         "examples/**"
       ],
       "forbidden_scope": [
@@ -7325,8 +7710,15 @@
         "tasks/progress.md"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/23_SECURITY_PRIVACY.md",
+        "docs/31_MASTER_ACCEPTANCE.md",
+        "docs/67_TEST_GATES.md",
+        "docs/25_CICD_DEVOPS.md",
+        "specs/orchestrator/gates.json"
+      ],
+      "scope_note": "**摘掉 `docs/**`（Supervisor-only）**；**加入 `tests/security/**`**（T1106 交付 owasp smoke 的地方）。\n\n**`scripts/**` 已摘掉**（2026-09-21 收窄）：加它的原意是「`record_test_run.py` 所在」，但**跑脚本不需要写权限**——它在写入面里只会多给一条改证据记录器的路，而本任务恰恰是那个**被记录**的门。被考的人不该攥着笔：删除一个秘密扫描断言、把 `passed` 写宽松，只需改 `scripts/**` 里一个文件。现在你只**运行**它、把调用写进 RESULT，落账由我在验收时做。\n\n**不碰 `.github/workflows/**`**：本任务是把门建起来并跑给你看，**要不要进 CI 是 Supervisor 的决定**（CI 的 job 清单与 `gates.json` 的 `required_jobs` 必须一致，改一处要同时改另一处，那是我的面）。你要的是「本地一条命令能跑」，外加一句「建议挂到哪个 job」。",
+      "supervisor_scope_narrowing": "摘掉 `docs/**`；加入 `scripts/**` 与 `tests/security/**`；把 `.github/workflows/**` 放进 `forbidden_scope`（CI 与 gates.json 的一致性由 Supervisor 维护）。\n\n**第五次修订（2026-09-21，自动安全评审触发）**：评审提「worker-writable gate-evidence scripts」——本条**采纳，而且它比评审说的更具体**。查证：`scripts/record_test_run.py:37` 的 `TESTS_REL` 就是 `tasks/tests.json`，而 CLAUDE.md §4 把 `tasks/**` 定为 Worker 只读。所以原需求第 5 条「用 `record_test_run.py` 记进 `tasks/tests.json`」**是一句会越界的指令**，worker 照做就会在 collect 被拒。两处一并改：写入面摘掉 `scripts/**`（跑不需要写权限），需求改成「跑检查、把调用形状写进 RESULT」。"
     },
     {
       "id": "T1207",
@@ -7338,15 +7730,26 @@
         "T1206"
       ],
       "requirements": [
-        "逐条核对 31_MASTER_ACCEPTANCE",
-        "输出 build/version/commit/test evidence",
-        "remaining nonblocking risks"
+        "**这是「完成声明」的落笔处，`CLAUDE.md:186-188` 逐字**：「完成不是\"所有 task 显示 done\"。必须同时：所有 V1-required task merged、四层 Gate 通过、Master Acceptance 通过、MOF canonical workflow 从 Research Question 到 external contribution 全闭环通过，**并有可复现证据**。」所以报告要有四块，每块都要**指到一次真跑过的命令与其记录**，而不是复述结论。",
+        "**Master Acceptance 逐条核**：`docs/31_MASTER_ACCEPTANCE.md` 的 Gate A–I（`:5-60`）加 Development System Gate（`:62-72`），**每一条**给出：判定（通过/未通过/不适用）、证据（命令 + 落账位置）、以及未通过项的处置。Gate I 全文只有一句（`:60`）：「完整 MOF workflow 从 Research Question 到外部项目贡献 Evidence 与 Profile credit，全程真实 DB/Git/blob/browser，非 mock 演示」——它的证据是 T1202 的 `mof-canonical` 门的记录。",
+        "**任务侧逐条核**：`tasks/task_status.json` 里所有 `v1_required=true` 的任务都 `merged`（逐条列出，不用「应该都好了」），以及 `tasks/tests.json` 里 blocking 条目**没有 `not_run` 冒充 `passed`**——账本的规矩是「没有 command 的 `passed` 不算证据」。",
+        "**剩下的风险要写在明面上**：未能达成/未能验证的项，一条不落地点名（含 T1206 的缺席清单：dependency/CVE 扫描、SAST、容器扫描、SBOM），并写清「影响是什么、V1 之后怎么补」。仓库已有这个写法：`ops/runbook-steps.json:147-150` 的 `\"kind\": \"absent\"`。**不许用「基本通过」「大体没问题」这类话把缺口糊过去。**",
+        "**报告落在 `tests/acceptance/`（不是 `docs/`——那是 Supervisor-only）**，文件名自明；我会按需要把它落到 `docs/` 去。同时给出 build/version/commit（`git rev-parse HEAD`）、以及每条证据的复跑命令（我要照着复跑）。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "V1 验收与交付报告（Markdown，落在 `tests/acceptance/` 下）",
+        "Gate A–I + Development System Gate 的逐条判定表（判定 / 证据 / 命令 / 落账位置）",
+        "v1_required 任务清单与状态（逐条，从 `tasks/task_status.json` 生成，不是手抄）",
+        "剩余风险与缺席清单（逐条，含影响与补法）",
+        "可复跑命令清单 + `git rev-parse HEAD`"
+      ],
       "acceptance_criteria": [
-        "所有 V1 gate checked",
-        "task_status 所有 required done",
-        "progress 标记 completed"
+        "**逐条覆盖**：Gate A–I 与 Development System Gate 共 10 条，每条都有判定与证据；缺一条判不通过。",
+        "**证据指到真跑过的东西**：每条证据给出命令与它的落账位置（`tasks/tests.json` 条目名或 gates 运行记录）；抽查三条，按命令复跑能复现判定。",
+        "**没有假装通过**：任何一条判定是「未通过 / 未验证 / 不适用」的，都必须在「剩余风险」一节里出现（两处条数要能对上）。",
+        "**v1_required 逐条列**：报告里的任务清单条数 = `tasks/task_status.json` 里 `v1_required=true` 且状态非 `merged` 的条数（应为 0），由脚本生成而非手写。",
+        "**可复现**：给出 `git rev-parse HEAD` 与全部关键命令；报告中不允许出现「见某次聊天」「凭记忆」这类来源。",
+        "**不许把门放宽**：报告只是报告；**不许为了让某条判定变绿去改测试、改台账或改 `tasks/tests.json` 的 status**（账本只能由 `scripts/record_test_run.py` 写真跑结果）。"
       ],
       "tests": [
         "final audit"
@@ -7355,8 +7758,8 @@
         "tests/acceptance/**",
         "tests/e2e/**",
         "ops/**",
-        "docs/**",
-        "examples/**"
+        "examples/**",
+        "scripts/**"
       ],
       "forbidden_scope": [
         ".git/**",
@@ -7365,8 +7768,14 @@
         "tasks/progress.md"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/31_MASTER_ACCEPTANCE.md",
+        "docs/48_DEFINITION_OF_DONE.md",
+        "docs/24_TEST_STRATEGY.md",
+        "CLAUDE.md"
+      ],
+      "scope_note": "摘掉 `docs/**`（Supervisor-only）；加入 `scripts/**`（要读 `record_test_run.py` / `reconcile_tests_ledger.py` 的口径）。报告落在 `tests/acceptance/`。",
+      "supervisor_scope_narrowing": "摘掉 `docs/**`；加入 `scripts/**`。"
     },
     {
       "id": "T1208",
@@ -7380,14 +7789,29 @@
         "T0812"
       ],
       "requirements": [
-        "导出 Git bundle/repository refs、RSG manifests、Scientific Object/relations、Issues/PR/Reviews、Releases/Assets metadata、Contribution/Audit export、可访问 blobs 清单/打包选项",
-        "格式文档化且不依赖内部 DB 主键才能理解",
-        "Restricted/private 导出仅授权 owner"
+        "**可移植导出的内容按 `CLAUDE.md:74`（§8 Canonical 数据真相边界）逐字来**：Release 把「**RSG snapshot hash + Git commit SHA + blob hashes + schema/policy/rights version**」固定为不可变状态。导出物就是这四样的**齐备**（少一样都不可移植）：RSG 的 manifest/快照、Git 的 ref 与 commit、blob 的内容（S3/MinIO 上的大对象）、以及 schema/policy/rights 的版本标识。",
+        "**导出是只读的**：整个过程不许改动源项目（不许写新版本、不许动 branch、不许改 blob）。要有断言证明导出前后源侧存储逐字节没变（至少：状态版本行数、branch head、blob 的 hash 集合）。",
+        "**要在另一套干净环境里真的导进去**：导入后按 §8 的口径重建——PostgreSQL 里的科研真相、Git 里的文本历史、S3/MinIO 里的大对象——并且 **RSG snapshot hash 与导出侧一致**、Git commit 一致、blob 逐字节一致（按内容 hash 比，不按路径比）。",
+        "**完整性要能在导入侧被检出，不是靠信任**：任何一处被改动（改一个 blob 字节、挪一个 commit、改一行 manifest）都要在导入时**被检出并拒绝**，而不是静默接受。仓库里已有这个形状的先例：schema 快照与 spec 指纹都是「生成物 + `--check`」，照那个形状做。",
+        "**真实服务**：PostgreSQL、S3/MinIO、Gitea 都用真的（`tests/acceptance/*-real-services-e2e.sh` 是既有形状；`make infra-up` 起本地栈）。**不许用内存里的假存储把这一段走通**。",
+        "**幂等与可重复**：同一项目导出两次得到同一份内容（或至少同一组 hash）；导入到已存在的目标上要么幂等、要么明确拒绝。",
+        "**诚实报告**：今天**导不出**或**重建不回来**的部分（例如某个 blob 没有落到 S3、某类对象没有版本字段）逐条点名，不要用「其余都一样」带过。"
       ],
-      "deliverables": [],
+      "deliverables": [
+        "导出器（一条命令：项目 → 一份可搬运的导出物 + 一份清单含四类 hash）",
+        "导入器/重建器（一条命令：导出物 → 干净环境里的项目）",
+        "端到端脚本：导出 → 干净环境导入 → 四类标识逐条比对（真 PostgreSQL + 真 S3/MinIO + 真 Gitea）",
+        "篡改检出用例：至少三类篡改各自被拒",
+        "RESULT：四类标识的实测值、只读性证据、以及导不出/重建不回来的项"
+      ],
       "acceptance_criteria": [
-        "导出包可在离线 validator 中校验 hash/refs",
-        "Seed Project 导出后关键对象/历史计数一致"
+        "**仪器能说不（先做这一步）**：三类篡改（改 blob 一个字节、改 manifest 一行、换一个 commit）各做一次，确认导入侧**拒绝**并指名是哪儿；再把拒绝逻辑关掉，确认用例转红。两段输出都留在 RESULT 里。",
+        "**四类标识齐备且一致**：RSG snapshot hash、Git commit SHA、blob hashes、schema/policy/rights version——逐条给出导出侧与导入侧的实测值并断言相等。",
+        "**导出只读**：导出前后源侧的状态版本行数、branch head hash、blob 内容 hash 集合逐条相同。",
+        "**真实服务**：脚本里能看到真的 PostgreSQL / S3(MinIO) / Gitea 调用；没有内存假存储替代关键一跳。",
+        "**可重复**：同一项目导出两次的四类标识一致；导入到干净环境两次结果一致（或第二次明确拒绝并说明）。",
+        "**残留物清干净**：脚本跑完不留进程、不留端口占用、不留临时目录（我在同一台机器上要能立刻复跑）。",
+        "**诚实报告**：导不出/重建不回来的项与不确定处逐条点名。"
       ],
       "tests": [
         "project export portability e2e"
@@ -7396,7 +7820,6 @@
         "tests/acceptance/**",
         "tests/e2e/**",
         "ops/**",
-        "docs/**",
         "examples/**"
       ],
       "forbidden_scope": [
@@ -7406,8 +7829,14 @@
         "tasks/progress.md"
       ],
       "decision_level_max": "L1",
-      "relevant_specs": [],
-      "scope_note": "这是 phase 级默认上限；Supervisor 在 spawn 前必须按具体 Task 再缩小 allowed_scope。"
+      "relevant_specs": [
+        "docs/09_VERSION_CONTROL.md",
+        "docs/07_RSG_SPEC.md",
+        "docs/31_MASTER_ACCEPTANCE.md",
+        "docs/67_TEST_GATES.md"
+      ],
+      "scope_note": "**`scripts/**` 已从本任务摘出（2026-09-21 Supervisor 收窄，安全评审后）。**理由是那里放的不是普通工具，而是**验收仪器本身**：`scripts/record_test_run.py`（测试证据录入口）、`scripts/validate_specs.py`、`scripts/validate_task_state.py`、`scripts/spec_version.py`、`scripts/gen_schema_snapshot.py`、`scripts/reconcile_tests_ledger.py`、`scripts/staticcheck.sh`、`scripts/ci.sh`。**能让被验收者写验收仪器的写入面，等于让考生改卷子**——一个能改 `record_test_run.py` 的工人可以伪造测试证据，一个能改 `validate_specs.py` 的工人可以让规格校验放行。同一条口径已经用在 T1206 上（2026-09-21 同一轮）。",
+      "supervisor_scope_narrowing": "**（2026-09-21 第 2 版·安全收窄）`scripts/**` 移除。** 你的导出工具与它的 `--check` 校验器放在 `tests/acceptance/**`（要求 5 点名的 `*-real-services-e2e.sh` 就是既有形状）或 `ops/**`；幂等/完整性用的辅助脚本同样用 `tests/**` 或 `ops/**` 下的名字，**不要往 `scripts/` 里放**。如果你判断某个文件非落在 `scripts/**` 不可（例如必须复用 `speclib.py` 里的解析），**不要自己开这个口子**：在 RESULT 的 follow_up 里点名是哪一个文件、为什么、由 Supervisor 决定是放宽范围还是给你一个更合适的落点。\n\n**别再犯 T1108 那种错**：范围收窄只影响你**写**什么，不影响你**读**什么——整个 worktree 你都可以读，`scripts/` 下的既有脚本你随便调用（`python3 scripts/...` 只读执行没问题）。"
     },
     {
       "id": "T0013",

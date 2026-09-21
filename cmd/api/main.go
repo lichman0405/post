@@ -84,6 +84,7 @@ import (
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
 	appcontribution "github.com/lichman0405/post/internal/application/contribution"
+	"github.com/lichman0405/post/internal/application/dependencyimpact"
 	"github.com/lichman0405/post/internal/application/diffs"
 	"github.com/lichman0405/post/internal/application/discussions"
 	"github.com/lichman0405/post/internal/application/evidencegraph"
@@ -121,6 +122,7 @@ import (
 	"github.com/lichman0405/post/internal/search/answer"
 	"github.com/lichman0405/post/internal/search/ranking"
 	"github.com/lichman0405/post/internal/search/retrieval"
+	"github.com/lichman0405/post/internal/security"
 	"github.com/lichman0405/post/internal/version"
 	"github.com/lichman0405/post/internal/worker"
 )
@@ -371,6 +373,22 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "post-api: authentication configuration error:\n%v\n", err)
 		return exitConfig
 	}
+	// Edge hardening (T1106, docs/23 §7): the response-header set and the
+	// shared rate-limit budgets. Loaded fail-closed like every other
+	// configuration block — an unparseable budget refuses to start rather
+	// than silently running with a different policy than the operator
+	// wrote. The budgets are logged on one line at startup so the running
+	// policy is visible without reading the loader.
+	securityCfg, err := securityLoader().Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "post-api: security configuration error:\n%v\n", err)
+		return exitConfig
+	}
+	// One limiter instance, two consumers: the login service (per-email and
+	// per-IP brute-force budgets) and the edge middleware (the coarse
+	// per-class budgets). They share the Redis keyspace but never a bucket —
+	// the middleware namespaces its keys "edge:".
+	rateLimiter := persistence.NewRedisRateLimiter(redisClient)
 	// Audit (T0110): one store writes auth events and serves the Activity
 	// reads; the state-changing stores append audit rows inside their own
 	// transactions. The auth surface records through it best-effort (the
@@ -379,7 +397,7 @@ func run(args []string) int {
 	authAPI := authhttp.New(authhttp.Deps{
 		Users:      persistence.NewCredentialStore(pool),
 		Sessions:   persistence.NewRedisSessionStore(redisClient),
-		Limiter:    persistence.NewRedisRateLimiter(redisClient),
+		Limiter:    rateLimiter,
 		OIDCClient: newOIDCClientOrNil(authCfg),
 		Cfg:        *authCfg,
 		Secure:     cfg.Layer == config.LayerProd,
@@ -524,8 +542,12 @@ func run(args []string) int {
 	// The three-way diff use case (T0401): one instance serves both the PR
 	// page's diff read (T0408, through the prdiff resolution below) and the
 	// conflict resolution surface (T0407) — the engine is stateless and the
-	// ports are the same two read stores.
-	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool))
+	// ports are the same read stores. The third port is the proposal read
+	// (T0817) that lets the SOURCE side of a triple live in another project
+	// when a pull request of this one proposes it — the external fork's
+	// shape, and the only foreign source any of these callers may read.
+	pullRequestStore := persistence.NewPullRequestStore(pool)
+	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool), pullRequestStore)
 	// One check service, two consumers: the PR page's review read and the
 	// merge command's server-side re-run (docs/22 §7). The merge must run the
 	// SAME review the human read — a second instance would be a second
@@ -541,6 +563,16 @@ func run(args []string) int {
 		Manifest: persistence.NewManifestStore(pool),
 		Policies: persistence.NewPolicyStore(pool),
 		Engine:   integrity.New(reg),
+		// The PR first screen's dependency impact line (T1007): the same
+		// analysis's read surface, with the caller's own access applied per
+		// affected project. The WRITE side of the analysis is not here — it
+		// runs in cmd/worker off the published event log, because 「上游变更
+		// 触发」 names no user a request could authenticate (docs/19 §3), and
+		// no route in this binary triggers it.
+		Impact: dependencyimpact.NewService(
+			persistence.NewDependencyImpactStore(pool),
+			dependencyimpact.ProjectsGate(projectAPI.Service()),
+		),
 	})
 	// Project schema profiles (T0213): namespaced, versioned JSON Schema
 	// extensions of the official base schemas. The persisted profile rows
@@ -645,12 +677,25 @@ func run(args []string) int {
 		Repos:        forkProvisioner,
 		Imports:      forkImporter,
 		PullRequests: prSvc,
-		Authz:        authz.NewMatrixEngine(),
+		// Reviews is the same pull-request service read through its review
+		// surface: sending an EXISTING proposal into review (T0411) is the
+		// pull-request state machine's move, driven from here because the
+		// authorization for it is the open_pr cell this service already
+		// resolves. Without it the route would fail closed with 503 — the
+		// service refuses rather than moving a row nobody authorized.
+		Reviews: prSvc,
+		Authz:   authz.NewMatrixEngine(),
 	})
 	pullrequestsAPI := pullrequestshttp.New(pullrequestshttp.Deps{
 		PullRequests: prSvc,
 		Create:       forksSvc,
-		Checks:       checksSvc,
+		// Sending a proposal into review (T0411) is a governance action,
+		// so it is authorized where every other open_pr decision is:
+		// the forks service resolves the SAME cell against the PR's
+		// project (including the non-member's fork lineage) and drives
+		// the pull-request command that moves the row.
+		Review: forksSvc,
+		Checks: checksSvc,
 		// The PR's Research State Diff (T0408): the PR's own fixed base,
 		// its proposed head and the target branch's current head, computed
 		// by the T0401 engine. The base is never re-derived from the target
@@ -1073,7 +1118,14 @@ func run(args []string) int {
 		Aborts:   persistence.NewScientificObjectStore(pool),
 		Projects: projectAPI.Service(),
 		Authz:    authz.NewMatrixEngine(),
-		Checks:   checksSvc,
+		// The fork lineage (T0817): the merge reads a source branch out of
+		// its own project only when the lineage says that project is the PR
+		// author's fork of the PR's project — the same triple 00086's
+		// pull_request_fork_gate enforces on the row. Without it the merge
+		// refuses every cross-project source rather than reading a foreign
+		// project's branch on the say-so of a PR row.
+		Forks:  persistence.NewForkStore(pool),
+		Checks: checksSvc,
 		// The policy in force is read through the owning service (T0603) and
 		// evaluated through the typed rule surface: the merge asks a question
 		// (main_protected?) and never reads policy_json itself.
@@ -1088,6 +1140,12 @@ func run(args []string) int {
 	mergeAPI := mergehttp.New(mergehttp.Deps{
 		Command:  mergeSvc,
 		Projects: projectAPI.Service(),
+		// The collection's last path segment has ONE remainder owner and it
+		// is this route (Go's ServeMux cannot match a suffix inside a
+		// segment, and a second remainder registration panics), so the other
+		// verb on that segment — ":request-review", T0411 — is served by the
+		// pull-request surface's handler, dispatched from here.
+		ReviewRequest: pullrequestsAPI.RequestReviewHandler(),
 	})
 	mergeAPI.Register(v1)
 	// Freeze main governance (T0601). The two halves of one rule live in
@@ -1197,9 +1255,28 @@ func run(args []string) int {
 	searchAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
+	// The edge chain, outermost first (T1106):
+	//   1. security.Headers stamps the secure response-header set on every
+	//      response — including the ones the limiter refuses below, so a
+	//      429 carries the same CSP and nosniff as a 200;
+	//   2. observability assigns the correlation id, which the limiter's
+	//      own error envelope reports as request_id;
+	//   3. security.RateLimit guards the WHOLE tree — not just /api/v1 —
+	//      because the two routes that bypass the /api/v1 guard are the
+	//      ones that most need a budget: the provider push receiver
+	//      (POST /api/v1/git/hooks/gitea, authenticated by HMAC, outside
+	//      the session guard by design) and the scaffold enqueue endpoint
+	//      (POST /internal/jobs). The only exemption is the pair of
+	//      liveness/readiness probes (security.ExemptProbePaths).
+	securityCfg.SessionCookie = authhttp.CookieSession
+	handler := security.Headers()(
+		observability.Middleware(logger)(
+			security.RateLimit(rateLimiter, *securityCfg)(mux)))
+	slog.Info("post-api: edge rate limiting active", "policy", securityCfg.Describe())
+
 	srv := &http.Server{
 		Addr:              cfg.Server.Addr,
-		Handler:           observability.Middleware(logger)(mux),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -1311,6 +1388,10 @@ func databaseDSN(cfg *config.Config) string {
 // authnLoader resolves the auth configuration environment (the loader is
 // injectable so main_test can run without real env).
 var authnLoader = func() authn.Loader { return authn.Loader{} }
+
+// securityLoader resolves the edge-hardening configuration environment
+// (injectable, same reason as authnLoader).
+var securityLoader = func() security.Loader { return security.Loader{} }
 
 // gitproviderLoader resolves the GitProvider configuration environment
 // (injectable, same reason as authnLoader).

@@ -24,6 +24,13 @@ type errorEnvelope struct {
 // the identical error shape.
 func WriteError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
+	// nosniff on every envelope, from the one function that renders every
+	// envelope (T1106). The edge middleware (internal/security.Headers)
+	// sends the same header on every response; stating it here too is what
+	// makes the fact belong to the exit rather than to the chain — a
+	// handler reached without the edge (a unit test, a future mount) still
+	// cannot have its JSON reinterpreted as something executable.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(errorEnvelope{
 		Code:      code,
@@ -44,6 +51,7 @@ func requestID(r *http.Request) string {
 // WriteJSON renders a success payload.
 func WriteJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
 }

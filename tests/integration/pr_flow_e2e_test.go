@@ -300,7 +300,7 @@ func newFlowFixture(t *testing.T, ctx context.Context) *flowFixture {
 	})
 	prStore := persistence.NewPullRequestStore(pool)
 	prSvc := pullrequests.NewService(prStore)
-	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool))
+	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool), persistence.NewPullRequestStore(pool))
 	diffOfPR := prdiff.NewService(prStore, branchStore, diffSvc)
 	resolutionSvc := resolutions.NewService(diffSvc, resolutions.NewPGStore(pool), projectSvc, authz.NewMatrixEngine())
 	checksSvc := prchecks.NewService(prchecks.Deps{

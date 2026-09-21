@@ -1,0 +1,70 @@
+{
+  "id": "T1103",
+  "dependencies": [
+    "T0704",
+    "T1101"
+  ],
+  "tests": [
+    "publish ux e2e"
+  ],
+  "phase": "P11",
+  "phase_name": "UI、安全、可访问性、性能与运维加固",
+  "title": "Publication/Visibility Security UX",
+  "v1_required": true,
+  "decision_level_max": "L1",
+  "requirements": [
+    "**现状定性（2026-09-21 复核，逐条可核）：后端齐全，前端一个调用都没有。** 四条路由已经挂上并已被真服务 e2e 走过——`cmd/api/assetshttp/wiring.go:97-98`（`POST /api/v1/projects/{projectId}/assets:publish-preview`、`…/assets:publish`）与 `cmd/api/knowledgehttp/wiring.go:134-135`（`…/knowledge:publish-preview`、`…/knowledge:publish`）；权限门是 `internal/application/assetpublish/command.go:384 requirePublish`（`:402 Action: authz.ActionPublishPrivateToPublic`）；影响预览是 `internal/assets/preview.go:575 func Preview(...) (ImpactPreview, error)`，它在 publish 事务里被**服务端重跑**（`cmd/api/main.go:856` 逐字 `the server-side re-run of the impact preview`）。而 `apps/web` 里 `grep publish-preview` **零命中**——没有页面、没有按钮、没有调用。所以本任务是**接一条已经存在的链**，不是造后端。",
+    "**规格逐字，照抄，别换措辞**：`docs/06_UI_UX_SPEC.md:46-48` 第五节标题就叫 Publish/Visibility UX，正文逐字「**任何 private→public 必须独立确认页，列出：将公开的对象、metadata、blob access、依赖、private evidence/attestation、rights/license。禁止一个 generic “Are you sure?” 弹窗替代影响清单。**」；`docs/12_PERMISSIONS_RIGHTS_POLICY.md:17` 逐字「任何 private→public、restricted→open、named access→public 都要求有权限的人显式确认，并产生 audit/event。Agent/MCP 不得自动执行此类扩大操作。」；`docs/23_SECURITY_PRIVACY.md:17` 逐字「这是最高风险 operation。必须：human explicit action、impact preview、rights validation、no hidden private dependency leak、audit event、optional org policy approvals。Agent token 默认无 `visibility:publish` scope。」",
+    "**「独立确认页」是字面意思**：一个**页面**（有 URL、可回退、可直接访问），不是 `window.confirm`，不是弹窗，不是折叠在列表里的一个按钮。页面的主要面积就是那六类清单；确认动作是页面上的一个**明确的**动作，并且它提交的是**服务器给出的那一份预览**所对应的发布。任务的验收原文「不能一键 generic modal 发布敏感 state」指的就是这条。",
+    "**清单里的六类，逐类说明今天在数据里对应什么（我核过 `internal/assets/preview.go`，别自己猜）**：`objects`、`metadata`、`blobs`、`refs`、`private_dependencies` 五张清单与 `blockers` 都在 `ImpactPreview` 里（`:240` 起；`PrivateDependency` 在 `:490`）。映射到 `docs/06` 那六项是：将公开的对象→`objects`；metadata→`metadata`；blob access→`blobs`；依赖→`refs` + `private_dependencies`；rights/license→**来自版本自己的权利声明**（`apps/web/lib/rights.ts` 已有解析与渲染，`apps/web/app/components/rights-panel.tsx` 已有面板，**复用它而不是重写**）；**private evidence/attestation→今天平台上不存在这个功能**（见下一条）。",
+    "**`private evidence/attestation` 这一项要诚实处理**：attestation 在 V1 里**没有实现**——`specs/api/openapi.yaml` 与 `specs/mcp/tools.json` 里 `attest` 零命中；`internal/application/researchprofile/doc.go:84-88` 逐字写明了为什么不实现（规格没有定义谁能签发、披露级别词汇、以及计数从哪一刻起算泄漏）。唯一叫 attestation 的东西是 `evidence_type` 枚举值 `external_attestation`。**所以不要在清单里编一栏空数据**，也不要写「无 attestation」这种会被读成「检查过了没有」的话。照实渲染成**「本平台当前没有可公开的 attestation 功能」**这一类**说明状态**（并且要有一条测试钉住这一栏不是假的空列表）。",
+    "**阻断项必须是硬的**：`ImpactPreview` 的 `blockers` 非空时，页面**不能提供一个能成功的确认动作**——不是把按钮变灰然后不管，而是让确认路径本身走不通（后端本来也会拒：`internal/application/assetpublish/errors.go:113 CodePublishBlocked = \"ASSET_PUBLISH_BLOCKED\"` 与 `:821` 那个「状态变了就重跑 preview 再拒」的测试）。**同时**要处理「打开页面时没有阻断、点确认时状态已经变了」这一档：那一刻的拒绝要**在页面上说清楚是哪一类阻断项出现了**，而不是一句通用的失败提示。",
+    "**Agent 不许走这条路**：`docs/12:17` 逐字「Agent/MCP 不得自动执行此类扩大操作」。今天由 `internal/application/assetpublish/command.go:255 requireAgent` 在服务端兜底（agent 一律拒）。页面上**不提供**任何 agent 自动化的入口或承诺（不要写「Agent 可以代办」这类文案），并且要有一条测试证明匿名/低权角色在这一页上拿不到可用的确认动作。",
+    "**权限语义照抄现状，不要自创**：`specs/policies/permissions-matrix.csv:12` 那一行逐字 `publish_private_to_public,deny,deny,deny,deny,conditional,allow,deny`——**实际生效的是只有 owner**（maintainer 的 `conditional` 在 `internal/authz/verdict.go:35` 是 fail-closed 拒）。页面对 maintainer 的呈现要与这条一致：**可以给「这是 owner 才能做的操作」这类说明**，但**不许**在客户端自己实现一遍权限判定来放宽或收紧它——服务端是边界（`cmd/api/assetshttp/publish.go:116` 逐字 `NOT gated here — the command authorizes the actor against the permission`）。",
+    "**可见性变更那一格今天本来就拒绝，别顺手开**：`apps/web/app/(main)/projects/[id]/settings/page.tsx:244-261` 是一个 `disabled` 的 `<select>` 加一句说明，`cmd/api/projectshttp/projects_settings_handlers.go:92-94` 逐字写着 `A visibility field is refused with VISIBILITY_CHANGE_NOT_SUPPORTED: the setting is preview-only until the publishing guard lands (T0109 requirement), and an explicit refusal beats a silent drop.`。**本任务不改这个行为**——这一笔做的是「发布（publish）」这一条路径的界面，不是「改项目 visibility」。若你判断这两件事必须一起做，**停下来报**。",
+    "**e2e 要真的经过页面与真服务**：既有挂具已经就位，**复用它，不要另造一套**——`tests/e2e-release/run.sh` 起真 harness（`tests/e2e-release/harness/main.go`，真 PostgreSQL + 真 handler，`run.sh:5-9` 逐字 `Nothing is mocked.`），而 `release-e2e.mjs:965-970` 已经在真 Chromium 里走过 `POST …/assets:publish`。新用例要**在浏览器里**走完：打开确认页 → 看到六类清单 → 确认 → 发布成功；再加负向：阻断项存在时确认走不通、非 owner 拿不到确认动作、状态变化时得到**可读的**拒绝。",
+    "**不做 / 边界**：不改 Go 代码（`internal/**`、`cmd/**` 不在范围内——后端已经齐全，若你发现缺一条路由或一个字段，**报回来**，不要自己加）；不改 `specs/**`（契约与权限矩阵都是 Supervisor 的）；不改 `docs/**`、`tasks/**`；不实现 attestation 功能（那是另一个产品决策，见需求第 5 条）；不做知识（knowledge）发布的界面**除非**你判断它与资产发布是同一页面的同一形态——若是，做，并在 RESULT 里说明；若不是，只做资产并在 RESULT 里说明为什么。"
+  ],
+  "deliverables": [
+    "`apps/web` 里的独立发布确认页（有 URL、可回退），渲染 `ImpactPreview` 的六类清单与 rights 面板",
+    "阻断项的硬处理：有阻断则确认走不通；状态变化被拒时页面说清是哪一类",
+    "复用的 rights 渲染与既有的发布路由调用（`…:publish-preview` 与 `…:publish`）",
+    "`tests/e2e-release/` 里的浏览器用例：成功路径 + 三条负向",
+    "RESULT 里点名 attestation 那一栏是怎么渲染的、以及它为什么不是假的空列表"
+  ],
+  "acceptance_criteria": [
+    "**不能一键 generic modal 发布敏感 state**（任务原文）：确认动作落在一个**独立页面**上，页面上有那六类清单；`grep` 能证明没有用 `window.confirm`/`alert`/通用 `Are you sure?` 文案替代清单——测试里断言**确认页的正文里出现了具体对象名/依赖名**，而不只是数量",
+    "**六类逐类点名**（`docs/06:48`）：对象、metadata、blob access、依赖、rights/license、private evidence/attestation——每一类在页面上都有一个**可被测试定位**的区块；attestation 那一栏按需求第 5 条诚实地渲染为「当前没有这个功能」的状态，并有一条测试钉住它不是空列表冒充",
+    "**阻断是硬的**：构造一个带私有依赖的候选（`internal/assets/preview.go` 有专门的阻断类），确认动作走不通；并且当发布事务里重跑 preview 发现状态已变时，页面呈现**可读的**拒绝（说出是哪一类阻断），不是通用失败",
+    "**Agent 与低权角色拿不到确认动作**：匿名与 maintainer（按 fail-closed 实际被拒的那一档）在这一页上都没有可用的确认路径；断言是**走接口**得到的，不是只看按钮的 disabled 属性",
+    "**不自行实现权限判定**：页面的显示与否走服务端答案或既有客户端角色门（`apps/web/lib/releases.ts:224 mayCreateRelease` 那一档的既有做法），没有在客户端新写一遍矩阵",
+    "**e2e 真的经过页面与真服务**：用例在真 Chromium 里打开真页面、打真 API（复用 `tests/e2e-release`），不是 mock 的 JSON；并且这条 e2e **能失败**——在 RESULT 里说明你把哪里改坏时它会红（例如把确认动作接到 preview 之外的路径上）",
+    "**没有顺手改可见性那格**：`settings/page.tsx` 的 `disabled` 控件与 `VISIBILITY_CHANGE_NOT_SUPPORTED` 行为不变；`tests/e2e-settings/settings-e2e.mjs:309-317` 那两条既有断言仍绿",
+    "**RESULT 里写明**：页面的 URL 形状、六类清单各自的数据来源（哪个字段/哪个接口）、attestation 那一栏的渲染与理由、你对 knowledge 发布做没做及为什么、以及所有你不知道该怎么判而按 fail-closed 处理的地方"
+  ],
+  "allowed_scope": [
+    "apps/web/**",
+    "tests/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "specs/**",
+    "docs/**",
+    "infra/**",
+    "internal/**",
+    "cmd/**",
+    "packages/ui/**"
+  ],
+  "relevant_specs": [
+    "docs/06_UI_UX_SPEC.md",
+    "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
+    "docs/23_SECURITY_PRIVACY.md",
+    "docs/42_PAGE_SPECS.md",
+    "docs/51_FRONTEND_STANDARD.md",
+    "specs/policies/permissions-matrix.csv"
+  ],
+  "scope_note": "范围只有两条：界面（`apps/web/**`）与它自己的测试（`tests/**`，浏览器用例复用 `tests/e2e-release/`）。**后端一行都不改**——四条发布路由、影响预览、权限门、阻断码都已经在树上并有测试；本任务是把它们接上一个界面。这条判断是收窄的关键：把 `internal/**` 与 `cmd/**` 拿掉之后，「后端不齐」这个发现只能变成**报回来**，不能变成顺手改——而顺手改后端正是这种「接线任务」最容易失控的地方。`packages/ui/**` 也不在范围内：复用 `apps/web/app/components/rights-panel.tsx` 与既有类，若某个形态确实该沉进共享层，报回来给 T1101 那一笔，不要在这里动。",
+  "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄）——把 phase 级默认上限砍成「界面 + 测试」两条。** 原上限含 `internal/**`、`cmd/**`、`infra/**`、`ops/**`、`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`go.mod`、`go.sum`、`.env.example`，与本任务无关。\n\n**为什么敢砍掉 `internal/**`**：我逐条核过发布链已经闭合——路由（`assetshttp/wiring.go:97-98`）、权限（`assetpublish/command.go:384`）、预览（`assets/preview.go:575`，且在事务内重跑）、阻断码（`errors.go:113`）、真服务 e2e（`tests/e2e-release`）全在。**若工人发现这个判断错了（缺路由、缺字段、缺阻断类），正确动作是停下来报，不是自己补**——这条写进了需求第 11 条。\n\n**`private evidence/attestation` 这一栏我在本收窄里定了口径**：不许编数据、不许写会被读成「检查过了没有」的话，只能诚实渲染成「本平台当前没有这个功能」，并要求一条测试钉住。理由：`internal/application/researchprofile/doc.go:84-88` 已经逐字说明它为什么不存在（规格缺三个定义），在这个前提上把一个空列表画成清单项，是拿界面冒充功能。"
+}

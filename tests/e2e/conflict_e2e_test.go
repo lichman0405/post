@@ -236,7 +236,7 @@ func newConflictEnv(t *testing.T, ctx context.Context) *conflictEnv {
 	// The guarded v1 subtree: projects + conflicts, exactly as main.go
 	// composes them.
 	resolutionSvc := resolutions.NewService(
-		diffs.NewService(stateStore, persistence.NewManifestStore(pool)),
+		diffs.NewService(stateStore, persistence.NewManifestStore(pool), persistence.NewPullRequestStore(pool)),
 		resolutions.NewPGStore(pool),
 		projectsSvc,
 		authz.NewMatrixEngine(),

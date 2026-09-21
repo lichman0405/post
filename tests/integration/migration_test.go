@@ -1480,6 +1480,22 @@ var explicitIndexes = map[string][]string{
 	// candidate it is handed, in one statement, so the lookup has to be
 	// an index probe rather than a scan of the table.
 	"reviews_reviewed_state_idx": {"reviewed_state_id"},
+	// T1007 (00111): the dependency-impact alert's idempotency. The
+	// analysis is derived from the event log rather than willed by a
+	// caller, so the same upstream change replayed — a restarted worker, a
+	// second process over the same log — must not produce a second alert.
+	// The key is (trigger event, affected kind, affected entity), read
+	// straight out of the payload, because those three fields ARE the
+	// alert's identity; the insert's ON CONFLICT DO NOTHING is what turns
+	// the conflict into a no-op, and this index is the conflict it targets.
+	// PARTIAL on the event type, so no other producer's outbox rows are
+	// constrained against keys they do not carry.
+	//
+	// The three keys are asserted by their QUOTED names, which is how
+	// pg_get_indexdef renders the expression (`payload ->> 'trigger_event_id'
+	// ::text`): quoting pins them as payload keys rather than as columns that
+	// happen to share the name, and it survives the operator's spacing.
+	"outbox_events_dependency_impact_uniq": {"UNIQUE", "event_type", "'trigger_event_id'", "'affected_kind'", "'affected_id'", "WHERE"},
 }
 
 // migrationVersions returns the numeric prefix of every embedded

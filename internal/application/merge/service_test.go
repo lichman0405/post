@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -196,7 +197,10 @@ type fakeStore struct {
 	lockedScope    MergeScope
 	lockedScopeErr error
 
-	getPRCalls      int
+	getPRCalls int
+	// lockScope records every lock request, which is where the per-side
+	// projects of a cross-project merge are asserted (T0817).
+	lockScope       []LockScopeParams
 	lockScopeCalls  int
 	lockHeadsCalls  int
 	writeMergeCalls int
@@ -257,18 +261,37 @@ func (f *fakeStore) GetPullRequest(context.Context, string, int64) (domain.PullR
 }
 
 func (f *fakeStore) GetBranch(_ context.Context, _ string, branchID string) (domain.Branch, error) {
+	return f.branchOf(branchID)
+}
+
+// GetBranchByID is the source side's read (T0817): the branch is answered
+// with its own project, so a fake whose source branch lives in another
+// project exercises the cross-project path without the project filter
+// getting in the way.
+func (f *fakeStore) GetBranchByID(_ context.Context, branchID string) (domain.Branch, error) {
+	return f.branchOf(branchID)
+}
+
+func (f *fakeStore) branchOf(branchID string) (domain.Branch, error) {
 	if branchID == mainBranchID {
 		return f.target, nil
 	}
-	return f.source, nil
+	if branchID == f.source.ID {
+		return f.source, nil
+	}
+	if branchID == featBranchID {
+		return f.source, nil
+	}
+	return domain.Branch{}, ErrBranchNotFound
 }
 
 func (f *fakeStore) VersionHeads(context.Context, []string, []string) (VersionHeads, error) {
 	return f.heads, nil
 }
 
-func (f *fakeStore) LockMergeScope(_ context.Context, _ states.Transaction, _ LockScopeParams) (MergeScope, error) {
+func (f *fakeStore) LockMergeScope(_ context.Context, _ states.Transaction, in LockScopeParams) (MergeScope, error) {
 	f.lockScopeCalls++
+	f.lockScope = append(f.lockScope, in)
 	if f.lockedScopeErr != nil {
 		return MergeScope{}, f.lockedScopeErr
 	}
@@ -510,6 +533,23 @@ func (f *fakeGit) MergePullRequest(_ context.Context, in GitMergeRequest) (GitMe
 	return GitMergeResult{SHA: f.sha, Actor: f.actor}, nil
 }
 
+// fakeForks is the fork lineage the cross-project source side asks
+// (T0817). The zero value answers false to every question, which is the
+// refusal; a test that wants the external proposal's shape sets isFork.
+type fakeForks struct {
+	isFork bool
+	err    error
+	asked  [][3]string
+}
+
+func (f *fakeForks) IsForkOf(_ context.Context, forkProjectID, parentProjectID, forkedBy string) (bool, error) {
+	f.asked = append(f.asked, [3]string{forkProjectID, parentProjectID, forkedBy})
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.isFork, nil
+}
+
 // harness is one wired service plus the fakes behind it.
 type harness struct {
 	svc       *Service
@@ -526,6 +566,7 @@ type harness struct {
 	rules     *fakeRules
 	events    *fakeEvents
 	git       *fakeGit
+	forks     *fakeForks
 }
 
 func newHarness(t *testing.T, opts ...func(*harness)) *harness {
@@ -571,6 +612,9 @@ func (h *harness) service(attempts int) *Service {
 	}
 	if h.git != nil {
 		d.Git = h.git
+	}
+	if h.forks != nil {
+		d.Forks = h.forks
 	}
 	return NewService(d)
 }
@@ -1620,6 +1664,181 @@ func TestMergeCarriesTheGateOfTheTargetBranch(t *testing.T) {
 	}
 }
 
+// forkSource stages the external proposal's shape: the PR's source branch
+// lives in another project, and the test decides what the fork lineage says
+// about it. Returns the fork project id the source branch carries.
+const forkProjID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+
+func forkSource(h *harness) {
+	h.store.source.ProjectID = forkProjID
+	// The lineage the merge asks about is the PR AUTHOR's fork, so the
+	// fixture PR has to name one.
+	h.store.pr.CreatedBy = actorID
+}
+
+// TestMergeReadsTheSourceSideInItsOwnProject: the source branch of a
+// cross-project proposal is read by its own id and its project comes from
+// the row, so the merge plans, and the write transaction locks, the source
+// branch under the FORK's project while the accepted state lands in the
+// PR's (T0817). The PR row's own project is untouched by the read.
+func TestMergeReadsTheSourceSideInItsOwnProject(t *testing.T) {
+	h := newHarness(t, func(h *harness) {
+		forkSource(h)
+		h.forks = &fakeForks{isFork: true}
+	})
+	res, err := h.merge(t)
+	if err != nil {
+		t.Fatalf("merge of a proposal from the author's own fork = %v", err)
+	}
+	if res.State.ProjectID != projID {
+		t.Fatalf("accepted state project = %q, want the PR's project %q",
+			res.State.ProjectID, projID)
+	}
+	if len(h.forks.asked) != 1 || h.forks.asked[0] != [3]string{forkProjID, projID, actorID} {
+		t.Fatalf("fork lineage questions = %v, want the (source project, PR project, PR author) triple", h.forks.asked)
+	}
+	params := h.store.lockScope[0]
+	if params.SourceProjectID != forkProjID {
+		t.Fatalf("locked source project = %q, want the source branch's own project %q",
+			params.SourceProjectID, forkProjID)
+	}
+	if params.ProjectID != projID {
+		t.Fatalf("locked project = %q, want the PR's project %q", params.ProjectID, projID)
+	}
+	if params.TargetBranchID != mainBranchID {
+		t.Fatalf("locked target %q, want the PR's target branch", params.TargetBranchID)
+	}
+}
+
+// TestMergeRefusesAForeignSourceThatIsNotTheAuthorsFork pins the symmetric
+// judgment the merge side owes (T0817): a source branch of another project
+// that is NOT the PR author's fork of the PR's project is refused, and it is
+// refused BEFORE anything is planned, locked or written — the refusal is the
+// merge's own, not a not-found from a project-scoped read.
+func TestMergeRefusesAForeignSourceThatIsNotTheAuthorsFork(t *testing.T) {
+	h := newHarness(t, func(h *harness) {
+		forkSource(h)
+		h.forks = &fakeForks{isFork: false}
+	})
+	_, err := h.merge(t)
+	if !errors.Is(err, ErrBranchNotFound) {
+		t.Fatalf("merge of a foreign, non-fork source = %v, want ErrBranchNotFound", err)
+	}
+	if h.diffs.calls != 0 || h.commits.attempts != 0 || h.store.lockScopeCalls != 0 || h.store.writeMergeCalls != 0 {
+		t.Fatalf("a refused foreign source planned or wrote something: diffs=%d commits=%d locks=%d writes=%d",
+			h.diffs.calls, h.commits.attempts, h.store.lockScopeCalls, h.store.writeMergeCalls)
+	}
+	// The lineage was asked, and it was asked about the SOURCE project — the
+	// check happened, so the answer is a judgment and not a missing row.
+	if len(h.forks.asked) != 1 || h.forks.asked[0][0] != forkProjID {
+		t.Fatalf("fork lineage questions = %v, want the foreign source project asked about", h.forks.asked)
+	}
+}
+
+// TestMergeRefusesAForeignSourceWithNoLineageWired: a merge that cannot ask
+// the fork question does not read a foreign project's branch at all. The
+// refusal is a store failure (the port is missing), and nothing is planned.
+func TestMergeRefusesAForeignSourceWithNoLineageWired(t *testing.T) {
+	h := newHarness(t, func(h *harness) { forkSource(h) })
+	_, err := h.merge(t)
+	if !errors.Is(err, ErrStore) {
+		t.Fatalf("merge with an unwired fork lineage = %v, want ErrStore", err)
+	}
+	if h.diffs.calls != 0 || h.commits.attempts != 0 {
+		t.Fatalf("an unjudgeable foreign source planned something: diffs=%d commits=%d", h.diffs.calls, h.commits.attempts)
+	}
+}
+
+// TestMergeRefusesWhenTheLineageReadFails: a failed lineage read is not a
+// yes. Nothing is planned.
+func TestMergeRefusesWhenTheLineageReadFails(t *testing.T) {
+	h := newHarness(t, func(h *harness) {
+		forkSource(h)
+		h.forks = &fakeForks{err: errors.New("connection reset")}
+	})
+	_, err := h.merge(t)
+	if !errors.Is(err, ErrStore) {
+		t.Fatalf("merge with a failing fork lineage read = %v, want ErrStore", err)
+	}
+	if h.diffs.calls != 0 || h.commits.attempts != 0 {
+		t.Fatalf("a failed lineage read planned something: diffs=%d commits=%d", h.diffs.calls, h.commits.attempts)
+	}
+}
+
+// TestMergeDoesNotAskTheLineageForASameProjectSource: the fork question is
+// about a FOREIGN source only. A source branch in the PR's own project
+// leaves the lineage unasked and the merge unaffected — the check adds no
+// cost and no refusal to the ordinary path.
+func TestMergeDoesNotAskTheLineageForASameProjectSource(t *testing.T) {
+	h := newHarness(t, func(h *harness) {
+		h.forks = &fakeForks{isFork: false} // a lineage that would refuse
+	})
+	if _, err := h.merge(t); err != nil {
+		t.Fatalf("merge with a same-project source = %v", err)
+	}
+	if len(h.forks.asked) != 0 {
+		t.Fatalf("fork lineage questions = %v, want none for a same-project source", h.forks.asked)
+	}
+	if got := h.store.lockScope[0].SourceProjectID; got != projID {
+		t.Fatalf("locked source project = %q, want the PR's project for a same-project source", got)
+	}
+}
+
+// TestGitStepOfACrossProjectSourceIsRecordedFailed: the provider-side merge
+// names ONE repository, so a merge whose source branch lives in another
+// project cannot be expressed as a provider PR. The saga records the step as
+// failed with that reason instead of handing the adapter a ref pair that
+// resolves in the wrong repository — and the database half stays committed.
+func TestGitStepOfACrossProjectSourceIsRecordedFailed(t *testing.T) {
+	git := &fakeGit{sha: mergeSHA, actor: mergeService}
+	h := newHarness(t, func(h *harness) {
+		forkSource(h)
+		h.forks = &fakeForks{isFork: true}
+		h.git = git
+	})
+	res, err := h.merge(t)
+	if err != nil {
+		t.Fatalf("cross-project merge = %v", err)
+	}
+	if len(git.requests) != 0 {
+		t.Fatalf("the provider adapter was called %d times, want none for a cross-repository merge", len(git.requests))
+	}
+	if res.Merge.GitState != domain.GitStateFailed || res.Merge.GitSHA != nil {
+		t.Fatalf("merge row = state %q sha %v, want failed and no sha", res.Merge.GitState, res.Merge.GitSHA)
+	}
+	if len(h.store.gitSteps) != 1 || !strings.Contains(h.store.gitSteps[0].Error, "across repositories") {
+		t.Fatalf("recorded git steps = %+v, want one failed step naming the cross-repository limit", h.store.gitSteps)
+	}
+}
+
+// TestGitStepOfASameProjectSourceIsUnaffected: the cross-project branch of
+// the saga is not the ordinary one. A same-project source branch of another
+// project's name never reaches it: the target branch's ref is resolved for
+// THIS project, as before.
+func TestGitStepOfASameProjectSourceIsUnaffected(t *testing.T) {
+	git := &fakeGit{sha: mergeSHA, actor: mergeService}
+	h := newHarness(t, func(h *harness) {
+		// The target is not main, so the two branches can carry different
+		// refs and the adapter's pair is unambiguous.
+		h.store.target.Name = "release-candidate"
+		h.store.target.GitRef = "refs/heads/release-candidate"
+		h.git = git
+	})
+	res, err := h.merge(t)
+	if err != nil {
+		t.Fatalf("same-project merge = %v", err)
+	}
+	if len(git.requests) != 1 {
+		t.Fatalf("provider adapter calls = %d, want 1", len(git.requests))
+	}
+	if got := git.requests[0].SourceRef; got != "refs/heads/feature" {
+		t.Fatalf("provider source ref = %q, want the source branch's own ref", got)
+	}
+	if res.Merge.GitState != domain.GitStateUpdated {
+		t.Fatalf("merge row state = %q, want updated", res.Merge.GitState)
+	}
+}
+
 // The fakes must keep implementing the ports they stand for: a port that grows a
 // method fails to compile here rather than at some call site's wiring.
 var (
@@ -1632,4 +1851,5 @@ var (
 	_ ProjectGate    = (*fakeProjects)(nil)
 	_ Authz          = (*fakeAuthz)(nil)
 	_ GitMerger      = (*fakeGit)(nil)
+	_ ForkLineage    = (*fakeForks)(nil)
 )

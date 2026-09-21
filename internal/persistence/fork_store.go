@@ -190,6 +190,38 @@ func findFork(ctx context.Context, q queryRower, parentProjectID, actorID pgtype
 	return fork, true, nil
 }
 
+// IsForkOf implements merge.ForkLineage (T0817): whether one project is a
+// fork of another made by one actor — the triple 00086's
+// pull_request_fork_gate enforces on a pull request row, asked as a
+// decision-shaped question by the merge.
+//
+// It reads the lineage row rather than the claim path's unique-key
+// conflict, because the caller is judging a row that already exists: a
+// lineage row that is not there is a false answer, not an error, and the
+// merge refuses on it.
+func (s *ForkStore) IsForkOf(ctx context.Context, forkProjectID, parentProjectID, forkedBy string) (bool, error) {
+	forkUUID, err := textUUID(forkProjectID)
+	if err != nil {
+		return false, nil
+	}
+	parentUUID, err := textUUID(parentProjectID)
+	if err != nil {
+		return false, nil
+	}
+	actorUUID, err := textUUID(forkedBy)
+	if err != nil {
+		return false, nil
+	}
+	var isFork bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM project_forks
+		   WHERE fork_project_id = $1 AND parent_project_id = $2 AND forked_by = $3)`,
+		forkUUID, parentUUID, actorUUID).Scan(&isFork); err != nil {
+		return false, mapForkError(err)
+	}
+	return isFork, nil
+}
+
 // ForkOfProject implements forks.StorePort.
 func (s *ForkStore) ForkOfProject(ctx context.Context, forkProjectID string) (forks.Fork, bool, error) {
 	id, err := textUUID(forkProjectID)

@@ -15,7 +15,6 @@
     "specs/SPEC_VERSION.json",
     "internal/persistence/**",
     "internal/assets/**",
-    "internal/rights/**",
     "go.mod",
     "go.sum",
     ".env.example",
@@ -31,7 +30,8 @@
     ".git/**",
     "CLAUDE.md",
     "tasks/task_status.json",
-    "tasks/progress.md"
+    "tasks/progress.md",
+    "internal/rights/**"
   ],
   "id": "T0708",
   "phase": "P7",
@@ -58,5 +58,5 @@
   "scope_note": "资产那一侧的 fork/derive 写路径：表与读法已在，缺的是判定与写入。范围收窄掉 apps/web/**（见裁定）。",
   "title": "Asset Fork/Derive + Lineage",
   "v1_required": true,
-  "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 裁定）——usage.derivatives 的三个值，三种行为，一个都不许坍缩。**\n\n`internal/rights/usage.go` 的包注释逐字写着 `\"unspecified\" is a real answer, not a missing one`，\n并同时否定两种坍缩（不许当许可、不许当禁止）。这条规矩落到 derive 上就是：\n\n- `usage.derivatives == \"restricted\"` → **拒绝**（声明禁止衍生）；\n- `usage.derivatives == \"allowed\"` → **放行**（声明允许）；\n- `usage.derivatives == \"unspecified\"` → **既不拒绝也不放行**：要求请求里带一条**显式确认**\n  （确认内容与 actor 一并写进同一事务的 audit 行），没有确认就拒绝。\n\n`rights_json` 读不出来（缺失、解析失败、`internal/rights.Parse` 拒未知字段）→ **拒绝**：\n这是仓库自己的口径（`assetpublish` 的 requirePolicy：「an unreadable policy is not a permissive one」）。\n**不许**把 `unspecified` 自动升级成许可，也**不许**把它自动降级成禁令——两者都是在替人做法律判断\n（`docs/12 §4` 逐字「字段不替代法律合同」；`docs/38` 是同一件事的法律边界）。\n\n授权：derive 是往**目标项目**写一个新版本，所以用与 `internal/application/assetpublish/command.go`\n的 `requirePublish` **同一处判定**（目标项目成员身份 + `authz.ActionPublishPrivateToPublic`）——\n**不新增 action、不改 `specs/policies/permissions-matrix.csv`**。若你判断这个格子对某个角色不合适，\n照实写进 RESULT 并停下来报，不要自行放宽。\n\n读得到才算能 derive：**父版本必须对调用者可读**，判据与资产页的读门同一条\n（`cmd/api/assetshttp/page.go`：发起项目 public 或调用者是该项目成员）。**不许**用「id 猜得到就能派生」\n绕过它——那正是 ADR-024 那条规矩（非公开行不给非成员）要防的事。\n\n关系取名的规矩（`docs/11_RELEASE_ASSET_HUB.md:27` 逐字「Fork/Derive：创建新的 Asset/Object identity，\n保留 lineage」）：两者的共同点是**创建新 identity + 保留 lineage**，差别是关系的性质——\n`forked_from` 是谱系复制（`internal/rsg/relationcatalog/catalog.go` 归为 Lineage/network），\n`derived_from` 是转换派生（同表归为 Provenance/structure）。由**请求显式选择**这两个值之一；\n`supersedes` 不是本任务（不实现、不暴露）。\n\n范围收窄：本任务**不做界面**——资产页已经会渲染 lineage（`internal/assets/page.go:24`/`:508`、\n`internal/persistence/queries/asset_page.sql` 的 asset_lineage 读法），本任务的验收在\n「写路径 + 那条读法显示得出来」，另做一个 derive 表单属于另一个关注点。因此 `apps/web/**` 从\nallowed_scope 里去掉；若你发现不动界面就完不成某条验收，**照实报回来**，不要自己扩范围。"
+  "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 裁定）——usage.derivatives 的三个值，三种行为，一个都不许坍缩。**\n\n`internal/rights/usage.go` 的包注释逐字写着 `\"unspecified\" is a real answer, not a missing one`，\n并同时否定两种坍缩（不许当许可、不许当禁止）。这条规矩落到 derive 上就是：\n\n- `usage.derivatives == \"restricted\"` → **拒绝**（声明禁止衍生）；\n- `usage.derivatives == \"allowed\"` → **放行**（声明允许）；\n- `usage.derivatives == \"unspecified\"` → **既不拒绝也不放行**：要求请求里带一条**显式确认**\n  （确认内容与 actor 一并写进同一事务的 audit 行），没有确认就拒绝。\n\n`rights_json` 读不出来（缺失、解析失败、`internal/rights.Parse` 拒未知字段）→ **拒绝**：\n这是仓库自己的口径（`assetpublish` 的 requirePolicy：「an unreadable policy is not a permissive one」）。\n**不许**把 `unspecified` 自动升级成许可，也**不许**把它自动降级成禁令——两者都是在替人做法律判断\n（`docs/12 §4` 逐字「字段不替代法律合同」；`docs/38` 是同一件事的法律边界）。\n\n授权：derive 是往**目标项目**写一个新版本，所以用与 `internal/application/assetpublish/command.go`\n的 `requirePublish` **同一处判定**（目标项目成员身份 + `authz.ActionPublishPrivateToPublic`）——\n**不新增 action、不改 `specs/policies/permissions-matrix.csv`**。若你判断这个格子对某个角色不合适，\n照实写进 RESULT 并停下来报，不要自行放宽。\n\n读得到才算能 derive：**父版本必须对调用者可读**，判据与资产页的读门同一条\n（`cmd/api/assetshttp/page.go`：发起项目 public 或调用者是该项目成员）。**不许**用「id 猜得到就能派生」\n绕过它——那正是 ADR-024 那条规矩（非公开行不给非成员）要防的事。\n\n关系取名的规矩（`docs/11_RELEASE_ASSET_HUB.md:27` 逐字「Fork/Derive：创建新的 Asset/Object identity，\n保留 lineage」）：两者的共同点是**创建新 identity + 保留 lineage**，差别是关系的性质——\n`forked_from` 是谱系复制（`internal/rsg/relationcatalog/catalog.go` 归为 Lineage/network），\n`derived_from` 是转换派生（同表归为 Provenance/structure）。由**请求显式选择**这两个值之一；\n`supersedes` 不是本任务（不实现、不暴露）。\n\n范围收窄：本任务**不做界面**——资产页已经会渲染 lineage（`internal/assets/page.go:24`/`:508`、\n`internal/persistence/queries/asset_page.sql` 的 asset_lineage 读法），本任务的验收在\n「写路径 + 那条读法显示得出来」，另做一个 derive 表单属于另一个关注点。因此 `apps/web/**` 从\nallowed_scope 里去掉；若你发现不动界面就完不成某条验收，**照实报回来**，不要自己扩范围。\n\n**（2026-09-21 二次收窄，按安全复核）——`internal/rights/**` 从 allowed_scope 里摘掉。** 本任务用到的是 `internal/rights` 的**既有导出面**（`Parse`、`Document.Usage.Derivatives`、`Permission` 三个常量），全部是只读调用；判定（三个值怎么处理）写在**本任务自己的命令**里，不在 rights 包里。若你发现必须改 `internal/rights` 才做得成，**停下来报**——那会动到全平台共用的权利词汇表，是另一笔要单独评审的改动，不是本任务的顺手活。"
 }

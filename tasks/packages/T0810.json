@@ -1,0 +1,50 @@
+{
+  "id": "T0810",
+  "phase": "P8",
+  "phase_name": "开放网络、Fork、贡献与 Research Profile",
+  "title": "最小 Open Network 闭环 E2E",
+  "v1_required": true,
+  "dependencies": [
+    "T0802",
+    "T0804",
+    "T0806",
+    "T0808",
+    "T0817"
+  ],
+  "requirements": [
+    "public project→discover→fork/contribute→PR merge→profile credit→external evidence",
+    "**改文件的范围里没有 `internal/rsg/**`，但读它不受限**。RSG 状态链的断言（合并之后上游真的多了一个状态、链上每个状态被一次 commit 命名）用既有导出接口读即可。需要只在包内可见的夹具时写在 `tests/**`。发现 `internal/rsg/**` 或 `internal/application/merge/**` 里的真缺陷，停下写证据（文件、行、复现命令）报回来。"
+  ],
+  "deliverables": [],
+  "acceptance_criteria": [
+    "完整链路 CI 可跑"
+  ],
+  "tests": [
+    "network e2e"
+  ],
+  "allowed_scope": [
+    "tests/**",
+    "cmd/api/**",
+    "internal/contribution/**",
+    "internal/application/**",
+    "go.mod",
+    "go.sum",
+    ".env.example"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "specs/**",
+    "docs/**",
+    "infra/**",
+    "apps/web/**",
+    "internal/rsg/**",
+    "internal/application/merge/**",
+    "internal/events/**"
+  ],
+  "decision_level_max": "L1",
+  "relevant_specs": [],
+  "scope_note": "**收窄到「闭环 E2E 要跑通什么」，并把 schema 与前端摘出去。**\n\n摘掉的三类，各有理由：\n- `infra/migrations/**` + `specs/database/postgres.sql` + `specs/SPEC_VERSION.json`：本任务不建表、不改 schema，闭环要用的对象、关系、fork 门禁在既有迁移里都已经有了（`infra/migrations/00086_external_fork.sql`）。摘掉它们同时消掉一个真实故障模式：带着生成物的补丁在 main 一动时就 `git apply` 不上（`specs/orchestrator/derived-artifacts.json` 逐字写着生成物要重新生成、不能当文本合）。**真需要迁移或索引，报上来，编号由我分配**（CLAUDE.md §8.1）。\n- `internal/persistence/**`：理由同上，E2E 不写查询层。\n- `apps/web/**`：本任务的验收标准是「完整链路 **CI 可跑**」。链路的每一跳在 API 与真实服务上都能跑；把浏览器 UI 拉进来会让这条门依赖前端构建与浏览器环境，而那是 P11 的任务面。**要一个 web 侧断言就报上来。**\n\n`internal/application/**` 与 `internal/contribution/**` 保留：闭环里 profile credit 那一段可能要小改接线。`cmd/api/**` 保留：E2E 走真实 HTTP。\n- **`internal/rsg/**` 也摘掉（2026-09-21 安全复核后补）**：本任务是 E2E，断言 RSG 状态链的形状**读**既有包就够了——`allowed_scope` 管的是「能改哪些文件」，不管「能 import 什么」。真要一个只有 RSG 内部才有的夹具，照本仓既有形状把夹具写在 `tests/**` 里（`tests/integration/network_fake_git_test.go` 就是这么做的：它替换的是传输那一半，并在文件头写清「这里不测什么」）。**若闭环里发现的是 `internal/rsg/**` 的真 bug，正确动作是报回来，不是自己修**——那与本任务书禁止改 `internal/application/merge/**` 是同一条道理：同一个修法出现两个实现是一份要还的债。",
+  "supervisor_scope_narrowing": "**收窄到「闭环 E2E 要跑通什么」，并把 schema 与前端摘出去。**\n\n摘掉的三类，各有理由：\n- `infra/migrations/**` + `specs/database/postgres.sql` + `specs/SPEC_VERSION.json`：本任务不建表、不改 schema，闭环要用的对象、关系、fork 门禁在既有迁移里都已经有了（`infra/migrations/00086_external_fork.sql`）。摘掉它们同时消掉一个真实故障模式：带着生成物的补丁在 main 一动时就 `git apply` 不上（`specs/orchestrator/derived-artifacts.json` 逐字写着生成物要重新生成、不能当文本合）。**真需要迁移或索引，报上来，编号由我分配**（CLAUDE.md §8.1）。\n- `internal/persistence/**`：理由同上，E2E 不写查询层。\n- `apps/web/**`：本任务的验收标准是「完整链路 **CI 可跑**」。链路的每一跳在 API 与真实服务上都能跑；把浏览器 UI 拉进来会让这条门依赖前端构建与浏览器环境，而那是 P11 的任务面。**要一个 web 侧断言就报上来。**\n\n`internal/application/**` 与 `internal/contribution/**` 保留：闭环里 profile credit 那一段可能要小改接线。`cmd/api/**` 保留：E2E 走真实 HTTP。\n- **`internal/rsg/**` 也摘掉（2026-09-21 安全复核后补）**：本任务是 E2E，断言 RSG 状态链的形状**读**既有包就够了——`allowed_scope` 管的是「能改哪些文件」，不管「能 import 什么」。真要一个只有 RSG 内部才有的夹具，照本仓既有形状把夹具写在 `tests/**` 里（`tests/integration/network_fake_git_test.go` 就是这么做的：它替换的是传输那一半，并在文件头写清「这里不测什么」）。**若闭环里发现的是 `internal/rsg/**` 的真 bug，正确动作是报回来，不是自己修**——那与本任务书禁止改 `internal/application/merge/**` 是同一条道理：同一个修法出现两个实现是一份要还的债。"
+}

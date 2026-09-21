@@ -403,7 +403,11 @@ func buildAPI(ctx context.Context, pool *pgxpool.Pool, webOrigin string) (*api, 
 		PullRequests: prSvc,
 		Authz:        authz.NewMatrixEngine(),
 	})
-	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool))
+	// The third port is the proposal read (T0817): it is what lets the SOURCE
+	// side of a triple live in another project when a pull request of this one
+	// proposes it — the external fork's shape. The proposal store is already
+	// here (prStore, above) and is the same implementation cmd/api wires.
+	diffSvc := diffs.NewService(stateStore, persistence.NewManifestStore(pool), prStore)
 	diffOfPR := prdiff.NewService(prStore, branchStore, diffSvc)
 	resolutionSvc := resolutions.NewService(diffSvc, resolutions.NewPGStore(pool), projectSvc, authz.NewMatrixEngine())
 	checksSvc := prchecks.NewService(prchecks.Deps{
@@ -425,9 +429,15 @@ func buildAPI(ctx context.Context, pool *pgxpool.Pool, webOrigin string) (*api, 
 		Projects:  projectSvc,
 		Authz:     authz.NewMatrixEngine(),
 		Checks:    checksSvc,
-		Policies:  policyAPI.Service(),
-		Rules:     policy.NewRuleEvaluator(),
-		Events:    events.Recorder{},
+		// The fork lineage (T0817), wired exactly as cmd/api wires it: a
+		// source branch outside the PR's project is admissible only when the
+		// lineage says it is this PR author's fork of this project. This
+		// flow merges within one project, so it is never consulted — and
+		// leaving it nil would make a legitimate external proposal refuse.
+		Forks:    persistence.NewForkStore(pool),
+		Policies: policyAPI.Service(),
+		Rules:    policy.NewRuleEvaluator(),
+		Events:   events.Recorder{},
 		// The abort reader is wired exactly as cmd/api wires it: the merge
 		// copies docs/46:7's record onto the row it lands on main.
 		Aborts: objects,

@@ -55,6 +55,44 @@ func (f *fakeSnapshotPort) GetManifestSnapshot(_ context.Context, stateID string
 	return f.snap, nil
 }
 
+// fakeProposalPort implements ProposalPort: a fixed verdict per state id,
+// plus an optional error. An unlisted state answers false, which is what
+// the production read answers for a state no proposal names.
+type fakeProposalPort struct {
+	proposed map[string]bool
+	err      error
+	// seen records the (project, state) pairs the service asked about, so a
+	// test can pin that the port is consulted for the source side alone.
+	seen [][2]string
+}
+
+func (f *fakeProposalPort) ProposesToProject(_ context.Context, projectID, stateID string) (bool, error) {
+	f.seen = append(f.seen, [2]string{projectID, stateID})
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.proposed[stateID], nil
+}
+
+// foreignFixtures is the cross-project triple the T0817 tests share: base
+// and target are the diff's project's own states, the source state lives in
+// another project (the external proposal's fork).
+func foreignFixtures() (map[string]domain.ProjectState, map[string]manifest.Snapshot) {
+	sha := "dddddddddddddddddddddddddddddddddddddddd"
+	statesMap := map[string]domain.ProjectState{
+		"state-base-0001": {ID: "state-base-0001", ProjectID: "proj-00000001", ManifestVersion: manifest.FormatV1},
+		"state-src-000001": {ID: "state-src-000001", ProjectID: "proj-fork-0001",
+			GitCommitSHA: &sha, ManifestVersion: manifest.FormatV1},
+		"state-tgt-000001": {ID: "state-tgt-000001", ProjectID: "proj-00000001", ManifestVersion: manifest.FormatV1},
+	}
+	snaps := map[string]manifest.Snapshot{
+		"state-base-0001":  {ObjectVersions: []manifest.ObjectVersion{}, RelationVersions: []manifest.RelationVersion{}, BlobRefs: []manifest.BlobRef{}},
+		"state-src-000001": {ObjectVersions: []manifest.ObjectVersion{}, RelationVersions: []manifest.RelationVersion{}, BlobRefs: []manifest.BlobRef{}},
+		"state-tgt-000001": {ObjectVersions: []manifest.ObjectVersion{}, RelationVersions: []manifest.RelationVersion{}, BlobRefs: []manifest.BlobRef{}},
+	}
+	return statesMap, snaps
+}
+
 // fixtureStates is the three-state map the service fixtures share: base
 // and target carry no git ref, source carries one — so the service's
 // ref-passing shows up in the result.
@@ -85,7 +123,7 @@ func fixtureService(t *testing.T) (*Service, *fakeStatePort, *fakeSnapshotPort) 
 		RelationVersions: []manifest.RelationVersion{},
 		BlobRefs:         []manifest.BlobRef{},
 	}}
-	return NewService(statesPort, snapshotsPort), statesPort, snapshotsPort
+	return NewService(statesPort, snapshotsPort, nil), statesPort, snapshotsPort
 }
 
 // TestDiffBuildsDiff proves the service composes the six reads into a
@@ -129,6 +167,71 @@ func TestDiffValidation(t *testing.T) {
 	})
 	if err == nil || !errors.Is(err, ErrValidation) || !strings.Contains(err.Error(), "does not belong") {
 		t.Fatalf("foreign project error = %v, want ErrValidation naming the mismatch", err)
+	}
+}
+
+// TestDiffForeignSourceNeedsAProposal pins the T0817 rule's two halves: a
+// source state of another project is refused unless a pull request of the
+// diff's project proposes it, and the base and target sides get no such
+// exemption however permissive the proposal port is.
+func TestDiffForeignSourceNeedsAProposal(t *testing.T) {
+	statesMap, snaps := foreignFixtures()
+	triple := Params{
+		ProjectID:     "proj-00000001",
+		BaseStateID:   "state-base-0001",
+		SourceStateID: "state-src-000001",
+		TargetStateID: "state-tgt-000001",
+	}
+
+	// 1. A foreign source nobody proposed here: the state's content is
+	// never read and the answer is the membership failure it has always
+	// been.
+	refusing := &fakeProposalPort{}
+	svc := NewService(&fakeStatePort{states: statesMap}, &fakeSnapshotPort{snaps: snaps}, refusing)
+	if _, err := svc.Diff(context.Background(), triple); err == nil ||
+		!errors.Is(err, ErrValidation) || !strings.Contains(err.Error(), "no pull request of that project proposes it") {
+		t.Fatalf("unproposed foreign source error = %v, want ErrValidation naming the missing proposal", err)
+	}
+
+	// 2. The same triple with a proposal naming the source state: the diff
+	// renders, and the port was asked about the source side only.
+	admitting := &fakeProposalPort{proposed: map[string]bool{"state-src-000001": true}}
+	svc = NewService(&fakeStatePort{states: statesMap}, &fakeSnapshotPort{snaps: snaps}, admitting)
+	d, err := svc.Diff(context.Background(), triple)
+	if err != nil {
+		t.Fatalf("proposed foreign source error = %v, want a rendered diff", err)
+	}
+	if d.ProjectID != "proj-00000001" {
+		t.Fatalf("diff project = %q, want the diff's own project", d.ProjectID)
+	}
+	if len(admitting.seen) != 1 || admitting.seen[0] != [2]string{"proj-00000001", "state-src-000001"} {
+		t.Fatalf("proposal reads = %v, want exactly the source state asked about", admitting.seen)
+	}
+
+	// 3. The base and target sides carry no exemption: a proposal port that
+	// says yes to everything still refuses a foreign base or target.
+	permissive := &fakeProposalPort{proposed: map[string]bool{
+		"state-base-0001": true, "state-src-000001": true, "state-tgt-000001": true,
+	}}
+	svc = NewService(&fakeStatePort{states: statesMap}, &fakeSnapshotPort{snaps: snaps}, permissive)
+	for _, side := range []struct {
+		name   string
+		params Params
+	}{
+		{"base", Params{ProjectID: "proj-fork-0001", BaseStateID: "state-base-0001", SourceStateID: "state-src-000001", TargetStateID: "state-src-000001"}},
+		{"target", Params{ProjectID: "proj-fork-0001", BaseStateID: "state-src-000001", SourceStateID: "state-src-000001", TargetStateID: "state-base-0001"}},
+	} {
+		if _, err := svc.Diff(context.Background(), side.params); err == nil ||
+			!errors.Is(err, ErrValidation) || !strings.Contains(err.Error(), side.name+" state") {
+			t.Fatalf("foreign %s error = %v, want ErrValidation naming the %s side", side.name, err, side.name)
+		}
+	}
+
+	// 4. A failed proposal read is a store failure, not a licence.
+	svc = NewService(&fakeStatePort{states: statesMap}, &fakeSnapshotPort{snaps: snaps},
+		&fakeProposalPort{err: errors.New("connection reset")})
+	if _, err := svc.Diff(context.Background(), triple); err == nil || !errors.Is(err, ErrStore) {
+		t.Fatalf("failed proposal read error = %v, want ErrStore", err)
 	}
 }
 
@@ -229,7 +332,7 @@ func newConflictFixtureService(t *testing.T) *conflictFixtureService {
 	}
 	snapshotsPort := &fakeSnapshotPort{snaps: snapshots}
 	return &conflictFixtureService{
-		svc:           NewService(statesPort, snapshotsPort),
+		svc:           NewService(statesPort, snapshotsPort, nil),
 		statesPort:    statesPort,
 		snapshotsPort: snapshotsPort,
 	}

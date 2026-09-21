@@ -126,6 +126,7 @@ func newDiffFixtureWithVisibility(t *testing.T, ctx context.Context, projectVisi
 		diffs: diffs.NewService(
 			stateStore,
 			persistence.NewManifestStore(pool),
+			persistence.NewPullRequestStore(pool),
 		),
 		svc:       svc,
 		statesSvc: statesSvc,
