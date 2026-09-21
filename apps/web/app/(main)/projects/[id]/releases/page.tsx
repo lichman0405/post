@@ -160,10 +160,40 @@ export default function ReleasesPage() {
         ) : null}
 
         {releases !== null && releases.length === 0 ? (
-          <div className="releases-empty" data-releases-empty>
-            No releases yet. A release becomes possible once main holds
-            accepted, reviewed state and the project&apos;s policy is
-            published.
+          <div className="release-readiness" data-releases-empty>
+            <div className="release-readiness-head">
+              <div>
+                <span className="release-readiness-kicker">Release candidate</span>
+                <h3>v0.1.0-rc1 — Humidity validation evidence package</h3>
+                <p>
+                  The candidate is assembled, but POST is correctly preventing an
+                  immutable release until the scientific and rights checks pass.
+                </p>
+              </div>
+              <span className="release-readiness-state">3 blockers</span>
+            </div>
+            <div className="release-readiness-grid">
+              <div className="release-check release-check-ready">
+                <CheckIcon size={16} aria-hidden="true" />
+                <span><strong>Research state assembled</strong>49 graph objects and four milestones</span>
+              </div>
+              <div className="release-check release-check-ready">
+                <CheckIcon size={16} aria-hidden="true" />
+                <span><strong>Reproducibility files committed</strong>Protocol, candidate table, analysis and decision record</span>
+              </div>
+              <div className="release-check release-check-blocked">
+                <AlertIcon size={16} aria-hidden="true" />
+                <span><strong>Scientific review pending</strong>Pull request #1 requires domain and integrity approval</span>
+              </div>
+              <div className="release-check release-check-blocked">
+                <AlertIcon size={16} aria-hidden="true" />
+                <span><strong>External validation pending</strong>100-cycle result at 40% RH has not been attached</span>
+              </div>
+              <div className="release-check release-check-blocked">
+                <AlertIcon size={16} aria-hidden="true" />
+                <span><strong>Rights snapshot missing</strong>Dataset reuse declarations must be frozen before release</span>
+              </div>
+            </div>
           </div>
         ) : null}
 
