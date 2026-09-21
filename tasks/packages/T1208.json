@@ -41,8 +41,7 @@
   "tests/acceptance/**",
   "tests/e2e/**",
   "ops/**",
-  "examples/**",
-  "scripts/**"
+  "examples/**"
  ],
  "forbidden_scope": [
   ".git/**",
@@ -57,6 +56,6 @@
   "docs/31_MASTER_ACCEPTANCE.md",
   "docs/67_TEST_GATES.md"
  ],
- "scope_note": "**摘掉 `docs/**`（Supervisor-only）**；加入 `scripts/**`（生成物 `--check` 的既有形状在那儿）。\n\n**不碰 `internal/**` 与 `cmd/**`**：本任务要证明「今天这套系统造出来的项目**可以被搬走**」。搬运过程中发现某个东西**根本没落盘**（例如 blob 只在内存里、或某类对象没有版本标识），**那就是这个任务的结论**——**报上来**并如实写进 RESULT，不要顺手去改产品代码把它补上（那是一条新账）。",
- "supervisor_scope_narrowing": "摘掉 `docs/**`；加入 `scripts/**`。产品代码不在范围内：导不出来是结论，不是要顺手修的 bug。"
+ "scope_note": "**`scripts/**` 已从本任务摘出（2026-09-21 Supervisor 收窄，安全评审后）。**理由是那里放的不是普通工具，而是**验收仪器本身**：`scripts/record_test_run.py`（测试证据录入口）、`scripts/validate_specs.py`、`scripts/validate_task_state.py`、`scripts/spec_version.py`、`scripts/gen_schema_snapshot.py`、`scripts/reconcile_tests_ledger.py`、`scripts/staticcheck.sh`、`scripts/ci.sh`。**能让被验收者写验收仪器的写入面，等于让考生改卷子**——一个能改 `record_test_run.py` 的工人可以伪造测试证据，一个能改 `validate_specs.py` 的工人可以让规格校验放行。同一条口径已经用在 T1206 上（2026-09-21 同一轮）。",
+ "supervisor_scope_narrowing": "**（2026-09-21 第 2 版·安全收窄）`scripts/**` 移除。** 你的导出工具与它的 `--check` 校验器放在 `tests/acceptance/**`（要求 5 点名的 `*-real-services-e2e.sh` 就是既有形状）或 `ops/**`；幂等/完整性用的辅助脚本同样用 `tests/**` 或 `ops/**` 下的名字，**不要往 `scripts/` 里放**。如果你判断某个文件非落在 `scripts/**` 不可（例如必须复用 `speclib.py` 里的解析），**不要自己开这个口子**：在 RESULT 的 follow_up 里点名是哪一个文件、为什么、由 Supervisor 决定是放宽范围还是给你一个更合适的落点。\n\n**别再犯 T1108 那种错**：范围收窄只影响你**写**什么，不影响你**读**什么——整个 worktree 你都可以读，`scripts/` 下的既有脚本你随便调用（`python3 scripts/...` 只读执行没问题）。"
 }

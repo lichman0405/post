@@ -9175,7 +9175,7 @@ T0409 合并为 **PR #247**（squash `926f292`），`infra/migrations/00070_merg
 - 要用那一列早就有（`infra/migrations/00003_projects.sql:22`），**所以本任务不新增迁移**——
   我因此把 `infra/migrations/**`、`specs/database/postgres.sql`、`specs/SPEC_VERSION.json` **移出**它的
   `allowed_scope`：不新增迁移就不该重新生成那份"所有建表语句的总和"，也不该动指纹。
-- **"不做解冻"不是我拍的，是规格定的**：`docs/09_VERSION_CONTROL.md:9-10` 逐字写着
+- **"不做解冻"不是我拍的，是规格定的**：`docs/09_VERSION_CONTROL.md:13` 逐字写着
   「Emergency unfreeze 不在 V1 提供，避免形成绕过路径」，契约里也确实只有 `:freeze` 没有 `:unfreeze`。
 - 授权那一格在矩阵里**没有 `conditional`**（`internal/authz/matrix.go:85-93`），所以不像发布那样需要
   fail-closed 的自定义判断（那一条是 #237）。
@@ -15544,7 +15544,7 @@ owner 的回答是长期授权：「我不会再回答你问题。你自己处�
 - **T0610（主线对象 reopen）= 形状 A：与 `abort_main_object` 逐格对称。**
   `reopen_main_object,deny,deny,deny,deny,via_pr,via_pr,proposal_only`（照 CSV:14 的 abort 行），
   `internal/authz/action.go` 增 `ActionReopenMainObject`。依据 `docs/43_STATE_MACHINES.md:10`（reopen 是 abort 的逆向边）、
-  `docs/46:11`（保留历史、追加新 transition）、`docs/09:9-10` 逐字「**即便 Owner 也只能经 PR merge**」——
+  `docs/46:11`（保留历史、追加新 transition）、`docs/09:13` 逐字「**即便 Owner 也只能经 PR merge**」——
   `via_pr` 不是从 abort 类推的，是 main 的一般规矩。**不采用形状 B**（复用 `write_scientific_state`）：
   那会让 contributor 能撤销 maintainer 的 abort，而 abort 它自己做不了——那是**放宽**权限，方向反了。
 
@@ -15658,3 +15658,24 @@ T1201/T1202/T1205/T1206/T1207/T1208 的 phase 默认范围含 `docs/**`。按 §
 ### ⑥ 迁移号分配
 
 **`00122` 分配给 T0908**（`00121` 是 T0906 的，仍在飞）。编号由 Supervisor 分配、写进任务包，Worker 不得自选（§8.1）。
+
+### ⑦ 两处安全收窄：T1107 与 T1208（2026-09-21，自动化安全评审后复核成立）
+
+自动化安全评审对**任务书写入面**报了两条 MEDIUM，逐条核过，**都成立**，都按"被验收者不得同时持有验收仪器的笔"这一条口径收窄。
+
+- **T1208（完整 Project 可移植导出）摘掉 `scripts/**`。**
+  那里放的不是普通工具，而是**验收仪器本身**：`record_test_run.py`（测试证据录入口）、`validate_specs.py`、`validate_task_state.py`、
+  `spec_version.py`、`gen_schema_snapshot.py`、`reconcile_tests_ledger.py`、`staticcheck.sh`、`ci.sh`。
+  一个能改 `record_test_run.py` 的 Worker 可以**伪造测试证据**；一个能改 `validate_specs.py` 的 Worker 可以让规格校验放行。
+  导出工具与它的 `--check` 校验器改落在 `tests/acceptance/**` 或 `ops/**`（要求 5 点名的 `*-real-services-e2e.sh` 就是既有形状）。
+  **同一口径已用于 T1206**（同一轮、同一个发现）。
+
+- **T1107（权限与 Search Side-channel 安全回归）把 `cmd/api/**` 收到八个读面包 + `main.go`**，
+  并把 **`cmd/api/authhttp/**` 与 `cmd/api/httpmw/**` 写进 `forbidden_scope`**。
+  理由不是"太大了"，而是**它正挡在考卷上**：本任务要求 6 逐字引 `cmd/api/authhttp/auth_middleware.go:144-152/178-186` 的匿名口径、
+  要求 8 明令 `internal/authz/**` 不许动——**让被检验者能改写被检验的规则，与动 `internal/authz/**` 是同一件事**。
+  留下的八个包是要求 4 点名的公开面所在：`assetshttp`、`provenancehttp`、`explorehttp`、`searchhttp`、`feedshttp`、`projectshttp`、`knowledgehttp` 与接线 `main.go`。
+
+**两条纪律写进了任务书**，因为收窄本身有"让任务做不完"的风险（T1108 那次踩过）：
+① 范围只约束**写**什么，不约束**读**什么——`scripts/**`、`internal/authz/**`、`cmd/api/authhttp/**` 仍可读、可调用、可在测试里断言；
+② 若实测发现某处非落在没收进来的路径里，**停下来报**并在 RESULT 的 follow_up 点名，由 Supervisor 决定放宽还是换做法，**不许自己开口子**。

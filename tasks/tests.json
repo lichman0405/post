@@ -197,9 +197,9 @@
       "name": "worktree integration",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T01:24:36Z",
+      "evidence": "Supervisor ran `go test -count=1 $(go list ./... | grep -v '/tests/integration')` -> exit 0 on 2026-09-21T01:24:36Z. Last output: ?   \tgithub.com/lichman0405/post/tests/e2e-release/harness\t[no test files] ; ok  \tgithub.com/lichman0405/post/tests/ranking\t0.021s ; ok  \tgithub.com/lichman0405/post/tests/searchplan\t0.035s ; GO_TEST_EXIT=0"
     },
     {
       "id": "T0010-TEST-02",
@@ -207,9 +207,9 @@
       "name": "two-worker concurrency smoke",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T01:24:36Z",
+      "evidence": "Supervisor ran `go test -count=1 $(go list ./... | grep -v '/tests/integration')` -> exit 0 on 2026-09-21T01:24:36Z. Last output: ?   \tgithub.com/lichman0405/post/tests/e2e-release/harness\t[no test files] ; ok  \tgithub.com/lichman0405/post/tests/ranking\t0.021s ; ok  \tgithub.com/lichman0405/post/tests/searchplan\t0.035s ; GO_TEST_EXIT=0"
     },
     {
       "id": "T0010-TEST-03",
@@ -217,9 +217,9 @@
       "name": "worker crash recovery",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T01:24:36Z",
+      "evidence": "Supervisor ran `go test -count=1 $(go list ./... | grep -v '/tests/integration')` -> exit 0 on 2026-09-21T01:24:36Z. Last output: ?   \tgithub.com/lichman0405/post/tests/e2e-release/harness\t[no test files] ; ok  \tgithub.com/lichman0405/post/tests/ranking\t0.021s ; ok  \tgithub.com/lichman0405/post/tests/searchplan\t0.035s ; GO_TEST_EXIT=0"
     },
     {
       "id": "T0011-TEST-01",
@@ -227,9 +227,9 @@
       "name": "git control denial e2e",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T01:24:36Z",
+      "evidence": "Supervisor ran `go test -count=1 $(go list ./... | grep -v '/tests/integration')` -> exit 0 on 2026-09-21T01:24:36Z. Last output: ?   \tgithub.com/lichman0405/post/tests/e2e-release/harness\t[no test files] ; ok  \tgithub.com/lichman0405/post/tests/ranking\t0.021s ; ok  \tgithub.com/lichman0405/post/tests/searchplan\t0.035s ; GO_TEST_EXIT=0"
     },
     {
       "id": "T0011-TEST-02",
@@ -237,9 +237,9 @@
       "name": "scope violation e2e",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T01:24:36Z",
+      "evidence": "Supervisor ran `go test -count=1 $(go list ./... | grep -v '/tests/integration')` -> exit 0 on 2026-09-21T01:24:36Z. Last output: ?   \tgithub.com/lichman0405/post/tests/e2e-release/harness\t[no test files] ; ok  \tgithub.com/lichman0405/post/tests/ranking\t0.021s ; ok  \tgithub.com/lichman0405/post/tests/searchplan\t0.035s ; GO_TEST_EXIT=0"
     },
     {
       "id": "T0011-TEST-03",
@@ -247,9 +247,9 @@
       "name": "result schema unit",
       "gate": "G1/G2",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T01:24:36Z",
+      "evidence": "Supervisor ran `go test -count=1 $(go list ./... | grep -v '/tests/integration')` -> exit 0 on 2026-09-21T01:24:36Z. Last output: ?   \tgithub.com/lichman0405/post/tests/e2e-release/harness\t[no test files] ; ok  \tgithub.com/lichman0405/post/tests/ranking\t0.021s ; ok  \tgithub.com/lichman0405/post/tests/searchplan\t0.035s ; GO_TEST_EXIT=0"
     },
     {
       "id": "T0012-TEST-01",
@@ -977,9 +977,9 @@
       "name": "publish security e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T01:42:50Z",
+      "evidence": "Supervisor ran `go test ./tests/integration -count=1 -v -run 'TestAssetPublish|TestKnowledgePublish'` -> exit 0 on 2026-09-21T01:42:50Z. Last output: --- PASS: TestKnowledgePublishNeverCrossesTheProjectBoundary (0.37s) ; PASS ; testdb: databases=16 templates=2 migrations=2 create=717ms migrate=880ms drop=1.955s ; ok  \tgithub.com/lichman0405/post/tests/integration\t6.813s Supervisor 补跑既成任务的证据；基线 7614bbd"
     },
     {
       "id": "T0706-TEST-01",
@@ -1137,9 +1137,9 @@
       "name": "network e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T02:40:44Z",
+      "evidence": "Supervisor ran `TZ=UTC go test ./tests/integration -count=1 -v -timeout 20m` -> exit 0 on 2026-09-21T02:40:44Z. Last output: --- PASS: TestWebhookUnclassifiedStatusDoesNotBurnStreak (0.09s) ; PASS ; testdb: databases=440 templates=85 migrations=89 create=21.706s migrate=36.139s drop=45.733s ; ok  \tgithub.com/lichman0405/post/tests/integration\t318.130s Supervisor 补跑（合并态缺证据）。树=origin/main 9fe978e 的独立工作树 /tmp/post-evid-t0816；整包 437 passed / 0 failed，ok 318.130s。本用例：--- PASS: TestOpenNetworkLoopEndToEnd (0.92s)。全量日志见 /home/shibo/code/post/.rddev/runtime/evid-t0816-UTC.log"
     },
     {
       "id": "T0811-TEST-01",
@@ -1307,9 +1307,9 @@
       "name": "impact golden/e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T02:40:44Z",
+      "evidence": "Supervisor ran `TZ=UTC go test ./tests/integration -count=1 -v -timeout 20m` -> exit 0 on 2026-09-21T02:40:44Z. Last output: --- PASS: TestWebhookUnclassifiedStatusDoesNotBurnStreak (0.09s) ; PASS ; testdb: databases=440 templates=85 migrations=89 create=21.706s migrate=36.139s drop=45.733s ; ok  \tgithub.com/lichman0405/post/tests/integration\t318.130s Supervisor 补跑（合并态缺证据）。树=origin/main 9fe978e 的独立工作树 /tmp/post-evid-t0816；整包 437 passed / 0 failed，ok 318.130s。本用例：--- PASS: TestDependencyImpactGoldenClosure (0.89s) / TestDependencyImpactAlertDedupeLivesInTheDatabase (0.27s) / TestDependencyImpactAssetLandingPointAndPrivacy (0.50s) / TestDependencyImpactRunsInTheWorkerProcess (5.29s)。全量日志见 /home/shibo/code/post/.rddev/runtime/evid-t0816-UTC.log"
     },
     {
       "id": "T1101-TEST-01",
@@ -1327,9 +1327,9 @@
       "name": "research map e2e/perf",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T01:42:50Z",
+      "evidence": "Supervisor ran `go test ./tests/integration -count=1 -v -run 'TestResearchMap'` -> exit 0 on 2026-09-21T01:42:50Z. Last output: --- PASS: TestResearchMapE2EPerfScale (2.44s) ; PASS ; testdb: databases=2 templates=1 migrations=1 create=128ms migrate=460ms drop=335ms ; ok  \tgithub.com/lichman0405/post/tests/integration\t3.619s Supervisor 补跑既成任务的证据；基线 7614bbd"
     },
     {
       "id": "T1103-TEST-01",
@@ -1517,9 +1517,9 @@
       "name": "version-counter backfill on a pre-existing database (00024 + 00025)",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T01:42:50Z",
+      "evidence": "Supervisor ran `go test ./tests/integration -count=1 -v -run 'TestMigrationVersionCounterBackfill|TestMigrationBranchRefBackfillDirection'` -> exit 0 on 2026-09-21T01:42:50Z. Last output: --- PASS: TestMigrationBranchRefBackfillDirection (0.58s) ; PASS ; testdb: databases=3 templates=0 migrations=0 create=84ms migrate=0s drop=543ms ; ok  \tgithub.com/lichman0405/post/tests/integration\t2.123s Supervisor 补跑既成任务的证据；基线 7614bbd"
     },
     {
       "id": "T0204-TEST-G3",
@@ -1537,9 +1537,9 @@
       "name": "branch-domain-real-services (G3)",
       "gate": "G3",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": "Contract for the T0205 task package: deliver TestBranchHeadEvolvesIndependently (branch head 可独立演化) and TestMainAndBranchStateDoNotMix (main 与 branch state 不混淆) in tests/integration, against real PostgreSQL. bash tests/acceptance/branch-domain-real-services-e2e.sh fails loudly by name until they exist, and fails if either does not actually run."
+      "status": "passed",
+      "last_run": "2026-09-21T01:41:16Z",
+      "evidence": "Supervisor ran `bash tests/acceptance/branch-domain-real-services-e2e.sh` -> exit 0 on 2026-09-21T01:41:16Z. Last output:   pinned: TestBranchHeadEvolvesIndependently TestMainAndBranchStateDoNotMix ; ok   TestBranchHeadEvolvesIndependently ; ok   TestMainAndBranchStateDoNotMix ; G3 branch-domain-real-services: all checks passed against real PostgreSQL Supervisor 补跑既成任务的证据；基线 7614bbd"
     },
     {
       "id": "T0207-TEST-G3",
@@ -1547,9 +1547,9 @@
       "name": "validation-gates-real-services (G3)",
       "gate": "G3",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": "Contract for the T0207 task package: deliver TestGatesDifferInStrictnessAndSayWhy (不同 gate 严格度不同且可解释) and TestServerRevalidatesWhatTheCommandValidated (command 再次 server validate) in tests/integration, against real PostgreSQL. bash tests/acceptance/validation-gates-real-services-e2e.sh fails loudly by name until they exist, and fails if either does not actually run."
+      "status": "passed",
+      "last_run": "2026-09-21T01:41:18Z",
+      "evidence": "Supervisor ran `bash tests/acceptance/validation-gates-real-services-e2e.sh` -> exit 0 on 2026-09-21T01:41:18Z. Last output:   pinned: TestGatesDifferInStrictnessAndSayWhy TestServerRevalidatesWhatTheCommandValidated ; ok   TestGatesDifferInStrictnessAndSayWhy ; ok   TestServerRevalidatesWhatTheCommandValidated ; G3 validation-gates-real-services: all checks passed against real PostgreSQL Supervisor 补跑既成任务的证据；基线 7614bbd"
     },
     {
       "id": "T0712-TEST-01",
@@ -1637,9 +1637,9 @@
       "name": "affiliation date convention agreement (projection / stamping / judging read one definition)",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T01:42:50Z",
+      "evidence": "Supervisor ran `go test ./tests/integration -count=1 -v -run 'TestAffiliationDateConventionAcrossTheProjection|TestAffiliationEndDayIsStillAMembershipDay|TestOrganizationAudienceIgnoresTheSessionTimezone'` -> exit 0 on 2026-09-21T01:42:50Z. Last output: --- PASS: TestOrganizationAudienceIgnoresTheSessionTimezone (0.25s) ; PASS ; testdb: databases=3 templates=1 migrations=1 create=162ms migrate=424ms drop=224ms ; ok  \tgithub.com/lichman0405/post/tests/integration\t1.312s Supervisor 补跑既成任务的证据；基线 7614bbd"
     },
     {
       "id": "T0816-TEST-02",
@@ -1647,9 +1647,9 @@
       "name": "utc-vs-local calendar day boundary resolves to the joined organization",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T01:42:50Z",
+      "evidence": "Supervisor ran `go test ./tests/integration -count=1 -v -run 'TestAffiliationDateConventionAcrossTheProjection|TestAffiliationEndDayIsStillAMembershipDay|TestOrganizationAudienceIgnoresTheSessionTimezone'` -> exit 0 on 2026-09-21T01:42:50Z. Last output: --- PASS: TestOrganizationAudienceIgnoresTheSessionTimezone (0.25s) ; PASS ; testdb: databases=3 templates=1 migrations=1 create=162ms migrate=424ms drop=224ms ; ok  \tgithub.com/lichman0405/post/tests/integration\t1.312s Supervisor 补跑既成任务的证据；基线 7614bbd"
     },
     {
       "id": "T0816-TEST-03",
@@ -1657,9 +1657,9 @@
       "name": "the whole integration suite is green under both TZ=UTC and TZ=Asia/Shanghai",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T02:46:52Z",
+      "evidence": "Supervisor ran `TZ=UTC go test ./tests/integration -count=1 -v -timeout 20m 以及 TZ=Asia/Shanghai go test ./tests/integration -count=1 -v -timeout 20m` -> exit 0 on 2026-09-21T02:46:52Z. Last output: --- PASS: TestWebhookUnclassifiedStatusDoesNotBurnStreak (0.20s) ; PASS ; testdb: databases=440 templates=85 migrations=89 create=22.25s migrate=46.45s drop=1m8.392s ; ok  \tgithub.com/lichman0405/post/tests/integration\t374.782s Supervisor 补跑（合并态缺证据）。树=origin/main 9fe978e 的独立工作树 /tmp/post-evid-t0816，两次都是整包跑。TZ=UTC: 437 passed / 0 failed, ok github.com/lichman0405/post/tests/integration 318.130s（日志 /home/shibo/code/post/.rddev/runtime/evid-t0816-UTC.log）。TZ=Asia/Shanghai: 437 passed / 0 failed, ok 374.782s（日志 /home/shibo/code/post/.rddev/runtime/evid-t0816-Asia_Shanghai.log）。两次都没有 --- FAIL 行。"
     },
     {
       "id": "T0610-TEST-01",
@@ -1677,9 +1677,9 @@
       "name": "request review route",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T02:40:44Z",
+      "evidence": "Supervisor ran `TZ=UTC go test ./tests/integration -count=1 -v -timeout 20m` -> exit 0 on 2026-09-21T02:40:44Z. Last output: --- PASS: TestWebhookUnclassifiedStatusDoesNotBurnStreak (0.09s) ; PASS ; testdb: databases=440 templates=85 migrations=89 create=21.706s migrate=36.139s drop=45.733s ; ok  \tgithub.com/lichman0405/post/tests/integration\t318.130s Supervisor 补跑（合并态缺证据）。树=origin/main 9fe978e 的独立工作树 /tmp/post-evid-t0816；整包 437 passed / 0 failed，ok 318.130s。本用例：--- PASS: TestRequestReviewRouteEndToEnd (1.01s)。全量日志见 /home/shibo/code/post/.rddev/runtime/evid-t0816-UTC.log"
     },
     {
       "id": "T0511-TEST-01",
@@ -1697,9 +1697,9 @@
       "name": "external fork merge e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T01:42:50Z",
+      "evidence": "Supervisor ran `go test ./tests/integration -count=1 -v -run 'TestExternalForkMerge'` -> exit 0 on 2026-09-21T01:42:50Z. Last output: --- PASS: TestExternalForkMergeRefusesANonForkSource (0.61s) ; PASS ; testdb: databases=2 templates=1 migrations=1 create=137ms migrate=428ms drop=239ms ; ok  \tgithub.com/lichman0405/post/tests/integration\t2.673s Supervisor 补跑既成任务的证据；基线 7614bbd"
     },
     {
       "id": "T0818-TEST-01",
@@ -1707,9 +1707,9 @@
       "name": "external fork merge: the upstream project's RSG reads the landed content",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": ""
+      "status": "passed",
+      "last_run": "2026-09-21T02:40:44Z",
+      "evidence": "Supervisor ran `TZ=UTC go test ./tests/integration -count=1 -v -timeout 20m` -> exit 0 on 2026-09-21T02:40:44Z. Last output: --- PASS: TestWebhookUnclassifiedStatusDoesNotBurnStreak (0.09s) ; PASS ; testdb: databases=440 templates=85 migrations=89 create=21.706s migrate=36.139s drop=45.733s ; ok  \tgithub.com/lichman0405/post/tests/integration\t318.130s Supervisor 补跑（合并态缺证据）。树=origin/main 9fe978e 的独立工作树 /tmp/post-evid-t0816；整包 437 passed / 0 failed，ok 318.130s。本用例：--- PASS: TestExternalForkMergeLandsTheContentInTheUpstreamRSG (2.86s)。全量日志见 /home/shibo/code/post/.rddev/runtime/evid-t0816-UTC.log"
     },
     {
       "id": "T0611-TEST-01",

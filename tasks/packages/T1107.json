@@ -1,73 +1,82 @@
 {
-  "id": "T1107",
-  "dependencies": [
-    "T0906",
-    "T0806"
-  ],
-  "tests": [
-    "privacy suite"
-  ],
-  "phase": "P11",
-  "phase_name": "UI、安全、可访问性、性能与运维加固",
-  "title": "权限与 Search Side-channel 安全回归",
-  "v1_required": true,
-  "decision_level_max": "L1",
-  "requirements": [
-    "**先搞清楚已经有什么，别重造（2026-09-21 复核）**。仓库里的权限负向测试已经很密：`tests/e2e/privacy_e2e_test.go:140 TestE2EPrivacyNegative`、`tests/e2e/asset_page_e2e_test.go:886 TestE2EAssetPageAnswersOneIndistinguishable404`、`tests/integration/privacy_test.go:49 TestPrivacyReadIsolation`、`tests/integration/project_authz_test.go:46 TestProjectAuthzMatrix`、`tests/integration/org_permission_test.go:187`、`tests/integration/activity_audience_failclosed_test.go:40`、`tests/integration/asset_publish_test.go:938 TestAssetPublishDenialPrecedesTheTargetLookup`、`tests/integration/knowledge_publish_test.go:1049 TestKnowledgePublishPermissionIsFailClosed` 与 `:1232`、`tests/integration/search_access_test.go:23`、`tests/integration/search_scope_test.go:40`、`tests/integration/retrieval_test.go:433/803/991/1109`，外加 JS 侧 `tests/e2e-anonymous/`、`tests/e2e-assets/`、`tests/e2e-explore/`、`tests/e2e-settings/`、`tests/e2e-shell/`。**本任务不是从零写一套，是把它们收成一条能一键跑的门，并且把已知的两个空白补上。**",
-    "**规格逐字，照抄**：`docs/23_SECURITY_PRIVACY.md:5` 把这件事列为最高风险之一，逐字「最大风险不是传统 XSS alone，而是：private research 泄漏、错误 publish、对象级权限绕过、signed URL 泄漏、Agent token 权限过大、Git transport 绕过 main protection、**search side-channel**、webhook secret 泄漏。」；`:13` 逐字「默认 deny。每个 command 明确 `actor + org + project + object + action + policy context`。权限单元测试和 property-based matrix test。」；`:21` 逐字「所有 query/search/export/download 进行 tenant/project/object policy 过滤。**私有对象计数也不能通过 public API 泄漏**；公开 asset 页面“8 private projects use this”仅在产品策略明确允许的匿名聚合阈值下显示，**V1 可直接不显示 private count**。」；`docs/45_ERROR_MODEL.md:24` 逐字「错误信息告诉用户下一步，不泄漏 private entity existence 或内部 stack。」；`docs/54_SECURITY_THREAT_MODEL.md:10` 把「Private Project/Branch 内容出现在 Search/Explore/API error」列为场景 #1，`:19` 逐字「每个场景必须有对应 automated negative test，映射见 traceability 文档。」",
-    "**过滤在 SQL 谓词里，不是 post-filter——这一点要当成性质来验，不要当口号**。文档检索的可见性谓词逐字在 `internal/persistence/queries/search.sql:44`（`AND (visibility = 'public' OR project_id = ANY(@allowed_project_ids::uuid[]))`），同一句复制在 `:167-168`（全文）与 `:211-212`（向量）；`internal/search/retrieval/store.go:17-24` 逐字说明「每一条授予或拒绝的谓词都在 SQL 里……加在这里就成了一条**读之后**才应用的规则，而那是 docs/21 §9 禁止的形状」。**唯二**在输出后应用 scope 的地方是图种子读——`internal/search/ranking/store.go:101-104` 与 `internal/search/retrieval/retrieval.go:695-700`——两处都有测试，甚至有一条第 `:991 TestTraversalQueriesAreWhatRefuseTheOtherProject` 是**反证**（跑无谓词版本，证明另一项目的 version id 真会回来）。**你的套件要保留这种反证的味道**：一条只会说「没泄漏」的测试，在过滤器被整个摘掉时也必须能红。",
-    "**空白一：计数泄漏在后端没有测试**。上面那条 `:21` 的「私有对象计数也不能通过 public API 泄漏」今天只有**前端**对照——`tests/e2e-assets/assets-e2e.mjs` 的 `check(\"private usage: no count of withheld usages is rendered\", ...)` 与 `tests/e2e-explore/explore-e2e.mjs` 的「无 popularity 词汇」。**要补的是后端**：构造「若干私有项目使用/依赖某个公开对象」的库状态，逐个读**公开**面（资产页、依赖页、检索答案、feed、列表端点），断言返回体里**推不出**私有实体的**存在、个数与身份**——不只是「没有那个名字」，而是「没有任何一个数字/枚举顺序/分页计数能把它数出来」。要有一条**能失败的**对照：先把计数真的渲染出来一次（或让某个端点返回真实计数），断言套件红，再改回来。",
-    "**空白二：时序（timing）这一维在规格里根本没有定义，不要发明**。`docs/**` 里 grep `时序`/`timing`/`constant-time` 只命中两处：`docs/32_RISK_REGISTER.md:8`（讲的是关系枚举，不是时序）与 `docs/23:21`（讲的是计数）。全仓唯一一处常时比较是 `cmd/api/authhttp/auth_middleware.go:194-196` 的 CSRF 比较（逐字「a missing header is the same 403 as a wrong one (no oracle)」）。**所以**：①**不许**为响应时间设一个阈值并据此判红——那是我没权发明的产品语义（CLAUDE.md §5，L3）；②要做的**确定性的那一半**是「**答案不可区分**」：对「不存在」与「存在但不可读」两种输入，断言 status、错误 code、错误文案、响应头、以及响应体字节长度**逐项相同**（`tests/e2e/asset_page_e2e_test.go:912` 的 `if body != first` 那种比法就是现成范式）；③时序**测量并记录**，不作门：把两类输入的耗时分布原样写进 RESULT，并逐字写下「规格没有给出任何时序阈值，所以本套件不设阈值」这句话。",
-    "**匿名口径照抄现状，不要在这条上重新开刀**：`cmd/api/authhttp/auth_middleware.go:144-152/178-186` 逐字「No/expired session: reads continue, writes answer 401.」「Structural 401 for unauthenticated writes」；`specs/policies/permissions-matrix.csv:2-3` 逐字 `read_public_project,allow,...` 与 `read_private_project,deny,...`；私有项目一律**存在性隐藏的 404**（`internal/authz/actor.go:15-16` 的 `ActorPublicAnonymous`，`cmd/api/assetshttp/page.go:233-238` 的单一 404 code）。**`docs/05_INFORMATION_ARCHITECTURE.md:9` 的「登录前保留 Search」读法与今天的 401 口径不一致，这件事已经被裁过**（`internal/search/scope.go:44-48` 逐字记录了 owner ruling 2026-09-18 与它记在 `tasks/decisions.md`）——**不要在本任务里翻这个案**，按现状断言。",
-    "**只许收紧，不许放宽**。本任务允许你在读路径上做**fail-closed 方向**的修改（更严地拒绝、更少地披露），**任何放宽都禁止**——包括「让某个角色多看见一点」「把某个 404 改成 403 更友好」「让不可区分的两个答案变得可区分」。每一处非测试改动要在 RESULT 里逐条点名：改了哪个文件、收紧在哪、**在你改之前哪条测试是红的**（把红的那次输出贴进去），改完之后是不是绿。**改不出红的证据，就不要改那段代码。**",
-    "**`internal/authz/**` 不许动**（见 scope）：它是本任务要检验的那本规则书。改它来让套件变绿，就是改考卷。同理 `internal/rights/**` 的可见性判定、`specs/policies/permissions-matrix.csv` 都不动。若你判断某条规则的**值**本身错了，**停下来报**——那是要单独裁定的。",
-    "**套件要能一键跑、并且进得了门**：`privacy suite` 这条必测在 `tasks/tests.json` 里登记着（`T1107-TEST-01`，`blocking: true`）。交付一个可以从仓库根调用的入口（照既有 `bash tests/acceptance/*.sh` 的形状），把上面那些既有 Go/JS 测试**按性质分组**跑起来（真 PostgreSQL 的那一档、HTTP 边缘那一档、浏览器那一档），并且**新补的两块**也要在其中。**不要**把慢测试与快测试混成一条不可诊断的链——失败时要能一眼看出是哪一类。",
-    "**不做 / 边界**：不改 `specs/**`（契约、权限矩阵都是 Supervisor 的）；不改 `docs/**`、`tasks/**`；不新增迁移；不做界面改动（`apps/web/**` 只在你需要补一条前端计数泄漏对照时才碰，且照既有 `assets-e2e.mjs` 的形状）；不重写既有的负向测试——**它们原样留着**，你的入口是把它们组织起来，不是替换它们。"
-  ],
-  "deliverables": [
-    "一键可跑的 privacy/permission 负向套件入口（分组、可诊断）",
-    "后端计数泄漏的负向测试（含一条能失败的对照）",
-    "「答案不可区分」的确定性断言（status/code/文案/头/字节长度逐项相同）",
-    "时序测量的原始数据 + 一句逐字的「规格没有给阈值，所以不设阈值」",
-    "RESULT 里逐条点名的 fail-closed 收紧（若有），每处带「改之前哪条红」的输出"
-  ],
-  "acceptance_criteria": [
-    "**permission negative suite 全过**（任务原文）：套件入口从仓库根一条命令跑完全绿；并且**它真的跑了东西**——输出里能看到每一组的用例计数（不是「0 tests」也照样绿的壳）",
-    "**既有的负向证据一条都没被删弱**：`tests/e2e/privacy_e2e_test.go`、`tests/e2e/asset_page_e2e_test.go:886`、`tests/integration/privacy_test.go`、`project_authz_test.go`、`org_permission_test.go`、`activity_audience_failclosed_test.go`、`asset_publish_test.go`、`knowledge_publish_test.go`、`search_access_test.go`、`search_scope_test.go`、`retrieval_test.go`（含 `:991` 那条反证）全部原样通过；RESULT 里给出它们的清单与各自跑了什么",
-    "**计数泄漏有后端测试**：构造「私有项目使用公开对象」的库状态，逐个公开面断言推不出私有实体的存在/个数/身份；并且有**对照**证明这条测试能失败（渲染出计数则红）",
-    "**不可区分性逐项断言**：对「不存在」与「存在但不可读」，status、错误 code、文案、响应头、响应体字节长度逐项相同；至少覆盖项目面、资产面、检索面三处",
-    "**时序不设阈值**：RESULT 里有时序的原始测量数据，并且**逐字**写下规格未给阈值因此不设门；套件里没有任何基于耗时的断言",
-    "**只紧不松**：所有非测试改动都是 fail-closed 方向，逐条带「改之前红」的证据；没有任何放宽（无角色多看见、无 404→403、无可区分化）",
-    "**没碰规则书**：`internal/authz/**`、`internal/rights/**` 的可见性判定、`specs/policies/permissions-matrix.csv` 的 diff 为空",
-    "**RESULT 里写明**：套件入口的调用方式、分组与每组用例数、新补两块各自的失败对照、时序原始数据、以及你**没有**覆盖到的面与原因（例如检索层今天没有 HTTP 路由这件事）"
-  ],
-  "allowed_scope": [
-    "tests/**",
-    "internal/search/**",
-    "internal/persistence/**",
-    "cmd/api/**",
-    "apps/web/**"
-  ],
-  "forbidden_scope": [
-    ".git/**",
-    "CLAUDE.md",
-    "tasks/**",
-    "specs/**",
-    "docs/**",
-    "infra/**",
-    "internal/authz/**",
-    "internal/rights/**",
-    "internal/events/**",
-    "internal/devorchestrator/**"
-  ],
-  "relevant_specs": [
-    "docs/23_SECURITY_PRIVACY.md",
-    "docs/45_ERROR_MODEL.md",
-    "docs/54_SECURITY_THREAT_MODEL.md",
-    "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
-    "docs/21_DATA_MODEL.md",
-    "specs/policies/permissions-matrix.csv"
-  ],
-  "scope_note": "范围按「泄漏会从哪儿出去」划：读路径的查询层（`internal/persistence/**`、`internal/search/**`）、HTTP 边缘（`cmd/api/**`，不可区分 404/401 与错误文案在这一层成形）、以及界面侧的计数呈现（`apps/web/**`，那里今天已经有两条前端对照）、加上套件本身（`tests/**`）。**四条禁令**：`internal/authz/**` 是要被检验的规则书，改它等于改考卷；`internal/rights/**` 的可见性判定同理由；`specs/policies/permissions-matrix.csv` 是权限语义的真相源（改它就是改产品规则，L3）；`internal/devorchestrator/**` 与 `internal/events/**` 与本任务无关。**不做迁移**：若某条泄漏的修法需要改 schema 或加索引，报回来，编号由我分配（§8.1）。",
-  "supervisor_scope_narrowing": "**（2026-09-21 Supervisor 收窄）——从 phase 级默认上限砍到五条，并加四条硬禁令。** 原上限含 `specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`infra/**`、`ops/**`、`go.mod`、`go.sum`、`.env.example` 与整个 `internal/**`；现在只留会真的出现在这条链上的目录。\n\n**收窄里我做了两个判断，都写进需求**：①**时序维不设阈值**（需求第 5 条）——规格里没有任何时序数字，设一个就是发明产品语义，属 §5 的 L3，我不替 owner 发明；改为「确定性的不可区分性逐项断言 + 时序只测量记录」。②**只许收紧**（需求第 7 条）——一个安全回归任务如果顺手放宽了任何一条可见性判定，它就是在把门改成能通过的样子；允许收紧（fail-closed）并要求带「改之前红」的证据，是因为那才是回归任务应有的产物。\n\n**为什么把 `internal/authz/**` 明确写进 forbidden**：本任务的验收是「负向套件全过」，而套件检验的对象正是这台引擎。让它可写，等于给「让门变绿」留了一条最短路——改判定比查泄漏容易得多。"
+ "id": "T1107",
+ "dependencies": [
+  "T0906",
+  "T0806"
+ ],
+ "tests": [
+  "privacy suite"
+ ],
+ "phase": "P11",
+ "phase_name": "UI、安全、可访问性、性能与运维加固",
+ "title": "权限与 Search Side-channel 安全回归",
+ "v1_required": true,
+ "decision_level_max": "L1",
+ "requirements": [
+  "**先搞清楚已经有什么，别重造（2026-09-21 复核）**。仓库里的权限负向测试已经很密：`tests/e2e/privacy_e2e_test.go:140 TestE2EPrivacyNegative`、`tests/e2e/asset_page_e2e_test.go:886 TestE2EAssetPageAnswersOneIndistinguishable404`、`tests/integration/privacy_test.go:49 TestPrivacyReadIsolation`、`tests/integration/project_authz_test.go:46 TestProjectAuthzMatrix`、`tests/integration/org_permission_test.go:187`、`tests/integration/activity_audience_failclosed_test.go:40`、`tests/integration/asset_publish_test.go:938 TestAssetPublishDenialPrecedesTheTargetLookup`、`tests/integration/knowledge_publish_test.go:1049 TestKnowledgePublishPermissionIsFailClosed` 与 `:1232`、`tests/integration/search_access_test.go:23`、`tests/integration/search_scope_test.go:40`、`tests/integration/retrieval_test.go:433/803/991/1109`，外加 JS 侧 `tests/e2e-anonymous/`、`tests/e2e-assets/`、`tests/e2e-explore/`、`tests/e2e-settings/`、`tests/e2e-shell/`。**本任务不是从零写一套，是把它们收成一条能一键跑的门，并且把已知的两个空白补上。**",
+  "**规格逐字，照抄**：`docs/23_SECURITY_PRIVACY.md:5` 把这件事列为最高风险之一，逐字「最大风险不是传统 XSS alone，而是：private research 泄漏、错误 publish、对象级权限绕过、signed URL 泄漏、Agent token 权限过大、Git transport 绕过 main protection、**search side-channel**、webhook secret 泄漏。」；`:13` 逐字「默认 deny。每个 command 明确 `actor + org + project + object + action + policy context`。权限单元测试和 property-based matrix test。」；`:21` 逐字「所有 query/search/export/download 进行 tenant/project/object policy 过滤。**私有对象计数也不能通过 public API 泄漏**；公开 asset 页面“8 private projects use this”仅在产品策略明确允许的匿名聚合阈值下显示，**V1 可直接不显示 private count**。」；`docs/45_ERROR_MODEL.md:24` 逐字「错误信息告诉用户下一步，不泄漏 private entity existence 或内部 stack。」；`docs/54_SECURITY_THREAT_MODEL.md:10` 把「Private Project/Branch 内容出现在 Search/Explore/API error」列为场景 #1，`:19` 逐字「每个场景必须有对应 automated negative test，映射见 traceability 文档。」",
+  "**过滤在 SQL 谓词里，不是 post-filter——这一点要当成性质来验，不要当口号**。文档检索的可见性谓词逐字在 `internal/persistence/queries/search.sql:44`（`AND (visibility = 'public' OR project_id = ANY(@allowed_project_ids::uuid[]))`），同一句复制在 `:167-168`（全文）与 `:211-212`（向量）；`internal/search/retrieval/store.go:17-24` 逐字说明「每一条授予或拒绝的谓词都在 SQL 里……加在这里就成了一条**读之后**才应用的规则，而那是 docs/21 §9 禁止的形状」。**唯二**在输出后应用 scope 的地方是图种子读——`internal/search/ranking/store.go:101-104` 与 `internal/search/retrieval/retrieval.go:695-700`——两处都有测试，甚至有一条第 `:991 TestTraversalQueriesAreWhatRefuseTheOtherProject` 是**反证**（跑无谓词版本，证明另一项目的 version id 真会回来）。**你的套件要保留这种反证的味道**：一条只会说「没泄漏」的测试，在过滤器被整个摘掉时也必须能红。",
+  "**空白一：计数泄漏在后端没有测试**。上面那条 `:21` 的「私有对象计数也不能通过 public API 泄漏」今天只有**前端**对照——`tests/e2e-assets/assets-e2e.mjs` 的 `check(\"private usage: no count of withheld usages is rendered\", ...)` 与 `tests/e2e-explore/explore-e2e.mjs` 的「无 popularity 词汇」。**要补的是后端**：构造「若干私有项目使用/依赖某个公开对象」的库状态，逐个读**公开**面（资产页、依赖页、检索答案、feed、列表端点），断言返回体里**推不出**私有实体的**存在、个数与身份**——不只是「没有那个名字」，而是「没有任何一个数字/枚举顺序/分页计数能把它数出来」。要有一条**能失败的**对照：先把计数真的渲染出来一次（或让某个端点返回真实计数），断言套件红，再改回来。",
+  "**空白二：时序（timing）这一维在规格里根本没有定义，不要发明**。`docs/**` 里 grep `时序`/`timing`/`constant-time` 只命中两处：`docs/32_RISK_REGISTER.md:8`（讲的是关系枚举，不是时序）与 `docs/23:21`（讲的是计数）。全仓唯一一处常时比较是 `cmd/api/authhttp/auth_middleware.go:194-196` 的 CSRF 比较（逐字「a missing header is the same 403 as a wrong one (no oracle)」）。**所以**：①**不许**为响应时间设一个阈值并据此判红——那是我没权发明的产品语义（CLAUDE.md §5，L3）；②要做的**确定性的那一半**是「**答案不可区分**」：对「不存在」与「存在但不可读」两种输入，断言 status、错误 code、错误文案、响应头、以及响应体字节长度**逐项相同**（`tests/e2e/asset_page_e2e_test.go:912` 的 `if body != first` 那种比法就是现成范式）；③时序**测量并记录**，不作门：把两类输入的耗时分布原样写进 RESULT，并逐字写下「规格没有给出任何时序阈值，所以本套件不设阈值」这句话。",
+  "**匿名口径照抄现状，不要在这条上重新开刀**：`cmd/api/authhttp/auth_middleware.go:144-152/178-186` 逐字「No/expired session: reads continue, writes answer 401.」「Structural 401 for unauthenticated writes」；`specs/policies/permissions-matrix.csv:2-3` 逐字 `read_public_project,allow,...` 与 `read_private_project,deny,...`；私有项目一律**存在性隐藏的 404**（`internal/authz/actor.go:15-16` 的 `ActorPublicAnonymous`，`cmd/api/assetshttp/page.go:233-238` 的单一 404 code）。**`docs/05_INFORMATION_ARCHITECTURE.md:9` 的「登录前保留 Search」读法与今天的 401 口径不一致，这件事已经被裁过**（`internal/search/scope.go:44-48` 逐字记录了 owner ruling 2026-09-18 与它记在 `tasks/decisions.md`）——**不要在本任务里翻这个案**，按现状断言。",
+  "**只许收紧，不许放宽**。本任务允许你在读路径上做**fail-closed 方向**的修改（更严地拒绝、更少地披露），**任何放宽都禁止**——包括「让某个角色多看见一点」「把某个 404 改成 403 更友好」「让不可区分的两个答案变得可区分」。每一处非测试改动要在 RESULT 里逐条点名：改了哪个文件、收紧在哪、**在你改之前哪条测试是红的**（把红的那次输出贴进去），改完之后是不是绿。**改不出红的证据，就不要改那段代码。**",
+  "**`internal/authz/**` 不许动**（见 scope）：它是本任务要检验的那本规则书。改它来让套件变绿，就是改考卷。同理 `internal/rights/**` 的可见性判定、`specs/policies/permissions-matrix.csv` 都不动。若你判断某条规则的**值**本身错了，**停下来报**——那是要单独裁定的。",
+  "**套件要能一键跑、并且进得了门**：`privacy suite` 这条必测在 `tasks/tests.json` 里登记着（`T1107-TEST-01`，`blocking: true`）。交付一个可以从仓库根调用的入口（照既有 `bash tests/acceptance/*.sh` 的形状），把上面那些既有 Go/JS 测试**按性质分组**跑起来（真 PostgreSQL 的那一档、HTTP 边缘那一档、浏览器那一档），并且**新补的两块**也要在其中。**不要**把慢测试与快测试混成一条不可诊断的链——失败时要能一眼看出是哪一类。",
+  "**不做 / 边界**：不改 `specs/**`（契约、权限矩阵都是 Supervisor 的）；不改 `docs/**`、`tasks/**`；不新增迁移；不做界面改动（`apps/web/**` 只在你需要补一条前端计数泄漏对照时才碰，且照既有 `assets-e2e.mjs` 的形状）；不重写既有的负向测试——**它们原样留着**，你的入口是把它们组织起来，不是替换它们。"
+ ],
+ "deliverables": [
+  "一键可跑的 privacy/permission 负向套件入口（分组、可诊断）",
+  "后端计数泄漏的负向测试（含一条能失败的对照）",
+  "「答案不可区分」的确定性断言（status/code/文案/头/字节长度逐项相同）",
+  "时序测量的原始数据 + 一句逐字的「规格没有给阈值，所以不设阈值」",
+  "RESULT 里逐条点名的 fail-closed 收紧（若有），每处带「改之前哪条红」的输出"
+ ],
+ "acceptance_criteria": [
+  "**permission negative suite 全过**（任务原文）：套件入口从仓库根一条命令跑完全绿；并且**它真的跑了东西**——输出里能看到每一组的用例计数（不是「0 tests」也照样绿的壳）",
+  "**既有的负向证据一条都没被删弱**：`tests/e2e/privacy_e2e_test.go`、`tests/e2e/asset_page_e2e_test.go:886`、`tests/integration/privacy_test.go`、`project_authz_test.go`、`org_permission_test.go`、`activity_audience_failclosed_test.go`、`asset_publish_test.go`、`knowledge_publish_test.go`、`search_access_test.go`、`search_scope_test.go`、`retrieval_test.go`（含 `:991` 那条反证）全部原样通过；RESULT 里给出它们的清单与各自跑了什么",
+  "**计数泄漏有后端测试**：构造「私有项目使用公开对象」的库状态，逐个公开面断言推不出私有实体的存在/个数/身份；并且有**对照**证明这条测试能失败（渲染出计数则红）",
+  "**不可区分性逐项断言**：对「不存在」与「存在但不可读」，status、错误 code、文案、响应头、响应体字节长度逐项相同；至少覆盖项目面、资产面、检索面三处",
+  "**时序不设阈值**：RESULT 里有时序的原始测量数据，并且**逐字**写下规格未给阈值因此不设门；套件里没有任何基于耗时的断言",
+  "**只紧不松**：所有非测试改动都是 fail-closed 方向，逐条带「改之前红」的证据；没有任何放宽（无角色多看见、无 404→403、无可区分化）",
+  "**没碰规则书**：`internal/authz/**`、`internal/rights/**` 的可见性判定、`specs/policies/permissions-matrix.csv` 的 diff 为空",
+  "**RESULT 里写明**：套件入口的调用方式、分组与每组用例数、新补两块各自的失败对照、时序原始数据、以及你**没有**覆盖到的面与原因（例如检索层今天没有 HTTP 路由这件事）"
+ ],
+ "allowed_scope": [
+  "apps/web/**",
+  "cmd/api/assetshttp/**",
+  "cmd/api/explorehttp/**",
+  "cmd/api/feedshttp/**",
+  "cmd/api/knowledgehttp/**",
+  "cmd/api/main.go",
+  "cmd/api/projectshttp/**",
+  "cmd/api/provenancehttp/**",
+  "cmd/api/searchhttp/**",
+  "internal/persistence/**",
+  "internal/search/**",
+  "tests/**"
+ ],
+ "forbidden_scope": [
+  ".git/**",
+  "CLAUDE.md",
+  "tasks/**",
+  "specs/**",
+  "docs/**",
+  "infra/**",
+  "internal/authz/**",
+  "internal/rights/**",
+  "internal/events/**",
+  "internal/devorchestrator/**",
+  "cmd/api/authhttp/**",
+  "cmd/api/httpmw/**"
+ ],
+ "relevant_specs": [
+  "docs/23_SECURITY_PRIVACY.md",
+  "docs/45_ERROR_MODEL.md",
+  "docs/54_SECURITY_THREAT_MODEL.md",
+  "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
+  "docs/21_DATA_MODEL.md",
+  "specs/policies/permissions-matrix.csv"
+ ],
+ "scope_note": "**`cmd/api/**` 已收窄到本任务真正要验的那几个读面（2026-09-21 Supervisor 收窄，安全评审后）。**原来的一整个 `cmd/api/**` 会把 `cmd/api/authhttp/**` 也包进来——而 `authhttp` 正是**本任务要检验的匿名口径所在**（要求 6 逐字引的 `auth_middleware.go:144-152/178-186`）。**让被检验者能写考卷，和 `internal/authz/**` 不许动（要求 8）是同一件事**，所以它与 `httpmw` 一起进 `forbidden_scope`。留下的八个是要求 4 点名的公开面所在的包：资产页、依赖页、检索答案、feed、列表端点，以及 `main.go` 的接线。",
+ "supervisor_scope_narrowing": "**（2026-09-21 第 2 版·安全收窄）** 写入面从 `cmd/api/**` 收到八个具体路径 + `main.go`；`cmd/api/authhttp/**` 与 `cmd/api/httpmw/**` 明确禁写。\n\n这条收窄**不该让任务变得做不完**：要求 4 要补的后端计数泄漏对照读的是资产页/依赖页/检索答案/feed/列表端点，要求 7 允许的 fail-closed 收紧也只发生在这些读面上。**但如果你实测发现某处收紧必须落在上面没列的包里**（例如某个中间件在别处），**停下来不要改**，在 RESULT 的 follow_up 里点名是哪个文件、要改什么、为什么非它不可——由 Supervisor 决定放宽范围还是换个做法。\n\n**范围只约束你写什么，不约束你读什么**：`internal/authz/**`、`cmd/api/authhttp/**`、`specs/policies/permissions-matrix.csv` 你都可以读、可以引用、可以在测试里断言它们的行为——只是不能改它们（正是要求 8 的意思）。"
 }
