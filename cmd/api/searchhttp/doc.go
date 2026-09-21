@@ -1,5 +1,18 @@
-// Package searchhttp mounts POST /api/v1/search: the one route that runs the
-// whole search pipeline and answers with an evidence-backed answer (T0906).
+// Package searchhttp mounts the search surface: POST /api/v1/search (T0906),
+// the one route that runs the whole search pipeline and answers with an
+// evidence-backed answer, and the two routes of the Draft Research Context flow
+// that the contract hangs off it (T0908):
+//
+//	POST /api/v1/search/{searchId}:start-project   answer -> draft + project
+//	POST /api/v1/research-context-drafts/{draftId}:confirm   draft -> initial state
+//
+// The two flows share a package because they share a subject — the stored
+// record of an answered search — and because the second one is addressed by an
+// id the first one's route path already names. They do not share a service:
+// draft.go talks to internal/application/researchcontext, which owns the
+// policy (who may start, who may confirm, what a draft may contain, what
+// confirmation writes), while this package owns only the transport decisions
+// the pipeline's list above describes.
 //
 // # The pipeline, and why it lives here
 //
@@ -38,8 +51,7 @@
 //
 // # What is not here
 //
-// No reader of a stored search (the start-project flow is T0908's), and no
-// provider adapter: this package is handed a planner and an answer generator
+// No provider adapter: this package is handed a planner and an answer generator
 // already wired, or handed nil, and nil is a supported state for both — a
 // deployment that has not answered whether content may leave the platform
 // still searches, because both steps lose only the sentence they would have

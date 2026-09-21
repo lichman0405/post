@@ -19,6 +19,7 @@ import (
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/feeds"
 	"github.com/lichman0405/post/internal/application/projects"
+	"github.com/lichman0405/post/internal/application/researchcontext"
 	"github.com/lichman0405/post/internal/application/rsg"
 	"github.com/lichman0405/post/internal/application/sciobjects"
 	"github.com/lichman0405/post/internal/authz"
@@ -213,6 +214,25 @@ var probes = []probe{
 			// A write route under the guard carries the session's CSRF token
 			// beside the cookie; the probe session's token is the one the
 			// store below answers with.
+			r.Header.Set("X-CSRF-Token", probeCSRF)
+			r.AddCookie(&http.Cookie{Name: "post_session", Value: probeSessionToken})
+			return r
+		},
+	},
+	{
+		name:         "the draft research context answer",
+		key:          "searchhttp/draft.go:writeDraftJSON",
+		contentType:  "application/json; charset=utf-8",
+		cacheControl: "no-store",
+		kind:         edgesec.ExitInlineText,
+		status:       http.StatusCreated,
+		build:        func(t *testing.T) http.Handler { return researchContextHandler(t) },
+		req: func(t *testing.T) *http.Request {
+			r := httptest.NewRequest(http.MethodPost,
+				"/api/v1/search/"+probeSearchID+":start-project",
+				strings.NewReader(`{"name":"Lab","slug":"lab","research_question":"how does CO2 uptake scale with pore size?"}`))
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("Idempotency-Key", probeIdempotencyKey)
 			r.Header.Set("X-CSRF-Token", probeCSRF)
 			r.AddCookie(&http.Cookie{Name: "post_session", Value: probeSessionToken})
 			return r
@@ -547,27 +567,25 @@ const (
 	probeCSRF         = "probe-csrf-token"
 	probeActorID      = "6a1f0d3e-1c2b-4a5d-8e9f-0a1b2c3d4e5f"
 	probeSearchID     = "9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a"
-	probeAssetRef     = "asset:AST-0001@2"
+	probeDraftID      = "3c2b1a09-8f7e-4d6c-b5a4-93827106f5e4"
+	probeStateID      = "5e4d3c2b-1a09-48f7-9e6d-c5b4a3928170"
+	probeCommitID     = "81706f5e-4d3c-4b2b-a1a0-988f7e6d5c4b"
+	probeVersionID    = "6f5e4d3c-2b1a-4098-87e6-d5c4b3a29180"
+	// probeIdempotencyKey is the contract's Idempotency-Key (minLength 8); the
+	// start route requires it, so a probe without one would measure the 400
+	// path rather than the exit.
+	probeIdempotencyKey = "probe-idempotency-key"
+	probeAssetRef       = "asset:AST-0001@2"
 )
 
 func searchHandler(t *testing.T) http.Handler {
 	t.Helper()
-	// The REAL answer layer, with no provider configured: that is the
-	// supported state of a deployment that has not answered "may platform
-	// content go to a model", and it always produces a document (the
-	// structured fallback, generator.go). What a model would have written is
-	// pinned by tests/answer's fixtures; this probe is about the exit.
-	answerer, err := answer.New(answer.Deps{})
-	if err != nil {
-		t.Fatalf("answer.New: %v", err)
-	}
-
 	v1 := http.NewServeMux()
 	searchhttp.New(searchhttp.Deps{
 		Scope:     probeSearchScope{},
 		Retriever: probeRetriever{},
 		Ranker:    probeRanker{},
-		Answerer:  answerer,
+		Answerer:  probeAnswerer(t),
 		Records:   probeSearchRecords{},
 	}).Register(v1)
 
@@ -576,6 +594,78 @@ func searchHandler(t *testing.T) http.Handler {
 		Cfg: authn.Config{WebOrigin: "http://127.0.0.1:3000", SessionTTL: time.Hour},
 	})
 	return auth.Guard(v1)
+}
+
+// probeAnswerer is the REAL answer layer with no provider configured: that
+// is the supported state of a deployment that has not answered "may platform
+// content go to a model", and it always produces a document (the structured
+// fallback, generator.go). What a model would have written is pinned by
+// tests/answer's fixtures; this probe is about the exit.
+func probeAnswerer(t *testing.T) *answer.Generator {
+	t.Helper()
+	answerer, err := answer.New(answer.Deps{})
+	if err != nil {
+		t.Fatalf("answer.New: %v", err)
+	}
+	return answerer
+}
+
+// researchContextHandler composes the draft flow's transport the way
+// cmd/api/main.go does — the real guard, the real search surface, the real
+// mux — with the flow itself faked. The probe is about the bytes this route
+// writes (its own Content-Type, its own nosniff, its own no-store); a real
+// flow would need a database, which is where the flow's own tests live.
+func researchContextHandler(t *testing.T) http.Handler {
+	t.Helper()
+	v1 := http.NewServeMux()
+	searchhttp.New(searchhttp.Deps{
+		Scope:     probeSearchScope{},
+		Retriever: probeRetriever{},
+		Ranker:    probeRanker{},
+		Answerer:  probeAnswerer(t),
+		Records:   probeSearchRecords{},
+		Drafts:    probeDraftCommands{},
+	}).Register(v1)
+
+	auth := authhttp.New(authhttp.Deps{
+		Users: probeUserStore{}, Sessions: probeSessionStore{}, Limiter: probeLimiter{},
+		Cfg: authn.Config{WebOrigin: "http://127.0.0.1:3000", SessionTTL: time.Hour},
+	})
+	return auth.Guard(v1)
+}
+
+// probeDraftCommands stands in for *researchcontext.Service. Both verbs answer
+// a stored-looking row so the transport's own rendering and its headers are
+// what comes back.
+type probeDraftCommands struct{}
+
+func (probeDraftCommands) Start(context.Context, domain.User, researchcontext.StartInput) (researchcontext.StartResult, error) {
+	return researchcontext.StartResult{
+		Project: domain.Project{ID: probeProjectID, Name: "Lab", Visibility: domain.VisibilityPrivate},
+		Draft: researchcontext.Draft{
+			ID: probeDraftID, ProjectID: probeProjectID, SearchID: probeSearchID,
+			ResearchQuestion: "how does CO2 uptake scale with pore size?",
+			ReferencedRefs:   []string{"asset:AST-0001@2"},
+			Status:           researchcontext.DraftStatusDraft,
+			CreatedAt:        time.Now(),
+		},
+	}, nil
+}
+
+func (probeDraftCommands) Confirm(context.Context, domain.User, researchcontext.ConfirmInput) (researchcontext.ConfirmResult, error) {
+	now := time.Now()
+	confirmed := probeDraftID
+	return researchcontext.ConfirmResult{
+		Draft: researchcontext.Draft{
+			ID: probeDraftID, ProjectID: probeProjectID, SearchID: probeSearchID,
+			ResearchQuestion: "how does CO2 uptake scale with pore size?",
+			ReferencedRefs:   []string{"asset:AST-0001@2"},
+			Status:           researchcontext.DraftStatusConfirmed,
+			CreatedAt:        now, ConfirmedAt: &now, ConfirmedBy: &confirmed,
+		},
+		BranchID: probeBranchID, StateCommitID: probeCommitID, StateID: probeStateID,
+		QuestionObjectID: probeObjectID, QuestionVersionID: probeVersionID,
+	}, nil
 }
 
 // probeSessionStore answers the one lookup the guard makes for the probe's

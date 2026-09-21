@@ -47,6 +47,12 @@ type service struct {
 	answerer  Answerer
 	records   RecordWriter
 	limits    retrieval.Limits
+	// drafts is the Draft Research Context flow, nil when the surface was
+	// wired without it (see Deps.Drafts: the two routes fail closed).
+	drafts DraftCommands
+	// provision enqueues the T0301 job for a project the start route
+	// created, nil when no queue is wired (see Deps.ProvisionProject).
+	provision ProvisionEnqueuer
 }
 
 // newService wires the pipeline, refusing the dependencies a search cannot be
@@ -86,6 +92,8 @@ func newService(deps Deps) *service {
 		answerer:  deps.Answerer,
 		records:   deps.Records,
 		limits:    deps.Limits,
+		drafts:    deps.Drafts,
+		provision: deps.ProvisionProject,
 	}
 }
 

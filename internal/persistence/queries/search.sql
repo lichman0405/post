@@ -553,3 +553,31 @@ INSERT INTO search_records (
     @actor_id, @query, @filters, @plan, @signals, @selected_refs, @citations, @answer
 )
 RETURNING id, created_at;
+
+-- ---------------------------------------------------------------------------
+-- Reading a record back (T0908)
+--
+-- The record was written write-only by design (see the block above: "There is
+-- no UPDATE and no DELETE"). This is its first reader, and it exists now
+-- because its caller exists: POST /search/{searchId}:start-project builds a
+-- Draft Research Context out of one answered search, and what it needs from
+-- the record is exactly the actor it belongs to and the set the draft's refs
+-- may be drawn from.
+--
+-- Three columns and the actor, and nothing else. The query is a read for ONE
+-- caller, and a projection that carried the plan, the signals and the answer
+-- document as well would be a second, unused way to reach the record's
+-- contents — the answer is already reachable as the draft's substrate without
+-- being copied into the draft table. A future reader that needs the answer
+-- adds its own query, with its own argument for what it needs.
+--
+-- selected_refs is the important one: it is the boundary the draft's refs are
+-- validated against (migration 00134's research_context_draft_refs_guard, and
+-- the write path's own pre-check before it creates the project). Reading it
+-- here rather than from a cached copy is what makes the boundary the one the
+-- SEARCH was answered with.
+
+-- name: GetSearchRecord :one
+SELECT id, actor_id, query, selected_refs, citations, answer
+FROM search_records
+WHERE id = @id;

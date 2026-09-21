@@ -38,6 +38,22 @@ type Querier interface {
 	// stores that canonical form, and the integrity hash is the sha256 of the
 	// canonical text, so a read payload always re-hashes to its stored hash.
 	CanonicalizeScientificObjectPayload(ctx context.Context, payload []byte) ([]byte, error)
+	// The confirmation, as a compare-and-swap.
+	//
+	// WHERE status = 'draft' is the whole concurrency story: the branch, the
+	// state and the research_question object are created by the application
+	// through the ordinary RSG write path BEFORE this statement runs, so two
+	// confirmations racing each other each create their own state and exactly one
+	// of them lands here — the loser reads no row (pgx.ErrNoRows) and rolls its
+	// own transaction back, leaving one initial state and one refusal. A second
+	// confirmation of an already-confirmed draft therefore cannot rewrite what
+	// the first one created.
+	//
+	// The five ids are the transition's own result, handed back by the path that
+	// produced them; this query records them and derives nothing. The table's
+	// all-or-nothing CHECK means a confirmation missing any of them is not a
+	// state the database can store.
+	ConfirmResearchContextDraft(ctx context.Context, arg ConfirmResearchContextDraftParams) (ResearchContextDraft, error)
 	CountActiveOrganizationOwners(ctx context.Context, organizationID pgtype.UUID) (int64, error)
 	CountProjectOwners(ctx context.Context, projectID pgtype.UUID) (int32, error)
 	// The ledger row, written in the same transaction as the child version and
@@ -775,6 +791,23 @@ type Querier interface {
 	// its slug to tell a create from a continuation.
 	GetResearchAssetByPIDRow(ctx context.Context, pid string) (ResearchAsset, error)
 	GetResearchAssetVersion(ctx context.Context, arg GetResearchAssetVersionParams) (ResearchAssetVersion, error)
+	// One draft in full, by its id — the draftId both routes speak in, and the
+	// only read the confirm route needs before it decides whether the caller may
+	// confirm (the project it names is the project whose membership is checked).
+	GetResearchContextDraft(ctx context.Context, id pgtype.UUID) (ResearchContextDraft, error)
+	// The draft a search already has, if it has one. This is the replay read of
+	// the START route: a request that finds a row here resumes the draft the key
+	// (or another key) already created instead of opening a second project.
+	// UNIQUE (search_id) makes this at most one row by construction.
+	GetResearchContextDraftBySearch(ctx context.Context, searchID pgtype.UUID) (ResearchContextDraft, error)
+	// The other half of the start route's replay: the draft a caller's own
+	// Idempotency-Key already created. Reached only when the search has no
+	// draft, and it is how "the same key, the same project" is answered when the
+	// caller cannot name the search again. UNIQUE (created_by, idempotency_key)
+	// makes this at most one row by construction; a key that names a draft for a
+	// DIFFERENT search is the IDEMPOTENCY_CONFLICT the write path reports, not a
+	// replay.
+	GetResearchContextDraftByStartKey(ctx context.Context, arg GetResearchContextDraftByStartKeyParams) (ResearchContextDraft, error)
 	// Research Profile / Organization Profile reads (T0808, docs/42 "Research
 	// Profile", docs/05 §4 "Organization Research Profile").
 	//
@@ -878,6 +911,29 @@ type Querier interface {
 	// object, which is the only scope a route that names one object can replay
 	// in; the partial unique index makes the pair unique by construction.
 	GetScientificObjectVersionByReopenRequestKey(ctx context.Context, arg GetScientificObjectVersionByReopenRequestKeyParams) (ScientificObjectVersion, error)
+	// ---------------------------------------------------------------------------
+	// Reading a record back (T0908)
+	//
+	// The record was written write-only by design (see the block above: "There is
+	// no UPDATE and no DELETE"). This is its first reader, and it exists now
+	// because its caller exists: POST /search/{searchId}:start-project builds a
+	// Draft Research Context out of one answered search, and what it needs from
+	// the record is exactly the actor it belongs to and the set the draft's refs
+	// may be drawn from.
+	//
+	// Three columns and the actor, and nothing else. The query is a read for ONE
+	// caller, and a projection that carried the plan, the signals and the answer
+	// document as well would be a second, unused way to reach the record's
+	// contents — the answer is already reachable as the draft's substrate without
+	// being copied into the draft table. A future reader that needs the answer
+	// adds its own query, with its own argument for what it needs.
+	//
+	// selected_refs is the important one: it is the boundary the draft's refs are
+	// validated against (migration 00134's research_context_draft_refs_guard, and
+	// the write path's own pre-check before it creates the project). Reading it
+	// here rather than from a cached copy is what makes the boundary the one the
+	// SEARCH was answered with.
+	GetSearchRecord(ctx context.Context, id pgtype.UUID) (GetSearchRecordRow, error)
 	GetStateCommitByID(ctx context.Context, id pgtype.UUID) (StateCommit, error)
 	// The project's template origin — at most one row exists (UNIQUE
 	// (project_id)); the query answers no-row when the project was created
@@ -924,6 +980,33 @@ type Querier interface {
 	// declaration order (00082), stored so the list reads back item by item
 	// the way it was declared.
 	InsertAssetVersionParty(ctx context.Context, arg InsertAssetVersionPartyParams) (AssetVersionParty, error)
+	// The Draft Research Context (T0908): the writes and the two replay reads of
+	// the flow docs/14:25 describes — a search answer becomes a draft, and the
+	// draft becomes a project's initial state when its owner confirms it.
+	//
+	// The table's own rules (one draft per search, one draft per key per actor,
+	// refs drawn only from the search's selected_refs, draft -> confirmed once)
+	// live in migration 00134, not here. What belongs here is the one thing SQL
+	// can say that a constraint cannot: the confirmation is a compare-and-swap on
+	// status = 'draft', so two confirmations racing each other produce ONE
+	// transition and one loser that reads no row back, rather than two initial
+	// states for one project.
+	//
+	// There is no DELETE anywhere in this file. A draft is the record of how a
+	// project began (migration 00134's guard refuses the delete even if one were
+	// written here).
+	// The draft row, written once. Every column is a value the caller already
+	// produced: the project was created for it, the search it was built from is
+	// already recorded, and the refs are the caller's keep/drop/reclassify
+	// decisions over that search's selected_refs (refused by the table's trigger
+	// if any of them is not — this query does not repeat the rule, exactly as
+	// InsertSearchRecord does not repeat citations <@ selected_refs).
+	//
+	// The caller passes an empty array rather than NULL for the five list
+	// columns: "the caller kept nothing" and "the caller sent nothing" are the
+	// same state here, and the columns are NOT NULL so that the draft's shape
+	// does not depend on a reader's generosity with NULL.
+	InsertResearchContextDraft(ctx context.Context, arg InsertResearchContextDraftParams) (ResearchContextDraft, error)
 	// Project schema profiles (canonical table project_schema_profiles; 00038).
 	// The table is append-only (the 00038 trigger): these queries INSERT and
 	// SELECT only — a profile change is a new version row, never an UPDATE.

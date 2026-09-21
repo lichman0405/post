@@ -15,15 +15,21 @@ import (
 // migration 00121, docs/22 §8: the server saves the query plan, the selected
 // entity ids and the answer citations).
 //
-// # One method, and no reader
+// # The writer, and the reader that arrived with its caller
 //
 // The store writes a record and returns the search id the contract addresses
-// searches by (POST /search/{searchId}:start-project). It has no read method:
-// the only reader in the contract resumes a search's sources, and that flow
-// is not this task's — a read added here for nobody would be a query shape
-// frozen before its caller exists. The integration test reads the row with
-// its own SQL, which is also the stronger check: it shows the columns as a
-// row rather than through a projection this file chose.
+// searches by (POST /search/{searchId}:start-project). T0906 wrote it with no
+// reader at all, on the argument that the only read the contract has resumes a
+// search's sources and that flow did not exist yet, so a read added then would
+// have been a query shape frozen before its caller. That caller is T0908 and
+// the reader is now here (GetSearchRecord, below): one answered search's actor
+// and its selected refs, which is what starting a Draft Research Context needs
+// and all it needs.
+//
+// The integration tests still read the stored row with their own SQL in the
+// places where the SUBJECT is the row rather than the flow — that is the
+// stronger check there, because it shows the columns as a row rather than
+// through a projection this file chose.
 //
 // # Why the arguments are the pieces and not an answer type
 //

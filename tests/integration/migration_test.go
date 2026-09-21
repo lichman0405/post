@@ -1356,6 +1356,84 @@ var canonicalTables = map[string]tableExp{
 			fk("created_by", "users", "RESTRICT"),
 		},
 	},
+	// 00134 (T0908): the Draft Research Context — docs/14:25's candidate that
+	// a search answer becomes before the user confirms it into a project's
+	// initial state. The columns are the six things that line names and
+	// nothing else, and the TWO unique keys are the flow's two replay
+	// guarantees: one draft per search (under any key, which is what stops a
+	// second click opening a second project) and one draft per key per actor
+	// (which is what lets the same key name the same project again).
+	//
+	// The confirmation record is all-or-nothing by CHECK: status =
+	// 'confirmed' and each of the eight columns describing the confirmation
+	// are set together or not at all, so a confirmed draft whose branch or
+	// state commit were missing — an untraceable confirmation — is not a
+	// state the database can hold. Five of them are foreign keys, and every
+	// reference is RESTRICT: a draft names the rows a project began with.
+	//
+	// The refs are text[] rather than jsonb because they are sets of refs
+	// chosen from search_records.selected_refs, and the rule that they are
+	// drawn from there is a TRIGGER (research_context_draft_refs_guard), not
+	// a CHECK: PostgreSQL CHECK constraints cannot read another table. The
+	// catalog fixture sees the table; the trigger is asserted by the
+	// flow test, which inserts a ref the search never returned and requires
+	// the refusal (tests/integration/search_start_project_test.go).
+	"research_context_drafts": {
+		cols: []colExp{
+			c("id", u, false, true),
+			c("project_id", u, false, false),
+			c("search_id", u, false, false),
+			c("created_by", u, false, false),
+			c("research_question", txt, false, false),
+			arr("referenced_refs", false, false),
+			arr("dependency_refs", false, false),
+			arr("candidate_refs", false, false),
+			arr("uncertainties", false, false),
+			arr("hypotheses", false, false),
+			c("status", txt, false, true),
+			c("idempotency_key", txt, false, false),
+			c("confirm_idempotency_key", txt, true, false),
+			c("confirmed_at", ts, true, false),
+			c("confirmed_by", u, true, false),
+			c("initial_branch_id", u, true, false),
+			c("initial_state_id", u, true, false),
+			c("initial_commit_id", u, true, false),
+			c("question_object_id", u, true, false),
+			c("question_version_id", u, true, false),
+			c("created_at", ts, false, true),
+		},
+		pk: []string{"id"},
+		uniques: [][]string{
+			{"search_id"},
+			{"created_by", "idempotency_key"},
+		},
+		checks: []string{
+			"btrim",
+			"status = ANY",
+			"length(idempotency_key)",
+			"length(confirm_idempotency_key)",
+			// The all-or-nothing confirmation, as ONE substring: the count
+			// assertion above fixes how many checks exist (five), so each
+			// entry pins a whole definition rather than a piece of one. This
+			// one spans the tie between the status and the last column of the
+			// confirmation record — `status = 'confirmed'` is true exactly
+			// when the question version is set — which is the property the
+			// CHECK exists for; the six conjuncts between them are what the
+			// column list above already pins.
+			"(status = 'confirmed'::text) = (question_version_id IS NOT NULL)",
+		},
+		fks: []fkExp{
+			fk("project_id", "projects", "RESTRICT"),
+			fk("search_id", "search_records", "RESTRICT"),
+			fk("created_by", "users", "RESTRICT"),
+			fk("confirmed_by", "users", "RESTRICT"),
+			fk("initial_branch_id", "branches", "RESTRICT"),
+			fk("initial_state_id", "project_states", "RESTRICT"),
+			fk("initial_commit_id", "state_commits", "RESTRICT"),
+			fk("question_object_id", "scientific_objects", "RESTRICT"),
+			fk("question_version_id", "scientific_object_versions", "RESTRICT"),
+		},
+	},
 }
 
 // gooseTable is the only non-canonical table the runner may create.
@@ -1487,6 +1565,11 @@ var explicitIndexes = map[string][]string{
 	// addressed by, so two rows answering to one pid is the identity
 	// failing.
 	"knowledge_publications_pid_uniq": {"pid", "UNIQUE"},
+	// T0908 (00134): the confirm route's key discipline — one Idempotency-Key
+	// names one confirmation, per confirming actor, and only for rows that
+	// have been confirmed (partial: an unconfirmed draft carries no confirm
+	// key and must not collide with another draft's).
+	"research_context_drafts_confirm_key_uniq": {"confirmed_by", "UNIQUE", "WHERE"},
 	// T0807 (00087): the Contribution Ledger projection's dedupe key — one
 	// ledger row per source domain event, ever. Partial for the reason
 	// research_events_outbox_event_uniq is: NULL is never a conflict, so a

@@ -432,6 +432,35 @@ type ResearchAssetVersion struct {
 	OriginRefs      []string           `json:"origin_refs"`
 }
 
+// Draft Research Context (T0908, docs/14:25): the candidate — research question, referenced knowledge, dependencies, candidate materials, uncertainties and agent-suggested hypotheses — that a search answer becomes when the reader clicks "Start Research Project". It is NOT an RSG node: the project's initial state forms only on confirmation, so a project with a draft and no confirmation has no branch, no state and no scientific object.
+type ResearchContextDraft struct {
+	ID        pgtype.UUID `json:"id"`
+	ProjectID pgtype.UUID `json:"project_id"`
+	// The answered search the draft was built from (search_records, 00121). Its selected_refs are the only refs the draft may carry (research_context_draft_refs_guard), so the draft cannot name a source the answer did not have.
+	SearchID         pgtype.UUID `json:"search_id"`
+	CreatedBy        pgtype.UUID `json:"created_by"`
+	ResearchQuestion string      `json:"research_question"`
+	ReferencedRefs   []string    `json:"referenced_refs"`
+	DependencyRefs   []string    `json:"dependency_refs"`
+	CandidateRefs    []string    `json:"candidate_refs"`
+	Uncertainties    []string    `json:"uncertainties"`
+	Hypotheses       []string    `json:"hypotheses"`
+	Status           string      `json:"status"`
+	IdempotencyKey   string      `json:"idempotency_key"`
+	// The confirm route's Idempotency-Key, written once at confirmation. A repeat of the same key answers the confirmation it names; a different key on an already-confirmed draft is refused (the draft is not in a state that can be confirmed).
+	ConfirmIdempotencyKey *string            `json:"confirm_idempotency_key"`
+	ConfirmedAt           pgtype.Timestamptz `json:"confirmed_at"`
+	ConfirmedBy           pgtype.UUID        `json:"confirmed_by"`
+	InitialBranchID       pgtype.UUID        `json:"initial_branch_id"`
+	InitialStateID        pgtype.UUID        `json:"initial_state_id"`
+	// The state commit that names the confirmation's transition (docs/09 §2). From it a reader reaches the initial branch, the initial state and the research_question object version the transition created — the traceability the confirmation owes.
+	InitialCommitID  pgtype.UUID `json:"initial_commit_id"`
+	QuestionObjectID pgtype.UUID `json:"question_object_id"`
+	// The research_question object version the confirmation created (version 1 of a new object, through the ordinary RSG write path). The object is created at confirmation and never before: an unanswered question is a draft, a question in the project's state is a decision.
+	QuestionVersionID pgtype.UUID        `json:"question_version_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type ResearchEvent struct {
 	ID            pgtype.UUID        `json:"id"`
 	EventType     string             `json:"event_type"`
