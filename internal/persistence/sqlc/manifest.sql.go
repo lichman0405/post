@@ -71,7 +71,7 @@ WITH RECURSIVE lineage(id) AS (
   JOIN lineage l ON ps.id = l.id
   WHERE ps.parent_state_id IS NOT NULL
 )
-SELECT sov.id, sov.object_id, sov.version_no, sov.state_id, sov.branch_id, sov.schema_id, sov.schema_version, sov.title, sov.lifecycle_state, sov.payload, sov.visibility_policy_id, sov.integrity_hash, sov.created_by, sov.created_at, sov.abort_reason_code, sov.abort_explanation, sov.abort_replacement_ref, sov.aborted_by, sov.aborted_at, sov.abort_request_key, so.object_type
+SELECT sov.id, sov.object_id, sov.version_no, sov.state_id, sov.branch_id, sov.schema_id, sov.schema_version, sov.title, sov.lifecycle_state, sov.payload, sov.visibility_policy_id, sov.integrity_hash, sov.created_by, sov.created_at, sov.abort_reason_code, sov.abort_explanation, sov.abort_replacement_ref, sov.aborted_by, sov.aborted_at, sov.abort_request_key, sov.reopen_reason_code, sov.reopen_explanation, sov.reopened_by, sov.reopened_at, sov.reopen_request_key, so.object_type
 FROM scientific_object_versions sov
 JOIN scientific_objects so ON so.id = sov.object_id
 WHERE sov.state_id IN (SELECT id FROM lineage)
@@ -98,6 +98,11 @@ type ListManifestObjectVersionsRow struct {
 	AbortedBy           pgtype.UUID        `json:"aborted_by"`
 	AbortedAt           pgtype.Timestamptz `json:"aborted_at"`
 	AbortRequestKey     *string            `json:"abort_request_key"`
+	ReopenReasonCode    *string            `json:"reopen_reason_code"`
+	ReopenExplanation   *string            `json:"reopen_explanation"`
+	ReopenedBy          pgtype.UUID        `json:"reopened_by"`
+	ReopenedAt          pgtype.Timestamptz `json:"reopened_at"`
+	ReopenRequestKey    *string            `json:"reopen_request_key"`
 	ObjectType          string             `json:"object_type"`
 }
 
@@ -144,6 +149,11 @@ func (q *Queries) ListManifestObjectVersions(ctx context.Context, stateID pgtype
 			&i.AbortedBy,
 			&i.AbortedAt,
 			&i.AbortRequestKey,
+			&i.ReopenReasonCode,
+			&i.ReopenExplanation,
+			&i.ReopenedBy,
+			&i.ReopenedAt,
+			&i.ReopenRequestKey,
 			&i.ObjectType,
 		); err != nil {
 			return nil, err

@@ -59,11 +59,23 @@ type Deps struct {
 	Dependencies DependencyReader
 	// Derive is the fork/derive use case (T0708). The production value is
 	// *assets.DeriveCommand, over the store that owns the derivation
-	// transaction — the second governed write this surface registers, beside
-	// Publish above, and required for the same reason: a surface wired
-	// without one of its ports is a wiring bug, not a degradation to answer
-	// around.
+	// transaction — a governed write this surface registers, beside Publish
+	// above and the metadata revision below, and required for the same
+	// reason: a surface wired without one of its ports is a wiring bug, not
+	// a degradation to answer around.
 	Derive DeriveCommand
+	// Metadata is the asset metadata revision use case (T0706). The
+	// production value is *assetmetadata.Command, over the store that owns
+	// the revision transaction. It is required like the rest: a surface
+	// wired without its write port answers 500 on the one route it serves,
+	// which is a wiring bug rather than a degradation to answer around.
+	//
+	// It reached this struct at the same merge as Derive above: T0706 and
+	// T0708 each added one governed write to the same three places in this
+	// file (the Deps field, the New wiring, the route), so git saw three
+	// adjacent insertions and refused all three. Both sides are additive,
+	// which is why the resolution is "keep both" rather than a judgement.
+	Metadata MetadataCommand
 }
 
 // New wires the handlers.
@@ -76,6 +88,7 @@ func New(deps Deps) *API {
 		members:      deps.Members,
 		dependencies: deps.Dependencies,
 		derive:       deps.Derive,
+		metadata:     deps.Metadata,
 	}}
 }
 
@@ -124,4 +137,13 @@ func (a *API) Register(v1 *http.ServeMux) {
 	// every write, and its Idempotency-Key is a header, which is where
 	// docs/22 puts it.
 	v1.HandleFunc("POST /api/v1/projects/{projectId}/assets:derive", a.handlers.handleDerive)
+	// The metadata revision (T0706). Not a contract path either, and the
+	// same decision: docs/11 §4 gives asset metadata its own revisable
+	// surface and the contract has no route for it yet, so it is mounted
+	// here. PATCH and GET on /api/v1/assets/{assetId} coexist because the
+	// method selects the pattern — the read is the public asset page
+	// (T0709), the write is this task's metadata revision, and they are
+	// the two halves of one address (assets.AssetAPIPath). See metadata.go
+	// for why the project id is a body field rather than a path segment.
+	v1.HandleFunc("PATCH /api/v1/assets/{assetId}", a.handlers.handleAssetMetadata)
 }

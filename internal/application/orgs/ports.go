@@ -50,12 +50,23 @@ type OrgStore interface {
 	CreateOrganization(ctx context.Context, org domain.Organization, creatorUserID string, affiliationStart time.Time) (domain.Organization, domain.OrganizationMembership, error)
 	// GetOrganization returns the organization or ErrOrgNotFound.
 	GetOrganization(ctx context.Context, orgID string) (domain.Organization, error)
-	// UpdateOrganization persists name/description changes and returns the
-	// updated organization, or ErrOrgNotFound.
-	UpdateOrganization(ctx context.Context, org domain.Organization) (domain.Organization, error)
+	// UpdateOrganization persists the name/description changes and, when
+	// attribution is non-nil, the organization's attestation attribution —
+	// all in ONE transaction — returning the updated organization, or
+	// ErrOrgNotFound.
+	UpdateOrganization(ctx context.Context, org domain.Organization, attribution *string) (domain.Organization, error)
 	// DeactivateOrganization sets deactivated_at (soft delete — the only
 	// "delete" the domain offers), or ErrOrgNotFound.
 	DeactivateOrganization(ctx context.Context, orgID string) error
+	// GetAttestationAttribution returns the organization's standing answer
+	// to "may this organization be named on an attestation it issues"
+	// (organizations.attestation_attribution, migration 00120), or
+	// ErrOrgNotFound.
+	//
+	// It is a separate read rather than a field of domain.Organization
+	// because the domain type is not this task's to widen; the service
+	// pairs the two at the one place they are rendered together.
+	GetAttestationAttribution(ctx context.Context, orgID string) (string, error)
 	// ListOrganizationsForUser returns the organizations the user
 	// currently belongs to (open affiliation), newest first.
 	ListOrganizationsForUser(ctx context.Context, userID string) ([]domain.Organization, error)

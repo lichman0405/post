@@ -86,6 +86,10 @@
 --   00107_activity_research_event_scope.sql
 --   00110_ranking_factor_indexes.sql
 --   00111_dependency_impact.sql
+--   00120_attestations.sql
+--   00121_search_answer_record.sql
+--   00123_scientific_object_reopen_record.sql
+--   00125_asset_metadata_revision.sql
 --   00128_asset_derive_creations.sql
 
 
@@ -7125,6 +7129,609 @@ COMMENT ON INDEX outbox_events_dependency_impact_uniq IS
 --     once 00101 turned out to be sitting there — which is what
 --     TestFreshInstallCatalog's explicit-index inventory would have caught
 --     either way.
+
+
+-- ===== 00120_attestations.sql =====
+
+-- Private Evidence / Public Attestation, the storage model (T0812).
+--
+-- # What an attestation is
+--
+-- A minimal public statement a project makes about a PUBLIC object version
+-- it did not author: "we validated this, this way, and the result was
+-- this". It is the one thing a private project may publish about its own
+-- private work — docs/12 §2 逐字: "Private Project：project/RSG/private
+-- blobs 默认不可见；可显式 Publish Asset/Knowledge/Attestation" — and
+-- docs/22 §28 lists create attestation among the high-risk commands that
+-- need server-side authorization plus policy validation.
+--
+-- # Attestation != evidence, and this table is where that is structural
+--
+-- `evidence_assertions` (00007, guards in 00058) is the evidence model: an
+-- assertion pins TWO versions (target and evidence), and carries the
+-- substance — directness, inference_nature, scope, reasoning_note. An
+-- attestation pins ONE version and carries none of those. It has no
+-- evidence_object_version_id column at all, and no free-text field a
+-- private detail could be smuggled through: the public half of a row is
+-- exactly the four enumerated values below plus the target pin.
+--
+-- That is the whole privacy argument, and it is STRUCTURAL rather than
+-- procedural: there is no column on this table that names the underlying
+-- private evidence or its content. What the row does record of the
+-- private side — which project attested, which of that project's states
+-- the attestation rests on, which internal review authorised it — is
+-- cited by id, never by value, and is never projected publicly (see
+-- internal/application/attestations.Present, which has no field for it).
+--
+-- # The private side, cited and not disclosed
+--
+--   * attesting_project_id  — the project that attests. A project id is
+--                             not a public identity: nothing renders it.
+--   * basis_state_id        — the attesting project's OWN state that the
+--                             attestation rests on (the private evidence
+--                             lives in that state's manifest). This is the
+--                             "underlying private evidence" the task
+--                             requires not to be exposed.
+--   * internal_review_id    — the review that authorised the attestation,
+--                             on a pull request of the attesting project
+--                             and of exactly that state.
+--
+-- The two triggers below make "the cited private facts are the attester's
+-- own" unconditional for ANY write path (application code, psql, a leaked
+-- credential), in the 00014/00015/00028 discipline: the domain layer
+-- validates on the happy path, the database makes the invariant
+-- unconditional. A row whose basis state or whose review belongs to some
+-- other project would be an attestation resting on somebody else's private
+-- work — the one shape this table must not be able to hold.
+--
+-- # The target: exactly one pin, and no stored kind
+--
+-- A target is pinned to a scientific object version (the requirement's
+-- Protocol/Claim) or to a research asset version (its Asset). Exactly one
+-- of the two columns is set — the CHECK below — and the KIND is DERIVED
+-- from which one it is, never stored. A stored target_kind column could
+-- disagree with the row it points at (a 'protocol' label on a claim
+-- version); the joined row cannot. This is the same decision
+-- internal/application/evidencenetwork records for the evidence classes
+-- ("the classes are computed, never stored").
+--
+-- # The public half: four enumerated values
+--
+--   * validation_type   — what kind of validation was performed
+--   * validation_result — confirmed / refuted / inconclusive
+--   * org_visibility    — whether the attesting organization is named
+--
+-- validation_result is deliberately three-valued and NOT numeric: no
+-- weight, no score, nothing derivable (CLAUDE.md §9.13, docs/10 §4 "V1 不
+-- 自动赋数值权重"). Two attestations on one version keep their own
+-- results side by side, exactly as two contradictory evidence assertions
+-- do.
+--
+-- # org_visibility AND the organization's standing setting
+--
+-- organizations.attestation_attribution is the organization's own standing
+-- answer to "may we be named"; the attestation's org_visibility is the
+-- choice made for THIS statement. The public projection names the
+-- organization only when BOTH say so, and it re-reads the setting on
+-- every read (internal/application/attestations.Present). Two independent
+-- gates, each with its own failure mode:
+--
+--   * the recorded value is a PROMISE. An attestation issued while the
+--     organization was anonymous stays anonymous even after the setting
+--     flips to named — a standing setting must not retroactively break a
+--     promise made under it.
+--   * the setting is a FLOOR. An organization that flips to anonymous
+--     stops being named on every attestation it ever issued — otherwise a
+--     setting would be unable to retract a disclosure it exists to
+--     control.
+--
+-- DEFAULT 'anonymous' is the conservative direction, and it is the
+-- direction docs/12 §3 requires: "任何 private→public … 都要求有权限的人
+-- 显式确认". Being named is a widening; an organization that has not
+-- chosen it is not named.
+--
+-- # What is deliberately NOT here
+--
+--   * No uniqueness on (attesting_project_id, target_object_version_id,
+--     validation_type). A second row with the same shape has a legitimate
+--     reading — a re-validation after a first inconclusive result is a
+--     new judgment about the same pair — and refusing it in the schema
+--     would refuse the honest case to prevent the dishonest one. Nothing
+--     sums these rows either (CLAUDE.md §9.13), so a duplicate buys
+--     nothing; anti-gaming is a separate concern (docs/13 §6).
+--   * No visibility column. An attestation is written already-published:
+--     there is no draft state, and a "private attestation" would be a
+--     second kind of row on a table whose whole point is that what is here
+--     is public.
+--   * No revocation. V1 does not retract (the same conservative default
+--     the knowledge publication took); history is not deleted anyway
+--     (CLAUDE.md §9.8), so a retraction would be a new row that the
+--     projection reads — a later task's design, not this one's guess.
+
+ALTER TABLE organizations
+  ADD COLUMN attestation_attribution text NOT NULL DEFAULT 'anonymous'
+    CHECK (attestation_attribution IN ('anonymous', 'named'));
+
+COMMENT ON COLUMN organizations.attestation_attribution IS
+  'standing answer to "may this organization be named on an attestation it issues": anonymous (default) or named. The attestation records its own org_visibility as well; the public projection names the organization only when both say named (migration 00120, T0812)';
+
+CREATE TABLE attestations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- pid is the attestation's public identity: the id a client addresses and
+  -- cites. Same 26-character lowercase Crockford base32 vocabulary and the
+  -- same CHECK as asset pids (00064) and knowledge publication pids
+  -- (00083), so one predicate in Go (assets.ValidPID) reads all three.
+  --
+  -- The DEFAULT stays for rows written before the command could mint one;
+  -- the command passes the pid it minted explicitly, because a persistent
+  -- identifier that two writers derive differently is not a persistent
+  -- identity (00064 records the same decision).
+  pid text NOT NULL DEFAULT substr(replace(gen_random_uuid()::text, '-', ''), 1, 26),
+
+  -- The public target: exactly one of these two, enforced below.
+  target_object_version_id uuid REFERENCES scientific_object_versions(id) ON DELETE RESTRICT,
+  target_asset_version_id  uuid REFERENCES research_asset_versions(id) ON DELETE RESTRICT,
+
+  -- The private side. Cited by id; never projected.
+  attesting_project_id      uuid NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+  attesting_organization_id uuid REFERENCES organizations(id) ON DELETE RESTRICT,
+  basis_state_id            uuid NOT NULL REFERENCES project_states(id) ON DELETE RESTRICT,
+  internal_review_id        uuid NOT NULL REFERENCES reviews(id) ON DELETE RESTRICT,
+
+  -- The public half.
+  validation_type text NOT NULL,
+  validation_result text NOT NULL,
+  org_visibility text NOT NULL,
+
+  created_by uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT attestations_validation_type_check
+    CHECK (validation_type IN ('reproduction', 'method_validation', 'data_audit', 'rights_review')),
+  CONSTRAINT attestations_validation_result_check
+    CHECK (validation_result IN ('confirmed', 'refuted', 'inconclusive')),
+  CONSTRAINT attestations_org_visibility_check
+    CHECK (org_visibility IN ('anonymous', 'named')),
+  CONSTRAINT attestations_pid_format
+    CHECK (pid ~ '^[0-9a-hjkmnp-tv-z]{26}$'),
+  -- Exactly one target pin. Both NULL is an attestation about nothing; both
+  -- set is an attestation about two things, and no read could say which one
+  -- the validation_result is about. `<>` on two booleans, not OR: the
+  -- columns are nullable, so the two IS NULL tests are the only total form.
+  CONSTRAINT attestations_exactly_one_target
+    CHECK ((target_object_version_id IS NULL) <> (target_asset_version_id IS NULL))
+);
+
+CREATE UNIQUE INDEX attestations_pid_uniq ON attestations (pid);
+
+-- The two natural target reads: "the attestations about this object
+-- version", newest first (the shape a public listing rides), and the same
+-- for an asset version. The keyset order is (created_at DESC, id DESC) so
+-- the read walks the index rather than sorting.
+CREATE INDEX attestations_target_object_idx
+  ON attestations (target_object_version_id, created_at DESC, id DESC);
+CREATE INDEX attestations_target_asset_idx
+  ON attestations (target_asset_version_id, created_at DESC, id DESC);
+
+-- The attesting project's own read (a member listing what this project has
+-- attested) — a stable forward walk, not a keyset page.
+CREATE INDEX attestations_attesting_project_idx
+  ON attestations (attesting_project_id, created_at, id);
+
+-- The private-side guard. Two facts must hold for ANY write path:
+--
+--   1. the basis state is a state of the ATTESTING project, and
+--   2. the internal review is a review on a pull request of the attesting
+--      project, of EXACTLY that basis state.
+--
+-- (2) is the same pinning reviews.reviewed_state_id carries since 00061
+-- ("a review is a judgment about one state, not about a moving target"):
+-- here it says the review the attestation cites is the review of the state
+-- the attestation rests on, not a review of some other state of the same
+-- project. Without it, a project could cite an unrelated approved review.
+--
+-- Cross-table invariants cannot be CHECK constraints, so they are triggers
+-- — the same layering 00004/00005/00058 use, and the same reason: the
+-- domain layer refuses these on the happy path, and the database refuses
+-- them unconditionally.
+-- +goose StatementBegin
+CREATE FUNCTION attestations_private_side_guard() RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM project_states ps
+    WHERE ps.id = NEW.basis_state_id
+      AND ps.project_id = NEW.attesting_project_id
+  ) THEN
+    RAISE EXCEPTION 'attestation: basis state % is not a state of the attesting project % (the private evidence an attestation rests on is the attesting project''s own)',
+      NEW.basis_state_id, NEW.attesting_project_id
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM reviews r
+    JOIN pull_requests pr ON pr.id = r.pull_request_id
+    WHERE r.id = NEW.internal_review_id
+      AND pr.project_id = NEW.attesting_project_id
+      AND r.reviewed_state_id = NEW.basis_state_id
+  ) THEN
+    RAISE EXCEPTION 'attestation: internal review % is not a review of basis state % on a pull request of project % (an attestation cites the review that judged the state it rests on)',
+      NEW.internal_review_id, NEW.basis_state_id, NEW.attesting_project_id
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  IF NEW.attesting_organization_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM projects p
+      WHERE p.id = NEW.attesting_project_id
+        AND p.organization_id = NEW.attesting_organization_id
+    ) THEN
+      RAISE EXCEPTION 'attestation: organization % does not own the attesting project % (an attestation is made in its own organization''s name)',
+        NEW.attesting_organization_id, NEW.attesting_project_id
+        USING ERRCODE = 'P0001';
+    END IF;
+  ELSE
+    IF EXISTS (
+      SELECT 1 FROM projects p
+      WHERE p.id = NEW.attesting_project_id
+        AND p.organization_id IS NOT NULL
+    ) THEN
+      RAISE EXCEPTION 'attestation: attesting project % belongs to an organization, so the attestation must record it',
+        NEW.attesting_project_id
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+-- +goose StatementEnd
+
+CREATE TRIGGER attestations_private_side
+  BEFORE INSERT OR UPDATE ON attestations
+  FOR EACH ROW EXECUTE FUNCTION attestations_private_side_guard();
+
+-- Append-only. An attestation is a statement made in public: it is never
+-- edited and never deleted (CLAUDE.md §9.8 — nothing disappears; state
+-- only evolves). The same guard function 00014 installed for the version
+-- logs and ledgers, and the same statement-level TRUNCATE closure 00015
+-- added, because row triggers do not fire on TRUNCATE.
+CREATE TRIGGER attestations_append_only
+  BEFORE UPDATE OR DELETE ON attestations
+  FOR EACH ROW EXECUTE FUNCTION append_only_guard();
+
+CREATE TRIGGER attestations_no_truncate
+  BEFORE TRUNCATE ON attestations FOR EACH STATEMENT
+  EXECUTE FUNCTION append_only_guard();
+
+
+-- ===== 00121_search_answer_record.sql =====
+
+-- The record of one search and the answer it produced (T0906).
+--
+-- docs/22 §8 (Search API) is one sentence long and it is the whole reason
+-- this table exists: "接受 raw query + structured optional filters；服务端保存
+-- query plan、selected entity ids、answer citations". Before this file, nothing
+-- in the tree saved a search at all — POST /search did not exist, and the
+-- contract already carries POST /search/{searchId}:start-project
+-- (specs/api/openapi.yaml), a route that cannot be served without a record to
+-- address a searchId to. The three things the spec names are the columns
+-- below: the plan, the selected refs, the citations.
+--
+-- # A record, not a cache
+--
+-- The row is written once, when the answer is produced, and is never updated
+-- and never read to answer the same question again. Reusing a stored answer
+-- would publish a claim at its old age: the ranking is a function of the
+-- corpus AS OF NOW (ranking/doc.go), so an answer whose sources have since
+-- been superseded is a statement the platform would no longer make. What the
+-- row is FOR is the two things that need the search to still exist after the
+-- response was sent: the citation trail (an answer cites entity versions, and
+-- a reader must be able to see which search produced a citation — docs/54
+-- ranks a fabricated or unauthorized citation as a top-severity scenario), and
+-- the start-project flow, which resumes a search's sources as a draft
+-- research context rather than re-running the search under a different corpus.
+--
+-- # citations ⊆ selected_refs, enforced by the database
+--
+-- The package's central invariant is that an answer may cite only what
+-- retrieval returned (internal/search/answer/doc.go, docs/22 §8's last
+-- clause, docs/54 #7). The Go guard refuses a document that cites anything
+-- else, and this CHECK is the second, independent refusal: a row whose
+-- citations name a ref the search did not return cannot be inserted by ANY
+-- writer, including one added later that has not read the guard. Containment
+-- is the whole of it: it forbids a citation outside selected_refs and says
+-- nothing about how many there are, so an empty citation list satisfies it on
+-- any search — which is correct, because an empty list is exactly what a
+-- fallback means (see the citations column below).
+--
+-- # What is jsonb and why
+--
+-- plan, signals and answer are documents, and they are stored as documents
+-- rather than decomposed into rows. None of them is a fact the database has a
+-- question about: nothing joins to a plan's narrowing or to a signal report,
+-- and the answer is the answer layer's own canonical document — its shape is
+-- that package's schema (internal/search/answer/schema.go, versioned by
+-- answer_version), not this schema's. Decomposing them here would give the
+-- platform a second, drifting definition of what an answer is. The two
+-- columns that DO carry relational meaning — the selected refs and the
+-- citations — are text[] precisely because the invariant above is a statement
+-- about them as sets of refs.
+--
+-- plan is nullable and signals/answer are not: a deployment with no planner
+-- configured still searches (planner.New requires a provider — planning's
+-- absence changes what is READ), so "no plan" is a real state of a real
+-- search; a search that ran always has a signal report and always has an
+-- answer document, even when that answer is the structured fallback.
+--
+-- # No index
+--
+-- Reads of this table are by primary key (one searchId at a time), and that
+-- is the only read the contract has. An index for a read that does not exist
+-- is a write cost paid on every search for nothing; the catalog fixture
+-- (tests/integration/catalog_test.go) requires the explicit index set to
+-- match exactly, so an index added here would also be a schema change nobody
+-- asked for.
+CREATE TABLE search_records (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- The actor whose scope the search ran under. The record belongs to the
+  -- person who asked: the scope resolved from this id decided which rows were
+  -- readable (internal/search/scope.go is the only constructor of it), so an
+  -- answer read back under a different actor would be a claim made about
+  -- rows that actor may not read.
+  actor_id uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  query text NOT NULL CHECK (btrim(query) <> ''),
+  -- The structured filters the caller sent, verbatim and uninterpreted:
+  -- an unknown shape is refused by the planner, not repaired here.
+  filters jsonb,
+  -- The query plan, when a planner ran.
+  plan jsonb,
+  -- The retrieval's own SignalReport[] — which signals ran, which were
+  -- skipped and why. It is stored because it is what the answer's coverage
+  -- limitations are derived from: without it, "the vector signal did not run"
+  -- is a sentence in a saved answer that nothing can check.
+  signals jsonb NOT NULL,
+  -- The entity version refs the result selected, in rank order, in the
+  -- retrieval's own "<kind>:<identity>@<version>" spelling. This is the set
+  -- the answer may cite and the set start-project resumes.
+  selected_refs text[] NOT NULL,
+  -- The refs the answer cites: the subset of selected_refs the written summary
+  -- leans on. It is non-empty exactly when a MODEL wrote that summary: the
+  -- answer schema requires an answered document to cite at least one ref
+  -- (internal/search/answer/schema.go), and every fallback is constructed
+  -- with no citations at all (generator.go's fallback), so a fallback row's
+  -- citations are always empty. Empty is a real state (a fallback over a
+  -- result the model never saw).
+  citations text[] NOT NULL,
+  -- The answer document (internal/search/answer, answer_version 1).
+  answer jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  -- The invariant, in the database. See the header.
+  CHECK (citations <@ selected_refs)
+);
+
+
+-- ===== 00123_scientific_object_reopen_record.sql =====
+
+-- The reopen record on the append-only object version log (T0610).
+--
+-- docs/46:11 is the whole spec sentence for reopen: "Reopen 创建新 transition，
+-- 保留历史 abort。" docs/43:10 gives the edge ("active → aborted → reopened →
+-- active；可 superseded…但不物理删除"), docs/03 §6 defines the state
+-- ("在 abort 之后通过新 transition 恢复继续研究"), and 00014's append-only trigger
+-- names reopen beside abort as the canonical correction that APPENDS a row.
+-- Nothing in the repository asks for a reopen column set, and neither does
+-- this migration: the columns below are migration 00100's abort record,
+-- applied to the transition 00100 itself flags as its sibling.
+--
+-- # Why this migration exists at all, given the lifecycle bit was already here
+--
+-- `'reopened'` has been a legal `lifecycle_state` since 00005:20, so the
+-- STATE transition needs no schema change. Two things the T0610 acceptance
+-- criteria require do:
+--
+--   - Idempotency. The abort command's replay works because the request's
+--     Idempotency-Key is stored on the row the request produced (00100's
+--     abort_request_key, unique per object), so the state itself is the
+--     idempotency record and a repeat writes no second version, no second
+--     audit row and no second event. A reopen must replay the same way, and
+--     a key with no home cannot be read back. It cannot borrow the abort
+--     column: GetVersionByAbortRequestKey's read is shared with the abort
+--     command's replay path, so a key written by a reopen would answer an
+--     ABORT request with a reopened row.
+--   - The governance record. docs/26 lists "abort/reopen" together among the
+--     highest-risk audited actions, and the merge materializes the version a
+--     proposal carried onto main under the MERGING actor's created_by — so
+--     who decided the reopen and when would otherwise not exist on the row
+--     that reaches main (the argument 00100 records verbatim for
+--     aborted_by/aborted_at).
+--
+-- # Shape: 00100's, field for field
+--
+-- Same placement (columns on scientific_object_versions, NOT folded into
+-- `payload`: the payload is the schema-governed scientific content and its
+-- sha256 is the version's integrity_hash, so a governance act about a
+-- version must not change what the version says). Same nullability (every
+-- column NULL for every version that is not a reopen). Same all-or-nothing
+-- CHECK. Same partial unique index scoped to the object for the request
+-- key. Same open-string reason code (shape only, no vocabulary — none
+-- exists in any spec for abort and none exists for reopen).
+--
+-- One deliberate asymmetry with 00100, named here because it is a
+-- difference a reader will otherwise have to infer: 00100's record has an
+-- abort_replacement_ref column and this one has no reopen counterpart.
+-- docs/46:7's "replacement/superseding ref(optional)" is a field of an
+-- ABORT record — the thing that replaces what was aborted. A reopen has no
+-- replacement; it is itself the return to use. Adding a column no spec
+-- names and no code would write is how a schema accumulates guesses.
+--
+-- Forward-only and additive: no existing column, constraint or row is
+-- touched; a database that never reopens an object behaves exactly as
+-- before, and every existing query keeps working (the new columns are
+-- simply absent from their projections).
+ALTER TABLE scientific_object_versions
+  ADD COLUMN reopen_reason_code text,
+  ADD COLUMN reopen_explanation text,
+  ADD COLUMN reopened_by uuid REFERENCES users(id) ON DELETE RESTRICT,
+  ADD COLUMN reopened_at timestamptz,
+  ADD COLUMN reopen_request_key text;
+
+-- The reason code is an OPEN string, exactly as 00100's abort_reason_code is:
+-- no specification names reopen reason codes at all, so this CHECK fixes the
+-- SHAPE (a bounded lowercase token) and never a vocabulary. No list of
+-- accepted codes exists in this migration, in Go, or anywhere else.
+ALTER TABLE scientific_object_versions
+  ADD CONSTRAINT scientific_object_versions_reopen_reason_code_shape
+  CHECK (reopen_reason_code IS NULL OR reopen_reason_code ~ '^[a-z0-9_]{1,64}$');
+
+-- The human explanation is the part a machine cannot reconstruct, so it must
+-- be present and non-blank whenever a record exists. The bound is 00100's.
+ALTER TABLE scientific_object_versions
+  ADD CONSTRAINT scientific_object_versions_reopen_explanation_shape
+  CHECK (reopen_explanation IS NULL
+         OR (length(btrim(reopen_explanation)) BETWEEN 1 AND 4096));
+
+-- The idempotency key follows the contract's own bound
+-- (specs/api/openapi.yaml, components.parameters.IdempotencyKey: minLength 8):
+-- a stored key is a deliberate token, never a stray empty string.
+ALTER TABLE scientific_object_versions
+  ADD CONSTRAINT scientific_object_versions_reopen_request_key_shape
+  CHECK (reopen_request_key IS NULL OR length(reopen_request_key) >= 8);
+
+-- All-or-nothing, and tied to the state it describes: a row carrying reopen
+-- metadata is a row whose lifecycle_state IS 'reopened'. The record can
+-- therefore never be attached to an active or aborted version, and a
+-- reopened version written without a record (a payload-only lifecycle move,
+-- e.g. a fixture) stays legal — this migration constrains the record's shape,
+-- it does not mandate that every reopened row has one.
+ALTER TABLE scientific_object_versions
+  ADD CONSTRAINT scientific_object_versions_reopen_record_shape
+  CHECK (
+    NOT (reopen_reason_code IS NULL) = NOT (reopen_explanation IS NULL)
+    AND NOT (reopen_reason_code IS NULL) = NOT (reopened_by IS NULL)
+    AND NOT (reopen_reason_code IS NULL) = NOT (reopened_at IS NULL)
+    AND (reopen_reason_code IS NULL OR lifecycle_state = 'reopened')
+  );
+
+CREATE UNIQUE INDEX scientific_object_versions_reopen_request_key_idx
+  ON scientific_object_versions (object_id, reopen_request_key)
+  WHERE reopen_request_key IS NOT NULL;
+
+COMMENT ON COLUMN scientific_object_versions.reopen_reason_code IS
+  'The reopen''s reason code, in the shape 00100 gave the abort record. An OPEN caller-supplied token in V1 — no spec names reopen reason codes at all, and this platform does not invent a vocabulary; the column CHECKs the shape (^[a-z0-9_]{1,64}$) and records the value as given.';
+COMMENT ON COLUMN scientific_object_versions.reopen_explanation IS
+  'The human explanation the reopen recorded — the part no machine can reconstruct. Non-blank when the record exists.';
+COMMENT ON COLUMN scientific_object_versions.reopened_by IS
+  'The actor who decided the reopen (not the row''s created_by: after a Research PR merge materializes the reopen onto main, created_by is the merging actor while this stays the reopening one).';
+COMMENT ON COLUMN scientific_object_versions.reopened_at IS
+  'Server-derived time of the reopen decision; never caller-supplied. Travels with the record when a merge materializes the reopen onto main.';
+COMMENT ON COLUMN scientific_object_versions.reopen_request_key IS
+  'The Idempotency-Key the reopen request carried (specs/api/openapi.yaml components.parameters.IdempotencyKey); NULL when none. UNIQUE per object among non-NULL keys, so a repeated request reads the row the first one wrote instead of appending a second (the migration-00100 pattern). Not carried onto main by a merge: it names a request, not history.';
+
+
+-- ===== 00125_asset_metadata_revision.sql =====
+
+-- T0706. Asset metadata revision: the mutable, asset-level metadata of
+-- docs/11 §4, and the five columns that hold it.
+--
+-- docs/11 §4 (RELEASE_ASSET_HUB.md:21) is the whole task:
+--
+--   Scientific Version 不可变；描述、keywords、cover、contact、
+--   documentation 等 Asset Metadata 可独立 revision，保留 audit，
+--   不产生新的 scientific version。
+--
+-- Read literally, that sentence asks for three things and forbids one. A
+-- version is immutable; metadata is revisable; the revision is audited;
+-- and the revision does NOT produce a new scientific version. So the
+-- revision is an IN-PLACE update of the asset row, and this migration is
+-- the columns that update writes — deliberately not a version table, not
+-- a revision-history table, and not a second row per revision. "Asset
+-- metadata" and "scientific version" are two different things in docs/11
+-- precisely so that revising one cannot produce the other, and a
+-- revision-history table would rebuild the version stream docs/11 §4
+-- just said must not exist (its audit is the audit_log row the same
+-- transaction writes — 00012's before_summary/after_summary columns are
+-- what metadata revisions record into).
+--
+-- # Why research_assets, and why these columns are mutable there
+--
+-- A research version's metadata lives in its immutable manifest document
+-- (research_asset_versions.manifest, 00010; the asset type's required
+-- metadata table is internal/assets.RequiredMetadata). That document
+-- belongs to the VERSION: it is covered by the version's integrity hash
+-- and its row is append-only (00014). What docs/11 §4 makes revisable is
+-- the layer above it — the asset's own descriptive metadata — and
+-- research_assets is that row (00010, extended by 00064 with the pid).
+-- It carries no append-only row trigger, so an in-place update is a legal
+-- write here and an illegal one on the version row; that asymmetry is the
+-- schema expressing the same boundary the code does
+-- (internal/application/assetpublish/command.go:197 refuses title/slug
+-- when publishing a version of an existing asset, because "publishing a
+-- version is not an asset-metadata revision").
+--
+-- # What is NOT here
+--
+-- No pid, no asset_type and no origin_project_id: those are the asset's
+-- IDENTITY, not its metadata, and docs/11 §2 makes the pid stable across
+-- renames and transfers. slug is metadata, and the reason renaming it is
+-- safe is 00064's: the pid — and therefore every URL built from it — is
+-- random and never derived from the slug.
+--
+-- # The columns, one per metadata item of docs/11 §4
+--
+-- description, keywords, contact and documentation are the four items the
+-- sentence lists that this surface writes. Each is NOT NULL with an empty
+-- default, which is the shape the asset already had: a pre-T0706 row has
+-- no description, and "" states that, while NULL would be the absence of
+-- a statement. text[] for the three list-shaped items because the values
+-- are plain strings (a keyword, a contact, a documentation link) and the
+-- column then reads back as the list it was declared as; a jsonb document
+-- would be a shape the platform invented where a list is what is stored.
+-- There is deliberately no CHECK on their contents beyond the array
+-- itself: internal/assets bounds their length and shape on the
+-- application path, the same division the manifest's metadata block uses
+-- (00067 makes it a JSON object at the storage layer; the field tables
+-- live in Go).
+--
+-- cover_blob_id is the fifth item, and it is RESERVED rather than served.
+-- docs/11 §4 lists cover among the revisable metadata, and docs/11 §3
+-- puts a cover in the publish checklist's required metadata, so the
+-- column has to exist for the item to be representable at all. What does
+-- not exist is any way to fetch the bytes: the blob surface today is
+-- internal/storage's port declaration and the blobs/blob_attachments
+-- tables (00008) — there is no upload route, no download route, and no
+-- signed-URL/TTL mechanism anywhere in the tree, so a cover that could be
+-- SET would be an image no reader can ever see. The column is therefore
+-- declared, nullable, foreign-keyed to the row it would name, and NOT
+-- written by any code path in this build: the revision command refuses a
+-- cover change by name instead of silently dropping it
+-- (internal/application/assetmetadata.ErrCoverNotSupported), and the
+-- blob-side channel that would make it real belongs to the task that
+-- builds the blob transfer path. Null means "no cover recorded", which is
+-- the truth for every asset today.
+ALTER TABLE research_assets
+  ADD COLUMN description text NOT NULL DEFAULT '',
+  ADD COLUMN keywords text[] NOT NULL DEFAULT '{}',
+  ADD COLUMN contact text[] NOT NULL DEFAULT '{}',
+  ADD COLUMN documentation text[] NOT NULL DEFAULT '{}',
+  ADD COLUMN cover_blob_id uuid REFERENCES blobs(id) ON DELETE RESTRICT;
+
+COMMENT ON COLUMN research_assets.description IS
+  'T0706. The asset''s description — revisable asset metadata (docs/11 §4), NOT part of any scientific version. Revised in place by internal/application/assetmetadata, in the same transaction as the audit_log row recording the revision. Empty string means "no description recorded"; NULL is never stored.';
+
+COMMENT ON COLUMN research_assets.keywords IS
+  'T0706. The asset''s keyword list — revisable asset metadata (docs/11 §4). An array because it is stored as a list; the count/length bounds live in internal/assets (MaxKeywords, MaxKeywordLen) and are enforced on the write path, not as a CHECK here.';
+
+COMMENT ON COLUMN research_assets.contact IS
+  'T0706. How to reach whoever is responsible for the asset — revisable asset metadata (docs/11 §4). Plain strings, not a structured party reference: docs/11 §6 already gives the responsible parties their own roles (Rights Holder, Custodian, Maintainer, Creator, Contributor) in their own tables, and a second structured copy here would be a second answer to "who is responsible".';
+
+COMMENT ON COLUMN research_assets.documentation IS
+  'T0706. Where the asset is documented — revisable asset metadata (docs/11 §4). Plain strings: this build stores the reference the publisher declared and does not dereference it, so no URL shape is asserted here (a DOI, a repository path and an https link are all references).';
+
+COMMENT ON COLUMN research_assets.cover_blob_id IS
+  'T0706. The blob that would be the asset''s cover — RESERVED, and written by nothing in this build. docs/11 §4 lists cover among the revisable metadata, so the slot exists; the blob surface has no upload/download route and no signed-URL/TTL mechanism, so a cover set today is an image no reader could fetch. The revision command refuses a cover change by name (assetmetadata.ErrCoverNotSupported) rather than dropping it, and the channel that would fill this column belongs to the blob-transfer task. NULL is the state of every asset today.';
 
 
 -- ===== 00128_asset_derive_creations.sql =====

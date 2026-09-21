@@ -86,7 +86,7 @@ func (q *Queries) CreateReleaseCreation(ctx context.Context, arg CreateReleaseCr
 const createResearchAsset = `-- name: CreateResearchAsset :one
 INSERT INTO research_assets (asset_type, slug, title, origin_project_id)
 VALUES ($1, $2, $3, $4)
-RETURNING id, asset_type, slug, title, origin_project_id, created_at, pid
+RETURNING id, asset_type, slug, title, origin_project_id, created_at, pid, description, keywords, contact, documentation, cover_blob_id
 `
 
 type CreateResearchAssetParams struct {
@@ -112,6 +112,11 @@ func (q *Queries) CreateResearchAsset(ctx context.Context, arg CreateResearchAss
 		&i.OriginProjectID,
 		&i.CreatedAt,
 		&i.Pid,
+		&i.Description,
+		&i.Keywords,
+		&i.Contact,
+		&i.Documentation,
+		&i.CoverBlobID,
 	)
 	return i, err
 }

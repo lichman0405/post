@@ -45,6 +45,7 @@ import (
 
 	"github.com/lichman0405/post/cmd/api/aborthttp"
 	"github.com/lichman0405/post/cmd/api/assetshttp"
+	"github.com/lichman0405/post/cmd/api/attestationhttp"
 	"github.com/lichman0405/post/cmd/api/audithttp"
 	"github.com/lichman0405/post/cmd/api/authhttp"
 	"github.com/lichman0405/post/cmd/api/conflicthttp"
@@ -73,12 +74,15 @@ import (
 	"github.com/lichman0405/post/cmd/api/reviewhttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/cmd/api/schemaprofileshttp"
+	"github.com/lichman0405/post/cmd/api/searchhttp"
 	"github.com/lichman0405/post/cmd/api/subscriptionshttp"
 	"github.com/lichman0405/post/cmd/api/templateshttp"
 	"github.com/lichman0405/post/cmd/api/validationhttp"
 	"github.com/lichman0405/post/cmd/api/webhookshttp"
 	"github.com/lichman0405/post/internal/application/aborts"
+	"github.com/lichman0405/post/internal/application/assetmetadata"
 	"github.com/lichman0405/post/internal/application/assetpublish"
+	"github.com/lichman0405/post/internal/application/attestations"
 	"github.com/lichman0405/post/internal/application/audit"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
@@ -119,6 +123,9 @@ import (
 	"github.com/lichman0405/post/internal/rsg/integrity"
 	"github.com/lichman0405/post/internal/rsg/schemareg"
 	rsgvalidation "github.com/lichman0405/post/internal/rsg/validation"
+	"github.com/lichman0405/post/internal/search/answer"
+	"github.com/lichman0405/post/internal/search/ranking"
+	"github.com/lichman0405/post/internal/search/retrieval"
 	"github.com/lichman0405/post/internal/security"
 	"github.com/lichman0405/post/internal/version"
 	"github.com/lichman0405/post/internal/worker"
@@ -955,6 +962,19 @@ func run(args []string) int {
 		// same asset_dependencies table the publish above writes, keyed by
 		// the project instead of the asset.
 		Dependencies: persistence.NewProjectDependencyStore(pool),
+		// The asset metadata revision (T0706). docs/11 §4 makes an asset's
+		// description/keywords/cover/contact/documentation independently
+		// revisable with the audit kept and no new scientific version; the
+		// command revises the research_assets row in place and the store
+		// writes the audit_log row in the SAME transaction, under the asset
+		// row lock, with the before/after pair read from the row it is about
+		// to overwrite. The role gate is the default-deny maintainer rule
+		// the project settings surface uses — the permission matrix has no
+		// asset-metadata row, and specs/ is not a Worker's to edit.
+		Metadata: assetmetadata.NewCommand(assetmetadata.Deps{
+			Members: persistence.NewProjectStore(pool),
+			Store:   persistence.NewAssetMetadataStore(pool),
+		}),
 	})
 	assetsAPI.Register(v1)
 	// Knowledge publication (T0805): the missing publish path for
@@ -1004,6 +1024,40 @@ func run(args []string) int {
 		Evidence: persistence.NewEvidenceStore(pool),
 	})
 	knowledgeAPI.Register(v1)
+	// Private evidence / public attestation (T0812): the governance write
+	// that lets a project state, in public, that it validated a PUBLIC
+	// version somebody else's project published — "we validated this, this
+	// way, and the result was this" — without the private work underneath
+	// it coming along. docs/12 §2 逐字: "Private Project：project/RSG/private
+	// blobs 默认不可见；可显式 Publish Asset/Knowledge/Attestation", and
+	// docs/22 §28 lists create attestation among the high-risk commands.
+	//
+	// The privacy is STRUCTURAL, not a rendering rule (migration 00120):
+	// the table has no column a reasoning note, a citation or an excerpt
+	// could be written into, and the public read
+	// (ResolvePublicAttestation) has no column for the attesting project,
+	// the basis state or the internal review — so the projection cannot
+	// disclose what it was never handed. What it publishes is the
+	// attestation itself and nothing else: the attesting project's
+	// visibility, the basis state's visibility and the visibility of
+	// anything in them are all untouched (发布不等于公开, L3-20260916-1,
+	// from the other end).
+	//
+	// The matrix row is the same one the publication evaluates —
+	// publish_private_to_public — and the human backstop in front of it is
+	// the command's own: an agent may prepare an attestation and may not
+	// issue one.
+	attestationStore := persistence.NewAttestationStore(pool)
+	attestationCommand := attestations.NewCommand(attestations.Deps{
+		Members: persistence.NewProjectStore(pool),
+		Store:   attestationStore,
+		Authz:   authz.NewMatrixEngine(),
+	})
+	attestationAPI := attestationhttp.New(attestationhttp.Deps{
+		Attest: attestationCommand,
+		Read:   attestationStore,
+	})
+	attestationAPI.Register(v1)
 	// The Explore index (T0802): the six dimensions of docs/05 §6 in one
 	// anonymous read. Three of its six sections are the platform's EXISTING
 	// public reads, not new ones — the public project list, the asset hub's
@@ -1140,7 +1194,18 @@ func run(args []string) int {
 		// with nobody's name on it. Wiring it is not optional in the sense
 		// that matters: without it the merge REFUSES such a plan instead of
 		// writing a record-less abort.
-		Aborts:   persistence.NewScientificObjectStore(pool),
+		Aborts: persistence.NewScientificObjectStore(pool),
+		// The reopen reader (T0610): the same rule for the reverse edge —
+		// a 'reopened' version the plan materializes onto main carries the
+		// record of WHO decided the reopen and WHEN, because the row the
+		// merge writes is stamped with the MERGING actor and the deciding
+		// actor exists nowhere else (internal/application/merge/ports.go).
+		// Deliberately asymmetric with Aborts above: no specification
+		// mandates a reopen record (docs/46:11 says only that a reopen
+		// creates a new transition and keeps the abort history), so an
+		// unwired or record-less case copies nothing rather than refusing
+		// a plan no sentence forbids.
+		Reopens:  persistence.NewScientificObjectStore(pool),
 		Projects: projectAPI.Service(),
 		Authz:    authz.NewMatrixEngine(),
 		// The fork lineage (T0817): the merge reads a source branch out of
@@ -1220,6 +1285,64 @@ func run(args []string) int {
 	})
 	abortAPI := aborthttp.New(aborthttp.Deps{Command: abortSvc})
 	abortAPI.Register(v1)
+	// Evidence-backed search (T0906): POST /api/v1/search runs the whole
+	// pipeline — resolve the actor's scope, plan, retrieve, rank, answer —
+	// and records the search (query plan, selected refs, citations) before
+	// it answers (docs/22 §8; the record is what /search/{searchId}:start-project
+	// addresses later).
+	//
+	// Two steps are deliberately left unwired, and both absences are the
+	// supported state the search packages document rather than a gap:
+	//
+	//   * the PLANNER has no provider. planner.New refuses a nil provider,
+	//     so no planner is constructed at all: planning is skipped, the
+	//     retrieval runs on the question alone, and the record's plan column
+	//     is null — which says "this deployment planned nothing", not "the
+	//     plan failed". A provider adapter is what a deployment that has
+	//     answered "may a question leave the platform" would add.
+	//   * the EMBEDDER is nil, so the vector signal does not run and the
+	//     vector half of the corpus is not compared. The retrieval REPORTS
+	//     this (SignalReport.Skipped = no_embedder) and the answer's
+	//     limitations carry it, because "the vector signal did not run" and
+	//     "no stored vector matched" are different statements about the
+	//     corpus and only one of them is true here.
+	//
+	// The answer generator is built with no provider for the same reason, and
+	// that is a state it accepts: an answer model that is absent costs the
+	// written summary, never the structured result underneath it.
+	retrievalStore, err := retrieval.NewSQLStore(pool)
+	if err != nil {
+		slog.Error("post-api: retrieval store setup failed", "error", err)
+		return exitRuntime
+	}
+	rankingStore, err := ranking.NewSQLStore(pool)
+	if err != nil {
+		slog.Error("post-api: ranking store setup failed", "error", err)
+		return exitRuntime
+	}
+	searcher, err := retrieval.NewRetriever(retrievalStore, nil)
+	if err != nil {
+		slog.Error("post-api: retriever setup failed", "error", err)
+		return exitRuntime
+	}
+	ranker, err := ranking.NewRanker(rankingStore)
+	if err != nil {
+		slog.Error("post-api: ranker setup failed", "error", err)
+		return exitRuntime
+	}
+	answerer, err := answer.New(answer.Deps{Logger: logger})
+	if err != nil {
+		slog.Error("post-api: answer generator setup failed", "error", err)
+		return exitRuntime
+	}
+	searchAPI := searchhttp.New(searchhttp.Deps{
+		Scope:     persistence.NewProjectStore(pool),
+		Retriever: searcher,
+		Ranker:    ranker,
+		Answerer:  answerer,
+		Records:   persistence.NewSearchRecordStore(pool),
+	})
+	searchAPI.Register(v1)
 	mux.Handle("/api/v1/", authAPI.Guard(v1))
 
 	// The edge chain, outermost first (T1106):

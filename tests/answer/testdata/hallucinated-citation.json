@@ -1,0 +1,236 @@
+{
+  "name": "hallucinated-citation",
+  "note": "The acceptance criterion: the provider cites an asset version the search never returned. The WHOLE document is refused — the invented identity appears nowhere in the published answer, and the answer falls back with the refusal named.",
+  "query": "Which MOF materials show CO2 uptake above 3 mmol/g at 298 K, and has that been reproduced?",
+  "signals": [
+    {
+      "signal": "full_text",
+      "ran": true,
+      "hits": 3
+    },
+    {
+      "signal": "vector",
+      "skipped": "no_embedder"
+    },
+    {
+      "signal": "facets",
+      "skipped": "no_facets"
+    },
+    {
+      "signal": "graph",
+      "ran": true,
+      "hits": 2
+    }
+  ],
+  "sources": [
+    {
+      "rank": 1,
+      "ref": "asset:AST-0001@2",
+      "kind": "document",
+      "entity_type": "asset",
+      "object_type": "material",
+      "identity": "AST-0001",
+      "version": "2",
+      "title": "Mg-MOF-74 CO2 uptake at 298 K",
+      "project_id": "3f2a5b7c-1d4e-4a6b-8c9d-0e1f2a3b4c5d",
+      "object_id": "1d2c3b4a-5e6f-4071-8293-a4b5c6d7e8f9",
+      "labels": [
+        "independently_reproduced"
+      ],
+      "factors": [
+        {
+          "factor": "query_scope_match",
+          "level": "question",
+          "level_rank": 0,
+          "reason": "recalled by the question's own content (full_text)"
+        },
+        {
+          "factor": "evidence",
+          "level": "reviewed",
+          "level_rank": 0,
+          "reason": "2 evidence assertions target this version, 1 reviewed",
+          "facts": {
+            "assertions": 2,
+            "direct": 0,
+            "rejected": 0,
+            "reviewed": 1
+          }
+        },
+        {
+          "factor": "review",
+          "level": "approved",
+          "level_rank": 0,
+          "reason": "1 scientific review on the state this version was created in, 1 approved",
+          "facts": {
+            "approved": 1,
+            "changes_requested": 0,
+            "scientific": 1
+          }
+        },
+        {
+          "factor": "reproduction",
+          "level": "independent",
+          "level_rank": 0,
+          "reason": "2 reproductions recorded, 2 from another project",
+          "facts": {
+            "failed": 0,
+            "independent": 2,
+            "reproduces": 2
+          }
+        },
+        {
+          "factor": "conflict",
+          "level": "uncontested",
+          "level_rank": 0,
+          "reason": "nothing on the platform contradicts this version (no contradictory evidence assertion, no contradicts relation)",
+          "facts": {
+            "evidence_assertions": 0,
+            "relations": 0
+          }
+        },
+        {
+          "factor": "version",
+          "level": "current",
+          "level_rank": 0,
+          "reason": "version 2 is the newest version of its object and is active",
+          "facts": {
+            "newest_version_no": 2,
+            "version_no": 2
+          }
+        }
+      ],
+      "signals": [
+        {
+          "signal": "full_text",
+          "rank": 1,
+          "score": 0.31
+        }
+      ]
+    }
+  ],
+  "provider": {
+    "document": "{\n  \"answer_version\": \"1\",\n  \"summary\": \"The uptake is 3.2 mmol/g (asset:AST-9999@7).\",\n  \"citations\": [\n    \"asset:AST-9999@7\"\n  ]\n}"
+  },
+  "forbidden": [
+    "asset:AST-9999@7",
+    "AST-9999"
+  ],
+  "expected_answer": {
+    "answer_version": "1",
+    "status": "fallback",
+    "reason": "ungrounded_citation",
+    "query": "Which MOF materials show CO2 uptake above 3 mmol/g at 298 K, and has that been reproduced?",
+    "answer_view": false,
+    "summary": "",
+    "citations": [],
+    "limitations": [
+      {
+        "text": "the answer model cited or named an entity the search did not return, so its document was refused and this answer is the structured result",
+        "origin": "platform"
+      },
+      {
+        "text": "the vector signal did not run: no embedder is configured, so the question could not be embedded and no stored vector could be compared against it",
+        "origin": "platform"
+      },
+      {
+        "text": "the facet signal did not run: the question carried no structured filter, and the facet signal without one would be the newest rows of the index rather than a match",
+        "origin": "platform"
+      },
+      {
+        "text": "the platform derived no limitation for this result's 1 source: it pins its object's newest live version, with evidence asserted about it and a scientific review state the platform could read",
+        "refs": [
+          "asset:AST-0001@2"
+        ],
+        "origin": "platform"
+      }
+    ],
+    "conflicts": [
+      {
+        "text": "nothing on the platform contradicts the 1 source of this result: no contradictory evidence assertion and no contradicts relation touches it",
+        "refs": [
+          "asset:AST-0001@2"
+        ],
+        "origin": "platform"
+      }
+    ],
+    "sources": [
+      {
+        "rank": 1,
+        "ref": "asset:AST-0001@2",
+        "kind": "document",
+        "entity_type": "asset",
+        "object_type": "material",
+        "title": "Mg-MOF-74 CO2 uptake at 298 K",
+        "version": "2",
+        "href": "/api/v1/assets/AST-0001?version=2",
+        "project_id": "3f2a5b7c-1d4e-4a6b-8c9d-0e1f2a3b4c5d",
+        "labels": [
+          "independently_reproduced"
+        ],
+        "factors": [
+          {
+            "factor": "query_scope_match",
+            "level": "question",
+            "level_rank": 0,
+            "reason": "recalled by the question's own content (full_text)"
+          },
+          {
+            "factor": "evidence",
+            "level": "reviewed",
+            "level_rank": 0,
+            "reason": "2 evidence assertions target this version, 1 reviewed",
+            "facts": {
+              "assertions": 2,
+              "direct": 0,
+              "rejected": 0,
+              "reviewed": 1
+            }
+          },
+          {
+            "factor": "review",
+            "level": "approved",
+            "level_rank": 0,
+            "reason": "1 scientific review on the state this version was created in, 1 approved",
+            "facts": {
+              "approved": 1,
+              "changes_requested": 0,
+              "scientific": 1
+            }
+          },
+          {
+            "factor": "reproduction",
+            "level": "independent",
+            "level_rank": 0,
+            "reason": "2 reproductions recorded, 2 from another project",
+            "facts": {
+              "failed": 0,
+              "independent": 2,
+              "reproduces": 2
+            }
+          },
+          {
+            "factor": "conflict",
+            "level": "uncontested",
+            "level_rank": 0,
+            "reason": "nothing on the platform contradicts this version (no contradictory evidence assertion, no contradicts relation)",
+            "facts": {
+              "evidence_assertions": 0,
+              "relations": 0
+            }
+          },
+          {
+            "factor": "version",
+            "level": "current",
+            "level_rank": 0,
+            "reason": "version 2 is the newest version of its object and is active",
+            "facts": {
+              "newest_version_no": 2,
+              "version_no": 2
+            }
+          }
+        ],
+        "cited": false
+      }
+    ]
+  }
+}

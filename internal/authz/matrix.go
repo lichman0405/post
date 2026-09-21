@@ -127,6 +127,19 @@ var matrixTable = map[Action]map[ActorClass]Verdict{
 		ActorOwner:                  VerdictViaPR,
 		ActorAgent:                  VerdictProposalOnly,
 	},
+	// ActionReopenMainObject is cell-for-cell the abort row above, and that
+	// identity is the policy: abort and reopen are one pair of opposite
+	// operations, so undoing an abort is never easier than making one
+	// (T0610's ruling; specs/policies/permissions-matrix.csv:15).
+	ActionReopenMainObject: {
+		ActorPublicAnonymous:        VerdictDeny,
+		ActorAuthenticatedNonMember: VerdictDeny,
+		ActorViewer:                 VerdictDeny,
+		ActorContributor:            VerdictDeny,
+		ActorMaintainer:             VerdictViaPR,
+		ActorOwner:                  VerdictViaPR,
+		ActorAgent:                  VerdictProposalOnly,
+	},
 	ActionReadFiles: {
 		ActorPublicAnonymous:        VerdictPublicPolicy,
 		ActorAuthenticatedNonMember: VerdictAuthorized,

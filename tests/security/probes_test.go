@@ -15,6 +15,8 @@ import (
 	"github.com/lichman0405/post/cmd/api/fileshttp"
 	"github.com/lichman0405/post/cmd/api/releasehttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
+	"github.com/lichman0405/post/cmd/api/searchhttp"
+	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/feeds"
 	"github.com/lichman0405/post/internal/application/projects"
 	"github.com/lichman0405/post/internal/application/rsg"
@@ -22,6 +24,11 @@ import (
 	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/domain"
 	"github.com/lichman0405/post/internal/gitprovider"
+	"github.com/lichman0405/post/internal/persistence"
+	"github.com/lichman0405/post/internal/search"
+	"github.com/lichman0405/post/internal/search/answer"
+	"github.com/lichman0405/post/internal/search/ranking"
+	"github.com/lichman0405/post/internal/search/retrieval"
 	edgesec "github.com/lichman0405/post/internal/security"
 )
 
@@ -61,6 +68,13 @@ type probe struct {
 	// disposition is the exact Content-Disposition value, or "" when the
 	// response must carry none at all.
 	disposition string
+	// cacheControl is the exact Cache-Control the response must carry, or ""
+	// when the probe makes no claim about caching. Most exits are responses
+	// a cache may keep and they say nothing about it; the search answer is
+	// the one row whose Wire promises no-store, and a promise no probe
+	// measures is documentation rather than a check — the same reason this
+	// table exists beside the registry at all.
+	cacheControl string
 	// kind is the exit classification JudgeExit must reach on the edged
 	// response.
 	kind edgesec.ExitKind
@@ -91,6 +105,12 @@ func TestRegisteredExitsSendTheHeadersTheyDeclare(t *testing.T) {
 			}
 			if got := bare.Header().Get("Content-Disposition"); got != p.disposition {
 				t.Errorf("bare handler sent Content-Disposition: %q, want %q", got, p.disposition)
+			}
+			if p.cacheControl != "" {
+				if got := bare.Header().Get("Cache-Control"); got != p.cacheControl {
+					t.Errorf("bare handler sent Cache-Control: %q, want %q — nothing above this exit sets "+
+						"it, so the row's promise is only kept if the exit does", got, p.cacheControl)
+				}
 			}
 
 			// ---- the composed chain -----------------------------------
@@ -173,6 +193,30 @@ var probes = []probe{
 			})
 		},
 		req: func(t *testing.T) *http.Request { return httptest.NewRequest(http.MethodGet, "/x", nil) },
+	},
+	{
+		name:        "the search answer",
+		key:         "searchhttp/handlers.go:writeSearchJSON",
+		contentType: "application/json; charset=utf-8",
+		// Cache-Control is asserted here and not in the registry: an answer
+		// belongs to the actor who asked, so it must not be kept by a shared
+		// cache, and no layer above the exit sets the header (the edge does
+		// not touch caching).
+		cacheControl: "no-store",
+		kind:         edgesec.ExitInlineText,
+		status:       http.StatusOK,
+		build:        func(t *testing.T) http.Handler { return searchHandler(t) },
+		req: func(t *testing.T) *http.Request {
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/search",
+				strings.NewReader(`{"query":"co2 uptake"}`))
+			r.Header.Set("Content-Type", "application/json")
+			// A write route under the guard carries the session's CSRF token
+			// beside the cookie; the probe session's token is the one the
+			// store below answers with.
+			r.Header.Set("X-CSRF-Token", probeCSRF)
+			r.AddCookie(&http.Cookie{Name: "post_session", Value: probeSessionToken})
+			return r
+		},
 	},
 	{
 		name:        "the raw download channel",
@@ -485,4 +529,135 @@ func (probeRSGService) GetObjectDetail(_ context.Context, _ projects.Reader, pro
 		Versions: []domain.ScientificObjectVersion{version},
 		Selected: version,
 	}, nil
+}
+
+// ---- searchhttp -------------------------------------------------------
+
+// The search probe drives the route the way cmd/api mounts it: the search
+// surface behind the REAL auth guard.
+//
+// The guard is not scaffolding here. It is the only thing that can put an
+// actor into the request context from outside the package — the handler asks
+// authhttp.PrincipalID, and nothing but the guard writes that value — so a
+// probe that injected one another way would be measuring a composition
+// production never builds. Its three ports are answered below in place of
+// Redis and PostgreSQL; the pipeline's ports are answered beside them.
+const (
+	probeSessionToken = "probe-session-token"
+	probeCSRF         = "probe-csrf-token"
+	probeActorID      = "6a1f0d3e-1c2b-4a5d-8e9f-0a1b2c3d4e5f"
+	probeSearchID     = "9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a"
+	probeAssetRef     = "asset:AST-0001@2"
+)
+
+func searchHandler(t *testing.T) http.Handler {
+	t.Helper()
+	// The REAL answer layer, with no provider configured: that is the
+	// supported state of a deployment that has not answered "may platform
+	// content go to a model", and it always produces a document (the
+	// structured fallback, generator.go). What a model would have written is
+	// pinned by tests/answer's fixtures; this probe is about the exit.
+	answerer, err := answer.New(answer.Deps{})
+	if err != nil {
+		t.Fatalf("answer.New: %v", err)
+	}
+
+	v1 := http.NewServeMux()
+	searchhttp.New(searchhttp.Deps{
+		Scope:     probeSearchScope{},
+		Retriever: probeRetriever{},
+		Ranker:    probeRanker{},
+		Answerer:  answerer,
+		Records:   probeSearchRecords{},
+	}).Register(v1)
+
+	auth := authhttp.New(authhttp.Deps{
+		Users: probeUserStore{}, Sessions: probeSessionStore{}, Limiter: probeLimiter{},
+		Cfg: authn.Config{WebOrigin: "http://127.0.0.1:3000", SessionTTL: time.Hour},
+	})
+	return auth.Guard(v1)
+}
+
+// probeSessionStore answers the one lookup the guard makes for the probe's
+// cookie.
+type probeSessionStore struct{ authn.SessionStore }
+
+func (probeSessionStore) Get(_ context.Context, token string) (authn.Session, error) {
+	if token != probeSessionToken {
+		return authn.Session{}, authn.ErrSessionNotFound
+	}
+	return authn.Session{
+		Token: probeSessionToken, UserID: probeActorID, CSRFToken: probeCSRF,
+		CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
+	}, nil
+}
+
+// probeUserStore answers the account lookup behind that session.
+type probeUserStore struct{ authn.UserStore }
+
+func (probeUserStore) GetByID(_ context.Context, id string) (authn.UserRecord, error) {
+	if id != probeActorID {
+		return authn.UserRecord{}, authn.ErrUserNotFound
+	}
+	return authn.UserRecord{User: domain.User{
+		ID: probeActorID, Handle: "probe", Email: "probe@post.test",
+	}}, nil
+}
+
+// probeLimiter allows every check: the search route takes no rate-limit
+// decision of its own, and the limit that could refuse a request is not what
+// this probe measures.
+type probeLimiter struct{ authn.RateLimiter }
+
+func (probeLimiter) Check(context.Context, string, int, time.Duration) (bool, time.Duration, error) {
+	return true, 0, nil
+}
+
+// probeSearchScope puts the probe's actor in one project.
+// search.ResolveScope scans the id as a uuid column, so the fixture is a
+// uuid.
+type probeSearchScope struct{ search.ProjectScopeReader }
+
+func (probeSearchScope) ListProjectsForUser(context.Context, string) ([]domain.Project, error) {
+	return []domain.Project{{ID: probeProjectID, Name: "Lab", Visibility: domain.VisibilityPrivate}}, nil
+}
+
+// probeRetriever recalls one candidate and reports the signals a deployment
+// with no embedder reports.
+type probeRetriever struct{ searchhttp.Retriever }
+
+func (probeRetriever) Retrieve(_ context.Context, _ search.Scope, req retrieval.Request) (retrieval.Result, error) {
+	return retrieval.Result{Query: req.Query, Signals: []retrieval.SignalReport{
+		{Signal: retrieval.SignalFullText, Ran: true, Hits: 1},
+		{Signal: retrieval.SignalVector, Skipped: retrieval.SkippedNoEmbedder},
+		{Signal: retrieval.SignalFacets, Skipped: retrieval.SkippedNoFacets},
+		{Signal: retrieval.SignalGraph, Ran: true},
+	}}, nil
+}
+
+// probeRanker orders that one candidate first.
+type probeRanker struct{ searchhttp.Ranker }
+
+func (probeRanker) Rank(_ context.Context, _ search.Scope, _ retrieval.Request, res retrieval.Result) (ranking.Result, error) {
+	return ranking.Result{
+		Query: res.Query, Factors: ranking.Factors(),
+		Ranked: []ranking.Ranked{{
+			Rank: 1, Ref: probeAssetRef, Kind: retrieval.KindDocument, EntityType: "asset",
+			Title: "Mg-MOF-74 CO2 uptake", Version: "2",
+			Candidate: retrieval.Candidate{
+				Ref: probeAssetRef, Kind: retrieval.KindDocument, EntityType: "asset",
+				Identity: "AST-0001", Version: "2", Title: "Mg-MOF-74 CO2 uptake",
+				Visibility: "public", ProjectID: probeProjectID, ObjectType: "material",
+			},
+		}},
+	}, nil
+}
+
+// probeSearchRecords answers the record write with an id: the search is
+// recorded before it is answered, and a failure there is a 503 rather than
+// the exit this probe is about.
+type probeSearchRecords struct{ searchhttp.RecordWriter }
+
+func (probeSearchRecords) Save(context.Context, persistence.SearchRecord) (string, error) {
+	return probeSearchID, nil
 }

@@ -15706,3 +15706,148 @@ CI 看不见：每个 CI job 都迁一棵全新库，文件按字典序全量应
 **顺带说明为什么不是"给 T0907 一个低位号"**：那只能救 T0907 自己。只要**任何**在 T0907 之后派工的同链任务
 （T0710 依赖 T0708、T1107 依赖 T0906，都可能先于 T0907 派工）拿到低位号，空洞就换个位置出现。
 真正的不变量是「**号必须按派工顺序单调**」，所以修的是台账里那两笔**违反该不变量的历史预留**，不是给某一笔挑号。
+
+## ⑨ T0906：rebaseline 对「同一锚点的相邻插入」结构上做不到，基线由 Supervisor 手工推进（2026-09-21）
+
+**事实**：T0906 的 PR 与 main 冲突，冲突面只有 `cmd/api/main.go` 的 import 块。两边**插在同一行**：
+merge-base `bb4239a` 的该处是 `rsgvalidation` → `version` → `worker`；T1106（b67226b）在
+`rsgvalidation` 后插 `internal/security`，T0906 在**同一个位置**插 `internal/search/{answer,ranking,retrieval}`。
+
+**为什么 `rddev rebaseline` 救不了**：它把任务改动算成一条**线性补丁**（`git apply`），
+而补丁的上下文取自 merge-base。该处任何 hunk 的前置上下文都含有相邻的
+`rsgvalidation`/`version`，而这两个在 main 上**已经不再相邻**（中间多了 `security`），
+所以 hunk 永远匹配不上。实测：`git apply --check` 报 `patch failed: cmd/api/main.go:117`；
+把 import 那个 hunk 删掉再试，下一个 hunk 又报 `main.go:1133` 失败——T1106 在 `main.go` 里
+一共动了 42 行，冲突不止一处。这不是「树旧了」，是**线性补丁的表达能力不够**：
+它无法把一个插入带过「另一端在相邻位置也插过东西」的区域。
+
+**处置（§1「merge conflict」授权）**：Supervisor 在 T0906 的 worktree 里做**三方合并**，
+冲突按并集解、派生工件按合并后的树重新生成，然后 `rddev task reject`（撤销那份已经过期的验收）
++ `rddev worker rework`。**代码修正仍然由工人做**，G1/G2 仍是新鲜、独立的——Supervisor
+只做了工具做不到的那一步机械合并，没有替工人写交付物。
+合并提交 `3e47950`（父 `2a9f184` + `a5844fa`）；合并后 `git diff origin/main HEAD` 正好是
+T0906 自己的贡献（42 文件 +9560 行），`go build ./...` 通过。
+
+**顺带发现的两件事**：
+
+1. **T0812 与 T0906 都被 T1106 新增的「字节出口登记表」（`tests/security/exits_test.go`）拦下**。
+   它是一条**全仓不变量**，会追溯性地让「已验收、尚未合并」的旧交付变红——因为
+   `MergePR` 的 `assertGateGreen` 读的是**验收当时**记下的 G2，而那份证据早于这条新测试。
+   这不是 bug（CI 会独立地把它拦下来），但意味着：**一笔任务被验收之后、合并之前，
+   main 上新增的全仓不变量可以让它的验收失效**。处置是 `task reject` 撤销验收
+   （CLI 帮助里正是这么写的：`accepted -> rejected` 撤销「required-for-merge gate 后来变红」的验收），
+   再返工。
+2. **`.rddev/tools/resolve_decisions.py` 的 `failure_excerpt()` 有两个 bug**，导致它的返工信
+   只有模板话、不含真正的失败行：`jobs` 被当成 dict 读（实际是 list），日志 glob 写成
+   `output/*/g2/*/*.log`（实际是 `output/<runid>-g2/<job>/<NN>.log`，多了一层）。
+   已修：改读 gate 记录里每个 step 的 `output_file` 绝对路径，并按是否真有失败的 job
+   决定信的抬头——**有真实失败时不再说「这不是缺陷」**。修完 T0812 的摘录能逐字打印出
+   `these write sites are not in the byte-exit registry: attestationhttp/publish.go:241`。
+
+**未做（等驱动重启窗口）**：把 `rebaseline.go` 的 `git apply` 换成三方合并（`--3way` 或直接
+`git merge`）。它能修掉这一类，但改 `internal/devorchestrator/**` 会让正在跑的驱动二进制变旧
+（见 `driver-stale-binary-after-orchestrator-commit`），而此刻链上六笔在飞。先记账，后改。
+
+### ⑨-b T1109 是同一类的**语义**冲突，`--3way` 也修不掉（2026-09-21）
+
+实测过 `git apply --3way`（在 main 的一棵干净树上，同一条排除派生工件的补丁）：
+`authhttp/envelope.go` 它**能**自动合掉（纯 apply 合不掉），但 `cmd/api/main.go` 仍然冲突，
+而且留下的是**语义**冲突而不是格式冲突——`srv.Handler` 一行，两边各写了一个变量：
+
+* T1109 写 `Handler: root`：它新建了一个 `root` mux，把 `/metrics` 单独挂上去，
+  理由是「a scrape must not be counted as product traffic」，产品树走 `root.Handle("/", ...)`；
+* T1106 写 `Handler: handler`：`handler` 是它新加的安全链
+  `security.Headers(observability.Middleware(security.RateLimit(mux)))`。
+
+**这一行不能靠工具选。** 谁对取决于两个任务各自想干什么，机器读不出来。
+
+**处置**：Supervisor 手工三方合并，取**两边都保留**的写法——`root` mux 留住（T1109 的结构），
+但 `root` 的兜底路由交给 **`handler`** 而不是 T1109 原来写的裸
+`observability.Middleware(logger)(mux)`：照搬那一行会把 T1106 的头部集与限流从**所有产品流量**上摘掉，
+那是安全回退，不能接受。`root` 的定义顺带挪到 `handler` 之后（Go 先声明后用）。
+
+**这一处值得回看**：`/metrics` 因此**不经过** T1106 的头部集与限流。两边各自明确写下的行为都保留了
+（T1109 要的是「抓取不计入产品流量」，不是「不受限流」），但 T1106 的原文是
+「RateLimit guards the WHOLE tree」，而 `/metrics` 是在它之后才出现的。**是并集还是应当把 `/metrics`
+也纳入限流，属于安全边界口径，建议由人复核**——我没有替它选，只保证没有**削弱**任何既有保护。
+
+**附带验证了机制是对的**：T1109 的 `task accept` 在手工合并之后被拒，理由是
+「the review verdict is about a DIFFERENT code state: it was written for code identity 7ec718f1…,
+the tree is now 1aedb74f…」——**评审结论不跨代码状态存活**，一次合并修复必须重评审。
+这不是障碍，这正是四层 Gate 该有的样子。
+
+## ⑩ T0812 落地后的合并序列：两笔要我手工合，两笔 rebaseline 自解（2026-09-21）
+
+**问题**：T0812 握 00120，T0610/T0706/T0708 三笔已 accepted、T0906 在 verification，四笔都卡在它后面。
+「等它落地就好了」不够——**落地之后会发生什么**没人验过。
+
+**做法**：不去读代码推断，建一个只读探针 worktree（`git worktree add --detach … main`），
+把 T0812 的改动应用上去（模拟它先落地），再把每一笔待合并任务的 patch 叠上去，
+按 `rebaseline.go` 的真实口径 `git apply --exclude=<derived>` 试。
+
+**结果——四笔分成两类**：
+
+| 任务 | 排除派生工件后可应用？ | 落地后怎么办 |
+|---|---|---|
+| T0610（00123） | ✅ | rebaseline 自动处理 |
+| T0708（00128） | ✅ | rebaseline 自动处理 |
+| T0906（00121） | ❌ `tests/integration/migration_test.go`、`tests/security/exits_test.go` | **要我手工合** |
+| T0706（00125） | ❌ `cmd/api/main.go`、`tests/security/exits_test.go` | **要我手工合** |
+
+冲突全是**同一锚点的相邻插入**：迁移计数断言、以及 `tests/security/exits_test.go` 那张
+byte-exit 登记表——T0812、T0906、T0706 三笔各自往里加自己那一条，锚点相同。
+（`cmd/api/main.go` 是 T1106 那次的老位置，T0706 又踩一次。）
+
+**顺带证伪了一个我担心的故障**：我原本怕 T0906 的 `postgres.sql`（生成于「main 还没有 00120」的时刻，
+不含 00120 的 schema）被**静默**整体套上去，把 T0812 的表结构抹掉——那是无声的数据损坏。
+**实测不会**：`prepareIntegrationTree` 用的是朴素 `git apply`，冲突时**响亮地失败**
+（`the task's change does not apply to current main — bring the branch up to date and re-run`），
+交给 rebaseline。**这条路径的失败方式是喊出来，不是咽下去。** 记下来是因为
+「派生工件被静默跳过」在本仓有过**真实前科**（[[compose-link-derived-artifacts-silent-gap]]），
+这一次实测是另一条路径、另一种结果。
+
+**操作含义**：T0812 一落地，我要**立刻**手工合 T0906 与 T0706，不能让它们卡在 apply 失败上。
+两处的形状都是并集（登记表按字典序加条目、import 并集），与 T0906/T1109 那两次同类。
+
+**没有做的事**：探针里 `--3way` 试过一次，报 `does not match index`——是我的探针没带 `--index`，
+状态不完整，**不足以判定 `--3way` 行不行**。不拿一次坏探针的结果当结论；真到那一步再按实际冲突选形状。
+探针已 `git worktree remove --force` 清掉。
+
+## ⑪ T0812 的 CI 红在一条**与本任务无关的编排器竞态**上——已定位并实证（2026-09-21）
+
+**现象**：T0812（attestation）的 `go` job 红，失败的是
+`internal/devorchestrator/driver_test.go:775 TestTheHeartbeatStaysFreshWhileATickIsBlocked`：
+`the heartbeat kept moving after the keepalive was stopped: "…46.046Z" then "…46.148Z"` —— 正好差一个
+20ms 心跳周期。T0812 的 diff **一行都没碰** `internal/devorchestrator/**`，所以这是既有问题。
+
+**根因（读代码得出，不是猜）**：`driver.go` 的 `startHeartbeat` 返回的 stop 是
+
+```go
+return func() { once.Do(func() { close(done) }) }
+```
+
+**它只关闭 `done`，从不等那个 goroutine 退出。** goroutine 若已经走过 `select`、正落在
+`case <-ticker.C:` 分支里，它会照旧 `ReadDriverStatus` + `WriteDriverStatus` —— 这一笔写在
+`stop()` 返回**之后**落地。测试紧接着读 `before`，100ms 后再读 `after`，于是看见心跳又动了。
+**契约（stop 之后不再写）实现里根本没有保证，是测试单方面假设的。**
+
+**实证（关键：先证明探针会红）**：本地 40 遍、100 遍在原版上全绿——**造不出 CI 那种负载**，
+所以「跑绿了」什么也证明不了。改用**加宽窗口**的探针：把 ticker 换成 1ms、跑 400 轮、
+断言同一件事。结果：
+
+| 版本 | 400 轮里 stop() 之后又写心跳的次数 |
+|---|---|
+| 原版（main） | **374**（93.5%，红） |
+| 修好的 | **0**（绿） |
+
+**修法**：goroutine 用 `defer close(stopped)` 自报退出，stop 改成 `close(done); <-stopped` ——
+等待而不是赌窗口小。生产调用点是 `defer stopHeartbeat()`（`driver_run.go:121`），
+阻塞到 goroutine 退出是安全的；`-count=100` 加 CPU 压力无回归。
+
+**为什么这条值得记**：这是一个**测试断言强于实现契约**的形状——它平时以低概率偶发
+（20ms ticker 下窗口很窄），于是被当成 flaky 放过去；但根因是代码少了一次 join。
+**修的不是测试，是代码。** 没有删断言、没有放宽窗口、没有 skip。
+
+**什么时候落地**：**不现在落**。此刻 T0906/T0610/T0706/T0708 四笔已 accepted 在等合并，
+往 main 上再叠一个提交会让它们的基线集体落后、触发又一轮 rebaseline（其中两笔还要我手工合）。
+等这一批合完再落这个修复。修好的版本已实测，随时可落。

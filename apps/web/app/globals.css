@@ -500,3 +500,165 @@
   line-height: 1.5;
   color: var(--fgColor-muted, #59636e);
 }
+
+/* --- The attestation page (T0812) ---------------------------------------
+   A statement a private project makes about a public version. Primer
+   vocabulary and one rule the page itself follows: the disclosure card is
+   the loudest thing on it, because "an attestation is not evidence" is the
+   fact a reader is least likely to assume and most likely to get wrong. */
+
+.att-main {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+.att-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.att-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.att-subtitle {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.att-badge {
+  flex: none;
+  padding: 2px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.att-badge-success {
+  color: var(--fgColor-success, #1a7f37);
+  border-color: var(--borderColor-success, #4ac26b);
+  background-color: var(--bgColor-success-muted, #dafbe1);
+}
+
+.att-badge-danger {
+  color: var(--fgColor-danger, #cf222e);
+  border-color: var(--borderColor-danger, #ff8182);
+  background-color: var(--bgColor-danger-muted, #ffebe9);
+}
+
+.att-badge-attention {
+  color: var(--fgColor-attention, #9a6700);
+  border-color: var(--borderColor-attention, #d4a72c);
+  background-color: var(--bgColor-attention-muted, #fff8c5);
+}
+
+.att-pid-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+
+.att-pid-label {
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.att-id,
+.att-pid {
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+}
+
+.att-card {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--bgColor-default, #ffffff);
+}
+
+.att-disclosure {
+  border-left: 4px solid var(--borderColor-attention, #d4a72c);
+}
+
+.att-card-title {
+  margin: 0 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.att-facts {
+  margin: 0;
+}
+
+.att-fact {
+  display: flex;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.att-fact-label {
+  flex: none;
+  width: 140px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.att-fact-value {
+  margin: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.att-attributed,
+.att-note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.att-target-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.att-statement {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.att-claims {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.att-withheld {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.att-link {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.att-link:hover {
+  text-decoration: underline;
+}

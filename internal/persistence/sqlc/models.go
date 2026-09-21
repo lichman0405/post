@@ -57,6 +57,22 @@ type AssetVersionParty struct {
 	RecordedAt     pgtype.Timestamptz `json:"recorded_at"`
 }
 
+type Attestation struct {
+	ID                      pgtype.UUID        `json:"id"`
+	Pid                     string             `json:"pid"`
+	TargetObjectVersionID   pgtype.UUID        `json:"target_object_version_id"`
+	TargetAssetVersionID    pgtype.UUID        `json:"target_asset_version_id"`
+	AttestingProjectID      pgtype.UUID        `json:"attesting_project_id"`
+	AttestingOrganizationID pgtype.UUID        `json:"attesting_organization_id"`
+	BasisStateID            pgtype.UUID        `json:"basis_state_id"`
+	InternalReviewID        pgtype.UUID        `json:"internal_review_id"`
+	ValidationType          string             `json:"validation_type"`
+	ValidationResult        string             `json:"validation_result"`
+	OrgVisibility           string             `json:"org_visibility"`
+	CreatedBy               pgtype.UUID        `json:"created_by"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+}
+
 type AuditLog struct {
 	ID             pgtype.UUID        `json:"id"`
 	ActorID        pgtype.UUID        `json:"actor_id"`
@@ -192,6 +208,8 @@ type Organization struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	// soft-delete marker: set when the organization is deactivated by its owner; NULL = active
 	DeactivatedAt pgtype.Timestamptz `json:"deactivated_at"`
+	// standing answer to "may this organization be named on an attestation it issues": anonymous (default) or named. The attestation records its own org_visibility as well; the public projection names the organization only when both say named (migration 00120, T0812)
+	AttestationAttribution string `json:"attestation_attribution"`
 }
 
 type OrganizationMembership struct {
@@ -388,6 +406,16 @@ type ResearchAsset struct {
 	OriginProjectID pgtype.UUID        `json:"origin_project_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	Pid             string             `json:"pid"`
+	// T0706. The asset's description — revisable asset metadata (docs/11 §4), NOT part of any scientific version. Revised in place by internal/application/assetmetadata, in the same transaction as the audit_log row recording the revision. Empty string means "no description recorded"; NULL is never stored.
+	Description string `json:"description"`
+	// T0706. The asset's keyword list — revisable asset metadata (docs/11 §4). An array because it is stored as a list; the count/length bounds live in internal/assets (MaxKeywords, MaxKeywordLen) and are enforced on the write path, not as a CHECK here.
+	Keywords []string `json:"keywords"`
+	// T0706. How to reach whoever is responsible for the asset — revisable asset metadata (docs/11 §4). Plain strings, not a structured party reference: docs/11 §6 already gives the responsible parties their own roles (Rights Holder, Custodian, Maintainer, Creator, Contributor) in their own tables, and a second structured copy here would be a second answer to "who is responsible".
+	Contact []string `json:"contact"`
+	// T0706. Where the asset is documented — revisable asset metadata (docs/11 §4). Plain strings: this build stores the reference the publisher declared and does not dereference it, so no URL shape is asserted here (a DOI, a repository path and an https link are all references).
+	Documentation []string `json:"documentation"`
+	// T0706. The blob that would be the asset's cover — RESERVED, and written by nothing in this build. docs/11 §4 lists cover among the revisable metadata, so the slot exists; the blob surface has no upload/download route and no signed-URL/TTL mechanism, so a cover set today is an image no reader could fetch. The revision command refuses a cover change by name (assetmetadata.ErrCoverNotSupported) rather than dropping it, and the channel that would fill this column belongs to the blob-transfer task. NULL is the state of every asset today.
+	CoverBlobID pgtype.UUID `json:"cover_blob_id"`
 }
 
 type ResearchAssetVersion struct {
@@ -485,6 +513,16 @@ type ScientificObjectVersion struct {
 	AbortedAt pgtype.Timestamptz `json:"aborted_at"`
 	// The Idempotency-Key the abort request carried (specs/api/openapi.yaml components.parameters.IdempotencyKey); NULL when none. UNIQUE per object among non-NULL keys, so a repeated request reads the row the first one wrote instead of appending a second (the migration-00089 pattern). Not carried onto main by a merge: it names a request, not history.
 	AbortRequestKey *string `json:"abort_request_key"`
+	// The reopen's reason code, in the shape 00100 gave the abort record. An OPEN caller-supplied token in V1 — no spec names reopen reason codes at all, and this platform does not invent a vocabulary; the column CHECKs the shape (^[a-z0-9_]{1,64}$) and records the value as given.
+	ReopenReasonCode *string `json:"reopen_reason_code"`
+	// The human explanation the reopen recorded — the part no machine can reconstruct. Non-blank when the record exists.
+	ReopenExplanation *string `json:"reopen_explanation"`
+	// The actor who decided the reopen (not the row's created_by: after a Research PR merge materializes the reopen onto main, created_by is the merging actor while this stays the reopening one).
+	ReopenedBy pgtype.UUID `json:"reopened_by"`
+	// Server-derived time of the reopen decision; never caller-supplied. Travels with the record when a merge materializes the reopen onto main.
+	ReopenedAt pgtype.Timestamptz `json:"reopened_at"`
+	// The Idempotency-Key the reopen request carried (specs/api/openapi.yaml components.parameters.IdempotencyKey); NULL when none. UNIQUE per object among non-NULL keys, so a repeated request reads the row the first one wrote instead of appending a second (the migration-00100 pattern). Not carried onto main by a merge: it names a request, not history.
+	ReopenRequestKey *string `json:"reopen_request_key"`
 }
 
 type StateCommit struct {
