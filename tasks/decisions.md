@@ -16312,3 +16312,70 @@ T1107（搜索侧信道 / 隐私负数收口）跑完自己的活后**如实报 
 1. **迁移号**：A/B/C/D/E/F/G/H 里只有 A 可能与 `specs/api/**` 有关、**没有一笔带迁移**，
    所以不会扰动号序。真正要盯的还是 T0908=134 / T1108=135 这两个已预占的号。
 2. 立完账要**同笔**跑 `python3 scripts/spec_version.py --write` 并提交，否则 main 立刻变红。
+
+## ⑳ 今天三个反复出现的形状：squash 合并的余波、手工合成、以及一条排序约束（2026-09-21）
+
+### 1. PR 冲突不是「分支过时」，是 squash 合并的余波 —— 这条要记住
+
+**症状**：`gh pr view` 报 `CONFLICTING`/`DIRTY`，而 PR 里**一个 check 都没有**。
+
+**根因**（这次是顺着 `gh pr merge` 的调用点读出来的，不是猜的）：
+`rddev pr merge` 实际执行的是 `gh pr merge <branch> --squash --delete-branch`。
+于是主线拿到的是那笔任务的**内容**，**没有它的提交**。任何**通过一次 merge 带着那笔提交**的分支，
+相对共同祖先就与主线**两边都动过** `specs/SPEC_VERSION.json` 与 `specs/database/postgres.sql`，
+GitHub 判冲突。而 `git_control.go` 的 `assertPRMergeable` 自己写着：**冲突的 PR 不产生任何 check run** ——
+所以「等 CI 变绿再合并」在这种情况下**永远等不到**，等的是一个不会来的事件。
+
+**修法**：不许按文本合并这两个文件。用 `.rddev/runtime/repair-derived-conflicts.sh TASK`：
+把 main 并进分支 → 只允许派生文件冲突（出现别的冲突就 exit 2 停下）→
+`gen_schema_snapshot.py` + `spec_version.py --write` + `gen_sqlc.sh` **按生成重算** →
+比对「合并前后相对 main 的代码文件集必须逐个相同」（不同就 exit 3）→ 生成器幂等性检查（不幂等就 exit 4）。
+先跑不带 `--commit`，看过自检输出再 `--commit`。
+
+**这台仪器能不能说「不」**：在 T0809（已合并的任务）上试过，它按预期 `exit 2` 拒绝——
+那棵树上真有非派生文件的冲突。**先证明它会拒绝，再用它的「通过」。**
+
+### 2. T1109 的基线前移：工具点名交给人，我手合了，但**没有**替工人验收
+
+`rddev rebaseline T1109` **拒绝了**，原话：
+「the task's change does not apply to main as a patch, and a three-way merge of it conflicts with
+main's own change to the same lines of `cmd/api/main.go` — **composing them needs a human**」。
+
+形状：T0906 在 `mux.Handle("/api/v1/", …)` **之前**插了一整块 search 接线，而 T1109 改的正是**那一行本身**。
+两边改的是不相干的东西，`git apply` 的**文本上下文**却对不上——这和 §⑮ 记的 T0302/T0303 是同一个形状。
+
+**我按 `CLAUDE.md §1`「merge conflict 可直接处理」手工合成**（在 `.rddev/worktrees/T1109`：
+WIP 提交做安全网 → `git merge main` → 只有一个文件真冲突 → 手工解 → 提交合并 →
+`git reset main` 把分支指回主线、保留未提交 diff 的形状）。
+
+**合成之后必须核的两件事，两件都核了**：
+- **交付面文件集**：合并前后**逐个相同**（32 个）；
+- **逐文件内容**：只有 `cmd/api/main.go` 变了——而 main 自基线以来碰过、且落在本笔交付面里的文件，
+  **也恰好只有它**。其余 31 个逐字节原样。这是「合成是最小的」的判据，不是感觉。
+
+**但我没有让它就此过去。** 合出来的树**只被编译器看过**（`go build ./...` 绿），
+而本笔的 blocking 验收测试是 `observability smoke`，**没有任何人在新树上跑过它**。
+所以我把树交回原工人（`task reject --reason-file` + `worker rework`），
+信里写明「本轮是基线前移，不是返工」、工具为什么拒绝、我合了哪一处、以及**要它专门证
+`/api/v1/search` 与 `/metrics` 在合成后都还在**。新基线 `d21ad3c` 由 spawn 自己记进 gate 输入
+（`worker_spawn.go:175`：baseline 取自**任务分支的 ref**，我把那个 ref 指回主线了）。
+
+**判据**：Supervisor 有权解冲突 ≠ Supervisor 有权替工人宣布它验过。
+
+### 3. 一条排序约束：改 `specs/**` 要等迁移链落地
+
+`scripts/spec_version.py` 的输入是 `tasks/tasks.json` **加上 `specs/` 下的每一个文件**。
+所以 T1107 的规格修补（往 `specs/ui/routes.yaml` 与 `docs/05 §3` 补 `milestones`）
+**会把 `specs/SPEC_VERSION.json` 再推一次**，而 T0706/T0708 的分支里正带着**上一代**的它——
+一动就又把这两条分支搞脏，T0706 正在跑的评审也会因为分支 tip 移动而失效。
+
+**所以顺序是：T0706 落主线 → T0708 修复并落主线 → 再动 `specs/**` → 再 rebaseline T1107。**
+§⑱ 那句「等没有工人在跑再动 `specs/**`」要按这条细化：不是「没有工人在跑」，是
+**「没有分支还带着上一代 SPEC_VERSION.json 在飞」**。
+
+### 4. PR #325（`codex/research-demo-ui`）先不动，记在这里免得丢
+
+`OPEN` / `MERGEABLE` / `CLEAN`，8 个文件全在 `apps/web`，CI 绿。
+**不合并**，理由是它**不是任务 DAG 里的任何一笔**：没有任务书、没有 Worker、没有 G2/G3 记录，
+因此 `CLAUDE.md §5.1` 里「自主合并」的那几个前提**根本无法被评估**（第 1 条就要求 Worker 已交付且我完成独立 G2）。
+它不是阻塞项，留着不碍事；等它有了任务书或 owner 明确要，再走正规路。
