@@ -19,7 +19,7 @@ SHELL := /bin/bash
 GO_UNIT_PKGS := $(shell go list ./... | grep -v '/tests/integration')
 STATICCHECK_VER := 2026.2.1
 
-.PHONY: help bootstrap check build rddev test test-integration dev smoke sync-schemas \
+.PHONY: help bootstrap check build rddev test test-integration bench dev smoke sync-schemas \
 	check-schema-drift check-schema-snapshot check-openapi check-spec-version fmt-check staticcheck lint-python type-python \
 	progress ci migrate search-rebuild search-embed infra-up infra-init infra infra-down infra-ps infra-logs
 
@@ -193,6 +193,54 @@ test-integration: ## integration suite against real PostgreSQL; loud failure (wi
 		exit $$rc; \
 	else \
 		echo ">> test-integration: FAILED — integration tests require a real PostgreSQL and none is reachable (see pg-ready above)." >&2; \
+		exit 1; \
+	fi
+
+bench: ## performance baseline + index gate (T1108); needs real PostgreSQL, separate from check/test
+# The third infrastructure-requiring target, after `migrate` and
+# `test-integration`, and kept out of BOTH of them: `make test` runs go test
+# over GO_UNIT_PKGS with no database, and the performance harness is a `go run`
+# with its own database, so folding it into either would either break the
+# bare-host contract (Makefile:7-10) or put a multi-minute corpus load on the
+# integration suite's critical path.
+#
+# It provisions, seeds and drops its own database (default post_bench, override
+# with DB=) and never writes to `post`, so it can run beside the integration
+# suite and beside a developer's dev stack. The admin URL is the same variable
+# the rest of this file uses, with the same default port and a loud failure
+# when nothing is listening — the reason is printed, never a silent pass.
+#
+# `SCALE=ci` (default) is the shape check CI runs; `SCALE=spec` is docs/27:20's
+# capacity baseline (10k objects / 100k relations / 10k state transitions / 100k
+# search documents) and takes minutes — the run prints its own per-stage wall
+# clock (provision / corpus load / ANALYZE / measure / total), which is the
+# number to read before pointing CI at the spec tier. Only the spec tier produces
+# the SLO comparison; the report says so itself, in the document rather than in
+# this comment. Extra harness flags go in FLAGS (e.g. FLAGS=--drop).
+#
+# Two things about the invocation below are deliberate:
+#
+#   * the URL is NOT echoed here. This target used to print POSTGRES_TEST_ADMIN_URL
+#     raw, password included, while every output path inside the harness redacts
+#     it (db.go's redactURL) — one credential in a terminal log, from the one
+#     place that did not use the redactor. The harness now prints its own
+#     "benchmark: all --scale ... against postgres://...:xxxxx@..." banner as its
+#     first line, so there is exactly ONE renderer of a URL in the flow.
+#   * `--json` is passed, so stdout is the machine-readable report (the human
+#     table goes to stderr either way). Without it the harness writes no stdout
+#     at all, and "the report is machine-readable" would be a claim about a flag
+#     nobody sets. THIS TARGET'S OWN OUTPUT GOES TO STDERR TOO — the pg-ready
+#     line and the `>>` line above are redirected — so `make bench > r.json`
+#     leaves a document a caller can parse and nothing else. (`2>&1` still shows
+#     everything, which is what a human wants.)
+bench:
+	@PG_BENCH_URL="$${POSTGRES_TEST_ADMIN_URL:-postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post}"; \
+	if python3 scripts/pg-ready.py "$$PG_BENCH_URL" >&2; then \
+		echo ">> bench: scale=$${SCALE:-ci} (database $${DB:-post_bench}); the harness prints the redacted server URL" >&2; \
+		POSTGRES_TEST_ADMIN_URL="$$PG_BENCH_URL" \
+			go run ./tests/benchmark all --json --scale "$${SCALE:-ci}" --db "$${DB:-post_bench}" $${FLAGS:-}; \
+	else \
+		echo ">> bench: FAILED — the performance gate requires a real PostgreSQL and none is reachable (see pg-ready above)." >&2; \
 		exit 1; \
 	fi
 
