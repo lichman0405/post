@@ -1,7 +1,9 @@
 package devorchestrator
 
 import (
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -972,5 +974,77 @@ func TestWorktreeDiffReproducesTheWorktreeByteForByte(t *testing.T) {
 		if string(got) != want {
 			t.Errorf("%s: applying the diff produced %q, the worktree holds %q — the tree the gate verifies would not be the tree the task produced", name, got, want)
 		}
+	}
+}
+
+// The applied patch carries a binary file's BYTES into the tree G2 grades and
+// that the merge lands. The review document is the other reader — and it used
+// to name the file and show none of its content, so a Reviewer could only ever
+// approve a filename. annotateBinaryLines closes that: the document now carries
+// the size and the SHA-256 of the bytes that would be written.
+//
+// Both halves are asserted because they come from different code: the tracked
+// half from `git diff`, the untracked half from the loop in taskWorktreeDiff.
+// A guard on one is not a guard on the other.
+func TestTheReviewDiffCarriesTheBytesOfBinaryFiles(t *testing.T) {
+	dir := t.TempDir()
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init", "-q")
+	// A real PNG header, so git classifies these as binary the way it will for
+	// the baselines a visual-regression task adds.
+	trackedBefore := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01}
+	if err := os.WriteFile(filepath.Join(dir, "tracked.png"), trackedBefore, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "-A")
+	runGit("commit", "-q", "-m", "baseline")
+	baseline := runGit("rev-parse", "HEAD")
+
+	trackedAfter := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0xfe}
+	untracked := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 'a', 'b', 'c'}
+	if err := os.WriteFile(filepath.Join(dir, "tracked.png"), trackedAfter, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "new.png"), untracked, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := taskWorktreeDiff(&WorkerRecord{Worktree: dir, BaselineSHA: baseline})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		path string
+		data []byte
+	}{
+		{"tracked.png", trackedAfter},
+		{"new.png", untracked},
+	} {
+		want := fmt.Sprintf("[binary] %s size=%d sha256=%x", tc.path, len(tc.data), sha256.Sum256(tc.data))
+		if !strings.Contains(diff, want) {
+			t.Errorf("the review diff does not name the bytes of %s — a Reviewer can only approve a filename.\nwant line: %s\ngot:\n%s", tc.path, want, diff)
+		}
+	}
+
+	// The instrument must be able to say NO. If the annotation hashed the
+	// BASELINE blob instead of the worktree's copy, the assertions above would
+	// still pass whenever a file was newly added (baseline absent, worktree
+	// read) — so pin the modified file to the bytes that would actually be
+	// written, and confirm the stale ones are not what was recorded.
+	stale := fmt.Sprintf("[binary] tracked.png size=%d sha256=%x", len(trackedBefore), sha256.Sum256(trackedBefore))
+	if strings.Contains(diff, stale) {
+		t.Errorf("the diff carries the BASELINE bytes for tracked.png, not the ones this change writes:\n%s", diff)
 	}
 }

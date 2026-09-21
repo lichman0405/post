@@ -1,6 +1,7 @@
 package devorchestrator
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -1537,6 +1538,47 @@ func TestRebaselineATaskCreatedFileWithAnUnusualExecMode(t *testing.T) {
 	}
 	if got := readFileOrFail(t, p); got != "#!/bin/sh\necho created\n" {
 		t.Errorf("docs/created.sh came back as %q", got)
+	}
+}
+
+// A task that adds a BINARY file — the shape that could be neither rebaselined
+// nor graded (T1101, 2026-09-21: 14 checked-in visual baselines, and the refusal
+// named `git apply`'s binary-patch format rather than the missing content).
+//
+// The advance applies the task's change as a patch, and that patch used to be
+// built by the same function that renders the REVIEW diff. A reviewer cannot read
+// a PNG, so that function summarises a binary file as "Binary files ... differ" —
+// right for a reader, and NO DATA for `git apply`, which fails with "cannot apply
+// binary patch to 'x' without full index line".
+//
+// The bytes are the assertion, deliberately: a patch that carried the path but
+// none of the content would pass any test that only counted paths, and that is
+// exactly the defect. The same string feeds G2's integration tree, so this
+// covers both callers of taskWorktreePatch.
+func TestRebaselineCarriesABinaryFileTheTaskAdded(t *testing.T) {
+	f := newRebaselineFixture(t, "T9019")
+	f.mainMovesElsewhere() // the advance is meant to succeed, so nothing else may refuse it
+
+	// A real PNG header plus a NUL: the NUL is what makes git call it binary, and
+	// the header keeps the fixture honest about the thing it stands for.
+	want := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01")
+	p := filepath.Join(f.worktree, "tests", "web-smoke", "baseline", "page.png")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, want, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := RebaselineTask(f.root, "T9019", "", ""); err != nil {
+		t.Fatalf("a task that adds a binary file was refused: %v", err)
+	}
+	got, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("the binary file is gone after the advance: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("the binary file came back as %x, want %x", got, want)
 	}
 }
 

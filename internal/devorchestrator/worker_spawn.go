@@ -889,6 +889,26 @@ func gitOutputRaw(dir string, args ...string) (string, error) {
 	return string(out), nil
 }
 
+// gitOutputRawEnv is gitOutputRaw with an explicit environment, for the one
+// thing that cannot be said on the command line: which INDEX git reads.
+//
+// `GIT_INDEX_FILE` is the only way to ask git to describe a worktree through an
+// index other than the repository's own, and that is what lets the patch builder
+// read the change without staging anything into the tree it is reading.
+func gitOutputRawEnv(dir string, env []string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = env
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), ee, strings.TrimSpace(string(ee.Stderr)))
+		}
+		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return string(out), nil
+}
+
 // gitOutput2 runs bin and returns trimmed stdout (used for claude --version).
 func gitOutput2(bin string, args ...string) (string, error) {
 	cmd := exec.Command(bin, args...)

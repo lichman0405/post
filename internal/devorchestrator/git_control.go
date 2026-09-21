@@ -2,6 +2,7 @@ package devorchestrator
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -750,7 +751,187 @@ func taskWorktreeDiff(rec *WorkerRecord) (string, error) {
 			}
 		}
 	}
-	return b.String(), nil
+	// Last, over the WHOLE document: both the tracked half (`git diff` above)
+	// and the untracked half (the loop) summarise binary content as one opaque
+	// "Binary files … differ" line.
+	return annotateBinaryLines(b.String(), rec.Worktree), nil
+}
+
+// annotateBinaryLines appends a size and SHA-256 after every "Binary files …
+// differ" summary, so a Reviewer can approve CONCRETE BYTES rather than a
+// filename.
+//
+// Why: taskWorktreePatch carries binary content into the tree G2 grades and
+// that the merge then lands, but this document — the one a Reviewer reads —
+// used to show only the filename. Splitting the two readers is deliberate
+// (see taskWorktreePatch); the part that was NOT deliberate is that the review
+// input stopped being able to say which bytes were approved. The two documents
+// may differ in ENCODING, but they must not differ in what they disclose.
+//
+// An added line makes this string not-a-patch. That is by construction, and it
+// is why every caller that APPLIES uses taskWorktreePatch: this is a reading
+// copy. Annotating is therefore safe to do unconditionally, and doing it here
+// rather than at each site means a future third caller inherits it.
+//
+// Lstat, never Stat, for the same reason the symlink branch above uses it: the
+// paths come from the Worker's own tree, and following one would turn the
+// review input into an arbitrary-file-read primitive — a symlink to a
+// credential file would be hashed and written into a durable artifact.
+//
+// The hash makes those bytes AUDITABLE, not enforced. Nothing here refuses an
+// apply; it records what was reviewed so "what was graded" and "what was
+// merged" can be compared afterwards. Closing that gap for real needs a
+// Supervisor-approved allowlist the Worker cannot write, which is a task-package
+// shape change and is written up in decisions §㉗ rather than pretended here.
+func annotateBinaryLines(doc, worktree string) string {
+	if !strings.Contains(doc, "Binary files ") {
+		return doc
+	}
+	var b strings.Builder
+	b.Grow(len(doc) + 256)
+	// SplitAfter, so the loop writes back exactly the bytes it read and the
+	// document is otherwise untouched.
+	for _, line := range strings.SplitAfter(doc, "\n") {
+		b.WriteString(line)
+		path, deleted, ok := binarySummaryPath(line)
+		if !ok {
+			continue
+		}
+		if deleted {
+			// Nothing travels: the change removes the file. Say that, so the
+			// absence of a hash is not read as a failure to produce one.
+			fmt.Fprintf(&b, "[binary] %s deleted by this change\n", path)
+			continue
+		}
+		abs := filepath.Join(worktree, path)
+		st, err := os.Lstat(abs)
+		switch {
+		case err != nil:
+			fmt.Fprintf(&b, "[binary] %s not present in the worktree\n", path)
+		case !st.Mode().IsRegular():
+			fmt.Fprintf(&b, "[binary] %s not a regular file in the worktree (mode %s)\n", path, st.Mode())
+		default:
+			data, err := os.ReadFile(abs)
+			if err != nil {
+				fmt.Fprintf(&b, "[binary] %s unreadable: %v\n", path, err)
+				continue
+			}
+			fmt.Fprintf(&b, "[binary] %s size=%d sha256=%x\n", path, len(data), sha256.Sum256(data))
+		}
+	}
+	return b.String()
+}
+
+// binarySummaryPath reads a path back out of one "Binary files a/X and b/Y
+// differ" line, which is the shape git uses and the shape the untracked loop
+// above emits. The b/ side is preferred because that is the side that would be
+// written.
+//
+// LastIndex, not Split: a Worker's filename may itself contain " and ", and the
+// separator is the last one — the b/ side follows it. When even that cannot be
+// resolved the caller is told so by ok=false, rather than being handed a path
+// that might name a different file.
+func binarySummaryPath(line string) (path string, deleted bool, ok bool) {
+	const prefix = "Binary files "
+	rest := strings.TrimSuffix(strings.TrimSuffix(line, "\n"), " differ")
+	if !strings.HasPrefix(rest, prefix) {
+		return "", false, false
+	}
+	middle := strings.TrimPrefix(rest, prefix)
+	i := strings.LastIndex(middle, " and ")
+	if i < 0 {
+		return "", false, false
+	}
+	aSide, bSide := middle[:i], middle[i+len(" and "):]
+	if bSide == "/dev/null" {
+		// A deletion: name the file that went away. Strip the a/ prefix; a
+		// path with no prefix is left as-is.
+		return strings.TrimPrefix(aSide, "a/"), true, aSide != "/dev/null"
+	}
+	if !strings.HasPrefix(bSide, "b/") {
+		return "", false, false
+	}
+	return strings.TrimPrefix(bSide, "b/"), false, true
+}
+
+// taskWorktreePatch returns the SAME change as taskWorktreeDiff, encoded so that
+// `git apply` can apply it — binary content included.
+//
+// The two cannot be one function, because they answer to different readers.
+// taskWorktreeDiff is what a REVIEWER reads, and there a binary file is
+// correctly summarised as "Binary files ... differ": no one reviews a PNG by
+// reading it, and dumping a base85 blob into the review input would bury the
+// hunks that do need reading. But that summary carries NO DATA, so a patch built
+// from it applies everything except the binaries, and git reports the gap as
+// "cannot apply binary patch to 'x' without full index line" — which reads like
+// a malformed patch and is really a patch with the content left out.
+//
+// The consequence was not cosmetic. Both places that rebuild the task's change on
+// top of main — RebaselineTask and the G2 integration tree — apply this string,
+// so a task whose change contains a binary file (T1101's 14 checked-in visual
+// baselines, 2026-09-21) could be neither rebaselined NOR graded, and the failure
+// named a git format detail rather than the missing content.
+//
+// So the change is handed to git to encode, through a TEMPORARY index seeded from
+// the base commit: `git add` here is how git is asked to describe the worktree,
+// not a staging step, and the Worker's own index is never touched. That also lets
+// git carry what it carries natively — file modes, symlinks, and binary blobs —
+// instead of this package hand-writing a header for each, which is the other half
+// of why the hand-built form could not represent them.
+func taskWorktreePatch(rec *WorkerRecord) (string, error) {
+	base := taskDiffBase(rec)
+	// read-tree creates the index itself; a file that exists but is empty is not
+	// a valid index and it refuses on one.
+	f, err := os.CreateTemp("", "post-task-patch-*.idx")
+	if err != nil {
+		return "", fmt.Errorf("creating a temporary index for the task's patch: %w", err)
+	}
+	name := f.Name()
+	f.Close()
+	if err := os.Remove(name); err != nil {
+		return "", fmt.Errorf("clearing the temporary index path for the task's patch: %w", err)
+	}
+	defer os.Remove(name)
+
+	env := append(os.Environ(), "GIT_INDEX_FILE="+name)
+	if _, err := gitOutputRawEnv(rec.Worktree, env, "read-tree", base); err != nil {
+		return "", fmt.Errorf("seeding the temporary index from %s: %w", base, err)
+	}
+	// The entries git will not add and the review diff never carried either: a
+	// directory has no content, and a nested repository with no commit checked out
+	// makes `git add` fail outright — "'vendor/nested/' does not have a commit
+	// checked out", exit 128, which would refuse the advance for a worktree that
+	// is perfectly fine. Excluding them by pathspec reproduces the review diff's
+	// rule exactly (regular files and symlinks travel; everything else does not),
+	// and it is the SNAPSHOT that carries a nested repository across an advance,
+	// not this patch.
+	untracked, err := gitPaths(rec.Worktree, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return "", fmt.Errorf("listing untracked files for the task's patch: %w", err)
+	}
+	addArgs := []string{"add", "-A", "--"}
+	for _, p := range untracked {
+		// Lstat, not Stat: a symlink is a regular-looking entry only if you follow
+		// it, and following one here would read a file the Worker pointed at.
+		st, err := os.Lstat(filepath.Join(rec.Worktree, p))
+		if err != nil {
+			return "", fmt.Errorf("stat-ing untracked %s for the task's patch: %w", p, err)
+		}
+		if st.Mode().IsRegular() || st.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		// literal, so a path holding a glob metacharacter is named rather than
+		// matched: these are the Worker's filenames, not patterns.
+		addArgs = append(addArgs, ":(exclude,literal)"+p)
+	}
+	if _, err := gitOutputRawEnv(rec.Worktree, env, addArgs...); err != nil {
+		return "", fmt.Errorf("describing the worktree for the task's patch: %w", err)
+	}
+	out, err := gitOutputRawEnv(rec.Worktree, env, "diff", "--binary", "--cached", base, "--")
+	if err != nil {
+		return "", fmt.Errorf("diffing the worktree against the baseline: %w", err)
+	}
+	return out, nil
 }
 
 // taskDiffBase is the commit a task's contribution is measured from: where its

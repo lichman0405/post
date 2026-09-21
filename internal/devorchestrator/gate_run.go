@@ -729,7 +729,11 @@ func prepareIntegrationTree(repoRoot, taskID string) (string, func(), error) {
 		_, _ = gitOutput(repoRoot, "worktree", "remove", "--force", dir)
 		_ = os.RemoveAll(dir)
 	}
-	change, err := taskWorktreeDiff(rec)
+	// taskWorktreePatch, not taskWorktreeDiff: this string is APPLIED to build the
+	// tree G2 grades, and the review diff cannot carry binary content. Without it a
+	// task that adds a binary file — a checked-in screenshot — has a graded tree
+	// missing that file, or no tree at all.
+	change, err := taskWorktreePatch(rec)
 	if err != nil {
 		cleanup()
 		return "", noop, fmt.Errorf("reading the task's change for the integration tree: %w", err)

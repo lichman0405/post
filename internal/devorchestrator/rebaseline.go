@@ -260,7 +260,9 @@ func RebaselineTask(repoRoot, taskID, dagPath, statePath string) (*RebaselineRes
 	// untracked file, which `git diff` alone omits. This is the same document
 	// the review is handed, and it is the whole insurance policy for what
 	// follows.
-	change, err := taskWorktreeDiff(rec)
+	// taskWorktreePatch, not taskWorktreeDiff: this string is APPLIED, and the
+	// review diff cannot carry binary content (see its doc comment).
+	change, err := taskWorktreePatch(rec)
 	if err != nil {
 		return nil, err
 	}
