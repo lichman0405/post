@@ -1,40 +1,23 @@
 "use client";
 
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { Spinner } from "@primer/react";
 import { useProjectShell } from "./shell-context";
+import "./demo.css";
 
-/**
- * Overview tab (T0108): the research summary's first landing — the
- * project's purpose and its governance/state facts straight from the
- * shell's single fetch. Research questions, findings and branch state
- * replace this seed as the RSG milestones land (docs/06 §1).
- */
-export default function ProjectOverviewPage() {
-  const shell = useProjectShell();
-  if (shell === null) {
-    // The shell only mounts tab content in its ready state; null means a
-    // wiring error, not a user-visible page.
-    return null;
-  }
-  const { project, role } = shell;
-  return (
-    <div className="project-overview" data-project-tab-content="overview">
-      {project.purpose !== "" ? (
-        <p className="project-overview-purpose">{project.purpose}</p>
-      ) : null}
-      <dl>
-        <dt>Activity status</dt>
-        <dd>{project.activity_status}</dd>
-        <dt>Visibility</dt>
-        <dd>{project.visibility}</dd>
-        <dt>Main branch</dt>
-        <dd>{project.main_frozen ? "frozen" : "unfrozen"}</dd>
-        <dt>Repository</dt>
-        <dd>{project.provision_status}</dd>
-        <dt>Your role</dt>
-        <dd>{role ?? "not a member"}</dd>
-        <dt>Created</dt>
-        <dd>{project.created_at.slice(0, 10)}</dd>
-      </dl>
-    </div>
-  );
+type Overview = { counts: Record<"questions"|"findings"|"hypotheses"|"claims"|"other_objects",number>; key_questions:Array<{object_id:string;statement:string;question_state:string}>; key_findings:Array<{object_id:string;statement:string;assessment:string}>; branches:{active:Array<{id:string;name:string;purpose:string}>}; current_main:{head_state_id:string;latest_commit:{message:string;actor:string}}|null };
+
+export default function ProjectOverviewPage(){
+  const shell=useProjectShell(); const [overview,setOverview]=useState<Overview|null>(null);
+  const url=useMemo(()=>shell?`${shell.apiBaseUrl}/api/v1/projects/${shell.project.id}/overview`:"",[shell]);
+  useEffect(()=>{if(!url)return;const c=new AbortController();fetch(url,{credentials:"include",signal:c.signal}).then(r=>r.json()).then(setOverview).catch(()=>null);return()=>c.abort()},[url]);
+  if(!shell)return null;if(!overview)return <div className="demo-loading"><Spinner aria-label="Loading project overview"/></div>;
+  const {project}=shell,total=Object.values(overview.counts).reduce((s,n)=>s+n,0);
+  const spaces=[["Research","Question → hypothesis → evidence → finding","research","ready"],["Issues","Open scientific and integrity work","issues","4 open"],["Pull requests","Research-state proposals and checks","pulls","in review"],["Milestones","Candidate and validation timeline","milestones","4 events"],["Assets","Publishable datasets and protocols","assets","8 candidates"],["Files","Methods, data dictionary and analysis notes","files","main"],["Releases","Immutable, reviewed snapshots","releases","gate pending"]];
+  return <div className="demo-overview" data-project-tab-content="overview"><section className="demo-lead"><div><span className="demo-kicker">MOF humidity validation · 298 K</span><h2>Can MOF-X separate ethylene under realistic humidity?</h2><p>{project.purpose}</p></div><div className="demo-decision"><span>Current decision</span><strong>Proceed below 40% RH</strong><small>Upstream drying or reactivation required above the threshold.</small></div></section>
+    <section className="demo-metrics">{[[total,"Research objects"],[overview.counts.claims,"Versioned claims"],[overview.counts.findings,"Synthesized findings"],[overview.branches.active.length,"Active branches"],[8,"Evidence links"]].map(([n,l])=><div key={l}><strong>{n}</strong><span>{l}</span></div>)}</section>
+    <div className="demo-two-col"><section className="demo-panel"><header><span className="demo-kicker">Primary question</span><Link href={`/projects/${project.id}/research`}>Open research map →</Link></header><h3>{overview.key_questions[0]?.statement}</h3><div className="demo-status-row"><span className="demo-badge">partially answered</span><span>2 competing hypotheses</span></div><h4>Evidence-backed findings</h4>{overview.key_findings.map(f=><div className="demo-list-row" key={f.object_id}><span className={`demo-dot ${f.assessment}`}/><p>{f.statement}</p></div>)}</section><section className="demo-panel"><header><span className="demo-kicker">Work in progress</span><span>{overview.branches.active.length} branches</span></header><div className="demo-branch-list">{overview.branches.active.map(b=><div key={b.id}><strong>⑂ {b.name}</strong><p>{b.purpose}</p></div>)}</div></section></div>
+    <section className="demo-panel"><header><span className="demo-kicker">Project workspaces</span><span>Live demo surface</span></header><div className="demo-workspaces">{spaces.map(([name,desc,path,status])=><Link key={name} className="demo-workspace" href={`/projects/${project.id}/${path}`}><strong>{name}</strong><p>{desc}</p><span>{status} →</span></Link>)}</div></section>
+    {overview.current_main?<p className="demo-head-note">Accepted main <code>{overview.current_main.head_state_id.slice(0,8)}</code> · {overview.current_main.latest_commit.message} by {overview.current_main.latest_commit.actor}</p>:null}</div>
 }

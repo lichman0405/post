@@ -1,12 +1,8 @@
-import { TabPlaceholder } from "../tab-placeholder";
-
-/** Issues tab: workflow items land with the workflow milestones; the
- *  shell route is navigable today. */
-export default function IssuesPage() {
-  return (
-    <TabPlaceholder title="Issues" milestone="the workflow milestones">
-      Research workflow items — reviews, integrity checks, open
-      contributions — organize here.
-    </TabPlaceholder>
-  );
-}
+"use client";
+import "../demo.css";
+const issues=[
+{id:12,title:"Complete 20-cycle durability test at 40% RH",body:"Confirm that irreversible selectivity loss stays below 10% across duplicate samples.",labels:["experiment","high priority"],owner:"demo",state:"In progress"},
+{id:11,title:"Resolve contested framework-degradation claim",body:"Pair sealed-cell PXRD with water-desorption IR to detect local defects that bulk PXRD may miss.",labels:["scientific review","contested claim"],owner:"materials-team",state:"Evidence needed"},
+{id:10,title:"Validate activation window: 150 / 180 / 210 °C",body:"Lock vacuum time and pellet size; compare residual solvent and dry breakthrough performance.",labels:["protocol","reproducibility"],owner:"demo",state:"Planned"},
+{id:9,title:"Prepare FAIR metadata for humidity datasets",body:"Add column units, calibration identifiers, uncertainty fields and reuse rights before publication.",labels:["data","integrity"],owner:"data-steward",state:"Open"}];
+export default function IssuesPage(){return <div className="demo-page" data-project-tab-content="issues"><section className="demo-page-head"><div><span className="demo-kicker">Research workflow</span><h2>Issues</h2><p>Scientific work that must be resolved before the humidity-validation evidence package can be released.</p></div><span className="demo-badge amber">4 open</span></section><div className="demo-issue-list">{issues.map(i=><article className="demo-issue" key={i.id}><div className="demo-issue-id">#{i.id}</div><div><h3>{i.title}</h3><p>{i.body}</p><div className="demo-labels">{i.labels.map(l=><span key={l}>{l}</span>)}</div></div><div className="demo-issue-side"><strong>{i.state}</strong><span>{i.owner}</span></div></article>)}</div></div>}
