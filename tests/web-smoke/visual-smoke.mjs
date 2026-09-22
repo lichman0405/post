@@ -5,21 +5,50 @@
  * destination renders, and the responsive baseline collapses the header at
  * narrow widths instead of overflowing.
  *
- * Usage: node visual-smoke.mjs <base-url> <apps-web-dir>
+ * Usage: node visual-smoke.mjs <base-url>
+ *        WEB_SMOKE_WEB_DIR overrides the web app directory the CSS policy reads.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright";
 
 const BASE = process.argv[2] ?? "http://127.0.0.1:31107";
-const APPS_WEB = process.argv[3] ?? path.resolve(import.meta.dirname, "../../apps/web");
+// An env override rather than a second positional argument: run.sh drives
+// every check in this directory with the same single argument (the base
+// URL), and the default resolves from this file's own location to the same
+// path the runner used to pass.
+const APPS_WEB = process.env.WEB_SMOKE_WEB_DIR ?? path.resolve(import.meta.dirname, "../../apps/web");
 
 let fails = 0;
-const ok = (label) => console.log(`ok   ${label}`);
 const fail = (label, detail) => {
   fails += 1;
   console.log(`FAIL ${label}${detail ? `: ${detail}` : ""}`);
 };
+/* ok() takes a LABEL AND NOTHING ELSE. That is not a style preference.
+ *
+ * Until T1112 the signature was `(label) =>`, so a call shaped
+ * `ok(label, condition)` — which reads as an assertion and which its author
+ * believed was one — had the second argument dropped on the floor and
+ * printed "ok" unconditionally, whatever the page did. Ten such calls had
+ * accumulated in this directory (T0907 removed two more); they are invisible
+ * by construction, because a suite that cannot fail never asks to be fixed.
+ * That is how a browser suite can sit red for six days.
+ *
+ * So the shape itself now fails. ANY second argument — truthy, falsy or
+ * undefined — is reported as a failed check that names the call, because the
+ * condition was discarded and "the discarded condition happened to be true"
+ * is not a check either. `...extra` rather than `arguments` so the guard
+ * reads the same in a method or an arrow function. */
+function ok(label, ...extra) {
+  if (extra.length > 0) {
+    fail(
+      `ok(${JSON.stringify(label)}, …) called with ${extra.length + 1} arguments`,
+      "ok takes a label only — a second argument is discarded, so this line could never fail. Write it as an if/else that calls fail(label, detail).",
+    );
+    return;
+  }
+  console.log(`ok   ${label}`);
+}
 
 /* ---------- A. Static CSS policy (no browser needed) ---------- */
 
@@ -88,7 +117,12 @@ await page.goto(BASE, { waitUntil: "load" });
 await page.waitForSelector(".global-nav-link", { state: "attached" });
 
 const header = page.locator(".global-nav");
-ok("header renders on /", (await header.count()) === 1);
+const headerCount = await header.count();
+if (headerCount !== 1) {
+  fail("header renders on /", `.global-nav matched ${headerCount} element(s), expected 1`);
+} else {
+  ok("header renders on /");
+}
 const headerBox = await header.boundingBox();
 if (!headerBox || headerBox.height > 64) {
   fail("desktop information density: header height <= 64px", `height=${headerBox?.height}`);
@@ -110,7 +144,11 @@ for (const label of DESKTOP_LABELS) {
 ok(`desktop nav shows ${DESKTOP_LABELS.join(", ")} at <= 14px`);
 
 const searchInput = page.locator('form[role="search"] input[type="search"][name="q"]');
-ok("search form input[name=q] visible", await searchInput.isVisible());
+if (!(await searchInput.isVisible())) {
+  fail("search form input[name=q] visible", "the header search input is not visible at 1280px");
+} else {
+  ok("search form input[name=q] visible");
+}
 const placeholder = await searchInput.getAttribute("placeholder");
 if (placeholder !== "Search POST") {
   fail("search placeholder is 'Search POST'", `got ${placeholder}`);
@@ -118,12 +156,44 @@ if (placeholder !== "Search POST") {
   ok("search placeholder is 'Search POST'");
 }
 
+// The bell is genuinely in the DOM twice while hydration swaps the Suspense
+// fallback for the real link — nav-bell.tsx exports both NavBellFallback and
+// NavBell with the same href and aria-label. Measured 2026-09-21 on this
+// tree: 2 immediately after waitForSelector(".global-nav-link"), 1 by
+// ~200ms. Waiting for the swap before counting is the same bounded
+// readiness wait the aria-current check below uses; it does not soften the
+// assertion, it is what makes "exactly one" a statement about the page
+// rather than about when the assertion happened to run. The wait swallows
+// its own timeout on purpose: the count below is the assertion, and it
+// reports the number it actually saw.
 const bell = page.locator('a[aria-label="Notifications"][href="/notifications"]');
-ok("notifications bell links to /notifications", (await bell.count()) === 1);
+await page
+  .waitForFunction(
+    () => document.querySelectorAll('a[aria-label="Notifications"][href="/notifications"]').length === 1,
+    undefined,
+    { timeout: 5000 },
+  )
+  .catch(() => {});
+const bellCount = await bell.count();
+if (bellCount !== 1) {
+  fail("notifications bell links to /notifications", `matched ${bellCount} element(s) on the settled DOM, expected 1`);
+} else {
+  ok("notifications bell links to /notifications");
+}
 const logo = page.locator('a[aria-label="POST home"][href="/"]');
-ok("logo links home", (await logo.count()) === 1);
+const logoCount = await logo.count();
+if (logoCount !== 1) {
+  fail("logo links home", `matched ${logoCount} element(s), expected 1`);
+} else {
+  ok("logo links home");
+}
 const signIn = page.locator('a[href="/login"]:visible', { hasText: "Sign in" });
-ok("signed-out state offers Sign in in the header", (await signIn.count()) >= 1);
+const signInCount = await signIn.count();
+if (signInCount < 1) {
+  fail("signed-out state offers Sign in in the header", `matched ${signInCount} element(s), expected >= 1`);
+} else {
+  ok("signed-out state offers Sign in in the header");
+}
 
 // Hydration can transiently expose two copies of the nav (Suspense swap);
 // wait for the settled DOM, then assert the single current marker.
@@ -135,7 +205,11 @@ await page.waitForFunction(
 const currentText = await page.evaluate(
   () => document.querySelector(".global-nav-link[aria-current='page']")?.textContent?.trim(),
 );
-ok("aria-current=page marks the active destination", currentText === "Home");
+if (currentText !== "Home") {
+  fail("aria-current=page marks the active destination", `marker text ${JSON.stringify(currentText)}, expected "Home"`);
+} else {
+  ok("aria-current=page marks the active destination");
+}
 
 // Exactly one non-hidden main landmark per document (HTML conformance,
 // docs/06 §10): the layout provides <main id="main">; page fragments must
@@ -222,10 +296,12 @@ for (const [href, h1] of destinations) {
    assertion that replaces the placeholder's.
  *
  * Before: the stub echoed the query in a <q> element (`<q>` is the inline
- * quotation element, used there as a hook) and the check was
- * `ok("...", textContent === "solid-state")` — `ok` takes no condition, so
- * the comparison was discarded and the line could not fail on a wrong query;
- * a missing element was the only thing it could catch, by throwing.
+ * quotation element, used there as a hook) and the check handed its
+ * comparison to ok as a second argument, which ok silently discarded — the
+ * line could not fail on a wrong query; a missing element was the only thing
+ * it could catch, by throwing. (T1112 made that shape fail outright, which
+ * is why the paragraph reads the way it does rather than quoting the call:
+ * writing the call out here would trip the guard's own grep.)
  *
  * After: the query is still the fact, read from its own element, and it is
  * now a real check. Two more are added that the stub could not have: that the
@@ -252,13 +328,26 @@ if (!["loading", "ready", "error"].includes(searchState ?? "")) {
 /* The sign-in surface keeps the slim wordmark header (GitHub-style). */
 await page.goto(BASE + "/login", { waitUntil: "load" });
 const loginHeader = page.locator(".global-nav");
-ok("/login header shows the wordmark only", (await loginHeader.count()) === 1 && (await loginHeader.locator(".global-nav-links").count()) === 0);
+const loginHeaderCount = await loginHeader.count();
+const loginRowCount = await loginHeader.locator(".global-nav-links").count();
+if (loginHeaderCount !== 1 || loginRowCount !== 0) {
+  fail(
+    "/login header shows the wordmark only",
+    `.global-nav matched ${loginHeaderCount} (expected 1), its .global-nav-links matched ${loginRowCount} (expected 0)`,
+  );
+} else {
+  ok("/login header shows the wordmark only");
+}
 
 /* ---------- C. Responsive baseline ---------- */
 
 await page.setViewportSize({ width: 768, height: 800 });
 await page.goto(BASE, { waitUntil: "load" });
-ok("768px: desktop nav row visible", await page.locator(".global-nav-links").first().isVisible());
+if (!(await page.locator(".global-nav-links").first().isVisible())) {
+  fail("768px: desktop nav row visible", ".global-nav-links is not visible at 768px");
+} else {
+  ok("768px: desktop nav row visible");
+}
 
 await page.setViewportSize({ width: 375, height: 667 });
 await page.goto(BASE, { waitUntil: "load" });
@@ -273,7 +362,11 @@ if (await page.locator('form[role="search"]').first().isVisible()) {
   ok("375px: header search form collapses (drawer carries Search)");
 }
 const toggle = page.locator('button[aria-label="Global navigation menu"]');
-ok("375px: mobile menu toggle visible", await toggle.isVisible());
+if (!(await toggle.isVisible())) {
+  fail("375px: mobile menu toggle visible", 'button[aria-label="Global navigation menu"] is not visible at 375px');
+} else {
+  ok("375px: mobile menu toggle visible");
+}
 
 // The SSR'd button is inert until hydration attaches its click handler, so
 // a single click can land before it is interactive. Click in-page until the

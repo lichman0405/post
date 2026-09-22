@@ -17,9 +17,10 @@
  *     appear somewhere" cannot see one.
  *   - the tabs that are now REAL pages are asserted to render their content,
  *     not merely to mount: every route whose TabPlaceholder was replaced
- *     (pulls, releases, milestones, files, activity, settings) is required
- *     to LIST rows. A mount-only check also passes on the empty and the
- *     error state, so it could not tell a working page from a broken one.
+ *     (research, issues, pulls, releases, milestones, assets, files, activity,
+ *     settings) is required to LIST rows. A mount-only check also passes on
+ *     the empty and the error state, so it could not tell a working page from
+ *     a broken one.
  *   - private unauthorized 不渲染 shell: for a project the API answers
  *     with the existence-hiding 404, the page shows the plain not-found
  *     state with NO shell chrome — no name, no badges, no tabs, and no
@@ -209,6 +210,71 @@ const ALLOY_ACTIVITY = [
   },
 ];
 
+// The Research/Overview tab (T0108 demo, PR #338) reads an overview aggregate
+// and renders counts/cards. The shape matches what
+// apps/web/app/(main)/projects/[id]/research/page.tsx expects.
+const ALLOY_OVERVIEW = {
+  counts: { questions: 2, findings: 1, hypotheses: 2, claims: 3, other_objects: 0 },
+  key_questions: [
+    {
+      object_id: "qqqqqqqq-0000-4000-8000-000000000001",
+      statement: "Can MOF-X separate ethylene under humidity?",
+      question_state: "partially_answered",
+      hypotheses: [
+        { object_id: "hhhhhhhh-0000-4000-8000-000000000001", object_type: "hypothesis", title: "Open-metal sites bind preferentially" },
+      ],
+      findings: [
+        { object_id: "ffffffff-0000-4000-8000-000000000001", object_type: "finding", title: "Humidity above 40% RH collapses selectivity" },
+      ],
+    },
+  ],
+  key_findings: [
+    {
+      object_id: "ffffffff-0000-4000-8000-000000000001",
+      statement: "Humidity above 40% RH collapses selectivity",
+      finding_type: "observation",
+      assessment: "supporting",
+      claims: [
+        { object_id: "cccccccc-0000-4000-8000-000000000001", version_id: "vvvvvvvv-0000-4000-8000-000000000001", title: "Selectivity loss is reversible below 30% RH", resolved: true },
+      ],
+    },
+  ],
+  branches: {
+    active: [
+      { id: "bbbbbbbb-0000-4000-8000-000000000001", name: "humidity-sweep", purpose: "Map selectivity vs RH", head_state_id: "ssssssss-0000-4000-8000-000000000001" },
+    ],
+    merged: 1,
+    aborted: 0,
+  },
+  current_main: {
+    head_state_id: "ssssssss-0000-4000-8000-000000000002",
+    latest_commit: { message: "Accept humidity threshold", actor: "alice" },
+  },
+  empty: false,
+};
+
+// The Assets tab (T0108 demo, PR #338) queries project objects and maps over
+// them. Without a mocked query endpoint the page dereferences undefined and
+// throws an uncaught error, so the mock must answer this route.
+const ALLOY_ASSETS = {
+  objects: [
+    {
+      id: "oooooooo-0000-4000-8000-000000000001",
+      object_type: "dataset",
+      version_no: 1,
+      title: "Breakthrough curves at 40% RH",
+      payload: { purpose: "Primary humidity-validation dataset" },
+    },
+    {
+      id: "oooooooo-0000-4000-8000-000000000002",
+      object_type: "protocol",
+      version_no: 2,
+      title: "Activation and sample prep",
+      payload: { purpose: "Standardized activation protocol" },
+    },
+  ],
+};
+
 const NOT_FOUND = {
   code: "PROJECT_NOT_FOUND",
   message: "project not found",
@@ -299,6 +365,16 @@ function installApiMock(page) {
           ],
         }),
       });
+    }
+    // The Research/Overview tab (T0108 demo, PR #338) is a real page now.
+    // It reads the same overview aggregate the landing /projects/[id] page does.
+    if (method === "GET" && pathname === `/api/v1/projects/${ALLOY.id}/overview`) {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ALLOY_OVERVIEW) });
+    }
+    // The Assets tab (T0108 demo, PR #338) queries project objects and lists
+    // them; an unmocked 404 makes it throw, so it must be answered here.
+    if (method === "GET" && pathname === `/api/v1/projects/${ALLOY.id}/query`) {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ALLOY_ASSETS) });
     }
     // The private project (and its membership) answers the existence-
     // hiding 404 for everyone, like the API's read policy for a private
@@ -483,15 +559,21 @@ if (divergence !== -1 || renderedTabs.length !== TAB_CONTRACT.length) {
 // placeholder for THREE routes the product had already replaced — the run
 // crashed on the first of them, so the other two were never reached.
 const TAB_ROUTES = [
-  { key: "research", path: "/research", placeholder: "Research" },
-  { key: "issues", path: "/issues", placeholder: "Issues" },
+  // T0108 demo (PR #338) replaced the Research placeholder with a real
+  // overview page that lists counts, questions, findings and branches.
+  { key: "research", path: "/research", placeholder: null, ready: '[data-project-tab-content="research"]', rows: ".research-card" },
+  // T0108 demo (PR #338) replaced the Issues placeholder with a real page
+  // that lists demo issues.
+  { key: "issues", path: "/issues", placeholder: null, ready: '[data-project-tab-content="issues"]', rows: ".demo-issue" },
   // T0403 replaced the Pull requests placeholder with the real list page.
   { key: "pulls", path: "/pulls", placeholder: null, ready: "[data-pulls-list]", rows: "[data-pull-row]" },
   // The releases hub is a real page of its own (list + manifest links).
   { key: "releases", path: "/releases", placeholder: null, ready: '[data-project-tab-content="releases"]', rows: "[data-release-row]" },
   // T0609's milestones page; specs/ui/routes.yaml carries the tab.
   { key: "milestones", path: "/milestones", placeholder: null, ready: '[data-project-tab-content="milestones"]', rows: "[data-milestone-row]" },
-  { key: "assets", path: "/assets", placeholder: "Assets" },
+  // T0108 demo (PR #338) replaced the Assets placeholder with a real page
+  // that queries project objects; the mock above serves the query endpoint.
+  { key: "assets", path: "/assets", placeholder: null, ready: '[data-project-tab-content="assets"]', rows: ".demo-asset" },
   // T0308 replaced the Files placeholder with the real read-only page.
   { key: "files", path: "/files", placeholder: null, ready: "[data-files-page]", rows: "[data-files-entry]" },
   // The Activity feed is the real member-only timeline.
