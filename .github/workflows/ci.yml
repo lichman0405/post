@@ -415,8 +415,16 @@ jobs:
       # runner does not ship does not skip: it FAILs, and the reason is usually
       # above the 25-line window (this is how the owasp-smoke row failed with
       # nothing but `G3 security-smoke: 1 failure(s)` in the job output).
-      - name: "security-master: redis-cli — the owasp-smoke row resets and reads back its own edge counters through it before measuring the rate-limit boundary"
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools
+      # The install is guarded by a presence check rather than run
+      # unconditionally, and that is what makes the step satisfiable wherever
+      # this job runs: G2 runs CI's exact steps on a host that is not a GitHub
+      # runner, and there `sudo` has no tty to prompt on — an unconditional
+      # `sudo apt-get` failed the whole job before any security row ran, while
+      # the tool it installs was already in /usr/bin. The guard asserts the same
+      # thing (redis-cli is there) and only reaches for the package manager when
+      # it is not.
+      - name: "security-master: redis-cli — the owasp-smoke row resets and reads back its own edge counters through it before measuring the rate-limit boundary (installed only when the runner does not already ship it)"
+        run: command -v redis-cli >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools; }
       - name: "security-master: PyYAML — the deploy-template row's validator parses the staging compose file as YAML (the same install the spec-validation job does)"
         run: pip install pyyaml
       - name: "security-master: govulncheck (the vuln-go row's instrument; pinned here because nothing else pins it)"

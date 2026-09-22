@@ -367,8 +367,8 @@
           "run": "pip install uv"
         },
         {
-          "name": "security-master: redis-cli \u2014 the owasp-smoke row resets and reads back its own edge counters through it before measuring the rate-limit boundary",
-          "run": "sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools"
+          "name": "security-master: redis-cli \u2014 the owasp-smoke row resets and reads back its own edge counters through it before measuring the rate-limit boundary (installed only when the runner does not already ship it)",
+          "run": "command -v redis-cli >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools; }"
         },
         {
           "name": "security-master: PyYAML \u2014 the deploy-template row's validator parses the staging compose file as YAML (the same install the spec-validation job does)",
