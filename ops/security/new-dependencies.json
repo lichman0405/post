@@ -1,0 +1,123 @@
+{
+  "what": [
+    "The new dependencies T1209 introduced, recorded because docs/40_OPEN_SOURCE_LICENSES.md:7 asks for it:",
+    "\"任何新增依赖必须记录 license、版本、用途、替代方案；高 copyleft/商业限制依赖需显式 ADR/法务确认\".",
+    "",
+    "What counts as \"new\" here: a package or scanner that this task added to the repository. Reused pins",
+    "(eslint 9.39.5, which apps/web already declares) are listed too, marked as such, so a reader cannot",
+    "mistake the row's toolchain for something the tree already had.",
+    "",
+    "None of these is a runtime dependency of the product. They are scanners and their support packages;",
+    "nothing here is compiled into or shipped with the API, the web app or the adapter. The licences are",
+    "recorded for the same reason the SBOM records them — an inventory a reader can check — and every",
+    "entry below was read from the installed package's own licence file, not inferred from a registry page.",
+    "",
+    "The versions are the pins in ops/security/tool-versions.sh; `make security-tools` installs exactly",
+    "them, and each gate row asserts the version it actually ran."
+  ],
+  "recorded_at": "2026-09-23",
+  "task": "T1209",
+  "dependencies": [
+    {
+      "name": "gosec",
+      "version": "v2.29.0",
+      "module": "github.com/securego/gosec/v2",
+      "kind": "scanner (Go SAST)",
+      "license": "Apache-2.0",
+      "license_witness": "$GOMODCACHE/github.com/securego/gosec/v2@v2.29.0/LICENSE.txt, first line \"Apache License\"",
+      "used_by": "tests/security/sast.sh go (gate row sast-go)",
+      "purpose": "docs/23 §11 asks for SAST at every Release. gosec is the Go static analyser: it builds the package set and reports G-rules (hardcoded credentials, weak crypto, unsafe pointer/reflect use, unhandled errors on security-relevant calls, file permissions) as a JSON report this repository parses into a per-finding baseline.",
+      "why_this_one": "It is the Go ecosystem's standard SAST tool and the only one that both understands a multi-module Go repository and emits machine-readable output with a stable rule id per finding — the property the per-finding baseline depends on. v2.29.0 specifically: earlier 2.x releases fail to build against Go 1.27 (the toolchain CLAUDE.md §7 pins).",
+      "alternatives": "semgrep (single tool for three languages, larger rule set, a Python/OCaml toolchain to install, and its ruleset is a moving target unless pinned by commit); CodeQL (strongest analysis, but it needs a database build in a GitHub runner whose licensing differs for private repositories); staticcheck (already in this tree — correctness, not security rules, so it is not a substitute).",
+      "license_check": "Apache-2.0 is on the allowlist in ops/security/license-allowlist.json. No copyleft, no use restriction, no ADR required; it is not a distributed dependency of the product at all."
+    },
+    {
+      "name": "bandit",
+      "version": "1.8.6",
+      "module": "bandit (PyCQA)",
+      "kind": "scanner (Python SAST)",
+      "license": "Apache-2.0",
+      "license_witness": "the installed distribution's METADATA (uv tool install bandit==1.8.6): Name: bandit / Version: 1.8.6 / License: Apache-2.0",
+      "used_by": "tests/security/sast.sh python (gate row sast-python)",
+      "purpose": "The Python face of docs/23 §11's SAST: a scan of services/scientific-adapter/src for the classic Python security rules (subprocess with shell=True, unsafe deserialization, hardcoded passwords, weak hashing, assert used for control flow).",
+      "why_this_one": "PyCQA's bandit is the de-facto Python SAST tool, it is packaged as a single CLI, and it emits the same JSON shape this repository's report parser needs (file, line, rule id, severity, confidence).",
+      "alternatives": "semgrep (as above); pylint's security plugin (a linter's subset, weaker rules); ruff's `S` rules (already available in this tree via ops/ci/ruff.toml — the closest substitute, and the reason the adapter's ruff config is worth keeping in view: it covers a small overlapping subset with no per-finding baseline).",
+      "license_check": "Apache-2.0, on the allowlist. No ADR required."
+    },
+    {
+      "name": "eslint-plugin-security",
+      "version": "4.0.1",
+      "kind": "lint plugin (Node SAST rules)",
+      "license": "Apache-2.0",
+      "license_witness": "tests/security/node-tools/node_modules/eslint-plugin-security/package.json (license: Apache-2.0)",
+      "used_by": "tests/security/node-tools/eslint-sast.config.mjs (gate row sast-node)",
+      "purpose": "The rule set behind the TypeScript/JavaScript face of SAST: detect-eval-with-expression, detect-non-literal-regexp, detect-object-injection, detect-child-process, detect-unsafe-regex and the rest of the plugin's recommended set — each forced to \"error\" in the SAST config, with a floor on the number of rules so a plugin upgrade that silently dropped rules would fail the config load rather than narrow the scan.",
+      "why_this_one": "It is the maintained eslint-community security rule set; eslint is already this repository's linter, so the Node face adds rules to a tool the tree runs rather than a second lint engine.",
+      "alternatives": "eslint-plugin-no-unsanitized (DOM sinks specifically; complementary, smaller); semgrep's TypeScript rules (a second engine); adding the plugin to apps/web's own eslint config (rejected: it would put a security rule set into the app's config, where `next lint` and any per-file disable comment could weaken it — so it lives in tests/security/node-tools with its own config and its own lockfile).",
+      "license_check": "Apache-2.0, on the allowlist. No ADR required."
+    },
+    {
+      "name": "typescript-eslint",
+      "version": "8.70.1",
+      "kind": "lint parser (support package)",
+      "license": "MIT",
+      "license_witness": "tests/security/node-tools/node_modules/typescript-eslint/package.json (license: MIT)",
+      "used_by": "tests/security/node-tools/eslint-sast.config.mjs (gate row sast-node)",
+      "purpose": "Supplies the TypeScript parser and the typed lint configuration the SAST config runs under. Without it, eslint's default parser rejects every .ts/.tsx file as a parse error — the first version of this row reported 103 fatal parse errors and no findings, which is exactly the shape of a green-looking scan that measured nothing.",
+      "why_this_one": "It is the parser eslint itself documents for TypeScript, maintained by the typescript-eslint project, and it is the only parser that produces the AST the security rules need.",
+      "alternatives": "@typescript-eslint/parser directly (the same packages, without the aggregate entry point this config imports); oxlint (fast, but no eslint-plugin-security rule compatibility).",
+      "license_check": "MIT, on the allowlist. No ADR required."
+    },
+    {
+      "name": "typescript",
+      "version": "5.9.3",
+      "kind": "compiler (support package, peer of the parser)",
+      "license": "Apache-2.0",
+      "license_witness": "tests/security/node-tools/node_modules/typescript/package.json (license: Apache-2.0)",
+      "used_by": "tests/security/node-tools/eslint-sast.config.mjs (gate row sast-node)",
+      "purpose": "The compiler API the TypeScript parser loads. Pinned to the same 5.9.3 the web workspace builds with, so the SAST scan parses the sources the build compiles.",
+      "why_this_one": "It is the workspace's own compiler version; a different one here would mean the security scan reads a different language version than the build.",
+      "alternatives": "None — it is a hard requirement of the parser. Note it is a dependency of the isolated tests/security/node-tools project, not of apps/web, which keeps pnpm-lock.yaml untouched.",
+      "license_check": "Apache-2.0, on the allowlist. No ADR required."
+    },
+    {
+      "name": "eslint",
+      "version": "9.39.5",
+      "kind": "lint engine (REUSED — already declared by apps/web)",
+      "license": "MIT",
+      "license_witness": "tests/security/node-tools/node_modules/eslint/package.json (license: MIT)",
+      "used_by": "tests/security/node-tools/eslint-sast.config.mjs (gate row sast-node)",
+      "purpose": "The engine the security rules run on. Already a devDependency of apps/web at this exact version; the SAST toolchain installs its own copy inside tests/security/node-tools so the security rule set cannot be weakened from the application's config.",
+      "why_this_one": "Reusing the version the tree already runs avoids a second eslint in the workspace.",
+      "alternatives": "Adding the security plugin to the web workspace's eslint config — rejected, see eslint-plugin-security above.",
+      "license_check": "MIT, on the allowlist, and not a new dependency."
+    },
+    {
+      "name": "cyclonedx-gomod",
+      "version": "v1.9.0",
+      "module": "github.com/CycloneDX/cyclonedx-gomod",
+      "kind": "generator (Go SBOM)",
+      "license": "Apache-2.0",
+      "license_witness": "$GOMODCACHE/github.com/!cyclone!d!x/cyclonedx-gomod@v1.9.0/LICENSE (Apache License 2.0 text)",
+      "used_by": "tests/security/sbom.sh go (gate row sbom-go)",
+      "purpose": "docs/25 §1 item 10 asks for an SBOM per Release and docs/40:3 asks for the real versions and licences to be generated and checked in CI. This is the Go face: it reads go.mod, resolves the module graph and emits a CycloneDX document with the modules, their versions and their licences.",
+      "why_this_one": "It is CycloneDX's own Go generator, so the format is the reference implementation's rather than a re-derivation; and it emits licences as CycloneDX *evidence* (which is how the generator documents its own confidence) rather than asserting them — a distinction this repository keeps visible instead of flattening. That is why the sbom-go row does NOT pass -assert-licenses.",
+      "alternatives": "syft (multi-ecosystem, larger install, its Go support reads the built binary or the module cache rather than go.mod); `go version -m` plus a hand-written renderer (no licence data at all).",
+      "license_check": "Apache-2.0, on the allowlist. No ADR required."
+    }
+  ],
+  "not_added_deliberately": [
+    {
+      "name": "@cyclonedx/cyclonedx-npm",
+      "why": "Evaluated for the npm face and rejected: it cannot read pnpm-lock.yaml, so against this workspace it either fails or renders an inventory of a tree the repository does not install. `pnpm sbom` reads the lockfile pnpm itself owns. There is therefore no pin for it in ops/security/tool-versions.sh — a variable nothing consumes is a pin somebody eventually installs and trusts."
+    },
+    {
+      "name": "trivy / grype",
+      "why": "The container-scan row has no object to scan: there is no Dockerfile anywhere in this tree (ops/runbook-steps.json, tree claim `no-dockerfile`). Adding a scanner before the image would be a row that always passes. The gate's container-scan row is a guarded absence instead, and it fails the moment an image appears, which is the point at which this entry has to be filled in. See ops/security/absent-checks.json."
+    },
+    {
+      "name": "semgrep",
+      "why": "The single-tool alternative for all three SAST faces. Rejected for V1 in favour of the per-language tools this tree already had a place for, and because its default ruleset is fetched rather than pinned — a security verdict that changes when a remote ruleset changes is not a verdict this repository can reproduce. It remains the leading candidate for post-V1 if a single tool turns out to be worth more than three pinned ones."
+    }
+  ]
+}

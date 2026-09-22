@@ -1,18 +1,25 @@
 {
-  "version": 1,
-  "comment": "The Master Security/Quality Gate (tests/security/master-security-gate.sh) as an inventory of what a Release is asked to run: docs/23_SECURITY_PRIVACY.md §11 (dependency audit, SAST, secret scan, container scan, OWASP smoke, permission E2E) plus the SBOM that docs/25_CICD_DEVOPS.md item 10 asks for. Every one of them is listed in `items`, either as covered by a named check of the gate or as absent. Read and enforced by tests/security/check-absent-manifest.py — the `absence_witness` command of each absent entry is RUN by that checker and must still come back empty, so this file cannot go stale quietly: add a Dockerfile, an SBOM generator or a SAST stage and the gate goes red until this file is updated. Absence is recorded here, never omitted. Whether an absent capability is an ACCEPTED V1 RISK is the Supervisor's written call (docs/23 §11 allows a written ADR/risk acceptance for High; Critical is not accepted in V1) — `suggested_disposition` below is the Worker's recommendation, not that call.",
+  "version": 2,
+  "comment": "The Master Security/Quality Gate (tests/security/master-security-gate.sh) as an inventory of what a Release is asked to run: docs/23_SECURITY_PRIVACY.md §11 (dependency audit, SAST, secret scan, container scan, OWASP smoke, permission E2E) plus the SBOM that docs/25_CICD_DEVOPS.md items 9-10 ask for. Every one of them is listed in `items`, either as covered by named rows of the gate or as an absence. Read and enforced by tests/security/check-absent-manifest.py — the `absence_witness` commands of the remaining absence are RUN by that checker and must still come back empty, so this file cannot go stale quietly. WHAT CHANGED IN v2 (T1209): SAST and the SBOM stopped being absences — they are eight new rows of the gate (sast-go/python/node, sbom-go/node/python, license-audit, container-scan), and the two detail entries that described them are gone rather than left behind as prose about a gap that no longer exists. The container scan stays an absence, because there is still no image to scan; what it gained is a GUARD: a row of the gate that is green only while the tree really has no container build file, that prints why, and that fails the moment one appears. Whether an absent capability is an ACCEPTED V1 RISK is the Supervisor's written call (docs/23 §11 allows a written ADR/risk acceptance for High; Critical is not accepted in V1) — `suggested_disposition` below is the Worker's recommendation, not that call.",
   "kinds": {
     "covered": "a check of the master gate runs this today; check_ids name it and the checker proves those ids still exist in the gate's registry",
-    "absent": "nothing in this tree performs it; absent_id names the detail entry below with the substitute, the cost of adding it, and the impact of not having it"
+    "guarded-absence": "nothing in this tree performs it, and a named row of the master gate exists whose only job is to keep that visible: the row is green while the absence is real, prints what the absence rests on, and goes red the moment it stops being true. A guard is not the capability — it is a statement about the capability that is allowed to fail."
   },
-  "required_by": "docs/23_SECURITY_PRIVACY.md §11 (每个 Release 运行 dependency audit、SAST、secret scan、container scan、OWASP smoke、permission E2E)",
+  "required_by": "docs/23_SECURITY_PRIVACY.md §11 (每个 Release 运行 dependency audit、SAST、secret scan、container scan、OWASP smoke、permission E2E) + docs/25_CICD_DEVOPS.md items 9-10 (security/dependency/secret scan、container build/SBOM)",
   "items": [
     {
       "id": "dependency-audit",
-      "doc": "docs/23 §11",
+      "doc": "docs/23 §11; docs/25 §1 item 9",
       "status": "covered",
       "check_ids": ["vuln-go", "vuln-node", "vuln-python"],
       "note": "Three ecosystems, three instruments, three separate rows: govulncheck (Go, v1.8.0), pnpm audit --audit-level=low (Node/web), uv audit (Python adapter). Each row is red on its own and each one is NOT ASKED — never silently green — on a host that lacks its tool."
+    },
+    {
+      "id": "sast",
+      "doc": "docs/23 §11; docs/25 §1 item 9",
+      "status": "covered",
+      "check_ids": ["sast-go", "sast-python", "sast-node"],
+      "note": "Three languages, three instruments, three separate rows, so a red Go scan cannot hide behind a green Node one (tests/security/sast.sh). gosec v2.29.0 reads the Go module, bandit 1.8.6 the adapter's source, eslint 9.39.5 + eslint-plugin-security 4.0.1 + typescript-eslint 8.70.1 the web app and the shared UI package. Every row checks its tool's version against ops/security/tool-versions.sh before scanning, refuses a scan that covered too little of the tree, and requires each finding to be a per-finding baseline entry with a written review — no -exclude-dir, no -nosec, no severity floor anywhere in the invocations. The existing findings are baselined per finding in ops/ci/gosec-baseline.txt, ops/ci/eslint-security-baseline.txt and ops/ci/bandit-baseline.txt; a baseline entry is not an accepted risk (that is a written ADR) and sast_report.py rejects an entry that names a directory, a glob or a rule without a file and line."
     },
     {
       "id": "secret-scan",
@@ -36,88 +43,47 @@
       "note": "tests/e2e/privacy_e2e_test.go — TestE2EPrivacyNegative: the negative path is the point, so the row requires that test to have passed by name."
     },
     {
-      "id": "sast",
-      "doc": "docs/23 §11",
-      "status": "absent",
-      "absent_id": "sast"
-    },
-    {
       "id": "container-scan",
-      "doc": "docs/23 §11",
+      "doc": "docs/23 §11; docs/25 §1 item 10",
       "status": "absent",
-      "absent_id": "container-scan"
+      "absent_id": "container-scan",
+      "note": "Still an absence — there is no image in this tree to scan — but no longer an unguarded one: the `container-scan` row of the gate is green only while that is true, and its failure message says what has to replace it. See the entry below."
     },
     {
       "id": "sbom",
-      "doc": "docs/23 §11",
-      "status": "absent",
-      "absent_id": "sbom"
+      "doc": "docs/25 §1 item 10; docs/40 §3",
+      "status": "covered",
+      "check_ids": ["sbom-go", "sbom-node", "sbom-python", "license-audit"],
+      "note": "One document per face, generated and validated by the row that reports it — cyclonedx-gomod v1.9.0 over go.mod, `pnpm sbom` (pnpm pinned by package.json's packageManager) over the installed workspace, `uv export --format cyclonedx1.5` plus the adapter's own dist-info METADATA for licences. A green row means the document was re-parsed, cleared a per-face component floor, and resolved every key component named in tests/security/key-components.json — including the entries whose answer is \"not in this tree\" and the witness that has to keep saying so. The documents are written to the ignored .sbom/ directory and are never committed: they are reproducible from go.mod, pnpm-lock.yaml and uv.lock, and a committed SBOM is an inventory of a tree that no longer exists. `license-audit` is the row that reads all three (docs/40:3) and judges every component's licence against ops/security/license-allowlist.json, with a written reason per allowed licence and a deny-class that goes red naming package, licence and version."
     }
   ],
   "absent": [
     {
-      "id": "sast",
-      "kind": "absent",
-      "capability": "Static application security testing over the Go, TypeScript and Python sources (taint analysis, injection sinks, unsafe deserialization, missing authorization on a handler).",
-      "command": null,
-      "absence_witness": [
-        {
-          "why": "no SAST tool is pinned or invoked by the CI workflows",
-          "command": "grep -rniE 'gosec|semgrep|codeql|bandit|sast' .github/workflows/ 2>/dev/null",
-          "expect": "no output"
-        },
-        {
-          "why": "no SAST tool is pinned in any toolchain file",
-          "command": "grep -rniE 'gosec|semgrep|codeql|bandit' go.mod package.json services/scientific-adapter/pyproject.toml ops/ci/ 2>/dev/null",
-          "expect": "no output"
-        }
-      ],
-      "why_absent": "No SAST tool is configured anywhere in the tree: no gosec, semgrep, CodeQL, bandit or sonar stage in .github/workflows/, none pinned in go.mod, package.json or services/scientific-adapter/pyproject.toml, and ops/ci/ holds ruff and mypy configs only. CI's `go` job runs fmt/vet/staticcheck — linters with a security-adjacent subset and no security rule set, which is why they are named as a substitute and not as SAST. The absence is witnessed, not asserted: see absence_witness below, which the checker runs on every gate run.",
-      "substitute_today": "Behavioural negatives catch a subset of the same defect classes at the level that matters: the permission negative E2E proves a private project stays invisible, the OWASP smoke proves the header/CORS/rate-limit/anonymous-write edges, and govulncheck covers known-vulnerable dependencies. `go vet ./...` and `make staticcheck` (CI `go` job; grandfathered baseline ops/ci/staticcheck-baseline.txt) cover correctness, not security rules. None of them reads the source for an injection sink.",
-      "to_add": "Pick one tool that covers all three languages — semgrep with a pinned ruleset (Go + TypeScript + Python), or gosec + eslint-plugin-security + bandit as three pinned tools — then (1) add a `sast` row to tests/security/master-security-gate.sh with prerequisites and evidence, (2) decide the failing threshold (High and above block a Release; docs/23 §11 does not accept Critical in V1), (3) run it once and record the baseline, and (4) wire the row into CI, which is the Supervisor's surface (.github/workflows/** and specs/orchestrator/gates.json move together).",
-      "impact": "A statically visible High — an unsanitized sink, an endpoint whose authorization is missing — can land without any gate reading the source. Today's coverage is behavioural: it catches what a request can reach, not what the code could reach under another input. This is the largest of the three gaps in coverage, and the only one that no amount of running the product can close.",
-      "suggested_disposition": "Recommend accepting as a documented V1 risk with a written ADR, and adding semgrep (single tool, three languages, ruleset pinned by commit) as the first post-V1 security item — with the note that V1's exposure is bounded by the behavioural negatives plus the small, reviewed surface, and that this bound is an argument, not a measurement."
-    },
-    {
       "id": "container-scan",
-      "kind": "absent",
+      "kind": "guarded-absence",
+      "guard_check_id": "container-scan",
       "capability": "Scanning built container images for OS-package and application-layer CVEs before they are deployed.",
       "command": null,
       "absence_witness": [
         {
-          "why": "the tree has no Dockerfile, so no application image exists to scan",
-          "command": "find . -name 'Dockerfile*' -not -path './node_modules/*' -not -path './.git/*'",
-          "expect": "no output"
-        }
-      ],
-      "why_absent": "Nothing in this tree builds or runs an application image: there is no Dockerfile anywhere (ops/deploy/README.md § What is missing #1; ops/runbook-steps.json release-4-image-digest). A container scanner has no artifact to scan, so this is not a tool that is missing — it is the build that is missing. The only images in play are the infrastructure ones pulled by docker-compose.yml (pgvector/pgvector:0.8.6-pg16, redis:7.4.11-alpine, quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z, gitea/gitea:1.27.3, axllent/mailpit:v1.31.1), pinned by tag and never scanned by anything here.",
-      "substitute_today": "The staging template is validated statically and fail-closed: tests/acceptance/deploy-staging-smoke.sh runs 19 rules over ops/deploy/docker-compose.staging.yml, ops/deploy/staging.env.example and the nginx config, including rule R03, which refuses an image pinned by anything other than @sha256:<64 hex>. That is a rule about how an image must be referenced, not a statement about what is inside it. The dependency audits cover the application's own packages, not a base image's OS packages.",
-      "to_add": "First the image: a Dockerfile per application (api, web, scientific-adapter) plus a build stage in CI (docs/25 item 10). Then the scanner: trivy or grype in image mode over each built image, failing on High/Critical, with an ignore file for accepted findings; and digest pinning for every image the deployment composes, which rule R03 already demands. The scanner is a day of work once the images exist; the images are the actual project.",
-      "impact": "Today no deployed artifact exists, so the exposure is the infrastructure stack's upstream images and their update cadence — nobody in this repository tracks them, and a base-image CVE would be found by reading release notes, not by a gate. Once images are built, without this row a High in a base layer ships unnoticed.",
-      "suggested_disposition": "Recommend accepting for V1 with the gap stated plainly (there is no image to scan yet), and making the image build + trivy a single follow-up item so that the scanner cannot be split from the artifact that makes it meaningful. Nothing to scan is a reason to defer the scanner, not a reason to call the release container-safe."
-    },
-    {
-      "id": "sbom",
-      "kind": "absent",
-      "capability": "A machine-readable software bill of materials (SPDX or CycloneDX) for each Release, bound to the Release's immutable identifiers.",
-      "command": null,
-      "absence_witness": [
-        {
-          "why": "no SBOM generator is invoked by the build, the CI stages or the deployment scripts",
-          "command": "grep -rniE 'syft|cyclonedx|spdx' .github/workflows/ Makefile ops/ci/ ops/deploy/ 2>/dev/null",
+          "why": "the tree has no container build file, so no application image exists to scan — the same walk the guard row performs, run here by the checker itself",
+          "command": "find . \\( -name .git -o -name .rddev -o -name node_modules -o -name .next -o -name .venv -o -name .sbom -o -name .backup-dr -o -name .dev -o -name post-wt \\) -prune -o -type f \\( -name 'Dockerfile' -o -name 'Dockerfile.*' -o -name '*.Dockerfile' -o -name 'Containerfile' -o -name 'Containerfile.*' \\) -print",
           "expect": "no output"
         },
         {
-          "why": "no SBOM generator is pinned in any toolchain file",
-          "command": "grep -rniE 'syft|cyclonedx|spdx' go.mod package.json services/scientific-adapter/pyproject.toml 2>/dev/null",
-          "expect": "no output"
+          "why": "the tree claim the guard rests on is still registered, exactly once, in the file the release runbook reads",
+          "command": "grep -c '\"id\": \"no-dockerfile\"' ops/runbook-steps.json",
+          "expect": {
+            "stdout_matches": "^1$"
+          }
         }
       ],
-      "why_absent": "docs/25_CICD_DEVOPS.md item 10 asks for a container build/SBOM stage and there is none: no syft, cyclonedx or spdx generator is configured in .github/workflows/, the Makefile, ops/ci/ or ops/deploy/, and none is pinned in go.mod, package.json or the adapter's pyproject.toml. ops/runbook-steps.json release-4-image-digest records the same gap from the release-runbook side.",
-      "substitute_today": "The three lockfiles ARE the component inventory in source form and they are committed and integrity-checked by the existing gates: go.sum (module graph, verified by the Go toolchain), pnpm-lock.yaml (installed with --frozen-lockfile by the web job) and services/scientific-adapter/uv.lock (uv sync --frozen / uv audit). The three dependency-audit rows read exactly those. What is missing is the artifact: a versioned document frozen into a Release, which is what an incident responder needs and what the lockfiles only imply.",
-      "to_add": "One generator per ecosystem — cyclonedx-gomod for Go, @cyclonedx/cyclonedx-npm (or pnpm equivalent) for the workspace, cyclonedx-py for the adapter (uv has no SBOM command) — emitting one merged CycloneDX document per Release, stored as a Release artifact next to the RSG snapshot hash, the Git commit SHA and the blob hashes (docs/31 Gate C: a Release is immutable and pinned). Then a master-gate row that regenerates it and fails when the committed document and the lockfiles disagree, so the SBOM cannot rot silently.",
-      "impact": "A Release today can state which commit, which schema version and which snapshot hash it was built from, but not which components it contains. Answering \"are we affected by this CVE?\" is a manual sweep of three lockfiles, and a downstream consumer has no bill of materials to attach to their own compliance story. This is the cheapest of the three gaps to close and the one whose absence is most visible to an outside reader.",
-      "suggested_disposition": "Recommend adding before the V1 Release rather than accepting: the generators are pinned tools, the inputs are lockfiles that already exist, and unlike SAST and the container scan this needs no new product artifact to be meaningful."
+      "why_absent": "Nothing in this tree builds or runs an application image: there is no Dockerfile anywhere (ops/deploy/README.md § What is missing #1; ops/runbook-steps.json, tree claim `no-dockerfile`, re-derived by ops/runbook-verify.py T1). A container scanner has no artifact to scan, so this is not a tool that is missing — it is the build that is missing. The only images in play are the infrastructure ones pulled by docker-compose.yml (pgvector/pgvector:0.8.6-pg16, redis:7.4.11-alpine, quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z, gitea/gitea:1.27.3, axllent/mailpit:v1.31.1), pinned by tag and never scanned by anything here — their licences are now recorded per image in tests/security/key-components.json and judged by the license-audit row, which is a statement about their licence and not about their contents.",
+      "guard": "The `container-scan` row of the gate (tests/security/container-scan.sh) is this absence made falsifiable. It walks the tree for Dockerfile, Dockerfile.*, *.Dockerfile, Containerfile and Containerfile.*, prints how many files it walked and which claim says there is no image, and exits 0 only while it finds none. It exits 1 the moment one appears — not because the repository broke, but because this row stopped being the truth and a real image scan has to take its place — and it also exits 1 if the `no-dockerfile` claim disappears from ops/runbook-steps.json, since a guard citing a claim nobody registers is a guard resting on nothing. A guarded absence is falsifiable in the direction that matters: it can go red on its own, and it prints why it is green while it is.",
+      "substitute_today": "The staging template is validated statically and fail-closed: tests/acceptance/deploy-staging-smoke.sh runs 19 rules over ops/deploy/docker-compose.staging.yml, ops/deploy/staging.env.example and the nginx config, including rule R03, which refuses an image pinned by anything other than @sha256:<64 hex>. That is a rule about how an image must be referenced, not a statement about what is inside it. The dependency audits cover the application's own packages, not a base image's OS packages.",
+      "to_add": "First the image: a Dockerfile per application (api, web, scientific-adapter) plus a build stage in CI (docs/25 item 10). Then the scanner: trivy or grype in image mode over each built image, failing on High/Critical, with an ignore file for accepted findings; and digest pinning for every image the deployment composes, which rule R03 already demands. The guard row must be REPLACED by that scanner, not deleted alongside it: it is the only thing in the tree that says which of the two states the repository is in. The scanner is a day of work once the images exist; the images are the actual project.",
+      "impact": "Today no deployed artifact exists, so the exposure is the infrastructure stack's upstream images and their update cadence — nobody in this repository tracks them, and a base-image CVE would be found by reading release notes, not by a gate. Once images are built, without this row a High in a base layer ships unnoticed. The guard changes when this becomes visible (immediately, on the commit that adds the Dockerfile) and does not change the exposure itself: nothing is being scanned today either way.",
+      "suggested_disposition": "Recommend accepting for V1 with the gap stated plainly (there is no image to scan yet), and making the image build + trivy a single follow-up item so that the scanner cannot be split from the artifact that makes it meaningful. The guard is what keeps that acceptance honest: it is a written record that can go red, rather than a paragraph promising someone will notice. Nothing to scan is a reason to defer the scanner; it is not a reason to call the release container-safe."
     }
   ]
 }

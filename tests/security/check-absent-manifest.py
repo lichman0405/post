@@ -18,16 +18,23 @@ run:
      reader needs — why it is absent, what stands in for it today, what
      adding it would take, what the gap costs — and it does not say the
      capability is unnecessary;
-  4. the absent set is exactly SAST, the container scan and the SBOM. The
-     dependency audit is NOT absent (govulncheck / pnpm audit / uv audit are
-     three rows of the gate with their own evidence); if one of them is
-     removed from the gate, the covered-item check above goes red instead of
-     the audit sliding into this list;
+  4. the absent set is exactly the container scan. SAST and the SBOM are NOT
+     absent any more — they are eight rows of the gate (sast-*, sbom-*,
+     license-audit, container-scan; see the manifest's items), and the checker
+     proves those ids exist rather than letting a capability slide back into
+     this list. The dependency audit is likewise a gate row (govulncheck /
+     pnpm audit / uv audit); if one of those rows is removed, the
+     covered-item check goes red instead of the audit becoming an "absence";
   5. every `absence_witness` command is RUN. It must still come back empty.
-     This is the half that keeps the file from rotting: add a Dockerfile, an
-     SBOM generator or a SAST stage and the witness prints something (`find`
-     prints the new Dockerfile; `grep` prints the new stage) and this row
-     fails until the manifest is updated to say so.
+     This is the half that keeps the file from rotting: add a Dockerfile and
+     the witness prints it, and this row fails until the manifest is updated
+     to say so;
+  6. the remaining absence is a GUARDED one, and the guard is checked to
+     exist: the entry names `guard_check_id`, a row of the live gate registry
+     whose only job is to keep the absence visible and to go red the moment
+     it stops being true. A guard that was renamed or deleted guards nothing,
+     and that is a failure here rather than a green row pointing at a check
+     nobody runs.
 
 Nothing here decides whether a gap is an accepted risk. docs/23 §11 allows a
 written ADR/risk acceptance for High findings and does not accept Critical in
@@ -44,9 +51,11 @@ Exit codes
     3  usage error
     4  --selftest found the checker unable to say no
 
---selftest mutates a COPY of the manifest (SAST deleted from the absent list)
-and requires this checker to reject it. A checker whose failure mode has never
-been executed is a checker nobody has evidence for.
+--selftest runs two mutations on a COPY of the manifest and requires this
+checker to reject each of them, naming container-scan: (a) the guard it cites
+is pointed at a check id the gate does not have, and (b) the absence entry is
+deleted outright. A checker whose failure mode has never been executed is a
+checker nobody has evidence for.
 """
 
 from __future__ import annotations
@@ -67,8 +76,8 @@ DEFAULT_MANIFEST = "ops/security/absent-checks.json"
 # Every capability a Release is asked to run: the six of
 # docs/23_SECURITY_PRIVACY.md §11 — dependency audit、SAST、secret scan、
 # container scan、OWASP smoke、permission E2E — plus the SBOM, which is not in
-# §11 but is asked for by docs/25_CICD_DEVOPS.md item 10 ("container
-# build/SBOM") and named as an absence by this task. Hard-coded on purpose: a
+# §11 but is asked for by docs/25_CICD_DEVOPS.md items 9-10 ("security/
+# dependency/secret scan"、"container build/SBOM"). Hard-coded on purpose: a
 # list read out of the manifest could not notice an item leaving it.
 REQUIRED_ITEMS = [
     "dependency-audit",
@@ -80,11 +89,17 @@ REQUIRED_ITEMS = [
     "sbom",
 ]
 
-# The three capabilities this task was told are genuinely absent. The
-# dependency audit is not among them: it is three rows of the gate now.
-REQUIRED_ABSENT = ["sast", "container-scan", "sbom"]
+# The capability this tree genuinely still cannot perform: scanning container
+# images it does not build. SAST and the SBOM were on this list and are not any
+# more — they are rows of the gate now, and a capability that came back here
+# would mean those rows disappeared. That is what the covered-item check above
+# is for.
+REQUIRED_ABSENT = ["container-scan"]
 
 ABSENT_FIELDS = ["why_absent", "substitute_today", "to_add", "impact", "suggested_disposition"]
+# A guarded absence carries one more thing: the prose that says what keeps it
+# honest, and (below, checked against the registry) the row that does it.
+GUARDED_FIELDS = ABSENT_FIELDS + ["guard"]
 
 # A gap restated as a non-gap. Every one of these turns "we do not have this"
 # into "we do not need this", which docs/23 §11 is explicit about: the
@@ -157,11 +172,13 @@ def check_manifest(path: str, repo: str) -> None:
     absent_entries = {a.get("id"): a for a in manifest.get("absent", [])}
     if sorted(absent_entries) != sorted(REQUIRED_ABSENT):
         fail(
-            "the absent set must be exactly the three capabilities this tree cannot perform: "
-            f"expected {sorted(REQUIRED_ABSENT)}, found {sorted(absent_entries)}"
+            "the absent set must be exactly the capabilities this tree still cannot perform: "
+            f"expected {sorted(REQUIRED_ABSENT)}, found {sorted(absent_entries)}. SAST and the SBOM "
+            "left this list when the gate gained rows for them; a capability reappearing here means "
+            "those rows went away."
         )
     else:
-        ok("manifest: the absent set is exactly SAST + container scan + SBOM (the dependency audit is a gate row, not an absence)")
+        ok("manifest: the absent set is exactly the container scan (SAST and the SBOM are gate rows now)")
 
     for item in items:
         iid = item.get("id")
@@ -185,11 +202,30 @@ def check_manifest(path: str, repo: str) -> None:
             if entry is None:
                 fail(f"item {iid}: status absent, but there is no `absent` entry with id '{absent_id}'")
                 continue
-            if entry.get("kind") != "absent":
-                fail(f"item {iid}: entry '{absent_id}' has kind '{entry.get('kind')}', want 'absent'")
+            kind = entry.get("kind")
+            if kind not in ("absent", "guarded-absence"):
+                fail(f"item {iid}: entry '{absent_id}' has kind '{kind}', want 'absent' or 'guarded-absence'")
+                continue
             if entry.get("command") is not None:
                 fail(f"item {iid}: an absent capability must not carry a command (found {entry.get('command')!r})")
-            empty = [f for f in ABSENT_FIELDS if not str(entry.get(f) or "").strip()]
+            guard = ""
+            if kind == "guarded-absence":
+                guard = entry.get("guard_check_id") or ""
+                if not guard:
+                    fail(
+                        f"item {iid}: entry '{absent_id}' is a guarded absence with no guard_check_id. "
+                        "A guard that is not named is a guard nobody can check."
+                    )
+                    continue
+                if guard not in check_ids:
+                    fail(
+                        f"item {iid}: the guard check '{guard}' is not in the gate registry. The whole "
+                        "point of this entry is that a row exists which goes red when the absence stops "
+                        "being real; a guard that was renamed or deleted guards nothing."
+                    )
+                    continue
+            fields = GUARDED_FIELDS if kind == "guarded-absence" else ABSENT_FIELDS
+            empty = [f for f in fields if not str(entry.get(f) or "").strip()]
             if empty:
                 fail(f"item {iid}: entry '{absent_id}' is missing {empty} — a gap has to name its substitute, its cost and its impact")
                 continue
@@ -213,51 +249,94 @@ def check_manifest(path: str, repo: str) -> None:
                     ["bash", "-c", cmd], cwd=repo, capture_output=True, text=True, timeout=120
                 )
                 produced = [ln for ln in proc.stdout.splitlines() if ln.strip()]
-                if produced:
+                expect = w.get("expect")
+                if isinstance(expect, dict):
+                    pat = expect.get("stdout_matches")
+                    if pat and not any(re.search(pat, ln) for ln in produced):
+                        fail(
+                            f"item {iid}: the absence witness `{cmd}` must match {pat!r} and printed "
+                            f"{produced[:3] or 'nothing'}"
+                        )
+                        continue
+                    ok(f"item: {iid} — witness `{cmd}` matches {pat!r}")
+                elif produced:
                     fail(
                         f"item {iid}: the absence witness now produces output, so this entry is stale — "
                         f"`{cmd}` printed: {produced[:3]}"
                     )
                 else:
                     ok(f"item: {iid} — witness still shows the gap (`{cmd}` printed nothing)")
-            ok(f"item: {iid} — absent, with substitute, cost and impact")
+            if guard:
+                ok(
+                    f"item: {iid} — guarded absence: the '{guard}' row of this gate is registered and goes red "
+                    "the moment the absence stops being real"
+                )
+            else:
+                ok(f"item: {iid} — absent, with substitute, cost and impact")
         else:
             fail(f"item {iid}: status '{status}' is not covered|absent")
 
 
 def selftest(repo: str) -> int:
-    """Prove this checker can say no: drop SAST from a copy and require red."""
+    """Prove this checker can say no: two mutations of a copy, each of which
+    has to come back red and name container-scan.
+
+    The two are the shapes a guarded absence can rot into: its guard is
+    renamed out from under it (so the entry cites a row nobody runs), and the
+    entry is deleted outright (so the capability is silently covered).
+    """
     with open(os.path.join(repo, DEFAULT_MANIFEST), encoding="utf-8") as fh:
         manifest = json.load(fh)
-    manifest["absent"] = [a for a in manifest["absent"] if a.get("id") != "sast"]
-    for item in manifest["items"]:
-        if item.get("id") == "sast":
-            item["absent_id"] = "sast-that-does-not-exist"
+
+    def guard_points_at_nothing(m: dict) -> None:
+        for a in m.get("absent", []):
+            if a.get("id") == "container-scan":
+                a["guard_check_id"] = "container-scan-that-does-not-exist"
+
+    def absence_deleted(m: dict) -> None:
+        m["absent"] = [a for a in m.get("absent", []) if a.get("id") != "container-scan"]
+        for item in m.get("items", []):
+            if item.get("id") == "container-scan":
+                item["absent_id"] = "container-scan-that-does-not-exist"
+
+    mutations = [
+        ("the guard it cites is not a check of this gate", guard_points_at_nothing),
+        ("the absence entry is deleted outright", absence_deleted),
+    ]
+
+    failures = 0
     with tempfile.TemporaryDirectory() as tmp:
-        mutated = os.path.join(tmp, "absent-checks.json")
-        with open(mutated, "w", encoding="utf-8") as fh:
-            json.dump(manifest, fh)
-        proc = subprocess.run(
-            [sys.executable, os.path.abspath(__file__), "--manifest", mutated, "--repo", repo],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-    if proc.returncode == 0:
-        print("FAIL selftest: the checker accepted a manifest with SAST deleted — it cannot say no", file=sys.stderr)
-        return 4
-    if "sast" not in (proc.stdout + proc.stderr):
-        print(
-            "FAIL selftest: the checker rejected the mutated manifest but never named SAST, so the "
-            f"rejection was for another reason:\n{proc.stdout}{proc.stderr}",
-            file=sys.stderr,
-        )
-        return 4
-    print(
-        "ok   selftest: deleting the SAST entry from a copy of the manifest makes this checker exit "
-        f"{proc.returncode} and name it"
-    )
-    return 0
+        for what, mutate in mutations:
+            mutated = json.loads(json.dumps(manifest))
+            mutate(mutated)
+            path = os.path.join(tmp, "absent-checks.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(mutated, fh)
+            proc = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), "--manifest", path, "--repo", repo],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            if proc.returncode == 0:
+                print(
+                    f"FAIL selftest: the checker accepted a manifest in which {what} — it cannot say no",
+                    file=sys.stderr,
+                )
+                failures += 1
+                continue
+            if "container-scan" not in (proc.stdout + proc.stderr):
+                print(
+                    f"FAIL selftest: the checker rejected the manifest in which {what} but never named "
+                    f"container-scan, so the rejection was for another reason:\n{proc.stdout}{proc.stderr}",
+                    file=sys.stderr,
+                )
+                failures += 1
+                continue
+            print(
+                f"ok   selftest: {what} makes this checker exit {proc.returncode} and name container-scan"
+            )
+    return 4 if failures else 0
 
 
 def main() -> int:

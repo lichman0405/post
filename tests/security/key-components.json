@@ -1,0 +1,208 @@
+{
+  "what": [
+    "docs/40_OPEN_SOURCE_LICENSES.md:3 asks the SBOM to name the versions and",
+    "licences of what this repository actually ships. docs/25_CICD_DEVOPS.md §23",
+    "item 10 asks CI to produce it. This manifest is the list of components",
+    "that MUST be findable when it is produced — one entry per dependency",
+    "docs/40 and the task books name by name — plus, for the names that are",
+    "genuinely not package dependencies of this tree, the witness that says",
+    "where they live instead.",
+    "",
+    "Every entry is checked by tests/security/check-sbom.py, and an entry whose",
+    "witness stops holding turns its row red. Two witness kinds exist because",
+    "this tree has both cases:"
+  ],
+  "witness_kinds": {
+    "in-sbom": "the component must appear in the named face's CycloneDX document (id matched as module path / group+name / pypi name)",
+    "present-elsewhere": "the thing is in the tree but not in any package SBOM (a container image, a code generator, a tool). Its `witness` command must print something, and what it prints appears in the row's evidence",
+    "absent-from-tree": "the SBOM key-component list names it but this tree does not depend on it. Its `witness` must print nothing — the moment the tree gains it, this entry goes red and the manifest has to be updated to require it in the SBOM"
+  },
+  "floors": {
+    "what": "A component count below these is a broken generation, not a small tree: an SBOM that lost its components would verify vacuously. Set well under today's count.",
+    "go": 20,
+    "node": 250,
+    "python": 4
+  },
+  "counts_today": {
+    "go": 26,
+    "node": 364,
+    "python": 6
+  },
+  "components": [
+    {
+      "name": "pgx (PostgreSQL driver)",
+      "layer": "go",
+      "sbom": "go",
+      "match": {
+        "kind": "golang-module",
+        "id": "github.com/jackc/pgx/v5"
+      },
+      "why": "CLAUDE.md §7 names pgx/sqlc as the canonical database access stack; sqlc generates against it (sqlc.yaml)."
+    },
+    {
+      "name": "Go toolchain",
+      "layer": "go",
+      "sbom": null,
+      "witness": "awk '/^go /{print \"go.mod: \"; print; exit}' go.mod",
+      "expect": {
+        "stdout_nonempty": true
+      },
+      "why": "The toolchain version is a build input, not a module dependency, so CycloneDX has no component for it; go.mod's `go` directive is its pin (CLAUDE.md §7: Go 1.27.x)."
+    },
+    {
+      "name": "sqlc",
+      "layer": "go",
+      "sbom": null,
+      "witness": "grep -m1 -o '\\bv1\\.[0-9][0-9.]*' sqlc.yaml",
+      "expect": {
+        "stdout_nonempty": true
+      },
+      "why": "A code generator, not a linked dependency: it is not in go.mod, so it is absent from the module SBOM. sqlc.yaml and infra/migrations/README.md carry its pin (v1.31.1), and tests/integration/check-sqlc-drift.sh is what holds the generated code to it."
+    },
+    {
+      "name": "chi",
+      "layer": "go",
+      "sbom": null,
+      "witness": "grep -n 'go-chi/chi' go.mod go.sum",
+      "expect": {
+        "stdout_empty": true
+      },
+      "why": "docs/40's key-component list names chi, and the correct answer for THIS tree is that it is not here: CLAUDE.md §7 says \"net/http + chi 风格轻量路由\", i.e. chi-STYLE routing on the standard library, and that is what the tree does. The witness is the evidence: a grep that must find nothing. Add chi as a real dependency and this entry turns red, which is the point — the manifest would then have to require it in the module SBOM."
+    },
+    {
+      "name": "Next.js",
+      "layer": "node",
+      "sbom": "node",
+      "match": {
+        "kind": "npm",
+        "id": "next"
+      },
+      "why": "CLAUDE.md §7: Next.js 16 Active LTS is the frontend framework."
+    },
+    {
+      "name": "React",
+      "layer": "node",
+      "sbom": "node",
+      "match": {
+        "kind": "npm",
+        "id": "react"
+      },
+      "why": "CLAUDE.md §7 names React with Next.js."
+    },
+    {
+      "name": "Primer React",
+      "layer": "node",
+      "sbom": "node",
+      "match": {
+        "kind": "npm",
+        "id": "@primer/react"
+      },
+      "why": "CLAUDE.md §10 and §7: the UI is GitHub Primer, and @primer/react is the component library."
+    },
+    {
+      "name": "Octicons (Primer icons)",
+      "layer": "node",
+      "sbom": "node",
+      "match": {
+        "kind": "npm",
+        "id": "@primer/octicons-react"
+      },
+      "why": "CLAUDE.md §7 names Primer/Octicons; this is the icon package the web app imports."
+    },
+    {
+      "name": "Playwright",
+      "layer": "node",
+      "sbom": null,
+      "witness": "grep -l '\"playwright\"' tests/*/package.json | head -1",
+      "expect": {
+        "stdout_nonempty": true
+      },
+      "why": "The browser suites live in 13 separate npm projects under tests/ (each with its own package-lock.json), outside the pnpm workspace whose SBOM is .sbom/node.cdx.json — so this is a present-elsewhere entry, not a missing one. The witness prints one of the projects that pins it; today all 13 pin 1.55.0."
+    },
+    {
+      "name": "pymatgen",
+      "layer": "python",
+      "sbom": null,
+      "witness": "grep -m1 '^dependencies = \\[\\]$' services/scientific-adapter/pyproject.toml",
+      "expect": {
+        "stdout_nonempty": true
+      },
+      "why": "docs/40 and the adapter's own pyproject both say the scientific Python stack arrives with the adapter tasks; today the adapter's dependency list is literally empty, and its SBOM (6 components) is its dev tooling only. The witness asserts the empty list: the first scientific dependency added makes this entry red, and the manifest then has to require pymatgen in the Python SBOM."
+    },
+    {
+      "name": "ASE (Atomic Simulation Environment)",
+      "layer": "python",
+      "sbom": null,
+      "witness": "grep -m1 '^dependencies = \\[\\]$' services/scientific-adapter/pyproject.toml",
+      "expect": {
+        "stdout_nonempty": true
+      },
+      "why": "Same entry as pymatgen, and the same witness: ASE is named by docs/40 as a scientific dependency and is not in the tree yet. Kept as its own entry so the SBOM key-component list can name both without either one hiding the other."
+    },
+    {
+      "name": "PostgreSQL + pgvector",
+      "layer": "infra",
+      "sbom": null,
+      "witness": "grep -m1 'image: pgvector/pgvector:' docker-compose.yml",
+      "expect": {
+        "stdout_nonempty": true
+      },
+      "why": "CLAUDE.md §7/§8: PostgreSQL + pgvector is the scientific truth store. It is a service image, not a package dependency, so no package SBOM carries it.",
+      "licence": "PostgreSQL Licence (permissive, BSD-like)",
+      "judgement": "allow",
+      "image": "pgvector/pgvector:0.8.6-pg16"
+    },
+    {
+      "name": "Redis",
+      "layer": "infra",
+      "sbom": null,
+      "witness": "grep -m1 'image: redis:' docker-compose.yml",
+      "expect": {
+        "stdout_nonempty": true
+      },
+      "why": "CLAUDE.md §7: Redis for cache/async. A service image, not a package dependency.",
+      "licence": "RSALv2 / SSPLv1 (Redis 7.4 onwards) — commercial-restriction, NOT open source by OSI's definition",
+      "judgement": "needs-adr",
+      "image": "redis:7.4.11-alpine"
+    },
+    {
+      "name": "MinIO (S3-compatible blob store)",
+      "layer": "infra",
+      "sbom": null,
+      "witness": "grep -m1 'image: quay.io/minio/minio' docker-compose.yml",
+      "expect": {
+        "stdout_nonempty": true
+      },
+      "why": "CLAUDE.md §7: S3-compatible blob storage, MinIO locally. A service image. Note the blob API contract is the S3 protocol, so the local container is an implementation choice rather than a code dependency.",
+      "licence": "AGPL-3.0",
+      "judgement": "needs-adr",
+      "image": "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
+    },
+    {
+      "name": "Gitea",
+      "layer": "infra",
+      "sbom": null,
+      "witness": "grep -m1 'image: gitea/gitea:' docker-compose.yml",
+      "expect": {
+        "stdout_nonempty": true
+      },
+      "why": "CLAUDE.md §7: internal Gitea behind the GitProvider adapter. A service image.",
+      "licence": "MIT",
+      "judgement": "allow",
+      "image": "gitea/gitea:1.27.3"
+    },
+    {
+      "name": "Mailpit (dev-stack mail sink)",
+      "layer": "infra",
+      "sbom": null,
+      "witness": "grep -m1 'image: axllent/mailpit' docker-compose.yml",
+      "expect": {
+        "stdout_nonempty": true
+      },
+      "why": "The dev stack's SMTP sink (ops/DEV_COMMANDS.md:71, docs/64_UBUNTU_DEV_ENV.md:104). It runs only in the local compose stack, not in a deployment, but it is an image the tree pulls, so it is recorded here like the other four. Its licence is NOT verified by this tree: nothing in the repository states one and the check could not be performed offline. Recorded as `unknown` — which the licence audit prints as UNVERIFIED — rather than guessed at, so the gap is a named line somebody has to close rather than a silent pass.",
+      "licence": "UNVERIFIED — no licence recorded anywhere in this tree (axllent/mailpit publishes MIT, but that claim was not checked here)",
+      "judgement": "unknown",
+      "image": "axllent/mailpit:v1.31.1"
+    }
+  ]
+}

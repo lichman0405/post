@@ -42,6 +42,7 @@ BROWSER_E2E_NO_DB_SUITES := $(filter-out $(BROWSER_E2E_DB_SUITES),$(BROWSER_E2E_
 .PHONY: help bootstrap check build rddev test test-integration bench dev smoke sync-schemas \
 	check-schema-drift check-schema-snapshot check-openapi check-spec-version fmt-check staticcheck lint-python type-python \
 	progress ci migrate search-rebuild search-embed infra-up infra-init infra infra-down infra-ps infra-logs \
+	security-tools security-gate \
 	browser-list browser-smoke browser-smoke-% browser-e2e browser-e2e-nodb browser-e2e-db browser-e2e-% browser-suites browser-ok-arity a11y i18n \
 	observability-smoke observability-trace observability-route
 
@@ -308,6 +309,15 @@ fmt-check: ## fail when any Go file is not gofmt-formatted (legacy baseline: ops
 
 staticcheck: ## honnef.co static analysis, pinned version (grandfathered baseline: ops/ci/staticcheck-baseline.txt)
 	bash scripts/staticcheck.sh
+
+# The Master Security/Quality Gate (docs/23 §11, docs/25 §23 items 9-10, docs/40).
+# Two targets, deliberately: installing scanners and judging the tree are
+# different jobs, and CI runs the first as the step before the second.
+security-tools: ## install the pinned SAST/SBOM scanners the security gate runs (re-runnable)
+	bash tests/security/install-security-tools.sh
+
+security-gate: ## run the Master Security/Quality Gate (docs/23 §11) over this tree
+	bash tests/security/master-security-gate.sh
 
 lint-python: ## ruff lint over the scientific adapter (config: ops/ci/ruff.toml)
 	cd services/scientific-adapter && uvx ruff check . --config ../../ops/ci/ruff.toml

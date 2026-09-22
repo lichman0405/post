@@ -63,3 +63,13 @@ Thumbs.db
 # REFUSES any other location inside the working tree, so this entry and the
 # Go constant are the two halves of one rule and must be changed together.
 .backup-dr/
+
+# SBOM artifacts (T1209, docs/40). tests/security/sbom.sh writes CycloneDX
+# documents here for the Go modules, the npm workspace and the Python adapter,
+# and the license-audit row reads them back. They are build output: machine
+# specific, reproducible from go.mod / pnpm-lock.yaml / uv.lock, and stale the
+# moment a lockfile moves — a committed SBOM is an inventory of a tree that no
+# longer exists, which is the drift docs/40:3 asks CI to catch rather than to
+# publish. The directory is overridable (POST_SBOM_FACE_DIR) for mutation
+# checks, but this entry and sbom.sh's default must agree.
+.sbom/

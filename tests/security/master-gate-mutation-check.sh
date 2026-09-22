@@ -24,11 +24,18 @@
 #                           and exit non-zero. This is the silent-skip rule
 #                           measured on the real gate, from outside it
 #                           (`--selftest` measures it from inside).
-#   5. absence manifest     delete the SAST entry from a copy of
-#                           ops/security/absent-checks.json; the checker must
-#                           reject the manifest and say which capability went
-#                           missing. A gap that can be deleted quietly is not
-#                           written down.
+#   5. absence manifest     rot the recorded absence in a copy of
+#                           ops/security/absent-checks.json two ways: delete
+#                           the absence outright, and — in the other shape —
+#                           leave it in place with its guard_check_id pointed
+#                           at a check id this gate does not register. The
+#                           checker must reject both and say which capability
+#                           or which guard went missing. A gap that can be
+#                           deleted quietly, or whose guard nobody runs, is not
+#                           written down. The mutating script's own exit code
+#                           is checked here, so a mutation that failed to
+#                           change anything fails the run instead of letting an
+#                           unmutated copy be measured and called green.
 #   6. vuln-go              swap the INPUT that decides the dependency
 #                           audit's verdict: a synthetic vulnerability
 #                           database naming a symbol this tree calls, reached
@@ -101,10 +108,18 @@ fi
 # The copy, and the two manifests that make "the same tree" checkable.
 # ---------------------------------------------------------------------------
 tree_manifest() { # tree_manifest <dir> > manifest
+  # This list has to mirror the tar copy's exclusions exactly: a directory the
+  # copy does not carry must not be in the manifest either, or the check below
+  # reports "the copy differs" about the files the copy was never meant to
+  # have. `.venv` nests — `services/scientific-adapter/.venv`, which
+  # `make security-tools` and `make bootstrap` both create, and which the
+  # gate's `sbom-python` row requires — so it needs the `*/` pattern too, as
+  # node_modules and .next already have.
   ( cd "$1" && find . -type f \
       -not -path './.git' -not -path './.git/*' \
       -not -path './node_modules/*' -not -path '*/node_modules/*' \
-      -not -path './.next/*' -not -path '*/.next/*' -not -path './out/*' -not -path './.venv/*' \
+      -not -path './.next/*' -not -path '*/.next/*' -not -path './out/*' \
+      -not -path './.venv/*' -not -path '*/.venv/*' \
       -not -path '*/__pycache__/*' \
       -print0 | sort -z | xargs -0 sha256sum )
 }
@@ -292,35 +307,92 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 5. absence manifest — delete a named gap and require the checker to
-#    refuse. Deleting an absence is the quietest way to make a security
-#    inventory look complete, so it has to be the loudest failure.
+# 5. absence manifest — the recorded gap is protected two ways, so it is rotted
+#    in two shapes and the checker has to refuse both: the absence deleted
+#    outright (the quietest way to make a security inventory look complete),
+#    and the absence left in place with its guard disarmed (a guarded absence
+#    whose guard is a check id the gate does not register has no guard at all).
+#
+#    Both mutating scripts' exit codes are checked. The mutation this replaces
+#    deleted the `sast` entry from `absent[]` and asserted that the list had
+#    shrunk; when the v2 manifest stopped recording SAST (it is a gate row now)
+#    the assertion fired, the copy was left unmutated, and — because nothing
+#    read that exit code — the checker's green on an unmutated copy was
+#    reported as a missed mutation. A mutation that did not change anything has
+#    to fail this script, not pass it.
 # ---------------------------------------------------------------------------
-step "5. absence manifest: delete the SAST gap from a copy and require a refusal"
-cp "$SCRATCH/ops/security/absent-checks.json" "$WORK/manifest-with-sast.json"
-python3 - "$WORK/manifest-with-sast.json" <<'PY'
+step "5. absence manifest: the recorded absence deleted, and its guard disarmed — both must be refused"
+MANIFEST="$SCRATCH/ops/security/absent-checks.json"
+# Which absence to rot comes out of the manifest itself, so this mutation
+# cannot rot the way the one it replaces did: if the file records no absence at
+# all there is nothing to measure and the run fails loudly below.
+ABSENT_ID="$(python3 -c 'import json,sys; a=json.load(open(sys.argv[1], encoding="utf-8")).get("absent") or []; print(a[0].get("id","") if a else "")' "$MANIFEST")"
+if [ -z "$ABSENT_ID" ]; then
+  fail "MUTATION 5 NOT APPLIED: $MANIFEST records no absence, so there is nothing to delete or disarm. This mutation measures the checker's refusal; with nothing to rot it would measure nothing."
+else
+  # (a) delete the recorded absence outright.
+  cp "$MANIFEST" "$WORK/manifest-absent-deleted.json"
+  if ! python3 - "$WORK/manifest-absent-deleted.json" "$ABSENT_ID" <<'PY'
 import json, sys
-p = sys.argv[1]
+p, absent_id = sys.argv[1], sys.argv[2]
 m = json.load(open(p, encoding="utf-8"))
 before = len(m["absent"])
-m["absent"] = [a for a in m["absent"] if a.get("id") != "sast"]
+m["absent"] = [a for a in m["absent"] if a.get("id") != absent_id]
 for item in m["items"]:
-    if item.get("id") == "sast":
-        item["absent_id"] = "sast-which-is-no-longer-listed"
-assert len(m["absent"]) == before - 1, "the mutation did not remove an entry"
+    if item.get("absent_id") == absent_id:
+        item["absent_id"] = absent_id + "-which-is-no-longer-listed"
+assert len(m["absent"]) == before - 1, f"the mutation did not remove the '{absent_id}' entry"
 json.dump(m, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-print(f"mutation applied: {before} absent entries -> {len(m['absent'])}")
+print(f"mutation applied: deleted the recorded absence '{absent_id}' ({before} -> {len(m['absent'])})")
 PY
-python3 tests/security/check-absent-manifest.py --manifest "$WORK/manifest-with-sast.json" --repo "$ROOT" >"$WORK/manifest.log" 2>&1
-manifest_rc=$?
-if [ "$manifest_rc" -eq 0 ]; then
-  fail "MUTATION 5 NOT CAUGHT: the checker accepted a manifest with the SAST gap deleted"
-elif grep -q 'sast' "$WORK/manifest.log"; then
-  ok "MUTATION 5: the checker refused the manifest (exit $manifest_rc) and named the missing capability"
-  grep -E '^FAIL' "$WORK/manifest.log" | head -3 | sed 's/^/     /'
-else
-  fail "MUTATION 5 CAUGHT BY SOMETHING ELSE: exit $manifest_rc without naming SAST:"
-  tail -6 "$WORK/manifest.log" | sed 's/^/     /'
+  then
+    fail "MUTATION 5a NOT APPLIED: the manifest copy could not be mutated (the reason is above). An unmutated copy would be checked, and its green would say nothing about the checker."
+  else
+    python3 tests/security/check-absent-manifest.py --manifest "$WORK/manifest-absent-deleted.json" --repo "$ROOT" >"$WORK/manifest-deleted.log" 2>&1
+    manifest_rc=$?
+    if [ "$manifest_rc" -eq 0 ]; then
+      fail "MUTATION 5a NOT CAUGHT: the checker accepted a manifest whose recorded absence ('$ABSENT_ID') had been deleted"
+    elif grep -q "$ABSENT_ID" "$WORK/manifest-deleted.log"; then
+      ok "MUTATION 5a: the checker refused the manifest (exit $manifest_rc) and named the capability whose absence went missing"
+      grep -E '^FAIL' "$WORK/manifest-deleted.log" | head -3 | sed 's/^/     /'
+    else
+      fail "MUTATION 5a CAUGHT BY SOMETHING ELSE: exit $manifest_rc without naming '$ABSENT_ID':"
+      tail -6 "$WORK/manifest-deleted.log" | sed 's/^/     /'
+    fi
+  fi
+
+  # (b) keep the absence, disarm its guard.
+  cp "$MANIFEST" "$WORK/manifest-guard-disarmed.json"
+  if ! python3 - "$WORK/manifest-guard-disarmed.json" "$ABSENT_ID" <<'PY'
+import json, sys
+p, absent_id = sys.argv[1], sys.argv[2]
+m = json.load(open(p, encoding="utf-8"))
+for a in m["absent"]:
+    if a.get("id") == absent_id:
+        guard = a.get("guard_check_id") or ""
+        assert guard, f"the absence '{absent_id}' names no guard_check_id, so there is no guard to disarm"
+        a["guard_check_id"] = guard + "-that-does-not-exist"
+        print(f"mutation applied: the guard on '{absent_id}' now points at '{a['guard_check_id']}'")
+        break
+else:
+    raise AssertionError(f"no `absent` entry with id '{absent_id}' to disarm")
+json.dump(m, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+PY
+  then
+    fail "MUTATION 5b NOT APPLIED: the guard could not be disarmed in the manifest copy (the reason is above). An unmutated copy would be checked, and its green would say nothing about the checker."
+  else
+    python3 tests/security/check-absent-manifest.py --manifest "$WORK/manifest-guard-disarmed.json" --repo "$ROOT" >"$WORK/manifest-guard.log" 2>&1
+    guard_rc=$?
+    if [ "$guard_rc" -eq 0 ]; then
+      fail "MUTATION 5b NOT CAUGHT: the checker accepted a guarded absence whose guard_check_id names a check this gate does not register"
+    elif grep -q "${ABSENT_ID}-that-does-not-exist" "$WORK/manifest-guard.log"; then
+      ok "MUTATION 5b: the checker refused the manifest (exit $guard_rc) and named the guard that is not a row of this gate"
+      grep -E '^FAIL' "$WORK/manifest-guard.log" | head -3 | sed 's/^/     /'
+    else
+      fail "MUTATION 5b CAUGHT BY SOMETHING ELSE: exit $guard_rc without naming the disarmed guard:"
+      tail -6 "$WORK/manifest-guard.log" | sed 's/^/     /'
+    fi
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -413,5 +485,5 @@ if [ "$FAILS" -ne 0 ]; then
   printf 'master-gate-mutation-check: FAILED — %d finding(s)\n' "$FAILS" >&2
   exit 1
 fi
-printf 'master-gate-mutation-check: OK — six mutations, six instruments that said no, and the tree left as it was found\n'
+printf 'master-gate-mutation-check: OK — six mutations (the absence manifest one in both of its shapes), six instruments that said no, and the tree left as it was found\n'
 exit 0

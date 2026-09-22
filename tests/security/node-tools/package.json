@@ -1,0 +1,12 @@
+{
+  "name": "post-sast-node-tools",
+  "private": true,
+  "version": "0.0.0",
+  "description": "The Node/TypeScript SAST toolchain for `make security-tools` (tests/security/sast.sh node). It is its own npm project on purpose: apps/web's devDependencies are pinned by pnpm-lock.yaml, and a security tool added to the workspace would move that lockfile for every developer on every install. Everything here is an exact pin (no ^, no ~) and every package is recorded in ops/security/new-dependencies.json with its license, purpose and alternative, which is docs/40's first principle.",
+  "dependencies": {
+    "eslint": "9.39.5",
+    "eslint-plugin-security": "4.0.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.70.1"
+  }
+}
