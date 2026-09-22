@@ -9733,7 +9733,7 @@
       ]
     },
     "T1101": {
-      "status": "running",
+      "status": "worker_failed",
       "started_at": "2026-09-21T23:18:21Z",
       "worker_run_id": "run-e307b9af953657a6",
       "rejection_reason": "# T1101 第三轮 review 结论：request_changes\n\n核心数字（独立复现）对得上：12 页 0 px、pull-detail 170 px、project-conflicts 1280x1199→1280x1185、run.sh 88 ok/0 FAIL、+660/−801 与 CSS +183/−444，变异日志也一致。\n\n但有一处**未经授权且现有仪器都看不见**的外观变更：\n\n- `pull-detail.css:298 .pull-change-kind` 与 `:329 .pull-change-moved` 被删掉，改由 `packages/ui/src/ui.css` 的 `.post-diff-kind`/`.post-diff-note` 渲染。\n- 评审人在 /tmp 独立副本上实测 PR 页 scientific tab：\n  - HEAD 的 kind chip 是 59.8x18 / 55.9x18 / 57x18、radius 10px、font 11px/16px、padding 0 6px、neutral 文字 rgb(31,35,40)。\n  - 现在是 67.9x22 / 63.7x22 / 65x22、radius 999px、font 12px/18px、padding 1px 8px、neutral 文字 rgb(89,99,110)。\n  - moved 注记 175.2x18 → 193.9x22；面板 449px → 488px 高；同一面板区域 29807 px 不同（守卫容差 64）。\n- 这些元素只在 scientific/knowledge/evidence 非默认 tab 渲染，而 visual-regression.mjs 的 `PAGES` 只拍默认状态（ready 是 `[data-pull-panel=\"summary\"]`），所以基线对照、style-parity、section E 全看不见。\n- AC5 证据写「五处 10px 现在都是 6px」，但 `.pull-change-kind`/`.pull-change-moved` 已不存在，其替代者是 999px——证据被 diff 推翻。\n\n**返工要求：**\n1. 把这两个 chip 按 HEAD 度量写回 `pull-detail.css`（或让共享 Diff 组件能还原 HEAD 度量），并在 scientific tab 下实测像素等价。\n2. 同时修掉 RESULT.json 里 AC5 那条与 diff 矛盾的证据。\n3. 考虑把 `head-tree-visual.sh` 接进日常路径，并在 visual-regression.mjs 里给 pull-detail 补拍 scientific/knowledge/evidence tab 后的基线，堵住非默认状态的覆盖空洞。\n\n其余 minor/nit 见 review RESULT.json，不阻塞。\n",
@@ -9827,6 +9827,13 @@
           "at": "2026-09-21T23:18:21Z",
           "run_id": "run-e307b9af953657a6",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "worker_failed",
+          "at": "2026-09-22T00:14:02Z",
+          "run_id": "run-675a9742919c38f5",
+          "reason": "worker exited 1"
         }
       ]
     },
@@ -10521,9 +10528,11 @@
       ]
     },
     "T1112": {
-      "status": "verification",
+      "status": "merged",
       "started_at": "2026-09-21T23:20:47Z",
       "worker_run_id": "run-57e750d3bd78f834",
+      "accepted_by_supervisor_at": "2026-09-21T23:50:54Z",
+      "merged_at": "2026-09-22T00:11:53Z",
       "rejection_reason": "# T1112 rebaseline：main 已推进，web 演示 UI 的回归已修复\n\n当前 main 已合并：\n- PR #337 [T1202] Canonical MOF Workflow E2E\n- PR #338 hotfix/web-demo-regressions：移除 CSS gradient 违规、为 project overview 增加 overview/counts/branches 的 null-safety\n\n上一轮 review 指出 browser suites 因 apps/web 回归（projects.css gradient、projects/[id]/page.tsx 缺少 null-check）而无法通过。这些回归已在 main 修复，因此将 T1112 推到当前 main 重新验证。\n\n要求不变：浏览器测试套件接进 make，断言写错必须报错；G1/G2/G3 通过。\n",
       "history": [
         {
@@ -10586,6 +10595,19 @@
           "at": "2026-09-21T23:35:12Z",
           "run_id": "run-2430dd63ec5581d3",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-21T23:50:54Z",
+          "run_id": "run-e378112dcb829287"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-22T00:11:53Z",
+          "run_id": "run-5d91ebfbdc224164",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -10829,9 +10851,10 @@
       ]
     },
     "T1205": {
-      "status": "running",
+      "status": "accepted",
       "started_at": "2026-09-21T23:39:29Z",
       "worker_run_id": "run-43db48e6bfe6f5c8",
+      "accepted_by_supervisor_at": "2026-09-22T00:24:29Z",
       "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/supervisor/task-status-running-2026-09-22 *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
       "history": [
         {
@@ -10881,6 +10904,19 @@
           "at": "2026-09-21T23:39:29Z",
           "run_id": "run-43db48e6bfe6f5c8",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-21T23:50:54Z",
+          "run_id": "run-e7d6201abb4e6962",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-22T00:24:29Z",
+          "run_id": "run-ce1f7540a50f310d"
         }
       ]
     },
@@ -10903,9 +10939,10 @@
       "merged_at": null
     },
     "T1208": {
-      "status": "verification",
+      "status": "accepted",
       "started_at": "2026-09-21T23:36:20Z",
       "worker_run_id": "run-ab6498671856d47e",
+      "accepted_by_supervisor_at": "2026-09-22T00:22:22Z",
       "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/supervisor/task-status-running-2026-09-22 *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
       "history": [
         {
@@ -10962,6 +10999,12 @@
           "at": "2026-09-21T23:39:30Z",
           "run_id": "run-0bed469157536892",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-22T00:22:22Z",
+          "run_id": "run-a9e842fa7fc9f2ad"
         }
       ]
     }
