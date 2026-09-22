@@ -17385,3 +17385,19 @@ T1205 是此刻**唯一** dispatchable 的任务，且挂在主链 `max(T1202,T1
 **派它是驱动的活，返工是我的活**。所以返工排在它后面：
 `.rddev/runtime/wait-rework-T1101.sh` 等的条件是「槽位有空 **且** T1205 已离开 `todo`」。
 那个脚本**只决定什么时候试，不决定任何 Gate 是否通过**——每个动作都走 rddev，由它按自己的规则拒绝。
+
+## L2-20260922-1 — Integration tree 按 gate run 隔离，避免并发误删
+
+- **决策**：`prepareIntegrationTree` 改为按**gate run id**生成唯一的 integration tree 路径
+  （`.rddev/runtime/integration/<TASK>-<RUNID>`），不再所有 run 共享一个目录；无 run id 的旧入口
+  保留为共享路径，供现有测试/fixture 兼容。
+- **背景**：T1206 验收时同一任务出现两个并发的 `rddev task accept`（driver + manual），
+  第二个 run 的 `prepareIntegrationTree` 把第一个 run 正在读写的 integration tree 删除并重建，
+  导致 `internal/devorchestrator` 测试找不到 `../../specs/orchestrator/task-package.schema.json`，
+  以及 `gitea-e2e-guard-unit-test.sh` 复制 `tests/acceptance/gitea-real-services-e2e.sh` 时
+  报 `No such file or directory`。这些 red 是 harness 并发冲突，不是任务交付物缺陷。
+- **影响**：G2/G3 的 integration tree 存储边界变化，但语义不变（仍是 current main + task patch）。
+  解决了 "manual accept 与 driver 并发" 以及 "driver 在相邻 poll 内对同一任务启动多次 accept"
+  导致的假性失败。属于 `internal/devorchestrator` 的 bug fix，不触及产品语义。
+- **可逆性**：可逆；若以后改为带锁的共享树，可移除 run id 路径并加文件锁。当前选择更简单且无锁。
+
