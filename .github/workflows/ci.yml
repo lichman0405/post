@@ -367,3 +367,64 @@ jobs:
           I18N_API_ADDR: "127.0.0.1:18198"
           I18N_WEB_PORT: "31118"
         run: make i18n
+  security-master:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_dev_pw
+          POSTGRES_DB: post
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4.11-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: "security-master: declare where the installers put their tools (go install -> GOPATH/bin, uv tool -> ~/.local/bin) so later steps find them"
+        run: if [ -n "${GITHUB_PATH:-}" ]; then echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"; echo "$HOME/.local/bin" >> "$GITHUB_PATH"; fi
+      - name: "security-master: pnpm (corepack) — the SAST-Node and SBOM-Node rows run it, at the pin package.json declares"
+        run: corepack enable pnpm
+      - name: "security-master: uv — the bandit install and the SBOM-Python row run it"
+        run: pip install uv
+      # The two below are what this job's own first run found missing. The gate
+      # runs every row it can and prints, per row, only the last 25 lines of
+      # that row's log — so a row whose *script* shells out to a tool the
+      # runner does not ship does not skip: it FAILs, and the reason is usually
+      # above the 25-line window (this is how the owasp-smoke row failed with
+      # nothing but `G3 security-smoke: 1 failure(s)` in the job output).
+      - name: "security-master: redis-cli — the owasp-smoke row resets and reads back its own edge counters through it before measuring the rate-limit boundary"
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools
+      - name: "security-master: PyYAML — the deploy-template row's validator parses the staging compose file as YAML (the same install the spec-validation job does)"
+        run: pip install pyyaml
+      - name: "security-master: govulncheck (the vuln-go row's instrument; pinned here because nothing else pins it)"
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+      - name: "security-master: install every pinned scanner (make security-tools)"
+        run: make security-tools
+      - name: "security-master: the Master Security/Quality Gate (docs/23 §11)"
+        run: bash tests/security/master-security-gate.sh
+        env:
+          POSTGRES_TEST_ADMIN_URL: postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post
+          POST_G3_REDIS_ADDR: 127.0.0.1:6379
