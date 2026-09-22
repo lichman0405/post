@@ -17822,3 +17822,46 @@ CI 会把"项目做完了"报成失败。这不是产品缺陷，是**仪器缺�
 `bash scripts/staticcheck.sh` 本地也跑过（退出码 0，6 条为既有基线），
 `ops/ci/staticcheck-baseline.txt` 与 `gofmt-baseline.txt` 里都没有本文件的条目，
 所以这次行号位移不会连累 CI 的 `go` 作业。
+
+## ㊶ T1209 第 1 次 collect 被拒：**产品交付没问题，是 RESULT 的分类错误**（L1，2026-09-23）
+
+### 1. 拒在哪（逐字）
+
+```
+[FAIL] result-consistency: result-acceptance: status completed but acceptance
+entries not passed: 迁移号：需要迁移时用 00149 (not_applicable)
+```
+
+同一份 collect 报告里其余 **13 项全部 [ok]**：范围（23 个改动路径，全在 `allowed_scope` 内）、
+无残留进程、HEAD == 基线 `9292ec0`、分支未移动、无新 ref、RESULT 通过 schema、23 条测试全 passed、
+必需测试有 passed 条目、无秘密材料。
+
+### 2. 规则与它为什么是对的
+
+`internal/devorchestrator/result_consistency.go:159-166`：`status: completed` 的 RESULT 里
+**每一条 acceptance 条目都必须是 `passed`**。`not_applicable` 是合法取值
+（`specs/orchestrator/worker-result.schema.json:92`），但不能与 `completed` 同时出现——
+"完成"这句话的含义就是"我列的每条判据都过了"。
+
+**我没有把这条规则放宽**（那会是把 Gate 改软），也没有自己动手改 Worker 的 RESULT
+（那是它的记录，不是我的）。
+
+### 3. 真正的错是什么
+
+`prompt.md:57` 那句「If this task adds a SQL migration, its number is **00149**」是**有条件的派工嘱托**，
+不是任务书里的验收判据（书里那条判据自己写了"没有新增迁移"，Worker 也已经列成第 9 条并通过）。
+Worker 另起第 14 条、把条件句当判据、标 `not_applicable`——事实没错，分类错了。
+
+### 4. 处置：返工同一 session（diff 保留），只改记账
+
+`rddev worker rework T1209 --reason-file /tmp/t1209-rework-1.md`（run `run-f414bc36f680fa1f`）。
+信里逐字引了 collect、给了两处修改位置（并进 #9 或改写成成立的条件并标 `passed`），
+并逐条禁止：动工作树任何文件、写账本、重跑整套测试。**理由**：产品交付一个字没动，
+不该为一条记账烧掉一整轮工作；而"重跑一遍"会引入与判据无关的新变量。
+
+### 5. 附带确认的一件事（操作知识）
+
+返工派工后**不需要**手工 `rddev drive --clear-decision`：`staleDecisions`
+（`internal/devorchestrator/driver.go:334`）会丢掉那些 `run_id` 与登记表当前 run 不再相符的决定。
+实测：04:42:13 记下的决定，在返工 run `run-f414bc36f680fa1f` 落到 registry 后，
+于 04:44:23 的下一拍被丢掉，`rddev status` 从 "1" 变 "0"，驱动恢复 `T1209 still working`。
