@@ -27,8 +27,8 @@ func TestGatesSpecSyncsWithCIWorkflow(t *testing.T) {
 	}
 
 	ci := parseCIWorkflow(t, filepath.Join(root, ".github", "workflows", "ci.yml"))
-	if len(ci) != 7 {
-		t.Fatalf("ci.yml declares %d jobs, want 7", len(ci))
+	if len(ci) != 8 {
+		t.Fatalf("ci.yml declares %d jobs, want 8", len(ci))
 	}
 	for job, steps := range ci {
 		gj, ok := spec.Jobs[job]
@@ -52,8 +52,13 @@ func TestGatesSpecSyncsWithCIWorkflow(t *testing.T) {
 		}
 	}
 
-	// The required-jobs list is the G4 assertion's backbone: every CI job,
-	// exactly the CI jobs, in canonical order.
+	// The required-jobs list is the G4 assertion's backbone: the CI jobs a
+	// merge is conditioned on. `observability` (T1109) is deliberately absent
+	// from it while it is new: it is wired in ci.yml and defined above so a
+	// real runner proves it green first, and promoting it is a one-line edit
+	// here, in spec.required_jobs and in G4's own list. Required and wired are
+	// different sets for exactly as long as that proof takes; nothing else may
+	// join this list without also leaving that state.
 	if !equalStrings(spec.RequiredJobs, []string{"spec-validation", "task-state", "go", "web", "python", "migration-integration", "acceptance"}) {
 		t.Errorf("required_jobs = %v, want ci.yml's jobs in canonical order", spec.RequiredJobs)
 	}

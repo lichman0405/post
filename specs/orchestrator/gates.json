@@ -293,6 +293,22 @@
       "requires_tasks": [
         "T1202"
       ]
+    },
+    "observability": {
+      "steps": [
+        {
+          "run": "corepack enable pnpm && pnpm install --frozen-lockfile"
+        },
+        {
+          "run": "pip install uv && cd services/scientific-adapter && uv sync --frozen"
+        },
+        {
+          "run": "docker pull pgvector/pgvector:0.8.6-pg16"
+        },
+        {
+          "run": "make observability-smoke"
+        }
+      ]
     }
   },
   "review": {
