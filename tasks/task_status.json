@@ -10851,10 +10851,11 @@
       ]
     },
     "T1205": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-21T23:39:29Z",
       "worker_run_id": "run-43db48e6bfe6f5c8",
       "accepted_by_supervisor_at": "2026-09-22T00:24:29Z",
+      "merged_at": "2026-09-22T00:44:18Z",
       "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/supervisor/task-status-running-2026-09-22 *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
       "history": [
         {
@@ -10917,17 +10918,34 @@
           "to": "accepted",
           "at": "2026-09-22T00:24:29Z",
           "run_id": "run-ce1f7540a50f310d"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-22T00:44:18Z",
+          "run_id": "run-370e3c53d6d8ea3b"
         }
       ]
     },
     "T1206": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-22T00:44:25Z",
+      "worker_run_id": "run-14635cdd4306eb42",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-22T00:44:22Z",
+          "run_id": "run-205d9fca6bdfb6df"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-22T00:44:25Z",
+          "run_id": "run-14635cdd4306eb42",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T1207": {
       "status": "todo",
@@ -10939,10 +10957,11 @@
       "merged_at": null
     },
     "T1208": {
-      "status": "accepted",
+      "status": "merged",
       "started_at": "2026-09-21T23:36:20Z",
       "worker_run_id": "run-ab6498671856d47e",
       "accepted_by_supervisor_at": "2026-09-22T00:22:22Z",
+      "merged_at": "2026-09-22T00:44:18Z",
       "rejection_reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/supervisor/task-status-running-2026-09-22 *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check",
       "history": [
         {
@@ -11005,6 +11024,12 @@
           "to": "accepted",
           "at": "2026-09-22T00:22:22Z",
           "run_id": "run-a9e842fa7fc9f2ad"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-22T00:44:18Z",
+          "run_id": "run-1ebabacbc67d2c99"
         }
       ]
     }
