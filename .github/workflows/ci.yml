@@ -3,10 +3,10 @@
 # scripts/ci.sh (keep the stage lists in sync).
 #
 # All jobs run on ubuntu-24.04 (docs/25, docs/64: CI runner aligned with
-# the canonical dev environment). Three of them need real infrastructure and
-# say why in their own comments — migration-integration and a11y each declare
-# a PostgreSQL service container, observability pulls the pinned pgvector
-# image. The rest pass on a bare runner.
+# the canonical dev environment). Four of them need real infrastructure and
+# say why in their own comments — migration-integration, a11y and i18n each
+# declare a PostgreSQL service container, observability pulls the pinned
+# pgvector image. The rest pass on a bare runner.
 name: ci
 
 on:
@@ -312,3 +312,58 @@ jobs:
           A11Y_API_ADDR: "127.0.0.1:18197"
           A11Y_WEB_PORT: "31117"
         run: make a11y
+
+  # Stage 10 — the i18n baseline (T1105). The same shape as the a11y job above,
+  # for the same reason: this is not a static checker. It builds @post/web for
+  # production, starts the shared Go API harness against a real PostgreSQL, and
+  # drives a real Chromium over the core routes in BOTH preferences — the copy
+  # switches, <html lang> follows it, the API requests are byte-identical across
+  # locales, and scientific quantities and units render identically.
+  #
+  # It needs Go (the harness is a Go program), node + pnpm (next build) and a
+  # PostgreSQL. It needs no step for the harness's own deps or for Chromium:
+  # run-i18n.sh does both itself (npm ci against tests/web-smoke/package-lock.json,
+  # then `npx playwright install chromium --only-shell`), exactly as run-a11y.sh
+  # does. The two suites take different port pairs and share nothing writable.
+  #
+  # Wall clock on a warm tree, measured locally: SUITE PASSED in 70-73 s over
+  # two independent runs (13 routes driven in both preferences, 12 with a
+  # byte-identical API payload); the suite itself prints those per-phase costs
+  # every run. On a cold runner the Chromium download and `next build` dominate,
+  # as they do for a11y. It runs alongside the other jobs rather than after them.
+  i18n:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_dev_pw
+          POSTGRES_DB: post
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: "i18n: web workspace deps (pnpm via corepack, frozen lockfile)"
+        run: corepack enable pnpm && pnpm install --frozen-lockfile
+      - name: "i18n: language switching + wire identity (real Chromium, fixture data)"
+        env:
+          POSTGRES_TEST_ADMIN_URL: postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post
+          # Same reasoning as the a11y job's pair above: the suite pre-flights
+          # its ports, and G2 re-runs these exact steps on a developer host
+          # where a Worker may be driving the same suite on its defaults
+          # (18194/31109) at the same moment.
+          I18N_API_ADDR: "127.0.0.1:18198"
+          I18N_WEB_PORT: "31118"
+        run: make i18n
