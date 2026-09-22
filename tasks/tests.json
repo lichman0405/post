@@ -987,9 +987,9 @@
       "name": "asset metadata tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T07:47:40Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `go test ./internal/assets/... ./internal/application/assetmetadata/... ./internal/persistence/... ./cmd/api/assetshttp/... -count=1` on the tree that was merged -- RESULT.json test label 'asset metadata tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-21T07:47:40Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0707-TEST-01",
@@ -1007,9 +1007,9 @@
       "name": "asset lineage",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T08:53:04Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `go test ./tests/integration/ -run TestAssetLineage -count=1 -v` on the tree that was merged -- RESULT.json test label 'asset lineage', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-21T08:53:04Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0709-TEST-01",
@@ -1027,9 +1027,9 @@
       "name": "asset canonical e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T10:12:36Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `go test ./tests/integration/ -run 'TestAssetCanonicalE2E$' -count=1 -v` on the tree that was merged -- RESULT.json test label 'asset canonical e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-21T10:12:36Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0711-TEST-01",
@@ -1157,9 +1157,9 @@
       "name": "attestation privacy e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T05:54:15Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `go test ./tests/integration -run '^TestAttestationPrivacyE2E$' -count=1 -v` on the tree that was merged -- RESULT.json test label 'attestation privacy e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-21T05:54:15Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0901-TEST-01",
@@ -1217,9 +1217,9 @@
       "name": "answer grounding tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T06:34:50Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `go test -count=1 -v ./tests/answer/` on the tree that was merged -- RESULT.json test label 'answer grounding tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-21T06:34:50Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0907-TEST-01",
@@ -1227,9 +1227,9 @@
       "name": "search ui e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T07:37:06Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `bash tests/e2e-search/run.sh` on the tree that was merged -- RESULT.json test label 'search ui e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-21T07:37:06Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0908-TEST-01",
@@ -1237,9 +1237,9 @@
       "name": "start project e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T10:11:07Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `go test ./tests/integration/ -run 'TestStartResearchProjectE2E|TestStartProjectRefusesAnUngroundedRefE2E' -count=1 -v` on the tree that was merged -- RESULT.json test label 'start project e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-21T10:11:07Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1001-TEST-01",
@@ -1317,9 +1317,9 @@
       "name": "visual regression",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-22T03:17:56Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `cd /home/shibo/code/post/.rddev/worktrees/T1101 && bash tests/web-smoke/visual-regression-run.sh` on the tree that was merged -- RESULT.json test label 'visual regression', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-22T03:17:56Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1102-TEST-01",
@@ -1337,9 +1337,9 @@
       "name": "publish ux e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-22T12:39:22Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `make browser-e2e-release` on the tree that was merged -- RESULT.json test label 'publish ux e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-22T12:39:22Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1104-TEST-01",
@@ -1357,9 +1357,9 @@
       "name": "i18n e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-22T18:35:41Z",
+      "evidence": "Supervisor ran `make i18n (GitHub Actions run 35766550262, job \"i18n\" 106877425211, ubuntu-24.04)` -> exit 0 on 2026-09-22T18:35:41Z. Last output: i18n-suite: [ 24s] starting next on http://127.0.0.1:31118 ; i18n-suite: [ 24s] web app ready ; i18n-suite: [ 24s] locale switching + wire-identity checks (real Chromium, fixture data) ; i18n-suite: [ 93s] SUITE PASSED (total) the i18n job PR #353 wires in as the tenth required check; its first run on a runner. Full log: gh api repos/lichman0405/post/actions/jobs/106877425211/logs"
     },
     {
       "id": "T1106-TEST-01",
@@ -1367,9 +1367,9 @@
       "name": "security tests",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T04:03:41Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `bash tests/security/owasp-smoke.sh` on the tree that was merged -- RESULT.json test label 'security tests', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-21T04:03:41Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1107-TEST-01",
@@ -1377,9 +1377,9 @@
       "name": "privacy suite",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T10:29:45Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `bash tests/acceptance/privacy-suite.sh` on the tree that was merged -- RESULT.json test label 'privacy suite', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-21T10:29:45Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1108-TEST-01",
@@ -1387,9 +1387,9 @@
       "name": "perf benchmark",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T10:57:17Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `go run ./tests/benchmark selfcheck` on the tree that was merged -- RESULT.json test label 'perf benchmark', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-21T10:57:17Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1109-TEST-01",
@@ -1417,9 +1417,9 @@
       "name": "seed builder",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T04:58:40Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `SEED_DEMO_SUMMARY=/tmp/t1201/r5-fresh-summary.json SEED_DEMO_BUILD_REPORT=/tmp/t1201/r5-fresh-build.json SEED_DEMO_VERIFY_REPORT=/tmp/t1201/r5-fresh-verify.json SEED_DEMO_API_LOG=/tmp/t1201/r5-fresh-api.log ops/seed-demo.sh --reset # run from the worktree root; empty database post_seed_demo` on the tree that was merged -- RESULT.json test label 'seed builder', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-21T04:58:40Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1202-TEST-01",
@@ -1427,9 +1427,9 @@
       "name": "canonical playwright",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T21:43:29Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `bash tests/acceptance/mof-canonical-workflow.sh` on the tree that was merged -- RESULT.json test label 'canonical playwright', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-21T21:43:29Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1203-TEST-01",
@@ -1457,9 +1457,9 @@
       "name": "contract suite",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-22T00:44:18Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `go test ./tests/contract/... -count=1` on the tree that was merged -- RESULT.json test label 'contract suite', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-22T00:44:18Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1206-TEST-01",
@@ -1487,9 +1487,9 @@
       "name": "project export portability e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-22T00:44:18Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `bash tests/acceptance/project-export-portability-e2e.sh` on the tree that was merged -- RESULT.json test label 'project export portability e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-22T00:44:18Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0013-TEST-01",
@@ -1747,9 +1747,9 @@
       "name": "browser suites wired",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-22T00:11:53Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `make browser-list` on the tree that was merged -- RESULT.json test label 'browser suites wired', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-22T00:11:53Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T1113-TEST-01",
@@ -1757,9 +1757,9 @@
       "name": "sourceHref scheme allowlist",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T10:11:17Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test apps/web/lib/search.test.mjs` on the tree that was merged -- RESULT.json test label 'sourceHref scheme allowlist', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-21T10:11:17Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     },
     {
       "id": "T0909-TEST-01",
@@ -1767,9 +1767,9 @@
       "name": "confirm failure path e2e",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-21T11:37:48Z",
+      "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `go test ./tests/integration -run 'TestConfirmWithAUsedKeyLeavesNoStateE2E|TestConfirmCompletesAfterAHalfDoneAttemptE2E|TestConfirmRefusesAProjectStateItDidNotMakeE2E' -count=1 -v` on the tree that was merged -- RESULT.json test label 'confirm failure path e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-21T11:37:48Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
     }
   ]
 }

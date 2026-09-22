@@ -10252,9 +10252,12 @@
       ]
     },
     "T1105": {
-      "status": "running",
-      "started_at": "2026-09-22T14:43:28Z",
-      "worker_run_id": "run-ae57da9484bc16df",
+      "status": "merged",
+      "started_at": "2026-09-22T17:00:48Z",
+      "worker_run_id": "run-c7d1882a11e6c2f6",
+      "accepted_by_supervisor_at": "2026-09-22T18:04:33Z",
+      "merged_at": "2026-09-22T18:17:51Z",
+      "rejection_reason": "# T1105 返工要求（第 3 轮 · 第二份独立复核判定 request_changes）\n\n这一轮的结论我先说清楚：**你第 2 轮做的事是对的，方向也是对的**——复核员自己独立复跑了你的数字\n（364 条目录 / 303 引用 / 581 条未进目录 / `core 0 in 37` / `app 246 in 67` / `CJK outside comments 0` /\n单测 16/16 / `tsc` 干净），也把上一轮那五张页**逐句做了 AST 级的对比**，结论是**没有丢句子**。\n唯一的例外它解释清楚了（`3 blockers` 现在走 `{count}` 复数、`search unreachable` 搬成了非渲染常量）。\n\n**但同一类缺陷仍然存在，只是下沉了一层**：字符串不在页面文件里，在 `apps/web/lib/*.ts` 的\n**显示文案表**里；而你的扫描器 `core` 组**只列 `app/**` 文件**，所以它们渲染在核心页上，\n却待在「core: 0」这句话的外面。这是三条阻断的共同根。下面每条我都自己核过。\n\n## 1【blocking·根】你的仪器有一个盲区，而且它今天正在这个盲区上读绿\n\n`tests/i18n/scan-hardcoded.mjs` 的 `core` 组里 **`lib/` 文件数量是 0**（实测 `grep -c \"lib/\"` = 0）。\n后果不是抽象的：`gate 'core': 0 in 37 file(s)` 这句话**覆盖不到** `lib/pulls.ts`、\n`lib/assets.ts`、`lib/search.ts`、`lib/research-profile.ts` 这些**被核心页直接渲染**的表。\n\n要做的（**这是本轮最重要的一条**）：让 `core` 组**覆盖到「在核心页默认渲染路径上出文案」的 lib 文件**。\n怎么判断归属由你定（手工名单 / 从核心页的 import 图推 / 两者结合），但**判定标准必须写在文件头的注释里**，\n并且**下限要能因为「漏掉一个这样的文件」而变红**——照你已有的那个形状（FLOOR 由具名分量相加）。\n\n**不许用「把它们排除在名单外」的办法让数字好看**：那正是这一轮被打回的原因。\n\n## 2【blocking】四处 lib 表真的在核心页上渲染英文（逐条实测）\n\n- **PR 详情页**（`.pulls`，你本轮刚加进套件的路由）\n  - `lib/pulls.ts:705` 的 `pullTabLabel(tab)` —— 六个标签 `Summary` / `Scientific changes` /\n    `Knowledge changes` / `Evidence` / `Checks` / `Raw Files`，全是硬编码英文；\n    `apps/web/lib/i18n.ts` 里 `grep \"Scientific changes\"` = **0 命中**、`grep \"Raw Files\"` = **0 命中**。\n  - `lib/pulls.ts:723` 的 `pullTabHint(tab)` —— 标签栏下面整句英文（`\"What this proposal changes, in one screen: …\"`）。\n  - **而且它已经产生了肉眼可见的 bug**：`pulls/[number]/page.tsx:572` 写的是\n    `t(\"pull.risk.open\", { tab: pullTabLabel(risk.tab) })`，而目录里\n    `pull.risk.open` 的 zh 值是 `\"打开{tab}\"` —— 于是 zh-CN 偏好下**渲染出「打开Scientific changes」**。\n    这不是「还没本地化」，是**已经坏掉的混排**。\n  - 边界照 `docs/28`：**稳定 code 保持不动**（`data-pull-tab` 的值就是 code，它必须原样），\n    变的是显示 label。做法建议：`lib/pulls.ts` 改成返回 key（`pullTabLabelKey` / `pullTabHintKey`），\n    由调用点 `t()`；或你论证更合适的等价做法。\n- **Asset 页**：`lib/assets.ts:44-59` 的 `TYPE_LABELS`（`Dataset` / `Protocol` / `Material collection` /\n  `Benchmark`），以及同文件 `messageForAssetCode`（`asset-page.tsx:142`/`:144` 调它）。\n  `data-asset-type={asset.type}` 那个 code 正确保持，要动的是 label。\n- **Search Answer 页**：`lib/search.ts:176` 的 `fallbackHeadline(reason)` ——\n  `\"No written answer: the search returned no source to cite.\"`。\n  **它就渲染在套件正在探测的那一段里**（`.search-fallback`，`data-search-fallback=\"no_sources\"`），\n  也就是说**这一趟已经证明「那一段渲染了中文，而里面这句英文没被看见」**。\n- **Research Profile 页**：`lib/research-profile.ts:485` 的 `formatAffiliationWindow`、\n  `:524` 的 `describeRelation`（`Reproduced` / `Failed to reproduce`，经 `research-profile-sections.tsx:120`/`:257` 渲染）、\n  以及 `messageForResearchProfileCode`（`research-profile-card.tsx:64`/`:95`）。\n  挂具没有种 affiliations/reproductions，所以线上路径今天没被走到——**但这不改变它们写着英文**。\n\n**英文一个字母都不许变**（需求第 4 条，与上一轮同）：这几处接目录之后，默认 en 下必须与现在逐字相同。\n用可核对的方式证明（`git show HEAD:<path>` 取原文逐条比对）。**上面那条「打开Scientific changes」是缺陷**，\n不是可以顺手记一笔的东西——修完请在 RESULT 里贴出 zh-CN 下这句话的**实际渲染文本**。\n\n## 3【major】现在有几条探测是「永远不会红」的\n\n复核点名：新加的路由只探了**你已经改好的那几个元素**，所以这些页上剩下的英文**无法让这一趟变红**。\n实测确认——下面四个选择器在 `tests/web-smoke/i18n-smoke.mjs` 里出现次数**都是 0**，\n但它们在页面里都是真实存在的钩子：\n\n| 选择器 | 出现在 |\n|---|---|\n| `.pull-tabs` | `pulls/[number]/page.tsx` |\n| `.pull-panel-hint` | `pulls/[number]/page.tsx` |\n| `.assets-type` | `assets/assets-browse.tsx` |\n| `.search-fallback-headline` | `search/search-answer.tsx` |\n\n把它们加进对应路由的探测里（zh 下这些文本必须变、en 下必须与基线逐字相同）。\n`FLOOR`/`WIRE_FLOOR` 的形状是对的（数路由，不数文案），保留。\n\n## 4【major】Research Profile 那条路由根本没在套件里\n\n`ROUTES` 现在 12 条，但**没有 `/users/{user_id}`**，而它正是需求第 10 条点名的 Research Profile。\n能驱动，材料都齐：共享挂具在 `tests/web-smoke/a11y-harness/main.go:168` 就在吐 `user_id`，\nT1104 的无障碍套件**早就在驱动 `/users/{user_id}` 并且把 `core: true`**（`a11y-smoke.mjs:162`，\n`CORE_PAGES_WITH_DATA_FLOOR = 7` —— 你 `FLOOR` 的注释自己就引了这个先例）。\n加进 `ROUTES`，并把 `FLOOR` / `WIRE_FLOOR` **同步提上去**（只许升）。\n\n## 5【minor】RESULT 有两句话比树大\n\n`summary` 的「THE FIVE PAGES ARE LOCALIZED」与 `acceptance[4]` 的「the core pages and the shell are\nlocalized」在 §2 那四条修完之前**都不成立**。你的 `risk[3]` 其实承认了 lib 表没本地化，\n但把它描述成「label table … and by pages outside docs/42's core set」——**漏掉了最关键的那半句**：\n那些表**就渲染在核心页里面**。照实改口径：聚合数字与逐路由表是诚实的（复核逐条复现了），\n**不成立的是「核心页已本地化」这句话本身**。\n\n## 6【nit】CJK 那条命令加一个从句\n\nAC4 引的是任务书自带的 `--include='*.tsx' --include='*.ts'`（399 行 = 375 目录 + 24 注释，复核复现一致）。\n**不加这两个过滤**直接跑，`apps/web` 还会多出 13 条 `.mjs` 测试文件里的命中（既有 fixture 加你新写的\n`i18n.test.mjs` 期望值）和 27 条 gitignore 的 `.next` 构建产物。都不是渲染文案，你引的命令也没错——\n只是在引命令的地方补一句，免得有人照 AC 原文复跑看到非零就以为你造假。\n\n## 7 我对 `advisory only` 的裁定（复核要我明确表态，我给）\n\n**保留 `advisory only`，不改。** 理由：需求第 4 条（照抄现状）与需求第 2 条的括注（不要把「仅」丢了）\n在这一条上冲突；而这一条是**一个中英混排徽章**，`仅建议 · advisory only` 里的英文半句本来就是\n`advisory only`，限定词 `only` 在。你第 2 轮把 §7 的读法写在了目录里该 key 处，**这个做法我接受**。\n`RESULT` 里把这条标成 Supervisor 裁定，别再当悬案重开。\n\n## 8【blocking 之外的第三条】不要靠重渲基线掩盖\n\n同上一轮的约束，再说一遍：**基线的像素差没有理由出现**，除非是导航那个控件或确有据的重渲。\n如果你发现某张页的英文被改了，那是缺陷，不是基线问题。\n\n## 不变的约束\n\n- **不许**为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout；\n  `FLOOR` / `WIRE_FLOOR` 只许**升**。这一轮尤其注意：**不许把 lib 文件从 `core` 组里排除来保持 0**。\n- `allowed_scope` 不变：`packages/ui/**`、`apps/web/**`、`tests/**`、`Makefile`。\n  不要动 `.github/**`（CI 接线是我的活）、`specs/**`、`docs/**`、`tasks/**`、`infra/**`、\n  `internal/**`、`cmd/**`、`ops/**`。\n- 不要 commit / push / 建分支；不要改迁移号；不要新增迁移。\n- 交付形状不变：未提交的 working-tree diff + `.rddev/workers/T1105/RESULT.json`。\n  RESULT 里写明：哪些 lib 文件进了 `core` 组（以及判定标准）、`FLOOR`/`WIRE_FLOOR` 新值、\n  zh-CN 下「打开…」那句的实际渲染文本、四处 lib 表的英文逐字未变的证明、\n  以及新增探测器的红/绿实测输出。\n",
       "history": [
         {
           "from": "todo",
@@ -10268,6 +10271,82 @@
           "at": "2026-09-22T14:43:28Z",
           "run_id": "run-ae57da9484bc16df",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-22T15:15:36Z",
+          "run_id": "run-f4f43f67c4d1cf5b",
+          "reason": "collect rejected: refs: new ref(s) created during the run: refs/heads/chore/ci-a11y-job ***, refs/heads/chore/t1104-minors *** — creating refs is Git control-plane. If a ref here is the Supervisor's own work, record it (`rddev refs adopt <name>`) rather than widening the check"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T15:24:52Z",
+          "run_id": "run-118b60e3c89340f5",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T15:26:30Z",
+          "run_id": "run-789d1e1f652c55d8",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-22T15:52:08Z",
+          "run_id": "run-40a9188bcfeed5e4",
+          "reason": "# T1105 返工要求（第 2 轮 · 独立复核判定 request_changes）\n\n上一轮你交的东西**机械部分是好的**，复核工人把它能重跑的都重跑了一遍，数字都对得上\n（catalog 169×2、REFERENCED 111、NOT IN CATALOG 725、`gate 'core' 0/30`、`gate 'app' 390/67`、\n330/330 单测、`CJK outside comments 0`、没有 `[locale]` 段、`a11y-smoke.mjs` 只加了 `Language` 一行、\n三处 mutation 记录都在）。**但它判定 request_changes，理由只有一条主线：你交的是「核心页面里的一小半」。**\n\n## 1【blocking】五张核心页还是硬编码英文，而且套件永远不会因此变红\n\n任务书需求第 10 条点名了 `docs/42` 里那几张核心页：Project Overview、**Research**、**PR**、\n**Release**、**Asset Page**、**Search Answer**、Research Profile，加 `/`、`/projects`、`/login`。\n现在真正接上目录的只有 Project Overview 与 research-profile 卡片。复核逐条点了名（行号是它的）：\n\n- `apps/web/app/(main)/projects/[id]/research/page.tsx` —— 21 处（例如 `:47` 的 **aria-label**：ARIA 文本也是用户可见文案，不能不算）\n- `apps/web/app/(main)/projects/[id]/pulls/[number]/page.tsx` —— 36 处\n- `apps/web/app/(main)/projects/[id]/releases/page.tsx` —— 27 处，`release-detail.tsx` —— 13 处\n- `apps/web/app/(main)/assets/asset-page.tsx` —— 23 处（例如 `:154` 的 aria-label）\n- `apps/web/app/(main)/search/search-answer.tsx` —— 20 处：套件走的是 `/search`**不带 query**，所以「带引用的答案」正文从来没被走过\n\n你的表把它们记成 NOT COVERED、risks 里也写了读者会看到中英混排——**诚实是算数的（AC5 因此过了），\n但诚实不等于交付**。而且这不是做不到：共享挂具\n`tests/web-smoke/a11y-harness/main.go` 已经在吐 `pr_number`、`release_id`、`asset_pid`、\n`asset_version`、`user_id`，T1104 的 a11y 套件就是靠它们驱动了全部 7 张核心页\n（`CORE_PAGES_WITH_DATA_FLOOR = 7`）。**你要做的就是把这五张也接上、并让套件真的走它们。**\n\n**英文一个字母都不许变**（需求第 4 条）：这几页接目录之后，默认 en 下的渲染必须与现在**逐字相同**。\n请用可核对的方式证明它：`git show HEAD:<path>` 取出改动前的字符串，逐条比对目录里的 en 值。\n\n## 2【major】套件钉住的是你现在这一小片，不是合约\n\n`tests/web-smoke/i18n-smoke.mjs` 的 `ROUTES`（`:125`/`:136`/`:151`/`:162`/`:176`）只有\n`/`、`/login`、`/projects`、`/search`（无 query）、`/projects/{id}`（只有 overview 标签），\n`FLOOR`（`:438`）是 5。**后果很硬：那五张页永远保持英文，这个套件一次都不会红。**\n文件头（`:16-20`）却写着「the core pages switch language」，比这五条路由能证明的宽。\n\n要做的：把上面那五条路由加进 `ROUTES`（用挂具的真 fixture：pr_number / release_id /\nasset_pid+version / user_id），**把 `FLOOR` 提到与放大后的集合一致**（照 T1104 的\n`CORE_PAGES_WITH_DATA_FLOOR` 那个形状——那个下限正是「删掉一条核心路由就会红」的原因）。\n另外把新接的这几个文件加进 `tests/i18n/scan-hardcoded.mjs` 的 `core` 组，\n否则「core: 0」这句话仍然只覆盖旧的 30 个文件。**再补一次 mutation**：\n挑一处**新接的**页面改回硬编码，套件必须红，把红的那次输出贴进 RESULT，然后还原。\n\n## 3【minor ×4】逐条修\n\n1. **`apps/web/app/(auth)/login/login-card.tsx:173` 的英文被改了。** 基线里按钮是\n   `Create account`（`login-card.tsx:142`）、卡片下面那行链接是 `Create an account`（`:171`），\n   两个不同的字符串；现在两处共用 `login.createAccount = \"Create account\"`，链接的文案被静默改了。\n   需求第 4 条是「照抄现状」，这不是文案润色任务。**把链接那句恢复成 `Create an account`**\n   （新增一个 key，或让 en 值分别匹配两个调用点的原文）。\n2. **`apps/web/lib/i18n.ts:297` 的 `advisory only`**：需求第 2 条点名过这一处——英文那条\n   **不要把「仅」丢了**，并且要先读 `docs/09 §7`（agent 只解决结构冲突、人解决科学冲突）再定译法。\n   现在 en 正好就是 `advisory only`，而 RESULT 里没有记你据 §7 的读法。**二者选一**：\n   要么在 RESULT 里把 §7 的推理写清楚（为什么「advisory only」保住了「仅」的限定力），\n   要么换一个保住限定力的说法（`suggestion only` / `for information only`）。\n3. **`tests/web-smoke/i18n-smoke.mjs:363` 的请求体那句是空的。** 套件记录 `(method, path, query, body)`\n   并比对两份记录，文件头（`:27-30`）宣称「目录里的 key 漏进请求体」会被它抓住——但你驱动的\n   每条路由都只发 GET，body 恒为空串，`WIRE_FLOOR = 4` 数的也是这些 GET。**要么**驱动一条\n   真的带 body 的请求（挂具能认证），**要么**在 RESULT 里明说这一条现在是空的\n   （href / `data-*` / 切换器取值那三条是真的，保留）。\n4. **RESULT 的测试计数写错**：`tests[0]` 说 `apps/web/lib/i18n.test.mjs`「adds 14 of the 330」，\n   文件里实际是 **16** 个顶层 `test(`（`grep -c '^test(' apps/web/lib/i18n.test.mjs` = 16）。\n   330/330 本身复现无误，改的是这条归属数字。\n\n## 4【nit ×2】顺手则修\n\n- `apps/web/lib/i18n.ts:159` 的 `common.loading` 两个语言各声明一次、从未被引用\n  （REFERENCED 111 vs 169）。删掉，或接到真的加载态上。\n- `apps/web/app/nav/mobile-nav-menu.tsx:118`：`Signed in as <strong>{name}</strong>` 变成了单个插值串，\n  **用户名上的加粗没了**——这是搭着重新渲的基线溜进去的视觉变化。恢复嵌套元素，或在 RESULT 里\n  记为「有意的简化」。\n\n## 不变的约束\n\n- **不许**为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout；\n  `FLOOR` 只许**升**不许降，允许的基线只许在**有据可依**时才重渲。\n- `allowed_scope` 不变：`packages/ui/**`、`apps/web/**`、`tests/**`、`Makefile`。\n  不要动 `.github/**`（CI 接线是我的活）、`specs/**`、`docs/**`、`tasks/**`、`infra/**`、`internal/**`、`cmd/**`、`ops/**`。\n- 不要 commit / push / 建分支；不要改迁移号；不要新增迁移。\n- 重渲基线时要**说清楚哪几张、为什么**：这几页接目录后 en 渲染应当逐字不变，\n  所以除了导航那个新控件，基线的像素差没有理由出现。如果你发现某张页的英文被改动了，\n  那是缺陷，不是可以顺手重渲掉的东西。\n- 交付形状不变：未提交的 working-tree diff + `.rddev/workers/T1105/RESULT.json`，\n  RESULT 里写明你改了哪些文件、新增了哪几条路由、`FLOOR` 新值、两次 mutation 的输出原文。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T15:52:15Z",
+          "run_id": "run-60c1de5681836557",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T16:34:11Z",
+          "run_id": "run-8b1caa09eff8c916",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-22T17:00:47Z",
+          "run_id": "run-55b60a5416e757ea",
+          "reason": "# T1105 返工要求（第 3 轮 · 第二份独立复核判定 request_changes）\n\n这一轮的结论我先说清楚：**你第 2 轮做的事是对的，方向也是对的**——复核员自己独立复跑了你的数字\n（364 条目录 / 303 引用 / 581 条未进目录 / `core 0 in 37` / `app 246 in 67` / `CJK outside comments 0` /\n单测 16/16 / `tsc` 干净），也把上一轮那五张页**逐句做了 AST 级的对比**，结论是**没有丢句子**。\n唯一的例外它解释清楚了（`3 blockers` 现在走 `{count}` 复数、`search unreachable` 搬成了非渲染常量）。\n\n**但同一类缺陷仍然存在，只是下沉了一层**：字符串不在页面文件里，在 `apps/web/lib/*.ts` 的\n**显示文案表**里；而你的扫描器 `core` 组**只列 `app/**` 文件**，所以它们渲染在核心页上，\n却待在「core: 0」这句话的外面。这是三条阻断的共同根。下面每条我都自己核过。\n\n## 1【blocking·根】你的仪器有一个盲区，而且它今天正在这个盲区上读绿\n\n`tests/i18n/scan-hardcoded.mjs` 的 `core` 组里 **`lib/` 文件数量是 0**（实测 `grep -c \"lib/\"` = 0）。\n后果不是抽象的：`gate 'core': 0 in 37 file(s)` 这句话**覆盖不到** `lib/pulls.ts`、\n`lib/assets.ts`、`lib/search.ts`、`lib/research-profile.ts` 这些**被核心页直接渲染**的表。\n\n要做的（**这是本轮最重要的一条**）：让 `core` 组**覆盖到「在核心页默认渲染路径上出文案」的 lib 文件**。\n怎么判断归属由你定（手工名单 / 从核心页的 import 图推 / 两者结合），但**判定标准必须写在文件头的注释里**，\n并且**下限要能因为「漏掉一个这样的文件」而变红**——照你已有的那个形状（FLOOR 由具名分量相加）。\n\n**不许用「把它们排除在名单外」的办法让数字好看**：那正是这一轮被打回的原因。\n\n## 2【blocking】四处 lib 表真的在核心页上渲染英文（逐条实测）\n\n- **PR 详情页**（`.pulls`，你本轮刚加进套件的路由）\n  - `lib/pulls.ts:705` 的 `pullTabLabel(tab)` —— 六个标签 `Summary` / `Scientific changes` /\n    `Knowledge changes` / `Evidence` / `Checks` / `Raw Files`，全是硬编码英文；\n    `apps/web/lib/i18n.ts` 里 `grep \"Scientific changes\"` = **0 命中**、`grep \"Raw Files\"` = **0 命中**。\n  - `lib/pulls.ts:723` 的 `pullTabHint(tab)` —— 标签栏下面整句英文（`\"What this proposal changes, in one screen: …\"`）。\n  - **而且它已经产生了肉眼可见的 bug**：`pulls/[number]/page.tsx:572` 写的是\n    `t(\"pull.risk.open\", { tab: pullTabLabel(risk.tab) })`，而目录里\n    `pull.risk.open` 的 zh 值是 `\"打开{tab}\"` —— 于是 zh-CN 偏好下**渲染出「打开Scientific changes」**。\n    这不是「还没本地化」，是**已经坏掉的混排**。\n  - 边界照 `docs/28`：**稳定 code 保持不动**（`data-pull-tab` 的值就是 code，它必须原样），\n    变的是显示 label。做法建议：`lib/pulls.ts` 改成返回 key（`pullTabLabelKey` / `pullTabHintKey`），\n    由调用点 `t()`；或你论证更合适的等价做法。\n- **Asset 页**：`lib/assets.ts:44-59` 的 `TYPE_LABELS`（`Dataset` / `Protocol` / `Material collection` /\n  `Benchmark`），以及同文件 `messageForAssetCode`（`asset-page.tsx:142`/`:144` 调它）。\n  `data-asset-type={asset.type}` 那个 code 正确保持，要动的是 label。\n- **Search Answer 页**：`lib/search.ts:176` 的 `fallbackHeadline(reason)` ——\n  `\"No written answer: the search returned no source to cite.\"`。\n  **它就渲染在套件正在探测的那一段里**（`.search-fallback`，`data-search-fallback=\"no_sources\"`），\n  也就是说**这一趟已经证明「那一段渲染了中文，而里面这句英文没被看见」**。\n- **Research Profile 页**：`lib/research-profile.ts:485` 的 `formatAffiliationWindow`、\n  `:524` 的 `describeRelation`（`Reproduced` / `Failed to reproduce`，经 `research-profile-sections.tsx:120`/`:257` 渲染）、\n  以及 `messageForResearchProfileCode`（`research-profile-card.tsx:64`/`:95`）。\n  挂具没有种 affiliations/reproductions，所以线上路径今天没被走到——**但这不改变它们写着英文**。\n\n**英文一个字母都不许变**（需求第 4 条，与上一轮同）：这几处接目录之后，默认 en 下必须与现在逐字相同。\n用可核对的方式证明（`git show HEAD:<path>` 取原文逐条比对）。**上面那条「打开Scientific changes」是缺陷**，\n不是可以顺手记一笔的东西——修完请在 RESULT 里贴出 zh-CN 下这句话的**实际渲染文本**。\n\n## 3【major】现在有几条探测是「永远不会红」的\n\n复核点名：新加的路由只探了**你已经改好的那几个元素**，所以这些页上剩下的英文**无法让这一趟变红**。\n实测确认——下面四个选择器在 `tests/web-smoke/i18n-smoke.mjs` 里出现次数**都是 0**，\n但它们在页面里都是真实存在的钩子：\n\n| 选择器 | 出现在 |\n|---|---|\n| `.pull-tabs` | `pulls/[number]/page.tsx` |\n| `.pull-panel-hint` | `pulls/[number]/page.tsx` |\n| `.assets-type` | `assets/assets-browse.tsx` |\n| `.search-fallback-headline` | `search/search-answer.tsx` |\n\n把它们加进对应路由的探测里（zh 下这些文本必须变、en 下必须与基线逐字相同）。\n`FLOOR`/`WIRE_FLOOR` 的形状是对的（数路由，不数文案），保留。\n\n## 4【major】Research Profile 那条路由根本没在套件里\n\n`ROUTES` 现在 12 条，但**没有 `/users/{user_id}`**，而它正是需求第 10 条点名的 Research Profile。\n能驱动，材料都齐：共享挂具在 `tests/web-smoke/a11y-harness/main.go:168` 就在吐 `user_id`，\nT1104 的无障碍套件**早就在驱动 `/users/{user_id}` 并且把 `core: true`**（`a11y-smoke.mjs:162`，\n`CORE_PAGES_WITH_DATA_FLOOR = 7` —— 你 `FLOOR` 的注释自己就引了这个先例）。\n加进 `ROUTES`，并把 `FLOOR` / `WIRE_FLOOR` **同步提上去**（只许升）。\n\n## 5【minor】RESULT 有两句话比树大\n\n`summary` 的「THE FIVE PAGES ARE LOCALIZED」与 `acceptance[4]` 的「the core pages and the shell are\nlocalized」在 §2 那四条修完之前**都不成立**。你的 `risk[3]` 其实承认了 lib 表没本地化，\n但把它描述成「label table … and by pages outside docs/42's core set」——**漏掉了最关键的那半句**：\n那些表**就渲染在核心页里面**。照实改口径：聚合数字与逐路由表是诚实的（复核逐条复现了），\n**不成立的是「核心页已本地化」这句话本身**。\n\n## 6【nit】CJK 那条命令加一个从句\n\nAC4 引的是任务书自带的 `--include='*.tsx' --include='*.ts'`（399 行 = 375 目录 + 24 注释，复核复现一致）。\n**不加这两个过滤**直接跑，`apps/web` 还会多出 13 条 `.mjs` 测试文件里的命中（既有 fixture 加你新写的\n`i18n.test.mjs` 期望值）和 27 条 gitignore 的 `.next` 构建产物。都不是渲染文案，你引的命令也没错——\n只是在引命令的地方补一句，免得有人照 AC 原文复跑看到非零就以为你造假。\n\n## 7 我对 `advisory only` 的裁定（复核要我明确表态，我给）\n\n**保留 `advisory only`，不改。** 理由：需求第 4 条（照抄现状）与需求第 2 条的括注（不要把「仅」丢了）\n在这一条上冲突；而这一条是**一个中英混排徽章**，`仅建议 · advisory only` 里的英文半句本来就是\n`advisory only`，限定词 `only` 在。你第 2 轮把 §7 的读法写在了目录里该 key 处，**这个做法我接受**。\n`RESULT` 里把这条标成 Supervisor 裁定，别再当悬案重开。\n\n## 8【blocking 之外的第三条】不要靠重渲基线掩盖\n\n同上一轮的约束，再说一遍：**基线的像素差没有理由出现**，除非是导航那个控件或确有据的重渲。\n如果你发现某张页的英文被改了，那是缺陷，不是基线问题。\n\n## 不变的约束\n\n- **不许**为了让检查变绿而删除、skip、弱化任何测试、放宽 assertion、放大 timeout；\n  `FLOOR` / `WIRE_FLOOR` 只许**升**。这一轮尤其注意：**不许把 lib 文件从 `core` 组里排除来保持 0**。\n- `allowed_scope` 不变：`packages/ui/**`、`apps/web/**`、`tests/**`、`Makefile`。\n  不要动 `.github/**`（CI 接线是我的活）、`specs/**`、`docs/**`、`tasks/**`、`infra/**`、\n  `internal/**`、`cmd/**`、`ops/**`。\n- 不要 commit / push / 建分支；不要改迁移号；不要新增迁移。\n- 交付形状不变：未提交的 working-tree diff + `.rddev/workers/T1105/RESULT.json`。\n  RESULT 里写明：哪些 lib 文件进了 `core` 组（以及判定标准）、`FLOOR`/`WIRE_FLOOR` 新值、\n  zh-CN 下「打开…」那句的实际渲染文本、四处 lib 表的英文逐字未变的证明、\n  以及新增探测器的红/绿实测输出。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T17:00:48Z",
+          "run_id": "run-c7d1882a11e6c2f6",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T17:29:50Z",
+          "run_id": "run-95f293617051b82c",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-22T18:04:33Z",
+          "run_id": "run-d5ff07d0acf97112"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-22T18:17:51Z",
+          "run_id": "run-76ff8df4bf4c2ae7",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
