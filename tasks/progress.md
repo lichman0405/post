@@ -1,3 +1,7 @@
+> **当前这一刻（2026-09-22 10:35）**：T1206 已合并（PR #346，commit 50ed938）；issue #271 已修复（PR #345）。
+> T1101 复核仍为 request_changes，已拒绝并 rebase 到当前 main 返工中（run-a86e7f07ec88daa4）。
+> 所有 open issue 按 owner 指示保持开启。
+>
 > **当前这一刻（2026-09-22 10:08）**：T1206 已提交 PR #346，CI 仅剩 migration-integration 在跑；
 > T1101 仍在 verification，已补一轮 Review Worker（run-f45ec6608ca40c55）等新的 verdict；
 > issue #271（并发跑门互删合成树）已通过 PR #345 修复并合入 main；所有 open issue 按 owner 指示保持开启。
