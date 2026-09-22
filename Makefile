@@ -490,8 +490,14 @@ observability-smoke: ## run metrics + alerts + distributed-trace harnesses (need
 observability-trace: ## run only the distributed-trace end-to-end check
 	bash tests/observability/trace-e2e.sh
 
-observability-route: ## run only the observability route probe
-	bash tests/observability/route-probe.sh
+observability-route: ## probe a RUNNING cmd/api for both composed routes; needs BASE_URL=http://host:port
+# This probe READS a running process and never starts one: its whole point is
+# that a hand merge of the composition root can drop a route and still compile,
+# so the answer has to come from a live mux. The URL is therefore an input, and
+# without it the target fails with the usage line rather than guessing a port —
+# a guessed port would probe whatever else happened to be listening.
+	@test -n "$(BASE_URL)" || { echo "observability-route: FAILED — BASE_URL is required (e.g. make observability-route BASE_URL=http://127.0.0.1:8080). This probe needs a RUNNING cmd/api; it does not start one. See ops/observability/README.md §6.1 for how to start one." >&2; exit 1; }
+	bash tests/observability/route-probe.sh "$(BASE_URL)"
 
 # Local infrastructure (Docker Compose, T0003). Applications stay host-native
 # (docs/66 §2); only the infra dependencies below run in containers.

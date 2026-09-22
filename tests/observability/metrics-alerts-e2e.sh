@@ -206,7 +206,14 @@ echo ">> promtool: $PROMTOOL"
 # ---------------------------------------------------------------------------
 # real PostgreSQL + real migrations
 # ---------------------------------------------------------------------------
-command -v docker >/dev/null 2>&1 || fail "docker is required: this harness must be able to stop a real PostgreSQL. Set POST_OBS_SMOKE_NO_PG=1 to run only the Redis chain (and say so when reporting)."
+# No Redis-only fallback, and deliberately none: the sentence that used to sit
+# here offered POST_OBS_SMOKE_NO_PG=1, a variable no line of this file ever
+# read — advice that would have cost a reader a run to disprove. Half the
+# evidence below IS the PostgreSQL half (the container is stopped and started
+# on purpose), so a mode that skipped it would be a different, weaker check
+# wearing this one's name; it would have to be a separate harness with its own
+# timeline, not a flag on this one.
+command -v docker >/dev/null 2>&1 || fail "docker is required: this harness stops and restarts a real PostgreSQL container to inject the database fault. There is no Redis-only mode: see the comment above this line."
 docker image inspect "$PG_IMAGE" >/dev/null 2>&1 || fail "image $PG_IMAGE is not present locally. Pull it (docker pull $PG_IMAGE) rather than substituting another image: the migrations are applied to it."
 
 echo ">> starting PostgreSQL ($PG_IMAGE)"

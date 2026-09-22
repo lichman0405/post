@@ -92,7 +92,7 @@ below, not quietly omitted.
 | `post_rsg_reconciliation_open_findings` | RSG reconciliation drift | `cmd/api/reconciliation.go:71` |
 | `post_rsg_reconciliation_refs_checked_total` | RSG reconciliation drift | `cmd/api/reconciliation.go:71` |
 | `post_permission_denials_total` | permission denied rates | `cmd/api/authhttp/envelope.go:72` (surface `api`), `internal/events/inbox_store.go:235` (surface `inbox`), `internal/gitprovider/push_ingestion_http.go:83,115,150` (surface `gitprovider`) |
-| `post_metrics_collector_errors_total` | **not a §3 item** — this task's own self-observation. See §2. | `internal/observability/collect.go:45` |
+| `post_metrics_collector_errors_total` | **not a §3 item** — this task's own self-observation. See §2. | `internal/observability/collect.go:96` (the increment), `internal/observability/metrics.go:236` (the definition) |
 
 Every line number above was checked by grepping the file it names, not from
 memory: each one is the line the family's name or the observing call actually
@@ -230,7 +230,7 @@ list that these classes are covered.
 
 | class | search performed | result |
 | --- | --- | --- |
-| **blob integrity mismatch** | `ls internal/storage/` → one file, `doc.go`. `grep -rn 'CreateBlob' --include='*.go' .` → five lines, three files, and no product call site: the sqlc-generated query, its params struct and its method (`internal/persistence/sqlc/blobs.sql.go:42,49,60`), the interface method (`internal/persistence/sqlc/querier.go:121`), and **one caller in the whole tree, a test** (`tests/integration/manifest_test.go:178`). `grep -rn 'PutObject' --include='*.go' cmd/ internal/` → only `cmd/api/backupdr/`, the backup/restore drill, which is not a product path. | **No product code reads, writes or hashes blob bytes.** The asset preview (`cmd/api/assetshttp`) reads blob *metadata rows* to say who would see what; nothing opens the object, and there is no upload route to hang a counter on. The one blob-hash comparison in the tree is the drill's (`cmd/api/backupdr/reconcile.go:521`) — see below. |
+| **blob integrity mismatch** | `ls internal/storage/` → one file, `doc.go`. `grep -rn 'CreateBlob' --include='*.go' .` → seven lines, five files, and no product call site: the sqlc-generated query, its params struct and its method (`internal/persistence/sqlc/blobs.sql.go:42,49,60`), the interface method (`internal/persistence/sqlc/querier.go:121`), **one caller in the whole tree, a test** (`tests/integration/manifest_test.go:178`), and two prose mentions in the portability acceptance harness (`tests/acceptance/portability/export.go:120,222` — a comment and a `printf` that both say the same thing this row says: the blob rows are assembled by the test because the build has no product-side write path). `grep -rn 'PutObject' --include='*.go' cmd/ internal/` → only `cmd/api/backupdr/`, the backup/restore drill, which is not a product path. | **No product code reads, writes or hashes blob bytes.** The asset preview (`cmd/api/assetshttp`) reads blob *metadata rows* to say who would see what; nothing opens the object, and there is no upload route to hang a counter on. The one blob-hash comparison in the tree is the drill's (`cmd/api/backupdr/reconcile.go:521`) — see below. |
 | **data visibility leak suspicion** | Traced every place a permission verdict is consumed: `cmd/api/authhttp/envelope.go:72` (the boundary, where a refusal becomes a 403/401), `internal/gitprovider/push_ingestion_http.go:83,115,150` (the one refusal site outside the guard — the webhook receiver, which writes its 401/403 directly) and `internal/events/inbox_store.go:235` (the silent-filter tier, where the decision removes rows from a 200). `grep -rn 'DecisionFiltered' --include='*.go' cmd/ internal/` returns four lines, and they are all accounted for: the constant's declaration and its doc comment (`internal/observability/metrics.go:329,338`) and **one** call site with its comment (`internal/events/inbox_store.go:220,235`) — no other producer. | **No rule — but not because the tier is uncounted, which would be false.** The silent-filter tier IS counted: `internal/events/inbox_store.go:235` records `decision="filtered"`, one increment per READ whose target list the filter shortened (not per hidden row — see the constant's own comment). What that counter measures is the platform **working**: its rate tracks event volume and how much restricted material is in it, so a rule on it would page whenever a project with restricted visibility had traffic, which is why `PostPermissionDenialsElevated` keys on `decision="forbidden"` alone. What it does **not** measure is anything about who saw what, and that gap is what leaves the class unruly: a denied read answers `404` on purpose ("Read existence hiding"), so a refusal and a genuine miss are the same status and the same body — and `ObserveRefusal` deliberately does not count 404 as a denial at all; and the filter's counter records that rows were withheld, never which rows, from whom, or whether the caller was reaching for something they had no entitlement to. Turning either into a leak signal needs a definition of what "suspicious" looks like — a product/security judgement, not this task's. The direction is worth stating too: `post_permission_denials_total` counts who was **told no**, which is the opposite of who saw too much. |
 
 The rules file states both verbatim (`本版无规则，因为无指标源`) next to the two
@@ -261,10 +261,13 @@ grep -rniE 'upload[_ ]?(fail|error)|blob[_ ]?(fail|error)|integrity|checksum' \
   --include='*.go' cmd/ internal/ | grep -v _test.go | grep -v backupdr
 ```
 
-which returns **376 lines across 103 files** — the word dominates the scientific
+which returns **387 lines across 81 files** (re-counted on the tree this
+document ships with; a count is only as good as the command next to it, so the
+command is above and the number is its output) — the word dominates the
+scientific
 review engine (`internal/rsg/integrity`, `internal/rsg/validation`, unrelated to
 stored bytes) and `assetshttp`'s `integrity_hash` field, which is carried in a
-manifest and never compared against an object on this path. Of the 376, exactly
+manifest and never compared against an object on this path. Of the 387, exactly
 one compares a stored blob's bytes against a recorded hash, and it is the drill
 below. The only
 comparison of a stored blob against a recorded hash in the tree is
@@ -512,7 +515,7 @@ covered by `cmd/api`'s unit tests rather than by the end-to-end run.
 
 Not done by this task: `.github/workflows/ci.yml` is the Supervisor's file, and
 the job count in it is asserted by a test outside this task's write scope
-(`internal/devorchestrator/gate_spec_test.go:30` — "ci.yml declares %d jobs,
+(`internal/devorchestrator/gate_spec_test.go:31` — "ci.yml declares %d jobs,
 want 7"). Adding a job without updating that assertion reddens the `go` job.
 This is the job as it would be pasted, and it is the whole wiring:
 
