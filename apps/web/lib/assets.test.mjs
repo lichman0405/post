@@ -20,6 +20,8 @@
  *     oracle the single code exists not to be.
  */
 import assert from "node:assert/strict";
+
+import { translate } from "./i18n.ts";
 import { test } from "node:test";
 
 import {
@@ -27,13 +29,23 @@ import {
   ASSET_TYPES,
   assetHref,
   assetPageUrl,
-  assetTypeLabel,
+  assetTypeEmptyKey,
+  assetTypeLabelKey,
   assetVersionHref,
   browseUrl,
   createAssetsClient,
   creatorHandleLabel,
-  messageForAssetCode,
+  assetCodeKey,
 } from "./assets.ts";
+
+/** The translator the pages pass in, resolved against the REAL en catalog.
+ *
+ *  T1105 moved these sentences into the catalog; a test asserting the old
+ *  literals would now be asserting copy that no longer exists. Resolving
+ *  through translate("en", …) keeps the assertions about the sentence a
+ *  reader sees AND adds a property the literals could not have: every key
+ *  has to exist in the catalog, in both locales. */
+const en = (key, vars) => translate("en", key, vars);
 
 const API = "http://127.0.0.1:8080";
 
@@ -152,18 +164,18 @@ test("a refusal becomes an ApiError carrying the API's code", async () => {
 });
 
 test("every refusal the asset surface can answer has its own line, and the 404 has exactly one", () => {
-  const notFound = messageForAssetCode("ASSET_NOT_FOUND");
-  assert.notEqual(notFound, messageForAssetCode("ASSET_PAGE_UNAVAILABLE"));
-  assert.notEqual(notFound, messageForAssetCode("ASSET_LIST_VALIDATION_FAILED"));
-  assert.notEqual(notFound, messageForAssetCode("SOMETHING_ELSE"));
+  const notFound = en(assetCodeKey("ASSET_NOT_FOUND"));
+  assert.notEqual(notFound, en(assetCodeKey("ASSET_PAGE_UNAVAILABLE")));
+  assert.notEqual(notFound, en(assetCodeKey("ASSET_LIST_VALIDATION_FAILED")));
+  assert.notEqual(notFound, en(assetCodeKey("SOMETHING_ELSE")));
   // The two validation codes are two surfaces: a bad type filter and a bad
   // version address are different mistakes, and the API answers them with
   // different codes (cmd/api/assetshttp). One line for both would tell the
   // reader their filter was wrong when their version address was.
-  const badFilter = messageForAssetCode("ASSET_LIST_VALIDATION_FAILED");
-  const badVersion = messageForAssetCode("ASSET_PAGE_VALIDATION_FAILED");
+  const badFilter = en(assetCodeKey("ASSET_LIST_VALIDATION_FAILED"));
+  const badVersion = en(assetCodeKey("ASSET_PAGE_VALIDATION_FAILED"));
   assert.notEqual(badFilter, badVersion);
-  assert.notEqual(badVersion, messageForAssetCode("SOMETHING_ELSE"));
+  assert.notEqual(badVersion, en(assetCodeKey("SOMETHING_ELSE")));
   assert.match(badVersion, /version/i);
   // The one line covers all four reasons the API answers this code for: the
   // page must not offer to distinguish "does not exist" from "not shared
@@ -172,14 +184,18 @@ test("every refusal the asset surface can answer has its own line, and the 404 h
   assert.doesNotMatch(notFound, /private|forbidden|deleted/i);
 });
 
-test("an unknown type renders verbatim rather than as a known one", () => {
+test("an unknown type has no label key, so the page renders it verbatim", () => {
   // The set is closed on the server, so a value outside it is a value this
-  // client does not know. Labelling it "Dataset" (or "Other") would
-  // misreport the row.
-  assert.equal(assetTypeLabel("dataset"), "Dataset");
-  assert.equal(assetTypeLabel("benchmark"), "Benchmark");
-  assert.equal(assetTypeLabel("model"), "model");
-  assert.equal(assetTypeLabel(""), "");
+  // client does not know — and a key invented here would render as a
+  // missing-key marker on a page that is merely reading a newer server. The
+  // caller renders the raw value instead: `t(assetTypeLabelKey(x) ?? x)`.
+  assert.equal(en(assetTypeLabelKey("dataset")), "Dataset");
+  assert.equal(en(assetTypeLabelKey("benchmark")), "Benchmark");
+  assert.equal(assetTypeLabelKey("model"), null);
+  assert.equal(assetTypeLabelKey(""), null);
+  // The browse list's empty line is per type for the same closed set.
+  assert.equal(en(assetTypeEmptyKey("dataset")), "No published dataset assets yet.");
+  assert.equal(assetTypeEmptyKey("model"), null);
 });
 
 test("a credited user is a mention and a credited organization is not", () => {

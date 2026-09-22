@@ -6,11 +6,14 @@
  * CSRF) — and renders them. docs/42 lists what a Research Profile shows:
  * affiliations, public contribution dimensions, assets, reuse, reproductions.
  *
- * Import-free by construction (like lib/profile.ts and lib/config.ts), so the
- * node:test suite (research-profile.test.mjs) runs it through Node's type
- * stripping. Its ApiError-shaped error deliberately mirrors lib/auth.ts and
- * lib/profile.ts: one shape per import-free module, because an import between
- * them would break that suite.
+ * No RUNTIME imports by construction (like lib/profile.ts and lib/config.ts),
+ * so the node:test suite (research-profile.test.mjs) runs it through Node's
+ * type stripping. Its ApiError-shaped error deliberately mirrors lib/auth.ts
+ * and lib/profile.ts: one shape per module, because a runtime import between
+ * them would break that suite. T1105 added ONE type-only import (`Translate`,
+ * which Node strips — the precedent is lib/entity-meta.ts and
+ * lib/server-config.ts) so that the three sentences this module composes
+ * around API data can be resolved by the caller's translator.
  *
  * WHAT THIS MODULE REFUSES, and why it is not just a shape check:
  * parsePersonProfile/parseOrganizationProfile throw when a payload carries a
@@ -23,6 +26,8 @@
  * A client that renders whatever it is handed is where a score would become
  * real.
  */
+
+import type { Translate } from "./i18n";
 
 /** The API error envelope (docs/22 §5): stable codes, no dependency detail. */
 export interface ResearchProfileErrorEnvelope {
@@ -413,10 +418,13 @@ export function createResearchProfileClient(
           parsed as ResearchProfileErrorEnvelope,
         );
       }
-      throw new ResearchProfileError(res.status, {
-        code: "UNKNOWN",
-        message: "the server answered unexpectedly; try again",
-      });
+      /* A synthetic envelope carries its CODE as the message, not a
+       * sentence: the pages render the code through the catalog
+       * (researchProfileCodeKey), so prose here would be English no reader is
+       * shown — and prose in a .ts file is exactly what the scanner cannot
+       * tell from copy a reader IS shown. */
+      const code = "UNKNOWN";
+      throw new ResearchProfileError(res.status, { code, message: code });
     }
     return parsed;
   }
@@ -485,10 +493,16 @@ export function printableEntity(
 export function formatAffiliationWindow(
   start: string | null,
   end: string | null,
+  t: Translate,
 ): string {
-  if (start === null && end === null) return "dates not recorded";
-  if (start === null) return `until ${end}`;
-  if (end === null) return `${start} – present`;
+  if (start === null && end === null) return t("rp.affiliation.datesNotRecorded");
+  if (start === null) return t("rp.affiliation.until", { end: String(end) });
+  if (end === null) return t("rp.affiliation.present", { start });
+  /* Two dates and an en dash: no word of this shape is language, so it is
+   * composed here rather than translated (docs/28 §4's spirit — a quantity is
+   * not copy). The three shapes above ARE sentences and go through the
+   * catalog. `String(end)` because a null end is this function's caller
+   * error, not a value to render. */
   return `${start} – ${end}`;
 }
 
@@ -499,51 +513,59 @@ export function formatDay(instant: string): string {
   return at.toISOString().slice(0, 10);
 }
 
-/** The channel vocabulary is the API's (state_commits.via); an unknown value
- *  is shown as it arrived rather than hidden. */
-export function describeVia(via: string): string {
+/** The channel vocabulary is the API's (state_commits.via); the CODES below
+ *  are the API's and the display NAMES are the catalog's (T1105), because a
+ *  reader is shown this word inside a sentence ("via agent"). An unknown value
+ *  is shown as it arrived rather than hidden — the caller does that with
+ *  `t(describeViaKey(via) ?? via)`, which is why this returns null rather
+ *  than the raw value. */
+export function describeViaKey(via: string): string | null {
   switch (via) {
     case "web":
-      return "web";
+      return "rp.via.web";
     case "api":
-      return "API";
+      return "rp.via.api";
     case "mcp":
-      return "MCP";
+      return "rp.via.mcp";
     case "claude_code":
-      return "agent";
+      return "rp.via.agent";
     case "git_compat":
-      return "Git";
+      return "rp.via.git";
     case "system":
-      return "system";
+      return "rp.via.system";
     default:
-      return via;
+      return null;
   }
 }
 
-/** describeRelation names the two reproduction relations of docs/10 §4. */
-export function describeRelation(relation: string): string {
+/** The catalog key naming one of the two reproduction relations of docs/10
+ *  §4, or null for a relation this function was not taught (the caller then
+ *  renders the raw value: `t(describeRelationKey(r) ?? r)`). */
+export function describeRelationKey(relation: string): string | null {
   switch (relation) {
     case "reproduces":
-      return "Reproduced";
+      return "rp.relation.reproduces";
     case "fails_to_reproduce":
-      return "Failed to reproduce";
+      return "rp.relation.failsToReproduce";
     default:
-      return relation;
+      return null;
   }
 }
 
-/** Human-facing message for a stable code from either profile route. */
-export function messageForResearchProfileCode(code: string): string {
+/** The catalog key of the line a page renders for a stable code from either
+ *  profile route. A key and not a sentence, because this module cannot reach
+ *  the catalog: the page resolves it with t(researchProfileCodeKey(code)). */
+export function researchProfileCodeKey(code: string): string {
   switch (code) {
     case "USER_NOT_FOUND":
-      return "This person has no public research profile.";
+      return "rp.code.userNotFound";
     case "ORG_NOT_FOUND":
-      return "This organization has no public profile.";
+      return "rp.code.orgNotFound";
     case "SERVICE_UNAVAILABLE":
-      return "Research profiles are temporarily unavailable. Please try again later.";
+      return "rp.code.unavailable";
     case "UNEXPECTED":
-      return "The profile could not be rendered: it carried a field a profile is not allowed to show.";
+      return "rp.code.unexpected";
     default:
-      return "Something went wrong. Please try again.";
+      return "rp.code.generic";
   }
 }

@@ -5,6 +5,8 @@ import { BeakerIcon, ServerIcon } from "@primer/octicons-react";
 import { DevStatus } from "@post/ui";
 import type { DevStatusState } from "@post/ui";
 
+import { useT } from "../i18n-provider";
+
 export interface ServiceStatus {
   name: string;
   url: string;
@@ -26,21 +28,22 @@ export function StatusPanel({
   /** The render's correlation id (T0007): grep every service log with it. */
   correlationId?: string;
 }) {
+  const t = useT();
   return (
     <div>
       <header className="status-header">
         <BeakerIcon size={24} aria-hidden />
         <Heading as="h1" className="status-title">
-          POST — Platform for Open Science &amp; Technology
+          {t("common.platformTitle")}
         </Heading>
-        <Label>web {webVersion}</Label>
+        <Label>{t("home.webVersion", { version: webVersion })}</Label>
       </header>
       {/* A <div>, not a second <main>: (main)/layout.tsx already provides the
           page's single <main id="main"> landmark (docs/06 §10, one non-hidden
           main per document). */}
       <div className="status-main">
         <Heading as="h2" className="status-subtitle">
-          Development status
+          {t("home.developmentStatus")}
         </Heading>
         <div className="status-list">
           {services.map((s) => (
@@ -57,13 +60,17 @@ export function StatusPanel({
           ))}
         </div>
         <Text as="p" className="status-note">
-          The web app has no backend of its own: it only renders status fetched
-          over HTTP from the Go API and the scientific adapter.
+          {t("home.statusNote")}
         </Text>
         {correlationId !== undefined && (
           <Text as="p" className="status-note">
-            Request trace: <code>{correlationId}</code> — grep the API, worker
-            and adapter logs with this id to follow this render.
+            {/* Split around the <code> rather than interpolated: the id is
+                an element here, and a catalog value can only carry text.
+                The em dash between the two halves is punctuation, so it is
+                the same character in both locales and stays in the markup
+                — it is not copy and it is not a catalog entry. */}
+            {t("home.requestTraceLabel")} <code>{correlationId}</code> —{" "}
+            {t("home.requestTraceHelp")}
           </Text>
         )}
       </div>

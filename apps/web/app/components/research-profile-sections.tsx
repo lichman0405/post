@@ -2,9 +2,12 @@
 
 import { Link, Text } from "@primer/react";
 
+import { useT } from "../i18n-provider";
+import { translateOr } from "../../lib/i18n";
+
 import {
-  describeRelation,
-  describeVia,
+  describeRelationKey,
+  describeViaKey,
   formatAffiliationWindow,
   formatDay,
   printableEntity,
@@ -51,21 +54,22 @@ import {
 /** Section is one labelled dimension: a heading, its rows, and the honest
  *  empty line. It renders no count (rule 1 above). */
 function Section({
-  title,
+  titleKey,
   items,
-  empty,
+  emptyKey,
   render,
 }: {
-  title: string;
+  titleKey: string;
   items: unknown[];
-  empty: string;
+  emptyKey: string;
   render: (index: number) => React.ReactNode;
 }) {
+  const t = useT();
   return (
     <section className="rp-section">
-      <h2 className="rp-section-title">{title}</h2>
+      <h2 className="rp-section-title">{t(titleKey)}</h2>
       {items.length === 0 ? (
-        <Text className="rp-empty">{empty}</Text>
+        <Text className="rp-empty">{t(emptyKey)}</Text>
       ) : (
         <ul className="rp-list">{items.map((_, i) => render(i))}</ul>
       )}
@@ -90,11 +94,12 @@ function Roles({ codes }: { codes: string[] }) {
 }
 
 export function AffiliationList({ items }: { items: ProfileAffiliation[] }) {
+  const t = useT();
   return (
     <Section
-      title="Affiliations"
+      titleKey="rp.affiliations"
       items={items}
-      empty="No affiliation recorded."
+      emptyKey="rp.empty.affiliations"
       render={(i) => {
         const a = items[i];
         // A withheld employer is not a missing one (rule 2): the row keeps
@@ -113,8 +118,8 @@ export function AffiliationList({ items }: { items: ProfileAffiliation[] }) {
                 <EntityLink url={organization.url} label={organization.label} />
               )}
               <span className="rp-meta">
-                {a.role} · {formatAffiliationWindow(a.affiliation_start, a.affiliation_end)}
-                {a.verified ? " · verified" : ""}
+                {a.role} · {formatAffiliationWindow(a.affiliation_start, a.affiliation_end, t)}
+                {a.verified ? ` · ${t("rp.verified")}` : ""}
               </span>
             </div>
           </li>
@@ -127,17 +132,18 @@ export function AffiliationList({ items }: { items: ProfileAffiliation[] }) {
 export function ContributionList({
   items,
   showActor,
-  empty,
+  emptyKey,
 }: {
   items: ProfileContribution[];
   showActor: boolean;
-  empty: string;
+  emptyKey: string;
 }) {
+  const t = useT();
   return (
     <Section
-      title="Contributions"
+      titleKey="rp.contributions"
       items={items}
-      empty={empty}
+      emptyKey={emptyKey}
       render={(i) => {
         const c = items[i];
         const project = printableEntity(c.project);
@@ -157,9 +163,9 @@ export function ContributionList({
                     <EntityLink url={project.url} label={project.label} /> ·{" "}
                   </>
                 )}
-                {formatDay(c.occurred_at)} · via {describeVia(c.via)}
-                {c.accepted_context ? " · accepted" : ""}
-                {c.released_context ? " · released" : ""}
+                {formatDay(c.occurred_at)} · {t("rp.via")} {translateOr(t, describeViaKey(c.via), c.via)}
+                {c.accepted_context ? ` · ${t("rp.accepted")}` : ""}
+                {c.released_context ? ` · ${t("rp.released")}` : ""}
               </span>
               <Roles codes={c.role_codes} />
             </div>
@@ -170,12 +176,15 @@ export function ContributionList({
   );
 }
 
-export function AssetList({ items, empty }: { items: ProfileAsset[]; empty: string }) {
+export function AssetList({ items, emptyKey }: { items: ProfileAsset[]; emptyKey: string }) {
+  // No `useT()` here: every visible string this list renders is either an
+  // API value or the `emptyKey` the caller passed, which Section resolves.
+  // The hook is added where a `t(...)` call exists, not by habit.
   return (
     <Section
-      title="Assets"
+      titleKey="rp.assets"
       items={items}
-      empty={empty}
+      emptyKey={emptyKey}
       render={(i) => {
         const a = items[i];
         const origin = printableEntity(a.project);
@@ -207,11 +216,12 @@ export function AssetList({ items, empty }: { items: ProfileAsset[]; empty: stri
 }
 
 export function ReuseList({ items }: { items: ProfileReuse[] }) {
+  const t = useT();
   return (
     <Section
-      title="Reuse"
+      titleKey="rp.reuse"
       items={items}
-      empty="No recorded reuse of this work yet."
+      emptyKey="rp.empty.reuse"
       render={(i) => {
         const r = items[i];
         return (
@@ -221,7 +231,7 @@ export function ReuseList({ items }: { items: ProfileReuse[] }) {
                 {r.title}
               </Link>
               <span className="rp-meta">
-                used by <EntityLink url={r.project.url} label={r.project.name} />{" "}
+                {t("rp.usedBy")} <EntityLink url={r.project.url} label={r.project.name} />{" "}
                 · {r.dependency_type} · {formatDay(r.declared_at)}
               </span>
             </div>
@@ -233,18 +243,21 @@ export function ReuseList({ items }: { items: ProfileReuse[] }) {
 }
 
 export function ReproductionList({ items }: { items: ProfileReproduction[] }) {
+  // The relation name is a display label (docs/28 §3), so it comes from the
+  // catalog now; everything else here is API data.
+  const t = useT();
   return (
     <Section
-      title="Reproductions"
+      titleKey="rp.reproductions"
       items={items}
-      empty="No reproduction recorded."
+      emptyKey="rp.empty.reproductions"
       render={(i) => {
         const r = items[i];
         const project = printableEntity(r.project);
         return (
           <li key={i} className="rp-row">
             <div className="rp-row-main">
-              <span className="rp-event">{describeRelation(r.relation)}</span>
+              <span className="rp-event">{translateOr(t, describeRelationKey(r.relation), r.relation)}</span>
               <span className="rp-meta">
                 {r.review_state} · {formatDay(r.created_at)}
                 {project !== null && (

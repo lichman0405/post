@@ -14,20 +14,20 @@ import { Spinner } from "@primer/react";
 import {
   ApiError,
   assessPullRisks,
-  changeKindLabel,
+  changeKindLabelKey,
   createPullsClient,
   DEFAULT_PULL_TAB,
   diffTotals,
-  dimensionLabel,
+  dimensionLabelKey,
   evidenceChanges,
   INTEGRITY_DIMENSIONS,
   isStaleReview,
   knowledgeChanges,
   latestHeadReview,
-  messageForPullRequestCode,
+  pullRequestCodeKey,
   PULL_TABS,
-  pullTabHint,
-  pullTabLabel,
+  pullTabHintKey,
+  pullTabLabelKey,
   rawPatchUrl,
   relationTypeOf,
   type CheckResult,
@@ -41,8 +41,10 @@ import {
   type Review,
   type ReviewInput,
 } from "../../../../../../lib/pulls";
+import { translateOr } from "../../../../../../lib/i18n";
 import { Diff } from "@post/ui";
 import type { Tone } from "@post/ui";
+import { useT } from "../../../../../i18n-provider";
 import { useProjectShell } from "../../shell-context";
 import "./pull-detail.css";
 
@@ -84,6 +86,7 @@ export default function PullDetailPage({
   params: Promise<{ number: string }>;
 }) {
   const shell = useProjectShell();
+  const t = useT();
 
   // The route param arrives as a Promise, so the page has three states —
   // pending, invalid, ready — and never fewer: a single "null number"
@@ -192,14 +195,15 @@ export default function PullDetailPage({
           number,
           text:
             err instanceof ApiError
-              ? messageForPullRequestCode(err.code)
-              : "Could not load this pull request.",
+              ? t(pullRequestCodeKey(err.code))
+              : t("pull.error.load"),
         });
       });
     return () => {
       cancelled = true;
     };
-  }, [shell, client, number]);
+    // `t` in the deps: the fallback sentence is resolved in the catch.
+  }, [shell, client, number, t]);
 
   /** Record one review decision; the API's answer is what the page shows. */
   async function submitReview(event: FormEvent<HTMLFormElement>) {
@@ -226,8 +230,8 @@ export default function PullDetailPage({
         number,
         text:
           err instanceof ApiError
-            ? messageForPullRequestCode(err.code)
-            : "Could not record this review.",
+            ? t(pullRequestCodeKey(err.code))
+            : t("pull.error.review"),
       });
     } finally {
       setSubmitting(false);
@@ -245,11 +249,11 @@ export default function PullDetailPage({
       <div className="pulls-page" data-pulls-detail data-pulls-invalid-number>
         <section className="pulls-section">
           <div className="pulls-error" data-pulls-error>
-            {messageForPullRequestCode("VALIDATION_FAILED")}
+            {t(pullRequestCodeKey("VALIDATION_FAILED"))}
           </div>
           <p className="pulls-back">
             <Link href={`/projects/${shell.project.id}/pulls`}>
-              Back to pull requests
+              {t("pull.back")}
             </Link>
           </p>
         </section>
@@ -265,7 +269,7 @@ export default function PullDetailPage({
       <div className="pulls-page" data-pulls-detail data-pull-number={number ?? undefined}>
         <p className="pulls-back">
           <Link href={`/projects/${shell.project.id}/pulls`}>
-            Back to pull requests
+            {t("pull.back")}
           </Link>
         </p>
         <section className="pulls-section">
@@ -278,7 +282,7 @@ export default function PullDetailPage({
   if (data === null) {
     return (
       <div className="pulls-page" data-pulls-detail data-pull-number={number ?? undefined}>
-        <Spinner aria-label="Loading pull request" />
+        <Spinner aria-label={t("pull.loading")} />
       </div>
     );
   }
@@ -288,7 +292,7 @@ export default function PullDetailPage({
     diff: data.diff,
     reviews: data.reviews,
     headStateId: data.pr.proposed_state_id,
-  });
+  }, t);
   const knowledge = knowledgeChanges(data.diff);
   const evidence = evidenceChanges(data.diff);
   const totals = diffTotals(data.diff);
@@ -298,7 +302,7 @@ export default function PullDetailPage({
     <div className="pulls-page" data-pulls-detail data-pull-number={data.pr.number}>
       <p className="pulls-back">
         <Link href={`/projects/${shell.project.id}/pulls`}>
-          Back to pull requests
+          {t("pull.back")}
         </Link>
       </p>
 
@@ -311,15 +315,20 @@ export default function PullDetailPage({
           <span className="pulls-state" data-pull-state={data.pr.state}>
             {data.pr.state}
           </span>
-          <span>opened {data.pr.created_at.slice(0, 10)} by {data.pr.created_by}</span>
+          <span>
+            {t("pull.openedBy", {
+              date: data.pr.created_at.slice(0, 10),
+              actor: data.pr.created_by,
+            })}
+          </span>
         </p>
         {data.pr.body !== "" ? (
           <p className="pulls-detail-body">{data.pr.body}</p>
         ) : null}
         <dl className="pulls-pins">
-          <dt>Base (main) state</dt>
+          <dt>{t("pull.baseState")}</dt>
           <dd className="pulls-pin-id" data-pull-base-state>{data.pr.base_state_id}</dd>
-          <dt>Proposed (branch) state</dt>
+          <dt>{t("pull.proposedState")}</dt>
           <dd className="pulls-pin-id" data-pull-head-state>{data.pr.proposed_state_id}</dd>
         </dl>
       </section>
@@ -333,7 +342,7 @@ export default function PullDetailPage({
       <div
         className="pull-tabs"
         role="tablist"
-        aria-label="Pull request views"
+        aria-label={t("pull.tabsLabel")}
         data-pull-tabs
         ref={tabListRef}
       >
@@ -356,7 +365,7 @@ export default function PullDetailPage({
             onClick={() => setTab(each)}
             onKeyDown={(event) => onTabKeyDown(event, index)}
           >
-            {pullTabLabel(each)}
+            {t(pullTabLabelKey(each))}
             <span className="pull-tab-count" data-tab-count={each}>
               {tabCount(each, {
                 objects: totals.objects,
@@ -378,7 +387,7 @@ export default function PullDetailPage({
         data-pull-panel={tab}
         tabIndex={0}
       >
-        <p className="pull-panel-hint">{pullTabHint(tab)}</p>
+        <p className="pull-panel-hint">{t(pullTabHintKey(tab))}</p>
 
         {tab === "summary" ? (
           <SummaryPanel
@@ -398,7 +407,7 @@ export default function PullDetailPage({
           <ChangesPanel
             objects={knowledge.objects}
             relations={knowledge.relations}
-            emptyText="No knowledge changes in this proposal: no claim, hypothesis, research question or finding moved, and no knowledge relation changed."
+            emptyText={t("pull.knowledge.empty")}
             objectAttr="data-knowledge-object"
             relationAttr="data-knowledge-relation"
           />
@@ -408,7 +417,7 @@ export default function PullDetailPage({
           <ChangesPanel
             objects={evidence.objects}
             relations={evidence.relations}
-            emptyText="No evidence changes in this proposal: no evidence assertion and no evidence relation moved."
+            emptyText={t("pull.evidence.empty")}
             objectAttr="data-evidence-object"
             relationAttr="data-evidence-relation"
           />
@@ -424,16 +433,13 @@ export default function PullDetailPage({
           decision — the API decides whether this caller may. */}
       {tab === "summary" ? (
         <section className="pulls-section pull-review" data-pull-review>
-          <h2 className="pulls-section-title">Record a review</h2>
+          <h2 className="pulls-section-title">{t("pull.review.title")}</h2>
           <p className="pulls-section-desc">
-            One decision per dimension on the current head (
-            {data.pr.proposed_state_id}). The API records the reviewer from
-            the session and refuses a second decision of the same dimension on
-            the same head.
+            {t("pull.review.desc", { stateId: data.pr.proposed_state_id })}
           </p>
           <form className="pull-review-form" onSubmit={submitReview} data-review-form>
             <label className="pull-review-field">
-              <span>Dimension</span>
+              <span>{t("pull.review.dimension")}</span>
               <select
                 value={reviewKind}
                 data-review-kind
@@ -447,7 +453,7 @@ export default function PullDetailPage({
               </select>
             </label>
             <label className="pull-review-field">
-              <span>Decision</span>
+              <span>{t("pull.review.decision")}</span>
               <select
                 value={reviewDecision}
                 data-review-decision
@@ -455,7 +461,7 @@ export default function PullDetailPage({
                   setReviewDecision(e.target.value as ReviewInput["decision"] | "")
                 }
               >
-                <option value="">Choose a decision…</option>
+                <option value="">{t("pull.review.choose")}</option>
                 {REVIEW_DECISIONS.map((decision) => (
                   <option key={decision} value={decision}>
                     {decision}
@@ -464,7 +470,7 @@ export default function PullDetailPage({
               </select>
             </label>
             <label className="pull-review-field pull-review-field-wide">
-              <span>Reasoning</span>
+              <span>{t("pull.review.reasoning")}</span>
               <textarea
                 value={reviewBody}
                 data-review-body
@@ -479,7 +485,7 @@ export default function PullDetailPage({
                 data-review-submit
                 disabled={reviewDecision === "" || submitting}
               >
-                {submitting ? "Recording…" : "Record review"}
+                {submitting ? t("pull.review.submitting") : t("pull.review.submit")}
               </button>
               {/* T1104: recording a review is a SUBMIT, and both of its
                   outcomes are silent markup otherwise — the form clears
@@ -490,7 +496,7 @@ export default function PullDetailPage({
                   failure is an alert (the reader's action did not land). */}
               {justRecorded !== null && justRecorded.number === number ? (
                 <span className="pull-review-saved" data-review-saved role="status">
-                  Recorded {justRecorded.decision}
+                  {t("pull.review.recorded", { decision: justRecorded.decision })}
                 </span>
               ) : null}
             </div>
@@ -530,14 +536,15 @@ function tabCount(
 /* ---------- The risk banner (docs/06 §6: 重要风险必须明显) ---------- */
 
 function RiskBanner({ risks, onOpen }: { risks: PullRisk[]; onOpen: (tab: PullTab) => void }) {
+  const t = useT();
   const blocking = risks.filter((r) => r.severity === "blocking").length;
   return (
     <section className="pull-risks" data-pull-risks data-risk-count={risks.length} data-risk-blocking={blocking}>
       <h2 className="pull-risks-title">
         <AlertIcon size={16} aria-hidden="true" />
         {blocking > 0
-          ? `${blocking} blocking risk${blocking === 1 ? "" : "s"} on this proposal`
-          : `${risks.length} risk${risks.length === 1 ? "" : "s"} to weigh before merging`}
+          ? t(blocking === 1 ? "pull.risk.blocking.one" : "pull.risk.blocking.many", { count: blocking })
+          : t(risks.length === 1 ? "pull.risk.weigh.one" : "pull.risk.weigh.many", { count: risks.length })}
       </h2>
       <ul className="pull-risk-list">
         {risks.map((risk) => (
@@ -563,7 +570,7 @@ function RiskBanner({ risks, onOpen }: { risks: PullRisk[]; onOpen: (tab: PullTa
               data-risk-tab={risk.tab}
               onClick={() => onOpen(risk.tab)}
             >
-              Open {pullTabLabel(risk.tab)}
+              {t("pull.risk.open", { tab: t(pullTabLabelKey(risk.tab)) })}
             </button>
           </li>
         ))}
@@ -587,6 +594,7 @@ function SummaryPanel({
   reviews: Review[];
   projectId: string;
 }) {
+  const t = useT();
   const earlier = reviews.filter((r) => isStaleReview(r, pr.proposed_state_id));
   const conflictsHref =
     `/projects/${projectId}/conflicts` +
@@ -596,21 +604,25 @@ function SummaryPanel({
   return (
     <>
       <div className="pull-summary-counts" data-pull-totals>
-        <Count label="Objects created" value={diff.summary.objects_created} />
-        <Count label="Objects updated" value={diff.summary.objects_updated} />
-        <Count label="Objects aborted" value={diff.summary.objects_aborted} />
-        <Count label="Objects reopened" value={diff.summary.objects_reopened} />
-        <Count label="Relations created" value={diff.summary.relations_created} />
-        <Count label="Relations updated" value={diff.summary.relations_updated} />
+        {/* `code` is the stable identifier the DOM carries (data-count-label,
+            which tests/e2e-pulls/pulls-e2e.mjs reads); `label` is the copy a
+            reader sees. docs/28 §3 is the split: the code does not follow the
+            language preference, the label does. */}
+        <Count code="Objects created" label={t("pull.count.objectsCreated")} value={diff.summary.objects_created} />
+        <Count code="Objects updated" label={t("pull.count.objectsUpdated")} value={diff.summary.objects_updated} />
+        <Count code="Objects aborted" label={t("pull.count.objectsAborted")} value={diff.summary.objects_aborted} />
+        <Count code="Objects reopened" label={t("pull.count.objectsReopened")} value={diff.summary.objects_reopened} />
+        <Count code="Relations created" label={t("pull.count.relationsCreated")} value={diff.summary.relations_created} />
+        <Count code="Relations updated" label={t("pull.count.relationsUpdated")} value={diff.summary.relations_updated} />
       </div>
 
       <div className="pull-summary-states" data-pull-states>
-        <StateLine role="Base (pinned)" ref_={diff.base} />
-        <StateLine role="Proposed" ref_={diff.source} />
-        <StateLine role="Target (branch head)" ref_={diff.target} />
+        <StateLine role="Base (pinned)" label={t("pull.state.basePinned")} ref_={diff.base} />
+        <StateLine role="Proposed" label={t("pull.state.proposed")} ref_={diff.source} />
+        <StateLine role="Target (branch head)" label={t("pull.state.targetHead")} ref_={diff.target} />
       </div>
 
-      <h3 className="pull-subtitle">Review state of the current head</h3>
+      <h3 className="pull-subtitle">{t("pull.reviewState")}</h3>
       <div className="pull-review-state" data-pull-review-state>
         {REVIEW_KINDS.map((kind) => {
           const review = latestHeadReview(reviews, kind, pr.proposed_state_id);
@@ -624,7 +636,7 @@ function SummaryPanel({
               <span className="pull-review-kind">{kind}</span>
               {review === null ? (
                 <span className="pull-review-none">
-                  no {kind} review recorded for this head
+                  {t("pull.review.none", { kind })}
                 </span>
               ) : (
                 <span className="pull-review-recorded">
@@ -639,20 +651,20 @@ function SummaryPanel({
       </div>
 
       <p className="pull-summary-line" data-pull-integrity-verdict={report.verdict}>
-        <ShieldCheckIcon size={14} aria-hidden="true" /> Machine integrity
-        verdict: <strong>{report.verdict}</strong>
+        <ShieldCheckIcon size={14} aria-hidden="true" /> {t("pull.integrityVerdict")}{" "}
+        <strong>{report.verdict}</strong>
       </p>
 
       {earlier.length > 0 ? (
         <div className="pull-earlier" data-pull-earlier-reviews>
-          <h3 className="pull-subtitle">Decisions on older heads</h3>
+          <h3 className="pull-subtitle">{t("pull.earlier.title")}</h3>
           <ul className="pull-earlier-list">
             {earlier.map((review) => (
               <li key={review.id} data-earlier-review={review.id}>
-                {review.kind} · {review.decision} · judged{" "}
+                {review.kind} · {review.decision} · {t("pull.earlier.judged")}{" "}
                 <code>{review.reviewed_state_id.slice(0, 8)}</code>
                 {review.reviewed_state_id !== pr.proposed_state_id
-                  ? " (not the head proposed now)"
+                  ? t("pull.earlier.notHead")
                   : ""}
               </li>
             ))}
@@ -662,29 +674,40 @@ function SummaryPanel({
 
       <p className="pull-summary-line">
         <Link href={conflictsHref} data-pull-conflicts-link>
-          Open the conflict resolution view for these states
+          {t("pull.openConflicts")}
         </Link>
       </p>
     </>
   );
 }
 
-function Count({ label, value }: { label: string; value: number }) {
+function Count({ code, label, value }: { code: string; label: string; value: number }) {
   return (
-    <div className="pull-count" data-count-label={label}>
+    <div className="pull-count" data-count-label={code}>
       <span className="pull-count-value">{value}</span>
       <span className="pull-count-label">{label}</span>
     </div>
   );
 }
 
-function StateLine({ role, ref_ }: { role: string; ref_: { id: string; git_ref: string | null } }) {
+/** One side of the comparison. `role` is the stable code the DOM carries
+ *  (data-state-role); `label` is the copy a reader sees. */
+function StateLine({
+  role,
+  label,
+  ref_,
+}: {
+  role: string;
+  label: string;
+  ref_: { id: string; git_ref: string | null };
+}) {
+  const t = useT();
   return (
     <div className="pull-summary-state" data-state-role={role}>
-      <span className="pull-summary-state-role">{role}</span>
+      <span className="pull-summary-state-role">{label}</span>
       <code className="pulls-pin-id">{ref_.id}</code>
       <span className="pull-summary-state-git">
-        {ref_.git_ref === null || ref_.git_ref === "" ? "no git ref" : ref_.git_ref.slice(0, 12)}
+        {ref_.git_ref === null || ref_.git_ref === "" ? t("pull.noGitRef") : ref_.git_ref.slice(0, 12)}
       </span>
     </div>
   );
@@ -693,18 +716,19 @@ function StateLine({ role, ref_ }: { role: string; ref_: { id: string; git_ref: 
 /* ---------- Scientific / knowledge / evidence change lists ---------- */
 
 function ScientificPanel({ diff }: { diff: DiffDocument }) {
+  const t = useT();
   return (
     <>
-      <h3 className="pull-subtitle">Objects</h3>
+      <h3 className="pull-subtitle">{t("pull.scientific.objects")}</h3>
       <ObjectList
         changes={diff.object_changes}
-        emptyText="No scientific object changed in this proposal."
+        emptyText={t("pull.scientific.emptyObjects")}
         attr="data-scientific-object"
       />
-      <h3 className="pull-subtitle">Relations</h3>
+      <h3 className="pull-subtitle">{t("pull.scientific.relations")}</h3>
       <RelationList
         changes={diff.relation_changes}
-        emptyText="No relation changed in this proposal."
+        emptyText={t("pull.scientific.emptyRelations")}
         attr="data-scientific-relation"
       />
     </>
@@ -770,6 +794,7 @@ function ObjectList({
   emptyText: string;
   attr: string;
 }) {
+  const t = useT();
   if (changes.length === 0) {
     return <p className="pull-empty">{emptyText}</p>;
   }
@@ -777,11 +802,11 @@ function ObjectList({
     <Diff
       entries={changes.map((change) => ({
         key: change.object_id,
-        kind: changeKindLabel(change.kind),
+        kind: translateOr(t, changeKindLabelKey(change.kind), change.kind),
         tone: changeKindTone(change.kind),
         type: change.object_type,
         title: change.source_version.title || change.object_id,
-        note: change.target_moved ? "target branch moved this too" : undefined,
+        note: change.target_moved ? t("pull.change.moved") : undefined,
         noteAttrs: change.target_moved ? { "data-change-moved": true } : undefined,
         meta: (
           <>
@@ -793,8 +818,8 @@ function ObjectList({
         ),
         fields:
           change.changed_fields.length === 0
-            ? "new object"
-            : `changed: ${change.changed_fields.join(", ")}`,
+            ? t("pull.change.newObject")
+            : t("pull.change.changed", { fields: change.changed_fields.join(", ") }),
         attrs: {
           [attr]: change.object_id,
           "data-change-kind": change.kind,
@@ -815,6 +840,7 @@ function RelationList({
   emptyText: string;
   attr: string;
 }) {
+  const t = useT();
   if (changes.length === 0) {
     return <p className="pull-empty">{emptyText}</p>;
   }
@@ -822,7 +848,7 @@ function RelationList({
     <Diff
       entries={changes.map((change) => ({
         key: change.relation_id,
-        kind: changeKindLabel(change.kind),
+        kind: translateOr(t, changeKindLabelKey(change.kind), change.kind),
         tone: changeKindTone(change.kind),
         type: relationTypeOf(change),
         title: (
@@ -831,13 +857,13 @@ function RelationList({
             {change.source_version.target_object_version_id.slice(0, 8)}
           </>
         ),
-        note: change.target_moved ? "target branch moved this too" : undefined,
+        note: change.target_moved ? t("pull.change.moved") : undefined,
         noteAttrs: change.target_moved ? { "data-change-moved": true } : undefined,
         meta: <span className="pull-change-id">{change.relation_id}</span>,
         fields:
           change.changed_fields.length === 0
-            ? "new relation"
-            : `changed: ${change.changed_fields.join(", ")}`,
+            ? t("pull.change.newRelation")
+            : t("pull.change.changed", { fields: change.changed_fields.join(", ") }),
         attrs: {
           [attr]: change.relation_id,
           "data-change-kind": change.kind,
@@ -852,6 +878,7 @@ function RelationList({
 /* ---------- Checks ---------- */
 
 function ChecksPanel({ report }: { report: IntegrityReport }) {
+  const t = useT();
   return (
     <div data-pull-checks>
       <div
@@ -860,7 +887,7 @@ function ChecksPanel({ report }: { report: IntegrityReport }) {
       >
         {verdictIcon(report.verdict)}
         <span className="pulls-verdict-text">
-          <strong>Verdict: {report.verdict}</strong>
+          <strong>{t("pull.verdict", { verdict: report.verdict })}</strong>
           <span className="pulls-verdict-explanation">{report.explanation}</span>
         </span>
       </div>
@@ -870,7 +897,7 @@ function ChecksPanel({ report }: { report: IntegrityReport }) {
           if (results.length === 0) return null;
           return (
             <div className="pulls-check-group" key={dimension} data-dimension={dimension}>
-              <h3 className="pulls-dimension-title">{dimensionLabel(dimension)}</h3>
+              <h3 className="pulls-dimension-title">{translateOr(t, dimensionLabelKey(dimension), dimension)}</h3>
               {results.map((result) => (
                 <CheckRow key={result.check} result={result} />
               ))}
@@ -878,7 +905,7 @@ function ChecksPanel({ report }: { report: IntegrityReport }) {
           );
         })}
       </div>
-      <p className="pull-summary-line">Computed at {report.computed_at}.</p>
+      <p className="pull-summary-line">{t("pull.computedAt", { at: report.computed_at })}</p>
     </div>
   );
 }
@@ -925,14 +952,13 @@ function CheckRow({ result }: { result: CheckResult }) {
 
 function RawFilesPanel({ diff }: { diff: DiffDocument }) {
   const shell = useProjectShell();
+  const t = useT();
   const apiBaseUrl = shell === null ? null : shell.apiBaseUrl;
   const projectId = shell === null ? null : shell.project.id;
   if (diff.file_diff_refs.length === 0) {
     return (
       <p className="pull-empty" data-raw-empty>
-        No Git ref is recorded for either side of this comparison, so there
-        is no raw file diff to show. The semantic diff above is the full
-        answer for this proposal.
+        {t("pull.raw.empty")}
       </p>
     );
   }
@@ -942,24 +968,24 @@ function RawFilesPanel({ diff }: { diff: DiffDocument }) {
         <div className="pull-raw-side" key={ref_.kind} data-file-diff-ref={ref_.kind}>
           <h3 className="pull-subtitle">
             {ref_.kind === "source"
-              ? "Proposed files (base → proposed head)"
-              : "Target branch files (base → target head)"}
+              ? t("pull.raw.sourceFiles")
+              : t("pull.raw.targetFiles")}
           </h3>
           <dl className="pull-raw-refs">
-            <dt>base git ref</dt>
+            <dt>{t("pull.raw.baseRef")}</dt>
             <dd data-raw-base-ref>
               {ref_.base_git_ref === "" ? (
                 <span className="pull-raw-empty-ref">
-                  none — the git convention for a born-in-push diff is the empty tree
+                  {t("pull.raw.noneEmptyTree")}
                 </span>
               ) : (
                 <RawRefLink apiBaseUrl={apiBaseUrl} projectId={projectId} sha={ref_.base_git_ref} />
               )}
             </dd>
-            <dt>head git ref</dt>
+            <dt>{t("pull.raw.headRef")}</dt>
             <dd data-raw-head-ref>
               {ref_.head_git_ref === "" ? (
-                <span className="pull-raw-empty-ref">none</span>
+                <span className="pull-raw-empty-ref">{t("common.none")}</span>
               ) : (
                 <RawRefLink apiBaseUrl={apiBaseUrl} projectId={projectId} sha={ref_.head_git_ref} />
               )}
@@ -968,10 +994,7 @@ function RawFilesPanel({ diff }: { diff: DiffDocument }) {
         </div>
       ))}
       <p className="pull-summary-line">
-        Each link opens that commit&apos;s raw patch through the project&apos;s
-        Files raw-diff channel. The semantic diff on the other tabs is the
-        subject of this page; the raw files are secondary by design
-        (docs/06 §6).
+        {t("pull.raw.note")}
       </p>
     </div>
   );
@@ -987,6 +1010,7 @@ function RawRefLink({
   projectId: string | null;
   sha: string;
 }) {
+  const t = useT();
   if (apiBaseUrl === null || projectId === null) {
     return <code>{sha.slice(0, 12)}</code>;
   }
@@ -996,7 +1020,7 @@ function RawRefLink({
       className="pull-raw-link"
       data-raw-patch={sha}
     >
-      raw patch of <code>{sha.slice(0, 12)}</code>
+      {t("pull.raw.patch")} <code>{sha.slice(0, 12)}</code>
     </a>
   );
 }

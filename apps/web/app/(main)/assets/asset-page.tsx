@@ -17,13 +17,15 @@ import {
 import { Spinner } from "@primer/react";
 
 import { Sidebar } from "@post/ui";
+import { useT } from "../../i18n-provider";
+import { translateOr, type Translate } from "../../../lib/i18n";
 import { RightsPanel } from "../../components/rights-panel";
 import {
   ApiError,
-  assetTypeLabel,
+  assetCodeKey,
+  assetTypeLabelKey,
   createAssetsClient,
   creatorHandleLabel,
-  messageForAssetCode,
   type AssetPage as AssetPageData,
 } from "../../../lib/assets";
 import {
@@ -116,6 +118,7 @@ export function AssetPage({
   version?: string | null;
 }) {
   const client = useMemo(() => createAssetsClient(apiBaseUrl), [apiBaseUrl]);
+  const t = useT();
   const [answer, setAnswer] = useState<PageAnswer | null>(null);
 
   // The address as one comparable string. JSON rather than a separator
@@ -130,38 +133,40 @@ export function AssetPage({
     client
       .page(pid, version ?? null)
       .then(async (page) => {
-        const publish = await publishEntry(page);
+        const publish = await publishEntry(t, page);
         if (!cancelled) setAnswer({ forKey: key, ok: true, page, publish });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         if (err instanceof ApiError) {
-          setAnswer({ forKey: key, ok: false, message: messageForAssetCode(err.code), status: err.status });
+          setAnswer({ forKey: key, ok: false, message: t(assetCodeKey(err.code)), status: err.status });
         } else {
-          setAnswer({ forKey: key, ok: false, message: messageForAssetCode("UNKNOWN"), status: 0 });
+          setAnswer({ forKey: key, ok: false, message: t(assetCodeKey("UNKNOWN")), status: 0 });
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [client, pid, version, key]);
+    // `t` in the deps: publishEntry and the refusal message both resolve
+    // their sentences through it.
+  }, [client, pid, version, key, t]);
 
   const current = answer !== null && answer.forKey === key ? answer : null;
 
   if (current === null) {
     return (
       <div className="asset-page" data-asset-page="loading">
-        <Spinner aria-label="Loading asset" />
+        <Spinner aria-label={t("asset.loading")} />
       </div>
     );
   }
   if (!current.ok) {
     return (
       <div className="asset-page" data-asset-page="error" data-asset-status={current.status}>
-        <h1 className="assets-title">Asset</h1>
+        <h1 className="assets-title">{t("asset.error.title")}</h1>
         <p className="asset-notice">{current.message}</p>
         <p className="asset-notice-sub">
-          <Link href="/assets">Back to all assets</Link>
+          <Link href="/assets">{t("asset.back")}</Link>
         </p>
       </div>
     );
@@ -176,9 +181,9 @@ export function AssetPage({
           being a next/link and the styling lives in packages/ui. */}
       <Sidebar
         className="asset-breadcrumb"
-        label="Breadcrumb"
+        label={t("asset.breadcrumb")}
         tone="accent"
-        crumbs={[{ key: "assets", content: <Link href="/assets">Assets</Link> }]}
+        crumbs={[{ key: "assets", content: <Link href="/assets">{t("asset.allAssets")}</Link> }]}
       />
 
       {/* 1. PID / version, 2. type — data-asset-block names the docs/42
@@ -194,30 +199,30 @@ export function AssetPage({
           </h1>
           <p className="asset-ident">
             <span className="assets-type" data-asset-type={asset.type}>
-              {assetTypeLabel(asset.type)}
+              {translateOr(t, assetTypeLabelKey(asset.type), asset.type)}
             </span>
             <code className="assets-pid" data-asset-pid-code>
               {asset.pid}
             </code>
             <span className="asset-version-chip" data-asset-version={rendered.version}>
-              version {rendered.version}
+              {t("asset.versionChip", { version: rendered.version })}
             </span>
             <span className="asset-visibility" data-asset-visibility={rendered.visibility}>
               {rendered.visibility}
             </span>
           </p>
           <p className="asset-published">
-            Published {rendered.published_at.slice(0, 10)}
+            {t("asset.publishedAt", { date: rendered.published_at.slice(0, 10) })}
             {rendered.published_by === null ? null : (
               <>
-                {" by "}
+                {t("asset.publishedBy")}
                 <span className="asset-actor">{rendered.published_by.display_name}</span>
                 <span className="asset-handle">@{rendered.published_by.handle}</span>
               </>
             )}
             {asset.origin_project === null ? null : (
               <>
-                {" in "}
+                {t("asset.publishedIn")}
                 <Link href={`/projects/${asset.origin_project.id}`} data-asset-project={asset.origin_project.slug}>
                   {asset.origin_project.name}
                 </Link>
@@ -252,8 +257,8 @@ export function AssetPage({
               >
                 <RocketIcon size={14} aria-hidden="true" />{" "}
                 {current.publish.alreadyPublic
-                  ? "Publish a new public version from this one"
-                  : "Publish this version publicly"}
+                  ? t("asset.publish.newPublicVersion")
+                  : t("asset.publish.thisVersion")}
               </Link>
             </p>
           ) : (
@@ -276,10 +281,10 @@ export function AssetPage({
             data-asset-block="origin"
           >
             <h2 className="asset-block-title" id="asset-origin-heading">
-              <LinkIcon size={16} aria-hidden="true" /> Origin
+              <LinkIcon size={16} aria-hidden="true" /> {t("asset.origin.title")}
             </h2>
             {page.origin.length === 0 ? (
-              <p className="asset-block-empty">No resolvable origin recorded for this version.</p>
+              <p className="asset-block-empty">{t("asset.origin.empty")}</p>
             ) : (
               <ul className="asset-rows">
                 {page.origin.map((origin) => (
@@ -315,13 +320,13 @@ export function AssetPage({
             data-asset-block="creators"
           >
             <h2 className="asset-block-title" id="asset-creators-heading">
-              <BeakerIcon size={16} aria-hidden="true" /> Creators
+              <BeakerIcon size={16} aria-hidden="true" /> {t("asset.creators.title")}
             </h2>
             {page.creators.length === 0 ? (
               /* No stored credit row for this version — the honest state of
                  a version published before the credit table existed, said
                  in words rather than filled in with the publisher. */
-              <p className="asset-block-empty">No credited party recorded for this version.</p>
+              <p className="asset-block-empty">{t("asset.creators.empty")}</p>
             ) : (
               <ul className="asset-rows">
                 {page.creators.map((creator) => (
@@ -363,10 +368,10 @@ export function AssetPage({
             data-asset-block="metadata"
           >
             <h2 className="asset-block-title" id="asset-metadata-heading">
-              <TagIcon size={16} aria-hidden="true" /> Metadata
+              <TagIcon size={16} aria-hidden="true" /> {t("asset.metadata.title")}
             </h2>
             {page.metadata.length === 0 ? (
-              <p className="asset-block-empty">This version declares no metadata.</p>
+              <p className="asset-block-empty">{t("asset.metadata.empty")}</p>
             ) : (
               <dl className="asset-metadata">
                 {page.metadata.map((entry) => (
@@ -388,10 +393,10 @@ export function AssetPage({
             data-asset-block="dependencies"
           >
             <h2 className="asset-block-title" id="asset-dependencies-heading">
-              <GitBranchIcon size={16} aria-hidden="true" /> Dependencies
+              <GitBranchIcon size={16} aria-hidden="true" /> {t("asset.dependencies.title")}
             </h2>
             {page.dependencies.length === 0 ? (
-              <p className="asset-block-empty">This version pins no published dependency.</p>
+              <p className="asset-block-empty">{t("asset.dependencies.empty")}</p>
             ) : (
               <ul className="asset-rows" data-asset-dependencies={page.dependencies.length}>
                 {page.dependencies.map((dep) => (
@@ -408,7 +413,7 @@ export function AssetPage({
                       // The pin names a version this repository has no row
                       // for: a fact about the publisher's document, said as
                       // such.
-                      <span className="asset-row-note">not in this repository</span>
+                      <span className="asset-row-note">{t("asset.dependencies.unresolved")}</span>
                     )}
                   </li>
                 ))}
@@ -423,10 +428,10 @@ export function AssetPage({
             data-asset-block="lineage"
           >
             <h2 className="asset-block-title" id="asset-lineage-heading">
-              <VersionsIcon size={16} aria-hidden="true" /> Lineage
+              <VersionsIcon size={16} aria-hidden="true" /> {t("asset.lineage.title")}
             </h2>
             {page.lineage.length === 0 ? (
-              <p className="asset-block-empty">No fork or derive edge recorded for this version.</p>
+              <p className="asset-block-empty">{t("asset.lineage.empty")}</p>
             ) : (
               <ul className="asset-rows">
                 {page.lineage.map((edge) => (
@@ -459,10 +464,10 @@ export function AssetPage({
             data-asset-block="used_by"
           >
             <h2 className="asset-block-title" id="asset-usages-heading">
-              <LinkIcon size={16} aria-hidden="true" /> Used by
+              <LinkIcon size={16} aria-hidden="true" /> {t("asset.usedBy.title")}
             </h2>
             {page.used_by.length === 0 ? (
-              <p className="asset-block-empty">No public usage recorded for this version.</p>
+              <p className="asset-block-empty">{t("asset.usedBy.empty")}</p>
             ) : (
               <ul className="asset-rows" data-asset-usages={page.used_by.length}>
                 {page.used_by.map((usage) => (
@@ -491,7 +496,7 @@ export function AssetPage({
             data-asset-block="versions"
           >
             <h2 className="asset-block-title" id="asset-versions-heading">
-              <VersionsIcon size={16} aria-hidden="true" /> Versions
+              <VersionsIcon size={16} aria-hidden="true" /> {t("asset.versions.title")}
             </h2>
             <ul className="asset-versions" data-asset-versions={page.versions.length}>
               {page.versions.map((entry) => (
@@ -523,10 +528,10 @@ export function AssetPage({
             data-asset-block="events"
           >
             <h2 className="asset-block-title" id="asset-events-heading">
-              <LawIcon size={16} aria-hidden="true" /> Network events
+              <LawIcon size={16} aria-hidden="true" /> {t("asset.events.title")}
             </h2>
             {page.events.length === 0 ? (
-              <p className="asset-block-empty">No public event recorded for this asset.</p>
+              <p className="asset-block-empty">{t("asset.events.empty")}</p>
             ) : (
               <ul className="asset-events">
                 {page.events.map((event) => (
@@ -537,7 +542,7 @@ export function AssetPage({
                   >
                     <span className="asset-event-type">{event.type}</span>
                     {event.version === undefined ? null : (
-                      <span className="asset-event-version">version {event.version}</span>
+                      <span className="asset-event-version">{t("asset.eventVersion", { version: event.version })}</span>
                     )}
                     <span className="assets-date">{event.occurred_at.slice(0, 10)}</span>
                     {event.actor === null ? null : (
@@ -608,7 +613,7 @@ function shortHash(hash: string): string {
  *     answer (MAX_CANDIDATE_QUERY_LENGTH), which would make the entry point
  *     a dead link rather than a page.
  */
-async function publishEntry(page: AssetPageData): Promise<PublishEntry | null> {
+async function publishEntry(t: Translate, page: AssetPageData): Promise<PublishEntry | null> {
   const project = page.asset.origin_project;
   if (project === null) return null;
 
@@ -640,9 +645,7 @@ async function publishEntry(page: AssetPageData): Promise<PublishEntry | null> {
     return {
       kind: "withheld",
       reason: "candidate-not-buildable",
-      detail:
-        "This page could not rebuild the version's document, so it does not " +
-        "offer a publication.",
+      detail: t("asset.publish.notBuildable"),
     };
   }
 
@@ -655,11 +658,10 @@ async function publishEntry(page: AssetPageData): Promise<PublishEntry | null> {
     return {
       kind: "withheld",
       reason: "candidate-too-long",
-      detail:
-        `This version's document is ${query.length} characters once encoded ` +
-        `into the link to the confirmation page, past the ` +
-        `${MAX_CANDIDATE_QUERY_LENGTH}-character budget such a link can carry, ` +
-        "so the publication is not offered from this page.",
+      detail: t("asset.publish.tooLong", {
+        length: query.length,
+        budget: MAX_CANDIDATE_QUERY_LENGTH,
+      }),
     };
   }
 

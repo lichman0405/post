@@ -385,6 +385,15 @@ const expectedOrder = [
   "Organizations",
   "Notifications",
   "Sign in",
+  // T1105 appended the language switcher as the last control of
+  // `.global-nav-end` (after the account slot, before the mobile toggle,
+  // which the desktop CSS keeps out of the tab sequence). It is a native
+  // <select> whose accessible name is the catalog's `nav.language` — the
+  // cookie default resolves to English here, so the name is "Language". A
+  // control added to the header without this line would have reddened the
+  // walk below, which is the point: the tab order is enumerated, not
+  // asserted to be "some order".
+  "Language",
 ];
 const seen = [];
 const focusVisible = [];

@@ -12,6 +12,7 @@ import {
   messageForOIDCError,
   type AuthClient,
 } from "../../../lib/auth";
+import { useT } from "../../i18n-provider";
 
 /**
  * The sign-in card (client component): email+password login/signup and an
@@ -23,6 +24,7 @@ import {
  * state changes exactly as the API guard requires.
  */
 export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
+  const t = useT();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [mode, setMode] = useState<"login" | "signup">("login");
@@ -81,7 +83,7 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
     }
   }
 
-  const heading = mode === "login" ? "Sign in to POST" : "Create your account";
+  const heading = mode === "login" ? t("login.heading") : t("login.signupHeading");
 
   return (
     <div className="auth-card">
@@ -89,7 +91,7 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
         {heading}
       </Heading>
       <p className="auth-sub">
-        Platform for Open Science &amp; Technology
+        {t("login.subtitle")}
       </p>
 
       {/* T1104: this Flash is the ONLY report a rejected sign-in, sign-up or
@@ -112,7 +114,7 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
         }}
       >
         <FormControl required>
-          <FormControl.Label>Email</FormControl.Label>
+          <FormControl.Label>{t("login.email")}</FormControl.Label>
           <TextInput
             type="email"
             autoComplete="email"
@@ -122,7 +124,7 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
           />
         </FormControl>
         <FormControl required>
-          <FormControl.Label>Password</FormControl.Label>
+          <FormControl.Label>{t("login.password")}</FormControl.Label>
           <TextInput
             type="password"
             autoComplete={mode === "login" ? "current-password" : "new-password"}
@@ -139,7 +141,7 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
           disabled={busy || email.trim() === "" || password === ""}
           className="auth-submit"
         >
-          {busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
+          {busy ? t("login.pleaseWait") : mode === "login" ? t("nav.signIn") : t("login.createAccount")}
         </Button>
       </form>
 
@@ -152,14 +154,14 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
       >
         <MarkGithubIcon size={16} aria-hidden />
         <span className="auth-oidc-label">
-          Continue with your institution (OIDC)
+          {t("login.oidc")}
         </span>
       </Button>
 
       <p className="auth-sub auth-sub-after">
         {mode === "login" ? (
           <>
-            New to POST?{" "}
+            {t("login.newToPost")}{" "}
             <Link
               as="button"
               type="button"
@@ -168,12 +170,12 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
                 setMode("signup");
               }}
             >
-              Create an account
+              {t("login.createAnAccount")}
             </Link>
           </>
         ) : (
           <>
-            Already have an account?{" "}
+            {t("login.alreadyHaveAccount")}{" "}
             <Link
               as="button"
               type="button"
@@ -182,7 +184,7 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
                 setMode("login");
               }}
             >
-              Sign in
+              {t("nav.signIn")}
             </Link>
           </>
         )}

@@ -32,6 +32,35 @@
   min-width: 0;
 }
 
+/* The language switcher (T1105).
+ *
+ * WHY THIS RULE EXISTS AT ALL: T1104's keyboard walk found that every other
+ * header stop shows a focus indicator and this one did not — a native
+ * <select> that Primer renders with `outline: none` and no replacement ring
+ * on keyboard focus. An a11y suite that reported the header as fine would
+ * have been wrong about the one control this task added, so the ring is
+ * drawn here rather than assumed from the component library.
+ *
+ * `:focus-visible` and not `:focus`: a mouse click on a select should not
+ * paint a ring, and WCAG 2.4.7 is about keyboard focus. The colour is
+ * Primer's focus token, the same one the search input and the nav links
+ * inherit, so the header has one focus treatment rather than two. */
+.global-nav-language {
+  max-width: 140px;
+  flex: 0 0 auto;
+}
+/* Primer's `Select` puts the className on the TextInputWrapper it renders
+ * AROUND the <select> (dist/Select/Select.js:149 — `className` goes to
+ * TextInputWrapper), so this has to reach one level in. Measured, not
+ * guessed: with the rule on the wrapper the keyboard walk still reported
+ * `outline: none` on the focused <select>, whose own class is Primer's
+ * hashed `prc-Select-Select-*`. The descendant selector below wins on
+ * specificity (0,2,1 against that class's 0,2,0). */
+.global-nav-language select:focus-visible {
+  outline: 2px solid var(--focus-outlineColor, #0969da);
+  outline-offset: 2px;
+}
+
 .global-nav-links {
   flex: 1;
   min-width: 0;

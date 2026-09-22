@@ -138,28 +138,34 @@ export class ApiError extends Error {
 }
 
 /**
- * The codes this page can be handed, and the line it renders for each.
+ * The codes this page can be handed, and the catalog key of the line it
+ * renders for each.
  *
  * The four SEARCH_* codes are cmd/api/searchhttp's. The last two are this
  * client's own: a body that is not JSON never reaches a code, and a fetch
  * that throws has no envelope at all — both are failures, and rendering
  * either as an empty result list would be the "failure is not emptiness"
  * mistake docs/51 names.
+ *
+ * A KEY and not a sentence, because this module cannot reach the catalog:
+ * the page resolves it with t(searchCodeKey(code)) (T1105). Only the CODE is
+ * in this table; the line is in the catalog, so the same refusal renders in
+ * the reader's language.
  */
-export function messageForSearchCode(code: string): string {
+export function searchCodeKey(code: string): string {
   switch (code) {
     case "SEARCH_INVALID_REQUEST":
-      return "That search could not be run as written. Check the question and try again.";
+      return "search.code.invalidRequest";
     case "SEARCH_UNAUTHENTICATED":
-      return "Sign in to run a search.";
+      return "search.code.unauthenticated";
     case "SEARCH_UNAVAILABLE":
-      return "Search is temporarily unavailable. Try again.";
+      return "search.code.unavailable";
     case "SEARCH_RECORD_FAILED":
-      return "The search could not be recorded, so it was not answered. Try again.";
+      return "search.code.recordFailed";
     case "MALFORMED_ANSWER":
-      return "The answer could not be read, so nothing is shown for this search.";
+      return "search.code.malformedAnswer";
     default:
-      return "The search service could not be reached. Try again.";
+      return "search.code.unreachable";
   }
 }
 
@@ -171,27 +177,31 @@ export function messageForSearchCode(code: string): string {
  * into the answer's first limitation (fallbackText), shortened for a
  * heading. The platform's full sentence is rendered verbatim underneath —
  * this is a heading over that fact, never a second account of it, and it
- * makes no claim the answer does not carry.
+ * makes no claim the answer does not carry. The KEY is what this function
+ * returns (T1105): the headline itself is in the catalog, and the page
+ * resolves it with t(fallbackHeadlineKey(reason)).
  */
-export function fallbackHeadline(reason: string): string {
+export function fallbackHeadlineKey(reason: string): string {
   switch (reason) {
     case "no_provider":
-      return "No written answer: this deployment has no answer model configured.";
+      return "search.fallback.headline.noProvider";
     case "no_sources":
-      return "No written answer: the search returned no source to cite.";
+      return "search.fallback.headline.noSources";
     case "provider_error":
-      return "No written answer: the answer model could not be reached.";
+      return "search.fallback.headline.providerError";
     case "provider_timeout":
-      return "No written answer: the answer model did not answer in time.";
+      return "search.fallback.headline.providerTimeout";
     case "invalid_answer":
-      return "No written answer: the model's document did not satisfy the answer schema.";
+      return "search.fallback.headline.invalidAnswer";
     case "ungrounded_citation":
-      return "No written answer: the model cited an entity the search did not return.";
+      return "search.fallback.headline.ungroundedCitation";
     default:
       // A reason this page has not been taught is still a fallback, and the
       // page still says the one thing that is true of every one of them. The
-      // platform's own sentence is rendered beside it either way.
-      return "No written answer for this search.";
+      // platform's own sentence is rendered beside it either way. This is the
+      // one case that needs no lookup to be safe, which is why the function
+      // returns a key rather than null: an unknown reason has its own key.
+      return "search.fallback.headline.other";
   }
 }
 
@@ -350,6 +360,24 @@ export function searchUrl(apiBaseUrl: string): string {
   return `${apiBaseUrl.replace(/\/+$/, "")}/api/v1/search`;
 }
 
+/**
+ * The envelope this client synthesizes itself: a connection that failed
+ * before there was a body, a body that was not JSON, or a body that is not
+ * the shape an answer has.
+ *
+ * `message` carries the CODE and not a sentence. An ApiError's message is a
+ * developer diagnostic — the page renders the code through the catalog
+ * (searchCodeKey), never this string — so prose here would be English that
+ * no reader is ever shown, and the code is exactly what an engineer reading
+ * a log needs. It is also the one shape this file can offer the scanner: its
+ * rules cannot tell a developer diagnostic from rendered copy in a .ts file,
+ * and a file that has to be exempted from the rules is a file whose NEXT
+ * sentence goes unnoticed.
+ */
+function syntheticEnvelope(code: string, retryable: boolean): ErrorEnvelope {
+  return { code, message: code, retryable };
+}
+
 /** Decode an error body into the envelope, falling back to a generic code. */
 function envelopeFor(status: number, body: unknown): ErrorEnvelope {
   if (typeof body === "object" && body !== null) {
@@ -357,13 +385,15 @@ function envelopeFor(status: number, body: unknown): ErrorEnvelope {
     if (typeof env.code === "string" && env.code !== "") {
       return {
         code: env.code,
-        message: typeof env.message === "string" ? env.message : "request failed",
+        /* An envelope that carries a code but no message of its own is
+         * answered with its own code, for the reason above. */
+        message: typeof env.message === "string" ? env.message : env.code,
         request_id: env.request_id,
         retryable: env.retryable,
       };
     }
   }
-  return { code: "UNKNOWN", message: `request failed with status ${status}`, retryable: false };
+  return syntheticEnvelope("UNKNOWN", status === 503 || status >= 500);
 }
 
 /** Create the search client over one API origin. */
@@ -396,27 +426,23 @@ export function createSearchClient(
         });
       } catch {
         // No envelope exists when the connection itself fails.
-        throw new ApiError(0, { code: "UNREACHABLE", message: "search unreachable", retryable: true });
+        // A synthetic envelope carries its CODE as the message: the page
+        // renders the code through the catalog (searchCodeKey), so a sentence
+        // here would be English no reader is shown, and the code is what an
+        // engineer reading a log needs. See syntheticEnvelope below.
+        throw new ApiError(0, syntheticEnvelope("UNREACHABLE", true));
       }
       let body: unknown;
       try {
         body = await res.json();
       } catch {
-        throw new ApiError(res.status, {
-          code: "MALFORMED_ANSWER",
-          message: "the answer was not JSON",
-          retryable: res.status >= 500,
-        });
+        throw new ApiError(res.status, syntheticEnvelope("MALFORMED_ANSWER", res.status >= 500));
       }
       if (res.status < 200 || res.status >= 300) {
         throw new ApiError(res.status, envelopeFor(res.status, body));
       }
       if (!isSearchResponse(body)) {
-        throw new ApiError(res.status, {
-          code: "MALFORMED_ANSWER",
-          message: "the answer did not have the shape of an answer",
-          retryable: false,
-        });
+        throw new ApiError(res.status, syntheticEnvelope("MALFORMED_ANSWER", false));
       }
       return body;
     },

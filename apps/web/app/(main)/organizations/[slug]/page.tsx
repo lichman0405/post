@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { getWebConfig } from "../../../../lib/server-config";
+import { getT } from "../../../../lib/i18n-server";
 import { OrganizationProfileCard } from "./organization-profile-card";
 
 /**
@@ -23,10 +24,16 @@ import { OrganizationProfileCard } from "./organization-profile-card";
  * built from a server-side read (see /users/{id}, which uses
  * lib/entity-meta) and this task does not add one. The title is therefore
  * generic rather than derived — an honest gap, not a stub page.
+ *
+ * T1105: that generic title is still copy, so it comes from the catalog and
+ * follows the language preference. This route's body is NOT localized (see
+ * the coverage table in the task's RESULT): the card's own strings are
+ * covered, the copy inside it that reads over the wire is not.
  */
-export const metadata: Metadata = {
-  title: "Organization profile — POST",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getT();
+  return { title: t("page.organizations.metaTitle") };
+}
 
 export default async function OrganizationProfilePage({
   params,

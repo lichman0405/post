@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
 
 import { getWebConfig } from "../../../lib/server-config";
+import { getT } from "../../../lib/i18n-server";
 import { AssetsBrowse } from "./assets-browse";
 
-export const metadata: Metadata = {
-  title: "Assets — POST",
-};
+/** T1105: the tab title is copy — it follows the language preference. The
+ *  browse list below it is NOT localized (see the coverage table in the
+ *  task's RESULT); this route is therefore half-covered on purpose and the
+ *  catalog group it draws from says so. */
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getT();
+  return { title: t("page.assets.metaTitle") };
+}
 
 /**
  * The asset hub (T0709, docs/11 §2): server component that resolves the

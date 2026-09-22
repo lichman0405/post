@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ThreeBarsIcon, SignInIcon } from "@primer/octicons-react";
 
+import { useT } from "../i18n-provider";
 import { NAV_DRAWER_DESTINATIONS } from "./nav-destinations";
 import { useNavSession } from "./nav-session";
 
@@ -20,6 +21,7 @@ const DRAWER_ID = "global-nav-drawer";
 export function MobileNavMenu() {
   const pathname = usePathname();
   const { user, loading, busy, signOut } = useNavSession();
+  const t = useT();
   const [open, setOpen] = useState(false);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -63,7 +65,7 @@ export function MobileNavMenu() {
         ref={toggleRef}
         type="button"
         className="global-nav-icon global-nav-mobile-toggle"
-        aria-label="Global navigation menu"
+        aria-label={t("nav.menuLabel")}
         aria-expanded={open}
         aria-controls={open ? DRAWER_ID : undefined}
         onClick={() => setOpen((value) => !value)}
@@ -79,7 +81,7 @@ export function MobileNavMenu() {
           onKeyDown={onPanelKeyDown}
         >
           <ul className="global-nav-drawer-list">
-            {NAV_DRAWER_DESTINATIONS.map(({ href, label, icon: Icon }) => {
+            {NAV_DRAWER_DESTINATIONS.map(({ href, labelKey, icon: Icon }) => {
               const current = pathname === href;
               return (
                 <li key={href}>
@@ -89,7 +91,7 @@ export function MobileNavMenu() {
                     aria-current={current ? "page" : undefined}
                   >
                     <Icon size={16} aria-hidden />
-                    <span>{label}</span>
+                    <span>{t(labelKey)}</span>
                   </Link>
                 </li>
               );
@@ -97,20 +99,32 @@ export function MobileNavMenu() {
           </ul>
           <div className="global-nav-drawer-divider" role="separator" />
           {loading ? (
-            <p className="global-nav-drawer-session">Checking session…</p>
+            <p className="global-nav-drawer-session">{t("nav.checkingSession")}</p>
           ) : user === null ? (
             <Link href="/login" className="global-nav-drawer-link">
               <SignInIcon size={16} aria-hidden />
-              <span>Sign in</span>
+              <span>{t("nav.signIn")}</span>
             </Link>
           ) : (
             <>
+              {/* T1105: the name is an ELEMENT here (T0107 put it in a
+                  <strong>), so the sentence around it cannot be one
+                  interpolated catalog value without dropping that markup —
+                  which is what an earlier revision of this task did, and the
+                  rework put back. The connective is its own key instead, the
+                  same shape as asset.publishedBy on the asset page: the value
+                  carries its own trailing space because what follows is a
+                  node, not a string. `nav.signedInAs` (the desktop menu's
+                  one-string version of the same sentence) and this label must
+                  say the same thing — they are two keys because the markup
+                  differs, not because the sentence does. */}
               <p className="global-nav-drawer-session">
-                Signed in as <strong>{user.display_name || user.handle}</strong>
+                {t("nav.signedInAsLabel")}
+                <strong>{user.display_name || user.handle}</strong>
               </p>
               <div className="global-nav-drawer-actions">
                 <Link href={`/users/${user.id}`} className="global-nav-drawer-link">
-                  Your profile
+                  {t("nav.yourProfile")}
                 </Link>
                 <button
                   type="button"
@@ -118,7 +132,7 @@ export function MobileNavMenu() {
                   disabled={busy}
                   onClick={() => signOut()}
                 >
-                  {busy ? "Signing out…" : "Sign out"}
+                  {busy ? t("nav.signingOut") : t("nav.signOut")}
                 </button>
               </div>
             </>

@@ -20,10 +20,22 @@
  * Authorization truth stays in the API: a refusal renders its own
  * message, the page never guesses the caller's role.
  *
- * The module is import-free by construction (like lib/projects.ts), so
- * the node:test suite (pulls.test.mjs) runs it through Node's type
+ * The module has no RUNTIME imports by construction (like lib/projects.ts),
+ * so the node:test suite (pulls.test.mjs) runs it through Node's type
  * stripping. The ApiError shape mirrors lib/projects.ts.
+ *
+ * T1105: the copy this module used to hold — the tab labels, the tab hints,
+ * the dimension labels, the refusal lines and the risk sentences — is in the
+ * catalog now. A PURE LOOKUP returns a catalog key (`pullTabLabelKey`,
+ * `dimensionLabelKey`) and the page resolves it with t(); a sentence this
+ * module COMPOSES from the data it was handed (a count, a list of ids) takes
+ * the translator as its last argument and interpolates into a catalog value,
+ * the way publishEntry(t, page) in app/(main)/assets/asset-page.tsx does.
+ * The module still cannot reach the catalog on its own, which is what keeps
+ * it testable without a DOM. The one import below is a TYPE, and Node's type
+ * stripping erases it.
  */
+import type { Translate } from "./i18n";
 
 /** The wire PR shape (cmd/api/pullrequestshttp prPayload, docs/43 states). */
 export interface PullRequest {
@@ -347,10 +359,13 @@ export function createPullsClient(
     if (typeof body === "object" && body !== null && "code" in body) {
       throw new ApiError(status, body as ErrorEnvelope);
     }
-    throw new ApiError(status, {
-      code: "UNKNOWN",
-      message: "the server answered unexpectedly; try again",
-    });
+    /* A synthetic envelope carries its CODE as the message, not a sentence:
+     * the pages render the code through the catalog (pullRequestCodeKey), so
+     * prose here would be English no reader is shown — and prose in a .ts
+     * file is exactly what the scanner cannot tell from copy a reader IS
+     * shown. See lib/assets.ts:envelopeFor for the same shape. */
+    const code = "UNKNOWN";
+    throw new ApiError(status, { code, message: code });
   }
 
   // The guard covers every field of the declared shape, including the
@@ -629,51 +644,62 @@ export const INTEGRITY_DIMENSIONS = [
   "blob",
 ] as const;
 
-/** Human-facing label for one integrity dimension. */
-export function dimensionLabel(dimension: string): string {
+/** The catalog key of one integrity dimension's label.
+ *
+ *  Null for a dimension this client was not taught: the set is closed on the
+ *  server (internal/rsg integrity dimensions), so a value outside it is a
+ *  value this client cannot name, and the caller renders the raw value rather
+ *  than a key that does not exist. Same shape as assetTypeLabelKey. */
+export function dimensionLabelKey(dimension: string): string | null {
   switch (dimension) {
     case "schema":
-      return "Schema";
+      return "pull.dimension.schema";
     case "provenance":
-      return "Provenance";
+      return "pull.dimension.provenance";
     case "dependency":
-      return "Dependency";
+      return "pull.dimension.dependency";
     case "rights":
-      return "Rights";
+      return "pull.dimension.rights";
     case "visibility":
-      return "Visibility";
+      return "pull.dimension.visibility";
     case "blob":
-      return "Blob references";
+      return "pull.dimension.blob";
     default:
-      return dimension;
+      return null;
   }
 }
 
-/** Human-facing message for a stable pull-request API code. */
-export function messageForPullRequestCode(code: string): string {
+/** The catalog key of the line a page renders for a stable pull-request API
+ *  code (cmd/api/pullrequestshttp, reviewhttp).
+ *
+ *  Only the CODE is in this table — the sentence is in the catalog, so the
+ *  same code renders in the reader's language. The default is a generic line
+ *  rather than the code itself: a code is a machine fact, not a sentence, and
+ *  the page already renders the code in its request-id line. */
+export function pullRequestCodeKey(code: string): string {
   switch (code) {
     case "PULL_REQUEST_NOT_FOUND":
-      return "This pull request does not exist, or you do not have access to it.";
+      return "pull.code.notFound";
     case "VALIDATION_FAILED":
-      return "That request could not be processed. Check the pull request number and try again.";
+      return "pull.code.validationFailed";
     case "PROJECT_NOT_FOUND":
-      return "This project does not exist, or you do not have access to it.";
+      return "pull.code.projectNotFound";
     case "STATE_NOT_FOUND":
-      return "One of the compared research states no longer exists, so the diff cannot be shown.";
+      return "pull.code.stateNotFound";
     case "REVIEW_ALREADY_SUBMITTED":
-      return "You already recorded this review kind for this head — the author has to update the proposal, then review it again.";
+      return "pull.code.reviewAlreadySubmitted";
     case "PR_TERMINAL":
-      return "This pull request is already closed; a closed proposal accepts no further reviews.";
+      return "pull.code.prTerminal";
     case "AUTH_FORBIDDEN":
-      return "You are not permitted to submit a review in this project.";
+      return "pull.code.forbidden";
     case "AUTH_UNAUTHENTICATED":
-      return "Sign in to submit a review.";
+      return "pull.code.unauthenticated";
     case "CSRF_FAILED":
-      return "The request was rejected as cross-site. Reload the page and try again.";
+      return "pull.code.csrfFailed";
     case "SERVICE_UNAVAILABLE":
-      return "Pull request data is temporarily unavailable. Please try again later.";
+      return "pull.code.unavailable";
     default:
-      return "Something went wrong while loading pull request data. Please try again.";
+      return "pull.code.generic";
   }
 }
 
@@ -701,39 +727,45 @@ export type PullTab = (typeof PULL_TABS)[number];
 /** The tab the page opens on — never the raw file diff (docs/06 §6). */
 export const DEFAULT_PULL_TAB: PullTab = "summary";
 
-/** Human-facing tab label. */
-export function pullTabLabel(tab: PullTab): string {
+/** The catalog key of one tab's label.
+ *
+ *  A KEY and not a sentence, because this module cannot reach the catalog:
+ *  the page resolves it with t(pullTabLabelKey(tab)). The tab's CODE — the
+ *  value `data-pull-tab` carries and the value the wire speaks — is the tab
+ *  itself and never passes through here (docs/28 §3). */
+export function pullTabLabelKey(tab: PullTab): string {
   switch (tab) {
     case "summary":
-      return "Summary";
+      return "pull.tab.summary";
     case "scientific":
-      return "Scientific changes";
+      return "pull.tab.scientific";
     case "knowledge":
-      return "Knowledge changes";
+      return "pull.tab.knowledge";
     case "evidence":
-      return "Evidence";
+      return "pull.tab.evidence";
     case "checks":
-      return "Checks";
+      return "pull.tab.checks";
     case "raw":
-      return "Raw Files";
+      return "pull.tab.raw";
   }
 }
 
-/** One line of what a tab holds, rendered under the tab bar. */
-export function pullTabHint(tab: PullTab): string {
+/** The catalog key of the line of what a tab holds, rendered under the tab
+ *  bar. Same shape as pullTabLabelKey and for the same reason. */
+export function pullTabHintKey(tab: PullTab): string {
   switch (tab) {
     case "summary":
-      return "What this proposal changes, in one screen: counts, both review dimensions, and the risks a reviewer must not miss.";
+      return "pull.tabHint.summary";
     case "scientific":
-      return "Every scientific object the proposal creates, updates, aborts or reopens, with its three-way fields.";
+      return "pull.tabHint.scientific";
     case "knowledge":
-      return "Changes to the knowledge objects (claims, hypotheses, research questions, findings) and the knowledge relations between them.";
+      return "pull.tabHint.knowledge";
     case "evidence":
-      return "Evidence assertions and the evidence relations (docs/10 §4) this proposal adds or changes.";
+      return "pull.tabHint.evidence";
     case "checks":
-      return "The machine integrity report: one row per check, with its own reason.";
+      return "pull.tabHint.checks";
     case "raw":
-      return "The recorded Git refs of both sides. This is the raw file view — the semantic diff above is the page's subject.";
+      return "pull.tabHint.raw";
   }
 }
 
@@ -857,19 +889,25 @@ export function evidenceChanges(diff: DiffDocument): {
   };
 }
 
-/** Human-facing label for one change kind (diff.ChangeKind). */
-export function changeKindLabel(kind: string): string {
+/** The catalog key of one change kind's display label (diff.ChangeKind).
+ *
+ *  Null for a kind this client was not taught — the caller then renders the
+ *  raw value. The display label happens to equal the code in English, which
+ *  is exactly the case docs/28 §3 separates: the CODE stays in the wire and
+ *  in `data-*` attributes, the LABEL a reader sees is copy and is translated.
+ */
+export function changeKindLabelKey(kind: string): string | null {
   switch (kind) {
     case "created":
-      return "created";
+      return "pull.changeKind.created";
     case "updated":
-      return "updated";
+      return "pull.changeKind.updated";
     case "aborted":
-      return "aborted";
+      return "pull.changeKind.aborted";
     case "reopened":
-      return "reopened";
+      return "pull.changeKind.reopened";
     default:
-      return kind;
+      return null;
   }
 }
 
@@ -978,13 +1016,29 @@ function visibilityNoteworthy(change: ObjectChange): boolean {
   return change.kind === "created" && pinnedPolicy(change.source_version) !== null;
 }
 
-/** One line naming what happened to one object's visibility policy. */
-function visibilityLine(change: ObjectChange): string {
+/** One line naming what happened to one object's visibility policy.
+ *
+ *  Takes the translator because the line is a sentence AROUND two values
+ *  (the object's title and a policy id), and the policy id can be absent —
+ *  in which case the line has to say so in words ("inherited default"),
+ *  which is copy. */
+function visibilityLine(change: ObjectChange, t: Translate): string {
   const title = change.source_version.title || change.object_id;
   const policy = pinnedPolicy(change.source_version);
-  if (change.kind === "created") return `${title} (born pinned to ${policy})`;
+  const inherited = t("pull.visibility.inheritedDefault");
+  if (change.kind === "created") {
+    /* String(policy) rather than `policy ?? …`: the baseline interpolated the
+     * value straight into the template, so a null (which visibilityNoteworthy
+     * makes unreachable for a creation — see its comment) rendered the word
+     * "null". Kept byte-identical rather than quietly improved. */
+    return t("pull.visibility.bornPinned", { title, policy: String(policy) });
+  }
   const before = change.base_version === null ? null : pinnedPolicy(change.base_version);
-  return `${title} (policy ${before === null ? "inherited default" : before} → ${policy === null ? "inherited default" : policy})`;
+  return t("pull.visibility.changed", {
+    title,
+    before: before === null ? inherited : before,
+    after: policy === null ? inherited : policy,
+  });
 }
 
 /** What assessPullRisks reads: the PR's three answers plus the head it judges. */
@@ -1012,7 +1066,7 @@ export interface RiskInput {
  * shows no risk banner at all — the honest rendering of "nothing to warn
  * about", never a green "all clear" the page cannot vouch for.
  */
-export function assessPullRisks(input: RiskInput): PullRisk[] {
+export function assessPullRisks(input: RiskInput, t: Translate): PullRisk[] {
   const { report, diff, reviews, headStateId } = input;
   const risks: PullRisk[] = [];
 
@@ -1021,10 +1075,15 @@ export function assessPullRisks(input: RiskInput): PullRisk[] {
     if (result.passed) continue;
     const subject = result.subject !== undefined && result.subject !== "" ? ` (${result.subject})` : "";
     const blocking = result.severity === "blocking";
+    const dimension = dimensionLabelKey(result.dimension);
     risks.push({
       severity: blocking ? "blocking" : "warning",
       code: blocking ? RISK_BLOCKING_CHECK : RISK_WARNING_CHECK,
-      title: `${dimensionLabel(result.dimension)} check failed: ${result.check}${subject}`,
+      title: t("pull.risk.checkFailed", {
+        dimension: dimension === null ? result.dimension : t(dimension),
+        check: result.check,
+        subject,
+      }),
       detail: result.detail !== undefined && result.detail !== "" ? result.detail : result.why,
       tab: "checks",
     });
@@ -1035,7 +1094,7 @@ export function assessPullRisks(input: RiskInput): PullRisk[] {
     risks.push({
       severity: "blocking",
       code: RISK_INTEGRITY_BLOCKED,
-      title: "The machine integrity verdict is blocked",
+      title: t("pull.risk.integrityBlocked"),
       detail: report.explanation,
       tab: "checks",
     });
@@ -1048,10 +1107,8 @@ export function assessPullRisks(input: RiskInput): PullRisk[] {
     risks.push({
       severity: "warning",
       code: RISK_TARGET_MOVED,
-      title: `The target branch moved ${moved.length} of the compared entries too`,
-      detail:
-        `${moved.join(", ")} — both sides changed these since the branch point, ` +
-        `so the two moves have to be read together before this proposal merges.`,
+      title: t("pull.risk.targetMoved.title", { count: moved.length }),
+      detail: t("pull.risk.targetMoved.detail", { entries: moved.join(", ") }),
       tab: "scientific",
     });
   }
@@ -1061,10 +1118,12 @@ export function assessPullRisks(input: RiskInput): PullRisk[] {
     risks.push({
       severity: "warning",
       code: RISK_OBJECTS_ABORTED,
-      title: `${aborted.length} object${aborted.length === 1 ? " is" : "s are"} aborted by this proposal`,
-      detail:
-        `${aborted.map((c) => c.source_version.title || c.object_id).join(", ")} — ` +
-        `nothing disappears, so an abort is a scientific act the reviewer must see.`,
+      title: t(aborted.length === 1 ? "pull.risk.aborted.title.one" : "pull.risk.aborted.title.many", {
+        count: aborted.length,
+      }),
+      detail: t("pull.risk.aborted.detail", {
+        entries: aborted.map((c) => c.source_version.title || c.object_id).join(", "),
+      }),
       tab: "scientific",
     });
   }
@@ -1074,7 +1133,11 @@ export function assessPullRisks(input: RiskInput): PullRisk[] {
     risks.push({
       severity: "warning",
       code: RISK_SCHEMA_CHANGED,
-      title: `${schemaChanged.length} object${schemaChanged.length === 1 ? "" : "s"} change their governing schema`,
+      /* The detail of this one is data only — "title → schema-ref version",
+         one per object — so it is composed here rather than translated. */
+      title: t(schemaChanged.length === 1 ? "pull.risk.schema.title.one" : "pull.risk.schema.title.many", {
+        count: schemaChanged.length,
+      }),
       detail: schemaChanged
         .map((c) => `${c.source_version.title || c.object_id} → ${c.source_version.schema_ref.id} ${c.source_version.schema_ref.version}`)
         .join(", "),
@@ -1087,10 +1150,12 @@ export function assessPullRisks(input: RiskInput): PullRisk[] {
     risks.push({
       severity: "warning",
       code: RISK_VISIBILITY_CHANGED,
-      title: `Visibility changes on ${visibilityChanged.length} object${visibilityChanged.length === 1 ? "" : "s"}`,
-      detail:
-        `${visibilityChanged.map(visibilityLine).join(", ")} — ` +
-        `rights are version-pinned, so the reviewer has to see who can read what after this merge.`,
+      title: t(visibilityChanged.length === 1 ? "pull.risk.visibility.title.one" : "pull.risk.visibility.title.many", {
+        count: visibilityChanged.length,
+      }),
+      detail: t("pull.risk.visibility.detail", {
+        entries: visibilityChanged.map((change) => visibilityLine(change, t)).join(", "),
+      }),
       tab: "scientific",
     });
   }
@@ -1102,8 +1167,12 @@ export function assessPullRisks(input: RiskInput): PullRisk[] {
     risks.push({
       severity: "blocking",
       code: RISK_CHANGES_REQUESTED,
-      title: `${refused.length} review${refused.length === 1 ? "" : "s"} request changes on the current head`,
-      detail: refused.map((r) => `${r.kind} review by ${r.reviewer_id}`).join(", "),
+      title: t(refused.length === 1 ? "pull.risk.refused.title.one" : "pull.risk.refused.title.many", {
+        count: refused.length,
+      }),
+      detail: refused
+        .map((r) => t("pull.risk.refused.entry", { kind: r.kind, reviewer: r.reviewer_id }))
+        .join(", "),
       tab: "summary",
     });
   }

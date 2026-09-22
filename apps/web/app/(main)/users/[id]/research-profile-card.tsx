@@ -6,7 +6,7 @@ import { Flash, Heading, Link, Spinner, Text } from "@primer/react";
 import {
   ResearchProfileError,
   createResearchProfileClient,
-  messageForResearchProfileCode,
+  researchProfileCodeKey,
   type PersonResearchProfile,
 } from "../../../../lib/research-profile";
 import {
@@ -16,6 +16,7 @@ import {
   ReproductionList,
   ReuseList,
 } from "../../../components/research-profile-sections";
+import { useT } from "../../../i18n-provider";
 
 /**
  * The Research Profile card (docs/42), rendered under the identity card on
@@ -37,6 +38,7 @@ export function ResearchProfileCard({
   apiBaseUrl: string;
   userId: string;
 }) {
+  const t = useT();
   const client = useMemo(
     () => createResearchProfileClient(apiBaseUrl),
     [apiBaseUrl],
@@ -59,9 +61,9 @@ export function ResearchProfileCard({
           setNotFound(true);
         } else {
           setLoadError(
-            messageForResearchProfileCode(
+            t(researchProfileCodeKey(
               err instanceof ResearchProfileError ? err.code : "UNKNOWN",
-            ),
+            )),
           );
         }
       })
@@ -71,7 +73,8 @@ export function ResearchProfileCard({
     return () => {
       cancelled = true;
     };
-  }, [client, userId]);
+    // `t` in the deps: the failure line resolves through it.
+  }, [client, userId, t]);
 
   if (loading) {
     return (
@@ -79,7 +82,7 @@ export function ResearchProfileCard({
       // loading state, the spinner's default srText would say it twice.
       <div className="rp-card rp-loading" role="status" aria-busy="true">
         <Spinner size="small" srText={null} />
-        <Text>Loading research profile…</Text>
+        <Text>{t("rp.loading")}</Text>
       </div>
     );
   }
@@ -90,7 +93,7 @@ export function ResearchProfileCard({
     // guess which one it is.
     return (
       <div className="rp-card">
-        <Flash variant="default">{messageForResearchProfileCode("USER_NOT_FOUND")}</Flash>
+        <Flash variant="default">{t(researchProfileCodeKey("USER_NOT_FOUND"))}</Flash>
       </div>
     );
   }
@@ -98,7 +101,7 @@ export function ResearchProfileCard({
   if (profile === null || loadError !== null) {
     return (
       <div className="rp-card">
-        <Flash variant="danger">{loadError ?? "The research profile could not be loaded."}</Flash>
+        <Flash variant="danger">{loadError ?? t("rp.error.load")}</Flash>
       </div>
     );
   }
@@ -106,7 +109,7 @@ export function ResearchProfileCard({
   return (
     <div className="rp-card">
       <Heading as="h2" className="rp-title">
-        Research profile
+        {t("rp.title")}
       </Heading>
 
       {profile.person.bio !== "" && <p className="rp-bio">{profile.person.bio}</p>}
@@ -115,16 +118,16 @@ export function ResearchProfileCard({
       <ContributionList
         items={profile.contributions}
         showActor={false}
-        empty="No public contribution recorded yet."
+        emptyKey="rp.empty.contributions"
       />
-      <AssetList items={profile.assets} empty="No published assets yet." />
+      <AssetList items={profile.assets} emptyKey="rp.empty.assets" />
       <ReuseList items={profile.reuse} />
       <ReproductionList items={profile.reproductions} />
 
       <section className="rp-section">
-        <h2 className="rp-section-title">Projects</h2>
+        <h2 className="rp-section-title">{t("rp.projects")}</h2>
         {profile.projects.length === 0 ? (
-          <Text className="rp-empty">No public project to name yet.</Text>
+          <Text className="rp-empty">{t("rp.empty.projects")}</Text>
         ) : (
           <ul className="rp-list">
             {profile.projects.map((p) => (
@@ -141,8 +144,7 @@ export function ResearchProfileCard({
       </section>
 
       <p className="rp-footnote">
-        Every dimension above is a list of recorded facts. POST does not
-        compute a score, rank or rating for a person, and this page shows none.
+        {t("rp.footnote")}
       </p>
     </div>
   );

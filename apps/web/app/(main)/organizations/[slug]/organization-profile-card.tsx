@@ -6,13 +6,14 @@ import { Flash, Heading, Link, Spinner, Text } from "@primer/react";
 import {
   ResearchProfileError,
   createResearchProfileClient,
-  messageForResearchProfileCode,
+  researchProfileCodeKey,
   type OrganizationResearchProfile,
 } from "../../../../lib/research-profile";
 import {
   AssetList,
   ContributionList,
 } from "../../../components/research-profile-sections";
+import { useT } from "../../../i18n-provider";
 
 /**
  * The Organization Research Profile (docs/05 §4: an institution's public
@@ -34,6 +35,7 @@ export function OrganizationProfileCard({
   apiBaseUrl: string;
   slug: string;
 }) {
+  const t = useT();
   const client = useMemo(
     () => createResearchProfileClient(apiBaseUrl),
     [apiBaseUrl],
@@ -56,9 +58,9 @@ export function OrganizationProfileCard({
           setNotFound(true);
         } else {
           setLoadError(
-            messageForResearchProfileCode(
+            t(researchProfileCodeKey(
               err instanceof ResearchProfileError ? err.code : "UNKNOWN",
-            ),
+            )),
           );
         }
       })
@@ -68,7 +70,8 @@ export function OrganizationProfileCard({
     return () => {
       cancelled = true;
     };
-  }, [client, slug]);
+    // `t` in the deps: the failure line resolves through it.
+  }, [client, slug, t]);
 
   if (loading) {
     return (
@@ -76,7 +79,7 @@ export function OrganizationProfileCard({
       // loading state, the spinner's default srText would say it twice.
       <div className="rp-card rp-loading" role="status" aria-busy="true">
         <Spinner size="small" srText={null} />
-        <Text>Loading organization profile…</Text>
+        <Text>{t("rp.org.loading")}</Text>
       </div>
     );
   }
@@ -84,7 +87,7 @@ export function OrganizationProfileCard({
   if (notFound) {
     return (
       <div className="rp-card">
-        <Flash variant="default">{messageForResearchProfileCode("ORG_NOT_FOUND")}</Flash>
+        <Flash variant="default">{t(researchProfileCodeKey("ORG_NOT_FOUND"))}</Flash>
       </div>
     );
   }
@@ -92,7 +95,7 @@ export function OrganizationProfileCard({
   if (profile === null || loadError !== null) {
     return (
       <div className="rp-card">
-        <Flash variant="danger">{loadError ?? "The organization profile could not be loaded."}</Flash>
+        <Flash variant="danger">{loadError ?? t("rp.org.error.load")}</Flash>
       </div>
     );
   }
@@ -108,9 +111,9 @@ export function OrganizationProfileCard({
       )}
 
       <section className="rp-section">
-        <h2 className="rp-section-title">Projects</h2>
+        <h2 className="rp-section-title">{t("rp.projects")}</h2>
         {profile.projects.length === 0 ? (
-          <Text className="rp-empty">No public project yet.</Text>
+          <Text className="rp-empty">{t("rp.org.empty.projects")}</Text>
         ) : (
           <ul className="rp-list">
             {profile.projects.map((p) => (
@@ -137,16 +140,15 @@ export function OrganizationProfileCard({
       <ContributionList
         items={profile.activity}
         showActor
-        empty="No public activity recorded yet."
+        emptyKey="rp.org.empty.contributions"
       />
       <AssetList
         items={profile.assets}
-        empty="No published assets from this organization's public projects yet."
+        emptyKey="rp.org.empty.assets"
       />
 
       <p className="rp-footnote">
-        Activity, projects and assets are recorded facts. POST does not
-        compute a score, rank or rating for an organization.
+        {t("rp.org.footnote")}
       </p>
     </div>
   );
