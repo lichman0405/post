@@ -352,6 +352,10 @@
     "security-master": {
       "steps": [
         {
+          "name": "security-master: declare where the installers put their tools (go install -> GOPATH/bin, uv tool -> ~/.local/bin) so later steps find them",
+          "run": "if [ -n \"${GITHUB_PATH:-}\" ]; then echo \"$(go env GOPATH)/bin\" >> \"$GITHUB_PATH\"; echo \"$HOME/.local/bin\" >> \"$GITHUB_PATH\"; fi"
+        },
+        {
           "name": "security-master: pnpm (corepack) \u2014 the SAST-Node and SBOM-Node rows run it, at the pin package.json declares",
           "run": "corepack enable pnpm"
         },
