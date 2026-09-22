@@ -68,7 +68,14 @@ func RunGate(opts *GateRunOpts) (*GateRunResult, error) {
 	// the task's own worktree (the previous behaviour) reported green for
 	// trees that cannot be composed with main at all: five separate collisions
 	// across P1, every one of which git called MERGEABLE.
-	workDir, cleanupTree, err := prepareIntegrationTree(opts.RepoRoot, opts.TaskID)
+	//
+	// A gate run needs its own run id before the tree is built so the tree path
+	// can be unique to this run; see IntegrationTreeDirForRun.
+	runID := opts.RunID
+	if runID == "" {
+		runID = NewRunID()
+	}
+	workDir, cleanupTree, err := prepareIntegrationTreeForRun(opts.RepoRoot, opts.TaskID, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -85,10 +92,6 @@ func RunGate(opts *GateRunOpts) (*GateRunResult, error) {
 	}
 	if len(jobs) == 0 {
 		return nil, fmt.Errorf("gate %s declares no jobs for task %s", opts.Gate, opts.TaskID)
-	}
-	runID := opts.RunID
-	if runID == "" {
-		runID = NewRunID()
 	}
 	// A gate run's record is named gate-run-<runID>.json, so two gates run by
 	// ONE command under the same caller-supplied run id collide on the
@@ -676,7 +679,20 @@ func EnsureG2Green(opts *GateRunOpts) (*GateRunResult, error) {
 // IntegrationTreeDir is where the tree a gate verifies is built: current main
 // plus the task's complete change. Supervisor-owned and gitignored.
 func IntegrationTreeDir(repoRoot, taskID string) string {
-	return filepath.Join(repoRoot, ".rddev", "runtime", "integration", taskID)
+	return IntegrationTreeDirForRun(repoRoot, taskID, "")
+}
+
+// IntegrationTreeDirForRun returns a gate-run-specific integration tree path.
+// Two G2/G3 runs for the same task can execute concurrently (a manual accept
+// alongside the driver, or two driver ticks). A shared directory caused one run
+// to delete and rebuild the tree under another run's feet: files the other run
+// was reading briefly vanished, producing "No such file or directory" reds that
+// were harness artifacts, not task defects.
+func IntegrationTreeDirForRun(repoRoot, taskID, runID string) string {
+	if runID == "" {
+		return filepath.Join(repoRoot, ".rddev", "runtime", "integration", taskID)
+	}
+	return filepath.Join(repoRoot, ".rddev", "runtime", "integration", taskID+"-"+runID)
 }
 
 // prepareIntegrationTree builds the tree G2 and G3 verify.
@@ -695,6 +711,11 @@ func IntegrationTreeDir(repoRoot, taskID string) string {
 // that, rather than as a step failure: it means the branch must be brought up
 // to date, which is a different repair from a red test.
 func prepareIntegrationTree(repoRoot, taskID string) (string, func(), error) {
+	return prepareIntegrationTreeForRun(repoRoot, taskID, "")
+}
+
+// prepareIntegrationTreeForRun is the run-scoped variant of prepareIntegrationTree.
+func prepareIntegrationTreeForRun(repoRoot, taskID, runID string) (string, func(), error) {
 	noop := func() {}
 	if taskID == "" {
 		return "", noop, nil
@@ -706,7 +727,7 @@ func prepareIntegrationTree(repoRoot, taskID string) (string, func(), error) {
 	if st, err := os.Stat(rec.Worktree); err != nil || !st.IsDir() {
 		return "", noop, nil
 	}
-	dir := IntegrationTreeDir(repoRoot, taskID)
+	dir := IntegrationTreeDirForRun(repoRoot, taskID, runID)
 	if _, err := gitOutput(repoRoot, "worktree", "remove", "--force", dir); err != nil {
 		// Stale or absent: both are fine, but a leftover directory would make
 		// `worktree add` fail, so clear it.

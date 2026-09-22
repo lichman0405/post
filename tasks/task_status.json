@@ -9733,7 +9733,7 @@
       ]
     },
     "T1101": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-22T00:58:48Z",
       "worker_run_id": "run-f2ce543fac7e614f",
       "rejection_reason": "# T1101 第三轮 review 结论：request_changes\n\n核心数字（独立复现）对得上：12 页 0 px、pull-detail 170 px、project-conflicts 1280x1199→1280x1185、run.sh 88 ok/0 FAIL、+660/−801 与 CSS +183/−444，变异日志也一致。\n\n但有一处**未经授权且现有仪器都看不见**的外观变更：\n\n- `pull-detail.css:298 .pull-change-kind` 与 `:329 .pull-change-moved` 被删掉，改由 `packages/ui/src/ui.css` 的 `.post-diff-kind`/`.post-diff-note` 渲染。\n- 评审人在 /tmp 独立副本上实测 PR 页 scientific tab：\n  - HEAD 的 kind chip 是 59.8x18 / 55.9x18 / 57x18、radius 10px、font 11px/16px、padding 0 6px、neutral 文字 rgb(31,35,40)。\n  - 现在是 67.9x22 / 63.7x22 / 65x22、radius 999px、font 12px/18px、padding 1px 8px、neutral 文字 rgb(89,99,110)。\n  - moved 注记 175.2x18 → 193.9x22；面板 449px → 488px 高；同一面板区域 29807 px 不同（守卫容差 64）。\n- 这些元素只在 scientific/knowledge/evidence 非默认 tab 渲染，而 visual-regression.mjs 的 `PAGES` 只拍默认状态（ready 是 `[data-pull-panel=\"summary\"]`），所以基线对照、style-parity、section E 全看不见。\n- AC5 证据写「五处 10px 现在都是 6px」，但 `.pull-change-kind`/`.pull-change-moved` 已不存在，其替代者是 999px——证据被 diff 推翻。\n\n**返工要求：**\n1. 把这两个 chip 按 HEAD 度量写回 `pull-detail.css`（或让共享 Diff 组件能还原 HEAD 度量），并在 scientific tab 下实测像素等价。\n2. 同时修掉 RESULT.json 里 AC5 那条与 diff 矛盾的证据。\n3. 考虑把 `head-tree-visual.sh` 接进日常路径，并在 visual-regression.mjs 里给 pull-detail 补拍 scientific/knowledge/evidence tab 后的基线，堵住非默认状态的覆盖空洞。\n\n其余 minor/nit 见 review RESULT.json，不阻塞。\n",
@@ -9848,6 +9848,13 @@
           "at": "2026-09-22T00:58:48Z",
           "run_id": "run-f2ce543fac7e614f",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T01:13:18Z",
+          "run_id": "run-f3829687f534cbaf",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -10942,9 +10949,10 @@
       ]
     },
     "T1206": {
-      "status": "running",
-      "started_at": "2026-09-22T00:44:25Z",
-      "worker_run_id": "run-14635cdd4306eb42",
+      "status": "worker_failed",
+      "started_at": "2026-09-22T01:16:09Z",
+      "worker_run_id": "run-ffa855119407c4c0",
+      "rejection_reason": "【返工 —— 验收时 `migration-integration`/`acceptance` 这条检查没过，请照下面报错改】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-8a34ff5cf4fa5117-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T1206/gate-run-run-8a34ff5cf4fa5117-g2.json and the step logs\n\n**这次不是「基线旧了」那么简单：验收时 `G2` 的 `migration-integration`/`acceptance` 真的红了**，\n报错行贴在下面。**它是一个真实缺陷，要你在代码里改掉，不是重跑一遍就会过去。**\n\n基线同时也推到了最新的 main（派生文件已按合并后的树重新生成），所以请先\n确认你看到的是新基线，再动手。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 自己去**复现下面那条报错**（命令就在上面，逐字跑一遍，别只看结论）。**改的是你的实现，不是断言**：测试是新的，它拦下的东西是真的。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n\n**这一次验收里，实际报错的行（供你定位）：**\n\n  * G2 的 `migration-integration` 红了\n      命令 `make test-integration` 退出码 2：\n        2026/09/22 09:14:06 ERROR api: webhook ingestion failed delivery_id=freeze-main-unfrozen-1 ref=refs/heads/main after=*** error=\"gitprovider: not found: fetch the p\n        2026/09/22 09:14:10 ERROR api: webhook ingestion failed delivery_id=freeze-research-frozen-1 ref=refs/heads/freeze-r1 after=*** error=\"gitprovider: not found: fetc\n        FAIL\tgithub.com/lichman0405/post/tests/integration\t170.149s\n        FAIL\n        make: *** [Makefile:211: test-integration] Error 1\n  * G2 的 `acceptance` 红了\n      命令 `bash scripts/tests/gitea-e2e-guard-unit-test.sh` 退出码 1：\n        Traceback (most recent call last):\n        FileNotFoundError: [Errno 2] No such file or directory: '/home/shibo/code/post/.***-real-services-e2e.sh'\n        FAIL the unexplained push failure is not reported as such:\n        FAIL the run did not report on the tree it graded\n        Traceback (most recent call last):\n        FileNotFoundError: [Errno 2] No such file or directory: '/home/shibo/code/post/.***-real-services-e2e.sh'\n        FAIL the scratch-repo failure is not named: bash: tests/acceptance/gitea-real-services-e2e.sh: No such file or directory\n        Traceback (most recent call last):\n",
       "history": [
         {
           "from": "todo",
@@ -10958,6 +10966,34 @@
           "at": "2026-09-22T00:44:25Z",
           "run_id": "run-14635cdd4306eb42",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T01:02:49Z",
+          "run_id": "run-901411328fcc340f",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-22T01:16:08Z",
+          "run_id": "run-8f47eeab9e910080",
+          "reason": "【返工 —— 验收时 `migration-integration`/`acceptance` 这条检查没过，请照下面报错改】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-8a34ff5cf4fa5117-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T1206/gate-run-run-8a34ff5cf4fa5117-g2.json and the step logs\n\n**这次不是「基线旧了」那么简单：验收时 `G2` 的 `migration-integration`/`acceptance` 真的红了**，\n报错行贴在下面。**它是一个真实缺陷，要你在代码里改掉，不是重跑一遍就会过去。**\n\n基线同时也推到了最新的 main（派生文件已按合并后的树重新生成），所以请先\n确认你看到的是新基线，再动手。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 自己去**复现下面那条报错**（命令就在上面，逐字跑一遍，别只看结论）。**改的是你的实现，不是断言**：测试是新的，它拦下的东西是真的。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n\n**这一次验收里，实际报错的行（供你定位）：**\n\n  * G2 的 `migration-integration` 红了\n      命令 `make test-integration` 退出码 2：\n        2026/09/22 09:14:06 ERROR api: webhook ingestion failed delivery_id=freeze-main-unfrozen-1 ref=refs/heads/main after=*** error=\"gitprovider: not found: fetch the p\n        2026/09/22 09:14:10 ERROR api: webhook ingestion failed delivery_id=freeze-research-frozen-1 ref=refs/heads/freeze-r1 after=*** error=\"gitprovider: not found: fetc\n        FAIL\tgithub.com/lichman0405/post/tests/integration\t170.149s\n        FAIL\n        make: *** [Makefile:211: test-integration] Error 1\n  * G2 的 `acceptance` 红了\n      命令 `bash scripts/tests/gitea-e2e-guard-unit-test.sh` 退出码 1：\n        Traceback (most recent call last):\n        FileNotFoundError: [Errno 2] No such file or directory: '/home/shibo/code/post/.***-real-services-e2e.sh'\n        FAIL the unexplained push failure is not reported as such:\n        FAIL the run did not report on the tree it graded\n        Traceback (most recent call last):\n        FileNotFoundError: [Errno 2] No such file or directory: '/home/shibo/code/post/.***-real-services-e2e.sh'\n        FAIL the scratch-repo failure is not named: bash: tests/acceptance/gitea-real-services-e2e.sh: No such file or directory\n        Traceback (most recent call last):\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T01:16:09Z",
+          "run_id": "run-ffa855119407c4c0",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "worker_failed",
+          "at": "2026-09-22T01:25:55Z",
+          "run_id": "run-ba0198a7dacfbf56",
+          "reason": "worker exited 143"
         }
       ]
     },
