@@ -1,0 +1,8 @@
+# A verb-suffix catch-all parked in the exemption list: forbidden by the file's
+# header, and reported rather than honoured.
+version: 1
+exemptions:
+  - method: POST
+    path: /api/v1/search/{rest...}
+    decision: docs/22_API_DESIGN.md §8
+    reason: parking the catch-all instead of resolving it

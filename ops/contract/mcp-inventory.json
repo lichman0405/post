@@ -1,0 +1,368 @@
+{
+  "catalog_path": "specs/mcp/tools.json",
+  "declared_tools": 21,
+  "tools_with_a_dispatch_site": 0,
+  "tools_the_catalog_declares_and_the_tree_does_not_dispatch": 21,
+  "tools": [
+    {
+      "name": "asset.publish_preview",
+      "mode": "proposal",
+      "args": [
+        "project_id",
+        "source_refs",
+        "asset_type",
+        "rights"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": false,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    },
+    {
+      "name": "blob.finalize_attach",
+      "mode": "write",
+      "args": [
+        "project_id",
+        "branch_id",
+        "blob_id",
+        "object_version_ref",
+        "attachment_role",
+        "idempotency_key"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": false,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    },
+    {
+      "name": "blob.request_upload",
+      "mode": "write",
+      "args": [
+        "project_id",
+        "branch_id",
+        "filename",
+        "size",
+        "media_type",
+        "purpose"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": true,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    },
+    {
+      "name": "branch.create",
+      "mode": "write",
+      "args": [
+        "project_id",
+        "base_ref",
+        "name",
+        "visibility",
+        "purpose",
+        "idempotency_key"
+      ],
+      "sites": [
+        {
+          "file": "cmd/api/rsghttp/overview.go",
+          "line": 370,
+          "in": "overviewPageModelFrom",
+          "form": "literal"
+        }
+      ],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": true,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and the tree only NAMES it (cmd/api/rsghttp/overview.go:370, literal) — a name in a string is not a wiring"
+    },
+    {
+      "name": "branch.get",
+      "mode": "read",
+      "args": [
+        "project_id",
+        "branch_id"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": true,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    },
+    {
+      "name": "evidence.create_assertion",
+      "mode": "write",
+      "args": [
+        "project_id",
+        "branch_id",
+        "target_version_ref",
+        "evidence_version_ref",
+        "relation",
+        "scope",
+        "reasoning_note",
+        "idempotency_key"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": true,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    },
+    {
+      "name": "issue.create",
+      "mode": "write",
+      "args": [
+        "project_id",
+        "title",
+        "issue_type",
+        "body",
+        "related_refs",
+        "idempotency_key"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": true,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    },
+    {
+      "name": "knowledge.publish_preview",
+      "mode": "proposal",
+      "args": [
+        "knowledge_version_ref",
+        "rights"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": false,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    },
+    {
+      "name": "object.abort_proposal",
+      "mode": "proposal",
+      "args": [
+        "project_id",
+        "object_version_ref",
+        "reason_code",
+        "explanation"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": false,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    },
+    {
+      "name": "object.create",
+      "mode": "write",
+      "args": [
+        "project_id",
+        "branch_id",
+        "object_type",
+        "payload",
+        "schema_ref",
+        "idempotency_key"
+      ],
+      "sites": [
+        {
+          "file": "cmd/api/rsghttp/overview.go",
+          "line": 377,
+          "in": "overviewPageModelFrom",
+          "form": "literal"
+        }
+      ],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": true,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and the tree only NAMES it (cmd/api/rsghttp/overview.go:377, literal) — a name in a string is not a wiring"
+    },
+    {
+      "name": "object.create_version",
+      "mode": "write",
+      "args": [
+        "project_id",
+        "branch_id",
+        "object_id",
+        "expected_version",
+        "patch",
+        "idempotency_key"
+      ],
+      "sites": [
+        {
+          "file": "cmd/api/rsghttp/page.go",
+          "line": 408,
+          "in": "objectPageModelFrom",
+          "form": "literal"
+        }
+      ],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": true,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and the tree only NAMES it (cmd/api/rsghttp/page.go:408, literal) — a name in a string is not a wiring"
+    },
+    {
+      "name": "object.get",
+      "mode": "read",
+      "args": [
+        "object_id",
+        "version"
+      ],
+      "sites": [
+        {
+          "file": "cmd/api/rsghttp/page.go",
+          "line": 401,
+          "in": "objectPageModelFrom",
+          "form": "literal"
+        }
+      ],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": true,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and the tree only NAMES it (cmd/api/rsghttp/page.go:401, literal) — a name in a string is not a wiring"
+    },
+    {
+      "name": "pr.create",
+      "mode": "write",
+      "args": [
+        "project_id",
+        "source_branch",
+        "target_branch",
+        "title",
+        "body",
+        "idempotency_key"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": true,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    },
+    {
+      "name": "pr.diff",
+      "mode": "read",
+      "args": [
+        "project_id",
+        "pr_id"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": false,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    },
+    {
+      "name": "project.get",
+      "mode": "read",
+      "args": [
+        "project_id"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": true,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    },
+    {
+      "name": "project.list",
+      "mode": "read",
+      "args": [
+        "scope",
+        "cursor"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": false,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    },
+    {
+      "name": "relation.create",
+      "mode": "write",
+      "args": [
+        "project_id",
+        "branch_id",
+        "type",
+        "source_version_ref",
+        "target_version_ref",
+        "metadata",
+        "idempotency_key"
+      ],
+      "sites": [
+        {
+          "file": "cmd/api/rsghttp/overview.go",
+          "line": 389,
+          "in": "overviewPageModelFrom",
+          "form": "literal"
+        }
+      ],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": true,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and the tree only NAMES it (cmd/api/rsghttp/overview.go:389, literal) — a name in a string is not a wiring"
+    },
+    {
+      "name": "release.prepare",
+      "mode": "proposal",
+      "args": [
+        "project_id",
+        "title",
+        "notes"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": false,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    },
+    {
+      "name": "rsg.query",
+      "mode": "read",
+      "args": [
+        "project_id",
+        "state_or_branch",
+        "query"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": true,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    },
+    {
+      "name": "search.query",
+      "mode": "read",
+      "args": [
+        "query",
+        "filters"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": true,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    },
+    {
+      "name": "validation.run",
+      "mode": "read_action",
+      "args": [
+        "project_id",
+        "branch_id",
+        "gate"
+      ],
+      "sites": [],
+      "dispatched": false,
+      "mentioned_in_catalog_doc": true,
+      "conclusion": "not_implemented",
+      "reason": "specs/mcp/tools.json declares it and no call in the tree takes it: the catalogue promises a tool nothing can route to"
+    }
+  ],
+  "implemented_but_not_in_catalog": [],
+  "notes": [
+    "conclusion is mechanical and rewritten every run: implemented = at least one dispatch site, not_implemented = none. Whether an unimplemented tool should be built or dropped from the catalogue is a product decision, and this report does not pretend to make it.",
+    "a tool-name literal is evidence of a MENTION, not of a working dispatch: cmd/mcp-server answers /mcp with 501 by design (T0006), so a tool with no dispatch site is unimplemented in every sense that matters, and a tool with a dispatch site still deserves a human look.",
+    "undeclared tool names are reported from files whose path names mcp — the surface a tool can be wired from. Literals shaped like a tool name elsewhere in the tree are other people's identifiers (the doctor's fixture keys, a drill's column names), and a list made mostly of those is a list nobody reads.",
+    "docs/47 mentions are substring hits in prose, which abbreviates (`project.get/list`); the column is a hint, never the verdict."
+  ]
+}

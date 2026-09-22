@@ -1,0 +1,8 @@
+# The anti-pattern the exemption file's header names: an exemption whose reason
+# is "we did not get to it".
+version: 1
+exemptions:
+  - method: GET
+    path: /api/v1/alpha
+    decision: we did not get to it
+    reason: no decision at all

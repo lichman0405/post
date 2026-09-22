@@ -1,0 +1,8 @@
+# The entry-heading form tasks/decisions.md uses for its current entries:
+# "## L1-YYYYMMDD-NN".
+version: 1
+exemptions:
+  - method: GET
+    path: /api/v1/alpha
+    decision: tasks/decisions.md L1-20260914-63
+    reason: fixture entry cited to an entry heading that exists

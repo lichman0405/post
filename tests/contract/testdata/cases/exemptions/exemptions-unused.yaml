@@ -1,0 +1,7 @@
+# An exemption for a route this tree does not mount.
+version: 1
+exemptions:
+  - method: GET
+    path: /api/v1/nowhere
+    decision: docs/22_API_DESIGN.md §3
+    reason: stale entry

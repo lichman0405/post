@@ -1,0 +1,17 @@
+openapi: 3.1.0
+info: {title: fixture, version: 0.0.0}
+servers:
+  - url: /api/v1
+paths:
+  /alpha:
+    get:
+      summary: alpha
+      responses: {'200': {description: OK}}
+  /beta:
+    post:
+      summary: beta
+      responses: {'200': {description: OK}}
+  /gamma:
+    get:
+      summary: declared and never mounted
+      responses: {'200': {description: OK}}

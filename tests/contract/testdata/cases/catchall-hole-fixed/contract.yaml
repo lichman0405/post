@@ -1,0 +1,13 @@
+openapi: 3.1.0
+info: {title: fixture, version: 0.0.0}
+servers:
+  - url: /api/v1
+paths:
+  /projects/{projectId}/pull-requests:
+    post:
+      summary: open a pull request
+      responses: {'200': {description: OK}}
+  /projects/{projectId}/pull-requests/{number}:merge:
+    post:
+      summary: merge, carried by the catch-all
+      responses: {'200': {description: OK}}
