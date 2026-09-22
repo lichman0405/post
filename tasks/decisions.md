@@ -17481,3 +17481,195 @@ T1205 是此刻**唯一** dispatchable 的任务，且挂在主链 `max(T1202,T1
 - **影响**：只改文档与注释，零行为变化；不放松任何 Gate。缺口的补法是**新任务**（播种一条能命中的
   文档 + 断言答案里出现引用 + 重渲基线），触发条件是 V1 之后的第一轮补强。
 - **可逆性**：完全可逆。
+
+## ㉟ ㉘ 的处置写着「由我落笔把契约那两条端点删掉」；今天重读规格后，我把它升级成一条待裁定的 L3（**L3-②**）（2026-09-23，T1207 收尾轮）
+
+### 1. 我今天重读到了什么
+
+㉘（2026-09-21）记的是：契约里有 `blobs:request-upload` 与 `blobs/{blobId}:finalize`
+两条端点，产品里没有任何一处写得出 blob。它的第 3 节末尾写着处置是「**契约与实现对齐**，
+也就是 T1205 的收尾动作（**由我落笔改 `specs/api/openapi.yaml`**），不是补一个上传服务」。
+㉘ 里「它不阻断 V1」那段推论我复核过，**成立，不动**（Gate C 与 Gate I 都在读侧与状态侧，
+不经过「上传一个新 blob」）。**今天收回的只是那一句处置。**
+
+为 T1207 收尾做核对时，我把「上传」这件事在**规格**里查了一遍，四处锚点逐字核过：
+
+- `docs/15_AGENT_MCP_API.md:23-25` §6 Upload：`Agent 先请求 signed upload URL → 上传 S3/MinIO →
+  调 blob.finalize → attach 到具体 Scientific Object。Blob 未 attach 前为 temporary，TTL 后可 GC；
+  一旦成为历史引用不可物理删除。`
+- `docs/17_FILES_STORAGE.md:17-19` §4 Upload path：`上传必须从科研上下文发生：……所有 finalize
+  必须指定 object/branch/purpose。`
+- `docs/23_SECURITY_PRIVACY.md:25` §6 Blob：`private bucket/object encryption、signed URL 短 TTL、
+  Content-Disposition 安全、恶意文件扫描 hook、HTML/SVG active content sandbox、preview sanitization。`
+- `docs/27_PERFORMANCE_SLO.md:22-23` §Blob：`支持 multipart upload；单 blob V1 目标至少 10GB
+  （具体 cloud limit adapter 化）。`——同篇 `:16` 的写入 SLO 还逐字排除了一项
+  `（不含 blob upload）`，即它把 upload 当成一条**已存在的**写入路径在做预算。
+
+也就是说：上传不是两条孤立的占位端点，而是**一套写在规格里的产品能力**——有协议、有安全要求、
+有 V1 量级目标。删掉契约那两行，只是把「规格与实现不一致」从 `specs/api` 挪进 `docs/**`。
+
+### 2. 为什么这不是我该自己定的
+
+- 它决定的是**产品范围**：V1 到底含不含「把内容放进 blob truth」这条入口。按 `CLAUDE.md` §5.1
+  属 L3——与 L3-⓪（内容能不能出平台）、L3-①（登录前能不能搜索）同类，是**第三条**要 owner
+  拍板的。**另有一种自洽读法**（docs 是前瞻性描述，V1 不含上传），但那正是需要裁定的分歧本身，
+  不是我能在两条读法之间替 owner 选一条的。
+- T1106 的任务书（`tasks/packages/T1106.json:17`）逐字写着：「真要做它就得新建对象存储通道或
+  引入第三方签名服务——那需要新的外部凭证，**不是你能决定的，也不是我能顺手决定的**。」
+  ㉘ 里「由我落笔删两条端点」是这套记录里的孤例，今天按新读到的证据收回。
+- 没有任何一笔任务承接它。复核命令与其输出（今天实跑）：
+
+  ```bash
+  jq -r '.tasks[] | select(((.allowed_scope // []) | map(test("internal/storage|blobs")) | any)) | .id' tasks/tasks.json
+  # 输出为空
+  ```
+
+  任务书里提到这两条端点的只有两笔：T1106——它被明令**不做**上传面、只记录缺口——与
+  T1207 这份报告本身。
+
+### 3. 所以处置是
+
+**不删端点、不改契约，也不派工。** 把它作为**第 3 条待 owner 裁定的 L3（`L3-②`）**，
+与 L3-⓪、L3-① 并列交给 owner：**V1 是否包含 blob 上传入口**。
+
+- 裁定「包含」→ 立账一笔覆盖 `internal/storage` + `cmd/api` + 迁移的任务，并**同时裁定 TTL/GC
+  语义**（T1106 的 follow_up 已写明建议：pending 的 blob 超过 TTL 不得被 attach；`blobs` 表加一列
+  `expires_at`，属新迁移）。
+- 裁定「不包含」→ 由我落笔把契约那两条端点移除，**并同步修订 `docs/15` §6、`docs/17` §4、
+  `docs/23` §6、`docs/27` §Blob**，让规格与实现一起对齐——而不是只动契约。
+
+**在裁定之前，R3 的状态是「已记账的缺口 + 一条未获裁定的 L3」，不是「待补的工程活」。**
+
+## ㊱ T1207 收尾复核把 Gate G 第 1 条判成「未通过」；MCP 工具面立为待裁定的 L3-③（2026-09-23）
+
+### 1. 复核员先发现的，我逐条核过
+
+T1207 的第 4 轮复核（`.rddev/workers/T1207-review/RESULT.json`，`request_changes`）给出 1 条
+blocking：报告把 `docs/31_MASTER_ACCEPTANCE.md:45-49` 的 Gate G 判成「通过」，而它的第 1 条
+「MCP semantic tools 完整且权限正确」**没有证据、且被树反证**。我逐条核过：
+
+- `cmd/mcp-server/main.go:77-80`：`/mcp` 返回 501，正文逐字
+  `{"error":"MCP protocol wiring not implemented yet (agent tasks)"}`。
+- `ops/contract/mcp-inventory.json`（已合并的 T1205 交付）：`declared_tools=21`、
+  `tools_with_a_dispatch_site=0`、未实现 21。
+- `docs/02_V1_SCOPE.md:52` 把「MCP/API 读写科研状态」列进 **V1 必做**；§4（`:60-70`）没有豁免它。
+- `docs/56_REQUIREMENTS_TRACEABILITY.md:15`：`| MCP/Agent | 15/47 | T1205 + 各 semantic API task | G |`。
+- 目录侧还有一份没被引用的材料：`specs/mcp/tools.json` 的 `forbidden_default_agent_actions`
+  （`merge_main`、`publish_private_to_public`、`change_rights_holder`、`delete_history`、
+  `force_push_main`），以及四条治理类工具（`release.prepare`、`asset.publish_preview`、
+  `knowledge.publish_preview`、`object.abort_proposal`）的 `mode` 是 `proposal` 而不是 `write`。
+
+### 2. 为什么这是 L3，不是我该自己定的
+
+- 规格写了它是 V1 必做、§4 没豁免 → **不是"可选项"**，不能靠"没做"糊过去；所以报告的判定
+  必须是**未通过**，而不是"暂缺证据"。
+- 但要把 21 条工具建起来，得先有**产品语义**：每条工具的参数与返回、`proposal` 模式在操作上
+  到底意味着什么、`docs/02:53` 那句「Governance 操作（merge/publish/visibility）限制为 Web 或
+  **显式 approval path**」里的 approval path 是什么形状——规格一处都没写。自己发明这些，正是
+  CLAUDE.md §5 不许我做的事。
+- **agent 权限模型**本身就是 §5.1 列明的停止条件；「V1 含不含这一整面」是产品范围。
+- T1205 的账自己就写着：「Whether an unimplemented tool should be built or dropped from the
+  catalogue is a product decision, and this report does not pretend to make it.」——那句是上一轮
+  我接受过的记录，今天不改它。
+
+### 3. 处置
+
+- **报告**：Gate G 判「未通过」，第 1 条列上面这些证据；第 2 条（Agent 无 merge/publish
+  visibility 扩大权限）按**真空成立**写，并标明"真空"（目录禁止 + 今天没有 agent 写入路径），
+  不许写成"已验证"。Gate G 的失分理由写第 1 条未满足。
+- **不派工、不动 `specs/mcp/tools.json`、不把 `/mcp` 的 501 说成"完成"。**
+- 两条路交给 owner：裁定「建」→ 立一笔覆盖 MCP 工具面与 approval path 的任务（量大，属新阶段，
+  且要先定权限语义）；裁定「不建」→ 由我把 `specs/mcp/tools.json` 与 `docs/02:52`、`docs/56:15`
+  一起降级——**只动代码不动规格 = 把不一致从 specs 挪进代码**，与 L3-② 是同一个道理。
+- **V1 完成声明（CLAUDE.md §12）因此多一条未闭合项：Gate G。** 在裁定之前它是 L3 等待，
+  不是工程欠账。
+
+## ㊲ T1207 第 4 轮复核的处置，与我对两处"改判"的结论（2026-09-23）
+
+- 判定 `request_changes`（1 blocking / 3 major / 1 minor / 4 nits）；**blocking 成立**，所以
+  处置是**返工**（第 5 轮，同一 session），不是接受。复核员独立复跑过审计（exit 0）并在临时副本
+  里证伪 7 次，全部转红——**审计本身没问题，出问题的是它替 Gate G 下的判定。**
+- **Gate F 的改判（未通过 → 通过）我复核后成立，保留。** 五笔任务全部 `merged`、所列测试全部
+  `passed`，改判是按台账事实把判定改对；报告自己披露了其中两条是回填记录（R1）。**不因为"这轮
+  要求改严"就反过来压它——判定跟着证据走，两个方向都一样。**
+- **审计是基准快照，不是活命令。** `v1-final-audit.sh` 的 baseline==HEAD 断言**不放宽**；改的是
+  把它写成事实：HEAD 与基准不符时专门打印"这是快照"的说明（并给出两条出路），**退出码照样非 0**；
+  并把 `--emit-tables` 扩成"够重建报告的那一份"（生成基准行 + 两张表 + 计数块）。
+- **收尾动作（记在这里，免得忘）**：T1207 合并、我落账 `T1207-TEST-01` 之后，报告引用的分布会从
+  `177 条 = 176 passed + 1 not_run` 变成 `177 条 = 177 passed + 0 not_run`——**必须在新基准上
+  重新生成一次报告**（用脚本产物机械刷新：基准行、两张表、计数；**不许手改判定与证据**），
+  再在新 HEAD 上跑 `bash tests/acceptance/v1-final-audit.sh` 得 exit 0。这是 §12 完成声明的
+  收尾动作之一；届时若有**判定**要变，另立任务，不许在这一步手改。
+- **T1209（SAST/SBOM）落地之后还有一步，别忘了**：报告 R10 今天写的是「SAST、容器扫描、SBOM
+  **三项缺席**」——T1209 合并后这句话不再成立（SAST 与 SBOM 有了行，容器扫描变成**有守卫的缺席**
+  并配一份 ADR-028 的书面风险接受），R10 必须改写，Gate H 要按新证据重判，§0 的统计要重算。
+  所以 T1209 合并后要立一笔小任务（暂记 **T1210**：在最终基准上重新生成报告），
+  `allowed_scope` 限 `tests/acceptance/**`。
+- **★ 由上面那条推出来的一个顺序约束（我原本打算提前立 T1209，核过脚本后否掉）**：
+  `v1-final-audit.sh` 把报告 §1.2 的**未合并 v1_required 清单**与脚本自己算的名单**逐条比对**
+  （`:192-230` 4a/4b/4c），并钉住结论句「…**全部 `merged`**」（`:141` 那段 require_marker）。
+  所以只要 `tasks/tasks.json` 里**多出一笔尚未 merged 的 `v1_required` 任务**，
+  报告里那句被钉住的结论句在自己的树里就**变成假的**——脚本不会因此变红（它只查 marker 在不在），
+  **但报告会写下一句不成立的话，这比红更糟**。结论：**T1209 必须在 T1207 合并之后才立账**，
+  T1210 再在 T1209 之后重新生成报告——三笔的顺序是硬的，不能为了抢时间把 T1209 提前塞进 tasks.json。
+- **审计不接 CI（我的裁定）**：复核员指出"审计没接进任何 CI 作业，合并之后报告与账本会悄悄脱节"。
+  我把它写成决定而不是照做——`v1-final-audit.sh` 是**基准快照**，接进 CI 会在每次合并后**立刻红**
+  并挡住所有在跑任务（它校验的是"报告钉的那棵树"，而 main 每天都在动）。它的用途是**在每次收尾
+  基准上跑一次**，那一步由 T1210 承接；接 CI 反而会把一个必然红的作业塞进 required_jobs。
+  这条决定与 T1205 的 `PINNED RED` 是同一个道理：**红的仪器可以带着已知红存在，但必须有人知道
+  它为什么红、以及谁在什么时候跑它。**
+- **契约对账的收尾是一笔未立账的动作，记在这**：98 条 undocumented 路由的证据、`openapi-exemptions.yaml`
+  的裁定（今天 `exemptions=0 cited=0`，等于一份没人用的豁免文件）、3 条 unmounted 操作、以及
+  contractgate 要不要接进 CI——这是从 T1205 继承下来的 Supervisor 动作，至今**不在任何任务账上**
+  （T1207 报告 R13 只负责点名）。记为 **T1211**（V1 之后立账；立账时要带上 CI 接法这一件，
+  因为接 CI 会让 main 变红，必须与那 98 条的证据一起动）。
+
+### 4. 与 T1207 报告 R3 的措辞差一层（报告本身不改）
+
+T1207 报告的 R3 把后补法写成「两者都是 **L1/L2** 决策，需由任务承接」。这份报告是当轮交付物、
+正在复核中，**一个字都不改**；差的是**决策层级**：工程本身（通道、迁移、E2E）是 L1/L2，
+而「V1 含不含这条入口」是 L3——上面 §2 已说明。`L3-②` 是这条 L3 的编号，报告称它为
+「需由任务承接的 L1/L2」，两者不冲突，只是报告写窄了一层。
+
+## ㊳ 补记 **L3-④**：「公开声明（attestation）该在哪里被发现」（2026-09-23，清点待办时发现的漏登记）
+
+### 1. 它已经存在两天了，只是没进我给 owner 的那张清单
+
+`.rddev/runtime/owner-decisions-needed.md` 的末尾（2026-09-21 追加）记着 T0812 复核带出的一条：
+**「a decision about where a public statement should be discoverable, which is a product decision
+rather than a rendering one」**（T0812 自己的 follow_up 原话，它**拒绝顺手做**是对的）。
+那条只写在 `.rddev/runtime/` 里；`tasks/progress.md` 的〇清单（L3-⓪～③）**从来没有它**。
+今天清点「待立账/待裁定」时发现这个缺口，补成 **L3-④**。
+
+### 2. 今天实跑的事实（不是转述两天前的记录）
+
+- 路由与页面**都在**：`apps/web/app/(main)/attestations/[pid]/page.tsx`，
+  `/attestations/[pid]` 出现在构建产物 `apps/web/.next/types/routes.d.ts` 的路由表里。
+- **入口为零**：`attestationHref` 定义在 `apps/web/lib/attestations.ts:237`，而它的**全部调用者**
+  只有那一页自己——`page.tsx:72` 的 canonical 链接、`page.tsx:131` 的「Reload this page」自链。
+  `grep -rn attestationHref apps/web --include='*.tsx' --include='*.ts' | grep -v '\.next/'` 除定义处
+  只有这两行。**所以今天只有"知道 pid"的人能打开它。**
+- 契约那一半**已入账**：`specs/api/openapi.yaml` 里 `attestation` 零命中，三条路由在契约对账里
+  是 `undocumented`（`go run ./tests/cmd/contractgate -root . -json`，路由挂载点
+  `cmd/api/attestationhttp/wiring.go:68-70`）——
+  属于 T1205 那份 **98 条 undocumented** 的清单，**收尾在 T1211**（㊲ 已记）。这一半不是 L3，
+  是 L1 的登记动作，**不要混进这条裁定**。
+
+### 3. 为什么是 L3
+
+CLAUDE.md §5.1 把**公开性**列进必须停下的情形；而这条问的正是"哪些内容在哪个发现面上可见"。
+两种读法都自洽（① 声明是给"拿到 pid 的第三方"核验的，不需要发现面；② 一份没人能发现的公开声明
+不服务于它的目的）——**在两种读法之间替 owner 选一条，就是我在发明产品语义。**
+
+### 4. 处置：不派工、不改产品代码；两条路给 owner
+
+- **答「不建发现面」** → 今天的形状就是答案，记一句"pid-only 是产品决定"，
+  `docs/` 里补一句说明即可（那份说明属 L1，我写）。
+- **答「建」** → 我倾向的形状（**供 owner 否或准，不是已定的事，与 2026-09-21 那条建议一致**）：
+  **只做「目标版本页列出针对它的 attestation 链接」这一种**，且列表本身受既有的可见性/读者判定约束
+  （ADR-024 那条读法已在 T0812 里落好），**不新增任何发现面**——不加全局 feed、不加搜索项、
+  不进 Explore。这样不改变任何既有公开性语义，只是让"已经能读到的东西"有一个入口。
+  工作量小（一条按 target 的读 + 版本页一段列表），**但它要新增一条契约路径**，
+  所以立账时必须与 `specs/api/**` 的登记同笔（那是我写）。
+
+**在裁定之前，它是"一条待裁定的 L3"，不是工程欠账**——今天没有人在等它，它不挡 V1 的任何一环。
