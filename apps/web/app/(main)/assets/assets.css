@@ -304,6 +304,46 @@
   overflow-wrap: anywhere;
 }
 
+/* The way into the publish confirmation (T1103). A quiet secondary action
+   in the header: it is an entry point to a review, not the act itself, and
+   the page it opens is where the decision is made. Borderless like the
+   other header links, with the icon carrying the accent. */
+.asset-publish {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.asset-publish-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.asset-publish-link:hover {
+  text-decoration: underline;
+}
+
+/* The entry point WITHHELD (T1103 rework). Not a quieter version of the
+   link: the page had something to publish and does not offer it, because
+   the document it would carry is not the published one. Primer's attention
+   colour, used the way projects.css uses it for a caution, and never red —
+   nothing here failed, the page refused. */
+.asset-publish-withheld {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--borderColor-attention-muted, #d4a72c);
+  border-radius: 6px;
+  background: var(--bgColor-attention-muted, #fff8c5);
+  color: var(--fgColor-attention, #9a6700);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* Main column + side column. The side column holds the versions and the
    event log, which are the two blocks a reader scans rather than reads. */
 .asset-columns {

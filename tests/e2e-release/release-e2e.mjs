@@ -1000,6 +1000,20 @@ async function theChain(alice, bob, carol) {
     `${assetRowBefore}`,
   );
 
+  if (process.env.RELEASE_CHAIN_OUT) {
+    fs.writeFileSync(
+      process.env.RELEASE_CHAIN_OUT,
+      JSON.stringify({
+        number,
+        releaseID,
+        assetPID,
+        assetVersion,
+        acceptedVersionID: accepted.version_id,
+        objectID: accepted.id,
+      }),
+    );
+  }
+
   /* ---- leg 8: the abort, through T0602's product path. ---- */
   banner("leg 8 — the object is aborted through the product's abort route");
 
@@ -1274,7 +1288,7 @@ async function theChain(alice, bob, carol) {
       "version row and its content stay immutable — the warning itself is a gap, not a bug here.)",
   );
 
-  return { number, releaseID, assetPID, assetVersion, abortNumber };
+  return { number, releaseID, assetPID, assetVersion, abortNumber, acceptedVersionID: accepted.version_id, objectID: accepted.id };
 }
 
 await main();

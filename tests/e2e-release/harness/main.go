@@ -86,6 +86,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -708,6 +709,22 @@ func (a *api) harnessRoutes(mux *http.ServeMux) {
 	// rights declaration and the provenance pins. This is the content a
 	// publisher authors; the product's publish route is what decides whether
 	// it may be stored.
+	//
+	// The three required parameters describe the release and object version
+	// the candidate pins. Six optional ones (T1103) let a caller author a
+	// DIFFERENT document from the same place, so a suite can reach states the
+	// one default document cannot express — and so the hash below is always
+	// computed by the production model over the document actually returned:
+	//
+	//	version          the version label               (default "1.0")
+	//	title, slug      the display fields of a NEW asset
+	//	visibility       the target visibility           (default "private")
+	//	dependency_pins  comma-separated pid@version pins (default: none)
+	//	blob_ids         comma-separated blob ids        (default: blob-fixture-0001)
+	//	metadata_pad     a metadata value of N characters, for size limits
+	//
+	// Every default reproduces the document this route has always answered
+	// with, so an existing caller (release-e2e.mjs) is unaffected by them.
 	mux.HandleFunc("GET /harness/asset-candidate", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		projectID, releaseID, versionID := q.Get("project_id"), q.Get("release_id"), q.Get("object_version_id")
@@ -716,17 +733,46 @@ func (a *api) harnessRoutes(mux *http.ServeMux) {
 				"project_id, release_id and object_version_id are required")
 			return
 		}
+		versionLabel := queryDefault(q, "version", "1.0")
+		visibility := queryDefault(q, "visibility", "private")
+		if !assets.ValidVersionLabel(versionLabel) {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST",
+				"version "+strconv.Quote(versionLabel)+" is not a storable version label")
+			return
+		}
+		if v := assets.Visibility(visibility); !v.Valid() {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST",
+				"visibility must be public or private, got "+strconv.Quote(visibility))
+			return
+		}
+		metadata := assets.Metadata{
+			"purpose":       "the isotherm series behind the released claim",
+			"data_type":     "adsorption isotherm",
+			"blob_ids":      queryList(q, "blob_ids", []string{"blob-fixture-0001"}),
+			"access_level":  "restricted",
+			"quality_notes": "instrument drift corrected against the reference run",
+		}
+		if pad := q.Get("metadata_pad"); pad != "" {
+			n, err := strconv.Atoi(pad)
+			if err != nil || n < 0 {
+				writeError(w, http.StatusBadRequest, "BAD_REQUEST",
+					"metadata_pad must be a non-negative integer")
+				return
+			}
+			// A key of its own rather than a padded value of a required one:
+			// the manifest is an open map and an extra key is part of the
+			// document (and therefore of the hash), which is the point.
+			metadata["harness_pad"] = strings.Repeat("x", n)
+		}
+		pins := make([]assets.DependencyPin, 0, 2)
+		for _, pin := range queryList(q, "dependency_pins", nil) {
+			pins = append(pins, assets.DependencyPin(pin))
+		}
 		manifest := assets.Manifest{
-			Version:   assets.ManifestFormatVersion,
-			AssetType: assets.TypeDataset,
-			Metadata: assets.Metadata{
-				"purpose":       "the isotherm series behind the released claim",
-				"data_type":     "adsorption isotherm",
-				"blob_ids":      []string{"blob-fixture-0001"},
-				"access_level":  "restricted",
-				"quality_notes": "instrument drift corrected against the reference run",
-			},
-			DependencyPins: []assets.DependencyPin{},
+			Version:        assets.ManifestFormatVersion,
+			AssetType:      assets.TypeDataset,
+			Metadata:       metadata,
+			DependencyPins: pins,
 		}
 		raw, err := manifest.CanonicalJSON()
 		if err != nil {
@@ -763,15 +809,185 @@ func (a *api) harnessRoutes(mux *http.ServeMux) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"asset_pid":      "",
 			"asset_type":     string(assets.TypeDataset),
-			"version":        "1.0",
+			"version":        versionLabel,
 			"manifest":       json.RawMessage(raw),
 			"rights":         json.RawMessage(rightsDoc),
 			"origin_refs":    refs,
-			"visibility":     "private",
+			"visibility":     visibility,
 			"integrity_hash": hash,
 			"creator_ids":    []string{a.ownerID},
-			"title":          "Isotherm series behind the released claim",
-			"slug":           "isotherm-series-released-claim",
+			"title":          queryDefault(q, "title", "Isotherm series behind the released claim"),
+			"slug":           queryDefault(q, "slug", "isotherm-series-released-claim"),
+		})
+	})
+
+	// POST /harness/blob — a stored blob, openly attached to one object
+	// version, and its id. A fixture, like the organization and the
+	// candidate: this build has a file-upload surface but no route that
+	// ATTACHES a blob to an object version with an access level, and the
+	// preview/publish rules that read an access level are exactly what the
+	// publish suite needs a stored blob for (internal/assets/preview.go: a
+	// blob blocks when the rights declaration promises open access and the
+	// blob is not openly attached). Nothing about a publication is decided
+	// here; the row is what the product's own reader sees.
+	mux.HandleFunc("POST /harness/blob", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ObjectVersionID string `json:"object_version_id"`
+			AccessLevel     string `json:"access_level"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "the request body is not JSON")
+			return
+		}
+		if in.ObjectVersionID == "" {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "object_version_id is required")
+			return
+		}
+		if in.AccessLevel == "" {
+			in.AccessLevel = "open"
+		}
+		var exists bool
+		if err := a.pool.QueryRow(r.Context(),
+			`SELECT EXISTS(SELECT 1 FROM scientific_object_versions WHERE id = $1::uuid)`,
+			in.ObjectVersionID).Scan(&exists); err != nil || !exists {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST",
+				"object_version_id does not name a stored object version")
+			return
+		}
+		var blobID string
+		if err := a.pool.QueryRow(r.Context(), `
+			INSERT INTO blobs (content_hash, size_bytes, media_type, storage_key, integrity_state, created_by)
+			VALUES ($1, $2, 'application/octet-stream', $3, 'verified', $4::uuid)
+			RETURNING id::text`,
+			"harness-"+strconv.FormatInt(time.Now().UnixNano(), 10), int64(1024),
+			"harness/blob/"+strconv.FormatInt(time.Now().UnixNano(), 10), a.ownerID,
+		).Scan(&blobID); err != nil {
+			writeError(w, http.StatusConflict, "BLOB_NOT_CREATED", err.Error())
+			return
+		}
+		// state_id comes from the object version the attachment is made
+		// against — the same source migration 00035 backfilled the column
+		// from, and the only one that exists here: an attachment is made
+		// against a version, and that version's state is what a manifest
+		// export enumerates it by (it is NOT NULL since 00035).
+		tag, err := a.pool.Exec(r.Context(), `
+			INSERT INTO blob_attachments (blob_id, scientific_object_version_id, attachment_role, access_level, state_id)
+			SELECT $1::uuid, sov.id, 'data', $3, sov.state_id
+			  FROM scientific_object_versions sov
+			 WHERE sov.id = $2::uuid`,
+			blobID, in.ObjectVersionID, in.AccessLevel)
+		if err != nil {
+			writeError(w, http.StatusConflict, "BLOB_NOT_ATTACHED", err.Error())
+			return
+		}
+		if tag.RowsAffected() != 1 {
+			writeError(w, http.StatusConflict, "BLOB_NOT_ATTACHED",
+				"the object version named no row to attach the blob to")
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"blob_id":      blobID,
+			"access_level": in.AccessLevel,
+		})
+	})
+
+	// POST /harness/blob-access — set the access level of every attachment
+	// of one blob. It is the one lever the publish suite needs to move the
+	// state UNDER a confirmation page that was already previewed: the page's
+	// preview is computed, the level changes, and the publish's own
+	// re-check inside its transaction is what has to catch it.
+	//
+	// blob_attachments is not append-only (migration 00014 guards releases,
+	// research_asset_versions, asset_lineage, state_commits and
+	// policy_versions), and the column's own CHECK admits exactly the two
+	// values (00008).
+	mux.HandleFunc("POST /harness/blob-access", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			BlobID      string `json:"blob_id"`
+			AccessLevel string `json:"access_level"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "the request body is not JSON")
+			return
+		}
+		if in.BlobID == "" || in.AccessLevel == "" {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "blob_id and access_level are required")
+			return
+		}
+		tag, err := a.pool.Exec(r.Context(),
+			`UPDATE blob_attachments SET access_level = $2 WHERE blob_id = $1::uuid`,
+			in.BlobID, in.AccessLevel)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "ACCESS_NOT_SET", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"blob_id":      in.BlobID,
+			"access_level": in.AccessLevel,
+			"attachments":  tag.RowsAffected(),
+		})
+	})
+
+	// POST /harness/state — a project state row in a project of the
+	// caller's choosing, and the canonical `state:<uuid>` origin ref that
+	// names it.
+	//
+	// A publication must pin a source: internal/assets' gate refuses a
+	// candidate with no release or state origin ref
+	// (ASSET_UNPINNED_SOURCE, docs/11 §3), and a ref into ANOTHER project's
+	// private state is a private dependency that blocks a public
+	// publication. So a fixture version stored in a PUBLIC project needs a
+	// state in that project, and this route is the substrate for it — the
+	// same kind of fixture as the organization, the project rows and the
+	// blobs below. Creating one through the product would mean a branch, an
+	// object, a research pull request, a review and a merge, which is a
+	// chain this suite already runs once and which says nothing about the
+	// publish page.
+	//
+	// project_states is append-only (migration 00014 guards UPDATE and
+	// DELETE; 00015 guards TRUNCATE), so the insert below is the whole
+	// interaction. branch_id is nullable (00004): a state that no branch
+	// pointed at yet is a state the preview resolves all the same
+	// (ListPreviewStateRefs joins projects, not branches).
+	mux.HandleFunc("POST /harness/state", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ProjectID string `json:"project_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "the request body is not JSON")
+			return
+		}
+		if in.ProjectID == "" {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "project_id is required")
+			return
+		}
+		var exists bool
+		if err := a.pool.QueryRow(r.Context(),
+			`SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1::uuid)`,
+			in.ProjectID).Scan(&exists); err != nil || !exists {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST",
+				"project_id does not name a stored project")
+			return
+		}
+		var stateID string
+		if err := a.pool.QueryRow(r.Context(), `
+			INSERT INTO project_states (project_id, state_hash, manifest_version)
+			VALUES ($1::uuid, $2, '1')
+			RETURNING id::text`,
+			in.ProjectID, "harness-state-"+strconv.FormatInt(time.Now().UnixNano(), 10),
+		).Scan(&stateID); err != nil {
+			writeError(w, http.StatusConflict, "STATE_NOT_CREATED", err.Error())
+			return
+		}
+		ref, ok := assets.NewOriginRef(assets.KindState, stateID)
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "REF_NOT_BUILT",
+				"the stored state id is not a uuid")
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"state_id": stateID,
+			"ref":      string(ref),
 		})
 	})
 
@@ -859,6 +1075,34 @@ func (a *api) harnessRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /harness/requests", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"requests": a.log.list()})
 	})
+}
+
+// queryDefault returns the query parameter's value, or def when it is absent
+// or empty. It keeps a fixture route's defaults in one place.
+func queryDefault(q url.Values, key, def string) string {
+	if v := strings.TrimSpace(q.Get(key)); v != "" {
+		return v
+	}
+	return def
+}
+
+// queryList splits a comma-separated query parameter, dropping empty entries
+// so a caller can pass "" to mean "the default" and "a,b," to mean two items.
+func queryList(q url.Values, key string, def []string) []string {
+	raw := strings.TrimSpace(q.Get(key))
+	if raw == "" {
+		return def
+	}
+	out := make([]string, 0, 2)
+	for _, part := range strings.Split(raw, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	if len(out) == 0 {
+		return def
+	}
+	return out
 }
 
 // rowText reads one row as text; ok is false when no row matched.
