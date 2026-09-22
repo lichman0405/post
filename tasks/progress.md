@@ -3198,9 +3198,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-22T18:37:02Z
+生成时间：2026-09-22T20:10:38Z
 
-状态分布：todo 0 · ready 0 · running 1 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 149（合计 150/150 个任务）
+状态分布：todo 0 · ready 0 · running 0 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 150（合计 150/150 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -3352,7 +3352,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1204 | 生产 Runbook/Release/Recovery 验证 | P12 | merged | 2026-09-20T12:21:32Z |  | 2026-09-20T13:17:17Z | 2026-09-20T13:53:19Z |
 | T1205 | OpenAPI/MCP/Schema 文档最终同步 | P12 | merged | 2026-09-21T23:39:29Z |  | 2026-09-22T00:24:29Z | 2026-09-22T00:44:18Z |
 | T1206 | Master Security/Quality Gate | P12 | merged | 2026-09-22T01:16:09Z |  |  |  |
-| T1207 | V1 最终验收与交付报告 | P12 | running | 2026-09-22T18:36:23Z |  |  |  |
+| T1207 | V1 最终验收与交付报告 | P12 | merged | 2026-09-22T19:18:34Z |  | 2026-09-22T19:56:05Z | 2026-09-22T20:09:19Z |
 | T1208 | 完整 Project 可移植导出 | P12 | merged | 2026-09-21T23:36:20Z |  | 2026-09-22T00:22:22Z | 2026-09-22T00:44:18Z |
 
 <!-- AUTO-PROGRESS:END -->

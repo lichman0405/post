@@ -11427,9 +11427,11 @@
       ]
     },
     "T1207": {
-      "status": "rejected",
-      "started_at": "2026-09-22T18:36:23Z",
-      "worker_run_id": "run-a0383aa559edac1f",
+      "status": "merged",
+      "started_at": "2026-09-22T19:18:34Z",
+      "worker_run_id": "run-2001b75052653f23",
+      "accepted_by_supervisor_at": "2026-09-22T19:56:05Z",
+      "merged_at": "2026-09-22T20:09:19Z",
       "rejection_reason": "第 4 轮复核判定 request_changes（`.rddev/workers/T1207-review/RESULT.json`）：1 blocking / 3 major / 1 minor / 4 nits。复核员独立复跑过审计（exit 0）并在临时副本里证伪 7 次、全部转红——审计本身站得住，问题在判定。\n\n**blocking**：报告把 `docs/31_MASTER_ACCEPTANCE.md:45-49` 的 Gate G 判「通过」，而第 1 条「MCP semantic tools 完整且权限正确」无证据、且被树反证：`cmd/mcp-server/main.go:77-80` 返回 501；`ops/contract/mcp-inventory.json` declared=21 / dispatched=0；`docs/02_V1_SCOPE.md:52` 在 V1 范围内且 §4 未豁免；`docs/56_REQUIREMENTS_TRACEABILITY.md:15` 有映射行。第 2 条也没有独立判定。\n\n**major**：(a) Gate A/C/E 多条 checkbox 无判定无证据（A#3/A#5/A#6/A#7、C#4、E#4），账本里这些测试已 passed；(b) R 清单漏了两条活缺口——MCP 面与契约对账（`tests/cmd/contractgate` 101 findings / exit 3，且没有任何 CI 或脚本在跑它）；(c) `v1-final-audit.sh:141-150` 的 baseline==HEAD 断言使报告在合并后必然红，而报告没写清它是基准快照。\n\n**minor**：三处行号（`internal/application/reopens/service.go:720-723`、`cmd/api/authhttp/envelope.go:86`、`ops/runbook-steps.json:149`）。**nit**：四条（R3 清单漏 `tests/e2e-release/harness/main.go:859`；§1.2「输出原样贴入」与事实不符；分布断言未断言 failed/skipped 为 0；L3-⓪ 第二句未逐字）。\n\n处置：返工（第 5 轮，同一 session，diff 保留），返工信见 rework 的 --reason-file。返工方向是把判定改严（Gate G 要改成未通过），**不许以任何方式弱化既有断言**。\n",
       "history": [
         {
@@ -11528,6 +11530,33 @@
           "at": "2026-09-22T19:17:29Z",
           "run_id": "run-42fb3291a2a915c4",
           "reason": "第 4 轮复核判定 request_changes（`.rddev/workers/T1207-review/RESULT.json`）：1 blocking / 3 major / 1 minor / 4 nits。复核员独立复跑过审计（exit 0）并在临时副本里证伪 7 次、全部转红——审计本身站得住，问题在判定。\n\n**blocking**：报告把 `docs/31_MASTER_ACCEPTANCE.md:45-49` 的 Gate G 判「通过」，而第 1 条「MCP semantic tools 完整且权限正确」无证据、且被树反证：`cmd/mcp-server/main.go:77-80` 返回 501；`ops/contract/mcp-inventory.json` declared=21 / dispatched=0；`docs/02_V1_SCOPE.md:52` 在 V1 范围内且 §4 未豁免；`docs/56_REQUIREMENTS_TRACEABILITY.md:15` 有映射行。第 2 条也没有独立判定。\n\n**major**：(a) Gate A/C/E 多条 checkbox 无判定无证据（A#3/A#5/A#6/A#7、C#4、E#4），账本里这些测试已 passed；(b) R 清单漏了两条活缺口——MCP 面与契约对账（`tests/cmd/contractgate` 101 findings / exit 3，且没有任何 CI 或脚本在跑它）；(c) `v1-final-audit.sh:141-150` 的 baseline==HEAD 断言使报告在合并后必然红，而报告没写清它是基准快照。\n\n**minor**：三处行号（`internal/application/reopens/service.go:720-723`、`cmd/api/authhttp/envelope.go:86`、`ops/runbook-steps.json:149`）。**nit**：四条（R3 清单漏 `tests/e2e-release/harness/main.go:859`；§1.2「输出原样贴入」与事实不符；分布断言未断言 failed/skipped 为 0；L3-⓪ 第二句未逐字）。\n\n处置：返工（第 5 轮，同一 session，diff 保留），返工信见 rework 的 --reason-file。返工方向是把判定改严（Gate G 要改成未通过），**不许以任何方式弱化既有断言**。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T19:18:34Z",
+          "run_id": "run-2001b75052653f23",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T19:30:01Z",
+          "run_id": "run-ff196d679315a6f3",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-22T19:56:05Z",
+          "run_id": "run-aa08e8caaee39caa"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-22T20:09:19Z",
+          "run_id": "run-c9f4abc43bd645d4",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },

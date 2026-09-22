@@ -1477,9 +1477,9 @@
       "name": "final audit",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-22T20:10:13Z",
+      "evidence": "Supervisor ran `bash tests/acceptance/v1-final-audit.sh` -> exit 0 on 2026-09-22T20:10:13Z. Last output: V1_REQUIRED_UNMERGED_LIST: ; BLOCKING_NOT_RUN_COUNT=1 ;   - T1207-TEST-01 (T1207) final audit ; AUDIT OK: report markers present, counts match (0 unmerged, 1 not_run, 0 failed, 0 skipped). Supervisor G2 run. Tree: a detached worktree at the report's OWN baseline 9b22339e6398b714de5cc810454437ee33e51913 with the two delivered files copied in from the merged commit — the audit is a snapshot validator, so its baseline assertion holds only in a tree whose HEAD equals the report's baseline. Run 2026-09-23T04:10+08:00, BEFORE this entry was recorded: the distribution assertions read 177 ="
     },
     {
       "id": "T1208-TEST-01",
