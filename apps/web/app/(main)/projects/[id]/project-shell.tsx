@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AlertIcon, RepoIcon } from "@primer/octicons-react";
 import { Spinner } from "@primer/react";
+import { Sidebar } from "@post/ui";
 
 import {
   ApiError,
@@ -161,9 +162,19 @@ export function ProjectShell({
   return (
     <div className="project-shell" data-project-shell={project.slug}>
       <header className="project-shell-header">
-        <p className="project-shell-breadcrumb">
-          <Link href="/projects">Projects</Link> / {project.slug}
-        </p>
+        {/* T1101: the trail is the shared Sidebar now. The crumb's own
+            `Link` stays here — the shared layer must not depend on
+            `next/link`, and an `<a>` would turn this into a full page
+            load. What the shared layer owns is the row, the "/" and the
+            12px muted type that four breadcrumbs used to each spell. */}
+        <Sidebar
+          label="Breadcrumb"
+          className="project-shell-breadcrumb"
+          crumbs={[
+            { key: "projects", content: <Link href="/projects">Projects</Link> },
+            { key: "project", content: project.slug },
+          ]}
+        />
         <div className="project-shell-title-row">
           <h1 className="project-shell-name">
             <RepoIcon size={16} aria-hidden="true" /> {project.name}

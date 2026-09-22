@@ -1,0 +1,621 @@
+/* Shared component styles for @post/ui (T1101).
+ *
+ * GitHub/Primer language, as docs/06 §2 and docs/51 state it: neutral
+ * surfaces, hairline borders, high density, small radii, no gradient, no
+ * glass, no elevation on anything that is not an overlay.
+ *
+ * # Radius
+ *
+ * Two values, and only two:
+ *   - `6px`  the working radius for buttons, inputs, chips and panels
+ *            (docs/41:17). Chips used to be spelled 2em, 10px, 999px and
+ *            9999px across nine stylesheets; every one of them is now
+ *            either 6px or a pill.
+ *   - `999px` the PILL sentinel. It does not mean "a 999px radius": the
+ *            browser clamps a radius to half the box, so on an 18-22px
+ *            tall label the radius actually rendered is 9-11px — well
+ *            inside docs/41:17's small/medium band, and the shape Primer's
+ *            own Label draws. The declared literal is a sentinel precisely
+ *            so it cannot be read as a large corner; the visual run
+ *            measures the rendered value and fails above 24px.
+ *
+ * # Colour
+ *
+ * Every colour comes from the fourteen roles of docs/41:6-12 through
+ * tokens.ts's CSS expressions, or from Primer's `*-muted` tint variables
+ * that the roles' own fills cannot substitute for on a label background.
+ * No literal colour is invented here.
+ */
+
+/* ---------- StateLabel ----------
+ *
+ * Six shapes, each one the rule it replaced, declaration for declaration —
+ * because AC3 asks the replacement to render like what it replaced, and the
+ * families genuinely differ (padding, weight, size, and whether the label
+ * is a flex box or a plain inline span). Each block names the selector it
+ * came from; if a value here and a value there ever disagree, one of them
+ * is a bug.
+ *
+ * Every declaration below is the one it replaced, including the radius
+ * literal: `2em` stays `2em` on the three pill families whose HEAD rule
+ * said `2em`, and `999px` stays `999px` on the three whose HEAD rule said
+ * `999px`. The two are the same drawn shape — a radius clamps to half the
+ * box, so an 18-22px pill draws 9-11px either way — but a shared layer
+ * that silently rewrote a value it was copying is a layer whose other
+ * copies can no longer be trusted.
+ */
+
+.post-state-label {
+  /* The rendered element is an inline span; the families that need a flex
+     box say so, the three that were plain inline spans inherit this. */
+  display: inline;
+}
+
+/* .badge (projects.css:94) — Public / Private / Frozen main / pending.
+   HEAD's `-public`, `-private` and `-frozen` all carry a transparent
+   border; only `-muted` keeps the inherited hairline. */
+.post-state-label-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 2em;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.post-state-label-badge-neutral {
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+.post-state-label-badge-success {
+  color: var(--fgColor-success, #1a7f37);
+  background: var(--bgColor-success-muted, #dafbe1);
+  border-color: transparent;
+}
+
+.post-state-label-badge-attention {
+  color: var(--fgColor-attention, #9a6700);
+  background: var(--bgColor-attention-muted, #fff8c5);
+  border-color: transparent;
+}
+
+/* .conflicts-badge + -warn/-ok/-done (conflicts.css:137) — the conflict
+   counters. Weight 600 and a 2px vertical padding, where the badge family
+   above is 500 and 1px. */
+.post-state-label-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+}
+
+.post-state-label-chip-success {
+  background: var(--bgColor-success-muted, #dafbe1);
+  border: 1px solid var(--borderColor-success-muted, #aceebb);
+  color: var(--fgColor-success, #1a7f37);
+}
+
+.post-state-label-chip-attention {
+  background: var(--bgColor-attention-muted, #fff8c5);
+  border: 1px solid var(--borderColor-attention-muted, #d4a72c);
+  color: var(--fgColor-attention, #9a6700);
+}
+
+/* .conflicts-advisory-badge (conflicts.css:236) — an inline span inside the
+   detector's explanation paragraph, indented off the text before it. */
+.post-state-label-advisory {
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--borderColor-attention-muted, #d4a72c);
+  border-radius: 999px;
+  color: var(--fgColor-attention, #9a6700);
+}
+
+/* .files-readonly-badge (projects.css:569) — no border at all, and 2px 10px
+   rather than the badge family's 1px 8px. */
+.post-state-label-readonly {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 2em;
+  font-size: 12px;
+  color: var(--fgColor-success, #1a7f37);
+  background: var(--bgColor-success-muted, #dafbe1);
+}
+
+/* .files-kind-badge (projects.css:735) — 11px, weight and line-height left
+   alone (400 / normal), no fill. */
+.post-state-label-kind {
+  padding: 1px 8px;
+  border-radius: 2em;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  font-size: 11px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* .activity-row-source / .activity-row-visibility (activity.css) — 11px like
+   the kind badge but a filled pill with 18px of line box. */
+.post-state-label-meta {
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 999px;
+}
+
+.post-state-label-meta-neutral {
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+/* HEAD's `[data-activity-source="research"]` variant — the accent tint of a
+   research-event row. The attribute stays the caller's (`data-activity-source`
+   is set by the activity page); this is the tone, not the marker. */
+.post-state-label-meta-accent {
+  color: var(--fgColor-accent, #0969da);
+  background: var(--bgColor-accent-muted, #ddf4ff);
+  border-color: var(--borderColor-accent-muted, #54aeff66);
+}
+
+/* ---------- Table ---------- */
+
+.post-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.post-table thead th {
+  padding: 6px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--fgColor-muted, #59636e);
+  border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+}
+
+.post-table tbody td,
+.post-table tbody th {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+/* Only the row-list variant drops the last row's bottom border. HEAD's two
+   row tables said so (`.pulls-table`, `.settings-members`) and HEAD's
+   comparison grid did not (`.conflicts-threeway-table`), so a rule that
+   applied to both would have left the grid 1px shorter than the table it
+   replaces — a missing hairline under its last row. */
+.post-table:not(.post-table-grid) tbody tr:last-child td,
+.post-table:not(.post-table-grid) tbody tr:last-child th {
+  border-bottom: none;
+}
+
+/* The comparison variant: every cell boxed, so a value can be read across
+   a column as well as along a row. Wins over the row rules above by class
+   count, not by source order. */
+.post-table.post-table-grid {
+  font-size: 12px;
+}
+
+.post-table.post-table-grid th,
+.post-table.post-table-grid td {
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.post-table.post-table-grid thead th {
+  background: var(--bgColor-muted, #f6f8fa);
+  font-weight: 600;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* ---------- Timeline ---------- */
+
+.post-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.post-timeline-row {
+  display: flex;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.post-timeline-row:last-child {
+  border-bottom: none;
+}
+
+.post-timeline-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin-top: 2px;
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 6px;
+}
+
+/* The family a row belongs to is a meaning, not decoration: a retraction
+   is a danger, a reopening restores a state, a release fixes one. */
+.post-timeline-row-danger .post-timeline-marker {
+  color: var(--fgColor-danger, #d1242f);
+  background: var(--bgColor-danger-muted, #ffebe9);
+  border-color: var(--borderColor-danger-muted, #ff818266);
+}
+
+.post-timeline-row-success .post-timeline-marker {
+  color: var(--fgColor-open, #1a7f37);
+  background: var(--bgColor-open-muted, #dafbe1);
+  border-color: var(--borderColor-open-muted, #4ac26b66);
+}
+
+.post-timeline-row-accent .post-timeline-marker {
+  color: var(--fgColor-accent, #0969da);
+  background: var(--bgColor-accent-muted, #ddf4ff);
+  border-color: var(--borderColor-accent-muted, #54aeff66);
+}
+
+.post-timeline-body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.post-timeline-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 8px;
+}
+
+.post-timeline-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* The label pair of a row head. HEAD's `.activity-row-head` laid the title
+   and these two labels out in ONE flex row with `gap: 6px 8px`, so the two
+   labels sat 8px apart; wrapping them in their own box means this box has
+   to say 8 itself, or the second label slides 2px left. */
+.post-timeline-labels {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.post-timeline-time {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+  font-variant-numeric: tabular-nums;
+}
+
+.post-timeline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.post-timeline-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.post-timeline-detail {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.post-timeline-detail dt {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.post-timeline-detail dt::after {
+  content: ":";
+}
+
+.post-timeline-detail dd {
+  margin: 0;
+  color: var(--fgColor-default, #1f2328);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Diff ---------- */
+
+.post-diff {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 6px;
+}
+
+.post-diff-entry {
+  padding: 8px 12px;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.post-diff-entry:first-child {
+  border-top: none;
+}
+
+.post-diff-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+/* The kind chip reuses the label geometry: one shape for every state word
+   in the app, rather than a per-page spelling of "a small rounded box".
+   Metrics match the page it first replaced (pull-detail.css
+   .pull-change-kind) so the shared component does not become an
+   unauthorized visual change. */
+.post-diff-kind {
+  padding: 0 6px;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 10px;
+  background: var(--bgColor-muted, #f6f8fa);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.post-diff-kind-success {
+  color: var(--fgColor-success, #1a7f37);
+  border-color: var(--borderColor-success-muted, #aceebb);
+  background: var(--bgColor-success-muted, #dafbe1);
+}
+
+.post-diff-kind-danger {
+  color: var(--fgColor-danger, #d1242f);
+  border-color: var(--borderColor-danger-muted, #ffcecb);
+  background: var(--bgColor-danger-muted, #ffebe9);
+}
+
+.post-diff-kind-attention {
+  color: var(--fgColor-attention, #9a6700);
+  border-color: var(--borderColor-attention-muted, #f5e0a3);
+  background: var(--bgColor-attention-muted, #fff8c5);
+}
+
+.post-diff-kind-accent {
+  color: var(--fgColor-accent, #0969da);
+  border-color: var(--borderColor-accent-muted, #54aeff66);
+  background: var(--bgColor-accent-muted, #ddf4ff);
+}
+
+.post-diff-type {
+  color: var(--fgColor-muted, #59636e);
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+}
+
+.post-diff-title {
+  font-weight: 600;
+}
+
+.post-diff-note {
+  padding: 0 6px;
+  border: 1px solid var(--borderColor-attention-muted, #f5e0a3);
+  border-radius: 10px;
+  background: var(--bgColor-attention-muted, #fff8c5);
+  color: var(--fgColor-attention, #9a6700);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.post-diff-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-left: 2px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+
+.post-diff-fields {
+  /* Intentionally no block layout: pull-detail.css rendered the fields
+     inline inside `.pull-change-meta`, and the non-default tabs must stay
+     metric-equivalent to HEAD. A block with a top margin would shift the
+     page height. */
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+
+/* Side-by-side layout: one bordered panel per side, each with its own
+   heading and entries. Used where the question is "what does each side
+   have", not "what changed". */
+.post-diff-sides {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.post-diff-side {
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.post-diff-side-heading {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.post-diff-side-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.post-diff-side-entry {
+  padding: 4px 0;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+  font-size: 12px;
+}
+
+.post-diff-side-entry:first-child {
+  border-top: none;
+}
+
+.post-diff-side-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.post-diff-side-title {
+  margin: 0;
+}
+
+.post-diff-side-meta {
+  margin: 2px 0 0;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* ---------- Sidebar ---------- */
+
+.post-sidebar {
+  min-width: 0;
+}
+
+/* The trail is INLINE FLOW, because three of the four breadcrumbs it
+   replaced were a `<p>` of inline text — `<Link>Projects</Link> / slug`
+   (projects.css:138, projects.css:1713, assets.css:174) — and a flex row
+   does not render that text the same way: inside a flex container the
+   separator's spaces are at the edge of an anonymous item and get
+   stripped, so `Projects / alloy-lab` comes out `Projects/alloy-lab`, 2px
+   narrower. Inline `<li>`s cannot be spaced apart; the separators are the
+   text itself, exactly as they were typed by hand.
+   Nothing here sets `color` or `font-size`: the crumb text took its colour
+   from the `<p>` (default for the shell and asset trails, muted for the
+   release trail) and its size from the same place (12px, 12px, 13px). A
+   shared layer that hard-codes muted-12px paints two of the three trails
+   wrong — see `.release-detail-breadcrumb` and `.asset-breadcrumb` for
+   where each one now says it. */
+.post-sidebar-trail {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.post-sidebar-crumb {
+  display: inline;
+}
+
+.post-sidebar-sep {
+  color: inherit;
+}
+
+/* The fourth breadcrumb — the files path (projects.css:601) — IS a flex
+   row of chips, so it keeps the row's own layout: 2px between the crumbs,
+   wrapping, vertically centred. */
+.post-sidebar-trail-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.post-sidebar-trail-row .post-sidebar-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.post-sidebar-trail-row .post-sidebar-sep {
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* A crumb that is a link keeps the geometry of a breadcrumb: no box, no
+   decoration of its own. (`text-decoration` is deliberately not set here:
+   HEAD's shell breadcrumb left its link underlined by the UA default and
+   only the two accent trails reset it.) */
+.post-sidebar-trail a {
+  color: inherit;
+  font: inherit;
+}
+
+/* A crumb that is a CONTROL (a segment you can descend into) is HEAD's
+   `.files-crumb`: a chip with a hit target. `font-family` and `font-size`
+   rather than the `font` shorthand — the shorthand drags the page's 1.5
+   line-height in, which makes the chip 22px tall where HEAD's was 18px. */
+.post-sidebar-trail button,
+.post-sidebar-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.post-sidebar-tone-accent .post-sidebar-trail a,
+.post-sidebar-tone-accent .post-sidebar-trail button,
+.post-sidebar-tone-accent .post-sidebar-action {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.post-sidebar-tone-accent .post-sidebar-trail a:hover,
+.post-sidebar-trail button:hover,
+.post-sidebar-trail button:focus-visible,
+.post-sidebar-action:hover,
+.post-sidebar-action:focus-visible {
+  background: var(--bgColor-accent-muted, #ddf4ff);
+}
+
+.post-sidebar-tone-accent .post-sidebar-trail a:hover {
+  text-decoration: underline;
+}
+
+/* The crumb you are on (HEAD's `.files-crumb[aria-current="page"]`): default
+   ink, weight 600, not a control. The extra `.post-sidebar` is load-bearing:
+   the accent rule above is (0,2,1) and this one has to outrank it, or the
+   current crumb keeps the accent blue and the lighter weight — 3px narrower
+   and the wrong colour, which is a visible diff on a chip that is 60px wide. */
+.post-sidebar .post-sidebar-trail [aria-current="page"] {
+  color: var(--fgColor-default, #1f2328);
+  font-weight: 600;
+  cursor: default;
+}

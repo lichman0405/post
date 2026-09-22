@@ -14,6 +14,7 @@ import {
 } from "@primer/octicons-react";
 import { Spinner } from "@primer/react";
 
+import { Sidebar } from "@post/ui";
 import { RightsPanel } from "../../components/rights-panel";
 import {
   ApiError,
@@ -142,9 +143,15 @@ export function AssetPage({
   const { asset, version: rendered } = page;
   return (
     <div className="asset-page" data-asset-page="ready" data-asset-pid={asset.pid}>
-      <nav className="asset-breadcrumb" aria-label="Breadcrumb">
-        <Link href="/assets">Assets</Link>
-      </nav>
+      {/* T1101: the fourth and last hand-written breadcrumb. The trail is
+          the shared Sidebar now; its crumbs are slots, so this one keeps
+          being a next/link and the styling lives in packages/ui. */}
+      <Sidebar
+        className="asset-breadcrumb"
+        label="Breadcrumb"
+        tone="accent"
+        crumbs={[{ key: "assets", content: <Link href="/assets">Assets</Link> }]}
+      />
 
       {/* 1. PID / version, 2. type — data-asset-block names the docs/42
           items this element carries, so a test can check the eleven

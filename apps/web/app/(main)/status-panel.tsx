@@ -30,7 +30,7 @@ export function StatusPanel({
     <div>
       <header className="status-header">
         <BeakerIcon size={24} aria-hidden />
-        <Heading as="h1" style={{ fontSize: 20, margin: 0 }}>
+        <Heading as="h1" className="status-title">
           POST — Platform for Open Science &amp; Technology
         </Heading>
         <Label>web {webVersion}</Label>
@@ -39,7 +39,7 @@ export function StatusPanel({
           page's single <main id="main"> landmark (docs/06 §10, one non-hidden
           main per document). */}
       <div className="status-main">
-        <Heading as="h2" style={{ fontSize: 16, margin: "0 0 8px" }}>
+        <Heading as="h2" className="status-subtitle">
           Development status
         </Heading>
         <div className="status-list">

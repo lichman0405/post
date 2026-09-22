@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { GitPullRequestIcon } from "@primer/octicons-react";
 import { Spinner } from "@primer/react";
+import { Table } from "@post/ui";
 
 import {
   ApiError,
@@ -76,35 +77,49 @@ export default function PullsPage() {
             No pull requests yet. Research PRs appear here once proposed.
           </div>
         ) : (
-          <table className="pulls-table">
-            <thead>
-              <tr>
-                <th>Number</th>
-                <th>Title</th>
-                <th>State</th>
-                <th>Opened</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pulls.map((pr) => (
-                <tr key={pr.id} data-pull-row={pr.number}>
-                  <td className="pulls-number">
-                    <Link
-                      className="pulls-number-link"
-                      href={`/projects/${shell.project.id}/pulls/${pr.number}`}
-                    >
-                      #{pr.number}
-                    </Link>
-                  </td>
-                  <td className="pulls-title">{pr.title}</td>
-                  <td className="pulls-state" data-pull-state={pr.state}>
-                    {pr.state}
-                  </td>
-                  <td className="pulls-date">{pr.created_at.slice(0, 10)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          /* T1101: `.pulls-table` was one of two byte-identical table
+             stylesheets in projects.css (the other is `.settings-members`);
+             the shared Table owns that shape now and this list only says
+             what its columns are. */
+          <Table
+            className="pulls-table"
+            columns={[
+              {
+                key: "number",
+                header: "Number",
+                render: (pr) => (
+                  <Link
+                    className="pulls-number-link"
+                    href={`/projects/${shell.project.id}/pulls/${pr.number}`}
+                  >
+                    #{pr.number}
+                  </Link>
+                ),
+                cellAttrs: () => ({ className: "pulls-number" }),
+              },
+              {
+                key: "title",
+                header: "Title",
+                render: (pr) => pr.title,
+                cellAttrs: () => ({ className: "pulls-title" }),
+              },
+              {
+                key: "state",
+                header: "State",
+                render: (pr) => pr.state,
+                cellAttrs: (pr) => ({ className: "pulls-state", "data-pull-state": pr.state }),
+              },
+              {
+                key: "opened",
+                header: "Opened",
+                render: (pr) => pr.created_at.slice(0, 10),
+                cellAttrs: () => ({ className: "pulls-date" }),
+              },
+            ]}
+            rows={pulls}
+            rowKey={(pr) => pr.id}
+            rowAttrs={(pr) => ({ "data-pull-row": pr.number })}
+          />
         )}
       </section>
     </div>

@@ -171,6 +171,12 @@
   color: var(--fgColor-accent, #0969da);
 }
 
+/* Placement only: the trail itself, including the accent colour of its
+   link, is the shared `Sidebar` with tone="accent" (T1101). */
+/* T1101 rework: HEAD's two declarations, restored. 13px, not 12px — the
+   asset trail is one step larger than the project ones, and the missing
+   pixel and a half of line box moved the whole page up by 1.5px. The
+   shared trail inherits the size rather than setting it. */
 .asset-breadcrumb {
   margin-bottom: 12px;
   font-size: 13px;
@@ -422,9 +428,14 @@
 /* The rendered version is marked by weight and a rule, not by colour: the
    list is a set of immutable versions, and "current" is which one this
    page happens to render. */
+/* T1101: this was `box-shadow: inset 2px 0 0` — the one box-shadow in the
+   app that is not on an overlay (nav.css's menu is the other, and it is
+   one). An inset shadow that draws a rule is a border, so it is one now.
+   The padding drops from 8px to 6px so the marked row keeps the exact
+   geometry it had: 2px of border + 6px of padding = the old 8px. */
 .asset-version-row[aria-current="true"] {
-  box-shadow: inset 2px 0 0 var(--fgColor-accent, #0969da);
-  padding-left: 8px;
+  border-left: 2px solid var(--fgColor-accent, #0969da);
+  padding-left: 6px;
 }
 
 .asset-version-row[aria-current="true"] .asset-version-label {

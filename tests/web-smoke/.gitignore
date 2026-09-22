@@ -1,3 +1,15 @@
 # Harness runtime state, never part of the diff.
 server.log
 node_modules/
+# The visual-regression harness's per-run output. `shots/` (the visual
+# smoke's artifacts) and `baseline/` (the visual regression's reference)
+# are NOT ignored — the second one is the reference the run compares
+# against, and a baselines-only regeneration is the one change that has to
+# be reviewed by eye.
+current/
+diff/
+# The style-parity diagnostic's per-run dumps (one per tree it serves). It
+# is a diagnostic, not a gate; its output belongs in a run's log, not in the
+# diff — committed, it would read as evidence for a tree that has moved on.
+style-parity-head.log
+style-parity-work.log

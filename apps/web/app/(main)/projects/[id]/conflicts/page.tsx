@@ -23,6 +23,8 @@ import {
   type ResolutionKind,
   type ResolutionRecord,
 } from "../../../../../lib/conflicts";
+import { Diff, StateLabel, Table } from "@post/ui";
+import type { DiffSide } from "@post/ui";
 import { useProjectShell } from "../shell-context";
 import "./conflicts.css";
 
@@ -238,14 +240,14 @@ function ConflictsBody({
       <section className="conflicts-summary" data-conflicts-summary>
         <p className="conflicts-summary-line">
           {report.auto_mergeable ? (
-            <span className="conflicts-badge conflicts-badge-ok" data-conflicts-clean>
-              <CheckIcon size={12} aria-hidden="true" /> Nothing needs a human decision
-            </span>
+            <StateLabel shape="chip" tone="success" icon={CheckIcon} data-conflicts-clean>
+              Nothing needs a human decision
+            </StateLabel>
           ) : (
-            <span className="conflicts-badge conflicts-badge-warn" data-conflicts-total>
+            <StateLabel shape="chip" tone="attention" data-conflicts-total>
               {totalConflicts} conflict{totalConflicts === 1 ? "" : "s"} need
               {totalConflicts === 1 ? "s" : ""} a human decision
-            </span>
+            </StateLabel>
           )}
           <span className="conflicts-summary-muted">
             {conflicted} conflicted change{conflicted === 1 ? "" : "s"} across{" "}
@@ -373,18 +375,18 @@ function ConflictCard({
           <code title={targetId}>{short(targetId)}</code>
         </span>
         {saved !== null ? (
-          <span className="conflicts-badge conflicts-badge-done" data-conflict-saved>
-            <CheckIcon size={12} aria-hidden="true" /> {saved.kind}
-          </span>
+          <StateLabel shape="chip" tone="success" icon={CheckIcon} data-conflict-saved>
+            {saved.kind}
+          </StateLabel>
         ) : null}
       </header>
 
       <section className="conflicts-explanation" data-conflict-advisory>
         <p className="conflicts-explanation-label">
           Detector explanation{" "}
-          <span className="conflicts-advisory-badge" data-conflict-advisory-badge>
+          <StateLabel shape="advisory" tone="attention" data-conflict-advisory-badge>
             仅建议 · advisory only
-          </span>
+          </StateLabel>
         </p>
         <p className="conflicts-detail">{conflict.detail}</p>
         <p className="conflicts-advisory-note">
@@ -514,32 +516,32 @@ function ThreeWay({
   }
   return (
     <div className="conflicts-threeway" data-conflicts-threeway>
-      <table className="conflicts-threeway-table">
-        <thead>
-          <tr>
-            <th scope="col">Field</th>
-            <th scope="col">Base</th>
-            <th scope="col">Source (A)</th>
-            <th scope="col">Target (B)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.label}>
-              <th scope="row">{row.label}</th>
-              <td data-side="base">
-                <pre>{row.base}</pre>
-              </td>
-              <td data-side="source">
-                <pre>{row.source}</pre>
-              </td>
-              <td data-side="target">
-                <pre>{row.target}</pre>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <Table
+        borders="grid"
+        columns={[
+          { key: "field", header: "Field", rowHeader: true, render: (row) => row.label },
+          {
+            key: "base",
+            header: "Base",
+            render: (row) => <pre>{row.base}</pre>,
+            cellAttrs: () => ({ "data-side": "base" }),
+          },
+          {
+            key: "source",
+            header: "Source (A)",
+            render: (row) => <pre>{row.source}</pre>,
+            cellAttrs: () => ({ "data-side": "source" }),
+          },
+          {
+            key: "target",
+            header: "Target (B)",
+            render: (row) => <pre>{row.target}</pre>,
+            cellAttrs: () => ({ "data-side": "target" }),
+          },
+        ]}
+        rows={rows}
+        rowKey={(row) => row.label}
+      />
     </div>
   );
 }
@@ -552,40 +554,49 @@ function EvidenceContext({ evidence }: { evidence: ObjectEvidence | null }) {
   return (
     <section className="conflicts-evidence" data-conflicts-evidence>
       <h3 className="conflicts-evidence-title">Evidence context</h3>
-      <div className="conflicts-evidence-columns">
-        <EvidenceList side="Source (A)" items={evidence.source_evidence} />
-        <EvidenceList side="Target (B)" items={evidence.target_evidence} />
-      </div>
+      <Diff
+        sides={[
+          evidenceSide("Source (A)", evidence.source_evidence),
+          evidenceSide("Target (B)", evidence.target_evidence),
+        ]}
+      />
     </section>
   );
 }
 
-function EvidenceList({ side, items }: { side: string; items: EvidenceItem[] }) {
-  return (
-    <div className="conflicts-evidence-column" data-evidence-side={side}>
-      <p className="conflicts-evidence-side">{side}</p>
-      {items.length === 0 ? (
-        <p className="conflicts-evidence-empty">No evidence recorded on this side.</p>
-      ) : (
-        <ul className="conflicts-evidence-list">
-          {items.map((item, i) => (
-            <li className="conflicts-evidence-item" key={`${item.evidence_object_id}-${i}`}>
-              <p className="conflicts-evidence-item-title">
-                {item.evidence_title}{" "}
-                <span className="conflicts-evidence-item-type">{item.evidence_object_type}</span>
-              </p>
-              <p className="conflicts-evidence-item-meta">
-                {item.relation_type} · {item.directness} · {item.review_state}
-                {item.reasoning_note !== null && item.reasoning_note !== ""
-                  ? ` · ${item.reasoning_note}`
-                  : ""}
-              </p>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
+/**
+ * One side of the evidence comparison, in the shared Diff shape (T1101).
+ *
+ * The two columns of this section used to be `.conflicts-evidence-column`
+ * in conflicts.css — a bordered panel with a heading and a list of items
+ * whose title carries a type mark and whose meta line carries the relation
+ * facts. That is `Diff`'s `sides` layout; what stays here is the mapping
+ * from an evidence item to an entry.
+ */
+function evidenceSide(side: string, items: EvidenceItem[]): DiffSide {
+  return {
+    key: side,
+    heading: side,
+    attrs: { "data-evidence-side": side },
+    empty: "No evidence recorded on this side.",
+    entries: items.map((item, i) => ({
+      key: `${item.evidence_object_id}-${i}`,
+      title: (
+        <>
+          {item.evidence_title}{" "}
+          <span className="conflicts-evidence-item-type">{item.evidence_object_type}</span>
+        </>
+      ),
+      meta: (
+        <>
+          {item.relation_type} · {item.directness} · {item.review_state}
+          {item.reasoning_note !== null && item.reasoning_note !== ""
+            ? ` · ${item.reasoning_note}`
+            : ""}
+        </>
+      ),
+    })),
+  };
 }
 
 /* ---------- three-way helpers ---------- */

@@ -13,6 +13,7 @@ import {
   releaseManifestHref,
   type Release,
 } from "../../../../../../lib/releases";
+import { Sidebar } from "@post/ui";
 import { useProjectShell } from "../../shell-context";
 
 /**
@@ -96,9 +97,21 @@ export default function ReleaseDetail() {
 
   return (
     <div className="release-detail" data-release-detail={release.version}>
-      <p className="release-detail-breadcrumb">
-        <Link href={`/projects/${project.id}/releases`}>Releases</Link> / {release.version}
-      </p>
+      {/* T1101: the trail is the shared Sidebar. The current segment is a
+          plain span (this is the page you are on) rather than a link; the
+          spacer before it is the component's, not a hand-typed " / ". */}
+      <Sidebar
+        className="release-detail-breadcrumb"
+        label="Breadcrumb"
+        tone="accent"
+        crumbs={[
+          {
+            key: "releases",
+            content: <Link href={`/projects/${project.id}/releases`}>Releases</Link>,
+          },
+          { key: "version", content: release.version },
+        ]}
+      />
       <div className="release-detail-title-row">
         <h2 className="release-detail-title">
           <TagIcon size={16} aria-hidden="true" /> {release.title}

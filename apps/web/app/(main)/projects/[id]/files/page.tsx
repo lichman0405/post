@@ -22,6 +22,7 @@ import {
   type FilesFileView,
   type FilesTreeListing,
 } from "../../../../../lib/files";
+import { Sidebar, StateLabel } from "@post/ui";
 import { useProjectShell } from "../shell-context";
 
 /**
@@ -248,42 +249,58 @@ export default function FilesPage() {
         <span className="files-ref">
           <GitBranchIcon size={14} aria-hidden="true" /> {REF}
         </span>
-        <span className="files-readonly-badge" data-files-readonly>
-          <EyeClosedIcon size={12} aria-hidden="true" /> Read-only
-        </span>
+        <StateLabel shape="readonly" tone="success" icon={EyeClosedIcon} data-files-readonly>
+          Read-only
+        </StateLabel>
       </header>
 
       <div className="files-layout">
         <nav className="files-tree" data-files-tree aria-label="Repository tree">
+          {/* T1101: the trail is the shared Sidebar. The path controls stay
+              this page's own — they are buttons with their own `onClick`,
+              and `data-files-crumb` is what the Files e2e selects — while
+              the row, the separators and the crumb hit target come from
+              `post-sidebar-action` instead of a fourth `.files-crumb`
+              spelling of the same chip. */}
           <div className="files-breadcrumb" data-files-breadcrumb>
-            <button
-              type="button"
-              className="files-crumb"
-              data-files-crumb="root"
-              onClick={() => descend("")}
-              aria-current={segments.length === 0 ? "page" : undefined}
-            >
-              <GitBranchIcon size={14} aria-hidden="true" /> {REF}
-            </button>
-            {segments.map((seg, i) => {
-              const path = segments.slice(0, i + 1).join("/");
-              return (
-                <span className="files-crumb-group" key={path}>
-                  <span className="files-crumb-sep" aria-hidden="true">
-                    /
-                  </span>
-                  <button
-                    type="button"
-                    className="files-crumb"
-                    data-files-crumb={path}
-                    onClick={() => descend(path)}
-                    aria-current={i === segments.length - 1 ? "page" : undefined}
-                  >
-                    {seg}
-                  </button>
-                </span>
-              );
-            })}
+            <Sidebar
+              label="Repository path"
+              tone="accent"
+              trail="row"
+              crumbs={[
+                {
+                  key: "root",
+                  content: (
+                    <button
+                      type="button"
+                      className="post-sidebar-action"
+                      data-files-crumb="root"
+                      onClick={() => descend("")}
+                      aria-current={segments.length === 0 ? "page" : undefined}
+                    >
+                      <GitBranchIcon size={14} aria-hidden="true" /> {REF}
+                    </button>
+                  ),
+                },
+                ...segments.map((seg, i) => {
+                  const path = segments.slice(0, i + 1).join("/");
+                  return {
+                    key: path,
+                    content: (
+                      <button
+                        type="button"
+                        className="post-sidebar-action"
+                        data-files-crumb={path}
+                        onClick={() => descend(path)}
+                        aria-current={i === segments.length - 1 ? "page" : undefined}
+                      >
+                        {seg}
+                      </button>
+                    ),
+                  };
+                }),
+              ]}
+            />
           </div>
           {listing === null && treeError === null ? (
             <div className="files-state">
@@ -327,9 +344,9 @@ export default function FilesPage() {
                   {file.name}
                 </span>
                 {file.kind !== "text" ? (
-                  <span className="files-kind-badge" data-files-kind={file.kind}>
+                  <StateLabel shape="kind" tone="neutral" data-files-kind={file.kind}>
                     {file.kind}
-                  </span>
+                  </StateLabel>
                 ) : null}
                 <span className="files-preview-size">{formatBytes(file.size)}</span>
               </div>

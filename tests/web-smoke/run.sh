@@ -5,18 +5,29 @@
 # own npm project (its own lockfile), outside the pnpm workspace, so the
 # repository's pnpm-lock.yaml is never touched.
 #
-# T1112 — THE CHECK LIST IS DISCOVERED, NOT WRITTEN DOWN. Every *.mjs file
-# in this directory IS a check; the runner finds them, drives each with one
-# argument (the base URL) and reports them one by one. A list of names typed
-# into a runner is the exact shape of the failure T1112 exists to remove:
-# T1107's tests/e2e-shell was red for six days because the only places that
-# could have named it were lists somebody had to remember to update. A check
-# added here is run by `make browser-smoke` the day it lands; a check that
-# disappears cannot linger as a name matching nothing.
+# T1112 — THE CHECK LIST IS DISCOVERED, NOT WRITTEN DOWN. A check is any file
+# whose name ends in `-smoke.mjs` or `-regression.mjs`; the runner finds them,
+# drives each with one argument (the base URL) and reports them one by one. A
+# list of names typed into a runner is the exact shape of the failure T1112
+# exists to remove: T1107's tests/e2e-shell was red for six days because the
+# only places that could have named it were lists somebody had to remember to
+# update. A check added here is run by `make browser-smoke` the day it lands;
+# a check that disappears cannot linger as a name matching nothing.
 #
-# A check's NAME is its file name with `.mjs` and a trailing `-smoke`
-# removed: visual-smoke.mjs -> visual, a11y-smoke.mjs -> a11y (the same
-# names package.json's scripts use).
+# The `-smoke` / `-regression` suffix is the discovery boundary: helper modules
+# (shared fixtures, diff locators, style diagnostics) live in this directory as
+# plain `.mjs` files but are NOT checks, so they are not driven as if they took
+# a base URL.
+#
+# A check's NAME is its file name with `.mjs` and a trailing `-smoke` removed:
+# visual-smoke.mjs -> visual, a11y-smoke.mjs -> a11y (the same names
+# package.json's scripts use). A `-regression.mjs` file keeps the stem:
+# visual-regression.mjs -> visual-regression.
+#
+# T1101 added the third pass — the baseline comparison (visual-regression.mjs),
+# which is the only one of the three that fails when a covered page's rendering
+# moves. It derives the repository root from its own path, so the runner still
+# passes only the base URL to every discovered check.
 #
 # Usage: bash tests/web-smoke/run.sh
 # Env:   WEB_SMOKE_PORT    (default 31107) overrides the server port.
@@ -41,11 +52,10 @@ BASE="http://127.0.0.1:$PORT"
 # the family of bug this task exists to remove.
 declare -A CHECK_FILE=()
 CHECKS=()
-for file in "$SMOKE_DIR"/*.mjs; do
-  if [ ! -e "$file" ]; then
-    echo "web-smoke: FAILED — no *.mjs checks under $SMOKE_DIR; this harness has nothing to run." >&2
-    exit 1
-  fi
+shopt -s nullglob
+CHECK_FILES=("$SMOKE_DIR"/*-smoke.mjs "$SMOKE_DIR"/*-regression.mjs)
+shopt -u nullglob
+for file in "${CHECK_FILES[@]}"; do
   name="$(basename "$file" .mjs)"
   name="${name%-smoke}"
   if [ -n "${CHECK_FILE[$name]:-}" ]; then
@@ -55,6 +65,11 @@ for file in "$SMOKE_DIR"/*.mjs; do
   CHECK_FILE["$name"]="$file"
   CHECKS+=("$name")
 done
+
+if [ "${#CHECKS[@]}" -eq 0 ]; then
+  echo "web-smoke: FAILED — no *-smoke.mjs or *-regression.mjs checks under $SMOKE_DIR; this harness has nothing to run." >&2
+  exit 1
+fi
 
 if [ "${1:-}" = "--list" ]; then
   printf '%s\n' "${CHECKS[@]}"
@@ -111,8 +126,14 @@ echo "web-smoke: running ${#SELECTED[@]}: ${SELECTED[*]}"
 # The web app fails closed without a validated config (instrumentation.ts);
 # these values mirror the G2/G4 CI env. The smoke pages render with the
 # services "down" when they are not running — the nav under test is static.
+#
+# T1101: the API origin is the one the baseline comparison's Playwright
+# router intercepts. It resolves nowhere, exactly like the loopback port it
+# replaced, so the two smoke passes below see the same services-down pages
+# they always did; only the regression pass, which routes API calls in the
+# browser, sees data.
 export POST_ENV=prod
-export API_BASE_URL=http://127.0.0.1:18080
+export API_BASE_URL=http://api.e2e.test
 export SCIENTIFIC_ADAPTER_URL=http://127.0.0.1:19100
 
 SERVER_PID=""

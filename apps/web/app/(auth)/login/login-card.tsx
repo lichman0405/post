@@ -85,7 +85,7 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
 
   return (
     <div className="auth-card">
-      <Heading as="h1" style={{ fontSize: 22, margin: "0 0 4px" }}>
+      <Heading as="h1" className="auth-heading">
         {heading}
       </Heading>
       <p className="auth-sub">
@@ -93,7 +93,7 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
       </p>
 
       {error !== null && (
-        <Flash variant="danger" style={{ marginBottom: 12 }}>
+        <Flash variant="danger" className="auth-flash">
           {error}
         </Flash>
       )}
@@ -130,7 +130,7 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
           variant="primary"
           block
           disabled={busy || email.trim() === "" || password === ""}
-          style={{ marginTop: 12 }}
+          className="auth-submit"
         >
           {busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
         </Button>
@@ -141,15 +141,15 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
         block
         disabled={busy}
         onClick={() => void continueWithOIDC()}
-        style={{ marginTop: 8 }}
+        className="auth-oidc"
       >
         <MarkGithubIcon size={16} aria-hidden />
-        <span style={{ marginLeft: 6 }}>
+        <span className="auth-oidc-label">
           Continue with your institution (OIDC)
         </span>
       </Button>
 
-      <p className="auth-sub" style={{ marginTop: 16 }}>
+      <p className="auth-sub auth-sub-after">
         {mode === "login" ? (
           <>
             New to POST?{" "}

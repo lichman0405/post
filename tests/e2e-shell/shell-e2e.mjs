@@ -480,24 +480,24 @@ if (rowCount !== 3) {
   ok("directory: lists the three fixtures");
 }
 const alloyRow = page.locator('[data-project-row="alloy-lab"]');
-if ((await alloyRow.locator(".badge-public").count()) !== 1) {
+if ((await alloyRow.locator('[data-badge="public"]').count()) !== 1) {
   fail("directory: public badge on the public project");
 } else {
   ok("directory: public project carries the Public badge");
 }
-if ((await alloyRow.locator(".badge-frozen").count()) !== 1) {
+if ((await alloyRow.locator('[data-badge="frozen"]').count()) !== 1) {
   fail("directory: frozen badge on the frozen project");
 } else {
   ok("directory: frozen project carries the Frozen main badge");
 }
 const solarRow = page.locator('[data-project-row="solar-lab"]');
-if ((await solarRow.locator(".badge-private").count()) !== 1) {
+if ((await solarRow.locator('[data-badge="private"]').count()) !== 1) {
   fail("directory: private badge on the private project");
 } else {
   ok("directory: private project carries the Private badge");
 }
 const copperRow = page.locator('[data-project-row="copper-lab"]');
-if ((await copperRow.locator(".badge-frozen").count()) !== 0) {
+if ((await copperRow.locator('[data-badge="frozen"]').count()) !== 0) {
   fail("directory: no frozen badge on the unfrozen project");
 } else {
   ok("directory: unfrozen project carries no Frozen badge");
@@ -515,12 +515,12 @@ if (name === null || !name.includes("Alloy Lab")) {
 } else {
   ok("shell: project name renders");
 }
-if ((await page.locator(".project-shell .badge-public").count()) !== 1) {
+if ((await page.locator('.project-shell [data-badge="public"]').count()) !== 1) {
   fail("shell: Public badge");
 } else {
   ok("shell: Public badge renders");
 }
-if ((await page.locator(".project-shell .badge-frozen").count()) !== 1) {
+if ((await page.locator('.project-shell [data-badge="frozen"]').count()) !== 1) {
   fail("shell: Frozen main badge");
 } else {
   ok("shell: Frozen main badge renders (main_frozen from the API)");
@@ -658,7 +658,7 @@ ok("unknown project: same neutral not-found state");
 
 await page.goto(`${BASE}/projects/${COPPER.id}`, { waitUntil: "load" });
 await page.waitForSelector('[data-project-shell="copper-lab"]');
-if ((await page.locator(".project-shell .badge-frozen").count()) !== 0) {
+if ((await page.locator('.project-shell [data-badge="frozen"]').count()) !== 0) {
   fail("shell: no Frozen badge when main_frozen is false");
 } else {
   ok("shell: Frozen badge absent when main_frozen is false");

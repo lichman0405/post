@@ -50,6 +50,17 @@
   color: var(--fgColor-muted, #59636e);
 }
 
+/* T1101: the two inline `style={{ … }}` props on this panel's headings. */
+.status-title {
+  margin: 0;
+  font-size: 20px;
+}
+
+.status-subtitle {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
 /* T0101 auth surfaces: the sign-in card and the session strip. */
 
 .auth-main {
@@ -72,6 +83,45 @@
   color: var(--fgColor-muted, #59636e);
 }
 
+/* T1101: the six inline `style={{ … }}` props this card used to carry are
+   these classes. Inline styles win every cascade argument, so a page that
+   sets one is a page whose spacing cannot be adjusted from any stylesheet;
+   the app had twelve of them and none of them needed to be inline (they
+   are static values, not measured ones).
+
+   `fontSize: 22` on the heading was the one real decision. Every other
+   page title in the app — status-panel.tsx and profile-card.tsx — is 20px,
+   and 22 was the only 22 anywhere. The tradeoff is 2px of height on the
+   sign-in card against one type scale for page titles; the scale wins,
+   because a design system whose third instance disagrees with its first
+   two is exactly the drift this task exists to stop. */
+.auth-heading {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+
+.auth-flash {
+  margin-bottom: 12px;
+}
+
+.auth-submit {
+  margin-top: 12px;
+}
+
+.auth-oidc {
+  margin-top: 8px;
+}
+
+.auth-oidc-label {
+  margin-left: 6px;
+}
+
+/* Combines with `.auth-sub`; declared after it so the top margin wins on
+   source order at equal specificity. */
+.auth-sub-after {
+  margin-top: 16px;
+}
+
 .auth-status {
   display: flex;
   align-items: center;
@@ -86,6 +136,26 @@
 }
 
 /* T0102 profile surfaces: the public profile card and its edit form. */
+
+/* T1101: the four inline `style={{ … }}` props this card used to carry.
+   `.profile-name` is the 20px page-title size the status panel and the
+   sign-in card use — see the note in `.auth-heading`. */
+.profile-name {
+  margin: 0;
+  font-size: 20px;
+}
+
+.profile-flash {
+  margin-top: 12px;
+}
+
+.profile-edit {
+  margin-top: 12px;
+}
+
+.profile-edit-label {
+  margin-left: 6px;
+}
 
 .profile-main {
   display: flex;
@@ -332,6 +402,10 @@
   text-align: center;
 }
 
+/* T1101: was `border-radius: 50%` on a 48x48 box — a 24px corner, the one
+   radius in the app that reaches the "no large radii" line, and the shape
+   (a big soft tinted circle above a title) is the marketing-card idiom the
+   brief rules out. It is the working 6px like every other chip now. */
 .coming-soon-icon {
   display: inline-flex;
   align-items: center;

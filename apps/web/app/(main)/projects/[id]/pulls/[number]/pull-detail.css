@@ -46,7 +46,7 @@
   min-width: 18px;
   padding: 0 5px;
   border: 1px solid var(--borderColor-muted, #d8dee4);
-  border-radius: 10px;
+  border-radius: 6px;
   background: var(--bgColor-muted, #f6f8fa);
   color: var(--fgColor-muted, #59636e);
   font-size: 11px;
@@ -129,7 +129,7 @@
 .pull-risk-severity {
   padding: 0 6px;
   border: 1px solid currentColor;
-  border-radius: 10px;
+  border-radius: 6px;
   font-size: 11px;
   font-weight: 600;
   line-height: 16px;
@@ -265,82 +265,15 @@
   font-size: 13px;
 }
 
-/* ---------- Change lists ---------- */
-
-.pull-changes {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border: 1px solid var(--borderColor-muted, #d8dee4);
-  border-radius: 6px;
-}
-
-.pull-change {
-  padding: 8px 12px;
-  border-top: 1px solid var(--borderColor-muted, #d8dee4);
-}
-
-.pull-change:first-child {
-  border-top: none;
-}
-
-.pull-change-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
-
-.pull-change-kind {
-  padding: 0 6px;
-  border: 1px solid var(--borderColor-muted, #d8dee4);
-  border-radius: 10px;
-  background: var(--bgColor-muted, #f6f8fa);
-  font-size: 11px;
-  line-height: 16px;
-}
-
-.pull-change-created {
-  color: var(--fgColor-success, #1a7f37);
-  border-color: var(--borderColor-success-muted, #aceebb);
-  background: var(--bgColor-success-muted, #dafbe1);
-}
-
-.pull-change-aborted {
-  color: var(--fgColor-danger, #d1242f);
-  border-color: var(--borderColor-danger-muted, #ffcecb);
-  background: var(--bgColor-danger-muted, #ffebe9);
-}
-
-.pull-change-type {
-  color: var(--fgColor-muted, #59636e);
-  font-family: var(--fontStack-monospace, ui-monospace, monospace);
-  font-size: 12px;
-}
-
-.pull-change-title {
-  font-weight: 600;
-}
-
-.pull-change-moved {
-  padding: 0 6px;
-  border: 1px solid var(--borderColor-attention-muted, #f5e0a3);
-  border-radius: 10px;
-  background: var(--bgColor-attention-muted, #fff8c5);
-  color: var(--fgColor-attention, #9a6700);
-  font-size: 11px;
-  line-height: 16px;
-}
-
-.pull-change-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding-left: 2px;
-  color: var(--fgColor-muted, #59636e);
-  font-size: 12px;
-}
+/* ---------- Change lists ----------
+ *
+ * T1101: the list BODY is the shared Diff (packages/ui) — the `<ul>`, the
+ * `<li>`, the head line, the kind chip, the type, the title, the moved
+ * note, the meta line and the fields line all moved there, because the
+ * conflicts page had written the same shapes a second time. What stays is
+ * the page's own vocabulary inside the slots it fills: the identifier and
+ * the lifecycle word that only a research-state diff has.
+ */
 
 .pull-change-id {
   font-family: var(--fontStack-monospace, ui-monospace, monospace);
@@ -458,7 +391,7 @@
 .pull-review-saved {
   padding: 2px 8px;
   border: 1px solid var(--borderColor-success-muted, #aceebb);
-  border-radius: 10px;
+  border-radius: 6px;
   background: var(--bgColor-success-muted, #dafbe1);
   color: var(--fgColor-success, #1a7f37);
   font-size: 12px;
