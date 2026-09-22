@@ -3,8 +3,10 @@
 # scripts/ci.sh (keep the stage lists in sync).
 #
 # All jobs run on ubuntu-24.04 (docs/25, docs/64: CI runner aligned with
-# the canonical dev environment). Only migration-integration requires
-# infrastructure; everything else passes on a bare runner.
+# the canonical dev environment). Three of them need real infrastructure and
+# say why in their own comments — migration-integration and a11y each declare
+# a PostgreSQL service container, observability pulls the pinned pgvector
+# image. The rest pass on a bare runner.
 name: ci
 
 on:
@@ -254,3 +256,59 @@ jobs:
         run: docker pull pgvector/pgvector:0.8.6-pg16
       - name: "observability: metrics + alerts + distributed-trace suite (make observability-smoke)"
         run: make observability-smoke
+
+  # Stage 8 — accessibility (T1104). The suite is not a static checker: it
+  # builds @post/web for production, starts the real API harness against a real
+  # PostgreSQL, and drives a real Chromium over every docs/42 core page that has
+  # a route — asserting that axe-core's WCAG pass AND its best-practice pass are
+  # both at zero AND that each dynamic page rendered the fixture's content
+  # rather than its not-found shell.
+  #
+  # It needs Go (the harness is a Go program), node + pnpm (next build) and a
+  # PostgreSQL. It does NOT need a step that installs the smoke suite's own
+  # dependencies or Chromium: run-a11y.sh does both itself (npm ci against
+  # tests/web-smoke/package-lock.json, then `npx playwright install
+  # chromium --only-shell`, run-a11y.sh:73-78), so the browser version and the
+  # lockfile stay the suite's business rather than this file's.
+  #
+  # Wall clock, measured locally: `next build` ~40 s, the suite itself 21-22 s;
+  # the browser download is the variable part. It runs alongside the other jobs
+  # rather than after them.
+  a11y:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_dev_pw
+          POSTGRES_DB: post
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: "a11y: web workspace deps (pnpm via corepack, frozen lockfile)"
+        run: corepack enable pnpm && pnpm install --frozen-lockfile
+      - name: "a11y: WCAG 2.2 AA suite (axe-core both passes + keyboard walk)"
+        env:
+          POSTGRES_TEST_ADMIN_URL: postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post
+          # The suite's ports are fixed and run-a11y.sh pre-flights them,
+          # refusing to start on a busy one. An empty CI runner has nothing
+          # there, but G2 re-runs these exact steps on a developer host, where a
+          # Worker may be driving the same suite on the defaults (18193/31108)
+          # at the same moment; the gate's run takes a pair of its own so that a
+          # collision reports as "port in use" on nobody's gate.
+          A11Y_API_ADDR: "127.0.0.1:18197"
+          A11Y_WEB_PORT: "31117"
+        run: make a11y
