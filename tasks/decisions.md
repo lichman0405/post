@@ -17401,3 +17401,21 @@ T1205 是此刻**唯一** dispatchable 的任务，且挂在主链 `max(T1202,T1
   导致的假性失败。属于 `internal/devorchestrator` 的 bug fix，不触及产品语义。
 - **可逆性**：可逆；若以后改为带锁的共享树，可移除 run id 路径并加文件锁。当前选择更简单且无锁。
 
+
+## L1-20260922-2 — 已解决的决定点由 Supervisor 撤销
+
+- **决策**：`.rddev/runtime/decisions.json` 里那些**条件已经不成立**的决定点（复核结论已被新一轮
+  复核取代、任务已合并、collect 失败已被返工回答），由 Supervisor 撤掉；驱动因此不再整笔跳过该任务。
+  撤销只做一件事——让驱动**重试**，每个 Gate 仍由 `rddev` 自己判定并可能拒绝（本次撤销后
+  `rddev pr status T1109` 仍要自己判 G4 = passed 才放行 merge）。
+- **背景**：`staleDecisions()`（`driver.go:331`）判定"决定点过时"的唯一依据是**工人的 run id 变了**：
+  `rec.RunID != d.RunID` 才撤。可是决定点是在 run 之内产生的——验收被拒、复核 request_changes——
+  而解法可能是**同一 run 之下换一轮复核/推进基线**，run id 不变，决定点就永远撤不掉，
+  而 `tick` 对有决定点的任务是 `continue`（`driver_run.go:273`）。实测后果：T1109 在
+  2026-09-21T21:57 被记了一条「复核 request_changes」的决定点，22:27 新一轮复核 approve 并验收通过，
+  **之后 13 小时驱动每个 tick 都跳过它**——任务 accepted、G1–G4 全绿、却既不 push 也不开 PR。
+  T1205/T1208/T1206 的三条同理（都已合并，决定点仍留在台账里）。
+- **影响**：只动驱动的调度台账，不动任何 Gate 判定，也不改产品语义；是 supervision 记账。
+  根因（决定点与 run id 绑定过紧，缺一个"条件已消失"的判定）**未修**，先记账：
+  同一 run 内被解决的 refused，仍需 Supervisor 手工撤点。
+- **可逆性**：可逆；撤销前留备份（`/tmp/decisions-backup-*.json`），撤销是幂等的。

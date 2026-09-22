@@ -9980,9 +9980,10 @@
       ]
     },
     "T1103": {
-      "status": "worker_failed",
-      "started_at": "2026-09-22T03:18:01Z",
-      "worker_run_id": "run-374b302eab7dae10",
+      "status": "running",
+      "started_at": "2026-09-22T11:02:17Z",
+      "worker_run_id": "run-d6a3570df583d435",
+      "rejection_reason": "上一个工人在这个工作树里跑了 209 轮、**撞上模型上下文上限**（API 400: request exceeded model token limit 262144）死在半路，**没有交出 RESULT.json**。它留下的是一份未交付的半成品，不是一次可验收的交付。\n\n工作树里现在有它的残留（未提交）：\n- 改过：`apps/web/app/(main)/projects/[id]/releases/[releaseId]/release-detail.tsx`、`tests/e2e-release/release-e2e.mjs`\n- 新增：`apps/web/app/(main)/projects/[id]/assets/publish/`、`apps/web/app/(main)/projects/[id]/releases/[releaseId]/release-detail.css`、`apps/web/lib/publish.ts`、`tests/e2e-release/publish-ux-e2e.mjs`、`tests/e2e-release/publish-ux-run.sh`\n\n## 你要做什么\n\n1. **先自己核这份半成品**：它能站住的就留着并补完，站不住的（改错的、跑不通的、跟验收标准无关的）删掉重做。不要因为「它已经写了」就默认它对——没有人验收过它。RESULT.json 的 `files_changed` 必须逐条对上你最终真正改动的文件。\n2. 按任务书里的 8 条验收标准逐条做完，每条给出证据（命令 + 落账位置）。\n3. **为了不再撞上下文上限**（这是上一轮的死因）：\n   - 不要整文件 dump 大文件到上下文，用 grep / sed -n 定位需要的那几行；\n   - 不要反复重读同一棵树；探查只围绕 allowed_scope 与验收标准；\n   - 长输出写进文件再看摘要（`... > /tmp/x.log 2>&1` 然后 grep/tail），不要把几万行日志灌进上下文；\n   - **早点写 RESULT.json 并持续更新**，不要攒到最后——上一轮就是这么什么都没留下的。\n4. 不许为了让门变绿去改测试、改台账或改 `tasks/tests.json` 的 status。\n",
       "history": [
         {
           "from": "todo",
@@ -10003,13 +10004,41 @@
           "at": "2026-09-22T03:47:17Z",
           "run_id": "run-7721576788df0897",
           "reason": "worker exited 1"
+        },
+        {
+          "from": "worker_failed",
+          "to": "ready",
+          "at": "2026-09-22T11:01:53Z",
+          "run_id": "run-53355f90cea5a7d1"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-22T11:02:08Z",
+          "run_id": "run-70f5e42db4ba205f",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-22T11:02:16Z",
+          "run_id": "run-37ca886c516a43c9",
+          "reason": "上一个工人在这个工作树里跑了 209 轮、**撞上模型上下文上限**（API 400: request exceeded model token limit 262144）死在半路，**没有交出 RESULT.json**。它留下的是一份未交付的半成品，不是一次可验收的交付。\n\n工作树里现在有它的残留（未提交）：\n- 改过：`apps/web/app/(main)/projects/[id]/releases/[releaseId]/release-detail.tsx`、`tests/e2e-release/release-e2e.mjs`\n- 新增：`apps/web/app/(main)/projects/[id]/assets/publish/`、`apps/web/app/(main)/projects/[id]/releases/[releaseId]/release-detail.css`、`apps/web/lib/publish.ts`、`tests/e2e-release/publish-ux-e2e.mjs`、`tests/e2e-release/publish-ux-run.sh`\n\n## 你要做什么\n\n1. **先自己核这份半成品**：它能站住的就留着并补完，站不住的（改错的、跑不通的、跟验收标准无关的）删掉重做。不要因为「它已经写了」就默认它对——没有人验收过它。RESULT.json 的 `files_changed` 必须逐条对上你最终真正改动的文件。\n2. 按任务书里的 8 条验收标准逐条做完，每条给出证据（命令 + 落账位置）。\n3. **为了不再撞上下文上限**（这是上一轮的死因）：\n   - 不要整文件 dump 大文件到上下文，用 grep / sed -n 定位需要的那几行；\n   - 不要反复重读同一棵树；探查只围绕 allowed_scope 与验收标准；\n   - 长输出写进文件再看摘要（`... > /tmp/x.log 2>&1` 然后 grep/tail），不要把几万行日志灌进上下文；\n   - **早点写 RESULT.json 并持续更新**，不要攒到最后——上一轮就是这么什么都没留下的。\n4. 不许为了让门变绿去改测试、改台账或改 `tasks/tests.json` 的 status。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T11:02:17Z",
+          "run_id": "run-d6a3570df583d435",
+          "reason": "worker spawn"
         }
       ]
     },
     "T1104": {
-      "status": "worker_failed",
-      "started_at": "2026-09-22T03:19:08Z",
-      "worker_run_id": "run-cff5ebbd47a75411",
+      "status": "running",
+      "started_at": "2026-09-22T11:04:23Z",
+      "worker_run_id": "run-a294016c18c6c8fd",
+      "rejection_reason": "上一个工人在这个工作树里跑了 260 轮、**撞上模型上下文上限**（API 400: request exceeded model token limit 262144）死在半路，**没有交出 RESULT.json**。它留下的是一份未交付的半成品，不是一次可验收的交付。\n\n工作树里现在有它的残留（未提交）：\n- 改过：`Makefile`、`apps/web/app/(auth)/layout.tsx`、`apps/web/app/(main)/assets/assets.css`、`apps/web/app/(main)/auth-status.tsx`、`apps/web/app/(main)/projects/[id]/page.tsx`、`apps/web/app/(main)/projects/[id]/project-shell.tsx`、`apps/web/app/(main)/projects/[id]/releases/[releaseId]/release-detail.tsx`、`apps/web/app/(main)/search/search-answer.tsx`、`apps/web/app/globals.css`、`packages/ui/src/ui.css`、`tests/web-smoke/a11y-smoke.mjs`\n- 新增：`tests/web-smoke/a11y-harness/`、`tests/web-smoke/keyboard-checklist.md`、`tests/web-smoke/run-a11y.sh`\n- **站外的垃圾**：工作树根目录多了一个编译出来的 `a11y-harness` 二进制——它不在你的 allowed_scope（Makefile / packages/ui/** / apps/web/** / tests/**）里，收工时 scope 校验会因此判你不通过。**删掉它**，并且让构建产物落在临时目录（`go build -o \"$(mktemp -d)/a11y-harness\"`），不要落在仓库里。\n\n## 你要做什么\n\n1. **先自己核这份半成品**：它能站住的就留着并补完，站不住的（改错的、跑不通的、跟验收标准无关的）删掉重做。不要因为「它已经写了」就默认它对——没有人验收过它。RESULT.json 的 `files_changed` 必须逐条对上你最终真正改动的文件。\n2. 按任务书里的 9 条验收标准逐条做完，每条给出证据（命令 + 落账位置）。\n3. **为了不再撞上下文上限**（这是上一轮的死因）：\n   - 不要整文件 dump 大文件到上下文，用 grep / sed -n 定位需要的那几行；\n   - 不要反复重读同一棵树；探查只围绕 allowed_scope 与验收标准；\n   - 长输出写进文件再看摘要（`... > /tmp/x.log 2>&1` 然后 grep/tail），不要把几万行日志灌进上下文；\n   - **早点写 RESULT.json 并持续更新**，不要攒到最后——上一轮就是这么什么都没留下的。\n4. 注意 `packages/ui/src/ui.css` 与 `apps/web/app/globals.css` 刚刚被 T1101（Primer 风格统一）改过并已进 main，你的改动是叠在它之上的；不要回退 T1101 的收敛结果，你的 diff 必须是「在它之上再加可访问性」，不是「改回旧样式」。\n5. 不许为了让门变绿去改测试、改台账或改 `tasks/tests.json` 的 status。\n",
       "history": [
         {
           "from": "todo",
@@ -10030,6 +10059,53 @@
           "at": "2026-09-22T03:50:31Z",
           "run_id": "run-b7948ac0fb4442ae",
           "reason": "worker exited 1"
+        },
+        {
+          "from": "worker_failed",
+          "to": "ready",
+          "at": "2026-09-22T11:02:45Z",
+          "run_id": "run-b1e2894a01647b2b"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-22T11:02:47Z",
+          "run_id": "run-d201f4c67d19a328",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-22T11:02:47Z",
+          "run_id": "run-9c1998b666e91dc3",
+          "reason": "上一个工人在这个工作树里跑了 260 轮、**撞上模型上下文上限**（API 400: request exceeded model token limit 262144）死在半路，**没有交出 RESULT.json**。它留下的是一份未交付的半成品，不是一次可验收的交付。\n\n工作树里现在有它的残留（未提交）：\n- 改过：`Makefile`、`apps/web/app/(auth)/layout.tsx`、`apps/web/app/(main)/assets/assets.css`、`apps/web/app/(main)/auth-status.tsx`、`apps/web/app/(main)/projects/[id]/page.tsx`、`apps/web/app/(main)/projects/[id]/project-shell.tsx`、`apps/web/app/(main)/projects/[id]/releases/[releaseId]/release-detail.tsx`、`apps/web/app/(main)/search/search-answer.tsx`、`apps/web/app/globals.css`、`packages/ui/src/ui.css`、`tests/web-smoke/a11y-smoke.mjs`\n- 新增：`tests/web-smoke/a11y-harness/`、`tests/web-smoke/keyboard-checklist.md`、`tests/web-smoke/run-a11y.sh`\n- **站外的垃圾**：工作树根目录多了一个编译出来的 `a11y-harness` 二进制——它不在你的 allowed_scope（Makefile / packages/ui/** / apps/web/** / tests/**）里，收工时 scope 校验会因此判你不通过。**删掉它**，并且让构建产物落在临时目录（`go build -o \"$(mktemp -d)/a11y-harness\"`），不要落在仓库里。\n\n## 你要做什么\n\n1. **先自己核这份半成品**：它能站住的就留着并补完，站不住的（改错的、跑不通的、跟验收标准无关的）删掉重做。不要因为「它已经写了」就默认它对——没有人验收过它。RESULT.json 的 `files_changed` 必须逐条对上你最终真正改动的文件。\n2. 按任务书里的 9 条验收标准逐条做完，每条给出证据（命令 + 落账位置）。\n3. **为了不再撞上下文上限**（这是上一轮的死因）：\n   - 不要整文件 dump 大文件到上下文，用 grep / sed -n 定位需要的那几行；\n   - 不要反复重读同一棵树；探查只围绕 allowed_scope 与验收标准；\n   - 长输出写进文件再看摘要（`... > /tmp/x.log 2>&1` 然后 grep/tail），不要把几万行日志灌进上下文；\n   - **早点写 RESULT.json 并持续更新**，不要攒到最后——上一轮就是这么什么都没留下的。\n4. 注意 `packages/ui/src/ui.css` 与 `apps/web/app/globals.css` 刚刚被 T1101（Primer 风格统一）改过并已进 main，你的改动是叠在它之上的；不要回退 T1101 的收敛结果，你的 diff 必须是「在它之上再加可访问性」，不是「改回旧样式」。\n5. 不许为了让门变绿去改测试、改台账或改 `tasks/tests.json` 的 status。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T11:02:49Z",
+          "run_id": "run-235f61bfc28aa45f",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "worker_failed",
+          "at": "2026-09-22T11:02:57Z",
+          "run_id": "run-25fe55dcc1ac8fbc",
+          "reason": "worker exited 1"
+        },
+        {
+          "from": "worker_failed",
+          "to": "ready",
+          "at": "2026-09-22T11:04:21Z",
+          "run_id": "run-611a7badbfd06fc1"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-22T11:04:23Z",
+          "run_id": "run-a294016c18c6c8fd",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -10271,11 +10347,11 @@
       ]
     },
     "T1109": {
-      "status": "accepted",
-      "started_at": "2026-09-21T21:34:35Z",
-      "worker_run_id": "run-bb8759413b65a825",
+      "status": "running",
+      "started_at": "2026-09-22T11:08:40Z",
+      "worker_run_id": "run-dd8f3e46ad873411",
       "accepted_by_supervisor_at": "2026-09-21T22:27:59Z",
-      "rejection_reason": "# T1109 rebaseline：main 上的 Makefile 变了，补丁贴不上\n\n当前 main 已经合并了 T1108（性能基线）和 T0909（confirm 原子化），`Makefile` 与 `internal/events/**`、`internal/gitprovider/**` 等文件都与你的分支基线不同。\n\n`rddev task accept` 的原话：\n\n    error: patch failed: Makefile:19\n\n这不是你的代码缺陷，是基线漂移。`rddev rebaseline` 会把你的分支推到当前 main，保留你手上的改动，然后你在新基线上重新跑完整验收并更新 RESULT。\n\n要求不变：生产级可观测性 / Dashboards；G1/G2/G3 通过；失败就写失败。\n",
+      "rejection_reason": "【这不是缺陷 —— 基线推进 + 一次合并冲突，已由 Supervisor 合成完毕，请你在这颗树上重新验证】\n\nmain 在你离开的这段时间前进了（T1205/T1208/T1206/T1101 等先后合并），你的分支与 main 冲突，`rddev pr merge` 因此拒绝过（PR #348 状态 CONFLICTING）。**冲突只有一个文件：`Makefile`**，而且是两处「两边都在同一个锚点后面插自己的东西」：\n\n1. `.PHONY` 续行列表：main 插了 `browser-list browser-smoke … browser-ok-arity`，你插了 `observability-smoke observability-trace observability-route`；\n2. 目标定义区：main 插了一整块 `browser-*` 目标（T1112 的浏览器套件），你插了 `observability-*` 三个目标。\n\n**Supervisor 已按「两边都留」把这颗树合成好并 rebase 到当前 main**（本工作树就是合成后的树）：\n- `.PHONY` 续行两行都在；\n- main 的 `browser-*` 目标块与你的 `observability-*` 目标块都在，顺序是 main 的在前、你的在后；\n- 合成后 `make -n help`、`make -n browser-list`、`make -n observability-trace` 都能解析，`Makefile` 里没有冲突标记。\n\n你的改动本身**没有**被改语义：被 main 改过的其它文件（`cmd/api/**`、`internal/**` 等）rebase 时都干净落地，没有一处需要你重做。\n\n## 你要做的事\n\n1. **在这颗合成后的树上重新跑一遍你的验收测试**（`tests/observability/**` 与 Makefile 里那三个目标所对应的东西；需要 `make infra-up` 起 compose 栈的，就照常起）。`Makefile` 现在是 main 的 browser 块 + 你的 observability 块，两者都要能跑。\n2. **如实更新 `RESULT.json`**：基线换成当前这颗树（写 `git rev-parse HEAD` 的 sha），`tests[]` 写你这次真正跑过的命令与真实结果；跑不动的写 `blocked` 并说明原因，失败就写失败。\n3. 在 `notes_for_supervisor` 里记一笔：**Makefile 的两处冲突是 Supervisor 按「两边都留」合成的**，你只做了验证，没有再解决冲突。\n4. **不要**回退 main 的 `browser-*` 目标、不要动 T1112 的 `browser-ok-arity` 守卫、不要为让某条判定变绿去删测试或改 `tasks/tests.json`。\n5. 若你发现 main 的新接口与你的调用方对不上：**按 main 的新接口改你的调用方**，不要改回旧接口；改不动的写进 RESULT 由 Supervisor 裁定。\n",
       "history": [
         {
           "from": "todo",
@@ -10461,6 +10537,20 @@
           "to": "accepted",
           "at": "2026-09-21T22:27:59Z",
           "run_id": "run-6192139eba952252"
+        },
+        {
+          "from": "accepted",
+          "to": "rejected",
+          "at": "2026-09-22T11:08:37Z",
+          "run_id": "run-e94243bba2c9f44c",
+          "reason": "【这不是缺陷 —— 基线推进 + 一次合并冲突，已由 Supervisor 合成完毕，请你在这颗树上重新验证】\n\nmain 在你离开的这段时间前进了（T1205/T1208/T1206/T1101 等先后合并），你的分支与 main 冲突，`rddev pr merge` 因此拒绝过（PR #348 状态 CONFLICTING）。**冲突只有一个文件：`Makefile`**，而且是两处「两边都在同一个锚点后面插自己的东西」：\n\n1. `.PHONY` 续行列表：main 插了 `browser-list browser-smoke … browser-ok-arity`，你插了 `observability-smoke observability-trace observability-route`；\n2. 目标定义区：main 插了一整块 `browser-*` 目标（T1112 的浏览器套件），你插了 `observability-*` 三个目标。\n\n**Supervisor 已按「两边都留」把这颗树合成好并 rebase 到当前 main**（本工作树就是合成后的树）：\n- `.PHONY` 续行两行都在；\n- main 的 `browser-*` 目标块与你的 `observability-*` 目标块都在，顺序是 main 的在前、你的在后；\n- 合成后 `make -n help`、`make -n browser-list`、`make -n observability-trace` 都能解析，`Makefile` 里没有冲突标记。\n\n你的改动本身**没有**被改语义：被 main 改过的其它文件（`cmd/api/**`、`internal/**` 等）rebase 时都干净落地，没有一处需要你重做。\n\n## 你要做的事\n\n1. **在这颗合成后的树上重新跑一遍你的验收测试**（`tests/observability/**` 与 Makefile 里那三个目标所对应的东西；需要 `make infra-up` 起 compose 栈的，就照常起）。`Makefile` 现在是 main 的 browser 块 + 你的 observability 块，两者都要能跑。\n2. **如实更新 `RESULT.json`**：基线换成当前这颗树（写 `git rev-parse HEAD` 的 sha），`tests[]` 写你这次真正跑过的命令与真实结果；跑不动的写 `blocked` 并说明原因，失败就写失败。\n3. 在 `notes_for_supervisor` 里记一笔：**Makefile 的两处冲突是 Supervisor 按「两边都留」合成的**，你只做了验证，没有再解决冲突。\n4. **不要**回退 main 的 `browser-*` 目标、不要动 T1112 的 `browser-ok-arity` 守卫、不要为让某条判定变绿去删测试或改 `tasks/tests.json`。\n5. 若你发现 main 的新接口与你的调用方对不上：**按 main 的新接口改你的调用方**，不要改回旧接口；改不动的写进 RESULT 由 Supervisor 裁定。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T11:08:40Z",
+          "run_id": "run-dd8f3e46ad873411",
+          "reason": "worker spawn"
         }
       ]
     },
@@ -11085,8 +11175,9 @@
     },
     "T1207": {
       "status": "verification",
-      "started_at": "2026-09-22T02:35:18Z",
-      "worker_run_id": "run-135b7f2bdd0cb50a",
+      "started_at": "2026-09-22T11:01:19Z",
+      "worker_run_id": "run-b8711f17ddf25043",
+      "rejection_reason": "T1207 复核判定 request_changes：1 blocking、1 major、1 nit。报告的骨架是好的（Gate A–I 加 Development System Gate 十条都在、脚本会自检条数、明确写出了\"排除了 T1207 自己\"），但它是**对着旧的 main（514c15f）写的**，而 main 之后前进了（T1206 合并、T1101 合并）。这份报告要 certify 的那颗树才是它必须对着的树。\n\n## blocking\n\n1. 报告与审计脚本钉在基线 514c15f：报告里写着有 24 条 blocking 测试是 not_run，并把 T1206-TEST-01 列为 not_run。但当前 main 上 T1206-TEST-01 已是 passed（fa0cc9c 记录的），真实的 blocking not_run 是 **23** 条。后果很硬：合进 main 之后 `bash tests/acceptance/v1-final-audit.sh` 会因为条数对不上直接非零退出——一份\"最终验收报告\"自带的那条必跑测试，在 merge 后是红的。\n\n## major\n\n1. blob 写入路径那条发现写着「全树搜索 `request-upload` / `requestUpload` 零命中」，但 `specs/api/openapi.yaml:234` 就有 `/projects/{projectId}/branches/{branchId}/blobs:request-upload:`。结论（产品代码里没有实现）是对的，但\"全树零命中\"这句话本身是假的，会让整份报告的取证可信度下降。\n\n## nit\n\n1. `tests/acceptance/v1-final-audit.sh` 里「部署的 search 没有接任何 planner / embedder / answer provider」这条 marker 检查写了两遍（一遍双引号、一遍单引号）。删掉一份。\n\n## 返工要求\n\n1. 这次返工已经替你 rebase 到当前 main 了，工作树 = 当前 main 顶端 + 你的改动。先用 `git rev-parse HEAD` 记下你重新生成时对着的那颗树的 sha，并写进报告。\n2. 所有数字重新取一遍，不许沿用旧基线抄下来的数：blocking not_run 条数、T1206-TEST-01 的当前状态、v1_required 待办条数、`tasks/tests.json` 的整体分布。修完后 `bash tests/acceptance/v1-final-audit.sh` 必须在当前树上退出 0。\n3. request-upload 那条改写成事实：OpenAPI 里**声明**了这个端点（`specs/api/openapi.yaml:234`），产品代码里没有实现/没有 handler。给出你实际跑过的检索命令与命中行。\n4. 报告里凡是\"零命中 / 全部 / 都 / 无一处\"这类全称断言，都要附上你实际跑的命令和它的输出落在哪里；跑不出全称结论的就不要写全称。抽查任意三条证据，按你写的命令复跑必须复现你的判定。\n5. 不许为了让脚本变绿去改测试、改台账或改 `tasks/tests.json` 的 status——账本只能由 `scripts/record_test_run.py` 写真跑结果。报告只是报告。\n",
       "history": [
         {
           "from": "todo",
@@ -11106,6 +11197,41 @@
           "to": "verification",
           "at": "2026-09-22T02:42:50Z",
           "run_id": "run-c88189ff4cc545b4",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-22T10:59:53Z",
+          "run_id": "run-dbb78122661b46a0",
+          "reason": "T1207 复核判定 request_changes：1 blocking、1 major、1 nit。报告的骨架是好的（Gate A–I 加 Development System Gate 十条都在、脚本会自检条数、明确写出了\"排除了 T1207 自己\"），但它是**对着旧的 main（514c15f）写的**，而 main 之后前进了（T1206 合并、T1101 合并）。这份报告要 certify 的那颗树才是它必须对着的树。\n\n## blocking\n\n1. 报告与审计脚本钉在基线 514c15f：报告里写着有 24 条 blocking 测试是 not_run，并把 T1206-TEST-01 列为 not_run。但当前 main 上 T1206-TEST-01 已是 passed（fa0cc9c 记录的），真实的 blocking not_run 是 **23** 条。后果很硬：合进 main 之后 `bash tests/acceptance/v1-final-audit.sh` 会因为条数对不上直接非零退出——一份\"最终验收报告\"自带的那条必跑测试，在 merge 后是红的。\n\n## major\n\n1. blob 写入路径那条发现写着「全树搜索 `request-upload` / `requestUpload` 零命中」，但 `specs/api/openapi.yaml:234` 就有 `/projects/{projectId}/branches/{branchId}/blobs:request-upload:`。结论（产品代码里没有实现）是对的，但\"全树零命中\"这句话本身是假的，会让整份报告的取证可信度下降。\n\n## nit\n\n1. `tests/acceptance/v1-final-audit.sh` 里「部署的 search 没有接任何 planner / embedder / answer provider」这条 marker 检查写了两遍（一遍双引号、一遍单引号）。删掉一份。\n\n## 返工要求\n\n1. 这次返工已经替你 rebase 到当前 main 了，工作树 = 当前 main 顶端 + 你的改动。先用 `git rev-parse HEAD` 记下你重新生成时对着的那颗树的 sha，并写进报告。\n2. 所有数字重新取一遍，不许沿用旧基线抄下来的数：blocking not_run 条数、T1206-TEST-01 的当前状态、v1_required 待办条数、`tasks/tests.json` 的整体分布。修完后 `bash tests/acceptance/v1-final-audit.sh` 必须在当前树上退出 0。\n3. request-upload 那条改写成事实：OpenAPI 里**声明**了这个端点（`specs/api/openapi.yaml:234`），产品代码里没有实现/没有 handler。给出你实际跑过的检索命令与命中行。\n4. 报告里凡是\"零命中 / 全部 / 都 / 无一处\"这类全称断言，都要附上你实际跑的命令和它的输出落在哪里；跑不出全称结论的就不要写全称。抽查任意三条证据，按你写的命令复跑必须复现你的判定。\n5. 不许为了让脚本变绿去改测试、改台账或改 `tasks/tests.json` 的 status——账本只能由 `scripts/record_test_run.py` 写真跑结果。报告只是报告。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T11:00:00Z",
+          "run_id": "run-aa07c288e4186080",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-22T11:01:18Z",
+          "run_id": "run-67fcda298099279a",
+          "reason": "T1207 复核判定 request_changes：1 blocking、1 major、1 nit。报告的骨架是好的（Gate A–I 加 Development System Gate 十条都在、脚本会自检条数、明确写出了\"排除了 T1207 自己\"），但它是**对着旧的 main（514c15f）写的**，而 main 之后前进了（T1206 合并、T1101 合并）。这份报告要 certify 的那颗树才是它必须对着的树。\n\n## blocking\n\n1. 报告与审计脚本钉在基线 514c15f：报告里写着有 24 条 blocking 测试是 not_run，并把 T1206-TEST-01 列为 not_run。但当前 main 上 T1206-TEST-01 已是 passed（fa0cc9c 记录的），真实的 blocking not_run 是 **23** 条。后果很硬：合进 main 之后 `bash tests/acceptance/v1-final-audit.sh` 会因为条数对不上直接非零退出——一份\"最终验收报告\"自带的那条必跑测试，在 merge 后是红的。\n\n## major\n\n1. blob 写入路径那条发现写着「全树搜索 `request-upload` / `requestUpload` 零命中」，但 `specs/api/openapi.yaml:234` 就有 `/projects/{projectId}/branches/{branchId}/blobs:request-upload:`。结论（产品代码里没有实现）是对的，但\"全树零命中\"这句话本身是假的，会让整份报告的取证可信度下降。\n\n## nit\n\n1. `tests/acceptance/v1-final-audit.sh` 里「部署的 search 没有接任何 planner / embedder / answer provider」这条 marker 检查写了两遍（一遍双引号、一遍单引号）。删掉一份。\n\n## 返工要求\n\n1. 这次返工已经替你 rebase 到当前 main 了，工作树 = 当前 main 顶端 + 你的改动。先用 `git rev-parse HEAD` 记下你重新生成时对着的那颗树的 sha，并写进报告。\n2. 所有数字重新取一遍，不许沿用旧基线抄下来的数：blocking not_run 条数、T1206-TEST-01 的当前状态、v1_required 待办条数、`tasks/tests.json` 的整体分布。修完后 `bash tests/acceptance/v1-final-audit.sh` 必须在当前树上退出 0。\n3. request-upload 那条改写成事实：OpenAPI 里**声明**了这个端点（`specs/api/openapi.yaml:234`），产品代码里没有实现/没有 handler。给出你实际跑过的检索命令与命中行。\n4. 报告里凡是\"零命中 / 全部 / 都 / 无一处\"这类全称断言，都要附上你实际跑的命令和它的输出落在哪里；跑不出全称结论的就不要写全称。抽查任意三条证据，按你写的命令复跑必须复现你的判定。\n5. 不许为了让脚本变绿去改测试、改台账或改 `tasks/tests.json` 的 status——账本只能由 `scripts/record_test_run.py` 写真跑结果。报告只是报告。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T11:01:19Z",
+          "run_id": "run-b8711f17ddf25043",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T11:07:26Z",
+          "run_id": "run-80f801e4c6263e74",
           "reason": "collect: all checks passed"
         }
       ]
