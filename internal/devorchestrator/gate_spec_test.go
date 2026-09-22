@@ -27,7 +27,7 @@ func TestGatesSpecSyncsWithCIWorkflow(t *testing.T) {
 	}
 
 	ci := parseCIWorkflow(t, filepath.Join(root, ".github", "workflows", "ci.yml"))
-	if len(ci) != 10 {
+	if len(ci) != 11 {
 		t.Fatalf("ci.yml declares %d jobs, want 10", len(ci))
 	}
 	for job, steps := range ci {
@@ -59,7 +59,7 @@ func TestGatesSpecSyncsWithCIWorkflow(t *testing.T) {
 	// non-required job as a G3 job and demands that it name the tasks whose
 	// work it asserts. So a new CI job is required from its first run, and the
 	// proof that it is green is its first run rather than a staging step.
-	if !equalStrings(spec.RequiredJobs, []string{"spec-validation", "task-state", "go", "web", "python", "migration-integration", "acceptance", "observability", "a11y", "i18n"}) {
+	if !equalStrings(spec.RequiredJobs, []string{"spec-validation", "task-state", "go", "web", "python", "migration-integration", "acceptance", "observability", "a11y", "i18n", "security-master"}) {
 		t.Errorf("required_jobs = %v, want ci.yml's jobs in canonical order", spec.RequiredJobs)
 	}
 
