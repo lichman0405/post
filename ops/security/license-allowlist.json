@@ -1,0 +1,81 @@
+{
+  "what": [
+    "The licence allowlist for docs/40_OPEN_SOURCE_LICENSES.md: tests/security/license-audit.sh",
+    "reads every component of the three SBOMs (Go / npm / pip) and judges each component's",
+    "licence against this file. Nothing here is implicit: a licence that is not in `allow`",
+    "makes the row red, and the fix is a decision recorded HERE with a reason — not a flag",
+    "on the row.",
+    "",
+    "WHY THE REASONS ARE WRITTEN OUT",
+    "Three licences in this tree are not the plain permissive case (LGPL-3.0-or-later on a",
+    "native library, MPL-2.0 file-level copyleft, CC-BY-4.0 on a data package). Each of them",
+    "is allowed for a stated reason with a stated obligation, so that a reader can disagree",
+    "with the reasoning instead of having to reverse-engineer it."
+  ],
+  "policy": {
+    "deny_class": "copyleft strong enough to reach our own source (GPL/AGPL/SSPL and the source-available licences), and any licence that restricts commercial or research use. A component under one of these makes the row RED and names the package, its licence and its version. Accepting one is a written ADR (docs/23 §11) plus legal confirmation (docs/40 principle 1), which is the Supervisor's call and not something this file can grant.",
+    "unknown": "a licence that is in neither table is a decision nobody has made, so it is also RED — the same as a denied one, for a different reason.",
+    "first_party": "this repository's own packages appear in the SBOMs as components. They are not dependencies and are not licensed by a third party; they are listed here by name so the list stays explicit rather than an implicit skip.",
+    "no_licence": "a component whose licence the SBOM does not carry. It is RED unless it is named in `unlicensed` with a reason, and a witness that can be checked."
+  },
+  "allow": {
+    "MIT": "permissive; the only obligation is retaining the copyright notice, which the SBOM inventory itself satisfies.",
+    "Apache-2.0": "permissive, with an explicit patent grant; obligations are the notice and any NOTICE file the distribution ships.",
+    "Apache-2.0 OR BSD-2-Clause": "dual-licensed permissive (packaging, in the adapter's environment); either arm is on this allowlist.",
+    "BSD-2-Clause": "permissive; notice retention only.",
+    "BSD-3-Clause": "permissive; adds the no-endorsement clause, which this project does not need to do anything about.",
+    "BSD-Source-Code": "the BSD variant the Go project's own x/ repositories ship (BSD-3-Clause text with the source-code disclaimer) — golang.org/x/crypto, /sync, /sys and /text. Verified by reading the module's LICENSE in the module cache, not inferred from the id.",
+    "ISC": "permissive and equivalent in effect to MIT, with the licence text instead of the copyright line.",
+    "0BSD": "permissive with the notice requirement waived entirely (tslib).",
+    "BlueOak-1.0.0": "a permissive licence written to be readable (minimatch's current licence); no copyleft, notice retention only.",
+    "Python-2.0": "the PSF licence (argparse, a dev-time dependency); permissive and GPL-compatible.",
+    "W3C": "the W3C document licence as used by focus-visible; permissive, notice retention.",
+    "CC0-1.0": "a public-domain dedication (language-subtag-registry, which is data, not code).",
+    "CC-BY-4.0": "caniuse-lite's browser-support DATA. Attribution is the obligation, which is why the package ships its notice; there is no copyleft on code.",
+    "MPL-2.0": "file-level copyleft (axe-core, used unmodified as a dev dependency for the accessibility suite). The obligation is to publish modifications to MPL-covered files if we ever make any; we make none, and it does not reach our source.",
+    "LGPL-3.0-or-later": "@img/sharp-libvips-linux-x64, the native image library that sharp pulls in for Next.js image optimisation — a transitive dependency of the web app, not a direct one. Weak copyleft: it permits use in a larger work provided the library is not modified and the user can relink it, which is the case for an unmodified prebuilt .so. The obligations are to ship the LGPL text and to point at the library's source, which the component's distribution URL in the SBOM does. This is deliberately NOT treated as the GPL-class case: LGPL-3.0 does not reach our own code. It is called out in the row's output so the distinction stays visible rather than being buried in this table."
+  },
+  "deny": {
+    "ids": [
+      "GPL-1.0-only", "GPL-1.0-or-later",
+      "GPL-2.0-only", "GPL-2.0-or-later", "GPL-2.0", "GPL-3.0", "GPL-3.0-only",
+      "GPL-3.0-or-later",
+      "AGPL-1.0-only", "AGPL-1.0-or-later", "AGPL-3.0", "AGPL-3.0-only", "AGPL-3.0-or-later",
+      "SSPL-1.0", "BUSL-1.1", "BSL-1.1", "Elastic-2.0", "RSALv2", "OSL-3.0",
+      "Commons-Clause", "CPAL-1.0", "EUPL-1.2",
+      "CC-BY-NC-4.0", "CC-BY-NC-SA-4.0", "CC-BY-NC-ND-4.0", "CC-BY-ND-4.0", "CC-BY-SA-4.0",
+      "JSON", "X11", "Ms-RL", "Sleepycat"
+    ],
+    "name_patterns": [
+      {"matches": "(?i)server side public licen[cs]e", "why": "SSPL — source-available, not open source; MongoDB's licence and the shape of Redis's 7.4+ RSALv2/SSPLv1"},
+      {"matches": "(?i)business source licen[cs]e", "why": "BUSL — time-delayed source-available, with a use restriction"},
+      {"matches": "(?i)redis source available", "why": "RSALv2 — commercial restriction"},
+      {"matches": "(?i)commons clause", "why": "an add-on prohibition on selling the software"},
+      {"matches": "(?i)non-?commercial", "why": "a use restriction, which makes the dependency unusable by definition here"},
+      {"matches": "(?i)research (only|use only)|evaluation only", "why": "field-of-use restriction"}
+    ]
+  },
+  "first_party": [
+    {"match": "github.com/lichman0405/post", "why": "the Go module itself — the SBOM's own metadata.component subject"},
+    {"match": "@post/ui", "why": "packages/ui, this repository's own workspace package (purl pkg:npm/%40post/ui)"},
+    {"match": "post-scientific-adapter", "why": "services/scientific-adapter, this repository's own Python project"}
+  ],
+  "unlicensed": [
+    {
+      "match": "github.com/pressly/goose/v3",
+      "version": "v3.28.0",
+      "why": "cyclonedx-gomod reports no licence for this module, so the document carries none — but the module's own LICENSE file, which the Go module cache keeps beside the source it was built from, is the MIT text. Verified by reading that file: the witness below is NOT decorative, the audit fails this row if the file is missing or stops starting with the MIT heading.",
+      "witness": {
+        "file": "$GOMODCACHE/github.com/pressly/goose/v3@v3.28.0/LICENSE",
+        "head_matches": "^MIT License",
+        "sha256": "f23985556a879c0e68bb4e136ee4b88a550d26fa33db77a65d76b721c93093ef"
+      }
+    },
+    {
+      "match": "colorama",
+      "version": "0.4.6",
+      "why": "This component is locked for the Windows platform only (uv.lock resolves it as a sys_platform == 'win32' dependency of pytest), so `uv sync` installs no distribution for it on Linux and there is no METADATA file to read a licence from. Its licence is therefore UNVERIFIED by this row, not cleared: the component is in the SBOM, it is named here, and the row prints it as unverified every run. V1 ships on Ubuntu (CLAUDE.md §7), so it is not on the shipped surface — but that is a statement about the platform, not about the licence, and it is recorded as such.",
+      "witness": null
+    }
+  ]
+}

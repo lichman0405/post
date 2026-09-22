@@ -30,13 +30,16 @@
 #     its own exit code (2). `--allow-not-asked` turns that exit code green
 #     and nothing else: the rows are still printed and still recorded. It is
 #     for a bare CI runner, never for a Release.
-#  4. WHAT THE TREE CANNOT DO IS WRITTEN DOWN, NOT OMITTED.
-#     ops/security/absent-checks.json names SAST, the container scan and the
-#     SBOM — what stands in for each today, what adding it would take, what
-#     the gap costs — and the `absence-manifest` row below keeps that file
-#     true. Whether an absent capability is an accepted V1 risk is the
-#     Supervisor's written call, not this script's: the manifest records the
-#     gap and the evidence, and says so.
+#  4. WHAT THE TREE CANNOT DO IS WRITTEN DOWN, NOT OMITTED, AND WHAT IT DOES
+#     IS COUNTED. ops/security/absent-checks.json lists every capability
+#     docs/23 §11 asks a Release to run, each one either covered by named rows
+#     of this gate or named as absent, and the `absence-manifest` row below
+#     keeps that file true — including its one remaining absence, the
+#     container scan, which is a GUARDED absence: the `container-scan` row
+#     here is green only while the tree really has no container build file,
+#     and goes red the moment one appears. Whether an absent capability is an
+#     accepted V1 risk is the Supervisor's written call, not this script's:
+#     the manifest records the gap and the evidence, and says so.
 #
 # Two different "not here", deliberately kept apart
 # -------------------------------------------------
@@ -114,7 +117,7 @@ add_check() { # add_check <id> <name> <doc> <requires> <command> <evidence>...
 # registry is the cheapest way to make a security gate green, and it is the
 # one that leaves no failing output behind. See the registry-integrity guard
 # in the run loop.
-MIN_CHECKS=9
+MIN_CHECKS=17
 
 # --- security surface -------------------------------------------------------
 
@@ -170,9 +173,7 @@ add_check deploy-template \
 # --- dependency / CVE audits ------------------------------------------------
 #
 # Three languages, three instruments, each one its own row so a red Go audit
-# cannot be hidden by a green Node one. They are the part of docs/23 §11 this
-# tree can answer today; SAST, the container scan and the SBOM are the part
-# it cannot, and those live in ops/security/absent-checks.json.
+# cannot be hidden by a green Node one.
 
 add_check vuln-go \
   "Dependency/CVE audit (Go): govulncheck over the module graph and reachable symbols" \
@@ -195,17 +196,129 @@ add_check vuln-python \
   "cd services/scientific-adapter && uv audit" \
   '^Found no known vulnerabilities'
 
+# --- SAST (docs/23 §11) -----------------------------------------------------
+#
+# Three languages, three instruments, three rows: a red Go scan cannot be
+# hidden behind a green Node one. tests/security/sast.sh runs one face per
+# invocation. Each row asserts the version of the tool it actually ran against
+# ops/security/tool-versions.sh (`make security-tools` installs exactly those),
+# and each one refuses a scan that covered too little of the tree — a scan of
+# an empty tree reports no findings, which is indistinguishable from a clean
+# one. The findings that exist today are baselined PER FINDING in
+# ops/ci/*-baseline.txt with a written review attached to each key; no
+# invocation below carries -exclude-dir, -nosec or a severity floor, and a
+# finding that is not in its baseline is red.
+
+add_check sast-go \
+  "SAST (Go): gosec over the module, every finding new (red) or baselined individually" \
+  "docs/23 §11 (SAST)" \
+  "go gosec file:tests/security/sast.sh file:ops/ci/gosec-baseline.txt file:ops/security/tool-versions.sh" \
+  "bash tests/security/sast.sh go" \
+  '^ok   sast-go: gosec v2\.29\.0: [0-9]+ file\(s\) scanned, [0-9]+ finding\(s\) reported \([0-9]+ baselined \(reviewed\), 0 unbaselined\)' \
+  '^     severity mix: '
+
+add_check sast-python \
+  "SAST (Python adapter): bandit over the adapter's source, no skip list and no severity floor" \
+  "docs/23 §11 (SAST)" \
+  "python3 bandit file:tests/security/sast.sh file:ops/ci/bandit-baseline.txt" \
+  "bash tests/security/sast.sh python" \
+  '^ok   sast-python: bandit 1\.8\.6: [0-9]+ file\(s\) scanned, [0-9]+ finding\(s\) reported \([0-9]+ baselined \(reviewed\), 0 unbaselined\)'
+
+add_check sast-node \
+  "SAST (web + shared UI): eslint with the security plugin's whole recommended set forced to error" \
+  "docs/23 §11 (SAST)" \
+  "node dir:tests/security/node-tools/node_modules file:tests/security/sast.sh file:ops/ci/eslint-security-baseline.txt" \
+  "bash tests/security/sast.sh node" \
+  '^ok   sast-node: eslint 9\.39\.5: [0-9]+ file\(s\) scanned, [0-9]+ rule\(s\), [0-9]+ finding\(s\) reported \([0-9]+ baselined \(reviewed\), 0 unbaselined\)' \
+  '^     rules: [0-9]+ from eslint-plugin-security/recommended, every one of them at "error"'
+
+# --- SBOM (docs/25 §1 item 10; docs/40) -------------------------------------
+#
+# One document per face, generated by the row that reports it, so a green row
+# is a document produced in THIS run rather than one that happened to be lying
+# around. The documents are written to the ignored .sbom/ directory and are
+# never committed: they are reproducible from go.mod, pnpm-lock.yaml and
+# uv.lock, and a committed SBOM is an inventory of a tree that no longer
+# exists. A row is green only after tests/security/check-sbom.py has re-parsed
+# the document, cleared the face's component floor and resolved every key
+# component in tests/security/key-components.json — including the entries
+# whose answer is "deliberately not in this tree", whose witness has to keep
+# saying so.
+
+add_check sbom-go \
+  "SBOM (Go): cyclonedx-gomod over go.mod, licence evidence per module, validated" \
+  "docs/25 §1 item 10; docs/40 §3" \
+  "go cyclonedx-gomod file:tests/security/sbom.sh file:tests/security/check-sbom.py file:tests/security/key-components.json" \
+  "bash tests/security/sbom.sh go" \
+  '^ok   sbom-go: cyclonedx-gomod v1\.9\.0 \(go\.mod, license evidence included\): [0-9]+ component\(s\), spec 1\.[0-9]+' \
+  '^     subject: github.com/lichman0405/post' \
+  '^     chi: absent, as documented'
+
+add_check sbom-node \
+  "SBOM (npm workspace): pnpm sbom over the installed workspace, CycloneDX 1.5" \
+  "docs/25 §1 item 10; docs/40 §3" \
+  "node pnpm workspace-deps file:tests/security/sbom.sh file:tests/security/check-sbom.py file:tests/security/key-components.json" \
+  "bash tests/security/sbom.sh node" \
+  '^ok   sbom-node: pnpm [0-9.]+ sbom \(pnpm-lock\.yaml, CycloneDX 1\.5\): [0-9]+ component\(s\), spec 1\.5' \
+  '^     Playwright: witnessed'
+
+add_check sbom-python \
+  "SBOM (Python adapter): uv export + the installed distributions' own METADATA for licences" \
+  "docs/25 §1 item 10; docs/40 §3" \
+  "uv dir:services/scientific-adapter/.venv file:tests/security/sbom.sh file:tests/security/sbom_python_licenses.py file:tests/security/key-components.json" \
+  "bash tests/security/sbom.sh python" \
+  '^ok   sbom-python: uv [0-9.]+ export --format cyclonedx1\.5 \+ licenses from .* dist-info METADATA: [0-9]+ component\(s\), spec 1\.5' \
+  '^     pymatgen: witnessed'
+
+# --- licence audit (docs/40) ------------------------------------------------
+#
+# Reads the three documents the rows above just produced and judges every
+# component's licence against ops/security/license-allowlist.json, which
+# carries a written reason per allowed licence and a deny class that goes red
+# naming package, licence and version. It runs AFTER the sbom-* rows on
+# purpose: a licence audit with no inventory to audit is NOT ASKED here, not
+# green — hence the file prerequisites, which say exactly that.
+
+add_check license-audit \
+  "Licence audit: every SBOM component judged against ops/security/license-allowlist.json" \
+  "docs/40_OPEN_SOURCE_LICENSES.md §3; docs/23 §11" \
+  "python3 go file:ops/security/license-allowlist.json file:tests/security/key-components.json file:.sbom/go.cdx.json file:.sbom/node.cdx.json file:.sbom/python.cdx.json" \
+  "python3 tests/security/license_audit.py" \
+  '^ok   license-audit: [0-9]+ component\(s\) across 3 SBOM\(s\), every licence judged against ops/security/license-allowlist\.json' \
+  '^     first-party, not third-party dependencies \([0-9]+\):'
+
+# --- container scan: a GUARDED absence --------------------------------------
+#
+# There is no Dockerfile in this tree, so there is no image to scan, and a row
+# that said "not applicable" would be a permanent green light nobody revisits.
+# This row is instead the absence made falsifiable: green only while the tree
+# really has no container build file — printing the claim it rests on, where
+# that claim is registered and how much of the tree it walked — and RED the
+# moment a Dockerfile or Containerfile appears, or if the `no-dockerfile`
+# claim stops being registered. A green here is not a container scan and does
+# not claim to be one; ops/security/absent-checks.json records the gap itself
+# as the Supervisor's risk call to make.
+
+add_check container-scan \
+  "Container scan: a guarded absence — green only while the tree has no container build file" \
+  "docs/23 §11 (container scan); docs/25 §1 item 10" \
+  "python3 file:tests/security/container-scan.sh file:ops/runbook-steps.json" \
+  "bash tests/security/container-scan.sh" \
+  '^ok   container-scan: no container build file in the tree \([0-9]+ file\(s\) walked' \
+  '^     the claim this rests on: ops/runbook-steps\.json \(id no-dockerfile, re-derived by ops/runbook-verify\.py T1\);'
+
 # --- the absence manifest ---------------------------------------------------
 
 add_check absence-manifest \
-  "Absence manifest: SAST / container scan / SBOM named, detailed, and cross-checked against this gate" \
+  "Absence manifest: every §11 capability covered by a named row or named as absent, and the guard itself checked" \
   "docs/23 §11; ops/security/absent-checks.json" \
   "python3 file:ops/security/absent-checks.json file:tests/security/check-absent-manifest.py" \
-  "python3 tests/security/check-absent-manifest.py" \
+  "python3 tests/security/check-absent-manifest.py --selftest" \
   '^ok   manifest: ' \
-  '^ok   item: sast' \
-  '^ok   item: container-scan' \
-  '^ok   item: sbom' \
+  '^ok   selftest: ' \
+  '^ok   item: sast — covered by sast-go, sast-python, sast-node' \
+  '^ok   item: container-scan — guarded absence: the .container-scan. row of this gate is registered' \
+  '^ok   item: sbom — covered by sbom-go, sbom-node, sbom-python, license-audit' \
   '^ok   item: dependency-audit' \
   '^ok   item: secret-scan' \
   '^ok   item: owasp-smoke' \
@@ -245,9 +358,14 @@ prereq_missing() { # -> one reason per line, empty when everything resolves
       curl)        have curl        || echo "curl is not on PATH";;
       uv)          have uv          || echo "uv is not on PATH (pip install uv)";;
       govulncheck) have govulncheck || echo "govulncheck is not on PATH (go install golang.org/x/vuln/cmd/govulncheck@latest)";;
+      gosec)       have gosec       || echo "gosec is not on PATH — run 'make security-tools' (it installs the pinned version into \$(go env GOPATH)/bin)";;
+      bandit)      have bandit      || echo "bandit is not on PATH — run 'make security-tools' (uv tool install bandit)";;
+      cyclonedx-gomod) have cyclonedx-gomod || echo "cyclonedx-gomod is not on PATH — run 'make security-tools'";;
       redis)       redis_ready      || echo "no Redis answering at $REDIS_ADDR";;
       postgres)    postgres_ready   || echo "no PostgreSQL accepting connections at ${PG_URL%%\?*} (make infra-up)";;
       web-deps)    [ -d "$ROOT/apps/web/node_modules" ] || echo "apps/web/node_modules is missing (pnpm install --frozen-lockfile)";;
+      workspace-deps) [ -d "$ROOT/node_modules" ] || echo "the workspace's node_modules is missing (pnpm install --frozen-lockfile) — pnpm's SBOM reads the INSTALLED workspace";;
+      dir:*)       [ -d "$ROOT/${token#dir:}" ] || echo "required directory is missing: ${token#dir:} (run 'make security-tools')";;
       file:*)      [ -f "$ROOT/${token#file:}" ] || echo "required file is missing: ${token#file:}";;
       "")          ;;
       *)           echo "unknown prerequisite token '$token' (a typo here would silently pass)";;
