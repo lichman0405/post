@@ -84,47 +84,16 @@
 
 /* ---------- badges (shared: directory + shell) ---------- */
 
+/* The label shape itself lives in @post/ui (StateLabel shape="badge"):
+   the four `.badge*` families that used to sit here were the same 12px pill
+   spelled five ways across five stylesheets (T1101). What stays is the row
+   the labels sit in, which is this page's own. */
+
 .project-badges {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-}
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 1px 8px;
-  border: 1px solid var(--borderColor-default, #d0d7de);
-  border-radius: 2em;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 18px;
-  white-space: nowrap;
-}
-
-.badge-public {
-  color: var(--fgColor-success, #1a7f37);
-  background: var(--bgColor-success-muted, #dafbe1);
-  border-color: transparent;
-}
-
-.badge-private {
-  color: var(--fgColor-attention, #9a6700);
-  background: var(--bgColor-attention-muted, #fff8c5);
-  border-color: transparent;
-}
-
-.badge-frozen {
-  color: var(--fgColor-attention, #9a6700);
-  background: var(--bgColor-attention-muted, #fff8c5);
-  border-color: transparent;
-}
-
-.badge-muted {
-  color: var(--fgColor-muted, #59636e);
-  background: var(--bgColor-muted, #f6f8fa);
 }
 
 /* ---------- shell ---------- */
@@ -135,6 +104,13 @@
   background: var(--bgColor-inset, #f6f8fa);
 }
 
+/* Placement only: the trail's row, separators, type scale and link
+   colour are @post/ui's Sidebar (T1101). */
+/* T1101 rework: back to HEAD's three declarations. The trail inside is the
+   shared `Sidebar` now, but a breadcrumb is still a line of text: 12px, the
+   page's own colour for the slug and the "/" with only the link muted, and
+   the link left underlined the way an unstyled `<a>` is. (The shared trail
+   sets no colour or size of its own for exactly this reason.) */
 .project-shell-breadcrumb {
   margin: 0 0 8px;
   font-size: 12px;
@@ -365,28 +341,14 @@
   background: var(--bgColor-danger-muted, #ffebe9);
 }
 
+/* T1101: the members table body is the shared `Table`. This block was the
+   second byte-identical copy of the pulls table below — `width`,
+   `border-collapse`, `font-size`, then th padding + muted colour +
+   border-bottom, then td padding + hairline, then the last-row rule — which
+   is why both are one component now. What stays is this page's own: where
+   the table sits, and what its columns hold. */
 .settings-members {
-  width: 100%;
   margin-top: 12px;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.settings-members th {
-  padding: 6px 12px;
-  text-align: left;
-  font-weight: 600;
-  color: var(--fgColor-muted, #59636e);
-  border-bottom: 1px solid var(--borderColor-default, #d0d7de);
-}
-
-.settings-members td {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
-}
-
-.settings-members tr:last-child td {
-  border-bottom: none;
 }
 
 .settings-member-identity {
@@ -566,17 +528,24 @@
   color: var(--fgColor-muted, #59636e);
 }
 
-.files-readonly-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 10px;
-  border-radius: 2em;
-  font-size: 12px;
-  color: var(--fgColor-success, #1a7f37);
-  background: var(--bgColor-success-muted, #dafbe1);
-}
+/* T1101: `.files-readonly-badge` is `StateLabel shape="readonly"
+   tone="success"`, `.files-kind-badge` (further down) is
+   `StateLabel shape="kind" tone="neutral"`, and `.files-crumb*` is the
+   shared `Sidebar`'s trail. `.files-ref` above is left alone: it names the
+   branch being browsed, a page-level fact rather than a state word.
 
+   The two shapes keep HEAD's own geometry (2px 10px with no border, and
+   11px/400 with a hairline) rather than one shared pill: the shapes were
+   never the same, and AC3 asks the replacement to render like what it
+   replaced. */
+
+/* T1101 rework: restored verbatim from HEAD. `.files-layout` is the three-column
+   page grid (tree | content | side) that files/page.tsx:257 still renders, and
+   `.files-tree` (:258) is the pane frame around the tree. The 900px query folds
+   the three columns into one. These are layout, not styling — the shared
+   components do not draw them, so pruning them left the page stacked at every
+   width. `tests/web-smoke/class-liveness.mjs` now fails if a class a component
+   asks for loses its rule again. */
 .files-layout {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr) 280px;
@@ -598,6 +567,13 @@
   overflow: hidden;
 }
 
+/* The bar above the tree. The trail inside it is the shared `Sidebar`:
+   its row, wrap, gap, separators, hit target and accent colour come from
+   packages/ui, so what is left here is the bar. */
+/* T1101 rework: back to HEAD's box. The row of crumbs inside is the shared
+   `Sidebar` with `trail="row"`, which owns the flex row, the 2px gaps and
+   the chip (`post-sidebar-action`); the box around it — padding, hairline,
+   muted background — is this page's and did not change. */
 .files-breadcrumb {
   display: flex;
   flex-wrap: wrap;
@@ -606,36 +582,6 @@
   padding: 8px 10px;
   border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
   background: var(--bgColor-muted, #f6f8fa);
-}
-
-.files-crumb {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fgColor-accent, #0969da);
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.files-crumb:hover,
-.files-crumb:focus-visible {
-  background: var(--bgColor-accent-muted, #ddf4ff);
-}
-
-.files-crumb[aria-current="page"] {
-  color: var(--fgColor-default, #1f2328);
-  font-weight: 600;
-  cursor: default;
-}
-
-.files-crumb-sep {
-  color: var(--fgColor-muted, #59636e);
-  font-size: 12px;
 }
 
 .files-entry-list {
@@ -729,14 +675,6 @@
 .files-preview-size {
   margin-left: auto;
   font-size: 12px;
-  color: var(--fgColor-muted, #59636e);
-}
-
-.files-kind-badge {
-  padding: 1px 8px;
-  border-radius: 2em;
-  border: 1px solid var(--borderColor-default, #d0d7de);
-  font-size: 11px;
   color: var(--fgColor-muted, #59636e);
 }
 
@@ -997,28 +935,10 @@
   color: var(--fgColor-muted, #59636e);
 }
 
+/* T1101: the pulls list is the shared `Table` — this was the twin of the
+   settings members block above. */
 .pulls-table {
-  width: 100%;
   margin-top: 12px;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.pulls-table th {
-  padding: 6px 12px;
-  text-align: left;
-  font-weight: 600;
-  color: var(--fgColor-muted, #59636e);
-  border-bottom: 1px solid var(--borderColor-default, #d0d7de);
-}
-
-.pulls-table td {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
-}
-
-.pulls-table tr:last-child td {
-  border-bottom: none;
 }
 
 .pulls-number {
@@ -1640,7 +1560,7 @@
 
 .milestone-kind {
   border: 1px solid var(--borderColor-default, #d0d7de);
-  border-radius: 9999px;
+  border-radius: 999px;
   padding: 1px 8px;
   font-size: 11px;
   color: var(--fgColor-muted, #59636e);
@@ -1788,6 +1708,11 @@
   color: var(--fgColor-muted, #59636e);
 }
 
+/* Placement only: the trail's shape and its accent link colour are the
+   shared `Sidebar`'s with tone="accent" (T1101). */
+/* T1101 rework: HEAD's declarations, restored. 12px muted line, accent link
+   with no underline until hover — the shared trail inherits both rather
+   than deciding them. */
 .release-detail-breadcrumb {
   margin: 0 0 8px;
   font-size: 12px;

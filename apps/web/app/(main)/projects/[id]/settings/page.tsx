@@ -13,6 +13,7 @@ import {
   type ProjectMember,
   type ProjectRole,
 } from "../../../../../lib/projects";
+import { Table } from "@post/ui";
 import { useProjectShell } from "../shell-context";
 
 /**
@@ -192,51 +193,63 @@ export default function SettingsPage() {
         ) : members === null ? (
           <Spinner aria-label="Loading members" />
         ) : (
-          <table className="settings-members">
-            <thead>
-              <tr>
-                <th>Member</th>
-                <th>Role</th>
-                <th>Joined</th>
-              </tr>
-            </thead>
-            <tbody>
-              {members.map((m) => {
-                const isSelf = userId !== null && m.user_id === userId;
-                const ownerLocked = role === "maintainer" && m.role === "owner";
-                return (
-                  <tr key={m.user_id} data-member-row={m.user_id}>
-                    <td className="settings-member-identity">
-                      <span className="settings-member-name">{m.display_name || m.handle}</span>
-                      <span className="settings-member-handle">@{m.handle}</span>
-                    </td>
-                    <td className="settings-member-role">
-                      {isSelf || ownerLocked ? (
-                        <span className="settings-role-static" data-role-static={m.role}>
-                          {m.role}
-                          {isSelf ? <span className="settings-role-note"> (you)</span> : null}
-                        </span>
-                      ) : (
-                        <select
-                          className="settings-role-select"
-                          data-role-select
-                          aria-label={`Role for ${m.display_name || m.handle}`}
-                          value={m.role}
-                          disabled={busyMember === m.user_id}
-                          onChange={(e) => changeRole(m, e.target.value as ProjectRole)}
-                        >
-                          {roleOptions.map((r) => (
-                            <option key={r} value={r}>{r}</option>
-                          ))}
-                        </select>
-                      )}
-                    </td>
-                    <td className="settings-member-joined">{m.joined_at.slice(0, 10)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          /* T1101: the members list was the second byte-identical copy of
+             the pulls-table stylesheet; both are the shared Table now, and
+             this page keeps only what is its own — which columns, and the
+             role control inside one of them. */
+          <Table
+            className="settings-members"
+            columns={[
+              {
+                key: "member",
+                header: "Member",
+                render: (m) => (
+                  <>
+                    <span className="settings-member-name">{m.display_name || m.handle}</span>
+                    <span className="settings-member-handle">@{m.handle}</span>
+                  </>
+                ),
+                cellAttrs: () => ({ className: "settings-member-identity" }),
+              },
+              {
+                key: "role",
+                header: "Role",
+                render: (m) => {
+                  const isSelf = userId !== null && m.user_id === userId;
+                  const ownerLocked = role === "maintainer" && m.role === "owner";
+                  return isSelf || ownerLocked ? (
+                    <span className="settings-role-static" data-role-static={m.role}>
+                      {m.role}
+                      {isSelf ? <span className="settings-role-note"> (you)</span> : null}
+                    </span>
+                  ) : (
+                    <select
+                      className="settings-role-select"
+                      data-role-select
+                      aria-label={`Role for ${m.display_name || m.handle}`}
+                      value={m.role}
+                      disabled={busyMember === m.user_id}
+                      onChange={(e) => changeRole(m, e.target.value as ProjectRole)}
+                    >
+                      {roleOptions.map((r) => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  );
+                },
+                cellAttrs: () => ({ className: "settings-member-role" }),
+              },
+              {
+                key: "joined",
+                header: "Joined",
+                render: (m) => m.joined_at.slice(0, 10),
+                cellAttrs: () => ({ className: "settings-member-joined" }),
+              },
+            ]}
+            rows={members}
+            rowKey={(m) => m.user_id}
+            rowAttrs={(m) => ({ "data-member-row": m.user_id })}
+          />
         )}
       </section>
 

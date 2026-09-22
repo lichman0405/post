@@ -41,6 +41,8 @@ import {
   type Review,
   type ReviewInput,
 } from "../../../../../../lib/pulls";
+import { Diff } from "@post/ui";
+import type { Tone } from "@post/ui";
 import { useProjectShell } from "../../shell-context";
 import "./pull-detail.css";
 
@@ -697,6 +699,24 @@ function ChangesPanel({
   );
 }
 
+/**
+ * The colour family of a change kind (T1101): a creation is good news, an
+ * abort is a removal, and an update or a reopen is neither — it is a
+ * change, and the row says so in words. This mapping used to be four
+ * `.pull-change-*` rules in pull-detail.css; the chip is now the shared
+ * Diff's, painted from the tone.
+ */
+function changeKindTone(kind: string): Tone {
+  switch (kind) {
+    case "created":
+      return "success";
+    case "aborted":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
 function ObjectList({
   changes,
   emptyText,
@@ -710,44 +730,35 @@ function ObjectList({
     return <p className="pull-empty">{emptyText}</p>;
   }
   return (
-    <ul className="pull-changes">
-      {changes.map((change) => (
-        <li
-          key={change.object_id}
-          className="pull-change"
-          {...{ [attr]: change.object_id }}
-          data-change-kind={change.kind}
-          data-object-type={change.object_type}
-          data-target-moved={change.target_moved}
-        >
-          <div className="pull-change-head">
-            <span className={`pull-change-kind pull-change-${change.kind}`}>
-              {changeKindLabel(change.kind)}
-            </span>
-            <span className="pull-change-type">{change.object_type}</span>
-            <span className="pull-change-title">
-              {change.source_version.title || change.object_id}
-            </span>
-            {change.target_moved ? (
-              <span className="pull-change-moved" data-change-moved>
-                target branch moved this too
-              </span>
-            ) : null}
-          </div>
-          <div className="pull-change-meta">
+    <Diff
+      entries={changes.map((change) => ({
+        key: change.object_id,
+        kind: changeKindLabel(change.kind),
+        tone: changeKindTone(change.kind),
+        type: change.object_type,
+        title: change.source_version.title || change.object_id,
+        note: change.target_moved ? "target branch moved this too" : undefined,
+        noteAttrs: change.target_moved ? { "data-change-moved": true } : undefined,
+        meta: (
+          <>
             <span className="pull-change-id">{change.object_id}</span>
             <span className="pull-change-lifecycle">
               {change.source_version.lifecycle_state}
             </span>
-            <span className="pull-change-fields" data-change-fields>
-              {change.changed_fields.length === 0
-                ? "new object"
-                : `changed: ${change.changed_fields.join(", ")}`}
-            </span>
-          </div>
-        </li>
-      ))}
-    </ul>
+          </>
+        ),
+        fields:
+          change.changed_fields.length === 0
+            ? "new object"
+            : `changed: ${change.changed_fields.join(", ")}`,
+        attrs: {
+          [attr]: change.object_id,
+          "data-change-kind": change.kind,
+          "data-object-type": change.object_type,
+          "data-target-moved": change.target_moved,
+        },
+      }))}
+    />
   );
 }
 
@@ -764,42 +775,33 @@ function RelationList({
     return <p className="pull-empty">{emptyText}</p>;
   }
   return (
-    <ul className="pull-changes">
-      {changes.map((change) => (
-        <li
-          key={change.relation_id}
-          className="pull-change"
-          {...{ [attr]: change.relation_id }}
-          data-change-kind={change.kind}
-          data-relation-type={relationTypeOf(change)}
-          data-target-moved={change.target_moved}
-        >
-          <div className="pull-change-head">
-            <span className={`pull-change-kind pull-change-${change.kind}`}>
-              {changeKindLabel(change.kind)}
-            </span>
-            <span className="pull-change-type">{relationTypeOf(change)}</span>
-            <span className="pull-change-title">
-              {change.source_version.source_object_version_id.slice(0, 8)} →{" "}
-              {change.source_version.target_object_version_id.slice(0, 8)}
-            </span>
-            {change.target_moved ? (
-              <span className="pull-change-moved" data-change-moved>
-                target branch moved this too
-              </span>
-            ) : null}
-          </div>
-          <div className="pull-change-meta">
-            <span className="pull-change-id">{change.relation_id}</span>
-            <span className="pull-change-fields" data-change-fields>
-              {change.changed_fields.length === 0
-                ? "new relation"
-                : `changed: ${change.changed_fields.join(", ")}`}
-            </span>
-          </div>
-        </li>
-      ))}
-    </ul>
+    <Diff
+      entries={changes.map((change) => ({
+        key: change.relation_id,
+        kind: changeKindLabel(change.kind),
+        tone: changeKindTone(change.kind),
+        type: relationTypeOf(change),
+        title: (
+          <>
+            {change.source_version.source_object_version_id.slice(0, 8)} →{" "}
+            {change.source_version.target_object_version_id.slice(0, 8)}
+          </>
+        ),
+        note: change.target_moved ? "target branch moved this too" : undefined,
+        noteAttrs: change.target_moved ? { "data-change-moved": true } : undefined,
+        meta: <span className="pull-change-id">{change.relation_id}</span>,
+        fields:
+          change.changed_fields.length === 0
+            ? "new relation"
+            : `changed: ${change.changed_fields.join(", ")}`,
+        attrs: {
+          [attr]: change.relation_id,
+          "data-change-kind": change.kind,
+          "data-relation-type": relationTypeOf(change),
+          "data-target-moved": change.target_moved,
+        },
+      }))}
+    />
   );
 }
 

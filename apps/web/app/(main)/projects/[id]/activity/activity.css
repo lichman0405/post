@@ -121,112 +121,15 @@
   background: var(--bgColor-muted, #f6f8fa);
 }
 
-/* The timeline itself: one hairline per row, newest first. */
-.activity-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
+/* T1101: the stream itself is the shared `Timeline` (packages/ui) — the
+   `<ol>`, the row, the marker square and its family colouring, the head
+   line, the registry/visibility pills, the right-aligned `<time>`, the
+   meta line and the `<dl>` of facts all moved there. Two stylesheets had
+   grown the same shape (this one and pull-detail.css's review history).
 
-.activity-row {
-  display: flex;
-  gap: 10px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
-}
-
-.activity-row:last-child {
-  border-bottom: none;
-}
-
-.activity-row-marker {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
-  margin-top: 2px;
-  color: var(--fgColor-muted, #59636e);
-  background: var(--bgColor-muted, #f6f8fa);
-  border: 1px solid var(--borderColor-muted, #d8dee4);
-  border-radius: 6px;
-}
-
-/* The families with rendering of their own get their colour from the
-   platform's meaning, not from decoration: a retraction is a danger
-   (docs/46), a reopening restores a state, a release fixes one. */
-.activity-row-abort .activity-row-marker {
-  color: var(--fgColor-danger, #d1242f);
-  background: var(--bgColor-danger-muted, #ffebe9);
-  border-color: var(--borderColor-danger-muted, #ff818266);
-}
-
-.activity-row-reopen .activity-row-marker {
-  color: var(--fgColor-open, #1a7f37);
-  background: var(--bgColor-open-muted, #dafbe1);
-  border-color: var(--borderColor-open-muted, #4ac26b66);
-}
-
-.activity-row-release .activity-row-marker {
-  color: var(--fgColor-accent, #0969da);
-  background: var(--bgColor-accent-muted, #ddf4ff);
-  border-color: var(--borderColor-accent-muted, #54aeff66);
-}
-
-.activity-row-body {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.activity-row-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 8px;
-}
-
-.activity-row-title {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-/* Which registry the row came from — always rendered, never inferred by
-   the reader from the row's shape. */
-.activity-row-source,
-.activity-row-visibility {
-  padding: 0 6px;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 18px;
-  color: var(--fgColor-muted, #59636e);
-  background: var(--bgColor-muted, #f6f8fa);
-  border: 1px solid var(--borderColor-muted, #d8dee4);
-  border-radius: 999px;
-}
-
-.activity-row-source[data-activity-source="research"] {
-  color: var(--fgColor-accent, #0969da);
-  background: var(--bgColor-accent-muted, #ddf4ff);
-  border-color: var(--borderColor-accent-muted, #54aeff66);
-}
-
-.activity-row-time {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--fgColor-muted, #59636e);
-  font-variant-numeric: tabular-nums;
-}
-
-.activity-row-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--fgColor-muted, #59636e);
-}
+   What stays is this page's own vocabulary, which it fills the slots
+   with: the actor link that may have no actor, the target link, and the
+   correlation id. */
 
 .activity-actor {
   color: var(--fgColor-accent, #0969da);
@@ -263,34 +166,6 @@
 
 /* The facts a family records: a definition list, because each line labels a
    value the row itself carries. */
-.activity-details {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  margin: 6px 0 0;
-  font-size: 12px;
-}
-
-.activity-detail {
-  display: flex;
-  gap: 6px;
-  min-width: 0;
-}
-
-.activity-detail dt {
-  color: var(--fgColor-muted, #59636e);
-}
-
-.activity-detail dt::after {
-  content: ":";
-}
-
-.activity-detail dd {
-  margin: 0;
-  color: var(--fgColor-default, #1f2328);
-  overflow-wrap: anywhere;
-}
-
 .activity-more {
   display: flex;
   justify-content: center;

@@ -32,6 +32,8 @@ import {
   type AuditEntry,
 } from "../../../../../lib/activity";
 import { eventTypeDisplayName } from "../../../../../lib/inbox";
+import { StateLabel, Timeline } from "@post/ui";
+import type { TimelineEntry, Tone } from "@post/ui";
 import { useProjectShell } from "../shell-context";
 import "./activity.css";
 
@@ -302,11 +304,10 @@ function ActivityPageInner() {
         ) : null}
 
         {entries !== null && entries.length > 0 ? (
-          <ol className="activity-list" data-activity-list>
-            {entries.map((entry) => (
-              <ActivityRow key={entry.id} projectId={project.id} entry={entry} />
-            ))}
-          </ol>
+          <Timeline
+            data-activity-list
+            entries={entries.map((entry) => activityEntry(project.id, entry))}
+          />
         ) : null}
 
         {shown.kind === "loaded" && shown.nextCursor !== null ? (
@@ -342,95 +343,107 @@ function familyIcon(entry: AuditEntry) {
   }
 }
 
+/** The marker colour family of a row: what kind of event this was
+ *  (docs/46). The shared Timeline paints the marker from this, instead of
+ *  each page spelling `.activity-row-<family> .activity-row-marker`. */
+function familyTone(entry: AuditEntry): Tone {
+  switch (activityFamily(entry)) {
+    case "abort":
+      return "danger";
+    case "reopen":
+      return "success";
+    case "release":
+      return "accent";
+    default:
+      return "neutral";
+  }
+}
+
 /**
- * One timeline row. Everything it renders comes from one entry through the
- * helpers in lib/activity.ts (unit-tested), so the page holds no rendering
- * rule of its own — and no row is rendered from a field its registry does
- * not have.
+ * One timeline row, as a shared `Timeline` entry. Everything it renders
+ * comes from one entry through the helpers in lib/activity.ts
+ * (unit-tested), so the page holds no rendering rule of its own — and no
+ * row is rendered from a field its registry does not have.
+ *
+ * The row is built here rather than in JSX because `Timeline` owns the
+ * shape (marker, head, time, meta, facts) and the page owns the content,
+ * including every `data-activity-*` marker the activity e2e selects on.
  */
-function ActivityRow({ projectId, entry }: { projectId: string; entry: AuditEntry }) {
+function activityEntry(projectId: string, entry: AuditEntry): TimelineEntry {
   const actorHref = activityActorHref(entry);
   const target = activityTarget(projectId, entry);
   const details = activityDetail(entry);
   const visibility = activityVisibility(entry);
   const family = activityFamily(entry);
 
-  return (
-    <li
-      className={`activity-row activity-row-${family}`}
-      data-activity-row={entry.id}
-      data-activity-row-source={entry.source}
-      data-activity-row-family={family}
-    >
-      <div className="activity-row-marker" aria-hidden="true">
-        {familyIcon(entry)}
-      </div>
-      <div className="activity-row-body">
-        <div className="activity-row-head">
-          <span className="activity-row-title" data-activity-title>
-            {activityTitle(entry, eventTypeDisplayName)}
+  return {
+    key: entry.id,
+    marker: familyIcon(entry),
+    tone: familyTone(entry),
+    title: <span data-activity-title>{activityTitle(entry, eventTypeDisplayName)}</span>,
+    labels: (
+      <>
+        <StateLabel
+          shape="meta"
+          tone={entry.source === "research" ? "accent" : "neutral"}
+          data-activity-source={entry.source}
+        >
+          {activityFilterLabel(entry.source)}
+        </StateLabel>
+        {visibility !== null ? (
+          <StateLabel shape="meta" tone="neutral" data-activity-visibility={visibility}>
+            {visibility}
+          </StateLabel>
+        ) : null}
+      </>
+    ),
+    time: {
+      dateTime: entry.occurred_at,
+      text: activityTimestamp(entry.occurred_at),
+      title: entry.occurred_at,
+    },
+    meta: (
+      <>
+        {actorHref !== null ? (
+          <Link className="activity-actor" href={actorHref} data-activity-actor={entry.actor_id}>
+            {activityActorName(entry)}
+          </Link>
+        ) : (
+          <span className="activity-actor activity-actor-unknown" data-activity-actor="">
+            {activityActorName(entry)}
           </span>
-          <span className="activity-row-source" data-activity-source={entry.source}>
-            {activityFilterLabel(entry.source)}
-          </span>
-          {visibility !== null ? (
-            <span className="activity-row-visibility" data-activity-visibility={visibility}>
-              {visibility}
-            </span>
-          ) : null}
-          <time
-            className="activity-row-time"
-            data-activity-time
-            dateTime={entry.occurred_at}
-            title={entry.occurred_at}
-          >
-            {activityTimestamp(entry.occurred_at)}
-          </time>
-        </div>
-
-        <div className="activity-row-meta">
-          {actorHref !== null ? (
-            <Link className="activity-actor" href={actorHref} data-activity-actor={entry.actor_id}>
-              {activityActorName(entry)}
+        )}
+        <span className="activity-via" data-activity-via={entry.via}>
+          {viaLabel(entry.via)}
+        </span>
+        {target !== null ? (
+          target.href !== null ? (
+            <Link className="activity-target" href={target.href} data-activity-target={entry.target_ref}>
+              {target.label}
             </Link>
           ) : (
-            <span className="activity-actor activity-actor-unknown" data-activity-actor="">
-              {activityActorName(entry)}
+            // No page shows this target (an object, an organization, the
+            // project itself): the ref renders as text. A link to a route
+            // that does not exist would be a promise the app cannot keep.
+            <span className="activity-target" data-activity-target={entry.target_ref}>
+              {target.label}
             </span>
-          )}
-          <span className="activity-via" data-activity-via={entry.via}>
-            {viaLabel(entry.via)}
-          </span>
-          {target !== null ? (
-            target.href !== null ? (
-              <Link className="activity-target" href={target.href} data-activity-target={entry.target_ref}>
-                {target.label}
-              </Link>
-            ) : (
-              // No page shows this target (an object, an organization, the
-              // project itself): the ref renders as text. A link to a route
-              // that does not exist would be a promise the app cannot keep.
-              <span className="activity-target" data-activity-target={entry.target_ref}>
-                {target.label}
-              </span>
-            )
-          ) : null}
-          <span className="activity-correlation" data-activity-correlation title="Correlation id">
-            {entry.correlation_id}
-          </span>
-        </div>
-
-        {details.length > 0 ? (
-          <dl className="activity-details">
-            {details.map((detail) => (
-              <div className="activity-detail" key={detail.label} data-activity-detail={detail.label}>
-                <dt>{detail.label}</dt>
-                <dd>{detail.value}</dd>
-              </div>
-            ))}
-          </dl>
+          )
         ) : null}
-      </div>
-    </li>
-  );
+        <span className="activity-correlation" data-activity-correlation title="Correlation id">
+          {entry.correlation_id}
+        </span>
+      </>
+    ),
+    details: details.map((detail) => ({
+      label: detail.label,
+      value: detail.value,
+      attrs: { "data-activity-detail": detail.label },
+    })),
+    attrs: {
+      "data-activity-row": entry.id,
+      "data-activity-row-source": entry.source,
+      "data-activity-row-family": family,
+    },
+  };
 }

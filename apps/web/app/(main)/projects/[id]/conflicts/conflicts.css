@@ -134,33 +134,12 @@
   color: var(--fgColor-muted, #59636e);
 }
 
-.conflicts-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  font-size: 12px;
-  font-weight: 600;
-  border-radius: 999px;
-}
-
-.conflicts-badge-warn {
-  background: var(--bgColor-attention-muted, #fff8c5);
-  border: 1px solid var(--borderColor-attention-muted, #d4a72c);
-  color: var(--fgColor-attention, #9a6700);
-}
-
-.conflicts-badge-ok {
-  background: var(--bgColor-success-muted, #dafbe1);
-  border: 1px solid var(--borderColor-success-muted, #aceebb);
-  color: var(--fgColor-success, #1a7f37);
-}
-
-.conflicts-badge-done {
-  background: var(--bgColor-success-muted, #dafbe1);
-  border: 1px solid var(--borderColor-success-muted, #aceebb);
-  color: var(--fgColor-success, #1a7f37);
-}
+/* T1101: `.conflicts-badge`, `-warn`, `-ok` and `-done` were the same
+   12px pill four times over, one page away from projects.css's `.badge*`
+   and assets.css's chips. They are `StateLabel shape="chip"` now, and the
+   advisory badge on the explanation line is `StateLabel shape="advisory"`
+   — see packages/ui/src/StateLabel.tsx for the tone-to-meaning mapping,
+   which is what the words rather than the classes say. */
 
 .conflicts-empty {
   margin: 0;
@@ -233,16 +212,6 @@
   color: var(--fgColor-muted, #59636e);
 }
 
-.conflicts-advisory-badge {
-  margin-left: 8px;
-  padding: 1px 8px;
-  font-size: 12px;
-  font-weight: 600;
-  border: 1px solid var(--borderColor-attention-muted, #d4a72c);
-  border-radius: 999px;
-  color: var(--fgColor-attention, #9a6700);
-}
-
 .conflicts-detail {
   margin: 0 0 4px;
   font-size: 13px;
@@ -259,27 +228,10 @@
   border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
 }
 
-.conflicts-threeway-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.conflicts-threeway-table th,
-.conflicts-threeway-table td {
-  padding: 6px 8px;
-  border: 1px solid var(--borderColor-muted, #d8dee4);
-  text-align: left;
-  vertical-align: top;
-}
-
-.conflicts-threeway-table thead th {
-  background: var(--bgColor-muted, #f6f8fa);
-  font-weight: 600;
-  color: var(--fgColor-muted, #59636e);
-}
-
-.conflicts-threeway-table pre {
+/* T1101: the table body is the shared `Table` with `borders="grid"`. What
+   stays is the `<pre>` inside its cells — a page-level detail of how a
+   field value is quoted, not something the shared grid should know. */
+.conflicts-threeway pre {
   margin: 0;
   max-height: 160px;
   overflow: auto;
@@ -304,56 +256,25 @@
   font-weight: 600;
 }
 
-.conflicts-evidence-columns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
+/* T1101 rework: restored verbatim from HEAD. The evidence type word sits
+   inside an entry's title (`conflicts/page.tsx` `evidenceSide`), so without
+   this rule it is drawn at the title's size and weight instead of as the
+   quiet 11px annotation it is.
 
-.conflicts-evidence-side {
-  margin: 0 0 4px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--fgColor-muted, #59636e);
-}
-
-.conflicts-evidence-empty {
-  margin: 0;
-  font-size: 12px;
-  color: var(--fgColor-muted, #59636e);
-}
-
-.conflicts-evidence-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.conflicts-evidence-item {
-  padding: 6px 8px;
-  border: 1px solid var(--borderColor-muted, #d8dee4);
-  border-radius: 6px;
-  background: var(--bgColor-default, #ffffff);
-}
-
-.conflicts-evidence-item-title {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 600;
-}
-
+   Two sibling tokens went the other way and are NOT restored, because this
+   task replaced what they painted rather than merely deleting the rules:
+   HEAD's `.conflicts-threeway-table` (its own border-collapse grid, HEAD's
+   page.tsx:517) is the shared `Table` with `borders="grid"`, and HEAD's
+   `.conflicts-evidence-columns` (`display: grid; grid-template-columns:
+   1fr 1fr; gap: 16px`, HEAD's page.tsx:555) is `Diff`, whose `post-diff-sides`
+   owns that layout — HEAD's `gap: 16px` would have fought its `gap: 12px`
+   on equal specificity, so restoring it would be two rules arguing over one
+   box. Both classNames were removed from the JSX in the same edit; leaving
+   them would have been a className no stylesheet answers, which is the
+   defect `tests/web-smoke/class-liveness.mjs` reports. */
 .conflicts-evidence-item-type {
   font-size: 11px;
   font-weight: 400;
-  color: var(--fgColor-muted, #59636e);
-}
-
-.conflicts-evidence-item-meta {
-  margin: 2px 0 0;
-  font-size: 12px;
   color: var(--fgColor-muted, #59636e);
 }
 

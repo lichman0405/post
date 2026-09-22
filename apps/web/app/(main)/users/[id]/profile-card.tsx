@@ -159,7 +159,7 @@ export function ProfileCard({
       <div className="profile-header">
         <PersonIcon size={24} aria-hidden />
         <div className="profile-header-body">
-          <Heading as="h1" style={{ fontSize: 20, margin: 0 }}>
+          <Heading as="h1" className="profile-name">
             {profile.display_name || profile.handle}
           </Heading>
           <Text className="profile-handle">@{profile.handle}</Text>
@@ -173,7 +173,7 @@ export function ProfileCard({
       </p>
 
       {saved && (
-        <Flash variant="success" style={{ marginTop: 12 }}>
+        <Flash variant="success" className="profile-flash">
           Profile updated.
         </Flash>
       )}
@@ -182,7 +182,7 @@ export function ProfileCard({
         <Button
           variant="default"
           size="small"
-          style={{ marginTop: 12 }}
+          className="profile-edit"
           onClick={() => {
             setFormError(null);
             setSaved(false);
@@ -190,7 +190,7 @@ export function ProfileCard({
           }}
         >
           <PencilIcon size={14} aria-hidden />
-          <span style={{ marginLeft: 6 }}>Edit profile</span>
+          <span className="profile-edit-label">Edit profile</span>
         </Button>
       )}
 
