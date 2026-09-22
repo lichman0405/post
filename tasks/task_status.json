@@ -11026,13 +11026,24 @@
       ]
     },
     "T1207": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-22T02:35:18Z",
+      "worker_run_id": "run-135b7f2bdd0cb50a",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-22T02:35:16Z",
+          "run_id": "run-cd9bd7dc3d22645f"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-22T02:35:18Z",
+          "run_id": "run-135b7f2bdd0cb50a",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T1208": {
       "status": "merged",
