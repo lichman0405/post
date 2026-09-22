@@ -164,7 +164,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: "python: toolchain (uv, ruff, mypy)"
-        run: pip install uv ruff mypy
+        run: pip install uv==0.12.13 ruff mypy
       - name: "python: sync adapter env"
         run: cd services/scientific-adapter && uv sync --frozen
       - name: "python: lint (ruff)"
@@ -251,7 +251,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: "observability: adapter env (the trace phase starts the scientific adapter)"
-        run: pip install uv && cd services/scientific-adapter && uv sync --frozen
+        run: pip install uv==0.12.13 && cd services/scientific-adapter && uv sync --frozen
       - name: "observability: pull the pinned pgvector image (the harness requires it locally and substitutes nothing)"
         run: docker pull pgvector/pgvector:0.8.6-pg16
       - name: "observability: metrics + alerts + distributed-trace suite (make observability-smoke)"
@@ -408,7 +408,7 @@ jobs:
       - name: "security-master: pnpm (corepack) — the SAST-Node and SBOM-Node rows run it, at the pin package.json declares"
         run: corepack enable pnpm
       - name: "security-master: uv — the bandit install and the SBOM-Python row run it"
-        run: pip install uv
+        run: pip install uv==0.12.13
       # The two below are what this job's own first run found missing. The gate
       # runs every row it can and prints, per row, only the last 25 lines of
       # that row's log — so a row whose *script* shells out to a tool the

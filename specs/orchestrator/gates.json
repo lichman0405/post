@@ -157,7 +157,7 @@
     "python": {
       "steps": [
         {
-          "run": "pip install uv ruff mypy"
+          "run": "pip install uv==0.12.13 ruff mypy"
         },
         {
           "run": "cd services/scientific-adapter && uv sync --frozen"
@@ -312,7 +312,7 @@
           "run": "corepack enable pnpm && pnpm install --frozen-lockfile"
         },
         {
-          "run": "pip install uv && cd services/scientific-adapter && uv sync --frozen"
+          "run": "pip install uv==0.12.13 && cd services/scientific-adapter && uv sync --frozen"
         },
         {
           "run": "docker pull pgvector/pgvector:0.8.6-pg16"
@@ -364,7 +364,7 @@
         },
         {
           "name": "security-master: uv \u2014 the bandit install and the SBOM-Python row run it",
-          "run": "pip install uv"
+          "run": "pip install uv==0.12.13"
         },
         {
           "name": "security-master: redis-cli \u2014 the owasp-smoke row resets and reads back its own edge counters through it before measuring the rate-limit boundary (installed only when the runner does not already ship it)",
