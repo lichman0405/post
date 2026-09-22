@@ -11638,13 +11638,68 @@
       ]
     },
     "T1209": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
+      "status": "verification",
+      "started_at": "2026-09-22T20:52:22Z",
       "notes": "新立账（2026-09-23，T1207 合并之后）：docs/23:45 的 SAST 与 docs/25 第 10 条 / docs/40:3 的 SBOM 今天缺席；容器扫描是无守卫的缺席。任务书见 tasks/packages/T1209.json，G3 覆盖同笔补进 gates.json（security-master）。",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "worker_run_id": "run-aa97d8117c7f4951",
+      "rejection_reason": "# T1209 返工通知（第 2 轮）——你的交付把两个**既有**仪器弄坏了，都在你的 scope 里\n\n你这轮的产品工作我**已经自己复跑并逐条验过**，结论：八条新行是真的、能红能绿、证据行是真的判据。\n下面两件事**不是**让你重做那些，是补两处你改动时没跟上的**老文件**。\n\n## 一、`tests/security/master-gate-mutation-check.sh`（T1206 的仪器，你一个字没动）——变异 5 现在是**死的**\n\n我在隔离环境里把脚本第 301-313 行那段 python 原样跑了一遍：\n\n```\n$ python3 - /tmp/m5.json <<'PY'      # 与脚本 301-313 行逐字相同\n...\nAssertionError: the mutation did not remove an entry\npython 退出码=1\n$ python3 tests/security/check-absent-manifest.py --manifest /tmp/m5.json --repo .\nchecker 退出码=0\n```\n\n原因：变异 5 删的是 `absent[]` 里的 `sast` 条目，并断言 `len(before)-1`；v2 的缺席集**恰好只剩 `container-scan`**，\n没有 sast 可删 → assert 触发 → 而脚本**没有检查这段 python 的退出码**，于是它拿一份**没被变异的副本**去跑\nchecker，checker 当然 0，脚本走进 `manifest_rc -eq 0` 分支，报 `MUTATION 5 NOT CAUGHT`。\n\n后果有两层，两层都要修：\n1. `bash tests/security/master-gate-mutation-check.sh`（`tests/security/README.md:64` 教读者跑的那条）\n   现在会**假红**——红在一台坏掉的仪器上，不是红在被测的东西上；\n2. 更糟的是「删掉一条缺席，检查器必须拒绝」这个**属性已经没有仪器在测了**。\n\n**修法**（挑你认为忠实的一种，并在 RESULT 里说明挑了哪种）：\n- 把变异 5 改成变异**真实存在的那条缺席**（`container-scan`），并且按 v2 的两种腐烂形状各测一次：\n  (a) 从副本里**删掉** `container-scan` 条目 → 要求红且点名它；\n  (b) 把 `guard_check_id` 改指一个总门里**不存在**的 check id → 要求红且说明守卫没人跑。\n- 变异必须是**真变异**：「没删掉东西」这件事本身要让脚本失败，不能变成无声通过——所以那段 python 的退出码\n  必须被检查（`|| fail \"...\"`），这是这次事故的直接成因，别只改断言。\n- 改完**跑完整个脚本**（六条变异一起跑，PostgreSQL/Redis 我这边是活的），把它的 summary 原文贴进 RESULT。\n\n## 二、`tests/security/README.md`（同样你一个字没动）——现在说的是假话\n\n- **52-58 行**：「SAST, the container scan and the SBOM are capabilities nothing in this tree performs」——\n  SAST 与 SBOM 已经**不是**缺席了；\n- **71-73 行**：把变异脚本描述成「a manifest with its SAST entry deleted」——修完第一部分后这句也不对；\n- **23-36 行的表**：只有 9 行，你新加的八条（`sast-*`、`sbom-*`、`license-audit`、`container-scan`）一条都没有。\n\n**修法**：把表和这两段话改成 v2 的事实——八条新行进表（id / 它证明什么 / 需要什么，风格照旧）；\n「两类 not here」那一段改成**一条有守卫的缺席**（容器扫描）并说明守卫会自己变红；\n变异脚本那句改成你修好之后的形状。保持 README 本来的笔调，它是读者落地的第一份文件。\n\n## 三、硬性禁止\n\n- **不许动 `tasks/**`、`specs/**`、`.github/**`、产品代码（`cmd/**`、`internal/**`、`apps/**`、`services/**`）**。\n- **不许把任何测试的 status 写进 `tasks/`**（账本是我的）。\n- 你现在这 23 条路径里**其余部分必须字节不变**：八条新行、基线文件、清单、安装脚本、Makefile、.gitignore\n  一个字节都不许重写或「顺手改进」。\n- 不许为了让什么变绿而删/skip/弱化任何断言、放宽任何正则、放大任何超时。\n\n## 四、交付物\n\n- `.rddev/workers/T1209/RESULT.json` + 一条短信说明：改了哪两个文件、各改了什么、\n  变异脚本重跑后的 summary 原文、README 表现在几行。\n- 变更路径数应为 **25**（原 23 + 这两个文件）；`git status --porcelain -uall` 里不许出现这两个之外的**新**路径。\n- G1：`bash tests/security/master-gate-mutation-check.sh`（整支）与\n  `bash tests/security/master-security-gate.sh`（不带 `--allow-not-asked`）都要跑，退出码照实报。\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-22T20:13:01Z",
+          "run_id": "run-48976848fb31bc07"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-22T20:13:04Z",
+          "run_id": "run-9ee469e3da5cb0cb",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-22T20:42:13Z",
+          "run_id": "run-3a43f28e16147ea1",
+          "reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: 迁移号：需要迁移时用 00149 (not_applicable)"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T20:43:43Z",
+          "run_id": "run-f414bc36f680fa1f",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T20:45:29Z",
+          "run_id": "run-8895c0011748cc7c",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-22T20:52:18Z",
+          "run_id": "run-51894300ba722235",
+          "reason": "# T1209 返工通知（第 2 轮）——你的交付把两个**既有**仪器弄坏了，都在你的 scope 里\n\n你这轮的产品工作我**已经自己复跑并逐条验过**，结论：八条新行是真的、能红能绿、证据行是真的判据。\n下面两件事**不是**让你重做那些，是补两处你改动时没跟上的**老文件**。\n\n## 一、`tests/security/master-gate-mutation-check.sh`（T1206 的仪器，你一个字没动）——变异 5 现在是**死的**\n\n我在隔离环境里把脚本第 301-313 行那段 python 原样跑了一遍：\n\n```\n$ python3 - /tmp/m5.json <<'PY'      # 与脚本 301-313 行逐字相同\n...\nAssertionError: the mutation did not remove an entry\npython 退出码=1\n$ python3 tests/security/check-absent-manifest.py --manifest /tmp/m5.json --repo .\nchecker 退出码=0\n```\n\n原因：变异 5 删的是 `absent[]` 里的 `sast` 条目，并断言 `len(before)-1`；v2 的缺席集**恰好只剩 `container-scan`**，\n没有 sast 可删 → assert 触发 → 而脚本**没有检查这段 python 的退出码**，于是它拿一份**没被变异的副本**去跑\nchecker，checker 当然 0，脚本走进 `manifest_rc -eq 0` 分支，报 `MUTATION 5 NOT CAUGHT`。\n\n后果有两层，两层都要修：\n1. `bash tests/security/master-gate-mutation-check.sh`（`tests/security/README.md:64` 教读者跑的那条）\n   现在会**假红**——红在一台坏掉的仪器上，不是红在被测的东西上；\n2. 更糟的是「删掉一条缺席，检查器必须拒绝」这个**属性已经没有仪器在测了**。\n\n**修法**（挑你认为忠实的一种，并在 RESULT 里说明挑了哪种）：\n- 把变异 5 改成变异**真实存在的那条缺席**（`container-scan`），并且按 v2 的两种腐烂形状各测一次：\n  (a) 从副本里**删掉** `container-scan` 条目 → 要求红且点名它；\n  (b) 把 `guard_check_id` 改指一个总门里**不存在**的 check id → 要求红且说明守卫没人跑。\n- 变异必须是**真变异**：「没删掉东西」这件事本身要让脚本失败，不能变成无声通过——所以那段 python 的退出码\n  必须被检查（`|| fail \"...\"`），这是这次事故的直接成因，别只改断言。\n- 改完**跑完整个脚本**（六条变异一起跑，PostgreSQL/Redis 我这边是活的），把它的 summary 原文贴进 RESULT。\n\n## 二、`tests/security/README.md`（同样你一个字没动）——现在说的是假话\n\n- **52-58 行**：「SAST, the container scan and the SBOM are capabilities nothing in this tree performs」——\n  SAST 与 SBOM 已经**不是**缺席了；\n- **71-73 行**：把变异脚本描述成「a manifest with its SAST entry deleted」——修完第一部分后这句也不对；\n- **23-36 行的表**：只有 9 行，你新加的八条（`sast-*`、`sbom-*`、`license-audit`、`container-scan`）一条都没有。\n\n**修法**：把表和这两段话改成 v2 的事实——八条新行进表（id / 它证明什么 / 需要什么，风格照旧）；\n「两类 not here」那一段改成**一条有守卫的缺席**（容器扫描）并说明守卫会自己变红；\n变异脚本那句改成你修好之后的形状。保持 README 本来的笔调，它是读者落地的第一份文件。\n\n## 三、硬性禁止\n\n- **不许动 `tasks/**`、`specs/**`、`.github/**`、产品代码（`cmd/**`、`internal/**`、`apps/**`、`services/**`）**。\n- **不许把任何测试的 status 写进 `tasks/`**（账本是我的）。\n- 你现在这 23 条路径里**其余部分必须字节不变**：八条新行、基线文件、清单、安装脚本、Makefile、.gitignore\n  一个字节都不许重写或「顺手改进」。\n- 不许为了让什么变绿而删/skip/弱化任何断言、放宽任何正则、放大任何超时。\n\n## 四、交付物\n\n- `.rddev/workers/T1209/RESULT.json` + 一条短信说明：改了哪两个文件、各改了什么、\n  变异脚本重跑后的 summary 原文、README 表现在几行。\n- 变更路径数应为 **25**（原 23 + 这两个文件）；`git status --porcelain -uall` 里不许出现这两个之外的**新**路径。\n- G1：`bash tests/security/master-gate-mutation-check.sh`（整支）与\n  `bash tests/security/master-security-gate.sh`（不带 `--allow-not-asked`）都要跑，退出码照实报。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T20:52:22Z",
+          "run_id": "run-aa97d8117c7f4951",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T21:01:51Z",
+          "run_id": "run-5521413a29796199",
+          "reason": "collect: all checks passed"
+        }
+      ]
     }
   },
   "version": 2

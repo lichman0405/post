@@ -352,7 +352,28 @@
     "security-master": {
       "steps": [
         {
-          "run": "bash tests/security/master-security-gate.sh"
+          "name": "security-master: pnpm (corepack) \u2014 the SAST-Node and SBOM-Node rows run it, at the pin package.json declares",
+          "run": "corepack enable pnpm"
+        },
+        {
+          "name": "security-master: uv \u2014 the bandit install and the SBOM-Python row run it",
+          "run": "pip install uv"
+        },
+        {
+          "name": "security-master: govulncheck (the vuln-go row's instrument; pinned here because nothing else pins it)",
+          "run": "go install golang.org/x/vuln/cmd/govulncheck@v1.8.0"
+        },
+        {
+          "name": "security-master: install every pinned scanner (make security-tools)",
+          "run": "make security-tools"
+        },
+        {
+          "name": "security-master: the Master Security/Quality Gate (docs/23 \u00a711)",
+          "run": "bash tests/security/master-security-gate.sh",
+          "env": {
+            "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post",
+            "POST_G3_REDIS_ADDR": "127.0.0.1:6379"
+          }
         }
       ],
       "requires_tasks": [
