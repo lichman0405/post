@@ -3,8 +3,10 @@
 # scripts/ci.sh (keep the stage lists in sync).
 #
 # All jobs run on ubuntu-24.04 (docs/25, docs/64: CI runner aligned with
-# the canonical dev environment). Only migration-integration requires
-# infrastructure; everything else passes on a bare runner.
+# the canonical dev environment). Three of them need real infrastructure and
+# say why in their own comments — migration-integration and a11y each declare
+# a PostgreSQL service container, observability pulls the pinned pgvector
+# image. The rest pass on a bare runner.
 name: ci
 
 on:
