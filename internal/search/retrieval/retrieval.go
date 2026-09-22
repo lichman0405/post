@@ -9,7 +9,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/lichman0405/post/internal/observability"
 	"github.com/lichman0405/post/internal/search"
 	"github.com/lichman0405/post/internal/search/embedding"
 	"github.com/lichman0405/post/internal/search/planner"
@@ -348,9 +350,41 @@ func NewRetriever(store Store, emb embedding.Embedder, opts ...Option) (*Retriev
 	return r, nil
 }
 
+// The search-latency outcome vocabulary. "refused" is kept apart from
+// "error" on purpose: ErrNoScope means the CALLER was not allowed to search,
+// which is a permission outcome (docs/26 §3 "permission denied rates"), not
+// a search that could not run — and lumping the two would make an
+// access-control refusal look like the "search unavailable" P2 alert.
+const (
+	searchOutcomeOK      = "ok"
+	searchOutcomeRefused = "refused"
+	searchOutcomeError   = "error"
+)
+
+func searchOutcome(err error) string {
+	switch {
+	case err == nil:
+		return searchOutcomeOK
+	case errors.Is(err, ErrNoScope):
+		return searchOutcomeRefused
+	default:
+		return searchOutcomeError
+	}
+}
+
 // Retrieve runs one search: the three document signals, the fusion, and the
 // traversal from the fused seeds.
-func (r *Retriever) Retrieve(ctx context.Context, scope search.Scope, req Request) (Result, error) {
+func (r *Retriever) Retrieve(ctx context.Context, scope search.Scope, req Request) (res Result, retErr error) {
+	// The query-latency observation (docs/26 §3 "search latency"). It is
+	// taken over the WHOLE call — including the early refusals below —
+	// because the number an SLO is written against is what the caller waits
+	// for. Timing only the successes would let an outage make the histogram
+	// look fast.
+	start := time.Now()
+	defer func() {
+		observability.Default().ObserveSearchQuery(searchOutcome(retErr), time.Since(start).Seconds())
+	}()
+
 	if !scope.Authenticated() {
 		return Result{}, ErrNoScope
 	}
