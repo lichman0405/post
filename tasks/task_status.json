@@ -10949,10 +10949,10 @@
       ]
     },
     "T1206": {
-      "status": "worker_failed",
+      "status": "verification",
       "started_at": "2026-09-22T01:16:09Z",
       "worker_run_id": "run-ffa855119407c4c0",
-      "rejection_reason": "【返工 —— 验收时 `migration-integration`/`acceptance` 这条检查没过，请照下面报错改】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-8a34ff5cf4fa5117-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T1206/gate-run-run-8a34ff5cf4fa5117-g2.json and the step logs\n\n**这次不是「基线旧了」那么简单：验收时 `G2` 的 `migration-integration`/`acceptance` 真的红了**，\n报错行贴在下面。**它是一个真实缺陷，要你在代码里改掉，不是重跑一遍就会过去。**\n\n基线同时也推到了最新的 main（派生文件已按合并后的树重新生成），所以请先\n确认你看到的是新基线，再动手。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 自己去**复现下面那条报错**（命令就在上面，逐字跑一遍，别只看结论）。**改的是你的实现，不是断言**：测试是新的，它拦下的东西是真的。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n\n**这一次验收里，实际报错的行（供你定位）：**\n\n  * G2 的 `migration-integration` 红了\n      命令 `make test-integration` 退出码 2：\n        2026/09/22 09:14:06 ERROR api: webhook ingestion failed delivery_id=freeze-main-unfrozen-1 ref=refs/heads/main after=*** error=\"gitprovider: not found: fetch the p\n        2026/09/22 09:14:10 ERROR api: webhook ingestion failed delivery_id=freeze-research-frozen-1 ref=refs/heads/freeze-r1 after=*** error=\"gitprovider: not found: fetc\n        FAIL\tgithub.com/lichman0405/post/tests/integration\t170.149s\n        FAIL\n        make: *** [Makefile:211: test-integration] Error 1\n  * G2 的 `acceptance` 红了\n      命令 `bash scripts/tests/gitea-e2e-guard-unit-test.sh` 退出码 1：\n        Traceback (most recent call last):\n        FileNotFoundError: [Errno 2] No such file or directory: '/home/shibo/code/post/.***-real-services-e2e.sh'\n        FAIL the unexplained push failure is not reported as such:\n        FAIL the run did not report on the tree it graded\n        Traceback (most recent call last):\n        FileNotFoundError: [Errno 2] No such file or directory: '/home/shibo/code/post/.***-real-services-e2e.sh'\n        FAIL the scratch-repo failure is not named: bash: tests/acceptance/gitea-real-services-e2e.sh: No such file or directory\n        Traceback (most recent call last):\n",
+      "rejection_reason": "RESOLVED: G2 reds were harness artifacts from concurrent gate runs deleting the shared integration tree (issue #271). Per-run integration tree fix landed in PR #345; manual G2 t1206-manual-g2-g2 passed.",
       "history": [
         {
           "from": "todo",
@@ -10994,6 +10994,13 @@
           "at": "2026-09-22T01:25:55Z",
           "run_id": "run-ba0198a7dacfbf56",
           "reason": "worker exited 143"
+        },
+        {
+          "from": "worker_failed",
+          "to": "verification",
+          "at": "2026-09-22T01:46:44Z",
+          "run_id": "t1206-manual-g2",
+          "reason": "Supervisor stop: Worker process stuck after lost tool result; G2 reds traced to orchestrator integration-tree concurrency (issue #271). Manual G2 run t1206-manual-g2-g2 passed after fix; review verdict already approve. Ready for accept/merge."
         }
       ]
     },
