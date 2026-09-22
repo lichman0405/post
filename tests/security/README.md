@@ -70,7 +70,9 @@ unnoticed:
    witnesses the `absence-manifest` row *runs* — so the absence cannot outlive
    the fact. SAST and the SBOM used to be recorded here; both are gate rows now.
    Absence is recorded, never omitted, and whether what is left is an accepted
-   V1 risk is the Supervisor's written call (docs/23 §11).
+   V1 risk is the Supervisor's written call (docs/23 §11) — made, for this
+   capability, in `docs/adr/ADR-028-v1-ships-no-container-image.md`, which the
+   manifest cites as `risk_accepted_in` and witnesses by name.
 
 ## Proving the instruments can say no
 

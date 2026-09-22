@@ -25,9 +25,12 @@ run:
      this list. The dependency audit is likewise a gate row (govulncheck /
      pnpm audit / uv audit); if one of those rows is removed, the
      covered-item check goes red instead of the audit becoming an "absence";
-  5. every `absence_witness` command is RUN. It must still come back empty.
+  5. every `absence_witness` command is RUN, and its `expect` has to hold —
+     no output for a walk that must find nothing, or a match for something
+     that must still be there (a registration, a written acceptance).
      This is the half that keeps the file from rotting: add a Dockerfile and
-     the witness prints it, and this row fails until the manifest is updated
+     the witness prints it, rename the ADR the acceptance lives in and the
+     witness stops matching, and this row fails until the manifest is updated
      to say so;
   6. the remaining absence is a GUARDED one, and the guard is checked to
      exist: the entry names `guard_check_id`, a row of the live gate registry
