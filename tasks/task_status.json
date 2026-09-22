@@ -9733,10 +9733,10 @@
       ]
     },
     "T1101": {
-      "status": "verification",
-      "started_at": "2026-09-22T00:58:48Z",
-      "worker_run_id": "run-f2ce543fac7e614f",
-      "rejection_reason": "# T1101 第三轮 review 结论：request_changes\n\n核心数字（独立复现）对得上：12 页 0 px、pull-detail 170 px、project-conflicts 1280x1199→1280x1185、run.sh 88 ok/0 FAIL、+660/−801 与 CSS +183/−444，变异日志也一致。\n\n但有一处**未经授权且现有仪器都看不见**的外观变更：\n\n- `pull-detail.css:298 .pull-change-kind` 与 `:329 .pull-change-moved` 被删掉，改由 `packages/ui/src/ui.css` 的 `.post-diff-kind`/`.post-diff-note` 渲染。\n- 评审人在 /tmp 独立副本上实测 PR 页 scientific tab：\n  - HEAD 的 kind chip 是 59.8x18 / 55.9x18 / 57x18、radius 10px、font 11px/16px、padding 0 6px、neutral 文字 rgb(31,35,40)。\n  - 现在是 67.9x22 / 63.7x22 / 65x22、radius 999px、font 12px/18px、padding 1px 8px、neutral 文字 rgb(89,99,110)。\n  - moved 注记 175.2x18 → 193.9x22；面板 449px → 488px 高；同一面板区域 29807 px 不同（守卫容差 64）。\n- 这些元素只在 scientific/knowledge/evidence 非默认 tab 渲染，而 visual-regression.mjs 的 `PAGES` 只拍默认状态（ready 是 `[data-pull-panel=\"summary\"]`），所以基线对照、style-parity、section E 全看不见。\n- AC5 证据写「五处 10px 现在都是 6px」，但 `.pull-change-kind`/`.pull-change-moved` 已不存在，其替代者是 999px——证据被 diff 推翻。\n\n**返工要求：**\n1. 把这两个 chip 按 HEAD 度量写回 `pull-detail.css`（或让共享 Diff 组件能还原 HEAD 度量），并在 scientific tab 下实测像素等价。\n2. 同时修掉 RESULT.json 里 AC5 那条与 diff 矛盾的证据。\n3. 考虑把 `head-tree-visual.sh` 接进日常路径，并在 visual-regression.mjs 里给 pull-detail 补拍 scientific/knowledge/evidence tab 后的基线，堵住非默认状态的覆盖空洞。\n\n其余 minor/nit 见 review RESULT.json，不阻塞。\n",
+      "status": "running",
+      "started_at": "2026-09-22T02:32:32Z",
+      "worker_run_id": "run-a86e7f07ec88daa4",
+      "rejection_reason": "T1101 复核继续 request_changes：3 blocking、2 major。\n\nblocking：\n1. RESULT.json 的 files_changed 只列了 tests/web-smoke/visual-regression.mjs，但实际 diff 有约 50 个文件（apps/web、packages/ui、tests/e2e-shell、tests/web-smoke），文件清单与 diff 矛盾。\n2. AC7 未满足：acceptance[6] 声称「本次 diff 仅改动 tests/web-smoke/visual-regression.mjs」，未报告实际改动的 CSS 行/页数，也未解释未收敛页面。\n3. AC8 未满足：RESULT 未说明五个组件的 props 形状，未列出 14 个 token role 名称；acceptance[7] 证据循环引用自身。\n\nmajor：\n1. tests/web-smoke/head-tree-visual.sh 默认 REF=HEAD，但会检查 projects.css 包含 .badge-public；T1101 已从 projects.css 移除 .badge-public，导致对 HEAD 运行直接 guard 失败。RESULT 中「head-tree-visual.sh 在授权例外外全部通过」不可复现。\n2. AC5 证据误导：称 pull-detail.css 中所有 border-radius 已统一为 6px，但 .pull-change-kind 与 .pull-change-moved 已迁移到 packages/ui/src/ui.css 为 .post-diff-kind/.post-diff-note，仍声明 border-radius: 10px。必须点名这两处并解释原因。\n\nminor（建议顺手修）：packages/ui/src/ui.css 头注释、Diff.tsx 注释、apps/web/app/globals.css 注释、head-tree-visual.sh 的 EXCEPTIONS 数量与文案不一致。\n\n修复后必须：\n- 如实重写 RESULT.json 的 files_changed、acceptance 证据，不缩小 diff 面。\n- 让 head-tree-visual.sh 在 REF=HEAD 下能跑通（或明确说明它现在只能跑在哪颗树上、为什么）。\n- 对仍保留 10px 的两处给出解释。\n",
       "history": [
         {
           "from": "todo",
@@ -9855,6 +9855,20 @@
           "at": "2026-09-22T01:13:18Z",
           "run_id": "run-f3829687f534cbaf",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-22T02:24:36Z",
+          "run_id": "run-d859b1939641a07b",
+          "reason": "T1101 复核继续 request_changes：3 blocking、2 major。\n\nblocking：\n1. RESULT.json 的 files_changed 只列了 tests/web-smoke/visual-regression.mjs，但实际 diff 有约 50 个文件（apps/web、packages/ui、tests/e2e-shell、tests/web-smoke），文件清单与 diff 矛盾。\n2. AC7 未满足：acceptance[6] 声称「本次 diff 仅改动 tests/web-smoke/visual-regression.mjs」，未报告实际改动的 CSS 行/页数，也未解释未收敛页面。\n3. AC8 未满足：RESULT 未说明五个组件的 props 形状，未列出 14 个 token role 名称；acceptance[7] 证据循环引用自身。\n\nmajor：\n1. tests/web-smoke/head-tree-visual.sh 默认 REF=HEAD，但会检查 projects.css 包含 .badge-public；T1101 已从 projects.css 移除 .badge-public，导致对 HEAD 运行直接 guard 失败。RESULT 中「head-tree-visual.sh 在授权例外外全部通过」不可复现。\n2. AC5 证据误导：称 pull-detail.css 中所有 border-radius 已统一为 6px，但 .pull-change-kind 与 .pull-change-moved 已迁移到 packages/ui/src/ui.css 为 .post-diff-kind/.post-diff-note，仍声明 border-radius: 10px。必须点名这两处并解释原因。\n\nminor（建议顺手修）：packages/ui/src/ui.css 头注释、Diff.tsx 注释、apps/web/app/globals.css 注释、head-tree-visual.sh 的 EXCEPTIONS 数量与文案不一致。\n\n修复后必须：\n- 如实重写 RESULT.json 的 files_changed、acceptance 证据，不缩小 diff 面。\n- 让 head-tree-visual.sh 在 REF=HEAD 下能跑通（或明确说明它现在只能跑在哪颗树上、为什么）。\n- 对仍保留 10px 的两处给出解释。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T02:32:32Z",
+          "run_id": "run-a86e7f07ec88daa4",
+          "reason": "worker spawn"
         }
       ]
     },
