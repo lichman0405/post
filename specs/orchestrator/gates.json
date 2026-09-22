@@ -10,7 +10,8 @@
     "migration-integration",
     "acceptance",
     "observability",
-    "a11y"
+    "a11y",
+    "i18n"
   ],
   "gates": {
     "G1": {
@@ -30,7 +31,8 @@
         "migration-integration",
         "acceptance",
         "observability",
-        "a11y"
+        "a11y",
+        "i18n"
       ]
     },
     "G3": {
@@ -50,7 +52,8 @@
         "migration-integration",
         "acceptance",
         "observability",
-        "a11y"
+        "a11y",
+        "i18n"
       ]
     }
   },
@@ -327,6 +330,21 @@
             "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post",
             "A11Y_API_ADDR": "127.0.0.1:18197",
             "A11Y_WEB_PORT": "31117"
+          }
+        }
+      ]
+    },
+    "i18n": {
+      "steps": [
+        {
+          "run": "corepack enable pnpm && pnpm install --frozen-lockfile"
+        },
+        {
+          "run": "make i18n",
+          "env": {
+            "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post",
+            "I18N_API_ADDR": "127.0.0.1:18198",
+            "I18N_WEB_PORT": "31118"
           }
         }
       ]

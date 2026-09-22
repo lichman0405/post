@@ -48,7 +48,7 @@ make ci               # 本地复刻 CI 全部 6 个 stage（= bash scripts/ci.s
 
 ## CI 工作流（.github/workflows/ci.yml）
 
-9 个 job，全部跑在 `ubuntu-24.04`（docs/25、docs/64）：
+10 个 job，全部跑在 `ubuntu-24.04`（docs/25、docs/64）：
 
 1. `spec-validation` —— spec bundle + 任务 DAG 校验、OpenAPI 契约检查及其 fixture 测试（取代原 spec-validation workflow）
 2. `task-state` —— DAG/state/test 覆盖与 JSON 形状校验 + fixture 测试
@@ -59,6 +59,7 @@ make ci               # 本地复刻 CI 全部 6 个 stage（= bash scripts/ci.s
 7. `migration-integration` —— 需要基础设施的三个 job 之一，独立 job + `pgvector/pgvector:0.8.6-pg16` service container（与 docker-compose.yml 同镜像），跑 `make test-integration`
 8. `observability` —— metrics / alerts / 分布式 trace 套件（`make observability-smoke`；`needs: [go]`，自拉 pgvector 镜像）
 9. `a11y` —— 全站 WCAG 2.2 AA（T1104）：生产构建 `@post/web`、真 PostgreSQL + 真 Chromium 走 docs/42 每个有路由的核心页，axe-core 的 WCAG 遍与 best-practice 遍都必须为 0，且动态页必须渲染出 fixture 内容而不是空壳
+10. `i18n` —— 语言基线（T1105）：同一套 Go 挂具 + 真 PostgreSQL + 真 Chromium，在 en/zh-CN 两种偏好下走核心路由，断言文案切换、`<html lang>` 跟随、两种语言下的 API 请求逐字节相同、以及科学量与单位逐字相同（`make i18n`）
 
 **`specs/orchestrator/gates.json` 与这份列表是 lockstep**：G2 跑的就是这里的 job 与逐步命令（含 per-step `env`），`internal/devorchestrator/gate_spec_test.go` 在 CI 上挡住任何单边改动。加一个新 job 就要同时改 ci.yml、gates.json 的 `required_jobs` / `G2.runs_jobs` / `G4.asserts_jobs` 三处，再 `python3 scripts/spec_version.py --write`。
 
