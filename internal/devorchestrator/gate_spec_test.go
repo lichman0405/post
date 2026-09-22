@@ -272,8 +272,32 @@ func TestEveryTaskOfThePhasesUnderDevelopmentHasG3(t *testing.T) {
 			}
 		}
 	}
-	if covered == 0 {
-		t.Fatal("no task carries a G3 job — task_overrides has gone vacuous again")
+	if len(livePhases) == 0 {
+		// A fully merged DAG has no live phase, so the loop above has no subject
+		// at all. `covered == 0` there says "nothing to check", not "the override
+		// table is vacuous" — and V1's completion state is exactly that tree
+		// (CLAUDE.md §12: every v1_required task merged, four gates green), so a
+		// red here would report "the project is finished" as a CI failure. The
+		// vacuity question is still worth asking, though, so ask it of the whole
+		// DAG: something must remain wired to a G3 job, or a phase reopened
+		// tomorrow would dispatch with no integration gate at all.
+		wired := 0
+		for _, task := range dag.Tasks {
+			jobs, err := spec.JobsForGate("G3", task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(jobs) > 0 {
+				wired++
+			}
+		}
+		if wired == 0 {
+			t.Fatal("no task carries a G3 job — task_overrides has gone vacuous again")
+		}
+	} else if covered == 0 {
+		// There is a live phase and none of its tasks carries a G3 job: the
+		// t.Errorf above already named them; this makes the failure unmissable.
+		t.Fatal("the live phases' tasks carry no G3 job — task_overrides has gone vacuous again")
 	}
 	// A G3 job is not a CI job: it must not leak into the G4 assertion, which
 	// checks the required CI jobs against every task's G2 record.

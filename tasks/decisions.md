@@ -17746,3 +17746,59 @@ T1210 要求 4e 把它钉进脚本（直接数台账，空 evidence 的 `passed`
   **必需作业不许声明 `requires_tasks`**（"a required job must declare nothing"），所以接线时要把
   `requires_tasks` 从 job 定义里摘掉。**接线会让 main 的必需作业从 10 变 11**，
   所以 T1210 必须在接线**之后**再生成证书（§3 已记）。
+
+## ㊵ 全 DAG 合并后 `TestEveryTaskOfThePhasesUnderDevelopmentHasG3` 假红：这是**仪器缺陷**，就地修（L1，2026-09-23）
+
+### 1. 红在哪、红成什么样
+
+main 在 **`2210d5b`**（我自己的状态提交）上 CI 真红：run `35778608984` 的 `acceptance` 作业，
+第 5 步 `tests/acceptance/phase-boundary-checkpoint.sh` 里 `go test ./internal/devorchestrator/`：
+
+```
+--- FAIL: TestEveryTaskOfThePhasesUnderDevelopmentHasG3 (0.01s)
+    gate_spec_test.go:276: no task carries a G3 job — task_overrides has gone vacuous again
+FAIL the G3 coverage guards fail
+```
+
+在 `2210d5b` 的 detached worktree 里逐字复现，句子与行号一致。
+
+### 2. 根因：这条守卫**只在还有活没干完时能为绿**
+
+`2210d5b` 上 **150 笔任务全部 merged**。测试先取"活相位"（`livePhases`），
+再要求活相位的每笔任务都带 G3 作业，最后用 `covered == 0` 判"覆盖表是不是空了"。
+全合并时 `livePhases` **为空**，那个循环**根本没有检查对象**，`covered` 自然为 0——
+于是"空表"这条 Fatal 在**空范围**上误报。
+
+也就是说：**V1 的完成态（`CLAUDE.md` §12：全部 v1_required 任务 merged）在 CI 里不可表达**，
+CI 会把"项目做完了"报成失败。这不是产品缺陷，是**仪器缺陷**；而且它只在**越接近完成越容易触发**，
+正好是最不该被假红干扰的时候。
+
+### 3. 处置（L1 实现决定，就地修，不动守卫的用意）
+
+`internal/devorchestrator/gate_spec_test.go`：把 `covered == 0` 分成两种情形——
+
+- **没有活相位**（DAG 全合并）：不再拿"空范围"当"空表"。改成对整个 DAG 问同一个问题：
+  **必须仍有任务挂在 G3 作业上**（`wired == 0` 才 Fatal）。理由写进注释：一个相位若明天重开，
+  派下去的任务必须仍有集成门；"表是否真空"这个问题一英寸都没放松，只是问的对象从"活相位"换成"全 DAG"。
+- **有活相位**：保留原来的 Fatal，句子改写成 `the live phases' tasks carry no G3 job — …`，
+  与上面那条区分开，免得两种病共用一句话。
+
+原有 `t.Errorf`（逐笔点名缺 G3 的任务）一字未动，Fatal 那句的固定措辞
+（`no task carries a G3 job — task_overrides has gone vacuous again`）也保留，历史证据仍可检索。
+
+### 4. 四次运行，两个方向都试过（仪器必须先能说"不"）
+
+| 树 | 变异 | 期望 | 实测 |
+|---|---|---|---|
+| `2210d5b`（全合并）+ 修好的测试 | 无 | PASS | `ok github.com/lichman0405/post/internal/devorchestrator` |
+| `2210d5b` + 修好的测试 | `task_overrides = {}` | FAIL | `gate_spec_test.go:295: no task carries a G3 job — task_overrides has gone vacuous again` |
+| `9292ec0`（有活相位）+ 修好的测试 | 无 | PASS | `ok` |
+| `9292ec0` + 修好的测试 | 摘掉活任务 `T1209` 的 `g3_jobs` | FAIL | `gate_spec_test.go:264: task T1209 (P12, …) has no G3 jobs — …` |
+
+前两次证明假红消失、真空仍被抓；后两次证明**有活相位时逐笔点名照旧**，守卫没有被改成摆设。
+
+### 5. 记账
+
+- 本决定是 L1：只动"检查在什么范围上提问"，未改 G3 覆盖规则本身、未改任何任务的 gate 归属。
+- `tasks/tasks.json` 与 `specs/**` **一个字都没动**，所以规格摘要不变——在跑的 T1209 的 G2 不受影响。
+- `2210d5b` 那次红**不重跑**：它已经是历史，修好后的 main 上同一测试为绿。
