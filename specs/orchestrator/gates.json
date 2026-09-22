@@ -348,6 +348,17 @@
           }
         }
       ]
+    },
+    "security-master": {
+      "steps": [
+        {
+          "run": "bash tests/security/master-security-gate.sh"
+        }
+      ],
+      "requires_tasks": [
+        "T1206",
+        "T1209"
+      ]
     }
   },
   "review": {
@@ -1105,6 +1116,11 @@
       "g3_jobs": [
         "auth-real-services",
         "rsg-real-services"
+      ]
+    },
+    "T1209": {
+      "g3_jobs": [
+        "security-master"
       ]
     }
   }

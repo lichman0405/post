@@ -1770,6 +1770,16 @@
       "status": "passed",
       "last_run": "2026-09-21T11:37:48Z",
       "evidence": "Backfilled from the task's own Worker record on 2026-09-22 (not a fresh re-run). The Worker ran `go test ./tests/integration -run 'TestConfirmWithAUsedKeyLeavesNoStateE2E|TestConfirmCompletesAfterAHalfDoneAttemptE2E|TestConfirmRefusesAProjectStateItDidNotMakeE2E' -count=1 -v` on the tree that was merged -- RESULT.json test label 'confirm failure path e2e', status passed -- and the task then cleared G2 (Supervisor diff/scope/acceptance review) and G4, merging at 2026-09-21T11:37:48Z. The pass is the Worker's recorded run as validated by that acceptance, not a Supervisor re-run; a re-run writes its own evidence string."
+    },
+    {
+      "id": "T1209-TEST-01",
+      "task_id": "T1209",
+      "name": "master suite",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }

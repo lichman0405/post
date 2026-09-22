@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 150,
+  "task_count": 151,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -8563,6 +8563,75 @@
       "tests": [
         "confirm failure path e2e"
       ]
+    },
+    {
+      "id": "T1209",
+      "phase": "P12",
+      "phase_name": "Canonical Workflow 与最终交付",
+      "title": "SAST 与 SBOM：把 docs/23 §11 / docs/25 第 9–10 条缺的两面补进总门",
+      "v1_required": true,
+      "dependencies": [
+        "T1206",
+        "T1207"
+      ],
+      "requirements": [
+        "**先自己复跑一遍现状，别照抄我的话。** 规格逐字（我核过）：`docs/23_SECURITY_PRIVACY.md:45`「每个 Release 运行 dependency audit、SAST、secret scan、container scan、OWASP smoke、permission E2E。**Critical/High 必须修复或有书面 ADR/risk acceptance（V1 不接受 Critical）**」；`docs/25_CICD_DEVOPS.md:23-24` 的 CI Gate 第 9 条「security/dependency/secret scan」与第 10 条「container build/SBOM」；`docs/40_OPEN_SOURCE_LICENSES.md:3`「实际版本与许可证在 **bootstrap/CI 中生成 SBOM 并核对**」。`docs/23:45` 那六项里今天**有的**是 dependency audit（`govulncheck` / `pnpm audit` / `uv audit` 三面，已接进 `tests/security/master-security-gate.sh` 的 `vuln-go` / `vuln-node` / `vuln-python` 三行）、secret scan、OWASP smoke（`tests/security/owasp-smoke.sh`）、permission 负向 e2e（`permission-negative-e2e` 行）；**缺 SAST**。**SBOM 不在这六项里**——它来自 `docs/25` 第 10 条与 `docs/40:3`，今天同样缺席。**容器扫描是第三种情况：没有对象**——全树没有 Dockerfile/Containerfile，`ops/runbook-steps.json:165` 逐字「Nothing builds an image: there is no Dockerfile, and CI has no container build/SBOM stage (docs/25 item 10)」，`ops/DEV_COMMANDS.md:154` 记着 tree claim `no-dockerfile`。现状的机器可读记录在 `ops/security/absent-checks.json`。",
+        "**补 SAST，按 dependency 三面的同一形状补成三行**（相同的位置、相同的注册表形状：名字 + 命令 + 必须打印的证据行 + 退出码）：`sast-go`（gosec，**钉版本**，照仓库对 staticcheck 的做法 `Makefile:20` 的 `STATICCHECK_VER`；**并同时把 `MIN_CHECKS` 抬到新的行数**——它现在正好等于今天的 9 行（`tests/security/master-security-gate.sh:117`），加了行不抬下限，下限就不再保护新行）、`sast-python`（bandit，钉版本）、`sast-node`（eslint 的安全规则；`apps/web` 已有 eslint 9 + eslint-config-next，任何新增插件按 `docs/40` 第一条原则记录 license/版本/用途/替代方案）。**存量命中只许逐条基线**：仓库的 `ops/ci/staticcheck-baseline.txt` 是先例，但**基线只能记录「已逐条复核并判定为不可达或非安全」的具体 find**；**不许**用 `-exclude-dir`、抬高 severity 阈值、`-nosec` 批量标注这类整类豁免换绿。判不准的**照实报**，不要自己判成安全。",
+        "**补 SBOM，三面各一份**（Go modules / npm / pip）。产物写进一个被忽略的目录（`.gitignore` 里加），**不许签入**——它是产物不是源码。总门里加校验：JSON 可解析、组件数 > 0、且 `docs/40` 点名的关键依赖都在（Go toolchain/chi/pgx/sqlc、Next.js/React、Primer/Octicons、Gitea、PostgreSQL/pgvector、Redis、MinIO、Playwright、Python scientific packages）。生成器同样**钉版本**，并给出「本地一条命令能重生成」。",
+        "**许可证核对**（`docs/40` 第一条原则「任何新增依赖必须记录 license、版本、用途、替代方案；高 copyleft/商业限制依赖需显式 ADR/法务确认」）：从 SBOM 里读每个组件的 license，按你建的一份 allowlist 判定；命中 deny 类（GPL-3.0 这类高 copyleft、以及商业限制类）时**必须红**，并打印是哪个包、哪条 license、什么版本。ADR 是你报、我写——你不要自己出一份 ADR。",
+        "**容器扫描：把「缺席」改成「有守卫的缺席」，它必须可被证伪。** 先看清现状（我核过）：总门里**今天没有** `container-scan` 这一行——容器扫描现在只以 `ops/security/absent-checks.json` 里的一个 `absent` 条目存在，靠 `absence-manifest` 行与总门交叉核对（`tests/security/master-security-gate.sh:200-210`）。第 5 条要**新增** `container-scan` 这一行：无 Dockerfile 时它绿、并打印今天为什么没有对象（tree claim `no-dockerfile` + `ops/runbook-steps.json:165` 的出处），**一旦树里出现任何 `Dockerfile`/`Containerfile` 它必须变红**——红的意思是「现在有镜像要扫了，补扫描或由 Supervisor 书面接受」，不是继续打 `NOT ASKED`。这是本任务对「缺席」这个词的处置：缺席可以是事实，但不许是**无守卫**的事实。",
+        "**缺席清单要跟上事实（连带把总门那行的证据行改对）**：`ops/security/absent-checks.json` 里 `SAST` 与 `SBOM` 两条**删掉**（它们不再是缺席项，总门里已有行），容器扫描那条改写为「有守卫的缺席」并指向第 5 条那行。**别忘了同一条链上的第三处**：总门 `absence-manifest` 那一行（`tests/security/master-security-gate.sh:200-210`）把 `^ok   item: sast` / `^ok   item: container-scan` / `^ok   item: sbom` 三条输出钉成了证据行——清单删了两条，这三行证据必须同步改（容器扫描那行的措辞跟着改），否则总门自己会红。**清单、检查器、总门那行的证据行，三处必须同时对上。****风险接受不是你的事**：容器扫描这条要不要作为 V1 风险接受、以什么形式落笔（书面 ADR），由我写；你交证据与建议。",
+        "**每条新行都要做一次「仪器能说不」的证明**（本任务的灵魂，也是这个仓库的规矩）：SAST——种一个该工具一定会命中的样例（放临时目录，**别把坏样例签进仓库**），确认那行**转红**；SBOM——把一份产物截断/清空，确认校验行转红；许可证——把一个组件改成 GPL-3.0，确认 deny 行转红；容器扫描——放一个最小 Dockerfile，确认第 5 条那行转红。**每次改完必须还原并复测干净**，红与绿两次输出都留在 RESULT 里。",
+        "**CI 由我接，别撞墙**：`.github/workflows/**` 与 `specs/orchestrator/gates.json` 不在你的 `allowed_scope` 里（gates 的 job 清单与 `required_jobs` 必须一致，改一处要同时改另一处，那是 Supervisor 的面）。**别去改 CI、也别因为改不了而判 blocked**：你只要让总门里每条新行**可跑、可红、可复现**，并在 RESULT 里写一句建议挂到哪个 job。我接 CI 时会**不带 `--allow-not-asked`** 跑（即：工具不在 = 红），所以**钉版本的安装必须写成一条独立的、可复跑的命令**（形如 `make security-tools`，放 `Makefile`，逐条钉版本、不静默 latest、打不出就红）：我会把它作为**同一个 job 的前置 `run` 步骤**放进 `ci.yml` 与 `gates.json`（两处的 `run` 步骤必须逐步一致，多一步少一步都会让 `gate_spec_test` 红）。请在 RESULT 里给出这条命令**在干净环境跑通**的实测（装完立刻跑一次总门，两条输出都留）。",
+        "**一条既有检查都不许弱化**：不许删行、跳过、改判据、把红改成 `NOT ASKED`、放大阈值或超时；`--allow-not-asked` 的语义一个字都不许动。要证明你没弱化，就对**一条既有行**（例如 `secret-scan` 或 `vuln-go`）再做一次变异，确认它仍然会红。",
+        "**证据要能落账，但账本不是你写的**：每条新行给出一条**可直接粘贴执行**的 `scripts/record_test_run.py` 调用（`--id/--command/--exit-code/--output-file`），命令、退出码与输出尾部同时写进 RESULT。**你不要写 `tasks/tests.json`**——那是 CLAUDE.md §4 里 Supervisor-only 的账本，Worker 写它越界，`rddev worker collect` 会按越界拒收整个 diff。落账由我在验收时做。"
+      ],
+      "deliverables": [
+        "`tests/security/master-security-gate.sh` 新增的行：`sast-go`、`sast-python`、`sast-node`、SBOM 生成 + 校验、许可证核对、容器扫描守卫（每行都有名字、判据、必须打印的证据行、退出码），以及总门自检（`--selftest`）对这些新行的覆盖。",
+        "SBOM 生成器与许可证核对器（放在 `tests/security/` 下，命名自明；**钉版本**），外加 `Makefile` 上的本地目标（一条命令能重生成 + 一条命令能跑总门）。",
+        "`ops/security/absent-checks.json` 的更新（SAST/SBOM 两条删除；容器扫描改写为「有守卫的缺席」），以及 `ops/security/` 下的 license allowlist。",
+        "每条新行的红/绿实测（变异证明）+ 对一条既有行的变异证明（证明没被弱化）。",
+        "RESULT：逐条命令与退出码、输出尾部、`record_test_run.py` 调用形状、建议的 CI job 归属、以及你发现的任何**判不准**的项（照实报，别替我做安全判断）。"
+      ],
+      "acceptance_criteria": [
+        "**仪器能说不（先做这一步）**：四条新面各做一次变异（SAST 命中的样例、截断的 SBOM、GPL-3.0 组件、最小 Dockerfile），确认**对应那行转红**——红的是那一行、不是整个脚本崩；红与绿两次输出都留在 RESULT 里。",
+        "**总门一条命令**：`tests/security/master-security-gate.sh` 跑完，打印每条检查的名字 + 结果 + 总退出码；新行全部出现在注册表与摘要里，且 `MIN_CHECKS` 下限已抬到新行数（删掉任意一条新行必须让总门以注册表完整性失败收尾——做一次删行变异证明）。",
+        "**SBOM 三面可复现**：三份产物能从零重新生成、JSON 可解析、组件数 > 0、`docs/40` 点名的关键依赖都在；产物**未签入**（`git status` 干净）。",
+        "**许可证核对能红**：deny 类 license 被点名拒绝（包名 + license + 版本）；allowlist 的判定理由写在文件里，不是隐式的。",
+        "**容器扫描是有守卫的缺席**：无 Dockerfile 时绿并打印理由与出处；一旦出现 Dockerfile/Containerfile 即红。",
+        "**既有检查没被弱化**：至少对一条既有行（`secret-scan` / `vuln-go` 任选）做一次变异，确认它仍会红；既有行的名字与判据与 T1206 交付时逐条对得上。",
+        "**缺席清单与总门一致**：`ops/security/absent-checks.json` 里不再有 SAST/SBOM，容器扫描一条写明守卫行；由总门的 `absence-manifest` 行校验通过。",
+        "**没碰不该碰的**：`tasks/**`、`specs/**`、`.github/**`、产品代码（`cmd/**`、`internal/**`、`apps/**`、`services/**`）零改动；没有新增迁移。",
+        "**证据可落账，但账本不是你写的**：每条新行给出可直接粘贴的 `scripts/record_test_run.py` 调用；RESULT 里**不许**把任何 status 写成 `passed`（你只跑、只报）。",
+        "**诚实报告**：判不准的、需要 ADR 的、工具装不上的，逐条点名；不许用「基本干净」这类话糊过去。"
+      ],
+      "tests": [
+        "master suite"
+      ],
+      "allowed_scope": [
+        "tests/security/**",
+        "ops/**",
+        "Makefile",
+        ".gitignore"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/task_status.json",
+        "tasks/progress.md",
+        ".github/**",
+        "specs/**",
+        "scripts/**"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/23_SECURITY_PRIVACY.md",
+        "docs/25_CICD_DEVOPS.md",
+        "docs/40_OPEN_SOURCE_LICENSES.md",
+        "docs/31_MASTER_ACCEPTANCE.md",
+        "docs/24_TEST_STRATEGY.md"
+      ],
+      "scope_note": "**`scripts/**` 不给**（沿用 T1206 第六次修订的收窄）：被记录的门不该攥着笔——`scripts/record_test_run.py` 就在那里，写它等于能改证据。你只**运行**它、把调用形状写进 RESULT。\n\n**`tests/security/**` + `ops/**` + `Makefile` + `.gitignore` 是你需要的全部**：新行与新工具脚本放 `tests/security/`；缺席清单与 allowlist 放 `ops/security/`；钉版本与本地目标放 `Makefile`；SBOM 产物目录进 `.gitignore`。\n\n**`.github/**` 与 `specs/orchestrator/gates.json` 明确禁止**：CI 的 job 清单、`required_jobs`、`G2.runs_jobs`、`G4.asserts_jobs` 必须四处一致（少一处就有 job 不被跑），那是 Supervisor 的收尾动作。你只要让新行在本地可跑、可红，并给出建议挂哪个 job。"
     }
   ]
 }

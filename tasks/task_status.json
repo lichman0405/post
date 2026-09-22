@@ -11636,6 +11636,15 @@
           "run_id": "run-1ebabacbc67d2c99"
         }
       ]
+    },
+    "T1209": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "新立账（2026-09-23，T1207 合并之后）：docs/23:45 的 SAST 与 docs/25 第 10 条 / docs/40:3 的 SBOM 今天缺席；容器扫描是无守卫的缺席。任务书见 tasks/packages/T1209.json，G3 覆盖同笔补进 gates.json（security-master）。",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
     }
   },
   "version": 2
