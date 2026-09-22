@@ -1397,9 +1397,9 @@
       "name": "observability smoke",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-22T12:39:52Z",
+      "evidence": "Supervisor ran `make observability-smoke` -> exit 0 on 2026-09-22T12:39:52Z. Last output: >> trace-e2e PASSED: one id traced across API -> queue -> worker and web -> API + adapter ; >> logs kept at: /tmp/tmp.ke63DJiOeD ; timeout 1500 make observability-smoke > /tmp/t1109-test01.log 2>&1  49.21s user 13.30s system 13% cpu 7:31.48 total ; EXIT=0 Supervisor run on merged main (after 477e191): the suite the task delivers, run by hand because it is required and blocking. Re-run of the same command the Worker reported; wall clock 7m31s."
     },
     {
       "id": "T1110-TEST-01",
