@@ -9980,10 +9980,12 @@
       ]
     },
     "T1103": {
-      "status": "running",
-      "started_at": "2026-09-22T11:02:17Z",
-      "worker_run_id": "run-d6a3570df583d435",
-      "rejection_reason": "上一个工人在这个工作树里跑了 209 轮、**撞上模型上下文上限**（API 400: request exceeded model token limit 262144）死在半路，**没有交出 RESULT.json**。它留下的是一份未交付的半成品，不是一次可验收的交付。\n\n工作树里现在有它的残留（未提交）：\n- 改过：`apps/web/app/(main)/projects/[id]/releases/[releaseId]/release-detail.tsx`、`tests/e2e-release/release-e2e.mjs`\n- 新增：`apps/web/app/(main)/projects/[id]/assets/publish/`、`apps/web/app/(main)/projects/[id]/releases/[releaseId]/release-detail.css`、`apps/web/lib/publish.ts`、`tests/e2e-release/publish-ux-e2e.mjs`、`tests/e2e-release/publish-ux-run.sh`\n\n## 你要做什么\n\n1. **先自己核这份半成品**：它能站住的就留着并补完，站不住的（改错的、跑不通的、跟验收标准无关的）删掉重做。不要因为「它已经写了」就默认它对——没有人验收过它。RESULT.json 的 `files_changed` 必须逐条对上你最终真正改动的文件。\n2. 按任务书里的 8 条验收标准逐条做完，每条给出证据（命令 + 落账位置）。\n3. **为了不再撞上下文上限**（这是上一轮的死因）：\n   - 不要整文件 dump 大文件到上下文，用 grep / sed -n 定位需要的那几行；\n   - 不要反复重读同一棵树；探查只围绕 allowed_scope 与验收标准；\n   - 长输出写进文件再看摘要（`... > /tmp/x.log 2>&1` 然后 grep/tail），不要把几万行日志灌进上下文；\n   - **早点写 RESULT.json 并持续更新**，不要攒到最后——上一轮就是这么什么都没留下的。\n4. 不许为了让门变绿去改测试、改台账或改 `tasks/tests.json` 的 status。\n",
+      "status": "merged",
+      "started_at": "2026-09-22T11:37:04Z",
+      "worker_run_id": "run-0b1123431e3002fc",
+      "accepted_by_supervisor_at": "2026-09-22T12:30:49Z",
+      "merged_at": "2026-09-22T12:39:22Z",
+      "rejection_reason": "复核员的结论是 **approve**，但里面列了 **2 条 major、6 条 minor**。我读了它的证据并自己核过文件行，**其中几条我认为必须在这一笔里关掉**，所以这一轮不是「重做」，是**定点补完**——复核员确认能复现的部分（页面结构、六类清单、阻断接口、e2e 真栈）保持原样，不要重写。\n\n## 必须先关掉的三条\n\n**1（major）：这条 e2e 没有任何运行器会跑到它。** `Makefile:33` 只通过 `tests/e2e-*/run.sh` 发现套件，而全仓 grep `publish-ux` 只有那两个新文件——没有 Makefile 目标、没有 CI 步骤、`tests/e2e-release/run.sh` 结尾仍然只有 `release-e2e`。于是 `make browser-e2e` 永远不会跑这一笔的验收证据。**这正是本仓库自己记过的老毛病**（`Makefile:25-32`：T1112 那个没人引用的套件「went unseen for six days」）。\n- 要求：让 `tests/e2e-release/run.sh` 真的把 `publish-ux-e2e.mjs` 跑起来（复核员给的改法就在你范围内：那条链上设 `RELEASE_CHAIN_OUT`，之后跑 `publish-ux-e2e.mjs`）。**不要**新建第二套启动器，也不要为了省掉第二次 `next build` 去改既有断言。\n- 复核员的风险提示一并处理：两个脚本今天用不同端口（31170/18191 与 31171/18192），并起来跑是巧合不是设计——**改完要在 RESULT 里说明** `make browser-e2e` 的耗时变化，以及两个脚本能不能独立跑。\n\n**2（major）：确认页可能发布一份比它声称的版本更窄的文档，而且是静默的。** `buildCandidateFromStoredVersion` 从资产页渲染出来的东西重建 manifest，而 `internal/assets/page.go:917` 会把**钉住非公开版本/项目的依赖 pin 直接丢掉**（`continue`，`mayLinkVersion`）。于是六类清单里「依赖」那一栏看不到少掉的那个 pin，读者被告知「正在发布这个版本」，实际发出去的是一份更窄的文档——**这恰好是这一笔要防的那类伤害**。\n- 要求：**在 `apps/web` 内封闭这条路**。你手里有存量行的 `AssetPage.version.integrity_hash`（`asset-page.tsx:208` 就在渲染它），而重建也算了规范哈希——**比一比**：不一致就**不要提供确认动作**（fail closed），并说清差在哪一类（例如「依赖 pin 少了 N 条」）。\n- **必须有一条能失败的测试**：复核员指出 `tests/e2e-release/harness/main.go:729` 的 fixture 候选**根本没有 pin**，所以这条路今天一次都没被跑过。给 fixture 加一个「钉住非公开版本的存量版本」，让「哈希一致 → 正常提供确认」与「不一致 → 拒绝提供」两个方向各有断言。\n- 如果 `integrity_hash` 与重建哈希**在设计上就不可比**（口径不同、规范化不同），不要硬比：**先把这个判断用文件行证死**（引 `internal/assets` 里算 hash 的那处原文），然后改成**把差异显式说出来并拒绝提供确认**——同样 fail closed，同样要测试。**不许**把它降级成「在 RESULT 里记一笔风险」：这一笔的 AC[3] 要的就是「阻断是硬的」。\n- **不许**改 `internal/**`、`cmd/**`（不在你范围内），也**不许**动服务端可见性语义。\n\n**3（minor，但按缺陷处理）：不要发明 rights 声明。** `publish.ts:508` 的 `stored.rights ?? defaultRightsDocument()`——API 答 null 时（`page.go` 的 `rightsOf` 对空文档返回 nil，`internal/assets/page.go`）你**造**了一份该版本从来没有的 rights 文档，还把这份发明渲染在「Rights / license」一栏；而发布门本来会诚实地拒掉「没有 rights 文档」的候选（`internal/assets/gate.go:176`，`CodeMissingRights`）。**把诚实拒绝换成了发明**，也违反了你自己写在 `asset-page.tsx:564` 的不变量（「Everything in the candidate is a fact the API just sent about THIS stored version」）。\n- 要求：删掉这个 fallback。API 没有就如实呈现「这个版本没有 rights 声明」，让门自己去拒。\n\n## 该修的 minor（复核员都给了行号）\n\n- **`publish.ts:527` 的兜底文案**：匿名读者跟着入口链接进来，只会看到「Something went wrong while publishing. Please try again.」——**一句假话**（当时并没有在发布），而这是本任务要求「可读」的那一页。把 `AUTH_UNAUTHENTICATED`、`VALIDATION_FAILED`、以及版本标签超长那一路（`internal/assets/asset.go:88`）各给一句说人话的文案；e2e 的匿名那条腿今天只断言「没有确认控件」，顺手加上断言它说的是人话。\n- **`publish.ts` 没有单元测试**：同目录每个模块都有 `*.test.mjs`，由 `scripts/web-unit-tests.sh` 跑（且有零匹配守卫）。你那个模块自己写着「import-free，好让 node:test 直接跑」——**这个缝你没用**。给 base64url 两个编解码、Go 规范 JSON 编码器、以及 `integrity_hash` 比较加上单元测试。\n- **`page.tsx:169-181` 那条 409 `ASSET_PUBLISH_BLOCKED` 分支没有测试**：e2e 只跑到了「版本标签被占」那一支，没跑到带阻断类别的那一支。补一条（走真栈）。\n- **`RESULT` 里 knowledge 那问的回答答偏了**：它答的是 research-profile/attestation，没提包里点名的 knowledge 路由。**判断是对的**（`***.go:249` 的 `Preview` 是 audience / review dimensions / blocking reasons 那一套形状，不是这六类清单），**把理由换成这个**。\n- **候选走 query 参数没有长度守卫**（`asset-page.tsx:564`）：元数据多的版本能把 URL 顶过 Node 默认 16KB 头限制，入口变成死链。给个守卫或在 RESULT 里写明并**开一条后续任务**，二选一，别沉默。\n- 两条 nit（内联样式挪进 `publish-confirm.css`；对已经 public 的版本仍提供「Publish this version publicly」的措辞）能顺手改就改，改不了就明说。\n\n## 边界\n\n- **不许**为了让哪条变绿去弱化既有断言、删测试、放宽 timeout；`AC[7]`（settings 的可见性控件与 `VISIBILITY_CHANGE_NOT_SUPPORTED` 行为不变）与 `tests/e2e-settings/settings-e2e.mjs:309-317` 两条断言仍然要绿。\n- **不许**改 `specs/**`、`docs/**`、`tasks/**`、`internal/**`、`cmd/**`、`infra/**`、`.github/**`。\n- 报告里 `style-parity.sh` 那条 red 是**先于你的改动**就存在的（复核员也这么判），**不要**去改挂具让它变绿，照原样留着并在 RESULT 里点明。\n- 定点补完，不要重写页面；复核员确认能复现的部分保持原样。\n- 这一轮若再因**真缺陷**被拒，下一轮换新工人（不是同一 session 继续）。\n",
       "history": [
         {
           "from": "todo",
@@ -10031,14 +10033,55 @@
           "at": "2026-09-22T11:02:17Z",
           "run_id": "run-d6a3570df583d435",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T11:27:53Z",
+          "run_id": "run-78ec4d2d08789ccf",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-22T11:37:03Z",
+          "run_id": "run-6b8f1b8af6f9fcaf",
+          "reason": "复核员的结论是 **approve**，但里面列了 **2 条 major、6 条 minor**。我读了它的证据并自己核过文件行，**其中几条我认为必须在这一笔里关掉**，所以这一轮不是「重做」，是**定点补完**——复核员确认能复现的部分（页面结构、六类清单、阻断接口、e2e 真栈）保持原样，不要重写。\n\n## 必须先关掉的三条\n\n**1（major）：这条 e2e 没有任何运行器会跑到它。** `Makefile:33` 只通过 `tests/e2e-*/run.sh` 发现套件，而全仓 grep `publish-ux` 只有那两个新文件——没有 Makefile 目标、没有 CI 步骤、`tests/e2e-release/run.sh` 结尾仍然只有 `release-e2e`。于是 `make browser-e2e` 永远不会跑这一笔的验收证据。**这正是本仓库自己记过的老毛病**（`Makefile:25-32`：T1112 那个没人引用的套件「went unseen for six days」）。\n- 要求：让 `tests/e2e-release/run.sh` 真的把 `publish-ux-e2e.mjs` 跑起来（复核员给的改法就在你范围内：那条链上设 `RELEASE_CHAIN_OUT`，之后跑 `publish-ux-e2e.mjs`）。**不要**新建第二套启动器，也不要为了省掉第二次 `next build` 去改既有断言。\n- 复核员的风险提示一并处理：两个脚本今天用不同端口（31170/18191 与 31171/18192），并起来跑是巧合不是设计——**改完要在 RESULT 里说明** `make browser-e2e` 的耗时变化，以及两个脚本能不能独立跑。\n\n**2（major）：确认页可能发布一份比它声称的版本更窄的文档，而且是静默的。** `buildCandidateFromStoredVersion` 从资产页渲染出来的东西重建 manifest，而 `internal/assets/page.go:917` 会把**钉住非公开版本/项目的依赖 pin 直接丢掉**（`continue`，`mayLinkVersion`）。于是六类清单里「依赖」那一栏看不到少掉的那个 pin，读者被告知「正在发布这个版本」，实际发出去的是一份更窄的文档——**这恰好是这一笔要防的那类伤害**。\n- 要求：**在 `apps/web` 内封闭这条路**。你手里有存量行的 `AssetPage.version.integrity_hash`（`asset-page.tsx:208` 就在渲染它），而重建也算了规范哈希——**比一比**：不一致就**不要提供确认动作**（fail closed），并说清差在哪一类（例如「依赖 pin 少了 N 条」）。\n- **必须有一条能失败的测试**：复核员指出 `tests/e2e-release/harness/main.go:729` 的 fixture 候选**根本没有 pin**，所以这条路今天一次都没被跑过。给 fixture 加一个「钉住非公开版本的存量版本」，让「哈希一致 → 正常提供确认」与「不一致 → 拒绝提供」两个方向各有断言。\n- 如果 `integrity_hash` 与重建哈希**在设计上就不可比**（口径不同、规范化不同），不要硬比：**先把这个判断用文件行证死**（引 `internal/assets` 里算 hash 的那处原文），然后改成**把差异显式说出来并拒绝提供确认**——同样 fail closed，同样要测试。**不许**把它降级成「在 RESULT 里记一笔风险」：这一笔的 AC[3] 要的就是「阻断是硬的」。\n- **不许**改 `internal/**`、`cmd/**`（不在你范围内），也**不许**动服务端可见性语义。\n\n**3（minor，但按缺陷处理）：不要发明 rights 声明。** `publish.ts:508` 的 `stored.rights ?? defaultRightsDocument()`——API 答 null 时（`page.go` 的 `rightsOf` 对空文档返回 nil，`internal/assets/page.go`）你**造**了一份该版本从来没有的 rights 文档，还把这份发明渲染在「Rights / license」一栏；而发布门本来会诚实地拒掉「没有 rights 文档」的候选（`internal/assets/gate.go:176`，`CodeMissingRights`）。**把诚实拒绝换成了发明**，也违反了你自己写在 `asset-page.tsx:564` 的不变量（「Everything in the candidate is a fact the API just sent about THIS stored version」）。\n- 要求：删掉这个 fallback。API 没有就如实呈现「这个版本没有 rights 声明」，让门自己去拒。\n\n## 该修的 minor（复核员都给了行号）\n\n- **`publish.ts:527` 的兜底文案**：匿名读者跟着入口链接进来，只会看到「Something went wrong while publishing. Please try again.」——**一句假话**（当时并没有在发布），而这是本任务要求「可读」的那一页。把 `AUTH_UNAUTHENTICATED`、`VALIDATION_FAILED`、以及版本标签超长那一路（`internal/assets/asset.go:88`）各给一句说人话的文案；e2e 的匿名那条腿今天只断言「没有确认控件」，顺手加上断言它说的是人话。\n- **`publish.ts` 没有单元测试**：同目录每个模块都有 `*.test.mjs`，由 `scripts/web-unit-tests.sh` 跑（且有零匹配守卫）。你那个模块自己写着「import-free，好让 node:test 直接跑」——**这个缝你没用**。给 base64url 两个编解码、Go 规范 JSON 编码器、以及 `integrity_hash` 比较加上单元测试。\n- **`page.tsx:169-181` 那条 409 `ASSET_PUBLISH_BLOCKED` 分支没有测试**：e2e 只跑到了「版本标签被占」那一支，没跑到带阻断类别的那一支。补一条（走真栈）。\n- **`RESULT` 里 knowledge 那问的回答答偏了**：它答的是 research-profile/attestation，没提包里点名的 knowledge 路由。**判断是对的**（`***.go:249` 的 `Preview` 是 audience / review dimensions / blocking reasons 那一套形状，不是这六类清单），**把理由换成这个**。\n- **候选走 query 参数没有长度守卫**（`asset-page.tsx:564`）：元数据多的版本能把 URL 顶过 Node 默认 16KB 头限制，入口变成死链。给个守卫或在 RESULT 里写明并**开一条后续任务**，二选一，别沉默。\n- 两条 nit（内联样式挪进 `publish-confirm.css`；对已经 public 的版本仍提供「Publish this version publicly」的措辞）能顺手改就改，改不了就明说。\n\n## 边界\n\n- **不许**为了让哪条变绿去弱化既有断言、删测试、放宽 timeout；`AC[7]`（settings 的可见性控件与 `VISIBILITY_CHANGE_NOT_SUPPORTED` 行为不变）与 `tests/e2e-settings/settings-e2e.mjs:309-317` 两条断言仍然要绿。\n- **不许**改 `specs/**`、`docs/**`、`tasks/**`、`internal/**`、`cmd/**`、`infra/**`、`.github/**`。\n- 报告里 `style-parity.sh` 那条 red 是**先于你的改动**就存在的（复核员也这么判），**不要**去改挂具让它变绿，照原样留着并在 RESULT 里点明。\n- 定点补完，不要重写页面；复核员确认能复现的部分保持原样。\n- 这一轮若再因**真缺陷**被拒，下一轮换新工人（不是同一 session 继续）。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T11:37:04Z",
+          "run_id": "run-0b1123431e3002fc",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T12:13:15Z",
+          "run_id": "run-e92a6a74300cde07",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-22T12:30:49Z",
+          "run_id": "run-bf48fb58b5a19564"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-22T12:39:22Z",
+          "run_id": "run-0a8322d9bd7156a3",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T1104": {
       "status": "running",
-      "started_at": "2026-09-22T11:04:23Z",
-      "worker_run_id": "run-a294016c18c6c8fd",
-      "rejection_reason": "上一个工人在这个工作树里跑了 260 轮、**撞上模型上下文上限**（API 400: request exceeded model token limit 262144）死在半路，**没有交出 RESULT.json**。它留下的是一份未交付的半成品，不是一次可验收的交付。\n\n工作树里现在有它的残留（未提交）：\n- 改过：`Makefile`、`apps/web/app/(auth)/layout.tsx`、`apps/web/app/(main)/assets/assets.css`、`apps/web/app/(main)/auth-status.tsx`、`apps/web/app/(main)/projects/[id]/page.tsx`、`apps/web/app/(main)/projects/[id]/project-shell.tsx`、`apps/web/app/(main)/projects/[id]/releases/[releaseId]/release-detail.tsx`、`apps/web/app/(main)/search/search-answer.tsx`、`apps/web/app/globals.css`、`packages/ui/src/ui.css`、`tests/web-smoke/a11y-smoke.mjs`\n- 新增：`tests/web-smoke/a11y-harness/`、`tests/web-smoke/keyboard-checklist.md`、`tests/web-smoke/run-a11y.sh`\n- **站外的垃圾**：工作树根目录多了一个编译出来的 `a11y-harness` 二进制——它不在你的 allowed_scope（Makefile / packages/ui/** / apps/web/** / tests/**）里，收工时 scope 校验会因此判你不通过。**删掉它**，并且让构建产物落在临时目录（`go build -o \"$(mktemp -d)/a11y-harness\"`），不要落在仓库里。\n\n## 你要做什么\n\n1. **先自己核这份半成品**：它能站住的就留着并补完，站不住的（改错的、跑不通的、跟验收标准无关的）删掉重做。不要因为「它已经写了」就默认它对——没有人验收过它。RESULT.json 的 `files_changed` 必须逐条对上你最终真正改动的文件。\n2. 按任务书里的 9 条验收标准逐条做完，每条给出证据（命令 + 落账位置）。\n3. **为了不再撞上下文上限**（这是上一轮的死因）：\n   - 不要整文件 dump 大文件到上下文，用 grep / sed -n 定位需要的那几行；\n   - 不要反复重读同一棵树；探查只围绕 allowed_scope 与验收标准；\n   - 长输出写进文件再看摘要（`... > /tmp/x.log 2>&1` 然后 grep/tail），不要把几万行日志灌进上下文；\n   - **早点写 RESULT.json 并持续更新**，不要攒到最后——上一轮就是这么什么都没留下的。\n4. 注意 `packages/ui/src/ui.css` 与 `apps/web/app/globals.css` 刚刚被 T1101（Primer 风格统一）改过并已进 main，你的改动是叠在它之上的；不要回退 T1101 的收敛结果，你的 diff 必须是「在它之上再加可访问性」，不是「改回旧样式」。\n5. 不许为了让门变绿去改测试、改台账或改 `tasks/tests.json` 的 status。\n",
+      "started_at": "2026-09-22T13:42:48Z",
+      "worker_run_id": "run-3df29d7d38a9e415",
+      "rejection_reason": "T1104 第 5 轮（复核员第 2 次 request_changes）：我逐条复核后**同意两条 blocking**。这不是推倒重来 —— 缺陷只有两处、都很小；套件、覆盖面、两次反证、三处合成、14 张基线的重渲，复核员在他自己复制的树上**独立复现过**（`make a11y` 24 秒 EXIT=0、7 个有数据的核心页、两趟 axe 全 0；死 API → coverage 0 < 7 转红；`tabindex={3}` → 11 条 FAIL；视觉比对 17/17 零像素差；把 main 的 `asset-page.png` 换回去 → 恰好那一张 154 px 转红）。这些**保持原样**，不要动。\n\n我这边也独立跑过（在你这棵树上：`make a11y` 与两次视觉比对；改动 35 条路径与收工记录逐条一致；17 张基线校验和前后相同）。结论与复核员一致。**下面每一条我都自己核过原文与行号**，不是转述。\n\n## 必修（blocking）\n\n**B1. `tests/web-smoke/keyboard-checklist.md` 的「照着做」路径跑不通 —— 文档的要求是「能被人照着走完」（AC[1]/AC[2]），照今天印出来的命令走不到。**\n\n我核过的事实：\n- `tests/web-smoke/a11y-harness/main.go:98`：`addr := envDefault(\"A11Y_API_ADDR\", \"127.0.0.1:18192\")` —— **harness 自己的默认是 18192**。\n- 文档 :36 的第 1 步只 export 了 `POSTGRES_TEST_ADMIN_URL`，直接 `/tmp/a11y-harness` → 它绑 **18192**。\n- 文档 :41、:43 的第 2 步却用 `API_BASE_URL=http://127.0.0.1:18193`（18193 只存在于 `run-a11y.sh:23,29`，是它 `export A11Y_API_ADDR=\"$API_PORT\"` 之后才有的）→ 那个端口**没有东西在听**。\n- 后果不是\"少一条提示\"，是整份文档白读：动态页（项目总览、PR、release、asset、search）全部只渲染外壳 /「Project not found」，而 READY 里那串 fixture id 指向一个读者从未启动的应用。\n- 文档 :51-52 的括注还把 18193 说成是 harness 的默认（\"If port 31108 or 18193 is taken, `A11Y_WEB_PORT` / `A11Y_API_ADDR` override them\"），方向是**反的**：18192 才是默认，18193 是套件的选择。\n- :54-55 的备选（\"Alternatively, keep `make a11y` running and use its printed output\"）也不能用：`run-a11y.sh` 的 EXIT trap 会杀掉两个服务并 `DROP DATABASE ... WITH (FORCE)`，`make a11y` 一退出那些 id 就死了。\n\n要求：把第 1 步与第 2 步对齐（在 harness 那步 `export A11Y_API_ADDR=127.0.0.1:18193`，或把 `API_BASE_URL` 改成 18192 —— 选一个并在文档里写明为什么），修掉 :51-52 的括注与 :54-55 的备选（删掉，或写成真正可行的做法：自己起两个服务并**不退出**、说明 id 从哪来）。**并且证明它能走**：按文档原样起这两个服务（后台、别退出），`curl` 一个动态路由看到真内容、用 READY 里的 id 打开一个动态页看到 fixture 数据 —— 贴命令与输出，不要只贴文档 diff。走完把你起的两个服务收干净，工作树里不留残留。\n\n**B2. 需求第 6 条的后半句没有交付，而 RESULT 的 AC[5] 记为 passed —— 这是假覆盖面，也是这一轮被拒的主因。**\n\n需求原文（T1104 requirements[5]，逐字）：\"`aria-live` 在 `apps/web` 里零命中，而 `docs/28:5` 点名要它。加载与**提交**的状态播报要有个去处：…… **失败/成功提示是否被屏幕阅读器读到，你去逐条核并给出结论**。\"\n\n我核过你交的 RESULT（`grep` 计数）：`aria-live` 5、`role=\"status\"` 2、`role=\"alert\"` 2；而 `提交`=0、`失败`=0、`成功提示`=0、`Flash`=0、`login-card`=0、`review-saved`=0、`review-error`=0、`4.1.3`=0。note 8 列的十处**全是加载态与读失败**（auth-status ×3、project-shell、三张 profile 卡的 loading、search-answer 的答案加载与命名读失败、explore 读失败），**没有一条是提交后的成功/失败提示**。代码也支持这个判断：`apps/web/app/(auth)/login/login-card.tsx:96` 是 `<Flash variant=\"danger\" className=\"auth-flash\">`，无 `role`、无 `aria-live`；`pulls/[number]/page.tsx` 里 `grep` 不到任何提交结果播报。\n\n要求（复核员给的最小可接受做法，我同意）：**把「提交后的成功/失败提示」逐条列出来并逐条给结论** —— 每处写 `文件:行`、播报的是什么事件（成功/失败）、当前有没有被播报（有什么 `role`/`aria-live`，或没有）、结论（该播报就加上，或逐字写明为什么不加、代价是什么）。范围至少覆盖写操作类客户端的结果渲染（登录/注册、评审提交、资料与设置保存、冲突解决、evidence/discussion 提交，以及你自己 `grep` 出来的其它处）；**名下必须能对上**复核员点到的两处：`login-card.tsx:96` 的 Flash、`pulls/[number]/page.tsx` 的评审提交结果。该加 live region 的地方就加上（逐处说明选 `polite` 还是 `assertive`、绑的是哪个事件），加完 `make a11y` 必须仍是零违规。\n**并且把 RESULT 的 AC[5] 改成它真正交付了什么** —— 半句没做却声明\"两条缺口都有结论\"就是虚报；宁可写成\"加载态已落实；提交提示已逐条核过，其中 N 处刻意不加，理由如下\"。\n\n## 同一轮顺手修（复核员的 minor/nit，行号我都核过）\n\n**M3.** `tests/web-smoke/a11y-smoke.mjs:735-738` 的注释是错的：「THE FLOOR IS 6, AND WHY IT IS NOT 7 … this run drives SIX of those」，而 :771 是 `const CORE_PAGES_WITH_DATA_FLOOR = 7`，你运行的输出也是 7。行为是对的（复核员验过），错的是这段注释把反外壳契约说小了；改成与 7 一致。\n\n**M4.** RESULT 内部自相矛盾，**以交付树为准重写**：note 11 还写着「36 paths … 15 regenerated baseline PNGs … HEAD is unchanged at `a0a73d3e…`」，而交付的树是 `2f2611e`、**35** 条路径、**14** 张重渲；note 13 还留着第 2 轮的像素数（`project-files 76 px`、`release-detail 96 px`），note 17 已更正为「其余 16 张 0 px、只剩 asset-page 154 px」。note 8 写「8 sites」却列了十处。**RESULT 只能有一份事实**：每条都对着当前树核一遍再写。\n\n**M5.** `apps/web/app/(main)/search/search-answer.tsx:81` 的引用路径少了 `notifications/`：真实文件是 `apps/web/app/(main)/notifications/inbox-surface.tsx:61-63`（我核过，`createInboxClient(..., { csrfToken })` 就在那两行）。\n\n**M6.** `packages/ui/src/ui.css:594-597` 与 `:635-637`、`apps/web/app/(main)/assets/assets.css:285-288`：静止态有下划线（这是 1.4.1 的修复），但 `:hover, :focus-visible` 里 `text-decoration: none` 把它去掉了 —— 悬停/聚焦态只剩颜色差。改成「悬停/聚焦保留下划线、用颜色区分」，或逐字写出你不改的理由。**别拿基线图当挡箭牌**：视觉比对渲染的是静态页、没有 hover 态，改这三处不会动任何一张基线。\n\n## 边界（与上一轮相同，一条都不许松）\n\n- 不许改 `specs/**`、`docs/**`、`tasks/**`、`internal/**`、`cmd/**`、`.github/**`；`make a11y` 的 CI 接线仍由我合并后接（上一轮那段 YAML 我保留了，不用重写）。\n- 不许放宽 `TOLERANCE_PIXELS`、不许删/摘基线图、不许加 impact 白名单或 `disableRules`、不许回退 T1101/T1103 的收敛；基线只能重新渲染出来。\n- 改动路径应与收工记录一致（35 条）；根目录不留编译产物；两个服务用完收干净。\n- 收工前跑：`make a11y`（7 个有数据的核心页、两趟 axe 全 0）、`bash tests/web-smoke/visual-regression-run.sh`（17/17 零像素差）、`make browser-ok-arity`、`pnpm --filter @post/web typecheck && pnpm --filter @post/web lint`。\n\n## 为什么这一轮仍是 same-session rework\n\n两处缺陷位置明确、且都在你自己刚写完的文件里（文档那两行、RESULT 那一节），你核自己的东西最快。换新工人会 `reset --hard` + `clean -fd` 把这棵树清掉 —— 14 张重渲的基线、整套套件、harness 全要重做，对一笔其余部分已被独立复现通过的交付不划算。\n\n省上下文：别整文件 dump，长输出写文件再看摘要，**RESULT 早点更新、边做边改**。\n",
       "history": [
         {
           "from": "todo",
@@ -10105,6 +10148,83 @@
           "to": "running",
           "at": "2026-09-22T11:04:23Z",
           "run_id": "run-a294016c18c6c8fd",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-22T11:27:53Z",
+          "run_id": "run-3e8f1faf9449ae19",
+          "reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: AC[3] Coverage auditable: per-route table with scan state and both passes' violation counts; >= 7 core pages scanned 有数据 (docs/42's nine pages all exist except /knowledge/{id}); report missing routes honestly. (failed)"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T11:29:08Z",
+          "run_id": "run-5118ec561d9294f5",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T11:34:20Z",
+          "run_id": "run-3a0263982d17195e",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-22T12:12:28Z",
+          "run_id": "run-ea2d9d1ec6aaa7c2",
+          "reason": "复核员给的是 **request_changes**：**1 条 blocking、4 条 minor、3 条 nit**。无障碍本身它是认的（它在这棵树上自己跑了 `make a11y`：EXIT=0、52 ok、0 FAIL、7 个有数据的核心页、两趟 axe 全 0、两次变异都真的转红又复原、既有断言一条没被弱化）。**问题出在你改出来的像素与你的记账**。定点修，不要把整笔重做。\n\n## blocking：你改了 T1101 已入库的视觉基线覆盖的 3 个页面，而且 RESULT 里一个字没提\n\n- 证据（复核员做的，你按同样办法自己复现一遍）：`ui.css:591-597`（`.post-sidebar-trail a` 加 `text-decoration: underline`）、`ui.css:620-636`（accent trail `none` → `underline`）、`apps/web/app/(main)/assets/assets.css:280-288`（`.asset-published a` `none` → `underline`）——这三处让 `tests/web-smoke/visual-regression.mjs` 的 17 张基线里 **3 张超差**：`project-files.png` 76 px、`release-detail.png` 96 px、`asset-page.png` 154 px（`TOLERANCE_PIXELS=64`），于是 **`make browser-smoke` / `make browser-suites` 在你交的树上是红的**。对照组：只把这两个 CSS 文件回退到 HEAD，同一挂具 17 张全部 0 像素差、EXIT=0——**因就是这几个声明，没有别的**。\n- 要求（复核员给的改法，我同意）：**在同一次改动里重新生成这 3 张基线**，并在 RESULT 里写清「像素为什么应该变」——这几个下划线不是装饰，是 WCAG 1.4.1（不能只用颜色区分链接）的修复；同时把复核员那个对照组**自己复跑一遍**并把命令与输出贴进 RESULT，再贴重新生成后 `make browser-smoke` 的绿。\n- **不许**为了变绿去放大 `TOLERANCE_PIXELS`、删基线图、把某张图从比对列表里摘掉、或跳过视觉比对。基线图只能按真实渲染重新生成，且每张都要能指到上面那几条声明。\n\n## minor（复核员都给了行号）\n\n1. **`Makefile:430` 的 `a11y` 目标没有进 `.PHONY`**（`:42-45` 的清单里有 `browser-list`、`browser-smoke`、`browser-e2e*`、`browser-suites`、`browser-ok-arity`，独独漏了它）。**这一条不是洁癖**：我发现同一份清单在第 45 行末尾缺一个续行反斜杠，导致它后面那一行整行被 Make 当成 recipe、后续目标全部不是 phony——**这个清单极其脆**。所以：把它加进去，并且**用一条能证伪的命令**证明它真的生效（例如 `make -p` 里 `.PHONY` 的值包含 `a11y`，或先 `touch a11y` 再 `make a11y` 仍然执行），把输出贴进 RESULT。\n2. **`tests/web-smoke/run-a11y.sh:58` 用 `npm install` 而不是 `npm ci`**：判定 WCAG 的这道门自己不去锁 `tests/web-smoke/package-lock.json`（playwright 1.55.0、axe-core 4.10.3），等于每次从 registry 现解一遍。\n3. **同一个文件的三条失败路径（`:86`、`:91`、`:118`）承诺了日志却把它删掉**：它们打印 `...; log:` 就退出，而 EXIT trap 的清理（`:35-47`）把 `$WORK_DIR` 整个删了——日志就在里面。CI 上操作者只看到一个冒号。失败时把日志尾部打出来，或保留 `WORK_DIR`。\n4. **你交给我的 CI 片段有一个顺序错误**（这条会直接落到我合并后要接的接线里，所以必须改）：它把 `npx playwright install --with-deps chromium --only-shell`（`working-directory: tests/web-smoke`）放在装依赖**之前**，于是 npx 会去 registry 抓一个**未锁定**的 playwright（多下一次浏览器），而不是稍后 `run-a11y.sh` 自己装的那个 1.55.0。**改成：先锁文件安装，再装浏览器**，并在 RESULT 的片段里给出改后的完整样子。\n\n## nit（照实修，都是「可核性」问题）\n\n1. RESULT 第 8 条里三处行号指错：`project-shell.tsx:111` 是注释里（live region 在 `:117`）、`auth-status.tsx:73` 差一行（登录分支在 `:83`；`:62` 是 Spinner，未登录分支在 `:72`）、`search-answer.tsx:157/:190` 是 loading/error 外壳（`role=\"status\"`/`role=\"alert\"` 在 `:165`/`:198`）。**判定是对的，坐标要改对**。\n2. `tests[2].evidence` 引的 `/tmp/t1104/mutation.log` 末尾带着一个未处理的 `page.waitForSelector` 超时崩溃——那不是你要证明的那次「干净转红」。**把引用改成**真正干净的那一对（变异 → 红；复原 → 绿），并把那个崩溃在 RESULT 里说明是返工中已修掉的东西。\n3. `keyboard-checklist.md:22` 让读者「把同样的三个进程留着别关」，却从没说这三个进程是什么、怎么起。补上命令与环境（或直接指向 `run-a11y.sh` 里起它们的那几行）。\n\n## 边界\n\n- **不许**弱化任何既有断言、不许删测试、不许放宽 timeout、不许动 `TOLERANCE_PIXELS` 或基线清单来「变绿」；不许回退 T1101 在 `packages/ui/src/ui.css` / `apps/web/app/globals.css` 上的收敛。\n- 不许改 `specs/**`、`docs/**`、`tasks/**`、`internal/**`、`cmd/**`、`.github/**`；`make a11y` 的 CI 接线仍由我合并后接（你只要把片段改对）。\n- 省上下文：别整文件 dump，长输出写文件再看摘要，**RESULT 早点更新**。\n- 这一轮若再因**真缺陷**被拒，下一轮换新工人（不是同一 session 继续）。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T12:12:34Z",
+          "run_id": "run-7c21990251a308a0",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T12:32:15Z",
+          "run_id": "run-5f37c88d3b88099b",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-22T12:56:31Z",
+          "run_id": "run-67ba30fc21413a5b",
+          "reason": "【这不是缺陷 —— 基线推进；两处冲突三方合成不了，由我手工合成。请在新基线上重验并原样重新提交】\n\n你上一轮交付的东西是好的，**这一轮的返工请求不是因为它有缺陷**，而是因为：验收（G2，验证的是「当前 main + 你这个任务的完整改动」）时发现你的改动已经不能干净地落到 main 上了——`rddev task accept` 的原话是：\n\n    the task's change does not apply to current main — bring the branch up to date and re-run:\n    git apply /tmp/post-integration-T1104-3707457783.patch: exit status 1: error: patch failed: Makefile:42\n\n你的分支（基线 a0a73d3）停在你开工那天，main 已经走到 **2f2611e**。这中间 main 上多了：\n\n- `6c84ca3` **[T1103] Publication/Visibility Security UX (#349)** —— 它改了 `apps/web/app/(main)/assets/asset-page.tsx`、`assets/assets.css`（追加 `.asset-publish*` 规则）、新增发布确认页，并且**重新渲染了 `tests/web-smoke/baseline/asset-page.png` 这一张基线**；\n- `477e191` **[T1109] 生产级 Observability/Dashboards (#348)** 与 `185f6bf`（我修的 Makefile 缺陷）：给 `.PHONY` 清单加了第 46 行 `observability-smoke observability-trace observability-route`，并给第 45 行**补回一个丢掉的续行反斜杠**。\n\n**我已经把你的分支推到 2f2611e**（`git log -1` 能看到），你的完整改动原样重新应用，逐个文件比对一致。**只有两处三方合并合不了**——`git apply --3way` 在同样的行上两边都改了，按 `rddev` 的设计这属于「要人来定的合成」，由我（Supervisor）合成：\n\n## 合成 1：`Makefile`（我改了第 45 行尾部）\n\n- 冲突的形状：main 在第 45 行末尾加了 ` \\` 并新增第 46 行；你在**同一行**末尾加了 ` a11y`。\n- 合成结果（第 45-46 行）：\n\n      browser-list browser-smoke browser-smoke-% browser-e2e browser-e2e-nodb browser-e2e-db browser-e2e-% browser-suites browser-ok-arity a11y \\\n      observability-smoke observability-trace observability-route\n\n- 我已经用能证伪的命令验过合成后的文件：`make -n a11y` 打印 `bash tests/web-smoke/run-a11y.sh`；`make -n observability-smoke` 打印两个 observability 脚本；`make -p` 里 `.PHONY` 同时含 `a11y`、`browser-ok-arity`、`observability-smoke|trace|route`。\n- **你要做的**：在你的树上把上一轮 minor 1 那个「能证伪的一对」重跑一遍（`touch a11y && make -n a11y`，以及把 `a11y` 从 `.PHONY` 里去掉再跑一次的反面对照），把输出贴进 RESULT。**理由**：那对证据是上一轮在旧上下文里做的，文件的上下文变了，证据要重做。\n\n## 合成 2：`tests/web-smoke/baseline/asset-page.png`（我取了 main 的那一张作起点）\n\n- 冲突的形状：T1103 在 main 上也动了 asset 页面并重渲了**同一张**基线；PNG 不能按文本合并，两边单取谁都不对（你那张是「a0a73d3 的页面 + 你的 CSS」，main 那张是「T1103 的页面、没有你的 CSS」）。\n- 我取的是 **main 的那张**（保住 main 上已验收的东西），**所以这张基线现在必须由你在新基线上重新渲染**——带 T1103 的页面改动 + 你的 CSS。\n- **注意这不止一张的事**：17 张基线里你改过 15 张，其中 **14 张**（`project-***`、`pull-detail`×4、`release-detail`、`research-profile`）原样带过来了，只有 `asset-page.png` 这一张是上述冲突；另外 2 张（`projects-directory.png`、`search-answer.png`）你没改。但 T1103 动过 asset 页面，而 CI 里**没有**跑这套视觉比对（这正是上一轮那张基线悄悄漂移没人发现的原因），所以「另外那 14 张在新基线上仍然 0 px」这句话只能由你跑出来。\n\n## 合成 3（三方合成成功，但请你核一遍）：`apps/web/app/(main)/assets/assets.css`\n\n这个文件两边都改了，git 三方合成**成功**了：T1103 在文件末尾追加 `.asset-publish` / `.asset-publish-link` / `.asset-publish-withheld` 几个规则，你的改动在别处。**请你自己 diff 一遍**（`git diff 2f2611e -- \"apps/web/app/(main)/assets/assets.css\"`），确认合成没有动到你自己的声明，也没有把 T1103 的规则吃掉。\n\n## 你要做的事（定点，不要整笔重做上一轮已经修好的 minors/nits）\n\n1. **重渲 `tests/web-smoke/baseline/asset-page.png`**：在 2f2611e 的树上、带上 T1103 的页面改动与你的 CSS。做法照上一轮（`UPDATE_BASELINE=1 bash tests/web-smoke/visual-regression-run.sh`）。\n2. **对照组要能指向「两边之和」**：把 `asset-page.png` 换回 main 的原图（`git show 2f2611e:tests/web-smoke/baseline/asset-page.png > tests/web-smoke/baseline/asset-page.png`）重跑 `bash tests/web-smoke/visual-regression-run.sh`，把差异像素数贴出来——它应当**不为 0**（你的 CSS 合法地移动了这些像素：WCAG 1.4.1 的下划线）；再把你的那几条 CSS 声明撤掉重跑，对照另一边。两次都要贴命令与输出。\n3. **跑完整套并确认其余 14 张你改过的基线仍是 0 px**：`bash tests/web-smoke/visual-regression-run.sh` → EXIT=0、差异为 0。\n4. **重跑任务要求的用例**：`make a11y`（即 required test `T1104-TEST-01` a11y suite）与 `make browser-smoke`，两个都要 EXIT=0。\n5. **更新 `RESULT.json`**：加一节「基线推进与三处合成」，写清上面 1/2/3 的证据、你重渲后 asset-page 的像素差、以及合成 3 的自查结论；`status` 只有在 required test 全绿时才能写 `completed`。**上一轮已修好的 minors/nits 不需要重做，证据照旧保留**（带新跑的输出更好）。\n\n## 边界（与上一轮相同，一条都没放宽）\n\n- **不许**弱化任何断言、不许删测试、不许放宽 timeout、不许动 `TOLERANCE_PIXELS`（仍是 64）或基线清单来「变绿」；基线图只能按真实渲染重新生成。\n- **不许**回退 T1101 在 `packages/ui/src/ui.css`、`apps/web/app/globals.css` 上的收敛，也**不许**回退 T1103 在 asset 页面上的东西（`.asset-publish*` 规则、`asset-page.tsx` 的发布入口、`publish/` 新页面）。\n- 不许改 `specs/**`、`docs/**`、`tasks/**`、`internal/**`、`cmd/**`、`.github/**`；`make a11y` 的 CI 接线仍由我合并后接（你只要保证上一轮那个 YAML 片段是改对过的样子）。\n- 省上下文：别整文件 dump，长输出写文件再看摘要，**RESULT 早点更新**。\n- 这一轮若因**真缺陷**被拒，下一轮换新工人（不是同一 session 继续）。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T12:56:38Z",
+          "run_id": "run-59c22e91b6f6c1f1",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T13:10:43Z",
+          "run_id": "run-87dc4696adc69644",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-22T13:42:43Z",
+          "run_id": "run-af5316d23659b320",
+          "reason": "T1104 第 5 轮（复核员第 2 次 request_changes）：我逐条复核后**同意两条 blocking**。这不是推倒重来 —— 缺陷只有两处、都很小；套件、覆盖面、两次反证、三处合成、14 张基线的重渲，复核员在他自己复制的树上**独立复现过**（`make a11y` 24 秒 EXIT=0、7 个有数据的核心页、两趟 axe 全 0；死 API → coverage 0 < 7 转红；`tabindex={3}` → 11 条 FAIL；视觉比对 17/17 零像素差；把 main 的 `asset-page.png` 换回去 → 恰好那一张 154 px 转红）。这些**保持原样**，不要动。\n\n我这边也独立跑过（在你这棵树上：`make a11y` 与两次视觉比对；改动 35 条路径与收工记录逐条一致；17 张基线校验和前后相同）。结论与复核员一致。**下面每一条我都自己核过原文与行号**，不是转述。\n\n## 必修（blocking）\n\n**B1. `tests/web-smoke/keyboard-checklist.md` 的「照着做」路径跑不通 —— 文档的要求是「能被人照着走完」（AC[1]/AC[2]），照今天印出来的命令走不到。**\n\n我核过的事实：\n- `tests/web-smoke/a11y-harness/main.go:98`：`addr := envDefault(\"A11Y_API_ADDR\", \"127.0.0.1:18192\")` —— **harness 自己的默认是 18192**。\n- 文档 :36 的第 1 步只 export 了 `POSTGRES_TEST_ADMIN_URL`，直接 `/tmp/a11y-harness` → 它绑 **18192**。\n- 文档 :41、:43 的第 2 步却用 `API_BASE_URL=http://127.0.0.1:18193`（18193 只存在于 `run-a11y.sh:23,29`，是它 `export A11Y_API_ADDR=\"$API_PORT\"` 之后才有的）→ 那个端口**没有东西在听**。\n- 后果不是\"少一条提示\"，是整份文档白读：动态页（项目总览、PR、release、asset、search）全部只渲染外壳 /「Project not found」，而 READY 里那串 fixture id 指向一个读者从未启动的应用。\n- 文档 :51-52 的括注还把 18193 说成是 harness 的默认（\"If port 31108 or 18193 is taken, `A11Y_WEB_PORT` / `A11Y_API_ADDR` override them\"），方向是**反的**：18192 才是默认，18193 是套件的选择。\n- :54-55 的备选（\"Alternatively, keep `make a11y` running and use its printed output\"）也不能用：`run-a11y.sh` 的 EXIT trap 会杀掉两个服务并 `DROP DATABASE ... WITH (FORCE)`，`make a11y` 一退出那些 id 就死了。\n\n要求：把第 1 步与第 2 步对齐（在 harness 那步 `export A11Y_API_ADDR=127.0.0.1:18193`，或把 `API_BASE_URL` 改成 18192 —— 选一个并在文档里写明为什么），修掉 :51-52 的括注与 :54-55 的备选（删掉，或写成真正可行的做法：自己起两个服务并**不退出**、说明 id 从哪来）。**并且证明它能走**：按文档原样起这两个服务（后台、别退出），`curl` 一个动态路由看到真内容、用 READY 里的 id 打开一个动态页看到 fixture 数据 —— 贴命令与输出，不要只贴文档 diff。走完把你起的两个服务收干净，工作树里不留残留。\n\n**B2. 需求第 6 条的后半句没有交付，而 RESULT 的 AC[5] 记为 passed —— 这是假覆盖面，也是这一轮被拒的主因。**\n\n需求原文（T1104 requirements[5]，逐字）：\"`aria-live` 在 `apps/web` 里零命中，而 `docs/28:5` 点名要它。加载与**提交**的状态播报要有个去处：…… **失败/成功提示是否被屏幕阅读器读到，你去逐条核并给出结论**。\"\n\n我核过你交的 RESULT（`grep` 计数）：`aria-live` 5、`role=\"status\"` 2、`role=\"alert\"` 2；而 `提交`=0、`失败`=0、`成功提示`=0、`Flash`=0、`login-card`=0、`review-saved`=0、`review-error`=0、`4.1.3`=0。note 8 列的十处**全是加载态与读失败**（auth-status ×3、project-shell、三张 profile 卡的 loading、search-answer 的答案加载与命名读失败、explore 读失败），**没有一条是提交后的成功/失败提示**。代码也支持这个判断：`apps/web/app/(auth)/login/login-card.tsx:96` 是 `<Flash variant=\"danger\" className=\"auth-flash\">`，无 `role`、无 `aria-live`；`pulls/[number]/page.tsx` 里 `grep` 不到任何提交结果播报。\n\n要求（复核员给的最小可接受做法，我同意）：**把「提交后的成功/失败提示」逐条列出来并逐条给结论** —— 每处写 `文件:行`、播报的是什么事件（成功/失败）、当前有没有被播报（有什么 `role`/`aria-live`，或没有）、结论（该播报就加上，或逐字写明为什么不加、代价是什么）。范围至少覆盖写操作类客户端的结果渲染（登录/注册、评审提交、资料与设置保存、冲突解决、evidence/discussion 提交，以及你自己 `grep` 出来的其它处）；**名下必须能对上**复核员点到的两处：`login-card.tsx:96` 的 Flash、`pulls/[number]/page.tsx` 的评审提交结果。该加 live region 的地方就加上（逐处说明选 `polite` 还是 `assertive`、绑的是哪个事件），加完 `make a11y` 必须仍是零违规。\n**并且把 RESULT 的 AC[5] 改成它真正交付了什么** —— 半句没做却声明\"两条缺口都有结论\"就是虚报；宁可写成\"加载态已落实；提交提示已逐条核过，其中 N 处刻意不加，理由如下\"。\n\n## 同一轮顺手修（复核员的 minor/nit，行号我都核过）\n\n**M3.** `tests/web-smoke/a11y-smoke.mjs:735-738` 的注释是错的：「THE FLOOR IS 6, AND WHY IT IS NOT 7 … this run drives SIX of those」，而 :771 是 `const CORE_PAGES_WITH_DATA_FLOOR = 7`，你运行的输出也是 7。行为是对的（复核员验过），错的是这段注释把反外壳契约说小了；改成与 7 一致。\n\n**M4.** RESULT 内部自相矛盾，**以交付树为准重写**：note 11 还写着「36 paths … 15 regenerated baseline PNGs … HEAD is unchanged at `a0a73d3e…`」，而交付的树是 `2f2611e`、**35** 条路径、**14** 张重渲；note 13 还留着第 2 轮的像素数（`project-files 76 px`、`release-detail 96 px`），note 17 已更正为「其余 16 张 0 px、只剩 asset-page 154 px」。note 8 写「8 sites」却列了十处。**RESULT 只能有一份事实**：每条都对着当前树核一遍再写。\n\n**M5.** `apps/web/app/(main)/search/search-answer.tsx:81` 的引用路径少了 `notifications/`：真实文件是 `apps/web/app/(main)/notifications/inbox-surface.tsx:61-63`（我核过，`createInboxClient(..., { csrfToken })` 就在那两行）。\n\n**M6.** `packages/ui/src/ui.css:594-597` 与 `:635-637`、`apps/web/app/(main)/assets/assets.css:285-288`：静止态有下划线（这是 1.4.1 的修复），但 `:hover, :focus-visible` 里 `text-decoration: none` 把它去掉了 —— 悬停/聚焦态只剩颜色差。改成「悬停/聚焦保留下划线、用颜色区分」，或逐字写出你不改的理由。**别拿基线图当挡箭牌**：视觉比对渲染的是静态页、没有 hover 态，改这三处不会动任何一张基线。\n\n## 边界（与上一轮相同，一条都不许松）\n\n- 不许改 `specs/**`、`docs/**`、`tasks/**`、`internal/**`、`cmd/**`、`.github/**`；`make a11y` 的 CI 接线仍由我合并后接（上一轮那段 YAML 我保留了，不用重写）。\n- 不许放宽 `TOLERANCE_PIXELS`、不许删/摘基线图、不许加 impact 白名单或 `disableRules`、不许回退 T1101/T1103 的收敛；基线只能重新渲染出来。\n- 改动路径应与收工记录一致（35 条）；根目录不留编译产物；两个服务用完收干净。\n- 收工前跑：`make a11y`（7 个有数据的核心页、两趟 axe 全 0）、`bash tests/web-smoke/visual-regression-run.sh`（17/17 零像素差）、`make browser-ok-arity`、`pnpm --filter @post/web typecheck && pnpm --filter @post/web lint`。\n\n## 为什么这一轮仍是 same-session rework\n\n两处缺陷位置明确、且都在你自己刚写完的文件里（文档那两行、RESULT 那一节），你核自己的东西最快。换新工人会 `reset --hard` + `clean -fd` 把这棵树清掉 —— 14 张重渲的基线、整套套件、harness 全要重做，对一笔其余部分已被独立复现通过的交付不划算。\n\n省上下文：别整文件 dump，长输出写文件再看摘要，**RESULT 早点更新、边做边改**。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T13:42:48Z",
+          "run_id": "run-3df29d7d38a9e415",
           "reason": "worker spawn"
         }
       ]
@@ -10347,10 +10467,11 @@
       ]
     },
     "T1109": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-22T11:08:40Z",
       "worker_run_id": "run-dd8f3e46ad873411",
-      "accepted_by_supervisor_at": "2026-09-21T22:27:59Z",
+      "accepted_by_supervisor_at": "2026-09-22T12:01:10Z",
+      "merged_at": "2026-09-22T12:30:59Z",
       "rejection_reason": "【这不是缺陷 —— 基线推进 + 一次合并冲突，已由 Supervisor 合成完毕，请你在这颗树上重新验证】\n\nmain 在你离开的这段时间前进了（T1205/T1208/T1206/T1101 等先后合并），你的分支与 main 冲突，`rddev pr merge` 因此拒绝过（PR #348 状态 CONFLICTING）。**冲突只有一个文件：`Makefile`**，而且是两处「两边都在同一个锚点后面插自己的东西」：\n\n1. `.PHONY` 续行列表：main 插了 `browser-list browser-smoke … browser-ok-arity`，你插了 `observability-smoke observability-trace observability-route`；\n2. 目标定义区：main 插了一整块 `browser-*` 目标（T1112 的浏览器套件），你插了 `observability-*` 三个目标。\n\n**Supervisor 已按「两边都留」把这颗树合成好并 rebase 到当前 main**（本工作树就是合成后的树）：\n- `.PHONY` 续行两行都在；\n- main 的 `browser-*` 目标块与你的 `observability-*` 目标块都在，顺序是 main 的在前、你的在后；\n- 合成后 `make -n help`、`make -n browser-list`、`make -n observability-trace` 都能解析，`Makefile` 里没有冲突标记。\n\n你的改动本身**没有**被改语义：被 main 改过的其它文件（`cmd/api/**`、`internal/**` 等）rebase 时都干净落地，没有一处需要你重做。\n\n## 你要做的事\n\n1. **在这颗合成后的树上重新跑一遍你的验收测试**（`tests/observability/**` 与 Makefile 里那三个目标所对应的东西；需要 `make infra-up` 起 compose 栈的，就照常起）。`Makefile` 现在是 main 的 browser 块 + 你的 observability 块，两者都要能跑。\n2. **如实更新 `RESULT.json`**：基线换成当前这颗树（写 `git rev-parse HEAD` 的 sha），`tests[]` 写你这次真正跑过的命令与真实结果；跑不动的写 `blocked` 并说明原因，失败就写失败。\n3. 在 `notes_for_supervisor` 里记一笔：**Makefile 的两处冲突是 Supervisor 按「两边都留」合成的**，你只做了验证，没有再解决冲突。\n4. **不要**回退 main 的 `browser-*` 目标、不要动 T1112 的 `browser-ok-arity` 守卫、不要为让某条判定变绿去删测试或改 `tasks/tests.json`。\n5. 若你发现 main 的新接口与你的调用方对不上：**按 main 的新接口改你的调用方**，不要改回旧接口；改不动的写进 RESULT 由 Supervisor 裁定。\n",
       "history": [
         {
@@ -10551,6 +10672,26 @@
           "at": "2026-09-22T11:08:40Z",
           "run_id": "run-dd8f3e46ad873411",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T11:44:52Z",
+          "run_id": "run-57131e7d141902df",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-22T12:01:10Z",
+          "run_id": "run-c56052c547ce2ed2"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-22T12:30:59Z",
+          "run_id": "run-5a03dca1caf68467",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
@@ -11174,10 +11315,10 @@
       ]
     },
     "T1207": {
-      "status": "verification",
-      "started_at": "2026-09-22T11:01:19Z",
-      "worker_run_id": "run-b8711f17ddf25043",
-      "rejection_reason": "T1207 复核判定 request_changes：1 blocking、1 major、1 nit。报告的骨架是好的（Gate A–I 加 Development System Gate 十条都在、脚本会自检条数、明确写出了\"排除了 T1207 自己\"），但它是**对着旧的 main（514c15f）写的**，而 main 之后前进了（T1206 合并、T1101 合并）。这份报告要 certify 的那颗树才是它必须对着的树。\n\n## blocking\n\n1. 报告与审计脚本钉在基线 514c15f：报告里写着有 24 条 blocking 测试是 not_run，并把 T1206-TEST-01 列为 not_run。但当前 main 上 T1206-TEST-01 已是 passed（fa0cc9c 记录的），真实的 blocking not_run 是 **23** 条。后果很硬：合进 main 之后 `bash tests/acceptance/v1-final-audit.sh` 会因为条数对不上直接非零退出——一份\"最终验收报告\"自带的那条必跑测试，在 merge 后是红的。\n\n## major\n\n1. blob 写入路径那条发现写着「全树搜索 `request-upload` / `requestUpload` 零命中」，但 `specs/api/openapi.yaml:234` 就有 `/projects/{projectId}/branches/{branchId}/blobs:request-upload:`。结论（产品代码里没有实现）是对的，但\"全树零命中\"这句话本身是假的，会让整份报告的取证可信度下降。\n\n## nit\n\n1. `tests/acceptance/v1-final-audit.sh` 里「部署的 search 没有接任何 planner / embedder / answer provider」这条 marker 检查写了两遍（一遍双引号、一遍单引号）。删掉一份。\n\n## 返工要求\n\n1. 这次返工已经替你 rebase 到当前 main 了，工作树 = 当前 main 顶端 + 你的改动。先用 `git rev-parse HEAD` 记下你重新生成时对着的那颗树的 sha，并写进报告。\n2. 所有数字重新取一遍，不许沿用旧基线抄下来的数：blocking not_run 条数、T1206-TEST-01 的当前状态、v1_required 待办条数、`tasks/tests.json` 的整体分布。修完后 `bash tests/acceptance/v1-final-audit.sh` 必须在当前树上退出 0。\n3. request-upload 那条改写成事实：OpenAPI 里**声明**了这个端点（`specs/api/openapi.yaml:234`），产品代码里没有实现/没有 handler。给出你实际跑过的检索命令与命中行。\n4. 报告里凡是\"零命中 / 全部 / 都 / 无一处\"这类全称断言，都要附上你实际跑的命令和它的输出落在哪里；跑不出全称结论的就不要写全称。抽查任意三条证据，按你写的命令复跑必须复现你的判定。\n5. 不许为了让脚本变绿去改测试、改台账或改 `tasks/tests.json` 的 status——账本只能由 `scripts/record_test_run.py` 写真跑结果。报告只是报告。\n",
+      "status": "rejected",
+      "started_at": "2026-09-22T11:27:55Z",
+      "worker_run_id": "run-d2621c2d613c49c0",
+      "rejection_reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: **v1_required 逐条列，且要排除本任务自己**：报告里的任务清单条数 = 非 merged 的 v1_required 条数（排除 T1207），由脚本生成而非手写；脚本要把「排除了谁」打印出来。**除 T1207 外应为 0**。 (failed)",
       "history": [
         {
           "from": "todo",
@@ -11233,6 +11374,27 @@
           "at": "2026-09-22T11:07:26Z",
           "run_id": "run-80f801e4c6263e74",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-22T11:27:53Z",
+          "run_id": "run-e30a6e5bed332c1c",
+          "reason": "T1207 复核第 2 次判定 request_changes：1 blocking、2 major。复核员把这份报告对着冻结树**逐条复跑**过——审计脚本 exit 0、Gate H 的两行安全项、R3/R5–R11 的每条代码级断言、报告引用的 64 个测试 ID 全部存在且与台账一致——**绝大部分是站得住的**。所以这轮不要重写报告，只做定点修复。\n\n## blocking\n\n1. **R4 里的第二条证据是假的，复跑不出来。** 原文写「`internal/application/reopens/service.go` 步骤序注释与代码顺序相反（注释称 agent backstop 在 authorization 之前，实际 `requireAgent` 在 `requireReopen` 之后调用）」。**我自己在树里核过**：\n\n   - `requireAgent` 在 `internal/application/reopens/service.go:224`；\n   - `requireReopen` 在 `:227`——**`requireAgent` 在前**；\n   - `requireAgent` 自己的文档注释（`:379-381`）逐字写着 'it is deliberately the FIRST of the two lines'。\n\n   注释与代码一致，这里**没有**顺序颠倒。请把这条证据删掉或改成事实（例如「注释与代码一致，此处无缺陷」），并顺手检查报告里其它同类全称断言是不是也有一边倒的措辞。\n\n## major\n\n1. **R4 缺了任务书包里指定必须写的那句话。** 备注要求报告写明：**这一条今天没有任何任务承接**（原文「第 2 条今天没有任何任务承接」），并写明规则——凡说「有任务承接」必须指到那个任务的书；同时引 `tasks/decisions.md:16971`（「A/F/G 至今没有承接者」）。现在 R4 只写了「决定后由新任务修复注释/顺序/失败回退行为」，既没说今天无人承接，也没带这条可追溯规则。\n2. **`RESULT.json` 里 AC4 的记账不诚实。** AC4 的字面目标「除 T1207 外应为 0」在树上**不成立**（实际 5 笔未合并），报告正文对此是诚实的（:10 的抬头、:39-41 的台账滞后说明），但 RESULT 把这条记为 `passed`，collect 因此读到「6 条 acceptance 全过」。**报告不用改**（AC6 禁止把 0 造出来），要改的是 RESULT 的记账：这条应按实际写成「字面目标未满足（5 笔未合并），报告已如实披露」，不要记为 passed。\n\n## minor（一并修掉，复核员给了证据）\n\n1. R6 的出处指向错行：引的是 `internal/search/answer/grounding.go:206 的注释`，但 :206 是 `strings.ContainsRune(token, '@')` 那行判定；那条边界说明在 `:173`。结论没错，行号错了。\n2. Gate C 的资产那一半（:123, :128）只有「T0706/T0708/T0710 已 merged」这样的状态句，**没有命令、没有台账位置**；`T0709 资产页已合并` 同样无出处。要么补命令+落账位置，要么按「未验证」标注（要求 2/AC1 要的是每条都有命令）。\n3. 审计脚本只钉了**条数**，没钉**名单**：它比对「计数：N / 0」、blocking not_run 条数、分布标记，却从没把报告里那 23 个 ID 的表、五笔任务清单和脚本自己的输出对过。复核员在副本上做过变异——把五行任务换成不存在的 T9999/T9998… 而「计数：5 / 0」保持不动——脚本照样通过。**请把名单也钉上**（脚本是这份报告唯一的自检手段，只钉条数等于没钉）。\n4. R4 的「出处」写 `tasks/decisions.md` ⑲ 及 **2026-09-19 更正**；⑲ 里那次更正是 **2026-09-21** 的（`tasks/decisions.md:16971`）。日期指错了。\n5. §4 的复现命令清单里列了 `bash tests/acceptance/mof-canonical-workflow.sh`，但没写明**这一轮没有重跑它**（它需要整套服务栈）。Gate I 的数字归给 T1202 的记录是对的，RESULT 也写了，但平铺的命令清单会被读成本轮证据。\n\n## 边界\n\n- **不许为了变绿削弱审计脚本**：它只能变强（钉名单、钉更多断言），不能放宽、不能删检查。\n- **不许改 `tasks/tests.json` 的 status**，也不许把「未验证」写成「通过」。\n- 定点修，不要重写整份报告——复核员确认能复现的部分保持原样。\n- 这一轮若再因**真缺陷**被拒，下一轮换新工人（不是同一 session 继续）。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T11:27:55Z",
+          "run_id": "run-d2621c2d613c49c0",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-22T11:31:06Z",
+          "run_id": "run-356466a8f2c2509f",
+          "reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: **v1_required 逐条列，且要排除本任务自己**：报告里的任务清单条数 = 非 merged 的 v1_required 条数（排除 T1207），由脚本生成而非手写；脚本要把「排除了谁」打印出来。**除 T1207 外应为 0**。 (failed)"
         }
       ]
     },

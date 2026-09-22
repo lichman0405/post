@@ -1,3 +1,31 @@
+> **当前这一刻（2026-09-22 21:45）**：T1104 的**第二次独立复核**给的是 `request_changes`（2 blocking），我逐条核过原文与行号后**同意**，已 `task reject` + `worker rework`（`run-3df29d7d38a9e415`，pid 3174580，同 session，树保留在 `2f2611e`）。
+>
+> - **先说一句最硬的事实：accept 的 G2 是全绿的。** `accept-run-d76b0a47828a096d.json` 记 `G1 passed / G2 passed / G3 passed / G4 failed`，
+>   G4 的唯一理由是「the latest review verdict is "request_changes" with 2 blocking finding(s)」。G2 那 8 个 job（CI 的**逐字**步骤）在本机
+>   21:24:53→21:42:05 跑完、全过——也就是说**合成本的那棵树通过了完整的 CI 等价集合**，被挡住的只有复核判定这一条。
+> - **复核员是独立复现的，不是读我的账**：他把自己复制的整棵树放在 `/tmp` 里跑（没写工作树），得到 `make a11y` 24 秒 EXIT=0、7 个有数据的核心页、两趟 axe 全 0；
+>   死 API → `core pages scanned with data: 0` + `FAIL coverage … 0 < 7`；`tabindex={3}` → 11 条 FAIL；视觉比对 17/17 零像素差；
+>   把 main 的 `asset-page.png` 换回去当基线 → **恰好那一张 154 px 转红**，其余 16 张 0。**三处合成站得住。**
+> - **我自己也独立跑了一遍**（同在 `2f2611e` 这棵树上）：`make a11y` EXIT=0（22 秒，端口用 18194/31109 避开复核员可能并发的默认端口）、
+>   视觉比对 17/17 零像素差、反证对照 154 px（我把它拆开看：**2 行**，`y=88` 42 px（侧栏面包屑）、`y=185` 112 px（正文链接，x 412-420 与 425-527 之间 4 px 空隙）——
+>   是「下划线」的形状，不是版面错位）。证据落在 `.rddev/runtime/supervisor-g2/`（`T1104-G2-NOTES.md` + 四份 log）。
+>   跑完核过：改动仍是 **35 条路径**，与收工记录逐条一致；17 张基线校验和前后相同——**我这两次跑没在树里留残留**。
+> - **blocking 1：手工键盘文档照做跑不通。** `a11y-harness/main.go:98` 的默认是 `127.0.0.1:18192`；文档第 1 步直接起 harness（绑 18192），
+>   第 2 步却 `API_BASE_URL=http://127.0.0.1:18193`（18193 只存在于 `run-a11y.sh:23,29` 的 `export A11Y_API_ADDR`）——**照印出来的命令走，动态页全是空壳**。
+>   文档 :51-52 的括注把两个默认说反了；:54-55 的「keep `make a11y` running」也不可行（EXIT trap 杀两个服务并 `DROP DATABASE … WITH (FORCE)`）。
+>   AC[1]/AC[2] 要的是「能被人照着走完」，所以这条是实打实的。
+> - **blocking 2：需求第 6 条的后半句没交，AC[5] 却记成 passed —— 这是假覆盖面，也是这一轮被拒的主因。** 需求原文要的是
+>   「**失败/成功提示是否被屏幕阅读器读到，你去逐条核并给出结论**」；我 `grep` 他交的 RESULT：`提交`=0、`失败`=0、`成功提示`=0、`Flash`=0、`login-card`=0、`4.1.3`=0，
+>   note 8 那十处**全是加载态与读失败**。代码也对得上：`(auth)/login/login-card.tsx:96` 的 `<Flash variant="danger">` 没有 `role`/`aria-live`。返工信要求逐处列 `文件:行` + 事件 + 现状 + 结论，并把 AC[5] 改成真正交付的东西。
+> - **顺手修的 4 处**（我都核过行号）：`a11y-smoke.mjs:735-738` 注释写「THE FLOOR IS 6 … drives SIX」而 `:771` 是 `= 7`；RESULT note 11 还写着 36 paths/15 张/`a0a73d3e`（交付的是 35 条/14 张/`2f2611e`）、note 13 还留着第 2 轮的 76/96 px、note 8 说 8 却列了 10；
+>   `search-answer.tsx:81` 引用少写 `notifications/`（真实是 `apps/web/app/(main)/notifications/inbox-surface.tsx:61-63`）；`ui.css:594-597`/`:635-637`、`assets.css:285-288` 在 `:hover`/`:focus-visible` 里把下划线去掉（静止态才有 = 1.4.1 只在静止态成立）。
+> - **这一轮为什么仍是 same-session rework**：两处缺陷都在他刚写完的文件里、位置明确；`respawn` 会 `reset --hard` + `clean -fd` 把这棵树清掉——**14 张重渲的基线与整套套件都要重做**，对一笔其余部分已被独立复现通过的交付不划算。
+> - **流程上踩到并处置的两件事**：①驱动在复核给出 verdict 后仍然启动了 accept（跑满 17 分钟才因 G4 被拒）——**我没有在它跑的时候动手**，等它落定才 reject，避免两个写入者打架；
+>   ②动手前先 `kill` 掉 `.rddev/runtime/resolver-loop.sh`（它对 accept 决定的处方正是 `rddev rebaseline`，见本文件 21:00 那段），做完 `setsid` 起回来（新 pid 3176136），并 `drive --clear-decision T1104`。
+> - **一条给以后的教训**：复核员报告里那条「fingerprint hygiene」风险说的正是我——它在复核期间观测到那棵树的 `asset-page.png` 被换成 main 的字节又还原（我做的反证对照）。
+>   字节逐条还原了、复核也仍成立，但**复核在跑时不要动被复核的树**：那一刻的判断依据随时可能被改写。
+> - **收尾活不变**：①T1104 合并后 `scripts/record_test_run.py` 记 `T1104-TEST-01`；②把 CI 片段接进 `.github/workflows/ci.yml` **并同步 `specs/orchestrator/gates.json`**（job 数**现在是 8**，且每个 job 必须同时进 `required_jobs`）。片段我已备好（含 `--with-deps` 的 root 分支：本机 `sudo` 要密码、CI runner 有无密码 sudo，两条路都要走对）。
+>
 > **当前这一刻（2026-09-22 21:00）**：T1104 的 accept 被拒——**真正的原因不是缺陷，是它的分支已经落不到 main 上了**。推基线时有两处三方合不了，我手工合成后把任务送回返工（`run-59c22e91b6f6c1f1`，pid 2943079，基线 2f2611e）；main 的 CI 第一次在跑 T1109 接进来的 `observability` job。
 >
 > - **先看清拒的是什么**：`rddev task accept` 的原话是「the task's change does not apply to current main … patch failed: Makefile:42」。
