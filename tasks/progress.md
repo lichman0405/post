@@ -1,3 +1,15 @@
+> **当前这一刻（2026-09-22 23:10）**：T1104 已合并（PR #350 → `3f32bcd`，41 个文件），驱动当场派出 T1105（i18n，22:43:28）。这一轮做了三件收尾，其中接线的第一次尝试**会漏掉一个 job**，被仓库自己的 lockstep 测试当场抓住。
+>
+> - **接线（PR #351 → `964efa3`，23:03:43 合并）**：`make a11y` 是树里唯一真的开 Chromium、真的连 PostgreSQL 的套件，此前**没有任何 runner 跑过它**——只有 T1104 自己的 G2 在我这台机器上跑过。现在它是 CI 的第 9 个 job（两行 run：pnpm 冻结安装 + `make a11y`），**第一次在 runner 上就过了（1 分 26 秒；第二次 1 分 22 秒）**，9 个 job 全绿后合并。
+> - **第一次接就踩到 lockstep，而且踩的不是记账问题**：`specs/orchestrator/gates.json` 把同一个 job 集合写了**三遍**（`required_jobs`、`G2.runs_jobs`、`G4.asserts_jobs`）。我只补了两处，`TestGateSpecLoadValidation` 立刻报 `G2 jobs = [8 项]，want the required CI jobs`。**`rddev task accept` 跑的正是 `G2.runs_jobs`**——漏在那里的 job 就是 G2 永远不跑的 job，也就是这份 spec 立在那儿的理由（「看起来相似、实际更小的子集」）。`gate_spec_test.go` 里那份硬编码清单是镜像的同一个坑：计数改成 9、清单还是 8，`TestGatesSpecSyncsWithCIWorkflow` 在 push 之前就抓到了。**两条都在推之前修掉**（记在 `tasks/decisions.md` 的 `L1-20260922-4`）。
+> - **顺带改掉两处已经不成立的事实陈述**（都在我这次动的文件里）：`ci.yml` 顶部写「只有 migration-integration 需要基础设施」——observability 早就把它变成假话，a11y 又加一条，现在三处各在自己的注释里说明；`ops/DEV_COMMANDS.md` 的 job 清单还写着 **6 个**（acceptance 与 observability 从来没列上过），现在是 9 个，并写明**新加一个 job 必须同时改哪三处 + 重新生成 spec 摘要**（`scripts/spec_version.py --write`）。
+> - **复核的两条 minor 已修**（都在 `tests/web-smoke/`，只改文档与注释，见 `L1-20260922-5`）：①手工键盘文档补上「换 web 端口要同时 `export A11Y_WEB_ORIGIN`」，并指明它就是 harness 的 CORS 白名单主机（`a11y-harness/main.go:99` → `auth_middleware.go:306-312`）；不设的失败方式很隐蔽——**页面全都 200，而浏览器发出的每个 API 调用都被拒**，动态页因此只剩空壳。②harness 那条 search fixture 注释原来宣称拿到的是 `ReasonNoProvider` 和一份**带来源**的答案；实际是**零来源分支**（`internal/search/answer/generator.go:133`：`catalyst` 不匹配任何播种文档 → 先命中 `len(sources)==0`，根本走不到 provider 那一步）。注释改成真话，并写上页面里能自己核对的痕迹（`apps/web/lib/search.ts:180` 的 no_sources 标题）。**这条同时是一笔待办的来源**：a11y 扫描至今**没有**覆盖「带引用的答案」那条路径——它是覆盖面缺口，不是缺陷，**记账不夹带**（不在 chore 里偷改 fixture，那要重渲 17 张基线，属于独立任务）。
+> - **账本**：`T1104-TEST-01`（a11y suite）已 `passed`，证据是 CI 上那次 a11y job（run 35743090655 / job 106797647269，2026-09-22T14:51:44Z，coverage 7/7、两趟 axe 全 0、SUITE PASSED 43 秒），另注明我在工人树上的手跑。
+> - **驱动重建重启，而且是它自己先喊的**：合并 `#351` 后我把本地 main 快进到 `964efa3`，**23:05:13** 驱动打出一行
+>   `this driver is running a stale rddev and will act on nothing until it is rebuilt and restarted: this rddev was built from 2f2611ee71e5 …`
+>   ——因为那个 commit 动了 `internal/devorchestrator`。随后 `make rddev` + 重启（新 **pid 3559721**，23:05:44）。这一段是「不动作」而不是「乱动作」，正是设计的意图。
+> - **下一步**：T1105 走完流水线（collect → 复核 → accept → 合并；它的 G2 现在会自动带上第 9 个 job）；**T1207（V1 最终验收报告）必须最后做**——它的脚本统计「非 merged 的 v1_required 条数」和「阻塞且未跑的测试」，任何一次合并都会改这些数字。返工信已备好（要求它**重跑**自己的审计脚本，而不是手改那两张表）。
+>
 > **当前这一刻（2026-09-22 21:45）**：T1104 的**第二次独立复核**给的是 `request_changes`（2 blocking），我逐条核过原文与行号后**同意**，已 `task reject` + `worker rework`（`run-3df29d7d38a9e415`，pid 3174580，同 session，树保留在 `2f2611e`）。
 >
 > - **先说一句最硬的事实：accept 的 G2 是全绿的。** `accept-run-d76b0a47828a096d.json` 记 `G1 passed / G2 passed / G3 passed / G4 failed`，

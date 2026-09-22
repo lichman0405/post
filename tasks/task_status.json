@@ -10078,9 +10078,11 @@
       ]
     },
     "T1104": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-22T13:42:48Z",
       "worker_run_id": "run-3df29d7d38a9e415",
+      "accepted_by_supervisor_at": "2026-09-22T14:28:49Z",
+      "merged_at": "2026-09-22T14:43:23Z",
       "rejection_reason": "T1104 第 5 轮（复核员第 2 次 request_changes）：我逐条复核后**同意两条 blocking**。这不是推倒重来 —— 缺陷只有两处、都很小；套件、覆盖面、两次反证、三处合成、14 张基线的重渲，复核员在他自己复制的树上**独立复现过**（`make a11y` 24 秒 EXIT=0、7 个有数据的核心页、两趟 axe 全 0；死 API → coverage 0 < 7 转红；`tabindex={3}` → 11 条 FAIL；视觉比对 17/17 零像素差；把 main 的 `asset-page.png` 换回去 → 恰好那一张 154 px 转红）。这些**保持原样**，不要动。\n\n我这边也独立跑过（在你这棵树上：`make a11y` 与两次视觉比对；改动 35 条路径与收工记录逐条一致；17 张基线校验和前后相同）。结论与复核员一致。**下面每一条我都自己核过原文与行号**，不是转述。\n\n## 必修（blocking）\n\n**B1. `tests/web-smoke/keyboard-checklist.md` 的「照着做」路径跑不通 —— 文档的要求是「能被人照着走完」（AC[1]/AC[2]），照今天印出来的命令走不到。**\n\n我核过的事实：\n- `tests/web-smoke/a11y-harness/main.go:98`：`addr := envDefault(\"A11Y_API_ADDR\", \"127.0.0.1:18192\")` —— **harness 自己的默认是 18192**。\n- 文档 :36 的第 1 步只 export 了 `POSTGRES_TEST_ADMIN_URL`，直接 `/tmp/a11y-harness` → 它绑 **18192**。\n- 文档 :41、:43 的第 2 步却用 `API_BASE_URL=http://127.0.0.1:18193`（18193 只存在于 `run-a11y.sh:23,29`，是它 `export A11Y_API_ADDR=\"$API_PORT\"` 之后才有的）→ 那个端口**没有东西在听**。\n- 后果不是\"少一条提示\"，是整份文档白读：动态页（项目总览、PR、release、asset、search）全部只渲染外壳 /「Project not found」，而 READY 里那串 fixture id 指向一个读者从未启动的应用。\n- 文档 :51-52 的括注还把 18193 说成是 harness 的默认（\"If port 31108 or 18193 is taken, `A11Y_WEB_PORT` / `A11Y_API_ADDR` override them\"），方向是**反的**：18192 才是默认，18193 是套件的选择。\n- :54-55 的备选（\"Alternatively, keep `make a11y` running and use its printed output\"）也不能用：`run-a11y.sh` 的 EXIT trap 会杀掉两个服务并 `DROP DATABASE ... WITH (FORCE)`，`make a11y` 一退出那些 id 就死了。\n\n要求：把第 1 步与第 2 步对齐（在 harness 那步 `export A11Y_API_ADDR=127.0.0.1:18193`，或把 `API_BASE_URL` 改成 18192 —— 选一个并在文档里写明为什么），修掉 :51-52 的括注与 :54-55 的备选（删掉，或写成真正可行的做法：自己起两个服务并**不退出**、说明 id 从哪来）。**并且证明它能走**：按文档原样起这两个服务（后台、别退出），`curl` 一个动态路由看到真内容、用 READY 里的 id 打开一个动态页看到 fixture 数据 —— 贴命令与输出，不要只贴文档 diff。走完把你起的两个服务收干净，工作树里不留残留。\n\n**B2. 需求第 6 条的后半句没有交付，而 RESULT 的 AC[5] 记为 passed —— 这是假覆盖面，也是这一轮被拒的主因。**\n\n需求原文（T1104 requirements[5]，逐字）：\"`aria-live` 在 `apps/web` 里零命中，而 `docs/28:5` 点名要它。加载与**提交**的状态播报要有个去处：…… **失败/成功提示是否被屏幕阅读器读到，你去逐条核并给出结论**。\"\n\n我核过你交的 RESULT（`grep` 计数）：`aria-live` 5、`role=\"status\"` 2、`role=\"alert\"` 2；而 `提交`=0、`失败`=0、`成功提示`=0、`Flash`=0、`login-card`=0、`review-saved`=0、`review-error`=0、`4.1.3`=0。note 8 列的十处**全是加载态与读失败**（auth-status ×3、project-shell、三张 profile 卡的 loading、search-answer 的答案加载与命名读失败、explore 读失败），**没有一条是提交后的成功/失败提示**。代码也支持这个判断：`apps/web/app/(auth)/login/login-card.tsx:96` 是 `<Flash variant=\"danger\" className=\"auth-flash\">`，无 `role`、无 `aria-live`；`pulls/[number]/page.tsx` 里 `grep` 不到任何提交结果播报。\n\n要求（复核员给的最小可接受做法，我同意）：**把「提交后的成功/失败提示」逐条列出来并逐条给结论** —— 每处写 `文件:行`、播报的是什么事件（成功/失败）、当前有没有被播报（有什么 `role`/`aria-live`，或没有）、结论（该播报就加上，或逐字写明为什么不加、代价是什么）。范围至少覆盖写操作类客户端的结果渲染（登录/注册、评审提交、资料与设置保存、冲突解决、evidence/discussion 提交，以及你自己 `grep` 出来的其它处）；**名下必须能对上**复核员点到的两处：`login-card.tsx:96` 的 Flash、`pulls/[number]/page.tsx` 的评审提交结果。该加 live region 的地方就加上（逐处说明选 `polite` 还是 `assertive`、绑的是哪个事件），加完 `make a11y` 必须仍是零违规。\n**并且把 RESULT 的 AC[5] 改成它真正交付了什么** —— 半句没做却声明\"两条缺口都有结论\"就是虚报；宁可写成\"加载态已落实；提交提示已逐条核过，其中 N 处刻意不加，理由如下\"。\n\n## 同一轮顺手修（复核员的 minor/nit，行号我都核过）\n\n**M3.** `tests/web-smoke/a11y-smoke.mjs:735-738` 的注释是错的：「THE FLOOR IS 6, AND WHY IT IS NOT 7 … this run drives SIX of those」，而 :771 是 `const CORE_PAGES_WITH_DATA_FLOOR = 7`，你运行的输出也是 7。行为是对的（复核员验过），错的是这段注释把反外壳契约说小了；改成与 7 一致。\n\n**M4.** RESULT 内部自相矛盾，**以交付树为准重写**：note 11 还写着「36 paths … 15 regenerated baseline PNGs … HEAD is unchanged at `a0a73d3e…`」，而交付的树是 `2f2611e`、**35** 条路径、**14** 张重渲；note 13 还留着第 2 轮的像素数（`project-files 76 px`、`release-detail 96 px`），note 17 已更正为「其余 16 张 0 px、只剩 asset-page 154 px」。note 8 写「8 sites」却列了十处。**RESULT 只能有一份事实**：每条都对着当前树核一遍再写。\n\n**M5.** `apps/web/app/(main)/search/search-answer.tsx:81` 的引用路径少了 `notifications/`：真实文件是 `apps/web/app/(main)/notifications/inbox-surface.tsx:61-63`（我核过，`createInboxClient(..., { csrfToken })` 就在那两行）。\n\n**M6.** `packages/ui/src/ui.css:594-597` 与 `:635-637`、`apps/web/app/(main)/assets/assets.css:285-288`：静止态有下划线（这是 1.4.1 的修复），但 `:hover, :focus-visible` 里 `text-decoration: none` 把它去掉了 —— 悬停/聚焦态只剩颜色差。改成「悬停/聚焦保留下划线、用颜色区分」，或逐字写出你不改的理由。**别拿基线图当挡箭牌**：视觉比对渲染的是静态页、没有 hover 态，改这三处不会动任何一张基线。\n\n## 边界（与上一轮相同，一条都不许松）\n\n- 不许改 `specs/**`、`docs/**`、`tasks/**`、`internal/**`、`cmd/**`、`.github/**`；`make a11y` 的 CI 接线仍由我合并后接（上一轮那段 YAML 我保留了，不用重写）。\n- 不许放宽 `TOLERANCE_PIXELS`、不许删/摘基线图、不许加 impact 白名单或 `disableRules`、不许回退 T1101/T1103 的收敛；基线只能重新渲染出来。\n- 改动路径应与收工记录一致（35 条）；根目录不留编译产物；两个服务用完收干净。\n- 收工前跑：`make a11y`（7 个有数据的核心页、两趟 axe 全 0）、`bash tests/web-smoke/visual-regression-run.sh`（17/17 零像素差）、`make browser-ok-arity`、`pnpm --filter @post/web typecheck && pnpm --filter @post/web lint`。\n\n## 为什么这一轮仍是 same-session rework\n\n两处缺陷位置明确、且都在你自己刚写完的文件里（文档那两行、RESULT 那一节），你核自己的东西最快。换新工人会 `reset --hard` + `clean -fd` 把这棵树清掉 —— 14 张重渲的基线、整套套件、harness 全要重做，对一笔其余部分已被独立复现通过的交付不划算。\n\n省上下文：别整文件 dump，长输出写文件再看摘要，**RESULT 早点更新、边做边改**。\n",
       "history": [
         {
@@ -10226,17 +10228,48 @@
           "at": "2026-09-22T13:42:48Z",
           "run_id": "run-3df29d7d38a9e415",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T14:04:02Z",
+          "run_id": "run-5776d5bb9681c40a",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-22T14:28:49Z",
+          "run_id": "run-cc02a925cc3467b8"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-22T14:43:23Z",
+          "run_id": "run-b01d4f8cfb72ab1d",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T1105": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
-      "notes": "",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "status": "running",
+      "started_at": "2026-09-22T14:43:28Z",
+      "worker_run_id": "run-ae57da9484bc16df",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-22T14:43:24Z",
+          "run_id": "run-64c20d49ce067f46"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-22T14:43:28Z",
+          "run_id": "run-ae57da9484bc16df",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T1106": {
       "status": "merged",

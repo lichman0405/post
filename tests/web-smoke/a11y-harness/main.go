@@ -388,11 +388,21 @@ func buildAPI(ctx context.Context, pool *pgxpool.Pool, webOrigin string) (*api, 
 	/* The search surface (docs/42 "Search Answer"), wired the way cmd/api
 	 * wires it when the deployment has no answer model: answer.Deps.Provider
 	 * is nil, which internal/search/answer/generator.go documents as a
-	 * SUPPORTED deployment state and not a defect — every answer is then the
-	 * structured fallback (ReasonNoProvider), which still carries the query,
-	 * the ranked sources and the limitations the retrieval found. So this is
-	 * the product path, not a stub: nothing here fabricates an answer, and
-	 * the page scanned is the page a real deployment without a model serves.
+	 * SUPPORTED deployment state and not a defect — nothing here fabricates an
+	 * answer, and the page scanned is the page a real deployment without a
+	 * model serves.
+	 *
+	 * What this fixture puts in front of that surface is narrower than the
+	 * surface itself, and the coverage table should not be read as more than
+	 * it is: "catalyst" matches none of the seeded documents, so retrieval
+	 * returns zero ranked sources and the generator's zero-source branch
+	 * answers first (internal/search/answer/generator.go:133,
+	 * ReasonNoSources) — before the provider check is ever reached. The scan
+	 * therefore exercises the structured fallback with no sources, not
+	 * ReasonNoProvider and not an answer carrying citations. The page says so
+	 * itself — its headline is the no_sources one ("the search returned no
+	 * source to cite", apps/web/lib/search.ts:180) — which is what makes this
+	 * row a measurement of the fallback rather than of the answer path.
 	 *
 	 * Without it /search renders its error banner and the Search Answer core
 	 * page is never actually scanned — the precise "scan the shell and call

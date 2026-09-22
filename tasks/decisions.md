@@ -17441,3 +17441,43 @@ T1205 是此刻**唯一** dispatchable 的任务，且挂在主链 `max(T1202,T1
 - **可逆性**：完全可逆。解除时（四笔全 merged）执行：
   `rddev worker rework T1207 --parallel 4 --reason-file <信>`，信中要求它**重跑那份任务清单脚本**、
   把 `git rev-parse HEAD` 与各 Gate 证据更新到**最终树**，其余报告正文不动——然后照常走复核/G2/G3/accept/merge。
+
+## L1-20260922-4 — 新加一个 CI job 要同时改四处，少一处就有 job 不被跑
+
+- **决策**：`specs/orchestrator/gates.json` 用**三个字段**描述同一个 job 集合——`required_jobs`、
+  `gates.G2.runs_jobs`、`gates.G4.asserts_jobs`——而它们**不是同一件事**：`G2.runs_jobs` 是
+  `rddev task accept` 真正会跑的清单，`required_jobs` 是 G4 在 PR 上断言的清单，`G4.asserts_jobs`
+  只是同一断言的**自述**。加 job 时三处必须同时改，第四处是 `internal/devorchestrator/gate_spec_test.go`
+  里硬编码的计数与清单字面量，第五步是 `python3 scripts/spec_version.py --write`
+  （gates.json 是 spec 摘要的输入）。
+- **为什么值得记**：T1104 接 a11y 时（2026-09-22）我**只补了 `required_jobs` 与 `G4.asserts_jobs`**，
+  `TestGateSpecLoadValidation` 立刻报 `G2 jobs = [8 项]，want the required CI jobs`。这不是记账问题：
+  **漏在 `G2.runs_jobs` 里的 job 就是 G2 永远不跑的 job**，而这正是这份 spec 存在的理由——G2 不许
+  变成「看起来相似、实际更小的子集」。同一个坑的镜像形状在 `gate_spec_test.go`：计数改成 9 而清单
+  还是 8 项，`TestGatesSpecSyncsWithCIWorkflow` 在 push 之前就报错。两处都是**在推之前**被仓库自己
+  的测试抓住的，说明这套 lockstep 是有效的，不必也不该绕过它。
+- **影响**：只动 CI 与 gate spec；不改任何 Gate 判定标准。a11y suite 因此从「只有 T1104 自己的 G2
+  跑过」变成「每个 PR 与每次 main push 都跑」，第一次在 runner 上即通过（1m26s）。
+- **可逆性**：完全可逆（回退该 PR 即可），且**降级路径是明确的**：把 a11y 从三处清单里去掉，
+  再重生成 spec 摘要；不允许只从 `required_jobs` 去掉而留着 job（那会让 job 变成「非 required 的
+  G3 job」，`gate_spec_test.go` 的两规则循环会要求它点名所断言的 task）。
+
+
+## L1-20260922-5 — T1104 的两条 minor 由 Supervisor 在合并后修，覆盖缺口记账不夹带
+
+- **决策**：复核给 T1104 的 verdict 是 `approve`，两条 minor 都是**文档/注释层面的事实错误**：
+  (1) `tests/web-smoke/keyboard-checklist.md` 少了「换 web 端口必须同时 `export A11Y_WEB_ORIGIN`」——
+  它是 harness 交给 API guard 的 CORS 白名单主机（`a11y-harness/main.go:99` →
+  `cmd/api/authhttp/auth_middleware.go:306-312`），不设的失败方式很隐蔽：**页面全都 200，而浏览器发出的
+  每个 API 调用都被拒**，动态页只剩空壳；(2) `a11y-harness/main.go` 的 search fixture 注释宣称拿到的是
+  `ReasonNoProvider` 和一份**带来源**的答案，实际是**零来源分支**（`internal/search/answer/generator.go:133`；
+  `catalyst` 不匹配任何播种文档，`len(sources)==0` 先命中，走不到 provider 检查），页面上的痕迹是
+  `apps/web/lib/search.ts:180` 的 no_sources 标题。两条都**不在合并前改**：改文档会让已给出的 approve
+  依据失效、复核要重跑一遍，而两条都不影响交付物的行为。
+- **为什么不顺手把 fixture 改成「能匹配到的查询」**：那会把「带引用的答案」这条路径塞进扫描，
+  等于**改变测试覆盖面**并让 17 张视觉基线重渲——这属于一笔独立任务的内容，不该夹在一次 chore 里
+  悄悄做掉。**缺口本身记账**：a11y 扫描至今覆盖的是「零来源的结构化 fallback」，不是
+  「带引用的答案」；T1104 的覆盖表不得被读成后者。
+- **影响**：只改文档与注释，零行为变化；不放松任何 Gate。缺口的补法是**新任务**（播种一条能命中的
+  文档 + 断言答案里出现引用 + 重渲基线），触发条件是 V1 之后的第一轮补强。
+- **可逆性**：完全可逆。

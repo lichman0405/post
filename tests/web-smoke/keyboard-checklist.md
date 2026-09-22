@@ -63,6 +63,17 @@ If 31108 or 18193 is taken, change the number in **both** steps — the
 silent: the harness defaults to 18192 and `next start` binds whatever `-p`
 says, so a half-changed pair still starts and still serves pages.
 
+Moving the **web** port (31108) needs one more `export` in step 1, next to
+`A11Y_API_ADDR`: `export A11Y_WEB_ORIGIN=http://127.0.0.1:<the new web port>`.
+`make a11y` sets it for you (`run-a11y.sh:30` exports it as the base URL the
+suite then serves on); by hand it is yours to set. The harness reads it at
+startup and hands it to the API's guard as the CORS allow-list host
+(`a11y-harness/main.go:99`), which stamps `Access-Control-Allow-Origin` only
+when the browser's `Origin` host matches
+(`cmd/api/authhttp/auth_middleware.go:306-312`). A moved web port without it
+fails silently from the other side: every page still answers 200 and every API
+call the browser makes is refused, so the dynamic pages render their shells.
+
 Do not try to borrow a `make a11y` run's ids instead. That target tears the
 stack down as it exits — its EXIT trap kills both servers
 (`run-a11y.sh:50-62`), and the harness drops its own fixture database on the

@@ -1347,9 +1347,9 @@
       "name": "a11y suite",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-22T15:05:32Z",
+      "evidence": "Supervisor ran `make a11y` -> exit 0 on 2026-09-22T15:05:32Z. Last output:  2026-09-22T14:51:44.4205038Z ok   coverage: 7 core pages scanned with data (>= 7) ;  2026-09-22T14:51:44.4205289Z ;  2026-09-22T14:51:44.4205432Z a11y smoke: all checks passed ;  2026-09-22T14:51:44.4325558Z a11y-suite: [ 43s] SUITE PASSED (total) Evidence: CI job 'a11y' (required) on PR #351 — run 35743090655, job 106797647269, commit 6037b45, 2026-09-22T14:51:44Z: coverage 7/7 core pages with data, axe-core WCAG pass + best-practice pass both 0, all 9 routes 0 violations, 'a11y-suite: [ 43s] SUITE PASSED (total)'. Job URL https://github.com/lichman0405/post/actions/runs/35743090655/job/106797647269 . The same suite passed T1104's own hand"
     },
     {
       "id": "T1105-TEST-01",
