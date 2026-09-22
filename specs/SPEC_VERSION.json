@@ -1,6 +1,6 @@
 {
   "algorithm": "sha256",
-  "combined_digest": "b802cb56fb6d5b2bbc2fbf8b29979b9ad157145172106ec2ec0b40a4c091346b",
+  "combined_digest": "8421f2c971e2ab10886e47971b0a81c66adc9dd38699fb3803fadc92cb378e43",
   "files": {
     "specs/README.md": "2a0398dfb3ead0586034364d7411d845b84fd33b7c43d1ce9199d6a14ef4cf1a",
     "specs/api/openapi-exemptions.yaml": "545ac92bc8476313240259b1ccd6d11c5c018fa33129473fc1d5c4d0d0b1be70",
@@ -10,7 +10,7 @@
     "specs/mcp/tools.json": "f6b5fb023aba882a259bbe7d001bdd2755c1120f1dc768fe7512a7383fdbaca9",
     "specs/orchestrator/decision-levels.yaml": "8a06ec18b8abd79c2462e3d3bcc5b785c51a8f970c54aaa279f174882e0f5a3f",
     "specs/orchestrator/derived-artifacts.json": "25c7cf0aa2f5dca78d2c3668a45db348c2aaaa9738be203832173f6a200694ba",
-    "specs/orchestrator/gates.json": "9db639a71711ec7ee1ab7060d424df0d44d28f492f590b20f4627a61ef4acf1a",
+    "specs/orchestrator/gates.json": "d6d4a32df2f91ca6d18b0461460fe0932f882aed4776a9c06bb9e78825dd2351",
     "specs/orchestrator/rddev-cli.yaml": "f73576090a3f8bb3b78d560e662e0a180c480917b12f731ad579879ed174a397",
     "specs/orchestrator/review-verdict.schema.json": "78940ff58ba1d84e05d739d1c4af2a4d47b2fa834e7ba2ce2bca5b337f66f9fd",
     "specs/orchestrator/source-repo-preflight.schema.json": "a69dd6840fd2c5558dfba7fdb19019430f1c9a3b248c19c6f0a93b2912882932",
@@ -44,5 +44,5 @@
   },
   "input_count": 39,
   "marker_format": 1,
-  "spec_version": "sha256:b802cb56fb6d5b2b"
+  "spec_version": "sha256:8421f2c971e2ab10"
 }

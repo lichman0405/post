@@ -42,20 +42,25 @@ make ci               # 本地复刻 CI 全部 6 个 stage（= bash scripts/ci.s
 语义要点：
 
 - `test-integration` 先经 `scripts/pg-ready.py` 探测 `POSTGRES_TEST_ADMIN_URL`（默认 `postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post`，即 `make infra-up` 实际发布的端口）；不可达时打印探测结论与修复提示后以非零退出 —— **绝不静默跳过**。
-- `bash scripts/ci.sh [stage...]` 逐 stage 运行，每个 stage 是独立子进程（errexit 真正生效），失败会打印 `STAGE FAILED: <name>` 并立即停止 —— 与 `.github/workflows/ci.yml` 的 job/step 命名一一对应。不带参数运行全部 6 个 stage（integration 需要数据库）。
+- `bash scripts/ci.sh [stage...]` 逐 stage 运行，每个 stage 是独立子进程（errexit 真正生效），失败会打印 `STAGE FAILED: <name>` 并立即停止 —— 与 `.github/workflows/ci.yml` 的 job/step 命名一一对应。不带参数运行全部 8 个 stage（integration 需要数据库）。
 - `python3 scripts/validate_task_state.py` 校验 `tasks/tasks.json` 与 `tasks/task_status.json` 覆盖**同一任务集合**（双向：DAG 多出的任务、状态表多出的条目都会失败）、状态枚举、时间戳格式、`tasks/tests.json` 的测试引用与覆盖 —— 堵住「DAG 加了任务但状态表漏登记、被静默当 todo」的漂移类。
 - 历史基线（gofmt 10 个文件、staticcheck 7 条、ruff/mypy 逐文件忽略）只放行**已存在的**旧债，新代码必须全绿；修复基线中条目后应删除对应行，新代码永不进基线。
 
 ## CI 工作流（.github/workflows/ci.yml）
 
-6 个 job，全部跑在 `ubuntu-24.04`（docs/25、docs/64）：
+9 个 job，全部跑在 `ubuntu-24.04`（docs/25、docs/64）：
 
 1. `spec-validation` —— spec bundle + 任务 DAG 校验、OpenAPI 契约检查及其 fixture 测试（取代原 spec-validation workflow）
 2. `task-state` —— DAG/state/test 覆盖与 JSON 形状校验 + fixture 测试
 3. `go` —— gofmt / vet / staticcheck / unit（不含 `tests/integration`）
 4. `web` —— typecheck（ui/web）/ lint / node --test / 生产构建（`POST_ENV=prod`）
-5. `python` —— ruff / mypy / pytest
-6. `migration-integration` —— 唯一需要基础设施的 stage，独立 job + `pgvector/pgvector:0.8.6-pg16` service container（与 docker-compose.yml 同镜像），跑 `make test-integration`
+5. `acceptance` —— 四层 Gate 环自身：four-gate / rejection-retry / supervisor-git / driver-persistence 四套 e2e、gitea-e2e-guard 单测，外加阶段边界 checkpoint
+6. `python` —— ruff / mypy / pytest
+7. `migration-integration` —— 需要基础设施的三个 job 之一，独立 job + `pgvector/pgvector:0.8.6-pg16` service container（与 docker-compose.yml 同镜像），跑 `make test-integration`
+8. `observability` —— metrics / alerts / 分布式 trace 套件（`make observability-smoke`；`needs: [go]`，自拉 pgvector 镜像）
+9. `a11y` —— 全站 WCAG 2.2 AA（T1104）：生产构建 `@post/web`、真 PostgreSQL + 真 Chromium 走 docs/42 每个有路由的核心页，axe-core 的 WCAG 遍与 best-practice 遍都必须为 0，且动态页必须渲染出 fixture 内容而不是空壳
+
+**`specs/orchestrator/gates.json` 与这份列表是 lockstep**：G2 跑的就是这里的 job 与逐步命令（含 per-step `env`），`internal/devorchestrator/gate_spec_test.go` 在 CI 上挡住任何单边改动。加一个新 job 就要同时改 ci.yml、gates.json 的 `required_jobs` / `G2.runs_jobs` / `G4.asserts_jobs` 三处，再 `python3 scripts/spec_version.py --write`。
 
 ## 本地基础设施（Docker Compose，T0003 起可用）
 
