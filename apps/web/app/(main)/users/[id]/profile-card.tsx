@@ -20,6 +20,8 @@ import {
   messageForProfileCode,
   type ProfileUser,
 } from "../../../../lib/profile";
+import { formatCalendarDate } from "../../../../lib/i18n";
+import { useT } from "../../../i18n-provider";
 
 /**
  * The profile card (client component): fetches the public profile and the
@@ -37,6 +39,7 @@ export function ProfileCard({
   apiBaseUrl: string;
   userId: string;
 }) {
+  const t = useT();
   const profileClient = useMemo(
     () => createProfileClient(apiBaseUrl),
     [apiBaseUrl],
@@ -129,7 +132,7 @@ export function ProfileCard({
       // case — same shape as search-answer.tsx).
       <div className="profile-card profile-loading" role="status" aria-busy="true">
         <Spinner size="small" srText={null} />
-        <Text>Loading profile…</Text>
+        <Text>{t("profile.loading")}</Text>
       </div>
     );
   }
@@ -139,7 +142,7 @@ export function ProfileCard({
       <div className="profile-card">
         <Flash variant="danger">
           {messageForProfileCode("USER_NOT_FOUND")}{" "}
-          <Link href="/">Back to status</Link>
+          <Link href="/">{t("profile.backToStatus")}</Link>
         </Flash>
       </div>
     );
@@ -149,14 +152,20 @@ export function ProfileCard({
     return (
       <div className="profile-card">
         <Flash variant="danger">
-          {loadError ?? "The profile could not be loaded."}
+          {loadError ?? t("profile.error.load")}
         </Flash>
       </div>
     );
   }
 
   const isOwner = session !== null && session.user.id === profile.id;
-  const joined = new Date(profile.created_at).toLocaleDateString();
+  // T1105 / docs/28 §4. Was `toLocaleDateString()` with NO argument, so the
+  // text depended on the runtime's default locale AND time zone — the same
+  // row printed `9/22/2026` on one host and `22.09.2026` on another, and
+  // nothing said which was right. `formatCalendarDate` is an explicit format
+  // over the UTC calendar fields: one date per instant, on every host, in
+  // both languages (lib/i18n.ts states the choice and its cost).
+  const joined = formatCalendarDate(profile.created_at);
 
   return (
     <div className="profile-card">
@@ -170,10 +179,10 @@ export function ProfileCard({
         </div>
       </div>
 
-      <p className="profile-joined">Joined {joined}</p>
+      <p className="profile-joined">{t("profile.joined", { date: joined })}</p>
 
       <p className="profile-bio">
-        {profile.bio === "" ? "No bio yet." : profile.bio}
+        {profile.bio === "" ? t("profile.noBio") : profile.bio}
       </p>
 
       {/* T1104: the PATCH's outcome. On success the edit form closes and this
@@ -183,7 +192,7 @@ export function ProfileCard({
           save is an alert. */}
       {saved && (
         <Flash variant="success" className="profile-flash" role="status">
-          Profile updated.
+          {t("profile.saved")}
         </Flash>
       )}
 
@@ -199,7 +208,7 @@ export function ProfileCard({
           }}
         >
           <PencilIcon size={14} aria-hidden />
-          <span className="profile-edit-label">Edit profile</span>
+          <span className="profile-edit-label">{t("profile.edit")}</span>
         </Button>
       )}
 
@@ -217,20 +226,19 @@ export function ProfileCard({
             </Flash>
           )}
           <FormControl>
-            <FormControl.Label>Handle</FormControl.Label>
+            <FormControl.Label>{t("profile.handle")}</FormControl.Label>
             <TextInput
               value={handle}
               maxLength={200}
               onChange={(event) => setHandle(event.target.value)}
               block
             />
-            <FormControl.Caption>
-              Lowercase letters, digits and dashes; changing it does not
-              change this page&apos;s address.
-            </FormControl.Caption>
+            {/* The apostrophe in the English copy is a straight one in the
+                catalog, so the JSX entity is no longer needed here. */}
+            <FormControl.Caption>{t("profile.handleHint")}</FormControl.Caption>
           </FormControl>
           <FormControl>
-            <FormControl.Label>Display name</FormControl.Label>
+            <FormControl.Label>{t("profile.displayName")}</FormControl.Label>
             <TextInput
               value={displayName}
               maxLength={200}
@@ -239,7 +247,7 @@ export function ProfileCard({
             />
           </FormControl>
           <FormControl>
-            <FormControl.Label>Bio</FormControl.Label>
+            <FormControl.Label>{t("profile.bio")}</FormControl.Label>
             <Textarea
               value={bio}
               maxLength={2000}
@@ -250,7 +258,7 @@ export function ProfileCard({
           </FormControl>
           <div className="profile-form-actions">
             <Button type="submit" variant="primary" disabled={busy}>
-              {busy ? "Saving…" : "Save"}
+              {busy ? t("profile.saving") : t("profile.save")}
             </Button>
             <Button
               type="button"
@@ -261,7 +269,7 @@ export function ProfileCard({
                 setEditing(false);
               }}
             >
-              Cancel
+              {t("profile.cancel")}
             </Button>
           </div>
         </form>

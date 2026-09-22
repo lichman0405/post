@@ -5,6 +5,7 @@ import { Button, Link, Spinner, Text } from "@primer/react";
 import { PersonIcon, SignInIcon } from "@primer/octicons-react";
 
 import { createAuthClient, type AuthUser } from "../../lib/auth";
+import { useT } from "../i18n-provider";
 
 /**
  * The sign-in state strip (client component): resolves the current session
@@ -12,6 +13,7 @@ import { createAuthClient, type AuthUser } from "../../lib/auth";
  * passed in from the server page; nothing here touches the environment.
  */
 export function AuthStatus({ apiBaseUrl }: { apiBaseUrl: string }) {
+  const t = useT();
   const client = useMemo(() => createAuthClient(apiBaseUrl), [apiBaseUrl]);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,7 +64,7 @@ export function AuthStatus({ apiBaseUrl }: { apiBaseUrl: string }) {
             text is Primer's documented shape for that, and the shape the
             other loading states in this app already use. */}
         <Spinner size="small" srText={null} />
-        <Text>Checking session…</Text>
+        <Text>{t("nav.checkingSession")}</Text>
       </div>
     );
   }
@@ -72,8 +74,12 @@ export function AuthStatus({ apiBaseUrl }: { apiBaseUrl: string }) {
       <div className="auth-status" aria-live="polite">
         <SignInIcon size={16} aria-hidden />
         <Text>
-          <Link href="/login">Sign in</Link> to create and publish research
-          objects.
+          {/* T1105: the sentence is split at the link, not interpolated —
+              a catalog value can only carry text, and the link is an
+              element. The joiner is a literal space in the markup so that
+              neither language has to encode one. */}
+          <Link href="/login">{t("nav.signIn")}</Link>{" "}
+          {t("home.signInPrompt")}
         </Text>
       </div>
     );
@@ -83,14 +89,14 @@ export function AuthStatus({ apiBaseUrl }: { apiBaseUrl: string }) {
     <div className="auth-status" aria-live="polite">
       <PersonIcon size={16} aria-hidden />
       <Text>
-        Signed in as <strong>{user.display_name || user.handle}</strong>{" "}
+        {t("nav.signedInAs", { name: user.display_name || user.handle })}{" "}
         <span className="auth-email">({user.email})</span>
       </Text>
       {/* The profile URL is id-keyed and stable (T0102): it never changes
           when the owner renames their handle. */}
-      <Link href={`/users/${user.id}`}>View profile</Link>
+      <Link href={`/users/${user.id}`}>{t("nav.viewProfile")}</Link>
       <Button variant="invisible" size="small" disabled={busy} onClick={() => void signOut()}>
-        {busy ? "Signing out…" : "Sign out"}
+        {busy ? t("nav.signingOut") : t("nav.signOut")}
       </Button>
     </div>
   );

@@ -1,11 +1,16 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { getWebConfig } from "../../../lib/server-config";
+import { getT } from "../../../lib/i18n-server";
 import { LoginCard } from "./login-card";
 
-export const metadata: Metadata = {
-  title: "Sign in — POST",
-};
+/** T1105: the tab title is copy — it follows the language preference like the
+ *  card below it. `generateMetadata` rather than a `metadata` constant
+ *  because the locale is only known per request. */
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getT();
+  return { title: t("login.metaTitle") };
+}
 
 /**
  * The sign-in page: server component that resolves the validated API origin

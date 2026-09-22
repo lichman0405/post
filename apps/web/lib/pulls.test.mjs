@@ -1,9 +1,12 @@
 /**
- * Unit tests for lib/pulls.ts (T0403, extended by T0408) — the
+ * Unit tests for lib/pulls.ts (T0403, extended by T0408, T1105) — the
  * pull-request client the Pull requests tab renders with. Node's type
  * stripping runs this file directly
  * (node --test apps/web/lib/*.test.mjs via scripts/web-unit-tests.sh), so
- * it must stay import-free outside node:test / node:assert.
+ * it must stay free of runtime imports outside node:test / node:assert —
+ * ./i18n.ts is the one exception, and it is itself import-free by
+ * construction (see its header), which is what lets these tests resolve the
+ * same sentences the pages render.
  *
  * The fake fetch mirrors lib/projects.test.mjs: a routes map keyed
  * "METHOD path" serves canned JSON, and every call is recorded so tests
@@ -13,24 +16,36 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { translate } from "./i18n.ts";
+
 import {
   ApiError,
   assessPullRisks,
   createPullsClient,
   DEFAULT_PULL_TAB,
   diffTotals,
-  dimensionLabel,
+  dimensionLabelKey,
   evidenceChanges,
   INTEGRITY_DIMENSIONS,
   isStaleReview,
   knowledgeChanges,
   latestHeadReview,
-  messageForPullRequestCode,
+  pullRequestCodeKey,
   PULL_TABS,
-  pullTabLabel,
+  pullTabLabelKey,
   rawPatchUrl,
   relationTypeOf,
 } from "./pulls.ts";
+
+/** The translator the pages pass in, resolved against the REAL en catalog.
+ *
+ *  T1105 moved these sentences into the catalog, and a test asserting the old
+ *  literals would be asserting copy that no longer exists. Resolving through
+ *  translate("en", …) keeps the assertions about the sentence a reader sees AND
+ *  adds a property the literals could not have: the key has to exist in the
+ *  catalog, in both locales (translate renders ⟦missing:key⟧ otherwise, and
+ *  lib/i18n.test.mjs pins locale parity). */
+const en = (key, vars) => translate("en", key, vars);
 
 /** A canned wire PR (cmd/api/pullrequestshttp prPayload). */
 const PR = {
@@ -274,12 +289,12 @@ test("a check result with a non-boolean passed trips the shape guard", async () 
   await assert.rejects(() => c.checks("p1", 7), /unexpected check result shape/);
 });
 
-test("messageForPullRequestCode maps the stable codes and falls back", () => {
-  assert.match(messageForPullRequestCode("PULL_REQUEST_NOT_FOUND"), /does not exist/);
-  assert.match(messageForPullRequestCode("VALIDATION_FAILED"), /could not be processed/i);
-  assert.match(messageForPullRequestCode("PROJECT_NOT_FOUND"), /does not exist/);
-  assert.match(messageForPullRequestCode("SERVICE_UNAVAILABLE"), /temporarily unavailable/);
-  assert.match(messageForPullRequestCode("SOMETHING_ELSE"), /something went wrong/i);
+test("pullRequestCodeKey maps the stable codes, with a generic default", () => {
+  assert.match(en(pullRequestCodeKey("PULL_REQUEST_NOT_FOUND")), /does not exist/);
+  assert.match(en(pullRequestCodeKey("VALIDATION_FAILED")), /could not be processed/i);
+  assert.match(en(pullRequestCodeKey("PROJECT_NOT_FOUND")), /does not exist/);
+  assert.match(en(pullRequestCodeKey("SERVICE_UNAVAILABLE")), /temporarily unavailable/);
+  assert.match(en(pullRequestCodeKey("SOMETHING_ELSE")), /something went wrong/i);
 });
 
 test("the canonical dimensions keep report order with human labels", () => {
@@ -291,13 +306,13 @@ test("the canonical dimensions keep report order with human labels", () => {
     "visibility",
     "blob",
   ]);
-  assert.equal(dimensionLabel("schema"), "Schema");
-  assert.equal(dimensionLabel("provenance"), "Provenance");
-  assert.equal(dimensionLabel("dependency"), "Dependency");
-  assert.equal(dimensionLabel("rights"), "Rights");
-  assert.equal(dimensionLabel("visibility"), "Visibility");
-  assert.equal(dimensionLabel("blob"), "Blob references");
-  assert.equal(dimensionLabel("something-new"), "something-new");
+  assert.equal(en(dimensionLabelKey("schema")), "Schema");
+  assert.equal(en(dimensionLabelKey("provenance")), "Provenance");
+  assert.equal(en(dimensionLabelKey("dependency")), "Dependency");
+  assert.equal(en(dimensionLabelKey("rights")), "Rights");
+  assert.equal(en(dimensionLabelKey("visibility")), "Visibility");
+  assert.equal(en(dimensionLabelKey("blob")), "Blob references");
+  assert.equal(dimensionLabelKey("something-new"), null, "a dimension this client was not taught has no key; the page renders the raw value");
 });
 
 /* ==================== T0408: the diff, the reviews, the risks ==================== */
@@ -690,12 +705,12 @@ test("the six tabs are docs/06 §6's, and the raw file view is never the default
   ]);
   assert.equal(DEFAULT_PULL_TAB, "summary");
   assert.notEqual(DEFAULT_PULL_TAB, "raw");
-  assert.equal(pullTabLabel("summary"), "Summary");
-  assert.equal(pullTabLabel("scientific"), "Scientific changes");
-  assert.equal(pullTabLabel("knowledge"), "Knowledge changes");
-  assert.equal(pullTabLabel("evidence"), "Evidence");
-  assert.equal(pullTabLabel("checks"), "Checks");
-  assert.equal(pullTabLabel("raw"), "Raw Files");
+  assert.equal(en(pullTabLabelKey("summary")), "Summary");
+  assert.equal(en(pullTabLabelKey("scientific")), "Scientific changes");
+  assert.equal(en(pullTabLabelKey("knowledge")), "Knowledge changes");
+  assert.equal(en(pullTabLabelKey("evidence")), "Evidence");
+  assert.equal(en(pullTabLabelKey("checks")), "Checks");
+  assert.equal(en(pullTabLabelKey("raw")), "Raw Files");
 });
 
 test("the knowledge and evidence tabs partition the knowledge layer", () => {
@@ -861,7 +876,7 @@ test("a clean proposal raises no risk at all", () => {
       diff: CLEAN_DIFF,
       reviews: [],
       headStateId: PR.proposed_state_id,
-    }),
+    }, en),
     [],
   );
 });
@@ -887,7 +902,7 @@ test("a failed blocking check is a blocking risk, never softened", () => {
     diff: CLEAN_DIFF,
     reviews: [],
     headStateId: PR.proposed_state_id,
-  });
+  }, en);
   assert.equal(risks.length, 2);
   assert.equal(risks[0].severity, "blocking");
   assert.equal(risks[0].code, "RISK_BLOCKING_CHECK");
@@ -906,7 +921,7 @@ test("a blocked verdict with no blocking row still leads with a blocking risk", 
     diff: CLEAN_DIFF,
     reviews: [],
     headStateId: PR.proposed_state_id,
-  });
+  }, en);
   assert.equal(risks.length, 1);
   assert.equal(risks[0].severity, "blocking");
   assert.equal(risks[0].code, "RISK_INTEGRITY_VERDICT_BLOCKED");
@@ -925,7 +940,7 @@ test("a changes_requested review blocks, but only on the head proposed now", () 
       }),
     ],
     headStateId: PR.proposed_state_id,
-  });
+  }, en);
   assert.equal(onHead.length, 1);
   assert.equal(onHead[0].severity, "blocking");
   assert.equal(onHead[0].code, "RISK_CHANGES_REQUESTED");
@@ -945,7 +960,7 @@ test("a changes_requested review blocks, but only on the head proposed now", () 
       }),
     ],
     headStateId: PR.proposed_state_id,
-  });
+  }, en);
   assert.deepEqual(stale, []);
 });
 
@@ -955,7 +970,7 @@ test("the target branch having moved the same entries is a risk", () => {
     diff: DIFF,
     reviews: [],
     headStateId: PR.proposed_state_id,
-  });
+  }, en);
   const moved = risks.find((r) => r.code === "RISK_TARGET_MOVED");
   assert.ok(moved, "expected a target-moved risk");
   assert.equal(moved.severity, "warning");
@@ -985,7 +1000,7 @@ test("aborts, schema changes and visibility changes each raise their own risk", 
     diff,
     reviews: [],
     headStateId: PR.proposed_state_id,
-  });
+  }, en);
   const codes = risks.map((r) => r.code);
   assert.deepEqual(codes, ["RISK_OBJECTS_ABORTED", "RISK_SCHEMA_CHANGED", "RISK_VISIBILITY_CHANGED"]);
   for (const risk of risks) {
@@ -1017,7 +1032,7 @@ test("an object CREATED with its own visibility policy is a visibility risk", ()
     diff: { ...DIFF, object_changes: [pinned], relation_changes: [] },
     reviews: [],
     headStateId: PR.proposed_state_id,
-  });
+  }, en);
   assert.deepEqual(risks.map((r) => r.code), ["RISK_VISIBILITY_CHANGED"]);
   assert.equal(risks[0].severity, "warning");
   assert.equal(risks[0].tab, "scientific");
@@ -1038,7 +1053,7 @@ test("an object CREATED with its own visibility policy is a visibility risk", ()
       diff: { ...DIFF, object_changes: [inherited], relation_changes: [] },
       reviews: [],
       headStateId: PR.proposed_state_id,
-    }),
+    }, en),
     [],
   );
 
@@ -1056,7 +1071,7 @@ test("an object CREATED with its own visibility policy is a visibility risk", ()
     diff: { ...DIFF, object_changes: [pinned, changed], relation_changes: [] },
     reviews: [],
     headStateId: PR.proposed_state_id,
-  });
+  }, en);
   assert.deepEqual(both.map((r) => r.code), ["RISK_VISIBILITY_CHANGED"]);
   assert.match(both[0].detail, /born pinned to policy-restricted-1/);
   assert.match(both[0].detail, /policy inherited default → policy-open-2/);
@@ -1114,7 +1129,7 @@ test("blocking risks lead the list, whatever order they were found in", () => {
       }),
     ],
     headStateId: PR.proposed_state_id,
-  });
+  }, en);
   assert.deepEqual(
     risks.map((r) => r.severity),
     ["blocking", "blocking", "warning"],
@@ -1128,11 +1143,11 @@ test("rawPatchUrl targets the Files raw-diff channel with an encoded sha", () =>
   );
 });
 
-test("messageForPullRequestCode covers the review surface's codes", () => {
-  assert.match(messageForPullRequestCode("STATE_NOT_FOUND"), /no longer exists/);
-  assert.match(messageForPullRequestCode("REVIEW_ALREADY_SUBMITTED"), /already recorded/);
-  assert.match(messageForPullRequestCode("PR_TERMINAL"), /closed/);
-  assert.match(messageForPullRequestCode("AUTH_FORBIDDEN"), /not permitted/);
-  assert.match(messageForPullRequestCode("AUTH_UNAUTHENTICATED"), /sign in/i);
-  assert.match(messageForPullRequestCode("CSRF_FAILED"), /cross-site/i);
+test("pullRequestCodeKey covers the review surface's codes", () => {
+  assert.match(en(pullRequestCodeKey("STATE_NOT_FOUND")), /no longer exists/);
+  assert.match(en(pullRequestCodeKey("REVIEW_ALREADY_SUBMITTED")), /already recorded/);
+  assert.match(en(pullRequestCodeKey("PR_TERMINAL")), /closed/);
+  assert.match(en(pullRequestCodeKey("AUTH_FORBIDDEN")), /not permitted/);
+  assert.match(en(pullRequestCodeKey("AUTH_UNAUTHENTICATED")), /sign in/i);
+  assert.match(en(pullRequestCodeKey("CSRF_FAILED")), /cross-site/i);
 });

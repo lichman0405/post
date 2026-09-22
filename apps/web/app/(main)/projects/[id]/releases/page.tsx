@@ -14,6 +14,7 @@ import {
   releaseManifestHref,
   type Release,
 } from "../../../../../lib/releases";
+import { useT } from "../../../../i18n-provider";
 import { useProjectShell } from "../shell-context";
 
 /**
@@ -38,6 +39,7 @@ type Notice = { kind: "success" | "error"; text: string } | null;
 
 export default function ReleasesPage() {
   const shell = useProjectShell();
+  const t = useT();
 
   const [releases, setReleases] = useState<Release[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
@@ -86,13 +88,15 @@ export default function ReleasesPage() {
         setListError(
           err instanceof ApiError
             ? messageForReleaseCode(err.code)
-            : "Could not load releases.",
+            : t("releases.error.load"),
         );
       });
     return () => {
       cancelled = true;
     };
-  }, [shell, releasesClient]);
+    // `t` belongs in the deps: the fallback sentence is resolved in the
+    // catch, so switching language must re-run the fetch's error path.
+  }, [shell, releasesClient, t]);
 
   if (shell === null) {
     // The shell only mounts tab content in its ready state; null means a
@@ -119,7 +123,7 @@ export default function ReleasesPage() {
       setReleases((prev) => [created, ...(prev ?? [])]);
       setVersion("");
       setTitle("");
-      setNotice({ kind: "success", text: `Release ${created.version} created.` });
+      setNotice({ kind: "success", text: t("releases.created", { version: created.version }) });
     } catch (err: unknown) {
       // Keep the key: the next submit replays this exact create.
       setNotice({
@@ -127,7 +131,7 @@ export default function ReleasesPage() {
         text:
           err instanceof ApiError
             ? messageForReleaseCode(err.code)
-            : "Could not create the release. Please try again.",
+            : t("releases.error.create"),
       });
     } finally {
       setCreating(false);
@@ -138,13 +142,10 @@ export default function ReleasesPage() {
     <div className="releases-page" data-project-tab-content="releases">
       <section className="releases-section">
         <h2 className="releases-section-title">
-          <TagIcon size={16} aria-hidden="true" /> Releases
+          <TagIcon size={16} aria-hidden="true" /> {t("releases.title")}
         </h2>
         <p className="releases-section-desc">
-          Immutable snapshots of main&apos;s accepted state. A release fixes
-          the research state, the policy in force and the review record —
-          it never changes afterwards, and it is not affected by later work
-          on the project.
+          {t("releases.intro")}
         </p>
 
         {listError !== null ? (
@@ -155,7 +156,7 @@ export default function ReleasesPage() {
 
         {releases === null && listError === null ? (
           <div className="releases-loading">
-            <Spinner aria-label="Loading releases" />
+            <Spinner aria-label={t("releases.loading")} />
           </div>
         ) : null}
 
@@ -163,35 +164,34 @@ export default function ReleasesPage() {
           <div className="release-readiness" data-releases-empty>
             <div className="release-readiness-head">
               <div>
-                <span className="release-readiness-kicker">Release candidate</span>
-                <h3>v0.1.0-rc1 — Humidity validation evidence package</h3>
+                <span className="release-readiness-kicker">{t("releases.candidate.kicker")}</span>
+                <h3>{t("releases.candidate.title")}</h3>
                 <p>
-                  The candidate is assembled, but POST is correctly preventing an
-                  immutable release until the scientific and rights checks pass.
+                  {t("releases.candidate.body")}
                 </p>
               </div>
-              <span className="release-readiness-state">3 blockers</span>
+              <span className="release-readiness-state">{t("releases.candidate.blockers", { count: 3 })}</span>
             </div>
             <div className="release-readiness-grid">
               <div className="release-check release-check-ready">
                 <CheckIcon size={16} aria-hidden="true" />
-                <span><strong>Research state assembled</strong>49 graph objects and four milestones</span>
+                <span><strong>{t("releases.check.state.title")}</strong>{t("releases.check.state.body")}</span>
               </div>
               <div className="release-check release-check-ready">
                 <CheckIcon size={16} aria-hidden="true" />
-                <span><strong>Reproducibility files committed</strong>Protocol, candidate table, analysis and decision record</span>
+                <span><strong>{t("releases.check.files.title")}</strong>{t("releases.check.files.body")}</span>
               </div>
               <div className="release-check release-check-blocked">
                 <AlertIcon size={16} aria-hidden="true" />
-                <span><strong>Scientific review pending</strong>Pull request #1 requires domain and integrity approval</span>
+                <span><strong>{t("releases.check.review.title")}</strong>{t("releases.check.review.body")}</span>
               </div>
               <div className="release-check release-check-blocked">
                 <AlertIcon size={16} aria-hidden="true" />
-                <span><strong>External validation pending</strong>100-cycle result at 40% RH has not been attached</span>
+                <span><strong>{t("releases.check.validation.title")}</strong>{t("releases.check.validation.body")}</span>
               </div>
               <div className="release-check release-check-blocked">
                 <AlertIcon size={16} aria-hidden="true" />
-                <span><strong>Rights snapshot missing</strong>Dataset reuse declarations must be frozen before release</span>
+                <span><strong>{t("releases.check.rights.title")}</strong>{t("releases.check.rights.body")}</span>
               </div>
             </div>
           </div>
@@ -224,7 +224,7 @@ export default function ReleasesPage() {
                   href={releaseManifestHref(shell.apiBaseUrl, project.id, release.id)}
                   data-release-manifest={release.version}
                 >
-                  <DownloadIcon size={14} aria-hidden="true" /> Manifest
+                  <DownloadIcon size={14} aria-hidden="true" /> {t("releases.manifest")}
                 </a>
               </div>
             ))}
@@ -234,15 +234,13 @@ export default function ReleasesPage() {
 
       {canCreate ? (
         <section className="releases-section">
-          <h2 className="releases-section-title">Create a release</h2>
+          <h2 className="releases-section-title">{t("releases.create.title")}</h2>
           <p className="releases-section-desc">
-            The release fixes main&apos;s current accepted state. The
-            server re-runs the release gate (reviews, rights snapshot,
-            main state) and refuses if anything blocks.
+            {t("releases.create.body")}
           </p>
           <form className="releases-create-form" onSubmit={submitCreate}>
             <label className="releases-label" htmlFor="release-version">
-              Version
+              {t("releases.create.version")}
             </label>
             <input
               id="release-version"
@@ -250,12 +248,12 @@ export default function ReleasesPage() {
               data-release-version-input
               value={version}
               onChange={(event) => setVersion(event.target.value)}
-              placeholder="e.g. v1.0.0"
+              placeholder={t("releases.create.versionPlaceholder")}
               required
               disabled={creating}
             />
             <label className="releases-label" htmlFor="release-title">
-              Title <span className="releases-label-note">(optional)</span>
+              {t("releases.create.titleLabel")} <span className="releases-label-note">{t("releases.create.optional")}</span>
             </label>
             <input
               id="release-title"
@@ -263,7 +261,7 @@ export default function ReleasesPage() {
               data-release-title-input
               value={title}
               onChange={(event) => setTitle(event.target.value)}
-              placeholder="a short label; defaults to the version"
+              placeholder={t("releases.create.titlePlaceholder")}
               disabled={creating}
             />
             <div className="releases-create-row">
@@ -273,10 +271,10 @@ export default function ReleasesPage() {
                 data-release-create
                 disabled={creating || version.trim() === ""}
               >
-                {creating ? "Creating…" : "Create release"}
+                {creating ? t("releases.create.submitting") : t("releases.create.submit")}
               </button>
               <span className="releases-create-note">
-                Releases are immutable — there is no edit or delete.
+                {t("releases.create.note")}
               </span>
             </div>
           </form>
@@ -300,7 +298,7 @@ export default function ReleasesPage() {
         </section>
       ) : (
         <p className="releases-readonly-note" data-releases-unauthorized>
-          Only owners and maintainers can create releases.
+          {t("releases.readonly")}
         </p>
       )}
     </div>

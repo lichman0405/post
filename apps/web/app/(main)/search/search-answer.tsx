@@ -9,8 +9,8 @@ import {
   citedSources,
   createSearchClient,
   evidenceRows,
-  fallbackHeadline,
-  messageForSearchCode,
+  fallbackHeadlineKey,
+  searchCodeKey,
   sourceHref,
   sourceKindLabel,
   sourceLabel,
@@ -21,6 +21,7 @@ import {
   type SearchStatement,
 } from "../../../lib/search";
 import { createAuthClient } from "../../../lib/auth";
+import { useT } from "../../i18n-provider";
 import "./search.css";
 
 /**
@@ -77,6 +78,10 @@ export function SearchAnswerView({
   query: string;
   apiBaseUrl: string;
 }) {
+  // This component renders none of its own copy — the three states below
+  // (AnswerLoading / AnswerError / AnswerBody) do, and each resolves its own
+  // `useT()`. A `t` here would be a declaration with no reader, which is the
+  // failure `unused_catalog_keys` catches in the catalog and lint catches here.
   // The CSRF token comes from the shared session storage, the same way the
   // inbox writes (apps/web/app/(main)/notifications/inbox-surface.tsx:61-63):
   // the search POST is a state
@@ -102,7 +107,12 @@ export function SearchAnswerView({
         const failure =
           err instanceof ApiError
             ? err
-            : new ApiError(0, { code: "UNREACHABLE", message: "search unreachable" });
+            : // The message of this synthetic error is a diagnostic, not copy:
+              // nothing renders it (the panel below renders the CODE's
+              // sentence, searchCodeKey). It stays a constant so the
+              // scanner's `property:message` rule can tell "a sentence a
+              // reader sees" from "a string an engineer greps a log for".
+              new ApiError(0, { code: "UNREACHABLE", message: UNREACHABLE_MESSAGE });
         setState({
           kind: "error",
           for: query,
@@ -141,6 +151,10 @@ export function SearchAnswerView({
   return <AnswerBody response={settled.response} apiBaseUrl={apiBaseUrl} />;
 }
 
+/** The diagnostic carried by the synthetic error for a request that never
+ *  reached the API. Not copy: no component renders it. */
+const UNREACHABLE_MESSAGE = "search unreachable";
+
 /**
  * The state of one question's answer, tagged with the question it is about and
  * with the attempt that produced it (so a retry shows the loading state again
@@ -161,6 +175,7 @@ type State =
 
 /** The three dots github uses while it is fetching. Text, not a spinner. */
 function AnswerLoading() {
+  const t = useT();
   return (
     <div className="search-panel search-panel-loading" data-search-state="loading">
       <p className="search-loading" role="status" data-search-loading>
@@ -168,7 +183,7 @@ function AnswerLoading() {
             (Primer's own instruction for this case), so a screen reader hears
             the loading state once instead of twice. */}
         <Spinner size="small" srText={null} />
-        <span>Searching and reading the sources…</span>
+        <span>{t("search.loading")}</span>
       </p>
     </div>
   );
@@ -194,19 +209,20 @@ function AnswerError({
   retryable: boolean;
   onRetry: () => void;
 }) {
+  const t = useT();
   return (
     <div className="search-panel search-panel-error" data-search-state="error">
       <p className="search-error" role="alert" data-search-error={code}>
         <AlertIcon size={16} aria-hidden />
-        <span>{messageForSearchCode(code)}</span>
+        <span>{t(searchCodeKey(code))}</span>
       </p>
       <p className="search-error-meta">
         <span className="search-error-code">{code}</span>
-        {requestId ? <span className="search-error-request">request {requestId}</span> : null}
+        {requestId ? <span className="search-error-request">{t("search.error.request", { requestId })}</span> : null}
       </p>
       {retryable ? (
         <button type="button" className="search-retry" onClick={onRetry}>
-          Try again
+          {t("search.retry")}
         </button>
       ) : null}
     </div>
@@ -221,6 +237,7 @@ function AnswerBody({
   response: SearchResponse;
   apiBaseUrl: string;
 }) {
+  const t = useT();
   const { answer, search_id: searchId } = response;
   const cited = citedSources(answer);
   const rows = evidenceRows(answer);
@@ -247,9 +264,8 @@ function AnswerBody({
       <UnderlyingResults sources={answer.sources} apiBaseUrl={apiBaseUrl} />
 
       <p className="search-provenance">
-        Search <span className="search-provenance-id">{searchId}</span>. Sources and
-        underlying results are one list in this answer; the cited ones are the subset the
-        summary leans on.
+        {t("search.provenance.label")} <span className="search-provenance-id">{searchId}</span>
+        {t("search.provenance.suffix")}
       </p>
     </div>
   );
@@ -263,14 +279,15 @@ function AnswerBody({
  * View must not be labelled one on this page.
  */
 function SummaryBlock({ answer }: { answer: SearchAnswer }) {
+  const t = useT();
   if (answer.summary === "") return null;
   return (
     <section className="search-section" data-search-section="answer">
       <div className="search-section-head">
-        <h2 className="search-section-title">Answer</h2>
+        <h2 className="search-section-title">{t("search.answer.title")}</h2>
         {answer.answer_view ? (
-          <span className="search-badge" data-search-view-badge title="Written by a model from the sources below; it adds no claim of its own.">
-            View
+          <span className="search-badge" data-search-view-badge title={t("search.view.tooltip")}>
+            {t("search.view.badge")}
           </span>
         ) : null}
       </div>
@@ -279,7 +296,7 @@ function SummaryBlock({ answer }: { answer: SearchAnswer }) {
       </p>
       {answer.citations.length > 0 ? (
         <div className="search-citations" data-search-citations>
-          <span className="search-citations-label">Cites</span>
+          <span className="search-citations-label">{t("search.cites")}</span>
           {answer.citations.map((ref) => (
             <span className="search-citation" key={ref} data-search-citation={ref}>
               {ref}
@@ -301,22 +318,22 @@ function SummaryBlock({ answer }: { answer: SearchAnswer }) {
  * platform chose not to write an answer without evidence to ground it.
  */
 function FallbackNotice({ answer }: { answer: SearchAnswer }) {
+  const t = useT();
   const reason = answer.reason ?? "";
   return (
     <section className="search-section search-fallback" data-search-fallback={reason}>
       <div className="search-section-head">
-        <h2 className="search-section-title">Structured result</h2>
+        <h2 className="search-section-title">{t("search.fallback.title")}</h2>
         <span className="search-badge search-badge-neutral" data-search-fallback-reason>
-          {reason === "" ? "no written answer" : reason}
+          {reason === "" ? t("search.fallback.noReason") : reason}
         </span>
       </div>
       <p className="search-fallback-headline" data-search-fallback-headline>
         <InfoIcon size={16} aria-hidden />
-        <span>{fallbackHeadline(reason)}</span>
+        <span>{t(fallbackHeadlineKey(reason))}</span>
       </p>
       <p className="search-fallback-note">
-        No answer was written, and the sources below are what the search found. They are the
-        whole result: the platform does not write an answer it cannot ground in them.
+        {t("search.fallback.note")}
       </p>
     </section>
   );
@@ -336,10 +353,11 @@ function CitedSources({
   sources: SearchSource[];
   apiBaseUrl: string;
 }) {
+  const t = useT();
   return (
     <section className="search-section" data-search-section="sources">
       <div className="search-section-head">
-        <h2 className="search-section-title">Sources the answer cites</h2>
+        <h2 className="search-section-title">{t("search.citedSources.title")}</h2>
         <span className="search-count">{sources.length}</span>
       </div>
       <ul className="search-list">
@@ -373,8 +391,9 @@ function Statements({
   section: "limitations" | "conflicts";
   statements: SearchStatement[];
 }) {
+  const t = useT();
   if (statements.length === 0) return null;
-  const title = section === "limitations" ? "Limitations" : "Conflicts";
+  const title = section === "limitations" ? t("search.limitations") : t("search.conflicts");
   return (
     <section className="search-section" data-search-section={section}>
       <div className="search-section-head">
@@ -416,17 +435,17 @@ function Statements({
  * this page quietly inventing a source to attach it to.
  */
 function EvidenceMap({ rows, apiBaseUrl }: { rows: EvidenceRow[]; apiBaseUrl: string }) {
+  const t = useT();
   const withRefs = rows.filter((row) => row.refs.length > 0);
   if (withRefs.length === 0) return null;
   return (
     <section className="search-section" data-search-section="evidence-map">
       <div className="search-section-head">
-        <h2 className="search-section-title">Evidence map</h2>
+        <h2 className="search-section-title">{t("search.evidenceMap.title")}</h2>
         <span className="search-count">{withRefs.length}</span>
       </div>
       <p className="search-section-note">
-        Derived from this answer&apos;s own statements: each limitation or conflict beside the
-        sources its refs name.
+        {t("search.evidenceMap.note")}
       </p>
       <ul className="search-list">
         {withRefs.map((row, i) => {
@@ -477,11 +496,12 @@ function UnderlyingResults({
   sources: SearchSource[];
   apiBaseUrl: string;
 }) {
+  const t = useT();
   if (sources.length === 0) return null;
   return (
     <section className="search-section" data-search-section="results">
       <div className="search-section-head">
-        <h2 className="search-section-title">Underlying results</h2>
+        <h2 className="search-section-title">{t("search.results.title")}</h2>
         <span className="search-count">{sources.length}</span>
       </div>
       <ul className="search-list">
@@ -498,7 +518,7 @@ function UnderlyingResults({
               <SourceTitle source={source} apiBaseUrl={apiBaseUrl} />
               {source.cited ? (
                 <span className="search-badge search-badge-neutral" data-search-cited-mark>
-                  Cited
+                  {t("search.cited")}
                 </span>
               ) : null}
             </p>
@@ -506,13 +526,13 @@ function UnderlyingResults({
               <span className="search-ref">{source.ref}</span>
               <span className="search-kind">{sourceKindLabel(source)}</span>
               {source.version ? (
-                <span className="search-version">version {source.version}</span>
+                <span className="search-version">{t("search.sourceVersion", { version: source.version })}</span>
               ) : null}
               {/* The project travels with a source whether or not it has an
                   address, and for an unaddressed source it is the only handle
                   on where the entity lives. */}
               {source.href ? null : source.project_id ? (
-                <span className="search-project">project {source.project_id}</span>
+                <span className="search-project">{t("search.sourceProject", { projectId: source.project_id })}</span>
               ) : null}
             </p>
             {source.labels.length > 0 ? (
@@ -527,7 +547,7 @@ function UnderlyingResults({
             {source.factors.length > 0 ? (
               <details className="search-factors">
                 <summary className="search-factors-summary">
-                  Ranking factors ({source.factors.length})
+                  {t("search.factors.summary", { count: source.factors.length })}
                 </summary>
                 <ul className="search-factors-list">
                   {source.factors.map((factor) => (

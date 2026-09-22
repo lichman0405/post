@@ -1,11 +1,15 @@
 import type { Metadata } from "next";
 
 import { getWebConfig } from "../../../lib/server-config";
+import { getT } from "../../../lib/i18n-server";
 import { ProjectDirectory } from "./project-directory";
 
-export const metadata: Metadata = {
-  title: "Projects — POST",
-};
+/** T1105: the tab title is copy — it follows the language preference like the
+ *  directory below it. */
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getT();
+  return { title: t("projects.metaTitle") };
+}
 
 /**
  * The project directory (T0108): server component that resolves the

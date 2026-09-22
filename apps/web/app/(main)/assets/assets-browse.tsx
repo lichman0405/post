@@ -5,12 +5,15 @@ import Link from "next/link";
 import { PackageIcon } from "@primer/octicons-react";
 import { Spinner } from "@primer/react";
 
+import { useT } from "../../i18n-provider";
+import { translateOr } from "../../../lib/i18n";
 import {
   ApiError,
   ASSET_TYPES,
-  assetTypeLabel,
+  assetCodeKey,
+  assetTypeEmptyKey,
+  assetTypeLabelKey,
   createAssetsClient,
-  messageForAssetCode,
   type AssetBrowseList,
   type AssetType,
 } from "../../../lib/assets";
@@ -53,6 +56,7 @@ type BrowseAnswer =
 
 export function AssetsBrowse({ apiBaseUrl }: { apiBaseUrl: string }) {
   const client = useMemo(() => createAssetsClient(apiBaseUrl), [apiBaseUrl]);
+  const t = useT();
   const [type, setType] = useState<AssetType | null>(null);
   const [answer, setAnswer] = useState<BrowseAnswer | null>(null);
 
@@ -70,13 +74,14 @@ export function AssetsBrowse({ apiBaseUrl }: { apiBaseUrl: string }) {
         setAnswer({
           for: type,
           ok: false,
-          message: messageForAssetCode(err instanceof ApiError ? err.code : "UNKNOWN"),
+          message: t(assetCodeKey(err instanceof ApiError ? err.code : "UNKNOWN")),
         });
       });
     return () => {
       cancelled = true;
     };
-  }, [client, type]);
+    // `t` in the deps: the refusal line resolves through it.
+  }, [client, type, t]);
 
   // The answer is about the current filter, or it is not shown at all.
   const current = answer !== null && answer.for === type ? answer : null;
@@ -117,7 +122,7 @@ export function AssetsBrowse({ apiBaseUrl }: { apiBaseUrl: string }) {
             data-asset-filter={candidate}
             onClick={() => setType(candidate)}
           >
-            {assetTypeLabel(candidate)}
+            {translateOr(t, assetTypeLabelKey(candidate), candidate)}
           </button>
         ))}
       </nav>
@@ -129,8 +134,8 @@ export function AssetsBrowse({ apiBaseUrl }: { apiBaseUrl: string }) {
       ) : current.list.assets.length === 0 ? (
         <div className="assets-empty">
           {type === null
-            ? "No published assets yet."
-            : `No published ${assetTypeLabel(type).toLowerCase()} assets yet.`}
+            ? t("assets.browse.empty.all")
+            : t(assetTypeEmptyKey(type) ?? "assets.browse.empty.all")}
         </div>
       ) : (
         <ul className="assets-list" data-asset-count={current.list.assets.length}>
@@ -145,7 +150,7 @@ export function AssetsBrowse({ apiBaseUrl }: { apiBaseUrl: string }) {
                 </Link>
                 <span className="assets-row-facts">
                   <span className="assets-type" data-asset-type={asset.type}>
-                    {assetTypeLabel(asset.type)}
+                    {translateOr(t, assetTypeLabelKey(asset.type), asset.type)}
                   </span>
                   {/* The pid is the asset's persistent identity (docs/11 §2):
                       a reader can cite it even when the title is revised. */}

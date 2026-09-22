@@ -1,5 +1,6 @@
 import { GlobalNav } from "../nav/global-nav";
 import { getWebConfig } from "../../lib/server-config";
+import { getT } from "../../lib/i18n-server";
 
 /**
  * Layout for the signed-in and public product surfaces: skip link, the
@@ -7,14 +8,15 @@ import { getWebConfig } from "../../lib/server-config";
  * validated API origin is resolved once here and handed to the header's
  * session provider; pages keep resolving their own needs as before.
  */
-export default function MainLayout({
+export default async function MainLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   const cfg = getWebConfig();
+  const { t } = await getT();
   return (
     <>
       <a href="#main" className="skip-link">
-        Skip to content
+        {t("shell.skipToContent")}
       </a>
       <GlobalNav apiBaseUrl={cfg.apiBaseUrl} />
       {/* tabIndex={-1} lets the skip link actually focus the landmark. */}

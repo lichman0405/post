@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 import { AlertIcon, CheckIcon, GitPullRequestIcon } from "@primer/octicons-react";
 import { Spinner } from "@primer/react";
 
+import { useT } from "../../../../i18n-provider";
+
 import {
   ApiError,
   RESOLUTION_KINDS,
@@ -321,6 +323,7 @@ function ConflictCard({
   onSave: (decision: DecisionInput) => Promise<ResolutionRecord[]>;
   onPlan: (plan: ResolutionRecord[]) => void;
 }) {
+  const t = useT();
   const initialKind =
     record !== null && (RESOLUTION_KINDS as readonly string[]).includes(record.kind)
       ? (record.kind as ResolutionKind)
@@ -384,17 +387,24 @@ function ConflictCard({
         ) : null}
       </header>
 
+      {/* T1105: this block is the ONE place in apps/web that rendered
+          hardcoded Chinese ("仅建议 · advisory only"), and the task named it
+          as the string that had to enter the catalog. It is a LABEL, not a
+          domain code: `data-conflict-advisory-badge` next to it is the
+          stable anchor and stays exactly as it is. The rest of this page's
+          copy is still literal — see the coverage table in the RESULT, which
+          lists this route as partially converted rather than claiming
+          otherwise. */}
       <section className="conflicts-explanation" data-conflict-advisory>
         <p className="conflicts-explanation-label">
-          Detector explanation{" "}
+          {t("conflicts.detectorExplanation")}{" "}
           <StateLabel shape="advisory" tone="attention" data-conflict-advisory-badge>
-            仅建议 · advisory only
+            {t("conflicts.advisoryOnly")}
           </StateLabel>
         </p>
         <p className="conflicts-detail">{conflict.detail}</p>
         <p className="conflicts-advisory-note">
-          The machine never applies this on its own — recording a decision is the human&apos;s
-          call.
+          {t("conflicts.advisoryNote")}
         </p>
       </section>
 

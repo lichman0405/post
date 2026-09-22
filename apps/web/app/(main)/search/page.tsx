@@ -1,14 +1,19 @@
 import type { Metadata } from "next";
 
 import { getWebConfig } from "../../../lib/server-config";
+import { getT } from "../../../lib/i18n-server";
 import { SearchAnswerView } from "./search-answer";
 import "./search.css";
 
-export const metadata: Metadata = {
-  title: "Search — POST",
-  description:
-    "An evidence-backed answer to a research question, with the sources it cites, what limits it and what contradicts it.",
-};
+/** T1105: the tab title and the page description are copy, so they follow
+ *  the language preference like everything else on the page. */
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getT();
+  return {
+    title: t("search.metaTitle"),
+    description: t("search.metaDescription"),
+  };
+}
 
 /**
  * The Search Answer surface (T0907, docs/05 §5, docs/42 §Search Answer).
@@ -43,23 +48,29 @@ export default async function SearchPage({
   const raw = params.q;
   const query = typeof raw === "string" ? raw.trim() : "";
   const cfg = getWebConfig();
+  const { t } = await getT();
 
   return (
     <div className="search">
-      <h1 className="search-title">Search</h1>
+      <h1 className="search-title">{t("search.title")}</h1>
       {query === "" ? (
         <p className="search-intro">
-          Ask a question about the network — for example{" "}
+          {/* Split around the example rather than interpolated: the example
+              is an element (it is styled), and a catalog value carries text
+              only. The example keeps its numerals and its units verbatim in
+              both locales — "3 mmol/g" and "298 K" are a quantity and a
+              temperature, and docs/28 §4 is explicit that a unit is not a
+              translation problem. */}
+          {t("search.introPrefix")}{" "}
           <span className="search-intro-example">
-            which MOF materials show CO2 uptake above 3 mmol/g at 298 K?
+            {t("search.introExample")}
           </span>{" "}
-          The answer comes back with the sources it cites, what limits it, and
-          what contradicts it.
+          {t("search.introSuffix")}
         </p>
       ) : (
         <>
           <p className="search-query">
-            Answer for <span data-search-query>{query}</span>
+            {t("search.answerFor")} <span data-search-query>{query}</span>
           </p>
           <SearchAnswerView query={query} apiBaseUrl={cfg.apiBaseUrl} />
         </>

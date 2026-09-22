@@ -24,7 +24,11 @@ import type { ProjectRole } from "../../../lib/projects";
  */
 export interface ProjectTab {
   key: string;
-  label: string;
+  /** T1105: a catalog key, not a rendered label — the tab bar is on every
+      project page, so its nine labels are copy and belong in the catalog
+      (docs/28 §3). Same shape as nav-destinations.ts: the table resolves no
+      locale, the renderer does. */
+  labelKey: string;
   /** Route segment; "" is the overview (the project page itself). */
   path: string;
   icon: Icon;
@@ -33,18 +37,18 @@ export interface ProjectTab {
 }
 
 export const PROJECT_TABS: ProjectTab[] = [
-  { key: "overview", label: "Overview", path: "", icon: BookIcon },
-  { key: "research", label: "Research", path: "research", icon: BeakerIcon },
-  { key: "issues", label: "Issues", path: "issues", icon: IssueOpenedIcon },
-  { key: "pulls", label: "Pull requests", path: "pulls", icon: GitPullRequestIcon },
-  { key: "releases", label: "Releases", path: "releases", icon: TagIcon },
-  { key: "milestones", label: "Milestones", path: "milestones", icon: MilestoneIcon },
-  { key: "assets", label: "Assets", path: "assets", icon: ArchiveIcon },
-  { key: "files", label: "Files", path: "files", icon: FileDirectoryIcon },
-  { key: "activity", label: "Activity", path: "activity", icon: PulseIcon },
+  { key: "overview", labelKey: "project.tab.overview", path: "", icon: BookIcon },
+  { key: "research", labelKey: "project.tab.research", path: "research", icon: BeakerIcon },
+  { key: "issues", labelKey: "project.tab.issues", path: "issues", icon: IssueOpenedIcon },
+  { key: "pulls", labelKey: "project.tab.pulls", path: "pulls", icon: GitPullRequestIcon },
+  { key: "releases", labelKey: "project.tab.releases", path: "releases", icon: TagIcon },
+  { key: "milestones", labelKey: "project.tab.milestones", path: "milestones", icon: MilestoneIcon },
+  { key: "assets", labelKey: "project.tab.assets", path: "assets", icon: ArchiveIcon },
+  { key: "files", labelKey: "project.tab.files", path: "files", icon: FileDirectoryIcon },
+  { key: "activity", labelKey: "project.tab.activity", path: "activity", icon: PulseIcon },
   {
     key: "settings",
-    label: "Settings",
+    labelKey: "project.tab.settings",
     path: "settings",
     icon: GearIcon,
     minRole: "maintainer",

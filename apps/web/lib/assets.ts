@@ -40,24 +40,52 @@
 export const ASSET_TYPES = ["dataset", "protocol", "material_collection", "benchmark"] as const;
 export type AssetType = (typeof ASSET_TYPES)[number];
 
-/** One asset type's display label — the human name of a closed-set value. */
-const TYPE_LABELS: Record<AssetType, string> = {
-  dataset: "Dataset",
-  protocol: "Protocol",
-  material_collection: "Material collection",
-  benchmark: "Benchmark",
+/** The catalog key of one asset type's display label (T1105).
+ *
+ *  A KEY and not a sentence, because this module cannot reach the catalog:
+ *  the page resolves it with t(assetTypeLabelKey(type)). The type CODE — the
+ *  value `data-asset-type` carries and the value the wire speaks — is the
+ *  type itself and never passes through here (docs/28 §3). */
+const TYPE_LABEL_KEYS: Record<AssetType, string> = {
+  dataset: "asset.type.dataset",
+  protocol: "asset.type.protocol",
+  material_collection: "asset.type.materialCollection",
+  benchmark: "asset.type.benchmark",
 };
 
 /**
- * The display label of one asset type.
+ * The catalog key of one asset type's display label, or null for a value this
+ * client was not taught.
  *
- * An unknown value renders VERBATIM rather than as its nearest known type
- * or as "other": the set is closed on the server, so a value outside it is
- * a value this client does not know — not a value that does not exist — and
- * a label invented here would misreport the row it labels.
+ * An unknown value renders VERBATIM rather than as its nearest known type or
+ * as "other": the set is closed on the server, so a value outside it is a
+ * value this client does not know — not a value that does not exist — and a
+ * label invented here would misreport the row it labels. The CALLER does that
+ * (`t(assetTypeLabelKey(x) ?? x)`), which is why this returns null rather than
+ * the raw value: a function that cannot translate must not pretend to.
  */
-export function assetTypeLabel(type: string): string {
-  return (TYPE_LABELS as Record<string, string>)[type] ?? type;
+export function assetTypeLabelKey(type: string): string | null {
+  return (TYPE_LABEL_KEYS as Record<string, string>)[type] ?? null;
+}
+
+/** The catalog key of the browse list's empty line for one type filter.
+ *
+ *  The line is per type rather than one sentence with the label interpolated
+ *  into it, because English lower-cases the label inside the sentence ("No
+ *  published dataset assets yet.") and no other language does. One key per
+ *  type keeps the English byte-identical without an English-only transform
+ *  the catalog could not express. */
+const TYPE_EMPTY_KEYS: Record<AssetType, string> = {
+  dataset: "assets.browse.empty.dataset",
+  protocol: "assets.browse.empty.protocol",
+  material_collection: "assets.browse.empty.materialCollection",
+  benchmark: "assets.browse.empty.benchmark",
+};
+
+/** The catalog key of that empty line, or null for a type this client was not
+ *  taught (the caller then renders the unfiltered line). */
+export function assetTypeEmptyKey(type: string): string | null {
+  return (TYPE_EMPTY_KEYS as Record<string, string>)[type] ?? null;
 }
 
 /** A project identity the API chose to render (cmd/api/assetshttp; nil when withheld). */
@@ -319,26 +347,45 @@ export function assetPageUrl(apiBaseUrl: string, pid: string, version?: string |
 }
 
 /**
- * The line a page renders for an API refusal.
+ * The catalog key of the line a page renders for an API refusal.
  *
  * The codes are cmd/api/assetshttp's. ASSET_NOT_FOUND is ONE line on
  * purpose: the API answers it for four different situations, and the page
  * must not try to tell them apart — anything more specific would be the
- * oracle the single code exists not to be.
+ * oracle the single code exists not to be. The code is what this table
+ * maps; the line itself is in the catalog, so it renders in the reader's
+ * language.
  */
-export function messageForAssetCode(code: string): string {
+export function assetCodeKey(code: string): string {
   switch (code) {
     case "ASSET_NOT_FOUND":
-      return "No such asset — or it is not shared with you.";
+      return "asset.code.notFound";
     case "ASSET_PAGE_UNAVAILABLE":
-      return "Asset data is temporarily unavailable. Try again.";
+      return "asset.code.unavailable";
     case "ASSET_LIST_VALIDATION_FAILED":
-      return "That filter is not one this repository offers.";
+      return "asset.code.listValidationFailed";
     case "ASSET_PAGE_VALIDATION_FAILED":
-      return "That version address is not one this repository can serve.";
+      return "asset.code.pageValidationFailed";
     default:
-      return "Something went wrong loading assets.";
+      return "asset.code.generic";
   }
+}
+
+/**
+ * The envelope this client synthesizes itself: when the body did not decode
+ * into one, or when the connection failed before there was a body at all.
+ *
+ * `message` carries the CODE and not a sentence. An ApiError's message is a
+ * developer diagnostic — the pages render the code through the catalog
+ * (assetCodeKey), never this string — so prose here would be English that no
+ * reader is ever shown, and the code is exactly what an engineer reading a
+ * log needs. It is also the one shape this file can offer the scanner: the
+ * scanner's rules cannot tell a developer diagnostic from rendered copy in a
+ * .ts file, and a file that has to be exempted from the rules is a file whose
+ * NEXT sentence goes unnoticed.
+ */
+function syntheticEnvelope(code: string, retryable: boolean): ErrorEnvelope {
+  return { code, message: code, request_id: undefined, retryable };
 }
 
 /** Decode an error body into the envelope, falling back to a generic code. */
@@ -348,13 +395,15 @@ function envelopeFor(status: number, body: unknown): ErrorEnvelope {
     if (typeof env.code === "string" && env.code !== "") {
       return {
         code: env.code,
-        message: typeof env.message === "string" ? env.message : "request failed",
+        /* An envelope that carries a code but no message of its own is
+         * answered with its own code, for the reason above. */
+        message: typeof env.message === "string" ? env.message : env.code,
         request_id: env.request_id,
         retryable: env.retryable,
       };
     }
   }
-  return { code: "UNKNOWN", message: `request failed with status ${status}`, retryable: false };
+  return syntheticEnvelope("UNKNOWN", status === 503 || status >= 500);
 }
 
 /** Create the assets client over one API origin. */

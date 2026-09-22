@@ -10,20 +10,28 @@
  * Run: node --test "apps/web/lib/research-profile.test.mjs"
  */
 import assert from "node:assert/strict";
+
+import { translate } from "./i18n.ts";
 import { test } from "node:test";
 
 import {
   ResearchProfileError,
   createResearchProfileClient,
-  describeRelation,
-  describeVia,
+  describeRelationKey,
+  describeViaKey,
   formatAffiliationWindow,
   formatDay,
-  messageForResearchProfileCode,
+  researchProfileCodeKey,
   parseOrganizationProfile,
   parsePersonProfile,
   printableEntity,
 } from "./research-profile.ts";
+
+/** The translators the pages pass in, resolved against the REAL catalog (en
+ *  for the byte-identical assertions, zh for the ones that prove the line
+ *  really moves). T1105 moved these sentences into the catalog. */
+const en = (key, vars) => translate("en", key, vars);
+const zh = (key, vars) => translate("zh-CN", key, vars);
 
 const API = "http://127.0.0.1:8080";
 
@@ -408,10 +416,17 @@ test("a withheld identity prints NOTHING — never a placeholder naming the abse
 // Formatting helpers (the API sends facts, the client writes the sentence)
 
 test("formatAffiliationWindow renders all four window shapes", () => {
-  assert.equal(formatAffiliationWindow("2024-01-15", "2025-06-30"), "2024-01-15 – 2025-06-30");
-  assert.equal(formatAffiliationWindow("2024-01-15", null), "2024-01-15 – present");
-  assert.equal(formatAffiliationWindow(null, "2025-06-30"), "until 2025-06-30");
-  assert.equal(formatAffiliationWindow(null, null), "dates not recorded");
+  // Three of the four shapes are sentences and come from the catalog; the
+  // fourth is two dates and an en dash, which is not language. Resolved
+  // against the REAL en catalog (T1105 moved the three sentences there).
+  assert.equal(formatAffiliationWindow("2024-01-15", "2025-06-30", en), "2024-01-15 – 2025-06-30");
+  assert.equal(formatAffiliationWindow("2024-01-15", null, en), "2024-01-15 – present");
+  assert.equal(formatAffiliationWindow(null, "2025-06-30", en), "until 2025-06-30");
+  assert.equal(formatAffiliationWindow(null, null, en), "dates not recorded");
+  // …and the same call in the other locale really is a rendering, not the
+  // English with a different label bolted on.
+  assert.equal(formatAffiliationWindow(null, null, zh), "日期未记录");
+  assert.equal(formatAffiliationWindow("2024-01-15", null, zh), "2024-01-15 – 至今");
 });
 
 test("formatDay keeps the calendar day the API sent", () => {
@@ -420,18 +435,28 @@ test("formatDay keeps the calendar day the API sent", () => {
 });
 
 test("via and relation vocabularies render as words, unknown values verbatim", () => {
-  assert.equal(describeVia("claude_code"), "agent");
-  assert.equal(describeVia("git_compat"), "Git");
-  assert.equal(describeVia("carrier_pigeon"), "carrier_pigeon");
-  assert.equal(describeRelation("reproduces"), "Reproduced");
-  assert.equal(describeRelation("fails_to_reproduce"), "Failed to reproduce");
-  assert.equal(describeRelation("supports"), "supports");
+  // The page renders `t(key ?? raw)`: a known code has a catalog key, an
+  // unknown one has none and is shown as it arrived rather than hidden.
+  assert.equal(en(describeViaKey("claude_code")), "agent");
+  assert.equal(en(describeViaKey("git_compat")), "Git");
+  assert.equal(describeViaKey("carrier_pigeon"), null);
+  assert.equal(en(describeRelationKey("reproduces")), "Reproduced");
+  assert.equal(en(describeRelationKey("fails_to_reproduce")), "Failed to reproduce");
+  assert.equal(describeRelationKey("supports"), null);
+  // The words are localized: the same call in zh is not the English.
+  assert.equal(zh(describeViaKey("claude_code")), "智能体");
+  assert.equal(zh(describeRelationKey("reproduces")), "已复现");
 });
 
 test("every stable code has a human line", () => {
   for (const code of ["USER_NOT_FOUND", "ORG_NOT_FOUND", "SERVICE_UNAVAILABLE", "UNEXPECTED"]) {
-    assert.notEqual(messageForResearchProfileCode(code), messageForResearchProfileCode("SOMETHING_ELSE"));
+    assert.notEqual(en(researchProfileCodeKey(code)), en(researchProfileCodeKey("SOMETHING_ELSE")));
   }
-  assert.match(messageForResearchProfileCode("USER_NOT_FOUND"), /no public research profile/);
-  assert.match(messageForResearchProfileCode("ORG_NOT_FOUND"), /no public profile/);
+  assert.match(en(researchProfileCodeKey("USER_NOT_FOUND")), /no public research profile/);
+  assert.match(en(researchProfileCodeKey("ORG_NOT_FOUND")), /no public profile/);
+  // The two 404 lines are two surfaces and must not collapse into one — and
+  // neither may render the missing-key marker.
+  for (const code of ["USER_NOT_FOUND", "ORG_NOT_FOUND", "SERVICE_UNAVAILABLE", "UNEXPECTED"]) {
+    assert.doesNotMatch(en(researchProfileCodeKey(code)), /⟦missing:/);
+  }
 });

@@ -14,6 +14,7 @@ import {
   type Release,
 } from "../../../../../../lib/releases";
 import { Sidebar } from "@post/ui";
+import { useT } from "../../../../../i18n-provider";
 import { useProjectShell } from "../../shell-context";
 
 /**
@@ -33,6 +34,7 @@ import { useProjectShell } from "../../shell-context";
  */
 export default function ReleaseDetail() {
   const shell = useProjectShell();
+  const t = useT();
   const params = useParams<{ id: string; releaseId: string }>();
   const releaseId = params.releaseId;
 
@@ -57,13 +59,14 @@ export default function ReleaseDetail() {
         setError(
           err instanceof ApiError
             ? messageForReleaseCode(err.code)
-            : "Could not load this release.",
+            : t("release.error.load"),
         );
       });
     return () => {
       cancelled = true;
     };
-  }, [shell, releasesClient, releaseId]);
+    // `t` in the deps: the fallback sentence is resolved in the catch.
+  }, [shell, releasesClient, releaseId, t]);
 
   if (shell === null) {
     // The shell only mounts tab content in its ready state; null means a
@@ -78,10 +81,10 @@ export default function ReleaseDetail() {
         <div className="release-detail-state-icon" aria-hidden="true">
           <AlertIcon size={24} />
         </div>
-        <h2 className="release-detail-state-title">Release unavailable</h2>
+        <h2 className="release-detail-state-title">{t("release.error.title")}</h2>
         <p className="release-detail-state-desc">{error}</p>
         <Link className="project-state-button" href={`/projects/${project.id}/releases`}>
-          Back to Releases
+          {t("release.back")}
         </Link>
       </div>
     );
@@ -90,7 +93,7 @@ export default function ReleaseDetail() {
   if (release === null) {
     return (
       <div className="release-detail-state">
-        <Spinner aria-label="Loading release" />
+        <Spinner aria-label={t("release.loading")} />
       </div>
     );
   }
@@ -102,12 +105,12 @@ export default function ReleaseDetail() {
           spacer before it is the component's, not a hand-typed " / ". */}
       <Sidebar
         className="release-detail-breadcrumb"
-        label="Release breadcrumb"
+        label={t("release.breadcrumb")}
         tone="accent"
         crumbs={[
           {
             key: "releases",
-            content: <Link href={`/projects/${project.id}/releases`}>Releases</Link>,
+            content: <Link href={`/projects/${project.id}/releases`}>{t("releases.title")}</Link>,
           },
           { key: "version", content: release.version },
         ]}
@@ -121,38 +124,36 @@ export default function ReleaseDetail() {
           href={releaseManifestHref(shell.apiBaseUrl, project.id, release.id)}
           data-release-manifest={release.version}
         >
-          <DownloadIcon size={14} aria-hidden="true" /> Download manifest
+          <DownloadIcon size={14} aria-hidden="true" /> {t("release.downloadManifest")}
         </a>
       </div>
       <p className="release-detail-note">
-        Immutable snapshot — the state, policy and review record fixed
-        here never change, and later project work does not affect this
-        release. There is no edit or delete.
+        {t("release.immutableNote")}
       </p>
       <dl className="release-detail-facts">
-        <dt>Version</dt>
+        <dt>{t("release.fact.version")}</dt>
         <dd>{release.version}</dd>
-        <dt>State</dt>
+        <dt>{t("release.fact.state")}</dt>
         <dd>
           <code>{release.state_id}</code>
         </dd>
-        <dt>Project policy</dt>
-        <dd>{release.policy_version_id !== null ? <code>{release.policy_version_id}</code> : "none"}</dd>
-        <dt>Organization policy</dt>
+        <dt>{t("release.fact.projectPolicy")}</dt>
+        <dd>{release.policy_version_id !== null ? <code>{release.policy_version_id}</code> : t("common.none")}</dd>
+        <dt>{t("release.fact.orgPolicy")}</dt>
         <dd>
           {release.org_policy_version_id !== null ? (
             <code>{release.org_policy_version_id}</code>
           ) : (
-            "none"
+            t("common.none")
           )}
         </dd>
-        <dt>Manifest hash</dt>
+        <dt>{t("release.fact.manifestHash")}</dt>
         <dd>
           <code data-release-manifest-hash>{release.manifest_hash}</code>
         </dd>
-        <dt>Created</dt>
+        <dt>{t("release.fact.created")}</dt>
         <dd>{release.created_at.slice(0, 10)}</dd>
-        <dt>Created by</dt>
+        <dt>{t("release.fact.createdBy")}</dt>
         <dd>{release.created_by}</dd>
       </dl>
     </div>

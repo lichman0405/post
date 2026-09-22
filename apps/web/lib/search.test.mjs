@@ -19,6 +19,8 @@
  *     which must never attach a claim to a source the answer did not return.
  */
 import assert from "node:assert/strict";
+
+import { translate } from "./i18n.ts";
 import { test } from "node:test";
 
 import {
@@ -27,13 +29,19 @@ import {
   citedSources,
   createSearchClient,
   evidenceRows,
-  fallbackHeadline,
+  fallbackHeadlineKey,
   isSearchResponse,
-  messageForSearchCode,
+  searchCodeKey,
   sourceHref,
   sourceKindLabel,
   sourceLabel,
 } from "./search.ts";
+
+/** The translator the pages pass in, resolved against the REAL en catalog.
+ *  These sentences moved into the catalog in T1105; resolving through
+ *  translate("en", …) keeps the assertions about what a reader sees and adds
+ *  the property that every key exists, in both locales. */
+const en = (key, vars) => translate("en", key, vars);
 
 const API = "http://127.0.0.1:8080";
 
@@ -273,14 +281,20 @@ test("evidenceRows keeps a ref that names no source instead of inventing one", (
 });
 
 test("every fallback reason has its own sentence", () => {
-  const headlines = FALLBACK_REASONS.map((reason) => fallbackHeadline(reason));
+  // Resolved against the REAL en catalog: the sentences moved there in T1105,
+  // so this asserts what a reader is shown AND that every key exists.
+  const headlines = FALLBACK_REASONS.map((reason) => en(fallbackHeadlineKey(reason)));
   assert.equal(new Set(headlines).size, FALLBACK_REASONS.length);
   for (const headline of headlines) {
     assert.ok(headline.length > 0);
     assert.ok(!/something went wrong/i.test(headline));
   }
-  // A reason this page has not been taught is still a fallback with a line.
-  assert.ok(fallbackHeadline("brand_new_reason").length > 0);
+  // A reason this page has not been taught is still a fallback with a line —
+  // and it is a line the catalog has, not a key the page would render with a
+  // ⟦missing:…⟧ marker in it.
+  const unknown = en(fallbackHeadlineKey("brand_new_reason"));
+  assert.ok(unknown.length > 0);
+  assert.doesNotMatch(unknown, /⟦missing:/);
 });
 
 test("every code this page can be handed has its own line", () => {
@@ -292,8 +306,9 @@ test("every code this page can be handed has its own line", () => {
     "MALFORMED_ANSWER",
     "UNREACHABLE",
   ];
-  const lines = codes.map(messageForSearchCode);
+  const lines = codes.map((code) => en(searchCodeKey(code)));
   assert.equal(new Set(lines).size, codes.length);
+  for (const line of lines) assert.doesNotMatch(line, /⟦missing:/);
 });
 
 test("a source's label falls back to its ref only when it has no title", () => {

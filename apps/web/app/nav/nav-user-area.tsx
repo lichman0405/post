@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ActionList, ActionMenu } from "@primer/react";
 import { PersonIcon, TriangleDownIcon } from "@primer/octicons-react";
 
+import { useT } from "../i18n-provider";
 import { useNavSession } from "./nav-session";
 
 /**
@@ -13,6 +14,7 @@ import { useNavSession } from "./nav-session";
  */
 export function NavUserArea() {
   const { user, loading, busy, signOut } = useNavSession();
+  const t = useT();
 
   if (loading) {
     // Reserve the trigger's footprint so the header does not shift when
@@ -23,14 +25,14 @@ export function NavUserArea() {
   if (user === null) {
     return (
       <Link href="/login" className="global-nav-signin">
-        Sign in
+        {t("nav.signIn")}
       </Link>
     );
   }
 
   return (
     <ActionMenu>
-      <ActionMenu.Anchor aria-label={`Account menu for ${user.handle}`}>
+      <ActionMenu.Anchor aria-label={t("nav.accountMenuLabel", { handle: user.handle })}>
         {/* role="button": ActionMenu.Anchor puts aria-haspopup,
             aria-expanded and tabindex=0 on its child, and those are NOT
             allowed on a generic <span> — axe reports `aria-allowed-attr`
@@ -49,14 +51,14 @@ export function NavUserArea() {
       <ActionMenu.Overlay align="end" width="medium">
         <ActionList>
           <ActionList.Item disabled>
-            Signed in as {user.display_name || user.handle}
+            {t("nav.signedInAs", { name: user.display_name || user.handle })}
           </ActionList.Item>
           <ActionList.LinkItem href={`/users/${user.id}`}>
-            Your profile
+            {t("nav.yourProfile")}
           </ActionList.LinkItem>
           <ActionList.Divider />
           <ActionList.Item variant="danger" onSelect={() => signOut()}>
-            {busy ? "Signing out…" : "Sign out"}
+            {busy ? t("nav.signingOut") : t("nav.signOut")}
           </ActionList.Item>
         </ActionList>
       </ActionMenu.Overlay>

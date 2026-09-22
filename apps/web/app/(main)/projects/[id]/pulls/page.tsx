@@ -9,9 +9,10 @@ import { Table } from "@post/ui";
 import {
   ApiError,
   createPullsClient,
-  messageForPullRequestCode,
+  pullRequestCodeKey,
   type PullRequest,
 } from "../../../../../lib/pulls";
+import { useT } from "../../../../i18n-provider";
 import { useProjectShell } from "../shell-context";
 
 /**
@@ -22,6 +23,7 @@ import { useProjectShell } from "../shell-context";
  */
 export default function PullsPage() {
   const shell = useProjectShell();
+  const t = useT();
 
   const [pulls, setPulls] = useState<PullRequest[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,14 +45,15 @@ export default function PullsPage() {
         if (cancelled) return;
         setError(
           err instanceof ApiError
-            ? messageForPullRequestCode(err.code)
-            : "Could not load pull requests.",
+            ? t(pullRequestCodeKey(err.code))
+            : t("pull.list.error.load"),
         );
       });
     return () => {
       cancelled = true;
     };
-  }, [shell, client]);
+    // `t` in the deps: the fallback sentence is resolved in the catch.
+  }, [shell, client, t]);
 
   if (shell === null) {
     // The shell only mounts tab content in its ready state; null means a
@@ -61,20 +64,18 @@ export default function PullsPage() {
   return (
     <div className="pulls-page" data-pulls-list>
       <section className="pulls-section">
-        <h2 className="pulls-section-title">Pull requests</h2>
+        <h2 className="pulls-section-title">{t("pull.list.title")}</h2>
         <p className="pulls-section-desc">
-          Proposed research-state diffs against {shell.project.name}&apos;s
-          main branch, oldest first. Open a pull request to see its machine
-          integrity report.
+          {t("pull.list.intro", { project: shell.project.name })}
         </p>
         {error !== null ? (
           <div className="pulls-error" data-pulls-error>{error}</div>
         ) : pulls === null ? (
-          <Spinner aria-label="Loading pull requests" />
+          <Spinner aria-label={t("pull.list.loading")} />
         ) : pulls.length === 0 ? (
           <div className="pulls-empty" data-pulls-empty>
             <GitPullRequestIcon size={16} aria-hidden="true" />
-            No pull requests yet. Research PRs appear here once proposed.
+            {t("pull.list.empty")}
           </div>
         ) : (
           /* T1101: `.pulls-table` was one of two byte-identical table
@@ -86,7 +87,7 @@ export default function PullsPage() {
             columns={[
               {
                 key: "number",
-                header: "Number",
+                header: t("pull.list.col.number"),
                 render: (pr) => (
                   <Link
                     className="pulls-number-link"
@@ -99,19 +100,19 @@ export default function PullsPage() {
               },
               {
                 key: "title",
-                header: "Title",
+                header: t("pull.list.col.title"),
                 render: (pr) => pr.title,
                 cellAttrs: () => ({ className: "pulls-title" }),
               },
               {
                 key: "state",
-                header: "State",
+                header: t("pull.list.col.state"),
                 render: (pr) => pr.state,
                 cellAttrs: (pr) => ({ className: "pulls-state", "data-pull-state": pr.state }),
               },
               {
                 key: "opened",
-                header: "Opened",
+                header: t("pull.list.col.opened"),
                 render: (pr) => pr.created_at.slice(0, 10),
                 cellAttrs: () => ({ className: "pulls-date" }),
               },

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { useT } from "../i18n-provider";
 import { NAV_DESKTOP_DESTINATIONS } from "./nav-destinations";
 
 /**
@@ -13,9 +14,10 @@ import { NAV_DESKTOP_DESTINATIONS } from "./nav-destinations";
  */
 export function NavLinks() {
   const pathname = usePathname();
+  const t = useT();
   return (
     <ul className="global-nav-list">
-      {NAV_DESKTOP_DESTINATIONS.map(({ href, label, icon: Icon }) => {
+      {NAV_DESKTOP_DESTINATIONS.map(({ href, labelKey, icon: Icon }) => {
         const current = pathname === href;
         return (
           <li key={href}>
@@ -25,7 +27,7 @@ export function NavLinks() {
               aria-current={current ? "page" : undefined}
             >
               <Icon size={16} aria-hidden />
-              <span>{label}</span>
+              <span>{t(labelKey)}</span>
             </Link>
           </li>
         );

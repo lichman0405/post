@@ -14,6 +14,7 @@ import {
   type Project,
   type ProjectMembership,
 } from "../../../../lib/projects";
+import { useT } from "../../../i18n-provider";
 import { ProjectBadges } from "../project-badges";
 import { projectTabHref, tabsForRole } from "../project-tabs";
 import { ProjectShellContext } from "./shell-context";
@@ -53,6 +54,7 @@ export function ProjectShell({
   projectId: string;
   children: React.ReactNode;
 }) {
+  const t = useT();
   const client = useMemo(() => createProjectsClient(apiBaseUrl), [apiBaseUrl]);
   const pathname = usePathname();
   // The phase derives from data keyed by projectId — nothing is set
@@ -115,7 +117,7 @@ export function ProjectShell({
       // `srText` is the prop that actually renders that hidden span, so
       // the region below now has a sentence to read out.
       <div className="project-state-main" aria-live="polite" aria-busy="true">
-        <Spinner srText="Loading project" />
+        <Spinner srText={t("project.loading")} />
       </div>
     );
   }
@@ -130,12 +132,12 @@ export function ProjectShell({
           <div className="project-state-icon" aria-hidden="true">
             <AlertIcon size={24} />
           </div>
-          <h1 className="project-state-title">Project not found</h1>
+          <h1 className="project-state-title">{t("project.notFound.title")}</h1>
           <p className="project-state-desc">
-            This project does not exist, or you do not have access to it.
+            {t("project.notFound.body")}
           </p>
           <Link className="project-state-button" href="/projects">
-            Back to Projects
+            {t("project.backToProjects")}
           </Link>
         </div>
       </div>
@@ -149,7 +151,7 @@ export function ProjectShell({
           <div className="project-state-icon" aria-hidden="true">
             <AlertIcon size={24} />
           </div>
-          <h1 className="project-state-title">Project unavailable</h1>
+          <h1 className="project-state-title">{t("project.unavailable.title")}</h1>
           <p className="project-state-desc">
             {failure !== null ? failure.message : ""}
           </p>
@@ -174,10 +176,10 @@ export function ProjectShell({
             load. What the shared layer owns is the row, the "/" and the
             12px muted type that four breadcrumbs used to each spell. */}
         <Sidebar
-          label="Breadcrumb"
+          label={t("project.breadcrumb")}
           className="project-shell-breadcrumb"
           crumbs={[
-            { key: "projects", content: <Link href="/projects">Projects</Link> },
+            { key: "projects", content: <Link href="/projects">{t("nav.projects")}</Link> },
             { key: "project", content: project.slug },
           ]}
         />
@@ -191,7 +193,7 @@ export function ProjectShell({
           <p className="project-shell-purpose">{project.purpose}</p>
         ) : null}
       </header>
-      <nav className="project-tabs" aria-label="Project">
+      <nav className="project-tabs" aria-label={t("project.tabsLabel")}>
         {tabs.map((tab) => {
           const href = projectTabHref(project.id, tab.path);
           const active = pathname === href;
@@ -205,7 +207,7 @@ export function ProjectShell({
               aria-current={active ? "page" : undefined}
             >
               <Icon size={14} aria-hidden="true" />
-              {tab.label}
+              {t(tab.labelKey)}
             </Link>
           );
         })}
