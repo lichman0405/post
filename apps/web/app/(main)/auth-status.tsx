@@ -50,8 +50,18 @@ export function AuthStatus({ apiBaseUrl }: { apiBaseUrl: string }) {
 
   if (loading) {
     return (
-      <div className="auth-status">
-        <Spinner size="small" />
+      <div className="auth-status" aria-live="polite" aria-busy="true">
+        {/* The Spinner was never unlabelled: Primer's srText defaults to
+            "Loading" (dist/Spinner/Spinner.js:46) and renders it in a
+            VisuallyHidden span. But an `aria-label` here does NOTHING —
+            Primer puts aria-hidden="true" on the <svg> unconditionally
+            (:139) and skips the VisuallyHidden span as soon as an
+            aria-label is passed (:50, :157), so the name would land on a
+            hidden element and be announced by nobody. The visible
+            sentence is the announcement; suppressing the spinner's own
+            text is Primer's documented shape for that, and the shape the
+            other loading states in this app already use. */}
+        <Spinner size="small" srText={null} />
         <Text>Checking session…</Text>
       </div>
     );
@@ -59,7 +69,7 @@ export function AuthStatus({ apiBaseUrl }: { apiBaseUrl: string }) {
 
   if (user === null) {
     return (
-      <div className="auth-status">
+      <div className="auth-status" aria-live="polite">
         <SignInIcon size={16} aria-hidden />
         <Text>
           <Link href="/login">Sign in</Link> to create and publish research
@@ -70,7 +80,7 @@ export function AuthStatus({ apiBaseUrl }: { apiBaseUrl: string }) {
   }
 
   return (
-    <div className="auth-status">
+    <div className="auth-status" aria-live="polite">
       <PersonIcon size={16} aria-hidden />
       <Text>
         Signed in as <strong>{user.display_name || user.handle}</strong>{" "}

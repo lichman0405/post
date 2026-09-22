@@ -99,6 +99,25 @@ test("search posts the question as JSON, with the session cookie", async () => {
   assert.deepEqual(JSON.parse(calls[0].init.body), { query: "CO2 uptake" });
 });
 
+// The guard (cmd/api/authhttp/auth_middleware.go checkCSRF) asks for the
+// session-bound token on top of the cookie, so both halves of the request
+// are asserted: the cookie ride-along above, and the token here. Without
+// this header the API answers 403 CSRF_FAILED and the page shows a failure
+// where the answer belongs — the state T1104 found /search in.
+test("search carries the CSRF token when the caller has one", async () => {
+  const { fetchFn, calls } = fakeFetch([() => jsonResponse(200, answerBody())]);
+  await createSearchClient(API, { fetch: fetchFn, csrfToken: () => "tok-123" }).search("q");
+
+  assert.equal(calls[0].init.headers["X-CSRF-Token"], "tok-123");
+});
+
+test("search sends no CSRF header when there is no token to send", async () => {
+  const { fetchFn, calls } = fakeFetch([() => jsonResponse(200, answerBody())]);
+  await createSearchClient(API, { fetch: fetchFn, csrfToken: () => null }).search("q");
+
+  assert.equal("X-CSRF-Token" in calls[0].init.headers, false);
+});
+
 test("a refusal becomes an ApiError carrying the wire code and request id", async () => {
   const { fetchFn } = fakeFetch([
     () =>

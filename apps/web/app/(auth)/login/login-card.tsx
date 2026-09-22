@@ -92,8 +92,15 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
         Platform for Open Science &amp; Technology
       </p>
 
+      {/* T1104: this Flash is the ONLY report a rejected sign-in, sign-up or
+          OIDC start ever produces — the form does not navigate away on
+          success, it stays put on failure — so without a live role the
+          answer to "why did nothing happen?" is silent. `alert` (assertive)
+          because it reports the failure of an action the reader just took;
+          Primer's Flash renders a plain <div> and has no role of its own
+          (@primer/react 38.39.0 dist/Flash/Flash.js forwards ...rest). */}
       {error !== null && (
-        <Flash variant="danger" className="auth-flash">
+        <Flash variant="danger" className="auth-flash" role="alert">
           {error}
         </Flash>
       )}

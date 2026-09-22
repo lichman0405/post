@@ -108,8 +108,14 @@ export function ProjectShell({
 
   if (phase === "loading") {
     return (
-      <div className="project-state-main">
-        <Spinner aria-label="Loading project" />
+      // The live region has to contain TEXT to announce anything, and
+      // `aria-label` on a Primer Spinner is discarded (the <svg> is always
+      // aria-hidden, and Primer skips its VisuallyHidden span as soon as
+      // an aria-label is passed — dist/Spinner/Spinner.js:50,139,157).
+      // `srText` is the prop that actually renders that hidden span, so
+      // the region below now has a sentence to read out.
+      <div className="project-state-main" aria-live="polite" aria-busy="true">
+        <Spinner srText="Loading project" />
       </div>
     );
   }

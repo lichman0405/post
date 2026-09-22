@@ -12,6 +12,9 @@ export default function AuthLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <>
+      <a href="#main" className="skip-link">
+        Skip to content
+      </a>
       <header className="global-nav">
         <div className="global-nav-inner">
           <Link href="/" className="global-nav-logo" aria-label="POST home">
@@ -20,6 +23,7 @@ export default function AuthLayout({
           </Link>
         </div>
       </header>
+      {/* tabIndex={-1} lets the skip link actually focus the landmark. */}
       <main id="main" tabIndex={-1}>
         {children}
       </main>

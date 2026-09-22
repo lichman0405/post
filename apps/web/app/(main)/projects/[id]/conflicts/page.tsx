@@ -374,8 +374,11 @@ function ConflictCard({
           {targetKind === "object" ? "object" : "relation"}{" "}
           <code title={targetId}>{short(targetId)}</code>
         </span>
+        {/* T1104: recording a resolution is a write; the chip that appears in
+            the card header is its only success report. Polite — the reader
+            just asked for it, and nothing else on the page is disrupted. */}
         {saved !== null ? (
-          <StateLabel shape="chip" tone="success" icon={CheckIcon} data-conflict-saved>
+          <StateLabel shape="chip" tone="success" icon={CheckIcon} data-conflict-saved role="status">
             {saved.kind}
           </StateLabel>
         ) : null}
@@ -452,8 +455,10 @@ function ConflictCard({
           >
             {saving ? "Saving…" : "Save decision"}
           </button>
+          {/* T1104: the failure half of the same write; alert, because the
+              reader's decision did not land and the chip above never comes. */}
           {saveError !== null ? (
-            <p className="conflicts-save-error" data-conflict-save-error>
+            <p className="conflicts-save-error" data-conflict-save-error role="alert">
               {saveError}
             </p>
           ) : null}

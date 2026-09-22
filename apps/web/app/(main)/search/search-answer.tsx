@@ -20,6 +20,7 @@ import {
   type SearchSource,
   type SearchStatement,
 } from "../../../lib/search";
+import { createAuthClient } from "../../../lib/auth";
 import "./search.css";
 
 /**
@@ -76,7 +77,15 @@ export function SearchAnswerView({
   query: string;
   apiBaseUrl: string;
 }) {
-  const client = useMemo(() => createSearchClient(apiBaseUrl), [apiBaseUrl]);
+  // The CSRF token comes from the shared session storage, the same way the
+  // inbox writes (apps/web/app/(main)/notifications/inbox-surface.tsx:61-63):
+  // the search POST is a state
+  // change, and without the header the guard answers 403 CSRF_FAILED.
+  const authClient = useMemo(() => createAuthClient(apiBaseUrl), [apiBaseUrl]);
+  const client = useMemo(
+    () => createSearchClient(apiBaseUrl, { csrfToken: () => authClient.csrfToken() }),
+    [apiBaseUrl, authClient],
+  );
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<State>({ kind: "loading", for: query, attempt: 0 });
 

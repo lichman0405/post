@@ -1,6 +1,23 @@
 /* POST web scaffold styles — GitHub/Primer design tokens (ADR-012).
    @primer/react v38 has no `sx` prop; layout lives in these classes. */
 
+/* T1104: respect user motion preference. Verified: no product CSS currently
+   animates (grep found zero transition / animation / keyframes / scroll-behavior
+   in apps/web/app or packages/ui stylesheets), but this guard prevents future
+   CSS motion from ignoring the preference. Primer's Spinner is the one moving
+   element in the current tree; the rule below stops its SVG animation when the
+   user requests reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 .status-header {
   display: flex;
   align-items: center;

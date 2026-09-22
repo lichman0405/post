@@ -102,7 +102,7 @@ export default function ReleaseDetail() {
           spacer before it is the component's, not a hand-typed " / ". */}
       <Sidebar
         className="release-detail-breadcrumb"
-        label="Breadcrumb"
+        label="Release breadcrumb"
         tone="accent"
         crumbs={[
           {

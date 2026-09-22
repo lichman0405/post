@@ -75,8 +75,10 @@ export function ResearchProfileCard({
 
   if (loading) {
     return (
-      <div className="rp-card rp-loading">
-        <Spinner size="small" />
+      // Same shape as profile-card.tsx: the visible sentence announces the
+      // loading state, the spinner's default srText would say it twice.
+      <div className="rp-card rp-loading" role="status" aria-busy="true">
+        <Spinner size="small" srText={null} />
         <Text>Loading research profile…</Text>
       </div>
     );

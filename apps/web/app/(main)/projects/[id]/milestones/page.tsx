@@ -313,9 +313,12 @@ export default function MilestonesPage() {
             </div>
           </form>
           {notice !== null ? (
+            // T1104: recording a milestone is a write; this notice is the only
+            // result the page renders. Polite on success, alert on failure.
             <div
               className={`milestones-notice milestones-notice-${notice.kind}`}
               data-milestone-notice={notice.kind}
+              role={notice.kind === "success" ? "status" : "alert"}
             >
               {notice.kind === "success" ? (
                 <CheckIcon size={16} aria-hidden="true" />

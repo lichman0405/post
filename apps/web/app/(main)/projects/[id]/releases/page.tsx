@@ -281,9 +281,13 @@ export default function ReleasesPage() {
             </div>
           </form>
           {notice !== null ? (
+            // T1104: creating a release is a write; this notice ("Release
+            // v… created." vs. the failure text) is the only result the page
+            // renders. Polite on success, alert on failure.
             <div
               className={`releases-notice releases-notice-${notice.kind}`}
               data-release-notice={notice.kind}
+              role={notice.kind === "success" ? "status" : "alert"}
             >
               {notice.kind === "success" ? (
                 <CheckIcon size={16} aria-hidden="true" />
