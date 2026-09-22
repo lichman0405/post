@@ -10949,10 +10949,10 @@
       ]
     },
     "T1206": {
-      "status": "verification",
+      "status": "merged",
       "started_at": "2026-09-22T01:16:09Z",
       "worker_run_id": "run-ffa855119407c4c0",
-      "rejection_reason": "RESOLVED: G2 reds were harness artifacts from concurrent gate runs deleting the shared integration tree (issue #271). Per-run integration tree fix landed in PR #345; manual G2 t1206-manual-g2-g2 passed.",
+      "rejection_reason": "",
       "history": [
         {
           "from": "todo",
@@ -11001,6 +11001,13 @@
           "at": "2026-09-22T01:46:44Z",
           "run_id": "t1206-manual-g2",
           "reason": "Supervisor stop: Worker process stuck after lost tool result; G2 reds traced to orchestrator integration-tree concurrency (issue #271). Manual G2 run t1206-manual-g2-g2 passed after fix; review verdict already approve. Ready for accept/merge."
+        },
+        {
+          "from": "verification",
+          "to": "merged",
+          "at": "2026-09-22T02:21:19Z",
+          "run_id": "t1206-manual-g2",
+          "reason": "PR #346 merged (commit 50ed938). G2 green in CI and manual run t1206-manual-g2-g2; G3 security-smoke passed in Worker RESULT; review verdict approve."
         }
       ]
     },
