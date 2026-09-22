@@ -3,11 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  AlertIcon,
   BeakerIcon,
   GitBranchIcon,
   LawIcon,
   LinkIcon,
   PackageIcon,
+  RocketIcon,
   ShieldCheckIcon,
   TagIcon,
   VersionsIcon,
@@ -24,6 +26,12 @@ import {
   messageForAssetCode,
   type AssetPage as AssetPageData,
 } from "../../../lib/assets";
+import {
+  MAX_CANDIDATE_QUERY_LENGTH,
+  buildCandidateFromStoredVersion,
+  encodeCandidateQuery,
+  type CandidateBuild,
+} from "../../../lib/publish";
 import "./assets.css";
 
 /**
@@ -76,8 +84,27 @@ import "./assets.css";
  * fetch is a spinner that lies).
  */
 type PageAnswer =
-  | { forKey: string; ok: true; page: AssetPageData }
+  | { forKey: string; ok: true; page: AssetPageData; publish: PublishEntry | null }
   | { forKey: string; ok: false; message: string; status: number };
+
+/**
+ * What this page offers as the way into the publish confirmation.
+ *
+ * `null`: nothing — an asset no project owns has no project namespace to be
+ * published into. `link`: the confirmation page's address, with the candidate
+ * that page will preview. `withheld`: the page HAS something to publish and
+ * still does not offer it, because the document it would carry is not the
+ * document that was published (`integrity-mismatch` / `integrity-absent`) or
+ * because the link itself could not be carried (`candidate-too-long`).
+ *
+ * A withheld entry is a refusal, not a warning: the reader is told why in
+ * `detail` and there is no link to click. The alternative — offering it and
+ * letting the publish store a narrower version — is the silent narrowing
+ * this union exists to prevent.
+ */
+type PublishEntry =
+  | { kind: "link"; href: string; alreadyPublic: boolean }
+  | { kind: "withheld"; reason: string; detail: string };
 
 export function AssetPage({
   apiBaseUrl,
@@ -102,8 +129,9 @@ export function AssetPage({
     // network and to nothing else.
     client
       .page(pid, version ?? null)
-      .then((page) => {
-        if (!cancelled) setAnswer({ forKey: key, ok: true, page });
+      .then(async (page) => {
+        const publish = await publishEntry(page);
+        if (!cancelled) setAnswer({ forKey: key, ok: true, page, publish });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -202,6 +230,40 @@ export function AssetPage({
             <ShieldCheckIcon size={14} aria-hidden="true" />{" "}
             <code data-asset-hash>{rendered.integrity_hash}</code>
           </p>
+          {/* The way into the publish confirmation (T1103). It is a link,
+              not a button: the confirmation page is a page of its own with
+              its own address, so it can be opened in a tab, bookmarked and
+              gone back to — which is the whole point of it being a page
+              rather than a dialog. It carries no permission test of its
+              own; the reader who may not publish gets the same link and is
+              refused by the API (docs/12 §2).
+
+              What it DOES carry is the check that the publication is the
+              one it says it is (publishEntry): an entry withheld there has
+              no link at all, and the sentence beside it says what differed.
+              A version that is already public is offered a new public
+              version rather than told it is about to become public. */}
+          {current.publish === null ? null : current.publish.kind === "link" ? (
+            <p className="asset-publish">
+              <Link
+                className="asset-publish-link"
+                href={current.publish.href}
+                data-asset-publish={rendered.version}
+              >
+                <RocketIcon size={14} aria-hidden="true" />{" "}
+                {current.publish.alreadyPublic
+                  ? "Publish a new public version from this one"
+                  : "Publish this version publicly"}
+              </Link>
+            </p>
+          ) : (
+            <p
+              className="asset-publish-withheld"
+              data-asset-publish-withheld={current.publish.reason}
+            >
+              <AlertIcon size={14} aria-hidden="true" /> {current.publish.detail}
+            </p>
+          )}
         </div>
       </header>
 
@@ -517,4 +579,93 @@ function renderMetadataValue(value: unknown): string {
 function shortHash(hash: string): string {
   const body = hash.startsWith("sha256:") ? hash.slice("sha256:".length) : hash;
   return `${body.slice(0, 12)}…`;
+}
+
+/**
+ * The publish entry for one loaded asset page, or null when this page has
+ * nothing to offer.
+ *
+ * Null has exactly one cause: an asset no project owns has no project
+ * namespace to be published into, and the confirmation page lives under the
+ * project shell — it needs the project's id for the route the API is asked
+ * to publish through ("the project the asset belongs to", not "the project
+ * the reader happens to be in"). No permission test happens here.
+ *
+ * Everything in the candidate is a fact the API just sent about THIS stored
+ * version: its pid, its type, its metadata block, its dependency pins, its
+ * rights declaration, its provenance, its credits. Nothing is invented and
+ * nothing is defaulted except the target visibility, which is the change
+ * under review. That is what makes the page that opens a preview of
+ * publishing *this* version rather than a generic "are you sure".
+ *
+ * Two things can still make that candidate the wrong document, and both are
+ * refusals rather than warnings:
+ *
+ *   - the rebuilt manifest does not hash to the version's own stored digest
+ *     (buildCandidateFromStoredVersion compares them, see lib/publish), which
+ *     is how a pin withheld from the dependency block shows up here; and
+ *   - the encoded candidate does not fit in a link the web server will
+ *     answer (MAX_CANDIDATE_QUERY_LENGTH), which would make the entry point
+ *     a dead link rather than a page.
+ */
+async function publishEntry(page: AssetPageData): Promise<PublishEntry | null> {
+  const project = page.asset.origin_project;
+  if (project === null) return null;
+
+  let build: CandidateBuild;
+  try {
+    build = await buildCandidateFromStoredVersion({
+      stored: {
+        asset: {
+          pid: page.asset.pid,
+          type: page.asset.type,
+          origin_project: { id: project.id },
+        },
+        version: {
+          version: page.version.version,
+          visibility: page.version.visibility,
+          integrityHash: page.version.integrity_hash,
+        },
+        origin: page.origin.map((o) => ({ ref: o.ref })),
+        rights: page.rights,
+        metadata: page.metadata.map((m) => ({ key: m.key, value: m.value })),
+        dependencies: page.dependencies.map((d) => ({ pin: d.pin })),
+        creators: page.creators.map((c) => ({ kind: c.kind, partyId: c.party_id })),
+      },
+    });
+  } catch {
+    // Digesting a document the API just served cannot fail; if it does, the
+    // page says so and offers nothing, rather than offering a link whose
+    // document nobody checked.
+    return {
+      kind: "withheld",
+      reason: "candidate-not-buildable",
+      detail:
+        "This page could not rebuild the version's document, so it does not " +
+        "offer a publication.",
+    };
+  }
+
+  if (build.kind !== "ready") {
+    return { kind: "withheld", reason: build.kind, detail: build.detail };
+  }
+
+  const query = encodeCandidateQuery(build.candidate);
+  if (query.length > MAX_CANDIDATE_QUERY_LENGTH) {
+    return {
+      kind: "withheld",
+      reason: "candidate-too-long",
+      detail:
+        `This version's document is ${query.length} characters once encoded ` +
+        `into the link to the confirmation page, past the ` +
+        `${MAX_CANDIDATE_QUERY_LENGTH}-character budget such a link can carry, ` +
+        "so the publication is not offered from this page.",
+    };
+  }
+
+  return {
+    kind: "link",
+    href: `/projects/${project.id}/assets/publish?candidate=${query}`,
+    alreadyPublic: page.version.visibility === "public",
+  };
 }

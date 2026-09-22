@@ -1,0 +1,248 @@
+.publish-confirm {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.publish-confirm-breadcrumb {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.publish-confirm-breadcrumb a {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+
+.publish-confirm-breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+.publish-confirm-head {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+}
+
+.publish-confirm-title {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.publish-confirm-lead {
+  margin: 0;
+  font-size: 14px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.publish-confirm-notice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.publish-confirm-notice.danger {
+  border-color: var(--borderColor-danger-muted, #ff818266);
+  background-color: var(--bgColor-danger-muted, #ffebe9);
+  color: var(--fgColor-danger, #cf222e);
+}
+
+.publish-confirm-notice.info {
+  background-color: var(--bgColor-muted, #f6f8fa);
+}
+
+.publish-confirm-section {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--bgColor-default, #ffffff);
+}
+
+.publish-confirm-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.publish-confirm-section-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+/* A second-level heading inside a section (the private-dependency list under
+   Dependencies). It used to be an inline style on the h3; the design system
+   lives in the stylesheets, so it is a class like every other heading here. */
+.publish-confirm-subsection-title {
+  margin: 12px 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/*
+ * The attestation category's status block (T1103): the platform has no such
+ * feature, so this is a statement about the product, not a list of findings.
+ * It is styled as a bordered status note rather than as an empty-list
+ * placeholder so the two cannot be mistaken for each other.
+ */
+.publish-confirm-attestation-status {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-left: 3px solid var(--borderColor-muted, #d1d9e0);
+  border-radius: 6px;
+  background: var(--bgColor-muted, #f6f8fa);
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.publish-confirm-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.publish-confirm-list-item {
+  display: grid;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+  font-size: 13px;
+}
+
+.publish-confirm-list-item:last-child {
+  border-bottom: none;
+}
+
+.publish-confirm-item-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+}
+
+.publish-confirm-item-label {
+  font-weight: 600;
+}
+
+.publish-confirm-item-meta {
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+
+.publish-confirm-item-detail {
+  margin: 0;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.publish-confirm-item-blocking {
+  color: var(--fgColor-danger, #cf222e);
+  font-weight: 600;
+}
+
+.publish-confirm-meta-key {
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+
+.publish-confirm-meta-value {
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+}
+
+.publish-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--borderColor-default, #d0d7de);
+}
+
+.publish-confirm-submit {
+  padding: 8px 16px;
+  border: 1px solid var(--borderColor-success-emphasis, #1f883d);
+  border-radius: 6px;
+  background-color: var(--bgColor-success-emphasis, #1f883d);
+  color: var(--fgColor-white, #ffffff);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.publish-confirm-submit:hover {
+  background-color: var(--bgColor-success-emphasis, #1a7f37);
+}
+
+.publish-confirm-submit:disabled {
+  border-color: var(--borderColor-default, #d0d7de);
+  background-color: var(--bgColor-muted, #f6f8fa);
+  color: var(--fgColor-muted, #59636e);
+  cursor: not-allowed;
+}
+
+.publish-confirm-cancel {
+  padding: 8px 16px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background-color: var(--bgColor-default, #ffffff);
+  color: var(--fgColor-default, #1f2328);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.publish-confirm-cancel:hover {
+  background-color: var(--bgColor-muted, #f6f8fa);
+}
+
+.publish-confirm-spinner {
+  display: grid;
+  min-height: 200px;
+  place-items: center;
+}
+
+.publish-confirm-fact-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 16px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.publish-confirm-fact {
+  display: flex;
+  gap: 6px;
+}
+
+.publish-confirm-fact-label {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.publish-confirm-fact-value {
+  font-weight: 600;
+}
+
+@media (max-width: 600px) {
+  .publish-confirm-fact-list {
+    grid-template-columns: 1fr;
+  }
+}
