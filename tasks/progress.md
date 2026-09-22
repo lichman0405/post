@@ -12,6 +12,11 @@
 > - **T1207（V1 最终验收报告）**：**有意停住**，不是卡死——它的 AC[4] 就是「除它自己外，未合并的 V1 任务应为 0」，
 >   也就是"最后一笔"。现在还有 4 笔没合并，所以它必须等它们合并后再返工定稿（理由与解除动作见 `tasks/decisions.md` 的 L1-20260922-3）。
 >   它停在 `rejected` + 一条决定点，驱动会跳过它；槽位让给 T1105。
+> - **T1104 合并后有两件 Supervisor 收尾活（别忘）**：①按规矩用 `scripts/record_test_run.py` 把 `T1104-TEST-01`
+>   （a11y 套件，blocking）记成**真跑过的**结果——只能等它 merged 之后记，账本工具拒绝给未合并任务写 passed；
+>   ②工人交来的是**给 CI 的片段**（AC[2]/AC[7] 明令不许它动 `.github/**`），要由我把它接进
+>   `.github/workflows/ci.yml` 的 `migration-integration` job **并同步 `specs/orchestrator/gates.json`**
+>   （`gate_spec_test.go` 逐步比对两者、且把 job 数钉死为 7，所以只能加步骤、不能加 job），随后重生成 spec 摘要。
 > - **剩余**：150 笔里 **145 已合并**，未合并 5 笔 = T1103(复核中) / T1104(返工中) / T1105(待派) / T1109(复跑中) / T1207(有意停住)。
 > - 所有 open issue 按 owner 指示保持开启。
 >
