@@ -1,3 +1,32 @@
+> **当前这一刻（2026-09-22 21:00）**：T1104 的 accept 被拒——**真正的原因不是缺陷，是它的分支已经落不到 main 上了**。推基线时有两处三方合不了，我手工合成后把任务送回返工（`run-59c22e91b6f6c1f1`，pid 2943079，基线 2f2611e）；main 的 CI 第一次在跑 T1109 接进来的 `observability` job。
+>
+> - **先看清拒的是什么**：`rddev task accept` 的原话是「the task's change does not apply to current main … patch failed: Makefile:42」。
+>   G2 验的是「当前 main + 本任务完整改动」，main 从工人开工的 `a0a73d3` 走到了 `2f2611e`（T1103 #349、T1109 #348、我修的 Makefile 缺反斜杠、observability 接线），
+>   而**三方合并有两处真的冲突**（`git apply --3way` 之后 unmerged 只有这两个）：`Makefile` 与 `tests/web-smoke/baseline/asset-page.png`。
+>   `rddev rebaseline` 按设计拒绝这种冲突（「composing them needs a human」），并把完整改动与快照留在
+>   `.rddev/runtime/rebaseline/T1104-20260922T125152Z/`（`change.patch` + `files/`）。
+> - **三处合成，逐条有据**：①`Makefile`——main 在第 45 行末尾补了续行反斜杠并新增第 46 行 `observability-*`，工人在**同一行**末尾加 `a11y`；
+>   合成为 `… browser-ok-arity a11y \` + observability 那一行。②`asset-page.png`——T1103 也动了 asset 页面并**重渲了同一张基线**；
+>   PNG 不能按文本合并，我**取了 main 那一张作起点**，把「在新基线上重新渲染」写进返工信（只有工人有 Chromium）。③`assets/web…/assets.css`——两边都改但 git 三方**成功**了
+>   （T1103 在文件末尾追加 `.asset-publish*` 规则），信里要求工人自己 diff 一遍确认没吃错。
+> - **我按 `rebaseline` 自己的步骤手工推的**（它拒绝冲突时不会有后半截的 reject+rework）：`reset --hard 2f2611e` → `clean -fdq` → `git apply --3way`（带它的
+>   derived-artifact 排除项）→ 解两处冲突 → `git reset -q` 还原成「未提交 working-tree diff」这一交付形状 → `task reject --reason-file` → `worker rework --parallel 4 --reason-file`
+>   → `rddev drive --clear-decision T1104`（不清就是又一次静默跳过）。**合成本的验证**：32 M + 3 ??，unmerged 0、staged 0；`make -n a11y` 打印 `run-a11y.sh`、
+>   `make -n observability-smoke` 打印两个脚本、`make -p` 里 `.PHONY` 同时含这五个目标——**合成后的 Makefile 两半都真的生效**。
+> - **一个把我误导了二十分钟的假故障（值得记）**：我先手跑 `rddev rebaseline T1104`，得到的是
+>   `describing the worktree for the task's patch: git add -A --: unable to stat 'tests/e2e-release/publish-ux-e2e.mjs'`——
+>   那个文件既不在 HEAD 也不在索引里，看起来像补丁工具的缺陷。**真相是并发**：`.rddev/runtime/resolver-loop.sh` 每 90 秒自己跑一次
+>   `resolve_decisions.py`，而它对这类 accept 决定的处方正是 `rddev rebaseline`，它在我脚下 `reset --hard`/`clean`，我读到半棵被拆掉的树。
+>   它那次（20:50:58）给出的才是真答案。**处置**：先 `kill` 掉解析器循环再动手，做完重新 `setsid` 起回来；
+>   并把它那条撞满的计数（`attempts: 3` = `MAX_ATTEMPTS`，撞满后**永久停手**）删掉——那三次拒的是「工具不该自己合的冲突」，不是一个反复失败的条件。
+> - **main 的 CI（`35729346102`，head `2f2611e`）**：7 个老 job 全绿（`go` 也绿了——上一轮我误把「接线但不必需」当状态，被 `gate_spec_test.go` 的两条规则按下了），
+>   **`observability` 第一次真跑**（in_progress，12:51Z 起）。它现在是 `required_jobs` 的一员，红就是阻塞合并的红。
+> - **T1104 合并后仍有两件收尾活**：①`scripts/record_test_run.py` 记 `T1104-TEST-01`（a11y 套件，blocking）——只能等 merged 之后记；
+>   ②把工人交的 CI 片段接进 `.github/workflows/ci.yml` **并同步 `specs/orchestrator/gates.json`**——
+>   注意 job 数**现在是 8**（T1109 上位时把 `gate_spec_test.go` 的硬编码从 7 改成了 8），且**每个 job 都必须同时进 `required_jobs`**（否则那条两规则循环立刻红）。
+> - **另记一条事实**：**a11y/视觉比对这套门根本不在 CI 里**（`web` job 只做 typecheck/lint/unit/build）——这就是上一轮那张基线悄悄漂移没人发现的原因，
+>   也是为什么这几张图只能靠工人自己跑、复核员核、我核。
+>
 > **当前这一刻（2026-09-22 20:15）**：T1109 已验收通过（20:01），**推送那一步注定被拒——我没用强推就把它接上了**；T1104 按复核的 request_changes 退回返工。
 >
 > - **T1109 的推送为什么会被拒、我怎么修的**：远端那个任务分支还停在工人原先那版（`1c27b50`，基于旧 main），
