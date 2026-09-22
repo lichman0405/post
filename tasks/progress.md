@@ -1,6 +1,13 @@
-> **当前这一刻（2026-09-22 19:32）**：驱动在跑（`setsid` 脱离会话的 pid 2094907），四笔里三笔在动、一笔有意停住。
+> **当前这一刻（2026-09-22 19:47）**：驱动在跑（`setsid` 脱离会话的 pid 2094907）。T1103 已按我自己的判读退回返工，T1104 与 T1109 都在 `verification`（复核已派/待派）。
 >
-> - **T1103（发布/可见性安全 UX）**：collect 全过，进了 `verification`，19:28 已派**独立复核**（T1103-review 在跑）。回来走 G2/G3/accept/merge。
+> - **T1103（发布/可见性安全 UX）**：独立复核给了 **approve**，但带我判为**必须先关掉**的 2 条 major + 1 条按缺陷处理的 minor，
+>   所以**退回返工**（`run-0b1123431e3002fc`，信 `/tmp/t1103-rework3.txt`，已核 prompt.md 贴对了）：
+>   ①**那条 e2e 没有任何运行器会跑到**（`make browser-e2e` 只认 `tests/e2e-*/run.sh`，新脚本零引用——正是 `Makefile:25-32` 记过的
+>   T1112 老毛病「went unseen for six days」）；②**确认页会静默发布比它声称的版本更窄的文档**（重建 manifest 时私有依赖 pin 被
+>   `internal/assets/page.go:917` 丢掉，六类清单里看不见）；③**不许发明 rights 声明**（`publish.ts:508` 的 `?? defaultRightsDocument()`
+>   把本该发生的诚实拒绝换成了一份该版本从未有过的声明，还渲染在 Rights 一栏）。②要求在 apps/web 内 fail closed（存量行
+>   `integrity_hash` 与重建哈希比对）**并补一条能失败的测试**（今天 fixture 里根本没有 pin，这条路一次没跑过）。
+>   注：驱动在收到退回之前已自己起了 accept，跑完后因状态已变而 REFUSED 并记了一条待办标记——**已手动清掉**（不清就是又一次静默跳过）。
 > - **T1104（全站无障碍 AA）**：上一轮 collect 被判退——`status: completed` 却带着一条自己判未达标的 AC[3]
 >   （「有数据的核心页面 ≥ 7」，它只做到 6）。**已按同一条规则重新派工**（run-5118ec561d9294f5，信 `/tmp/t1104-rework2.txt`）：
 >   要么用真栈把第 7 页扫出数据、要么如实改报 `blocked` 并逐页给命令与输出。**不看它的自述**，我自己核过：
@@ -8,7 +15,8 @@
 >   但**搜索页能扫出数据**——`apps/web/app/(main)/search/page.tsx:26-31` 写明 POST /search 需要会话；
 >   而工人自己搭的真栈里**已有一个真实登录用户**（`a11y-owner@example.com`，密码打在 READY 行里）。
 >   所以 7 是够得着的，**不降这条标准**。
-> - **T1109（Observability）**：合并冲突已由 Supervisor 合成（Makefile 两边都留），工人在合成后的树上**重跑验证**中。
+> - **T1109（Observability）**：合并冲突已由 Supervisor 合成（Makefile 两边都留），工人在合成树（eba3429）上重跑验证完毕、
+>   collect 全过 → `verification`（3 个文件的小改动叠加在合成提交之上；PR #348 仍 open，等复核 → accept → merge）。
 > - **T1207（V1 最终验收报告）**：**有意停住**，不是卡死——它的 AC[4] 就是「除它自己外，未合并的 V1 任务应为 0」，
 >   也就是"最后一笔"。现在还有 4 笔没合并，所以它必须等它们合并后再返工定稿（理由与解除动作见 `tasks/decisions.md` 的 L1-20260922-3）。
 >   它停在 `rejected` + 一条决定点，驱动会跳过它；槽位让给 T1105。
@@ -17,7 +25,7 @@
 >   ②工人交来的是**给 CI 的片段**（AC[2]/AC[7] 明令不许它动 `.github/**`），要由我把它接进
 >   `.github/workflows/ci.yml` 的 `migration-integration` job **并同步 `specs/orchestrator/gates.json`**
 >   （`gate_spec_test.go` 逐步比对两者、且把 job 数钉死为 7，所以只能加步骤、不能加 job），随后重生成 spec 摘要。
-> - **剩余**：150 笔里 **145 已合并**，未合并 5 笔 = T1103(复核中) / T1104(返工中) / T1105(待派) / T1109(复跑中) / T1207(有意停住)。
+> - **剩余**：150 笔里 **145 已合并**，未合并 5 笔 = T1103(返工中) / T1104(等复核判) / T1105(待派，它依赖 T1104 合并) / T1109(等复核判) / T1207(有意停住)。
 > - 所有 open issue 按 owner 指示保持开启。
 >
 > **当前这一刻（2026-09-22 11:10）**：**进度看着停住，是因为驱动没了，不是因为任务链坏了。**
