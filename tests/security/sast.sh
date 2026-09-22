@@ -61,6 +61,15 @@ VERSIONS="$ROOT/ops/security/tool-versions.sh"
 # used. (2026-09-23, the counts the three rows print on this tree: gosec 797
 # files, eslint 129, bandit 8. They are the observed numbers, printed by the
 # rows themselves — not a list this comment maintains.)
+#
+# Each face enforces its own floor inline, right after its scanner writes its
+# report and before the report is judged — it is bound to that face's report
+# format (gosec's Stats.files, bandit's metrics keys, eslint's file array), so
+# a shared helper here could only ever have restated one of them. A shell
+# floor helper used to sit at this point; it was defined and never called (the
+# three faces had each grown their own copy in Python), so it was removed
+# rather than left as a second, dead statement of the rule — one copy that
+# runs, not two that have to be kept in step.
 FLOOR_GO_FILES=400
 FLOOR_NODE_FILES=50
 FLOOR_PY_FILES=5
@@ -78,18 +87,6 @@ report() { # report <tool> <report.json> <baseline> <id> <version> [rule-count]
   [ -f "$file" ] || die "$id: the scanner wrote no report at $file — it did not measure anything"
   python3 tests/security/sast_report.py \
     --tool "$tool" --report "$file" --baseline "$baseline" --id "$id" --version "$version" --rules "$rules"
-}
-
-check_floor() { # check_floor <id> <scanned> <floor> <target> <override>
-  # The floor applies to the repository's own surface. A mutation run points the
-  # row at a planted fixture on purpose and prints the target it used, so the
-  # override is what turns the floor off — and it is visible in the row output.
-  local id="$1" scanned="$2" floor="$3" target="$4" override="${5:-}"
-  if [ -z "$override" ] && [ "$scanned" -lt "$floor" ]; then
-    die "$id: $target yielded $scanned file(s) to scan, and this row requires at least $floor when it \
-scans the repository's own source. A security scan of an empty tree reports no findings, which is \
-indistinguishable from a clean one."
-  fi
 }
 
 case "${1:-}" in
