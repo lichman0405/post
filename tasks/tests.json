@@ -1467,9 +1467,9 @@
       "name": "master suite",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": null
+      "status": "passed",
+      "last_run": "2026-09-22T02:36:21Z",
+      "evidence": "Supervisor ran `bash tests/security/master-security-gate.sh --report /tmp/t1206-master-gate-report.json` -> exit 0 on 2026-09-22T02:36:21Z. Last output:   ok              vuln-node                Dependency/CVE audit (Node/web): pnpm audit at --audit-level=low ;   ok              vuln-python              Dependency/CVE audit (Python adapter): uv audit ;   ok              absence-manifest         Absence manifest: SAST / container scan / SBOM named, detailed, and cross-checked against this gate ; master-security-gate: PASS — 9 check(s) ran and each printed its own evidence (report: /tmp/t1206-master-gate-report.json)"
     },
     {
       "id": "T1207-TEST-01",
