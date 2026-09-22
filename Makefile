@@ -42,7 +42,7 @@ BROWSER_E2E_NO_DB_SUITES := $(filter-out $(BROWSER_E2E_DB_SUITES),$(BROWSER_E2E_
 .PHONY: help bootstrap check build rddev test test-integration bench dev smoke sync-schemas \
 	check-schema-drift check-schema-snapshot check-openapi check-spec-version fmt-check staticcheck lint-python type-python \
 	progress ci migrate search-rebuild search-embed infra-up infra-init infra infra-down infra-ps infra-logs \
-	browser-list browser-smoke browser-smoke-% browser-e2e browser-e2e-nodb browser-e2e-db browser-e2e-% browser-suites browser-ok-arity
+	browser-list browser-smoke browser-smoke-% browser-e2e browser-e2e-nodb browser-e2e-db browser-e2e-% browser-suites browser-ok-arity \
 	observability-smoke observability-trace observability-route
 
 help: ## list targets
