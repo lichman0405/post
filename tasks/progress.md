@@ -3168,9 +3168,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-21T06:58:27Z
+生成时间：2026-09-22T18:37:02Z
 
-状态分布：todo 12 · ready 0 · running 3 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 2 · merged 130（合计 147/147 个任务）
+状态分布：todo 0 · ready 0 · running 1 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 149（合计 150/150 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -3262,11 +3262,11 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0703 | Rights Model | P7 | merged | 2026-09-15T16:37:35Z |  | 2026-09-15T17:09:14Z | 2026-09-15T17:14:12Z |
 | T0704 | Publication Impact Preview | P7 | merged | 2026-09-15T18:46:44Z |  | 2026-09-15T19:00:22Z | 2026-09-15T19:04:57Z |
 | T0705 | Asset Publish Governance | P7 | merged | 2026-09-15T23:43:26Z |  | 2026-09-16T00:40:34Z | 2026-09-16T00:47:27Z |
-| T0706 | Asset Metadata Revision | P7 | accepted | 2026-09-21T03:38:38Z |  | 2026-09-21T04:31:15Z |  |
+| T0706 | Asset Metadata Revision | P7 | merged | 2026-09-21T03:38:38Z |  | 2026-09-21T04:31:15Z | 2026-09-21T07:47:40Z |
 | T0707 | Asset Reference/Dependency | P7 | merged | 2026-09-18T16:10:13Z |  | 2026-09-18T16:43:56Z | 2026-09-18T16:50:28Z |
-| T0708 | Asset Fork/Derive + Lineage | P7 | accepted | 2026-09-21T04:40:32Z |  | 2026-09-21T05:22:48Z |  |
+| T0708 | Asset Fork/Derive + Lineage | P7 | merged | 2026-09-21T08:08:09Z |  | 2026-09-21T08:40:28Z | 2026-09-21T08:53:04Z |
 | T0709 | Asset Hub Pages/Explore | P7 | merged | 2026-09-16T01:57:45Z |  | 2026-09-16T02:36:27Z | 2026-09-16T02:41:11Z |
-| T0710 | Asset 完整 E2E | P7 | todo |  |  |  |  |
+| T0710 | Asset 完整 E2E | P7 | merged | 2026-09-21T08:53:09Z |  | 2026-09-21T10:03:21Z | 2026-09-21T10:12:36Z |
 | T0711 | Asset Governance 与 Rights Holder Transfer | P7 | merged | 2026-09-18T13:53:19Z |  | 2026-09-18T14:22:43Z | 2026-09-18T14:29:04Z |
 | T0712 | 预览响应不得泄漏外部私有实体的身份（T0704 跨项目泄漏修复） | P7 | merged | 2026-09-15T22:11:05Z |  | 2026-09-15T22:35:34Z | 2026-09-15T22:42:04Z |
 | T0801 | Public Entity Anonymous Pages | P8 | merged | 2026-09-16T02:41:13Z |  | 2026-09-16T03:20:27Z | 2026-09-16T03:25:11Z |
@@ -3293,8 +3293,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T0904 | Hybrid Retrieval + Graph Expansion | P9 | merged | 2026-09-19T05:31:44Z |  | 2026-09-19T06:56:28Z | 2026-09-19T07:04:51Z |
 | T0905 | Scientific Ranking | P9 | merged | 2026-09-20T12:54:18Z |  | 2026-09-20T13:37:58Z | 2026-09-20T13:45:08Z |
 | T0906 | Evidence-backed Answer Generator/API | P9 | merged | 2026-09-21T05:05:13Z |  | 2026-09-21T05:49:30Z | 2026-09-21T06:34:50Z |
-| T0907 | Search Answer Web UI | P9 | running | 2026-09-21T06:40:15Z |  |  |  |
-| T0908 | Search → Draft Research Context | P9 | todo |  |  |  |  |
+| T0907 | Search Answer Web UI | P9 | merged | 2026-09-21T06:40:15Z |  | 2026-09-21T07:24:30Z | 2026-09-21T07:37:06Z |
+| T0908 | Search → Draft Research Context | P9 | merged | 2026-09-21T09:00:23Z |  | 2026-09-21T09:34:23Z | 2026-09-21T10:11:07Z |
+| T0909 | confirm 的失败路径必须原子化：状态与记录要么一起落，要么都不落 | P9 | merged | 2026-09-21T10:39:01Z |  | 2026-09-21T11:27:21Z | 2026-09-21T11:37:48Z |
 | T1001 | Transactional Outbox | P10 | merged | 2026-09-14T15:17:43Z |  | 2026-09-14T15:51:18Z | 2026-09-14T15:54:45Z |
 | T1002 | Subscription Model / Follow/Watch | P10 | merged | 2026-09-16T10:57:20Z |  | 2026-09-16T11:31:28Z | 2026-09-16T11:36:18Z |
 | T1003 | Web Research Inbox | P10 | merged | 2026-09-18T10:52:26Z |  | 2026-09-18T11:58:13Z | 2026-09-18T12:07:54Z |
@@ -3302,24 +3303,26 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1005 | Email Digest abstraction | P10 | merged | 2026-09-18T12:47:25Z |  | 2026-09-18T13:19:42Z | 2026-09-18T13:25:53Z |
 | T1006 | Signed Webhooks | P10 | merged | 2026-09-15T03:32:24Z |  | 2026-09-15T04:54:21Z | 2026-09-15T05:00:53Z |
 | T1007 | Dependency Impact Analysis | P10 | merged | 2026-09-21T01:28:03Z |  | 2026-09-21T02:06:52Z | 2026-09-21T02:22:22Z |
-| T1101 | 统一 Primer-style Design System | P11 | todo |  |  |  |  |
+| T1101 | 统一 Primer-style Design System | P11 | merged | 2026-09-22T02:32:32Z |  | 2026-09-22T03:08:23Z | 2026-09-22T03:17:56Z |
 | T1102 | Research Map 高质量交互 | P11 | merged | 2026-09-21T00:23:30Z |  | 2026-09-21T01:05:44Z | 2026-09-21T01:14:12Z |
-| T1103 | Publication/Visibility Security UX | P11 | todo |  |  |  |  |
-| T1104 | 全站 Accessibility AA | P11 | todo |  |  |  |  |
-| T1105 | I18N 基线 | P11 | todo |  |  |  |  |
+| T1103 | Publication/Visibility Security UX | P11 | merged | 2026-09-22T11:37:04Z |  | 2026-09-22T12:30:49Z | 2026-09-22T12:39:22Z |
+| T1104 | 全站 Accessibility AA | P11 | merged | 2026-09-22T13:42:48Z |  | 2026-09-22T14:28:49Z | 2026-09-22T14:43:23Z |
+| T1105 | I18N 基线 | P11 | merged | 2026-09-22T17:00:48Z |  | 2026-09-22T18:04:33Z | 2026-09-22T18:17:51Z |
 | T1106 | API/Upload 安全加固 | P11 | merged | 2026-09-21T03:20:48Z |  | 2026-09-21T03:53:54Z | 2026-09-21T04:03:41Z |
-| T1107 | 权限与 Search Side-channel 安全回归 | P11 | running | 2026-09-21T06:40:17Z |  |  |  |
-| T1108 | 性能基线与索引调优 | P11 | todo |  |  |  |  |
-| T1109 | 生产级 Observability/Dashboards | P11 | running | 2026-09-21T06:43:30Z |  |  |  |
+| T1107 | 权限与 Search Side-channel 安全回归 | P11 | merged | 2026-09-21T09:07:48Z |  | 2026-09-21T09:43:54Z | 2026-09-21T10:29:45Z |
+| T1108 | 性能基线与索引调优 | P11 | merged | 2026-09-21T09:13:20Z |  | 2026-09-21T10:38:57Z | 2026-09-21T10:57:17Z |
+| T1109 | 生产级 Observability/Dashboards | P11 | merged | 2026-09-22T11:08:40Z |  | 2026-09-22T12:01:10Z | 2026-09-22T12:30:59Z |
 | T1110 | Backup/Restore 自动化演练 | P11 | merged | 2026-09-18T09:13:47Z |  | 2026-09-18T09:49:45Z | 2026-09-18T09:56:37Z |
 | T1111 | 凭据不进进程参数表：git 调用统一走环境变量传 header | P11 | merged | 2026-09-18T21:07:27Z |  | 2026-09-18T23:13:06Z | 2026-09-18T23:22:54Z |
+| T1112 | 浏览器套件进 make，且断言写错必须报错 | P11 | merged | 2026-09-21T23:20:47Z |  | 2026-09-21T23:50:54Z | 2026-09-22T00:11:53Z |
+| T1113 | sourceHref 只放行 http(s)：把一处越界的信任收紧 | P11 | merged | 2026-09-21T09:16:10Z |  | 2026-09-21T09:53:03Z | 2026-09-21T10:11:17Z |
 | T1201 | 完整 Seed Demo Data Builder | P12 | merged | 2026-09-21T02:30:40Z |  | 2026-09-21T04:21:12Z | 2026-09-21T04:58:40Z |
-| T1202 | Canonical MOF Workflow E2E | P12 | todo |  |  |  |  |
+| T1202 | Canonical MOF Workflow E2E | P12 | merged | 2026-09-21T21:11:21Z |  | 2026-09-21T21:35:06Z | 2026-09-21T21:43:29Z |
 | T1203 | Staging 部署模板 | P12 | merged | 2026-09-19T05:32:06Z |  | 2026-09-19T06:02:21Z | 2026-09-19T06:10:29Z |
 | T1204 | 生产 Runbook/Release/Recovery 验证 | P12 | merged | 2026-09-20T12:21:32Z |  | 2026-09-20T13:17:17Z | 2026-09-20T13:53:19Z |
-| T1205 | OpenAPI/MCP/Schema 文档最终同步 | P12 | todo |  |  |  |  |
-| T1206 | Master Security/Quality Gate | P12 | todo |  |  |  |  |
-| T1207 | V1 最终验收与交付报告 | P12 | todo |  |  |  |  |
-| T1208 | 完整 Project 可移植导出 | P12 | todo |  |  |  |  |
+| T1205 | OpenAPI/MCP/Schema 文档最终同步 | P12 | merged | 2026-09-21T23:39:29Z |  | 2026-09-22T00:24:29Z | 2026-09-22T00:44:18Z |
+| T1206 | Master Security/Quality Gate | P12 | merged | 2026-09-22T01:16:09Z |  |  |  |
+| T1207 | V1 最终验收与交付报告 | P12 | running | 2026-09-22T18:36:23Z |  |  |  |
+| T1208 | 完整 Project 可移植导出 | P12 | merged | 2026-09-21T23:36:20Z |  | 2026-09-22T00:22:22Z | 2026-09-22T00:44:18Z |
 
 <!-- AUTO-PROGRESS:END -->
