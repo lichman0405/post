@@ -310,11 +310,17 @@ export default function SettingsPage() {
       </section>
 
       {notice !== null ? (
+        // T1104: "Settings saved." / "Could not save settings." is the whole
+        // report of the PATCH behind the Save button — the button only stops
+        // saying "Saving…". Role follows the kind: a saved setting is a
+        // polite status, a rejected write is an alert. (Only this notice
+        // changed; the visibility control itself is T1103's and is untouched.)
         <div
           className={
             notice.kind === "success" ? "settings-notice settings-notice-success" : "settings-notice settings-notice-error"
           }
           data-settings-notice={notice.kind}
+          role={notice.kind === "success" ? "status" : "alert"}
         >
           {notice.kind === "success" ? (
             <CheckIcon size={14} aria-hidden="true" />

@@ -204,8 +204,13 @@ export function InboxSurface({ apiBaseUrl }: { apiBaseUrl: string }) {
         </button>
       </div>
 
+      {/* T1104: "Mark read" / "Mark all read" are writes, and this line is
+          where BOTH outcomes land — the success sentence from runMark, or the
+          mapped API error from its catch. Polite (role="status"): the reader
+          asked for the mark, nothing is broken, and the unread badge
+          vanishing is a visual-only confirmation otherwise. */}
       {notice !== null ? (
-        <div className="inbox-notice" data-inbox-notice>
+        <div className="inbox-notice" data-inbox-notice role="status">
           {notice}
         </div>
       ) : null}

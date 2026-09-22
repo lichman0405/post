@@ -272,12 +272,15 @@
   color: var(--fgColor-muted, #59636e);
 }
 
+/* WCAG 1.4.1 / axe `link-in-text-block`: these links sit inside a block of
+   body text, so colour alone must not be what marks them as links. Underlined,
+   and the underline holds in every state — a `:hover, :focus-visible` rule
+   that removed it here would leave the pointed-at link distinguished by
+   colour alone, which is the failure this rule exists to prevent.
+   Verified load-bearing: reverting it turns the /assets/[pid]/[version] scan
+   red with `link-in-text-block [serious]`. */
 .asset-published a {
   color: var(--fgColor-accent, #0969da);
-  text-decoration: none;
-}
-
-.asset-published a:hover {
   text-decoration: underline;
 }
 

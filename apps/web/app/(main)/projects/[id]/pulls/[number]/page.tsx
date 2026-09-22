@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import {
   AlertIcon,
@@ -106,6 +106,31 @@ export default function PullDetailPage({
   } | null>(null);
   const [error, setError] = useState<{ number: number; text: string } | null>(null);
   const [tab, setTab] = useState<PullTab>(DEFAULT_PULL_TAB);
+  const tabListRef = useRef<HTMLDivElement | null>(null);
+
+  /* The WAI-ARIA tabs pattern: a tablist is one tab stop and the arrow keys
+   * move between its tabs. `role="tablist"` was declared here from the start
+   * but nothing implemented the keyboard half of the promise, so the tabs
+   * were reachable only by Tab and a screen-reader user was told about a
+   * widget that did not behave as announced. Activation follows focus
+   * (automatic activation), which is what the APG prescribes when the panels
+   * are already on the page — they are; switching a tab only changes which
+   * panel is visible. */
+  function onTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
+    const last = PULL_TABS.length - 1;
+    let next = index;
+    if (event.key === "ArrowRight") next = index === last ? 0 : index + 1;
+    else if (event.key === "ArrowLeft") next = index === 0 ? last : index - 1;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = last;
+    else return;
+    event.preventDefault();
+    const target = PULL_TABS[next];
+    setTab(target);
+    // The button is keyed by its tab name, so the same DOM node survives the
+    // re-render and focus set here is not lost to it.
+    tabListRef.current?.querySelector<HTMLButtonElement>(`#pull-tab-${target}`)?.focus();
+  }
 
   // The review form: which dimension, which verdict, what reasoning. The
   // verdict starts empty so nothing can be submitted before the human
@@ -305,8 +330,14 @@ export default function PullDetailPage({
         <RiskBanner risks={risks} onOpen={setTab} />
       ) : null}
 
-      <div className="pull-tabs" role="tablist" aria-label="Pull request views" data-pull-tabs>
-        {PULL_TABS.map((each) => (
+      <div
+        className="pull-tabs"
+        role="tablist"
+        aria-label="Pull request views"
+        data-pull-tabs
+        ref={tabListRef}
+      >
+        {PULL_TABS.map((each, index) => (
           <button
             key={each}
             type="button"
@@ -314,10 +345,16 @@ export default function PullDetailPage({
             id={`pull-tab-${each}`}
             aria-selected={each === tab}
             aria-controls={`pull-panel-${each}`}
+            /* Roving tabindex: the tablist is ONE tab stop (the selected
+               tab). Without this every tab is its own stop, which is not
+               what `role="tablist"` promises, and the arrow keys below
+               would be the only way to reach the others. */
+            tabIndex={each === tab ? 0 : -1}
             className={`pull-tab${each === tab ? " pull-tab-active" : ""}`}
             data-pull-tab={each}
             data-tab-selected={each === tab}
             onClick={() => setTab(each)}
+            onKeyDown={(event) => onTabKeyDown(event, index)}
           >
             {pullTabLabel(each)}
             <span className="pull-tab-count" data-tab-count={each}>
@@ -444,15 +481,22 @@ export default function PullDetailPage({
               >
                 {submitting ? "Recording…" : "Record review"}
               </button>
+              {/* T1104: recording a review is a SUBMIT, and both of its
+                  outcomes are silent markup otherwise — the form clears
+                  itself on success (the review moves into the list below)
+                  and the button stops saying "Recording…", so a
+                  screen-reader reader gets no signal either way. Success is
+                  polite status (nothing is broken, it just happened);
+                  failure is an alert (the reader's action did not land). */}
               {justRecorded !== null && justRecorded.number === number ? (
-                <span className="pull-review-saved" data-review-saved>
+                <span className="pull-review-saved" data-review-saved role="status">
                   Recorded {justRecorded.decision}
                 </span>
               ) : null}
             </div>
           </form>
           {submitError !== null && submitError.number === number ? (
-            <div className="pull-review-error" data-review-error>
+            <div className="pull-review-error" data-review-error role="alert">
               {submitError.text}
             </div>
           ) : null}

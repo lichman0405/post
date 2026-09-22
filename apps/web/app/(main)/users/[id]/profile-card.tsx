@@ -123,8 +123,12 @@ export function ProfileCard({
 
   if (loading) {
     return (
-      <div className="profile-card profile-loading">
-        <Spinner size="small" />
+      // role="status" is what announces the fetch being in flight; the visible
+      // sentence is the announcement, so the spinner's own "Loading" srText is
+      // suppressed rather than read out twice (Primer's instruction for this
+      // case — same shape as search-answer.tsx).
+      <div className="profile-card profile-loading" role="status" aria-busy="true">
+        <Spinner size="small" srText={null} />
         <Text>Loading profile…</Text>
       </div>
     );
@@ -172,8 +176,13 @@ export function ProfileCard({
         {profile.bio === "" ? "No bio yet." : profile.bio}
       </p>
 
+      {/* T1104: the PATCH's outcome. On success the edit form closes and this
+          sentence is the entire report; on failure the form stays open and
+          the Flash inside it is the entire report. Neither had a live role,
+          so neither reached a screen reader. Success is polite; a rejected
+          save is an alert. */}
       {saved && (
-        <Flash variant="success" className="profile-flash">
+        <Flash variant="success" className="profile-flash" role="status">
           Profile updated.
         </Flash>
       )}
@@ -202,7 +211,11 @@ export function ProfileCard({
             void save();
           }}
         >
-          {formError !== null && <Flash variant="danger">{formError}</Flash>}
+          {formError !== null && (
+            <Flash variant="danger" role="alert">
+              {formError}
+            </Flash>
+          )}
           <FormControl>
             <FormControl.Label>Handle</FormControl.Label>
             <TextInput

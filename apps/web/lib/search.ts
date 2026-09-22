@@ -325,6 +325,18 @@ export type FetchLike = (
 export interface SearchClientOptions {
   /** Fetch implementation (tests inject a fake); default: global fetch. */
   fetch?: FetchLike;
+  /**
+   * The session-bound CSRF token, when the caller has one. `POST /search`
+   * is a state change behind the auth guard (cmd/api/authhttp/auth_middleware.go
+   * `checkCSRF`), so the session cookie alone is NOT enough: without this
+   * header the API answers 403 CSRF_FAILED, and the page renders a failure
+   * where the answer should be. Every other write client in this app
+   * carries it (lib/projects.ts:158, lib/profile.ts:140, lib/conflicts.ts:367,
+   * lib/discussions.ts:355, lib/inbox.ts:170) — this one was missing it.
+   * Default: none, so a caller with no session still gets the API's own
+   * 401 rendered rather than a header nobody can check.
+   */
+  csrfToken?: () => string | null;
 }
 
 /** The search client: one per API origin. */
@@ -363,14 +375,22 @@ export function createSearchClient(
 
   return {
     async search(query: string): Promise<SearchResponse> {
+      // credentials: "include" — POST /search runs behind the auth guard
+      // (specs/api's global security), so the session cookie has to ride
+      // along; a caller without one gets the 401 the page renders. The
+      // guard then asks for the session-bound token on top of the cookie,
+      // so both halves travel together.
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+        accept: "application/json",
+      };
+      const csrf = options.csrfToken?.() ?? null;
+      if (csrf !== null) headers["X-CSRF-Token"] = csrf;
       let res: { status: number; json: () => Promise<unknown> };
       try {
-        // credentials: "include" — POST /search runs behind the auth guard
-        // (specs/api's global security), so the session cookie has to ride
-        // along; a caller without one gets the 401 the page renders.
         res = await doFetch(searchUrl(apiBaseUrl), {
           method: "POST",
-          headers: { "content-type": "application/json", accept: "application/json" },
+          headers,
           credentials: "include",
           body: JSON.stringify({ query }),
         });

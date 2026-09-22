@@ -4,6 +4,19 @@
  * surfaces, hairline borders, high density, small radii, no gradient, no
  * glass, no elevation on anything that is not an overlay.
  *
+ * T1104: shared-layer guard for prefers-reduced-motion. No shared component
+ * currently defines CSS motion, but any future motion added here is covered.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+/*
  * # Radius
  *
  * Two values, and only two:
@@ -571,6 +584,16 @@
   font: inherit;
 }
 
+/* T1104: links inside a breadcrumb trail must be distinguishable without
+   relying on colour alone (WCAG 1.4.1). The underline is the cue that does
+   not depend on colour, so it stays in EVERY state, hover and focus
+   included — dropping it there left the pointer-over state distinguished by
+   the accent colour alone, which is exactly what 1.4.1 forbids. The
+   hover/focus background below is added on top, never instead. */
+.post-sidebar-trail a {
+  text-decoration: underline;
+}
+
 /* A crumb that is a CONTROL (a segment you can descend into) is HEAD's
    `.files-crumb`: a chip with a hit target. `font-family` and `font-size`
    rather than the `font` shorthand — the shorthand drags the page's 1.5
@@ -594,10 +617,11 @@
 .post-sidebar-tone-accent .post-sidebar-trail button,
 .post-sidebar-tone-accent .post-sidebar-action {
   color: var(--fgColor-accent, #0969da);
-  text-decoration: none;
+  text-decoration: underline;
 }
 
 .post-sidebar-tone-accent .post-sidebar-trail a:hover,
+.post-sidebar-tone-accent .post-sidebar-trail a:focus-visible,
 .post-sidebar-trail button:hover,
 .post-sidebar-trail button:focus-visible,
 .post-sidebar-action:hover,
@@ -605,9 +629,8 @@
   background: var(--bgColor-accent-muted, #ddf4ff);
 }
 
-.post-sidebar-tone-accent .post-sidebar-trail a:hover {
-  text-decoration: underline;
-}
+/* T1104: same rule as the plain trail above — the accent trail's underline
+   survives hover and focus, on top of the background shift set just above. */
 
 /* The crumb you are on (HEAD's `.files-crumb[aria-current="page"]`): default
    ink, weight 600, not a control. The extra `.post-sidebar` is load-bearing:

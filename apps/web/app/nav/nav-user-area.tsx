@@ -31,7 +31,16 @@ export function NavUserArea() {
   return (
     <ActionMenu>
       <ActionMenu.Anchor aria-label={`Account menu for ${user.handle}`}>
-        <span className="global-nav-user">
+        {/* role="button": ActionMenu.Anchor puts aria-haspopup,
+            aria-expanded and tabindex=0 on its child, and those are NOT
+            allowed on a generic <span> — axe reports `aria-allowed-attr`
+            at CRITICAL impact. Nothing else on the page could see this
+            until the a11y suite signed in (T1104): the signed-out header
+            renders a plain "Sign in" link instead, so every earlier scan
+            was of the branch without the widget. The span already behaves
+            as a button (it opens the account menu), so this states what it
+            is rather than changing what it does. */}
+        <span className="global-nav-user" role="button">
           <PersonIcon size={16} aria-hidden />
           <span className="global-nav-user-handle">{user.handle}</span>
           <TriangleDownIcon size={12} aria-hidden />
