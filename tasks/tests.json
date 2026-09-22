@@ -1777,9 +1777,9 @@
       "name": "master suite",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": ""
+      "status": "passed",
+      "last_run": "2026-09-22T21:57:22Z",
+      "evidence": "Supervisor ran `POSTGRES_TEST_ADMIN_URL=postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post POST_G3_REDIS_ADDR=127.0.0.1:6379 bash tests/security/master-security-gate.sh` -> exit 0 on 2026-09-22T21:57:22Z. Last output:   ok              container-scan           Container scan: a guarded absence — green only while the tree has no container build file ;   ok              absence-manifest         Absence manifest: every §11 capability covered by a named row or named as absent, and the guard itself checked ; master-security-gate: PASS — 17 check(s) ran and each printed its own evidence (report: /tmp/tmp.9StGGCQ0eg/master-gate-report.json) ; GATE_EXIT=0 G2 (Supervisor): the full gate, 17 rows, run on the T1209 merge commit 034a341 plus this round's docs/manifest edits — every row exited 0 and printed the evidence it declared. It is also the first full run on a host whose `uv` was not shadowed: the attempt before it (PATH with ~/.local/bin first, uv 0.7.9) went red on vuln-python and sbom-python, which is the version sensitivity recorded as T1211 requirement 4, not a defect of the tree. Cross-check: the same 17 rows are what the new `security-master` CI job runs, and their first run there (PR #356) is what found the two undeclared dependencies fixed in 39110ec."
     }
   ]
 }

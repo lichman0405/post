@@ -17865,3 +17865,119 @@ Worker 另起第 14 条、把条件句当判据、标 `not_applicable`——事�
 （`internal/devorchestrator/driver.go:334`）会丢掉那些 `run_id` 与登记表当前 run 不再相符的决定。
 实测：04:42:13 记下的决定，在返工 run `run-f414bc36f680fa1f` 落到 registry 后，
 于 04:44:23 的下一拍被丢掉，`rddev status` 从 "1" 变 "0"，驱动恢复 `T1209 still working`。
+
+
+## ㊷ T1209 合并（SAST/SBOM/许可证/容器守卫进总门）与这一窗里我做的五个决定（L1，2026-09-23）
+
+### 0. 合并了什么
+
+T1209 把 `docs/23 §11` 点名的 SAST 与 `docs/25` 第 10 条点名的 SBOM 从 `absent` 变成总门里的
+**实检行**（`sast-go/python/node`、`sbom-go/node/python`、`license-audit`、`container-scan`、
+`absence-manifest`），注册表下限 **9 → 17**；容器扫描保留为**有守卫的缺席**。
+25 条路径，全部落在 `tests/security/**`、`ops/**`、`Makefile`、`.gitignore`。
+
+**合并**：`034a341`（PR #355，2026-09-22T21:44:26Z 合并；合并前 11 项 CI 检查全绿）。
+状态机的三步留痕在 `tasks/task_status.json`：`running → verification`（collect 全过，21:01:51）、
+`verification → accepted`（21:30:02，G1/G2/G3/G4 全 passed）、`accepted → merged`（21:44:28）。
+
+### 1. 决定一：先落作业定义，再走验收（`b459ee2`、`579e2b7`）
+
+`jobs.security-master` 原来只有一句 `bash tests/security/master-security-gate.sh`。
+G3 在**干净的集成树**里跑这个作业（`gate_run.go:718` 的 `prepareIntegrationTreeForRun`），
+那棵树既没有 `node_modules`、也没有 `.venv`、更没有任何扫描器——只有那一句的门必然 NOT ASKED。
+所以先把作业的六步写进 `specs/orchestrator/gates.json`（**保留 `requires_tasks`，仍不是必需作业**，
+五处锁步不动），再走 accept。两笔提交都只动 `specs/**`，`spec:validation` 与 `task-state` 都绿。
+
+第 6 步（`579e2b7`，排在四步 `uses:` 之后）是 `$GITHUB_PATH` 追加 `$(go env GOPATH)/bin` 与
+`$HOME/.local/bin`，本地是 no-op。理由：`make security-tools` 只为**自己进程**扩 PATH（为了断言 pin），
+而门是**后一次调用**，读的是环境 PATH；runner 镜像的默认 PATH 是第三方事实，写出来比依赖它诚实。
+**这一条后来被第二轮独立审查独立报成 R4**（"a wiring trap for whoever owns the CI change"）。
+
+### 2. 决定二：我自己的两处发现 → 返工第二轮（不是新任务、不是我自己改）
+
+| 发现 | 证据 | 为什么是返工而不是记录 |
+|---|---|---|
+| `master-gate-mutation-check.sh` 的变异 5 **已死** | 隔离跑第 301-313 行：`AssertionError: the mutation did not remove an entry`（python rc=1），脚本没查退出码 → 拿**未变异**的副本跑 checker（rc=0）→ 报 `MUTATION 5 NOT CAUGHT` | 这不只是文字错：**「删掉一条缺席，检查器必须拒绝」这条属性已经没有仪器在测**，而脚本本身开始**假红** |
+| `tests/security/README.md` 三处仍在说旧事实 | 表只有 9 行；52-58 行仍写「SAST/容器扫描/SBOM 三项缺席」；71-73 行仍写「manifest with its SAST entry deleted」 | README 是读者落地的第一份文件，内容与树直接矛盾 |
+
+处置：`rddev task reject`（verification → rejected，RejectRecord）→ `rddev worker rework --reason-file`
+（同一 session、diff 保留）。第 3 轮我复跑确认：变异 5 **两种腐烂形状**各测一次都红（5a 删条目、5b 把
+`guard_check_id` 指到总门不注册的 id），README 表 17 行。
+
+### 3. 决定三：第二轮独立审查的 7 条 findings，只有一条判 major，其余记录并进 T1211
+
+verdict **approve**（绑定 25 条路径的那一轮）。唯一的 major 是 RESULT 里的
+`bash tests/security/sbom.sh all`——`sbom.sh` 没有 `all` 面（分派只有 `go|node|python`）。
+它**在 `.rddev/` 里，永不进树**，而它背后的能力我已独立复跑（三个面从零生成、截断 SBOM 会红），
+所以**不改 Worker 的记录、也不为一句文字再烧一轮**，以我自己的 G2 记录为准（`.rddev/runtime/supervisor-g2/T1209-independent-verification.md` 第三、四轮）。
+
+两条落在**会进树的文件**上的：
+- `ops/security/absent-checks.json` 的 `kinds` 图例写成 `{covered, guarded-absence}`，检查器
+  `check-absent-manifest.py:206` 只接受 `{absent, guarded-absence}`（`covered` 是条目 `status` 的取值）；
+- `ops/security/license-allowlist.json:3` 的 `what` 引 `tests/security/license-audit.sh`（实际 `license_audit.py`）。
+两条都是**说明与实现不符但保护完好**：照图例写错的条目会被检查器**拒**，照文件名 grep 只会找不到文件。
+按本仓库自己的刻度（T1201/T1206 的先例）记录并合并，进 T1211。
+
+### 4. 决定四：ADR-028 是 `docs/23:45` 要的那份**书面风险接受**（只覆盖容器扫描这一项）
+
+范围**仅限**「V1 交付不含任何镜像」，并且**自我失效**：镜像一出现，`container-scan` 行转红即失效信号。
+文中每一处数字与措辞都对着合并后的树核过（下限 17、三条证据行、五个服务镜像的许可证处置）。
+（初稿有一句把五个基础设施镜像的许可证说成「已被 license-audit 行判定」——实测那行**刻意不判决**它们，
+只是把它们印成 `NEEDS ADR` / `LICENCE UNVERIFIED`，已改成实测所见。）
+
+**这份接受是「可查的」，不是「写着好看的」**：清单里新增 `risk_accepted_in` 指到 ADR，并新增**第三条见证**
+`grep -c 'no-dockerfile' docs/adr/ADR-028-*.md`——ADR 被改名或删掉，`absence-manifest` 行当场红。
+ADR 里四条「守卫能红」的断言我都在一棵**探针树**上实测过（`post-wt/adr-028-probe`，`git worktree add --detach`，
+跑完还原、`git status` 0 行）：①种一个 `Dockerfile`，门那一行绿→红（0→1）；②同树跑清单检查器绿→红
+（原文 `the absence witness now produces output`）；③检查器 `--selftest` 抓两种腐烂形状；④从注册表删掉一行，
+总门以 `EXIT_USAGE=3` 拒绝并打印 `16 check(s) registered, floor is 17`。证据留档
+`.rddev/runtime/supervisor-g2/T1209-adr-028-demonstrations.md`。
+
+**也修了自己草稿里一处引错的行号**：ADR 里「证据行只在退出码为 0 时才被认」原引
+`master-security-gate.sh:91-92`、`:470-488`，读下来那两处分别是 `add_check` 的参数说明与 `--only` 的选择逻辑，
+真正实现这条的是 `:587-606`（`rc -ne 0` 直接记 FAIL 并 `continue`，走到证据检查的只有 0 退出的行）——
+已改。附带把清单 `comment` 与检查器文档串里那句「witness 必须无输出」改成实情（第二条见证本来就要 `^1$`，
+现在还有第三条要匹配 ADR），措辞是「每条见证的 `expect` 说了它必须成立什么」。
+
+### 5. 决定五：第 11 个必需作业接线**走 PR**（合并后做）
+
+顺序不能颠倒：T1209 的 G4 要在**10 作业**的 G2 记录上过关（先接线会让 G4 当场拒）。
+接线脚本 `/tmp/wire-security-master.py` 一次改六处（作业定义、摘 `requires_tasks`、`required_jobs`、
+`G2.runs_jobs`、`G4.asserts_jobs`、`gate_spec_test.go` 的作业数与规范清单 + `ci.yml` 作业体），
+在 `579e2b7 + 25 条路径`的树上**干跑通过**（go test ok、12/12、9/9、marker rc=0）。
+走 PR 的理由：新作业必须在进 main **之前**被 CI 真跑一次，否则 G4 会拿着一个没人验证过的作业
+去卡每一笔任务。
+
+**落地**：PR #356（分支 `chore/ci-security-master-job`）——第一次实跑红 → 修 `39110ec` → 绿，
+2026-09-22T22:10:15Z squash 合并为 `ee0a640`。该 run 的 11 项检查全绿（新作业 `security-master` 3m39s），
+main 上 `specs/SPEC_VERSION.json` 随之变为 `sha256:41717f0c68fb7f6a`（39 inputs）。
+
+### 6. 决定六：作业的**第一次 CI 实跑**抓出两处未声明的依赖——修作业（`39110ec`），声明那一半进 T1211
+
+**这就是「走 PR」这个决定的回报。** PR #356 第一次跑（run `35788602541`）`security-master` 当场红：
+17 行里 **15 绿 2 红**——`FAIL owasp-smoke: exit 1`、`FAIL deploy-template: exit 2`。
+门是**每行独立、全部照跑**的，所以这一次跑把整份清单的真实状态一次问清了；
+而作业输出里能看到的只有每行日志的**最后 25 行**（`tail -25`），两条红都没把原因印在里面。
+
+**怎么查的（都不是推断）**：
+- `gh run view --job … --log` 在 run 还没结束时会拒绝，但 `gh api repos/…/actions/jobs/<id>/logs --allow-escape-sequences`
+  能拿到**已完成作业**的全文——这是第一次实跑留下的唯一完整证据。
+- `owasp-smoke` 那条：全文里唯一的失败行是 `FAIL S0 redis-cli is required: …`，位置在整段输出的**第 8 行**，
+  自然落在 25 行窗口之外。**复现**：造一个 `/usr/bin` 的克隆目录、只少 `redis-cli` 这一个符号链接拿它当 PATH，
+  那一行真的就在本地复现了同一次红——`1 failure(s)`，且最后 25 行与 CI 的尾巴逐字一致。
+  （不这么量一次，我手里就只有「大概是缺工具」这种猜测。）
+- `deploy-template` 那条：原因它自己就印在尾巴里——`python3 with pyyaml is required (the template is YAML)`，
+  作业没装 pyyaml（`spec-validation` 作业从第一天起就 `pip install pyyaml`，这一笔漏了同一件事）。
+- 顺带确认：**不是** `uv` 的版本问题。CI 上 `vuln-python`/`sbom-python` 两行**全绿**（`pip install uv` 装的是 0.12.17）；
+  本地那次两条红是我自己把 `$HOME/.local/bin`（uv **0.7.9**）放在 PATH 前面造成的，与树无关——
+  uv 无钉可依这件事本身是 T1211 需求 4，证据就是这次的对照。
+
+**改法**：`39110ec` 给作业补两步（`apt-get install redis-tools`、`pip install pyyaml`），
+`specs/orchestrator/gates.json` 同步同两步（`TestGatesSpecSyncsWithCIWorkflow` 逐条比 run 字符串，顺序也必须一致），
+摘要重算（39 inputs，`sha256:41717f0c68fb7f6a`）。**这不是把门放水**：让作业真的能跑那两行，与「删掉检查」相反。
+
+**没有在这笔里改的那半**：那两行**声明**的先决条件——`owasp-smoke` 的 `requires` 不写 `redis-cli` 与 `node`，
+`deploy-template` 的不写 pyyaml——所以缺工具的宿主得到的是「红，且原因在窗口外」，而不是门的契约所写的
+「NOT ASKED 并说明为什么」。那是仪器自己的文件（`tests/security/**`），已立为 **T1211 需求 11**，
+判据写在它的验收里：去掉 `redis-cli`/藏起 pyyaml 时，那两行必须 NOT ASKED 并点名缺的工具，**不许**靠删检查消红。
+

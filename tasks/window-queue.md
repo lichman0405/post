@@ -13,49 +13,35 @@
 
 ---
 
-## A. 落 T0511 的任务书，然后解冻 T0812 —— 唯一的"真待落地"
+## A. ~~落 T0511 的任务书，然后解冻 T0812~~ —— **已完结（2026-09-23 核）**
 
-**为什么**：`tasks/packages/T0511.json` 是**唯一**还真正待落地的任务书
-（2026-09-19 用 `.rddev/tools/packages-vs-dag.py` 逐份比对过：26 份包里其余 20 份 DIFFERS
-是**过期草稿**，live 那份更新，落了会把更正改回去；详见 `tasks/packages/README.md`）。
+`T0511` 与 `T0812` 都已 `merged`（`tasks/task_status.json`）。空窗清单上唯一一条"真待落地"落地了：
+T0812 的 `blocked` 由 T0511 的合并解冻，两本都收口。
 
-**怎么确认还需要做**：`python3 .rddev/tools/packages-vs-dag.py | grep T0511` → 仍是 `NOT IN DAG`。
-
-**步骤**（顺序不能乱，每一步都在 `land-T0511.py` 的头注释里）：
-
-```sh
-python3 .rddev/tools/land-T0511.py --dry-run                   # 干跑
-python3 .rddev/tools/land-T0511.py                             # 写 tasks/tasks.json
-python3 scripts/spec_version.py --write                        # 重生成指纹，不跑这步 main 红
-python3 scripts/validate_task_state.py                         # 9 项检查
-git add -A && git commit && git push                           # 一笔提交
-./bin/rddev task ready T0511                                   # 之后才能派工
-```
-
-**T0511 合并之后**（不是同一时刻）才有的事：`./bin/rddev task ready T0812`。
-T0812 现在被冻成 `blocked`，因为它的那半条依赖（"读规则 ADR-024 得先在树上"）
-DAG 里表达不出来，而它要改的两个文件正被 T0511 重写。
+**唯一的遗留是记账噪音**：`python3 .rddev/tools/packages-vs-dag.py | grep T0511` 现在报
+`DIFFERS fields: deliverables` —— 这是**已合并任务的过期草稿**（live 那份在返工里改过 `deliverables`），
+不是待落地。判据同 `tasks/packages/README.md`：`NOT IN DAG` 才是活，`DIFFERS` 对**已合并**的任务只是留档。
+**不再需要任何动作。**
 
 ---
 
-## B. 让 CI 真的跑 `tests/e2e`（**新，2026-09-19 发现，静默口子**）
+## B. 让 CI 真的跑 `tests/e2e` —— **已立账为 T1212（2026-09-23），并当场收窄**
 
-**为什么**：CI 的 `go` job 跑 `go test $(go list ./... | grep -v '/tests/integration')`，
-**它包含 `./tests/e2e`，而这个 job 没有数据库**；唯一带库的 job 只跑 `./tests/integration`。
-**全仓库搜 `tests/e2e` 零命中**。也就是说：`tests/e2e` 里要库的那些链路在 CI 里**永远 skip，而 job 报绿**。
-**我跑出来看过**（库指死端口、照 CI 形状）：`exit=0`、**27 个 PASS、1 个 SKIP**、结尾 `ok`；
-同一个测试在真库上是 `PASS (0.90s)`。**T0811 一并，它的登记阻塞测试就是第二个这样的。**
+**立账了，但比这条原本的描述窄。** 今天重新在树上核过：`tests/e2e` 里**大多数**测试是进程内的
+（`httptest` + `miniredis` + `memstore`，`tests/e2e/auth_e2e_test.go:46` 的 `newE2EEnv`），
+在 CI 的 `go` job 里**是真跑的**；**只有两个**旅程要真 PostgreSQL ——
+`tests/e2e/conflict_e2e_test.go:107`（冲突解决）与 `tests/e2e/discussion_promote_e2e_test.go:112`
+（话题升格）—— 库不可达时**静默** `t.Skipf`，job 照报绿。
+所以口子是真的，但只有**两条链路**，不是「整个 `tests/e2e` 没跑过」。
 
-**怎么确认还需要做**：`grep -rn "tests/e2e" .github/workflows/ci.yml Makefile scripts/ci.sh` → 若仍为空，就还没修。
+**工人那一半**（`tasks/packages/T1212.json`，`allowed_scope` 只给 `tests/e2e/**` 与
+`internal/persistence/testdb/**`）：共享判据 `POST_REQUIRE_E2E_DB=1`（库不可达时 `t.Fatalf` 而非 `t.Skipf`，
+未设时行为一字不变）＋一个证明守卫**能红**的测试。
 
-**修法（已定）**：① 在**有库的 job**（`migration-integration`）里**显式加一步**
-`go test ./tests/e2e -count=1`（带 `POSTGRES_TEST_ADMIN_URL`）；
-② 让 skip **变大声**：共享帮手 `RequireDB(t)`——环境变量 `POST_REQUIRE_E2E_DB=1` 且库不可达时
-**`t.Fatalf` 而不是 `t.Skipf`**，并在那个 job 里设上它（库挂了该红，不该绿）；
-③ 配 fixture 单测证明守卫**能红**（本仓库惯例）。
-**要改 `ci.yml` → 必须同步 `specs/orchestrator/gates.json`（指纹输入）→ 空窗。**
-
-**优先级**：**排在 A 之后、C 之前**——它是**门本身的正确性**，而且每多一本 e2e 任务就更漏一点。
+**留在我手上的那一半**（工人不许碰 `.github/**`——两道作业步骤必须逐步一致，改一处要两处一起走）：
+① 带库的 `migration-integration` job 加一步 `POST_REQUIRE_E2E_DB=1 go test ./tests/e2e -count=1`；
+② 让没有库的 `go` job 把 `./tests/e2e` 从包列表里**摘掉**（今天它是被 `grep -v '/tests/integration'`
+顺带带进去的）。`T1212` 合并后做，与 `specs/orchestrator/gates.json` 同笔改（`TestCIWorkflowMatchesGateSpec`）。
 
 ---
 
@@ -140,3 +126,26 @@ T0811 合并后**接口侧已经有了**（开话题、评论、升格），但�
   以后按 `'7'` 列/筛就找不到。修法：pull_request 目标**存解析后的十进制形式**。
 - **`make -n <target>` 之类的 CI 步骤自检**：**我倾向于不做**。它要防的失败是**大声**的
   （目标不存在 → make 自己报错），不是静默的，性价比不够。列在这里只为说明**我考虑过并否掉了**。
+
+---
+
+## F. 本窗（2026-09-23）立的三本账 —— 记在这里是为了下次别再重新发现一遍
+
+**它们不是空窗待办，是已立账、等驱动派工的任务**。列出来只有一个理由：这三件事各自的**由来**都在这份
+文件的语境里（B 条、T1209 的复核、T1207 的复核），下次开窗时能一眼看出「已经有人立过账了」。
+
+- **T1210**（`v1_required=false`，`tests/acceptance/**`，G3 `mof-canonical`）：V1 证书在新基准上重生成。
+  由来：T1207 的第五轮独立复核五条意见 + T1209 让 R10 那句「SAST、容器扫描、SBOM 三项缺席」不再成立。
+  它依赖 T1209 与 T1207（都已合并）。
+- **T1211**（`v1_required=false`，`tests/security/**`、`ops/security/**`、`ops/ci/**`、`Makefile`，
+  G3 `security-smoke`）：安全仪器**自己的**欠账（许可证判决不落地、`POST_SBOM_REUSE` 的真值判断、
+  uv/govulncheck 的钉法、死掉的 `check_floor()`、指错文件名的注释、`kinds` 图例、判过期磁盘 SBOM、
+  `container-scan` 的剪枝与承诺不对称…），逐条都对着树核过，**共 11 条**——第 11 条是接线作业
+  `security-master` 在 PR #356 里第一次实跑才暴露的：`owasp-smoke` 那一行的 `requires` 不写
+  `redis-cli`/`node`、`deploy-template` 的不写 pyyaml，于是缺工具的宿主得到的是一次**原因落在
+  `tail -25` 窗口之外**的红，而不是门承诺的「NOT ASKED 并说明为什么」。依赖 T1209。
+- **T1212**（`v1_required=false`，`tests/e2e/**`、`internal/persistence/testdb/**`，G3 `rsg-real-services`）：
+  即上面 B 条。无依赖。
+
+**这三本收口之后**，空窗清单上剩下的活就是 **C**（两处 baseline 的"只许变短"守卫）与 **D**（PR 页
+Discussion 区块那条缺口：要么立账，要么改规格把这一格删掉——不许两头都不做）。
