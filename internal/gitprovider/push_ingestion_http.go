@@ -30,6 +30,23 @@ import (
 // paths and a truncated commit list, never file content).
 const maxDeliveryBody = 4 << 20
 
+// refusalSurface is this handler's name in post_permission_denials_total
+// (docs/26 §3 "permission denied rates"). The surface label is a closed set
+// maintained at the sites that consume a refusal — "api" in
+// cmd/api/authhttp/envelope.go, "inbox" in internal/events/inbox_store.go —
+// and this receiver is the third.
+//
+// It is counted here rather than at the envelope because it is the one
+// refusal site the envelope cannot see: the webhook route is registered on
+// the ROOT mux, outside the session/CSRF guard (the provider is a machine
+// and the HMAC over the raw body is its authentication), so it answers by
+// writing the status directly instead of going through authhttp.WriteError.
+// Counting a refusal at the point it is decided, for the one receiver the
+// boundary does not wrap, is what keeps "every product refusal in this
+// binary is counted" a statement about the tree rather than about the
+// call sites that happened to be audited.
+const refusalSurface = "gitprovider"
+
 // NewPushWebhookHandler wires the receiver: the ingester performs
 // inspection + classification, the store resolves the secret. The handler
 // itself is transport-only: read raw bytes, verify, answer. Logging is
@@ -63,6 +80,7 @@ func NewPushWebhookHandler(ingester *PushIngester, store IngestStore) http.Handl
 		deliveryID := r.Header.Get("X-Gitea-Delivery")
 		if signature == "" {
 			reqLog.Warn("api: webhook delivery rejected (no signature)", "delivery_id", deliveryID)
+			observability.Default().ObserveRefusal(refusalSurface, http.StatusUnauthorized)
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -94,6 +112,7 @@ func NewPushWebhookHandler(ingester *PushIngester, store IngestStore) http.Handl
 		if !VerifyPushSignature(secret, body, signature) {
 			reqLog.Warn("api: webhook delivery rejected (bad signature)",
 				"delivery_id", deliveryID, "ref", ev.Ref)
+			observability.Default().ObserveRefusal(refusalSurface, http.StatusUnauthorized)
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -122,6 +141,13 @@ func NewPushWebhookHandler(ingester *PushIngester, store IngestStore) http.Handl
 				reqLog.Warn("api: webhook delivery refused (main is frozen)",
 					"delivery_id", deliveryID, "ref", ev.Ref, "after", ev.After,
 					"code", frozen.Code(), "gitea_repo_id", frozen.RepositoryID)
+				// The one refusal in this binary an operator has no other
+				// metric for: a direct write to a frozen main (T0601) is a
+				// permission decision, and until it is counted here nothing
+				// in post_permission_denials_total moves when somebody tries
+				// it — post_http_requests_total records the 403 but carries
+				// no decision class, so the denial-rate rule cannot see it.
+				observability.Default().ObserveRefusal(refusalSurface, http.StatusForbidden)
 				w.WriteHeader(http.StatusForbidden)
 				return
 			}

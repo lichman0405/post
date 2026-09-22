@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/lichman0405/post/internal/observability"
 )
 
 // Deliverer turns fanned-out delivery rows into signed HTTP requests and
@@ -174,6 +176,11 @@ func (d *Deliverer) RunOnce(ctx context.Context) (int, int, error) {
 		log := d.log.With("delivery_id", a.DeliveryID, "endpoint_id", a.EndpointID,
 			"event_id", a.EventID, "event_type", a.EventType, "attempt", a.Attempts+1)
 		outcome, code, msg := d.try(ctx, a)
+		// One count per attempt, using the classification this switch already
+		// makes (docs/26 §3 "webhook success"). The label set is that
+		// classification and nothing finer — no endpoint or event id, which
+		// would be unbounded.
+		observability.Default().ObserveWebhookDelivery(webhookOutcomeLabel(outcome))
 		switch outcome {
 		case outcomeDelivered:
 			if err := d.store.RecordDelivered(ctx, a.DeliveryID, *code); err != nil {
@@ -213,6 +220,26 @@ func (d *Deliverer) RunOnce(ctx context.Context) (int, int, error) {
 		}
 	}
 	return delivered, failed, nil
+}
+
+// webhookOutcomeLabel names an attempt outcome for the metric label. The
+// vocabulary is the classification table in this file's package comment, so
+// post_webhook_deliveries_total and the delivery log never disagree about
+// what happened to a request.
+func webhookOutcomeLabel(outcome int) string {
+	switch outcome {
+	case outcomeDelivered:
+		return "delivered"
+	case outcomeTerminal:
+		return "terminal"
+	case outcomeRetry:
+		return "retry"
+	case outcomeRetryNoStreak:
+		return "retry_no_streak"
+	default:
+		// Unreachable: try() returns exactly the four values above.
+		return "unknown"
+	}
 }
 
 // attempt outcomes of one HTTP try.

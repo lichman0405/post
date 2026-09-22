@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/lichman0405/post/internal/observability"
 )
 
 // Dispatcher publishes pending outbox rows into research_events (the
@@ -24,6 +26,13 @@ type Dispatcher struct {
 	pool      *pgxpool.Pool
 	log       *slog.Logger
 	batchSize int
+	// poll is the pause between successful passes; backoffMin/backoffMax
+	// bound the failure path. All three are options so the tuning surface
+	// is uniform — before T1109 batch size had a With* and the interval
+	// did not (T1001 review item 5).
+	poll       time.Duration
+	backoffMin time.Duration
+	backoffMax time.Duration
 	// publish is the per-row publish step, replaceable in tests to force a
 	// deterministic failure (the savepoint isolation keeps one broken row
 	// from blocking the rest of the batch).
@@ -33,11 +42,29 @@ type Dispatcher struct {
 // DefaultBatchSize is how many pending outbox rows one RunOnce claims.
 const DefaultBatchSize = 100
 
-// DefaultPollInterval is the pause between RunOnce passes in Run. The
-// outbox is a low-latency path (the event should exist shortly after the
-// transaction commits) but not a hot loop; the next task's SLO work may
-// tune this per deployment.
+// DefaultPollInterval is the pause between RunOnce passes in Run while the
+// passes are succeeding. The outbox is a low-latency path (the event should
+// exist shortly after the transaction commits) but not a hot loop.
 const DefaultPollInterval = time.Second
+
+// The retry ladder used while passes are FAILING. Before T1109 the loop
+// logged one ERROR per second for as long as PostgreSQL was down — a
+// database outage of an hour produced 3600 identical lines and told an
+// operator nothing the first line had not (tasks/decisions.md L1-20260914-73,
+// T1001 review items 2 and 5). The failure path now backs off from
+// DefaultBackoffMin, doubling to DefaultBackoffMax, and resets to the
+// normal cadence on the first successful pass — so recovery is immediate
+// and an outage is legible: the gap between lines IS the retry rhythm.
+//
+// The values are the ones internal/worker already uses for job retries
+// (worker.go backoff/backoffCap), so the platform has one retry vocabulary
+// rather than two.
+const (
+	// DefaultBackoffMin is the pause after the first failed pass.
+	DefaultBackoffMin = time.Second
+	// DefaultBackoffMax caps the failure-path pause.
+	DefaultBackoffMax = 30 * time.Second
+)
 
 // DispatcherOption tunes a Dispatcher.
 type DispatcherOption func(*Dispatcher)
@@ -53,6 +80,48 @@ func WithBatchSize(n int) DispatcherOption {
 	return func(d *Dispatcher) { d.batchSize = n }
 }
 
+// WithPollInterval sets the pause between successful RunOnce passes
+// (default DefaultPollInterval). Non-positive values are ignored, like
+// worker.RedisQueue.WithPollTimeout and the other tuning options.
+func WithPollInterval(d time.Duration) DispatcherOption {
+	return func(dis *Dispatcher) {
+		if d > 0 {
+			dis.poll = d
+		}
+	}
+}
+
+// WithBackoff sets the failure-path retry ladder's first step and cap
+// (defaults DefaultBackoffMin / DefaultBackoffMax). Non-positive values are
+// ignored, like WithPollInterval; the two are resolved together, against the
+// values already in place, so the ladder this installs never descends: the
+// pause may grow as an outage continues, never shrink.
+//
+// A cap below the first step therefore RAISES the cap to the first step. Both
+// other readings are wrong. Lowering the first step would silently discard the
+// knob the caller chose. Leaving a cap under the first step is what the
+// previous version did, and it inverted the ladder: WithBackoff(60s, 45s) set
+// min=60s, then refused 45s (it is below the new min) and kept the DEFAULT cap
+// of 30s — so Run, which waits on the current step and only then climbs, spent
+// 60s, 30s, 30s, 30s… with the pause collapsing the moment the outage proved
+// serious. TestWithBackoffNeverInstallsADescendingLadder is the assertion.
+func WithBackoff(min, max time.Duration) DispatcherOption {
+	return func(dis *Dispatcher) {
+		nextMin := dis.backoffMin
+		if min > 0 {
+			nextMin = min
+		}
+		nextMax := dis.backoffMax
+		if max > 0 && max >= nextMin {
+			nextMax = max
+		}
+		if nextMax < nextMin {
+			nextMax = nextMin
+		}
+		dis.backoffMin, dis.backoffMax = nextMin, nextMax
+	}
+}
+
 // WithPublisher replaces the per-row publish step. The default is
 // PublishEvent; the seam exists so tests can force one row to fail
 // deterministically (the savepoint isolation keeps that row from blocking
@@ -66,10 +135,13 @@ func WithPublisher(publish func(ctx context.Context, tx pgx.Tx, p PendingEvent) 
 // is down, like every other worker dependency outage.
 func NewDispatcher(pool *pgxpool.Pool, opts ...DispatcherOption) *Dispatcher {
 	d := &Dispatcher{
-		pool:      pool,
-		log:       slog.Default(),
-		batchSize: DefaultBatchSize,
-		publish:   PublishEvent,
+		pool:       pool,
+		log:        slog.Default(),
+		batchSize:  DefaultBatchSize,
+		poll:       DefaultPollInterval,
+		backoffMin: DefaultBackoffMin,
+		backoffMax: DefaultBackoffMax,
+		publish:    PublishEvent,
 	}
 	for _, opt := range opts {
 		opt(d)
@@ -99,22 +171,51 @@ type PendingEvent struct {
 
 // Run publishes the outbox backlog until ctx is cancelled: one pass
 // immediately (a backlog built while the worker was down drains right
-// away), then one pass per DefaultPollInterval. The loop never exits on a
-// transient failure — a down database is retried like every other
-// dependency outage; only ctx cancellation ends it.
+// away), then one pass per poll interval while passes succeed. The loop
+// never exits on a transient failure — a down database is retried like
+// every other dependency outage; only ctx cancellation ends it.
+//
+// Failures back off instead of repeating at the poll interval: see the
+// DefaultBackoffMin comment. The pause is per-attempt and resets on the
+// first success, so the loop returns to the low-latency cadence the moment
+// the database answers again.
 func (d *Dispatcher) Run(ctx context.Context) error {
-	ticker := time.NewTicker(DefaultPollInterval)
-	defer ticker.Stop()
+	backoff := d.backoffMin
 	for {
-		if _, err := d.RunOnce(ctx); err != nil && ctx.Err() == nil {
-			d.log.Error("events: outbox publish pass failed", "error", err)
+		_, err := d.RunOnce(ctx)
+		wait := d.poll
+		if err != nil && ctx.Err() == nil {
+			d.log.Error("events: outbox publish pass failed",
+				"error", err, "retry_in", backoff)
+			// The counter beside the log line (docs/26 §3 outbox lag): the
+			// failure half of the family. It is also what the database
+			// alert reads, because a database that cannot be reached is
+			// exactly this loop failing every pass.
+			observability.Default().ObserveOutboxPublishFailure()
+			wait = backoff
+			backoff = nextBackoff(backoff, d.backoffMax)
+		} else {
+			backoff = d.backoffMin
 		}
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return nil
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
+}
+
+// nextBackoff doubles current, capped at max. A non-positive max means
+// uncapped doubling, which WithBackoff never produces (the defaults always
+// apply) but a zero-value Dispatcher built by hand could.
+func nextBackoff(current, max time.Duration) time.Duration {
+	next := current * 2
+	if max > 0 && next > max {
+		return max
+	}
+	return next
 }
 
 // RunOnce claims one batch of pending outbox rows and publishes each, all
@@ -166,6 +267,45 @@ func (d *Dispatcher) RunOnce(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("events: commit publish transaction: %w", err)
 	}
 	return published, nil
+}
+
+// OutboxBacklog is the outbox as the metric endpoint reports it.
+type OutboxBacklog struct {
+	// Pending is how many rows are still unpublished.
+	Pending int64
+	// OldestPending is how long the oldest unpublished row has been waiting
+	// — the LAG docs/26 §3 names, as opposed to the depth. Zero when
+	// nothing is pending. A depth says "there is work"; the age says
+	// whether it is moving, which is the difference between a busy outbox
+	// and a stuck one.
+	OldestPending time.Duration
+}
+
+// The backlog probe. It is a read-only aggregate over the same partial index
+// the claim uses (outbox_events_pending_idx, 00046), so it costs a count
+// over exactly the rows the dispatcher is working on. Nothing here writes or
+// locks: a metric read must never perturb the thing it measures, and the
+// claim's FOR UPDATE SKIP LOCKED is the only lock on this path.
+const outboxBacklogQuery = `
+SELECT count(*),
+       COALESCE(EXTRACT(EPOCH FROM now() - min(created_at)), 0)
+FROM outbox_events
+WHERE published_at IS NULL`
+
+// Backlog reads the current outbox lag. Errors are returned, not swallowed:
+// a database that cannot be reached must not be reported as an empty outbox.
+func (d *Dispatcher) Backlog(ctx context.Context) (OutboxBacklog, error) {
+	var (
+		pending int64
+		oldest  float64
+	)
+	if err := d.pool.QueryRow(ctx, outboxBacklogQuery).Scan(&pending, &oldest); err != nil {
+		return OutboxBacklog{}, fmt.Errorf("events: read outbox backlog: %w", err)
+	}
+	return OutboxBacklog{
+		Pending:       pending,
+		OldestPending: time.Duration(oldest * float64(time.Second)),
+	}, nil
 }
 
 const claimPendingOutbox = `

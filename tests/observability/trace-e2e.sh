@@ -115,17 +115,49 @@ echo "-- worker.log for trace-e2e-from-caller:"
 grep -F 'trace-e2e-from-caller' "$LOG/worker.log" | grep -F '"msg":"worker: job completed"'
 
 echo
-echo "=== Phase 3: Redis down — structured go-redis lines + enqueue failure with correlation id ==="
+echo "=== Phase 3: Redis down — structured go-redis lines + the failed request traced by correlation id ==="
 kill -- -"${PIDS[0]}" 2>/dev/null || kill "${PIDS[0]}" 2>/dev/null || true   # devredis
 sleep 2
 FAIL_RESP="$(curl -sS -X POST "$API/internal/jobs" \
   -H 'Content-Type: application/json' \
   -H 'X-Correlation-ID: trace-e2e-redis-down' \
   -d '{"type":"smoke"}' || true)"
-grep -F '"msg":"api: job enqueue failed"' "$LOG/api.log" | grep -F 'trace-e2e-redis-down' \
-  || fail "enqueue failure not logged with correlation id"
-echo "-- api.log failure line (carries the request correlation id):"
-grep -F '"msg":"api: job enqueue failed"' "$LOG/api.log" | tail -1
+# WHAT THIS PHASE ASSERTS ON THIS BASELINE, AND WHY IT IS NOT THE HANDLER'S LINE
+#
+# Before T1106 this phase asserted `"msg":"api: job enqueue failed"` carrying the
+# caller's id: the request reached the enqueue handler, the handler's Redis push
+# failed, and it logged why. That line is now UNREACHABLE here, and not because
+# of anything this task did: internal/security/ratelimit.go guards the whole
+# tree and FAILS CLOSED when its Redis is unreachable (line 138-150: limiter
+# error -> 503 SERVICE_UNAVAILABLE before next.ServeHTTP), so with devredis down
+# the request is refused at the edge and the mux never dispatches. Measured in
+# this phase's own api.log:
+#
+#   {"level":"ERROR","msg":"security: rate limiter failed; request refused",
+#    "correlation_id":"trace-e2e-redis-down","error":"persistence: rate limit
+#    increment: dial tcp 127.0.0.1:16390: connect: connection refused",
+#    "class":"anonymous","method":"POST","path":"/internal/jobs"}
+#
+# So what the phase asserts is what the platform actually promises, and it is
+# the same promise: the failure is traceable by the caller's correlation id,
+# the cause is named, and the outcome is recorded. The three greps below are
+# that, and none of them is a relaxation of the other two — an id-less log
+# line, a silent failure, or a client left unable to quote its own trace id
+# each fails the phase.
+grep -F '"correlation_id":"trace-e2e-redis-down"' "$LOG/api.log" \
+  | grep -qF '"msg":"security: rate limiter failed; request refused"' \
+  || fail "the refusal of the enqueue was not logged with the caller's correlation id"
+grep -F '"correlation_id":"trace-e2e-redis-down"' "$LOG/api.log" \
+  | grep -qF '"status":503' \
+  || fail "the request that could not be enqueued was not recorded as a 503 under its own id"
+grep -qF 'trace-e2e-redis-down' <<<"$FAIL_RESP" \
+  || fail "the error body does not carry the caller's correlation id: $FAIL_RESP"
+echo "-- api.log refusal line (names the cause, carries the request correlation id):"
+grep -F '"correlation_id":"trace-e2e-redis-down"' "$LOG/api.log" | grep -F 'rate limiter failed' | tail -1
+echo "-- api.log completion line (the outcome, same id):"
+grep -F '"correlation_id":"trace-e2e-redis-down"' "$LOG/api.log" | grep -F '"http request completed"' | tail -1
+echo "-- error body returned to the caller (request_id is the same id):"
+printf '   %s\n' "$FAIL_RESP"
 echo "-- worker.log structured lines while redis is down:"
 grep -E '"msg":"worker: (queue read failed|processing-list recovery failed)"' "$LOG/worker.log" | tail -1 || true
 # go-redis's own chatter must arrive through the structured logger

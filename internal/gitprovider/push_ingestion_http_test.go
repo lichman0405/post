@@ -10,7 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/lichman0405/post/internal/gitprovider"
+	"github.com/lichman0405/post/internal/observability"
 	"github.com/lichman0405/post/internal/rsg/schemareg"
 )
 
@@ -111,6 +114,73 @@ func TestPushWebhookRejectsMissingSignature(t *testing.T) {
 	}
 	if len(store.params) != 0 {
 		t.Error("missing signature reached the ingester")
+	}
+}
+
+// denialValue reads post_permission_denials_total{surface,decision} off the
+// process registry's exposition. The counter lives on
+// observability.Default() — the same process-wide instance the receiver
+// increments — so a before/after delta is the receiver's own contribution.
+func denialValue(t *testing.T, surface, decision string) float64 {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	promhttp.HandlerFor(observability.Default().Gatherer(), promhttp.HandlerOpts{}).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	want := `post_permission_denials_total{decision="` + decision + `",surface="` + surface + `"} `
+	for _, line := range strings.Split(rec.Body.String(), "\n") {
+		if !strings.HasPrefix(line, want) {
+			continue
+		}
+		v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimPrefix(line, want)), 64)
+		if err != nil {
+			t.Fatalf("parse %q: %v", line, err)
+		}
+		return v
+	}
+	return 0
+}
+
+// The receiver counts its own refusals (docs/26 §3 "permission denied
+// rates"). It is the one refusal site in the binary outside
+// cmd/api/authhttp/envelope.go: the route is registered on the root mux,
+// outside the session/CSRF guard, so it answers by writing the status
+// directly and the envelope never sees it. Without these counts the frozen
+// main 403 — the only signal an operator gets that somebody pushed to a
+// frozen main — is missing from the single denial-rate rule in the file.
+func TestPushWebhookCountsFrozenMainRefusal(t *testing.T) {
+	before := denialValue(t, "gitprovider", "forbidden")
+	body := hookBody(gitprovider.MainRef, testSHA, testSHA2, 1)
+	store := &fakeIngestStore{secret: hookTestSecret, mainFrozen: true}
+
+	rec := hookRequest(t, body, signHook(hookTestSecret, body), "d-frozen", "push", &fakePort{}, store)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body %s", rec.Code, rec.Body.String())
+	}
+	if got := denialValue(t, "gitprovider", "forbidden"); got != before+1 {
+		t.Errorf(`post_permission_denials_total{decision="forbidden",surface="gitprovider"} = %v, want %v: a frozen-main delivery was answered 403 without being counted as a permission denial`, got, before+1)
+	}
+}
+
+// ...and the two signature refusals are counted as unauthenticated, so the
+// surface is not half-instrumented. Both statuses are counted for the same
+// reason: the HMAC over the raw body IS this receiver's authentication, so
+// failing it is the 401 class the family already defines.
+func TestPushWebhookCountsSignatureRefusals(t *testing.T) {
+	before := denialValue(t, "gitprovider", "unauthenticated")
+	body := hookBody("refs/heads/semantic", testSHA, testSHA2, 1)
+	store := &fakeIngestStore{secret: hookTestSecret}
+
+	for _, tc := range []struct{ name, signature string }{
+		{"missing", ""},
+		{"bad", signHook("wrong-secret", body)},
+	} {
+		rec := hookRequest(t, body, tc.signature, "d-"+tc.name, "push", &fakePort{}, store)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s signature: status = %d, want 401", tc.name, rec.Code)
+		}
+	}
+	if got := denialValue(t, "gitprovider", "unauthenticated"); got != before+2 {
+		t.Errorf(`post_permission_denials_total{decision="unauthenticated",surface="gitprovider"} = %v, want %v: two refused deliveries were not counted`, got, before+2)
 	}
 }
 

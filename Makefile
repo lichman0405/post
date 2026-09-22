@@ -21,7 +21,8 @@ STATICCHECK_VER := 2026.2.1
 
 .PHONY: help bootstrap check build rddev test test-integration bench dev smoke sync-schemas \
 	check-schema-drift check-schema-snapshot check-openapi check-spec-version fmt-check staticcheck lint-python type-python \
-	progress ci migrate search-rebuild search-embed infra-up infra-init infra infra-down infra-ps infra-logs
+	progress ci migrate search-rebuild search-embed infra-up infra-init infra infra-down infra-ps infra-logs \
+	observability-smoke observability-trace observability-route
 
 help: ## list targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN { FS = ":.*## " } { printf "  %-20s %s\n", $$1, $$2 }'
@@ -386,6 +387,26 @@ smoke: ## Docker-free CI smoke: start/check every app with real requests (no inf
 		echo "exit=$$rc (next 16 logs the ConfigError and never serves, but does not always exit by itself; timeout guarantees termination)"; \
 		grep -m1 "POST_ENV:" /tmp/post-smoke-web-noconfig.log; \
 		echo ">> smoke OK";'
+
+# Observability smoke / trace / route probes (T1109). These targets run the
+# same checks the CI observability job runs, but against the currently built
+# binaries and the local infra stack. They are intentionally separate from
+# `smoke`: `smoke` is Docker-free and must pass without a Prometheus or Tempo,
+# while these targets need the compose stack (infra-up) and the observability
+# tooling installed (promtool, curl, jq). A failure prints the failing output,
+# never a silent skip.
+observability-smoke: ## run metrics + alerts + distributed-trace harnesses (needs infra-up; ~7m26s)
+# This is the single root-level command the README and CI snippet advertise:
+# it strings together the metrics/alerts harness (which itself runs fault
+# injection and promtool) and the trace end-to-end check. Both must pass.
+	bash tests/observability/metrics-alerts-e2e.sh
+	bash tests/observability/trace-e2e.sh
+
+observability-trace: ## run only the distributed-trace end-to-end check
+	bash tests/observability/trace-e2e.sh
+
+observability-route: ## run only the observability route probe
+	bash tests/observability/route-probe.sh
 
 # Local infrastructure (Docker Compose, T0003). Applications stay host-native
 # (docs/66 §2); only the infra dependencies below run in containers.

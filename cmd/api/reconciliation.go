@@ -7,6 +7,7 @@ import (
 
 	"github.com/lichman0405/post/internal/config"
 	"github.com/lichman0405/post/internal/gitprovider"
+	"github.com/lichman0405/post/internal/observability"
 )
 
 // The T0309 Git ↔ RSG reconciliation loop: runs one verification pass at
@@ -43,6 +44,11 @@ func runReconciliationSweep(ctx context.Context, rec *gitprovider.Reconciler, lo
 		if err != nil {
 			log.Error("git reconciliation: pass failed (retried next tick)",
 				"error", config.RedactForOutput(err.Error()))
+			// A failed pass has read no state, so it records the failure and
+			// leaves the open-findings gauge at its last real value; setting
+			// it to 0 here would clear the P1 drift alert during exactly the
+			// outage that may have caused the drift.
+			observability.Default().ObserveReconciliationFailure()
 			return
 		}
 		attrs := []any{
@@ -58,6 +64,12 @@ func runReconciliationSweep(ctx context.Context, rec *gitprovider.Reconciler, lo
 			attrs = append(attrs, "provider_error", config.RedactForOutput(sum.ProviderError))
 		}
 		log.Info("git reconciliation: pass complete", attrs...)
+		// The same numbers the log line carries, as a metric (docs/26 §3
+		// "RSG reconciliation drift"). The open-findings gauge is what the
+		// P1 drift alert reads: docs/16 §5 says ANY drift is high severity,
+		// so a non-zero open count is the condition, not a trend.
+		observability.Default().ObserveReconciliation(
+			observability.ReconcileOutcomeOK, sum.RefsChecked, sum.FindingsOpened, sum.FindingsResolved, sum.FindingsOpen)
 		if sum.FindingsOpened > 0 {
 			log.Error("git reconciliation: drift detected — high-severity findings recorded (repair proposals NOT applied)",
 				"opened", sum.FindingsOpened, "run_id", sum.RunID)

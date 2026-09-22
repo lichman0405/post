@@ -1379,8 +1379,22 @@ func run(args []string) int {
 		},
 	})
 	searchAPI.Register(v1)
-	mux.Handle("/api/v1/", authAPI.Guard(v1))
+	// RecordRoute wraps the product mux so the route that matched reaches the
+	// request metrics. It is needed exactly here: the guard between the two
+	// muxes rebuilds the request to attach the principal, so the pattern the
+	// inner mux writes lands on a copy the middleware never sees (route.go).
+	mux.Handle("/api/v1/", authAPI.Guard(observability.RecordRoute(v1)))
 
+	// Metrics (T1109, docs/26 §3): the scrape-time sources are registered
+	// here, at the composition root, because each one needs a dependency
+	// this function owns. A failure to register is fatal and NOT swallowed:
+	// the endpoint is the deliverable, and an API that starts with a family
+	// missing from /metrics would answer 200 while measuring less than it
+	// claims to.
+	if err := registerAPIMetrics(observability.Default(), pool, scaffoldQueue, provisioningQueue); err != nil {
+		slog.Error("post-api: metrics registration failed", "error", err)
+		return exitRuntime
+	}
 	// The edge chain, outermost first (T1106):
 	//   1. security.Headers stamps the secure response-header set on every
 	//      response — including the ones the limiter refuses below, so a
@@ -1400,9 +1414,18 @@ func run(args []string) int {
 			security.RateLimit(rateLimiter, *securityCfg)(mux)))
 	slog.Info("post-api: edge rate limiting active", "policy", securityCfg.Describe())
 
+	// The scrape endpoint sits on its own mux, outside the request middleware
+	// (see metricsHandler): a scrape is not product traffic and must not be
+	// counted as it. The product tree is handed T1106's chain — not the bare
+	// mux — so every product response still carries the secure header set and
+	// the coarse rate-limit budget.
+	root := http.NewServeMux()
+	root.Handle("GET /metrics", metricsHandler(observability.Default()))
+	root.Handle("/", handler)
+
 	srv := &http.Server{
 		Addr:              cfg.Server.Addr,
-		Handler:           handler,
+		Handler:           root,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

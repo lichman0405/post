@@ -12,6 +12,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
+	"github.com/lichman0405/post/internal/observability"
 	"github.com/lichman0405/post/internal/search"
 )
 
@@ -186,6 +187,7 @@ func (p *Planner) Plan(ctx context.Context, scope search.Scope, req Request) (Pl
 		// "the schema said yes" is not a reason to trust an unchecked decode.
 		return p.fallback(ctx, scope, req, ReasonInvalidPlan, err), nil
 	}
+	observability.Default().ObservePlannerPlanned()
 	return Plan{Status: StatusPlanned, Query: req.Query, Document: &decoded}, nil
 }
 
@@ -193,6 +195,11 @@ func (p *Planner) Plan(ctx context.Context, scope search.Scope, req Request) (Pl
 // for every provider-shaped failure, so a new failure mode cannot be added
 // without a reason to name it.
 func (p *Planner) fallback(ctx context.Context, scope search.Scope, req Request, reason Reason, cause error) Plan {
+	// The counter Reason's closed set was declared for: "It is a closed set
+	// so the fallback rate can be counted per cause" (plan.go). Counting
+	// here, at the single exit, is what makes that comment true — a cause
+	// added anywhere else cannot reach a plan without passing this line.
+	observability.Default().ObservePlannerFallback(string(reason))
 	p.log.WarnContext(ctx, "search planning fell back to structured results",
 		slog.String("reason", string(reason)),
 		slog.String("actor_id", scope.ActorID()),

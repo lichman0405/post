@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/lichman0405/post/internal/observability"
 )
 
 // Job is one queued unit of work. ID is the idempotency key (docs/52 §17):
@@ -125,6 +127,12 @@ func (l *Loop) Run(ctx context.Context) error {
 			}
 			// Redis unreachable: keep the process alive and retry.
 			l.log.Error("worker: queue read failed", "error", err)
+			// The counter beside the log line: this is the family that moves
+			// when Redis disappears (docs/26 §3 queue failures), and it is
+			// what the queue alert in ops/observability/alerts.yml fires on.
+			// The queue's DEPTH cannot serve that purpose — Depth() reads
+			// the same down server and fails with it.
+			observability.Default().ObserveQueueError("read")
 			if !sleep(ctx, time.Second) {
 				return nil
 			}
@@ -163,6 +171,7 @@ func (l *Loop) process(ctx context.Context, job Job, raw string) {
 		log.Error("worker: unknown job type; dead-lettering")
 		job.Attempts++
 		job.Error = "unknown job type: no handler registered"
+		observability.Default().ObserveQueueJob("dead_lettered")
 		l.deadLetter(ctx, job, raw)
 		return
 	}
@@ -182,6 +191,7 @@ func (l *Loop) process(ctx context.Context, job Job, raw string) {
 			log.Error("worker: idempotency mark failed after completion", "error", err)
 		}
 		log.Info("worker: job completed")
+		observability.Default().ObserveQueueJob("completed")
 		l.ack(ctx, job, raw)
 		return
 	}
@@ -191,9 +201,11 @@ func (l *Loop) process(ctx context.Context, job Job, raw string) {
 	if job.Attempts >= l.maxAttempts {
 		log.Error("worker: job failed permanently; dead-lettering", "error", err)
 		job.Error = err.Error()
+		observability.Default().ObserveQueueJob("dead_lettered")
 		l.deadLetter(ctx, job, raw)
 		return
 	}
+	observability.Default().ObserveQueueJob("retried")
 	retryIn := l.backoffFor(job.Attempts)
 	log.Warn("worker: job failed; scheduling retry", "error", err, "retry_in", retryIn)
 	if !sleep(ctx, retryIn) {
