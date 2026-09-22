@@ -1,0 +1,8 @@
+# The other citation form the exemption file's header names: a circled entry in
+# tasks/decisions.md.
+version: 1
+exemptions:
+  - method: GET
+    path: /api/v1/alpha
+    decision: tasks/decisions.md ㉚
+    reason: fixture entry cited to a decisions.md entry

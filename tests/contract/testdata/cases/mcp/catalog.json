@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "tools": [
+    {"name": "alpha.one", "mode": "read", "args": ["project_id"]},
+    {"name": "alpha.two", "mode": "write", "args": ["project_id", "branch_id"]},
+    {"name": "alpha.three", "mode": "read", "args": []}
+  ]
+}

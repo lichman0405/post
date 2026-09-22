@@ -1,0 +1,9 @@
+openapi: 3.1.0
+info: {title: fixture, version: 0.0.0}
+servers:
+  - url: /api/v1
+paths:
+  /projects/{projectId}/pull-requests:
+    post:
+      summary: open a pull request (the real registration is absent from this tree)
+      responses: {'200': {description: OK}}

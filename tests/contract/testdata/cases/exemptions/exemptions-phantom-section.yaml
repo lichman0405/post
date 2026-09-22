@@ -1,0 +1,7 @@
+# A citation that names a real file but a section that does not exist in it.
+version: 1
+exemptions:
+  - method: GET
+    path: /api/v1/alpha
+    decision: docs/22_API_DESIGN.md §99
+    reason: cite a section that is not there

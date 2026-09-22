@@ -1,0 +1,8 @@
+# The citation names a section of a fixture doc that really exists under this
+# case's root — the resolver checks the text, not the spelling.
+version: 1
+exemptions:
+  - method: GET
+    path: /api/v1/alpha
+    decision: docs/22_API_DESIGN.md §3
+    reason: fixture entry cited to a section that exists
