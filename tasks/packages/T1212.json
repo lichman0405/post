@@ -1,0 +1,63 @@
+{
+  "id": "T1212",
+  "phase": "P12",
+  "phase_name": "Canonical Workflow 与最终交付",
+  "title": "让「需要真库」的 e2e 测试在 CI 里不再静默跳过（把跳过变成可判的失败）",
+  "v1_required": false,
+  "dependencies": [
+    "T0101",
+    "T0104",
+    "T0203",
+    "T0205",
+    "T0207",
+    "T0208"
+  ],
+  "requirements": [
+    "**先自己复跑现状，别照抄我的话。** 我核过的形状（你去树里再核一遍，不一致以树为准并写进 RESULT）：`tests/e2e` 里**大多数**测试是进程内的（`httptest` + `miniredis` + `memstore`，见 `tests/e2e/auth_e2e_test.go:46` 的 `newE2EEnv`），**只有两个**要真 PostgreSQL——`tests/e2e/conflict_e2e_test.go:107`（冲突解决旅程）与 `tests/e2e/discussion_promote_e2e_test.go:112`（话题升格）——它们在库不可达时 `t.Skipf`。而 CI 的 `go` job **没有数据库**（`.github/workflows/ci.yml` 那条 `go test $(go list ./... | grep -v '/tests/integration')` **包含** `./tests/e2e`），带库的 `migration-integration` job 只跑 `make test-integration`（即 `./tests/integration`，**不含** `./tests/e2e`）。**所以这两个旅程在 CI 里从来没有跑过，而且跳过是静默的**（没有 `-v` 时 `go test` 只印 `ok`）。",
+    "**把「跳过」变成可判的失败（本任务的正题）。** 加一条**共享判据**：环境变量 `POST_REQUIRE_E2E_DB=1` 且库不可达时，走 `t.Fatalf` 而不是 `t.Skipf`，消息里要**指名**是哪个测试、它要连的 DSN、以及「这个环境声明了必须有库」这个事实；变量**未设时行为一字不变**（仍然是 `t.Skipf`，本机没起库的人照旧能跑其余测试）。两个调用点（`conflict_e2e_test.go`、`discussion_promote_e2e_test.go`）都要**经由这条判据**，不许各自复制一份 `if os.Getenv(...)`。放哪一层由你定（`internal/persistence/testdb` 是这两个测试已经在用的共享包，见 `tests/e2e/main_test.go` 的 `testdb.Main`），但要在 RESULT 里说明为什么选那里。",
+    "**证明这条判据能红（仓库惯例：每道守卫都要有一个能证明它会红的测试）。** 加一个**不依赖任何数据库**的测试：把 DSN 指到一个**死端口**、置 `POST_REQUIRE_E2E_DB=1`，断言拿到的是**失败**（而不是 skip），并断言消息里含变量名与 DSN；同一段代码在变量未设时**仍然是 skip**。两条都要有输出。",
+    "**顺手把 CI 侧该做什么写清楚（那半是我改，不是你改）。** 在 RESULT 里给出**逐字可粘贴**的两条：① 给带库 job 加的那一步（形如 `POST_REQUIRE_E2E_DB=1 go test ./tests/e2e -count=1`，与它需要的环境变量）；② 没有库的那个 job 该怎么把 `./tests/e2e` 从它的包列表里摘掉（今天它是被 `grep -v '/tests/integration'` 顺带带进去的）。**不要**去改 `.github/workflows/**` 或 `specs/**`（那是我的面，且 `gates.json` 与 `ci.yml` 的步骤必须逐步一致，改一处要两处一起走）。",
+    "**不许弱化任何断言**：不许把现有的 `t.Skipf` 直接删掉换成「永远红」（那会让本机没起库的人连其余测试都跑不了），不许放宽任何既有判据，不许给测试加 `-short` 之外的跳过条件。**默认（变量未设）行为必须与本任务之前逐字相同**。",
+    "**不许碰产品代码的行为**：`internal/persistence/testdb` 是测试支撑包，除这条判据外不许改它的语义；`internal/**` 的其它包、`cmd/**`、`apps/**`、`services/**`、`infra/**` 一行都不许动。"
+  ],
+  "deliverables": [
+    "共享判据（`POST_REQUIRE_E2E_DB`）的实现，以及两个需要真库的 e2e 测试改走它。",
+    "一个证明该判据**能红**、且在变量未设时**仍是 skip** 的测试（含两份输出）。",
+    "RESULT：现状复核、实现位置与理由、红/绿两种输出、给 Supervisor 的两条 CI 命令逐字文本，以及任何你判不准的项。"
+  ],
+  "acceptance_criteria": [
+    "**仪器能说不**：把 DSN 指向死端口并置 `POST_REQUIRE_E2E_DB=1` 时那两个旅程**失败**且消息指名 DSN 与变量；变量未设时**仍然跳过**。两次输出都留在 RESULT 里。",
+    "本机带库时 `go test ./tests/e2e -count=1 -v` **没有 SKIP**（两个旅程真的跑了，逐条列出它们的 `--- PASS`），退出码 0。",
+    "`POST_REQUIRE_E2E_DB` 这个变量名在树里只出现在**一处实现**里（调用点只用它，不各自读环境）。",
+    "现有测试一条都不许因此变红：`go test ./tests/e2e/... ./internal/persistence/testdb/... -count=1` 退出码 0。",
+    "`git status --porcelain -uall` 里的路径**全部**落在 `tests/e2e/**`、`internal/persistence/testdb/**` 之内；`.github/**`、`specs/**`、`tasks/**`、`cmd/**`、`apps/**`、`services/**`、`infra/**` **零改动**。"
+  ],
+  "tests": [
+    "e2e db guard",
+    "e2e suite"
+  ],
+  "allowed_scope": [
+    "tests/e2e/**",
+    "internal/persistence/testdb/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "specs/**",
+    "docs/**",
+    ".github/**",
+    "cmd/**",
+    "apps/**",
+    "services/**",
+    "infra/**",
+    "scripts/**"
+  ],
+  "decision_level_max": "L1",
+  "relevant_specs": [
+    "docs/67_TEST_GATES.md",
+    "docs/25_CICD_DEVOPS.md"
+  ],
+  "scope_note": "这一笔来自我自己的空窗待办清单（`tasks/window-queue.md` 的 B 条，2026-09-19 记），今天核过仍然成立，但比当时的描述**窄**：进程内的 e2e 测试在 CI 里是真跑的，**只有两个需要真库的旅程**在静默跳过。`v1_required=false`：V1 证书不依赖它，四层 Gate 的定义也不因此改变——它改的是「CI 里那两个旅程到底跑没跑」这件事的**可判性**。CI 那一半（`.github/workflows/ci.yml` 与 `specs/orchestrator/gates.json` 的步骤锁步）由 Supervisor 在合并前后来接，理由同 T1209：作业步骤两处必须逐步一致，改一处会让 `TestCIWorkflowMatchesGateSpec` 红。**依赖那六条（`T0101/T0104/T0203/T0205/T0207/T0208`）不是我随手写的**：本任务的 G3 作业是 `rsg-real-services`，而该作业的 `requires_tasks` 正是这六条——`gate_spec_test.go` 会拒一个「G3 断言了不在自己依赖里的任务」的任务（原文：the gate is red by construction），这六条与 T1205 当初承载同一作业时的写法逐字相同，且都已合并，所以不改变可派工性。",
+  "supervisor_scope_narrowing": "**为什么 `internal/persistence/testdb/**` 在范围里**：那两个旅程的库是由这个包起的（`testdb.Setup` 会 `t.Fatalf`，而**跳过**发生在此之前的两次 `pgReachable` 探测里），判据只有放在实现跳过的那一层才只有一份；把它复制到 `tests/e2e` 里会变成两处各自演化。**为什么 `scripts/**` 在禁止面**：那里是验收仪器本身（`record_test_run.py` / `validate_specs.py` / `spec_version.py`），让被验收者改卷子等于让考生改分——同一口径已用在 T1206/T1208/T1211。**为什么 `.github/**` 与 `specs/**` 也在禁止面**：CI 作业的两个副本（`ci.yml` 与 `gates.json`）必须由同一个人在同一笔里改，这是 T1104 那次接线踩出来的规矩（漏一处 = 有一个 job 永远不被 `G2.runs_jobs` 跑）。"
+}

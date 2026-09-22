@@ -367,11 +367,11 @@
           "run": "pip install uv"
         },
         {
-          "name": "security-master: redis-cli — the owasp-smoke row resets and reads back its own edge counters through it before measuring the rate-limit boundary",
+          "name": "security-master: redis-cli \u2014 the owasp-smoke row resets and reads back its own edge counters through it before measuring the rate-limit boundary",
           "run": "sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools"
         },
         {
-          "name": "security-master: PyYAML — the deploy-template row's validator parses the staging compose file as YAML (the same install the spec-validation job does)",
+          "name": "security-master: PyYAML \u2014 the deploy-template row's validator parses the staging compose file as YAML (the same install the spec-validation job does)",
           "run": "pip install pyyaml"
         },
         {
@@ -1153,6 +1153,21 @@
     "T1209": {
       "g3_jobs": [
         "security-master"
+      ]
+    },
+    "T1210": {
+      "g3_jobs": [
+        "mof-canonical"
+      ]
+    },
+    "T1211": {
+      "g3_jobs": [
+        "security-smoke"
+      ]
+    },
+    "T1212": {
+      "g3_jobs": [
+        "rsg-real-services"
       ]
     }
   }

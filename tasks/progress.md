@@ -3219,9 +3219,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-22T21:49:14Z
+生成时间：2026-09-22T22:13:29Z
 
-状态分布：todo 0 · ready 0 · running 0 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 151（合计 151/151 个任务）
+状态分布：todo 3 · ready 0 · running 0 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 151（合计 154/154 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -3376,5 +3376,8 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1207 | V1 最终验收与交付报告 | P12 | merged | 2026-09-22T19:18:34Z |  | 2026-09-22T19:56:05Z | 2026-09-22T20:09:19Z |
 | T1208 | 完整 Project 可移植导出 | P12 | merged | 2026-09-21T23:36:20Z |  | 2026-09-22T00:22:22Z | 2026-09-22T00:44:18Z |
 | T1209 | SAST 与 SBOM：把 docs/23 §11 / docs/25 第 9–10 条缺的两面补进总门 | P12 | merged | 2026-09-22T20:52:22Z |  | 2026-09-22T21:30:02Z | 2026-09-22T21:44:28Z |
+| T1210 | 在最终基准上重新生成 V1 总验收报告（并把复核的五条意见逐条处置） | P12 | todo |  |  |  |  |
+| T1211 | 安全仪器自己的欠账：T1209 复核 findings 与风险的逐条处置 | P12 | todo |  |  |  |  |
+| T1212 | 让「需要真库」的 e2e 测试在 CI 里不再静默跳过（把跳过变成可判的失败） | P12 | todo |  |  |  |  |
 
 <!-- AUTO-PROGRESS:END -->

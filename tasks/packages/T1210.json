@@ -1,0 +1,62 @@
+{
+  "id": "T1210",
+  "phase": "P12",
+  "phase_name": "Canonical Workflow 与最终交付",
+  "title": "在最终基准上重新生成 V1 总验收报告（并把复核的五条意见逐条处置）",
+  "v1_required": false,
+  "dependencies": [
+    "T1209",
+    "T1207"
+  ],
+  "requirements": [
+    "**先读再写，别照抄我的话。** 要读的四处：`tests/acceptance/v1-final-report.md`（证书本体）、`tests/acceptance/v1-final-audit.sh`（校验它的快照校验器）、`tasks/decisions.md`（㊲/㊳ 与 T1209 的落地记录 ㊷）、`.rddev/workers/T1207-review/RESULT.json`（第五轮独立复核的五条意见）。**本任务书里的每个数字都是「当时的树」上的，你自己去树上数一遍**；数与我说不一样以树为准，并在 RESULT 里写明差异。",
+    "**数字一律机械化，不许手写。** `bash tests/acceptance/v1-final-audit.sh --emit-tables` 的产物（生成注释行、生成基准行、§1.2/§1.3 两张表、计数块）**逐字**贴进报告；基准行是**这次运行那棵树**的真实 HEAD。手写的名单骗得过条数检查、骗不过第 4 节的名单检查；手写的计数块骗不过第 3 节的计数块校验——这正是脚本存在的理由，别绕过它。",
+    "**把 T1209 的落地写进判定（判定半边必须自己从树里读出来）。** 报告里今天的 R10 写的是「**SAST、容器扫描、SBOM 三项缺席**」，这句在新树上不再成立：SAST 与 SBOM 已经是总门里的**实检行**（`sast-go`/`sast-python`/`sast-node`、`sbom-go`/`sbom-node`/`sbom-python`、`license-audit`），容器扫描是**有守卫的缺席**（无容器构建文件时绿、出现即红）并且有 `docs/adr/ADR-028-*.md` 那份**书面风险接受**。**这句话在 `v1-final-audit.sh` 里被钉成了强制标记**（`require_marker \"SAST、容器扫描、SBOM 三项缺席\"`）——报告与脚本必须**同轮一起改**，标记的新措辞要能承载「两条已有行 + 一条有守卫的缺席 + 一份 ADR」这个新事实，而不是把句子删掉了事。Gate H 也按新证据重判：**真跑一遍**总门，逐字引它的退出码、`MIN_CHECKS` 的新值、以及 `absence-manifest` 那一行的证据行。",
+    "**第五轮复核的五条意见逐条处置**（先到 `.rddev/workers/T1207-review/RESULT.json` 核对原文，下面是摘要，不是替代品）：\n   a. §0 的「四条 L3」漏了一条（㊳ 记的那条）→ 改成五条并写上第 ④ 条。\n   b. Gate H 判「未通过」，而同一份报告里 H1 那一行单独写「通过」→ 该行的判定要带上「扫描面之外仍有缺席」这一类限定（或改判），**§5 的统计随之重算**——判定与统计必须一致。\n   c. `CLAUDE.md` 第 12 节的四个完成条件里「**四层 Gate 通过**」今天只散落在 S6/H5/R2/Gate I 几处 → 给它自己的块：逐层给出权威与「绿记在哪」（`specs/orchestrator/gates.json` 的 G1–G4、`.rddev/runtime/gates/` 下的记录）。\n   d. `v1-final-audit.sh` 里**两处**数字检查只取第一处匹配（`grep … | head -n1`）→ 照分布那条（同一脚本里已经写好的修法）收**全部**匹配并要求集合唯一。这是变异 M8 逃逸那一类的通用修法：说对一次不算数，得每一处都说对。\n   e. 复核员建议的新断言：**`passed` 行必须带 evidence**——直接数台账（`tasks/tests.json`），空 evidence 的 `passed` 条数必须为 0，把这条件钉进脚本；台账是只读的，你只数不改。",
+    "**仪器能说不（先做这一步）。** 至少四处各证伪一次，确认转红，然后把红绿两次输出都留在 RESULT 里：① 单点改一处分布句；② 改 §0 的 L3 条数；③ 改 H1 行的判定；④ 造一条空 evidence 的 `passed`（在**副本**上造，别动台账本体）。**改完必须还原并复测干净**——这一条与 T1209 那次返工的成因同类：仪器红在一台坏掉的仪器上，不是红在被测的东西上。",
+    "**不许碰台账与测试。** `tasks/**` 只读（**一个 `status` 都不许改**、`tasks/tests.json` 不许写）；`tests/**` 之外零改动——包括 `docs/**`、`specs/**`、`.github/**`、产品代码。**不许为了让判定变绿改判据、放宽断言、放大超时**；报告是对某一棵树的证书，快照校验器不是提示器。报告仍落 `tests/acceptance/`，文件名不变（何时进 `docs/` 由我定）。"
+  ],
+  "deliverables": [
+    "`tests/acceptance/v1-final-report.md` 的重生成版本：基准行、§1.2/§1.3 两张表、计数块全部来自 `--emit-tables`；R10 与 Gate H 按新树重判；§0 的五条 L3；「四层 Gate 通过」的独立块；§5 统计与判定一致。",
+    "`tests/acceptance/v1-final-audit.sh` 的更正：新标记措辞、两处 `head -n1` 收成集合唯一检查、以及「空 evidence 的 `passed` 必须为 0」这条新断言。",
+    "四处变异的红/绿实测输出。",
+    "RESULT：`--emit-tables` 的生成命令与贴入的行；总门实跑的命令、退出码与证据行原文；五条意见逐条「改了什么、在第几行、怎么证明」；以及任何你判不准、决定照实报的项。"
+  ],
+  "acceptance_criteria": [
+    "在**新的** HEAD 上 `bash tests/acceptance/v1-final-audit.sh` **退出码 0**，打印 `EXCLUDED=…`、`V1_REQUIRED_UNMERGED_COUNT=0`、`BLOCKING_NOT_RUN_COUNT=…` 与计数块，且与台账逐字一致。",
+    "报告里出现的每一处分布句式、每一张名单表、基准行都由 `--emit-tables` 生成：RESULT 给出生成命令，并把贴入的行**逐行对照**出来。",
+    "R10 与 Gate H 的新判定与树里的事实逐条对得上：总门实跑（**不带 `--allow-not-asked`**）退出码 0、`MIN_CHECKS` 的新值、`absence-manifest` 的证据行、`docs/adr/ADR-028-*.md` 的存在与它引用的守卫行名。",
+    "五条复核意见逐条处置完毕，每条给出「改了什么、在第几行、怎么证明」；其中 (d) 要求脚本里**不再有**只取第一处匹配的数字检查。",
+    "四处变异全部转红，且每次改完都已还原：RESULT 里同时有红绿两份输出。",
+    "`git status --porcelain -uall` 里的路径**全部**落在 `tests/acceptance/**` 之内；`tasks/**`、`docs/**`、`specs/**`、`.github/**`、`cmd/**`、`internal/**`、`apps/**`、`services/**`、`infra/**` **零改动**。"
+  ],
+  "tests": [
+    "v1 final audit",
+    "acceptance report markers"
+  ],
+  "allowed_scope": [
+    "tests/acceptance/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "specs/**",
+    "docs/**",
+    ".github/**",
+    "cmd/**",
+    "internal/**",
+    "apps/**",
+    "services/**",
+    "infra/**"
+  ],
+  "decision_level_max": "L1",
+  "relevant_specs": [
+    "docs/31_MASTER_ACCEPTANCE.md",
+    "docs/67_TEST_GATES.md",
+    "docs/23_SECURITY_PRIVACY.md",
+    "docs/25_CICD_DEVOPS.md"
+  ],
+  "scope_note": "`v1_required` 为 **false** 是刻意的，理由写进 `tasks/decisions.md`：这是**证书的刷新**，不是产品交付。若它也标 `v1_required=true`，报告就会在同一棵树里不得不具名排除「正在写证书的自己」——排除名单每刷新一次就长一节，那不是严格，是记账技巧。依赖里同时钉 `T1207`（证书的前一版，第五轮复核的意见来自它）与 `T1209`（本次要写进判定的那笔安全门落地）。**G3 给的是 `mof-canonical`**：证书里最吃重的跨边界断言是 Gate I（MOF canonical workflow 全闭环），它必须在**承载这份证书的那棵树上重新挣得**，而不是引用一条更早的记录。（安全门那一半由 `security-master` 作业负责，它已经是必需 CI 作业、也在 G2 的 `runs_jobs` 里，所以不再重复列为 G3。）",
+  "supervisor_scope_narrowing": "**为什么只给 `tests/acceptance/**`**：这一笔的产物就是那两份文件（报告 + 校验器），它们是**同一件东西的正反面**——报告写什么，校验器就得能验什么；给两份文件以外的任何写入面都会让「证书」与「被证之物」之间的边界糊掉。**为什么 `docs/**` 不在范围里**：`docs/31_MASTER_ACCEPTANCE.md` 是**规格**（判据的来源），报告是**对规格的答复**；允许被验收者改规格等于让考生改卷子，同一口径已用在 T1206/T1208/T1211 上。**为什么 `tasks/**` 连只读也要写进禁止面**：校验器要**读**台账（数条数、数空 evidence），读是必须的，写是越界的——把这一条写明白，是为了让「我数了一下」与「我改了一下」在 diff 里泾渭分明。"
+}

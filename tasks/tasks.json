@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 151,
+  "task_count": 154,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -8632,6 +8632,201 @@
         "docs/24_TEST_STRATEGY.md"
       ],
       "scope_note": "**`scripts/**` 不给**（沿用 T1206 第六次修订的收窄）：被记录的门不该攥着笔——`scripts/record_test_run.py` 就在那里，写它等于能改证据。你只**运行**它、把调用形状写进 RESULT。\n\n**`tests/security/**` + `ops/**` + `Makefile` + `.gitignore` 是你需要的全部**：新行与新工具脚本放 `tests/security/`；缺席清单与 allowlist 放 `ops/security/`；钉版本与本地目标放 `Makefile`；SBOM 产物目录进 `.gitignore`。\n\n**`.github/**` 与 `specs/orchestrator/gates.json` 明确禁止**：CI 的 job 清单、`required_jobs`、`G2.runs_jobs`、`G4.asserts_jobs` 必须四处一致（少一处就有 job 不被跑），那是 Supervisor 的收尾动作。你只要让新行在本地可跑、可红，并给出建议挂哪个 job。"
+    },
+    {
+      "id": "T1210",
+      "phase": "P12",
+      "phase_name": "Canonical Workflow 与最终交付",
+      "title": "在最终基准上重新生成 V1 总验收报告（并把复核的五条意见逐条处置）",
+      "v1_required": false,
+      "dependencies": [
+        "T1209",
+        "T1207"
+      ],
+      "requirements": [
+        "**先读再写，别照抄我的话。** 要读的四处：`tests/acceptance/v1-final-report.md`（证书本体）、`tests/acceptance/v1-final-audit.sh`（校验它的快照校验器）、`tasks/decisions.md`（㊲/㊳ 与 T1209 的落地记录 ㊷）、`.rddev/workers/T1207-review/RESULT.json`（第五轮独立复核的五条意见）。**本任务书里的每个数字都是「当时的树」上的，你自己去树上数一遍**；数与我说不一样以树为准，并在 RESULT 里写明差异。",
+        "**数字一律机械化，不许手写。** `bash tests/acceptance/v1-final-audit.sh --emit-tables` 的产物（生成注释行、生成基准行、§1.2/§1.3 两张表、计数块）**逐字**贴进报告；基准行是**这次运行那棵树**的真实 HEAD。手写的名单骗得过条数检查、骗不过第 4 节的名单检查；手写的计数块骗不过第 3 节的计数块校验——这正是脚本存在的理由，别绕过它。",
+        "**把 T1209 的落地写进判定（判定半边必须自己从树里读出来）。** 报告里今天的 R10 写的是「**SAST、容器扫描、SBOM 三项缺席**」，这句在新树上不再成立：SAST 与 SBOM 已经是总门里的**实检行**（`sast-go`/`sast-python`/`sast-node`、`sbom-go`/`sbom-node`/`sbom-python`、`license-audit`），容器扫描是**有守卫的缺席**（无容器构建文件时绿、出现即红）并且有 `docs/adr/ADR-028-*.md` 那份**书面风险接受**。**这句话在 `v1-final-audit.sh` 里被钉成了强制标记**（`require_marker \"SAST、容器扫描、SBOM 三项缺席\"`）——报告与脚本必须**同轮一起改**，标记的新措辞要能承载「两条已有行 + 一条有守卫的缺席 + 一份 ADR」这个新事实，而不是把句子删掉了事。Gate H 也按新证据重判：**真跑一遍**总门，逐字引它的退出码、`MIN_CHECKS` 的新值、以及 `absence-manifest` 那一行的证据行。",
+        "**第五轮复核的五条意见逐条处置**（先到 `.rddev/workers/T1207-review/RESULT.json` 核对原文，下面是摘要，不是替代品）：\n   a. §0 的「四条 L3」漏了一条（㊳ 记的那条）→ 改成五条并写上第 ④ 条。\n   b. Gate H 判「未通过」，而同一份报告里 H1 那一行单独写「通过」→ 该行的判定要带上「扫描面之外仍有缺席」这一类限定（或改判），**§5 的统计随之重算**——判定与统计必须一致。\n   c. `CLAUDE.md` 第 12 节的四个完成条件里「**四层 Gate 通过**」今天只散落在 S6/H5/R2/Gate I 几处 → 给它自己的块：逐层给出权威与「绿记在哪」（`specs/orchestrator/gates.json` 的 G1–G4、`.rddev/runtime/gates/` 下的记录）。\n   d. `v1-final-audit.sh` 里**两处**数字检查只取第一处匹配（`grep … | head -n1`）→ 照分布那条（同一脚本里已经写好的修法）收**全部**匹配并要求集合唯一。这是变异 M8 逃逸那一类的通用修法：说对一次不算数，得每一处都说对。\n   e. 复核员建议的新断言：**`passed` 行必须带 evidence**——直接数台账（`tasks/tests.json`），空 evidence 的 `passed` 条数必须为 0，把这条件钉进脚本；台账是只读的，你只数不改。",
+        "**仪器能说不（先做这一步）。** 至少四处各证伪一次，确认转红，然后把红绿两次输出都留在 RESULT 里：① 单点改一处分布句；② 改 §0 的 L3 条数；③ 改 H1 行的判定；④ 造一条空 evidence 的 `passed`（在**副本**上造，别动台账本体）。**改完必须还原并复测干净**——这一条与 T1209 那次返工的成因同类：仪器红在一台坏掉的仪器上，不是红在被测的东西上。",
+        "**不许碰台账与测试。** `tasks/**` 只读（**一个 `status` 都不许改**、`tasks/tests.json` 不许写）；`tests/**` 之外零改动——包括 `docs/**`、`specs/**`、`.github/**`、产品代码。**不许为了让判定变绿改判据、放宽断言、放大超时**；报告是对某一棵树的证书，快照校验器不是提示器。报告仍落 `tests/acceptance/`，文件名不变（何时进 `docs/` 由我定）。"
+      ],
+      "deliverables": [
+        "`tests/acceptance/v1-final-report.md` 的重生成版本：基准行、§1.2/§1.3 两张表、计数块全部来自 `--emit-tables`；R10 与 Gate H 按新树重判；§0 的五条 L3；「四层 Gate 通过」的独立块；§5 统计与判定一致。",
+        "`tests/acceptance/v1-final-audit.sh` 的更正：新标记措辞、两处 `head -n1` 收成集合唯一检查、以及「空 evidence 的 `passed` 必须为 0」这条新断言。",
+        "四处变异的红/绿实测输出。",
+        "RESULT：`--emit-tables` 的生成命令与贴入的行；总门实跑的命令、退出码与证据行原文；五条意见逐条「改了什么、在第几行、怎么证明」；以及任何你判不准、决定照实报的项。"
+      ],
+      "acceptance_criteria": [
+        "在**新的** HEAD 上 `bash tests/acceptance/v1-final-audit.sh` **退出码 0**，打印 `EXCLUDED=…`、`V1_REQUIRED_UNMERGED_COUNT=0`、`BLOCKING_NOT_RUN_COUNT=…` 与计数块，且与台账逐字一致。",
+        "报告里出现的每一处分布句式、每一张名单表、基准行都由 `--emit-tables` 生成：RESULT 给出生成命令，并把贴入的行**逐行对照**出来。",
+        "R10 与 Gate H 的新判定与树里的事实逐条对得上：总门实跑（**不带 `--allow-not-asked`**）退出码 0、`MIN_CHECKS` 的新值、`absence-manifest` 的证据行、`docs/adr/ADR-028-*.md` 的存在与它引用的守卫行名。",
+        "五条复核意见逐条处置完毕，每条给出「改了什么、在第几行、怎么证明」；其中 (d) 要求脚本里**不再有**只取第一处匹配的数字检查。",
+        "四处变异全部转红，且每次改完都已还原：RESULT 里同时有红绿两份输出。",
+        "`git status --porcelain -uall` 里的路径**全部**落在 `tests/acceptance/**` 之内；`tasks/**`、`docs/**`、`specs/**`、`.github/**`、`cmd/**`、`internal/**`、`apps/**`、`services/**`、`infra/**` **零改动**。"
+      ],
+      "tests": [
+        "v1 final audit",
+        "acceptance report markers"
+      ],
+      "allowed_scope": [
+        "tests/acceptance/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "cmd/**",
+        "internal/**",
+        "apps/**",
+        "services/**",
+        "infra/**"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/31_MASTER_ACCEPTANCE.md",
+        "docs/67_TEST_GATES.md",
+        "docs/23_SECURITY_PRIVACY.md",
+        "docs/25_CICD_DEVOPS.md"
+      ],
+      "scope_note": "`v1_required` 为 **false** 是刻意的，理由写进 `tasks/decisions.md`：这是**证书的刷新**，不是产品交付。若它也标 `v1_required=true`，报告就会在同一棵树里不得不具名排除「正在写证书的自己」——排除名单每刷新一次就长一节，那不是严格，是记账技巧。依赖里同时钉 `T1207`（证书的前一版，第五轮复核的意见来自它）与 `T1209`（本次要写进判定的那笔安全门落地）。**G3 给的是 `mof-canonical`**：证书里最吃重的跨边界断言是 Gate I（MOF canonical workflow 全闭环），它必须在**承载这份证书的那棵树上重新挣得**，而不是引用一条更早的记录。（安全门那一半由 `security-master` 作业负责，它已经是必需 CI 作业、也在 G2 的 `runs_jobs` 里，所以不再重复列为 G3。）",
+      "supervisor_scope_narrowing": "**为什么只给 `tests/acceptance/**`**：这一笔的产物就是那两份文件（报告 + 校验器），它们是**同一件东西的正反面**——报告写什么，校验器就得能验什么；给两份文件以外的任何写入面都会让「证书」与「被证之物」之间的边界糊掉。**为什么 `docs/**` 不在范围里**：`docs/31_MASTER_ACCEPTANCE.md` 是**规格**（判据的来源），报告是**对规格的答复**；允许被验收者改规格等于让考生改卷子，同一口径已用在 T1206/T1208/T1211 上。**为什么 `tasks/**` 连只读也要写进禁止面**：校验器要**读**台账（数条数、数空 evidence），读是必须的，写是越界的——把这一条写明白，是为了让「我数了一下」与「我改了一下」在 diff 里泾渭分明。"
+    },
+    {
+      "id": "T1211",
+      "phase": "P12",
+      "phase_name": "Canonical Workflow 与最终交付",
+      "title": "安全仪器自己的欠账：T1209 复核 findings 与风险的逐条处置",
+      "v1_required": false,
+      "dependencies": [
+        "T1209"
+      ],
+      "requirements": [
+        "**先自己复跑现状，别照抄我的话。** 这一笔全部落在 T1209 造的那套仪器里（总门、八条新行、安装脚本、清单文件），**不是产品缺陷**：产品面一行都不许动。下面十条每一条都给了出处，**先到树里核一遍再动手**；核出来与我说的不一样，以树为准并在 RESULT 里写明（我自己的账里就写错过引用）。",
+        "**licence 政策的三处文字必须说同一件事。** 今天的形状（我核过）：`ops/security/license-allowlist.json` 的 `policy.no_licence` 写「RED unless it is named in `unlicensed` with a reason, **and a witness that can be checked**」，而 `tests/security/license_audit.py` 对「点了名、`witness: null`」的条目**只打印 `LICENCE UNVERIFIED` 并让该行保持绿**（活例 `colorama`，它的 `why` 自陈「Windows 平台锁定、Linux 上装不出 dist、故无 METADATA 可读」）。第三条是 `tests/security/README.md` 里那句话。**三处必须给同一个判决**，两种改法都接受：(a) 让代码执行它写下的判决（点名而无 witness → 该行红，并打印怎么消解）；或 (b) 把 policy 那句改写成实现的形状，并**说明**「印刷而不放过」为什么是这条的诚实形状。**不许**把三处一起改弱成「什么都不打印」。`colorama` 的处置必须在同一句话里被点名。",
+        "**`POST_SBOM_REUSE` 只认明确的真值。** 今天 `tests/security/sbom.sh` 三个面都是 `[ -z \"${POST_SBOM_REUSE:-}\" ]` 判分支——**任何非空值都算 reuse**，于是 `POST_SBOM_REUSE=0` 会让一个**想重新生成**的读者正好得到相反的行为。改成只有 `1|true|yes` 才算 reuse，其余（含 `0`、空、垃圾值）一律重新生成；并在脚本头部注释里写明这条词表。",
+        "**`ops/security/tool-versions.sh` 里 uv 的位置要对。** 它被列在 `TOOLS THAT ARE PINNED ELSEWHERE, DELIBERATELY` 标题下，而同段的正文只说了「the gate records the exact generator version it ran in the SBOM's own metadata.tools」——**记录不等于钉住**，pnpm 有 `packageManager`、sqlc 有 `sqlc.yaml`，uv **哪儿都没有钉**，所以这个标题对它是一句不成立的话。两种改法都接受：(a) **真钉上**（加 `UV_VERSION=` 并让 `install-security-tools.sh` 装完**断言**版本），或 (b) 把它移到一个叫「recorded, not pinned」的段落里，**写明今天为什么可以接受**、以及它一旦浮动的代价。**CI 作业那半（`pip install uv==…`）由我改**：若选 (a)，把变量名与取值写进 RESULT 的短信里。",
+        "**govulncheck 的浮动收掉。** 今天 `tests/security/master-security-gate.sh:360` 的缺件提示写死 `go install golang.org/x/vuln/cmd/govulncheck@latest`，而 `tool-versions.sh` 里**没有它**，只有 CI 作业里那一步钉着 `v1.8.0`——也就是说**本地跑门的人会得到一个浮动的扫描器**。加 `GOVULNCHECK_VERSION=v1.8.0` 到 `tool-versions.sh`，让 `install-security-tools.sh` 用既有的 `install_go_tool` 装上并**断言**版本（与 gosec / cyclonedx-gomod 同一套），并把 :360 那条提示改成读这个 pin。",
+        "**两处死的东西收掉或接上。** (a) `tests/security/sast.sh:83` 的 `check_floor()` **只有定义、没有任何调用点**（`grep -c check_floor tests/security/sast.sh` = 1）——删掉，或接上真正需要它的地方；**若接上，必须有一条测试能证明它会红**。(b) `ops/security/license-allowlist.json` 头部的 `what` 引的是 `tests/security/license-audit.sh`，**这个文件不存在**（实际是 `tests/security/license_audit.py`，下划线 + `.py`）——改成实际路径。**顺手**grep 一遍这套仪器里还有没有别的**指向不存在文件**的叙述（README、脚本头注释、`ops/DEV_COMMANDS.md` 里提到这套仪器的地方），有就一并改。",
+        "**`ops/security/absent-checks.json` 的 `kinds` 图例与检查器对不上。** 图例今天列的是 `{covered, guarded-absence}`，而检查器 `tests/security/check-absent-manifest.py` 接受的 **`kind` 只有** `{absent, guarded-absence}`（`covered` 是条目 **`status`** 的取值，不是 `kind` 的）。照图例写一个 `kind: \"covered\"` 的条目会被检查器拒（**拒得对**），但图例本身是错的。改成**两套词表各自说清**：`status: covered|absent`、`kind: absent|guarded-absence`。",
+        "**`license-audit` 读的是磁盘上的 `.sbom/*.cdx.json`，不是它自己这一轮三个 sbom 行的产物。** 整门一起跑没问题（同一次调用里先生成后判），但 `--only license-audit`、或某个 sbom 行 `NOT ASKED` 时，它会**判一份旧文档并照样印绿**。要么让这一行**校验产物新鲜度**（行的产物带 run id 或时间戳，对不上就红），要么在产物不属于本轮时**明说**「judging a document from an earlier run」——**不许**保持今天这种「看不出来」的形状。选哪种都行，但要在 RESULT 里说清选法与代价。",
+        "**`container-scan` 的见证剪掉了 `.dev`、`post-wt`、`.backup-dr`、`.rddev`**（`tests/security/container-scan.sh`）：放在这四个目录里的 `Dockerfile` 它看不见，而这一行的整个承诺是「树里没有容器构建文件」。要么把剪枝**收窄到真正的构建产物**，要么把**这四个目录各自的理由**写进脚本的 stderr 与 README（今天只写在代码注释里）。选哪种都行；**判据**是：一个把 `Dockerfile` 放进 `post-wt/` 的人，能不能从输出里看出自己被剪掉了。",
+        "**变异脚本的 `tree_manifest()` 与 tar 的排除集是手工对称的**（`./out/*` vs 任意深度的 `out`）：一处改了另一处不动，就会造出「树被弄脏」的**假红**——这正是 T1209 返工那一轮同类事故的形状。让两者读**同一个**列表（或由一处生成另一处），并在脚本头部写明这条耦合。",
+        "**每一行声明的先决条件，要和它真正跑的命令对得上。** 这一条是接线 PR 的 `security-master` 作业**第一次在 CI 里跑**跑出来的，不是读出来的：`owasp-smoke` 那一行的 `requires` 写的是 `go python3 psql curl redis postgres file:tests/security/owasp-smoke.sh`，而它跑的 `tests/security/owasp-smoke.sh` 还要 **`redis-cli`**（S0 用它 DEL 再 EXISTS 读回本轮自己的限流桶；缺了它只 `fail` 一条，而后半程全是 `ok`）与 **`node`**（S8 的 `node --test apps/web/lib/security-headers.test.mjs`）；`deploy-template` 那一行的 `requires` 写的是 `python3 go file:tests/acceptance/deploy-staging-smoke.sh`，而 `tests/acceptance/deploy-staging-smoke.sh` 要 **pyyaml**（缺了它自己以 exit 2 报 `python3 with pyyaml is required (the template is YAML)`）。**后果不是「少跑一行」，是一次说不清原因的红**：门对每一行只印该行日志的**最后 25 行**（`master-security-gate.sh` 的 `tail -25`），而这两条原因都在窗口之外——CI 上看到的只有 `FAIL owasp-smoke: exit 1`、`FAIL deploy-template: exit 2`，以及 `G3 security-smoke: 1 failure(s)` 这么一行。判据（两种改法都可以）：在缺该工具的宿主上，这两行必须是 **NOT ASKED 并点名缺的是哪个工具**，不是 FAIL/exit 2。做法上，工具 token 加进 `prereq_missing`（`node` 的 token 已存在，`redis-cli` 要新增；python 模块今天没有 token，怎么表达由你定——新增一个 token 形态、或在行内先探测再 NOT ASKED，但必须能判、必须有活例）。**不许**用删掉 S0/S8、或让 pyyaml 缺失时静默跳过该行检查的方式消灭这次红——那是把「测不了」写成「没问题」。CI 作业那半（`apt-get install redis-tools` 与 `pip install pyyaml`）我已随接线 PR 改好（`39110ec`），所以那两行在 CI 里仍然照跑；你改的是**声明**，不是让它别跑。"
+      ],
+      "deliverables": [
+        "`ops/security/license-allowlist.json`（policy 与 `what` 两处文字）、`ops/security/tool-versions.sh`（uv 与 govulncheck）、`ops/security/absent-checks.json`（kinds 图例）三份清单文件的更正。",
+        "`tests/security/license_audit.py`、`tests/security/sbom.sh`、`tests/security/sast.sh`、`tests/security/install-security-tools.sh`、`tests/security/master-security-gate.sh`、`tests/security/container-scan.sh`、`tests/security/master-gate-mutation-check.sh` 的实现更正。",
+        "`tests/security/README.md` 与 `ops/security/new-dependencies.json` 的同步（凡上面改了措辞或事实的地方，读者落地的第一份文件要跟上）。",
+        "RESULT：逐条「改了什么、在第几行、怎么证明」；全门与变异脚本的**原文 summary** 与退出码；选 (a) 还是 (b) 的理由；以及任何你**判不准**、决定照实报的项。"
+      ],
+      "acceptance_criteria": [
+        "**仪器能说不（先做这一步）**：至少四处各证伪一次并留红绿两次输出——① `POST_SBOM_REUSE=0` 必须**重新生成**（可见证据：产物 mtime 变化或行上出现 regenerated 字样）、`POST_SBOM_REUSE=1` 复用；② 照 `kinds` 图例写一个 `kind: \"covered\"` 的条目，检查器必须**拒**；③ 在 `container-scan` 的剪枝目录里放一个 `Dockerfile`，那一行必须按你选的口径**要么红、要么在输出里明说被剪掉**；④ 你若接上了 `check_floor()`，必须有一条能证明它会红的测试（**不许**只接上不验）。",
+        "`bash tests/security/master-security-gate.sh`（**不带 `--allow-not-asked`**）退出码 0，SUMMARY 原文进 RESULT；注册表下限 `MIN_CHECKS` **不许下调**（改行数必须同笔抬下限）。",
+        "`bash tests/security/master-gate-mutation-check.sh` 整支退出码 0，六条变异的 summary 原文进 RESULT。",
+        "`grep -rn 'license-audit\\.sh' .` 在树里**零命中**（历史记录文件除外）；`grep -rn 'govulncheck@latest' .` 同样零命中；`sast.sh` 的 `check_floor` 要么不存在、要么有调用点且有能红的测试。",
+        "三处 licence 文字对「点名但无 witness」给出**同一个**判决，且 `colorama` 在那句话里被点名处置：`bash tests/security/master-security-gate.sh --only license-audit` 的退出码与该判决一致（绿则必须有印刷，红则必须逐字说明怎么消解）。",
+        "`git status --porcelain -uall` 里的路径**全部**落在 `tests/security/**`、`ops/security/**`、`ops/ci/**`、`Makefile` 之内；`tasks/**`、`specs/**`、`.github/**`、`cmd/**`、`internal/**`、`apps/**`、`services/**`、`infra/**` **零改动**。",
+        "**先决条件能说「我没工具」**：把 `redis-cli` 从 PATH 里去掉（不必改系统——用一个只少这一个符号链接的目录当 PATH 即可，我核这条时就是这么做的），`bash tests/security/master-security-gate.sh --only owasp-smoke` 必须打印 **NOT ASKED** 并点名 `redis-cli`；把 pyyaml 藏起来（让 `python3 -c 'import yaml'` 失败的同一种做法）时，`--only deploy-template` 同样 NOT ASKED 并点名它。两次都要把原文输出与退出码写进 RESULT。反例（不许）：仍然是 `FAIL … exit N`，或原因只出现在 `tail -25` 之外。"
+      ],
+      "tests": [
+        "master security gate (17 checks)",
+        "master gate mutation check"
+      ],
+      "allowed_scope": [
+        "tests/security/**",
+        "ops/security/**",
+        "ops/ci/**",
+        "Makefile"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "cmd/**",
+        "internal/**",
+        "apps/**",
+        "services/**",
+        "infra/**"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/23_SECURITY_PRIVACY.md",
+        "docs/25_CICD_DEVOPS.md",
+        "docs/67_TEST_GATES.md",
+        "docs/40_OPEN_SOURCE_LICENSES.md"
+      ],
+      "scope_note": "这一笔是**仪器诚实度的收尾**，不是产品功能，所以 `v1_required` 为 false：V1 证书（T1207 的报告与 `tests/acceptance/v1-final-audit.sh`）不依赖它，它也不改任何产品语义。它**不动** `specs/**` 与 `.github/**`——CI 作业步骤那半（`pip install uv==…`、govulncheck 的 pin）是 Supervisor 的面，作业定义五处锁步（`ci.yml` / `gates.json.jobs` / `required_jobs` / `G2.runs_jobs` / `G4.asserts_jobs` / `gate_spec_test.go`）必须一起改，Worker 改一处就会让 `TestCIWorkflowMatchesGateSpec` 红。**十一项需求全部有活例可指**，没有一项是「顺手改进」：它们来自 T1209 的第二轮独立复核（verdict approve，7 条 findings + 10 条 risks）、我自己复跑时记下的两笔，以及接线作业 `security-master` 在 PR #356 里第一次实跑抓出的一笔（共 11 条），逐条都在树里核过。",
+      "supervisor_scope_narrowing": "**为什么允许碰 `Makefile`**：`make security-tools` 是安装这条链的入口，若选 (a) 钉 uv 或 govulncheck，pin 可能落在 `tool-versions.sh`（在 scope 内）也可能需要 `Makefile` 上的目标跟着走；不收进来会让工人为了一个目标改不了而报 blocked。**为什么不许碰 `scripts/**`**：那里是**验收仪器本身**（`record_test_run.py` / `validate_specs.py` / `spec_version.py`），让被验收者改卷子等于让考生改分——同一口径已用在 T1206、T1208 上。**为什么 `tests/security/**` 是整目录白名单**：这一笔改的正是这套仪器自己的文件，逐个列路径只会在返工时漏掉一个；但 `tasks/**` 与 `specs/**` 仍然一个字都不许动。"
+    },
+    {
+      "id": "T1212",
+      "phase": "P12",
+      "phase_name": "Canonical Workflow 与最终交付",
+      "title": "让「需要真库」的 e2e 测试在 CI 里不再静默跳过（把跳过变成可判的失败）",
+      "v1_required": false,
+      "dependencies": [
+        "T0101",
+        "T0104",
+        "T0203",
+        "T0205",
+        "T0207",
+        "T0208"
+      ],
+      "requirements": [
+        "**先自己复跑现状，别照抄我的话。** 我核过的形状（你去树里再核一遍，不一致以树为准并写进 RESULT）：`tests/e2e` 里**大多数**测试是进程内的（`httptest` + `miniredis` + `memstore`，见 `tests/e2e/auth_e2e_test.go:46` 的 `newE2EEnv`），**只有两个**要真 PostgreSQL——`tests/e2e/conflict_e2e_test.go:107`（冲突解决旅程）与 `tests/e2e/discussion_promote_e2e_test.go:112`（话题升格）——它们在库不可达时 `t.Skipf`。而 CI 的 `go` job **没有数据库**（`.github/workflows/ci.yml` 那条 `go test $(go list ./... | grep -v '/tests/integration')` **包含** `./tests/e2e`），带库的 `migration-integration` job 只跑 `make test-integration`（即 `./tests/integration`，**不含** `./tests/e2e`）。**所以这两个旅程在 CI 里从来没有跑过，而且跳过是静默的**（没有 `-v` 时 `go test` 只印 `ok`）。",
+        "**把「跳过」变成可判的失败（本任务的正题）。** 加一条**共享判据**：环境变量 `POST_REQUIRE_E2E_DB=1` 且库不可达时，走 `t.Fatalf` 而不是 `t.Skipf`，消息里要**指名**是哪个测试、它要连的 DSN、以及「这个环境声明了必须有库」这个事实；变量**未设时行为一字不变**（仍然是 `t.Skipf`，本机没起库的人照旧能跑其余测试）。两个调用点（`conflict_e2e_test.go`、`discussion_promote_e2e_test.go`）都要**经由这条判据**，不许各自复制一份 `if os.Getenv(...)`。放哪一层由你定（`internal/persistence/testdb` 是这两个测试已经在用的共享包，见 `tests/e2e/main_test.go` 的 `testdb.Main`），但要在 RESULT 里说明为什么选那里。",
+        "**证明这条判据能红（仓库惯例：每道守卫都要有一个能证明它会红的测试）。** 加一个**不依赖任何数据库**的测试：把 DSN 指到一个**死端口**、置 `POST_REQUIRE_E2E_DB=1`，断言拿到的是**失败**（而不是 skip），并断言消息里含变量名与 DSN；同一段代码在变量未设时**仍然是 skip**。两条都要有输出。",
+        "**顺手把 CI 侧该做什么写清楚（那半是我改，不是你改）。** 在 RESULT 里给出**逐字可粘贴**的两条：① 给带库 job 加的那一步（形如 `POST_REQUIRE_E2E_DB=1 go test ./tests/e2e -count=1`，与它需要的环境变量）；② 没有库的那个 job 该怎么把 `./tests/e2e` 从它的包列表里摘掉（今天它是被 `grep -v '/tests/integration'` 顺带带进去的）。**不要**去改 `.github/workflows/**` 或 `specs/**`（那是我的面，且 `gates.json` 与 `ci.yml` 的步骤必须逐步一致，改一处要两处一起走）。",
+        "**不许弱化任何断言**：不许把现有的 `t.Skipf` 直接删掉换成「永远红」（那会让本机没起库的人连其余测试都跑不了），不许放宽任何既有判据，不许给测试加 `-short` 之外的跳过条件。**默认（变量未设）行为必须与本任务之前逐字相同**。",
+        "**不许碰产品代码的行为**：`internal/persistence/testdb` 是测试支撑包，除这条判据外不许改它的语义；`internal/**` 的其它包、`cmd/**`、`apps/**`、`services/**`、`infra/**` 一行都不许动。"
+      ],
+      "deliverables": [
+        "共享判据（`POST_REQUIRE_E2E_DB`）的实现，以及两个需要真库的 e2e 测试改走它。",
+        "一个证明该判据**能红**、且在变量未设时**仍是 skip** 的测试（含两份输出）。",
+        "RESULT：现状复核、实现位置与理由、红/绿两种输出、给 Supervisor 的两条 CI 命令逐字文本，以及任何你判不准的项。"
+      ],
+      "acceptance_criteria": [
+        "**仪器能说不**：把 DSN 指向死端口并置 `POST_REQUIRE_E2E_DB=1` 时那两个旅程**失败**且消息指名 DSN 与变量；变量未设时**仍然跳过**。两次输出都留在 RESULT 里。",
+        "本机带库时 `go test ./tests/e2e -count=1 -v` **没有 SKIP**（两个旅程真的跑了，逐条列出它们的 `--- PASS`），退出码 0。",
+        "`POST_REQUIRE_E2E_DB` 这个变量名在树里只出现在**一处实现**里（调用点只用它，不各自读环境）。",
+        "现有测试一条都不许因此变红：`go test ./tests/e2e/... ./internal/persistence/testdb/... -count=1` 退出码 0。",
+        "`git status --porcelain -uall` 里的路径**全部**落在 `tests/e2e/**`、`internal/persistence/testdb/**` 之内；`.github/**`、`specs/**`、`tasks/**`、`cmd/**`、`apps/**`、`services/**`、`infra/**` **零改动**。"
+      ],
+      "tests": [
+        "e2e db guard",
+        "e2e suite"
+      ],
+      "allowed_scope": [
+        "tests/e2e/**",
+        "internal/persistence/testdb/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "cmd/**",
+        "apps/**",
+        "services/**",
+        "infra/**",
+        "scripts/**"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/67_TEST_GATES.md",
+        "docs/25_CICD_DEVOPS.md"
+      ],
+      "scope_note": "这一笔来自我自己的空窗待办清单（`tasks/window-queue.md` 的 B 条，2026-09-19 记），今天核过仍然成立，但比当时的描述**窄**：进程内的 e2e 测试在 CI 里是真跑的，**只有两个需要真库的旅程**在静默跳过。`v1_required=false`：V1 证书不依赖它，四层 Gate 的定义也不因此改变——它改的是「CI 里那两个旅程到底跑没跑」这件事的**可判性**。CI 那一半（`.github/workflows/ci.yml` 与 `specs/orchestrator/gates.json` 的步骤锁步）由 Supervisor 在合并前后来接，理由同 T1209：作业步骤两处必须逐步一致，改一处会让 `TestCIWorkflowMatchesGateSpec` 红。**依赖那六条（`T0101/T0104/T0203/T0205/T0207/T0208`）不是我随手写的**：本任务的 G3 作业是 `rsg-real-services`，而该作业的 `requires_tasks` 正是这六条——`gate_spec_test.go` 会拒一个「G3 断言了不在自己依赖里的任务」的任务（原文：the gate is red by construction），这六条与 T1205 当初承载同一作业时的写法逐字相同，且都已合并，所以不改变可派工性。",
+      "supervisor_scope_narrowing": "**为什么 `internal/persistence/testdb/**` 在范围里**：那两个旅程的库是由这个包起的（`testdb.Setup` 会 `t.Fatalf`，而**跳过**发生在此之前的两次 `pgReachable` 探测里），判据只有放在实现跳过的那一层才只有一份；把它复制到 `tests/e2e` 里会变成两处各自演化。**为什么 `scripts/**` 在禁止面**：那里是验收仪器本身（`record_test_run.py` / `validate_specs.py` / `spec_version.py`），让被验收者改卷子等于让考生改分——同一口径已用在 T1206/T1208/T1211。**为什么 `.github/**` 与 `specs/**` 也在禁止面**：CI 作业的两个副本（`ci.yml` 与 `gates.json`）必须由同一个人在同一笔里改，这是 T1104 那次接线踩出来的规矩（漏一处 = 有一个 job 永远不被 `G2.runs_jobs` 跑）。"
     }
   ]
 }

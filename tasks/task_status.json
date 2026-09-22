@@ -11715,6 +11715,33 @@
           "reason": "pr merge via rddev (four gates green)"
         }
       ]
+    },
+    "T1210": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "新立账（2026-09-23，T1209 合并之后）：v1-final-report.md 与 v1-final-audit.sh 钉的是T1209 之前那棵树——R10 仍写「SAST、容器扫描、SBOM 三项缺席」，分布计数与基准 SHA 都已过期。任务书见 tasks/packages/T1210.json，G3 覆盖同笔补进 gates.json（mof-canonical）。v1_required=false 是刻意的：它是证书的刷新，不是产品交付。",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1211": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "新立账（2026-09-23，T1209 合并之后）：T1209 的第二轮独立复核给了 7 条 findings + 10 条 risks，加上我自己复跑记的两笔与接线作业首跑抓出的一笔，共 11 条需求，全是那套安全仪器自己的欠账（不是产品缺陷），逐条已在树里核过。任务书见 tasks/packages/T1211.json，G3 覆盖同笔补进 gates.json（security-smoke）。v1_required=false：V1 证书不依赖它。",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
+    },
+    "T1212": {
+      "status": "todo",
+      "started_at": null,
+      "completed_at": null,
+      "notes": "新立账（2026-09-23，T1209 合并之后）：来自空窗待办清单 B 条（2026-09-19 记，今天核过仍成立，但比当时窄——只有两个需要真库的 e2e 旅程在静默跳过）。任务书见 tasks/packages/T1212.json，G3 覆盖同笔补进 gates.json（rsg-real-services）。v1_required=false：它改的是 CI 里那两个旅程的可判性，不改四层 Gate 的定义。CI 那一半由 Supervisor 接。",
+      "worker_run_id": null,
+      "accepted_by_supervisor_at": null,
+      "merged_at": null
     }
   },
   "version": 2
