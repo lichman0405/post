@@ -1,5 +1,5 @@
 {
-  "$comment": "Four-gate acceptance loop (T0012, docs/67). G1 is enforced by `rddev worker collect` (RESULT consistency, worker boundary); G2 re-runs CI's EXACT steps — the jobs of .github/workflows/ci.yml, steps verbatim (a sync unit test fails when this file drifts from ci.yml); G4 (merge gate) asserts EVERY required job is green in the task's latest G2 record. G3 is per-task integration/E2E via task_overrides (absent = not required, recorded as such, never silently skipped).",
+  "$comment": "Four-gate acceptance loop (T0012, docs/67). G1 is enforced by `rddev worker collect` (RESULT consistency, worker boundary); G2 re-runs CI's EXACT steps \u2014 the jobs of .github/workflows/ci.yml, steps verbatim (a sync unit test fails when this file drifts from ci.yml); G4 (merge gate) asserts EVERY required job is green in the task's latest G2 record. G3 is per-task integration/E2E via task_overrides (absent = not required, recorded as such, never silently skipped).",
   "version": 1,
   "required_jobs": [
     "spec-validation",
@@ -8,7 +8,8 @@
     "web",
     "python",
     "migration-integration",
-    "acceptance"
+    "acceptance",
+    "observability"
   ],
   "gates": {
     "G1": {
@@ -26,7 +27,8 @@
         "web",
         "python",
         "migration-integration",
-        "acceptance"
+        "acceptance",
+        "observability"
       ]
     },
     "G3": {
@@ -44,7 +46,8 @@
         "web",
         "python",
         "migration-integration",
-        "acceptance"
+        "acceptance",
+        "observability"
       ]
     }
   },

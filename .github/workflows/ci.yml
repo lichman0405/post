@@ -225,10 +225,12 @@ jobs:
   # Wall clock: the metrics harness's 29-scrape 15s grid is real time, 7m26s on
   # a warm machine; 30 minutes is the honest ceiling on a cold runner.
   #
-  # NOT yet in specs/orchestrator/gates.json's required_jobs: it is wired here
-  # first so that a real runner proves it green before accepting the check
-  # becomes a condition of every merge. Promotion is the Supervisor's next
-  # step and is a one-line change in that spec plus G4.asserts_jobs.
+  # It is required from this first run, not staged: the gate spec's own
+  # invariant (gate_spec_test.go's two-rules loop) reads every job defined
+  # there and not in required_jobs as a G3 job that must name the tasks whose
+  # work it asserts, so "wired but not yet required" is not a state this spec
+  # can express. Its green is therefore established by running it, which is
+  # what this job does on every push to main and every PR.
   observability:
     runs-on: ubuntu-24.04
     needs: [go]

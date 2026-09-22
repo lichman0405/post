@@ -52,14 +52,14 @@ func TestGatesSpecSyncsWithCIWorkflow(t *testing.T) {
 		}
 	}
 
-	// The required-jobs list is the G4 assertion's backbone: the CI jobs a
-	// merge is conditioned on. `observability` (T1109) is deliberately absent
-	// from it while it is new: it is wired in ci.yml and defined above so a
-	// real runner proves it green first, and promoting it is a one-line edit
-	// here, in spec.required_jobs and in G4's own list. Required and wired are
-	// different sets for exactly as long as that proof takes; nothing else may
-	// join this list without also leaving that state.
-	if !equalStrings(spec.RequiredJobs, []string{"spec-validation", "task-state", "go", "web", "python", "migration-integration", "acceptance"}) {
+	// The required-jobs list is the G4 assertion's backbone, and it is the same
+	// list G2 runs and asserts_jobs mirrors — three spellings of one set. A job
+	// that is defined in the spec and runs in CI but is NOT required is not a
+	// state this spec can express: the two-rules loop below reads every
+	// non-required job as a G3 job and demands that it name the tasks whose
+	// work it asserts. So a new CI job is required from its first run, and the
+	// proof that it is green is its first run rather than a staging step.
+	if !equalStrings(spec.RequiredJobs, []string{"spec-validation", "task-state", "go", "web", "python", "migration-integration", "acceptance", "observability"}) {
 		t.Errorf("required_jobs = %v, want ci.yml's jobs in canonical order", spec.RequiredJobs)
 	}
 
