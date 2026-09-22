@@ -9733,9 +9733,9 @@
       ]
     },
     "T1101": {
-      "status": "worker_failed",
-      "started_at": "2026-09-21T23:18:21Z",
-      "worker_run_id": "run-e307b9af953657a6",
+      "status": "running",
+      "started_at": "2026-09-22T00:58:48Z",
+      "worker_run_id": "run-f2ce543fac7e614f",
       "rejection_reason": "# T1101 第三轮 review 结论：request_changes\n\n核心数字（独立复现）对得上：12 页 0 px、pull-detail 170 px、project-conflicts 1280x1199→1280x1185、run.sh 88 ok/0 FAIL、+660/−801 与 CSS +183/−444，变异日志也一致。\n\n但有一处**未经授权且现有仪器都看不见**的外观变更：\n\n- `pull-detail.css:298 .pull-change-kind` 与 `:329 .pull-change-moved` 被删掉，改由 `packages/ui/src/ui.css` 的 `.post-diff-kind`/`.post-diff-note` 渲染。\n- 评审人在 /tmp 独立副本上实测 PR 页 scientific tab：\n  - HEAD 的 kind chip 是 59.8x18 / 55.9x18 / 57x18、radius 10px、font 11px/16px、padding 0 6px、neutral 文字 rgb(31,35,40)。\n  - 现在是 67.9x22 / 63.7x22 / 65x22、radius 999px、font 12px/18px、padding 1px 8px、neutral 文字 rgb(89,99,110)。\n  - moved 注记 175.2x18 → 193.9x22；面板 449px → 488px 高；同一面板区域 29807 px 不同（守卫容差 64）。\n- 这些元素只在 scientific/knowledge/evidence 非默认 tab 渲染，而 visual-regression.mjs 的 `PAGES` 只拍默认状态（ready 是 `[data-pull-panel=\"summary\"]`），所以基线对照、style-parity、section E 全看不见。\n- AC5 证据写「五处 10px 现在都是 6px」，但 `.pull-change-kind`/`.pull-change-moved` 已不存在，其替代者是 999px——证据被 diff 推翻。\n\n**返工要求：**\n1. 把这两个 chip 按 HEAD 度量写回 `pull-detail.css`（或让共享 Diff 组件能还原 HEAD 度量），并在 scientific tab 下实测像素等价。\n2. 同时修掉 RESULT.json 里 AC5 那条与 diff 矛盾的证据。\n3. 考虑把 `head-tree-visual.sh` 接进日常路径，并在 visual-regression.mjs 里给 pull-detail 补拍 scientific/knowledge/evidence tab 后的基线，堵住非默认状态的覆盖空洞。\n\n其余 minor/nit 见 review RESULT.json，不阻塞。\n",
       "history": [
         {
@@ -9834,6 +9834,20 @@
           "at": "2026-09-22T00:14:02Z",
           "run_id": "run-675a9742919c38f5",
           "reason": "worker exited 1"
+        },
+        {
+          "from": "worker_failed",
+          "to": "rejected",
+          "at": "2026-09-22T00:56:05Z",
+          "run_id": "run-675a9742919c38f5",
+          "reason": "Worker failed with API StreamIdleTimeoutError after 85 min; Supervisor manually rebaselined onto main (resolved tests/web-smoke/run.sh discovery vs. T1101 helper modules) and reclassifies as rejected for respawn."
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T00:58:48Z",
+          "run_id": "run-f2ce543fac7e614f",
+          "reason": "worker spawn"
         }
       ]
     },
