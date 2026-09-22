@@ -228,6 +228,17 @@ func writeDocumentHeaders(w http.ResponseWriter) {
 
 // renderObjectPageError answers an HTML request with the neutral error
 // page carrying the same status/code/message the JSON envelope answers.
+//
+// It writes the status itself, so this response is NOT counted in
+// post_permission_denials_total the way authhttp.WriteError's are. Checked
+// when that counter was added (T1109): no read on this path can reach it with
+// a 403. rsg.ErrForbidden is produced only inside rsg.requireWrite
+// (internal/application/rsg/service.go:662-716), whose callers are the write
+// commands — CreateObject, CreateObjectVersion, CreateRelation, evidence
+// save — while the three HTML callers above call GetObjectDetail,
+// ProjectOverview and ResearchOutline. If a read ever starts returning that
+// sentinel, this function is the surface where the refusal would escape the
+// counter, and a page view would be the only trace of it.
 func renderObjectPageError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
 	title := http.StatusText(status)
 	if status == http.StatusNotFound {

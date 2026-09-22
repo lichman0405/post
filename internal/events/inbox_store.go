@@ -3,6 +3,8 @@ package events
 import (
 	"context"
 	"fmt"
+
+	"github.com/lichman0405/post/internal/observability"
 )
 
 // The inbox reads and writes (T1003). They live on SubscriptionStore
@@ -203,16 +205,34 @@ func (s *SubscriptionStore) inboxVisibleTargets(ctx context.Context, userID stri
 
 	targetTypes := []string{}
 	targetIDs := []string{}
+	filtered := false
 	for _, t := range targets {
 		level, err := s.TargetAudience(ctx, s.pool, t, userID)
 		if err != nil {
 			return nil, nil, fmt.Errorf("events: inbox audience: %w", err)
 		}
 		if level == AudienceNone {
+			// The refusal no HTTP status can carry: the target is dropped
+			// and the request still answers 200 with a shorter list, so a
+			// reader — and the edge — cannot tell this from "nothing there".
+			// Recorded here because here is the only place the decision is
+			// visible (docs/26 §3 permission denied rates). See
+			// observability.DecisionFiltered.
+			filtered = true
 			continue
 		}
 		targetTypes = append(targetTypes, t.Type)
 		targetIDs = append(targetIDs, t.ID)
+	}
+	if filtered {
+		// ONE increment per shortened read, not one per dropped target. The
+		// family's other two decisions are counted once per refused REQUEST,
+		// and a per-target increment here would make `sum by (decision)` add
+		// requests to targets — a read that hid three rows would weigh three
+		// times as much as a read that hid one, which is not a rate of
+		// anything. The count this answers is "how many answers came back
+		// shorter than they should", and that is one per read.
+		observability.Default().ObservePermissionDenial("inbox", observability.DecisionFiltered)
 	}
 	return targetTypes, targetIDs, nil
 }

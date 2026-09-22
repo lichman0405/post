@@ -43,6 +43,7 @@ BROWSER_E2E_NO_DB_SUITES := $(filter-out $(BROWSER_E2E_DB_SUITES),$(BROWSER_E2E_
 	check-schema-drift check-schema-snapshot check-openapi check-spec-version fmt-check staticcheck lint-python type-python \
 	progress ci migrate search-rebuild search-embed infra-up infra-init infra infra-down infra-ps infra-logs \
 	browser-list browser-smoke browser-smoke-% browser-e2e browser-e2e-nodb browser-e2e-db browser-e2e-% browser-suites browser-ok-arity
+	observability-smoke observability-trace observability-route
 
 help: ## list targets
 # `[a-zA-Z_-]`, not `[a-zA-Z0-9_-]`, is how browser-e2e and every
@@ -472,6 +473,25 @@ browser-suites: ## every browser suite: web-smoke checks + all e2e suites
 		exit 1; \
 	fi; \
 	echo "browser-suites: all groups passed"
+# Observability smoke / trace / route probes (T1109). These targets run the
+# same checks the CI observability job runs, but against the currently built
+# binaries and the local infra stack. They are intentionally separate from
+# `smoke`: `smoke` is Docker-free and must pass without a Prometheus or Tempo,
+# while these targets need the compose stack (infra-up) and the observability
+# tooling installed (promtool, curl, jq). A failure prints the failing output,
+# never a silent skip.
+observability-smoke: ## run metrics + alerts + distributed-trace harnesses (needs infra-up; ~7m26s)
+# This is the single root-level command the README and CI snippet advertise:
+# it strings together the metrics/alerts harness (which itself runs fault
+# injection and promtool) and the trace end-to-end check. Both must pass.
+	bash tests/observability/metrics-alerts-e2e.sh
+	bash tests/observability/trace-e2e.sh
+
+observability-trace: ## run only the distributed-trace end-to-end check
+	bash tests/observability/trace-e2e.sh
+
+observability-route: ## run only the observability route probe
+	bash tests/observability/route-probe.sh
 
 # Local infrastructure (Docker Compose, T0003). Applications stay host-native
 # (docs/66 §2); only the infra dependencies below run in containers.

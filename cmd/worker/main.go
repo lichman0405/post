@@ -148,6 +148,17 @@ func run(args []string) int {
 	// search.embed job type makes.
 	searchEmbed := flags.Bool("search-embed", false,
 		"recompute the embedding of every search document that needs it and exit")
+	// -metrics-addr exposes this process's Prometheus endpoint (T1109,
+	// docs/26 §3). It is a flag rather than a POST_* variable because the
+	// configuration surface (internal/config) is validated as a whole and
+	// belongs to another task's file; the default is empty, which means no
+	// listener, so an existing deployment is unaffected until its operator
+	// asks for one. Prometheus scrapes each process, so the worker's
+	// endpoint is separate from the API's by design: the counters that move
+	// inside THIS loop (queue read failures, dead letters, outbox publish
+	// failures) only exist here.
+	metricsAddr := flags.String("metrics-addr", "",
+		"listen address for the Prometheus metrics endpoint, e.g. 127.0.0.1:19110 (empty: disabled)")
 	if err := flags.Parse(args); err != nil {
 		return exitConfig
 	}
@@ -273,6 +284,28 @@ func run(args []string) int {
 	// rows the API recorded inside its commit transactions into
 	// research_events, and runs until shutdown.
 	dispatcher := events.NewDispatcher(pool, events.WithLogger(logger))
+	// Metrics (T1109): the worker's own sources. Registration failure is
+	// fatal for the same reason it is in cmd/api — an endpoint missing a
+	// family answers 200 while measuring less than it claims to.
+	if err := registerWorkerMetrics(observability.Default(), pool, queue, dispatcher); err != nil {
+		slog.Error("post-worker: metrics registration failed", "error", err)
+		return exitRuntime
+	}
+	if *metricsAddr != "" {
+		metricsSrv, err := observability.ServeMetrics(ctx, *metricsAddr, observability.Default(), logger)
+		if err != nil {
+			slog.Error("post-worker: metrics listener failed to start", "addr", *metricsAddr, "error", err)
+			return exitRuntime
+		}
+		defer func() {
+			shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = metricsSrv.Shutdown(shutCtx)
+		}()
+	} else {
+		slog.Info("post-worker: metrics endpoint disabled (pass -metrics-addr to enable)",
+			"effect", "the queue, outbox and database families of this process are not scrapable")
+	}
 	var dispatcherWG sync.WaitGroup
 	dispatcherWG.Add(1)
 	go func() {

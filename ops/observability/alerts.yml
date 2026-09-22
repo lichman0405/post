@@ -1,0 +1,512 @@
+# POST alerting rules — first version (T1109).
+#
+# Shape: a Prometheus rule file (`groups:` / `rules:`), loadable as-is by a
+# Prometheus `rule_files:` entry. Severity labels use docs/26 §6's own
+# vocabulary (P1/P2) rather than inventing a critical/warning translation
+# layer that no document asks for.
+#
+# WHAT IS IN HERE, AND WHY THAT IS ALL THAT IS IN HERE
+#
+# docs/26 §6 names seven alert classes. A rule may only be written for a class
+# that this platform can actually measure — a rule whose expression cannot
+# become true is worse than no rule, because it converts "we are not watching
+# this" into "we are watching this and it is fine". The two classes with no
+# metric source are recorded as comments at the end of the P1 group, in the
+# words the task specified, and their absence is repeated in README.md with
+# the search that established it.
+#
+# Every threshold below is derived from a constant in this repository, named
+# in the rule's own comment. None of them is a round number chosen to look
+# plausible: where a real cadence exists (the reconciliation sweep's 5m, the
+# dispatcher's 1s poll, the delivery ladder's outcomes) the threshold is that
+# cadence times a stated number of cycles.
+#
+# HOW TO CHECK THIS FILE WITHOUT A PROMETHEUS SERVER
+#
+#   promtool check rules ops/observability/alerts.yml
+#   promtool test rules <generated-test.yml>     # see README.md
+#
+# tests/observability/metrics-alerts-e2e.sh runs both, the second against
+# samples really captured from a running POST process.
+
+groups:
+  # ---------------------------------------------------------------------
+  # P1 — docs/26 §6: RSG/Git drift, database unavailable.
+  # ---------------------------------------------------------------------
+  - name: post-p1
+    rules:
+      # docs/26 §6 P1 "database unavailable".
+      #
+      # post_db_up is emitted as 0 by both cmd/api and cmd/worker when a ping
+      # fails, rather than being dropped — a dropped series makes an absent()
+      # alert the only way to see the outage, and absent() cannot tell "the
+      # database is gone" from "the process is gone". Because the 0 is always
+      # there, `== 0` always has something to evaluate.
+      #
+      # for: 1m is four scrape intervals at Prometheus's default 15s. One
+      # failed ping is a blip (a failover, a connection reset); a minute of
+      # them is an outage.
+      - alert: PostDatabaseUnavailable
+        expr: post_db_up == 0
+        for: 1m
+        labels:
+          severity: P1
+        annotations:
+          summary: "PostgreSQL is not answering {{ $labels.job }}"
+          description: >-
+            The process could not complete a ping within its 2s probe budget
+            (metricsPingTimeout) for a full minute. Check PostgreSQL itself
+            first, then the connection pool: post_db_pool_acquires_total
+            {kind="empty"} counts callers that gave up waiting for a
+            connection, which tells you whether the database is refusing
+            connections or merely slow to hand them out.
+
+      # docs/26 §6 P1 "RSG/Git drift".
+      #
+      # cmd/api/reconciliation.go's comment states the rule's whole design:
+      # docs/16 §5 makes ANY drift high severity, so the condition is a
+      # non-zero open count, not a trend or a rate. A rate would be blind to
+      # exactly the case that matters — one unfixed divergence that nobody
+      # keeps looking at.
+      #
+      # for: 5m is exactly one reconciliationInterval (cmd/api/reconciliation.go:29),
+      # so the finding must survive a second full sweep before anyone is
+      # paged. Below that, a finding that a re-check closes is a transient.
+      #
+      # NOT affected by a failed pass: ObserveReconciliationFailure leaves
+      # this gauge untouched rather than zeroing it, so an outage cannot
+      # silently clear a drift alert (see internal/observability/metrics.go).
+      - alert: PostRSGGitDrift
+        expr: post_rsg_reconciliation_open_findings > 0
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: "RSG/Git drift is open on {{ $value }} finding(s)"
+          description: >-
+            The reconciliation sweep found the relational RSG and the Git
+            repository disagreeing and the finding is still open after a
+            second full sweep. Repair proposals are recorded but NOT applied
+            automatically (cmd/api/reconciliation.go), so this needs a human.
+            Read the newest git reconciliation log line — it carries the
+            project ref and both sides of the divergence — then decide as a
+            scientific matter which side is right. Do not "fix" it by editing
+            the finding.
+
+      # One target gone, which is the case the rule below cannot see.
+      #
+      # WHY THIS RULE EXISTS, AND WHAT IT ASSUMES
+      #
+      # The meta-alert below is `absent(post_db_up)`, and post_db_up is emitted
+      # by BOTH binaries. So it fires only when NEITHER of the two scrape
+      # targets is answering: one process going dark — the case most worth
+      # seeing, and the one that takes five of the other eleven rules with it
+      # (every rule fed by a worker-only family: the outbox's two, the queue's
+      # two, and the webhook surge; see the table in ops/observability/README.md)
+      # — leaves it perfectly silent. Silence that means "half the platform is
+      # unobserved" is the failure mode this whole file is written against.
+      #
+      # The expression has two branches because "not reporting" has two causes
+      # and they look different from inside Prometheus:
+      #
+      #   up{job=...} == 0   a scrape that FAILED. Prometheus still writes the
+      #                      `up` series for a configured target, so a target
+      #                      whose endpoint stopped answering is visible as 0,
+      #                      per instance. This branch is what makes ONE broken
+      #                      replica visible in a multi-instance job.
+      #   absent(up{job=...})  the target is not in the scrape configuration at
+      #                      all — someone deleted or renamed the job — so
+      #                      there is no series to read a 0 from. absent() with
+      #                      an equality matcher returns {job="<that job>"} 1,
+      #                      which merges cleanly into the same alert.
+      #
+      # THE ASSUMPTION, stated where a reader of this file will find it: the
+      # two scrape jobs are named post-api and post-worker. That convention is
+      # not this file's to invent — it is set in the scrape configuration that
+      # ships with the endpoint, and ops/observability/README.md carries the
+      # pasteable snippet plus the table of which rules each target feeds. If a
+      # deployment names them differently, this rule is inert for that
+      # deployment and the naming-independent backstop below is all that fires:
+      # renaming the jobs is a deployment decision (ops owns it), not something
+      # this rule can guess its way around. It is stated rather than worked
+      # around because PromQL cannot enumerate a scrape configuration — there
+      # is no expression that says "any target that should exist", only "this
+      # named target".
+      #
+      # for: 5m — the same hold as the meta-alert and for the same reason: past
+      # any plausible scrape blip, short enough that a monitoring gap is caught
+      # in the same working session. Deliberately NOT shorter: a single failed
+      # scrape of one replica should not page.
+      - alert: PostMetricsTargetMissing
+        expr: >-
+          up{job=~"post-api|post-worker"} == 0
+          or absent(up{job="post-api"})
+          or absent(up{job="post-worker"})
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: "The {{ $labels.job }} metrics target is not reporting"
+          description: >-
+            One of the two POST scrape targets stopped reporting, so part of
+            this platform is unobserved rather than healthy. When this series
+            carries an instance label, that one target's scrape is failing:
+            the process is down, or its /metrics listener is. When it does not,
+            the whole job has disappeared from the scrape configuration — a
+            config change, not a crash. Every rule fed only by the missing
+            target is now silent, and silence is not green: check which rules
+            the target feeds in ops/observability/README.md before assuming the
+            rest of this list is telling you anything.
+
+      # The meta-alert. Every other rule here is silent when the metrics
+      # endpoint stops answering, and silence is indistinguishable from
+      # health in a rules file — a process that died looks exactly like a
+      # process with nothing wrong. post_db_up is used as the canary because
+      # both binaries always emit it, whatever else fails.
+      #
+      # This is the BOTH-GONE case, and it is kept beside
+      # PostMetricsTargetMissing above rather than replaced by it: this rule
+      # reads a series POST emits, so it depends on no scrape-configuration
+      # naming at all. If the jobs above are ever renamed — the one assumption
+      # PostMetricsTargetMissing makes — this is the rule that still tells you
+      # that the platform has stopped reporting altogether.
+      #
+      # for: 5m is beyond any plausible scrape blip and short enough that a
+      # monitoring gap is noticed the same working session.
+      - alert: PostMetricsEndpointMissing
+        expr: absent(post_db_up)
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: "No POST process is reporting metrics"
+          description: >-
+            absent(post_db_up) means neither cmd/api nor cmd/worker has
+            produced a sample within the staleness window. Treat every other
+            POST alert as unknown rather than green until this clears: you
+            are blind, not healthy. Check that the processes are running and
+            that their /metrics endpoints answer.
+
+      # ---------------------------------------------------------------
+      # NO RULE FOR TWO P1 CLASSES, ON PURPOSE.
+      #
+      #   本版无规则，因为无指标源  (blob integrity mismatch)
+      #   本版无规则，因为无指标源  (data visibility leak suspicion)
+      #
+      # blob integrity mismatch: internal/storage is a doc.go and nothing
+      # else; no product path reads or writes object bytes, CreateBlob has no
+      # call site outside a test, and there is no upload route. The one hash
+      # comparison in the tree is cmd/api/backupdr/reconcile.go:521, the
+      # backup/restore drill checking restored objects against their recorded
+      # integrity_hash — a drill path, not a product path, and not a source
+      # any product metric could read.
+      #
+      # data visibility leak suspicion: the platform's own design makes the
+      # two relevant signals unmeasurable from here. A denied read answers
+      # 404 on purpose (Read existence hiding), so a refusal and a genuine
+      # miss have the same status and the same body; and the silent-filter
+      # tier removes rows from a 200. Neither can be turned into a
+      # leak-detection signal without a decision about what "suspicious"
+      # means, which is a product/security judgement and not this task's to
+      # make. The permission family measures REFUSALS, which is the
+      # opposite direction: it counts who was told no, not who saw too much.
+      # ---------------------------------------------------------------
+
+  # ---------------------------------------------------------------------
+  # P2 — docs/26 §6: event/outbox backlog, search unavailable, webhook
+  # failures surge.
+  # ---------------------------------------------------------------------
+  - name: post-p2
+    rules:
+      # docs/26 §6 P2 "event/outbox backlog".
+      #
+      # The AGE, not the count. A deep outbox is normal during a burst — the
+      # dispatcher drains it and the count returns to zero on its own. The
+      # age of the oldest unpublished row only grows when the publisher is
+      # not moving, which is the condition worth waking someone for.
+      #
+      # 300s against the dispatcher's DefaultPollInterval of 1s
+      # (internal/events/publish.go): three hundred skipped cycles. Nothing
+      # healthy produces that.
+      #
+      # KNOWN LIMIT, stated rather than hidden: this family is read out of
+      # the same database it measures, so while PostgreSQL is unreachable the
+      # collector cannot read it and emits no sample (see internal/
+      # observability/collect.go). That case is not uncovered —
+      # PostDatabaseUnavailable (P1) fires on it, and it is the louder alert
+      # of the two.
+      #
+      # What "emits no sample" does NOT do, measured rather than assumed: it
+      # does not make the series absent to the rule. Prometheus carries a
+      # series' last sample forward for the lookback delta (5m by default)
+      # before treating it as gone, and a series merely missing from a scrape
+      # BODY is never marked stale — only a failed SCRAPE is. So a backlog
+      # measured just before the database went away keeps this alert firing
+      # for up to five minutes into the outage. That is the right direction
+      # here (the backlog is very probably still there) but it has a
+      # consequence worth stating: this alert going quiet is NOT evidence the
+      # backlog cleared. Its silence is only trustworthy with post_db_up 1
+      # beside it.
+      #
+      # for: 2m, and the reason is that this rule is the exception to the
+      # pattern the rest of the file follows. Every other rule's EXPRESSION
+      # contains a time window, so the window does the smoothing and the hold
+      # only confirms. This expression is a bare gauge comparison with no
+      # window at all — but its threshold is not instantaneous either: 300s of
+      # an undrained row cannot be produced by a blip, it is 300 dispatcher
+      # cycles that did not happen. The condition is already a sustained one,
+      # so the hold only has to establish that the reading is repeatable:
+      # eight consecutive scrapes. An event waits 5+2 minutes before anyone is
+      # told, not ten.
+      - alert: PostOutboxBacklog
+        expr: post_outbox_oldest_pending_seconds > 300
+        for: 2m
+        labels:
+          severity: P2
+        annotations:
+          summary: "Outbox has not drained for {{ $value | humanizeDuration }}"
+          description: >-
+            The oldest unpublished outbox row is over five minutes old, so
+            research events are sitting undelivered. Check the publisher's
+            own error path first: post_outbox_publish_failures_total climbing
+            beside this means the dispatcher is trying and failing; flat with
+            a growing backlog means it is not trying at all (not running, or
+            wedged). Deliveries are at-least-once, so nothing is lost — but
+            subscribers are not being told about state changes.
+
+      # The causal half of the same class. Separate from the backlog rule
+      # because they answer different questions: this one says "publishing is
+      # failing now", the other says "the queue of unpublished work is old".
+      #
+      # increase(...) >= 3 over 10m, against the backoff ladder this task
+      # added to internal/events/publish.go (1s, 2s, 4s, 8s, 16s, then 30s
+      # capped): three failures arrive within about ten seconds of an outage
+      # starting, so any real outage trips this, while a single transient
+      # failure — which the next pass fixes — does not. The threshold is the
+      # ladder's own rhythm, not a guess.
+      #
+      # for: 2m, not 10m: the expression already sums over a ten-minute
+      # window, so the "sustained" work is done there, and a hold of the same
+      # length would put detection twenty minutes after the outage began —
+      # longer than the outage most worth reporting on. Two minutes is eight
+      # consecutive scrapes over which the window cannot go quiet on its own
+      # (the ladder's 30s cap guarantees a retry inside every 30s of outage).
+      - alert: PostOutboxPublishFailing
+        expr: increase(post_outbox_publish_failures_total[10m]) >= 3
+        for: 2m
+        labels:
+          severity: P2
+        annotations:
+          summary: "Outbox publishing has failed {{ $value }} times in 10m"
+          description: >-
+            The dispatcher's publish pass is failing repeatedly. The counter
+            is incremented once per failed pass and the pass backs off, so a
+            sustained value here means the cause is not transient. Read the
+            "events: outbox publish pass failed" log lines — they carry the
+            error and the retry_in the ladder chose. Check PostgreSQL and
+            the outbox_events table's grants before assuming the dispatcher
+            is at fault.
+
+      # docs/26 §6 P2 "search unavailable".
+      #
+      # A ratio, not a count: a single failed query in a quiet period is not
+      # an outage, and an absolute count cannot tell the two apart.
+      #
+      # The outcome vocabulary is load-bearing here. `refused` is
+      # DELIBERATELY excluded from the numerator: a refusal is the access
+      # layer answering correctly, and counting it would make a permission
+      # change look like a search outage. It stays in the denominator
+      # because a refused query is still traffic the surface served.
+      #
+      # 10% over 10m: below that, retryable single-query failures are within
+      # normal operation. clamp_min guards the no-traffic case, where both
+      # sums are zero.
+      #
+      # for: 5m. The rule warns rather than pages, so a confirmed five
+      # minutes is enough; and as with every ratio rule here, the
+      # ten-minute rate window is already doing the smoothing, so a hold
+      # of the same length would double it and push detection out to
+      # twenty minutes.
+      - alert: PostSearchUnavailable
+        expr: >-
+          sum(rate(post_search_query_duration_seconds_count{outcome="error"}[10m]))
+          /
+          clamp_min(sum(rate(post_search_query_duration_seconds_count[10m])), 0.001)
+          > 0.1
+        for: 5m
+        labels:
+          severity: P2
+        annotations:
+          summary: "More than 10% of search queries are failing"
+          description: >-
+            Search is answering errors for a sustained share of its traffic.
+            The `ok` latency histogram and the `error` count share a family,
+            so the two can be read together: rising error ratio with flat
+            latency means queries are being rejected, not overrunning.
+
+      # docs/26 §3 "search latency" — an explicit metric in the spec with no
+      # §6 alert class of its own, so it is expressed here as the alert its
+      # own family naturally supports.
+      #
+      # p99, not mean: search is interactive and it is the tail that users
+      # notice. Only outcome="ok" is measured — including errored queries
+      # would make fast failures lower the latency, which is backwards.
+      #
+      # 2s is the point past which an interactive search stops feeling like
+      # one; it is a product judgement, and the only threshold in this file
+      # that is not derived from a cadence constant. Stated plainly so it can
+      # be renegotiated with evidence instead of being discovered later.
+      #
+      # for: 5m, NOT 10m. The expression already averages over a ten-minute
+      # window, so the "sustained" work is done by the rate window; a hold of
+      # the same length would stack two ten-minute filters and put detection
+      # near twenty minutes, which is longer than the slowness it is meant to
+      # report on. Five minutes is one more scrape-and-a-half of confirmation.
+      - alert: PostSearchLatencySlow
+        expr: >-
+          histogram_quantile(0.99,
+            sum by (le) (rate(post_search_query_duration_seconds_bucket{outcome="ok"}[10m])))
+          > 2
+        for: 5m
+        labels:
+          severity: P2
+        annotations:
+          summary: "Search p99 latency is {{ $value }}s"
+          description: >-
+            The 99th percentile of successful searches has been over two
+            seconds for ten minutes. Compare against
+            post_search_query_duration_seconds_count to see whether the tail
+            is broadening or a small number of queries are stuck.
+
+      # docs/26 §6 P2 "webhook failures surge".
+      #
+      # The numerator is exactly the two outcomes that mean a delivery
+      # FAILED, per the classification table in internal/events/deliver.go:
+      # "terminal" is a 4xx (the endpoint refused the request) and "retry" is
+      # a 5xx or a network error. "retry_no_streak" is deliberately excluded —
+      # the code's own comment says a 1xx/3xx is "not evidence the endpoint
+      # is failing", and it does not burn the consecutive-failure streak.
+      # Counting it would make a redirecting endpoint look broken.
+      #
+      # The denominator is all attempts, so this is a share of traffic and
+      # not a volume. NOTE, because it is a real property of the rule and
+      # not a defect: one endpoint with a down server retries up to six
+      # times before the ladder gives up, so a single broken subscriber
+      # contributes several failures per delivery. That is intended — a
+      # retry storm against one endpoint is what this class is about — but
+      # it means the alert can fire on one bad endpoint. The label breakdown
+      # by outcome distinguishes it from a broad failure within one query.
+      #
+      # 20% of attempts, averaged over the ten-minute rate window, with a
+      # five-minute hold on top — again not ten, for the reason given on the
+      # rule above: the window is the smoothing, the hold only needs to
+      # confirm it.
+      - alert: PostWebhookFailuresSurge
+        expr: >-
+          sum(rate(post_webhook_deliveries_total{outcome=~"terminal|retry"}[10m]))
+          /
+          clamp_min(sum(rate(post_webhook_deliveries_total[10m])), 0.001)
+          > 0.2
+        for: 5m
+        labels:
+          severity: P2
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of webhook attempts are failing"
+          description: >-
+            Deliveries to subscriber endpoints are failing at a sustained
+            rate. Break the family down by outcome to tell the two cases
+            apart: terminal climbing means endpoints are rejecting the
+            requests (a 4xx — check the endpoint URL and its secret, which is
+            per-endpoint and would come back as several endpoints failing at
+            once); retry climbing with terminal flat means endpoints are
+            unreachable. An endpoint that keeps failing is disabled by the
+            consecutive-failure policy and emits webhook.delivery_failed, so
+            check the delivery log before assuming the deliveries are merely
+            slow.
+
+      # docs/26 §3 "queue failures" / "queue depth", and §6's database class
+      # applied to the queue's own dependency.
+      #
+      # The worker's read path is a blocking pop in a loop; a read error
+      # means it cannot reach Redis at all, so EVERY job stalls — there is no
+      # partial version of this failure. increase(...) >= 2 rather than > 0
+      # so that a single reconnect blip does not page anyone; a genuine
+      # outage produces errors every second the loop retries.
+      #
+      # for: 2m is two minutes of an error every second — over a hundred
+      # failed reads — where the threshold alone would already have been met
+      # by two. It is short because the failure is total, not partial.
+      - alert: PostJobQueueUnavailable
+        expr: increase(post_queue_errors_total{operation="read"}[5m]) >= 2
+        for: 2m
+        labels:
+          severity: P2
+        annotations:
+          summary: "The job queue cannot be read"
+          description: >-
+            The worker is failing to pop jobs. Jobs are not lost — they stay
+            in the queue — but research work is not progressing. Check Redis
+            itself before the worker, then post_queue_depth: a depth that is
+            flat while errors climb is an unreachable queue, whereas a depth
+            that is climbing means the worker is alive and merely slow.
+
+      # A dead letter is work that will never happen — the job exhausted its
+      # retries. docs/26 §3 "queue failures".
+      #
+      # No `for:`: the state is already terminal, so waiting would only delay
+      # the page. One dead letter is one piece of lost work, which is why
+      # there is no threshold.
+      - alert: PostJobDeadLettered
+        expr: increase(post_queue_jobs_total{outcome="dead_lettered"}[15m]) > 0
+        labels:
+          severity: P2
+        annotations:
+          summary: "A job exhausted its retries and was dead-lettered"
+          description: >-
+            A job was moved to the dead-letter list, so whatever it was
+            supposed to do did not happen and will not happen on its own.
+            Read the job payload and the handler's last error before
+            requeuing it: a job that dead-letters because of a permanent
+            condition (a deleted project, a revoked credential) will simply
+            dead-letter again.
+
+      # docs/26 §3 "permission denied rates". Not a §6 class — the spec asks
+      # for the rate without naming an alert for it — so this is the alert
+      # the family itself supports, and it is marked as such rather than
+      # being presented as a spec requirement.
+      #
+      # Only decision="forbidden" (403). The other two tiers are excluded on
+      # purpose and for different reasons:
+      #   - "unauthenticated" (401): a browser fleet with expired sessions
+      #     produces a steady 401 rate with no attacker present.
+      #   - "filtered": counts the silent-filter tier, which is the platform
+      #     working correctly — its rate tracks event volume, not attack
+      #     volume, and alerting on it would page someone every time a
+      #     project with restricted visibility had traffic.
+      #
+      # 1 refusal/second averaged over the rate window. Human use does not
+      # produce that; a script, a misconfigured client, or credential
+      # stuffing does. KNOWN LIMIT: a slow, low-rate probe stays under this
+      # bar. This threshold is a starting point and should be tuned against
+      # real traffic — it is the one rule here whose number has no cadence
+      # constant to derive it from.
+      #
+      # for: 2m, SHORT on purpose. The expression already averages over ten
+      # minutes, so the "sustained" work is done by the rate window; a long
+      # hold on top of it would only delay detection. The same reasoning
+      # applies to every ratio rule in this file, and it is why none of them
+      # carries a hold as long as its own rate window.
+      - alert: PostPermissionDenialsElevated
+        expr: sum(rate(post_permission_denials_total{decision="forbidden"}[10m])) > 1
+        for: 2m
+        labels:
+          severity: P2
+        annotations:
+          summary: "403 refusals are running at {{ $value }}/s"
+          description: >-
+            The API is refusing more than one request per second for ten
+            minutes. Break down by surface to find where: surface="api" is
+            the HTTP boundary, surface="inbox" is the fan-out filter. A
+            sudden start with a single credential repeated in the logs is a
+            probe; a flat rate that began after a deploy is more likely a
+            permission change that revoked something a client still uses.
