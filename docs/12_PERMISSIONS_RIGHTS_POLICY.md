@@ -12,6 +12,10 @@ Public Project：accepted RSG 与公开研发历史可见；Blob/data access 可
 
 Private Project：project/RSG/private blobs 默认不可见；可显式 Publish Asset/Knowledge/Attestation。
 
+**已发布 attestation 的可见面**：V1 的 attestation 页面**只按编号（`pid`）可达**，不提供列表、
+搜索或导航入口。「只有知道编号才能打开」是**产品决定**，不是缺口（`L3-④` 裁定，`docs/02` §4）；
+新增任何发现面都是一次可见性扩大，须走 §3。
+
 ## 3. 不扩大可见性原则
 
 任何 private→public、restricted→open、named access→public 都要求有权限的人显式确认，并产生 audit/event。Agent/MCP 不得自动执行此类扩大操作。

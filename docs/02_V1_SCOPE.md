@@ -44,12 +44,15 @@ V1 必须证明三件事：
 ### Open Network
 - Explore Public Projects/Assets/Knowledge/People/Organizations。
 - Public web access without login。
-- Search the network，生成 Evidence-backed Research Answer。
+- Search the network，生成 Evidence-backed Research Answer。**搜索与 Research Answer 一律要求登录**
+  （`L3-①` 裁定：不改）；匿名只可见公开页面本身。
 - Open Contribution Opportunity。
 - External contribution → PR → credit。
 
 ### Agent interface
-- MCP/API 读写科研状态。
+- Semantic HTTP API（OpenAPI-first）读写科研状态。
+- MCP / Agent 工具面 **V1 不含**：`specs/mcp/tools.json` 与 `docs/47` 是 V1.x 的设计输入，
+  不是 V1 交付物（`L3-③` 裁定，见 §4）。
 - Governance 操作（merge/publish/visibility）限制为 Web 或显式 approval path。
 - Git Compatibility Mode。
 
@@ -59,6 +62,17 @@ V1 必须证明三件事：
 
 ## 4. V1 明确不做
 
+> §4 的每一条都是**范围裁定**，不是「还没做」：列在这里的东西 V1 的规格与契约都不承诺它。
+> 本节由 owner 于 2026-09-23 裁定（`tasks/decisions.md` ㊻，五条 `L3` 裁定）。
+
+- **把平台内容发送到平台之外的第三方服务**（模型、向量、分析）。V1 只保留接口位置、
+  测试用确定性假件、不接线；跨出平台的数据分类规则见 `docs/55`（`L3-⓪`）。
+- **面向用户的大文件上传入口**：契约不声明 `blobs:request-upload` / `blobs/{blobId}:finalize`，
+  Web 不含上传 UI；V1 的 blob 只可能由平台内部流程产生（`L3-②`）。
+- **MCP / Agent 工具面**：`specs/mcp/tools.json` 声明的 21 条工具与 `docs/47` 是 V1.x 设计，
+  V1 不交付、不接线（`L3-③`）。
+- **公开声明的发现面**：attestation 页面只有知道编号 `pid` 才能打开，不提供列表、搜索或
+  任何导航入口；「只有知道编号才可达」是产品决定，不是缺口（`L3-④`）。
 - 自动迁移旧 GitHub/GitLab/NAS/ELN/LIMS 项目。
 - 自建计算/HPC/实验执行层。
 - Federation / self-hosted node 网络互联。

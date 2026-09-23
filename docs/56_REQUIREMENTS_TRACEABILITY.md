@@ -12,7 +12,8 @@
 | Open contribution | 13/14 | T0803–T0810 | D |
 | Contribution Profile | 13 | T0807–T0809 | D |
 | Search Answer | 14 | T0901–T0908 | E |
-| MCP/Agent | 15/47 | T1205 + 各 semantic API task | G |
+| Semantic API（HTTP） | 22 | T1205 + 各 semantic API task | G |
+| MCP 工具面 | 15/47 | 无 —— **V1 不含**（`docs/02` §4，`L3-③`） | — |
 | Git compatibility | 16 | T0301–T0309 | G |
 | Events/Impact | 18 | T1001–T1007 | H |
 | Canonical MOF flow | 34 | T1201–T1202 | I |

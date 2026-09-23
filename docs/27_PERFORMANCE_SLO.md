@@ -21,3 +21,6 @@ V1 是工程目标，不承诺公网 SLA，但应满足以下开发验收。
 
 ## Blob
 支持 multipart upload；单 blob V1 目标至少 10GB（具体 cloud limit adapter 化）。Web preview 只对安全/合理大小生成。
+
+**V1 范围**：V1 不含上传入口、也没有生产 blob 写入路径（`L3-②`，`docs/02` §4；证书
+「剩余风险」里同名的那一条）——本节是 V1.x 的容量基线，不构成 V1 的欠账。

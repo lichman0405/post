@@ -231,26 +231,6 @@ paths:
         - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '201': {description: Evidence assertion created}
-  /projects/{projectId}/branches/{branchId}/blobs:request-upload:
-    post:
-      summary: Request signed upload for a scientific-context blob
-      parameters:
-        - $ref: '#/components/parameters/ProjectId'
-        - $ref: '#/components/parameters/BranchId'
-      responses:
-        '200': {description: Upload URL and provisional blob id}
-  /projects/{projectId}/branches/{branchId}/blobs/{blobId}:finalize:
-    post:
-      summary: Finalize and attach uploaded blob to a scientific object
-      parameters:
-        - $ref: '#/components/parameters/ProjectId'
-        - $ref: '#/components/parameters/BranchId'
-        - name: blobId
-          in: path
-          required: true
-          schema: {type: string}
-      responses:
-        '200': {description: Attached}
   /projects/{projectId}/branches/{branchId}:validate:
     post:
       summary: Validate branch at PR/main/release/asset gate

@@ -24,6 +24,12 @@
 
 private bucket/object encryption、signed URL 短 TTL、Content-Disposition 安全、恶意文件扫描 hook、HTML/SVG active content sandbox、preview sanitization。
 
+**V1 范围**：V1 不含用户可见的上传入口（`L3-②`，`docs/02` §4），本节要求适用于 V1 内部流程
+产生的 blob 与 V1.x 的上传路径；下载侧（signed URL、access policy）V1 照常适用。
+
+**出平台**：V1 不把平台内容发送到平台之外的第三方服务（模型、向量、分析）。分类规则与
+「哪一级数据永不出平台」见 `docs/55`（`L3-⓪` 裁定）。
+
 ## 7. Web
 
 CSP、CSRF、XSS escape、secure headers、SameSite、rate limiting、login brute force protection、SSRF guard for External Reference fetch、URL allow/deny strategy。

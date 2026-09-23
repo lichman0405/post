@@ -1,5 +1,7 @@
 {
   "version": 1,
+  "scope": "post-v1",
+  "scope_note": "docs/02_V1_SCOPE.md section 4 and tasks/decisions.md 46: V1 ships no MCP tool surface (ruling L3-3, 2026-09-23). This catalogue and docs/47 are V1.x design inputs, not V1 deliverables; the machine definition stays published so V1.x starts from a reviewed surface rather than a blank page.",
   "tools": [
     {"name":"project.get","mode":"read","args":["project_id"]},
     {"name":"project.list","mode":"read","args":["scope","cursor"]},

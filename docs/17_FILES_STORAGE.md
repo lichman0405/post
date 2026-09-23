@@ -16,6 +16,10 @@ Blob 以 content hash + blob id 标识。记录 size、media type、storage key�
 
 ## 4. Upload path
 
+**V1 不含用户可见的上传入口**（`L3-②` 裁定，`docs/02` §4）：契约不声明 `blobs:request-upload` /
+`blobs/{blobId}:finalize`，Web 无上传 UI，V1 的 blob 只可能由平台内部流程产生。以下约束
+对 V1.x 的上传路径与任何内部写入同样成立。
+
 上传必须从科研上下文发生：Experiment raw data、Calculation output、Dataset files、Protocol attachment、Agent semantic operation。所有 finalize 必须指定 object/branch/purpose。
 
 ## 5. Download

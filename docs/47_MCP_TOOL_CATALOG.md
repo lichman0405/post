@@ -1,5 +1,9 @@
 # MCP Tool Catalog（说明版）
 
+> **V1 不含 MCP 工具面**（`L3-③` 裁定，`docs/02` §3/§4）：本目录是 V1.x 的设计输入，
+> V1 不交付、不接线（`cmd/mcp-server` 的 `/mcp` 按设计返回 501）。机器定义因此保留原样，
+> 并在 `specs/mcp/tools.json` 里带 `"scope": "post-v1"` 标记。
+
 机器定义：`specs/mcp/tools.json`。
 
 ## Read
