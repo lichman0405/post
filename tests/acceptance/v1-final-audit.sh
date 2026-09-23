@@ -16,9 +16,12 @@
 #      把**全部**出现收成集合、要求集合里只有一个元素（T1210 要求 4d）：
 #      说对一次不算数，得每一处都说对。适用对象包括登记数两句、台账分布那一句、
 #      以及**基准行**（头部说对、正文留一条旧 SHA 也算错）；
-#   6. 两个「不许手写」的计数：§0 的 L3 条数由报告与台账两边的编号集合数出来
-#      （两边必须相等），门层的「几通过 / 几未通过」由报告自己的处置行数出来——
-#      判定与统计必须一致（T1210 要求 4b）。
+#   6. 两个「不许手写」的计数：§0 的 L3 由报告与台账两边的编号集合数出来
+#      （两边必须相等），**每一条还要有自己的 `**裁定**：` 行**（行数 == 点名数，
+#      T1214）；门层的「几通过 / 几未通过」由报告自己的处置行数出来——判定与统计
+#      必须一致（T1210 要求 4b），**未通过的门名只在未通过数 > 0 时出现，且由位置
+#      配对点到真正的那些门**（T1214：写死的「（Gate G）」在判定翻面后会把
+#      「没有未通过的门」与「Gate G 未通过」印在同一句里）。
 #
 # 它是**基准快照**（snapshot）校验器，不是常驻检查：报告是对某一棵树的证书。
 # 报告的「生成基准」与当前 HEAD 不符时（合并、落账或任何一次 HEAD 前进之后必然如此），
@@ -203,8 +206,14 @@ collect_all() { # collect_all WHAT REGEX EXPECTED
   fi
 }
 
-# 10 个 Gate 标题
-for gate in "Gate A" "Gate B" "Gate C" "Gate D" "Gate E" "Gate F" "Gate G" "Gate H" "Gate I" "Development System Gate"; do
+# 10 个 Gate 标题。这个数组是**一处定义、三处用**：
+#   1. 下面这个 require_marker 循环（每节标题都在）；
+#   2. 第 5.3 节那两条「几通过 / 几未通过」的**位置配对**——第 N 条处置行属于第 N 个标题
+#      （报告里各节处置行的出现顺序与这个数组一致，T1214 在实跑里核对过，见报告第 6 节）；
+#   3. 未通过时**点名**的那串门名。
+# 顺序与报告一致是这条检查的前提：谁排前面，谁就领走第一条处置行。
+GATE_TITLES=("Gate A" "Gate B" "Gate C" "Gate D" "Gate E" "Gate F" "Gate G" "Gate H" "Gate I" "Development System Gate")
+for gate in "${GATE_TITLES[@]}"; do
   require_marker "### $gate"
 done
 
@@ -218,6 +227,21 @@ require_marker "产品的 blob 写入路径缺失"
 require_marker "reopen 在生产里没有入口"
 require_marker "部署的 search 没有接任何 planner / embedder / answer provider"
 require_marker '`rddev worker collect` 的证据没说清它评了什么'
+
+# Gate G 按**范围豁免**改判（T1214，owner 五条 L3 裁定）：豁免必须**引规格**，不是引自己。
+# 这四条钉的是豁免的书面依据（`docs/02` §4 的三条范围裁定由上面那两句引文覆盖，
+# `docs/56` 与 `docs/47` 与 `specs/mcp/tools.json` 的 `scope` 标记各钉一处），
+# 外加那一行的判定格本身——把 G1 改回「未通过」或改成一个含糊的词，这里就红。
+require_marker "| G1 | MCP semantic tools 完整且权限正确 | **范围豁免**"
+require_marker "docs/56_REQUIREMENTS_TRACEABILITY.md"
+require_marker "docs/47_MCP_TOOL_CATALOG.md"
+require_marker '"scope": "post-v1"'
+
+# blob 那条风险按 `L3-②` 重新定性（T1214）：**事实不变，定性变了**。
+# 「范围外，不是欠账」是这一条的新定性，V1.x 的前向说明必须一起在（它同时是
+# 将来立账时的前提，㊻ §6 点名了这一点）。
+require_marker "范围外，不是欠账"
+require_marker "未被使用的上传文件多久清掉"
 
 # T1209 落地后的缺席清单（T1210 重写的那一句）：SAST 与 SBOM 已是总门里的
 # 实检行、容器扫描是**有守卫的缺席**并有一份**书面风险接受**。三块都要在：
@@ -347,11 +371,17 @@ if [ "$passed_without_evidence" != "0" ]; then
   fail=1
 fi
 
-# §0 的「N 条 L3 未获裁定」不许手写：脚本自己从两个文件里数。
+# §0 的「N 条 L3 已全部获得裁定」不许手写：脚本自己从三个东西里数。
 #   左半边 = 报告第 0 节点名的 L3 编号集合（报告必须逐条点名，不能只报个数）；
 #   右半边 = 台账（tasks/decisions.md）里出现过的 L3 编号集合。
 # 两个集合必须相等，且报告里那句计数的措辞必须等于**数出来的**那个数。
 # 这样「漏登记一条 L3」与「条数写错」两种病各有一半会红。
+#
+# T1214：owner 在 2026-09-23 把五条全部裁定，所以 §0 那句「几条**未获裁定**」要求一句
+# 已经不成立的话。改成数**裁定行**，而不是把句子换个说法：
+#   数 §0 里以 `**裁定**：` 起头的行数（= 逐条点名过的裁定条数），
+#   要求它**等于**同一节里点名的 L3 标签数——「点名了却没说裁定结果」「说了裁定却漏点名」
+#   两个方向都会红。措辞由上面那个 L3_WORDS 拼出来，句子里那两个数一个都不许手写。
 l3_in_report="$(awk '/^## 0\./,/^## 1\./' "$REPORT" | grep -oE 'L3-[⓪①②③④⑤⑥⑦⑧⑨]' | sort -u)"
 l3_in_ledger="$(grep -oE 'L3-[⓪①②③④⑤⑥⑦⑧⑨]' "$ROOT/tasks/decisions.md" | sort -u)"
 if [ "$l3_in_report" != "$l3_in_ledger" ]; then
@@ -364,7 +394,15 @@ if [ "$l3_in_report" != "$l3_in_ledger" ]; then
 fi
 l3_count="$(echo "$l3_in_report" | grep -c .)"
 L3_WORDS=(零 一 二 三 四 五 六 七 八 九)
-require_marker "**${L3_WORDS[$l3_count]}条 L3 至今未获裁定**"
+
+# 裁定行的条数：§0 里以 `**裁定**：` 起头的行（每一条 L3 一行，句式见报告 §0）。
+# 不写成 `grep -c .` 那种「数非空行」——这里数的正是那个句式本身。
+l3_rulings="$(awk '/^## 0\./,/^## 1\./' "$REPORT" | grep -cE '^\*\*裁定\*\*：' || true)"
+if [ "$l3_rulings" != "$l3_count" ]; then
+  echo "FAIL: the report's section 0 names $l3_count L3 label(s) but carries $l3_rulings ruling line(s) (a line is one that starts with **裁定**：) — every named L3 needs its own ruling line" >&2
+  fail=1
+fi
+require_marker "**${L3_WORDS[$l3_count]}条 L3 已全部获得裁定**"
 
 # 门层的「几通过 / 几未通过」也不许手写，必须与各节自己的判定一致
 # （T1210 要求 4b：判定与统计必须一致）。数法是数报告自己的**处置行**：
@@ -388,7 +426,35 @@ if [ "$gates_disposed" != "$GATES_TOTAL" ]; then
   fail=1
 fi
 gates_passed=$((gates_disposed - gates_failed))
-require_marker "Gate 层面：**${gates_passed} 条「通过」、${gates_failed} 条「未通过」（Gate G）**"
+
+# **只有真的有未通过的门时才点名，点的是数出来的那些门**（T1214 修）。
+# 原来这里把门名写死成「（Gate G）」，理由是当时确实只有 Gate G 未通过。T1214 把 Gate G
+# 按范围豁免改判之后，未通过数变成 0，而那句写死的措辞会把「没有未通过的门」和
+# 「Gate G 未通过」印在同一句里——**判定变了而措辞的硬编码没跟上**，正是这份证书反复
+# 被咬的那一类病。改法是让名字跟着**数出来的判定**走：
+#   - 数法一个字没动（同上：先抹掉排版再数，判定与统计必须一致）；
+#   - 门名由**位置配对**得出——报告里第 N 条处置行属于 GATE_TITLES 的第 N 个标题；
+#   - 未通过数为 0 时，那句里**不带括号、不点任何门名**。
+# 两个方向都被钉住：某节判「未通过」而统计句写 0 → 红；统计句写 1 却没点出是哪一门 → 红。
+# 不通过字面量换绿（这里没有任何字面门名可写）。
+failed_gates=""
+gate_index=0
+while IFS= read -r disposition; do
+  [ -n "$disposition" ] || continue
+  if [ "$gate_index" -lt "$GATES_TOTAL" ]; then
+    case "$disposition" in
+      未通过*) failed_gates="${failed_gates}${failed_gates:+, }${GATE_TITLES[$gate_index]}" ;;
+    esac
+  fi
+  gate_index=$((gate_index + 1))
+done <<< "$dispositions"
+
+if [ "$gates_failed" -eq 0 ]; then
+  stats_marker="Gate 层面：**${gates_passed} 条「通过」、0 条「未通过」**"
+else
+  stats_marker="Gate 层面：**${gates_passed} 条「通过」、${gates_failed} 条「未通过」（${failed_gates}）**"
+fi
+require_marker "$stats_marker"
 
 # 报告引用的每个数字都必须在脚本生成的计数块里（--emit-tables 的产物，
 # 逐条比对；报告手写一个数字而与台账不符，这里就红）
