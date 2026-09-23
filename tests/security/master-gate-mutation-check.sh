@@ -71,6 +71,14 @@ cd "$ROOT"
 PG_URL="${POSTGRES_TEST_ADMIN_URL:-postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post}"
 REDIS_ADDR="${POST_G3_REDIS_ADDR:-127.0.0.1:6379}"
 
+# The tool pins, for the one hint this script prints. It used to name the
+# scanner with no version at all (`@latest`), which is how a local run got a
+# scanner nobody chose — see ops/security/tool-versions.sh and
+# 'make security-tools'.
+VERSIONS="$ROOT/ops/security/tool-versions.sh"
+# shellcheck source=/dev/null
+. "$VERSIONS" || { echo "master-gate-mutation-check: cannot read $VERSIONS" >&2; exit 2; }
+
 WORK="$(mktemp -d)"
 SCRATCH="$WORK/tree"
 mkdir -p "$SCRATCH"
@@ -82,7 +90,7 @@ fail() { printf 'FAIL %s\n' "$*"; FAILS=$((FAILS+1)); }
 ok()   { printf 'ok   %s\n' "$*"; }
 step() { printf '\n== %s ==\n' "$*"; }
 
-GOVULNCHECK_HINT="go install golang.org/x/vuln/cmd/govulncheck@latest"
+GOVULNCHECK_HINT="go install golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION (or: make security-tools)"
 for tool in tar python3 go sha256sum govulncheck; do
   command -v "$tool" >/dev/null 2>&1 || {
     echo "master-gate-mutation-check: $tool is not on PATH; the mutations cannot be run and a skip is not a pass." >&2
@@ -106,27 +114,35 @@ fi
 
 # ---------------------------------------------------------------------------
 # The copy, and the two manifests that make "the same tree" checkable.
+#
+# ONE EXCLUSION LIST, and both halves read it. They used to be written out
+# twice by hand — tar's --exclude flags on one side, a chain of `-not -path`
+# tests on the other — and they had already drifted: tar left `out` out at any
+# depth while the manifest left out only `./out/*`, so a nested `pkg/out/file`
+# appeared in the manifest and never in the copy. The comparison below then
+# reported "the copy differs from the tree under review before any mutation",
+# about a tree nothing had touched. A false red from the check whose whole job
+# is detecting tampering is worse than no check at all: it teaches the reader
+# that a red here is noise, and the next real one is read as more of it. The
+# names are excluded at ANY depth on both sides (`-prune` on the walk,
+# `--exclude=<name>` on the copy, which matches a path component at any level);
+# add a name here and both sides move together.
 # ---------------------------------------------------------------------------
+EXCLUDED_NAMES=(.git node_modules .next out .venv __pycache__)
+
 tree_manifest() { # tree_manifest <dir> > manifest
-  # This list has to mirror the tar copy's exclusions exactly: a directory the
-  # copy does not carry must not be in the manifest either, or the check below
-  # reports "the copy differs" about the files the copy was never meant to
-  # have. `.venv` nests — `services/scientific-adapter/.venv`, which
-  # `make security-tools` and `make bootstrap` both create, and which the
-  # gate's `sbom-python` row requires — so it needs the `*/` pattern too, as
-  # node_modules and .next already have.
-  ( cd "$1" && find . -type f \
-      -not -path './.git' -not -path './.git/*' \
-      -not -path './node_modules/*' -not -path '*/node_modules/*' \
-      -not -path './.next/*' -not -path '*/.next/*' -not -path './out/*' \
-      -not -path './.venv/*' -not -path '*/.venv/*' \
-      -not -path '*/__pycache__/*' \
-      -print0 | sort -z | xargs -0 sha256sum )
+  local dir="$1" args=() name
+  for name in "${EXCLUDED_NAMES[@]}"; do args+=( -name "$name" -o ); done
+  unset 'args[${#args[@]}-1]'
+  ( cd "$dir" && find . \( "${args[@]}" \) -prune -o -type f -print0 \
+      | sort -z | xargs -0 -r sha256sum )
 }
 
+TAR_EXCLUDES=()
+for name in "${EXCLUDED_NAMES[@]}"; do TAR_EXCLUDES+=( --exclude="$name" ); done
+
 step "copy the tree under review into $SCRATCH"
-tar -C "$ROOT" --exclude=.git --exclude=node_modules --exclude=.next --exclude=out --exclude=.venv \
-  -cf - . | tar -C "$SCRATCH" -xf -
+tar -C "$ROOT" "${TAR_EXCLUDES[@]}" -cf - . | tar -C "$SCRATCH" -xf -
 # The browser and Next toolchains live in node_modules, which is not copied
 # (it is not source). The web-dependent halves of mutations 3's S8 checks get
 # the same packages through a symlink, so the copy is not a weaker tree.

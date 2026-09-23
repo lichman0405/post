@@ -26,9 +26,9 @@ bash tests/security/master-security-gate.sh --report /tmp/gate.json
 | --- | --- | --- |
 | `secret-scan` | no committed `*.env.example` holds a secret — and the detector's own planted-secret failing mode runs in the same row, so a scanner that stopped scanning goes red | go |
 | `permission-negative-e2e` | a private project stays invisible (`TestE2EPrivacyNegative`) | go |
-| `owasp-smoke` | headers value for value, CORS refusals, anonymous write 401, rate-limit boundary, fail-closed — against the real API binary, real PostgreSQL, real Redis | go, python3, psql, curl, redis |
+| `owasp-smoke` | headers value for value, CORS refusals, anonymous write 401, rate-limit boundary, fail-closed — against the real API binary, real PostgreSQL, real Redis | go, python3, psql, curl, redis, `redis-cli` (S0 resets its own rate-limit buckets and reads them back), node (S8 asserts the web header set through `node --test`) |
 | `a11y` | axe (wcag + best-practice) at two viewports plus keyboard focus traversal, in real Chromium | node, `web-deps` (apps/web/node_modules) |
-| `deploy-template` | the staging template's 19 rules, including the rule-refuting self-test and the planted-secret mutation check | python3, file |
+| `deploy-template` | the staging template's 19 rules, including the rule-refuting self-test and the planted-secret mutation check | python3, `py:yaml` (PyYAML — the template is YAML), go, file |
 | `vuln-go` | `govulncheck ./...` — Go dependency CVEs | govulncheck |
 | `vuln-node` | `pnpm audit --audit-level=low` — the web workspace | pnpm |
 | `vuln-python` | `uv audit` — the scientific adapter | uv |
@@ -38,13 +38,64 @@ bash tests/security/master-security-gate.sh --report /tmp/gate.json
 | `sbom-go` | a CycloneDX document built from `go.mod` by `cyclonedx-gomod`, licence evidence included: it parses, it has components, and it witnesses the key Go dependencies of `docs/40` | go, cyclonedx-gomod |
 | `sbom-node` | the same for the pnpm workspace, from the installed tree (`pnpm sbom`, CycloneDX 1.5) | pnpm, the workspace's `node_modules` |
 | `sbom-python` | the same for the adapter: `uv export` plus each installed distribution's own `METADATA` for licences | uv, the adapter's `.venv` |
-| `license-audit` | every component of all three SBOMs judged against `ops/security/license-allowlist.json`: a deny-class licence is red naming package, licence and version, and anything the row cannot decide is printed rather than passed | python3, the three `.sbom/*.cdx.json` (the `sbom-*` rows write them first — this row's `requires` names them) |
-| `container-scan` | a *guarded absence*, not a scan: green only while the tree has no container build file, printing the `no-dockerfile` tree claim it rests on — and red the moment a `Dockerfile`/`Containerfile` appears, because then there is an image to scan and this row has to be replaced | python3, file |
+| `license-audit` | every component of all three SBOMs judged against `ops/security/license-allowlist.json`. Three verdicts, and the same three are written in that file's `policy.no_licence` and in `license_audit.py`: a deny-class or unlisted licence is **red**; a component named in `unlicensed` **with** a checkable witness is counted as licensed by that file; a component named with **no** witness is printed as `LICENCE UNVERIFIED` on every run and stays out of the licence counts — printed, never passed off as fine, and never cleared. `colorama` is the live case (uv.lock locks it to `sys_platform == 'win32'`, so no distribution is installed on Linux and there is no METADATA to read) | python3, the three `.sbom/*.cdx.json` and their `.run` stamps (the `sbom-*` rows write them first — this row's `requires` names them) |
+| `container-scan` | a *guarded absence*, not a scan: green only while the tree has no container build file, printing the `no-dockerfile` tree claim it rests on and the directories it does **not** walk with the reason for each — and red the moment a `Dockerfile`/`Containerfile` appears where the walk can see it, because then there is an image to scan and this row has to be replaced | python3, file |
 | `absence-manifest` | `ops/security/absent-checks.json` is complete, every covered item names a check that still exists, every named gap still shows its gap, and every guarded absence names a guard the gate really registers | python3 |
 
 Exit codes: `0` all rows green · `1` a row failed (or was unsubstantiated) ·
 `2` a row was NOT ASKED · `3` usage/registry error · `4` the gate's own
 accounting failed its self-test.
+
+## The directories the container scan does not walk
+
+The `container-scan` row's claim is "no container build file in the tree", and
+that claim is about the directories it *does* walk. It prints the ones it
+skips, with the reason for each, on every run — a walk with exclusions whose
+exclusions nobody sees is a claim nobody can check, and "I put a Dockerfile in
+`post-wt/` and the row stayed green" has to be answerable from the row's own
+output. So each of these is printed, and each is then walked *on its own* for
+container build files: anything found there is printed too, named, as a file
+that lives in a directory listed here and was not judged as this tree's. It
+does not turn the row red — an installed package's or another checkout's
+Dockerfile is not this tree's file — and it does not vanish either.
+
+| directory | why it is not this tree's content |
+| --- | --- |
+| `.git` | the repository's own object store: compressed objects and refs, and the one directory whose file names say nothing about the checkout |
+| `.rddev` | the orchestrator's runtime state — and other Workers' worktrees, each a whole checkout of this repository. A Dockerfile in another Worker's tree is not this tree's file, and walking it would let one branch decide another task's gate |
+| `post-wt` | the Supervisor's own worktrees (`rddev branch create --worktree post-wt/...`): separate checkouts, same reason as `.rddev` |
+| `node_modules` | installed npm packages: a Dockerfile inside a dependency's published tarball is the dependency's. `ops/runbook-verify.py`'s walk leaves installed trees out for the same reason |
+| `.venv` | the scientific adapter's installed Python packages (same reason as `node_modules`) |
+| `.next` | the web app's generated build output |
+| `.sbom` | the CycloneDX documents this gate writes and reads back (generated, gitignored: `sbom.sh`) |
+| `.backup-dr` | the backup/DR drill's artifacts — database dumps, blob copies, git mirrors — a copy of an environment rather than a source change (`docs/37_BACKUP_DR.md`) |
+| `.dev` | dev-stack runtime scratch: `POST_MAIL_SINK_DIR` defaults to `.dev/mail`, and the sink writes whole notification bodies there |
+
+The same list, with the same reasons, is printed by `tests/security/container-scan.sh`,
+and built from one `PRUNED` array there so the walk and the report cannot drift
+apart.
+
+## Documents from an earlier run
+
+Two rows judge artifacts another row produced: `license-audit` reads the three
+`.sbom/*.cdx.json` the `sbom-*` rows write, and those rows write them *in the
+same run*. The gate exports `POST_GATE_RUN_ID` to every row, each `sbom-*` row
+stamps the id of the run that wrote each document beside it (`.sbom/<face>.run`),
+and `license-audit` compares the stamps with its own run id. They match in a
+full gate run. Under `--only license-audit`, with an `sbom-*` row NOT ASKED, or
+with a generator run by hand, they do not — and the row says so on its own `ok`
+line and again at the end of its output, because a green line about the tree an
+earlier run saw is exactly the kind of green this gate exists to refuse. It does
+not fail for it: the verdicts are still about the bytes on disk, and a row that
+went red whenever it was run alone would be unusable. To make hand-run pieces
+agree, give them one id:
+`POST_GATE_RUN_ID=myrun bash tests/security/sbom.sh go && POST_GATE_RUN_ID=myrun python3 tests/security/license_audit.py`.
+
+`POST_SBOM_REUSE` is the mutation hook that validates the document on disk
+instead of regenerating it, and its word list is exact: only `1`, `true` or
+`yes` mean reuse. Everything else — unset, empty, `0`, `no`, a typo —
+regenerates, because `POST_SBOM_REUSE=0` reads as "do not reuse" to a human and
+a hook whose off switch turns it on is a hook that lies.
 
 ## Two different kinds of "not here"
 

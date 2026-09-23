@@ -26,6 +26,14 @@
 # failing install rather than a green gate running yesterday's tool. Exit code
 # 1 with the command that failed, 2 for usage.
 #
+# One tool is ASSERTED WITHOUT BEING INSTALLED — uv. It is a prerequisite of
+# this script rather than one of its products (it installs bandit, and it
+# syncs the adapter's environment three steps below), so the assertion is
+# about what is already on PATH: the wrong uv stops the install here instead
+# of letting the Python SBOM and the vuln-python audit run under a generator
+# nobody chose. `pip install uv==<pin>` or `uv self update <pin>` is the fix
+# the failure message names.
+#
 # WHAT IT ALSO INSTALLS (and why those are not optional)
 # -----------------------------------------------------
 #   * pnpm's workspace dependencies (`pnpm install --frozen-lockfile`) — the
@@ -79,10 +87,33 @@ install_go_tool() { # install_go_tool <binary> <install-path> <module> <version>
 have go || die "go is not on PATH (https://go.dev/dl)"
 install_go_tool gosec github.com/securego/gosec/v2/cmd/gosec github.com/securego/gosec/v2 "$GOSEC_VERSION"
 install_go_tool cyclonedx-gomod github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod github.com/CycloneDX/cyclonedx-gomod "$CYCLONEDX_GOMOD_VERSION"
+# The vuln-go row's scanner. Installed here and asserted below exactly like
+# the other two: before this, the only place its version was written down was
+# the CI job, so a local run of the gate used whatever `@latest` had resolved
+# to on that machine.
+install_go_tool govulncheck golang.org/x/vuln/cmd/govulncheck golang.org/x/vuln "$GOVULNCHECK_VERSION"
+
+# --- the Python toolchain (uv) ---------------------------------------------
+# uv is assert-only: it is a PREREQUISITE of this script (it is the installer
+# below, and the adapter's environment comes from `uv sync`), so there is
+# nothing here to install it from — pip-installing a Python tool from a shell
+# script that assumes it may already exist is how two uv installs end up on
+# one PATH. What this script does instead is refuse to go on with the wrong
+# one, because three verdicts come out of this binary: the document shape the
+# licence audit judges (`uv export`), the Python dependency audit (`uv audit`)
+# and the bandit install below.
+step "uv $UV_VERSION (asserted against ops/security/tool-versions.sh)"
+have uv || die "uv is not on PATH — install the pinned one first (pip install uv==$UV_VERSION, or https://docs.astral.sh/uv)"
+UV_PATH="$(command -v uv)"
+HAVE="$(uv --version 2>/dev/null | awk '{print $2}')"
+[ "$HAVE" = "$UV_VERSION" ] || die "uv at $UV_PATH is ${HAVE:-unknown}, the pin is $UV_VERSION \
+(ops/security/tool-versions.sh). uv decides the shape of the document the licence audit judges and is the \
+instrument of the vuln-python row — a scan and an inventory from an unknown generator are not evidence. \
+Install the pinned one: pip install uv==$UV_VERSION, or 'uv self update $UV_VERSION'."
+echo "   $UV_PATH -> $HAVE"
 
 # --- Python scanner --------------------------------------------------------
 step "bandit $BANDIT_VERSION (uv tool install)"
-have uv || die "uv is not on PATH (https://docs.astral.sh/uv)"
 uv tool install --force "bandit==$BANDIT_VERSION" || die "uv tool install bandit==$BANDIT_VERSION failed"
 BANDIT="$(command -v bandit)" || die "bandit is not on PATH after 'uv tool install' — uv's tool bin directory (~/.local/bin by default) has to be on PATH"
 HAVE="$(bandit --version 2>&1 | awk '$1=="bandit" {print $2; exit}')"
@@ -125,10 +156,11 @@ versions, so a different one is a red row, not a warning:
 
   gosec            $(go version -m "$(command -v gosec)" 2>/dev/null | awk '$1=="mod" && $2=="github.com/securego/gosec/v2" {print $3}')  (read out of the binary; gosec's own -version prints "dev" for a go-installed one)
   cyclonedx-gomod  $CYCLONEDX_GOMOD_VERSION
+  govulncheck      $GOVULNCHECK_VERSION
   bandit           $BANDIT_VERSION
   eslint           $ESLINT_VERSION (+ eslint-plugin-security $ESLINT_PLUGIN_SECURITY_VERSION, typescript-eslint $TYPESCRIPT_ESLINT_VERSION)
   pnpm             $PIN (package.json)
-  uv               $(uv --version | awk '{print $2}')
+  uv               $UV_VERSION (asserted above: this script does not install it)
 
 Next: bash tests/security/master-security-gate.sh
 EOF
