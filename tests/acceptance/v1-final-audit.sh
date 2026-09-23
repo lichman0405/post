@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
-# V1 最终验收审计脚本（T1207 起，T1210 刷新）
+# V1 最终验收审计脚本（T1207 起，T1210 刷新，T1213 重钉）
 #
-# 这个脚本做五件事：
+# 这个脚本做六件事（T1213 复核 nit：这里原写「五件事」，而下面的清单在 T1210
+# 加进第 5、6 条之后已经是六条——数一遍清单就知道，改的是这句注释）：
 #   1. 统计 v1_required=true 且未 merged 的任务，排除 T1207 自身；
 #   2. 统计 blocking=true 与各 status 的测试条数，并把**计数块原样打印**——
 #      普通运行与 --emit-tables 走同一个函数：一个供人读，一个供重建报告，
@@ -156,6 +157,16 @@ if [ ! -f "$REPORT" ]; then
   exit 1
 fi
 
+# require_marker MARKER — 报告里必须**逐字**出现这一串（grep -qF，整份文件里出现即算）。
+#
+# **这条保证的边界（T1213 定稿时重跑探针实测踩到，留在这里给下一位改写者）**：
+# 它问的是「整份报告里有没有这一串」，不是「该写这一串的那一节写的是不是这一串」。
+# 于是**报告里任何一处逐字引文都可能满足它所演示的那条断言**——本报告 6.5 表里
+# 为探针留证时，曾把脚本打印的 `FAIL: … missing required marker: <那一串>` 整句抄进去，
+# 那条 marker 就被这段引文自己找到，构造样本不再变红（引文把断言的械缴了：
+# 该格写着新脚本退出码 1，实测却是 0）。要抄失败信息，就把它省到不再是那条 marker 的
+# **逐字子串**（本版的做法：末段省成 `…`）；否则请改这一条的修法（例如限定出现位置），
+# 不要指望读者「知道那是引文」。同一类陷阱对下面 `collect_all` 的期望串同样成立。
 require_marker() {
   local marker="$1"
   if ! grep -qF "$marker" "$REPORT"; then
@@ -171,6 +182,14 @@ require_marker() {
 # 第 1.3 节写对、却在第 0 节写错的报告能骗过它（变异 M8 实测逃逸）。同一个事实
 # 在一个文档里说了几遍，就得几遍都说对。集合为空也走这条失败路径：没有出现
 # 同样是失败，只是失败的理由不同（不存在 ≠ 说错了，但都不许过）。
+#
+# **这条保证的边界要写明白（T1210 最终复核 nit，T1213 复核后照原样保留）**：
+# 它保证的是「**已经出现**的每一处都说对」，**不是**「该出现的地方都还在」——
+# 把某一句从 12 处删到只剩 1 处、而那一处正确，这里仍然通过（只有全部删光才红，
+# 走的是上面那条「集合为空」的失败分支）。要后者得另加**位置/条数**断言。
+# 本轮**不加**：那是把「值检查」升级成「排版检查」，条数断言在报告每次增删一句
+# 时都会红一次，红的原因与它要防的东西无关——正是这个脚本反复被红咬的那一类。
+# 所以它是一个**已知的、写在文档里的**边界，不是一处漏改。
 collect_all() { # collect_all WHAT REGEX EXPECTED
   local what="$1" regex="$2" expected="$3" found
   found="$(grep -oE "$regex" "$REPORT" | sort -u)"
@@ -206,6 +225,15 @@ require_marker '`rddev worker collect` 的证据没说清它评了什么'
 require_marker "SAST 与 SBOM 不再是缺席"
 require_marker "容器扫描是唯一剩下的缺席，而且是一条有守卫的缺席"
 require_marker "docs/adr/ADR-028-v1-ships-no-container-image.md"
+# require_marker 只断言报告**提到**这个路径，它一个字也证明不了那份书面接受还在树里
+# （T1210 最终复核 nit）。树层的那道保险在总门 `absence-manifest` 的第三条 witness
+# （`grep -c 'no-dockerfile' docs/adr/ADR-028-*.md` 非零），而**那份门不在本脚本内**；
+# 这一条是快照层的第二道：ADR 被改名或删掉时，这份校验器自己也会红，而不是继续
+# 引用一份不存在的接受。它**只加不减**：上面那条 require_marker 原样保留。
+if [ ! -f "$ROOT/docs/adr/ADR-028-v1-ships-no-container-image.md" ]; then
+  echo "FAIL: the written risk acceptance the report cites is not in the tree: docs/adr/ADR-028-v1-ships-no-container-image.md" >&2
+  fail=1
+fi
 require_marker "MIN_CHECKS=17"
 require_marker "master-security-gate: PASS — 17 check(s) ran and each printed its own evidence"
 require_marker "ok   item: container-scan — guarded absence: the 'container-scan' row of this gate is registered"
@@ -344,8 +372,16 @@ require_marker "**${L3_WORDS[$l3_count]}条 L3 至今未获裁定**"
 # 其中以 `**未通过` 起头的那些就是未通过的门数。第 5.3 节的统计句必须逐字
 # 等于**数出来的**那个数——把某节判定改成「未通过」而不同步统计，或者只改统计，
 # 两种方向都会在这里红（这与上面 L3 那一条是同一个修法：先数再比，不许手写）。
-gates_disposed="$(grep -cE '^\*\*处置\*\*：' "$REPORT")"
-gates_failed="$(grep -cE '^\*\*处置\*\*：\*\*未通过' "$REPORT")"
+# 「未通过」怎么数（T1210 最终复核 nit，T1213 修）：**先抹掉排版，再数判定**。
+# 原来只认紧跟冒号的 `**未通过`，于是 `**处置**：未通过——…`（少了那对星号）
+# 这一种写法数不到，而报告正文里已经写着「未通过」——判定与统计的一致性检查
+# 被**排版**绕过（构造样本与两次实跑见报告「修订记录」；这不是措辞洁癖：
+# 同一句话换个加粗方式就能让统计漏掉一个未通过的门，那个统计正是第 5.3 节
+# 与下面那条 require_marker 的依据）。
+# 数的是「这一节的判定是不是未通过」，与它用了哪种加粗无关。
+dispositions="$(grep -E '^\*\*处置\*\*：' "$REPORT" | sed -E 's/^\*\*处置\*\*：//; s/^[*_[:space:]]+//')"
+gates_disposed="$(printf '%s\n' "$dispositions" | grep -c .)"
+gates_failed="$(printf '%s\n' "$dispositions" | grep -c '^未通过')"
 GATES_TOTAL=10
 if [ "$gates_disposed" != "$GATES_TOTAL" ]; then
   echo "FAIL: report has $gates_disposed gate disposition line(s), want $GATES_TOTAL (one per Gate, none missing)" >&2
