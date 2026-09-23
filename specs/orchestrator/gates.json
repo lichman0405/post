@@ -123,7 +123,7 @@
           "run": "bash scripts/tests/staticcheck-unit-test.sh"
         },
         {
-          "run": "go test $(go list ./... | grep -v '/tests/integration')"
+          "run": "go test $(go list ./... | grep -v -e '/tests/integration' -e '/tests/e2e$')"
         }
       ]
     },
@@ -188,6 +188,14 @@
           "run": "make test-integration",
           "env": {
             "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post"
+          }
+        },
+        {
+          "name": "integration: e2e journeys (tests/e2e, a database is required)",
+          "run": "go test ./tests/e2e -count=1",
+          "env": {
+            "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post",
+            "POST_REQUIRE_E2E_DB": "1"
           }
         }
       ]
@@ -1168,6 +1176,11 @@
     "T1212": {
       "g3_jobs": [
         "rsg-real-services"
+      ]
+    },
+    "T1213": {
+      "g3_jobs": [
+        "mof-canonical"
       ]
     }
   }

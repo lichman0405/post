@@ -85,7 +85,7 @@ stage_go() {
   go vet ./...
   make staticcheck
   bash scripts/tests/staticcheck-unit-test.sh
-  go test $(go list ./... | grep -v '/tests/integration')
+  go test $(go list ./... | grep -v -e '/tests/integration' -e '/tests/e2e$')
 }
 
 stage_web() {
@@ -138,6 +138,11 @@ stage_integration() {
   # error instead of the loud, actionable failure this stage promises.
   bash scripts/tests/pg-ready-unit-test.sh
   make test-integration
+  # The two database journeys in ./tests/e2e skip silently when no database is
+  # reachable; POST_REQUIRE_E2E_DB=1 is the caller that makes a skip a failure
+  # (T1212's guard). tests/e2e therefore left stage_go's package list.
+  POSTGRES_TEST_ADMIN_URL="${POSTGRES_TEST_ADMIN_URL:-postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post}" \
+    POST_REQUIRE_E2E_DB=1 go test ./tests/e2e -count=1
 }
 
 if [[ -n "${CI_STAGE_SINGLE:-}" ]]; then

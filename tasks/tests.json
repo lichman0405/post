@@ -1787,9 +1787,9 @@
       "name": "final audit",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": ""
+      "status": "passed",
+      "last_run": "2026-09-23T02:57:30Z",
+      "evidence": "Supervisor ran `bash tests/acceptance/v1-final-audit.sh` -> exit 0 on 2026-09-23T02:57:30Z. Last output: COUNTS tests_skipped=0 ; COUNTS tests_blocking=181 ; ``` ; AUDIT OK: report markers present, counts match (0 unmerged, 3 not_run, 0 failed, 0 skipped, 0 passed-without-evidence). 在报告钉住的基准 115a4286 上跑（+ 本笔交付的 tests/acceptance/**）；负对照 HEAD≠基准 rc=1"
     },
     {
       "id": "T1211-TEST-01",
@@ -1797,14 +1797,24 @@
       "name": "master gate mutation check",
       "gate": "task-defined",
       "blocking": true,
-      "status": "not_run",
-      "last_run": null,
-      "evidence": ""
+      "status": "passed",
+      "last_run": "2026-09-23T02:57:34Z",
+      "evidence": "Supervisor ran `bash tests/security/master-gate-mutation-check.sh` -> exit 0 on 2026-09-23T02:57:34Z. Last output: == the working tree is byte-identical to what it was at the start == ; ok   no mutation touched the working tree (67662 file(s) hashed before and after) ; == master-gate-mutation-check: summary == ; master-gate-mutation-check: OK — six mutations (the absence manifest one in both of its shapes), six instruments that said no, and the tree left as it was found 6 个变异全部被抓住并复位（67662 个文件哈希前后一致）"
     },
     {
       "id": "T1212-TEST-01",
       "task_id": "T1212",
       "name": "e2e db guard",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "passed",
+      "last_run": "2026-09-23T02:57:38Z",
+      "evidence": "Supervisor ran `POSTGRES_TEST_ADMIN_URL=$POSTGRES_TEST_ADMIN_URL POST_REQUIRE_E2E_DB=1 go test ./tests/e2e -count=1` -> exit 0 on 2026-09-23T02:57:38Z. Last output: --- PASS: TestE2EResearchProfileHealthyCompositionAnswers200 (0.00s) ; PASS ; testdb: databases=2 templates=2 migrations=2 create=166ms migrate=837ms drop=370ms ; ok  \tgithub.com/lichman0405/post/tests/e2e\t4.559s 37 个旅程 33 通过 0 跳过 0 失败（-v 日志）；负对照：库不可达时同一命令 rc=1 并逐条报「是失败不是跳过」（t1212-e2e-nodb.log）"
+    },
+    {
+      "id": "T1213-TEST-01",
+      "task_id": "T1213",
+      "name": "certificate revision",
       "gate": "task-defined",
       "blocking": true,
       "status": "not_run",

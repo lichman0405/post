@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 154,
+  "task_count": 155,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -8827,6 +8827,76 @@
       ],
       "scope_note": "这一笔来自我自己的空窗待办清单（`tasks/window-queue.md` 的 B 条，2026-09-19 记），今天核过仍然成立，但比当时的描述**窄**：进程内的 e2e 测试在 CI 里是真跑的，**只有两个需要真库的旅程**在静默跳过。`v1_required=false`：V1 证书不依赖它，四层 Gate 的定义也不因此改变——它改的是「CI 里那两个旅程到底跑没跑」这件事的**可判性**。CI 那一半（`.github/workflows/ci.yml` 与 `specs/orchestrator/gates.json` 的步骤锁步）由 Supervisor 在合并前后来接，理由同 T1209：作业步骤两处必须逐步一致，改一处会让 `TestCIWorkflowMatchesGateSpec` 红。**依赖那六条（`T0101/T0104/T0203/T0205/T0207/T0208`）不是我随手写的**：本任务的 G3 作业是 `rsg-real-services`，而该作业的 `requires_tasks` 正是这六条——`gate_spec_test.go` 会拒一个「G3 断言了不在自己依赖里的任务」的任务（原文：the gate is red by construction），这六条与 T1205 当初承载同一作业时的写法逐字相同，且都已合并，所以不改变可派工性。",
       "supervisor_scope_narrowing": "**为什么 `internal/persistence/testdb/**` 在范围里**：那两个旅程的库是由这个包起的（`testdb.Setup` 会 `t.Fatalf`，而**跳过**发生在此之前的两次 `pgReachable` 探测里），判据只有放在实现跳过的那一层才只有一份；把它复制到 `tests/e2e` 里会变成两处各自演化。**为什么 `scripts/**` 在禁止面**：那里是验收仪器本身（`record_test_run.py` / `validate_specs.py` / `spec_version.py`），让被验收者改卷子等于让考生改分——同一口径已用在 T1206/T1208/T1211。**为什么 `.github/**` 与 `specs/**` 也在禁止面**：CI 作业的两个副本（`ci.yml` 与 `gates.json`）必须由同一个人在同一笔里改，这是 T1104 那次接线踩出来的规矩（漏一处 = 有一个 job 永远不被 `G2.runs_jobs` 跑）。"
+    },
+    {
+      "id": "T1213",
+      "phase": "P12",
+      "phase_name": "Canonical Workflow 与最终交付",
+      "title": "把 V1 证书在最终树上重钉一次：Gate H 在 T1211 的新安全仪器上重挣，返工轮已处置的四处逐条复核",
+      "v1_required": false,
+      "dependencies": [
+        "T1210",
+        "T1211",
+        "T1212"
+      ],
+      "requirements": [
+        "**先读再写，别照抄我的话。** 要读这几处：`tests/acceptance/v1-final-report.md`（证书本体，尤其**文末的「第六轮 / 第七轮」两段**——那是上一轮返工留下的自述）、`tests/acceptance/v1-final-audit.sh`（校验它的快照校验器）、`.rddev/workers/T1210-review/RESULT.superseded-run-4939114a82164d05.json`（**返工轮那次**复核的原件：1 minor + 4 nit + 4 risks，下面第 4 条的「四处」就是它）、`.rddev/workers/T1210-review/RESULT.json`（**最终**复核：verdict=approve，1 minor + 5 nit + 5 risks；它的逐条处置见下面第 6 条）、`tasks/decisions.md`（㊷ ㊸ ㊹）、以及 `tasks/tests.json`（**只读**：数条数、看 evidence）。这几处的说法若有冲突，以**你自己在树里跑出来的结果**为准，并在 RESULT 里说明冲突。",
+        "**（正题）Gate H 必须在 T1211 的仪器上重挣。** T1211 改的正是安全仪器本身（`tests/security/**`、`ops/security/**`：uv 钉版、`absent-checks.json` 的词表与守卫、工具版本、变异脚本），而证书里 Gate H 的绿是在**改动前**那套仪器上挣的（上一轮返工跑的是 `115a4286`，T1211 还没合）。要求：在**这棵树上**同一时刻跑\n```\nbash tests/security/master-security-gate.sh --report /tmp/t1213-master-gate-report.json\n```\n把**末行逐字**、退出码、`MIN_CHECKS` 的实际值、`check(s) registered` 的计数、17 行的判定、`absence-manifest` 那一行的证据行，全部贴进 RESULT，并把报告 Gate H 第 2 节的引文换成**这一次**的输出。出现任何红则本轮**停手**、把红当结论写进 RESULT（不许删旧证据了事，也不许改判定去迎合输出）。",
+        "**机械块一律由脚本重新生成，基准行必须是这棵树的真实 HEAD。** 跑 `bash tests/acceptance/v1-final-audit.sh --emit-tables`，把它的**同一次输出**里的生成注释行、生成基准行、§1.2 / §1.3 两张表、计数块**逐字**贴回报告（**不许手写**：手写的名单骗得过条数、骗不过第 4 节的名单检查；手写的计数块骗不过第 3 节的校验）。改完必须 `bash tests/acceptance/v1-final-audit.sh` 退出码 0，并把输出原文留在 RESULT。注意基准行换成本树 HEAD 之后，报告里**所有**引用旧基准 SHA 的句子（复核记录、修订记录里点名旧基准的地方）都要跟着说清楚谁是谁。",
+        "**（复核，不是重做）T1210 返工轮已处置的四处，你只负责逐条验。** 那四处是：①过期分支的出路 (a) 改成打印**报告自己钉的** SHA（`v1-final-audit.sh` 里 `report_head`）；②「走查 2106 → 2108 个文件」并写明该数随被忽略的构建产物浮动；③R14 的「全部调用者只有那一页自己」改成「**产品侧**的…」并点名 `apps/web/lib/attestations.test.mjs` 的三个调用点；④复核 nit③ 的「逐字抄录块缺收尾行」**不采纳**，理由是那一行属于该 checker 的**另一种调用方式**（非 `--selftest`）。逐条给出「我读了哪一行 / 我跑了哪条命令 / 我看到什么」的引用；**验不过就说不成立**（标成对我不利的发现），不许为了让报告好看而替它圆场。**不许重做**：它们是上一轮复核的对象，你改了就等于把「被复核的东西」换掉。",
+        "**（复核 risk③）报告里的绝对路径要作一次明确处置。** 报告里有逐字引文带着机器路径（形如 `/home/shibo/.../worktrees/T1210/...`）。在**逐字引用**里出现机器路径本身是对的（改掉就不再是逐字），但这一版必须明确选一条并**写出来**：**保留**（并在那一段标题里说明该路径属于被抄录的输出、不是报告在指路），或**脱敏**（那么标题就不能再声称逐字）。**不许**只处理一处、另一处装作没看见。",
+        "**（复核新盘）T1210 的最终复核（verdict=approve，1 minor + 5 nit + 5 risks）逐条处置：改或不改都要写明理由，改的要给自证。** 判据是**报告与校验器的一致性和可复现性**，不是好看。除 minor 那一条（它指的是 `.rddev/workers/T1210/RESULT.json`，**不在你的写入面内**——写「不改，理由：面外」即可）之外，其余五条都落在 `tests/acceptance/**`：脚本头注释说「这个脚本做五件事」而清单是六条；`require_marker` 只断言报告**提到**某个 ADR 路径、不断言该文件在树里（若加断言，给出「把 ADR 改名/删掉时它会红」的实跑原文）；报告印给读者复跑的 jq 与脚本钉的那条逐字不同；`gates_failed` 的推导只认一种排版（若改，必须给出「改前会漏判的构造样本、改后被判红」的两次原文）；`collect_all` 保证的是「已出现的每一处都说对」而不是「该出现的地方都还在」（要后者得另加位置断言——可以做，也可以写明不做）。**任何一条都不许以放宽、删除或跳过既有断言的方式通过**；改不动的，就照原样留着并在 RESULT 里点名。",
+        "**（新加一小节）「修订记录（本次重钉）」**：(a) 说明这一版是在哪棵树、哪一天重钉的，基准行因此更新；(b) **逐个门层**写明哪几层在这棵树上**重挣**了（Gate H 按上面那条、机械块按上一条、Gate I 的 MOF 引文按下面那条），哪几层是**沿用发放时**（`b6c1fb1a`）的判定——对每一个**沿用**的层给出机械理由：该层驱动的路径在 `b6c1fb1a..这棵树` 之间没有改动，附 `git diff --stat b6c1fb1a..HEAD -- <该层驱动的路径>` 的**原文**。 另外在那一节里写一句 `EXCLUDE_TASK=T1207` 的现状：它是 T1207 时期的遗留（那时报告不能把「还没合并的自己」算成未合并），今天 T1207 已合并，这条排除是**空操作**——**不许**顺手删（删了就在改判据、也在改被复核的脚本），只写清它现在是空的。",
+        "**Gate I 的引文也要是这棵树上的。** 证书里最吃重的跨边界断言是 MOF canonical workflow 全闭环；它上一轮在 `115a4286` 上跑过（50 步全绿）。这一版要求在同一棵树上再跑一次（本任务的 G3 作业就是 `mof-canonical`，它会自己跑；但报告里引的必须是**你能指出来源的那一次**运行），并把 `FAIL` 计数与退出码写进 RESULT。",
+        "**（硬线）只许写 `tests/acceptance/**`。** `tasks/**`（含台账 `tasks/tests.json`——你**只读**）、`specs/**`、`docs/**`、`.github/**`、`ops/**`、`tests/security/**`、`internal/**`、`apps/**`、`services/**`、`infra/**`、`scripts/**` 一概不许写。",
+        "**收工前把树弄干净。** 跑仪器会留下产物（`.sbom/`、`__pycache__`、`/tmp` 里的临时报告不算，树里的算）：**你造的，你都清掉**。`git status --porcelain -uall` 只许列出 `tests/acceptance/**` 内你有意改的文件；不许留下任何进程（collect 会查残留）。"
+      ],
+      "deliverables": [
+        "重钉后的 `tests/acceptance/v1-final-report.md`：基准行与两张机械表按**这棵树**重取；Gate H 的引文换成在**T1211 那套仪器**上的实跑；新增本轮的「修订记录」小节（逐层「重挣 / 沿用」）；复核 risk③ 的绝对路径作出明确处置。",
+        "`tests/acceptance/v1-final-audit.sh`：**只在必要时**改（它已由 T1210 返工轮改好并红绿自证）；若你改了，必须给出改前红、改后绿的两次原文。",
+        "RESULT：`bash tests/acceptance/v1-final-audit.sh` 退出码 0 的原文、总门在**新仪器**上同一时刻实跑的原文（rc / MIN_CHECKS / 17 行 / `NOT ASKED` 计数 / `absence-manifest` 证据行）、返工轮四处处置的复核引用、`--emit-tables` 的**同一次输出**、任何判不准的项。"
+      ],
+      "acceptance_criteria": [
+        "**最终复核的五条 + minor 一条都被点过名**：每一条给出「改 / 不改 + 理由」；改了的给出自证（含「改前会漏判的构造样本、改后被判红」这类原文），不改的点名留在原样；**没有**任何一处是靠放宽/删除/跳过断言过的。",
+        "**仪器在这棵树上说 OK**：`bash tests/acceptance/v1-final-audit.sh` 退出码 0，输出原文在 RESULT 里；基准行等于 `git rev-parse HEAD`（这棵树的真实 HEAD）。",
+        "**Gate H 在 T1211 的仪器上重挣过**：给出 `bash tests/security/master-security-gate.sh --report …` 的退出码、末行逐字、`MIN_CHECKS` 的值、`check(s) registered` 计数、17 行判定、`absence-manifest` 证据行；报告 Gate H 的引文与这次输出一致（若某项与「发放时」不同，必须说清哪个是哪次的，**不许**把旧证据删掉了事）。",
+        "**返工轮四处处置逐条复核过**：每条都有「读了哪一行 / 跑了哪条命令」的引用；其中 nit③ 的「不采纳」要么被你的实跑证实（贴出两种调用方式的差异原文），要么被你判为不成立并写明理由。",
+        "**修订记录小节存在**，且对每个「沿用」的层给出 `git diff --stat b6c1fb1a..HEAD -- <路径>` 的原文；**绝对路径**在同一节里被明确处置（保留并说明，或脱敏并改标题）。",
+        "**机械块逐字来自 `--emit-tables` 的同一次输出**（给出该次输出原文，或给出令两者相等的那条比对命令与空 diff）。",
+        "**没有越界**：`git status --porcelain -uall` 只列 `tests/acceptance/**`；台账 `tasks/tests.json` 一个字节未动（给出 `git diff --stat HEAD -- tasks/` 为空的原文）；无残留进程。"
+      ],
+      "tests": [
+        "certificate revision",
+        "master gate re-earn"
+      ],
+      "allowed_scope": [
+        "tests/acceptance/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "cmd/**",
+        "internal/**",
+        "apps/**",
+        "services/**",
+        "infra/**",
+        "ops/**",
+        "tests/security/**",
+        "scripts/**"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/31_MASTER_ACCEPTANCE.md",
+        "docs/23_SECURITY_PRIVACY.md",
+        "docs/67_TEST_GATES.md",
+        "docs/25_CICD_DEVOPS.md"
+      ],
+      "scope_note": "这一笔来自 T1210 的独立复核（**返工轮那次**：verdict=approve，1 minor + 4 nit + 4 risks，原件在 `.rddev/workers/T1210-review/RESULT.superseded-run-4939114a82164d05.json`；**最终**那次：同样的三个数字是 1 minor + 5 nit + 5 risks，原件在 `.rddev/workers/T1210-review/RESULT.json`）**以及 T1210 返工轮已经做完的一部分**。**它现在不是「把四条意见修一遍」**：那四条（minor①的出路变量、nit①的文件数、nit②的 R14 口径、nit④的两处 `head -n1` 注释）已经由 T1210 的返工轮在 `115a4286` 上改完，nit③（逐字抄录缺收尾行）被那一轮**带证据地不采纳**。所以本任务的重心只有三件事：**Gate H 在 T1211 的新仪器上重挣**（复核 risk②点名的情形，上一轮跑的还是旧仪器）、**把证书重钉到承载这一版的树上**（机械块由 `--emit-tables` 重生成）、**复核 risk③的绝对路径**并补一小节修订记录；返工轮那四处**只验不重做**（改了就等于把被复核的东西换掉）。`v1_required=false` 是刻意的（同 T1210）：这是**证书的修订**，不是产品交付；标 true 会让报告必须具名排除「正在写修订的自己」，排除名单每刷一版长一节——那是记账技巧不是严格。**依赖三笔**：`T1210`（被修订的证书本体）、`T1211`（仪器变了，Gate H 因此要重挣）、`T1212`（落地后台账与测试分布会变，而报告的两张表与计数块正是台账的产物）。**G3 给 `mof-canonical`**（与 T1210 同一作业）：证书里最吃重的跨边界断言是 Gate I（MOF 全闭环），它必须在**承载这一版的树上**重新挣得；安全门那一半由 `security-master` 作业负责，它已是必需 CI 作业、也在 G2 的 `runs_jobs` 里，所以不重复列为 G3。",
+      "supervisor_scope_narrowing": "**为什么只给 `tests/acceptance/**`**：这一笔的产物就是那两份文件（报告 + 校验器），它们是同一件东西的正反面——报告写什么，校验器就得能验什么；给这两份文件以外的任何写入面，都会让「证书」与「被证之物」之间的边界糊掉。**为什么 `docs/**` 不在范围里**：`docs/31_MASTER_ACCEPTANCE.md` 是**规格**（判据的来源），报告是**对规格的答复**；允许被验收者改规格等于让考生改卷子，同一口径已用在 T1206/T1208/T1210/T1211 上。**为什么 `ops/**` 与 `tests/security/**` 也进了禁止面**：那是 T1211 的面，而且正是这一笔要重挣的那一层的**仪器**——仪器变了要重挣证书，不是改证书去迎合仪器；把这两处写进禁止面，是为了让「重挣」与「修改判据」在 diff 里泾渭分明。**为什么 `tasks/**` 连只读也写进禁止面**：校验器要**读**台账（数条数、数空 evidence），读是必须的、写是越界的——写明白这一条，好让「我数了一下」与「我改了一下」分得清。**为什么 `scripts/**` 在禁止面**：那里是验收仪器本身（`record_test_run.py` / `validate_specs.py` / `spec_version.py`），让被验收者改卷子等于让考生改分。"
     }
   ]
 }

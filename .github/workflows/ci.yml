@@ -84,8 +84,8 @@ jobs:
         run: make staticcheck
       - name: "go: staticcheck gate fixture unit tests"
         run: bash scripts/tests/staticcheck-unit-test.sh
-      - name: "go: unit tests (integration package excluded — it needs PostgreSQL)"
-        run: go test $(go list ./... | grep -v '/tests/integration')
+      - name: "go: unit tests (integration and e2e packages excluded — they need PostgreSQL)"
+        run: go test $(go list ./... | grep -v -e '/tests/integration' -e '/tests/e2e$')
 
   # Stage 4 — Web: lint / typecheck / unit / production build.
   web:
@@ -212,6 +212,11 @@ jobs:
         env:
           POSTGRES_TEST_ADMIN_URL: postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post
         run: make test-integration
+      - name: "integration: e2e journeys (tests/e2e, a database is required)"
+        env:
+          POSTGRES_TEST_ADMIN_URL: postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post
+          POST_REQUIRE_E2E_DB: "1"
+        run: go test ./tests/e2e -count=1
 
   # Stage 7 — observability (T1109). The suite is self-contained by design:
   # the metrics harness starts its OWN PostgreSQL container and an in-process

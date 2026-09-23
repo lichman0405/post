@@ -18297,7 +18297,23 @@ nit③（逐字抄录缺收尾行）它**带证据地不采纳**——那一行�
 
 ### 6.1 落账结果
 
-（本节与落账命令的实跑输出同笔落地——三行台账 `not_run → passed` 的退出码与证据文件写在这里。）
+三条台账行不引用任何 worker 的自述，全部是**Supervisor 在合并后的 `main` 上自己跑出来的**（证据留档
+`/tmp/evidence-20260923-025513/`，与本次提交同笔）：
+
+- **`T1210-TEST-01`** `bash tests/acceptance/v1-final-audit.sh` → rc=0（`2026-09-23T02:57:30Z`）。
+  在报告钉住的基准 `115a4286` 上组合出的树里跑（该树 = 基准 + 本笔交付的 `tests/acceptance/**`，2 个文件）
+  ，末行 `AUDIT OK: report markers present, counts match (0 unmerged, 3 not_run, 0 failed, 0 skipped, 0 passed-without-evidence)`。
+  **负对照**：把同一个 `HEAD` 换成非钉住基准，同一脚本 rc=1 且打印 `AUDIT FAILED`——这个仪器会说不。
+- **`T1211-TEST-01`** `bash tests/security/master-gate-mutation-check.sh` → rc=0（`2026-09-23T02:57:34Z`）。
+  6 个变异（漏报名、断言翻面、少一个安全头、静默跳过、缺席记账被删/被指向不存在的行、投毒公告）
+  全部被抓并逐个复位，收尾 `no mutation touched the working tree (67662 file(s) hashed before and after)`。
+- **`T1212-TEST-01`** `POST_REQUIRE_E2E_DB=1 go test ./tests/e2e -count=1` → rc=0（`2026-09-23T02:57:38Z`）。
+  非 `-v` 的那次只打印 `ok`，**不能证明旅程真的跑了**，所以另跑一次 `-v`：37 个旅程 33 通过、
+  **0 skip、0 fail**。**负对照**：把 DSN 指向不存在的端口、守卫仍开，同一命令 rc=1，逐条打印
+  「此环境声明需要真库，跑不起来就是失败而不是跳过」——这正是 T1212 交付的那条守卫本身。
+
+这三行落账后 `tasks/tests.json` 里**没有一行不是 `passed`**；紧接着 T1213 立账时新写的那行（§7）
+会成为唯一的 `not_run`——它的账要由 T1213 自己在最终树上重钉时再挣。
 
 ### 8. V1 的当前位置
 

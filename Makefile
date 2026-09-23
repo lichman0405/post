@@ -13,10 +13,13 @@
 
 SHELL := /bin/bash
 
-# Unit-test packages only: tests/integration connects to real PostgreSQL
-# (the DSN default lives in the test-integration target below) and belongs to
-# test-integration, not check/test.
-GO_UNIT_PKGS := $(shell go list ./... | grep -v '/tests/integration')
+# Unit-test packages only: tests/integration and the two database journeys in
+# tests/e2e connect to real PostgreSQL. They belong to the database stages
+# (stage_integration in scripts/ci.sh, and the migration-integration CI job
+# that runs make test-integration plus the e2e step), not to check/test,
+# which promise no database. A skip is not a pass: in those stages
+# POST_REQUIRE_E2E_DB=1 turns e2e's silent skip into a failure.
+GO_UNIT_PKGS := $(shell go list ./... | grep -v -e '/tests/integration' -e '/tests/e2e$$')
 STATICCHECK_VER := 2026.2.1
 
 # The browser suites (T1112). DISCOVERED, never written down here: these two
