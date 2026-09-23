@@ -1,6 +1,6 @@
 {
   "what": [
-    "The licence allowlist for docs/40_OPEN_SOURCE_LICENSES.md: tests/security/license-audit.sh",
+    "The licence allowlist for docs/40_OPEN_SOURCE_LICENSES.md: tests/security/license_audit.py",
     "reads every component of the three SBOMs (Go / npm / pip) and judges each component's",
     "licence against this file. Nothing here is implicit: a licence that is not in `allow`",
     "makes the row red, and the fix is a decision recorded HERE with a reason — not a flag",
@@ -16,7 +16,7 @@
     "deny_class": "copyleft strong enough to reach our own source (GPL/AGPL/SSPL and the source-available licences), and any licence that restricts commercial or research use. A component under one of these makes the row RED and names the package, its licence and its version. Accepting one is a written ADR (docs/23 §11) plus legal confirmation (docs/40 principle 1), which is the Supervisor's call and not something this file can grant.",
     "unknown": "a licence that is in neither table is a decision nobody has made, so it is also RED — the same as a denied one, for a different reason.",
     "first_party": "this repository's own packages appear in the SBOMs as components. They are not dependencies and are not licensed by a third party; they are listed here by name so the list stays explicit rather than an implicit skip.",
-    "no_licence": "a component whose licence the SBOM does not carry. It is RED unless it is named in `unlicensed` with a reason, and a witness that can be checked."
+    "no_licence": "a component whose licence the SBOM does not carry. NOT NAMED in `unlicensed` is RED: silence is not a judgement. NAMED WITH a reason AND a witness that can be checked, the witness is verified (the file is read, its first line and its sha256 are checked against the entry) and the component counts as licensed by that file. NAMED WITH a reason but NO witness, the verdict is UNVERIFIED: the row prints it as `LICENCE UNVERIFIED` on every run, keeps it out of the licence counts, and does NOT fail the row — colorama is the live case, locked by uv.lock to sys_platform == 'win32', so on this (Linux) platform no distribution is installed and there is no METADATA to read. Why printed rather than red: the row's job is to make sure no licence is decided by silence, and this one is not silent — it is a named, printed, re-checked line on every run. Making the row fail instead would red the gate permanently over a check that cannot be performed here at all, which is how a gate teaches its readers to ignore it, and calling the component fine would be worse: that is the laundering this row exists to prevent. Both readings are on the row's own output, and tests/security/README.md and tests/security/license_audit.py state the same verdict in the same words."
   },
   "allow": {
     "MIT": "permissive; the only obligation is retaining the copyright notice, which the SBOM inventory itself satisfies.",

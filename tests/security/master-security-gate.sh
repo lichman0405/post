@@ -75,6 +75,26 @@ cd "$ROOT"
 PG_URL="${POSTGRES_TEST_ADMIN_URL:-postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post}"
 REDIS_ADDR="${POST_G3_REDIS_ADDR:-127.0.0.1:6379}"
 
+# The tool pins, so that a NOT ASKED reason quotes the version the tree
+# actually pins instead of a second copy of it typed into a hint string. The
+# vuln-go row's hint used to name its scanner with no version at all (`@latest`)
+# — the one scanner in this gate with no pin anywhere except the CI job's own
+# step. Now the hint quotes the pin, and the pin is the only place a version is
+# written down.
+VERSIONS="$ROOT/ops/security/tool-versions.sh"
+# shellcheck source=/dev/null
+. "$VERSIONS" || { echo "master-security-gate: cannot read $VERSIONS" >&2; exit $EXIT_USAGE; }
+
+# The identity of THIS run, inherited by every row and by every script a row
+# runs. It exists so that an artifact-producing row can stamp what it wrote
+# and a row that reads an artifact can tell "produced by this run" from "found
+# on disk from an earlier one" — the licence audit reads the three SBOMs the
+# sbom-* rows write, and under --only, or with an sbom row NOT ASKED, those
+# documents would otherwise be from a previous run with nothing in the output
+# saying so. See tests/security/sbom.sh (writes the stamp) and
+# tests/security/license_audit.py (reads it).
+export POST_GATE_RUN_ID="gate-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+
 EXIT_PASS=0 EXIT_FAILED=1 EXIT_NOT_ASKED=2 EXIT_USAGE=3 EXIT_SELFTEST=4
 
 WORK="$(mktemp -d)"
@@ -139,7 +159,7 @@ add_check permission-negative-e2e \
 add_check owasp-smoke \
   "OWASP edge smoke against real services: header set, CORS, anonymous write, rate limit, fail-closed" \
   "docs/23 §11 (OWASP smoke); docs/67 G3 security-smoke" \
-  "go python3 psql curl redis postgres file:tests/security/owasp-smoke.sh" \
+  "go python3 psql curl redis redis-cli node postgres file:tests/security/owasp-smoke.sh" \
   "bash tests/security/owasp-smoke.sh" \
   '^ok   S0 ' '^ok   S1 ' '^ok   S2 ' '^ok   S3 ' '^ok   S4 ' '^ok   S5 ' '^ok   S6 ' '^ok   S7 ' '^ok   S8 ' \
   '^G3 security-smoke: OK'
@@ -162,7 +182,7 @@ add_check a11y \
 add_check deploy-template \
   "Staging deployment template: static smoke, including the validator's and the secret scan's own mutations" \
   "docs/25 (deploy); ops/deploy/README.md" \
-  "python3 go file:tests/acceptance/deploy-staging-smoke.sh" \
+  "python3 go py:yaml file:tests/acceptance/deploy-staging-smoke.sh" \
   "bash tests/acceptance/deploy-staging-smoke.sh" \
   '^ok   inputs present: ' \
   '^ok   self-test: ' \
@@ -328,6 +348,20 @@ add_check absence-manifest \
 # Prerequisites. A token that cannot be satisfied is a REASON, printed with
 # the row: the gate never runs a command it cannot trust to have measured the
 # thing it names.
+#
+# Token forms: a bare name is a command on PATH (`go`, `redis-cli`) or, for
+# `redis`/`postgres`/`web-deps`/`workspace-deps`, a probe; `dir:PATH` and
+# `file:PATH` are tree paths; `py:MODULE` is a Python module the row's command
+# imports. `py:yaml` exists because the deploy-template row's command needs
+# PyYAML and, without it, dies with exit 2 twenty lines into its own log —
+# where the gate's tail -25 window does not reach. A missing module has to
+# read as NOT ASKED with the module named, not as a red whose reason is off
+# screen.
+#
+# Every token here is a claim about the row's COMMAND, not about the row's
+# subject: the owasp smoke needs node (S8 runs the web header test through
+# `node --test`) and redis-cli (S0 resets its own rate-limit buckets and reads
+# them back), so both are declared even though S1-S7 would run without them.
 # ---------------------------------------------------------------------------
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -357,7 +391,8 @@ prereq_missing() { # -> one reason per line, empty when everything resolves
       psql)        have psql        || echo "psql is not on PATH (the owasp smoke gives itself its own database)";;
       curl)        have curl        || echo "curl is not on PATH";;
       uv)          have uv          || echo "uv is not on PATH (pip install uv)";;
-      govulncheck) have govulncheck || echo "govulncheck is not on PATH (go install golang.org/x/vuln/cmd/govulncheck@latest)";;
+      govulncheck) have govulncheck || echo "govulncheck is not on PATH — run 'make security-tools' (it installs the pinned $GOVULNCHECK_VERSION from ops/security/tool-versions.sh into \$(go env GOPATH)/bin; by hand: go install golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION)";;
+      redis-cli)   have redis-cli   || echo "redis-cli is not on PATH — the owasp smoke resets and reads back its own rate-limit buckets through it before measuring the boundary, so without it that measurement is of another run's traffic (Debian/Ubuntu: apt-get install redis-tools)";;
       gosec)       have gosec       || echo "gosec is not on PATH — run 'make security-tools' (it installs the pinned version into \$(go env GOPATH)/bin)";;
       bandit)      have bandit      || echo "bandit is not on PATH — run 'make security-tools' (uv tool install bandit)";;
       cyclonedx-gomod) have cyclonedx-gomod || echo "cyclonedx-gomod is not on PATH — run 'make security-tools'";;
@@ -367,6 +402,8 @@ prereq_missing() { # -> one reason per line, empty when everything resolves
       workspace-deps) [ -d "$ROOT/node_modules" ] || echo "the workspace's node_modules is missing (pnpm install --frozen-lockfile) — pnpm's SBOM reads the INSTALLED workspace";;
       dir:*)       [ -d "$ROOT/${token#dir:}" ] || echo "required directory is missing: ${token#dir:} (run 'make security-tools')";;
       file:*)      [ -f "$ROOT/${token#file:}" ] || echo "required file is missing: ${token#file:}";;
+      py:*)        have python3 && python3 -c "import ${token#py:}" >/dev/null 2>&1 \
+                     || echo "python3 cannot import the module '${token#py:}', which the command this row runs needs. The distribution name is often not the module name (PyYAML ships 'yaml'): install the one the row's own script names, then re-run.";;
       "")          ;;
       *)           echo "unknown prerequisite token '$token' (a typo here would silently pass)";;
     esac

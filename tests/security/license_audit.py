@@ -24,9 +24,16 @@ WHAT MAKES IT RED
 WHAT IT REPORTS WITHOUT FAILING (and says so, every run)
 --------------------------------------------------------
   * components whose licence the SBOM does not carry and whose `unlicensed`
-    entry has no witness: they are printed as UNVERIFIED. A licence nobody can
-    check is not the same finding as a licence that is fine, and the row must
-    not let the two look alike;
+    entry has no witness: the row prints them as UNVERIFIED and does NOT fail.
+    This is the same verdict `policy.no_licence` of
+    ops/security/license-allowlist.json states and the same one
+    tests/security/README.md gives — one judgement in three places, which is
+    the point of writing it down at all. What makes it honest is that the
+    component is never CLEARED by it: it stays out of the licence counts, it
+    is not called fine, and it is printed on every run. The live case is
+    colorama (uv.lock resolves it for sys_platform == 'win32', so no
+    distribution is installed on Linux and there is no METADATA to check) —
+    naming it here rather than letting it look like a licence that passed;
   * infra images whose manifest judgement is "needs-adr" — Redis (RSALv2 /
     SSPLv1) and MinIO (AGPL-3.0). Those are service images rather than package
     dependencies, and what to do about a source-available or AGPL service is a
@@ -35,6 +42,20 @@ WHAT IT REPORTS WITHOUT FAILING (and says so, every run)
   * infra images whose judgement is "unknown" — a service whose licence this
     tree records nowhere. Printed under LICENCE UNVERIFIED, which is a
     different statement from "checked and permissive".
+
+WHICH RUN'S DOCUMENTS THESE ARE (said out loud, either way)
+-----------------------------------------------------------
+The three documents are written by the sbom-* rows, which stamp the run that
+produced them beside each file (.sbom/<face>.run). This row compares that
+stamp with its own run — POST_GATE_RUN_ID, exported by the gate to every row
+it runs — and when they do not match, it says so on its own ok line and again
+at the end of its output: under `--only license-audit`, with an sbom row NOT
+ASKED, or with a generator run by hand, what is being judged is what an
+earlier run left behind, and a green line about an earlier tree read as a
+green line about this one is exactly the failure this row is supposed to
+catch. It does not FAIL for that: the verdicts below are still about the
+bytes on disk, and a row that went red whenever it was run alone would be a
+row nobody could use to check a single tree's licences. It says it instead.
 
 Exit codes: 0 every component judged and nothing denied; 1 a deny, an
 unlisted licence, an unlicensed-and-unnamed component, or an unusable SBOM;
@@ -144,6 +165,27 @@ def main() -> int:
             if e.get("match") == name and str(e.get("version")) == str(version):
                 return e
         return None
+
+    # Whose documents are these? The sbom-* rows stamp the run that wrote each
+    # document beside it; this process has a run id of its own when the gate
+    # exported one. Anything that does not match is judged anyway and SAID,
+    # never passed off as this run's output (see the module docstring).
+    run_id = os.environ.get("POST_GATE_RUN_ID", "")
+    not_this_run: list[str] = []
+    for face in FACES:
+        stamp_path = path_of(os.path.join(args.dir, f"{face}.run"))
+        try:
+            with open(stamp_path, encoding="utf-8") as fh:
+                stamp = fh.read().strip()
+        except OSError:
+            stamp = ""
+        if not stamp:
+            not_this_run.append(
+                f"{face}.cdx.json carries no run stamp — written before this row stamped its inputs, "
+                "or by a generator run by hand"
+            )
+        elif stamp != run_id:
+            not_this_run.append(f"{face}.cdx.json was written by run {stamp}")
 
     problems: list[str] = []
     denied_lines: list[str] = []
@@ -310,16 +352,26 @@ def main() -> int:
         return fail(f"{len(denied_lines)} deny-class component(s); {total} component(s) audited")
 
     mix = ", ".join(f"{k}={v}" for k, v in sorted(licence_counts.items(), key=lambda kv: (-kv[1], kv[0])))
-    print(f"ok   {args.id}: {total} component(s) across {len(FACES)} SBOM(s), every licence judged against {args.allowlist}")
+    line = f"ok   {args.id}: {total} component(s) across {len(FACES)} SBOM(s), every licence judged against {args.allowlist}"
+    if not_this_run:
+        # On the row's own success line, so it cannot be missed by a reader who
+        # only sees the gate's summary or the tail of the log.
+        line += " [NOT FROM THIS RUN — these documents are earlier output, see the end of this log]"
+    print(line)
     print(f"     {mix}")
+    if not not_this_run:
+        print(f"     the three documents were produced by this run ({run_id})")
     if first_party_seen:
         print(f"     first-party, not third-party dependencies ({len(first_party_seen)}):")
         for line in first_party_seen:
             print(f"       {line}")
     if unverified:
-        print(f"     UNVERIFIED — no licence in the SBOM and no witness to check ({len(unverified)}):")
-        for line in unverified:
-            print(f"       {line}")
+        print(
+            f"     UNVERIFIED — named in `unlicensed`, no witness that can be checked: printed, NOT "
+            f"cleared, not counted among the licences judged above ({len(unverified)}):"
+        )
+        for unv in unverified:
+            print(f"       {unv}")
     if needs_adr:
         print(f"     NEEDS ADR — service images under a restrictive licence ({len(needs_adr)}):")
         for line in needs_adr:
@@ -333,6 +385,19 @@ def main() -> int:
     if "LGPL-3.0-or-later" in licence_counts:
         print("     note: LGPL-3.0-or-later is present (weak copyleft, unmodified native library) — allowed")
         print("           with its obligations written in the allowlist, and NOT treated as the GPL case.")
+    if not_this_run:
+        # Last, deliberately: the gate prints only the last 25 lines of a row's
+        # log, and this is the one thing here a reader must not have to scroll
+        # for.
+        print("")
+        print("     NOT FROM THIS RUN — this row judged documents an earlier run produced:")
+        for entry in not_this_run:
+            print(f"       {entry}")
+        print(f"       this run: {run_id or '<none — POST_GATE_RUN_ID is unset, so this invocation has no id>'}")
+        print("       the sbom-* rows write those documents, and the stamp beside each one, in the same run:")
+        print("       a full `bash tests/security/master-security-gate.sh` is what makes them this run's.")
+        print("       to make hand-run pieces agree, give them one id, e.g.")
+        print("       POST_GATE_RUN_ID=myrun bash tests/security/sbom.sh go && POST_GATE_RUN_ID=myrun python3 tests/security/license_audit.py")
     return 0
 
 
