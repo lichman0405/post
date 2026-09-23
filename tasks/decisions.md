@@ -18460,3 +18460,26 @@ git show <426KB 的报告> | grep -qE "修订记录"     # 管道状态 = 141，
    **`L3-③`（MCP 工具面）直接决定 Gate G 的判定**，因此决定 §12 完成声明；
 2. **最终重钉**（在裁定之后）：按裁定更新 Gate G 与统计口径，并把 §4 的四条记实错误一并订正
    ——那份证书本来就要再生成一版，所以四条意见不在合并前返工。
+
+### 8. §12 完成声明：四条里三条已成立，第四条缺的不是工程
+
+`CLAUDE.md` §12 要求「所有 V1-required task merged、四层 Gate 通过、Master Acceptance 通过、
+MOF canonical workflow 全闭环并有可复现证据」。今天逐条核（`/tmp/master-acceptance.sh` 的原始输出
+存在 `/tmp/master-acceptance-final.txt`）：
+
+| 条件 | 判定 | 证据 |
+|---|---|---|
+| V1-required 全部合并 | **成立** | `v1_required=150 merged=150 not-merged=0`（`tasks/tasks.json` × `task_status.json`） |
+| 四层 Gate（CI 等价集合） | **成立** | `main` 的 HEAD `f8015d8`：CI run `35817091608` **11 个作业全 success** |
+| MOF canonical workflow 全闭环 | **成立** | T1213 的 G3 记录 `run-33b07e266ad03692-g3`：`mof-canonical` `exit=0`；台账 `T1202-TEST-01` `passed` |
+| Master Acceptance（Gate A–I） | **未成立** | Gate A–F、H、I 与 Development System Gate 通过；**Gate G 判「未通过」** |
+
+Gate G 的缺口**不是工程欠账**，是产品范围问题（`L3-③`，决策 ㊱）：`docs/02_V1_SCOPE.md:52` 把
+「MCP/API 读写科研状态」列进 V1 必做、§4 没豁免，而目录声明 21 条工具、**0 个 dispatch 点**、
+`/mcp` 返回 501。两条路（建起来 / 把目录与两处规格一起降级）**都要先有产品语义**，
+规格一处都没写——按 §5 不许我发明。
+
+**所以 V1 现在停在「等你裁定」上，不是停在「还没做完」上。** 裁定之后：选「不含」→ 我更新
+`docs/02:52`、`docs/56:15` 与 `specs/mcp/tools.json`，Gate G 按范围豁免改判，10 个关口全过；
+选「含」→ 立一笔覆盖 21 条工具与 approval path 的任务（量大，且要先定权限语义）。
+两者之后都要做**最终重钉**（证书在届时 main 上重生成，并把 §4 的四条记实错误一并订正）。
