@@ -9,9 +9,12 @@
 // conflict e2e tests make).
 //
 // PostgreSQL is a requirement this file adds to the package: when no
-// database is reachable the test skips loudly (the same infra-conditional
-// pattern as the gitea integration tests) so the infra-free unit gate
-// stays green, and runs the full journey wherever PostgreSQL is up.
+// database is reachable the test skips (the infra-conditional pattern the
+// gitea integration tests use) so the infra-free unit gate stays green, and
+// runs the full journey wherever PostgreSQL is up. The skip is a judgement
+// rather than this caller's own: it goes through testdb.RequireDB, which fails
+// instead when the environment declared that a database must be reachable
+// (POST_REQUIRE_E2E_DB — internal/persistence/testdb/require_db.go).
 //
 // T0811-TEST "discussion promotion e2e" (blocking):
 //
@@ -108,10 +111,7 @@ func discussionAdminURL() string {
 func newDiscussionEnv(t *testing.T, ctx context.Context) *discussionEnv {
 	t.Helper()
 	admin := discussionAdminURL()
-	if !pgReachable(admin) {
-		t.Skipf("discussion promotion e2e: PostgreSQL unreachable at %s — the journey needs a real database; "+
-			"start the stack (make infra-up) or set POSTGRES_TEST_ADMIN_URL and the test runs", admin)
-	}
+	testdb.RequireDB(t, ctx, admin, "discussion promotion e2e", "the journey needs a real database")
 	pool, _ := testdb.Setup(t, ctx, admin, discussionTaskID)
 
 	// alice: the project owner, seeded in PostgreSQL and mirrored into the

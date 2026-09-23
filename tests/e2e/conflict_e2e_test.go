@@ -9,9 +9,15 @@
 // trade the auth e2e makes).
 //
 // PostgreSQL is a requirement this one file adds to the package: when no
-// database is reachable the test skips loudly (the same infra-conditional
-// pattern as the gitea integration tests) so the infra-free unit gate
-// stays green, and runs the full journey wherever PostgreSQL is up.
+// database is reachable the test skips (the infra-conditional pattern the
+// gitea integration tests use) so the infra-free unit gate stays green, and
+// runs the full journey wherever PostgreSQL is up.
+//
+// The skip is a judgement, not each caller's own: it goes through
+// testdb.RequireDB, which fails instead when the environment has declared that
+// a database must be reachable (POST_REQUIRE_E2E_DB, set by the CI job that
+// owns the database service). See internal/persistence/testdb/require_db.go
+// for why the decision lives there and what the two outcomes look like.
 //
 // T0407-TEST "conflict e2e" (blocking):
 //
@@ -67,19 +73,6 @@ func conflictAdminURL() string {
 	return "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post"
 }
 
-// pgReachable probes the maintenance database; the skip is the
-// infra-conditional pattern of the gitea integration tests.
-func pgReachable(u string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, u)
-	if err != nil {
-		return false
-	}
-	defer pool.Close()
-	return pool.Ping(ctx) == nil
-}
-
 // conflictEnv is one composed deployment: guarded API server (real
 // handlers, real PostgreSQL) + Redis, seeded with one private project
 // whose two branches diverged on a protocol — a real scientific conflict
@@ -103,10 +96,7 @@ type conflictEnv struct {
 // references a real users row (the resolutions store's decided_by FK).
 func newConflictEnv(t *testing.T, ctx context.Context) *conflictEnv {
 	t.Helper()
-	if !pgReachable(conflictAdminURL()) {
-		t.Skipf("conflict e2e: PostgreSQL unreachable at %s — the resolution journey needs a real database; "+
-			"start the stack (make infra-up) or set POSTGRES_TEST_ADMIN_URL and the test runs", conflictAdminURL())
-	}
+	testdb.RequireDB(t, ctx, conflictAdminURL(), "conflict e2e", "the resolution journey needs a real database")
 	pool, _ := testdb.Setup(t, ctx, conflictAdminURL(), conflictTaskID)
 
 	// alice: the project owner, seeded in PostgreSQL and mirrored into the
