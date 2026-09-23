@@ -11717,31 +11717,219 @@
       ]
     },
     "T1210": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
+      "status": "merged",
+      "started_at": "2026-09-22T22:57:49Z",
       "notes": "新立账（2026-09-23，T1209 合并之后）：v1-final-report.md 与 v1-final-audit.sh 钉的是T1209 之前那棵树——R10 仍写「SAST、容器扫描、SBOM 三项缺席」，分布计数与基准 SHA 都已过期。任务书见 tasks/packages/T1210.json，G3 覆盖同笔补进 gates.json（mof-canonical）。v1_required=false 是刻意的：它是证书的刷新，不是产品交付。",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "worker_run_id": "run-b5c897f64650f726",
+      "accepted_by_supervisor_at": "2026-09-23T00:08:48Z",
+      "merged_at": "2026-09-23T01:00:28Z",
+      "rejection_reason": "【返工 —— 验收时 `security-master` 这条检查没过，请照下面报错改】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-848a75124c5be443-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T1210/gate-run-run-848a75124c5be443-g2.json and the step logs\n\n**这次不是「基线旧了」那么简单：验收时 `G2` 的 `security-master` 真的红了**，\n报错行贴在下面。**它是一个真实缺陷，要你在代码里改掉，不是重跑一遍就会过去。**\n\n基线同时也推到了最新的 main（派生文件已按合并后的树重新生成），所以请先\n确认你看到的是新基线，再动手。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 自己去**复现下面那条报错**（命令就在上面，逐字跑一遍，别只看结论）。**改的是你的实现，不是断言**：测试是新的，它拦下的东西是真的。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n\n**这一次验收里，实际报错的行（供你定位）：**\n\n  * G2 的 `security-master` 红了\n      命令 `sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools` 退出码 1：\n        $ sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools\n        sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper\n        sudo: a password is required\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-22T22:15:13Z",
+          "run_id": "run-47293f6d189d7af3"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-22T22:15:16Z",
+          "run_id": "run-dc59c33d2ff12fba",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T22:28:27Z",
+          "run_id": "run-5aeff29cbc19d026",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-22T22:57:48Z",
+          "run_id": "run-13021a0cdca9e134",
+          "reason": "【返工 —— 验收时 `security-master` 这条检查没过，请照下面报错改】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-848a75124c5be443-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T1210/gate-run-run-848a75124c5be443-g2.json and the step logs\n\n**这次不是「基线旧了」那么简单：验收时 `G2` 的 `security-master` 真的红了**，\n报错行贴在下面。**它是一个真实缺陷，要你在代码里改掉，不是重跑一遍就会过去。**\n\n基线同时也推到了最新的 main（派生文件已按合并后的树重新生成），所以请先\n确认你看到的是新基线，再动手。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 自己去**复现下面那条报错**（命令就在上面，逐字跑一遍，别只看结论）。**改的是你的实现，不是断言**：测试是新的，它拦下的东西是真的。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n\n**这一次验收里，实际报错的行（供你定位）：**\n\n  * G2 的 `security-master` 红了\n      命令 `sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools` 退出码 1：\n        $ sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools\n        sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper\n        sudo: a password is required\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T22:57:49Z",
+          "run_id": "run-b5c897f64650f726",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T23:40:49Z",
+          "run_id": "run-bc15aa223493c386",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-23T00:08:48Z",
+          "run_id": "run-5fe92a57bf053d2c"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-23T01:00:28Z",
+          "run_id": "run-7e827f1c884df2e6",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T1211": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
+      "status": "merged",
+      "started_at": "2026-09-22T23:48:48Z",
       "notes": "新立账（2026-09-23，T1209 合并之后）：T1209 的第二轮独立复核给了 7 条 findings + 10 条 risks，加上我自己复跑记的两笔与接线作业首跑抓出的一笔，共 11 条需求，全是那套安全仪器自己的欠账（不是产品缺陷），逐条已在树里核过。任务书见 tasks/packages/T1211.json，G3 覆盖同笔补进 gates.json（security-smoke）。v1_required=false：V1 证书不依赖它。",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "worker_run_id": "run-52f63216332b66b7",
+      "accepted_by_supervisor_at": "2026-09-23T00:59:03Z",
+      "merged_at": "2026-09-23T02:04:03Z",
+      "rejection_reason": "# 基线推进，不是指摘：T1211 的 CI 红在 Supervisor 的接线里，已修在 main 上\n\n**你这轮的交付没有错**，一个字节都不用改。红的是 CI 里**我**那一半，下面是逐字事实。\n\n## 1. 红在哪（原文）\n\nT1211 的 PR（`task/T1211-t1209-findings`）上，必需作业 `security-master` 在**第 13 步**\n`make security-tools` 失败，日志最后三行是：\n\n```\n== uv 0.12.13 (asserted against ops/security/tool-versions.sh)\nsecurity-tools: uv at /opt/hostedtoolcache/Python/3.12.14/x64/bin/uv is 0.12.18, the pin is 0.12.13 (ops/security/tool-versions.sh). uv decides the shape of the document the licence audit jud\nmake: *** [Makefile:317: security-tools] Error 1\n```\n\n也就是 `tests/security/install-security-tools.sh:109` 那条断言（你这轮新加的）在 runner 上**判红**——\n而它判得对：那个作业跑的是 `pip install uv`（**没有钉版**），全新 runner 上装到的是当时 PyPI 上的 0.12.18。\n那条 die 自己给出的补救句就是 `pip install uv==$UV_VERSION`，我照它做的。\n\n**为什么本机一直是绿的**：本机的 `uv --version` 恰好就是 `0.12.13`——`pip install uv` 在已经装了这个版本\n的机器上是「already satisfied」，什么都不换。所以这不是你的断言有问题，是 CI 与「这台机器恰好长这样」的差别。\n\n## 2. 修在哪\n\nmain 上的 `d98022a`：三个作业（`python` / `observability` / `security-master`）的 `pip install uv`\n全部改成 `pip install uv==0.12.13`（= `ops/security/tool-versions.sh:73` 的 `UV_VERSION`）；\n`specs/orchestrator/gates.json` 与 `.github/workflows/ci.yml` 同笔改（两者逐步逐字被\n`TestGatesSpecSyncsWithCIWorkflow` 比对），摘要标记同笔重新生成。这个提交在**你的面之外**，由我做。\n\n## 3. 基线已推进\n\n你的分支被推到了新基线 `d98022a`（原 `115a4286`），**带着你的 diff**。所以：\n\n- **重新取证**：在新基线上把你任务书要求的那一组检查/证据行**重跑一遍**（本机跑，不需要网络），\n  确认结论仍然成立；`RESULT.json` 按本轮的实际输出更新，并写清「本轮是基线推进、交付未变、\n  红在 Supervisor 的 CI 接线里，起因见上与 main 的修复 commit」。\n- **不要改任何文件**。diff 必须与上一轮**一个字节不差**（除了 rebaseline 若留下冲突痕迹——真留下的话，\n  只许按原意复原，并在 RESULT 里说明你复原了什么）。为了变绿而放宽那条 uv 断言、改 `UV_VERSION` 的取值、\n  或删掉任何检查，都是**加重**问题，不是修它。\n- **收工照旧**：`git status --porcelain -uall` 只许列你有意改的文件；不留残留进程。\n\n## 4. 判据没变\n\n这一轮**不是**放宽任何判据，也不是新增要求：要做的还是任务书里那几件事，只是树换成了新基线。\n真正的绿要在 CI 上挣——你这个分支的下一次 CI 会带着上面的钉版，`security-master` 那一行才有机会量到它该量的事。\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-22T22:16:14Z",
+          "run_id": "run-dceb1551c75f41fd"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-22T22:16:23Z",
+          "run_id": "run-40c7a8f60d0c17ff",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-22T22:29:32Z",
+          "run_id": "run-04bce89fca39d98b",
+          "reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: ④ 你若接上了 check_floor()，必须有一条能证明它会红的测试（不许只接上不验） (not_applicable)"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T22:36:30Z",
+          "run_id": "run-fe2b8d33821b760b",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T23:13:49Z",
+          "run_id": "run-2ac1b2a4103c2d62",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-22T23:39:45Z",
+          "run_id": "run-381758224438b5b2"
+        },
+        {
+          "from": "accepted",
+          "to": "rejected",
+          "at": "2026-09-22T23:48:46Z",
+          "run_id": "run-13ef14fc7abacdc0",
+          "reason": "# 基线推进，不是指摘：T1211 的 CI 红在 Supervisor 的接线里，已修在 main 上\n\n**你这轮的交付没有错**，一个字节都不用改。红的是 CI 里**我**那一半，下面是逐字事实。\n\n## 1. 红在哪（原文）\n\nT1211 的 PR（`task/T1211-t1209-findings`）上，必需作业 `security-master` 在**第 13 步**\n`make security-tools` 失败，日志最后三行是：\n\n```\n== uv 0.12.13 (asserted against ops/security/tool-versions.sh)\nsecurity-tools: uv at /opt/hostedtoolcache/Python/3.12.14/x64/bin/uv is 0.12.18, the pin is 0.12.13 (ops/security/tool-versions.sh). uv decides the shape of the document the licence audit jud\nmake: *** [Makefile:317: security-tools] Error 1\n```\n\n也就是 `tests/security/install-security-tools.sh:109` 那条断言（你这轮新加的）在 runner 上**判红**——\n而它判得对：那个作业跑的是 `pip install uv`（**没有钉版**），全新 runner 上装到的是当时 PyPI 上的 0.12.18。\n那条 die 自己给出的补救句就是 `pip install uv==$UV_VERSION`，我照它做的。\n\n**为什么本机一直是绿的**：本机的 `uv --version` 恰好就是 `0.12.13`——`pip install uv` 在已经装了这个版本\n的机器上是「already satisfied」，什么都不换。所以这不是你的断言有问题，是 CI 与「这台机器恰好长这样」的差别。\n\n## 2. 修在哪\n\nmain 上的 `d98022a`：三个作业（`python` / `observability` / `security-master`）的 `pip install uv`\n全部改成 `pip install uv==0.12.13`（= `ops/security/tool-versions.sh:73` 的 `UV_VERSION`）；\n`specs/orchestrator/gates.json` 与 `.github/workflows/ci.yml` 同笔改（两者逐步逐字被\n`TestGatesSpecSyncsWithCIWorkflow` 比对），摘要标记同笔重新生成。这个提交在**你的面之外**，由我做。\n\n## 3. 基线已推进\n\n你的分支被推到了新基线 `d98022a`（原 `115a4286`），**带着你的 diff**。所以：\n\n- **重新取证**：在新基线上把你任务书要求的那一组检查/证据行**重跑一遍**（本机跑，不需要网络），\n  确认结论仍然成立；`RESULT.json` 按本轮的实际输出更新，并写清「本轮是基线推进、交付未变、\n  红在 Supervisor 的 CI 接线里，起因见上与 main 的修复 commit」。\n- **不要改任何文件**。diff 必须与上一轮**一个字节不差**（除了 rebaseline 若留下冲突痕迹——真留下的话，\n  只许按原意复原，并在 RESULT 里说明你复原了什么）。为了变绿而放宽那条 uv 断言、改 `UV_VERSION` 的取值、\n  或删掉任何检查，都是**加重**问题，不是修它。\n- **收工照旧**：`git status --porcelain -uall` 只许列你有意改的文件；不留残留进程。\n\n## 4. 判据没变\n\n这一轮**不是**放宽任何判据，也不是新增要求：要做的还是任务书里那几件事，只是树换成了新基线。\n真正的绿要在 CI 上挣——你这个分支的下一次 CI 会带着上面的钉版，`security-master` 那一行才有机会量到它该量的事。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T23:48:48Z",
+          "run_id": "run-52f63216332b66b7",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-23T00:29:18Z",
+          "run_id": "run-4fc2f1e079c72a7c",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-23T00:59:03Z",
+          "run_id": "run-c63d10fb8fa52e9e"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-23T02:04:03Z",
+          "run_id": "run-ca8669e49e1cb6d4",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T1212": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
+      "status": "merged",
+      "started_at": "2026-09-22T23:12:52Z",
       "notes": "新立账（2026-09-23，T1209 合并之后）：来自空窗待办清单 B 条（2026-09-19 记，今天核过仍成立，但比当时窄——只有两个需要真库的 e2e 旅程在静默跳过）。任务书见 tasks/packages/T1212.json，G3 覆盖同笔补进 gates.json（rsg-real-services）。v1_required=false：它改的是 CI 里那两个旅程的可判性，不改四层 Gate 的定义。CI 那一半由 Supervisor 接。",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "worker_run_id": "run-7ce76c3a93a7ebb3",
+      "accepted_by_supervisor_at": "2026-09-23T00:28:04Z",
+      "merged_at": "2026-09-23T00:59:12Z",
+      "rejection_reason": "【返工 —— 验收时 `security-master` 这条检查没过，请照下面报错改】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-4f84ea5a3175eea6-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T1212/gate-run-run-4f84ea5a3175eea6-g2.json and the step logs\n\n**这次不是「基线旧了」那么简单：验收时 `G2` 的 `security-master` 真的红了**，\n报错行贴在下面。**它是一个真实缺陷，要你在代码里改掉，不是重跑一遍就会过去。**\n\n基线同时也推到了最新的 main（派生文件已按合并后的树重新生成），所以请先\n确认你看到的是新基线，再动手。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 自己去**复现下面那条报错**（命令就在上面，逐字跑一遍，别只看结论）。**改的是你的实现，不是断言**：测试是新的，它拦下的东西是真的。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n\n**这一次验收里，实际报错的行（供你定位）：**\n\n  * G2 的 `security-master` 红了\n      命令 `sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools` 退出码 1：\n        $ sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools\n        sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper\n        sudo: a password is required\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-22T22:16:14Z",
+          "run_id": "run-8c44ae22f621703c"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-22T22:17:31Z",
+          "run_id": "run-bad47a6be8ad3a80",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T22:27:22Z",
+          "run_id": "run-ea237f0731f2be01",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-22T23:12:51Z",
+          "run_id": "run-b49ee6e74d6eae9c",
+          "reason": "【返工 —— 验收时 `security-master` 这条检查没过，请照下面报错改】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-4f84ea5a3175eea6-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T1212/gate-run-run-4f84ea5a3175eea6-g2.json and the step logs\n\n**这次不是「基线旧了」那么简单：验收时 `G2` 的 `security-master` 真的红了**，\n报错行贴在下面。**它是一个真实缺陷，要你在代码里改掉，不是重跑一遍就会过去。**\n\n基线同时也推到了最新的 main（派生文件已按合并后的树重新生成），所以请先\n确认你看到的是新基线，再动手。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 自己去**复现下面那条报错**（命令就在上面，逐字跑一遍，别只看结论）。**改的是你的实现，不是断言**：测试是新的，它拦下的东西是真的。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n\n**这一次验收里，实际报错的行（供你定位）：**\n\n  * G2 的 `security-master` 红了\n      命令 `sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools` 退出码 1：\n        $ sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools\n        sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper\n        sudo: a password is required\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-22T23:12:52Z",
+          "run_id": "run-7ce76c3a93a7ebb3",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-22T23:41:00Z",
+          "run_id": "run-f37fe2c14511c8a6",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-23T00:28:04Z",
+          "run_id": "run-f56518dc000f4f7e"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-23T00:59:12Z",
+          "run_id": "run-a7a68d5ab6e3ae4d",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     }
   },
   "version": 2

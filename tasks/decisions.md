@@ -17981,3 +17981,326 @@ main 上 `specs/SPEC_VERSION.json` 随之变为 `sha256:41717f0c68fb7f6a`（39 i
 「NOT ASKED 并说明为什么」。那是仪器自己的文件（`tests/security/**`），已立为 **T1211 需求 11**，
 判据写在它的验收里：去掉 `redis-cli`/藏起 pyyaml 时，那两行必须 NOT ASKED 并点名缺的工具，**不许**靠删检查消红。
 
+
+## ㊸ T1211 第 1 次 collect 被拒：**交付没有指摘，是 Worker 把一条条件判据标成了 `not_applicable`**（L1，2026-09-23）
+
+### 1. 拒在哪（逐字）
+
+```
+[FAIL] result-consistency: result-acceptance: status completed but acceptance
+entries not passed: ④ 你若接上了 check_floor()，必须有一条能证明它会红的测试（不许只接上不验） (not_applicable)
+```
+
+同一份报告里其余 **13 项全部 [ok]**：范围（11 个改动路径，全在 `allowed_scope` 内）、无残留进程、
+HEAD 等于基线 `b6c1fb1`、分支未移动、无新 ref、RESULT 通过 schema、18 条测试全部 passed、
+两条必需测试都有 passed 条目、无秘密材料。**产品交付一条指摘都没有，被拒的是一条记账的分类。**
+
+### 2. 规则与它为什么不能放宽
+
+`internal/devorchestrator/result_consistency.go:159-170`：`status: completed` 的 RESULT 里，
+**每一条 acceptance 条目都必须是 `passed`**。`not_applicable` 是合法取值
+（`specs/orchestrator/worker-result.schema.json`），但"合法取值"不等于"能与 `completed` 同时出现"——
+"完成"这句话的含义就是"我列的每一条判据都没有悬着的事"。
+
+**我没有放宽这条规则，也没有自己动手改 Worker 的 RESULT**（那是它的记录，不是我的）。
+两天前 T1209 第 1 次 collect 被拒是同一条规则、同一个判决（㊶），这次照旧。
+
+### 3. 真正的错是**标签**，不是事实，也不是书
+
+Worker 的判断「`check_floor()` 已被删掉，没有一条能红的测试可给」**事实正确**（R6(a) 允许"删掉"这条分支，
+`grep -c check_floor tests/security/sast.sh` = 0）。但 ④ **不是"与本任务无关"的判据**：
+
+1. ④ 是判据 1 里的**第四条证伪位**，判据 1 的开头写死了「至少四处各证伪一次」；
+2. Worker **确实交出了第四条证伪**——它本该守的那道等价下限（`tests/security/sast.sh:147-158`
+   的 `sast-python` 内联文件数下限，`if not override and files < floor`）被证过能红：
+   1 个文件的 bandit 报告 → 该行 exit 1 并印出理由，8 个文件 → exit 0；
+3. 同一件事的另一处判据（第 4 条：`check_floor` 要么不存在、要么有调用点且有能红的测试）已 `passed`。
+
+**任务书我一个字没改。** 这不是书的错，是分类的错：这一位的活干了，干它的不是 `check_floor()`
+而是它的等价物，正确的标签是按实际走的那条分支报 `passed` 并附那条分支的证据。
+
+### 4. 处置：返工同一 session（diff 保留），只改这一条分类
+
+`rddev worker rework T1211 --parallel 4 --reason-file /tmp/t1211-rework-1.md`
+（run `run-fe2b8d33821b760b`）。信里逐字引了 collect、引了规则与行号、说明"标签错"的三条理由，
+给两种改法（A：把 `acceptance[3]` 改 `passed` 并按分支陈述证据；B：并进第 7 条），并逐条禁止：
+动工作树任何文件、重跑整套门（会写 `.sbom/` 弄脏树）、碰 `tasks/**`／`specs/**`／`.github/**`、
+改除这一条外的任何字段、留残留进程。**理由与 ㊶ 相同**：产品交付一个字没动，
+不该为一条记账烧掉一整轮工作；重跑会引入与判据无关的新变量。
+
+### 5. 这一窗的教训（写给下一本书）
+
+**判据里凡是"允许不做"的分支，必须写明那条分支要交什么证据。** ④ 写成
+「**你若接上了** X，必须有一条能证明它会红的测试」——真的走了另一条分支的读者，
+对这句话只剩 `not_applicable` 可答，而规则不许。下一本书里同一件事要写成
+「X **删或接，都要交出你那条分支的证据**：接了 → …；删了 → 删除凭据 + 等价下限能红的证据」。
+
+**没有选择的那条路**（记下来，免得下次再想一遍）：改书把 ④ 补成两分支都要证据，再把这条改动
+land 进 `tasks/tasks.json`。它被否掉有两个理由：(a) 那等于在一份"被拒"之后再改判据，
+读者无法分辨是"修好了一条写坏的书"还是"把标准改成能过"；(b) `.rddev/tools/apply-packages.py`
+拒绝把包 land 到 `rejected` 状态的任务上（它只接受 todo/ready/worker_failed/blocked），
+要用它就得先绕过我自己设的守卫。规则 159-170 本身没有问题，问题只在标签。
+
+## ㊹ T1210 / T1211 / T1212 三笔落地，Supervisor 的两个 CI 半边接线，T1213 立账（L1，2026-09-23）
+
+### 1. 这一窗的三笔，各自的结果
+
+- **T1210（证书刷新，`tests/acceptance/**`）**：独立复核 verdict **approve**——**最后一轮**那次是
+  1 minor + 5 nit + 5 risks（原件 `.rddev/workers/T1210-review/RESULT.json`）；**返工轮**那次是
+  1 minor + 4 nit + 4 risks（原件 `.rddev/workers/T1210-review/RESULT.superseded-run-4939114a82164d05.json`，
+  本节下面 §2 的表处置的是那五条，最终那次多出来的一条 nit 与它一起进了 T1213 的任务书）。
+  Supervisor 的 G2 与它自己的复核独立地对过账：
+  §1 那两张表与计数块（`v1_required_total=150` / `unmerged=0`、`tests_total=181` / `passed=178` /
+  `not_run=3` / `failed=0` / `skipped=0` / `blocking=181` / 空 evidence 的 passed=0）**我按台账手数了一遍，逐条相同**。
+  **accept 第一次是红的，红在我自己的接线里（见 5.1），返工轮因此发生**：那一轮不只是「重跑一遍」，
+  它把复核的四条意见做了、把 nit③ 带证据地不采纳、在 `115a4286` 上重跑了总门（07:13:13→07:13:47，rc 0、17 行、
+  `NOT ASKED` 0 行）与 MOF 全流程（07:14:28→07:15:03，50 步、rc 0），并在报告里留下「第六轮 / 第七轮」两段自述。
+  交付树冻结时 `git status --porcelain -uall` 只有那两个文件、HEAD = `115a4286`（= 报告新钉的基准）。
+- **T1211（安全仪器自己的欠账，`ops/security/**` + `tests/security/**`）**：第一次 collect 被拒（判决见 **㊸**），
+  返工同一 session（`run-fe2b8d33821b760b`，diff 一个字节未动，只把 ④ 的分类从 `not_applicable` 改成 `passed`
+  并按分支陈述证据），重新收集通过、复核通过、accept 通过，`1463335` 提交并推送——**PR 的必需作业 `security-master`
+  在 GitHub 上红了**，红的是**我**那一半接线（`pip install uv` 没钉版，见第 5 节），于是又走了一轮：
+  基线推进到 `d98022a`（我在 main 上修好的那条），`run-52f63216332b66b7` 在新基线上重新取证（diff 逐字节不变，
+  见 §3.1）。
+- **T1212（e2e 静默跳过，`tests/e2e/**` + `internal/persistence/testdb/**`）**：独立复核 verdict **approve**
+  （2 minor + 4 nit + 6 risks，原件 `.rddev/workers/T1212-review/RESULT.json`），复核方式是**复跑**而不是复读
+  （在被审树之外用 `git archive` 出的字节副本上重跑，含死端口那一次）。它的 CI 半边由我接（见第 5 节）。
+
+### 2. T1210 复核的五条意见 —— 逐条处置
+
+| # | 级别 | 指摘 | 处置 |
+|---|------|------|------|
+| 1 | minor | `v1-final-audit.sh` 过期分支的出路 (a) 给出 `git checkout $actual_head`（当前 HEAD），而正文说「在报告自己的基准上跑」 | **进 T1213**（正题一），并要求给出「修好后分支跑对」的复现输出 |
+| 2 | nit | 「走查 2106 个文件」是冷树那次的真实输出，同树今天重跑是 2108（差额是两个被忽略的运行产物） | **进 T1213**：这句话要对它具名的那次运行成立 |
+| 3 | nit | R14 的「全部调用者只有那一页自己」是无口径全称句（`.mjs` 单测调用者存在），㊳ 原话带口径 | **进 T1213**：改成带口径的写法，结论不变 |
+| 4 | nit | Gate H 那块标着「逐字抄录」的输出少了收尾行 `check-absent-manifest: OK — …` | **进 T1213**：补上，或改标题不再声称逐字 |
+| 5 | nit | 剩下两处 `head -n1` 是**顺序断言**不是数值检查 | **只记录**（复核员自己说判定上不构成违反，只提醒下一位读者别读成漏改） |
+
+**最终那一轮复核多出来的第六条**（1 minor + 5 nit 的那次）：脚本头注释说「这个脚本做五件事」而清单是六条、
+`require_marker` 只断言报告**提到** ADR 路径而不断言该文件在树里、报告里印给读者的 jq 与脚本钉的那条逐字不同、
+`gates_failed` 的推导只认一种排版、`collect_all` 保证的是「已出现的每一处都说对」而不是「该出现的地方都还在」。
+**这五条（连同上面那条 minor）一条都不在本窗的处置范围里**——它们落在 `tests/acceptance/**`，而那个面属于
+**T1213**；任务书里已按「逐条给『改/不改 + 理由』、改的给自证、不许放宽断言」立成一整条要求与一条验收判据。
+
+四条 risk 的处置：①「审计脚本没有任何 CI/Makefile 消费者」——**这是设计而不是缺口**：它是**基准快照**校验器，
+HEAD 一前进就必然非 0，装进 CI 只会每天红一次；它的消费者是「要重钉证书的人」（脚本自己把两条出路印出来）。
+②「Gate H 的绿建立在同一会话更早的那次总门实跑上」——**这正是 T1213 的正题二**：在最终树上同一时刻重挣。
+③「报告里的绝对路径」——**进 T1213**（要求在这版里对保留/脱敏作一次明确处置并写出来）。
+④「ADR-028 的容器扫描残余风险」——已由 ㉟ 那份书面接受覆盖，且守卫行会在镜像出现时转红；**记录**。
+
+### 3. T1211：从被拒到通过（㊸ 的后续）
+
+第一次 collect 的拒因是**取证分类**而不是事实（㊸ §3）：`status: completed` 的 RESULT 里每一条 acceptance
+都必须是 `passed`，而 ④ 那条判据的前提（「若你接上了 `check_floor()`」）在本轮**没有发生**，worker 就把它标成了
+`not_applicable`。判决没有放宽，任务书一个字没改，改的是**标签**：④ 按实际走的那条分支（删掉）报 `passed`，
+证据用等价下限那对红绿，**不为一个不存在的函数编一条红**。返工后 13 项 [ok] 照旧，树保持 11 modified / 无未跟踪。
+
+**这一条的可复用教训**（写进本窗的 book 约定）：判据里带前提的条目，前提没发生 **不等于** 与任务无关；
+「我走的是另一条分支」应报 `passed` 并把那条分支的证据写在格子里——这是本书里本来就有的写法（T1205 那条
+「豁免名单不是由你写的（若你写了，本任务判不通过）」报的就是 `passed` + "read-only"）。
+
+### 3.1 T1211 的基线推进，以及它撞上的那个工具面缺口：**已推送的分支 rebaseline 后会分叉**
+
+**为什么推进**：T1211 的 PR 上，必需作业 `security-master` 在第 13 步 `make security-tools` 判红——红的正是
+**T1211 自己新加的那条 uv 断言**（`uv` 必须等于 `ops/security/tool-versions.sh` 里的钉版 0.12.13），
+而作业里装 `uv` 的那行是 `pip install uv`（**没钉版**），新 runner 上装到 0.12.18。**断言是对的，作业是错的**：
+补救句（`pip install uv==$UV_VERSION`）是那条 die 自己印出来的。本机一直是绿的，只因为这台机器上的 `uv`
+恰好就是 0.12.13——`pip install uv` 在已满足的机器上什么都不换。修在 **`d98022a`**（三个作业同笔钉版，
+`ci.yml` 与 `gates.json` 逐字同改，摘要标记同笔重新生成）。**这是我在 `.github/**` 上的第二个缺陷**
+（第一个是 5.1 的 `sudo`），同一个作业、同一类错：**接线里写了一个「只有全新 runner 才满足」的前提**。
+
+**为什么必须 rebaseline 而不是重跑**：T1211 的分支基点还是 `b6c1fb1`，它的下一次 CI 会拿 `b6c1fb1` 当 merge base
+——也就是说钉版根本进不了那次合并树，同一条红会再红一次。所以用
+`rddev rebaseline T1211 --reason-file /tmp/t1211-advance.md`：本地分支被推到 `d98022a` 并**原样带着那 11 个文件的改动**
+（未提交），`task reject` + `worker rework`（`run-52f63216332b66b7`）。给工人的信逐字引了 runner 的报错、
+说明「**你这轮的交付没有错，一个字节都不用改**」、要求在新基线上重新取证、并逐条禁止它改文件或放宽那条 uv 断言。
+
+**分支就此分叉**。`rddev rebaseline` **只动本地 ref，从不推送**，而远程那条分支还停在 `1463335`
+（第一次 accept 时提交并推的）。`d98022a` 与 `1463335` 是**兄弟**（共同父提交 `b6c1fb1`），于是驱动下一次
+`git push origin task/T1211-t1209-findings` **必然 non-fast-forward 被拒**，`stepAccepted` 会记一条 `push` 决定点
+——而 `push` 不在 `resolve_decisions.py` 的四类候选里，也没人回收它：**这条分支会一直停着**。
+
+**工具面没有 force-push**（`PushTask` 就是一句 `git push origin <branch>`，全仓没有 `--force`），
+我也**不打算**用：`git push --force-with-lease=…` 被本环境的自动模式分类器拒绝，原文是
+「Force-pushing `task/T1211-t1209-findings` … is a history-rewriting remote push the user never named」。
+**我没有绕它**（`gh api` 之类同样能达到目的的路，走它等于绕过这条拒绝的意图）。
+
+**收口办法（不重写任何已公开的历史）**：驱动 commit 出 `X`（`d98022a` 的子提交）之后，在该 worktree 里
+`git merge --no-edit 1463335…` 得到 `M'`——两侧对同样 11 个文件的改动**逐字相同**，无冲突；`1463335` 因此是 `M'`
+的**祖先**，`git push origin task/T1211-t1209-findings` 是一次 **fast-forward**（不是重写）；随后
+`rddev refs adopt refs/heads/…` 让这次手工 ref 移动落账，`rddev drive --clear-decision T1211` 让驱动重试。
+**为什么不降低任何判据**：squash 进 main 的内容仍是本笔的 diff，合并基点仍是 `d98022a`（它是 `M'` 的祖先）；
+collect 在 `d98022a` 上判、G2 在「main + 本笔补丁」上判、G4 在 GitHub 的必需作业上判——**每个 gate 的输入内容没变**，
+变的只是一个提交容器。这一步**先在临时克隆里排练过**（那次排练还抓到：`git clone` 只搬 `refs/heads/*`，
+旧 tip 得从 GitHub 直接 fetch 进来，否则排练树里根本没有 `1463335`）。
+
+**教训（进 book 约定）**：**rebaseline 只对「还没推出去的分支」是自洽的**。一旦分支推送过、CI 跑过、PR 开过，
+rebaseline 就会造出一个工具面无法收口的 remote/local 分叉（rebaseline 不推、驱动只往前推、没有 force-push）。
+下一次遇到「已推送分支要先换基点」时，正确做法是**在推送之前**就把基点选对（或让改动从 main 上的一个空提交重新出发），
+而不是事后 rebaseline。
+
+### 4. T1212 复核的 2 minor：两条都不是缺陷，是需要我表态的判断
+
+- **minor 1（消息里有一截没被钉住）**：guard 钉了失败消息的四个子串（`--- FAIL: ` 横幅、变量名、DSN、旅程名），
+  没钉「so \<test name\> failing to run is a failure and not a skip」那一句里的**测试名**——而在子进程里那个名字
+  就是 guard 自己的名字，从 guard 内部无法自证。复核员自己写「not a defect」。**处置：记录，不建账。**
+  为一句日志措辞造一套「子进程换名再断言」的机关，代价大于它保的东西；这一条以**已知的、有解释的缺口**留在
+  复核记录与本节里，而不是假装它被钉住了。
+- **minor 2（取值文法比任务书的 `=1` 宽）**：任何非空且非 `"0"` 的值都算「必须」——包括 `false` / `no` / `off`。
+  复核员说「flagged for the Supervisor to confirm rather than treated as a defect」。**处置：确认并保留。**
+  理由是**不对称**：假「必填」是**响亮**的失败（消息里点名变量、DSN、旅程名与正在跑的测试，看一眼就懂），
+  假「可选」是**静默跳过**——而静默跳过正是这一笔要消灭的东西。文法由 `TestRequiredDBValueGrammar` 钉住、
+  在代码里写明、并在 RESULT 的 risks 里主动提出。**这是一条工程判断（L1），不是一条缺陷。**
+- 四条 nit：③ RESULT 里的行号引用过期（worker 的 RESULT 不是树里产物）→ 记录；④ 三处注释重复变量字面量
+  → 记录；⑤ `guardJourneys` 的表意味着**将来**第三个需要真库的测试会落在守卫之外 → 记录为「加测试时的一条约束」；
+  ⑥ 文档注释把「将要接线」写成「已接线」→ **本窗的接线使它成真**（顺序上：T1212 先合，CI 半边同窗后落，
+  中间那一刻这句话严不起来）。
+- 六条 risk 里最实的一条：**`tests/integration` 里同类静默跳过仍在**（Gitea token、`sqlc` 在 PATH、MinIO，
+  都没有「必填」开关）→ 记为**待办候选**（同类缺陷，不是本笔的回归），下一轮立账时一并考虑。
+
+### 5. Supervisor 的两个 CI 半边：为什么必须同笔落地，以及排练抓到的两个真错
+
+**为什么同笔**：`.github/workflows/ci.yml` 与 `specs/orchestrator/gates.json` 的**步骤逐字**被
+`TestCIWorkflowMatchesGateSpec` 比对（`gate_spec_test.go:47`），改一处漏一处 = 有一个 job 永远不被 G2 跑到。
+两处都要动的东西只能一个人一次动完，所以两个半边都由我接。**但原来打算「一个空窗、一笔提交」落地的计划没成立**：
+uv 那一半（`d98022a`）**单独先落了**——它红的是一条必需作业，而必需作业在全新 runner 上红会挡住**每一张** PR，
+不只是 T1211 那一张（而且 T1211 的分支正卡在这条红上，它的 rebaseline 正等着一个带钉版的 main，
+见 §3.1）；e2e 那一半仍按原计划等窗口（T1212 合并之后、且那一步在真库上实跑通过之后再落）。
+
+**排练抓到的两个真错**（都在真树上会以别的形状现形，见下）：
+
+1. **我的落账脚本读早了 `gates.json`**：脚本先把 gates.json 读进内存做守卫，再让 CI 半边去写它，最后把内存里
+   的旧版本写回去——结果 `ci.yml` 变了、`gates.json` 没变。真树上会表现为**同步测试红**（"job go step 4:
+   gates.json runs … , ci.yml runs …"），而原因看起来在 CI 半边，实际在落账脚本的读取顺序。修法：**先跑 CI
+   半边，再读 gates.json**。
+2. **Makefile 里的 `$'`**：`grep -v -e '/tests/e2e$'` 写进 `$(shell …)` 时，make 把 `$'` 读成一个变量引用，
+   模式（连同它前面的引号）一起散架，`GO_UNIT_PKGS` 变成**空**。真树上不会红——`make test` 会**一个包都不跑**
+   而照样退出 0，这比红更危险。修法：写 `$$'`。**这一条只在排练里现形**
+
+顺带一处**标签也要跟着走**：`go` 那条 job 的名字原本写「integration package excluded」，改了包列表之后它
+描述的是一个不存在的 job（`- name:` 只在 ci.yml 里，gates.json 的步骤不具名，所以名字可以单独改），
+`Makefile:16` 与 `scripts/ci.sh` 的注释同理。
+
+### 5.1 接线里还有第三处缺陷，是 G2 自己报出来的：`sudo` 在非 runner 宿主上没有终端
+
+T1210 的 accept 第一次是**红**的，红得很奇怪：`security-master` 作业的**第 4 步**
+（`sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools`）以 exit 1 收场，
+日志只有一行：
+
+    sudo: a terminal is required to read the password; either use the -S option to read from
+    standard input or configure an askpass helper
+
+它之后的四步（`pip install pyyaml`、`govulncheck`、`make security-tools`、总门本身）**根本没跑**——G2 在第一个红处停，
+整个作业红，`rddev task accept` 以「G2 is red（state unchanged）」拒绝。
+
+**这是我的错，不是环境的错。** 那行 `apt-get` 是 ㊴ 的接线 PR（`39110ec` / `ee0a640`）里**我**加进这个作业的，
+加的时候只在 GitHub runner 的语义下想过——那里 `sudo` 免密。而 G2 的合约是「在**本机**跑 CI 的那几步」；
+本机没有 tty，`sudo` 要不到密码，于是这一步**在任何非 runner 宿主上都必然红**：它不是「这台机器缺工具」，
+是「这一步不可能过」。更刺眼的是它要装的 `redis-cli` **早就在** `/usr/bin/redis-cli`（7.0.15；`ops/doctor-checks.md:136`
+把 T-REDIS-CLI 列为 required 的本机工具，`ops/bootstrap-ubuntu.sh:16` 是给人跑的安装脚本）。
+
+**为什么这不是「把门改绿」**：改后这一步断言的仍是同一件事（`redis-cli` 在），只是不再无条件调用包管理器：
+
+    command -v redis-cli >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools; }
+
+在缺这个工具的 runner 上，安装**照样发生**，装不上**照样红**；在本机（或任何已经装了它的 runner）上，
+它跳过的是一次它不需要的**安装**，不是一次**检查**。`owasp-smoke` 那一行、它的工具钉版、它的先决条件声明
+（T1211 新加的 `redis-cli` token：缺了是 NOT ASKED 并点名工具，不是 FAIL）都没动。这一步的语义是「仪器在」，
+不是「跑了 apt」。
+
+**同步面**：`ci.yml` 与 `gates.json` 的 `run` 字符串逐字被 `TestGatesSpecSyncsWithCIWorkflow` 比对，两处同笔改；
+`gates.json` 是摘要输入，`specs/SPEC_VERSION.json` 同笔重新生成；步骤**名字**也改了（`ci.yml` 独有、比对不含它），
+因为新行为不该挂在旧标签下；`ci.yml` 那段注释补了「为什么是守卫而不是无条件安装」。
+**扫过的兄弟面（都不该改）**：`ops/bootstrap-ubuntu.sh`（人跑的、有 sudo，正确）、`ops/doctor-checks.md`
+（人读的补救表，正确）。
+**教训（进 book 约定）**：往 CI 步骤里写 `sudo`，等于往 G2 的必跑路径里写一个只有 runner 才满足的前提——
+**G2 会在本机跑这些步骤，这正是它存在的意思**。
+
+**被拒之后驱动做了什么（我一开始判断错了，这里按事实写）**：被拒时驱动会记一条 `DECISION NEEDED`
+（`decisions.json`），我据此以为「必须手工清掉决定，驱动才会重试」。事实不是这样：**拒绝会直接触发一次返工**
+（`verification → rejected → running`，`tasks/task_status.json` 的历史里写着），返工提示词逐字引用那条 G2 报错，
+而那条决定记录会被这次返工**自动顶掉**。T1211 的 collect 被拒（22:29:32）就是这么走的：7 分钟后驱动自己拉了返工
+（22:36:30），并不需要我清；我后来那次 `--clear-decision` 是**无害但多余**的（它只让 23:13:49 那次 collect
+有机会被排上队——那之前驱动一直在跑 accept）。
+
+**真正的代价在这里**：返工把「修好 G2 红」当成 **worker 的活**，而这一条红在 `.github/**`（任务书的**禁止面**）里——
+worker 面对一个它被禁止修的缺陷。这一次的结果是好的：两个 worker 都自己查清了「红在合成树的主干上、
+Supervisor 已在 `115a4286` 修掉」，转而做**重新取证**（T1210 那笔重跑了总门与 MOF 全流程，T1212 那笔按作业步骤
+逐步复跑）——也就是把 T1213 本来要做的事提前做了一部分。代价是**一整轮返工 + 一轮重做的复核**（复核是对旧 diff 的
+判定，diff 一变就作废）。
+**教训（进 book 约定）**：我自己往 CI 步骤里加的每一行，都是 G2 必跑路径上的一行；**一行不可满足的步骤，
+代价不只是那一次红，而是每一个在飞的 accept 都要付一轮返工**。加步骤前先问「本机能不能跑」。
+
+### 6. 账本落账（本窗实跑，不是抄工人）
+
+`tasks/tests.json` 里 T1210/T1211/T1212 三行在立账时是 `not_run`（证书发放时它们还在飞）。三笔合并后由我
+**实跑**并逐条落账（`scripts/record_test_run.py --apply`，`passed` 只在退出码 0 时被接受）：
+
+| 行 | 测试 | 跑在哪棵树上 | 结果 |
+|---|---|---|---|
+| T1210-TEST-01 | `bash tests/acceptance/v1-final-audit.sh` | 报告**自己钉住的**基准（`115a4286`，返工轮重钉的）+ 合并进来那一版 `tests/acceptance/**` | 见 §6.1 |
+| T1211-TEST-01 | `bash tests/security/master-gate-mutation-check.sh` | 合并后的 main（它自己在 `mktemp -d` 里造变异副本，不脏树） | 见 §6.1 |
+| T1212-TEST-01 | `POST_REQUIRE_E2E_DB=1 POSTGRES_TEST_ADMIN_URL=… go test ./tests/e2e -count=1` | 合并后的 main（真库，`docker compose` 里那台 postgres） | 见 §6.1 |
+
+**为什么 T1210 那一条必须在「钉住的基准」上跑**：这个审计是**基准快照**校验器——HEAD 一前进它必然非 0
+（这正是它不进 CI 的原因，㊷ §2 risk ①）。所以它的 `exit 0` 只在「HEAD == 报告钉住的 SHA」的那棵树上有意义；
+在合并后的 main 上跑它只会得到「证书过期」这条正确但无信息量的红。
+
+**树是 compose 出来的**（`/tmp/record-three.sh`）：`git clone --no-local` 到 `/tmp`（**只读**源库，
+不建 branch、不建 worktree——memory：我自己造 ref 会让在跑的 collect 失败），在副本里
+`git checkout --detach <报告钉的 SHA>`，再 `git checkout <合并后 main> -- tests/acceptance`
+把**合并进来那一版**的证书文件放上去。于是 HEAD 仍是证书钉的那个 SHA（审计的主场），
+而桌子上的证书是**最终那一版**。台账/状态/任务 DAG 保持基准那一刻的样子——这正是报告两张表要对的账。
+
+**负对照（同一份文件、HEAD 不是它钉的 SHA）**：期望**非 0**，且打印「证书过期」那条出路。
+只在基准上绿 = 这条守卫能说不；两次都绿才是真的坏了。两条原文都进 `/tmp` 的日志，负对照的退出码写进落账的 note。
+
+**为什么 T1211/T1212 那两条要等合并之后**：它们是被测物本体（安全仪器、e2e 守卫），只有合并后的 main 才
+同时具备「新仪器」与「新守卫 + 真库」。
+
+### 7. T1213 立账（**窗口还没开，任务书是先在 `/tmp` 里改好的**）
+
+来源是 T1210 的独立复核（verdict=approve）——**两轮复核的每一条都进了任务书**：返工轮那次
+（1 minor + 4 nit + 4 risks，原件 `…/RESULT.superseded-run-4939114a82164d05.json`）的四处与
+**最终**那次（1 minor + 5 nit + 5 risks，原件 `…/RESULT.json`）的五条 + minor，一共十处，逐条有归属：
+返工轮已改的四条**只验不重做**、nit③ 带证据地不采纳要求复核、最终那六条要求逐条「改/不改 + 理由」。
+
+**但这笔任务在我写任务书的当天就缩小了一半**：T1210 被拒之后的返工轮（第七轮）自己把四条意见修了
+——出路改成打印报告钉的那个 SHA（`report_head`）、走查数 2106 → 2108 并写明随忽略产物浮动、R14 改成
+「**产品侧**的调用者只有那一页自己」并点名三个 `.mjs` 单测调用点、两处 `head -n1` 加了「这是位置断言」的注释；
+nit③（逐字抄录缺收尾行）它**带证据地不采纳**——那一行属于同一个 checker 的**另一种**调用方式（非 `--selftest`），
+总门跑的是 `--selftest`，报告第 2 节把两者分开引了。
+
+所以任务书重写成了「**只验不重做**」：那四条由 T1213 逐条复核并给引用（验不过就说不成立），
+**不许**重做——它们正是上一轮复核的对象，改了就等于把被复核的东西换掉。真正剩下的四件事是：
+
+| 任务书条目 | 来源 | 为什么还得做 |
+|---|---|---|
+| R2（正题） | risk ② | Gate H 上一轮的绿挣在 `115a4286` 上，而 **T1211 改的正是那套仪器**；必须在承载 T1211 的树上重挣 |
+| R3 / R6 | risk ② + 我加的 | 基准行与两张机械表要按**这棵树**重取（`--emit-tables` 的同一次输出）；报告里引用旧基准的句子要跟着说清谁是谁 |
+| R5 | risk ③ | 报告里的绝对路径要有一次明确处置（保留并说明 / 脱敏并改标题）——这条返工轮没碰 |
+| R7 | 我加的 | 「修订记录（本次重钉）」：逐层写明「重挣 / 沿用」，沿用的层给 `git diff --stat b6c1fb1a..HEAD -- <路径>` 原文 |
+
+**为什么 `v1_required=false`**（同 T1210 的裁定）：它是**证书的修订**，不是产品交付物；标 true 会让报告
+必须具名排除「正在写修订的自己」，排除名单每刷一版长一节——那是记账技巧不是严格。
+**依赖三笔**：`T1210`（被修订的证书）、`T1211`（仪器变了）、`T1212`（落地后台账与测试分布会变，而报告的两张表
+与计数块正是台账的产物）。**G3 给 `mof-canonical`**（与 T1210 同一作业）——证书里最吃重的跨边界断言是 Gate I，
+必须在承载这一版的树上重新挣得。
+
+**窗口为什么还没开**：落账脚本（`/tmp/t1213-land.py`）自己就把条件写死了——三笔依赖必须都是 `merged`，
+所以它必须等三笔都并进来才跑。它落地时与 **T1212 的 e2e 接线那一半**同笔（`.github/**` + `specs/**` +
+`scripts/**` + `Makefile` + `tasks/**` 一起动、摘要标记只重新生成一次）；uv 那一半已经单独先落了（§3.1）。
+
+**只给 `tests/acceptance/**`**（任务书里另外写死了）：产物就是「报告 + 校验它的脚本」这一对，
+给别的写入面会让「证书」与「被证之物」的边界糊掉；`docs/31` 是规格（判据来源），允许被验收者改规格
+等于让考生改卷子。
+
+### 6.1 落账结果
+
+（本节与落账命令的实跑输出同笔落地——三行台账 `not_run → passed` 的退出码与证据文件写在这里。）
+
+### 8. V1 的当前位置
+
+三笔（T1210 / T1211 / T1212）已合并进 `main`，驱动在 10:05:10 报「nothing to do」正常退出——**流水线此刻是空的**。
+余下的是：把三条台账行按实跑落账（§6.1）、把 T1213 立账并落地两个 CI 半边、由 T1213 把证书在最终树上重钉，
+然后是 **Master Acceptance（§12）** 与**五条 L3 裁定**（那份要 owner 拍板的清单）。
