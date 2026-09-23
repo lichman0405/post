@@ -1182,6 +1182,11 @@
       "g3_jobs": [
         "mof-canonical"
       ]
+    },
+    "T1214": {
+      "g3_jobs": [
+        "mof-canonical"
+      ]
     }
   }
 }

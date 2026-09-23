@@ -1820,6 +1820,16 @@
       "status": "passed",
       "last_run": "2026-09-23T04:05:12Z",
       "evidence": "Supervisor ran `bash tests/acceptance/v1-final-audit.sh` -> exit 0 on 2026-09-23T04:05:12Z. Last output: COUNTS tests_skipped=0 ; COUNTS tests_blocking=182 ; ``` ; AUDIT OK: report markers present, counts match (0 unmerged, 1 not_run, 0 failed, 0 skipped, 0 passed-without-evidence). 在证书自己钉住的基准 a8850f51 上跑（+ 合并后 main 的 tests/acceptance/**）；负对照 HEAD≠基准 rc=1"
+    },
+    {
+      "id": "T1214-TEST-01",
+      "task_id": "T1214",
+      "name": "certificate final revision",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }

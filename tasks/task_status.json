@@ -11988,6 +11988,10 @@
           "reason": "pr merge via rddev (four gates green)"
         }
       ]
+    },
+    "T1214": {
+      "status": "todo",
+      "notes": "新立账（2026-09-23，owner 五条 L3 裁定之后）：证书的最后一次重钉——Gate G 按范围豁免改判，§0 五条裁定逐条点名，㊺ §4 的四条记实错误一并订正。任务书见 tasks/packages/T1214.json，G3 覆盖同笔补进 gates.json（mof-canonical）。v1_required=false：这是证书的修订，不是产品交付。"
     }
   },
   "version": 2
