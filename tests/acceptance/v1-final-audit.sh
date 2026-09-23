@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
 #
-# V1 最终验收审计脚本（T1207 final audit）
+# V1 最终验收审计脚本（T1207 起，T1210 刷新）
 #
-# 这个脚本做四件事：
+# 这个脚本做五件事：
 #   1. 统计 v1_required=true 且未 merged 的任务，排除 T1207 自身；
-#   2. 统计 blocking=true 与各 status 的测试条数；
+#   2. 统计 blocking=true 与各 status 的测试条数，并把**计数块原样打印**——
+#      普通运行与 --emit-tables 走同一个函数：一个供人读，一个供重建报告，
+#      读到的就是被校验的那一份；
 #   3. 校验 tests/acceptance/v1-final-report.md 是否包含所有强制标记，
 #      且报告里的数字/名单/基准 commit/计数块与台账、与 git 逐条一致；
-#   4. 显式断言台账里 failed / skipped 为 0（分布标记之外的第二道，直接数）。
+#   4. 显式断言台账里 failed / skipped 为 0，以及**每一条 passed 都带 evidence**
+#      （分布标记之外的第二、第三道，直接数台账，不经过报告）；
+#   5. 报告里每一处「同一个事实」的出现都必须说对——句式的字面相等不够，
+#      把**全部**出现收成集合、要求集合里只有一个元素（T1210 要求 4d）：
+#      说对一次不算数，得每一处都说对。适用对象包括登记数两句、台账分布那一句、
+#      以及**基准行**（头部说对、正文留一条旧 SHA 也算错）；
+#   6. 两个「不许手写」的计数：§0 的 L3 条数由报告与台账两边的编号集合数出来
+#      （两边必须相等），门层的「几通过 / 几未通过」由报告自己的处置行数出来——
+#      判定与统计必须一致（T1210 要求 4b）。
 #
 # 它是**基准快照**（snapshot）校验器，不是常驻检查：报告是对某一棵树的证书。
 # 报告的「生成基准」与当前 HEAD 不符时（合并、落账或任何一次 HEAD 前进之后必然如此），
@@ -69,6 +79,35 @@ failed_tests="$(jq '[.tests[] | select(.status=="failed")] | length' "$ROOT/task
 skipped_tests="$(jq '[.tests[] | select(.status=="skipped")] | length' "$ROOT/tasks/tests.json")"
 blocking_tests="$(jq '[.tests[] | select(.blocking==true)] | length' "$ROOT/tasks/tests.json")"
 
+# 台账规矩：「没有 command 的 passed 不算证据」。这一条**直接数台账**
+# （T1210 要求 4e）：空 evidence（或只有空白字符）的 passed 必须为 0。
+# 它不是报告的断言，是台账的断言——报告怎么写都绕不过它。
+passed_without_evidence="$(jq '
+  [ .tests[] | select(.status=="passed")
+    | select((((.evidence // "") | gsub("[[:space:]]"; "")) | length) == 0) ] | length
+' "$ROOT/tasks/tests.json")"
+
+# ---------------------------------------------------------------------------
+# 计数块：报告引用的每个数字都由脚本给出，不许手写。
+# **两条路径都打印它**：--emit-tables 用它重建报告第 1.3 节，普通运行也把它
+# 原样打出来（同一份数字，脚本一边打印、一边校验报告里那 9 行与它逐字相等）——
+# 「打印出来的」与「被校验的」是同一份东西，读输出的人不必去读脚本。
+# ---------------------------------------------------------------------------
+emit_counts_block() {
+  echo '<!-- 计数块：报告引用的每个数字都由脚本给出，不许手写 -->'
+  echo '```text'
+  echo "COUNTS v1_required_total=$v1_total"
+  echo "COUNTS v1_required_unmerged=$unmerged_count"
+  echo "COUNTS excluded=$EXCLUDE_TASK"
+  echo "COUNTS tests_total=$total_tests"
+  echo "COUNTS tests_passed=$passed_tests"
+  echo "COUNTS tests_not_run=$not_run_count"
+  echo "COUNTS tests_failed=$failed_tests"
+  echo "COUNTS tests_skipped=$skipped_tests"
+  echo "COUNTS tests_blocking=$blocking_tests"
+  echo '```'
+}
+
 # ---------------------------------------------------------------------------
 # --emit-tables：生成够重建报告的那一份产物（生成物，不是断言）
 # ---------------------------------------------------------------------------
@@ -94,18 +133,7 @@ if [ "$EMIT_TABLES" = "1" ]; then
     echo "$not_run_json" | jq -r '.[] | "| \(.id) | \(.task_id) | \(.name) |"'
   fi
   echo
-  echo "<!-- 计数块：报告引用的每个数字都由脚本给出，不许手写 -->"
-  echo '```text'
-  echo "COUNTS v1_required_total=$v1_total"
-  echo "COUNTS v1_required_unmerged=$unmerged_count"
-  echo "COUNTS excluded=$EXCLUDE_TASK"
-  echo "COUNTS tests_total=$total_tests"
-  echo "COUNTS tests_passed=$passed_tests"
-  echo "COUNTS tests_not_run=$not_run_count"
-  echo "COUNTS tests_failed=$failed_tests"
-  echo "COUNTS tests_skipped=$skipped_tests"
-  echo "COUNTS tests_blocking=$blocking_tests"
-  echo '```'
+  emit_counts_block
   exit 0
 fi
 
@@ -116,6 +144,9 @@ echo "$unmerged_json" | jq -r '.[] | "  - \(.id) [\(.status)] (\(.phase)) \(.tit
 
 echo "BLOCKING_NOT_RUN_COUNT=$not_run_count"
 echo "$not_run_json" | jq -r '.[] | "  - \(.id) (\(.task_id)) \(.name)"'
+echo "PASSED_WITHOUT_EVIDENCE_COUNT=$passed_without_evidence"
+echo
+emit_counts_block
 
 # ---------------------------------------------------------------------------
 # 3. 校验报告文件与强制标记
@@ -133,22 +164,60 @@ require_marker() {
   fi
 }
 
+# collect_all WHAT REGEX EXPECTED — 把报告里**该句式的每一处出现**都收上来，
+# 去重后要求集合里恰好只有台账给的那一个元素（T1210 要求 4d）。
+#
+# 为什么不是 require_marker：那条只要求「正确的句式至少出现一次」——一份在
+# 第 1.3 节写对、却在第 0 节写错的报告能骗过它（变异 M8 实测逃逸）。同一个事实
+# 在一个文档里说了几遍，就得几遍都说对。集合为空也走这条失败路径：没有出现
+# 同样是失败，只是失败的理由不同（不存在 ≠ 说错了，但都不许过）。
+collect_all() { # collect_all WHAT REGEX EXPECTED
+  local what="$1" regex="$2" expected="$3" found
+  found="$(grep -oE "$regex" "$REPORT" | sort -u)"
+  if [ "$found" != "$expected" ]; then
+    echo "FAIL: $what — the report's occurrences are not exactly the one the ledger gives" >&2
+    echo "--- report says ($(echo "$found" | grep -c .) distinct) ---" >&2
+    echo "$found" >&2
+    echo "--- ledger says ---" >&2
+    echo "$expected" >&2
+    fail=1
+  fi
+}
+
 # 10 个 Gate 标题
 for gate in "Gate A" "Gate B" "Gate C" "Gate D" "Gate E" "Gate F" "Gate G" "Gate H" "Gate I" "Development System Gate"; do
   require_marker "### $gate"
 done
 
-# 剩余风险编号
-for r in R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11; do
+# 剩余风险编号（R12/R13/R14 也钉上：报告今天有 14 条，缺任何一条都是缺口不点名）
+for r in R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14; do
   require_marker "### $r."
 done
 
-# 关键事实标记（对应四条已知缺口 + T1206 缺席清单）
+# 关键事实标记（对应四条已知缺口 + T1206/T1209 缺席清单的处置）
 require_marker "产品的 blob 写入路径缺失"
 require_marker "reopen 在生产里没有入口"
 require_marker "部署的 search 没有接任何 planner / embedder / answer provider"
 require_marker '`rddev worker collect` 的证据没说清它评了什么'
-require_marker "SAST、容器扫描、SBOM 三项缺席"
+
+# T1209 落地后的缺席清单（T1210 重写的那一句）：SAST 与 SBOM 已是总门里的
+# 实检行、容器扫描是**有守卫的缺席**并有一份**书面风险接受**。三块都要在：
+# 句子（两条实检行 + 一条有守卫的缺席）、ADR 文件、那条守卫行的名字与证据行。
+require_marker "SAST 与 SBOM 不再是缺席"
+require_marker "容器扫描是唯一剩下的缺席，而且是一条有守卫的缺席"
+require_marker "docs/adr/ADR-028-v1-ships-no-container-image.md"
+require_marker "MIN_CHECKS=17"
+require_marker "master-security-gate: PASS — 17 check(s) ran and each printed its own evidence"
+require_marker "ok   item: container-scan — guarded absence: the 'container-scan' row of this gate is registered"
+
+# Gate H 的 H1 行：判定必须**带限定**（T1210 要求 4b）。这是那一行的判定格，
+# 逐字钉住——把这一格改回无边界的「通过」，或改成别的值，这里就红。
+require_marker '| H1 | Critical/High security issues = 0 | **通过（限定：扫描面之外仍有一条有守卫的缺席）** |'
+
+# 「四层 Gate 通过」必须有它自己的块（T1210 要求 4c）：逐层给权威与「绿记在哪」
+require_marker "### 5.2 「四层 Gate 通过」：逐层的权威与「绿记在哪」"
+require_marker "specs/orchestrator/gates.json"
+require_marker ".rddev/runtime/gates/"
 
 # search 接线缺口的可复跑证据（R5）：报告必须给出具体命令与命中行，
 # 不接受「grep 过、没 wire」这类无法复现的措辞
@@ -164,13 +233,21 @@ require_marker "V1 的两条台账条件在本基准 commit 上已经满足"
 require_marker "EXCLUDED=T1207"
 require_marker "${not_run_count} 条 blocking 测试为"
 
-# 报告的基准 commit 必须就是当前 HEAD（数字与 SHA 都不许抄旧树）
-report_head="$(grep -oE '^> 生成基准：`[0-9a-f]{40}`' "$REPORT" | head -n1 | grep -oE '[0-9a-f]{40}')"
+# 报告的基准 commit 必须就是当前 HEAD（数字与 SHA 都不许抄旧树）。
+# 与上面三条同一个修法（T1210 要求 4d）：收**全部**基准行、要求集合唯一，
+# 不是只看第一处。一份在头部写对基准、却在正文引用里留一条旧 SHA 的报告，
+# 必须在这里红——「说对一次」不算数。
 actual_head="$(git -C "$ROOT" rev-parse HEAD)"
-if [ -z "$report_head" ]; then
+baseline_lines="$(grep -oE '^> 生成基准：`[0-9a-f]{40}`' "$REPORT" | sort -u)"
+baseline_expected="> 生成基准：\`${actual_head}\`"
+# 出路 (a) 要指回【报告自己】钉的那个 SHA，而不是当前树的 HEAD：打印 HEAD 会把
+# 「去哪棵树核对」说反（出口说的是「在报告自己的基准上跑」）。这里的 head -n1 取的是
+# 唯一值——上面已经用 sort -u 收成集合，多于一条时走的是下面那条失败分支，不会走到这里。
+report_head="$(printf '%s\n' "$baseline_lines" | grep -oE '[0-9a-f]{40}' | head -n1)"
+if [ -z "$baseline_lines" ]; then
   echo "FAIL: report does not state its baseline commit in the expected format" >&2
   fail=1
-elif [ "$report_head" != "$actual_head" ]; then
+elif [ "$baseline_lines" != "$baseline_expected" ]; then
   # 基准不符不是「报告写错了」，是「证书过期了」——但这仍然是一次失败。
   cat >&2 <<EOF
 FAIL: 报告的基准不是这棵树。
@@ -180,11 +257,11 @@ FAIL: 报告的基准不是这棵树。
   都是在下面那个 SHA 上取的一次快照。HEAD 前进一次（合并、落账、任何一次提交），
   报告就与当前树不同步——这不是报告错了，是它记录的那棵树不是这一棵。
 
-  报告钉在的基准：$report_head
+  报告钉在的基准：$baseline_lines
   当前工作树 HEAD：$actual_head
 
   两条出路：
-    (a) 在报告自己的基准上跑这条命令：git checkout $report_head（或那个基准的 worktree），
+    (a) 在报告自己的基准上跑这条命令：git checkout ${report_head:-（报告里没有可解析的基准行）}（或那个基准的 worktree），
         再执行 bash tests/acceptance/v1-final-audit.sh；
     (b) 已经在基准树上核对完判定与证据之后，把报告移到当前树：
         bash tests/acceptance/v1-final-audit.sh --emit-tables
@@ -199,6 +276,8 @@ fi
 
 # 基准行必须是报告开头的那一条（不是正文引用里的某一条）：
 # 第 3 行内的头部行才是「这份报告钉在哪」的声明。
+# 这里的两个 head -n1 是**位置**断言（哪一行在前），不是值检查：值检查一律走上面的
+# collect_all（收全部出现、要求集合唯一）。位置问的是「第一条在哪一行」，取第一条就是它要问的东西。
 first_section_line="$(grep -nE '^## 1\.' "$REPORT" | head -n1 | cut -d: -f1)"
 head_line="$(grep -nE '^> 生成基准：`[0-9a-f]{40}`' "$REPORT" | head -n1 | cut -d: -f1)"
 if [ -z "$head_line" ] || [ -z "$first_section_line" ] || [ "$head_line" -ge "$first_section_line" ]; then
@@ -206,42 +285,17 @@ if [ -z "$head_line" ] || [ -z "$first_section_line" ] || [ "$head_line" -ge "$f
   fail=1
 fi
 
-# 校验报告中的计数与脚本计算一致（防止报告悄悄改数字）
-report_unmerged_count="$(grep -E '^\*\*计数：[0-9]+ / 0' "$REPORT" | grep -oE '[0-9]+' | head -n1)"
-if [ -z "$report_unmerged_count" ]; then
-  echo "FAIL: report does not state unmerged count in expected format" >&2
-  fail=1
-elif [ "$report_unmerged_count" != "$unmerged_count" ]; then
-  echo "FAIL: report claims $report_unmerged_count unmerged tasks, script counted $unmerged_count" >&2
-  fail=1
-fi
+# 校验报告中的计数与脚本计算一致（防止报告悄悄改数字）。
+# 两处都收**全部**出现、要求集合唯一（T1210 要求 4d）：与下面分布那一条同一个修法。
+counts_target_sentence="**计数：${unmerged_count} / 0"
+collect_all "the unmerged-count sentence" '^\*\*计数：[0-9]+ / [0-9]+' "$counts_target_sentence"
 
-report_not_run_count="$(grep -E '^当前结果：\*\*[0-9]+ 条 blocking 测试为' "$REPORT" | grep -oE '[0-9]+' | head -n1)"
-if [ -z "$report_not_run_count" ]; then
-  echo "FAIL: report does not state not_run count in expected format" >&2
-  fail=1
-elif [ "$report_not_run_count" != "$not_run_count" ]; then
-  echo "FAIL: report claims $report_not_run_count not_run tests, script counted $not_run_count" >&2
-  fail=1
-fi
+not_run_target_sentence="当前结果：**${not_run_count} 条 blocking 测试为"
+collect_all "the not_run-count sentence" '^当前结果：\*\*[0-9]+ 条 blocking 测试为' "$not_run_target_sentence"
 
 # 校验报告声明的 tests.json 整体分布与台账一致
 distribution_marker="**${total_tests} 条 = ${passed_tests} \`passed\` + ${not_run_count} \`not_run\`**"
-require_marker "$distribution_marker"
-
-# 上面那一条只要求「正确的分布句式**至少出现一次**」——一份在第 1.3 节写对、
-# 却在第 0 节写错的报告能骗过它（变异 M8 实测逃逸）。所以这里把**所有**该句式的
-# 出现都收上来：集合里只许有一个元素，且就是台账给的那一个。
-# 「说对一次」不算数，得「每一处都说对」。
-dist_found="$(grep -oE '\*\*[0-9]+ 条 = [0-9]+ `passed` \+ [0-9]+ `not_run`\*\*' "$REPORT" | sort -u)"
-if [ "$dist_found" != "$distribution_marker" ]; then
-  echo "FAIL: the report's ledger-distribution statements are not exactly the one the ledger gives" >&2
-  echo "--- report says ---" >&2
-  echo "$dist_found" >&2
-  echo "--- ledger says ---" >&2
-  echo "$distribution_marker" >&2
-  fail=1
-fi
+collect_all "the ledger-distribution sentence" '\*\*[0-9]+ 条 = [0-9]+ `passed` \+ [0-9]+ `not_run`\*\*' "$distribution_marker"
 
 if [ "$blocking_tests" != "$total_tests" ]; then
   echo "FAIL: ledger has non-blocking entries (blocking=$blocking_tests, total=$total_tests); report claims every entry is blocking" >&2
@@ -255,6 +309,50 @@ if [ "$failed_tests" != "0" ] || [ "$skipped_tests" != "0" ]; then
   echo "FAIL: ledger holds $failed_tests failed / $skipped_tests skipped entries; the report claims none" >&2
   fail=1
 fi
+
+# 分布的第三道断言（T1210 要求 4e）：**空 evidence 的 passed 必须为 0**。
+# 台账规矩是「没有真实命令的 passed 不算证据」，而上面两道都只看 status：
+# 一条 `{"status":"passed","evidence":""}` 的账目能骗过它们，骗不过这一条。
+# 它同样直接数台账，不经过报告。
+if [ "$passed_without_evidence" != "0" ]; then
+  echo "FAIL: ledger holds $passed_without_evidence passed entr(ies) with empty evidence; a passed row without a command is not evidence" >&2
+  fail=1
+fi
+
+# §0 的「N 条 L3 未获裁定」不许手写：脚本自己从两个文件里数。
+#   左半边 = 报告第 0 节点名的 L3 编号集合（报告必须逐条点名，不能只报个数）；
+#   右半边 = 台账（tasks/decisions.md）里出现过的 L3 编号集合。
+# 两个集合必须相等，且报告里那句计数的措辞必须等于**数出来的**那个数。
+# 这样「漏登记一条 L3」与「条数写错」两种病各有一半会红。
+l3_in_report="$(awk '/^## 0\./,/^## 1\./' "$REPORT" | grep -oE 'L3-[⓪①②③④⑤⑥⑦⑧⑨]' | sort -u)"
+l3_in_ledger="$(grep -oE 'L3-[⓪①②③④⑤⑥⑦⑧⑨]' "$ROOT/tasks/decisions.md" | sort -u)"
+if [ "$l3_in_report" != "$l3_in_ledger" ]; then
+  echo "FAIL: the L3s the report's section 0 names are not the L3s the decisions record holds" >&2
+  echo "--- only in report ---" >&2
+  comm -23 <(echo "$l3_in_report") <(echo "$l3_in_ledger") >&2
+  echo "--- only in the decisions record ---" >&2
+  comm -13 <(echo "$l3_in_report") <(echo "$l3_in_ledger") >&2
+  fail=1
+fi
+l3_count="$(echo "$l3_in_report" | grep -c .)"
+L3_WORDS=(零 一 二 三 四 五 六 七 八 九)
+require_marker "**${L3_WORDS[$l3_count]}条 L3 至今未获裁定**"
+
+# 门层的「几通过 / 几未通过」也不许手写，必须与各节自己的判定一致
+# （T1210 要求 4b：判定与统计必须一致）。数法是数报告自己的**处置行**：
+# docs/31 共 10 条 Gate（含 Development System Gate），每节一行 `**处置**：…`；
+# 其中以 `**未通过` 起头的那些就是未通过的门数。第 5.3 节的统计句必须逐字
+# 等于**数出来的**那个数——把某节判定改成「未通过」而不同步统计，或者只改统计，
+# 两种方向都会在这里红（这与上面 L3 那一条是同一个修法：先数再比，不许手写）。
+gates_disposed="$(grep -cE '^\*\*处置\*\*：' "$REPORT")"
+gates_failed="$(grep -cE '^\*\*处置\*\*：\*\*未通过' "$REPORT")"
+GATES_TOTAL=10
+if [ "$gates_disposed" != "$GATES_TOTAL" ]; then
+  echo "FAIL: report has $gates_disposed gate disposition line(s), want $GATES_TOTAL (one per Gate, none missing)" >&2
+  fail=1
+fi
+gates_passed=$((gates_disposed - gates_failed))
+require_marker "Gate 层面：**${gates_passed} 条「通过」、${gates_failed} 条「未通过」（Gate G）**"
 
 # 报告引用的每个数字都必须在脚本生成的计数块里（--emit-tables 的产物，
 # 逐条比对；报告手写一个数字而与台账不符，这里就红）
@@ -322,5 +420,5 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "AUDIT OK: report markers present, counts match ($unmerged_count unmerged, $not_run_count not_run, $failed_tests failed, $skipped_tests skipped)."
+echo "AUDIT OK: report markers present, counts match ($unmerged_count unmerged, $not_run_count not_run, $failed_tests failed, $skipped_tests skipped, $passed_without_evidence passed-without-evidence)."
 exit 0
