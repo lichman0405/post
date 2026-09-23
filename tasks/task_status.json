@@ -11932,13 +11932,62 @@
       ]
     },
     "T1213": {
-      "status": "todo",
-      "started_at": null,
-      "completed_at": null,
+      "status": "merged",
+      "started_at": "2026-09-23T03:20:22Z",
       "notes": "新立账（2026-09-23，T1210/T1211/T1212 合并之后）：来自 T1210 的独立复核（返工轮那次 verdict=approve，1 minor + 4 nit + 4 risks，原件 .rddev/workers/T1210-review/RESULT.superseded-run-4939114a82164d05.json；最终那次 1 minor + 5 nit + 5 risks，原件 .rddev/workers/T1210-review/RESULT.json）。任务书见 tasks/packages/T1213.json，G3 覆盖同笔补进 gates.json（mof-canonical）。v1_required=false：这是证书的修订，不是产品交付。",
-      "worker_run_id": null,
-      "accepted_by_supervisor_at": null,
-      "merged_at": null
+      "worker_run_id": "run-b068dc559ee76431",
+      "accepted_by_supervisor_at": "2026-09-23T03:50:13Z",
+      "merged_at": "2026-09-23T04:03:24Z",
+      "rejection_reason": "collect rejected: result-consistency: result-acceptance: status completed but only 6 acceptance entr(ies) for 7 criterion(a) in the task package (**最终复核的五条 + minor 一条都被点过名**：每一条给出「改 / 不改 + 理由」；改了的给出自证（含「改前会漏判的构造样本、改后被判红」这类原文），不改的点名留在原样；**没有**任何一处是靠放宽/删除/跳过断言过的。; **仪器在这棵树上说 OK**：`bash tests/acceptance/v1-final-audit.sh` 退出码 0，输出原文在 RESULT 里；基准行等于 `git rev-parse HEAD`（这棵树的真实 HEAD）。; **Gate H 在 T1211 的仪器上重挣过**：给出 `bash tests/security/master-security-gate.sh --report …` 的退出码、末行逐字、`MIN_CHECKS` 的值、`check(s) registered` 计数、17 行判定、`absence-manifest` 证据行；报告 Gate H 的引文与这次输出一致（若某项与「发放时」不同，必须说清哪个是哪次的，**不许**把旧证据删掉了事）。; **返工轮四处处置逐条复核过**：每条都有「读了哪一行 / 跑了哪条命令」的引用；其中 nit③ 的「不采纳」要么被你的实跑证实（贴出两种调用方式的差异原文），要么被你判为不成立并写明理由。; **修订记录小节存在**，且对每个「沿用」的层给出 `git diff --stat b6c1fb1a..HEAD -- <路径>` 的原文；**绝对路径**在同一节里被明确处置（保留并说明，或脱敏并改标题）。; **机械块逐字来自 `--emit-tables` 的同一次输出**（给出该次输出原文，或给出令两者相等的那条比对命令与空 diff）。; **没有越界**：`git status --porcelain -uall` 只列 `tests/acceptance/**`；台账 `tasks/tests.json` 一个字节未动（给出 `git diff --stat HEAD -- tasks/` 为空的原文）；无残留进程。) — every criterion needs an entry with evidence",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-23T02:59:56Z",
+          "run_id": "run-2fbc780845e82b84"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-23T02:59:59Z",
+          "run_id": "run-17063105725248c7",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-23T03:19:26Z",
+          "run_id": "run-4f268cbe35c25ec4",
+          "reason": "collect rejected: result-consistency: result-acceptance: status completed but only 6 acceptance entr(ies) for 7 criterion(a) in the task package (**最终复核的五条 + minor 一条都被点过名**：每一条给出「改 / 不改 + 理由」；改了的给出自证（含「改前会漏判的构造样本、改后被判红」这类原文），不改的点名留在原样；**没有**任何一处是靠放宽/删除/跳过断言过的。; **仪器在这棵树上说 OK**：`bash tests/acceptance/v1-final-audit.sh` 退出码 0，输出原文在 RESULT 里；基准行等于 `git rev-parse HEAD`（这棵树的真实 HEAD）。; **Gate H 在 T1211 的仪器上重挣过**：给出 `bash tests/security/master-security-gate.sh --report …` 的退出码、末行逐字、`MIN_CHECKS` 的值、`check(s) registered` 计数、17 行判定、`absence-manifest` 证据行；报告 Gate H 的引文与这次输出一致（若某项与「发放时」不同，必须说清哪个是哪次的，**不许**把旧证据删掉了事）。; **返工轮四处处置逐条复核过**：每条都有「读了哪一行 / 跑了哪条命令」的引用；其中 nit③ 的「不采纳」要么被你的实跑证实（贴出两种调用方式的差异原文），要么被你判为不成立并写明理由。; **修订记录小节存在**，且对每个「沿用」的层给出 `git diff --stat b6c1fb1a..HEAD -- <路径>` 的原文；**绝对路径**在同一节里被明确处置（保留并说明，或脱敏并改标题）。; **机械块逐字来自 `--emit-tables` 的同一次输出**（给出该次输出原文，或给出令两者相等的那条比对命令与空 diff）。; **没有越界**：`git status --porcelain -uall` 只列 `tests/acceptance/**`；台账 `tasks/tests.json` 一个字节未动（给出 `git diff --stat HEAD -- tasks/` 为空的原文）；无残留进程。) — every criterion needs an entry with evidence"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-23T03:20:22Z",
+          "run_id": "run-b068dc559ee76431",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-23T03:21:34Z",
+          "run_id": "run-200cc179636a83c8",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-23T03:50:13Z",
+          "run_id": "run-33b07e266ad03692"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-23T04:03:24Z",
+          "run_id": "run-30c86cff50f44508",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     }
   },
   "version": 2
