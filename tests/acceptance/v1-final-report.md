@@ -1,9 +1,19 @@
 # V1 最终验收与交付报告
 
 > 报告位置：`tests/acceptance/v1-final-report.md`  
-> 生成基准：`9b22339e6398b714de5cc810454437ee33e51913`  
+> 生成基准：`115a4286bf8ccea8ddc0ff4f56747c4082ba483d`  
 > 生成日期：2026-09-23  
 > 审计脚本：`tests/acceptance/v1-final-audit.sh`（`--emit-tables` 生成第 1.2 / 1.3 节那两张表、生成基准行与计数块）
+
+**这一版为什么换基准（第七轮 / 返工轮，2026-09-23）**：上一版证书（基准 `b6c1fb1a`）在验收时 `G2` 红了，
+红的不是这份报告与它的审计脚本，而是 CI 的 `security-master` 作业里第 3 步——`.github/workflows/ci.yml`
+里那句**无条件**的 `sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends redis-tools`。
+G2 在**不是 GitHub runner** 的机器上逐字重跑 CI 的步骤，那里 `sudo` 没有 tty 可用来读密码，
+于是这一步退出码 1，作业在任何一条安全行跑起来之前就失败了（逐字报错：`sudo: a terminal is required to read
+the password`）。它要装的工具其实已经在 `/usr/bin/redis-cli`（7.0.15）。**修的是那句话，不是断言**：
+`115a4286` 把它改成「先断言工具在，缺了才去装」，改在 `.github/workflows/ci.yml` 与随之重新生成的
+`specs/**` 派生文件里——那在本任务的 `allowed_scope`（`tests/acceptance/**`）**之外**，所以这不是本报告改的，
+是本报告要认的新基准。这一版把证书重新钉到 `115a4286` 上，并把判定依据在新树上再跑一遍（第 5.3 节 ⑧）。
 
 **这份报告是某一棵树上的证书，审计脚本是它的快照校验器。** `bash tests/acceptance/v1-final-audit.sh`
 只在**报告自己的基准**上有意义：报告钉住的每个数字（`v1_required` 清单、`tests.json` 分布、
@@ -15,15 +25,15 @@ blocking `not_run` 名单）都是在上面那个 SHA 上取的一次快照，HE
 
 ## 0. 结论（放在最前）
 
-**V1 的两条台账条件在本基准 commit 上已经满足：`v1_required=true` 的任务（排除 T1207 自身）全部 `merged`；blocking 测试里唯一一条 `not_run` 就是这份报告自己的审计条目。** 但这**不等于**「V1 可以宣告完成」——下一条说了为什么。
+**V1 的两条台账条件在本基准 commit 上已经满足：`v1_required=true` 的任务（排除 T1207 自身）全部 `merged`；blocking 测试里剩下的 `not_run` 只有 3 条，全部是「在跑任务自己的、还没落账的那道门」。** 但这**不等于**「V1 可以宣告完成」——下一条说了为什么。
 
-- `tasks/tasks.json` 中 `v1_required=true` 的任务共 **149** 笔。排除 T1207 自身后，未 merged 的有 **0 笔**（脚本会打印 `EXCLUDED=T1207`，让人看得出那是一次具名排除而不是悄悄减一）。
-- `tasks/tests.json` 里 blocking 条目共 **177** 条：**177 条 = 176 `passed` + 1 `not_run`**，没有 `failed`、没有 `skipped`、没有非 blocking 条目。唯一那条 `not_run` 是 `T1207-TEST-01`（本报告自己的审计，按 `scripts/record_test_run.py` 的规矩由 Supervisor 在 G2 落账；本报告不修改任何 `status`）。
-- `docs/31_MASTER_ACCEPTANCE.md` 的 10 条 Gate 里，**8 条判「通过」，2 条判「未通过」：Gate G 与 Gate H**。
+- `tasks/tasks.json` 中 `v1_required=true` 的任务共 **150** 笔。排除 T1207 自身后，未 merged 的有 **0 笔**（脚本会打印 `EXCLUDED=T1207`，让人看得出那是一次具名排除而不是悄悄减一）。
+- `tasks/tests.json` 里 blocking 条目共 **181** 条：**181 条 = 178 `passed` + 3 `not_run`**，没有 `failed`、没有 `skipped`、没有非 blocking 条目。3 条 `not_run` 是 `T1210-TEST-01`（**本报告自己的审计**）、`T1211-TEST-01`（master gate mutation check）、`T1212-TEST-01`（e2e db guard）——都是**各自那笔在跑任务的门**，按 `scripts/record_test_run.py` 的规矩由 Supervisor 在各自 G2 落账；本报告不修改任何 `status`。上一版报告钉的那一条 `T1207-TEST-01` 已由 Supervisor 按既定程序落账为 `passed`。
+- `docs/31_MASTER_ACCEPTANCE.md` 的 10 条 Gate 里，**9 条判「通过」，1 条判「未通过」：Gate G**。
   - **Gate G 未通过**：第 1 条「MCP semantic tools 完整且权限正确」被树反证——`cmd/mcp-server` 的 `/mcp` 返回 501，`specs/mcp/tools.json` 声明 21 条工具而全树 0 个 dispatch 点，而 `docs/02_V1_SCOPE.md:52` 把它列进 V1 必做、§4 没有豁免它。这是 **L3-③**（`tasks/decisions.md` ㊱），等待 owner 裁定，见 R12。
-  - **Gate H 未通过**：唯一理由是 SAST / 容器扫描 / SBOM 三项**覆盖缺席**（R10）。
-- 未闭合的缺口在剩余风险里逐条点名，共 **13 条**（R1–R13）。其中 4 条是**产品**侧（R3 blob 写入路径、R4 reopen 无入口、R5 search 无模型侧、R7 search_records 503），1 条是**工具**侧（R11 `rddev worker collect` 的证据基线），1 条是**仪器**侧（R13 契约对账仪没有跑它的人），其余是证据成色与 L3 待裁定项。
-- **四条 L3 至今未获裁定**，其中三条直接挂在 Gate 判定或缺口处置上：L3-⓪（内容能不能出平台 → Gate E 第一条只按结构化答案判过，R8）、L3-①（登录前能不能搜索 → R9）、L3-②（V1 含不含 blob 上传入口 → R3 的处置）、L3-③（V1 含不含 MCP 工具面 → Gate G 未通过，R12）。
+  - **Gate H 由「未通过」改判为「通过」**：上一版（基准 `9b22339e`）未通过的唯一理由是 **SAST / 容器扫描 / SBOM 三项覆盖缺席**（R10）。T1209（合并提交 `034a341`，PR #355）之后这条理由不再成立，本报告在这棵树上**真跑了一遍**总门（**不带** `--allow-not-asked`）：退出码 **0**、17 行全绿、`MIN_CHECKS=17`。H1 那一行的判定随之带上限定——**「0」是扫描面上的结论，扫描面之外仍有一条有守卫的缺席（容器扫描）**，见 Gate H 与 R10。
+- 未闭合的缺口在剩余风险里逐条点名，共 **14 条**（R1–R14）。其中 4 条是**产品**侧（R3 blob 写入路径、R4 reopen 无入口、R5 search 无模型侧、R7 search_records 503），1 条是**工具**侧（R11 `rddev worker collect` 的证据基线），1 条是**仪器**侧（R13 契约对账仪没有跑它的人），其余是证据成色与 L3 待裁定项。
+- **五条 L3 至今未获裁定**，每一条都挂在一条 Gate 判定或一条缺口处置上：L3-⓪（内容能不能出平台 → Gate E 第一条只按结构化答案判过，R8）、L3-①（登录前能不能搜索 → R9）、L3-②（V1 含不含 blob 上传入口 → R3 的处置）、L3-③（V1 含不含 MCP 工具面 → Gate G 未通过，R12）、L3-④（公开声明该在哪里被发现 → R14，`tasks/decisions.md` ㊳ 补记）。
 
 以下每一节都给出真实跑过的命令及其落账位置，未使用「见某次聊天」或「凭记忆」。
 
@@ -51,7 +61,7 @@ bash tests/acceptance/v1-final-audit.sh
 
 <!-- 生成命令：bash tests/acceptance/v1-final-audit.sh --emit-tables -->
 
-> 生成基准：`9b22339e6398b714de5cc810454437ee33e51913`
+> 生成基准：`115a4286bf8ccea8ddc0ff4f56747c4082ba483d`
 
 | 任务 | 状态 | 阶段 | 标题 |
 |------|------|------|------|
@@ -59,7 +69,9 @@ bash tests/acceptance/v1-final-audit.sh
 
 **计数：0 / 0（目标为 0，排除 T1207 后实际为 0）**。脚本输出会显式打印 `EXCLUDED=T1207`。
 
-> 台账说明：上一版报告（基准 `5b0d7d82`）此表为空且已附上上一轮的对比。T1207 自己**落笔时**的状态是 `rejected`（这份报告正在返工轮里），脚本按定义把它排除并在 `EXCLUDED=` 里具名打印。**排除不是"减一"的同义词**：脚本打印它排除了谁，第 4 节的 4a 还逐条比对名单本身。
+> 台账说明：上一版（基准 `9b22339e`）此表为空，但当时 T1207 自己还在返工轮里；本版为空是因为 T1207 已合并
+> （`392e6d6`）且 `T1207-TEST-01` 已落账。脚本仍按定义排除 T1207 并在 `EXCLUDED=` 里具名打印。
+> **排除不是"减一"的同义词**：脚本打印它排除了谁，第 4 节的 4a 还逐条比对名单本身。
 
 ### 1.3 blocking 测试状态
 
@@ -68,43 +80,50 @@ bash tests/acceptance/v1-final-audit.sh
 jq '.tests | map(select(.blocking == true and .status == "not_run")) | {count: length, ids: map(.id), names: map(.name)}' tasks/tests.json
 ```
 
-当前结果：**1 条 blocking 测试为 `not_run`**，不是 `passed`。清单（同一次 `--emit-tables` 输出的后半段）：
+当前结果：**3 条 blocking 测试为 `not_run`**，不是 `passed`。清单（同一次 `--emit-tables` 输出的后半段）：
 
 | 测试 ID | 任务 | 名称 |
 |---------|------|------|
-| T1207-TEST-01 | T1207 | final audit |
+| T1210-TEST-01 | T1210 | final audit |
+| T1211-TEST-01 | T1211 | master gate mutation check |
+| T1212-TEST-01 | T1212 | e2e db guard |
 
 <!-- 计数块：报告引用的每个数字都由脚本给出，不许手写 -->
 ```text
-COUNTS v1_required_total=149
+COUNTS v1_required_total=150
 COUNTS v1_required_unmerged=0
 COUNTS excluded=T1207
-COUNTS tests_total=177
-COUNTS tests_passed=176
-COUNTS tests_not_run=1
+COUNTS tests_total=181
+COUNTS tests_passed=178
+COUNTS tests_not_run=3
 COUNTS tests_failed=0
 COUNTS tests_skipped=0
-COUNTS tests_blocking=177
+COUNTS tests_blocking=181
 ```
 
-> 账本规则：没有真实命令的 `passed` 不算证据。本报告未修改 `tasks/tests.json` 的任何 `status`。唯一这条 `not_run` 是**本报告自己的审计脚本**：它是这份交付物的 G2 门，由 Supervisor 按账本规矩落账；报告作者（T1207 自己）不能给自己的门记 `passed`。
+> 账本规则：没有真实命令的 `passed` 不算证据。本报告未修改 `tasks/tests.json` 的任何 `status`。
+> 这 3 条 `not_run` 都是**在跑任务自己的门**：`T1210-TEST-01` 是这份交付物的 G2 门（由 Supervisor 按账本
+> 规矩落账，报告作者不能给自己的门记 `passed`）；`T1211-TEST-01`（master gate mutation check）与
+> `T1212-TEST-01`（e2e db guard）是同一窗口里另外两笔在跑任务的门，各自落各自的账。
 
-本基准上 `tasks/tests.json` 的**整体分布**（复跑命令与结果如下，均在 `9b22339e` 实跑）：
+本基准上 `tasks/tests.json` 的**整体分布**（复跑命令与结果如下，均在 `115a4286` 实跑）：
 
 ```bash
 jq -c '[.tests[]] | group_by(.status) | map({status: .[0].status, count: length})' tasks/tests.json
-# 输出：[{"status":"not_run","count":1},{"status":"passed","count":176}]
+# 输出：[{"status":"not_run","count":3},{"status":"passed","count":178}]
 jq '[.tests[] | select(.blocking==true)] | length' tasks/tests.json
-# 输出：177（即全部条目都是 blocking=true）
+# 输出：181（即全部条目都是 blocking=true）
 jq '[.tests[] | select(.status=="failed")] | length' tasks/tests.json
 # 输出：0
 jq '[.tests[] | select(.status=="skipped")] | length' tasks/tests.json
 # 输出：0
 jq '[.tests[] | select(.status=="passed") | select(((.evidence // "") | length) == 0)] | length' tasks/tests.json
-# 输出：0（没有一条 passed 是空证据）
+# 输出：0（没有一条 passed 是空证据；这一条 T1210 起也钉进审计脚本，直接数台账）
 ```
 
-也就是：**177 条 = 176 `passed` + 1 `not_run`**，没有 `failed`、没有 `skipped`、没有非 blocking 条目。上表那 1 条就是这 1 条 `not_run` 的全部。T1206-TEST-01 不在其中——它已是 `passed`（Supervisor 于 2026-09-22T02:36:21Z 以 `bash tests/security/master-security-gate.sh --report /tmp/t1206-master-gate-report.json` 记录，9 checks、exit 0，见 Gate H）。
+也就是：**181 条 = 178 `passed` + 3 `not_run`**，没有 `failed`、没有 `skipped`、没有非 blocking 条目。
+上表那 3 条就是这 3 条 `not_run` 的全部。T1206-TEST-01、T1207-TEST-01、T1209-TEST-01 都已是 `passed`
+（分别是 9 行、快照、17 行那三版 master suite / 审计的运行记录，见 Gate H 与第 4 节）。
 
 ---
 
@@ -203,8 +222,8 @@ jq '[.tests[] | select(.status=="passed") | select(((.evidence // "") | length) 
 | F5 | Research Map 可访问并可 drill-down | 通过 | `#T1102-TEST-01` research map e2e/perf | `passed` |
 
 **处置**：5 / 5 通过。**这一节的判定与上一版一致，是上一轮复核后保留的改判**
-（上一版曾判「未通过」，理由是五笔任务未 merged；五笔全部 merged、所列测试全部 `passed` 之后按台账事实改对，
-`tasks/decisions.md` ㊲ 记录了这次复核结论）。改判**没有放宽任何断言**：`#T1101-TEST-01`/`#T1103-TEST-01`
+（更早一版曾判「未通过」，理由是五笔任务未 merged；五笔全部 merged、所列测试全部 `passed` 之后按台账事实改对，
+`tasks/decisions.md` ㊲ 记录了那次复核结论）。改判**没有放宽任何断言**：`#T1101-TEST-01`/`#T1103-TEST-01`
 等通过证据本身是回填的 Worker 记录（不是独立复跑），这条性质记入 R1。
 
 ### Gate G — Agent/API/Git
@@ -229,15 +248,14 @@ sed -n '77,80p' cmd/mcp-server/main.go
 #     fmt.Fprintf(w, `{"error":"MCP protocol wiring not implemented yet (agent tasks)"}`)
 
 # 2. 目录声明 21 条工具，全树 0 个 dispatch 点（重建 T1205 的那份对账）
-go build -o /tmp/t1207-cgate ./tests/cmd/contractgate
-/tmp/t1207-cgate -root . -write-mcp /tmp/t1207-mcp-inventory.json | head -2
+go build -o /tmp/t1210-cgate ./tests/cmd/contractgate
+/tmp/t1210-cgate -root . -write-mcp /tmp/t1210-mcp-inventory.json | head -2
 # 输出：MCP reconciliation: catalog specs/mcp/tools.json declares 21 tool(s); 0 have a dispatch site; 21 do not.
-jq '{declared_tools, tools_with_a_dispatch_site, tools_the_catalog_declares_and_the_tree_does_not_dispatch}' /tmp/t1207-mcp-inventory.json
+jq '{declared_tools, tools_with_a_dispatch_site, tools_the_catalog_declares_and_the_tree_does_not_dispatch}' /tmp/t1210-mcp-inventory.json
 # 输出：{"declared_tools":21,"tools_with_a_dispatch_site":0,"tools_the_catalog_declares_and_the_tree_does_not_dispatch":21}
 
 # 3. 而规格把这一面列进 V1 必做、§4 没有豁免它
-sed -n '51,53p;60p' docs/02_V1_SCOPE.md
-#   ### Agent interface
+sed -n '52p;53p;60p' docs/02_V1_SCOPE.md
 #   - MCP/API 读写科研状态。
 #   - Governance 操作（merge/publish/visibility）限制为 Web 或显式 approval path。
 #   ## 4. V1 明确不做
@@ -265,24 +283,139 @@ sed -n '15p' docs/56_REQUIREMENTS_TRACEABILITY.md
 
 | # | checkbox | 判定 | 证据（命令 / 树内位置） | 落账位置 |
 |---|----------|------|--------------------------|----------|
-| H1 | Critical/High security issues = 0 | 通过 | `bash tests/security/master-security-gate.sh --only vuln-go,vuln-node,vuln-python` → Go `No vulnerabilities found.`（govulncheck 结论行；另有 3 条"依赖模块里存在、本代码不调用"的告警，工具自己分列）、Node `No known vulnerabilities found`、Python `Found no known vulnerabilities and no adverse project statuses in 6 packages`；`--only secret-scan` → `--- PASS: TestRepoExampleFilesAreSecretFree` 与 `TestScanRepoExampleFilesFailsOnPlantedFile` | 本报告实测（三条 exit 0）；`#T1206-TEST-01` master suite 由 Supervisor 于 2026-09-22T02:36:21Z 记 `passed` |
+| H1 | Critical/High security issues = 0 | **通过（限定：扫描面之外仍有一条有守卫的缺席）** | 总门实跑（**不带** `--allow-not-asked`）退出码 **0**、17 行全绿；SAST 三行（`sast-go`/`sast-python`/`sast-node`）、SBOM 三行（`sbom-go`/`sbom-node`/`sbom-python`）与 `license-audit` 各自打印自己的证据行；扫描面之外唯一的缺席是容器扫描（有守卫 + 书面接受），见下方三段 | 本报告实测；`#T1206-TEST-01`（9 行那版）与 `#T1209-TEST-01`（17 行那版）两条 master suite 均 `passed` |
 | H2 | permission negative E2E 全过 | 通过 | `#T0106-TEST-01` privacy negative e2e（非成员读私密项目被拒）、`#T0105-TEST-01` 权限矩阵、`#T0705-TEST-01` publish security e2e | 三条 `passed` |
 | H3 | backup/restore tested | 通过 | `#T1110-TEST-01` restore drill（`./ops/backup-restore-drill.sh --no-infra` → `TestRestoreDrill`）、`#T1111-TEST-01` restore drill e2e、`#T1204-TEST-01` runbook drill | 三条 `passed` |
 | H4 | local one-command dev | 通过 | 机制是 `make dev`（`Makefile:324`，从 `.env.dev` 一条命令起五个应用、Ctrl-C 全停）；环境前置与可执行性由 `#T0000-TEST-01/02`、`#T1204-TEST-01` 落账 | 三条 `passed`。**本报告本轮没有亲自跑 `make dev`**——它起的是整套本地栈，这一条的证据是那三条记录 |
-| H5 | CI blocking suites 全绿 | 通过 | 必需作业集合的权威是两个文件本身：`.github/workflows/ci.yml` 与 `specs/orchestrator/gates.json`。本报告实测两边逐字对得上（脚本见第 4 节第 5b 条）：`10 ['a11y','acceptance','go','i18n','migration-integration','observability','python','spec-validation','task-state','web']` 与 `True`（四处的集合相等）。台账侧：blocking 只剩 1 条 `not_run`（本报告自己的审计） | 本报告实测。**本报告没有在本基准上触发 CI**：两个最新必需作业的运行记录是 `#T1104-TEST-01` 的 run 35743090655 与 `#T1105-TEST-01` 的 run 35766550262，且每个必需任务合并前的 G4 以"所有必需作业绿"为断言 |
-| H6 | accessibility AA core pages | 通过 | `make a11y`（CI 必需作业 `a11y`）：axe-core WCAG pass + best-practice pass 双双 0 违规，7 个核心页面上有数据 | `#T1104-TEST-01` `passed` |
+| H5 | CI blocking suites 全绿 | 通过 | 必需作业集合的权威是**三个**文件本身：`.github/workflows/ci.yml`、`specs/orchestrator/gates.json` 与那条把两者钉在一起的单测。本报告实测四处逐字对得上（脚本见第 4 节第 5b 条）：`11 ['a11y','acceptance','go','i18n','migration-integration','observability','python','security-master','spec-validation','task-state','web']` 与 `True`（四处的集合相等）。**第 11 个必需作业是 T1209 的 `security-master`**，本报告在它进 CI 之后才生成证书 | 本报告实测。**本报告没有在本基准上触发 CI**：每个必需任务合并前的 G4 以"所有必需作业绿"为断言，本基准的 G2 就是 CI 的 exact steps（第 5.2 节） |
+| H6 | accessibility AA core pages | 通过 | **两个入口，分别说清是哪一次给了哪一句**：① **`make a11y`**（CI 必需作业 `a11y`，`tests/web-smoke/run-a11y.sh`，真 PostgreSQL + 真 `next start`，自带「核心页面**带数据**的条数 ≥ 7」这条下限断言）：axe-core WCAG pass + best-practice pass 双双 0 违规，`coverage: 7 core pages scanned with data (>= 7)`——本报告本轮**没有**亲自跑它，这一句的证据是 `#T1104-TEST-01`（记的是一次真实的 CI `a11y` 作业运行）。② **总门里的 `a11y` 那一行**（`tests/web-smoke/run.sh`，对的是桩 API `API_BASE_URL=http://api.e2e.test`）：本报告本轮实跑，`ok a11y`，两种规则集同样 0 违规、键盘与 reduced-motion 断言全绿；但这一行里**核心页面没有数据**（它自己打印 `core pages scanned with data: 0`，`/search` 那条按 `服务关` 计、不计入 core-page AA pass）——它证明的是无障碍结构，不是带数据页面。两份证据合起来才是这一条 checkbox | ①`#T1104-TEST-01` `passed`；②本报告本轮总门实跑（第 2 节 Gate H 第 1 段，退出码 0、17 行） |
 
-**处置**：**未通过——H1 与 H5/H6 都成立，但"Critical/High = 0"这个结论只覆盖到已经装了扫描器的那些面**。
-未通过的唯一理由是 **SAST / 容器扫描 / SBOM 三项覆盖缺席**，见 R10：
+**处置**：**通过——这一节在上一版是「未通过」，改判的依据是树变了，不是断言松了。**
+上一版写在报告里的条件是「若 Supervisor 的裁定是『V1 完成不以这三项为条件』，Gate H 应随之改判为通过」；
+那份裁定**已经存在**，而且不是一句话，是一件一件的落地，逐条引在下面。
+
+**1. 总门真跑了一遍（本基准 `115a4286` 实测，不带 `--allow-not-asked`）。**
 
 ```bash
-bash tests/security/master-security-gate.sh --only absence-manifest
-# 输出：ok item: sast / ok item: container-scan / ok item: sbom，并打印 witness 命令证明缺口仍在
+make security-tools    # 先把总门每一行的前置装齐（写的是被忽略的路径；T1209 的 CI 作业里同一顺序）
+bash tests/security/master-security-gate.sh --report /tmp/t1210-master-gate-report.json
+# 退出码：0（本轮实跑：2026-09-23 07:13:13 +08:00 起，07:13:47 止）
+# 末行逐字：master-security-gate: PASS — 17 check(s) ran and each printed its own evidence (report: /tmp/t1210-master-gate-report.json)
+# `NOT ASKED` 行数：0（17 行全部真跑；这一点由这一行自己的措辞与注册表下限共同钉住）
 ```
 
-dependency/CVE 扫描（Go/Node/Python 三面）已由 T1206 补齐并实测干净，**不在这份缺席清单里**。
-本报告**不自行放宽**：若 Supervisor 的裁定是「V1 完成不以这三项为条件」，Gate H 应随之改判为通过；
-在没有那份裁定之前，报告照实写「未通过」。
+**这一条为什么要重跑一次**：上一版证书（基准 `b6c1fb1a`）在验收时 `G2` 红的正是这个作业里的**安装步**，
+不是总门本身——CI 的 `security-master` 作业在第 3 步无条件跑 `sudo apt-get` 装 `redis-tools`，
+而 G2 不是在 GitHub runner 上跑（那里 `sudo` 没有 tty 可读密码），于是它退出码 1，总门那一行**根本没轮到**。
+修法是把那一步换成「先断言 `redis-cli` 在（`command -v redis-cli >/dev/null || { … }`）、缺了才装」，
+落在 `115a4286` 的 `.github/workflows/ci.yml` 里（本任务的 `allowed_scope` 之外，所以不是本报告改的）。
+**本报告本轮做的就是在这个新基准上把总门真跑一遍**：上面那次运行就是它，退出码 0、17 行、`NOT ASKED` 0 行。
+
+**这一条要照实说清楚**：在一棵没有 `node_modules` / `.venv` 的冷树上，同一命令的退出码是 **2**，
+有 5 行 `NOT ASKED`（`a11y`、`sast-node`、`sbom-node`、`sbom-python`、`license-audit`——它们的前置是
+工作区依赖与适配器虚拟环境）。`make security-tools` 装齐之后这 5 行变成真跑的行，退出码才是 0。
+**本报告没有用 `--allow-not-asked` 把那个 2 说成绿**：`--allow-not-asked` 是给裸 CI runner 的，
+它的语义是「承认这次没问全」，不是「问了」。
+
+**2. 注册表下限 `MIN_CHECKS=17`**（`tests/security/master-security-gate.sh:120`，这一行逐字是
+`MIN_CHECKS=17`）。少一行注册即注册表完整性失败、退出码 3——删检查不是把门变绿的办法。
+这个下限与「守卫能红」都是 T1209 自己 G2 逐条变异验过的，结论写在
+`docs/adr/ADR-028-v1-ships-no-container-image.md` 的 Decision 第 2 条与 Consequences。
+
+**3. `absence-manifest` 那一行的证据行（本基准实测，逐字抄录）**：
+
+```text
+---- absence-manifest: Absence manifest: every §11 capability covered by a named row or named as absent, and the guard itself checked ----
+     ok   selftest: the guard it cites is not a check of this gate makes this checker exit 1 and name container-scan
+     ok   selftest: the absence entry is deleted outright makes this checker exit 1 and name container-scan
+     ok   manifest: /home/shibo/code/post/.rddev/worktrees/T1210/ops/security/absent-checks.json parses and the gate registry was read (17 check(s) registered)
+     ok   manifest: items are exactly the required capabilities of docs/23 §11 (plus the SBOM of docs/25 item 10)
+     ok   manifest: the absent set is exactly the container scan (SAST and the SBOM are gate rows now)
+     ok   item: dependency-audit — covered by vuln-go, vuln-node, vuln-python, present in the gate registry
+     ok   item: sast — covered by sast-go, sast-python, sast-node, present in the gate registry
+     ok   item: secret-scan — covered by secret-scan, present in the gate registry
+     ok   item: owasp-smoke — covered by owasp-smoke, present in the gate registry
+     ok   item: permission-e2e — covered by permission-negative-e2e, present in the gate registry
+     ok   item: container-scan — witness still shows the gap (`find . \( -name .git -o -name .rddev -o -name node_modules -o -name .next -o -name .venv -o -name .sbom -o -name .backup-dr -o -name .dev -o -name post-wt \) -prune -o -type f \( -name 'Dockerfile' -o -name 'Dockerfile.*' -o -name '*.Dockerfile' -o -name 'Containerfile' -o -name 'Containerfile.*' \) -print` printed nothing)
+     ok   item: container-scan — witness `grep -c '"id": "no-dockerfile"' ops/runbook-steps.json` matches '^1$'
+     ok   item: container-scan — witness `grep -c 'no-dockerfile' docs/adr/ADR-028-v1-ships-no-container-image.md` matches '^[1-9][0-9]*$'
+     ok   item: container-scan — guarded absence: the 'container-scan' row of this gate is registered and goes red the moment the absence stops being real
+     ok   item: sbom — covered by sbom-go, sbom-node, sbom-python, license-audit, present in the gate registry
+ok   absence-manifest
+```
+
+那三行 `ok   item: container-scan — witness …` 就是这份「有守卫的缺席」的证据行：第一行是那次**真跑的**
+「全树找容器构建文件」走查（要求无输出），第二行要求 `no-dockerfile` 这条 tree claim 仍登记在
+`ops/runbook-steps.json` 里、且**恰好一次**，第三行要求**那份书面接受自己还在**
+（`grep -c 'no-dockerfile' docs/adr/ADR-028-v1-ships-no-container-image.md` 非零）——
+**书面接受被改名或删掉，这一行当场红**。
+
+**3b. 这一行的两个调用方式，以及复核意见 S-3 的处置。** 复核意见说上面那段引文「漏抄了结尾的
+`check-absent-manifest: OK — …`」。**那一行属于这个 checker 的另一种调用方式，不属于总门**：
+`tests/security/check-absent-manifest.py` 只在**非 `--selftest`** 模式的最后打印它（`:371`），
+而总门那一行注册的命令是 `python3 tests/security/check-absent-manifest.py --selftest`
+（`tests/security/master-security-gate.sh` 的 `add_check absence-manifest`），它的 `--selftest` 分支在
+`:358-363` 处 `return 1 if FAILS else 0`——**根本不走那句话**。本报告两次独立实跑（全门一次、
+`--only absence-manifest` 一次）的 stdout 里都没有这一行，`--report` 写出的 JSON 里也没有；
+把它抄进那段引文，就是把两次不同的运行混成一次。两种调用方式各自的末尾，逐字如下：
+
+```text
+$ python3 tests/security/check-absent-manifest.py --selftest   # 总门注册的就是这一条
+...（15 行 ok，末行）
+     ok   item: sbom — covered by sbom-go, sbom-node, sbom-python, license-audit, present in the gate registry
+（没有结尾的 check-absent-manifest: OK 行；退出码 0）
+
+$ python3 tests/security/check-absent-manifest.py               # 非 selftest：有那一行，但没有 selftest 两行
+...（13 行 ok，末两行）
+（空行）
+check-absent-manifest: OK — every §11 capability is covered or named, and every named gap is still a gap
+（退出码 0）
+```
+
+`diff` 两次输出只有两处不同：`--selftest` 多两行 `ok   selftest: …`、非 `--selftest` 多一行结尾 OK。
+**所以第 3 段那段引文在它自己的调用方式下是完整的，这一条复核意见按「不采纳」处置，证据就是上面这两次实跑。**
+
+**4. SAST 与 SBOM 已经是总门里的实检行，不再是缺席。** 本基准实测它们各自的证据行：
+
+```bash
+bash tests/security/master-security-gate.sh --only sast-go
+# ok   sast-go: gosec v2.29.0: 797 file(s) scanned, 254 finding(s) reported (254 baselined (reviewed), 0 unbaselined) ...
+bash tests/security/master-security-gate.sh --only sbom-node
+# ok   sbom-node: pnpm 12.4.1 sbom (pnpm-lock.yaml, CycloneDX 1.5): 364 component(s), spec 1.5, licence: 363 spdx id / 0 expression / 1 none
+```
+
+八条新行是 `sast-go` / `sast-python` / `sast-node`、`sbom-go` / `sbom-node` / `sbom-python`、`license-audit`、
+`container-scan`（注册表从 9 行升到 17 行）。**一个可复现的 High 是红，不是"已记录"**：SAST 每一处 finding
+都要在 `ops/ci/gosec-baseline.txt` / `bandit-baseline.txt` / `eslint-security-baseline.txt` 里有**逐条**的
+基线条目（不允许目录、glob 或整条规则的豁免），`sast_report.py` 拒收那种条目。
+
+**5. 唯一剩下的缺席是容器扫描，它有一份书面风险接受。**
+`docs/adr/ADR-028-v1-ships-no-container-image.md`（**存在，且被 `absence-manifest` 那一行以 witness 指着**）
+逐字写明：它**就是** `docs/23_SECURITY_PRIVACY.md:45`（§11）要求的那份「书面 ADR / risk acceptance」在
+container scan 这一项上的形式，范围**仅限**「V1 交付不含任何镜像」，并且**自我失效**——镜像一出现，
+`container-scan` 那一行转红即失效信号。它引用的守卫行名就是 `container-scan`（也就是
+`tests/security/master-security-gate.sh` 注册表里的那一行，`tests/security/container-scan.sh` 是它的实现）。
+
+**H1 的限定写在这里，也写在那一行里**：「Critical/High = 0」是**扫描面上的结论**（dependency audit /
+SAST / secret scan / OWASP smoke / permission E2E 都有真跑的行走过），**扫描面之外**仍有一条有守卫的缺席：
+容器扫描今天没有对象可扫（全树无 `Dockerfile`/`Containerfile`，走查 2108 个文件——这个数由那一行自己打印，
+随树里**被忽略的**构建产物浮动（本地跑一次门就会多出 `tests/web-smoke/server.log`、`__pycache__/*.pyc` 之类），
+判定不依赖它，判定依赖的是同一行打印的 tree claim `no-dockerfile`），所以 `docs/23 §11` 六项里
+有五项由实检行覆盖、第六项由一份**可失效的书面接受**覆盖。**这不是把缺席说成扫描**：那一行自己逐字写着
+"it is not a container scan and does not pretend to be one"。
+
+> **若这份改判的哪一条不成立，Gate H 就回到「未通过」**：ADF-028 被撤（第三行 witness 红）、
+> 树里出现镜像（守卫红）、或某一行的证据行不再打印。三条都是可复跑的。
+
+> 顺带一处**文档滞后**（不是缺口，也不影响本条的判定）：`ops/runbook-steps.json:149` 那条 `kind: absent`
+> 的 note 仍写着「there is no dependency/CVE scan and CI has no security job」。**这两半今天都不成立**——
+> 依赖/CVE 扫描由 T1206 补齐（`vuln-go`/`vuln-node`/`vuln-python` 三行），CI 的**第 11 个必需作业
+> `security-master`** 由 T1209 接上（本报告实测四处的必需作业集合都是 11 个）。同一文件 `:144` 是那条
+> 条目的 id（`release-2-changelog-flags-scan`）、`:147` 是 `"kind": "absent"`、`:149` 是这段 note。
+> 本报告不改 `ops/`，把这条记在这里供 Supervisor 复核——**它是一处笔记过期，不是一处缺口**。
+
+> dependency/CVE 扫描（Go/Node/Python 三面）已由 T1206 补齐并实测干净，**不在这份缺席清单里**，
+> 它今天是总门的三条实检行。
 
 ### Gate I — Canonical Workflow
 
@@ -292,9 +425,14 @@ dependency/CVE 扫描（Go/Node/Python 三面）已由 T1206 补齐并实测干�
 
 | # | 判定 | 证据 | 落账位置 |
 |---|------|------|----------|
-| I1 | 通过 | `.rddev/workers/T1202/RESULT.json` 里的三条运行：①`bash tests/acceptance/mof-canonical-workflow.sh` → `G3 mof-canonical: PASSED - 50 step(s), every assertion green`（步骤号 [01]..[50] 无缺口）；②`node tests/e2e-pr-flows/mof-canonical-e2e.mjs` → 21 步真实 Chromium（playwright 1.55.0）；③`bash tests/acceptance/mof-canonical-mutation-check.sh` → `MUTATION CHECK - both mutations were caught. The gate can say no.` 关键断言：外部证据可通过 pid 取回；外部贡献者 `demo-external` 获得 2 条 contribution；affiliation 与个人历史并列显示 | `tasks/tests.json#T1202-TEST-01` `passed`（`evidence` 逐字记着「回填自 T1202 自己的 Worker 记录，不是一轮新的复跑」）。**本轮没有重跑这一条**：它需要整套本地服务栈，复跑命令见第 4 节第 4 条 |
+| I1 | 通过 | **本报告在承载这份证书的那棵树（`115a4286`）上实跑**：`bash tests/acceptance/mof-canonical-workflow.sh` → 退出码 0，末行逐字 `G3 mof-canonical: PASSED — 50 step(s), every assertion green`；步骤 `[01]..[50]` 无缺口（`50` 条 `[NN]`、`50` 条 `ok`）、`FAIL` 行 0 条。关键断言（逐字，本次运行）：[45] 外部组的证据按它发布的持久 id 取回（`ok   pid n7dsg0fs5vbstvxsjjzjzt3es0 renders 1 assertion(s) from the external group: fails_to_reproduce/unreviewed`——pid 每次播种都新生成，所以它是**这一次**的那一个）；[46] `ok   demo-external is credited with 2 contribution row(s): scientific_object.version_created`；[47] `ok   affiliations=1 (demo-mof-external) and contributions=2 are rendered side by side`；[48] `ok   HTTP status and entries in its public knowledge feed (got 200|1)`、[49] `ok   publications the knowledge network names for the unpublished version (HTTP 404) (got 0)`（发布的那一版可发现、未发布的兄弟版本 404）；[50] `ok   git status --porcelain (a gate that changes the tree it grades has graded nothing) (got  M tests/acceptance/v1-final-audit.sh\n M tests/acceptance/v1-final-report.md)`（表格里写不了换行，`\n` 处是真实换行）——这一条比的是**运行前后**两次 `git status --porcelain` 逐字相等（`$DIRT_BEFORE` vs 现在，脚本 `:634-635`），而那两个已改文件在它跑之前就在，所以这行输出正是本报告自己那两个文件：它说的是「这次运行没有多改一个字节」，不是「树是干净的」 | `tasks/tests.json#T1202-TEST-01` `passed`（**回填**自 T1202 自己的 Worker 记录），**不是本轮这条结论的依据**；本轮依据是上面那次实跑。它的正式落账位置是 **T1210 自己的 G3 作业 `mof-canonical`**（`specs/orchestrator/gates.json` 的 `task_overrides.T1210.g3_jobs`，第 5.2 节）——**本报告不说那条 G3 记录已经落了**：本报告作者没有 orchestrator 权限，落 G3 记录的那一步在 Supervisor 那边；本报告给的是这次实跑的完整输出与退出码 |
 
-**处置**：通过（证据来自 T1202 的运行记录，账本条目为回填；这条证据性质记入 R2）。
+**处置**：通过。这一条**不再是引用一条更早的记录**——T1210 的任务书把 Gate I 指定为它的 G3 作业，
+理由逐字是「证书里最吃重的跨边界断言是 Gate I（MOF canonical workflow 全闭环），它必须在**承载这份证书的那棵树上重新挣得**」，
+本报告照此在这棵树上跑了一次（50 步全绿、退出码 0、`FAIL` 0 条），命令与 T1210 的 G3 作业**是同一条**。
+**本报告不把「跑过一次」写成「以后不会再坏」**：这条证据的性质仍是一次快照（与整份报告同级），
+而且它落成 `.rddev/runtime/gates/T1210/gate-run-*-g3.json` 那一步由 Supervisor 的 `rddev gate run` 完成——
+本报告只交这次运行的输出与退出码，不声称那条记录已经存在。
 
 ### Development System Gate
 
@@ -307,7 +445,7 @@ dependency/CVE 扫描（Go/Node/Python 三面）已由 T1206 补齐并实测干�
 | S3 | 至少两个独立 Worker 可并行完成互不冲突的示例任务 | 通过 | `#T0010-TEST-02` two-worker concurrency smoke | `passed` |
 | S4 | Worker 无 Git remote credentials，commit/push/branch mutation 尝试被拒绝或验收强制拒绝 | 通过 | `#T0011-TEST-01` git control denial e2e、`#T0012-TEST-03` supervisor git control e2e | 两条 `passed` |
 | S5 | Worker 越界 diff 被拒绝 | 通过 | `#T0011-TEST-02` scope violation e2e | `passed` |
-| S6 | Supervisor 可独立执行 G2/G3/G4 并只在全绿后 commit/PR/merge | 通过 | `#T0012-TEST-01` four-gate acceptance e2e、`#T0012-TEST-02` rejection/retry e2e | 两条 `passed` |
+| S6 | Supervisor 可独立执行 G2/G3/G4 并只在全绿后 commit/PR/merge | 通过 | `#T0012-TEST-01` four-gate acceptance e2e、`#T0012-TEST-02` rejection/retry e2e | 两条 `passed`。**逐层的权威与「绿记在哪」在第 5.2 节** |
 | S7 | Supervisor 会话中断后可从仓库状态恢复，不依赖旧聊天上下文 | 通过 | 状态外部化在 `tasks/tasks.json`、`tasks/task_status.json`、`tasks/tests.json`、`tasks/progress.md`、`tasks/decisions.md`（本报告本身就是一次"断开后从仓库状态重建判断"的实例：它引用的每一处事实都指得到文件与行） | 台账文件本身（`scripts/record_test_run.py` / `scripts/reconcile_tests_ledger.py` 是唯一写 `status` 的入口） |
 
 **处置**：7 / 7 通过。
@@ -316,7 +454,7 @@ dependency/CVE 扫描（Go/Node/Python 三面）已由 T1206 补齐并实测干�
 
 ## 3. 剩余风险（逐条点名）
 
-本节与第 2 节对应：**两条「未通过」的 Gate 各有一条直接理由**（Gate G ← R12；Gate H ← R10），
+本节与第 2 节对应：**唯一一条「未通过」的 Gate 有一条直接理由**（Gate G ← R12），
 其余「通过」的 Gate 也各自带缺口，以风险形式保留，一条不落地点名。**没有「基本通过」类措辞**：
 每条都写清事实、影响、V1 后怎么补。
 
@@ -339,9 +477,9 @@ Gate F 的每一条都能指到一条 blocking 测试记录，**但要把证据�
 
 ### R2. V1 的完成声明依赖一份被回填过的账本
 
-- 事实（本报告实测）：`tasks/tests.json` 共 177 条，其中 **140 条**的 `evidence` 写明是回填的
-  （**127 条**逐字写着 `not a fresh re-run`）。唯一剩下的 `not_run` 是 `T1207-TEST-01`。
-- 影响：**账上 176 条 `passed` 不等于 176 次独立复跑**。V1 的完成声明因此建立在「Worker/CI 运行记录 +
+- 事实（本报告实测）：`tasks/tests.json` 共 181 条，其中 **140 条**的 `evidence` 写明是回填的
+  （**127 条**逐字写着 `not a fresh re-run`）。剩下 3 条 `not_run` 是在跑任务自己的门（第 1.3 节）。
+- 影响：**账上 178 条 `passed` 不等于 178 次独立复跑**。V1 的完成声明因此建立在「Worker/CI 运行记录 +
   各任务的 G2/G4 验收」之上，而不是建立在本报告作者的一次性全量复跑之上。这是事实层面的限制，
   不是判定的瑕疵；写在这里是为了让读报告的人知道证据的成色。
 
@@ -364,7 +502,7 @@ Gate F 的每一条都能指到一条 blocking 测试记录，**但要把证据�
     **产品代码（`cmd/**`、`internal/**`）里一条调用都没有**；上面清单里的"产品代码"只有 sqlc 的源查询与生成物——
     它们是被生成的存取层，不是任何一处**发起**写入的入口。
   - 生产侧唯一的 `PutObject` 在灾备包里：`cmd/api/backupdr/source.go:79`、`drill.go:603`（调用），
-    `drill.go:129`、`s3.go:221`（注释），`s3.go:222`（定义）。**没有一行在产品把内容放进 blob truth 的路上。**
+    `drill.go:129`、`s3.go:221`（注释）、`s3.go:222`（定义）。**没有一行在产品把内容放进 blob truth 的路上。**
 
 **影响**：资产/发布链路今天只在**已存在的 blob 行**上被验证过；**新 blob 的创建没有产品入口**。
 因此「可移植导出」的结论只能声明它导出的是已有内容。
@@ -389,14 +527,14 @@ Gate F 的每一条都能指到一条 blocking 测试记录，**但要把证据�
     所以注释里那句「Step 4 precedes step 5」（`:213`）只对 version/lifecycle 成立，**对 object 不成立**。
   - `requireAgent` 调用在 `:224`、`requireReopen` 在 `:227`（**backstop 在前**），
     `requireAgent` 的文档注释（`:380-383`）自己写着 'it is deliberately the FIRST of the two lines'。
-    **此处注释与代码一致，没有缺陷**（上一轮这里曾写反，本版已更正）。
+    **此处注释与代码一致，没有缺陷**（更早一版这里曾写反，已更正）。
   - **行为缺陷**：`openProposal`（调用在 `:352`）因**非** `ErrIdempotencyKeyInUse` 失败时（该判断在 `:368`）
     会落进 `replayIfRecorded`（`:371`），读回**本次请求自己刚追加的那一版**（追加在 `:341` 的 `appendReopenVersion`，已成功），
     返回 `Replayed=true`（`resultFromRecorded`，`:918`）而 `PullRequestNumber=0`。**这条回退是有意的**——
     `replay` 的注释在 `:720-723` 逐字写着 'The first attempt committed the version and died before opening the
     proposal (the gap documented in this task's result). The replay answers with what is recorded rather than
     opening a PR on a branch the caller can no longer see the head of.'（`:748` 附近是 `replayIfRecorded` 的定义，
-    不是这段注释——上一轮引错了行号，已更正）——但后果仍然成立：**一次真实的「提案没开成」被答成 201 的重放**，
+    不是这段注释——更早一版引错了行号，已更正）——但后果仍然成立：**一次真实的「提案没开成」被答成 201 的重放**，
     调用方拿到的是没有 PR 的成功。
 
 **影响**：该缺陷今天**不可达**（没有 reopen 路由），所以不是当前可触发的 bug；
@@ -406,7 +544,7 @@ Gate F 的每一条都能指到一条 blocking 测试记录，**但要把证据�
 并更正了那句「T0909 里已逐条写明」。我把这个全称断言自己复跑了一遍：
 
 ```bash
-# (a) 字面写 reopens 的 allowed_scope：0 / 150 笔任务
+# (a) 字面写 reopens 的 allowed_scope：0 / 154 笔任务
 jq -r '.tasks[] | select(((.allowed_scope // []) | map(test("reopens")) | any)) | .id' tasks/tasks.json | wc -l
 # 输出：0
 # (b) 未 merged 的任务里，scope 能碰到 internal/application 的：0 笔
@@ -470,8 +608,8 @@ jq -r '.tasks[] | select(.id=="T0909") | "\(.title) :: \(.allowed_scope | join("
   `return ErrRecordFailed`（`:225`），答案不返回）；传输层把它答成 **503 `SEARCH_RECORD_FAILED`**
   （`cmd/api/searchhttp/handlers.go:34` 定义该 code、`:209-214` 是它的分支，注释逐字写着
   'the answer was produced and could not be recorded, so it is not returned'）。
-  503 的响应包一律带 `retryable=true`（`cmd/api/authhttp/envelope.go:86`：`Retryable: status == http.StatusServiceUnavailable`——
-  `:85` 是 `RequestID:` 那行，上一轮引错了行号，已更正）。**这是有意的**：`service.go:116-125` 用一整段注释论证过「没有记录就不交答案」。
+  503 的响应包一律带 `retryable=true`（`cmd/api/authhttp/envelope.go:86`：`Retryable: status == http.StatusServiceUnavailable`）。
+  **这是有意的**：`service.go:116-125` 用一整段注释论证过「没有记录就不交答案」。
 - **R7 的 code 名**：本基准上写记录失败有自己的 code `SEARCH_RECORD_FAILED`（泛化的 `SEARCH_UNAVAILABLE` 现在只覆盖「管线失败」）。
 
 **影响**：一次 transient `search_records` 失败以可用性事故的形式表现；重试是新 search、新记录，语义正确但成本高。
@@ -513,31 +651,41 @@ jq -r '.tasks[] | select(.id=="T0909") | "\(.title) :: \(.allowed_scope | join("
 **V1 后补法**：owner 选 (a) 契约是疏漏则给 `/search` 加 `security: []` 并改 scope 组装层；
 选 (b) 维持现状并修订规格中的「搜索入口」描述。
 
-### R10. SAST、容器扫描、SBOM 三项缺席
+### R10. 「三项缺席」的处置结果：两项成了实检行，第三项成了有守卫的缺席（书面接受在 ADR-028）
 
-- 出处：`ops/security/absent-checks.json`；`ops/runbook-steps.json:147-149` 的 `kind: absent`（`"kind": "absent"` 在 `:147`，那段 note 在 `:149`——上一轮写成 `:150`，已更正）。
-- 证据（本报告实测）：
-  ```bash
-  bash tests/security/master-security-gate.sh --only absence-manifest
-  ```
-  输出：`ok item: sast`、`ok item: container-scan`、`ok item: sbom`，并打印 witness 命令证明缺口仍在。
+**这条风险在上一版里叫「SAST、容器扫描、SBOM 三项缺席」，是 Gate H 判「未通过」的直接理由。
+那个句子在今天这棵树上不再成立，本版按树改写了它——不是把句子删掉，是把它换成一个可复跑的事实。**
+（审计脚本里钉的那条标记也随之换成下面这两句，标记本身没有放松，只是换成了对新树的断言。）
 
-**影响**：
-- **SAST**：静态可见的 High（未净化 sink、缺失 authorization）可能无 gate 拦截，是三项中最大的覆盖缺口。
-- **容器扫描**：当前无 Dockerfile/应用镜像，所以无对象可扫；一旦构建镜像，无扫描即可能 ship 高危 base layer。
-- **SBOM**：Release 无法给出组件清单，下游消费者无合规材料。
+- **SAST 与 SBOM 不再是缺席**：它们是总门里的**实检行**——
+  `sast-go` / `sast-python` / `sast-node`（gosec v2.29.0、bandit 1.8.6、eslint 9.39.5 + eslint-plugin-security 4.0.1）
+  与 `sbom-go` / `sbom-node` / `sbom-python`（cyclonedx-gomod v1.9.0、`pnpm sbom`、`uv export --format cyclonedx1.5`）
+  加 `license-audit`。本基准上它们各自打印了自己的证据行（见 Gate H 第 4 段）。
+- **容器扫描是唯一剩下的缺席，而且是一条有守卫的缺席**：`container-scan` 那一行在树里没有容器构建文件时**绿**
+  （它走查了 2108 个文件并打印它所依赖的 tree claim；这个数随本地被忽略的构建产物浮动，判定只看那条 claim），出现任何 `Dockerfile`/`Containerfile` 即**红**。
+  它的书面风险接受是 `docs/adr/ADR-028-v1-ships-no-container-image.md`——按 `docs/23_SECURITY_PRIVACY.md:45`（§11）
+  那句「Critical/High 必须修复或有书面 ADR/risk acceptance（V1 不接受 Critical）」，这份 ADR **就是**这一项上的
+  那份书面接受，范围仅限「V1 交付不含任何镜像」，且**自我失效**（镜像一出现，守卫转红即失效信号）。
+- **出处**：`ops/security/absent-checks.json`（`absent` 数组今天只有 `container-scan` 一条，`kind` 是
+  `guarded-absence`，`guard_check_id` 指向总门里那条 `container-scan` 行，`risk_accepted_in` 指向 ADR-028）；
+  `ops/runbook-steps.json:147` 的 `kind: absent`（`"kind": "absent"` 在 `:147`，那段 note 在 `:149`）。
+- **一处笔记过期（不是缺口）**：`ops/runbook-steps.json:149` 那条 note 仍写着「there is no dependency/CVE scan
+  and CI has no security job」，两半今天都不成立（T1206 补了 CVE 扫描；第 11 个必需作业 `security-master` 已进 CI）。
+  本报告不改 `ops/`，只点名，供 Supervisor 复核。
 
-**V1 后补法**：
-- SAST：推荐 semgrep（单工具三语言）并固定规则集；加 master-gate 行并写入 CI。
-- 容器扫描：先补 Dockerfile + CI 构建，再加 trivy/grype image scan。
-- SBOM：每生态一个生成器，合并为 CycloneDX 文档绑定 Release。
+**残余风险（照实写，不修辞）**：真正在跑的上游基础设施镜像（`docker-compose.yml` 拉的 pgvector 0.8.6-pg16、
+redis 7.4.11-alpine、minio、gitea 1.27.3、mailpit v1.31.1）**按 tag 钉住、无人扫描**——它们里面的 CVE
+只能靠读 release notes 发现，不由任何门发现。今天没有任何交付物是镜像，所以这个暴露面是**基础设施的**
+而不是 V1 交付物的；`docs/adr/ADR-028-*.md` 的 Consequences 第 3 条与 `tests/security/key-components.json`
+把它的位置与价钱都记下来了（许可证那一半已由 `license-audit` 行每次跑门打印并要求书面裁决）。
 
-> dependency/CVE 扫描（Go/Node/Python 三面）已由 T1206 补齐并实测干净，**不在**这份缺席清单里。
+**V1 后补法**：先有镜像（每应用一个 Dockerfile + CI 的 build 阶段，docs/25 第 10 条），再有扫描器
+（trivy/grype image mode，High/Critical 即红 + ignore 文件），**并且那条守卫行必须被扫描器取代，而不是与它一起删掉**
+（它是树里唯一说得出「现在是哪一种状态」的东西）。ADR-028 逐字写着这一点。
 
-> 顺带一处**文档滞后**（不是缺口，也不影响本条的判定）：`ops/runbook-steps.json:149` 那条 `kind: absent` 的
-> note 仍写着「there is no dependency/CVE scan and CI has no security job」。**前半句已过时**——T1206 补上了
-> dependency/CVE 扫描（见 Gate H 证据第 1 条）；**后半句今天仍成立**——`ci.yml` 的 10 个必需作业里没有
-> security 作业，CVE 扫描目前只由 master security gate 在合并门里按需跑。本报告不改 `ops/`，把这条记在这里供 Supervisor 复核。
+> 一句话总结这条的**判定影响**：Gate H 的「未通过」在上一版只有这一个理由；这个理由的每一块都在本基准上
+> 有可复跑的替代物（实检行的证据行、守卫行的证据行、书面接受本身），所以 Gate H 在这一版判「通过」，
+> 而 H1 那一行的判定带上限定（扫描面之外仍有这一条）。
 
 ### R11. `rddev worker collect` 的证据没说清它评了什么
 
@@ -555,7 +703,7 @@ jq -r '.tasks[] | select(.id=="T0909") | "\(.title) :: \(.allowed_scope | join("
 - 出处：`tasks/decisions.md` **㊱**（2026-09-23）；复核起点是 `.rddev/workers/T1207-review/RESULT.json`。
 - 事实（本基准实跑，命令与输出见第 2 节 Gate G）：
   1. `specs/mcp/tools.json` 声明 **21 条**工具，全树 **0 个 dispatch 点**
-     （`/tmp/t1207-cgate -root . -write-mcp …` 重建出同一结论；已合并的 `ops/contract/mcp-inventory.json` 逐字节同结论）；
+     （`/tmp/t1210-cgate -root . -write-mcp …` 重建出同一结论；已合并的 `ops/contract/mcp-inventory.json` 逐字节同结论）；
   2. `cmd/mcp-server/main.go:77-80` 的 `/mcp` 按设计答 **501**，正文
      `{"error":"MCP protocol wiring not implemented yet (agent tasks)"}`；
   3. `docs/02_V1_SCOPE.md:52` 把「MCP/API 读写科研状态」列进 **V1 必做**，§4（`:60-70`）**没有豁免它**；
@@ -573,14 +721,12 @@ jq -r '.tasks[] | select(.id=="T0909") | "\(.title) :: \(.allowed_scope | join("
 - 出处：T1205 的交付（`ops/contract/route-inventory.json`、`tests/cmd/contractgate`）与其 RESULT 摘要。
 - 证据（本基准实跑；**直接跑二进制才看得到它自己的退出码 3**，`go run` 会包一层让 shell 看到 1，两种跑法都试过）：
   ```bash
-  go build -o /tmp/t1207-cgate ./tests/cmd/contractgate
-  /tmp/t1207-cgate -root . | head -2
+  go build -o /tmp/t1210-cgate ./tests/cmd/contractgate
+  /tmp/t1210-cgate -root . | head -2
   # 输出：contractgate: . (server prefix /api/v1, contract specs/api/openapi.yaml, exemptions specs/api/openapi-exemptions.yaml)
   #       summary: mounted=134 in_contract=30 catchall_resolved=6 exempted=0 undocumented=98 | contract_ops=40 unmounted=3 | exemptions=0 cited=0 files_scanned=735
-  /tmp/t1207-cgate -root . >/dev/null 2>&1; echo "exit=$?"
+  /tmp/t1210-cgate -root . >/dev/null 2>&1; echo "exit=$?"
   # 输出：101 finding(s). Exit 3.  →  exit=3
-  go run ./tests/cmd/contractgate -root . >/dev/null 2>&1; echo "exit=$?"
-  # 输出：exit=1（go run 的包装层；程序自己写的是 3）
   ```
 - **红的性质**：这不是「刚变红」。T1205 的 RESULT 摘要逐字写着
   `PINNED RED at merge: mounted=134 in_contract=30 catchall_resolved=6 exempted=0 undocumented=98 | contract_ops=40 unmounted=3 | exemptions=0 cited=0 files_scanned=728 | advisory=41`
@@ -593,6 +739,23 @@ jq -r '.tasks[] | select(.id=="T0909") | "\(.title) :: \(.allowed_scope | join("
   `openapi-exemptions.yaml` 的裁定、3 条 unmounted、以及 contractgate 要不要接进 CI——**接 CI 会让 main 变红**，
   必须与那 98 条的证据一起动）。**该不该收进 CI 是 Supervisor 的裁定，本报告不自己下结论。**
 
+### R14. L3-④ 未回答：公开声明（attestation）该在哪里被发现
+
+- 出处：`tasks/decisions.md` **㊳**（2026-09-23 补记；那条决定**不在** `tasks/progress.md` 的 L3 清单里，
+  是清点待办时才补上编号的——这正是本版把它写进报告的理由）。
+- 事实（㊳ 里逐条实跑核对过）：路由与页面都在（`apps/web/app/(main)/attestations/[pid]/page.tsx`），
+  但**入口为零**——`attestationHref` 定义在 `apps/web/lib/attestations.ts:237`，**产品侧的**调用者只有那一页自己
+  （`page.tsx:72` 的 canonical 链接、`:131` 的「Reload this page」自链；`apps/web/lib/attestations.test.mjs:84/88/89`
+  也调它，那是单测，不是入口）。**今天只有"知道 pid"的人能打开它。**
+- **性质**：CLAUDE.md §5.1 把**公开性**列进必须停下的情形，而这条问的正是「哪些内容在哪个发现面上可见」。
+  两种读法都自洽（① 声明是给"拿到 pid 的第三方"核验的，不需要发现面；② 一份没人能发现的公开声明不服务于它的目的），
+  在两者之间替 owner 选一条就是在发明产品语义。**它是"一条待裁定的 L3"，不是工程欠账，它不挡 V1 的任何一环。**
+- 契约那一半**不是 L3**：`specs/api/openapi.yaml` 里 `attestation` 零命中，三条路由在契约对账里是
+  `undocumented`——属于 R13 那 98 条的清单，收尾在 T1211。
+- **V1 后补法**：owner 答「不建发现面」→ 今天的形状就是答案，`docs/` 里补一句说明（属 L1）；
+  答「建」→ 立账时必须与 `specs/api/**` 的登记同笔（㊳ 给出了倾向形状：只做「目标版本页列出针对它的 attestation 链接」，
+  不新增任何发现面）。**在裁定之前，本报告不接工、不改产品代码。**
+
 ---
 
 ## 4. 关键复跑命令清单
@@ -600,15 +763,21 @@ jq -r '.tasks[] | select(.id=="T0909") | "\(.title) :: \(.allowed_scope | join("
 ```bash
 # 1. 当前基准
 git rev-parse HEAD
-# 输出：9b22339e6398b714de5cc810454437ee33e51913
+# 输出：115a4286bf8ccea8ddc0ff4f56747c4082ba483d
 
 # 2. 审计脚本（本任务的 final audit）：报告标记、数字、名单、计数块、基准 commit 全对才 exit 0
 bash tests/acceptance/v1-final-audit.sh
-# 输出末行：AUDIT OK: report markers present, counts match (0 unmerged, 1 not_run, 0 failed, 0 skipped).
+# 输出末行：AUDIT OK: report markers present, counts match (0 unmerged, 3 not_run, 0 failed, 0 skipped, 0 passed-without-evidence).
+# 这次运行同时把**计数块原样打印出来**（COUNTS v1_required_total=150 … COUNTS tests_blocking=181，
+# 版本与台账逐字相等）：脚本一边打印它、一边校验报告里那 9 行与它逐字相等——
+# 「打印出来的」与「被校验的」是同一份东西，读输出的人不必去读脚本。
 #
 # 2b. 这条命令是**基准快照**：它只在报告自己的基准上有意义。HEAD 前进之后（合并、落账、
 #     任何一次提交）它必然以非 0 退出，并打印「证书过期」的说明与两条出路——那不是报告错了，
 #     是报告记录的那棵树不是这一棵。要么在那个 SHA 上跑，要么先重新生成报告：
+#     两条出路里，出路 (a) 指回的是**报告自己钉的那个 SHA**（不是当前 HEAD）——本版修了这一点，
+#     在那之前它会把「去哪棵树核对」说反（复核 minor，证据：拿一份钉在旧基准上的报告跑，
+#     它打印的是 `git checkout <报告里的 SHA>`）。
 bash tests/acceptance/v1-final-audit.sh --emit-tables
 # 输出：生成注释行 + 「> 生成基准：`<当前 HEAD>`」+ 未合并任务表 + blocking not_run 表 + 计数块。
 # 把生成基准行贴回报告头部、两张表贴回第 1.2 / 1.3 节、计数块贴回第 1.3 节
@@ -616,23 +785,26 @@ bash tests/acceptance/v1-final-audit.sh --emit-tables
 
 # 3. blocking not_run 测试
 jq '.tests | map(select(.blocking == true and .status == "not_run")) | {count: length, ids: map(.id), names: map(.name)}' tasks/tests.json
-# 输出：{"count": 1, "ids": ["T1207-TEST-01"], "names": ["final audit"]}（本报告自己的审计条目）
+# 输出：{"count":3,"ids":["T1210-TEST-01","T1211-TEST-01","T1212-TEST-01"],"names":["final audit","master gate mutation check","e2e db guard"]}
 jq -c '[.tests[]] | group_by(.status) | map({status: .[0].status, count: length})' tasks/tests.json
-# 输出：[{"status":"not_run","count":1},{"status":"passed","count":176}]
+# 输出：[{"status":"not_run","count":3},{"status":"passed","count":178}]
 
-# 4. Gate I / MOF canonical workflow（需要真实服务）
-#    注意：本轮**没有**重跑这一条（它需要整套 PostgreSQL/Redis/MinIO/Gitea/浏览器栈）。
-#    Gate I 的数字来自 T1202 的运行记录：.rddev/workers/T1202/RESULT.json，账本条目 #T1202-TEST-01。
+# 4. Gate I / MOF canonical workflow（本报告在 115a4286 上实跑：退出码 0，50 步全绿，FAIL 0 条）
+#    它需要整套真实栈（PostgreSQL/Redis/MinIO/Gitea + 真 next start + 真 Chromium），
+#    起栈的命令与脚本自己的前置在 docs/66 与 tests/acceptance/mof-canonical-workflow.sh 的头注释里。
 bash tests/acceptance/mof-canonical-workflow.sh
+# 输出末两行：G3 mof-canonical: PASSED — 50 step(s), every assertion green
+#              the seeded world, left in place for inspection: post_mof_demo_canonical_gate
 
-# 5. Gate H / 依赖与 CVE 审计（本报告实测，三条都 exit 0）
-bash tests/security/master-security-gate.sh --only vuln-go,vuln-node,vuln-python
-# 输出：Go `No vulnerabilities found.`（结论行；另有 3 条「依赖模块里存在、代码不可达」的告警，工具自己分列）
-#       Node `No known vulnerabilities found` / Python `Found no known vulnerabilities and no adverse project statuses in 6 packages`
-bash tests/security/master-security-gate.sh --only secret-scan
+# 5. Gate H / 依赖与 CVE 审计 + 总安全门（本报告在 115a4286 上实跑）
+make security-tools    # 冷树上先装齐前置；不装的话总门会以退出码 2 报 5 行 NOT ASKED
+bash tests/security/master-security-gate.sh --report /tmp/t1210-master-gate-report.json
+# 输出末行：master-security-gate: PASS — 17 check(s) ran and each printed its own evidence
+# 退出码 0；注册表下限 MIN_CHECKS=17（tests/security/master-security-gate.sh:120）
 bash tests/security/master-security-gate.sh --only absence-manifest
+# 输出：那三行 ok   item: container-scan — witness …（有守卫的缺席），见 Gate H 第 3 段
 
-# 5b. Gate H / CI 必需作业集合：权威是这两个文件本身，三处必须是同一个集合
+# 5b. Gate H / CI 必需作业集合：权威是这三个文件本身，四处必须是同一个集合
 python3 - <<'PY'
 import re, json
 jobs = set(re.findall(r'^  ([a-z0-9_-]+):$', open('.github/workflows/ci.yml').read().split('\njobs:\n',1)[1], re.M))
@@ -640,25 +812,25 @@ g = json.load(open('specs/orchestrator/gates.json'))
 print(len(jobs), sorted(jobs))
 print(jobs == set(g['required_jobs']) == set(g['gates']['G2']['runs_jobs']) == set(g['gates']['G4']['asserts_jobs']))
 PY
-# 输出：10 ['a11y', 'acceptance', 'go', 'i18n', 'migration-integration', 'observability', 'python', 'spec-validation', 'task-state', 'web']
+# 输出：11 ['a11y', 'acceptance', 'go', 'i18n', 'migration-integration', 'observability', 'python', 'security-master', 'spec-validation', 'task-state', 'web']
 #       True
 
 # 5c. Gate G / MCP 工具面对账（本报告实测：21 声明的、0 个 dispatch 点）
-go build -o /tmp/t1207-cgate ./tests/cmd/contractgate
-/tmp/t1207-cgate -root . -write-mcp /tmp/t1207-mcp-inventory.json | head -2
+go build -o /tmp/t1210-cgate ./tests/cmd/contractgate
+/tmp/t1210-cgate -root . -write-mcp /tmp/t1210-mcp-inventory.json | head -2
 # 输出：MCP reconciliation: catalog specs/mcp/tools.json declares 21 tool(s); 0 have a dispatch site; 21 do not.
-jq '{declared_tools, tools_with_a_dispatch_site}' /tmp/t1207-mcp-inventory.json
+jq '{declared_tools, tools_with_a_dispatch_site}' /tmp/t1210-mcp-inventory.json
 # 输出：{"declared_tools":21,"tools_with_a_dispatch_site":0}
 sed -n '77,80p' cmd/mcp-server/main.go
 # 输出：/mcp 的 501 存根与正文 `{"error":"MCP protocol wiring not implemented yet (agent tasks)"}`
-sed -n '51,53p;60p' docs/02_V1_SCOPE.md
-# 输出：### Agent interface / - MCP/API 读写科研状态。/ … / ## 4. V1 明确不做（§4 没有豁免它）
+sed -n '52p;53p;60p' docs/02_V1_SCOPE.md
+# 输出：- MCP/API 读写科研状态。/ - Governance 操作…（§4 没有豁免它）
 
 # 5d. Gate G / 契约对账（R13：已知红、且无人跑它；退出码 3 是程序自己的）
-/tmp/t1207-cgate -root . | head -2
-# 输出：summary: mounted=134 in_contract=30 catchall_resolved=6 exempted=0 undocumented=98 | contract_ops=40 unmounted=3 | exemptions=0 cited=0 files_scanned=735
-/tmp/t1207-cgate -root . >/dev/null 2>&1; echo "exit=$?"
-# 输出：exit=3（末行 101 finding(s). Exit 3.）
+/tmp/t1210-cgate -root . | head -2
+# 输出：summary: mounted=134 in_contract=30 catchall_resolved=6 exempted=0 undocumented=98 | contract_ops=40 unmounted=3 | exemptions=0 cited=0 | files_scanned=735
+/tmp/t1210-cgate -root . >/dev/null 2>&1; echo "exit=$?"
+# 输出：exit=3
 grep -rn contractgate .github/workflows/ Makefile scripts/ || echo "0 callers"
 # 输出：0 callers
 
@@ -699,54 +871,135 @@ jq -r '.tests[] | select(.id|test("^T00(09|10|11)-TEST-")) | "\(.id) \(.status)"
 jq '[.tests[] | select((.id|test("^T04(0[1-9]|1[01])-TEST-01$")) or (.id|test("^T030[1-5]-TEST-01$")) or (.id|test("^T060[568]-TEST-01$")) or (.id|test("^T090[1-9]-TEST-01$")) or (.id|test("^T00(09|10|11)-TEST-"))) | select(.status!="passed")] | length'
 # 期望：0（本基准实测输出 0，即上列全称断言没有反例）
 jq '[.tests[] | select(.status=="passed") | select(((.evidence // "") | length) == 0)] | length'
-# 期望：0（没有一条 passed 是空证据）
+# 期望：0（没有一条 passed 是空证据；审计脚本第 3 节把这一条也钉住了，见第 3 节分布的第二/第三道）
 
 # 8. 谁承接：reopen 的 A/F/G 今天没有任何任务书认领（R4 的全称断言）
 jq -r '.tasks[] | select(((.allowed_scope // []) | map(test("reopens")) | any)) | .id' tasks/tasks.json | wc -l
-# 期望：0（150 笔任务里没有一笔的字面 scope 写 reopens）
+# 期望：0（154 笔任务里没有一笔的字面 scope 写 reopens）
 jq -s -r '.[0].tasks as $d | .[1].tasks as $s | $d[] | .id as $id | select(((.allowed_scope // []) | map(test("internal/application")) | any)) | select(($s[$id].status // "missing") != "merged") | "\($id) \($s[$id].status)"' tasks/tasks.json tasks/task_status.json
-# 期望：空（未 merged 只剩 T1207 自己一笔，它的 scope 碰不到 internal/application）
+# 期望：空
 
 # 9. Gate C 资产那一半的状态（任务与测试分开取，别把「已合并」读成「已通过」）
 jq -r '.tasks | to_entries[] | select(.key|test("^T070[689]$|^T0710$")) | "\(.key) \(.value.status)"' tasks/task_status.json | sort
 # 期望：T0706 merged / T0708 merged / T0709 merged / T0710 merged
-jq -r '.tests[] | select(.id|test("^T070[6789]-TEST-01$|^T0710-TEST-01$")) | "\(.id) \(.status)"' tasks/tests.json | sort
-# 期望：T0706-TEST-01 passed / T0707-TEST-01 passed / T0708-TEST-01 passed /
-#       T0709-TEST-01 passed / T0710-TEST-01 passed
 jq '[.tests[] | select(.id|test("^T07(0[1-9]|1[0-2])-TEST-01$")) | select(.status!="passed")] | length'
 # 期望：0（整个资产族 T0701–T0712 没有一条不是 passed）
 
 # 10. 回填成色（R2 的数字）：账本里有多少条 evidence 自述是回填
 jq '[.tests[] | select((.evidence // "") | test("Backfilled|补跑|backfilled"))] | length' tasks/tests.json
-# 输出：140（177 条里，140 条的 evidence 写明是回填的；其中 127 条逐字写着 not a fresh re-run）
+# 输出：140（181 条里，140 条的 evidence 写明是回填的；其中 127 条逐字写着 not a fresh re-run）
+
+# 11. L3 的编号集合：报告第 0 节点名的 L3 与台账记的 L3 必须相等
+#     （审计脚本自己做这条比对；这条命令是它的可复跑版本）
+grep -oE 'L3-[⓪①②③④⑤⑥⑦⑧⑨]' tasks/decisions.md | sort -u
+# 输出：L3-⓪ L3-① L3-② L3-③ L3-④（五条；少一条就说明有未登记的裁定项）
 ```
 
 ---
 
 ## 5. 验收与交付声明
 
+### 5.1 `CLAUDE.md` §12 的四个完成条件，逐条对上
+
+`CLAUDE.md` §12 把「完成」定义成**四条同时成立**，不是一个「所有 task 显示 done」：
+
+| # | §12 的条件 | 本报告里的回答 | 结论 |
+|---|-------------|----------------|------|
+| ① | 所有 V1-required task merged | 第 1 节（审计脚本实测：**150** 笔 `v1_required`，排除 T1207 后未 merged **0** 笔） | 满足 |
+| ② | **四层 Gate 通过** | **第 5.2 节**（逐层给权威与「绿记在哪」） | 满足（逐层见下） |
+| ③ | Master Acceptance 通过 | 第 2 节（docs/31 的 Gate A–I 与 Development System Gate **逐条**判定） | **未满足：Gate G 未通过**（L3-③ 待裁定，R12） |
+| ④ | MOF canonical workflow 从 Research Question 到 external contribution 全闭环通过，并有可复现证据 | Gate I（**本报告在 `115a4286` 上实跑**：50 步全绿、退出码 0、`FAIL` 0 条） | 满足 |
+
+所以本报告**不宣告 V1 完成**：③ 不成立，而它不成立的原因是一条**未获裁定的 L3**，不是一件没做完的工程活。
+
+### 5.2 「四层 Gate 通过」：逐层的权威与「绿记在哪」
+
+第 5.1 节 ② 那一句在上一版只散落在 S6、H5、R2 与 Gate I 四处；这里把它自己的块补上。
+**四层的权威是 `specs/orchestrator/gates.json` 本身**（配合 `docs/67_TEST_GATES.md` 的定义），
+每层「绿」都有一条可读的记录——本报告不自己跑 `rddev`（本报告作者没有 Git control 权限），
+它给的是**去哪读那条绿**，外加本报告自己那一层（T1210 的 G3 = `mof-canonical`）的实跑。
+
+| 层 | 权威（定义在哪） | 谁跑它 / 怎么红的 | 绿记在哪（路径 + 记录里的字段） |
+|----|------------------|-------------------|----------------------------------|
+| **G1** Worker Local | `docs/67_TEST_GATES.md` §G1；`specs/orchestrator/gates.json#gates.G1` | `rddev worker collect`：RESULT 内部一致性 + worker 边界。`completed` 却带 `not_run` / `failed`、带 INTERIM 标记、或 RESULT 本身 failed/blocked，**即拒** | `.rddev/runtime/gates/<TASK>/collect-run-*.json`，`"record_type": "collect"` 且 `"status": "ok"`。例：`…/T1209/collect-run-5521413a29796199.json` |
+| **G2** Supervisor Acceptance | `gates.json#gates.G2` 的 `runs_jobs`（**11** 个作业，与 `.github/workflows/ci.yml` 的**同一步骤**逐字一致，不是"长得像的子集"） | `rddev task accept`：本地重跑 CI 的 exact steps；任一作业红即拒绝 `verification → accepted` | `.rddev/runtime/gates/<TASK>/gate-run-*-g2.json`，`"gate": "G2"` 且 `"status": "passed"`；随之的 `.rddev/runtime/gates/<TASK>/accept-run-*.json` 里 `"status": "accepted"`。例：`…/T1209/gate-run-run-61790e741add423c-g2.json`、`accept-run-61790e741add423c.json` |
+| **G3** Integration / E2E | `docs/67` §G3；`gates.json#gates.G3` + `task_overrides.<TASK>.g3_jobs`（**没有条目 = `not_required`，记下来，不静默跳过**） | `rddev gate run … g3`：起真服务（PostgreSQL / Gitea / MinIO / Redis / 真浏览器）跑那个作业 | `.rddev/runtime/gates/<TASK>/gate-run-*-g3.json`，`"gate": "G3"` 且 `"status": "passed"`。**本任务（T1210）的 G3 就是 `mof-canonical`**（`task_overrides.T1210.g3_jobs`），本报告已在**这棵树**上跑过一次（Gate I：50 步全绿） |
+| **G4** Merge | `gates.json#gates.G4` 的 `asserts_jobs`（同一个 **11** 作业集合）+ `docs/67` §G4 | `rddev pr merge`：断言该任务最新 G2 记录里**每一个必需作业都绿**，且那条记录晚于 collect；红或缺一个即拒绝合并 | `.rddev/runtime/gates/<TASK>/git-pr-merge-run-*.json`，`"action": "pr-merge"` 且 `"gate_status": "passed"`。例：`…/T1209/git-pr-merge-run-7fbf9ed13b28377e.json` |
+
+三点要写明白：
+
+- **G2 与 CI 的相等不是"人保证的"**：`gates.json` 与 `ci.yml` 的作业集合由一条单测钉着，漂了就红；
+  本报告第 4 节 5b 的脚本是那条关系的可复跑版本（四处集合相等，`True`）。
+- **G3 的"没要求"不等于"跳过"**：`task_overrides` 里没有条目的任务在 `gates.json` 的注释里写明是
+  `not_required` 并且会**被记录下来**；本报告的 Gate I 之所以能拿 T1202 的记录做旁证、又能在本树上再挣一次，
+  就是因为 T1210 自己带着 `mof-canonical` 这条 G3 作业。
+- **`.rddev/**` 是本地运行记录，不是提交物**（`.gitignore:10` 忽略整个目录）。引用它是在说「这条绿当时记在哪」，
+  不是在说它进了版本库。
+
+### 5.3 判定与统计（与第 2 节的表逐格一致）
+
 - 本报告已覆盖 `docs/31_MASTER_ACCEPTANCE.md` Gate A–I（`:5-60`）与 Development System Gate（`:62-72`）共 10 条，
-  每条都有判定与证据；**逐条 checkbox 共 46 项**（含 Gate I 的一句与 Dev Gate 的 7 条），每项一个判定：
-  **44 项「通过」、1 项「未通过」（Gate G 第 1 条）、1 项「真空成立」（Gate G 第 2 条，按真空写）**。
-  Gate 层面：**8 条「通过」、2 条「未通过」（Gate G、Gate H）**，最小判定单位在表里，不在这一句里。
-- 判定为「未通过」的两条已在剩余风险里逐条出现：**Gate G ← R12**、**Gate H ← R10**；
-  判定为「通过」但带缺口的 Gate A/C/D/E/F 已在 R1–R9、R11 中逐条出现；
-  R13 是一条 Gate 判定之外的仪器欠账（点名，不自行处置）。两处条数能对上：未通过 2 = R12 + R10。
-- `tasks/tests.json` 中 176 条 `passed`、1 条 `not_run`（`T1207-TEST-01`，本报告自己的审计条目）、
-  **0 条 `failed`、0 条 `skipped`**；**本报告未修改任何 `status`**，账本只由 `scripts/record_test_run.py` /
-  `scripts/reconcile_tests_ledger.py` 写真跑结果。
-- 本任务（T1207）的 `allowed_scope` 内产物为 `tests/acceptance/v1-final-report.md` 与
+  每条都有判定与证据；**逐条判定共 46 项**——`- [ ]` checkbox **38 条**（Gate A 7 / B 4 / C 4 / D 4 / E 4 /
+  F 5 / G 4 / H 6，`grep -c '^- \[ \]' docs/31_MASTER_ACCEPTANCE.md` = 38）+ Gate I 的那**一句** +
+  Development System Gate 的 **7 条**（38 + 1 + 7 = 46；后两项在 `docs/31` 里不是 checkbox，本报告把它们
+  一并逐条判定，但不把它们的条数算进 checkbox 那一列）。每项一个判定：
+  **44 项「通过」（其中 H1 那一项带一条限定：扫描面之外仍有一条有守卫的缺席）、1 项「未通过」（Gate G 第 1 条）、
+  1 项「真空成立」（Gate G 第 2 条，按真空写）**。
+  Gate 层面：**9 条「通过」、1 条「未通过」（Gate G）**，最小判定单位在表里，不在这一句里。
+- **这一版的统计与上一版差在哪，以及为什么**：上一版是 `8 通过 / 2 未通过（Gate G、Gate H）`；
+  本版是 `9 / 1`。差的那一条是 **Gate H**，改判的依据是**树变了**——SAST 与 SBOM 成了总门里的实检行、
+  容器扫描成了有守卫的缺席并有一份书面风险接受（`docs/adr/ADR-028-v1-ships-no-container-image.md`），
+  本报告在这棵树上真跑了一遍总门（退出码 0、17 行全绿）。**断言没有放宽，H1 那一行反而多了一条限定。**
+- 判定为「未通过」的那一条已在剩余风险里逐条出现：**Gate G ← R12**；
+  判定为「通过」但带缺口的 Gate A/C/D/E/F/H 已在 R1–R10、R14 中逐条出现；
+  R11 是工具的欠账、R13 是仪器欠账（点名，不自行处置）。两处条数能对上：未通过 1 = R12。
+- `tasks/tests.json` 中 178 条 `passed`、3 条 `not_run`（`T1210-TEST-01` 本报告自己的审计条目，
+  以及 `T1211-TEST-01`、`T1212-TEST-01` 两笔同窗在跑任务自己的门）、**0 条 `failed`、0 条 `skipped`**；
+  **本报告未修改任何 `status`**，账本只由 `scripts/record_test_run.py` / `scripts/reconcile_tests_ledger.py` 写真跑结果。
+- 本任务（T1210）的 `allowed_scope` 内产物为 `tests/acceptance/v1-final-report.md` 与
   `tests/acceptance/v1-final-audit.sh`（后者含 `--emit-tables` 生成模式）；未触碰 `tasks/task_status.json`、
-  `tasks/progress.md`、`tasks/**`、`specs/**` 与任何产品代码。
-- **本版（第 5 轮 / 收尾轮）相对上一版（基准 `5b0d7d82`）改了什么**：
-  ① 基准换成 `9b22339e`；② 第 2 节从「每个 Gate 一段散文」改成**每条 checkbox 一行**（判定 + 证据 + 落账位置，
-     判定只取三值），并**读了测试体**再落笔（A2/A3/A5/A6/A7、B2、C2/C4、D2/D3/E3/E4 都给出文件与行号）；
-  ③ **Gate G 由「通过」改判为「未通过」**（第 1 条被树反证：21 条声明 / 0 个 dispatch 点 / 501 / `docs/02:52` 未豁免），
-     第 2 条按**真空成立**写；④ 新增 **R12**（MCP 工具面，L3-③）与 **R13**（契约对账仪，已知红且无人跑）；
-  ⑤ R3 的 blob 清单补全（`tests/e2e-release/harness/main.go:859`，并写明那是测试装置不是产品代码），
-     处置升级为 **L3-②**（㉟）；⑥ 三处行号更正（R4 的 `:720-723`、R7 的 `:86`、R10 的 `:149`）；
-  ⑦ R8/Gate E 的第二句 L3-⓪ 判定改成**逐字陈述句**；⑧ 审计脚本新增 `failed`/`skipped` 非 0 即红的显式断言、
-     新增计数块校验与「基准行必须在报告头部」的位置断言，并把「基准不符」的失败改成**专门的快照说明**（退出码照样非 0）；
-  ⑨ `--emit-tables` 扩成够重建报告的那一份（生成基准行 + 两张表 + 计数块），第 1.2/1.3 节逐字贴入。
-- **本报告不自行放宽任何门**：Gate H 的 SAST/容器扫描/SBOM 三项缺席照实写「未通过」，
-  Gate G 的 MCP 工具面照实写「未通过」并把裁定权交回 owner（L3-③）；报告作者**不改台账、不改测试、不改判定口径**。
+  `tasks/progress.md`、`tasks/**`、`specs/**`、`docs/**` 与任何产品代码。
+- **本版（T1210，第六轮 / 证书刷新轮）相对上一版（基准 `9b22339e`）改了什么**：
+  ① 基准换成 `b6c1fb1a`，第 1.2 / 1.3 节的两张表、基准行、计数块**逐字**来自
+     `bash tests/acceptance/v1-final-audit.sh --emit-tables` 的同一次输出（四个数字全部按树重取：
+     150 笔 v1_required、181 条测试、178 `passed`、3 `not_run`）；
+  ② **R10 重写**：旧句「SAST、容器扫描、SBOM 三项缺席」在新树上不成立，换成「两项成了总门里的实检行、
+     第三项成了有守卫的缺席（书面接受 `docs/adr/ADR-028-*.md`）」，并补上前一版漏掉的两句文档滞后更正；
+  ③ **Gate H 由「未通过」改判为「通过」**（唯一理由已由 T1209 的落地取代：总门实跑退出码 0、`MIN_CHECKS=17`、
+     `absence-manifest` 三行 witness 逐字引在第 2 节），且 **H1 那一行的判定带上限定**；§5.3 的统计随之一致重算；
+  ④ **Gate I 不再引用 T1202 的记录**：本报告在**承载这份证书的那棵树**上实跑了一次 MOF canonical workflow
+     （50 步全绿、退出码 0），因为 T1210 的 G3 作业就是 `mof-canonical`；
+  ⑤ §0 的 L3 清单补上第 ④ 条（`tasks/decisions.md` ㊳ 的漏登记），并新增 **R14** 点名它；
+  ⑥ 新增 **5.1 / 5.2 两节**：把 `CLAUDE.md` §12 的四个完成条件逐条对上，并给「四层 Gate 通过」它自己的块
+     （逐层的权威与「绿记在哪」，到 `.rddev/runtime/gates/` 的字段一级）；
+  ⑦ 审计脚本：**三处**只取第一处匹配的数字检查**收成集合唯一**（4d：登记数那两句、台账分布那一句、
+     以及**基准行本身**——一份在头部写对基准、却在正文里留一条旧 SHA 的报告现在也会红）、
+     新增「空 evidence 的 `passed` 必须为 0」的台账断言（4e）、R10/H1/总门那几处标记换成能承载新事实的措辞、
+     风险编号钉到 R14、§0 的 L3 条数改成**脚本从两个文件数出来**再比对（不是手写）、
+     §5.3 的门层统计「9 通过 / 1 未通过」也改成**数报告自己的处置行**再比对（判定与统计必须一致，4b）、
+     并且普通运行与 `--emit-tables` 走**同一个**计数块函数——前者打印、后者供重建，读到的就是被校验的那一份。
+- **本版（T1210，第七轮 / 返工轮）相对上一版（基准 `b6c1fb1a`）改了什么**：
+  ① **基准换成 `115a4286`**，理由在报告头部：上一版在验收时红的是 CI `security-master` 作业的**安装步**
+     （无条件 `sudo apt-get` 在没有 tty 的机器上退出码 1，总门那一行根本没轮到），修在
+     `.github/workflows/ci.yml`（本任务 `allowed_scope` 之外，`115a4286` 带上它），所以证书要重新钉。
+     两张表与计数块按新树重取（**数字未变**：150 笔 `v1_required`、181 条测试、178 `passed`、3 `not_run`）。
+  ② **总门在新基准上真跑一遍**：`2026-09-23 07:13:13 → 07:13:47`，退出码 0、17 行、`NOT ASKED` 0 行
+     （第 2 节 Gate H 第 1 段）。
+  ③ **MOF canonical workflow 在新基准上真跑一遍**：`2026-09-23 07:14:28 → 07:15:03`，50 步全绿、退出码 0、
+     `FAIL` 0 条；Gate I 的引文换成**这一次**运行的逐字输出（外部组的 pid 每次播种都会变，上一版那一个已经不再是
+     树里存在的那个）。
+  ④ **复核意见逐条处置**（复核给的是 1 条 minor + 4 条 nit）：
+     minor——审计脚本「证书过期」那段的出路 (a) 打印的是**当前 HEAD**，而它说的是「在报告自己的基准上跑」，
+     已改成打印**报告钉的那个 SHA**（第 4 节 2b 的说明与它一致）；nit①——走查文件数 2106 → **2108**，
+     并写明这个数随本地**被忽略的**构建产物浮动、判定只看那条 tree claim；nit②——R14 的「全部调用者只有那一页自己」
+     改成「**产品侧**的调用者只有那一页自己」，并把 `apps/web/lib/attestations.test.mjs:84/88/89` 那三个单测调用点点名；
+     nit③——「absence-manifest 引文漏了结尾一行」**不采纳**，两次实跑核对后确认那一行属于这个 checker 的
+     **另一种调用方式**（非 `--selftest`），总门跑的是 `--selftest`，证据是第 2 节 Gate H 第 3b 段；
+     nit④——脚本里剩下的两个 `head -n1` 是**位置**断言（哪一行在前），已加注释说明它们为什么不走 `collect_all`。
+  ⑤ **H6 那一行的证据拆成两个入口**：`make a11y`（真数据、核心页面带数据 ≥ 7 的下限）由 `#T1104-TEST-01` 落账，
+     总门里的 `a11y` 那一行是本报告本轮实跑（对桩 API，`core pages scanned with data: 0`）——
+     上一版把两次运行合成了一句，本版分开写，**判定不变、措辞收紧**。
+  ⑥ 第 4 节 5d 的 `summary:` 引文补上漏掉的一个 `|`（本轮逐字重跑核对出来的）。
+- **本报告不自行放宽任何门**：Gate G 照实写「未通过」并把裁定权交回 owner（L3-③）；
+  Gate H 的改判逐条给了可复跑的替代物，并写明三条会让它回到「未通过」的条件；
+  报告作者**不改台账、不改测试、不改判定口径**。
