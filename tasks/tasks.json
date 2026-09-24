@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 157,
+  "task_count": 158,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -9039,6 +9039,71 @@
       ],
       "scope_note": "这一笔是**流水线自己的可信度**，不是产品功能，所以 `v1_required` 为 false：V1 证书（`tests/acceptance/v1-final-report.md` 与它的校验器）钉在它自己那棵树上，不依赖它，它也不改任何产品语义、权限模型或科研语义。它修的是**每笔任务的必过作业**——`#243` 挡的是 `go`（required），`#207`/`#133` 挡的是 `acceptance`（required），所以它自己的验收也可能被它要修的那个偶发红拦下；真遇到时按 `rddev` 的记录重跑，**不许**放宽任何断言。",
       "supervisor_scope_narrowing": "**为什么把两个验收脚本单独写进 `allowed_scope` 而不是给 `tests/acceptance/**`**：这个目录里还躺着 V1 证书（`v1-final-report.md`）、它的校验器（`v1-final-audit.sh`）与 `gitea-real-services-e2e.sh`（那是 #240 的面，另有任务）——整目录放开会让这三样都变成可写，而它们要么不能被改（证书钉在 `91ed2d5`），要么会把两笔任务的冲突面糊在一起。逐一列出要改的两个文件，边界才是可核的。**为什么 `scripts/**` 不在范围内**：那里是验收仪器本身（`record_test_run.py` / `validate_specs.py` / `spec_version.py` / `validate_task_state.py`），让被验收者改卷子等于让考生改分——同一口径在 T1211 与 T1204 用过。**为什么 `gates.json` / `ci.yml` 不在范围内**：作业定义与「哪几个作业是 required」是验收判据的来源，改判据不在实现任务的范围里；若你判断必须改，在 RESULT 里点名说清楚，我来接。**为什么允许碰 `cmd/rddev/**` 的测试**：`#243` 的症状就出在 `cmd/rddev/worker_test.go` 的 `TestWorkerStop`，修法可能落在测试的收尾等待上，不收进来会让工人为了一个测试文件报 blocked。"
+    },
+    {
+      "id": "T1216",
+      "phase": "P13",
+      "phase_name": "V1 之后的加固：流水线自己的可信度",
+      "title": "G3 的 Gitea bootstrap 竞态：先让那三步把返回码说出来，再按它说的决定怎么修（#240）",
+      "v1_required": false,
+      "dependencies": [],
+      "tests": [
+        "gitea bootstrap failure names the step that failed",
+        "bootstrap race measured over N runs"
+      ],
+      "allowed_scope": [
+        "tests/acceptance/gitea-real-services-e2e.sh"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "apps/**",
+        "services/**",
+        "infra/**",
+        "ops/**",
+        "scripts/**",
+        "Makefile",
+        "internal/**",
+        "cmd/**",
+        "tests/security/**",
+        "tests/acceptance/four-gate-helpers.sh",
+        "tests/acceptance/rejection-retry-e2e.sh",
+        "tests/acceptance/v1-final-report.md",
+        "tests/acceptance/v1-final-audit.sh"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/24_TEST_STRATEGY.md",
+        "docs/67_TEST_GATES.md",
+        "docs/25_CICD_DEVOPS.md"
+      ],
+      "requirements": [
+        "**先读再写，别照抄我的话。** 这一笔全部落在 `tests/acceptance/gitea-real-services-e2e.sh` 里，**不是产品缺陷**：产品面一行都不许动。下面每条都给了出处，先到树里核一遍；核出来与我说的不一样，以树为准并在 RESULT 里写明。",
+        "**（正题的第一步）先让失败说得清是哪一步。** 今天 `:529-531` 是三个请求串在一条 `&&` 链里——`DELETE /api/v1/repos/$REPO2/branch_protections/main` 期望 `204`、`POST .../contents/README.md` 期望 `201`、`POST .../branch_protections` 期望 `201`——而 `:534` 的失败话术只有一句「the bootstrap sequence (remove rule, seed, re-protect) did not complete」。**任何一步不是预期码，报出来的都是同一句话，看不出是哪一步、返回了什么码、响应体写了什么。** 紧邻其上 `:521-525` 已经证明「规则生效时 contents API 写 main 返回 403」，所以 `DELETE` 之后那次 `POST` 拿到的非 `201` **最可能就是仍然 403**——但这是推测，现在**打不出来**。把这三步拆成各自断言、各自打印**实际返回码与响应体**（响应体要能看出 Gitea 为什么拒）。这是这一笔的**第一交付**：在拿到真实码之前，任何「修法」都是猜。",
+        "**第二步：把它跑了足够多次，让数字说话。** 原件记的频率是「大约 5 次里红 1 次」（`.rddev/runtime/gates/T0406/output/run-b17e9d3d09e0652d-g3/gitea-real-services/00.log`，2026-09-15T21:12:43Z；同代码随后连跑 4 次全过）。**光跑一次说「过了」不算证据**（这条在 #240 里被点过名）。给出你实际跑的**次数**、红的次数、以及每一次红在**哪一步、什么码**——一张表，不要叙述。",
+        "**第三步：按量到的结果修，且不要用重试把问题盖住。** 二选一，由第 2 步的读数决定：(a) 若真是「删规则后立刻写仍被拒」（最终一致性/事务可见性），那就**有界重试**——次数与间隔写死、每次失败都印出来、**用尽即红且点名是哪一步哪一秒**，绝不允许静默通过；(b) 若是别的原因（例如请求本身有问题、`$PROT2` 的负载不对、并发另一个用例动了同一个仓库），按真因修。**不许**放大 timeout、不许无界重试、不许把断言从「返回码等于 X」放宽成「不报错就算过」。这一条的红线是 #240 的原话：「一旦大家习惯了『这个偶尔会红，重跑一下就好』，将来真出现回归时也会被当成同一个 flake 重跑掉。一个会随机说不的仪器，和不会说不的仪器一样不可信。」",
+        "**若修法必须落在本文件之外，停手并说明。** 这一笔的范围只有这一个文件（见下面 `supervisor_scope_narrowing` 里为什么）。如果你量到根因在别的面（产品代码、dev stack 的 Gitea 配置、别的测试脚本），**不要自己扩范围**：在 RESULT 里点名说清楚「要让哪一处怎么改、凭什么」，我来接。",
+        "**不许动相邻的仪器。** `tests/acceptance/v1-final-report.md` 与 `tests/acceptance/v1-final-audit.sh` 是 V1 证书与其校验器，一个字节都不许碰（收工前给两份的 `sha256sum`）；`tests/acceptance/four-gate-helpers.sh` 与 `tests/acceptance/rejection-retry-e2e.sh` 是**另一笔任务（T1215）正在改的文件**，同理一个字节都不许碰——两个文件都要改的话在 RESULT 里说，不要在这里顺手做。"
+      ],
+      "deliverables": [
+        "`tests/acceptance/gitea-real-services-e2e.sh` 里 bootstrap 三步的拆解与逐码/逐响应体打印（第一交付），以及按读数得出的修法。",
+        "一张**实测表**：跑了多少次、红几次、每次红在哪一步、返回码与响应体要点。",
+        "一条**能红的构造**：证明新写的诊断确实会把「哪一步、什么码」说出来（例如故意把某一步的期望码改错、或用一个必然被拒的请求），并给出红绿两次输出。",
+        "`RESULT.json`：上面每条的「读了哪一行 / 跑了哪条命令 / 看到什么」，含两份证书文件的 sha256 与「相邻两个文件未动」的 `git diff --stat` 原文。"
+      ],
+      "acceptance_criteria": [
+        "**失败现在说得清是哪一步**：构造一次失败（受控构造即可），输出里能**同时**看到「哪一步」与「实际返回码」，贴出原文；把三步的期望码各改错一次，三次都能指出**对应**的那一步（不是同一句话）。",
+        "**频率是量出来的，不是叙述的**：给出实际运行次数与红/绿分布的表；运行的**次数**不少于 20 次（含至少一次你在**慢/并发**条件下的运行），或说明为什么达不到并给出替代量法。",
+        "`bash tests/acceptance/gitea-real-services-e2e.sh` 在你这棵树上退出码 0，末几行原文进 RESULT。**若它红了：把红当结论写进 RESULT，不许删证据、不许放宽断言、不许重跑掩盖。**",
+        "**修法若含重试**：次数与间隔是**写死的常量**、每次尝试都打印、用尽后**必须红**且点名是哪一步——给出「用尽即红」那一次的输出。",
+        "**没有越界**：`git status --porcelain -uall` 只列 `tests/acceptance/gitea-real-services-e2e.sh`；`tests/acceptance/v1-final-report.md`（`92cb6c19…`）、`v1-final-audit.sh`（`c6ae3181…`）、`four-gate-helpers.sh`、`rejection-retry-e2e.sh` 的 `sha256sum` 与你开工时一致；`tasks/**`、`specs/**`、`docs/**`、`.github/**`、`internal/**`、`cmd/**` 一个字节未动；无残留进程。"
+      ],
+      "scope_note": "这一笔修的是**流水线自己的仪器**（G3 的 `gitea-real-services` 作业里那个偶发红），不是产品功能，所以 `v1_required` 为 false：V1 证书钉在它自己那棵树上，不依赖它，它也不改任何产品语义。它要防的是 #240 自己点名的那个后果——「一个会随机说不的仪器，和不会说不的仪器一样不可信」。**注意它自己的 G3 就是它要修的那个作业**：验收时 `gitea-real-services` 可能正好红一次；真遇到时按 `rddev` 的记录重跑并留档，**不许**为了让它绿而放宽任何断言。",
+      "supervisor_scope_narrowing": "**为什么只给一个文件**：同时开着的还有 T1215（`internal/devorchestrator/**`、`cmd/rddev/**`、`four-gate-helpers.sh`、`rejection-retry-e2e.sh`）。两笔的范围**故意不相交**，这样并行跑也不会在同一份 diff 上撞车；把 `tests/acceptance/**` 整个放开会让两笔都写得进去，冲突面就从「两个文件」变成「一个目录」。**为什么 `internal/**` 与 `cmd/**` 在禁止面**：这一笔是**仪器**的活。若根因真的在产品或 dev stack 里（例如 Gitea 的配置、bootstrap 顺序本身），那是另一笔的判据，需要我自己看——**停手并在 RESULT 里点名**比扩范围改产品更对。**为什么允许改这个文件里的断言**：`#240` 说得很直——现在打不出码，所以「哪一步该期望什么」本身可能就是错的；但放宽判据（把「等于 X」改成「不报错」）仍然禁止，改判据必须由实测的码支撑。"
     }
   ]
 }

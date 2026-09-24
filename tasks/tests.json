@@ -1840,6 +1840,16 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1216-TEST-01",
+      "task_id": "T1216",
+      "name": "gitea bootstrap failure names the step that failed",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }
