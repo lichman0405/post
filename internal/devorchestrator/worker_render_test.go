@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -542,4 +543,46 @@ func conventionsList(t *testing.T, prompt string) (word, heading, block string, 
 		}
 	}
 	return word, heading, strings.Join(list, "\n"), bullets
+}
+
+// TestTheGuardClaimInTheSystemPromptIsTrue: the contract tells every Worker
+// that a PreToolUse guard hook confines its writes. That sentence is a promise
+// about a session, not about a script, and it was false for two tools: with
+// Write/Edit in permissions.allow and absent from the matcher, dontAsk ran
+// them bare and the hook was never invoked (T1219).
+//
+// The two halves are asserted together on purpose. The claim alone would pass
+// on the broken tree — the sentence was already there — and the matcher alone
+// would pass with the claim deleted, leaving the Worker to discover the
+// envelope by hitting it. A guarantee and the thing that enforces it have to
+// move in the same commit, which is the lesson this whole task is an instance
+// of.
+func TestTheGuardClaimInTheSystemPromptIsTrue(t *testing.T) {
+	const claim = "guard hook confines your writes"
+	s := RenderSystemPrompt("T0001", "/repo", "/repo/.rddev/worktrees/T0001", "/repo/.rddev/workers/T0001", "/repo/.rddev/worktrees")
+	if !strings.Contains(s, claim) {
+		t.Fatalf("the Worker contract no longer states %q; a Worker that is refused a write without having been told writes are confined will read the refusal as a malfunction", claim)
+	}
+	// The sentence itself must name the tools it claims to cover; "your
+	// writes" alone would not say whether the file tools are meant to be
+	// inside the envelope or left outside it (which is how it read before
+	// T1219, when the sentence said "shell writes" and meant only Bash).
+	// The bullet wraps across lines, so the "sentence" is the claim and the
+	// continuation lines that follow it (the same wrapped-continuation shape
+	// conventionsList walks).
+	sentence := s[strings.Index(s, claim):]
+	if i := strings.Index(sentence, "\n\n"); i >= 0 {
+		sentence = sentence[:i]
+	}
+	for _, tool := range []string{"Write", "Edit"} {
+		if !strings.Contains(sentence, tool) {
+			t.Errorf("the contract sentence %q does not name the %s tool, so a Worker using it cannot tell the envelope covers it", sentence, tool)
+		}
+		// ...and the sentence has to be TRUE: the named tool must reach the
+		// hook, or this is the same promise-without-mechanism the task exists
+		// to remove.
+		if !slices.Contains(strings.Split(guardMatcher, "|"), tool) {
+			t.Errorf("the contract promises the guard confines %s writes and the matcher %q does not name %s — the promise is prose again", tool, guardMatcher, tool)
+		}
+	}
 }

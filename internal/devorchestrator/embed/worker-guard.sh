@@ -26,8 +26,13 @@
 #     (~/.config/gh, ~/.ssh, ~/.gnupg, ~/.docker, ~/.aws, ~/.git-credentials,
 #     ~/.netrc, ~/.claude), any .env file except .env.example, or the repo's
 #     .rddev/ runtime state outside the Worker's own worktree and result dir;
-#   - shell writes (rm/cp/mv/ln/install/tee and >/>> redirections) are
-#     confined to the Worker's own worktree, its own result dir and /tmp;
+#     the file-writing tools below are held to that same read confinement, so
+#     a tool that reads the file it is about to change is refused on the same
+#     terms as the Read tool;
+#   - writes are confined to the Worker's own worktree, its own result dir and
+#     /tmp, whichever tool makes them: shell writes (rm/cp/mv/ln/install/tee
+#     and >/>> redirections) and file-writing tool calls (Write/Edit/MultiEdit/
+#     NotebookEdit) go through the same normalisation and the same allow-set.
 #     ~ / $HOME / ${HOME} are always outside, and an unresolvable $ expansion
 #     fails closed;
 #   - `printenv <credential-name>` probes are blocked (the variables are
@@ -42,6 +47,16 @@
 #     collect-time invariants instead.
 #   - Redirections on a quoted path are conservatively over-blocked when the
 #     quote state cannot be resolved; unresolvable $ expansions fail closed.
+#   - WHICH tools reach this hook is worker-settings.json's matcher, not this
+#     script's business — a tool the matcher does not name is a tool that
+#     never arrives here. That seam is where Write/Edit escaped the write
+#     envelope until T1219 (they were in permissions.allow, so dontAsk let
+#     them run bare, and the matcher never invoked the guard for them). It is
+#     now checked from both sides: TestWriteGuardFiles derives the matcher's
+#     required contents from permissions.allow, and
+#     TestGuardMatcherNamesExactlyTheKnownTools fixes the set in both
+#     directions, so a tool that becomes allowed without becoming visible
+#     here fails a test instead of silently escaping.
 #
 # Hook protocol: the tool call JSON arrives on stdin. On a violation the guard
 # prints {"decision":"block","reason":...} on stdout, the human-readable
@@ -123,6 +138,47 @@ for part in sys.argv[1].split("."):
         print("no"); sys.exit(0)
     cur = cur[part]
 print("yes" if cur is True else "no")
+' "$1"
+}
+
+# json_string KEYPATH prints the string at that dotted path in the tool-call
+# JSON on stdin (empty when the key is absent or holds a non-string). Exit 0
+# when the payload parsed; non-zero when it did not, so callers fail closed
+# rather than decide on a document they could not read.
+#
+# Path fields are parsed for the reason run_in_background is parsed: a text
+# scan resolves keys differently from the JSON the consumer actually reads.
+#
+# WHAT WAS MEASURED, so this comment is not wider than the fact. Putting the
+# key inside an ESCAPED string literal does NOT fool the scan — a quote inside
+# a JSON string is escaped, so `"file_path"` never appears contiguously inside
+# Write.content and the scan goes on to find the real key (the run_in_background
+# comment above reached the same conclusion about `command`, and it is right).
+# What DOES fool it is a key appearing unescaped ahead of the real one, which a
+# nested object in a model-controlled field produces:
+#
+#   {"new_string":{"file_path":"/safe"},"file_path":"/etc/evil"}
+#
+# reads as /safe to a scan, and /etc/evil is never examined. That payload is
+# not producible through today's harness — tool inputs are schema-validated
+# before dispatch — so this is a defence against a SERIALISATION CHANGE rather
+# than against a live exploit, taken because a path check should not rest on
+# the current encoding of its input. The second half is the non-zero exit: an
+# unreadable payload is refused, where a text scan would silently yield no path
+# and let the call through. Both halves have regression cases.
+json_string() {
+	python3 -c '
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    sys.exit(3)
+cur = doc
+for part in sys.argv[1].split("."):
+    if not isinstance(cur, dict) or part not in cur:
+        print(""); sys.exit(0)
+    cur = cur[part]
+print(cur if isinstance(cur, str) else "")
 ' "$1"
 }
 
@@ -225,16 +281,17 @@ resolve_path() {
 	fi
 }
 
-# check_write_target blocks a shell write whose resolved destination is
-# outside the Worker's worktree, its result dir and /tmp (plus the standard
-# /dev sinks).
+# check_write_target blocks a write whose resolved destination is outside the
+# Worker's worktree, its result dir and /tmp (plus the standard /dev sinks).
+# It is shared by the shell-write policy and by the file-writing tools, so
+# its wording names neither one.
 check_write_target() {
 	target=$1
 	# Fail closed when the contract env is missing: an unset
 	# $POST_WORKER_WORKTREE collapses the allow pattern below to `/*`,
 	# which would admit every absolute path.
 	if [ -z "${POST_WORKER_WORKTREE:-}" ] || [ -z "${POST_WORKER_RESULT_DIR:-}" ]; then
-		block "worker contract environment (POST_WORKER_WORKTREE/POST_WORKER_RESULT_DIR) is missing — refusing to decide a shell write"
+		block "worker contract environment (POST_WORKER_WORKTREE/POST_WORKER_RESULT_DIR) is missing — refusing to decide a file write"
 	fi
 	t=$(resolve_path "$target")
 	case "$t" in
@@ -242,7 +299,7 @@ check_write_target() {
 		/tmp|/tmp/*) return 0 ;;
 		"$POST_WORKER_WORKTREE"|"$POST_WORKER_WORKTREE"/*) return 0 ;;
 		"$POST_WORKER_RESULT_DIR"|"$POST_WORKER_RESULT_DIR"/*) return 0 ;;
-		*) block "write target '$target' resolves to $t, outside this Worker's worktree, its result dir and /tmp — shell writes are confined by rddev" ;;
+		*) block "write target '$target' resolves to $t, outside this Worker's worktree, its result dir and /tmp — file writes are confined by rddev" ;;
 	esac
 }
 
@@ -413,11 +470,17 @@ redirect_policy() {
 	done
 }
 
-# read_policy blocks file-read confinement violations (Read/Grep/Glob/
-# NotebookRead tool calls). Credential stores and .env files are blocked
-# wherever they live; under $HOME nothing else is confined; the repo's
-# .rddev/ runtime state is readable only inside the Worker's own worktree and
-# its own result dir.
+# read_policy blocks file-read confinement violations. Credential stores and
+# .env files are blocked wherever they live; under $HOME nothing else is
+# confined; the repo's .rddev/ runtime state is reachable only inside the
+# Worker's own worktree and its own result dir.
+#
+# It backs two callers, so its messages name neither: the Read/Grep/Glob/
+# NotebookRead branch, and the file-writing branch (Write/Edit/MultiEdit/
+# NotebookEdit read the file they are about to change — the diff returns to
+# the model — so they are held to the same confinement). A refusal that said
+# "reading" while a Worker was trying to Write would be the half-true claim
+# this file already had to fix once.
 read_policy() {
 	p=$1
 	if [ -z "${POST_REPO_ROOT:-}" ] || [ -z "${POST_WORKER_WORKTREE:-}" ] || [ -z "${POST_WORKER_RESULT_DIR:-}" ]; then
@@ -425,11 +488,11 @@ read_policy() {
 	fi
 	case "$p" in
 		*"/.config/gh"|*"/.config/gh/"*|*"/.ssh"|*"/.ssh/"*|*"/.gnupg"|*"/.gnupg/"*|*"/.docker"|*"/.docker/"*|*"/.aws"|*"/.aws/"*|*"/.git-credentials"|*"/.netrc"|*"/.claude"|*"/.claude/"*)
-			block "reading credential store path '$p' is not permitted to Workers" ;;
+			block "access to credential store path '$p' is not permitted to Workers" ;;
 		*".env"*)
 			case "$p" in
 				*".env.example") : ;;
-				*) block "reading '$p' is not permitted to Workers (.env files hold secrets; .env.example is the allowed template)" ;;
+				*) block "access to '$p' is not permitted to Workers (.env files hold secrets; .env.example is the allowed template)" ;;
 			esac ;;
 	esac
 	t=$(resolve_path "$p")
@@ -444,7 +507,7 @@ read_policy() {
 		"$POST_REPO_ROOT"/.rddev|"$POST_REPO_ROOT"/.rddev/*)
 			case "$t" in
 				"$POST_WORKER_WORKTREE"|"$POST_WORKER_WORKTREE"/*|"$POST_WORKER_RESULT_DIR"|"$POST_WORKER_RESULT_DIR"/*) return 0 ;;
-				*) block "reading '$p' reaches another Worker's runtime state or the dispatch harness — confined by rddev" ;;
+				*) block "access to '$p' reaches another Worker's runtime state or the dispatch harness — confined by rddev" ;;
 			esac ;;
 	esac
 	return 0
@@ -525,8 +588,34 @@ case "$tool_name" in
 		exit 0 ;;
 	Read|Grep|Glob|NotebookRead)
 		for field in file_path path notebook_path pattern; do
-			p=$(printf '%s\n' "$input" | json_field "$field")
+			p=$(printf '%s\n' "$input" | json_string "tool_input.$field"); rc=$?
+			if [ "$rc" -ne 0 ]; then
+				block "cannot parse the tool-input JSON to check a file read; refusing the call rather than allowing an unverified read."
+			fi
 			[ -n "$p" ] && read_policy "$p"
+		done
+		exit 0 ;;
+	Write|Edit|MultiEdit|NotebookEdit)
+		# The file-writing tools. They must obey BOTH halves of the envelope
+		# Bash is held to, because they can do both: a Write/Edit names a
+		# destination (the write half, identical to a shell redirection), and
+		# an Edit/NotebookEdit READS the file it is about to change — its diff
+		# comes back to the model — so the credential-store/.env/.rddev read
+		# confinement applies to it on the same terms as the Read tool.
+		#
+		# How these tools got here is the reason this branch exists at all:
+		# they were in permissions.allow and absent from the matcher, so
+		# dontAsk ran them bare and this hook was never invoked (T1219 —
+		# reproduced live: a Worker wrote .rddev/runtime/tasks/<TASK>/
+		# gate-inputs.json, the record collect judges allowed_scope by).
+		for field in file_path notebook_path path; do
+			p=$(printf '%s\n' "$input" | json_string "tool_input.$field"); rc=$?
+			if [ "$rc" -ne 0 ]; then
+				block "cannot parse the tool-input JSON to check a file write; refusing the call rather than allowing an unverified write."
+			fi
+			[ -n "$p" ] || continue
+			read_policy "$p"
+			check_write_target "$p"
 		done
 		exit 0 ;;
 esac

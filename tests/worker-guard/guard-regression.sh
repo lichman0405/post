@@ -89,6 +89,32 @@ record_fail() {
 	failed_cases="$failed_cases\n  - $1: $2"
 }
 
+# check_json NAME EXPECT REASON RAW-JSON — the same verdict contract as
+# check(), for rules the string-only helper cannot express: a BOOLEAN field
+# (run_in_background) or a payload whose PATH is not the plain string check()
+# would build (a decoy key inside model-controlled content, duplicate keys,
+# unparseable JSON). The document is passed through verbatim.
+check_json() { # name expect-reason raw-json
+	name=$1
+	expect=$2
+	reason=$3
+	json=$4
+	out=$(printf '%s\n' "$json" | sh "$GUARD" 2>&1)
+	code=$?
+	case "$code:$expect" in
+		2:block|0:allow)
+			if [ "$expect" = "block" ] && [ -n "$reason" ]; then
+				case "$out" in
+					*"$reason"*) : ;;
+					*) record_fail "$name" "blocked but message missing '$reason': $out"; return ;;
+				esac
+			fi
+			pass=$((pass + 1)) ;;
+		*)
+			record_fail "$name" "expected $expect, got exit $code: $out" ;;
+	esac
+}
+
 # ---------------------------------------------------------------------------
 # Shell write confinement — own worktree / own result dir / /tmp / /dev sinks
 # allowed, everything else blocked.
@@ -266,12 +292,88 @@ check "NotebookRead matcher on .env"      block ".env" NotebookRead notebook_pat
 check "Read dynamic path fails closed"    block "static path" Read file_path '$FOO/x'
 
 # ---------------------------------------------------------------------------
+# File-WRITING tools (T1219). These tools were in permissions.allow and absent
+# from the PreToolUse matcher, so dontAsk ran them bare and the hook was never
+# invoked: the write envelope below did not hold for the two tools most likely
+# to be used to leave it. Reproduced live before the fix — a real claude
+# session, driven with the generated worker-settings.json, wrote
+# .rddev/runtime/tasks/<TASK>/gate-inputs.json with the Write tool and
+# reported CREATED-OK. Every rule got a two-sided pair for the same reason the
+# shell-write rules did.
+#
+# They are held to BOTH halves: a Write/Edit names a destination (the write
+# half, identical to a shell redirection), and an Edit/NotebookEdit reads the
+# file it is about to change — its diff returns to the model — so the read
+# confinement applies to it on the same terms as the Read tool.
+
+check "Write into own worktree"           allow ""  Write file_path '/repo/.rddev/worktrees/T0010/notes.txt'
+check "Write relative into worktree"      allow ""  Write file_path 'notes.txt'
+check "Write own RESULT.json"             allow ""  Write file_path '/repo/.rddev/workers/T0010/RESULT.json'
+check "Write to /tmp"                     allow ""  Write file_path '/tmp/t1219/scratch.txt'
+check "Write to /etc"                     block "confined" Write file_path '/etc/x'
+check "Write to \$HOME"                   block "confined" Write file_path '$HOME/x'
+check "Write to ~"                        block "confined" Write file_path '~/x'
+check "Write to another workers result dir" block "confined" Write file_path '/repo/.rddev/workers/T0009/RESULT.json'
+check "Write unresolved var fails closed" block "static path" Write file_path '$UNKNOWN/x'
+check "Write the authoritative runtime record" block "confined" Write file_path '/repo/.rddev/runtime/tasks/T0010/gate-inputs.json'
+check "Write .env in own worktree"        block ".env" Write file_path '.env'
+
+check "Edit inside worktree"              allow ""  Edit file_path '/repo/.rddev/worktrees/T0010/main.go'
+check "Edit relative in worktree"         allow ""  Edit file_path 'internal/config/x.go'
+check "Edit to /etc"                      block "confined" Edit file_path '/etc/hosts'
+check "Edit on a credential store"        block "credential store" Edit file_path '~/.ssh/id_rsa'
+check "Edit on the claude settings store" block "credential store" Edit file_path '~/.claude/settings.json'
+check "Edit on a repo .env"               block ".env" Edit file_path '/repo/.env'
+check "Edit another workers worktree"     block "another Worker" Edit file_path '/repo/.rddev/worktrees/T0009/main.go'
+
+check "MultiEdit inside worktree"         allow ""  MultiEdit file_path 'internal/config/x.go'
+check "MultiEdit to /etc"                 block "confined" MultiEdit file_path '/etc/hosts'
+check "MultiEdit on a credential store"   block "credential store" MultiEdit file_path '~/.netrc'
+
+check "NotebookEdit inside worktree"      allow ""  NotebookEdit notebook_path '/repo/.rddev/worktrees/T0010/nb.ipynb'
+check "NotebookEdit to /etc"              block "confined" NotebookEdit notebook_path '/etc/nb.ipynb'
+check "NotebookEdit on a credential store" block "credential store" NotebookEdit notebook_path '~/.aws/credentials'
+check "NotebookEdit on a repo .env"       block ".env" NotebookEdit notebook_path '/repo/.env'
+
+# The path the fix exists for: collect reads allowed_scope out of
+# .rddev/runtime/tasks/<TASK>/gate-inputs.json, so a Worker that can rewrite it
+# rewrites the input the gate judges it by.
+check "Edit the authoritative runtime record" block "confined" Edit file_path '/repo/.rddev/runtime/tasks/T0010/gate-inputs.json'
+
+# The path field is taken from a real JSON decode, not a text scan, so these
+# pin the decoder rather than a live exploit: the payloads below are not
+# producible through today's harness, where tool inputs are schema-validated
+# before dispatch. A path check should not rest on the current encoding of its
+# input, though, and the scan's failure mode is the quiet one — it reads a
+# decoy and never examines the real target, so the call is allowed. Raw JSON,
+# because `check` builds its own document.
+#
+# Measured, and the first case records it: a decoy inside an ESCAPED string
+# literal does NOT fool the scan (a quote in a JSON string is escaped, so the
+# key never appears contiguously inside Write.content). The nested-object and
+# duplicate-key shapes do.
+check_json "decoy file_path in Write.content does not hide the real target" block "confined" \
+	'{"tool_name":"Write","tool_input":{"content":"\"file_path\": \"/repo/.rddev/worktrees/T0010/safe.txt\"","file_path":"/etc/evil"}}'
+check_json "decoy nested object ahead of the real file_path" block "confined" \
+	'{"tool_name":"Edit","tool_input":{"new_string":{"file_path":"/repo/.rddev/worktrees/T0010/safe.txt"},"file_path":"/etc/evil","old_string":"x"}}'
+check_json "duplicate file_path (last wins, as the decoder resolves it)" block "confined" \
+	'{"tool_name":"Write","tool_input":{"file_path":"/repo/.rddev/worktrees/T0010/safe.txt","file_path":"/etc/evil","content":"x"}}'
+check_json "a legitimate Write through the same shape is still allowed" allow "" \
+	'{"tool_name":"Write","tool_input":{"content":"\"file_path\": \"/etc/decoy\"","file_path":"/repo/.rddev/worktrees/T0010/notes.txt"}}'
+check_json "unparseable tool input fails closed for a write" block "cannot parse" \
+	'{"tool_name":"Write","tool_input":{'
+check_json "unparseable tool input fails closed for a read" block "cannot parse" \
+	'{"tool_name":"Read","tool_input":{'
+
+# ---------------------------------------------------------------------------
 # Fail-closed without the worker contract env: an unset POST_WORKER_WORKTREE
 # used to collapse the write allow-pattern to `/*` and admit every absolute
 # path; both policies must refuse to decide instead (L1-20260912-3 regression).
 
 check "write without contract env fails closed"  block "contract environment" Bash command 'echo x | tee /etc/x' POST_WORKER_WORKTREE= POST_WORKER_RESULT_DIR=
 check "read without contract env fails closed"   block "contract environment" Read file_path '/repo/specs/README.md' POST_REPO_ROOT= POST_WORKER_WORKTREE= POST_WORKER_RESULT_DIR=
+check "Write tool without contract env fails closed" block "contract environment" Write file_path '/repo/.rddev/worktrees/T0010/x' POST_REPO_ROOT= POST_WORKER_WORKTREE= POST_WORKER_RESULT_DIR=
+check "Edit tool without contract env fails closed"  block "contract environment" Edit file_path '/repo/.rddev/worktrees/T0010/x' POST_REPO_ROOT= POST_WORKER_WORKTREE= POST_WORKER_RESULT_DIR=
 
 # ---------------------------------------------------------------------------
 # Background execution (T0011). A Worker that backgrounds long-running work and
@@ -281,27 +383,6 @@ check "read without contract env fails closed"   block "contract environment" Re
 # RESULT that falsely claimed success, so it is refused mechanically. These
 # cases take raw JSON because the rule keys off a BOOLEAN field
 # (`run_in_background`), which the string-only `check` helper cannot express.
-
-check_json() { # name expect-reason raw-json
-	name=$1
-	expect=$2
-	reason=$3
-	json=$4
-	out=$(printf '%s\n' "$json" | sh "$GUARD" 2>&1)
-	code=$?
-	case "$code:$expect" in
-		2:block|0:allow)
-			if [ "$expect" = "block" ] && [ -n "$reason" ]; then
-				case "$out" in
-					*"$reason"*) : ;;
-					*) record_fail "$name" "blocked but message missing '$reason': $out"; return ;;
-				esac
-			fi
-			pass=$((pass + 1)) ;;
-		*)
-			record_fail "$name" "expected $expect, got exit $code: $out" ;;
-	esac
-}
 
 check_json "background bash is refused"          block "background execution" \
 	'{"tool_name":"Bash","tool_input":{"command":"make test","run_in_background":true}}'
