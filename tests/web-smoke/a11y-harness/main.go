@@ -9,7 +9,12 @@
 //     creates these in this build);
 //   - one main branch, one feature branch, one project state, one release,
 //     one research asset/version and one pull request — enough for the seven
-//     docs/42 pages that have routes to render real content.
+//     docs/42 pages that have routes to render real content;
+//   - the search side of that corpus: one further published asset whose title
+//     carries the scanned question, written into the projection by the
+//     production rebuild, plus a deterministic answer provider so /search
+//     renders an answer WITH citations rather than the zero-source fallback
+//     (search_fixture.go). Nothing here reaches a network.
 //
 // The process prints one JSON line ("READY {...}") on stdout once every route
 // is serving and the fixture is seeded; the caller waits for it and then
@@ -157,6 +162,11 @@ func run(adminURL, addr, webOrigin string) error {
 	if err != nil {
 		return err
 	}
+	// The projection is written from the corpus seed() just created, so the
+	// scanned question has a document to find (search_fixture.go).
+	if err := api.projectSearchCorpus(ctx); err != nil {
+		return err
+	}
 
 	line, err := json.Marshal(map[string]any{
 		"ready":         true,
@@ -172,6 +182,12 @@ func run(adminURL, addr, webOrigin string) error {
 		"release_id":    fixture.releaseID,
 		"asset_pid":     fixture.assetPID,
 		"asset_version": fixture.assetVersion,
+		// The fixture document's citation ref and the question that matches
+		// it. The a11y scan asserts the page really cites THIS ref, so "the
+		// search route rendered citations" is a claim about the seeded
+		// document rather than about any citation at all.
+		"search_query": searchFixtureQuery,
+		"search_ref":   fixture.searchRef,
 	})
 	if err != nil {
 		return err
@@ -197,6 +213,10 @@ type seedFixture struct {
 	releaseID    string
 	assetPID     string
 	assetVersion string
+	// searchRef is the citation ref the projection writes for the document
+	// the scanned question matches (search_fixture.go). The a11y scan reads
+	// it out of the READY line and requires the page to cite it.
+	searchRef string
 }
 
 // api is the composed surface plus the state the harness routes need.
@@ -386,27 +406,33 @@ func buildAPI(ctx context.Context, pool *pgxpool.Pool, webOrigin string) (*api, 
 	researchprofilehttp.New(researchprofilehttp.Deps{Reader: persistence.NewResearchProfileStore(pool)}).Register(mux)
 
 	/* The search surface (docs/42 "Search Answer"), wired the way cmd/api
-	 * wires it when the deployment has no answer model: answer.Deps.Provider
-	 * is nil, which internal/search/answer/generator.go documents as a
-	 * SUPPORTED deployment state and not a defect — nothing here fabricates an
-	 * answer, and the page scanned is the page a real deployment without a
-	 * model serves.
+	 * wires it EXCEPT for one dependency: the answer provider.
 	 *
-	 * What this fixture puts in front of that surface is narrower than the
-	 * surface itself, and the coverage table should not be read as more than
-	 * it is: "catalyst" matches none of the seeded documents, so retrieval
-	 * returns zero ranked sources and the generator's zero-source branch
-	 * answers first (internal/search/answer/generator.go:133,
-	 * ReasonNoSources) — before the provider check is ever reached. The scan
-	 * therefore exercises the structured fallback with no sources, not
-	 * ReasonNoProvider and not an answer carrying citations. The page says so
-	 * itself — its headline is the no_sources one ("the search returned no
-	 * source to cite", apps/web/lib/search.ts:180) — which is what makes this
-	 * row a measurement of the fallback rather than of the answer path.
+	 * What the scanned page renders is decided by two pieces of fixture state,
+	 * and before T1226 this harness had neither — so `catalyst` retrieved
+	 * nothing, the generator's zero-source branch answered first
+	 * (internal/search/answer/generator.go, ReasonNoSources) before the
+	 * provider check was ever reached, and /search was scanned as the
+	 * no-sources fallback while the coverage table recorded it as a core page
+	 * with data. Both pieces now come from search_fixture.go:
 	 *
-	 * Without it /search renders its error banner and the Search Answer core
-	 * page is never actually scanned — the precise "scan the shell and call
-	 * it a core page" failure the coverage table exists to prevent. */
+	 *   - the projection: projectSearchCorpus() runs the production rebuild
+	 *     over the seeded corpus, and seedSearchDocument() adds the published
+	 *     asset whose title and slug carry the scanned question, so retrieval
+	 *     returns one ranked source;
+	 *   - the provider: a deterministic fixture document, because a nil
+	 *     provider is what cmd/api wires and every answer then falls back with
+	 *     ReasonNoProvider — sources alone would still not reach the cited
+	 *     path, and it is the cited path ("a summary plus the sources it
+	 *     leans on") that docs/42's Search Answer page is.
+	 *
+	 * So the page this fixture serves is the answered-with-citations state,
+	 * and the coverage table's 有数据 for /search is now a measurement of that
+	 * state (a11y-smoke.mjs keys the route on `[data-search-citation]` and the
+	 * absence of `[data-search-fallback]`). The fallback branches are covered
+	 * elsewhere and are NOT what this page renders: `no_sources` by the i18n
+	 * suite's second search route, `no_provider` by cmd/api's own wiring, and
+	 * the provider-shape failures by the answer package's unit suite. */
 	retrievalStore, err := retrieval.NewSQLStore(pool)
 	if err != nil {
 		return nil, fmt.Errorf("search retrieval store: %w", err)
@@ -423,7 +449,7 @@ func buildAPI(ctx context.Context, pool *pgxpool.Pool, webOrigin string) (*api, 
 	if err != nil {
 		return nil, fmt.Errorf("search ranker: %w", err)
 	}
-	answerer, err := answer.New(answer.Deps{})
+	answerer, err := answer.New(answer.Deps{Provider: fixtureAnswerProvider{}})
 	if err != nil {
 		return nil, fmt.Errorf("search answerer: %w", err)
 	}
@@ -476,6 +502,14 @@ func (a *api) seed(ctx context.Context, ids []string) (*seedFixture, error) {
 	if err := a.seedPullRequest(ctx, project.ID, ownerID, f); err != nil {
 		return nil, fmt.Errorf("seed pull request: %w", err)
 	}
+	// The search fixture (search_fixture.go): the one document the scanned
+	// question matches. Its ref travels in the READY line so the scan can
+	// require the page to cite THIS document.
+	ref, err := a.seedSearchDocument(ctx, project.ID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	f.searchRef = ref
 	return f, nil
 }
 

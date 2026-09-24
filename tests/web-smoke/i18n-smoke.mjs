@@ -349,16 +349,93 @@ const ROUTES = [
           ],
         },
         {
-          // The query is what makes this a different page from the `/search`
-          // route above: with one, search-answer.tsx renders the answer body
-          // (provenance, the fallback notice, the statement sections, the
-          // evidence map, the underlying results); without one, none of it
-          // exists in the DOM. The first review's finding was exactly this —
-          // the earlier suite drove `/search` and so never reached any of it.
+          /* The ANSWERED state — the path the harness's search fixture drives
+           * (a11y-harness/search_fixture.go: an asset whose title carries this
+           * question, written into the projection by the production rebuild,
+           * plus the deterministic answer provider).
+           *
+           * T1226 split what used to be one route in two. The route was keyed
+           * on the fallback's copy (`Structured result`, the `no_sources`
+           * headline) because the fallback was what this harness produced: no
+           * document matched `catalyst`, so the generator answered
+           * `no_sources` (internal/search/answer/generator.go). The suite was
+           * therefore comparing the fallback's translations twice over and
+           * translating nothing on the answered branch — the branch with the
+           * most copy on the page (the View badge, the Cites label, the two
+           * source-list titles). The next entry drives the fallback on purpose,
+           * with a question no fixture document matches, so both branches keep
+           * their coverage and neither is what the corpus happens to produce. */
           route: "/search?q=catalyst",
           label: "search answer",
           // POST /api/v1/search is behind the auth guard: without a session the
           // page renders its error panel and both probes come back null.
+          auth: true,
+          fetches: true,
+          probes: [
+            // The answered branch's own heading — `.search-fallback` is a
+            // sibling section, not a parent, so this selector cannot match the
+            // fallback's copy.
+            {
+              selector: '[data-search-section="answer"] .search-section-title',
+              en: "Answer",
+              zh: "回答",
+            },
+            // docs/14 §4's View label, rendered only when the answer document's
+            // own `answer_view` is true: the page's shortest translated string,
+            // and the one that says a model wrote this from the sources below.
+            { selector: "[data-search-view-badge]", en: "View", zh: "视图" },
+            // The Citations label over the answer's refs.
+            { selector: ".search-citations-label", en: "Cites", zh: "引用" },
+            // The cited-source list's heading: rendered only when the answer
+            // cites something, which is the state this route exists to drive.
+            {
+              selector: '[data-search-section="sources"] .search-section-title',
+              en: "Sources the answer cites",
+              zh: "回答引用的来源",
+            },
+            // The longest answered-state string, and the one that draws the
+            // distinction the answer layer makes: these are the rows the
+            // summary leans on, and they are rows of the one source list.
+            {
+              selector: '[data-search-section="results"] .search-section-title',
+              en: "Underlying results",
+              zh: "底层结果",
+            },
+            // Renders in both branches (fallback and answered), so it is the
+            // answer body's own proof that it mounted at all.
+            { selector: ".search-provenance", en: "Search", zh: "搜索" },
+          ],
+          /* `data-search-id` is the id of the row POST /search just wrote
+           * (internal/persistence/search_record_store.go: Save returns the new
+           * row's UUID), so two loads of the same page differ in that
+           * attribute BY CONSTRUCTION — the first run of this route reds check
+           * 5 on it, and the red is a fact about the API's state change, not
+           * about language. It is excluded from the identity comparison by
+           * name and ONLY after both preferences are shown to carry a
+           * UUID-shaped value there: an attribute that stops looking like an
+           * id fails below, so the exclusion cannot widen into a hole. Nothing
+           * else on this route is excluded — every other data-* attribute
+           * (the citation refs, the ranked sources' refs/ranks/cited flags,
+           * each one written by the API rather than by this translation) is
+           * still compared byte for byte, and they are equal in both
+           * preferences because the fixture's provider answers the same
+           * question with the same document. */
+          volatileDataAttrs: ["data-search-id"],
+        },
+        {
+          /* The FALLBACK state, driven on purpose.
+           *
+           * `zzqx` matches nothing in the corpus, so retrieval returns zero
+           * ranked sources and the generator answers `ReasonNoSources` before
+           * it ever looks for a provider — the branch this suite used to reach
+           * by accident (see the entry above). The `en` values below are
+           * therefore the ones THIS route's reason produces, and the suite
+           * says which reason it saw if the API's answer ever changes: the
+           * headline is per-reason copy (lib/search.ts's fallbackHeadlineKey)
+           * and only `.search-fallback-note` is the same sentence for every
+           * reason. */
+          route: "/search?q=zzqx",
+          label: "search fallback",
           auth: true,
           fetches: true,
           probes: [
@@ -374,31 +451,20 @@ const ROUTES = [
               en: "No answer was written, and the sources below are what the search found.",
               zh: "没有撰写回答，下面的来源就是本次检索找到的内容。",
             },
-            // Renders in both branches (fallback and answered), so it is the
-            // answer body's own proof that it mounted at all.
+            // Renders in both branches, so it is the answer body's own proof
+            // that it mounted at all rather than an error panel's.
             { selector: ".search-provenance", en: "Search", zh: "搜索" },
             // The headline over the platform's own sentence: what the fallback
-            // IS, in the product's words (lib/search.ts's fallbackHeadlineKey
-            // maps the API's reason code to this key). It is per-reason copy,
-            // so the `en` value below is the one THIS harness produces — the
-            // suite says which reason it saw if the API's answer changes.
+            // IS, in the product's words. It is per-reason copy, so the `en`
+            // value below is the one ReasonNoSources produces.
             {
               selector: ".search-fallback-headline",
               en: "No written answer: the search returned no source to cite.",
               zh: "没有书面回答：本次检索没有返回可引用的来源。",
             },
           ],
-          /* `data-search-id` is the id of the row POST /search just wrote
-           * (internal/persistence/search_record_store.go: Save returns the new
-           * row's UUID), so two loads of the same page differ in that
-           * attribute BY CONSTRUCTION — the first run of this route reds check
-           * 5 on it, and the red is a fact about the API's state change, not
-           * about language. It is excluded from the identity comparison by
-           * name and ONLY after both preferences are shown to carry a
-           * UUID-shaped value there: an attribute that stops looking like an
-           * id fails below, so the exclusion cannot widen into a hole. Nothing
-           * else on this route is excluded — 23 other data-* attributes are
-           * still compared byte for byte. */
+          // Same state change as the route above, so the same one exclusion —
+          // and the shape check below makes it an assertion, not a hole.
           volatileDataAttrs: ["data-search-id"],
         },
       ]
@@ -770,17 +836,23 @@ console.log(`\nroutes driven in both preferences: ${coverage.length}${IDS === nu
  * The second review added an eighth: `/users/{user_id}` (Research Profile).
  * It was the one core page a11y-smoke.mjs drove and this suite did not, which
  * is what let its copy stay English while every other core page was checked.
- * Both counts below moved up by one with it and neither may move down. */
+ * Both counts below moved up by one with it and neither may move down.
+ *
+ * T1226 added a ninth: `/search?q=zzqx`, the zero-source fallback. That route
+ * is not a new page — it is the OTHER branch of the one the eighth entry
+ * already drove, and the ninth count is what keeps the fallback's copy
+ * translated instead of letting the answered branch's arrival quietly retire
+ * it. Both floors moved up by one with it, for the same reason as above. */
 const STATIC_ROUTES = 4;
 /** Static routes on which a request is recorded and compared (`/login` talks
  *  to the API only on submit, so it is not one of them). */
 const STATIC_ROUTES_WITH_WIRE = 3;
 /** Core routes with fixture content: the seven added in the rework, plus the
- *  research profile page. */
-const CORE_ROUTES_WITH_DATA = 8;
-/** Those eight, plus the project overview — every core route whose page
+ *  research profile page and the search fallback route. */
+const CORE_ROUTES_WITH_DATA = 9;
+/** Those nine, plus the project overview — every core route whose page
  *  fetches, which is all of them. */
-const CORE_ROUTES_WITH_WIRE = 9;
+const CORE_ROUTES_WITH_WIRE = 10;
 const FLOOR = IDS === null ? STATIC_ROUTES : STATIC_ROUTES + 1 + CORE_ROUTES_WITH_DATA;
 if (coverage.length < FLOOR) {
   fail("coverage: routes driven", `${coverage.length} < ${FLOOR} — a route that was being driven has stopped being driven`);
