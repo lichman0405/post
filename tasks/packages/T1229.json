@@ -1,0 +1,74 @@
+{
+  "id": "T1229",
+  "phase": "P12",
+  "phase_name": "Canonical Workflow 与最终交付",
+  "title": "P13 把证书赖以得绿的那套安全仪器换掉了：把 V1 证书在最终树上再重钉一次（Gate H 在 18 行总门上重挣、陈旧字面逐个重取、逐层「重挣 / 沿用」）",
+  "v1_required": false,
+  "dependencies": [
+    "T1202",
+    "T1223",
+    "T1224",
+    "T1225",
+    "T1226",
+    "T1227",
+    "T1228"
+  ],
+  "tests": [
+    "certificate re-pin",
+    "master gate re-earn on the P13 instrument set"
+  ],
+  "allowed_scope": [
+    "tests/acceptance/**"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "specs/**",
+    "docs/**",
+    ".github/**",
+    "cmd/**",
+    "internal/**",
+    "apps/**",
+    "services/**",
+    "infra/**",
+    "ops/**",
+    "tests/security/**",
+    "scripts/**"
+  ],
+  "decision_level_max": "L1",
+  "relevant_specs": [
+    "docs/31_MASTER_ACCEPTANCE.md",
+    "docs/23_SECURITY_PRIVACY.md",
+    "docs/67_TEST_GATES.md",
+    "docs/25_CICD_DEVOPS.md"
+  ],
+  "requirements": [
+    "**先读再写，别照抄我的话；我给的行号与数字都是「我读的那一刻」，以树为准。** 要读这几处：`tests/acceptance/v1-final-report.md`（证书本体——尤其 **Gate H 那一节**、**§6「修订记录」里前几轮的自述**与**文末的轮次段落**）；`tests/acceptance/v1-final-audit.sh`（校验它的快照校验器，**头注释第 26-29 行**写明它是什么）；`tasks/packages/T1213.json` 与 `tasks/packages/T1214.json`（前两轮重钉的任务书，本笔的形状与它们同源）；`tasks/decisions.md` **第 67 条**（立本笔的那一条：里面有触发清单与全部实测数字）。**`tasks/tests.json` 只读**（数条数、看 evidence）。这几处的说法若有冲突，**以你自己在树里跑出来的结果为准**，并在 RESULT 里写明冲突。",
+    "**（正题）Gate H 必须在 P13 换过的那套仪器上重挣，不许沿用。** 证书里 Gate H 的绿是 **2026-09-23 19:27** 在基准 `91ed2d5` 上挣的（17 行、退出码 0）。那之后到今天的树之间，**它跑的那套仪器被换过两处**：① `tests/security/sast.sh`、`tests/security/sast_report.py`、`tests/security/sast-go-surface-check.sh`、`tests/security/README.md` 与 `ops/ci/gosec-baseline.txt` 都改过（T1220 的扫描面、T1222 的 `!` 行解析、以及随之调整的基线）；② T1224 往 `tests/security/master-security-gate.sh` **注册了第 18 行**并把 `MIN_CHECKS` 从 17 抬到 18——于是 `MIN_CHECKS=` 那一行**又下移了一次**。**这条规矩不是我定的，是证书自己写的**：它正文里有一句「本版把行号从 `:120` 改成 `:140`：T1211 往同一个脚本里加了行……`MIN_CHECKS=` 那一行整体下移 20 行——**这正是「仪器变了」在报告里的第一个具体后果**，也是本版必须重挣 Gate H 而不是沿用旧判定的原因之一」。要求：在**这棵树**上、同一时刻跑\n```\nbash tests/security/master-security-gate.sh --report /tmp/t1229-master-gate-report.json\n```\n把**退出码**、**末行逐字**、`MIN_CHECKS` 的**实际值**、`check(s) registered` 的**实际计数**、**每一行**的判定（哪几行 `ok`、哪几行 `NOT ASKED`、有没有 `FAIL`）、`absence-manifest` 那一行的证据行原文、**以及 T1224 新加那一行的 `ok` 原文**全部贴进 RESULT，并把报告 Gate H 的引文换成**这一次**的输出。出现任何红则本轮**停手**、把红当结论写进 RESULT（**不许**删旧证据了事，**不许**改判定去迎合输出，**不许**用 `--allow-not-asked` 把「没问全」说成绿）。若本机没起服务导致某些行 `NOT ASKED`，**照实列出是哪几行**，并按证书既有的口径说明（`make security-tools` 之后那几行才真跑）。",
+    "**报告里那些「仪器变了就会过期」的字面，逐个重取，一个都不许顺手续用。** 至少这几处（以你在树上找到的为准）：① `tests/security/master-security-gate.sh:140` 这个**行号**；② `MIN_CHECKS=17`；③ `17 check(s) registered`；④ 「17 行全绿」；⑤ 「`NOT ASKED` 0 行」；⑥ 逐字抄录的末行 `master-security-gate: PASS — 17 check(s) ran and each printed its own evidence`。**每一个都要按这棵树重取**；某处若被保留为历史，必须在同一句里**点名它属于哪棵树/哪一次运行**。**特别禁止的失败形状**：上一轮的值恰好与这一轮相同就把上一轮的原文留着——上一轮尾行里那个 `17 check(s) ran` 里的 `17` 若仍然是 `17`，你要能说出**为什么**（是行数真没变，还是你抄了旧的），并把判据写成「我跑的那次输出的 sha256 / 时间戳」，不是「看起来一样」。",
+    "**机械块一律由脚本重新生成，基准行必须是这棵树的真实 HEAD。** 跑 `bash tests/acceptance/v1-final-audit.sh --emit-tables`，把它的**同一次输出**里的生成注释行、生成基准行、§1.2 / §1.3 两张表、计数块**逐字**贴回报告（**不许手写**：手写的名单骗得过条数、骗不过第 4 节的名单检查；手写的计数块骗不过第 3 节的计数块校验）。改完必须 `bash tests/acceptance/v1-final-audit.sh` **退出码 0**，并把输出原文留在 RESULT。**注意**：`tasks/tests.json` 里本笔自己的两条 blocking 条目是 `not_run`，§1.3 的分布会因此变化——那是**对的**，照实呈现（上一轮同款：报告作者不能给自己的门记 `passed`）。基准行换成本树 HEAD 之后，报告里**所有**引用旧基准 SHA 的句子都要跟着说清谁是哪一版的树。",
+    "**（新加一节）「修订记录（本次重钉）」**：(a) 说明这一版是在哪棵树、哪一天重钉的，基准行因此更新；(b) **逐个门层**写明哪几层在这棵树上**重挣**了（Gate H 按上面那条、机械块按上一条、Gate I 的 MOF 引文按下面那条），哪几层是**沿用**——对每一个**沿用**的层给出机械理由：该层驱动的路径在 **`91ed2d5..HEAD`** 之间没有改动，附 `git diff --stat 91ed2d5..HEAD -- <该层驱动的路径>` 的**原文**（空输出也要贴）。**分母说清楚**：用 `91ed2d5`（证书挣得绿的那棵树）而不是它的合并提交，并在那一节里写明你用的是哪个分母、为什么。**那个区间里出现 `tests/acceptance/**` 是正常的**——那是 T1214 自己交付证书的提交，不是「驱动变了」，这一点也写出来，免得下一个人把自交付误读成仪器变动。(c) 另外用一段**点名这一次的触发**：列出 P13 里改过 `tests/security/**` 与 `ops/ci/**` 的提交及其 `--stat`，好让下一轮有同样的轨迹可查（**这一节的用处就是这个**：上一个轮次留下的轨迹让本笔一眼看出仪器被动过）。",
+    "**Gate I 的引文也要是这棵树上的。** 证书里最吃重的跨边界断言是 MOF canonical workflow 全闭环；本笔的 G3 作业就是 `mof-canonical`，它会自己在这棵树上跑一遍。报告里引的必须是**你能指出来源的那一次**运行，把**步数**、`FAIL` 计数与**退出码**写进 RESULT。",
+    "**顺带只读地复核一条断言（不要动手改它）。** 我在第 67 条里写了一句「这台校验器**没有任何 runner**——CI、`Makefile`、任何脚本都不跑它，它是快照校验器、只在我这边验收时手跑」。**核它**：在 `Makefile`、`.github/**`、`scripts/**`，以及 `tests/` 底下**所有** `.sh`（`find tests -name '*.sh'`）里 grep `v1-final-audit` 与 `v1-final-report`，把命令与**输出原文**贴进 RESULT。**若你找到了一个 runner，那是我的断言错了**——照实写，并说清它会不会让 main 变红。**不管结果如何，都不要给它接 runner**（那是我的裁定，不在你的范围内）：一台快照校验器在 HEAD 前进后必然非 0，接进 CI 等于让 main 永远红。",
+    "**（硬线）只许写 `tests/acceptance/**`。** `tasks/**`（含台账 `tasks/tests.json`——你**只读**）、`specs/**`、`docs/**`、`.github/**`、`ops/**`、`tests/security/**`、`internal/**`、`apps/**`、`services/**`、`infra/**`、`scripts/**` 一概不许写。**尤其**：`tests/security/**` 与 `ops/ci/**` 正是这一笔要重挣的那一层的**仪器**——仪器变了要重挣证书，**不是**改证书去迎合仪器，**更不是**改仪器让证书好写。",
+    "**收工前把树弄干净。** 跑仪器会留下产物（`.sbom/`、`__pycache__`、`/tmp` 里的临时报告不算，树里的算）：**你造的，你都清掉**。`git status --porcelain -uall` 只许列出 `tests/acceptance/**` 内你有意改的文件；不许留下任何进程（collect 会查残留）。"
+  ],
+  "deliverables": [
+    "重钉后的 `tests/acceptance/v1-final-report.md`：基准行与两张机械表按**这棵树**重取；Gate H 的引文换成在 **P13 那套仪器**上的实跑；「仪器变了就会过期」的那些字面（行号、`MIN_CHECKS`、`check(s) registered`、行数、逐字末行）逐个重取并说清归属；新增本轮的「修订记录（本次重钉）」小节（逐层「重挣 / 沿用」+ 本轮触发清单）。",
+    "`tests/acceptance/v1-final-audit.sh`：**只在必要时**改。若你改了，必须给出**改前红、改后绿**的两次原文；**不许**为了让报告好写而放宽任何断言。",
+    "RESULT：`bash tests/acceptance/v1-final-audit.sh` 退出码 0 的原文；总门在**这棵树上**同一时刻实跑的原文（rc / 末行逐字 / `MIN_CHECKS` / 注册计数 / 逐行判定 / `absence-manifest` 证据行 / 新加那行的 `ok` 原文）；`--emit-tables` 的**同一次输出**；「有没有 runner」那条只读复核的命令与输出；任何判不准的项。"
+  ],
+  "acceptance_criteria": [
+    "**Gate H 是在 P13 的仪器上重挣的，不是沿用的**：给出总门在本树上的退出码、末行逐字、`MIN_CHECKS` 的实际值、`check(s) registered` 的实际计数、**每一行**的判定、`absence-manifest` 那一行的证据行、以及 T1224 新加那一行的 `ok` 原文；报告 Gate H 的引文与这次输出一致。旧的一轮若还留在报告里，必须点名它属于哪棵树。",
+    "**「仪器变了就会过期」的字面逐个重取过**：行号、`MIN_CHECKS`、`check(s) registered`、行数、逐字末行——每一处都能指出它是从**哪一次运行**的输出里取来的（时间戳或输出 sha256），**没有一处**是「和上一轮一样所以留着」。",
+    "**机械块逐字来自 `--emit-tables` 的同一次输出**（给出该次输出原文，或给出令两者相等的那条比对命令与空 diff）。",
+    "**`bash tests/acceptance/v1-final-audit.sh` 退出码 0**，基准行等于 `git rev-parse HEAD`（这棵树的真实 HEAD），输出原文在 RESULT 里；§1.3 的分布与本笔自己的两条 `not_run` 一致。",
+    "**修订记录小节存在**：每个「沿用」的层都有 `git diff --stat 91ed2d5..HEAD -- <路径>` 的原文（空输出也贴）；分母的选择与理由写在里面；本轮触发清单（P13 改过 `tests/security/**` 与 `ops/ci/**` 的提交）在列。",
+    "**Gate I 的引文来源可指**：写明这一次 MOF canonical 的步数、`FAIL` 计数与退出码，并说清它是哪一次运行。",
+    "**「有没有 runner」那条只读复核做过**：命令与输出原文在 RESULT 里；若结论与我的断言相反，照实写。",
+    "**没有越界**：`git status --porcelain -uall` 只列 `tests/acceptance/**`；`tasks/**`、`specs/**`、`docs/**`、`.github/**`、`tests/security/**`、`ops/**`、`scripts/**`、`internal/**` 一个字节未动（给出为空的 `git diff --stat HEAD -- <那些路径>` 原文）；无残留进程。"
+  ],
+  "scope_note": "**这一笔是把 T1224 主动交出来的一份后果接住。** T1224 的任务书里写着：报告与审计里 `MIN_CHECKS=17`、`17 check(s) registered` 两个字面**不许改**，「它们会因此变成**对一个更早的树的陈述**——那是**陈旧**，不是**红**……把这条后果写进 RESULT 就够」。**它说得对，而「写进 RESULT 就够」是它那一笔的边界，不是全局的**——那句话把后果交给了我，而我当时没接。接住它的地方就是本笔。\n\n**为什么是现在才立**：本笔是 2026-09-24 做 V1 完成度核对时发现的。核对的三条里两条已经成立（`v1_required=true` 的 150 笔全部 merged；blocking 测试里没有一条 `passed` 是空证据），第三条「Master Acceptance 通过」**只在它的基准那一棵树上成立**：证书钉在 `91ed2d5`，它的合并是 `8f393bb`，而 `git rev-list --count 8f393bb..origin/main` 是 **43**，`git diff --name-only 8f393bb..origin/main` 的 43 个路径里躺着 `tests/security/sast.sh`、`sast_report.py`、`sast-go-surface-check.sh`、`README.md` 与 `ops/ci/gosec-baseline.txt`。**证书赖以得绿的那套仪器被动过**，而按证书自己写的规矩（「仪器变了，用旧仪器挣来的绿就不是这份交付上的绿」），它必须重挣。\n\n**为什么依赖这六笔**：T1223–T1228 是 P13 的仪器改造序列，它们各自都动过某台仪器（T1224/T1225 动 `tests/security/**`、T1226 动 a11y/i18n 仪器、T1227 立仪器名册与检查器并动 `ops/ci/instrument-inventory.json`、T1223 动守卫、T1228 动 `scripts/update_progress.py`）。**重钉必须发生在仪器不再动的树之后**——否则钉完下一笔一合，证书又成旧仪器的陈述了。这正是 T1213 那一轮的教训，本笔把它写成依赖而不是写成提醒。\n\n**为什么 `T1202` 也进依赖**：本笔的 G3 作业是 `mof-canonical`，而 `specs/orchestrator/gates.json` 里 `mof-canonical` 声明了 `requires_tasks: [\"T1202\"]`。`internal/devorchestrator/gate_spec_test.go` 的 `TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt` 要求**每一个携带该作业的任务**在依赖闭包里含有它声明的任务，否则判「红是构造出来的」——任务无论做得多对都不可能被接受。T1202 早已 merged，写进依赖是零代价。\n\n**为什么 `v1_required=false`**：同 T1213/T1214——这是**证书的修订**，不是产品交付。标 true 会让报告必须具名排除「正在写修订的自己」，排除名单每刷一版长一节，那是记账技巧不是严格。",
+  "supervisor_scope_narrowing": "**为什么只给 `tests/acceptance/**`**：这一笔的产物就是那两份文件（报告 + 校验器），它们是同一件东西的正反面——报告写什么，校验器就得能验什么；给这两份文件以外的任何写入面，都会让「证书」与「被证之物」之间的边界糊掉。\n\n**为什么 `docs/**` 不在范围里**：`docs/31_MASTER_ACCEPTANCE.md` 是**规格**（判据的来源），报告是**对规格的答复**；允许被验收者改规格等于让考生改卷子。同一口径已用在 T1206/T1208/T1210/T1211/T1213/T1214 上。\n\n**为什么 `tests/security/**` 与 `ops/**` 进了禁止面**：那是 P13 这一轮刚动过的面，而且正是本笔要**重挣**的那一层的**仪器**——仪器变了要重挣证书，不是改证书去迎合仪器。把这两处写进禁止面，是为了让「重挣」与「修改判据」在 diff 里泾渭分明。**这一条在本笔尤其吃重**：`MIN_CHECKS` 与那台仪器的注册表正是「改一改就能让报告的字面重新成立」的地方，所以它连只读以外的任何接触都不许有。\n\n**为什么 `tasks/**` 连只读也写进禁止面**：校验器要**读**台账（数条数、数空 evidence），读是必须的、写是越界的——写明白这一条，好让「我数了一下」与「我改了一下」分得清。\n\n**为什么 `scripts/**` 在禁止面**：那里是验收仪器本身（`record_test_run.py` / `validate_specs.py` / `spec_version.py`），让被验收者改卷子等于让考生改分。"
+}

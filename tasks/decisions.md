@@ -20124,3 +20124,92 @@ regen  --stamp 2026-01-01T00:00:00Z        -> rewritten
 **这正是它存在的价值**：那两笔入账各自都在同一个提交里动了 `tasks/tasks.json`，却没有重生成进度表，于是表里连 T1223–T1226 四行都还没有。**修好的 `--check` 会在那两笔上准确变红，而在我同笔重生成的两笔上是绿的**——两个方向都测到了，不是我推测的。
 
 **同时它证明接线在 CI 里不是脆的**：CI 只看**已提交的字节**，比较的是「已提交的 `progress.md`」对「已提交的 `task_status.json`」，所以驱动在跑的时候不停改那个未提交的活文件**不会**让它抖。唯一的窗口在我这边的提交过程里（跑完生成器到 `git add` 之间驱动写一次）——那个窗口有确定的做法关掉：**先 `git add tasks/task_status.json` 冻住索引，再从索引里取那份 blob 去生成 `progress.md`，然后 `git add` 它**，两份就按构造一致了。接线时一并把我的提交步骤改成这个形状。
+
+
+## 67 — V1 完成度核对：§12 的四条里三条已经成立，第四条**只在它自己那棵树上**成立——证书赖以得绿的安全仪器被 P13 换掉了，而重钉没有人扛（立账 T1229，2026-09-24）
+
+**这一条是回答 owner 那句「是不是目前项目算是做完了？」。** 我不想用「是的」或「还没有」来答，所以把 `CLAUDE.md` §12 的四个完成条件逐条拿去树里量了一遍。**结论是：差一步，而差的那一步有具体名字。**
+
+### 一、我量了什么，数字是多少（全部当场实测，不是转抄）
+
+| §12 的条件 | 实测 | 成立？ |
+|---|---|---|
+| 所有 V1-required task merged | `v1_required=true` 的 **150** 笔，未 merged **0** 笔 | **是** |
+| 四层 Gate 通过 | G1/G2/G3/G4 的机制在跑（本日多轮 accept/collect 有记录）；见下面 §三 的限定 | **是**（就现行树而言） |
+| Master Acceptance 通过 | 证书存在、判定 10 门全通过——**但它钉在 `91ed2d5` 上，而 main 已前进 43 个提交，且这 43 个里动过它赖以得绿的仪器** | **只在它自己那棵树上** |
+| MOF canonical 全闭环、有可复现证据 | **13** 次绿的 G3 记录，最近一次 T1221（`2026-09-24T08:17:10.740Z`）在 HEAD `6c0e4a5c…` 上：50 步全绿、`FAIL` 0 条、末行 `G3 mof-canonical: PASSED — 50 step(s), every assertion green`；`6c0e4a5c` 是 `origin/main` 的祖先 | **是** |
+
+**账本侧的两个数**（写这一条的前一刻重新数了一遍）：
+
+- `tasks/tests.json` 共 **199** 条，全部 `blocking=true`：**183 `passed` + 16 `not_run`**，没有 `failed`、没有 `skipped`。
+- **16 条 `not_run` 的归属任务，`v1_required` 全部为 `false`**——它们全在 P13（T1215–T1229），没有一条落在 V1 交付上。
+- **`passed` 而 `evidence` 为空的：0 条。** 这一条是 T1210 钉进审计脚本的断言，今天仍然成立。
+
+### 二、第四条为什么不成立：证书被自己的规矩判成陈旧
+
+证书 `tests/acceptance/v1-final-report.md` 的基准行（第 4 行与第 120 行各一条，两条相同）逐字是：
+
+```text
+> 生成基准：`91ed2d5fdb24c7a0b0f332d6861fb5ffde5eb86f`
+```
+
+它的合并提交是 `8f393bb`（T1214，PR #361）。而：
+
+```
+$ git rev-list --count 8f393bb..origin/main
+43
+$ git diff --name-only 8f393bb..origin/main | wc -l
+43
+```
+
+那 43 个路径里有五条**正是 Gate H 赖以得绿的那套仪器**：`tests/security/sast.sh`、`tests/security/sast_report.py`、`tests/security/sast-go-surface-check.sh`、`tests/security/README.md`、`ops/ci/gosec-baseline.txt`。它们对应 T1220（SAST 的 go 面声称扫整个 module、实际走文件系统把 `.rddev/` 下的副本一起扫）与 T1222（`git check-ignore -v` 的否定行被当成命中）。
+
+**还不止。** T1224 往 `tests/security/master-security-gate.sh` 注册了**第 18 行**、并把 `MIN_CHECKS` 从 17 抬到 18。于是报告里那几处逐字引文全部成了对更早的树的陈述：
+
+- `tests/security/master-security-gate.sh:140`（行号会再移一次）；
+- `MIN_CHECKS=17`；
+- `17 check(s) registered`；
+- 「17 行全绿」「`NOT ASKED` 0 行」；
+- 逐字抄录的末行 `master-security-gate: PASS — 17 check(s) ran and each printed its own evidence`。
+
+**判它是陈旧的规矩不是我定的，是证书自己写的。** 它正文里逐字留着：
+
+> **本版把行号从 `:120` 改成 `:140`**：T1211 往同一个脚本里加了行（uv 钉版断言、词表与守卫），`MIN_CHECKS=` 那一行整体下移 20 行——**这正是「仪器变了」在报告里的第一个具体后果**，也是本版必须重挣 Gate H 而不是沿用旧判定的原因之一；`:120` 今天属于别的代码。
+
+T1213 那一轮重钉的理由也是同一句的另一个实例（第八轮，基准 `a8850f51`：「在一套已经被换掉的仪器上挣来的绿，只能证明旧仪器在那个旧树上是绿的」）。**推论是硬的：仪器换过一次要重挣，换过两次同样要重挣。**
+
+### 三、这份后果本来就被交出来了，只是没人接
+
+T1224 的任务书里逐字写着：
+
+> **不许碰 V1 证书**：`tests/acceptance/**` 一个字节不动；报告与审计里 `MIN_CHECKS=17`、`17 check(s) registered` 两个字面也不许改。它们会因此变成**对一个更早的树的陈述**——那是**陈旧**，不是**红**……把这条后果写进 RESULT 就够。
+
+**那句话是对的，而「写进 RESULT 就够」是它那一笔的边界，不是全局的。** 它把后果交给了 Supervisor——**交给了那个在立账时没接住它的人**。这正是 `book-fix-must-sweep-sibling-fields` 那条教训的又一例：一笔决定里的承诺，只在那本任务书里执行；任务书之外没有人执行它。发现它的方式是**人肉核对**（§一那张表），不是任何自动检查——因为这台校验器**没有任何 runner**（见 §六）。
+
+### 四、立账 T1229（P12，`v1_required=false`）
+
+账立在 `tasks/tasks.json`、`tasks/packages/T1229.json`、`tasks/task_status.json`（`todo`）、`tasks/tests.json`（`T1229-TEST-01`/`-02`，blocking、`not_run`），G3 覆盖同笔写进 `specs/orchestrator/gates.json` 的 `task_overrides`（`{"g3_jobs": ["mof-canonical"]}`）。
+
+- **依赖 `T1202` + `T1223`–`T1228`。** 那六笔是 P13 的仪器改造序列，每一笔都动过某台仪器；**重钉必须发生在仪器不再动的树之后**，否则钉完下一笔一合，证书又成旧仪器的陈述了。T1213 的教训在这里写成**依赖**，而不是写成一句提醒。`T1202` 进依赖是因为 `mof-canonical` 声明了 `requires_tasks: ["T1202"]`，而 `gate_spec_test.go` 的 `TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt` 要求携带该作业的任务在依赖闭包里含有它（否则判「红是构造出来的」）。
+- **交付面只有 `tests/acceptance/**`**，`tests/security/**` 与 `ops/**` 明写在禁止面——那是本笔要**重挣**的那一层的仪器，让「重挣」与「改判据」在 diff 里泾渭分明。任务书另有一条硬要求：报告里那六处陈旧字面**逐个重取**，且每一处都要能指出取白**哪一次运行**（时间戳或输出 sha256），**不许**因为「和上一轮一样」就留着。
+- **不许给它接 runner**：任务书明确禁止工人顺手把 `v1-final-audit.sh` 接进 CI——一台快照校验器在 HEAD 前进后必然非 0，接进去等于让 main 永远红。
+
+### 五、这一条我顺手量到的、和自己有关的两件事
+
+**（a）我差点把「上一轮的值恰好相同」当证据。** 写任务书时我要求工人「末行里的 `17` 若仍是 `17`，你要能说出为什么」。这不是多余的谨慎：**那正是这一整笔的病根**——报告里所有陈旧字面，都是上一轮写对、这一轮没人再看一遍的数字。
+
+**（b）`tasks/packages/**` 不是活的产物。** 我按 T1213/T1214 的先例给 T1229 写了 `tasks/packages/T1229.json`，顺手量了一下才发现：全仓没有任何脚本、任何 Go 代码读它（`grep -rn 'tasks/packages' --include='*.go' --include='*.py' --include='*.sh'` 只有两处**注释**引用）；170 笔任务里只有 62 份，最新的一份停在 T1217。**它不是机器产物，是留痕**——Worker 拿到的任务包由 `RenderTaskPackage` 从 DAG 条目渲染。所以它**不在摘要的 39 个输入里，改它不动标记**；但它的内容**必须与 DAG 条目一致**，我这次是逐键比对过的（`sorted(package.keys()) == sorted(dag_entry.keys())`，且值为同一对象）。
+
+### 六、遗留（记录，不立账）
+
+1. **`tests/acceptance/v1-final-audit.sh` 没有任何 runner。** 在 `Makefile`、`.github/**`、`scripts/**`、`tests/**/*.sh` 里 grep `v1-final-audit` 与 `v1-final-report`，只有脚本自己引用自己。**这是刻意的**（快照校验器做常驻检查必然常红），但副作用是：**证书过期没有任何东西会喊出来**，本笔是靠人肉核对发现的。它属于 T1112 记下的那一类（「没人跑的仪器」），而 T1227 正在给这一类立名册与检查器。**我把裁定留到看 T1227 的产物时做**：是让名册点名它（承认它是仪器、但注明「只在验收时手跑」），还是另立一条「证书时效」的提示。**不现在做**，因为 T1227 的产物会决定哪种形状合适。
+2. **驱动在我写这一条的过程中一直在跑**，且它的写与我的写**互不覆盖**：`Store.mutate` 先取锁、再在锁内**重新读**，所以我在 T1229 入账时看到的历史条目（T1224 `verification→accepted`、T1226 `running→verification`、T1228 `todo→ready→running`）一条都没丢。这不是推测：`git diff tasks/task_status.json` 里那些 `history` 数组与我的 T1229 条目同时存在。
+3. **一处我自己的工具缺陷，已修**：入账脚本用 `json.dumps(..., ensure_ascii=False)` 重写 `specs/orchestrator/gates.json`，把文件里原有的 `\u2014`/`\u00a7` **反转义成了裸字符**——diff 里多出 6 行我没打算动的改动。**真正的拦截者是 `go test`**：它先因为另一处缺陷（`supervisor_scope_narrowing` 被一个尾逗号写成了 1 元组、序列化成 JSON 数组，而 DAG 加载器的字段类型是 `string`）拒绝解析整个 DAG。两处都已修；`gates.json` 现在是**五行纯插入**，`tasks/tasks.json` 的删除只有 `task_count: 170 → 171` 这一行。**记这一条是因为它印证了 §六 那条老规矩**：JSON 规格编辑必须**回环**（读进对象、改、再序列化并用 `json.loads` 验回），而且**要按各文件自己的转义风格写**——`gates.json` 用 `ensure_ascii=True`，另外三份台账用 `False`，量出来的（提交字节里 `gates.json` 的非 ASCII 字面字节 = 0，其余三份 = 59 万 / 93 万 / 1487）。
+
+### 七、给 owner 的直白答复
+
+**账面上是的**：V1 要求的 150 笔任务全部合完了，该跑的测试没有一条欠账，MOF 那条主线到今天早上还在新树上跑通过（50 步全绿）。
+
+**但那本「V1 验收证书」钉在 9 月 23 日的一棵树上，之后主线前进了 43 个提交，其中就包括「证书赖以给分的那批安全检查工具」被换掉。** 按证书自己写下的规矩，这种情况必须**重跑一遍再重新签发**，而不是把旧的接着用。这个「重跑一遍」**之前没有人接**——它被交出来了，但停在了一句「写进 RESULT 就够」上。现在我把它立成 T1229，排在仪器改造全部完成之后自动跑。
+
+所以准确的说法是：**项目本身做完了，最后一道「重新盖章」还没盖——而它现在有人扛、有排期了。**

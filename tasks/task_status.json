@@ -12583,10 +12583,11 @@
       ]
     },
     "T1224": {
-      "status": "verification",
+      "status": "accepted",
       "started_at": "2026-09-24T09:36:35Z",
       "notes": "新立账（2026-09-24，P13 第九笔）：把 T1220 立起来的表面判据接进总门注册表。\n\n**为什么它现在是「可运行的证据」而不是「每轮都跑的闸」**：`tests/security/sast-go-surface-check.sh` 是一台完整的仪器（六个案例、自己植入、自己断言没留下东西），但**没有任何执行器引用它**——`grep -rn sast-go-surface-check` 除了它自己，命中的只有台账里的散文。而 T1222 刚给它补的两条否定模式案例（被 `!` 重新纳入的路径），今天跑在任何地方都不跑。\n\n**接法（与我原先记下的相反，故更正）**：我此前在 T1222 的账里写「那件事要把 `MIN_CHECKS=17` 抬到 18，而 `v1-final-audit.sh` 里逐字钉着两条 V1 验收证据——动它等于动 V1 完成声明的证据层」。**前半句对，机制说错了**：`v1-final-audit.sh:261-262` 的两条 `require_marker` 读的是**报告文件**（`:173-179` 是 `grep -qF \"$marker\" \"$REPORT\"`），**不读活的脚本**，所以抬下限**不会**让审计变红。真实的后果是**陈旧而不是红**：报告与审计里 `MIN_CHECKS=17`、`17 check(s) registered` 会变成对一个更早的树的陈述。\n\n**关键的一条**：加行**不需要**动 `ci.yml`，也**不需要**动 `specs/orchestrator/gates.json`——CI 早已在 `ci.yml:440` 跑 `bash tests/security/master-security-gate.sh`（前面 `:437-438` 是 `make security-tools`），而 `gates.json` 镜像的是 CI 的 **step 列表**（`TestGatesSpecSyncsWithCIWorkflow` 守着），不是注册表的行数。所以这一笔能是**单目录任务**（`tests/security/**`）。\n\n**下限为什么跟着抬**：`MIN_CHECKS` 是下限（`:452` 用 `-lt`，因为 `--selftest` 靠 `--extra-checks` 加诱饵行）。下限的功用在「删掉一行会看得见」；新行落在下限之外，等于它可以被静默删除——那正是下限存在的理由被绕开。\n\n**为什么 `ops/security/absent-checks.json` 不必动**：那份清单的校验是**单向的**（`check-absent-manifest.py:190-201` 只要求清单里每个 `covered` 项点到的 `check_ids` 在注册表里存在），新加的行不必被清单认领。\n\n**同笔更正 T1223 的 G3 作业**：T1223 原定 `security-master`，改为 **`mof-canonical`**，并把 `T1202` 加进依赖。理由是三个同类守卫任务（T1219、T1221）都是这个配对（`mof-canonical.requires_tasks = ['T1202']`），而 `security-master` 对那一笔是**不成立**的声明——它读的东西 T1223 一样没碰，而且那样一来 T1223 的 G3 会挂在**本笔**要改的注册表行数上。**诚实地说**：两个 G3 作业**都不真正驱守卫**（守卫是 Claude Code 的 PreToolUse 钩子，不是 `rddev` 调的），所以守任务的 G3 一直是「既有 E2E 不许因此变红」，不是覆盖——这条照原样记，不假装它是覆盖。\n\n**裁定**：§5.1 属 L1（加一个既有仪器的执行入口、抬一次下限；不新增权限、不放宽任何限制），我自己决定并记在这里。",
       "worker_run_id": "run-32433ff2b67f6a59",
+      "accepted_by_supervisor_at": "2026-09-24T10:19:39Z",
       "history": [
         {
           "from": "todo",
@@ -12607,6 +12608,12 @@
           "at": "2026-09-24T09:52:47Z",
           "run_id": "run-d0af9934b20f8fb3",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-24T10:19:39Z",
+          "run_id": "run-4bc572c536a02fa7"
         }
       ]
     },
@@ -12615,7 +12622,7 @@
       "notes": "新立账（2026-09-24，P13 第十笔）：修 `tests/security/sast.sh` 读 `git check-ignore -v` 那一行的**取字段**方式。\n\n**毛病**：T1222 教会那个函数分辨 `!` 行，但它取 pattern 是「剥最短前缀到第一个冒号（当源）、再剥一次（当行号）」。**源路径里有一个冒号就剥错**。我亲自量过：`.gitignore` 放在 `dir:with:colon/` 里、内容 `*.go` + `!keep.go`，git 打出 rc=0 与 `dir:with:colon/.gitignore:2:!keep.go<TAB>dir:with:colon/keep.go`，而现行解析出 `colon/.gitignore:2:!keep.go`——**不以 `!` 开头**，于是读成命中。\n\n**两个方向**：文件那一路 → 健康树判红（响）；目录那一路 → 该目录进 `DROPPED` 而不是 `SURFACE`，**扫描面静默缩小**——T1220 修的就是这个类。后者才是立账的理由。\n\n**为什么现在值一笔**：今天这个仓库里没有含冒号的目录，所以是潜伏的；但 T1224 刚把这台仪器接成每轮 CI 都跑的一行，潜伏就成了常设。修法是认**行号字段**（纯数字）而不是数冒号，源里、pattern 里带冒号都对。\n\n**同笔要更新总门那一行的 `evidence`**：它钉住仪器总结行的案例数（英文数词 `ten`），加一个案例就变 `eleven`——不改就是每轮红。要求仍是**钉住数目**（换成不计数目的宽松正则，会让「案例少了一个」再也看不见）。\n\n**一笔更正我自己的清单**：我此前把 T1222 复核的两条也当成待办——「TAB-less 行被静默丢弃（两个调用点都 `2>&1`，git 的 stderr 就看不见了）」与「`cleanup_plants()` 只清原来三处植入物」。**逐条核实后两条都是我读错了**：(1) 两个调用点都**检查了 rc**（非 0/1 就 `die` 并把 git 的输出打出来），rc=1 时 git 根本不打印行，所以「静默丢弃」的只可能是与判决行同时出现的 stderr 噪音，丢掉是对的；(2) `cleanup()`（EXIT trap）**清的是全部六处**，我先读到的 `cleanup_plants()` 是**跑前**扫尾原三处的那一个，而第 10 个案例是**问树**（不是问自己的 rm）确认新三处都没了。**两条都撤，只有冒号这条成立。** 这正是「同一个结论有两道防线时，其中一道看着像漏的」——记在这里，别再当待办捡回来。\n\n**裁定**：§5.1 属 L1（修一个解析器对分隔符的假设，并给既有仪器加一个能红的案例；不新增权限、不放宽限制、不改变扫描**范围**的定义）。依赖 T1222（被修的文件）与 T1224（要改的那行 `evidence` 由它注册），依赖同时把两者串行化——它们开的是同一个目录。"
     },
     "T1226": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-24T09:53:17Z",
       "notes": "新立账（2026-09-24，P13 第十一笔）：**执行一笔记了但没立的承诺**——L1-20260922-5 说这个缺口的补法是「新任务（播种一条能命中的文档 + 断言答案里出现引用 + 重渲基线），触发条件是 V1 之后的第一轮补强」。P13 就是「V1 之后的加固」，触发条件已到，而**这笔任务从没被立起来**（tasks.json 里没有任何一笔提到它，我逐笔查过）。\n\n**缺口是什么**：a11y 扫描把 `/search?q=catalyst` 当核心页扫，判据是 `[data-search-answer]` 存在。但 `catalyst` **匹配不到任何播种文档**（harness 自己那段块注释写着），检索返回零个来源，生成器的**零来源分支先答**（`ReasonNoSources`），**走不到 provider 检查**——页面渲染的是**回退**状态。于是这条路在覆盖表里被记成**有数据**，而实际扫到的是回退。**覆盖被记宽了**，这正是本笔要关掉的说法。\n\n**同笔更正我自己的半句错**：L1-20260922-5 的括号里写着「+ 重渲基线」，我此前也照抄过。核了一遍**是错的**：视觉套件用的是**另一套** fixture（`visual-regression-run.sh`、`head-tree-visual.sh`、`run.sh` 里没有任何 `a11y-harness` 引用），所以这 17 张 PNG 不该因为本笔重渲。任务书里更正了这点，并且**按具体文件开范围、把 `tests/web-smoke/baseline/**` 明确写进 forbidden**——让「要不要重渲」变成一个必须问我、而不是可以顺手做掉的问题。\n\n**判据要能区分两条路**：`[data-search-answer]` **回退状态也渲染**，所以它证明不了什么。产品里已有更细的钩子（`data-search-citation` / `data-search-fallback`，只读引用，不改 `apps/**`），判据要求「有引用且无回退」，并且要求**证明这条新断言能红**。\n\n**G3 是 `a11y` + `i18n`**：这台 harness 有**两个**消费者（`run-a11y.sh` 与 `run-i18n.sh`/`i18n-smoke.mjs`），都是 required job，都跑真 Chromium 并从这台 harness 取数——它们本来就是这笔改动最贴的端到端判据。\n\n**裁定**：§5.1 属 L1（改测试夹具与判据，让覆盖名实相符；不新增权限、不改产品语义、判据是**加**一条能红的断言并**禁止**删除或放宽既有的）。",
       "worker_run_id": "run-7d58d0fc394f2371",
@@ -12632,6 +12639,13 @@
           "at": "2026-09-24T09:53:17Z",
           "run_id": "run-7d58d0fc394f2371",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-24T10:19:39Z",
+          "run_id": "run-c1c16f4396f075bb",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -12640,8 +12654,29 @@
       "notes": "新立账（2026-09-24，P13 第十二笔）：**把 P13 那个类结构化地关掉**，而不是再找一台实例。\n\n**本笔的量法（我自己量的，2026-09-24）**：`tests/web-smoke/visual-regression.mjs` 是那 17 张 PNG 的比对，由 `run.sh` 的 glob（`*-regression.mjs`）发现，`run.sh` 由 `make browser-smoke` 调——而 **`make browser-smoke` 没有任何调用者**：`specs/orchestrator/gates.json` 的 20 个作业、`.github/workflows/ci.yml` 的每个 `run:`、`ops/**` 全都搜不到。`a11y`/`i18n` 两个作业跑的是 `run-a11y.sh`/`run-i18n.sh`，各自独立的运行器，不经过 `run.sh`。台账里 `T1101-TEST-01` 的证据也写着是**当时手工跑过一次**、回填的。**所以那 17 张基线今天守着的东西是零。**\n\n**为什么立这笔而不是继续一台一台找**：T1224 接一台仪器进总门、T1226 修一台量错状态的扫描、本笔——同一个类：**仪器存在，没有任何东西跑它，于是它的绿什么也不说明**。前两笔各修一个实例；本笔立一份名册（每台要么点名**活入口**、要么写明为什么必须手动）＋一个**能被 `go test ./...` 跑到**的检查器守住它。此后「新增仪器不入册」「删掉条目」都会红。**这是这个类的收尾动作，不是又一台实例。**\n\n**为什么要求检查器走 Go 测试**：`go` 作业的第 5 步就是 `go test $(go list ./... | grep -v …)`，而 `go` 已在 `required_jobs` 里——**于是本笔不需要改任何 CI 配置**（`.github/**` 与 `specs/**` 都是 Supervisor-only，工人碰不到）。这也是我实测过「只有 `_test.go` 的包能过 `go vet ./...` / `go list ./...`」之后才敢写的。\n\n**我踩过的坑写进了任务书**：我用三种办法数「哪些仪器没人跑」，得到**三份不同的名单**（22 台 / 26 台 / 互相矛盾）。原因是 `tests/acceptance/privacy-suite.sh` 把要跑的脚本放进数组变量 `CONTROL_SCRIPTS`（`:239-242`，循环在 `:250`）再 `bash \"$script\"`——字符串搜索看不见这条边；而 `run.sh` 这种通用文件名又会撞出**假边**。所以任务书要求可达性按**传递闭包**算，并要求三处突变各自能红。**我不把「哪些没人跑」的名单当成任务前提**——那份名单正是本笔要产出的东西，我数不准正是它需要存在的理由。\n\n**一处范围教训照 T1226 办**：`forbidden_scope` 里**不写带括号的例外**（带括号的条目会被范围检查自己的匹配器跳过，于是那块地**两个名单都不在**——这正是本笔要关的那个缝）。例外只用 `allowed_scope`（绑定约束）表达，并在自检里逐个探针断言「不在 allowed 里、但在 forbidden 里」。\n\n**裁定**：§5.1 属 L1（加一份名册与一台只读检查器；不新增权限、不改产品语义、不放松任何 Gate——判据是**加**一个能红的检查器并**禁止**删除或放宽既有的）。`manual` 的每一台由我逐条裁定；其中 17 张视觉基线那台**接线与否是我的决定**（接线要动 CI 配置），任务书明确要求工人**不要在名册里替我做这个决定**。"
     },
     "T1228": {
+      "status": "running",
+      "started_at": "2026-09-24T10:19:44Z",
+      "notes": "新立账（2026-09-24，P13 第十三笔）：**`update_progress.py --check` 是一台只能说「不」的仪器。**\n\n**本笔的由来是我自己差点犯的错。** `tasks/progress.md` 的自动段确实过期了（T1222 还写着 `todo`、`merged 163（合计 164/164）`，实际 169/164）。我顺手跑 `python3 scripts/update_progress.py --check`，**退出码 1，报「progress view is stale」**——看着像是这道检查很灵、只是没人接进 CI。**我差点据此立一笔「把 `--check` 接进 `task-state` 作业」。那会让 main 永远红。**\n\n**实测（沙箱 `--root`，固定戳，唯一变量就是那个戳）**：`render_section` 把 `生成时间：{stamp}` 写在**被比较的正文里**（`scripts/update_progress.py:84-86`），而 `main()` 的 `stamp = args.stamp or now_stamp()`（`:127`）。于是 `--check` 拿**文件里那次生成的时间**去比**当下这一秒**：\n\n```\nregen  --stamp 2026-01-01T00:00:00Z        -> rewritten\n--check --stamp 2026-01-01T00:00:00Z       -> \"progress view up to date\"      exit 0\n--check --stamp 2026-01-01T00:00:01Z       -> \"progress view is stale\"        exit 1\n--check (no --stamp, 真实调用)              -> \"progress view is stale\"        exit 1\n```\n\n**对任何已提交的 `progress.md`，真实调用永远返回 1**——除非恰好在同一秒里重生成过。所以**我那次 exit=1 什么也没测出来**：账本确实旧了，但那个退出码不是它的证据。**一台只能说「不」的仪器和一台只能说「是」的仪器一样没有价值。**\n\n**本笔的出处（一处更正）**：我最初在这里写的是「`tasks/decisions.md` 第 65 条记我这轮的复核发现，本笔是它引出的待办里可以立即执行的一条」——**这句是错的，我去树里查了**：第 65 条的「遗留（记录，不立账）」只列了 `api` 构建产物与复核风险 2、5、6，`grep` 全份 `decisions.md` 对 `update_progress` 只有两处历史提及（`:9032` 讲生成器只重写 `AUTO-PROGRESS` 之间、`:13924` 一句泛泛的提醒），**没有这一条**。真实出处是我自己的核对：收尾时顺手核 `tasks/progress.md` 是否过期，发现自动段确实旧了，顺着去跑 `--check`，才有了上面那段实测。已更正，留痕。\n\n**为什么立账而不是我直接改**：按 `CLAUDE.md` §5.1，这属于普通工具修复（L1，不新增权限、不改产品语义），**不是**我该直接动手的业务实现——我是 Supervisor，业务/工具实现走 Worker。判据是**加**能红的用例并禁止删除或放宽既有的。\n\n**接线不在工人范围里**：把 `--check` 变成一道 Gate 要动 `specs/orchestrator/gates.json` 与/或 `.github/workflows/ci.yml`，两者都是 Supervisor-only。而且**顺序不能反：先让仪器两侧都能说，再接**。本笔只做前半步；接线与否我在本笔合并后自己裁定。任务书已明确禁止工人顺手接线。\n\n**为什么 `tasks/**` 对工人是禁区（哪怕要验的就是 `tasks/progress.md`）**：那两行自动段是**产物**，由这台生成器从 `tasks/task_status.json` 重算。开写权限等于允许工人手改产物让检查变绿。所以任务书要求全部验证走临时 `--root`，而生成器本来就为测试留了这个口子（`scripts/tests/progress-update-test.sh` 开头写明真的文件从不被读写）。\n\n**范围教训第三次适用**：`forbidden_scope` 里**不写带括号的例外**（带括号的条目会被范围检查的匹配器跳过，那块地两个名单都不在）。例外只用 `allowed_scope` 表达，自检里逐个探针断言。",
+      "worker_run_id": "run-d02e672228a41645",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-24T10:19:41Z",
+          "run_id": "run-6611e28b8bbeb470"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-24T10:19:44Z",
+          "run_id": "run-d02e672228a41645",
+          "reason": "worker spawn"
+        }
+      ]
+    },
+    "T1229": {
       "status": "todo",
-      "notes": "新立账（2026-09-24，P13 第十三笔）：**`update_progress.py --check` 是一台只能说「不」的仪器。**\n\n**本笔的由来是我自己差点犯的错。** `tasks/progress.md` 的自动段确实过期了（T1222 还写着 `todo`、`merged 163（合计 164/164）`，实际 169/164）。我顺手跑 `python3 scripts/update_progress.py --check`，**退出码 1，报「progress view is stale」**——看着像是这道检查很灵、只是没人接进 CI。**我差点据此立一笔「把 `--check` 接进 `task-state` 作业」。那会让 main 永远红。**\n\n**实测（沙箱 `--root`，固定戳，唯一变量就是那个戳）**：`render_section` 把 `生成时间：{stamp}` 写在**被比较的正文里**（`scripts/update_progress.py:84-86`），而 `main()` 的 `stamp = args.stamp or now_stamp()`（`:127`）。于是 `--check` 拿**文件里那次生成的时间**去比**当下这一秒**：\n\n```\nregen  --stamp 2026-01-01T00:00:00Z        -> rewritten\n--check --stamp 2026-01-01T00:00:00Z       -> \"progress view up to date\"      exit 0\n--check --stamp 2026-01-01T00:00:01Z       -> \"progress view is stale\"        exit 1\n--check (no --stamp, 真实调用)              -> \"progress view is stale\"        exit 1\n```\n\n**对任何已提交的 `progress.md`，真实调用永远返回 1**——除非恰好在同一秒里重生成过。所以**我那次 exit=1 什么也没测出来**：账本确实旧了，但那个退出码不是它的证据。**一台只能说「不」的仪器和一台只能说「是」的仪器一样没有价值。**\n\n**本笔的出处（一处更正）**：我最初在这里写的是「`tasks/decisions.md` 第 65 条记我这轮的复核发现，本笔是它引出的待办里可以立即执行的一条」——**这句是错的，我去树里查了**：第 65 条的「遗留（记录，不立账）」只列了 `api` 构建产物与复核风险 2、5、6，`grep` 全份 `decisions.md` 对 `update_progress` 只有两处历史提及（`:9032` 讲生成器只重写 `AUTO-PROGRESS` 之间、`:13924` 一句泛泛的提醒），**没有这一条**。真实出处是我自己的核对：收尾时顺手核 `tasks/progress.md` 是否过期，发现自动段确实旧了，顺着去跑 `--check`，才有了上面那段实测。已更正，留痕。\n\n**为什么立账而不是我直接改**：按 `CLAUDE.md` §5.1，这属于普通工具修复（L1，不新增权限、不改产品语义），**不是**我该直接动手的业务实现——我是 Supervisor，业务/工具实现走 Worker。判据是**加**能红的用例并禁止删除或放宽既有的。\n\n**接线不在工人范围里**：把 `--check` 变成一道 Gate 要动 `specs/orchestrator/gates.json` 与/或 `.github/workflows/ci.yml`，两者都是 Supervisor-only。而且**顺序不能反：先让仪器两侧都能说，再接**。本笔只做前半步；接线与否我在本笔合并后自己裁定。任务书已明确禁止工人顺手接线。\n\n**为什么 `tasks/**` 对工人是禁区（哪怕要验的就是 `tasks/progress.md`）**：那两行自动段是**产物**，由这台生成器从 `tasks/task_status.json` 重算。开写权限等于允许工人手改产物让检查变绿。所以任务书要求全部验证走临时 `--root`，而生成器本来就为测试留了这个口子（`scripts/tests/progress-update-test.sh` 开头写明真的文件从不被读写）。\n\n**范围教训第三次适用**：`forbidden_scope` 里**不写带括号的例外**（带括号的条目会被范围检查的匹配器跳过，那块地两个名单都不在）。例外只用 `allowed_scope` 表达，自检里逐个探针断言。"
+      "notes": "新立账（2026-09-24，P13 第十四笔、**P12 的证书重钉**）：**V1 证书赖以得绿的那套安全仪器，在证书发放之后被 P13 换掉了，而重钉没有人扛。**\n\n**这一笔是我做 V1 完成度核对时发现的。** `CLAUDE.md` §12 的四条里，三条已经成立：`v1_required=true` 的 **150** 笔全部 merged（0 笔未合并）；blocking 测试 **183 → 185** 条里**没有一条 `passed` 是空证据**；MOF canonical 有 13 次绿记录、最近一次跑在 `6c0e4a5` 上而它在 main 的历史里。**第四条「Master Acceptance 通过」只在它自己那一棵树上成立。**\n\n**实测**：证书 `tests/acceptance/v1-final-report.md` 钉的基准是 `91ed2d5`（2026-09-23，T1214 第九轮），它的合并提交是 `8f393bb`，而 `git rev-list --count 8f393bb..origin/main` = **43**。`git diff --name-only 8f393bb..origin/main` 的 43 个路径里躺着 `tests/security/sast.sh`、`tests/security/sast_report.py`、`tests/security/sast-go-surface-check.sh`、`tests/security/README.md` 与 `ops/ci/gosec-baseline.txt`——**正是 Gate H 赖以得绿的那套仪器**（T1220 的扫描面、T1222 的 `!` 行解析）。还不止：T1224 往 `tests/security/master-security-gate.sh` 注册了**第 18 行**并把 `MIN_CHECKS` 从 17 抬到 18，于是报告里逐字引着的那句 `master-security-gate: PASS — 17 check(s) ran …` 与 `17 check(s) registered` 都成了对更早的树的陈述。\n\n**规矩是证书自己写的，不是我替它定的**：报告正文有一句「本版把行号从 `:120` 改成 `:140`：T1211 往同一个脚本里加了行……`MIN_CHECKS=` 那一行整体下移 20 行——**这正是「仪器变了」在报告里的第一个具体后果**，也是本版必须重挣 Gate H 而不是沿用旧判定的原因之一」。T1213 那一轮也是同一个理由重钉的。**推论是硬的：仪器换过一次要重挣，换过两次同样要重挣。**\n\n**这份后果本来就被交出来了，只是没人接。** T1224 的任务书写着：报告与审计里 `MIN_CHECKS=17`、`17 check(s) registered` 两个字面**不许改**，「它们会因此变成对一个更早的树的陈述——那是**陈旧**，不是**红**……把这条后果写进 RESULT 就够」。**它说得对，而「写进 RESULT 就够」是它那一笔的边界，不是全局的。**那句话把后果交给了 Supervisor，而 Supervisor 当时没接——**这正是「一笔决定里的承诺，只在那本任务书里执行」这条教训的又一例**。接住它的地方就是本笔。\n\n**为什么立账而不我自己改**：交付物是 `tests/acceptance/**` 两份文件（证书 + 校验它的脚本），是实打实的实现工作，按 `CLAUDE.md` §5.1 走 Worker。判据是**重挣**（在这棵树上重跑、重取字面），**不是**改判定去迎合输出。\n\n**为什么依赖 T1223–T1228**：那是 P13 的仪器改造序列，每一笔都动过某台仪器（T1224/T1225 动 `tests/security/**`、T1226 动 a11y/i18n、T1227 立仪器名册并动 `ops/ci/instrument-inventory.json`、T1223 动守卫、T1228 动 `scripts/update_progress.py`）。**重钉必须发生在仪器不再动的树之后**——钉完下一笔一合，证书又成旧仪器的陈述了。T1213 的教训，本笔把它写成依赖而不是写成提醒。\n\n**为什么 `T1202` 也在依赖里**：G3 作业选 `mof-canonical`，而它在 `specs/orchestrator/gates.json` 里声明了 `requires_tasks: [\"T1202\"]`；`gate_spec_test.go` 的 `TestEveryG3JobIsSatisfiableByTheTaskThatCarriesIt` 要求携带该作业的任务在依赖闭包里含有它，否则判「红是构造出来的」。T1202 早已 merged，写上零代价。\n\n**为什么 `v1_required=false`**：同 T1213/T1214——这是**证书的修订**，不是产品交付；标 true 会让报告必须具名排除「正在写修订的自己」，排除名单每刷一版长一节，那是记账技巧不是严格。\n\n**顺带记一条还不能定论的事**：这台校验器**没有任何 runner**（`Makefile`、`.github/**`、`tests/**/*.sh`、`scripts/**` 里都没有它），所以「证书过期」没有任何东西会喊出来——本笔是靠人肉核对发现的。它是不是该有提示、或者该并进 T1227 的仪器名册，我留到自己看 T1227 的产物时再裁定；**任务书已经禁止工人顺手给它接 runner**：一台快照校验器在 HEAD 前进后必然非 0，接进 CI 等于让 main 永远红。"
     }
   },
   "version": 2

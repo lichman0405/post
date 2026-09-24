@@ -1970,6 +1970,26 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1229-TEST-01",
+      "task_id": "T1229",
+      "name": "certificate re-pin",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1229-TEST-02",
+      "task_id": "T1229",
+      "name": "master gate re-earn on the P13 instrument set",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }
