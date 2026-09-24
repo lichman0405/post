@@ -12076,10 +12076,13 @@
       ]
     },
     "T1215": {
-      "status": "verification",
-      "started_at": "2026-09-24T01:03:07Z",
+      "status": "merged",
+      "started_at": "2026-09-24T02:53:01Z",
       "notes": "新立账（2026-09-24，V1 完成之后的第一笔）：#243 / #207 / #133 三条议题描述的是同一个 1 秒窗口——`run-worker.sh` 先写 `exit.status`（`worker_guard.go:168`）再做 kill 序列（`:186`-`:188`），于是「文件存在」不蕴含「收尾完成」。任务书见 `tasks/packages/T1215.json`，G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`mof-canonical`，其 `requires_tasks` 为 `T1202`，已抄进 `dependencies`）。`v1_required=false`：这是流水线加固，不是产品交付，V1 证书不依赖它。",
-      "worker_run_id": "run-0c6e959110b22c0b",
+      "worker_run_id": "run-8c8993d52bd3e041",
+      "accepted_by_supervisor_at": "2026-09-24T03:34:51Z",
+      "merged_at": "2026-09-24T03:55:40Z",
+      "rejection_reason": "【返工 —— 验收时 `security-master` 这条检查没过，请照下面报错改】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-f676bb5c28c48fa2-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T1215/gate-run-run-f676bb5c28c48fa2-g2.json and the step logs\n\n**这次不是「基线旧了」那么简单：验收时 `G2` 的 `security-master` 真的红了**，\n报错行贴在下面。**它是一个真实缺陷，要你在代码里改掉，不是重跑一遍就会过去。**\n\n基线同时也推到了最新的 main（派生文件已按合并后的树重新生成），所以请先\n确认你看到的是新基线，再动手。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 自己去**复现下面那条报错**（命令就在上面，逐字跑一遍，别只看结论）。**改的是你的实现，不是断言**：测试是新的，它拦下的东西是真的。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n\n**这一次验收里，实际报错的行（供你定位）：**\n\n  * G2 的 `security-master` 红了\n      命令 `bash tests/security/master-security-gate.sh` 退出码 1：\n        internal/devorchestrator/worker_spawn.go:793:12: G301 (MEDIUM) Expect directory permissions to be 0750 or less\n        internal/devorchestrator/worker_spawn.go:770:12: G301 (MEDIUM) Expect directory permissions to be 0750 or less\n        internal/devorchestrator/worker_registry.go:176:13: G301 (MEDIUM) Expect directory permissions to be 0750 or less\n        177: \t\t\treturn nil, fmt.Errorf(\"creating lock directory %s: %w\", dir, err)\n        internal/devorchestrator/worker_guard.go:220:12: G301 (MEDIUM) Expect directory permissions to be 0750 or less\n        internal/devorchestrator/worker_guard.go:234:12: G306 (MEDIUM) Expect WriteFile permissions to be 0600 or less\n        internal/devorchestrator/worker_guard.go:231:12: G306 (MEDIUM) Expect WriteFile permissions to be 0600 or less\n        internal/devorchestrator/worker_guard.go:224:12: G306 (MEDIUM) Expect WriteFile permissions to be 0600 or less\n",
       "history": [
         {
           "from": "todo",
@@ -12100,14 +12103,70 @@
           "at": "2026-09-24T01:52:11Z",
           "run_id": "run-1adfc982cd7343b9",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-24T02:40:51Z",
+          "run_id": "run-3d8d63ee7c4a25ef",
+          "reason": "【返工 —— 验收时 `security-master` 这条检查没过，请照下面报错改】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-f676bb5c28c48fa2-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T1215/gate-run-run-f676bb5c28c48fa2-g2.json and the step logs\n\n**这次不是「基线旧了」那么简单：验收时 `G2` 的 `security-master` 真的红了**，\n报错行贴在下面。**它是一个真实缺陷，要你在代码里改掉，不是重跑一遍就会过去。**\n\n基线同时也推到了最新的 main（派生文件已按合并后的树重新生成），所以请先\n确认你看到的是新基线，再动手。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 自己去**复现下面那条报错**（命令就在上面，逐字跑一遍，别只看结论）。**改的是你的实现，不是断言**：测试是新的，它拦下的东西是真的。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n\n**这一次验收里，实际报错的行（供你定位）：**\n\n  * G2 的 `security-master` 红了\n      命令 `bash tests/security/master-security-gate.sh` 退出码 1：\n        internal/devorchestrator/worker_spawn.go:793:12: G301 (MEDIUM) Expect directory permissions to be 0750 or less\n        internal/devorchestrator/worker_spawn.go:770:12: G301 (MEDIUM) Expect directory permissions to be 0750 or less\n        internal/devorchestrator/worker_registry.go:176:13: G301 (MEDIUM) Expect directory permissions to be 0750 or less\n        177: \t\t\treturn nil, fmt.Errorf(\"creating lock directory %s: %w\", dir, err)\n        internal/devorchestrator/worker_guard.go:220:12: G301 (MEDIUM) Expect directory permissions to be 0750 or less\n        internal/devorchestrator/worker_guard.go:234:12: G306 (MEDIUM) Expect WriteFile permissions to be 0600 or less\n        internal/devorchestrator/worker_guard.go:231:12: G306 (MEDIUM) Expect WriteFile permissions to be 0600 or less\n        internal/devorchestrator/worker_guard.go:224:12: G306 (MEDIUM) Expect WriteFile permissions to be 0600 or less\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-24T02:40:53Z",
+          "run_id": "run-98265e0391045fa5",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "worker_failed",
+          "at": "2026-09-24T02:49:03Z",
+          "run_id": "run-9f3d228c17faafeb",
+          "reason": "worker exited 143"
+        },
+        {
+          "from": "worker_failed",
+          "to": "ready",
+          "at": "2026-09-24T02:52:11Z",
+          "run_id": "run-7160c04e19c097c7"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-24T02:53:01Z",
+          "run_id": "run-8c8993d52bd3e041",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-24T03:06:56Z",
+          "run_id": "run-a241515d94dfaea7",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-24T03:34:51Z",
+          "run_id": "run-a21bb84ef974b0d2"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-24T03:55:40Z",
+          "run_id": "run-280065a1ba046df3",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T1216": {
-      "status": "verification",
+      "status": "merged",
       "started_at": "2026-09-24T01:57:37Z",
       "notes": "新立账（2026-09-24，与 T1215 同批）：#240——G3 的 `gitea-real-services` 偶发红在 bootstrap 那三步上（`tests/acceptance/gitea-real-services-e2e.sh:529-531` 三个请求串在一条 `&&` 链里，`:534` 的失败话术说不出是哪一步、什么码），量到的频率约 5 次红 1 次（原件 `.rddev/runtime/gates/T0406/output/run-b17e9d3d09e0652d-g3/gitea-real-services/00.log`）。任务书见 `tasks/packages/T1216.json`，G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`gitea-real-services`，该作业没有 `requires_tasks`，故 `dependencies` 为空）。`v1_required=false`：这是流水线加固，不是产品交付。",
       "worker_run_id": "run-68e8c5494365fa65",
+      "accepted_by_supervisor_at": "2026-09-24T02:21:27Z",
+      "merged_at": "2026-09-24T02:53:26Z",
       "rejection_reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: If the fix contains a retry: attempts and interval are hard-coded constants, every attempt is printed, and exhaustion MUST go red naming the step — supply that exhaustion-red run's output. (not_applicable)",
       "history": [
         {
@@ -12143,16 +12202,163 @@
           "at": "2026-09-24T01:58:37Z",
           "run_id": "run-7656a2e6300b9902",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-24T02:21:27Z",
+          "run_id": "run-6726ae617224db66"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-24T02:53:26Z",
+          "run_id": "run-b2643567e786c60a",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T1217": {
-      "status": "todo",
-      "notes": "新立账（2026-09-24，P13 第二笔）：两件事同一处收工校验。一是 `#264`——`worker_collect.go:297` 收 `RESULT.json` 时全文没有与 `rec.StartedAt` 的比较，而 `ReworkWorker`（`worker_spawn.go:1063`）/`RespawnWorker`（`:1086`）重用同一任务目录、`archivePreviousVerdict`（`review_worker.go:689`）只服务评审路径，于是一轮没写过 `RESULT.json` 的返工会被收成绿的。二是 ㊾ 带出的：`result_consistency.go:159-166` 无条件要求 `completed` 下所有 `acceptance[]` 是 `passed`，而 schema 的枚举含 `not_applicable`，`system.md` 却只把这条规矩说给了 `tests[]`——Worker 照 schema 写就被拒，正文里没人告诉它。修法已定：不放宽 collect、不改 schema，把规矩写进正文。`v1_required=false`：这是流水线加固，不是产品交付。G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`mof-canonical`，其 `requires_tasks` 为 `T1202`，已与 T1215 一起抄进 `dependencies`）。"
+      "status": "running",
+      "started_at": "2026-09-24T04:52:49Z",
+      "notes": "新立账（2026-09-24，P13 第二笔）：两件事同一处收工校验。一是 `#264`——`worker_collect.go:297` 收 `RESULT.json` 时全文没有与 `rec.StartedAt` 的比较，而 `ReworkWorker`（`worker_spawn.go:1063`）/`RespawnWorker`（`:1086`）重用同一任务目录、`archivePreviousVerdict`（`review_worker.go:689`）只服务评审路径，于是一轮没写过 `RESULT.json` 的返工会被收成绿的。二是 ㊾ 带出的：`result_consistency.go:159-166` 无条件要求 `completed` 下所有 `acceptance[]` 是 `passed`，而 schema 的枚举含 `not_applicable`，`system.md` 却只把这条规矩说给了 `tests[]`——Worker 照 schema 写就被拒，正文里没人告诉它。修法已定：不放宽 collect、不改 schema，把规矩写进正文。`v1_required=false`：这是流水线加固，不是产品交付。G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`mof-canonical`，其 `requires_tasks` 为 `T1202`，已与 T1215 一起抄进 `dependencies`）。",
+      "worker_run_id": "run-cf8bd29409fdc0ac",
+      "rejection_reason": "【返工 —— 验收时 `security-master` 这条检查没过，请照下面报错改】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-01028d8104c32f83-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T1217/gate-run-run-01028d8104c32f83-g2.json and the step logs\n\n**这次不是「基线旧了」那么简单：验收时 `G2` 的 `security-master` 真的红了**，\n报错行贴在下面。**它是一个真实缺陷，要你在代码里改掉，不是重跑一遍就会过去。**\n\n基线同时也推到了最新的 main（派生文件已按合并后的树重新生成），所以请先\n确认你看到的是新基线，再动手。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 自己去**复现下面那条报错**（命令就在上面，逐字跑一遍，别只看结论）。**改的是你的实现，不是断言**：测试是新的，它拦下的东西是真的。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n\n**这一次验收里，实际报错的行（供你定位）：**\n\n  * G2 的 `security-master` 红了\n      命令 `bash tests/security/master-security-gate.sh` 退出码 1：\n        internal/devorchestrator/worker_collect.go:366:17: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/worker_collect.go:325:18: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/result_freshness.go:123:15: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/result_freshness.go:87:15: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/gate_inputs.go:289:15: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/gate_inputs.go:285:15: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/gate_inputs.go:142:16: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/gate_inputs.go:348:12: G301 (MEDIUM) Expect directory permissions to be 0750 or less\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-24T03:55:52Z",
+          "run_id": "run-162ae8c3faae7866"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-24T03:55:55Z",
+          "run_id": "run-535db8723218a7d4",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-24T04:14:44Z",
+          "run_id": "run-9a758a6fe6eedf33",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-24T04:45:29Z",
+          "run_id": "run-fe2101ef2038f47e",
+          "reason": "【返工 —— 验收时 `security-master` 这条检查没过，请照下面报错改】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-01028d8104c32f83-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T1217/gate-run-run-01028d8104c32f83-g2.json and the step logs\n\n**这次不是「基线旧了」那么简单：验收时 `G2` 的 `security-master` 真的红了**，\n报错行贴在下面。**它是一个真实缺陷，要你在代码里改掉，不是重跑一遍就会过去。**\n\n基线同时也推到了最新的 main（派生文件已按合并后的树重新生成），所以请先\n确认你看到的是新基线，再动手。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 自己去**复现下面那条报错**（命令就在上面，逐字跑一遍，别只看结论）。**改的是你的实现，不是断言**：测试是新的，它拦下的东西是真的。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n\n**这一次验收里，实际报错的行（供你定位）：**\n\n  * G2 的 `security-master` 红了\n      命令 `bash tests/security/master-security-gate.sh` 退出码 1：\n        internal/devorchestrator/worker_collect.go:366:17: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/worker_collect.go:325:18: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/result_freshness.go:123:15: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/result_freshness.go:87:15: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/gate_inputs.go:289:15: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/gate_inputs.go:285:15: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/gate_inputs.go:142:16: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/gate_inputs.go:348:12: G301 (MEDIUM) Expect directory permissions to be 0750 or less\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-24T04:45:30Z",
+          "run_id": "run-4d07760c4716312b",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "worker_failed",
+          "at": "2026-09-24T04:46:26Z",
+          "run_id": "run-711b8eaa10b0d92e",
+          "reason": "worker exited 143"
+        },
+        {
+          "from": "worker_failed",
+          "to": "ready",
+          "at": "2026-09-24T04:52:42Z",
+          "run_id": "run-fd4d592f188f0bb1"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-24T04:52:49Z",
+          "run_id": "run-cf8bd29409fdc0ac",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T1218": {
-      "status": "todo",
-      "notes": "新立账（2026-09-24，P13 第三笔）：#228——`knowledge_publications`（`00010:64`）没有 append-only 保护，任何有写权限的东西都能就地改写一条已发布记录的 `rights_json`。`00014` 的行级名单 13 张表里没有它；`00083:118/122` 给相伴的 `knowledge_publication_creations` 装了完整两半，却在 `:66-73` 的注释里把「被指向的那一行是 append-only」当成前提写下——**承诺在注释里，机制不在**。L1 裁定（写进任务书的 Supervisor rulings）：append-only，两半都装，复用 `append_only_guard()`，进 `appendOnlyTables` 普查清单，与 T0013 归类的冲突由我记 `tasks/decisions.md`。迁移号 00157。`allowed_scope` 为迁移目录 + `specs/database/postgres.sql` + `tests/integration/**`。已核出 #228 正文一处过期：它说这张表没有调用者，但 T0805（`fc78310`）之后 `internal/persistence/knowledge_publish_store.go:291` 就在写它——任务书里点名要求以树为准。`v1_required=false`：加固，不改产品语义。G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`mof-canonical`，其 `requires_tasks` 为 `T1202`，已抄进 `dependencies`）。"
+      "status": "merged",
+      "started_at": "2026-09-24T02:58:56Z",
+      "notes": "新立账（2026-09-24，P13 第三笔）：#228——`knowledge_publications`（`00010:64`）没有 append-only 保护，任何有写权限的东西都能就地改写一条已发布记录的 `rights_json`。`00014` 的行级名单 13 张表里没有它；`00083:118/122` 给相伴的 `knowledge_publication_creations` 装了完整两半，却在 `:66-73` 的注释里把「被指向的那一行是 append-only」当成前提写下——**承诺在注释里，机制不在**。L1 裁定（写进任务书的 Supervisor rulings）：append-only，两半都装，复用 `append_only_guard()`，进 `appendOnlyTables` 普查清单，与 T0013 归类的冲突由我记 `tasks/decisions.md`。迁移号 00157。`allowed_scope` 为迁移目录 + `specs/database/postgres.sql` + `tests/integration/**`。已核出 #228 正文一处过期：它说这张表没有调用者，但 T0805（`fc78310`）之后 `internal/persistence/knowledge_publish_store.go:291` 就在写它——任务书里点名要求以树为准。`v1_required=false`：加固，不改产品语义。G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`mof-canonical`，其 `requires_tasks` 为 `T1202`，已抄进 `dependencies`）。",
+      "worker_run_id": "run-af379f41ddcf7433",
+      "accepted_by_supervisor_at": "2026-09-24T03:55:05Z",
+      "merged_at": "2026-09-24T04:07:47Z",
+      "rejection_reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T1218-701849097.patch: exit status 1: error: patch failed: specs/SPEC_VERSION.json:1\n    error: specs/SPEC_VERSION.json: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-24T02:21:29Z",
+          "run_id": "run-ec76e97ba0e761ed"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-24T02:21:32Z",
+          "run_id": "run-4cdce42991ee9253",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-24T02:41:14Z",
+          "run_id": "run-98d06d56178775fb",
+          "reason": "collect rejected: scope: 1 changed path(s) outside allowed_scope [infra/migrations/** internal/persistence/sqlc/** specs/database/postgres.sql tests/integration/**]: specs/SPEC_VERSION.json"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-24T02:45:58Z",
+          "run_id": "run-8e01df7de3c9f1b3",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-24T02:53:51Z",
+          "run_id": "run-9deccf20200a8356",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-24T02:58:55Z",
+          "run_id": "run-93d89bf3bc2d7de1",
+          "reason": "【这不是缺陷 —— 基线推进，请在新基线上改好并重新验证】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: the task's change does not apply to current main — bring the branch up to date and re-run: git apply /tmp/post-integration-T1218-701849097.patch: exit status 1: error: patch failed: specs/SPEC_VERSION.json:1\n    error: specs/SPEC_VERSION.json: patch does not apply\n\n**最常见的原因是 main 在你离开的这段时间里往前走了**：你的分支上带着一份\n`specs/SPEC_VERSION.json`（由 `specs/**` 算出的派生文件）或别的生成物，\n它的内容描述的是你开工那天的主线，主线一动它就与主线冲突。\n推进基线时，派生文件已经**排除在补丁之外、按合并后的树重新生成**了。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 按任务书逐条重跑用例；有对不上的地方，**按 main 的新接口改你的调用方**，不要改回旧接口。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-24T02:58:56Z",
+          "run_id": "run-af379f41ddcf7433",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-24T03:09:58Z",
+          "run_id": "run-fbbb53a2aaccc0e6",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-24T03:55:05Z",
+          "run_id": "run-b76e3464c4014016"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-24T04:07:47Z",
+          "run_id": "run-fbd548a7b0b630c6",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     }
   },
   "version": 2

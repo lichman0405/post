@@ -19109,3 +19109,324 @@ collect 的 `scope` 检查、G2 的 `spec-validation`、CI 的 `spec_version.py 
 **要立账的**（与缺口 A、B 并列）：返工信需要一个「红的是行号漂移，不是你的代码」的分支，
 判据至少有两条现成的——偏移是否一致、以及失败的键是否本来就在基线里。
 把那封信原样发出去，代价是让一个工人去修 main 上的既有行，或者让它报一次 blocked。
+
+## 52 — 证书里那句「此后不再有待裁定的 `L3`」是**按标签数出来的**：另有八件事，一件都没被数到（L1 记账，2026-09-24）
+
+**起因**：owner 问「再看看 issues，哪些需要做」。我按 issue 清单逐条核对时发现，
+**清单本身不是全集** —— 下面这八件里，**没有一件**在 GitHub 的 80 个 open issue 里立过账，
+也没有一件在 `.rddev/runtime/owner-decisions-needed.md` 里（那份文件自己的两批五项都已经处理掉了：
+第一批五笔我依长期授权自裁，第二批五笔 owner 于 2026-09-23 回了「按你说的来。」）。
+它们只活在**这份台账的正文里**。
+
+### 一、为什么当初没被数到（机制，不是我漏看）
+
+`tests/acceptance/v1-final-audit.sh:385-386` 是这么数的：
+
+    l3_in_report="$(awk '/^## 0\./,/^## 1\./' "$REPORT" | grep -oE 'L3-[⓪①②③④⑤⑥⑦⑧⑨]' | sort -u)"
+    l3_in_ledger="$(grep -oE 'L3-[⓪①②③④⑤⑥⑦⑧⑨]' "$ROOT/tasks/decisions.md" | sort -u)"
+
+它比的是**报告与台账两边的标签集合**——`L3-` 后面接一个圈码（⓪ 到 ⑨ 那九个）。
+那些号是 ㊻ 为**五条范围裁定**当场铸的号。所以这条检查能证明的只是：「那五条被点名、被裁定、两边一致」。
+**一件用散文记下的 L3，结构上不可能进入这个集合**——它没有号。
+
+于是 `decisions.md:18493`「这是本轮唯一的 L3 输入，**此后不再有待裁定的 `L3`**」这句，
+它的**证据只覆盖那五个号**，句子本身比证据宽。这不是造假（五条确实裁了、确实落地了），
+是**口径**问题：读的人会以为"全清了"。
+
+**这与 ㊿ 是同一类病**：一种保证只写在某处，而强制它在另一处（那处更窄）。
+㊿ 是「不可变只写在注释里」，这里是「清账只按号数」。
+
+### 二、八件事（每条都逐字核过，附行号）
+
+| # | 事 | 出处 | 性质 | 现状 |
+|---|---|---|---|---|
+| 1 | **公开项目里的私有分支，非成员知道 branch id 就能读里面的对象** | `:10346`（T0804 提出）、`:14863-14880` | **权限模型 / 隐私** | **代码里确实没修**：`internal/application/rsg/service.go:504-523` 的 `GetObject` 只有 `projects.Get` + `branches.Get`，无可见性谓词；`internal/persistence/queries/rsg.sql` 的 `visibility` **只出现在两条 INSERT**；权限矩阵里没有任何"读分支"行。T0613 只关了 Activity 那一半（非成员不再从 Activity **拿到** id） |
+| 2 | 贡献账本要不要有"可见性轴" | `:13676` | 隐私 | 台账逐字「`contribution_events` 没有可见性列是**已知 L3**，要 owner 拍板」；此后无更晚条目 |
+| 3 | 发布是否要求 Research PR **已合并** | `:11508-11508` | 科研语义 | 台账逐字「**我不自行发明**，记在这里，等 owner 裁定」。不扣 Gate（契约硬要求已满足，错的是记录） |
+| 4 | 私有项目的贡献者能否 fork 进**公开**项目 | `:12552-12560` | 权限 | 已有保守默认：T0814 按"父项目非 public 时拒 public"接线，`public` 那条路**没接** |
+| 5 | `CLAUDE.md` §8.1 那句「Worker 写入 `specs/` 的唯一入口」要不要改写 | `:13091-13095` | **owner 自己的规约** | 只差**措辞**；实际口径已定（按 (a) 读，`git log -- CLAUDE.md` 最后改动 2026-09-16，提出在 09-19 之后没动过） |
+| 6 | 谁有权 abort 一个**已发布**的 asset version | `:15121-15125` | 权限 | 写侧 L3；读侧那一半是**我的排期决定**（我 09-21 记了"等 T0708 的 rights 裁定"，T0708 已于 `08:53:04` 合并——**条件满足了，但没人回来立账**） |
+| 7 | 开发栈三个上游镜像的许可证 | `.rddev/runtime/owner-decisions-needed.md` 末节 | 法律 | `redis:7.4.11-alpine`(RSALv2/SSPLv1)、`minio`(AGPL-3.0)、`mailpit`(UNVERIFIED)。有默认：**现状不变**（只在本机开发栈跑，不进交付物）；一旦打包/部署含它们的东西，必须先有书面结论 |
+| 8 | canonical origin `lichman0405/post` 现在是 **public** | `:15180-15211` | 公开性 | 与已录的 `L3-20260912-1`（PRIVATE）**直接冲突**，而那条自己写着「若将来 visibility 再变，必须重新确认」。今天复查仍是 public |
+
+### 三、这一条**不动摇** V1 的完成声明
+
+八件**没有一件**挡 `v1_required` 任务——150/150 全部已合并是事实，证书的四条也仍然成立。
+但它们和第 1 条的关系要说清楚：**第 1 条不是"没做的功能"，是已交付功能上的一个洞**
+（私有分支这个模型存在、被写入、被展示，而读侧不执法它）。按 §5.1 它是**隐私/权限**，
+正是我必须停下来交 owner 的那一类——所以我停在这里，不自裁。
+
+**两件事都要说清楚，不能只报好消息。**
+
+### 四、处置
+
+- **不新立任务**（八件里七件是 L3，立出来的书会当场挂在 `SPEC_BLOCKED`；第 6 条的读侧是我的活，
+  但它要渲染的数据源正好挂在第 6 条的写侧上，配对交付才有意义）。**等安静窗口**：`tasks/tasks.json` 现在不能动（T1215/T1218 在飞）。
+- **收口方式，附一条我自己写错、写完当场就撞上的**：我最初写的是「给这八件铸一组号」——
+  **那样行不通**，而且会从**另一个方向**弄红同一条检查：报告 §0 要求每个被点名的号
+  各配一行 `**裁定**：`（`v1-final-audit.sh:398-405`），而这八件**一件都还没裁定**。
+  所以号只能在 owner 裁定**之后**铸。在那之前，正确的做法就是**别把那句话当全集读**——
+  这一条在本节开头已经记下了。
+- **而且我几乎把这条检查弄红**：写上面那段时我在正文里连着写了两个标签（描述那个
+  `grep` 的范围，以及举例说明"铸号"），**两个都是形如 `L3-` 加圈码的真标签**。
+  那条检查是**拿台账正文去 grep 的**，不区分"这是描述"还是"这是断言"——所以
+  **在台账里写下一个新号，等于当场宣布存在一条尚未裁定的 L3**，而那正是它要红的事。
+  是提交前顺手跑了一遍那个 `grep` 才发现的。改法：描述范围时把前缀与圈码分开写。
+  **这条写在这里，因为下一个人会踩同一个坑**——这份文件既是记录、又是被扫描的输入。
+- 我已经把这份清单交给了 owner（大白话）。
+
+### 52 补记（2026-09-24 11:1x）：第 1 条**不是潜伏的，是活的**——前置状态产品自己能造出来
+
+写完第 52 条之后我把第 1 条追到底，因为"读侧不执法"只说明**门没锁**，
+还需要说明**那个房间能不能被建出来**。三处逐条核过：
+
+1. **能建。** `internal/persistence/branch_store.go:77-84` 只有**一半**判定：
+
+       visibility := in.Visibility
+       if visibility == "" { visibility = domain.BranchVisibility(project.Visibility) }
+       if visibility == domain.BranchVisibilityPublic &&
+          project.Visibility == string(domain.VisibilityPrivate) {
+           return branches.ErrPublicBranchInPrivateProject
+       }
+
+   它挡的是**放宽**（私有项目里开公开分支）。**收窄——公开项目里开私有分支——原样穿过去进 INSERT。**
+   而 `ports.go:60-64` 与 `doc.go:17-19` 的措辞是「an explicit value may **only stay within the preset**」，
+   按字面**两个方向都该挡**。注释描述的是对称规则，代码只实现了其中一半。
+   （DB 侧也不拦：`infra/migrations/00004_rsg_state.sql:16` 的 `CHECK (visibility IN ('public','private'))`
+   只管取值合法，没有跨表的约束。）
+
+2. **API 收得下。** `cmd/api/rsghttp/handlers.go:144` 的请求体带 `Visibility string \`json:"visibility"\``，
+   `:161` 原样传给服务层。所以这不是"只有直接改库才能到达"的状态。
+
+3. **读侧确实不看它。** `internal/application/rsg/service.go:504` 的 `GetObject` 只有
+   `s.projects.Get` + `s.branches.Get`（**存在性**），没有 `branch.Visibility` 谓词；
+   `:546` 的 `GetObjectDetail` 注释自称「Reads run exactly the gate GetObject runs」——同一个洞；
+   `internal/persistence/queries/rsg.sql` 里 `visibility` **只出现在两条 INSERT**（`:10-11`、`:22-23`）；
+   `specs/policies/permissions-matrix.csv` 里没有任何"读分支"行（`grep -in branch` 只出 `:5 create_branch`）。
+
+**结论（这才是要报给 owner 的形状）**：一个公开项目里可以建出一个私有分支；不是这个项目成员的人，
+**只要知道那条分支的编号**，就能读到里面的对象。不是理论路径——建、传参、读，三段都通。
+
+**仍然不自己修**，理由与 `:14863-14876` 逐字一致，且更强了：「私有分支对非成员意味着什么」是权限模型的决定（L3）。
+**顺手修等于把一件要人拍板的事做成既成事实**——这正是那份记录自己警告过的错。这条现在排在待 owner 八件的第一位。
+
+### 52 补记二（2026-09-24 11:4x）：`v1-final-audit.sh` 是**钉在某个 SHA 上**的仪器，HEAD 前进之后跑它**按设计就该红**
+
+修完上面那条标签的事，我顺手把 `bash tests/acceptance/v1-final-audit.sh` 跑了一遍，退出码 1：
+
+    FAIL: report not_run table has 1 rows, script counted 4
+
+**这不是回归，是设计**——逐条核过：
+
+- 报告自己在 `tests/acceptance/v1-final-report.md:58` 就写明：「blocking `not_run` 名单……
+  都是在上面那个 SHA 上取的一次快照，**HEAD 前进一次**（合并、落账、任何一次提交）[就过期]」。
+- 那 4 条是 `T1215/T1216/T1217/T1218-TEST-01`——**证书钉下之后才立的任务**。
+  证书上写的是 `183 = 182 passed + 1 not_run`，那 1 条是它自己那道门（`T1214-TEST-01`）。
+- **CI 不跑它**：`.github/workflows/` 里对 `v1-final-audit` / `v1-final-report` 零命中。
+  所以它红不会让 main 红；它是**宣告完成那一刻**由 Supervisor 手跑的仪器。
+- **与我的编辑无关**：那条 FAIL 在脚本 `:515`，读的是 `tasks/tests.json`；
+  `decisions.md` 全脚本只在 `:386` 被读（就是上面那条 L3 标签检查，现在已相等）。
+
+**记下来是因为这个红长得像回归**：一个只在"宣告完成的那一刻"才有意义的一次性仪器，
+被随手跑一次会给出一个吓人的、但其实预期之内的红。**读仪器的结论之前先读仪器的适用范围**——
+这与上面那条"按标签数却读成全集"是同一族错误的两个方向：一个覆盖比声称的窄，
+一个**有效期比看起来的短**。
+
+## 53 — `knowledge_publications` 的不可变只写在注释里：把「写下来的保证」变成「真的拒绝」（L1 裁定 + 落地，T1218 / 迁移 00157 / #228）
+
+**这笔的性质**：不是"给一张表补个触发器"，是**一条写下来的承诺从来没被强制过**。
+按 §5.1 第 6 条，这属于"未改动既定产品语义"——因为**语义早就写下了**，缺的是机制。所以是 L1，我裁、工人做。
+
+### 一、承诺写在哪儿（逐字核过，不是工人转述）
+
+`infra/migrations/00083_knowledge_publication_identity.sql:72-76` 自己写着：
+
+    -- Append-only, like the row it points at and like the other ledgers: both
+    -- halves of the guard are taken from 00053/00063/00072 — the 00014 row guard
+    -- (BEFORE UPDATE OR DELETE) and the 00015 TRUNCATE guard (BEFORE TRUNCATE,
+    -- statement level), because a ledger that can be truncated is not
+    -- append-only and TRUNCATE fires no row trigger.
+
+「**like the row it points at**」——它把 `knowledge_publications` 的不可变当成**既有前提**引用了。
+然后同一个迁移只给**账本**装了那两半：`knowledge_publication_creations_append_only`（`:118`）与
+`knowledge_publication_creations_no_truncate`（`:122`）。**它指的那个行，一次都没碰。**
+
+### 二、为什么当初漏了（这半是 T0013 的归类）
+
+`00014` 的行级普查（13 张表）与 `00015` 的 TRUNCATE 普查都不含这张表。
+`tasks/results/T0013/RESULT.json` 的豁免清单把它归成「publication/visibility record …
+**exempted rather than over-guarded**」，也就是与 `users`/`projects` 这类**当前态**表并列。
+**那个归类与行本身矛盾**：`published_by`、`published_at`、`rights_json`、
+`UNIQUE(object_version_id, public_version)` —— 这是"发布发生过"的记录，不是可改的属性；
+更正的方式是**追加一个新的 `public_version`**，不是改写早先那次发布说过的话。
+
+### 三、#228 正文有一句已经过期，我按**树**而不是按 issue 正文裁
+
+issue 说 `PublishKnowledgePublication` 除了生成的 sqlc 代码没有调用者、"加触发器不会破坏任何代码"。
+**那是写下时的事实，现在不成立**：T0805（`fc78310`）之后，
+`internal/persistence/knowledge_publish_store.go` 调它、`cmd/api/main.go` 把它接进了 API 组合根
+（两处我自己核过）。风险改为**按树评估**：那条路径只 `INSERT`
+（`internal/persistence/queries/knowledge_publish.sql`），而守卫只拒绝 UPDATE/DELETE/TRUNCATE，
+所以到不了合法发布。这一点由**端到端那套**证明——九个 `TestKnowledgePublish*` 带着 00157 一起绿。
+
+### 四、落地（T1218，迁移 `00157_knowledge_publications_append_only.sql`）
+
+**两半都在**，而且**复用 `append_only_guard()` 本身**（00014:28 那个函数），不是重新写一个
+"什么叫不可变"的判断——所有受守卫的表因此抛出**同一句** `table % is append-only: % is forbidden`、同一个 `P0001`。
+没有新增/修改/删除任何约束；`00014`/`00015`/`00083` 与 `append_only_guard()` **逐字节未改**。
+
+**证据（要能红的才算）**：工人做了两次变异——
+**把迁移拿掉**、以及**让守卫在场但失效**。第二次是关键：它证明
+"只查 `pg_trigger` 目录"的那种测试会在什么都没保护的情况下通过。
+UPDATE / DELETE / TRUNCATE 在只由迁移历史建起来的库上都返回 `P0001`，行事后仍读到 `{"license": "CC-BY-4.0"}`。
+
+### 五、两条诚实的负面（比多报一条正面有价值）
+
+1. `internal/persistence/sqlc/**` **没有动**——触发器不改变 sqlc 生成的任何东西；
+   工人报的是"不存在"，不是编一条出来。这正合任务书里那句"动了就照实报、没动就别造"。
+2. 两个派生物**只由各自的生成器写**。标记摘要随基线变（`tasks/tasks.json` 是它 39 个输入之一），
+   而唯一与 HEAD 不同的输入是 `specs/database/postgres.sql`——生成过、`--check` 绿。
+
+### 六、返工那一轮的记录
+
+第一次被拒**不是实现有缺陷，是任务书的 scope 缺口**。返工轮里实现**一个字节没动**：
+`00157` 的 sha256 前后相同（`5465eced…`），测试文件 diff 形状不变（+54/-2，删的两行都是注释）。
+所有检查在新基线上**从头重跑**、没有一项沿用上一轮——包括在临时库里重建的那套 psql 探针。
+
+**这一条值得单独记**：一次"因任务书而起的返工"里，**实现没变而证据全换**，
+是正确做法。反过来的做法（把上一轮输出搬过来当本轮的）会让"重跑"变成仪式。
+
+**落地**：PR #364，合并为 `3ea25b2`（2026-09-24T04:07:46Z）——CI 的 12 个作业全绿之后由驱动合并，
+我没有手工介入这一步。迁移号 `00157` 是派工时分配的，与 `00158`（T1217 的预留号）不冲突。
+
+## 54 — 陈旧二进制的守卫比的是**本地 `main`**，而驱动从不推进它：规则从 PR 进来，守卫看不见（L1 记账 + 待立账，2026-09-24）
+
+**发现经过**：我对 T1217 做例行的"驱动还健康吗"检查，`./bin/rddev status` 报
+`driver: alive (pid 486387, heartbeat 4s ago) / workers: 1 running / decisions waiting: 0`——**没有 `stale` 字段**。
+按 [[driver-stale-binary-after-orchestrator-commit]] 的记法，没有 `stale` 就等于二进制是新的。**这次不成立。**
+
+### 一、事实（每一条都跑过命令，不是读注释推的）
+
+`internal/devorchestrator/binary_staleness.go` 的 `StaleBinaryReason` 是这么比的（逐字）：
+
+    args := append([]string{"log", "--format=%h %s", rev + "..main", "--"}, OrchestratorSourcePaths...)
+
+**`rev + "..main"`——本地 `main` 分支，不是 `origin/main`。** 而同一份文件自己的注释写下这条守卫的用意：
+
+    a gate must not grade from a tool older than the rules it enforces.
+
+同一时刻量到的三件事：
+
+| 量的是什么 | 结果 |
+|---|---|
+| 本地 `main` 指向 | `39ca6c7` |
+| 本地 `main` 里有 `60d7dd5`（T1215 的合并）吗 | **没有** |
+| `git log 9a518e3…**..main** -- cmd/rddev internal/devorchestrator` | **0 条** → 守卫判"新" |
+| 同一个 rev、同两条路径，比 **`origin/main`** | **1 条**：`60d7dd5 [T1215] 退出时序…(#363)` → 守卫**本该拒绝** |
+
+所以守卫的结论**完全由"比哪个 ref"决定**，而它比的那个 ref 恰好是驱动**从不推进**的那个：
+驱动在 GitHub 上合并 PR，前进的是 `origin/main`；本地 `main` 停在它自己上次被提交的地方
+（这正是 [[local-main-lags-origin-main]] 记的那件事）。**结论是：本来只该是"记账口径偏了"的东西，
+反过来吃掉了守卫的全部作用。**
+
+### 二、为什么这次真的发生了（而不是理论）
+
+T1215 的合并（`60d7dd5`）动了 **10 个 orchestrator 源文件**：
+`worker_guard.go`、`worker_registry.go`、`worker_spawn.go`、`worker_stop.go`、`worker_proc.go`、
+`review_worker.go`、新增 `worker_exit_timing.go`（+136）与它 359 行的测试、`cmd/rddev/worker_test.go`（+108）。
+而正在跑的驱动是 **`9a518e3` 构建的**（`vcs.time=2026-09-24T01:01:46Z` = 本地 09:01:46，
+`bin/rddev` mtime `09:02`）——**比 T1215 合并早约 3 小时**。
+
+也就是说：**此刻驱动的账本逻辑比它正在执行的规则旧**，而它报的是"健康"。
+
+### 三、能伤到什么、伤不到什么（我不夸大）
+
+**伤不到判据本身。** G2 跑的是**被测工作树里的**测试脚本（T1217 的树里 `four-gate-helpers.sh` 已是 T1215 之后那版），
+CI 的 11 个作业更是完全不经过 `rddev`。所以**测试决定通过与否这件事没有被降格**（§6 的 G1/G2/G3/G4 标准不变）。
+**可能偏的是编排账本**：收工判定、`exit.status` 读取语义、G2 覆盖记账——而这三样**恰好是 T1215 改的那批**。
+对 T1217 这一笔，实际风险低（它是首轮，不存在上一轮的 `RESULT.json`），但**这是个正在生效的洞，不是隐患**。
+
+### 四、处置
+
+- **不现在修**。修它要动 `internal/devorchestrator/**`，而驱动正在跑——那正是
+  §3 与 [[driver-stale-binary-after-orchestrator-commit]] 描述的、会把流水线自己停住的形状。
+  而且按 §1，这属于应当派工的实现工作，不该由我顺手改。
+- **不重启驱动**。它的子进程表是**空的**（`ps --ppid 486387` 无输出）——T1217 的工人被 `setsid` 摘走了。
+  所以重启**不会杀掉工人**，只会让驱动**认不出它已经派过 T1217**，从而**再派一遍**。
+  "重启更安全"是错觉，这里恰好相反。
+- **记在这里、等空窗立账**：与第 51 条那两处"没人管"同族——**规则从 PR 进来，而守卫只看本地 ref**。
+  修法是让比较面覆盖 PR 进来的那条路径（`origin/main`，或两者取并），
+  **并且要有一条会红的测试证明"PR 合并进来的 orchestrator 变更会让守卫拒绝"**——
+  照 [[prove-the-instrument-can-say-no]]，这条测试必须先证明它能红，否则还是在量空气。
+
+### 五、给下一个读到这里的人（包括我自己）
+
+`rddev status` 说健康 **不等于** 二进制是当前的。要自己量：
+
+    REV=$(go version -m bin/rddev | sed -n 's/.*vcs.revision=//p')
+    git log --oneline "$REV..origin/main" -- cmd/rddev internal/devorchestrator
+
+比 `main` 空、比 `origin/main` 非空，就是本文这一条。**别用 status 的沉默当绿灯。**
+
+## 55 — 四处缺口的**修法各落在哪里**：三处根本派不出去工，只有一处可以（L1 记账，更正 51 / 54 里「要立账」的说法，2026-09-24）
+
+我在 51 与 54 的末尾都写了「要立账」。**现在把四处缺口的落点逐一量过之后，"立账"这个动词对其中三处是错的**——
+不是"先记账、以后派工"，而是**派不出去**。这是我该在写下那句话之前就量的事。
+
+| 缺口 | 修在哪 | 在 git 里？ | 能派工吗 | 谁做 |
+|---|---|---|---|---|
+| **A** 派生物链条在规则文件里表达不出来 | `specs/orchestrator/derived-artifacts.json`（+ `scripts/spec_version.py`） | 在 | **不能**——`specs/**` 与 `scripts/**` 都是 Supervisor-only / 工人禁区 | **我** |
+| **B** collect 被拒没有自动恢复 | `.rddev/tools/resolve_decisions.py` | **不在** | 不能 | **我** |
+| **C** 返工信把「G2 有作业红」读成「你的代码有缺陷」 | 同上（同一份文件的 `reason_for()`） | **不在** | 不能 | **我** |
+| **D** 陈旧二进制的守卫比错 ref | `internal/devorchestrator/binary_staleness.go` | 在 | **能** | 工人 |
+
+**B 与 C 为什么派不出去**：`.rddev/` 在 `.gitignore:10` 里，`git cat-file -e origin/main:.rddev/tools/resolve_decisions.py` **不存在**。
+工人的产物是"未提交的 working-tree diff"，而这份文件**连提交都进不去**（[[rddev-tooling-lives-outside-git]]）——
+它的修复不进 git、不进 CI、不经过四层 Gate。派一个工人去改它，等于让它的工在验收时"消失"。
+**这不是我偷懒的借口，是它的产物形态决定的。** 代价要认：**这三处的修复天生没有 Gate 兜底**，只能靠我自己先证伪再改。
+
+**A 为什么派不出去**：`specs/**` 是 Supervisor-only（CLAUDE.md §8.1 的例外只有 `postgres.sql` 那一个生成物），
+而 A 恰恰要改的就是那条例外规则自己。
+
+**C 的具体位置**（逐字核过，`resolve_decisions.py`）：
+`:154` 抬头按**红掉的 job 名**拼——`head = [f"【返工 —— 验收时 \`{...}\` 这条检查没过，请照下面报错改】"]`；
+`:172` 正文写死一句「你的交付在验收时被拒……」；`:207` 的分派表把 `accept` + `"G2 is red"` 一律映射到"推基线返工"。
+**三处都不知道"红的是行号漂移"这种形态**——T1215 撞上的正是它：报出来的 gosec 发现**全都在 main 上**，
+只是被插入的行整体推后了（`worker_guard.go` 一律 +25，`worker_spawn.go`/`worker_registry.go` 一律 +3）。
+**偏移一致**是判据，而且 `ops/ci/gosec-baseline.txt` 的键本来就长这样，两个判据都是现成的、可自动算的。
+
+**所以处置改成：D 派工；A、B、C 我自己修，且修完必须在台账里写清"没有 Gate 兜过它"。**
+顺序上 B 优先于 C——两者同文件，而 B（任务静默停死）比 C（信读起来误导）后果重。
+
+**这一条的教训**：写下"要立账"之前，先量一遍**那笔活的产物能不能落到 git 里**。
+不然台账上会留下一串"待派工"，而它们永远派不出去。
+
+### 54 补记 — 这条洞当场就有一个实证，而且是刚发生的（2026-09-24 12:15）
+
+第 54 条写的是"驱动此刻正拿旧工具判新规则"。**我当时是推断的；半小时后它给了我一个能直接指认的实例。**
+
+T1217 交付的正是 `worker_collect.go` 里新加的一条收工检查（`result-freshness-*`，见 `result_freshness.go`）。
+它 12:14:44 被 collect，`collect-report.json` 里 **14 条检查，一条 `result-freshness-*` 都没有**。
+
+我去核了原因，不是它没接上——工作树里 `worker_collect.go:307-318` 明明写着：
+
+    resultPath := filepath.Join(rec.ResultDir, "RESULT.json")
+    freshness, err := CheckResultFreshness(resultPath, gate, rec)
+    for _, f := range freshness {
+        if f.Refused { fail("result-freshness-"+string(f.Instrument), f.Detail) }
+        else         { pass("result-freshness-"+string(f.Instrument), f.Detail) }
+    }
+
+**是跑 collect 的那支二进制里压根没有这段**：`git show 9a518e3:internal/devorchestrator/worker_collect.go | grep -c CheckResultFreshness` = **0**，
+而那个版本里全部 `pass/fail` 的检查名，与报告里那 14 条**逐一对得上**
+（`gate-inputs` / `worker-exit` / `residue` / `head-baseline` / `branch-ref` / `refs` / `scope` / `result-schema` /
+`result-consistency-*` / `secrets`）。**这就是第 54 条说的那件事，只不过这次能指着一条具体的检查说"它没跑"。**
+
+**要紧吗？对 T1217 不要紧，理由要说清**：判它的是**测试**，而测试跑在**被测的那棵树**里——
+G2 的 `go test ./internal/devorchestrator/` 会执行本轮新增的 `result_freshness_test.go`，
+工人还用 `no-freshness-step` 变异证明过"把这段调用删掉，行为测试就红"。所以**新代码是被测过的**，
+只是**不是由驱动的 collect 测的**。G1/G2/G3/G4 的标准没有被动过。
+
+**真正的后果是一条操作纪律**：**工人交的 orchestrator 改动，在 `make rddev` 之前是不生效的。**
+T1215 的与 T1217 的都要等那一步。所以收尾顺序里"重建二进制"不是可选项，是**这两笔修复开始起作用的前提**；
+把它当成"重启前的例行公事"会漏掉它真正的意义。**在此之前，任何"驱动跑得好好的"都只说明它跑的是旧规则。**
