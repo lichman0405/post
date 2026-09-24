@@ -18857,3 +18857,104 @@ schema / collect / `system.md` 三者对 `acceptance[].status = not_applicable` 
   两次红都是 `2/3 seed=404`（**不是**任务书猜的 403）；重试 32 次挽回 **0** 次，
   每次 4 次尝试约 3.1 秒耗尽
 - 全部 `acceptance_criteria` 里含条件式词 **22** 条，条件落在**交付物形状**上的 **1** 条（本条的旧写法）
+
+
+## ㊿ `knowledge_publications` 的不可变只写在注释里：L1 裁定 append-only，与 T0013 的归类冲突（L1，2026-09-24）
+
+### 一、决定
+
+`knowledge_publications` **是 append-only**。这是 L1：它不改产品语义、不改权限模型、不改
+API 契约，只是让表结构兑现它自己已经写在注释里的承诺。裁定连同理由一起写进了 T1218 任务书的
+`supervisor_scope_narrowing`（渲染成 `## Supervisor rulings for this task`，位置在
+`## Requirements` **之前**——`worker_render.go:455` 那句注释说得对：放后面，工人已经选好读法了）。
+四条一并定死，不许工人再权衡：
+
+1. **两半都装**：`00014` 的行级 guard（BEFORE UPDATE OR DELETE）**和** `00015` 的语句级
+   TRUNCATE guard。只装一半等于没装。
+2. **复用 `append_only_guard()`**（`00014:28` 建的那个），不另写一套判据。
+3. 进 `tests/integration/append_only_test.go` 的 `appendOnlyTables` 清单，并补注释说明为什么。
+4. 迁移号 **00157**，由我在派工前预留。
+
+### 二、证据：承诺在注释里，机制不在
+
+`infra/migrations/00083_knowledge_publication_identity.sql:66-73` 写着这份幂等账本
+"Append-only, **like the row it points at** and like the other ledgers"——
+**它把「被它指向的那一行是 append-only」当成前提写进了注释**。
+同一份迁移给 `knowledge_publication_creations` 装了两半（`:118` 行级、`:122` 语句级 TRUNCATE），
+**却没碰它指向的那张表**。
+
+核过的数：
+
+- `00014` 的 `CREATE TRIGGER ..._append_only` 共 **13** 条，覆盖
+  `scientific_object_versions, relation_versions, project_states, state_commits, releases,
+  research_asset_versions, asset_lineage, policy_versions, validation_results,
+  contribution_events, audit_log, research_events, external_reference_snapshots`
+  ——`knowledge_publications` **不在其中**。
+- 全仓 `grep -rniE "(UPDATE|DELETE FROM)\s+knowledge_publications"` 命中 **0**：
+  这张表从来只有 INSERT 和 SELECT。
+
+**这和我 2026-09-24 记的另一起是同一个形状**：`internal/rsg/schemareg/schema.go` 的
+「`$ref` resolve against them locally (never over the network)」之所以成立，
+只是因为 `jsonschema.NewCompiler()` 没装 loader（`loader.go:155` 返回 `no URLLoader set`），
+**是巧合，不是机制**。两处的教训是同一条：**判断严重性要看谁在强制，不是看谁在声称。**
+
+### 三、与 T0013 的归类冲突在哪
+
+T0013（`00014`）把这张表列进豁免名单，理由写在 `tasks/results/T0013/RESULT.json`：
+豁免对象是「当前状态/工作流表」，它把 `knowledge_publications` 和
+`users` / `projects` / `issues` 并成一类。
+
+**这个归类对不上表结构。** `00010:64` 的定义是
+`published_by` + `published_at` + `rights_json` + `UNIQUE(object_version_id, public_version)`
+——存的是**「发布这个动作发生过」**，不是「当前状态」。一条已发布记录被就地改写，
+外部读者看到的声明就变了，且不留痕迹；这与 `CLAUDE.md` §9 第 5 条（Release / Asset Version
+immutable）是同一条要求。所以是 **T0013 的分类错了**，不是 00083 写错了前提。
+两边不可能都对，我按表结构判。
+
+### 四、为什么修法是「两半 + 复用」而不是别的
+
+- **为什么必须补 TRUNCATE 那一半**：行级触发器**不在 TRUNCATE 上触发**，
+  这是 T0013 自己发现并交给 `00015` 补的洞。00083 的注释把理由写得最清楚：
+  a ledger that can be truncated is not append-only and TRUNCATE fires no row trigger。
+  只改 UPDATE/DELETE 就等于把 T0013 已经踩过的坑再踩一遍。
+- **为什么复用同一个函数**：另写一套判据就多一处会各自漂移的地方；
+  `append_only_guard()` 是既有 30 多张表共用的那一份。
+- **为什么进那份普查清单**：`appendOnlyTables` 同时驱动目录断言和逐表拒绝循环，
+  而 `append_only_truncate_test.go` 的 `truncateGuardedTables` 是**从 `pg_trigger` 里查**
+  `_no_truncate` 再与这份手工清单**交叉核对**——**少一边两边都会红**。
+  这是这套测试里我最满意的一处设计：它不靠人记得更新清单。
+
+### 五、任务书里点名纠了 issue 正文一处过期
+
+`#228` 的证据部分说 `PublishKnowledgePublication`「在 sqlc 生成代码之外没有任何调用者」
+「此时加触发器不会破坏任何代码」。**这是它写下的时点的实情，现在不成立了**：
+T0805 后来合并（`fc78310`），`internal/persistence/knowledge_publish_store.go:291`
+就在调它——**这张表已经有产品写入路径了**。
+
+结论不变（仍然该是 append-only，因为那条路径只 INSERT），但风险描述变了，
+所以任务书里明写：**以树为准，不以 issue 正文为准**。这条也顺带是给工人的一次示范——
+我自己在 ㊾ 里刚犯过「照着自己脑子里的版本下判断」的错。
+
+### 六、这一笔交出去了，账落在这里
+
+- T1218 任务书：`tasks/tasks.json` 的 `T1218`（`d701cc7` 立 T1217、`bb727a9` 立 T1218）。
+- 迁移号 157 已在 `.rddev/runtime/migration-numbers.json` **预留**：分配器对已预留的号
+  原样返还（`AllocateMigrationNumber`：「a task keeps the number it was contracted with」），
+  所以即使 T1217 先派工，T1218 也拿得到任务书里写死的 157。
+- `tasks/**` 对工人是**禁写**范围，所以任务书里让它把「该记什么」写进 RESULT 的
+  `notes_for_supervisor`，由我落账到本文——就是这一段。
+
+### 七、可复核的数
+
+- `00014` 行级名单 **13** 张（`grep -c 'CREATE TRIGGER .*_append_only'` → 13），
+  `knowledge_publications` 不在其中
+- `grep -rniE "(UPDATE|DELETE FROM)\s+knowledge_publications"` → **0** 命中
+- `00083`：`:91` 唯一索引 `knowledge_publications_pid_uniq`、`:109` 建
+  `knowledge_publication_creations`、`:118`/`:122` 两半 guard 都在**它**身上
+- `internal/persistence/knowledge_publish_store.go:291` → `q.PublishKnowledgePublication(...)`，
+  全仓该 sqlc 查询的非生成调用者**恰好这 1 处**
+- 任务书落地实测：五个 JSON 文件重新序列化后与磁盘**逐字节一致**；
+  T1215（10 文件）/ T1216（1 文件）的 worker patch 对新 main tip `git apply --check` **干净通过**，
+  两份都不含 `specs/` / `tasks/` 的 hunk
+- `tasks/decisions.md` **不在** `specs/SPEC_VERSION.json` 的 39 个输入里（本文因此随时可写，
+  不会移动 marker、不会打扰在跑任务的 G2）
