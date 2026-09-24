@@ -18702,3 +18702,75 @@ AUDIT OK: report markers present, counts match (0 unmerged, 1 not_run, 0 failed,
 - **没有把 §6.1–§6.9 的历史叙述重钉到 T1214**（那是改第八轮的原话，不是改一处路径）；
 - **没有重生成 `specs/SPEC_VERSION.json`**：它的输入是 `tasks/tasks.json` + `specs/**`，
   这一笔只动 `tasks/tests.json` / `decisions.md` / `progress.md` 与驱动的状态文件，不在输入里。
+
+---
+
+## ㊽ T1214 任务书的三处订正落在了一份**没人读的文件**里：DAG 才是被渲染成 Worker 任务书的那一份（L1，2026-09-24）
+
+### 1. 是怎么发现的
+
+收尾之后我回头核 T1214 的账，发现 `tasks/tasks.json` 的 T1214 条目与
+`tasks/packages/T1214.json` 在四处对不上（`requirements[2]`/`[4]`/`[5]`、
+`acceptance_criteria[3]`）。顺着 `git log tasks/packages/` 查下去，对不上的是**我自己**：
+立账那一笔 `ade80a3` 里两份文件逐字段相等，随后三笔订正各只碰了 `tasks/packages/T1214.json`——
+
+- `8aabe12` 把那四条记实错误换成我自己量出来的数；
+- `91ed2d5` 撤掉「脚本里有 10 个门标题的循环」那句我编的话；
+- `67d60fb` 把「三条范围裁定」改成与括号里点名数相符的「两条」。
+
+三笔都在末次派工（`run-02951ee0082f2597`，20:30:52+08）**之前**约一小时落地，本意就是让那一轮
+拿到订正过的任务书。
+
+### 2. 但 Worker 读的不是那个文件（这一条是实测，不是推断）
+
+`internal/devorchestrator/worker_spawn.go:127` 取 `store.dag.Get(opts.TaskID)`，交
+`RenderTaskPackage`（`worker_render.go:48`）渲染成任务书。全仓 `grep` 下来，
+`tasks/packages/` 这个路径**在 Go 与 Python 里一次都没被读过**——它是我手写的副本，没有读者。
+
+决定性的一步是拿派工原件对：把两版文本各自整段（空白归一化后）到
+`.rddev/workers/T1214/prompt.md` 里找——
+
+```
+[requirements][2]     包副本在任务书里: False | DAG 在任务书里: True
+[requirements][4]     包副本在任务书里: False | DAG 在任务书里: True
+[requirements][5]     包副本在任务书里: False | DAG 在任务书里: True
+[acceptance_criteria][3] 包副本在任务书里: False | DAG 在任务书里: True
+```
+
+四处一致：**派出去的原文是 DAG 那版，我的订正一个字都没到 Worker 手里。**
+
+### 3. 对已合并的交付有什么影响：没有，但原因不是我做对了
+
+- 那两句里**只有一句是假的**：`requirements[4]` 的括号说「门的顺序由脚本里那 10 个标题的
+  循环给出」——脚本当时**没有**那张表（订正版写明「脚本今天没有那张门名表……要你自己建立并
+  证明」，而 Worker 正是照后者的意思建了 `GATE_TITLES` 与位置配对，今天在
+  `tests/acceptance/v1-final-audit.sh:215`）。
+- 合并后的证书里**没有**重复这两处错：报告 `:1314` 直接把 `91ed2d5` 的标题行抄进了修订记录
+  （「……那句『脚本里有 10 个门标题的循环』是我编的」），全文也没有「三/两条范围裁定」这种计数
+  （`grep -n "条范围裁定"` 只命中 `:352` 一处无关的「另一条范围裁定」）。
+  Worker 是靠 `git log` 的标题行读到的，**不是靠我那份订正**。
+- 结论：这一笔**没有**污染 V1 证书；但它说明我当时以为「我改过任务书了」，实际没有。
+
+### 4. 这一笔做了什么
+
+1. **把订正搬进真相源**：`tasks/tasks.json` 的 T1214 条目四处字段改成与包副本一致
+   （4 insertions / 4 deletions；写前用 `json.dumps(indent=2, ensure_ascii=False)+"\n"`
+   验证逐字节往返，写后断言**只有**这四个字段变过）。
+2. **重生成 `specs/SPEC_VERSION.json`**（`tasks/tasks.json` 是它的输入）：
+   `3fd228bcca5d6bc8…`(39 inputs) → `2e93270677852055…`(39 inputs)；
+   全仓 `grep` 旧标记零命中，没有别处引着它。
+3. 验证器：`validate_task_state.py` 9/9、`validate_specs.py` 12/12。
+
+### 5. 必须留在这里的话
+
+- **这是事后订正真相源**：那一轮 Worker 实际拿到的原文只存在于
+  `.rddev/workers/T1214/prompt.md`（不在 git 里）。本条就是这件事的记录——不写下来，
+  「DAG 里现在这版」与「当时派出去那版」之间的差就没人知道了。
+- **`tasks/packages/**` 是一个会静默漂移的副本**（以下都是这一笔之后实测的数）：156 笔任务里
+  **58 笔**有这个文件、**98 笔没有**；有文件的里面 **31 笔**与 DAG 的字段值不等（漂得最多的是
+  `deliverables` 19 笔、`tests` 12 笔、`requirements` 10 笔）。T1214 在改完 §4 第 1 条之后
+  **已不在**这 31 笔里。`CLAUDE.md` 从头到尾没提过这个目录。
+  它既不是输入也不是产物，**是一份没有读者的第二真相源**。要么让它由 DAG 生成并加校验，
+  要么删掉——这件事不在这里顺手做，留给下一批立账时开一笔任务。
+- 这一笔**没有**改 `tasks/packages/T1214.json`（它现在与 DAG 一致了），也**没有**动
+  `tests/acceptance/**`（证书与校验器的字节数不变）。
