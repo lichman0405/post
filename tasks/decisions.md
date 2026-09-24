@@ -20277,3 +20277,46 @@ T1224 的任务书里逐字写着：
 2. **T1223 的 `risks` 五条**（我已逐条读过）：其中「`no records file` 那条依赖 `/nonexistent-dir` 不存在」是一个**环境型的假绿**（若将来某环境真建了这个目录，该用例会静默变绿）。**性质重要（`green-from-the-early-exit-path` 同类）但概率极低**，本轮不派工，记在这里；若再动那套件，做成「保证不存在」的夹具。
 3. **`internal/devorchestrator/worker-guard.go:378` 的注释**与 `:147` 同款过宽，而那个文件**不在 T1223 的 `allowed_scope`** 里。走 (甲) 路线时头注改真而它不动，两处会不一致——**留到 T1223 定了路线之后再判**是补一笔还是并在别处。
 4. **我这一轮的返工书里有一处自造的重复**：替换行号时把 `command_records` 那个逐行块的内容既放进了括号又留在原句里，读起来重复一遍（意思没错、判据没错，工人已收到，不重发）。记下来是因为它是「文本级替换插进了已经重述同一件事的句子」——和 `json-spec-edit-must-roundtrip` 是同一个毛病的小号版本。
+
+## 69 — T1226 验收：一条为已修缺陷辩护的注释、一台把 axe 扫描挪走了的仪器——**两处又都是我这本任务书的缝**，本笔照收并把后果立成 T1230（2026-09-24）
+
+### 一、裁定：收下（不驳回），两件后果当场立账
+
+评审 `approve`，5 条 findings（`[0]` `[1]` minor，`[2]` `[3]` nit），**0 条 blocking**。**没有驳回**，理由三条：
+
+1. **判据是加强的**：新判据是 `[data-search-citation]` 在 **且** `[data-search-fallback]` 不在（`a11y-smoke.mjs` 的 `absent` 那半），既有断言一条未删未跳，17 张基线逐字节未变；
+2. **五条里没有一条是「工人在自己的产物里写下假话」**——见 §二：`[0]` 与 `[3]` 的根在**我的任务书**，不在工人的手上；
+3. 按我自己立的规矩（`reject-vs-record-rule`）：**为机制辩护的假话、而保护还在** → 记录后合并；**假的覆盖/证据声明** → 驳回。这两条一条都不属于后者。
+
+### 二、我量过的两处缝——都在任务书里，不在工人手里
+
+**(1) 我在要求里点名了那条注释会辩护的机制，却没说「把为它会辩护的那句话改掉」。**
+要求 `[2]` 逐字写着「**那个标记回退状态也渲染**（这正是覆盖被记宽的原因）」——所以工人**知道**。而 `a11y-smoke.mjs` 里 `SHELL_SELECTORS` 上方那段自述仍写着 `search-answer.tsx` 把 `data-search-answer` 写在「only when an answer came back」。**我核过产品**：`apps/web/app/(main)/search/search-answer.tsx` 的 `AnswerBody`（`:245-253`）把它写在 `search-panel` 那个 div 上，两条分支（`SummaryBlock` / `FallbackNotice`，`:255-259`）**共用**，所以回退态也渲染它。工人新写的那段（`routeTemplates` 上方）说的是实话；**14 行之下那句仍是假话，而且它正是被修掉的那个判据的理由**。这是 `a-deferred-fix-becomes-the-next-tasks-premise` 的原样重演：我点名了事实、没点名那句话，工人照书办事，留下一处自相矛盾。
+
+**(2) 我要求把扫描挪到「带引用」那条路，却没说明挪走的那一层不能掉出活入口。**
+量过（T1226 合并前的工作树）：`/search` 回退态的 axe 扫描**改动前是有**的——a11y 作业扫的就是回退态那一页（夹具自述：「retrieval returned zero ranked sources for `catalyst` … the coverage table recorded the fallback under 有数据」）。改动后 a11y 作业扫带引用那一支，回退态只剩 `tests/e2e-search/search-e2e.mjs:379` 一处 axe，而那条路**没有任何活入口**：`gates.json`/`ci.yml` 里搜不到 `make browser-e2e`（只有 `Makefile` 自己提到它）；`tests/acceptance/privacy-suite.sh:199` 的 `BROWSER_SUITES=(anonymous assets explore settings shell)` **不含 search**；而 `privacy-suite.sh` 自己也没有 CI 调用者（只被 V1 报告 B4 行与台账当证据引用）。
+
+**精确的说法是「回退态的无障碍测量掉出了活入口」，不是「那个页面没人渲染」。** 回退态确实还被渲染：**T1226 自己**把 `/search?q=zzqx` 加进了 i18n 套件（`i18n-smoke.mjs:437`、`:841` 的注释写着「T1226 added a ninth」），而 `i18n` 是 required job。但 i18n 套件里**没有 axe**（`grep -n axe tests/web-smoke/i18n-smoke.mjs` 空输出）。工人是**有意识地**不让回退态消失的——它漏掉的是「测量」那一层。
+
+### 三、评审的四条，我逐条核过
+
+- `[0]` 注释那条：**成立**，就是 §二(1)。
+- `[1]` 评审说工人 RESULT 的 `risks[2]` / `follow_up_issues[1]`「answered search 仍没有视觉基线」与树矛盾：**成立**。`tests/web-smoke/baseline/search-answer.png` 就是那 17 张之一（`ls | wc -l` = 17），`visual-regression.mjs:352` 驱动 `/search?q=${SEARCH_QUERY}`，`ready` 是 `[data-search-section="answer"]`，其夹具是 answered。**准确的说法只能是**「a11y harness 的搜索页没有自己的基线，两套各用各的夹具」。**这条改不了任何判据**：17 张确实逐字节未变、也确实不必重渲。它住在**不在版本库里的** `RESULT.json` 里，作为既成事实收下、不派工——但它是「Worker 的自述没有收件人」的又一例（`book-handing-back-creates-an-untracked-obligation`）。
+- `[2]` `a11y-harness/main.go:189` 的 READY 行报了 `search_query`，而**没有任何消费者**（查询词在路由表、键盘走查、i18n 路由三处各自硬编码）：**成立**，并入 T1230。
+- `[3]` axe 覆盖移位：**成立**，就是 §二(2)。评审说「取舍看着是有意的」——对一半：取舍确实是有意的，**代价没有被写下来**。
+
+### 四、顺带核到的一处同族假话（评审没提，我读树时撞上）
+
+`tests/web-smoke/keyboard-checklist.md` 里那句「on that same route the answer itself really renders（`[data-search-answer]` is in the DOM…）」：它在 T1226 **之前是假的**（那条路当时渲染的是回退态，而 `data-search-answer` 照样在），T1226 之后因为夹具真的答了而**碰巧成真**。**别把它当证据**：它连引用都不看、也不看回退。并入 T1230。
+
+### 五、立账 T1230（P13，`v1_required=false`，G3 = `a11y` + `i18n`，依赖 T1226）
+
+把回退态的扫描接回 **`a11y` 作业内部**（**不新建 CI 作业**——`required_jobs` 那 11 个作业的集合相等是证书里的一处断言，动它等于动证书），并把 §二(1) / §四 那两句改成机制的样子。**不必等 T1227**：这一笔不新增仪器、不加作业，只是把一条本来就存在的扫描放回它原来所在的作业里。
+
+**为什么不让 T1227 顺笔做**：T1227 的允许面是 `internal/instrumentinventory/**` + `ops/ci/instrument-inventory.json`，任务书里明写「本笔不碰任何仪器」。名册要**照实记**今天的状态——顺手改掉，名册记的就是一笔已经不存在的事实。这是 `a-deferred-fix-becomes-the-next-tasks-premise` 的反面用法：**把缺陷交给名册去记，等于给名册喂一个会过期的前提。**
+
+### 六、遗留（记录，不立账）
+
+1. `keyboard-checklist.md` 那句改成什么样由 T1230 定。**「人肉走查文档比仪器弱」是允许的**；不许的是它读起来像仪器。
+2. 评审 `[3]` 的另一半：`make browser-e2e` 与 `tests/acceptance/privacy-suite.sh` 都无活入口——**那是 T1227 名册的产出**，等它落账后我一次性裁定要不要接线（接线要动 CI 配置，是我的面）。
+3. T1226 的 `forbidden_scope` 里那条带括号的例外（`tests/**（上面列出的那几处除外）`）会被范围检查自己的匹配器跳过。**本笔没出事**（约束落在 `allowed_scope` 那个白名单上），但写法照 T1227 更正过的那样办：**例外只用 `allowed_scope` 表达，`forbidden_scope` 不放括号**。

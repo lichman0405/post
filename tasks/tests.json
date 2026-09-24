@@ -1990,6 +1990,36 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1230-TEST-01",
+      "task_id": "T1230",
+      "name": "the a11y job axe-scans the /search fallback state again, and the coverage table records it as the fallback rather than 有数据",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1230-TEST-02",
+      "task_id": "T1230",
+      "name": "the new fallback-state assertion fails when the page is not the fallback",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1230-TEST-03",
+      "task_id": "T1230",
+      "name": "the suite's own files no longer claim data-search-answer proves an answered page, and the visual baselines are byte-identical",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }

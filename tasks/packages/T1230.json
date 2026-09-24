@@ -1,0 +1,74 @@
+{
+  "id": "T1230",
+  "phase": "P13",
+  "phase_name": "V1 之后的加固：流水线自己的可信度",
+  "title": "T1226 把 `/search` 的 axe 扫描从回退态挪到了带引用态，回退态从此**没有任何活入口**扫它：把那条扫描接回 `a11y` 作业内部，并把两句为已修缺陷辩护的话改成机制的样子",
+  "v1_required": false,
+  "dependencies": [
+    "T1226"
+  ],
+  "tests": [
+    "the a11y job axe-scans the /search fallback state again, and the coverage table records it as the fallback rather than 有数据",
+    "the new fallback-state assertion fails when the page is not the fallback",
+    "the suite's own files no longer claim data-search-answer proves an answered page, and the visual baselines are byte-identical"
+  ],
+  "allowed_scope": [
+    "tests/web-smoke/a11y-smoke.mjs",
+    "tests/web-smoke/a11y-harness/**",
+    "tests/web-smoke/i18n-smoke.mjs",
+    "tests/web-smoke/run-a11y.sh",
+    "tests/web-smoke/run-i18n.sh",
+    "tests/web-smoke/keyboard-checklist.md"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "specs/**",
+    "docs/**",
+    ".github/**",
+    "apps/**",
+    "services/**",
+    "infra/**",
+    "ops/**",
+    "scripts/**",
+    "Makefile",
+    "cmd/**",
+    "internal/**",
+    ".rddev.example/**",
+    "tests/web-smoke/baseline/**",
+    "tests/security/**",
+    "tests/acceptance/**",
+    "tests/e2e-search/**",
+    "tests/**（allowed_scope 没点名的一律不许写）"
+  ],
+  "decision_level_max": "L1",
+  "relevant_specs": [
+    "docs/35_ACCESSIBILITY.md",
+    "docs/67_TEST_GATES.md"
+  ],
+  "requirements": [
+    "**先自己把下面四条在树里核一遍**（我读过树也会错，**以树为准**；对不上就写明并以树为准）：\n  * (a) `tests/web-smoke/a11y-smoke.mjs` 的搜索路由今天断言的是**带引用**那支：`[data-search-citation]` 在、`[data-search-fallback]` 不在（`data` 里的 `absent`）。而 `/search` 的**回退态**今天不再被这台套件扫到。\n  * (b) 我量到的移位（2026-09-24，T1226 的工作树）：回退态剩下的 axe 扫描只有 `tests/e2e-search/search-e2e.mjs:379` 一处，而 `tests/e2e-search/run.sh` **没有活入口**——`specs/orchestrator/gates.json` 与 `.github/workflows/ci.yml` 里搜不到 `make browser-e2e`；`tests/acceptance/privacy-suite.sh:199` 的 `BROWSER_SUITES=(anonymous assets explore settings shell)` 不含 `search`；`privacy-suite.sh` 自己也没有 CI 调用者。回退态**仍被渲染**（`i18n` 作业经由 `i18n-smoke.mjs:437` 的 `/search?q=zzqx`），但那个套件里**没有 axe**。\n  * (c) `a11y-smoke.mjs` 里 `SHELL_SELECTORS` 上方那段自述说 `data-search-answer` 只在「an answer came back」时写——**假**：`apps/web/app/(main)/search/search-answer.tsx` 的 `AnswerBody` 把它写在两条分支（`SummaryBlock` / `FallbackNotice`）**共用**的那个 div 上，回退态也渲染它；同文件新写的那段（`routeTemplates` 上方）已经说了实话。**只读产品代码，不许改 `apps/**`。**\n  * (d) 同族还有 `tests/web-smoke/keyboard-checklist.md` 里那句「the answer itself really renders（`[data-search-answer]` is in the DOM…）」——它在 T1226 **之前是假的**（那条路当时渲染回退态，而那个标记照样在），之后因为夹具真的答了而**碰巧成真**。**它比仪器弱**（不看引用、也不看回退），不许把它当覆盖证据。",
+    "**把回退态的 axe 扫描接回活入口——接在 `a11y` 作业内部，不许新建 CI 作业、不许改 `.github/**` 或 `specs/**`。** 这台套件今天扫的是带引用那支；回退态要作为**第二条搜索路由**进扫描表（查询词由你定，i18n 那套用的是一条匹配不到任何播种文档的问题），判据要落到两处：(i) **证明这一页真的是回退态**（用你核过的真实钩子，例如回退段在、答案那支的标记不在）；(ii) **它的 axe 违规数为 0，且这一行被记进覆盖表**——读者要能看出这一行扫的是回退态。\n  **特别警告**：把回退态记成「有数据」**正是 T1226 修掉的那个缺陷**。这一行的判据必须是回退态自己的，方向与带引用那行**相反**。\n  **下限（floor）不许降**：`a11y-smoke.mjs` 末尾那个「到达 有数据 的路由数」的下限若因你改了路由集合而变化，照**实际数**写清并说明为什么（只许说清，不许为了数字好看而把新路由塞进那个计数）。",
+    "**把那两句改成机制的样子，并把同族说法扫一遍。** (c) 那段注释要说明 `data-search-answer` 是 **ready 状态的标记、不是 answered 的标记**（两条分支共用，回退态也渲染），并指向新的 `absent` 判据；(d) 那句要么说得更强（点名引用判据）、要么明说它不证明什么——**由你定**，但读的人不能从它推出「有仪器证明过答案是答案」。\n  另外在**这台套件的文件族里** grep 这类说法（`data-search-answer` 与「really renders」/「proves the page」一类），逐条处理；**范围外的命中写进 RESULT，不要改**。",
+    "**证明新判据能红。** 把它要否定的那个状态构造出来（例如把查询换成一条能命中的、或临时让夹具不再返回回退），贴出**这条断言失败**的原文，然后还原并复绿。**不能红的断言不算证据。** 不许为了让任何一处变绿而删除、跳过或放宽既有断言。",
+    "**两个消费者都要实跑**：`bash tests/web-smoke/run-a11y.sh` 与 `bash tests/web-smoke/run-i18n.sh` **都**要退出 0（本机若起不来就把阻塞原因写进 RESULT，**不要伪造通过**）。贴出覆盖表里**两条**搜索路由的记录原文与 floor 的实际值。**既有断言一条都不许删、不许跳、不许放宽。**",
+    "**不许碰视觉基线**：`tests/web-smoke/baseline/**` 一个字节不动（17 张 PNG 的 sha256 前后逐个相同）。也不许碰 `apps/**`、`docs/**`、`specs/**`、`tasks/**`、`.github/**`、`ops/**`、`scripts/**`。**本笔不新建、不改任何 CI 配置**（`a11y` 与 `i18n` 已是 required job；接线是我的面）。"
+  ],
+  "deliverables": [
+    "`tests/web-smoke/a11y-smoke.mjs`（必要时含 `tests/web-smoke/a11y-harness/**`）：回退态真的被扫、判据能红、注释改成机制的样子。",
+    "`tests/web-smoke/keyboard-checklist.md`：那句改成不弱于机制、也不冒充实测的样子（见 (d)）。",
+    "RESULT：(a)-(d) 四条各自引一行原文的复核结论；两个套件实跑的原文（命令、退出码、覆盖表里**两条**搜索路由的记录、floor 实际值）；新判据的**红原文 + 还原后复绿原文**；17 张基线 PNG 的 sha256 前后对照；同族说法的 grep 命令与逐条处置（范围外的命中列出）。",
+    "RESULT：`git status --porcelain -uall`（只应列 `tests/web-smoke/**` 里你动的那几个文件）与 `git diff --stat HEAD -- apps/ docs/ specs/ tasks/ .github/ ops/ scripts/ tests/web-smoke/baseline/` 的空输出。"
+  ],
+  "acceptance_criteria": [
+    "回退态的 axe 扫描**在 `a11y` 作业的运行路径上**（`make a11y` → `run-a11y.sh` → `a11y-smoke.mjs`），且这一页真的是回退态（贴出 DOM/文本证据：回退段的钩子在、答案那支的标记不在）。",
+    "覆盖表里那两行搜索路由的记录与各自**实际**扫到的状态一致；**回退态那行不是「有数据」**。",
+    "新判据**能红**（贴红原文），还原后复绿（贴原文）。",
+    "既有断言一条未删、未跳过、未放宽；floor 不降（若变了，给出实际数与理由）。",
+    "那两处说法（注释、走查文档）读起来不再比机制宽：给出 grep 命令与空结果，或逐条说明为什么留着。",
+    "17 张 PNG 的 sha256 与改动前逐个相同；`git status --porcelain -uall` 只列允许面内的文件；两个消费者实跑（或写明为什么起不来）。"
+  ],
+  "scope_note": "**这一笔是 T1226 那一笔的代价，不是新发现。** T1226 把 a11y 扫描从回退态挪到「带引用」那支（那是对的，回退态被记成「有数据」正是它要修的缺陷），但**回退态的无障碍测量因此掉出了活入口**：a11y 作业不再扫它，剩下唯一的 axe 扫描住在 `tests/e2e-search/`——那条路没有任何活入口（`privacy-suite.sh` 的 `BROWSER_SUITES` 不含 `search`，而它自己也没有 CI 调用者）。**我的任务书当时只说「让判据落到带引用那支」，没说「挪走的那一层不能掉出活入口」**——这一笔补上。同笔收回两处同族假话（`a11y-smoke.mjs` 的注释、`keyboard-checklist.md` 的一句），它们都在为已经修掉的那个缺陷辩护。",
+  "supervisor_scope_narrowing": "**为什么只开这几个位置：**\n\n  * `tests/web-smoke/a11y-smoke.mjs` 与 `tests/web-smoke/a11y-harness/**` 是扫描判据与播种数据所在。\n  * `run-a11y.sh` / `run-i18n.sh` / `i18n-smoke.mjs` 是同一台仪器的消费者，夹具一改它们可能要跟着动——**开它们是因为它们是这台仪器的一部分**，不是预期它们要改。\n  * `keyboard-checklist.md` 是这台套件的人肉走查文档，那句同族假话在它里面。\n\n**为什么不开整个 `tests/web-smoke/**`：** 那会把 `baseline/**`（17 张二进制视觉基线）和另外几台套件（`visual-smoke.mjs`、`style-parity.mjs`、`visual-regression.mjs`）一起圈进来。本笔不该改任何像素，也不该顺手改别的仪器。\n\n**为什么不开 `apps/**`：** 判据要用的钩子产品里已经有了（`data-search-citation`、`data-search-fallback`），**只读**引用即可。\n\n**为什么 G3 是这两个：** `a11y` 与 `i18n` 正是这台 harness 的两个消费者，也都是 required job，都跑真 Chromium。本笔的产物是「回退态又被 a11y 作业扫到了」，这两个作业就是它最贴的端到端判据。\n\n**这是 L1，不是 L3**：把一条已经存在的扫描放回它原来所在的作业里、把两句假话改真。不新增权限、不改产品语义、不放松任何 Gate（判据是**加**一条能红的断言，并且**禁止**删除或放宽既有的）。"
+}
