@@ -18705,7 +18705,7 @@ AUDIT OK: report markers present, counts match (0 unmerged, 1 not_run, 0 failed,
 
 ---
 
-## ㊽ T1214 任务书的三处订正落在了一份**没人读的文件**里：DAG 才是被渲染成 Worker 任务书的那一份（L1，2026-09-24）
+## ㊽ T1214 任务书的三处订正写进了**暂存区却没落地**：DAG 才是被渲染成 Worker 任务书的那一份（L1，2026-09-24）
 
 ### 1. 是怎么发现的
 
@@ -18725,7 +18725,15 @@ AUDIT OK: report markers present, counts match (0 unmerged, 1 not_run, 0 failed,
 
 `internal/devorchestrator/worker_spawn.go:127` 取 `store.dag.Get(opts.TaskID)`，交
 `RenderTaskPackage`（`worker_render.go:48`）渲染成任务书。全仓 `grep` 下来，
-`tasks/packages/` 这个路径**在 Go 与 Python 里一次都没被读过**——它是我手写的副本，没有读者。
+`tasks/packages/` 这个路径**在 Go 与 Python 里一次都没被读过**。
+
+**但要写清楚：这不是我发现的**——`tasks/packages/README.md` 第 3 行就逐字写着
+「**没有任何东西读它。** …任务规格的**唯一真相源**是 `tasks/tasks.json`」，并且把这个目录
+定义成 **Supervisor 的暂存区**、给了落地顺序（`apply-packages.py` → `spec_version.py --write`
+→ `validate_task_state.py` → `task ready`）。所以真正的病因不是「有个没人读的副本」，
+而是**我把暂存区当成了正式账本**：三笔订正写进草稿，却**没有跑落地那一步**。
+同一天我在 `docs/` 与 `specs/` 上做的是「改完立刻重生成指纹」，到了任务书这里却只改了草稿，
+这是流程执行上的漏，不是设计缺陷。
 
 决定性的一步是拿派工原件对：把两版文本各自整段（空白归一化后）到
 `.rddev/workers/T1214/prompt.md` 里找——
@@ -18766,11 +18774,17 @@ AUDIT OK: report markers present, counts match (0 unmerged, 1 not_run, 0 failed,
 - **这是事后订正真相源**：那一轮 Worker 实际拿到的原文只存在于
   `.rddev/workers/T1214/prompt.md`（不在 git 里）。本条就是这件事的记录——不写下来，
   「DAG 里现在这版」与「当时派出去那版」之间的差就没人知道了。
-- **`tasks/packages/**` 是一个会静默漂移的副本**（以下都是这一笔之后实测的数）：156 笔任务里
-  **58 笔**有这个文件、**98 笔没有**；有文件的里面 **31 笔**与 DAG 的字段值不等（漂得最多的是
-  `deliverables` 19 笔、`tests` 12 笔、`requirements` 10 笔）。T1214 在改完 §4 第 1 条之后
-  **已不在**这 31 笔里。`CLAUDE.md` 从头到尾没提过这个目录。
-  它既不是输入也不是产物，**是一份没有读者的第二真相源**。要么让它由 DAG 生成并加校验，
-  要么删掉——这件事不在这里顺手做，留给下一批立账时开一笔任务。
+- **草稿与账本不一致是这个目录的正常态，不是新问题**：实测 156 笔任务里 **58 笔**在
+  `tasks/packages/` 有文件、**98 笔没有**；有文件的里面 **31 笔**与 DAG 的字段值不等
+  （漂得最多的是 `deliverables` 19 笔、`tests` 12 笔、`requirements` 10 笔）。README 末尾
+  2026-09-19 那节《这个目录里有**过期草稿**，落地前必须逐个比对》讲的正是这件事，并且明说
+  `apply-packages.py` **分不出**「待落地的任务书」和「早就被更新的旧草稿」——它只会写。
+  所以上面这 31 这个数**不是**新发现的缺陷指标，是那条已知警告的又一次实测。
+- **真正要留在这里的教训**：一个「写在这里不算数、必须再跑一次落地」的暂存区，
+  它的失败模式不是文件漂移，而是**人以为写完了**。这一笔的补救（把订正搬进 DAG）方向对，
+  但**真正的修复是流程性的**：以后凡是动任务书，先问「这是草稿还是账本」，
+  动草稿就必须跟一步落地；`--dry-run` 要一次看完所有待落地项（README 记着 2026-09-18 那次
+  「五份全带那四个字段、第一份就退出、后面根本没被检查到」）。
+  T1214 在改完 §4 第 1 条之后，草稿与账本已再次相等。
 - 这一笔**没有**改 `tasks/packages/T1214.json`（它现在与 DAG 一致了），也**没有**动
   `tests/acceptance/**`（证书与校验器的字节数不变）。
