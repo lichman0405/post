@@ -19631,3 +19631,110 @@ registry 字段 / `task-package.json` / 守卫层 / `exit.status`，**恰恰不�
 在等 PR #365 的 CI）。此刻改 `tasks/tasks.json` 会移动标记（[[state-commit-moves-spec-digest]]），
 而且新任务一旦以可派状态落账，驱动**下一拍就会派工**（[[dispatch-pool-includes-todo]]）——
 **在最后一笔正在合并的时候改 DAG，是拿一件已经接近完成的事去冒不必冒的险。等它落地再动。**
+
+T1219 已于 `05:59:12Z` 派出（`drive: T1219 dispatched`），本条的排期条件已满足。
+
+---
+
+## 59 — 追一条「过期的表头数字」，撞上安全门自己的扫描面：`gosec ./...` 把被 gitignore 的 `.rddev/` 草稿当成仓库源码扫（L1 记账，2026-09-24）
+
+### 一、起点是评审的第 6 条风险，不是我自己想找事
+
+T1217 的评审列了七条风险，第 6 条是「`ops/ci/gosec-baseline.txt` 的表头还写着 797/254，
+而现在是 798/256」。**这是一条我没核过的转述**，按 [[verify-cited-assertions]] 该自己核。
+核的过程里撞上一件大得多的东西，两件都记在这里。
+
+### 二、先证明数字是真的，再谈别的
+
+- `ops/ci/gosec-baseline.txt:14` 写着 `# tool: gosec v2.29.0 over the whole Go module: 797 files, 254 findings`。
+- **那个 254 在写下时是对的**：表头是 T1209（`034a341`）写的，而 `git show 034a341:ops/ci/gosec-baseline.txt`
+  的条目数正是 **254**。**现在** `grep -cv '^\s*\(#\|$\)'` 数出来是 **256**。
+- 中间发生了什么：T1217 的合并（`2d5d280`）改了这份基线 **13 增 / 11 删**（行号键控的搬迁），
+  **净 +2**，而 `git show 2d5d280 -- ops/ci/gosec-baseline.txt | grep -E '^[-+]#'` **零命中**——
+  **表头一个字没动**。所以它不是"从来就错"，是**改的人只改了条目、没改自己头顶那句话**。
+- `tests/security/sast_report.py:9` 的 docstring 复述同一个 254，同样过期。
+- 而 `tests/security/sast.sh:61` 那句「gosec 797 files, eslint 129, bandit 8」**不算缺陷**：
+  它自己写着「They are the observed numbers, printed by the rows themselves — **not a list this comment maintains**」，
+  还带了日期 `(2026-09-23`。**同一族数字，一处做了免责、一处没做**——差别只在有没有那句声明。
+
+### 三、然后我用自己的复算去核「哪些是新发现」，**复算错了**
+
+为了不让那 94 条挡住视线，我把 gosec 的 JSON 自己分类了一遍，得出「仓库源码 256 条里有 **7 条没被基线覆盖**」
+（3 条 G101 HIGH、4 条 G104 LOW），差一点就当成新缺陷记下来。
+
+**全是我错的。** 那 7 条在基线里一条不缺——我按 `issue["line"]` 拼 key，而 **gosec 对跨行匹配给的是区间**：
+`"15-30"`，不是我拼出来的单个数。而 `sast_report.py:132-137` 的 `line_of()` 正是为这件事存在的：
+
+    """gosec reports an int for a one-line match and "15-30" for a match that spans
+    lines. The baseline key has to be the line the finding starts on, so ..."""
+
+**要读工具的结论，就读工具本身**：改用它自己的 reader 跑同一份报告，
+答案从「7 条新的」变成 **0 条新的**（94 条未覆盖，全部来自 `.rddev/`，见下节）。
+这是本项目第二次「我的探针自己造出证据」（第一次见 [[prove-the-instrument-can-say-no]]）。
+
+### 四、真正的发现：**这扇门的扫描面不是它声称的那个面**
+
+用那扇门自己的话跑一遍（`bash tests/security/sast.sh go`）：
+
+    FAIL sast-go: 350 finding(s), 94 unbaselined (1274 file(s) scanned)
+
+350 = **256 条来自仓库源码**（全部已基线）+ **94 条来自 `.rddev/` 下的副本**（按定义不在基线里）。
+`.rddev/` 是 `.gitignore:10` 忽略的**orchestrator 自己的运行态草稿**：
+
+- `.rddev/runtime/rebaseline/<TASK>-<时间戳>/files/**`——rebaseline **在 `reset` 之前拷出来的源文件副本**，
+  108M、**864 个 `.go`**、时间跨度 `T0303`(09-14) 到 `T1205`(09-21)；
+- `.rddev/worktrees/**`——工人工作树。
+
+`TARGET` 默认 `.`，调用是 `gosec ... "${TARGET%/}/..."`，而 gosec 是**走文件系统**的，
+不是按 module 解析包（报告里的路径是 `/home/shibo/code/post/.rddev/...` 的绝对路径）。
+于是这两个目录里的每一份**副本**都被当成仓库源码扫了一遍。
+
+**直接后果是这句话不成立**（`:16-17`）：
+
+    # surface: every package in the module. Nothing was excluded by directory,
+    #       severity or -nosec: ...
+
+**扫描面比 module 大**——大出来的部分全是被 gitignore 的草稿。
+
+### 五、为什么现有的每一道保护都看不见它
+
+1. **CI 是绿的**：`.github/workflows/ci.yml:440` 那个 `security-master` 作业确实跑
+   `bash tests/security/master-security-gate.sh`，但检出里没有 `.rddev/`（被 gitignore），
+   所以 CI 只看到那 256 条、全绿。**这个面只在本地根目录上出现**——而本地根目录正是我跑 G4 的地方。
+2. **文件数地板看不见**：`FLOOR_GO_FILES=400`（`sast.sh:71`）拦的是"扫了个空"，
+   而这次是**扫多了**（1274 > 400）。**地板对多出来的文件没有意见**，设计如此。
+3. **版本钉看不见**：gosec 版本是对的（`v2.29.0` 已核）。这不是工具错了，是目标选错了。
+
+**要紧在哪**：§6 G4 说「任何 blocking test 红灯禁止 merge」。**一盏因为与被审改动无关的原因而红的灯**，
+会训练人去看别处——这正是 [[choose-the-surface-a-red-check-appears-on]] 记的那一族。
+而且它**只在本地红、在 CI 绿**，所以它会稳定地教人「本地那盏不算」。
+
+### 六、裁定与排期
+
+**性质**：这是「一个保证写在一处、强制它的东西在另一处且更窄/更宽」的**又一次**——
+与第 52 条、㊿、第 58 条同族，但**方向相反**：那三处是**保证比机制宽**，这一处是**机制比声明的面宽**。
+按 §5.1 属 bug fix（L1），我自己决定。**决定：立账。**
+
+**但现在不立**，理由与第 58 条逐字相同：T1219 正在飞，改 `tasks/tasks.json` 会移动标记、
+把它在跑的 G2 一起弄红（[[in-flight-g2-composes-current-main]]）。**等它落地再立。**
+
+**修法方向（写给立账时的我自己，免得工人走偏）**：**不许加排除。**
+`sast.sh` 第 3 条规则原文就是「NO EXCLUSION FLAGS … no -exclude-dir, no -nosec」，
+加一个 `-exclude-dir=.rddev` 正是这扇门自己禁掉的那种解法，而且形状上就是"把门开大"。
+正确的形状是**加一条正向断言**：**扫描面里出现的每一个文件路径都必须是仓库里的路径**；
+报告里出现一个不属于仓库的路径，是一次**扫描面的失败**，要用这句话失败——
+而不是请人去逐条 triage 一个仓库里不存在的文件。
+那既修好了本地的红，又**比现在更严**（今天它把 `.rddev/` 的副本当成待审发现，
+而"把 `.rddev/...` 写进基线"会是更坏的结果：**给一个仓库里不存在的路径背书**）。
+
+**同笔应收的还有那两处过期的 254**（`ops/ci/gosec-baseline.txt:14` 与 `sast_report.py:9`），
+所以那一笔的允许面需要同时含 `ops/ci/gosec-baseline.txt` 与 `tests/security/**`——
+这正是 T1217 评审第 6 条风险说要开的那一对。
+
+### 七、教训
+
+- **表头里的数字没人守，就会过期**，而过期的方式是静默的：改条目的人不会抬头看那句话。
+  要么让它可核对（像 `sast.sh:61` 那样写明"这是某天的观察值、不是本注释维护的清单"），要么别写。
+- **我第二次用自己的复算代替工具**，第二次造出假证据。**核一个数字，要跑到能反驳它的那层。**
+- **一扇门在 CI 上的面和在本地的面可以不是同一个面**，而"本地那盏不算"这种习惯，
+  是最贵的一种绿灯。
