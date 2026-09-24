@@ -9149,7 +9149,7 @@
         "**（第一件事）收工校验会采信一份陈旧的 `RESULT.json`。** `internal/devorchestrator/worker_collect.go:297` 把 `filepath.Join(rec.ResultDir, \"RESULT.json\")` 直接交给 `ValidateWorkerResultFile`（`:299`），**全文没有任何一处拿它与 `rec.StartedAt` 比过**（`grep -n 'ModTime\\|StartedAt' internal/devorchestrator/worker_collect.go` 命中 0）。而返工与重开都**重用同一个任务目录**：`ReworkWorker`（`worker_spawn.go:1063`）与 `RespawnWorker`（`:1086`）；`archivePreviousVerdict`（`review_worker.go:689`）只被评审路径调用（`:140`）。于是 `#264` 说的那条成立：**一轮返工如果从头到尾没写过新的 `RESULT.json`，上一轮那份会被当成这一轮的收进来，而且是绿的。**先把这个洞**复现成一条会红的测试**（红的那次输出留下来），再修。",
         "**修法要给判据，不要给补丁。** 不许只是「在返工前删掉旧文件」了事——那挡不住「工人写了但写坏了」「文件被 checkout 刷新了 mtime」这些形态。要给出一个**可断言的判据**（例如：这份文档是否属于本 `run_id` / 本次启动之后），并说明它在什么情况下会**误伤**（`RESULT.json` 比 worker 启动还早、mtime 被 git 刷新、同一次运行里工人先写后改……），误伤的那几种要么被排除掉、要么在测试里钉住。",
         "**（第二件事）收工规则与词表打架，而正文里没说。** `internal/devorchestrator/result_consistency.go:159-166` 是**无条件**的：`status: completed` 下任何一条 `acceptance[]` 只要 `!= \"passed\"` 就 fail。而 `specs/orchestrator/worker-result.schema.json` 的 `acceptance[].status` 枚举是 `[\"passed\",\"failed\",\"not_applicable\"]`——**`not_applicable` 是 schema 承认的合法值**。给 Worker 的 `system.md` 里那句「the vocabulary has no \"not applicable\"」写在 **`tests[]`** 那一条里（讲的是 `not_run`）；对 `acceptance[]` 一个字都没有。结果：**Worker 照 schema 写 `not_applicable` 就会被拒收，而正文从没告诉过它不行**（2026-09-24，T1216 因此被整笔拒绝，见 `tasks/decisions.md` ㊾）。",
-        "**第二件事的修法已经定了，不要另找方向**：**不放宽 collect 的判据，也不改 schema 的枚举。**`not_run` 与 `not_applicable` 都要保留原义——它们属于 `blocked`/`failed` 的报告。要做的是**把这条规矩写进 Worker 读得到的正文**（`system.md` 的渲染来源在 `internal/devorchestrator/` 里），写法与 `tests[]` 那一条并列、同样给出「记成别的会怎样」（被拒，且这一轮白跑），并补一条**会红的**测试：漏掉这段文本时必须红。",
+        "**第二件事的修法已经定了，不要另找方向**（正文那一块在 `internal/devorchestrator/worker_render.go:533`，是一段叫 \"Three recording conventions the schema cannot express\" 的正文，第三条就是 `tests[]` 的那条规矩——**它把 `not_run` 写得完整且正确**，所以 `tests[]` 这半边没有洞，别去动它；缺的是与它**并列的第四条**。加一条时**记得改那段标题里的数量词**，别留下「Three」底下四条的情形。）：**不放宽 collect 的判据，也不改 schema 的枚举。**`not_run` 与 `not_applicable` 都要保留原义——它们属于 `blocked`/`failed` 的报告。要做的是**把这条规矩写进 Worker 读得到的正文**（`system.md` 的渲染来源在 `internal/devorchestrator/` 里），写法与 `tests[]` 那一条并列、同样给出「记成别的会怎样」（被拒，且这一轮白跑），并补一条**会红的**测试：漏掉这段文本时必须红。",
         "**不许为了让什么变绿而放宽任何判据**：`result_consistency.go` 的 `completed ⇒ 全部 acceptance 通过` 一字不改；`specs/orchestrator/worker-result.schema.json` 一个字节不动（收工给出它的 `sha256sum`）；不许删/skip 测试、不许放大 timeout、不许把断言从「等于」改成「不报错」。",
         "**若修法必须落在本文件之外，停手并说明。** 这一笔的范围只有 `internal/devorchestrator/**`。如果你量到根因在别处（schema、`cmd/rddev`、`scripts/`、CI 配置），**不要自己扩范围**：在 RESULT 里点名说清楚「要让哪一处怎么改、凭什么」，我来接。"
       ],
@@ -9162,7 +9162,7 @@
       "acceptance_criteria": [
         "**陈旧 `RESULT.json` 不再被当成这一轮的**：给出测试在「修之前红」的实际输出（`MUTATION CHECK` 开头），并说明它断言的是**行为**而不是某个函数的形状。**修之前红不了的话，这一条就是构出来的。**",
         "**判据写在一处、两个方向都被钉住**：新增判据有独立 `_test.go` 覆盖「陈旧⇒拒收」与「当轮⇒收」两侧；并在 RESULT 里点名回答误伤边界——至少处理「`RESULT.json` 早于本次启动」与「mtime 被刷新」这两种形态（排除掉，或在测试里钉住）。",
-        "**收工规则在 Worker 读得到的正文里**：`acceptance[]` 的完成规则与 `tests[]` 的那条并列出现，并且有一条测试断言「渲染结果里必须有它、漏掉就红」。给出那条测试名与它红过的那次输出。",
+        "**收工规则在 Worker 读得到的正文里**：`acceptance[]` 的完成规则与 `tests[]` 的那条并列出现，并且有一条测试断言「渲染结果里必须有它、漏掉就红」。给出那条测试名与它红过的那次输出。渲染出来的正文里**不许再出现「Three recording conventions」这种与条数对不上的标题**——要么把它改成与实际条数一致，要么让新增那条从属于既有的一条；**断言必须包含这一层**（只断言「那段话在」的测试查不出这个）。",
         "**没有放宽任何判据**：`internal/devorchestrator/result_consistency.go` 的完成规则一字未改；`specs/orchestrator/worker-result.schema.json` 的 `sha256sum` 与你开工时一致；无删/skip 测试、无放大 timeout。",
         "**没有越界**：`git status --porcelain -uall` 只列 `internal/devorchestrator/**` 下的文件；无残留进程。"
       ],
