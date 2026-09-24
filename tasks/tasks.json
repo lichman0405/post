@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 168,
+  "task_count": 169,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -9813,6 +9813,76 @@
       ],
       "scope_note": "决策 L1-20260922-5 记下了这个缺口、它的补法与触发条件，但**那笔任务从没被立起来**（tasks.json 里没有任何一笔提到它）。P13 就是「V1 之后的加固」，触发条件已到。本笔补上它：让 a11y 扫描真的扫到带引用的答案那条路，而不是把回退状态记成「有数据」。",
       "supervisor_scope_narrowing": "**为什么只开这几个位置：**\n\n  * `tests/web-smoke/a11y-harness/**` 与 `tests/web-smoke/a11y-smoke.mjs` 是播种数据与扫描判据所在。\n  * `run-a11y.sh` / `run-i18n.sh` / `i18n-smoke.mjs` 是这台 harness 的**消费者**，夹具一改它们就可能要跟着动——**开它们是因为它们是同一台仪器的一部分**，不是因为预期它们要改。\n\n**为什么不开 `tests/web-smoke/baseline/**`（虽然它在同一个目录下）：** 那是 17 张**二进制**视觉基线，由渲染产生、不是手写的。本笔**不该**改变任何像素：视觉套件用的是**另一套** fixture（`visual-regression-run.sh` / `head-tree-visual.sh` / `run.sh` 里没有 a11y-harness 的引用，我核过）。所以我按**具体文件**开，而不是开整个 `tests/web-smoke/**`——把基线留在范围外，让「要不要重渲」变成一个必须问我、而不是可以顺手做掉的问题。\n\n**为什么不开 `apps/**`：** 判据要用的钩子产品里已经有了（`data-search-citation`、`data-search-fallback`、`data-search-source-ref`），**只读**地引用即可。本笔不改产品代码。\n\n**为什么 G3 是这两个：** `a11y` 与 `i18n` 正是这台 harness 的两个消费者，也都是 required job。两个都跑真 Chromium、都从这台 harness 取数——它们本来就是这笔改动**最贴**的端到端判据。\n\n**这是 L1，不是 L3**：改测试夹具与判据，让覆盖名实相符。不新增权限、不改产品语义、不放松任何 Gate（判据是**加**一条能红的断言，并且**禁止**删除或放宽既有的）。"
+    },
+    {
+      "id": "T1227",
+      "phase": "P13",
+      "phase_name": "V1 之后的加固：流水线自己的可信度",
+      "title": "没有名册的仪器就是没人跑的仪器：给 `tests/**` 与 `scripts/**` 下的每一台仪器立一份名册，并让一个 `go test ./...` 能跑到的检查器守住它——起点是我量过的那台（17 张视觉基线的比对，今天没有任何**活入口**跑它）",
+      "v1_required": false,
+      "dependencies": [
+        "T1223",
+        "T1224",
+        "T1225",
+        "T1226"
+      ],
+      "tests": [
+        "every shell instrument under tests/ and scripts/ is declared in the inventory, and the checker fails when a new one appears undeclared",
+        "a wired entry's live entry point really reaches the instrument through the transitive closure, and the checker fails when that entry point is removed",
+        "the inventory's manual count cannot grow past its declared cap, and the checker fails when it does"
+      ],
+      "allowed_scope": [
+        "internal/instrumentinventory/**",
+        "ops/ci/instrument-inventory.json"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "apps/**",
+        "services/**",
+        "infra/**",
+        "ops/**",
+        "scripts/**",
+        "Makefile",
+        "cmd/**",
+        "internal/**",
+        ".rddev.example/**",
+        "tests/**"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/67_TEST_GATES.md",
+        "docs/24_TEST_STRATEGY.md"
+      ],
+      "requirements": [
+        "**先自己复现我量过的那一台，别照抄我的话。** 目标：`tests/web-smoke/visual-regression.mjs`（17 张基线的 PNG 比对）**今天没有任何活入口在跑它**。至少要给出这四条的命令与原文：\n  * (a) 它是被 `tests/web-smoke/run.sh` 的 glob（`*-regression.mjs`）发现的——贴出那两行。\n  * (b) `run.sh` 由 `make browser-smoke` 调（`Makefile`）。\n  * (c) `make browser-smoke` **没有任何调用者**：`specs/orchestrator/gates.json` 的 20 个作业、`.github/workflows/ci.yml` 的每个 `run:`、以及 `ops/**` 里都搜不到它；把搜索命令与结果贴出来。\n  * (d) `a11y` 与 `i18n` 两个作业跑的是 `run-a11y.sh` / `run-i18n.sh`，它们是各自独立的运行器，**不经过 `run.sh`**——证明这一点（例如 `grep -n 'run.sh' tests/web-smoke/run-a11y.sh` 为空）。\n  **若你找到一条我漏掉的活入口，那就是本笔的第一个发现**：照实写，并据此调整名册；不要为了附和我的结论而忽略它。",
+        "**名册的形状**：每台仪器一条，二选一，不许含混——\n  * `wired`：**点名那个活入口**（作业名 + 它跑的命令），并给出你用来证明可达的闭包路径；\n  * `manual`：写明**为什么它必须是手动的**（一句话，具体到机制，不要写「比较重」这种形容词）。\n  名册要有 `floors`：**仪器总数的下限**与 **`manual` 条数的上限**，两处都写清「为什么是这个数」，写法照 `tests/security/key-components.json` 的 `floors`/`counts_today` 与 `internal/devorchestrator/worker_guard_regression_test.go` 的 `const floor`（那个文件里有逐族点数的段落，照它的风格）。**语义不许改**：下限的语义是「低于它就判有人删了名册条目」，不是「等于」。",
+        "**检查器必须由 `go test ./...` 跑到**——`go` 作业的第 5 步就是它（`make fmt-check`、`go vet ./...`、`make staticcheck`、`bash scripts/tests/staticcheck-unit-test.sh`、`go test $(go list ./... | grep -v -e '/tests/integration' -e '/tests/e2e$')`）。**这样你不需要改任何 CI 配置**（`.github/**` 与 `specs/**` 都不在你的允许面里）。我实测过「只有 `_test.go` 的包」能过 `go vet ./...` 与 `go list ./...`；你怎么办由你定。它必须**只读树、不连数据库、不起网络**。",
+        "**检查器要断言三件事，每一件都要能被触发**：\n  1. **完整性**：遍历磁盘上的仪器集合，任何一台没进名册就红。「仪器」= `tests/**/*.sh` 与 `scripts/**/*.sh`（`startswith` 而不是用 glob 库的默认语义，并把你实际用的集合定义写进 RESULT，含条数）。**新增一台仪器而不入册必须红。**\n  2. **可达性要按「从入口出发的传递闭包」算，不是「文件里有没有这个字符串」。** 这一点我踩过：我用（一）按文件名搜、（二）按全路径搜、（三）只展开一层——三次给出**三份不同的名单**（22 台 / 26 台 / 互相矛盾），原因是 `tests/acceptance/privacy-suite.sh` 把要跑的脚本列表放在数组变量 `CONTROL_SCRIPTS` 里（数组在 `:239-242`，循环在 `:250` 的 `for script in \"${CONTROL_SCRIPTS[@]}\"`，循环体里 `bash \"$script\"`），字符串搜索看不见这条边；而 `run.sh` 这种通用文件名会在别人的路径里撞出**假边**。所以：**闭包要对「文件里提到的其它文件」递归展开**（`bash X`、`make T` → Makefile 该 target 的配方、数组字面量里的路径），并且**每条 `wired` 都要给出闭包路径**（入口 → … → 仪器）。**入口被删掉必须红。**\n  3. **`manual` 条数超过上限就红。** 上限只许**按你落账的实际数**写，并说明为什么是这个数；不许为了好看把它抬高。",
+        "**证明检查器能说不**：三处突变，**各自**贴出红原文，还原后各贴复绿原文（不许只贴一处、不许用「同上」）：\n  * (m1) 从名册里删掉一条 → 红；\n  * (m2) 往盘上放一台新仪器（例如 `tests/tmp-probe/whatever.sh`）**不入册** → 红；**验完删掉它**；\n  * (m3) 把一条 `wired` 改成 `manual`，让 `manual` 超过上限 → 红。\n  三处都还原，并在 RESULT 里给出还原后的 `git status --porcelain -uall`（只应列你的两个交付物）。",
+        "**本笔不碰任何仪器，也不碰任何 CI 配置。** 只加名册与检查器。特别地：`tests/**`（除读之外）、`.github/**`、`specs/**`、`scripts/**`、`tasks/**`、`apps/**` 一个字节不改。**也不许借「补强」之名删除、跳过或放宽任何既有检查**——本笔不放松任何 Gate；判据是**加**一个能红的检查器。",
+        "**把你判成 `manual` 的每一台列进 RESULT，逐台给理由。** 我会逐条裁定，其中「17 张视觉基线」那台**我会单独决定要不要接活入口**——那不是你能做的：接线要动 `.github/workflows/ci.yml` 与/或 `specs/orchestrator/gates.json`，两者都是 Supervisor-only。所以**不要在名册里替我做这个决定**：照实记它今天是 `manual`（或 `wired`，如果你找到了活入口），并把你建议的处置写进 RESULT，不要写进名册。"
+      ],
+      "deliverables": [
+        "`ops/ci/instrument-inventory.json`：名册（每台仪器一条，`wired` 或 `manual`；`floors` 含总数下限与 `manual` 上限；每台带得出理由）。",
+        "`internal/instrumentinventory/**`：检查器（断言完整性、可达闭包、`manual` 上限；只读树、不连库、不出网）。",
+        "RESULT：(a)-(d) 四条复现的命令与原文；(m1)(m2)(m3) 三处突变各自的红原文与还原后复绿原文；仪器集合的定义与条数；`wired` / `manual` 各多少台；**每一台 `manual` 的理由**；你对 17 张视觉基线那台建议的处置（决定权在我）。",
+        "RESULT：`git status --porcelain -uall`（只应列上面两个交付物）与 `git diff --stat HEAD -- tests/ scripts/ .github/ specs/ tasks/ apps/ services/ infra/ docs/` 的空输出。"
+      ],
+      "acceptance_criteria": [
+        "(a)-(d) 四条各有命令与原文；**若你找到我漏掉的活入口**，照实写并说明名册因此怎么变。",
+        "名册覆盖磁盘上的**每一台**仪器：条数与「`tests/**/*.sh` + `scripts/**/*.sh`」的实际数一致，并把这个数写进 RESULT；每台要么 `wired`（点名活入口）要么 `manual`（给出机制理由），无第三条路。",
+        "**三处突变都能红**（贴原文），还原后复绿（贴原文）；三处都还原干净。",
+        "`go test $(go list ./... | grep -v -e '/tests/integration' -e '/tests/e2e$')` 对本包通过；`make fmt-check`、`go vet ./...`、`make staticcheck` 也通过（那是 `go` 作业的同一串命令）。",
+        "`manual` 条数不超过名册声明的上限；上限与总数下限都写了「为什么是这个数」。",
+        "`git status --porcelain -uall` 只列两个交付物；`tests/**`、`.github/**`、`specs/**`、`tasks/**`、`scripts/**` 的 diff 为空；既有检查一条未删、未跳过、未放宽。"
+      ],
+      "scope_note": "P13 的三笔（T1224 接一台仪器进总门、T1226 修一台量错状态的扫描、本笔）是同一个类：**仪器存在，而没有任何东西跑它**，于是它的绿什么也不说明。前两笔各修一个实例；本笔把这个类**结构化地**关掉——立一份名册，每台仪器要么点名活入口、要么写明为什么必须手动，再由一个能被 `go test ./...` 跑到的检查器守住名册。此后「新增一台仪器而不入册」「删掉一条」都会红，不必再靠人工一次一台地找。起点是我自己量过的那台：17 张视觉基线的比对今天没有任何活入口跑它。",
+      "supervisor_scope_narrowing": "**为什么只开这两个位置：**\n\n  * `ops/ci/instrument-inventory.json` 是名册本身——`ops/ci/` 已经放基线那类「CI 的账」，同一类东西。\n  * `internal/instrumentinventory/**` 是检查器。放 `internal/` 是因为 `go test ./...` 会自动跑到它，**于是不需要改任何 CI 配置**：`go` 作业的第 5 步就是 `go test $(go list ./... | …)`，而 `go` 已是 `required_jobs` 之一。这一点是本笔能不碰 `.github/**` 的原因。\n\n**为什么不开 `tests/**`（哪怕仪器都在那里）：** 本笔**只读**仪器。如果开写权限，「让检查器变绿」最省事的办法就变成了改被检查的仪器——那正是本仓库禁止的那类动作。名册与检查器分开，检查器只读树，这条界线才守得住。\n\n**为什么不开 `scripts/**`：** 同上，那里也有仪器（`scripts/tests/**` 就是一批单测）。只读。\n\n**为什么接线不在你的范围里：** 把一台仪器接成活入口要动 `.github/workflows/ci.yml` 或 `specs/orchestrator/gates.json`，两者都是 Supervisor-only。所以名册只**记录**事实，`manual` 的每一台由我裁定；你不必（也不许）为了让某台变 `wired` 去改 CI 配置。\n\n**这是 L1，不是 L3**：加一台只读的检查器与一份名册，不新增权限、不改产品语义、不放松任何 Gate（判据是**加**一个能红的检查器，并且禁止删除或放宽既有的）。"
     }
   ]
 }

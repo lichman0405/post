@@ -1950,6 +1950,16 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1227-TEST-01",
+      "task_id": "T1227",
+      "name": "every shell instrument under tests/ and scripts/ is declared in the inventory, and the checker fails when a new one appears undeclared",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }
