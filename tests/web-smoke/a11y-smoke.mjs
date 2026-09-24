@@ -132,10 +132,21 @@ const SHELL_MARKERS = [
  * BEFORE any script runs — its own comment says the query "is the one part of
  * the page that is true without the API". So "catalyst" is on that page with
  * the API up, with it down, and with no session at all, and a check keyed on
- * it would have reported 有数据 for a page showing an error banner. The
- * answer itself is what proves the page: search-answer.tsx writes
- * `data-search-state="ready"` and `data-search-answer` only when an answer
- * came back. */
+ * it would have reported 有数据 for a page showing an error banner.
+ *
+ * The answer BODY proves the page reached a ready state, and no more — T1230
+ * corrects what this comment used to say. search-answer.tsx writes
+ * `data-search-state="ready"` and `data-search-answer` on the ONE div both
+ * ready branches render, so the FALLBACK carries them too (a `status:
+ * "fallback"` answer gets no summary, the reason, and the sources). They are
+ * the READY state's markers, not the ANSWERED one's, and a route keyed on them
+ * alone cannot tell the two ready states apart. What separates the branches is
+ * which one rendered, and neither branch's own hook is on the other: the
+ * answered branch writes `[data-search-section="answer"]` and the
+ * `[data-search-citation]` refs under it, the fallback writes
+ * `[data-search-fallback]`. The route table below gives each state its own
+ * route and has each route FORBID the other's marker, so 有数据 and 回退 are
+ * two separate measurements of one page rather than one label covering both. */
 const SHELL_SELECTORS = ['[data-search-state="error"]'];
 
 /* `data` is the marker that proves a route rendered the fixture's content —
@@ -157,7 +168,30 @@ const SHELL_SELECTORS = ['[data-search-state="error"]'];
  * floor below reds).
  *
  * A route with `data: null` is static: it has no fixture to prove, and its
- * content (nav, header, search query) is there either way. */
+ * content (nav, header, search query) is there either way.
+ *
+ * `scannedAs` is the coverage-table label this route's marker PROVES when it
+ * holds, for a route whose state is not the default one (有数据). It exists
+ * because the label used to be implied by "the marker held" — which is only
+ * true while every route's marker means the same thing, and the fallback route
+ * below is the one that does not. */
+
+/* The two questions this suite puts to the search page, one per ready state.
+ *
+ * `catalyst` matches a document the harness seeds (a11y-harness/
+ * search_fixture.go), so retrieval finds it and the answer carries a citation.
+ * `zzqx` matches nothing in the corpus, so retrieval returns zero ranked
+ * sources and the generator answers `no_sources`
+ * (internal/search/answer/generator.go) before it ever looks for a provider:
+ * the structured fallback, reached on purpose rather than because the corpus
+ * happened to be empty — which is how this suite used to reach it (T1226).
+ * The i18n suite's second search route asks `zzqx` too, so the claim "this
+ * question matches nothing" is held by two suites instead of one comment. */
+const SEARCH_ANSWERED_QUERY = "catalyst";
+const SEARCH_FALLBACK_QUERY = "zzqx";
+const SEARCH_ANSWERED_TEMPLATE = `/search?q=${SEARCH_ANSWERED_QUERY}`;
+const SEARCH_FALLBACK_TEMPLATE = `/search?q=${SEARCH_FALLBACK_QUERY}`;
+
 const routeTemplates = [
   { route: "/", core: false, data: null },
   { route: "/projects", core: false, data: null },
@@ -170,9 +204,45 @@ const routeTemplates = [
    * fallback; and the ref is compared with the fixture's own ref below, so
    * "it cites" cannot be satisfied by a citation of something else. */
   {
-    route: "/search?q=catalyst",
+    route: SEARCH_ANSWERED_TEMPLATE,
     core: true,
     data: { selector: "[data-search-citation]", absent: ["[data-search-fallback]"] },
+  },
+  /* The FALLBACK — the other ready state of the SAME docs/42 page, driven on
+   * purpose with a question no fixture document matches. T1226 moved this
+   * suite's /search scan from the fallback to the cited answer, and that left
+   * the fallback state reached by NO live entry point: the only axe scan of it
+   * lived in tests/e2e-search, behind `make browser-e2e`, a target nothing in
+   * specs/orchestrator/gates.json or .github/workflows/ci.yml calls. This
+   * route puts the fallback back on the a11y job's own path without giving up
+   * the cited one — the two states get one route each, so neither is what the
+   * corpus happens to produce.
+   *
+   * The marker runs the OPPOSITE way round from the route above, and that
+   * direction is the point: the fallback notice is what must be there (with
+   * its reason in the attribute), and the answered branch's own hooks — the
+   * `data-search-section="answer"` section and the `[data-search-citation]`
+   * refs under it — must not be. Keying this row on `[data-search-answer]`
+   * would be T1226's bug read backwards: that attribute sits on the body BOTH
+   * ready states render, so it would record an ANSWERED page as the fallback.
+   * `scannedAs` is the label the row gets when this marker holds, which is why
+   * the coverage table shows 回退 here and 有数据 on the route above.
+   *
+   * `core: false`, and that is not a lowered floor: this is the same docs/42
+   * core page (Search Answer) the route above already drives to 有数据, and
+   * the floor counts distinct core pages that reached their fixture content.
+   * Counting this row too would put one page into that number twice and would
+   * call the fallback "scanned with data" — the exact claim T1226 removed. The
+   * fallback's own proof is the named check after the scan loop, not this
+   * number. */
+  {
+    route: SEARCH_FALLBACK_TEMPLATE,
+    core: false,
+    scannedAs: "回退",
+    data: {
+      selector: "[data-search-fallback]",
+      absent: ['[data-search-section="answer"]', "[data-search-citation]"],
+    },
   },
   { route: "/login", core: false, data: null },
   ...(IDS !== null ? [
@@ -188,15 +258,18 @@ const routeTemplates = [
 const scans = [];
 for (const t of routeTemplates) {
   const route = routeURL(t.route, IDS);
-  scans.push([route, 1280, 800, t.core, t.data, t.route]);
+  scans.push([route, 1280, 800, t.core, t.data, t.route, t.scannedAs ?? null]);
   if (route === "/") {
-    scans.push([route, 375, 667, t.core, t.data, t.route]);
+    scans.push([route, 375, 667, t.core, t.data, t.route, t.scannedAs ?? null]);
   }
 }
-/* The /search load's own answer state, recorded by the scan loop below when it
- * scans that route. Held here so the named check after the loop reads the page
- * that was actually scanned instead of loading /search a second time. */
-let searchState = null;
+/* The search loads' own state, recorded by the scan loop below as it scans each
+ * route. Keyed by route TEMPLATE, because there are two search routes now and
+ * each named check after the loop has to read the page ITS route scanned: one
+ * shared variable would leave both checks reading whichever search route was
+ * scanned last, which would fail the answered route's check on the fallback's
+ * reading — and, with the routes in the other order, would let it pass on it. */
+const searchStates = new Map();
 
 /* Proof that the route rendered the fixture's content rather than a shell.
  * Returns true only when the marker is present AND no shell marker is. A
@@ -328,7 +401,7 @@ async function signIn(page, ids) {
   return res.status === 200 && res.token;
 }
 
-for (const [route, w, h, core, hasData, template] of scans) {
+for (const [route, w, h, core, hasData, template, scannedAs] of scans) {
   const page = await browser.newPage({ viewport: { width: w, height: h } });
   if (IDS !== null && route.startsWith("/search")) await signIn(page, IDS);
   await page.goto(BASE + route, { waitUntil: "load" });
@@ -338,18 +411,20 @@ for (const [route, w, h, core, hasData, template] of scans) {
   /* The search route's evidence, read off the page that was just scanned
    * rather than inferred from the marker: the citation refs the answer
    * actually rendered, the fallback reason if a notice was up, and the wire
-   * status the answer body carried. The named check after the loop is what
-   * compares the refs with the fixture's own ref (IDS.search_ref), so the
-   * route table's markers and this reading measure the same load. */
+   * status the answer body carried. The named checks after the loop are what
+   * compare each reading against the state its route claims — the refs against
+   * the fixture's own ref (IDS.search_ref) for the answered route, the zero
+   * counts for the fallback — so the route table's markers and these readings
+   * measure the same load. */
   if (template !== null && template.startsWith("/search")) {
-    searchState = await page.evaluate(() => ({
+    searchStates.set(template, await page.evaluate(() => ({
       status: document.querySelector("[data-search-answer]")?.getAttribute("data-status") ?? null,
       citations: [...document.querySelectorAll("[data-search-citation]")].map((el) =>
         el.getAttribute("data-search-citation"),
       ),
       sources: document.querySelectorAll("[data-search-source-ref]").length,
       fallback: document.querySelector("[data-search-fallback]")?.getAttribute("data-search-fallback") ?? null,
-    }));
+    })));
   }
   const wcagV = await axeScan(page, `${route} @${w}x${h}`, "wcag", { type: "tag", values: WCAG_TAGS });
   const bpV = await axeScan(page, `${route} @${w}x${h}`, "best-practice", { type: "tag", values: STRUCTURAL_TAGS });
@@ -358,6 +433,7 @@ for (const [route, w, h, core, hasData, template] of scans) {
     template,
     core,
     hasData,
+    scannedAs,
     contentOK: content.ok,
     contentReason: content.reason,
     // The route's own forbidden markers that were on the page (empty for every
@@ -389,7 +465,8 @@ if (IDS !== null) {
   /* Fail-closed on a missing ref: a READY line without it would make every
    * comparison below vacuous, which is worse than a red. */
   const expectedRef = typeof IDS.search_ref === "string" && IDS.search_ref !== "" ? IDS.search_ref : null;
-  const shown = searchState === null ? "the search route was never scanned" : JSON.stringify(searchState);
+  const searchState = searchStates.get(SEARCH_ANSWERED_TEMPLATE) ?? null;
+  const shown = searchState === null ? `${SEARCH_ANSWERED_TEMPLATE} was never scanned` : JSON.stringify(searchState);
   if (expectedRef === null) {
     fail("search: the harness reports the fixture's search ref", `READY carries search_ref=${JSON.stringify(IDS.search_ref)}`);
   } else if (searchState === null) {
@@ -409,6 +486,61 @@ if (IDS !== null) {
     fail("search: /search still lists the ranked source it cited", shown);
   } else {
     ok(`search: /search answered with ${searchState.citations.length} citation(s) incl. ${expectedRef}, ${searchState.sources} ranked source(s), no fallback notice`);
+  }
+}
+
+/* The FALLBACK route's own assertion — the mirror of the block above, and the
+ * reason the readings are held in a Map instead of one variable.
+ *
+ * What it proves is that the page really IS the zero-source fallback, which is
+ * a claim about the product's state rather than about this file's intent: the
+ * notice is up and names its reason, the wire status is `fallback`, and the
+ * answered branch produced nothing — no citation refs, no ranked source. The
+ * last two are what fail if the route's question starts matching something
+ * again (a fixture change, a new corpus word, a broken projection): the page
+ * would come back ANSWERED, this check says so, and the route table's row turns
+ * from 回退 into 非回退 in the same run. Without this block the row would still
+ * be scanned and still be axe-clean — it would just be measuring a different
+ * state under the fallback's name, which is the failure mode the whole file
+ * exists to prevent, and a scan whose page went missing from the table
+ * entirely is the one thing a per-route check cannot see (that is the floor's
+ * job, over the core routes).
+ *
+ * The forbidden markers are asserted twice on purpose, in two shapes: the
+ * route table's `absent` list forbids the answered branch's hooks as part of
+ * the coverage measurement (so the row cannot be labelled 回退 while they are
+ * on the page), and the citation count here states it as a reading with the
+ * number in the message.
+ *
+ * Asserted only when the harness is up: with the API down this route is the
+ * error shell (服务关 in the coverage table), not a fallback, and a red here
+ * would blame the route for the environment. */
+if (IDS !== null) {
+  const fallbackState = searchStates.get(SEARCH_FALLBACK_TEMPLATE) ?? null;
+  const shown = fallbackState === null
+    ? `${SEARCH_FALLBACK_TEMPLATE} was never scanned`
+    : JSON.stringify(fallbackState);
+  if (fallbackState === null) {
+    fail(`search: ${SEARCH_FALLBACK_TEMPLATE} was scanned as the fallback state`, shown);
+  } else if (fallbackState.fallback === null) {
+    fail(
+      `search: ${SEARCH_FALLBACK_TEMPLATE} rendered the fallback notice`,
+      `${shown} — no [data-search-fallback] on the page, so this route is not scanning the state it names`,
+    );
+  } else if (fallbackState.status !== "fallback") {
+    fail(`search: ${SEARCH_FALLBACK_TEMPLATE} answered with the fallback status`, `${shown} — expected data-status="fallback"`);
+  } else if (fallbackState.citations.length > 0) {
+    fail(
+      `search: ${SEARCH_FALLBACK_TEMPLATE} cites nothing`,
+      `${shown} — the answered branch rendered ${fallbackState.citations.length} citation(s); the page is the ANSWERED state under the fallback route's name`,
+    );
+  } else if (fallbackState.sources !== 0) {
+    fail(
+      `search: ${SEARCH_FALLBACK_TEMPLATE} matched no ranked source`,
+      `${shown} — the question is supposed to match nothing in the corpus`,
+    );
+  } else {
+    ok(`search: ${SEARCH_FALLBACK_TEMPLATE} is the ${fallbackState.fallback} fallback: 0 citations, 0 ranked sources, no answered-branch marker`);
   }
 }
 
@@ -847,7 +979,7 @@ console.log("route                                    | core | data   | wcag | b
 console.log("-----------------------------------------+------+--------+------+--------------");
 let coreWithData = 0;
 for (const r of scanResults) {
-  /* Three states, not two. 服务关 means the route never reached its content
+  /* Four values now, not three. 服务关 means the route never reached its content
    * because the API was not there to serve it (the services-down mode run.sh
    * drives — `/search` shows its error panel and nothing else). The search
    * route has a second, distinct way to fall short: the API answered, and the
@@ -855,9 +987,21 @@ for (const r of scanResults) {
    * which the route's own forbidden marker records. Calling that one 服务关
    * would repeat, one layer down, the exact mislabelling this task fixed —
    * the row would blame the environment for a state the product chose, and a
-   * reader checking whether the API was up would read it backwards. */
+   * reader checking whether the API was up would read it backwards.
+   *
+   * The fourth value is T1230's, and it is the search routes' doing: a route
+   * whose marker proves a state OTHER than 有数据 (`scannedAs`) prints that
+   * state when the marker holds, and 非<that state> when it does not. Both
+   * halves matter. The routes drive the ONE page in its two ready states, so
+   * the fallback row has to be able to say 回退 — and it must not be able to
+   * say 有数据, which is the claim T1226 removed. Nor, when it comes back
+   * answered, may it say 回退 (the other branch) or 服务关 (the API), because
+   * a row that names the wrong cause is worse than a row that names none. */
   const degraded = r.absentHit.length > 0;
-  const dataLabel = r.hasData === null ? "static" : r.contentOK ? "有数据" : degraded ? "回退" : "服务关";
+  const dataLabel = r.hasData === null ? "static"
+    : r.contentOK ? (r.scannedAs ?? "有数据")
+    : degraded ? (r.scannedAs === null ? "回退" : `非${r.scannedAs}`)
+    : "服务关";
   console.log(`${r.route.padEnd(40)} | ${r.core ? "yes" : "no "} | ${dataLabel.padEnd(6)} | ${String(r.wcag).padEnd(4)} | ${r.bestPractice}`);
   if (r.core && r.contentOK) coreWithData += 1;
 }
@@ -923,8 +1067,20 @@ if (shelled.length > 0) {
  * (docs/42 has nine sections; Scientific Object Detail and Knowledge Network
  * Page have no route in apps/web, which leaves exactly seven), so a page that
  * stops rendering its data reds this run rather than quietly leaving the
- * count. The floor is unchanged by T1226: the same seven routes are driven,
- * and /search reaches the count through a stricter marker than before. */
+ * count. The floor is unchanged by T1226: the same seven CORE routes are
+ * driven, and /search reaches the count through a stricter marker than before.
+ *
+ * T1230 adds a route and still leaves the floor at 7, deliberately. The new
+ * route is `/search?q=zzqx`, the FALLBACK state of the same Search Answer page
+ * that is already counted above, and it is `core: false` for exactly that
+ * reason: this number counts distinct docs/42 core pages whose fixture content
+ * rendered, so a second route over a page already in the count must not enter
+ * it. Letting it in would be wrong twice over — one page counted as two, and a
+ * row whose state is 回退 counted as "scanned with data", which is the
+ * mislabelling T1226 removed. The new route's own proof is the named fallback
+ * check above, which reds if the page stops being the fallback; nothing about
+ * that proof depends on this number, and the number did not move to
+ * accommodate it. */
 const CORE_PAGES_WITH_DATA_FLOOR = 7;
 if (IDS !== null) {
   if (coreWithData < CORE_PAGES_WITH_DATA_FLOOR) {
