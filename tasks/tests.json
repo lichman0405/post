@@ -1940,6 +1940,16 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1226-TEST-01",
+      "task_id": "T1226",
+      "name": "the a11y scan of /search lands on an answer carrying citations, not the zero-source fallback",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }

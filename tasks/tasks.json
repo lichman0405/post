@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 167,
+  "task_count": 168,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -9745,6 +9745,74 @@
       ],
       "scope_note": "T1222 教会读行函数分辨 `!` 行；本笔修的是同一个函数**取字段**的方式——源路径里一个冒号就能让 `!` 判定落在错的字段上，于是目录循环里静默缩小扫描面。T1224 把仪器接成每轮都跑的闸，所以这个潜伏案例现在值一笔。",
       "supervisor_scope_narrowing": "**为什么只开 `tests/security/**`：** 要碰的三样东西都在那里——读行函数（`sast.sh`）、那台仪器（`sast-go-surface-check.sh`）、以及总门那一行的 `evidence`（`master-security-gate.sh`）。\n\n**为什么依赖 T1224：** 本笔要改的 `evidence` 那一行是 T1224 注册的；T1224 不合并，那个数词还不在树上。依赖同时保证两者**不会并行**（同一目录），所以不会有冲突面。\n\n**为什么不开 `ops/ci/gosec-baseline.txt`：** 本笔只改「怎么读 git 的一行」，不新增也不消除任何发现，基线不动。\n\n**为什么不开 `tests/acceptance/**`：** V1 证书是冻结的历史文件，本笔不动它。\n\n**这是 L1，不是 L3**：修一个解析器对字段分隔符的假设，并给既有仪器加一个能红的案例——不新增权限、不放宽任何限制、不改变扫描**范围**的定义（恰恰相反，是把范围被静默缩小的那条路堵上）。**先按判据复现再动手**——我给的测量若与树不符，以树为准并写明。"
+    },
+    {
+      "id": "T1226",
+      "phase": "P13",
+      "phase_name": "V1 之后的加固：流水线自己的可信度",
+      "title": "a11y 扫描把 `/search` 记成「有数据」，实际扫的是**零来源回退**：这是 L1-20260922-5 承诺的那笔（触发条件「V1 之后的第一轮补强」已到）——播一条能命中的文档，并断言页面上真的出现**引用**",
+      "v1_required": false,
+      "dependencies": [],
+      "tests": [
+        "the a11y scan of /search lands on an answer carrying citations, not the zero-source fallback",
+        "the new search-route assertion fails when the citation state is broken",
+        "both harness consumers stay green and the visual baselines are byte-identical"
+      ],
+      "allowed_scope": [
+        "tests/web-smoke/a11y-harness/**",
+        "tests/web-smoke/a11y-smoke.mjs",
+        "tests/web-smoke/run-a11y.sh",
+        "tests/web-smoke/run-i18n.sh",
+        "tests/web-smoke/i18n-smoke.mjs"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "apps/**",
+        "services/**",
+        "infra/**",
+        "ops/**",
+        "scripts/**",
+        "Makefile",
+        "cmd/**",
+        "internal/**",
+        ".rddev.example/**",
+        "tests/**（上面列出的那几处除外）",
+        "tests/web-smoke/baseline/**"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/35_ACCESSIBILITY.md",
+        "docs/67_TEST_GATES.md"
+      ],
+      "requirements": [
+        "**先把下面五条在树里核一遍**（我读过树也会错，**以树为准**；对不上就写明并以树为准）：\n  * (a) 扫描把 `/search?q=catalyst` 当**核心页**扫，数据标记是 `[data-search-answer]`（`tests/web-smoke/a11y-smoke.mjs` 的 route 表）。\n  * (b) `tests/web-smoke/a11y-harness/main.go` 里那段自述说得很清楚（在 `retrieval.NewSQLStore` 之前的那段块注释）：**`catalyst` 匹配不到任何播种文档**，于是检索返回零个排序来源，生成器的**零来源分支先答**（`internal/search/answer/generator.go` 的 `ReasonNoSources`），**根本走不到 provider 检查**。\n  * (c) 后果：这条路在覆盖表里被记成**有数据**，而它实际扫的是**回退**状态——页面自己的标题就是 `no_sources` 那条（`apps/web` 的 search 文案）。**这就是本笔要关掉的那个「覆盖得比实际宽」的说法。**\n  * (d) **这台 harness 有两个消费者**：`run-a11y.sh` 与 `run-i18n.sh`（`i18n-smoke.mjs` 也读它）。两个都是 required job，所以**两个都必须保持绿**。\n  * (e) **视觉套件不用这台 harness**：`visual-regression-run.sh`、`head-tree-visual.sh`、`run.sh` 里**没有**任何 `a11y-harness` 引用（我自己核过）。所以 `tests/web-smoke/baseline/` 那 17 张 PNG **不该**因为本笔重渲。我先前在一处台账里写过「会让 17 张视觉基线重渲」——**那半句是错的**，这里更正：两套用的是各自的 fixture。仍然**不许**碰 `tests/web-smoke/baseline/**`（见判据）。",
+        "**播种一条这个查询能命中的文档**，使检索返回排序来源、生成器走到**带引用**的答案那条路。播种数据住在 a11y harness 里（`tests/web-smoke/a11y-harness/**`）。查询词是继续用 `catalyst` 还是换一个由你定——**只要扫到的那条路是「带引用的答案」**。",
+        "**让判据证明它真的在那条路上**，而不是只看 `[data-search-answer]`——**那个标记回退状态也渲染**（这正是覆盖被记宽的原因）。可用的钩子已经在产品组件里（**只读**，不许改 `apps/web/**`）：答案里的引用是 `data-search-citation`，回退段是 `data-search-fallback`，来源行是 `data-search-source-ref` / `data-cited`。所以搜索那条路的标记要**至少**能区分「有引用」与「回退」：例如断言 `[data-search-citation]` 存在**且** `[data-search-fallback]` 不存在。（钩子名请在 `apps/web/app/(main)/search/search-answer.tsx` 里**自己核一遍**再写进判据。）",
+        "**证明这条新断言能红**：把它要否定的那个状态构造出来（例如临时让查询匹配不到、或让播种文档失效），贴出**页面上真的没有引用**时这条断言**失败**的原文，然后还原并复绿。**不能红的断言不算证据。** 不许为了让任何一处变绿而删除、跳过或放宽既有断言。",
+        "**两个消费者都要实跑**：`bash tests/web-smoke/run-a11y.sh` 与 `bash tests/web-smoke/run-i18n.sh` **都**要退出 0（两者都要真 Chromium；本机若起不来就把阻塞原因写进 RESULT，不要伪造通过）。另外**覆盖表的 floor 不许降**：`a11y-smoke.mjs` 末尾那个「到达 有数据 的路由数」的下限（若你改了路由集合，数目要按实际情况写清并说明为什么）。",
+        "**不许碰视觉基线**：`tests/web-smoke/baseline/**` 一个字节不动（17 张 PNG 的 sha256 前后相同）。也不许碰 `apps/**`、`docs/**`、`specs/**`、`tasks/**`。**若你测出某个基线真的必须重渲，停下来写进 RESULT 交给我**，不要自己重渲——那会把一笔测试夹具的改动变成一次覆盖面变更。"
+      ],
+      "deliverables": [
+        "`tests/web-smoke/a11y-harness/**`：能让扫描的查询命中的播种数据。",
+        "`tests/web-smoke/a11y-smoke.mjs`：搜索那条路的标记改成能区分「带引用」与「回退」的判据（并保持既有断言一条不少）。",
+        "RESULT：(a)-(e) 五条的复核结论（各引一行原文）；两个套件的实跑原文（命令、退出码、覆盖表里 搜索那条路的记录）；新断言的**红-可红**证据（红原文 + 还原后复绿原文）；17 张基线 PNG 的 sha256 前后对照。",
+        "RESULT：`git status --porcelain -uall`（只应列 `tests/web-smoke/**`）与 `git diff --stat HEAD -- apps/ docs/ specs/ tasks/ .github/ ops/ tests/web-smoke/baseline/` 的空输出。"
+      ],
+      "acceptance_criteria": [
+        "(a)-(e) 五条各有复核结论与引用；与树不符的以树为准并写明。**特别是 (e)**：如果你测出视觉套件其实**也**用了这台 harness，那是我的更正错了——写明你的测法，并**停下来**别改基线。",
+        "扫描时搜索那条路走的是**带引用**的答案：页面上 `[data-search-citation]` 出现、`[data-search-fallback]` 不出现（或你选的等价判据），贴出实际 DOM/文本证据。",
+        "**新断言能红**：把「有引用」那个状态破坏掉时它失败（贴原文），还原后复绿（贴原文）。",
+        "`bash tests/web-smoke/run-a11y.sh` 与 `bash tests/web-smoke/run-i18n.sh` **都**退出 0（或写明本机为什么起不来）；既有断言一条未删、未跳过。",
+        "`tests/web-smoke/baseline/**` 17 张 PNG 的 sha256 与改动前**逐个相同**；`git status --porcelain -uall` 只列 `tests/web-smoke/**`（不含 baseline/）。",
+        "覆盖表里搜索那条路的记录与它**实际**扫到的状态一致（不再把回退记成「有数据」而不加区分）。"
+      ],
+      "scope_note": "决策 L1-20260922-5 记下了这个缺口、它的补法与触发条件，但**那笔任务从没被立起来**（tasks.json 里没有任何一笔提到它）。P13 就是「V1 之后的加固」，触发条件已到。本笔补上它：让 a11y 扫描真的扫到带引用的答案那条路，而不是把回退状态记成「有数据」。",
+      "supervisor_scope_narrowing": "**为什么只开这几个位置：**\n\n  * `tests/web-smoke/a11y-harness/**` 与 `tests/web-smoke/a11y-smoke.mjs` 是播种数据与扫描判据所在。\n  * `run-a11y.sh` / `run-i18n.sh` / `i18n-smoke.mjs` 是这台 harness 的**消费者**，夹具一改它们就可能要跟着动——**开它们是因为它们是同一台仪器的一部分**，不是因为预期它们要改。\n\n**为什么不开 `tests/web-smoke/baseline/**`（虽然它在同一个目录下）：** 那是 17 张**二进制**视觉基线，由渲染产生、不是手写的。本笔**不该**改变任何像素：视觉套件用的是**另一套** fixture（`visual-regression-run.sh` / `head-tree-visual.sh` / `run.sh` 里没有 a11y-harness 的引用，我核过）。所以我按**具体文件**开，而不是开整个 `tests/web-smoke/**`——把基线留在范围外，让「要不要重渲」变成一个必须问我、而不是可以顺手做掉的问题。\n\n**为什么不开 `apps/**`：** 判据要用的钩子产品里已经有了（`data-search-citation`、`data-search-fallback`、`data-search-source-ref`），**只读**地引用即可。本笔不改产品代码。\n\n**为什么 G3 是这两个：** `a11y` 与 `i18n` 正是这台 harness 的两个消费者，也都是 required job。两个都跑真 Chromium、都从这台 harness 取数——它们本来就是这笔改动**最贴**的端到端判据。\n\n**这是 L1，不是 L3**：改测试夹具与判据，让覆盖名实相符。不新增权限、不改产品语义、不放松任何 Gate（判据是**加**一条能红的断言，并且**禁止**删除或放宽既有的）。"
     }
   ]
 }
