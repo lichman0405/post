@@ -49,6 +49,13 @@ run_updater() { # dir [extra args...] -> sets RC/OUT/ERR
   ERR="$(cat "$WORK/err")"
 }
 
+run_real() { # dir [extra args...] -> sets RC/OUT/ERR; NO injected --stamp,
+             # i.e. the invocation `make progress` / CI actually makes.
+  OUT="$(python3 "$UPDATER" --root "$1" "${@:2}" 2>"$WORK/err")"
+  RC=$?
+  ERR="$(cat "$WORK/err")"
+}
+
 # --- 1. first run seeds the marked section, keeps hand-written content ------
 mkfixture "$WORK/seed"
 run_updater "$WORK/seed"
@@ -118,6 +125,44 @@ if [[ $RC -eq 0 ]] && echo "$OUT" | grep -q "no auto section"; then
   ok "--check without markers: prints notice, exit 0"
 else
   fail "--check no markers: rc=$RC out=$OUT"
+fi
+
+# --- 8. --check compares content, not the generation stamp (T1228) -----------
+# The section was generated at a stamp far in the past and is checked with the
+# real clock (no --stamp): the content is current, so --check must say yes.
+# While the stamp was part of the comparison this could only ever answer "no"
+# for a committed file, which is what made it unusable as a gate.
+mkfixture "$WORK/stampok"
+run_real "$WORK/stampok" --stamp 2020-01-01T00:00:00Z   # seed at an old stamp
+run_real "$WORK/stampok" --check
+if [[ $RC -eq 0 ]] && echo "$OUT" | grep -q "up to date"; then
+  ok "--check: a past stamp does not make a current section stale (exit 0)"
+else
+  fail "--check stamp-blind: rc=$RC out=$OUT err=$ERR"
+fi
+
+# --- 9. ... and it still answers "no" when the content really moved ----------
+# Same sandbox, same real clock, only task_status.json changes: the red may not
+# come from the clock. Both halves are asserted in one case on purpose — a check
+# that always says yes would satisfy the second half alone (T1228: an instrument
+# that can only say "no" is worth no more than one that can only say "yes").
+mkfixture "$WORK/seesaw"
+run_real "$WORK/seesaw" --stamp 2019-06-01T00:00:00Z    # seed at an old stamp
+run_real "$WORK/seesaw" --check
+rc_current=$RC
+python3 - "$WORK/seesaw" <<'PY'
+import json, sys
+p = f"{sys.argv[1]}/tasks/task_status.json"
+d = json.load(open(p))
+d["tasks"]["T0001"]["status"] = "accepted"      # merged -> accepted
+json.dump(d, open(p, "w"))
+PY
+run_real "$WORK/seesaw" --check
+rc_stale=$RC
+if [[ $rc_current -eq 0 && $rc_stale -eq 1 ]] && echo "$ERR" | grep -q "stale"; then
+  ok "--check: answers yes while current, no once the content moved"
+else
+  fail "--check two-sided: rc_current=$rc_current rc_stale=$rc_stale out=$OUT err=$ERR"
 fi
 
 # --- summary -------------------------------------------------------------------
