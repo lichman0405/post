@@ -18984,3 +18984,96 @@ output byte-identical」。`knowledge_publications` 确实被检入的查询读
 （`feeds.sql:192`、`knowledge_publish.sql:35/58/143`、`search.sql:270` 等），
 但**加触发器不改列**。所以预期是输出不动、标准满足。
 工人若报了别的结果，它就是发现了我的错误，按「停手点名」写进 RESULT 即可。
+
+## 51 — T1218 的两处「没人管」：派生物链条在规则文件里表达不出来，而 collect 被拒没有任何自动恢复在接（L1，2026-09-24）
+
+（编号：圈号系列在 ㊿ 用完了，这里是第 51 条，改用阿拉伯数字。）
+
+### 一、发生了什么
+
+T1218 的第一次交付被 collect 拒了。**十四条检查里十三条通过，唯一红的是 `scope`**：
+
+    scope: 1 changed path(s) outside allowed_scope
+      [infra/migrations/** internal/persistence/sqlc/** specs/database/postgres.sql tests/integration/**]:
+      specs/SPEC_VERSION.json
+
+工人的改动是四个路径：迁移 `00157`、`specs/database/postgres.sql`、
+`specs/SPEC_VERSION.json`、`tests/integration/append_only_test.go`。
+其余各项（gate-inputs、worker-exit、residue、head-baseline、branch-ref、refs、
+result-schema、四条 result-consistency、secrets）全部通过，`RESULT.json` 里
+10 条测试、6 条判据全部 `passed`。
+
+**被拒的那一份恰恰是维持一致所必需的那一份。** 这不是工人的越界，是我任务书写漏了。
+
+### 二、缺口 A：规则文件表达不出这条链条（我写漏的根因）
+
+链条在树上是**三段**，我只写了前两段：
+
+    infra/migrations/**          -> specs/database/postgres.sql     （声明过的派生物）
+    specs/database/postgres.sql  -> specs/SPEC_VERSION.json
+          （`specs/**` 下每一个文件都是这个标记的输入——
+            `derived-artifacts.json` 自己的 `$comment` 就是这么写的）
+
+第三段有实测：**移动过 `specs/database/postgres.sql` 的最近 8 个提交，8 个都同时移动了标记**
+（`git log --format=%H -n 8 origin/main -- specs/database/postgres.sql`，逐个
+`git show --name-only` 数过）。已合并的带迁移任务里，T1006 / T1007 / T0610 三笔
+都同时列了两个标记——它们大概就是撞过同一堵墙之后补上的。
+
+**为什么派发时和 CI 都不报错**：`derived-artifacts.json` 里那条规则的 marker 是
+**glob** `specs/**`，而 `infra/migrations/**` 任务通常只点名 `specs/database/postgres.sql`
+这**一个具体文件**；一个具体文件盖不住一个 glob，于是
+`TestEveryTaskScopeSatisfiesTheDerivedArtifactRule`（`gate_spec_test.go:427`）不触发。
+规则文件**没有表达「覆盖了 A、而 A 又是 B 的输入，所以也要覆盖 B」这种传递性**。
+
+反证：本任务书自己的验收判据 [4] 从一开始就把 `specs/SPEC_VERSION.json` 列在
+「允许出现的路径」里。**判据是对的，错的是 scope 那一行**——两处互相矛盾，
+我按判据修（`f112967`：`specs/SPEC_VERSION.json` 进 allowed_scope，
+`forbidden_scope` 里那条 `specs/**（… 除外）` 相应开口子）。
+
+### 三、缺口 B：collect 被拒没有自动恢复——这一个是会「永久静默」的
+
+查这一步的时候顺手把 `.rddev/tools/resolve_decisions.py` 的过滤器读了，
+`main()` 只挑三种：
+
+    action == "accept" 且 reason 含 "does not apply" / "G2 is red"
+    action == "spawn"  且 reason 含 "does not start from the integration tip"
+    action == "merge"  且 reason 含 "cannot build the merge commit"
+
+T1218 这条决定的 `action` 是 **`collect`**——**一条都不匹配**。于是：
+
+  * 解析器每 90 秒记一次 `没有可机械恢复的决定点`，什么都不做；
+  * 驱动对 `rejected` 的任务整笔跳过它；
+  * 于是**任务永久停在 `rejected`，而没有任何一个角色会去动它**。
+
+这不是「慢」，是「停了」。差一点就把它当成「驱动还在跑、等就行」——
+发现它只是因为我去读了那个过滤器，而不是因为有任何东西报错。
+
+**已做的恢复**：`rddev rebaseline T1218 --reason-file …` 把基线推到 `f112967`
+（搬过去 4 个文件，并**重新生成了 `specs/SPEC_VERSION.json` 与
+`specs/database/postgres.sql`**——顺带实证了 rebaseline 的「派生文件排除在补丁之外、
+按合并后的树重新生成」这句注释是真的），返工已经起来。信里写的是
+**「这不是缺陷，是任务书漏了一条」**，并且在 `prompt.md` 里核到过它真的送达了。
+
+### 四、裁定
+
+**两处都不现在改。** 理由：现在动 `tasks/tasks.json` 会把 `specs/SPEC_VERSION.json`
+再推一次，而 T1218 正在 `f112967` 上返工、它的补丁里带着这个标记——
+再推一次就等于亲手把它下一次 G2 弄成 `does not apply to current main`。
+T1218 一落地（或至少不再在飞）就**立账**：
+
+  1. **规则文件补传递性**：让「覆盖 `specs/database/postgres.sql`」自动要求
+     `specs/SPEC_VERSION.json`。注意：直接加一条
+     `{"marker": "specs/database/postgres.sql", "derived": "specs/SPEC_VERSION.json"}`
+     会让 CI 对**所有**只列了快照、没列标记的老任务一起变红（T0013、T1108 … 都在其列），
+     所以这一笔要连着「哪些老账要豁免、豁免怎么写」一起想清楚，不是一行字。
+  2. **collect 被拒要有人接**：至少让解析器认得 `action == "collect"`，
+     并在「树没动、只是 scope 或判据不认」时把决定点留给人看，而不是静默丢弃。
+     现在是**静默**——这是最坏的一种失败。
+
+### 五、没有降低任何 Gate
+
+scope 那一行是**放宽到判据本来要求的范围**，不是「为了让门变绿」而放宽：
+判据 [4] 一直就要求那条路径，且这条路径上的文件是**派生**的（`derived-artifacts.json`
+把它列为派生物的理由就是「Worker 重新生成它，而不是把它当文本合并」）。
+collect 的 `scope` 检查、G2 的 `spec-validation`、CI 的 `spec_version.py --check`
+一个都没有删、没有 skip、没有放宽。
