@@ -1,0 +1,72 @@
+{
+  "id": "T1217",
+  "phase": "P13",
+  "phase_name": "V1 之后的加固：流水线自己的可信度",
+  "title": "收工校验的两处不诚实：陈旧的 `RESULT.json` 会被当成本轮的采信、`acceptance[].status` 的规矩没写在工人读得到的正文里（#264 + ㊾）",
+  "v1_required": false,
+  "dependencies": [
+    "T1202",
+    "T1215"
+  ],
+  "tests": [
+    "a stale RESULT.json from an earlier round is not collected as this round's",
+    "the completion rule for acceptance[] is stated where the Worker reads it"
+  ],
+  "allowed_scope": [
+    "internal/devorchestrator/**",
+    "ops/ci/gosec-baseline.txt"
+  ],
+  "forbidden_scope": [
+    ".git/**",
+    "CLAUDE.md",
+    "tasks/**",
+    "specs/**",
+    "docs/**",
+    ".github/**",
+    "apps/**",
+    "services/**",
+    "infra/**",
+    "ops/**（`ops/ci/gosec-baseline.txt` 除外）",
+    "scripts/**",
+    "Makefile",
+    "cmd/**",
+    "tests/**"
+  ],
+  "decision_level_max": "L1",
+  "relevant_specs": [
+    "docs/24_TEST_STRATEGY.md",
+    "docs/67_TEST_GATES.md",
+    "docs/25_CICD_DEVOPS.md"
+  ],
+  "requirements": [
+    "**你的工作树里已经躺着一份上一轮的实现——这是有意的，别推倒重来，也别当成脏改动清掉。** 这一笔在 2026-09-24 派过一次（`run-4d07760c4716312b`），那一轮的产物**原样留在你的工作树里**：`git status --porcelain -uall` 会列出 6 行——新增 `internal/devorchestrator/result_freshness.go` 与 `result_freshness_test.go`，修改 `gate_inputs.go`、`worker_collect.go`、`worker_render.go`、`worker_render_test.go`。**它不是你写的，也不是环境噪声**，是上一轮工人交的、已经被收工校验收下的实现；那一轮死在验收，死在下面第三件事上。**先读、再判、后写**：通读 `git diff` 与那两个新文件，逐条对照下面的验收判据，判断它到底做到了没有。做到了的**不要重写**——重写只会把已经对的判据弄坏；没做到、做错、或做得不够的，改它。\n\n另：`.rddev/workers/T1217/RESULT.json` 里躺着的是**上一轮**那份（12:13 写的）。这一笔新增的判据（`CheckResultFreshness`）会把「与派发那一刻字节相同」的文档判为上一轮的文档并拒收，所以**你必须重写一份属于本轮的 `RESULT.json`**，不能原样留着。",
+    "**先读再写，别照抄我的话。** 下面每条都给了出处，先到树里核一遍；核出来与我说的不一样，以树为准并在 RESULT 里写明。",
+    "**（第一件事）收工校验会采信一份陈旧的 `RESULT.json`。** `internal/devorchestrator/worker_collect.go:297` 把 `filepath.Join(rec.ResultDir, \"RESULT.json\")` 直接交给 `ValidateWorkerResultFile`（`:299`），**全文没有任何一处拿它与 `rec.StartedAt` 比过**（`grep -n 'ModTime\\|StartedAt' internal/devorchestrator/worker_collect.go` 命中 0）。而返工与重开都**重用同一个任务目录**：`ReworkWorker`（`worker_spawn.go:1063`）与 `RespawnWorker`（`:1086`）；`archivePreviousVerdict`（`review_worker.go:689`）只被评审路径调用（`:140`）。于是 `#264` 说的那条成立：**一轮返工如果从头到尾没写过新的 `RESULT.json`，上一轮那份会被当成这一轮的收进来，而且是绿的。**先把这个洞**复现成一条会红的测试**（红的那次输出留下来），再修。",
+    "**修法要给判据，不要给补丁。** 不许只是「在返工前删掉旧文件」了事——那挡不住「工人写了但写坏了」「文件被 checkout 刷新了 mtime」这些形态。要给出一个**可断言的判据**（例如：这份文档是否属于本 `run_id` / 本次启动之后），并说明它在什么情况下会**误伤**（`RESULT.json` 比 worker 启动还早、mtime 被 git 刷新、同一次运行里工人先写后改……），误伤的那几种要么被排除掉、要么在测试里钉住。",
+    "**（第二件事）收工规则与词表打架，而正文里没说。** `internal/devorchestrator/result_consistency.go:159-166` 是**无条件**的：`status: completed` 下任何一条 `acceptance[]` 只要 `!= \"passed\"` 就 fail。而 `specs/orchestrator/worker-result.schema.json` 的 `acceptance[].status` 枚举是 `[\"passed\",\"failed\",\"not_applicable\"]`——**`not_applicable` 是 schema 承认的合法值**。给 Worker 的 `system.md` 里那句「the vocabulary has no \"not applicable\"」写在 **`tests[]`** 那一条里（讲的是 `not_run`）；对 `acceptance[]` 一个字都没有。结果：**Worker 照 schema 写 `not_applicable` 就会被拒收，而正文从没告诉过它不行**（2026-09-24，T1216 因此被整笔拒绝，见 `tasks/decisions.md` ㊾）。",
+    "**第二件事的修法已经定了，不要另找方向**（正文那一块在 `internal/devorchestrator/worker_render.go:533`，是一段叫 \"Three recording conventions the schema cannot express\" 的正文，第三条就是 `tests[]` 的那条规矩——**它把 `not_run` 写得完整且正确**，所以 `tests[]` 这半边没有洞，别去动它；缺的是与它**并列的第四条**。加一条时**记得改那段标题里的数量词**，别留下「Three」底下四条的情形。）：**不放宽 collect 的判据，也不改 schema 的枚举。**`not_run` 与 `not_applicable` 都要保留原义——它们属于 `blocked`/`failed` 的报告。要做的是**把这条规矩写进 Worker 读得到的正文**（`system.md` 的渲染来源在 `internal/devorchestrator/` 里），写法与 `tests[]` 那一条并列、同样给出「记成别的会怎样」（被拒，且这一轮白跑），并补一条**会红的**测试：漏掉这段文本时必须红。",
+    "**（第三件事，是上一轮验收带出来的：`security-master` 的 `sast-go` 会红，而红的不是你的代码，是行号漂移。）** 我在你这棵树上跑了同一个仪器（`bash tests/security/sast.sh go`，与 `tests/security/master-security-gate.sh` 的 `sast-go` 行同源），它报：`256 finding(s), 13 unbaselined (798 file(s) scanned)`。逐条与 `ops/ci/gosec-baseline.txt` 对完之后，**13 条无一是新类别、无一是真实缺陷**：\n\n  * **11 条是 main 上已经复核过的既有发现**，被你在同一个文件里插入的行整体推后了；\n  * **2 条来自你新增的 `result_freshness.go`**，是同一形态（`os.ReadFile` 一个由本函数自己拼出来的路径）的新实例。\n\n**证据是偏移一致**：同一个文件里的每一处都位移了同一个量，而且位移之后每一处的**下一行**与基线条目当时记下的下一行逐字相同（例：`gate_inputs.go:94:12:G301` 条目记的下一行是 `return err`，你树里的 `122:12` 下一行也是 `return err`）。行被动过的话，偏移不会这么整齐。\n\n| 文件 | 基线键（main 上的） | 你树里的键 | 偏移 |\n|---|---|---|---|\n| `internal/devorchestrator/gate_inputs.go` | `94:12:G301` | `122:12` | +28 |\n| `internal/devorchestrator/gate_inputs.go` | `108:16:G304` | `142:16` | +34 |\n| `internal/devorchestrator/gate_inputs.go` | `113:13:G301` | `147:13` | +34 |\n| `internal/devorchestrator/gate_inputs.go` | `251:15:G304` | `285:15` | +34 |\n| `internal/devorchestrator/gate_inputs.go` | `255:15:G304` | `289:15` | +34 |\n| `internal/devorchestrator/gate_inputs.go` | `298:12:G301` | `332:12` | +34 |\n| `internal/devorchestrator/gate_inputs.go` | `314:12:G301` | `348:12` | +34 |\n| `internal/devorchestrator/worker_collect.go` | `304:18:G304` | `325:18` | +21 |\n| `internal/devorchestrator/worker_collect.go` | `345:17:G304` | `366:17` | +21 |\n| `internal/devorchestrator/worker_collect.go` | `533:15:G304` | `554:15` | +21 |\n| `internal/devorchestrator/worker_collect.go` | `558:16:G304` | `579:16` | +21 |\n| `internal/devorchestrator/result_freshness.go`（新文件） | —— | `87:15:G304` | —— |\n| `internal/devorchestrator/result_freshness.go`（新文件） | —— | `123:15:G304` | —— |\n\n**算法自证**（你可以照着重算一遍）：基线现在有 **254** 条，仪器的报告说 **243** 条命中、**13** 条未命中；`254 − 243 = 11`，正是上表那 11 条漂移。也就是说**基线里那 11 条旧键现在是 stale 的**（代码挪走了）。修完之后应当是 **256** 条、**256** 命中、**0** stale、**0** unbaselined——因为 11 条是**原位改行号**、只有 2 条是新增。\n\n**怎么改**：\n\n  1. 那 11 条把 `path:line:column:RULE` 里的**行号**改成你树里的行号，**原位改**，`category` 与 `reason` 保留原文（那是复核文字，不是你的话，别改写也别删）。\n  2. `result_freshness.go` 那两条**另写**，照同一文件既有条目的写法，category 用 `not-attacker-reachable`，reason 要说清**为什么这条路径不是攻击者可达的**（读的是 `.rddev/` 下 rddev 自己的运行态，名字不由请求决定）。\n  3. **一条一行**。目录级、glob 级、规则级条目会被 `tests/security/sast_report.py:109` 明文拒绝——那正是这份基线还有意义的原因。\n  4. **不许**加 `#nosec`，**不许**动 `tests/security/sast.sh` 的调用参数（它没有任何排除项，这是它的第 3 条自述）。",
+    "**那几个权限模式一个字节都不许改。** 被顶到新行号的条目里，`G301` 报的是 `os.MkdirAll(..., 0o755)`——它们在 main 上已被复核并写进基线（目录建在 `.rddev/` 自己的运行态下，路径不由请求决定，`0755` 就是普通目录模式）。**你不是来改它们的，是来把行号对回去的**：为了让警告消失而把 `0o755` 压成 `0o750`，改的是别人的、已经复核过的语义，而且会让基线里那些条目变成 stale——这条路上没有一处是你被要求修的。",
+    "**不许为了让什么变绿而放宽任何判据**：`result_consistency.go` 的 `completed ⇒ 全部 acceptance 通过` 一字不改；`specs/orchestrator/worker-result.schema.json` 一个字节不动（收工给出它的 `sha256sum`）；不许删/skip 测试、不许放大 timeout、不许把断言从「等于」改成「不报错」。",
+    "**若修法必须落在本文件之外，停手并说明。** 这一笔的范围只有 `internal/devorchestrator/**`。如果你量到根因在别处（schema、`cmd/rddev`、`scripts/`、CI 配置），**不要自己扩范围**：在 RESULT 里点名说清楚「要让哪一处怎么改、凭什么」，我来接。"
+  ],
+  "deliverables": [
+    "`#264` 的复现：一条在修之前会红的测试，附「修之前红」那次的输出（`MUTATION CHECK` 开头）。",
+    "修法与判据：为什么它挡住的是这一类而不是这一个，以及误伤边界的处理与测试。",
+    "`system.md` 的补写 + 一条漏掉即红的渲染测试。",
+    "收工证据：跑过的命令、次数、结果；两份不该动的文件的 `sha256sum`；`git status --porcelain -uall`。",
+    "`ops/ci/gosec-baseline.txt`：11 条既有条目按你树里的行号**原位**重对（`category`/`reason` 原文不动）+ `result_freshness.go` 的 2 条新条目。改前改后的条目数（`grep -c` 与 `wc -l`）与 `git diff` 原文。",
+    "**属于本轮的** `RESULT.json`（不是上一轮那份留在原地的 34249 字节文档）：三件事各自的证据，以及你在开头「读了上一轮实现、判断它做到了哪些、改了哪些」的结论。"
+  ],
+  "acceptance_criteria": [
+    "**陈旧 `RESULT.json` 不再被当成这一轮的**：给出测试在「修之前红」的实际输出（`MUTATION CHECK` 开头），并说明它断言的是**行为**而不是某个函数的形状。**修之前红不了的话，这一条就是构出来的。**",
+    "**判据写在一处、两个方向都被钉住**：新增判据有独立 `_test.go` 覆盖「陈旧⇒拒收」与「当轮⇒收」两侧；并在 RESULT 里点名回答误伤边界——至少处理「`RESULT.json` 早于本次启动」与「mtime 被刷新」这两种形态（排除掉，或在测试里钉住）。",
+    "**收工规则在 Worker 读得到的正文里**：`acceptance[]` 的完成规则与 `tests[]` 的那条并列出现，并且有一条测试断言「渲染结果里必须有它、漏掉就红」。给出那条测试名与它红过的那次输出。渲染出来的正文里**不许再出现「Three recording conventions」这种与条数对不上的标题**——要么把它改成与实际条数一致，要么让新增那条从属于既有的一条；**断言必须包含这一层**（只断言「那段话在」的测试查不出这个）。",
+    "**没有放宽任何判据**：`internal/devorchestrator/result_consistency.go` 的完成规则一字未改；`specs/orchestrator/worker-result.schema.json` 的 `sha256sum` 与你开工时一致；无删/skip 测试、无放大 timeout。",
+    "**没有越界**：`git status --porcelain -uall` 只列 `internal/devorchestrator/**` 下的文件；无残留进程。",
+    "**`sast-go` 报 `0 unbaselined`，且没有 stale 残留**：给出 `bash tests/security/sast.sh go` 的**输出原文**，那一行须形如 `ok   sast-go: gosec v2.29.0: N file(s) scanned, 256 finding(s) reported (256 baselined (reviewed), 0 unbaselined)`，**后面不许再跟 `, N baseline entr(ies) no longer fire`**——那半句挂着，说明你是**另加**了新条目而没把旧的换掉；而旧的那 11 条现在正是因为代码挪走而 stale。条目数须从 **254 变成 256**（只有 `result_freshness.go` 那两条是新增）。",
+    "**没有为了让 `sast-go` 变绿而动别人的东西**：`git diff -- ops/ci/gosec-baseline.txt` 里只许出现行号改动与新增两行，不许出现 `0o755`→`0o750` 这类模式改动（给出该 diff 原文）；`tests/security/sast.sh` 与 gosec 的调用参数一字未动；无 `#nosec`、无目录级/glob 级条目（给出 `grep -n 'nosec\\|\\*\\*' ops/ci/gosec-baseline.txt` 为空）。"
+  ],
+  "scope_note": "这一笔修的是**流水线自己会不会被骗**，不是产品功能，所以 `v1_required` 为 false：V1 证书钉在它自己那棵树上，不依赖它，它也不改任何产品语义。要防的后果是 `#264` 自己点名的那个——**一轮什么都没干的返工，会被收成绿的**。它挡着的不是某一笔任务，而是此后每一笔：收工校验是「工人说完成了」与「我真的验收了」之间唯一的机械关卡。 **`ops/ci/gosec-baseline.txt` 为什么在允许面内（这是任务书原先漏掉的一块）**：`security-master` 的 `sast-go` 行按 `path:line:column:RULE` 键控，`tests/security/sast_report.py` **明文拒绝**目录级/glob 级条目，所以它只能按行号写；你在 `internal/devorchestrator/**` 里插行，就会把 main 上已经复核过的既有发现顶到新行号上，它们随即变成 `unbaselined` 而判红——**这不是你引入的缺陷**。判据自己点名了那个文件，任务书原先却把它关在 `ops/**` 外面，于是这一关在工人手里无解。放宽这一条即可。",
+  "supervisor_scope_narrowing": "**为什么只给一个目录**：同时开着或刚开过的还有 T1215（`internal/devorchestrator/**`、`cmd/rddev/**`、`tests/acceptance/four-gate-helpers.sh`、`rejection-retry-e2e.sh`）——**T1217 依赖 T1215**，`dependencies` 里写了，所以驱动不会在两笔同时开着时派它；等 T1215 合了才轮到。**为什么 `cmd/rddev/**` 不在允许面**：这一笔的判据与渲染都在 `internal/devorchestrator/` 里；`cmd/rddev` 的测试若要跟着改，说明根因不在我指的那一处——那种情况按上面第 7 条**停手点名**，不要扩范围。**为什么允许改 `system.md` 的渲染来源**：第二件事的修法就是「把规矩写到工人读得到的地方」，而那段正文正是在 `internal/devorchestrator/` 里渲染出来的；但 `specs/orchestrator/worker-result.schema.json` **一个字节都不许动**——判据我已经定了：不放宽 collect、不改 schema。 **为什么把 `ops/ci/gosec-baseline.txt` 收进允许面**：这一关红的是**行号漂移**，不是缺陷——量过，13 条里 11 条是既有发现被插入行推后（`gate_inputs.go` 一处 +28、六处 +34，`worker_collect.go` 四处一律 +21），2 条是新文件里的同一形态。偏移一致，说明行没被改过；它们已被复核为 `not-attacker-reachable` 并写进基线，而基线只能按行号写，所以**唯一正确的修法是重对行号**，而那个文件原先在 `ops/**` 的禁区里。**`ops/**` 的其余部分仍然关着**：那条禁区里只剩 `ops/ci/gosec-baseline.txt` 开出来（`forbidden_scope` 是写给工人看的说明文字，不是被程序校验的 glob——校验的是 `allowed_scope`，收工只放行 `allowed_scope` 里的路径）。**只跑那一个作业的命令**：`bash tests/security/sast.sh go`（`master-security-gate.sh` 的 `sast-go` 行跑的就是它；工具没装就先 `make security-tools`）。"
+}
