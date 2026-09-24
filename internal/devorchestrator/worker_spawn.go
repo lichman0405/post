@@ -375,22 +375,21 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("starting the reaper wrapper: %w", err)
 	}
-	// Read the pid the reaper prints, with a deadline; then detach (Release,
-	// never Wait — the reaper outlives rddev by design).
-	pidCh := make(chan int, 1)
+	// Read the identity the reaper prints, with a deadline; then detach
+	// (Release, never Wait — the reaper outlives rddev by design).
+	handoffCh := make(chan spawnHandoff, 1)
 	go func() {
 		sc := bufio.NewScanner(stdout)
 		if sc.Scan() {
-			var pid int
-			if _, err := fmt.Sscanf(sc.Text(), "%d", &pid); err == nil {
-				pidCh <- pid
+			if h, ok := parseSpawnHandoff(sc.Text()); ok {
+				handoffCh <- h
 			}
 		}
-		close(pidCh)
+		close(handoffCh)
 	}()
-	var workerPID int
+	var reported spawnHandoff
 	select {
-	case workerPID = <-pidCh:
+	case reported = <-handoffCh:
 	case <-time.After(10 * time.Second):
 		// The whole group, not just the reaper: the reaper is the session
 		// leader, so a signal it never gets to handle would orphan whatever
@@ -398,6 +397,7 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 		_ = signalProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 		return nil, fmt.Errorf("the reaper wrapper did not report a pid within 10s — spawn aborted, nothing was recorded")
 	}
+	workerPID := reported.PID
 	if workerPID <= 0 {
 		_ = signalProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 		return nil, fmt.Errorf("the reaper wrapper reported an invalid pid — spawn aborted, nothing was recorded")
@@ -413,25 +413,25 @@ func Spawn(opts *SpawnOpts) (*SpawnResult, error) {
 	// carry none of the stripped credential variables. --setting-sources
 	// project stops user settings re-injecting them; this check makes spawn
 	// fail loudly if one is present in the real processes anyway. A spawn
-	// must never silently hand a credential to a Worker.
-	for _, pid := range []int{workerPID, sessionLeaderPID} {
-		environ, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
-		if err != nil {
-			killWorker(workerPID)
-			return nil, fmt.Errorf("post-spawn environment assertion: reading /proc/%d/environ: %w — the Worker environment could not be verified, spawn aborted and the Worker killed", pid, err)
-		}
-		if leak := assertCleanWorkerEnv(environ); leak != "" {
-			killWorker(workerPID)
-			return nil, fmt.Errorf("post-spawn environment assertion: %s is present in the environment of pid %d — the Worker must not hold remote credentials, spawn aborted and the Worker killed", leak, pid)
-		}
+	// must never silently hand a credential to a Worker. A Worker that has
+	// already exited is witnessed through the reaper instead of being refused
+	// (#133) — the why is on assertSpawnedEnv.
+	if err := assertSpawnedEnv(workerPID, sessionLeaderPID); err != nil {
+		killWorker(workerPID)
+		return nil, fmt.Errorf("post-spawn environment assertion: %w — the Worker environment could not be verified, spawn aborted and the Worker killed", err)
 	}
 
 	// 8) Record the registry fact (status running; exit info merged later).
 	startedAt := runStartedAt()
-	startTime, err := procStartTime(workerPID)
+	// The start time the reaper read at the fork — the one instant the Worker
+	// provably exists — or, for a reaper that could not read it, a direct
+	// /proc read here. That fallback fails only when the Worker is already
+	// gone, which is the case the handoff exists to cover (#133); see
+	// spawnStartTime.
+	startTime, err := spawnStartTime(reported, workerPID)
 	if err != nil {
 		killWorker(workerPID)
-		return nil, fmt.Errorf("reading /proc starttime for pid %d: %w", workerPID, err)
+		return nil, fmt.Errorf("reading /proc starttime for pid %d (the reaper reported none either): %w", workerPID, err)
 	}
 	// Finalize the authoritative gate inputs with the process identity the
 	// early WriteGateInputs could not know (the Worker exists now); collect

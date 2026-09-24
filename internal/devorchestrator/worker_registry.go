@@ -41,7 +41,7 @@ const (
 	// WorkerRunning: the recorded pid exists and its /proc/<pid>/stat field 22
 	// (starttime) matches the recorded start_time — the pid was not reused.
 	WorkerRunning WorkerStatus = "running"
-	// WorkerExited: the reaper recorded an exit status; the run is over.
+	// WorkerExited: the reaper recorded an exit status and stopped; the run is over.
 	WorkerExited WorkerStatus = "exited"
 	// WorkerStale: the pid is gone or reused but no exit status was recorded
 	// (rddev or the host died, or the reaper was killed) *and* the reaper
@@ -244,21 +244,37 @@ func DiscoverWorkers(repoRoot string) ([]WorkerView, error) {
 }
 
 // reconcileWorker derives one record's status, merging the reaper's
-// exit.status into the registry file when the process is gone (so the fact is
+// exit.status into the registry file once the run is over (so the fact is
 // persisted for later reads and for collect/T0011).
+//
+// "Over" means the reaper is gone, not that exit.status exists (#243). The
+// reaper writes the code FIRST and collects the Worker's process group
+// afterwards — that order is deliberate (a cleanup that fails must never cost
+// the record of how the Worker ended), so the file is strictly weaker than
+// the run being over. ExitStatus is the fact everything downstream treats as
+// "finished": review collect refuses without it, worker stop records it, the
+// driver polls it. It may therefore only be written by a reader that has seen
+// the writer stop.
 func reconcileWorker(repoRoot string, rec *WorkerRecord) (WorkerView, error) {
 	v := WorkerView{Record: *rec, LogPath: rec.LogPath}
 	v.Status, v.LogBytes, v.LogAgeS = deriveStatus(rec)
 
+	// The code is on disk and the reaper is still there: it is in its cleanup
+	// window (renderReaper kills the Worker's group and only then exits). Wait
+	// it out and re-derive, so a reader that lands in that second gets the
+	// honest answer instead of one that calls a session still being collected
+	// "finished". If it is still alive after the grace the record stays open —
+	// stale is the true answer, and the next discovery retries.
+	if rec.ExitStatus == nil && v.Status == WorkerStale && reaperLive(rec) && exitStatusFileExists(rec) {
+		waitPidGone(rec.SessionLeaderPID, 5*time.Second)
+		v.Status, v.LogBytes, v.LogAgeS = deriveStatus(rec)
+	}
+
 	if rec.ExitStatus == nil && v.Status == WorkerExited {
-		// The reaper wrapper (the session leader) writes both exit.status
-		// copies and exits a moment after the Worker dies. Wait for it to
-		// finish so the code merged here can never be the previous attempt's
-		// stale copy or a half-written pair (T0012 rework race: collect read
-		// the new task-dir copy next to the stale authoritative one).
-		if rec.SessionLeaderPID > 0 {
-			waitPidGone(rec.SessionLeaderPID, 5*time.Second)
-		}
+		// The reaper has written both exit.status copies and is gone, so
+		// neither copy can still be mid-write or be a previous attempt's
+		// (T0012 rework race: collect read the new task-dir copy next to the
+		// stale authoritative one).
 		// The reaper recorded an exit after this registry was written; merge
 		// it in so the exit code survives process restarts of the reader.
 		code, err := readExitStatus(repoRoot, rec.TaskID)
@@ -284,14 +300,16 @@ func reconcileWorker(repoRoot string, rec *WorkerRecord) (WorkerView, error) {
 	// rework/respawn refuse for a Worker that "has not exited" — so it sits in
 	// `running` while the driver reports it as still working, indefinitely
 	// (2026-09-21: T0612 sat that way for 7.5 hours). Once the reaper itself
-	// is gone there is nothing left to wait
-	// for, and the honest record is the unrecorded sentinel: not 0, so collect
-	// still reads the run as one that did not complete.
-	// A live reaper is not waited on: it may still write the code, so the
-	// record stays stale until it is gone. A record that never named a reaper
-	// stays stale too — nothing there can show the writer is finished.
+	// has stopped running there is nothing left to wait for, and the honest
+	// record is the unrecorded sentinel: not 0, so collect still reads the run
+	// as one that did not complete.
+	// A reaper that is still running is not waited on: it may still write the
+	// code, so the record stays stale until it stops. A record that never named
+	// a reaper stays stale too — nothing there can show the writer is finished.
+	// "Stopped running", not "gone": the reaper is Released at spawn, so the
+	// usual end state is an unreaped zombie, which exists forever (pidRunning).
 	if rec.ExitStatus == nil && v.Status == WorkerStale && rec.SessionLeaderPID > 0 &&
-		!pidExists(rec.SessionLeaderPID) {
+		!pidRunning(rec.SessionLeaderPID) {
 		// The reaper may still have written the code on its way out; a late
 		// copy beats the sentinel.
 		code := ExitStatusUnrecorded
@@ -327,7 +345,7 @@ func deriveStatus(rec *WorkerRecord) (WorkerStatus, int64, int64) {
 		return WorkerRunning, bytes, age
 	}
 	bytes, _ := logStats(rec.LogPath)
-	if exitStatusFileExists(rec) {
+	if exitStatusFileExists(rec) && !reaperLive(rec) {
 		// the reaper wrote exit.status after the registry snapshot was read;
 		// treat as exited so reconcile can merge it
 		return WorkerExited, bytes, 0
@@ -335,28 +353,50 @@ func deriveStatus(rec *WorkerRecord) (WorkerStatus, int64, int64) {
 	return WorkerStale, bytes, 0
 }
 
-// waitPidGone polls until pid no longer exists, bounded by timeout. The
-// reaper wrapper is the session leader: its exit orders every file write it
-// performed, so waiting on it makes the two exit.status copies
-// observationally atomic for any reader that runs afterwards.
+// reaperLive reports whether the run's reaper — the session leader that writes
+// exit.status — is still running. While it is, the run is not over: the file is
+// on disk before the reaper kills the Worker's process group, so a reader that
+// stopped at the file would describe a session that is still being collected
+// (#243). A record that never named a reaper answers false: there is no writer
+// to wait for, which is the same standard reconcileWorker's sentinel branch
+// applies to a record whose reaper pid is unknown.
+func reaperLive(rec *WorkerRecord) bool {
+	return rec.SessionLeaderPID > 0 && pidRunning(rec.SessionLeaderPID)
+}
+
+// pidRunning reports whether pid is executing: it exists and is not a zombie.
+//
+// Existence alone is the wrong test for "has this process finished?" (#243).
+// Spawn Releases the reaper instead of waiting for it (the reaper outlives
+// rddev by design), so nobody reaps it on a long-lived rddev — it sits in /proc
+// as a zombie for the rest of the session, and a bare existence test answers
+// true forever. A zombie is not running: it has returned from its last
+// instruction, so every write it made is on disk and its cleanup is done.
+// Waiting for it to disappear waits for a reaper that will never be collected —
+// the same confusion that let a record read "not over yet" long after the run
+// was finished.
+func pidRunning(pid int) bool {
+	fields, err := procStatFields(pid)
+	if err != nil || len(fields) == 0 {
+		return false // gone, or unreadable: either way it is not running
+	}
+	return fields[0] != "Z"
+}
+
+// waitPidGone polls until pid has stopped running (exited, zombie, or gone),
+// bounded by timeout. The reaper wrapper is the session leader: its exit orders
+// every file write it performed, so waiting on it makes the two exit.status
+// copies observationally atomic for any reader that runs afterwards. A zombie
+// counts as stopped — it has executed its last instruction; being unreaped is
+// its parent's business, not a reason to keep waiting (see pidRunning).
 func waitPidGone(pid int, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if !pidExists(pid) {
+		if !pidRunning(pid) {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-}
-
-// pidExists reports whether a process with this pid exists at all (no
-// start-time check — the caller only needs liveness, not identity).
-func pidExists(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	_, err := os.Stat(fmt.Sprintf("/proc/%d", pid))
-	return err == nil
 }
 
 // pidAlive reports whether pid exists with the recorded process start time.

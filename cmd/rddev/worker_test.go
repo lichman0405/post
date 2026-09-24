@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -529,6 +530,113 @@ func TestWorkerStop(t *testing.T) {
 	if !strings.Contains(string(data), `"status": "running"`) {
 		t.Errorf("stop moved the task state:\n%s", data)
 	}
+}
+
+// TestWorkerStopLeavesNoLiveReaper: `worker stop` returns only once the run is
+// over — the session leader rddev recorded is no longer running, and nothing is
+// left with a working directory inside the tree the caller is about to delete.
+//
+// The symptom this pins down (#243): stop used to return the moment exit.status
+// existed, while the reaper was still collecting the Worker's process group for
+// another ~1s with its cwd inside the worktree — the "original symptom" of the
+// stop test being that a live process sat in a deleted temp directory.
+//
+// The liveness facts are read straight from /proc, never from the code under
+// test, so this can fail when rddev's own view says "exited".
+func TestWorkerStopLeavesNoLiveReaper(t *testing.T) {
+	fakeClaudePath(t, "sleep")
+	t.Setenv("FAKE_CLAUDE_SECONDS", "60")
+	repo := fakeRepo(t)
+	t.Cleanup(func() { stopAll(t, repo) })
+
+	code, _, errOut := runWorkerCLI(t, repo, "worker", "spawn", "T0001")
+	if code != 0 {
+		t.Fatalf("spawn: exit %d: %s", code, errOut)
+	}
+	waitFor(t, "worker live", func() bool {
+		s, _ := listStatus(repo, "T0001")
+		return s == "running"
+	})
+	rec, err := devorchestrator.LoadRegistry(repo, "T0001")
+	if err != nil || rec == nil {
+		t.Fatalf("load registry: %v (%+v)", err, rec)
+	}
+	if rec.SessionLeaderPID <= 0 {
+		t.Fatalf("the registry names no session leader to wait for: %+v", rec)
+	}
+
+	code, out, errOut := runWorkerCLI(t, repo, "worker", "stop", "T0001")
+	if code != 0 {
+		t.Fatalf("stop: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+
+	// 1) the reaper that writes the code is not running when stop returns
+	if state := procStateOf(rec.SessionLeaderPID); state != "" && state != "Z" {
+		t.Errorf("stop returned with the reaper (pid %d) still running (state %q): it writes exit.status before it collects the Worker's group (#243)",
+			rec.SessionLeaderPID, state)
+	}
+	// 2) neither is the Worker
+	if state := procStateOf(rec.PID); state != "" && state != "Z" {
+		t.Errorf("stop returned with the Worker (pid %d) still running (state %q)", rec.PID, state)
+	}
+	// 3) and nothing live is left standing in the tree: the caller deletes it
+	// the moment stop returns
+	if pids := livePidsWithCwdUnder(t, repo); len(pids) > 0 {
+		t.Errorf("live process(es) %v still have a working directory under %s when stop returned", pids, repo)
+	}
+}
+
+// procStateOf returns the /proc/<pid>/stat state letter (R, S, D, Z, ...), or
+// "" when the process is gone.
+func procStateOf(pid int) string {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return ""
+	}
+	rest := data
+	if i := bytes.LastIndexByte(data, ')'); i >= 0 {
+		rest = data[i+1:]
+	}
+	fields := strings.Fields(string(rest))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+// livePidsWithCwdUnder returns every running process whose working directory is
+// dir or below it. Zombies are skipped: a finished process holds no directory.
+// The test process itself is skipped because runWorkerCLI chdirs it into the
+// fixture repo.
+func livePidsWithCwdUnder(t *testing.T, dir string) []string {
+	t.Helper()
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("resolving %s: %v", dir, err)
+	}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		t.Skipf("no /proc to scan: %v", err)
+	}
+	var found []string
+	self := os.Getpid()
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil || pid == self {
+			continue
+		}
+		if state := procStateOf(pid); state == "" || state == "Z" {
+			continue
+		}
+		cwd, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+		if err != nil {
+			continue
+		}
+		if cwd == real || strings.HasPrefix(cwd, real+string(os.PathSeparator)) {
+			found = append(found, fmt.Sprintf("%d (%s)", pid, cwd))
+		}
+	}
+	return found
 }
 
 // TestWorkerSpawnErrors: usage and operational failures are loud, and spawn
