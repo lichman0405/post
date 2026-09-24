@@ -12426,12 +12426,94 @@
       ]
     },
     "T1220": {
-      "status": "todo",
-      "notes": "新立账（2026-09-24，P13 第五笔）：起点是 T1217 评审的第 6 条风险（「表头还写着 797/254，现在是 798/256」）——那是一条我没核过的转述，核的过程撞上一件大得多的事。两件都记在 `tasks/decisions.md` 第 59 条。\n\n**洞**：`tests/security/sast.sh:102` 是 `TARGET=\"${POST_SAST_GO_TARGET:-.}\"`，`:108` 调用 `gosec ... \"${TARGET%/}/...\"`，而 gosec **走文件系统**而不是按 module 解析包，于是默认从仓库根一路扫进被 gitignore 的 `.rddev/`（`.gitignore:10`，`git check-ignore -v` 实测命中）。那里有两处仓库源码的副本：`runtime/rebaseline/<TASK>-<时间戳>/files/**`（rebaseline 在 `reset` 前拷出的源文件，我实测 864 个 `.go`、108M）与 `worktrees/**`（各任务工作树，我实测 12338 个 `.go`，**含别的工人尚未提交的改动**）。实测：`FAIL sast-go: 350 finding(s), 94 unbaselined (1274 file(s) scanned)`，基线 256 条；用这一行自己的 stderr 数**分解**过：**94 条未基线全部在 `runtime/rebaseline/**` 下**（T0304/T1110/T1205/T1004/T0606/T0309/T0303 等），**仓库自己的源码里 0 条未基线**，`worktrees/**` 这一次没有出现（原因待核）。`ops/ci/gosec-baseline.txt:16-17` 那句「surface: every package in the module」因此不成立。三道现有保护都看不见它：CI 绿（检出里没有 `.rddev/`，这个面只在有运行态的根目录出现，那正是我跑 G4 的地方）；`FLOOR_GO_FILES=400` 拦的是扫了个空、这次是扫多了；版本钉（`v2.29.0`）是对的——不是工具错了，是目标选错了。\n\n**那只过期的 254**：表头那句在写下时是对的（`git show 034a341:ops/ci/gosec-baseline.txt` 里正是 254 条），T1217 的合并（`2d5d280`）净 +2 而无人在意表头；`tests/security/sast_report.py:9` 复述同一个数。反例是同文件 `sast.sh:59-62`：数字带日期且自声明「not a list this comment maintains」——差别只在有没有那句免责。\n\n**过程中的一次自我纠错**：我先用自己的复算去分类 gosec 报告，得出「256 条里有 7 条未基线」，差一点当成新缺陷；**全是我错的**——我按 `issue[\"line\"]` 拼 key，而 gosec 对跨行匹配给的是区间（`\"15-30\"`），`sast_report.py:132-137` 的 `line_of()` 正为此存在。改用工具自己的 reader 跑同一份报告，答案从 7 条变成 **0 条**。这是本项目第二次「我的探针自己造出证据」。\n\n**裁定**：与第 52 条、㊿、第 58 条同族（保证写在 A 处、强制它的东西在 B 处），但**方向相反**——那三处是保证比机制宽，这一处是机制比声明的面宽。按 §5.1 属 bug fix，L1，我自己决定：**立账**。修法两半都要，缺一不可：**(a) 换面**（默认只扫仓库自己的 Go 源码，且由 `go list ./...` 这类工具推导，不手工维护清单）+ **(b) 加锁**（正向断言：扫到的每条路径都必须在 `$ROOT` 内且 `git check-ignore` 不命中，命中即报「扫描面失败」并指出路径）。只有 (a) 改回去没人拦；只有 (b) 本机永久红。**不许 `-exclude-dir`**（`sast.sh` 第 3 条规则自己禁的就是这个），**不许把 `.rddev/...` 写进基线**——那是给仓库里不存在的路径背书，比现在更坏。\n\n`allowed_scope` 只开 `tests/security/**`（修的东西本身就是一条测试行；其余 `tests/**` 仍关着）与 `ops/ci/gosec-baseline.txt`（只开给表头那句事实，条目不许多）。`v1_required=false`：加固，不改产品语义，方向更严。G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`security-master`，其 `requires_tasks` 为空；先例是写就这条基线的 T1209）。`dependencies` 为 `[]`——它不依赖任何未合并的任务。"
+      "status": "merged",
+      "started_at": "2026-09-24T07:07:18Z",
+      "notes": "新立账（2026-09-24，P13 第五笔）：起点是 T1217 评审的第 6 条风险（「表头还写着 797/254，现在是 798/256」）——那是一条我没核过的转述，核的过程撞上一件大得多的事。两件都记在 `tasks/decisions.md` 第 59 条。\n\n**洞**：`tests/security/sast.sh:102` 是 `TARGET=\"${POST_SAST_GO_TARGET:-.}\"`，`:108` 调用 `gosec ... \"${TARGET%/}/...\"`，而 gosec **走文件系统**而不是按 module 解析包，于是默认从仓库根一路扫进被 gitignore 的 `.rddev/`（`.gitignore:10`，`git check-ignore -v` 实测命中）。那里有两处仓库源码的副本：`runtime/rebaseline/<TASK>-<时间戳>/files/**`（rebaseline 在 `reset` 前拷出的源文件，我实测 864 个 `.go`、108M）与 `worktrees/**`（各任务工作树，我实测 12338 个 `.go`，**含别的工人尚未提交的改动**）。实测：`FAIL sast-go: 350 finding(s), 94 unbaselined (1274 file(s) scanned)`，基线 256 条；用这一行自己的 stderr 数**分解**过：**94 条未基线全部在 `runtime/rebaseline/**` 下**（T0304/T1110/T1205/T1004/T0606/T0309/T0303 等），**仓库自己的源码里 0 条未基线**，`worktrees/**` 这一次没有出现（原因待核）。`ops/ci/gosec-baseline.txt:16-17` 那句「surface: every package in the module」因此不成立。三道现有保护都看不见它：CI 绿（检出里没有 `.rddev/`，这个面只在有运行态的根目录出现，那正是我跑 G4 的地方）；`FLOOR_GO_FILES=400` 拦的是扫了个空、这次是扫多了；版本钉（`v2.29.0`）是对的——不是工具错了，是目标选错了。\n\n**那只过期的 254**：表头那句在写下时是对的（`git show 034a341:ops/ci/gosec-baseline.txt` 里正是 254 条），T1217 的合并（`2d5d280`）净 +2 而无人在意表头；`tests/security/sast_report.py:9` 复述同一个数。反例是同文件 `sast.sh:59-62`：数字带日期且自声明「not a list this comment maintains」——差别只在有没有那句免责。\n\n**过程中的一次自我纠错**：我先用自己的复算去分类 gosec 报告，得出「256 条里有 7 条未基线」，差一点当成新缺陷；**全是我错的**——我按 `issue[\"line\"]` 拼 key，而 gosec 对跨行匹配给的是区间（`\"15-30\"`），`sast_report.py:132-137` 的 `line_of()` 正为此存在。改用工具自己的 reader 跑同一份报告，答案从 7 条变成 **0 条**。这是本项目第二次「我的探针自己造出证据」。\n\n**裁定**：与第 52 条、㊿、第 58 条同族（保证写在 A 处、强制它的东西在 B 处），但**方向相反**——那三处是保证比机制宽，这一处是机制比声明的面宽。按 §5.1 属 bug fix，L1，我自己决定：**立账**。修法两半都要，缺一不可：**(a) 换面**（默认只扫仓库自己的 Go 源码，且由 `go list ./...` 这类工具推导，不手工维护清单）+ **(b) 加锁**（正向断言：扫到的每条路径都必须在 `$ROOT` 内且 `git check-ignore` 不命中，命中即报「扫描面失败」并指出路径）。只有 (a) 改回去没人拦；只有 (b) 本机永久红。**不许 `-exclude-dir`**（`sast.sh` 第 3 条规则自己禁的就是这个），**不许把 `.rddev/...` 写进基线**——那是给仓库里不存在的路径背书，比现在更坏。\n\n`allowed_scope` 只开 `tests/security/**`（修的东西本身就是一条测试行；其余 `tests/**` 仍关着）与 `ops/ci/gosec-baseline.txt`（只开给表头那句事实，条目不许多）。`v1_required=false`：加固，不改产品语义，方向更严。G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`security-master`，其 `requires_tasks` 为空；先例是写就这条基线的 T1209）。`dependencies` 为 `[]`——它不依赖任何未合并的任务。",
+      "worker_run_id": "run-07b1771cfcc13b42",
+      "accepted_by_supervisor_at": "2026-09-24T07:58:37Z",
+      "merged_at": "2026-09-24T08:30:34Z",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-24T07:07:15Z",
+          "run_id": "run-690203db6ae92d5b"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-24T07:07:18Z",
+          "run_id": "run-07b1771cfcc13b42",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-24T07:29:52Z",
+          "run_id": "run-7757d920324b37e0",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-24T07:58:37Z",
+          "run_id": "run-38d3ce23e7970fed"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-24T08:30:34Z",
+          "run_id": "run-5f16268578a72eff",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T1221": {
+      "status": "merged",
+      "started_at": "2026-09-24T07:07:46Z",
+      "notes": "新立账（2026-09-24，P13 第六笔）：起点是 T1219 那次独立评审的 **major 发现**——它的 observation 对、诊断错。评审在 verdict 里写「command_records() 只分析 Bash 命令的第一行」，我复现了行为、又去读了那段 awk，发现**不是那个原因**。\n\n**洞（我实测的）**：把第二条命令放到下一行，守卫的命令位策略就整个看不见它。守卫脚本 `internal/devorchestrator/embed/worker-guard.sh`，契约环境取 `tests/worker-guard/guard-regression.sh:28-32` 那一组，退出码 2 = 拦、0 = 放行：\n\n    cp /tmp/x /etc/evil              单行 → 2 ；`true; cp …` → 2 ；**换行后 → 0**\n    rm -rf /etc/evil                 换行后 → **0**\n    gh auth login                    单行 2 ；**换行后 0**\n    sudo ls                          单行 2 ；**换行后 0**\n    git commit -m x                  单行 2 ；**换行后 0**\n    printenv GITHUB_TOKEN            单行 2 ；**换行后 0**\n    echo x | tee /etc/evil           换行后 2（管线的另一半在拦）\n    echo x > /etc/evil               换行后 2（重定向的那一半在拦）\n\n所以这**不是写策略一处的洞**：命令位上的每一族策略——控制面 CLI、提权、git、printenv、写——都能被绕开。要紧的是第一行：`gate-inputs.json` 是 collect 判作业范围与作业新鲜度的权威记录。T1219 关掉的是 `Write`/`Edit` 那条路（matcher 不认这两个工具），**这一条是 shell 那条路**，而它一直开着。\n\n**机制（我核过的；评审的诊断是错的）**：`:463` 的 `command=$(printf '%s\\n' \"$input\" | json_field command)`，`json_field`（`:76`）是 awk **文本扫描**，它的转义处理在 `:91-92`——见到 `\\` 就把下一个字符**原样**收下，于是 `\\n` 解出来是字母 `n`，第二行被焊进上一行最后一个词（`true` + 换行 + `cp …` 变成 `truencp …`），命令位解析从此看不到 `cp`。而 `;`、`|`、`&` 不需要转义、原样留着——**所以 `;` 拦得住、换行拦不住**。评审说的那层是错的：`command_records` 的 awk（`:138` 起）每读一行都把 `pending=1`（`:169-180`），真拿到换行它会正确地开一个新段；**坏的是取文本的那一层，不是分析的那一层**。这是本项目「观察对了、解释错了」的第四次，也是第一次出现在独立评审的 verdict 里——所以任务书把机制写出来、要求工人**复核**而不是照抄，并明说评审的诊断是错的。\n\n**为什么并入 P13 而不是当新阶段**：与 T1219 同一个面（工人隔离机制自己），而且是它的直接后续；`dependencies: [\"T1202\",\"T1219\"]`，`g3_jobs: [\"mof-canonical\"]`（其 `requires_tasks` 是 T1202，已含在依赖里）。**允许面与 T1219 同组**（`internal/devorchestrator/**`、`tests/worker-guard/**`、`.rddev.example/**`）：修的是守卫脚本本身、它唯一的那套双侧回归套件、以及逐字节必须同步的示例副本。`ops/**` 不在允许面里——gosec 基线按 `path:line:column:RULE` 记账，在已基线发现上方插行会让那一行变红（T1217 撞过一次）。\n\n**同一笔还要收两处「话比机制宽」**：一是 `worker_render.go:537` 承诺守卫限制「your file reads」，而经 Bash 的读实测 `cat ~/.ssh/id_rsa` 是 rc=0——**要么让它成立、要么把话说准**，两条路都行但句子与钉它的测试必须同笔（T1219 的 `TestTheGuardClaimInTheSystemPromptIsTrue` 只钉了写的半）；二是 `gate_inputs.go:22` 那处注释说运行态目录「refuses for both reads and shell writes」，T1219 之前对 `Write` 工具是假的、现在是真的但说得比实际窄。\n\n**裁定**：§5.1 属 bug fix（方向是让既有的保证真的生效，不新增权限、不放宽任何限制），L1，我自己决定并记在这里。判据里最要紧的两条是「这个判据能红」（MUTATION CHECK）与「188 条既有用例逐字保留」（`comm -23` 比全文，不是比名字）。",
+      "worker_run_id": "run-5287e31b6b5ab433",
+      "accepted_by_supervisor_at": "2026-09-24T08:17:49Z",
+      "merged_at": "2026-09-24T08:31:15Z",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-24T07:07:43Z",
+          "run_id": "run-2ee9410a36cecb7e"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-24T07:07:46Z",
+          "run_id": "run-5287e31b6b5ab433",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-24T07:33:35Z",
+          "run_id": "run-15950918659ec724",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-24T08:17:49Z",
+          "run_id": "run-186b3ccba957ca4d"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-24T08:31:15Z",
+          "run_id": "run-c65bc72909fab7fb",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
+    },
+    "T1222": {
       "status": "todo",
-      "notes": "新立账（2026-09-24，P13 第六笔）：起点是 T1219 那次独立评审的 **major 发现**——它的 observation 对、诊断错。评审在 verdict 里写「command_records() 只分析 Bash 命令的第一行」，我复现了行为、又去读了那段 awk，发现**不是那个原因**。\n\n**洞（我实测的）**：把第二条命令放到下一行，守卫的命令位策略就整个看不见它。守卫脚本 `internal/devorchestrator/embed/worker-guard.sh`，契约环境取 `tests/worker-guard/guard-regression.sh:28-32` 那一组，退出码 2 = 拦、0 = 放行：\n\n    cp /tmp/x /etc/evil              单行 → 2 ；`true; cp …` → 2 ；**换行后 → 0**\n    rm -rf /etc/evil                 换行后 → **0**\n    gh auth login                    单行 2 ；**换行后 0**\n    sudo ls                          单行 2 ；**换行后 0**\n    git commit -m x                  单行 2 ；**换行后 0**\n    printenv GITHUB_TOKEN            单行 2 ；**换行后 0**\n    echo x | tee /etc/evil           换行后 2（管线的另一半在拦）\n    echo x > /etc/evil               换行后 2（重定向的那一半在拦）\n\n所以这**不是写策略一处的洞**：命令位上的每一族策略——控制面 CLI、提权、git、printenv、写——都能被绕开。要紧的是第一行：`gate-inputs.json` 是 collect 判作业范围与作业新鲜度的权威记录。T1219 关掉的是 `Write`/`Edit` 那条路（matcher 不认这两个工具），**这一条是 shell 那条路**，而它一直开着。\n\n**机制（我核过的；评审的诊断是错的）**：`:463` 的 `command=$(printf '%s\\n' \"$input\" | json_field command)`，`json_field`（`:76`）是 awk **文本扫描**，它的转义处理在 `:91-92`——见到 `\\` 就把下一个字符**原样**收下，于是 `\\n` 解出来是字母 `n`，第二行被焊进上一行最后一个词（`true` + 换行 + `cp …` 变成 `truencp …`），命令位解析从此看不到 `cp`。而 `;`、`|`、`&` 不需要转义、原样留着——**所以 `;` 拦得住、换行拦不住**。评审说的那层是错的：`command_records` 的 awk（`:138` 起）每读一行都把 `pending=1`（`:169-180`），真拿到换行它会正确地开一个新段；**坏的是取文本的那一层，不是分析的那一层**。这是本项目「观察对了、解释错了」的第四次，也是第一次出现在独立评审的 verdict 里——所以任务书把机制写出来、要求工人**复核**而不是照抄，并明说评审的诊断是错的。\n\n**为什么并入 P13 而不是当新阶段**：与 T1219 同一个面（工人隔离机制自己），而且是它的直接后续；`dependencies: [\"T1202\",\"T1219\"]`，`g3_jobs: [\"mof-canonical\"]`（其 `requires_tasks` 是 T1202，已含在依赖里）。**允许面与 T1219 同组**（`internal/devorchestrator/**`、`tests/worker-guard/**`、`.rddev.example/**`）：修的是守卫脚本本身、它唯一的那套双侧回归套件、以及逐字节必须同步的示例副本。`ops/**` 不在允许面里——gosec 基线按 `path:line:column:RULE` 记账，在已基线发现上方插行会让那一行变红（T1217 撞过一次）。\n\n**同一笔还要收两处「话比机制宽」**：一是 `worker_render.go:537` 承诺守卫限制「your file reads」，而经 Bash 的读实测 `cat ~/.ssh/id_rsa` 是 rc=0——**要么让它成立、要么把话说准**，两条路都行但句子与钉它的测试必须同笔（T1219 的 `TestTheGuardClaimInTheSystemPromptIsTrue` 只钉了写的半）；二是 `gate_inputs.go:22` 那处注释说运行态目录「refuses for both reads and shell writes」，T1219 之前对 `Write` 工具是假的、现在是真的但说得比实际窄。\n\n**裁定**：§5.1 属 bug fix（方向是让既有的保证真的生效，不新增权限、不放宽任何限制），L1，我自己决定并记在这里。判据里最要紧的两条是「这个判据能红」（MUTATION CHECK）与「188 条既有用例逐字保留」（`comm -23` 比全文，不是比名字）。"
+      "notes": "新立账（2026-09-24，P13 第七笔）：起点是 **T1220 那笔独立评审的 minor 发现 [2]**——注意是**评审抓到的、我自己漏了的**。我读了同一份代码、跑了同一套仪器，没看出来。\n\n**洞**：`tests/security/sast.sh` 有两处解析 `git check-ignore --stdin -v` 的输出（文件检查 `:162`、包目录丢弃循环 `:271`），两处都**把命令打出的每一行当成命中**。而 git 对**被否定模式重新纳入**的路径也会打一行（模式字段以 `!` 开头、退出码仍是 0），那条路径 git 并未忽略。我的最小复现：`.gitignore` 写 `*.go` 再写 `!keep.go`，`git check-ignore -q -- inner/keep.go` 说它**没被忽略**，可 `-v` 仍打出 `inner/.gitignore:2:!keep.go\\tinner/keep.go`。**两个方向都会错**：文件侧假红（把没被忽略的文件报成逃逸）、目录侧**静默缩小扫描面**（把被重新纳入的包目录丢掉）——后者正是 T1220 花整笔力气治的病换了入口。\n\n**要紧在哪**：判定扫描面的代码出错时，错的不是「多扫了」，是「**少扫了且看不见**」；而 T1220 刚立起来的那台仪器（`sast-go-surface-check.sh`，6 个案例）**对这种读法错误完全无感**——没有一条碰否定模式。所以「修代码」与「补仪器的盲区」是同一笔的两半，判据核心是**新案例能红**。\n\n**为什么「把仪器接进执行器」不在这一笔**：那要把 `tests/security/master-security-gate.sh` 的 `MIN_CHECKS=17` 抬到 18，而 `tests/acceptance/v1-final-audit.sh` 里**逐字钉着** `require_marker \"MIN_CHECKS=17\"` 与 `require_marker \"master-security-gate: PASS — 17 check(s) ran and each printed its own evidence\"`——动它等于动 **V1 完成声明的证据层**，要单独一笔、由我配套改报告与标记。\n\n**同笔还收三处同类「话与机制不符」**：`sast.sh:6` 的自述仍是 `# gosec over the whole Go module`（T1220 标题里那句假话在仓库里的**最后一处**）；`usage()` 的 `sed /^$/q` 撞上第 2 行的裸 `#` 使 `--help` **什么都不打印**（先于本任务存在的缺陷，正是它让上面那句藏起来）；基线表头里「没有按目录排除」与「丢弃被 gitignore 的包目录」并排读着矛盾。另加一条**必须给出结论**的判断：17 个被跟踪的 `testdata` Go 夹具在 `go list` 的包模式之外（旧的走查会读到它们，基线里与它们相关的发现是 0 条）——要么显式加回扫描面，要么写清为什么不在面内，**不许悬着**。\n\n**裁定**：§5.1 属 bug fix（让既有判据真的符合 git 的语义），L1，我自己决定并记在这里。允许面 `tests/security/**` + `ops/ci/gosec-baseline.txt` 单文件；`ops/**` 其余部分仍关闭，基线**只准动表头措辞、256 条条目逐字节不变**（第 56 条那个教训：在已基线发现上方插行会让那一行变红）。"
     }
   },
   "version": 2

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 163,
+  "task_count": 164,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -9464,6 +9464,78 @@
       ],
       "scope_note": "这一笔修的是**工人隔离机制里的一处整体绕行**：守卫按命令位判断禁止动作（提权、控制面 CLI、git 写操作、printenv 探针、信封外的写），而只要把第二条命令放到下一行，整套判断就看不见它。**没有改任何产品语义、安全边界或权限模型**——方向是让已经写在契约里的限制真的生效。它要紧在两点：一是**判定方与被判定方的关系**，`gate-inputs.json` 是 collect 判作业范围与作业新鲜度的权威记录，而绕行能让工人改写它（T1219 关掉的是 `Write`/`Edit` 那条路，这一条是 shell 那条路）；二是**观察对了、解释错了**在本项目已出现多次，这一次出现在独立评审的 verdict 里，所以任务书把机制写出来并要求工人复核，而不是照抄。",
       "supervisor_scope_narrowing": "**为什么开 `internal/devorchestrator/**`、`tests/worker-guard/**`、`.rddev.example/**`（与 T1219 同一组）：**\n\n  * 修的是守卫脚本本身与它的生成物；`.rddev.example/guard/worker-guard.sh` 之所以在允许面里，是因为 `worker_guard_test.go` 强制它与内嵌脚本**逐字节相同**，不同步就红。\n  * `tests/worker-guard/**` 是那套双侧回归套件唯一的家；`tests/**` 的其余部分仍对工人关闭，而套件里既有用例的任何删改都会在收工的 scope 检查与判据第 4 条上暴露。\n  * 契约句子所在的 `worker_render.go`、注释所在的 `gate_inputs.go` 都在 `internal/devorchestrator/**` 里，不需要额外开口。`ops/**`（含 gosec 基线）**不在**允许面里：这一笔只要求你别去动它、别在已基线发现上方插行。\n\n**这是 L1，不是 L3**：修的是既有保证的强制方式，不新增权限、不放宽任何限制。**先复核再动手**——机制那段话如果与树不符，以树为准并写明。"
+    },
+    {
+      "id": "T1222",
+      "phase": "P13",
+      "phase_name": "V1 之后的加固：流水线自己的可信度",
+      "title": "T1220 的安全扫描面判据里，`git check-ignore -v` 的**否定行**被当成命中：被 `!` 重新纳入的路径会被误报成逃逸，或在丢弃循环里静默缩小扫描面",
+      "v1_required": false,
+      "dependencies": [
+        "T1220"
+      ],
+      "tests": [
+        "a path re-included by a negated ignore pattern is not reported as an escape and is not dropped from the surface",
+        "the negation cases of the surface check are proven able to fail against the unfixed parse",
+        "sast.sh's own one-line description no longer claims the whole Go module, and --help actually prints it",
+        "the tracked testdata Go fixtures have a recorded, evidence-backed verdict about the scan surface",
+        "the surface check's own answers are unchanged: repo_paths_only still asks git both ways, and the baseline's 256 entries are byte-identical"
+      ],
+      "allowed_scope": [
+        "tests/security/**",
+        "ops/ci/gosec-baseline.txt"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "apps/**",
+        "services/**",
+        "infra/**",
+        "scripts/**",
+        "Makefile",
+        "cmd/**",
+        "internal/**",
+        "ops/**（`ops/ci/gosec-baseline.txt` 除外）",
+        "tests/**（`tests/security/**` 除外）"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/24_TEST_STRATEGY.md",
+        "docs/67_TEST_GATES.md",
+        "docs/23_SECURITY_PRIVACY.md"
+      ],
+      "requirements": [
+        "**先自己复跑，别照抄我的话。** 起点是 T1220 那笔独立评审的 minor 发现 [2]，我自己复现过：建一个临时仓库，`.gitignore` 写 `*.go` 再写 `!keep.go`，两个文件各写一个 `package p`。`git check-ignore -q -- inner/keep.go` 的退出码说明它**没被忽略**，可 `git check-ignore --stdin -v` 仍然为它打出一行 `inner/.gitignore:2:!keep.go\\tinner/keep.go`——**模式字段以 `!` 开头**。先把这个现象在你自己的手上复现出来再往下做。",
+        "**机制（我核过的，你复核）。** `tests/security/sast.sh` 有**两处**在解析 `git check-ignore --stdin -v` 的输出（文件检查约在 `:162`，包目录丢弃循环约在 `:271`），两处都**把命令打出的每一行当成一次命中**。而 git 对**被否定模式重新纳入**的路径也会打一行（退出码仍是 0），那条路径 git 并未忽略。**两个方向都会错**：文件那侧把没被忽略的文件报成逃逸（假红、假 `SCAN SURFACE FAILED`），目录那侧把被重新纳入的包目录丢掉（**静默缩小扫描面**——正是 T1220 要治的那个病，换了个入口）。",
+        "**修法（L1，你的判断，但要把理由写进注释）**：两处**都**要改，只改一处不算。判定要问的唯一问题是「这条路径到底有没有被忽略」，所以要么改用不带 `-v` 的 `git check-ignore --quiet -- <path>` 逐路径问 git，要么保留 `--stdin -v` 但**跳过模式字段以 `!` 开头的行**。选哪条你定；无论选哪条，注释里要写明**为什么这个读法才是 git 的语义**，而不是「这样能过」。",
+        "**给这台仪器加能红的案例（这是这一笔的判据核心）。** `tests/security/sast-go-surface-check.sh` 现有 6 个案例，**没有一个碰否定模式**——也就是说 T1220 那台仪器对这类读法错误完全无感。加两条，并让它们**各自先自检再判**（这是那台仪器自己立的规矩，别破）：\n  * 否定**文件**：在保留的包目录里放一个 `.gitignore`（`*.go` + `!keep.go`）和两个 Go 文件。要求这一行**绿**，且**两个文件都不被报成逃逸**。自检两件事：`drop.go` 真的被 git 忽略、`keep.go` 真的**没**被忽略——否则案例可能在什么都没量的情况下通过。\n  * 否定**目录**：造一个「被忽略又被 `!` 重新纳入」的包目录，要求它**留在扫描面里**、不被打印成 `surface: NOT scanned`。同样先自检它真的被重新纳入、且真的在 `go list` 的派生面里。",
+        "**这两条新案例能红**：把其中至少一条对着**未修**的解析跑一遍，给出它变红的**实际输出**（命令 + 退出码 + 关键行），然后还原。**修之前红不了的话，这条案例就是构出来的。** 如果两条只能证明一条能红，说明你证明的是哪一条、另一条为什么做不到。",
+        "**自述与 `--help`（两件小事，但都是「话与机制不符」的同类）。** (a) `tests/security/sast.sh:6` 的自述 `# gosec over the whole Go module` **就是 T1220 出现在标题里的那句假话**，README 行与基线表头都已改，这是仓库里的**最后一处**——改掉，并顺手 `grep -rn 'whole Go module'` 证明它确实是最后一处。(b) `usage()` 用 `sed /^$/q` 取表头，而 `sast.sh` 的第 2 行是裸 `#`，于是 **`--help` 什么都不打印**——这是先于本任务存在的缺陷，但正是它让 (a) 那句藏起来。修掉 `usage()`，并让 `--help` 的输出里**看得见这句自述**（下次再写歪，看得见）。给出 `--help` 的**实际输出**。",
+        "**基线表头的措辞（条目一字不动）。** `ops/ci/gosec-baseline.txt` 的新表头里「Nothing is excluded by directory, severity or -nosec: the row passes no such flag…」与三行之上的「丢弃被 gitignore 的包目录」放在一起读会像自相矛盾。改成「没有排除**旗标**」的说法，把「丢的是 git 自己说要忽略的东西、而且打印出来」这层关系说清。**256 条条目必须逐字节不变**——给出 `comm`（或 sha256 分列）的证据，别只声明。",
+        "**那 17 个被跟踪的 `testdata` Go 夹具要有明确结论，不许悬着。** 事实：`git ls-files '*.go' | grep testdata` 有 17 个，它们**被 git 跟踪、没有被忽略**，但 `go list ./...` 的包模式**不返回**它们（Go 把 `testdata` 排除在包模式之外）——而 T1220 之前的 `gosec ./...` 那次文件系统走查**会**读到它们。基线里与它们相关的发现是 **0 条**（`cut -f1 ops/ci/gosec-baseline.txt | grep -c testdata`）。要么把它们**显式**加回扫描面并说明理由，要么在 `tests/security/sast.sh` 的表头或 `tests/security/README.md` 里**写清楚为什么它们不在面内**，并给出这条判断的依据。**不许两者都不做。** 我倾向后者（`testdata` 按 Go 约定不参与构建，而它们现在 0 发现），但这是你的判断——把理由写下来，并让这个结论有一条**能红的判据**（例如：把一个携带发现的 `.go` 放进 `testdata`，按你的结论它应当**不被**扫描；那么这条断言红不红得了）。",
+        "**不许弱化。** 现有 6 个案例**逐字保留**（给出 `comm -23` 为空的证据）；`repo_paths_only` 的**两问自检**（探针必须被忽略、`go.mod` 必须不被忽略）原样保留；`ops/ci/gosec-baseline.txt` 的 256 条条目逐字节不变；新案例不许靠放宽 assert、跳过或加白名单变绿。"
+      ],
+      "deliverables": [
+        "`tests/security/sast.sh`：两处 `check-ignore` 输出解析按 git 的语义修正（注释写明为什么），`usage()`/`--help` 修好，`:6` 的自述改掉。",
+        "`tests/security/sast-go-surface-check.sh`：否定文件与否定目录各一条案例，各自带自检；并把它们对未修解析**能红**的实际输出写进 RESULT。",
+        "`ops/ci/gosec-baseline.txt`：只有表头那处措辞；256 条条目逐字节不变。",
+        "`tests/security/README.md` 或 `sast.sh` 表头里的一段：`testdata` 那 17 个夹具的结论与依据（选了哪条路都要留下这段）。"
+      ],
+      "acceptance_criteria": [
+        "**前后对照**：贴出否定模式的实际输出三件套——(1) git 自己的判定（`check-ignore -q` 对两个文件的退出码），(2) **未修**时那一行的实际输出（假红或误丢），(3) 修后的实际输出。命令与退出码逐条列出。",
+        "**这个判据能红**：MUTATION CHECK——把你这处修法撤掉，新加的案例必须变红（给出撤销后的实际输出），然后还原。**修之前红不了的话，这一条就是构出来的。**",
+        "**两处调用点都改了**，不是只改一处：给出两处各自的证据（文件侧与目录侧各一条实测）。",
+        "**没弱化**：现有 6 个案例逐字保留（`comm -23` 为空的命令与输出）+ 基线 256 条条目逐字节不变（sha256 或 `comm` 的证据）+ 两问自检仍在。",
+        "**`--help` 的实际输出**，以及 `grep -rn 'whole Go module'` 的结果（应当是空或只剩你要留下的那处）。",
+        "**`testdata` 的结论与依据**，以及支撑这个结论的那条判据能红的证据。",
+        "**最终计数**：`sast-go-surface-check: OK — N cases…` 的实际末行、`bash tests/security/sast.sh go` 的末行，都在。"
+      ],
+      "scope_note": "这一笔收的是 T1220 那笔**独立评审抓到的潜伏缺陷**——注意是评审抓到、我自己漏了的：`git check-ignore --stdin -v` 对**被否定模式重新纳入**的路径也打一行，而那一行的路径 git 并未忽略。后果一头是假红，另一头是**静默缩小扫描面**，后者正是 T1220 花整笔力气去治的那个病换了入口。**没有改任何产品语义、安全边界或权限模型**——方向是让已经写在代码里的判据真的符合 git 的语义。它要紧在一点：**判定扫描面的那行代码出错时，错的不是「多扫了」，而是「少扫了且看不见」**，而 T1220 刚立起来的那台仪器对这种错误**完全无感**（6 个案例没有一条碰否定模式）。**把仪器的盲区补上，和把代码修对，是同一笔的两半。**",
+      "supervisor_scope_narrowing": "**为什么开 `tests/security/**` 与 `ops/ci/gosec-baseline.txt`：**\n\n  * `tests/security/**` 是这两件仪器（`sast.sh` 的 go 行与其表面判据、`sast-go-surface-check.sh`）唯一的家，两处要改的解析、`usage()`、`:6` 的自述、README 段落都在里面。\n  * `ops/ci/gosec-baseline.txt` 只开**这一个文件**（`ops/**` 的其余部分仍关闭），而且只准动表头措辞：**256 条条目逐字节不变**是本笔的硬判据。别在已基线的发现上方插行——那是另一笔（第 56 条那个教训）。\n  * `internal/**` 关闭：这一笔不碰 `rddev` 自己的代码。\n\n**为什么「把仪器接进一个真的会跑它的执行器」不在这一笔里：** 那件事要把 `tests/security/master-security-gate.sh` 的 `MIN_CHECKS=17` 抬到 18，而 `tests/acceptance/v1-final-audit.sh` 里**逐字钉着** `require_marker \"MIN_CHECKS=17\"` 和 `require_marker \"master-security-gate: PASS — 17 check(s) ran and each printed its own evidence\"` 两条 V1 验收证据——动它等于动 V1 完成声明的证据层，要单独一笔、由我配套改报告与标记。**本笔不碰这两处**；仪器现在仍是「可运行的证据」，不是「每轮都跑的闸」。\n\n**这是 L1，不是 L3**：修的是既有判据的读取方式，不新增权限、不放宽任何限制。**先复核再动手**——上面对机制与数字的陈述如果与树不符，以树为准并写明。"
     }
   ]
 }

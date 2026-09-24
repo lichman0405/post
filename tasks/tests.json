@@ -1900,6 +1900,16 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1222-TEST-01",
+      "task_id": "T1222",
+      "name": "a path re-included by a negated ignore pattern is not reported as an escape and is not dropped from the surface",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }
