@@ -190,10 +190,84 @@ check_ignore_hit() { # check_ignore_hit <line of 'git check-ignore -v'>  -> "<pa
   #
   # A line with no TAB is not a verdict line at all (`2>&1` puts anything git
   # says on stderr into the same buffer), and is no more a hit than a `!` line.
+  #
+  # THE SOURCE FIELD IS A PATH, SO IT MAY ITSELF CONTAIN A COLON (T1225,
+  # 2026-09-24). The three fields are separated by a character a path may also
+  # hold, so "strip the source, then the line number" — two `${x#*:}` in a row
+  # — takes the wrong field the moment the source has one, and takes it
+  # SILENTLY: what lands in `pat` is then `<linenum>:<pattern>`, which does not
+  # begin with `!`, so a RE-INCLUSION is read as a hit. Measured on this tree,
+  # git printing such a line for a package directory of this module (a
+  # `core.excludesFile` in a colon-named directory matched it — see case 11 of
+  # tests/security/sast-go-surface-check.sh, which plants exactly that):
+  #
+  #   /tmp/colon:src/excludes:2:!tests/…/pkg<TAB>/…/tests/…/pkg       rc=0
+  #     two-step strip      -> pat="2:!tests/…/pkg"      -> HIT: the package
+  #                            directory is dropped from the surface, and a
+  #                            file is refused as local state, on a tree that
+  #                            git does not ignore
+  #     line number read    -> pat="!tests/…/pkg"        -> not a hit
+  #
+  # So the fields are not COUNTED, they are RECOGNISED: the line number is the
+  # one field that is all digits, and the pattern is everything after it. The
+  # `.*` below is greedy, so group 1 is the longest prefix that still leaves a
+  # `:<digits>:` behind it — a source containing colons comes out whole,
+  # including one that itself contains `:2:`. Two cheaper fixes are wrong and
+  # are not what this is: "everything right of the last colon" breaks a pattern
+  # that contains a colon (a pattern is a path too), and stripping one field is
+  # the defect itself.
+  #
+  # WHAT THIS DOES NOT FIX, AND WHAT THAT COSTS (measured on this tree, T1225,
+  # go1.27.1). The mirror image is left over: a PATTERN that itself spells
+  # `<colon><digits><colon>` is split at that one, and `pat` comes out as the
+  # pattern's tail. Three lines git really prints, from ignore rules a
+  # repository can really have — none of these shapes is in THIS tree today
+  # (`git ls-files` has no path containing a colon, and no tracked ignore line
+  # spells one), so what follows is latent, not live:
+  #
+  #   …/.gitignore:2:!keep:2:note.go    re-includes the Go file keep:2:note.go.
+  #                                     `go list` returns that file as source of
+  #                                     its package — only an import PATH is
+  #                                     validated, and a file name is not one
+  #     two-step strip   -> pat="!keep:2:note.go"    -> not a hit   (right)
+  #     line number read -> pat="note.go"            -> HIT         (wrong)
+  #
+  #   …/.gitignore:3:!x[:2:]y.go        a character class; it matches x2y.go,
+  #                                     whose own name contains no colon
+  #     two-step strip   -> pat="!x[:2:]y.go"        -> not a hit   (right)
+  #     line number read -> pat="]y.go"              -> HIT         (wrong)
+  #
+  #   …/.gitignore:2:!x[:2:]y/          the same class over a package DIRECTORY
+  #                                     (x2y, a package of this module)
+  #     two-step strip   -> pat="!x[:2:]y/"          -> not a hit   (right)
+  #     line number read -> pat="]y/"                -> HIT         (wrong)
+  #
+  # So this trades one shape for another, deliberately, and the trade is not
+  # free: the third line above is a package directory dropped from the derived
+  # surface, which is the same direction this function is being fixed for. What
+  # is bought is that the shape it closes needs no odd rule at all — only a
+  # SOURCE path with a colon in it (any `core.excludesFile` or `.gitignore` in
+  # a directory whose name holds one) — while the shapes it leaves need a rule
+  # WRITTEN with `:<digits>:` in it, which is what those three lines have in
+  # common. Neither is closed by splitting the header more cleverly: the format
+  # has no unambiguous split. The complete fix is no split — `git check-ignore
+  # -v -z` separates every field with a NUL (measured, same date:
+  # `<source>\0<linenum>\0<pattern>\0<pathname>\0`, and stdin then has to be
+  # NUL-delimited too, else git answers rc=1 and prints nothing) — and because
+  # it changes what both callers below read, and how they read it, it is its
+  # own task rather than half of this one.
+  #
+  # A header that does not have this shape at all is not read as a hit, the
+  # same direction as the TAB check above: a line this function cannot read is
+  # a line it will not act on.
   local line="$1" hdr pat
   case "$line" in *$'\t'*) ;; *) return 1;; esac
   hdr="${line%%$'\t'*}"             # <source>:<linenum>:<pattern>
-  pat="${hdr#*:}"; pat="${pat#*:}"  # strip the source, then the line number
+  if [[ "$hdr" =~ ^(.*):([0-9]+):(.*)$ ]]; then
+    pat="${BASH_REMATCH[3]}"        # everything after the line-number field
+  else
+    return 1
+  fi
   case "$pat" in '!'*) return 1;; esac
   printf '%s\t%s\n' "${line##*$'\t'}" "$hdr"
 }

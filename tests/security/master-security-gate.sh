@@ -261,23 +261,26 @@ add_check sast-go \
 # What it plants, and what it therefore measures rather than reads out of
 # tests/security/sast.sh: an ignored copy under a dot directory, an ignored
 # package directory, an ignored FILE inside a package that stays, a
-# re-included file, a re-included package directory, and a Go file under
-# testdata/ — running the go row once per case and requiring the answer git
-# and the toolchain actually give, not the one the comment claims. Its last
-# case asserts the tree is as it was found, which is what keeps a plant from
-# becoming the next run's input. The row is here in ADDITION to sast-go and
-# not instead of it: sast-go judges the findings, this one judges the surface
-# they were taken from, and a green sast-go on a silently shrunken surface is
-# exactly the failure the instrument exists to catch.
+# re-included file, a re-included package directory, a Go file under
+# testdata/, and (T1225) a re-inclusion whose rule was read from an ignore file
+# whose own PATH contains a colon — running the go row once per case and
+# requiring the answer git and the toolchain actually give, not the one the
+# comment claims. Its last case asserts the tree is as it was found, which is
+# what keeps a plant from becoming the next run's input. The row is here in
+# ADDITION to sast-go and not instead of it: sast-go judges the findings, this
+# one judges the surface they were taken from, and a green sast-go on a
+# silently shrunken surface is exactly the failure the instrument exists to
+# catch.
 
 add_check sast-go-surface \
   "SAST (Go) surface: what the go row scans, against planted copies, ignored files and re-included paths" \
   "docs/23 §11 (SAST); tests/security/sast.sh (the go row's surface)" \
   "go gosec git python3 file:tests/security/sast-go-surface-check.sh file:tests/security/sast.sh file:ops/ci/gosec-baseline.txt file:ops/security/tool-versions.sh" \
   "bash tests/security/sast-go-surface-check.sh" \
-  '^sast-go-surface-check: OK — ten cases: the derived surface is green and prints itself, a copy' \
+  '^sast-go-surface-check: OK — eleven cases: the derived surface is green and prints itself, a copy' \
   '^ok   case 7: green — the re-included file was not reported as an escape' \
-  '^ok   case 8: green, and the re-included package directory stayed in the surface'
+  '^ok   case 8: green, and the re-included package directory stayed in the surface' \
+  '^ok   case 11: the re-included package directory under a colon-named source was scanned'
 
 add_check sast-python \
   "SAST (Python adapter): bandit over the adapter's source, no skip list and no severity floor" \
