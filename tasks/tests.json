@@ -1960,6 +1960,16 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1228-TEST-01",
+      "task_id": "T1228",
+      "name": "update_progress.py --check exits 0 on a current tree and non-zero on a stale one, both measured in a sandbox root",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }

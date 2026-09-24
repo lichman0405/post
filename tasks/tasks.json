@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 169,
+  "task_count": 170,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -9883,6 +9883,71 @@
       ],
       "scope_note": "P13 的三笔（T1224 接一台仪器进总门、T1226 修一台量错状态的扫描、本笔）是同一个类：**仪器存在，而没有任何东西跑它**，于是它的绿什么也不说明。前两笔各修一个实例；本笔把这个类**结构化地**关掉——立一份名册，每台仪器要么点名活入口、要么写明为什么必须手动，再由一个能被 `go test ./...` 跑到的检查器守住名册。此后「新增一台仪器而不入册」「删掉一条」都会红，不必再靠人工一次一台地找。起点是我自己量过的那台：17 张视觉基线的比对今天没有任何活入口跑它。",
       "supervisor_scope_narrowing": "**为什么只开这两个位置：**\n\n  * `ops/ci/instrument-inventory.json` 是名册本身——`ops/ci/` 已经放基线那类「CI 的账」，同一类东西。\n  * `internal/instrumentinventory/**` 是检查器。放 `internal/` 是因为 `go test ./...` 会自动跑到它，**于是不需要改任何 CI 配置**：`go` 作业的第 5 步就是 `go test $(go list ./... | …)`，而 `go` 已是 `required_jobs` 之一。这一点是本笔能不碰 `.github/**` 的原因。\n\n**为什么不开 `tests/**`（哪怕仪器都在那里）：** 本笔**只读**仪器。如果开写权限，「让检查器变绿」最省事的办法就变成了改被检查的仪器——那正是本仓库禁止的那类动作。名册与检查器分开，检查器只读树，这条界线才守得住。\n\n**为什么不开 `scripts/**`：** 同上，那里也有仪器（`scripts/tests/**` 就是一批单测）。只读。\n\n**为什么接线不在你的范围里：** 把一台仪器接成活入口要动 `.github/workflows/ci.yml` 或 `specs/orchestrator/gates.json`，两者都是 Supervisor-only。所以名册只**记录**事实，`manual` 的每一台由我裁定；你不必（也不许）为了让某台变 `wired` 去改 CI 配置。\n\n**这是 L1，不是 L3**：加一台只读的检查器与一份名册，不新增权限、不改产品语义、不放松任何 Gate（判据是**加**一个能红的检查器，并且禁止删除或放宽既有的）。"
+    },
+    {
+      "id": "T1228",
+      "phase": "P13",
+      "phase_name": "V1 之后的加固：流水线自己的可信度",
+      "title": "`update_progress.py --check` 是一台**只能说「不」**的仪器：它拿**当下这一秒**去比文件里那次生成的时间戳（`生成时间：{stamp}` 就在被比较的正文里，而 `stamp` 默认取 `now_stamp()`），所以对任何已提交的 `progress.md` 它永远报 stale——我据此**差点把它接进 `task-state` 作业**，那会让 main 永远红。把时间戳排除出比较，并证明它**两侧都能说**",
+      "v1_required": false,
+      "dependencies": [],
+      "tests": [
+        "update_progress.py --check exits 0 on a current tree and non-zero on a stale one, both measured in a sandbox root",
+        "the generation timestamp is not part of what --check compares, so a committed progress.md can pass",
+        "the new unit-test cases fail against the unfixed comparison and pass against the fixed one"
+      ],
+      "allowed_scope": [
+        "scripts/update_progress.py",
+        "scripts/tests/progress-update-test.sh"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "apps/**",
+        "services/**",
+        "infra/**",
+        "ops/**",
+        "Makefile",
+        "cmd/**",
+        "internal/**",
+        ".rddev.example/**",
+        "tests/**",
+        "scripts/**"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/67_TEST_GATES.md",
+        "docs/24_TEST_STRATEGY.md"
+      ],
+      "requirements": [
+        "**先把下面这四条自己跑一遍，别照抄我的话**（我量过也可能错，**以树为准**）。**用沙箱 `--root`，不要动真的 `tasks/progress.md`**（它在你的禁区里）：把 `tasks/tasks.json`、`tasks/task_status.json`、`tasks/progress.md` 拷到一个临时目录，对它跑 `python3 scripts/update_progress.py --root <tmp> [--stamp …]`。要给的四条命令与原文：\n  * (a) **固定戳**重生成（`--stamp 2026-01-01T00:00:00Z`）后再用**同一个戳** `--check` → 退出码；\n  * (b) 用**另一个戳**（`…:00:01Z`）`--check` → 退出码；\n  * (c) **不带 `--stamp`**（也就是真实的那次调用）`--check` → 退出码；\n  * (d) 结论一句话：**唯一变量是不是那个时间戳**。若 (a) 不是 0，那我的判断错了——照实写明并**停下来把结论写进 RESULT**，别继续改。",
+        "**改法**：让 `--check` 比的是**内容**而不是「内容 + 这一次的秒」。你可以自己选形状，但必须同时满足：\n  * 真的 stale（例如 `task_status.json` 里多了一笔、或某个状态变了）时**必须**返回非 0——**不许把这道检查改成永远绿**；\n  * 文件是当前的时候**必须**返回 0（这才是本笔要修的）；\n  * 不改文件格式、不改两个 marker、不改机器段以外的任何字节；\n  * `--stamp` 作为「测试可确定性」的入口要留着并继续有效；\n  * 幂等：连跑两次，第二次必须打印「already up to date」且不写文件。",
+        "**证明它两侧都能说**（这是本笔的核心判据，不许只给一侧）：在不碰真文件的沙箱里，给出「当前 → 退出 0」与「故意弄 stale → 退出 1」两次的**命令 + 退出码 + 原文**。弄 stale 那一次要**具体到机制**（例如把 `task_status.json` 里某一笔的状态改成另一个词），并说明你如何把沙箱恢复原状。**一台只能说「不」的仪器与一台只能说「是」的仪器一样没有价值**——这句话是本笔存在的理由，你要用两次实测把它立起来。",
+        "**给既有的单元测试加用例，并证明新用例能红**：`scripts/tests/progress-update-test.sh` 已经在拿沙箱测这台生成器（它开头就写明了「真的 `tasks/progress.md` 从不被读写」）。把那两个方向各加一条用例（当前 → 0；弄 stale → 非 0），并**把修好之前的行为也钉住**：给出「把改动撤销后，新用例确实会红」的原文。既有用例**一条不许删、不许跳过、不许放宽**。",
+        "**不许动真文件**：`tasks/**` 全在你的禁区里（含 `tasks/progress.md`）。所有验证走临时 `--root`。你的 diff 只应落在两个交付物上——`git status --porcelain -uall` 只列它们，`git diff --stat HEAD -- tasks/ specs/ docs/ .github/ tests/` 为空。",
+        "**不要顺手把这台仪器接进 CI**：接线要动 `specs/orchestrator/gates.json` 与/或 `.github/workflows/ci.yml`，都是 Supervisor-only。你只把仪器改成**能被信**；接线是我的事，我会在本笔合并后自己决定。（这也是本笔的由来——我差点在它还不能说「是」的时候接上去。）",
+        "**不许借「修 bug」之名放松任何 Gate**：这是 L1（修一个比较语义并补测试），不新增权限、不改产品语义；判据是**加**能红的用例，并且禁止删除或放宽既有的。"
+      ],
+      "deliverables": [
+        "`scripts/update_progress.py`：`--check` 的比较把生成时间戳排除在外，其余行为（重生成、幂等、marker、机器段以外的字节不变）逐条保持。",
+        "`scripts/tests/progress-update-test.sh`：两个方向各一条新用例（当前 → 0；弄 stale → 非 0），既有用例逐条保留。",
+        "RESULT：(a)-(d) 四条命令与退出码原文；`--check` 两侧的两次实测（命令 + 退出码 + 原文）；「撤销修法后新用例会红」的原文；幂等那一次（连跑两次）的原文。",
+        "RESULT：`git status --porcelain -uall` 与 `git diff --stat HEAD -- tasks/ specs/ docs/ .github/ tests/ Makefile` 的空输出。"
+      ],
+      "acceptance_criteria": [
+        "(a)-(d) 四条各有命令与退出码原文；(d) 明确回答「唯一变量是不是那个时间戳」。",
+        "修好之后，在沙箱里：当前 → **退出 0**；故意弄 stale → **非 0**。两次都贴原文。**只给一侧不算通过**——特别是只有「弄 stale 会红」不算。",
+        "新用例能红：撤销修法后，新用例**确实失败**（贴原文），恢复后复绿（贴原文）。",
+        "`bash scripts/tests/progress-update-test.sh` 通过；`task-state` 作业那一串（`python3 scripts/validate_task_state.py`、`bash scripts/tests/task-state-unit-test.sh`、`bash scripts/tests/progress-update-test.sh`、`bash scripts/tests/tests-ledger-unit-test.sh`）**全部**通过；既有用例一条未删、未跳过、未放宽。",
+        "幂等：连跑两次重生成，第二次打印「already up to date」且不写文件（贴原文）。",
+        "`git status --porcelain -uall` 只列两个交付物；`tasks/**`、`specs/**`、`docs/**`、`.github/**`、`tests/**`、`Makefile` 的 diff 为空。"
+      ],
+      "scope_note": "`scripts/update_progress.py --check` 今天是一台**只能说「不」**的仪器：生成时间戳写在被比较的正文里，而戳默认取当下这一秒，所以任何已提交的 `tasks/progress.md` 都过不了它。我量过（沙箱、固定戳，唯一变量就是那个戳），并**据此差点把它接进 `task-state` 作业**——那会让 main 永远红。本笔把这台仪器改成**能被信**：时间戳不参与比较，并且要求两侧各有一条实测（当前 → 0；弄 stale → 非 0），既有单测补上这两个方向且能红。接线与否是我的事，不在本笔范围内。",
+      "supervisor_scope_narrowing": "**为什么只开这两个文件：**\n\n  * `scripts/update_progress.py` 是被修的比较逻辑所在；\n  * `scripts/tests/progress-update-test.sh` 是它的单测，`task-state` 作业已经在跑它（`gates.json` 里 `task-state` 的第三步就是 `bash scripts/tests/progress-update-test.sh`），而 `task-state` 是 required job——**所以本笔的 G3 不需要新接线**，改完就自动被跑到。\n\n**为什么不开 `tasks/**`（哪怕要验的就是 `tasks/progress.md`）：** 那两行自动段是**产物**，由这台生成器从 `tasks/task_status.json` 重算。开写权限就等于允许工人手改产物来让检查变绿——正是本仓库禁止的那类动作。所以任务书要求**全部验证走临时 `--root`**，而生成器本来就为此留了口子（它开头的说明写着真的文件从不被单测读写）。\n\n**为什么接线不在你的范围里：** 把 `--check` 变成一道 Gate 要动 `gates.json` / `ci.yml`，两者都是 Supervisor-only。而且**顺序不能反**：先让仪器两侧都能说，再接——我在它还会永远报 stale 的时候就差点接上去，那会让 main 永远红。本笔只做前半步。\n\n**这是 L1，不是 L3**：修一处比较语义并补两条能红的用例。不新增权限、不改产品语义、不放松任何 Gate（判据是**加**用例并禁止删除或放宽既有的）。"
     }
   ]
 }
