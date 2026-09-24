@@ -19960,3 +19960,46 @@ T1221 把命令位分析修对了（换行是分隔符），但顺手产生了�
 ### 五、没有降低任何 Gate
 
 这一笔**不新增也不放宽任何守卫判据**：判的东西一条没变，被放宽的限制一条没有，`specs/orchestrator/worker-permissions.yaml` 没被碰。反过来，`floor` 抬到落账条数**提高了**删用例的成本，`:621` 变 fail-closed **收紧**了行为。合并后守卫要重新 embed 并重启驱动（`make rddev`）——那是我的事，不在工人面里。
+
+## 64 — 「动它等于动 V1 完成声明的证据层」：机制是我说错的（审计读的是报告，不是活的脚本）——顺手把表面判据接进总门（L1 记账 + 立账 T1224，2026-09-24）
+
+T1220 立起来的表面判据 `tests/security/sast-go-surface-check.sh` 是一台**完整**仪器（六个案例、自己植入、退出时删掉、还有一个案例断言自己没留下东西），但**没有任何执行器引用它**：`grep -rn 'sast-go-surface-check\.sh'` 除它自己，命中的只有台账里的散文。而 T1222 刚给它补的两条否定模式案例，今天跑在任何地方都不跑。这一笔把它接进**每轮都跑**的地方。
+
+### 一、我此前写下的机制是错的，这里更正
+
+T1222 的账（`tasks/tasks.json:9538`、`tasks/task_status.json:12517`）里我写：「那件事要把 `tests/security/master-security-gate.sh` 的 `MIN_CHECKS=17` 抬到 18，而 `tests/acceptance/v1-final-audit.sh` 里**逐字钉着** `require_marker "MIN_CHECKS=17"` 与 `require_marker "master-security-gate: PASS — 17 check(s) ran…"` 两条 V1 验收证据——动它等于动 **V1 完成声明的证据层**」。
+
+**「逐字钉着」是真的**（`v1-final-audit.sh:261-262` 就是那两行字面）。**但由它推出的机制是错的**：`require_marker()`（`:173-179`）读的是 `"$REPORT"`，也就是 `tests/acceptance/v1-final-report.md` 那份**冻结的文本**，**不读活的脚本**。所以抬下限**不会**让审计变红。真实的后果是**陈旧而不是红**：报告与审计里那两处字面会变成**对一个更早的树的陈述**；而「陈旧」审计本来就在管——它自带基准行，**HEAD 一前进就非零退出**。
+
+顺带核出一件我原先也没说准的事：**审计与报告都不在 CI 里**。`grep -rn 'v1-final-audit' .github/workflows/*.yml Makefile` 空输出，仓库里除它自己与报告里那几行散文没有第二个引用者。它是**手工按需**的仪器，不是常设闸。所以「抬下限会惊动 V1 证书」这条顾虑，比我原先写的小得多。
+
+### 二、接法：单目录任务成立，因为三处分叉都不需要动
+
+T1220/T1222 那两笔开的是 `tests/security/**` + `ops/ci/gosec-baseline.txt`。这一笔**只开 `tests/security/**`**，四条理由逐条核过：
+
+- **CI 已经在跑总门**：`.github/workflows/ci.yml:440` 那一步是 `run: bash tests/security/master-security-gate.sh`，前面 `:437-438` 已经 `make security-tools` 把扫描器装齐。**加一行注册就等于每轮 CI 都跑它。**
+- **`specs/orchestrator/gates.json` 不必动**：它镜像的是 CI 的 **step 列表**（`TestGatesSpecSyncsWithCIWorkflow`，`gate_spec_test.go:22` 守着），不是注册表的行数。注册一行不改 step。
+- **`ops/security/absent-checks.json` 不必动**：那份清单的校验是**单向的**——`check-absent-manifest.py:190-201` 只要求清单里每个 `covered` 项点到的 `check_ids` 在注册表里**存在**，**不**要求注册表里每一行都被清单认领。
+- **`MIN_CHECKS` 是下限不是等式**：`:452` 用的是 `-lt`，因为 `--selftest` 靠 `--extra-checks`（`:439-449`）往注册表里加诱饵行。所以「注册表行数 == 下限」不能被断言成相等。
+
+### 三、下限跟着抬到 18：不是为了好看
+
+下限的功用在它自己的注释里写着——「删掉一行是让安全门变绿最便宜、也最不留痕迹的办法」。新行落在下限**之外**，等于它可以被静默删除：那正是下限存在的理由被绕开。所以 `MIN_CHECKS` 17→18，注册表 18 行。
+
+**没有降低任何 Gate**：抬下限是**收紧**（可删的行少了一行），新行是**加**了一个真跑的执行入口。放宽 `-lt`、改成相等断言、走 `--extra-checks` 旁路，三条都在任务书里明文禁止。
+
+### 四、一处更正：`task_overrides` 不是「每个任务都有」
+
+我先前从「键的列表一直排到 T1222」推出「每个任务都带 G3 作业」，**数一下就不是**：`task_overrides` 150 个键对 164 个任务，缺 14 个——与 `gates.json` 的 `$comment` 一致（「absent = not required, recorded as such, never silently skipped」）。真正硬的是 `TestEveryTaskOfThePhasesUnderDevelopmentHasG3`（`gate_spec_test.go:215`）：**活阶段**的任务必须带一个，新立的两笔都在 P13，都带了。
+
+### 五、顺手更正 T1223 的 G3 作业
+
+T1223（改守卫）我原先给的是 `security-master`。核了一遍同类：改 `internal/devorchestrator/**` 的三个任务 **T1217/T1219/T1221**，G3 全是 **`mof-canonical`**，依赖里都带 `T1202`（`mof-canonical.requires_tasks = ['T1202']`）。而 `security-master` 对那一笔是**不成立的声明**：它读的东西 T1223 一样没碰。已改为 `mof-canonical` + 依赖 `["T1202","T1221"]`。
+
+**诚实的一句**：这两个 G3 作业**都不真正驱守卫**——守卫是 Claude Code 的 PreToolUse 钩子，不是 `rddev` 调的。所以守卫任务的 G3 一直是「既有 E2E 不许因此变红」，**不是覆盖**。这条照原样记，不假装它是覆盖。
+
+### 六、裁定
+
+立账 **T1224**：`tests/security/**` 单目录，依赖 `T1222`，G3 `security-master`（正好是它要改的那台仪器本身——最贴的配对）。判据核心是**新行必须打印 `ok` 而不是 `NOT ASKED`**：`:110-119` 写着 `requires` 里有一个 token 不满足，这一行就**不执行**——一个 NOT ASKED 的行等于没接。另要求量出这一行的墙钟（那台仪器把 go 行跑六次），若明显变慢由我决定，而不是工人自己删。
+
+记账前已验证：四个台账用脚本的序列化参数**逐字节回环**（`tasks/tasks.json` 704528 B、`task_status.json` 1287135 B、`tests.json` 140963 B、`gates.json` 25931 B），两个记账脚本在**临时副本**上空跑过一遍，增量恰为 tasks/task_count/tasks_status/tests/overrides 各 +2。
