@@ -12076,12 +12076,61 @@
       ]
     },
     "T1215": {
-      "status": "todo",
-      "notes": "新立账（2026-09-24，V1 完成之后的第一笔）：#243 / #207 / #133 三条议题描述的是同一个 1 秒窗口——`run-worker.sh` 先写 `exit.status`（`worker_guard.go:168`）再做 kill 序列（`:186`-`:188`），于是「文件存在」不蕴含「收尾完成」。任务书见 `tasks/packages/T1215.json`，G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`mof-canonical`，其 `requires_tasks` 为 `T1202`，已抄进 `dependencies`）。`v1_required=false`：这是流水线加固，不是产品交付，V1 证书不依赖它。"
+      "status": "verification",
+      "started_at": "2026-09-24T01:03:07Z",
+      "notes": "新立账（2026-09-24，V1 完成之后的第一笔）：#243 / #207 / #133 三条议题描述的是同一个 1 秒窗口——`run-worker.sh` 先写 `exit.status`（`worker_guard.go:168`）再做 kill 序列（`:186`-`:188`），于是「文件存在」不蕴含「收尾完成」。任务书见 `tasks/packages/T1215.json`，G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`mof-canonical`，其 `requires_tasks` 为 `T1202`，已抄进 `dependencies`）。`v1_required=false`：这是流水线加固，不是产品交付，V1 证书不依赖它。",
+      "worker_run_id": "run-0c6e959110b22c0b",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-24T01:03:04Z",
+          "run_id": "run-deed3a0384f46c74"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-24T01:03:07Z",
+          "run_id": "run-0c6e959110b22c0b",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-24T01:52:11Z",
+          "run_id": "run-1adfc982cd7343b9",
+          "reason": "collect: all checks passed"
+        }
+      ]
     },
     "T1216": {
-      "status": "todo",
-      "notes": "新立账（2026-09-24，与 T1215 同批）：#240——G3 的 `gitea-real-services` 偶发红在 bootstrap 那三步上（`tests/acceptance/gitea-real-services-e2e.sh:529-531` 三个请求串在一条 `&&` 链里，`:534` 的失败话术说不出是哪一步、什么码），量到的频率约 5 次红 1 次（原件 `.rddev/runtime/gates/T0406/output/run-b17e9d3d09e0652d-g3/gitea-real-services/00.log`）。任务书见 `tasks/packages/T1216.json`，G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`gitea-real-services`，该作业没有 `requires_tasks`，故 `dependencies` 为空）。`v1_required=false`：这是流水线加固，不是产品交付。"
+      "status": "rejected",
+      "started_at": "2026-09-24T01:03:34Z",
+      "notes": "新立账（2026-09-24，与 T1215 同批）：#240——G3 的 `gitea-real-services` 偶发红在 bootstrap 那三步上（`tests/acceptance/gitea-real-services-e2e.sh:529-531` 三个请求串在一条 `&&` 链里，`:534` 的失败话术说不出是哪一步、什么码），量到的频率约 5 次红 1 次（原件 `.rddev/runtime/gates/T0406/output/run-b17e9d3d09e0652d-g3/gitea-real-services/00.log`）。任务书见 `tasks/packages/T1216.json`，G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`gitea-real-services`，该作业没有 `requires_tasks`，故 `dependencies` 为空）。`v1_required=false`：这是流水线加固，不是产品交付。",
+      "worker_run_id": "run-1936a2c60ae82bff",
+      "rejection_reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: If the fix contains a retry: attempts and interval are hard-coded constants, every attempt is printed, and exhaustion MUST go red naming the step — supply that exhaustion-red run's output. (not_applicable)",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-24T01:03:31Z",
+          "run_id": "run-ad79a89d713f2f28"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-24T01:03:34Z",
+          "run_id": "run-1936a2c60ae82bff",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-09-24T01:54:18Z",
+          "run_id": "run-2ca76eb89f7fc35d",
+          "reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: If the fix contains a retry: attempts and interval are hard-coded constants, every attempt is printed, and exhaustion MUST go red naming the step — supply that exhaustion-red run's output. (not_applicable)"
+        }
+      ]
     }
   },
   "version": 2
