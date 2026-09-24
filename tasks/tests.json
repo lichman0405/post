@@ -1860,6 +1860,16 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1218-TEST-01",
+      "task_id": "T1218",
+      "name": "a published knowledge record is rejected by the database on UPDATE, DELETE and TRUNCATE",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }

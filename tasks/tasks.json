@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 159,
+  "task_count": 160,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -9168,6 +9168,75 @@
       ],
       "scope_note": "这一笔修的是**流水线自己会不会被骗**，不是产品功能，所以 `v1_required` 为 false：V1 证书钉在它自己那棵树上，不依赖它，它也不改任何产品语义。要防的后果是 `#264` 自己点名的那个——**一轮什么都没干的返工，会被收成绿的**。它挡着的不是某一笔任务，而是此后每一笔：收工校验是「工人说完成了」与「我真的验收了」之间唯一的机械关卡。",
       "supervisor_scope_narrowing": "**为什么只给一个目录**：同时开着或刚开过的还有 T1215（`internal/devorchestrator/**`、`cmd/rddev/**`、`tests/acceptance/four-gate-helpers.sh`、`rejection-retry-e2e.sh`）——**T1217 依赖 T1215**，`dependencies` 里写了，所以驱动不会在两笔同时开着时派它；等 T1215 合了才轮到。**为什么 `cmd/rddev/**` 不在允许面**：这一笔的判据与渲染都在 `internal/devorchestrator/` 里；`cmd/rddev` 的测试若要跟着改，说明根因不在我指的那一处——那种情况按上面第 7 条**停手点名**，不要扩范围。**为什么允许改 `system.md` 的渲染来源**：第二件事的修法就是「把规矩写到工人读得到的地方」，而那段正文正是在 `internal/devorchestrator/` 里渲染出来的；但 `specs/orchestrator/worker-result.schema.json` **一个字节都不许动**——判据我已经定了：不放宽 collect、不改 schema。"
+    },
+    {
+      "id": "T1218",
+      "phase": "P13",
+      "phase_name": "V1 之后的加固：流水线自己的可信度",
+      "title": "`knowledge_publications` 缺 append-only 保护：已发布的 rights_json 可被就地改写（#228，迁移 00157）",
+      "v1_required": false,
+      "dependencies": [
+        "T1202"
+      ],
+      "tests": [
+        "a published knowledge record is rejected by the database on UPDATE, DELETE and TRUNCATE",
+        "the append-only census recognises knowledge_publications"
+      ],
+      "allowed_scope": [
+        "infra/migrations/**",
+        "specs/database/postgres.sql",
+        "tests/integration/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "docs/**",
+        ".github/**",
+        "apps/**",
+        "services/**",
+        "cmd/**",
+        "internal/**",
+        "ops/**",
+        "scripts/**",
+        "Makefile",
+        "specs/**（`specs/database/postgres.sql` 除外）",
+        "infra/**（`infra/migrations/00157_*.sql` 除外）",
+        "tests/**（`tests/integration/**` 除外）"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/24_TEST_STRATEGY.md",
+        "docs/67_TEST_GATES.md",
+        "docs/25_CICD_DEVOPS.md"
+      ],
+      "requirements": [
+        "**先读再写，别照抄我的话。** 上面每一条都给了出处，先到树里核一遍；核出来与我说的不一样，**以树为准**并在 RESULT 里写明。上面那条关于 #228 正文过期的提醒，就是一个「别照抄」的实例——请自己复核一遍它现在的状态。",
+        "**加新迁移 `infra/migrations/00157_knowledge_publications_append_only.sql`**：给 `knowledge_publications` 装上两半 guard，复用 `append_only_guard()`。写法照 `00014`（行级）与 `00015`（语句级）的既有形态，命名照 `00083:118/122` 的样子。**既有迁移一个字节都不许改**——迁移是历史，新增只能落在 00157。",
+        "**重生成两个派生物**：`python3 scripts/gen_schema_snapshot.py --write`（更新 `specs/database/postgres.sql`，它是 `infra/migrations/**` 的生成物），再 `python3 scripts/spec_version.py --write`（`postgres.sql` 是 spec 摘要的输入之一），然后各自 `--check` 一遍。**两个都不许手工编辑**——手工同步出来的快照过不了校验。",
+        "**补测试**：真实 PostgreSQL 上验证 UPDATE、DELETE、TRUNCATE 三种写**都被数据库本身拒绝**（SQLSTATE `P0001`、错误里点名是哪张表做了什么操作），**并且合法的 INSERT 仍然成功**。把 `knowledge_publications` 加进 `appendOnlyTables`，并在该清单上方的注释里补一段说明为什么它属于这里。",
+        "**证明这套测试能红。** 在装触发器之前（或临时把它摘掉）跑一次，把红的输出留下来。**一个从来不会红的测试不是证据**——T0703 的 `TestRightsDocumentIsImmutable` （`tests/integration/rights_model_test.go:301`）就是只在保护已经存在的地方验证不可变的写法，它对这张表什么也没证明。#228 点名要求别再重复那个形状。",
+        "**不许为了让什么变绿而放宽判据**：不删/skip 测试、不改 `append_only_guard()` 的判据、不改 `00014`/`00015`/`00083`、不放大 timeout、不把断言从「被拒」改成「不报错」。若你发现某条既有测试因为这次加固而变红，**那是发现，不是障碍**——写进 RESULT，不要改测试去迎合。",
+        "**若修法必须落在上面列的范围之外，停手并说明。** 在 RESULT 里点名说清楚「要让哪一处怎么改、凭什么」，我来接，不要自己扩范围。"
+      ],
+      "deliverables": [
+        "`00157_knowledge_publications_append_only.sql`：两半 guard，复用既有函数。",
+        "重生成后的 `specs/database/postgres.sql` 与 `specs/SPEC_VERSION.json`，附两条 `--check` 的输出。",
+        "`tests/integration/append_only_test.go`：清单加表 + 注释说明；三种写被拒、INSERT 仍成功的实测。",
+        "**能红的证明**：装触发器之前那次的红色输出（`MUTATION CHECK` 开头）。",
+        "收工证据：跑过的命令与次数；既有迁移文件的 `sha256sum`（证明未改）；`git status --porcelain -uall`；无残留进程。",
+        "`notes_for_supervisor`：T0013 归类的冲突该记什么，以及你实测到的任何反例。"
+      ],
+      "acceptance_criteria": [
+        "**三种写都被数据库本身拒绝，且这套测试被证明能红**：给出 UPDATE / DELETE / TRUNCATE 各自的 SQLSTATE （要 `P0001`）与错误文本，并给出**装触发器之前那次**的实际输出（`MUTATION CHECK` 开头）。**红不了的话，这一条就是构出来的**——那等于又写了一遍 T0703 那种「只在保护存在的地方验证不可变」。",
+        "**合法的 INSERT 仍然成功**：给出一次成功写入的实测（走 `knowledge_publish_store` 或直接 INSERT），证明新触发器没有挡住正常发布路径。#228 正文说这张表已经没有写入路径了——如果你核出来它错了，就在 RESULT 里写明你核到的事实。",
+        "**两半都在，且两份普查都认识它**：`pg_trigger` 里两个触发器都在且 `tgenabled='O'`；`knowledge_publications` 在 `appendOnlyTables` 里；`append_only_truncate_test.go` 的交叉核对通过。给出这几条测试的名字与它们跑绿的那一次。",
+        "**两个派生物都重生成过、且 `--check` 绿**：`specs/database/postgres.sql` 里能看到新触发器，`python3 scripts/spec_version.py --check` 通过。给出两条命令与它们的输出。",
+        "**没有改历史、没有放宽判据**：`git status --porcelain -uall` 只列 `infra/migrations/00157_*.sql`、`specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`tests/integration/append_only_test.go`；既有迁移与 `append_only_guard()` 一个字节未改（给出 `sha256sum`）；无删/skip 测试、无放大 timeout。",
+        "**该记的决定写进了 RESULT**：与 T0013 归类冲突这件事、`00083` 注释里那个落空的前提、以及你实测到的反例，都写进 `notes_for_supervisor`。`tasks/**` 你不许写——我来落账，所以这些内容必须完整。"
+      ],
+      "scope_note": "`docs/21` 与 `docs/46` 把「不可变」当作存储层的性质，`CLAUDE.md` §9 第 5 条（Release / Asset Version immutable）与第 8 条（Nothing disappears; state only evolves）是同一类要求。这一笔补的是**数据库自己发出的拒绝**：在此之前，任何对这张表有写权限的东西——应用代码、psql、一个泄漏的凭证——都能就地改写一条已发布记录的 `rights_json`，也就是「发布者声明了哪些使用方式」那份声明，而且不留任何痕迹。它不改产品语义、不改权限模型、不改 API 契约，只是让表结构兑现它已经写在注释里的承诺。",
+      "supervisor_scope_narrowing": "这一笔有一个**结论要先给**，不要自己去选：**`knowledge_publications` 是 append-only。**\n\n理由两层，第二层是真正的证据：\n\n1. 表结构本来就是「发布这个动作发生过」这件事的记录，不是当前状态——\n   `published_by` + `published_at` + `rights_json` + `UNIQUE(object_version_id, public_version)`。\n   要纠正就追加一条新的 `public_version`，而不是把旧的那行改掉。\n\n2. **更要命的是：`infra/migrations/00083_knowledge_publication_identity.sql:66-73` 自己写着**\n   这份幂等账本 \"Append-only, **like the row it points at** and like the other ledgers\"——\n   它把「被它指向的那一行是 append-only」**当成前提写进了注释**，\n   而**没有任何东西在强制**。同一份迁移给 `knowledge_publication_creations` 装了两半\n   （`:118` 行级 BEFORE UPDATE OR DELETE、`:122` 语句级 BEFORE TRUNCATE），\n   却没碰它指向的那张表。`00014` 的行级名单（13 张）里也没有它。\n   T0013 的豁免理由（`tasks/results/T0013/RESULT.json`）把它和 `users`/`projects` 这类\n   真正的当前状态表并列——**这个归类对不上表结构，也和 00083 的前提互相矛盾。**\n\n**其余几条一并定死，不必再权衡：**\n\n- **两半都要**：`00014` 的行级 guard **和** `00015` 的语句级 TRUNCATE guard。\n  理由用 00083 自己的话：a ledger that can be truncated is not append-only and\n  TRUNCATE fires no row trigger。只装一半等于没装。\n- **复用 `append_only_guard()`**（`00014:28` 建的那个），**不要另写一套判据**。\n- 这张表要进 `tests/integration/append_only_test.go` 的 `appendOnlyTables` 清单，\n  并照 `00083`/`00128`/`00103` 的写法在文件顶部注释里补一段**为什么**。\n  那份清单同时驱动目录断言和逐表拒绝循环；`append_only_truncate_test.go` 从 `pg_trigger`\n  里查 `_no_truncate` 再跟这份设计清单**交叉核对**——两边少一边都会红。\n- **编号 00157**，文件名 `00157_knowledge_publications_append_only.sql`。编号是我在派工时定的，\n  **不要自己选号**，也不要改任何已有的迁移文件。\n- **与 T0013 归类的冲突由我记进 `tasks/decisions.md`**。`tasks/**` 对你是禁写范围，\n  你只把「该记什么、凭什么」写进 RESULT 的 `notes_for_supervisor`，我来落账。\n- **#228 的正文里有一处已经过期，别照抄**：它说 `PublishKnowledgePublication`「在 sqlc\n  生成代码之外没有任何调用者」「此时加触发器不会破坏任何代码」。那是它写下的时点；\n  T0805 后来合了（`fc78310`），现在 `internal/persistence/knowledge_publish_store.go:291`\n  就在调它——**表已经有产品写入路径了**。评估风险时以树为准，不以issue正文为准。\n\n**为什么这不是「加个约束」而是「补一个谎」**：注释里承诺的不可变不是机制，\n只有触发器发出的那声拒绝才是。这一笔交付的是后者。"
     }
   ]
 }

@@ -12149,6 +12149,10 @@
     "T1217": {
       "status": "todo",
       "notes": "新立账（2026-09-24，P13 第二笔）：两件事同一处收工校验。一是 `#264`——`worker_collect.go:297` 收 `RESULT.json` 时全文没有与 `rec.StartedAt` 的比较，而 `ReworkWorker`（`worker_spawn.go:1063`）/`RespawnWorker`（`:1086`）重用同一任务目录、`archivePreviousVerdict`（`review_worker.go:689`）只服务评审路径，于是一轮没写过 `RESULT.json` 的返工会被收成绿的。二是 ㊾ 带出的：`result_consistency.go:159-166` 无条件要求 `completed` 下所有 `acceptance[]` 是 `passed`，而 schema 的枚举含 `not_applicable`，`system.md` 却只把这条规矩说给了 `tests[]`——Worker 照 schema 写就被拒，正文里没人告诉它。修法已定：不放宽 collect、不改 schema，把规矩写进正文。`v1_required=false`：这是流水线加固，不是产品交付。G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`mof-canonical`，其 `requires_tasks` 为 `T1202`，已与 T1215 一起抄进 `dependencies`）。"
+    },
+    "T1218": {
+      "status": "todo",
+      "notes": "新立账（2026-09-24，P13 第三笔）：#228——`knowledge_publications`（`00010:64`）没有 append-only 保护，任何有写权限的东西都能就地改写一条已发布记录的 `rights_json`。`00014` 的行级名单 13 张表里没有它；`00083:118/122` 给相伴的 `knowledge_publication_creations` 装了完整两半，却在 `:66-73` 的注释里把「被指向的那一行是 append-only」当成前提写下——**承诺在注释里，机制不在**。L1 裁定（写进任务书的 Supervisor rulings）：append-only，两半都装，复用 `append_only_guard()`，进 `appendOnlyTables` 普查清单，与 T0013 归类的冲突由我记 `tasks/decisions.md`。迁移号 00157。`allowed_scope` 为迁移目录 + `specs/database/postgres.sql` + `tests/integration/**`。已核出 #228 正文一处过期：它说这张表没有调用者，但 T0805（`fc78310`）之后 `internal/persistence/knowledge_publish_store.go:291` 就在写它——任务书里点名要求以树为准。`v1_required=false`：加固，不改产品语义。G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`mof-canonical`，其 `requires_tasks` 为 `T1202`，已抄进 `dependencies`）。"
     }
   },
   "version": 2
