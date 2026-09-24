@@ -20320,3 +20320,17 @@ T1224 的任务书里逐字写着：
 1. `keyboard-checklist.md` 那句改成什么样由 T1230 定。**「人肉走查文档比仪器弱」是允许的**；不许的是它读起来像仪器。
 2. 评审 `[3]` 的另一半：`make browser-e2e` 与 `tests/acceptance/privacy-suite.sh` 都无活入口——**那是 T1227 名册的产出**，等它落账后我一次性裁定要不要接线（接线要动 CI 配置，是我的面）。
 3. T1226 的 `forbidden_scope` 里那条带括号的例外（`tests/**（上面列出的那几处除外）`）会被范围检查自己的匹配器跳过。**本笔没出事**（约束落在 `allowed_scope` 那个白名单上），但写法照 T1227 更正过的那样办：**例外只用 `allowed_scope` 表达，`forbidden_scope` 不放括号**。
+
+### 七、更正：§六.3 的机制是我编的——不是陈旧，它从未成立
+
+§六.3 里我给那句处方配了个机制（**那句话是错的，本节就是它的更正，grep 到它请以本节为准**）：说 T1226 那条带括号的例外「会被范围检查自己的匹配器跳过」。**没有任何匹配器读过 `forbidden_scope`。** 四处都查了：
+
+1. `ValidateScopeAgainstTree`（`internal/devorchestrator/scope_validate.go:91`）在 Go 里**只有一个调用点**：`worker_spawn.go:196`，传进去的是 `taskSpec.AllowedScope`。它做的是把 allowed_scope 每一条拿去树里匹配（匹配不到 → HardError；`/**` 结尾的降为 DeadEntry 警告）。**一个字节都没碰 `forbidden_scope`。**
+2. `ForbiddenScope` 在非测试 Go 代码里出现两次：结构体字段（`dag.go:24`、`worker_render.go:26`）与渲染（`worker_render.go:475`）——渲染就是 `- %s` 逐条打成 bullet，放进工人提示词的 `## Forbidden scope` 一节。
+3. `git log -S'（' -- internal/devorchestrator/scope_validate.go` **空输出**：那个「跳过带括号条目」的守卫**从来没有存在过**。所以这**不是陈旧**——陈旧记的是曾经为真的事、靠对账能发现；这是**编的**，编的只能靠「谁在强制」这个问题拆掉。
+4. 另两处提及都不是强制：`docs/63_WORKER_CONTRACT.md:13` 把 `forbidden_scope` 列进工人任务包的字段清单（「给它看」），`tests/worker-collect/e2e-live.sh:137` 把它设成空数组——那个 e2e 测的是 git 控制面探针（T9001），不是范围。
+
+**真实规则（比我写的那条更该记）**：`forbidden_scope` 是**给工人读的散文，不是机器强制的边界**；collect 时唯一的约束是 `allowed_scope` 那个白名单（`worker_collect.go` → `ScopeMatchesPathWithDerived`）。两条推论：
+
+- **任何必须成立的边界只能写进 `allowed_scope`。** 写进 `forbidden_scope` 的约束**没有强制者**——同一课的又一次：判断严重性要看谁在强制，不是谁在声称（`guarantee-in-a-comment-is-not-a-mechanism`）。
+- §六.3 的**处方**仍然成立，理由换了、也更硬。但我点名的那个**形状**（括号里写例外）本身无害——它不冒充机器。**T1230 的 `tests/**（allowed_scope 没点名的一律不许写）` 与它同形，本笔不改**：它说的正是机器实际执行的那条规则，只是执行者叫 `allowed_scope`。
