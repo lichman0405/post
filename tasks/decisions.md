@@ -18958,3 +18958,29 @@ T0805 后来合并（`fc78310`），`internal/persistence/knowledge_publish_stor
   两份都不含 `specs/` / `tasks/` 的 hunk
 - `tasks/decisions.md` **不在** `specs/SPEC_VERSION.json` 的 39 个输入里（本文因此随时可写，
   不会移动 marker、不会打扰在跑任务的 G2）
+
+### 八、T1218 任务书里一处我已知的瑕疵，**故意没现在改**（2026-09-24，补记）
+
+CI 抓出 `allowed_scope` 少列了第二个派生物（`internal/persistence/sqlc/**`），
+我在 `b588c61` 补上了。但**验收标准第 5 条**里那句枚举还没跟着改，它仍然写着
+
+> `git status --porcelain -uall` 只列 `infra/migrations/00157_*.sql`、
+> `specs/database/postgres.sql`、`specs/SPEC_VERSION.json`、`tests/integration/append_only_test.go`
+
+——这是**一份穷举清单**，现在少了 `internal/persistence/sqlc/**`。
+若工人重新生成的 sqlc 输出真的动了，这条标准就**无法满足**：
+要么它违反标准，要么它违反我刚给的授权。这正是我今天一整天在修的那一类病
+（判据的真假不该取决于交付物的形状，见 ㊾）。
+
+**为什么现在不改**：T1218 已经在跑（`running`，10:21:32 派工），
+它的补丁**必然携带 marker**（迁移 + `postgres.sql` 都在摘要输入里），
+此刻落地任何 `tasks/tasks.json` 的改动都会让它的 G2 组合树对不上补丁前像。
+所以这一笔只能等它合了再落，或等它真的报出 sqlc 动了、走返工时连同
+订正一起重新渲染（返工是用当前 DAG 重渲染 prompt 的）。
+
+**为什么大概率不会咬到**：触发器不改变 sqlc 建模的东西（表与列），
+`derived-artifacts.json` 自己也写明「a migration that adds new tables leaves this
+output byte-identical」。`knowledge_publications` 确实被检入的查询读
+（`feeds.sql:192`、`knowledge_publish.sql:35/58/143`、`search.sql:270` 等），
+但**加触发器不改列**。所以预期是输出不动、标准满足。
+工人若报了别的结果，它就是发现了我的错误，按「停手点名」写进 RESULT 即可。
