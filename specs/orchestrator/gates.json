@@ -1227,6 +1227,21 @@
       "g3_jobs": [
         "security-master"
       ]
+    },
+    "T1223": {
+      "g3_jobs": [
+        "mof-canonical"
+      ]
+    },
+    "T1224": {
+      "g3_jobs": [
+        "security-master"
+      ]
+    },
+    "T1225": {
+      "g3_jobs": [
+        "security-master"
+      ]
     }
   }
 }

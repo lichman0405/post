@@ -1910,6 +1910,36 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1223-TEST-01",
+      "task_id": "T1223",
+      "name": "the guard's own statements about multi-line content and `sh -c` opacity match what it actually does",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1224-TEST-01",
+      "task_id": "T1224",
+      "name": "the master gate registers the go surface check as a row whose run prints ok, not NOT ASKED",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1225-TEST-01",
+      "task_id": "T1225",
+      "name": "the ignore-line reader recovers the pattern when the ignore file's path contains a colon",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }

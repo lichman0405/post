@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 164,
+  "task_count": 167,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -9536,6 +9536,215 @@
       ],
       "scope_note": "这一笔收的是 T1220 那笔**独立评审抓到的潜伏缺陷**——注意是评审抓到、我自己漏了的：`git check-ignore --stdin -v` 对**被否定模式重新纳入**的路径也打一行，而那一行的路径 git 并未忽略。后果一头是假红，另一头是**静默缩小扫描面**，后者正是 T1220 花整笔力气去治的那个病换了入口。**没有改任何产品语义、安全边界或权限模型**——方向是让已经写在代码里的判据真的符合 git 的语义。它要紧在一点：**判定扫描面的那行代码出错时，错的不是「多扫了」，而是「少扫了且看不见」**，而 T1220 刚立起来的那台仪器对这种错误**完全无感**（6 个案例没有一条碰否定模式）。**把仪器的盲区补上，和把代码修对，是同一笔的两半。**",
       "supervisor_scope_narrowing": "**为什么开 `tests/security/**` 与 `ops/ci/gosec-baseline.txt`：**\n\n  * `tests/security/**` 是这两件仪器（`sast.sh` 的 go 行与其表面判据、`sast-go-surface-check.sh`）唯一的家，两处要改的解析、`usage()`、`:6` 的自述、README 段落都在里面。\n  * `ops/ci/gosec-baseline.txt` 只开**这一个文件**（`ops/**` 的其余部分仍关闭），而且只准动表头措辞：**256 条条目逐字节不变**是本笔的硬判据。别在已基线的发现上方插行——那是另一笔（第 56 条那个教训）。\n  * `internal/**` 关闭：这一笔不碰 `rddev` 自己的代码。\n\n**为什么「把仪器接进一个真的会跑它的执行器」不在这一笔里：** 那件事要把 `tests/security/master-security-gate.sh` 的 `MIN_CHECKS=17` 抬到 18，而 `tests/acceptance/v1-final-audit.sh` 里**逐字钉着** `require_marker \"MIN_CHECKS=17\"` 和 `require_marker \"master-security-gate: PASS — 17 check(s) ran and each printed its own evidence\"` 两条 V1 验收证据——动它等于动 V1 完成声明的证据层，要单独一笔、由我配套改报告与标记。**本笔不碰这两处**；仪器现在仍是「可运行的证据」，不是「每轮都跑的闸」。\n\n**这是 L1，不是 L3**：修的是既有判据的读取方式，不新增权限、不放宽任何限制。**先复核再动手**——上面对机制与数字的陈述如果与树不符，以树为准并写明。"
+    },
+    {
+      "id": "T1223",
+      "phase": "P13",
+      "phase_name": "V1 之后的加固：流水线自己的可信度",
+      "title": "守卫把**写进文件的文本**也当命令位读：`sh -c '...'` 那条「刻意当作不透明」的说明现在只对单行成立，而 heredoc 正文 / 多行引号字符串进了命令位分析这件事两条 Known-limits 都没写；另有 `mktemp` 失败时 Bash 侧策略整片无声放行（信封内写动词 / 提权 / 控制面 CLI / git / 凭据探针，实测全部 rc=0）",
+      "v1_required": false,
+      "dependencies": [
+        "T1202",
+        "T1221"
+      ],
+      "tests": [
+        "the guard's own statements about multi-line content and `sh -c` opacity match what it actually does",
+        "a heredoc body line naming a forbidden verb is refused, and a benign heredoc body is allowed",
+        "the Bash branch fails closed when it cannot create its records file, and that case goes red against the unfixed arm",
+        "exempting heredoc bodies is shown to be an escape, demonstrated by an unquoted delimiter expanding `$(...)` and by a body piped into a shell",
+        "the two guard copies stay byte-identical and every pre-existing regression case is byte-identical"
+      ],
+      "allowed_scope": [
+        "internal/devorchestrator/embed/worker-guard.sh",
+        "internal/devorchestrator/worker_guard_regression_test.go",
+        ".rddev.example/guard/worker-guard.sh",
+        ".rddev.example/README.md",
+        "tests/worker-guard/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "apps/**",
+        "services/**",
+        "infra/**",
+        "ops/**",
+        "scripts/**",
+        "Makefile",
+        "cmd/**",
+        "internal/**（`internal/devorchestrator/embed/worker-guard.sh` 与 `internal/devorchestrator/worker_guard_regression_test.go` 除外）",
+        "tests/**（`tests/worker-guard/**` 除外）",
+        ".rddev.example/**（`guard/worker-guard.sh` 与 `README.md` 除外）"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/24_TEST_STRATEGY.md",
+        "docs/67_TEST_GATES.md",
+        "docs/23_SECURITY_PRIVACY.md"
+      ],
+      "requirements": [
+        "**先自己复现，别照抄我的话。** 两件事：(a) 一个 heredoc，正文里有一行以守卫点名的词开头（`git push origin main`）——按现在的守卫给出**命令 + 退出码 + 关键输出行**。再给一条**良性**正文（正文只写普通文本）确认它放行——两侧都要，否则你不知道自己量的是哪一边。(b) `bash -c` 的多行写法（内层脚本里有一行以点名词开头）同样给两侧。行号我引的是 `internal/devorchestrator/embed/worker-guard.sh:51`、`:621`、`.rddev.example/README.md:59`——**以树为准**，不对就按树写。",
+        "**「让解析器跳过 heredoc 正文」不是本笔的选项，而且理由必须由你自己证明，不许引用我的说法。** 我复现过两条机制（都真的会执行正文），你要各自**再复现一遍**并给出实际输出：(i) **分隔符不加引号**时，正文里的 `$(...)` 会在消费者命令运行**之前**被展开执行——`cat <<EOF` 的正文写成 `$(echo X > /tmp/probe)`，`cat` 还没跑副作用就已经发生；(ii) `cat <<'EOF' | sh` 把正文喂给 shell 执行。这两条说明**任何「跳过正文」的解析器都可能被正文本身绕开**，也就是把一个安全方向的过度拦截换成一条真的出口。\n\n    **而实测量出来的东西更支持这一点**（我在仓库全部转录上跑了一遍，你要能以你自己的方式复核）：把「每条被守卫点名的行都落在 heredoc 正文 / 未闭合引号里」的命令挑出来，共 **178** 条，逐条过两份守卫，**30 条**是新守卫拒、旧守卫放（`178` 里另有 `93` 条两边都放，其余两边都拒）。**这 30 条里绝大多数是「正文确实会被执行」**：8 条是多行 `bash -c '...'`（正文就是要跑的脚本，里面真的有 `git worktree remove --force`、`rm -rf $PROBE`、`git worktree add`——**拒它是对的**）；7 条是 `cat > /tmp/wait-ci*.sh <<'EOF'` 写下脚本、顺手在后续调用里 `bash` 它（守卫看不到下一次调用）；3 条是 `python3 - <<'PY'`（正文就是被执行的代码）；真正「写进文件、永不执行」的只有约 3 条（往 `gate_run_test.go`/`decisions.md` 里 `cat >>` 追加源码或散文，被注释里提到的 git 动词命中）。也就是说：**这一类的多数是「会被执行的文本」，豁免正文正是把这一多数放出去。** 结论写进注释：**不豁免**，并且把这个理由（两条机制 + 这张实测构成）作为 Known limits 的一 bullet。若你实测出与上述相反的结论，写明并把证据给我。",
+        "**守卫头部的两处说明要与机制一致**（这是本笔的主体，除第 4 条外**不改行为**）：(a) `:51-53` 那条「`sh -c '...'` 与同类被刻意当作不透明（内层 shell 会绕开分析），改由 deny 层 + collect 期不变量约束」——T1221 之后这句**只对单行调用成立**：多行 `sh -c` 现在被逐行当命令位读。改掉或按实际加上限定，并说清约束它的是哪一层。(b) `:19-22` 的换行那条要说清**被写进文件的文本同样算命令位**——heredoc 正文、多行引号字符串里的行，与命令行上的行一视同仁，因为守卫判的是**命令文本**，它不运行 shell、也就分不出「这行是要执行的」还是「这行是要写进文件的」。把 (1)(2) 的现象与理由落在这一 bullet 上，别写成两句空话。",
+        "**唯一要求的行为改动：`:621` 的 fail-open 要关掉，而且它比评审说的严重，别按 nit 处理。** `records_file=$(mktemp \"${TMPDIR:-/tmp}/worker-guard.XXXXXX\") || exit 0` 在临时文件建不出来时放行整条调用。评审说这「unreachable in practice」，我按 `TMPDIR=/nonexistent` 实测了**爆炸半径**（你要各自复核这几条）：**被静默关掉**的是 `rm -f /etc/hosts`、`cp a /etc/b`、`sudo ls`、`gh pr list`、`git push origin main`、`printenv GH_TOKEN`——**全部 rc=0**；**仍然生效**的只有不依赖那个临时文件的两半：`echo hi > /etc/x` 的重定向判定（rc=2）与 Write 工具的路径判定（`Write /etc/x` → rc=2）。也就是说丢掉的**不是「一条命令位分析」，而是 Bash 这一侧策略的绝大部分**（信封内的 shell 写动词、提权、控制面 CLI、git、凭据探针），而它只在一个日志级别上留了一句 `mktemp: failed to create file via template` 就继续放行。改成拒（`|| block \"...\"`），把你实测的这张对照表写进注释。另：这个 `TMPDIR` 是**钩子自己的环境**，工人无法用命令前缀改它（那是子 shell，改不到父进程），所以这是**健壮性**问题而不是现成的绕过——但代价是「环境一坏，最强的那几条规则无声失效」，这正是本文件自己的教条要拒的形状。**要不要顺带把 `records` 的传递方式换成不依赖临时文件**由你判断，但若你换，必须证明新方式既不会漏掉记录（漏 = 少拦，方向更坏）、也不会在正文里出现分隔符时截断。",
+        "**新用例要能红，而且两侧都要。** `tests/worker-guard/guard-regression.sh` 加：(a) heredoc 正文里以点名词开头的行 → **拒**；(b) heredoc 正文是普通文本 → **放行**（保证 (a) 不是「heredoc 一律拒」）;(c) `TMPDIR` 指向不存在的目录 + 一条命令位违规的 Bash 调用 → **拒**（改前是 rc=0 放行，所以这条**天然能红**，把撤销修法后的实际输出贴出来）——**不需要为此另写运行器**：`guard-regression.sh` 的 `check`（定义在 `tests/worker-guard/guard-regression.sh:43`）本来就收「这个用例专用的环境覆盖」尾参，`env_args+=( \"$key=$val\" )`（`:64`）对任意键都生效，所以 `check <名字> block <理由> Bash command 'rm -f /etc/hosts' TMPDIR=/nonexistent-dir` 就能表达这条用例;(d) 多行 `bash -c` 的一对（内层点名 → 拒 / 内层普通 → 放行）。每条都要有「撤销修法它就红」的证据，或者写明为什么某条做不到——**不做而要装作做了，比不做更坏**。",
+        "**floor 要跟着抬。** `internal/devorchestrator/worker_guard_regression_test.go` 的 `const floor = 365` 现在是「低于它就判有人删了用例」（`if total < floor`），所以加用例本身不会红——**但那正是它自己立下的规矩被绕过的方式**：floor 低于落账条数，下一笔就能把你的用例删掉而不触发任何东西。按该文件已有的写法把 floor 抬到**你落账的实际条数**，并补上「为什么是这个数」的说明（照它现有段落的风格：逐族点数，别只写个数字）。floor 的**语义**不许改（不许变成 `!=`、不许变成 range 检查）。",
+        "**`.rddev.example/README.md:59` 的总结比机制宽，改成机制真正的样子。** 现在写的是 `Only an unknown tool name is allowed through (no path or command policy applies to a tool that names neither).` 实测（评审量的，你复核）：`{\"tool_name\":\"Read\",\"tool_input\":{}}`、`{\"tool_name\":\"Write\",\"tool_input\":{\"content\":\"x\"}}`、`{\"tool_name\":null,…}` **都 exit 0**——**已知工具但一个路径/命令都没点名的调用是放行的**；「没有东西可查就拒」只落在 Bash 那一支（`tool_input.command` 缺席/null/空 → 拒）。README 那句要么说全，要么把 Bash 那一支的例外说出来。守卫头部本来就把这件事说得比 README 准，别把头部改差去迁就 README。",
+        "**两份守卫必须逐字节同步，且不许弱化。** `internal/devorchestrator/worker_guard_test.go:28` 强制 `.rddev.example/guard/worker-guard.sh` 与 `internal/devorchestrator/embed/worker-guard.sh` 相同——**两份一起改**，给出两份的 sha256 相等。既有回归用例**逐字保留**（`LC_ALL=C comm -23` 为空的命令与输出）；`sh -c` 那条既有用例原样留着（它测的是单行，仍然成立——**不许**为了让文案好看去改它）；不许放宽断言、不许 skip、不许加白名单、不许把某条用例删了再补一条等价的。",
+        "**复核我的每一条事实断言，以树为准。** 尤其：`:51`/`:621`/README `:59` 三个行号；`mktemp` 是否真的只出现一次；`TMPDIR` 是否真的只被那一处用到（`grep -n TMPDIR`）；Bash 那支「没有命令就拒」是否真的只覆盖 Bash。我写错的地方按树改，并在 note 里点出来——**别默默照抄**。"
+      ],
+      "deliverables": [
+        "`internal/devorchestrator/embed/worker-guard.sh` + 逐字节同步的 `.rddev.example/guard/worker-guard.sh`：头部 `:19-22` 与 `:49-53` 两条说明按机制改写（写进文件的文本也算命令位；`sh -c` 的不透明只对单行成立）；Known limits 增一条「为什么不豁免 heredoc 正文」，附两条可执行的反例机制；`:621` 的 `|| exit 0` 改成拒。**除 `:621` 外不改行为。**",
+        "`.rddev.example/README.md`：`:59` 那句总结与机制对齐（已知工具但不点名路径/命令的调用是放行的；「没有可查的东西就拒」是 Bash 那一支的规则）。",
+        "`tests/worker-guard/guard-regression.sh`：四组新用例（heredoc 正文点名/良性、`bash -c` 多行点名/良性、`TMPDIR` 建不出临时文件），每条都带自检或能红的证据。",
+        "`internal/devorchestrator/worker_guard_regression_test.go`：`floor` 抬到落账的实际条数，并按该文件既有风格补「为什么是这个数」的段落；floor 的语义不变。",
+        "`RESULT.json` 的 note 里：两条反例机制的实际输出、`TMPDIR` 那条的**撤销前后对照**、两份守卫的 sha256、既有用例 `comm -23` 为空的证据、以及你对我行号/断言断错的任何一处。"
+      ],
+      "acceptance_criteria": [
+        "**言行一致表**：把守卫头部每条与多行/`sh -c` 相关的说明与**实测行为**并排列出（说明 → 命中的实测命令 → 退出码）。文案说「拒」的必须真的拒，说「放行」的必须真的放行，说「只对单行成立」的要给出单行与多行两个方向。",
+        "**不豁免的理由是被证明的，不是被声明的**：未加引号分隔符的 heredoc 正文里 `$(...)` 真的在消费者运行前执行、`cat <<'EOF' | sh` 真的执行正文——两条各自的命令与输出，以及由此写进注释的结论。",
+        "**`:621` 那条能红，且爆炸半径有一张实测对照表**：MUTATION CHECK——把 `|| block` 改回 `|| exit 0`，新用例必须变红（给出实际输出），然后还原。**改前红不了的用例就是构出来的。**对照表要含**失效侧**（`rm -f /etc/hosts`、`cp a /etc/b`、`sudo ls`、`gh pr list`、`git push`、`printenv GH_TOKEN` 在 `TMPDIR` 不可用时各自改成 rc=2）与**仍生效侧**（`echo hi > /etc/x`、`Write /etc/x` 两条不依赖临时文件的判定，改前改后都是 rc=2）——两侧都要，否则你不知道自己量的是哪一半。",
+        "**两份守卫逐字节相同**：两条 sha256 相等；`go test ./internal/devorchestrator/ -run GuardRegression -v` 的实际输出（含新条数与 PASS 数）。",
+        "**没弱化**：既有用例逐字保留（`LC_ALL=C comm -23` 为空的命令与输出）+ `sh -c` 既有用例原样 + floor 语义未变（`if total < floor`）+ 无 skip / 无白名单 / 无放宽断言。",
+        "**floor = 实际条数**：`guard-regression.sh` 末行的实际条数、`const floor` 的值、以及二者相等的证据；并给出「把新用例删掉一条就红」的实测（`total < floor` 真的会触发）。",
+        "**README 那句**：改后的句子 + 支撑它的三条实测（`Read` 无路径、`Write` 只带 content、`tool_name` 为 null 各自的退出码），以及与 Bash 那支「没有命令就拒」的对照。"
+      ],
+      "scope_note": "这一笔**几乎全是文档与机制对齐**：T1221 把守卫的命令位分析修对了，但它自己那句「`sh -c` 被刻意当作不透明」在修完之后**只对单行成立**，而「写进文件的文本也会被当命令位读」这件事两条 Known-limits 都没写。**量级我要说清口径**：评审在**它自己的语料**（42,812 条 Bash 调用，4,211 条多行）上量出 22 条改判定、其中 6 条纯内容导致；我这边的语料更大且不是同一批（116,293 条 Bash 调用、23,271 条多行），所以那组绝对数**不能直接搬**，能搬的是方向与类别。方向是安全的（过度拦截，工人可以改用 Write 工具），但**没有写下来的边界**下一笔就会有人去「修」——而最自然的那个修法（让解析器跳过 heredoc 正文）会打开一条真的出口，这一笔把那个理由连同两条可执行的反例一起钉进注释，正是为了挡住那种修法。\n\n**`:621` 那一处不是 nit，是这一笔唯一的行为改动，而且比评审说的严重。** 我实测：把 `TMPDIR` 指到不存在的目录后，`rm -f /etc/hosts`、`cp a /etc/b`、`sudo ls`、`gh pr list`、`git push`、`printenv GH_TOKEN` **全部 rc=0 放行**；只有不依赖那个临时文件的两半还生效（重定向判定、Write 工具的路径判定）。评审把它记为「unreachable in practice」的 nit，是**按可达性**评的；按**失效范围**评，它关掉的是 Bash 这一侧策略的绝大部分，而且是无声的。\n\n**我没有在改任何产品语义、安全边界、权限模型或科研语义**：守卫判的东西一条没变，被放宽的限制一条没有，`specs/orchestrator/worker-permissions.yaml` 没被碰。这是 L1：把已经写下的意图与被实测的行为对齐，并把为什么不进一步放宽写清楚。",
+      "supervisor_scope_narrowing": "**为什么开这几个位置（与 T1221 同一组，但收窄到本笔真正要碰的东西）：**\n\n  * `internal/devorchestrator/embed/worker-guard.sh` 与 `.rddev.example/guard/worker-guard.sh` 是同一份守卫的两份副本，`internal/devorchestrator/worker_guard_test.go:28` 强制它们逐字节相同，所以只能一起开、一起改。\n  * `.rddev.example/README.md` 是那句过宽的总结所在。\n  * `tests/worker-guard/**` 是守卫的回归套件（`guard-regression.sh`），本笔的四组新用例住在这里。\n  * `internal/devorchestrator/worker_guard_regression_test.go` 只开**这一个文件**（`internal/**` 的其余部分仍关闭），而且只准动 `const floor` 的数值与它上面那段说明——这个文件里另外两个测试（`TestWriteGuardFiles`、`TestTheGuardClaimInTheSystemPromptIsTrue`）**不许碰**：它们各自钉着matcher 与那句契约，本笔不动那两处。\n\n**为什么不开别的：** 本笔不动 `tests/security/**`（那是 T1222 的面）、不动 `cmd/**`、`scripts/**`、`Makefile`、`ops/**`、`specs/**`、`docs/**`、`tasks/**`。守卫改完之后**重新 embed 与重启驱动是 Supervisor 的事**（`make rddev` + 重启驱动），不在你的面里——你只管改源文件与用例；`go:embed` 会在构建时把新内容吃进去。"
+    },
+    {
+      "id": "T1224",
+      "phase": "P13",
+      "phase_name": "V1 之后的加固：流水线自己的可信度",
+      "title": "T1222 补的两条否定模式案例住在没人跑的仪器里：把表面判据接进总门成为第 18 行、`MIN_CHECKS` 17→18（`ci.yml:440` 早已在跑总门，所以加一行注册就等于每轮都跑）",
+      "v1_required": false,
+      "dependencies": [
+        "T1222"
+      ],
+      "tests": [
+        "the master gate registers the go surface check as a row whose run prints ok, not NOT ASKED",
+        "adding the row leaves the go row's own evidence line byte-identical",
+        "the new row can fail: a broken surface check reds the master gate"
+      ],
+      "allowed_scope": [
+        "tests/security/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "apps/**",
+        "services/**",
+        "infra/**",
+        "ops/**",
+        "scripts/**",
+        "Makefile",
+        "cmd/**",
+        "internal/**",
+        ".rddev.example/**",
+        "tests/**（`tests/security/**` 除外）"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/23_SECURITY_PRIVACY.md",
+        "docs/67_TEST_GATES.md"
+      ],
+      "requirements": [
+        "**先复核下面五条，以树为准**——对得上就照做，对不上就写明并以树为准（这几条是我读树读出来的，我读过树也会错）：\n  * (a) **CI 已经在跑总门**：`.github/workflows/ci.yml:440` 那一步是 `run: bash tests/security/master-security-gate.sh`，它前面 `:437-438` 是 `make security-tools`（把扫描器装齐）。所以**加一行注册就等于每轮 CI 都跑它**——不需要动 `ci.yml`，也**不需要**动 `specs/orchestrator/gates.json`（那份文件镜像的是 CI 的 **step 列表**，不是注册表的行数）。\n  * (b) **总门顺序执行**各行的命令（`for id in \"${SELECTED[@]}\"`），没有并行——所以「上一行的植入物污染下一行」只能是**没清干净**，不可能因为并发。\n  * (c) **`MIN_CHECKS` 是下限不是等式**：`:452` 用的是 `-lt`，而 `--selftest` 靠 `--extra-checks`（`:439-449`）往注册表里加诱饵行。所以「注册表行数 == 下限」**不能**写成相等断言，本笔也不许把它改成相等。\n  * (d) **没有任何会跑的东西钉住 17 这个数**：`tests/security/check-absent-manifest.py:159` 只是**打印** `len(check_ids)`，不校验；`tests/acceptance/v1-final-audit.sh:261-262` 的两条 `require_marker` 读的是**报告文件**（`:173-179` 是 `grep -qF \"$marker\" \"$REPORT\"`），**不读活的脚本**；报告与 `docs/adr/ADR-028` 是冻结的历史文件。\n  * (e) **那台仪器自己需要什么**：它用一句 `for tool in go gosec git python3` 检查四个工具；它把 `bash tests/security/sast.sh go` **跑十次**（T1222 之前是六次）；它在 `tests/security/node_modules/` 下植入一个包目录与一个点目录副本、在 `tests/security/` 下再植三处，退出时**全部**删掉，并且**有一个案例断言自己没留下东西**。**这些行号在 T1222 之后会整体下移**（它的改动从该文件第 60 行起），所以上面按**内容**引，你按内容找。",
+        "**注册第 18 行**：`add_check` **紧跟**在 `sast-go` 那一行之后（它是那一行的表面判据，放在一起读才成句）。`requires` 要覆盖它真正需要的工具（见 (e)；`sast-go` 那一行的 `requires` 写法可以照抄）。`command` 跑那台仪器。`evidence` 用**它自己的成功行**——它自己的 `ok()` 打的是 `ok   <文本>`，末行是 `sast-go-surface-check: OK — <N> cases: …`（**N 与那句的措辞在 T1222 之后变了，照抄这棵树上的实际值**，别去报告、别处或本任务书里抄；行号同样按内容找）。",
+        "**`MIN_CHECKS` 17→18，并在那一行上方写清理由**：下限的功用在「删掉一行会看得见」；新行落在下限之外，等于它可以被静默删除——那正是下限存在的理由被绕开。**不许**放宽 `-lt`、不许改成相等、不许走 `--extra-checks` 旁路、不许给新行加任何跳过条件。",
+        "**这一行必须真的跑起来，不是 NOT ASKED**：`add_check` 的说明里写着 `requires` 里有一个 token 不满足，这一行就**不执行**、标成 NOT ASKED。所以判据里要能看见这一行打印的是 `ok` 而不是 `NOT ASKED`，并把那一行原文贴出来——一个 NOT ASKED 的行等于没接。\n  **别把别人家的 NOT ASKED 当成本笔的失败**：有几行要真服务（例如 `owasp-smoke` 要 redis），本机没起服务时它们本来就会 NOT ASKED，那是既有的、与本笔无关的状态；`ci.yml` 的 job 会把它们凑齐。你只要**列出**本次哪些行是 NOT ASKED、并证明**新行不在其中**。",
+        "**代价要量出来而不是假定**：那台仪器把 go 行**跑十次**，报出**这一行的墙钟**与**加行前后总门的墙钟**。若你量出来这一行让总门明显变慢且你认为不可接受，**不要自己删它**——把数字写进 RESULT 交给我决定。",
+        "**不许碰 V1 证书**：`tests/acceptance/**` 一个字节不动；报告与审计里 `MIN_CHECKS=17`、`17 check(s) registered` 两个字面也不许改。它们会因此变成**对一个更早的树的陈述**——那是**陈旧**，不是**红**（审计只 grep 报告，见 (d)；而且它本来就在 HEAD 前进后非零退出）。把这条后果写进 RESULT 就够。"
+      ],
+      "deliverables": [
+        "`tests/security/master-security-gate.sh`：新注册行（紧跟 `sast-go`）+ `MIN_CHECKS=18` + 那一行上方的理由。这是本笔**唯一**的产物文件。",
+        "RESULT：加行**前后各一次**总门实跑的原文——退出码、末行逐字、`N check(s) registered` 的实际数、`sast-go` 自己那行的证据行、以及新行那一行（含它是 `ok` 还是 `NOT ASKED`）。",
+        "RESULT：新行**单跑**的原文（命令、退出码、它自己声明的每条 `evidence` 正则命中的原文），以及**这一行能红**的构造样本：让那台仪器失败一次，贴出总门因此变红的原文，然后**还原**并证明复绿。",
+        "RESULT：墙钟（这一行、加行前后的总门）、`git status --porcelain -uall`、`git diff --stat HEAD -- tests/acceptance/ specs/ tasks/ .github/ ops/` 的空输出，以及 (a)-(e) 五条的复核结论（各引一行原文）。"
+      ],
+      "acceptance_criteria": [
+        "加行前后各跑一次总门都退出 0，两次末行原文都在，注册表计数从 17 变成 18；**新行打印的是 `ok` 而不是 `NOT ASKED`**，那一行原文在。",
+        "`sast-go` 自己那行的证据行在**加行前后逐字相同**（证明新行的植入物没有污染它）；若不同，给出为什么，并说明你把它当红还是别的。",
+        "`bash tests/security/master-security-gate.sh --selftest` 仍然退出 0。",
+        "新行**能红**：构造一处失败让总门因此变红（贴原文），还原后复绿（贴原文）。**不许**靠放宽、跳过、改宽断言来过任何一处。",
+        "没有越界：`git status --porcelain -uall` 只列 `tests/security/**`；`tests/acceptance/**`、`specs/**`、`tasks/**`、`.github/**`、`ops/**` 一个字节未动。",
+        "(a)-(e) 五条各有复核结论与引用；与树不符的以树为准并写明。"
+      ],
+      "scope_note": "把 T1220 立起来的表面判据接进总门注册表，使它从「可运行的证据」变成「每轮都跑的闸」。T1222 刚给这台仪器补的两条否定模式案例，今天跑在任何地方都不跑；接上之后它们才真正成为回归保护。",
+      "supervisor_scope_narrowing": "**为什么只开 `tests/security/**`：** 这一笔要碰的三样东西都住在那里——总门脚本本身（注册行与 `MIN_CHECKS`）、那台仪器、以及仪器自己的成功行。\n\n**为什么不开 `.github/workflows/ci.yml`：** 不需要。CI 已经在 `:440` 跑 `bash tests/security/master-security-gate.sh`，前面 `:437-438` 已经 `make security-tools` 把工具装齐。**加一行注册就等于每轮 CI 都跑它**——这正是这一笔能是单目录任务的原因。\n\n**为什么不开 `specs/orchestrator/gates.json`：** 那份文件镜像的是 CI 的 **step 列表**（`TestGatesSpecSyncsWithCIWorkflow` 在守着），**不是**总门注册表的行数。注册一行不改 CI 的 step。\n\n**为什么不开 `ops/security/absent-checks.json`：** 那份清单的校验是**单向的**（`check-absent-manifest.py:190-201` 只要求清单里每个 `covered` 项点到的 `check_ids` 在注册表里存在，**不**要求注册表里每一行都被清单认领），所以新加的行不必进清单。\n\n**为什么不开 `tests/acceptance/**`：** 那是 V1 证书。报告与审计里 `MIN_CHECKS=17` 与 `17 check(s) registered` 会因为本笔变成**对一个更早的树的陈述**——**陈旧，不是红**：审计只 grep 报告（`v1-final-audit.sh:173-179`），不读活的脚本，而且它本来就在 HEAD 前进后非零退出。这条后果写进 RESULT 即可，**不要**去修它。\n\n**这是 L1，不是 L3**：加一个既有仪器的执行入口、抬一次下限，不新增权限、不放宽任何限制。**先复核再动手**——上面五条如果与树不符，以树为准并写明。"
+    },
+    {
+      "id": "T1225",
+      "phase": "P13",
+      "phase_name": "V1 之后的加固：流水线自己的可信度",
+      "title": "表面判据自己的解析器会把 `!` 行读成命中：`.gitignore` 的**源路径**里只要有一个冒号，`pat=\"${hdr#*:}\"; pat=\"${pat#*:}\"` 就剥错字段（源里带冒号 → `!` 前缀落在错的字段上 → 目录循环里静默缩小扫描面、文件循环里把健康树判红）",
+      "v1_required": false,
+      "dependencies": [
+        "T1222",
+        "T1224"
+      ],
+      "tests": [
+        "the ignore-line reader recovers the pattern when the ignore file's path contains a colon",
+        "a re-included package directory under a colon-named source stays in the derived scan surface",
+        "the new case fails against the unfixed reader"
+      ],
+      "allowed_scope": [
+        "tests/security/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "apps/**",
+        "services/**",
+        "infra/**",
+        "ops/**",
+        "scripts/**",
+        "Makefile",
+        "cmd/**",
+        "internal/**",
+        ".rddev.example/**",
+        "tests/**（`tests/security/**` 除外）"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/23_SECURITY_PRIVACY.md",
+        "docs/67_TEST_GATES.md"
+      ],
+      "requirements": [
+        "**先自己量一遍，别信我这段散文**。事实（我在 2026-09-24 亲自构造并量过，你按内容找代码，**行号在 T1222 之后已经变了**）：\n  * 读 `!` 行的那个函数（`tests/security/sast.sh`，注释块以「WHAT A `git check-ignore -v` LINE SAYS」开头）用两步剥离取 pattern：先 `pat=\"${hdr#*:}\"` 去掉**最短**前缀到第一个冒号（它管这叫「源」），再 `pat=\"${pat#*:}\"` 去掉第二个（「行号」）。\n  * 我构造的：`.gitignore` 内容 `*.go` + `!keep.go`，但放在名字含冒号的目录 `dir:with:colon/` 里，`keep.go` 与它同目录。`git check-ignore --stdin -v` 打出 **rc=0** 与一行\n    `dir:with:colon/.gitignore:2:!keep.go<TAB>dir:with:colon/keep.go`\n    而现行解析出来的是 `colon/.gitignore:2:!keep.go`——**不以 `!` 开头**，于是被读成**命中**。\n  * **两个方向的后果都要自己确认**：文件那一路命中会把这个路径算成「本地状态」→ 健康树**判红**；    目录那一路命中会让该目录进 `DROPPED` 而不是 `SURFACE` → **扫描面静默缩小**（T1220 修的就是这个类）。**后者是这一笔真正的理由**，判据里要能看见它。\n  * 今天这个仓库里**没有**含冒号的目录，所以是**潜伏**的；而 T1224 刚把这台仪器接成每轮 CI 都跑的一行，潜伏也就成了常设。",
+        "**修**：别再数冒号，去**认行号字段**——它是纯数字，取它之后的一切做 pattern。这样源里有冒号、pattern 里有冒号两种情形都对（正则用贪婪 `.*`：`^(.*):([0-9]+):(.*)$`，第一组会吃到「还能留下 `:<数字>:` 的最长前缀」）。**不许**改成「取最后一个冒号右边」（pattern 里带冒号就废）、**不许**改成「只剥一次」。认不出来的行仍然返回非零（与今天 TAB 那条检查同一个 fail-closed 方向）。`!` 的判定**必须原样保留**——本笔只修「字段怎么取」，不碰「取到之后怎么读」。",
+        "**加案例证明它**（T1222 之后那台仪器是十个案例，你**以树上的实际数为准**；至少加一个，若你认为需要两个——例如「源里带冒号」与「pattern 里带冒号」各一个——那就加两个，并在 RESULT 里写明为什么）：种一个**名字含冒号**的目录（连同它的 `.gitignore`：`*.go` + `!keep.go`，旁边一个被重新纳入的 `keep.go`），断言三件事：`git check-ignore -v` 对这个文件确实打出 `!` 行**且那行的源路径含冒号**；总门那一行**没有**把这个文件当作逃逸点报出来；**这个包目录在派生出来的扫描面里**（没被 DROPPED 掉）。第三条是关键的那条，别省。\n  **如果 Go 不接受含冒号的目录名作为包**（我未验证这一点，你实测为准）：那就退到**直接驱动那个读行函数**（喂给它一条合成的 `check-ignore -v` 行），并在 RESULT 里写明**你走的是哪条路、为什么**。不许因为难造就悄悄把案例写成只覆盖「源里没有冒号」——那正好是本笔要防的。",
+        "**证明这个案例能红**：把修**还原**（或临时改回旧的两次剥离），让新案例**失败**并贴出原文，再还原修、复绿。一个不能红的案例不算证据。**不许**为了让它绿而放宽任何断言。",
+        "**总门那一行的证据正则要跟着改**：T1224 给 `tests/security/master-security-gate.sh` 注册的那一行，`evidence` 会钉住这台仪器总结行的**案例数**（它是**英文数词**，形如 `… OK — ten cases: …`）。你加了案例，那个词就变成你实际的新数词（加一个即 `eleven`）——**不改就是每轮 CI 都红**。改法：只把那个数词更新，**仍然钉住它**（别换成不计数目的宽松正则：那样「案例少了一个」就再也看不见了）。改完**实跑一次总门**并贴出那一行的 `ok` 原文。",
+        "**别碰 V1 证书**：`tests/acceptance/**` 一个字节不动。"
+      ],
+      "deliverables": [
+        "`tests/security/sast.sh`：读行函数的字段恢复改成认行号字段（或你实测更好的等价写法，但上面两条「不许」要守）。",
+        "`tests/security/sast-go-surface-check.sh`：含冒号源路径的案例（含它的植入与清理）。",
+        "`tests/security/master-security-gate.sh`：那一行 `evidence` 里的案例数词更新。",
+        "RESULT：\n  - 我自己那条测量的**复现**：命令、`git check-ignore --stdin -v` 的原始输出、    修前解析出的 `pat`（应当不以 `!` 开头）、修后解析出的 `pat`（应当以 `!` 开头）。\n  - 新案例**能红**的原文（还原修 → 红 → 复绿）。\n  - 总门**加案例后**实跑一次：退出码、末行逐字、那一行的 `ok` 原文、注册表计数。\n  - `git status --porcelain -uall`（只应列 `tests/security/**`）与 `git diff --stat HEAD -- tests/acceptance/ specs/ tasks/ .github/ ops/` 的空输出。"
+      ],
+      "acceptance_criteria": [
+        "修前/修后两条 `pat` 的原文都在，方向相反（修前不以 `!` 开头 → 被读成命中；修后以 `!` 开头）；我上面那段散文若与你的实测不符，**以你的实测为准并写明**。",
+        "目录那一路的后果被**直接证明**：含冒号源路径下，被重新纳入的包目录出现在 `SURFACE`（或等价的「在派生扫描面里」）而**不**在 `DROPPED`。",
+        "新案例**能红**：还原修之后它失败（贴原文），还原修之后复绿（贴原文）。",
+        "`bash tests/security/master-security-gate.sh` 退出 0，新行打印 `ok` 而非 `NOT ASKED`，`evidence` 里的案例数词与仪器总结行的实际数词**一致**；`--selftest` 仍退出 0。",
+        "`bash tests/security/sast-go-surface-check.sh` 退出 0，案例数为**十加上你新增的个数**（我预期加一个、即十一；你加了几个就报几个，**以树上的实际数为准**），且 `evidence` 里那个数词与之**字面一致**。",
+        "没有越界：`git status --porcelain -uall` 只列 `tests/security/**`；`tests/acceptance/**`、`specs/**`、`tasks/**`、`.github/**`、`ops/**` 一个字节未动。"
+      ],
+      "scope_note": "T1222 教会读行函数分辨 `!` 行；本笔修的是同一个函数**取字段**的方式——源路径里一个冒号就能让 `!` 判定落在错的字段上，于是目录循环里静默缩小扫描面。T1224 把仪器接成每轮都跑的闸，所以这个潜伏案例现在值一笔。",
+      "supervisor_scope_narrowing": "**为什么只开 `tests/security/**`：** 要碰的三样东西都在那里——读行函数（`sast.sh`）、那台仪器（`sast-go-surface-check.sh`）、以及总门那一行的 `evidence`（`master-security-gate.sh`）。\n\n**为什么依赖 T1224：** 本笔要改的 `evidence` 那一行是 T1224 注册的；T1224 不合并，那个数词还不在树上。依赖同时保证两者**不会并行**（同一目录），所以不会有冲突面。\n\n**为什么不开 `ops/ci/gosec-baseline.txt`：** 本笔只改「怎么读 git 的一行」，不新增也不消除任何发现，基线不动。\n\n**为什么不开 `tests/acceptance/**`：** V1 证书是冻结的历史文件，本笔不动它。\n\n**这是 L1，不是 L3**：修一个解析器对字段分隔符的假设，并给既有仪器加一个能红的案例——不新增权限、不放宽任何限制、不改变扫描**范围**的定义（恰恰相反，是把范围被静默缩小的那条路堵上）。**先按判据复现再动手**——我给的测量若与树不符，以树为准并写明。"
     }
   ]
 }

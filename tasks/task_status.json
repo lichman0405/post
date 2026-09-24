@@ -12512,8 +12512,59 @@
       ]
     },
     "T1222": {
+      "status": "merged",
+      "started_at": "2026-09-24T08:35:26Z",
+      "notes": "新立账（2026-09-24，P13 第七笔）：起点是 **T1220 那笔独立评审的 minor 发现 [2]**——注意是**评审抓到的、我自己漏了的**。我读了同一份代码、跑了同一套仪器，没看出来。\n\n**洞**：`tests/security/sast.sh` 有两处解析 `git check-ignore --stdin -v` 的输出（文件检查 `:162`、包目录丢弃循环 `:271`），两处都**把命令打出的每一行当成命中**。而 git 对**被否定模式重新纳入**的路径也会打一行（模式字段以 `!` 开头、退出码仍是 0），那条路径 git 并未忽略。我的最小复现：`.gitignore` 写 `*.go` 再写 `!keep.go`，`git check-ignore -q -- inner/keep.go` 说它**没被忽略**，可 `-v` 仍打出 `inner/.gitignore:2:!keep.go\\tinner/keep.go`。**两个方向都会错**：文件侧假红（把没被忽略的文件报成逃逸）、目录侧**静默缩小扫描面**（把被重新纳入的包目录丢掉）——后者正是 T1220 花整笔力气治的病换了入口。\n\n**要紧在哪**：判定扫描面的代码出错时，错的不是「多扫了」，是「**少扫了且看不见**」；而 T1220 刚立起来的那台仪器（`sast-go-surface-check.sh`，6 个案例）**对这种读法错误完全无感**——没有一条碰否定模式。所以「修代码」与「补仪器的盲区」是同一笔的两半，判据核心是**新案例能红**。\n\n**为什么「把仪器接进执行器」不在这一笔**：那要把 `tests/security/master-security-gate.sh` 的 `MIN_CHECKS=17` 抬到 18，而 `tests/acceptance/v1-final-audit.sh` 里**逐字钉着** `require_marker \"MIN_CHECKS=17\"` 与 `require_marker \"master-security-gate: PASS — 17 check(s) ran and each printed its own evidence\"`——动它等于动 **V1 完成声明的证据层**，要单独一笔、由我配套改报告与标记。\n\n**同笔还收三处同类「话与机制不符」**：`sast.sh:6` 的自述仍是 `# gosec over the whole Go module`（T1220 标题里那句假话在仓库里的**最后一处**）；`usage()` 的 `sed /^$/q` 撞上第 2 行的裸 `#` 使 `--help` **什么都不打印**（先于本任务存在的缺陷，正是它让上面那句藏起来）；基线表头里「没有按目录排除」与「丢弃被 gitignore 的包目录」并排读着矛盾。另加一条**必须给出结论**的判断：17 个被跟踪的 `testdata` Go 夹具在 `go list` 的包模式之外（旧的走查会读到它们，基线里与它们相关的发现是 0 条）——要么显式加回扫描面，要么写清为什么不在面内，**不许悬着**。\n\n**裁定**：§5.1 属 bug fix（让既有判据真的符合 git 的语义），L1，我自己决定并记在这里。允许面 `tests/security/**` + `ops/ci/gosec-baseline.txt` 单文件；`ops/**` 其余部分仍关闭，基线**只准动表头措辞、256 条条目逐字节不变**（第 56 条那个教训：在已基线发现上方插行会让那一行变红）。",
+      "worker_run_id": "run-cf2298d39608b284",
+      "accepted_by_supervisor_at": "2026-09-24T09:18:59Z",
+      "merged_at": "2026-09-24T09:32:28Z",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-24T08:35:22Z",
+          "run_id": "run-f11d37f392398779"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-24T08:35:26Z",
+          "run_id": "run-cf2298d39608b284",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-24T08:53:30Z",
+          "run_id": "run-2d6142bd4acbae19",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-24T09:18:59Z",
+          "run_id": "run-9689cd9d9ec3f856"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-24T09:32:28Z",
+          "run_id": "run-5834c200efe9cc99",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
+    },
+    "T1223": {
       "status": "todo",
-      "notes": "新立账（2026-09-24，P13 第七笔）：起点是 **T1220 那笔独立评审的 minor 发现 [2]**——注意是**评审抓到的、我自己漏了的**。我读了同一份代码、跑了同一套仪器，没看出来。\n\n**洞**：`tests/security/sast.sh` 有两处解析 `git check-ignore --stdin -v` 的输出（文件检查 `:162`、包目录丢弃循环 `:271`），两处都**把命令打出的每一行当成命中**。而 git 对**被否定模式重新纳入**的路径也会打一行（模式字段以 `!` 开头、退出码仍是 0），那条路径 git 并未忽略。我的最小复现：`.gitignore` 写 `*.go` 再写 `!keep.go`，`git check-ignore -q -- inner/keep.go` 说它**没被忽略**，可 `-v` 仍打出 `inner/.gitignore:2:!keep.go\\tinner/keep.go`。**两个方向都会错**：文件侧假红（把没被忽略的文件报成逃逸）、目录侧**静默缩小扫描面**（把被重新纳入的包目录丢掉）——后者正是 T1220 花整笔力气治的病换了入口。\n\n**要紧在哪**：判定扫描面的代码出错时，错的不是「多扫了」，是「**少扫了且看不见**」；而 T1220 刚立起来的那台仪器（`sast-go-surface-check.sh`，6 个案例）**对这种读法错误完全无感**——没有一条碰否定模式。所以「修代码」与「补仪器的盲区」是同一笔的两半，判据核心是**新案例能红**。\n\n**为什么「把仪器接进执行器」不在这一笔**：那要把 `tests/security/master-security-gate.sh` 的 `MIN_CHECKS=17` 抬到 18，而 `tests/acceptance/v1-final-audit.sh` 里**逐字钉着** `require_marker \"MIN_CHECKS=17\"` 与 `require_marker \"master-security-gate: PASS — 17 check(s) ran and each printed its own evidence\"`——动它等于动 **V1 完成声明的证据层**，要单独一笔、由我配套改报告与标记。\n\n**同笔还收三处同类「话与机制不符」**：`sast.sh:6` 的自述仍是 `# gosec over the whole Go module`（T1220 标题里那句假话在仓库里的**最后一处**）；`usage()` 的 `sed /^$/q` 撞上第 2 行的裸 `#` 使 `--help` **什么都不打印**（先于本任务存在的缺陷，正是它让上面那句藏起来）；基线表头里「没有按目录排除」与「丢弃被 gitignore 的包目录」并排读着矛盾。另加一条**必须给出结论**的判断：17 个被跟踪的 `testdata` Go 夹具在 `go list` 的包模式之外（旧的走查会读到它们，基线里与它们相关的发现是 0 条）——要么显式加回扫描面，要么写清为什么不在面内，**不许悬着**。\n\n**裁定**：§5.1 属 bug fix（让既有判据真的符合 git 的语义），L1，我自己决定并记在这里。允许面 `tests/security/**` + `ops/ci/gosec-baseline.txt` 单文件；`ops/**` 其余部分仍关闭，基线**只准动表头措辞、256 条条目逐字节不变**（第 56 条那个教训：在已基线发现上方插行会让那一行变红）。"
+      "notes": "新立账（2026-09-24，P13 第八笔）：起点是 **T1221 那笔独立评审的三条残留**（findings[0] minor、findings[1] nit、findings[3] nit；[2] 是 `.rddev/workers/T1221/RESULT.json` 那张表里一行的写法，那份记录不在版本库里，作为已记下的既成事实收下，不派工）。\n\n**这条 minor 是「没写下来的边界」**：T1221 把命令位分析修对了——换行现在是分隔符——但它顺带产生了一件没人写下来的后果：**被写进文件的文本也算命令位**。`cat > x <<'EOF'` 的正文里有一行以 `git push` 开头，整条调用就被拒。评审量过 4211 条多行调用：22 条改了判定，其中 16 条是基线守卫**在单行写法下本来就会拒的同一策略**（例如 `git merge-base` 不在只读白名单里、`rm -rf \"$D\"` 是 DYNAMIC），**6 条是纯内容导致**。方向是安全的（过度拦截，工人改用 Write 工具即可），但守卫头部那条「`sh -c '...'` 与同类被刻意当作不透明」在修完之后**只对单行成立**，而「文件内容也进命令位分析」两条 Known-limits 都没提。\n\n**为什么这一笔的判据不是「去把过度拦截修掉」**：最自然的修法——让解析器跳过 heredoc 正文——**会打开一条真的出口**，我自己复现过两条机制（本笔要求工人各自再复现一遍，不许引用我的话）：(i) 分隔符**不加引号**时，正文里的 `$(...)` 在消费者命令运行**之前**就被展开执行，所以哪怕消费者是 `cat` 也一样；(ii) `cat <<'EOF' | sh` 直接把正文喂给 shell。也就是说正文**是不是数据取决于别的行**，静态解析判不出来。所以正确的动作是**把边界写下来并说明为什么不豁免**，把那个理由连同两条可执行的反例钉进注释——挡住下一笔「好心」的修法。\n\n**同笔收掉两条 nit**：`:621` 的 `records_file=$(mktemp ...) || exit 0` 在临时文件建不出来时让**整段命令位分析**静默跳过、调用放行——与这个文件自己「读不出来的东西一律拒」的教条同一个形状的例外，`grep -n mktemp` 数下来**这是最后一个**（也是全文唯一一处用 `TMPDIR` 的地方，所以 `TMPDIR=/nonexistent` 能确定性地把它逼出来，这条用例**天然能红**）；`.rddev.example/README.md:59` 那句「Only an unknown tool name is allowed through」比机制宽——实测 `{\"tool_name\":\"Read\",\"tool_input\":{}}`、`{\"tool_name\":\"Write\",\"tool_input\":{\"content\":\"x\"}}`、`{\"tool_name\":null,…}` 都 exit 0，「没有可查的东西就拒」只落在 Bash 那一支。\n\n**为什么 `floor` 也在本笔里**：`worker_guard_regression_test.go` 的 `const floor = 365` 是「低于它就判有人删了用例」（`if total < floor`）——所以**加用例本身不会红，但 floor 低于落账条数正是这条规矩被绕过的方式**：下一笔把用例删掉不会触发任何东西。按它自己立下的理由（「A floor set below the count a task lands with would let that task's cases be deleted again」）抬到本笔落账的实际条数。该文件只开**这一个文件**，另两个测试（`TestWriteGuardFiles`、`TestTheGuardClaimInTheSystemPromptIsTrue`）不许碰。\n\n**裁定**：§5.1 属「让既有文档与既有机制一致」+ 一处 bug fix（`mktemp` 那条 fail-open），L1，我自己决定并记在这里。**行为改动只有 `:621` 一处**；守卫判的东西一条没变，被放宽的限制一条没有。允许面五个位置：两份逐字节同步的守卫副本、README、`tests/worker-guard/**`、以及那个 Go 测试文件。**合并后守卫需要重新 embed 并重启驱动（`make rddev`）——那是我的事，不是工人的面。**"
+    },
+    "T1224": {
+      "status": "todo",
+      "notes": "新立账（2026-09-24，P13 第九笔）：把 T1220 立起来的表面判据接进总门注册表。\n\n**为什么它现在是「可运行的证据」而不是「每轮都跑的闸」**：`tests/security/sast-go-surface-check.sh` 是一台完整的仪器（六个案例、自己植入、自己断言没留下东西），但**没有任何执行器引用它**——`grep -rn sast-go-surface-check` 除了它自己，命中的只有台账里的散文。而 T1222 刚给它补的两条否定模式案例（被 `!` 重新纳入的路径），今天跑在任何地方都不跑。\n\n**接法（与我原先记下的相反，故更正）**：我此前在 T1222 的账里写「那件事要把 `MIN_CHECKS=17` 抬到 18，而 `v1-final-audit.sh` 里逐字钉着两条 V1 验收证据——动它等于动 V1 完成声明的证据层」。**前半句对，机制说错了**：`v1-final-audit.sh:261-262` 的两条 `require_marker` 读的是**报告文件**（`:173-179` 是 `grep -qF \"$marker\" \"$REPORT\"`），**不读活的脚本**，所以抬下限**不会**让审计变红。真实的后果是**陈旧而不是红**：报告与审计里 `MIN_CHECKS=17`、`17 check(s) registered` 会变成对一个更早的树的陈述。\n\n**关键的一条**：加行**不需要**动 `ci.yml`，也**不需要**动 `specs/orchestrator/gates.json`——CI 早已在 `ci.yml:440` 跑 `bash tests/security/master-security-gate.sh`（前面 `:437-438` 是 `make security-tools`），而 `gates.json` 镜像的是 CI 的 **step 列表**（`TestGatesSpecSyncsWithCIWorkflow` 守着），不是注册表的行数。所以这一笔能是**单目录任务**（`tests/security/**`）。\n\n**下限为什么跟着抬**：`MIN_CHECKS` 是下限（`:452` 用 `-lt`，因为 `--selftest` 靠 `--extra-checks` 加诱饵行）。下限的功用在「删掉一行会看得见」；新行落在下限之外，等于它可以被静默删除——那正是下限存在的理由被绕开。\n\n**为什么 `ops/security/absent-checks.json` 不必动**：那份清单的校验是**单向的**（`check-absent-manifest.py:190-201` 只要求清单里每个 `covered` 项点到的 `check_ids` 在注册表里存在），新加的行不必被清单认领。\n\n**同笔更正 T1223 的 G3 作业**：T1223 原定 `security-master`，改为 **`mof-canonical`**，并把 `T1202` 加进依赖。理由是三个同类守卫任务（T1219、T1221）都是这个配对（`mof-canonical.requires_tasks = ['T1202']`），而 `security-master` 对那一笔是**不成立**的声明——它读的东西 T1223 一样没碰，而且那样一来 T1223 的 G3 会挂在**本笔**要改的注册表行数上。**诚实地说**：两个 G3 作业**都不真正驱守卫**（守卫是 Claude Code 的 PreToolUse 钩子，不是 `rddev` 调的），所以守任务的 G3 一直是「既有 E2E 不许因此变红」，不是覆盖——这条照原样记，不假装它是覆盖。\n\n**裁定**：§5.1 属 L1（加一个既有仪器的执行入口、抬一次下限；不新增权限、不放宽任何限制），我自己决定并记在这里。"
+    },
+    "T1225": {
+      "status": "todo",
+      "notes": "新立账（2026-09-24，P13 第十笔）：修 `tests/security/sast.sh` 读 `git check-ignore -v` 那一行的**取字段**方式。\n\n**毛病**：T1222 教会那个函数分辨 `!` 行，但它取 pattern 是「剥最短前缀到第一个冒号（当源）、再剥一次（当行号）」。**源路径里有一个冒号就剥错**。我亲自量过：`.gitignore` 放在 `dir:with:colon/` 里、内容 `*.go` + `!keep.go`，git 打出 rc=0 与 `dir:with:colon/.gitignore:2:!keep.go<TAB>dir:with:colon/keep.go`，而现行解析出 `colon/.gitignore:2:!keep.go`——**不以 `!` 开头**，于是读成命中。\n\n**两个方向**：文件那一路 → 健康树判红（响）；目录那一路 → 该目录进 `DROPPED` 而不是 `SURFACE`，**扫描面静默缩小**——T1220 修的就是这个类。后者才是立账的理由。\n\n**为什么现在值一笔**：今天这个仓库里没有含冒号的目录，所以是潜伏的；但 T1224 刚把这台仪器接成每轮 CI 都跑的一行，潜伏就成了常设。修法是认**行号字段**（纯数字）而不是数冒号，源里、pattern 里带冒号都对。\n\n**同笔要更新总门那一行的 `evidence`**：它钉住仪器总结行的案例数（英文数词 `ten`），加一个案例就变 `eleven`——不改就是每轮红。要求仍是**钉住数目**（换成不计数目的宽松正则，会让「案例少了一个」再也看不见）。\n\n**一笔更正我自己的清单**：我此前把 T1222 复核的两条也当成待办——「TAB-less 行被静默丢弃（两个调用点都 `2>&1`，git 的 stderr 就看不见了）」与「`cleanup_plants()` 只清原来三处植入物」。**逐条核实后两条都是我读错了**：(1) 两个调用点都**检查了 rc**（非 0/1 就 `die` 并把 git 的输出打出来），rc=1 时 git 根本不打印行，所以「静默丢弃」的只可能是与判决行同时出现的 stderr 噪音，丢掉是对的；(2) `cleanup()`（EXIT trap）**清的是全部六处**，我先读到的 `cleanup_plants()` 是**跑前**扫尾原三处的那一个，而第 10 个案例是**问树**（不是问自己的 rm）确认新三处都没了。**两条都撤，只有冒号这条成立。** 这正是「同一个结论有两道防线时，其中一道看着像漏的」——记在这里，别再当待办捡回来。\n\n**裁定**：§5.1 属 L1（修一个解析器对分隔符的假设，并给既有仪器加一个能红的案例；不新增权限、不放宽限制、不改变扫描**范围**的定义）。依赖 T1222（被修的文件）与 T1224（要改的那行 `evidence` 由它注册），依赖同时把两者串行化——它们开的是同一个目录。"
     }
   },
   "version": 2
