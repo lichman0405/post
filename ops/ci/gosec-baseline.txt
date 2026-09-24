@@ -31,12 +31,23 @@
 #       it dropped with the rule that dropped it, and checks the files of the
 #       packages that remain before the scanner runs: each one under the
 #       repository root, and not git-ignored (tests/security/sast.sh,
-#       repo_paths_only). Nothing is excluded by directory, severity or -nosec:
-#       the row passes no such flag — there is no -exclude-dir, no -nosec and no
+#       repo_paths_only). Nothing here is excluded by a FLAG: the row passes no
+#       exclusion flag of any kind — there is no -exclude-dir, no -nosec and no
 #       severity floor in its invocation — and sast_report.py rejects any key
-#       that is not file:line:rule. What the package set leaves out is what Go
-#       does not call source: directories named testdata or beginning with `.`
-#       or `_` (a fixture of tests/contract/testdata is data, not a package).
+#       that is not file:line:rule. The package directories dropped above are a
+#       different thing, and the difference is who said so. A flag is the row
+#       deciding what not to look at; those drops are git answering a question
+#       the row asks it ("is this path ignored?"), and each dropped directory
+#       is printed with the rule that gave that answer. So the surface a run
+#       scans is short by exactly what git already excludes and, if it is short
+#       at all, by a list the run prints.
+#       No finding is dropped either way: every finding the scanner reports is
+#       judged on its own line of this file, and an unbaselined one is red
+#       whatever directory it came from. What the package set leaves out is
+#       what Go does not call source: directories named testdata or beginning
+#       with `.` or `_` (a fixture of tests/contract/testdata is data, not a
+#       package — the verdict and how it is measured: tests/security/sast.sh
+#       §6, and case 9 of tests/security/sast-go-surface-check.sh).
 #       "Every package in the module" used to be the claim here, and it was not
 #       true: the row walked the filesystem from the repository root instead, so
 #       a working copy's .rddev/ — rebaseline drafts and other Workers'
