@@ -119,6 +119,41 @@ code() { # code METHOD PATH [BODY]
     curl -sS -o /dev/null -w '%{http_code}' -X "$method" -H "Authorization: token $TOKEN" "$BASE$path"
   fi
 }
+# code_body is code() that KEEPS what the instance answered. Sets:
+#   CB_CODE  the HTTP status, or "" when curl itself failed
+#   CB_RC    curl's exit status (non-zero means CB_CODE says nothing)
+#   CB_BODY  the response body, one line, truncated — Gitea's own reason
+#
+# `code()` throws the body away, and the bootstrap sequence below was written
+# on top of it: three requests in one `&&` chain, one sentence for all of them.
+# A 403 (rule still in effect), a 404 (no such rule) and a 422 (bad payload)
+# therefore all arrived as "the bootstrap sequence (remove rule, seed,
+# re-protect) did not complete" — same words, no code, no body, no way back to
+# which request said no (issue #240). The body is where Gitea names the reason,
+# and a rare red that cannot be attributed is indistinguishable from a test
+# that is simply wrong.
+CB_CODE=""; CB_RC=0; CB_BODY=""
+code_body() { # code_body METHOD PATH [BODY]
+  local method="$1" path="$2" body="${3:-}" bodyfile="$WORK/cb-body" errfile="$WORK/cb-err"
+  : >"$bodyfile"; : >"$errfile"
+  if [[ -n "$body" ]]; then
+    CB_CODE="$(curl -sS -o "$bodyfile" -w '%{http_code}' -X "$method" \
+      -H "Authorization: token $TOKEN" -H 'Content-Type: application/json' \
+      -d "$body" "$BASE$path" 2>"$errfile")"
+  else
+    CB_CODE="$(curl -sS -o "$bodyfile" -w '%{http_code}' -X "$method" \
+      -H "Authorization: token $TOKEN" "$BASE$path" 2>"$errfile")"
+  fi
+  CB_RC=$?
+  # One line, bounded: the failure messages stay grep-able and a stray HTML
+  # error page cannot bury the rest of the log.
+  CB_BODY="$(tr -d '\r\n' <"$bodyfile" 2>/dev/null | head -c 400)"
+  if [[ -z "$CB_BODY" ]]; then
+    # An empty body is not the same as nothing to say: curl's own stderr is
+    # the only explanation when there was no HTTP response at all.
+    CB_BODY="$(tr -d '\r\n' <"$errfile" 2>/dev/null | head -c 400)"
+  fi
+}
 inst_main_sha() { # the instance's main, or empty when it cannot be read
   # `/branches/main` answers 500 on this Gitea (checked against the running
   # instance, not read from a doc), so the refs API is the one that can answer.
@@ -525,13 +560,112 @@ if [[ -n "$REPO2" ]]; then
   fi
 
   # The platform's exit, in the production order: seed first, protect after.
+  #
+  # The three requests are run UNCONDITIONALLY and asserted one by one. The
+  # shape they replaced was a single `&&` chain — the first request that
+  # strayed short-circuited the other two away — behind one sentence that
+  # named no step and printed no code. So a run that went red was reportable
+  # only as "the bootstrap sequence did not complete", which is the whole of
+  # issue #240: nobody could say whether the delete had failed, whether the
+  # delete had answered 204 and the WRITE was still refused (a stale rule
+  # read), or whether the re-protect was the odd one out. Those are three
+  # different defects and they were the same sentence.
+  #
+  # Now every step's code is kept, a stray code fails the step it belongs to
+  # with the status and the body the instance sent back, and all three codes
+  # are printed on every run — the green ones included. And there is NO retry
+  # here, because a retry was measured and it does not work:
+  #
+  # T1216 ran this file 32 times under concurrent instance load (8-way
+  # repository churn). Eight went red, all with the same signature:
+  #
+  #   1/3 remove-rule=204   2/3 seed=404   3/3 re-protect=201 (attempts 1/4/1)
+  #   body: {"message":"branch does not exist [repo_id: N name: main]"}
+  #
+  # All eight exhausted four attempts one second apart: the same request, in
+  # the same state, answers 404 for at least three seconds and then keeps
+  # answering 404 — it is not a consistency window that closes. Re-issuing is
+  # therefore NOT the answer and the retry was removed rather than tuned. (Two
+  # further candidate cures were measured against the same state and rejected:
+  # restoring the repository's default branch with PATCH does not clear the
+  # 404, and the 404 is not the deleted rule still being in effect — step 3
+  # re-applies the rule afterwards with 201, and the body names the branch,
+  # not a refusal.)
+  #
+  # What is known about the trigger, and what is not. The 404 is on the seed
+  # write only: the rule really was gone (204, then re-applied 201), so the
+  # delete is not it. It reproduces when this repository has just been pushed
+  # to, and it is the same request the platform itself sends
+  # (internal/gitprovider/mainprotection.go, EnsureInitialMain), which answers
+  # 201 in every other loaded and unloaded run. The same state is NOT
+  # discriminated by default_branch: of six strays reproduced from the same
+  # sequence, three had the repository pointing at main and three at the pushed
+  # research branch, and forcing the field back to main on an unprotected
+  # repository still seeded 201 — so the field is neither the cause nor a
+  # reliable predictor, and this file does not get to guess further. The gate's
+  # job ends at reporting the step, the code and the instance's own reason,
+  # which it now does; locating the trigger is a decision about the platform's
+  # bootstrap, and it belongs with the product rather than with this file's
+  # sentences (T1216 records the diagnosis and hands the hole off).
   SEED_B64="$(python3 -c "import base64;print(base64.b64encode(('# ${REPO2##*/}\n').encode()).decode())")"
-  if [[ "$(code DELETE "/api/v1/repos/$REPO2/branch_protections/main")" == "204" \
-     && "$(code POST "/api/v1/repos/$REPO2/contents/README.md" "{\"content\":\"$SEED_B64\",\"message\":\"POST repository bootstrap\",\"branch\":\"main\"}")" == "201" \
-     && "$(code POST "/api/v1/repos/$REPO2/branch_protections" "$PROT2")" == "201" ]]; then
-    ok "the bootstrap seed lands before the rule is re-applied (production order)"
+  boot_step() { # boot_step LABEL EXPECTED METHOD PATH [BODY] — sets BOOT_CODE/BOOT_BODY
+    local label="$1" expected="$2" method="$3" path="$4" body="${5:-}" code extra
+    code_body "$method" "$path" "$body"
+    code="${CB_CODE:-<no response, curl rc=$CB_RC>}"
+    extra=""
+    [[ "$code" == "$expected" ]] || extra=" — body: ${CB_BODY:-<empty>}"
+    printf '     %s: %s %s -> %s (expected %s) at %s%s\n' \
+      "$label" "$method" "$path" "$code" "$expected" "$(date -u +%H:%M:%SZ)" "$extra"
+    BOOT_CODE="$code"; BOOT_BODY="$CB_BODY"
+    return 0
+  }
+  boot_verdict() { # boot_verdict LABEL EXPECTED CODE BODY
+    # Every field is passed in. The first cut read the boot_step globals here,
+    # and because the verdicts run after all three steps, each verdict reported
+    # the LAST step's result — step 1's failure was printed with step 3's code
+    # and step 3's body. One more way for a failing run to describe a step it
+    # never measured (T1216).
+    local label="$1" expected="$2" code="$3" body="$4"
+    [[ "$code" == "$expected" ]] && return 0
+    fail "$label answered ${code:-<no response>}, expected $expected at $(date -u +%H:%M:%SZ) — body: ${body:-<empty>}"
+    return 1
+  }
+  boot_step "bootstrap step 1/3 (remove rule: DELETE /branch_protections/main)" 204 \
+    DELETE "/api/v1/repos/$REPO2/branch_protections/main"
+  BOOT_DEL_CODE="$BOOT_CODE"; BOOT_DEL_BODY="$BOOT_BODY"
+  boot_step "bootstrap step 2/3 (seed main: POST /contents/README.md)" 201 \
+    POST "/api/v1/repos/$REPO2/contents/README.md" \
+    "{\"content\":\"$SEED_B64\",\"message\":\"POST repository bootstrap\",\"branch\":\"main\"}"
+  BOOT_SEED_CODE="$BOOT_CODE"; BOOT_SEED_BODY="$BOOT_BODY"
+  boot_step "bootstrap step 3/3 (re-protect: POST /branch_protections)" 201 \
+    POST "/api/v1/repos/$REPO2/branch_protections" "$PROT2"
+  BOOT_PROT_CODE="$BOOT_CODE"; BOOT_PROT_BODY="$BOOT_BODY"
+
+  BOOT_BAD=0
+  boot_verdict "bootstrap step 1/3 (remove rule: DELETE /branch_protections/main)" 204 \
+    "$BOOT_DEL_CODE" "$BOOT_DEL_BODY" || BOOT_BAD=1
+  boot_verdict "bootstrap step 2/3 (seed main: POST /contents/README.md)" 201 \
+    "$BOOT_SEED_CODE" "$BOOT_SEED_BODY" || BOOT_BAD=1
+  boot_verdict "bootstrap step 3/3 (re-protect: POST /branch_protections)" 201 \
+    "$BOOT_PROT_CODE" "$BOOT_PROT_BODY" || BOOT_BAD=1
+  printf '     bootstrap sequence codes: 1/3 remove-rule=%s 2/3 seed=%s 3/3 re-protect=%s\n' \
+    "${BOOT_DEL_CODE:-<none>}" "${BOOT_SEED_CODE:-<none>}" "${BOOT_PROT_CODE:-<none>}"
+  if (( BOOT_BAD )); then
+    # A stray code on a step is only diagnosable against the state the instance
+    # thinks the repository is in, and both halves of that state are cheap to
+    # ask for here: which refs the repository has, and which of them Gitea has
+    # taken as the repository's default branch. The seed's 404 is about main
+    # not existing; whether the instance agrees it is the default branch is the
+    # difference between "the branch is missing" and "the repository is not
+    # pointed at that branch", and they need different fixes.
+    BOOT_REFS="$(api GET "/api/v1/repos/$REPO2/git/refs" 2>/dev/null \
+      | python3 -c 'import json,sys;refs=json.load(sys.stdin) or [];print(", ".join(r.get("ref","?") for r in refs) or "<no refs>")' 2>/dev/null)"
+    BOOT_DEFAULT="$(api GET "/api/v1/repos/$REPO2" 2>/dev/null \
+      | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("default_branch") or "<none>")' 2>/dev/null)"
+    printf '     %s has refs: %s\n' "$REPO2" "${BOOT_REFS:-<unreadable>}"
+    printf '     %s default_branch: %s\n' "$REPO2" "${BOOT_DEFAULT:-<unreadable>}"
   else
-    fail "the bootstrap sequence (remove rule, seed, re-protect) did not complete"
+    ok "the bootstrap seed lands before the rule is re-applied (production order)"
   fi
 
   # The first PR merge brings the first research commit onto main.
